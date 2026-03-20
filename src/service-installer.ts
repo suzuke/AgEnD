@@ -1,7 +1,8 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { render } from "ejs";
+import ejs from "ejs";
+const { render } = ejs;
 import { platform } from "node:os";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
