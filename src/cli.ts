@@ -205,4 +205,12 @@ program
     }
   });
 
+program
+  .command("init")
+  .description("Interactive setup wizard")
+  .action(async () => {
+    const { runSetupWizard } = await import("./setup-wizard.js");
+    await runSetupWizard();
+  });
+
 program.parse();
