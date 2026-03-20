@@ -1,0 +1,14 @@
+[Unit]
+Description=Claude Channel Daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=<%= execPath %> start
+WorkingDirectory=<%= workingDirectory %>
+Restart=no
+StandardOutput=append:<%= logPath %>
+StandardError=append:<%= logPath %>
+
+[Install]
+WantedBy=default.target
