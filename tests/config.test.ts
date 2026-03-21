@@ -29,6 +29,32 @@ describe("loadConfig", () => {
     expect(config.restart_policy.max_retries).toBe(DEFAULT_CONFIG.restart_policy.max_retries);
   });
 
+  it("loads legacy config.yaml and maps to InstanceConfig shape", () => {
+    const configPath = join(tmpDir, "config.yaml");
+    writeFileSync(configPath, `
+channel_plugin: telegram@claude-plugins-official
+working_directory: /tmp/legacy
+restart_policy:
+  max_retries: 5
+  backoff: exponential
+  reset_after: 300
+context_guardian:
+  threshold_percentage: 70
+  max_age_hours: 2
+  strategy: hybrid
+memory:
+  auto_summarize: false
+  watch_memory_dir: true
+  backup_to_sqlite: true
+log_level: info
+`);
+    const config = loadConfig(configPath);
+    // Verify it has the fields needed to construct an InstanceConfig
+    expect(config.working_directory).toBe("/tmp/legacy");
+    expect(config.restart_policy.max_retries).toBe(5);
+    expect(config.channel_plugin).toBe("telegram@claude-plugins-official");
+  });
+
   it("reads full config from YAML file", () => {
     const configPath = join(tmpDir, "config.yaml");
     writeFileSync(
