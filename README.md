@@ -4,6 +4,8 @@ A reliable daemon wrapper for [Claude Code](https://docs.anthropic.com/en/docs/c
 
 [中文版 README](README.zh-TW.md)
 
+> **⚠️ Security Notice:** This daemon runs Claude Code with `bypassPermissions` mode. All permission decisions are delegated to a PreToolUse hook backed by a remote approval server (Telegram inline buttons). If the approval server is unreachable, **all tool calls are denied** until it recovers. The built-in deny list blocks known destructive commands (`rm -rf /`, `git push --force`, etc.), but this setup fundamentally trusts the approval server for access control. **Use at your own risk.** Review the [Permissions](#permissions) section before deploying.
+
 ## Why
 
 Claude Code's Telegram plugin requires an active CLI session — close the terminal and the bot dies. This daemon solves that by:
@@ -125,13 +127,22 @@ All state is stored in `~/.claude-channel-daemon/`:
 
 ## Permissions
 
-The daemon injects a settings file with pre-configured permissions:
+**This daemon uses `bypassPermissions` mode.** Claude Code's built-in permission prompts are completely disabled. All access control is handled by a three-layer system:
 
-**Allowed:** Read, Edit, Write, Glob, Grep, Bash, WebFetch, WebSearch, Agent, Telegram reply
+1. **PreToolUse hook** — Every tool call is POSTed to the Telegram plugin's approval server (`127.0.0.1:18321`). The server decides allow/deny based on danger detection.
 
-**Denied:** `rm -rf /`, `git push --force`, `git reset --hard`, `git clean -f`, `dd`, `mkfs`
+2. **Danger detection** — The approval server uses regex patterns to classify operations:
+   - **Safe** (auto-approved): read-only operations, safe bash commands, web searches
+   - **Dangerous** (requires Telegram approval): `rm`, `sudo`, `git push`, `chmod`, sensitive file paths (`.env`, `.claude/settings.json`)
+   - **Hardcoded deny list**: `rm -rf /`, `git push --force`, `git reset --hard`, `dd`, `mkfs`
 
-A PreToolUse hook integrates with the Telegram plugin's remote approval system for dangerous operations.
+3. **Health check + fail-safe** — The daemon pings the approval server every 30 seconds. If it's unreachable:
+   - All tool calls are **denied** (not allowed)
+   - Warning logged every 60 seconds until recovery
+
+**Why `bypassPermissions`?** Claude Code has internal protected paths (e.g., `~/.claude/skills/`) that trigger terminal permission prompts even when the PreToolUse hook returns "allow". In a headless daemon, these prompts block indefinitely with no way to respond. `bypassPermissions` prevents this by delegating all decisions to the hook layer.
+
+**Risk:** If someone gains access to `127.0.0.1:18321`, they can approve arbitrary operations. The server only listens on localhost and validates against the Telegram access allowlist.
 
 ## Requirements
 

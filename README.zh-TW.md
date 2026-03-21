@@ -4,6 +4,8 @@
 
 [English README](README.md)
 
+> **⚠️ 安全提醒：** 這個 daemon 以 `bypassPermissions` 模式執行 Claude Code。所有權限決策都交給 PreToolUse hook 和 Telegram 遠端批准系統處理。如果批准 server 無法連線，**所有工具調用會被拒絕**，直到 server 恢復為止。內建的 deny list 會擋掉已知的破壞性指令，但這套架構本質上依賴批准 server 做存取控制。**使用風險自負。** 部署前請詳閱[權限控制](#權限控制)段落。
+
 ## 為什麼需要這個
 
 Claude Code 的 Telegram plugin 需要一個活著的 CLI session — 關掉終端機 bot 就斷了。這個 daemon 解決了以下問題：
@@ -125,13 +127,22 @@ log_level: info  # debug | info | warn | error
 
 ## 權限控制
 
-Daemon 注入的設定檔包含預設權限：
+**這個 daemon 使用 `bypassPermissions` 模式。** Claude Code 內建的權限提示完全關閉，所有存取控制由三層機制處理：
 
-**允許：** Read、Edit、Write、Glob、Grep、Bash、WebFetch、WebSearch、Agent、Telegram reply
+1. **PreToolUse hook** — 每次工具調用都會 POST 到 Telegram plugin 的批准 server（`127.0.0.1:18321`），由 server 決定放行或拒絕。
 
-**拒絕：** `rm -rf /`、`git push --force`、`git reset --hard`、`git clean -f`、`dd`、`mkfs`
+2. **危險偵測** — 批准 server 用 regex 分類操作：
+   - **安全**（自動放行）：唯讀操作、安全的 bash 指令、網頁搜尋
+   - **危險**（需要 Telegram 批准）：`rm`、`sudo`、`git push`、`chmod`、敏感路徑（`.env`、`.claude/settings.json`）
+   - **硬性拒絕**：`rm -rf /`、`git push --force`、`git reset --hard`、`dd`、`mkfs`
 
-PreToolUse hook 會與 Telegram plugin 的遠端批准系統整合，危險操作需要透過 Telegram 批准。
+3. **Health check + 故障安全** — daemon 每 30 秒 ping 批准 server。如果連不上：
+   - 所有工具調用會被**拒絕**（不是放行）
+   - 每 60 秒記錄警告，直到恢復
+
+**為什麼用 `bypassPermissions`？** Claude Code 有內部保護路徑（例如 `~/.claude/skills/`），即使 hook 回傳 allow，仍會跳終端機權限提示。在無人值守的 daemon 環境下，這些提示會永遠卡住。`bypassPermissions` 把所有決策交給 hook 層，避免這個問題。
+
+**風險：** 如果有人能存取 `127.0.0.1:18321`，就能批准任意操作。server 只在 localhost 監聽，並且會驗證 Telegram access allowlist。
 
 ## 系統需求
 

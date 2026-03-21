@@ -184,6 +184,35 @@ program
       guardian.markRotationComplete();
     });
 
+    // Health check: ping approval server every 30 seconds
+    const APPROVAL_URL = "http://127.0.0.1:18321/approve";
+    let approvalDownSince: number | null = null;
+    const healthCheckInterval = setInterval(async () => {
+      try {
+        const res = await fetch(APPROVAL_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tool_name: "__health_check", tool_input: {} }),
+          signal: AbortSignal.timeout(3000),
+        });
+        if (res.ok) {
+          if (approvalDownSince) {
+            logger.info("Approval server recovered");
+            approvalDownSince = null;
+          }
+        }
+      } catch {
+        if (!approvalDownSince) {
+          approvalDownSince = Date.now();
+          logger.warn("⚠️ Approval server unreachable — all tool calls will be denied until it recovers");
+        } else if (Date.now() - approvalDownSince > 60_000) {
+          logger.error("⚠️ Approval server down >60s — all tool calls are being denied");
+          // Notify once, then reset timer so we don't spam
+          approvalDownSince = Date.now();
+        }
+      }
+    }, 30_000);
+
     guardian.startTimer();
     await pm.start();
 
@@ -191,6 +220,7 @@ program
     const shutdown = async () => {
       logger.info("Shutting down...");
       clearInterval(transcriptInterval);
+      clearInterval(healthCheckInterval);
       guardian.stop();
       if (memoryLayer) await memoryLayer.stop();
       await pm.stop();
