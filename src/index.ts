@@ -5,4 +5,5 @@ export { MemoryDb } from "./db.js";
 export { loadConfig, DEFAULT_CONFIG } from "./config.js";
 export { createLogger } from "./logger.js";
 export { installService, detectPlatform } from "./service-installer.js";
+export { ApprovalServer } from "./approval-server.js";
 export type { DaemonConfig, ContextStatus, StatusLineData, MemoryBackupRow } from "./types.js";

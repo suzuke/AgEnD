@@ -6,6 +6,7 @@ import { ProcessManager, STATUSLINE_FILE } from "./process-manager.js";
 import { ContextGuardian } from "./context-guardian.js";
 import { MemoryLayer } from "./memory-layer.js";
 import { MemoryDb } from "./db.js";
+import { ApprovalServer } from "./approval-server.js";
 import {
   installService,
   uninstallService,
@@ -53,6 +54,26 @@ program
 
     const pm = new ProcessManager(config, logger);
     const guardian = new ContextGuardian(config.context_guardian, logger, STATUSLINE_FILE);
+
+    // Approval server — handles PreToolUse hook requests via Telegram inline buttons
+    const approvalServer = new ApprovalServer(logger);
+    if (config.approval_chat_id) {
+      approvalServer.setChatId(config.approval_chat_id);
+    }
+    await approvalServer.start();
+
+    // Auto-detect chat_id from first incoming Telegram message (if not configured)
+    if (!config.approval_chat_id) {
+      pm.once("stdout", () => {}); // ensure listener is ready
+      pm.on("stdout", (data: string) => {
+        const chatMatch = data.match(/chat_id="(\d+)"/);
+        if (chatMatch && !config.approval_chat_id) {
+          config.approval_chat_id = chatMatch[1];
+          approvalServer.setChatId(chatMatch[1]);
+          logger.info({ chatId: chatMatch[1] }, "Auto-detected Telegram chat ID for approvals");
+        }
+      });
+    }
 
     let memoryLayer: MemoryLayer | null = null;
     if (config.memory.watch_memory_dir || config.memory.backup_to_sqlite) {
@@ -192,6 +213,7 @@ program
       logger.info("Shutting down...");
       clearInterval(transcriptInterval);
       guardian.stop();
+      await approvalServer.stop();
       if (memoryLayer) await memoryLayer.stop();
       await pm.stop();
       if (existsSync(PID_PATH)) unlinkSync(PID_PATH);

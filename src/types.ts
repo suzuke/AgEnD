@@ -17,6 +17,7 @@ export interface DaemonConfig {
     backup_to_sqlite: boolean;
   };
   memory_directory?: string;
+  approval_chat_id?: string;
   log_level: "debug" | "info" | "warn" | "error";
 }
 
