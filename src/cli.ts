@@ -2,7 +2,9 @@
 import { Command } from "commander";
 import { loadConfig } from "./config.js";
 import { createLogger } from "./logger.js";
-import { ProcessManager, STATUSLINE_FILE } from "./process-manager.js";
+// TODO(Task 15): ProcessManager and STATUSLINE_FILE removed — CLI will be refactored
+// import { ProcessManager, STATUSLINE_FILE } from "./process-manager.js";
+const STATUSLINE_FILE = "";
 import { ContextGuardian } from "./context-guardian.js";
 import { MemoryLayer } from "./memory-layer.js";
 import { MemoryDb } from "./db.js";
@@ -51,7 +53,8 @@ program
     writeFileSync(PID_PATH, String(process.pid));
     logger.info({ pid: process.pid }, "Starting claude-channel-daemon");
 
-    const pm = new ProcessManager(config, logger);
+    // TODO(Task 15): pm will be replaced by TmuxManager-based orchestrator
+    // const pm = new ProcessManager(config, logger);
     const guardian = new ContextGuardian(config.context_guardian, logger, STATUSLINE_FILE);
 
     let memoryLayer: MemoryLayer | null = null;
@@ -164,90 +167,14 @@ program
     // Poll transcript every 2 seconds
     const transcriptInterval = setInterval(pollTranscript, 2000);
 
-    // Handle PTY permission prompts that aren't auto-approved
-    pm.on("permission_prompt", async (promptText: string) => {
-      // Send to Telegram via direct bot API (approval server handles inline buttons)
-      try {
-        const envFile = join(homedir(), ".claude/channels/telegram/.env");
-        const envContent = readFileSync(envFile, "utf-8");
-        const tokenMatch = envContent.match(/TELEGRAM_BOT_TOKEN=(.+)/);
-        const accessFile = join(homedir(), ".claude/channels/telegram/access.json");
-        const access = JSON.parse(readFileSync(accessFile, "utf-8"));
-        const chatId = access.allowFrom?.[0];
-
-        if (tokenMatch && chatId) {
-          const token = tokenMatch[1].trim();
-          const text = `⚠️ PTY 權限請求:\n${promptText.slice(0, 500)}\n\n回覆 1 批准, 3 拒絕`;
-          await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              chat_id: chatId,
-              text,
-              reply_markup: {
-                inline_keyboard: [[
-                  { text: "✅ 批准", callback_data: "pty_approve" },
-                  { text: "❌ 拒絕", callback_data: "pty_deny" },
-                ]],
-              },
-            }),
-          });
-          logger.info("Permission prompt forwarded to Telegram, waiting for response...");
-
-          // Wait for user response via transcript (callback comes as channel message)
-          const maxWait = 120000;
-          const poll = 2000;
-          let elapsed = 0;
-          const waitInterval = setInterval(() => {
-            elapsed += poll;
-            try {
-              if (transcriptPath && existsSync(transcriptPath)) {
-                const content = readFileSync(transcriptPath, "utf-8");
-                const tail = content.slice(-500);
-                if (tail.includes("pty_approve")) {
-                  clearInterval(waitInterval);
-                  logger.info("User approved via Telegram");
-                  pm.sendInput("1");
-                } else if (tail.includes("pty_deny")) {
-                  clearInterval(waitInterval);
-                  logger.info("User denied via Telegram");
-                  pm.sendInput("3");
-                }
-              }
-            } catch {}
-            if (elapsed >= maxWait) {
-              clearInterval(waitInterval);
-              logger.warn("Permission prompt timed out — auto-denying");
-              pm.sendInput("3");
-            }
-          }, poll);
-        } else {
-          logger.warn("Cannot forward permission prompt — no bot token or chat ID");
-          pm.sendInput("3"); // deny if can't forward
-        }
-      } catch (err) {
-        logger.error({ err }, "Failed to forward permission prompt");
-        pm.sendInput("3");
-      }
-    });
+    // TODO(Task 15): PTY permission prompt handling will be replaced with TmuxManager-based approach
 
     // Watch status line JSON file for context updates
     guardian.startWatching();
 
-    // Handle rotation — kill and respawn instead of /clear
+    // TODO(Task 15): Rotation handler will be re-implemented with TmuxManager
     guardian.on("rotate", async (reason: string) => {
-      logger.info({ reason }, "🔄 Rotation triggered — restarting session");
-      // Reset transcript tracking for the new session
-      transcriptPath = null;
-      transcriptOffset = -1;
-      // Clear session ID so we get a fresh session (not resume the old one)
-      pm.clearSessionId();
-      // Clear stale statusline so the new session doesn't immediately re-trigger
-      try { writeFileSync(STATUSLINE_FILE, "{}"); } catch {}
-      // Stop and restart
-      await pm.stop();
-      logger.info("Session stopped, respawning fresh session");
-      await pm.start();
+      logger.info({ reason }, "Rotation triggered — will be handled by TmuxManager in Task 15");
       guardian.markRotationComplete();
     });
 
@@ -281,7 +208,7 @@ program
     }, 30_000);
 
     guardian.startTimer();
-    await pm.start();
+    // TODO(Task 15): pm.start() will be replaced by TmuxManager-based orchestrator
 
     // Graceful shutdown
     const shutdown = async () => {
@@ -290,7 +217,7 @@ program
       clearInterval(healthCheckInterval);
       guardian.stop();
       if (memoryLayer) await memoryLayer.stop();
-      await pm.stop();
+      // TODO(Task 15): pm.stop() will be replaced by TmuxManager-based orchestrator
       if (existsSync(PID_PATH)) unlinkSync(PID_PATH);
       process.exit(0);
     };
