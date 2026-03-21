@@ -8,7 +8,10 @@ import stripAnsi from "strip-ansi";
 import type { DaemonConfig } from "./types.js";
 import type { Logger } from "./logger.js";
 
-const SESSION_FILE = join(homedir(), ".claude-channel-daemon", "session-id");
+const DATA_DIR = join(homedir(), ".claude-channel-daemon");
+const SESSION_FILE = join(DATA_DIR, "session-id");
+export const STATUSLINE_FILE = join(DATA_DIR, "statusline.json");
+const STATUSLINE_SCRIPT = join(DATA_DIR, "statusline.sh");
 
 export class ProcessManager extends EventEmitter {
   private term: IPty | null = null;
@@ -38,6 +41,7 @@ export class ProcessManager extends EventEmitter {
     }
     this.shuttingDown = false;
     this.ensureSpawnHelper();
+    this.ensureStatusLineScript();
     this.spawnChild();
   }
 
@@ -78,6 +82,11 @@ export class ProcessManager extends EventEmitter {
     this.term.write(text + "\r");
   }
 
+  private ensureStatusLineScript(): void {
+    const script = `#!/bin/bash\ncat > "${STATUSLINE_FILE}"\necho "ok"\n`;
+    writeFileSync(STATUSLINE_SCRIPT, script, { mode: 0o755 });
+  }
+
   private ensureSpawnHelper(): void {
     // node-pty's spawn-helper loses +x after npm install on macOS
     try {
@@ -107,13 +116,22 @@ export class ProcessManager extends EventEmitter {
     const claudeBin = this.resolveClaudeBin();
     const args: string[] = [];
 
+    // Inject status line script via --settings
+    const settings = {
+      statusLine: {
+        type: "command",
+        command: STATUSLINE_SCRIPT,
+      },
+    };
+    args.push("--settings", JSON.stringify(settings));
+
     // Resume previous session if available
     if (this.sessionId) {
       args.push("--resume", this.sessionId);
       this.logger.info({ sessionId: this.sessionId }, "Resuming previous session");
     }
 
-    this.logger.info({ claudeBin, args, cwd: this.config.working_directory }, "Spawning claude via PTY");
+    this.logger.info({ claudeBin, args: args.map(a => a.length > 50 ? a.slice(0, 50) + "..." : a), cwd: this.config.working_directory }, "Spawning claude via PTY");
 
     this.term = pty.spawn(claudeBin, args, {
       name: "xterm-256color",

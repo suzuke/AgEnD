@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
-import type { ContextStatus, DaemonConfig } from "./types.js";
+import { readFileSync, watchFile, unwatchFile, existsSync } from "node:fs";
+import type { ContextStatus, StatusLineData, DaemonConfig } from "./types.js";
 import type { Logger } from "./logger.js";
 
 type GuardianConfig = DaemonConfig["context_guardian"];
@@ -7,12 +8,45 @@ type GuardianConfig = DaemonConfig["context_guardian"];
 export class ContextGuardian extends EventEmitter {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private rotating = false;
+  private statusFilePath: string;
 
   constructor(
     private config: GuardianConfig,
     private logger: Logger,
+    statusFilePath: string,
   ) {
     super();
+    this.statusFilePath = statusFilePath;
+  }
+
+  /** Start watching the status line JSON file for updates. */
+  startWatching(): void {
+    this.logger.info({ path: this.statusFilePath }, "Watching status line file");
+    watchFile(this.statusFilePath, { interval: 2000 }, () => {
+      this.readAndCheck();
+    });
+  }
+
+  /** Read the status line JSON file and check context usage. */
+  private readAndCheck(): void {
+    try {
+      if (!existsSync(this.statusFilePath)) return;
+      const raw = readFileSync(this.statusFilePath, "utf-8");
+      const data: StatusLineData = JSON.parse(raw);
+      const cw = data.context_window;
+
+      if (cw.used_percentage != null) {
+        const status: ContextStatus = {
+          used_percentage: cw.used_percentage,
+          remaining_percentage: cw.remaining_percentage ?? (100 - cw.used_percentage),
+          context_window_size: cw.context_window_size,
+        };
+        this.emit("status_update", { ...status, rate_limits: data.rate_limits });
+        this.updateContextStatus(status);
+      }
+    } catch (err) {
+      this.logger.debug({ err }, "Failed to read status line file");
+    }
   }
 
   updateContextStatus(status: ContextStatus): void {
@@ -24,29 +58,6 @@ export class ContextGuardian extends EventEmitter {
       );
       this.triggerRotation("threshold");
     }
-  }
-
-  parseStatusLine(line: string): ContextStatus | null {
-    // Try JSON format first (status line script output)
-    try {
-      const parsed = JSON.parse(line);
-      if (parsed?.context_window) {
-        return parsed.context_window as ContextStatus;
-      }
-    } catch {}
-
-    // Parse TUI status bar format: "15.1% · 151.5k tokens"
-    const pctMatch = line.match(/(\d+(?:\.\d+)?)%\s*·\s*([\d.]+)k?\s*tokens/);
-    if (pctMatch) {
-      const used = parseFloat(pctMatch[1]);
-      return {
-        used_percentage: used,
-        remaining_percentage: 100 - used,
-        context_window_size: 200000, // default assumption
-      };
-    }
-
-    return null;
   }
 
   startTimer(): void {
@@ -71,6 +82,7 @@ export class ContextGuardian extends EventEmitter {
       clearTimeout(this.timer);
       this.timer = null;
     }
+    unwatchFile(this.statusFilePath);
   }
 
   markRotationComplete(): void {

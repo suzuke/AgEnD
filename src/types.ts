@@ -26,6 +26,27 @@ export interface ContextStatus {
   context_window_size: number;
 }
 
+export interface StatusLineData {
+  session_id: string;
+  model: { id: string; display_name: string };
+  context_window: {
+    total_input_tokens: number;
+    total_output_tokens: number;
+    context_window_size: number;
+    current_usage: number | null;
+    used_percentage: number | null;
+    remaining_percentage: number | null;
+  };
+  cost: {
+    total_cost_usd: number;
+    total_duration_ms: number;
+  };
+  rate_limits?: {
+    five_hour: { used_percentage: number; resets_at: string };
+    seven_day: { used_percentage: number; resets_at: string };
+  };
+}
+
 export interface MemoryBackupRow {
   id: number;
   file_path: string;

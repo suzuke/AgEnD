@@ -2,7 +2,7 @@
 import { Command } from "commander";
 import { loadConfig } from "./config.js";
 import { createLogger } from "./logger.js";
-import { ProcessManager } from "./process-manager.js";
+import { ProcessManager, STATUSLINE_FILE } from "./process-manager.js";
 import { ContextGuardian } from "./context-guardian.js";
 import { MemoryLayer } from "./memory-layer.js";
 import { MemoryDb } from "./db.js";
@@ -50,7 +50,7 @@ program
     logger.info({ pid: process.pid }, "Starting claude-channel-daemon");
 
     const pm = new ProcessManager(config, logger);
-    const guardian = new ContextGuardian(config.context_guardian, logger);
+    const guardian = new ContextGuardian(config.context_guardian, logger, STATUSLINE_FILE);
 
     let memoryLayer: MemoryLayer | null = null;
     if (config.memory.watch_memory_dir || config.memory.backup_to_sqlite) {
@@ -71,13 +71,8 @@ program
       }
     }
 
-    // Wire context guardian to process manager stdout
-    pm.on("stdout", (text: string) => {
-      const status = guardian.parseStatusLine(text);
-      if (status) {
-        guardian.updateContextStatus(status);
-      }
-    });
+    // Watch status line JSON file for context updates
+    guardian.startWatching();
 
     // Handle rotation
     guardian.on("rotate", async (reason: string) => {
