@@ -138,16 +138,39 @@ program
 
     // Handle rotation
     guardian.on("rotate", async (reason: string) => {
-      logger.info({ reason }, "Rotation triggered");
+      logger.info({ reason }, "🔄 Rotation triggered");
       if (config.memory.auto_summarize) {
         pm.sendInput(
-          "Please summarize the important context from this conversation and save it to your memory files, then respond with 'SUMMARIZE_DONE'.",
+          "Please summarize the important context from this conversation and save it to your memory files. When done, respond with exactly: SUMMARIZE_DONE",
         );
-        // Give time for summarize, then clear
-        setTimeout(() => {
-          pm.sendInput("/clear");
-          guardian.markRotationComplete();
-        }, 30000);
+        logger.info("Waiting for summarize to complete...");
+        // Watch transcript for SUMMARIZE_DONE signal, with timeout
+        const maxWait = 120000; // 2 minutes max
+        const pollInterval = 3000;
+        let elapsed = 0;
+        const waitForDone = setInterval(() => {
+          elapsed += pollInterval;
+          try {
+            if (transcriptPath && existsSync(transcriptPath)) {
+              const content = readFileSync(transcriptPath, "utf-8");
+              // Check last 2000 chars for the signal
+              const tail = content.slice(-2000);
+              if (tail.includes("SUMMARIZE_DONE")) {
+                clearInterval(waitForDone);
+                logger.info("Summarize completed, sending /clear");
+                pm.sendInput("/clear");
+                guardian.markRotationComplete();
+                return;
+              }
+            }
+          } catch {}
+          if (elapsed >= maxWait) {
+            clearInterval(waitForDone);
+            logger.warn("Summarize timed out after 2 minutes, forcing /clear");
+            pm.sendInput("/clear");
+            guardian.markRotationComplete();
+          }
+        }, pollInterval);
       } else {
         pm.sendInput("/clear");
         guardian.markRotationComplete();
