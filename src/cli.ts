@@ -71,52 +71,67 @@ program
       }
     }
 
-    // Watch transcript file for message activity
-    guardian.on("status_update", (data: any) => {
-      // After each status update, read the transcript to find new messages
-      try {
-        const statusData = JSON.parse(readFileSync(STATUSLINE_FILE, "utf-8"));
-        const transcriptPath = statusData.transcript_path;
-        if (transcriptPath && existsSync(transcriptPath)) {
-          const lines = readFileSync(transcriptPath, "utf-8").trim().split("\n");
-          // Show the last few user/assistant messages
-          const recent = lines.slice(-6);
-          for (const line of recent) {
-            try {
-              const entry = JSON.parse(line);
-              const msg = entry.message;
-              if (!msg?.role || !msg?.content) continue;
-              let text = "";
-              if (typeof msg.content === "string") {
-                text = msg.content;
-              } else if (Array.isArray(msg.content)) {
-                text = msg.content
-                  .filter((c: any) => c.type === "text")
-                  .map((c: any) => c.text)
-                  .join(" ");
-              }
-              if (!text.trim()) continue;
+    // Tail-follow the transcript file for real-time activity logging
+    let transcriptOffset = 0;
+    let transcriptPath: string | null = null;
 
-              // Extract channel message content
-              const channelMatch = text.match(/<channel[^>]*user="([^"]*)"[^>]*>\n?([\s\S]*?)\n?<\/channel>/);
-              if (channelMatch) {
-                const [, user, content] = channelMatch;
-                if (!transcriptLoggedLines.has(line)) {
-                  transcriptLoggedLines.add(line);
-                  logger.info({ from: user, text: content.slice(0, 200) }, "📩 Telegram message");
+    function pollTranscript() {
+      try {
+        if (!transcriptPath) {
+          if (!existsSync(STATUSLINE_FILE)) return;
+          const statusData = JSON.parse(readFileSync(STATUSLINE_FILE, "utf-8"));
+          transcriptPath = statusData.transcript_path ?? null;
+          if (!transcriptPath) return;
+        }
+        if (!existsSync(transcriptPath)) return;
+        const content = readFileSync(transcriptPath, "utf-8");
+        if (content.length <= transcriptOffset) return;
+
+        const newContent = content.slice(transcriptOffset);
+        transcriptOffset = content.length;
+
+        for (const line of newContent.trim().split("\n")) {
+          try {
+            const entry = JSON.parse(line);
+            const msg = entry.message;
+            if (!msg?.role || !msg?.content) continue;
+
+            const contents = Array.isArray(msg.content) ? msg.content : [{ type: "text", text: msg.content }];
+
+            for (const block of contents) {
+              if (block.type === "text" && block.text?.trim()) {
+                const channelMatch = block.text.match(/<channel[^>]*user="([^"]*)"[^>]*>\n?([\s\S]*?)\n?<\/channel>/);
+                if (channelMatch) {
+                  logger.info({ from: channelMatch[1], text: channelMatch[2].slice(0, 200) }, "📩 Telegram");
+                } else if (msg.role === "assistant") {
+                  logger.info({ text: block.text.slice(0, 300) }, "💬 Claude");
                 }
-              } else if (msg.role === "assistant" && text.length > 1) {
-                if (!transcriptLoggedLines.has(line)) {
-                  transcriptLoggedLines.add(line);
-                  logger.info({ text: text.slice(0, 300) }, "🤖 Claude response");
+              } else if (block.type === "tool_use") {
+                const name = block.name ?? "unknown";
+                const input = block.input ?? {};
+                // Summarize tool use
+                if (name.includes("reply")) {
+                  logger.info({ to: input.chat_id, text: String(input.text ?? "").slice(0, 200) }, "📤 Telegram reply");
+                } else if (name === "Read") {
+                  logger.info({ file: input.file_path }, "📖 Read");
+                } else if (name === "Edit") {
+                  logger.info({ file: input.file_path }, "✏️ Edit");
+                } else if (name === "Write") {
+                  logger.info({ file: input.file_path }, "📝 Write");
+                } else if (name === "Bash") {
+                  logger.info({ cmd: String(input.command ?? "").slice(0, 100) }, "🖥️ Bash");
+                } else {
+                  logger.info({ tool: name }, "🔧 Tool");
                 }
               }
-            } catch {}
-          }
+            }
+          } catch {}
         }
       } catch {}
-    });
-    const transcriptLoggedLines = new Set<string>();
+    }
+
+    // Poll transcript every 2 seconds
+    const transcriptInterval = setInterval(pollTranscript, 2000);
 
     // Watch status line JSON file for context updates
     guardian.startWatching();
@@ -145,6 +160,7 @@ program
     // Graceful shutdown
     const shutdown = async () => {
       logger.info("Shutting down...");
+      clearInterval(transcriptInterval);
       guardian.stop();
       if (memoryLayer) await memoryLayer.stop();
       await pm.stop();
