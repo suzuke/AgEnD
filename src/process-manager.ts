@@ -126,8 +126,10 @@ fi
       permissions: {
         allow: [
           "Read", "Edit", "Write", "Glob", "Grep",
-          "Bash(*)", "WebFetch", "WebSearch", "Agent",
+          "Bash(*)", "WebFetch", "WebSearch", "Agent", "Skill",
           "mcp__plugin_telegram_telegram__reply",
+          "mcp__plugin_telegram_telegram__react",
+          "mcp__plugin_telegram_telegram__edit_message",
         ],
         deny: [
           "Bash(rm -rf /)", "Bash(rm -rf /*)",
