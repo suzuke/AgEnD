@@ -71,14 +71,52 @@ program
       }
     }
 
-    // Log Claude activity from PTY output
-    pm.on("stdout", (text: string) => {
-      // Look for channel messages (telegram plugin injects them)
-      if (text.includes("channel source=")) {
-        const userMatch = text.match(/user="([^"]+)"/);
-        logger.info({ from: userMatch?.[1] ?? "unknown" }, "Telegram message received");
-      }
+    // Watch transcript file for message activity
+    guardian.on("status_update", (data: any) => {
+      // After each status update, read the transcript to find new messages
+      try {
+        const statusData = JSON.parse(readFileSync(STATUSLINE_FILE, "utf-8"));
+        const transcriptPath = statusData.transcript_path;
+        if (transcriptPath && existsSync(transcriptPath)) {
+          const lines = readFileSync(transcriptPath, "utf-8").trim().split("\n");
+          // Show the last few user/assistant messages
+          const recent = lines.slice(-6);
+          for (const line of recent) {
+            try {
+              const entry = JSON.parse(line);
+              const msg = entry.message;
+              if (!msg?.role || !msg?.content) continue;
+              let text = "";
+              if (typeof msg.content === "string") {
+                text = msg.content;
+              } else if (Array.isArray(msg.content)) {
+                text = msg.content
+                  .filter((c: any) => c.type === "text")
+                  .map((c: any) => c.text)
+                  .join(" ");
+              }
+              if (!text.trim()) continue;
+
+              // Extract channel message content
+              const channelMatch = text.match(/<channel[^>]*user="([^"]*)"[^>]*>\n?([\s\S]*?)\n?<\/channel>/);
+              if (channelMatch) {
+                const [, user, content] = channelMatch;
+                if (!transcriptLoggedLines.has(line)) {
+                  transcriptLoggedLines.add(line);
+                  logger.info({ from: user, text: content.slice(0, 200) }, "📩 Telegram message");
+                }
+              } else if (msg.role === "assistant" && text.length > 1) {
+                if (!transcriptLoggedLines.has(line)) {
+                  transcriptLoggedLines.add(line);
+                  logger.info({ text: text.slice(0, 300) }, "🤖 Claude response");
+                }
+              }
+            } catch {}
+          }
+        }
+      } catch {}
     });
+    const transcriptLoggedLines = new Set<string>();
 
     // Watch status line JSON file for context updates
     guardian.startWatching();
