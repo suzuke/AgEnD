@@ -136,10 +136,13 @@ fi
     const claudeBin = this.resolveClaudeBin();
     const args: string[] = [];
 
+    // Bare mode: skip hooks, LSP, auto-memory etc. — daemon manages its own lifecycle
+    args.push("--bare");
+
     // Channel mode: route Telegram messages as user prompts
     args.push("--channels", `plugin:${this.config.channel_plugin}`);
 
-    // Load statusLine config from file (avoids conflict with other --settings flags)
+    // Load statusLine + any other settings from our own file (no conflict with cmux)
     const settingsFile = join(DATA_DIR, "claude-settings.json");
     args.push("--settings", settingsFile);
 
