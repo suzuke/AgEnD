@@ -83,7 +83,18 @@ export class ProcessManager extends EventEmitter {
   }
 
   private ensureStatusLineScript(): void {
-    const script = `#!/bin/bash\ncat > "${STATUSLINE_FILE}"\necho "ok"\n`;
+    // Tee stdin JSON to our file, then pipe to the user's original statusLine command.
+    // This way both the daemon and the user's status line (e.g., ccline) work.
+    const script = `#!/bin/bash
+INPUT=$(cat)
+echo "$INPUT" > "${STATUSLINE_FILE}"
+# Forward to the original statusLine command if available
+if command -v ccline &>/dev/null; then
+  echo "$INPUT" | ccline
+else
+  echo "ok"
+fi
+`;
     writeFileSync(STATUSLINE_SCRIPT, script, { mode: 0o755 });
   }
 
