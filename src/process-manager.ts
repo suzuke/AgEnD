@@ -139,9 +139,11 @@ fi
     // Channel mode: route Telegram messages as user prompts
     args.push("--channels", `plugin:${this.config.channel_plugin}`);
 
-    // Auto-accept edits — dontAsk skips all permission prompts while keeping plugins loaded
+    // Auto-accept all tools — acceptEdits auto-approves file ops,
+    // allowedTools "*" covers MCP tools like telegram reply
     // Note: bypassPermissions prevents plugin loading (including Telegram)
-    args.push("--permission-mode", "dontAsk");
+    args.push("--permission-mode", "acceptEdits");
+    args.push("--allowedTools", "Bash,Read,Edit,Write,Glob,Grep,Agent,WebFetch,WebSearch,mcp__plugin_telegram_telegram__reply");
 
     // Load statusLine + any other settings from our own file (no conflict with cmux)
     const settingsFile = join(DATA_DIR, "claude-settings.json");
