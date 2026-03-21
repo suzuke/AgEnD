@@ -54,3 +54,39 @@ export interface MemoryBackupRow {
   chat_id: string | null;
   backed_up_at: string;
 }
+
+export interface AccessConfig {
+  mode: "pairing" | "locked";
+  allowed_users: number[];
+  max_pending_codes: number;
+  code_expiry_minutes: number;
+}
+
+export interface ChannelConfig {
+  type: "telegram";
+  mode: "topic" | "dm";
+  bot_token_env: string;
+  group_id?: number;
+  access: AccessConfig;
+  options?: Record<string, unknown>;
+}
+
+export interface InstanceConfig {
+  working_directory: string;
+  topic_id?: number;
+  channel?: ChannelConfig;
+  restart_policy: DaemonConfig["restart_policy"];
+  context_guardian: DaemonConfig["context_guardian"];
+  memory: DaemonConfig["memory"];
+  memory_directory?: string;
+  log_level: DaemonConfig["log_level"];
+  approval_port?: number;
+  /** @deprecated backward compat */
+  channel_plugin?: string;
+}
+
+export interface FleetConfig {
+  channel?: ChannelConfig;
+  defaults: Partial<InstanceConfig>;
+  instances: Record<string, InstanceConfig>;
+}

@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from "node:fs";
 import yaml from "js-yaml";
-import type { DaemonConfig } from "./types.js";
+import type { DaemonConfig, FleetConfig, InstanceConfig } from "./types.js";
 
 export const DEFAULT_CONFIG: DaemonConfig = {
   channel_plugin: "telegram@claude-plugins-official",
@@ -23,7 +23,7 @@ export const DEFAULT_CONFIG: DaemonConfig = {
   log_level: "info",
 };
 
-function deepMerge(target: DaemonConfig, source: Partial<DaemonConfig>): DaemonConfig {
+function deepMergeGeneric<T extends object>(target: T, source: Partial<T>): T {
   const result = { ...target } as Record<string, unknown>;
   const sourceRecord = source as Record<string, unknown>;
 
@@ -38,16 +38,27 @@ function deepMerge(target: DaemonConfig, source: Partial<DaemonConfig>): DaemonC
       targetVal !== null &&
       !Array.isArray(targetVal)
     ) {
-      result[key] = deepMerge(
-        targetVal as DaemonConfig,
-        sourceVal as Partial<DaemonConfig>,
+      result[key] = deepMergeGeneric(
+        targetVal as object,
+        sourceVal as Partial<object>,
       );
     } else if (sourceVal !== undefined) {
       result[key] = sourceVal;
     }
   }
-  return result as unknown as DaemonConfig;
+  return result as unknown as T;
 }
+
+function deepMerge(target: DaemonConfig, source: Partial<DaemonConfig>): DaemonConfig {
+  return deepMergeGeneric(target, source);
+}
+
+export const DEFAULT_INSTANCE_CONFIG: Omit<InstanceConfig, "working_directory"> = {
+  restart_policy: DEFAULT_CONFIG.restart_policy,
+  context_guardian: DEFAULT_CONFIG.context_guardian,
+  memory: DEFAULT_CONFIG.memory,
+  log_level: DEFAULT_CONFIG.log_level,
+};
 
 export function loadConfig(configPath: string): DaemonConfig {
   if (!existsSync(configPath)) {
@@ -59,4 +70,46 @@ export function loadConfig(configPath: string): DaemonConfig {
     return { ...DEFAULT_CONFIG };
   }
   return deepMerge(DEFAULT_CONFIG, parsed);
+}
+
+export function loadFleetConfig(configPath: string): FleetConfig {
+  if (!existsSync(configPath)) {
+    return { defaults: {}, instances: {} };
+  }
+
+  const raw = readFileSync(configPath, "utf-8");
+  const parsed = yaml.load(raw) as {
+    channel?: FleetConfig["channel"];
+    defaults?: Partial<InstanceConfig>;
+    instances?: Record<string, Partial<InstanceConfig>>;
+  } | null;
+
+  if (!parsed) {
+    return { defaults: {}, instances: {} };
+  }
+
+  const fleetDefaults: Partial<InstanceConfig> = parsed.defaults ?? {};
+  const rawInstances = parsed.instances ?? {};
+  const instances: Record<string, InstanceConfig> = {};
+
+  for (const [name, overrides] of Object.entries(rawInstances)) {
+    const merged = deepMergeGeneric(
+      deepMergeGeneric(DEFAULT_INSTANCE_CONFIG as Partial<InstanceConfig>, fleetDefaults),
+      overrides,
+    ) as Partial<InstanceConfig>;
+
+    if (!merged.working_directory) {
+      throw new Error(
+        `Instance "${name}" is missing required field: working_directory`,
+      );
+    }
+
+    instances[name] = merged as InstanceConfig;
+  }
+
+  return {
+    channel: parsed.channel,
+    defaults: fleetDefaults,
+    instances,
+  };
 }
