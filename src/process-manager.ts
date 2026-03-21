@@ -216,10 +216,10 @@ fi
       }
 
       // Auto-approve permission prompts that slip through acceptEdits
-      // (e.g., .claude/skills/ files have hard-coded protection)
-      if (data.includes("Yes") && data.includes("No") && (data.includes("Allow") || data.includes("approve"))) {
-        this.logger.info("Auto-approving permission prompt in PTY");
-        this.term?.write("y");
+      // Claude Code shows: "❯1.Yes  2.Yes,andallow...  3.No"
+      if (clean.includes("1.Yes") && clean.includes("3.No")) {
+        this.logger.info("Auto-approving permission prompt in PTY (option 1)");
+        this.term?.write("1");
       }
 
       // Capture session ID from output (claude prints: claude --resume <uuid>)
