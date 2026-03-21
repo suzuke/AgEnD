@@ -21,6 +21,7 @@ export class ProcessManager extends EventEmitter {
   private restartTimer: ReturnType<typeof setTimeout> | null = null;
   private uptimeTimer: ReturnType<typeof setTimeout> | null = null;
   private sessionId: string | null = null;
+  private suppressSessionCapture = false;
 
   constructor(
     private config: DaemonConfig,
@@ -40,6 +41,7 @@ export class ProcessManager extends EventEmitter {
       return;
     }
     this.shuttingDown = false;
+    this.suppressSessionCapture = false;
     this.ensureSpawnHelper();
     this.ensureStatusLineScript();
     this.spawnChild();
@@ -77,6 +79,7 @@ export class ProcessManager extends EventEmitter {
   /** Clear saved session ID so next start creates a fresh session. */
   clearSessionId(): void {
     this.sessionId = null;
+    this.suppressSessionCapture = true;
     this.saveSessionId();
     this.logger.info("Session ID cleared — next start will create a fresh session");
   }
@@ -186,7 +189,7 @@ fi
 
       // Capture session ID from output (claude prints: claude --resume <uuid>)
       const resumeMatch = clean.match(/--resume\s+([0-9a-f-]{36})/);
-      if (resumeMatch) {
+      if (resumeMatch && !this.suppressSessionCapture) {
         this.sessionId = resumeMatch[1];
         this.saveSessionId();
         this.logger.info({ sessionId: this.sessionId }, "Captured session ID for resume");

@@ -175,6 +175,8 @@ program
       transcriptOffset = -1;
       // Clear session ID so we get a fresh session (not resume the old one)
       pm.clearSessionId();
+      // Clear stale statusline so the new session doesn't immediately re-trigger
+      try { writeFileSync(STATUSLINE_FILE, "{}"); } catch {}
       // Stop and restart
       await pm.stop();
       logger.info("Session stopped, respawning fresh session");
