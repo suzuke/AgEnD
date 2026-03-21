@@ -109,6 +109,13 @@ fi
     // other --settings injected by tools like cmux
     const settingsFile = join(DATA_DIR, "claude-settings.json");
     const settings = {
+      permissions: {
+        allow: [
+          "Read", "Edit", "Write", "Glob", "Grep",
+          "Bash(*)", "WebFetch", "WebSearch", "Agent",
+          "mcp__plugin_telegram_telegram__reply",
+        ],
+      },
       statusLine: {
         type: "command",
         command: STATUSLINE_SCRIPT,
@@ -149,13 +156,10 @@ fi
     // Channel mode: route Telegram messages as user prompts
     args.push("--channels", `plugin:${this.config.channel_plugin}`);
 
-    // Auto-accept all tools — acceptEdits auto-approves file ops,
-    // allowedTools "*" covers MCP tools like telegram reply
-    // Note: bypassPermissions prevents plugin loading (including Telegram)
-    args.push("--permission-mode", "acceptEdits");
-    args.push("--allowedTools", "Bash,Read,Edit,Write,Glob,Grep,Agent,WebFetch,WebSearch,mcp__plugin_telegram_telegram__reply");
+    // Permissions are set in the settings file (claude-settings.json)
+    // Note: --permission-mode bypassPermissions prevents plugin loading
 
-    // Load statusLine + any other settings from our own file (no conflict with cmux)
+    // Load settings from file (permissions + statusLine)
     const settingsFile = join(DATA_DIR, "claude-settings.json");
     args.push("--settings", settingsFile);
 
