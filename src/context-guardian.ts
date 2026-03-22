@@ -4,10 +4,14 @@ import type { ContextStatus, StatusLineData, DaemonConfig } from "./types.js";
 import type { Logger } from "./logger.js";
 
 type GuardianConfig = DaemonConfig["context_guardian"];
+type State = "NORMAL" | "PENDING" | "HANDING_OVER" | "ROTATING" | "GRACE";
 
 export class ContextGuardian extends EventEmitter {
-  private timer: ReturnType<typeof setTimeout> | null = null;
-  private rotating = false;
+  state: State = "NORMAL";
+  private ageTimer: ReturnType<typeof setTimeout> | null = null;
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  private completionTimer: ReturnType<typeof setTimeout> | null = null;
+  private graceTimer: ReturnType<typeof setTimeout> | null = null;
   private statusFilePath: string;
 
   constructor(
@@ -19,15 +23,11 @@ export class ContextGuardian extends EventEmitter {
     this.statusFilePath = statusFilePath;
   }
 
-  /** Start watching the status line JSON file for updates. */
   startWatching(): void {
     this.logger.debug({ path: this.statusFilePath }, "Watching status line file");
-    watchFile(this.statusFilePath, { interval: 2000 }, () => {
-      this.readAndCheck();
-    });
+    watchFile(this.statusFilePath, { interval: 2000 }, () => this.readAndCheck());
   }
 
-  /** Read the status line JSON file and check context usage. */
   private readAndCheck(): void {
     try {
       if (!existsSync(this.statusFilePath)) return;
@@ -57,48 +57,93 @@ export class ContextGuardian extends EventEmitter {
   }
 
   updateContextStatus(status: ContextStatus): void {
-    this.logger.debug({ status }, "Context status update");
-    if (status.used_percentage > this.config.threshold_percentage && !this.rotating) {
+    if (this.state !== "NORMAL") return;
+    if (status.used_percentage > this.config.threshold_percentage) {
       this.logger.info(
         { used: status.used_percentage, threshold: this.config.threshold_percentage },
-        "Context threshold exceeded, triggering rotation",
+        "Context threshold exceeded — waiting for idle",
       );
-      this.triggerRotation("threshold");
+      this.enterPending();
     }
   }
 
+  signalIdle(): void {
+    if (this.state !== "PENDING") return;
+    this.enterHandingOver();
+  }
+
+  signalHandoverComplete(): void {
+    if (this.state !== "HANDING_OVER") return;
+    this.clearTimer("completionTimer");
+    this.enterRotating();
+  }
+
+  markRotationComplete(): void {
+    if (this.state !== "ROTATING") return;
+    this.enterGrace();
+  }
+
   startTimer(): void {
-    if (this.timer) return;
+    if (this.ageTimer) return;
     const ms = this.config.max_age_hours * 60 * 60 * 1000;
-    this.timer = setTimeout(() => {
-      this.logger.info("Max age reached, triggering timer rotation");
-      this.triggerRotation("timer");
+    this.ageTimer = setTimeout(() => {
+      this.logger.info("Max age reached — waiting for idle");
+      if (this.state === "NORMAL") this.enterPending();
     }, ms);
   }
 
-  resetTimer(): void {
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = null;
+  private resetAgeTimer(): void {
+    if (this.ageTimer) {
+      clearTimeout(this.ageTimer);
+      this.ageTimer = null;
     }
     this.startTimer();
   }
 
   stop(): void {
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = null;
-    }
+    this.clearTimer("ageTimer");
+    this.clearTimer("idleTimer");
+    this.clearTimer("completionTimer");
+    this.clearTimer("graceTimer");
     unwatchFile(this.statusFilePath);
   }
 
-  markRotationComplete(): void {
-    this.rotating = false;
-    this.resetTimer();
+  private enterPending(): void {
+    this.state = "PENDING";
+    this.emit("pending");
+    this.idleTimer = setTimeout(() => {
+      this.logger.warn("Idle wait timeout — abandoning this rotation attempt");
+      this.state = "NORMAL";
+    }, this.config.max_idle_wait_ms);
   }
 
-  private triggerRotation(reason: "threshold" | "timer"): void {
-    this.rotating = true;
-    this.emit("rotate", reason);
+  private enterHandingOver(): void {
+    this.clearTimer("idleTimer");
+    this.state = "HANDING_OVER";
+    this.emit("request_handover");
+    this.completionTimer = setTimeout(() => {
+      this.logger.warn("Handover completion timeout — proceeding to rotate");
+      this.enterRotating();
+    }, this.config.completion_timeout_ms);
+  }
+
+  private enterRotating(): void {
+    this.state = "ROTATING";
+    this.emit("rotate");
+  }
+
+  private enterGrace(): void {
+    this.state = "GRACE";
+    this.graceTimer = setTimeout(() => {
+      this.state = "NORMAL";
+      this.resetAgeTimer();
+    }, this.config.grace_period_ms);
+  }
+
+  private clearTimer(name: "ageTimer" | "idleTimer" | "completionTimer" | "graceTimer"): void {
+    if (this[name]) {
+      clearTimeout(this[name]);
+      this[name] = null;
+    }
   }
 }
