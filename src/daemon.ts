@@ -119,18 +119,31 @@ export class Daemon {
     await TmuxManager.ensureSession(sessionName);
     this.tmux = new TmuxManager(sessionName, "");
 
-    // Check if window already alive (daemon restart after crash)
+    // Strategy A: always start fresh Claude window (MCP server has no reconnection)
+    // Kill any existing window from previous run
     const windowIdFile = join(this.instanceDir, "window-id");
-    let windowAlive = false;
     if (existsSync(windowIdFile)) {
       const savedId = readFileSync(windowIdFile, "utf-8").trim();
       if (savedId) {
-        this.tmux = new TmuxManager(sessionName, savedId);
-        windowAlive = await this.tmux.isWindowAlive();
+        const oldTmux = new TmuxManager(sessionName, savedId);
+        if (await oldTmux.isWindowAlive()) {
+          // Capture session-id from statusline before killing
+          try {
+            const statusFile = join(this.instanceDir, "statusline.json");
+            if (existsSync(statusFile)) {
+              const data = JSON.parse(readFileSync(statusFile, "utf-8"));
+              if (data.session_id) {
+                writeFileSync(join(this.instanceDir, "session-id"), data.session_id);
+              }
+            }
+          } catch {}
+          await oldTmux.killWindow();
+          this.logger.info({ savedId }, "Killed old tmux window for fresh start");
+        }
       }
     }
 
-    if (!windowAlive) {
+    {
       // Generate settings file
       this.writeSettings();
       // Build claude command — find plugin dir (dist/plugin or src/plugin depending on how we're run)
