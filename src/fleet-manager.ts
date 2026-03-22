@@ -1,7 +1,9 @@
 import { fork, type ChildProcess } from "node:child_process";
-import { existsSync, readFileSync, mkdirSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { existsSync, readFileSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { join, dirname, basename } from "node:path";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
+import yaml from "js-yaml";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -24,6 +26,8 @@ export class FleetManager {
   private adapter: ChannelAdapter | null = null;
   private routingTable: Map<number, string> = new Map();
   private instanceIpcClients: Map<string, IpcClient> = new Map();
+  private pendingBindings: Map<number, string> = new Map(); // threadId → browsing state
+  private configPath: string = "";
   private logger = createLogger("info");
 
   constructor(private dataDir: string) {}
@@ -102,6 +106,7 @@ export class FleetManager {
 
   /** Start all instances from fleet config */
   async startAll(configPath: string): Promise<void> {
+    this.configPath = configPath;
     const fleet = this.loadConfig(configPath);
     const topicMode = fleet.channel?.mode === "topic";
     const ports = this.allocatePorts(fleet.instances);
@@ -162,8 +167,8 @@ export class FleetManager {
 
       const instanceName = this.routingTable.get(threadId);
       if (!instanceName) {
-        this.logger.info({ threadId }, "Unbound topic — no instance for this threadId");
-        // Could reply "topic not bound" here
+        // Auto-bind: show directory browser
+        this.handleUnboundTopic(msg, threadId);
         return;
       }
 
@@ -187,6 +192,16 @@ export class FleetManager {
         },
       });
       this.logger.info({ instanceName, user: msg.username, text: msg.text.slice(0, 80) }, "Routed to instance");
+    });
+
+    // Handle callback queries (directory browser selections)
+    this.adapter.on("callback_query", (data: { callbackData: string; chatId: string; threadId?: string; messageId: string }) => {
+      this.handleDirectorySelection(data);
+    });
+
+    // Handle topic deletion (auto-unbind)
+    this.adapter.on("topic_closed", (data: { chatId: string; threadId: string }) => {
+      this.handleTopicDeleted(parseInt(data.threadId, 10));
     });
 
     await this.adapter.start();
@@ -264,6 +279,192 @@ export class FleetManager {
       default:
         respond(null, `Unknown tool: ${tool}`);
     }
+  }
+
+  // ===================== Auto-bind =====================
+
+  /** Show directory browser when message arrives in unbound topic */
+  private async handleUnboundTopic(msg: InboundMessage, threadId: number): Promise<void> {
+    if (!this.adapter) return;
+
+    // List directories in common locations
+    const dirs = this.listProjectDirectories();
+    if (dirs.length === 0) {
+      await this.adapter.sendText(msg.chatId, "No project directories found. Add instances to fleet.yaml manually.", {
+        threadId: String(threadId),
+      });
+      return;
+    }
+
+    // Build inline keyboard with directory options
+    const { InlineKeyboard } = await import("grammy");
+    const keyboard = new InlineKeyboard();
+    for (const dir of dirs.slice(0, 8)) { // Max 8 options
+      const label = basename(dir);
+      keyboard.text(label, `bind:${threadId}:${dir}`).row();
+    }
+    keyboard.text("❌ Cancel", `bind:${threadId}:cancel`).row();
+
+    await this.adapter.sendText(
+      msg.chatId,
+      `📂 This topic is not bound to any project.\nSelect a working directory:`,
+      { threadId: String(threadId) },
+    );
+    // Send keyboard as a separate message (adapter.sendText doesn't support inline keyboard directly)
+    // Use the bot API directly via the adapter
+    const tgAdapter = this.adapter as TelegramAdapter;
+    await tgAdapter.sendTextWithKeyboard(
+      msg.chatId,
+      "Choose a project directory:",
+      keyboard,
+      String(threadId),
+    );
+  }
+
+  /** Handle directory selection from inline keyboard */
+  private async handleDirectorySelection(data: { callbackData: string; chatId: string; threadId?: string; messageId: string }): Promise<void> {
+    const { callbackData, chatId } = data;
+    if (!callbackData.startsWith("bind:")) return;
+
+    const parts = callbackData.split(":");
+    const threadId = parseInt(parts[1], 10);
+    const dirPath = parts.slice(2).join(":");
+
+    if (dirPath === "cancel") {
+      await this.adapter?.editMessage(chatId, data.messageId, "Binding cancelled.");
+      return;
+    }
+
+    // Create instance name from directory name
+    const instanceName = basename(dirPath).toLowerCase().replace(/[^a-z0-9-]/g, "-");
+
+    this.logger.info({ instanceName, threadId, dirPath }, "Auto-binding topic to project");
+
+    // Update fleet config
+    if (this.fleetConfig) {
+      this.fleetConfig.instances[instanceName] = {
+        working_directory: dirPath,
+        topic_id: threadId,
+        restart_policy: this.fleetConfig.defaults.restart_policy ?? { max_retries: 10, backoff: "exponential", reset_after: 300 },
+        context_guardian: this.fleetConfig.defaults.context_guardian ?? { threshold_percentage: 80, max_age_hours: 4, strategy: "hybrid" },
+        memory: this.fleetConfig.defaults.memory ?? { auto_summarize: false, watch_memory_dir: true, backup_to_sqlite: true },
+        log_level: (this.fleetConfig.defaults.log_level as "info") ?? "info",
+      };
+
+      // Save to fleet.yaml
+      this.saveFleetConfig();
+
+      // Update routing table
+      this.routingTable.set(threadId, instanceName);
+
+      // Start the new instance
+      const ports = this.allocatePorts(this.fleetConfig.instances);
+      await this.startInstance(instanceName, this.fleetConfig.instances[instanceName], ports[instanceName], true);
+
+      // Wait for IPC ready then connect
+      await new Promise(r => setTimeout(r, 5000));
+      const sockPath = join(this.getInstanceDir(instanceName), "channel.sock");
+      if (existsSync(sockPath)) {
+        const ipc = new IpcClient(sockPath);
+        try {
+          await ipc.connect();
+          this.instanceIpcClients.set(instanceName, ipc);
+          ipc.on("message", (ipcMsg: Record<string, unknown>) => {
+            if (ipcMsg.type === "fleet_outbound") {
+              this.handleOutboundFromInstance(instanceName, ipcMsg);
+            }
+          });
+        } catch {}
+      }
+
+      await this.adapter?.editMessage(chatId, data.messageId,
+        `✅ Bound to: ${dirPath}\nInstance: ${instanceName}`);
+      this.logger.info({ instanceName, threadId }, "Topic auto-bound successfully");
+    }
+  }
+
+  // ===================== Auto-unbind =====================
+
+  /** Handle topic deletion — stop daemon and remove from config */
+  private async handleTopicDeleted(threadId: number): Promise<void> {
+    const instanceName = this.routingTable.get(threadId);
+    if (!instanceName) return;
+
+    this.logger.info({ instanceName, threadId }, "Topic deleted — auto-unbinding");
+
+    // Stop the daemon
+    await this.stopInstance(instanceName);
+
+    // Remove from routing table
+    this.routingTable.delete(threadId);
+
+    // Remove from fleet config
+    if (this.fleetConfig) {
+      delete this.fleetConfig.instances[instanceName];
+      this.saveFleetConfig();
+    }
+
+    // Close IPC connection
+    const ipc = this.instanceIpcClients.get(instanceName);
+    if (ipc) {
+      await ipc.close();
+      this.instanceIpcClients.delete(instanceName);
+    }
+  }
+
+  // ===================== Helpers =====================
+
+  /** List project directories from common locations */
+  private listProjectDirectories(): string[] {
+    const dirs: string[] = [];
+    const searchPaths = [
+      join(homedir(), "Documents"),
+      join(homedir(), "Projects"),
+      join(homedir(), "Documents/Hack"),
+      join(homedir(), "src"),
+      join(homedir(), "work"),
+    ];
+
+    for (const searchPath of searchPaths) {
+      if (!existsSync(searchPath)) continue;
+      try {
+        const entries = readdirSync(searchPath, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.isDirectory() && !entry.name.startsWith(".")) {
+            const fullPath = join(searchPath, entry.name);
+            // Check if it looks like a project (has .git, package.json, etc.)
+            if (
+              existsSync(join(fullPath, ".git")) ||
+              existsSync(join(fullPath, "package.json")) ||
+              existsSync(join(fullPath, "Cargo.toml")) ||
+              existsSync(join(fullPath, "go.mod")) ||
+              existsSync(join(fullPath, "pyproject.toml"))
+            ) {
+              dirs.push(fullPath);
+            }
+          }
+        }
+      } catch {}
+    }
+    return dirs;
+  }
+
+  /** Save fleet config back to fleet.yaml */
+  private saveFleetConfig(): void {
+    if (!this.fleetConfig || !this.configPath) return;
+    const toSave: Record<string, unknown> = {};
+    if (this.fleetConfig.channel) toSave.channel = this.fleetConfig.channel;
+    if (Object.keys(this.fleetConfig.defaults).length > 0) toSave.defaults = this.fleetConfig.defaults;
+    toSave.instances = {};
+    for (const [name, inst] of Object.entries(this.fleetConfig.instances)) {
+      (toSave.instances as Record<string, unknown>)[name] = {
+        working_directory: inst.working_directory,
+        topic_id: inst.topic_id,
+        ...(inst.approval_port ? { approval_port: inst.approval_port } : {}),
+      };
+    }
+    writeFileSync(this.configPath, yaml.dump(toSave, { lineWidth: 120 }));
+    this.logger.info({ path: this.configPath }, "Saved fleet config");
   }
 
   async stopAll(): Promise<void> {

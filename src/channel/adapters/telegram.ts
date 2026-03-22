@@ -115,12 +115,29 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
       });
     });
 
-    // Handle callback queries from approval inline keyboards
+    // Handle callback queries from approval inline keyboards and directory browser
     this.bot.on("callback_query:data", async (ctx: Context) => {
       if (!ctx.callbackQuery?.data) return;
       await ctx.answerCallbackQuery();
-      // Callback data is handled by individual approval listeners via EventEmitter
-      this.emit("callback_query", ctx.callbackQuery);
+      this.emit("callback_query", {
+        callbackData: ctx.callbackQuery.data,
+        chatId: String(ctx.callbackQuery.message?.chat.id ?? ""),
+        threadId: ctx.callbackQuery.message?.message_thread_id != null
+          ? String(ctx.callbackQuery.message.message_thread_id)
+          : undefined,
+        messageId: String(ctx.callbackQuery.message?.message_id ?? ""),
+      });
+    });
+
+    // Handle topic closed/deleted events (for auto-unbind)
+    this.bot.on("message:forum_topic_closed", (ctx: Context) => {
+      const chatId = String(ctx.message?.chat.id ?? "");
+      const threadId = ctx.message?.message_thread_id != null
+        ? String(ctx.message.message_thread_id)
+        : undefined;
+      if (threadId) {
+        this.emit("topic_closed", { chatId, threadId });
+      }
     });
   }
 
@@ -252,6 +269,15 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
         })
         .catch(reject);
     });
+  }
+
+  /** Send text with inline keyboard (for directory browser etc.) */
+  async sendTextWithKeyboard(chatId: string, text: string, keyboard: InlineKeyboardType, threadId?: string): Promise<SentMessage> {
+    const msg = await this.bot.api.sendMessage(Number(chatId), text, {
+      message_thread_id: threadId != null ? Number(threadId) : undefined,
+      reply_markup: keyboard,
+    });
+    return { messageId: String(msg.message_id), chatId };
   }
 
   async sendFile(chatId: string, filePath: string, opts?: SendOpts): Promise<SentMessage> {
