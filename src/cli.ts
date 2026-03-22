@@ -158,6 +158,16 @@ fleet
     };
     process.on("SIGINT", shutdown);
     process.on("SIGTERM", shutdown);
+    process.on("uncaughtException", async (err) => {
+      console.error("Uncaught exception:", err);
+      await fm.stopAll().catch(() => {});
+      process.exit(1);
+    });
+    process.on("unhandledRejection", async (err) => {
+      console.error("Unhandled rejection:", err);
+      await fm.stopAll().catch(() => {});
+      process.exit(1);
+    });
   });
 
 fleet
