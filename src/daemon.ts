@@ -206,30 +206,20 @@ export class Daemon {
         if (data.session_id) writeFileSync(sessionIdFile, data.session_id);
       } catch {}
     });
-    let idleCheckInterval: ReturnType<typeof setInterval> | null = null;
-
-    this.guardian.on("pending", () => {
-      this.logger.info("Context rotation pending — watching for idle");
-      idleCheckInterval = setInterval(async () => {
-        if (await this.isClaudeIdle()) this.guardian?.signalIdle();
-      }, 3000);
+    this.guardian.on("pending", async () => {
+      this.logger.info("Context rotation pending — waiting for transcript to settle");
+      await this.waitForTranscriptIdle(15000);
+      this.logger.info("Claude is idle — signaling");
+      this.guardian?.signalIdle();
     });
 
     this.guardian.on("request_handover", async () => {
-      if (idleCheckInterval) {
-        clearInterval(idleCheckInterval);
-        idleCheckInterval = null;
-      }
-
       this.logger.info("Sending handover prompt to Claude");
       if (this.tmux) {
         const pct = this.readContextPercentage();
-        const prompt = [
-          `你的 context 已使用 ${pct}%，即將進行 rotation。請：`,
-          `1. 簡短告知用戶你正在保存工作狀態`,
-          `2. 將目前工作狀態寫入 memory/handover.md，包含：正在進行的任務、已完成的部分、下一步計劃、重要決策`,
-        ].join("\n");
+        const prompt = `Context ${pct}% rotation. First use the reply tool to tell the user you are rotating, then save state to memory/handover.md`;
         await this.tmux.sendKeys(prompt);
+        await new Promise(r => setTimeout(r, 500));
         await this.tmux.sendSpecialKey("Enter");
       }
 
@@ -264,10 +254,9 @@ export class Daemon {
           this.config.working_directory.replace(/\//g, "-").replace(/^-/, ""),
           "memory",
         );
-      if (existsSync(memDir)) {
-        this.memoryLayer = new MemoryLayer(memDir, db, this.logger);
-        await this.memoryLayer.start();
-      }
+      mkdirSync(memDir, { recursive: true });
+      this.memoryLayer = new MemoryLayer(memDir, db, this.logger);
+      await this.memoryLayer.start();
     }
 
     // Set CCD_SOCKET_PATH env for MCP server
@@ -585,35 +574,33 @@ export class Daemon {
     }
   }
 
-  private async isClaudeIdle(): Promise<boolean> {
-    try {
-      const pane = await this.tmux?.capturePane();
-      return !!pane && /^>\s*$/m.test(pane);
-    } catch {
-      return false;
-    }
+  /** Debounce-based idle: resolves when no transcript events for `quietMs`. */
+  private waitForTranscriptIdle(quietMs = 5000): Promise<void> {
+    return new Promise((resolve) => {
+      const events = ["tool_use", "tool_result", "assistant_text", "channel_message"];
+      let timer: ReturnType<typeof setTimeout>;
+
+      const done = () => {
+        events.forEach(e => this.transcriptMonitor?.removeListener(e, reset));
+        resolve();
+      };
+      const reset = () => {
+        clearTimeout(timer);
+        timer = setTimeout(done, quietMs);
+      };
+
+      timer = setTimeout(done, quietMs);
+      events.forEach(e => this.transcriptMonitor?.on(e, reset));
+    });
   }
 
-  private waitForHandoverSignal(): void {
-    const onFileChanged = (filePath: string) => {
-      if (filePath.endsWith("handover.md")) {
-        cleanup();
-        this.guardian?.signalHandoverComplete();
-      }
-    };
-    this.memoryLayer?.on("file_changed", onFileChanged);
-
-    const idleCheck = setInterval(async () => {
-      if (await this.isClaudeIdle()) {
-        cleanup();
-        this.guardian?.signalHandoverComplete();
-      }
-    }, 3000);
-
-    const cleanup = () => {
-      this.memoryLayer?.removeListener("file_changed", onFileChanged);
-      clearInterval(idleCheck);
-    };
+  private async waitForHandoverSignal(): Promise<void> {
+    // Wait for transcript activity to settle (no events for 5s = idle).
+    // This is event-driven — no pane scraping needed.
+    this.logger.info("Waiting for transcript to settle");
+    await this.waitForTranscriptIdle(15000);
+    this.logger.info("Transcript settled — handover complete");
+    this.guardian?.signalHandoverComplete();
   }
 
   private writeSettings(): void {

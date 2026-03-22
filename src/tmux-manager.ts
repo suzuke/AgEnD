@@ -64,7 +64,7 @@ export class TmuxManager {
   }
 
   async sendKeys(text: string): Promise<void> {
-    await exec("tmux", ["send-keys", "-t", `${this.sessionName}:${this.windowId}`, text]);
+    await exec("tmux", ["send-keys", "-l", "-t", `${this.sessionName}:${this.windowId}`, text]);
   }
 
   async sendSpecialKey(key: "Enter" | "Escape" | "Up" | "Down"): Promise<void> {
