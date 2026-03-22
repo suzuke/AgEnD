@@ -190,10 +190,22 @@ export class Daemon {
       writeFileSync(windowIdFile, windowId);
 
       // Auto-confirm the development channels safety prompt
-      // Wait for Claude to show the prompt, then press Enter
-      await new Promise(r => setTimeout(r, 5000));
-      await this.tmux.sendSpecialKey("Enter");
-      this.logger.info("Auto-confirmed development channels prompt");
+      // Poll tmux pane until we see the prompt, then press Enter
+      for (let i = 0; i < 30; i++) { // max 30s
+        await new Promise(r => setTimeout(r, 1000));
+        try {
+          const pane = await this.tmux.capturePane();
+          if (pane.includes("I am using this for local development")) {
+            await this.tmux.sendSpecialKey("Enter");
+            this.logger.info("Auto-confirmed development channels prompt");
+            break;
+          }
+          if (pane.includes("Listening for channel messages")) {
+            // Already past the prompt (no prompt shown)
+            break;
+          }
+        } catch {}
+      }
     }
 
     // 3. Pipe-pane for prompt detection
