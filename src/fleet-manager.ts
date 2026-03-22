@@ -15,6 +15,7 @@ import { AccessManager } from "./channel/access-manager.js";
 import { IpcClient } from "./channel/ipc-bridge.js";
 import type { ChannelAdapter, InboundMessage } from "./channel/types.js";
 import { createLogger } from "./logger.js";
+import { transcribe } from "./stt.js";
 
 const BASE_PORT = 18400; // Start above 18321 to avoid conflict with official telegram plugin
 const TMUX_SESSION = "ccd";
@@ -198,46 +199,7 @@ export class FleetManager {
 
     // Route inbound messages by threadId
     this.adapter.on("message", (msg: InboundMessage) => {
-      const threadId = msg.threadId ? parseInt(msg.threadId, 10) : undefined;
-      if (threadId == null) {
-        this.logger.warn({ chatId: msg.chatId }, "Message without threadId — ignoring in topic mode");
-        return;
-      }
-
-      const instanceName = this.routingTable.get(threadId);
-      if (!instanceName) {
-        // Check if awaiting project name input
-        if (this.pendingBindings.get(threadId) === "awaiting_name") {
-          this.handleNewProjectName(msg, threadId);
-          return;
-        }
-        // Check if auto-bind is already in progress for this topic
-        if (this.pendingBindings.has(threadId)) return;
-        // Auto-bind: show directory browser
-        this.handleUnboundTopic(msg, threadId);
-        return;
-      }
-
-      // Forward to instance via IPC
-      const ipc = this.instanceIpcClients.get(instanceName);
-      if (!ipc) {
-        this.logger.warn({ instanceName }, "No IPC connection to instance");
-        return;
-      }
-
-      ipc.send({
-        type: "fleet_inbound",
-        content: msg.text,
-        meta: {
-          chat_id: msg.chatId,
-          message_id: msg.messageId,
-          user: msg.username,
-          user_id: msg.userId,
-          ts: msg.timestamp.toISOString(),
-          thread_id: msg.threadId ?? "",
-        },
-      });
-      this.logger.info({ instanceName, user: msg.username, text: msg.text.slice(0, 80) }, "Routed to instance");
+      this.handleInboundMessage(msg);
     });
 
     // Handle callback queries (directory browser selections)
@@ -291,6 +253,68 @@ export class FleetManager {
         this.logger.warn({ name, err }, "Failed to connect to instance IPC");
       }
     }
+  }
+
+  /** Handle inbound message — transcribe voice if present, then route */
+  private async handleInboundMessage(msg: InboundMessage): Promise<void> {
+    const threadId = msg.threadId ? parseInt(msg.threadId, 10) : undefined;
+    if (threadId == null) {
+      this.logger.warn({ chatId: msg.chatId }, "Message without threadId — ignoring in topic mode");
+      return;
+    }
+
+    const instanceName = this.routingTable.get(threadId);
+    if (!instanceName) {
+      if (this.pendingBindings.get(threadId) === "awaiting_name") {
+        this.handleNewProjectName(msg, threadId);
+        return;
+      }
+      if (this.pendingBindings.has(threadId)) return;
+      this.handleUnboundTopic(msg, threadId);
+      return;
+    }
+
+    // Transcribe voice messages
+    let text = msg.text;
+    const voiceAttachment = msg.attachments?.find(a => a.kind === "voice" || a.kind === "audio");
+    if (voiceAttachment) {
+      const groqKey = process.env.GROQ_API_KEY;
+      if (groqKey) {
+        try {
+          const localPath = await (this.adapter as TelegramAdapter).downloadAttachment(voiceAttachment.fileId);
+          const result = await transcribe(localPath, groqKey);
+          text = text ? `${text}\n\n[語音訊息] ${result.text}` : `[語音訊息] ${result.text}`;
+          this.logger.info({ instanceName, transcription: result.text.slice(0, 80) }, "Voice transcribed");
+        } catch (err) {
+          this.logger.warn({ err: (err as Error).message }, "Voice transcription failed");
+          text = text || "[語音訊息 — 轉錄失敗]";
+        }
+      } else {
+        this.logger.warn("GROQ_API_KEY not set, skipping voice transcription");
+        text = text || "[語音訊息 — 未設定 STT API key]";
+      }
+    }
+
+    const ipc = this.instanceIpcClients.get(instanceName);
+    if (!ipc) {
+      this.logger.warn({ instanceName }, "No IPC connection to instance");
+      return;
+    }
+
+    ipc.send({
+      type: "fleet_inbound",
+      content: text,
+      meta: {
+        chat_id: msg.chatId,
+        message_id: msg.messageId,
+        user: msg.username,
+        user_id: msg.userId,
+        ts: msg.timestamp.toISOString(),
+        thread_id: msg.threadId ?? "",
+        ...(voiceAttachment ? { attachment_file_id: voiceAttachment.fileId } : {}),
+      },
+    });
+    this.logger.info({ instanceName, user: msg.username, text: (text ?? "").slice(0, 80) }, "Routed to instance");
   }
 
   /** Handle outbound tool calls from a daemon instance */
