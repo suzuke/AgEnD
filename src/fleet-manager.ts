@@ -567,14 +567,43 @@ export class FleetManager {
       await this.adapter?.sendText(msg.chatId, `✅ Created: ${projectDir}`, { threadId: String(threadId) });
     }
 
-    // Bind it
+    // Bind it directly (not via handleDirectorySelection — no message to edit)
     this.pendingBindings.delete(threadId);
-    await this.handleDirectorySelection({
-      callbackData: `bind:${threadId}:${projectDir}`,
-      chatId: msg.chatId,
-      threadId: String(threadId),
-      messageId: "",
-    });
+    const instanceName = basename(projectDir).toLowerCase().replace(/[^a-z0-9-]/g, "-");
+
+    if (this.fleetConfig) {
+      this.fleetConfig.instances[instanceName] = {
+        working_directory: projectDir,
+        topic_id: threadId,
+        restart_policy: this.fleetConfig.defaults.restart_policy ?? { max_retries: 10, backoff: "exponential", reset_after: 300 },
+        context_guardian: this.fleetConfig.defaults.context_guardian ?? { threshold_percentage: 80, max_age_hours: 4, strategy: "hybrid" },
+        memory: this.fleetConfig.defaults.memory ?? { auto_summarize: false, watch_memory_dir: true, backup_to_sqlite: true },
+        log_level: (this.fleetConfig.defaults.log_level as "info") ?? "info",
+      };
+      this.saveFleetConfig();
+      this.routingTable.set(threadId, instanceName);
+
+      const ports = this.allocatePorts(this.fleetConfig.instances);
+      await this.startInstance(instanceName, this.fleetConfig.instances[instanceName], ports[instanceName], true);
+
+      await new Promise(r => setTimeout(r, 5000));
+      const sockPath = join(this.getInstanceDir(instanceName), "channel.sock");
+      if (existsSync(sockPath)) {
+        const ipc = new IpcClient(sockPath);
+        try {
+          await ipc.connect();
+          this.instanceIpcClients.set(instanceName, ipc);
+          ipc.on("message", (ipcMsg: Record<string, unknown>) => {
+            if (ipcMsg.type === "fleet_outbound") {
+              this.handleOutboundFromInstance(instanceName, ipcMsg);
+            }
+          });
+        } catch {}
+      }
+
+      await this.adapter?.sendText(msg.chatId, `✅ Created & bound: ${projectDir}`, { threadId: String(threadId) });
+      this.logger.info({ instanceName, threadId }, "New project created and bound");
+    }
   }
 
   /** Get configured project roots, with fallback */
@@ -584,12 +613,8 @@ export class FleetManager {
       return roots.map(r => r.startsWith("~") ? join(homedir(), r.slice(1)) : r)
         .filter(r => existsSync(r));
     }
-    // Fallback: common locations
-    return [
-      join(homedir(), "Documents/Hack"),
-      join(homedir(), "Projects"),
-      join(homedir(), "src"),
-    ].filter(r => existsSync(r));
+    // Fallback: home directory
+    return [homedir()];
   }
 
   /** List project directories from project_roots */
