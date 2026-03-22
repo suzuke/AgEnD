@@ -346,6 +346,7 @@ export class FleetManager {
 
     switch (tool) {
       case "reply":
+        this.logger.info({ instance: instanceName, text: (args.text as string ?? "").slice(0, 100) }, "Reply");
         this.adapter.sendText(chatId, args.text as string ?? "", {
           threadId,
           replyTo: args.reply_to as string,
