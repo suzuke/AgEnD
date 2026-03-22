@@ -465,7 +465,7 @@ export class Daemon {
       hooks: {
         PreToolUse: [
           {
-            matcher: "*",
+            matcher: "Bash",
             hooks: [
               {
                 type: "command",
