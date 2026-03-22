@@ -51,56 +51,72 @@ process.on("uncaughtException", (err) => {
 // IPC client with request-response
 // ---------------------------------------------------------------------------
 
-const ipc = new IpcClient(SOCKET_PATH);
+let ipc: IpcClient | null = null;
 let ipcConnected = false;
 let requestCounter = 0;
+let reconnecting = false;
 const pendingRequests = new Map<
   number,
   { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }
 >();
 
+function setupIpcListeners(client: IpcClient): void {
+  client.on("message", (msg: Record<string, unknown>) => {
+    if (typeof msg.requestId === "number" && pendingRequests.has(msg.requestId)) {
+      const pending = pendingRequests.get(msg.requestId)!;
+      pendingRequests.delete(msg.requestId);
+      clearTimeout(pending.timer);
+      if (msg.error) {
+        pending.reject(new Error(String(msg.error)));
+      } else {
+        pending.resolve(msg.result);
+      }
+      return;
+    }
+    if (msg.type === "channel_message") {
+      pushChannelMessage(msg as unknown as ChannelIpcMessage);
+    }
+  });
+
+  client.on("disconnect", () => {
+    ipcConnected = false;
+    process.stderr.write("ccd-channel: IPC disconnected — will reconnect\n");
+    // Reject all pending requests
+    for (const [id, pending] of pendingRequests) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error("IPC disconnected"));
+      pendingRequests.delete(id);
+    }
+    scheduleReconnect();
+  });
+}
+
 async function connectIpc(): Promise<void> {
   try {
-    await ipc.connect();
+    const client = new IpcClient(SOCKET_PATH!);
+    await client.connect();
+    ipc = client;
     ipcConnected = true;
+    reconnecting = false;
+    setupIpcListeners(client);
+    client.send({ type: "mcp_ready" });
     process.stderr.write("ccd-channel: connected to daemon IPC\n");
   } catch (err) {
-    process.stderr.write(
-      `ccd-channel: failed to connect to daemon IPC: ${err}\n`,
-    );
+    process.stderr.write(`ccd-channel: failed to connect to daemon IPC: ${err}\n`);
     ipcConnected = false;
+    scheduleReconnect();
   }
 }
 
-ipc.on("message", (msg: Record<string, unknown>) => {
-  // Response to a pending request
-  if (typeof msg.requestId === "number" && pendingRequests.has(msg.requestId)) {
-    const pending = pendingRequests.get(msg.requestId)!;
-    pendingRequests.delete(msg.requestId);
-    clearTimeout(pending.timer);
-
-    if (msg.error) {
-      pending.reject(new Error(String(msg.error)));
-    } else {
-      pending.resolve(msg.result);
-    }
-    return;
-  }
-
-  // Inbound channel message from daemon
-  if (msg.type === "channel_message") {
-    pushChannelMessage(msg as unknown as ChannelIpcMessage);
-  }
-});
-
-// Handle IPC disconnection
-const origClose = ipc.close.bind(ipc);
-// We detect disconnection via the socket's close/error events. The IpcClient
-// emits these on its internal socket. We listen for them after connection.
-function setupDisconnectHandler(): void {
-  // The IpcClient EventEmitter doesn't expose socket events directly,
-  // but we can detect disconnection when send fails or via a heartbeat.
-  // For robustness, wrap send to catch write errors.
+function scheduleReconnect(): void {
+  if (reconnecting) return;
+  reconnecting = true;
+  const delay = 3000;
+  process.stderr.write(`ccd-channel: reconnecting in ${delay}ms...\n`);
+  setTimeout(() => {
+    reconnecting = false;
+    connectIpc();
+  }, delay);
 }
 
 interface ChannelIpcMessage {
@@ -114,7 +130,7 @@ function ipcRequest(
   args: Record<string, unknown>,
 ): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    if (!ipcConnected) {
+    if (!ipcConnected || !ipc) {
       reject(new Error("Not connected to daemon IPC"));
       return;
     }
@@ -281,14 +297,8 @@ function pushChannelMessage(msg: ChannelIpcMessage): void {
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  // Connect to daemon IPC first
+  // Connect to daemon IPC first (will auto-reconnect on disconnect)
   await connectIpc();
-  setupDisconnectHandler();
-
-  // Announce ourselves to the daemon so it knows the MCP server is up
-  if (ipcConnected) {
-    ipc.send({ type: "mcp_ready" });
-  }
 
   // Start MCP stdio transport (Claude <-> this process)
   const transport = new StdioServerTransport();

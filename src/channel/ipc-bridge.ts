@@ -128,9 +128,23 @@ export class IpcClient extends EventEmitter {
       });
 
       socket.on("data", parse);
-      socket.on("error", reject);
-      socket.once("connect", resolve);
+      socket.on("error", (err) => {
+        this.emit("disconnect", err);
+      });
+      socket.on("close", () => {
+        this.emit("disconnect", new Error("socket closed"));
+      });
+      socket.once("error", reject);
+      socket.once("connect", () => {
+        // Remove the one-shot error handler used for connection failure
+        socket.removeListener("error", reject);
+        resolve();
+      });
     });
+  }
+
+  get connected(): boolean {
+    return this.socket != null && !this.socket.destroyed;
   }
 
   send(msg: unknown): void {
