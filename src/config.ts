@@ -80,6 +80,7 @@ export function loadFleetConfig(configPath: string): FleetConfig {
   const raw = readFileSync(configPath, "utf-8");
   const parsed = yaml.load(raw) as {
     channel?: FleetConfig["channel"];
+    project_roots?: string[];
     defaults?: Partial<InstanceConfig>;
     instances?: Record<string, Partial<InstanceConfig>>;
   } | null;
@@ -109,6 +110,7 @@ export function loadFleetConfig(configPath: string): FleetConfig {
 
   return {
     channel: parsed.channel,
+    project_roots: parsed.project_roots,
     defaults: fleetDefaults,
     instances,
   };
