@@ -29,6 +29,7 @@ export class MemoryLayer {
       await this.watcher.close();
       this.watcher = null;
     }
+    this.db.close();
   }
 
   private backupFile(filePath: string): void {

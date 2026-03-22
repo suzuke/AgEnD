@@ -236,32 +236,31 @@ export class FleetManager {
   /** Connect IPC clients to each daemon instance's channel.sock */
   private async connectToInstances(fleet: FleetConfig): Promise<void> {
     for (const name of Object.keys(fleet.instances)) {
-      const sockPath = join(this.getInstanceDir(name), "channel.sock");
-      if (!existsSync(sockPath)) {
-        this.logger.warn({ name, sockPath }, "Instance IPC socket not found");
-        continue;
-      }
+      await this.connectIpcToInstance(name);
+    }
+  }
 
-      const ipc = new IpcClient(sockPath);
-      try {
-        await ipc.connect();
-        this.instanceIpcClients.set(name, ipc);
+  /** Connect IPC to a single instance with all handlers */
+  private async connectIpcToInstance(name: string): Promise<void> {
+    const sockPath = join(this.getInstanceDir(name), "channel.sock");
+    if (!existsSync(sockPath)) return;
 
-        // Handle outbound tool calls, approval requests, and tool status from daemon
-        ipc.on("message", (msg: Record<string, unknown>) => {
-          if (msg.type === "fleet_outbound") {
-            this.handleOutboundFromInstance(name, msg);
-          } else if (msg.type === "fleet_approval_request") {
-            this.handleApprovalFromInstance(name, msg);
-          } else if (msg.type === "fleet_tool_status") {
-            this.handleToolStatusFromInstance(name, msg);
-          }
-        });
-
-        this.logger.debug({ name }, "Connected to instance IPC");
-      } catch (err) {
-        this.logger.warn({ name, err }, "Failed to connect to instance IPC");
-      }
+    const ipc = new IpcClient(sockPath);
+    try {
+      await ipc.connect();
+      this.instanceIpcClients.set(name, ipc);
+      ipc.on("message", (msg: Record<string, unknown>) => {
+        if (msg.type === "fleet_outbound") {
+          this.handleOutboundFromInstance(name, msg);
+        } else if (msg.type === "fleet_approval_request") {
+          this.handleApprovalFromInstance(name, msg);
+        } else if (msg.type === "fleet_tool_status") {
+          this.handleToolStatusFromInstance(name, msg);
+        }
+      });
+      this.logger.debug({ name }, "Connected to instance IPC");
+    } catch (err) {
+      this.logger.warn({ name, err }, "Failed to connect to instance IPC");
     }
   }
 
@@ -597,19 +596,7 @@ export class FleetManager {
 
       // Wait for IPC ready then connect
       await new Promise(r => setTimeout(r, 5000));
-      const sockPath = join(this.getInstanceDir(instanceName), "channel.sock");
-      if (existsSync(sockPath)) {
-        const ipc = new IpcClient(sockPath);
-        try {
-          await ipc.connect();
-          this.instanceIpcClients.set(instanceName, ipc);
-          ipc.on("message", (ipcMsg: Record<string, unknown>) => {
-            if (ipcMsg.type === "fleet_outbound") {
-              this.handleOutboundFromInstance(instanceName, ipcMsg);
-            }
-          });
-        } catch {}
-      }
+      await this.connectIpcToInstance(instanceName);
 
       this.pendingBindings.delete(threadId);
       await this.adapter?.editMessage(chatId, data.messageId,
@@ -701,19 +688,7 @@ export class FleetManager {
       await this.startInstance(instanceName, this.fleetConfig.instances[instanceName], ports[instanceName], true);
 
       await new Promise(r => setTimeout(r, 5000));
-      const sockPath = join(this.getInstanceDir(instanceName), "channel.sock");
-      if (existsSync(sockPath)) {
-        const ipc = new IpcClient(sockPath);
-        try {
-          await ipc.connect();
-          this.instanceIpcClients.set(instanceName, ipc);
-          ipc.on("message", (ipcMsg: Record<string, unknown>) => {
-            if (ipcMsg.type === "fleet_outbound") {
-              this.handleOutboundFromInstance(instanceName, ipcMsg);
-            }
-          });
-        } catch {}
-      }
+      await this.connectIpcToInstance(instanceName);
 
       await this.adapter?.sendText(msg.chatId, `✅ Created & bound: ${projectDir}`, { threadId: String(threadId) });
       this.logger.info({ instanceName, threadId }, "New project created and bound");
