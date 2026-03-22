@@ -162,7 +162,8 @@ export class FleetManager {
     if (topicMode && fleet.channel) {
       await this.autoCreateTopics(fleet);
       this.routingTable = this.buildRoutingTable();
-      this.logger.info({ routes: Object.fromEntries(this.routingTable) }, "Topic routing table");
+      const routeSummary = [...this.routingTable.entries()].map(([tid, name]) => `#${tid}→${name}`).join(", ");
+      this.logger.info(`Routes: ${routeSummary}`);
 
       await this.startSharedAdapter(fleet);
 
@@ -217,7 +218,16 @@ export class FleetManager {
     if (fleet.channel?.group_id) {
       (this.adapter as TelegramAdapter).setLastChatId(String(fleet.channel.group_id));
     }
-    this.logger.info("Shared Telegram adapter started");
+
+    this.adapter.on("started", (username: string) => {
+      this.logger.info(`Telegram bot @${username} polling`);
+    });
+    this.adapter.on("polling_conflict", ({ attempt, delay }: { attempt: number; delay: number }) => {
+      this.logger.warn(`409 Conflict (attempt ${attempt}), retry in ${delay / 1000}s`);
+    });
+    this.adapter.on("handler_error", (err: unknown) => {
+      this.logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Telegram handler error");
+    });
 
     // Periodically check for deleted topics (Telegram may not always send events)
     this.startTopicCleanupPoller();

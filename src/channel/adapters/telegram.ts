@@ -221,8 +221,7 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
     // Grammy's default error handler calls bot.stop() on any throw — override
     // to keep polling alive on handler errors
     this.bot.catch((err) => {
-      const msg = err.error instanceof Error ? err.error.message : String(err.error);
-      process.stderr.write(`telegram adapter: handler error (polling continues): ${msg}\n`);
+      this.emit("handler_error", err.error);
     });
 
     // 409 Conflict = another getUpdates consumer is active (official plugin zombie,
@@ -234,16 +233,14 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
           await this.bot.start({
             drop_pending_updates: attempt === 1,
             onStart: (info) => {
-              process.stderr.write(`telegram adapter: polling as @${info.username}\n`);
+              this.emit("started", info.username);
             },
           });
           return; // bot.stop() was called — clean exit
         } catch (err) {
           if (err instanceof GrammyError && err.error_code === 409) {
             const delay = Math.min(1000 * attempt, 15000);
-            process.stderr.write(
-              `telegram adapter: 409 Conflict, retrying in ${delay / 1000}s\n`,
-            );
+            this.emit("polling_conflict", { attempt, delay });
             await new Promise(r => setTimeout(r, delay));
             continue;
           }

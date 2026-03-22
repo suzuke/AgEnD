@@ -21,7 +21,7 @@ export class ContextGuardian extends EventEmitter {
 
   /** Start watching the status line JSON file for updates. */
   startWatching(): void {
-    this.logger.info({ path: this.statusFilePath }, "Watching status line file");
+    this.logger.debug({ path: this.statusFilePath }, "Watching status line file");
     watchFile(this.statusFilePath, { interval: 2000 }, () => {
       this.readAndCheck();
     });

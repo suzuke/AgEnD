@@ -53,7 +53,7 @@ export class Daemon {
   async start(): Promise<void> {
     mkdirSync(this.instanceDir, { recursive: true });
     writeFileSync(join(this.instanceDir, "daemon.pid"), String(process.pid));
-    this.logger.info({ name: this.name, pid: process.pid }, "Starting daemon instance");
+    this.logger.info(`Starting ${this.name}`);
 
     // 1. IPC server — bridge between MCP server (Claude's child) and daemon
     const sockPath = join(this.instanceDir, "channel.sock");
@@ -284,7 +284,7 @@ export class Daemon {
     // Set CCD_SOCKET_PATH env for MCP server
     process.env.CCD_SOCKET_PATH = sockPath;
 
-    this.logger.info({ name: this.name, port }, "Daemon instance started");
+    this.logger.info(`${this.name} ready (port ${port})`);
   }
 
   async stop(): Promise<void> {
