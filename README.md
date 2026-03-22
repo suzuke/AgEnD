@@ -12,7 +12,7 @@ This daemon fixes that:
 
 - **Fleet mode** — 1 Telegram bot, N Forum Topics = N independent Claude sessions
 - **tmux-based** — Claude runs in tmux windows, survives daemon crashes
-- **Auto context rotation** — sends `/compact` at 40%, restarts fresh if needed
+- **Auto context rotation** — at 60% context, waits for idle, asks Claude to save state, then restarts fresh
 - **Voice messages** — Telegram voice → Groq Whisper → text to Claude
 - **Approval system** — dangerous Bash commands get Telegram inline buttons
 - **Auto topic binding** — create a Telegram topic, pick a project directory, done
@@ -50,6 +50,8 @@ ccd topic bind <n> <tid>  Bind instance to topic
 ccd topic unbind <n>      Unbind instance from topic
 ccd access lock <n>       Lock instance access
 ccd access unlock <n>     Unlock instance access
+ccd access list <n>       List allowed users
+ccd access remove <n> <uid> Remove user from allowed list
 ccd access pair <n> <uid> Generate pairing code
 ccd install               Install as system service
 ccd uninstall             Remove system service
@@ -87,7 +89,7 @@ ccd uninstall             Remove system service
 
 **MCP Channel Server** — Runs as Claude's child process. Communicates with the daemon via Unix socket IPC. Declares `claude/channel` capability and pushes inbound messages via `notifications/claude/channel`. Auto-reconnects on IPC disconnect.
 
-**Context Guardian** — Watches Claude's status line JSON. At 40% context usage, sends `/compact`. If compact doesn't bring it below threshold, kills the window and starts a fresh session.
+**Context Guardian** — Watches Claude's status line JSON. A state machine with 5 states: NORMAL → PENDING (threshold exceeded, waiting for idle) → HANDING_OVER (sends prompt asking Claude to save state to `memory/handover.md`) → ROTATING (kills window, spawns fresh session) → GRACE (10-min cooldown). Default threshold: 60%. Also rotates after `max_age_hours` (default 8h).
 
 ## Configuration
 
@@ -109,8 +111,11 @@ channel:
 
 defaults:
   context_guardian:
-    threshold_percentage: 40
-    max_age_hours: 4
+    threshold_percentage: 60
+    max_age_hours: 8
+    max_idle_wait_ms: 300000
+    completion_timeout_ms: 60000
+    grace_period_ms: 600000
   log_level: info
 
 instances:
@@ -165,12 +170,16 @@ Claude calls Bash tool
 |------|---------|
 | `fleet.yaml` | Fleet configuration |
 | `.env` | Bot token + API keys |
-| `daemon.log` | Fleet log (JSON) |
+| `fleet.log` | Fleet log (JSON) |
 | `instances/<name>/` | Per-instance data |
+| `instances/<name>/daemon.log` | Per-instance log |
 | `instances/<name>/session-id` | Saved session UUID for `--resume` |
 | `instances/<name>/statusline.json` | Latest status line from Claude |
 | `instances/<name>/channel.sock` | IPC Unix socket |
 | `instances/<name>/transcript-offset` | Byte offset for transcript monitor |
+| `instances/<name>/access-state.json` | Access control state |
+| `instances/<name>/memory.db` | SQLite backup of memory files |
+| `instances/<name>/output.log` | Claude tmux output capture |
 
 ## Requirements
 
