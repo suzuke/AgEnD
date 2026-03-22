@@ -8,8 +8,10 @@ export interface DaemonConfig {
   };
   context_guardian: {
     threshold_percentage: number;
+    max_idle_wait_ms: number;
+    completion_timeout_ms: number;
+    grace_period_ms: number;
     max_age_hours: number;
-    strategy: "status_line" | "timer" | "hybrid";
   };
   memory: {
     auto_summarize: boolean;

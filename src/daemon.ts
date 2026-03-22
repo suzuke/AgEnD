@@ -206,56 +206,50 @@ export class Daemon {
         if (data.session_id) writeFileSync(sessionIdFile, data.session_id);
       } catch {}
     });
-    this.guardian.on("rotate", async (reason: string) => {
-      this.logger.info({ reason }, "Context rotation triggered — sending /compact");
+    let idleCheckInterval: ReturnType<typeof setInterval> | null = null;
 
-      // Step 1: Send /compact to let Claude compress context in-place
-      if (this.tmux) {
-        await this.tmux.sendKeys("/compact");
-        await this.tmux.sendSpecialKey("Enter");
-        this.logger.info("Sent /compact to Claude");
+    this.guardian.on("pending", () => {
+      this.logger.info("Context rotation pending — watching for idle");
+      idleCheckInterval = setInterval(async () => {
+        if (await this.isClaudeIdle()) this.guardian?.signalIdle();
+      }, 3000);
+    });
 
-        // Wait for compact to finish (poll statusline for reduced context %)
-        const compactTimeout = 60_000;
-        const start = Date.now();
-        const { readFile } = await import("node:fs/promises");
-        while (Date.now() - start < compactTimeout) {
-          await new Promise(r => setTimeout(r, 5000));
-          try {
-            const sf = join(this.instanceDir, "statusline.json");
-            const data = JSON.parse(await readFile(sf, "utf-8"));
-            const pct = data.context_window?.used_percentage;
-            if (pct != null && pct < this.config.context_guardian.threshold_percentage) {
-              this.logger.info({ newUsage: pct }, "Compact succeeded — context below threshold");
-              this.guardian?.markRotationComplete();
-              return;
-            }
-          } catch {}
-        }
-
-        this.logger.warn("Compact did not reduce context below threshold — restarting session");
+    this.guardian.on("request_handover", async () => {
+      if (idleCheckInterval) {
+        clearInterval(idleCheckInterval);
+        idleCheckInterval = null;
       }
 
-      // Step 2: If compact wasn't enough, kill and start fresh (no --resume)
-      try {
-        const { readFile } = await import("node:fs/promises");
-        const sf = join(this.instanceDir, "statusline.json");
-        const data = JSON.parse(await readFile(sf, "utf-8"));
-        if (data.session_id) {
-          writeFileSync(join(this.instanceDir, "session-id"), data.session_id);
-        }
-      } catch {}
+      this.logger.info("Sending handover prompt to Claude");
+      if (this.tmux) {
+        const pct = this.readContextPercentage();
+        const prompt = [
+          `你的 context 已使用 ${pct}%，即將進行 rotation。請：`,
+          `1. 簡短告知用戶你正在保存工作狀態`,
+          `2. 將目前工作狀態寫入 memory/handover.md，包含：正在進行的任務、已完成的部分、下一步計劃、重要決策`,
+        ].join("\n");
+        await this.tmux.sendKeys(prompt);
+        await this.tmux.sendSpecialKey("Enter");
+      }
 
-      // Remove session-id so spawnClaudeWindow starts fresh
-      const sessionIdFile = join(this.instanceDir, "session-id");
-      try { unlinkSync(sessionIdFile); } catch {}
+      this.waitForHandoverSignal();
+    });
+
+    this.guardian.on("rotate", async () => {
+      this.logger.info("Context rotation — killing and respawning Claude");
+
+      try {
+        const data = JSON.parse(readFileSync(statusFile, "utf-8"));
+        if (data.session_id) writeFileSync(sessionIdFile, data.session_id);
+      } catch {}
 
       await this.tmux?.killWindow();
       this.transcriptMonitor?.resetOffset();
       await this.spawnClaudeWindow();
       this.autoConfirmDevChannels();
       this.guardian?.markRotationComplete();
-      this.logger.info({ reason }, "Context rotation complete — fresh Claude session started");
+      this.logger.info("Context rotation complete — fresh Claude session started");
     });
 
     // 9. Memory layer
@@ -579,6 +573,47 @@ export class Daemon {
     const windowId = await this.tmux!.createWindow(claudeCmd, this.config.working_directory);
     const windowIdFile = join(this.instanceDir, "window-id");
     writeFileSync(windowIdFile, windowId);
+  }
+
+  private readContextPercentage(): number {
+    try {
+      const sf = join(this.instanceDir, "statusline.json");
+      const data = JSON.parse(readFileSync(sf, "utf-8"));
+      return data.context_window?.used_percentage ?? 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  private async isClaudeIdle(): Promise<boolean> {
+    try {
+      const pane = await this.tmux?.capturePane();
+      return !!pane && /^>\s*$/m.test(pane);
+    } catch {
+      return false;
+    }
+  }
+
+  private waitForHandoverSignal(): void {
+    const onFileChanged = (filePath: string) => {
+      if (filePath.endsWith("handover.md")) {
+        cleanup();
+        this.guardian?.signalHandoverComplete();
+      }
+    };
+    this.memoryLayer?.on("file_changed", onFileChanged);
+
+    const idleCheck = setInterval(async () => {
+      if (await this.isClaudeIdle()) {
+        cleanup();
+        this.guardian?.signalHandoverComplete();
+      }
+    }, 3000);
+
+    const cleanup = () => {
+      this.memoryLayer?.removeListener("file_changed", onFileChanged);
+      clearInterval(idleCheck);
+    };
   }
 
   private writeSettings(): void {

@@ -40,8 +40,10 @@ restart_policy:
   reset_after: 300
 context_guardian:
   threshold_percentage: 70
+  max_idle_wait_ms: 300000
+  completion_timeout_ms: 60000
+  grace_period_ms: 600000
   max_age_hours: 2
-  strategy: hybrid
 memory:
   auto_summarize: false
   watch_memory_dir: true
@@ -67,8 +69,10 @@ restart_policy:
   reset_after: 120
 context_guardian:
   threshold_percentage: 70
+  max_idle_wait_ms: 300000
+  completion_timeout_ms: 60000
+  grace_period_ms: 600000
   max_age_hours: 2
-  strategy: timer
 memory:
   auto_summarize: false
   watch_memory_dir: false
@@ -79,8 +83,19 @@ log_level: debug
     const config = loadConfig(configPath);
     expect(config.channel_plugin).toBe("telegram@claude-plugins-official");
     expect(config.restart_policy.backoff).toBe("linear");
-    expect(config.context_guardian.strategy).toBe("timer");
+    expect(config.context_guardian.threshold_percentage).toBe(70);
     expect(config.memory.auto_summarize).toBe(false);
+  });
+
+  it("has correct default context_guardian values", () => {
+    const config = loadConfig("/nonexistent/path.yaml");
+    expect(config.context_guardian).toEqual({
+      threshold_percentage: 60,
+      max_idle_wait_ms: 300_000,
+      completion_timeout_ms: 60_000,
+      grace_period_ms: 600_000,
+      max_age_hours: 8,
+    });
   });
 });
 
@@ -121,8 +136,10 @@ instances:
     topic_id: 42
     context_guardian:
       threshold_percentage: 90
+      max_idle_wait_ms: 300000
+      completion_timeout_ms: 60000
+      grace_period_ms: 600000
       max_age_hours: 2
-      strategy: timer
 `
     );
     const fleet = loadFleetConfig(fleetPath);
@@ -132,8 +149,8 @@ instances:
     expect(fleet.instances.mybot.restart_policy.backoff).toBe("linear");
 
     // context_guardian from instance overrides defaults
-    expect(fleet.instances.mybot.context_guardian.strategy).toBe("timer");
     expect(fleet.instances.mybot.context_guardian.threshold_percentage).toBe(90);
+    expect(fleet.instances.mybot.context_guardian.max_idle_wait_ms).toBe(300000);
 
     // topic_id preserved
     expect(fleet.instances.mybot.topic_id).toBe(42);
