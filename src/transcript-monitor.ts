@@ -30,6 +30,12 @@ export class TranscriptMonitor extends EventEmitter {
     if (!this.transcriptPath) {
       this.transcriptPath = await this.resolveTranscriptPath();
       if (!this.transcriptPath) return;
+      // Skip existing content on first discovery — only process new entries
+      try {
+        const initial = await stat(this.transcriptPath);
+        this.byteOffset = initial.size;
+        return;
+      } catch { return; }
     }
     if (!existsSync(this.transcriptPath)) return;
 
