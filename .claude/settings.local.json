@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(claudeception)"
+    ]
+  },
+  "enabledMcpjsonServers": [
+    "ccd-channel"
+  ],
+  "enableAllProjectMcpServers": true
+}
