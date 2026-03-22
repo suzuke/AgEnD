@@ -3,13 +3,21 @@ import type { MessageBus } from "../channel/message-bus.js";
 import type { IpcServer } from "../channel/ipc-bridge.js";
 
 const DANGER_PATTERNS = [
-  /^rm\s+-rf\s+[\/~]/,
-  /git\s+push.*--force/,
-  /git\s+reset\s+--hard/,
-  /git\s+clean\s+-f/,
+  /\brm\b/,                    // any file deletion
+  /\bgit\s+push\b/,           // any push (not just --force)
+  /\bgit\s+reset\b/,          // any reset
+  /\bgit\s+clean\b/,          // any clean
+  /\bgit\s+checkout\s+\./,    // discard changes
+  /\bgit\s+restore\b/,        // discard changes
+  /\bmv\b/,                    // move/rename files
   /\bdd\b/,
   /\bmkfs\b/,
   /\bsudo\b/,
+  /\bchmod\b/,
+  /\bchown\b/,
+  /\bkill\b/,
+  /\bpkill\b/,
+  />\s*\//,                    // redirect overwrite to absolute path
 ];
 
 function isSafeTool(toolName: string): boolean {
