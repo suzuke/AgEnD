@@ -198,7 +198,7 @@ Claude 要用一個工具
 
 ## 已知問題
 
-- 不要在 cmux 裡面跑（它的 `--settings` 注入會跟我們的衝突）
+- ~~不要在 cmux 裡面跑~~ 已修復：daemon 會設定 `CMUX_CLAUDE_HOOKS_DISABLED=1` 停用 cmux 的 `--settings` 注入
 - `bypassPermissions` 模式會讓 plugin 不載入（Claude Code bug）
 - 目前只在 macOS 測過
 

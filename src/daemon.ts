@@ -525,9 +525,11 @@ export class Daemon {
     this.logger.debug({ mcpConfigPath }, "Wrote MCP server config");
 
     // Build claude command
+    // Disable cmux's claude shim hooks — daemon manages its own lifecycle,
+    // and cmux's --settings injection would conflict with ours.
     const settingsPath = join(this.instanceDir, "claude-settings.json");
     const sessionIdFile = join(this.instanceDir, "session-id");
-    let claudeCmd = `claude --settings ${settingsPath} --dangerously-load-development-channels server:ccd-channel`;
+    let claudeCmd = `CMUX_CLAUDE_HOOKS_DISABLED=1 claude --settings ${settingsPath} --dangerously-load-development-channels server:ccd-channel`;
     if (existsSync(sessionIdFile)) {
       const sid = readFileSync(sessionIdFile, "utf-8").trim();
       if (sid) claudeCmd += ` --resume ${sid}`;
