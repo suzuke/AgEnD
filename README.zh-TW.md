@@ -204,6 +204,7 @@ Claude 要用一個工具
 
 ## 已知問題
 
+- ~~不要在 cmux 裡面跑~~ 已修復：daemon 會設定 `CMUX_CLAUDE_HOOKS_DISABLED=1` 停用 cmux 的 `--settings` 注入
 - 全域 `enabledPlugins` 裡有官方 telegram plugin 會造成 409 polling 衝突（daemon 會自動重試）
 - 目前只在 macOS 測過
 
