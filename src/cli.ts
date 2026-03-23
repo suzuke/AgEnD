@@ -2,6 +2,8 @@
 import { Command } from "commander";
 import { loadConfig } from "./config.js";
 import { join } from "node:path";
+import { SchedulerDb } from "./scheduler/db.js";
+import { Cron } from "croner";
 import {
   existsSync,
   readFileSync,
@@ -124,6 +126,17 @@ program
       console.log(lines.slice(-n).join("\n"));
     }
   });
+
+function signalFleetReload(): void {
+  const pidPath = join(DATA_DIR, "fleet.pid");
+  try {
+    const pid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
+    process.kill(pid, "SIGHUP");
+    console.log("Fleet manager notified to reload schedules.");
+  } catch {
+    console.log("Fleet manager not running. Schedules will be loaded on next start.");
+  }
+}
 
 // === Fleet commands ===
 const fleet = program.command("fleet").description("Fleet management");
@@ -428,6 +441,163 @@ program
   .action(async () => {
     const { runSetupWizard } = await import("./setup-wizard.js");
     await runSetupWizard();
+  });
+
+// === Schedule commands ===
+const schedule = program.command("schedule").description("Manage scheduled tasks");
+
+schedule
+  .command("list")
+  .option("--target <instance>", "Filter by target instance")
+  .option("--json", "Output as JSON")
+  .action((opts) => {
+    const db = new SchedulerDb(join(DATA_DIR, "scheduler.db"));
+    try {
+      const schedules = db.list(opts.target);
+      if (opts.json) {
+        console.log(JSON.stringify(schedules, null, 2));
+        return;
+      }
+      if (schedules.length === 0) {
+        console.log("No schedules found.");
+        return;
+      }
+      console.log("ID\t\t\t\t\tLabel\t\t\tCron\t\tTarget\tEnabled\tLast Status");
+      for (const s of schedules) {
+        console.log(`${s.id}\t${s.label ?? "-"}\t${s.cron}\t${s.target}\t${s.enabled ? "✅" : "❌"}\t${s.last_status ?? "-"}`);
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+schedule
+  .command("add")
+  .requiredOption("--cron <expr>", "Cron expression")
+  .requiredOption("--target <instance>", "Target instance")
+  .requiredOption("--message <text>", "Message to send on trigger")
+  .option("--label <text>", "Human-readable name")
+  .option("--timezone <tz>", "IANA timezone", "Asia/Taipei")
+  .action((opts) => {
+    // Validate cron expression
+    try { new Cron(opts.cron, { timezone: opts.timezone }); } catch (err) {
+      console.error(`Invalid cron expression: ${(err as Error).message}`);
+      process.exit(1);
+    }
+    const db = new SchedulerDb(join(DATA_DIR, "scheduler.db"));
+    try {
+      const s = db.create({
+        cron: opts.cron,
+        message: opts.message,
+        source: opts.target,
+        target: opts.target,
+        reply_chat_id: "",
+        reply_thread_id: null,
+        label: opts.label,
+        timezone: opts.timezone,
+      });
+      console.log(`Created schedule ${s.id}`);
+      signalFleetReload();
+    } finally {
+      db.close();
+    }
+  });
+
+schedule
+  .command("update")
+  .argument("<id>", "Schedule ID")
+  .option("--cron <expr>", "New cron expression")
+  .option("--message <text>", "New message")
+  .option("--target <instance>", "New target instance")
+  .option("--label <text>", "New label")
+  .option("--timezone <tz>", "New timezone")
+  .option("--enabled <bool>", "Enable/disable (true/false)")
+  .action((id, opts) => {
+    const db = new SchedulerDb(join(DATA_DIR, "scheduler.db"));
+    try {
+      const params: Record<string, unknown> = {};
+      if (opts.cron) params.cron = opts.cron;
+      if (opts.message) params.message = opts.message;
+      if (opts.target) params.target = opts.target;
+      if (opts.label) params.label = opts.label;
+      if (opts.timezone) params.timezone = opts.timezone;
+      if (opts.enabled !== undefined) params.enabled = opts.enabled === "true";
+      db.update(id, params);
+      console.log(`Updated schedule ${id}`);
+      signalFleetReload();
+    } finally {
+      db.close();
+    }
+  });
+
+schedule
+  .command("delete")
+  .argument("<id>", "Schedule ID")
+  .action((id) => {
+    const db = new SchedulerDb(join(DATA_DIR, "scheduler.db"));
+    try {
+      db.delete(id);
+      console.log(`Deleted schedule ${id}`);
+      signalFleetReload();
+    } finally {
+      db.close();
+    }
+  });
+
+schedule
+  .command("enable")
+  .argument("<id>", "Schedule ID")
+  .action((id) => {
+    const db = new SchedulerDb(join(DATA_DIR, "scheduler.db"));
+    try {
+      db.update(id, { enabled: true });
+      console.log(`Enabled schedule ${id}`);
+      signalFleetReload();
+    } finally {
+      db.close();
+    }
+  });
+
+schedule
+  .command("disable")
+  .argument("<id>", "Schedule ID")
+  .action((id) => {
+    const db = new SchedulerDb(join(DATA_DIR, "scheduler.db"));
+    try {
+      db.update(id, { enabled: false });
+      console.log(`Disabled schedule ${id}`);
+      signalFleetReload();
+    } finally {
+      db.close();
+    }
+  });
+
+schedule
+  .command("history")
+  .argument("<id>", "Schedule ID")
+  .option("--limit <n>", "Number of runs to show", "20")
+  .action((id, opts) => {
+    const db = new SchedulerDb(join(DATA_DIR, "scheduler.db"));
+    try {
+      const runs = db.getRuns(id, parseInt(opts.limit, 10));
+      if (runs.length === 0) {
+        console.log("No runs found.");
+        return;
+      }
+      console.log("Time\t\t\tStatus\t\t\tDetail");
+      for (const r of runs) {
+        console.log(`${r.triggered_at}\t${r.status}\t${r.detail ?? ""}`);
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+schedule
+  .command("trigger")
+  .argument("<id>", "Schedule ID")
+  .action((id) => {
+    console.log("Manual trigger requires fleet manager running. Use the Telegram interface instead.");
   });
 
 program.parse();
