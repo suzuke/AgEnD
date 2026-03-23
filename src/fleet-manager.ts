@@ -24,6 +24,13 @@ import { ContainerManager } from "./container-manager.js";
 const BASE_PORT = 18400; // Start above 18321 to avoid conflict with official telegram plugin
 const TMUX_SESSION = "ccd";
 
+/** Sanitize a directory name into a valid instance name. Keeps Unicode letters (incl. CJK). */
+function sanitizeInstanceName(name: string): string {
+  // Keep Unicode letters (\p{L}), digits, and hyphens; replace everything else with hyphen
+  const sanitized = name.toLowerCase().replace(/[^\p{L}\d-]/gu, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  return sanitized || "project";
+}
+
 export class FleetManager {
   private children: Map<string, ChildProcess> = new Map();
   private daemons: Map<string, InstanceType<typeof import("./daemon.js").Daemon>> = new Map();
@@ -717,7 +724,7 @@ export class FleetManager {
     }
 
     // Create instance name from directory name
-    const instanceName = `${basename(dirPath).toLowerCase().replace(/[^a-z0-9-]/g, "-")}-t${threadId}`;
+    const instanceName = `${sanitizeInstanceName(basename(dirPath))}-t${threadId}`;
 
     this.logger.info({ instanceName, threadId, dirPath }, "Auto-binding topic to project");
 
@@ -830,7 +837,7 @@ export class FleetManager {
 
     // Bind it directly (not via handleDirectorySelection — no message to edit)
     this.pendingBindings.delete(threadId);
-    const instanceName = `${basename(projectDir).toLowerCase().replace(/[^a-z0-9-]/g, "-")}-t${threadId}`;
+    const instanceName = `${sanitizeInstanceName(basename(projectDir))}-t${threadId}`;
 
     if (this.fleetConfig) {
       this.fleetConfig.instances[instanceName] = {
