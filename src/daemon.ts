@@ -713,17 +713,15 @@ export class Daemon {
           "mcp__ccd-channel__delete_schedule",
         ],
         deny: [
+          // Catastrophic operations — hard deny, no user override
           "Bash(rm -rf /)",
           "Bash(rm -rf /*)",
           "Bash(rm -rf ~)",
           "Bash(rm -rf ~/*)",
-          "Bash(git push * --force *)",
-          "Bash(git push --force *)",
-          "Bash(git reset --hard *)",
-          "Bash(git clean -fd *)",
-          "Bash(git clean -f *)",
           "Bash(dd *)",
           "Bash(mkfs *)",
+          // git force ops and git clean are handled by ApprovalServer
+          // (danger patterns) — user can approve via Telegram if needed
         ],
         defaultMode: "default",
       },
