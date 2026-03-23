@@ -593,9 +593,9 @@ export class Daemon {
   private writeSettings(): void {
     const port = this.config.approval_port ?? 18321;
     const settings: Record<string, unknown> = {
-      // Disable the official telegram plugin to avoid bot token polling conflict
-      // Our daemon manages Telegram via its own adapter
-      enabledPlugins: { "telegram@claude-plugins-official": false },
+      // NOTE: enabledPlugins via --settings does NOT work — plugins are loaded
+      // before --settings is merged. Use .claude/settings.local.json instead.
+      // The 409 retry in TelegramAdapter handles any lingering official plugin.
       hooks: {
         PreToolUse: [
           {
