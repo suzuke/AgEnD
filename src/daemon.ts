@@ -16,7 +16,7 @@ import { ApprovalServer } from "./approval/approval-server.js";
 import { TmuxPromptDetector, loadToolAllowlist } from "./approval/tmux-prompt-detector.js";
 import { TelegramAdapter } from "./channel/adapters/telegram.js";
 import { AccessManager } from "./channel/access-manager.js";
-import type { ChannelAdapter, InboundMessage } from "./channel/types.js";
+import type { ChannelAdapter, InboundMessage, ApprovalResponse } from "./channel/types.js";
 import type { ContainerManager } from "./container-manager.js";
 import { transcribe } from "./stt.js";
 
@@ -236,10 +236,17 @@ export class Daemon {
     await this.approvalServer.start();
 
     // 7. Prompt detector
+    // In topic mode, messageBus has no adapters — must route via IPC like ApprovalServer does
+    const requestApproval = (prompt: string): Promise<ApprovalResponse> => {
+      if (this.topicMode && this.ipcServer) {
+        return this.requestApprovalViaIpc(prompt);
+      }
+      return this.messageBus.requestApproval(prompt);
+    };
     this.promptDetector = new TmuxPromptDetector(
       outputLog,
       this.tmux,
-      (prompt) => this.messageBus.requestApproval(prompt),
+      requestApproval,
       this.logger,
       this.instanceDir,
     );
@@ -571,6 +578,40 @@ export class Daemon {
       default:
         respond(null, `Unknown tool: ${tool}`);
     }
+  }
+
+  /** Topic mode: forward approval request to fleet manager via IPC (mirrors ApprovalServer logic) */
+  private requestApprovalViaIpc(prompt: string): Promise<ApprovalResponse> {
+    return new Promise((resolve) => {
+      const approvalId = `approval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+      const timeout = setTimeout(() => {
+        cleanup();
+        resolve({ decision: "deny", respondedBy: { channelType: "timeout", userId: "" } });
+      }, 120_000);
+
+      const onMessage = (msg: Record<string, unknown>) => {
+        if (msg.type === "fleet_approval_response" && msg.approvalId === approvalId) {
+          cleanup();
+          const d = msg.decision as string;
+          const decision = d === "deny" ? "deny" as const : d === "always_allow" ? "always_allow" as const : "approve" as const;
+          resolve({ decision, respondedBy: { channelType: "ipc", userId: "" } });
+        }
+      };
+
+      const cleanup = () => {
+        clearTimeout(timeout);
+        this.ipcServer?.removeListener("message", onMessage as (...a: unknown[]) => void);
+      };
+
+      this.ipcServer?.on("message", onMessage as (...a: unknown[]) => void);
+      this.ipcServer?.broadcast({
+        type: "fleet_approval_request",
+        approvalId,
+        instanceName: this.name,
+        prompt,
+      });
+    });
   }
 
   /** Background polling to auto-confirm all Claude startup prompts */
