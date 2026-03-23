@@ -16,6 +16,9 @@ import { IpcClient } from "./channel/ipc-bridge.js";
 import type { ChannelAdapter, InboundMessage } from "./channel/types.js";
 import { createLogger } from "./logger.js";
 import { transcribe } from "./stt.js";
+import { Scheduler } from "./scheduler/index.js";
+import type { Schedule, SchedulerConfig } from "./scheduler/index.js";
+import { DEFAULT_SCHEDULER_CONFIG } from "./scheduler/index.js";
 
 const BASE_PORT = 18400; // Start above 18321 to avoid conflict with official telegram plugin
 const TMUX_SESSION = "ccd";
@@ -28,6 +31,7 @@ export class FleetManager {
   private routingTable: Map<number, string> = new Map();
   private instanceIpcClients: Map<string, IpcClient> = new Map();
   private pendingBindings: Map<number, string> = new Map(); // threadId → browsing state
+  private scheduler: Scheduler | null = null;
   private configPath: string = "";
   private logger = createLogger("info");
 
@@ -169,6 +173,21 @@ export class FleetManager {
       const routeSummary = [...this.routingTable.entries()].map(([tid, name]) => `#${tid}→${name}`).join(", ");
       this.logger.info(`Routes: ${routeSummary}`);
 
+      // Initialize scheduler
+      const schedulerConfig: SchedulerConfig = {
+        ...DEFAULT_SCHEDULER_CONFIG,
+        ...(this.fleetConfig?.defaults as Record<string, unknown>)?.scheduler as Partial<SchedulerConfig> ?? {},
+      };
+
+      this.scheduler = new Scheduler(
+        join(this.dataDir, "scheduler.db"),
+        (schedule) => this.handleScheduleTrigger(schedule),
+        schedulerConfig,
+        (name) => this.fleetConfig?.instances?.[name] != null,
+      );
+      this.scheduler.init();
+      this.logger.info("Scheduler initialized");
+
       await this.startSharedAdapter(fleet);
 
       // Wait for daemon IPC servers to be ready, then connect
@@ -176,10 +195,10 @@ export class FleetManager {
       await this.connectToInstances(fleet);
     }
 
-    // SIGHUP: reload scheduler (wired in next task)
+    // SIGHUP: reload scheduler
     process.on("SIGHUP", () => {
       this.logger.info("Received SIGHUP, reloading scheduler...");
-      // Scheduler will be wired in next task
+      this.scheduler?.reload();
     });
   }
 
@@ -266,6 +285,9 @@ export class FleetManager {
           this.handleApprovalFromInstance(name, msg);
         } else if (msg.type === "fleet_tool_status") {
           this.handleToolStatusFromInstance(name, msg);
+        } else if (msg.type === "fleet_schedule_create" || msg.type === "fleet_schedule_list" ||
+                   msg.type === "fleet_schedule_update" || msg.type === "fleet_schedule_delete") {
+          this.handleScheduleCrud(name, msg);
         }
       });
       this.logger.debug({ name }, "Connected to instance IPC");
@@ -431,6 +453,108 @@ export class FleetManager {
         const ipc = this.instanceIpcClients.get(instanceName);
         ipc?.send({ type: "fleet_tool_status_ack", messageId: sent.messageId });
       }).catch(() => {});
+    }
+  }
+
+  // ===================== Scheduler =====================
+
+  private async handleScheduleTrigger(schedule: Schedule): Promise<void> {
+    const { target, reply_chat_id, reply_thread_id, message, label, id, source } = schedule;
+    const defaults = this.fleetConfig?.defaults as Record<string, unknown> | undefined;
+    const schedulerDefaults = defaults?.scheduler as Record<string, unknown> | undefined;
+
+    const retryCount = (schedulerDefaults?.retry_count as number) ?? 3;
+    const retryInterval = (schedulerDefaults?.retry_interval_ms as number) ?? 30_000;
+
+    const deliver = (): boolean => {
+      const ipc = this.instanceIpcClients.get(target);
+      if (!ipc?.connected) return false;
+
+      ipc.send({
+        type: "fleet_schedule_trigger",
+        payload: { schedule_id: id, message: `[排程任務] ${message}`, label },
+        meta: { chat_id: reply_chat_id, thread_id: reply_thread_id, user: "scheduler" },
+      });
+      return true;
+    };
+
+    if (deliver()) {
+      this.scheduler!.recordRun(id, "delivered");
+      if (source !== target) {
+        this.notifySourceTopic(schedule);
+      }
+      return;
+    }
+
+    for (let i = 0; i < retryCount; i++) {
+      await new Promise((r) => setTimeout(r, retryInterval));
+      if (deliver()) {
+        this.scheduler!.recordRun(id, "delivered");
+        if (source !== target) this.notifySourceTopic(schedule);
+        return;
+      }
+    }
+
+    this.scheduler!.recordRun(id, "instance_offline", `retry ${retryCount}x failed`);
+    this.notifyScheduleFailure(schedule);
+  }
+
+  private notifySourceTopic(schedule: Schedule): void {
+    if (!this.adapter) return;
+    const text = `⏰ 排程「${schedule.label ?? schedule.id}」已觸發，目標實例：${schedule.target}`;
+    this.adapter.sendText(schedule.reply_chat_id, text, {
+      threadId: schedule.reply_thread_id ?? undefined,
+    }).catch((err: unknown) => this.logger.error({ err }, "Failed to send cross-instance notification"));
+  }
+
+  private notifyScheduleFailure(schedule: Schedule): void {
+    if (!this.adapter) return;
+    const text = `⏰ 排程「${schedule.label ?? schedule.id}」觸發失敗：實例 ${schedule.target} 未在線。`;
+    this.adapter.sendText(schedule.reply_chat_id, text, {
+      threadId: schedule.reply_thread_id ?? undefined,
+    }).catch((err: unknown) => this.logger.error({ err }, "Failed to send schedule failure notification"));
+  }
+
+  private handleScheduleCrud(instanceName: string, msg: Record<string, unknown>): void {
+    const requestId = msg.requestId as string;
+    const payload = (msg.payload ?? {}) as Record<string, unknown>;
+    const meta = (msg.meta ?? {}) as Record<string, string>;
+    const ipc = this.instanceIpcClients.get(instanceName);
+    if (!ipc) return;
+
+    try {
+      let result: unknown;
+
+      switch (msg.type) {
+        case "fleet_schedule_create": {
+          const params = {
+            cron: payload.cron as string,
+            message: payload.message as string,
+            source: instanceName,
+            target: (payload.target as string) || instanceName,
+            reply_chat_id: meta.chat_id,
+            reply_thread_id: meta.thread_id || null,
+            label: payload.label as string | undefined,
+            timezone: payload.timezone as string | undefined,
+          };
+          result = this.scheduler!.create(params);
+          break;
+        }
+        case "fleet_schedule_list":
+          result = this.scheduler!.list(payload.target as string | undefined);
+          break;
+        case "fleet_schedule_update":
+          result = this.scheduler!.update(payload.id as string, payload as Record<string, unknown>);
+          break;
+        case "fleet_schedule_delete":
+          this.scheduler!.delete(payload.id as string);
+          result = "ok";
+          break;
+      }
+
+      ipc.send({ type: "fleet_schedule_response", requestId, result });
+    } catch (err) {
+      ipc.send({ type: "fleet_schedule_response", requestId, error: (err as Error).message });
     }
   }
 
@@ -624,6 +748,18 @@ export class FleetManager {
 
     this.logger.info({ instanceName, threadId }, "Topic deleted — auto-unbinding");
 
+    // Clean up related schedules
+    if (this.scheduler) {
+      const count = this.scheduler.deleteByInstanceOrThread(instanceName, String(threadId));
+      if (count > 0) {
+        this.logger.info({ threadId, instanceName, count }, "Cleaned up schedules for deleted topic");
+        const groupId = this.fleetConfig?.channel?.group_id;
+        if (groupId && this.adapter) {
+          this.adapter.sendText(String(groupId), `⚠️ Topic 已刪除，已清除 ${count} 條相關排程。`).catch(() => {});
+        }
+      }
+    }
+
     // Stop the daemon
     await this.stopInstance(instanceName);
 
@@ -794,6 +930,9 @@ export class FleetManager {
       clearInterval(this.topicCleanupTimer);
       this.topicCleanupTimer = null;
     }
+
+    // Shutdown scheduler
+    this.scheduler?.shutdown();
 
     // Remove PID file
     const pidPath = join(this.dataDir, "fleet.pid");
