@@ -19,6 +19,7 @@ import { transcribe } from "./stt.js";
 import { Scheduler } from "./scheduler/index.js";
 import type { Schedule, SchedulerConfig } from "./scheduler/index.js";
 import { DEFAULT_SCHEDULER_CONFIG } from "./scheduler/index.js";
+import { ContainerManager } from "./container-manager.js";
 
 const BASE_PORT = 18400; // Start above 18321 to avoid conflict with official telegram plugin
 const TMUX_SESSION = "ccd";
@@ -32,6 +33,7 @@ export class FleetManager {
   private instanceIpcClients: Map<string, IpcClient> = new Map();
   private pendingBindings: Map<number, string> = new Map(); // threadId → browsing state
   private scheduler: Scheduler | null = null;
+  private containerManager: ContainerManager | null = null;
   private configPath: string = "";
   private logger = createLogger("info");
 
@@ -108,7 +110,7 @@ export class FleetManager {
 
     // Import Daemon dynamically to avoid circular deps
     const { Daemon } = await import("./daemon.js");
-    const daemon = new Daemon(name, config, instanceDir, topicMode);
+    const daemon = new Daemon(name, config, instanceDir, topicMode, this.containerManager ?? undefined);
     await daemon.start();
     this.daemons.set(name, daemon);
   }
@@ -153,6 +155,18 @@ export class FleetManager {
     const fleet = this.loadConfig(configPath);
     const topicMode = fleet.channel?.mode === "topic";
     const ports = this.allocatePorts(fleet.instances);
+
+    if (fleet.sandbox?.enabled) {
+      this.containerManager = new ContainerManager();
+      const ccdInstallDir = join(__dirname, "..");
+      await this.containerManager.ensureRunning({
+        projectRoots: fleet.project_roots ?? [],
+        dataDir: this.dataDir,
+        ccdInstallDir,
+        extraMounts: fleet.sandbox.extra_mounts ?? [],
+      });
+      this.logger.info("Sandbox container running");
+    }
 
     // Ensure tmux session exists
     await TmuxManager.ensureSession(TMUX_SESSION);
@@ -882,6 +896,7 @@ export class FleetManager {
     const toSave: Record<string, unknown> = {};
     if (this.fleetConfig.project_roots) toSave.project_roots = this.fleetConfig.project_roots;
     if (this.fleetConfig.channel) toSave.channel = this.fleetConfig.channel;
+    if (this.fleetConfig.sandbox) toSave.sandbox = this.fleetConfig.sandbox;
     if (Object.keys(this.fleetConfig.defaults).length > 0) toSave.defaults = this.fleetConfig.defaults;
     toSave.instances = {};
     for (const [name, inst] of Object.entries(this.fleetConfig.instances)) {

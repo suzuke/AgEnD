@@ -17,6 +17,7 @@ import { TmuxPromptDetector } from "./approval/tmux-prompt-detector.js";
 import { TelegramAdapter } from "./channel/adapters/telegram.js";
 import { AccessManager } from "./channel/access-manager.js";
 import type { ChannelAdapter, InboundMessage } from "./channel/types.js";
+import type { ContainerManager } from "./container-manager.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -46,6 +47,7 @@ export class Daemon {
     private config: InstanceConfig,
     private instanceDir: string,
     private topicMode = false,
+    private containerManager?: ContainerManager,
   ) {
     this.logger = createLogger(config.log_level);
     this.messageBus = new MessageBus();
@@ -585,6 +587,13 @@ export class Daemon {
       if (sid) claudeCmd += ` --resume ${sid}`;
     }
 
+    // In sandbox mode, set CLAUDE_CODE_SHELL to redirect Bash commands to Docker.
+    // Claude itself stays on host (preserves Keychain auth, hooks, tmux attach).
+    if (this.containerManager) {
+      const shellPath = this.writeSandboxShell();
+      claudeCmd = `CLAUDE_CODE_SHELL=${shellPath} ${claudeCmd}`;
+    }
+
     const windowId = await this.tmux!.createWindow(claudeCmd, this.config.working_directory);
     const windowIdFile = join(this.instanceDir, "window-id");
     writeFileSync(windowIdFile, windowId);
@@ -705,6 +714,18 @@ export class Daemon {
       join(this.instanceDir, "claude-settings.json"),
       JSON.stringify(settings),
     );
+  }
+
+  /** Generate sandbox-bash wrapper script that forwards Bash commands to Docker */
+  private writeSandboxShell(): string {
+    const scriptPath = join(this.instanceDir, "sandbox-bash");
+    const script = `#!/bin/bash
+# Sandbox shell: forwards Bash tool commands to the shared Docker container.
+# Claude Code runs on host; only Bash execution is sandboxed.
+exec docker exec -i -w "$(pwd)" ccd-shared /bin/bash "$@"
+`;
+    writeFileSync(scriptPath, script, { mode: 0o755 });
+    return scriptPath;
   }
 
   private writeStatusLineScript(): string {

@@ -180,3 +180,46 @@ instances:
     expect(fleet.defaults).toEqual({});
   });
 });
+
+describe("sandbox config", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = join(tmpdir(), `ccd-sandbox-config-${Date.now()}`);
+    mkdirSync(tmpDir, { recursive: true });
+  });
+  afterEach(() => rmSync(tmpDir, { recursive: true, force: true }));
+
+  it("parses sandbox config from fleet.yaml", () => {
+    const configPath = join(tmpDir, "fleet.yaml");
+    writeFileSync(configPath, `
+sandbox:
+  enabled: true
+  extra_mounts:
+    - /Users/me/.gitconfig:/Users/me/.gitconfig:ro
+    - /Users/me/.ssh:/Users/me/.ssh:ro
+instances:
+  proj:
+    working_directory: /tmp/proj
+`);
+    const config = loadFleetConfig(configPath);
+    expect(config.sandbox).toEqual({
+      enabled: true,
+      extra_mounts: [
+        "/Users/me/.gitconfig:/Users/me/.gitconfig:ro",
+        "/Users/me/.ssh:/Users/me/.ssh:ro",
+      ],
+    });
+  });
+
+  it("defaults sandbox to disabled when omitted", () => {
+    const configPath = join(tmpDir, "fleet.yaml");
+    writeFileSync(configPath, `
+instances:
+  proj:
+    working_directory: /tmp/proj
+`);
+    const config = loadFleetConfig(configPath);
+    expect(config.sandbox).toBeUndefined();
+  });
+});

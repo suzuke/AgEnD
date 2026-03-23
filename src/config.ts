@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from "node:fs";
 import yaml from "js-yaml";
-import type { DaemonConfig, FleetConfig, InstanceConfig } from "./types.js";
+import type { DaemonConfig, FleetConfig, InstanceConfig, SandboxConfig } from "./types.js";
 
 export const DEFAULT_CONFIG: DaemonConfig = {
   channel_plugin: "telegram@claude-plugins-official",
@@ -85,6 +85,13 @@ export function loadFleetConfig(configPath: string): FleetConfig {
     project_roots?: string[];
     defaults?: Partial<InstanceConfig>;
     instances?: Record<string, Partial<InstanceConfig>>;
+    // sandbox config example in fleet.yaml:
+    //   sandbox:
+    //     enabled: true
+    //     extra_mounts:
+    //       - /Users/me/.gitconfig:/Users/me/.gitconfig:ro
+    //       - /Users/me/.ssh:/Users/me/.ssh:ro
+    sandbox?: SandboxConfig;
   } | null;
 
   if (!parsed) {
@@ -115,5 +122,6 @@ export function loadFleetConfig(configPath: string): FleetConfig {
     project_roots: parsed.project_roots,
     defaults: fleetDefaults,
     instances,
+    sandbox: parsed.sandbox,
   };
 }

@@ -96,9 +96,15 @@ export interface FleetDefaults extends Partial<InstanceConfig> {
   };
 }
 
+export interface SandboxConfig {
+  enabled: boolean;
+  extra_mounts?: string[];
+}
+
 export interface FleetConfig {
   channel?: ChannelConfig;
   project_roots?: string[];
   defaults: FleetDefaults;
   instances: Record<string, InstanceConfig>;
+  sandbox?: SandboxConfig;
 }
