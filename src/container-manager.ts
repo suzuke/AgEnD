@@ -38,7 +38,8 @@ export class ContainerManager {
       "--add-host", "host.docker.internal:host-gateway",
     ];
 
-    for (const root of opts.projectRoots) {
+    for (const raw of opts.projectRoots) {
+      const root = raw.startsWith("~") ? raw.replace("~", home) : raw;
       args.push("-v", `${root}:${root}`);
     }
 
