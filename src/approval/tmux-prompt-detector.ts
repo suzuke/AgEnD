@@ -94,6 +94,8 @@ export function saveToolToAllowlist(instanceDir: string, pattern: string): void 
 export class TmuxPromptDetector {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private byteOffset = 0;
+  /** True while an approval request is in-flight — suppresses duplicate detections */
+  private pendingApproval = false;
 
   constructor(
     private outputLogPath: string,
@@ -124,8 +126,9 @@ export class TmuxPromptDetector {
         const newContent = buf.subarray(0, bytesRead).toString("utf8");
         this.byteOffset += bytesRead;
 
-        if (detectPermissionPrompt(newContent)) {
+        if (detectPermissionPrompt(newContent) && !this.pendingApproval) {
           this.logger.info("TmuxPromptDetector: permission prompt detected");
+          this.pendingApproval = true;
           const toolPattern = extractToolPattern(newContent);
           const cleanPrompt = formatPromptForDisplay(newContent);
           try {
@@ -146,6 +149,8 @@ export class TmuxPromptDetector {
           } catch (err) {
             this.logger.warn("TmuxPromptDetector: approvalFn error", err);
             await this.tmux.sendKeys("3");
+          } finally {
+            this.pendingApproval = false;
           }
         }
       } catch (err) {
