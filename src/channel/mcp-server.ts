@@ -250,6 +250,59 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ["file_id"],
       },
     },
+    {
+      name: "create_schedule",
+      description: "Create a cron-based schedule. When triggered, sends a message to the target instance.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          cron: { type: "string", description: "Cron expression, e.g. '0 7 * * *' (every day at 7 AM)" },
+          message: { type: "string", description: "Message to inject when triggered" },
+          target: { type: "string", description: "Target instance name. Defaults to this instance if omitted." },
+          label: { type: "string", description: "Human-readable name for this schedule" },
+          timezone: { type: "string", description: "IANA timezone, e.g. 'Asia/Taipei'. Defaults to Asia/Taipei." },
+        },
+        required: ["cron", "message"],
+      },
+    },
+    {
+      name: "list_schedules",
+      description: "List all schedules. Optionally filter by target instance.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          target: { type: "string", description: "Filter by target instance name" },
+        },
+      },
+    },
+    {
+      name: "update_schedule",
+      description: "Update an existing schedule. Only include fields you want to change.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          id: { type: "string", description: "Schedule ID" },
+          cron: { type: "string", description: "New cron expression" },
+          message: { type: "string", description: "New message" },
+          target: { type: "string", description: "New target instance" },
+          label: { type: "string", description: "New label" },
+          timezone: { type: "string", description: "New timezone" },
+          enabled: { type: "boolean", description: "Enable/disable the schedule" },
+        },
+        required: ["id"],
+      },
+    },
+    {
+      name: "delete_schedule",
+      description: "Delete a schedule by ID.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          id: { type: "string", description: "Schedule ID to delete" },
+        },
+        required: ["id"],
+      },
+    },
   ],
 }));
 
