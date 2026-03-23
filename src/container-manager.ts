@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 
 function exec(cmd: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
@@ -46,6 +46,10 @@ export class ContainerManager {
     args.push("-v", `${home}/.claude:${home}/.claude`);
     args.push("-v", `${opts.dataDir}:${opts.dataDir}`);
     args.push("-v", `${opts.ccdInstallDir}:${opts.ccdInstallDir}:ro`);
+
+    // Mount host tmpdir so Claude Code's cwd-tracking temp files work inside the container
+    const tmp = tmpdir();
+    args.push("-v", `${tmp}:${tmp}`);
 
     for (const mount of opts.extraMounts) {
       args.push("-v", mount);
