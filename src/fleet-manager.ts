@@ -38,8 +38,7 @@ export class FleetManager {
   private adapter: ChannelAdapter | null = null;
   private routingTable: Map<number, string> = new Map();
   private instanceIpcClients: Map<string, IpcClient> = new Map();
-  private pendingBindings: Map<number, string> = new Map(); // threadId → browsing state
-  private currentOpenSession: { id: string; paths: string[] } | null = null;
+private currentOpenSession: { id: string; paths: string[] } | null = null;
   private scheduler: Scheduler | null = null;
   private containerManager: ContainerManager | null = null;
   private configPath: string = "";
@@ -533,11 +532,6 @@ export class FleetManager {
 
     const instanceName = this.routingTable.get(threadId);
     if (!instanceName) {
-      if (this.pendingBindings.get(threadId) === "awaiting_name") {
-        this.handleNewProjectName(msg, threadId);
-        return;
-      }
-      if (this.pendingBindings.has(threadId)) return;
       this.handleUnboundTopic(msg, threadId);
       return;
     }
@@ -841,6 +835,12 @@ export class FleetManager {
   }
 
   /** Create Telegram topics for instances that don't have topic_id */
+  /**
+   * Create Telegram topics for instances that don't have topic_id.
+   * Note: With the /open and /new command flow, instances always get a topic_id
+   * at creation time. This method is kept as a safety net for manually-added
+   * instances in fleet.yaml. May be removed in the future.
+   */
   private async autoCreateTopics(fleet: FleetConfig): Promise<void> {
     if (!fleet.channel?.group_id) return;
     const botToken = process.env[fleet.channel.bot_token_env];
@@ -869,58 +869,13 @@ export class FleetManager {
 
   // ===================== Auto-bind =====================
 
-  /** Show directory browser when message arrives in unbound topic */
-  private async handleUnboundTopic(msg: InboundMessage, threadId: number, page = 0): Promise<void> {
+  /** Reply with redirect when message arrives in an unbound topic */
+  private async handleUnboundTopic(msg: InboundMessage, _threadId: number): Promise<void> {
     if (!this.adapter) return;
-    this.pendingBindings.set(threadId, "browsing");
-
-    const dirs = this.listProjectDirectories();
-    const recentDirs = this.getRecentlyBoundDirs();
-    const PAGE_SIZE = 5;
-
-    const { InlineKeyboard } = await import("grammy");
-    const keyboard = new InlineKeyboard();
-
-    // Recently bound projects (only on first page)
-    if (page === 0 && recentDirs.length > 0) {
-      for (const dir of recentDirs.slice(0, 3)) {
-        const label = `⭐ ${basename(dir)}`;
-        keyboard.text(label, `bind:${threadId}:${dir}`).row();
-      }
-    }
-
-    // Paginated project list (exclude recent to avoid duplicates)
-    const recentSet = new Set(recentDirs);
-    const filteredDirs = dirs.filter(d => !recentSet.has(d));
-    const pageStart = page * PAGE_SIZE;
-    const pageDirs = filteredDirs.slice(pageStart, pageStart + PAGE_SIZE);
-
-    for (const dir of pageDirs) {
-      keyboard.text(`📁 ${basename(dir)}`, `bind:${threadId}:${dir}`).row();
-    }
-
-    // Pagination buttons
-    const hasMore = pageStart + PAGE_SIZE < filteredDirs.length;
-    if (page > 0 || hasMore) {
-      if (page > 0) keyboard.text("⬅️ Prev", `page:${threadId}:${page - 1}`);
-      if (hasMore) keyboard.text("➡️ Next", `page:${threadId}:${page + 1}`);
-      keyboard.row();
-    }
-
-    // New project + cancel
-    keyboard.text("➕ New project", `newproj:${threadId}`).row();
-    keyboard.text("❌ Cancel", `bind:${threadId}:cancel`).row();
-
-    const tgAdapter = this.adapter as TelegramAdapter;
-    const headerText = page === 0
-      ? "📂 Select a project for this topic:"
-      : `📂 Projects (page ${page + 1}):`;
-
-    await tgAdapter.sendTextWithKeyboard(
+    await this.adapter.sendText(
       msg.chatId,
-      headerText,
-      keyboard,
-      String(threadId),
+      "Please use /open or /new in General to bind a project to a topic.",
+      { threadId: msg.threadId },
     );
   }
 
@@ -978,59 +933,6 @@ export class FleetManager {
     this.currentOpenSession = null;
     await this.adapter.editMessage(chatId, messageId, `Binding to ${basename(dirPath)}...`);
     await this.openBindProject(chatId, dirPath);
-  }
-
-  /** Handle directory selection from inline keyboard */
-  private async handleDirectorySelection(data: { callbackData: string; chatId: string; threadId?: string; messageId: string }): Promise<void> {
-    const { callbackData, chatId } = data;
-
-    // Pagination
-    if (callbackData.startsWith("page:")) {
-      const parts = callbackData.split(":");
-      const threadId = parseInt(parts[1], 10);
-      const page = parseInt(parts[2], 10);
-      await this.adapter?.editMessage(chatId, data.messageId, "Loading...");
-      await this.handleUnboundTopic(
-        { chatId, threadId: String(threadId), text: "", source: "", adapterId: "", messageId: "", userId: "", username: "", timestamp: new Date() },
-        threadId,
-        page,
-      );
-      return;
-    }
-
-    // New project
-    if (callbackData.startsWith("newproj:")) {
-      const threadId = parseInt(callbackData.split(":")[1], 10);
-      await this.adapter?.editMessage(chatId, data.messageId, "📝 Send the new project name (will create folder in project root):");
-      this.pendingBindings.set(threadId, "awaiting_name");
-      return;
-    }
-
-    if (!callbackData.startsWith("bind:")) return;
-
-    const parts = callbackData.split(":");
-    const threadId = parseInt(parts[1], 10);
-    const dirPath = parts.slice(2).join(":");
-
-    if (dirPath === "cancel") {
-      this.pendingBindings.delete(threadId);
-      await this.adapter?.editMessage(chatId, data.messageId, "Binding cancelled.");
-      return;
-    }
-
-    // Guard: already bound
-    if (this.routingTable.has(threadId)) {
-      this.pendingBindings.delete(threadId);
-      await this.adapter?.editMessage(chatId, data.messageId, "Already bound.");
-      return;
-    }
-
-    this.logger.info({ threadId, dirPath }, "Auto-binding topic to project");
-
-    const instanceName = await this.bindAndStart(dirPath, threadId);
-    this.pendingBindings.delete(threadId);
-    await this.adapter?.editMessage(chatId, data.messageId,
-      `✅ Bound to: ${dirPath}\nInstance: ${instanceName}`);
   }
 
   // ===================== Auto-unbind =====================
@@ -1107,45 +1009,6 @@ export class FleetManager {
     return instanceName;
   }
 
-  /** Handle new project name input */
-  private async handleNewProjectName(msg: InboundMessage, threadId: number): Promise<void> {
-    const projectName = msg.text.trim();
-    if (!projectName || projectName.includes("/") || projectName.includes("..")) {
-      await this.adapter?.sendText(msg.chatId, "Invalid project name. Try again:", { threadId: String(threadId) });
-      return;
-    }
-
-    // Find first project root to create in
-    const roots = this.getProjectRoots();
-    if (roots.length === 0) {
-      await this.adapter?.sendText(msg.chatId, "No project_roots configured in fleet.yaml.", { threadId: String(threadId) });
-      this.pendingBindings.delete(threadId);
-      return;
-    }
-
-    const projectDir = join(roots[0], projectName);
-    if (existsSync(projectDir)) {
-      // Directory already exists — just bind it
-      await this.adapter?.sendText(msg.chatId, `📁 Directory already exists. Binding to: ${projectDir}`, { threadId: String(threadId) });
-    } else {
-      // Create directory + git init
-      mkdirSync(projectDir, { recursive: true });
-      try {
-        const { execFile } = await import("node:child_process");
-        const { promisify } = await import("node:util");
-        const exec = promisify(execFile);
-        await exec("git", ["init"], { cwd: projectDir });
-      } catch {}
-      await this.adapter?.sendText(msg.chatId, `✅ Created: ${projectDir}`, { threadId: String(threadId) });
-    }
-
-    // Bind it directly (not via handleDirectorySelection — no message to edit)
-    this.pendingBindings.delete(threadId);
-    const instanceName = await this.bindAndStart(projectDir, threadId);
-    await this.adapter?.sendText(msg.chatId, `✅ Created & bound: ${projectDir}`, { threadId: String(threadId) });
-    this.logger.info({ instanceName, threadId }, "New project created and bound");
-  }
-
   /** Get configured project roots, with fallback */
   private getProjectRoots(): string[] {
     const roots = this.fleetConfig?.project_roots;
@@ -1199,14 +1062,6 @@ export class FleetManager {
     if (subMatches.length === 0) return { type: "none" };
     if (subMatches.length === 1) return { type: "exact", path: subMatches[0] };
     return { type: "multiple", paths: subMatches };
-  }
-
-  /** Get directories of recently bound instances (for "recent" section) */
-  private getRecentlyBoundDirs(): string[] {
-    if (!this.fleetConfig) return [];
-    return Object.values(this.fleetConfig.instances)
-      .map(inst => inst.working_directory)
-      .filter(d => existsSync(d));
   }
 
   /** Save fleet config back to fleet.yaml */
