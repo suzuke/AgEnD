@@ -1,5 +1,5 @@
 import { fork, type ChildProcess } from "node:child_process";
-import { existsSync, readFileSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync, readdirSync, statSync, writeFileSync, unlinkSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -153,6 +153,10 @@ export class FleetManager {
     // Ensure tmux session exists
     await TmuxManager.ensureSession(TMUX_SESSION);
 
+    // Write PID file so external tools can signal this process
+    const pidPath = join(this.dataDir, "fleet.pid");
+    writeFileSync(pidPath, String(process.pid), "utf-8");
+
     // Start all daemon instances
     for (const [name, config] of Object.entries(fleet.instances)) {
       await this.startInstance(name, config, ports[name], topicMode && !config.channel);
@@ -171,6 +175,12 @@ export class FleetManager {
       await new Promise(r => setTimeout(r, 3000));
       await this.connectToInstances(fleet);
     }
+
+    // SIGHUP: reload scheduler (wired in next task)
+    process.on("SIGHUP", () => {
+      this.logger.info("Received SIGHUP, reloading scheduler...");
+      // Scheduler will be wired in next task
+    });
   }
 
   /** Start the shared Telegram adapter for topic mode */
@@ -784,6 +794,10 @@ export class FleetManager {
       clearInterval(this.topicCleanupTimer);
       this.topicCleanupTimer = null;
     }
+
+    // Remove PID file
+    const pidPath = join(this.dataDir, "fleet.pid");
+    try { unlinkSync(pidPath); } catch {}
     // Stop adapter
     if (this.adapter) {
       await this.adapter.stop();
