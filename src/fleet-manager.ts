@@ -263,6 +263,7 @@ private currentOpenSession: { id: string; paths: string[] } | null = null;
       this.handleTopicDeleted(parseInt(data.threadId, 10));
     });
 
+    await this.registerBotCommands();
     await this.adapter.start();
     // Set the group chatId for approval messages
     if (fleet.channel?.group_id) {
@@ -281,6 +282,35 @@ private currentOpenSession: { id: string; paths: string[] } | null = null;
 
     // Periodically check for deleted topics (Telegram may not always send events)
     this.startTopicCleanupPoller();
+  }
+
+  /** Register /open and /new in Telegram command menu */
+  private async registerBotCommands(): Promise<void> {
+    const groupId = this.fleetConfig?.channel?.group_id;
+    const botTokenEnv = this.fleetConfig?.channel?.bot_token_env;
+    if (!groupId || !botTokenEnv) return;
+    const botToken = process.env[botTokenEnv];
+    if (!botToken) return;
+
+    try {
+      await fetch(
+        `https://api.telegram.org/bot${botToken}/setMyCommands`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            commands: [
+              { command: "open", description: "Open an existing project" },
+              { command: "new", description: "Create a new project" },
+            ],
+            scope: { type: "chat", chat_id: groupId },
+          }),
+        },
+      );
+      this.logger.info("Registered bot commands: /open, /new");
+    } catch (err) {
+      this.logger.warn({ err }, "Failed to register bot commands (non-fatal)");
+    }
   }
 
   /** Connect IPC clients to each daemon instance's channel.sock */
