@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { createReadStream, mkdirSync } from "node:fs";
+import { createReadStream, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join, extname, basename } from "node:path";
 import { Bot, GrammyError, InputFile } from "grammy";
 import type { Context, InlineKeyboard as InlineKeyboardType } from "grammy";
@@ -25,6 +25,7 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
   private accessManager: AccessManager;
   private inboxDir: string;
   private queue: MessageQueue;
+  private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(opts: TelegramAdapterOptions) {
     super();
@@ -218,6 +219,8 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
 
   async start(): Promise<void> {
     this.queue.start();
+    this._pruneInbox();
+    this.cleanupTimer = setInterval(() => this._pruneInbox(), 60 * 60 * 1000);
 
     // Grammy's default error handler calls bot.stop() on any throw — override
     // to keep polling alive on handler errors
@@ -254,8 +257,24 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
   }
 
   async stop(): Promise<void> {
+    if (this.cleanupTimer) clearInterval(this.cleanupTimer);
     this.queue.stop();
     await this.bot.stop();
+  }
+
+  /** Delete inbox files older than 1 hour */
+  private _pruneInbox(): void {
+    const maxAge = 60 * 60 * 1000;
+    const now = Date.now();
+    try {
+      for (const name of readdirSync(this.inboxDir)) {
+        const filePath = join(this.inboxDir, name);
+        try {
+          const mtime = statSync(filePath).mtimeMs;
+          if (now - mtime > maxAge) unlinkSync(filePath);
+        } catch { /* ignore per-file errors */ }
+      }
+    } catch { /* ignore if dir doesn't exist */ }
   }
 
   // ── Text / file sending ───────────────────────────────────────────────────
