@@ -5,9 +5,11 @@ import type { Logger } from "./logger.js";
 
 type GuardianConfig = DaemonConfig["context_guardian"];
 type State = "NORMAL" | "PENDING" | "HANDING_OVER" | "ROTATING" | "GRACE";
+export type RotationReason = "context_full" | "max_age";
 
 export class ContextGuardian extends EventEmitter {
   state: State = "NORMAL";
+  rotationReason: RotationReason | null = null;
   private ageTimer: ReturnType<typeof setTimeout> | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private completionTimer: ReturnType<typeof setTimeout> | null = null;
@@ -64,7 +66,7 @@ export class ContextGuardian extends EventEmitter {
         { used: status.used_percentage, threshold: this.config.threshold_percentage },
         "Context threshold exceeded — waiting for idle",
       );
-      this.enterPending();
+      this.enterPending("context_full");
     }
   }
 
@@ -89,7 +91,7 @@ export class ContextGuardian extends EventEmitter {
     const ms = this.config.max_age_hours * 60 * 60 * 1000;
     this.ageTimer = setTimeout(() => {
       this.logger.info("Max age reached — waiting for idle");
-      if (this.state === "NORMAL") this.enterPending();
+      if (this.state === "NORMAL") this.enterPending("max_age");
     }, ms);
   }
 
@@ -110,8 +112,9 @@ export class ContextGuardian extends EventEmitter {
     unwatchFile(this.statusFilePath);
   }
 
-  private enterPending(): void {
+  private enterPending(reason: RotationReason): void {
     this.state = "PENDING";
+    this.rotationReason = reason;
     this.emit("pending");
     this.idleTimer = setTimeout(() => {
       this.logger.warn("Idle wait timeout — abandoning this rotation attempt");
@@ -138,6 +141,7 @@ export class ContextGuardian extends EventEmitter {
     this.state = "GRACE";
     this.graceTimer = setTimeout(() => {
       this.state = "NORMAL";
+      this.rotationReason = null;
       this.resetAgeTimer();
     }, this.config.grace_period_ms);
   }
