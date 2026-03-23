@@ -139,10 +139,12 @@ export class TmuxPromptDetector {
           const cleanPrompt = formatPromptForDisplay(newContent);
           try {
             const result = await this.approvalFn(cleanPrompt);
+            this.logger.info({ decision: result.decision }, "TmuxPromptDetector: approval response received");
             if (result.decision === "always_allow") {
               // Navigate to option 2 and confirm
               await this.tmux.sendSpecialKey("Down");
               await this.tmux.sendSpecialKey("Enter");
+              this.logger.info("TmuxPromptDetector: sent Down+Enter for always_allow");
               // Persist the tool pattern so writeSettings includes it next time
               if (toolPattern && this.instanceDir) {
                 saveToolToAllowlist(this.instanceDir, toolPattern);
@@ -151,6 +153,7 @@ export class TmuxPromptDetector {
             } else if (result.decision === "approve") {
               // Option 1 is already selected by default
               await this.tmux.sendSpecialKey("Enter");
+              this.logger.info("TmuxPromptDetector: sent Enter for approve");
             } else {
               // Navigate to option 3 (No) and confirm
               await this.tmux.sendSpecialKey("Down");
