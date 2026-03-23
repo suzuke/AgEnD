@@ -1,5 +1,5 @@
 import { fork, type ChildProcess } from "node:child_process";
-import { existsSync, readFileSync, mkdirSync, readdirSync, statSync, writeFileSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync, readdirSync, statSync, writeFileSync, unlinkSync, rmSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -38,7 +38,7 @@ export class FleetManager {
   private adapter: ChannelAdapter | null = null;
   private routingTable: Map<number, string> = new Map();
   private instanceIpcClients: Map<string, IpcClient> = new Map();
-  private pendingBindings: Map<number, string> = new Map(); // threadId → browsing state
+  private currentOpenSession: { id: string; paths: string[] } | null = null;
   private scheduler: Scheduler | null = null;
   private containerManager: ContainerManager | null = null;
   private configPath: string = "";
@@ -255,7 +255,7 @@ export class FleetManager {
 
     // Handle callback queries (directory browser selections)
     this.adapter.on("callback_query", (data: { callbackData: string; chatId: string; threadId?: string; messageId: string }) => {
-      this.handleDirectorySelection(data);
+      this.handleCallbackQuery(data);
     });
 
     // Handle topic deletion (auto-unbind)
@@ -263,6 +263,7 @@ export class FleetManager {
       this.handleTopicDeleted(parseInt(data.threadId, 10));
     });
 
+    await this.registerBotCommands();
     await this.adapter.start();
     // Set the group chatId for approval messages
     if (fleet.channel?.group_id) {
@@ -281,6 +282,35 @@ export class FleetManager {
 
     // Periodically check for deleted topics (Telegram may not always send events)
     this.startTopicCleanupPoller();
+  }
+
+  /** Register /open and /new in Telegram command menu */
+  private async registerBotCommands(): Promise<void> {
+    const groupId = this.fleetConfig?.channel?.group_id;
+    const botTokenEnv = this.fleetConfig?.channel?.bot_token_env;
+    if (!groupId || !botTokenEnv) return;
+    const botToken = process.env[botTokenEnv];
+    if (!botToken) return;
+
+    try {
+      await fetch(
+        `https://api.telegram.org/bot${botToken}/setMyCommands`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            commands: [
+              { command: "open", description: "Open an existing project" },
+              { command: "new", description: "Create a new project" },
+            ],
+            scope: { type: "chat", chat_id: groupId },
+          }),
+        },
+      );
+      this.logger.info("Registered bot commands: /open, /new");
+    } catch (err) {
+      this.logger.warn({ err }, "Failed to register bot commands (non-fatal)");
+    }
   }
 
   /** Connect IPC clients to each daemon instance's channel.sock */
@@ -317,21 +347,217 @@ export class FleetManager {
     }
   }
 
+
+  /** Parse and dispatch commands from the General topic */
+  private async handleGeneralCommand(msg: InboundMessage): Promise<void> {
+    const text = msg.text?.trim();
+    if (!text) return;
+
+    if (text === "/open" || text === "/open@" || text.startsWith("/open ") || text.startsWith("/open@")) {
+      // Extract keyword: remove /open or /open@botname, take the rest
+      const keyword = text.replace(/^\/open(@\S+)?\s*/, "").trim();
+      await this.handleOpenCommand(msg, keyword || undefined);
+      return;
+    }
+
+    if (text === "/new" || text === "/new@" || text.startsWith("/new ") || text.startsWith("/new@")) {
+      const name = text.replace(/^\/new(@\S+)?\s*/, "").trim();
+      await this.handleNewCommand(msg, name || undefined);
+      return;
+    }
+
+    // Not a command — ignore silently
+  }
+
+  /** Handle /open command — list or search unbound directories */
+  private async handleOpenCommand(msg: InboundMessage, keyword?: string): Promise<void> {
+    if (!this.adapter || !this.fleetConfig) return;
+
+    const roots = this.getProjectRoots();
+    if (roots.length === 0 || (roots.length === 1 && roots[0] === homedir())) {
+      await this.adapter.sendText(msg.chatId, "No project roots configured. Run `ccd init` to set up.");
+      return;
+    }
+
+    const dirs = this.listUnboundDirectories();
+
+    if (keyword) {
+      const result = this.filterDirectories(dirs, keyword);
+      if (result.type === "none") {
+        await this.adapter.sendText(msg.chatId, `No projects found matching "${keyword}".`);
+        return;
+      }
+      if (result.type === "exact") {
+        await this.openBindProject(msg.chatId, result.path);
+        return;
+      }
+      // Multiple matches — show keyboard
+      await this.sendOpenKeyboard(msg.chatId, result.paths, 0);
+      return;
+    }
+
+    // No keyword — show full list
+    if (dirs.length === 0) {
+      await this.adapter.sendText(msg.chatId, "All projects are already bound to topics.");
+      return;
+    }
+    await this.sendOpenKeyboard(msg.chatId, dirs, 0);
+  }
+
+  /** Send paginated inline keyboard for /open */
+  private async sendOpenKeyboard(chatId: string, dirs: string[], page: number): Promise<void> {
+    const sessionId = Math.random().toString(16).slice(2, 10); // 8 hex chars
+    this.currentOpenSession = { id: sessionId, paths: dirs };
+
+    const PAGE_SIZE = 5;
+    const pageStart = page * PAGE_SIZE;
+    const pageDirs = dirs.slice(pageStart, pageStart + PAGE_SIZE);
+
+    const { InlineKeyboard } = await import("grammy");
+    const keyboard = new InlineKeyboard();
+
+    for (let i = 0; i < pageDirs.length; i++) {
+      const idx = pageStart + i;
+      keyboard.text(`📁 ${basename(pageDirs[i])}`, `cmd_open:${sessionId}:${idx}`).row();
+    }
+
+    // Pagination
+    const hasMore = pageStart + PAGE_SIZE < dirs.length;
+    if (page > 0 || hasMore) {
+      if (page > 0) keyboard.text("⬅️ Prev", `cmd_open:${sessionId}:page:${page - 1}`);
+      if (hasMore) keyboard.text("➡️ Next", `cmd_open:${sessionId}:page:${page + 1}`);
+      keyboard.row();
+    }
+
+    keyboard.text("❌ Cancel", `cmd_open:${sessionId}:cancel`).row();
+
+    const headerText = page === 0
+      ? "📂 Select a project:"
+      : `📂 Projects (page ${page + 1}):`;
+
+    const tgAdapter = this.adapter as TelegramAdapter;
+    // Intentionally no threadId — keyboard is sent to the General topic
+    await tgAdapter.sendTextWithKeyboard(chatId, headerText, keyboard);
+  }
+
+  /** Create topic and bind a project directory (triggered by /open exact match or keyboard selection) */
+  private async openBindProject(chatId: string, dirPath: string): Promise<void> {
+    if (!this.adapter || !this.fleetConfig) return;
+
+    let topicId: number | undefined;
+    try {
+      const topicName = basename(dirPath);
+      topicId = await this.createForumTopic(topicName);
+      const instanceName = await this.bindAndStart(dirPath, topicId);
+
+      const tgAdapter = this.adapter as TelegramAdapter;
+      await tgAdapter.sendText(
+        chatId,
+        `✅ Bound to: ${dirPath}\nInstance: ${instanceName}`,
+        { threadId: String(topicId) },
+      );
+    } catch (err) {
+      // Rollback: remove partial instance config if bindAndStart failed after topic creation
+      if (topicId != null) {
+        const partialName = Object.entries(this.fleetConfig.instances)
+          .find(([, cfg]) => cfg.topic_id === topicId)?.[0];
+        if (partialName) {
+          delete this.fleetConfig.instances[partialName];
+          this.routingTable.delete(topicId);
+          this.saveFleetConfig();
+        }
+      }
+      await this.adapter.sendText(chatId, `❌ Failed to bind: ${(err as Error).message}`);
+    }
+  }
+
+  /** Validate project name for /new command */
+  private validateProjectName(name: string): boolean {
+    if (!name || !name.trim()) return false;
+    if (name.includes("/") || name.includes("..")) return false;
+    if (name.startsWith("-")) return false;
+    return true;
+  }
+
+  /** Handle /new command — create directory + git init + bind */
+  private async handleNewCommand(msg: InboundMessage, name?: string): Promise<void> {
+    if (!this.adapter || !this.fleetConfig) return;
+
+    if (!name) {
+      await this.adapter.sendText(msg.chatId, "Usage: /new <project-name>");
+      return;
+    }
+
+    if (!this.validateProjectName(name)) {
+      await this.adapter.sendText(msg.chatId, "Invalid project name. Avoid /, .., leading -, and whitespace-only names.");
+      return;
+    }
+
+    const roots = this.getProjectRoots();
+    if (roots.length === 0 || (roots.length === 1 && roots[0] === homedir())) {
+      await this.adapter.sendText(msg.chatId, "No project roots configured. Run `ccd init` to set up.");
+      return;
+    }
+
+    const projectDir = join(roots[0], name);
+    if (existsSync(projectDir)) {
+      await this.adapter.sendText(msg.chatId, `Directory "${name}" already exists. Use /open ${name} instead.`);
+      return;
+    }
+
+    try {
+      // Create directory + git init in parallel with createForumTopic
+      const [topicId] = await Promise.all([
+        this.createForumTopic(name),
+        (async () => {
+          mkdirSync(projectDir, { recursive: true });
+          try {
+            const { execFile } = await import("node:child_process");
+            const { promisify } = await import("node:util");
+            const exec = promisify(execFile);
+            await exec("git", ["init"], { cwd: projectDir });
+          } catch {}
+        })(),
+      ]);
+
+      const instanceName = await this.bindAndStart(projectDir, topicId);
+
+      const tgAdapter = this.adapter as TelegramAdapter;
+      await tgAdapter.sendText(
+        msg.chatId,
+        `✅ Bound to: ${projectDir}\nInstance: ${instanceName}`,
+        { threadId: String(topicId) },
+      );
+    } catch (err) {
+      // Rollback: remove created directory
+      try {
+        if (existsSync(projectDir)) rmSync(projectDir, { recursive: true, force: true });
+      } catch {}
+      // Rollback: remove partial instance config
+      if (this.fleetConfig) {
+        const partialName = Object.entries(this.fleetConfig.instances)
+          .find(([, cfg]) => cfg.working_directory === projectDir)?.[0];
+        if (partialName) {
+          const tid = this.fleetConfig.instances[partialName].topic_id;
+          delete this.fleetConfig.instances[partialName];
+          if (tid != null) this.routingTable.delete(tid);
+          this.saveFleetConfig();
+        }
+      }
+      await this.adapter.sendText(msg.chatId, `❌ Failed: ${(err as Error).message}`);
+    }
+  }
+
   /** Handle inbound message — transcribe voice if present, then route */
   private async handleInboundMessage(msg: InboundMessage): Promise<void> {
     const threadId = msg.threadId ? parseInt(msg.threadId, 10) : undefined;
     if (threadId == null) {
-      this.logger.warn({ chatId: msg.chatId }, "Message without threadId — ignoring in topic mode");
+      await this.handleGeneralCommand(msg);
       return;
     }
 
     const instanceName = this.routingTable.get(threadId);
     if (!instanceName) {
-      if (this.pendingBindings.get(threadId) === "awaiting_name") {
-        this.handleNewProjectName(msg, threadId);
-        return;
-      }
-      if (this.pendingBindings.has(threadId)) return;
       this.handleUnboundTopic(msg, threadId);
       return;
     }
@@ -611,7 +837,36 @@ export class FleetManager {
 
   // ===================== Auto-create topics =====================
 
+  /** Create a Telegram Forum Topic. Returns the message_thread_id. */
+  private async createForumTopic(topicName: string): Promise<number> {
+    const groupId = this.fleetConfig?.channel?.group_id;
+    const botTokenEnv = this.fleetConfig?.channel?.bot_token_env;
+    if (!groupId || !botTokenEnv) throw new Error("No group_id or bot_token configured");
+    const botToken = process.env[botTokenEnv];
+    if (!botToken) throw new Error(`Bot token env var ${botTokenEnv} not set`);
+
+    const res = await fetch(
+      `https://api.telegram.org/bot${botToken}/createForumTopic`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: groupId, name: topicName }),
+      },
+    );
+    const data = await res.json() as { ok: boolean; result?: { message_thread_id: number }; description?: string };
+    if (!data.ok || !data.result) {
+      throw new Error(`createForumTopic failed: ${data.description ?? "unknown error"}`);
+    }
+    return data.result.message_thread_id;
+  }
+
   /** Create Telegram topics for instances that don't have topic_id */
+  /**
+   * Create Telegram topics for instances that don't have topic_id.
+   * Note: With the /open and /new command flow, instances always get a topic_id
+   * at creation time. This method is kept as a safety net for manually-added
+   * instances in fleet.yaml. May be removed in the future.
+   */
   private async autoCreateTopics(fleet: FleetConfig): Promise<void> {
     if (!fleet.channel?.group_id) return;
     const botToken = process.env[fleet.channel.bot_token_env];
@@ -624,23 +879,10 @@ export class FleetManager {
       try {
         // Use Bot API directly (adapter may not be started yet)
         const topicName = basename(config.working_directory);
-        const res = await fetch(
-          `https://api.telegram.org/bot${botToken}/createForumTopic`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              chat_id: fleet.channel.group_id,
-              name: topicName,
-            }),
-          },
-        );
-        const data = await res.json() as { ok: boolean; result?: { message_thread_id: number } };
-        if (data.ok && data.result) {
-          config.topic_id = data.result.message_thread_id;
-          configChanged = true;
-          this.logger.info({ name, topicId: config.topic_id, topicName }, "Auto-created Telegram topic");
-        }
+        const threadId = await this.createForumTopic(topicName);
+        config.topic_id = threadId;
+        configChanged = true;
+        this.logger.info({ name, topicId: config.topic_id, topicName }, "Auto-created Telegram topic");
       } catch (err) {
         this.logger.warn({ name, err }, "Failed to auto-create topic");
       }
@@ -653,141 +895,70 @@ export class FleetManager {
 
   // ===================== Auto-bind =====================
 
-  /** Show directory browser when message arrives in unbound topic */
-  private async handleUnboundTopic(msg: InboundMessage, threadId: number, page = 0): Promise<void> {
+  /** Reply with redirect when message arrives in an unbound topic */
+  private async handleUnboundTopic(msg: InboundMessage, _threadId: number): Promise<void> {
     if (!this.adapter) return;
-    this.pendingBindings.set(threadId, "browsing");
-
-    const dirs = this.listProjectDirectories();
-    const recentDirs = this.getRecentlyBoundDirs();
-    const PAGE_SIZE = 5;
-
-    const { InlineKeyboard } = await import("grammy");
-    const keyboard = new InlineKeyboard();
-
-    // Recently bound projects (only on first page)
-    if (page === 0 && recentDirs.length > 0) {
-      for (const dir of recentDirs.slice(0, 3)) {
-        const label = `⭐ ${basename(dir)}`;
-        keyboard.text(label, `bind:${threadId}:${dir}`).row();
-      }
-    }
-
-    // Paginated project list (exclude recent to avoid duplicates)
-    const recentSet = new Set(recentDirs);
-    const filteredDirs = dirs.filter(d => !recentSet.has(d));
-    const pageStart = page * PAGE_SIZE;
-    const pageDirs = filteredDirs.slice(pageStart, pageStart + PAGE_SIZE);
-
-    for (const dir of pageDirs) {
-      keyboard.text(`📁 ${basename(dir)}`, `bind:${threadId}:${dir}`).row();
-    }
-
-    // Pagination buttons
-    const hasMore = pageStart + PAGE_SIZE < filteredDirs.length;
-    if (page > 0 || hasMore) {
-      if (page > 0) keyboard.text("⬅️ Prev", `page:${threadId}:${page - 1}`);
-      if (hasMore) keyboard.text("➡️ Next", `page:${threadId}:${page + 1}`);
-      keyboard.row();
-    }
-
-    // New project + cancel
-    keyboard.text("➕ New project", `newproj:${threadId}`).row();
-    keyboard.text("❌ Cancel", `bind:${threadId}:cancel`).row();
-
-    const tgAdapter = this.adapter as TelegramAdapter;
-    const headerText = page === 0
-      ? "📂 Select a project for this topic:"
-      : `📂 Projects (page ${page + 1}):`;
-
-    await tgAdapter.sendTextWithKeyboard(
+    await this.adapter.sendText(
       msg.chatId,
-      headerText,
-      keyboard,
-      String(threadId),
+      "Please use /open or /new in General to bind a project to a topic.",
+      { threadId: msg.threadId },
     );
   }
 
-  /** Handle directory selection from inline keyboard */
-  private async handleDirectorySelection(data: { callbackData: string; chatId: string; threadId?: string; messageId: string }): Promise<void> {
-    const { callbackData, chatId } = data;
+  /** Dispatch callback queries by prefix */
+  private async handleCallbackQuery(data: { callbackData: string; chatId: string; threadId?: string; messageId: string }): Promise<void> {
+    const { callbackData, chatId, messageId } = data;
 
-    // Pagination
-    if (callbackData.startsWith("page:")) {
-      const parts = callbackData.split(":");
-      const threadId = parseInt(parts[1], 10);
-      const page = parseInt(parts[2], 10);
-      await this.adapter?.editMessage(chatId, data.messageId, "Loading...");
-      await this.handleUnboundTopic(
-        { chatId, threadId: String(threadId), text: "", source: "", adapterId: "", messageId: "", userId: "", username: "", timestamp: new Date() },
-        threadId,
-        page,
-      );
+    if (callbackData.startsWith("cmd_open:")) {
+      await this.handleOpenCallback(callbackData, chatId, messageId);
       return;
     }
 
-    // New project
-    if (callbackData.startsWith("newproj:")) {
-      const threadId = parseInt(callbackData.split(":")[1], 10);
-      await this.adapter?.editMessage(chatId, data.messageId, "📝 Send the new project name (will create folder in project root):");
-      this.pendingBindings.set(threadId, "awaiting_name");
-      return;
-    }
+    // Legacy prefixes from old directory browser — no longer handled
+  }
 
-    if (!callbackData.startsWith("bind:")) return;
+  /** Handle callback from /open inline keyboard */
+  private async handleOpenCallback(callbackData: string, chatId: string, messageId: string): Promise<void> {
+    if (!this.adapter) return;
 
+    // Format: cmd_open:<sessionId>:<action>
     const parts = callbackData.split(":");
-    const threadId = parseInt(parts[1], 10);
-    const dirPath = parts.slice(2).join(":");
+    const sessionId = parts[1];
 
-    if (dirPath === "cancel") {
-      this.pendingBindings.delete(threadId);
-      await this.adapter?.editMessage(chatId, data.messageId, "Binding cancelled.");
+    // Validate session
+    if (!this.currentOpenSession || this.currentOpenSession.id !== sessionId) {
+      await this.adapter.editMessage(chatId, messageId, "This menu has expired. Use /open again.");
       return;
     }
 
-    // Guard: already bound
-    if (this.routingTable.has(threadId)) {
-      this.pendingBindings.delete(threadId);
-      await this.adapter?.editMessage(chatId, data.messageId, "Already bound.");
+    const action = parts[2];
+
+    // Cancel
+    if (action === "cancel") {
+      this.currentOpenSession = null;
+      await this.adapter.editMessage(chatId, messageId, "Cancelled.");
       return;
     }
 
-    // Create instance name from directory name
-    const instanceName = `${sanitizeInstanceName(basename(dirPath))}-t${threadId}`;
-
-    this.logger.info({ instanceName, threadId, dirPath }, "Auto-binding topic to project");
-
-    // Update fleet config
-    if (this.fleetConfig) {
-      this.fleetConfig.instances[instanceName] = {
-        working_directory: dirPath,
-        topic_id: threadId,
-        restart_policy: this.fleetConfig.defaults.restart_policy ?? DEFAULT_INSTANCE_CONFIG.restart_policy,
-        context_guardian: this.fleetConfig.defaults.context_guardian ?? DEFAULT_INSTANCE_CONFIG.context_guardian,
-        memory: this.fleetConfig.defaults.memory ?? DEFAULT_INSTANCE_CONFIG.memory,
-        log_level: this.fleetConfig.defaults.log_level ?? DEFAULT_INSTANCE_CONFIG.log_level,
-      };
-
-      // Save to fleet.yaml
-      this.saveFleetConfig();
-
-      // Update routing table
-      this.routingTable.set(threadId, instanceName);
-
-      // Start the new instance
-      const ports = this.allocatePorts(this.fleetConfig.instances);
-      await this.startInstance(instanceName, this.fleetConfig.instances[instanceName], ports[instanceName], true);
-
-      // Wait for IPC ready then connect
-      await new Promise(r => setTimeout(r, 5000));
-      await this.connectIpcToInstance(instanceName);
-
-      this.pendingBindings.delete(threadId);
-      await this.adapter?.editMessage(chatId, data.messageId,
-        `✅ Bound to: ${dirPath}\nInstance: ${instanceName}`);
-      this.logger.info({ instanceName, threadId }, "Topic auto-bound successfully");
+    // Pagination: cmd_open:<sessionId>:page:<pageNum>
+    if (action === "page") {
+      const page = parseInt(parts[3], 10);
+      await this.adapter.editMessage(chatId, messageId, "Loading...");
+      await this.sendOpenKeyboard(chatId, this.currentOpenSession.paths, page);
+      return;
     }
+
+    // Directory selection: cmd_open:<sessionId>:<index>
+    const index = parseInt(action, 10);
+    if (isNaN(index) || index < 0 || index >= this.currentOpenSession.paths.length) {
+      await this.adapter.editMessage(chatId, messageId, "Invalid selection.");
+      return;
+    }
+
+    const dirPath = this.currentOpenSession.paths[index];
+    this.currentOpenSession = null;
+    await this.adapter.editMessage(chatId, messageId, `Binding to ${basename(dirPath)}...`);
+    await this.openBindProject(chatId, dirPath);
   }
 
   // ===================== Auto-unbind =====================
@@ -833,63 +1004,35 @@ export class FleetManager {
 
   // ===================== Helpers =====================
 
-  /** Handle new project name input */
-  private async handleNewProjectName(msg: InboundMessage, threadId: number): Promise<void> {
-    const projectName = msg.text.trim();
-    if (!projectName || projectName.includes("/") || projectName.includes("..")) {
-      await this.adapter?.sendText(msg.chatId, "Invalid project name. Try again:", { threadId: String(threadId) });
-      return;
-    }
+  /**
+   * Create instance config, save fleet.yaml, start daemon, connect IPC.
+   * Returns the generated instance name.
+   */
+  private async bindAndStart(dirPath: string, topicId: number): Promise<string> {
+    if (!this.fleetConfig) throw new Error("Fleet config not loaded");
 
-    // Find first project root to create in
-    const roots = this.getProjectRoots();
-    if (roots.length === 0) {
-      await this.adapter?.sendText(msg.chatId, "No project_roots configured in fleet.yaml.", { threadId: String(threadId) });
-      this.pendingBindings.delete(threadId);
-      return;
-    }
+    const instanceName = `${sanitizeInstanceName(basename(dirPath))}-t${topicId}`;
 
-    const projectDir = join(roots[0], projectName);
-    if (existsSync(projectDir)) {
-      // Directory already exists — just bind it
-      await this.adapter?.sendText(msg.chatId, `📁 Directory already exists. Binding to: ${projectDir}`, { threadId: String(threadId) });
-    } else {
-      // Create directory + git init
-      mkdirSync(projectDir, { recursive: true });
-      try {
-        const { execFile } = await import("node:child_process");
-        const { promisify } = await import("node:util");
-        const exec = promisify(execFile);
-        await exec("git", ["init"], { cwd: projectDir });
-      } catch {}
-      await this.adapter?.sendText(msg.chatId, `✅ Created: ${projectDir}`, { threadId: String(threadId) });
-    }
+    this.fleetConfig.instances[instanceName] = {
+      working_directory: dirPath,
+      topic_id: topicId,
+      restart_policy: this.fleetConfig.defaults.restart_policy ?? DEFAULT_INSTANCE_CONFIG.restart_policy,
+      context_guardian: this.fleetConfig.defaults.context_guardian ?? DEFAULT_INSTANCE_CONFIG.context_guardian,
+      memory: this.fleetConfig.defaults.memory ?? DEFAULT_INSTANCE_CONFIG.memory,
+      log_level: this.fleetConfig.defaults.log_level ?? DEFAULT_INSTANCE_CONFIG.log_level,
+    };
 
-    // Bind it directly (not via handleDirectorySelection — no message to edit)
-    this.pendingBindings.delete(threadId);
-    const instanceName = `${sanitizeInstanceName(basename(projectDir))}-t${threadId}`;
+    this.saveFleetConfig();
+    this.routingTable.set(topicId, instanceName);
 
-    if (this.fleetConfig) {
-      this.fleetConfig.instances[instanceName] = {
-        working_directory: projectDir,
-        topic_id: threadId,
-        restart_policy: this.fleetConfig.defaults.restart_policy ?? DEFAULT_INSTANCE_CONFIG.restart_policy,
-        context_guardian: this.fleetConfig.defaults.context_guardian ?? DEFAULT_INSTANCE_CONFIG.context_guardian,
-        memory: this.fleetConfig.defaults.memory ?? DEFAULT_INSTANCE_CONFIG.memory,
-        log_level: this.fleetConfig.defaults.log_level ?? DEFAULT_INSTANCE_CONFIG.log_level,
-      };
-      this.saveFleetConfig();
-      this.routingTable.set(threadId, instanceName);
+    const ports = this.allocatePorts(this.fleetConfig.instances);
+    await this.startInstance(instanceName, this.fleetConfig.instances[instanceName], ports[instanceName], true);
 
-      const ports = this.allocatePorts(this.fleetConfig.instances);
-      await this.startInstance(instanceName, this.fleetConfig.instances[instanceName], ports[instanceName], true);
+    await new Promise(r => setTimeout(r, 5000));
+    await this.connectIpcToInstance(instanceName);
 
-      await new Promise(r => setTimeout(r, 5000));
-      await this.connectIpcToInstance(instanceName);
-
-      await this.adapter?.sendText(msg.chatId, `✅ Created & bound: ${projectDir}`, { threadId: String(threadId) });
-      this.logger.info({ instanceName, threadId }, "New project created and bound");
-    }
+    this.logger.info({ instanceName, topicId }, "Topic bound and started");
+    return instanceName;
   }
 
   /** Get configured project roots, with fallback */
@@ -919,12 +1062,32 @@ export class FleetManager {
     return dirs.sort((a, b) => basename(a).localeCompare(basename(b)));
   }
 
-  /** Get directories of recently bound instances (for "recent" section) */
-  private getRecentlyBoundDirs(): string[] {
-    if (!this.fleetConfig) return [];
-    return Object.values(this.fleetConfig.instances)
-      .map(inst => inst.working_directory)
-      .filter(d => existsSync(d));
+  /** List directories from project_roots that are not already bound to an instance */
+  private listUnboundDirectories(): string[] {
+    const boundDirs = new Set(
+      Object.values(this.fleetConfig?.instances ?? {}).map(i => i.working_directory),
+    );
+    return this.listProjectDirectories().filter(d => !boundDirs.has(d));
+  }
+
+  /** Match directories by keyword. Exact basename match wins over substring. */
+  private filterDirectories(
+    dirs: string[],
+    keyword: string,
+  ): { type: "exact"; path: string } | { type: "multiple"; paths: string[] } | { type: "none" } {
+    const kw = keyword.toLowerCase();
+
+    // Check for exact basename match first
+    const exactMatches = dirs.filter(d => basename(d).toLowerCase() === kw);
+    if (exactMatches.length === 1) {
+      return { type: "exact", path: exactMatches[0] };
+    }
+
+    // Fall back to substring match
+    const subMatches = dirs.filter(d => basename(d).toLowerCase().includes(kw));
+    if (subMatches.length === 0) return { type: "none" };
+    if (subMatches.length === 1) return { type: "exact", path: subMatches[0] };
+    return { type: "multiple", paths: subMatches };
   }
 
   /** Save fleet config back to fleet.yaml */
