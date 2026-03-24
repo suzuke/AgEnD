@@ -45,6 +45,24 @@ describe("parseInstallCommand", () => {
     });
   });
 
+  it("ignores cargo install edge cases (--git, --path, URLs)", () => {
+    expect(
+      parseInstallCommand("cargo install --git https://github.com/foo/bar")
+    ).toBeNull();
+    expect(
+      parseInstallCommand("cargo install --path ./my-crate")
+    ).toBeNull();
+  });
+
+  it("handles cargo install with --git and crate name", () => {
+    expect(
+      parseInstallCommand("cargo install ripgrep --git https://github.com/BurntSushi/ripgrep")
+    ).toEqual({
+      type: "cargo",
+      packages: ["ripgrep"],
+    });
+  });
+
   it("detects npm install -g", () => {
     expect(parseInstallCommand("npm install -g typescript")).toEqual({
       type: "npm",

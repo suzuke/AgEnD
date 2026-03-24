@@ -38,7 +38,20 @@ const INSTALL_PATTERNS: Array<{
   {
     type: "cargo",
     pattern: /cargo\s+install\s+(.+)/,
-    extract: (m) => m[1].split(/\s+/).filter(p => !p.startsWith("-") && !p.startsWith("--")),
+    extract: (m) => {
+      const tokens = m[1].split(/\s+/);
+      const skipNext = new Set(["--path", "--git", "--branch", "--tag", "--rev", "--root", "--index", "--registry"]);
+      const packages: string[] = [];
+      let skip = false;
+      for (const t of tokens) {
+        if (skip) { skip = false; continue; }
+        if (skipNext.has(t)) { skip = true; continue; }
+        if (t.startsWith("-") || t.startsWith("--")) continue;
+        if (t.includes("://") || t.includes("/")) continue;  // URLs and paths
+        packages.push(t);
+      }
+      return packages;
+    },
   },
   {
     type: "npm",

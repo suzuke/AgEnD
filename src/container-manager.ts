@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readFileSync, appendFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, resolve as resolvePath } from "node:path";
 import { readPendingPackages, clearPendingPackages, type PendingPackages } from "./install-recorder.js";
@@ -143,10 +143,13 @@ export class ContainerManager {
     dockerfilePath: string,
   ): Promise<{ success: boolean; packages: PendingPackages }> {
     const pending = readPendingPackages(recordPath);
+    if (pending.count === 0) return { success: true, packages: pending };
+
     const patch = generateDockerfilePatch(pending);
 
-    // Append patch to end of Dockerfile (after USER ccd line)
-    appendFileSync(dockerfilePath, "\n" + patch);
+    // Save original Dockerfile for rollback on build failure
+    const original = readFileSync(dockerfilePath, "utf-8");
+    writeFileSync(dockerfilePath, original + "\n" + patch);
 
     // Rebuild image
     try {
@@ -157,6 +160,8 @@ export class ContainerManager {
         dirname(dockerfilePath),
       ]);
     } catch (err) {
+      // Rollback Dockerfile on build failure
+      writeFileSync(dockerfilePath, original);
       return { success: false, packages: pending };
     }
 
