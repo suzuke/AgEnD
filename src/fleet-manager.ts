@@ -1238,7 +1238,7 @@ export class FleetManager {
   // ===================== /meets Command =====================
 
   private parseMeetsArgs(text: string): { topic: string; mode: "debate" | "collab"; count: number; names?: string[]; repo?: string } | null {
-    const args = text.replace(/^\/meets(@\S+)?\s*/, "").trim();
+    const args = text.replace(/^\/(meets|collab)(@\S+)?\s*/, "").trim();
     if (!args) return null;
 
     let mode: "debate" | "collab" = "debate";
@@ -1246,11 +1246,6 @@ export class FleetManager {
     let names: string[] | undefined;
     let repo: string | undefined;
     let topic = args;
-
-    if (topic.includes("--collab")) {
-      mode = "collab";
-      topic = topic.replace("--collab", "").trim();
-    }
 
     const repoMatch = topic.match(/--repo\s+(\S+)/);
     if (repoMatch) {

@@ -2,7 +2,7 @@
 
 ## Overview
 
-A `/meets` command that spawns multiple ephemeral Claude Code instances into a shared Telegram topic (or future channel) for structured discussion or collaborative work. FleetManager acts as the system-level moderator, and a new `MeetingOrchestrator` class manages the session flow.
+Two commands — `/meets` for structured debate and `/collab` for collaborative coding — that spawn ephemeral Claude Code instances into a shared Telegram topic. FleetManager acts as the system-level moderator, and a `MeetingOrchestrator` class manages the session flow.
 
 ## Modes
 
@@ -99,8 +99,8 @@ Collaboration mode adds a repo selection step using inline buttons populated fro
 ```
 /meets "topic"                                → debate, 2 participants
 /meets -n 3 "topic"                           → debate, 3 participants
-/meets --collab --repo ~/app "task"           → collab mode
-/meets -n 2 --names "前端,後端" --collab "task" → collab, custom names
+/collab --repo ~/app "task"                   → collab mode
+/collab -n 3 --repo ~/app "task"              → collab, 3 participants
 ```
 
 ## Instance Naming
@@ -150,7 +150,7 @@ Start meeting
 ## Collaboration Flow
 
 ```
-/meets --collab --repo ~/app -n 3 "Implement OAuth login"
+/collab --repo ~/app -n 3 "Implement OAuth login"
   │
   ▼
 FleetManagerMeetingAPI.spawnEphemeralInstance() handles:
