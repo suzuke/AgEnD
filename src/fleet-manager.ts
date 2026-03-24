@@ -306,13 +306,14 @@ export class FleetManager {
             commands: [
               { command: "open", description: "Open an existing project" },
               { command: "new", description: "Create a new project" },
-              { command: "meets", description: "Start a multi-instance meeting" },
+              { command: "meets", description: "Start a multi-instance debate" },
+              { command: "collab", description: "Start collaborative coding with worktrees" },
             ],
             scope: { type: "chat", chat_id: groupId },
           }),
         },
       );
-      this.logger.info("Registered bot commands: /open, /new, /meets");
+      this.logger.info("Registered bot commands: /open, /new, /meets, /collab");
     } catch (err) {
       this.logger.warn({ err }, "Failed to register bot commands (non-fatal)");
     }
@@ -372,7 +373,12 @@ export class FleetManager {
     }
 
     if (text === "/meets" || text === "/meets@" || text.startsWith("/meets ") || text.startsWith("/meets@")) {
-      await this.handleMeetsCommand(msg);
+      await this.handleMeetsCommand(msg, "debate");
+      return;
+    }
+
+    if (text === "/collab" || text === "/collab@" || text.startsWith("/collab ") || text.startsWith("/collab@")) {
+      await this.handleMeetsCommand(msg, "collab");
       return;
     }
 
@@ -1273,7 +1279,7 @@ export class FleetManager {
     return { topic, mode, count, names, repo };
   }
 
-  private async handleMeetsCommand(msg: InboundMessage): Promise<void> {
+  private async handleMeetsCommand(msg: InboundMessage, forceMode?: "debate" | "collab"): Promise<void> {
     if (!this.adapter) return;
 
     // Check resource limits
@@ -1286,12 +1292,18 @@ export class FleetManager {
 
     const parsed = this.parseMeetsArgs(msg.text);
     if (!parsed) {
-      await this.adapter.sendText(msg.chatId, '用法：/meets "議題"\n例如：/meets -n 3 "要不要拆 monorepo？"');
+      const usage = forceMode === "collab"
+        ? '用法：/collab --repo ~/app "任務"\n例如：/collab -n 3 --repo ~/app "實作 OAuth"'
+        : '用法：/meets "議題"\n例如：/meets -n 3 "要不要拆 monorepo？"';
+      await this.adapter.sendText(msg.chatId, usage);
       return;
     }
 
+    // Override mode if command specifies it
+    if (forceMode) parsed.mode = forceMode;
+
     if (parsed.mode === "collab" && !parsed.repo) {
-      await this.adapter.sendText(msg.chatId, "⚠️ 協作模式需要指定 repo：/meets --collab --repo ~/app \"task\"");
+      await this.adapter.sendText(msg.chatId, '⚠️ 協作模式需要指定 repo：/collab --repo ~/app "任務"');
       return;
     }
 
