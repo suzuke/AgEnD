@@ -18,11 +18,13 @@ Multiple instances argue different sides of a topic. Roles auto-assigned by part
 
 Working directory: `/tmp` (no codebase needed).
 
+Debate instances run in **lightweight mode**: Daemon skips transcript monitor, context guardian, memory layer, and approval server (since `skipPermissions` is true). Only IPC server and tmux are started.
+
 ### Collaboration Mode (`--collab`)
 
 Multiple instances work together on a task in a shared repo. Each instance gets an isolated git worktree. Role assignment happens through instance self-discussion or user direction.
 
-Working directory: per-instance git worktree branching from the target repo.
+Working directory: per-instance git worktree branching from the target repo. Worktree setup/teardown is handled by `FleetManagerMeetingAPI`, not the orchestrator.
 
 ## Architecture
 
@@ -37,7 +39,7 @@ User: /meets "topic"
 │  • Create meeting channel (Telegram topic, etc.)  │
 │  • spawnEphemeralInstance() × N                   │
 │  • Instantiate MeetingOrchestrator, hand off      │
-│  • Route table: topicId → MeetingOrchestrator     │
+│  • Unified routing: topicId → instance | meeting  │
 └──────┬───────────────────────────────────────────┘
        │
        ▼
@@ -47,16 +49,18 @@ User: /meets "topic"
 │  • Debate/collab flow control                    │
 │  • Turn ordering, prompt composition             │
 │  • User intervention handling (absolute priority)│
+│  • Dynamic participant management (kick/add)     │
 │  • Summary generation on completion              │
 │  • Request FM to destroy instances on end        │
 └──────┬───────────────────────────────────────────┘
-       │  via FleetManager.sendAndWaitReply()
+       │  via FleetManagerMeetingAPI
        ▼
 ┌──────────┐ ┌──────────┐ ┌──────────┐
 │ Daemon A │ │ Daemon B │ │ Daemon C │
 │ ephemeral│ │ ephemeral│ │ ephemeral│
 └──────────┘ └──────────┘ └──────────┘
-     Full Claude Code instances (tmux-backed, via CliBackend)
+     Claude Code instances (tmux-backed, via CliBackend)
+     Debate: lightweight mode | Collab: full mode
 ```
 
 ## Command Interface
@@ -140,7 +144,7 @@ Start meeting
 ### Prompt Strategy
 
 - Each round sends "previous round summary + opponent's latest argument" — not full conversation history
-- Role assigned via `--system-prompt` flag at instance spawn time (e.g., "You are the Pro side. Your position is to support this proposal."). Per-round context (opponent's arguments, user instructions) is sent as regular user messages via IPC.
+- Role assigned at instance spawn time via backend-specific mechanism (abstracted by `FleetManagerMeetingAPI`). Per-round context (opponent's arguments, user instructions) is sent as regular user messages via IPC.
 - User free-text in topic is injected as additional context to the next speaker
 
 ## Collaboration Flow
@@ -149,10 +153,11 @@ Start meeting
 /meets --collab --repo ~/app -n 3 "Implement OAuth login"
   │
   ▼
-Orchestrator:
+FleetManagerMeetingAPI.spawnEphemeralInstance() handles:
   1. git worktree add /tmp/meet-{id}-A -b meet/{id}-A
   2. git worktree add /tmp/meet-{id}-B -b meet/{id}-B
   3. git worktree add /tmp/meet-{id}-C -b meet/{id}-C
+  4. Start Daemon in each worktree (full mode)
   │
   ▼
 Discussion phase: instances discuss task division in topic
@@ -161,7 +166,11 @@ Discussion phase: instances discuss task division in topic
 Development phase: each works in own worktree
   │
   ▼
-End: Orchestrator attempts to merge branches, reports conflicts to topic
+End: FleetManagerMeetingAPI.destroyEphemeralInstance() handles:
+  - Stop Daemon
+  - git worktree remove --force
+  - git branch -D meet/{id}-*
+  - Report merge status to orchestrator
 ```
 
 ## User Control (Absolute Priority)
@@ -177,8 +186,8 @@ User messages in the meeting topic always take highest priority. The orchestrato
 | `/more 3` | +3 rounds |
 | `/pause` | Pause flow, wait for `/resume` |
 | `/resume` | Resume paused flow |
-| `/kick A` | Remove instance A from meeting |
-| `/add` | Spawn additional instance |
+| `/kick A` | Remove instance A — orchestrator calls `fm.destroyEphemeralInstance()`, updates participant list |
+| `/add` | Spawn additional instance — orchestrator calls `fm.spawnEphemeralInstance()`, assigns next label |
 | `/redirect A "argue from cost perspective"` | Direct instruction to specific instance |
 | `@A what about testing?` | Override turn order, A speaks next with this prompt |
 | Free text | Appended as additional context to the next speaker's prompt |
@@ -191,21 +200,21 @@ User messages in the meeting topic always take highest priority. The orchestrato
 
 ## Channel Abstraction
 
-MeetingOrchestrator does not assume Telegram. It outputs structured message objects through an abstract interface:
+MeetingOrchestrator does not assume Telegram. It outputs structured message objects through a `MeetingChannelOutput` — a thin wrapper that binds `chatId`/`threadId` at construction and delegates to the existing `ChannelAdapter`:
 
 ```typescript
 interface MeetingChannelOutput {
   postMessage(text: string, options?: { label?: string }): Promise<string>
   editMessage(messageId: string, text: string): Promise<void>
-  createMeetingChannel(title: string): Promise<{ channelId: string }>
-  closeMeetingChannel(channelId: string): Promise<void>
 }
 ```
+
+Channel creation/closure is handled by `FleetManagerMeetingAPI`, not the orchestrator.
 
 Orchestrator emits structured data:
 
 ```typescript
-{ speaker: "A", role: "正方", round: 1, content: "..." }
+{ speaker: "A", role: "pro", round: 1, content: "..." }
 ```
 
 Channel adapter decides rendering. Telegram renders as:
@@ -217,39 +226,42 @@ Monorepo 的部署耦合...
 
 Future adapters (Slack, Discord) render in their own native formats.
 
-Implementation note: `createMeetingChannel` wraps `FleetManager.createForumTopic()` for Telegram. `closeMeetingChannel` maps to Telegram's `closeForumTopic` Bot API (needs to be added to TelegramAdapter).
-
 ## MeetingOrchestrator Interface
 
 ```typescript
+type MeetingRole = "pro" | "con" | "arbiter" | (string & {})  // extensible union
+
 interface MeetingConfig {
   meetingId: string
   topic: string
   mode: "debate" | "collab"
-  participants: ParticipantConfig[]
   maxRounds: number          // default: 3
   repo?: string              // collab mode only
 }
 
 interface ParticipantConfig {
   label: string              // "A", "B", or custom name
-  role: string               // "正方", "反方", "仲裁", or custom
-  systemPrompt: string       // injected via --system-prompt flag at spawn
-  workingDirectory: string   // debate: /tmp, collab: worktree path
+  role: MeetingRole
 }
 
 class MeetingOrchestrator {
   constructor(
     config: MeetingConfig,
-    fm: FleetManagerMeetingAPI,  // narrow interface, not full FM
+    fm: FleetManagerMeetingAPI,
     output: MeetingChannelOutput
   )
 
   /** Boot instances and start the debate/collab flow */
-  async start(): Promise<void>
+  async start(participants: ParticipantConfig[]): Promise<void>
 
   /** Handle any user message in the meeting topic (absolute priority) */
   handleUserMessage(msg: InboundMessage): void
+
+  /** Add a participant mid-meeting (/add) */
+  async addParticipant(config: ParticipantConfig): Promise<void>
+
+  /** Remove a participant mid-meeting (/kick) */
+  async removeParticipant(label: string): Promise<void>
 
   /** End meeting: summary → cleanup → destroy instances */
   async end(): Promise<void>
@@ -261,23 +273,34 @@ class MeetingOrchestrator {
 ### New Methods
 
 ```typescript
-// Narrow interface exposed to Orchestrator (not full FleetManager)
 interface FleetManagerMeetingAPI {
+  /** Spawn a temporary instance. Handles worktree setup for collab mode. */
   spawnEphemeralInstance(config: EphemeralInstanceConfig, signal?: AbortSignal): Promise<string>
+
+  /** Destroy a temporary instance. Handles worktree cleanup for collab mode. */
   destroyEphemeralInstance(name: string): Promise<void>
+
+  /** Send message to instance and wait for its reply (see Reply Capture below). */
   sendAndWaitReply(instanceName: string, message: string, timeoutMs?: number): Promise<string>
+
+  /** Create a meeting channel (e.g., Telegram forum topic). */
+  createMeetingChannel(title: string): Promise<{ channelId: number }>
+
+  /** Close a meeting channel. */
+  closeMeetingChannel(channelId: number): Promise<void>
 }
 ```
+
+Internally, `spawnEphemeralInstance` delegates to existing `startInstance()` and `destroyEphemeralInstance` delegates to existing `stopInstance()`.
 
 ### EphemeralInstanceConfig
 
 ```typescript
 interface EphemeralInstanceConfig {
-  meetingId: string
-  label: string               // "A", "B", or custom name
-  systemPrompt: string        // role instructions (see Backend Prerequisites below)
+  systemPrompt: string        // role instructions, delivered via backend-specific mechanism
   workingDirectory: string    // debate: /tmp, collab: worktree path
-  skipPermissions?: boolean   // debate mode: true (see Backend Prerequisites below)
+  lightweight?: boolean       // debate: true (skip context guardian, memory layer, etc.)
+  skipPermissions?: boolean   // debate: true
   backend?: string            // defaults to fleet config defaults.backend or "claude-code"
 }
 ```
@@ -294,7 +317,7 @@ This is the most critical new primitive. Today, Claude responds asynchronously v
    - **No** → existing behavior (post to Telegram)
 5. Timeout: 120s default, configurable. On timeout, return a timeout error to the orchestrator.
 
-Multiple `reply` calls: concatenate all replies until a 5-second idle period, then resolve.
+Multiple `reply` calls: concatenate until a 5-second idle period, then resolve. Reply buffer capped at 32KB to prevent unbounded growth.
 
 ```
 FleetManager.sendAndWaitReply("meet-xyz-A", prompt)
@@ -313,38 +336,35 @@ FleetManager.handleOutboundFromInstance("meet-xyz-A", msg)
   └─ The orchestrator receives the text and posts to topic itself (with formatting)
 ```
 
+On `MeetingOrchestrator.end()`, all pending `sendAndWaitReply` promises are rejected with `AbortError` to prevent dangling references.
+
 ### Approval Strategy for Ephemeral Instances
 
-- **Debate mode**: instances use `--dangerously-skip-permissions` (working in /tmp, no risk)
+- **Debate mode**: instances use `skipPermissions: true` (working in /tmp, no risk)
 - **Collab mode**: instances use the same approval strategy as normal fleet instances, with approval prompts routed to the meeting topic
 
-### Routing Extension
+### Unified Routing
+
+The existing `routingTable` is extended with a discriminated union instead of a separate map:
 
 ```typescript
-// Existing (actual type in codebase)
-routingTable: Map<number, string>                     // threadId → instanceName
+type RouteTarget =
+  | { kind: "instance"; name: string }
+  | { kind: "meeting"; orchestrator: MeetingOrchestrator }
 
-// New
-meetingTable: Map<number, MeetingOrchestrator>        // threadId → orchestrator
+routingTable: Map<number, RouteTarget>
 
-// Routing logic (meeting topics are always freshly created, no collision with routingTable)
 handleInboundMessage(msg) {
   const threadId = parseInt(msg.threadId, 10)
-  if (meetingTable.has(threadId)) {
-    meetingTable.get(threadId).handleUserMessage(msg)
-  } else if (routingTable.has(threadId)) {
-    // existing logic
+  const target = routingTable.get(threadId)
+  if (!target) return
+  if (target.kind === "meeting") {
+    target.orchestrator.handleUserMessage(msg)
+  } else {
+    // existing instance routing logic
   }
 }
 ```
-
-## Backend Independence
-
-- Orchestrator only calls `FleetManagerMeetingAPI`, never touches CliBackend or Daemon directly
-- FleetManager's `spawnEphemeralInstance` uses existing Daemon + CliBackend internally
-- Switching backend (e.g., to API-based) only requires the `FleetManagerMeetingAPI` contract to work
-- Orchestrator remains unchanged across backend swaps
-- System prompt is set via the backend's launch flags (e.g., `--system-prompt` for Claude Code), abstracted away from the orchestrator
 
 ## Resource Limits
 
@@ -360,17 +380,15 @@ handleInboundMessage(msg) {
 - All instances fail → end meeting with error summary
 - User sends /end during instance boot → AbortSignal cancels remaining spawns, cleanup started instances
 - Collab mode: validate `--repo` path is a git repository before spawning
-- Collab cleanup: `git worktree remove --force` + `git branch -D meet/{id}-*`
 
 ## Backend Prerequisites
 
 The following extensions to existing interfaces are required before meeting functionality can work:
 
-1. **`CliBackendConfig` needs `systemPrompt?: string`** — `buildCommand()` must append `--system-prompt "..."` to the CLI command when present. This is a supported Claude Code CLI flag.
-2. **`CliBackendConfig` needs `skipPermissions?: boolean`** — `buildCommand()` must append `--dangerously-skip-permissions` when true. Used only for debate-mode ephemeral instances (working in /tmp, no risk).
-3. **`TelegramAdapter` needs `closeForumTopic(threadId)`** — wraps the Telegram Bot API `closeForumTopic` method.
-
-These are small, isolated changes to existing code and do not affect the Orchestrator design.
+1. **`CliBackendConfig` needs `systemPrompt?: string`** — `buildCommand()` appends the appropriate flag. Supported by Claude Code CLI.
+2. **`CliBackendConfig` needs `skipPermissions?: boolean`** — `buildCommand()` appends `--dangerously-skip-permissions` when true.
+3. **`Daemon` needs `lightweight?: boolean` config** — when true, skips transcript monitor, context guardian, memory layer, and approval server during startup.
+4. **`TelegramAdapter` needs `closeForumTopic(threadId)`** — wraps the Telegram Bot API `closeForumTopic` method.
 
 ## Scope Boundaries (not in v1)
 
