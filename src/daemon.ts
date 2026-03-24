@@ -38,6 +38,8 @@ export class Daemon {
   // Track chatId/threadId from inbound messages for automatic outbound routing
   private lastChatId: string | undefined;
   private lastThreadId: string | undefined;
+  // Pending ack: react 🫡 on first transcript activity after receiving a message
+  private pendingAckMessage: { chatId: string; messageId: string } | null = null;
   // Tool status tracking for Telegram
   private toolStatusMessageId: string | null = null;
   private toolStatusLines: string[] = [];
@@ -143,6 +145,7 @@ export class Daemon {
           if (this.adapter && msg.chatId && msg.messageId) {
             this.adapter.react(msg.chatId, msg.messageId, "👀")
               .catch(e => this.logger.debug({ err: (e as Error).message }, "Auto-react failed"));
+            this.pendingAckMessage = { chatId: msg.chatId, messageId: msg.messageId };
           }
 
           let text = msg.text;
@@ -241,15 +244,24 @@ export class Daemon {
       // 4. Transcript monitor
       this.transcriptMonitor = new TranscriptMonitor(this.instanceDir, this.logger);
 
-      // 5. Wire transcript events (tool status in Telegram disabled for now)
+      // 5. Wire transcript events
+      const ackIfPending = () => {
+        if (!this.pendingAckMessage || !this.adapter) return;
+        const { chatId, messageId } = this.pendingAckMessage;
+        this.pendingAckMessage = null;
+        this.adapter.react(chatId, messageId, "🫡")
+          .catch(e => this.logger.debug({ err: (e as Error).message }, "Ack react failed"));
+      };
       this.transcriptMonitor.on("tool_use", (name: string, _input: unknown) => {
         this.logger.debug({ tool: name }, "Tool use");
+        ackIfPending();
       });
       this.transcriptMonitor.on("tool_result", (_name: string, _output: unknown) => {
         // no-op
       });
       this.transcriptMonitor.on("assistant_text", (text: string) => {
         this.logger.debug({ text: text.slice(0, 200) }, "Claude response");
+        ackIfPending();
       });
       this.transcriptMonitor.startPolling();
 
