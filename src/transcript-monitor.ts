@@ -132,6 +132,9 @@ export class TranscriptMonitor extends EventEmitter {
   }
 
   setTranscriptPath(path: string): void {
+    if (this.transcriptPath !== path) {
+      this.resetOffset();
+    }
     this.transcriptPath = path;
   }
 

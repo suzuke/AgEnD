@@ -83,6 +83,9 @@ export class SchedulerDb {
   }
 
   update(id: string, params: UpdateScheduleParams): Schedule {
+    const existing = this.get(id);
+    if (!existing) throw new Error(`Schedule "${id}" not found`);
+
     const sets: string[] = [];
     const values: unknown[] = [];
 
@@ -98,7 +101,7 @@ export class SchedulerDb {
       this.db.prepare(`UPDATE schedules SET ${sets.join(", ")} WHERE id = ?`).run(...values);
     }
 
-    return this.get(id)!;
+    return this.get(id) ?? existing;
   }
 
   delete(id: string): void {

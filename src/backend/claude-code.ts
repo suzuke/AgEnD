@@ -110,7 +110,8 @@ export class ClaudeCodeBackend implements CliBackend {
         if (pane.includes("Listening for channel messages")) {
           return;
         }
-        if (pane.includes("$") || pane.includes("%") || pane.includes(">")) {
+        const lastLine = pane.trimEnd().split("\n").pop() ?? "";
+        if (/[$%>]\s*$/.test(lastLine)) {
           return;
         }
       } catch {}
