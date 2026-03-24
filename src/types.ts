@@ -89,6 +89,10 @@ export interface InstanceConfig {
   channel_plugin?: string;
   /** Skip non-essential subsystems (transcript monitor, context guardian, memory layer, approval server, prompt detector) */
   lightweight?: boolean;
+  /** System prompt for the Claude instance */
+  systemPrompt?: string;
+  /** Skip permission checks (dangerously-skip-permissions) */
+  skipPermissions?: boolean;
 }
 
 export interface MeetingDefaults {

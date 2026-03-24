@@ -641,6 +641,8 @@ export class Daemon {
         },
       },
       approvalStrategy: this.approvalStrategyInstance!,
+      systemPrompt: this.config.systemPrompt,
+      skipPermissions: this.config.skipPermissions,
     };
   }
 
