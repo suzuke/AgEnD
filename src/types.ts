@@ -87,6 +87,8 @@ export interface InstanceConfig {
   backend?: string;
   /** @deprecated backward compat */
   channel_plugin?: string;
+  /** Skip non-essential subsystems (transcript monitor, context guardian, memory layer, approval server, prompt detector) */
+  lightweight?: boolean;
 }
 
 export interface FleetDefaults extends Partial<InstanceConfig> {
