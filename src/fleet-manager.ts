@@ -1378,7 +1378,7 @@ export class FleetManager {
       }, timeoutMs);
 
       const origResolve = resolve;
-      entry.resolve = (text: string) => {
+      entry.resolve = (text: string | PromiseLike<string>) => {
         clearTimeout(timeout);
         origResolve(text);
       };

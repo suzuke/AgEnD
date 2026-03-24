@@ -15,6 +15,9 @@ export class MeetingOrchestrator {
   private roundHistory: RoundEntry[] = [];
   private currentRound = 0;
   private state: MeetingState = "booting";
+
+  /** Check if ended — separate method so TS doesn't narrow away the possibility */
+  private isEnded(): boolean { return this.state === "ended"; }
   private userContext: string | undefined;
   private abortController = new AbortController();
   private resolveUserInput: (() => void) | null = null;
@@ -78,7 +81,7 @@ export class MeetingOrchestrator {
 
   private async runDebateLoop(): Promise<void> {
     for (let round = 1; round <= this.config.maxRounds; round++) {
-      if (this.state === "ended") return;
+      if (this.isEnded()) return;
       this.currentRound = round;
 
       await this.output.postMessage(`\n━━ Round ${round} ━━`);
@@ -87,13 +90,13 @@ export class MeetingOrchestrator {
       const speakers = this.getSpeakingOrder();
 
       for (const participant of speakers) {
-        if (this.state === "ended") return;
+        if (this.isEnded()) return;
 
         // Check for pause
         while (this.state === "paused") {
           await new Promise<void>(resolve => { this.resolveUserInput = resolve; });
         }
-        if (this.state === "ended") return;
+        if (this.isEnded()) return;
 
         // Check for direct address override
         let prompt: string;
@@ -146,7 +149,7 @@ export class MeetingOrchestrator {
   }
 
   private async generateSummary(): Promise<void> {
-    if (this.state === "ended") return;
+    if (this.isEnded()) return;
     this.state = "summarizing";
     await this.output.postMessage("\n━━ 會議摘要 ━━");
 
