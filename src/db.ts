@@ -36,6 +36,16 @@ export class MemoryDb {
       .all(filePath) as MemoryBackupRow[];
   }
 
+  pruneOldBackups(keepPerFile = 10): void {
+    const files = this.db.prepare("SELECT DISTINCT file_path FROM memory_backups").all() as { file_path: string }[];
+    const deleteStmt = this.db.prepare(
+      "DELETE FROM memory_backups WHERE file_path = ? AND id NOT IN (SELECT id FROM memory_backups WHERE file_path = ? ORDER BY backed_up_at DESC LIMIT ?)"
+    );
+    for (const { file_path } of files) {
+      deleteStmt.run(file_path, file_path, keepPerFile);
+    }
+  }
+
   close(): void {
     this.db.close();
   }

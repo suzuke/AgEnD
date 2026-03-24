@@ -62,6 +62,27 @@ export const DEFAULT_INSTANCE_CONFIG: Omit<InstanceConfig, "working_directory"> 
   log_level: DEFAULT_CONFIG.log_level,
 };
 
+function validateConfig(config: DaemonConfig): void {
+  const { context_guardian } = config;
+  if (context_guardian) {
+    if (typeof context_guardian.threshold_percentage !== 'undefined') {
+      const t = context_guardian.threshold_percentage;
+      if (typeof t !== 'number' || t < 0 || t > 100) {
+        throw new Error(`context_guardian.threshold_percentage must be 0-100, got: ${t}`);
+      }
+    }
+  }
+  const { restart_policy } = config;
+  if (restart_policy) {
+    if (typeof restart_policy.max_retries !== 'undefined') {
+      const m = restart_policy.max_retries;
+      if (typeof m !== 'number' || m < 0 || !Number.isInteger(m)) {
+        throw new Error(`restart_policy.max_retries must be a non-negative integer, got: ${m}`);
+      }
+    }
+  }
+}
+
 export function loadConfig(configPath: string): DaemonConfig {
   if (!existsSync(configPath)) {
     return { ...DEFAULT_CONFIG };
@@ -71,7 +92,9 @@ export function loadConfig(configPath: string): DaemonConfig {
   if (!parsed) {
     return { ...DEFAULT_CONFIG };
   }
-  return deepMerge(DEFAULT_CONFIG, parsed);
+  const config = deepMerge(DEFAULT_CONFIG, parsed);
+  validateConfig(config);
+  return config;
 }
 
 export function loadFleetConfig(configPath: string): FleetConfig {

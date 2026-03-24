@@ -14,6 +14,7 @@ import {
 import { homedir } from "node:os";
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
+import { spawn } from "node:child_process";
 
 const DATA_DIR = join(homedir(), ".claude-channel-daemon");
 const DEFAULT_CONFIG_PATH = join(DATA_DIR, "config.yaml");
@@ -114,11 +115,10 @@ program
       process.exit(1);
     }
     if (opts.follow) {
-      const rl = createInterface({
-        input: createReadStream(LOG_PATH, { start: 0 }),
-      });
-      rl.on("line", (line: string) => console.log(line));
-      process.stdin.resume();
+      const tail = spawn("tail", ["-f", LOG_PATH], { stdio: "inherit" });
+      tail.on("close", () => process.exit(0));
+      process.on("SIGINT", () => { tail.kill(); process.exit(0); });
+      return;
     } else {
       const content = readFileSync(LOG_PATH, "utf-8");
       const lines = content.trim().split("\n");
@@ -194,14 +194,39 @@ fleet
   .description("Stop fleet or specific instance")
   .argument("[instance]", "Specific instance to stop")
   .action(async (instance?: string) => {
-    const { FleetManager } = await import("./fleet-manager.js");
-    const fm = new FleetManager(DATA_DIR);
     if (instance) {
+      const { FleetManager } = await import("./fleet-manager.js");
+      const fm = new FleetManager(DATA_DIR);
       await fm.stopInstance(instance);
+      console.log("Stopped");
     } else {
-      await fm.stopAll();
+      const pidPath = join(DATA_DIR, "fleet.pid");
+      if (!existsSync(pidPath)) {
+        console.error("Fleet is not running (no PID file found)");
+        process.exit(1);
+      }
+      const pid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
+      try {
+        process.kill(pid, "SIGTERM");
+      } catch {
+        console.error("Failed to send SIGTERM (process may have already exited)");
+        try { unlinkSync(pidPath); } catch {}
+        process.exit(1);
+      }
+      // Wait for process exit (up to 10 seconds)
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        try {
+          process.kill(pid, 0);
+          await new Promise(r => setTimeout(r, 200));
+        } catch {
+          // Process exited
+          console.log("Fleet stopped");
+          return;
+        }
+      }
+      console.warn("Warning: fleet process still running after 10s");
     }
-    console.log("Stopped");
   });
 
 fleet
