@@ -38,7 +38,7 @@ export class FleetManager {
   private adapter: ChannelAdapter | null = null;
   private routingTable: Map<number, string> = new Map();
   private instanceIpcClients: Map<string, IpcClient> = new Map();
-  private currentOpenSession: { id: string; paths: string[] } | null = null;
+  private openSessions: Map<string, { paths: string[]; createdAt: number }> = new Map();
   private scheduler: Scheduler | null = null;
   private containerManager: ContainerManager | null = null;
   private configPath: string = "";
@@ -161,7 +161,8 @@ export class FleetManager {
       const eqIdx = trimmed.indexOf("=");
       if (eqIdx < 0) continue;
       const key = trimmed.slice(0, eqIdx);
-      const value = trimmed.slice(eqIdx + 1);
+      const raw = trimmed.slice(eqIdx + 1);
+      const value = raw.replace(/^["'](.*)["']$/, '$1');
       if (!process.env[key]) {
         process.env[key] = value;
       }
@@ -420,7 +421,13 @@ export class FleetManager {
   /** Send paginated inline keyboard for /open */
   private async sendOpenKeyboard(chatId: string, dirs: string[], page: number): Promise<void> {
     const sessionId = Math.random().toString(16).slice(2, 10); // 8 hex chars
-    this.currentOpenSession = { id: sessionId, paths: dirs };
+    this.openSessions.set(sessionId, { paths: dirs, createdAt: Date.now() });
+
+    // TTL cleanup: remove sessions older than 5 minutes
+    const OPEN_SESSION_TTL = 5 * 60 * 1000;
+    for (const [id, session] of this.openSessions) {
+      if (Date.now() - session.createdAt > OPEN_SESSION_TTL) this.openSessions.delete(id);
+    }
 
     const PAGE_SIZE = 5;
     const pageStart = page * PAGE_SIZE;
@@ -939,7 +946,8 @@ export class FleetManager {
     const sessionId = parts[1];
 
     // Validate session
-    if (!this.currentOpenSession || this.currentOpenSession.id !== sessionId) {
+    const session = this.openSessions.get(sessionId);
+    if (!session) {
       await this.adapter.editMessage(chatId, messageId, "This menu has expired. Use /open again.");
       return;
     }
@@ -948,7 +956,7 @@ export class FleetManager {
 
     // Cancel
     if (action === "cancel") {
-      this.currentOpenSession = null;
+      this.openSessions.delete(sessionId);
       await this.adapter.editMessage(chatId, messageId, "Cancelled.");
       return;
     }
@@ -957,19 +965,19 @@ export class FleetManager {
     if (action === "page") {
       const page = parseInt(parts[3], 10);
       await this.adapter.editMessage(chatId, messageId, "Loading...");
-      await this.sendOpenKeyboard(chatId, this.currentOpenSession.paths, page);
+      await this.sendOpenKeyboard(chatId, session.paths, page);
       return;
     }
 
     // Directory selection: cmd_open:<sessionId>:<index>
     const index = parseInt(action, 10);
-    if (isNaN(index) || index < 0 || index >= this.currentOpenSession.paths.length) {
+    if (isNaN(index) || index < 0 || index >= session.paths.length) {
       await this.adapter.editMessage(chatId, messageId, "Invalid selection.");
       return;
     }
 
-    const dirPath = this.currentOpenSession.paths[index];
-    this.currentOpenSession = null;
+    const dirPath = session.paths[index];
+    this.openSessions.delete(sessionId);
     await this.adapter.editMessage(chatId, messageId, `Binding to ${basename(dirPath)}...`);
     await this.openBindProject(chatId, dirPath);
   }
@@ -1159,25 +1167,28 @@ export class FleetManager {
       this.topicCleanupTimer = null;
     }
 
-    // Shutdown scheduler
+    // 1. Shutdown scheduler first
     this.scheduler?.shutdown();
 
-    // Remove PID file
-    const pidPath = join(this.dataDir, "fleet.pid");
-    try { unlinkSync(pidPath); } catch {}
-    // Stop adapter
-    if (this.adapter) {
-      await this.adapter.stop();
-      this.adapter = null;
-    }
-    // Close IPC connections
+    // 2. Stop all daemon instances
+    await Promise.allSettled(
+      [...this.daemons.keys()].map(name => this.stopInstance(name))
+    );
+
+    // 3. Close IPC connections
     for (const [, ipc] of this.instanceIpcClients) {
       await ipc.close();
     }
     this.instanceIpcClients.clear();
-    // Stop daemon instances
-    await Promise.allSettled(
-      [...this.daemons.keys()].map(name => this.stopInstance(name))
-    );
+
+    // 4. Stop adapter
+    if (this.adapter) {
+      await this.adapter.stop();
+      this.adapter = null;
+    }
+
+    // 5. Remove PID file
+    const pidPath = join(this.dataDir, "fleet.pid");
+    try { unlinkSync(pidPath); } catch {}
   }
 }

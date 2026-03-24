@@ -295,6 +295,7 @@ export class Daemon {
     if (this.config.memory.watch_memory_dir || this.config.memory.backup_to_sqlite) {
       const dbPath = join(this.instanceDir, "memory.db");
       const db = new MemoryDb(dbPath);
+      db.pruneOldBackups();
       const memDir =
         this.config.memory_directory ??
         join(
