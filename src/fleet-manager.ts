@@ -186,6 +186,7 @@ export class FleetManager {
         dataDir: this.dataDir,
         ccdInstallDir,
         extraMounts: fleet.sandbox.extra_mounts ?? [],
+        network: fleet.sandbox.network,
       });
       this.logger.info("Sandbox container running");
     }
