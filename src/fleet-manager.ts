@@ -21,6 +21,8 @@ import { Scheduler } from "./scheduler/index.js";
 import type { Schedule, SchedulerConfig } from "./scheduler/index.js";
 import { DEFAULT_SCHEDULER_CONFIG } from "./scheduler/index.js";
 const BASE_PORT = 18400; // Start above 18321 to avoid conflict with official telegram plugin
+const EPHEMERAL_PORT_BASE = BASE_PORT + 100; // Ephemeral instances use a separate port range
+const EPHEMERAL_PORT_POOL = 200; // Wrap around after this many ports
 const TMUX_SESSION = "ccd";
 
 /** Sanitize a directory name into a valid instance name. Keeps Unicode letters (incl. CJK). */
@@ -1418,7 +1420,7 @@ export class FleetManager {
       backend: config.backend,
     };
 
-    const port = 18421 + (FleetManager.ephemeralPortCounter++);
+    const port = EPHEMERAL_PORT_BASE + (FleetManager.ephemeralPortCounter++ % EPHEMERAL_PORT_POOL);
     instanceConfig.approval_port = port;
 
     await this.startInstance(name, instanceConfig, port, true);
