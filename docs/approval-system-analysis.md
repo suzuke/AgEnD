@@ -20,9 +20,6 @@ Claude calls a tool not in permissions.allow
   │     Allow → tool executes
   │     Deny → tool rejected
   │     120s timeout → deny
-  │
-  └─ Layer 3: Docker sandbox (if enabled)
-      Command executes inside container regardless of which layer approved it
 ```
 
 ### skipPermissions mode
