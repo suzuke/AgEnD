@@ -5,4 +5,5 @@ dist/
 *.db-wal
 .env
 .worktrees/
+.claude/worktrees/
 test-perm-detect.ts
