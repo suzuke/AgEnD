@@ -16,7 +16,8 @@ import type { CliBackend, CliBackendConfig } from "./backend/types.js";
 import { TelegramAdapter } from "./channel/adapters/telegram.js";
 import { AccessManager } from "./channel/access-manager.js";
 import type { ChannelAdapter, InboundMessage, ApprovalResponse, PermissionPrompt } from "./channel/types.js";
-import { transcribe } from "./stt.js";
+import { processAttachments } from "./channel/attachment-handler.js";
+import { routeToolCall } from "./channel/tool-router.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -41,6 +42,10 @@ export class Daemon {
   private toolStatusMessageId: string | null = null;
   private toolStatusLines: string[] = [];
   private toolStatusDebounce: ReturnType<typeof setTimeout> | null = null;
+  // Crash recovery
+  private healthCheckTimer: ReturnType<typeof setInterval> | null = null;
+  private crashCount = 0;
+  private lastCrashAt = 0;
 
   constructor(
     private name: string,
@@ -149,50 +154,12 @@ export class Daemon {
           }
 
           let text = msg.text;
-          const extraMeta: Record<string, string> = {};
+          let extraMeta: Record<string, string> = {};
 
           if (this.adapter) {
-            const tgAdapter = this.adapter as TelegramAdapter;
-
-            // Auto-download photos so Claude can Read them directly
-            const photoAttachment = msg.attachments?.find(a => a.kind === "photo");
-            if (photoAttachment) {
-              try {
-                const localPath = await tgAdapter.downloadAttachment(photoAttachment.fileId);
-                extraMeta.image_path = localPath;
-              } catch (err) {
-                this.logger.warn({ err: (err as Error).message }, "Photo download failed");
-              }
-            }
-
-            // Transcribe voice/audio
-            const voiceAttachment = msg.attachments?.find(a => a.kind === "voice" || a.kind === "audio");
-            if (voiceAttachment) {
-              const groqKey = process.env.GROQ_API_KEY;
-              if (groqKey) {
-                try {
-                  const localPath = await tgAdapter.downloadAttachment(voiceAttachment.fileId);
-                  const result = await transcribe(localPath, groqKey);
-                  try { unlinkSync(localPath); } catch { /* ignore */ }
-                  text = text ? `${text}\n\n[語音訊息] ${result.text}` : `[語音訊息] ${result.text}`;
-                  this.logger.info({ transcription: result.text.slice(0, 80) }, "Voice transcribed");
-                } catch (err) {
-                  this.logger.warn({ err: (err as Error).message }, "Voice transcription failed");
-                  text = text || "[語音訊息 — 轉錄失敗]";
-                }
-              } else {
-                text = text || "[語音訊息 — 未設定 STT API key]";
-              }
-              extraMeta.attachment_file_id = voiceAttachment.fileId;
-            }
-
-            // Pass other attachment types as file_id for manual download
-            const otherAttachment = msg.attachments?.find(a =>
-              a.kind !== "photo" && a.kind !== "voice" && a.kind !== "audio",
-            );
-            if (otherAttachment) {
-              extraMeta.attachment_file_id = otherAttachment.fileId;
-            }
+            const result = await processAttachments(msg, this.adapter, this.logger);
+            text = result.text;
+            extraMeta = result.extraMeta;
           }
 
           this.pushChannelMessage(text, {
@@ -327,11 +294,60 @@ export class Daemon {
     // Set CCD_SOCKET_PATH env for MCP server
     process.env.CCD_SOCKET_PATH = sockPath;
 
+    // 10. Health check — detect crashed tmux window and respawn
+    if (!this.config.lightweight) {
+      this.startHealthCheck();
+    }
+
     this.logger.info(`${this.name} ready`);
+  }
+
+  private startHealthCheck(): void {
+    const { max_retries, backoff, reset_after } = this.config.restart_policy;
+    if (max_retries <= 0) return; // restart disabled
+
+    this.healthCheckTimer = setInterval(async () => {
+      if (!this.tmux || this.guardian?.state === "ROTATING") return;
+
+      const alive = await this.tmux.isWindowAlive();
+      if (alive) return;
+
+      // Reset crash count if enough time has passed
+      if (reset_after > 0 && Date.now() - this.lastCrashAt > reset_after) {
+        this.crashCount = 0;
+      }
+
+      this.crashCount++;
+      this.lastCrashAt = Date.now();
+
+      if (this.crashCount > max_retries) {
+        this.logger.error({ crashCount: this.crashCount, maxRetries: max_retries }, "Max crash retries exceeded — not respawning");
+        return;
+      }
+
+      // Calculate backoff delay
+      const delay = backoff === "exponential"
+        ? Math.min(1000 * Math.pow(2, this.crashCount - 1), 60_000)
+        : 1000 * this.crashCount;
+
+      this.logger.warn({ crashCount: this.crashCount, delay }, "Claude window died — respawning after backoff");
+
+      await new Promise(r => setTimeout(r, delay));
+
+      try {
+        this.saveSessionId();
+        this.transcriptMonitor?.resetOffset();
+        await this.spawnClaudeWindow();
+        this.logger.info("Respawned Claude window after crash");
+      } catch (err) {
+        this.logger.error({ err }, "Failed to respawn Claude window");
+      }
+    }, 10_000); // Check every 10 seconds
   }
 
   async stop(): Promise<void> {
     this.logger.info("Stopping daemon instance");
+    if (this.healthCheckTimer) { clearInterval(this.healthCheckTimer); this.healthCheckTimer = null; }
     this.transcriptMonitor?.stop();
     this.guardian?.stop();
     if (this.memoryLayer) await this.memoryLayer.stop();
@@ -557,40 +573,9 @@ export class Daemon {
     }
 
     const adapter = adapters[0];
-    const chatId = args.chat_id as string ?? "";
 
-    switch (tool) {
-      case "reply": {
-        const files = Array.isArray(args.files) ? args.files as string[] : [];
-        const threadId = args.thread_id as string ?? this.lastThreadId;
-        adapter.sendText(chatId, args.text as string ?? "", {
-          threadId,
-          replyTo: args.reply_to as string,
-        }).then(async (sent) => {
-          for (const filePath of files) {
-            await adapter.sendFile(chatId, filePath, { threadId });
-          }
-          respond(sent);
-        }).catch(e => respond(null, e.message));
-        break;
-      }
-      case "react":
-        adapter.react(chatId, args.message_id as string ?? "", args.emoji as string ?? "")
-          .then(() => respond("ok"))
-          .catch(e => respond(null, e.message));
-        break;
-      case "edit_message":
-        adapter.editMessage(chatId, args.message_id as string ?? "", args.text as string ?? "")
-          .then(() => respond("ok"))
-          .catch(e => respond(null, e.message));
-        break;
-      case "download_attachment":
-        adapter.downloadAttachment(args.file_id as string ?? "")
-          .then(path => respond(path))
-          .catch(e => respond(null, e.message));
-        break;
-      default:
-        respond(null, `Unknown tool: ${tool}`);
+    if (!routeToolCall(adapter, tool, args, this.lastThreadId, respond)) {
+      respond(null, `Unknown tool: ${tool}`);
     }
   }
 

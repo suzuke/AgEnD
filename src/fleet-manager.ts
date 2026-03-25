@@ -1,6 +1,5 @@
-import { fork, type ChildProcess } from "node:child_process";
-import { existsSync, readFileSync, mkdirSync, readdirSync, statSync, writeFileSync, unlinkSync, rmSync } from "node:fs";
-import { join, dirname, basename, resolve } from "node:path";
+import { existsSync, readFileSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
+import { join, dirname, basename } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import yaml from "js-yaml";
@@ -8,40 +7,42 @@ import yaml from "js-yaml";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 import type { FleetConfig, InstanceConfig } from "./types.js";
-import type { RouteTarget, EphemeralInstanceConfig } from "./meeting/types.js";
-import { loadFleetConfig, DEFAULT_INSTANCE_CONFIG } from "./config.js";
+import type { RouteTarget } from "./meeting/types.js";
+import { loadFleetConfig } from "./config.js";
 import { TmuxManager } from "./tmux-manager.js";
 import { TelegramAdapter } from "./channel/adapters/telegram.js";
 import { AccessManager } from "./channel/access-manager.js";
 import { IpcClient } from "./channel/ipc-bridge.js";
 import type { ChannelAdapter, InboundMessage } from "./channel/types.js";
-import { createLogger } from "./logger.js";
-import { transcribe } from "./stt.js";
+import { createLogger, type Logger } from "./logger.js";
+import { processAttachments } from "./channel/attachment-handler.js";
+import { routeToolCall } from "./channel/tool-router.js";
 import { Scheduler } from "./scheduler/index.js";
 import type { Schedule, SchedulerConfig } from "./scheduler/index.js";
 import { DEFAULT_SCHEDULER_CONFIG } from "./scheduler/index.js";
+import type { FleetContext } from "./fleet-context.js";
+import { TopicCommands } from "./topic-commands.js";
+import { MeetingManager } from "./meeting-manager.js";
+
 const TMUX_SESSION = "ccd";
 
-/** Sanitize a directory name into a valid instance name. Keeps Unicode letters (incl. CJK). */
-function sanitizeInstanceName(name: string): string {
-  // Keep Unicode letters (\p{L}), digits, and hyphens; replace everything else with hyphen
-  const sanitized = name.toLowerCase().replace(/[^\p{L}\d-]/gu, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
-  return sanitized || "project";
-}
-
-export class FleetManager {
-  private children: Map<string, ChildProcess> = new Map();
+export class FleetManager implements FleetContext {
+  private children: Map<string, import("node:child_process").ChildProcess> = new Map();
   private daemons: Map<string, InstanceType<typeof import("./daemon.js").Daemon>> = new Map();
-  private fleetConfig: FleetConfig | null = null;
-  private adapter: ChannelAdapter | null = null;
-  private routingTable: Map<number, RouteTarget> = new Map();
-  private instanceIpcClients: Map<string, IpcClient> = new Map();
-  private openSessions: Map<string, { paths: string[]; createdAt: number }> = new Map();
-  private ephemeralTopicMap: Map<string, number> = new Map();  // instanceName → topicId
-  private scheduler: Scheduler | null = null;
+  fleetConfig: FleetConfig | null = null;
+  adapter: ChannelAdapter | null = null;
+  routingTable: Map<number, RouteTarget> = new Map();
+  instanceIpcClients: Map<string, IpcClient> = new Map();
+  scheduler: Scheduler | null = null;
   private configPath: string = "";
-  private logger = createLogger("info");
-  constructor(private dataDir: string) {}
+  logger: Logger = createLogger("info");
+  private topicCommands: TopicCommands;
+  private meetingManager: MeetingManager;
+
+  constructor(public dataDir: string) {
+    this.topicCommands = new TopicCommands(this);
+    this.meetingManager = new MeetingManager(this);
+  }
 
   /** Load fleet.yaml and build routing table */
   loadConfig(configPath: string): FleetConfig {
@@ -78,7 +79,6 @@ export class FleetManager {
   }
 
   async startInstance(name: string, config: InstanceConfig, topicMode: boolean): Promise<void> {
-    // Guard: already running
     if (this.daemons.has(name)) {
       this.logger.info({ name }, "Instance already running, skipping");
       return;
@@ -87,7 +87,6 @@ export class FleetManager {
     const instanceDir = this.getInstanceDir(name);
     mkdirSync(instanceDir, { recursive: true });
 
-    // Import Daemon dynamically to avoid circular deps
     const { Daemon } = await import("./daemon.js");
     const { createBackend } = await import("./backend/factory.js");
 
@@ -105,7 +104,6 @@ export class FleetManager {
       this.daemons.delete(name);
       return;
     }
-    // Try PID file fallback
     const pidPath = join(this.getInstanceDir(name), "daemon.pid");
     if (existsSync(pidPath)) {
       const pid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
@@ -139,26 +137,21 @@ export class FleetManager {
     const fleet = this.loadConfig(configPath);
     const topicMode = fleet.channel?.mode === "topic";
 
-    // Ensure tmux session exists
     await TmuxManager.ensureSession(TMUX_SESSION);
 
-    // Write PID file so external tools can signal this process
     const pidPath = join(this.dataDir, "fleet.pid");
     writeFileSync(pidPath, String(process.pid), "utf-8");
 
-    // Start all daemon instances
     for (const [name, config] of Object.entries(fleet.instances)) {
       await this.startInstance(name, config, topicMode && !config.channel);
     }
 
-    // Topic mode: auto-create topics for instances without topic_id, then start adapter
     if (topicMode && fleet.channel) {
-      await this.autoCreateTopics(fleet);
+      await this.topicCommands.autoCreateTopics();
       this.routingTable = this.buildRoutingTable();
       const routeSummary = [...this.routingTable.entries()].map(([tid, target]) => `#${tid}→${target.name}`).join(", ");
       this.logger.info(`Routes: ${routeSummary}`);
 
-      // Initialize scheduler
       const schedulerConfig: SchedulerConfig = {
         ...DEFAULT_SCHEDULER_CONFIG,
         ...(this.fleetConfig?.defaults as Record<string, unknown>)?.scheduler as Partial<SchedulerConfig> ?? {},
@@ -175,18 +168,15 @@ export class FleetManager {
 
       await this.startSharedAdapter(fleet);
 
-      // Wait for daemon IPC servers to be ready, then connect
       await new Promise(r => setTimeout(r, 3000));
       await this.connectToInstances(fleet);
     }
 
-    // SIGHUP: reload scheduler
     process.on("SIGHUP", () => {
       this.logger.info("Received SIGHUP, reloading scheduler...");
       this.scheduler?.reload();
     });
 
-    // SIGUSR2: graceful restart (use once + re-register pattern to avoid duplicate handlers)
     const onRestart = () => {
       this.logger.info("Received SIGUSR2, initiating graceful restart...");
       this.restartInstances()
@@ -221,24 +211,20 @@ export class FleetManager {
       inboxDir,
     });
 
-    // Route inbound messages by threadId
     this.adapter.on("message", (msg: InboundMessage) => {
       this.handleInboundMessage(msg);
     });
 
-    // Handle callback queries (directory browser selections)
     this.adapter.on("callback_query", (data: { callbackData: string; chatId: string; threadId?: string; messageId: string }) => {
-      this.handleCallbackQuery(data);
+      this.topicCommands.handleCallbackQuery(data);
     });
 
-    // Handle topic deletion (auto-unbind)
     this.adapter.on("topic_closed", (data: { chatId: string; threadId: string }) => {
-      this.handleTopicDeleted(parseInt(data.threadId, 10));
+      this.topicCommands.handleTopicDeleted(parseInt(data.threadId, 10));
     });
 
-    await this.registerBotCommands();
+    await this.topicCommands.registerBotCommands();
     await this.adapter.start();
-    // Set the group chatId for approval messages
     if (fleet.channel?.group_id) {
       (this.adapter as TelegramAdapter).setLastChatId(String(fleet.channel.group_id));
     }
@@ -253,40 +239,7 @@ export class FleetManager {
       this.logger.warn({ err: err instanceof Error ? err.message : String(err) }, "Telegram handler error");
     });
 
-    // Periodically check for deleted topics (Telegram may not always send events)
     this.startTopicCleanupPoller();
-  }
-
-  /** Register /open and /new in Telegram command menu */
-  private async registerBotCommands(): Promise<void> {
-    const groupId = this.fleetConfig?.channel?.group_id;
-    const botTokenEnv = this.fleetConfig?.channel?.bot_token_env;
-    if (!groupId || !botTokenEnv) return;
-    const botToken = process.env[botTokenEnv];
-    if (!botToken) return;
-
-    try {
-      await fetch(
-        `https://api.telegram.org/bot${botToken}/setMyCommands`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            commands: [
-              { command: "open", description: "Open an existing project" },
-              { command: "new", description: "Create a new project" },
-              { command: "meets", description: "Start a multi-angle discussion" },
-              { command: "debate", description: "Start a pro/con debate" },
-              { command: "collab", description: "Start collaborative coding with worktrees" },
-            ],
-            scope: { type: "chat", chat_id: groupId },
-          }),
-        },
-      );
-      this.logger.info("Registered bot commands: /open, /new, /meets, /debate, /collab");
-    } catch (err) {
-      this.logger.warn({ err }, "Failed to register bot commands (non-fatal)");
-    }
   }
 
   /** Connect IPC clients to each daemon instance's channel.sock */
@@ -297,7 +250,7 @@ export class FleetManager {
   }
 
   /** Connect IPC to a single instance with all handlers */
-  private async connectIpcToInstance(name: string): Promise<void> {
+  async connectIpcToInstance(name: string): Promise<void> {
     const sockPath = join(this.getInstanceDir(name), "channel.sock");
     if (!existsSync(sockPath)) return;
 
@@ -323,287 +276,24 @@ export class FleetManager {
     }
   }
 
-
-  /** Parse and dispatch commands from the General topic */
-  private async handleGeneralCommand(msg: InboundMessage): Promise<void> {
-    const text = msg.text?.trim();
-    if (!text) return;
-
-    if (text === "/open" || text === "/open@" || text.startsWith("/open ") || text.startsWith("/open@")) {
-      // Extract keyword: remove /open or /open@botname, take the rest
-      const keyword = text.replace(/^\/open(@\S+)?\s*/, "").trim();
-      await this.handleOpenCommand(msg, keyword || undefined);
-      return;
-    }
-
-    if (text === "/new" || text === "/new@" || text.startsWith("/new ") || text.startsWith("/new@")) {
-      const name = text.replace(/^\/new(@\S+)?\s*/, "").trim();
-      await this.handleNewCommand(msg, name || undefined);
-      return;
-    }
-
-    if (text === "/meets" || text === "/meets@" || text.startsWith("/meets ") || text.startsWith("/meets@")) {
-      await this.handleMeetsCommand(msg, "discussion");
-      return;
-    }
-
-    if (text === "/debate" || text === "/debate@" || text.startsWith("/debate ") || text.startsWith("/debate@")) {
-      await this.handleMeetsCommand(msg, "debate");
-      return;
-    }
-
-    if (text === "/collab" || text === "/collab@" || text.startsWith("/collab ") || text.startsWith("/collab@")) {
-      await this.handleMeetsCommand(msg, "collab");
-      return;
-    }
-
-    // Not a command — ignore silently
-  }
-
-  /** Handle /open command — list or search unbound directories */
-  private async handleOpenCommand(msg: InboundMessage, keyword?: string): Promise<void> {
-    if (!this.adapter || !this.fleetConfig) return;
-
-    const roots = this.getProjectRoots();
-    if (roots.length === 0 || (roots.length === 1 && roots[0] === homedir())) {
-      await this.adapter.sendText(msg.chatId, "No project roots configured. Run `ccd init` to set up.");
-      return;
-    }
-
-    const dirs = this.listUnboundDirectories();
-
-    if (keyword) {
-      const result = this.filterDirectories(dirs, keyword);
-      if (result.type === "none") {
-        await this.adapter.sendText(msg.chatId, `No projects found matching "${keyword}".`);
-        return;
-      }
-      if (result.type === "exact") {
-        await this.openBindProject(msg.chatId, result.path);
-        return;
-      }
-      // Multiple matches — show keyboard
-      await this.sendOpenKeyboard(msg.chatId, result.paths, 0);
-      return;
-    }
-
-    // No keyword — show full list
-    if (dirs.length === 0) {
-      await this.adapter.sendText(msg.chatId, "All projects are already bound to topics.");
-      return;
-    }
-    await this.sendOpenKeyboard(msg.chatId, dirs, 0);
-  }
-
-  /** Send paginated inline keyboard for /open */
-  private async sendOpenKeyboard(chatId: string, dirs: string[], page: number): Promise<void> {
-    const sessionId = Math.random().toString(16).slice(2, 10); // 8 hex chars
-    this.openSessions.set(sessionId, { paths: dirs, createdAt: Date.now() });
-
-    // TTL cleanup: remove sessions older than 5 minutes
-    const OPEN_SESSION_TTL = 5 * 60 * 1000;
-    for (const [id, session] of this.openSessions) {
-      if (Date.now() - session.createdAt > OPEN_SESSION_TTL) this.openSessions.delete(id);
-    }
-
-    const PAGE_SIZE = 5;
-    const pageStart = page * PAGE_SIZE;
-    const pageDirs = dirs.slice(pageStart, pageStart + PAGE_SIZE);
-
-    const { InlineKeyboard } = await import("grammy");
-    const keyboard = new InlineKeyboard();
-
-    for (let i = 0; i < pageDirs.length; i++) {
-      const idx = pageStart + i;
-      keyboard.text(`📁 ${basename(pageDirs[i])}`, `cmd_open:${sessionId}:${idx}`).row();
-    }
-
-    // Pagination
-    const hasMore = pageStart + PAGE_SIZE < dirs.length;
-    if (page > 0 || hasMore) {
-      if (page > 0) keyboard.text("⬅️ Prev", `cmd_open:${sessionId}:page:${page - 1}`);
-      if (hasMore) keyboard.text("➡️ Next", `cmd_open:${sessionId}:page:${page + 1}`);
-      keyboard.row();
-    }
-
-    keyboard.text("❌ Cancel", `cmd_open:${sessionId}:cancel`).row();
-
-    const headerText = page === 0
-      ? "📂 Select a project:"
-      : `📂 Projects (page ${page + 1}):`;
-
-    const tgAdapter = this.adapter as TelegramAdapter;
-    // Intentionally no threadId — keyboard is sent to the General topic
-    await tgAdapter.sendTextWithKeyboard(chatId, headerText, keyboard);
-  }
-
-  /** Create topic and bind a project directory (triggered by /open exact match or keyboard selection) */
-  private async openBindProject(chatId: string, dirPath: string): Promise<void> {
-    if (!this.adapter || !this.fleetConfig) return;
-
-    let topicId: number | undefined;
-    try {
-      const topicName = basename(dirPath);
-      topicId = await this.createForumTopic(topicName);
-      const instanceName = await this.bindAndStart(dirPath, topicId);
-
-      const tgAdapter = this.adapter as TelegramAdapter;
-      await tgAdapter.sendText(
-        chatId,
-        `✅ Bound to: ${dirPath}\nInstance: ${instanceName}`,
-        { threadId: String(topicId) },
-      );
-    } catch (err) {
-      // Rollback: remove partial instance config if bindAndStart failed after topic creation
-      if (topicId != null) {
-        const partialName = Object.entries(this.fleetConfig.instances)
-          .find(([, cfg]) => cfg.topic_id === topicId)?.[0];
-        if (partialName) {
-          delete this.fleetConfig.instances[partialName];
-          this.routingTable.delete(topicId);
-          this.saveFleetConfig();
-        }
-      }
-      await this.adapter.sendText(chatId, `❌ Failed to bind: ${(err as Error).message}`);
-    }
-  }
-
-  /** Validate project name for /new command */
-  private validateProjectName(name: string): boolean {
-    if (!name || !name.trim()) return false;
-    if (name.includes("/") || name.includes("..")) return false;
-    if (name.startsWith("-")) return false;
-    return true;
-  }
-
-  /** Handle /new command — create directory + git init + bind */
-  private async handleNewCommand(msg: InboundMessage, name?: string): Promise<void> {
-    if (!this.adapter || !this.fleetConfig) return;
-
-    if (!name) {
-      await this.adapter.sendText(msg.chatId, "Usage: /new <project-name>");
-      return;
-    }
-
-    if (!this.validateProjectName(name)) {
-      await this.adapter.sendText(msg.chatId, "Invalid project name. Avoid /, .., leading -, and whitespace-only names.");
-      return;
-    }
-
-    const roots = this.getProjectRoots();
-    if (roots.length === 0 || (roots.length === 1 && roots[0] === homedir())) {
-      await this.adapter.sendText(msg.chatId, "No project roots configured. Run `ccd init` to set up.");
-      return;
-    }
-
-    const projectDir = join(roots[0], name);
-    if (existsSync(projectDir)) {
-      await this.adapter.sendText(msg.chatId, `Directory "${name}" already exists. Use /open ${name} instead.`);
-      return;
-    }
-
-    try {
-      // Create directory + git init in parallel with createForumTopic
-      const [topicId] = await Promise.all([
-        this.createForumTopic(name),
-        (async () => {
-          mkdirSync(projectDir, { recursive: true });
-          try {
-            const { execFile } = await import("node:child_process");
-            const { promisify } = await import("node:util");
-            const exec = promisify(execFile);
-            await exec("git", ["init"], { cwd: projectDir });
-          } catch (e) { this.logger.debug({ err: e }, "git init failed for new project directory"); }
-        })(),
-      ]);
-
-      const instanceName = await this.bindAndStart(projectDir, topicId);
-
-      const tgAdapter = this.adapter as TelegramAdapter;
-      await tgAdapter.sendText(
-        msg.chatId,
-        `✅ Bound to: ${projectDir}\nInstance: ${instanceName}`,
-        { threadId: String(topicId) },
-      );
-    } catch (err) {
-      // Rollback: remove created directory
-      try {
-        if (existsSync(projectDir)) rmSync(projectDir, { recursive: true, force: true });
-      } catch (e) { this.logger.debug({ err: e }, "Rollback cleanup failed for project directory"); }
-      // Rollback: remove partial instance config
-      if (this.fleetConfig) {
-        const partialName = Object.entries(this.fleetConfig.instances)
-          .find(([, cfg]) => cfg.working_directory === projectDir)?.[0];
-        if (partialName) {
-          const tid = this.fleetConfig.instances[partialName].topic_id;
-          delete this.fleetConfig.instances[partialName];
-          if (tid != null) this.routingTable.delete(tid);
-          this.saveFleetConfig();
-        }
-      }
-      await this.adapter.sendText(msg.chatId, `❌ Failed: ${(err as Error).message}`);
-    }
-  }
-
   /** Handle inbound message — transcribe voice if present, then route */
   private async handleInboundMessage(msg: InboundMessage): Promise<void> {
     const threadId = msg.threadId ? parseInt(msg.threadId, 10) : undefined;
     if (threadId == null) {
-      await this.handleGeneralCommand(msg);
+      // General topic: try topic commands first, then meeting commands
+      if (await this.topicCommands.handleGeneralCommand(msg)) return;
+      if (await this.meetingManager.handleCommand(msg)) return;
       return;
     }
 
     const target = this.routingTable.get(threadId);
     if (!target) {
-      this.handleUnboundTopic(msg, threadId);
+      this.topicCommands.handleUnboundTopic(msg);
       return;
     }
     const instanceName = target.name;
 
-    let text = msg.text;
-    const extraMeta: Record<string, string> = {};
-    const tgAdapter = this.adapter as TelegramAdapter;
-
-    // Auto-download photos so Claude can Read them directly
-    const photoAttachment = msg.attachments?.find(a => a.kind === "photo");
-    if (photoAttachment) {
-      try {
-        const localPath = await tgAdapter.downloadAttachment(photoAttachment.fileId);
-        extraMeta.image_path = localPath;
-      } catch (err) {
-        this.logger.warn({ err: (err as Error).message }, "Photo download failed");
-      }
-    }
-
-    // Transcribe voice/audio
-    const voiceAttachment = msg.attachments?.find(a => a.kind === "voice" || a.kind === "audio");
-    if (voiceAttachment) {
-      const groqKey = process.env.GROQ_API_KEY;
-      if (groqKey) {
-        try {
-          const localPath = await tgAdapter.downloadAttachment(voiceAttachment.fileId);
-          const result = await transcribe(localPath, groqKey);
-          try { unlinkSync(localPath); } catch { /* ignore */ }
-          text = text ? `${text}\n\n[語音訊息] ${result.text}` : `[語音訊息] ${result.text}`;
-          this.logger.info({ instanceName, transcription: result.text.slice(0, 80) }, "Voice transcribed");
-        } catch (err) {
-          this.logger.warn({ err: (err as Error).message }, "Voice transcription failed");
-          text = text || "[語音訊息 — 轉錄失敗]";
-        }
-      } else {
-        this.logger.warn("GROQ_API_KEY not set, skipping voice transcription");
-        text = text || "[語音訊息 — 未設定 STT API key]";
-      }
-      extraMeta.attachment_file_id = voiceAttachment.fileId;
-    }
-
-    // Pass other attachment types as file_id for manual download
-    const otherAttachment = msg.attachments?.find(a =>
-      a.kind !== "photo" && a.kind !== "voice" && a.kind !== "audio",
-    );
-    if (otherAttachment) {
-      extraMeta.attachment_file_id = otherAttachment.fileId;
-    }
+    const { text, extraMeta } = await processAttachments(msg, this.adapter!, this.logger, instanceName);
 
     const ipc = this.instanceIpcClients.get(instanceName);
     if (!ipc) {
@@ -611,7 +301,6 @@ export class FleetManager {
       return;
     }
 
-    // Auto-react 👀 so sender knows the message was received
     if (this.adapter && msg.chatId && msg.messageId) {
       this.adapter.react(msg.chatId, msg.messageId, "👀")
         .catch(e => this.logger.debug({ err: (e as Error).message }, "Auto-react failed"));
@@ -641,7 +330,6 @@ export class FleetManager {
     const requestId = msg.requestId as number | undefined;
     const fleetRequestId = msg.fleetRequestId as string | undefined;
 
-    const chatId = args.chat_id as string ?? "";
     const respond = (result: unknown, error?: string) => {
       const ipc = this.instanceIpcClients.get(instanceName);
       if (fleetRequestId) {
@@ -651,41 +339,21 @@ export class FleetManager {
       }
     };
 
-    // Resolve threadId from instance → topic_id mapping (check ephemeral map first)
-    const ephemeralTopicId = this.ephemeralTopicMap.get(instanceName);
+    // Resolve threadId from instance → topic_id mapping
+    const ephemeralTopicId = this.meetingManager.getEphemeralTopicId(instanceName);
     const instanceConfig = this.fleetConfig?.instances[instanceName];
     const threadId = args.thread_id as string ?? (ephemeralTopicId ? String(ephemeralTopicId) : (instanceConfig?.topic_id ? String(instanceConfig.topic_id) : undefined));
 
-    switch (tool) {
-      case "reply": {
+    // Route standard channel tools (reply, react, edit_message, download_attachment)
+    if (routeToolCall(this.adapter, tool, args, threadId, respond)) {
+      if (tool === "reply") {
         this.logger.info(`→ ${instanceName} claude: ${(args.text as string ?? "").slice(0, 100)}`);
-        const files = Array.isArray(args.files) ? args.files as string[] : [];
-        this.adapter.sendText(chatId, args.text as string ?? "", {
-          threadId,
-          replyTo: args.reply_to as string,
-        }).then(async (sent) => {
-          for (const filePath of files) {
-            await this.adapter!.sendFile(chatId, filePath, { threadId });
-          }
-          respond(sent);
-        }).catch(e => respond(null, e.message));
-        break;
       }
-      case "react":
-        this.adapter.react(chatId, args.message_id as string ?? "", args.emoji as string ?? "")
-          .then(() => respond("ok"))
-          .catch(e => respond(null, e.message));
-        break;
-      case "edit_message":
-        this.adapter.editMessage(chatId, args.message_id as string ?? "", args.text as string ?? "")
-          .then(() => respond("ok"))
-          .catch(e => respond(null, e.message));
-        break;
-      case "download_attachment":
-        this.adapter.downloadAttachment(args.file_id as string ?? "")
-          .then(path => respond(path))
-          .catch(e => respond(null, e.message));
-        break;
+      return;
+    }
+
+    // Fleet-specific tools
+    switch (tool) {
       case "send_to_instance": {
         const targetName = args.instance_name as string;
         const message = args.message as string;
@@ -696,7 +364,6 @@ export class FleetManager {
           break;
         }
 
-        // Send as fleet_inbound to the target instance
         targetIpc.send({
           type: "fleet_inbound",
           content: message,
@@ -714,9 +381,9 @@ export class FleetManager {
         // Post to both Telegram topics for visibility
         const groupId = this.fleetConfig?.channel?.group_id;
         if (groupId && this.adapter) {
-          const senderTopicId = this.ephemeralTopicMap.get(instanceName)
+          const senderTopicId = this.meetingManager.getEphemeralTopicId(instanceName)
             ?? this.fleetConfig?.instances[instanceName]?.topic_id;
-          const targetTopicId = this.ephemeralTopicMap.get(targetName)
+          const targetTopicId = this.meetingManager.getEphemeralTopicId(targetName)
             ?? this.fleetConfig?.instances[targetName]?.topic_id;
           const preview = message.length > 200 ? message.slice(0, 200) + "…" : message;
 
@@ -753,7 +420,7 @@ export class FleetManager {
     }
   }
 
-  /** Handle approval request from a daemon instance — forward to shared adapter */
+  /** Handle approval request from a daemon instance */
   private handleApprovalFromInstance(instanceName: string, msg: Record<string, unknown>): void {
     this.logger.debug({ instanceName, approvalId: msg.approvalId }, "Received approval request from instance");
     if (!this.adapter) {
@@ -766,10 +433,8 @@ export class FleetManager {
     const approvalId = msg.approvalId as string;
     const instanceConfig = this.fleetConfig?.instances[instanceName];
     const threadId = instanceConfig?.topic_id ? String(instanceConfig.topic_id) : undefined;
-    this.logger.debug({ instanceName, threadId, approvalId }, "Sending approval to Telegram");
 
     this.adapter.sendApproval(prompt, (decision) => {
-      this.logger.debug({ instanceName, approvalId, decision }, "Approval callback received");
       this.sendApprovalResponse(instanceName, approvalId, decision);
     }, undefined, threadId).catch((err) => {
       this.logger.warn({ instanceName, err: (err as Error).message }, "Failed to send approval to Telegram");
@@ -778,12 +443,11 @@ export class FleetManager {
   }
 
   private sendApprovalResponse(instanceName: string, approvalId: string, decision: "approve" | "deny"): void {
-    this.logger.debug({ instanceName, approvalId, decision }, "Sending approval response to daemon");
     const ipc = this.instanceIpcClients.get(instanceName);
     ipc?.send({ type: "fleet_approval_response", approvalId, decision });
   }
 
-  /** Handle tool status update from a daemon instance — forward to Telegram */
+  /** Handle tool status update from a daemon instance */
   private handleToolStatusFromInstance(instanceName: string, msg: Record<string, unknown>): void {
     if (!this.adapter) return;
 
@@ -798,7 +462,6 @@ export class FleetManager {
       this.adapter.editMessage(chatId, editMessageId, text).catch(e => this.logger.debug({ err: e }, "Failed to edit tool status message"));
     } else {
       this.adapter.sendText(chatId, text, { threadId }).then((sent) => {
-        // Send the messageId back to the daemon so it can edit next time
         const ipc = this.instanceIpcClients.get(instanceName);
         ipc?.send({ type: "fleet_tool_status_ack", messageId: sent.messageId });
       }).catch(e => this.logger.debug({ err: e }, "Failed to send tool status message"));
@@ -829,9 +492,7 @@ export class FleetManager {
 
     if (deliver()) {
       this.scheduler!.recordRun(id, "delivered");
-      if (source !== target) {
-        this.notifySourceTopic(schedule);
-      }
+      if (source !== target) this.notifySourceTopic(schedule);
       return;
     }
 
@@ -907,10 +568,10 @@ export class FleetManager {
     }
   }
 
-  // ===================== Auto-create topics =====================
+  // ===================== Topic management =====================
 
   /** Create a Telegram Forum Topic. Returns the message_thread_id. */
-  private async createForumTopic(topicName: string): Promise<number> {
+  async createForumTopic(topicName: string): Promise<number> {
     const groupId = this.fleetConfig?.channel?.group_id;
     const botTokenEnv = this.fleetConfig?.channel?.bot_token_env;
     if (!groupId || !botTokenEnv) throw new Error("No group_id or bot_token configured");
@@ -932,239 +593,36 @@ export class FleetManager {
     return data.result.message_thread_id;
   }
 
-  /** Create Telegram topics for instances that don't have topic_id */
-  /**
-   * Create Telegram topics for instances that don't have topic_id.
-   * Note: With the /open and /new command flow, instances always get a topic_id
-   * at creation time. This method is kept as a safety net for manually-added
-   * instances in fleet.yaml. May be removed in the future.
-   */
-  private async autoCreateTopics(fleet: FleetConfig): Promise<void> {
-    if (!fleet.channel?.group_id) return;
-    const botToken = process.env[fleet.channel.bot_token_env];
-    if (!botToken) return;
+  private topicCleanupTimer: ReturnType<typeof setInterval> | null = null;
 
-    let configChanged = false;
-    for (const [name, config] of Object.entries(fleet.instances)) {
-      if (config.topic_id != null) continue; // already has topic
+  /** Periodically check if bound topics still exist */
+  private startTopicCleanupPoller(): void {
+    this.topicCleanupTimer = setInterval(async () => {
+      if (!this.fleetConfig?.channel?.group_id) return;
+      const tgAdapter = this.adapter as TelegramAdapter;
+      const groupId = this.fleetConfig.channel.group_id;
 
-      try {
-        // Use Bot API directly (adapter may not be started yet)
-        const topicName = basename(config.working_directory);
-        const threadId = await this.createForumTopic(topicName);
-        config.topic_id = threadId;
-        configChanged = true;
-        this.logger.info({ name, topicId: config.topic_id, topicName }, "Auto-created Telegram topic");
-      } catch (err) {
-        this.logger.warn({ name, err }, "Failed to auto-create topic");
-      }
-    }
-
-    if (configChanged) {
-      this.saveFleetConfig();
-    }
-  }
-
-  // ===================== Auto-bind =====================
-
-  /** Reply with redirect when message arrives in an unbound topic */
-  private async handleUnboundTopic(msg: InboundMessage, _threadId: number): Promise<void> {
-    if (!this.adapter) return;
-    await this.adapter.sendText(
-      msg.chatId,
-      "Please use /open or /new in General to bind a project to a topic.",
-      { threadId: msg.threadId },
-    );
-  }
-
-  /** Dispatch callback queries by prefix */
-  private async handleCallbackQuery(data: { callbackData: string; chatId: string; threadId?: string; messageId: string }): Promise<void> {
-    const { callbackData, chatId, messageId } = data;
-
-    if (callbackData.startsWith("cmd_open:")) {
-      await this.handleOpenCallback(callbackData, chatId, messageId);
-      return;
-    }
-
-    // Legacy prefixes from old directory browser — no longer handled
-  }
-
-  /** Handle callback from /open inline keyboard */
-  private async handleOpenCallback(callbackData: string, chatId: string, messageId: string): Promise<void> {
-    if (!this.adapter) return;
-
-    // Format: cmd_open:<sessionId>:<action>
-    const parts = callbackData.split(":");
-    const sessionId = parts[1];
-
-    // Validate session
-    const session = this.openSessions.get(sessionId);
-    if (!session) {
-      await this.adapter.editMessage(chatId, messageId, "This menu has expired. Use /open again.");
-      return;
-    }
-
-    const action = parts[2];
-
-    // Cancel
-    if (action === "cancel") {
-      this.openSessions.delete(sessionId);
-      await this.adapter.editMessage(chatId, messageId, "Cancelled.");
-      return;
-    }
-
-    // Pagination: cmd_open:<sessionId>:page:<pageNum>
-    if (action === "page") {
-      const page = parseInt(parts[3], 10);
-      await this.adapter.editMessage(chatId, messageId, "Loading...");
-      await this.sendOpenKeyboard(chatId, session.paths, page);
-      return;
-    }
-
-    // Directory selection: cmd_open:<sessionId>:<index>
-    const index = parseInt(action, 10);
-    if (isNaN(index) || index < 0 || index >= session.paths.length) {
-      await this.adapter.editMessage(chatId, messageId, "Invalid selection.");
-      return;
-    }
-
-    const dirPath = session.paths[index];
-    this.openSessions.delete(sessionId);
-    await this.adapter.editMessage(chatId, messageId, `Binding to ${basename(dirPath)}...`);
-    await this.openBindProject(chatId, dirPath);
-  }
-
-  // ===================== Auto-unbind =====================
-
-  /** Handle topic deletion — stop daemon and remove from config */
-  private async handleTopicDeleted(threadId: number): Promise<void> {
-    const target = this.routingTable.get(threadId);
-    if (!target) return;
-    const instanceName = target.name;
-
-    this.logger.info({ instanceName, threadId }, "Topic deleted — auto-unbinding");
-
-    // Clean up related schedules
-    if (this.scheduler) {
-      const count = this.scheduler.deleteByInstanceOrThread(instanceName, String(threadId));
-      if (count > 0) {
-        this.logger.info({ threadId, instanceName, count }, "Cleaned up schedules for deleted topic");
-        const groupId = this.fleetConfig?.channel?.group_id;
-        if (groupId && this.adapter) {
-          this.adapter.sendText(String(groupId), `⚠️ Topic 已刪除，已清除 ${count} 條相關排程。`).catch(e => this.logger.debug({ err: e }, "Failed to send schedule cleanup notification"));
-        }
-      }
-    }
-
-    // Stop the daemon
-    await this.stopInstance(instanceName);
-
-    // Remove from routing table
-    this.routingTable.delete(threadId);
-
-    // Remove from fleet config
-    if (this.fleetConfig) {
-      delete this.fleetConfig.instances[instanceName];
-      this.saveFleetConfig();
-    }
-
-    // Close IPC connection
-    const ipc = this.instanceIpcClients.get(instanceName);
-    if (ipc) {
-      await ipc.close();
-      this.instanceIpcClients.delete(instanceName);
-    }
-  }
-
-  // ===================== Helpers =====================
-
-  /**
-   * Create instance config, save fleet.yaml, start daemon, connect IPC.
-   * Returns the generated instance name.
-   */
-  private async bindAndStart(dirPath: string, topicId: number): Promise<string> {
-    if (!this.fleetConfig) throw new Error("Fleet config not loaded");
-
-    const instanceName = `${sanitizeInstanceName(basename(dirPath))}-t${topicId}`;
-
-    this.fleetConfig.instances[instanceName] = {
-      working_directory: dirPath,
-      topic_id: topicId,
-      restart_policy: this.fleetConfig.defaults.restart_policy ?? DEFAULT_INSTANCE_CONFIG.restart_policy,
-      context_guardian: this.fleetConfig.defaults.context_guardian ?? DEFAULT_INSTANCE_CONFIG.context_guardian,
-      memory: this.fleetConfig.defaults.memory ?? DEFAULT_INSTANCE_CONFIG.memory,
-      log_level: this.fleetConfig.defaults.log_level ?? DEFAULT_INSTANCE_CONFIG.log_level,
-    };
-
-    this.saveFleetConfig();
-    this.routingTable.set(topicId, { kind: "instance", name: instanceName });
-
-    await this.startInstance(instanceName, this.fleetConfig.instances[instanceName], true);
-
-    await new Promise(r => setTimeout(r, 5000));
-    await this.connectIpcToInstance(instanceName);
-
-    this.logger.info({ instanceName, topicId }, "Topic bound and started");
-    return instanceName;
-  }
-
-  /** Get configured project roots, with fallback */
-  private getProjectRoots(): string[] {
-    const roots = this.fleetConfig?.project_roots;
-    if (roots && roots.length > 0) {
-      return roots.map(r => r.startsWith("~") ? join(homedir(), r.slice(1)) : r)
-        .filter(r => existsSync(r));
-    }
-    // Fallback: home directory
-    return [homedir()];
-  }
-
-  /** List project directories from project_roots */
-  private listProjectDirectories(): string[] {
-    const dirs: string[] = [];
-    for (const root of this.getProjectRoots()) {
-      try {
-        const entries = readdirSync(root, { withFileTypes: true });
-        for (const entry of entries) {
-          if (entry.isDirectory() && !entry.name.startsWith(".")) {
-            dirs.push(join(root, entry.name));
+      const bot = tgAdapter.getBot();
+      for (const [threadId, target] of this.routingTable) {
+        try {
+          const msg = await bot.api.sendMessage(groupId, "\u200B", {
+            message_thread_id: threadId,
+          });
+          await bot.api.deleteMessage(groupId, msg.message_id).catch(e => this.logger.debug({ err: e }, "Failed to delete topic probe message"));
+        } catch (err: unknown) {
+          const errMsg = String(err);
+          if (errMsg.includes("thread not found") || errMsg.includes("TOPIC_ID_INVALID")) {
+            const targetName = target.kind === "instance" ? target.name : "meeting";
+            this.logger.info({ threadId, target: targetName }, "Topic deleted — auto-unbinding");
+            await this.topicCommands.handleTopicDeleted(threadId);
           }
         }
-      } catch (e) { this.logger.debug({ err: e, root }, "Failed to read project root directory"); }
-    }
-    return dirs.sort((a, b) => basename(a).localeCompare(basename(b)));
-  }
-
-  /** List directories from project_roots that are not already bound to an instance */
-  private listUnboundDirectories(): string[] {
-    const boundDirs = new Set(
-      Object.values(this.fleetConfig?.instances ?? {}).map(i => i.working_directory),
-    );
-    return this.listProjectDirectories().filter(d => !boundDirs.has(d));
-  }
-
-  /** Match directories by keyword. Exact basename match wins over substring. */
-  private filterDirectories(
-    dirs: string[],
-    keyword: string,
-  ): { type: "exact"; path: string } | { type: "multiple"; paths: string[] } | { type: "none" } {
-    const kw = keyword.toLowerCase();
-
-    // Check for exact basename match first
-    const exactMatches = dirs.filter(d => basename(d).toLowerCase() === kw);
-    if (exactMatches.length === 1) {
-      return { type: "exact", path: exactMatches[0] };
-    }
-
-    // Fall back to substring match
-    const subMatches = dirs.filter(d => basename(d).toLowerCase().includes(kw));
-    if (subMatches.length === 0) return { type: "none" };
-    if (subMatches.length === 1) return { type: "exact", path: subMatches[0] };
-    return { type: "multiple", paths: subMatches };
+      }
+    }, 5 * 60_000); // Check every 5 minutes (reduced from 60s to avoid API rate limits)
   }
 
   /** Save fleet config back to fleet.yaml */
-  private saveFleetConfig(): void {
+  saveFleetConfig(): void {
     if (!this.fleetConfig || !this.configPath) return;
     const toSave: Record<string, unknown> = {};
     if (this.fleetConfig.project_roots) toSave.project_roots = this.fleetConfig.project_roots;
@@ -1181,71 +639,34 @@ export class FleetManager {
     this.logger.info({ path: this.configPath }, "Saved fleet config");
   }
 
-  private topicCleanupTimer: ReturnType<typeof setInterval> | null = null;
-
-  /** Periodically check if bound topics still exist */
-  private startTopicCleanupPoller(): void {
-    this.topicCleanupTimer = setInterval(async () => {
-      if (!this.fleetConfig?.channel?.group_id) return;
-      const tgAdapter = this.adapter as TelegramAdapter;
-      const groupId = this.fleetConfig.channel.group_id;
-
-      const bot = tgAdapter.getBot();
-      for (const [threadId, target] of this.routingTable) {
-        try {
-          // sendMessage is the only reliable way to check if a topic still exists
-          // sendChatAction and editForumTopic both return ok:true for deleted topics
-          const msg = await bot.api.sendMessage(groupId, "\u200B", { // zero-width space — invisible probe
-            message_thread_id: threadId,
-          });
-          // Topic exists — delete the probe message
-          await bot.api.deleteMessage(groupId, msg.message_id).catch(e => this.logger.debug({ err: e }, "Failed to delete topic probe message"));
-        } catch (err: unknown) {
-          const errMsg = String(err);
-          if (errMsg.includes("thread not found") || errMsg.includes("TOPIC_ID_INVALID")) {
-            const targetName = target.kind === "instance" ? target.name : "meeting";
-            this.logger.info({ threadId, target: targetName }, "Topic deleted — auto-unbinding");
-            await this.handleTopicDeleted(threadId);
-          }
-        }
-      }
-    }, 60_000); // Check every 60 seconds
-  }
-
   async stopAll(): Promise<void> {
     if (this.topicCleanupTimer) {
       clearInterval(this.topicCleanupTimer);
       this.topicCleanupTimer = null;
     }
 
-    // 1. Shutdown scheduler first
     this.scheduler?.shutdown();
 
-    // 2. Stop all daemon instances
     await Promise.allSettled(
       [...this.daemons.keys()].map(name => this.stopInstance(name))
     );
 
-    // 3. Close IPC connections
     for (const [, ipc] of this.instanceIpcClients) {
       await ipc.close();
     }
     this.instanceIpcClients.clear();
 
-    // 4. Stop adapter
     if (this.adapter) {
       await this.adapter.stop();
       this.adapter = null;
     }
 
-    // 5. Remove PID file
     const pidPath = join(this.dataDir, "fleet.pid");
     try { unlinkSync(pidPath); } catch (e) { this.logger.debug({ err: e }, "Failed to remove fleet PID file"); }
   }
 
   /**
    * Graceful restart: wait for all instances to be idle, then stop and start them.
-   * Fleet manager process stays alive — only instances are restarted.
    */
   async restartInstances(): Promise<void> {
     if (!this.configPath) {
@@ -1260,15 +681,12 @@ export class FleetManager {
 
     this.logger.info(`Graceful restart: waiting for ${instanceNames.length} instances to idle...`);
 
-    // Notify all instances about pending restart
     const groupId = this.fleetConfig?.channel?.group_id;
     if (groupId && this.adapter) {
       await this.adapter.sendText(String(groupId), `🔄 Graceful restart initiated — waiting for all instances to idle...`)
         .catch(e => this.logger.debug({ err: e }, "Failed to post restart notification"));
     }
 
-    // Wait for all instances to be idle (no transcript activity for 10s),
-    // with a 5-minute overall timeout to avoid hanging on stuck instances.
     const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
     let timeoutHandle: ReturnType<typeof setTimeout>;
     const idleDeadline = new Promise<never>((_, reject) => {
@@ -1297,28 +715,23 @@ export class FleetManager {
 
     this.logger.info("All instances idle — restarting...");
 
-    // Close IPC connections first
     for (const [, ipc] of this.instanceIpcClients) {
       await ipc.close();
     }
     this.instanceIpcClients.clear();
 
-    // Stop all instances
     await Promise.allSettled(
       instanceNames.map(name => this.stopInstance(name))
     );
 
-    // Reload config (may have changed)
     const fleet = this.loadConfig(this.configPath);
     this.fleetConfig = fleet;
     const topicMode = fleet.channel?.mode === "topic";
 
-    // Restart instances
     for (const [name, config] of Object.entries(fleet.instances)) {
       await this.startInstance(name, config, topicMode && !config.channel);
     }
 
-    // Reconnect IPC
     if (topicMode) {
       this.routingTable = this.buildRoutingTable();
       await new Promise(r => setTimeout(r, 3000));
@@ -1330,304 +743,5 @@ export class FleetManager {
       await this.adapter.sendText(String(groupId), `✅ Graceful restart complete — ${this.daemons.size} instances running`)
         .catch(e => this.logger.debug({ err: e }, "Failed to post restart completion notification"));
     }
-  }
-
-  // ===================== /meets Command =====================
-
-  private parseMeetsArgs(text: string): { topic: string; mode: "debate" | "collab" | "discussion"; count: number; rounds?: number; names?: string[]; repo?: string; angles?: string[] } | null {
-    const args = text.replace(/^\/(meets|collab|debate)(@\S+)?\s*/, "").trim();
-    if (!args) return null;
-
-    let mode: "debate" | "collab" | "discussion" = "discussion";
-    let count = 2;
-    let rounds: number | undefined;
-    let names: string[] | undefined;
-    let repo: string | undefined;
-    let angles: string[] | undefined;
-    let topic = args;
-
-    const repoMatch = topic.match(/--repo\s+(\S+)/);
-    if (repoMatch) {
-      repo = repoMatch[1].startsWith("~")
-        ? join(homedir(), repoMatch[1].slice(1))
-        : resolve(repoMatch[1]);
-      topic = topic.replace(repoMatch[0], "").trim();
-    }
-
-    const rMatch = topic.match(/-r\s+(\d+)/);
-    if (rMatch) {
-      rounds = parseInt(rMatch[1], 10);
-      topic = topic.replace(rMatch[0], "").trim();
-    }
-
-    const nMatch = topic.match(/-n\s+(\d+)/);
-    if (nMatch) {
-      count = parseInt(nMatch[1], 10);
-      topic = topic.replace(nMatch[0], "").trim();
-    }
-
-    const namesMatch = topic.match(/--names\s+"([^"]+)"/);
-    if (namesMatch) {
-      names = namesMatch[1].split(",").map(n => n.trim());
-      topic = topic.replace(namesMatch[0], "").trim();
-    }
-
-    const anglesMatch = topic.match(/--angles\s+"([^"]+)"/);
-    if (anglesMatch) {
-      angles = anglesMatch[1].split(",").map(a => a.trim());
-      topic = topic.replace(anglesMatch[0], "").trim();
-    }
-
-    if (topic.includes("--debate")) {
-      mode = "debate";
-      topic = topic.replace("--debate", "").trim();
-    }
-
-    topic = topic.replace(/^["']|["']$/g, "").trim();
-    if (!topic) return null;
-
-    return { topic, mode, count, rounds, names, repo, angles };
-  }
-
-  private async handleMeetsCommand(msg: InboundMessage, forceMode?: "debate" | "collab" | "discussion"): Promise<void> {
-    if (!this.adapter) return;
-
-    const parsed = this.parseMeetsArgs(msg.text);
-    if (!parsed) {
-      const usage = forceMode === "collab"
-        ? '用法：/collab --repo ~/app "任務"\n例如：/collab -n 3 --repo ~/app "實作 OAuth"'
-        : '用法：/meets "議題"\n例如：/meets -n 3 "要不要拆 monorepo？"';
-      await this.adapter.sendText(msg.chatId, usage);
-      return;
-    }
-
-    // Override mode if command specifies it
-    if (forceMode) parsed.mode = forceMode;
-
-    if (parsed.mode === "collab" && !parsed.repo) {
-      await this.adapter.sendText(msg.chatId, '⚠️ 協作模式需要指定 repo：/collab --repo ~/app "任務"');
-      return;
-    }
-
-    if (parsed.repo && !existsSync(join(parsed.repo, ".git"))) {
-      // Auto-create repo if path doesn't exist or isn't a git repo
-      const { mkdirSync } = await import("node:fs");
-      const { execFileSync } = await import("child_process");
-      mkdirSync(parsed.repo, { recursive: true });
-      execFileSync("git", ["init"], { cwd: parsed.repo, stdio: "pipe" });
-      // Worktree requires at least one commit
-      execFileSync("git", ["commit", "--allow-empty", "-m", "init"], { cwd: parsed.repo, stdio: "pipe" });
-      this.logger.info({ repo: parsed.repo }, "Auto-initialized git repo for collab");
-    }
-
-    const maxParticipants = this.fleetConfig?.defaults?.meetings?.maxParticipants ?? 6;
-    if (parsed.count > maxParticipants) {
-      await this.adapter.sendText(msg.chatId, `⚠️ 超過參與者上限 (${maxParticipants})`);
-      return;
-    }
-
-    if (parsed.count < 2) {
-      await this.adapter.sendText(msg.chatId, "⚠️ 至少需要 2 位參與者");
-      return;
-    }
-
-    await this.startMeeting(msg.chatId, parsed.topic, parsed.mode, parsed.count, parsed.names, parsed.repo, parsed.rounds, parsed.angles);
-  }
-
-  private async startMeeting(
-    chatId: string,
-    topic: string,
-    mode: "debate" | "collab" | "discussion",
-    count: number,
-    customNames?: string[],
-    repo?: string,
-    rounds?: number,
-    angles?: string[],
-  ): Promise<void> {
-    // Create meeting topic
-    let channelId: number;
-    try {
-      const topicLabel = topic.length > 30 ? topic.slice(0, 30) + "…" : topic;
-      const result = await this.createMeetingChannel(`📋 ${topicLabel}`);
-      channelId = result.channelId;
-    } catch (err) {
-      await this.adapter!.sendText(chatId, `⚠️ 無法建立會議 topic: ${(err as Error).message}`);
-      return;
-    }
-
-    // Simple system prompt — just define the role
-    const systemPrompt = `你是一個 AI 會議主持人。你的工作是協調多角度討論並用 reply 工具將每個角色的回應分批發送到 channel。每個角色的回應要分開發送，不要合併成一則訊息。`;
-
-    // Build the kickoff message based on mode
-    let kickoffMessage: string;
-    if (mode === "debate") {
-      kickoffMessage = `使用 Agent Team 來辯論這個議題：「${topic}」\n\n要求：\n- ${count} 位參與者（正方、反方${count > 2 ? "、仲裁" : ""}）\n- 進行 ${rounds ?? 3} 輪辯論\n- 每個角色的發言要分開用 reply 發送，標明角色`;
-    } else if (mode === "collab") {
-      kickoffMessage = `使用 Agent Team 來協作完成這個任務：「${topic}」\n${repo ? `\n專案目錄：${repo}\n` : ""}\n要求：\n- ${count} 位參與者\n- 每個人用 isolation: "worktree" 在獨立 git worktree 工作\n- 先討論分工，再各自開發\n- 每個階段進展都分開用 reply 發送`;
-    } else {
-      // discussion mode
-      if (!angles) {
-        const defaultAngles = ["技術面", "成本效益", "使用者體驗", "風險與挑戰", "組織影響", "長期策略"];
-        angles = defaultAngles.slice(0, count);
-      }
-      const angleList = angles.join("、");
-      kickoffMessage = `使用 Agent Team 來從多個角度討論這個議題：「${topic}」\n\n分析角度：${angleList}\n\n要求：\n- 每個角度派一個 Agent 獨立分析\n- 分析完成後進行 ${rounds ?? 2} 輪交叉討論\n- 最後收斂出共識結論\n- 每個角色的回應要分開用 reply 發送，標明角度`;
-    }
-
-    // Spawn single orchestrator instance
-    const instanceName = await this.spawnEphemeralInstance({
-      systemPrompt,
-      workingDirectory: repo ?? "/tmp",
-      lightweight: true,
-      skipPermissions: true,
-    });
-
-    // Register in routing table so user messages in the topic reach this instance
-    this.routingTable.set(channelId, { kind: "instance", name: instanceName });
-    this.ephemeralTopicMap.set(instanceName, channelId);
-
-    // Notify user
-    await this.adapter!.sendText(chatId, `✅ 會議已建立，請到新的 topic 查看`);
-
-    // Send the kickoff message
-    const ipc = this.instanceIpcClients.get(instanceName);
-    if (ipc) {
-      ipc.send({
-        type: "fleet_inbound",
-        content: kickoffMessage,
-        meta: {
-          chat_id: String(this.fleetConfig?.channel?.group_id ?? ""),
-          message_id: `meet-${Date.now()}`,
-          user: "system",
-          user_id: "system",
-          ts: new Date().toISOString(),
-          thread_id: String(channelId),
-        },
-      });
-    }
-  }
-
-  /** Spawn an ephemeral Claude instance for meeting participation */
-  async spawnEphemeralInstance(config: EphemeralInstanceConfig, signal?: AbortSignal): Promise<string> {
-    const name = `meet-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-
-    if (signal?.aborted) throw Object.assign(new Error("Aborted"), { name: "AbortError" });
-
-    // Create git worktree for collab mode when working in a real repo
-    let workDir = config.workingDirectory;
-    if (workDir !== "/tmp") {
-      if (!existsSync(join(workDir, ".git"))) {
-        throw new Error(`Not a git repository: ${workDir}`);
-      }
-      const { execFileSync } = await import("child_process");
-      // Ensure repo has at least one commit (worktree requires HEAD)
-      try {
-        execFileSync("git", ["rev-parse", "HEAD"], { cwd: workDir, stdio: "pipe" });
-      } catch {
-        execFileSync("git", ["commit", "--allow-empty", "-m", "init"], { cwd: workDir, stdio: "pipe" });
-      }
-      const worktreePath = join("/tmp", `ccd-collab-${name}`);
-      const branchName = `meet/${name}`;
-      execFileSync("git", ["worktree", "add", worktreePath, "-b", branchName], { cwd: workDir, stdio: "pipe" });
-      workDir = worktreePath;
-      this.logger.info({ name, worktreePath, branchName }, "Created git worktree for collab instance");
-    }
-
-    const instanceConfig: InstanceConfig = {
-      working_directory: workDir,
-      lightweight: true,  // All ephemeral instances skip context guardian, memory layer, etc.
-      systemPrompt: config.systemPrompt,
-      skipPermissions: config.skipPermissions,
-      restart_policy: { max_retries: 0, backoff: "linear", reset_after: 0 },
-      context_guardian: { threshold_percentage: 100, max_idle_wait_ms: 0, completion_timeout_ms: 0, grace_period_ms: 0, max_age_hours: 24 },
-      memory: { auto_summarize: false, watch_memory_dir: false, backup_to_sqlite: false },
-      log_level: "info",
-      backend: config.backend,
-    };
-
-    await this.startInstance(name, instanceConfig, true);
-
-    // Wait for socket file, then connect IPC (same pattern as bindAndStart)
-    const deadline = Date.now() + 60_000;
-    const sockPath = join(this.getInstanceDir(name), "channel.sock");
-    while (!existsSync(sockPath)) {
-      if (Date.now() > deadline) throw new Error(`IPC timeout for ${name}`);
-      if (signal?.aborted) throw Object.assign(new Error("Aborted"), { name: "AbortError" });
-      await new Promise(r => setTimeout(r, 500));
-    }
-    await this.connectIpcToInstance(name);
-
-    // Wait for MCP server to connect (Daemon receives mcp_ready from MCP server)
-    // Without this, the kickoff message could be lost because MCP isn't connected yet
-    const ipc = this.instanceIpcClients.get(name);
-    if (ipc) {
-      const mcpDeadline = Date.now() + 60_000;
-      await new Promise<void>((resolve, reject) => {
-        const onMessage = (msg: Record<string, unknown>) => {
-          if (msg.type === "mcp_ready") {
-            resolve();
-          }
-        };
-        ipc.on("message", onMessage);
-        const check = () => {
-          if (Date.now() > mcpDeadline) {
-            ipc.removeListener("message", onMessage);
-            reject(new Error(`MCP ready timeout for ${name}`));
-          } else {
-            setTimeout(check, 500);
-          }
-        };
-        check();
-      });
-    }
-
-    return name;
-  }
-
-  /** Destroy an ephemeral instance created for a meeting */
-  async destroyEphemeralInstance(name: string): Promise<void> {
-    await this.stopInstance(name);
-
-    // Clean up git worktree if it exists
-    const worktreePath = join("/tmp", `ccd-collab-${name}`);
-    if (existsSync(worktreePath)) {
-      try {
-        const { execFileSync } = await import("child_process");
-        // Resolve main repo from worktree before removing it
-        const mainRepo = execFileSync("git", ["rev-parse", "--git-common-dir"], { cwd: worktreePath, stdio: "pipe" }).toString().trim();
-        const mainRepoDir = dirname(mainRepo); // .git -> parent dir
-        execFileSync("git", ["worktree", "remove", "--force", worktreePath], { cwd: mainRepoDir, stdio: "pipe" });
-        try {
-          execFileSync("git", ["branch", "-D", `meet/${name}`], { cwd: mainRepoDir, stdio: "pipe" });
-        } catch { /* branch may not exist */ }
-        this.logger.info({ name }, "Cleaned up git worktree");
-      } catch (err) {
-        this.logger.warn({ name, err }, "Failed to clean up worktree");
-      }
-    }
-  }
-
-  /** Create a Telegram forum topic for a meeting */
-  async createMeetingChannel(title: string): Promise<{ channelId: number }> {
-    const threadId = await this.createForumTopic(title);
-    return { channelId: threadId };
-  }
-
-  /** Close a Telegram forum topic used for a meeting */
-  async closeMeetingChannel(channelId: number): Promise<void> {
-    const groupId = this.fleetConfig?.channel?.group_id;
-    const botTokenEnv = this.fleetConfig?.channel?.bot_token_env;
-    if (!groupId || !botTokenEnv) return;
-    const botToken = process.env[botTokenEnv];
-    if (!botToken) return;
-
-    await fetch(
-      `https://api.telegram.org/bot${botToken}/closeForumTopic`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: groupId, message_thread_id: channelId }),
-      },
-    );
   }
 }
