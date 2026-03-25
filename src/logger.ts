@@ -22,7 +22,16 @@ export function createLogger(level: string = "info") {
           },
           level,
         },
-        { target: "pino/file", options: { destination: LOG_FILE }, level },
+        {
+          target: "pino-pretty",
+          options: {
+            destination: LOG_FILE,
+            colorize: false,
+            translateTime: "HH:MM:ss",
+            ignore: "pid,hostname",
+          },
+          level,
+        },
       ],
     },
   });
