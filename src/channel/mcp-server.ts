@@ -20,6 +20,7 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { z } from "zod";
 import { IpcClient } from "./ipc-bridge.js";
 
 // ---------------------------------------------------------------------------
@@ -35,6 +36,7 @@ if (!SOCKET_PATH) {
 }
 
 const IPC_TIMEOUT_MS = 30_000;
+const PERMISSION_TIMEOUT_MS = 120_000;
 
 // ---------------------------------------------------------------------------
 // Safety nets
@@ -154,6 +156,41 @@ function ipcRequest(
   });
 }
 
+function ipcPermissionRequest(
+  request_id: string,
+  tool_name: string,
+  description: string,
+  input_preview?: string,
+): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    if (!ipcConnected || !ipc) {
+      reject(new Error("Not connected to daemon IPC"));
+      return;
+    }
+    const requestId = ++requestCounter;
+    const timer = setTimeout(() => {
+      pendingRequests.delete(requestId);
+      reject(new Error(`Permission request timed out after ${PERMISSION_TIMEOUT_MS}ms`));
+    }, PERMISSION_TIMEOUT_MS);
+    pendingRequests.set(requestId, { resolve, reject, timer });
+    try {
+      ipc.send({
+        type: "permission_request",
+        requestId,
+        request_id,
+        tool_name,
+        description,
+        input_preview,
+      });
+    } catch (err) {
+      pendingRequests.delete(requestId);
+      clearTimeout(timer);
+      ipcConnected = false;
+      reject(new Error(`IPC send failed: ${err}`));
+    }
+  });
+}
+
 // ---------------------------------------------------------------------------
 // MCP Server
 // ---------------------------------------------------------------------------
@@ -161,7 +198,13 @@ function ipcRequest(
 const mcp = new Server(
   { name: "ccd-channel", version: "0.1.0" },
   {
-    capabilities: { tools: {}, experimental: { "claude/channel": {} } },
+    capabilities: {
+      tools: {},
+      experimental: {
+        "claude/channel": {},
+        "claude/channel/permission": {},
+      },
+    },
     instructions: [
       "Messages from channels arrive as <channel source=\"ccd\" chat_id=\"...\" message_id=\"...\" user=\"...\" ts=\"...\">.",
       "Reply using the reply tool -- pass chat_id back. Use reply_to (set to a message_id) to thread.",
@@ -325,6 +368,47 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     };
   }
 });
+
+const PermissionRequestNotificationSchema = z.object({
+  method: z.literal("notifications/claude/channel/permission_request"),
+  params: z.object({
+    request_id: z.string(),
+    tool_name: z.string(),
+    description: z.string(),
+    input_preview: z.string().optional(),
+  }),
+});
+
+mcp.setNotificationHandler(
+  PermissionRequestNotificationSchema,
+  async (notification) => {
+    const params = notification.params;
+    try {
+      const result = await ipcPermissionRequest(
+        params.request_id,
+        params.tool_name,
+        params.description,
+        params.input_preview,
+      ) as { request_id: string; behavior: "allow" | "deny" };
+      await mcp.notification({
+        method: "notifications/claude/channel/permission",
+        params: {
+          request_id: result.request_id,
+          behavior: result.behavior,
+        },
+      });
+    } catch (err) {
+      process.stderr.write(`ccd-channel: permission relay error: ${err}\n`);
+      await mcp.notification({
+        method: "notifications/claude/channel/permission",
+        params: {
+          request_id: params.request_id,
+          behavior: "deny",
+        },
+      });
+    }
+  },
+);
 
 // ---------------------------------------------------------------------------
 // Inbound: push channel messages to Claude
