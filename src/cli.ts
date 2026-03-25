@@ -259,12 +259,35 @@ fleet
     const fm = new FleetManager(DATA_DIR);
     const config = fm.loadConfig(FLEET_CONFIG_PATH);
 
-    console.log("Instance".padEnd(15) + "Status".padEnd(12) + "Topic");
-    console.log("\u2500".repeat(40));
+    console.log("Instance".padEnd(20) + "Status".padEnd(10) + "Context".padEnd(10) + "Cost".padEnd(10) + "Topic");
+    console.log("\u2500".repeat(65));
     for (const [name, inst] of Object.entries(config.instances)) {
       const status = fm.getInstanceStatus(name);
       const topic = inst.topic_id ? `#${inst.topic_id}` : "(DM)";
-      console.log(name.padEnd(15) + status.padEnd(12) + topic);
+
+      // Read statusline.json for context usage and cost
+      let contextStr = "-";
+      let costStr = "-";
+      const statusFile = join(DATA_DIR, "instances", name, "statusline.json");
+      try {
+        if (existsSync(statusFile)) {
+          const data = JSON.parse(readFileSync(statusFile, "utf-8"));
+          if (data.context_window?.used_percentage != null) {
+            contextStr = `${Math.round(data.context_window.used_percentage)}%`;
+          }
+          if (data.cost?.total_cost_usd != null) {
+            costStr = `$${data.cost.total_cost_usd.toFixed(2)}`;
+          }
+        }
+      } catch { /* ignore read errors */ }
+
+      console.log(
+        name.padEnd(20) +
+        status.padEnd(10) +
+        contextStr.padEnd(10) +
+        costStr.padEnd(10) +
+        topic,
+      );
     }
   });
 

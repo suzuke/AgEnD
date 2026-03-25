@@ -301,9 +301,11 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
       }
 
       // Send first chunk directly to get the messageId; enqueue the rest
+      const parseMode = opts?.format === "markdown" ? "HTML" as const : undefined;
       this.bot.api
         .sendMessage(Number(chatId), chunks[0], {
           message_thread_id: threadId != null ? Number(threadId) : undefined,
+          parse_mode: parseMode,
         })
         .then((msg) => {
           const result: SentMessage = {

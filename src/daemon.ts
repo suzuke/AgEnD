@@ -16,7 +16,8 @@ import type { CliBackend, CliBackendConfig } from "./backend/types.js";
 import { TelegramAdapter } from "./channel/adapters/telegram.js";
 import { AccessManager } from "./channel/access-manager.js";
 import type { ChannelAdapter, InboundMessage, ApprovalResponse, PermissionPrompt } from "./channel/types.js";
-import { transcribe } from "./stt.js";
+import { processAttachments } from "./channel/attachment-handler.js";
+import { routeToolCall } from "./channel/tool-router.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -149,50 +150,12 @@ export class Daemon {
           }
 
           let text = msg.text;
-          const extraMeta: Record<string, string> = {};
+          let extraMeta: Record<string, string> = {};
 
           if (this.adapter) {
-            const tgAdapter = this.adapter as TelegramAdapter;
-
-            // Auto-download photos so Claude can Read them directly
-            const photoAttachment = msg.attachments?.find(a => a.kind === "photo");
-            if (photoAttachment) {
-              try {
-                const localPath = await tgAdapter.downloadAttachment(photoAttachment.fileId);
-                extraMeta.image_path = localPath;
-              } catch (err) {
-                this.logger.warn({ err: (err as Error).message }, "Photo download failed");
-              }
-            }
-
-            // Transcribe voice/audio
-            const voiceAttachment = msg.attachments?.find(a => a.kind === "voice" || a.kind === "audio");
-            if (voiceAttachment) {
-              const groqKey = process.env.GROQ_API_KEY;
-              if (groqKey) {
-                try {
-                  const localPath = await tgAdapter.downloadAttachment(voiceAttachment.fileId);
-                  const result = await transcribe(localPath, groqKey);
-                  try { unlinkSync(localPath); } catch { /* ignore */ }
-                  text = text ? `${text}\n\n[語音訊息] ${result.text}` : `[語音訊息] ${result.text}`;
-                  this.logger.info({ transcription: result.text.slice(0, 80) }, "Voice transcribed");
-                } catch (err) {
-                  this.logger.warn({ err: (err as Error).message }, "Voice transcription failed");
-                  text = text || "[語音訊息 — 轉錄失敗]";
-                }
-              } else {
-                text = text || "[語音訊息 — 未設定 STT API key]";
-              }
-              extraMeta.attachment_file_id = voiceAttachment.fileId;
-            }
-
-            // Pass other attachment types as file_id for manual download
-            const otherAttachment = msg.attachments?.find(a =>
-              a.kind !== "photo" && a.kind !== "voice" && a.kind !== "audio",
-            );
-            if (otherAttachment) {
-              extraMeta.attachment_file_id = otherAttachment.fileId;
-            }
+            const result = await processAttachments(msg, this.adapter, this.logger);
+            text = result.text;
+            extraMeta = result.extraMeta;
           }
 
           this.pushChannelMessage(text, {
@@ -557,40 +520,9 @@ export class Daemon {
     }
 
     const adapter = adapters[0];
-    const chatId = args.chat_id as string ?? "";
 
-    switch (tool) {
-      case "reply": {
-        const files = Array.isArray(args.files) ? args.files as string[] : [];
-        const threadId = args.thread_id as string ?? this.lastThreadId;
-        adapter.sendText(chatId, args.text as string ?? "", {
-          threadId,
-          replyTo: args.reply_to as string,
-        }).then(async (sent) => {
-          for (const filePath of files) {
-            await adapter.sendFile(chatId, filePath, { threadId });
-          }
-          respond(sent);
-        }).catch(e => respond(null, e.message));
-        break;
-      }
-      case "react":
-        adapter.react(chatId, args.message_id as string ?? "", args.emoji as string ?? "")
-          .then(() => respond("ok"))
-          .catch(e => respond(null, e.message));
-        break;
-      case "edit_message":
-        adapter.editMessage(chatId, args.message_id as string ?? "", args.text as string ?? "")
-          .then(() => respond("ok"))
-          .catch(e => respond(null, e.message));
-        break;
-      case "download_attachment":
-        adapter.downloadAttachment(args.file_id as string ?? "")
-          .then(path => respond(path))
-          .catch(e => respond(null, e.message));
-        break;
-      default:
-        respond(null, `Unknown tool: ${tool}`);
+    if (!routeToolCall(adapter, tool, args, this.lastThreadId, respond)) {
+      respond(null, `Unknown tool: ${tool}`);
     }
   }
 
