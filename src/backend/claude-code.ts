@@ -8,7 +8,7 @@ export class ClaudeCodeBackend implements CliBackend {
 
   buildCommand(config: CliBackendConfig): string {
     const settingsPath = join(this.instanceDir, "claude-settings.json");
-    let cmd = `CMUX_CLAUDE_HOOKS_DISABLED=1 claude --settings ${settingsPath} --dangerously-load-development-channels server:ccd-channel`;
+    let cmd = `CMUX_CLAUDE_HOOKS_DISABLED=1 CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude --settings ${settingsPath} --dangerously-load-development-channels server:ccd-channel`;
 
     const sessionIdFile = join(this.instanceDir, "session-id");
     if (existsSync(sessionIdFile)) {

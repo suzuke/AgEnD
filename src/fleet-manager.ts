@@ -1336,50 +1336,52 @@ export class FleetManager {
       return;
     }
 
-    // Create channel output bound to this topic
-    const groupId = String(this.fleetConfig?.channel?.group_id ?? "");
-    const threadId = String(channelId);
-    const adapter = this.adapter!;
-    const output: MeetingChannelOutput = {
-      postMessage: async (text: string) => {
-        const sent = await adapter.sendText(groupId, text, { threadId });
-        return sent.messageId;
-      },
-      editMessage: async (messageId: string, text: string) => {
-        await adapter.editMessage(groupId, messageId, text);
-      },
-    };
-
-    if (mode === "discussion" && !angles) {
-      const defaultAngles = ["技術面", "成本效益", "使用者體驗", "風險與挑戰", "組織影響", "長期策略"];
-      angles = defaultAngles.slice(0, count);
+    // Build system prompt based on mode
+    let systemPrompt: string;
+    if (mode === "debate") {
+      systemPrompt = `你是一場辯論的主持人。議題：「${topic}」\n\n請使用 agent team 功能建立一個辯論團隊：\n- 一個正方 teammate（支持提案）\n- 一個反方 teammate（反對提案）\n${count > 2 ? `- 一個仲裁 teammate（客觀分析雙方）\n` : ""}\n讓他們辯論 ${rounds ?? 3} 輪，每輪每個 teammate 發言一次。\n辯論結束後，綜合所有觀點產出結論。\n\n用 reply 工具把每個 teammate 的發言和最終結論發到 channel。每次有 teammate 完成發言就立即用 reply 回報。`;
+    } else if (mode === "collab") {
+      systemPrompt = `你是一個協作任務的協調者。任務：「${topic}」\n${repo ? `\n專案目錄：${repo}\n` : ""}\n請使用 agent team 功能建立一個開發團隊：\n- ${count} 個 teammate，各自在獨立的 git worktree 中工作\n\n流程：\n1. 先讓 teammates 討論分工\n2. 確認分工後讓他們各自開發\n3. 完成後綜合成果\n\n用 reply 工具回報每個階段的進度。`;
+    } else {
+      // discussion mode (default)
+      if (!angles) {
+        const defaultAngles = ["技術面", "成本效益", "使用者體驗", "風險與挑戰", "組織影響", "長期策略"];
+        angles = defaultAngles.slice(0, count);
+      }
+      const angleList = angles.map((a, i) => `- Teammate ${i + 1}：從「${a}」角度分析`).join("\n");
+      systemPrompt = `你是一場多角度討論的主持人。議題：「${topic}」\n\n請使用 agent team 功能建立一個討論團隊：\n${angleList}\n\n流程：\n1. 先讓每個 teammate 獨立分析（不看其他人的觀點）\n2. 分享所有分析後，進行 ${rounds ?? 2} 輪交叉討論\n3. 最後收斂出共識結論\n\n用 reply 工具把每個 teammate 的分析和最終共識發到 channel。每次有進展就立即回報。`;
     }
 
-    const config: MeetingConfig = { meetingId, topic, mode, maxRounds: rounds ?? this.fleetConfig?.defaults?.meetings?.defaultRounds ?? 3, repo, angles };
-    const fmApi: FleetManagerMeetingAPI = {
-      spawnEphemeralInstance: this.spawnEphemeralInstance.bind(this),
-      destroyEphemeralInstance: this.destroyEphemeralInstance.bind(this),
-      sendAndWaitReply: this.sendAndWaitReply.bind(this),
-      createMeetingChannel: this.createMeetingChannel.bind(this),
-      closeMeetingChannel: this.closeMeetingChannel.bind(this),
-    };
+    // Spawn single orchestrator instance with agent teams enabled
+    const instanceName = await this.spawnEphemeralInstance({
+      systemPrompt,
+      workingDirectory: repo ?? "/tmp",
+      lightweight: true,
+      skipPermissions: true,
+    });
 
-    const orchestrator = new MeetingOrchestrator(config, fmApi, output);
-
-    // Register in routing table
-    this.routingTable.set(channelId, { kind: "meeting", orchestrator });
+    // Register in routing table so user messages in the topic reach this instance
+    this.routingTable.set(channelId, { kind: "instance", name: instanceName });
 
     // Notify user
-    await adapter.sendText(chatId, `✅ 會議已建立，請到新的 topic 查看`);
+    await this.adapter!.sendText(chatId, `✅ 會議已建立，請到新的 topic 查看`);
 
-    // Start (fire and forget)
-    orchestrator.start(participants).then(() => {
-      this.routingTable.delete(channelId);
-      this.closeMeetingChannel(channelId).catch(() => {});
-    }).catch(err => {
-      this.logger.error({ err }, "Meeting failed");
-      this.routingTable.delete(channelId);
-    });
+    // Send the topic as the first message to kick off the discussion
+    const ipc = this.instanceIpcClients.get(instanceName);
+    if (ipc) {
+      ipc.send({
+        type: "fleet_inbound",
+        content: `開始：${topic}`,
+        meta: {
+          chat_id: String(this.fleetConfig?.channel?.group_id ?? ""),
+          message_id: `meet-${Date.now()}`,
+          user: "system",
+          user_id: "system",
+          ts: new Date().toISOString(),
+          thread_id: String(channelId),
+        },
+      });
+    }
   }
 
   // ===================== Meeting API =====================
