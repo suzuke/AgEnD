@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { EventEmitter } from "node:events";
 import { MessageBus } from "../../src/channel/message-bus.js";
-import type { ChannelAdapter, InboundMessage, ApprovalHandle } from "../../src/channel/types.js";
+import type { ChannelAdapter, InboundMessage, ApprovalHandle, PermissionPrompt } from "../../src/channel/types.js";
 
 function makeAdapter(id: string, type = "mock"): ChannelAdapter & EventEmitter {
   const emitter = new EventEmitter() as ChannelAdapter & EventEmitter;
@@ -16,7 +16,7 @@ function makeAdapter(id: string, type = "mock"): ChannelAdapter & EventEmitter {
   emitter.downloadAttachment = vi.fn(async () => "/tmp/file");
   emitter.handlePairing = vi.fn(async () => "code");
   emitter.confirmPairing = vi.fn(async () => true);
-  emitter.sendApproval = vi.fn(async (_prompt: string, _cb: (d: "approve" | "deny") => void, _signal?: AbortSignal): Promise<ApprovalHandle> => {
+  emitter.sendApproval = vi.fn(async (_prompt: PermissionPrompt, _cb: (d: "approve" | "deny") => void, _signal?: AbortSignal): Promise<ApprovalHandle> => {
     return { cancel: vi.fn() };
   });
   return emitter;
@@ -151,7 +151,7 @@ describe("MessageBus", () => {
       bus.register(a1);
       bus.register(a2);
 
-      const result = await bus.requestApproval("Allow this?");
+      const result = await bus.requestApproval({ tool_name: "Bash", description: "Allow this?" });
       expect(result.decision).toBe("approve");
       expect(result.respondedBy.channelType).toBe("telegram");
       expect(result.respondedBy.userId).toBe("a1");
@@ -173,7 +173,7 @@ describe("MessageBus", () => {
       bus.register(a1);
       bus.register(a2);
 
-      const result = await bus.requestApproval("Allow?");
+      const result = await bus.requestApproval({ tool_name: "Bash", description: "Allow?" });
       expect(result.decision).toBe("deny");
     });
 
@@ -210,7 +210,7 @@ describe("MessageBus", () => {
 
       bus.register(a1);
 
-      const promise = bus.requestApproval("Allow?");
+      const promise = bus.requestApproval({ tool_name: "Bash", description: "Allow?" });
       vi.advanceTimersByTime(120_000);
       const result = await promise;
 
@@ -222,7 +222,7 @@ describe("MessageBus", () => {
     });
 
     it("immediately denies when no adapters registered", async () => {
-      const result = await bus.requestApproval("Allow?");
+      const result = await bus.requestApproval({ tool_name: "Bash", description: "Allow?" });
       expect(result.decision).toBe("deny");
       expect(result.respondedBy.channelType).toBe("none");
     });

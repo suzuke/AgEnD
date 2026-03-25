@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import type { ChannelAdapter, InboundMessage, OutboundMessage, Target, ApprovalResponse } from "./types.js";
+import type { ChannelAdapter, InboundMessage, OutboundMessage, Target, ApprovalResponse, PermissionPrompt } from "./types.js";
 
 const APPROVAL_TIMEOUT_MS = 120_000;
 
@@ -47,7 +47,7 @@ export class MessageBus extends EventEmitter {
     }
   }
 
-  requestApproval(prompt: string): Promise<ApprovalResponse> {
+  requestApproval(prompt: PermissionPrompt): Promise<ApprovalResponse> {
     return new Promise((resolve) => {
       const controller = new AbortController();
       const handles: Array<{ cancel(): void }> = [];
