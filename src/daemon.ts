@@ -70,7 +70,7 @@ export class Daemon {
       if (!type) return;
       // Build lookup key matching the pattern used when registering
       let key: string | undefined;
-      if (type === "fleet_schedule_response" && msg.fleetRequestId) {
+      if ((type === "fleet_schedule_response" || type === "fleet_outbound_response") && msg.fleetRequestId) {
         key = String(msg.fleetRequestId);
       } else if (type === "fleet_outbound_response" && msg.requestId != null) {
         key = `fleet_out_${msg.requestId}`;
@@ -515,18 +515,20 @@ export class Daemon {
     if (CROSS_INSTANCE_TOOLS.has(tool)) {
       // Route to fleet manager via IPC (topic mode only)
       if (this.topicMode && this.ipcServer) {
-        const outboundKey = `fleet_out_${requestId}`;
+        // Use fleetRequestId (not requestId) to avoid MCP server resolving the
+        // pending tool call prematurely when it receives the broadcast.
+        const fleetReqId = `xmsg_${requestId}`;
         this.ipcServer.broadcast({
           type: "fleet_outbound",
           tool,
           args,
-          requestId,
+          fleetRequestId: fleetReqId,
         });
         const timeout = setTimeout(() => {
-          this.pendingIpcRequests.delete(outboundKey);
+          this.pendingIpcRequests.delete(fleetReqId);
           respond(null, "Cross-instance operation timed out after 30s");
         }, 30_000);
-        this.pendingIpcRequests.set(outboundKey, (respMsg) => {
+        this.pendingIpcRequests.set(fleetReqId, (respMsg) => {
           clearTimeout(timeout);
           respond(respMsg.result, respMsg.error as string | undefined);
         });

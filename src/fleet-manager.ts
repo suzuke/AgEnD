@@ -629,12 +629,17 @@ export class FleetManager {
     if (!this.adapter) return;
     const tool = msg.tool as string;
     const args = (msg.args ?? {}) as Record<string, unknown>;
-    const requestId = msg.requestId as number;
+    const requestId = msg.requestId as number | undefined;
+    const fleetRequestId = msg.fleetRequestId as string | undefined;
 
     const chatId = args.chat_id as string ?? "";
     const respond = (result: unknown, error?: string) => {
       const ipc = this.instanceIpcClients.get(instanceName);
-      ipc?.send({ type: "fleet_outbound_response", requestId, result, error });
+      if (fleetRequestId) {
+        ipc?.send({ type: "fleet_outbound_response", fleetRequestId, result, error });
+      } else {
+        ipc?.send({ type: "fleet_outbound_response", requestId, result, error });
+      }
     };
 
     // Resolve threadId from instance → topic_id mapping (check ephemeral map first)
