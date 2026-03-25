@@ -8,7 +8,7 @@ import yaml from "js-yaml";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 import type { FleetConfig, InstanceConfig } from "./types.js";
-import type { RouteTarget, EphemeralInstanceConfig, MeetingConfig, MeetingChannelOutput, FleetManagerMeetingAPI } from "./meeting/types.js";
+import type { RouteTarget, EphemeralInstanceConfig } from "./meeting/types.js";
 import { loadFleetConfig, DEFAULT_INSTANCE_CONFIG } from "./config.js";
 import { TmuxManager } from "./tmux-manager.js";
 import { TelegramAdapter } from "./channel/adapters/telegram.js";
@@ -35,7 +35,6 @@ export class FleetManager {
   private fleetConfig: FleetConfig | null = null;
   private adapter: ChannelAdapter | null = null;
   private routingTable: Map<number, RouteTarget> = new Map();
-  private pendingMeetingReplies: Map<string, { resolve: (text: string) => void; reject: (err: Error) => void; buffer: string; timer: ReturnType<typeof setTimeout> | null }> = new Map();
   private instanceIpcClients: Map<string, IpcClient> = new Map();
   private openSessions: Map<string, { paths: string[]; createdAt: number }> = new Map();
   private ephemeralTopicMap: Map<string, number> = new Map();  // instanceName → topicId
@@ -156,7 +155,7 @@ export class FleetManager {
     if (topicMode && fleet.channel) {
       await this.autoCreateTopics(fleet);
       this.routingTable = this.buildRoutingTable();
-      const routeSummary = [...this.routingTable.entries()].map(([tid, target]) => `#${tid}→${target.kind === "instance" ? target.name : "meeting"}`).join(", ");
+      const routeSummary = [...this.routingTable.entries()].map(([tid, target]) => `#${tid}→${target.name}`).join(", ");
       this.logger.info(`Routes: ${routeSummary}`);
 
       // Initialize scheduler
@@ -550,11 +549,6 @@ export class FleetManager {
       this.handleUnboundTopic(msg, threadId);
       return;
     }
-    if (target.kind === "meeting") {
-      // Meeting topics handled by orchestrator
-      (target.orchestrator as any).handleUserMessage(msg);
-      return;
-    }
     const instanceName = target.name;
 
     let text = msg.text;
@@ -636,29 +630,6 @@ export class FleetManager {
     const tool = msg.tool as string;
     const args = (msg.args ?? {}) as Record<string, unknown>;
     const requestId = msg.requestId as number;
-
-    // Intercept replies from instances participating in a meeting
-    if (tool === "reply") {
-      const pending = this.pendingMeetingReplies.get(instanceName);
-      if (pending) {
-        const text = (args as Record<string, unknown>)?.text as string ?? "";
-        pending.buffer += text;
-        if (pending.buffer.length > 32 * 1024) {
-          if (pending.timer) clearTimeout(pending.timer);
-          pending.resolve(pending.buffer);
-          this.pendingMeetingReplies.delete(instanceName);
-        } else {
-          if (pending.timer) clearTimeout(pending.timer);
-          pending.timer = setTimeout(() => {
-            pending.resolve(pending.buffer);
-            this.pendingMeetingReplies.delete(instanceName);
-          }, 5000);
-        }
-        const ipc = this.instanceIpcClients.get(instanceName);
-        ipc?.send({ type: "fleet_outbound_response", requestId, result: { messageId: "meeting-internal", chatId: "", threadId: "" } });
-        return;
-      }
-    }
 
     const chatId = args.chat_id as string ?? "";
     const respond = (result: unknown, error?: string) => {
@@ -993,11 +964,6 @@ export class FleetManager {
   private async handleTopicDeleted(threadId: number): Promise<void> {
     const target = this.routingTable.get(threadId);
     if (!target) return;
-    if (target.kind === "meeting") {
-      // Meeting topics: just remove from routing table
-      this.routingTable.delete(threadId);
-      return;
-    }
     const instanceName = target.name;
 
     this.logger.info({ instanceName, threadId }, "Topic deleted — auto-unbinding");
@@ -1261,14 +1227,6 @@ export class FleetManager {
   private async handleMeetsCommand(msg: InboundMessage, forceMode?: "debate" | "collab" | "discussion"): Promise<void> {
     if (!this.adapter) return;
 
-    // Check resource limits
-    const activeMeetings = [...this.routingTable.values()].filter(t => t.kind === "meeting").length;
-    const maxConcurrent = this.fleetConfig?.defaults?.meetings?.maxConcurrent ?? 1;
-    if (activeMeetings >= maxConcurrent) {
-      await this.adapter.sendText(msg.chatId, "⚠️ 已達同時會議上限，請先結束現有會議。");
-      return;
-    }
-
     const parsed = this.parseMeetsArgs(msg.text);
     if (!parsed) {
       const usage = forceMode === "collab"
@@ -1321,12 +1279,6 @@ export class FleetManager {
     rounds?: number,
     angles?: string[],
   ): Promise<void> {
-    const { MeetingOrchestrator } = await import("./meeting/orchestrator.js");
-    const { assignRoles } = await import("./meeting/role-assigner.js");
-
-    const participants = assignRoles(count, customNames);
-    const meetingId = `meet-${Date.now()}`;
-
     // Create meeting topic
     let channelId: number;
     try {
@@ -1390,44 +1342,6 @@ export class FleetManager {
     }
   }
 
-  // ===================== Meeting API =====================
-
-  /** Send a message to an instance and wait for its reply */
-  async sendAndWaitReply(instanceName: string, message: string, timeoutMs = 120_000): Promise<string> {
-    const ipc = this.instanceIpcClients.get(instanceName);
-    if (!ipc) throw new Error(`No IPC connection to ${instanceName}`);
-
-    return new Promise<string>((resolve, reject) => {
-      const entry = { resolve, reject, buffer: "", timer: null as ReturnType<typeof setTimeout> | null };
-
-      const timeout = setTimeout(() => {
-        this.pendingMeetingReplies.delete(instanceName);
-        reject(new Error(`sendAndWaitReply timeout for ${instanceName}`));
-      }, timeoutMs);
-
-      const origResolve = resolve;
-      entry.resolve = (text: string | PromiseLike<string>) => {
-        clearTimeout(timeout);
-        origResolve(text);
-      };
-
-      this.pendingMeetingReplies.set(instanceName, entry);
-
-      ipc.send({
-        type: "fleet_inbound",
-        content: message,
-        meta: {
-          chat_id: "meeting-internal",
-          message_id: `meet-${Date.now()}`,
-          user: "meeting-orchestrator",
-          user_id: "system",
-          ts: new Date().toISOString(),
-          thread_id: "",
-        },
-      });
-    });
-  }
-
   /** Spawn an ephemeral Claude instance for meeting participation */
   async spawnEphemeralInstance(config: EphemeralInstanceConfig, signal?: AbortSignal): Promise<string> {
     const name = `meet-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -1479,7 +1393,7 @@ export class FleetManager {
     await this.connectIpcToInstance(name);
 
     // Wait for MCP server to connect (Daemon receives mcp_ready from MCP server)
-    // Without this, sendAndWaitReply messages are lost because MCP isn't connected yet
+    // Without this, the kickoff message could be lost because MCP isn't connected yet
     const ipc = this.instanceIpcClients.get(name);
     if (ipc) {
       const mcpDeadline = Date.now() + 60_000;
@@ -1507,13 +1421,6 @@ export class FleetManager {
 
   /** Destroy an ephemeral instance created for a meeting */
   async destroyEphemeralInstance(name: string): Promise<void> {
-    // Clean up pending replies
-    const pending = this.pendingMeetingReplies.get(name);
-    if (pending) {
-      if (pending.timer) clearTimeout(pending.timer);
-      pending.reject(Object.assign(new Error("Instance destroyed"), { name: "AbortError" }));
-      this.pendingMeetingReplies.delete(name);
-    }
     await this.stopInstance(name);
 
     // Clean up git worktree if it exists
