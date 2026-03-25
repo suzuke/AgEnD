@@ -38,6 +38,7 @@ export class FleetManager {
   private pendingMeetingReplies: Map<string, { resolve: (text: string) => void; reject: (err: Error) => void; buffer: string; timer: ReturnType<typeof setTimeout> | null }> = new Map();
   private instanceIpcClients: Map<string, IpcClient> = new Map();
   private openSessions: Map<string, { paths: string[]; createdAt: number }> = new Map();
+  private ephemeralTopicMap: Map<string, number> = new Map();  // instanceName → topicId
   private scheduler: Scheduler | null = null;
   private configPath: string = "";
   private logger = createLogger("info");
@@ -665,9 +666,10 @@ export class FleetManager {
       ipc?.send({ type: "fleet_outbound_response", requestId, result, error });
     };
 
-    // Resolve threadId from instance → topic_id mapping
+    // Resolve threadId from instance → topic_id mapping (check ephemeral map first)
+    const ephemeralTopicId = this.ephemeralTopicMap.get(instanceName);
     const instanceConfig = this.fleetConfig?.instances[instanceName];
-    const threadId = args.thread_id as string ?? (instanceConfig?.topic_id ? String(instanceConfig.topic_id) : undefined);
+    const threadId = args.thread_id as string ?? (ephemeralTopicId ? String(ephemeralTopicId) : (instanceConfig?.topic_id ? String(instanceConfig.topic_id) : undefined));
 
     switch (tool) {
       case "reply": {
@@ -1362,6 +1364,7 @@ export class FleetManager {
 
     // Register in routing table so user messages in the topic reach this instance
     this.routingTable.set(channelId, { kind: "instance", name: instanceName });
+    this.ephemeralTopicMap.set(instanceName, channelId);
 
     // Notify user
     await this.adapter!.sendText(chatId, `✅ 會議已建立，請到新的 topic 查看`);
