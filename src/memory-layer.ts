@@ -25,6 +25,7 @@ export class MemoryLayer extends EventEmitter {
 
     this.watcher.on("add", (path) => this.backupFile(path));
     this.watcher.on("change", (path) => this.backupFile(path));
+    this.watcher.on("error", (err) => this.logger.error({ err }, "Memory watcher error"));
   }
 
   async stop(): Promise<void> {

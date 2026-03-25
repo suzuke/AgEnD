@@ -99,7 +99,7 @@ export class ClaudeCodeBackend implements CliBackend {
     try {
       const sf = join(this.instanceDir, "statusline.json");
       const data = JSON.parse(readFileSync(sf, "utf-8"));
-      return data.context_window?.used_percentage ?? 0;
+      return data.context_window?.used_percentage ?? null;
     } catch (err) {
       // File may not exist yet during startup — return null to signal unavailable
       return null;
@@ -157,8 +157,9 @@ export class ClaudeCodeBackend implements CliBackend {
           }
         }
       }
-    } catch {
-      // Best-effort cleanup — don't fail shutdown if .mcp.json is inaccessible
+    } catch (err) {
+      // Best-effort cleanup — don't fail shutdown, but warn so user can clean up manually
+      process.stderr.write(`ccd: warning: failed to clean up .mcp.json: ${err}\n`);
     }
   }
 

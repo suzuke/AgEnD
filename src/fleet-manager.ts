@@ -172,10 +172,13 @@ export class FleetManager implements FleetContext {
       await this.connectToInstances(fleet);
     }
 
-    process.on("SIGHUP", () => {
+    // SIGHUP: reload scheduler (use once + re-register to avoid duplicates)
+    const onSighup = () => {
       this.logger.info("Received SIGHUP, reloading scheduler...");
       this.scheduler?.reload();
-    });
+      process.once("SIGHUP", onSighup);
+    };
+    process.once("SIGHUP", onSighup);
 
     const onRestart = () => {
       this.logger.info("Received SIGUSR2, initiating graceful restart...");

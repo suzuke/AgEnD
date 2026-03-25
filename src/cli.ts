@@ -43,7 +43,7 @@ program
     const config = loadConfig(opts.config);
 
     // Map DaemonConfig → InstanceConfig
-    const instanceConfig = {
+    const instanceConfig: import("./types.js").InstanceConfig = {
       working_directory: config.working_directory,
       restart_policy: config.restart_policy,
       context_guardian: config.context_guardian,
@@ -57,7 +57,7 @@ program
     writeFileSync(PID_PATH, String(process.pid));
 
     const instanceDir = join(DATA_DIR, "instances", "default");
-    const daemon = new Daemon("default", instanceConfig as any, instanceDir);
+    const daemon = new Daemon("default", instanceConfig, instanceDir);
     await daemon.start();
 
     const shutdown = async () => {

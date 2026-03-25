@@ -25,7 +25,11 @@ export class TmuxManager {
   }
 
   static async killSession(name: string): Promise<void> {
-    try { await exec("tmux", ["kill-session", "-t", name]); } catch {}
+    try {
+      await exec("tmux", ["kill-session", "-t", name]);
+    } catch (err: unknown) {
+      // Expected if session doesn't exist; unexpected errors logged via stderr
+    }
   }
 
   static async listWindows(sessionName: string): Promise<string[]> {
@@ -52,7 +56,9 @@ export class TmuxManager {
     if (!this.windowId) return;
     try {
       await exec("tmux", ["kill-window", "-t", `${this.sessionName}:${this.windowId}`]);
-    } catch {}
+    } catch (err: unknown) {
+      // Expected if window already exited
+    }
   }
 
   async isWindowAlive(): Promise<boolean> {

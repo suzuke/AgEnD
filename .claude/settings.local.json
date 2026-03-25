@@ -3,7 +3,9 @@
     "allow": [
       "Skill(claudeception)",
       "mcp__plugin_telegram_telegram__reply",
-      "mcp__ccd-channel__reply"
+      "mcp__ccd-channel__reply",
+      "mcp__ccd-channel__list_instances",
+      "mcp__ccd-channel__send_to_instance"
     ]
   },
   "enableAllProjectMcpServers": true,

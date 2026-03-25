@@ -348,6 +348,8 @@ export class Daemon {
   async stop(): Promise<void> {
     this.logger.info("Stopping daemon instance");
     if (this.healthCheckTimer) { clearInterval(this.healthCheckTimer); this.healthCheckTimer = null; }
+    if (this.toolStatusDebounce) { clearTimeout(this.toolStatusDebounce); this.toolStatusDebounce = null; }
+    this.pendingIpcRequests.clear();
     this.transcriptMonitor?.stop();
     this.guardian?.stop();
     if (this.memoryLayer) await this.memoryLayer.stop();

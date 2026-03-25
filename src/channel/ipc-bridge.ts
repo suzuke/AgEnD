@@ -24,7 +24,7 @@ function makeLineParser(onMessage: (msg: unknown) => void) {
       try {
         msg = JSON.parse(line);
       } catch {
-        return; // truly malformed JSON, skip
+        continue; // truly malformed JSON, skip this line
       }
       onMessage(msg);
     }
