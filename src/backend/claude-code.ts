@@ -31,22 +31,7 @@ export class ClaudeCodeBackend implements CliBackend {
   }
 
   writeConfig(config: CliBackendConfig): void {
-    // If skipPermissions is true, write a simplified settings file (no hooks, all tools allowed)
-    if (config.skipPermissions) {
-      writeFileSync(
-        join(this.instanceDir, "claude-settings.json"),
-        JSON.stringify({
-          permissions: {
-            allow: ["*"],
-            deny: [],
-            defaultMode: "allowAll",
-          },
-        }),
-      );
-      return;
-    }
-
-    // 1. Write .mcp.json
+    // 1. Write .mcp.json (always needed — ccd-channel MCP server)
     const mcpConfigPath = join(config.workingDirectory, ".mcp.json");
     let mcpConfig: { mcpServers?: Record<string, unknown> } = {};
     try {
@@ -69,13 +54,23 @@ export class ClaudeCodeBackend implements CliBackend {
     }
     writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2));
 
-    // 2. Get hooks from approval strategy
-    const approvalResult = config.approvalStrategy.setup(config.approvalPort);
-
-    // 3. Write statusline script
+    // 2. Write statusline script
     const statusLineCommand = this.writeStatusLineScript();
 
-    // 4. Write claude-settings.json
+    // 3. If skipPermissions, write simplified settings (no hooks, no approval)
+    if (config.skipPermissions) {
+      const settings: Record<string, unknown> = {
+        permissions: { allow: ["*"], deny: [], defaultMode: "bypassPermissions" },
+        statusLine: { type: "command", command: statusLineCommand },
+      };
+      writeFileSync(join(this.instanceDir, "claude-settings.json"), JSON.stringify(settings));
+      return;
+    }
+
+    // 4. Get hooks from approval strategy
+    const approvalResult = config.approvalStrategy.setup(config.approvalPort);
+
+    // 5. Write claude-settings.json
     const settings: Record<string, unknown> = {
       hooks: approvalResult.hooks ?? {},
       permissions: {
