@@ -42,6 +42,10 @@ export class Daemon {
   private toolStatusMessageId: string | null = null;
   private toolStatusLines: string[] = [];
   private toolStatusDebounce: ReturnType<typeof setTimeout> | null = null;
+  // Crash recovery
+  private healthCheckTimer: ReturnType<typeof setInterval> | null = null;
+  private crashCount = 0;
+  private lastCrashAt = 0;
 
   constructor(
     private name: string,
@@ -290,11 +294,60 @@ export class Daemon {
     // Set CCD_SOCKET_PATH env for MCP server
     process.env.CCD_SOCKET_PATH = sockPath;
 
+    // 10. Health check — detect crashed tmux window and respawn
+    if (!this.config.lightweight) {
+      this.startHealthCheck();
+    }
+
     this.logger.info(`${this.name} ready`);
+  }
+
+  private startHealthCheck(): void {
+    const { max_retries, backoff, reset_after } = this.config.restart_policy;
+    if (max_retries <= 0) return; // restart disabled
+
+    this.healthCheckTimer = setInterval(async () => {
+      if (!this.tmux || this.guardian?.state === "ROTATING") return;
+
+      const alive = await this.tmux.isWindowAlive();
+      if (alive) return;
+
+      // Reset crash count if enough time has passed
+      if (reset_after > 0 && Date.now() - this.lastCrashAt > reset_after) {
+        this.crashCount = 0;
+      }
+
+      this.crashCount++;
+      this.lastCrashAt = Date.now();
+
+      if (this.crashCount > max_retries) {
+        this.logger.error({ crashCount: this.crashCount, maxRetries: max_retries }, "Max crash retries exceeded — not respawning");
+        return;
+      }
+
+      // Calculate backoff delay
+      const delay = backoff === "exponential"
+        ? Math.min(1000 * Math.pow(2, this.crashCount - 1), 60_000)
+        : 1000 * this.crashCount;
+
+      this.logger.warn({ crashCount: this.crashCount, delay }, "Claude window died — respawning after backoff");
+
+      await new Promise(r => setTimeout(r, delay));
+
+      try {
+        this.saveSessionId();
+        this.transcriptMonitor?.resetOffset();
+        await this.spawnClaudeWindow();
+        this.logger.info("Respawned Claude window after crash");
+      } catch (err) {
+        this.logger.error({ err }, "Failed to respawn Claude window");
+      }
+    }, 10_000); // Check every 10 seconds
   }
 
   async stop(): Promise<void> {
     this.logger.info("Stopping daemon instance");
+    if (this.healthCheckTimer) { clearInterval(this.healthCheckTimer); this.healthCheckTimer = null; }
     this.transcriptMonitor?.stop();
     this.guardian?.stop();
     if (this.memoryLayer) await this.memoryLayer.stop();

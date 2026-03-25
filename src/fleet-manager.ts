@@ -618,7 +618,7 @@ export class FleetManager implements FleetContext {
           }
         }
       }
-    }, 60_000);
+    }, 5 * 60_000); // Check every 5 minutes (reduced from 60s to avoid API rate limits)
   }
 
   /** Save fleet config back to fleet.yaml */
