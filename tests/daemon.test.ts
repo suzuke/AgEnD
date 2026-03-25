@@ -2,8 +2,6 @@ import { describe, it, expect } from "vitest";
 import { Daemon } from "../src/daemon.js";
 import type { InstanceConfig } from "../src/types.js";
 import { ClaudeCodeBackend } from "../src/backend/claude-code.js";
-import { HookBasedApproval } from "../src/backend/hook-based-approval.js";
-import { MessageBus } from "../src/channel/message-bus.js";
 
 describe("Daemon", () => {
   it("constructs with valid config", () => {
@@ -15,8 +13,7 @@ describe("Daemon", () => {
       log_level: "info",
     };
     const backend = new ClaudeCodeBackend("/tmp/ccd-test-instance");
-    const approval = new HookBasedApproval({ messageBus: new MessageBus(), port: 18321 });
-    const daemon = new Daemon("test", config, "/tmp/ccd-test-instance", false, backend, approval);
+    const daemon = new Daemon("test", config, "/tmp/ccd-test-instance", false, backend);
     expect(daemon).toBeDefined();
   });
 
@@ -29,8 +26,7 @@ describe("Daemon", () => {
       log_level: "info",
     };
     const backend = new ClaudeCodeBackend("/tmp/ccd-test-instance");
-    const approval = new HookBasedApproval({ messageBus: new MessageBus(), port: 18321 });
-    const daemon = new Daemon("test", config, "/tmp/ccd-test-instance", true, backend, approval);
+    const daemon = new Daemon("test", config, "/tmp/ccd-test-instance", true, backend);
     expect(daemon).toBeDefined();
   });
 });
