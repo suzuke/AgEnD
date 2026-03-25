@@ -688,7 +688,6 @@ export class FleetManager {
         }
 
         // Send as fleet_inbound to the target instance
-        // Mark as cross-instance so target knows it's from another instance, not a user
         targetIpc.send({
           type: "fleet_inbound",
           content: message,
@@ -702,6 +701,27 @@ export class FleetManager {
             from_instance: instanceName,
           },
         });
+
+        // Post to both Telegram topics for visibility
+        const groupId = this.fleetConfig?.channel?.group_id;
+        if (groupId && this.adapter) {
+          const senderTopicId = this.ephemeralTopicMap.get(instanceName)
+            ?? this.fleetConfig?.instances[instanceName]?.topic_id;
+          const targetTopicId = this.ephemeralTopicMap.get(targetName)
+            ?? this.fleetConfig?.instances[targetName]?.topic_id;
+          const preview = message.length > 200 ? message.slice(0, 200) + "…" : message;
+
+          if (senderTopicId) {
+            this.adapter.sendText(String(groupId), `→ ${targetName}: ${preview}`, {
+              threadId: String(senderTopicId),
+            }).catch(e => this.logger.debug({ err: e }, "Failed to post cross-instance notification"));
+          }
+          if (targetTopicId) {
+            this.adapter.sendText(String(groupId), `← ${instanceName}: ${preview}`, {
+              threadId: String(targetTopicId),
+            }).catch(e => this.logger.debug({ err: e }, "Failed to post cross-instance notification"));
+          }
+        }
 
         this.logger.info(`✉ ${instanceName} → ${targetName}: ${message.slice(0, 100)}`);
         respond({ sent: true, target: targetName });
