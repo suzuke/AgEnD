@@ -13,8 +13,8 @@ export interface ChannelAdapter extends EventEmitter {
   react(chatId: string, messageId: string, emoji: string): Promise<void>;
 
   sendApproval(
-    prompt: string,
-    callback: (decision: "approve" | "always_allow" | "deny") => void,
+    prompt: PermissionPrompt,
+    callback: (decision: "approve" | "deny") => void,
     signal?: AbortSignal,
     threadId?: string,
   ): Promise<ApprovalHandle>;
@@ -74,8 +74,14 @@ export interface Attachment {
   transcription?: string;
 }
 
+export interface PermissionPrompt {
+  tool_name: string;
+  description: string;
+  input_preview?: string;
+}
+
 export interface ApprovalResponse {
-  decision: "approve" | "always_allow" | "deny";
+  decision: "approve" | "deny";
   respondedBy?: { channelType: string; userId: string };
   reason?: string;
 }
