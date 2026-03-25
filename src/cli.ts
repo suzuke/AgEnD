@@ -159,9 +159,8 @@ fleet
         console.error(`Instance "${instance}" not found in fleet config`);
         process.exit(1);
       }
-      const ports = fm.allocatePorts(config.instances);
       const topicMode = config.channel?.mode === "topic" && !inst.channel;
-      await fm.startInstance(instance, inst, ports[instance], topicMode);
+      await fm.startInstance(instance, inst, topicMode);
     } else {
       await fm.startAll(FLEET_CONFIG_PATH);
     }
