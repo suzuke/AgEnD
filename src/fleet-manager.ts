@@ -9,7 +9,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 import type { FleetConfig, InstanceConfig, CostGuardConfig, DailySummaryConfig } from "./types.js";
 import type { RouteTarget } from "./meeting/types.js";
-import { loadFleetConfig, DEFAULT_COST_GUARD, DEFAULT_DAILY_SUMMARY } from "./config.js";
+import { loadFleetConfig, DEFAULT_COST_GUARD, DEFAULT_DAILY_SUMMARY, DEFAULT_INSTANCE_CONFIG } from "./config.js";
 import { EventLog } from "./event-log.js";
 import { CostGuard, formatCents } from "./cost-guard.js";
 import { TmuxManager } from "./tmux-manager.js";
@@ -211,6 +211,46 @@ export class FleetManager implements FleetContext {
       );
     });
     this.dailySummary.start();
+
+    // Auto-create general instance if none configured
+    const hasGeneralTopic = Object.values(fleet.instances).some(inst => inst.general_topic === true);
+    if (!hasGeneralTopic) {
+      this.logger.info("Auto-creating general instance for General Topic");
+      const generalDir = join(homedir(), ".claude-channel-daemon", "general");
+      mkdirSync(generalDir, { recursive: true });
+      const claudeMdPath = join(generalDir, "CLAUDE.md");
+      if (!existsSync(claudeMdPath)) {
+        writeFileSync(claudeMdPath, `# General Assistant
+
+你是這個 CCD fleet 的通用入口。
+
+## 行為準則
+
+- 簡單任務（搜尋、翻譯、一般問答）：自己處理。
+- 屬於特定專案的任務：用 list_instances() 找到對應 agent，需要時用 start_instance() 啟動，再用 send_to_instance() 委派。
+- 需要多個 agent 協作的任務：協調各 agent 並行或串行執行，收集結果後彙整。
+- 使用者想開新的專案 agent：用 create_instance() 建立。
+- 收到其他 instance 委派的任務時，完成後一定要用 send_to_instance() 回報結果。
+
+## 委派原則
+
+只在有具體理由時才委派：
+- 任務需要存取特定專案的檔案
+- 任務可以從多 agent 平行執行中受益
+- 保留自己的 context 更重要，把不相關的工作交出去
+- 絕不把任務回委給委派你的 instance
+
+自己能做的，就自己做。
+`, "utf-8");
+      }
+      const generalConfig: InstanceConfig = {
+        ...DEFAULT_INSTANCE_CONFIG,
+        working_directory: generalDir,
+        general_topic: true,
+      };
+      fleet.instances["general"] = generalConfig;
+      this.saveFleetConfig();
+    }
 
     for (const [name, config] of Object.entries(fleet.instances)) {
       await this.startInstance(name, config, topicMode && !config.channel);
