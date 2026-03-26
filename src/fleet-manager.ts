@@ -103,6 +103,11 @@ export class FleetManager implements FleetContext {
     const daemon = new Daemon(name, config, instanceDir, topicMode, backend);
     await daemon.start();
     this.daemons.set(name, daemon);
+
+    daemon.on("rotation_quality", (data: Record<string, unknown>) => {
+      this.eventLog?.insert(name, "context_rotation", data);
+      this.logger.info({ name, ...data }, "Context rotation completed");
+    });
   }
 
   async stopInstance(name: string): Promise<void> {

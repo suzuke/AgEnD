@@ -2,6 +2,7 @@ import { join, dirname } from "node:path";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
+import { EventEmitter } from "node:events";
 import type { InstanceConfig } from "./types.js";
 import { createLogger, type Logger } from "./logger.js";
 import { TmuxManager } from "./tmux-manager.js";
@@ -22,7 +23,7 @@ import { routeToolCall } from "./channel/tool-router.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-export class Daemon {
+export class Daemon extends EventEmitter {
   private logger: Logger;
   private tmux: TmuxManager | null = null;
   private ipcServer: IpcServer | null = null;
@@ -48,6 +49,9 @@ export class Daemon {
   private healthCheckTimer: ReturnType<typeof setInterval> | null = null;
   private crashCount = 0;
   private lastCrashAt = 0;
+  // Context rotation quality tracking
+  private rotationStartedAt = 0;
+  private preRotationContextPct = 0;
 
   constructor(
     private name: string,
@@ -56,6 +60,7 @@ export class Daemon {
     private topicMode = false,
     private backend?: CliBackend,
   ) {
+    super();
     this.logger = createLogger(config.log_level);
     this.messageBus = new MessageBus();
     this.messageBus.setLogger(this.logger);
@@ -257,6 +262,8 @@ export class Daemon {
       });
 
       this.guardian.on("request_handover", async () => {
+        this.rotationStartedAt = Date.now();
+        this.preRotationContextPct = this.readContextPercentage();
         this.logger.info("Sending handover prompt to Claude");
         if (this.tmux) {
           const reason = this.guardian?.rotationReason ?? "context_full";
@@ -275,6 +282,28 @@ export class Daemon {
       this.guardian.on("rotate", async () => {
         this.logger.info("Context rotation — killing and respawning Claude");
         this.saveSessionId();
+
+        // Track rotation quality
+        const durationMs = Date.now() - this.rotationStartedAt;
+        const memDir = this.config.memory_directory ?? join(
+          homedir(),
+          ".claude/projects",
+          this.config.working_directory.replace(/\//g, "-").replace(/^-/, ""),
+          "memory",
+        );
+        let handoverStatus: "complete" | "timeout" | "empty" = "empty";
+        try {
+          const content = readFileSync(join(memDir, "handover.md"), "utf-8").trim();
+          handoverStatus = content.length > 0 ? "complete" : "empty";
+        } catch {
+          handoverStatus = "empty";
+        }
+        this.emit("rotation_quality", {
+          instance: this.name,
+          handover_status: handoverStatus,
+          duration_ms: durationMs,
+          previous_context_pct: this.preRotationContextPct,
+        });
 
         await this.tmux?.killWindow();
         this.transcriptMonitor?.resetOffset();
