@@ -383,12 +383,50 @@ export class FleetManager implements FleetContext {
   }
 
   /** Handle inbound message — transcribe voice if present, then route */
+  private findGeneralInstance(): string | undefined {
+    if (!this.fleetConfig) return undefined;
+    for (const [name, config] of Object.entries(this.fleetConfig.instances)) {
+      if (config.general_topic === true) {
+        return this.daemons.has(name) ? name : undefined;
+      }
+    }
+    return undefined;
+  }
+
   private async handleInboundMessage(msg: InboundMessage): Promise<void> {
     const threadId = msg.threadId ? parseInt(msg.threadId, 10) : undefined;
     if (threadId == null) {
       // General topic: try topic commands first, then meeting commands
       if (await this.topicCommands.handleGeneralCommand(msg)) return;
       if (await this.meetingManager.handleCommand(msg)) return;
+
+      // Forward to General Topic instance if configured
+      const generalInstance = this.findGeneralInstance();
+      if (generalInstance) {
+        const { text, extraMeta } = await processAttachments(msg, this.adapter!, this.logger, generalInstance);
+        const ipc = this.instanceIpcClients.get(generalInstance);
+        if (ipc) {
+          if (this.adapter && msg.chatId && msg.messageId) {
+            this.adapter.react(msg.chatId, msg.messageId, "👀")
+              .catch(e => this.logger.debug({ err: (e as Error).message }, "Auto-react failed"));
+          }
+          ipc.send({
+            type: "fleet_inbound",
+            content: text,
+            targetSession: generalInstance,
+            meta: {
+              chat_id: msg.chatId,
+              message_id: msg.messageId,
+              user: msg.username,
+              user_id: msg.userId,
+              ts: msg.timestamp.toISOString(),
+              thread_id: "",
+              ...extraMeta,
+            },
+          });
+          this.logger.info(`← ${generalInstance} ${msg.username}: ${(text ?? "").slice(0, 100)}`);
+        }
+      }
       return;
     }
 
@@ -908,10 +946,14 @@ export class FleetManager implements FleetContext {
     if (Object.keys(this.fleetConfig.defaults).length > 0) toSave.defaults = this.fleetConfig.defaults;
     toSave.instances = {};
     for (const [name, inst] of Object.entries(this.fleetConfig.instances)) {
-      (toSave.instances as Record<string, unknown>)[name] = {
+      const serialized: Record<string, unknown> = {
         working_directory: inst.working_directory,
         topic_id: inst.topic_id,
       };
+      if (inst.general_topic) {
+        serialized.general_topic = true;
+      }
+      (toSave.instances as Record<string, unknown>)[name] = serialized;
     }
     writeFileSync(this.configPath, yaml.dump(toSave, { lineWidth: 120 }));
     this.logger.info({ path: this.configPath }, "Saved fleet config");
