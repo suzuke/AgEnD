@@ -115,10 +115,40 @@ Also rotates after `max_age_hours` (default 8h) regardless of context usage.
 
 Instances can communicate with each other via MCP tools:
 
-- `send_to_instance` — send a message to another running instance (passive notification)
-- `list_instances` — discover all running instances
+- `send_to_instance` — send a message to another running instance or external session
+- `list_instances` — discover all running instances and external sessions
 
-Messages are posted to both sender and recipient Telegram topics for visibility.
+Messages are posted to the recipient's Telegram topic for visibility. Sender topic notifications are only posted for instance-to-instance messages (not from external sessions).
+
+### External session support
+
+You can connect a local Claude Code session to the daemon's channel tools (reply, send_to_instance, etc.) by pointing `.mcp.json` at an instance's IPC socket:
+
+```json
+{
+  "mcpServers": {
+    "ccd-channel": {
+      "command": "node",
+      "args": ["path/to/dist/channel/mcp-server.js"],
+      "env": {
+        "CCD_SOCKET_PATH": "~/.claude-channel-daemon/instances/<name>/channel.sock"
+      }
+    }
+  }
+}
+```
+
+The daemon automatically isolates external sessions from internal ones using env var layering:
+
+| Session type | Identity source | Example |
+|---|---|---|
+| Internal (daemon-managed) | `CCD_INSTANCE_NAME` via tmux env | `ccplugin` |
+| External (custom name) | `CCD_SESSION_NAME` in `.mcp.json` env | `dev` |
+| External (zero-config) | `external-<basename(cwd)>` fallback | `external-myproject` |
+
+Internal sessions get `CCD_INSTANCE_NAME` injected by the daemon into the tmux shell environment. External sessions don't have this, so they fall through to `CCD_SESSION_NAME` (if set) or an auto-generated name based on the working directory. This means the same `.mcp.json` produces different identities for internal vs external sessions — no configuration conflicts.
+
+External sessions appear in `list_instances` and can be targeted by `send_to_instance`.
 
 ### Graceful restart
 

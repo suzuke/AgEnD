@@ -115,10 +115,40 @@ NORMAL → PENDING → HANDING_OVER → ROTATING → GRACE
 
 Instance 之間可以透過 MCP tools 溝通：
 
-- `send_to_instance` — 傳訊息給另一個執行中的 instance（被動通知）
-- `list_instances` — 查看所有執行中的 instance
+- `send_to_instance` — 傳訊息給另一個執行中的 instance 或外部 session
+- `list_instances` — 查看所有執行中的 instance 和外部 session
 
-訊息會同時顯示在發送者和接收者的 Telegram topic 裡。
+訊息會顯示在接收者的 Telegram topic 裡。只有 instance 對 instance 的訊息才會在發送者 topic 顯示通知。
+
+### 外部 Session 支援
+
+你可以把本地的 Claude Code session 連到 daemon 的 channel tools（reply、send_to_instance 等），只要在 `.mcp.json` 指向 instance 的 IPC socket：
+
+```json
+{
+  "mcpServers": {
+    "ccd-channel": {
+      "command": "node",
+      "args": ["path/to/dist/channel/mcp-server.js"],
+      "env": {
+        "CCD_SOCKET_PATH": "~/.claude-channel-daemon/instances/<name>/channel.sock"
+      }
+    }
+  }
+}
+```
+
+Daemon 透過 env var 分層自動隔離外部和內部 session：
+
+| Session 類型 | 身份來源 | 範例 |
+|---|---|---|
+| 內部（daemon 管理）| `CCD_INSTANCE_NAME`（tmux 環境）| `ccplugin` |
+| 外部（自訂名稱）| `.mcp.json` 的 `CCD_SESSION_NAME` | `dev` |
+| 外部（零設定）| `external-<basename(cwd)>` fallback | `external-myproject` |
+
+內部 session 由 daemon 在 tmux shell 環境注入 `CCD_INSTANCE_NAME`。外部 session 沒有這個變數，所以 fallback 到 `CCD_SESSION_NAME`（有設定時）或用工作目錄自動產生名稱。同一份 `.mcp.json`，內外身份不同，零衝突。
+
+外部 session 會出現在 `list_instances` 中，可被 `send_to_instance` 定向投遞。
 
 ### 優雅重啟
 

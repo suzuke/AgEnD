@@ -47,12 +47,65 @@ Instance 之間以及外部 Claude Code session 與 daemon instance 之間的通
 
 ## Telegram 可見性
 
-每條跨 instance 訊息都會同時 post 到雙方的 Telegram topic：
+跨 instance 訊息的 Telegram topic 通知規則：
 
-- 發送方 topic：`→ targetName: 訊息預覽`
-- 接收方 topic：`← senderName: 訊息預覽`
+- **Instance → Instance**：雙方 topic 都會收到通知
+  - 發送方 topic：`→ targetName: 訊息預覽`
+  - 接收方 topic：`← senderName: 訊息預覽`
+- **外部 Session → Instance**：只有接收方 topic 收到通知（發送方沒有 topic）
+- **Instance → 外部 Session**：只有發送方 topic 收到通知（接收方沒有 topic）
 
 訊息超過 200 字會自動截斷。
+
+## Session Identity（Env Var Layering）
+
+MCP server 連線時自報 sessionName。Daemon 用 sessionName 做訊息路由，確保內部和外部 session 的訊息隔離。
+
+### 身份決定邏輯
+
+MCP server 按以下優先順序決定自己的 sessionName：
+
+```
+CCD_INSTANCE_NAME → CCD_SESSION_NAME → external-<basename(cwd)>
+```
+
+| 優先級 | Env Var | 來源 | 誰設定 |
+|---|---|---|---|
+| 1 | `CCD_INSTANCE_NAME` | tmux shell 環境 | Daemon 在啟動 Claude 時注入 |
+| 2 | `CCD_SESSION_NAME` | `.mcp.json` env | 使用者手動設定（可選）|
+| 3 | (fallback) | `basename(process.cwd())` | 自動產生 |
+
+### 為什麼需要分層？
+
+內部和外部 session 共用同一份 `.mcp.json`（因為在同一個專案目錄）。如果只靠 `.mcp.json` 的 env var，兩者會拿到相同的身份。
+
+解法：Daemon 透過 tmux shell 環境注入 `CCD_INSTANCE_NAME`（不在 `.mcp.json` 裡）。內部 session 在 tmux 裡啟動，所以有這個變數；外部 session 不在 tmux 裡，沒有這個變數，fallback 到 `CCD_SESSION_NAME` 或自動名稱。
+
+### Targeted IPC Send
+
+Daemon 的 `pushChannelMessage` 用 sessionName 做定向投遞（不是 broadcast）：
+
+```
+fleet_inbound { targetSession: "ccplugin" }  → 只送給 sessionName="ccplugin" 的 socket
+fleet_inbound { targetSession: "dev" }       → 只送給 sessionName="dev" 的 socket
+```
+
+這確保共用同一個 IPC socket 的內部和外部 session 不會互相干擾。
+
+### Fleet Manager Session Registry
+
+Fleet manager 維護 `sessionRegistry: Map<sessionName, instanceName>`。當 MCP server 的 `mcp_ready` 帶著一個不等於 instance name 的 sessionName 時，註冊為外部 session。
+
+`list_instances` 同時回傳 instances 和 external sessions：
+
+```json
+{
+  "instances": [
+    { "name": "ccplugin", "type": "instance", "topic_id": 672 },
+    { "name": "external-myproject", "type": "session", "host": "myproject" }
+  ]
+}
+```
 
 ## 外部 Session 雙向通訊
 
@@ -75,6 +128,8 @@ Instance 之間以及外部 Claude Code session 與 daemon instance 之間的通
   }
 }
 ```
+
+可選：加 `"CCD_SESSION_NAME": "dev"` 自訂名稱（否則自動用 `external-<dirname>`）。
 
 2. 啟動時帶 `--dangerously-load-development-channels` flag：
 
