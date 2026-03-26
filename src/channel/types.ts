@@ -1,5 +1,24 @@
 import { EventEmitter } from "node:events";
 
+export interface Choice {
+  id: string;
+  label: string;
+}
+
+export interface InstanceStatusData {
+  name: string;
+  status: "running" | "stopped" | "crashed" | "paused";
+  contextPct: number | null;
+  costCents: number;
+}
+
+export interface AlertData {
+  type: "hang" | "cost_warn" | "cost_limit" | "schedule_deferred" | "rotation";
+  instanceName: string;
+  message: string;
+  choices?: Choice[];
+}
+
 export interface ChannelAdapter extends EventEmitter {
   readonly type: string;
   readonly id: string;
@@ -23,6 +42,17 @@ export interface ChannelAdapter extends EventEmitter {
 
   handlePairing(chatId: string, userId: string): Promise<string>;
   confirmPairing(code: string): Promise<boolean>;
+
+  readonly topology: "topics" | "channels" | "flat";
+
+  setChatId(chatId: string): void;
+  getChatId(): string | null;
+
+  promptUser(chatId: string, text: string, choices: Choice[], opts?: SendOpts): Promise<string>;
+  notifyAlert(chatId: string, alert: AlertData, opts?: SendOpts): Promise<SentMessage>;
+
+  createTopic?(name: string): Promise<number>;
+  topicExists?(topicId: number): Promise<boolean>;
 }
 
 export interface ApprovalHandle {
