@@ -1,4 +1,23 @@
+import { homedir } from "node:os";
+import { resolve, sep } from "node:path";
+import { realpathSync } from "node:fs";
 import type { ChannelAdapter } from "./types.js";
+
+const STATE_DIR = resolve(homedir(), ".claude-channel-daemon") + sep;
+const INBOX_SEG = sep + "inbox" + sep;
+
+/** Block files inside the state dir (except inbox/) from being sent out. */
+function assertSendable(filePath: string): void {
+  let resolved: string;
+  try {
+    resolved = realpathSync(filePath);
+  } catch {
+    return; // file doesn't exist yet — let adapter handle the error
+  }
+  if (resolved.startsWith(STATE_DIR) && !resolved.includes(INBOX_SEG)) {
+    throw new Error(`Blocked: refusing to send state file ${filePath}`);
+  }
+}
 
 /**
  * Route a channel tool call (reply, react, edit_message, download_attachment)
@@ -16,6 +35,12 @@ export function routeToolCall(
   switch (tool) {
     case "reply": {
       const files = Array.isArray(args.files) ? args.files as string[] : [];
+      try {
+        for (const f of files) assertSendable(f);
+      } catch (e: any) {
+        respond(null, e.message);
+        return true;
+      }
       const replyThreadId = args.thread_id as string ?? threadId;
       adapter.sendText(chatId, args.text as string ?? "", {
         threadId: replyThreadId,
