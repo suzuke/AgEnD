@@ -690,11 +690,16 @@ export class Daemon extends EventEmitter {
         result = await this.messageBus.requestApproval(prompt);
       }
 
-      const behavior = result.decision === "approve" ? "allow" : "deny";
+      const isApprove = result.decision === "approve" || result.decision === "approve_always";
+      const behavior = isApprove ? "allow" : "deny";
       this.ipcServer?.send(socket, {
         requestId,
         result: { request_id, behavior },
       });
+
+      if (result.decision === "approve_always") {
+        this.addToolPermission(prompt.tool_name);
+      }
 
       // If denied due to timeout, inform Claude so it can distinguish from explicit rejection
       if (behavior === "deny" && result.respondedBy?.channelType === "timeout") {
@@ -723,7 +728,10 @@ export class Daemon extends EventEmitter {
 
       this.pendingIpcRequests.set(approvalId, (msg) => {
         clearTimeout(timeout);
-        const decision = msg.decision === "approve" ? "approve" as const : "deny" as const;
+        const d = msg.decision as string;
+        const decision = d === "approve" ? "approve" as const
+          : d === "approve_always" ? "approve_always" as const
+          : "deny" as const;
         resolve({ decision, respondedBy: { channelType: "fleet", userId: "" } });
       });
 
@@ -736,6 +744,23 @@ export class Daemon extends EventEmitter {
     });
   }
 
+
+  /** Add a tool to the persistent permission allow list in claude-settings.json */
+  private addToolPermission(toolName: string): void {
+    const settingsPath = join(this.instanceDir, "claude-settings.json");
+    try {
+      const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+      const allow: string[] = settings.permissions?.allow ?? [];
+      if (!allow.includes(toolName)) {
+        allow.push(toolName);
+        settings.permissions.allow = allow;
+        writeFileSync(settingsPath, JSON.stringify(settings));
+        this.logger.info({ toolName }, "Added tool to permission allow list");
+      }
+    } catch (err) {
+      this.logger.warn({ err, toolName }, "Failed to update claude-settings.json");
+    }
+  }
 
   /** Build config object for the CLI backend */
   private buildBackendConfig(): CliBackendConfig {

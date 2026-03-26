@@ -371,16 +371,18 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
 
   async sendApproval(
     prompt: PermissionPrompt,
-    callback: (decision: "approve" | "deny") => void,
+    callback: (decision: "approve" | "approve_always" | "deny") => void,
     signal?: AbortSignal,
     threadId?: string,
   ): Promise<ApprovalHandle> {
     const nonce = Math.random().toString(36).slice(2, 10);
     const approveData = `approval:approve:${nonce}`;
+    const alwaysData = `approval:approve_always:${nonce}`;
     const denyData = `approval:deny:${nonce}`;
 
     const keyboard = new InlineKeyboard()
       .text("✅ Allow", approveData)
+      .text("✅ Always", alwaysData)
       .text("❌ Deny", denyData);
 
     // Format the permission message
@@ -401,18 +403,19 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
     const handler = (query: { callbackData?: string; chatId?: string; messageId?: string }) => {
       if (!query.callbackData) return;
       const isApprove = query.callbackData === approveData;
+      const isAlways = query.callbackData === alwaysData;
       const isDeny = query.callbackData === denyData;
-      if (!isApprove && !isDeny) return;
+      if (!isApprove && !isAlways && !isDeny) return;
 
       cleanup();
       if (query.chatId && query.messageId) {
-        const label = isApprove ? "✅ Allowed" : "❌ Denied";
+        const label = isDeny ? "❌ Denied" : isAlways ? "✅ Always Allowed" : "✅ Allowed";
         this.bot.api.editMessageText(
           Number(query.chatId), Number(query.messageId),
           `${label}\nTool: \`${prompt.tool_name}\``,
         ).catch(() => { /* UI update only */ });
       }
-      callback(isApprove ? "approve" : "deny");
+      callback(isDeny ? "deny" : isAlways ? "approve_always" : "approve");
     };
 
     this.on("callback_query", handler);
