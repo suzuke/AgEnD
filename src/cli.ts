@@ -28,10 +28,20 @@ const LOG_PATH = join(DATA_DIR, "daemon.log");
 
 const program = new Command();
 
+// Read version from package.json at build time
+const pkgVersion = (() => {
+  try {
+    const pkgPath = join(__dirname, "..", "package.json");
+    return JSON.parse(readFileSync(pkgPath, "utf-8")).version ?? "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+})();
+
 program
   .name("ccd")
   .description("Claude Channel Daemon")
-  .version("0.2.0");
+  .version(pkgVersion);
 
 // === Single-instance (backward compat) ===
 program
@@ -560,6 +570,7 @@ const schedule = program.command("schedule").description("Manage scheduled tasks
 
 schedule
   .command("list")
+  .description("List all schedules")
   .option("--target <instance>", "Filter by target instance")
   .option("--json", "Output as JSON")
   .action((opts) => {
@@ -585,6 +596,7 @@ schedule
 
 schedule
   .command("add")
+  .description("Add a new schedule")
   .requiredOption("--cron <expr>", "Cron expression")
   .requiredOption("--target <instance>", "Target instance")
   .requiredOption("--message <text>", "Message to send on trigger")
@@ -617,6 +629,7 @@ schedule
 
 schedule
   .command("update")
+  .description("Update an existing schedule")
   .argument("<id>", "Schedule ID")
   .option("--cron <expr>", "New cron expression")
   .option("--message <text>", "New message")
@@ -644,6 +657,7 @@ schedule
 
 schedule
   .command("delete")
+  .description("Delete a schedule")
   .argument("<id>", "Schedule ID")
   .action((id) => {
     const db = new SchedulerDb(join(DATA_DIR, "scheduler.db"));
@@ -658,6 +672,7 @@ schedule
 
 schedule
   .command("enable")
+  .description("Enable a schedule")
   .argument("<id>", "Schedule ID")
   .action((id) => {
     const db = new SchedulerDb(join(DATA_DIR, "scheduler.db"));
@@ -672,6 +687,7 @@ schedule
 
 schedule
   .command("disable")
+  .description("Disable a schedule")
   .argument("<id>", "Schedule ID")
   .action((id) => {
     const db = new SchedulerDb(join(DATA_DIR, "scheduler.db"));
@@ -686,6 +702,7 @@ schedule
 
 schedule
   .command("history")
+  .description("Show schedule run history")
   .argument("<id>", "Schedule ID")
   .option("--limit <n>", "Number of runs to show", "20")
   .action((id, opts) => {
@@ -707,6 +724,7 @@ schedule
 
 schedule
   .command("trigger")
+  .description("Manually trigger a schedule")
   .argument("<id>", "Schedule ID")
   .action((id) => {
     console.log("Manual trigger requires fleet manager running. Use the Telegram interface instead.");
