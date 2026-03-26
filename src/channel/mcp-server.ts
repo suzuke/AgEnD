@@ -219,6 +219,7 @@ const mcp = new Server(
       "If the inbound meta has image_path, Read that file — it is a photo the sender attached.",
       "If the inbound meta has attachment_file_id, call download_attachment with that file_id to fetch the file, then Read the returned path.",
       "Use send_to_instance to communicate with other Claude instances. Messages are passive — the recipient sees them but is not forced to respond. Use list_instances to discover available instances.",
+      "Cross-instance messages (from_instance in meta) must be replied to via send_to_instance, NOT the reply tool. The reply tool is for Telegram only.",
     ].join("\n"),
   },
 );

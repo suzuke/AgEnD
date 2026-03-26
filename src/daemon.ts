@@ -116,15 +116,22 @@ export class Daemon extends EventEmitter {
         this.logger.debug({ sessionName }, "MCP channel server connected and ready");
         // Notify FleetManager's IPC client that MCP is ready
         this.ipcServer?.broadcast({ type: "mcp_ready", sessionName });
+      } else if (msg.type === "query_sessions") {
+        // Fleet manager asks for all registered session names (catches sessions
+        // that sent mcp_ready before fleet manager connected).
+        for (const [s, sessionName] of this.socketSessionNames) {
+          if (!s.destroyed && sessionName !== this.name) {
+            this.ipcServer?.send(socket, { type: "mcp_ready", sessionName });
+          }
+        }
       } else if (msg.type === "fleet_inbound") {
         // Fleet manager routed a message to us (topic mode)
         const meta = msg.meta as Record<string, string>;
         const targetSession = msg.targetSession as string | undefined;
-        // Don't let cross-instance messages overwrite lastChatId/lastThreadId —
-        // "cross-instance" is not a valid Telegram chat_id and would break
-        // tool status, permission messages, and schedule meta.
-        if (meta.chat_id && meta.chat_id !== "cross-instance") this.lastChatId = meta.chat_id;
-        if (meta.chat_id !== "cross-instance" && meta.thread_id) this.lastThreadId = meta.thread_id;
+        // Only update lastChatId/lastThreadId from real Telegram messages (non-empty chat_id).
+        // Cross-instance messages have empty chat_id and must not overwrite these.
+        if (meta.chat_id) this.lastChatId = meta.chat_id;
+        if (meta.chat_id && meta.thread_id) this.lastThreadId = meta.thread_id;
         this.pushChannelMessage(msg.content as string, meta, targetSession);
       } else if (msg.type === "fleet_schedule_trigger") {
         const payload = msg.payload as Record<string, unknown>;

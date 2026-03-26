@@ -372,6 +372,9 @@ export class FleetManager implements FleetContext {
           this.handleScheduleCrud(name, msg);
         }
       });
+      // Ask daemon for any sessions that registered before we connected
+      // (fixes race condition where mcp_ready was broadcast before fleet manager connected)
+      ipc.send({ type: "query_sessions" });
       this.logger.debug({ name }, "Connected to instance IPC");
       if (!this.statuslineWatchers.has(name)) {
         this.startStatuslineWatcher(name);
@@ -492,7 +495,7 @@ export class FleetManager implements FleetContext {
           targetSession,
           content: message,
           meta: {
-            chat_id: "cross-instance",
+            chat_id: "",
             message_id: `xmsg-${Date.now()}`,
             user: `instance:${senderLabel}`,
             user_id: `instance:${senderLabel}`,
