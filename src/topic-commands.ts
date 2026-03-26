@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
 import type { FleetContext } from "./fleet-context.js";
@@ -34,8 +34,60 @@ export class TopicCommands {
       return true;
     }
 
+    if (text === "/status" || text === "/status@" || text.startsWith("/status@")) {
+      await this.handleStatusCommand(msg);
+      return true;
+    }
+
     // Return false for commands we don't handle (e.g. /meets, /debate, /collab)
     return false;
+  }
+
+  /** Handle /status command — show per-instance status and cost */
+  private async handleStatusCommand(msg: InboundMessage): Promise<void> {
+    if (!this.ctx.adapter || !this.ctx.fleetConfig) return;
+
+    const lines: string[] = [];
+    for (const [name] of Object.entries(this.ctx.fleetConfig.instances)) {
+      const status = this.ctx.getInstanceStatus(name);
+      const paused = this.ctx.costGuard?.isLimited(name);
+
+      // Read statusline for context usage
+      let contextStr = "-";
+      const statusFile = join(this.ctx.dataDir, "instances", name, "statusline.json");
+      try {
+        if (existsSync(statusFile)) {
+          const data = JSON.parse(readFileSync(statusFile, "utf-8"));
+          if (data.context_window?.used_percentage != null) {
+            contextStr = `${Math.round(data.context_window.used_percentage)}%`;
+          }
+        }
+      } catch { /* ignore */ }
+
+      const costCents = this.ctx.costGuard?.getDailyCostCents(name) ?? 0;
+      const costStr = `$${(costCents / 100).toFixed(2)}`;
+
+      let icon: string;
+      if (paused) icon = "⏸";
+      else if (status === "running") icon = "🟢";
+      else if (status === "crashed") icon = "🔴";
+      else icon = "⚪";
+
+      lines.push(`${icon} ${name} — ctx ${contextStr}, ${costStr} today`);
+    }
+
+    if (lines.length === 0) {
+      lines.push("No instances configured.");
+    }
+
+    const limitCents = this.ctx.costGuard?.getLimitCents() ?? 0;
+    const totalCents = this.ctx.costGuard?.getFleetTotalCents() ?? 0;
+    if (limitCents > 0) {
+      lines.push("");
+      lines.push(`Fleet: $${(totalCents / 100).toFixed(2)} / $${(limitCents / 100).toFixed(2)} daily`);
+    }
+
+    await this.ctx.adapter.sendText(msg.chatId, lines.join("\n"));
   }
 
   /** Handle /open command — list or search unbound directories */
@@ -379,6 +431,7 @@ export class TopicCommands {
             commands: [
               { command: "open", description: "Open an existing project" },
               { command: "new", description: "Create a new project" },
+              { command: "status", description: "Show fleet status and costs" },
               { command: "meets", description: "Start a multi-angle discussion" },
               { command: "debate", description: "Start a pro/con debate" },
               { command: "collab", description: "Start collaborative coding with worktrees" },
@@ -387,7 +440,7 @@ export class TopicCommands {
           }),
         },
       );
-      this.ctx.logger.info("Registered bot commands: /open, /new, /meets, /debate, /collab");
+      this.ctx.logger.info("Registered bot commands: /open, /new, /status, /meets, /debate, /collab");
     } catch (err) {
       this.ctx.logger.warn({ err }, "Failed to register bot commands (non-fatal)");
     }
