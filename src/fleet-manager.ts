@@ -6,9 +6,9 @@ import yaml from "js-yaml";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-import type { FleetConfig, InstanceConfig, CostGuardConfig } from "./types.js";
+import type { FleetConfig, InstanceConfig, CostGuardConfig, DailySummaryConfig } from "./types.js";
 import type { RouteTarget } from "./meeting/types.js";
-import { loadFleetConfig, DEFAULT_COST_GUARD } from "./config.js";
+import { loadFleetConfig, DEFAULT_COST_GUARD, DEFAULT_DAILY_SUMMARY } from "./config.js";
 import { EventLog } from "./event-log.js";
 import { CostGuard, formatCents } from "./cost-guard.js";
 import { TmuxManager } from "./tmux-manager.js";
@@ -26,6 +26,7 @@ import type { FleetContext } from "./fleet-context.js";
 import { TopicCommands } from "./topic-commands.js";
 import { MeetingManager } from "./meeting-manager.js";
 import type { HangDetector } from "./hang-detector.js";
+import { DailySummary } from "./daily-summary.js";
 
 const TMUX_SESSION = "ccd";
 
@@ -47,6 +48,7 @@ export class FleetManager implements FleetContext {
   costGuard: CostGuard | null = null;
   private statuslineWatchers = new Map<string, ReturnType<typeof setInterval>>();
   private instanceRateLimits = new Map<string, { five_hour_pct: number; seven_day_pct: number }>();
+  private dailySummary: DailySummary | null = null;
 
   constructor(public dataDir: string) {
     this.topicCommands = new TopicCommands(this);
@@ -185,6 +187,29 @@ export class FleetManager implements FleetContext {
       this.eventLog?.insert(instance, "instance_paused", { reason: "cost_limit", cost_cents: totalCents });
       this.stopInstance(instance).catch(err => this.logger.error({ err, instance }, "Failed to pause instance on cost limit"));
     });
+
+    const summaryConfig: DailySummaryConfig = {
+      ...DEFAULT_DAILY_SUMMARY,
+      ...(fleet.defaults as Record<string, unknown>)?.daily_summary as Partial<DailySummaryConfig> ?? {},
+    };
+    this.dailySummary = new DailySummary(summaryConfig, costGuardConfig.timezone, (text) => {
+      if (!this.adapter || !this.fleetConfig?.channel?.group_id) return;
+      this.adapter.sendText(String(this.fleetConfig.channel.group_id), text)
+        .catch(e => this.logger.debug({ err: e }, "Failed to send daily summary"));
+    }, () => {
+      const instances = Object.keys(this.fleetConfig?.instances ?? {});
+      const costMap = new Map<string, number>();
+      for (const name of instances) {
+        costMap.set(name, this.costGuard?.getDailyCostCents(name) ?? 0);
+      }
+      return DailySummary.generateText(
+        this.eventLog!,
+        instances,
+        costMap,
+        this.costGuard?.getFleetTotalCents() ?? 0,
+      );
+    });
+    this.dailySummary.start();
 
     for (const [name, config] of Object.entries(fleet.instances)) {
       await this.startInstance(name, config, topicMode && !config.channel);
@@ -819,6 +844,7 @@ export class FleetManager implements FleetContext {
   async stopAll(): Promise<void> {
     this.clearStatuslineWatchers();
     this.costGuard?.stop();
+    this.dailySummary?.stop();
 
     if (this.topicCleanupTimer) {
       clearInterval(this.topicCleanupTimer);

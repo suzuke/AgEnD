@@ -75,6 +75,12 @@ export interface HangDetectorConfig {
   timeout_minutes: number;
 }
 
+export interface DailySummaryConfig {
+  enabled: boolean;
+  hour: number;
+  minute: number;
+}
+
 export interface ChannelConfig {
   type: "telegram";
   mode: "topic" | "dm";
@@ -121,6 +127,7 @@ export interface FleetDefaults extends Partial<InstanceConfig> {
   meetings?: MeetingDefaults;
   cost_guard?: CostGuardConfig;
   hang_detector?: HangDetectorConfig;
+  daily_summary?: DailySummaryConfig;
 }
 
 export interface FleetConfig {
