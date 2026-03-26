@@ -362,7 +362,7 @@ export class FleetManager implements FleetContext {
             this.logger.info({ sessionName, instanceName: name }, "Registered external session");
           }
         } else if (msg.type === "fleet_outbound") {
-          this.handleOutboundFromInstance(name, msg);
+          this.handleOutboundFromInstance(name, msg).catch(err => this.logger.error({ err }, "handleOutboundFromInstance error"));
         } else if (msg.type === "fleet_approval_request") {
           this.handleApprovalFromInstance(name, msg);
         } else if (msg.type === "fleet_tool_status") {
@@ -429,7 +429,7 @@ export class FleetManager implements FleetContext {
   }
 
   /** Handle outbound tool calls from a daemon instance */
-  private handleOutboundFromInstance(instanceName: string, msg: Record<string, unknown>): void {
+  private async handleOutboundFromInstance(instanceName: string, msg: Record<string, unknown>): Promise<void> {
     if (!this.adapter) return;
     const tool = msg.tool as string;
     const args = (msg.args ?? {}) as Record<string, unknown>;
@@ -554,6 +554,32 @@ export class FleetManager implements FleetContext {
             name: sessName, type: "session" as const, host: hostInstance,
           }));
         respond({ instances: allInstances, external_sessions: externalSessions });
+        break;
+      }
+
+      case "start_instance": {
+        const targetName = args.name as string;
+
+        // Already running?
+        if (this.daemons.has(targetName)) {
+          respond({ success: true, status: "already_running" });
+          break;
+        }
+
+        // Exists in config?
+        const targetConfig = this.fleetConfig?.instances[targetName];
+        if (!targetConfig) {
+          respond(null, `Instance '${targetName}' not found in fleet config`);
+          break;
+        }
+
+        try {
+          await this.startInstance(targetName, targetConfig, true);
+          await this.connectIpcToInstance(targetName);
+          respond({ success: true, status: "started" });
+        } catch (err) {
+          respond(null, `Failed to start instance '${targetName}': ${(err as Error).message}`);
+        }
         break;
       }
 

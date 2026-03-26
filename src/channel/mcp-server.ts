@@ -37,7 +37,10 @@ if (!SOCKET_PATH) {
 }
 
 const IPC_TIMEOUT_MS = 30_000;
+const SLOW_IPC_TIMEOUT_MS = 60_000;
 const PERMISSION_TIMEOUT_MS = 120_000;
+
+const SLOW_TOOLS = new Set(["start_instance"]);
 
 // ---------------------------------------------------------------------------
 // Safety nets
@@ -144,11 +147,12 @@ function ipcRequest(
       return;
     }
 
+    const timeoutMs = SLOW_TOOLS.has(tool) ? SLOW_IPC_TIMEOUT_MS : IPC_TIMEOUT_MS;
     const requestId = ++requestCounter;
     const timer = setTimeout(() => {
       pendingRequests.delete(requestId);
-      reject(new Error(`IPC request timed out after ${IPC_TIMEOUT_MS}ms`));
-    }, IPC_TIMEOUT_MS);
+      reject(new Error(`IPC request timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
 
     pendingRequests.set(requestId, { resolve, reject, timer });
 
@@ -379,6 +383,22 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: "object" as const,
         properties: {},
+      },
+    },
+    {
+      name: "start_instance",
+      description:
+        "Start a stopped CCD instance. Use list_instances() first to check available instances and their status. " +
+        "Only needed when the target instance status is 'stopped'.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          name: {
+            type: "string",
+            description: "The instance name to start (from list_instances)",
+          },
+        },
+        required: ["name"],
       },
     },
   ],
