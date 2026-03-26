@@ -40,7 +40,7 @@ const IPC_TIMEOUT_MS = 30_000;
 const SLOW_IPC_TIMEOUT_MS = 60_000;
 const PERMISSION_TIMEOUT_MS = 120_000;
 
-const SLOW_TOOLS = new Set(["start_instance"]);
+const SLOW_TOOLS = new Set(["start_instance", "create_instance"]);
 
 // ---------------------------------------------------------------------------
 // Safety nets
@@ -399,6 +399,27 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
         },
         required: ["name"],
+      },
+    },
+    {
+      name: "create_instance",
+      description:
+        "Create a new CCD instance bound to a project directory, with a new Telegram topic. " +
+        "Use this when the user wants to add a new project to the fleet. " +
+        "The directory must exist. Returns the instance name and topic ID.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          directory: {
+            type: "string",
+            description: "Absolute path or ~-prefixed path to the project directory",
+          },
+          topic_name: {
+            type: "string",
+            description: "Name for the Telegram topic. Defaults to directory basename.",
+          },
+        },
+        required: ["directory"],
       },
     },
   ],

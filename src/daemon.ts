@@ -569,7 +569,7 @@ export class Daemon extends EventEmitter {
     };
 
     // Schedule tools → route to fleet manager
-    const CROSS_INSTANCE_TOOLS = new Set(["send_to_instance", "list_instances", "start_instance"]);
+    const CROSS_INSTANCE_TOOLS = new Set(["send_to_instance", "list_instances", "start_instance", "create_instance"]);
     const SCHEDULE_TOOLS = new Set(["create_schedule", "list_schedules", "update_schedule", "delete_schedule"]);
 
     if (SCHEDULE_TOOLS.has(tool)) {
@@ -616,7 +616,7 @@ export class Daemon extends EventEmitter {
           fleetRequestId: fleetReqId,
           senderSessionName,
         });
-        const crossTimeoutMs = tool === "start_instance" ? 60_000 : 30_000;
+        const crossTimeoutMs = (tool === "start_instance" || tool === "create_instance") ? 60_000 : 30_000;
         const timeout = setTimeout(() => {
           this.pendingIpcRequests.delete(fleetReqId);
           respond(null, `Cross-instance operation timed out after ${crossTimeoutMs / 1000}s`);

@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
+import { access } from "node:fs/promises";
 import { join, dirname, basename } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -23,7 +24,7 @@ import { Scheduler } from "./scheduler/index.js";
 import type { Schedule, SchedulerConfig } from "./scheduler/index.js";
 import { DEFAULT_SCHEDULER_CONFIG } from "./scheduler/index.js";
 import type { FleetContext } from "./fleet-context.js";
-import { TopicCommands } from "./topic-commands.js";
+import { TopicCommands, sanitizeInstanceName } from "./topic-commands.js";
 import { MeetingManager } from "./meeting-manager.js";
 import type { HangDetector } from "./hang-detector.js";
 import { DailySummary } from "./daily-summary.js";
@@ -583,6 +584,79 @@ export class FleetManager implements FleetContext {
         break;
       }
 
+      case "create_instance": {
+        const directory = (args.directory as string).replace(/^~/, process.env.HOME || "~");
+        const topicName = (args.topic_name as string) || basename(directory);
+
+        // Validate directory exists
+        try {
+          await access(directory);
+        } catch {
+          respond(null, `Directory does not exist: ${directory}`);
+          break;
+        }
+
+        // Check if already bound
+        const existingInstance = Object.entries(this.fleetConfig?.instances ?? {})
+          .find(([_, config]) => config.working_directory === directory);
+        if (existingInstance) {
+          const [eName, eConfig] = existingInstance;
+          respond({
+            success: true,
+            status: "already_exists",
+            name: eName,
+            topic_id: eConfig.topic_id,
+            running: this.daemons.has(eName),
+          });
+          break;
+        }
+
+        // Sequential steps with rollback
+        let createdTopicId: number | undefined;
+        let newInstanceName: string | undefined;
+
+        try {
+          // Step a: Create Telegram topic
+          createdTopicId = await this.createForumTopic(topicName);
+
+          // Step b: Register in config
+          newInstanceName = `${sanitizeInstanceName(basename(directory))}-t${createdTopicId}`;
+          const instanceConfig = {
+            ...this.fleetConfig!.defaults,
+            working_directory: directory,
+            topic_id: createdTopicId,
+          } as InstanceConfig;
+          this.fleetConfig!.instances[newInstanceName] = instanceConfig;
+          this.routingTable.set(createdTopicId, { kind: "instance", name: newInstanceName });
+          this.saveFleetConfig();
+
+          // Step c: Start instance
+          await this.startInstance(newInstanceName, instanceConfig, true);
+          await this.connectIpcToInstance(newInstanceName);
+
+          respond({
+            success: true,
+            name: newInstanceName,
+            topic_id: createdTopicId,
+          });
+        } catch (err) {
+          // Rollback in reverse order
+          if (newInstanceName && this.daemons.has(newInstanceName)) {
+            await this.stopInstance(newInstanceName).catch(() => {});
+          }
+          if (newInstanceName && this.fleetConfig?.instances[newInstanceName]) {
+            delete this.fleetConfig.instances[newInstanceName];
+            if (createdTopicId) this.routingTable.delete(createdTopicId);
+            this.saveFleetConfig();
+          }
+          if (createdTopicId) {
+            await this.deleteForumTopic(createdTopicId);
+          }
+          respond(null, `Failed to create instance: ${(err as Error).message}`);
+        }
+        break;
+      }
+
       default:
         respond(null, `Unknown tool: ${tool}`);
     }
@@ -774,6 +848,27 @@ export class FleetManager implements FleetContext {
       throw new Error(`createForumTopic failed: ${data.description ?? "unknown error"}`);
     }
     return data.result.message_thread_id;
+  }
+
+  private async deleteForumTopic(topicId: number): Promise<void> {
+    try {
+      const groupId = this.fleetConfig?.channel?.group_id;
+      const botTokenEnv = this.fleetConfig?.channel?.bot_token_env;
+      if (!groupId || !botTokenEnv) return;
+      const botToken = process.env[botTokenEnv];
+      if (!botToken) return;
+
+      await fetch(
+        `https://api.telegram.org/bot${botToken}/deleteForumTopic`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: groupId, message_thread_id: topicId }),
+        },
+      );
+    } catch (err) {
+      this.logger.warn({ err, topicId }, "Failed to delete forum topic during rollback");
+    }
   }
 
   private topicCleanupTimer: ReturnType<typeof setInterval> | null = null;
