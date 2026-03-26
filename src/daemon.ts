@@ -102,7 +102,10 @@ export class Daemon {
         this.handlePermissionRequest(msg, socket);
       } else if (msg.type === "mcp_ready") {
         const sessionName = msg.sessionName as string | undefined;
-        if (sessionName) this.socketSessionNames.set(socket, sessionName);
+        if (sessionName) {
+          this.socketSessionNames.set(socket, sessionName);
+          socket.on("close", () => { this.socketSessionNames.delete(socket); });
+        }
         this.logger.debug({ sessionName }, "MCP channel server connected and ready");
         // Notify FleetManager's IPC client that MCP is ready
         this.ipcServer?.broadcast({ type: "mcp_ready", sessionName });
@@ -110,8 +113,11 @@ export class Daemon {
         // Fleet manager routed a message to us (topic mode)
         const meta = msg.meta as Record<string, string>;
         const targetSession = msg.targetSession as string | undefined;
-        if (meta.chat_id) this.lastChatId = meta.chat_id;
-        if (meta.thread_id) this.lastThreadId = meta.thread_id;
+        // Don't let cross-instance messages overwrite lastChatId/lastThreadId —
+        // "cross-instance" is not a valid Telegram chat_id and would break
+        // tool status, permission messages, and schedule meta.
+        if (meta.chat_id && meta.chat_id !== "cross-instance") this.lastChatId = meta.chat_id;
+        if (meta.chat_id !== "cross-instance" && meta.thread_id) this.lastThreadId = meta.thread_id;
         this.pushChannelMessage(msg.content as string, meta, targetSession);
       } else if (msg.type === "fleet_schedule_trigger") {
         const payload = msg.payload as Record<string, unknown>;
@@ -482,8 +488,12 @@ export class Daemon {
     const socket = this.findSocketBySession(target);
     if (socket) {
       this.ipcServer.send(socket, msg);
+    } else if (targetSession && targetSession !== this.name) {
+      // Target session specified but not connected — don't broadcast to avoid
+      // delivering cross-instance messages to the wrong Claude session.
+      this.logger.warn({ targetSession }, "Target session not connected, message dropped");
     } else {
-      // Fallback: broadcast (e.g. session not yet registered)
+      // Own session not yet registered — broadcast as fallback
       this.ipcServer.broadcast(msg);
     }
     this.logger.debug({ user: meta.user, targetSession: target, text: content.slice(0, 100) }, "Pushed channel message");
@@ -579,9 +589,12 @@ export class Daemon {
     const adapters = this.messageBus.getAllAdapters();
     if (adapters.length === 0) {
       // Topic mode: forward to fleet manager via IPC (fleet manager connected as IPC client)
-      // The fleet manager's IPC client receives this and routes to shared adapter
-      const outboundKey = `fleet_out_${requestId}`;
-      this.ipcServer?.broadcast({ type: "fleet_outbound", tool, args, requestId });
+      // The fleet manager's IPC client receives this and routes to shared adapter.
+      // Use fleetRequestId (not requestId) to avoid other MCP sessions on this daemon
+      // from prematurely resolving their pending requests when they receive the broadcast.
+      const fleetReqId = `tool_${requestId}`;
+      const outboundKey = fleetReqId;
+      this.ipcServer?.broadcast({ type: "fleet_outbound", tool, args, fleetRequestId: fleetReqId });
       const timeout = setTimeout(() => {
         this.pendingIpcRequests.delete(outboundKey);
         respond(null, "Fleet outbound timed out after 30s");
