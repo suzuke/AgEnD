@@ -38,6 +38,8 @@ export class FleetManager implements FleetContext {
   logger: Logger = createLogger("info");
   private topicCommands: TopicCommands;
   private meetingManager: MeetingManager;
+  // sessionName → instanceName mapping for external sessions
+  private sessionRegistry: Map<string, string> = new Map();
 
   constructor(public dataDir: string) {
     this.topicCommands = new TopicCommands(this);
@@ -262,7 +264,14 @@ export class FleetManager implements FleetContext {
       await ipc.connect();
       this.instanceIpcClients.set(name, ipc);
       ipc.on("message", (msg: Record<string, unknown>) => {
-        if (msg.type === "fleet_outbound") {
+        if (msg.type === "mcp_ready") {
+          // Register external sessions (sessionName differs from instance name)
+          const sessionName = msg.sessionName as string | undefined;
+          if (sessionName && sessionName !== name) {
+            this.sessionRegistry.set(sessionName, name);
+            this.logger.info({ sessionName, instanceName: name }, "Registered external session");
+          }
+        } else if (msg.type === "fleet_outbound") {
           this.handleOutboundFromInstance(name, msg);
         } else if (msg.type === "fleet_approval_request") {
           this.handleApprovalFromInstance(name, msg);
@@ -312,6 +321,7 @@ export class FleetManager implements FleetContext {
     ipc.send({
       type: "fleet_inbound",
       content: text,
+      targetSession: instanceName, // Telegram messages → instance's own session
       meta: {
         chat_id: msg.chatId,
         message_id: msg.messageId,
@@ -361,19 +371,32 @@ export class FleetManager implements FleetContext {
       case "send_to_instance": {
         const targetName = args.instance_name as string;
         const message = args.message as string;
-        const targetIpc = this.instanceIpcClients.get(targetName);
-
-        if (!targetIpc) {
-          respond(null, `Instance not found or not running: ${targetName}`);
-          break;
-        }
-
-        // Use sessionName for attribution (falls back to instanceName)
         const senderLabel = senderSessionName ?? instanceName;
         const isExternalSender = senderSessionName != null && senderSessionName !== instanceName;
 
+        // Resolve target: could be an instance name or an external session name
+        let targetIpc = this.instanceIpcClients.get(targetName);
+        let targetSession: string = targetName; // default: target is the instance itself
+        let targetInstanceName = targetName;
+
+        if (!targetIpc) {
+          // Check if target is an external session
+          const hostInstance = this.sessionRegistry.get(targetName);
+          if (hostInstance) {
+            targetIpc = this.instanceIpcClients.get(hostInstance);
+            targetSession = targetName; // deliver to the external session
+            targetInstanceName = hostInstance;
+          }
+        }
+
+        if (!targetIpc) {
+          respond(null, `Instance or session not found: ${targetName}`);
+          break;
+        }
+
         targetIpc.send({
           type: "fleet_inbound",
+          targetSession,
           content: message,
           meta: {
             chat_id: "cross-instance",
@@ -391,8 +414,8 @@ export class FleetManager implements FleetContext {
         if (groupId && this.adapter) {
           const senderTopicId = this.meetingManager.getEphemeralTopicId(instanceName)
             ?? this.fleetConfig?.instances[instanceName]?.topic_id;
-          const targetTopicId = this.meetingManager.getEphemeralTopicId(targetName)
-            ?? this.fleetConfig?.instances[targetName]?.topic_id;
+          const targetTopicId = this.meetingManager.getEphemeralTopicId(targetInstanceName)
+            ?? this.fleetConfig?.instances[targetInstanceName]?.topic_id;
           const preview = message.length > 200 ? message.slice(0, 200) + "…" : message;
 
           // Only post to sender topic if sender is the instance itself (not external)
@@ -401,7 +424,8 @@ export class FleetManager implements FleetContext {
               threadId: String(senderTopicId),
             }).catch(e => this.logger.debug({ err: e }, "Failed to post cross-instance notification"));
           }
-          if (targetTopicId) {
+          // Only post to target topic if target is an instance (not external session)
+          if (targetTopicId && !this.sessionRegistry.has(targetName)) {
             this.adapter.sendText(String(groupId), `← ${senderLabel}: ${preview}`, {
               threadId: String(targetTopicId),
             }).catch(e => this.logger.debug({ err: e }, "Failed to post cross-instance notification"));
@@ -414,13 +438,20 @@ export class FleetManager implements FleetContext {
       }
 
       case "list_instances": {
+        const senderLabel = senderSessionName ?? instanceName;
         const instances = [...this.daemons.keys()]
-          .filter(name => name !== instanceName)
+          .filter(name => name !== instanceName && name !== senderLabel)
           .map(name => {
             const config = this.fleetConfig?.instances[name];
-            return { name, topic_id: config?.topic_id ?? null };
+            return { name, type: "instance" as const, topic_id: config?.topic_id ?? null };
           });
-        respond({ instances });
+        // Include external sessions (excluding self)
+        const sessions = [...this.sessionRegistry.entries()]
+          .filter(([sessionName]) => sessionName !== senderLabel)
+          .map(([sessionName, hostInstance]) => ({
+            name: sessionName, type: "session" as const, host: hostInstance,
+          }));
+        respond({ instances: [...instances, ...sessions] });
         break;
       }
 

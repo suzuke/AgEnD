@@ -109,9 +109,10 @@ export class Daemon {
       } else if (msg.type === "fleet_inbound") {
         // Fleet manager routed a message to us (topic mode)
         const meta = msg.meta as Record<string, string>;
+        const targetSession = msg.targetSession as string | undefined;
         if (meta.chat_id) this.lastChatId = meta.chat_id;
         if (meta.thread_id) this.lastThreadId = meta.thread_id;
-        this.pushChannelMessage(msg.content as string, meta);
+        this.pushChannelMessage(msg.content as string, meta, targetSession);
       } else if (msg.type === "fleet_schedule_trigger") {
         const payload = msg.payload as Record<string, unknown>;
         const meta = msg.meta as Record<string, string>;
@@ -467,21 +468,33 @@ export class Daemon {
   }
 
   /**
-   * Push an inbound channel message to Claude via the MCP server.
-   * This broadcasts to all IPC clients — the MCP server picks it up
-   * and forwards to Claude via notifications/claude/channel.
+   * Push an inbound channel message to a specific MCP session.
+   * If targetSession is provided, only send to the matching socket.
+   * Otherwise send to the instance's own session (this.name).
    */
-  pushChannelMessage(content: string, meta: Record<string, string>): void {
+  pushChannelMessage(content: string, meta: Record<string, string>, targetSession?: string): void {
     if (!this.ipcServer) {
       this.logger.warn("Cannot push channel message: IPC server not running");
       return;
     }
-    this.ipcServer.broadcast({
-      type: "channel_message",
-      content,
-      meta,
-    });
-    this.logger.debug({ user: meta.user, text: content.slice(0, 100) }, "Pushed channel message to Claude");
+    const msg = { type: "channel_message", content, meta };
+    const target = targetSession ?? this.name;
+    const socket = this.findSocketBySession(target);
+    if (socket) {
+      this.ipcServer.send(socket, msg);
+    } else {
+      // Fallback: broadcast (e.g. session not yet registered)
+      this.ipcServer.broadcast(msg);
+    }
+    this.logger.debug({ user: meta.user, targetSession: target, text: content.slice(0, 100) }, "Pushed channel message");
+  }
+
+  /** Find the IPC socket for a given sessionName */
+  private findSocketBySession(sessionName: string): import("node:net").Socket | undefined {
+    for (const [socket, name] of this.socketSessionNames) {
+      if (name === sessionName && !socket.destroyed) return socket;
+    }
+    return undefined;
   }
 
   /**
