@@ -308,6 +308,48 @@ fleet
     console.log(lines.slice(-n).join("\n"));
   });
 
+fleet
+  .command("history")
+  .description("Show fleet event history")
+  .option("--instance <name>", "Filter by instance name")
+  .option("--type <type>", "Filter by event type")
+  .option("--since <date>", "Filter events since date (ISO format)")
+  .option("--limit <n>", "Number of events to show", "50")
+  .option("--json", "Output as JSON")
+  .action(async (opts: { instance?: string; type?: string; since?: string; limit: string; json?: boolean }) => {
+    const { EventLog } = await import("./event-log.js");
+    const evLog = new EventLog(join(DATA_DIR, "events.db"));
+    try {
+      const rows = evLog.query({
+        instance: opts.instance,
+        type: opts.type,
+        since: opts.since,
+        limit: parseInt(opts.limit, 10),
+      });
+      if (opts.json) {
+        console.log(JSON.stringify(rows, null, 2));
+        return;
+      }
+      if (rows.length === 0) {
+        console.log("No events found.");
+        return;
+      }
+      console.log("Time".padEnd(22) + "Instance".padEnd(20) + "Type".padEnd(25) + "Payload");
+      console.log("\u2500".repeat(90));
+      for (const r of rows) {
+        const payloadStr = r.payload != null ? JSON.stringify(r.payload) : "";
+        console.log(
+          r.created_at.padEnd(22) +
+          r.instance_name.padEnd(20) +
+          r.event_type.padEnd(25) +
+          payloadStr,
+        );
+      }
+    } finally {
+      evLog.close();
+    }
+  });
+
 // === Topic commands ===
 const topic = program.command("topic").description("Topic binding management");
 
