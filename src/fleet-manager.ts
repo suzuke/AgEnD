@@ -772,7 +772,7 @@ export class FleetManager implements FleetContext {
     const instanceConfig = this.fleetConfig?.instances[instanceName];
     const threadId = instanceConfig?.topic_id ? String(instanceConfig.topic_id) : undefined;
 
-    this.adapter.sendApproval(prompt, (decision) => {
+    this.adapter.sendApproval(prompt, (decision: "approve" | "approve_always" | "deny") => {
       this.sendApprovalResponse(instanceName, approvalId, decision);
     }, undefined, threadId).catch((err) => {
       this.logger.warn({ instanceName, err: (err as Error).message }, "Failed to send approval to Telegram");
@@ -780,7 +780,7 @@ export class FleetManager implements FleetContext {
     });
   }
 
-  private sendApprovalResponse(instanceName: string, approvalId: string, decision: "approve" | "deny"): void {
+  private sendApprovalResponse(instanceName: string, approvalId: string, decision: "approve" | "approve_always" | "deny"): void {
     const ipc = this.instanceIpcClients.get(instanceName);
     ipc?.send({ type: "fleet_approval_response", approvalId, decision });
   }

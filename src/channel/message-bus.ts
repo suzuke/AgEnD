@@ -69,7 +69,7 @@ export class MessageBus extends EventEmitter {
 
       let adapterFailures = 0;
       for (const adapter of this.adapters.values()) {
-        adapter.sendApproval(prompt, (decision) => {
+        adapter.sendApproval(prompt, (decision: "approve" | "approve_always" | "deny") => {
           if (resolved) return;
           resolved = true;
           clearTimeout(timeout);
