@@ -110,6 +110,8 @@ export interface InstanceConfig {
   systemPrompt?: string;
   /** Skip permission checks (dangerously-skip-permissions) */
   skipPermissions?: boolean;
+  /** Per-instance cost guard (overrides fleet defaults) */
+  cost_guard?: CostGuardConfig;
 }
 
 export interface MeetingDefaults {
