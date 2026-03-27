@@ -1,0 +1,24 @@
+---
+import type { Locale } from '../i18n/utils';
+import { t } from '../i18n/utils';
+
+interface Props { locale: Locale }
+const { locale } = Astro.props;
+
+const items = ['1', '2', '3', '4'];
+---
+
+<section id="faq" class="py-20">
+  <h2 class="text-2xl font-bold mb-10 text-center">{t(locale, 'faq.title')}</h2>
+  <div class="max-w-2xl mx-auto divide-y divide-border">
+    {items.map(i => (
+      <details class="group py-4">
+        <summary class="cursor-pointer font-semibold text-text-primary hover:text-accent flex items-center justify-between">
+          {t(locale, `faq.q${i}`)}
+          <span class="text-text-secondary group-open:rotate-45 transition-transform text-lg">+</span>
+        </summary>
+        <p class="mt-2 text-text-secondary text-sm">{t(locale, `faq.a${i}`)}</p>
+      </details>
+    ))}
+  </div>
+</section>

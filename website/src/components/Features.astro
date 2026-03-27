@@ -1,0 +1,29 @@
+---
+import type { Locale } from '../i18n/utils';
+import { t } from '../i18n/utils';
+
+interface Props { locale: Locale }
+const { locale } = Astro.props;
+
+const features = [
+  { key: 'fleet', icon: '🚢' },
+  { key: 'schedule', icon: '⏰' },
+  { key: 'cost', icon: '💰' },
+  { key: 'p2p', icon: '🤝' },
+  { key: 'rotation', icon: '🔄' },
+  { key: 'backend', icon: '🔌' },
+];
+---
+
+<section id="features" class="py-20">
+  <h2 class="text-2xl font-bold mb-10 text-center">{t(locale, 'features.title')}</h2>
+  <div class="grid md:grid-cols-3 gap-4">
+    {features.map(f => (
+      <div class="bg-surface border border-border rounded-lg p-5 text-center">
+        <div class="text-3xl mb-3">{f.icon}</div>
+        <h3 class="font-semibold mb-1">{t(locale, `features.${f.key}.name`)}</h3>
+        <p class="text-text-secondary text-sm">{t(locale, `features.${f.key}.desc`)}</p>
+      </div>
+    ))}
+  </div>
+</section>

@@ -1,0 +1,27 @@
+---
+import type { Locale } from '../i18n/utils';
+import { t } from '../i18n/utils';
+
+interface Props { locale: Locale }
+const { locale } = Astro.props;
+
+const pains = ['pain1', 'pain2', 'pain3', 'pain4', 'pain5'];
+const gains = ['gain1', 'gain2', 'gain3', 'gain4', 'gain5'];
+---
+
+<section class="py-20">
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="bg-surface border border-border rounded-lg p-6">
+      <h3 class="text-error text-lg font-semibold mb-4">✗ {t(locale, 'problem.without')}</h3>
+      <ul class="space-y-2 text-text-secondary text-sm">
+        {pains.map(k => <li>{t(locale, `problem.${k}`)}</li>)}
+      </ul>
+    </div>
+    <div class="bg-surface border border-border rounded-lg p-6">
+      <h3 class="text-success text-lg font-semibold mb-4">✓ {t(locale, 'problem.withTitle')}</h3>
+      <ul class="space-y-2 text-text-secondary text-sm">
+        {gains.map(k => <li>{t(locale, `problem.${k}`)}</li>)}
+      </ul>
+    </div>
+  </div>
+</section>
