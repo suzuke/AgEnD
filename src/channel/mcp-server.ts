@@ -35,8 +35,6 @@ if (!SOCKET_PATH) {
   );
   process.exit(1);
 }
-const IPC_SECRET = process.env.CCD_IPC_SECRET;
-
 const IPC_TIMEOUT_MS = 30_000;
 const SLOW_IPC_TIMEOUT_MS = 60_000;
 const PERMISSION_TIMEOUT_MS = 120_000;
@@ -100,7 +98,7 @@ function setupIpcListeners(client: IpcClient): void {
 
 async function connectIpc(): Promise<void> {
   try {
-    const client = new IpcClient(SOCKET_PATH!, IPC_SECRET);
+    const client = new IpcClient(SOCKET_PATH!);
     await client.connect();
     ipc = client;
     ipcConnected = true;
