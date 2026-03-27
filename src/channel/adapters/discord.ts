@@ -254,7 +254,7 @@ export class DiscordAdapter extends EventEmitter implements ChannelAdapter {
     try {
       const guild = await this.client.guilds.fetch(this.guildId);
       const channels = guild.channels.cache.filter(
-        (c) => c.type === ChannelType.GuildText,
+        (c: { type: ChannelType }) => c.type === ChannelType.GuildText,
       );
       for (const [, ch] of channels) {
         try {
@@ -325,7 +325,7 @@ export class DiscordAdapter extends EventEmitter implements ChannelAdapter {
       // Update the message to show the decision
       if (query.threadId && query.messageId) {
         this._fetchTextChannel(query.threadId).then((ch) => {
-          ch.messages.fetch(query.messageId!).then((msg) => {
+          ch.messages.fetch(query.messageId!).then((msg: Message) => {
             const label = isDeny ? "❌ Denied" : isAlways ? "✅ Always Allowed" : "✅ Allowed";
             msg.edit({
               content: `${label}\nTool: \`${prompt.tool_name}\``,
@@ -419,7 +419,7 @@ export class DiscordAdapter extends EventEmitter implements ChannelAdapter {
 
     // Find or create the category
     let category = guild.channels.cache.find(
-      (c) => c.type === ChannelType.GuildCategory && c.name === this.categoryName,
+      (c: { type: ChannelType; name: string }) => c.type === ChannelType.GuildCategory && c.name === this.categoryName,
     );
 
     if (!category) {
