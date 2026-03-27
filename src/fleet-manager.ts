@@ -375,6 +375,12 @@ export class FleetManager implements FleetContext {
     });
 
     this.startTopicCleanupPoller();
+
+    // Prune stale external sessions every 5 minutes
+    this.sessionPruneTimer = setInterval(() => {
+      this.pruneStaleExternalSessions().catch(err =>
+        this.logger.debug({ err }, "Session prune failed"));
+    }, 5 * 60 * 1000);
   }
 
   /** Connect IPC clients to each daemon instance's channel.sock */
@@ -951,6 +957,7 @@ export class FleetManager implements FleetContext {
   }
 
   private topicCleanupTimer: ReturnType<typeof setInterval> | null = null;
+  private sessionPruneTimer: ReturnType<typeof setInterval> | null = null;
 
   /** Periodically check if bound topics still exist */
   private startTopicCleanupPoller(): void {
@@ -1056,6 +1063,10 @@ export class FleetManager implements FleetContext {
       clearInterval(this.topicCleanupTimer);
       this.topicCleanupTimer = null;
     }
+    if (this.sessionPruneTimer) {
+      clearInterval(this.sessionPruneTimer);
+      this.sessionPruneTimer = null;
+    }
 
     this.scheduler?.shutdown();
 
@@ -1086,6 +1097,51 @@ export class FleetManager implements FleetContext {
 
     const pidPath = join(this.dataDir, "fleet.pid");
     try { unlinkSync(pidPath); } catch (e) { this.logger.debug({ err: e }, "Failed to remove fleet PID file"); }
+  }
+
+  /**
+   * Prune stale external sessions by re-querying each daemon for live sessions.
+   * Sessions in the registry that are no longer reported by any daemon are removed.
+   */
+  async pruneStaleExternalSessions(): Promise<number> {
+    const liveSessions = new Set<string>();
+
+    // Ask each daemon for its currently connected external sessions
+    const queries = [...this.instanceIpcClients.entries()].map(([name, ipc]) => {
+      if (!ipc.connected) return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        const timeout = setTimeout(resolve, 5000);
+        const handler = (msg: Record<string, unknown>) => {
+          if (msg.type === "mcp_ready" && msg.sessionName) {
+            liveSessions.add(msg.sessionName as string);
+          }
+        };
+        ipc.on("message", handler);
+        ipc.send({ type: "query_sessions" });
+        // Wait a bit for responses, then clean up
+        setTimeout(() => {
+          ipc.removeListener("message", handler);
+          clearTimeout(timeout);
+          resolve();
+        }, 2000);
+      });
+    });
+
+    await Promise.all(queries);
+
+    // Remove sessions not found in any daemon
+    let pruned = 0;
+    for (const [sessionName] of this.sessionRegistry) {
+      if (!liveSessions.has(sessionName)) {
+        this.sessionRegistry.delete(sessionName);
+        this.logger.info({ sessionName }, "Pruned stale external session");
+        pruned++;
+      }
+    }
+    if (pruned > 0) {
+      this.logger.info({ pruned, remaining: this.sessionRegistry.size }, "Session registry pruned");
+    }
+    return pruned;
   }
 
   /**
