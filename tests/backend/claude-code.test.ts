@@ -150,7 +150,7 @@ describe("ClaudeCodeBackend", () => {
     it("writes statusline script", () => {
       const backend = new ClaudeCodeBackend(TEST_DIR);
       backend.writeConfig(makeConfig());
-      expect(existsSync(join(TEST_DIR, "statusline.sh"))).toBe(true);
+      expect(existsSync(join(TEST_DIR, "statusline.js"))).toBe(true);
     });
 
     it("writes bypass settings when skipPermissions is true", () => {
