@@ -422,7 +422,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
           model: {
             type: "string",
-            description: "Claude model alias: 'sonnet', 'opus', or 'haiku'. Defaults to Claude Code's default (usually opus).",
+            description: "Claude model to use for this instance. Omit to use the default (usually opus).",
             enum: ["sonnet", "opus", "haiku"],
           },
         },
