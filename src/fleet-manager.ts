@@ -697,6 +697,24 @@ export class FleetManager implements FleetContext {
           break;
         }
 
+        // Check for duplicate early (before worktree creation) — only when no branch
+        if (!branch) {
+          const expandHome = (p: string) => p.replace(/^~/, process.env.HOME || "~");
+          const existingInstance = Object.entries(this.fleetConfig?.instances ?? {})
+            .find(([_, config]) => expandHome(config.working_directory) === directory);
+          if (existingInstance) {
+            const [eName, eConfig] = existingInstance;
+            respond({
+              success: true,
+              status: "already_exists",
+              name: eName,
+              topic_id: eConfig.topic_id,
+              running: this.daemons.has(eName),
+            });
+            break;
+          }
+        }
+
         // If branch specified, create git worktree
         let workDir = directory;
         let worktreePath: string | undefined;
@@ -734,20 +752,22 @@ export class FleetManager implements FleetContext {
           }
         }
 
-        // Check if already bound (normalize ~ in config paths for comparison)
-        const expandHome = (p: string) => p.replace(/^~/, process.env.HOME || "~");
-        const existingInstance = Object.entries(this.fleetConfig?.instances ?? {})
-          .find(([_, config]) => expandHome(config.working_directory) === workDir);
-        if (existingInstance) {
-          const [eName, eConfig] = existingInstance;
-          respond({
-            success: true,
-            status: "already_exists",
-            name: eName,
-            topic_id: eConfig.topic_id,
-            running: this.daemons.has(eName),
-          });
-          break;
+        // Check worktree path for duplicates (branch case only — non-branch already checked above)
+        if (worktreePath) {
+          const expandHome = (p: string) => p.replace(/^~/, process.env.HOME || "~");
+          const existingInstance = Object.entries(this.fleetConfig?.instances ?? {})
+            .find(([_, config]) => expandHome(config.working_directory) === workDir);
+          if (existingInstance) {
+            const [eName, eConfig] = existingInstance;
+            respond({
+              success: true,
+              status: "already_exists",
+              name: eName,
+              topic_id: eConfig.topic_id,
+              running: this.daemons.has(eName),
+            });
+            break;
+          }
         }
 
         // Sequential steps with rollback
