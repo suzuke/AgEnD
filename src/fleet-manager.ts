@@ -1114,18 +1114,14 @@ export class FleetManager implements FleetContext {
       return new Promise<void>((resolve) => {
         const timeout = setTimeout(resolve, 5000);
         const handler = (msg: Record<string, unknown>) => {
-          if (msg.type === "mcp_ready" && msg.sessionName) {
-            liveSessions.add(msg.sessionName as string);
-          }
+          if (msg.type !== "query_sessions_response") return;
+          ipc.removeListener("message", handler);
+          clearTimeout(timeout);
+          for (const s of msg.sessions as string[]) liveSessions.add(s);
+          resolve();
         };
         ipc.on("message", handler);
         ipc.send({ type: "query_sessions" });
-        // Wait a bit for responses, then clean up
-        setTimeout(() => {
-          ipc.removeListener("message", handler);
-          clearTimeout(timeout);
-          resolve();
-        }, 2000);
       });
     });
 

@@ -128,11 +128,16 @@ export class Daemon extends EventEmitter {
       } else if (msg.type === "query_sessions") {
         // Fleet manager asks for all registered session names (catches sessions
         // that sent mcp_ready before fleet manager connected).
+        const sessions: string[] = [];
         for (const [s, sessionName] of this.socketSessionNames) {
           if (!s.destroyed && sessionName !== this.name) {
+            // Individual mcp_ready for initial registration path
             this.ipcServer?.send(socket, { type: "mcp_ready", sessionName });
+            sessions.push(sessionName);
           }
         }
+        // Batch response for prune path
+        this.ipcServer?.send(socket, { type: "query_sessions_response", sessions });
       } else if (msg.type === "fleet_inbound") {
         // Fleet manager routed a message to us (topic mode)
         const meta = msg.meta as Record<string, string>;
