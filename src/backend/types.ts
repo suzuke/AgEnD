@@ -13,6 +13,7 @@ export interface CliBackendConfig {
   mcpServers: Record<string, McpServerEntry>;
   systemPrompt?: string;
   skipPermissions?: boolean;
+  model?: string;
 }
 
 export interface CliBackend {

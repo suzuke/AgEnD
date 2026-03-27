@@ -110,6 +110,8 @@ export interface InstanceConfig {
   systemPrompt?: string;
   /** Skip permission checks (dangerously-skip-permissions) */
   skipPermissions?: boolean;
+  /** Claude model to use (e.g. "sonnet", "opus", "haiku", or full model ID) */
+  model?: string;
   /** Per-instance cost guard (overrides fleet defaults) */
   cost_guard?: CostGuardConfig;
 }

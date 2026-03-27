@@ -20,6 +20,10 @@ export class ClaudeCodeBackend implements CliBackend {
       cmd += ` --dangerously-skip-permissions`;
     }
 
+    if (config.model) {
+      cmd += ` --model ${config.model}`;
+    }
+
     if (config.systemPrompt) {
       const promptPath = join(this.instanceDir, "system-prompt.md");
       writeFileSync(promptPath, config.systemPrompt);

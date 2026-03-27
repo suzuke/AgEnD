@@ -420,6 +420,11 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: "string",
             description: "Name for the Telegram topic. Defaults to directory basename.",
           },
+          model: {
+            type: "string",
+            description: "Claude model alias: 'sonnet', 'opus', or 'haiku'. Defaults to Claude Code's default (usually opus).",
+            enum: ["sonnet", "opus", "haiku"],
+          },
         },
         required: ["directory"],
       },
