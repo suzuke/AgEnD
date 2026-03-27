@@ -91,6 +91,9 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
         return;
       }
 
+      // Skip service messages (topic rename, pin, member join/leave, etc.)
+      if (this._isServiceMessage(msg)) return;
+
       const chatId = String(msg.chat.id);
       const threadId = msg.message_thread_id != null
         ? String(msg.message_thread_id)
@@ -196,6 +199,18 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
     }
 
     return result;
+  }
+
+  /** Returns true if the message is a Telegram service event with no user content. */
+  private _isServiceMessage(msg: NonNullable<Context["message"]>): boolean {
+    const hasText = !!(msg.text || msg.caption);
+    const hasMedia = !!(msg.photo || msg.document || msg.audio || msg.voice || msg.video || msg.sticker || msg.video_note);
+    if (hasText || hasMedia) return false;
+
+    // If there's no text and no media, it's a service message
+    // (e.g. new_chat_title, pinned_message, new_chat_members, left_chat_member,
+    //  forum_topic_created, forum_topic_edited, etc.)
+    return true;
   }
 
   private async _handlePairCommand(ctx: Context): Promise<void> {
