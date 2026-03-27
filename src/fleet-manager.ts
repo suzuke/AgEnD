@@ -779,7 +779,9 @@ export class FleetManager implements FleetContext {
           createdTopicId = await this.createForumTopic(topicName);
 
           // Step b: Register in config
-          newInstanceName = `${sanitizeInstanceName(basename(workDir))}-t${createdTopicId}`;
+          // Use topicName for worktree instances to avoid long paths (Unix socket limit 104 bytes)
+          const nameBase = worktreePath ? topicName : basename(workDir);
+          newInstanceName = `${sanitizeInstanceName(nameBase)}-t${createdTopicId}`;
           const instanceConfig = {
             ...this.fleetConfig!.defaults,
             working_directory: workDir,
