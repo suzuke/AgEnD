@@ -82,7 +82,7 @@ export interface DailySummaryConfig {
 }
 
 export interface ChannelConfig {
-  type: "telegram";
+  type: string;
   mode: "topic" | "dm";
   bot_token_env: string;
   group_id?: number;

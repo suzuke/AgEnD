@@ -14,7 +14,7 @@ import { IpcServer } from "./channel/ipc-bridge.js";
 import { MessageBus } from "./channel/message-bus.js";
 import { ToolTracker } from "./channel/tool-tracker.js";
 import type { CliBackend, CliBackendConfig } from "./backend/types.js";
-import { TelegramAdapter } from "./channel/adapters/telegram.js";
+import { createAdapter } from "./channel/factory.js";
 import { AccessManager } from "./channel/access-manager.js";
 import type { ChannelAdapter, InboundMessage, ApprovalResponse, PermissionPrompt } from "./channel/types.js";
 import { processAttachments } from "./channel/attachment-handler.js";
@@ -164,8 +164,8 @@ export class Daemon extends EventEmitter {
         );
         const inboxDir = join(this.instanceDir, "inbox");
         mkdirSync(inboxDir, { recursive: true });
-        this.adapter = new TelegramAdapter({
-          id: `tg-${this.name}`,
+        this.adapter = await createAdapter(this.config.channel!, {
+          id: `dm-${this.name}`,
           botToken,
           accessManager,
           inboxDir,

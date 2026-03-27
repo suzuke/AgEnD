@@ -2,8 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:f
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
 import type { FleetContext } from "./fleet-context.js";
-import type { InboundMessage } from "./channel/types.js";
-import { TelegramAdapter } from "./channel/adapters/telegram.js";
+import type { InboundMessage, Choice } from "./channel/types.js";
 import { DEFAULT_INSTANCE_CONFIG } from "./config.js";
 import { formatCents } from "./cost-guard.js";
 
@@ -133,29 +132,22 @@ export class TopicCommands {
     const pageStart = page * PAGE_SIZE;
     const pageDirs = dirs.slice(pageStart, pageStart + PAGE_SIZE);
 
-    const { InlineKeyboard } = await import("grammy");
-    const keyboard = new InlineKeyboard();
+    const hasMore = pageStart + PAGE_SIZE < dirs.length;
 
+    const choices: Choice[] = [];
     for (let i = 0; i < pageDirs.length; i++) {
       const idx = pageStart + i;
-      keyboard.text(`📁 ${basename(pageDirs[i])}`, `cmd_open:${sessionId}:${idx}`).row();
+      choices.push({ id: `cmd_open:${sessionId}:${idx}`, label: `📁 ${basename(pageDirs[i])}` });
     }
 
-    const hasMore = pageStart + PAGE_SIZE < dirs.length;
     if (page > 0 || hasMore) {
-      if (page > 0) keyboard.text("⬅️ Prev", `cmd_open:${sessionId}:page:${page - 1}`);
-      if (hasMore) keyboard.text("➡️ Next", `cmd_open:${sessionId}:page:${page + 1}`);
-      keyboard.row();
+      if (page > 0) choices.push({ id: `cmd_open:${sessionId}:page:${page - 1}`, label: "⬅️ Prev" });
+      if (hasMore) choices.push({ id: `cmd_open:${sessionId}:page:${page + 1}`, label: "➡️ Next" });
     }
+    choices.push({ id: `cmd_open:${sessionId}:cancel`, label: "❌ Cancel" });
 
-    keyboard.text("❌ Cancel", `cmd_open:${sessionId}:cancel`).row();
-
-    const headerText = page === 0
-      ? "📂 Select a project:"
-      : `📂 Projects (page ${page + 1}):`;
-
-    const tgAdapter = this.ctx.adapter as TelegramAdapter;
-    await tgAdapter.sendTextWithKeyboard(chatId, headerText, keyboard);
+    const headerText = page === 0 ? "📂 Select a project:" : `📂 Projects (page ${page + 1}):`;
+    await this.ctx.adapter!.promptUser(chatId, headerText, choices);
   }
 
   /** Create topic and bind a project directory */
@@ -168,8 +160,7 @@ export class TopicCommands {
       topicId = await this.ctx.createForumTopic(topicName);
       const instanceName = await this.bindAndStart(dirPath, topicId);
 
-      const tgAdapter = this.ctx.adapter as TelegramAdapter;
-      await tgAdapter.sendText(
+      await this.ctx.adapter.sendText(
         chatId,
         `✅ Bound to: ${dirPath}\nInstance: ${instanceName}`,
         { threadId: String(topicId) },
@@ -238,8 +229,7 @@ export class TopicCommands {
 
       const instanceName = await this.bindAndStart(projectDir, topicId);
 
-      const tgAdapter = this.ctx.adapter as TelegramAdapter;
-      await tgAdapter.sendText(
+      await this.ctx.adapter.sendText(
         msg.chatId,
         `✅ Bound to: ${projectDir}\nInstance: ${instanceName}`,
         { threadId: String(topicId) },
