@@ -1,17 +1,20 @@
 ---
+import Base from '../layouts/Base.astro';
+import Hero from '../components/Hero.astro';
+import Problem from '../components/Problem.astro';
+import Features from '../components/Features.astro';
+import QuickStart from '../components/QuickStart.astro';
+import Architecture from '../components/Architecture.astro';
+import FAQ from '../components/FAQ.astro';
 
+const locale = 'en' as const;
 ---
 
-<html lang="en">
-	<head>
-		<meta charset="utf-8" />
-		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-		<link rel="icon" href="/favicon.ico" />
-		<meta name="viewport" content="width=device-width" />
-		<meta name="generator" content={Astro.generator} />
-		<title>Astro</title>
-	</head>
-	<body>
-		<h1>Astro</h1>
-	</body>
-</html>
+<Base locale={locale}>
+  <Hero locale={locale} />
+  <Problem locale={locale} />
+  <Features locale={locale} />
+  <QuickStart locale={locale} />
+  <Architecture locale={locale} />
+  <FAQ locale={locale} />
+</Base>
