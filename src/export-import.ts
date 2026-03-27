@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import {
   existsSync,
   statSync,
@@ -34,13 +34,11 @@ export async function exportConfig(
   const outFile = resolve(outputPath ?? `ccd-export-${date}.tar.gz`);
 
   if (full) {
-    const excludeArgs = RUNTIME_EXCLUDES.map((p) => `--exclude='${p}'`).join(
-      " "
-    );
-    execSync(
-      `tar czf "${outFile}" ${excludeArgs} -C "${join(dataDir, "..")}" "${basename(dataDir)}"`,
-      { stdio: "pipe" }
-    );
+    const excludeArgs = RUNTIME_EXCLUDES.flatMap((p) => ["--exclude", p]);
+    execFileSync("tar", [
+      "czf", outFile, ...excludeArgs,
+      "-C", join(dataDir, ".."), basename(dataDir),
+    ], { stdio: "pipe" });
   } else {
     // Minimal: only config files that exist
     const existing = MINIMAL_FILES.filter((f) => existsSync(join(dataDir, f)));
@@ -48,13 +46,10 @@ export async function exportConfig(
       console.error("No config files found to export.");
       process.exit(1);
     }
-    const fileArgs = existing
-      .map((f) => `"${basename(dataDir)}/${f}"`)
-      .join(" ");
-    execSync(
-      `tar czf "${outFile}" -C "${join(dataDir, "..")}" ${fileArgs}`,
-      { stdio: "pipe" }
-    );
+    const fileArgs = existing.map((f) => `${basename(dataDir)}/${f}`);
+    execFileSync("tar", [
+      "czf", outFile, "-C", join(dataDir, ".."), ...fileArgs,
+    ], { stdio: "pipe" });
   }
 
   const size = statSync(outFile).size;
@@ -95,10 +90,7 @@ export async function importConfig(
   }
 
   // Extract — strip the top-level directory name
-  execSync(
-    `tar xzf "${absFile}" -C "${join(dataDir, "..")}"`,
-    { stdio: "pipe" }
-  );
+  execFileSync("tar", ["xzf", absFile, "-C", join(dataDir, "..")], { stdio: "pipe" });
   console.log(`Imported to: ${dataDir}`);
 
   // Validate paths in fleet.yaml

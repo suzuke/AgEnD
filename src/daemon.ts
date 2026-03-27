@@ -2,6 +2,7 @@ import { join, dirname } from "node:path";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
+import { randomUUID, randomBytes } from "node:crypto";
 import { EventEmitter } from "node:events";
 import type { InstanceConfig } from "./types.js";
 import { createLogger, type Logger } from "./logger.js";
@@ -54,6 +55,7 @@ export class Daemon extends EventEmitter {
   private rotationStartedAt = 0;
   private preRotationContextPct = 0;
   private hangDetector: HangDetector | null = null;
+  private ipcSecret: string;
 
   constructor(
     private name: string,
@@ -66,6 +68,7 @@ export class Daemon extends EventEmitter {
     this.logger = createLogger(config.log_level);
     this.messageBus = new MessageBus();
     this.messageBus.setLogger(this.logger);
+    this.ipcSecret = randomBytes(16).toString("hex");
   }
 
   async start(): Promise<void> {
@@ -75,7 +78,7 @@ export class Daemon extends EventEmitter {
 
     // 1. IPC server — bridge between MCP server (Claude's child) and daemon
     const sockPath = join(this.instanceDir, "channel.sock");
-    this.ipcServer = new IpcServer(sockPath, this.logger);
+    this.ipcServer = new IpcServer(sockPath, this.logger, this.ipcSecret);
     await this.ipcServer.listen();
 
     // Permanent IPC dispatcher: routes responses to pending requests by type+id key
@@ -713,7 +716,7 @@ export class Daemon extends EventEmitter {
   /** Topic mode: forward approval request to fleet manager via IPC */
   private requestApprovalViaIpc(prompt: PermissionPrompt): Promise<ApprovalResponse> {
     return new Promise((resolve) => {
-      const approvalId = `approval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const approvalId = `approval-${randomUUID()}`;
 
       const timeout = setTimeout(() => {
         this.pendingIpcRequests.delete(approvalId);
@@ -771,7 +774,7 @@ export class Daemon extends EventEmitter {
         "ccd-channel": {
           command: "node",
           args: [serverJs],
-          env: { CCD_SOCKET_PATH: sockPath },
+          env: { CCD_SOCKET_PATH: sockPath, CCD_IPC_SECRET: this.ipcSecret },
         },
       },
       systemPrompt: this.config.systemPrompt,

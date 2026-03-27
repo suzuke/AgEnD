@@ -13,7 +13,7 @@ export class ClaudeCodeBackend implements CliBackend {
     const sessionIdFile = join(this.instanceDir, "session-id");
     if (existsSync(sessionIdFile)) {
       const sid = readFileSync(sessionIdFile, "utf-8").trim();
-      if (sid) cmd += ` --resume ${sid}`;
+      if (sid && /^[a-zA-Z0-9_-]+$/.test(sid)) cmd += ` --resume ${sid}`;
     }
 
     if (config.skipPermissions) {

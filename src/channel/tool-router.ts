@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { resolve, sep } from "node:path";
-import { realpathSync } from "node:fs";
+import { realpathSync, existsSync } from "node:fs";
 import type { ChannelAdapter } from "./types.js";
 
 const STATE_DIR = resolve(homedir(), ".claude-channel-daemon") + sep;
@@ -12,7 +12,8 @@ function assertSendable(filePath: string): void {
   try {
     resolved = realpathSync(filePath);
   } catch {
-    return; // file doesn't exist yet — let adapter handle the error
+    if (!existsSync(filePath)) return; // truly missing — let adapter handle
+    throw new Error(`Blocked: cannot resolve path ${filePath}`);
   }
   if (resolved.startsWith(STATE_DIR) && !resolved.includes(INBOX_SEG)) {
     throw new Error(`Blocked: refusing to send state file ${filePath}`);

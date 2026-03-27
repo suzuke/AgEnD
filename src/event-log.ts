@@ -23,6 +23,10 @@ export interface QueryOpts {
   limit?: number;
 }
 
+function safeParseJson(s: string): Record<string, unknown> | null {
+  try { return JSON.parse(s) as Record<string, unknown>; } catch { return null; }
+}
+
 export class EventLog {
   private db: Database.Database;
   private insertStmt: Database.Statement;
@@ -73,7 +77,7 @@ export class EventLog {
     const rows = this.db.prepare(sql).all(...params) as EventRowRaw[];
     return rows.map((r) => ({
       ...r,
-      payload: r.payload != null ? (JSON.parse(r.payload) as Record<string, unknown>) : null,
+      payload: r.payload != null ? safeParseJson(r.payload) : null,
     }));
   }
 

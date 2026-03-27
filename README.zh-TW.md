@@ -373,6 +373,37 @@ GROQ_API_KEY=gsk_...          # 選用，語音轉文字用
 - Telegram bot token（[@BotFather](https://t.me/BotFather)）
 - Groq API key（選用，語音轉文字用）
 
+## 安全注意事項
+
+透過 Telegram 遠端操作 Claude Code，與坐在終端機前操作有不同的信任模型。請注意以下風險：
+
+### Telegram 帳號 = Shell 存取權
+
+`allowed_users` 中的任何用戶都能指示 Claude 在主機上執行任意 shell 指令。如果你的 Telegram 帳號被入侵（session 被盜、社交工程、手機借人），攻擊者等同取得 shell 存取權。建議：
+
+- 啟用 Telegram 兩步驟驗證
+- `allowed_users` 只放必要的人
+- 盡量用 `pairing` 模式取代預設 user ID
+- 檢查 `claude-settings.json` 裡的權限 allow/deny list
+
+### 權限繞過（`skipPermissions`）
+
+`skipPermissions` 設定會傳遞 `--dangerously-skip-permissions` 給 Claude Code，停用所有工具使用的權限提示。這代表 Claude 可以讀寫任意檔案、執行任何指令、發送網路請求，完全不需要詢問。這是 Claude Code 官方的自動化旗標，但在遠端 Telegram 情境下代表**所有操作零人工審核**。只有在你完全信任部署環境時才啟用。
+
+### Allow list 中的 `Bash(*)`
+
+預設情況下（`skipPermissions` 關閉時），ccd 在 Claude Code 的權限 allow list 中設定了 `Bash(*)`，使 shell 指令不需要逐一核准。deny list 會阻擋少數破壞性指令（`rm -rf /`、`dd`、`mkfs`），但這是黑名單策略——無法涵蓋所有危險指令。這與 Claude Code 自身的權限模型一致，`Bash(*)` 是官方支援的進階用戶設定。
+
+如果需要更嚴格的控制，可以編輯 `claude-settings.json`（每個 instance 產生在 `~/.claude-channel-daemon/instances/<name>/`），將 `Bash(*)` 改為特定模式如 `Bash(npm test)`、`Bash(git *)`。
+
+### IPC Socket
+
+Daemon 與 Claude 的 MCP server 透過 Unix socket（`~/.claude-channel-daemon/instances/<name>/channel.sock`）通訊。Socket 限制為擁有者唯讀（`0600`）並要求 shared secret 握手認證。這些措施防止其他本地程序注入訊息，但無法防禦同機器上被入侵的用戶帳號。
+
+### 密鑰儲存
+
+Bot token 和 API key 以明文存放在 `~/.claude-channel-daemon/.env`。`ccd export` 會包含此檔案並警告安全傳輸。如果主機為共用環境，建議使用檔案系統加密。
+
 ## 已知限制
 
 - 目前只在 macOS 測過

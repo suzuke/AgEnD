@@ -27,9 +27,9 @@ describe("AccessManager", () => {
     expect(am.isAllowed(999)).toBe(false);
   });
 
-  it("generates 6-char hex pairing code", () => {
+  it("generates 8-char hex pairing code", () => {
     const code = am.generateCode(999);
-    expect(code).toMatch(/^[0-9A-F]{6}$/);
+    expect(code).toMatch(/^[0-9A-F]{8}$/);
   });
 
   it("confirms valid pairing code and adds to allowlist", () => {

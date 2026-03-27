@@ -5,16 +5,23 @@ import {
   Server,
   Socket,
 } from "node:net";
-import { unlinkSync, existsSync } from "node:fs";
+import { unlinkSync, existsSync, chmodSync } from "node:fs";
 
 function encode(msg: unknown): string {
   return JSON.stringify(msg) + "\n";
 }
 
-function makeLineParser(onMessage: (msg: unknown) => void) {
+const MAX_LINE_BUFFER = 10 * 1024 * 1024; // 10 MB
+
+function makeLineParser(onMessage: (msg: unknown) => void, onOverflow?: () => void) {
   let buf = "";
   return (data: Buffer | string) => {
     buf += data.toString();
+    if (buf.length > MAX_LINE_BUFFER) {
+      buf = "";
+      onOverflow?.();
+      return;
+    }
     const lines = buf.split("\n");
     // Last element is either empty string or an incomplete line
     buf = lines.pop() ?? "";
@@ -35,12 +42,14 @@ export class IpcServer extends EventEmitter {
   private sockPath: string;
   private server: Server | null = null;
   private clients: Set<Socket> = new Set();
+  private secret: string | undefined;
   private logger?: { warn(obj: unknown, msg?: string): void; debug(obj: unknown, msg?: string): void };
 
-  constructor(sockPath: string, logger?: { warn(obj: unknown, msg?: string): void; debug(obj: unknown, msg?: string): void }) {
+  constructor(sockPath: string, logger?: { warn(obj: unknown, msg?: string): void; debug(obj: unknown, msg?: string): void }, secret?: string) {
     super();
     this.sockPath = sockPath;
     this.logger = logger;
+    this.secret = secret;
   }
 
   async listen(): Promise<void> {
@@ -55,22 +64,58 @@ export class IpcServer extends EventEmitter {
 
     return new Promise((resolve, reject) => {
       this.server = createServer((socket) => {
-        this.clients.add(socket);
-        const parse = makeLineParser((msg) => {
-          this.emit("message", msg, socket);
+        if (!this.secret) {
+          // No secret configured — accept immediately
+          this.acceptClient(socket);
+          return;
+        }
+        // Require auth handshake as first message
+        const authTimeout = setTimeout(() => {
+          this.logger?.warn("IPC auth timeout, dropping client");
+          socket.destroy();
+        }, 5000);
+        const authParse = makeLineParser((msg) => {
+          clearTimeout(authTimeout);
+          const m = msg as Record<string, unknown>;
+          if (m.type === "auth" && m.secret === this.secret) {
+            socket.removeAllListeners("data");
+            this.acceptClient(socket);
+          } else {
+            this.logger?.warn("IPC auth failed, dropping client");
+            socket.destroy();
+          }
         });
-        socket.on("data", parse);
-        socket.on("close", () => {
-          this.clients.delete(socket);
-        });
-        socket.on("error", (err) => {
-          this.logger?.warn({ err }, "IPC client socket error, removing client");
-          this.clients.delete(socket);
+        socket.on("data", authParse);
+        socket.on("error", () => {
+          clearTimeout(authTimeout);
+          socket.destroy();
         });
       });
 
       this.server.on("error", reject);
-      this.server.listen(this.sockPath, () => resolve());
+      this.server.listen(this.sockPath, () => {
+        try { chmodSync(this.sockPath, 0o600); } catch { /* best-effort */ }
+        resolve();
+      });
+    });
+  }
+
+  private acceptClient(socket: Socket): void {
+    this.clients.add(socket);
+    const parse = makeLineParser((msg) => {
+      this.emit("message", msg, socket);
+    }, () => {
+      this.logger?.warn("IPC buffer overflow, dropping client");
+      socket.destroy();
+      this.clients.delete(socket);
+    });
+    socket.on("data", parse);
+    socket.on("close", () => {
+      this.clients.delete(socket);
+    });
+    socket.on("error", (err) => {
+      this.logger?.warn({ err }, "IPC client socket error, removing client");
+      this.clients.delete(socket);
     });
   }
 
@@ -116,11 +161,13 @@ export class IpcServer extends EventEmitter {
 
 export class IpcClient extends EventEmitter {
   private sockPath: string;
+  private secret: string | undefined;
   private socket: Socket | null = null;
 
-  constructor(sockPath: string) {
+  constructor(sockPath: string, secret?: string) {
     super();
     this.sockPath = sockPath;
+    this.secret = secret;
   }
 
   async connect(): Promise<void> {
@@ -143,6 +190,10 @@ export class IpcClient extends EventEmitter {
       socket.once("connect", () => {
         // Remove the one-shot error handler used for connection failure
         socket.removeListener("error", reject);
+        // Send auth handshake if secret is configured
+        if (this.secret) {
+          socket.write(encode({ type: "auth", secret: this.secret }));
+        }
         resolve();
       });
     });

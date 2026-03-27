@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { randomBytes } from "node:crypto";
 import { createReadStream, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join, extname, basename } from "node:path";
 import { Bot, GrammyError, InputFile } from "grammy";
@@ -367,7 +368,7 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
     signal?: AbortSignal,
     threadId?: string,
   ): Promise<ApprovalHandle> {
-    const nonce = Math.random().toString(36).slice(2, 10);
+    const nonce = randomBytes(5).toString("hex");
     const approveData = `approval:approve:${nonce}`;
     const alwaysData = `approval:approve_always:${nonce}`;
     const denyData = `approval:deny:${nonce}`;

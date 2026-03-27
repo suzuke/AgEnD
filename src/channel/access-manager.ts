@@ -98,7 +98,7 @@ export class AccessManager {
       throw new Error(`Max pending codes reached for ${this.config.max_pending_codes} unique users`);
     }
 
-    const code = randomBytes(3).toString("hex").toUpperCase();
+    const code = randomBytes(4).toString("hex").toUpperCase();
     this.state.pending_codes.push({
       code,
       userId,

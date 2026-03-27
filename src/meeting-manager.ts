@@ -1,11 +1,16 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
+import { homedir } from "node:os";
 import type { FleetContext } from "./fleet-context.js";
+
+const WORKTREE_DIR = join(homedir(), ".claude-channel-daemon", "tmp");
 
 export class MeetingManager {
   private ephemeralTopicMap: Map<string, number> = new Map();
 
-  constructor(private ctx: FleetContext) {}
+  constructor(private ctx: FleetContext) {
+    mkdirSync(WORKTREE_DIR, { recursive: true });
+  }
 
   /** Get the ephemeral topic ID for an instance (used by fleet-manager for outbound routing) */
   getEphemeralTopicId(instanceName: string): number | undefined {
@@ -16,7 +21,7 @@ export class MeetingManager {
   async cleanupEphemeral(name: string): Promise<void> {
     this.ephemeralTopicMap.delete(name);
 
-    const worktreePath = join("/tmp", `ccd-collab-${name}`);
+    const worktreePath = join(WORKTREE_DIR, `ccd-collab-${name}`);
     if (!existsSync(worktreePath)) return;
 
     try {
