@@ -383,15 +383,23 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
     signal?: AbortSignal,
     threadId?: string,
   ): Promise<ApprovalHandle> {
+    const TIMEOUT_SECS = 120;
+    const COUNTDOWN_INTERVAL_MS = 30_000;
+
     const nonce = randomBytes(5).toString("hex");
     const approveData = `approval:approve:${nonce}`;
     const alwaysData = `approval:approve_always:${nonce}`;
     const denyData = `approval:deny:${nonce}`;
 
-    const keyboard = new InlineKeyboard()
-      .text("✅ Allow", approveData)
-      .text("✅ Always", alwaysData)
-      .text("❌ Deny", denyData);
+    const makeKeyboard = (remainingSecs: number) => {
+      const mm = Math.floor(remainingSecs / 60);
+      const ss = remainingSecs % 60;
+      const ts = `${mm}:${String(ss).padStart(2, "0")}`;
+      return new InlineKeyboard()
+        .text(`✅ Allow (${ts})`, approveData)
+        .text("✅ Always", alwaysData)
+        .text(`❌ Deny`, denyData);
+    };
 
     // Format the permission message
     let text = `⚠️ *Permission Request*\nTool: \`${prompt.tool_name}\``;
@@ -404,7 +412,17 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
       text += `\n${prompt.description}`;
     }
 
+    let sentChatId: number | undefined;
+    let sentMessageId: number | undefined;
+    let countdownTimer: ReturnType<typeof setInterval> | undefined;
+    const startTime = Date.now();
+
+    const stopCountdown = () => {
+      if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = undefined; }
+    };
+
     const cleanup = () => {
+      stopCountdown();
       this.off("callback_query", handler);
     };
 
@@ -416,11 +434,14 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
       if (!isApprove && !isAlways && !isDeny) return;
 
       cleanup();
-      if (query.chatId && query.messageId) {
+      // Post-decision feedback: update message with decision result
+      const editChatId = query.chatId ? Number(query.chatId) : sentChatId;
+      const editMsgId = query.messageId ? Number(query.messageId) : sentMessageId;
+      if (editChatId && editMsgId) {
         const label = isDeny ? "❌ Denied" : isAlways ? "✅ Always Allowed" : "✅ Allowed";
-        this.bot.api.editMessageText(
-          Number(query.chatId), Number(query.messageId),
+        this.bot.api.editMessageText(editChatId, editMsgId,
           `${label}\nTool: \`${prompt.tool_name}\``,
+          { parse_mode: "Markdown" },
         ).catch(() => { /* UI update only */ });
       }
       callback(isDeny ? "deny" : isAlways ? "approve_always" : "approve");
@@ -429,13 +450,25 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
     this.on("callback_query", handler);
 
     if (signal) {
-      signal.addEventListener("abort", () => cleanup());
+      signal.addEventListener("abort", () => {
+        // On timeout/abort, update message to show expiry
+        stopCountdown();
+        if (sentChatId && sentMessageId) {
+          this.bot.api.editMessageText(sentChatId, sentMessageId,
+            `⏱ Timed out\nTool: \`${prompt.tool_name}\``,
+            { parse_mode: "Markdown" },
+          ).catch(() => { /* UI update only */ });
+        }
+        this.off("callback_query", handler);
+      });
     }
+
+    const keyboard = makeKeyboard(TIMEOUT_SECS);
 
     if (threadId) {
       const chatId = this.getChatId();
       if (chatId) {
-        await this.bot.api.sendMessage(Number(chatId), text, {
+        const sent = await this.bot.api.sendMessage(Number(chatId), text, {
           message_thread_id: Number(threadId),
           reply_markup: keyboard,
           parse_mode: "Markdown",
@@ -445,9 +478,26 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
             reply_markup: keyboard,
           });
         });
+        sentChatId = sent.chat.id;
+        sentMessageId = sent.message_id;
       }
     } else {
       this.emit("approval_request", { prompt: text, keyboard, nonce });
+    }
+
+    // Start countdown timer — update buttons every 30s with remaining time
+    if (sentChatId && sentMessageId) {
+      const chatIdForEdit = sentChatId;
+      const msgIdForEdit = sentMessageId;
+      countdownTimer = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        const remaining = Math.max(0, TIMEOUT_SECS - elapsed);
+        if (remaining <= 0) { stopCountdown(); return; }
+        const updatedKeyboard = makeKeyboard(remaining);
+        this.bot.api.editMessageReplyMarkup(chatIdForEdit, msgIdForEdit, {
+          reply_markup: updatedKeyboard,
+        }).catch(() => { /* rate limit or already edited */ });
+      }, COUNTDOWN_INTERVAL_MS);
     }
 
     return { cancel: cleanup };
