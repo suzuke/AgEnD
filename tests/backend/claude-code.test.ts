@@ -126,10 +126,12 @@ describe("ClaudeCodeBackend", () => {
       backend.writeConfig(makeConfig());
       const settings = JSON.parse(readFileSync(join(TEST_DIR, "claude-settings.json"), "utf-8"));
       expect(settings.hooks).toBeUndefined();
-      expect(settings.permissions.allow).toContain("Read");
-      expect(settings.permissions.allow).toContain("Bash(*)");
-      expect(settings.permissions.deny).toContain("Bash(rm -rf /)");
-      expect(settings.permissions.defaultMode).toBe("default");
+      // allow list should only contain CCD MCP tools
+      for (const tool of settings.permissions.allow) {
+        expect(tool).toMatch(/^mcp__ccd-channel__/);
+      }
+      expect(settings.permissions.deny).toBeUndefined();
+      expect(settings.permissions.defaultMode).toBeUndefined();
       expect(settings.statusLine).toBeDefined();
     });
 
@@ -158,7 +160,7 @@ describe("ClaudeCodeBackend", () => {
       backend.writeConfig(makeConfig({ skipPermissions: true }));
       const settings = JSON.parse(readFileSync(join(TEST_DIR, "claude-settings.json"), "utf-8"));
       expect(settings.permissions.allow).toEqual(["*"]);
-      expect(settings.permissions.defaultMode).toBe("bypassPermissions");
+      expect(settings.permissions.defaultMode).toBeUndefined();
       expect(settings).not.toHaveProperty("hooks");
     });
   });
