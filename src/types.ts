@@ -122,6 +122,12 @@ export interface InstanceConfig {
   worktree_source?: string;
 }
 
+export interface WebhookConfig {
+  url: string;
+  events: string[];
+  headers?: Record<string, string>;
+}
+
 export interface MeetingDefaults {
   maxConcurrent?: number;
   maxParticipants?: number;
@@ -139,6 +145,7 @@ export interface FleetDefaults extends Partial<InstanceConfig> {
   cost_guard?: CostGuardConfig;
   hang_detector?: HangDetectorConfig;
   daily_summary?: DailySummaryConfig;
+  webhooks?: WebhookConfig[];
 }
 
 export interface FleetConfig {

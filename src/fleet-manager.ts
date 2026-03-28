@@ -7,7 +7,7 @@ import yaml from "js-yaml";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-import type { FleetConfig, InstanceConfig, CostGuardConfig, DailySummaryConfig } from "./types.js";
+import type { FleetConfig, InstanceConfig, CostGuardConfig, DailySummaryConfig, WebhookConfig } from "./types.js";
 import type { RouteTarget } from "./meeting/types.js";
 import { loadFleetConfig, DEFAULT_COST_GUARD, DEFAULT_DAILY_SUMMARY, DEFAULT_INSTANCE_CONFIG } from "./config.js";
 import { EventLog } from "./event-log.js";
@@ -28,6 +28,7 @@ import { TopicCommands, sanitizeInstanceName } from "./topic-commands.js";
 import { MeetingManager } from "./meeting-manager.js";
 import type { HangDetector } from "./hang-detector.js";
 import { DailySummary } from "./daily-summary.js";
+import { WebhookEmitter } from "./webhook-emitter.js";
 
 const TMUX_SESSION = "ccd";
 
@@ -50,6 +51,7 @@ export class FleetManager implements FleetContext {
   private statuslineWatchers = new Map<string, ReturnType<typeof setInterval>>();
   private instanceRateLimits = new Map<string, { five_hour_pct: number; seven_day_pct: number }>();
   private dailySummary: DailySummary | null = null;
+  private webhookEmitter: WebhookEmitter | null = null;
 
   // Topic icon + auto-archive state
   private topicIcons: { green?: string; blue?: string; red?: string } = {};
@@ -134,6 +136,7 @@ export class FleetManager implements FleetContext {
         this.eventLog?.insert(name, "hang_detected", {});
         this.logger.warn({ name }, "Instance appears hung");
         this.sendHangNotification(name);
+        this.webhookEmitter?.emit("hang", name);
       });
     }
 
@@ -200,13 +203,22 @@ export class FleetManager implements FleetContext {
     this.costGuard = new CostGuard(costGuardConfig, this.eventLog);
     this.costGuard.startMidnightReset();
 
+    const webhookConfigs: WebhookConfig[] =
+      (fleet.defaults as Record<string, unknown>)?.webhooks as WebhookConfig[] ?? [];
+    if (webhookConfigs.length > 0) {
+      this.webhookEmitter = new WebhookEmitter(webhookConfigs, this.logger);
+      this.logger.info({ count: webhookConfigs.length }, "Webhook emitter initialized");
+    }
+
     this.costGuard.on("warn", (instance: string, totalCents: number, limitCents: number) => {
       this.notifyInstanceTopic(instance, `⚠️ ${instance} cost: ${formatCents(totalCents)} / ${formatCents(limitCents)} (${Math.round(totalCents / limitCents * 100)}%)`);
+      this.webhookEmitter?.emit("cost_warning", instance, { cost_cents: totalCents, limit_cents: limitCents });
     });
 
     this.costGuard.on("limit", (instance: string, totalCents: number, limitCents: number) => {
       this.notifyInstanceTopic(instance, `🛑 ${instance} daily limit ${formatCents(limitCents)} reached — pausing instance.`);
       this.eventLog?.insert(instance, "instance_paused", { reason: "cost_limit", cost_cents: totalCents });
+      this.webhookEmitter?.emit("cost_limit", instance, { cost_cents: totalCents, limit_cents: limitCents });
       this.stopInstance(instance).catch(err => this.logger.error({ err, instance }, "Failed to pause instance on cost limit"));
     });
 
@@ -957,6 +969,7 @@ export class FleetManager implements FleetContext {
         label,
         five_hour_pct: rl.five_hour_pct,
       });
+      this.webhookEmitter?.emit("schedule_deferred", target, { schedule_id: id, label, five_hour_pct: rl.five_hour_pct });
       this.notifyInstanceTopic(target, `⏳ Schedule "${label ?? id}" deferred — rate limit at ${rl.five_hour_pct}%`);
       this.logger.info({ target, scheduleId: id, rateLimitPct: rl.five_hour_pct }, "Schedule deferred due to rate limit");
       return;
@@ -1232,6 +1245,7 @@ export class FleetManager implements FleetContext {
       this.eventLog?.insert(name, "model_failover", {
         from: primaryModel, to: fallbackModel, five_hour_pct: fiveHourPct,
       });
+      this.webhookEmitter?.emit("model_failover", name, { from: primaryModel, to: fallbackModel, five_hour_pct: fiveHourPct });
       this.notifyInstanceTopic(name,
         `⚡ Rate limit ${fiveHourPct}% — next rotation will use ${fallbackModel} (was ${primaryModel})`);
 
@@ -1244,6 +1258,7 @@ export class FleetManager implements FleetContext {
       this.eventLog?.insert(name, "model_recovered", {
         restored: primaryModel, five_hour_pct: fiveHourPct,
       });
+      this.webhookEmitter?.emit("model_recovered", name, { restored: primaryModel, five_hour_pct: fiveHourPct });
       this.notifyInstanceTopic(name,
         `✅ Rate limit recovered (${fiveHourPct}%) — next rotation will use ${primaryModel}`);
     }
