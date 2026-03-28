@@ -61,34 +61,19 @@ export class ClaudeCodeBackend implements CliBackend {
     const statusLineCommand = this.writeStatusLineScript();
 
     // 3. Write claude-settings.json
-    if (config.skipPermissions) {
-      const settings: Record<string, unknown> = {
-        permissions: { allow: ["*"], deny: [], defaultMode: "bypassPermissions" },
-        statusLine: { type: "command", command: statusLineCommand },
-      };
-      writeFileSync(join(this.instanceDir, "claude-settings.json"), JSON.stringify(settings));
-      return;
-    }
+    const mcpTools = [
+      "mcp__ccd-channel__reply", "mcp__ccd-channel__react",
+      "mcp__ccd-channel__edit_message", "mcp__ccd-channel__download_attachment",
+      "mcp__ccd-channel__create_schedule", "mcp__ccd-channel__list_schedules",
+      "mcp__ccd-channel__update_schedule", "mcp__ccd-channel__delete_schedule",
+      "mcp__ccd-channel__send_to_instance", "mcp__ccd-channel__list_instances",
+      "mcp__ccd-channel__start_instance", "mcp__ccd-channel__create_instance",
+      "mcp__ccd-channel__delete_instance",
+    ];
 
     const settings: Record<string, unknown> = {
       permissions: {
-        allow: [
-          "Read", "Edit", "Write", "Glob", "Grep", "Bash(*)",
-          "WebFetch", "WebSearch", "Agent", "Skill",
-          "mcp__ccd-channel__reply", "mcp__ccd-channel__react",
-          "mcp__ccd-channel__edit_message", "mcp__ccd-channel__download_attachment",
-          "mcp__ccd-channel__create_schedule", "mcp__ccd-channel__list_schedules",
-          "mcp__ccd-channel__update_schedule", "mcp__ccd-channel__delete_schedule",
-          "mcp__ccd-channel__send_to_instance", "mcp__ccd-channel__list_instances",
-          "mcp__ccd-channel__start_instance", "mcp__ccd-channel__create_instance",
-          "mcp__ccd-channel__delete_instance",
-        ],
-        deny: [
-          "Bash(rm -rf /)", "Bash(rm -rf /*)",
-          "Bash(rm -rf ~)", "Bash(rm -rf ~/*)",
-          "Bash(dd *)", "Bash(mkfs *)",
-        ],
-        defaultMode: "default",
+        allow: config.skipPermissions ? ["*"] : mcpTools,
       },
       statusLine: {
         type: "command",
