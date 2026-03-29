@@ -11,5 +11,6 @@
   "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "ccd-channel"
-  ]
+  ],
+  "spinnerTipsEnabled": false
 }

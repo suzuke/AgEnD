@@ -32,6 +32,19 @@ import { WebhookEmitter } from "./webhook-emitter.js";
 
 const TMUX_SESSION = "ccd";
 
+export function resolveReplyThreadId(
+  argsThreadId: unknown,
+  instanceConfig?: InstanceConfig,
+): string | undefined {
+  if (typeof argsThreadId === "string" && argsThreadId.length > 0) {
+    return argsThreadId;
+  }
+  if (instanceConfig?.general_topic) {
+    return undefined;
+  }
+  return instanceConfig?.topic_id != null ? String(instanceConfig.topic_id) : undefined;
+}
+
 export class FleetManager implements FleetContext {
   private children: Map<string, import("node:child_process").ChildProcess> = new Map();
   private daemons: Map<string, InstanceType<typeof import("./daemon.js").Daemon>> = new Map();
@@ -630,7 +643,7 @@ export class FleetManager implements FleetContext {
 
     // Resolve threadId from instance → topic_id mapping
     const instanceConfig = this.fleetConfig?.instances[instanceName];
-    const threadId = args.thread_id as string ?? (instanceConfig?.topic_id ? String(instanceConfig.topic_id) : undefined);
+    const threadId = resolveReplyThreadId(args.thread_id, instanceConfig);
 
     // Route standard channel tools (reply, react, edit_message, download_attachment)
     if (routeToolCall(this.adapter, tool, args, threadId, respond)) {

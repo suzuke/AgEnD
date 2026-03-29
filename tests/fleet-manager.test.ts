@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { FleetManager } from "../src/fleet-manager.js";
+import { FleetManager, resolveReplyThreadId } from "../src/fleet-manager.js";
 import { TopicCommands } from "../src/topic-commands.js";
 import { join, basename } from "node:path";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -99,6 +99,43 @@ instances:
 
     const threadId = await fm.createForumTopic("my-topic");
     expect(threadId).toBe(999);
+  });
+
+  it("does not default replies to thread 1 for the General instance", () => {
+    const threadId = resolveReplyThreadId(undefined, {
+      working_directory: "/tmp/general",
+      topic_id: 1,
+      general_topic: true,
+      restart_policy: { max_retries: 1, backoff: "linear", reset_after: 1 },
+      context_guardian: {
+        threshold_percentage: 60,
+        max_idle_wait_ms: 300_000,
+        completion_timeout_ms: 60_000,
+        grace_period_ms: 600_000,
+        max_age_hours: 8,
+      },
+      memory: { auto_summarize: true, watch_memory_dir: true, backup_to_sqlite: true },
+      log_level: "info",
+    });
+    expect(threadId).toBeUndefined();
+  });
+
+  it("defaults replies to the instance topic for normal instances", () => {
+    const threadId = resolveReplyThreadId(undefined, {
+      working_directory: "/tmp/proj",
+      topic_id: 42,
+      restart_policy: { max_retries: 1, backoff: "linear", reset_after: 1 },
+      context_guardian: {
+        threshold_percentage: 60,
+        max_idle_wait_ms: 300_000,
+        completion_timeout_ms: 60_000,
+        grace_period_ms: 600_000,
+        max_age_hours: 8,
+      },
+      memory: { auto_summarize: true, watch_memory_dir: true, backup_to_sqlite: true },
+      log_level: "info",
+    });
+    expect(threadId).toBe("42");
   });
 });
 
