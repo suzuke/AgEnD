@@ -24,7 +24,7 @@ Claude Code's official Telegram plugin gives you **1 bot = 1 session**. Close th
 | Auto context rotation (prevent stale sessions) | — | **Built-in** |
 | Permission requests via Telegram | Text-based reply | **Inline buttons** |
 | Voice messages → Claude | — | **Groq Whisper** |
-| Create topic = auto-bind project | — | **Built-in** |
+| Dynamic instance creation via General topic | — | **Built-in** |
 | Install as system service (launchd/systemd) | — | **One command** |
 | Crash recovery | — | **Auto-restart** |
 | Cost guard (daily spending limits) | Platform-level (`--max-budget-usd`) | **Per-instance daily limits** |
@@ -43,10 +43,11 @@ Claude Code's official Telegram plugin gives you **1 bot = 1 session**. Close th
 
 ## How it compares
 
-| | claude-channel-daemon | Claude Code Telegram Plugin | Cursor / Windsurf | Cline (VS Code) |
+| | claude-channel-daemon | Claude Code Telegram Plugin | Cursor | Cline (VS Code) |
 |---|:-:|:-:|:-:|:-:|
 | Runs headless (no IDE/terminal) | **Yes** | Needs terminal | No | No |
 | Multi-project fleet | **Yes** | 1 session | 1 window | 1 window |
+| Multi-channel (Telegram, Discord) | **Yes** | Telegram only | N/A | N/A |
 | Scheduled tasks | **Persistent** | Session-scoped | No | No |
 | Context auto-rotation | **Yes** | No | N/A | No |
 | Permission approval flow | **Inline buttons** | Text-based | N/A | Limited |
@@ -54,33 +55,35 @@ Claude Code's official Telegram plugin gives you **1 bot = 1 session**. Close th
 | Voice input | **Yes** | No | No | No |
 | System service | **Yes** | No | N/A | N/A |
 | Cost controls | **Per-instance** | Platform-level | N/A | N/A |
+| Model failover | **Auto-switch** | No | No | No |
 | Crash recovery | **Yes** | No | N/A | N/A |
 
 ## Architecture
 
 ```
-                          ┌─────────────────────────────────────────────────────────┐
-                          │                    Fleet Manager                        │
-                          │                                                         │
-Telegram ◄──long-poll──► │  TelegramAdapter (Grammy)     Scheduler (croner)        │
-                          │       │                          │                      │
-                          │  threadId routing table          │ cron triggers         │
-                          │  #277→proj-a  #672→proj-b        │                      │
-                          │       │                          │                      │
-                          │  ┌────┴────┐  ┌────┴────┐  ┌────┴────┐                 │
-                          │  │Daemon A  │  │Daemon B  │  │Daemon C  │                │
-                          │  │Permission│  │Permission│  │Permission│                │
-                          │  │Relay     │  │Relay     │  │Relay     │                │
-                          │  │Context   │  │Context   │  │Context   │                │
-                          │  │Guardian  │  │Guardian  │  │Guardian  │                │
-                          │  └────┬─────┘  └────┬─────┘  └────┬─────┘                │
-                          │       │              │              │                     │
-                          │  ┌────┴─────┐  ┌────┴─────┐  ┌────┴─────┐               │
-                          │  │tmux win  │  │tmux win  │  │tmux win  │               │
-                          │  │Claude    │  │Claude    │  │Claude    │               │
-                          │  │+MCP srv  │  │+MCP srv  │  │+MCP srv  │               │
-                          │  └──────────┘  └──────────┘  └──────────┘               │
-                          └─────────────────────────────────────────────────────────┘
+                          ┌──────────────────────────────────────────────────────────────┐
+                          │                       Fleet Manager                          │
+                          │                                                              │
+Telegram ◄──long-poll──► │  ChannelAdapter          Scheduler (croner)                  │
+Discord  ◄──gateway────► │  (Telegram/Discord)         │                                │
+                          │       │                     │ cron triggers                   │
+                          │  threadId routing table     │                                │
+                          │  #277→proj-a  #672→proj-b   │                                │
+                          │       │                     │    CostGuard   HangDetector    │
+                          │  ┌────┴────┐  ┌────┴────┐  ┌────┴────┐    WebhookEmitter    │
+                          │  │Daemon A  │  │Daemon B  │  │Daemon C  │                    │
+                          │  │Permission│  │Permission│  │Permission│                    │
+                          │  │Relay     │  │Relay     │  │Relay     │                    │
+                          │  │Context   │  │Context   │  │Context   │                    │
+                          │  │Guardian  │  │Guardian  │  │Guardian  │                    │
+                          │  └────┬─────┘  └────┬─────┘  └────┬─────┘                    │
+                          │       │              │              │                         │
+                          │  ┌────┴─────┐  ┌────┴─────┐  ┌────┴─────┐                   │
+                          │  │tmux win  │  │tmux win  │  │tmux win  │                   │
+                          │  │Claude    │  │Claude    │  │Claude    │                   │
+                          │  │+MCP srv  │  │+MCP srv  │  │+MCP srv  │                   │
+                          │  └──────────┘  └──────────┘  └──────────┘                   │
+                          └──────────────────────────────────────────────────────────────┘
 ```
 
 ## Key features
@@ -100,7 +103,7 @@ Claude: → create_schedule(cron: "0 9 * * *", message: "Check open PRs needing 
 
 Available MCP tools: `create_schedule`, `list_schedules`, `update_schedule`, `delete_schedule`
 
-Collaboration MCP tools: `list_instances`, `send_to_instance`, `start_instance`, `create_instance`
+Collaboration MCP tools: `list_instances`, `send_to_instance`, `start_instance`, `create_instance`, `delete_instance`
 
 Schedules can target a specific instance or the same instance that created them. When a schedule triggers, the daemon pushes the message to Claude as if a user sent it.
 
@@ -128,7 +131,8 @@ MCP tools for collaboration:
 - `list_instances` — discover all configured instances (running or stopped) with status and working directory
 - `send_to_instance` — send a message to another instance or external session
 - `start_instance` — wake a stopped instance so you can message it
-- `create_instance` — create a new instance with a Telegram topic from a project directory
+- `create_instance` — create a new instance with a topic from a project directory (supports `--branch` for git worktree isolation)
+- `delete_instance` — remove an instance and its topic
 
 Messages are posted to the recipient's Telegram topic for visibility. Sender topic notifications are only posted for instance-to-instance messages (not from external sessions).
 
@@ -142,7 +146,7 @@ A regular instance bound to the Telegram General Topic. Auto-created on fleet st
 - Project-specific tasks — uses `list_instances()` to find the right agent, `start_instance()` if needed, then `send_to_instance()` to delegate
 - New project requests — uses `create_instance()` to set up a new agent
 
-Existing slash commands (`/open`, `/new`, `/meets`, `/status`, etc.) continue to work alongside the General instance.
+Use `/status` in the General topic for a fleet overview. All other project management is handled by the General instance through natural language.
 
 ### External session support
 
@@ -182,12 +186,9 @@ External sessions appear in `list_instances` and can be targeted by `send_to_ins
 
 In topic mode, the bot responds to commands in the General topic:
 
-- `/open [keyword]` — browse and bind an existing project directory to a new topic
-- `/new <name>` — create a new project directory + git init + bind to topic
-- `/meets "topic"` — start a multi-angle discussion using Agent Teams
-- `/debate "topic"` — start a pro/con debate
-- `/collab --repo ~/app "task"` — start collaborative coding with git worktrees
 - `/status` — show fleet status and costs
+
+Project management commands (`/open`, `/new`, `/meets`, `/debate`, `/collab`) were removed in v0.3.4. The General instance now handles these tasks via natural language — just tell it what you need and it will use `create_instance`, `start_instance`, or `send_to_instance` as appropriate.
 
 ### Permission system
 
@@ -197,9 +198,9 @@ Uses Claude Code's native permission relay — permission requests are forwarded
 
 Telegram voice messages are transcribed via Groq Whisper API and sent to Claude as text. Works in both topic mode and DM mode. Requires `GROQ_API_KEY` in `.env`.
 
-### Auto topic binding
+### Dynamic instance management
 
-In topic mode, creating a new Telegram Forum Topic triggers an interactive directory browser. Pick a project directory → instance auto-configured, topic bound, Claude starts. Deleting a topic auto-unbinds and stops the instance.
+Instances are created through the General instance using `create_instance`. Tell the General instance what project you want to work on — it creates a Telegram topic, binds the project directory, and starts Claude automatically. Instances can also be created with `--branch` to spawn a git worktree for feature branch isolation. Deleting a topic auto-unbinds and stops the instance. Use `delete_instance` to fully remove an instance and its topic.
 
 ### Cost guard
 
@@ -253,6 +254,87 @@ Uses multi-signal detection: checks both transcript activity and statusline fres
 ### Rate limit-aware scheduling
 
 When the 5-hour API rate limit exceeds 85%, scheduled triggers are automatically deferred instead of firing. A notification is posted to the instance's topic. Deferred schedules are not lost — they will fire on the next cron tick when rate limits are below threshold.
+
+### Model failover
+
+When the primary model hits a rate limit, the daemon automatically switches to a backup model on the next context rotation. Configure a fallback chain in `fleet.yaml`:
+
+```yaml
+instances:
+  my-project:
+    model_failover: ["opus", "sonnet"]
+```
+
+The daemon notifies you in Telegram when a failover occurs and switches back to the primary model when rate limits recover.
+
+### Topic icon + idle archive
+
+Running instances get a visual icon indicator in Telegram. When an instance stops or crashes, the icon changes. Idle instances are automatically archived — sending a message to an archived topic re-opens it automatically.
+
+### Permission countdown + Always Allow
+
+Permission prompts now show a countdown timer that updates every 30 seconds. An "Always Allow" button lets you approve all future uses of a specific tool for the current session. Decisions are shown inline after you respond ("✅ Approved" / "❌ Denied").
+
+### Structured handover
+
+Context rotation now uses a structured template with validation. Claude saves state in `memory/handover.md` with sections for Active Work, Pending Decisions, and Key Context. If the first attempt fails validation, a retry is triggered automatically.
+
+### Service message filter
+
+Telegram system events (topic rename, pin, member join, etc.) are filtered out before reaching Claude, saving context window tokens.
+
+### Health endpoint
+
+A lightweight HTTP endpoint for external monitoring tools:
+
+```
+GET /health  → { status: "ok", instances: 3, uptime: 86400 }
+GET /status  → { instances: [{ name, status, context_pct, cost_today }] }
+```
+
+Configure in `fleet.yaml`:
+
+```yaml
+defaults:
+  health_endpoint:
+    enabled: true
+    port: 9100
+    bind: "127.0.0.1"
+```
+
+### Webhook notifications
+
+Push fleet events to external endpoints (Slack, custom dashboards, etc.):
+
+```yaml
+defaults:
+  webhooks:
+    - url: https://hooks.slack.com/...
+      events: ["rotation", "hang", "cost_warn"]
+    - url: https://custom.endpoint/ccd
+      events: ["*"]
+```
+
+### Discord adapter (MVP)
+
+Connect your fleet to Discord instead of (or alongside) Telegram. Configure in `fleet.yaml`:
+
+```yaml
+channel:
+  type: discord
+  bot_token_env: CCD_DISCORD_TOKEN
+  guild_id: "123456789"
+```
+
+### External adapter plugin system
+
+Community adapters can be installed via npm and loaded automatically:
+
+```bash
+npm install ccd-adapter-slack
+```
+
+The daemon discovers adapters matching the `ccd-adapter-*` naming convention. Channel types are exported from the package entry point for adapter authors.
 
 ## Quick start
 
@@ -312,7 +394,7 @@ project_roots:
   - ~/Projects
 
 channel:
-  type: telegram
+  type: telegram         # telegram or discord
   mode: topic           # topic (recommended) or dm
   bot_token_env: CCD_BOT_TOKEN
   group_id: -100xxxxxxxxxx
@@ -333,12 +415,24 @@ defaults:
   context_guardian:
     threshold_percentage: 60
     max_age_hours: 8
+  model_failover: ["opus", "sonnet"]
+  health_endpoint:
+    enabled: true
+    port: 9100
+    bind: "127.0.0.1"
+  webhooks:
+    - url: https://hooks.slack.com/...
+      events: ["rotation", "hang", "cost_warn"]
   log_level: info
 
 instances:
   my-project:
     working_directory: /path/to/project
     topic_id: 277
+    description: "Main backend service"
+    cost_guard:
+      daily_limit_usd: 30
+    model: opus
 ```
 
 Secrets in `~/.claude-channel-daemon/.env`:
