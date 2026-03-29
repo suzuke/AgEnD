@@ -899,7 +899,7 @@ export class Daemon extends EventEmitter {
     return this.config.memory_directory ?? join(
       homedir(),
       ".claude/projects",
-      this.config.working_directory.replace(/\//g, "-").replace(/^-/, ""),
+      this.config.working_directory.replace(/\//g, "-"),
       "memory",
     );
   }
