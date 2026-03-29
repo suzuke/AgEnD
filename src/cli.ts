@@ -141,19 +141,84 @@ fleet
 fleet
   .command("restart")
   .description("Graceful restart: wait for instances to idle, then restart")
-  .action(async () => {
+  .option("--reload", "Full process restart to load new code")
+  .action(async (opts: { reload?: boolean }) => {
     const pidPath = join(DATA_DIR, "fleet.pid");
     if (!existsSync(pidPath)) {
       console.error("Fleet is not running (no PID file found)");
       process.exit(1);
     }
     const pid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
-    try {
-      process.kill(pid, "SIGUSR2");
-      console.log("Graceful restart signal sent — fleet will restart when all instances are idle");
-    } catch {
-      console.error("Failed to send restart signal (process may have exited)");
-      process.exit(1);
+
+    if (opts.reload) {
+      // Full restart: graceful stop old process, then start new fleet in this process
+      try {
+        process.kill(pid, "SIGUSR1");
+      } catch {
+        console.error("Failed to send reload signal (process may have exited)");
+        process.exit(1);
+      }
+      console.log("Full restart signal sent — waiting for fleet to stop...");
+
+      // Wait for old process to exit (up to 6 minutes: 5 min idle wait + buffer)
+      const deadline = Date.now() + 6 * 60 * 1000;
+      while (Date.now() < deadline) {
+        try {
+          process.kill(pid, 0); // check if alive
+          await new Promise(r => setTimeout(r, 500));
+        } catch {
+          break; // process exited
+        }
+      }
+      // Verify it actually exited
+      try {
+        process.kill(pid, 0);
+        console.error("Old fleet process still running after timeout — aborting");
+        process.exit(1);
+      } catch {
+        // Good, it exited
+      }
+
+      console.log("Old fleet stopped. Starting with new code...");
+
+      // Start new fleet in this process (new Node.js process = new code loaded)
+      const { FleetManager } = await import("./fleet-manager.js");
+      const fm = new FleetManager(DATA_DIR);
+      await fm.startAll(FLEET_CONFIG_PATH);
+      console.log("Fleet restarted with new code");
+
+      // Keep process alive (same as fleet start)
+      const shutdown = async () => {
+        console.log("\nStopping fleet...");
+        await fm.stopAll();
+        process.exit(0);
+      };
+      process.on("SIGINT", shutdown);
+      process.on("SIGTERM", shutdown);
+      process.on("uncaughtException", async (err) => {
+        console.error("Uncaught exception:", err);
+        await fm.stopAll().catch(() => {});
+        process.exit(1);
+      });
+      process.on("unhandledRejection", async (err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("409") && msg.includes("getUpdates")) {
+          console.error("Bot polling conflict (409) — retrying...");
+          return;
+        }
+        console.error("Unhandled rejection:", err);
+        await fm.stopAll().catch(() => {});
+        process.exit(1);
+      });
+    } else {
+      // Instance-only restart (existing behavior)
+      try {
+        process.kill(pid, "SIGUSR2");
+        console.log("Graceful restart signal sent — fleet will restart when all instances are idle");
+      } catch {
+        console.error("Failed to send restart signal (process may have exited)");
+        process.exit(1);
+      }
     }
   });
 

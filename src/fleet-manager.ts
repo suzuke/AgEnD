@@ -343,6 +343,21 @@ export class FleetManager implements FleetContext {
         .finally(() => process.once("SIGUSR2", onRestart));
     };
     process.once("SIGUSR2", onRestart);
+
+    // SIGUSR1: full process reload (graceful stop → exit → CLI restarts)
+    const onFullRestart = () => {
+      this.logger.info("Received SIGUSR1, initiating full restart (process reload)...");
+      this.gracefulShutdownForReload()
+        .then(() => {
+          this.logger.info("Full restart: shutdown complete, exiting for reload");
+          process.exit(0);
+        })
+        .catch(err => {
+          this.logger.error({ err }, "Full restart: graceful shutdown failed");
+          process.exit(1);
+        });
+    };
+    process.once("SIGUSR1", onFullRestart);
   }
 
   /** Start the shared Telegram adapter for topic mode */
@@ -1493,6 +1508,57 @@ export class FleetManager implements FleetContext {
       this.logger.info({ pruned, remaining: this.sessionRegistry.size }, "Session registry pruned");
     }
     return pruned;
+  }
+
+  /**
+   * Graceful shutdown for full reload: wait for idle, notify, then stop everything.
+   * The caller is expected to exit the process after this resolves.
+   */
+  async gracefulShutdownForReload(): Promise<void> {
+    const instanceNames = [...this.daemons.keys()];
+    if (instanceNames.length === 0) {
+      this.logger.info("No instances to stop");
+      await this.stopAll();
+      return;
+    }
+
+    this.logger.info(`Full restart: waiting for ${instanceNames.length} instances to idle...`);
+
+    const groupId = this.fleetConfig?.channel?.group_id;
+    if (groupId && this.adapter) {
+      await this.adapter.sendText(String(groupId), `🔄 Full restart initiated — waiting for all instances to idle, then reloading process...`)
+        .catch(e => this.logger.debug({ err: e }, "Failed to post full restart notification"));
+    }
+
+    // Wait for idle with 5-minute timeout
+    const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+    let timeoutHandle: ReturnType<typeof setTimeout>;
+    const idleDeadline = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => reject(new Error("Idle wait timed out after 5 minutes")), IDLE_TIMEOUT_MS);
+    });
+
+    try {
+      await Promise.race([
+        Promise.all(
+          instanceNames.map(async (name) => {
+            const daemon = this.daemons.get(name);
+            if (daemon) {
+              this.logger.info(`Waiting for ${name} to idle...`);
+              await daemon.waitForIdle(10_000);
+              this.logger.info(`${name} is idle`);
+            }
+          })
+        ),
+        idleDeadline,
+      ]);
+    } catch (err) {
+      this.logger.warn({ err }, "Idle wait timed out — force stopping");
+    } finally {
+      clearTimeout(timeoutHandle!);
+    }
+
+    this.logger.info("All instances idle — stopping for reload...");
+    await this.stopAll();
   }
 
   /**
