@@ -392,7 +392,7 @@ access
   .argument("<instance>", "Instance name")
   .action(async (instance: string) => {
     const { AccessManager } = await import("./channel/access-manager.js");
-    const statePath = join(DATA_DIR, "instances", instance, "access-state.json");
+    const statePath = join(DATA_DIR, "access", "access.json");
     const instanceDir = join(DATA_DIR, "instances", instance);
     if (!existsSync(instanceDir)) {
       console.error(`Instance "${instance}" not found`);
@@ -409,7 +409,7 @@ access
   .argument("<instance>", "Instance name")
   .action(async (instance: string) => {
     const { AccessManager } = await import("./channel/access-manager.js");
-    const statePath = join(DATA_DIR, "instances", instance, "access-state.json");
+    const statePath = join(DATA_DIR, "access", "access.json");
     const instanceDir = join(DATA_DIR, "instances", instance);
     if (!existsSync(instanceDir)) {
       console.error(`Instance "${instance}" not found`);
@@ -426,7 +426,7 @@ access
   .argument("<instance>", "Instance name")
   .action(async (instance: string) => {
     const { AccessManager } = await import("./channel/access-manager.js");
-    const statePath = join(DATA_DIR, "instances", instance, "access-state.json");
+    const statePath = join(DATA_DIR, "access", "access.json");
     const instanceDir = join(DATA_DIR, "instances", instance);
     if (!existsSync(instanceDir)) {
       console.error(`Instance "${instance}" not found`);
@@ -451,7 +451,7 @@ access
   .argument("<user-id>", "User ID to remove")
   .action(async (instance: string, userId: string) => {
     const { AccessManager } = await import("./channel/access-manager.js");
-    const statePath = join(DATA_DIR, "instances", instance, "access-state.json");
+    const statePath = join(DATA_DIR, "access", "access.json");
     const instanceDir = join(DATA_DIR, "instances", instance);
     if (!existsSync(instanceDir)) {
       console.error(`Instance "${instance}" not found`);
@@ -469,7 +469,7 @@ access
   .argument("<user-id>", "Telegram user ID requesting pairing")
   .action(async (instance: string, userId: string) => {
     const { AccessManager } = await import("./channel/access-manager.js");
-    const statePath = join(DATA_DIR, "instances", instance, "access-state.json");
+    const statePath = join(DATA_DIR, "access", "access.json");
     const instanceDir = join(DATA_DIR, "instances", instance);
     if (!existsSync(instanceDir)) {
       console.error(`Instance "${instance}" not found`);
@@ -508,7 +508,7 @@ program
       if (plat === "macos") {
         console.log(`Run: launchctl load ${svcPath}`);
       } else {
-        console.log("Run: systemctl --user enable --now ccd");
+        console.log(`Run: systemctl --user enable --now com.ccd.fleet`);
       }
     }
   });

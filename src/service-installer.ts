@@ -93,6 +93,7 @@ export function activateService(plistPath: string, pidPath: string): void {
   if (plat === "macos") {
     execSync(`launchctl load ${plistPath}`, { stdio: "inherit" });
   } else {
-    execSync("systemctl --user enable --now ccd", { stdio: "inherit" });
+    const serviceName = plistPath.replace(/.*\//, "").replace(/\.service$/, "");
+    execSync(`systemctl --user enable --now ${serviceName}`, { stdio: "inherit" });
   }
 }

@@ -1708,7 +1708,7 @@ export class FleetManager implements FleetContext {
           let cost = 0;
           try {
             const data = JSON.parse(readFileSync(statusFile, "utf-8"));
-            context_pct = data.context?.used_percentage ?? 0;
+            context_pct = data.context_window?.used_percentage ?? 0;
             cost = data.cost?.total_cost_usd ?? 0;
           } catch { /* statusline not yet available */ }
           return {
