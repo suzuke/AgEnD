@@ -12,7 +12,7 @@
 
 ## 為什麼要做這個
 
-Claude Code 的官方 Telegram plugin 是 **1 bot = 1 session**。終端機關掉，bot 就斷了。沒有沙盒、沒有排程、不支援多專案。
+Claude Code 的官方 Telegram plugin 是 **1 bot = 1 session**。終端機關掉，bot 就斷了。沒有排程、不支援多專案。
 
 **claude-channel-daemon** 把 Claude Code 變成一個 always-on 的多專案 AI 工程團隊，全從 Telegram 操控：
 
@@ -298,7 +298,7 @@ GET /status  → { instances: [{ name, status, context_pct, cost_today }] }
 defaults:
   health_endpoint:
     enabled: true
-    port: 9100
+    port: 19280
     bind: "127.0.0.1"
 ```
 
@@ -378,6 +378,9 @@ ccd access unlock <n>     開放 instance 存取
 ccd access list <n>       列出允許的使用者
 ccd access remove <n> <uid> 移除使用者
 ccd access pair <n> <uid> 產生配對碼
+ccd export [path]         匯出設定（裝置遷移用）
+ccd export --full [path]  匯出設定 + 所有 instance 資料
+ccd import <file>         匯入設定檔
 ccd install               裝成系統服務
 ccd uninstall             移除系統服務
 ```
@@ -415,7 +418,7 @@ defaults:
   model_failover: ["opus", "sonnet"]
   health_endpoint:
     enabled: true
-    port: 9100
+    port: 19280
     bind: "127.0.0.1"
   webhooks:
     - url: https://hooks.slack.com/...

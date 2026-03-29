@@ -12,7 +12,7 @@
 
 ## Why this exists
 
-Claude Code's official Telegram plugin gives you **1 bot = 1 session**. Close the terminal and it goes offline. No sandbox. No scheduling. No multi-project support.
+Claude Code's official Telegram plugin gives you **1 bot = 1 session**. Close the terminal and it goes offline. No scheduling. No multi-project support.
 
 **claude-channel-daemon** turns Claude Code into an always-on, multi-project AI engineering team you control from Telegram:
 
@@ -298,7 +298,7 @@ Configure in `fleet.yaml`:
 defaults:
   health_endpoint:
     enabled: true
-    port: 9100
+    port: 19280
     bind: "127.0.0.1"
 ```
 
@@ -418,7 +418,7 @@ defaults:
   model_failover: ["opus", "sonnet"]
   health_endpoint:
     enabled: true
-    port: 9100
+    port: 19280
     bind: "127.0.0.1"
   webhooks:
     - url: https://hooks.slack.com/...
