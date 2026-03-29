@@ -49,6 +49,10 @@ export class TmuxManager {
     args.push("-P", "-F", "#{window_id}", command);
     const { stdout } = await exec("tmux", args);
     this.windowId = stdout.trim();
+    // Prevent the child process from overriding the window name via escape sequences
+    if (windowName) {
+      await exec("tmux", ["set-option", "-t", `${this.sessionName}:${this.windowId}`, "allow-rename", "off"]).catch(() => {});
+    }
     return this.windowId;
   }
 
