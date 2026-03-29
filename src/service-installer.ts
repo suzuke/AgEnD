@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execSync } from "node:child_process";
 import ejs from "ejs";
 const { render } = ejs;
 import { platform } from "node:os";
@@ -67,5 +68,30 @@ export function installService(vars: ServiceVars): string {
     mkdirSync(dirname(unitPath), { recursive: true });
     writeFileSync(unitPath, renderSystemdUnit(vars));
     return unitPath;
+  }
+}
+
+export function activateService(plistPath: string, pidPath: string): void {
+  // Kill manually-running fleet if present
+  if (existsSync(pidPath)) {
+    const pid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
+    try {
+      process.kill(pid, "SIGTERM");
+      // Wait briefly for process to exit
+      for (let i = 0; i < 20; i++) {
+        try { process.kill(pid, 0); } catch { break; }
+        execSync("sleep 0.1");
+      }
+    } catch {
+      // Process already gone
+    }
+    try { unlinkSync(pidPath); } catch {}
+  }
+
+  const plat = detectPlatform();
+  if (plat === "macos") {
+    execSync(`launchctl load ${plistPath}`, { stdio: "inherit" });
+  } else {
+    execSync("systemctl --user enable --now ccd", { stdio: "inherit" });
   }
 }

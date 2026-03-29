@@ -485,8 +485,9 @@ access
 program
   .command("install")
   .description("Install as system service")
-  .action(async () => {
-    const { installService, detectPlatform } = await import(
+  .option("--activate", "Stop manual fleet and load the service immediately")
+  .action(async (opts: { activate?: boolean }) => {
+    const { installService, activateService, detectPlatform } = await import(
       "./service-installer.js"
     );
     const execPath = process.argv[1];
@@ -497,11 +498,17 @@ program
       logPath: join(DATA_DIR, "fleet.log"),
     });
     console.log(`Service installed at: ${path}`);
-    const plat = detectPlatform();
-    if (plat === "macos") {
-      console.log(`Run: launchctl load ${path}`);
+    if (opts.activate) {
+      const pidPath = join(DATA_DIR, "fleet.pid");
+      activateService(path, pidPath);
+      console.log("Service activated.");
     } else {
-      console.log("Run: systemctl --user enable --now ccd");
+      const plat = detectPlatform();
+      if (plat === "macos") {
+        console.log(`Run: launchctl load ${path}`);
+      } else {
+        console.log("Run: systemctl --user enable --now ccd");
+      }
     }
   });
 
