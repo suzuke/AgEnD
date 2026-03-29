@@ -125,6 +125,14 @@ export class TopicCommands {
     for (const [name, config] of Object.entries(this.ctx.fleetConfig.instances)) {
       if (config.topic_id != null) continue;
 
+      // Telegram's native General topic always has thread_id = 1
+      if (config.general_topic) {
+        config.topic_id = 1;
+        configChanged = true;
+        this.ctx.logger.info({ name, topicId: 1 }, "Bound to native General topic");
+        continue;
+      }
+
       try {
         const topicName = basename(config.working_directory);
         const threadId = await this.ctx.createForumTopic(topicName);
