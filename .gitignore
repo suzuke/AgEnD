@@ -12,3 +12,4 @@ test-perm-detect.ts
 website/node_modules/
 website/dist/
 website/.astro/
+.mcp.json
