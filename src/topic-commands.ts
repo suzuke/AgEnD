@@ -24,7 +24,21 @@ export class TopicCommands {
       return true;
     }
 
+    if (text === "/reload" || text === "/reload@" || text.startsWith("/reload@")) {
+      await this.handleReloadCommand(msg);
+      return true;
+    }
+
     return false;
+  }
+
+  private async handleReloadCommand(msg: InboundMessage): Promise<void> {
+    if (!this.ctx.adapter) return;
+    const chatId = msg.chatId;
+    const threadId = msg.threadId;
+    await this.ctx.adapter.sendText(chatId, "🔄 Reloading fleet...", { threadId });
+    // SIGUSR1 triggers graceful shutdown; launchd restarts with new code
+    process.kill(process.pid, "SIGUSR1");
   }
 
   private async handleStatusCommand(msg: InboundMessage): Promise<void> {
@@ -168,6 +182,7 @@ export class TopicCommands {
           body: JSON.stringify({
             commands: [
               { command: "status", description: "Show fleet status and costs" },
+              { command: "reload", description: "Restart fleet with new code" },
             ],
             scope: { type: "chat", chat_id: groupId },
           }),
