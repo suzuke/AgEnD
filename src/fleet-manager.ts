@@ -568,6 +568,7 @@ export class FleetManager implements FleetContext {
       // Forward to General Topic instance if configured
       const generalInstance = this.findGeneralInstance();
       if (generalInstance) {
+        if (this.replyIfRateLimited(generalInstance, msg)) return;
         const { text, extraMeta } = await processAttachments(msg, this.adapter!, this.logger, generalInstance);
         const ipc = this.instanceIpcClients.get(generalInstance);
         if (ipc) {
@@ -611,6 +612,8 @@ export class FleetManager implements FleetContext {
     this.touchActivity(instanceName);
     this.setTopicIcon(instanceName, "blue");
 
+    if (this.replyIfRateLimited(instanceName, msg)) return;
+
     const { text, extraMeta } = await processAttachments(msg, this.adapter!, this.logger, instanceName);
 
     const ipc = this.instanceIpcClients.get(instanceName);
@@ -640,6 +643,19 @@ export class FleetManager implements FleetContext {
       },
     });
     this.logger.info(`← ${instanceName} ${msg.username}: ${(text ?? "").slice(0, 100)}`);
+  }
+
+  /** Handle outbound tool calls from a daemon instance */
+  private replyIfRateLimited(instanceName: string, msg: InboundMessage): boolean {
+    const rl = this.instanceRateLimits.get(instanceName);
+    if (!rl || rl.seven_day_pct < 100) return false;
+    if (this.adapter && msg.chatId) {
+      const threadId = msg.threadId ?? undefined;
+      this.adapter.sendText(msg.chatId, `⏸ ${instanceName} has hit the weekly usage limit. Your message was not delivered. Limit resets automatically — check /status for details.`, { threadId })
+        .catch(e => this.logger.debug({ err: e }, "Failed to send rate limit notice"));
+    }
+    this.logger.info({ instanceName }, "Blocked inbound message — weekly rate limit at 100%");
+    return true;
   }
 
   /** Handle outbound tool calls from a daemon instance */
