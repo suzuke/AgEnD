@@ -111,6 +111,34 @@ POC 程式碼：`poc-headless.mjs`
 
 **Headless 常駐 process 方案可能打破這個限制**——因為 CCD 直接控制 CLI 的 I/O，不需要 CLI 自己知道怎麼回覆到 Telegram。
 
+## 最終決定的架構（2026-03-30）
+
+```
+Inbound:    tmux paste-buffer（通用，CCD 控制時機，agent 忙時 queue）
+Outbound:   MCP tool call（通用，結構化，reply/send_to_instance 等）
+MCP 載入:   --mcp-config（通用，不需要 channel protocol）
+Permission: --dangerously-skip-permissions（通用）
+```
+
+### 需要改的
+1. MCP server 移除 `claude/channel` capability 和 `pushChannelMessage`
+2. MCP server 移除 permission relay（`claude/channel/permission`）
+3. ClaudeCodeBackend 的 `buildCommand` 改用 `--mcp-config` 取代 `--dangerously-load-development-channels`
+4. Daemon inbound 改用 `tmux paste-buffer` 取代 IPC → MCP notification
+5. TmuxManager 加 `pasteText` 方法（bracketed paste，跨 CLI 安全）
+6. Daemon 追蹤 agent 狀態，忙時 queue 訊息，idle 時才 paste
+7. 加 `--dangerously-skip-permissions` 到 buildCommand
+
+### 不需要改的
+- MCP tools 定義（reply, send_to_instance, create_schedule 等）
+- IPC bridge（MCP server 仍透過 IPC 跟 daemon 通訊）
+- Fleet manager 的 routing、scheduling、cost guard 等上層邏輯
+- Telegram/Discord adapter
+
+### 實作分支
+- Branch: `feature/cross-cli-unified`
+- 用 git worktree 隔離
+
 ## 下一步
 
 1. 確認 Claude Code Agent SDK 是否支援 long-lived session（多次 `.send()` 不退出）
