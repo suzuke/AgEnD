@@ -14,7 +14,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -153,13 +153,40 @@ fleet
     const pid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
 
     if (opts.reload) {
-      // Full restart: graceful stop old process, then start new fleet in this process
+      // Check if managed by launchd — if so, just signal and let launchd restart
+      let managedByLaunchd = false;
+      try {
+        const ppid = parseInt(execSync(`ps -o ppid= -p ${pid}`).toString().trim(), 10);
+        managedByLaunchd = ppid === 1;
+      } catch { /* ignore */ }
+
       try {
         process.kill(pid, "SIGUSR1");
       } catch {
         console.error("Failed to send reload signal (process may have exited)");
         process.exit(1);
       }
+
+      if (managedByLaunchd) {
+        console.log("Fleet is managed by launchd — sent reload signal.");
+        console.log("launchd will automatically restart with new code.");
+        // Wait briefly for old process to exit, then confirm new one started
+        const deadline = Date.now() + 6 * 60 * 1000;
+        while (Date.now() < deadline) {
+          try { process.kill(pid, 0); await new Promise(r => setTimeout(r, 500)); }
+          catch { break; }
+        }
+        // Wait for launchd to start new process
+        await new Promise(r => setTimeout(r, 2000));
+        if (existsSync(pidPath)) {
+          const newPid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
+          if (newPid !== pid) {
+            console.log(`New fleet process started (PID ${newPid})`);
+          }
+        }
+        return;
+      }
+
       console.log("Full restart signal sent — waiting for fleet to stop...");
 
       // Wait for old process to exit (up to 6 minutes: 5 min idle wait + buffer)

@@ -49,6 +49,7 @@ export class Daemon extends EventEmitter {
   private healthCheckTimer: ReturnType<typeof setInterval> | null = null;
   private crashCount = 0;
   private lastCrashAt = 0;
+  private spawning = false;
   // Context rotation quality tracking
   private rotationStartedAt = 0;
   private preRotationContextPct = 0;
@@ -242,17 +243,6 @@ export class Daemon extends EventEmitter {
         }
       }
     }
-    // Also kill any orphaned windows with the same name (e.g. from interrupted restarts)
-    try {
-      const windows = await TmuxManager.listWindows(sessionName);
-      for (const w of windows) {
-        if (w.name === this.name) {
-          const orphan = new TmuxManager(sessionName, w.id);
-          await orphan.killWindow();
-          this.logger.info({ windowId: w.id }, "Killed orphaned tmux window with matching name");
-        }
-      }
-    } catch { /* session may not exist yet */ }
 
     await this.spawnClaudeWindow();
 
@@ -362,10 +352,10 @@ export class Daemon extends EventEmitter {
     if (max_retries <= 0) return; // restart disabled
 
     this.healthCheckTimer = setInterval(async () => {
-      if (!this.tmux || this.guardian?.state === "RESTARTING") return;
+      if (!this.tmux || this.guardian?.state === "RESTARTING" || this.spawning) return;
 
       const alive = await this.tmux.isWindowAlive();
-      if (alive) return;
+      if (alive || this.spawning) return;
 
       // Reset crash count if enough time has passed
       if (reset_after > 0 && Date.now() - this.lastCrashAt > reset_after) {
@@ -386,18 +376,28 @@ export class Daemon extends EventEmitter {
         : 1000 * this.crashCount;
 
       this.logger.warn({ crashCount: this.crashCount, delay }, "Claude window died — respawning after backoff");
+      this.spawning = true;
 
       await new Promise(r => setTimeout(r, delay));
 
       try {
         this.saveSessionId();
         this.transcriptMonitor?.resetOffset();
+        // Kill any same-name windows before respawn to prevent orphans
+        const windows = await TmuxManager.listWindows("ccd");
+        for (const w of windows) {
+          if (w.name === this.name) {
+            const tm = new TmuxManager("ccd", w.id);
+            await tm.killWindow();
+          }
+        }
         await this.spawnClaudeWindow();
         this.logger.info("Respawned Claude window after crash");
       } catch (err) {
+        this.spawning = false;
         this.logger.error({ err }, "Failed to respawn Claude window");
       }
-    }, 10_000); // Check every 10 seconds
+    }, 30_000); // Check every 30 seconds (must be longer than spawn grace period)
   }
 
   async stop(): Promise<void> {
@@ -793,6 +793,8 @@ export class Daemon extends EventEmitter {
 
   /** Spawn (or respawn) a Claude window in tmux */
   private async spawnClaudeWindow(): Promise<void> {
+    this.spawning = true;
+    try {
     // Clear tool status from previous session
     this.toolStatusLines = [];
     this.toolStatusMessageId = null;
@@ -814,6 +816,9 @@ export class Daemon extends EventEmitter {
     // local development" and "New MCP server found" prompts).
     await new Promise(r => setTimeout(r, 10_000));
     try { await this.tmux!.sendSpecialKey("Enter"); } catch { /* window may have exited */ }
+    } finally {
+      this.spawning = false;
+    }
   }
 
   private saveSessionId(): void {

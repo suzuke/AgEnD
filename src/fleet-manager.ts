@@ -207,6 +207,20 @@ export class FleetManager implements FleetContext {
 
     await TmuxManager.ensureSession(TMUX_SESSION);
 
+    // Stop any running daemons first (their health checks would respawn killed windows)
+    for (const [name] of this.daemons) {
+      await this.stopInstance(name);
+    }
+
+    // Then kill all remaining ccd instance windows to prevent orphans
+    const existingWindows = await TmuxManager.listWindows(TMUX_SESSION);
+    for (const w of existingWindows) {
+      if (w.name !== "zsh") {
+        const tm = new TmuxManager(TMUX_SESSION, w.id);
+        await tm.killWindow();
+      }
+    }
+
     const pidPath = join(this.dataDir, "fleet.pid");
     writeFileSync(pidPath, String(process.pid), "utf-8");
 
