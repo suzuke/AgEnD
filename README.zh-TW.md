@@ -109,18 +109,19 @@ MCP tools：`create_schedule`、`list_schedules`、`update_schedule`、`delete_s
 
 ### Context 輪替
 
-監控 Claude 的 status line JSON。是個 5 狀態的 state machine：
+監控 Claude 的 status line JSON。當 context 使用率超過門檻或 session 達到最大壽命時，daemon 會執行簡單的重啟：
 
 ```
-NORMAL → PENDING → HANDING_OVER → ROTATING → GRACE
+NORMAL → RESTARTING → GRACE
 ```
 
-- **PENDING** — context 超過門檻（預設 60%），等 Claude 空閒
-- **HANDING_OVER** — 送 prompt 讓 Claude 把狀態存到 `memory/handover.md`
-- **ROTATING** — 砍 tmux window，用 `--resume` 開新 session
-- **GRACE** — 10 分鐘冷卻期，防止快速重複輪替
+1. **觸發** — context 超過門檻（預設 80%）或 `max_age_hours` 到期（預設 8h）
+2. **Idle 屏障** — 等最多 5 秒讓當前活動沉靜（best-effort，不是 handover）
+3. **Snapshot** — daemon 收集最近的 user messages、tool 活動、statusline 資料，寫入 `rotation-state.json`
+4. **重啟** — 砍 tmux window，開新 session 並把 snapshot 注入 system prompt
+5. **Grace** — 10 分鐘冷卻期，防止快速重複重啟
 
-也會在 `max_age_hours`（預設 8h）後不管 context 用量直接輪替。
+不會送 handover prompt 給 Claude。恢復上下文完全來自 daemon 端的 snapshot。
 
 ### 點對點 Agent 協作
 
@@ -235,7 +236,7 @@ Fleet: $11.70 / $50.00 daily
 ```
 📊 Daily Report — 2026-03-26
 
-proj-a: $8.20, 2 rotations
+proj-a: $8.20, 2 restarts
 proj-b: $2.10
 proj-c: $0.00 ⚠️ 1 hang
 
@@ -275,9 +276,9 @@ instances:
 
 權限提示現在會顯示倒數計時器，每 30 秒更新一次。「Always Allow」按鈕可以允許當前 session 中同一工具的所有後續使用。決定後會在訊息上顯示結果（「✅ 已允許」/「❌ 已拒絕」）。
 
-### 結構化 Handover
+### Daemon 端重啟 Snapshot
 
-Context rotation 現在使用結構化模板並驗證。Claude 會在 `memory/handover.md` 中以 Active Work、Pending Decisions、Key Context 三個區塊保存狀態。第一次驗證失敗時會自動重試。
+每次 context 重啟前，daemon 會儲存 `rotation-state.json`，包含最近的 user messages、tool 活動、context 使用率和 statusline 資料。新 session 會在 system prompt 中收到這份 snapshot，不依賴 Claude 寫交接報告就能保持上下文延續。
 
 ### Service Message 過濾
 
@@ -409,7 +410,7 @@ defaults:
     hour: 21
     minute: 0
   context_guardian:
-    threshold_percentage: 60
+    restart_threshold_pct: 80
     max_age_hours: 8
   model_failover: ["opus", "sonnet"]
   webhooks:
@@ -451,7 +452,7 @@ GROQ_API_KEY=gsk_...          # 選用，語音轉文字用
 | `instances/<name>/statusline.json` | Claude 最新狀態資料 |
 | `instances/<name>/channel.sock` | IPC Unix socket |
 | `instances/<name>/claude-settings.json` | 每個 instance 的 Claude 設定 |
-| `instances/<name>/memory.db` | 記憶檔 SQLite 備份 |
+| `instances/<name>/rotation-state.json` | Context 重啟 snapshot |
 | `instances/<name>/output.log` | Claude tmux 輸出擷取 |
 
 ## 系統需求

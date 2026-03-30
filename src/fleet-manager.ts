@@ -143,9 +143,9 @@ export class FleetManager implements FleetContext {
     await daemon.start();
     this.daemons.set(name, daemon);
 
-    daemon.on("rotation_quality", (data: Record<string, unknown>) => {
-      this.eventLog?.insert(name, "context_rotation", data);
-      this.logger.info({ name, ...data }, "Context rotation completed");
+    daemon.on("restart_complete", (data: Record<string, unknown>) => {
+      this.eventLog?.insert(name, "context_restart", data);
+      this.logger.info({ name, ...data }, "Context restart completed");
     });
 
     const hangDetector = daemon.getHangDetector();

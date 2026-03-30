@@ -52,9 +52,7 @@ export const DEFAULT_INSTANCE_CONFIG: Omit<InstanceConfig, "working_directory"> 
     reset_after: 300,
   },
   context_guardian: {
-    threshold_percentage: 60,
-    max_idle_wait_ms: 300_000,
-    completion_timeout_ms: 60_000,
+    restart_threshold_pct: 80,
     grace_period_ms: 600_000,
     max_age_hours: 8,
   },

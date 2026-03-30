@@ -6,15 +6,13 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 const makeConfig = (overrides = {}) => ({
-  threshold_percentage: 60,
-  max_idle_wait_ms: 300_000,
-  completion_timeout_ms: 60_000,
+  restart_threshold_pct: 80,
   grace_period_ms: 600_000,
   max_age_hours: 8,
   ...overrides,
 });
 
-describe("ContextGuardian v2", () => {
+describe("ContextGuardian v3", () => {
   const logger = createLogger("silent");
   let guardian: ContextGuardian;
   let tmpDir: string;
@@ -38,99 +36,62 @@ describe("ContextGuardian v2", () => {
     expect(guardian.state).toBe("NORMAL");
   });
 
-  it("transitions to PENDING when threshold exceeded", () => {
-    const pendingSpy = vi.fn();
-    guardian.on("pending", pendingSpy);
+  it("transitions to RESTARTING when threshold exceeded", () => {
+    const restartSpy = vi.fn();
+    guardian.on("restart_requested", restartSpy);
     guardian.updateContextStatus({
-      used_percentage: 65,
-      remaining_percentage: 35,
+      used_percentage: 85,
+      remaining_percentage: 15,
       context_window_size: 1_000_000,
     });
-    expect(guardian.state).toBe("PENDING");
-    expect(pendingSpy).toHaveBeenCalledTimes(1);
+    expect(guardian.state).toBe("RESTARTING");
+    expect(restartSpy).toHaveBeenCalledTimes(1);
+    expect(restartSpy).toHaveBeenCalledWith("context_full");
   });
 
   it("stays NORMAL below threshold", () => {
     guardian.updateContextStatus({
-      used_percentage: 55,
-      remaining_percentage: 45,
+      used_percentage: 75,
+      remaining_percentage: 25,
       context_window_size: 1_000_000,
     });
     expect(guardian.state).toBe("NORMAL");
   });
 
-  it("transitions PENDING → HANDING_OVER on idle signal", () => {
-    const handoverSpy = vi.fn();
-    guardian.on("request_handover", handoverSpy);
+  it("enters GRACE after markRestartComplete", () => {
     guardian.updateContextStatus({
-      used_percentage: 65,
-      remaining_percentage: 35,
+      used_percentage: 85,
+      remaining_percentage: 15,
       context_window_size: 1_000_000,
     });
-    guardian.signalIdle();
-    expect(guardian.state).toBe("HANDING_OVER");
-    expect(handoverSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it("ignores idle signal when not PENDING", () => {
-    guardian.signalIdle();
-    expect(guardian.state).toBe("NORMAL");
-  });
-
-  it("transitions HANDING_OVER → ROTATING on handover complete", () => {
-    const rotateSpy = vi.fn();
-    guardian.on("rotate", rotateSpy);
-    guardian.updateContextStatus({
-      used_percentage: 65,
-      remaining_percentage: 35,
-      context_window_size: 1_000_000,
-    });
-    guardian.signalIdle();
-    guardian.signalHandoverComplete();
-    expect(guardian.state).toBe("ROTATING");
-    expect(rotateSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it("transitions HANDING_OVER → ROTATING on completion timeout", () => {
-    const rotateSpy = vi.fn();
-    guardian.on("rotate", rotateSpy);
-    guardian.updateContextStatus({
-      used_percentage: 65,
-      remaining_percentage: 35,
-      context_window_size: 1_000_000,
-    });
-    guardian.signalIdle();
-    expect(guardian.state).toBe("HANDING_OVER");
-    vi.advanceTimersByTime(60_001);
-    expect(guardian.state).toBe("ROTATING");
-    expect(rotateSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it("enters GRACE after markRotationComplete", () => {
-    guardian.updateContextStatus({
-      used_percentage: 65,
-      remaining_percentage: 35,
-      context_window_size: 1_000_000,
-    });
-    guardian.signalIdle();
-    guardian.signalHandoverComplete();
-    guardian.markRotationComplete();
+    expect(guardian.state).toBe("RESTARTING");
+    guardian.markRestartComplete();
     expect(guardian.state).toBe("GRACE");
+  });
+
+  it("emits restart_complete on markRestartComplete", () => {
+    const completeSpy = vi.fn();
+    guardian.on("restart_complete", completeSpy);
+    guardian.updateContextStatus({
+      used_percentage: 85,
+      remaining_percentage: 15,
+      context_window_size: 1_000_000,
+    });
+    guardian.markRestartComplete();
+    expect(completeSpy).toHaveBeenCalledTimes(1);
   });
 
   it("ignores threshold during GRACE period", () => {
     guardian.updateContextStatus({
-      used_percentage: 65,
-      remaining_percentage: 35,
+      used_percentage: 85,
+      remaining_percentage: 15,
       context_window_size: 1_000_000,
     });
-    guardian.signalIdle();
-    guardian.signalHandoverComplete();
-    guardian.markRotationComplete();
+    guardian.markRestartComplete();
     expect(guardian.state).toBe("GRACE");
     guardian.updateContextStatus({
-      used_percentage: 70,
-      remaining_percentage: 30,
+      used_percentage: 90,
+      remaining_percentage: 10,
       context_window_size: 1_000_000,
     });
     expect(guardian.state).toBe("GRACE");
@@ -138,34 +99,72 @@ describe("ContextGuardian v2", () => {
 
   it("returns to NORMAL after grace period expires", () => {
     guardian.updateContextStatus({
-      used_percentage: 65,
-      remaining_percentage: 35,
+      used_percentage: 85,
+      remaining_percentage: 15,
       context_window_size: 1_000_000,
     });
-    guardian.signalIdle();
-    guardian.signalHandoverComplete();
-    guardian.markRotationComplete();
+    guardian.markRestartComplete();
     vi.advanceTimersByTime(600_001);
     expect(guardian.state).toBe("NORMAL");
   });
 
-  it("falls back to NORMAL if idle not detected within max_idle_wait", () => {
-    guardian.updateContextStatus({
+  it("triggers restart on max_age_hours timer", () => {
+    const restartSpy = vi.fn();
+    guardian.on("restart_requested", restartSpy);
+    guardian.startTimer();
+    vi.advanceTimersByTime(8 * 60 * 60 * 1000);
+    expect(guardian.state).toBe("RESTARTING");
+    expect(restartSpy).toHaveBeenCalledTimes(1);
+    expect(restartSpy).toHaveBeenCalledWith("max_age");
+  });
+
+  it("ignores requestRestart when not NORMAL", () => {
+    guardian.requestRestart("context_full");
+    expect(guardian.state).toBe("RESTARTING");
+    // Second request should be ignored
+    const restartSpy = vi.fn();
+    guardian.on("restart_requested", restartSpy);
+    guardian.requestRestart("max_age");
+    expect(restartSpy).not.toHaveBeenCalled();
+  });
+
+  it("supports legacy threshold_percentage fallback", () => {
+    const legacyGuardian = new ContextGuardian(
+      makeConfig({ restart_threshold_pct: undefined, threshold_percentage: 60 }),
+      logger,
+      statusFile,
+    );
+    const restartSpy = vi.fn();
+    legacyGuardian.on("restart_requested", restartSpy);
+    legacyGuardian.updateContextStatus({
       used_percentage: 65,
       remaining_percentage: 35,
       context_window_size: 1_000_000,
     });
-    expect(guardian.state).toBe("PENDING");
-    vi.advanceTimersByTime(300_001);
-    expect(guardian.state).toBe("NORMAL");
+    expect(legacyGuardian.state).toBe("RESTARTING");
+    legacyGuardian.stop();
   });
 
-  it("triggers rotation on max_age_hours timer", () => {
-    const pendingSpy = vi.fn();
-    guardian.on("pending", pendingSpy);
+  it("resets age timer after grace period", () => {
+    const restartSpy = vi.fn();
+    guardian.on("restart_requested", restartSpy);
     guardian.startTimer();
+
+    // Trigger restart via context
+    guardian.updateContextStatus({
+      used_percentage: 85,
+      remaining_percentage: 15,
+      context_window_size: 1_000_000,
+    });
+    guardian.markRestartComplete();
+
+    // Grace expires, returns to NORMAL
+    vi.advanceTimersByTime(600_001);
+    expect(guardian.state).toBe("NORMAL");
+
+    // Age timer should have been reset — wait full max_age
     vi.advanceTimersByTime(8 * 60 * 60 * 1000);
-    expect(guardian.state).toBe("PENDING");
-    expect(pendingSpy).toHaveBeenCalledTimes(1);
+    expect(guardian.state).toBe("RESTARTING");
+    expect(restartSpy).toHaveBeenCalledTimes(2);
   });
 });

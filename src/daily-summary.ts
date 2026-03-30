@@ -40,22 +40,17 @@ export class DailySummary {
 
     for (const name of instances) {
       const instanceEvents = todayEvents.filter(e => e.instance_name === name);
-      const rotations = instanceEvents.filter(e => e.event_type === "context_rotation").length;
+      const restarts = instanceEvents.filter(e => e.event_type === "context_restart").length;
       const hangs = instanceEvents.filter(e => e.event_type === "hang_detected").length;
       const deferred = instanceEvents.filter(e => e.event_type === "schedule_deferred").length;
       const costCents = costCentsMap.get(name) ?? 0;
-      const incompleteHandovers = instanceEvents.filter(e =>
-        e.event_type === "context_rotation" &&
-        (e.payload as Record<string, unknown> | null)?.handover_status !== "complete"
-      ).length;
 
       let line = `${name}: ${formatCents(costCents)}`;
-      if (rotations > 0) line += `, ${rotations} rotation${rotations > 1 ? "s" : ""}`;
+      if (restarts > 0) line += `, ${restarts} restart${restarts > 1 ? "s" : ""}`;
       if (deferred > 0) line += `, ${deferred} deferred`;
 
       const anomalies: string[] = [];
       if (hangs > 0) anomalies.push(`${hangs} hang${hangs > 1 ? "s" : ""}`);
-      if (incompleteHandovers > 0) anomalies.push(`${incompleteHandovers} incomplete handover${incompleteHandovers > 1 ? "s" : ""}`);
       if (anomalies.length > 0) line += ` ⚠️ ${anomalies.join(", ")}`;
 
       lines.push(line);

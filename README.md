@@ -109,18 +109,19 @@ Schedules can target a specific instance or the same instance that created them.
 
 ### Context rotation
 
-Watches Claude's status line JSON. A state machine with 5 states:
+Watches Claude's status line JSON. When context usage exceeds the threshold or the session reaches its max age, the daemon performs a simple restart:
 
 ```
-NORMAL → PENDING → HANDING_OVER → ROTATING → GRACE
+NORMAL → RESTARTING → GRACE
 ```
 
-- **PENDING** — context exceeds threshold (default 60%), waiting for Claude to go idle
-- **HANDING_OVER** — sends a prompt asking Claude to save state to `memory/handover.md`
-- **ROTATING** — kills tmux window, spawns fresh session with `--resume`
-- **GRACE** — 10-minute cooldown to prevent rapid re-rotation
+1. **Trigger** — context exceeds threshold (default 80%) or `max_age_hours` reached (default 8h)
+2. **Idle barrier** — waits up to 5 seconds for current activity to settle (best-effort, not a handover)
+3. **Snapshot** — daemon collects recent user messages, tool activity, and statusline data into `rotation-state.json`
+4. **Restart** — kills tmux window, spawns fresh session with the snapshot injected into the system prompt
+5. **Grace** — 10-minute cooldown to prevent rapid re-rotation
 
-Also rotates after `max_age_hours` (default 8h) regardless of context usage.
+No handover prompt is sent to Claude. Recovery context comes entirely from the daemon-side snapshot.
 
 ### Peer-to-peer agent collaboration
 
@@ -252,7 +253,7 @@ A daily report is posted to the General topic at a configurable time (default 21
 ```
 📊 Daily Report — 2026-03-26
 
-proj-a: $8.20, 2 rotations
+proj-a: $8.20, 2 restarts
 proj-b: $2.10
 proj-c: $0.00 ⚠️ 1 hang
 
@@ -292,9 +293,9 @@ Running instances get a visual icon indicator in Telegram. When an instance stop
 
 Permission prompts now show a countdown timer that updates every 30 seconds. An "Always Allow" button lets you approve all future uses of a specific tool for the current session. Decisions are shown inline after you respond ("✅ Approved" / "❌ Denied").
 
-### Structured handover
+### Daemon-side restart snapshot
 
-Context rotation now uses a structured template with validation. Claude saves state in `memory/handover.md` with sections for Active Work, Pending Decisions, and Key Context. If the first attempt fails validation, a retry is triggered automatically.
+Before each context restart, the daemon saves a `rotation-state.json` with recent user messages, tool activity, context usage, and statusline data. The next session receives this snapshot in its system prompt, providing continuity without relying on Claude to write a handover report.
 
 ### Service message filter
 
@@ -323,7 +324,7 @@ Push fleet events to external endpoints (Slack, custom dashboards, etc.):
 defaults:
   webhooks:
     - url: https://hooks.slack.com/...
-      events: ["rotation", "hang", "cost_warn"]
+      events: ["restart", "hang", "cost_warn"]
     - url: https://custom.endpoint/ccd
       events: ["*"]
 ```
@@ -426,7 +427,7 @@ defaults:
     hour: 21
     minute: 0
   context_guardian:
-    threshold_percentage: 60
+    restart_threshold_pct: 80
     max_age_hours: 8
   model_failover: ["opus", "sonnet"]
   webhooks:
@@ -469,7 +470,7 @@ GROQ_API_KEY=gsk_...          # optional, for voice transcription
 | `instances/<name>/statusline.json` | Latest Claude status line |
 | `instances/<name>/channel.sock` | IPC Unix socket |
 | `instances/<name>/claude-settings.json` | Per-instance Claude settings |
-| `instances/<name>/memory.db` | Memory file backup (SQLite) |
+| `instances/<name>/rotation-state.json` | Context restart snapshot |
 | `instances/<name>/output.log` | Claude tmux output capture |
 
 ## Requirements

@@ -20,15 +20,15 @@ describe("DailySummary.generateText", () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("generates summary with costs and rotations", () => {
-    eventLog.insert("proj-a", "context_rotation", { handover_status: "complete" });
+  it("generates summary with costs and restarts", () => {
+    eventLog.insert("proj-a", "context_restart", { reason: "context_full" });
     eventLog.insert("proj-b", "cost_snapshot", { accumulated_cents: 200 });
 
     const costMap = new Map([["proj-a", 820], ["proj-b", 200]]);
     const text = DailySummary.generateText(eventLog, ["proj-a", "proj-b"], costMap, 1020);
     expect(text).toContain("proj-a");
     expect(text).toContain("$8.20");
-    expect(text).toContain("1 rotation");
+    expect(text).toContain("1 restart");
     expect(text).toContain("$10.20"); // fleet total
   });
 
@@ -38,14 +38,6 @@ describe("DailySummary.generateText", () => {
 
     const text = DailySummary.generateText(eventLog, ["proj-a"], new Map([["proj-a", 0]]), 0);
     expect(text).toContain("2 hangs");
-  });
-
-  it("highlights incomplete handovers", () => {
-    eventLog.insert("proj-a", "context_rotation", { handover_status: "timeout" });
-    eventLog.insert("proj-a", "context_rotation", { handover_status: "complete" });
-
-    const text = DailySummary.generateText(eventLog, ["proj-a"], new Map([["proj-a", 0]]), 0);
-    expect(text).toContain("1 incomplete handover");
   });
 
   it("shows deferred schedules", () => {

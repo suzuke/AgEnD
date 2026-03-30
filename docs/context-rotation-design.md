@@ -1,182 +1,178 @@
-# Context Rotation v2 — 單閾值設計
+# Context Rotation v3 — Daemon-Driven Restart
 
-> claude-channel-daemon — Context Guardian 重新設計
-> 日期：2026-03-22
-
----
-
-## 1. 現況與問題
-
-```
-watchFile (2s interval)
-    → 讀 statusline.json
-    → used% > 40% ?
-        → 送 /compact，等 60 秒
-        → 降到 40% 以下 → 完成
-        → 沒降夠 → kill window + fresh start（刪 session-id）
-```
-
-**檔案**：`context-guardian.ts` (104 行) + `daemon.ts` rotate handler (209-258 行)
-
-| # | 問題 | 影響 |
-|---|------|------|
-| 1 | 40% 閾值太低 | Opus 1M 只用到 400K 就觸發 |
-| 2 | /compact 效果有限 | 只降 5-10%，很容易「沒降夠」就被殺 |
-| 3 | Fresh start 太激進 | 刪 session-id = 對話脈絡全失 |
-| 4 | 沒有通知、沒有 handover | 用戶不知道發生了什麼，新 session 不知道之前在做什麼 |
-| 5 | 沒有 idle 偵測 | 可能在工作中途強制中斷 |
+> claude-channel-daemon — Context Rotation 設計
+> 日期：2026-03-30（v3 rewrite，取代 v2 handover-based 設計）
 
 ---
 
-## 2. 業界調研
+## 1. 設計演進
 
-| 方案 | 作者/組織 | 核心思路 |
-|------|----------|---------|
-| Hook-based Rotation | Vincent van Deth | 60-65% 觸發，寫 handover doc 再換 session |
-| Ralph Wiggum Loop | Geoffrey Huntley / Anthropic | 進度存檔案/git，context 用完就丟 |
-| Context Virtualization | mksglu/context-mode | SQLite + FTS5，BM25 檢索 |
-| Progress Files | Anthropic 官方 | progress.txt + git checkpoint |
-| Anchored Summarization | Factory AI | 結構化摘要，評分 3.70/5 |
-| Observation Masking | JetBrains Research (NeurIPS 2025) | 舊 tool output 換成 placeholder，簡單 ≈ 複雜 |
+### v1（已淘汰）
+- 40% 閾值 → 送 `/compact` → 失敗就 fresh start（刪 session-id）
+- 問題：閾值太低、/compact 效果有限、脈絡全失
 
-**共識**：狀態外部化 > 壓縮 context。Context 是消耗品，外部狀態才是永久的。
+### v2（已淘汰）
+- 60% 閾值 → 等 idle → 送 handover prompt → 驗證 `handover.md` → rotate
+- 問題：**依賴 Claude 自覺寫交接報告**，本質上脆弱
 
-**關鍵數據**：
-- Vincent van Deth：**60% 時 handover 品質最高，65% 已開始退化**
-- JetBrains：簡單方法 ≈ 複雜策略，不需要過度設計
-
-**參考資料**：
-[Vincent van Deth](https://vincentvandeth.nl/blog/context-rot-claude-code-automatic-rotation) |
-[Anthropic harness](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) |
-[Factory AI](https://factory.ai/news/evaluating-compression) |
-[JetBrains](https://github.com/JetBrains-Research/the-complexity-trap) |
-[context-mode](https://github.com/mksglu/context-mode) |
-[MemGPT](https://arxiv.org/abs/2310.08560) |
-[LangChain](https://blog.langchain.com/context-management-for-deepagents/) |
-[Ralph Wiggum](https://github.com/anthropics/claude-code/tree/main/plugins/ralph-wiggum)
+### v3（現行）
+- 80% 閾值 → 5s idle barrier → daemon 收集 snapshot → kill → spawn with snapshot prompt
+- 原則：**daemon 主導恢復，不依賴 Claude 的 meta-task**
 
 ---
 
-## 3. 設計方案
+## 2. v2 → v3 的核心洞察
 
-### 3.1 核心洞察
+v2 嘗試讓 Claude 完成一個 meta-task（自我報告狀態），但這個鏈條每一步都脆弱：
 
-既然 60% 時 handover 品質最高，為什麼不直接在 60% rotate？
+| v2 步驟 | 失敗模式 |
+|---------|---------|
+| 送 handover prompt | Claude 可能忽略 |
+| 等 Claude 寫 `handover.md` | Claude 可能寫了但格式錯 |
+| 15 秒靜默偵測 = 「完成」 | 可能只是在思考 |
+| Markdown section 驗證 | 形式正確 ≠ 內容有用 |
+| 重試一次 | 重試後仍失敗就直接 proceed |
 
-- 不需要 /compact（效果有限，Claude Code 自己會 auto-compact）
-- 不需要多層閾值
-- 不需要獨立通知系統（handover prompt 讓 Claude 自己告知用戶，天生 channel-agnostic）
-- 新 session 拿到高品質 handover + 100% 乾淨 context
+**根本問題**：daemon 永遠只是在「猜」Claude 有沒有完成 handover。
 
-### 3.2 Handover 機制
-
-透過 tmux sendKeys 打字進 Claude prompt（語意上是系統指令，不是用戶訊息）：
-
-```
-你的 context 已使用 {pct}%，即將進行 rotation。請：
-1. 簡短告知用戶你正在保存工作狀態
-2. 將目前工作狀態寫入 memory/handover.md，包含：正在進行的任務、已完成的部分、下一步計劃、重要決策
-```
-
-Claude 收到後會：
-1. 透過當前 channel 回覆用戶 — **通知**
-2. 寫 `memory/handover.md` 並更新 MEMORY.md — **交接**
-
-檔案策略：永遠覆寫同一個 `memory/handover.md`。歷史由 memory-layer 自動備份到 SQLite。新 session 透過 Claude auto memory 載入 MEMORY.md 自然看到 handover。
-
-### 3.3 完成偵測
-
-三個信號競爭，先到先贏：
-
-| 信號 | 來源 |
-|------|------|
-| `handover.md` change event | memory-layer (chokidar) |
-| Claude 回到 idle | tmux-prompt-detector |
-| 60 秒 timeout | fallback timer |
-
-### 3.4 安全閥
-
-| 安全閥 | 用途 | 預設值 |
-|--------|------|--------|
-| **Idle gate** | 不在工作中途中斷。超時放棄本輪，下次 poll 重試 | 5 分鐘 |
-| **Completion timeout** | Handover 寫不完也不 block | 60 秒 |
-| **Grace period** | rotation 後新 session 可能馬上超 60%，防止循環 | 10 分鐘 |
+**v3 解法**：不猜。daemon 自己收集資訊，自己注入。
 
 ---
 
-## 4. 狀態機
+## 3. v3 設計
+
+### 3.1 狀態機
 
 ```
-    ┌───────────────────────────────────────────┐
-    │                                           │
-    v                                           │
-┌──────────────┐                                │
-│   NORMAL     │ <── 5min timeout ──┐           │
-│   (< 60%)    │                    │           │
-└──────────────┘                    │           │
-        │                           │           │
-        │ ≥ 60% or max_age_hours    │           │
-        v                           │           │
-┌──────────────┐                    │           │
-│   PENDING    │ ───────────────────┘           │
-│ (等待 idle)  │                                │
-└──────────────┘                                │
-        │                                       │
-        │ idle detected                         │
-        v                                       │
-┌──────────────┐                                │
-│  HANDING     │                                │
-│   OVER       │                                │
-└──────────────┘                                │
-        │                                       │
-        │ done or 60s timeout                   │
-        v                                       │
-┌──────────────┐                                │
-│  ROTATING    │                                │
-│ (kill+spawn) │                                │
-└──────────────┘                                │
-        │                                       │
-        │ respawn done                          │
-        v                                       │
-┌──────────────┐                                │
-│   GRACE      │ ───────────────────────────────┘
-│  (10 min)    │
+┌──────────────┐
+│   NORMAL     │ ◄──── grace 期滿
+└──────────────┘
+        │
+        │ ≥ 80% or max_age_hours
+        v
+┌──────────────┐
+│  RESTARTING  │ ── 5s idle barrier → snapshot → kill → spawn
+└──────────────┘
+        │
+        │ respawn done
+        v
+┌──────────────┐
+│   GRACE      │ ── 10 分鐘冷卻
 └──────────────┘
 ```
 
+從 5 個狀態簡化到 3 個。移除了 PENDING（等 idle）和 HANDING_OVER（等 Claude 寫報告）。
+
+### 3.2 觸發條件
+
+| 條件 | 行為 |
+|------|------|
+| `context_window.used_percentage >= restart_threshold_pct` | 進入 RESTARTING |
+| `max_age_hours` 到期 | 進入 RESTARTING |
+| tmux window crash | 走既有 health check respawn（不經過 guardian） |
+
+### 3.3 重啟流程
+
+```
+1. guardian emit restart_requested(reason)
+2. daemon: waitForTranscriptIdle(5000)    ← 5 秒 best-effort
+3. daemon: writeRotationSnapshot(reason)  ← 寫 rotation-state.json
+4. daemon: saveSessionId()
+5. daemon: killWindow()
+6. daemon: spawnClaudeWindow()            ← system prompt 含 snapshot
+7. guardian: markRestartComplete()         ← 進入 GRACE
+```
+
+### 3.4 Snapshot
+
+Daemon 在重啟前收集本地資訊，寫入 `<instanceDir>/rotation-state.json`：
+
+```json
+{
+  "instance": "general",
+  "reason": "context_full",
+  "created_at": "2026-03-30T10:00:00.000Z",
+  "session_id": "abc123",
+  "context_pct": 82,
+  "working_directory": "/path/to/repo",
+  "recent_user_messages": [
+    { "text": "Check the latest branch-instance spec", "ts": "..." }
+  ],
+  "recent_events": [
+    { "type": "tool_use", "name": "Read", "preview": "docs/spec.md" },
+    { "type": "assistant_text", "preview": "I found the spec..." }
+  ],
+  "recent_tool_activity": [
+    "Read docs/spec.md",
+    "Edit src/fleet-manager.ts"
+  ],
+  "last_statusline": {
+    "model": "opus",
+    "cost_usd": 3.2,
+    "five_hour_pct": 71
+  }
+}
+```
+
+Ring buffer 規則：
+- `recent_user_messages`：最多 10 筆，每筆截斷 200 字元，過濾 cross-instance 訊息
+- `recent_events`：最多 15 筆，preview 截斷 100 字元
+- `recent_tool_activity`：最多 10 筆
+
+### 3.5 Prompt 注入
+
+新 session 的 system prompt 結構：
+
+```
+1. fleet system prompt          ← 靜態模板
+2. user/system-configured prompt ← fleet.yaml 設定
+3. previous session snapshot     ← 從 rotation-state.json 產生
+```
+
+Snapshot 注入預算：**≤ 2000 字元**。超過則依此優先順序截斷：
+
+1. 永遠保留：reason, context_pct, session_id, working_directory
+2. 盡量保留：recent_user_messages
+3. 盡量保留：recent_events
+4. 最先捨棄：tool activity
+
 ---
 
-## 5. 實作範圍
-
-### 修改檔案
-
-| 檔案 | 修改 |
-|------|------|
-| `context-guardian.ts` | 重寫為上述狀態機 |
-| `daemon.ts` | rotate handler 改為 idle 等待 + handover + respawn |
-| `types.ts` | GuardianConfig 改為單閾值 + 安全閥 |
-
-### 利用的現有基礎設施（零改動）
-
-| 元件 | 用途 |
-|------|------|
-| `tmux-prompt-detector.ts` | idle 偵測 |
-| `tmux-manager.ts` sendKeys | 送 handover prompt |
-| `memory-layer.ts` chokidar | 偵測 handover.md 寫入完成 |
-| `memory-layer.ts` SQLite | handover 歷史備份 |
-| Claude auto memory (MEMORY.md) | 新 session 恢復 |
-| `daemon.ts` spawnClaudeWindow | 重啟 Claude |
-
-### Configuration
+## 4. 設定
 
 ```yaml
 context_guardian:
-  threshold_percentage: 60
-  max_idle_wait_ms: 300000
-  completion_timeout_ms: 60000
-  grace_period_ms: 600000
+  restart_threshold_pct: 80    # v3 新欄位
   max_age_hours: 8
+  grace_period_ms: 600000
+  enabled: true                # 選用
 ```
+
+已淘汰（向後相容但被忽略）：
+- `threshold_percentage`（fallback 到 `restart_threshold_pct`）
+- `max_idle_wait_ms`
+- `completion_timeout_ms`
+
+---
+
+## 5. 觀測性
+
+### 事件
+
+| 事件 | 欄位 |
+|------|------|
+| `restart_requested` | reason, context_pct |
+| `restart_complete` | reason, restart_duration_ms, pre_restart_context_pct, snapshot_user_message_count, snapshot_event_count |
+
+### 每日報告
+
+```
+proj-a: $8.20, 2 restarts
+proj-b: $2.10
+proj-c: $0.00 ⚠️ 1 hang
+```
+
+不再追蹤：`handover_status`、`missing_sections`、`word_count`。
 
 ---
 
@@ -184,17 +180,26 @@ context_guardian:
 
 | 風險 | 緩解 |
 |------|------|
-| Claude 忽略 handover prompt | 60 秒 timeout 後繼續 rotate |
-| Claude 長時間不 idle | 5 分鐘後放棄本輪，下次 poll 重試 |
-| Rotation 後馬上又觸發 | 10 分鐘 grace period |
-| 新 session 沒讀到 handover | Claude auto memory 保證載入 MEMORY.md |
+| 5 秒 idle barrier 仍是 best-effort | 接受。比 v2 的 5 分鐘 idle 等待 + 60 秒 handover 簡單得多 |
+| Snapshot 可能遺漏 in-flight context | 可接受。Claude auto memory (MEMORY.md) 作為補充 |
+| 注入 snapshot prompt 占 context budget | 硬限 2000 字元，啟動時僅占 ~0.2% context |
+| 連續重啟 | 10 分鐘 grace period 防止循環 |
 
 ---
 
 ## 7. 成功指標
 
-- [ ] handover.md 成功寫入率 > 90%
-- [ ] 零次工作中途中斷
-- [ ] 零次 rotation 循環
-- [ ] 用戶每次 rotation 都收到 Claude 的通知
-- [ ] 新 session 能延續工作
+- [x] 不再出現 `handover_status: empty/timeout/complete`
+- [x] 重啟邏輯從日誌就能完整理解
+- [x] 狀態機複雜度大幅降低（5 → 3 狀態）
+- [x] 新 session 透過 daemon snapshot 獲得有用的延續 context
+
+---
+
+## 8. 相關參考
+
+| 資料 | 重點 |
+|------|------|
+| [Vincent van Deth](https://vincentvandeth.nl/blog/context-rot-claude-code-automatic-rotation) | 60% 時 handover 品質最高——但 v3 不依賴 Claude 寫 handover，所以可以提高到 80% |
+| [JetBrains NeurIPS 2025](https://github.com/JetBrains-Research/the-complexity-trap) | 簡單方法 ≈ 複雜策略 |
+| [Anthropic harness](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents) | 狀態外部化 > 壓縮 context |

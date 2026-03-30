@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import type { InstanceConfig } from "./types.js";
+import type { InstanceConfig, RotationSnapshot, RotationSnapshotEvent } from "./types.js";
 import { createLogger, type Logger } from "./logger.js";
 import { TmuxManager } from "./tmux-manager.js";
 import { TranscriptMonitor } from "./transcript-monitor.js";
@@ -55,6 +55,10 @@ export class Daemon extends EventEmitter {
   private hangDetector: HangDetector | null = null;
   // Model failover: override model on next spawn when rate-limited
   private modelOverride: string | undefined;
+  // Context rotation v3: ring buffers for daemon-side snapshot
+  private recentUserMessages: Array<{ text: string; ts: string }> = [];
+  private recentEvents: RotationSnapshotEvent[] = [];
+  private recentToolActivity: string[] = [];
 
   constructor(
     private name: string,
@@ -257,18 +261,22 @@ export class Daemon extends EventEmitter {
         this.adapter.react(chatId, messageId, "🫡")
           .catch(e => this.logger.debug({ err: (e as Error).message }, "Ack react failed"));
       };
-      this.transcriptMonitor.on("tool_use", (name: string, _input: unknown) => {
+      this.transcriptMonitor.on("tool_use", (name: string, input: unknown) => {
         this.logger.debug({ tool: name }, "Tool use");
         ackIfPending();
         this.hangDetector?.recordActivity();
+        this.recordRecentEvent({ type: "tool_use", name, preview: this.summarizeTool(name, input) });
+        this.recordRecentToolActivity(this.summarizeTool(name, input));
       });
-      this.transcriptMonitor.on("tool_result", (_name: string, _output: unknown) => {
+      this.transcriptMonitor.on("tool_result", (name: string, _output: unknown) => {
         this.hangDetector?.recordActivity();
+        this.recordRecentEvent({ type: "tool_result", name });
       });
       this.transcriptMonitor.on("assistant_text", (text: string) => {
         this.logger.debug({ text: text.slice(0, 200) }, "Claude response");
         ackIfPending();
         this.hangDetector?.recordActivity();
+        this.recordRecentEvent({ type: "assistant_text", preview: text.slice(0, 100) });
       });
       this.transcriptMonitor.startPolling();
 
@@ -286,57 +294,43 @@ export class Daemon extends EventEmitter {
         this.saveSessionId();
         this.hangDetector?.recordStatuslineUpdate();
       });
-      this.guardian.on("pending", async () => {
-        this.logger.info("Context rotation pending — waiting for transcript to settle");
-        await this.waitForTranscriptIdle(15000);
-        this.logger.info("Claude is idle — signaling");
-        this.guardian?.signalIdle();
-      });
-
-      this.guardian.on("request_handover", async () => {
+      // v3: daemon-driven restart — no handover prompt, no validation
+      this.guardian.on("restart_requested", async (reason: string) => {
         this.rotationStartedAt = Date.now();
         this.preRotationContextPct = this.readContextPercentage();
-        this.logger.info("Sending handover prompt to Claude");
-        if (this.tmux) {
-          const reason = this.guardian?.rotationReason ?? "context_full";
-          const pct = this.readContextPercentage();
-          const notifyLine = reason === "max_age"
-            ? `Scheduled rotation — session age limit reached (context usage: ${pct}%, NOT full).`
-            : `Context rotation — usage at ${pct}%, approaching threshold. Use the reply tool to tell the user: quote the EXACT percentage ${pct}% and the reason (context approaching limit). Do NOT change or invent numbers.`;
-          const prompt = `${notifyLine} Save state to memory/handover.md using this EXACT structure:\n\n## Active Tasks\nWhat you are working on right now.\n\n## Progress\nWhat is done, what remains.\n\n## Decisions\nImportant decisions made and why.\n\n## Next Steps\nWhat the next session should do first.\n\n## Blockers\nOpen questions or issues (write "None" if none).${reason === "max_age" ? " Do NOT notify the user." : ""}`;
-          await this.tmux.sendKeys(prompt);
-          await new Promise(r => setTimeout(r, 500));
-          await this.tmux.sendSpecialKey("Enter");
-        }
+        this.logger.info({ reason, context_pct: this.preRotationContextPct }, "Restart requested");
 
-        this.waitForHandoverSignal();
-      });
+        // Minimal idle barrier: let current step settle (best-effort, not a handover wait)
+        await this.waitForTranscriptIdle(5000);
 
-      this.guardian.on("rotate", async () => {
-        this.logger.info("Context rotation — killing and respawning Claude");
+        // Collect and write daemon-side snapshot
+        const snapshot = this.writeRotationSnapshot(reason);
+
+        // Save session id, kill and respawn
         this.saveSessionId();
-
-        // Track rotation quality
-        const durationMs = Date.now() - this.rotationStartedAt;
-        const validation = this.validateHandover();
-        let handoverStatus: "complete" | "timeout" | "empty" = "empty";
-        if (validation.wordCount > 0) {
-          handoverStatus = validation.valid ? "complete" : "timeout";
-        }
-        this.emit("rotation_quality", {
-          instance: this.name,
-          handover_status: handoverStatus,
-          duration_ms: durationMs,
-          previous_context_pct: this.preRotationContextPct,
-          missing_sections: validation.missing,
-          word_count: validation.wordCount,
-        });
-
         await this.tmux?.killWindow();
         this.transcriptMonitor?.resetOffset();
+
+        // Clear ring buffers for new session
+        this.recentUserMessages = [];
+        this.recentEvents = [];
+        this.recentToolActivity = [];
+
         await this.spawnClaudeWindow();
-        this.guardian?.markRotationComplete();
-        this.logger.info("Context rotation complete — fresh Claude session started");
+
+        // Track restart metrics
+        const durationMs = Date.now() - this.rotationStartedAt;
+        this.emit("restart_complete", {
+          instance: this.name,
+          reason,
+          pre_restart_context_pct: this.preRotationContextPct,
+          restart_duration_ms: durationMs,
+          snapshot_user_message_count: snapshot.recent_user_messages?.length ?? 0,
+          snapshot_event_count: snapshot.recent_events?.length ?? 0,
+        });
+
+        this.guardian?.markRestartComplete();
+        this.logger.info({ reason, duration_ms: durationMs }, "Restart complete — fresh Claude session started");
       });
 
     }
@@ -357,7 +351,7 @@ export class Daemon extends EventEmitter {
     if (max_retries <= 0) return; // restart disabled
 
     this.healthCheckTimer = setInterval(async () => {
-      if (!this.tmux || this.guardian?.state === "ROTATING") return;
+      if (!this.tmux || this.guardian?.state === "RESTARTING") return;
 
       const alive = await this.tmux.isWindowAlive();
       if (alive) return;
@@ -520,6 +514,8 @@ export class Daemon extends EventEmitter {
       this.logger.warn("Cannot push channel message: IPC server not running");
       return;
     }
+    // v3: record user messages for rotation snapshot
+    this.recordRecentUserMessage(content, meta);
     const msg = { type: "channel_message", content, meta };
     const target = targetSession ?? this.name;
     const socket = this.findSocketBySession(target);
@@ -765,16 +761,22 @@ export class Daemon extends EventEmitter {
     };
   }
 
-  /** Combine fleet context with user-configured system prompt */
+  /** Combine fleet context with user-configured system prompt + previous session snapshot */
   private buildSystemPrompt(): string {
     const fleetContext = generateFleetSystemPrompt({
       instanceName: this.name,
       workingDirectory: this.config.working_directory,
     });
+    let prompt = fleetContext;
     if (this.config.systemPrompt) {
-      return fleetContext + "\n\n" + this.config.systemPrompt;
+      prompt += "\n\n" + this.config.systemPrompt;
     }
-    return fleetContext;
+    // v3: inject previous session snapshot
+    const snapshotBlock = this.buildSnapshotPrompt();
+    if (snapshotBlock) {
+      prompt += "\n\n" + snapshotBlock;
+    }
+    return prompt;
   }
 
   /** Spawn (or respawn) a Claude window in tmux */
@@ -864,57 +866,121 @@ export class Daemon extends EventEmitter {
     });
   }
 
-  private async waitForHandoverSignal(): Promise<void> {
-    // Wait for transcript activity to settle (no events for 5s = idle).
-    // This is event-driven — no pane scraping needed.
-    this.logger.info("Waiting for transcript to settle");
-    await this.waitForTranscriptIdle(15000);
+  // ── Context Rotation v3: Ring buffers ─────────────────────────
 
-    // Validate handover quality and retry once if needed
-    const validation = this.validateHandover();
-    if (!validation.valid && this.tmux) {
-      this.logger.warn(
-        { missing: validation.missing },
-        "Handover missing required sections — retrying with explicit prompt",
-      );
-      const retryPrompt = `Your handover.md is missing these sections: ${validation.missing.join(", ")}. Rewrite memory/handover.md and include ALL of these sections: ## Active Tasks, ## Progress, ## Decisions, ## Next Steps, ## Blockers. Each section must have content.`;
-      await this.tmux.sendKeys(retryPrompt);
-      await new Promise(r => setTimeout(r, 500));
-      await this.tmux.sendSpecialKey("Enter");
-      await this.waitForTranscriptIdle(15000);
-      const retry = this.validateHandover();
-      if (!retry.valid) {
-        this.logger.warn({ missing: retry.missing }, "Handover still incomplete after retry — proceeding anyway");
-      }
-    }
-
-    this.logger.info("Transcript settled — handover complete");
-    this.guardian?.signalHandoverComplete();
+  private recordRecentUserMessage(content: string, meta: Record<string, string>): void {
+    // Only record real user messages, not cross-instance messages
+    if (!meta.user || meta.user.startsWith("instance:")) return;
+    this.recentUserMessages.push({
+      text: content.slice(0, 200),
+      ts: meta.ts ?? new Date().toISOString(),
+    });
+    if (this.recentUserMessages.length > 10) this.recentUserMessages.shift();
   }
 
-  private validateHandover(): { valid: boolean; missing: string[]; wordCount: number } {
-    const memDir = this.getMemoryDir();
-    const path = join(memDir, "handover.md");
+  private recordRecentEvent(event: RotationSnapshotEvent): void {
+    this.recentEvents.push(event);
+    if (this.recentEvents.length > 15) this.recentEvents.shift();
+  }
+
+  private recordRecentToolActivity(summary: string): void {
+    if (!summary) return;
+    this.recentToolActivity.push(summary);
+    if (this.recentToolActivity.length > 10) this.recentToolActivity.shift();
+  }
+
+  // ── Context Rotation v3: Snapshot writer ──────────────────────
+
+  writeRotationSnapshot(reason: string): RotationSnapshot {
+    const statusline = this.readStatuslineData();
+    const snapshot: RotationSnapshot = {
+      instance: this.name,
+      reason,
+      created_at: new Date().toISOString(),
+      working_directory: this.config.working_directory,
+      session_id: this.backend?.getSessionId() ?? null,
+      context_pct: this.readContextPercentage(),
+      recent_user_messages: [...this.recentUserMessages],
+      recent_events: [...this.recentEvents],
+      recent_tool_activity: [...this.recentToolActivity],
+      last_statusline: statusline ? {
+        model: statusline.model?.display_name,
+        cost_usd: statusline.cost?.total_cost_usd,
+        five_hour_pct: statusline.rate_limits?.five_hour?.used_percentage,
+        seven_day_pct: statusline.rate_limits?.seven_day?.used_percentage,
+      } : undefined,
+    };
+    const snapshotPath = join(this.instanceDir, "rotation-state.json");
+    writeFileSync(snapshotPath, JSON.stringify(snapshot, null, 2));
+    this.logger.info({
+      reason,
+      context_pct: snapshot.context_pct,
+      user_msg_count: snapshot.recent_user_messages?.length ?? 0,
+      event_count: snapshot.recent_events?.length ?? 0,
+    }, "Snapshot written");
+    return snapshot;
+  }
+
+  private readStatuslineData(): import("./types.js").StatusLineData | null {
     try {
-      const content = readFileSync(path, "utf-8");
-      const requiredSections = ["Active Tasks", "Progress", "Decisions", "Next Steps", "Blockers"];
-      const contentLower = content.toLowerCase();
-      const missing = requiredSections.filter(s => !contentLower.includes(s.toLowerCase()));
-      const wordCount = content.split(/\s+/).filter(Boolean).length;
-      const valid = missing.length === 0 && wordCount >= 20;
-      return { valid, missing, wordCount };
+      const sf = join(this.instanceDir, "statusline.json");
+      return JSON.parse(readFileSync(sf, "utf-8"));
     } catch {
-      return { valid: false, missing: ["file not found"], wordCount: 0 };
+      return null;
     }
   }
 
-  private getMemoryDir(): string {
-    return this.config.memory_directory ?? join(
-      homedir(),
-      ".claude/projects",
-      this.config.working_directory.replace(/\//g, "-"),
-      "memory",
-    );
+  // ── Context Rotation v3: Prompt injection ─────────────────────
+
+  private buildSnapshotPrompt(): string | null {
+    const snapshotPath = join(this.instanceDir, "rotation-state.json");
+    try {
+      if (!existsSync(snapshotPath)) return null;
+      const snapshot: RotationSnapshot = JSON.parse(readFileSync(snapshotPath, "utf-8"));
+
+      // Single-consume: delete after reading so it's not re-injected on
+      // crash respawn, manual restart, or future rotations.
+      try { unlinkSync(snapshotPath); } catch { /* best-effort */ }
+
+      const lines: string[] = ["## Previous Session Snapshot", ""];
+      lines.push(`Restart reason: ${snapshot.reason}`);
+      if (snapshot.context_pct != null) lines.push(`Previous context usage: ${snapshot.context_pct}%`);
+      if (snapshot.session_id) lines.push(`Previous session id: ${snapshot.session_id}`);
+      lines.push(`Working directory: ${snapshot.working_directory}`);
+      lines.push("");
+
+      if (snapshot.recent_user_messages && snapshot.recent_user_messages.length > 0) {
+        lines.push("Recent user messages:");
+        for (const msg of snapshot.recent_user_messages) {
+          lines.push(`- ${msg.text}`);
+        }
+        lines.push("");
+      }
+
+      if (snapshot.recent_events && snapshot.recent_events.length > 0) {
+        lines.push("Recent activity:");
+        for (const ev of snapshot.recent_events) {
+          if (ev.type === "assistant_text") {
+            lines.push(`- Assistant: ${ev.preview}`);
+          } else {
+            lines.push(`- ${ev.name}${ev.preview ? `: ${ev.preview}` : ""}`);
+          }
+        }
+        lines.push("");
+      }
+
+      lines.push("Instruction:");
+      lines.push("Resume work from this snapshot when relevant. Do not assume anything not stated here.");
+
+      // Enforce 2000-char budget
+      let result = lines.join("\n");
+      if (result.length > 2000) {
+        result = result.slice(0, 1997) + "...";
+      }
+      return result;
+    } catch {
+      return null;
+    }
   }
 
 }

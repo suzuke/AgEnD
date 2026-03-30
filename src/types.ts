@@ -73,9 +73,14 @@ export interface InstanceConfig {
     reset_after: number;
   };
   context_guardian: {
-    threshold_percentage: number;
-    max_idle_wait_ms: number;
-    completion_timeout_ms: number;
+    /** @deprecated Use restart_threshold_pct instead */
+    threshold_percentage?: number;
+    /** v3: restart when context usage exceeds this percentage */
+    restart_threshold_pct?: number;
+    /** @deprecated No longer used in v3 */
+    max_idle_wait_ms?: number;
+    /** @deprecated No longer used in v3 */
+    completion_timeout_ms?: number;
     grace_period_ms: number;
     max_age_hours: number;
   };
@@ -121,6 +126,30 @@ export interface FleetDefaults extends Partial<InstanceConfig> {
   hang_detector?: HangDetectorConfig;
   daily_summary?: DailySummaryConfig;
   webhooks?: WebhookConfig[];
+}
+
+// ── Context Rotation v3: Snapshot types ──────────────────────
+export type RotationSnapshotEvent =
+  | { type: "tool_use"; name: string; preview?: string }
+  | { type: "tool_result"; name: string; preview?: string }
+  | { type: "assistant_text"; preview: string };
+
+export interface RotationSnapshot {
+  instance: string;
+  reason: string;
+  created_at: string;
+  working_directory: string;
+  session_id?: string | null;
+  context_pct?: number | null;
+  recent_user_messages?: Array<{ text: string; ts: string }>;
+  recent_events?: RotationSnapshotEvent[];
+  recent_tool_activity?: string[];
+  last_statusline?: {
+    model?: string;
+    cost_usd?: number;
+    five_hour_pct?: number;
+    seven_day_pct?: number;
+  };
 }
 
 export interface FleetConfig {
