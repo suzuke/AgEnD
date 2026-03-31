@@ -105,6 +105,26 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     this.webhookEmitter?.emit(event, name);
   }
 
+  // ── SysInfo ────────────────────────────────────────────────────────────
+  getSysInfo(): import("./fleet-context.js").SysInfo {
+    const mem = process.memoryUsage();
+    const toMB = (b: number) => Math.round(b / 1024 / 1024 * 10) / 10;
+    const instances = Object.keys(this.fleetConfig?.instances ?? {}).map(name => ({
+      name,
+      status: this.getInstanceStatus(name),
+      ipc: this.instanceIpcClients.has(name),
+      costCents: this.costGuard?.getDailyCostCents(name) ?? 0,
+      rateLimits: this.statuslineWatcher.getRateLimits(name) ?? null,
+    }));
+    return {
+      uptime_seconds: Math.floor((Date.now() - this.startedAt) / 1000),
+      memory_mb: { rss: toMB(mem.rss), heapUsed: toMB(mem.heapUsed), heapTotal: toMB(mem.heapTotal) },
+      instances,
+      fleet_cost_cents: this.costGuard?.getFleetTotalCents() ?? 0,
+      fleet_cost_limit_cents: this.costGuard?.getLimitCents() ?? 0,
+    };
+  }
+
   /** Load fleet.yaml and build routing table */
   loadConfig(configPath: string): FleetConfig {
     this.fleetConfig = loadFleetConfig(configPath);

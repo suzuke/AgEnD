@@ -29,6 +29,12 @@ export class TopicCommands {
       return true;
     }
 
+    if (text === "/sysinfo" || text === "/sysinfo@" || text.startsWith("/sysinfo@")
+        || text === "/sys-info" || text === "/sys_info") {
+      await this.handleSysInfoCommand(msg);
+      return true;
+    }
+
     return false;
   }
 
@@ -80,6 +86,38 @@ export class TopicCommands {
     }
 
     await this.ctx.adapter.sendText(msg.chatId, lines.join("\n"));
+  }
+
+  private async handleSysInfoCommand(msg: InboundMessage): Promise<void> {
+    if (!this.ctx.adapter) return;
+    const info = this.ctx.getSysInfo();
+
+    const upHours = Math.floor(info.uptime_seconds / 3600);
+    const upMins = Math.floor((info.uptime_seconds % 3600) / 60);
+    const lines: string[] = [
+      `⚙️ System Info`,
+      `Uptime: ${upHours}h ${upMins}m`,
+      `Memory: ${info.memory_mb.rss} MB RSS, ${info.memory_mb.heapUsed}/${info.memory_mb.heapTotal} MB heap`,
+      "",
+      "Instances:",
+    ];
+
+    for (const inst of info.instances) {
+      const icon = inst.status === "running" ? "🟢" : inst.status === "crashed" ? "🔴" : "⚪";
+      const ipc = inst.ipc ? "✓" : "✗";
+      let detail = `${icon} ${inst.name} [IPC:${ipc}] ${formatCents(inst.costCents)}`;
+      if (inst.rateLimits) {
+        detail += ` (5h:${inst.rateLimits.five_hour_pct}% 7d:${inst.rateLimits.seven_day_pct}%)`;
+      }
+      lines.push(detail);
+    }
+
+    if (info.fleet_cost_limit_cents > 0) {
+      lines.push("");
+      lines.push(`Fleet cost: ${formatCents(info.fleet_cost_cents)} / ${formatCents(info.fleet_cost_limit_cents)} daily`);
+    }
+
+    await this.ctx.adapter.sendText(msg.chatId, lines.join("\n"), { threadId: msg.threadId });
   }
 
   /** Reply with redirect when message arrives in an unbound topic */
