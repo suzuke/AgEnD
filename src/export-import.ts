@@ -31,7 +31,7 @@ export async function exportConfig(
   }
 
   const date = new Date().toISOString().slice(0, 10);
-  const outFile = resolve(outputPath ?? `ccd-export-${date}.tar.gz`);
+  const outFile = resolve(outputPath ?? `agend-export-${date}.tar.gz`);
 
   if (full) {
     const excludeArgs = RUNTIME_EXCLUDES.flatMap((p) => ["--exclude", p]);
@@ -123,7 +123,7 @@ export async function importConfig(
       for (const p of missing) {
         console.warn(`   • ${p}`);
       }
-      console.warn(`\nEdit ${fleetPath} to fix these before running 'ccd fleet start'.`);
+      console.warn(`\nEdit ${fleetPath} to fix these before running 'agend fleet start'.`);
     } else {
       console.log("\nAll paths in fleet.yaml verified.");
     }

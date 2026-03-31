@@ -279,7 +279,7 @@ export const TOOLS = [
     {
       name: "start_instance",
       description:
-        "Start a stopped CCD instance. Use list_instances() first to check available instances and their status. " +
+        "Start a stopped AgEnD instance. Use list_instances() first to check available instances and their status. " +
         "Only needed when the target instance status is 'stopped'.",
       inputSchema: {
         type: "object" as const,
@@ -295,7 +295,7 @@ export const TOOLS = [
     {
       name: "create_instance",
       description:
-        "Create a new CCD instance bound to a project directory, with a new Telegram topic. " +
+        "Create a new AgEnD instance bound to a project directory, with a new Telegram topic. " +
         "Use this when the user wants to add a new project to the fleet. " +
         "The directory must exist. Returns the instance name and topic ID.",
       inputSchema: {
@@ -334,7 +334,7 @@ export const TOOLS = [
     {
       name: "delete_instance",
       description:
-        "Delete a CCD instance: stop daemon, remove from fleet config, clean up worktree if applicable, and optionally delete the Telegram topic. " +
+        "Delete a AgEnD instance: stop daemon, remove from fleet config, clean up worktree if applicable, and optionally delete the Telegram topic. " +
         "Use this when an instance is no longer needed (e.g., feature branch work is done).",
       inputSchema: {
         type: "object" as const,

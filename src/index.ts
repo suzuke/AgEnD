@@ -5,7 +5,7 @@ export { createLogger } from "./logger.js";
 export { installService, detectPlatform } from "./service-installer.js";
 export type { ContextStatus, StatusLineData, InstanceConfig, ChannelConfig, AccessConfig } from "./types.js";
 
-// Channel adapter types — for external adapter authors (ccd-adapter-*)
+// Channel adapter types — for external adapter authors (agend-adapter-*)
 export type {
   ChannelAdapter,
   SendOpts,

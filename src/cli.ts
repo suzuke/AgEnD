@@ -35,7 +35,7 @@ const pkgVersion = (() => {
 })();
 
 program
-  .name("ccd")
+  .name("agend")
   .description("Claude Channel Daemon")
   .version(pkgVersion);
 

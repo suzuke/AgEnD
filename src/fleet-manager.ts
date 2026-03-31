@@ -161,7 +161,7 @@ export class FleetManager implements FleetContext {
     daemon.on("crash_loop", () => {
       this.eventLog?.insert(name, "crash_loop", {});
       this.logger.error({ name }, "Instance in crash loop — respawn paused");
-      this.notifyInstanceTopic(name, `🔴 ${name} keeps crashing shortly after launch — respawn paused. Check rate limits or run \`ccd fleet restart\`.`);
+      this.notifyInstanceTopic(name, `🔴 ${name} keeps crashing shortly after launch — respawn paused. Check rate limits or run \`agend fleet restart\`.`);
       this.setTopicIcon(name, "red");
     });
 
@@ -219,7 +219,7 @@ export class FleetManager implements FleetContext {
       await this.stopInstance(name);
     }
 
-    // Then kill all remaining ccd instance windows to prevent orphans
+    // Then kill all remaining agend instance windows to prevent orphans
     const existingWindows = await TmuxManager.listWindows(TMUX_SESSION);
     for (const w of existingWindows) {
       if (w.name !== "zsh") {
@@ -292,7 +292,7 @@ export class FleetManager implements FleetContext {
       if (!existsSync(claudeMdPath)) {
         writeFileSync(claudeMdPath, `# General Assistant
 
-你是這個 CCD fleet 的通用入口。
+你是這個 AgEnD fleet 的通用入口。
 
 ## 行為準則
 

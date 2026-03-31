@@ -564,7 +564,7 @@ export async function runSetupWizard(): Promise<void> {
     if (plat === "macos") {
       console.log(`  Run: ${dim(`launchctl load ${svcPath}`)}`);
     } else {
-      console.log(`  Run: ${dim("systemctl --user enable --now ccd")}`);
+      console.log(`  Run: ${dim("systemctl --user enable --now agend")}`);
     }
   }
 
@@ -574,7 +574,7 @@ export async function runSetupWizard(): Promise<void> {
   console.log(`  Config: ${FLEET_CONFIG_PATH}`);
   console.log();
   console.log(`  Start the fleet:`);
-  console.log(`    ${dim("ccd fleet start")}`);
+  console.log(`    ${dim("agend fleet start")}`);
   if (mode === "topic") {
     console.log();
     console.log(`  ${dim("Create a new topic in the group — the bot will auto-detect it")}`);

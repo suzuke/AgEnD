@@ -63,7 +63,7 @@ export class DiscordAdapter extends EventEmitter implements ChannelAdapter {
     this.accessManager = opts.accessManager;
     this.inboxDir = opts.inboxDir;
     this.guildId = opts.guildId;
-    this.categoryName = opts.categoryName ?? "CCD Agents";
+    this.categoryName = opts.categoryName ?? "AgEnD Agents";
     this.generalChannelId = opts.generalChannelId;
 
     mkdirSync(this.inboxDir, { recursive: true });

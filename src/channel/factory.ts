@@ -29,7 +29,7 @@ export async function createAdapter(config: ChannelConfig, opts: AdapterOpts): P
     }
     default: {
       // External adapter — try canonical name, then bare name
-      const candidates = [`ccd-adapter-${config.type}`, config.type];
+      const candidates = [`agend-adapter-${config.type}`, config.type];
       let factory: AdapterFactory | undefined;
 
       for (const pkg of candidates) {
@@ -45,7 +45,7 @@ export async function createAdapter(config: ChannelConfig, opts: AdapterOpts): P
       if (!factory) {
         throw new Error(
           `Channel adapter "${config.type}" not found. ` +
-          `Install it: npm install ccd-adapter-${config.type}`
+          `Install it: npm install agend-adapter-${config.type}`
         );
       }
 
