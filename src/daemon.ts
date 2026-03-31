@@ -16,6 +16,7 @@ import type { ChannelAdapter, InboundMessage } from "./channel/types.js";
 import { routeToolCall } from "./channel/tool-router.js";
 import { generateFleetSystemPrompt } from "./fleet-system-prompt.js";
 import { HangDetector } from "./hang-detector.js";
+import type { TmuxControlClient } from "./tmux-control.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -59,6 +60,7 @@ export class Daemon extends EventEmitter {
   private recentUserMessages: Array<{ text: string; ts: string }> = [];
   private recentEvents: RotationSnapshotEvent[] = [];
   private recentToolActivity: string[] = [];
+  private pasteLock: Promise<void> = Promise.resolve();
 
   constructor(
     private name: string,
@@ -66,6 +68,7 @@ export class Daemon extends EventEmitter {
     private instanceDir: string,
     private topicMode = false,
     private backend?: CliBackend,
+    private controlClient?: TmuxControlClient,
   ) {
     super();
     this.logger = createLogger(config.log_level);
@@ -489,23 +492,48 @@ export class Daemon extends EventEmitter {
       formatted = `[user:${user} chat_id:${chatId} thread_id:${threadId}] ${content}\n(Reply using the reply tool with chat_id="${chatId}" — do NOT respond with direct text)`;
     }
 
-    this.tmux.pasteText(formatted).catch(async (err) => {
+    // Serialize deliveries: each message waits for the previous to complete,
+    // and each waits for the CLI to be idle before pasting.
+    this.pasteLock = this.pasteLock.then(() => this.deliverMessage(formatted));
+    this.logger.debug({ user: meta.user, text: content.slice(0, 100) }, "Queued channel message for delivery");
+  }
+
+  /** Deliver a single message: wait for idle, then paste */
+  private async deliverMessage(formatted: string): Promise<void> {
+    const windowId = this.getWindowId();
+    if (windowId && this.controlClient) {
+      const idle = await this.controlClient.waitForIdle(windowId);
+      if (!idle) {
+        this.logger.warn("Delivering message after idle timeout (CLI may be busy)");
+      }
+    }
+
+    const ok = await this.tmux!.pasteText(formatted);
+    if (!ok) {
       // Window ID may be stale after crash/respawn — try to find by name
-      this.logger.warn({ err }, "pasteText failed, looking up window by name");
+      this.logger.warn("pasteText failed, looking up window by name");
       try {
         const windows = await TmuxManager.listWindows("agend");
         const match = windows.find(w => w.name === this.name);
         if (match) {
           this.tmux = new TmuxManager("agend", match.id);
           writeFileSync(join(this.instanceDir, "window-id"), match.id);
+          await this.controlClient?.registerWindow(match.id);
           await this.tmux.pasteText(formatted);
           this.logger.info({ windowId: match.id }, "Recovered window ID and delivered message");
         }
       } catch (retryErr) {
         this.logger.error({ err: retryErr }, "Failed to recover window for message delivery");
       }
-    });
-    this.logger.debug({ user: meta.user, text: content.slice(0, 100) }, "Pushed channel message via tmux");
+    }
+  }
+
+  private getWindowId(): string | undefined {
+    try {
+      return readFileSync(join(this.instanceDir, "window-id"), "utf-8").trim() || undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   /** Find the IPC socket for a given sessionName */
@@ -665,34 +693,74 @@ export class Daemon extends EventEmitter {
     return prompt;
   }
 
-  /** Spawn (or respawn) a Claude window in tmux */
+  /** Spawn (or respawn) a CLI window in tmux */
   private async spawnClaudeWindow(): Promise<void> {
     this.spawning = true;
     try {
-    // Clear tool status from previous session
     this.toolStatusLines = [];
     this.toolStatusMessageId = null;
     if (!this.backend) {
-      throw new Error("No backend configured — cannot spawn Claude window");
+      throw new Error("No backend configured — cannot spawn CLI window");
     }
-    const backendConfig = this.buildBackendConfig();
-    this.backend.writeConfig(backendConfig);
-    // Inject AGEND_INSTANCE_NAME via shell env (not .mcp.json) so internal sessions
-    // are distinguishable from external sessions sharing the same .mcp.json
-    let claudeCmd = `AGEND_INSTANCE_NAME=${this.name} ` + this.backend.buildCommand(backendConfig);
 
-    const windowId = await this.tmux!.createWindow(claudeCmd, this.config.working_directory, this.name);
-    const windowIdFile = join(this.instanceDir, "window-id");
-    writeFileSync(windowIdFile, windowId);
+    const alive = await this.trySpawn();
+    if (!alive) {
+      // First attempt failed (stale --resume, crash, rate limit, etc.)
+      // Clean slate: clear session-id and retry once.
+      this.logger.warn("CLI produced no output — clearing session-id and retrying");
+      const sidFile = join(this.instanceDir, "session-id");
+      try { unlinkSync(sidFile); } catch { /* may not exist */ }
+      await this.tmux!.killWindow();
 
-    // Fixed grace period — smart detection was unreliable across different CLIs.
-    // Wait for CLI to fully initialize, then press Enter to dismiss any prompts.
-    await new Promise(r => setTimeout(r, 10_000));
+      const retryAlive = await this.trySpawn();
+      if (!retryAlive) {
+        await this.tmux!.killWindow();
+        throw new Error("CLI failed to start after retry");
+      }
+    }
+
     try { await this.tmux!.sendSpecialKey("Enter"); } catch { /* window may have exited */ }
     this.lastSpawnAt = Date.now();
     } finally {
       this.spawning = false;
     }
+  }
+
+  /**
+   * Spawn a CLI window and verify it reaches a ready state.
+   * Uses control mode to wait for output, then checks pane content.
+   * Returns true if CLI is ready, false if it failed or got stuck.
+   */
+  private async trySpawn(): Promise<boolean> {
+    const backendConfig = this.buildBackendConfig();
+    this.backend!.writeConfig(backendConfig);
+    const cmd = `AGEND_INSTANCE_NAME=${this.name} ` + this.backend!.buildCommand(backendConfig);
+
+    const windowId = await this.tmux!.createWindow(cmd, this.config.working_directory, this.name);
+    writeFileSync(join(this.instanceDir, "window-id"), windowId);
+
+    // Register with control client and wait for output + idle
+    await this.controlClient?.registerWindow(windowId);
+    if (this.controlClient) {
+      const hasOutput = await this.controlClient.waitForOutput(windowId, 15_000);
+      if (!hasOutput) return false;
+      // Wait for CLI to settle (output stops = UI fully rendered)
+      await this.controlClient.waitForIdle(windowId, 10_000);
+    } else {
+      await new Promise(r => setTimeout(r, 10_000));
+    }
+
+    // Verify CLI reached prompt (not stuck in picker/error screen)
+    if (!await this.tmux!.isWindowAlive()) return false;
+    try {
+      const pane = await this.tmux!.capturePane();
+      // CLI is ready if we see a prompt indicator
+      if (/❯|bypass permissions|ok\s*$/m.test(pane)) return true;
+      // CLI is stuck if we see Resume Session picker or error
+      if (/Resume Session|error|Error/i.test(pane)) return false;
+    } catch { /* capture failed = window dead */ return false; }
+    // Unknown state — assume ok (other CLIs may have different prompts)
+    return true;
   }
 
   private saveSessionId(): void {

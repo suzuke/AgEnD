@@ -29,6 +29,7 @@ import { TopicCommands, sanitizeInstanceName } from "./topic-commands.js";
 import type { HangDetector } from "./hang-detector.js";
 import { DailySummary } from "./daily-summary.js";
 import { WebhookEmitter } from "./webhook-emitter.js";
+import { TmuxControlClient } from "./tmux-control.js";
 
 const TMUX_SESSION = "agend";
 
@@ -74,6 +75,7 @@ export class FleetManager implements FleetContext {
 
   // Model failover state
   private failoverActive = new Map<string, string>(); // instance → current failover model
+  private controlClient: TmuxControlClient | null = null;
 
   // Health endpoint
   private healthServer: Server | null = null;
@@ -139,7 +141,7 @@ export class FleetManager implements FleetContext {
 
     const backendName = config.backend ?? this.fleetConfig?.defaults?.backend ?? "claude-code";
     const backend = createBackend(backendName, instanceDir);
-    const daemon = new Daemon(name, config, instanceDir, topicMode, backend);
+    const daemon = new Daemon(name, config, instanceDir, topicMode, backend, this.controlClient ?? undefined);
     await daemon.start();
     this.daemons.set(name, daemon);
 
@@ -214,6 +216,11 @@ export class FleetManager implements FleetContext {
 
     await TmuxManager.ensureSession(TMUX_SESSION);
 
+    // Start tmux control mode client for idle detection
+    if (!this.controlClient) {
+      this.controlClient = new TmuxControlClient(TMUX_SESSION, 2000, this.logger);
+      this.controlClient.start();
+    }
     // Stop any running daemons first (their health checks would respawn killed windows)
     for (const [name] of this.daemons) {
       await this.stopInstance(name);
@@ -1610,6 +1617,9 @@ export class FleetManager implements FleetContext {
       await this.adapter.stop();
       this.adapter = null;
     }
+
+    this.controlClient?.stop();
+    this.controlClient = null;
 
     if (this.healthServer) {
       this.healthServer.close();
