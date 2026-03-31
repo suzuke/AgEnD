@@ -32,6 +32,7 @@ import { WebhookEmitter } from "./webhook-emitter.js";
 import { TmuxControlClient } from "./tmux-control.js";
 import { safeHandler } from "./safe-async.js";
 import { RoutingEngine } from "./routing-engine.js";
+import { InstanceLifecycle, type LifecycleContext } from "./instance-lifecycle.js";
 
 const TMUX_SESSION = "agend";
 
@@ -48,9 +49,11 @@ export function resolveReplyThreadId(
   return instanceConfig?.topic_id != null ? String(instanceConfig.topic_id) : undefined;
 }
 
-export class FleetManager implements FleetContext {
+export class FleetManager implements FleetContext, LifecycleContext {
   private children: Map<string, import("node:child_process").ChildProcess> = new Map();
-  private daemons: Map<string, InstanceType<typeof import("./daemon.js").Daemon>> = new Map();
+  readonly lifecycle: InstanceLifecycle;
+  /** @deprecated Use lifecycle.daemons — kept for backward compat */
+  get daemons() { return this.lifecycle.daemons; }
   fleetConfig: FleetConfig | null = null;
   adapter: ChannelAdapter | null = null;
   readonly routing = new RoutingEngine();
@@ -76,16 +79,23 @@ export class FleetManager implements FleetContext {
   private archiveTimer: ReturnType<typeof setInterval> | null = null;
   private static ARCHIVE_IDLE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+  controlClient: TmuxControlClient | null = null;
+
   // Model failover state
   private failoverActive = new Map<string, string>(); // instance → current failover model
-  private controlClient: TmuxControlClient | null = null;
 
   // Health endpoint
   private healthServer: Server | null = null;
   private startedAt = 0;
 
   constructor(public dataDir: string) {
+    this.lifecycle = new InstanceLifecycle(this);
     this.topicCommands = new TopicCommands(this);
+  }
+
+  // ── LifecycleContext bridge methods ──────────────────────────────────────
+  webhookEmit(event: string, name: string): void {
+    this.webhookEmitter?.emit(event, name);
   }
 
   /** Load fleet.yaml and build routing table */
@@ -119,69 +129,12 @@ export class FleetManager implements FleetContext {
   }
 
   async startInstance(name: string, config: InstanceConfig, topicMode: boolean): Promise<void> {
-    if (this.daemons.has(name)) {
-      this.logger.info({ name }, "Instance already running, skipping");
-      return;
-    }
-
-    if (!existsSync(config.working_directory)) {
-      this.logger.error({ name, working_directory: config.working_directory }, "Working directory does not exist — skipping instance");
-      return;
-    }
-
-    const instanceDir = this.getInstanceDir(name);
-    mkdirSync(instanceDir, { recursive: true });
-
-    const { Daemon } = await import("./daemon.js");
-    const { createBackend } = await import("./backend/factory.js");
-
-    const backendName = config.backend ?? this.fleetConfig?.defaults?.backend ?? "claude-code";
-    const backend = createBackend(backendName, instanceDir);
-    const daemon = new Daemon(name, config, instanceDir, topicMode, backend, this.controlClient ?? undefined);
-    await daemon.start();
-    this.daemons.set(name, daemon);
-
-    daemon.on("restart_complete", safeHandler((data: Record<string, unknown>) => {
-      this.eventLog?.insert(name, "context_rotation", data);
-      this.logger.info({ name, ...data }, "Context restart completed");
-    }, this.logger, `daemon.restart_complete[${name}]`));
-
-    const hangDetector = daemon.getHangDetector();
-    if (hangDetector) {
-      hangDetector.on("hang", safeHandler(async () => {
-        this.eventLog?.insert(name, "hang_detected", {});
-        this.logger.warn({ name }, "Instance appears hung");
-        await this.sendHangNotification(name);
-        this.webhookEmitter?.emit("hang", name);
-      }, this.logger, `hangDetector[${name}]`));
-    }
-
-    daemon.on("crash_loop", safeHandler(() => {
-      this.eventLog?.insert(name, "crash_loop", {});
-      this.logger.error({ name }, "Instance in crash loop — respawn paused");
-      this.notifyInstanceTopic(name, `🔴 ${name} keeps crashing shortly after launch — respawn paused. Check rate limits or run \`agend fleet restart\`.`);
-      this.setTopicIcon(name, "red");
-    }, this.logger, `daemon.crash_loop[${name}]`));
-
-    this.setTopicIcon(name, "green");
-    this.touchActivity(name);
+    return this.lifecycle.start(name, config, topicMode);
   }
 
   async stopInstance(name: string): Promise<void> {
-    this.setTopicIcon(name, "remove");
     this.failoverActive.delete(name);
-
-    const daemon = this.daemons.get(name);
-    if (daemon) {
-      await daemon.stop();
-      this.daemons.delete(name);
-    } else {
-      const pidPath = join(this.getInstanceDir(name), "daemon.pid");
-      if (existsSync(pidPath)) {
-        const pid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
-        try { process.kill(pid, "SIGTERM"); } catch (e) { this.logger.debug({ err: e, pid }, "SIGTERM failed for stale process"); }
-      }
-    }
+    return this.lifecycle.stop(name);
   }
 
   /** Load .env file from data dir into process.env */
@@ -892,177 +845,12 @@ export class FleetManager implements FleetContext {
       }
 
       case "create_instance": {
-        const directory = (args.directory as string).replace(/^~/, process.env.HOME || "~");
-        const topicName = (args.topic_name as string) || basename(directory);
-        const description = args.description as string | undefined;
-        const branch = args.branch as string | undefined;
-
-        // Validate directory exists
-        try {
-          await access(directory);
-        } catch {
-          respond(null, `Directory does not exist: ${directory}`);
-          break;
-        }
-
-        // Check for duplicate early (before worktree creation) — only when no branch
-        if (!branch) {
-          const expandHome = (p: string) => p.replace(/^~/, process.env.HOME || "~");
-          const existingInstance = Object.entries(this.fleetConfig?.instances ?? {})
-            .find(([_, config]) => expandHome(config.working_directory) === directory);
-          if (existingInstance) {
-            const [eName, eConfig] = existingInstance;
-            respond({
-              success: true,
-              status: "already_exists",
-              name: eName,
-              topic_id: eConfig.topic_id,
-              running: this.daemons.has(eName),
-            });
-            break;
-          }
-        }
-
-        // If branch specified, create git worktree
-        let workDir = directory;
-        let worktreePath: string | undefined;
-        if (branch) {
-          try {
-            const { execFile: execFileCb } = await import("node:child_process");
-            const { promisify } = await import("node:util");
-            const execFileAsync = promisify(execFileCb);
-
-            // Verify it's a git repo
-            await execFileAsync("git", ["rev-parse", "--git-dir"], { cwd: directory });
-
-            // Determine worktree path: sibling directory named repo-branch
-            const repoName = basename(directory);
-            const safeBranch = branch.replace(/\//g, "-");
-            worktreePath = join(dirname(directory), `${repoName}-${safeBranch}`);
-
-            // Check if branch exists
-            let branchExists = false;
-            try {
-              await execFileAsync("git", ["rev-parse", "--verify", branch], { cwd: directory });
-              branchExists = true;
-            } catch { /* branch doesn't exist */ }
-
-            if (branchExists) {
-              await execFileAsync("git", ["worktree", "add", worktreePath, branch], { cwd: directory });
-            } else {
-              await execFileAsync("git", ["worktree", "add", worktreePath, "-b", branch], { cwd: directory });
-            }
-            this.logger.info({ worktreePath, branch, repo: directory }, "Created git worktree for instance");
-            workDir = worktreePath;
-          } catch (err) {
-            respond(null, `Failed to create worktree: ${(err as Error).message}`);
-            break;
-          }
-        }
-
-        // Check worktree path for duplicates (branch case only — non-branch already checked above)
-        if (worktreePath) {
-          const expandHome = (p: string) => p.replace(/^~/, process.env.HOME || "~");
-          const existingInstance = Object.entries(this.fleetConfig?.instances ?? {})
-            .find(([_, config]) => expandHome(config.working_directory) === workDir);
-          if (existingInstance) {
-            const [eName, eConfig] = existingInstance;
-            respond({
-              success: true,
-              status: "already_exists",
-              name: eName,
-              topic_id: eConfig.topic_id,
-              running: this.daemons.has(eName),
-            });
-            break;
-          }
-        }
-
-        // Sequential steps with rollback
-        let createdTopicId: number | string | undefined;
-        let newInstanceName: string | undefined;
-
-        try {
-          // Step a: Create forum topic via adapter
-          createdTopicId = await this.createForumTopic(topicName);
-
-          // Step b: Register in config
-          // Use topicName for worktree instances to avoid long paths (Unix socket limit 104 bytes)
-          const nameBase = worktreePath ? topicName : basename(workDir);
-          newInstanceName = `${sanitizeInstanceName(nameBase)}-t${createdTopicId}`;
-          const instanceConfig = {
-            ...DEFAULT_INSTANCE_CONFIG,
-            ...this.fleetConfig!.defaults,
-            working_directory: workDir,
-            topic_id: createdTopicId,
-            ...(description ? { description } : {}),
-            ...(args.model ? { model: args.model as string } : {}),
-            ...(args.backend ? { backend: args.backend as string } : {}),
-            ...(worktreePath ? { worktree_source: directory } : {}),
-          } as InstanceConfig;
-          this.fleetConfig!.instances[newInstanceName] = instanceConfig;
-          this.routing.register(createdTopicId, { kind: "instance", name: newInstanceName });
-          this.saveFleetConfig();
-
-          // Step c: Start instance
-          await this.startInstance(newInstanceName, instanceConfig, true);
-          await this.connectIpcToInstance(newInstanceName);
-
-          respond({
-            success: true,
-            name: newInstanceName,
-            topic_id: createdTopicId,
-            ...(worktreePath ? { worktree_path: worktreePath, branch } : {}),
-          });
-        } catch (err) {
-          // Rollback in reverse order
-          if (newInstanceName && this.daemons.has(newInstanceName)) {
-            await this.stopInstance(newInstanceName).catch(e => this.logger.error({ err: e, name: newInstanceName }, "Failed to stop instance during rollback"));
-          }
-          if (newInstanceName && this.fleetConfig?.instances[newInstanceName]) {
-            delete this.fleetConfig.instances[newInstanceName];
-            if (createdTopicId) this.routing.unregister(createdTopicId);
-            this.saveFleetConfig();
-          }
-          if (createdTopicId) {
-            await this.deleteForumTopic(createdTopicId);
-          }
-          // Rollback worktree
-          if (worktreePath) {
-            try {
-              const { execFile: execFileCb } = await import("node:child_process");
-              const { promisify } = await import("node:util");
-              const execFileAsync = promisify(execFileCb);
-              await execFileAsync("git", ["worktree", "remove", "--force", worktreePath], { cwd: directory });
-            } catch { /* best-effort worktree cleanup */ }
-          }
-          respond(null, `Failed to create instance: ${(err as Error).message}`);
-        }
+        await this.lifecycle.handleCreate(args, respond);
         break;
       }
 
       case "delete_instance": {
-        const instanceName = args.name as string;
-        const deleteTopic = (args.delete_topic as boolean) ?? false;
-
-        const instanceConfig = this.fleetConfig?.instances[instanceName];
-        if (!instanceConfig) {
-          respond(null, `Instance not found: ${instanceName}`);
-          break;
-        }
-
-        if (instanceConfig.general_topic) {
-          respond(null, "Cannot delete the General instance");
-          break;
-        }
-
-        // Delete topic if requested (before removeInstance clears config)
-        if (deleteTopic && instanceConfig.topic_id) {
-          await this.deleteForumTopic(instanceConfig.topic_id);
-        }
-
-        await this.removeInstance(instanceName);
-        respond({ success: true, name: instanceName, topic_deleted: deleteTopic });
+        await this.lifecycle.handleDelete(args, respond);
         break;
       }
 
@@ -1218,7 +1006,7 @@ export class FleetManager implements FleetContext {
     return this.adapter.createTopic(topicName);
   }
 
-  private async deleteForumTopic(topicId: number | string): Promise<void> {
+  async deleteForumTopic(topicId: number | string): Promise<void> {
     try {
       if (!this.adapter?.deleteTopic) return;
       await this.adapter.deleteTopic(topicId);
@@ -1284,68 +1072,18 @@ export class FleetManager implements FleetContext {
   }
 
   async removeInstance(name: string): Promise<void> {
+    // Clean up schedules (scheduler is fleet-level, not lifecycle-level)
     const config = this.fleetConfig?.instances[name];
-    if (!config) return;
-
-    // Never remove the General instance
-    if (config.general_topic) {
-      this.logger.warn({ name }, "Refusing to remove General instance");
-      return;
-    }
-
-    // Clean up schedules
-    if (this.scheduler && config.topic_id) {
+    if (this.scheduler && config?.topic_id) {
       const count = this.scheduler.deleteByInstanceOrThread(name, String(config.topic_id));
       if (count > 0) {
         this.logger.info({ name, count }, "Cleaned up schedules for deleted instance");
       }
     }
-
-    // Stop daemon if running
-    if (this.daemons.has(name)) {
-      await this.stopInstance(name);
-    }
-
-    // Clean up git worktree if applicable
-    if (config.worktree_source && config.working_directory) {
-      const { existsSync } = await import("node:fs");
-      if (!existsSync(config.working_directory)) {
-        this.logger.info({ worktree: config.working_directory }, "Worktree directory already gone, skipping removal");
-      } else {
-        try {
-          const { execFile: execFileCb } = await import("node:child_process");
-          const { promisify } = await import("node:util");
-          const execFileAsync = promisify(execFileCb);
-          await execFileAsync("git", ["worktree", "remove", "--force", config.working_directory], {
-            cwd: config.worktree_source,
-          });
-          this.logger.info({ worktree: config.working_directory }, "Removed git worktree");
-        } catch (err) {
-          this.logger.warn({ err, worktree: config.working_directory }, "Failed to remove git worktree");
-        }
-      }
-    }
-
-    // Clean up IPC
-    const ipc = this.instanceIpcClients.get(name);
-    if (ipc) {
-      await ipc.close();
-      this.instanceIpcClients.delete(name);
-    }
-
-    // Remove from routing table
-    if (config.topic_id != null) {
-      this.routing.unregister(config.topic_id);
-    }
-
-    // Remove from fleet config and save
-    delete this.fleetConfig!.instances[name];
-    this.saveFleetConfig();
-
-    this.logger.info({ name }, "Instance removed");
+    return this.lifecycle.remove(name);
   }
 
-  private startStatuslineWatcher(name: string): void {
+  startStatuslineWatcher(name: string): void {
     const statusFile = join(this.getInstanceDir(name), "statusline.json");
     const timer = setInterval(() => {
       try {
@@ -1419,7 +1157,7 @@ export class FleetManager implements FleetContext {
     }
   }
 
-  private notifyInstanceTopic(instanceName: string, text: string): void {
+  notifyInstanceTopic(instanceName: string, text: string): void {
     if (!this.adapter) return;
     const groupId = this.fleetConfig?.channel?.group_id;
     if (!groupId) return;
@@ -1429,7 +1167,7 @@ export class FleetManager implements FleetContext {
     }).catch(e => this.logger.debug({ err: e }, "Failed to send notification"));
   }
 
-  private async sendHangNotification(instanceName: string): Promise<void> {
+  async sendHangNotification(instanceName: string): Promise<void> {
     if (!this.adapter) return;
     const groupId = this.fleetConfig?.channel?.group_id;
     if (!groupId) return;
@@ -1480,7 +1218,7 @@ export class FleetManager implements FleetContext {
   }
 
   /** Set topic icon based on instance state */
-  private setTopicIcon(instanceName: string, state: "green" | "blue" | "red" | "remove"): void {
+  setTopicIcon(instanceName: string, state: "green" | "blue" | "red" | "remove"): void {
     const topicId = this.fleetConfig?.instances[instanceName]?.topic_id;
     if (topicId == null || !this.adapter?.editForumTopic) return;
 
@@ -1492,7 +1230,7 @@ export class FleetManager implements FleetContext {
   }
 
   /** Track activity timestamp for idle detection */
-  private touchActivity(instanceName: string): void {
+  touchActivity(instanceName: string): void {
     this.lastActivity.set(instanceName, Date.now());
   }
 
