@@ -5,6 +5,6 @@ export default defineConfig({
   vite: {
     plugins: [tailwindcss()],
   },
-  site: 'https://anthropics.github.io',
-  base: '/claude-channel-daemon',
+  site: 'https://suzuke.github.io',
+  base: '/AgEnD',
 });

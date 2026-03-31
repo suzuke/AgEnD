@@ -7,16 +7,16 @@
   },
   "hero": {
     "headline": "你的 always-on AI 工程團隊",
-    "subheadline": "從通訊軟體管理多個 AI coding agent。Fleet mode、排程、花費控制，永不中斷。",
+    "subheadline": "從 Telegram 和 Discord 管理多個 AI coding agent。4 種 backend、Fleet mode、排程、花費控制，永不中斷。",
     "cta": "快速開始",
     "github": "GitHub →"
   },
   "terminal": {
     "cmd": "$ agend fleet start",
-    "line1": "✓ web-app — 已透過 Telegram 連線",
-    "line2": "✓ api-server — 已透過 Telegram 連線",
-    "line3": "✓ ml-pipeline — 已透過 Telegram 連線",
-    "status": "Fleet 運行中 — 3 個實例已啟動"
+    "line1": "✓ web-app — Claude Code via Telegram",
+    "line2": "✓ api-server — Codex via Discord",
+    "line3": "✓ ml-pipeline — Gemini via Telegram",
+    "status": "Fleet 運行中 — 3 個實例、2 個頻道"
   },
   "problem": {
     "without": "沒有 AgEnD",
@@ -39,7 +39,8 @@
     "cost": { "name": "花費守衛", "desc": "每日花費上限" },
     "p2p": { "name": "P2P 協作", "desc": "Agent 互相溝通" },
     "rotation": { "name": "Context 輪替", "desc": "自動刷新過期 session" },
-    "backend": { "name": "多 Backend", "desc": "不綁定單一 CLI 工具" }
+    "backend": { "name": "多 Backend", "desc": "Claude Code、Codex、Gemini CLI、OpenCode" },
+    "diagnostics": { "name": "Fleet 診斷", "desc": "/status 和 /sysinfo 健康監控" }
   },
   "quickstart": {
     "title": "快速開始",
@@ -49,19 +50,22 @@
   },
   "architecture": {
     "title": "架構",
-    "channel": "Telegram",
+    "channel1": "Telegram",
+    "channel2": "Discord",
     "core": "AgEnD",
     "backend1": "Claude Code",
-    "backend2": "未來的 CLI..."
+    "backend2": "Codex",
+    "backend3": "Gemini CLI",
+    "backend4": "OpenCode"
   },
   "faq": {
     "title": "常見問題",
     "q1": "免費嗎？",
     "a1": "是的，開源專案，MIT 授權。",
     "q2": "支援哪些 backend？",
-    "a2": "目前支援 Claude Code，未來會加入更多。",
+    "a2": "Claude Code、OpenAI Codex、Gemini CLI、OpenCode。也可以透過 CliBackend interface 自行擴充。",
     "q3": "支援哪些通訊管道？",
-    "a3": "目前支援 Telegram，Discord 規劃中。",
+    "a3": "Telegram 和 Discord 都已支援，兩者皆支援 topic/channel 模式的 fleet 路由。",
     "q4": "需要伺服器嗎？",
     "a4": "不需要，任何有 tmux 的機器都能跑。"
   },
