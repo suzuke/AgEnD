@@ -9,7 +9,12 @@ export class ClaudeCodeBackend implements CliBackend {
   buildCommand(config: CliBackendConfig): string {
     const settingsPath = join(this.instanceDir, "claude-settings.json");
     const mcpConfigPath = join(this.instanceDir, "mcp-config.json");
-    let cmd = `CMUX_CLAUDE_HOOKS_DISABLED=1 CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude --settings ${settingsPath} --mcp-config ${mcpConfigPath} --dangerously-skip-permissions`;
+    // Forward Anthropic env vars to the CLI process (tmux shell doesn't inherit daemon's env)
+    const envPrefix = ["CMUX_CLAUDE_HOOKS_DISABLED=1", "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1"];
+    for (const key of ["ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY"]) {
+      if (process.env[key]) envPrefix.push(`${key}=${process.env[key]}`);
+    }
+    let cmd = `${envPrefix.join(" ")} claude --settings ${settingsPath} --mcp-config ${mcpConfigPath} --dangerously-skip-permissions`;
 
     const sessionIdFile = join(this.instanceDir, "session-id");
     if (existsSync(sessionIdFile)) {
