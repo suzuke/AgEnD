@@ -5,7 +5,8 @@ import {
   Server,
   Socket,
 } from "node:net";
-import { unlinkSync, existsSync, chmodSync } from "node:fs";
+import { unlinkSync, existsSync, chmodSync, statSync } from "node:fs";
+import { dirname } from "node:path";
 
 function encode(msg: unknown): string {
   return JSON.stringify(msg) + "\n";
@@ -60,14 +61,42 @@ export class IpcServer extends EventEmitter {
       }
     }
 
+    // Warn if parent directory is world-readable
+    try {
+      const parentDir = dirname(this.sockPath);
+      const parentMode = statSync(parentDir).mode & 0o777;
+      if (parentMode & 0o007) {
+        this.logger?.warn({ dir: parentDir, mode: `0o${parentMode.toString(8)}` },
+          "IPC socket parent directory is world-accessible");
+      }
+    } catch { /* stat may fail on some systems */ }
+
     return new Promise((resolve, reject) => {
       this.server = createServer((socket) => {
         this.acceptClient(socket);
       });
 
-      this.server.on("error", reject);
+      // Set restrictive umask before listen to prevent TOCTOU race
+      // (socket is created with 0o600 permissions atomically)
+      const prevUmask = process.umask(0o077);
+      let umaskRestored = false;
+      const restoreUmask = () => {
+        if (!umaskRestored) { umaskRestored = true; process.umask(prevUmask); }
+      };
+
+      this.server.on("error", (err) => {
+        restoreUmask();
+        reject(err);
+      });
+
       this.server.listen(this.sockPath, () => {
-        try { chmodSync(this.sockPath, 0o600); } catch { /* best-effort */ }
+        restoreUmask();
+        // Belt-and-suspenders: also chmod in case umask was ineffective
+        try {
+          chmodSync(this.sockPath, 0o600);
+        } catch (err) {
+          this.logger?.warn({ err, sockPath: this.sockPath }, "Failed to chmod IPC socket");
+        }
         resolve();
       });
     });
