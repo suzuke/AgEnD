@@ -33,6 +33,7 @@ import { TmuxControlClient } from "./tmux-control.js";
 import { safeHandler } from "./safe-async.js";
 import { RoutingEngine } from "./routing-engine.js";
 import { InstanceLifecycle, type LifecycleContext } from "./instance-lifecycle.js";
+import { TopicArchiver, type ArchiverContext } from "./topic-archiver.js";
 
 const TMUX_SESSION = "agend";
 
@@ -49,7 +50,7 @@ export function resolveReplyThreadId(
   return instanceConfig?.topic_id != null ? String(instanceConfig.topic_id) : undefined;
 }
 
-export class FleetManager implements FleetContext, LifecycleContext {
+export class FleetManager implements FleetContext, LifecycleContext, ArchiverContext {
   private children: Map<string, import("node:child_process").ChildProcess> = new Map();
   readonly lifecycle: InstanceLifecycle;
   /** @deprecated Use lifecycle.daemons — kept for backward compat */
@@ -75,9 +76,7 @@ export class FleetManager implements FleetContext, LifecycleContext {
   // Topic icon + auto-archive state
   private topicIcons: { green?: string; blue?: string; red?: string } = {};
   private lastActivity = new Map<string, number>();
-  private archivedTopics = new Set<string>();
-  private archiveTimer: ReturnType<typeof setInterval> | null = null;
-  private static ARCHIVE_IDLE_MS = 24 * 60 * 60 * 1000; // 24 hours
+  private topicArchiver: TopicArchiver;
 
   controlClient: TmuxControlClient | null = null;
 
@@ -91,6 +90,12 @@ export class FleetManager implements FleetContext, LifecycleContext {
   constructor(public dataDir: string) {
     this.lifecycle = new InstanceLifecycle(this);
     this.topicCommands = new TopicCommands(this);
+    this.topicArchiver = new TopicArchiver(this);
+  }
+
+  // ── ArchiverContext bridge ────────────────────────────────────────────
+  lastActivityMs(name: string): number {
+    return this.lastActivity.get(name) ?? 0;
   }
 
   // ── LifecycleContext bridge methods ──────────────────────────────────────
@@ -310,7 +315,7 @@ export class FleetManager implements FleetContext, LifecycleContext {
 
       // Resolve topic icon emoji IDs and start idle archive poller
       await this.resolveTopicIcons();
-      this.startArchivePoller();
+      this.topicArchiver.startPoller();
 
       await new Promise(r => setTimeout(r, 3000));
       await this.connectToInstances(fleet);
@@ -408,7 +413,7 @@ export class FleetManager implements FleetContext, LifecycleContext {
 
     this.adapter.on("topic_closed", safeHandler(async (data: { chatId: string; threadId: string }) => {
       // Skip unbind if we archived this topic ourselves
-      if (this.archivedTopics.has(data.threadId)) return;
+      if (this.topicArchiver.isArchived(data.threadId)) return;
       await this.topicCommands.handleTopicDeleted(data.threadId);
     }, this.logger, "adapter.topic_closed"));
 
@@ -553,8 +558,8 @@ export class FleetManager implements FleetContext, LifecycleContext {
     const instanceName = target.name;
 
     // Reopen archived topic before routing
-    if (this.archivedTopics.has(threadId)) {
-      await this.reopenArchivedTopic(threadId, instanceName);
+    if (this.topicArchiver.isArchived(threadId)) {
+      await this.topicArchiver.reopen(threadId, instanceName);
     }
 
     this.touchActivity(instanceName);
@@ -1235,50 +1240,7 @@ export class FleetManager implements FleetContext, LifecycleContext {
   }
 
   /** Start periodic idle archive checker */
-  private startArchivePoller(): void {
-    this.archiveTimer = setInterval(() => {
-      this.archiveIdleTopics().catch((err) =>
-        this.logger.debug({ err }, "Archive idle check failed"));
-    }, 30 * 60_000); // check every 30 minutes
-  }
-
-  /** Close topics that have been idle beyond threshold */
-  private async archiveIdleTopics(): Promise<void> {
-    if (!this.adapter?.closeForumTopic || !this.fleetConfig) return;
-    const now = Date.now();
-
-    for (const [name, config] of Object.entries(this.fleetConfig.instances)) {
-      const topicId = config.topic_id;
-      if (topicId == null || config.general_topic) continue;
-      const topicIdStr = String(topicId);
-      if (this.archivedTopics.has(topicIdStr)) continue;
-
-      const status = this.getInstanceStatus(name);
-      if (status !== "running") continue; // only archive running-but-idle
-
-      const last = this.lastActivity.get(name) ?? 0;
-      if (last === 0) continue; // never active → skip (just started)
-      if (now - last < FleetManager.ARCHIVE_IDLE_MS) continue;
-
-      this.logger.info({ name, topicId, idleHours: Math.round((now - last) / 3600000) }, "Archiving idle topic");
-      this.archivedTopics.add(topicIdStr);
-      this.setTopicIcon(name, "remove");
-      await this.adapter.closeForumTopic(topicId);
-    }
-  }
-
-  /** Reopen an archived topic and restore icon */
-  private async reopenArchivedTopic(topicId: string, instanceName: string): Promise<void> {
-    if (!this.archivedTopics.has(topicId)) return;
-    this.archivedTopics.delete(topicId);
-
-    if (this.adapter?.reopenForumTopic) {
-      await this.adapter.reopenForumTopic(topicId);
-    }
-    this.setTopicIcon(instanceName, "green");
-    this.touchActivity(instanceName);
-    this.logger.info({ instanceName, topicId }, "Reopened archived topic");
-  }
+  // archiveIdleTopics / reopenArchivedTopic → delegated to TopicArchiver
 
   private clearStatuslineWatchers(): void {
     for (const [, timer] of this.statuslineWatchers) clearInterval(timer);
@@ -1300,10 +1262,7 @@ export class FleetManager implements FleetContext, LifecycleContext {
       clearInterval(this.sessionPruneTimer);
       this.sessionPruneTimer = null;
     }
-    if (this.archiveTimer) {
-      clearInterval(this.archiveTimer);
-      this.archiveTimer = null;
-    }
+    this.topicArchiver.stop();
 
     this.scheduler?.shutdown();
 
