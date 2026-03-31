@@ -217,8 +217,33 @@ describe("safeHandler edge cases", () => {
     );
   });
 
-  // Note: if a callback calls an async function without return/await,
-  // safeHandler cannot catch the rejection — the Promise is lost.
+  it("documents limitation: fire-and-forget async escapes safeHandler", async () => {
+    const { safeHandler } = await import("../src/safe-async.js");
+    const logger = { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() } as any;
+
+    // Temporarily swallow the unhandled rejection so it doesn't crash the test runner
+    const swallowed: unknown[] = [];
+    const trap = (e: PromiseRejectionEvent) => { e.preventDefault(); swallowed.push(e.reason); };
+    // Node uses 'unhandledRejection' on process, not window
+    const processTrap = (reason: unknown) => { swallowed.push(reason); };
+    process.on("unhandledRejection", processTrap);
+
+    const wrapped = safeHandler(() => {
+      // Deliberately not returning/awaiting — Promise escapes safeHandler
+      Promise.reject(new Error("escaped"));
+    }, logger, "fire-and-forget");
+    wrapped();
+
+    await new Promise(r => setTimeout(r, 50));
+
+    // safeHandler did NOT catch it — the Promise was lost
+    expect(logger.error).not.toHaveBeenCalled();
+    // The rejection leaked to the process level
+    expect(swallowed.length).toBeGreaterThan(0);
+
+    process.off("unhandledRejection", processTrap);
+  });
+
   // This is why all fleet-manager listeners were changed to async/await
   // in the P0-1 Codex review fix (commit 5531488).
 });
