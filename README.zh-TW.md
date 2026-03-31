@@ -18,7 +18,7 @@
 |---|---|
 | 關掉終端機，agent 就斷線 | 系統服務常駐，重開機也不怕 |
 | 一個終端機 = 一個專案 | 一個 bot，無限專案同時跑 |
-| Context window 塞滿，session 品質下降 | 自動輪替 context，不讓它老化 |
+| 長時間 session 累積過時 context | 依 max age 自動輪替 session，保持新鮮 |
 | 不知道 agent 半夜在幹嘛 | 每日花費報告 + 卡住偵測通知 |
 | 排程任務隨 session 結束消失 | 持久化排程，SQLite 儲存 |
 | 某個 model 被限速，全部停擺 | 自動切換備用 model |
@@ -39,7 +39,7 @@ agend fleet start               # 啟動 fleet
 
 - **Fleet 模式** — 一個 bot、N 個專案，各自獨立的 Telegram Forum Topic
 - **持久化排程** — cron 排程任務，重啟不遺失（SQLite 儲存）
-- **Context 輪替** — context window 塞滿前自動重啟 session
+- **Context 輪替** — 長時間 session 依 max age 自動重啟，保持 context 新鮮
 - **點對點協作** — agent 之間透過 MCP tools 互相發現、喚醒、傳訊
 - **General Topic** — 自然語言調度器，把任務路由到對的 agent
 - **權限轉發** — Telegram inline 按鈕 Allow/Deny，倒數計時 + Always Allow
@@ -71,7 +71,7 @@ agend fleet start               # 啟動 fleet
 
 ## 已知限制
 
-- 目前只在 macOS 測過
+- 支援 macOS（launchd）和 Linux（systemd），不支援 Windows
 - 全域 `enabledPlugins` 裡有官方 Telegram plugin 會造成 409 polling 衝突
 
 ## 授權

@@ -18,7 +18,7 @@ One Telegram bot, multiple CLI backends (Claude Code, Gemini CLI, Codex, OpenCod
 |---|---|
 | Close the terminal, agent goes offline | Runs as a system service — survives reboots |
 | One terminal = one project | One bot, unlimited projects running in parallel |
-| Context window fills up, session degrades | Auto-rotates context before it gets stale |
+| Long-running sessions accumulate stale context | Auto-rotates sessions by max age to stay fresh |
 | No idea what your agents are doing overnight | Daily cost reports + hang detection alerts |
 | Cron tasks disappear when the session ends | Persistent schedules backed by SQLite |
 | Rate limited on one model, everything stops | Auto-failover to backup models |
@@ -39,7 +39,7 @@ agend fleet start               # launch the fleet
 
 - **Fleet mode** — one bot, N projects, each in its own Telegram Forum Topic
 - **Persistent schedules** — cron-based tasks that survive restarts (SQLite-backed)
-- **Context rotation** — auto-restart sessions before context window fills up
+- **Context rotation** — auto-restart long-running sessions to keep context fresh (max-age based)
 - **Peer-to-peer collaboration** — agents discover, wake, and message each other via MCP tools
 - **General Topic** — natural language dispatcher that routes tasks to the right agent
 - **Permission relay** — inline Telegram buttons for Allow/Deny with countdown + Always Allow
@@ -71,7 +71,7 @@ agend fleet start               # launch the fleet
 
 ## Known limitations
 
-- Only tested on macOS
+- macOS (launchd) and Linux (systemd) supported; Windows is not
 - Official Telegram plugin in global `enabledPlugins` causes 409 polling conflicts
 
 ## License
