@@ -1,22 +1,22 @@
-# claude-channel-daemon
+# AgEnD
 
+[![npm](https://img.shields.io/npm/v/@suzuke/agend)](https://www.npmjs.com/package/@suzuke/agend)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js >= 20](https://img.shields.io/badge/Node.js-%3E%3D%2020-green.svg)](https://nodejs.org)
-[![Claude Code](https://img.shields.io/badge/Claude%20Code-compatible-blueviolet.svg)](https://docs.anthropic.com/en/docs/claude-code)
 
-**Run a fleet of Claude Code agents from your phone.** One Telegram bot, unlimited projects — each Forum Topic is an independent Claude session with crash recovery and zero babysitting.
+**Agent Engineering Daemon — run a fleet of AI coding agents from your phone.** One Telegram bot, multiple CLI backends (Claude Code, Gemini CLI, Codex, OpenCode), unlimited projects — each Forum Topic is an independent agent session with crash recovery and zero babysitting.
 
 [繁體中文](README.zh-TW.md)
 
-> **⚠️** The daemon uses Claude Code's native permission relay — permission requests are forwarded to Telegram as inline buttons (Allow/Deny). See [Permission System](#permission-system).
+> **⚠️** All CLI backends run with `--dangerously-skip-permissions` (or equivalent). See [Security Considerations](#security-considerations).
 
 ## Why this exists
 
 Claude Code's official Telegram plugin gives you **1 bot = 1 session**. Close the terminal and it goes offline. No scheduling. No multi-project support.
 
-**claude-channel-daemon** turns Claude Code into an always-on, multi-project AI engineering team you control from Telegram:
+**agend** turns Claude Code into an always-on, multi-project AI engineering team you control from Telegram:
 
-| Feature | Official Plugin | claude-channel-daemon |
+| Feature | Official Plugin | agend |
 |---------|:-:|:-:|
 | Multiple projects simultaneously | — | **N sessions, 1 bot** |
 | Survives terminal close / SSH disconnect | — | **tmux persistence** |
@@ -43,7 +43,7 @@ Claude Code's official Telegram plugin gives you **1 bot = 1 session**. Close th
 
 ## How it compares
 
-| | claude-channel-daemon | Claude Code Telegram Plugin | Cursor | Cline (VS Code) |
+| | agend | Claude Code Telegram Plugin | Cursor | Cline (VS Code) |
 |---|:-:|:-:|:-:|:-:|
 | Runs headless (no IDE/terminal) | **Yes** | Needs terminal | No | No |
 | Multi-project fleet | **Yes** | 1 session | 1 window | 1 window |
@@ -177,7 +177,7 @@ You can connect a local Claude Code session to the daemon's channel tools (reply
       "command": "node",
       "args": ["path/to/dist/channel/mcp-server.js"],
       "env": {
-        "CCD_SOCKET_PATH": "~/.claude-channel-daemon/instances/<name>/channel.sock"
+        "CCD_SOCKET_PATH": "~/.agend/instances/<name>/channel.sock"
       }
     }
   }
@@ -198,7 +198,7 @@ External sessions appear in `list_instances` and can be targeted by `send_to_ins
 
 ### Graceful restart
 
-`ccd fleet restart` sends SIGUSR2 to the fleet manager. It waits for all instances to go idle (no transcript activity for 10s), then restarts them one by one. A 5-minute timeout prevents hanging on stuck instances.
+`agend fleet restart` sends SIGUSR2 to the fleet manager. It waits for all instances to go idle (no transcript activity for 10s), then restarts them one by one. A 5-minute timeout prevents hanging on stuck instances.
 
 ### Telegram commands
 
@@ -357,13 +357,13 @@ The daemon discovers adapters matching the `ccd-adapter-*` naming convention. Ch
 brew install tmux        # macOS
 
 # Install
-npm install -g claude-channel-daemon
+npm install -g @suzuke/agend
 
 # Interactive setup
-ccd init
+agend init
 
 # Start the fleet
-ccd fleet start
+agend fleet start
 ```
 
 ## Commands
@@ -380,63 +380,63 @@ All other operations (create/delete/start instances, delegate tasks) are handled
 ### Fleet management
 
 ```bash
-ccd fleet start               # Start all instances (not needed with launchd)
-ccd fleet stop                # Stop all instances
-ccd fleet restart             # Graceful restart (wait for idle, same code)
-ccd fleet restart --reload    # Restart with new code (launchd auto-restarts)
-ccd fleet status              # Show instance status
-ccd fleet logs <name>         # Show instance logs
-ccd fleet history             # Show event history (cost, rotations, hangs)
-ccd fleet start <name>        # Start specific instance
-ccd fleet stop <name>         # Stop specific instance
-ccd fleet cleanup             # Remove orphaned instance directories
-ccd fleet cleanup --dry-run   # Preview cleanup without deleting
+agend fleet start               # Start all instances (not needed with launchd)
+agend fleet stop                # Stop all instances
+agend fleet restart             # Graceful restart (wait for idle, same code)
+agend fleet restart --reload    # Restart with new code (launchd auto-restarts)
+agend fleet status              # Show instance status
+agend fleet logs <name>         # Show instance logs
+agend fleet history             # Show event history (cost, rotations, hangs)
+agend fleet start <name>        # Start specific instance
+agend fleet stop <name>         # Stop specific instance
+agend fleet cleanup             # Remove orphaned instance directories
+agend fleet cleanup --dry-run   # Preview cleanup without deleting
 ```
 
 ### Schedules
 
 ```bash
-ccd schedule list             # List all schedules
-ccd schedule add              # Add a schedule from CLI
-ccd schedule delete <id>      # Delete a schedule
-ccd schedule enable <id>      # Enable a schedule
-ccd schedule disable <id>     # Disable a schedule
-ccd schedule history <id>     # Show schedule run history
+agend schedule list             # List all schedules
+agend schedule add              # Add a schedule from CLI
+agend schedule delete <id>      # Delete a schedule
+agend schedule enable <id>      # Enable a schedule
+agend schedule disable <id>     # Disable a schedule
+agend schedule history <id>     # Show schedule run history
 ```
 
 ### Topic bindings
 
 ```bash
-ccd topic list                # List topic bindings
-ccd topic bind <name> <tid>   # Bind instance to topic
-ccd topic unbind <name>       # Unbind instance from topic
+agend topic list                # List topic bindings
+agend topic bind <name> <tid>   # Bind instance to topic
+agend topic unbind <name>       # Unbind instance from topic
 ```
 
 ### Access control
 
 ```bash
-ccd access lock <name>        # Lock instance access
-ccd access unlock <name>      # Unlock instance access
-ccd access list <name>        # List allowed users
-ccd access remove <name> <uid>  # Remove user
-ccd access pair <name> <uid>  # Generate pairing code
+agend access lock <name>        # Lock instance access
+agend access unlock <name>      # Unlock instance access
+agend access list <name>        # List allowed users
+agend access remove <name> <uid>  # Remove user
+agend access pair <name> <uid>  # Generate pairing code
 ```
 
 ### Setup & service
 
 ```bash
-ccd init                      # Interactive setup wizard
-ccd install                   # Install as system service (launchd/systemd)
-ccd install --activate        # Install and start immediately
-ccd uninstall                 # Remove system service
-ccd export [path]             # Export config for device migration
-ccd export --full [path]      # Export config + all instance data
-ccd import <file>             # Import config from export file
+agend init                      # Interactive setup wizard
+agend install                   # Install as system service (launchd/systemd)
+agend install --activate        # Install and start immediately
+agend uninstall                 # Remove system service
+agend export [path]             # Export config for device migration
+agend export --full [path]      # Export config + all instance data
+agend import <file>             # Import config from export file
 ```
 
 ## Configuration
 
-Fleet config at `~/.claude-channel-daemon/fleet.yaml`:
+Fleet config at `~/.agend/fleet.yaml`:
 
 ```yaml
 project_roots:
@@ -445,7 +445,7 @@ project_roots:
 channel:
   type: telegram         # telegram or discord
   mode: topic           # topic (recommended) or dm
-  bot_token_env: CCD_BOT_TOKEN
+  bot_token_env: AGEND_BOT_TOKEN
   group_id: -100xxxxxxxxxx
   access:
     mode: locked         # locked or pairing
@@ -481,15 +481,15 @@ instances:
     model: opus
 ```
 
-Secrets in `~/.claude-channel-daemon/.env`:
+Secrets in `~/.agend/.env`:
 ```
-CCD_BOT_TOKEN=123456789:AAH...
+AGEND_BOT_TOKEN=123456789:AAH...
 GROQ_API_KEY=gsk_...          # optional, for voice transcription
 ```
 
 ## Data directory
 
-`~/.claude-channel-daemon/`:
+`~/.agend/`:
 
 | Path | Purpose |
 |------|---------|
@@ -535,17 +535,17 @@ The `skipPermissions` config option passes `--dangerously-skip-permissions` to C
 
 ### `Bash(*)` in the allow list
 
-By default (when `skipPermissions` is false), ccd configures `Bash(*)` in Claude Code's permission allow list so that shell commands don't require individual approval. The deny list blocks a few destructive patterns (`rm -rf /`, `dd`, `mkfs`), but this is a blocklist — it cannot cover all dangerous commands. This matches Claude Code's own permission model, where `Bash(*)` is a supported power-user configuration.
+By default (when `skipPermissions` is false), agend configures `Bash(*)` in Claude Code's permission allow list so that shell commands don't require individual approval. The deny list blocks a few destructive patterns (`rm -rf /`, `dd`, `mkfs`), but this is a blocklist — it cannot cover all dangerous commands. This matches Claude Code's own permission model, where `Bash(*)` is a supported power-user configuration.
 
-If you want tighter control, edit the `allow` list in `claude-settings.json` (generated per-instance in `~/.claude-channel-daemon/instances/<name>/`) to use specific patterns like `Bash(npm test)`, `Bash(git *)` instead of `Bash(*)`.
+If you want tighter control, edit the `allow` list in `claude-settings.json` (generated per-instance in `~/.agend/instances/<name>/`) to use specific patterns like `Bash(npm test)`, `Bash(git *)` instead of `Bash(*)`.
 
 ### IPC socket
 
-The daemon communicates with Claude's MCP server via a Unix socket at `~/.claude-channel-daemon/instances/<name>/channel.sock`. The socket is restricted to owner-only access (`0600`) and requires a shared secret handshake. These measures prevent other local processes from injecting messages, but do not protect against a compromised user account on the same machine.
+The daemon communicates with Claude's MCP server via a Unix socket at `~/.agend/instances/<name>/channel.sock`. The socket is restricted to owner-only access (`0600`) and requires a shared secret handshake. These measures prevent other local processes from injecting messages, but do not protect against a compromised user account on the same machine.
 
 ### Secrets storage
 
-Bot tokens and API keys are stored in plaintext at `~/.claude-channel-daemon/.env`. The `ccd export` command includes this file and warns about secure transfer. Consider filesystem encryption if the host is shared.
+Bot tokens and API keys are stored in plaintext at `~/.agend/.env`. The `agend export` command includes this file and warns about secure transfer. Consider filesystem encryption if the host is shared.
 
 ## Known limitations
 

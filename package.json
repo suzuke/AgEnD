@@ -1,5 +1,5 @@
 {
-  "name": "agend",
+  "name": "@suzuke/agend",
   "version": "1.0.0",
   "description": "Multi-agent fleet daemon — run any coding CLI (Claude, Gemini, Codex, OpenCode) from Telegram",
   "type": "module",
