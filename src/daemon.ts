@@ -756,8 +756,8 @@ export class Daemon extends EventEmitter {
       const pane = await this.tmux!.capturePane();
       // CLI is ready if we see a prompt indicator
       if (/❯|bypass permissions|ok\s*$/m.test(pane)) return true;
-      // CLI is stuck if we see Resume Session picker or error
-      if (/Resume Session|error|Error/i.test(pane)) return false;
+      // CLI is stuck or failed if we see known failure patterns
+      if (/Resume Session|command not found|not found|error|Error/i.test(pane)) return false;
     } catch { /* capture failed = window dead */ return false; }
     // Unknown state — assume ok (other CLIs may have different prompts)
     return true;

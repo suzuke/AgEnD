@@ -1,7 +1,18 @@
 import { join } from "node:path";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
+import { execFileSync } from "node:child_process";
 import type { CliBackend, CliBackendConfig } from "./types.js";
+
+/** Resolve the full path to the claude binary (tmux new-window may have a minimal PATH) */
+function resolveClaudePath(): string {
+  try {
+    // Use the daemon's own shell to resolve, which has the full PATH
+    return execFileSync("which", ["claude"], { encoding: "utf-8" }).trim();
+  } catch {
+    return "claude"; // fallback to bare name
+  }
+}
 
 
 export class ClaudeCodeBackend implements CliBackend {
@@ -15,7 +26,7 @@ export class ClaudeCodeBackend implements CliBackend {
     for (const key of ["ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY"]) {
       if (process.env[key]) envPrefix.push(`${key}=${process.env[key]}`);
     }
-    let cmd = `${envPrefix.join(" ")} claude --settings ${settingsPath} --mcp-config ${mcpConfigPath} --dangerously-skip-permissions`;
+    let cmd = `${envPrefix.join(" ")} ${resolveClaudePath()} --settings ${settingsPath} --mcp-config ${mcpConfigPath} --dangerously-skip-permissions`;
 
     const sessionIdFile = join(this.instanceDir, "session-id");
     if (existsSync(sessionIdFile)) {
