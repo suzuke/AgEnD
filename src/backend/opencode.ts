@@ -41,7 +41,7 @@ export class OpenCodeBackend implements CliBackend {
   }
 
   getReadyPattern(): RegExp {
-    return /⌬\s*OpenCode|^>\s/m;
+    return /Ask anything|ctrl\+p commands/m;
   }
 
   getContextUsage(): number | null {

@@ -47,7 +47,7 @@ export class GeminiCliBackend implements CliBackend {
   }
 
   getReadyPattern(): RegExp {
-    return /^\*\s|^>\s|YOLO mode/m;
+    return /Type your message|\? for shortcuts|YOLO Ctrl/m;
   }
 
   getContextUsage(): number | null {
