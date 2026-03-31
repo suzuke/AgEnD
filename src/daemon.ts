@@ -482,11 +482,11 @@ export class Daemon extends EventEmitter {
     const fromInstance = meta.from_instance;
     let formatted: string;
     if (fromInstance) {
-      // Cross-instance message
-      formatted = `[from:${fromInstance}] ${content}`;
+      formatted = `[from:${fromInstance}] ${content}\n(Reply using send_to_instance tool, NOT direct text)`;
     } else {
-      // User message from Telegram/Discord
-      formatted = `[user:${user}] ${content}`;
+      const chatId = meta.chat_id || "";
+      const threadId = meta.thread_id || "";
+      formatted = `[user:${user} chat_id:${chatId} thread_id:${threadId}] ${content}\n(Reply using the reply tool with chat_id="${chatId}" — do NOT respond with direct text)`;
     }
 
     this.tmux.pasteText(formatted).catch(async (err) => {
