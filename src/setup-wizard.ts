@@ -273,7 +273,7 @@ export async function runSetupWizard(): Promise<void> {
   );
   const accessMode = accessIndex === 0 ? "locked" : "pairing";
 
-  const allowedUsers: number[] = [];
+  const allowedUsers: (number | string)[] = [];
   if (accessMode === "locked") {
     console.log();
     console.log(`  ${dim("Your Telegram user ID — send /start to @userinfobot to find it")}`);
@@ -283,7 +283,7 @@ export async function runSetupWizard(): Promise<void> {
         return isNaN(n) || n <= 0 ? "Must be a positive number" : null;
       },
     });
-    allowedUsers.push(parseInt(uidStr, 10));
+    allowedUsers.push(uidStr);
 
     let addMore = await confirm(rl, "Add another user?", false);
     while (addMore) {
@@ -293,7 +293,7 @@ export async function runSetupWizard(): Promise<void> {
           return isNaN(n) || n <= 0 ? "Must be a positive number" : null;
         },
       });
-      allowedUsers.push(parseInt(uid, 10));
+      allowedUsers.push(uid);
       addMore = await confirm(rl, "Add another user?", false);
     }
   }
@@ -333,7 +333,7 @@ export async function runSetupWizard(): Promise<void> {
     console.log(`  ${dim("You can pre-configure instances now, or let the bot handle it.")}`);
   }
 
-  const instances: { name: string; workDir: string; topicId?: number }[] = [];
+  const instances: { name: string; workDir: string; topicId?: number | string }[] = [];
 
   const addInstance = await confirm(rl, "Pre-configure an instance now?", false);
   if (addInstance) {
@@ -360,12 +360,12 @@ export async function runSetupWizard(): Promise<void> {
         },
       });
 
-      let topicId: number | undefined;
+      let topicId: number | string | undefined;
       if (mode === "topic") {
         const tid = await ask(rl, "Topic ID (leave empty to auto-bind later)", {
           default: "",
         });
-        if (tid) topicId = parseInt(tid, 10);
+        if (tid) topicId = tid;
       }
 
       const expanded = expandHome(workDir);

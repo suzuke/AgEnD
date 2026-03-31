@@ -10,7 +10,7 @@ export default defineConfig({
       ".claude/worktrees/**",
     ],
     env: {
-      PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH ?? ""}`,
+      PATH: process.env.PATH ?? "",
     },
   },
 });

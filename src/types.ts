@@ -27,7 +27,7 @@ export interface StatusLineData {
 
 export interface AccessConfig {
   mode: "pairing" | "locked";
-  allowed_users: number[];
+  allowed_users: (number | string)[];
   max_pending_codes: number;
   code_expiry_minutes: number;
 }
@@ -64,7 +64,7 @@ export interface InstanceConfig {
   description?: string;
   /** Tags for capability discovery (e.g. ["code-reviewer", "researcher", "executor"]) */
   tags?: string[];
-  topic_id?: number;
+  topic_id?: number | string;
   general_topic?: boolean;
   restart_policy: {
     max_retries: number;

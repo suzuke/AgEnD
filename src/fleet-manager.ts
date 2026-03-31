@@ -51,7 +51,7 @@ export class FleetManager implements FleetContext {
   private daemons: Map<string, InstanceType<typeof import("./daemon.js").Daemon>> = new Map();
   fleetConfig: FleetConfig | null = null;
   adapter: ChannelAdapter | null = null;
-  routingTable: Map<number, RouteTarget> = new Map();
+  routingTable: Map<string, RouteTarget> = new Map();
   instanceIpcClients: Map<string, IpcClient> = new Map();
   scheduler: Scheduler | null = null;
   private configPath: string = "";
@@ -69,7 +69,7 @@ export class FleetManager implements FleetContext {
   // Topic icon + auto-archive state
   private topicIcons: { green?: string; blue?: string; red?: string } = {};
   private lastActivity = new Map<string, number>();
-  private archivedTopics = new Set<number>();
+  private archivedTopics = new Set<string>();
   private archiveTimer: ReturnType<typeof setInterval> | null = null;
   private static ARCHIVE_IDLE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -92,12 +92,12 @@ export class FleetManager implements FleetContext {
   }
 
   /** Build topic routing table: { topicId -> RouteTarget } */
-  buildRoutingTable(): Map<number, RouteTarget> {
-    const table = new Map<number, RouteTarget>();
+  buildRoutingTable(): Map<string, RouteTarget> {
+    const table = new Map<string, RouteTarget>();
     if (!this.fleetConfig) return table;
     for (const [name, inst] of Object.entries(this.fleetConfig.instances)) {
       if (inst.topic_id != null) {
-        table.set(inst.topic_id, {
+        table.set(String(inst.topic_id), {
           kind: inst.general_topic ? "general" : "instance",
           name,
         });
@@ -459,10 +459,9 @@ export class FleetManager implements FleetContext {
     });
 
     this.adapter.on("topic_closed", (data: { chatId: string; threadId: string }) => {
-      const tid = parseInt(data.threadId, 10);
       // Skip unbind if we archived this topic ourselves
-      if (this.archivedTopics.has(tid)) return;
-      this.topicCommands.handleTopicDeleted(tid);
+      if (this.archivedTopics.has(data.threadId)) return;
+      this.topicCommands.handleTopicDeleted(data.threadId);
     });
 
     await this.topicCommands.registerBotCommands();
@@ -561,7 +560,7 @@ export class FleetManager implements FleetContext {
   }
 
   private async handleInboundMessage(msg: InboundMessage): Promise<void> {
-    const threadId = msg.threadId ? parseInt(msg.threadId, 10) : undefined;
+    const threadId = msg.threadId || undefined;
     if (threadId == null) {
       // General topic: check for /status command
       if (await this.topicCommands.handleGeneralCommand(msg)) return;
@@ -807,14 +806,9 @@ export class FleetManager implements FleetContext {
         const question = args.question as string;
         const context = args.context as string | undefined;
         const body = context ? `${question}\n\nContext: ${context}` : question;
-        // Re-dispatch as send_to_instance with structured metadata
-        args.instance_name = targetName;
-        args.message = body;
-        args.request_kind = "query";
-        args.requires_reply = true;
-        args.task_summary = question.slice(0, 120);
-        // Recursively handle via the same switch (will hit send_to_instance case above)
-        return this.handleOutboundFromInstance(instanceName, { tool: "send_to_instance", args, requestId, fleetRequestId, senderSessionName });
+        // Re-dispatch as send_to_instance with structured metadata (new object to avoid mutating input)
+        const queryArgs = { ...args, instance_name: targetName, message: body, request_kind: "query", requires_reply: true, task_summary: question.slice(0, 120) };
+        return this.handleOutboundFromInstance(instanceName, { tool: "send_to_instance", args: queryArgs, requestId, fleetRequestId, senderSessionName });
       }
 
       case "delegate_task": {
@@ -825,12 +819,8 @@ export class FleetManager implements FleetContext {
         let body = task;
         if (criteria) body += `\n\nSuccess criteria: ${criteria}`;
         if (context) body += `\n\nContext: ${context}`;
-        args.instance_name = targetName;
-        args.message = body;
-        args.request_kind = "task";
-        args.requires_reply = true;
-        args.task_summary = task.slice(0, 120);
-        return this.handleOutboundFromInstance(instanceName, { tool: "send_to_instance", args, requestId, fleetRequestId, senderSessionName });
+        const taskArgs = { ...args, instance_name: targetName, message: body, request_kind: "task", requires_reply: true, task_summary: task.slice(0, 120) };
+        return this.handleOutboundFromInstance(instanceName, { tool: "send_to_instance", args: taskArgs, requestId, fleetRequestId, senderSessionName });
       }
 
       case "report_result": {
@@ -842,12 +832,8 @@ export class FleetManager implements FleetContext {
         }
         let body = summary;
         if (artifacts) body += `\n\nArtifacts: ${artifacts}`;
-        args.instance_name = targetName;
-        args.message = body;
-        args.request_kind = "report";
-        args.requires_reply = false;
-        args.task_summary = summary.slice(0, 120);
-        return this.handleOutboundFromInstance(instanceName, { tool: "send_to_instance", args, requestId, fleetRequestId, senderSessionName });
+        const reportArgs = { ...args, instance_name: targetName, message: body, request_kind: "report", requires_reply: false, task_summary: summary.slice(0, 120) };
+        return this.handleOutboundFromInstance(instanceName, { tool: "send_to_instance", args: reportArgs, requestId, fleetRequestId, senderSessionName });
       }
 
       // Phase 4: Capability discovery
@@ -998,7 +984,7 @@ export class FleetManager implements FleetContext {
         }
 
         // Sequential steps with rollback
-        let createdTopicId: number | undefined;
+        let createdTopicId: number | string | undefined;
         let newInstanceName: string | undefined;
 
         try {
@@ -1020,7 +1006,7 @@ export class FleetManager implements FleetContext {
             ...(worktreePath ? { worktree_source: directory } : {}),
           } as InstanceConfig;
           this.fleetConfig!.instances[newInstanceName] = instanceConfig;
-          this.routingTable.set(createdTopicId, { kind: "instance", name: newInstanceName });
+          this.routingTable.set(String(createdTopicId), { kind: "instance", name: newInstanceName });
           this.saveFleetConfig();
 
           // Step c: Start instance
@@ -1040,7 +1026,7 @@ export class FleetManager implements FleetContext {
           }
           if (newInstanceName && this.fleetConfig?.instances[newInstanceName]) {
             delete this.fleetConfig.instances[newInstanceName];
-            if (createdTopicId) this.routingTable.delete(createdTopicId);
+            if (createdTopicId) this.routingTable.delete(String(createdTopicId));
             this.saveFleetConfig();
           }
           if (createdTopicId) {
@@ -1230,14 +1216,14 @@ export class FleetManager implements FleetContext {
   // ===================== Topic management =====================
 
   /** Create a forum topic via the adapter. Returns the message_thread_id. */
-  async createForumTopic(topicName: string): Promise<number> {
+  async createForumTopic(topicName: string): Promise<number | string> {
     if (!this.adapter?.createTopic) {
       throw new Error("Adapter does not support topic creation");
     }
     return this.adapter.createTopic(topicName);
   }
 
-  private async deleteForumTopic(topicId: number): Promise<void> {
+  private async deleteForumTopic(topicId: number | string): Promise<void> {
     try {
       const groupId = this.fleetConfig?.channel?.group_id;
       const botTokenEnv = this.fleetConfig?.channel?.bot_token_env;
@@ -1365,8 +1351,8 @@ export class FleetManager implements FleetContext {
     }
 
     // Remove from routing table
-    if (config.topic_id) {
-      this.routingTable.delete(config.topic_id);
+    if (config.topic_id != null) {
+      this.routingTable.delete(String(config.topic_id));
     }
 
     // Remove from fleet config and save
@@ -1381,7 +1367,9 @@ export class FleetManager implements FleetContext {
     const timer = setInterval(() => {
       try {
         const data = JSON.parse(readFileSync(statusFile, "utf-8"));
-        this.costGuard?.updateCost(name, data.cost?.total_cost_usd ?? 0);
+        if (data.cost?.total_cost_usd != null) {
+          this.costGuard?.updateCost(name, data.cost.total_cost_usd);
+        }
         const rl = data.rate_limits;
         if (rl) {
           const prev = this.instanceRateLimits.get(name);
@@ -1541,7 +1529,8 @@ export class FleetManager implements FleetContext {
     for (const [name, config] of Object.entries(this.fleetConfig.instances)) {
       const topicId = config.topic_id;
       if (topicId == null || config.general_topic) continue;
-      if (this.archivedTopics.has(topicId)) continue;
+      const topicIdStr = String(topicId);
+      if (this.archivedTopics.has(topicIdStr)) continue;
 
       const status = this.getInstanceStatus(name);
       if (status !== "running") continue; // only archive running-but-idle
@@ -1551,14 +1540,14 @@ export class FleetManager implements FleetContext {
       if (now - last < FleetManager.ARCHIVE_IDLE_MS) continue;
 
       this.logger.info({ name, topicId, idleHours: Math.round((now - last) / 3600000) }, "Archiving idle topic");
-      this.archivedTopics.add(topicId);
+      this.archivedTopics.add(topicIdStr);
       this.setTopicIcon(name, "remove");
       await this.adapter.closeForumTopic(topicId);
     }
   }
 
   /** Reopen an archived topic and restore icon */
-  private async reopenArchivedTopic(topicId: number, instanceName: string): Promise<void> {
+  private async reopenArchivedTopic(topicId: string, instanceName: string): Promise<void> {
     if (!this.archivedTopics.has(topicId)) return;
     this.archivedTopics.delete(topicId);
 

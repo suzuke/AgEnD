@@ -20,7 +20,7 @@ export function isProbeableRouteTarget(target: RouteTarget): boolean {
 export interface FleetContext {
   readonly adapter: ChannelAdapter | null;
   readonly fleetConfig: FleetConfig | null;
-  readonly routingTable: Map<number, RouteTarget>;
+  readonly routingTable: Map<string, RouteTarget>;
   readonly instanceIpcClients: Map<string, IpcClient>;
   readonly scheduler: Scheduler | null;
   readonly logger: Logger;
@@ -33,6 +33,6 @@ export interface FleetContext {
   connectIpcToInstance(name: string): Promise<void>;
   saveFleetConfig(): void;
   getInstanceDir(name: string): string;
-  createForumTopic(topicName: string): Promise<number>;
+  createForumTopic(topicName: string): Promise<number | string>;
   removeInstance(name: string): Promise<void>;
 }

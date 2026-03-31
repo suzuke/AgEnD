@@ -20,7 +20,8 @@ export class ClaudeCodeBackend implements CliBackend {
     if (process.env.ANTHROPIC_API_KEY && !this.hasOAuthSession()) {
       envPrefix.push(`ANTHROPIC_API_KEY=${process.env.ANTHROPIC_API_KEY}`);
     }
-    let cmd = `${envPrefix.join(" ")} ${this.binaryPath} --settings ${settingsPath} --mcp-config ${mcpConfigPath} --dangerously-skip-permissions`;
+    let cmd = `${envPrefix.join(" ")} ${this.binaryPath} --settings ${settingsPath} --mcp-config ${mcpConfigPath}`;
+    if (config.skipPermissions !== false) cmd += " --dangerously-skip-permissions";
 
     const sessionIdFile = join(this.instanceDir, "session-id");
     if (existsSync(sessionIdFile)) {

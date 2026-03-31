@@ -112,8 +112,8 @@ export class DiscordAdapter extends EventEmitter implements ChannelAdapter {
 
       const userId = msg.author.id;
 
-      // Access control — Discord snowflake IDs are strings, parseInt for AccessManager
-      if (!this.accessManager.isAllowed(Number(userId))) {
+      // Access control — Discord snowflake IDs are strings, keep as-is to avoid precision loss
+      if (!this.accessManager.isAllowed(userId)) {
         return;
       }
 
@@ -414,7 +414,7 @@ export class DiscordAdapter extends EventEmitter implements ChannelAdapter {
 
   // ── Topology: create channel ────────────────────────────────────────────
 
-  async createTopic(name: string): Promise<number> {
+  async createTopic(name: string): Promise<string> {
     const guild = await this.client.guilds.fetch(this.guildId);
 
     // Find or create the category
@@ -436,10 +436,10 @@ export class DiscordAdapter extends EventEmitter implements ChannelAdapter {
     };
 
     const channel = await guild.channels.create(channelOpts);
-    return parseInt(channel.id);
+    return channel.id;
   }
 
-  async topicExists(topicId: number): Promise<boolean> {
+  async topicExists(topicId: number | string): Promise<boolean> {
     try {
       const channel = await this.client.channels.fetch(String(topicId));
       return channel != null;
@@ -451,7 +451,7 @@ export class DiscordAdapter extends EventEmitter implements ChannelAdapter {
   // ── Pairing ────────────────────────────────────────────────────────────
 
   async handlePairing(chatId: string, userId: string): Promise<string> {
-    const code = this.accessManager.generateCode(Number(userId));
+    const code = this.accessManager.generateCode(userId);
     return code;
   }
 

@@ -93,7 +93,7 @@ export class TopicCommands {
   }
 
   /** Handle topic deletion — stop daemon and remove from config */
-  async handleTopicDeleted(threadId: number): Promise<void> {
+  async handleTopicDeleted(threadId: string): Promise<void> {
     const target = this.ctx.routingTable.get(threadId);
     if (!target) return;
     if (target.kind === "general") {
@@ -106,7 +106,7 @@ export class TopicCommands {
   }
 
   /** Create instance config, save fleet.yaml, start daemon, connect IPC. */
-  async bindAndStart(dirPath: string, topicId: number): Promise<string> {
+  async bindAndStart(dirPath: string, topicId: number | string): Promise<string> {
     if (!this.ctx.fleetConfig) throw new Error("Fleet config not loaded");
 
     const instanceName = `${sanitizeInstanceName(basename(dirPath))}-t${topicId}`;
@@ -120,7 +120,7 @@ export class TopicCommands {
     };
 
     this.ctx.saveFleetConfig();
-    this.ctx.routingTable.set(topicId, { kind: "instance", name: instanceName });
+    this.ctx.routingTable.set(String(topicId), { kind: "instance", name: instanceName });
 
     await this.ctx.startInstance(instanceName, this.ctx.fleetConfig.instances[instanceName], true);
 

@@ -321,7 +321,7 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
       }
 
       // Send first chunk directly to get the messageId; enqueue the rest
-      const parseMode = opts?.format === "markdown" ? "HTML" as const : undefined;
+      const parseMode = opts?.format === "html" ? "HTML" as const : undefined;
       this.bot.api
         .sendMessage(Number(chatId), chunks[0], {
           message_thread_id: threadId != null ? Number(threadId) : undefined,
@@ -604,31 +604,31 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
 
   // ── Pairing ───────────────────────────────────────────────────────────────
 
-  async closeForumTopic(threadId: number): Promise<void> {
+  async closeForumTopic(threadId: number | string): Promise<void> {
     const chatId = this.getChatId();
     if (!chatId) return;
     try {
-      await this.bot.api.closeForumTopic(Number(chatId), threadId);
+      await this.bot.api.closeForumTopic(Number(chatId), Number(threadId));
     } catch {
       // Best-effort — topic may already be closed
     }
   }
 
-  async reopenForumTopic(threadId: number): Promise<void> {
+  async reopenForumTopic(threadId: number | string): Promise<void> {
     const chatId = this.getChatId();
     if (!chatId) return;
     try {
-      await this.bot.api.reopenForumTopic(Number(chatId), threadId);
+      await this.bot.api.reopenForumTopic(Number(chatId), Number(threadId));
     } catch {
       // Best-effort — topic may already be open
     }
   }
 
-  async editForumTopic(threadId: number, opts: { name?: string; iconCustomEmojiId?: string }): Promise<void> {
+  async editForumTopic(threadId: number | string, opts: { name?: string; iconCustomEmojiId?: string }): Promise<void> {
     const chatId = this.getChatId();
     if (!chatId) return;
     try {
-      await this.bot.api.editForumTopic(Number(chatId), threadId, {
+      await this.bot.api.editForumTopic(Number(chatId), Number(threadId), {
         name: opts.name,
         icon_custom_emoji_id: opts.iconCustomEmojiId,
       });
@@ -645,7 +645,7 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
   }
 
   async handlePairing(chatId: string, userId: string): Promise<string> {
-    const code = this.accessManager.generateCode(Number(userId));
+    const code = this.accessManager.generateCode(userId);
     return code;
   }
 

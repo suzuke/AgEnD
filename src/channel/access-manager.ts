@@ -4,14 +4,14 @@ import type { AccessConfig } from "../types.js";
 
 interface PendingCode {
   code: string;
-  userId: number;
+  userId: number | string;
   createdAt: number;
   attempts: number;
 }
 
 interface AccessState {
   mode?: "pairing" | "locked";
-  allowed_users: number[];
+  allowed_users: (number | string)[];
   pending_codes: PendingCode[];
 }
 
@@ -71,16 +71,16 @@ export class AccessManager {
     }
   }
 
-  isAllowed(userId: number): boolean {
+  isAllowed(userId: number | string): boolean {
     return this.state.allowed_users.includes(userId);
   }
 
-  hasPairingQuota(userId: number): boolean {
+  hasPairingQuota(userId: number | string): boolean {
     const userCodes = this.state.pending_codes.filter((p) => p.userId === userId);
     return userCodes.length < 2;
   }
 
-  generateCode(userId: number): string {
+  generateCode(userId: number | string): string {
     this.pruneExpired();
 
     if (this.state.mode === "locked") {
@@ -175,11 +175,11 @@ export class AccessManager {
     return this.state.mode ?? this.config.mode;
   }
 
-  getAllowedUsers(): number[] {
+  getAllowedUsers(): (number | string)[] {
     return [...this.state.allowed_users];
   }
 
-  removeUser(userId: number): boolean {
+  removeUser(userId: number | string): boolean {
     const idx = this.state.allowed_users.indexOf(userId);
     if (idx === -1) {
       return false;

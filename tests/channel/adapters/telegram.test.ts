@@ -317,7 +317,7 @@ describe("TelegramAdapter", () => {
   it("handlePairing delegates to AccessManager.generateCode", async () => {
     const spy = vi.spyOn(am, "generateCode").mockReturnValue("AABBCC");
     const code = await adapter.handlePairing("100", "999");
-    expect(spy).toHaveBeenCalledWith(999);
+    expect(spy).toHaveBeenCalledWith("999");
     expect(code).toBe("AABBCC");
   });
 

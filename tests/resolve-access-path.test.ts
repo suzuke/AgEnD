@@ -10,8 +10,8 @@ describe("resolveAccessPathFromConfig", () => {
     expect(result).toBe(join(dataDir, "access", "access.json"));
   });
 
-  it("returns fleet-level path when no fleet channel configured", () => {
+  it("returns per-instance path when no fleet channel configured", () => {
     const result = resolveAccessPathFromConfig(dataDir, "my-inst", undefined);
-    expect(result).toBe(join(dataDir, "access", "access.json"));
+    expect(result).toBe(join(dataDir, "instances", "my-inst", "access.json"));
   });
 });

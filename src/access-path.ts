@@ -6,11 +6,11 @@ import { join } from "node:path";
  */
 export function resolveAccessPathFromConfig(
   dataDir: string,
-  _instance: string,
+  instance: string,
   fleetChannel: { mode?: string } | undefined,
 ): string {
   if (fleetChannel?.mode === "topic") {
     return join(dataDir, "access", "access.json");
   }
-  return join(dataDir, "access", "access.json");
+  return join(dataDir, "instances", instance, "access.json");
 }

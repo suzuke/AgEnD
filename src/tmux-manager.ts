@@ -47,7 +47,7 @@ export class TmuxManager {
   // === Instance window methods ===
 
   async createWindow(command: string, cwd: string, windowName?: string): Promise<string> {
-    const args = ["new-window", "-t", this.sessionName, "-c", cwd];
+    const args = ["new-window", "-a", "-t", this.sessionName, "-c", cwd];
     if (windowName) args.push("-n", windowName);
     args.push("-P", "-F", "#{window_id}", command);
     const { stdout } = await exec("tmux", args);

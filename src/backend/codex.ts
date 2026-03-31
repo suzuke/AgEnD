@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { execSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { type CliBackend, type CliBackendConfig, resolveBinary } from "./types.js";
 
@@ -37,7 +38,6 @@ export class CodexBackend implements CliBackend {
     writeFileSync(join(this.instanceDir, "setup-mcp.sh"), setupScript, { mode: 0o755 });
 
     // Run setup immediately
-    const { execSync } = require("node:child_process");
     try {
       execSync(`bash ${join(this.instanceDir, "setup-mcp.sh")}`, { stdio: "ignore" });
     } catch { /* best effort */ }
@@ -55,7 +55,6 @@ export class CodexBackend implements CliBackend {
   }
 
   cleanup(config: CliBackendConfig): void {
-    const { execSync } = require("node:child_process");
     for (const name of Object.keys(config.mcpServers)) {
       try { execSync(`codex mcp remove ${name}`, { stdio: "ignore" }); } catch { /* best effort */ }
     }
