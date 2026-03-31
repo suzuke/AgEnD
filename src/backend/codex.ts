@@ -33,8 +33,8 @@ export class CodexBackend implements CliBackend {
     // that registers MCP servers on first launch
     const setupScript = Object.entries(config.mcpServers).map(([name, entry]) => {
       const args = entry.args.map(a => `"${a}"`).join(" ");
-      const envFlags = Object.entries(entry.env || {}).map(([k, v]) => `-e ${k}="${v}"`).join(" ");
-      return `codex mcp add ${name} ${entry.command} ${args} ${envFlags} 2>/dev/null || true`;
+      const envFlags = Object.entries(entry.env || {}).map(([k, v]) => `--env ${k}="${v}"`).join(" ");
+      return `codex mcp add ${name} ${envFlags} -- ${entry.command} ${args} 2>/dev/null || true`;
     }).join("\n");
     writeFileSync(join(this.instanceDir, "setup-mcp.sh"), setupScript, { mode: 0o755 });
 
