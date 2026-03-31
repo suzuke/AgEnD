@@ -18,10 +18,11 @@ export class CodexBackend implements CliBackend {
       cmd += ` -c model="${config.model}"`;
     }
 
+    // Codex reads AGENTS.md from the working directory for system instructions.
+    // Write the prompt there so Codex auto-loads it on startup.
     if (config.systemPrompt) {
       const promptPath = join(this.instanceDir, "system-prompt.md");
       writeFileSync(promptPath, config.systemPrompt);
-      cmd += ` --system-prompt-file "${promptPath}"`;
     }
 
     return cmd;
