@@ -763,11 +763,8 @@ export class Daemon extends EventEmitter {
       try {
         const pane = await this.tmux!.capturePane();
 
-        // CLI is ready (pattern defined by each backend)
-        if (this.backend!.getReadyPattern().test(pane)) return true;
-
-        // Confirmation dialog: "Yes, I accept" / "Yes, I trust this folder"
-        // Navigate to the "Yes" option and confirm
+        // Confirmation dialog: check BEFORE ready pattern so dialogs aren't mistaken as ready
+        // "Yes, I accept" / "Yes, I trust this folder"
         if (/No, exit|I accept|I trust/i.test(pane)) {
           this.logger.debug("Dismissing confirmation dialog");
           // If "No" is selected (❯ on No), press Down to select Yes
@@ -786,6 +783,9 @@ export class Daemon extends EventEmitter {
           if (!await this.tmux!.isWindowAlive()) return false;
           continue;
         }
+
+        // CLI is ready (pattern defined by each backend)
+        if (this.backend!.getReadyPattern().test(pane)) return true;
 
         // Resume Session picker or command not found
         if (/Resume Session|command not found|not found/i.test(pane)) return false;

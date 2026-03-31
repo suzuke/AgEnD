@@ -68,7 +68,7 @@ export class ClaudeCodeBackend implements CliBackend {
   }
 
   getReadyPattern(): RegExp {
-    return /❯|bypass permissions|ok\s*$/m;
+    return /❯|ok\s*$/m;
   }
 
   getContextUsage(): number | null {
