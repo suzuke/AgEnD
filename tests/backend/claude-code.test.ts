@@ -13,10 +13,10 @@ function makeConfig(overrides?: Partial<CliBackendConfig>): CliBackendConfig {
     instanceDir: TEST_DIR,
     instanceName: "test",
     mcpServers: {
-      "ccd-channel": {
+      "agend": {
         command: "node",
         args: ["/path/to/mcp-server.js"],
-        env: { CCD_SOCKET_PATH: "/tmp/test.sock" },
+        env: { AGEND_SOCKET_PATH: "/tmp/test.sock" },
       },
     },
     ...overrides,
@@ -74,8 +74,8 @@ describe("ClaudeCodeBackend", () => {
       const backend = new ClaudeCodeBackend(TEST_DIR);
       backend.writeConfig(makeConfig());
       const mcpConfig = JSON.parse(readFileSync(join(TEST_DIR, "mcp-config.json"), "utf-8"));
-      expect(mcpConfig.mcpServers["ccd-channel"]).toBeDefined();
-      expect(mcpConfig.mcpServers["ccd-channel"].command).toBe("node");
+      expect(mcpConfig.mcpServers["agend"]).toBeDefined();
+      expect(mcpConfig.mcpServers["agend"].command).toBe("node");
     });
 
     it("does not write .mcp.json to working directory", () => {

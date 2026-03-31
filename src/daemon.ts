@@ -158,7 +158,7 @@ export class Daemon extends EventEmitter {
     });
 
     // 2. Tmux — ensure session, create window if not alive
-    const sessionName = "ccd";
+    const sessionName = "agend";
     await TmuxManager.ensureSession(sessionName);
     this.tmux = new TmuxManager(sessionName, "");
 
@@ -269,8 +269,8 @@ export class Daemon extends EventEmitter {
 
     }
 
-    // Set CCD_SOCKET_PATH env for MCP server
-    process.env.CCD_SOCKET_PATH = sockPath;
+    // Set AGEND_SOCKET_PATH env for MCP server
+    process.env.AGEND_SOCKET_PATH = sockPath;
 
     // 10. Health check — detect crashed tmux window and respawn
     if (!this.config.lightweight) {
@@ -340,10 +340,10 @@ export class Daemon extends EventEmitter {
           this.saveSessionId();
           this.transcriptMonitor?.resetOffset();
           // Kill any same-name windows before respawn to prevent orphans
-          const windows = await TmuxManager.listWindows("ccd");
+          const windows = await TmuxManager.listWindows("agend");
           for (const w of windows) {
             if (w.name === this.name) {
-              const tm = new TmuxManager("ccd", w.id);
+              const tm = new TmuxManager("agend", w.id);
               await tm.killWindow();
             }
           }
@@ -412,7 +412,7 @@ export class Daemon extends EventEmitter {
     if (name === "Glob") return `Glob ${inp.pattern ?? ""}`;
     if (name === "Grep") return `Grep ${inp.pattern ?? ""}`;
     if (name === "Agent") return "Agent (subagent)";
-    if (name.startsWith("mcp__ccd-channel__")) return ""; // skip channel tools
+    if (name.startsWith("mcp__agend__")) return ""; // skip channel tools
     return name;
   }
 
@@ -616,10 +616,10 @@ export class Daemon extends EventEmitter {
       instanceDir: this.instanceDir,
       instanceName: this.name,
       mcpServers: {
-        "ccd-channel": {
+        "agend": {
           command: "node",
           args: [serverJs],
-          env: { CCD_SOCKET_PATH: sockPath },
+          env: { AGEND_SOCKET_PATH: sockPath },
         },
       },
       systemPrompt: this.buildSystemPrompt(),
@@ -658,9 +658,9 @@ export class Daemon extends EventEmitter {
     }
     const backendConfig = this.buildBackendConfig();
     this.backend.writeConfig(backendConfig);
-    // Inject CCD_INSTANCE_NAME via shell env (not .mcp.json) so internal sessions
+    // Inject AGEND_INSTANCE_NAME via shell env (not .mcp.json) so internal sessions
     // are distinguishable from external sessions sharing the same .mcp.json
-    let claudeCmd = `CCD_INSTANCE_NAME=${this.name} ` + this.backend.buildCommand(backendConfig);
+    let claudeCmd = `AGEND_INSTANCE_NAME=${this.name} ` + this.backend.buildCommand(backendConfig);
 
     const windowId = await this.tmux!.createWindow(claudeCmd, this.config.working_directory, this.name);
     const windowIdFile = join(this.instanceDir, "window-id");

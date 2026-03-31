@@ -1,9 +1,0 @@
-{
-  "ccd-channel": {
-    "command": "node",
-    "args": ["${CLAUDE_PLUGIN_ROOT}/server.js"],
-    "env": {
-      "CCD_SOCKET_PATH": "${CCD_SOCKET_PATH}"
-    }
-  }
-}

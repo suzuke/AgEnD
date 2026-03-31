@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { mkdirSync, statSync, renameSync, unlinkSync } from "node:fs";
 
-const DATA_DIR = join(homedir(), ".claude-channel-daemon");
+const DATA_DIR = join(homedir(), ".agend");
 const LOG_FILE = join(DATA_DIR, "daemon.log");
 const MAX_LOG_SIZE = 10 * 1024 * 1024; // 10 MB
 const MAX_LOG_BACKUPS = 3;

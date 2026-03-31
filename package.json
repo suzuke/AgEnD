@@ -1,15 +1,15 @@
 {
-  "name": "claude-channel-daemon",
-  "version": "0.6.0",
-  "description": "Reliable daemon wrapper for Claude Code Channels",
+  "name": "agend",
+  "version": "1.0.0",
+  "description": "Multi-agent fleet daemon — run any coding CLI (Claude, Gemini, Codex, OpenCode) from Telegram",
   "type": "module",
   "bin": {
-    "ccd": "./dist/cli.js",
-    "claude-channel-daemon": "./dist/cli.js"
+    "agend": "./dist/cli.js",
+    "ccd": "./dist/cli.js"
   },
   "scripts": {
     "build": "tsc",
-    "postbuild": "cp -r src/plugin dist/ && cd dist/plugin/ccd-channel && ln -sf ../../channel/mcp-server.js server.js",
+    "postbuild": "cp -r src/plugin dist/ && cd dist/plugin/agend && ln -sf ../../channel/mcp-server.js server.js",
     "start": "tsx src/cli.ts start",
     "dev": "tsx src/cli.ts",
     "test": "vitest run",
@@ -25,12 +25,16 @@
     "url": "https://github.com/suzuke/claude-channel-daemon.git"
   },
   "keywords": [
-    "claude",
-    "claude-code",
+    "agend",
+    "agent",
+    "fleet",
     "telegram",
-    "daemon",
-    "ai-agent",
-    "fleet-management"
+    "claude",
+    "gemini",
+    "codex",
+    "opencode",
+    "multi-agent",
+    "daemon"
   ],
   "files": [
     "dist/",

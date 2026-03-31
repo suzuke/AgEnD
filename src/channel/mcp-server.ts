@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * MCP Tool Server for claude-channel-daemon.
+ * MCP Tool Server for agend.
  *
  * Runs as a SEPARATE process (CLI's child via --mcp-config).
  * Communicates with the daemon through a Unix socket IPC connection.
@@ -22,7 +22,7 @@ import { TOOLS } from "./mcp-tools.js";
 // Configuration
 // ---------------------------------------------------------------------------
 
-const SOCKET_PATH = process.env.CCD_SOCKET_PATH ?? "";
+const SOCKET_PATH = process.env.AGEND_SOCKET_PATH ?? "";
 const IPC_TIMEOUT_MS = 30_000;
 const SLOW_IPC_TIMEOUT_MS = 60_000;
 
@@ -35,16 +35,16 @@ const SLOW_TOOLS = new Set(["start_instance", "create_instance", "delete_instanc
 // When the parent Claude process dies, stdin closes. Exit immediately to avoid
 // becoming an orphaned process that spins CPU forever on reconnect loops.
 process.stdin.on("end", () => {
-  process.stderr.write("ccd-channel: stdin closed (parent died) — exiting\n");
+  process.stderr.write("agend: stdin closed (parent died) — exiting\n");
   process.exit(0);
 });
 process.stdin.resume(); // ensure 'end' fires even if nothing reads stdin
 
 process.on("unhandledRejection", (err) => {
-  process.stderr.write(`ccd-channel: unhandled rejection: ${err}\n`);
+  process.stderr.write(`agend: unhandled rejection: ${err}\n`);
 });
 process.on("uncaughtException", (err) => {
-  process.stderr.write(`ccd-channel: uncaught exception: ${err}\n`);
+  process.stderr.write(`agend: uncaught exception: ${err}\n`);
 });
 
 // ---------------------------------------------------------------------------
@@ -78,7 +78,7 @@ function setupIpcListeners(client: IpcClient): void {
 
   client.on("disconnect", () => {
     ipcConnected = false;
-    process.stderr.write("ccd-channel: IPC disconnected — will reconnect\n");
+    process.stderr.write("agend: IPC disconnected — will reconnect\n");
     // Reject all pending requests
     for (const [id, pending] of pendingRequests) {
       clearTimeout(pending.timer);
@@ -98,17 +98,17 @@ async function connectIpc(): Promise<void> {
     reconnecting = false;
     reconnectAttempts = 0;
     setupIpcListeners(client);
-    // CCD_INSTANCE_NAME: set by daemon via tmux env (internal sessions)
-    // CCD_SESSION_NAME: set in .mcp.json env (external sessions, optional custom name)
+    // AGEND_INSTANCE_NAME: set by daemon via tmux env (internal sessions)
+    // AGEND_SESSION_NAME: set in .mcp.json env (external sessions, optional custom name)
     // Fallback: unique name from working directory + PID (avoids collision when
     // multiple Claude Code sessions work on the same project)
-    const sessionName = process.env.CCD_INSTANCE_NAME
-      ?? process.env.CCD_SESSION_NAME
+    const sessionName = process.env.AGEND_INSTANCE_NAME
+      ?? process.env.AGEND_SESSION_NAME
       ?? `external-${basename(process.cwd())}-${process.pid}`;
     client.send({ type: "mcp_ready", sessionName });
-    process.stderr.write("ccd-channel: connected to daemon IPC\n");
+    process.stderr.write("agend: connected to daemon IPC\n");
   } catch (err) {
-    process.stderr.write(`ccd-channel: failed to connect to daemon IPC: ${err}\n`);
+    process.stderr.write(`agend: failed to connect to daemon IPC: ${err}\n`);
     ipcConnected = false;
     scheduleReconnect();
   }
@@ -118,12 +118,12 @@ function scheduleReconnect(): void {
   if (reconnecting) return;
   reconnectAttempts++;
   if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
-    process.stderr.write(`ccd-channel: max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) exceeded — exiting\n`);
+    process.stderr.write(`agend: max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) exceeded — exiting\n`);
     process.exit(1);
   }
   reconnecting = true;
   const delay = 3000;
-  process.stderr.write(`ccd-channel: reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...\n`);
+  process.stderr.write(`agend: reconnecting in ${delay}ms (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...\n`);
   setTimeout(() => {
     reconnecting = false;
     connectIpc();
@@ -165,7 +165,7 @@ function ipcRequest(
 // ---------------------------------------------------------------------------
 
 const mcp = new Server(
-  { name: "ccd-channel", version: "0.3.0" },
+  { name: "agend", version: "0.3.0" },
   {
     capabilities: {
       tools: {},
@@ -214,7 +214,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
 
 async function main(): Promise<void> {
   if (!SOCKET_PATH) {
-    process.stderr.write("ccd-channel: CCD_SOCKET_PATH environment variable is required\n");
+    process.stderr.write("agend: AGEND_SOCKET_PATH environment variable is required\n");
     process.exit(1);
   }
   // Connect to daemon IPC first (will auto-reconnect on disconnect)
@@ -224,10 +224,10 @@ async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await mcp.connect(transport);
 
-  process.stderr.write("ccd-channel: MCP server running\n");
+  process.stderr.write("agend: MCP server running\n");
 }
 
 main().catch((err) => {
-  process.stderr.write(`ccd-channel: fatal error: ${err}\n`);
+  process.stderr.write(`agend: fatal error: ${err}\n`);
   process.exit(1);
 });

@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 const TMP = join(tmpdir(), "ccd-export-import-test");
 
 function makeDataDir(name: string): string {
-  const dir = join(TMP, name, ".claude-channel-daemon");
+  const dir = join(TMP, name, ".agend");
   mkdirSync(dir, { recursive: true });
   return dir;
 }

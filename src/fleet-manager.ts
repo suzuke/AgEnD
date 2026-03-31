@@ -30,7 +30,7 @@ import type { HangDetector } from "./hang-detector.js";
 import { DailySummary } from "./daily-summary.js";
 import { WebhookEmitter } from "./webhook-emitter.js";
 
-const TMUX_SESSION = "ccd";
+const TMUX_SESSION = "agend";
 
 export function resolveReplyThreadId(
   argsThreadId: unknown,
@@ -286,7 +286,7 @@ export class FleetManager implements FleetContext {
     const hasGeneralTopic = Object.values(fleet.instances).some(inst => inst.general_topic === true);
     if (!hasGeneralTopic) {
       this.logger.info("Auto-creating general instance for General Topic");
-      const generalDir = join(homedir(), ".claude-channel-daemon", "general");
+      const generalDir = join(homedir(), ".agend", "general");
       mkdirSync(generalDir, { recursive: true });
       const claudeMdPath = join(generalDir, "CLAUDE.md");
       if (!existsSync(claudeMdPath)) {

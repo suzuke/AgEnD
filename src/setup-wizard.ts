@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { stdin, stdout } from "node:process";
 import { execSync } from "node:child_process";
 
-const DATA_DIR = join(homedir(), ".claude-channel-daemon");
+const DATA_DIR = join(homedir(), ".agend");
 const FLEET_CONFIG_PATH = join(DATA_DIR, "fleet.yaml");
 const ENV_PATH = join(DATA_DIR, ".env");
 
@@ -195,7 +195,7 @@ export async function runSetupWizard(): Promise<void> {
   console.log(`  ${dim("Get one from @BotFather on Telegram")}`);
 
   // Check if env var already set
-  let tokenEnvName = "CCD_BOT_TOKEN";
+  let tokenEnvName = "AGEND_BOT_TOKEN";
   let token = "";
   let botUsername = "";
 
@@ -232,7 +232,7 @@ export async function runSetupWizard(): Promise<void> {
 
   tokenEnvName = await ask(rl, "Env variable name for token", {
     default: tokenEnvName,
-    validate: (v) => /^[A-Z_][A-Z0-9_]*$/.test(v) ? null : "Must be uppercase with underscores (e.g., CCD_BOT_TOKEN)",
+    validate: (v) => /^[A-Z_][A-Z0-9_]*$/.test(v) ? null : "Must be uppercase with underscores (e.g., AGEND_BOT_TOKEN)",
   });
 
   // ── Step 3: Mode ──
@@ -553,7 +553,7 @@ export async function runSetupWizard(): Promise<void> {
   if (installSvc) {
     const { installService, detectPlatform } = await import("./service-installer.js");
     const svcPath = installService({
-      label: "com.ccd.fleet",
+      label: "com.agend.fleet",
       execPath: process.argv[1],
       path: process.env.PATH!,
       workingDirectory: DATA_DIR,

@@ -1,5 +1,5 @@
 /**
- * Generates fleet context system prompt for CCD instances.
+ * Generates fleet context system prompt for AgEnD instances.
  *
  * This prompt is injected into every instance so the agent understands
  * its role in the fleet and knows how to communicate via MCP tools.
@@ -13,9 +13,9 @@ export interface FleetPromptParams {
 export function generateFleetSystemPrompt(params: FleetPromptParams): string {
   const { instanceName, workingDirectory } = params;
 
-  return `# CCD Fleet Context
+  return `# AgEnD Fleet Context
 
-You are **${instanceName}**, an instance in a CCD (Claude Channel Daemon) fleet.
+You are **${instanceName}**, an instance in a AgEnD (Agent Engineering Daemon) fleet.
 Your working directory is \`${workingDirectory}\`.
 
 ## Message Format

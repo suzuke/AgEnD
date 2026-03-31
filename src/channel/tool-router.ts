@@ -3,7 +3,7 @@ import { resolve, sep } from "node:path";
 import { realpathSync, existsSync } from "node:fs";
 import type { ChannelAdapter } from "./types.js";
 
-const STATE_DIR = resolve(homedir(), ".claude-channel-daemon") + sep;
+const STATE_DIR = resolve(homedir(), ".agend") + sep;
 const INBOX_SEG = sep + "inbox" + sep;
 
 /** Block files inside the state dir (except inbox/) from being sent out. */

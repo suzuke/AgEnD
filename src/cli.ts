@@ -19,7 +19,7 @@ import { spawn, execSync } from "node:child_process";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const DATA_DIR = join(homedir(), ".claude-channel-daemon");
+const DATA_DIR = join(homedir(), ".agend");
 const FLEET_CONFIG_PATH = join(DATA_DIR, "fleet.yaml");
 
 const program = new Command();
@@ -571,7 +571,7 @@ program
     );
     const execPath = process.argv[1];
     const svcPath = installService({
-      label: "com.ccd.fleet",
+      label: "com.agend.fleet",
       execPath,
       path: process.env.PATH!,
       workingDirectory: DATA_DIR,
@@ -587,7 +587,7 @@ program
       if (plat === "macos") {
         console.log(`Run: launchctl load ${svcPath}`);
       } else {
-        console.log(`Run: systemctl --user enable --now com.ccd.fleet`);
+        console.log(`Run: systemctl --user enable --now com.agend.fleet`);
       }
     }
   });
@@ -597,7 +597,7 @@ program
   .description("Remove system service")
   .action(async () => {
     const { uninstallService } = await import("./service-installer.js");
-    const removed = uninstallService("com.ccd.fleet");
+    const removed = uninstallService("com.agend.fleet");
     if (removed) {
       console.log("Service uninstalled");
     } else {
