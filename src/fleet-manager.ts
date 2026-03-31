@@ -1006,6 +1006,7 @@ export class FleetManager implements FleetContext {
           const nameBase = worktreePath ? topicName : basename(workDir);
           newInstanceName = `${sanitizeInstanceName(nameBase)}-t${createdTopicId}`;
           const instanceConfig = {
+            ...DEFAULT_INSTANCE_CONFIG,
             ...this.fleetConfig!.defaults,
             working_directory: workDir,
             topic_id: createdTopicId,
