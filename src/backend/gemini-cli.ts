@@ -47,7 +47,7 @@ export class GeminiCliBackend implements CliBackend {
   }
 
   getReadyPattern(): RegExp {
-    return />\s*$|Gemini/m;
+    return /^\*\s|^>\s|YOLO mode/m;
   }
 
   getContextUsage(): number | null {

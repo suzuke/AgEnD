@@ -44,7 +44,7 @@ export class CodexBackend implements CliBackend {
   }
 
   getReadyPattern(): RegExp {
-    return />\s*$|Codex/m;
+    return /›\s*Ask Codex|›/m;
   }
 
   getContextUsage(): number | null {
