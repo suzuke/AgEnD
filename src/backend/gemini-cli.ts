@@ -46,6 +46,10 @@ export class GeminiCliBackend implements CliBackend {
     }
   }
 
+  getReadyPattern(): RegExp {
+    return />\s*$|Gemini/m;
+  }
+
   getContextUsage(): number | null {
     // Gemini CLI doesn't expose context usage via a file
     return null;

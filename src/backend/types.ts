@@ -32,6 +32,9 @@ export interface CliBackend {
   /** Read session ID for resume capability. Returns null if unavailable. */
   getSessionId(): string | null;
 
+  /** Regex to detect when the CLI is ready to accept input. */
+  getReadyPattern(): RegExp;
+
   /** Clean up config files on shutdown. */
   cleanup?(config: CliBackendConfig): void;
 }

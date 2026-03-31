@@ -67,6 +67,10 @@ export class ClaudeCodeBackend implements CliBackend {
     this.preApproveApiKey(config);
   }
 
+  getReadyPattern(): RegExp {
+    return /❯|bypass permissions|ok\s*$/m;
+  }
+
   getContextUsage(): number | null {
     try {
       const sf = join(this.instanceDir, "statusline.json");

@@ -43,6 +43,10 @@ export class CodexBackend implements CliBackend {
     } catch { /* best effort */ }
   }
 
+  getReadyPattern(): RegExp {
+    return />\s*$|Codex/m;
+  }
+
   getContextUsage(): number | null {
     return null;
   }

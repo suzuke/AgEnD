@@ -763,8 +763,8 @@ export class Daemon extends EventEmitter {
       try {
         const pane = await this.tmux!.capturePane();
 
-        // CLI is ready
-        if (/❯|bypass permissions|ok\s*$/m.test(pane)) return true;
+        // CLI is ready (pattern defined by each backend)
+        if (this.backend!.getReadyPattern().test(pane)) return true;
 
         // Confirmation dialog: "Yes, I accept" / "Yes, I trust this folder"
         // Navigate to the "Yes" option and confirm
