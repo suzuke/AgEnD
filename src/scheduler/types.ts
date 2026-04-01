@@ -55,3 +55,37 @@ export const DEFAULT_SCHEDULER_CONFIG: SchedulerConfig = {
   retry_count: 3,
   retry_interval_ms: 30_000,
 };
+
+// ── Shared Decisions ──────────────────────────────────────────
+
+export type DecisionStatus = "active" | "superseded" | "archived";
+
+export interface Decision {
+  id: string;
+  project_root: string;
+  title: string;
+  content: string;
+  tags: string[];
+  status: DecisionStatus;
+  superseded_by: string | null;
+  created_by: string;
+  created_at: string;
+  expires_at: string | null;
+  updated_at: string;
+}
+
+export interface CreateDecisionParams {
+  project_root: string;
+  title: string;
+  content: string;
+  tags?: string[];
+  ttl_days?: number; // 0 = permanent, default 7
+  created_by: string;
+  supersedes?: string; // decision id to supersede
+}
+
+export interface UpdateDecisionParams {
+  content?: string;
+  tags?: string[];
+  ttl_days?: number;
+}

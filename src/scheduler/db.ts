@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
-import type { Schedule, ScheduleRun, CreateScheduleParams, UpdateScheduleParams } from "./types.js";
+import type { Schedule, ScheduleRun, CreateScheduleParams, UpdateScheduleParams, Decision, CreateDecisionParams, UpdateDecisionParams } from "./types.js";
 
 export class SchedulerDb {
   private db: Database.Database;
@@ -33,6 +33,21 @@ export class SchedulerDb {
         detail      TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_schedule_runs_schedule_id ON schedule_runs(schedule_id);
+      CREATE TABLE IF NOT EXISTS decisions (
+        id            TEXT PRIMARY KEY,
+        project_root  TEXT NOT NULL,
+        title         TEXT NOT NULL,
+        content       TEXT NOT NULL,
+        tags          TEXT,
+        status        TEXT NOT NULL DEFAULT 'active',
+        superseded_by TEXT,
+        created_by    TEXT NOT NULL,
+        created_at    TEXT NOT NULL,
+        expires_at    TEXT,
+        updated_at    TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_decisions_project ON decisions(project_root);
+      CREATE INDEX IF NOT EXISTS idx_decisions_status ON decisions(status);
     `);
   }
 
@@ -124,6 +139,102 @@ export class SchedulerDb {
 
   pruneOldRuns(days = 30): void {
     this.db.prepare("DELETE FROM schedule_runs WHERE triggered_at < datetime('now', '-' || ? || ' days')").run(days);
+  }
+
+  // ── Decisions ───────────────────────────────────────────────
+
+  private rowToDecision(row: Record<string, unknown>): Decision {
+    return {
+      id: row.id as string,
+      project_root: row.project_root as string,
+      title: row.title as string,
+      content: row.content as string,
+      tags: row.tags ? JSON.parse(row.tags as string) : [],
+      status: row.status as Decision["status"],
+      superseded_by: row.superseded_by as string | null,
+      created_by: row.created_by as string,
+      created_at: row.created_at as string,
+      expires_at: row.expires_at as string | null,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  createDecision(params: CreateDecisionParams): Decision {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    const ttl = params.ttl_days ?? 7;
+    const expiresAt = ttl > 0 ? new Date(Date.now() + ttl * 86_400_000).toISOString() : null;
+
+    this.db.prepare(`
+      INSERT INTO decisions (id, project_root, title, content, tags, created_by, created_at, expires_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, params.project_root, params.title, params.content, params.tags?.length ? JSON.stringify(params.tags) : null, params.created_by, now, expiresAt, now);
+
+    if (params.supersedes) {
+      this.supersedeDecision(params.supersedes, id);
+    }
+
+    return this.getDecision(id)!;
+  }
+
+  getDecision(id: string): Decision | null {
+    const row = this.db.prepare("SELECT * FROM decisions WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+    return row ? this.rowToDecision(row) : null;
+  }
+
+  listDecisions(projectRoot: string, opts?: { includeArchived?: boolean; tags?: string[] }): Decision[] {
+    let sql = "SELECT * FROM decisions WHERE project_root = ?";
+    const values: unknown[] = [projectRoot];
+
+    if (!opts?.includeArchived) {
+      sql += " AND status = 'active'";
+    }
+
+    sql += " ORDER BY created_at DESC";
+    let rows = this.db.prepare(sql).all(...values) as Record<string, unknown>[];
+
+    if (opts?.tags?.length) {
+      rows = rows.filter(r => {
+        const tags = r.tags ? JSON.parse(r.tags as string) as string[] : [];
+        return opts.tags!.some(t => tags.includes(t));
+      });
+    }
+
+    return rows.map(r => this.rowToDecision(r));
+  }
+
+  updateDecision(id: string, params: UpdateDecisionParams): Decision {
+    const existing = this.getDecision(id);
+    if (!existing) throw new Error(`Decision "${id}" not found`);
+
+    const sets: string[] = ["updated_at = ?"];
+    const values: unknown[] = [new Date().toISOString()];
+
+    if (params.content !== undefined) { sets.push("content = ?"); values.push(params.content); }
+    if (params.tags !== undefined) { sets.push("tags = ?"); values.push(JSON.stringify(params.tags)); }
+    if (params.ttl_days !== undefined) {
+      const expiresAt = params.ttl_days > 0 ? new Date(Date.now() + params.ttl_days * 86_400_000).toISOString() : null;
+      sets.push("expires_at = ?"); values.push(expiresAt);
+    }
+
+    values.push(id);
+    this.db.prepare(`UPDATE decisions SET ${sets.join(", ")} WHERE id = ?`).run(...values);
+    return this.getDecision(id)!;
+  }
+
+  archiveDecision(id: string): void {
+    this.db.prepare("UPDATE decisions SET status = 'archived', updated_at = ? WHERE id = ?").run(new Date().toISOString(), id);
+  }
+
+  supersedeDecision(oldId: string, newId: string): void {
+    this.db.prepare("UPDATE decisions SET status = 'superseded', superseded_by = ?, updated_at = ? WHERE id = ?")
+      .run(newId, new Date().toISOString(), oldId);
+  }
+
+  pruneExpiredDecisions(): number {
+    const result = this.db.prepare("UPDATE decisions SET status = 'archived', updated_at = ? WHERE status = 'active' AND expires_at IS NOT NULL AND expires_at < ?")
+      .run(new Date().toISOString(), new Date().toISOString());
+    return result.changes;
   }
 
   close(): void {
