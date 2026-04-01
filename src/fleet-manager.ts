@@ -1499,6 +1499,36 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
         return;
       }
 
+      // Fleet API (enriched for agent board)
+      if (req.method === "GET" && req.url === "/api/fleet") {
+        const sysInfo = this.getSysInfo();
+        const enriched = sysInfo.instances.map(inst => {
+          const config = this.fleetConfig?.instances[inst.name];
+          // Find claimed tasks for this instance
+          let currentTask: string | null = null;
+          try {
+            const tasks = this.scheduler?.db.listTasks({ assignee: inst.name, status: "claimed" });
+            if (tasks?.length) currentTask = tasks[0].title;
+          } catch { /* no scheduler */ }
+          return {
+            ...inst,
+            description: config?.description ?? null,
+            backend: config?.backend ?? "claude-code",
+            tool_set: config?.tool_set ?? "full",
+            general_topic: config?.general_topic ?? false,
+            lastActivity: this.lastActivityMs(inst.name) || null,
+            currentTask,
+          };
+        });
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.writeHead(200);
+        res.end(JSON.stringify({
+          ...sysInfo,
+          instances: enriched,
+        }));
+        return;
+      }
+
       // Activity API
       if (req.method === "GET" && req.url?.startsWith("/api/activity")) {
         const url = new URL(req.url, `http://localhost:${port}`);
@@ -1569,6 +1599,21 @@ const ACTIVITY_VIEWER_HTML = `<!DOCTYPE html>
   .feed-line .msg { color: #58a6ff; }
   .feed-line .tool { color: #d29922; }
   .feed-line .task { color: #3fb950; }
+  /* Agent Board */
+  .board { padding: 16px 24px; display: flex; gap: 12px; flex-wrap: wrap; border-bottom: 1px solid #21262d; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 12px 14px; min-width: 200px; flex: 1; max-width: 280px; transition: border-color 0.3s; }
+  .card.flash { border-color: #58a6ff; }
+  .card-header { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+  .card-header .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .card-header .dot.running { background: #3fb950; }
+  .card-header .dot.stopped { background: #8b949e; }
+  .card-header .dot.crashed { background: #f85149; }
+  .card-header .name { font-weight: 600; font-size: 14px; }
+  .card-row { font-size: 12px; color: #8b949e; line-height: 1.6; }
+  .card-row span { color: #c9d1d9; }
+  .card-task { font-size: 12px; color: #d29922; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .board-empty { font-size: 13px; color: #8b949e; padding: 8px 0; }
+  .section-label { font-size: 11px; color: #484f58; text-transform: uppercase; letter-spacing: 1px; padding: 10px 24px 0; }
 </style>
 </head>
 <body>
@@ -1594,6 +1639,9 @@ const ACTIVITY_VIEWER_HTML = `<!DOCTYPE html>
   </div>
   <div class="status" id="status">Ready</div>
 </div>
+<div class="section-label">Agents</div>
+<div class="board" id="board"><div class="board-empty">Loading...</div></div>
+<div class="section-label">Sequence</div>
 <div id="diagram"><div class="mermaid" id="mermaidEl"></div></div>
 <div class="feed" id="feed"></div>
 
@@ -1728,7 +1776,63 @@ function stepReplay() {
   playTimeout = setTimeout(stepReplay, delayMs);
 }
 
+// ── Agent Board ──────────────────────────────────
+
+let prevBoard = '';
+
+async function loadBoard() {
+  try {
+    const resp = await fetch('/api/fleet');
+    const data = await resp.json();
+    renderBoard(data);
+  } catch {}
+}
+
+function renderBoard(data) {
+  const board = document.getElementById('board');
+  const cards = data.instances.map(inst => {
+    const statusDot = inst.status === 'running' ? 'running' : inst.status === 'crashed' ? 'crashed' : 'stopped';
+    const icon = inst.status === 'running' ? '🟢' : inst.status === 'crashed' ? '🔴' : '⚪';
+    const role = inst.general_topic ? 'coordinator' : inst.description || 'worker';
+    const costStr = '$' + (inst.costCents / 100).toFixed(2);
+    const lastMs = inst.lastActivity;
+    let lastStr = '—';
+    if (lastMs) {
+      const ago = Math.floor((Date.now() - lastMs) / 1000);
+      lastStr = ago < 60 ? ago + 's ago' : ago < 3600 ? Math.floor(ago/60) + 'm ago' : Math.floor(ago/3600) + 'h ago';
+    }
+    const ipc = inst.ipc ? '✓' : '✗';
+    const rl = inst.rateLimits ? ' · 5h:' + inst.rateLimits.five_hour_pct + '%' : '';
+    const taskLine = inst.currentTask
+      ? '<div class="card-task">📌 ' + inst.currentTask + '</div>'
+      : '<div class="card-task" style="color:#484f58">(idle)</div>';
+    return '<div class="card" data-name="' + inst.name + '">' +
+      '<div class="card-header"><div class="dot ' + statusDot + '"></div><div class="name">' + inst.name + '</div></div>' +
+      '<div class="card-row">' + role.slice(0, 30) + '</div>' +
+      '<div class="card-row">Backend: <span>' + inst.backend + '</span> · Tools: <span>' + inst.tool_set + '</span></div>' +
+      '<div class="card-row">IPC: <span>' + ipc + '</span> · Cost: <span>' + costStr + '</span>' + rl + '</div>' +
+      '<div class="card-row">Last: <span>' + lastStr + '</span></div>' +
+      taskLine +
+      '</div>';
+  });
+
+  const newHtml = cards.join('');
+  if (newHtml !== prevBoard) {
+    board.innerHTML = newHtml;
+    // Flash changed cards
+    board.querySelectorAll('.card').forEach(c => {
+      c.classList.add('flash');
+      setTimeout(() => c.classList.remove('flash'), 1000);
+    });
+    prevBoard = newHtml;
+  }
+}
+
+// Auto-refresh board every 10s
+setInterval(loadBoard, 10000);
+
 // Auto-load on page open
+loadBoard();
 load();
 </script>
 </body>
