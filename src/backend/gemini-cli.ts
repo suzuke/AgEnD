@@ -61,7 +61,7 @@ export class GeminiCliBackend implements CliBackend {
     if (!trusted[workDir]) { trusted[workDir] = "TRUST_FOLDER"; changed = true; }
     // Also trust parent directory (Gemini may resolve cwd differently under launchd)
     const parent = dirname(workDir);
-    if (parent !== workDir && !trusted[parent]) { trusted[parent] = "TRUST_PARENT_FOLDER"; changed = true; }
+    if (parent !== workDir && !trusted[parent]) { trusted[parent] = "TRUST_PARENT"; changed = true; }
     if (changed) {
       mkdirSync(dirname(trustFile), { recursive: true });
       writeFileSync(trustFile, JSON.stringify(trusted, null, 2));
