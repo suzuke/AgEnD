@@ -37,6 +37,7 @@ export interface LifecycleContext {
   notifyInstanceTopic(name: string, text: string): void;
   webhookEmit(event: string, name: string): void;
   startStatuslineWatcher(name: string): void;
+  getActiveDecisionsForProject(projectRoot: string): Array<{ title: string; content: string; tags: string[] }>;
 }
 
 type Daemon = InstanceType<typeof import("./daemon.js").Daemon>;
@@ -67,6 +68,8 @@ export class InstanceLifecycle {
     const backendName = config.backend ?? this.ctx.fleetConfig?.defaults?.backend ?? "claude-code";
     const backend = createBackend(backendName, instanceDir);
     const daemon = new Daemon(name, config, instanceDir, topicMode, backend, this.ctx.controlClient ?? undefined);
+    // Wire up decisions callback so system prompt includes active decisions
+    daemon.getActiveDecisions = () => this.ctx.getActiveDecisionsForProject(config.working_directory);
     await daemon.start();
     this.daemons.set(name, daemon);
 

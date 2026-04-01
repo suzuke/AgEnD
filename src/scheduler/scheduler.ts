@@ -3,7 +3,7 @@ import { SchedulerDb } from "./db.js";
 import type { Schedule, CreateScheduleParams, UpdateScheduleParams, SchedulerConfig, ScheduleRun } from "./types.js";
 
 export class Scheduler {
-  private db: SchedulerDb;
+  readonly db: SchedulerDb;
   private jobs: Map<string, Cron> = new Map();
   private onTrigger: (schedule: Schedule) => void;
   private config: SchedulerConfig;

@@ -60,6 +60,8 @@ export class Daemon extends EventEmitter {
   private recentUserMessages: Array<{ text: string; ts: string }> = [];
   private recentEvents: RotationSnapshotEvent[] = [];
   private recentToolActivity: string[] = [];
+  /** Callback to query active decisions for system prompt injection (set by fleet manager) */
+  getActiveDecisions?: () => Array<{ title: string; content: string; tags: string[] }>;
   private pasteLock: Promise<void> = Promise.resolve();
 
   constructor(
@@ -92,7 +94,7 @@ export class Daemon extends EventEmitter {
       if (!type) return;
       // Build lookup key matching the pattern used when registering
       let key: string | undefined;
-      if ((type === "fleet_schedule_response" || type === "fleet_outbound_response") && msg.fleetRequestId) {
+      if ((type === "fleet_schedule_response" || type === "fleet_outbound_response" || type === "fleet_decision_response") && msg.fleetRequestId) {
         key = String(msg.fleetRequestId);
       } else if (type === "fleet_outbound_response" && msg.requestId != null) {
         key = `fleet_out_${msg.requestId}`;
@@ -563,6 +565,31 @@ export class Daemon extends EventEmitter {
     // Schedule tools → route to fleet manager
     const CROSS_INSTANCE_TOOLS = new Set(["send_to_instance", "list_instances", "start_instance", "create_instance", "delete_instance", "request_information", "delegate_task", "report_result", "describe_instance"]);
     const SCHEDULE_TOOLS = new Set(["create_schedule", "list_schedules", "update_schedule", "delete_schedule"]);
+    const DECISION_TOOLS = new Set(["post_decision", "list_decisions", "update_decision"]);
+
+    if (DECISION_TOOLS.has(tool)) {
+      const typeMap: Record<string, string> = {
+        post_decision: "fleet_decision_create",
+        list_decisions: "fleet_decision_list",
+        update_decision: "fleet_decision_update",
+      };
+      const fleetReqId = `dec_${requestId}`;
+      this.ipcServer?.broadcast({
+        type: typeMap[tool],
+        payload: args,
+        meta: { instance_name: this.name, working_directory: this.config.working_directory },
+        fleetRequestId: fleetReqId,
+      });
+      const timeout = setTimeout(() => {
+        this.pendingIpcRequests.delete(fleetReqId);
+        respond(null, "Decision operation timed out after 30s");
+      }, 30_000);
+      this.pendingIpcRequests.set(fleetReqId, (respMsg) => {
+        clearTimeout(timeout);
+        respond(respMsg.result, respMsg.error as string | undefined);
+      });
+      return;
+    }
 
     if (SCHEDULE_TOOLS.has(tool)) {
       const typeMap: Record<string, string> = {
@@ -684,6 +711,11 @@ export class Daemon extends EventEmitter {
     let prompt = fleetContext;
     if (this.config.systemPrompt) {
       prompt += "\n\n" + this.config.systemPrompt;
+    }
+    // Inject active decisions for this project
+    const decisionsBlock = this.buildDecisionsPrompt();
+    if (decisionsBlock) {
+      prompt += "\n\n" + decisionsBlock;
     }
     // v3: inject previous session snapshot
     const snapshotBlock = this.buildSnapshotPrompt();
@@ -903,6 +935,35 @@ export class Daemon extends EventEmitter {
     try {
       const sf = join(this.instanceDir, "statusline.json");
       return JSON.parse(readFileSync(sf, "utf-8"));
+    } catch {
+      return null;
+    }
+  }
+
+  // ── Active Decisions: Prompt injection ─────────────────────
+
+  private buildDecisionsPrompt(): string | null {
+    if (!this.getActiveDecisions) return null;
+    try {
+      const decisions = this.getActiveDecisions();
+      if (decisions.length === 0) return null;
+
+      const BUDGET = 1500;
+      const lines: string[] = ["## Active Project Decisions"];
+      let used = lines[0].length;
+
+      for (const d of decisions) {
+        const tagStr = d.tags.length ? `[${d.tags.join(", ")}] ` : "";
+        const line = `- ${tagStr}**${d.title}**: ${d.content}`;
+        if (used + line.length + 1 > BUDGET) {
+          lines.push(`\n(${decisions.length - (lines.length - 1)} more — use \`list_decisions\` to see all)`);
+          break;
+        }
+        lines.push(line);
+        used += line.length + 1;
+      }
+
+      return lines.join("\n");
     } catch {
       return null;
     }

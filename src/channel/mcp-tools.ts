@@ -137,6 +137,49 @@ export const TOOLS = [
         required: ["id"],
       },
     },
+    // ── Shared Decisions ──────────────────────────────────────────
+    {
+      name: "post_decision",
+      description: "Record a project decision that all instances sharing this working directory can see. Decisions are injected into system prompts so future sessions inherit them. Use for architectural choices, coding conventions, or any knowledge that should persist across context rotations.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          title: { type: "string", description: "Short title for the decision" },
+          content: { type: "string", description: "Full decision description" },
+          tags: { type: "array", items: { type: "string" }, description: "Optional tags for categorization" },
+          ttl_days: { type: "number", description: "Days until auto-archive. Default: permanent (no expiry). Set e.g. 7 for temporary decisions." },
+          supersedes: { type: "string", description: "Decision ID to supersede (marks old one as superseded)" },
+        },
+        required: ["title", "content"],
+      },
+    },
+    {
+      name: "list_decisions",
+      description: "List active decisions for this project. Returns decisions that were recorded by any instance sharing this working directory.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          include_archived: { type: "boolean", description: "Include archived/superseded decisions. Default: false" },
+          tags: { type: "array", items: { type: "string" }, description: "Filter by tags" },
+        },
+      },
+    },
+    {
+      name: "update_decision",
+      description: "Update or archive an existing decision.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          id: { type: "string", description: "Decision ID" },
+          content: { type: "string", description: "Updated content" },
+          tags: { type: "array", items: { type: "string" }, description: "Updated tags" },
+          ttl_days: { type: "number", description: "Updated TTL in days" },
+          archive: { type: "boolean", description: "Set to true to archive this decision" },
+        },
+        required: ["id"],
+      },
+    },
+    // ── Cross-instance communication ──────────────────────────────
     {
       name: "send_to_instance",
       description: "Send a message to another Claude instance. The message appears in their channel as a passive notification — they decide whether to respond. Use this to share information, request reviews, or coordinate work across instances.",

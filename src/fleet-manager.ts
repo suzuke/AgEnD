@@ -105,6 +105,19 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     this.webhookEmitter?.emit(event, name);
   }
 
+  // NOTE: Decisions are currently scoped by project_root (working directory path).
+  // Future versions may need a more abstract scope model (team/fleet/cross-repo).
+  getActiveDecisionsForProject(projectRoot: string): Array<{ title: string; content: string; tags: string[] }> {
+    if (!this.scheduler) return [];
+    try {
+      return this.scheduler.db.listDecisions(projectRoot).map(d => ({
+        title: d.title,
+        content: d.content,
+        tags: d.tags,
+      }));
+    } catch { return []; }
+  }
+
   // ── SysInfo ────────────────────────────────────────────────────────────
   getSysInfo(): import("./fleet-context.js").SysInfo {
     const mem = process.memoryUsage();
@@ -509,6 +522,9 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
         } else if (msg.type === "fleet_schedule_create" || msg.type === "fleet_schedule_list" ||
                    msg.type === "fleet_schedule_update" || msg.type === "fleet_schedule_delete") {
           this.handleScheduleCrud(name, msg);
+        } else if (msg.type === "fleet_decision_create" || msg.type === "fleet_decision_list" ||
+                   msg.type === "fleet_decision_update") {
+          this.handleDecisionCrud(name, msg);
         }
       }, this.logger, `ipc.message[${name}]`));
       // Ask daemon for any sessions that registered before we connected
@@ -808,6 +824,63 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       ipc.send({ type: "fleet_schedule_response", fleetRequestId, result });
     } catch (err) {
       ipc.send({ type: "fleet_schedule_response", fleetRequestId, error: (err as Error).message });
+    }
+  }
+
+  private handleDecisionCrud(instanceName: string, msg: Record<string, unknown>): void {
+    const fleetRequestId = msg.fleetRequestId as string;
+    const payload = (msg.payload ?? {}) as Record<string, unknown>;
+    const meta = (msg.meta ?? {}) as Record<string, string>;
+    const ipc = this.instanceIpcClients.get(instanceName);
+    if (!ipc || !this.scheduler) return;
+
+    const db = this.scheduler.db;
+    const projectRoot = meta.working_directory || this.fleetConfig?.instances[instanceName]?.working_directory || "";
+
+    try {
+      let result: unknown;
+
+      switch (msg.type) {
+        case "fleet_decision_create": {
+          // Prune expired decisions on create
+          db.pruneExpiredDecisions();
+          result = db.createDecision({
+            project_root: projectRoot,
+            title: payload.title as string,
+            content: payload.content as string,
+            tags: payload.tags as string[] | undefined,
+            ttl_days: payload.ttl_days as number | undefined,
+            created_by: instanceName,
+            supersedes: payload.supersedes as string | undefined,
+          });
+          break;
+        }
+        case "fleet_decision_list":
+          db.pruneExpiredDecisions();
+          result = db.listDecisions(projectRoot, {
+            includeArchived: payload.include_archived as boolean | undefined,
+            tags: payload.tags as string[] | undefined,
+          });
+          break;
+        case "fleet_decision_update": {
+          const id = payload.id as string;
+          if (payload.archive) {
+            db.archiveDecision(id);
+            result = { archived: true, id };
+          } else {
+            result = db.updateDecision(id, {
+              content: payload.content as string | undefined,
+              tags: payload.tags as string[] | undefined,
+              ttl_days: payload.ttl_days as number | undefined,
+            });
+          }
+          break;
+        }
+      }
+
+      ipc.send({ type: "fleet_decision_response", fleetRequestId, result });
+    } catch (err) {
+      ipc.send({ type: "fleet_decision_response", fleetRequestId, error: (err as Error).message });
     }
   }
 
