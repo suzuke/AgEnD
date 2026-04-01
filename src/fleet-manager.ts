@@ -1499,6 +1499,35 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
         return;
       }
 
+      // Activity API
+      if (req.method === "GET" && req.url?.startsWith("/api/activity")) {
+        const url = new URL(req.url, `http://localhost:${port}`);
+        const sinceParam = url.searchParams.get("since") ?? "2h";
+        const limitParam = url.searchParams.get("limit") ?? "500";
+
+        const match = sinceParam.match(/^(\d+)(m|h|d)$/);
+        let sinceIso: string | undefined;
+        if (match) {
+          const val = parseInt(match[1], 10);
+          const unit = match[2] === "d" ? 86400000 : match[2] === "h" ? 3600000 : 60000;
+          sinceIso = new Date(Date.now() - val * unit).toISOString();
+        }
+
+        const rows = this.eventLog?.listActivity({ since: sinceIso, limit: parseInt(limitParam, 10) }) ?? [];
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.writeHead(200);
+        res.end(JSON.stringify(rows));
+        return;
+      }
+
+      // Activity viewer
+      if (req.method === "GET" && (req.url === "/activity" || req.url === "/activity/")) {
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.writeHead(200);
+        res.end(ACTIVITY_VIEWER_HTML);
+        return;
+      }
+
       res.writeHead(404);
       res.end(JSON.stringify({ error: "not found" }));
     });
@@ -1508,3 +1537,199 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     });
   }
 }
+
+const ACTIVITY_VIEWER_HTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgEnD Activity Viewer</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; }
+  .header { padding: 16px 24px; border-bottom: 1px solid #21262d; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .header h1 { font-size: 18px; color: #58a6ff; font-weight: 600; }
+  .controls { display: flex; gap: 8px; align-items: center; }
+  .controls select, .controls button { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; border-radius: 6px; padding: 4px 10px; font-size: 13px; cursor: pointer; }
+  .controls button.active { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+  .controls button:hover { border-color: #58a6ff; }
+  .speed-group { display: flex; gap: 2px; }
+  .speed-group button { border-radius: 0; }
+  .speed-group button:first-child { border-radius: 6px 0 0 6px; }
+  .speed-group button:last-child { border-radius: 0 6px 6px 0; }
+  .status { font-size: 12px; color: #8b949e; margin-left: auto; }
+  #diagram { padding: 24px; overflow-x: auto; }
+  #diagram .mermaid { background: transparent; }
+  #diagram svg { max-width: 100%; }
+  .feed { padding: 12px 24px; max-height: 300px; overflow-y: auto; border-top: 1px solid #21262d; font-size: 13px; line-height: 1.8; }
+  .feed-line { opacity: 0.6; }
+  .feed-line.visible { opacity: 1; }
+  .feed-line .time { color: #8b949e; }
+  .feed-line .msg { color: #58a6ff; }
+  .feed-line .tool { color: #d29922; }
+  .feed-line .task { color: #3fb950; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>AgEnD Activity</h1>
+  <div class="controls">
+    <select id="range">
+      <option value="1h">1h</option>
+      <option value="2h" selected>2h</option>
+      <option value="4h">4h</option>
+      <option value="8h">8h</option>
+      <option value="24h">24h</option>
+    </select>
+    <button id="btnLoad">Load</button>
+    <button id="btnPlay">▶ Play</button>
+    <button id="btnPause" style="display:none">⏸ Pause</button>
+    <div class="speed-group">
+      <button class="speed" data-speed="1">1x</button>
+      <button class="speed active" data-speed="2">2x</button>
+      <button class="speed" data-speed="5">5x</button>
+      <button class="speed" data-speed="10">10x</button>
+    </div>
+  </div>
+  <div class="status" id="status">Ready</div>
+</div>
+<div id="diagram"><div class="mermaid" id="mermaidEl"></div></div>
+<div class="feed" id="feed"></div>
+
+<script>
+mermaid.initialize({ startOnLoad: false, theme: 'dark', sequence: { mirrorActors: false, messageAlign: 'left' } });
+
+let rows = [];
+let speed = 2;
+let playing = false;
+let playTimeout = null;
+let visibleCount = 0;
+
+document.querySelectorAll('.speed').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.speed').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    speed = parseInt(btn.dataset.speed);
+  });
+});
+
+document.getElementById('btnLoad').addEventListener('click', load);
+document.getElementById('btnPlay').addEventListener('click', startReplay);
+document.getElementById('btnPause').addEventListener('click', pauseReplay);
+
+async function load() {
+  const range = document.getElementById('range').value;
+  document.getElementById('status').textContent = 'Loading...';
+  try {
+    const resp = await fetch('/api/activity?since=' + range + '&limit=500');
+    rows = await resp.json();
+    document.getElementById('status').textContent = rows.length + ' events loaded';
+    visibleCount = rows.length;
+    renderFull();
+  } catch (e) {
+    document.getElementById('status').textContent = 'Error: ' + e.message;
+  }
+}
+
+function buildMermaid(entries) {
+  const participants = new Set();
+  entries.forEach(r => { participants.add(r.sender); if (r.receiver) participants.add(r.receiver); });
+  const aliases = new Map();
+  let idx = 0;
+  participants.forEach(p => {
+    const a = p.length > 12 ? String.fromCharCode(65 + idx++) : p;
+    aliases.set(p, a);
+  });
+
+  let lines = ['sequenceDiagram'];
+  aliases.forEach((a, p) => lines.push('    participant ' + a + ' as ' + p));
+
+  entries.forEach(r => {
+    const s = aliases.get(r.sender) || r.sender;
+    const summary = (r.summary || '').replace(/"/g, "'").slice(0, 80);
+    if (r.event === 'tool_call') {
+      lines.push('    Note over ' + s + ': 🔧 ' + summary);
+    } else if (r.receiver) {
+      const recv = aliases.get(r.receiver) || r.receiver;
+      lines.push('    ' + s + '->>' + recv + ': ' + summary);
+    } else {
+      lines.push('    Note over ' + s + ': ' + summary);
+    }
+  });
+  return lines.join('\\n');
+}
+
+async function renderDiagram(entries) {
+  const code = buildMermaid(entries);
+  const el = document.getElementById('mermaidEl');
+  el.removeAttribute('data-processed');
+  el.innerHTML = code;
+  try { await mermaid.run({ nodes: [el] }); } catch {}
+}
+
+function renderFeed(count) {
+  const feed = document.getElementById('feed');
+  feed.innerHTML = '';
+  rows.forEach((r, i) => {
+    const vis = i < count;
+    const time = (r.timestamp || '').replace('T', ' ').slice(11, 19);
+    const icon = r.event === 'message' ? '💬' : r.event === 'tool_call' ? '🔧' : '📋';
+    const cls = r.event === 'tool_call' ? 'tool' : r.event === 'task_update' ? 'task' : 'msg';
+    const arrow = r.receiver ? r.sender + ' → ' + r.receiver : r.sender;
+    const line = document.createElement('div');
+    line.className = 'feed-line' + (vis ? ' visible' : '');
+    line.innerHTML = '<span class="time">' + time + '</span> ' + icon + ' <span class="' + cls + '">' + arrow + ': ' + (r.summary || '') + '</span>';
+    feed.appendChild(line);
+  });
+  if (count > 0) feed.lastElementChild?.scrollIntoView({ behavior: 'smooth' });
+}
+
+function renderFull() {
+  visibleCount = rows.length;
+  renderDiagram(rows);
+  renderFeed(rows.length);
+}
+
+function startReplay() {
+  playing = true;
+  visibleCount = 0;
+  document.getElementById('btnPlay').style.display = 'none';
+  document.getElementById('btnPause').style.display = '';
+  stepReplay();
+}
+
+function pauseReplay() {
+  playing = false;
+  if (playTimeout) clearTimeout(playTimeout);
+  document.getElementById('btnPlay').style.display = '';
+  document.getElementById('btnPause').style.display = 'none';
+}
+
+function stepReplay() {
+  if (!playing || visibleCount >= rows.length) {
+    pauseReplay();
+    document.getElementById('status').textContent = 'Replay complete';
+    return;
+  }
+  visibleCount++;
+  const visible = rows.slice(0, visibleCount);
+  renderDiagram(visible);
+  renderFeed(visibleCount);
+  document.getElementById('status').textContent = visibleCount + '/' + rows.length;
+
+  // Calculate delay from real timestamps
+  let delayMs = 500;
+  if (visibleCount < rows.length) {
+    const curr = new Date(rows[visibleCount - 1].timestamp).getTime();
+    const next = new Date(rows[visibleCount].timestamp).getTime();
+    delayMs = Math.max(100, Math.min(3000, (next - curr) / speed));
+  }
+  playTimeout = setTimeout(stepReplay, delayMs);
+}
+
+// Auto-load on page open
+load();
+</script>
+</body>
+</html>`;
