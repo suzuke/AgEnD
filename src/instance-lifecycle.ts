@@ -181,6 +181,7 @@ export class InstanceLifecycle {
     const topicName = (args.topic_name as string) || basename(directory);
     const description = args.description as string | undefined;
     const branch = args.branch as string | undefined;
+    const detach = (args.detach as boolean) ?? false;
 
     // Validate directory exists
     try {
@@ -229,7 +230,9 @@ export class InstanceLifecycle {
           branchExists = true;
         } catch { /* branch doesn't exist */ }
 
-        if (branchExists) {
+        if (detach) {
+          await execFileAsync("git", ["worktree", "add", "--detach", worktreePath, branch], { cwd: directory });
+        } else if (branchExists) {
           await execFileAsync("git", ["worktree", "add", worktreePath, branch], { cwd: directory });
         } else {
           await execFileAsync("git", ["worktree", "add", worktreePath, "-b", branch], { cwd: directory });

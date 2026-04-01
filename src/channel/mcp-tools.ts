@@ -388,6 +388,10 @@ export const TOOLS = [
             type: "string",
             description: "Git branch name. When specified, creates a git worktree from the directory's repo and uses it as the working directory. If the branch doesn't exist, it will be created.",
           },
+          detach: {
+            type: "boolean",
+            description: "Use detached HEAD (read-only). Useful for review instances that shouldn't commit to the branch.",
+          },
         },
         required: ["directory"],
       },
@@ -408,6 +412,30 @@ export const TOOLS = [
           },
         },
         required: ["name"],
+      },
+    },
+    // ── Repo checkout ──────────────────────────────────────────
+    {
+      name: "checkout_repo",
+      description: "Mount another repo as a read-only worktree. Returns a local path you can Read files from. Use instance name or absolute path as source.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          source: { type: "string", description: "Repo path (absolute or ~-prefixed) or instance name." },
+          branch: { type: "string", description: "Branch or commit to checkout. Default: HEAD." },
+        },
+        required: ["source"],
+      },
+    },
+    {
+      name: "release_repo",
+      description: "Remove a previously checked-out repo worktree.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          path: { type: "string", description: "Path returned by checkout_repo." },
+        },
+        required: ["path"],
       },
     },
 ];

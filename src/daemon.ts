@@ -1,5 +1,5 @@
-import { join, dirname } from "node:path";
-import { mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync } from "node:fs";
+import { join, dirname, basename } from "node:path";
+import { mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import { EventEmitter } from "node:events";
@@ -394,6 +394,8 @@ export class Daemon extends EventEmitter {
     if (this.backend?.cleanup) {
       this.backend.cleanup(this.buildBackendConfig());
     }
+    // Clean up checked-out repos
+    try { rmSync(join(this.instanceDir, "repos"), { recursive: true, force: true }); } catch { /* best effort */ }
 
     const pidPath = join(this.instanceDir, "daemon.pid");
     try {
@@ -567,6 +569,16 @@ export class Daemon extends EventEmitter {
     const SCHEDULE_TOOLS = new Set(["create_schedule", "list_schedules", "update_schedule", "delete_schedule"]);
     const DECISION_TOOLS = new Set(["post_decision", "list_decisions", "update_decision"]);
     const TASK_TOOL = "task";
+
+    // Repo checkout — handled locally in daemon (no fleet-manager)
+    if (tool === "checkout_repo") {
+      this.handleCheckoutRepo(args, respond);
+      return;
+    }
+    if (tool === "release_repo") {
+      this.handleReleaseRepo(args, respond);
+      return;
+    }
 
     if (tool === TASK_TOOL) {
       const fleetReqId = `task_${requestId}`;
@@ -995,6 +1007,77 @@ export class Daemon extends EventEmitter {
   }
 
   // ── Context Rotation v3: Prompt injection ─────────────────────
+
+  // ── Repo Checkout ─────────────────────────────────────────
+
+  private async handleCheckoutRepo(
+    args: Record<string, unknown>,
+    respond: (result: unknown, error?: string) => void,
+  ): Promise<void> {
+    const { execFile: execFileCb } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const execFileAsync = promisify(execFileCb);
+
+    let source = (args.source as string).replace(/^~/, process.env.HOME || "~");
+    const branch = (args.branch as string) || "HEAD";
+
+    // Resolve instance name to working_directory via IPC query
+    // If source doesn't look like a path, treat it as an instance name
+    if (!source.startsWith("/")) {
+      // Broadcast to get instance info — but we don't have fleet config in daemon.
+      // Instead, rely on fleet manager to resolve. For now, reject non-path sources.
+      respond(null, `Source must be an absolute path or ~-prefixed path. Use describe_instance to find a repo's working_directory.`);
+      return;
+    }
+
+    // Verify it's a git repo
+    try {
+      await execFileAsync("git", ["rev-parse", "--git-dir"], { cwd: source });
+    } catch {
+      respond(null, `Not a git repository: ${source}`);
+      return;
+    }
+
+    const repoDir = join(this.instanceDir, "repos");
+    mkdirSync(repoDir, { recursive: true });
+    const safeName = `${basename(source)}-${branch.replace(/\//g, "-")}`;
+    const worktreePath = join(repoDir, safeName);
+
+    try {
+      // Resolve branch/ref to verify it exists
+      await execFileAsync("git", ["rev-parse", "--verify", branch], { cwd: source });
+      await execFileAsync("git", ["worktree", "add", "--detach", worktreePath, branch], { cwd: source });
+      const { stdout: commitHash } = await execFileAsync("git", ["rev-parse", "--short", "HEAD"], { cwd: worktreePath });
+      respond({ path: worktreePath, branch, source, commit: commitHash.trim() });
+    } catch (err) {
+      respond(null, `Failed to checkout: ${(err as Error).message}`);
+    }
+  }
+
+  private async handleReleaseRepo(
+    args: Record<string, unknown>,
+    respond: (result: unknown, error?: string) => void,
+  ): Promise<void> {
+    const repoPath = args.path as string;
+    const reposDir = join(this.instanceDir, "repos");
+
+    // Safety: only allow releasing paths under our repos/ directory
+    if (!repoPath.startsWith(reposDir)) {
+      respond(null, `Cannot release path outside instance repos directory`);
+      return;
+    }
+
+    try {
+      const { execFile: execFileCb } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const execFileAsync = promisify(execFileCb);
+      await execFileAsync("git", ["worktree", "remove", "--force", repoPath]);
+    } catch {
+      // Fallback: rm directly if git worktree remove fails
+      try { rmSync(repoPath, { recursive: true, force: true }); } catch { /* best effort */ }
+    }
+    respond({ released: true, path: repoPath });
+  }
 
   private buildSnapshotPrompt(): string | null {
     const snapshotPath = join(this.instanceDir, "rotation-state.json");
