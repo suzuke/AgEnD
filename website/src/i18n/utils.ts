@@ -14,5 +14,6 @@ export function t(locale: Locale, key: string): string {
 }
 
 export function langSwitchHref(locale: Locale, base: string = '/'): string {
-  return locale === 'en' ? `${base}zh-tw/` : base;
+  const b = base.endsWith('/') ? base : `${base}/`;
+  return locale === 'en' ? `${b}zh-tw/` : b;
 }
