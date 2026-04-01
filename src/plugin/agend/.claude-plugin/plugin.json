@@ -1,5 +1,5 @@
 {
-  "name": "ccd-channel",
+  "name": "agend-channel",
   "version": "0.3.1",
-  "description": "Built-in channel server for claude-channel-daemon"
+  "description": "Built-in channel server for AgEnD"
 }

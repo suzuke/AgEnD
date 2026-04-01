@@ -36,7 +36,7 @@ const pkgVersion = (() => {
 
 program
   .name("agend")
-  .description("Claude Channel Daemon")
+  .description("AgEnD — AI Engineering Daemon")
   .version(pkgVersion);
 
 function signalFleetReload(): void {

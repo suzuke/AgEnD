@@ -121,22 +121,29 @@ function expandHome(p: string): string {
 
 // ── Prerequisite checks ──────────────────────────────────
 
+const BACKENDS = [
+  { id: "claude-code", binary: "claude", label: "Claude Code", installUrl: "https://docs.anthropic.com/en/docs/claude-code" },
+  { id: "codex", binary: "codex", label: "OpenAI Codex", installUrl: "https://github.com/openai/codex" },
+  { id: "gemini-cli", binary: "gemini", label: "Gemini CLI", installUrl: "https://github.com/google-gemini/gemini-cli" },
+  { id: "opencode", binary: "opencode", label: "OpenCode", installUrl: "https://github.com/opencode-ai/opencode" },
+];
+
 interface PrereqResult {
-  claude: boolean;
-  claudeVersion: string;
+  backendOk: boolean;
+  backendVersion: string;
   tmux: boolean;
   tmuxVersion: string;
 }
 
-export function checkPrerequisites(): PrereqResult {
-  let claude = false;
-  let claudeVersion = "";
+export function checkPrerequisites(binary: string): PrereqResult {
+  let backendOk = false;
+  let backendVersion = "";
   let tmux = false;
   let tmuxVersion = "";
 
   try {
-    claudeVersion = execSync("claude --version", { stdio: "pipe" }).toString().trim();
-    claude = true;
+    backendVersion = execSync(`${binary} --version`, { stdio: "pipe" }).toString().trim();
+    backendOk = true;
   } catch { /* not installed */ }
 
   try {
@@ -144,7 +151,7 @@ export function checkPrerequisites(): PrereqResult {
     tmux = true;
   } catch { /* not installed */ }
 
-  return { claude, claudeVersion, tmux, tmuxVersion };
+  return { backendOk, backendVersion, tmux, tmuxVersion };
 }
 
 // ── Main wizard ──────────────────────────────────────────
@@ -152,19 +159,28 @@ export function checkPrerequisites(): PrereqResult {
 export async function runSetupWizard(): Promise<void> {
   const rl = createInterface({ input: stdin, output: stdout });
 
-  console.log(`\n${bold("Claude Channel Daemon — Setup")}\n`);
+  console.log(`\n${bold("AgEnD — Setup Wizard")}\n`);
 
   const TOTAL_STEPS = 9;
 
-  // ── Step 1: Prerequisites ──
-  step(1, TOTAL_STEPS, "Checking prerequisites");
-  const prereq = checkPrerequisites();
+  // ── Step 1: Backend + Prerequisites ──
+  step(1, TOTAL_STEPS, "Backend & Prerequisites");
 
-  if (prereq.claude) {
-    console.log(`  ${green("✓")} Claude Code ${dim(prereq.claudeVersion)}`);
+  const backendIdx = await choose(
+    rl,
+    "Which AI coding agent?",
+    BACKENDS.map(b => ({ label: b.label, hint: b.binary })),
+    0,
+  );
+  const selectedBackend = BACKENDS[backendIdx];
+
+  const prereq = checkPrerequisites(selectedBackend.binary);
+
+  if (prereq.backendOk) {
+    console.log(`  ${green("✓")} ${selectedBackend.label} ${dim(prereq.backendVersion)}`);
   } else {
-    console.log(`  ${red("✗")} Claude Code not found`);
-    console.log(`    Install: ${dim("https://docs.anthropic.com/en/docs/claude-code")}`);
+    console.log(`  ${red("✗")} ${selectedBackend.label} (${selectedBackend.binary}) not found`);
+    console.log(`    Install: ${dim(selectedBackend.installUrl)}`);
     rl.close();
     process.exit(1);
   }
@@ -245,7 +261,9 @@ export async function runSetupWizard(): Promise<void> {
     console.log(`  ${dim("To get the group ID:")}`);
     console.log(`  ${dim("1. Add the bot to a Telegram group with Forum Topics enabled")}`);
     console.log(`  ${dim("2. Send a message in the group")}`);
-    console.log(`  ${dim("3. Forward it to @userinfobot or check the update JSON")}`);
+    console.log(`  ${dim("3. Open https://api.telegram.org/bot<TOKEN>/getUpdates")}`);
+    console.log(`  ${dim("   Find \"chat\":{\"id\":-100...} in the response")}`);
+    console.log(`  ${dim("   Or: add @getidsbot to the group")}`);
     console.log(`  ${dim("   Group IDs are negative numbers, e.g., -1001234567890")}`);
     console.log();
 
@@ -276,7 +294,7 @@ export async function runSetupWizard(): Promise<void> {
   const allowedUsers: (number | string)[] = [];
   if (accessMode === "locked") {
     console.log();
-    console.log(`  ${dim("Your Telegram user ID — send /start to @userinfobot to find it")}`);
+    console.log(`  ${dim("Your Telegram user ID — send /start to @userinfobot or @getidsbot")}`);
     const uidStr = await ask(rl, "Your Telegram user ID", {
       validate: (v) => {
         const n = parseInt(v, 10);
@@ -445,6 +463,7 @@ export async function runSetupWizard(): Promise<void> {
   // ── Step 9: Summary ──
   step(9, TOTAL_STEPS, "Summary");
   console.log();
+  console.log(`  ${bold("Backend:")}    ${selectedBackend.label}`);
   console.log(`  ${bold("Bot:")}        @${botUsername}`);
   console.log(`  ${bold("Token env:")}  ${tokenEnvName}`);
   console.log(`  ${bold("Mode:")}       ${mode}${groupId ? ` (group: ${groupId})` : ""}`);
@@ -513,6 +532,7 @@ export async function runSetupWizard(): Promise<void> {
   };
 
   fleetData.defaults = {
+    ...(selectedBackend.id !== "claude-code" ? { backend: selectedBackend.id } : {}),
     restart_policy: {
       max_retries: 10,
       backoff: "exponential",

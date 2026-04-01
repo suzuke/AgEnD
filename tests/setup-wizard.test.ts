@@ -53,12 +53,11 @@ describe("Setup Wizard", () => {
   });
 
   describe("checkPrerequisites", () => {
-    it("returns detection results", () => {
-      const result = checkPrerequisites();
-      // In test env, claude and tmux may or may not be installed
-      expect(result).toHaveProperty("claude");
+    it("returns detection results for a given backend binary", () => {
+      const result = checkPrerequisites("claude");
+      expect(result).toHaveProperty("backendOk");
       expect(result).toHaveProperty("tmux");
-      expect(typeof result.claude).toBe("boolean");
+      expect(typeof result.backendOk).toBe("boolean");
       expect(typeof result.tmux).toBe("boolean");
     });
   });
