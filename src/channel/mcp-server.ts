@@ -188,10 +188,16 @@ const mcp = new Server(
 import { TOOL_SETS } from "./mcp-tools.js";
 export { TOOLS } from "./mcp-tools.js";
 
-const toolSet = process.env.AGEND_TOOL_SET ?? "full";
-const activeTools = TOOL_SETS[toolSet]
-  ? TOOLS.filter(t => TOOL_SETS[toolSet].includes(t.name))
-  : TOOLS;
+const toolSet = process.env.AGEND_TOOL_SET;
+let activeTools: typeof TOOLS;
+if (!toolSet || toolSet === "full") {
+  activeTools = TOOLS;
+} else if (TOOL_SETS[toolSet]) {
+  activeTools = TOOLS.filter(t => TOOL_SETS[toolSet].includes(t.name));
+} else {
+  process.stderr.write(`agend: ERROR — unknown AGEND_TOOL_SET "${toolSet}", valid: ${Object.keys(TOOL_SETS).join(", ")}. Using "full".\n`);
+  activeTools = TOOLS;
+}
 
 mcp.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: activeTools }));
 
