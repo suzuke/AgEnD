@@ -92,3 +92,38 @@ export interface UpdateDecisionParams {
   tags?: string[];
   ttl_days?: number;
 }
+
+// ── Fleet Task Board ──────────────────────────────────────────
+
+export type TaskStatus = "open" | "claimed" | "done" | "blocked" | "cancelled";
+export type TaskPriority = "low" | "normal" | "high" | "urgent";
+
+export interface Task {
+  id: string;
+  title: string;
+  description: string | null;
+  status: TaskStatus;
+  priority: TaskPriority;
+  assignee: string | null;
+  created_by: string;
+  depends_on: string[];
+  result: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateTaskParams {
+  title: string;
+  description?: string;
+  priority?: TaskPriority;
+  assignee?: string;
+  depends_on?: string[];
+  created_by: string;
+}
+
+export interface UpdateTaskParams {
+  status?: TaskStatus;
+  assignee?: string;
+  result?: string;
+  priority?: TaskPriority;
+}

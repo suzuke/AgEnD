@@ -94,7 +94,7 @@ export class Daemon extends EventEmitter {
       if (!type) return;
       // Build lookup key matching the pattern used when registering
       let key: string | undefined;
-      if ((type === "fleet_schedule_response" || type === "fleet_outbound_response" || type === "fleet_decision_response") && msg.fleetRequestId) {
+      if ((type === "fleet_schedule_response" || type === "fleet_outbound_response" || type === "fleet_decision_response" || type === "fleet_task_response") && msg.fleetRequestId) {
         key = String(msg.fleetRequestId);
       } else if (type === "fleet_outbound_response" && msg.requestId != null) {
         key = `fleet_out_${msg.requestId}`;
@@ -566,6 +566,26 @@ export class Daemon extends EventEmitter {
     const CROSS_INSTANCE_TOOLS = new Set(["send_to_instance", "list_instances", "start_instance", "create_instance", "delete_instance", "request_information", "delegate_task", "report_result", "describe_instance"]);
     const SCHEDULE_TOOLS = new Set(["create_schedule", "list_schedules", "update_schedule", "delete_schedule"]);
     const DECISION_TOOLS = new Set(["post_decision", "list_decisions", "update_decision"]);
+    const TASK_TOOL = "task";
+
+    if (tool === TASK_TOOL) {
+      const fleetReqId = `task_${requestId}`;
+      this.ipcServer?.broadcast({
+        type: "fleet_task",
+        payload: args,
+        meta: { instance_name: this.name },
+        fleetRequestId: fleetReqId,
+      });
+      const timeout = setTimeout(() => {
+        this.pendingIpcRequests.delete(fleetReqId);
+        respond(null, "Task operation timed out after 30s");
+      }, 30_000);
+      this.pendingIpcRequests.set(fleetReqId, (respMsg) => {
+        clearTimeout(timeout);
+        respond(respMsg.result, respMsg.error as string | undefined);
+      });
+      return;
+    }
 
     if (DECISION_TOOLS.has(tool)) {
       const typeMap: Record<string, string> = {

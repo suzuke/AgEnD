@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
-import type { Schedule, ScheduleRun, CreateScheduleParams, UpdateScheduleParams, Decision, CreateDecisionParams, UpdateDecisionParams } from "./types.js";
+import type { Schedule, ScheduleRun, CreateScheduleParams, UpdateScheduleParams, Decision, CreateDecisionParams, UpdateDecisionParams, Task, CreateTaskParams, UpdateTaskParams } from "./types.js";
 
 export class SchedulerDb {
   private db: Database.Database;
@@ -57,6 +57,25 @@ export class SchedulerDb {
       this.db.exec("ALTER TABLE decisions ADD COLUMN scope TEXT NOT NULL DEFAULT 'project'");
     }
     this.db.exec("CREATE INDEX IF NOT EXISTS idx_decisions_scope ON decisions(scope)");
+
+    // Tasks table
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS tasks (
+        id          TEXT PRIMARY KEY,
+        title       TEXT NOT NULL,
+        description TEXT,
+        status      TEXT NOT NULL DEFAULT 'open',
+        priority    TEXT NOT NULL DEFAULT 'normal',
+        assignee    TEXT,
+        created_by  TEXT NOT NULL,
+        depends_on  TEXT,
+        result      TEXT,
+        created_at  TEXT NOT NULL,
+        updated_at  TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+      CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee);
+    `);
   }
 
   private rowToSchedule(row: Record<string, unknown>): Schedule {
@@ -247,6 +266,87 @@ export class SchedulerDb {
     const result = this.db.prepare("UPDATE decisions SET status = 'archived', updated_at = ? WHERE status = 'active' AND expires_at IS NOT NULL AND expires_at < ?")
       .run(new Date().toISOString(), new Date().toISOString());
     return result.changes;
+  }
+
+  // ── Tasks ──────────────────────────────────────────────────
+
+  private rowToTask(row: Record<string, unknown>): Task {
+    return {
+      id: row.id as string,
+      title: row.title as string,
+      description: row.description as string | null,
+      status: row.status as Task["status"],
+      priority: row.priority as Task["priority"],
+      assignee: row.assignee as string | null,
+      created_by: row.created_by as string,
+      depends_on: row.depends_on ? JSON.parse(row.depends_on as string) : [],
+      result: row.result as string | null,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+    };
+  }
+
+  createTask(params: CreateTaskParams): Task {
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    this.db.prepare(`
+      INSERT INTO tasks (id, title, description, priority, assignee, created_by, depends_on, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, params.title, params.description ?? null, params.priority ?? "normal",
+      params.assignee ?? null, params.created_by,
+      params.depends_on?.length ? JSON.stringify(params.depends_on) : null, now, now);
+    return this.getTask(id)!;
+  }
+
+  getTask(id: string): Task | null {
+    const row = this.db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+    return row ? this.rowToTask(row) : null;
+  }
+
+  listTasks(opts?: { assignee?: string; status?: string }): Task[] {
+    let sql = "SELECT * FROM tasks WHERE 1=1";
+    const values: unknown[] = [];
+    if (opts?.assignee) { sql += " AND assignee = ?"; values.push(opts.assignee); }
+    if (opts?.status) { sql += " AND status = ?"; values.push(opts.status); }
+    sql += " ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, created_at";
+    return (this.db.prepare(sql).all(...values) as Record<string, unknown>[]).map(r => this.rowToTask(r));
+  }
+
+  updateTask(id: string, params: UpdateTaskParams): Task {
+    const existing = this.getTask(id);
+    if (!existing) throw new Error(`Task "${id}" not found`);
+    const sets: string[] = ["updated_at = ?"];
+    const values: unknown[] = [new Date().toISOString()];
+    if (params.status !== undefined) { sets.push("status = ?"); values.push(params.status); }
+    if (params.assignee !== undefined) { sets.push("assignee = ?"); values.push(params.assignee); }
+    if (params.result !== undefined) { sets.push("result = ?"); values.push(params.result); }
+    if (params.priority !== undefined) { sets.push("priority = ?"); values.push(params.priority); }
+    values.push(id);
+    this.db.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).run(...values);
+    return this.getTask(id)!;
+  }
+
+  claimTask(id: string, assignee: string): Task {
+    const task = this.getTask(id);
+    if (!task) throw new Error(`Task "${id}" not found`);
+    if (task.status !== "open") throw new Error(`Task "${id}" is ${task.status}, cannot claim`);
+    // Check dependencies
+    if (task.depends_on.length > 0) {
+      for (const depId of task.depends_on) {
+        const dep = this.getTask(depId);
+        if (dep && dep.status !== "done") {
+          throw new Error(`Task "${id}" is blocked by "${depId}" (status: ${dep?.status ?? "not found"})`);
+        }
+      }
+    }
+    return this.updateTask(id, { status: "claimed", assignee });
+  }
+
+  completeTask(id: string, result?: string): Task {
+    const task = this.getTask(id);
+    if (!task) throw new Error(`Task "${id}" not found`);
+    if (task.status !== "claimed") throw new Error(`Task "${id}" is ${task.status}, cannot complete (must be claimed first)`);
+    return this.updateTask(id, { status: "done", result: result ?? undefined });
   }
 
   close(): void {

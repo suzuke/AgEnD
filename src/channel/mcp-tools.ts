@@ -137,6 +137,28 @@ export const TOOLS = [
         required: ["id"],
       },
     },
+    // ── Fleet Task Board ──────────────────────────────────────────
+    {
+      name: "task",
+      description: "Manage fleet task board. Actions: create (new task), list (show tasks), claim (assign to self), done (mark complete), update (change status/priority/assignee).",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          action: { type: "string", enum: ["create", "list", "claim", "done", "update"], description: "Operation to perform" },
+          title: { type: "string", description: "Task title (create)" },
+          description: { type: "string", description: "Task details (create)" },
+          priority: { type: "string", enum: ["low", "normal", "high", "urgent"], description: "Priority (create/update)" },
+          assignee: { type: "string", description: "Instance name to assign (create/update)" },
+          depends_on: { type: "array", items: { type: "string" }, description: "Task IDs this depends on (create)" },
+          id: { type: "string", description: "Task ID (claim/done/update)" },
+          result: { type: "string", description: "Completion summary (done)" },
+          status: { type: "string", enum: ["open", "claimed", "done", "blocked", "cancelled"], description: "New status (update)" },
+          filter_assignee: { type: "string", description: "Filter by assignee (list)" },
+          filter_status: { type: "string", description: "Filter by status (list)" },
+        },
+        required: ["action"],
+      },
+    },
     // ── Shared Decisions ──────────────────────────────────────────
     {
       name: "post_decision",
@@ -396,7 +418,7 @@ export const TOOL_SETS: Record<string, string[]> = {
   standard: [
     "reply", "react", "edit_message",
     "send_to_instance", "list_instances", "describe_instance",
-    "list_decisions", "post_decision",
+    "list_decisions", "post_decision", "task",
   ],
   minimal: ["reply", "send_to_instance", "list_decisions", "download_attachment"],
 };

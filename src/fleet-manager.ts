@@ -527,6 +527,8 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
         } else if (msg.type === "fleet_decision_create" || msg.type === "fleet_decision_list" ||
                    msg.type === "fleet_decision_update") {
           this.handleDecisionCrud(name, msg);
+        } else if (msg.type === "fleet_task") {
+          this.handleTaskCrud(name, msg);
         }
       }, this.logger, `ipc.message[${name}]`));
       // Ask daemon for any sessions that registered before we connected
@@ -884,6 +886,58 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       ipc.send({ type: "fleet_decision_response", fleetRequestId, result });
     } catch (err) {
       ipc.send({ type: "fleet_decision_response", fleetRequestId, error: (err as Error).message });
+    }
+  }
+
+  private handleTaskCrud(instanceName: string, msg: Record<string, unknown>): void {
+    const fleetRequestId = msg.fleetRequestId as string;
+    const payload = (msg.payload ?? {}) as Record<string, unknown>;
+    const meta = (msg.meta ?? {}) as Record<string, string>;
+    const ipc = this.instanceIpcClients.get(instanceName);
+    if (!ipc || !this.scheduler) return;
+
+    const db = this.scheduler.db;
+    const action = payload.action as string;
+
+    try {
+      let result: unknown;
+      switch (action) {
+        case "create":
+          result = db.createTask({
+            title: payload.title as string,
+            description: payload.description as string | undefined,
+            priority: payload.priority as "low" | "normal" | "high" | "urgent" | undefined,
+            assignee: payload.assignee as string | undefined,
+            depends_on: payload.depends_on as string[] | undefined,
+            created_by: meta.instance_name || instanceName,
+          });
+          break;
+        case "list":
+          result = db.listTasks({
+            assignee: payload.filter_assignee as string | undefined,
+            status: payload.filter_status as string | undefined,
+          });
+          break;
+        case "claim":
+          result = db.claimTask(payload.id as string, meta.instance_name || instanceName);
+          break;
+        case "done":
+          result = db.completeTask(payload.id as string, payload.result as string | undefined);
+          break;
+        case "update":
+          result = db.updateTask(payload.id as string, {
+            status: payload.status as string | undefined,
+            assignee: payload.assignee as string | undefined,
+            result: payload.result as string | undefined,
+            priority: payload.priority as string | undefined,
+          } as Record<string, unknown>);
+          break;
+        default:
+          throw new Error(`Unknown task action: ${action}`);
+      }
+      ipc.send({ type: "fleet_task_response", fleetRequestId, result });
+    } catch (err) {
+      ipc.send({ type: "fleet_task_response", fleetRequestId, error: (err as Error).message });
     }
   }
 
