@@ -192,21 +192,21 @@ export function buildFleetConfig(answers: WizardAnswers): Record<string, unknown
 
 const BACKENDS = [
   { id: "claude-code", binary: "claude", label: "Claude Code",
-    installUrl: "https://docs.anthropic.com/en/docs/claude-code",
-    install: "npm i -g @anthropic-ai/claude-code",
+    installUrl: "https://code.claude.com/docs/en/quickstart",
+    install: "curl -fsSL https://claude.ai/install.sh | bash",
     auth: "claude (OAuth) or set ANTHROPIC_API_KEY" },
   { id: "codex", binary: "codex", label: "OpenAI Codex",
-    installUrl: "https://github.com/openai/codex",
+    installUrl: "https://developers.openai.com/codex/quickstart",
     install: "npm i -g @openai/codex",
-    auth: "set OPENAI_API_KEY" },
+    auth: "codex (ChatGPT login) or set OPENAI_API_KEY" },
   { id: "gemini-cli", binary: "gemini", label: "Gemini CLI",
     installUrl: "https://github.com/google-gemini/gemini-cli",
-    install: "npm i -g @anthropic-ai/gemini  (or brew install gemini)",
+    install: "npm i -g @google/gemini-cli",
     auth: "gemini (Google OAuth)" },
   { id: "opencode", binary: "opencode", label: "OpenCode",
-    installUrl: "https://github.com/opencode-ai/opencode",
-    install: "go install github.com/opencode-ai/opencode@latest",
-    auth: "configure provider API key in opencode settings" },
+    installUrl: "https://opencode.ai/download",
+    install: "curl -fsSL https://opencode.ai/install | bash",
+    auth: "opencode (configure provider)" },
 ];
 
 interface PrereqResult {

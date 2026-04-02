@@ -62,10 +62,10 @@ agend fleet start               # launch the fleet
 
 | Backend | Install | Auth |
 |---------|---------|------|
-| Claude Code | `npm i -g @anthropic-ai/claude-code` | `claude` (OAuth) or `ANTHROPIC_API_KEY` |
-| OpenAI Codex | `npm i -g @openai/codex` | `OPENAI_API_KEY` |
+| Claude Code | `curl -fsSL https://claude.ai/install.sh \| bash` | `claude` (OAuth) or `ANTHROPIC_API_KEY` |
+| OpenAI Codex | `npm i -g @openai/codex` | `codex` (ChatGPT login) or `OPENAI_API_KEY` |
 | Gemini CLI | `npm i -g @google/gemini-cli` | `gemini` (Google OAuth) |
-| OpenCode | `go install github.com/opencode-ai/opencode@latest` | Configure provider API key |
+| OpenCode | `curl -fsSL https://opencode.ai/install \| bash` | `opencode` (configure provider) |
 
 - Telegram bot token ([@BotFather](https://t.me/BotFather)) or Discord bot token
 - Groq API key (optional, for voice)

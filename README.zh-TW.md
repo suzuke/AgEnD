@@ -62,10 +62,10 @@ agend fleet start               # 啟動 fleet
 
 | Backend | 安裝 | 認證 |
 |---------|------|------|
-| Claude Code | `npm i -g @anthropic-ai/claude-code` | `claude`（OAuth）或 `ANTHROPIC_API_KEY` |
-| OpenAI Codex | `npm i -g @openai/codex` | `OPENAI_API_KEY` |
+| Claude Code | `curl -fsSL https://claude.ai/install.sh \| bash` | `claude`（OAuth）或 `ANTHROPIC_API_KEY` |
+| OpenAI Codex | `npm i -g @openai/codex` | `codex`（ChatGPT 登入）或 `OPENAI_API_KEY` |
 | Gemini CLI | `npm i -g @google/gemini-cli` | `gemini`（Google OAuth） |
-| OpenCode | `go install github.com/opencode-ai/opencode@latest` | 設定 provider API key |
+| OpenCode | `curl -fsSL https://opencode.ai/install \| bash` | `opencode`（設定 provider） |
 
 - Telegram bot token（[@BotFather](https://t.me/BotFather)）或 Discord bot token
 - Groq API key（選用，語音轉文字用）
