@@ -532,6 +532,8 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
           this.handleTaskCrud(name, msg);
         } else if (msg.type === "fleet_set_display_name") {
           this.handleSetDisplayName(name, msg);
+        } else if (msg.type === "fleet_set_description") {
+          this.handleSetDescription(name, msg);
         }
       }, this.logger, `ipc.message[${name}]`));
       // Ask daemon for any sessions that registered before we connected
@@ -919,6 +921,24 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     this.saveFleetConfig();
     this.logger.info({ instanceName, displayName }, "Display name set");
     ipc.send({ type: "fleet_display_name_response", fleetRequestId, result: { display_name: displayName } });
+  }
+
+  private handleSetDescription(instanceName: string, msg: Record<string, unknown>): void {
+    const fleetRequestId = msg.fleetRequestId as string;
+    const payload = (msg.payload ?? {}) as Record<string, unknown>;
+    const ipc = this.instanceIpcClients.get(instanceName);
+    if (!ipc || !this.fleetConfig) return;
+
+    const description = payload.description as string;
+    if (!description) {
+      ipc.send({ type: "fleet_description_response", fleetRequestId, error: "Description cannot be empty" });
+      return;
+    }
+
+    this.fleetConfig.instances[instanceName].description = description;
+    this.saveFleetConfig();
+    this.logger.info({ instanceName, description: description.slice(0, 80) }, "Description set");
+    ipc.send({ type: "fleet_description_response", fleetRequestId, result: { description } });
   }
 
   private summarizeToolCall(tool: string, args: Record<string, unknown>): string {
