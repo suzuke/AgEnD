@@ -447,6 +447,17 @@ export const TOOLS = [
         required: ["name"],
       },
     },
+    {
+      name: "set_description",
+      description: "Set your role description. This is injected into your system prompt as your role definition. Takes effect on next context rotation.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          description: { type: "string", description: "Your role description, e.g. 'Code reviewer focused on security and error handling'" },
+        },
+        required: ["description"],
+      },
+    },
     // ── Repo checkout ──────────────────────────────────────────
     {
       name: "checkout_repo",
@@ -479,7 +490,7 @@ export const TOOL_SETS: Record<string, string[]> = {
   standard: [
     "reply", "react", "edit_message",
     "send_to_instance", "broadcast", "list_instances", "describe_instance",
-    "list_decisions", "post_decision", "task", "set_display_name",
+    "list_decisions", "post_decision", "task", "set_display_name", "set_description",
   ],
   minimal: ["reply", "send_to_instance", "list_decisions", "download_attachment"],
 };

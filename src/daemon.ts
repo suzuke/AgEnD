@@ -94,7 +94,7 @@ export class Daemon extends EventEmitter {
       if (!type) return;
       // Build lookup key matching the pattern used when registering
       let key: string | undefined;
-      if ((type === "fleet_schedule_response" || type === "fleet_outbound_response" || type === "fleet_decision_response" || type === "fleet_task_response" || type === "fleet_display_name_response") && msg.fleetRequestId) {
+      if ((type === "fleet_schedule_response" || type === "fleet_outbound_response" || type === "fleet_decision_response" || type === "fleet_task_response" || type === "fleet_display_name_response" || type === "fleet_description_response") && msg.fleetRequestId) {
         key = String(msg.fleetRequestId);
       } else if (type === "fleet_outbound_response" && msg.requestId != null) {
         key = `fleet_out_${msg.requestId}`;
@@ -579,17 +579,18 @@ export class Daemon extends EventEmitter {
       return;
     }
 
-    if (tool === "set_display_name") {
-      const fleetReqId = `dn_${requestId}`;
+    if (tool === "set_display_name" || tool === "set_description") {
+      const type = tool === "set_display_name" ? "fleet_set_display_name" : "fleet_set_description";
+      const fleetReqId = `${tool === "set_display_name" ? "dn" : "desc"}_${requestId}`;
       this.ipcServer?.broadcast({
-        type: "fleet_set_display_name",
+        type,
         payload: args,
         meta: { instance_name: this.name },
         fleetRequestId: fleetReqId,
       });
       const timeout = setTimeout(() => {
         this.pendingIpcRequests.delete(fleetReqId);
-        respond(null, "Set display name timed out");
+        respond(null, `${tool} timed out`);
       }, 10_000);
       this.pendingIpcRequests.set(fleetReqId, (respMsg) => {
         clearTimeout(timeout);
@@ -767,8 +768,17 @@ export class Daemon extends EventEmitter {
     } else {
       prompt += "\n\nYou don't have a display name yet. Use set_display_name to choose one that reflects your personality.";
     }
+    // Role: description acts as the short role prompt
+    if (this.config.description) {
+      prompt += `\n\n## Role\n${this.config.description}`;
+    }
+    // Custom system prompt (supports file: prefix for external files)
     if (this.config.systemPrompt) {
-      prompt += "\n\n" + this.config.systemPrompt;
+      let userPrompt = this.config.systemPrompt;
+      if (userPrompt.startsWith("file:")) {
+        try { userPrompt = readFileSync(userPrompt.slice(5), "utf-8"); } catch { userPrompt = ""; }
+      }
+      if (userPrompt) prompt += "\n\n" + userPrompt;
     }
     // Inject active decisions for this project
     const decisionsBlock = this.buildDecisionsPrompt();

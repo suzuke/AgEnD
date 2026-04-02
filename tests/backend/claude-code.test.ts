@@ -59,7 +59,9 @@ describe("ClaudeCodeBackend", () => {
       const backend = new ClaudeCodeBackend(TEST_DIR);
       const cmd = backend.buildCommand(makeConfig({ systemPrompt: "You are a debater." }));
       expect(cmd).toContain("--system-prompt");
-      expect(readFileSync(join(TEST_DIR, "system-prompt.md"), "utf-8")).toBe("You are a debater.");
+      const content = readFileSync(join(TEST_DIR, ".prompt-generated"), "utf-8");
+      expect(content).toContain("You are a debater.");
+      expect(content).toContain("AUTO-GENERATED");
     });
 
     it("includes --model when model is set", () => {
