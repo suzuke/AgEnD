@@ -1,6 +1,6 @@
 # AgEnD Roadmap
 
-> Last updated: 2026-04-01 (v1.3.0)
+> Last updated: 2026-04-03 (v1.8.0)
 > Produced by multi-agent consensus: Claude Code, Codex, Gemini CLI, OpenCode
 
 ## Completed (v1.0–v1.3)
@@ -9,7 +9,7 @@
 - [x] Multi-channel support (Telegram, Discord)
 - [x] Fleet orchestration (persistent project instances)
 - [x] Cross-instance delegation (send_to_instance, delegate_task, report_result)
-- [x] Cron scheduling
+- [x] Cron scheduling (SQLite-backed, survives restarts)
 - [x] Cost guard with daily limits
 - [x] Context rotation (auto-refresh stale sessions)
 - [x] `/sysinfo` fleet diagnostics
@@ -17,6 +17,49 @@
 - [x] FleetManager modularization (RoutingEngine, InstanceLifecycle, TopicArchiver, StatuslineWatcher, OutboundHandlers)
 - [x] IPC socket hardening (umask TOCTOU fix)
 - [x] Platform-agnostic core (all Telegram/Discord specifics in adapters)
+
+## Completed (v1.4–v1.8)
+
+- [x] Shared Decisions — SQLite-backed cross-instance knowledge sharing (fleet/project scope)
+- [x] Task Board — task tracking with dependencies, priority, claim/done lifecycle
+- [x] Activity Visualization — Activity Log (SQLite) + Web UI (Mermaid, Network Graph, Agent Board, Replay)
+- [x] Tool Profiles — full/standard/minimal MCP tool sets to reduce token overhead
+- [x] Broadcast tool — fleet-wide or tag-filtered messaging
+- [x] Tags — instance tagging for filtered broadcast/list_instances
+- [x] Display names — agents choose their own identity via set_display_name MCP tool
+- [x] checkout_repo — cross-repo access for agents working on other projects
+- [x] Backend error pattern detection — PTY monitoring with per-backend error patterns, auto-notify + failover
+- [x] Model failover — auto-switch to backup model on rate limits (statusline + PTY detection)
+- [x] Gemini system prompt injection via `GEMINI_SYSTEM_MD` env var
+- [x] launchd (macOS) + systemd (Linux) service support with `agend install/start/stop/restart`
+- [x] System prompt UX — `file:` prefix, `system-prompt.md` convention, role via `description` field
+- [x] Hot reload — `SIGHUP` triggers full config reconcile (add/remove/restart instances)
+- [x] `agend update` — self-update via npm with optional daemon restart
+- [x] Backend doctor/trust — `agend backend doctor` diagnostics, `agend backend trust` for Gemini
+- [x] Complete zh-TW documentation (features, CLI, configuration, roadmap, security, changelog)
+- [x] fleet.yaml configuration reference (55 fields, EN + zh-TW)
+- [x] Hang detection with Telegram restart buttons
+- [x] Daily cost summary reports
+- [x] Webhook notifications (Slack, custom endpoints)
+- [x] Health endpoint for external monitoring
+
+---
+
+## Next Up: Teams & Collaboration
+
+**Goal:** Structured multi-agent collaboration with visibility.
+
+### Teams (temporary project groups)
+- `agend team create` — one command to assemble a team with new + existing agents
+- Shared team topic — all agent communication visible in one Telegram topic
+- @mention routing — direct messages to specific team members
+- Display name prefixing — `[Kuro] message` for attribution
+- `agend team disband` — clean shutdown: delete temp agents, archive topic, keep persistent agents
+- Team-aware MCP tools: `send_to_team`, `list_teams`
+
+### Mirror topics
+- Observe cross-instance communication in a dedicated topic
+- Zero-change to agent behavior — daemon-level hook on send_to_instance
 
 ---
 
@@ -34,18 +77,16 @@ Extend the existing health server into a full fleet API:
 
 **Effort:** ~200 lines. Data already exists in EventLog (SQLite) and getSysInfo().
 
-### 1.2 Cost analytics dashboard (MVP)
-Lightweight web UI served from the daemon:
-- Cost trend chart per instance (data from EventLog cost_snapshot)
-- Fleet status board (instance list with status/IPC/cost/rate limits)
-- Real-time updates via SSE or WebSocket
+### ~~1.2 Cost analytics dashboard (MVP)~~ → Partially done
+- [x] Activity Log with cost tracking (SQLite)
+- [x] Web UI with Agent Board, Network Graph, Replay
+- [ ] Cost trend chart per instance (Chart.js)
+- [ ] Real-time updates via SSE or WebSocket
 
-**Tech stack:** Static HTML + Chart.js, served by health server. No framework needed for MVP.
-
-### 1.3 Task timeline & error viewer
-- Task dispatch/completion timeline
-- Error log viewer with safeHandler context labels
-- Schedule execution history
+### ~~1.3 Task timeline & error viewer~~ → Partially done
+- [x] Activity Log covers task dispatch/completion
+- [x] Backend error detection with event logging
+- [ ] Schedule execution history viewer
 
 ---
 
@@ -63,14 +104,15 @@ Lightweight web UI served from the daemon:
 - Deploy/update instances via PR merge
 - Pre-commit hooks for agent-assisted review
 
-### 2.3 Conversation history & persistence
-- Log all inbound/outbound messages to SQLite
-- Searchable conversation history per instance
-- Cross-session context carry-over
+### ~~2.3 Conversation history & persistence~~ → Partially done
+- [x] Activity Log captures all cross-instance messages
+- [x] Context rotation v3 snapshots carry-over key context
+- [ ] Full inbound/outbound message logging
+- [ ] Searchable conversation history
 
 ---
 
-## Phase 3: Plugin & Skills System
+## Phase 3: Plugin & Extension System
 
 **Goal:** Let the community extend AgEnD without forking.
 
@@ -79,10 +121,9 @@ Lightweight web UI served from the daemon:
 - Dynamic `import()` for backend, channel, and tool plugins
 - Standard interfaces already exist: `CliBackend`, `ChannelAdapter`, `outboundHandlers` Map
 
-### 3.2 Skills / task templates
-- Reusable runbooks (e.g., "security scan", "dependency update", "code review")
-- Parameterized task templates with approval flows
-- Shareable via npm packages
+### 3.2 Custom tool plugins
+- Register additional MCP tools via plugins
+- Tool Profiles already support custom sets — extend to plugin-provided tools
 
 ### 3.3 Policy & permissions
 - Per-instance environment/sandbox controls
@@ -102,7 +143,7 @@ Lightweight web UI served from the daemon:
 
 ### 4.2 More backends
 - **Aider** (~50-80 lines) — most popular open-source coding agent
-- **Cursor Agent** (when CLI mode available)
+- **Kiro** (AWS) — when CLI mode stabilizes
 - **Custom CLI** — document how to implement CliBackend for any tool
 
 ### 4.3 Smart backend routing
@@ -119,19 +160,33 @@ Lightweight web UI served from the daemon:
 - Agent-to-agent recruitment (code agent → security scan agent → review agent)
 - Parallel execution with result aggregation
 
-### 5.2 Fleet-wide knowledge hub
-- Shared context across instances (architecture decisions, tech debt, preferences)
-- RAG-based retrieval from project documentation
-- Learning from past task outcomes
+### ~~5.2 Fleet-wide knowledge hub~~ → Partially done
+- [x] Shared Decisions (architecture decisions, conventions, preferences)
+- [x] Task Board for cross-instance work tracking
+- [ ] RAG-based retrieval from project documentation
+- [ ] Learning from past task outcomes
 
-### 5.3 Self-healing fleet
-- Auto-restart with model failover on repeated failures
-- Rate limit prediction and preemptive backend switching
-- Anomaly detection on cost/latency patterns
+### ~~5.3 Self-healing fleet~~ → Partially done
+- [x] Auto-restart with model failover on rate limits
+- [x] PTY error detection with auto-notify
+- [x] Crash loop detection with respawn pause
+- [ ] Rate limit prediction and preemptive backend switching
+- [ ] Anomaly detection on cost/latency patterns
 
 ### 5.4 Control Plane / Data Plane separation
 - Data Plane (local): daemon runs near code and secrets
 - Control Plane (optional cloud): cross-machine discovery, global scheduling, unified monitoring
+
+---
+
+## AgEnD-RS (Experimental)
+
+**Goal:** Rust rewrite for performance, single-binary distribution, native terminal multiplexing.
+
+- Fork of [Zellij](https://github.com/zellij-org/zellij) terminal multiplexer
+- Feature-flagged modules (`#[cfg(feature = "agend")]`) — minimal Zellij changes (~25 lines)
+- Modules: config, fleet, monitor, mcp (24 tools), telegram, routing, daemon, db, ipc, backend, lifecycle
+- Status: Phase 7 complete (core modules), Phase 8 in progress (end-to-end integration)
 
 ---
 
@@ -143,6 +198,7 @@ Lightweight web UI served from the daemon:
 | Multi-machine distributed fleet | Architecture change too large; focus on single-machine excellence first |
 | LINE channel | Complex API, limited global market |
 | Native desktop app | High dev cost; web UI covers the need |
+| Cost analytics deep dive | Accuracy concerns; defer until statusline data is verified |
 
 ---
 
