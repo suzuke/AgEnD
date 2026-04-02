@@ -542,9 +542,7 @@ export class Daemon extends EventEmitter {
     if (fromInstance) {
       formatted = `[from:${fromInstance}] ${content}\n(Reply using send_to_instance tool, NOT direct text)`;
     } else {
-      const chatId = meta.chat_id || "";
-      const threadId = meta.thread_id || "";
-      formatted = `[user:${user} chat_id:${chatId} thread_id:${threadId}] ${content}\n(Reply using the reply tool with chat_id="${chatId}" — do NOT respond with direct text)`;
+      formatted = `[user:${user}] ${content}\n(Reply using the reply tool — do NOT respond with direct text)`;
     }
 
     // Serialize deliveries: each message waits for the previous to complete,
@@ -776,16 +774,21 @@ export class Daemon extends EventEmitter {
 
     const adapter = adapters[0];
 
-    // Auto-correct invalid chat_id: some models (e.g. minimax) confuse topic_id with chat_id.
-    // Valid Telegram group chat_ids are negative numbers starting with -100.
-    if (args.chat_id && this.lastChatId) {
-      const cid = String(args.chat_id);
-      if (!cid.startsWith("-") && this.lastChatId.startsWith("-")) {
-        this.logger.warn({ given: cid, corrected: this.lastChatId }, "Auto-corrected invalid chat_id from model");
+    // Context-bound channel tools: reply/react/edit_message always target the current
+    // conversation. Use daemon's known chat_id/thread_id instead of model-provided values.
+    // This is channel-agnostic — no format-based heuristics or platform-specific logic.
+    const CONTEXT_BOUND_TOOLS = ["reply", "react", "edit_message"];
+    if (CONTEXT_BOUND_TOOLS.includes(tool)) {
+      if (this.lastChatId) {
+        const given = args.chat_id ? String(args.chat_id) : "";
+        if (given && given !== this.lastChatId) {
+          this.logger.warn({ tool, given, expected: this.lastChatId }, "Overriding mismatched chat_id on context-bound tool");
+        }
         args.chat_id = this.lastChatId;
       }
-    } else if (!args.chat_id && this.lastChatId) {
-      args.chat_id = this.lastChatId;
+      if (!args.thread_id && this.lastThreadId) {
+        args.thread_id = this.lastThreadId;
+      }
     }
 
     if (!routeToolCall(adapter, tool, args, this.lastThreadId, respond)) {
