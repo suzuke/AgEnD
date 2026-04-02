@@ -1,6 +1,6 @@
 import { join, dirname } from "node:path";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { type CliBackend, type CliBackendConfig, resolveBinary } from "./types.js";
+import { type CliBackend, type CliBackendConfig, type ErrorPattern, resolveBinary } from "./types.js";
 
 export class OpenCodeBackend implements CliBackend {
   readonly binaryName = "opencode";
@@ -69,6 +69,13 @@ export class OpenCodeBackend implements CliBackend {
 
   getReadyPattern(): RegExp {
     return /Ask anything|ctrl\+p commands/m;
+  }
+
+  getErrorPatterns(): ErrorPattern[] {
+    return [
+      { pattern: /rate.?limit|too many requests|429/i, type: "rate_limit", action: "failover", message: "Rate limit reached" },
+      { pattern: /auth.*error|unauthorized|401/i, type: "auth_error", action: "pause", message: "Authentication error" },
+    ];
   }
 
   getContextUsage(): number | null {

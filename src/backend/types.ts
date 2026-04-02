@@ -16,6 +16,20 @@ export interface CliBackendConfig {
   model?: string;
 }
 
+/** Action to take when an error pattern is detected in PTY output. */
+export type ErrorActionType = "notify" | "failover" | "restart" | "pause";
+
+/** Categorizes detected errors for logging and response. */
+export type ErrorType = "rate_limit" | "auth_error" | "crash" | "network" | "quota";
+
+export interface ErrorPattern {
+  pattern: RegExp;
+  type: ErrorType;
+  action: ErrorActionType;
+  /** Human-readable description for notifications. */
+  message: string;
+}
+
 export interface CliBackend {
   /** The CLI binary name (e.g. "claude", "gemini", "codex") */
   readonly binaryName: string;
@@ -34,6 +48,9 @@ export interface CliBackend {
 
   /** Regex to detect when the CLI is ready to accept input. */
   getReadyPattern(): RegExp;
+
+  /** Error patterns to detect in PTY output during operation. */
+  getErrorPatterns?(): ErrorPattern[];
 
   /** Pre-approve a working directory to skip trust dialogs on startup. */
   preTrust?(workingDirectory: string): void;

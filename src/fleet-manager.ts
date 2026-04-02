@@ -101,8 +101,8 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
   }
 
   // ── LifecycleContext bridge methods ──────────────────────────────────────
-  webhookEmit(event: string, name: string): void {
-    this.webhookEmitter?.emit(event, name);
+  webhookEmit(event: string, name: string, data?: Record<string, unknown>): void {
+    this.webhookEmitter?.emit(event, name, data);
   }
 
   // NOTE: Decisions support project scope (by working directory) and fleet scope (all instances).

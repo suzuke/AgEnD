@@ -11,7 +11,7 @@ import { ContextGuardian } from "./context-guardian.js";
 import { IpcServer } from "./channel/ipc-bridge.js";
 import { MessageBus } from "./channel/message-bus.js";
 import { ToolTracker } from "./channel/tool-tracker.js";
-import type { CliBackend, CliBackendConfig } from "./backend/types.js";
+import type { CliBackend, CliBackendConfig, ErrorPattern } from "./backend/types.js";
 import type { ChannelAdapter, InboundMessage } from "./channel/types.js";
 import { routeToolCall } from "./channel/tool-router.js";
 import { generateFleetSystemPrompt } from "./fleet-system-prompt.js";
@@ -63,6 +63,10 @@ export class Daemon extends EventEmitter {
   /** Callback to query active decisions for system prompt injection (set by fleet manager) */
   getActiveDecisions?: () => Array<{ title: string; content: string; tags: string[]; scope: string }>;
   private pasteLock: Promise<void> = Promise.resolve();
+  // PTY error pattern monitoring
+  private errorMonitorTimer: ReturnType<typeof setInterval> | null = null;
+  private lastDetectedError: string | null = null;
+  private lastErrorAt = 0;
 
   constructor(
     private name: string,
@@ -282,6 +286,7 @@ export class Daemon extends EventEmitter {
     // Without this, a dead CLI window goes undetected and messages are silently lost.
     if (!this.config.lightweight) {
       this.startHealthCheck();
+      this.startErrorMonitor();
     }
 
     this.logger.info(`${this.name} ready`);
@@ -370,9 +375,44 @@ export class Daemon extends EventEmitter {
     scheduleNext();
   }
 
+  /** Periodically scan PTY output for backend-defined error patterns. */
+  private startErrorMonitor(): void {
+    const patterns = this.backend?.getErrorPatterns?.();
+    if (!patterns?.length || !this.tmux) return;
+
+    const ERROR_COOLDOWN_MS = 120_000; // Don't re-alert same error within 2 minutes
+
+    this.errorMonitorTimer = setInterval(async () => {
+      if (!this.tmux || this.spawning || this.guardian?.state === "RESTARTING") return;
+      try {
+        const alive = await this.tmux.isWindowAlive();
+        if (!alive) return;
+
+        const pane = await this.tmux.capturePane();
+        for (const ep of patterns) {
+          if (!ep.pattern.test(pane)) continue;
+
+          // Deduplicate: skip if same error detected recently
+          const now = Date.now();
+          if (this.lastDetectedError === ep.type && now - this.lastErrorAt < ERROR_COOLDOWN_MS) continue;
+          this.lastDetectedError = ep.type;
+          this.lastErrorAt = now;
+
+          this.logger.warn({ errorType: ep.type, action: ep.action }, `PTY error detected: ${ep.message}`);
+          this.emit("pty_error", { name: this.name, ...ep });
+
+          break; // Only handle first match per scan
+        }
+      } catch {
+        // capturePane can fail if window is transitioning — ignore
+      }
+    }, 30_000); // Check every 30 seconds
+  }
+
   async stop(): Promise<void> {
     this.logger.info("Stopping daemon instance");
     if (this.healthCheckTimer) { clearTimeout(this.healthCheckTimer); this.healthCheckTimer = null; }
+    if (this.errorMonitorTimer) { clearInterval(this.errorMonitorTimer); this.errorMonitorTimer = null; }
     if (this.toolStatusDebounce) { clearTimeout(this.toolStatusDebounce); this.toolStatusDebounce = null; }
     this.pendingIpcRequests.clear();
     this.hangDetector?.stop();

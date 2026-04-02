@@ -1,7 +1,7 @@
 import { join, dirname } from "node:path";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
-import { type CliBackend, type CliBackendConfig, resolveBinary } from "./types.js";
+import { type CliBackend, type CliBackendConfig, type ErrorPattern, resolveBinary } from "./types.js";
 
 export class GeminiCliBackend implements CliBackend {
   readonly binaryName = "gemini";
@@ -84,6 +84,14 @@ export class GeminiCliBackend implements CliBackend {
 
   getReadyPattern(): RegExp {
     return /Type your message|\? for shortcuts|YOLO Ctrl/m;
+  }
+
+  getErrorPatterns(): ErrorPattern[] {
+    return [
+      { pattern: /RESOURCE_EXHAUSTED|quota exceeded/i, type: "rate_limit", action: "notify", message: "Gemini quota exhausted" },
+      { pattern: /PERMISSION_DENIED|API key not valid/i, type: "auth_error", action: "pause", message: "Gemini authentication error" },
+      { pattern: /UNAVAILABLE|503/i, type: "network", action: "notify", message: "Gemini service unavailable" },
+    ];
   }
 
   getContextUsage(): number | null {

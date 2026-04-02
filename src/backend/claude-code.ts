@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { type CliBackend, type CliBackendConfig, resolveBinary } from "./types.js";
+import { type CliBackend, type CliBackendConfig, type ErrorPattern, resolveBinary } from "./types.js";
 
 
 export class ClaudeCodeBackend implements CliBackend {
@@ -91,6 +91,15 @@ export class ClaudeCodeBackend implements CliBackend {
     } catch {
       return null;
     }
+  }
+
+  getErrorPatterns(): ErrorPattern[] {
+    return [
+      { pattern: /API Error: Rate limit/i, type: "rate_limit", action: "failover", message: "API rate limit reached" },
+      { pattern: /API Error: Authentication/i, type: "auth_error", action: "pause", message: "Authentication error" },
+      { pattern: /API Error: Overloaded/i, type: "rate_limit", action: "notify", message: "API overloaded" },
+      { pattern: /credit balance is too low/i, type: "quota", action: "pause", message: "Insufficient API credits" },
+    ];
   }
 
   cleanup(_config: CliBackendConfig): void {

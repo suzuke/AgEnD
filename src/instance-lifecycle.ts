@@ -35,7 +35,8 @@ export interface LifecycleContext {
   touchActivity(name: string): void;
   sendHangNotification(name: string): Promise<void>;
   notifyInstanceTopic(name: string, text: string): void;
-  webhookEmit(event: string, name: string): void;
+  webhookEmit(event: string, name: string, data?: Record<string, unknown>): void;
+  checkModelFailover(name: string, fiveHourPct: number): void;
   startStatuslineWatcher(name: string): void;
   getActiveDecisionsForProject(projectRoot: string): Array<{ title: string; content: string; tags: string[]; scope: string }>;
 }
@@ -94,6 +95,19 @@ export class InstanceLifecycle {
       this.ctx.notifyInstanceTopic(name, `🔴 ${name} keeps crashing shortly after launch — respawn paused. Check rate limits or run \`agend fleet restart\`.`);
       this.ctx.setTopicIcon(name, "red");
     }, this.ctx.logger, `daemon.crash_loop[${name}]`));
+
+    daemon.on("pty_error", safeHandler((data: { name: string; type: string; action: string; message: string }) => {
+      this.ctx.eventLog?.insert(name, "pty_error", { type: data.type, action: data.action });
+      this.ctx.logger.warn({ name, errorType: data.type, action: data.action }, `PTY error: ${data.message}`);
+
+      const emoji = data.type === "rate_limit" ? "⏳" : data.type === "auth_error" ? "🔑" : "⚠️";
+      this.ctx.notifyInstanceTopic(name, `${emoji} ${name}: ${data.message} (action: ${data.action})`);
+      this.ctx.webhookEmit("pty_error", name, { type: data.type, action: data.action, message: data.message });
+
+      if (data.action === "failover") {
+        this.ctx.checkModelFailover(name, 100); // Force failover trigger
+      }
+    }, this.ctx.logger, `daemon.pty_error[${name}]`));
 
     this.ctx.setTopicIcon(name, "green");
     this.ctx.touchActivity(name);
