@@ -24,6 +24,8 @@ export interface TelegramAdapterOptions {
   botToken: string;
   accessManager: AccessManager;
   inboxDir: string;
+  /** Override Telegram Bot API root URL (for mock server in E2E tests). */
+  apiRoot?: string;
 }
 
 export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
@@ -34,6 +36,7 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
   private bot: Bot;
   private accessManager: AccessManager;
   private inboxDir: string;
+  private apiRoot: string;
   private queue: MessageQueue;
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -42,10 +45,11 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
     this.id = opts.id;
     this.accessManager = opts.accessManager;
     this.inboxDir = opts.inboxDir;
+    this.apiRoot = opts.apiRoot ?? "https://api.telegram.org";
 
     mkdirSync(this.inboxDir, { recursive: true });
 
-    this.bot = new Bot(opts.botToken);
+    this.bot = new Bot(opts.botToken, opts.apiRoot ? { client: { apiRoot: opts.apiRoot } } : undefined);
 
     // Build MessageQueue backed by this bot
     this.queue = new MessageQueue({
@@ -530,7 +534,7 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
 
     // Construct the download URL
     const token = (this.bot as unknown as { token: string }).token;
-    const url = `https://api.telegram.org/file/bot${token}/${filePath}`;
+    const url = `${this.apiRoot}/file/bot${token}/${filePath}`;
 
     const filename = filePath.split("/").pop() ?? fileId;
     const localPath = join(this.inboxDir, filename);

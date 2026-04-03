@@ -56,6 +56,8 @@ export interface ChannelConfig {
   group_id?: number;
   access: AccessConfig;
   options?: Record<string, unknown>;
+  /** Override the Telegram Bot API root URL (e.g. for testing with a mock server). */
+  telegram_api_root?: string;
 }
 
 export interface InstanceConfig {

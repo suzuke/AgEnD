@@ -22,6 +22,7 @@ const __dirname = dirname(__filename);
 
 export class Daemon extends EventEmitter {
   private logger: Logger;
+  private tmuxSessionName: string;
   private tmux: TmuxManager | null = null;
   private ipcServer: IpcServer | null = null;
   private messageBus: MessageBus;
@@ -77,6 +78,7 @@ export class Daemon extends EventEmitter {
   ) {
     super();
     this.logger = createLogger(config.log_level);
+    this.tmuxSessionName = process.env.AGEND_TMUX_SESSION ?? "agend";
     this.messageBus = new MessageBus();
     this.messageBus.setLogger(this.logger);
   }
@@ -166,9 +168,8 @@ export class Daemon extends EventEmitter {
     });
 
     // 2. Tmux — ensure session, create window if not alive
-    const sessionName = "agend";
-    await TmuxManager.ensureSession(sessionName);
-    this.tmux = new TmuxManager(sessionName, "");
+    await TmuxManager.ensureSession(this.tmuxSessionName);
+    this.tmux = new TmuxManager(this.tmuxSessionName, "");
 
     // Strategy A: always start fresh Claude window (MCP server has no reconnection)
     // Kill any existing window from previous run
@@ -356,10 +357,10 @@ export class Daemon extends EventEmitter {
           const sidFile = join(this.instanceDir, "session-id");
           try { unlinkSync(sidFile); } catch { /* may not exist */ }
           // Kill any same-name windows before respawn to prevent orphans
-          const windows = await TmuxManager.listWindows("agend");
+          const windows = await TmuxManager.listWindows(this.tmuxSessionName);
           for (const w of windows) {
             if (w.name === this.name) {
-              const tm = new TmuxManager("agend", w.id);
+              const tm = new TmuxManager(this.tmuxSessionName, w.id);
               await tm.killWindow();
             }
           }
@@ -591,10 +592,10 @@ export class Daemon extends EventEmitter {
       // Window ID may be stale after crash/respawn — try to find by name
       this.logger.warn("pasteText failed, looking up window by name");
       try {
-        const windows = await TmuxManager.listWindows("agend");
+        const windows = await TmuxManager.listWindows(this.tmuxSessionName);
         const match = windows.find(w => w.name === this.name);
         if (match) {
-          this.tmux = new TmuxManager("agend", match.id);
+          this.tmux = new TmuxManager(this.tmuxSessionName, match.id);
           writeFileSync(join(this.instanceDir, "window-id"), match.id);
           await this.controlClient?.registerWindow(match.id);
           await this.tmux.pasteText(formatted);

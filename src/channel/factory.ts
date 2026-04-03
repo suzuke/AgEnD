@@ -16,7 +16,7 @@ export async function createAdapter(config: ChannelConfig, opts: AdapterOpts): P
   switch (config.type) {
     case "telegram": {
       const { TelegramAdapter } = await import("./adapters/telegram.js");
-      return new TelegramAdapter(opts);
+      return new TelegramAdapter({ ...opts, apiRoot: config.telegram_api_root });
     }
     case "discord": {
       const { DiscordAdapter } = await import("./adapters/discord.js");

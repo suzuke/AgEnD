@@ -37,7 +37,7 @@ import { TopicArchiver, type ArchiverContext } from "./topic-archiver.js";
 import { StatuslineWatcher, type StatuslineWatcherContext } from "./statusline-watcher.js";
 import { outboundHandlers, type OutboundContext } from "./outbound-handlers.js";
 
-const TMUX_SESSION = "agend";
+const TMUX_SESSION = process.env.AGEND_TMUX_SESSION ?? "agend";
 
 export function resolveReplyThreadId(
   argsThreadId: unknown,

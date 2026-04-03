@@ -3,6 +3,7 @@ import { ClaudeCodeBackend } from "./claude-code.js";
 import { GeminiCliBackend } from "./gemini-cli.js";
 import { CodexBackend } from "./codex.js";
 import { OpenCodeBackend } from "./opencode.js";
+import { MockBackend } from "./mock.js";
 
 export function createBackend(name: string, instanceDir: string): CliBackend {
   switch (name) {
@@ -14,7 +15,9 @@ export function createBackend(name: string, instanceDir: string): CliBackend {
       return new CodexBackend(instanceDir);
     case "opencode":
       return new OpenCodeBackend(instanceDir);
+    case "mock":
+      return new MockBackend(instanceDir);
     default:
-      throw new Error(`Unknown backend: ${name}. Available: claude-code, gemini-cli, codex, opencode`);
+      throw new Error(`Unknown backend: ${name}. Available: claude-code, gemini-cli, codex, opencode, mock`);
   }
 }

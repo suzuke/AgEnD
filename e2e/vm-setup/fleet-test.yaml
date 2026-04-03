@@ -1,0 +1,55 @@
+# Fleet configuration for E2E testing.
+# This template is injected into the VM before each test run.
+# ${HOST_IP} is replaced with the actual host IP at runtime.
+
+channel:
+  type: telegram
+  mode: topic
+  bot_token_env: AGEND_BOT_TOKEN
+  group_id: -1001234567890
+  telegram_api_root: "http://${HOST_IP}:8443"
+  access:
+    mode: locked
+    allowed_users:
+      - 111222333
+
+defaults:
+  backend: mock
+  model: mock-model
+  tool_set: standard
+  cost_guard:
+    daily_limit_usd: 999
+    warn_at_percentage: 90
+    timezone: UTC
+  hang_detector:
+    enabled: false
+  context_guardian:
+    grace_period_ms: 5000
+    max_age_hours: 0
+
+instances:
+  alpha:
+    working_directory: /tmp/agend-test/alpha
+    display_name: Alpha
+    description: "Test instance A"
+    tags: [test, team-a]
+
+  beta:
+    working_directory: /tmp/agend-test/beta
+    display_name: Beta
+    description: "Test instance B"
+    tags: [test, team-a]
+
+  gamma:
+    working_directory: /tmp/agend-test/gamma
+    display_name: Gamma
+    description: "Test instance C"
+    tags: [test, team-b]
+
+teams:
+  team-a:
+    members: [alpha, beta]
+    description: "Test team A"
+  team-b:
+    members: [gamma]
+    description: "Test team B"
