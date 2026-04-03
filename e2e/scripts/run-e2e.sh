@@ -82,7 +82,7 @@ fi
 
 echo "🧪 Running E2E tests..."
 cd "$PROJECT_ROOT"
-npx vitest run --config e2e/vitest.config.e2e.ts "${VITEST_ARGS[@]}"
+npx vitest run --config e2e/vitest.config.e2e.ts ${VITEST_ARGS[@]+"${VITEST_ARGS[@]}"}
 TEST_EXIT=$?
 
 echo ""
