@@ -364,6 +364,7 @@ export class Daemon extends EventEmitter {
             }
           }
           await this.spawnClaudeWindow();
+          await this.injectSnapshotMessage();
           this.logger.info("Respawned Claude window after crash");
         } catch (err) {
           this.logger.error({ err }, "Failed to respawn Claude window");
@@ -868,7 +869,7 @@ export class Daemon extends EventEmitter {
     if (!snapshot || !this.tmux) return;
     // Small delay to let the CLI fully render its ready prompt
     await new Promise(r => setTimeout(r, 1_000));
-    await this.tmux.pasteText(`[system:session-snapshot]\n${snapshot}`);
+    await this.tmux.pasteText(`[system:session-snapshot]\n${snapshot}\n\nThis is a background context restore — do NOT reply to or acknowledge this message. Simply resume normal operation when the next user or instance message arrives.`);
     this.logger.info("Injected session snapshot as first message");
   }
 
