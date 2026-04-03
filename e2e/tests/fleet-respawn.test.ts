@@ -1,8 +1,9 @@
 /**
- * E2E Test: Instance Respawn — crash detection + automatic restart
+ * E2E Test: Instance Respawn + Recovery notifications
  *
  * T7: Trigger instance crash via mock-control.json → health check detects →
  *     respawn with backoff → instance recovers and responds to messages.
+ * T8: Verify crash notification sent to both instance topic and general topic.
  *
  * Uses a shorter health check assertion window. The daemon health check runs
  * every 30s, so total wait can be up to ~35s (30s detection + backoff).
@@ -51,6 +52,7 @@ describe("Fleet Respawn E2E", () => {
     mkdirSync(join(testDir, "instances"), { recursive: true });
     mkdirSync(join(testDir, "access"), { recursive: true });
     mkdirSync(join(testDir, "work", "crasher"), { recursive: true });
+    mkdirSync(join(testDir, "work", "general"), { recursive: true });
 
     writeFileSync(
       join(testDir, ".env"),
@@ -94,6 +96,14 @@ describe("Fleet Respawn E2E", () => {
           tags: ["test"],
           topic_id: 50,
         },
+        general: {
+          working_directory: join(testDir, "work", "general"),
+          display_name: "General",
+          description: "General topic instance for notifications",
+          tags: ["test"],
+          topic_id: 51,
+          general_topic: true,
+        },
       },
       teams: {},
       health_port: healthPort,
@@ -121,15 +131,16 @@ describe("Fleet Respawn E2E", () => {
 
   // --- Phase 1: Start fleet ---
 
-  it("T7: fleet starts with crasher instance", async () => {
+  it("T7: fleet starts with crasher and general instances", async () => {
     fm = new FleetManager(testDir);
     await fm.startAll(join(testDir, "fleet.yaml"));
 
-    // Wait for instance to be ready
+    // Wait for both instances to be ready
     await waitFor(
       () =>
-        existsSync(join(testDir, "instances", "crasher", "statusline.json")),
-      { timeout: 20_000, label: "crasher statusline.json" },
+        existsSync(join(testDir, "instances", "crasher", "statusline.json")) &&
+        existsSync(join(testDir, "instances", "general", "statusline.json")),
+      { timeout: 20_000, label: "crasher+general statusline.json" },
     );
 
     const statusRaw = readFileSync(
@@ -192,6 +203,31 @@ describe("Fleet Respawn E2E", () => {
     expect(statusAfter.session_id).not.toBe(sessionBefore);
     expect(statusAfter.session_id).toMatch(/^mock-crasher-/);
   }, 90_000);
+
+  it("T8: crash notification sent to crasher topic", async () => {
+    // After respawn, daemon emits crash_respawn → notifyInstanceTopic sends to crasher's topic
+    const sends = telegramMock.getCallsFor("sendMessage");
+    const crasherNotification = sends.find(
+      (c) =>
+        String(c.params.message_thread_id) === "50" &&
+        typeof c.params.text === "string" &&
+        (c.params.text as string).includes("crashed and respawned"),
+    );
+    expect(crasherNotification).toBeDefined();
+  });
+
+  it("T8: crash notification sent to general topic with daemon.log path", async () => {
+    // General topic should receive notification with daemon.log reference
+    const sends = telegramMock.getCallsFor("sendMessage");
+    const generalNotification = sends.find(
+      (c) =>
+        String(c.params.message_thread_id) === "51" &&
+        typeof c.params.text === "string" &&
+        (c.params.text as string).includes("crashed and respawned") &&
+        (c.params.text as string).includes("daemon.log"),
+    );
+    expect(generalNotification).toBeDefined();
+  });
 
   it("T7: respawned instance responds to messages", async () => {
     const sendsBefore = telegramMock.getCallsFor("sendMessage").length;

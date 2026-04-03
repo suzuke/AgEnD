@@ -9,7 +9,7 @@ const MAX_LOG_SIZE = 10 * 1024 * 1024; // 10 MB
 const TRUNCATE_TO = 5 * 1024 * 1024; // keep last 5 MB
 
 /** Truncate log to tail when it exceeds MAX_LOG_SIZE (no rotation/backup files) */
-function truncateLogIfNeeded(logPath: string): void {
+export function truncateLogIfNeeded(logPath: string): void {
   try {
     const stat = statSync(logPath);
     if (stat.size < MAX_LOG_SIZE) return;
