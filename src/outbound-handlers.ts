@@ -85,18 +85,24 @@ const sendToInstance: Handler = (ctx, args, respond, meta) => {
 
   targetIpc.send({ type: "fleet_inbound", targetSession, content: message, meta: ipcMeta });
 
-  // Post a one-line summary to the target topic only (full message delivered via IPC).
+  // Post to the target topic for visibility — but only for actionable message kinds.
+  // report/update: target is just returning results; no notification needed.
+  // task/query: show full message so the target's topic reflects the full instruction.
+  // other (no request_kind): show a short summary as before.
   // Skip general_topic — that space is reserved for user ↔ general conversation.
+  const requestKind = ipcMeta.request_kind;
+  const skipNotification = requestKind === "report" || requestKind === "update";
   const groupId = ctx.fleetConfig?.channel?.group_id;
-  if (groupId && ctx.adapter) {
+  if (!skipNotification && groupId && ctx.adapter) {
     const targetInstance = ctx.fleetConfig?.instances[targetInstanceName];
     const targetTopicId = targetInstance?.topic_id;
     const isGeneralTopic = targetInstance?.general_topic === true;
     if (targetTopicId && !isGeneralTopic && !ctx.sessionRegistry.has(targetName)) {
-      const summary = ipcMeta.task_summary
-        ? ipcMeta.task_summary
-        : `${message.slice(0, 100)}${message.length > 100 ? "…" : ""}`;
-      ctx.adapter.sendText(String(groupId), `${senderLabel} → ${targetName}: ${summary}`, {
+      const showFullMessage = requestKind === "task" || requestKind === "query";
+      const notificationText = showFullMessage
+        ? `${senderLabel} → ${targetName}:\n${message}`
+        : `${senderLabel} → ${targetName}: ${ipcMeta.task_summary ?? `${message.slice(0, 100)}${message.length > 100 ? "…" : ""}`}`;
+      ctx.adapter.sendText(String(groupId), notificationText, {
         threadId: String(targetTopicId),
       }).catch(e => ctx.logger.warn({ err: e }, "Failed to post cross-instance notification"));
     }
