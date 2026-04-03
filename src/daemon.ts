@@ -14,7 +14,6 @@ import { ToolTracker } from "./channel/tool-tracker.js";
 import type { CliBackend, CliBackendConfig, ErrorPattern } from "./backend/types.js";
 import type { ChannelAdapter, InboundMessage } from "./channel/types.js";
 import { routeToolCall } from "./channel/tool-router.js";
-import { generateFleetSystemPrompt } from "./fleet-system-prompt.js";
 import { HangDetector } from "./hang-detector.js";
 import type { TmuxControlClient } from "./tmux-control.js";
 
@@ -187,6 +186,8 @@ export class Daemon extends EventEmitter {
     }
 
     await this.spawnClaudeWindow();
+    // Inject session snapshot (from context rotation) as the first message
+    await this.injectSnapshotMessage();
 
     if (!this.config.lightweight) {
       // 3. Pipe-pane for prompt detection
@@ -821,6 +822,26 @@ export class Daemon extends EventEmitter {
     if (!existsSync(serverJs)) {
       serverJs = join(__dirname, "..", "dist", "channel", "mcp-server.js");
     }
+    // Build MCP server env — fleet context is injected via MCP instructions,
+    // NOT via CLI --system-prompt flags.  This keeps all backends uniform and
+    // avoids overriding each CLI's built-in system prompt.
+    const mcpEnv: Record<string, string> = {
+      AGEND_SOCKET_PATH: sockPath,
+      AGEND_INSTANCE_NAME: this.name,
+      AGEND_WORKING_DIR: this.config.working_directory,
+    };
+    if (this.config.tool_set) mcpEnv.AGEND_TOOL_SET = this.config.tool_set;
+    if (this.config.display_name) mcpEnv.AGEND_DISPLAY_NAME = this.config.display_name;
+    if (this.config.description) mcpEnv.AGEND_DESCRIPTION = this.config.description;
+    // Custom systemPrompt: resolve file: prefix before passing
+    if (this.config.systemPrompt) {
+      let userPrompt = this.config.systemPrompt;
+      if (userPrompt.startsWith("file:")) {
+        try { userPrompt = readFileSync(userPrompt.slice(5), "utf-8"); } catch { userPrompt = ""; }
+      }
+      if (userPrompt) mcpEnv.AGEND_CUSTOM_PROMPT = userPrompt;
+    }
+
     return {
       workingDirectory: this.config.working_directory,
       instanceDir: this.instanceDir,
@@ -829,53 +850,26 @@ export class Daemon extends EventEmitter {
         "agend": {
           command: "node",
           args: [serverJs],
-          env: {
-            AGEND_SOCKET_PATH: sockPath,
-            ...(this.config.tool_set ? { AGEND_TOOL_SET: this.config.tool_set } : {}),
-          },
+          env: mcpEnv,
         },
       },
-      systemPrompt: this.buildSystemPrompt(),
       skipPermissions: this.config.skipPermissions,
       model: this.modelOverride ?? this.config.model,
     };
   }
 
-  /** Combine fleet context with user-configured system prompt + previous session snapshot */
-  private buildSystemPrompt(): string {
-    const fleetContext = generateFleetSystemPrompt({
-      instanceName: this.name,
-      workingDirectory: this.config.working_directory,
-    });
-    let prompt = fleetContext;
-    if (this.config.display_name) {
-      prompt += `\n\nYour display name is "${this.config.display_name}". Use this when introducing yourself.`;
-    } else {
-      prompt += "\n\nYou don't have a display name yet. Use set_display_name to choose one that reflects your personality.";
-    }
-    // Role: description acts as the short role prompt
-    if (this.config.description) {
-      prompt += `\n\n## Role\n${this.config.description}`;
-    }
-    // Custom system prompt (supports file: prefix for external files)
-    if (this.config.systemPrompt) {
-      let userPrompt = this.config.systemPrompt;
-      if (userPrompt.startsWith("file:")) {
-        try { userPrompt = readFileSync(userPrompt.slice(5), "utf-8"); } catch { userPrompt = ""; }
-      }
-      if (userPrompt) prompt += "\n\n" + userPrompt;
-    }
-    // Inject active decisions for this project
-    const decisionsBlock = this.buildDecisionsPrompt();
-    if (decisionsBlock) {
-      prompt += "\n\n" + decisionsBlock;
-    }
-    // v3: inject previous session snapshot
-    const snapshotBlock = this.buildSnapshotPrompt();
-    if (snapshotBlock) {
-      prompt += "\n\n" + snapshotBlock;
-    }
-    return prompt;
+  /**
+   * After CLI is ready, paste any pending session snapshot as the first
+   * user input so the agent picks up where the previous session left off.
+   * This replaces the old system-prompt injection approach.
+   */
+  private async injectSnapshotMessage(): Promise<void> {
+    const snapshot = this.buildSnapshotPrompt();
+    if (!snapshot || !this.tmux) return;
+    // Small delay to let the CLI fully render its ready prompt
+    await new Promise(r => setTimeout(r, 1_000));
+    await this.tmux.pasteText(`[system:session-snapshot]\n${snapshot}`);
+    this.logger.info("Injected session snapshot as first message");
   }
 
   /** Spawn (or respawn) a CLI window in tmux */

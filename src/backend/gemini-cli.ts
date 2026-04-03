@@ -1,5 +1,5 @@
 import { join, dirname } from "node:path";
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { type CliBackend, type CliBackendConfig, type ErrorPattern, resolveBinary } from "./types.js";
 
@@ -18,13 +18,6 @@ export class GeminiCliBackend implements CliBackend {
 
     if (config.model) {
       cmd += ` --model ${config.model}`;
-    }
-
-    // Inject system prompt via GEMINI_SYSTEM_MD env var (overrides GEMINI.md).
-    // The env var points to a file whose content replaces the default system prompt.
-    const promptFile = join(this.instanceDir, "system-prompt.md");
-    if (existsSync(promptFile)) {
-      cmd = `GEMINI_SYSTEM_MD=${promptFile} ${cmd}`;
     }
 
     return cmd;
@@ -57,13 +50,6 @@ export class GeminiCliBackend implements CliBackend {
     }
     writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 
-    // System prompt via GEMINI_SYSTEM_MD env var (set in buildCommand).
-    // Write to instance dir so each instance gets its own prompt file.
-    if (config.systemPrompt) {
-      const promptPath = join(this.instanceDir, "system-prompt.md");
-      mkdirSync(dirname(promptPath), { recursive: true });
-      writeFileSync(promptPath, config.systemPrompt);
-    }
   }
 
   preTrust(workDir: string): void {
@@ -118,13 +104,6 @@ export class GeminiCliBackend implements CliBackend {
           }
           writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
         }
-      }
-    } catch { /* best effort */ }
-    // Clean up instance system prompt file
-    try {
-      const promptPath = join(this.instanceDir, "system-prompt.md");
-      if (existsSync(promptPath)) {
-        unlinkSync(promptPath);
       }
     } catch { /* best effort */ }
   }

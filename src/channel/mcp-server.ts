@@ -164,22 +164,69 @@ function ipcRequest(
 // MCP Server
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Dynamic MCP instructions — carries fleet context + user custom prompt
+// so we never need to touch the CLI's own system prompt.
+// ---------------------------------------------------------------------------
+
+function buildMcpInstructions(): string {
+  const name = process.env.AGEND_INSTANCE_NAME ?? "unknown";
+  const workDir = process.env.AGEND_WORKING_DIR ?? process.cwd();
+  const displayName = process.env.AGEND_DISPLAY_NAME;
+  const description = process.env.AGEND_DESCRIPTION;
+  const customPrompt = process.env.AGEND_CUSTOM_PROMPT;
+
+  const sections: string[] = [];
+
+  // ── Identity ──
+  sections.push(`# AgEnD Fleet Context\nYou are **${name}**, an instance in an AgEnD fleet.\nYour working directory is \`${workDir}\`.`);
+  if (displayName) {
+    sections.push(`Your display name is "${displayName}". Use this when introducing yourself.`);
+  } else {
+    sections.push("You don't have a display name yet. Use set_display_name to choose one that reflects your personality.");
+  }
+  if (description) {
+    sections.push(`## Role\n${description}`);
+  }
+
+  // ── Message format & tool usage ──
+  sections.push([
+    "## Message Format",
+    "- `[user:name]` — from a Telegram/Discord user → reply with the `reply` tool.",
+    "- `[from:instance-name]` — from another fleet instance → reply with `send_to_instance`, NOT the reply tool.",
+    "",
+    "**Always use the `reply` tool for ALL responses to users.** Do not respond directly in the terminal.",
+    "",
+    "## Tool Usage",
+    "- reply: respond to users. react: emoji reactions. edit_message: update a sent message. download_attachment: fetch files.",
+    "- If the inbound message has image_path, Read that file — it is a photo.",
+    "- If the inbound message has attachment_file_id, call download_attachment then Read the returned path.",
+    "- If the inbound message has reply_to_text, the user is quoting a previous message.",
+    "- Use list_instances to discover fleet members. Use describe_instance for details.",
+    "- High-level collaboration: request_information (ask), delegate_task (assign), report_result (return results with correlation_id).",
+    "",
+    "## Collaboration Rules",
+    "1. Use fleet tools for cross-instance communication. Never assume direct file access to another instance's repo.",
+    "2. Cross-instance messages appear as `[from:instance-name]`. Reply via send_to_instance or report_result, NOT reply.",
+    "3. Use list_instances to discover available instances before sending messages.",
+    "4. You only have direct access to files under your own working directory.",
+  ].join("\n"));
+
+  // ── Custom user prompt ──
+  if (customPrompt) {
+    sections.push(customPrompt);
+  }
+
+  return sections.join("\n\n");
+}
+
 const mcp = new Server(
   { name: "agend", version: "0.3.0" },
   {
     capabilities: {
       tools: {},
     },
-    instructions: [
-      "Reply using the reply tool. Use react for emoji reactions, edit_message for updates, download_attachment for files.",
-      "If the inbound message has image_path, Read that file — it is a photo the sender attached.",
-      "If the inbound message has attachment_file_id, call download_attachment with that file_id to fetch the file, then Read the returned path.",
-      "If the inbound message has reply_to_text, the user is quoting/replying to a previous message.",
-      "Use send_to_instance to communicate with other instances. Use list_instances to discover available instances.",
-      "Cross-instance messages (from_instance in meta) must be replied to via send_to_instance, NOT the reply tool.",
-      "High-level collaboration tools: request_information (ask a question), delegate_task (assign work), report_result (return results with correlation_id).",
-      "Use describe_instance to get detailed info about a specific instance before interacting with it.",
-    ].join("\n"),
+    instructions: buildMcpInstructions(),
   },
 );
 

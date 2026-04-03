@@ -1,5 +1,5 @@
-import { join, dirname } from "node:path";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { type CliBackend, type CliBackendConfig, type ErrorPattern, resolveBinary } from "./types.js";
 
 export class OpenCodeBackend implements CliBackend {
@@ -55,14 +55,6 @@ export class OpenCodeBackend implements CliBackend {
     delete mcp["agend"];
     oc.mcp = mcp;
     delete oc.mcpServers;
-
-    // System prompt — write to instance dir (absolute path)
-    if (config.systemPrompt) {
-      const promptPath = join(this.instanceDir, ".opencode-instructions.md");
-      mkdirSync(dirname(promptPath), { recursive: true });
-      writeFileSync(promptPath, config.systemPrompt);
-      oc.instructions = [promptPath];
-    }
 
     writeFileSync(configPath, JSON.stringify(oc, null, 2));
   }

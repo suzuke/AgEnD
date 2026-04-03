@@ -137,7 +137,7 @@ All fields from `instances.<name>` can be set here as defaults. Additionally:
 |-------|------|---------|-------------|
 | `working_directory` | string | **required** | Project directory path |
 | `display_name` | string | — | Agent display name (e.g. "Kuro"). Set via `set_display_name` tool |
-| `description` | string | — | Role description. Injected into system prompt as `## Role` |
+| `description` | string | — | Role description. Injected via MCP server instructions as `## Role` |
 | `tags` | string[] | `[]` | Tags for filtering (`broadcast`, `list_instances`) |
 | `topic_id` | number\|string | auto | Channel topic/thread ID. Auto-assigned on create |
 | `general_topic` | boolean | `false` | Mark as General Topic (receives unrouted messages) |
@@ -145,7 +145,7 @@ All fields from `instances.<name>` can be set here as defaults. Additionally:
 | `model` | string | — | Model alias. Claude: `sonnet`, `opus`, `haiku`, `opusplan`, `best`, `sonnet[1m]`, `opus[1m]`. Codex: `gpt-4o`, `o3`. Gemini: `gemini-2.5-pro` |
 | `model_failover` | string[] | — | Fallback models when rate-limited (e.g. `["opus", "sonnet"]`) |
 | `tool_set` | string | `"full"` | MCP tool profile: `full` (all), `standard` (10), `minimal` (4) |
-| `systemPrompt` | string | — | Custom system prompt. Inline string or `file:./path.md` to load from an external file (path relative to `working_directory`). Example: `systemPrompt: "file:./prompts/role.md"` |
+| `systemPrompt` | string | — | Custom instructions injected via MCP server instructions. Inline string or `file:./path.md` to load from an external file (path relative to `working_directory`). Does not modify the CLI's built-in system prompt. Example: `systemPrompt: "file:./prompts/role.md"` |
 | `skipPermissions` | boolean | `true` | Skip CLI permission checks (`--dangerously-skip-permissions`). Set `false` to enable |
 | `lightweight` | boolean | `false` | Skip transcript monitor, context guardian, approval server |
 | `log_level` | string | `"info"` | `debug`, `info`, `warn`, `error` |
@@ -168,6 +168,55 @@ All fields from `instances.<name>` can be set here as defaults. Additionally:
 |-------|------|---------|-------------|
 | `grace_period_ms` | number | `600000` | Wait time after rotation trigger before restart (10 min) |
 | `max_age_hours` | number | `0` (disabled) | Force rotation after N hours. `0` = rely on CLI auto-compact |
+
+---
+
+## How fleet context is injected
+
+AgEnD injects fleet context into each instance via the **MCP server instructions** mechanism — not by modifying the CLI's own system prompt. This keeps each CLI's built-in behavior intact and works uniformly across all backends.
+
+### Fleet context via MCP instructions
+
+When the daemon spawns an instance, it starts an MCP server (`agend`) as a child process of the CLI. The daemon passes instance metadata to the MCP server via environment variables:
+
+| Env var | Content |
+|---------|---------|
+| `AGEND_INSTANCE_NAME` | Instance name (e.g. `my-project`) |
+| `AGEND_WORKING_DIR` | Working directory path |
+| `AGEND_DISPLAY_NAME` | Agent display name (if set) |
+| `AGEND_DESCRIPTION` | Role description from `description` field |
+| `AGEND_CUSTOM_PROMPT` | Resolved content from `systemPrompt` field |
+
+The MCP server assembles these into a single `instructions` string that the CLI reads via the MCP protocol. The instructions include:
+
+1. **Identity** — instance name, working directory, display name, role
+2. **Message format** — how to distinguish user messages (`[user:name]`) from cross-instance messages (`[from:instance-name]`)
+3. **Collaboration rules** — use `reply` for users, `send_to_instance` for cross-instance, scope awareness
+4. **Tool guidance** — how to use reply, react, edit_message, download_attachment, and fleet tools
+5. **Custom prompt** — the `systemPrompt` content from fleet.yaml (supports `file:` prefix)
+
+This approach means:
+- The CLI's built-in system prompt is **never modified** (Claude Code keeps its tool usage instructions, Gemini keeps its skills, etc.)
+- Project-level instruction files (CLAUDE.md, AGENTS.md, GEMINI.md) are **not affected**
+- All four backends (Claude Code, Codex, Gemini CLI, OpenCode) use the same injection path
+
+### Session snapshots (context rotation)
+
+When a context rotation occurs, the daemon saves a snapshot of the previous session (recent messages, tool activity, context usage) to `rotation-state.json`. On the next spawn, the snapshot is delivered as the **first inbound message** with a `[system:session-snapshot]` prefix — not embedded in the system prompt.
+
+The snapshot is single-consume: it is deleted after being read so it is not re-injected on subsequent restarts.
+
+### Decisions
+
+Active decisions (from `post_decision`) are **not** preloaded into the prompt. Agents query them on demand using the `list_decisions` tool.
+
+### fleet.yaml `systemPrompt`
+
+The `systemPrompt` field in fleet.yaml still works as before:
+- Inline string: `systemPrompt: "You are a security reviewer"`
+- File reference: `systemPrompt: "file:./prompts/role.md"` (path relative to `working_directory`)
+
+The only change is the injection channel: content is now delivered via MCP instructions instead of CLI flags like `--system-prompt`.
 
 ---
 
@@ -199,6 +248,5 @@ GROQ_API_KEY=gsk_...          # optional, for voice transcription
 | `instances/<name>/channel.sock` | IPC Unix socket |
 | `instances/<name>/statusline.json` | Latest CLI status |
 | `instances/<name>/session-id` | Session ID for `--resume` |
-| `instances/<name>/.prompt-generated` | Auto-generated system prompt (do not edit) |
-| `instances/<name>/rotation-state.json` | Context rotation snapshot |
+| `instances/<name>/rotation-state.json` | Context rotation snapshot (consumed on restart) |
 | `instances/<name>/repos/` | Checked-out repo worktrees (auto-cleaned) |

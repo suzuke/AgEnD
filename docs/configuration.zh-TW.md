@@ -134,7 +134,7 @@ health_port: 19280
 |------|------|------|------|
 | `working_directory` | string | **必填** | 專案目錄路徑 |
 | `display_name` | string | — | Agent 顯示名稱（例："Kuro"）。用 `set_display_name` 設定 |
-| `description` | string | — | 角色描述。會注入 system prompt 作為 `## Role` |
+| `description` | string | — | 角色描述。透過 MCP server instructions 注入為 `## Role` |
 | `tags` | string[] | `[]` | 標籤，用於 `broadcast` 和 `list_instances` 過濾 |
 | `topic_id` | number\|string | 自動 | 頻道 topic/thread ID。建立時自動分配 |
 | `general_topic` | boolean | `false` | 標記為 General Topic（接收未路由的訊息） |
@@ -142,7 +142,7 @@ health_port: 19280
 | `model` | string | — | 模型。Claude：`sonnet`、`opus`、`haiku`、`opusplan`。Codex：`gpt-4o`。Gemini：`gemini-2.5-pro` |
 | `model_failover` | string[] | — | 被限速時的備用模型（例：`["opus", "sonnet"]`） |
 | `tool_set` | string | `"full"` | MCP tool 設定：`full`（全部）、`standard`（10 個）、`minimal`（4 個） |
-| `systemPrompt` | string | — | 自訂 system prompt。內嵌字串或 `file:./path.md` 從外部檔案載入（路徑相對於 `working_directory`）。範例：`systemPrompt: "file:./prompts/role.md"` |
+| `systemPrompt` | string | — | 自訂指令，透過 MCP server instructions 注入。內嵌字串或 `file:./path.md` 從外部檔案載入（路徑相對於 `working_directory`）。不會修改 CLI 的內建 system prompt。範例：`systemPrompt: "file:./prompts/role.md"` |
 | `skipPermissions` | boolean | `true` | 跳過 CLI 權限檢查。設 `false` 啟用 |
 | `lightweight` | boolean | `false` | 跳過 transcript monitor、context guardian 等非必要子系統 |
 | `log_level` | string | `"info"` | `debug`、`info`、`warn`、`error` |
@@ -165,6 +165,55 @@ health_port: 19280
 |------|------|------|------|
 | `grace_period_ms` | number | `600000` | 觸發 rotation 後等待時間（10 分鐘） |
 | `max_age_hours` | number | `0`（停用） | 強制 rotation 的小時數。`0` = 依賴 CLI 自動壓縮 |
+
+---
+
+## Fleet context 注入機制
+
+AgEnD 透過 **MCP server instructions** 機制注入 fleet context — 不修改 CLI 本身的 system prompt。這讓各 CLI 的內建行為維持完整，且所有 backend 使用統一的注入路徑。
+
+### Fleet context 透過 MCP instructions
+
+Daemon 啟動 instance 時，會啟動一個 MCP server（`agend`）作為 CLI 的子進程。Daemon 透過環境變數傳遞 instance 資訊給 MCP server：
+
+| 環境變數 | 內容 |
+|---------|------|
+| `AGEND_INSTANCE_NAME` | Instance 名稱（例：`my-project`） |
+| `AGEND_WORKING_DIR` | 工作目錄路徑 |
+| `AGEND_DISPLAY_NAME` | Agent 顯示名稱（如有設定） |
+| `AGEND_DESCRIPTION` | `description` 欄位的角色描述 |
+| `AGEND_CUSTOM_PROMPT` | `systemPrompt` 欄位解析後的內容 |
+
+MCP server 將這些組合成一個 `instructions` 字串，CLI 透過 MCP protocol 讀取。Instructions 包含：
+
+1. **身分** — instance 名稱、工作目錄、顯示名稱、角色
+2. **訊息格式** — 區分使用者訊息（`[user:name]`）和跨 instance 訊息（`[from:instance-name]`）
+3. **協作規則** — 對使用者用 `reply`，跨 instance 用 `send_to_instance`，scope 意識
+4. **工具指引** — reply、react、edit_message、download_attachment 及 fleet 工具的用法
+5. **自訂 prompt** — fleet.yaml 的 `systemPrompt` 內容（支援 `file:` prefix）
+
+這個方式的好處：
+- CLI 的內建 system prompt **不會被修改**（Claude Code 保留 tool 指引、Gemini 保留 skills 等）
+- 專案的 instruction 檔案（CLAUDE.md、AGENTS.md、GEMINI.md）**不受影響**
+- 四個 backend（Claude Code、Codex、Gemini CLI、OpenCode）使用相同的注入路徑
+
+### Session snapshot（context rotation 接續）
+
+Context rotation 時，daemon 將前一個 session 的 snapshot（近期訊息、tool 活動、context 用量）儲存到 `rotation-state.json`。下次啟動時，snapshot 以 `[system:session-snapshot]` 前綴作為**第一則 inbound 訊息**送入 — 不再嵌入 system prompt。
+
+Snapshot 為一次性消耗：讀取後即刪除，不會在後續重啟時重複注入。
+
+### Decisions
+
+Active decisions（來自 `post_decision`）**不再預載**到 prompt。Agent 使用 `list_decisions` 工具按需查詢。
+
+### fleet.yaml `systemPrompt`
+
+fleet.yaml 的 `systemPrompt` 欄位仍然有效：
+- 內嵌字串：`systemPrompt: "你是安全審查員"`
+- 檔案參照：`systemPrompt: "file:./prompts/role.md"`（路徑相對於 `working_directory`）
+
+唯一的改變是注入管道：內容現在透過 MCP instructions 傳遞，而非 `--system-prompt` 等 CLI flag。
 
 ---
 
@@ -195,4 +244,4 @@ GROQ_API_KEY=gsk_...          # 選用，語音轉文字
 | `instances/<name>/` | 每個 instance 的運行時資料 |
 | `instances/<name>/channel.sock` | IPC Unix socket |
 | `instances/<name>/statusline.json` | 最新 CLI 狀態 |
-| `instances/<name>/.prompt-generated` | 自動產生的 system prompt（勿直接編輯） |
+| `instances/<name>/rotation-state.json` | Context rotation snapshot（重啟時消耗） |

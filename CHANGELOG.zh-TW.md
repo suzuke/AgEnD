@@ -6,10 +6,22 @@
 
 ## [未發佈] (Unreleased)
 
+### 破壞性變更
+- **System prompt 注入改為 MCP instructions。** Fleet context、自訂 `systemPrompt`、協作規則現在透過 MCP server instructions 注入，不再使用 CLI 的 `--system-prompt` 等 flag。變更原因：
+  - Claude Code：`--system-prompt` 傳了檔案路徑而非檔案內容 — fleet prompt **自始至終都沒有正確注入**
+  - Gemini CLI：`GEMINI_SYSTEM_MD` 會覆蓋內建 system prompt 並破壞 skills 功能
+  - Codex：`.prompt-generated` 是 dead code — 寫入但 CLI 從未讀取
+  - OpenCode：`instructions` 陣列被覆蓋而非追加，破壞專案原有的 instructions
+- **對現有設定的影響：**
+  - `fleet.yaml` 的 `systemPrompt` 欄位保留 — 改由 MCP instructions 注入
+  - 不再產生 `.prompt-generated`、`system-prompt.md`、`.opencode-instructions.md` 檔案
+  - 各 CLI 的內建 system prompt 不再被覆蓋或修改
+  - Active Decisions 不再預載到 system prompt — 改用 `list_decisions` 工具按需查詢
+  - Session snapshot（context rotation 接續）改為第一則 inbound 訊息送入（`[system:session-snapshot]`），不再嵌入 system prompt
+
 ### 新增
 - Fleet 事件（輪轉、懸掛、成本警報）的 Webhook 通知
 - 用於外部監控的 HTTP 健康檢查端點 (`/health`, `/status`)
-- 模型容錯移轉 — 在達到頻率限制時自動切換到備用模型
 - 在 Context 輪轉時具有驗證與重試機制的結構化交接範本
 - 權限中繼 UX 改進（逾時倒數、持久化的「一律允許」、決定後的回饋）
 - 主題圖示自動更新（執行中/已停止）+ 閒置封存

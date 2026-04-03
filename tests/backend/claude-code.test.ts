@@ -55,13 +55,11 @@ describe("ClaudeCodeBackend", () => {
       expect(cmd).toContain("--resume sess-123");
     });
 
-    it("includes --system-prompt when systemPrompt is set", () => {
+    it("does not include --system-prompt (prompt injected via MCP instructions)", () => {
       const backend = new ClaudeCodeBackend(TEST_DIR);
-      const cmd = backend.buildCommand(makeConfig({ systemPrompt: "You are a debater." }));
-      expect(cmd).toContain("--system-prompt");
-      const content = readFileSync(join(TEST_DIR, ".prompt-generated"), "utf-8");
-      expect(content).toContain("You are a debater.");
-      expect(content).toContain("AUTO-GENERATED");
+      const cmd = backend.buildCommand(makeConfig());
+      expect(cmd).not.toContain("--system-prompt");
+      expect(existsSync(join(TEST_DIR, ".prompt-generated"))).toBe(false);
     });
 
     it("includes --model when model is set", () => {

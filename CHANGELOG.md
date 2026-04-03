@@ -6,10 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Breaking Changes
+- **System prompt injection replaced with MCP instructions.** Fleet context, custom `systemPrompt`, and collaboration rules are now injected via MCP server instructions instead of CLI `--system-prompt` flags. This change was necessary because:
+  - Claude Code: `--system-prompt` was passed a file path as literal text instead of file contents — the fleet prompt was **never correctly injected** since inception
+  - Gemini CLI: `GEMINI_SYSTEM_MD` overwrites the built-in system prompt and breaks skills functionality
+  - Codex: `.prompt-generated` was dead code — written to disk but never read by the CLI
+  - OpenCode: `instructions` array was overwritten instead of appended, breaking existing project instructions
+- **Impact on existing setups:**
+  - `fleet.yaml` `systemPrompt` field is preserved — it now injects via MCP instructions instead of CLI flags
+  - `.prompt-generated`, `system-prompt.md`, `.opencode-instructions.md` files are no longer generated
+  - Each CLI's built-in system prompt is no longer overridden or modified
+  - Active Decisions are no longer preloaded into the system prompt — use `list_decisions` tool on demand
+  - Session snapshots (context rotation) are now delivered as the first inbound message (`[system:session-snapshot]`) instead of being embedded in the system prompt
+
 ### Added
 - Webhook notifications for fleet events (rotation, hang, cost alerts)
 - HTTP health endpoint (`/health`, `/status`) for external monitoring
-- Model failover — auto-switch to backup model on rate limit
 - Structured handover template with validation and retry on context rotation
 - Permission relay UX improvements (timeout countdown, "Always Allow" persistence, post-decision feedback)
 - Topic icon auto-update (running/stopped) + idle archive

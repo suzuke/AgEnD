@@ -11,7 +11,6 @@ export interface CliBackendConfig {
   instanceDir: string;
   instanceName: string;
   mcpServers: Record<string, McpServerEntry>;
-  systemPrompt?: string;
   skipPermissions?: boolean;
   model?: string;
 }
