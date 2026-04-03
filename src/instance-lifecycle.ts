@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, mkdirSync } from "node:fs";
 import { join, basename, dirname } from "node:path";
+import { homedir } from "node:os";
 import { access } from "node:fs/promises";
 import type { InstanceConfig, FleetConfig } from "./types.js";
 import { DEFAULT_INSTANCE_CONFIG } from "./config.js";
@@ -208,22 +209,30 @@ export class InstanceLifecycle {
     args: Record<string, unknown>,
     respond: (result: unknown, error?: string) => void,
   ): Promise<void> {
-    const directory = (args.directory as string).replace(/^~/, process.env.HOME || "~");
-    const topicName = (args.topic_name as string) || basename(directory);
+    const rawDirectory = args.directory as string | undefined;
+    const directory = rawDirectory ? rawDirectory.replace(/^~/, process.env.HOME || "~") : undefined;
+    const topicName = (args.topic_name as string) || (directory ? basename(directory) : undefined);
     const description = args.description as string | undefined;
     const branch = args.branch as string | undefined;
     const detach = (args.detach as boolean) ?? false;
 
-    // Validate directory exists
-    try {
-      await access(directory);
-    } catch {
-      respond(null, `Directory does not exist: ${directory}`);
+    if (!directory && !topicName) {
+      respond(null, "topic_name is required when directory is not specified");
       return;
     }
 
-    // Check for duplicate early (before worktree creation) — only when no branch
-    if (!branch) {
+    // Validate directory exists (only when explicitly provided)
+    if (directory) {
+      try {
+        await access(directory);
+      } catch {
+        respond(null, `Directory does not exist: ${directory}`);
+        return;
+      }
+    }
+
+    // Check for duplicate early (before worktree creation) — only when directory is known and no branch
+    if (directory && !branch) {
       const expandHome = (p: string) => p.replace(/^~/, process.env.HOME || "~");
       const existingInstance = Object.entries(this.ctx.fleetConfig?.instances ?? {})
         .find(([_, config]) => expandHome(config.working_directory) === directory);
@@ -240,9 +249,13 @@ export class InstanceLifecycle {
       }
     }
 
-    // If branch specified, create git worktree
-    let workDir = directory;
+    // If branch specified, create git worktree (requires directory)
+    let workDir = directory ?? "";
     let worktreePath: string | undefined;
+    if (branch && !directory) {
+      respond(null, "directory is required when branch is specified");
+      return;
+    }
     if (branch) {
       try {
         const { execFile: execFileCb } = await import("node:child_process");
@@ -255,9 +268,9 @@ export class InstanceLifecycle {
         if (customPath) {
           worktreePath = customPath.replace(/^~/, process.env.HOME || "~");
         } else {
-          const repoName = basename(directory);
+          const repoName = basename(directory!);
           const safeBranch = branch.replace(/\//g, "-");
-          worktreePath = join(dirname(directory), `${repoName}-${safeBranch}`);
+          worktreePath = join(dirname(directory!), `${repoName}-${safeBranch}`);
         }
 
         let branchExists = false;
@@ -304,10 +317,17 @@ export class InstanceLifecycle {
     let newInstanceName: string | undefined;
 
     try {
-      createdTopicId = await this.ctx.createForumTopic(topicName);
+      createdTopicId = await this.ctx.createForumTopic(topicName!);
 
-      const nameBase = worktreePath ? topicName : basename(workDir);
+      const nameBase = worktreePath ? topicName! : (directory ? basename(workDir) : topicName!);
       newInstanceName = `${sanitizeInstanceName(nameBase)}-t${createdTopicId}`;
+
+      // If no directory was provided, auto-create default workspace
+      if (!directory) {
+        workDir = join(homedir(), ".agend", "workspaces", newInstanceName);
+        mkdirSync(workDir, { recursive: true });
+      }
+
       const instanceConfig = {
         ...DEFAULT_INSTANCE_CONFIG,
         ...this.ctx.fleetConfig!.defaults,
@@ -351,6 +371,12 @@ export class InstanceLifecycle {
           const execFileAsync = promisify(execFileCb);
           await execFileAsync("git", ["worktree", "remove", "--force", worktreePath], { cwd: directory });
         } catch { /* best-effort worktree cleanup */ }
+      } else if (!directory && workDir) {
+        // Remove auto-created workspace directory
+        try {
+          const { rm } = await import("node:fs/promises");
+          await rm(workDir, { recursive: true, force: true });
+        } catch { /* best-effort cleanup */ }
       }
       respond(null, `Failed to create instance: ${(err as Error).message}`);
     }
