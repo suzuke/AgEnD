@@ -6,6 +6,25 @@
 
 ## [未發佈] (Unreleased)
 
+### 新增
+- Fleet 事件（輪轉、懸掛、成本警報）的 Webhook 通知
+- 用於外部監控的 HTTP 健康檢查端點 (`/health`, `/status`)
+- 在 Context 輪轉時具有驗證與重試機制的結構化交接範本
+- 權限中繼 UX 改進（逾時倒數、持久化的「一律允許」、決定後的回饋）
+- 主題圖示自動更新（執行中/已停止）+ 閒置封存
+- 過濾 Telegram 服務訊息（主題重新命名、置頂等）以節省 token
+
+### 修復
+- 最小化的 `claude-settings.json` — 允許列表中僅包含 AgEnD MCP 工具，不再覆蓋使用者全域的權限設定
+
+## [1.9.1] - 2026-04-03
+
+### 修復
+- Health-check 重新啟動時注入 session snapshot — 崩潰/kill 恢復也能還原 context
+- Snapshot 貼入時附加「不要回覆」指令，防止模型嘗試 IPC 回覆導致逾時
+
+## [1.9.0] - 2026-04-03
+
 ### 破壞性變更
 - **System prompt 注入改為 MCP instructions。** Fleet context、自訂 `systemPrompt`、協作規則現在透過 MCP server instructions 注入，不再使用 CLI 的 `--system-prompt` 等 flag。變更原因：
   - Claude Code：`--system-prompt` 傳了檔案路徑而非檔案內容 — fleet prompt **自始至終都沒有正確注入**
@@ -19,16 +38,52 @@
   - Active Decisions 不再預載到 system prompt — 改用 `list_decisions` 工具按需查詢
   - Session snapshot（context rotation 接續）改為第一則 inbound 訊息送入（`[system:session-snapshot]`），不再嵌入 system prompt
 
-### 新增
-- Fleet 事件（輪轉、懸掛、成本警報）的 Webhook 通知
-- 用於外部監控的 HTTP 健康檢查端點 (`/health`, `/status`)
-- 在 Context 輪轉時具有驗證與重試機制的結構化交接範本
-- 權限中繼 UX 改進（逾時倒數、持久化的「一律允許」、決定後的回饋）
-- 主題圖示自動更新（執行中/已停止）+ 閒置封存
-- 過濾 Telegram 服務訊息（主題重新命名、置頂等）以節省 token
+## [1.8.5] - 2026-04-03
 
 ### 修復
-- 最小化的 `claude-settings.json` — 允許列表中僅包含 AgEnD MCP 工具，不再覆蓋使用者全域的權限設定
+- 統一 log 與通知格式為 `sender → receiver: summary` 風格，適用於所有跨 instance 訊息
+- Task/query 通知顯示完整訊息內容；report/update 通知僅顯示摘要
+
+## [1.8.4] - 2026-04-03
+
+### 修復
+- 跨 instance 通知格式改為 `sender → receiver: summary` 格式
+- General Topic instance 不再收到跨 instance 通知貼文
+- 降低跨 instance 通知噪音 — 移除發送方 topic 貼文；目標通知優先使用 `task_summary`
+
+## [1.8.3] - 2026-04-03
+
+### 新增
+- **Team 支援** — 具名的 instance 群組，用於精準廣播
+  - `create_team` — 建立含成員與描述的 team
+  - `list_teams` — 列出所有 team 及其成員
+  - `update_team` — 新增/移除成員或更新描述
+  - `delete_team` — 刪除 team 定義
+  - `broadcast` 新增 `team` 參數，可對指定 team 的所有成員廣播
+  - `fleet.yaml` 新增 `teams` 區塊，用於持久化 team 定義
+
+## [1.8.2] - 2026-04-03
+
+### 新增
+- `fleet.yaml` 中 `working_directory` 現在為選填 — 未指定時自動建立 `~/.agend/workspaces/<name>`
+- `create_instance` 的 `directory` 參數現在為選填（省略時自動建立工作空間）
+
+### 修復
+- Topic 模式下，Context-bound routing 現在在 IPC 轉發前執行（修正「chat not found」錯誤）
+- Telegram：`thread_id=1` 正確視為 General Topic（不傳送 thread 參數）
+- Scheduler 在 instance 啟動前完成初始化，確保 fleet 啟動時能正確載入 decisions
+
+## [1.8.1] - 2026-04-03
+
+### 新增
+- `reply`、`react`、`edit_message` 改為 context-bound — 不再需要在 tool call 中指定 `chat_id` 和 `thread_id`；daemon 自動從當前對話 context 填入
+- PTY 監控的後端錯誤模式偵測 — 偵測到頻率限制、認證錯誤或崩潰時自動通知
+- 自動關閉執行時對話框（如 Codex 頻率限制的模型切換提示）
+- 模型容錯移轉 — 達到頻率限制時自動切換備用模型（statusline + PTY 偵測）
+
+### 修復
+- PTY 錯誤監控處理後發送恢復通知
+- 降低錯誤監控誤報；自動從 context 修正無效的 `chat_id`
 
 ## [0.3.7] - 2026-03-27
 

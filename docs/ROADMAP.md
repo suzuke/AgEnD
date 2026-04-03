@@ -1,6 +1,6 @@
 # AgEnD Roadmap
 
-> Last updated: 2026-04-03 (v1.8.0)
+> Last updated: 2026-04-03 (v1.9.1)
 > Produced by multi-agent consensus: Claude Code, Codex, Gemini CLI, OpenCode
 
 ## Completed (v1.0–v1.3)
@@ -37,25 +37,22 @@
 - [x] `agend update` — self-update via npm with optional daemon restart
 - [x] Backend doctor/trust — `agend backend doctor` diagnostics, `agend backend trust` for Gemini
 - [x] Complete zh-TW documentation (features, CLI, configuration, roadmap, security, changelog)
-- [x] fleet.yaml configuration reference (55 fields, EN + zh-TW)
+- [x] fleet.yaml configuration reference (EN + zh-TW)
 - [x] Hang detection with Telegram restart buttons
 - [x] Daily cost summary reports
 - [x] Webhook notifications (Slack, custom endpoints)
 - [x] Health endpoint for external monitoring
+- [x] Context-bound reply/react/edit_message — no chat_id/thread_id in tool calls; daemon fills from active context
+- [x] Teams — named instance groups with `create_team`/`list_teams`/`update_team`/`delete_team`; `broadcast(team:)` support
+- [x] Auto-create `working_directory` — omit from fleet.yaml to use `~/.agend/workspaces/<name>`
+- [x] `create_instance` directory optional — auto-workspace on omit
+- [x] Cross-instance notification improvements — reduced noise, `sender → receiver: summary` format, General Topic filter
 
 ---
 
-## Next Up: Teams & Collaboration
+## Next Up: Mirror Topics & Observability
 
-**Goal:** Structured multi-agent collaboration with visibility.
-
-### Teams (temporary project groups)
-- `agend team create` — one command to assemble a team with new + existing agents
-- Shared team topic — all agent communication visible in one Telegram topic
-- @mention routing — direct messages to specific team members
-- Display name prefixing — `[Kuro] message` for attribution
-- `agend team disband` — clean shutdown: delete temp agents, archive topic, keep persistent agents
-- Team-aware MCP tools: `send_to_team`, `list_teams`
+**Goal:** Make cross-instance communication visible without changing agent behavior.
 
 ### Mirror topics
 - Observe cross-instance communication in a dedicated topic

@@ -35,8 +35,12 @@ instances:
   my-project:
     working_directory: ~/Projects/my-app
     description: "Backend API developer"
-    tags: [backend, api]
     model: opus
+
+teams:
+  frontend:
+    members: [my-project, another-instance]
+    description: "Frontend development team"
 
 health_port: 19280
 ```
@@ -51,6 +55,7 @@ health_port: 19280
 | `channel` | object | **required** | Messaging platform configuration |
 | `defaults` | object | `{}` | Default settings inherited by all instances |
 | `instances` | object | **required** | Instance definitions (key = instance name) |
+| `teams` | object | `{}` | Named instance groups for targeted broadcasting |
 | `health_port` | number | `19280` | HTTP health/API server port |
 
 ---
@@ -131,14 +136,35 @@ All fields from `instances.<name>` can be set here as defaults. Additionally:
 
 ---
 
+## teams.\<name\>
+
+Named groups of instances for targeted broadcasting. Managed via `create_team`, `list_teams`, `update_team`, `delete_team` MCP tools, or defined directly in fleet.yaml.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `members` | string[] | **required** | Instance names in this team |
+| `description` | string | — | Human-readable description of the team's purpose |
+
+Example:
+
+```yaml
+teams:
+  backend-squad:
+    members: [api-agent, db-agent]
+    description: "Backend development team"
+```
+
+Use `broadcast(team: "backend-squad", message: "...")` to send to all members.
+
+---
+
 ## instances.\<name\>
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `working_directory` | string | **required** | Project directory path |
+| `working_directory` | string | auto | Project directory path. If omitted, auto-created at `~/.agend/workspaces/<name>` |
 | `display_name` | string | — | Agent display name (e.g. "Kuro"). Set via `set_display_name` tool |
 | `description` | string | — | Role description. Injected via MCP server instructions as `## Role` |
-| `tags` | string[] | `[]` | Tags for filtering (`broadcast`, `list_instances`) |
 | `topic_id` | number\|string | auto | Channel topic/thread ID. Auto-assigned on create |
 | `general_topic` | boolean | `false` | Mark as General Topic (receives unrouted messages) |
 | `backend` | string | `"claude-code"` | CLI backend: `claude-code`, `codex`, `gemini-cli`, `opencode` |
