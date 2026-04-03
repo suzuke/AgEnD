@@ -70,6 +70,10 @@ export class InstanceLifecycle {
     const backendName = config.backend ?? this.ctx.fleetConfig?.defaults?.backend ?? "claude-code";
     const backend = createBackend(backendName, instanceDir);
     const daemon = new Daemon(name, config, instanceDir, topicMode, backend, this.ctx.controlClient ?? undefined);
+    // Catch errors from daemon internals (e.g. IPC server) to prevent crashing the fleet process
+    daemon.on("error", (err: Error) => {
+      this.ctx.logger.error({ err, name }, "Daemon emitted error — instance isolated");
+    });
     // Wire up decisions callback so system prompt includes active decisions
     daemon.getActiveDecisions = () => this.ctx.getActiveDecisionsForProject(config.working_directory);
     await daemon.start();

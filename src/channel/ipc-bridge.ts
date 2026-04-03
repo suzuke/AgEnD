@@ -8,6 +8,9 @@ import {
 import { unlinkSync, existsSync, chmodSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 
+// macOS sun_path limit is 104 bytes; Linux is 108
+const UNIX_SOCKET_PATH_MAX = process.platform === "darwin" ? 104 : 108;
+
 function encode(msg: unknown): string {
   return JSON.stringify(msg) + "\n";
 }
@@ -52,6 +55,14 @@ export class IpcServer extends EventEmitter {
   }
 
   async listen(): Promise<void> {
+    // Fail fast if socket path exceeds OS limit (macOS: 104, Linux: 108)
+    const pathLen = Buffer.byteLength(this.sockPath, "utf-8");
+    if (pathLen >= UNIX_SOCKET_PATH_MAX) {
+      throw new Error(
+        `IPC socket path too long (${pathLen} bytes, max ${UNIX_SOCKET_PATH_MAX - 1}): ${this.sockPath}`
+      );
+    }
+
     // Clean up stale socket file if it exists
     if (existsSync(this.sockPath)) {
       try {
@@ -84,10 +95,11 @@ export class IpcServer extends EventEmitter {
         if (!umaskRestored) { umaskRestored = true; process.umask(prevUmask); }
       };
 
-      this.server.on("error", (err) => {
+      const startupErrorHandler = (err: Error) => {
         restoreUmask();
         reject(err);
-      });
+      };
+      this.server.on("error", startupErrorHandler);
 
       this.server.listen(this.sockPath, () => {
         restoreUmask();
@@ -97,6 +109,15 @@ export class IpcServer extends EventEmitter {
         } catch (err) {
           this.logger?.warn({ err, sockPath: this.sockPath }, "Failed to chmod IPC socket");
         }
+
+        // Replace the startup error handler with a persistent one that
+        // logs but does NOT crash the process (prevents unhandled 'error' events)
+        this.server!.removeListener("error", startupErrorHandler);
+        this.server!.on("error", (err) => {
+          this.logger?.warn({ err, sockPath: this.sockPath }, "IPC server error (post-listen)");
+          this.emit("error", err);
+        });
+
         resolve();
       });
     });

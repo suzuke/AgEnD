@@ -66,4 +66,15 @@ describe("IPC Bridge", () => {
     client = new IpcClient(sockPath);
     await client.connect(); // should work
   });
+
+  it("rejects socket path exceeding OS limit", async () => {
+    tmpDir = join(tmpdir(), `ccd-ipc-${Date.now()}`);
+    mkdirSync(tmpDir, { recursive: true });
+    // Create a path that exceeds 104 bytes (macOS sun_path limit)
+    const longName = "a".repeat(120);
+    const sockPath = join(tmpDir, `${longName}.sock`);
+
+    server = new IpcServer(sockPath);
+    await expect(server.listen()).rejects.toThrow(/socket path too long/i);
+  });
 });

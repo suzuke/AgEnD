@@ -92,7 +92,16 @@ export class Daemon extends EventEmitter {
     // 1. IPC server — bridge between MCP server (Claude's child) and daemon
     const sockPath = join(this.instanceDir, "channel.sock");
     this.ipcServer = new IpcServer(sockPath, this.logger);
+    // Forward IPC server errors as daemon events (prevents unhandled 'error' crash).
+    // Guard: only forward post-listen errors — startup errors are handled by listen() rejection.
+    let ipcListening = false;
+    this.ipcServer.on("error", (err: Error) => {
+      if (!ipcListening) return; // startup errors handled by listen() rejection
+      this.logger.error({ err, name: this.name }, "IPC server error");
+      this.emit("error", err);
+    });
     await this.ipcServer.listen();
+    ipcListening = true;
 
     // Permanent IPC dispatcher: routes responses to pending requests by type+id key
     this.ipcServer.on("message", (msg: Record<string, unknown>) => {
