@@ -11,10 +11,11 @@ import {
   mkdirSync,
   readdirSync,
   rmSync,
+  statSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { spawn, execSync } from "node:child_process";
+import { spawn, execSync, execFileSync } from "node:child_process";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -1142,6 +1143,266 @@ program
   .action(async (file: string) => {
     const { importConfig } = await import("./export-import.js");
     await importConfig(DATA_DIR, file);
+  });
+
+// === Quick management commands ===
+
+function fuzzyMatch(query: string, names: string[]): string | null {
+  const q = query.toLowerCase();
+  // Exact match
+  const exact = names.find(n => n.toLowerCase() === q);
+  if (exact) return exact;
+  // Starts with
+  const starts = names.filter(n => n.toLowerCase().startsWith(q));
+  if (starts.length === 1) return starts[0];
+  // Contains
+  const contains = names.filter(n => n.toLowerCase().includes(q));
+  if (contains.length === 1) return contains[0];
+  if (contains.length > 1) {
+    console.error(`Ambiguous match for "${query}": ${contains.join(", ")}`);
+    process.exit(1);
+  }
+  return null;
+}
+
+function resolveInstance(query: string, config: import("./types.js").FleetConfig): string {
+  const names = Object.keys(config.instances);
+  const match = fuzzyMatch(query, names);
+  if (!match) {
+    console.error(`No instance matching "${query}". Available: ${names.join(", ")}`);
+    process.exit(1);
+  }
+  return match;
+}
+
+function getInstanceStatusStandalone(name: string): "running" | "stopped" | "crashed" {
+  const pidPath = join(DATA_DIR, "instances", name, "daemon.pid");
+  if (!existsSync(pidPath)) return "stopped";
+  const pid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
+  try {
+    process.kill(pid, 0);
+    return "running";
+  } catch {
+    return "crashed";
+  }
+}
+
+function stripAnsi(str: string): string {
+  // eslint-disable-next-line no-control-regex
+  return str
+    .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "")   // CSI sequences (including private ? prefix)
+    .replace(/\x1b\][^\x07]*\x07/g, "")         // OSC sequences
+    .replace(/\x1b\([A-Z]/g, "")                 // Character set selection
+    .replace(/\x1b[=>]/g, "");                   // Keypad mode
+}
+
+function getTeamsForInstance(config: import("./types.js").FleetConfig, instanceName: string): string[] {
+  if (!config.teams) return [];
+  return Object.entries(config.teams)
+    .filter(([, t]) => t.members.includes(instanceName))
+    .map(([name]) => name);
+}
+
+function formatTimeSince(isoStr: string): string {
+  const diff = Date.now() - new Date(isoStr).getTime();
+  if (diff < 60_000) return `${Math.floor(diff / 1000)}s ago`;
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  return `${Math.floor(diff / 86_400_000)}d ago`;
+}
+
+program
+  .command("ls")
+  .description("List all instances with status, team, and last activity")
+  .option("--json", "Output as JSON")
+  .action(async (opts: { json?: boolean }) => {
+    const yaml = (await import("js-yaml")).default;
+    const config = yaml.load(readFileSync(FLEET_CONFIG_PATH, "utf-8")) as import("./types.js").FleetConfig;
+    const names = Object.keys(config.instances);
+
+    if (names.length === 0) {
+      console.log("No instances configured.");
+      return;
+    }
+
+    const rows = names.map(name => {
+      const status = getInstanceStatusStandalone(name);
+      const teams = getTeamsForInstance(config, name);
+
+      // Read statusline for context/cost
+      let context: number | null = null;
+      let cost: number | null = null;
+      const statusFile = join(DATA_DIR, "instances", name, "statusline.json");
+      try {
+        if (existsSync(statusFile)) {
+          const data = JSON.parse(readFileSync(statusFile, "utf-8"));
+          context = data.context_window?.used_percentage ?? null;
+          cost = data.cost?.total_cost_usd ?? null;
+        }
+      } catch { /* ignore */ }
+
+      // Last activity from log file modification time
+      let lastActivity: string | null = null;
+      for (const logName of ["daemon.log", "output.log"]) {
+        const logPath = join(DATA_DIR, "instances", name, logName);
+        try {
+          if (existsSync(logPath)) {
+            lastActivity = formatTimeSince(statSync(logPath).mtime.toISOString());
+            break;
+          }
+        } catch { /* ignore */ }
+      }
+
+      return { name, status, teams, context, cost, lastActivity };
+    });
+
+    if (opts.json) {
+      console.log(JSON.stringify(rows, null, 2));
+      return;
+    }
+
+    // Status icon
+    const statusIcon = (s: string) =>
+      s === "running" ? "\x1b[32m●\x1b[0m" : s === "crashed" ? "\x1b[31m●\x1b[0m" : "\x1b[90m○\x1b[0m";
+
+    const nameW = Math.max(20, ...rows.map(r => r.name.length + 2));
+    const statusW = 12;
+    const teamW = 20;
+    const ctxW = 8;
+    const costW = 8;
+
+    console.log(
+      "Name".padEnd(nameW) +
+      "Status".padEnd(statusW) +
+      "Team".padEnd(teamW) +
+      "Ctx".padEnd(ctxW) +
+      "Cost".padEnd(costW) +
+      "Activity"
+    );
+    console.log("\u2500".repeat(nameW + statusW + teamW + ctxW + costW + 10));
+
+    for (const r of rows) {
+      const teamStr = r.teams.length > 0 ? r.teams.join(",") : "-";
+      const ctxStr = r.context != null ? `${Math.round(r.context)}%` : "-";
+      const costStr = r.cost != null ? `$${r.cost.toFixed(2)}` : "-";
+      const actStr = r.lastActivity ?? "-";
+
+      // padEnd based on visible text length, then prepend the icon
+      console.log(
+        r.name.padEnd(nameW) +
+        statusIcon(r.status) + " " + r.status.padEnd(statusW - 2) +
+        teamStr.padEnd(teamW) +
+        ctxStr.padEnd(ctxW) +
+        costStr.padEnd(costW) +
+        actStr
+      );
+    }
+  });
+
+program
+  .command("attach")
+  .description("Attach to an instance's tmux window (fuzzy match)")
+  .argument("<name>", "Instance name (supports fuzzy matching)")
+  .action(async (query: string) => {
+    const yaml = (await import("js-yaml")).default;
+    const config = yaml.load(readFileSync(FLEET_CONFIG_PATH, "utf-8")) as import("./types.js").FleetConfig;
+    const name = resolveInstance(query, config);
+    const status = getInstanceStatusStandalone(name);
+
+    if (status !== "running") {
+      console.error(`Instance "${name}" is ${status}. Start it first with: agend fleet start ${name}`);
+      process.exit(1);
+    }
+
+    // Read window-id for the instance
+    const windowIdPath = join(DATA_DIR, "instances", name, "window-id");
+    let windowId: string | null = null;
+    try {
+      if (existsSync(windowIdPath)) {
+        windowId = readFileSync(windowIdPath, "utf-8").trim();
+      }
+    } catch { /* ignore */ }
+
+    const session = "agend";
+
+    // Verify tmux session exists
+    try {
+      execFileSync("tmux", ["has-session", "-t", session], { stdio: "pipe" });
+    } catch {
+      console.error(`tmux session "${session}" not found. Is the fleet running?`);
+      process.exit(1);
+    }
+
+    // If we have a window ID, select it first
+    if (windowId) {
+      try {
+        execFileSync("tmux", ["select-window", "-t", `${session}:${windowId}`], { stdio: "pipe" });
+      } catch {
+        // Window ID might be stale — try finding by window name
+        try {
+          execFileSync("tmux", ["select-window", "-t", `${session}:${name}`], { stdio: "pipe" });
+        } catch {
+          console.error(`Cannot find tmux window for "${name}". The instance may need to be restarted.`);
+          process.exit(1);
+        }
+      }
+    } else {
+      // Find by window name
+      try {
+        execFileSync("tmux", ["select-window", "-t", `${session}:${name}`], { stdio: "pipe" });
+      } catch {
+        console.error(`Cannot find tmux window for "${name}".`);
+        process.exit(1);
+      }
+    }
+
+    // Attach or switch-client depending on whether we're already in tmux
+    if (process.env.TMUX) {
+      // Already inside tmux — switch client
+      try {
+        execFileSync("tmux", ["switch-client", "-t", session], { stdio: "inherit" });
+      } catch {
+        console.error("Failed to switch tmux client.");
+        process.exit(1);
+      }
+    } else {
+      // Outside tmux — attach
+      try {
+        execFileSync("tmux", ["attach-session", "-t", session], { stdio: "inherit" });
+      } catch {
+        console.error("Failed to attach to tmux session.");
+        process.exit(1);
+      }
+    }
+  });
+
+program
+  .command("logs")
+  .description("Show instance output (stripped of ANSI codes)")
+  .argument("<name>", "Instance name (supports fuzzy matching)")
+  .option("-n, --lines <count>", "Number of lines to show", "50")
+  .option("-f, --follow", "Follow output (like tail -f)")
+  .action(async (query: string, opts: { lines: string; follow?: boolean }) => {
+    const yaml = (await import("js-yaml")).default;
+    const config = yaml.load(readFileSync(FLEET_CONFIG_PATH, "utf-8")) as import("./types.js").FleetConfig;
+    const name = resolveInstance(query, config);
+
+    const outputPath = join(DATA_DIR, "instances", name, "output.log");
+    if (!existsSync(outputPath)) {
+      console.error(`No output log found for "${name}".`);
+      process.exit(1);
+    }
+
+    const tailArgs = ["-n", opts.lines];
+    if (opts.follow) tailArgs.push("-f");
+    tailArgs.push(outputPath);
+
+    const tail = spawn("tail", tailArgs, { stdio: ["ignore", "pipe", "inherit"] });
+    tail.stdout!.on("data", (chunk: Buffer) => {
+      process.stdout.write(stripAnsi(chunk.toString()));
+    });
+    tail.on("close", () => process.exit(0));
+    process.on("SIGINT", () => { tail.kill(); process.exit(0); });
   });
 
 program.parse();
