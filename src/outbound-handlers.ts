@@ -85,15 +85,18 @@ const sendToInstance: Handler = (ctx, args, respond, meta) => {
 
   targetIpc.send({ type: "fleet_inbound", targetSession, content: message, meta: ipcMeta });
 
-  // Post a one-line summary to the target topic only (full message delivered via IPC)
+  // Post a one-line summary to the target topic only (full message delivered via IPC).
+  // Skip general_topic — that space is reserved for user ↔ general conversation.
   const groupId = ctx.fleetConfig?.channel?.group_id;
   if (groupId && ctx.adapter) {
-    const targetTopicId = ctx.fleetConfig?.instances[targetInstanceName]?.topic_id;
-    if (targetTopicId && !ctx.sessionRegistry.has(targetName)) {
-      const visibilityText = ipcMeta.task_summary
-        ? `← ${senderLabel}: ${ipcMeta.task_summary}`
-        : `← ${senderLabel}: ${message.slice(0, 100)}${message.length > 100 ? "…" : ""}`;
-      ctx.adapter.sendText(String(groupId), visibilityText, {
+    const targetInstance = ctx.fleetConfig?.instances[targetInstanceName];
+    const targetTopicId = targetInstance?.topic_id;
+    const isGeneralTopic = targetInstance?.general_topic === true;
+    if (targetTopicId && !isGeneralTopic && !ctx.sessionRegistry.has(targetName)) {
+      const summary = ipcMeta.task_summary
+        ? ipcMeta.task_summary
+        : `${message.slice(0, 100)}${message.length > 100 ? "…" : ""}`;
+      ctx.adapter.sendText(String(groupId), `${senderLabel} → ${targetName}: ${summary}`, {
         threadId: String(targetTopicId),
       }).catch(e => ctx.logger.warn({ err: e }, "Failed to post cross-instance notification"));
     }
