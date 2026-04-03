@@ -137,15 +137,16 @@ function signalReady() {
 }
 
 // Poll for channel.sock existence (MCP server creates IPC connection)
+const READY_TIMEOUT = parseInt(process.env.MOCK_READY_TIMEOUT ?? "10000", 10) || 10_000;
 let readySignaled = false;
 const readyTimeout = setTimeout(() => {
-  // Fallback: signal ready after 10s even if socket not found
+  // Fallback: signal ready after timeout even if socket not found
   if (!readySignaled) {
     readySignaled = true;
     process.stderr.write("mock-claude: timeout waiting for channel.sock, signaling ready anyway\n");
     signalReady();
   }
-}, 10_000);
+}, READY_TIMEOUT);
 
 const socketCheckInterval = setInterval(() => {
   if (readySignaled) {

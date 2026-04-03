@@ -9,6 +9,7 @@ export default defineConfig({
     exclude: ["**/node_modules/**"],
     pool: "forks",
     maxConcurrency: 1,
+    sequence: { shuffle: false },
     env: {
       PATH: process.env.PATH ?? "",
     },

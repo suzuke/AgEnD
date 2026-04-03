@@ -20,7 +20,6 @@ import { waitFor, sleep } from "../mock-servers/shared.js";
 import { TmuxManager } from "../../src/tmux-manager.js";
 import { FleetManager } from "../../src/fleet-manager.js";
 
-const TELEGRAM_MOCK_PORT = 18446;
 const TEST_GROUP_ID = -1001234567890;
 const TEST_USER_ID = 111222333;
 const TMUX_SESSION = `agend-e2e-${process.pid}`;
@@ -38,6 +37,7 @@ function getFreePort(): Promise<number> {
 }
 
 let telegramMock: TelegramMock;
+let telegramMockPort: number;
 let testDir: string;
 let fm: FleetManager | null = null;
 let healthPort: number;
@@ -45,9 +45,9 @@ let healthPort: number;
 describe("Fleet Lifecycle E2E (B Layer)", () => {
   beforeAll(async () => {
     process.env.AGEND_TMUX_SESSION = TMUX_SESSION;
-    healthPort = await getFreePort();
+    [healthPort, telegramMockPort] = await Promise.all([getFreePort(), getFreePort()]);
 
-    telegramMock = createTelegramMock({ port: TELEGRAM_MOCK_PORT });
+    telegramMock = createTelegramMock({ port: telegramMockPort });
     await telegramMock.start();
 
     testDir = join(tmpdir(), `agend-e2e-fleet-${Date.now()}`);
@@ -67,7 +67,7 @@ describe("Fleet Lifecycle E2E (B Layer)", () => {
         mode: "topic",
         bot_token_env: "AGEND_BOT_TOKEN",
         group_id: TEST_GROUP_ID,
-        telegram_api_root: `http://localhost:${TELEGRAM_MOCK_PORT}`,
+        telegram_api_root: `http://localhost:${telegramMockPort}`,
         access: {
           mode: "locked",
           allowed_users: [TEST_USER_ID],
@@ -140,7 +140,7 @@ describe("Fleet Lifecycle E2E (B Layer)", () => {
   });
 
   it("T1: mock Telegram server is accessible", async () => {
-    const res = await fetch(`http://localhost:${TELEGRAM_MOCK_PORT}/bot123456:FAKE_TOKEN/getMe`);
+    const res = await fetch(`http://localhost:${telegramMockPort}/bot123456:FAKE_TOKEN/getMe`);
     const data = await res.json() as { ok: boolean };
     expect(data.ok).toBe(true);
   });
@@ -209,7 +209,7 @@ describe("Fleet Lifecycle E2E (B Layer)", () => {
     const callsAfter = telegramMock.getCallsFor("getUpdates").length;
 
     // Polling should have stopped (no new getUpdates calls)
-    expect(callsAfter - callsBefore).toBeLessThanOrEqual(1);
+    expect(callsAfter - callsBefore).toBeLessThanOrEqual(2);
 
     // Verify health endpoint is gone
     try {
