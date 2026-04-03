@@ -32,8 +32,12 @@ instances:
   my-project:
     working_directory: ~/Projects/my-app
     description: "後端 API 開發者"
-    tags: [backend, api]
     model: opus
+
+teams:
+  frontend:
+    members: [my-project, another-instance]
+    description: "前端開發團隊"
 
 health_port: 19280
 ```
@@ -48,6 +52,7 @@ health_port: 19280
 | `channel` | object | **必填** | 通訊平台設定 |
 | `defaults` | object | `{}` | 所有 instance 的預設設定 |
 | `instances` | object | **必填** | Instance 定義（key = instance 名稱） |
+| `teams` | object | `{}` | 具名 instance 群組，用於精準廣播 |
 | `health_port` | number | `19280` | HTTP 健康檢查/API 伺服器埠 |
 
 ---
@@ -128,14 +133,35 @@ health_port: 19280
 
 ---
 
+## teams.\<name\>
+
+具名的 instance 群組，用於精準廣播。可透過 `create_team`、`list_teams`、`update_team`、`delete_team` MCP 工具管理，或直接在 fleet.yaml 中定義。
+
+| 欄位 | 型別 | 預設 | 說明 |
+|------|------|------|------|
+| `members` | string[] | **必填** | 此 team 的 instance 名稱列表 |
+| `description` | string | — | team 用途說明 |
+
+範例：
+
+```yaml
+teams:
+  backend-squad:
+    members: [api-agent, db-agent]
+    description: "後端開發團隊"
+```
+
+使用 `broadcast(team: "backend-squad", message: "...")` 向所有成員廣播。
+
+---
+
 ## instances.\<name\>
 
 | 欄位 | 型別 | 預設 | 說明 |
 |------|------|------|------|
-| `working_directory` | string | **必填** | 專案目錄路徑 |
+| `working_directory` | string | 自動 | 專案目錄路徑。省略時自動建立 `~/.agend/workspaces/<name>` |
 | `display_name` | string | — | Agent 顯示名稱（例："Kuro"）。用 `set_display_name` 設定 |
 | `description` | string | — | 角色描述。透過 MCP server instructions 注入為 `## Role` |
-| `tags` | string[] | `[]` | 標籤，用於 `broadcast` 和 `list_instances` 過濾 |
 | `topic_id` | number\|string | 自動 | 頻道 topic/thread ID。建立時自動分配 |
 | `general_topic` | boolean | `false` | 標記為 General Topic（接收未路由的訊息） |
 | `backend` | string | `"claude-code"` | CLI backend：`claude-code`、`codex`、`gemini-cli`、`opencode` |

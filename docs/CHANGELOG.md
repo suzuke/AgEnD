@@ -30,6 +30,47 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 - Minimal `claude-settings.json` — only CCD MCP tools in allow list, no longer overrides user's global permission settings
 
+## [1.8.4] - 2026-04-03
+
+### Fixed
+- Cross-instance notification format: `sender → receiver: summary` for clarity
+- General Topic instances no longer receive cross-instance notification posts
+- Reduced cross-instance notification noise — sender topic post removed; target notification uses `task_summary` when available
+
+## [1.8.3] - 2026-04-03
+
+### Added
+- **Team support** — named groups of instances for targeted broadcasting
+  - `create_team` — define a team with members and optional description
+  - `list_teams` — list all teams with member details
+  - `update_team` — add/remove members or update description
+  - `delete_team` — remove a team definition
+  - `broadcast` now accepts a `team` parameter to target all members of a named team
+  - `teams` section in `fleet.yaml` for persistent team definitions
+
+## [1.8.2] - 2026-04-03
+
+### Added
+- `working_directory` is now optional in fleet.yaml — auto-created at `~/.agend/workspaces/<name>` when missing
+- `create_instance` `directory` parameter is now optional (auto-workspace created when omitted)
+
+### Fixed
+- Context-bound routing now runs before IPC forwarding in topic mode (prevented "chat not found" errors)
+- Telegram: `thread_id=1` correctly treated as General Topic (no message thread)
+- Scheduler initializes before instances start, so active decisions load correctly on fleet spawn
+
+## [1.8.1] - 2026-04-03
+
+### Added
+- `reply`, `react`, `edit_message` are now context-bound — `chat_id` and `thread_id` are no longer required in tool calls; the daemon fills them from the active conversation context
+- Backend error pattern detection via PTY monitoring — auto-notify on rate limits, auth errors, and crashes
+- Auto-dismiss runtime dialogs (e.g. Codex rate limit model-switch prompts)
+- Model failover — auto-switch to backup model on rate limit (statusline + PTY detection)
+
+### Fixed
+- Recovery notification sent after PTY error monitor detects and handles an error
+- Error monitor false positives reduced; invalid `chat_id` auto-corrected from context
+
 ## [0.3.7] - 2026-03-27
 
 ### Added

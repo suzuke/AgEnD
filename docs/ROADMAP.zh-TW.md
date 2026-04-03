@@ -1,6 +1,6 @@
 # AgEnD 發展藍圖
 
-> 最後更新：2026-04-03 (v1.8.0)
+> 最後更新：2026-04-03 (v1.8.4)
 > 由多代理共識產出：Claude Code, Codex, Gemini CLI, OpenCode
 
 ## 已完成 (v1.0–v1.3)
@@ -37,25 +37,22 @@
 - [x] `agend update` — 透過 npm 自我更新，可選 daemon 重啟
 - [x] Backend doctor/trust — `agend backend doctor` 診斷、`agend backend trust` Gemini 信任
 - [x] 完整繁體中文文件（features、CLI、configuration、roadmap、security、changelog）
-- [x] fleet.yaml 設定參考（55 個欄位，中英文）
+- [x] fleet.yaml 設定參考（中英文）
 - [x] Hang detection 搭配 Telegram 重啟按鈕
 - [x] 每日成本摘要報告
 - [x] Webhook 通知（Slack、自訂端點）
 - [x] Health endpoint 供外部監控
+- [x] Context-bound reply/react/edit_message — tool call 中不需 chat_id/thread_id，daemon 自動從當前 context 填入
+- [x] Teams — 具名 instance 群組，支援 `create_team`/`list_teams`/`update_team`/`delete_team`；`broadcast(team:)` 精準廣播
+- [x] 自動建立 `working_directory` — fleet.yaml 中省略時使用 `~/.agend/workspaces/<name>`
+- [x] `create_instance` directory 選填 — 省略時自動建立工作空間
+- [x] 跨 instance 通知改善 — 降低噪音、`sender → receiver: summary` 格式、過濾 General Topic
 
 ---
 
-## 下一步：Teams 與協作
+## 下一步：Mirror Topics 與可觀測性
 
-**目標：** 結構化的多 agent 協作，並提供可見性。
-
-### Teams（臨時專案小組）
-- `agend team create` — 一個指令組建團隊，可混合新建 + 既有 agent
-- 共享 team topic — 所有 agent 溝通在同一個 Telegram topic 中可見
-- @mention 路由 — 指定訊息給特定成員
-- Display name prefix — `[Kuro] 訊息內容` 標示發話者
-- `agend team disband` — 乾淨解散：刪除臨時 agent、歸檔 topic、保留常駐 agent
-- Team MCP 工具：`send_to_team`、`list_teams`
+**目標：** 讓跨 instance 溝通可見，且不改變 agent 行為。
 
 ### Mirror topics
 - 在專用 topic 中觀察跨 instance 溝通

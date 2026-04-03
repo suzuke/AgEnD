@@ -41,12 +41,12 @@ Every instance is an equal peer that can discover, wake, create, and message oth
 
 **Core MCP tools:**
 
-- `list_instances` — discover all configured instances (running or stopped) with status, working directory, tags, and last activity
+- `list_instances` — discover all configured instances (running or stopped) with status, working directory, and last activity
 - `send_to_instance` — send a message to another instance or external session; supports structured metadata (`request_kind`, `requires_reply`, `correlation_id`, `task_summary`)
 - `start_instance` — wake a stopped instance so you can message it
-- `create_instance` — create a new instance with a topic from a project directory (supports `--branch` for git worktree isolation)
+- `create_instance` — create a new instance with a topic (directory optional; auto-created at `~/.agend/workspaces/<name>` if omitted); supports `branch` for git worktree isolation
 - `delete_instance` — remove an instance and its topic
-- `describe_instance` — get detailed info about a specific instance (description, tags, model, last activity)
+- `describe_instance` — get detailed info about a specific instance (description, model, last activity)
 
 **High-level collaboration tools** (prefer these over raw `send_to_instance`):
 
@@ -54,7 +54,15 @@ Every instance is an equal peer that can discover, wake, create, and message oth
 - `delegate_task` — assign work to another instance with success criteria (`request_kind=task`, `requires_reply=true`)
 - `report_result` — return results to the requester, echoing `correlation_id` to link the response to its request
 
-Messages are posted to the recipient's Telegram topic for visibility. Sender topic notifications are only posted for instance-to-instance messages (not from external sessions).
+**Team tools** (target groups of instances):
+
+- `create_team` — define a named group of instances
+- `list_teams` — list all teams with member details
+- `update_team` — add/remove members or update description
+- `delete_team` — remove a team definition
+- `broadcast(team: "name", ...)` — send a message to all members of a team
+
+When an instance sends to another, a notification appears in the target's topic: `sender → receiver: summary`. General Topic instances are excluded from these notifications to reduce noise.
 
 If you `send_to_instance` a stopped instance, the error tells you to use `start_instance()` first — agents self-correct without human intervention.
 

@@ -30,6 +30,47 @@
 ### 修復
 - 最小化的 `claude-settings.json` — 允許列表中僅包含 AgEnD MCP 工具，不再覆蓋使用者全域的權限設定
 
+## [1.8.4] - 2026-04-03
+
+### 修復
+- 跨 instance 通知格式改為 `sender → receiver: summary` 格式
+- General Topic instance 不再收到跨 instance 通知貼文
+- 降低跨 instance 通知噪音 — 移除發送方 topic 貼文；目標通知優先使用 `task_summary`
+
+## [1.8.3] - 2026-04-03
+
+### 新增
+- **Team 支援** — 具名的 instance 群組，用於精準廣播
+  - `create_team` — 建立含成員與描述的 team
+  - `list_teams` — 列出所有 team 及其成員
+  - `update_team` — 新增/移除成員或更新描述
+  - `delete_team` — 刪除 team 定義
+  - `broadcast` 新增 `team` 參數，可對指定 team 的所有成員廣播
+  - `fleet.yaml` 新增 `teams` 區塊，用於持久化 team 定義
+
+## [1.8.2] - 2026-04-03
+
+### 新增
+- `fleet.yaml` 中 `working_directory` 現在為選填 — 未指定時自動建立 `~/.agend/workspaces/<name>`
+- `create_instance` 的 `directory` 參數現在為選填（省略時自動建立工作空間）
+
+### 修復
+- Topic 模式下，Context-bound routing 現在在 IPC 轉發前執行（修正「chat not found」錯誤）
+- Telegram：`thread_id=1` 正確視為 General Topic（不傳送 thread 參數）
+- Scheduler 在 instance 啟動前完成初始化，確保 fleet 啟動時能正確載入 decisions
+
+## [1.8.1] - 2026-04-03
+
+### 新增
+- `reply`、`react`、`edit_message` 改為 context-bound — 不再需要在 tool call 中指定 `chat_id` 和 `thread_id`；daemon 自動從當前對話 context 填入
+- PTY 監控的後端錯誤模式偵測 — 偵測到頻率限制、認證錯誤或崩潰時自動通知
+- 自動關閉執行時對話框（如 Codex 頻率限制的模型切換提示）
+- 模型容錯移轉 — 達到頻率限制時自動切換備用模型（statusline + PTY 偵測）
+
+### 修復
+- PTY 錯誤監控處理後發送恢復通知
+- 降低錯誤監控誤報；自動從 context 修正無效的 `chat_id`
+
 ## [0.3.7] - 2026-03-27
 
 ### 新增
