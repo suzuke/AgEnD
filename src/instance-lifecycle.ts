@@ -56,8 +56,8 @@ export class InstanceLifecycle {
     }
 
     if (!existsSync(config.working_directory)) {
-      this.ctx.logger.error({ name, working_directory: config.working_directory }, "Working directory does not exist — skipping instance");
-      return;
+      this.ctx.logger.info({ name, working_directory: config.working_directory }, "Working directory does not exist — creating it");
+      mkdirSync(config.working_directory, { recursive: true });
     }
 
     const instanceDir = this.ctx.getInstanceDir(name);

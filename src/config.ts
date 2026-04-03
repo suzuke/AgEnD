@@ -1,4 +1,6 @@
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import yaml from "js-yaml";
 import type { CostGuardConfig, HangDetectorConfig, DailySummaryConfig, FleetConfig, InstanceConfig } from "./types.js";
 
@@ -96,9 +98,9 @@ export function loadFleetConfig(configPath: string): FleetConfig {
     ) as Partial<InstanceConfig>;
 
     if (!merged.working_directory) {
-      throw new Error(
-        `Instance "${name}" is missing required field: working_directory`,
-      );
+      const defaultDir = join(homedir(), ".agend", "workspaces", name);
+      mkdirSync(defaultDir, { recursive: true });
+      merged.working_directory = defaultDir;
     }
 
     instances[name] = merged as InstanceConfig;

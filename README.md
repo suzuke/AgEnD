@@ -74,7 +74,7 @@ agend fleet start               # launch the fleet
 
 - [Features](docs/features.md) — detailed feature documentation
 - [CLI Reference](docs/cli.md) — all commands and options
-- [Configuration](docs/configuration.md) — fleet.yaml, .env, data directory
+- [Configuration](docs/configuration.md) — fleet.yaml complete reference
 - [Security](SECURITY.md) — trust model and hardening
 
 ## Known limitations
