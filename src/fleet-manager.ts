@@ -77,6 +77,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
   // Topic icon + auto-archive state
   private topicIcons: { green?: string; blue?: string; red?: string } = {};
   private lastActivity = new Map<string, number>();
+  private lastInboundUser = new Map<string, string>(); // instanceName → last username
   private topicArchiver: TopicArchiver;
 
   controlClient: TmuxControlClient | null = null;
@@ -594,7 +595,8 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
               ...extraMeta,
             },
           });
-          this.logger.info(`← ${generalInstance} ${msg.username}: ${(text ?? "").slice(0, 100)}`);
+          this.lastInboundUser.set(generalInstance, msg.username);
+          this.logger.info(`${msg.username} → ${generalInstance}: ${(text ?? "").slice(0, 100)}`);
           this.eventLog?.logActivity("message", msg.username, (text ?? "").slice(0, 200), generalInstance);
         }
       }
@@ -646,7 +648,8 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
         ...extraMeta,
       },
     });
-    this.logger.info(`← ${instanceName} ${msg.username}: ${(text ?? "").slice(0, 100)}`);
+    this.lastInboundUser.set(instanceName, msg.username);
+    this.logger.info(`${msg.username} → ${instanceName}: ${(text ?? "").slice(0, 100)}`);
     this.eventLog?.logActivity("message", msg.username, (text ?? "").slice(0, 200), instanceName);
   }
 
@@ -690,7 +693,8 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     // Route standard channel tools (reply, react, edit_message, download_attachment)
     if (routeToolCall(this.adapter, tool, args, threadId, respond)) {
       if (tool === "reply") {
-        this.logger.info(`→ ${instanceName} claude: ${(args.text as string ?? "").slice(0, 100)}`);
+        const replyTo = this.lastInboundUser.get(instanceName) ?? "user";
+        this.logger.info(`${instanceName} → ${replyTo}: ${(args.text as string ?? "").slice(0, 100)}`);
       }
       return;
     }

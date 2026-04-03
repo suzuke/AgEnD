@@ -85,26 +85,39 @@ const sendToInstance: Handler = (ctx, args, respond, meta) => {
 
   targetIpc.send({ type: "fleet_inbound", targetSession, content: message, meta: ipcMeta });
 
-  // Post to the target topic for visibility — but only for actionable message kinds.
-  // report/update: target is just returning results; no notification needed.
-  // task/query: show full message so the target's topic reflects the full instruction.
-  // other (no request_kind): show a short summary as before.
-  // Skip general_topic — that space is reserved for user ↔ general conversation.
+  // Cross-instance topic notifications for visibility.
+  // general_topic instances are always skipped (keep General clean).
+  // Target topic: task/query → full message; report/update → silent; other → short summary.
+  // Sender topic: always show full outbound message (so users can see what the agent sent).
   const requestKind = ipcMeta.request_kind;
-  const skipNotification = requestKind === "report" || requestKind === "update";
   const groupId = ctx.fleetConfig?.channel?.group_id;
-  if (!skipNotification && groupId && ctx.adapter) {
-    const targetInstance = ctx.fleetConfig?.instances[targetInstanceName];
-    const targetTopicId = targetInstance?.topic_id;
-    const isGeneralTopic = targetInstance?.general_topic === true;
-    if (targetTopicId && !isGeneralTopic && !ctx.sessionRegistry.has(targetName)) {
-      const showFullMessage = requestKind === "task" || requestKind === "query";
-      const notificationText = showFullMessage
-        ? `${senderLabel} → ${targetName}:\n${message}`
-        : `${senderLabel} → ${targetName}: ${ipcMeta.task_summary ?? `${message.slice(0, 100)}${message.length > 100 ? "…" : ""}`}`;
-      ctx.adapter.sendText(String(groupId), notificationText, {
-        threadId: String(targetTopicId),
-      }).catch(e => ctx.logger.warn({ err: e }, "Failed to post cross-instance notification"));
+  if (groupId && ctx.adapter) {
+    const instances = ctx.fleetConfig?.instances ?? {};
+    const notificationLabel = `${senderLabel} → ${targetName}`;
+
+    // ── Target topic notification ──
+    const skipTargetNotification = requestKind === "report" || requestKind === "update";
+    if (!skipTargetNotification) {
+      const targetInstance = instances[targetInstanceName];
+      const targetTopicId = targetInstance?.topic_id;
+      const targetIsGeneral = targetInstance?.general_topic === true;
+      if (targetTopicId && !targetIsGeneral && !ctx.sessionRegistry.has(targetName)) {
+        const showFull = requestKind === "task" || requestKind === "query";
+        const text = showFull
+          ? `${notificationLabel}:\n${message}`
+          : `${notificationLabel}: ${ipcMeta.task_summary ?? `${message.slice(0, 100)}${message.length > 100 ? "…" : ""}`}`;
+        ctx.adapter.sendText(String(groupId), text, { threadId: String(targetTopicId) })
+          .catch(e => ctx.logger.warn({ err: e }, "Failed to post target topic notification"));
+      }
+    }
+
+    // ── Sender topic notification ──
+    const senderInstance = instances[meta.instanceName];
+    const senderTopicId = senderInstance?.topic_id;
+    const senderIsGeneral = senderInstance?.general_topic === true;
+    if (senderTopicId && !senderIsGeneral) {
+      ctx.adapter.sendText(String(groupId), `${notificationLabel}:\n${message}`, { threadId: String(senderTopicId) })
+        .catch(e => ctx.logger.warn({ err: e }, "Failed to post sender topic notification"));
     }
   }
 
