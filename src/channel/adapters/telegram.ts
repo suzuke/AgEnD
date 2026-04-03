@@ -11,6 +11,14 @@ import { MessageQueue } from "../message-queue.js";
 
 const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"]);
 
+/** Convert a threadId string to a Telegram message_thread_id number.
+ * Returns undefined for null/undefined or for the General topic (id=1),
+ * which must not receive message_thread_id in Telegram API calls. */
+function toThreadId(threadId: string | null | undefined): number | undefined {
+  if (threadId == null || threadId === "1") return undefined;
+  return Number(threadId);
+}
+
 export interface TelegramAdapterOptions {
   id: string;
   botToken: string;
@@ -43,7 +51,7 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
     this.queue = new MessageQueue({
       send: async (chatId, threadId, text) => {
         const msg = await this.bot.api.sendMessage(Number(chatId), text, {
-          message_thread_id: threadId != null ? Number(threadId) : undefined,
+          message_thread_id: toThreadId(threadId),
         });
         return { messageId: String(msg.message_id) };
       },
@@ -57,14 +65,14 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
           const msg = await this.bot.api.sendPhoto(
             Number(chatId),
             new InputFile(createReadStream(filePath), filename),
-            { message_thread_id: threadId != null ? Number(threadId) : undefined },
+            { message_thread_id: toThreadId(threadId) },
           );
           return { messageId: String(msg.message_id) };
         } else {
           const msg = await this.bot.api.sendDocument(
             Number(chatId),
             new InputFile(createReadStream(filePath), filename),
-            { message_thread_id: threadId != null ? Number(threadId) : undefined },
+            { message_thread_id: toThreadId(threadId) },
           );
           return { messageId: String(msg.message_id) };
         }
@@ -324,7 +332,7 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
       const parseMode = opts?.format === "html" ? "HTML" as const : undefined;
       this.bot.api
         .sendMessage(Number(chatId), chunks[0], {
-          message_thread_id: threadId != null ? Number(threadId) : undefined,
+          message_thread_id: toThreadId(threadId),
           parse_mode: parseMode,
         })
         .then((msg) => {
@@ -353,14 +361,14 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
       const msg = await this.bot.api.sendPhoto(
         Number(chatId),
         new InputFile(createReadStream(filePath), filename),
-        { message_thread_id: threadId != null ? Number(threadId) : undefined },
+        { message_thread_id: toThreadId(threadId) },
       );
       messageId = String(msg.message_id);
     } else {
       const msg = await this.bot.api.sendDocument(
         Number(chatId),
         new InputFile(createReadStream(filePath), filename),
-        { message_thread_id: threadId != null ? Number(threadId) : undefined },
+        { message_thread_id: toThreadId(threadId) },
       );
       messageId = String(msg.message_id);
     }
@@ -555,7 +563,7 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
     }
     const threadId = opts?.threadId;
     const msg = await this.bot.api.sendMessage(Number(chatId), text, {
-      message_thread_id: threadId != null ? Number(threadId) : undefined,
+      message_thread_id: toThreadId(threadId),
       reply_markup: keyboard,
     });
     return String(msg.message_id);
@@ -569,7 +577,7 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
         keyboard.text(choice.label, choice.id);
       }
       const msg = await this.bot.api.sendMessage(Number(chatId), alert.message, {
-        message_thread_id: threadId != null ? Number(threadId) : undefined,
+        message_thread_id: toThreadId(threadId),
         reply_markup: keyboard,
       });
       return { messageId: String(msg.message_id), chatId, threadId };

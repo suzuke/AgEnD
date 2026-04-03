@@ -365,17 +365,17 @@ export const TOOLS = [
     },
     {
       name: "create_instance",
-      description: "Create a new instance bound to a project directory with a channel topic.",
+      description: "Create a new instance bound to a project directory with a channel topic. If directory is omitted, a workspace is auto-created at ~/.agend/workspaces/<instance-name>.",
       inputSchema: {
         type: "object" as const,
         properties: {
           directory: {
             type: "string",
-            description: "Absolute path or ~-prefixed path to the project directory",
+            description: "Absolute path or ~-prefixed path to the project directory. Optional — omit to auto-create a workspace at ~/.agend/workspaces/<name>.",
           },
           topic_name: {
             type: "string",
-            description: "Name for the Telegram topic. Defaults to directory basename.",
+            description: "Name for the Telegram topic. Defaults to directory basename. Required when directory is omitted.",
           },
           description: {
             type: "string",
@@ -403,7 +403,7 @@ export const TOOLS = [
             description: "Custom path for the git worktree. Defaults to sibling directory of the repo.",
           },
         },
-        required: ["directory"],
+        required: [],
       },
     },
     {
