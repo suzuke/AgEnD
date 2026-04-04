@@ -1218,17 +1218,13 @@ function getInstanceStatusStandalone(name: string): "running" | "stopped" | "cra
 function stripAnsi(str: string): string {
   // eslint-disable-next-line no-control-regex
   return str
-    .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "")     // CSI sequences (including private ? prefix)
-    .replace(/\x1b\[[0-9;]*m/g, "")              // SGR color/style sequences
-    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "") // OSC sequences (BEL or ST terminated)
-    .replace(/\x1b\([A-Z]/g, "")                 // Character set selection
-    .replace(/\x1b[=>]/g, "")                    // Keypad mode
-    .replace(/\x1b\[?[0-9;]*[hl]/g, "")         // DEC private mode set/reset
-    .replace(/\x1b\[[0-9]*[ABCDHJ]/g, "")       // Cursor movement & erase
-    .replace(/\x1b\[?[0-9;]*[KJsu]/g, "")       // Erase line/screen, save/restore cursor
-    .replace(/\r/g, "")                          // Carriage returns from TUI redraws
+    .replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "")              // CSI (covers all)
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")   // OSC
+    .replace(/\x1b\([A-Z]/g, "")                           // Character set
+    .replace(/\x1b[=>]/g, "")                              // Keypad mode
+    .replace(/\r/g, "")                                     // Carriage returns
     // eslint-disable-next-line no-control-regex
-    .replace(/[\x00-\x08\x0e-\x1f]/g, "");      // Remaining control chars (except \t \n)
+    .replace(/[\x00-\x08\x0e-\x1f]/g, "");                // Control chars
 }
 
 function getTeamsForInstance(config: import("./types.js").FleetConfig, instanceName: string): string[] {
