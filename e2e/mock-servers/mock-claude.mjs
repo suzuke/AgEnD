@@ -129,13 +129,19 @@ function mcpNotify(method, params = {}) {
 
 async function initializeMcp() {
   try {
-    await mcpRequest("initialize", {
+    const resp = await mcpRequest("initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
       clientInfo: { name: "mock-claude", version: "1.0.0" },
     });
     mcpNotify("notifications/initialized");
     mcpInitialized = true;
+    // Write MCP instructions to file for E2E test inspection
+    if (resp.result?.instructions) {
+      try {
+        writeFileSync(join(INSTANCE_DIR, "mcp-instructions.txt"), resp.result.instructions);
+      } catch { /* ignore */ }
+    }
     process.stderr.write("mock-claude: MCP protocol initialized\n");
   } catch (err) {
     process.stderr.write(`mock-claude: MCP initialize failed: ${err.message}\n`);
