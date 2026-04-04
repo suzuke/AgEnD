@@ -271,6 +271,9 @@ const controlTimer = setInterval(async () => {
       if (typeof ctrl.context_pct === "number") contextPct = ctrl.context_pct;
       if (ctrl.call_tool && mcpInitialized) {
         const { name, args } = ctrl.call_tool;
+        // Single-consume: remove call_tool so it doesn't re-fire on next poll
+        delete ctrl.call_tool;
+        writeFileSync(controlFile, JSON.stringify(ctrl));
         process.stderr.write(`mock-claude: calling tool ${name} via mock-control\n`);
         try {
           const resp = await mcpRequest("tools/call", { name, arguments: args });

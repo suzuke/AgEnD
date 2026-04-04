@@ -143,6 +143,49 @@ describe("Cross-Instance Communication E2E", () => {
     );
   }, 60_000);
 
+  // --- Phase 1b: Warm up reply context for all instances ---
+  // Cross-instance messages have empty chat_id, so they don't populate
+  // lastChatId/lastThreadId in the daemon. Each instance needs at least
+  // one regular channel message first so replies have a destination.
+
+  it("T11: warm up beta reply context", async () => {
+    const sendsBefore = telegramMock.getCallsFor("sendMessage").length;
+    telegramMock.injectMessage({
+      text: "warm up",
+      chatId: TEST_GROUP_ID,
+      userId: TEST_USER_ID,
+      username: "testuser",
+      threadId: 87,
+    });
+    await waitFor(
+      () =>
+        telegramMock
+          .getCallsFor("sendMessage")
+          .slice(sendsBefore)
+          .some((c) => String(c.params.message_thread_id) === "87"),
+      { timeout: 30_000, label: "beta warm-up reply" },
+    );
+  }, 60_000);
+
+  it("T11: warm up general reply context", async () => {
+    const sendsBefore = telegramMock.getCallsFor("sendMessage").length;
+    telegramMock.injectMessage({
+      text: "warm up",
+      chatId: TEST_GROUP_ID,
+      userId: TEST_USER_ID,
+      username: "testuser",
+      threadId: 51,
+    });
+    await waitFor(
+      () =>
+        telegramMock
+          .getCallsFor("sendMessage")
+          .slice(sendsBefore)
+          .some((c) => String(c.params.message_thread_id) === "51"),
+      { timeout: 30_000, label: "general warm-up reply" },
+    );
+  }, 60_000);
+
   // --- Phase 2: send_to_instance ---
 
   it("T11: alpha sends to beta via send_to_instance, beta receives", async () => {

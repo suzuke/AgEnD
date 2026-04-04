@@ -141,6 +141,28 @@ describe("Scheduling E2E", () => {
     );
   }, 60_000);
 
+  // Warm up target's reply context — schedule-triggered messages have
+  // chat_id from the schedule's reply_chat_id, but we need the daemon's
+  // lastChatId/lastThreadId populated for the reply tool to work.
+  it("T13: warm up target reply context", async () => {
+    const sendsBefore = telegramMock.getCallsFor("sendMessage").length;
+    telegramMock.injectMessage({
+      text: "warm up",
+      chatId: TEST_GROUP_ID,
+      userId: TEST_USER_ID,
+      username: "testuser",
+      threadId: 71,
+    });
+    await waitFor(
+      () =>
+        telegramMock
+          .getCallsFor("sendMessage")
+          .slice(sendsBefore)
+          .some((c) => String(c.params.message_thread_id) === "71"),
+      { timeout: 30_000, label: "target warm-up reply" },
+    );
+  }, 60_000);
+
   it("T13: scheduler is initialized", () => {
     expect(fm).not.toBeNull();
     expect(fm!.scheduler).not.toBeNull();
@@ -157,7 +179,7 @@ describe("Scheduling E2E", () => {
       source: "source",
       target: "target",
       reply_chat_id: String(TEST_GROUP_ID),
-      reply_thread_id: "70",
+      reply_thread_id: "71",
       label: "test-schedule",
       timezone: "UTC",
     });
