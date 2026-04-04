@@ -224,6 +224,7 @@ export class InstanceLifecycle {
     const directory = rawDirectory ? rawDirectory.replace(/^~/, process.env.HOME || "~") : undefined;
     const topicName = (args.topic_name as string) || (directory ? basename(directory) : undefined);
     const description = args.description as string | undefined;
+    const systemPrompt = args.systemPrompt as string | undefined;
     const branch = args.branch as string | undefined;
     const detach = (args.detach as boolean) ?? false;
 
@@ -345,6 +346,7 @@ export class InstanceLifecycle {
         working_directory: workDir,
         topic_id: createdTopicId,
         ...(description ? { description } : {}),
+        ...(systemPrompt ? { systemPrompt } : {}),
         ...(args.model ? { model: args.model as string } : {}),
         ...(args.backend ? { backend: args.backend as string } : {}),
         ...(worktreePath ? { worktree_source: directory } : {}),

@@ -449,6 +449,10 @@ export const TOOLS = [
             type: "string",
             description: "Custom path for the git worktree. Defaults to sibling directory of the repo.",
           },
+          systemPrompt: {
+            type: "string",
+            description: "Custom system prompt for this instance (inline text only, file: prefix not supported here). Injected after fleet context in MCP instructions.",
+          },
         },
         required: [],
       },
