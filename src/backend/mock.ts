@@ -1,7 +1,7 @@
 import { join, dirname } from "node:path";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import type { CliBackend, CliBackendConfig } from "./types.js";
+import type { CliBackend, CliBackendConfig, ErrorPattern } from "./types.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -81,7 +81,10 @@ export class MockBackend implements CliBackend {
     return /MOCK_READY|mock-claude ready/;
   }
 
-  getErrorPatterns() {
-    return [];
+  getErrorPatterns(): ErrorPattern[] {
+    return [
+      { pattern: /MOCK_RATE_LIMIT/i, type: "rate_limit", action: "failover", message: "Mock rate limit reached" },
+      { pattern: /MOCK_AUTH_ERROR/i, type: "auth_error", action: "notify", message: "Mock auth error" },
+    ];
   }
 }

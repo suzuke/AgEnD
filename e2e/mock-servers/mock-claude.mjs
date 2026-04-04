@@ -275,6 +275,12 @@ const controlTimer = setInterval(async () => {
     if (existsSync(controlFile)) {
       const ctrl = JSON.parse(readFileSync(controlFile, "utf-8"));
       if (typeof ctrl.context_pct === "number") contextPct = ctrl.context_pct;
+      // pty_output: write text to stdout so daemon's error monitor can see it
+      if (ctrl.pty_output) {
+        process.stdout.write(ctrl.pty_output + "\n");
+        delete ctrl.pty_output;
+        writeFileSync(controlFile, JSON.stringify(ctrl));
+      }
       if (ctrl.call_tool && mcpInitialized) {
         const { name, args } = ctrl.call_tool;
         // Single-consume: remove call_tool so it doesn't re-fire on next poll
