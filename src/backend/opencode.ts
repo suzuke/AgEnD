@@ -1,10 +1,6 @@
-import { join, dirname } from "node:path";
-import { existsSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { type CliBackend, type CliBackendConfig, type ErrorPattern, resolveBinary } from "./types.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 export class OpenCodeBackend implements CliBackend {
   readonly binaryName = "opencode";
@@ -60,81 +56,7 @@ export class OpenCodeBackend implements CliBackend {
     oc.mcp = mcp;
     delete oc.mcpServers;
 
-    // Write fleet instructions file for OpenCode to pick up
-    // (OpenCode doesn't inject MCP instructions into its system prompt)
-    const instructionsPath = join(this.instanceDir, "fleet-instructions.md");
-    writeFileSync(instructionsPath, this.buildInstructions(config));
-    const contextPaths = (oc.contextPaths ?? []) as string[];
-    if (!contextPaths.includes(instructionsPath)) {
-      contextPaths.push(instructionsPath);
-    }
-    oc.contextPaths = contextPaths;
-
     writeFileSync(configPath, JSON.stringify(oc, null, 2));
-  }
-
-  private buildInstructions(config: CliBackendConfig): string {
-    const name = config.instanceName;
-    const workDir = config.workingDirectory;
-    const env = config.mcpServers["agend"]?.env ?? {};
-    const displayName = env.AGEND_DISPLAY_NAME;
-    const description = env.AGEND_DESCRIPTION;
-
-    const sections: string[] = [];
-    sections.push(`# AgEnD Fleet Context\nYou are **${name}**, an instance in an AgEnD fleet.\nYour working directory is \`${workDir}\`.`);
-    if (displayName) {
-      sections.push(`Your display name is "${displayName}". Use this when introducing yourself.`);
-    } else {
-      sections.push("You don't have a display name yet. Use set_display_name to choose one that reflects your personality.");
-    }
-    if (description) {
-      sections.push(`## Role\n${description}`);
-    }
-    sections.push([
-      "## Message Format",
-      "- `[user:name]` — from a Telegram/Discord user → reply with the `reply` tool.",
-      "- `[from:instance-name]` — from another fleet instance → reply with `send_to_instance`, NOT the reply tool.",
-      "",
-      "**Always use the `reply` tool for ALL responses to users.** Do not respond directly in the terminal.",
-      "",
-      "## Tool Usage",
-      "- reply: respond to users. react: emoji reactions. edit_message: update a sent message. download_attachment: fetch files.",
-      "- If the inbound message has image_path, Read that file — it is a photo.",
-      "- If the inbound message has attachment_file_id, call download_attachment then Read the returned path.",
-      "- If the inbound message has reply_to_text, the user is quoting a previous message.",
-      "- Use list_instances to discover fleet members. Use describe_instance for details.",
-      "- High-level collaboration: request_information (ask), delegate_task (assign), report_result (return results with correlation_id).",
-      "",
-      "## Collaboration Rules",
-      "1. Use fleet tools for cross-instance communication. Never assume direct file access to another instance's repo.",
-      "2. Cross-instance messages appear as `[from:instance-name]`. Reply via send_to_instance or report_result, NOT reply.",
-      "3. Use list_instances to discover available instances before sending messages.",
-      "4. You only have direct access to files under your own working directory.",
-    ].join("\n"));
-
-    // Load workflow template
-    const workflowEnv = env.AGEND_WORKFLOW;
-    if (workflowEnv !== "false") {
-      let workflowContent: string | null = null;
-      if (workflowEnv) {
-        workflowContent = workflowEnv;
-      } else {
-        try {
-          workflowContent = readFileSync(join(__dirname, "../workflow-templates/default.md"), "utf-8");
-        } catch { /* not found */ }
-      }
-      if (workflowContent) {
-        sections.push(`## Development Workflow\n\n${workflowContent}`);
-      }
-    }
-
-    // Custom user prompt (from fleet.yaml systemPrompt field)
-    const customPrompt = env.AGEND_CUSTOM_PROMPT;
-    if (customPrompt) {
-      sections.push(customPrompt);
-    }
-
-    return sections.join("\n\n");
   }
 
   getReadyPattern(): RegExp {
@@ -160,7 +82,7 @@ export class OpenCodeBackend implements CliBackend {
   }
 
   cleanup(config: CliBackendConfig): void {
-    // Clean up instance-specific MCP entries and instructions from opencode.json
+    // Clean up instance-specific MCP entries from opencode.json
     try {
       const configPath = join(config.workingDirectory, "opencode.json");
       if (existsSync(configPath)) {
@@ -170,15 +92,8 @@ export class OpenCodeBackend implements CliBackend {
             delete oc.mcp[`${name}-${config.instanceName}`];
             delete oc.mcp[name]; // also clean old non-namespaced key
           }
+          writeFileSync(configPath, JSON.stringify(oc, null, 2));
         }
-        // Remove fleet instructions reference and file
-        const instructionsPath = join(this.instanceDir, "fleet-instructions.md");
-        if (Array.isArray(oc.contextPaths)) {
-          oc.contextPaths = oc.contextPaths.filter((p: string) => p !== instructionsPath);
-          if (oc.contextPaths.length === 0) delete oc.contextPaths;
-        }
-        try { unlinkSync(instructionsPath); } catch { /* may not exist */ }
-        writeFileSync(configPath, JSON.stringify(oc, null, 2));
       }
     } catch { /* best effort */ }
   }
