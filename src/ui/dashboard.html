@@ -5,78 +5,99 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
 <title>AgEnD Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --raised: #1c2129; --border: #30363d;
+    --text: #f0f6fc; --text-sec: #8b949e; --text-muted: #484f58;
+    --accent: #2AABEE; --accent-dim: rgba(42,171,238,0.1); --success: #7ee787; --error: #f85149; --warn: #d29922;
+  }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace; display: flex; height: 100vh; }
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', system-ui, sans-serif; display: flex; height: 100vh; }
 
   /* Sidebar */
-  .sidebar { width: 260px; border-right: 1px solid #21262d; display: flex; flex-direction: column; flex-shrink: 0; }
-  .sidebar-header { padding: 16px; border-bottom: 1px solid #21262d; font-size: 16px; font-weight: 600; color: #58a6ff; }
-  .sidebar-header .uptime { font-size: 11px; color: #8b949e; font-weight: 400; margin-top: 4px; }
+  .sidebar { width: 260px; border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; background: var(--surface); }
+  .sidebar-header { padding: 16px; border-bottom: 1px solid var(--border); }
+  .sidebar-header h1 { font-size: 18px; font-weight: 700; color: var(--accent); }
+  .sidebar-header .uptime { font-size: 11px; color: var(--text-sec); margin-top: 4px; font-family: 'JetBrains Mono', monospace; }
   .instance-list { flex: 1; overflow-y: auto; }
-  .instance-item { padding: 10px 16px; cursor: pointer; border-bottom: 1px solid #161b22; display: flex; align-items: center; gap: 10px; }
-  .instance-item:hover { background: #161b22; }
-  .instance-item.active { background: #1f6feb22; border-left: 3px solid #1f6feb; }
-  .instance-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-  .instance-dot.running { background: #3fb950; }
-  .instance-dot.stopped { background: #f85149; }
-  .instance-dot.idle, .instance-dot.crashed { background: #d29922; }
-  .instance-info { flex: 1; min-width: 0; }
-  .instance-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .instance-meta { font-size: 11px; color: #8b949e; }
+  .instance-item { padding: 10px 16px; cursor: pointer; border-bottom: 1px solid var(--bg); display: flex; align-items: center; gap: 10px; transition: background 0.15s; }
+  .instance-item:hover { background: var(--raised); }
+  .instance-item.active { background: var(--accent-dim); border-left: 3px solid var(--accent); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .dot.running { background: var(--success); } .dot.stopped { background: var(--error); } .dot.crashed { background: var(--warn); }
+  .inst-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .inst-meta { font-size: 11px; color: var(--text-sec); font-family: 'JetBrains Mono', monospace; }
 
-  /* Main area */
-  .main { flex: 1; display: flex; flex-direction: column; }
-  .no-selection { flex: 1; display: flex; align-items: center; justify-content: center; color: #8b949e; font-size: 14px; }
+  /* Main */
+  .main { flex: 1; display: flex; flex-direction: column; background: var(--bg); }
+  .no-sel { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 14px; }
 
   /* Tabs */
-  .tabs { display: flex; border-bottom: 1px solid #21262d; }
-  .tab { padding: 8px 16px; cursor: pointer; font-size: 13px; color: #8b949e; border-bottom: 2px solid transparent; }
-  .tab:hover { color: #c9d1d9; }
-  .tab.active { color: #58a6ff; border-bottom-color: #58a6ff; }
+  .tabs { display: flex; border-bottom: 1px solid var(--border); background: var(--surface); }
+  .tab { padding: 10px 20px; cursor: pointer; font-size: 13px; font-weight: 500; color: var(--text-sec); border-bottom: 2px solid transparent; transition: all 0.15s; }
+  .tab:hover { color: var(--text); } .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 
-  /* Chat area */
+  /* Actions */
+  .actions { display: flex; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; align-items: center; }
+  .btn { padding: 6px 14px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; border: 1px solid var(--border); font-family: inherit; transition: all 0.15s; display: inline-flex; align-items: center; gap: 4px; }
+  .btn:disabled { opacity: 0.4; cursor: default; }
+  .btn-accent { background: var(--accent); color: #fff; border-color: var(--accent); } .btn-accent:hover:not(:disabled) { filter: brightness(1.1); }
+  .btn-green { background: #238636; color: #fff; border-color: #238636; } .btn-green:hover:not(:disabled) { background: #2ea043; }
+  .btn-warn { background: #9e6a03; color: #fff; border-color: #9e6a03; } .btn-warn:hover:not(:disabled) { background: #bb8009; }
+  .btn-red { background: #da3633; color: #fff; border-color: #da3633; } .btn-red:hover:not(:disabled) { background: var(--error); }
+  .btn-ghost { background: transparent; color: var(--text-sec); } .btn-ghost:hover:not(:disabled) { color: var(--text); background: var(--raised); }
+
+  /* Toast */
+  .toast { position: fixed; bottom: 20px; right: 20px; padding: 10px 16px; border-radius: 8px; font-size: 13px; z-index: 100; animation: slideIn 0.3s ease; }
+  .toast.ok { background: #238636; color: #fff; } .toast.err { background: #da3633; color: #fff; }
+  @keyframes slideIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+  /* Chat */
   .chat-view { flex: 1; display: flex; flex-direction: column; }
-  .chat-header { padding: 12px 16px; border-bottom: 1px solid #21262d; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
-  .chat-header .model { font-size: 11px; color: #8b949e; font-weight: 400; }
   .messages { flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
-  .msg { max-width: 85%; padding: 8px 12px; border-radius: 8px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
-  .msg.inbound { background: #1f6feb33; align-self: flex-end; border-bottom-right-radius: 2px; }
-  .msg.outbound { background: #161b22; align-self: flex-start; border-bottom-left-radius: 2px; border-left: 3px solid #3fb950; }
+  .msg { max-width: 85%; padding: 8px 12px; border-radius: 12px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+  .msg.inbound { background: var(--accent-dim); align-self: flex-end; border-bottom-right-radius: 2px; }
+  .msg.outbound { background: var(--surface); align-self: flex-start; border-bottom-left-radius: 2px; border-left: 3px solid var(--success); }
   .msg .sender { font-size: 11px; font-weight: 600; margin-bottom: 2px; }
-  .msg .sender.user { color: #58a6ff; }
-  .msg .sender.agent { color: #3fb950; }
-  .msg .time { font-size: 10px; color: #8b949e; float: right; margin-left: 12px; margin-top: 2px; }
-  .msg-empty { color: #8b949e; text-align: center; margin-top: 40px; font-size: 13px; }
-  .input-bar { padding: 12px 16px; border-top: 1px solid #21262d; display: flex; gap: 8px; }
-  .input-bar input { flex: 1; background: #161b22; color: #c9d1d9; border: 1px solid #30363d; border-radius: 6px; padding: 8px 12px; font-size: 13px; font-family: inherit; outline: none; }
-  .input-bar input:focus { border-color: #58a6ff; }
+  .msg .sender.user { color: var(--accent); } .msg .sender.agent { color: var(--success); }
+  .msg .time { font-size: 10px; color: var(--text-muted); float: right; margin-left: 12px; }
+  .msg-empty { color: var(--text-muted); text-align: center; margin-top: 40px; font-size: 13px; }
+  .input-bar { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; gap: 8px; }
+  .input-bar input { flex: 1; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 13px; font-family: inherit; outline: none; }
+  .input-bar input:focus { border-color: var(--accent); }
 
-  /* Detail view */
+  /* Detail */
   .detail-view { flex: 1; overflow-y: auto; padding: 16px; display: none; }
-  .detail-section { margin-bottom: 16px; }
-  .detail-section h3 { font-size: 13px; color: #58a6ff; margin-bottom: 8px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+  .card h3 { font-size: 13px; color: var(--accent); margin-bottom: 10px; font-weight: 600; }
   .detail-row { display: flex; gap: 8px; font-size: 13px; padding: 4px 0; }
-  .detail-label { color: #8b949e; min-width: 120px; }
-  .detail-value { color: #c9d1d9; }
+  .detail-label { color: var(--text-sec); min-width: 120px; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+  .activity-item { font-size: 12px; padding: 4px 0; border-bottom: 1px solid var(--bg); font-family: 'JetBrains Mono', monospace; }
+  .act-time { color: var(--text-muted); margin-right: 8px; } .act-event { color: var(--warn); margin-right: 4px; }
 
-  /* Action buttons */
-  .actions { display: flex; gap: 6px; padding: 12px 16px; border-bottom: 1px solid #21262d; flex-wrap: wrap; }
-  .btn { padding: 5px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; border: 1px solid #30363d; font-family: inherit; }
-  .btn-green { background: #238636; color: #fff; border-color: #238636; }
-  .btn-green:hover { background: #2ea043; }
-  .btn-yellow { background: #9e6a03; color: #fff; border-color: #9e6a03; }
-  .btn-yellow:hover { background: #bb8009; }
-  .btn-red { background: #da3633; color: #fff; border-color: #da3633; }
-  .btn-red:hover { background: #f85149; }
-  .btn-blue { background: #1f6feb; color: #fff; border-color: #1f6feb; }
-  .btn-blue:hover { background: #388bfd; }
-  .btn:disabled { opacity: 0.5; cursor: default; }
+  /* Task board */
+  .task-view { flex: 1; overflow-y: auto; padding: 16px; display: none; }
+  .task-item { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; }
+  .task-status { font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 500; font-family: 'JetBrains Mono', monospace; }
+  .task-status.open { background: var(--accent-dim); color: var(--accent); }
+  .task-status.claimed { background: rgba(210,153,34,0.15); color: var(--warn); }
+  .task-status.done { background: rgba(126,231,135,0.15); color: var(--success); }
+  .task-title { flex: 1; font-size: 13px; font-weight: 500; }
+  .task-assignee { font-size: 11px; color: var(--text-sec); }
+  .task-actions { display: flex; gap: 4px; }
 
-  /* Activity list in detail */
-  .activity-item { font-size: 12px; padding: 4px 0; border-bottom: 1px solid #161b22; }
-  .activity-item .act-time { color: #8b949e; margin-right: 8px; }
-  .activity-item .act-event { color: #d29922; margin-right: 4px; }
+  /* Form overlay */
+  .form-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 50; }
+  .form-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 24px; width: 440px; max-width: 90vw; max-height: 80vh; overflow-y: auto; }
+  .form-card h2 { font-size: 16px; margin-bottom: 16px; color: var(--accent); }
+  .form-field { margin-bottom: 12px; }
+  .form-field label { display: block; font-size: 12px; color: var(--text-sec); margin-bottom: 4px; font-weight: 500; }
+  .form-field input, .form-field select { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 13px; font-family: inherit; outline: none; }
+  .form-field input:focus, .form-field select:focus { border-color: var(--accent); }
+  .form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+  .sidebar-footer { padding: 12px 16px; border-top: 1px solid var(--border); }
 
   @media (max-width: 700px) { .sidebar { width: 200px; } }
 </style>
@@ -85,258 +106,233 @@
 
 <div class="sidebar">
   <div class="sidebar-header">
-    AgEnD
+    <h1>AgEnD</h1>
     <div class="uptime" id="uptime">--</div>
   </div>
   <div class="instance-list" id="instanceList"></div>
+  <div class="sidebar-footer">
+    <button class="btn btn-accent" style="width:100%" onclick="showCreateInstance()">+ New Instance</button>
+  </div>
 </div>
 
 <div class="main" id="mainArea">
-  <div class="no-selection" id="noSelection">Select an instance</div>
+  <div class="no-sel">Select an instance</div>
 </div>
 
 <script>
-const token = new URLSearchParams(location.search).get("token") || "";
-let currentInstance = null;
-let currentTab = "chat";
-let instances = [];
-const messagesByInstance = {};
+const T = new URLSearchParams(location.search).get("token") || "";
+let cur = null, curTab = "chat", instances = [];
+const msgs = {};
 
-// ── API helpers ──────────────────────────────────────────
-
-async function api(method, path, body) {
-  const opts = { method, headers: { "Content-Type": "application/json" } };
-  if (body) opts.body = JSON.stringify(body);
-  const res = await fetch(`${path}${path.includes("?") ? "&" : "?"}token=${token}`, opts);
-  return res.json();
+async function api(m, p, b) {
+  const o = { method: m, headers: { "Content-Type": "application/json" } };
+  if (b) o.body = JSON.stringify(b);
+  const r = await fetch(`${p}${p.includes("?") ? "&" : "?"}token=${T}`, o);
+  return r.json();
+}
+function esc(s) { const d = document.createElement("div"); d.textContent = s || ""; return d.innerHTML; }
+function fmtUp(s) { return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s/60)}m` : `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m`; }
+function toast(msg, ok=true) {
+  const el = document.createElement("div"); el.className = `toast ${ok?"ok":"err"}`; el.textContent = msg;
+  document.body.appendChild(el); setTimeout(() => el.remove(), 3000);
 }
 
-function esc(s) {
-  const d = document.createElement("div");
-  d.textContent = s || "";
-  return d.innerHTML;
-}
-
-function formatUptime(s) {
-  if (s < 60) return `${s}s`;
-  if (s < 3600) return `${Math.floor(s / 60)}m`;
-  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
-}
-
-// ── SSE ──────────────────────────────────────────────────
-
-const evtSource = new EventSource(`/ui/events?token=${token}`);
-
-evtSource.addEventListener("status", (e) => {
-  const data = JSON.parse(e.data);
-  instances = data.instances;
-  document.getElementById("uptime").textContent = `uptime: ${formatUptime(data.uptime)}`;
-  renderInstanceList();
-  // Refresh action buttons if current instance status changed
-  if (currentInstance) {
-    const inst = instances.find(i => i.name === currentInstance);
-    const actionsEl = document.getElementById("actions");
-    if (inst && actionsEl) renderActions(inst);
-  }
+const sse = new EventSource(`/ui/events?token=${T}`);
+sse.addEventListener("status", e => {
+  const d = JSON.parse(e.data); instances = d.instances;
+  document.getElementById("uptime").textContent = fmtUp(d.uptime);
+  renderList();
+  if (cur) { const i = instances.find(x => x.name === cur); const a = document.getElementById("actions"); if (i && a) renderActions(i); }
 });
-
-evtSource.addEventListener("message", (e) => {
-  const msg = JSON.parse(e.data);
-  if (!messagesByInstance[msg.instance]) messagesByInstance[msg.instance] = [];
-  messagesByInstance[msg.instance].push(msg);
-  if (messagesByInstance[msg.instance].length > 500) messagesByInstance[msg.instance].shift();
-  if (msg.instance === currentInstance && currentTab === "chat") renderMessages();
+sse.addEventListener("message", e => {
+  const m = JSON.parse(e.data);
+  if (!msgs[m.instance]) msgs[m.instance] = [];
+  msgs[m.instance].push(m);
+  if (msgs[m.instance].length > 500) msgs[m.instance].shift();
+  if (m.instance === cur && curTab === "chat") renderMsgs();
 });
+sse.onerror = () => { document.getElementById("uptime").textContent = "disconnected"; };
 
-evtSource.onerror = () => {
-  document.getElementById("uptime").textContent = "disconnected";
-};
-
-// ── Instance list ────────────────────────────────────────
-
-function renderInstanceList() {
+function renderList() {
   const el = document.getElementById("instanceList");
-  el.innerHTML = instances.map(inst => {
-    const active = inst.name === currentInstance ? " active" : "";
-    const cost = inst.cost > 0 ? `$${inst.cost.toFixed(2)}` : "";
-    const ctx = inst.context_pct > 0 ? `ctx:${Math.round(inst.context_pct)}%` : "";
-    const meta = [cost, ctx].filter(Boolean).join(" | ");
-    return `<div class="instance-item${active}" data-name="${esc(inst.name)}">
-      <div class="instance-dot ${inst.status}"></div>
-      <div class="instance-info">
-        <div class="instance-name">${esc(inst.name)}</div>
-        <div class="instance-meta">${esc(meta)}</div>
-      </div>
-    </div>`;
-  }).join("");
-  el.querySelectorAll(".instance-item").forEach(item => {
-    item.addEventListener("click", () => selectInstance(item.dataset.name));
-  });
+  el.innerHTML = instances.map(i => `<div class="instance-item${i.name===cur?" active":""}" data-n="${esc(i.name)}">
+    <div class="dot ${i.status}"></div><div style="flex:1;min-width:0">
+    <div class="inst-name">${esc(i.name)}</div>
+    <div class="inst-meta">${i.cost>0?`$${i.cost.toFixed(2)}`:""}${i.context_pct>0?` ctx:${Math.round(i.context_pct)}%`:""}</div>
+    </div></div>`).join("");
+  el.querySelectorAll(".instance-item").forEach(x => x.addEventListener("click", () => sel(x.dataset.n)));
 }
 
-// ── Instance selection ───────────────────────────────────
-
-function selectInstance(name) {
-  currentInstance = name;
-  renderInstanceList();
-  renderMain();
-}
+function sel(name) { cur = name; curTab = "chat"; renderMain(); renderList(); }
 
 function renderMain() {
-  if (!currentInstance) return;
-  const inst = instances.find(i => i.name === currentInstance);
+  if (!cur) return;
   const main = document.getElementById("mainArea");
-
   main.innerHTML = `
     <div class="tabs">
-      <div class="tab ${currentTab === "chat" ? "active" : ""}" data-tab="chat">Chat</div>
-      <div class="tab ${currentTab === "detail" ? "active" : ""}" data-tab="detail">Detail</div>
+      <div class="tab${curTab==="chat"?" active":""}" data-t="chat">Chat</div>
+      <div class="tab${curTab==="detail"?" active":""}" data-t="detail">Detail</div>
+      <div class="tab${curTab==="tasks"?" active":""}" data-t="tasks">Tasks</div>
     </div>
     <div class="actions" id="actions"></div>
-    <div class="chat-view" id="chatView" style="display:${currentTab === "chat" ? "flex" : "none"}">
+    <div class="chat-view" id="chatView" style="display:${curTab==="chat"?"flex":"none"}">
       <div class="messages" id="messages"></div>
-      <div class="input-bar">
-        <input type="text" id="msgInput" placeholder="Send a message..." autocomplete="off">
-        <button class="btn btn-blue" onclick="sendMessage()">Send</button>
-      </div>
+      <div class="input-bar"><input id="msgIn" placeholder="Send a message..." autocomplete="off"><button class="btn btn-accent" onclick="sendMsg()">Send</button></div>
     </div>
-    <div class="detail-view" id="detailView" style="display:${currentTab === "detail" ? "block" : "none"}">
-      <div style="color:#8b949e;text-align:center;padding:24px;">Loading...</div>
-    </div>`;
-
-  // Tab switching
-  main.querySelectorAll(".tab").forEach(tab => {
-    tab.addEventListener("click", () => {
-      currentTab = tab.dataset.tab;
-      renderMain();
-    });
-  });
-
-  // Actions
-  renderActions(inst);
-
-  // Content
-  if (currentTab === "chat") {
-    renderMessages();
-    const input = document.getElementById("msgInput");
-    input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-    });
-    input.focus();
-  } else {
-    loadDetail();
-  }
+    <div class="detail-view" id="detailView" style="display:${curTab==="detail"?"block":"none"}"><div style="color:var(--text-muted);text-align:center;padding:24px">Loading...</div></div>
+    <div class="task-view" id="taskView" style="display:${curTab==="tasks"?"block":"none"}"><div style="color:var(--text-muted);text-align:center;padding:24px">Loading...</div></div>`;
+  main.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => { curTab = t.dataset.t; renderMain(); }));
+  const i = instances.find(x => x.name === cur); renderActions(i);
+  if (curTab === "chat") { renderMsgs(); const inp = document.getElementById("msgIn"); inp.addEventListener("keydown", e => { if (e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMsg();} }); inp.focus(); }
+  else if (curTab === "detail") loadDetail();
+  else if (curTab === "tasks") loadTasks();
 }
 
-// ── Action buttons ───────────────────────────────────────
-
-function renderActions(inst) {
-  const el = document.getElementById("actions");
-  if (!inst) return;
-  const isRunning = inst.status === "running";
-  el.innerHTML = `
-    ${isRunning
-      ? `<button class="btn btn-yellow" onclick="instanceAction('stop')">Stop</button>
-         <button class="btn btn-yellow" onclick="instanceAction('restart')">Restart</button>`
-      : `<button class="btn btn-green" onclick="instanceAction('start')">Start</button>`}
-    <button class="btn btn-red" onclick="instanceAction('delete')">Delete</button>`;
+function renderActions(i) {
+  const el = document.getElementById("actions"); if (!el || !i) return;
+  const r = i.status === "running";
+  el.innerHTML = `${r
+    ?`<button class="btn btn-warn" onclick="doAction('stop')">Stop</button><button class="btn btn-warn" onclick="doAction('restart')">Restart</button>`
+    :`<button class="btn btn-green" onclick="doAction('start')">Start</button>`}
+    <button class="btn btn-red" onclick="doAction('delete')">Delete</button>`;
 }
-
-async function instanceAction(action) {
-  const name = currentInstance;
-  if (!name) return;
-
-  if (action === "delete") {
-    const confirmed = prompt(`Type "delete ${name}" to confirm:`);
-    if (confirmed !== `delete ${name}`) return;
-    await api("POST", `/ui/instances/${encodeURIComponent(name)}/delete`, { confirm: `delete ${name}` });
-    currentInstance = null;
-    document.getElementById("mainArea").innerHTML = '<div class="no-selection">Instance deleted</div>';
+async function doAction(a) {
+  if (!cur) return;
+  if (a === "delete") {
+    const c = prompt(`Type "delete ${cur}" to confirm:`);
+    if (c !== `delete ${cur}`) return;
+    const r = await api("POST", `/ui/instances/${encodeURIComponent(cur)}/delete`, { confirm: c });
+    if (r.error) { toast(r.error, false); return; }
+    toast(`${cur} deleted`); cur = null;
+    document.getElementById("mainArea").innerHTML = '<div class="no-sel">Instance deleted</div>';
     return;
   }
-
-  if (action === "restart") {
-    await api("POST", `/restart/${encodeURIComponent(name)}`);
-  } else {
-    await api("POST", `/ui/${action}/${encodeURIComponent(name)}`);
-  }
+  const ep = `/ui/${a}/${encodeURIComponent(cur)}`;
+  const r = await api("POST", ep);
+  if (r.error) toast(r.error, false);
+  else toast(`${cur} ${a}ed`);
 }
 
-// ── Chat ─────────────────────────────────────────────────
-
-function renderMessages() {
-  const el = document.getElementById("messages");
-  if (!el) return;
-  const msgs = messagesByInstance[currentInstance] || [];
-  if (msgs.length === 0) {
-    el.innerHTML = '<div class="msg-empty">No messages yet</div>';
-    return;
-  }
-  el.innerHTML = msgs.map(m => {
-    const isUser = m.sender === "web-user" || (!m.sender.startsWith("agend") && m.sender !== currentInstance && m.sender !== "general");
-    const cls = isUser ? "inbound" : "outbound";
-    const senderCls = isUser ? "user" : "agent";
-    const time = m.ts ? new Date(m.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
-    return `<div class="msg ${cls}">
-      <div class="sender ${senderCls}">${esc(m.sender)}<span class="time">${time}</span></div>
-      ${esc(m.text)}
-    </div>`;
+function renderMsgs() {
+  const el = document.getElementById("messages"); if (!el) return;
+  const m = msgs[cur] || [];
+  if (!m.length) { el.innerHTML = '<div class="msg-empty">No messages yet</div>'; return; }
+  el.innerHTML = m.map(x => {
+    const u = x.sender==="web-user"||(!x.sender.startsWith("agend")&&x.sender!==cur&&x.sender!=="general");
+    const t = x.ts ? new Date(x.ts).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}) : "";
+    return `<div class="msg ${u?"inbound":"outbound"}"><div class="sender ${u?"user":"agent"}">${esc(x.sender)}<span class="time">${t}</span></div>${esc(x.text)}</div>`;
   }).join("");
   el.scrollTop = el.scrollHeight;
 }
-
-async function sendMessage() {
-  const input = document.getElementById("msgInput");
-  const text = input.value.trim();
-  if (!text || !currentInstance) return;
-  input.value = "";
-  await api("POST", "/ui/send", { instance: currentInstance, message: text });
+async function sendMsg() {
+  const inp = document.getElementById("msgIn"), txt = inp.value.trim();
+  if (!txt||!cur) return; inp.value = "";
+  await api("POST", "/ui/send", { instance: cur, message: txt });
 }
 
-// ── Detail ───────────────────────────────────────────────
-
 async function loadDetail() {
-  const el = document.getElementById("detailView");
-  if (!el || !currentInstance) return;
+  const el = document.getElementById("detailView"); if (!el||!cur) return;
   try {
-    const data = await api("GET", `/ui/instance/${encodeURIComponent(currentInstance)}`);
-    const sl = data.statusline || {};
-    const cost = sl.cost?.total_cost_usd ?? 0;
-    const ctx = sl.context_window?.used_percentage ?? 0;
-    const model = sl.model?.display_name ?? "—";
-    const rl5h = sl.rate_limits?.five_hour?.used_percentage ?? 0;
-    const rl7d = sl.rate_limits?.seven_day?.used_percentage ?? 0;
-
-    let html = `
-      <div class="detail-section">
-        <h3>Instance</h3>
-        <div class="detail-row"><span class="detail-label">Name</span><span class="detail-value">${esc(data.name)}</span></div>
-        <div class="detail-row"><span class="detail-label">Status</span><span class="detail-value">${esc(data.status)}</span></div>
-        <div class="detail-row"><span class="detail-label">Display Name</span><span class="detail-value">${esc(data.display_name || "—")}</span></div>
-        <div class="detail-row"><span class="detail-label">Description</span><span class="detail-value">${esc(data.description || "—")}</span></div>
-        <div class="detail-row"><span class="detail-label">Directory</span><span class="detail-value">${esc(data.working_directory)}</span></div>
-      </div>
-      <div class="detail-section">
-        <h3>Runtime</h3>
-        <div class="detail-row"><span class="detail-label">Model</span><span class="detail-value">${esc(model)}</span></div>
-        <div class="detail-row"><span class="detail-label">Cost</span><span class="detail-value">$${cost.toFixed(2)}</span></div>
-        <div class="detail-row"><span class="detail-label">Context</span><span class="detail-value">${Math.round(ctx)}%</span></div>
-        <div class="detail-row"><span class="detail-label">Rate Limit (5h)</span><span class="detail-value">${Math.round(rl5h)}%</span></div>
-        <div class="detail-row"><span class="detail-label">Rate Limit (7d)</span><span class="detail-value">${Math.round(rl7d)}%</span></div>
-      </div>`;
-
-    if (data.recent_activity?.length) {
-      html += `<div class="detail-section"><h3>Recent Activity (1h)</h3>`;
-      for (const a of data.recent_activity) {
-        const t = a.timestamp ? a.timestamp.slice(11, 16) : "";
-        html += `<div class="activity-item"><span class="act-time">${t}</span><span class="act-event">${esc(a.event)}</span>${esc(a.summary || "")}</div>`;
-      }
-      html += `</div>`;
+    const d = await api("GET", `/ui/instance/${encodeURIComponent(cur)}`);
+    const sl = d.statusline||{}, cost=sl.cost?.total_cost_usd??0, ctx=sl.context_window?.used_percentage??0;
+    const model=sl.model?.display_name??"--", rl5=sl.rate_limits?.five_hour?.used_percentage??0, rl7=sl.rate_limits?.seven_day?.used_percentage??0;
+    let h = `<div class="card"><h3>Instance</h3>
+      <div class="detail-row"><span class="detail-label">Name</span><span>${esc(d.name)}</span></div>
+      <div class="detail-row"><span class="detail-label">Status</span><span>${esc(d.status)}</span></div>
+      <div class="detail-row"><span class="detail-label">Display</span><span>${esc(d.display_name||"--")}</span></div>
+      <div class="detail-row"><span class="detail-label">Description</span><span>${esc(d.description||"--")}</span></div>
+      <div class="detail-row"><span class="detail-label">Directory</span><span style="font-family:'JetBrains Mono',monospace;font-size:12px">${esc(d.working_directory)}</span></div></div>
+      <div class="card"><h3>Runtime</h3>
+      <div class="detail-row"><span class="detail-label">Model</span><span>${esc(model)}</span></div>
+      <div class="detail-row"><span class="detail-label">Cost</span><span>$${cost.toFixed(2)}</span></div>
+      <div class="detail-row"><span class="detail-label">Context</span><span>${Math.round(ctx)}%</span></div>
+      <div class="detail-row"><span class="detail-label">Rate 5h</span><span>${Math.round(rl5)}%</span></div>
+      <div class="detail-row"><span class="detail-label">Rate 7d</span><span>${Math.round(rl7)}%</span></div></div>`;
+    if (d.recent_activity?.length) {
+      h += `<div class="card"><h3>Recent Activity</h3>`;
+      for (const a of d.recent_activity) { const t=a.timestamp?a.timestamp.slice(11,16):""; h+=`<div class="activity-item"><span class="act-time">${t}</span><span class="act-event">${esc(a.event)}</span>${esc(a.summary||"")}</div>`; }
+      h += `</div>`;
     }
-    el.innerHTML = html;
-  } catch (err) {
-    el.innerHTML = `<div style="color:#f85149;padding:24px;">Failed to load detail</div>`;
-  }
+    el.innerHTML = h;
+  } catch { el.innerHTML = `<div style="color:var(--error);padding:24px">Failed to load</div>`; }
+}
+
+async function loadTasks() {
+  const el = document.getElementById("taskView"); if (!el) return;
+  try {
+    const d = await api("GET", "/ui/tasks");
+    const tasks = d.tasks || [];
+    let h = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <span style="font-weight:600;font-size:14px">${tasks.length} tasks</span>
+      <button class="btn btn-accent" onclick="showCreateTask()">+ New Task</button></div>`;
+    if (!tasks.length) h += `<div class="msg-empty">No tasks</div>`;
+    else for (const t of tasks) {
+      h += `<div class="task-item">
+        <span class="task-status ${t.status}">${t.status}</span>
+        <span class="task-title">${esc(t.title)}</span>
+        <span class="task-assignee">${esc(t.assignee||"")}</span>
+        <div class="task-actions">
+          ${t.status==="open"?`<button class="btn btn-ghost" onclick="taskAct('${t.id}','claim')">Claim</button>`:""}
+          ${t.status==="claimed"?`<button class="btn btn-ghost" onclick="taskAct('${t.id}','complete')">Done</button>`:""}
+        </div></div>`;
+    }
+    el.innerHTML = h;
+  } catch { el.innerHTML = `<div style="color:var(--error);padding:24px">Failed to load</div>`; }
+}
+async function taskAct(id, action) {
+  const r = await api("POST", `/ui/tasks/${id}`, { action });
+  if (r.error) toast(r.error, false); else { toast(`Task ${action}ed`); loadTasks(); }
+}
+
+function showCreateInstance() {
+  const ov = document.createElement("div"); ov.className = "form-overlay";
+  ov.innerHTML = `<div class="form-card"><h2>Create Instance</h2>
+    <div class="form-field"><label>Directory *</label><input id="ci-dir" placeholder="/path/to/project"></div>
+    <div class="form-field"><label>Topic Name</label><input id="ci-topic" placeholder="Auto from directory name"></div>
+    <div class="form-field"><label>Description</label><input id="ci-desc" placeholder="What this instance does"></div>
+    <div class="form-field"><label>Branch (git worktree)</label><input id="ci-branch" placeholder="e.g. feature-x"></div>
+    <div class="form-actions"><button class="btn btn-ghost" onclick="this.closest('.form-overlay').remove()">Cancel</button>
+    <button class="btn btn-accent" id="ci-go">Create</button></div></div>`;
+  document.body.appendChild(ov);
+  ov.addEventListener("click", e => { if (e.target === ov) ov.remove(); });
+  ov.querySelector("#ci-go").addEventListener("click", async () => {
+    const dir = document.getElementById("ci-dir").value.trim();
+    if (!dir) { toast("Directory required", false); return; }
+    const btn = ov.querySelector("#ci-go"); btn.disabled = true; btn.textContent = "Creating...";
+    const body = { directory: dir };
+    const v = id => document.getElementById(id).value.trim();
+    if (v("ci-topic")) body.topic_name = v("ci-topic");
+    if (v("ci-desc")) body.description = v("ci-desc");
+    if (v("ci-branch")) body.branch = v("ci-branch");
+    const r = await api("POST", "/ui/instances", body);
+    if (r.error) { toast(r.error, false); btn.disabled = false; btn.textContent = "Create"; }
+    else { toast("Instance created"); ov.remove(); }
+  });
+}
+
+function showCreateTask() {
+  const ov = document.createElement("div"); ov.className = "form-overlay";
+  const opts = instances.map(i => `<option value="${esc(i.name)}">${esc(i.name)}</option>`).join("");
+  ov.innerHTML = `<div class="form-card"><h2>Create Task</h2>
+    <div class="form-field"><label>Title *</label><input id="ct-title" placeholder="Task title"></div>
+    <div class="form-field"><label>Description</label><input id="ct-desc" placeholder="Details"></div>
+    <div class="form-field"><label>Priority</label><select id="ct-pri"><option value="normal">Normal</option><option value="low">Low</option><option value="high">High</option><option value="urgent">Urgent</option></select></div>
+    <div class="form-field"><label>Assignee</label><select id="ct-assign"><option value="">Unassigned</option>${opts}</select></div>
+    <div class="form-actions"><button class="btn btn-ghost" onclick="this.closest('.form-overlay').remove()">Cancel</button>
+    <button class="btn btn-accent" id="ct-go">Create</button></div></div>`;
+  document.body.appendChild(ov);
+  ov.addEventListener("click", e => { if (e.target === ov) ov.remove(); });
+  ov.querySelector("#ct-go").addEventListener("click", async () => {
+    const title = document.getElementById("ct-title").value.trim();
+    if (!title) { toast("Title required", false); return; }
+    const btn = ov.querySelector("#ct-go"); btn.disabled = true; btn.textContent = "Creating...";
+    const body = { title, priority: document.getElementById("ct-pri").value };
+    const desc = document.getElementById("ct-desc").value.trim(); if (desc) body.description = desc;
+    const asgn = document.getElementById("ct-assign").value; if (asgn) body.assignee = asgn;
+    const r = await api("POST", "/ui/tasks", body);
+    if (r.error) { toast(r.error, false); btn.disabled = false; btn.textContent = "Create"; }
+    else { toast("Task created"); ov.remove(); loadTasks(); }
+  });
 }
 </script>
 </body>

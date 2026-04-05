@@ -33,6 +33,17 @@ export interface WebApiContext {
   removeInstance(name: string): Promise<void>;
   lastInboundUser: Map<string, string>;
   saveFleetConfig(): void;
+  readonly lifecycle: { handleCreate(args: Record<string, unknown>, respond: (result: unknown, error?: string) => void): Promise<void> };
+  connectIpcToInstance(name: string): Promise<void>;
+  readonly scheduler: {
+    db: {
+      listTasks(opts?: { assignee?: string; status?: string }): unknown[];
+      createTask(params: { title: string; description?: string; priority?: string; assignee?: string; created_by: string }): unknown;
+      updateTask(id: string, params: Record<string, unknown>): unknown;
+      claimTask(id: string, assignee: string): unknown;
+      completeTask(id: string, result?: string): unknown;
+    };
+  } | null;
 }
 
 /** Parse JSON body from request. */
@@ -228,6 +239,114 @@ export function handleWebRequest(
       statusline,
       recent_activity: instanceActivity.slice(0, 20),
     });
+    return true;
+  }
+
+  // ── Restart (with auth — unifies /restart/:name) ─────
+
+  const restartMatch = path.match(/^\/ui\/restart\/(.+)$/);
+  if (method === "POST" && restartMatch) {
+    const name = decodeURIComponent(restartMatch[1]);
+    const config = ctx.fleetConfig?.instances[name];
+    if (!config) {
+      json(res, 404, { error: `Instance not found: ${name}` });
+      return true;
+    }
+    (async () => {
+      try {
+        await ctx.stopInstance(name);
+        const topicMode = ctx.fleetConfig?.channel?.mode === "topic";
+        await ctx.startInstance(name, config, topicMode ?? false);
+        ctx.emitSseEvent("status", ctx.getUiStatus());
+        json(res, 200, { restarted: name });
+      } catch (err) {
+        json(res, 500, { error: (err as Error).message });
+      }
+    })();
+    return true;
+  }
+
+  // ── Create instance ────────────────────────────────────
+
+  if (method === "POST" && path === "/ui/instances") {
+    (async () => {
+      try {
+        const body = await parseBody(req);
+        let result: unknown = null;
+        let error: string | undefined;
+        await ctx.lifecycle.handleCreate(body, (r, e) => { result = r; error = e; });
+        if (error) {
+          json(res, 400, { error });
+        } else {
+          ctx.emitSseEvent("status", ctx.getUiStatus());
+          json(res, 200, result);
+        }
+      } catch (err) {
+        json(res, 500, { error: (err as Error).message });
+      }
+    })();
+    return true;
+  }
+
+  // ── Task board ─────────────────────────────────────────
+
+  if (method === "GET" && path === "/ui/tasks") {
+    if (!ctx.scheduler) {
+      json(res, 200, { tasks: [] });
+      return true;
+    }
+    const tasks = ctx.scheduler.db.listTasks();
+    json(res, 200, { tasks });
+    return true;
+  }
+
+  if (method === "POST" && path === "/ui/tasks") {
+    if (!ctx.scheduler) {
+      json(res, 500, { error: "Scheduler not initialized" });
+      return true;
+    }
+    (async () => {
+      try {
+        const body = await parseBody(req);
+        const task = ctx.scheduler!.db.createTask({
+          title: body.title as string,
+          description: body.description as string | undefined,
+          priority: body.priority as string | undefined,
+          assignee: body.assignee as string | undefined,
+          created_by: "web-user",
+        });
+        json(res, 200, task);
+      } catch (err) {
+        json(res, 400, { error: (err as Error).message });
+      }
+    })();
+    return true;
+  }
+
+  const taskMatch = path.match(/^\/ui\/tasks\/(.+)$/);
+  if (method === "POST" && taskMatch) {
+    if (!ctx.scheduler) {
+      json(res, 500, { error: "Scheduler not initialized" });
+      return true;
+    }
+    const id = decodeURIComponent(taskMatch[1]);
+    (async () => {
+      try {
+        const body = await parseBody(req);
+        const action = body.action as string;
+        let result: unknown;
+        if (action === "claim") {
+          result = ctx.scheduler!.db.claimTask(id, (body.assignee as string) || "web-user");
+        } else if (action === "complete") {
+          result = ctx.scheduler!.db.completeTask(id, body.result as string | undefined);
+        } else {
+          result = ctx.scheduler!.db.updateTask(id, body);
+        }
+        json(res, 200, result);
+      } catch (err) {
+        json(res, 400, { error: (err as Error).message });
+      }
+    })();
     return true;
   }
 
