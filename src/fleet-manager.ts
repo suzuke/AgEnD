@@ -337,8 +337,8 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       const generalThreadId = generalName ? fleet.instances[generalName]?.topic_id : undefined;
       if (this.adapter && fleet.channel?.group_id) {
         const text = failedNames.length === 0
-          ? `Fleet started. ${started}/${total} instances started.`
-          : `Fleet started. ${started}/${total} instances started. Failed: ${failedNames.join(", ")}`;
+          ? `Fleet ready. ${started}/${total} instances running.`
+          : `Fleet ready. ${started}/${total} instances running. Failed: ${failedNames.join(", ")}`;
         this.adapter.sendText(String(fleet.channel.group_id), text, {
           threadId: generalThreadId != null ? String(generalThreadId) : undefined,
         }).catch(e => this.logger.debug({ err: e }, "Failed to send fleet start notification"));
@@ -1575,8 +1575,8 @@ If you can do it yourself, do it yourself.
       const started = this.daemons.size;
       const failedNames = Object.keys(fleet.instances).filter(n => !this.daemons.has(n));
       const restartText = failedNames.length === 0
-        ? `✅ Graceful restart complete. ${started}/${total} instances started.`
-        : `✅ Graceful restart complete. ${started}/${total} instances started. Failed: ${failedNames.join(", ")}`;
+        ? `Fleet ready. ${started}/${total} instances running.`
+        : `Fleet ready. ${started}/${total} instances running. Failed: ${failedNames.join(", ")}`;
       await this.adapter.sendText(String(groupId), restartText, notifyOpts)
         .catch(e => this.logger.debug({ err: e }, "Failed to post restart completion notification"));
 
