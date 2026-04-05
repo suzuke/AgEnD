@@ -14,7 +14,13 @@ export class TmuxManager {
 
   static async ensureSession(name: string): Promise<void> {
     if (await TmuxManager.sessionExists(name)) return;
-    await exec("tmux", ["new-session", "-d", "-s", name]);
+    try {
+      await exec("tmux", ["new-session", "-d", "-s", name]);
+    } catch (err) {
+      // Handle TOCTOU race: another instance may have created it concurrently
+      if (String(err).includes("duplicate session")) return;
+      throw err;
+    }
   }
 
   static async sessionExists(name: string): Promise<boolean> {
