@@ -1,64 +1,104 @@
-# AgEnD
+<p align="center">
+  <h1 align="center">AgEnD</h1>
+  <p align="center">
+    <strong>Run a fleet of AI coding agents from your phone.</strong>
+  </p>
+  <p align="center">
+    <a href="https://www.npmjs.com/package/@suzuke/agend"><img src="https://img.shields.io/npm/v/@suzuke/agend" alt="npm"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
+    <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js-%3E%3D%2020-green.svg" alt="Node.js >= 20"></a>
+  </p>
+</p>
 
-[![npm](https://img.shields.io/npm/v/@suzuke/agend)](https://www.npmjs.com/package/@suzuke/agend)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Node.js >= 20](https://img.shields.io/badge/Node.js-%3E%3D%2020-green.svg)](https://nodejs.org)
+AgEnD (**Agent Engineering Daemon**) turns your Telegram or Discord into a command center for AI coding agents. One bot, multiple CLI backends, unlimited projects — each running as an independent session with crash recovery and zero babysitting.
 
-**Agent Engineering Daemon** — run a fleet of AI coding agents from your phone.
+<p align="center">
+  <code>You → Telegram/Discord → AgEnD → Fleet of AI Agents → Results back to your phone</code>
+</p>
 
-One Telegram bot, multiple CLI backends (Claude Code, Gemini CLI, Codex, OpenCode, Kiro CLI), unlimited projects. Each Forum Topic is an independent agent session with crash recovery and zero babysitting.
+[繁體中文](README.zh-TW.md) · [Documentation](docs/features.md) · [CLI Reference](docs/cli.md)
 
-[繁體中文](README.zh-TW.md)
+---
 
-> **⚠️** All CLI backends run with `--dangerously-skip-permissions` (or equivalent). See [Security](SECURITY.md).
+## Why AgEnD?
 
-## Problems agend solves
-
-| Without agend | With agend |
+| Without AgEnD | With AgEnD |
 |---|---|
 | Close the terminal, agent goes offline | Runs as a system service — survives reboots |
 | One terminal = one project | One bot, unlimited projects running in parallel |
 | Long-running sessions accumulate stale context | Auto-rotates sessions by max age to stay fresh |
 | No idea what your agents are doing overnight | Daily cost reports + hang detection alerts |
-| Cron tasks disappear when the session ends | Persistent schedules backed by SQLite |
-| Rate limited on one model, everything stops | Auto-failover to backup models |
-| Can't approve tool use from your phone | Inline Telegram buttons with countdown + Always Allow |
 | Agents work in silos, can't coordinate | Peer-to-peer collaboration via MCP tools |
 | Runaway costs from unattended sessions | Per-instance daily spending limits with auto-pause |
 
-## Quick start
+## Feature Highlights
+
+🚀 **Fleet Management** — One bot, N projects. Each Telegram Forum Topic is an isolated agent session.
+
+🔄 **Multi-Backend** — Claude Code, Gemini CLI, Codex, OpenCode, Kiro CLI. Switch or mix freely.
+
+🤝 **Agent Collaboration** — Agents discover, wake, and message each other via MCP tools. A General Topic routes tasks to the right agent using natural language.
+
+📱 **Mobile Control** — Approve tool use, restart sessions, and manage your fleet from Telegram inline buttons.
+
+🛡️ **Autonomous & Safe** — Cost guards, hang detection, model failover, and context rotation keep your fleet running without babysitting.
+
+⏰ **Persistent Schedules** — Cron-based tasks backed by SQLite. Survives restarts.
+
+🎤 **Voice Messages** — Talk to your agents with Groq Whisper transcription.
+
+🔌 **Extensible** — Discord adapter, webhook notifications, health endpoint, external session support via IPC.
+
+## Quick Start
+
+**1. Install**
 
 ```bash
 brew install tmux               # macOS (prerequisite)
-npm install -g @suzuke/agend    # install AgEnD
-agend init                      # interactive setup (choose backend + channel)
-agend fleet start               # launch the fleet
+npm install -g @suzuke/agend
 ```
 
-## Features
+**2. Configure**
 
-- **Fleet mode** — one bot, N projects, each in its own Telegram Forum Topic
-- **Persistent schedules** — cron-based tasks that survive restarts (SQLite-backed)
-- **Context rotation** — auto-restart long-running sessions to keep context fresh (max-age based)
-- **Peer-to-peer collaboration** — agents discover, wake, and message each other via MCP tools
-- **General Topic** — natural language dispatcher that routes tasks to the right agent
-- **Permission relay** — inline Telegram buttons for Allow/Deny with countdown + Always Allow
-- **Voice messages** — Groq Whisper transcription, talk to your agents
-- **Cost guard** — per-instance daily spending limits with auto-pause
-- **Hang detection** — auto-detect stuck sessions, notify with restart buttons
-- **Model failover** — auto-switch to backup model on rate limits
-- **Daily summary** — fleet cost report posted to Telegram
-- **External sessions** — connect local Claude Code to the fleet via IPC
-- **Discord adapter** — use Discord instead of (or alongside) Telegram
-- **Health endpoint** — HTTP API for external monitoring
-- **Webhook notifications** — push events to Slack or custom endpoints
-- **System service** — one command to install as launchd/systemd service
+```bash
+agend init                      # interactive setup — choose backend + channel
+```
 
-## Requirements
+**3. Launch**
 
-- Node.js >= 20
-- tmux
-- One of the supported AI coding CLIs (installed and authenticated):
+```bash
+agend fleet start               # your fleet is live 🎉
+```
+
+That's it. Open Telegram, send a message to your bot, and start coding from your phone.
+
+## How It Works
+
+```
+┌─────────────┐     ┌──────────────┐     ┌─────────────────────────────────┐
+│  You         │────▶│  Telegram /  │────▶│  AgEnD Daemon                   │
+│  (Phone/PC)  │◀────│  Discord     │◀────│                                 │
+└─────────────┘     └──────────────┘     │  ┌───────────┐ ┌───────────┐   │
+                                          │  │ Instance A │ │ Instance B │   │
+                                          │  │ Claude Code│ │ Gemini CLI │   │
+                                          │  │ Project X  │ │ Project Y  │   │
+                                          │  └─────┬─────┘ └─────┬─────┘   │
+                                          │        │   MCP Tools  │         │
+                                          │        └──────────────┘         │
+                                          │  ┌───────────┐                  │
+                                          │  │ General    │ ← routes tasks  │
+                                          │  │ Dispatcher │   to instances   │
+                                          │  └───────────┘                  │
+                                          └─────────────────────────────────┘
+```
+
+1. **You send a message** to your Telegram/Discord bot
+2. **General Topic** interprets natural language and routes to the right agent instance
+3. **Agent instances** run in isolated tmux sessions, each with its own project and CLI backend
+4. **Agents collaborate** peer-to-peer via MCP tools — delegating tasks, sharing context, reporting results
+5. **Results flow back** to your chat. Permission requests arrive as inline buttons.
+
+## Supported Backends
 
 | Backend | Install | Auth |
 |---------|---------|------|
@@ -68,8 +108,15 @@ agend fleet start               # launch the fleet
 | OpenCode | `curl -fsSL https://opencode.ai/install \| bash` | `opencode` (configure provider) |
 | Kiro CLI | `brew install --cask kiro-cli` | `kiro-cli login` (AWS Builder ID) |
 
+## Requirements
+
+- Node.js >= 20
+- tmux
+- One of the supported AI coding CLIs (installed and authenticated)
 - Telegram bot token ([@BotFather](https://t.me/BotFather)) or Discord bot token
 - Groq API key (optional, for voice)
+
+> **⚠️** All CLI backends run with `--dangerously-skip-permissions` (or equivalent). See [Security](SECURITY.md).
 
 ## Documentation
 
@@ -78,7 +125,7 @@ agend fleet start               # launch the fleet
 - [Configuration](docs/configuration.md) — fleet.yaml complete reference
 - [Security](SECURITY.md) — trust model and hardening
 
-## Known limitations
+## Known Limitations
 
 - macOS (launchd) and Linux (systemd) supported; Windows is not
 - Official Telegram plugin in global `enabledPlugins` causes 409 polling conflicts

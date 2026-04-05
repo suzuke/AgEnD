@@ -1,64 +1,104 @@
-# AgEnD
+<p align="center">
+  <h1 align="center">AgEnD</h1>
+  <p align="center">
+    <strong>用手機管理一整個 AI coding agent 團隊。</strong>
+  </p>
+  <p align="center">
+    <a href="https://www.npmjs.com/package/@suzuke/agend"><img src="https://img.shields.io/npm/v/@suzuke/agend" alt="npm"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
+    <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js-%3E%3D%2020-green.svg" alt="Node.js >= 20"></a>
+  </p>
+</p>
 
-[![npm](https://img.shields.io/npm/v/@suzuke/agend)](https://www.npmjs.com/package/@suzuke/agend)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Node.js >= 20](https://img.shields.io/badge/Node.js-%3E%3D%2020-green.svg)](https://nodejs.org)
+AgEnD（**Agent Engineering Daemon**）把你的 Telegram 或 Discord 變成 AI coding agent 的指揮中心。一個 bot，多種 CLI 後端，無限專案 — 每個都是獨立 session，crash 自動恢復，不用顧。
 
-**Agent Engineering Daemon** — 用手機管理一整個 AI coding agent 團隊。
+<p align="center">
+  <code>你 → Telegram/Discord → AgEnD → AI Agent 團隊 → 結果回到你的手機</code>
+</p>
 
-一個 Telegram bot，多種 CLI 後端（Claude Code、Gemini CLI、Codex、OpenCode、Kiro CLI），無限專案。每個 Forum Topic 就是一個獨立的 agent session，crash 自動恢復，不用顧。
+[English](README.md) · [功能文件](docs/features.md) · [CLI 參考](docs/cli.md)
 
-[English](README.md)
+---
 
-> **⚠️** 所有 CLI 後端都以 `--dangerously-skip-permissions`（或等效參數）執行。詳見 [Security](SECURITY.md)。
+## 為什麼用 AgEnD？
 
-## agend 解決什麼問題
-
-| 沒有 agend | 有 agend |
+| 沒有 AgEnD | 有 AgEnD |
 |---|---|
 | 關掉終端機，agent 就斷線 | 系統服務常駐，重開機也不怕 |
 | 一個終端機 = 一個專案 | 一個 bot，無限專案同時跑 |
 | 長時間 session 累積過時 context | 依 max age 自動輪替 session，保持新鮮 |
 | 不知道 agent 半夜在幹嘛 | 每日花費報告 + 卡住偵測通知 |
-| 排程任務隨 session 結束消失 | 持久化排程，SQLite 儲存 |
-| 某個 model 被限速，全部停擺 | 自動切換備用 model |
-| 沒辦法從手機核准工具使用 | Telegram inline 按鈕，倒數計時 + Always Allow |
 | Agent 各做各的，無法協作 | 點對點協作，透過 MCP tools |
 | 無人看管時帳單暴增 | 每個 instance 每日花費上限，自動暫停 |
 
+## 功能亮點
+
+🚀 **Fleet 管理** — 一個 bot、N 個專案。每個 Telegram Forum Topic 就是獨立的 agent session。
+
+🔄 **多後端支援** — Claude Code、Gemini CLI、Codex、OpenCode、Kiro CLI，自由切換或混用。
+
+🤝 **Agent 協作** — Agent 之間透過 MCP tools 互相發現、喚醒、傳訊。General Topic 用自然語言把任務路由到對的 agent。
+
+📱 **手機操控** — 從 Telegram inline 按鈕核准工具使用、重啟 session、管理整個 fleet。
+
+🛡️ **自主又安全** — 花費上限、卡住偵測、model failover、context 輪替，fleet 不用顧也能穩穩跑。
+
+⏰ **持久化排程** — cron 排程任務，SQLite 儲存，重啟不遺失。
+
+🎤 **語音訊息** — 用 Groq Whisper 轉文字，用說的跟 agent 溝通。
+
+🔌 **可擴充** — Discord adapter、webhook 通知、health endpoint、外部 session 透過 IPC 連入。
+
 ## 開始用
+
+**1. 安裝**
 
 ```bash
 brew install tmux               # macOS（前置需求）
-npm install -g @suzuke/agend    # 安裝 AgEnD
-agend init                      # 互動式設定（選 backend + channel）
-agend fleet start               # 啟動 fleet
+npm install -g @suzuke/agend
 ```
 
-## 功能
+**2. 設定**
 
-- **Fleet 模式** — 一個 bot、N 個專案，各自獨立的 Telegram Forum Topic
-- **持久化排程** — cron 排程任務，重啟不遺失（SQLite 儲存）
-- **Context 輪替** — 長時間 session 依 max age 自動重啟，保持 context 新鮮
-- **點對點協作** — agent 之間透過 MCP tools 互相發現、喚醒、傳訊
-- **General Topic** — 自然語言調度器，把任務路由到對的 agent
-- **權限轉發** — Telegram inline 按鈕 Allow/Deny，倒數計時 + Always Allow
-- **語音訊息** — Groq Whisper 轉文字，用說的跟 agent 溝通
-- **花費上限** — 每個 instance 每日限額，超過自動暫停
-- **卡住偵測** — 自動偵測無回應的 session，通知並提供重啟按鈕
-- **Model Failover** — 被限速時自動切換備用 model
-- **每日摘要** — Fleet 花費報告，發到 Telegram
-- **外部 Session** — 本地 Claude Code 透過 IPC 連入 fleet
-- **Discord Adapter** — 用 Discord 取代（或同時使用）Telegram
-- **Health Endpoint** — HTTP API 供外部監控
-- **Webhook 通知** — 推送事件到 Slack 或自訂 endpoint
-- **系統服務** — 一行指令裝成 launchd/systemd 服務
+```bash
+agend init                      # 互動式設定 — 選 backend + channel
+```
 
-## 系統需求
+**3. 啟動**
 
-- Node.js >= 20
-- tmux
-- 以下任一 AI coding CLI（需安裝並完成認證）：
+```bash
+agend fleet start               # fleet 上線了 🎉
+```
+
+就這樣。打開 Telegram，傳訊息給你的 bot，開始用手機寫 code。
+
+## 運作原理
+
+```
+┌─────────────┐     ┌──────────────┐     ┌─────────────────────────────────┐
+│  你          │────▶│  Telegram /  │────▶│  AgEnD Daemon                   │
+│  (手機/電腦) │◀────│  Discord     │◀────│                                 │
+└─────────────┘     └──────────────┘     │  ┌───────────┐ ┌───────────┐   │
+                                          │  │ Instance A │ │ Instance B │   │
+                                          │  │ Claude Code│ │ Gemini CLI │   │
+                                          │  │ 專案 X     │ │ 專案 Y     │   │
+                                          │  └─────┬─────┘ └─────┬─────┘   │
+                                          │        │   MCP Tools  │         │
+                                          │        └──────────────┘         │
+                                          │  ┌───────────┐                  │
+                                          │  │ General    │ ← 路由任務      │
+                                          │  │ Dispatcher │   到各 instance  │
+                                          │  └───────────┘                  │
+                                          └─────────────────────────────────┘
+```
+
+1. **你傳訊息**給 Telegram/Discord bot
+2. **General Topic** 解讀自然語言，路由到對的 agent instance
+3. **Agent instance** 在獨立的 tmux session 跑，各有自己的專案和 CLI 後端
+4. **Agent 之間協作** — 透過 MCP tools 委派任務、分享 context、回報結果
+5. **結果回傳**到你的聊天室。權限請求以 inline 按鈕呈現。
+
+## 支援的後端
 
 | Backend | 安裝 | 認證 |
 |---------|------|------|
@@ -68,8 +108,15 @@ agend fleet start               # 啟動 fleet
 | OpenCode | `curl -fsSL https://opencode.ai/install \| bash` | `opencode`（設定 provider） |
 | Kiro CLI | `brew install --cask kiro-cli` | `kiro-cli login`（AWS Builder ID） |
 
+## 系統需求
+
+- Node.js >= 20
+- tmux
+- 以下任一 AI coding CLI（需安裝並完成認證）
 - Telegram bot token（[@BotFather](https://t.me/BotFather)）或 Discord bot token
 - Groq API key（選用，語音轉文字用）
+
+> **⚠️** 所有 CLI 後端都以 `--dangerously-skip-permissions`（或等效參數）執行。詳見 [Security](SECURITY.md)。
 
 ## 文件
 
