@@ -17,6 +17,25 @@
 ### 修復
 - 最小化的 `claude-settings.json` — 允許列表中僅包含 AgEnD MCP 工具，不再覆蓋使用者全域的權限設定
 
+## [1.12.0] - 2026-04-06
+
+### 新增
+- **Web UI 儀表板** — `agend web` 啟動瀏覽器 fleet 監控，SSE 即時更新 + 整合聊天介面，支援 Telegram 雙向同步
+- **agend quickstart** — 簡化 4 問題設定精靈，取代 `agend init` 作為推薦的新手入口
+- **project_roots 限制** — `create_instance` 驗證工作目錄在設定的 `project_roots` 範圍內
+- **HTML 對話匯出** — `agend export-chat` 匯出 fleet 活動為獨立 HTML，支援日期篩選（`--from`、`--to`）
+- **Mirror Topic** — `mirror_topic_id` 設定，在專屬 topic 觀察跨 instance 通訊
+
+### 修復
+- **平行啟動** — 處理多 instance 同時啟動時的 tmux duplicate session race
+- **.env 優先覆蓋** — `.env` 的值正確覆蓋繼承的 shell 環境變數
+- **Web UI 聊天同步** — Web UI 與 Telegram 之間的雙向訊息同步
+
+### 文件
+- README 大改版：hero section、功能亮點、架構圖、運作原理說明
+- Quick Start 改為使用 `agend quickstart`
+- 全面文件盤點：features.md、cli.md、configuration.md 更新所有 v1.11.0-v1.12.0 功能
+
 ## [1.11.0] - 2026-04-05
 
 ### 新增

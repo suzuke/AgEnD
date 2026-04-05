@@ -93,11 +93,11 @@ You can connect a local Claude Code session to the daemon's channel tools (reply
 ```json
 {
   "mcpServers": {
-    "ccd-channel": {
+    "agend": {
       "command": "node",
       "args": ["path/to/dist/channel/mcp-server.js"],
       "env": {
-        "CCD_SOCKET_PATH": "~/.agend/instances/<name>/channel.sock"
+        "AGEND_SOCKET_PATH": "~/.agend/instances/<name>/channel.sock"
       }
     }
   }
@@ -108,11 +108,11 @@ The daemon automatically isolates external sessions from internal ones using env
 
 | Session type | Identity source | Example |
 |---|---|---|
-| Internal (daemon-managed) | `CCD_INSTANCE_NAME` via tmux env | `ccplugin` |
-| External (custom name) | `CCD_SESSION_NAME` in `.mcp.json` env | `dev` |
+| Internal (daemon-managed) | `AGEND_INSTANCE_NAME` via tmux env | `ccplugin` |
+| External (custom name) | `AGEND_SESSION_NAME` in `.mcp.json` env | `dev` |
 | External (zero-config) | `external-<basename(cwd)>` fallback | `external-myproject` |
 
-Internal sessions get `CCD_INSTANCE_NAME` injected by the daemon into the tmux shell environment. External sessions don't have this, so they fall through to `CCD_SESSION_NAME` (if set) or an auto-generated name based on the working directory. This means the same `.mcp.json` produces different identities for internal vs external sessions — no configuration conflicts.
+Internal sessions get `AGEND_INSTANCE_NAME` injected by the daemon into the tmux shell environment. External sessions don't have this, so they fall through to `AGEND_SESSION_NAME` (if set) or an auto-generated name based on the working directory. This means the same `.mcp.json` produces different identities for internal vs external sessions — no configuration conflicts.
 
 External sessions appear in `list_instances` and can be targeted by `send_to_instance`.
 
@@ -259,3 +259,99 @@ npm install ccd-adapter-slack
 ```
 
 The daemon discovers adapters matching the `ccd-adapter-*` naming convention. Channel types are exported from the package entry point for adapter authors.
+
+## Kiro CLI backend
+
+Backend for AWS Kiro CLI (`backend: kiro-cli`). Supports session resume, MCP config, and models: `auto`, `claude-sonnet-4.5`, `claude-haiku-4.5`. Configure in `fleet.yaml` like any other backend.
+
+## agend quickstart
+
+Simplified 4-question setup wizard for new users. Auto-detects installed backends, auto-discovers Telegram group ID via `getUpdates` polling, and generates a minimal `fleet.yaml` with sensible defaults. Replaces the 9-step `agend init` as the recommended onboarding path.
+
+## Web Dashboard
+
+`agend web` launches a browser-based dashboard with live fleet monitoring via Server-Sent Events (SSE). Includes an integrated chat UI with bidirectional sync to Telegram — messages sent from the Web UI appear in Telegram and vice versa.
+
+## Built-in workflow template
+
+Fleet collaboration workflow is auto-injected via MCP instructions. The `workflow` field in `fleet.yaml` controls this:
+
+- `"builtin"` (default) — standard collaboration workflow
+- `"file:./path.md"` — custom workflow from file
+- `false` — disable workflow injection
+
+## Workflow layering: coordinator vs executor
+
+The General instance receives the full coordinator playbook (choosing collaborators, task sizing, delegation principles, goal & decision management). Other instances get a slimmed executor workflow (communication rules, progress tracking, context protection). This ensures the General instance acts as an intelligent dispatcher while worker instances stay focused.
+
+## Crash-aware snapshot restore
+
+Context snapshots are now written on crash detection, not just on context rotation. The snapshot file persists on disk with an in-memory consumption flag, enabling recovery even after daemon restarts. Agents resume with context after unexpected crashes, not just planned rotations.
+
+## Error monitor hash dedup
+
+The PTY error monitor records the pane content hash at recovery time. If the same error appears on the same screen, it is suppressed to prevent stale re-detection loops. This eliminates false positive error notifications from persistent terminal output.
+
+## Parallel startup
+
+Fleet instances now start in parallel instead of sequentially. Includes handling for tmux duplicate session race conditions that can occur when many instances spawn simultaneously.
+
+## Fleet ready notification
+
+After `fleet start` or `fleet restart`, a "Fleet ready. N/M instances running." message is posted to the General topic. If any instances failed to start, they are listed in the notification.
+
+## create_instance systemPrompt parameter
+
+Agents can pass custom system prompts when creating instances via the `systemPrompt` parameter. Supports inline text. The prompt is injected via MCP instructions alongside the fleet context.
+
+## project_roots enforcement on create_instance
+
+When `project_roots` is configured in `fleet.yaml`, `create_instance` validates that the requested working directory falls under one of the configured roots. Requests for directories outside the boundary are rejected with an error.
+
+## reply_to_text injection
+
+When a user replies to a previous message in Telegram, the quoted text is included in the formatted message delivered to the agent. This gives agents context about what the user is referring to.
+
+## delete_instance team cleanup
+
+When an instance is deleted via `delete_instance`, it is automatically removed from all teams it belongs to. No manual team membership cleanup is needed.
+
+## HTML Chat Export
+
+`agend export-chat` exports fleet activity as a self-contained HTML file. Supports `--from` and `--to` date filters and `-o` for output path. The exported file includes all messages, tool calls, and cross-instance communications in a readable chat format.
+
+## Mirror Topic
+
+Configure `mirror_topic_id` in `fleet.yaml` to designate a Telegram topic for observing cross-instance communication. All `send_to_instance` messages are mirrored to this topic in real time. This is a daemon-level hook with zero changes to agent behavior — agents don't know they're being observed.
+
+## Codex session resume
+
+OpenAI Codex backend supports session resume. When a session-id file exists, the backend uses `codex resume <session-id>` instead of starting fresh. Also detects "You've hit your usage limit" as a pause-triggering error.
+
+## Rate limit failover cooldown
+
+A 5-minute cooldown prevents repeated model failover triggering. After a failover occurs, subsequent rate limit errors within the cooldown window are suppressed. This prevents cascading failovers when error text persists in the terminal buffer.
+
+## CLI UX improvements
+
+- `agend fleet restart <name>` — restart a specific instance instead of the entire fleet
+- `agend attach` — fuzzy match with interactive numbered menu when ambiguous
+- `agend logs` — standalone log viewer with ANSI stripping, `-n/--lines` and `-f/--follow` options
+
+## .env priority override
+
+Values in `~/.agend/.env` now properly override inherited shell environment variables. This ensures token isolation — a bot token set in `.env` takes precedence over any `AGEND_BOT_TOKEN` that might exist in the shell environment.
+
+## Backend-aware General instructions
+
+When auto-creating the General topic instance, AgEnD writes the correct instruction file based on the configured backend:
+
+- Claude Code → `CLAUDE.md`
+- Codex → `AGENTS.md`
+- Gemini CLI → `GEMINI.md`
+- Kiro CLI → `.kiro/steering/project.md`
+- OpenCode → uses MCP instructions directly
+
+## Builtin text standardization
+
+All system-generated text (schedule notifications, voice message labels, general instructions, fleet notifications) is now in English. Previously some messages were in Chinese.

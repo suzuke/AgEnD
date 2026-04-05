@@ -48,11 +48,12 @@ health_port: 19280
 
 | 欄位 | 型別 | 預設 | 說明 |
 |------|------|------|------|
-| `project_roots` | string[] | `[]` | 專案目錄列表（供 topic 自動綁定瀏覽） |
+| `project_roots` | string[] | `[]` | 顯示在 topic 自動綁定瀏覽器中的目錄。同時限制 `create_instance` — 工作目錄必須在設定的 root 下 |
 | `channel` | object | **必填** | 通訊平台設定 |
 | `defaults` | object | `{}` | 所有 instance 的預設設定 |
 | `instances` | object | **必填** | Instance 定義（key = instance 名稱） |
 | `teams` | object | `{}` | 具名 instance 群組，用於精準廣播 |
+| `workflow` | string \| false | `"builtin"` | Fleet 協作工作流程模板。`"builtin"` = 標準工作流程，`"file:./path.md"` = 自訂，`false` = 停用 |
 | `health_port` | number | `19280` | HTTP 健康檢查/API 伺服器埠 |
 
 ---
@@ -66,6 +67,7 @@ health_port: 19280
 | `bot_token_env` | string | **必填** | 存放 bot token 的環境變數名稱 |
 | `group_id` | number | — | Telegram 群組 ID（負數）或 Discord guild ID |
 | `access` | object | **必填** | 存取控制 |
+| `mirror_topic_id` | number \| string | — | 鏡像跨 instance 通訊的 Telegram topic ID。所有 `send_to_instance` 訊息都會出現在此 |
 | `options` | object | — | 平台特定選項（Discord：`category_name`、`general_channel_id`） |
 
 ### channel.access
@@ -153,6 +155,8 @@ teams:
 
 使用 `broadcast(team: "backend-squad", message: "...")` 向所有成員廣播。
 
+> **注意：** 刪除 instance 時，該 instance 會自動從所有 team 中移除。
+
 ---
 
 ## instances.\<name\>
@@ -166,7 +170,7 @@ teams:
 | `general_topic` | boolean | `false` | 標記為 General Topic（接收未路由的訊息） |
 | `backend` | string | `"claude-code"` | CLI backend：`claude-code`、`codex`、`gemini-cli`、`opencode`、`kiro-cli` |
 | `model` | string | — | 模型。Claude：`sonnet`、`opus`、`haiku`、`opusplan`。Codex：`gpt-4o`。Gemini：`gemini-2.5-pro`。Kiro：`auto`、`claude-sonnet-4.5`、`claude-haiku-4.5` |
-| `model_failover` | string[] | — | 被限速時的備用模型（例：`["opus", "sonnet"]`） |
+| `model_failover` | string[] | — | 被限速時的備用模型（例：`["opus", "sonnet"]`）。5 分鐘冷卻期，防止同一時間窗口內重複 failover |
 | `tool_set` | string | `"full"` | MCP tool 設定：`full`（全部）、`standard`（10 個）、`minimal`（4 個） |
 | `systemPrompt` | string | — | 自訂指令，透過 MCP server instructions 注入。內嵌字串或 `file:./path.md` 從外部檔案載入（路徑相對於 `working_directory`）。不會修改 CLI 的內建 system prompt。範例：`systemPrompt: "file:./prompts/role.md"` |
 | `skipPermissions` | boolean | `true` | 跳過 CLI 權限檢查。設 `false` 啟用 |
@@ -223,6 +227,20 @@ MCP server 將這些組合成一個 `instructions` 字串，CLI 透過 MCP proto
 - 專案的 instruction 檔案（CLAUDE.md、AGENTS.md、GEMINI.md）**不受影響**
 - 所有 backend（Claude Code、Codex、Gemini CLI、OpenCode、Kiro CLI）使用相同的注入路徑
 
+### 已知限制：OpenCode MCP instructions
+
+OpenCode（截至 v1.3.10）**不會**讀取 MCP server 的 `instructions` 欄位。它能正確載入 MCP 工具，但 fleet context（身分、訊息格式、協作規則、workflow 模板）不會注入到 OpenCode instance 的 system prompt。這表示 OpenCode instance：
+
+- 擁有所有 fleet MCP 工具（reply、send_to_instance 等）
+- **不會**自動知道自己是 fleet instance 或如何使用 fleet 訊息格式
+- 可能不會遵循協作規則或 workflow 模板
+
+這是上游的限制。一旦 OpenCode 支援 MCP instructions，不需要修改 AgEnD — 現有機制會自動生效。
+
+### 已知限制：Kiro CLI MCP instructions（未驗證）
+
+Kiro CLI（截至 v1.29.2）**尚未驗證**是否讀取 MCP server 的 `instructions` 欄位。如果不支援，會有與 OpenCode 相同的限制：fleet context 不會被注入。Kiro CLI 支援 `.kiro/steering/` 檔案作為 context 注入方式，但 AgEnD 對所有 backend 使用統一的 MCP instructions 路徑。
+
 ### Session snapshot（context rotation 接續）
 
 Context rotation 時，daemon 將前一個 session 的 snapshot（近期訊息、tool 活動、context 用量）儲存到 `rotation-state.json`。下次啟動時，snapshot 以 `[system:session-snapshot]` 前綴作為**第一則 inbound 訊息**送入 — 不再嵌入 system prompt。
@@ -251,6 +269,8 @@ fleet.yaml 的 `systemPrompt` 欄位仍然有效：
 AGEND_BOT_TOKEN=123456789:AAH...
 GROQ_API_KEY=gsk_...          # 選用，語音轉文字
 ```
+
+`~/.agend/.env` 的值優先於繼承的 shell 環境變數。這確保 `.env` 中設定的密鑰不會被 shell profile 中的變數意外覆蓋。
 
 ---
 

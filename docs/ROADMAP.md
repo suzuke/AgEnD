@@ -1,6 +1,6 @@
 # AgEnD Roadmap
 
-> Last updated: 2026-04-03 (v1.9.1)
+> Last updated: 2026-04-06 (v1.12.0)
 > Produced by multi-agent consensus: Claude Code, Codex, Gemini CLI, OpenCode, Kiro CLI
 
 ## Completed (v1.0–v1.3)
@@ -18,7 +18,7 @@
 - [x] IPC socket hardening (umask TOCTOU fix)
 - [x] Platform-agnostic core (all Telegram/Discord specifics in adapters)
 
-## Completed (v1.4–v1.8)
+## Completed (v1.4–v1.12)
 
 - [x] Shared Decisions — SQLite-backed cross-instance knowledge sharing (fleet/project scope)
 - [x] Task Board — task tracking with dependencies, priority, claim/done lifecycle
@@ -47,16 +47,23 @@
 - [x] Auto-create `working_directory` — omit from fleet.yaml to use `~/.agend/workspaces/<name>`
 - [x] `create_instance` directory optional — auto-workspace on omit
 - [x] Cross-instance notification improvements — reduced noise, `sender → receiver: summary` format, General Topic filter
+- [x] MCP instructions injection — fleet context via MCP server instructions instead of CLI flags (v1.9.0)
+- [x] Kiro CLI backend — AWS Kiro CLI support with session resume and MCP config (v1.11.0)
+- [x] Built-in workflow template — coordinator/executor layering via MCP instructions (v1.11.0)
+- [x] Crash-aware snapshot restore — snapshots on crash, persistent across daemon restarts (v1.11.0)
+- [x] Fleet ready notifications — "N/M instances running" posted to General topic (v1.11.0)
+- [x] E2E test framework — 79+ tests in Tart VMs (v1.11.0)
+- [x] Web UI dashboard — live SSE monitoring with integrated chat (v1.12.0)
+- [x] agend quickstart — simplified 4-question onboarding wizard (v1.12.0)
+- [x] HTML Chat Export — `agend export-chat` with date filtering (v1.12.0)
+- [x] Mirror Topic — cross-instance communication visibility via dedicated topic (v1.12.0)
+- [x] project_roots enforcement — create_instance directory boundary validation (v1.12.0)
 
 ---
 
-## Next Up: Mirror Topics & Observability
+## Next Up: Observability
 
-**Goal:** Make cross-instance communication visible without changing agent behavior.
-
-### Mirror topics
-- Observe cross-instance communication in a dedicated topic
-- Zero-change to agent behavior — daemon-level hook on send_to_instance
+**Goal:** Make fleet operations visible without changing agent behavior.
 
 ---
 
@@ -78,7 +85,7 @@ Extend the existing health server into a full fleet API:
 - [x] Activity Log with cost tracking (SQLite)
 - [x] Web UI with Agent Board, Network Graph, Replay
 - [ ] Cost trend chart per instance (Chart.js)
-- [ ] Real-time updates via SSE or WebSocket
+- [x] Real-time updates via SSE
 
 ### ~~1.3 Task timeline & error viewer~~ → Partially done
 - [x] Activity Log covers task dispatch/completion
@@ -140,7 +147,7 @@ Extend the existing health server into a full fleet API:
 
 ### 4.2 More backends
 - **Aider** (~50-80 lines) — most popular open-source coding agent
-- **Kiro** (AWS) — when CLI mode stabilizes
+- ~~**Kiro** (AWS)~~ — done (v1.11.0)
 - **Custom CLI** — document how to implement CliBackend for any tool
 
 ### 4.3 Smart backend routing

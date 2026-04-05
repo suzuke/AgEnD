@@ -51,11 +51,12 @@ health_port: 19280
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `project_roots` | string[] | `[]` | Directories shown in topic auto-bind browser |
+| `project_roots` | string[] | `[]` | Directories shown in topic auto-bind browser. Also restricts `create_instance` — working directories must be under a configured root |
 | `channel` | object | **required** | Messaging platform configuration |
 | `defaults` | object | `{}` | Default settings inherited by all instances |
 | `instances` | object | **required** | Instance definitions (key = instance name) |
 | `teams` | object | `{}` | Named instance groups for targeted broadcasting |
+| `workflow` | string \| false | `"builtin"` | Fleet collaboration workflow template. `"builtin"` = standard workflow, `"file:./path.md"` = custom, `false` = disabled |
 | `health_port` | number | `19280` | HTTP health/API server port |
 
 ---
@@ -69,6 +70,7 @@ health_port: 19280
 | `bot_token_env` | string | **required** | Environment variable name holding the bot token |
 | `group_id` | number | — | Telegram group ID (negative) or Discord guild ID |
 | `access` | object | **required** | Access control settings |
+| `mirror_topic_id` | number \| string | — | Telegram topic ID for mirroring cross-instance communication. All `send_to_instance` messages appear here |
 | `options` | object | — | Platform-specific options (Discord: `category_name`, `general_channel_id`) |
 
 ### channel.access
@@ -156,6 +158,8 @@ teams:
 
 Use `broadcast(team: "backend-squad", message: "...")` to send to all members.
 
+> **Note:** When an instance is deleted, it is automatically removed from all teams.
+
 ---
 
 ## instances.\<name\>
@@ -169,7 +173,7 @@ Use `broadcast(team: "backend-squad", message: "...")` to send to all members.
 | `general_topic` | boolean | `false` | Mark as General Topic (receives unrouted messages) |
 | `backend` | string | `"claude-code"` | CLI backend: `claude-code`, `codex`, `gemini-cli`, `opencode`, `kiro-cli` |
 | `model` | string | — | Model alias. Claude: `sonnet`, `opus`, `haiku`, `opusplan`, `best`, `sonnet[1m]`, `opus[1m]`. Codex: `gpt-4o`, `o3`. Gemini: `gemini-2.5-pro`. Kiro: `auto`, `claude-sonnet-4.5`, `claude-sonnet-4`, `claude-haiku-4.5` |
-| `model_failover` | string[] | — | Fallback models when rate-limited (e.g. `["opus", "sonnet"]`) |
+| `model_failover` | string[] | — | Fallback models when rate-limited (e.g. `["opus", "sonnet"]`). A 5-minute cooldown prevents repeated failover within the same window |
 | `tool_set` | string | `"full"` | MCP tool profile: `full` (all), `standard` (10), `minimal` (4) |
 | `systemPrompt` | string | — | Custom instructions injected via MCP server instructions. Inline string or `file:./path.md` to load from an external file (path relative to `working_directory`). Does not modify the CLI's built-in system prompt. Example: `systemPrompt: "file:./prompts/role.md"` |
 | `skipPermissions` | boolean | `true` | Skip CLI permission checks (`--dangerously-skip-permissions`). Set `false` to enable |
@@ -268,6 +272,8 @@ Located at `~/.agend/.env`:
 AGEND_BOT_TOKEN=123456789:AAH...
 GROQ_API_KEY=gsk_...          # optional, for voice transcription
 ```
+
+Values in `~/.agend/.env` take priority over inherited shell environment variables. This ensures secrets set in `.env` are not accidentally overridden by variables in the shell profile.
 
 ---
 

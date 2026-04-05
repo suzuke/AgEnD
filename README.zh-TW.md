@@ -51,6 +51,8 @@ AgEnD（**Agent Engineering Daemon**）把你的 Telegram 或 Discord 變成 AI 
 
 🪞 **Mirror Topic** — 跨 instance 可見性。從另一個 topic 即時觀看其他 agent 的工作。
 
+🖥️ **Web Dashboard** — 瀏覽器即時 fleet 監控，SSE 更新 + 整合聊天介面。
+
 🔌 **可擴充** — Discord adapter、webhook 通知、health endpoint、外部 session 透過 IPC 連入。
 
 ## 開始用

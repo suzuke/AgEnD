@@ -17,6 +17,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 - Minimal `claude-settings.json` — only CCD MCP tools in allow list, no longer overrides user's global permission settings
 
+## [1.12.0] - 2026-04-06
+
+### Added
+- **Web UI dashboard** — `agend web` launches browser-based fleet monitoring with live SSE updates and integrated chat UI with bidirectional Telegram sync
+- **agend quickstart** — simplified 4-question setup wizard replacing `agend init` as the recommended onboarding path
+- **project_roots enforcement** — `create_instance` validates working directory is under configured `project_roots` boundary
+- **HTML Chat Export** — `agend export-chat` exports fleet activity as self-contained HTML with date filtering (`--from`, `--to`)
+- **Mirror Topic** — `mirror_topic_id` config for observing cross-instance communication in a dedicated topic
+
+### Fixed
+- **Parallel startup** — handle tmux duplicate session race when spawning many instances simultaneously
+- **.env priority override** — `.env` file values now properly override inherited shell environment variables
+- **Web UI chat sync** — bidirectional message sync between Web UI and Telegram
+
+### Documentation
+- README revamped with hero section, feature highlights, architecture diagram, and "How it works" flow
+- Quick Start updated to use `agend quickstart` command
+- Full documentation audit: features.md, cli.md, configuration.md updated with all v1.11.0-v1.12.0 features
+
 ## [1.11.0] - 2026-04-05
 
 ### Added

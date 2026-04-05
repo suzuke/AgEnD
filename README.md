@@ -51,6 +51,8 @@ AgEnD (**Agent Engineering Daemon**) turns your Telegram or Discord into a comma
 
 🪞 **Mirror Topic** — Cross-instance visibility. Watch another agent's work in real time from a separate topic.
 
+🖥️ **Web Dashboard** — Live fleet monitoring in the browser with SSE updates and integrated chat UI.
+
 🔌 **Extensible** — Discord adapter, webhook notifications, health endpoint, external session support via IPC.
 
 ## Quick Start
