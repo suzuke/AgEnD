@@ -306,12 +306,41 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       this.logger.info("Scheduler initialized");
     }
 
+    // Parallel startup with concurrency limit.
+    // Instances sharing the same working_directory are serialized to avoid
+    // config file races (e.g. opencode.json, SQLite migrations).
     const instanceEntries = Object.entries(fleet.instances);
+    const CONCURRENCY = 3;
+    const byWorkDir = new Map<string, [string, typeof fleet.instances[string]][]>();
     for (const [name, config] of instanceEntries) {
-      await this.startInstance(name, config, topicMode).catch(err =>
-        this.logger.error({ err, name }, "Failed to start instance")
-      );
+      const dir = config.working_directory;
+      if (!byWorkDir.has(dir)) byWorkDir.set(dir, []);
+      byWorkDir.get(dir)!.push([name, config]);
     }
+    const groups = [...byWorkDir.values()];
+    let running = 0;
+    let idx = 0;
+    await new Promise<void>(resolve => {
+      if (groups.length === 0) { resolve(); return; }
+      const startNext = () => {
+        while (running < CONCURRENCY && idx < groups.length) {
+          const group = groups[idx++];
+          running++;
+          (async () => {
+            for (const [name, config] of group) {
+              await this.startInstance(name, config, topicMode).catch(err =>
+                this.logger.error({ err, name }, "Failed to start instance")
+              );
+            }
+          })().finally(() => {
+            running--;
+            if (idx >= groups.length && running === 0) resolve();
+            else startNext();
+          });
+        }
+      };
+      startNext();
+    });
 
     if (topicMode && fleet.channel) {
 

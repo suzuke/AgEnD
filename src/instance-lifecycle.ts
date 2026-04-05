@@ -101,6 +101,11 @@ export class InstanceLifecycle {
       }
     }, this.ctx.logger, `daemon.crash_respawn[${name}]`));
 
+    daemon.on("snapshot_failed", safeHandler(() => {
+      this.ctx.eventLog?.insert(name, "snapshot_failed", {});
+      this.ctx.notifyInstanceTopic(name, `⚠️ ${name}: restarted without context (snapshot injection failed)`);
+    }, this.ctx.logger, `daemon.snapshot_failed[${name}]`));
+
     daemon.on("crash_loop", safeHandler(() => {
       this.ctx.eventLog?.insert(name, "crash_loop", {});
       this.ctx.logger.error({ name }, "Instance in crash loop — respawn paused");
