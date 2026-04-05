@@ -185,9 +185,9 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       const key = trimmed.slice(0, eqIdx);
       const raw = trimmed.slice(eqIdx + 1);
       const value = raw.replace(/^["'](.*)["']$/, '$1');
-      if (!process.env[key]) {
-        process.env[key] = value;
-      }
+      // .env file always wins over inherited shell env vars, so that
+      // quickstart's newly written token overrides any stale value.
+      process.env[key] = value;
     }
   }
 
