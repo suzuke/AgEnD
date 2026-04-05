@@ -17,6 +17,24 @@
 ### 修復
 - 最小化的 `claude-settings.json` — 允許列表中僅包含 AgEnD MCP 工具，不再覆蓋使用者全域的權限設定
 
+## [1.13.0] - 2026-04-06
+
+### 新增
+- **Web UI Phase 2：完整操控面板** — 建立/刪除 instance、Task board CRUD（建立、認領、完成）、排程管理（建立、刪除）、團隊管理（成員勾選建立、刪除）、Fleet 設定檢視（唯讀、已清理敏感資訊）
+- **Web UI 風格統一** — 對齊網站設計：Telegram 藍 `#2AABEE` 強調色、Inter + JetBrains Mono 字體、深色主題、圓角卡片、Toast 通知、載入狀態
+- **一鍵安裝腳本** — `curl -fsSL https://suzuke.github.io/AgEnD/install.sh | bash` 一行完成安裝（Node.js via nvm、tmux、agend、後端偵測）
+- **project_roots 限制** — `create_instance` 拒絕不在 `project_roots` 範圍內的目錄
+- **認證統一** — 所有 Web UI 端點（包含 restart）都需要 token 認證
+
+### 修復
+- **Web UI 回覆 context** — 首次從 Web UI 發訊不再出現「No active chat context」錯誤；使用真實 Telegram group_id/topic_id
+- **即時狀態刷新** — Instance 操作按鈕在 stop/start/restart/delete 後透過 SSE 即時更新
+- **Web↔Telegram 雙向同步** — Web 訊息以 `🌐` 前綴轉發到 Telegram topic；Telegram 訊息透過 SSE 推送到 Web UI
+
+### 文件
+- 全面文件盤點：所有文件新增 20+ 遺漏功能
+- 網站全面改版為 Spectra 風格深色設計
+
 ## [1.12.0] - 2026-04-06
 
 ### 新增

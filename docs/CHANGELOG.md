@@ -17,6 +17,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 - Minimal `claude-settings.json` — only CCD MCP tools in allow list, no longer overrides user's global permission settings
 
+## [1.13.0] - 2026-04-06
+
+### Added
+- **Web UI Phase 2: full control dashboard** — create/delete instances, task board CRUD (create, claim, complete), schedule management (create, delete), team management (create with member checkboxes, delete), fleet config viewer (read-only, sanitized)
+- **Web UI styling** — aligned with website design: Telegram blue `#2AABEE` accent, Inter + JetBrains Mono fonts, dark theme, rounded cards, toast notifications, loading states
+- **Bootstrap install script** — `curl -fsSL https://suzuke.github.io/AgEnD/install.sh | bash` for one-line setup (Node.js via nvm, tmux, agend, backend detection)
+- **project_roots enforcement** — `create_instance` rejects directories outside configured `project_roots` boundary
+- **Auth unification** — all Web UI endpoints (including restart) require token authentication
+
+### Fixed
+- **Web UI reply context** — first message from Web UI no longer causes "No active chat context" error; uses real Telegram group_id/topic_id
+- **Instant status refresh** — instance action buttons update immediately after stop/start/restart/delete via SSE
+- **Web↔Telegram bidirectional sync** — web messages forwarded to Telegram topic with `🌐` prefix; Telegram messages pushed to Web UI via SSE
+
+### Documentation
+- Full documentation audit: 20+ missing features added across all docs
+- Website redesigned with Spectra-inspired dark-first design
+
 ## [1.12.0] - 2026-04-06
 
 ### Added
