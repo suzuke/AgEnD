@@ -2003,14 +2003,25 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
               content: message,
               targetSession: instance,
               meta: {
-                chat_id: "web", message_id: `web-${Date.now()}`,
+                chat_id: "", message_id: `web-${Date.now()}`,
                 user: "web-user", user_id: "web-user",
                 ts, thread_id: "",
+                source: "web",
               },
             });
             this.lastInboundUser.set(instance, "web-user");
             this.eventLog?.logActivity("message", "web-user", message.slice(0, 200), instance);
             this.emitSseEvent("message", { instance, sender: "web-user", text: message, ts });
+            // Sync web message to Telegram topic
+            if (this.adapter && this.fleetConfig?.channel?.group_id) {
+              const topicId = this.fleetConfig.instances[instance]?.topic_id;
+              const preview = message.length > 500 ? message.slice(0, 500) + " [...]" : message;
+              this.adapter.sendText(
+                String(this.fleetConfig.channel.group_id),
+                `🌐 web-user: ${preview}`,
+                { threadId: topicId != null ? String(topicId) : undefined },
+              ).catch(e => this.logger.debug({ err: e }, "Web→Telegram sync failed"));
+            }
             res.writeHead(200);
             res.end(JSON.stringify({ sent: true }));
           } catch {
