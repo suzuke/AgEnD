@@ -55,26 +55,13 @@ AgEnD（**Agent Engineering Daemon**）把你的 Telegram 或 Discord 變成 AI 
 
 ## 開始用
 
-**1. 安裝**
-
 ```bash
-brew install tmux               # macOS（前置需求）
-npm install -g @suzuke/agend
+npm install -g @suzuke/agend    # 1. 安裝
+agend quickstart                # 2. 設定 — bot token、backend，搞定
+agend fleet start               # 3. 啟動 fleet 🎉
 ```
 
-**2. 設定**
-
-```bash
-agend init                      # 互動式設定 — 選 backend + channel
-```
-
-**3. 啟動**
-
-```bash
-agend fleet start               # fleet 上線了 🎉
-```
-
-就這樣。打開 Telegram，傳訊息給你的 bot，開始用手機寫 code。
+打開 Telegram，傳訊息給你的 bot，開始用手機寫 code。
 
 ## 運作原理
 
