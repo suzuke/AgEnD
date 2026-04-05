@@ -144,8 +144,35 @@ fleet
 fleet
   .command("restart")
   .description("Graceful restart: wait for instances to idle, then restart")
+  .argument("[instance]", "Specific instance to restart (immediate, no idle wait)")
   .option("--reload", "Full process restart to load new code")
-  .action(async (opts: { reload?: boolean }) => {
+  .action(async (instance?: string, opts?: { reload?: boolean }) => {
+    if (instance && opts?.reload) {
+      console.error("--reload restarts the entire fleet process. Cannot combine with instance name.");
+      process.exit(1);
+    }
+
+    if (instance) {
+      // Single instance restart via fleet's HTTP API
+      const { loadFleetConfig } = await import("./config.js");
+      const fleet = loadFleetConfig(FLEET_CONFIG_PATH);
+      const port = fleet.health_port ?? 19280;
+      try {
+        const resp = await fetch(`http://127.0.0.1:${port}/restart/${encodeURIComponent(instance)}`, { method: "POST" });
+        const body = await resp.json() as Record<string, unknown>;
+        if (resp.ok) {
+          console.log(`Instance "${instance}" restarted (immediate)`);
+        } else {
+          console.error(`Restart failed: ${body.error ?? resp.statusText}`);
+          process.exit(1);
+        }
+      } catch (err) {
+        console.error(`Cannot connect to fleet (port ${port}). Is the fleet running?`);
+        process.exit(1);
+      }
+      return;
+    }
+
     const pidPath = join(DATA_DIR, "fleet.pid");
     if (!existsSync(pidPath)) {
       console.error("Fleet is not running (no PID file found)");
@@ -153,7 +180,7 @@ fleet
     }
     const pid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
 
-    if (opts.reload) {
+    if (opts?.reload) {
       // Check if managed by launchd — if so, just signal and let launchd restart
       let managedByLaunchd = false;
       try {

@@ -1836,6 +1836,33 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
         return;
       }
 
+      // Instance restart (immediate, no idle wait)
+      if (req.method === "POST" && req.url?.startsWith("/restart/")) {
+        const name = decodeURIComponent(req.url.slice("/restart/".length));
+        const config = this.fleetConfig?.instances[name];
+        if (!config) {
+          res.writeHead(404);
+          res.end(JSON.stringify({ error: `Instance not found: ${name}` }));
+          return;
+        }
+        this.logger.info({ name }, "Instance restart requested via HTTP");
+        (async () => {
+          try {
+            await this.stopInstance(name);
+            const topicMode = this.fleetConfig?.channel?.mode === "topic";
+            await this.startInstance(name, config, topicMode ?? false);
+            this.logger.info({ name }, "Instance restarted");
+            res.writeHead(200);
+            res.end(JSON.stringify({ restarted: name }));
+          } catch (err) {
+            this.logger.error({ err, name }, "Instance restart failed");
+            res.writeHead(500);
+            res.end(JSON.stringify({ error: `Restart failed: ${(err as Error).message}` }));
+          }
+        })();
+        return;
+      }
+
       res.writeHead(404);
       res.end(JSON.stringify({ error: "not found" }));
     });
