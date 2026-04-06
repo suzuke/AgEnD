@@ -590,7 +590,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       // Forward to General Topic instance if configured
       const generalInstance = this.findGeneralInstance();
       if (generalInstance) {
-        if (this.replyIfRateLimited(generalInstance, msg)) return;
+        this.warnIfRateLimited(generalInstance, msg);
         const { text, extraMeta } = await processAttachments(msg, this.adapter!, this.logger, generalInstance);
         const ipc = this.instanceIpcClients.get(generalInstance);
         if (ipc) {
@@ -636,7 +636,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     this.touchActivity(instanceName);
     this.setTopicIcon(instanceName, "blue");
 
-    if (this.replyIfRateLimited(instanceName, msg)) return;
+    this.warnIfRateLimited(instanceName, msg);
 
     const { text, extraMeta } = await processAttachments(msg, this.adapter!, this.logger, instanceName);
 
@@ -676,16 +676,24 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
   }
 
   /** Handle outbound tool calls from a daemon instance */
-  private replyIfRateLimited(instanceName: string, msg: InboundMessage): boolean {
+  /** Warn (but don't block) when rate limits are high. 30-min debounce per instance. */
+  private rateLimitWarnedAt = new Map<string, number>();
+  private warnIfRateLimited(instanceName: string, msg: InboundMessage): void {
     const rl = this.statuslineWatcher.getRateLimits(instanceName);
-    if (!rl || rl.seven_day_pct < 100) return false;
-    if (this.adapter && msg.chatId) {
-      const threadId = msg.threadId ?? undefined;
-      this.adapter.sendText(msg.chatId, `⏸ ${instanceName} has hit the weekly usage limit. Your message was not delivered. Limit resets automatically — check /status for details.`, { threadId })
-        .catch(e => this.logger.warn({ err: e }, "Failed to send rate limit notice"));
+    if (!rl) return;
+    let warning = "";
+    if (rl.five_hour_pct >= 95) {
+      warning = `⚠️ ${instanceName} at ${Math.round(rl.five_hour_pct)}% of 5h rate limit. Responses may be slower.`;
+    } else if (rl.seven_day_pct >= 95) {
+      warning = `⚠️ ${instanceName} at ${Math.round(rl.seven_day_pct)}% weekly usage. Responses may be slower or fail.`;
     }
-    this.logger.info({ instanceName }, "Blocked inbound message — weekly rate limit at 100%");
-    return true;
+    if (!warning) return;
+    const lastWarn = this.rateLimitWarnedAt.get(instanceName) ?? 0;
+    if (Date.now() - lastWarn < 30 * 60_000) return;
+    this.rateLimitWarnedAt.set(instanceName, Date.now());
+    if (this.adapter && msg.chatId) {
+      this.adapter.sendText(msg.chatId, warning, { threadId: msg.threadId ?? undefined }).catch(() => {});
+    }
   }
 
   /** Handle outbound tool calls from a daemon instance */
