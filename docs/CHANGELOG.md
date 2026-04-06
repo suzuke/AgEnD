@@ -17,6 +17,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 - Minimal `claude-settings.json` — only CCD MCP tools in allow list, no longer overrides user's global permission settings
 
+## [1.14.0] - 2026-04-07
+
+### Added
+- **Plugin system + Discord adapter extraction** — Discord adapter moved to standalone `agend-plugin-discord` package; factory.ts supports `agend-plugin-{type}` / `agend-adapter-{type}` / bare name conventions; main package exports (`/channel`, `/types`) enable third-party plugins
+- **Web UI Phase 2: full control dashboard** — instance stop/start/restart/delete with name confirmation, create instance form (directory optional, backend auto-detect), task board CRUD, schedule management, team management, fleet config editor (form-based with sensitive field masking)
+- **Web UI layout: Fleet vs Instance** — sidebar "Fleet" entry for fleet-level tabs (Tasks, Schedules, Teams, Config); instance tabs limited to Chat + Detail; cross-navigation links between fleet and instance views
+- **Web UI UX improvements** — toast notifications, loading states, cron human-readable descriptions, larger status dots, empty state guidance, cost labels, website-consistent styling (#2AABEE accent, Inter + JetBrains Mono fonts)
+- **Backend auto-detection** — `GET /ui/backends` scans PATH for installed CLIs; Create Instance dropdown shows installed/not-installed status
+- **Instance-specific restart** — `agend fleet restart <instance>` via fleet HTTP API (`POST /restart/:name`)
+- **Bootstrap install script** — `curl -fsSL https://suzuke.github.io/AgEnD/install.sh | bash`
+- **project_roots enforcement** — `create_instance` rejects directories outside configured roots
+
+### Fixed
+- **Web UI reply context** — first web message no longer causes "No active chat context"; uses real Telegram group_id/topic_id
+- **Web↔Telegram bidirectional sync** — web messages forwarded to Telegram with `🌐` prefix; Telegram messages pushed to Web UI via SSE
+- **SSE instant status refresh** — action buttons update immediately after stop/start/restart/delete
+- **.env override** — `.env` file values unconditionally override inherited shell environment variables
+- **tmux duplicate session race** — `ensureSession()` handles concurrent parallel startup
+- **Create Instance form** — directory optional with dynamic topic_name requirement
+
+### Changed
+- **discord.js removed from core dependencies** — only needed when `agend-plugin-discord` is installed
+- **Web API extracted to `web-api.ts`** — reduces fleet-manager.ts size; all `/ui/*` routes in dedicated module
+- **Auth unified** — all Web UI endpoints (including restart) require token authentication
+
 ## [1.13.0] - 2026-04-06
 
 ### Added

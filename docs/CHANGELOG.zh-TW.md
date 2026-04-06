@@ -17,6 +17,31 @@
 ### 修復
 - 最小化的 `claude-settings.json` — 允許列表中僅包含 AgEnD MCP 工具，不再覆蓋使用者全域的權限設定
 
+## [1.14.0] - 2026-04-07
+
+### 新增
+- **Plugin 系統 + Discord adapter 獨立** — Discord adapter 搬到獨立 `agend-plugin-discord` package；factory.ts 支援 `agend-plugin-{type}` / `agend-adapter-{type}` / 裸名稱慣例；主 package 匯出（`/channel`、`/types`）讓第三方 plugin 可用
+- **Web UI Phase 2：完整操控面板** — instance stop/start/restart/delete（name 確認）、建立 instance 表單（directory 可選、backend 自動偵測）、Task board CRUD、排程管理、團隊管理、Fleet 設定編輯器（表單式 + 敏感欄位遮蔽）
+- **Web UI 版面：Fleet vs Instance** — Sidebar 加「Fleet」入口顯示 fleet 級 tabs（Tasks、Schedules、Teams、Config）；Instance 只保留 Chat + Detail；跨導航連結
+- **Web UI UX 改善** — Toast 通知、載入狀態、Cron 人類可讀描述、加大狀態點、空狀態引導、成本標註、網站一致風格（`#2AABEE` 強調色、Inter + JetBrains Mono 字體）
+- **Backend 自動偵測** — `GET /ui/backends` 掃描 PATH；建立 instance 的 dropdown 顯示安裝/未安裝狀態
+- **指定 instance 重啟** — `agend fleet restart <instance>` 透過 fleet HTTP API
+- **一鍵安裝腳本** — `curl -fsSL https://suzuke.github.io/AgEnD/install.sh | bash`
+- **project_roots 限制** — `create_instance` 拒絕不在設定 roots 範圍內的目錄
+
+### 修復
+- **Web UI 回覆 context** — 首次 web 訊息不再出現「No active chat context」；使用真實 Telegram group_id/topic_id
+- **Web↔Telegram 雙向同步** — Web 訊息以 `🌐` 前綴轉發到 Telegram；Telegram 訊息透過 SSE 推送到 Web UI
+- **SSE 即時狀態刷新** — 操作按鈕在 stop/start/restart/delete 後即時更新
+- **.env 覆蓋** — `.env` 檔案值無條件覆蓋繼承的 shell 環境變數
+- **tmux duplicate session race** — `ensureSession()` 處理並行啟動時的競爭條件
+- **建立 Instance 表單** — directory 改為可選，topic_name 動態必填
+
+### 變更
+- **discord.js 從核心依賴移除** — 僅在安裝 `agend-plugin-discord` 時需要
+- **Web API 抽取到 `web-api.ts`** — 縮減 fleet-manager.ts；所有 `/ui/*` 路由集中管理
+- **認證統一** — 所有 Web UI 端點（含 restart）都需要 token 認證
+
 ## [1.13.0] - 2026-04-06
 
 ### 新增
