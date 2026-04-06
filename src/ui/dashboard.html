@@ -310,14 +310,23 @@ async function taskAct(id, action) {
   if (r.error) toast(r.error, false); else { toast(`Task ${action}ed`); loadTasks(); }
 }
 
-function showCreateInstance() {
+async function showCreateInstance() {
   const ov = document.createElement("div"); ov.className = "form-overlay";
+  // Fetch available backends
+  let backendOpts = '<option value="">Use fleet default</option>';
+  try {
+    const bd = await api("GET", "/ui/backends");
+    const first = (bd.backends || []).find(b => b.installed);
+    backendOpts += (bd.backends || []).map(b => {
+      const label = b.installed ? b.name : `${b.name} (not installed)`;
+      return `<option value="${b.name}" ${b.installed ? "" : "disabled"} ${b.name === first?.name ? "selected" : ""}>${label}</option>`;
+    }).join("");
+  } catch { backendOpts += ["claude-code","codex","gemini-cli","opencode","kiro-cli"].map(b => `<option value="${b}">${b}</option>`).join(""); }
   ov.innerHTML = `<div class="form-card"><h2>Create Instance</h2>
     <div class="form-field"><label>Directory</label><input id="ci-dir" placeholder="Optional — auto-creates workspace if empty"></div>
     <div class="form-field"><label id="ci-topic-label">Topic Name</label><input id="ci-topic" placeholder="Auto from directory name"></div>
     <div class="form-field"><label>Description</label><input id="ci-desc" placeholder="What this instance does"></div>
-    <div class="form-field"><label>Backend</label>
-      <select id="ci-backend"><option value="">Use fleet default</option>${["claude-code","codex","gemini-cli","opencode","kiro-cli"].map(b=>`<option value="${b}">${b}</option>`).join("")}</select></div>
+    <div class="form-field"><label>Backend</label><select id="ci-backend">${backendOpts}</select></div>
     <div class="form-field"><label>Branch (git worktree)</label><input id="ci-branch" placeholder="e.g. feature-x"></div>
     <div class="form-actions"><button class="btn btn-ghost" onclick="this.closest('.form-overlay').remove()">Cancel</button>
     <button class="btn btn-accent" id="ci-go">Create</button></div></div>`;

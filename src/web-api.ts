@@ -6,6 +6,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execSync } from "node:child_process";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -121,6 +122,26 @@ export function handleWebRequest(
     } catch {
       json(res, 404, { error: "File not found" });
     }
+    return true;
+  }
+
+  // ── Backend detection ─────────────────────────────────
+
+  if (method === "GET" && path === "/ui/backends") {
+    const BACKENDS = [
+      { name: "claude-code", binary: "claude" },
+      { name: "codex", binary: "codex" },
+      { name: "gemini-cli", binary: "gemini" },
+      { name: "opencode", binary: "opencode" },
+      { name: "kiro-cli", binary: "kiro-cli" },
+    ];
+    const backends = BACKENDS.map(b => {
+      let installed = false;
+      let binPath = "";
+      try { binPath = execSync(`which ${b.binary}`, { stdio: "pipe" }).toString().trim(); installed = true; } catch { /* */ }
+      return { name: b.name, binary: b.binary, installed, path: binPath };
+    });
+    json(res, 200, { backends });
     return true;
   }
 
