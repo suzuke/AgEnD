@@ -425,27 +425,51 @@ export function handleWebRequest(
   if (method === "GET" && path === "/ui/config") {
     const config = ctx.fleetConfig;
     if (!config) { json(res, 200, {}); return true; }
-    // Sanitize: remove token references
-    const sanitized = {
-      channel: config.channel ? {
-        type: (config.channel as Record<string, unknown>).type,
-        mode: config.channel.mode,
-        group_id: config.channel.group_id,
-        access: (config.channel as Record<string, unknown>).access,
+    const ch = config.channel as Record<string, unknown> | undefined;
+    const defaults = (config as Record<string, unknown>).defaults as Record<string, unknown> | undefined;
+    json(res, 200, {
+      channel: ch ? {
+        type: ch.type, mode: config.channel!.mode,
+        bot_token_env: ch.bot_token_env,
+        group_id: config.channel!.group_id,
+        access: ch.access,
       } : undefined,
-      instances: Object.fromEntries(
-        Object.entries(config.instances).map(([name, inst]) => [name, {
-          working_directory: inst.working_directory,
-          description: inst.description,
-          display_name: inst.display_name,
-          topic_id: inst.topic_id,
-        }]),
-      ),
-      teams: config.teams,
+      defaults: defaults ? { backend: defaults.backend, model: defaults.model } : undefined,
       project_roots: (config as Record<string, unknown>).project_roots,
       health_port: (config as Record<string, unknown>).health_port,
-    };
-    json(res, 200, sanitized);
+    });
+    return true;
+  }
+
+  if (method === "POST" && path === "/ui/config") {
+    (async () => {
+      try {
+        const body = await parseBody(req);
+        const config = ctx.fleetConfig;
+        if (!config) { json(res, 500, { error: "No fleet config" }); return; }
+        const ch = config.channel as Record<string, unknown> | undefined;
+        // Update channel settings
+        if (body.channel && ch) {
+          const update = body.channel as Record<string, unknown>;
+          if (update.group_id != null) (config.channel as Record<string, unknown>).group_id = Number(update.group_id);
+          if (update.access) (config.channel as Record<string, unknown>).access = update.access;
+        }
+        // Update defaults
+        if (body.defaults) {
+          const d = (config as Record<string, unknown>).defaults as Record<string, unknown>;
+          const upd = body.defaults as Record<string, unknown>;
+          if (upd.backend) d.backend = upd.backend;
+          if (upd.model) d.model = upd.model;
+        }
+        // Update project_roots
+        if (body.project_roots) {
+          (config as Record<string, unknown>).project_roots = body.project_roots;
+        }
+        ctx.saveFleetConfig();
+        const needsRestart = !!(body.channel as Record<string, unknown>)?.group_id;
+        json(res, 200, { saved: true, needs_restart: needsRestart });
+      } catch (err) { json(res, 400, { error: (err as Error).message }); }
+    })();
     return true;
   }
 
