@@ -25,7 +25,12 @@
   .instance-item { padding: 10px 16px; cursor: pointer; border-bottom: 1px solid var(--bg); display: flex; align-items: center; gap: 10px; transition: background 0.15s; }
   .instance-item:hover { background: var(--raised); }
   .instance-item.active { background: var(--accent-dim); border-left: 3px solid var(--accent); }
-  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .fleet-entry { padding: 10px 16px; cursor: pointer; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 13px; color: var(--accent); transition: background 0.15s; }
+  .fleet-entry:hover { background: var(--raised); }
+  .fleet-entry.active { background: var(--accent-dim); border-left: 3px solid var(--accent); }
+  .sensitive { font-family: 'JetBrains Mono', monospace; letter-spacing: 2px; }
+  .eye-btn { background: none; border: none; cursor: pointer; color: var(--text-sec); font-size: 14px; padding: 0 4px; }
   .dot.running { background: var(--success); } .dot.stopped { background: var(--error); } .dot.crashed { background: var(--warn); }
   .inst-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .inst-meta { font-size: 11px; color: var(--text-sec); font-family: 'JetBrains Mono', monospace; }
@@ -109,6 +114,7 @@
     <h1>AgEnD</h1>
     <div class="uptime" id="uptime">--</div>
   </div>
+  <div class="fleet-entry" id="fleetEntry" onclick="selFleet()">&#9733; Fleet</div>
   <div class="instance-list" id="instanceList"></div>
   <div class="sidebar-footer">
     <button class="btn btn-accent" style="width:100%" onclick="showCreateInstance()">+ New Instance</button>
@@ -121,7 +127,8 @@
 
 <script>
 const T = new URLSearchParams(location.search).get("token") || "";
-let cur = null, curTab = "chat", instances = [];
+let cur = null, curTab = "chat", mode = "none", instances = [];
+// mode: "none" | "fleet" | "instance"
 const msgs = {};
 
 async function api(m, p, b) {
@@ -154,8 +161,9 @@ sse.addEventListener("message", e => {
 sse.onerror = () => { document.getElementById("uptime").textContent = "disconnected"; };
 
 function renderList() {
+  document.getElementById("fleetEntry").className = `fleet-entry${mode==="fleet"?" active":""}`;
   const el = document.getElementById("instanceList");
-  el.innerHTML = instances.map(i => `<div class="instance-item${i.name===cur?" active":""}" data-n="${esc(i.name)}">
+  el.innerHTML = instances.map(i => `<div class="instance-item${i.name===cur&&mode==="instance"?" active":""}" data-n="${esc(i.name)}">
     <div class="dot ${i.status}"></div><div style="flex:1;min-width:0">
     <div class="inst-name">${esc(i.name)}</div>
     <div class="inst-meta">${i.cost>0?`$${i.cost.toFixed(2)}`:""}${i.context_pct>0?` ctx:${Math.round(i.context_pct)}%`:""}</div>
@@ -163,34 +171,47 @@ function renderList() {
   el.querySelectorAll(".instance-item").forEach(x => x.addEventListener("click", () => sel(x.dataset.n)));
 }
 
-function sel(name) { cur = name; curTab = "chat"; renderMain(); renderList(); }
+function selFleet() { mode = "fleet"; cur = null; curTab = "tasks"; renderList(); renderMain(); }
+function sel(name) { mode = "instance"; cur = name; curTab = "chat"; renderMain(); renderList(); }
 
 function renderMain() {
-  if (!cur) return;
   const main = document.getElementById("mainArea");
-  const tabs = ["chat","detail","tasks","schedules","teams","config"];
+  if (mode === "fleet") return renderFleetMain(main);
+  if (mode === "instance" && cur) return renderInstanceMain(main);
+  main.innerHTML = '<div class="no-sel">Select Fleet or an instance</div>';
+}
+
+function renderFleetMain(main) {
+  const tabs = ["tasks","schedules","teams","config"];
+  if (!tabs.includes(curTab)) curTab = "tasks";
   main.innerHTML = `
-    <div class="tabs">
-      ${tabs.map(t => `<div class="tab${curTab===t?" active":""}" data-t="${t}">${t[0].toUpperCase()+t.slice(1)}</div>`).join("")}
-    </div>
-    <div class="actions" id="actions"></div>
-    <div class="chat-view" id="chatView" style="display:${curTab==="chat"?"flex":"none"}">
-      <div class="messages" id="messages"></div>
-      <div class="input-bar"><input id="msgIn" placeholder="Send a message..." autocomplete="off"><button class="btn btn-accent" onclick="sendMsg()">Send</button></div>
-    </div>
-    <div class="detail-view" id="detailView" style="display:${curTab==="detail"?"block":"none"}"><div style="color:var(--text-muted);text-align:center;padding:24px">Loading...</div></div>
+    <div class="tabs">${tabs.map(t => `<div class="tab${curTab===t?" active":""}" data-t="${t}">${t[0].toUpperCase()+t.slice(1)}</div>`).join("")}</div>
     <div class="task-view" id="taskView" style="display:${curTab==="tasks"?"block":"none"}"><div style="color:var(--text-muted);text-align:center;padding:24px">Loading...</div></div>
     <div class="task-view" id="schedView" style="display:${curTab==="schedules"?"block":"none"}"><div style="color:var(--text-muted);text-align:center;padding:24px">Loading...</div></div>
     <div class="task-view" id="teamView" style="display:${curTab==="teams"?"block":"none"}"><div style="color:var(--text-muted);text-align:center;padding:24px">Loading...</div></div>
     <div class="detail-view" id="configView" style="display:${curTab==="config"?"block":"none"}"><div style="color:var(--text-muted);text-align:center;padding:24px">Loading...</div></div>`;
   main.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => { curTab = t.dataset.t; renderMain(); }));
-  const i = instances.find(x => x.name === cur); renderActions(i);
-  if (curTab === "chat") { renderMsgs(); const inp = document.getElementById("msgIn"); inp.addEventListener("keydown", e => { if (e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMsg();} }); inp.focus(); }
-  else if (curTab === "detail") loadDetail();
-  else if (curTab === "tasks") loadTasks();
+  if (curTab === "tasks") loadTasks();
   else if (curTab === "schedules") loadSchedules();
   else if (curTab === "teams") loadTeams();
   else if (curTab === "config") loadConfig();
+}
+
+function renderInstanceMain(main) {
+  const tabs = ["chat","detail"];
+  if (!tabs.includes(curTab)) curTab = "chat";
+  main.innerHTML = `
+    <div class="tabs">${tabs.map(t => `<div class="tab${curTab===t?" active":""}" data-t="${t}">${t[0].toUpperCase()+t.slice(1)}</div>`).join("")}</div>
+    <div class="actions" id="actions"></div>
+    <div class="chat-view" id="chatView" style="display:${curTab==="chat"?"flex":"none"}">
+      <div class="messages" id="messages"></div>
+      <div class="input-bar"><input id="msgIn" placeholder="Send a message..." autocomplete="off"><button class="btn btn-accent" onclick="sendMsg()">Send</button></div>
+    </div>
+    <div class="detail-view" id="detailView" style="display:${curTab==="detail"?"block":"none"}"><div style="color:var(--text-muted);text-align:center;padding:24px">Loading...</div></div>`;
+  main.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => { curTab = t.dataset.t; renderMain(); }));
+  const i = instances.find(x => x.name === cur); renderActions(i);
+  if (curTab === "chat") { renderMsgs(); const inp = document.getElementById("msgIn"); inp.addEventListener("keydown", e => { if (e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMsg();} }); inp.focus(); }
+  else if (curTab === "detail") loadDetail();
 }
 
 function renderActions(i) {
@@ -249,7 +270,7 @@ async function loadDetail() {
       <div class="detail-row"><span class="detail-label">Directory</span><span style="font-family:'JetBrains Mono',monospace;font-size:12px">${esc(d.working_directory)}</span></div></div>
       <div class="card"><h3>Runtime</h3>
       <div class="detail-row"><span class="detail-label">Model</span><span>${esc(model)}</span></div>
-      <div class="detail-row"><span class="detail-label">Cost</span><span>$${cost.toFixed(2)}</span></div>
+      <div class="detail-row"><span class="detail-label">Cost</span><span>$${cost.toFixed(2)} <span style="color:var(--text-muted);font-size:11px">(session accumulated)</span></span></div>
       <div class="detail-row"><span class="detail-label">Context</span><span>${Math.round(ctx)}%</span></div>
       <div class="detail-row"><span class="detail-label">Rate 5h</span><span>${Math.round(rl5)}%</span></div>
       <div class="detail-row"><span class="detail-label">Rate 7d</span><span>${Math.round(rl7)}%</span></div></div>`;
@@ -270,12 +291,12 @@ async function loadTasks() {
     let h = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <span style="font-weight:600;font-size:14px">${tasks.length} tasks</span>
       <button class="btn btn-accent" onclick="showCreateTask()">+ New Task</button></div>`;
-    if (!tasks.length) h += `<div class="msg-empty">No tasks</div>`;
+    if (!tasks.length) h += `<div class="msg-empty">&#128203; No tasks yet — create one to get started</div>`;
     else for (const t of tasks) {
       h += `<div class="task-item">
         <span class="task-status ${t.status}">${t.status}</span>
         <span class="task-title">${esc(t.title)}</span>
-        <span class="task-assignee">${esc(t.assignee||"")}</span>
+        <span class="task-assignee">${t.assignee?`<span style="cursor:pointer;color:var(--accent)" onclick="sel('${esc(t.assignee)}')">${esc(t.assignee)}</span>`:""}</span>
         <div class="task-actions">
           ${t.status==="open"?`<button class="btn btn-ghost" onclick="taskAct('${t.id}','claim')">Claim</button>`:""}
           ${t.status==="claimed"?`<button class="btn btn-ghost" onclick="taskAct('${t.id}','complete')">Done</button>`:""}
@@ -349,13 +370,13 @@ async function loadSchedules() {
     let h = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <span style="font-weight:600;font-size:14px">${scheds.length} schedules</span>
       <button class="btn btn-accent" onclick="showCreateSchedule()">+ New Schedule</button></div>`;
-    if (!scheds.length) h += `<div class="msg-empty">No schedules</div>`;
+    if (!scheds.length) h += `<div class="msg-empty">&#128197; No schedules yet</div>`;
     else for (const s of scheds) {
       h += `<div class="task-item">
         <span class="task-status ${s.enabled?"open":"done"}">${s.enabled?"on":"off"}</span>
-        <span class="task-title">${esc(s.label||s.cron)}</span>
-        <span class="task-assignee" style="font-family:'JetBrains Mono',monospace">${esc(s.cron)}</span>
-        <span class="task-assignee">${esc(s.target)}</span>
+        <span class="task-title">${esc(s.label||cronDesc(s.cron))}</span>
+        <span class="task-assignee" style="font-family:'JetBrains Mono',monospace" title="${esc(cronDesc(s.cron))}">${esc(s.cron)}</span>
+        <span class="task-assignee" style="cursor:pointer;color:var(--accent)" onclick="sel('${esc(s.target)}')">${esc(s.target)}</span>
         <div class="task-actions">
           <button class="btn btn-ghost btn-red" onclick="delSchedule('${s.id}')">Delete</button>
         </div></div>`;
@@ -404,7 +425,7 @@ async function loadTeams() {
     let h = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <span style="font-weight:600;font-size:14px">${entries.length} teams</span>
       <button class="btn btn-accent" onclick="showCreateTeam()">+ New Team</button></div>`;
-    if (!entries.length) h += `<div class="msg-empty">No teams</div>`;
+    if (!entries.length) h += `<div class="msg-empty">&#128101; No teams yet — group instances for coordinated work</div>`;
     else for (const [name, team] of entries) {
       h += `<div class="task-item">
         <span class="task-title" style="font-weight:600">${esc(name)}</span>
@@ -445,14 +466,85 @@ function showCreateTeam() {
   });
 }
 
-// ── Config ───────────────────────────────────────────────
+// ── Cron description ─────────────────────────────────────
+const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+function cronDesc(expr) {
+  if (!expr) return "";
+  const p = expr.trim().split(/\s+/);
+  if (p.length < 5) return expr;
+  const [min, hr, dom, mon, dow] = p;
+  const time = (hr !== "*" && min !== "*") ? `at ${hr.padStart(2,"0")}:${min.padStart(2,"0")}` : "";
+  if (min === "*" && hr === "*") return "Every minute";
+  if (min.startsWith("*/")) return `Every ${min.slice(2)} minutes`;
+  if (hr.startsWith("*/")) return `Every ${hr.slice(2)} hours`;
+  if (dom === "*" && mon === "*" && dow === "*") return `Daily ${time}`;
+  if (dom === "*" && mon === "*" && dow === "1-5") return `Weekdays ${time}`;
+  if (dom === "*" && mon === "*" && dow !== "*") {
+    const days = dow.split(",").map(d => { const n = parseInt(d); return isNaN(n) ? d : (DAYS[n] || d); });
+    return `${days.join(", ")} ${time}`;
+  }
+  if (dom !== "*" && mon === "*") return `${dom}${dom==="1"?"st":dom==="2"?"nd":dom==="3"?"rd":"th"} of month ${time}`;
+  return expr;
+}
+
+// ── Config form ──────────────────────────────────────────
+let cfgData = null;
 async function loadConfig() {
   const el = document.getElementById("configView"); if (!el) return;
   try {
-    const d = await api("GET", "/ui/config");
-    el.innerHTML = `<div class="card"><h3>Fleet Configuration</h3>
-      <pre style="font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-word;color:var(--text-sec)">${esc(JSON.stringify(d, null, 2))}</pre></div>`;
-  } catch { el.innerHTML = `<div style="color:var(--error);padding:24px">Failed to load</div>`; }
+    cfgData = await api("GET", "/ui/config");
+    const ch = cfgData.channel || {};
+    const acc = ch.access || {};
+    const defs = cfgData.defaults || {};
+    const roots = cfgData.project_roots || [];
+    const mask = s => s ? "••••••••" : "";
+    el.innerHTML = `
+      <div class="card"><h3>Channel</h3>
+        <div class="form-field"><label>Type</label><input id="cfg-type" value="${esc(ch.type||"")}" disabled style="opacity:0.6"></div>
+        <div class="form-field"><label>Bot Token Env</label><input id="cfg-token-env" value="${esc(ch.bot_token_env||"AGEND_BOT_TOKEN")}" disabled style="opacity:0.6"></div>
+        <div class="form-field"><label>Group ID</label>
+          <div style="display:flex;gap:4px;align-items:center">
+            <input id="cfg-gid" type="password" value="${ch.group_id||""}" style="flex:1">
+            <button class="eye-btn" onclick="togglePw('cfg-gid')">&#128065;</button>
+          </div></div>
+      </div>
+      <div class="card"><h3>Access Control</h3>
+        <div class="form-field"><label>Mode</label>
+          <select id="cfg-acc-mode"><option value="locked" ${acc.mode==="locked"?"selected":""}>Locked</option><option value="open" ${acc.mode==="open"?"selected":""}>Open</option></select></div>
+        <div class="form-field"><label>Allowed Users</label>
+          <div style="display:flex;gap:4px;align-items:center">
+            <input id="cfg-users" type="password" value="${(acc.allowed_users||[]).join(", ")}" style="flex:1">
+            <button class="eye-btn" onclick="togglePw('cfg-users')">&#128065;</button>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Comma-separated user IDs</div></div>
+      </div>
+      <div class="card"><h3>Defaults</h3>
+        <div class="form-field"><label>Backend</label>
+          <select id="cfg-backend">
+            ${["claude-code","codex","gemini-cli","opencode","kiro-cli"].map(b => `<option value="${b}" ${defs.backend===b?"selected":""}>${b}</option>`).join("")}
+          </select></div>
+      </div>
+      <div class="card"><h3>Project Roots</h3>
+        <div id="cfg-roots">${roots.map((r,i) => `<div style="display:flex;gap:4px;margin-bottom:4px"><input class="cfg-root" value="${esc(r)}" style="flex:1"><button class="btn btn-ghost" style="padding:4px 8px" onclick="this.parentElement.remove()">&#10005;</button></div>`).join("")}</div>
+        <button class="btn btn-ghost" onclick="addRoot()">+ Add Root</button>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:12px">
+        <button class="btn btn-accent" onclick="saveConfig()">Save Changes</button>
+        <span style="font-size:11px;color:var(--text-muted)">Saving will reformat fleet.yaml (comments will be lost)</span>
+      </div>`;
+  } catch { el.innerHTML = `<div style="color:var(--error);padding:24px">Failed to load config</div>`; }
+}
+function togglePw(id) { const el = document.getElementById(id); el.type = el.type === "password" ? "text" : "password"; }
+function addRoot() { const el = document.getElementById("cfg-roots"); el.insertAdjacentHTML("beforeend", `<div style="display:flex;gap:4px;margin-bottom:4px"><input class="cfg-root" value="" placeholder="/path/to/projects" style="flex:1"><button class="btn btn-ghost" style="padding:4px 8px" onclick="this.parentElement.remove()">&#10005;</button></div>`); }
+async function saveConfig() {
+  const body = {
+    channel: { group_id: document.getElementById("cfg-gid").value.trim(), access: { mode: document.getElementById("cfg-acc-mode").value, allowed_users: document.getElementById("cfg-users").value.split(",").map(s => s.trim()).filter(Boolean) } },
+    defaults: { backend: document.getElementById("cfg-backend").value },
+    project_roots: [...document.querySelectorAll(".cfg-root")].map(i => i.value.trim()).filter(Boolean),
+  };
+  const r = await api("POST", "/ui/config", body);
+  if (r.error) toast(r.error, false);
+  else { toast("Config saved" + (r.needs_restart ? " (restart fleet to apply channel changes)" : "")); }
 }
 </script>
 </body>
