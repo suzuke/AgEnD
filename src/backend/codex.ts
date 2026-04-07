@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { type CliBackend, type CliBackendConfig, type ErrorPattern, type RuntimeDialog, resolveBinary } from "./types.js";
 
 export class CodexBackend implements CliBackend {
@@ -15,18 +15,9 @@ export class CodexBackend implements CliBackend {
     const approvalFlag = config.skipPermissions !== false
       ? "--dangerously-bypass-approvals-and-sandbox"
       : "--full-auto";
-
-    // Check for existing session to resume
-    const sessionIdFile = join(this.instanceDir, "session-id");
-    if (existsSync(sessionIdFile)) {
-      const sid = readFileSync(sessionIdFile, "utf-8").trim();
-      if (sid && /^[a-zA-Z0-9_-]+$/.test(sid)) {
-        let cmd = `${this.binaryPath} resume ${sid} ${approvalFlag}`;
-        if (config.model) cmd += ` -c model="${config.model}"`;
-        return cmd;
-      }
-    }
-
+    // Always fresh session — context rotation is intentional, and AgEnD's
+    // snapshot injection handles context continuity. Codex has no supported
+    // interface for session ID retrieval.
     let cmd = `${this.binaryPath} ${approvalFlag}`;
     if (config.model) cmd += ` -c model="${config.model}"`;
     return cmd;
@@ -81,10 +72,10 @@ export class CodexBackend implements CliBackend {
   }
 
   getSessionId(): string | null {
-    try {
-      const f = join(this.instanceDir, "session-id");
-      return readFileSync(f, "utf-8").trim() || null;
-    } catch { return null; }
+    // Codex manages sessions internally. No supported interface to retrieve
+    // session/thread ID externally. Return null — daemon's saveSessionId
+    // will no-op.
+    return null;
   }
 
   cleanup(config: CliBackendConfig): void {
