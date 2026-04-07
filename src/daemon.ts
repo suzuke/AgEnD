@@ -912,6 +912,8 @@ export class Daemon extends EventEmitter {
       }
       if (userPrompt) mcpEnv.AGEND_CUSTOM_PROMPT = userPrompt;
     }
+    // Pass through active decisions from fleet manager
+    if (process.env.AGEND_DECISIONS) mcpEnv.AGEND_DECISIONS = process.env.AGEND_DECISIONS;
 
     return {
       workingDirectory: this.config.working_directory,
