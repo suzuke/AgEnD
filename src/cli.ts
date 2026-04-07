@@ -811,9 +811,9 @@ program
     if (!opts.skipInstall) {
       console.log("  Updating AgEnD...");
       try {
-        execSync("npm update -g @suzuke/agend", { stdio: "inherit" });
+        execSync("npm install -g @suzuke/agend@latest", { stdio: "inherit" });
       } catch (err) {
-        console.error("  Failed to update. Try: sudo npm update -g @suzuke/agend");
+        console.error("  Failed to update. Try: npm install -g @suzuke/agend@latest");
         process.exit(1);
       }
     }

@@ -146,9 +146,9 @@ export class TopicCommands {
     await this.ctx.adapter.sendText(chatId, "📦 Updating AgEnD...", { threadId });
 
     try {
-      await execAsync("npm update -g @suzuke/agend", { timeout: 60_000 });
+      await execAsync("npm install -g @suzuke/agend@latest", { timeout: 120_000 });
     } catch {
-      await this.ctx.adapter.sendText(chatId, "❌ npm update failed. Try manually: sudo npm update -g @suzuke/agend", { threadId });
+      await this.ctx.adapter.sendText(chatId, "❌ npm install failed. Try manually: npm install -g @suzuke/agend@latest", { threadId });
       return;
     }
 
