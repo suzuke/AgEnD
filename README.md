@@ -122,6 +122,7 @@ Open Telegram, send a message to your bot, and start coding from your phone.
 
 - macOS (launchd) and Linux (systemd) supported; Windows is not
 - Official Telegram plugin in global `enabledPlugins` causes 409 polling conflicts
+- OpenCode and Kiro CLI do not read MCP server `instructions` field — fleet context and workflow templates are not injected into these backends' system prompts. Awaiting upstream fix.
 
 ## License
 

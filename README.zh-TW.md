@@ -122,6 +122,7 @@ agend fleet start               # 3. 啟動 fleet 🎉
 
 - 支援 macOS（launchd）和 Linux（systemd），不支援 Windows
 - 全域 `enabledPlugins` 裡有官方 Telegram plugin 會造成 409 polling 衝突
+- OpenCode 和 Kiro CLI 不讀取 MCP server 的 `instructions` 欄位 — fleet context 和 workflow template 不會注入到這些 backend 的 system prompt。等待上游修復。
 
 ## 授權
 
