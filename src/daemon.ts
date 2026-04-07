@@ -426,6 +426,15 @@ export class Daemon extends EventEmitter {
 
         const pane = await this.tmux.capturePane();
 
+        // Only scan text after the last prompt marker to avoid matching stale errors
+        // that remain in the capture-pane buffer after recovery.
+        let scanText = pane;
+        const rpg = new RegExp(readyPattern.source, readyPattern.flags.includes("g") ? readyPattern.flags : readyPattern.flags + "g");
+        let lastIdx = -1;
+        let m: RegExpExecArray | null;
+        while ((m = rpg.exec(pane)) !== null) lastIdx = m.index;
+        if (lastIdx >= 0) scanText = pane.slice(lastIdx);
+
         // Auto-dismiss runtime dialogs (e.g. Codex rate limit model switch)
         for (const dialog of dialogs) {
           if (!dialog.pattern.test(pane)) continue;
@@ -460,7 +469,7 @@ export class Daemon extends EventEmitter {
         // State: monitoring — check for new errors
         const currentPaneHash = Daemon.cheapPaneHash(pane);
         for (const ep of patterns) {
-          if (!ep.pattern.test(pane)) continue;
+          if (!ep.pattern.test(scanText)) continue;
 
           // Dedup: suppress if same error on same screen as last recovery
           if (this.lastRecoveryPaneHash && ep.type === this.lastRecoveredErrorType) {
