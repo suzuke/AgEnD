@@ -79,7 +79,11 @@ export function loadFleetConfig(configPath: string): FleetConfig {
   }
 
   const raw = readFileSync(configPath, "utf-8");
-  const parsed = yaml.load(raw) as {
+  // Quote bare 16+ digit integers before parsing to prevent precision loss.
+  // Discord snowflakes and Telegram group IDs are 64-bit and exceed JS MAX_SAFE_INTEGER.
+  const safeRaw = raw.replace(/(?<=:\s+|[-]\s+)(\d{16,})(?=\s*$)/gm, (_, d) => `"${d}"`);
+
+  const parsed = yaml.load(safeRaw) as {
     channel?: FleetConfig["channel"];
     project_roots?: string[];
     defaults?: Partial<InstanceConfig>;
