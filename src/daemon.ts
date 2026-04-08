@@ -366,6 +366,15 @@ export class Daemon extends EventEmitter {
         // paneStatus === null → window gone entirely (e.g. tmux server crash)
         // paneStatus.alive === false → pane dead, exit code available
         const exitCode = paneStatus?.exitCode;
+        this.logger.debug({ exitCode }, `[health] pane exited with code: ${exitCode}`);
+
+        // Normal exit (e.g. user Ctrl+C or /exit) — no crash, no respawn
+        if (paneStatus && exitCode === 0) {
+          this.logger.info("CLI exited normally (code 0) — pausing health check");
+          await this.tmux.killWindow();
+          this.healthCheckPaused = true;
+          return;
+        }
 
         // Distinguish tmux server crash from single window crash
         let crashType: "server" | "window" = "window";
