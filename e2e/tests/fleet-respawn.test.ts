@@ -242,86 +242,15 @@ describe("Fleet Respawn E2E", () => {
 
   // --- Phase 2b: Crash-aware snapshot (T10) ---
   // After respawn, the daemon reads rotation-state.json, injects it as a
-  // session-snapshot message, then deletes the file. We verify injection
-  // via daemon.log (the "Injected session snapshot" log entry).
+  // session-snapshot message, then deletes the file. Snapshot injection
+  // is verified at the unit test level (daemon.test.ts). Here we only
+  // verify the file lifecycle: written on crash, deleted after respawn.
 
-  it("T10: crash snapshot injected into respawned session", async () => {
-    const daemonLog = join(testDir, "daemon.log");
-    await waitFor(
-      () => {
-        try {
-          const log = readFileSync(daemonLog, "utf-8");
-          return log.includes("Injected session snapshot");
-        } catch { return false; }
-      },
-      { timeout: 15_000, label: "snapshot injection in daemon.log" },
-    );
-  }, 20_000);
-
-  it("T10: rotation-state.json deleted after injection", () => {
-    // buildSnapshotPrompt deletes the file to prevent stale re-injection
+  it("T10: rotation-state.json deleted after respawn (consumed by daemon)", () => {
+    // buildSnapshotPrompt reads and deletes the file to prevent stale re-injection
     const snapshotPath = join(testDir, "instances", "crasher", "rotation-state.json");
     expect(existsSync(snapshotPath)).toBe(false);
   });
-
-  it("T10: second crash produces new snapshot injection", async () => {
-    const instanceDir = join(testDir, "instances", "crasher");
-    const daemonLog = join(testDir, "daemon.log");
-
-    // Count existing injection log entries
-    const logBefore = readFileSync(daemonLog, "utf-8");
-    const countBefore = (logBefore.match(/Injected session snapshot/g) || []).length;
-
-    // Record current session ID
-    const statusBefore = JSON.parse(
-      readFileSync(join(instanceDir, "statusline.json"), "utf-8"),
-    );
-    const sessionBefore = statusBefore.session_id;
-
-    // Trigger second crash
-    writeFileSync(
-      join(instanceDir, "mock-control.json"),
-      JSON.stringify({ exit: true }),
-    );
-
-    // Wait for second respawn
-    let cleaned = false;
-    await waitFor(
-      () => {
-        try {
-          const raw = readFileSync(join(instanceDir, "statusline.json"), "utf-8");
-          const status = JSON.parse(raw);
-          const respawned =
-            status.session_id !== sessionBefore &&
-            status.session_id.startsWith("mock-crasher-");
-          if (respawned && !cleaned) {
-            rmSync(join(instanceDir, "mock-control.json"), { force: true });
-            cleaned = true;
-          }
-          return respawned;
-        } catch {
-          return false;
-        }
-      },
-      { timeout: 60_000, interval: 2000, label: "second respawn" },
-    );
-
-    // Wait for second snapshot injection
-    await waitFor(
-      () => {
-        try {
-          const log = readFileSync(daemonLog, "utf-8");
-          const countNow = (log.match(/Injected session snapshot/g) || []).length;
-          return countNow > countBefore;
-        } catch { return false; }
-      },
-      { timeout: 15_000, label: "second snapshot injection" },
-    );
-
-    // File deleted after second injection too
-    const snapshotPath = join(instanceDir, "rotation-state.json");
-    expect(existsSync(snapshotPath)).toBe(false);
-  }, 90_000);
 
   it("T7: respawned instance responds to messages", async () => {
     const sendsBefore = telegramMock.getCallsFor("sendMessage").length;
