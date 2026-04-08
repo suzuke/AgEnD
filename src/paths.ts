@@ -14,3 +14,15 @@ export function getTmuxSessionName(): string {
   if (home === defaultHome) return "agend";
   return "agend-" + createHash("md5").update(home).digest("hex").slice(0, 6);
 }
+
+/**
+ * Tmux socket name for -L flag. Returns null for default AGEND_HOME
+ * (backward compatible — uses tmux's default socket). Custom AGEND_HOME
+ * gets a unique socket to isolate tmux servers.
+ */
+export function getTmuxSocketName(): string | null {
+  const home = getAgendHome();
+  const defaultHome = join(homedir(), ".agend");
+  if (home === defaultHome) return null;
+  return "agend-" + createHash("md5").update(home).digest("hex").slice(0, 6);
+}

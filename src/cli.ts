@@ -16,7 +16,13 @@ import {
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawn, execSync, execFileSync } from "node:child_process";
-import { getAgendHome } from "./paths.js";
+import { getAgendHome, getTmuxSocketName } from "./paths.js";
+
+/** Prefix tmux args with -L when socket isolation is active. */
+function tmuxArgs(args: string[]): string[] {
+  const socket = getTmuxSocketName();
+  return socket ? ["-L", socket, ...args] : args;
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -1445,7 +1451,7 @@ program
 
     // Verify tmux session exists
     try {
-      execFileSync("tmux", ["has-session", "-t", session], { stdio: "pipe" });
+      execFileSync("tmux", tmuxArgs(["has-session", "-t", session]), { stdio: "pipe" });
     } catch {
       console.error(`tmux session "${session}" not found. Is the fleet running?`);
       process.exit(1);
@@ -1457,7 +1463,7 @@ program
       : [`${session}:${name}`];
     let selected = false;
     for (const t of targets) {
-      try { execFileSync("tmux", ["select-window", "-t", t], { stdio: "pipe" }); selected = true; break; }
+      try { execFileSync("tmux", tmuxArgs(["select-window", "-t", t]), { stdio: "pipe" }); selected = true; break; }
       catch { /* try next */ }
     }
     if (!selected) {
@@ -1469,7 +1475,7 @@ program
     if (process.env.TMUX) {
       // Already inside tmux — switch client
       try {
-        execFileSync("tmux", ["switch-client", "-t", session], { stdio: "inherit" });
+        execFileSync("tmux", tmuxArgs(["switch-client", "-t", session]), { stdio: "inherit" });
       } catch {
         console.error("Failed to switch tmux client.");
         process.exit(1);
@@ -1477,7 +1483,7 @@ program
     } else {
       // Outside tmux — attach
       try {
-        execFileSync("tmux", ["attach-session", "-t", session], { stdio: "inherit" });
+        execFileSync("tmux", tmuxArgs(["attach-session", "-t", session]), { stdio: "inherit" });
       } catch {
         console.error("Failed to attach to tmux session.");
         process.exit(1);
