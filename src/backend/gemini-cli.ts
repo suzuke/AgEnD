@@ -14,7 +14,8 @@ export class GeminiCliBackend implements CliBackend {
   buildCommand(config: CliBackendConfig): string {
     // --resume latest lets Gemini auto-resume without showing a session picker.
     // Using specific session IDs causes a picker dialog that daemon can't handle.
-    let cmd = `${this.binaryPath} --yolo --resume latest`;
+    let cmd = `${this.binaryPath} --yolo`;
+    if (!config.skipResume) cmd += " --resume latest";
 
     if (config.model) {
       cmd += ` --model ${config.model}`;

@@ -24,7 +24,7 @@ export class ClaudeCodeBackend implements CliBackend {
     if (config.skipPermissions !== false) cmd += " --dangerously-skip-permissions";
 
     const sessionIdFile = join(this.instanceDir, "session-id");
-    if (existsSync(sessionIdFile)) {
+    if (!config.skipResume && existsSync(sessionIdFile)) {
       const sid = readFileSync(sessionIdFile, "utf-8").trim();
       if (sid && /^[a-zA-Z0-9_-]+$/.test(sid)) cmd += ` --resume ${sid}`;
     }

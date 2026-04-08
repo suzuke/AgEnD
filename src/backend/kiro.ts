@@ -14,7 +14,7 @@ export class KiroBackend implements CliBackend {
     let cmd = `${this.binaryPath} chat`;
     if (config.skipPermissions !== false) cmd += " --trust-all-tools";
     // --resume is boolean: Kiro auto-resumes latest conversation for this working directory
-    cmd += " --resume";
+    if (!config.skipResume) cmd += " --resume";
     if (config.model) cmd += ` --model ${config.model}`;
     cmd += " --require-mcp-startup";
     return cmd;

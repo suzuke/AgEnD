@@ -20,7 +20,12 @@ export class CodexBackend implements CliBackend {
     // working directory. Each AgEnD instance has a unique working_directory,
     // so sessions are per-instance scoped and won't collide.
     // If no prior session exists (first launch), Codex falls back to a fresh session.
-    let cmd = `${this.binaryPath} resume --last ${approvalFlag}`;
+    let cmd: string;
+    if (config.skipResume) {
+      cmd = `${this.binaryPath} ${approvalFlag}`;
+    } else {
+      cmd = `${this.binaryPath} resume --last ${approvalFlag}`;
+    }
     if (config.model) cmd += ` -c model="${config.model}"`;
     return cmd;
   }

@@ -13,6 +13,8 @@ export interface CliBackendConfig {
   mcpServers: Record<string, McpServerEntry>;
   skipPermissions?: boolean;
   model?: string;
+  /** When true, backend should not resume a previous session (crash recovery). */
+  skipResume?: boolean;
 }
 
 /** Action to take when an error pattern is detected in PTY output. */

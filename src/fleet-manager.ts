@@ -219,13 +219,17 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     }
 
     // Then kill all remaining agend instance windows to prevent orphans
-    const existingWindows = await TmuxManager.listWindows(getTmuxSession());
-    for (const w of existingWindows) {
-      if (w.name !== "zsh") {
-        const tm = new TmuxManager(getTmuxSession(), w.id);
-        await tm.killWindow();
+    const agendNames = new Set(Object.keys(fleet.instances));
+    agendNames.add("general");
+    try {
+      const existingWindows = await TmuxManager.listWindows(getTmuxSession());
+      for (const w of existingWindows) {
+        if (agendNames.has(w.name)) {
+          const tm = new TmuxManager(getTmuxSession(), w.id);
+          await tm.killWindow();
+        }
       }
-    }
+    } catch { /* best effort — don't block startup */ }
 
     const pidPath = join(this.dataDir, "fleet.pid");
     writeFileSync(pidPath, String(process.pid), "utf-8");
@@ -1658,6 +1662,17 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
 
     this.logger.info("All instances idle — stopping for reload...");
     await this.stopAll();
+
+    // Clean up tmux session if no foreign windows remain
+    try {
+      const remaining = await TmuxManager.listWindows(getTmuxSession());
+      if (remaining.length <= 1) {
+        await TmuxManager.killSession(getTmuxSession());
+        this.logger.info("Killed tmux session (clean)");
+      } else {
+        this.logger.warn({ remaining: remaining.map(w => w.name) }, "Windows remain after stopAll — skipping session kill");
+      }
+    } catch { /* best effort — don't block exit */ }
   }
 
   /**
@@ -1779,6 +1794,19 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
     await Promise.allSettled(
       instanceNames.map(name => this.stopInstance(name))
     );
+
+    // Kill remaining orphan windows to prevent stale state on restart
+    try {
+      const agendNames = new Set(instanceNames);
+      agendNames.add("general");
+      const existingWindows = await TmuxManager.listWindows(getTmuxSession());
+      for (const w of existingWindows) {
+        if (agendNames.has(w.name)) {
+          const tm = new TmuxManager(getTmuxSession(), w.id);
+          await tm.killWindow();
+        }
+      }
+    } catch { /* best effort — don't block restart */ }
 
     const fleet = this.loadConfig(this.configPath);
     this.fleetConfig = fleet;

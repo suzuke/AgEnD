@@ -57,6 +57,7 @@ export class Daemon extends EventEmitter {
   private rapidCrashCount = 0;
   private healthCheckPaused = false;
   private spawning = false;
+  private skipResume = false;
   // Context rotation quality tracking
   private rotationStartedAt = 0;
   private preRotationContextPct = 0;
@@ -106,6 +107,19 @@ export class Daemon extends EventEmitter {
     mkdirSync(this.instanceDir, { recursive: true });
     writeFileSync(join(this.instanceDir, "daemon.pid"), String(process.pid));
     this.logger.info(`Starting ${this.name}`);
+
+    // P1: Read crash state from previous run — skip resume if last run was a crash loop
+    const crashStatePath = join(this.instanceDir, "crash-state.json");
+    try {
+      if (existsSync(crashStatePath)) {
+        const state = JSON.parse(readFileSync(crashStatePath, "utf-8"));
+        if (state.resumeDisabled) {
+          this.skipResume = true;
+          this.logger.warn("Previous crash loop detected — starting without resume");
+        }
+        unlinkSync(crashStatePath);
+      }
+    } catch { /* corrupt file — ignore */ }
 
     // 1. IPC server — bridge between MCP server (Claude's child) and daemon
     const sockPath = join(this.instanceDir, "channel.sock");
@@ -362,6 +376,14 @@ export class Daemon extends EventEmitter {
             { rapidCrashCount: this.rapidCrashCount },
             "Claude keeps crashing shortly after launch (possible rate limit) — pausing respawn",
           );
+          // P1: Persist crash state so next process restart skips resume
+          try {
+            writeFileSync(join(this.instanceDir, "crash-state.json"), JSON.stringify({
+              rapidCrashCount: this.rapidCrashCount,
+              lastCrashAt: Date.now(),
+              resumeDisabled: true,
+            }));
+          } catch { /* best effort */ }
           this.emit("crash_loop", this.name);
           return; // don't schedule next — paused
         }
@@ -394,6 +416,8 @@ export class Daemon extends EventEmitter {
           // Clear stale session-id so respawn doesn't --resume a dead session
           const sidFile = join(this.instanceDir, "session-id");
           try { unlinkSync(sidFile); } catch { /* may not exist */ }
+          // Skip resume on crash respawn — previous session may be corrupted
+          this.skipResume = true;
           // Kill any same-name windows before respawn to prevent orphans.
           // Wrapped in try-catch: if tmux server is dead, listWindows throws —
           // must not block spawnClaudeWindow (which calls ensureSession).
@@ -953,6 +977,7 @@ export class Daemon extends EventEmitter {
       },
       skipPermissions: this.config.skipPermissions,
       model: this.modelOverride ?? this.config.model,
+      skipResume: this.skipResume,
     };
   }
 
@@ -990,10 +1015,11 @@ export class Daemon extends EventEmitter {
     const alive = await this.trySpawn();
     if (!alive) {
       // First attempt failed (stale --resume, crash, rate limit, etc.)
-      // Clean slate: clear session-id and retry once.
-      this.logger.warn("CLI startup failed — clearing session-id and retrying");
+      // Clean slate: clear session-id, skip resume, and retry once.
+      this.logger.warn("CLI startup failed — clearing session-id and retrying without resume");
       const sidFile = join(this.instanceDir, "session-id");
       try { unlinkSync(sidFile); } catch { /* may not exist */ }
+      this.skipResume = true;
       await this.tmux!.killWindow();
 
       const retryAlive = await this.trySpawn();
@@ -1004,6 +1030,7 @@ export class Daemon extends EventEmitter {
     }
 
     this.lastSpawnAt = Date.now();
+    this.skipResume = false; // CLI started successfully — reset for next spawn
     } finally {
       this.spawning = false;
     }
