@@ -82,7 +82,7 @@ export interface CliBackend {
   preTrust?(workingDirectory: string): void;
 
   /** Command to gracefully quit the CLI (e.g. "/exit", "/quit"). */
-  getQuitCommand?(): string;
+  getQuitCommand(): string;
 
   /** Clean up config files on shutdown. */
   cleanup?(config: CliBackendConfig): void;

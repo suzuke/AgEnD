@@ -618,7 +618,7 @@ export class Daemon extends EventEmitter {
       // Pause health check to prevent crash detection during graceful shutdown
       this.healthCheckPaused = true;
       let killed = false;
-      const quitCmd = this.backend?.getQuitCommand?.();
+      const quitCmd = this.backend?.getQuitCommand();
       if (quitCmd) {
         await this.tmux.sendKeys(quitCmd);
         await this.tmux.sendSpecialKey("Enter");

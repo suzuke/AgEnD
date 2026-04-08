@@ -74,12 +74,17 @@ fleet
       try {
         const healthResp = await fetch(`http://127.0.0.1:${port}/health`);
         if (healthResp.ok) {
-          const resp = await fetch(`http://127.0.0.1:${port}/api/instance/${encodeURIComponent(instance)}/start`, { method: "POST" });
-          const body = await resp.json() as Record<string, unknown>;
-          if (resp.ok) {
-            console.log(`Instance "${instance}" started via running fleet daemon`);
-          } else {
-            console.error(`Start failed: ${body.error ?? resp.statusText}`);
+          try {
+            const resp = await fetch(`http://127.0.0.1:${port}/api/instance/${encodeURIComponent(instance)}/start`, { method: "POST" });
+            const body = await resp.json() as Record<string, unknown>;
+            if (resp.ok) {
+              console.log(`Instance "${instance}" started via running fleet daemon`);
+            } else {
+              console.error(`Start failed: ${body.error ?? resp.statusText}`);
+              process.exit(1);
+            }
+          } catch (err) {
+            console.error(`Failed to start instance via fleet API: ${(err as Error).message}`);
             process.exit(1);
           }
           return;
