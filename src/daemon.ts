@@ -332,8 +332,11 @@ export class Daemon extends EventEmitter {
 
     }
 
-    // Set AGEND_SOCKET_PATH env for MCP server
-    process.env.AGEND_SOCKET_PATH = sockPath;
+    // NOTE: Do NOT set process.env.AGEND_SOCKET_PATH here — it pollutes the
+    // shared fleet manager process env. Each daemon overwrites it, so the last
+    // one wins, causing MCP servers (especially kiro-cli which inherits process
+    // env) to connect to the wrong socket. The socket path is passed via
+    // per-instance MCP config files or wrapper scripts instead.
 
     // 10. Health check — detect crashed tmux window and respawn
     // Re-enabled: orphan window issue fixed by killing same-name windows before respawn.

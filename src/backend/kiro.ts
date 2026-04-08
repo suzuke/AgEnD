@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
 import { type CliBackend, type CliBackendConfig, type ErrorPattern, type StartupDialog, resolveBinary } from "./types.js";
 
 export class KiroBackend implements CliBackend {
@@ -23,6 +23,12 @@ export class KiroBackend implements CliBackend {
   writeConfig(config: CliBackendConfig): void {
     // Kiro CLI reads workspace MCP config from .kiro/settings/mcp.json
     // Format: { "mcpServers": { "name": { command, args, env } } }
+    //
+    // WORKAROUND: kiro-cli ignores the "env" block in mcp.json — the MCP server
+    // subprocess inherits the fleet manager's process env, which has a stale
+    // AGEND_SOCKET_PATH from whichever daemon wrote to it last.
+    // Fix: generate a wrapper script that exports the correct env vars before
+    // exec-ing the real MCP server.
     const mcpDir = join(config.workingDirectory, ".kiro", "settings");
     mkdirSync(mcpDir, { recursive: true });
     const mcpConfigPath = join(mcpDir, "mcp.json");
@@ -30,14 +36,22 @@ export class KiroBackend implements CliBackend {
     let mcpConfig: Record<string, unknown> = {};
     try { mcpConfig = JSON.parse(readFileSync(mcpConfigPath, "utf-8")); } catch { /* new file */ }
 
-    // Use instance-namespaced key to avoid conflicts when multiple instances share working directory
     const servers = (mcpConfig.mcpServers ?? {}) as Record<string, unknown>;
     for (const [name, entry] of Object.entries(config.mcpServers)) {
       const instanceKey = `${name}-${config.instanceName}`;
+      const allEnv = { ...entry.env, AGEND_INSTANCE_NAME: config.instanceName };
+
+      // Write a wrapper script that sets env vars explicitly
+      const wrapperPath = join(this.instanceDir, `mcp-wrapper-${name}.sh`);
+      const envExports = Object.entries(allEnv)
+        .map(([k, v]) => `export ${k}=${JSON.stringify(v)}`)
+        .join("\n");
+      writeFileSync(wrapperPath, `#!/bin/bash\n${envExports}\nexec ${entry.command} ${entry.args.map((a: string) => JSON.stringify(a)).join(" ")}\n`);
+      chmodSync(wrapperPath, 0o755);
+
       servers[instanceKey] = {
-        command: entry.command,
-        args: entry.args,
-        env: { ...entry.env, AGEND_INSTANCE_NAME: config.instanceName },
+        command: wrapperPath,
+        args: [],
       };
     }
     // Clean up old non-namespaced key if present
