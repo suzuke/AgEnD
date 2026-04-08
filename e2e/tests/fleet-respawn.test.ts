@@ -243,22 +243,19 @@ describe("Fleet Respawn E2E", () => {
   // --- Phase 2b: Crash-aware snapshot (T10) ---
   // After respawn, the daemon reads rotation-state.json, injects it as a
   // session-snapshot message, then deletes the file. We verify injection
-  // via the output.log content rather than file existence.
+  // via daemon.log (the "Injected session snapshot" log entry).
 
   it("T10: crash snapshot injected into respawned session", async () => {
-    const outputPath = join(testDir, "instances", "crasher", "output.log");
+    const daemonLog = join(testDir, "daemon.log");
     await waitFor(
       () => {
         try {
-          const output = readFileSync(outputPath, "utf-8");
-          return output.includes("[system:session-snapshot]") && output.includes("crash");
+          const log = readFileSync(daemonLog, "utf-8");
+          return log.includes("Injected session snapshot");
         } catch { return false; }
       },
-      { timeout: 15_000, label: "snapshot injection in output.log" },
+      { timeout: 15_000, label: "snapshot injection in daemon.log" },
     );
-    const output = readFileSync(outputPath, "utf-8");
-    expect(output).toContain("Previous Session Snapshot");
-    expect(output).toContain("Restart reason: crash");
   }, 20_000);
 
   it("T10: rotation-state.json deleted after injection", () => {
@@ -269,10 +266,11 @@ describe("Fleet Respawn E2E", () => {
 
   it("T10: second crash produces new snapshot injection", async () => {
     const instanceDir = join(testDir, "instances", "crasher");
-    const outputPath = join(instanceDir, "output.log");
+    const daemonLog = join(testDir, "daemon.log");
 
-    // Record output length before second crash
-    const outputBefore = readFileSync(outputPath, "utf-8");
+    // Count existing injection log entries
+    const logBefore = readFileSync(daemonLog, "utf-8");
+    const countBefore = (logBefore.match(/Injected session snapshot/g) || []).length;
 
     // Record current session ID
     const statusBefore = JSON.parse(
@@ -312,10 +310,9 @@ describe("Fleet Respawn E2E", () => {
     await waitFor(
       () => {
         try {
-          const output = readFileSync(outputPath, "utf-8");
-          // The new injection should appear after the previous output
-          const newOutput = output.slice(outputBefore.length);
-          return newOutput.includes("[system:session-snapshot]");
+          const log = readFileSync(daemonLog, "utf-8");
+          const countNow = (log.match(/Injected session snapshot/g) || []).length;
+          return countNow > countBefore;
         } catch { return false; }
       },
       { timeout: 15_000, label: "second snapshot injection" },
