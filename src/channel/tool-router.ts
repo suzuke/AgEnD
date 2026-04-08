@@ -43,9 +43,11 @@ export function routeToolCall(
         return true;
       }
       const replyThreadId = args.thread_id as string ?? threadId;
+      const format = args.format === "markdown" ? "html" as const : undefined;
       adapter.sendText(chatId, args.text as string ?? "", {
         threadId: replyThreadId,
         replyTo: args.reply_to as string,
+        format,
       }).then(async (sent) => {
         for (const filePath of files) {
           await adapter.sendFile(chatId, filePath, { threadId: replyThreadId });
