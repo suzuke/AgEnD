@@ -394,14 +394,18 @@ export class Daemon extends EventEmitter {
           // Clear stale session-id so respawn doesn't --resume a dead session
           const sidFile = join(this.instanceDir, "session-id");
           try { unlinkSync(sidFile); } catch { /* may not exist */ }
-          // Kill any same-name windows before respawn to prevent orphans
-          const windows = await TmuxManager.listWindows(this.tmuxSessionName);
-          for (const w of windows) {
-            if (w.name === this.name) {
-              const tm = new TmuxManager(this.tmuxSessionName, w.id);
-              await tm.killWindow();
+          // Kill any same-name windows before respawn to prevent orphans.
+          // Wrapped in try-catch: if tmux server is dead, listWindows throws —
+          // must not block spawnClaudeWindow (which calls ensureSession).
+          try {
+            const windows = await TmuxManager.listWindows(this.tmuxSessionName);
+            for (const w of windows) {
+              if (w.name === this.name) {
+                const tm = new TmuxManager(this.tmuxSessionName, w.id);
+                await tm.killWindow();
+              }
             }
-          }
+          } catch { /* tmux server may be dead — ensureSession in trySpawn will recover */ }
           this.writeRotationSnapshot("crash");
           await this.spawnClaudeWindow();
           await this.injectSnapshotMessage();
