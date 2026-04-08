@@ -120,5 +120,17 @@ export class GeminiCliBackend implements CliBackend {
         }
       }
     } catch { /* best effort */ }
+
+    // Remove trust entries added by preTrust()
+    try {
+      const trustFile = join(homedir(), ".gemini", "trustedFolders.json");
+      const trusted = JSON.parse(readFileSync(trustFile, "utf-8"));
+      const workDir = config.workingDirectory;
+      const parent = dirname(workDir);
+      let changed = false;
+      if (trusted[workDir] === "TRUST_FOLDER") { delete trusted[workDir]; changed = true; }
+      if (parent !== workDir && trusted[parent] === "TRUST_PARENT") { delete trusted[parent]; changed = true; }
+      if (changed) writeFileSync(trustFile, JSON.stringify(trusted, null, 2));
+    } catch { /* best effort */ }
   }
 }

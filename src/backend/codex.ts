@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { type CliBackend, type CliBackendConfig, type ErrorPattern, type RuntimeDialog, type StartupDialog, resolveBinary } from "./types.js";
@@ -111,5 +111,16 @@ export class CodexBackend implements CliBackend {
       const mcpName = `${name}-${config.instanceName}`;
       try { execFileSync(this.binaryPath, ["mcp", "remove", mcpName], { stdio: "ignore" }); } catch { /* best effort */ }
     }
+
+    // Remove trust entry from ~/.codex/config.toml
+    try {
+      const configPath = join(homedir(), ".codex", "config.toml");
+      const content = readFileSync(configPath, "utf-8");
+      const escaped = config.workingDirectory.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const re = new RegExp(`\\n?\\[projects\\."${escaped}"\\]\\ntrust_level = "trusted"\\n?`);
+      if (re.test(content)) {
+        writeFileSync(configPath, content.replace(re, "\n"));
+      }
+    } catch { /* best effort */ }
   }
 }
