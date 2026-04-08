@@ -644,6 +644,10 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
           this.lastInboundUser.set(generalInstance, msg.username);
           this.logger.info(`${msg.username} → ${generalInstance}: ${(text ?? "").slice(0, 100)}`);
           this.eventLog?.logActivity("message", msg.username, (text ?? "").slice(0, 200), generalInstance);
+          this.emitSseEvent("message", {
+            instance: generalInstance, sender: msg.username,
+            text: (text ?? "").slice(0, 2000), ts: new Date().toISOString(),
+          });
         }
       }
       return;
