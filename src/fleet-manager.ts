@@ -206,6 +206,10 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     const fleet = this.loadConfig(configPath);
     const topicMode = fleet.channel?.mode === "topic";
 
+    // Set tmux socket isolation for custom AGEND_HOME
+    const { getTmuxSocketName: getSocket } = await import("./paths.js");
+    TmuxManager.setSocketName(getSocket());
+
     await TmuxManager.ensureSession(getTmuxSession());
 
     // Start tmux control mode client for idle detection
