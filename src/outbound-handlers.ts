@@ -142,6 +142,7 @@ const listInstances: Handler = (ctx, args, respond, meta) => {
       topic_id: config.topic_id ?? null,
       display_name: config.display_name ?? null,
       description: config.description ?? null,
+      backend: config.backend ?? "claude-code",
       tags: config.tags ?? [],
       last_activity: ctx.lastActivityMs(name) ? new Date(ctx.lastActivityMs(name)).toISOString() : null,
     }));
@@ -166,6 +167,7 @@ const describeInstance: Handler = (ctx, args, respond) => {
       working_directory: config.working_directory,
       status: ctx.lifecycle.daemons.has(targetName) ? "running" : "stopped",
       topic_id: config.topic_id ?? null,
+      backend: config.backend ?? "claude-code",
       model: config.model ?? null,
       last_activity: ctx.lastActivityMs(targetName) ? new Date(ctx.lastActivityMs(targetName)).toISOString() : null,
       worktree_source: config.worktree_source ?? null,

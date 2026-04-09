@@ -326,8 +326,8 @@ fleet
     const names = Object.keys(config.instances);
     const nameWidth = Math.max(20, ...names.map(n => n.length + 2));
 
-    console.log("Instance".padEnd(nameWidth) + "Status".padEnd(10) + "Context".padEnd(10) + "Cost".padEnd(10) + "Topic");
-    console.log("\u2500".repeat(nameWidth + 40));
+    console.log("Instance".padEnd(nameWidth) + "Backend".padEnd(14) + "Status".padEnd(10) + "Context".padEnd(10) + "Cost".padEnd(10) + "Topic");
+    console.log("\u2500".repeat(nameWidth + 54));
     for (const [name, inst] of Object.entries(config.instances)) {
       const status = fm.getInstanceStatus(name);
       const topic = inst.topic_id ? `#${inst.topic_id}` : "(DM)";
@@ -348,8 +348,10 @@ fleet
         }
       } catch { /* ignore read errors */ }
 
+      const backend = inst.backend ?? "claude-code";
       console.log(
         name.padEnd(nameWidth) +
+        backend.padEnd(14) +
         status.padEnd(10) +
         contextStr.padEnd(10) +
         costStr.padEnd(10) +
