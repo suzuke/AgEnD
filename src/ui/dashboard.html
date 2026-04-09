@@ -474,7 +474,10 @@ async function showCreateInstance() {
     <div class="form-field"><label id="ci-topic-label">Topic Name</label><input id="ci-topic" placeholder="Auto from directory name"></div>
     <div class="form-field"><label>Description</label><input id="ci-desc" placeholder="What this instance does"></div>
     <div class="form-field"><label>Backend</label><select id="ci-backend">${backendOpts}</select></div>
+    <div class="form-field"><label>Model</label><input id="ci-model" placeholder="e.g. sonnet, opus, gemini-2.5-pro"></div>
     <div class="form-field"><label>Branch (git worktree)</label><input id="ci-branch" placeholder="e.g. feature-x"></div>
+    <div class="form-field"><label>Tags</label><input id="ci-tags" placeholder="comma-separated, e.g. dev, review"></div>
+    <div class="form-field"><label>System Prompt</label><textarea id="ci-prompt" rows="3" placeholder="Custom instructions for this instance"></textarea></div>
     <div class="form-actions"><button class="btn btn-ghost" onclick="this.closest('.form-overlay').remove()">Cancel</button>
     <button class="btn btn-accent" id="ci-go">Create</button></div></div>`;
   document.body.appendChild(ov);
@@ -494,7 +497,10 @@ async function showCreateInstance() {
     if (v("ci-topic")) body.topic_name = v("ci-topic");
     if (v("ci-desc")) body.description = v("ci-desc");
     const backend = document.getElementById("ci-backend").value; if (backend) body.backend = backend;
+    if (v("ci-model")) body.model = v("ci-model");
     if (v("ci-branch")) body.branch = v("ci-branch");
+    const tags = v("ci-tags"); if (tags) body.tags = tags.split(",").map(t => t.trim()).filter(Boolean);
+    if (v("ci-prompt")) body.systemPrompt = v("ci-prompt");
     const r = await api("POST", "/ui/instances", body);
     if (r.error) { toast(r.error, false); btn.disabled = false; btn.textContent = "Create"; }
     else { toast("Instance created"); ov.remove(); }

@@ -1140,6 +1140,20 @@ export class Daemon extends EventEmitter {
    */
   private async trySpawn(): Promise<boolean> {
     const backendConfig = this.buildBackendConfig();
+
+    // Detect instructions change → force new session for backends that don't
+    // re-read instruction files on --resume (Codex, Gemini, Kiro).
+    if (!backendConfig.skipResume && !this.backend!.instructionsReloadedOnResume && backendConfig.instructions) {
+      const prevFile = join(this.instanceDir, "prev-instructions");
+      let prev = "";
+      try { prev = readFileSync(prevFile, "utf-8"); } catch {}
+      if (prev && prev !== backendConfig.instructions) {
+        this.logger.info("Instructions changed — skipping resume to reload");
+        backendConfig.skipResume = true;
+      }
+      writeFileSync(prevFile, backendConfig.instructions);
+    }
+
     this.backend!.writeConfig(backendConfig);
     this.backend!.preTrust?.(this.config.working_directory);
     const cmd = `TERM=xterm-256color AGEND_INSTANCE_NAME=${this.name} ` + this.backend!.buildCommand(backendConfig);

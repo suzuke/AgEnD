@@ -80,6 +80,9 @@ export interface CliBackend {
    */
   getStartupDialogs?(): StartupDialog[];
 
+  /** Whether this backend re-reads instruction files on --resume (e.g. Claude Code's --append-system-prompt-file). */
+  readonly instructionsReloadedOnResume?: boolean;
+
   /** Pre-approve a working directory to skip trust dialogs on startup. */
   preTrust?(workingDirectory: string): void;
 

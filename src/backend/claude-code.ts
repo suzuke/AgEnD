@@ -6,6 +6,7 @@ import { type CliBackend, type CliBackendConfig, type ErrorPattern, type Startup
 
 export class ClaudeCodeBackend implements CliBackend {
   readonly binaryName = "claude";
+  readonly instructionsReloadedOnResume = true;
   private binaryPath: string;
 
   constructor(private instanceDir: string) {

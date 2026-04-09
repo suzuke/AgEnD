@@ -239,6 +239,19 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     return this.lifecycle.stop(name);
   }
 
+  /** Restart a single instance, reloading fleet.yaml first to pick up config changes. */
+  async restartSingleInstance(name: string): Promise<void> {
+    if (this.configPath) {
+      this.loadConfig(this.configPath);
+      this.routing.rebuild(this.fleetConfig!);
+    }
+    const config = this.fleetConfig?.instances[name];
+    if (!config) throw new Error(`Instance not found: ${name}`);
+    await this.stopInstance(name);
+    const topicMode = this.fleetConfig?.channel?.mode === "topic";
+    await this.startInstance(name, config, topicMode ?? false);
+  }
+
   /** Load .env file from data dir into process.env */
   private loadEnvFile(): void {
     const envPath = join(this.dataDir, ".env");
@@ -2045,25 +2058,18 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
       // Instance restart (immediate, no idle wait)
       if (req.method === "POST" && req.url?.startsWith("/restart/")) {
         const name = decodeURIComponent(req.url.slice("/restart/".length));
-        const config = this.fleetConfig?.instances[name];
-        if (!config) {
-          res.writeHead(404);
-          res.end(JSON.stringify({ error: `Instance not found: ${name}` }));
-          return;
-        }
         this.logger.info({ name }, "Instance restart requested via HTTP");
         (async () => {
           try {
-            await this.stopInstance(name);
-            const topicMode = this.fleetConfig?.channel?.mode === "topic";
-            await this.startInstance(name, config, topicMode ?? false);
+            await this.restartSingleInstance(name);
             this.logger.info({ name }, "Instance restarted");
             this.emitSseEvent("status", this.getUiStatus());
             res.writeHead(200);
             res.end(JSON.stringify({ restarted: name }));
           } catch (err) {
             this.logger.error({ err, name }, "Instance restart failed");
-            res.writeHead(500);
+            const status = (err as Error).message.includes("not found") ? 404 : 500;
+            res.writeHead(status);
             res.end(JSON.stringify({ error: `Restart failed: ${(err as Error).message}` }));
           }
         })();

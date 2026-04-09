@@ -32,6 +32,7 @@ export interface WebApiContext {
   emitSseEvent(event: string, data: unknown): void;
   startInstance(name: string, config: unknown, topicMode: boolean): Promise<void>;
   stopInstance(name: string): Promise<void>;
+  restartSingleInstance(name: string): Promise<void>;
   removeInstance(name: string): Promise<void>;
   lastInboundUser: Map<string, string>;
   saveFleetConfig(): void;
@@ -272,20 +273,14 @@ export function handleWebRequest(
   const restartMatch = path.match(/^\/ui\/restart\/(.+)$/);
   if (method === "POST" && restartMatch) {
     const name = decodeURIComponent(restartMatch[1]);
-    const config = ctx.fleetConfig?.instances[name];
-    if (!config) {
-      json(res, 404, { error: `Instance not found: ${name}` });
-      return true;
-    }
     (async () => {
       try {
-        await ctx.stopInstance(name);
-        const topicMode = ctx.fleetConfig?.channel?.mode === "topic";
-        await ctx.startInstance(name, config, topicMode ?? false);
+        await ctx.restartSingleInstance(name);
         ctx.emitSseEvent("status", ctx.getUiStatus());
         json(res, 200, { restarted: name });
       } catch (err) {
-        json(res, 500, { error: (err as Error).message });
+        const status = (err as Error).message.includes("not found") ? 404 : 500;
+        json(res, status, { error: (err as Error).message });
       }
     })();
     return true;

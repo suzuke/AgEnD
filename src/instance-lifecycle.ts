@@ -405,7 +405,7 @@ export class InstanceLifecycle {
         ...(args.tool_set ? { tool_set: args.tool_set as string } : {}),
         ...(args.skipPermissions != null ? { skipPermissions: args.skipPermissions as boolean } : {}),
         ...(args.lightweight != null ? { lightweight: args.lightweight as boolean } : {}),
-        ...(args.workflow !== undefined ? { workflow: args.workflow as string | false } : {}),
+        ...(args.workflow !== undefined ? { workflow: args.workflow === "false" ? false : args.workflow as string } : {}),
         ...(args.tags ? { tags: args.tags as string[] } : {}),
         ...(worktreePath ? { worktree_source: directory } : {}),
       } as InstanceConfig;

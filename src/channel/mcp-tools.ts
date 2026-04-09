@@ -453,6 +453,15 @@ export const TOOLS = [
             type: "string",
             description: "Custom system prompt for this instance (inline text only, file: prefix not supported here). Injected after fleet context in MCP instructions.",
           },
+          tags: {
+            type: "array",
+            items: { type: "string" },
+            description: "Tags for categorization and filtering.",
+          },
+          workflow: {
+            type: "string",
+            description: "Workflow template. 'builtin' (default), 'false' to disable, or custom text.",
+          },
         },
         required: [],
       },
