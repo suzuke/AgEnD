@@ -117,6 +117,10 @@ export interface FleetDefaults extends Partial<InstanceConfig> {
     retry_count?: number;
     retry_interval_ms?: number;
   };
+  startup?: {
+    concurrency?: number;
+    stagger_delay_ms?: number;
+  };
   cost_guard?: CostGuardConfig;
   hang_detector?: HangDetectorConfig;
   daily_summary?: DailySummaryConfig;

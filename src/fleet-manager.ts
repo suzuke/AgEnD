@@ -175,6 +175,65 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     await this.connectIpcToInstance(name);
   }
 
+  /**
+   * Start instances with configurable concurrency and stagger delay.
+   * Instances sharing the same working_directory are serialized within a group
+   * to avoid config file races. Stagger delay is group-to-group, not instance-to-instance.
+   * TODO: per-instance startup timeout (existing issue, not introduced here)
+   */
+  private async startInstancesWithConcurrency(
+    entries: [string, InstanceConfig][],
+    topicMode: boolean,
+  ): Promise<void> {
+    const raw = this.fleetConfig?.defaults?.startup;
+    const concurrency = Math.max(1, Math.min(20, raw?.concurrency ?? 3));
+    const staggerMs = Math.max(0, Math.min(30_000, raw?.stagger_delay_ms ?? 2000));
+
+    const byWorkDir = new Map<string, [string, InstanceConfig][]>();
+    for (const [name, config] of entries) {
+      const dir = config.working_directory;
+      if (!byWorkDir.has(dir)) byWorkDir.set(dir, []);
+      byWorkDir.get(dir)!.push([name, config]);
+    }
+    const groups = [...byWorkDir.values()];
+
+    let running = 0;
+    let idx = 0;
+    let lastStartAt = 0;
+    let pendingTimer = false;
+
+    await new Promise<void>((resolve) => {
+      if (groups.length === 0) { resolve(); return; }
+      const startNext = () => {
+        if (pendingTimer) return;
+        while (running < concurrency && idx < groups.length) {
+          const now = Date.now();
+          const elapsed = now - lastStartAt;
+          if (lastStartAt > 0 && elapsed < staggerMs) {
+            pendingTimer = true;
+            setTimeout(() => { pendingTimer = false; startNext(); }, staggerMs - elapsed);
+            return;
+          }
+          const group = groups[idx++];
+          running++;
+          lastStartAt = Date.now();
+          (async () => {
+            for (const [name, config] of group) {
+              await this.startInstance(name, config, topicMode).catch((err) =>
+                this.logger.error({ err, name }, "Failed to start instance"),
+              );
+            }
+          })().finally(() => {
+            running--;
+            if (idx >= groups.length && running === 0) resolve();
+            else startNext();
+          });
+        }
+      };
+      startNext();
+    });
+  }
+
   async stopInstance(name: string): Promise<void> {
     this.failoverActive.delete(name);
     return this.lifecycle.stop(name);
@@ -333,41 +392,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       } catch { /* no decisions available */ }
     }
 
-    // Parallel startup with concurrency limit.
-    // Instances sharing the same working_directory are serialized to avoid
-    // config file races (e.g. opencode.json, SQLite migrations).
-    const instanceEntries = Object.entries(fleet.instances);
-    const CONCURRENCY = 3;
-    const byWorkDir = new Map<string, [string, typeof fleet.instances[string]][]>();
-    for (const [name, config] of instanceEntries) {
-      const dir = config.working_directory;
-      if (!byWorkDir.has(dir)) byWorkDir.set(dir, []);
-      byWorkDir.get(dir)!.push([name, config]);
-    }
-    const groups = [...byWorkDir.values()];
-    let running = 0;
-    let idx = 0;
-    await new Promise<void>(resolve => {
-      if (groups.length === 0) { resolve(); return; }
-      const startNext = () => {
-        while (running < CONCURRENCY && idx < groups.length) {
-          const group = groups[idx++];
-          running++;
-          (async () => {
-            for (const [name, config] of group) {
-              await this.startInstance(name, config, topicMode).catch(err =>
-                this.logger.error({ err, name }, "Failed to start instance")
-              );
-            }
-          })().finally(() => {
-            running--;
-            if (idx >= groups.length && running === 0) resolve();
-            else startNext();
-          });
-        }
-      };
-      startNext();
-    });
+    await this.startInstancesWithConcurrency(Object.entries(fleet.instances), topicMode);
 
     if (topicMode && fleet.channel) {
 
@@ -481,8 +506,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
           if (config) {
             const topicMode = this.fleetConfig?.channel?.mode === "topic";
             await this.startInstance(instanceName, config, topicMode);
-            await new Promise(r => setTimeout(r, 3000));
-            await this.connectIpcToInstance(instanceName);
+            // startInstance already calls connectIpcToInstance
           }
           this.adapter?.editMessage(data.chatId, data.messageId, `🔄 ${instanceName} restarted.`).catch(() => {});
         } else {
@@ -1734,20 +1758,16 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
     // Start new + restart modified instances
     for (const [name, config] of Object.entries(newInstances)) {
       if (!this.daemons.has(name)) {
-        // New instance
+        // New instance — startInstance already calls connectIpcToInstance
         this.logger.info({ name }, "New instance in config — starting");
-        await this.startInstance(name, config, topicMode).then(() =>
-          this.connectIpcToInstance(name)
-        ).catch(err =>
+        await this.startInstance(name, config, topicMode).catch(err =>
           this.logger.error({ err, name }, "Failed to start new instance"));
       } else if (oldConfig?.instances[name]) {
         // Restart if any config field changed
         if (JSON.stringify(oldConfig.instances[name]) !== JSON.stringify(config)) {
           this.logger.info({ name }, "Instance config changed — restarting");
           await this.stopInstance(name).catch(() => {});
-          await this.startInstance(name, config, topicMode).then(() =>
-            this.connectIpcToInstance(name)
-          ).catch(err =>
+          await this.startInstance(name, config, topicMode).catch(err =>
             this.logger.error({ err, name }, "Failed to restart modified instance"));
         }
       }
@@ -1834,14 +1854,11 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
     this.fleetConfig = fleet;
     const topicMode = fleet.channel?.mode === "topic";
 
-    for (const [name, config] of Object.entries(fleet.instances)) {
-      await this.startInstance(name, config, topicMode);
-    }
+    await this.startInstancesWithConcurrency(Object.entries(fleet.instances), topicMode);
 
     if (topicMode) {
       this.routing.rebuild(this.fleetConfig!);
-      await new Promise(r => setTimeout(r, 3000));
-      await this.connectToInstances(fleet);
+      // startInstance already calls connectIpcToInstance, no need for connectToInstances here
 
       for (const name of Object.keys(fleet.instances)) {
         this.startStatuslineWatcher(name);
