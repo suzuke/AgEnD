@@ -44,7 +44,8 @@ export class OpenCodeBackend implements CliBackend {
     // MCP servers — use instance name as key to avoid multi-instance conflicts
     const mcp = (oc.mcp ?? {}) as Record<string, unknown>;
     for (const [name, entry] of Object.entries(config.mcpServers)) {
-      const instanceKey = `${name}-${config.instanceName}`;
+      const safeInstanceName = config.instanceName.replace(/[^\x20-\x7E]/g, "").replace(/\s+/g, "-") || config.instanceName.replace(/[^a-zA-Z0-9-]/g, "x");
+      const instanceKey = `${name}-${safeInstanceName}`;
       mcp[instanceKey] = {
         type: "local",
         command: [entry.command, ...entry.args],
@@ -104,7 +105,9 @@ export class OpenCodeBackend implements CliBackend {
         const oc = JSON.parse(readFileSync(configPath, "utf-8"));
         if (oc.mcp) {
           for (const name of Object.keys(config.mcpServers)) {
-            delete oc.mcp[`${name}-${config.instanceName}`];
+            const safeName = config.instanceName.replace(/[^\x20-\x7E]/g, "").replace(/\s+/g, "-") || config.instanceName.replace(/[^a-zA-Z0-9-]/g, "x");
+            delete oc.mcp[`${name}-${safeName}`];
+            delete oc.mcp[`${name}-${config.instanceName}`]; // clean up old non-sanitized keys
           }
         }
         // Remove fleet instructions path from instructions
