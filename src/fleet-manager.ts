@@ -1902,24 +1902,29 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
       await this.adapter.sendText(String(groupId), restartText, notifyOpts)
         .catch(e => this.logger.debug({ err: e }, "Failed to post restart completion notification"));
 
-      // Notify each instance's channel so Claude resumes work
+      // Notify each instance's channel — tailor message based on session state
       const instances = Object.entries(this.fleetConfig?.instances ?? {});
       this.logger.info({ count: instances.length }, "Sending restart notification to instances");
       for (const [name, config] of instances) {
         const threadId = config.topic_id != null ? String(config.topic_id) : undefined;
+        const daemon = this.daemons.get(name);
+        const isNewSession = daemon?.isNewSession ?? false;
+        const msg = isNewSession
+          ? "Fleet restart complete. Configuration changed — starting fresh session."
+          : "Fleet restart complete. Continue from where you left off.";
 
         // Send to topic so the message appears in the instance's channel
         if (threadId) {
-          this.adapter.sendText(String(groupId), "Fleet restart complete. Continue from where you left off.", { threadId })
+          this.adapter.sendText(String(groupId), msg, { threadId })
             .catch(e => this.logger.warn({ err: e, name, threadId }, "Failed to post per-instance restart notification"));
         }
 
-        // Push to daemon IPC so the Claude session receives the message
+        // Push to daemon IPC so the CLI session receives the message
         const ipc = this.instanceIpcClients.get(name);
         if (ipc?.connected) {
           ipc.send({
             type: "fleet_inbound",
-            content: "Fleet restart complete. Continue from where you left off.",
+            content: msg,
             meta: {
               chat_id: String(groupId),
               thread_id: threadId ?? "",

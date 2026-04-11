@@ -59,6 +59,8 @@ export class Daemon extends EventEmitter {
   private healthCheckPaused = false;
   private spawning = false;
   private skipResume = false;
+  /** Whether the last spawn started a fresh session (not resumed). */
+  isNewSession = false;
   // Context rotation quality tracking
   private rotationStartedAt = 0;
   private preRotationContextPct = 0;
@@ -230,7 +232,7 @@ export class Daemon extends EventEmitter {
     }
 
     const resumed = await this.spawnClaudeWindow();
-    // Only inject snapshot if resume failed — successful resume already has full history
+    this.isNewSession = !resumed;
     if (!resumed) {
       await this.injectSnapshotMessage();
     } else {

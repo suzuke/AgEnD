@@ -14,9 +14,9 @@ export class OpenCodeBackend implements CliBackend {
     // Use per-instance config via OPENCODE_CONFIG env (set in writeConfig)
     let cmd = this.binaryPath;
 
-    // Resume last session if session-id exists
+    // Resume last session if session-id exists and skipResume is not set
     const sessionIdFile = join(this.instanceDir, "session-id");
-    if (existsSync(sessionIdFile)) {
+    if (!config.skipResume && existsSync(sessionIdFile)) {
       const sid = readFileSync(sessionIdFile, "utf-8").trim();
       if (sid) cmd += ` --session ${sid}`;
     } else {
