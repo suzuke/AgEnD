@@ -46,6 +46,9 @@ export class OpenCodeBackend implements CliBackend {
     for (const [name, entry] of Object.entries(config.mcpServers)) {
       const safeInstanceName = config.instanceName.replace(/[^\x20-\x7E]/g, "").replace(/\s+/g, "-") || config.instanceName.replace(/[^a-zA-Z0-9-]/g, "x");
       const instanceKey = `${name}-${safeInstanceName}`;
+      // Remove old non-sanitized key if present
+      const oldKey = `${name}-${config.instanceName}`;
+      if (oldKey !== instanceKey) delete mcp[oldKey];
       mcp[instanceKey] = {
         type: "local",
         command: [entry.command, ...entry.args],
