@@ -1340,7 +1340,31 @@ async function lsAction(opts: { json?: boolean }): Promise<void> {
     const config = yaml.load(readFileSync(FLEET_CONFIG_PATH, "utf-8")) as import("./types.js").FleetConfig;
     const names = Object.keys(config.instances);
 
-    if (names.length === 0) {
+    // Load classic channels from classicBot.yaml
+    const classicPath = join(DATA_DIR, "classicBot.yaml");
+    interface ClassicEntry { channelId: string; backend?: string; createdBy?: string; createdAt?: string }
+    interface ClassicBotConfig { defaults?: { backend?: string }; channels?: Record<string, ClassicEntry> }
+    let classicConfig: ClassicBotConfig | null = null;
+    try {
+      if (existsSync(classicPath)) classicConfig = yaml.load(readFileSync(classicPath, "utf-8")) as ClassicBotConfig;
+    } catch { /* ignore */ }
+
+    const allNames = [...names];
+    const classicNames = new Set<string>();
+    const classicBackends = new Map<string, string>();
+    if (classicConfig?.channels) {
+      const classicDefault = classicConfig.defaults?.backend || config.defaults?.backend || "claude-code";
+      for (const [key, val] of Object.entries(classicConfig.channels)) {
+        const iName = `classic-${key}`;
+        if (!allNames.includes(iName)) {
+          allNames.push(iName);
+          classicNames.add(iName);
+          classicBackends.set(iName, val.backend || classicDefault);
+        }
+      }
+    }
+
+    if (allNames.length === 0) {
       console.log("No instances configured.");
       return;
     }
@@ -1358,9 +1382,10 @@ async function lsAction(opts: { json?: boolean }): Promise<void> {
       }
     } catch { /* tmux not running */ }
 
-    const rows = names.map(name => {
+    const rows = allNames.map(name => {
+      const isClassic = classicNames.has(name);
       const status = getInstanceStatusStandalone(name);
-      const teams = getTeamsForInstance(config, name);
+      const teams = isClassic ? ["(classic)"] : getTeamsForInstance(config, name);
 
       // Read statusline for context
       let context: number | null = null;
@@ -1395,7 +1420,9 @@ async function lsAction(opts: { json?: boolean }): Promise<void> {
       }
 
       const inst = config.instances[name];
-      const backend = (inst as unknown as Record<string, unknown>)?.backend as string ?? config.defaults?.backend ?? "claude-code";
+      const backend = isClassic
+        ? (classicBackends.get(name) ?? "claude-code")
+        : ((inst as unknown as Record<string, unknown>)?.backend as string ?? config.defaults?.backend ?? "claude-code");
 
       return { name, backend, status, teams, context, memMb, lastActivity };
     });
