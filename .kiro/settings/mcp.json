@@ -1,7 +1,7 @@
 {
   "mcpServers": {
-    "agend-ux-dev-t14419": {
-      "command": "/Users/suzuke/.agend/instances/ux-dev-t14419/mcp-wrapper-agend.sh",
+    "agend-agend-ts-dev-t15813": {
+      "command": "/Users/suzuke/.agend/instances/agend-ts-dev-t15813/mcp-wrapper-agend.sh",
       "args": []
     }
   }

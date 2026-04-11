@@ -485,6 +485,72 @@ export class InstanceLifecycle {
     return this.daemons.has(name);
   }
 
+  /** Handle replace_instance tool call: handover → delete → create → send context. */
+  async handleReplace(
+    args: Record<string, unknown>,
+    respond: (result: unknown, error?: string) => void,
+  ): Promise<void> {
+    const instanceName = args.name as string;
+    const reason = (args.reason as string) || "replaced";
+
+    const oldConfig = this.ctx.fleetConfig?.instances[instanceName];
+    if (!oldConfig) { respond(null, `Instance not found: ${instanceName}`); return; }
+    if (oldConfig.general_topic) { respond(null, "Cannot replace the General instance"); return; }
+
+    // 1. Collect handover context from daemon ring buffer (always available if running)
+    let handoverContext = "";
+    const daemon = this.daemons.get(instanceName);
+    if (daemon) {
+      handoverContext = daemon.collectHandoverContext();
+    }
+
+    // 2. Remember config for recreation
+    const savedConfig = { ...oldConfig };
+    const topicId = savedConfig.topic_id;
+
+    // 3. Delete old instance (but keep the topic)
+    await this.ctx.removeInstance(instanceName);
+
+    // 4. Create new instance with same config, reusing topic
+    const newName = `${instanceName.replace(/-t\d+$/, "")}-t${topicId}`;
+    const instanceConfig = { ...savedConfig } as InstanceConfig;
+    try {
+      this.ctx.fleetConfig!.instances[newName] = instanceConfig;
+      if (topicId != null) this.ctx.routing.register(topicId, { kind: "instance", name: newName });
+      this.ctx.saveFleetConfig();
+
+      await this.start(newName, instanceConfig, true);
+      await this.ctx.connectIpcToInstance(newName);
+
+      // 5. Send handover context to new instance
+      if (handoverContext) {
+        // Wait for new instance to be ready
+        await new Promise(r => setTimeout(r, 3_000));
+        const ipc = this.ctx.instanceIpcClients.get(newName);
+        if (ipc) {
+          const handoverMsg = `[system:handover]\nYou are replacing instance "${instanceName}" (reason: ${reason}).\n\n${handoverContext}\n\nResume work based on this context. Do NOT reply to this message — wait for the next user message.`;
+          ipc.send(JSON.stringify({ type: "inject_message", content: handoverMsg }));
+        }
+      }
+
+      respond({
+        success: true,
+        old_name: instanceName,
+        new_name: newName,
+        topic_id: topicId,
+        reason,
+        handover_chars: handoverContext.length,
+      });
+    } catch (err) {
+      // Rollback: try to restore old config
+      if (this.daemons.has(newName)) await this.stop(newName).catch(() => {});
+      delete this.ctx.fleetConfig!.instances[newName];
+      if (topicId != null) this.ctx.routing.unregister(topicId);
+      this.ctx.saveFleetConfig();
+      respond(null, `Failed to replace instance: ${(err as Error).message}`);
+    }
+  }
+
   private findGeneralInstance(): string | undefined {
     const instances = this.ctx.fleetConfig?.instances ?? {};
     for (const [n, config] of Object.entries(instances)) {

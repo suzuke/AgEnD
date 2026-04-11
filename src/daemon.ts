@@ -23,7 +23,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Tool routing sets — module-level to avoid re-creation on every handleToolCall
-const CROSS_INSTANCE_TOOLS = new Set(["send_to_instance", "list_instances", "start_instance", "create_instance", "delete_instance", "request_information", "delegate_task", "report_result", "describe_instance"]);
+const CROSS_INSTANCE_TOOLS = new Set(["send_to_instance", "list_instances", "start_instance", "create_instance", "delete_instance", "replace_instance", "request_information", "delegate_task", "report_result", "describe_instance"]);
 const SCHEDULE_TOOLS = new Set(["create_schedule", "list_schedules", "update_schedule", "delete_schedule"]);
 const DECISION_TOOLS = new Set(["post_decision", "list_decisions", "update_decision"]);
 const TASK_TOOL = "task";
@@ -276,60 +276,13 @@ export class Daemon extends EventEmitter {
       const statusFile = join(this.instanceDir, "statusline.json");
       this.guardian = new ContextGuardian(this.config.context_guardian, this.logger, statusFile);
       this.guardian.startWatching();
-      this.guardian.startTimer();
 
       this.guardian.on("status_update", () => {
         this.saveSessionId();
         this.hangDetector?.recordStatuslineUpdate();
       });
-      // v3: daemon-driven restart — no handover prompt, no validation
-      this.guardian.on("restart_requested", async (reason: string) => {
-        this.rotationStartedAt = Date.now();
-        this.preRotationContextPct = this.readContextPercentage();
-        this.logger.info({ reason, context_pct: this.preRotationContextPct }, "Restart requested");
-
-        // Minimal idle barrier: let current step settle (best-effort, not a handover wait)
-        await this.waitForIdle(5000);
-
-        // Collect and write daemon-side snapshot
-        const snapshot = this.writeRotationSnapshot(reason);
-
-        // Save session id and prepare for respawn
-        this.saveSessionId();
-        const oldWindowId = this.tmux?.getWindowId();
-        this.transcriptMonitor?.resetOffset();
-
-        // Clear ring buffers for new session
-        this.recentUserMessages = [];
-        this.recentEvents = [];
-        this.recentToolActivity = [];
-
-        // Spawn new window BEFORE killing old one — prevents tmux session
-        // destruction when all windows are killed during concurrent rotation.
-        await this.spawnClaudeWindow();
-
-        // Kill old window after new one is ready
-        if (oldWindowId) {
-          try {
-            const old = new TmuxManager(this.tmuxSessionName, oldWindowId);
-            await old.killWindow();
-          } catch { /* old window may already be dead */ }
-        }
-
-        // Track restart metrics
-        const durationMs = Date.now() - this.rotationStartedAt;
-        this.emit("restart_complete", {
-          instance: this.name,
-          reason,
-          pre_restart_context_pct: this.preRotationContextPct,
-          restart_duration_ms: durationMs,
-          snapshot_user_message_count: snapshot.recent_user_messages?.length ?? 0,
-          snapshot_event_count: snapshot.recent_events?.length ?? 0,
-        });
-
-        this.guardian?.markRestartComplete();
-        this.logger.info({ reason, duration_ms: durationMs }, "Restart complete — fresh Claude session started");
-      });
+      // Context rotation removed: all CLI backends have built-in auto-compact.
+      // Crash recovery (health check + respawn with snapshot) is retained below.
 
     }
 
@@ -356,7 +309,7 @@ export class Daemon extends EventEmitter {
 
     const scheduleNext = () => {
       this.healthCheckTimer = setTimeout(async () => {
-        if (!this.tmux || this.guardian?.state === "RESTARTING" || this.spawning || this.healthCheckPaused) {
+        if (!this.tmux || this.spawning || this.healthCheckPaused) {
           scheduleNext();
           return;
         }
@@ -514,7 +467,7 @@ export class Daemon extends EventEmitter {
     const readyPattern = this.backend!.getReadyPattern();
 
     this.errorMonitorTimer = setInterval(async () => {
-      if (!this.tmux || this.spawning || this.guardian?.state === "RESTARTING") return;
+      if (!this.tmux || this.spawning) return;
       try {
         const alive = await this.tmux.isWindowAlive();
         if (!alive) return;
@@ -942,7 +895,7 @@ export class Daemon extends EventEmitter {
           fleetRequestId: fleetReqId,
           senderSessionName,
         });
-        const crossTimeoutMs = (tool === "start_instance" || tool === "create_instance") ? 60_000 : 30_000;
+        const crossTimeoutMs = (tool === "start_instance" || tool === "create_instance" || tool === "replace_instance") ? 60_000 : 30_000;
         const timeout = setTimeout(() => {
           this.pendingIpcRequests.delete(fleetReqId);
           respond(null, `Cross-instance operation timed out after ${crossTimeoutMs / 1000}s`);
@@ -1337,6 +1290,32 @@ export class Daemon extends EventEmitter {
       event_count: snapshot.recent_events?.length ?? 0,
     }, "Snapshot written");
     return snapshot;
+  }
+
+  /** Collect ring buffer data for handover to a replacement instance. */
+  collectHandoverContext(): string {
+    const lines: string[] = [];
+    if (this.recentUserMessages.length > 0) {
+      lines.push("Recent user messages:");
+      for (const msg of this.recentUserMessages) lines.push(`- ${msg.text}`);
+      lines.push("");
+    }
+    if (this.recentEvents.length > 0) {
+      lines.push("Recent activity:");
+      for (const ev of this.recentEvents) {
+        if (ev.type === "assistant_text") lines.push(`- Assistant: ${ev.preview}`);
+        else lines.push(`- ${ev.name}${ev.preview ? `: ${ev.preview}` : ""}`);
+      }
+      lines.push("");
+    }
+    if (this.recentToolActivity.length > 0) {
+      lines.push("Recent tool activity:");
+      for (const t of this.recentToolActivity) lines.push(`- ${t}`);
+      lines.push("");
+    }
+    const pct = this.readContextPercentage();
+    if (pct != null) lines.push(`Context usage: ${pct}%`);
+    return lines.join("\n").slice(0, 4000);
   }
 
   private appendCrashHistory(data: { exitCode?: number; lastOutput?: string; crashType: "server" | "window" }): void {

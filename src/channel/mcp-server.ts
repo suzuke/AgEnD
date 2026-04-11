@@ -27,7 +27,7 @@ const SOCKET_PATH = process.env.AGEND_SOCKET_PATH ?? "";
 const IPC_TIMEOUT_MS = 30_000;
 const SLOW_IPC_TIMEOUT_MS = 60_000;
 
-const SLOW_TOOLS = new Set(["start_instance", "create_instance", "delete_instance"]);
+const SLOW_TOOLS = new Set(["start_instance", "create_instance", "delete_instance", "replace_instance"]);
 
 // ---------------------------------------------------------------------------
 // Safety nets

@@ -1089,6 +1089,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       case "start_instance": return `start_instance(${args.name})`;
       case "create_instance": return `create_instance(${args.directory})`;
       case "delete_instance": return `delete_instance(${args.name})`;
+      case "replace_instance": return `replace_instance(${args.name})`;
       default: return `${tool}()`;
     }
   }
