@@ -1,0 +1,95 @@
+========================================================================
+AgEnD MCP Token Overhead 測試報告
+日期：2026-04-04
+測試者：agend-t5033 + agend-reviewer-t9177
+========================================================================
+
+一、測試目的
+--------
+精確測量 AgEnD MCP server 注入到 Claude Code 的額外 token 消耗，
+包括 MCP instructions（fleet context + workflow template）和 tool
+definitions（full / standard / minimal 三種 profile）。
+
+二、測試方法
+--------
+- 指令：claude -p "Say hello" --output-format json --model sonnet
+- 環境：空目錄、無 CLAUDE.md、無 .claude/ settings
+- 對照組：純 Claude Code（無 MCP server）
+- 實驗組：加 AgEnD MCP server，分別測 full / standard / minimal
+- 每組跑 3 次，取平均值
+- Input tokens 完全確定性（3 runs 數值一致）
+
+三、測試結果
+--------
+
+  條件                    Total Input    vs Baseline    佔 200K Context
+  -----------------------------------------------------------------------
+  Baseline（無 MCP）         20,662           —              —
+  Full（30 tools）           21,549         +887           0.44%
+  Standard（11 tools）       21,368         +706           0.35%
+  Minimal（4 tools）         21,292         +630           0.31%
+
+四、Overhead 分解
+--------
+
+  MCP Instructions（fleet context + workflow template）：~630 tokens
+    - Fleet identity + role + message format + collaboration rules
+    - Development workflow template（~2050 chars）
+
+  Tool Schemas 差異：
+    - Full → Standard（少 19 tools）：-181 tokens
+    - Standard → Minimal（少 7 tools）：-76 tokens
+    - Full → Minimal（少 26 tools）：-257 tokens
+
+  備註：Tool schemas 的實際 token 消耗遠低於 naive 預估。
+  Anthropic 對 tool definitions 有特殊的 token 壓縮處理，
+  30 tools 與 4 tools 的差距僅 257 tokens（預估 ~3500）。
+
+五、費用影響
+--------
+
+  以 Sonnet 4 input pricing（$3/MTok）計算：
+
+  Profile      每條訊息 Overhead    每 1000 條訊息
+  ------------------------------------------------
+  Full          $0.002661           $2.66
+  Standard      $0.002118           $2.12
+  Minimal       $0.001890           $1.89
+
+  注意：以上為 cache miss（首次）的費用。
+  後續訊息如果 prompt cache hit，overhead 費用降至 1/10
+  （cache read = $0.30/MTok），即每條訊息 < $0.0003。
+
+六、Context Window 影響
+--------
+
+  Claude Code 本身的 system prompt 佔 ~20,662 tokens（10.3% of 200K）。
+  AgEnD 的 overhead 在此基礎上增加：
+
+  Profile      額外 tokens    佔 Context Window
+  -----------------------------------------------
+  Full          +887          0.44%
+  Standard      +706          0.35%
+  Minimal       +630          0.31%
+
+七、結論與建議
+--------
+
+  1. AgEnD 的 MCP overhead 極小 — 不到 baseline 的 4.3%（full profile）
+  2. 佔 context window 不到 0.5%，對長對話影響可忽略
+  3. Instructions 佔 ~630 tokens，是 overhead 的主要來源（71%）
+  4. Tool schemas 差異很小，因 Anthropic 有 token 壓縮
+  5. 費用影響可忽略 — 每條訊息 < $0.003，cache 生效後 < $0.0003
+
+  建議：
+  - Standard profile 是最佳平衡（保留所有協作工具，少 181 tokens）
+  - 不需要為了省 token 犧牲功能
+  - 如果 instance 完全不需要 fleet 協作，用 minimal 可再省 76 tokens
+
+八、測試腳本
+--------
+
+  scripts/measure-token-overhead.sh
+  可重現，需 claude CLI + jq + node
+
+========================================================================

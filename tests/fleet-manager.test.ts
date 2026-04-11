@@ -139,6 +139,63 @@ instances:
     expect(threadId).toBe("42");
   });
 
+  it("resolves threadId from sender's topic_id when sender is a fleet instance", () => {
+    // Simulates: senderSessionName = "kiro-dev-leader" exists in fleetConfig
+    // Should use kiro-dev-leader's topic_id (99), not IPC owner's (42)
+    const fleetInstances: Record<string, any> = {
+      codex: { topic_id: 42, working_directory: "/tmp/codex" },
+      "kiro-dev-leader": { topic_id: 99, working_directory: "/tmp/kiro" },
+    };
+    const senderSessionName = "kiro-dev-leader";
+    const instanceName = "codex"; // IPC channel owner
+
+    const senderInstanceName = senderSessionName && fleetInstances[senderSessionName]
+      ? senderSessionName : null;
+    const routingConfig = senderInstanceName
+      ? fleetInstances[senderInstanceName]
+      : (senderSessionName ? undefined : fleetInstances[instanceName]);
+    const threadId = resolveReplyThreadId(undefined, routingConfig);
+
+    expect(threadId).toBe("99");
+  });
+
+  it("falls back to general topic when sender is not in fleetConfig", () => {
+    // Simulates: senderSessionName = "unknown-session" not in fleetConfig
+    // Should return undefined (general topic), NOT IPC owner's topic_id
+    const fleetInstances: Record<string, any> = {
+      codex: { topic_id: 42, working_directory: "/tmp/codex" },
+    };
+    const senderSessionName = "unknown-session";
+    const instanceName = "codex";
+
+    const senderInstanceName = senderSessionName && fleetInstances[senderSessionName]
+      ? senderSessionName : null;
+    const routingConfig = senderInstanceName
+      ? fleetInstances[senderInstanceName]
+      : (senderSessionName ? undefined : fleetInstances[instanceName]);
+    const threadId = resolveReplyThreadId(undefined, routingConfig);
+
+    expect(threadId).toBeUndefined();
+  });
+
+  it("uses IPC owner's topic_id when no senderSessionName", () => {
+    // Simulates: no external session, normal instance outbound
+    const fleetInstances: Record<string, any> = {
+      codex: { topic_id: 42, working_directory: "/tmp/codex" },
+    };
+    const senderSessionName = undefined;
+    const instanceName = "codex";
+
+    const senderInstanceName = senderSessionName && fleetInstances[senderSessionName as string]
+      ? senderSessionName : null;
+    const routingConfig = senderInstanceName
+      ? fleetInstances[senderInstanceName]
+      : (senderSessionName ? undefined : fleetInstances[instanceName]);
+    const threadId = resolveReplyThreadId(undefined, routingConfig);
+
+    expect(threadId).toBe("42");
+  });
+
   it("saveFleetConfig preserves all optional user-configured fields", () => {
     const fm = new FleetManager(tmpDir);
     const configPath = join(tmpDir, "fleet.yaml");

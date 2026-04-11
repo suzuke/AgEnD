@@ -1,9 +1,9 @@
 import pino from "pino";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { mkdirSync, statSync, readFileSync, writeFileSync } from "node:fs";
+import { getAgendHome } from "./paths.js";
 
-const DATA_DIR = join(homedir(), ".agend");
+const DATA_DIR = getAgendHome();
 const LOG_FILE = join(DATA_DIR, "daemon.log");
 const MAX_LOG_SIZE = 10 * 1024 * 1024; // 10 MB
 const TRUNCATE_TO = 5 * 1024 * 1024; // keep last 5 MB

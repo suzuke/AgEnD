@@ -50,6 +50,7 @@ describe("Fleet Respawn E2E", () => {
     await telegramMock.start();
 
     testDir = `/tmp/ae2e-respawn-${Date.now().toString(36)}`;
+    process.env.AGEND_HOME = testDir;
     mkdirSync(testDir, { recursive: true });
     mkdirSync(join(testDir, "instances"), { recursive: true });
     mkdirSync(join(testDir, "access"), { recursive: true });
@@ -128,6 +129,7 @@ describe("Fleet Respawn E2E", () => {
     await sleep(500);
     rmSync(testDir, { recursive: true, force: true });
     delete process.env.AGEND_TMUX_SESSION;
+    delete process.env.AGEND_HOME;
     delete process.env.AGEND_BOT_TOKEN;
   }, 30_000);
 
@@ -239,82 +241,16 @@ describe("Fleet Respawn E2E", () => {
   }, 15_000);
 
   // --- Phase 2b: Crash-aware snapshot (T10) ---
+  // After respawn, the daemon reads rotation-state.json, injects it as a
+  // session-snapshot message, then deletes the file. Snapshot injection
+  // is verified at the unit test level (daemon.test.ts). Here we only
+  // verify the file lifecycle: written on crash, deleted after respawn.
 
-  it("T10: rotation-state.json written on crash with valid data", () => {
+  it("T10: rotation-state.json deleted after respawn (consumed by daemon)", () => {
+    // buildSnapshotPrompt reads and deletes the file to prevent stale re-injection
     const snapshotPath = join(testDir, "instances", "crasher", "rotation-state.json");
-    expect(existsSync(snapshotPath)).toBe(true);
-
-    const snapshot = JSON.parse(readFileSync(snapshotPath, "utf-8"));
-    expect(snapshot.instance).toBe("crasher");
-    expect(snapshot.reason).toBe("crash");
-    expect(snapshot.created_at).toBeTruthy();
-    expect(new Date(snapshot.created_at).getTime()).toBeGreaterThan(0);
-    expect(snapshot.working_directory).toContain("work/crasher");
+    expect(existsSync(snapshotPath)).toBe(false);
   });
-
-  it("T10: snapshot persists on disk after injection (not deleted)", () => {
-    // After respawn, injectSnapshotMessage reads the file but does NOT unlink it
-    const snapshotPath = join(testDir, "instances", "crasher", "rotation-state.json");
-    expect(existsSync(snapshotPath)).toBe(true);
-
-    // File should still be parseable
-    const snapshot = JSON.parse(readFileSync(snapshotPath, "utf-8"));
-    expect(snapshot.reason).toBe("crash");
-  });
-
-  it("T10: second crash updates rotation-state.json with new timestamp", async () => {
-    const instanceDir = join(testDir, "instances", "crasher");
-    const snapshotPath = join(instanceDir, "rotation-state.json");
-
-    // Record first snapshot timestamp
-    const firstSnapshot = JSON.parse(readFileSync(snapshotPath, "utf-8"));
-    const firstTimestamp = firstSnapshot.created_at;
-
-    // Record current session ID
-    const statusBefore = JSON.parse(
-      readFileSync(join(instanceDir, "statusline.json"), "utf-8"),
-    );
-    const sessionBefore = statusBefore.session_id;
-
-    // Trigger second crash
-    writeFileSync(
-      join(instanceDir, "mock-control.json"),
-      JSON.stringify({ exit: true }),
-    );
-
-    // Wait for second respawn
-    let cleaned = false;
-    await waitFor(
-      () => {
-        try {
-          const raw = readFileSync(join(instanceDir, "statusline.json"), "utf-8");
-          const status = JSON.parse(raw);
-          const respawned =
-            status.session_id !== sessionBefore &&
-            status.session_id.startsWith("mock-crasher-");
-          if (respawned && !cleaned) {
-            rmSync(join(instanceDir, "mock-control.json"), { force: true });
-            cleaned = true;
-          }
-          return respawned;
-        } catch {
-          return false;
-        }
-      },
-      { timeout: 60_000, interval: 2000, label: "second respawn" },
-    );
-
-    // Snapshot should be updated with a newer timestamp
-    const secondSnapshot = JSON.parse(readFileSync(snapshotPath, "utf-8"));
-    expect(secondSnapshot.reason).toBe("crash");
-    expect(secondSnapshot.created_at).not.toBe(firstTimestamp);
-    expect(new Date(secondSnapshot.created_at).getTime()).toBeGreaterThan(
-      new Date(firstTimestamp).getTime(),
-    );
-
-    // File still on disk after second injection
-    expect(existsSync(snapshotPath)).toBe(true);
-  }, 90_000);
 
   it("T7: respawned instance responds to messages", async () => {
     const sendsBefore = telegramMock.getCallsFor("sendMessage").length;

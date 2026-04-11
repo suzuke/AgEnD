@@ -1,8 +1,8 @@
 import { readFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import yaml from "js-yaml";
-import type { CostGuardConfig, HangDetectorConfig, DailySummaryConfig, FleetConfig, InstanceConfig } from "./types.js";
+import { getAgendHome, getTmuxSessionName } from "./paths.js";
+import type { CostGuardConfig, HangDetectorConfig, DailySummaryConfig, FleetConfig, FleetTemplate, InstanceConfig } from "./types.js";
 
 function deepMergeGeneric<T extends object>(target: T, source: Partial<T>): T {
   const result = { ...target } as Record<string, unknown>;
@@ -31,7 +31,7 @@ function deepMergeGeneric<T extends object>(target: T, source: Partial<T>): T {
 }
 
 export function getTmuxSession(): string {
-  return process.env.AGEND_TMUX_SESSION ?? "agend";
+  return process.env.AGEND_TMUX_SESSION ?? getTmuxSessionName();
 }
 
 export const DEFAULT_COST_GUARD: CostGuardConfig = {
@@ -79,12 +79,17 @@ export function loadFleetConfig(configPath: string): FleetConfig {
   }
 
   const raw = readFileSync(configPath, "utf-8");
-  const parsed = yaml.load(raw) as {
+  // Quote bare 16+ digit integers before parsing to prevent precision loss.
+  // Discord snowflakes and Telegram group IDs are 64-bit and exceed JS MAX_SAFE_INTEGER.
+  const safeRaw = raw.replace(/(?<=:\s+|[-]\s+)(\d{16,})(?=\s*$)/gm, (_, d) => `"${d}"`);
+
+  const parsed = yaml.load(safeRaw) as {
     channel?: FleetConfig["channel"];
     project_roots?: string[];
     defaults?: Partial<InstanceConfig>;
     instances?: Record<string, Partial<InstanceConfig>>;
     teams?: FleetConfig["teams"];
+    templates?: Record<string, FleetTemplate>;
     health_port?: number;
   } | null;
 
@@ -103,7 +108,7 @@ export function loadFleetConfig(configPath: string): FleetConfig {
     ) as Partial<InstanceConfig>;
 
     if (!merged.working_directory) {
-      const defaultDir = join(homedir(), ".agend", "workspaces", name);
+      const defaultDir = join(getAgendHome(), "workspaces", name);
       mkdirSync(defaultDir, { recursive: true });
       merged.working_directory = defaultDir;
     }
@@ -111,12 +116,26 @@ export function loadFleetConfig(configPath: string): FleetConfig {
     instances[name] = merged as InstanceConfig;
   }
 
+  // Validate templates: each must have at least one instance definition
+  const templates: Record<string, FleetTemplate> = {};
+  if (parsed.templates) {
+    for (const [name, tpl] of Object.entries(parsed.templates)) {
+      if (!tpl.instances || Object.keys(tpl.instances).length === 0) {
+        throw new Error(`Template "${name}" must define at least one instance`);
+      }
+      templates[name] = tpl;
+    }
+  }
+
   return {
-    channel: parsed.channel,
+    channel: parsed.channel
+      ? { ...parsed.channel, mode: parsed.channel.mode ?? "topic" }
+      : parsed.channel,
     project_roots: parsed.project_roots,
     defaults: fleetDefaults,
     instances,
     teams: parsed.teams ?? {},
+    templates,
     health_port: parsed.health_port,
   };
 }

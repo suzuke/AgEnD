@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>AgEnD Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #080b12; --surface: rgba(22,27,34,0.7); --raised: rgba(28,33,41,0.8);
+    --border: rgba(48,54,61,0.6); --border-bright: rgba(48,54,61,0.9);
+    --text: #f0f6fc; --text-sec: #8b949e; --text-muted: #484f58;
+    --accent: #2AABEE; --accent-dim: rgba(42,171,238,0.08); --accent-glow: rgba(42,171,238,0.2);
+    --success: #56d364; --error: #f85149; --warn: #d29922;
+    --glass: rgba(22,27,34,0.55); --glass-border: rgba(255,255,255,0.06);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { font-size: 14px; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: 'DM Sans', system-ui, sans-serif;
+    display: flex; height: 100vh;
+    background-image:
+      radial-gradient(ellipse 120% 80% at 10% 20%, rgba(42,171,238,0.04), transparent 50%),
+      radial-gradient(ellipse 80% 60% at 90% 80%, rgba(86,211,100,0.03), transparent 50%);
+  }
+
+  /* ── Sidebar ─────────────────────────────────────────── */
+  .sidebar {
+    width: 280px; flex-shrink: 0; display: flex; flex-direction: column;
+    background: var(--glass); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    border-right: 1px solid var(--glass-border);
+  }
+  .sidebar-header {
+    padding: 24px 20px 20px;
+    background: linear-gradient(135deg, rgba(42,171,238,0.08) 0%, transparent 60%);
+    border-bottom: 1px solid var(--glass-border);
+  }
+  .sidebar-header h1 {
+    font-family: 'Outfit', sans-serif; font-size: 22px; font-weight: 800;
+    letter-spacing: -0.03em; color: var(--text);
+    background: linear-gradient(135deg, var(--text) 60%, var(--accent));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .sidebar-header .uptime {
+    font-size: 11px; color: var(--text-muted); margin-top: 6px;
+    font-family: 'IBM Plex Mono', monospace; letter-spacing: 0.02em;
+  }
+  .nav-section {
+    font-family: 'Outfit', sans-serif; font-size: 10px; font-weight: 700;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-muted);
+    padding: 16px 20px 8px;
+  }
+  .fleet-entry {
+    margin: 0 12px; padding: 10px 12px; cursor: pointer;
+    border-radius: 10px; display: flex; align-items: center; gap: 10px;
+    font-family: 'Outfit', sans-serif; font-weight: 600; font-size: 13px;
+    color: var(--accent); transition: all 0.15s;
+    border: 1px solid transparent;
+  }
+  .fleet-entry:hover { background: var(--accent-dim); }
+  .fleet-entry.active { background: var(--accent-dim); border-color: rgba(42,171,238,0.2); box-shadow: 0 0 20px rgba(42,171,238,0.06); }
+  .instance-list { flex: 1; overflow-y: auto; padding: 4px 0; }
+  .instance-item {
+    margin: 2px 12px; padding: 10px 12px; cursor: pointer;
+    border-radius: 10px; display: flex; align-items: center; gap: 10px;
+    transition: all 0.15s; border: 1px solid transparent;
+  }
+  .instance-item:hover { background: var(--raised); }
+  .instance-item.active { background: var(--accent-dim); border-color: rgba(42,171,238,0.15); }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    transition: box-shadow 0.3s;
+  }
+  .dot.running { background: var(--success); box-shadow: 0 0 8px rgba(86,211,100,0.5); }
+  .dot.stopped { background: var(--error); opacity: 0.7; }
+  .dot.crashed { background: var(--warn); }
+  .inst-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .inst-meta { font-size: 11px; color: var(--text-muted); font-family: 'IBM Plex Mono', monospace; }
+  .sidebar-footer { padding: 16px; border-top: 1px solid var(--glass-border); }
+
+  /* ── Main ────────────────────────────────────────────── */
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .no-sel { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; color: var(--text-muted); }
+  .no-sel svg { opacity: 0.15; }
+  .no-sel span { font-family: 'Outfit', sans-serif; font-size: 15px; font-weight: 500; letter-spacing: -0.01em; }
+
+  /* ── Tabs ─────────────────────────────────────────────── */
+  .tabs {
+    display: flex; gap: 2px; padding: 8px 16px;
+    background: var(--glass); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--glass-border);
+  }
+  .tab {
+    padding: 8px 16px; cursor: pointer; border-radius: 8px;
+    font-family: 'Outfit', sans-serif; font-size: 13px; font-weight: 500;
+    color: var(--text-muted); transition: all 0.15s;
+  }
+  .tab:hover { color: var(--text-sec); background: rgba(255,255,255,0.03); }
+  .tab.active { color: var(--accent); background: var(--accent-dim); }
+
+  /* ── Action buttons ──────────────────────────────────── */
+  .actions { display: flex; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--glass-border); }
+  .btn {
+    padding: 7px 14px; border-radius: 8px; font-size: 12px; font-weight: 600;
+    cursor: pointer; border: 1px solid var(--border); font-family: 'DM Sans', sans-serif;
+    transition: all 0.15s; display: inline-flex; align-items: center; gap: 5px;
+  }
+  .btn:active:not(:disabled) { transform: scale(0.96); }
+  .btn:disabled { opacity: 0.35; cursor: default; }
+  .btn-accent { background: var(--accent); color: #fff; border-color: transparent; }
+  .btn-accent:hover:not(:disabled) { box-shadow: 0 4px 20px rgba(42,171,238,0.3); }
+  .btn-green { background: rgba(35,134,54,0.9); color: #fff; border-color: transparent; }
+  .btn-green:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(35,134,54,0.3); }
+  .btn-warn { background: rgba(158,106,3,0.9); color: #fff; border-color: transparent; }
+  .btn-warn:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(158,106,3,0.3); }
+  .btn-red { background: rgba(218,54,51,0.9); color: #fff; border-color: transparent; }
+  .btn-red:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(218,54,51,0.3); }
+  .btn-ghost { background: transparent; color: var(--text-sec); }
+  .btn-ghost:hover:not(:disabled) { color: var(--text); background: var(--raised); }
+
+  /* ── Toast ───────────────────────────────────────────── */
+  .toast {
+    position: fixed; bottom: 24px; right: 24px; padding: 12px 20px;
+    border-radius: 12px; font-size: 13px; font-weight: 500; z-index: 100;
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    animation: toastIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    border: 1px solid var(--glass-border);
+  }
+  .toast.ok { background: rgba(35,134,54,0.85); color: #fff; }
+  .toast.err { background: rgba(218,54,51,0.85); color: #fff; }
+  @keyframes toastIn { from { transform: translateY(16px) scale(0.95); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
+
+  /* ── Chat ─────────────────────────────────────────────── */
+  .chat-view { flex: 1; display: flex; flex-direction: column; }
+  .messages { flex: 1; overflow-y: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 10px; }
+  .msg {
+    max-width: 78%; padding: 12px 16px; border-radius: 16px;
+    font-size: 13px; line-height: 1.65; white-space: pre-wrap; word-break: break-word;
+  }
+  .msg.inbound {
+    align-self: flex-end; border-bottom-right-radius: 4px;
+    background: linear-gradient(135deg, rgba(42,171,238,0.12), rgba(42,171,238,0.06));
+    border: 1px solid rgba(42,171,238,0.1);
+  }
+  .msg.outbound {
+    align-self: flex-start; border-bottom-left-radius: 4px;
+    background: var(--surface); border: 1px solid var(--glass-border);
+    border-left: 2px solid var(--success);
+  }
+  .msg .sender { font-size: 11px; font-weight: 600; margin-bottom: 4px; font-family: 'Outfit', sans-serif; }
+  .msg .sender.user { color: var(--accent); }
+  .msg .sender.agent { color: var(--success); }
+  .msg .time { font-size: 10px; color: var(--text-muted); float: right; margin-left: 12px; font-family: 'IBM Plex Mono', monospace; }
+  .msg-empty { color: var(--text-muted); text-align: center; margin-top: 80px; font-size: 13px; line-height: 2; }
+  .msg-empty svg { display: block; margin: 0 auto 12px; opacity: 0.15; }
+  .input-bar { padding: 16px 20px; border-top: 1px solid var(--glass-border); display: flex; gap: 8px; }
+  .input-bar input {
+    flex: 1; background: rgba(255,255,255,0.04); color: var(--text);
+    border: 1px solid var(--border); border-radius: 12px; padding: 11px 16px;
+    font-size: 13px; font-family: 'DM Sans', sans-serif; outline: none; transition: all 0.15s;
+  }
+  .input-bar input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+
+  /* ── Detail cards ────────────────────────────────────── */
+  .detail-view { flex: 1; overflow-y: auto; padding: 24px; display: none; }
+  .card {
+    background: var(--surface); border: 1px solid var(--glass-border);
+    border-radius: 16px; padding: 20px 24px; margin-bottom: 16px;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    transition: border-color 0.2s;
+  }
+  .card:hover { border-color: rgba(255,255,255,0.1); }
+  .card h3 {
+    font-family: 'Outfit', sans-serif; font-size: 10px; font-weight: 700;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent);
+    margin-bottom: 14px;
+  }
+  .detail-row { display: flex; align-items: center; gap: 10px; font-size: 13px; padding: 6px 0; }
+  .detail-label { color: var(--text-muted); min-width: 100px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; }
+  .progress-bar { display: inline-block; width: 80px; height: 4px; background: rgba(255,255,255,0.06); border-radius: 2px; vertical-align: middle; margin-left: 8px; overflow: hidden; }
+  .progress-fill { height: 100%; border-radius: 2px; transition: width 0.4s cubic-bezier(0.4,0,0.2,1); }
+  .activity-item { font-size: 12px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.03); font-family: 'IBM Plex Mono', monospace; }
+  .act-time { color: var(--text-muted); margin-right: 8px; }
+  .act-event { color: var(--warn); margin-right: 4px; }
+
+  /* ── List items (tasks, schedules, teams) ─────────────── */
+  .task-view { flex: 1; overflow-y: auto; padding: 24px; display: none; }
+  .list-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+  .list-header span { font-family: 'Outfit', sans-serif; font-weight: 600; font-size: 15px; }
+  .task-item {
+    background: var(--surface); border: 1px solid var(--glass-border);
+    border-radius: 12px; padding: 14px 18px; margin-bottom: 10px;
+    display: flex; align-items: center; gap: 12px;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    transition: all 0.15s;
+  }
+  .task-item:hover { border-color: rgba(255,255,255,0.08); transform: translateY(-1px); }
+  .task-status {
+    font-size: 10px; padding: 3px 10px; border-radius: 999px; font-weight: 600;
+    font-family: 'IBM Plex Mono', monospace; text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .task-status.open { background: var(--accent-dim); color: var(--accent); }
+  .task-status.claimed { background: rgba(210,153,34,0.12); color: var(--warn); }
+  .task-status.done { background: rgba(86,211,100,0.1); color: var(--success); }
+  .task-title { flex: 1; font-size: 13px; font-weight: 500; }
+  .task-assignee { font-size: 11px; color: var(--text-sec); }
+  .task-actions { display: flex; gap: 4px; }
+
+  /* ── Form overlay ────────────────────────────────────── */
+  .form-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.65);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    display: flex; align-items: center; justify-content: center; z-index: 50;
+    animation: fadeIn 0.2s ease;
+  }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  .form-card {
+    background: var(--glass); border: 1px solid var(--glass-border);
+    border-radius: 20px; padding: 32px; width: 480px; max-width: 92vw; max-height: 82vh;
+    overflow-y: auto; backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+    box-shadow: 0 24px 80px rgba(0,0,0,0.4);
+  }
+  .form-card h2 {
+    font-family: 'Outfit', sans-serif; font-size: 20px; font-weight: 700;
+    margin-bottom: 24px; letter-spacing: -0.02em;
+  }
+  .form-field { margin-bottom: 16px; }
+  .form-field label {
+    display: block; font-size: 11px; font-weight: 600; color: var(--text-muted);
+    margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.08em;
+    font-family: 'Outfit', sans-serif;
+  }
+  .form-field input, .form-field select {
+    width: 100%; background: rgba(255,255,255,0.04); color: var(--text);
+    border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px;
+    font-size: 13px; font-family: 'DM Sans', sans-serif; outline: none;
+    transition: all 0.15s;
+  }
+  .form-field input:focus, .form-field select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+  .form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 24px; }
+  .eye-btn { background: none; border: none; cursor: pointer; color: var(--text-muted); font-size: 14px; padding: 4px 6px; border-radius: 6px; transition: all 0.15s; }
+  .eye-btn:hover { color: var(--accent); }
+
+  @media (max-width: 700px) { .sidebar { width: 240px; } }
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+  <div class="sidebar-header">
+    <h1>AgEnD</h1>
+    <div class="uptime" id="uptime">--</div>
+  </div>
+  <div style="padding:8px 12px 0">
+    <div class="fleet-entry" id="fleetEntry" onclick="selFleet()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+      Fleet
+    </div>
+  </div>
+  <div class="nav-section">Instances</div>
+  <div class="instance-list" id="instanceList"></div>
+  <div class="sidebar-footer">
+    <button class="btn btn-accent" style="width:100%;justify-content:center" onclick="showCreateInstance()">+ New Instance</button>
+  </div>
+</div>
+
+<div class="main" id="mainArea">
+  <div class="no-sel">
+    <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+    <span>Select Fleet or an instance to begin</span>
+  </div>
+</div>
+
+<script>
+const T = new URLSearchParams(location.search).get("token") || "";
+let cur = null, curTab = "chat", mode = "none", instances = [];
+// mode: "none" | "fleet" | "instance"
+const msgs = {};
+
+async function api(m, p, b) {
+  const o = { method: m, headers: { "Content-Type": "application/json" } };
+  if (b) o.body = JSON.stringify(b);
+  const r = await fetch(`${p}${p.includes("?") ? "&" : "?"}token=${T}`, o);
+  return r.json();
+}
+function esc(s) { const d = document.createElement("div"); d.textContent = s || ""; return d.innerHTML; }
+function fmtUp(s) { return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s/60)}m` : `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m`; }
+function toast(msg, ok=true) {
+  const el = document.createElement("div"); el.className = `toast ${ok?"ok":"err"}`; el.textContent = msg;
+  document.body.appendChild(el); setTimeout(() => el.remove(), 3000);
+}
+
+const sse = new EventSource(`/ui/events?token=${T}`);
+sse.addEventListener("status", e => {
+  const d = JSON.parse(e.data); instances = d.instances;
+  document.getElementById("uptime").textContent = fmtUp(d.uptime);
+  renderList();
+  if (cur) { const i = instances.find(x => x.name === cur); const a = document.getElementById("actions"); if (i && a) renderActions(i); }
+});
+sse.addEventListener("message", e => {
+  const m = JSON.parse(e.data);
+  if (!msgs[m.instance]) msgs[m.instance] = [];
+  msgs[m.instance].push(m);
+  if (msgs[m.instance].length > 500) msgs[m.instance].shift();
+  if (m.instance === cur && curTab === "chat") renderMsgs();
+});
+sse.onerror = () => { document.getElementById("uptime").textContent = "disconnected"; };
+
+function renderList() {
+  document.getElementById("fleetEntry").className = `fleet-entry${mode==="fleet"?" active":""}`;
+  const el = document.getElementById("instanceList");
+  el.innerHTML = instances.map(i => `<div class="instance-item${i.name===cur&&mode==="instance"?" active":""}" data-n="${esc(i.name)}">
+    <div class="dot ${i.status}" title="${i.status}"></div><div style="flex:1;min-width:0">
+    <div class="inst-name">${esc(i.name)}</div>
+    <div class="inst-meta">${i.cost>0?`$${i.cost.toFixed(2)}`:""}${i.context_pct>0?` ctx:${Math.round(i.context_pct)}%`:""}</div>
+    </div></div>`).join("");
+  el.querySelectorAll(".instance-item").forEach(x => x.addEventListener("click", () => sel(x.dataset.n)));
+}
+
+function selFleet() { mode = "fleet"; cur = null; curTab = "tasks"; renderList(); renderMain(); }
+function sel(name) { mode = "instance"; cur = name; curTab = "chat"; renderMain(); renderList(); }
+
+function renderMain() {
+  const main = document.getElementById("mainArea");
+  if (mode === "fleet") return renderFleetMain(main);
+  if (mode === "instance" && cur) return renderInstanceMain(main);
+  main.innerHTML = '<div class="no-sel"><svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg><span>Select Fleet or an instance to begin</span></div>';
+}
+
+function renderFleetMain(main) {
+  const tabs = ["tasks","schedules","teams","config"];
+  if (!tabs.includes(curTab)) curTab = "tasks";
+  main.innerHTML = `
+    <div class="tabs">${tabs.map(t => `<div class="tab${curTab===t?" active":""}" data-t="${t}">${t[0].toUpperCase()+t.slice(1)}</div>`).join("")}</div>
+    <div class="task-view" id="taskView" style="display:${curTab==="tasks"?"block":"none"}"><div style="color:var(--text-muted);text-align:center;padding:24px">Loading...</div></div>
+    <div class="task-view" id="schedView" style="display:${curTab==="schedules"?"block":"none"}"><div style="color:var(--text-muted);text-align:center;padding:24px">Loading...</div></div>
+    <div class="task-view" id="teamView" style="display:${curTab==="teams"?"block":"none"}"><div style="color:var(--text-muted);text-align:center;padding:24px">Loading...</div></div>
+    <div class="detail-view" id="configView" style="display:${curTab==="config"?"block":"none"}"><div style="color:var(--text-muted);text-align:center;padding:24px">Loading...</div></div>`;
+  main.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => { curTab = t.dataset.t; renderMain(); }));
+  if (curTab === "tasks") loadTasks();
+  else if (curTab === "schedules") loadSchedules();
+  else if (curTab === "teams") loadTeams();
+  else if (curTab === "config") loadConfig();
+}
+
+function renderInstanceMain(main) {
+  const tabs = ["chat","detail"];
+  if (!tabs.includes(curTab)) curTab = "chat";
+  main.innerHTML = `
+    <div class="tabs">${tabs.map(t => `<div class="tab${curTab===t?" active":""}" data-t="${t}">${t[0].toUpperCase()+t.slice(1)}</div>`).join("")}</div>
+    <div class="actions" id="actions"></div>
+    <div class="chat-view" id="chatView" style="display:${curTab==="chat"?"flex":"none"}">
+      <div class="messages" id="messages"></div>
+      <div class="input-bar"><input id="msgIn" placeholder="Send a message..." autocomplete="off"><button class="btn btn-accent" onclick="sendMsg()">Send</button></div>
+    </div>
+    <div class="detail-view" id="detailView" style="display:${curTab==="detail"?"block":"none"}"><div style="color:var(--text-muted);text-align:center;padding:24px">Loading...</div></div>`;
+  main.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => { curTab = t.dataset.t; renderMain(); }));
+  const i = instances.find(x => x.name === cur); renderActions(i);
+  if (curTab === "chat") { renderMsgs(); const inp = document.getElementById("msgIn"); inp.addEventListener("keydown", e => { if (e.key==="Enter"&&!e.shiftKey&&!e.isComposing){e.preventDefault();sendMsg();} }); inp.focus(); }
+  else if (curTab === "detail") loadDetail();
+}
+
+function renderActions(i) {
+  const el = document.getElementById("actions"); if (!el || !i) return;
+  const r = i.status === "running";
+  el.innerHTML = `${r
+    ?`<button class="btn btn-warn" onclick="doAction('stop')"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg> Stop</button><button class="btn btn-warn" onclick="doAction('restart')"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg> Restart</button>`
+    :`<button class="btn btn-green" onclick="doAction('start')"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg> Start</button>`}
+    <button class="btn btn-red" onclick="doAction('delete')"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> Delete</button>`;
+}
+async function doAction(a) {
+  if (!cur) return;
+  if (a === "delete") {
+    const c = prompt(`Type "delete ${cur}" to confirm:`);
+    if (c !== `delete ${cur}`) return;
+    const r = await api("POST", `/ui/instances/${encodeURIComponent(cur)}/delete`, { confirm: c });
+    if (r.error) { toast(r.error, false); return; }
+    toast(`${cur} deleted`); cur = null;
+    document.getElementById("mainArea").innerHTML = '<div class="no-sel"><span>Instance deleted</span></div>';
+    return;
+  }
+  const ep = `/ui/${a}/${encodeURIComponent(cur)}`;
+  const r = await api("POST", ep);
+  if (r.error) toast(r.error, false);
+  else toast(`${cur} ${a}ed`);
+}
+
+function renderMsgs() {
+  const el = document.getElementById("messages"); if (!el) return;
+  const m = msgs[cur] || [];
+  if (!m.length) { el.innerHTML = '<div class="msg-empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>No messages yet<br><span style="font-size:12px;color:var(--text-muted)">Send a message to start the conversation</span></div>'; return; }
+  el.innerHTML = m.map(x => {
+    const u = x.sender==="web-user"||(!x.sender.startsWith("agend")&&x.sender!==cur&&x.sender!=="general");
+    const t = x.ts ? new Date(x.ts).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}) : "";
+    return `<div class="msg ${u?"inbound":"outbound"}"><div class="sender ${u?"user":"agent"}">${esc(x.sender)}<span class="time">${t}</span></div>${esc(x.text)}</div>`;
+  }).join("");
+  el.scrollTop = el.scrollHeight;
+}
+async function sendMsg() {
+  const inp = document.getElementById("msgIn"), txt = inp.value.trim();
+  if (!txt||!cur) return; inp.value = "";
+  await api("POST", "/ui/send", { instance: cur, message: txt });
+}
+
+async function loadDetail() {
+  const el = document.getElementById("detailView"); if (!el||!cur) return;
+  try {
+    const d = await api("GET", `/ui/instance/${encodeURIComponent(cur)}`);
+    const sl = d.statusline||{}, cost=sl.cost?.total_cost_usd??0, ctx=sl.context_window?.used_percentage??0;
+    const model=sl.model?.display_name??"--", rl5=sl.rate_limits?.five_hour?.used_percentage??0, rl7=sl.rate_limits?.seven_day?.used_percentage??0;
+    let h = `<div class="card"><h3>Instance</h3>
+      <div class="detail-row"><span class="detail-label">Name</span><span>${esc(d.name)}</span></div>
+      <div class="detail-row"><span class="detail-label">Status</span><span>${esc(d.status)}</span></div>
+      <div class="detail-row"><span class="detail-label">Display</span><span>${esc(d.display_name||"--")}</span></div>
+      <div class="detail-row"><span class="detail-label">Description</span><span>${esc(d.description||"--")}</span></div>
+      <div class="detail-row"><span class="detail-label">Directory</span><span style="font-family:'IBM Plex Mono',monospace;font-size:12px">${esc(d.working_directory)}</span></div></div>
+      <div class="card"><h3>Runtime</h3>
+      <div class="detail-row"><span class="detail-label">Model</span><span>${esc(model)}</span></div>
+      <div class="detail-row"><span class="detail-label">Cost</span><span>$${cost.toFixed(2)} <span style="color:var(--text-muted);font-size:11px">(session accumulated)</span></span></div>
+      <div class="detail-row"><span class="detail-label">Context</span><span>${Math.round(ctx)}% <span class="progress-bar"><span class="progress-fill" style="width:${Math.min(ctx,100)}%;background:${ctx>80?'var(--warn)':'var(--accent)'}"></span></span></span></div>
+      <div class="detail-row"><span class="detail-label">Rate 5h</span><span>${Math.round(rl5)}% <span class="progress-bar"><span class="progress-fill" style="width:${Math.min(rl5,100)}%;background:${rl5>90?'var(--error)':rl5>70?'var(--warn)':'var(--accent)'}"></span></span></span></div>
+      <div class="detail-row"><span class="detail-label">Rate 7d</span><span>${Math.round(rl7)}% <span class="progress-bar"><span class="progress-fill" style="width:${Math.min(rl7,100)}%;background:${rl7>90?'var(--error)':rl7>70?'var(--warn)':'var(--accent)'}"></span></span></span></div></div>`;
+    if (d.recent_activity?.length) {
+      h += `<div class="card"><h3>Recent Activity</h3>`;
+      for (const a of d.recent_activity) { const t=a.timestamp?a.timestamp.slice(11,16):""; h+=`<div class="activity-item"><span class="act-time">${t}</span><span class="act-event">${esc(a.event)}</span>${esc(a.summary||"")}</div>`; }
+      h += `</div>`;
+    }
+    el.innerHTML = h;
+  } catch { el.innerHTML = `<div style="color:var(--error);padding:24px">Failed to load</div>`; }
+}
+
+async function loadTasks() {
+  const el = document.getElementById("taskView"); if (!el) return;
+  try {
+    const d = await api("GET", "/ui/tasks");
+    const tasks = d.tasks || [];
+    let h = `<div class="list-header"><span>${tasks.length} tasks</span>
+      <button class="btn btn-accent" onclick="showCreateTask()">+ New Task</button></div>`;
+    if (!tasks.length) h += `<div class="msg-empty"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>No tasks yet<br><span style="font-size:12px">Create one to coordinate fleet work</span></div>`;
+    else for (const t of tasks) {
+      h += `<div class="task-item">
+        <span class="task-status ${t.status}">${t.status}</span>
+        <span class="task-title">${esc(t.title)}</span>
+        <span class="task-assignee">${t.assignee?`<span style="cursor:pointer;color:var(--accent)" onclick="sel('${esc(t.assignee)}')">${esc(t.assignee)}</span>`:""}</span>
+        <div class="task-actions">
+          ${t.status==="open"?`<button class="btn btn-ghost" onclick="taskAct('${t.id}','claim')">Claim</button>`:""}
+          ${t.status==="claimed"?`<button class="btn btn-ghost" onclick="taskAct('${t.id}','complete')">Done</button>`:""}
+        </div></div>`;
+    }
+    el.innerHTML = h;
+  } catch { el.innerHTML = `<div style="color:var(--error);padding:24px">Failed to load</div>`; }
+}
+async function taskAct(id, action) {
+  const r = await api("POST", `/ui/tasks/${id}`, { action });
+  if (r.error) toast(r.error, false); else { toast(`Task ${action}ed`); loadTasks(); }
+}
+
+async function showCreateInstance() {
+  const ov = document.createElement("div"); ov.className = "form-overlay";
+  let backendOpts = '<option value="">Use fleet default</option>';
+  try {
+    const bd = await api("GET", "/ui/backends");
+    const first = (bd.backends || []).find(b => b.installed);
+    backendOpts += (bd.backends || []).map(b => {
+      const label = b.installed ? b.name : `${b.name} (not installed)`;
+      return `<option value="${b.name}" ${b.installed ? "" : "disabled"} ${b.name === first?.name ? "selected" : ""}>${label}</option>`;
+    }).join("");
+  } catch { backendOpts += ["claude-code","codex","gemini-cli","opencode","kiro-cli"].map(b => `<option value="${b}">${b}</option>`).join(""); }
+  ov.innerHTML = `<div class="form-card"><h2>Create Instance</h2>
+    <div class="form-field"><label>Directory</label><input id="ci-dir" placeholder="Optional — auto-creates workspace if empty"></div>
+    <div class="form-field"><label id="ci-topic-label">Topic Name</label><input id="ci-topic" placeholder="Auto from directory name"></div>
+    <div class="form-field"><label>Description</label><input id="ci-desc" placeholder="What this instance does"></div>
+    <div class="form-field"><label>Backend</label><select id="ci-backend">${backendOpts}</select></div>
+    <div class="form-field"><label>Model</label><input id="ci-model" placeholder="e.g. sonnet, opus, gemini-2.5-pro"></div>
+    <div class="form-field"><label>Branch (git worktree)</label><input id="ci-branch" placeholder="e.g. feature-x"></div>
+    <div class="form-field"><label>Tags</label><input id="ci-tags" placeholder="comma-separated, e.g. dev, review"></div>
+    <div class="form-field"><label>System Prompt</label><textarea id="ci-prompt" rows="3" placeholder="Custom instructions for this instance"></textarea></div>
+    <div class="form-actions"><button class="btn btn-ghost" onclick="this.closest('.form-overlay').remove()">Cancel</button>
+    <button class="btn btn-accent" id="ci-go">Create</button></div></div>`;
+  document.body.appendChild(ov);
+  ov.addEventListener("click", e => { if (e.target === ov) ov.remove(); });
+  ov.querySelector("#ci-dir").addEventListener("input", () => {
+    const hasDir = ov.querySelector("#ci-dir").value.trim();
+    ov.querySelector("#ci-topic-label").textContent = hasDir ? "Topic Name" : "Topic Name *";
+  });
+  ov.querySelector("#ci-go").addEventListener("click", async () => {
+    const dir = document.getElementById("ci-dir").value.trim();
+    const topic = document.getElementById("ci-topic").value.trim();
+    if (!dir && !topic) { toast("Topic Name is required when Directory is empty", false); return; }
+    const btn = ov.querySelector("#ci-go"); btn.disabled = true; btn.textContent = "Creating...";
+    const body = {};
+    if (dir) body.directory = dir;
+    const v = id => document.getElementById(id).value.trim();
+    if (v("ci-topic")) body.topic_name = v("ci-topic");
+    if (v("ci-desc")) body.description = v("ci-desc");
+    const backend = document.getElementById("ci-backend").value; if (backend) body.backend = backend;
+    if (v("ci-model")) body.model = v("ci-model");
+    if (v("ci-branch")) body.branch = v("ci-branch");
+    const tags = v("ci-tags"); if (tags) body.tags = tags.split(",").map(t => t.trim()).filter(Boolean);
+    if (v("ci-prompt")) body.systemPrompt = v("ci-prompt");
+    const r = await api("POST", "/ui/instances", body);
+    if (r.error) { toast(r.error, false); btn.disabled = false; btn.textContent = "Create"; }
+    else { toast("Instance created"); ov.remove(); }
+  });
+}
+
+function showCreateTask() {
+  const ov = document.createElement("div"); ov.className = "form-overlay";
+  const opts = instances.map(i => `<option value="${esc(i.name)}">${esc(i.name)}</option>`).join("");
+  ov.innerHTML = `<div class="form-card"><h2>Create Task</h2>
+    <div class="form-field"><label>Title *</label><input id="ct-title" placeholder="Task title"></div>
+    <div class="form-field"><label>Description</label><input id="ct-desc" placeholder="Details"></div>
+    <div class="form-field"><label>Priority</label><select id="ct-pri"><option value="normal">Normal</option><option value="low">Low</option><option value="high">High</option><option value="urgent">Urgent</option></select></div>
+    <div class="form-field"><label>Assignee</label><select id="ct-assign"><option value="">Unassigned</option>${opts}</select></div>
+    <div class="form-actions"><button class="btn btn-ghost" onclick="this.closest('.form-overlay').remove()">Cancel</button>
+    <button class="btn btn-accent" id="ct-go">Create</button></div></div>`;
+  document.body.appendChild(ov);
+  ov.addEventListener("click", e => { if (e.target === ov) ov.remove(); });
+  ov.querySelector("#ct-go").addEventListener("click", async () => {
+    const title = document.getElementById("ct-title").value.trim();
+    if (!title) { toast("Title required", false); return; }
+    const btn = ov.querySelector("#ct-go"); btn.disabled = true; btn.textContent = "Creating...";
+    const body = { title, priority: document.getElementById("ct-pri").value };
+    const desc = document.getElementById("ct-desc").value.trim(); if (desc) body.description = desc;
+    const asgn = document.getElementById("ct-assign").value; if (asgn) body.assignee = asgn;
+    const r = await api("POST", "/ui/tasks", body);
+    if (r.error) { toast(r.error, false); btn.disabled = false; btn.textContent = "Create"; }
+    else { toast("Task created"); ov.remove(); loadTasks(); }
+  });
+}
+
+// ── Schedules ────────────────────────────────────────────
+async function loadSchedules() {
+  const el = document.getElementById("schedView"); if (!el) return;
+  try {
+    const d = await api("GET", "/ui/schedules");
+    const scheds = d.schedules || [];
+    let h = `<div class="list-header"><span>${scheds.length} schedules</span>
+      <button class="btn btn-accent" onclick="showCreateSchedule()">+ New Schedule</button></div>`;
+    if (!scheds.length) h += `<div class="msg-empty"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>No schedules yet<br><span style="font-size:12px">Automate recurring tasks with cron</span></div>`;
+    else for (const s of scheds) {
+      h += `<div class="task-item">
+        <span class="task-status ${s.enabled?"open":"done"}">${s.enabled?"on":"off"}</span>
+        <span class="task-title">${esc(s.label||cronDesc(s.cron))}</span>
+        <span class="task-assignee" style="font-family:'IBM Plex Mono',monospace" title="${esc(cronDesc(s.cron))}">${esc(s.cron)}</span>
+        <span class="task-assignee" style="cursor:pointer;color:var(--accent)" onclick="sel('${esc(s.target)}')">${esc(s.target)}</span>
+        <div class="task-actions">
+          <button class="btn btn-ghost btn-red" onclick="delSchedule('${s.id}')">Delete</button>
+        </div></div>`;
+    }
+    el.innerHTML = h;
+  } catch { el.innerHTML = `<div style="color:var(--error);padding:24px">Failed to load</div>`; }
+}
+async function delSchedule(id) {
+  if (!confirm("Delete this schedule?")) return;
+  const r = await api("DELETE", `/ui/schedules/${id}`);
+  if (r.error) toast(r.error, false); else { toast("Schedule deleted"); loadSchedules(); }
+}
+function showCreateSchedule() {
+  const ov = document.createElement("div"); ov.className = "form-overlay";
+  const tgtOpts = instances.map(i => `<option value="${esc(i.name)}">${esc(i.name)}</option>`).join("");
+  ov.innerHTML = `<div class="form-card"><h2>Create Schedule</h2>
+    <div class="form-field"><label>Cron Expression *</label><input id="cs-cron" placeholder="0 9 * * 1-5"></div>
+    <div class="form-field"><label>Message *</label><input id="cs-msg" placeholder="What to send"></div>
+    <div class="form-field"><label>Target Instance *</label><select id="cs-target">${tgtOpts}</select></div>
+    <div class="form-field"><label>Label</label><input id="cs-label" placeholder="Daily standup"></div>
+    <div class="form-actions"><button class="btn btn-ghost" onclick="this.closest('.form-overlay').remove()">Cancel</button>
+    <button class="btn btn-accent" id="cs-go">Create</button></div></div>`;
+  document.body.appendChild(ov);
+  ov.addEventListener("click", e => { if (e.target === ov) ov.remove(); });
+  ov.querySelector("#cs-go").addEventListener("click", async () => {
+    const cron = document.getElementById("cs-cron").value.trim();
+    const msg = document.getElementById("cs-msg").value.trim();
+    const target = document.getElementById("cs-target").value;
+    if (!cron || !msg || !target) { toast("Cron, message, and target required", false); return; }
+    const btn = ov.querySelector("#cs-go"); btn.disabled = true; btn.textContent = "Creating...";
+    const body = { cron, message: msg, target, source: "web-user", reply_chat_id: "", reply_thread_id: "" };
+    const label = document.getElementById("cs-label").value.trim(); if (label) body.label = label;
+    const r = await api("POST", "/ui/schedules", body);
+    if (r.error) { toast(r.error, false); btn.disabled = false; btn.textContent = "Create"; }
+    else { toast("Schedule created"); ov.remove(); loadSchedules(); }
+  });
+}
+
+// ── Teams ────────────────────────────────────────────────
+async function loadTeams() {
+  const el = document.getElementById("teamView"); if (!el) return;
+  try {
+    const d = await api("GET", "/ui/teams");
+    const teams = d.teams || {};
+    const entries = Object.entries(teams);
+    let h = `<div class="list-header"><span>${entries.length} teams</span>
+      <button class="btn btn-accent" onclick="showCreateTeam()">+ New Team</button></div>`;
+    if (!entries.length) h += `<div class="msg-empty"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>No teams yet<br><span style="font-size:12px">Group instances for coordinated work</span></div>`;
+    else for (const [name, team] of entries) {
+      h += `<div class="task-item">
+        <span class="task-title" style="font-weight:600">${esc(name)}</span>
+        <span class="task-assignee">${esc((team.members||[]).join(", "))}</span>
+        <div class="task-actions">
+          <button class="btn btn-ghost btn-red" onclick="delTeam('${esc(name)}')">Delete</button>
+        </div></div>`;
+    }
+    el.innerHTML = h;
+  } catch { el.innerHTML = `<div style="color:var(--error);padding:24px">Failed to load</div>`; }
+}
+async function delTeam(name) {
+  if (!confirm(`Delete team "${name}"?`)) return;
+  const r = await api("DELETE", `/ui/teams/${encodeURIComponent(name)}`);
+  if (r.error) toast(r.error, false); else { toast("Team deleted"); loadTeams(); }
+}
+function showCreateTeam() {
+  const ov = document.createElement("div"); ov.className = "form-overlay";
+  const memOpts = instances.map(i => `<label style="display:flex;gap:6px;align-items:center;font-size:13px;padding:3px 0"><input type="checkbox" value="${esc(i.name)}">${esc(i.name)}</label>`).join("");
+  ov.innerHTML = `<div class="form-card"><h2>Create Team</h2>
+    <div class="form-field"><label>Team Name *</label><input id="ct2-name" placeholder="team-name"></div>
+    <div class="form-field"><label>Description</label><input id="ct2-desc" placeholder="What this team does"></div>
+    <div class="form-field"><label>Members *</label><div id="ct2-members" style="max-height:150px;overflow-y:auto">${memOpts}</div></div>
+    <div class="form-actions"><button class="btn btn-ghost" onclick="this.closest('.form-overlay').remove()">Cancel</button>
+    <button class="btn btn-accent" id="ct2-go">Create</button></div></div>`;
+  document.body.appendChild(ov);
+  ov.addEventListener("click", e => { if (e.target === ov) ov.remove(); });
+  ov.querySelector("#ct2-go").addEventListener("click", async () => {
+    const name = document.getElementById("ct2-name").value.trim();
+    const members = [...document.querySelectorAll("#ct2-members input:checked")].map(c => c.value);
+    if (!name || !members.length) { toast("Name and at least one member required", false); return; }
+    const btn = ov.querySelector("#ct2-go"); btn.disabled = true; btn.textContent = "Creating...";
+    const body = { name, members };
+    const desc = document.getElementById("ct2-desc").value.trim(); if (desc) body.description = desc;
+    const r = await api("POST", "/ui/teams", body);
+    if (r.error) { toast(r.error, false); btn.disabled = false; btn.textContent = "Create"; }
+    else { toast("Team created"); ov.remove(); loadTeams(); }
+  });
+}
+
+// ── Cron description ─────────────────────────────────────
+const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+function cronDesc(expr) {
+  if (!expr) return "";
+  const p = expr.trim().split(/\s+/);
+  if (p.length < 5) return expr;
+  const [min, hr, dom, mon, dow] = p;
+  const time = (hr !== "*" && min !== "*") ? `at ${hr.padStart(2,"0")}:${min.padStart(2,"0")}` : "";
+  if (min === "*" && hr === "*") return "Every minute";
+  if (min.startsWith("*/")) return `Every ${min.slice(2)} minutes`;
+  if (hr.startsWith("*/")) return `Every ${hr.slice(2)} hours`;
+  if (dom === "*" && mon === "*" && dow === "*") return `Daily ${time}`;
+  if (dom === "*" && mon === "*" && dow === "1-5") return `Weekdays ${time}`;
+  if (dom === "*" && mon === "*" && dow !== "*") {
+    const days = dow.split(",").map(d => { const n = parseInt(d); return isNaN(n) ? d : (DAYS[n] || d); });
+    return `${days.join(", ")} ${time}`;
+  }
+  if (dom !== "*" && mon === "*") return `${dom}${dom==="1"?"st":dom==="2"?"nd":dom==="3"?"rd":"th"} of month ${time}`;
+  return expr;
+}
+
+// ── Config form ──────────────────────────────────────────
+let cfgData = null;
+async function loadConfig() {
+  const el = document.getElementById("configView"); if (!el) return;
+  try {
+    cfgData = await api("GET", "/ui/config");
+    const ch = cfgData.channel || {};
+    const acc = ch.access || {};
+    const defs = cfgData.defaults || {};
+    const roots = cfgData.project_roots || [];
+    el.innerHTML = `
+      <div class="card"><h3>Channel</h3>
+        <div class="form-field"><label>Type</label><input id="cfg-type" value="${esc(ch.type||"")}" disabled style="opacity:0.5"></div>
+        <div class="form-field"><label>Bot Token Env</label><input id="cfg-token-env" value="${esc(ch.bot_token_env||"AGEND_BOT_TOKEN")}" disabled style="opacity:0.5"></div>
+        <div class="form-field"><label>Group ID</label>
+          <div style="display:flex;gap:4px;align-items:center">
+            <input id="cfg-gid" type="password" value="${ch.group_id||""}" style="flex:1">
+            <button class="eye-btn" onclick="togglePw('cfg-gid')">&#128065;</button>
+          </div></div>
+      </div>
+      <div class="card"><h3>Access Control</h3>
+        <div class="form-field"><label>Mode</label>
+          <select id="cfg-acc-mode"><option value="locked" ${acc.mode==="locked"?"selected":""}>Locked</option><option value="open" ${acc.mode==="open"?"selected":""}>Open</option></select></div>
+        <div class="form-field"><label>Allowed Users</label>
+          <div style="display:flex;gap:4px;align-items:center">
+            <input id="cfg-users" type="password" value="${(acc.allowed_users||[]).join(", ")}" style="flex:1">
+            <button class="eye-btn" onclick="togglePw('cfg-users')">&#128065;</button>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Comma-separated user IDs</div></div>
+      </div>
+      <div class="card"><h3>Defaults</h3>
+        <div class="form-field"><label>Backend</label>
+          <select id="cfg-backend">
+            ${["claude-code","codex","gemini-cli","opencode","kiro-cli"].map(b => `<option value="${b}" ${defs.backend===b?"selected":""}>${b}</option>`).join("")}
+          </select></div>
+      </div>
+      <div class="card"><h3>Project Roots</h3>
+        <div id="cfg-roots">${roots.map((r,i) => `<div style="display:flex;gap:4px;margin-bottom:6px"><input class="cfg-root" value="${esc(r)}" style="flex:1"><button class="btn btn-ghost" style="padding:4px 8px" onclick="this.parentElement.remove()">&#10005;</button></div>`).join("")}</div>
+        <button class="btn btn-ghost" onclick="addRoot()">+ Add Root</button>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;margin-top:16px">
+        <button class="btn btn-accent" onclick="saveConfig()">Save Changes</button>
+        <span style="font-size:11px;color:var(--text-muted)">Saving will reformat fleet.yaml (comments will be lost)</span>
+      </div>`;
+  } catch { el.innerHTML = `<div style="color:var(--error);padding:24px">Failed to load config</div>`; }
+}
+function togglePw(id) { const el = document.getElementById(id); el.type = el.type === "password" ? "text" : "password"; }
+function addRoot() { const el = document.getElementById("cfg-roots"); el.insertAdjacentHTML("beforeend", `<div style="display:flex;gap:4px;margin-bottom:6px"><input class="cfg-root" value="" placeholder="/path/to/projects" style="flex:1"><button class="btn btn-ghost" style="padding:4px 8px" onclick="this.parentElement.remove()">&#10005;</button></div>`); }
+async function saveConfig() {
+  const body = {
+    channel: { group_id: document.getElementById("cfg-gid").value.trim(), access: { mode: document.getElementById("cfg-acc-mode").value, allowed_users: document.getElementById("cfg-users").value.split(",").map(s => s.trim()).filter(Boolean) } },
+    defaults: { backend: document.getElementById("cfg-backend").value },
+    project_roots: [...document.querySelectorAll(".cfg-root")].map(i => i.value.trim()).filter(Boolean),
+  };
+  const r = await api("POST", "/ui/config", body);
+  if (r.error) toast(r.error, false);
+  else { toast("Config saved" + (r.needs_restart ? " (restart fleet to apply channel changes)" : "")); }
+}
+</script>
+</body>
+</html>

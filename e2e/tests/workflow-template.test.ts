@@ -2,7 +2,7 @@
  * E2E Test: Workflow Template Injection
  *
  * T15: Verify workflow template is injected into MCP instructions.
- *   - Default (builtin): instructions contain "Fleet Collaboration Workflow"
+ *   - Default (builtin): instructions contain "Fleet Collaboration" (executor version)
  *   - workflow: false → instructions do NOT contain workflow content
  *   - workflow: "file:..." → instructions contain custom file content
  *   - workflow + systemPrompt → both appear in instructions
@@ -49,6 +49,7 @@ describe("Workflow Template E2E", () => {
     await telegramMock.start();
 
     testDir = `/tmp/ae2e-wf-${Date.now().toString(36)}`;
+    process.env.AGEND_HOME = testDir;
     mkdirSync(testDir, { recursive: true });
     mkdirSync(join(testDir, "instances"), { recursive: true });
     mkdirSync(join(testDir, "access"), { recursive: true });
@@ -163,6 +164,7 @@ describe("Workflow Template E2E", () => {
     await sleep(500);
     rmSync(testDir, { recursive: true, force: true });
     delete process.env.AGEND_TMUX_SESSION;
+    delete process.env.AGEND_HOME;
     delete process.env.AGEND_BOT_TOKEN;
   }, 30_000);
 
@@ -193,8 +195,9 @@ describe("Workflow Template E2E", () => {
       "utf-8",
     );
     expect(instructions).toContain("Development Workflow");
-    expect(instructions).toContain("Fleet Collaboration Workflow");
-    expect(instructions).toContain("Choosing Collaborators");
+    expect(instructions).toContain("Fleet Collaboration");
+    expect(instructions).toContain("Communication Rules");
+    expect(instructions).toContain("Context Protection");
   });
 
   it("T15: workflow false excludes workflow content", () => {
@@ -203,7 +206,7 @@ describe("Workflow Template E2E", () => {
       "utf-8",
     );
     expect(instructions).not.toContain("Development Workflow");
-    expect(instructions).not.toContain("Fleet Collaboration Workflow");
+    expect(instructions).not.toContain("Fleet Collaboration");
     // Should still have base fleet context
     expect(instructions).toContain("Collaboration Rules");
   });
@@ -217,7 +220,7 @@ describe("Workflow Template E2E", () => {
     expect(instructions).toContain("Custom Workflow");
     expect(instructions).toContain("custom workflow for testing");
     // Should NOT contain builtin template
-    expect(instructions).not.toContain("Fleet Collaboration Workflow");
+    expect(instructions).not.toContain("Communication Rules");
   });
 
   it("T15: workflow + systemPrompt both appear in instructions", () => {
@@ -226,7 +229,8 @@ describe("Workflow Template E2E", () => {
       "utf-8",
     );
     // Builtin workflow present
-    expect(instructions).toContain("Fleet Collaboration Workflow");
+    expect(instructions).toContain("Fleet Collaboration");
+    expect(instructions).toContain("Communication Rules");
     // Custom systemPrompt also present
     expect(instructions).toContain("specialized testing agent");
   });
@@ -237,5 +241,5 @@ describe("Workflow Template E2E", () => {
     expect(fm).not.toBeNull();
     await fm!.stopAll();
     fm = null;
-  }, 30_000);
+  }, 90_000);
 });

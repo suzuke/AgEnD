@@ -1,6 +1,9 @@
 import type { ChannelAdapter } from "./types.js";
 import type { ChannelConfig } from "../types.js";
 import type { AccessManager } from "./access-manager.js";
+import { execSync } from "node:child_process";
+import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
 
 export interface AdapterOpts {
   id: string;
@@ -12,44 +15,60 @@ export interface AdapterOpts {
 /** Factory function that external adapter packages must default-export. */
 export type AdapterFactory = (config: ChannelConfig, opts: AdapterOpts) => ChannelAdapter;
 
+/** Resolve the entry point for a global npm package. */
+function resolveGlobalPackage(pkg: string): string | null {
+  try {
+    const globalRoot = execSync("npm root -g", { stdio: "pipe" }).toString().trim();
+    const pkgDir = join(globalRoot, pkg);
+    if (!existsSync(pkgDir)) return null;
+    // Read main from package.json, fallback to dist/index.js
+    try {
+      const pkgJson = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf-8"));
+      return join(pkgDir, pkgJson.main ?? "dist/index.js");
+    } catch {
+      return join(pkgDir, "dist/index.js");
+    }
+  } catch { return null; }
+}
+
+/** Try to import a plugin by name — local node_modules first, then global. */
+async function tryImportPlugin(pkg: string): Promise<{ default: unknown } | null> {
+  try { return await import(pkg); } catch { /* not in local node_modules */ }
+  const globalPath = resolveGlobalPackage(pkg);
+  if (globalPath) {
+    try { return await import(globalPath); } catch { /* global import failed */ }
+  }
+  return null;
+}
+
 export async function createAdapter(config: ChannelConfig, opts: AdapterOpts): Promise<ChannelAdapter> {
-  switch (config.type) {
-    case "telegram": {
-      const { TelegramAdapter } = await import("./adapters/telegram.js");
-      return new TelegramAdapter({ ...opts, apiRoot: config.telegram_api_root });
-    }
-    case "discord": {
-      const { DiscordAdapter } = await import("./adapters/discord.js");
-      return new DiscordAdapter({
-        ...opts,
-        guildId: config.group_id != null ? String(config.group_id) : "",
-        categoryName: (config.options?.category_name as string) ?? undefined,
-        generalChannelId: (config.options?.general_channel_id as string) ?? undefined,
-      });
-    }
-    default: {
-      // External adapter — try canonical name, then bare name
-      const candidates = [`agend-adapter-${config.type}`, config.type];
-      let factory: AdapterFactory | undefined;
+  // Built-in adapters
+  if (config.type === "telegram") {
+    const { TelegramAdapter } = await import("./adapters/telegram.js");
+    return new TelegramAdapter({ ...opts, apiRoot: config.telegram_api_root });
+  }
 
-      for (const pkg of candidates) {
-        try {
-          const mod = await import(pkg);
-          factory = mod.default;
-          break;
-        } catch {
-          continue;
-        }
-      }
+  // Plugin adapters — try multiple package name conventions
+  const candidates = [
+    `@suzuke/agend-plugin-${config.type}`, // scoped official plugin
+    `agend-plugin-${config.type}`,          // community plugin
+    `agend-adapter-${config.type}`,         // legacy convention
+    config.type,                             // bare name
+  ];
 
-      if (!factory) {
-        throw new Error(
-          `Channel adapter "${config.type}" not found. ` +
-          `Install it: npm install agend-adapter-${config.type}`
-        );
-      }
-
-      return factory(config, opts);
+  for (const pkg of candidates) {
+    const mod = await tryImportPlugin(pkg);
+    if (!mod) continue;
+    const factory = mod.default;
+    // Support both: factory function and object with createAdapter method
+    if (typeof factory === "function") return factory(config, opts) as ChannelAdapter;
+    if (factory && typeof (factory as Record<string, unknown>).createAdapter === "function") {
+      return (factory as { createAdapter: AdapterFactory }).createAdapter(config, opts);
     }
   }
+
+  throw new Error(
+    `Channel adapter "${config.type}" not found. ` +
+    `Install the plugin: npm install -g @suzuke/agend-plugin-${config.type}`
+  );
 }

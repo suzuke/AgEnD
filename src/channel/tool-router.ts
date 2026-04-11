@@ -1,9 +1,9 @@
-import { homedir } from "node:os";
 import { resolve, sep } from "node:path";
 import { realpathSync, existsSync } from "node:fs";
 import type { ChannelAdapter } from "./types.js";
+import { getAgendHome } from "../paths.js";
 
-const STATE_DIR = resolve(homedir(), ".agend") + sep;
+const STATE_DIR = resolve(getAgendHome()) + sep;
 const INBOX_SEG = sep + "inbox" + sep;
 
 /** Block files inside the state dir (except inbox/) from being sent out. */
@@ -43,9 +43,11 @@ export function routeToolCall(
         return true;
       }
       const replyThreadId = args.thread_id as string ?? threadId;
+      const format = args.format === "markdown" ? "html" as const : undefined;
       adapter.sendText(chatId, args.text as string ?? "", {
         threadId: replyThreadId,
         replyTo: args.reply_to as string,
+        format,
       }).then(async (sent) => {
         for (const filePath of files) {
           await adapter.sendFile(chatId, filePath, { threadId: replyThreadId });

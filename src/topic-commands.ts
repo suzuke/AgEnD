@@ -1,9 +1,15 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
 import { join, basename } from "node:path";
+import { homedir } from "node:os";
+
+const execAsync = promisify(exec);
 import type { FleetContext } from "./fleet-context.js";
 import type { InboundMessage } from "./channel/types.js";
 import { DEFAULT_INSTANCE_CONFIG } from "./config.js";
 import { formatCents } from "./cost-guard.js";
+import { detectPlatform } from "./service-installer.js";
 
 /** Sanitize a directory name into a valid instance name. Keeps Unicode letters (incl. CJK). */
 export function sanitizeInstanceName(name: string): string {
@@ -32,6 +38,11 @@ export class TopicCommands {
     if (text === "/sysinfo" || text === "/sysinfo@" || text.startsWith("/sysinfo@")
         || text === "/sys-info" || text === "/sys_info") {
       await this.handleSysInfoCommand(msg);
+      return true;
+    }
+
+    if (text === "/update" || text === "/update@" || text.startsWith("/update@")) {
+      await this.handleUpdateCommand(msg);
       return true;
     }
 
@@ -118,6 +129,67 @@ export class TopicCommands {
     }
 
     await this.ctx.adapter.sendText(msg.chatId, lines.join("\n"), { threadId: msg.threadId });
+  }
+
+  private async handleUpdateCommand(msg: InboundMessage): Promise<void> {
+    if (!this.ctx.adapter) return;
+    const chatId = msg.chatId;
+    const threadId = msg.threadId;
+
+    // Access control — only allowed users can trigger update
+    const allowed = this.ctx.fleetConfig?.channel?.access?.allowed_users ?? [];
+    if (allowed.length > 0 && !allowed.some(u => String(u) === String(msg.userId))) {
+      await this.ctx.adapter.sendText(chatId, "⛔ Not authorized", { threadId });
+      return;
+    }
+
+    await this.ctx.adapter.sendText(chatId, "📦 Updating AgEnD...", { threadId });
+
+    try {
+      await execAsync("npm install -g @suzuke/agend@latest", { timeout: 120_000 });
+    } catch {
+      await this.ctx.adapter.sendText(chatId, "❌ npm install failed. Try manually: npm install -g @suzuke/agend@latest", { threadId });
+      return;
+    }
+
+    await this.ctx.adapter.sendText(chatId, "✅ Updated. Restarting service...", { threadId });
+    // Brief delay to let sendText complete before process dies
+    await new Promise(r => setTimeout(r, 1000));
+
+    const label = "com.agend.fleet";
+    const plat = detectPlatform();
+
+    if (plat === "macos") {
+      const plistPath = join(homedir(), "Library/LaunchAgents", `${label}.plist`);
+      if (existsSync(plistPath)) {
+        const uid = process.getuid?.() ?? 501;
+        try {
+          await execAsync(`launchctl kickstart -k gui/${uid}/${label}`, { timeout: 15_000 });
+          return;
+        } catch {
+          await this.ctx.adapter.sendText(chatId, "⚠️ Failed to restart launchd service", { threadId });
+          return;
+        }
+      }
+    } else {
+      try {
+        await execAsync(`systemctl --user restart ${label}`, { timeout: 15_000 });
+        return;
+      } catch { /* no systemd service */ }
+    }
+
+    // Fallback: signal running daemon
+    const pidPath = join(this.ctx.dataDir, "fleet.pid");
+    if (existsSync(pidPath)) {
+      const pid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
+      try {
+        process.kill(pid, "SIGUSR1");
+      } catch {
+        await this.ctx.adapter.sendText(chatId, "⚠️ Fleet not running", { threadId });
+      }
+    } else {
+      await this.ctx.adapter.sendText(chatId, "⚠️ No service or running fleet found", { threadId });
+    }
   }
 
   /** Reply with redirect when message arrives in an unbound topic */
@@ -222,6 +294,7 @@ export class TopicCommands {
               { command: "status", description: "Show fleet status and costs" },
               { command: "restart", description: "Graceful restart all instances" },
               { command: "sysinfo", description: "System diagnostics" },
+              { command: "update", description: "Update AgEnD and restart service" },
             ],
             scope: { type: "chat", chat_id: groupId },
           }),

@@ -453,6 +453,15 @@ export const TOOLS = [
             type: "string",
             description: "Custom system prompt for this instance (inline text only, file: prefix not supported here). Injected after fleet context in MCP instructions.",
           },
+          tags: {
+            type: "array",
+            items: { type: "string" },
+            description: "Tags for categorization and filtering.",
+          },
+          workflow: {
+            type: "string",
+            description: "Workflow template. 'builtin' (default), 'false' to disable, or custom text.",
+          },
         },
         required: [],
       },
@@ -520,6 +529,41 @@ export const TOOLS = [
           path: { type: "string", description: "Path returned by checkout_repo." },
         },
         required: ["path"],
+      },
+    },
+    // ── Fleet Templates ──────────────────────────────────────────
+    {
+      name: "deploy_template",
+      description: "Deploy a fleet template — creates instances and optionally a team in one operation.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          template: { type: "string", description: "Template name from fleet.yaml templates section." },
+          directory: { type: "string", description: "Working directory (shared by all instances, or base repo for worktrees)." },
+          name: { type: "string", description: "Deployment name (used as team name and instance name prefix). Defaults to template name." },
+          branch: { type: "string", description: "Git branch — each instance gets its own worktree branched from this." },
+        },
+        required: ["template", "directory"],
+      },
+    },
+    {
+      name: "teardown_deployment",
+      description: "Tear down a template deployment — stops and deletes all instances and team.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          name: { type: "string", description: "Deployment name (as used in deploy_template)." },
+        },
+        required: ["name"],
+      },
+    },
+    {
+      name: "list_deployments",
+      description: "List active template deployments with their instances and status.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {},
+        required: [],
       },
     },
 ];

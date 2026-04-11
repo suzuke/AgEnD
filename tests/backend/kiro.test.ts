@@ -34,34 +34,19 @@ describe("KiroBackend", () => {
   });
 
   describe("buildCommand", () => {
-    it("generates chat command with --trust-all-tools", () => {
+    it("generates chat command with --trust-all-tools and --resume", () => {
       const backend = new KiroBackend(TEST_DIR);
       const cmd = backend.buildCommand(makeConfig());
       expect(cmd).toContain("chat");
       expect(cmd).toContain("--trust-all-tools");
+      expect(cmd).toContain("--resume");
       expect(cmd).toContain("--require-mcp-startup");
-      expect(cmd).not.toContain("--resume");
     });
 
-    it("includes --resume with valid UUID session-id", () => {
-      writeFileSync(join(TEST_DIR, "session-id"), "f142766b-7371-496d-a463-8d03562cce65");
+    it("always includes --resume (boolean flag, resumes latest session for CWD)", () => {
       const backend = new KiroBackend(TEST_DIR);
       const cmd = backend.buildCommand(makeConfig());
-      expect(cmd).toContain("--resume f142766b-7371-496d-a463-8d03562cce65");
-    });
-
-    it("skips resume for invalid session-id (not UUID)", () => {
-      writeFileSync(join(TEST_DIR, "session-id"), "not-a-valid-uuid");
-      const backend = new KiroBackend(TEST_DIR);
-      const cmd = backend.buildCommand(makeConfig());
-      expect(cmd).not.toContain("--resume");
-    });
-
-    it("skips resume for empty session-id", () => {
-      writeFileSync(join(TEST_DIR, "session-id"), "  \n");
-      const backend = new KiroBackend(TEST_DIR);
-      const cmd = backend.buildCommand(makeConfig());
-      expect(cmd).not.toContain("--resume");
+      expect(cmd).toContain("--resume");
     });
 
     it("includes --model when model is set", () => {
@@ -78,14 +63,20 @@ describe("KiroBackend", () => {
   });
 
   describe("writeConfig", () => {
-    it("writes mcp.json to .kiro/settings/ in working directory", () => {
+    it("writes mcp.json with wrapper script to .kiro/settings/ in working directory", () => {
       const backend = new KiroBackend(TEST_DIR);
       backend.writeConfig(makeConfig());
       const mcpConfigPath = join(WORK_DIR, ".kiro", "settings", "mcp.json");
       expect(existsSync(mcpConfigPath)).toBe(true);
       const config = JSON.parse(readFileSync(mcpConfigPath, "utf-8"));
       expect(config.mcpServers["agend-test-kiro"]).toBeDefined();
-      expect(config.mcpServers["agend-test-kiro"].command).toBe("node");
+      // kiro-cli ignores env block in mcp.json, so we use a wrapper script
+      const wrapperPath = config.mcpServers["agend-test-kiro"].command;
+      expect(wrapperPath).toContain("mcp-wrapper-agend.sh");
+      expect(existsSync(wrapperPath)).toBe(true);
+      const wrapperContent = readFileSync(wrapperPath, "utf-8");
+      expect(wrapperContent).toContain("AGEND_SOCKET_PATH");
+      expect(wrapperContent).toContain("exec node");
     });
 
     it("uses instance-namespaced key to avoid conflicts", () => {
@@ -107,6 +98,20 @@ describe("KiroBackend", () => {
       expect(config.mcpServers["agend"]).toBeUndefined();
       expect(config.mcpServers["agend-test-kiro"]).toBeDefined();
     });
+
+    it("writes steering file when instructions provided", () => {
+      const backend = new KiroBackend(TEST_DIR);
+      backend.writeConfig(makeConfig({ instructions: "# Fleet Context" }));
+      const steeringFile = join(WORK_DIR, ".kiro", "steering", "agend-test-kiro.md");
+      expect(existsSync(steeringFile)).toBe(true);
+      expect(readFileSync(steeringFile, "utf-8")).toContain("# Fleet Context");
+    });
+
+    it("does not write steering file when instructions absent", () => {
+      const backend = new KiroBackend(TEST_DIR);
+      backend.writeConfig(makeConfig());
+      expect(existsSync(join(WORK_DIR, ".kiro", "steering", "agend-test-kiro.md"))).toBe(false);
+    });
   });
 
   describe("cleanup", () => {
@@ -117,16 +122,19 @@ describe("KiroBackend", () => {
       const config = JSON.parse(readFileSync(join(WORK_DIR, ".kiro", "settings", "mcp.json"), "utf-8"));
       expect(config.mcpServers["agend-test-kiro"]).toBeUndefined();
     });
+
+    it("removes steering file on cleanup", () => {
+      const backend = new KiroBackend(TEST_DIR);
+      backend.writeConfig(makeConfig({ instructions: "# Fleet" }));
+      const steeringFile = join(WORK_DIR, ".kiro", "steering", "agend-test-kiro.md");
+      expect(existsSync(steeringFile)).toBe(true);
+      backend.cleanup(makeConfig());
+      expect(existsSync(steeringFile)).toBe(false);
+    });
   });
 
   describe("getSessionId", () => {
-    it("returns session-id from file", () => {
-      writeFileSync(join(TEST_DIR, "session-id"), "test-session-123");
-      const backend = new KiroBackend(TEST_DIR);
-      expect(backend.getSessionId()).toBe("test-session-123");
-    });
-
-    it("returns null when file missing", () => {
+    it("returns null (Kiro manages sessions internally)", () => {
       const backend = new KiroBackend(TEST_DIR);
       expect(backend.getSessionId()).toBeNull();
     });

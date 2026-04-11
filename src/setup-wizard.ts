@@ -4,8 +4,9 @@ import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { stdin, stdout } from "node:process";
 import { execSync } from "node:child_process";
+import { getAgendHome } from "./paths.js";
 
-const DATA_DIR = join(homedir(), ".agend");
+const DATA_DIR = getAgendHome();
 const FLEET_CONFIG_PATH = join(DATA_DIR, "fleet.yaml");
 const ENV_PATH = join(DATA_DIR, ".env");
 
@@ -190,7 +191,7 @@ export function buildFleetConfig(answers: WizardAnswers): Record<string, unknown
 
 // ── Prerequisite checks ──────────────────────────────────
 
-const BACKENDS = [
+export const BACKENDS = [
   { id: "claude-code", binary: "claude", label: "Claude Code",
     installUrl: "https://code.claude.com/docs/en/quickstart",
     install: "curl -fsSL https://claude.ai/install.sh | bash",
@@ -450,7 +451,7 @@ export async function runSetupWizard(): Promise<void> {
         validate: (v) => {
           if (v.length === 0) return "Name required";
           if (!/^[a-zA-Z0-9._-]+$/.test(v) && !/^[\u4e00-\u9fff\u3400-\u4dbf]+$/.test(v)) {
-            // Allow alphanumeric, dots, hyphens, underscores, or CJK chars
+            return "Name must be alphanumeric (a-z, 0-9, ., -, _) or CJK characters";
           }
           if (instances.some((i) => i.name === v)) return "Name already used";
           return null;

@@ -1,7 +1,11 @@
-import { join } from "node:path";
-import { execSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { type CliBackend, type CliBackendConfig, type ErrorPattern, type RuntimeDialog, resolveBinary } from "./types.js";
+import { execFileSync } from "node:child_process";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { type CliBackend, type CliBackendConfig, type ErrorPattern, type RuntimeDialog, type StartupDialog, resolveBinary } from "./types.js";
+import { appendWithMarker, removeMarker } from "./marker-utils.js";
+
+const CODEX_PROJECT_DOC_MAX_BYTES = 32_768;
 
 export class CodexBackend implements CliBackend {
   readonly binaryName = "codex";
@@ -16,39 +20,66 @@ export class CodexBackend implements CliBackend {
       ? "--dangerously-bypass-approvals-and-sandbox"
       : "--full-auto";
 
-    // Check for existing session to resume
-    const sessionIdFile = join(this.instanceDir, "session-id");
-    if (existsSync(sessionIdFile)) {
-      const sid = readFileSync(sessionIdFile, "utf-8").trim();
-      if (sid && /^[a-zA-Z0-9_-]+$/.test(sid)) {
-        let cmd = `${this.binaryPath} resume ${sid} ${approvalFlag}`;
-        if (config.model) cmd += ` -c model="${config.model}"`;
-        return cmd;
-      }
+    // `codex resume --last` resumes the most recent session for the current
+    // working directory. Each AgEnD instance has a unique working_directory,
+    // so sessions are per-instance scoped and won't collide.
+    // If no prior session exists (first launch), Codex falls back to a fresh session.
+    let cmd: string;
+    if (config.skipResume) {
+      cmd = `${this.binaryPath} ${approvalFlag}`;
+    } else {
+      cmd = `${this.binaryPath} resume --last ${approvalFlag}`;
     }
-
-    let cmd = `${this.binaryPath} ${approvalFlag}`;
     if (config.model) cmd += ` -c model="${config.model}"`;
     return cmd;
   }
 
   writeConfig(config: CliBackendConfig): void {
-    // Codex uses codex mcp add (global config), write a setup script
-    // that registers MCP servers on first launch
-    const setupScript = Object.entries(config.mcpServers).map(([name, entry]) => {
-      const args = entry.args.map(a => `"${a}"`).join(" ");
-      // Include AGEND_INSTANCE_NAME so MCP server identifies as this instance
-      // (Codex spawns MCP servers as separate processes that don't inherit tmux shell env)
+    // Codex stores MCP config globally in ~/.codex/config.toml.
+    // Use execFileSync (no shell) to avoid escaping issues with env values
+    // containing JSON (e.g. AGEND_DECISIONS). Use namespaced key to avoid
+    // conflicts when multiple Codex instances run simultaneously.
+    for (const [name, entry] of Object.entries(config.mcpServers)) {
+      const mcpName = `${name}-${config.instanceName}`;
       const allEnv = { ...entry.env, AGEND_INSTANCE_NAME: config.instanceName };
-      const envFlags = Object.entries(allEnv).map(([k, v]) => `--env ${k}="${v}"`).join(" ");
-      return `codex mcp add ${name} ${envFlags} -- ${entry.command} ${args} 2>/dev/null || true`;
-    }).join("\n");
-    writeFileSync(join(this.instanceDir, "setup-mcp.sh"), setupScript, { mode: 0o755 });
+      const args = ["mcp", "add", mcpName];
+      for (const [k, v] of Object.entries(allEnv)) {
+        args.push("--env", `${k}=${v}`);
+      }
+      args.push("--", entry.command, ...entry.args);
+      // Remove existing entry first (codex mcp add fails if name exists)
+      try { execFileSync(this.binaryPath, ["mcp", "remove", mcpName], { stdio: "ignore" }); } catch { /* may not exist */ }
+      try { execFileSync(this.binaryPath, args, { stdio: "ignore" }); } catch { /* best effort */ }
+    }
+    // Clean up old non-namespaced key if present (one-time migration)
+    try { execFileSync(this.binaryPath, ["mcp", "remove", "agend"], { stdio: "ignore" }); } catch { /* may not exist */ }
 
-    // Run setup immediately
-    try {
-      execSync(`bash ${join(this.instanceDir, "setup-mcp.sh")}`, { stdio: "ignore" });
-    } catch { /* best effort */ }
+    // Write fleet instructions into AGENTS.md (additive via marker block)
+    if (config.instructions) {
+      try {
+        const agentsMd = join(config.workingDirectory, "AGENTS.md");
+        appendWithMarker(agentsMd, config.instanceName, config.instructions);
+        // Warn if file exceeds Codex's project_doc_max_bytes limit
+        try {
+          const size = statSync(agentsMd).size;
+          if (size > CODEX_PROJECT_DOC_MAX_BYTES) {
+            console.warn(`[agend] AGENTS.md is ${size} bytes, exceeds Codex limit of ${CODEX_PROJECT_DOC_MAX_BYTES} — instructions may be truncated`);
+          }
+        } catch { /* stat failed — skip size check */ }
+      } catch { /* best effort */ }
+    }
+  }
+
+  preTrust(workDir: string): void {
+    const configPath = join(homedir(), ".codex", "config.toml");
+    let content = "";
+    try { content = readFileSync(configPath, "utf-8"); } catch {}
+
+    const section = `[projects."${workDir}"]`;
+    if (content.includes(section)) return;
+
+    mkdirSync(dirname(configPath), { recursive: true });
+    appendFileSync(configPath, `\n${section}\ntrust_level = "trusted"\n`);
   }
 
   getReadyPattern(): RegExp {
@@ -61,6 +92,13 @@ export class CodexBackend implements CliBackend {
       { pattern: /authentication|401 Unauthorized/i, type: "auth_error", action: "pause", message: "OpenAI authentication error" },
       { pattern: /insufficient_quota|billing/i, type: "quota", action: "pause", message: "OpenAI quota exceeded" },
       { pattern: /you've hit your usage limit/i, type: "quota", action: "pause", message: "Codex usage limit reached — upgrade plan required" },
+    ];
+  }
+
+  getStartupDialogs(): StartupDialog[] {
+    return [
+      { pattern: /Do you trust the files in this folder/i, keys: ["Enter"], description: "Codex trust dialog" },
+      { pattern: /Yes, continue/i, keys: ["Enter"], description: "Codex 'Yes, continue' confirmation" },
     ];
   }
 
@@ -81,15 +119,35 @@ export class CodexBackend implements CliBackend {
   }
 
   getSessionId(): string | null {
-    try {
-      const f = join(this.instanceDir, "session-id");
-      return readFileSync(f, "utf-8").trim() || null;
-    } catch { return null; }
+    // Codex manages sessions internally via SQLite (~/.codex/state_5.sqlite).
+    // `resume --last` handles session selection by CWD automatically.
+    return null;
   }
+
+  getQuitCommand(): string { return "/quit"; }
 
   cleanup(config: CliBackendConfig): void {
     for (const name of Object.keys(config.mcpServers)) {
-      try { execSync(`codex mcp remove ${name}`, { stdio: "ignore" }); } catch { /* best effort */ }
+      const mcpName = `${name}-${config.instanceName}`;
+      try { execFileSync(this.binaryPath, ["mcp", "remove", mcpName], { stdio: "ignore" }); } catch { /* best effort */ }
     }
+
+    // Remove fleet instructions marker block from AGENTS.md
+    try {
+      const agentsMd = join(config.workingDirectory, "AGENTS.md");
+      const isEmpty = removeMarker(agentsMd, config.instanceName);
+      if (isEmpty && existsSync(agentsMd)) unlinkSync(agentsMd);
+    } catch { /* best effort */ }
+
+    // Remove trust entry from ~/.codex/config.toml
+    try {
+      const configPath = join(homedir(), ".codex", "config.toml");
+      const content = readFileSync(configPath, "utf-8");
+      const escaped = config.workingDirectory.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const re = new RegExp(`\\n?\\[projects\\."${escaped}"\\]\\ntrust_level = "trusted"\\n?`);
+      if (re.test(content)) {
+        writeFileSync(configPath, content.replace(re, "\n"));
+      }
+    } catch { /* best effort */ }
   }
 }

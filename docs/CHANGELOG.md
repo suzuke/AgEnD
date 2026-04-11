@@ -17,6 +17,109 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 - Minimal `claude-settings.json` — only CCD MCP tools in allow list, no longer overrides user's global permission settings
 
+## [1.14.0] - 2026-04-07
+
+### Added
+- **Plugin system + Discord adapter extraction** — Discord adapter moved to standalone `agend-plugin-discord` package; factory.ts supports `agend-plugin-{type}` / `agend-adapter-{type}` / bare name conventions; main package exports (`/channel`, `/types`) enable third-party plugins
+- **Web UI Phase 2: full control dashboard** — instance stop/start/restart/delete with name confirmation, create instance form (directory optional, backend auto-detect), task board CRUD, schedule management, team management, fleet config editor (form-based with sensitive field masking)
+- **Web UI layout: Fleet vs Instance** — sidebar "Fleet" entry for fleet-level tabs (Tasks, Schedules, Teams, Config); instance tabs limited to Chat + Detail; cross-navigation links between fleet and instance views
+- **Web UI UX improvements** — toast notifications, loading states, cron human-readable descriptions, larger status dots, empty state guidance, cost labels, website-consistent styling (#2AABEE accent, Inter + JetBrains Mono fonts)
+- **Backend auto-detection** — `GET /ui/backends` scans PATH for installed CLIs; Create Instance dropdown shows installed/not-installed status
+- **Instance-specific restart** — `agend fleet restart <instance>` via fleet HTTP API (`POST /restart/:name`)
+- **Bootstrap install script** — `curl -fsSL https://suzuke.github.io/AgEnD/install.sh | bash`
+- **project_roots enforcement** — `create_instance` rejects directories outside configured roots
+
+### Fixed
+- **Web UI reply context** — first web message no longer causes "No active chat context"; uses real Telegram group_id/topic_id
+- **Web↔Telegram bidirectional sync** — web messages forwarded to Telegram with `🌐` prefix; Telegram messages pushed to Web UI via SSE
+- **SSE instant status refresh** — action buttons update immediately after stop/start/restart/delete
+- **.env override** — `.env` file values unconditionally override inherited shell environment variables
+- **tmux duplicate session race** — `ensureSession()` handles concurrent parallel startup
+- **Create Instance form** — directory optional with dynamic topic_name requirement
+
+### Changed
+- **discord.js removed from core dependencies** — only needed when `agend-plugin-discord` is installed
+- **Web API extracted to `web-api.ts`** — reduces fleet-manager.ts size; all `/ui/*` routes in dedicated module
+- **Auth unified** — all Web UI endpoints (including restart) require token authentication
+
+## [1.13.0] - 2026-04-06
+
+### Added
+- **Web UI Phase 2: full control dashboard** — create/delete instances, task board CRUD (create, claim, complete), schedule management (create, delete), team management (create with member checkboxes, delete), fleet config viewer (read-only, sanitized)
+- **Web UI styling** — aligned with website design: Telegram blue `#2AABEE` accent, Inter + JetBrains Mono fonts, dark theme, rounded cards, toast notifications, loading states
+- **Bootstrap install script** — `curl -fsSL https://suzuke.github.io/AgEnD/install.sh | bash` for one-line setup (Node.js via nvm, tmux, agend, backend detection)
+- **project_roots enforcement** — `create_instance` rejects directories outside configured `project_roots` boundary
+- **Auth unification** — all Web UI endpoints (including restart) require token authentication
+
+### Fixed
+- **Web UI reply context** — first message from Web UI no longer causes "No active chat context" error; uses real Telegram group_id/topic_id
+- **Instant status refresh** — instance action buttons update immediately after stop/start/restart/delete via SSE
+- **Web↔Telegram bidirectional sync** — web messages forwarded to Telegram topic with `🌐` prefix; Telegram messages pushed to Web UI via SSE
+
+### Documentation
+- Full documentation audit: 20+ missing features added across all docs
+- Website redesigned with Spectra-inspired dark-first design
+
+## [1.12.0] - 2026-04-06
+
+### Added
+- **Web UI dashboard** — `agend web` launches browser-based fleet monitoring with live SSE updates and integrated chat UI with bidirectional Telegram sync
+- **agend quickstart** — simplified 4-question setup wizard replacing `agend init` as the recommended onboarding path
+- **project_roots enforcement** — `create_instance` validates working directory is under configured `project_roots` boundary
+- **HTML Chat Export** — `agend export-chat` exports fleet activity as self-contained HTML with date filtering (`--from`, `--to`)
+- **Mirror Topic** — `mirror_topic_id` config for observing cross-instance communication in a dedicated topic
+
+### Fixed
+- **Parallel startup** — handle tmux duplicate session race when spawning many instances simultaneously
+- **.env priority override** — `.env` file values now properly override inherited shell environment variables
+- **Web UI chat sync** — bidirectional message sync between Web UI and Telegram
+
+### Documentation
+- README revamped with hero section, feature highlights, architecture diagram, and "How it works" flow
+- Quick Start updated to use `agend quickstart` command
+- Full documentation audit: features.md, cli.md, configuration.md updated with all v1.11.0-v1.12.0 features
+
+## [1.11.0] - 2026-04-05
+
+### Added
+- **Kiro CLI backend** — new backend for AWS Kiro CLI (`backend: kiro-cli`). Session resume, MCP config, error patterns, models: auto, claude-sonnet-4.5, claude-haiku-4.5, deepseek-3.2, and more
+- **Built-in workflow template** — fleet collaboration workflow auto-injected via MCP instructions. Configurable via `workflow` field in fleet.yaml (`"builtin"`, `"file:path"`, or `false`)
+- **Workflow split: coordinator vs executor** — General instance gets full coordinator playbook (Choosing Collaborators, Task Sizing, Delegation Principles, Goal & Decision Management). Other instances get slimmed executor workflow (Communication Rules, Progress Tracking, Context Protection)
+- **`create_instance` systemPrompt parameter** — agents can pass custom system prompts when creating instances (inline text only)
+- **Fleet ready Telegram notifications** — `startAll` and `restartInstances` send "Fleet ready. N/M instances running." to General topic with failed instance reporting
+- **E2E test framework** — 79+ tests running exclusively in Tart VMs. Mock backend with `pty_output` directive for error simulation. T15 workflow template tests, T16 failover cooldown tests
+- **Token overhead measurement** — test script (`scripts/measure-token-overhead.sh`) and report. Full profile: +887 tokens (0.44% of 200K context, $0.003/msg)
+- **Codex usage limit detection** — "You've hit your usage limit" error pattern (action: pause)
+- **MockBackend error patterns** — `MOCK_RATE_LIMIT` and `MOCK_AUTH_ERROR` for E2E testing
+
+### Fixed
+- **Crash recovery snapshot restore** — write snapshot on crash detection (not just context rotation); replace single-consume file deletion with in-memory `snapshotConsumed` flag so file persists for daemon restart recovery (#11 related)
+- **Codex session resume** — `CodexBackend.buildCommand()` now uses `codex resume <session-id>` when session-id file exists (#11)
+- **Rate limit failover loop** — 5-minute cooldown on failover-type PTY errors prevents repeated triggering when error text persists in terminal buffer (#10)
+- **PTY error monitor hash dedup** — record pane hash at recovery time; suppress same error on same screen to prevent stale re-detection loops
+- **CLI restart wait** — replace fixed 1s delay between bootout/bootstrap with dynamic polling (up to 30s) for process exit. Fixes "Bootstrap failed: Input/output error" with many instances
+- **CLI attach interactive selection** — fuzzy match ambiguity now shows numbered menu instead of error
+- **CLI logs ANSI cleanup** — enhanced `stripAnsi()` handles cursor movement, DEC private modes, carriage returns, and remaining control characters
+- **`reply_to_text` in agent messages** — user reply-to context now included in formatted messages pasted to agent
+- **General instructions per-backend** — auto-create writes correct file based on `fleet.defaults.backend` (CLAUDE.md, AGENTS.md, GEMINI.md, .kiro/steering/project.md)
+- **General instructions on every start** — `ensureGeneralInstructions()` called on every `startInstance` for general_topic instances, not just auto-create
+- **Builtin text English-only** — all system-generated text translated from Chinese to English (schedule notifications, voice message labels, general instructions)
+- **General delegation principles** — rewritten for coordinator role: delegate proactively with specific conditions instead of "do it yourself"
+
+### Changed
+- Fleet start/restart notifications unified to "Fleet ready. N/M instances running." format, sent to General topic
+- `buildDecisionsPrompt()` dead code removed (intentionally disconnected in v1.9.0)
+- `getActiveDecisionsForProject()` removed from fleet-manager (dead code)
+
+### Documented
+- OpenCode MCP instructions limitation (v1.3.10 doesn't read MCP instructions field)
+- Kiro CLI MCP instructions limitation (unverified)
+- Token overhead report (EN + zh-TW) with reproducible test script
+
+## [1.10.0] - 2026-04-05
+
+_Intermediate release, changes included in 1.11.0 above._
+
 ## [1.9.1] - 2026-04-03
 
 ### Fixed

@@ -1,5 +1,5 @@
 import { join, dirname, basename } from "node:path";
-import { mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync, rmSync, appendFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import { EventEmitter } from "node:events";
@@ -11,15 +11,22 @@ import { ContextGuardian } from "./context-guardian.js";
 import { IpcServer } from "./channel/ipc-bridge.js";
 import { MessageBus } from "./channel/message-bus.js";
 import { ToolTracker } from "./channel/tool-tracker.js";
-import type { CliBackend, CliBackendConfig, ErrorPattern } from "./backend/types.js";
+import type { CliBackend, CliBackendConfig, ErrorPattern, StartupDialog } from "./backend/types.js";
 import type { ChannelAdapter, InboundMessage } from "./channel/types.js";
 import { getTmuxSession } from "./config.js";
 import { routeToolCall } from "./channel/tool-router.js";
 import { HangDetector } from "./hang-detector.js";
 import type { TmuxControlClient } from "./tmux-control.js";
+import { buildFleetInstructions } from "./instructions.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// Tool routing sets — module-level to avoid re-creation on every handleToolCall
+const CROSS_INSTANCE_TOOLS = new Set(["send_to_instance", "list_instances", "start_instance", "create_instance", "delete_instance", "request_information", "delegate_task", "report_result", "describe_instance"]);
+const SCHEDULE_TOOLS = new Set(["create_schedule", "list_schedules", "update_schedule", "delete_schedule"]);
+const DECISION_TOOLS = new Set(["post_decision", "list_decisions", "update_decision"]);
+const TASK_TOOL = "task";
 
 export class Daemon extends EventEmitter {
   private logger: Logger;
@@ -51,6 +58,7 @@ export class Daemon extends EventEmitter {
   private rapidCrashCount = 0;
   private healthCheckPaused = false;
   private spawning = false;
+  private skipResume = false;
   // Context rotation quality tracking
   private rotationStartedAt = 0;
   private preRotationContextPct = 0;
@@ -69,6 +77,8 @@ export class Daemon extends EventEmitter {
   private errorDetectedAt = 0; // timestamp when error was first detected
   private lastFailoverAt = 0; // cooldown: prevent repeated failover triggers
   private static FAILOVER_COOLDOWN_MS = 5 * 60_000; // 5 minutes
+  private lastErrorNotifiedAt = new Map<string, number>(); // per-type cooldown for all actions
+  private static ERROR_COOLDOWN_MS = 5 * 60_000;
 
   /** Cheap hash for pane content dedup — not cryptographic, just identity check */
   private static cheapPaneHash(pane: string): string {
@@ -98,6 +108,19 @@ export class Daemon extends EventEmitter {
     mkdirSync(this.instanceDir, { recursive: true });
     writeFileSync(join(this.instanceDir, "daemon.pid"), String(process.pid));
     this.logger.info(`Starting ${this.name}`);
+
+    // P1: Read crash state from previous run — skip resume if last run was a crash loop
+    const crashStatePath = join(this.instanceDir, "crash-state.json");
+    try {
+      if (existsSync(crashStatePath)) {
+        const state = JSON.parse(readFileSync(crashStatePath, "utf-8"));
+        if (state.resumeDisabled) {
+          this.skipResume = true;
+          this.logger.warn("Previous crash loop detected — starting without resume");
+        }
+        unlinkSync(crashStatePath);
+      }
+    } catch { /* corrupt file — ignore */ }
 
     // 1. IPC server — bridge between MCP server (Claude's child) and daemon
     const sockPath = join(this.instanceDir, "channel.sock");
@@ -271,9 +294,9 @@ export class Daemon extends EventEmitter {
         // Collect and write daemon-side snapshot
         const snapshot = this.writeRotationSnapshot(reason);
 
-        // Save session id, kill and respawn
+        // Save session id and prepare for respawn
         this.saveSessionId();
-        await this.tmux?.killWindow();
+        const oldWindowId = this.tmux?.getWindowId();
         this.transcriptMonitor?.resetOffset();
 
         // Clear ring buffers for new session
@@ -281,7 +304,17 @@ export class Daemon extends EventEmitter {
         this.recentEvents = [];
         this.recentToolActivity = [];
 
+        // Spawn new window BEFORE killing old one — prevents tmux session
+        // destruction when all windows are killed during concurrent rotation.
         await this.spawnClaudeWindow();
+
+        // Kill old window after new one is ready
+        if (oldWindowId) {
+          try {
+            const old = new TmuxManager(this.tmuxSessionName, oldWindowId);
+            await old.killWindow();
+          } catch { /* old window may already be dead */ }
+        }
 
         // Track restart metrics
         const durationMs = Date.now() - this.rotationStartedAt;
@@ -300,8 +333,11 @@ export class Daemon extends EventEmitter {
 
     }
 
-    // Set AGEND_SOCKET_PATH env for MCP server
-    process.env.AGEND_SOCKET_PATH = sockPath;
+    // NOTE: Do NOT set process.env.AGEND_SOCKET_PATH here — it pollutes the
+    // shared fleet manager process env. Each daemon overwrites it, so the last
+    // one wins, causing MCP servers (especially kiro-cli which inherits process
+    // env) to connect to the wrong socket. The socket path is passed via
+    // per-instance MCP config files or wrapper scripts instead.
 
     // 10. Health check — detect crashed tmux window and respawn
     // Re-enabled: orphan window issue fixed by killing same-name windows before respawn.
@@ -325,11 +361,58 @@ export class Daemon extends EventEmitter {
           return;
         }
 
-        const alive = await this.tmux.isWindowAlive();
-        if (alive) {
+        const paneStatus = await this.tmux.getPaneStatus();
+        if (paneStatus?.alive) {
           scheduleNext();
           return;
         }
+
+        // paneStatus === null → window gone entirely (e.g. tmux server crash)
+        // paneStatus.alive === false → pane dead, exit code available
+        const exitCode = paneStatus?.exitCode;
+        this.logger.debug({ exitCode }, `[health] pane exited with code: ${exitCode}`);
+
+        // Normal exit (e.g. user Ctrl+C or /exit) — no crash, no respawn
+        if (paneStatus && exitCode === 0) {
+          this.logger.info("CLI exited normally (code 0) — pausing health check");
+          await this.tmux.killWindow();
+          this.healthCheckPaused = true;
+          return;
+        }
+
+        // Distinguish tmux server crash from single window crash
+        let crashType: "server" | "window" = "window";
+        if (!paneStatus) {
+          const serverAlive = await TmuxManager.sessionExists(this.tmuxSessionName);
+          if (!serverAlive) {
+            crashType = "server";
+            this.logger.error("tmux server died — all windows lost");
+            await new Promise(r => setTimeout(r, 2_000)); // let session stabilize
+          } else {
+            this.logger.warn({ exitCode }, "Claude window died (tmux server alive)");
+          }
+        } else {
+          this.logger.warn({ exitCode }, "Claude process exited");
+        }
+
+        // Capture last output from dead pane before killing
+        let lastOutput: string | undefined;
+        if (paneStatus) {
+          try {
+            const raw = await this.tmux.capturePaneWithHistory(50);
+            // Strip ANSI escape codes for readability
+            const cleaned = raw.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+            lastOutput = cleaned.trimEnd() || undefined;
+          } catch { /* best effort */ }
+        }
+
+        // Kill the dead window (remain-on-exit keeps it around) before respawn
+        if (paneStatus) {
+          await this.tmux.killWindow();
+        }
+
+        // Append to crash history
+        this.appendCrashHistory({ exitCode, lastOutput, crashType });
 
         // Detect rapid crash: window died within 60s of spawn
         if (this.lastSpawnAt > 0 && Date.now() - this.lastSpawnAt < 60_000) {
@@ -344,6 +427,14 @@ export class Daemon extends EventEmitter {
             { rapidCrashCount: this.rapidCrashCount },
             "Claude keeps crashing shortly after launch (possible rate limit) — pausing respawn",
           );
+          // P1: Persist crash state so next process restart skips resume
+          try {
+            writeFileSync(join(this.instanceDir, "crash-state.json"), JSON.stringify({
+              rapidCrashCount: this.rapidCrashCount,
+              lastCrashAt: Date.now(),
+              resumeDisabled: true,
+            }));
+          } catch { /* best effort */ }
           this.emit("crash_loop", this.name);
           return; // don't schedule next — paused
         }
@@ -376,14 +467,20 @@ export class Daemon extends EventEmitter {
           // Clear stale session-id so respawn doesn't --resume a dead session
           const sidFile = join(this.instanceDir, "session-id");
           try { unlinkSync(sidFile); } catch { /* may not exist */ }
-          // Kill any same-name windows before respawn to prevent orphans
-          const windows = await TmuxManager.listWindows(this.tmuxSessionName);
-          for (const w of windows) {
-            if (w.name === this.name) {
-              const tm = new TmuxManager(this.tmuxSessionName, w.id);
-              await tm.killWindow();
+          // Skip resume on crash respawn — previous session may be corrupted
+          this.skipResume = true;
+          // Kill any same-name windows before respawn to prevent orphans.
+          // Wrapped in try-catch: if tmux server is dead, listWindows throws —
+          // must not block spawnClaudeWindow (which calls ensureSession).
+          try {
+            const windows = await TmuxManager.listWindows(this.tmuxSessionName);
+            for (const w of windows) {
+              if (w.name === this.name) {
+                const tm = new TmuxManager(this.tmuxSessionName, w.id);
+                await tm.killWindow();
+              }
             }
-          }
+          } catch { /* tmux server may be dead — ensureSession in trySpawn will recover */ }
           this.writeRotationSnapshot("crash");
           await this.spawnClaudeWindow();
           await this.injectSnapshotMessage();
@@ -424,6 +521,15 @@ export class Daemon extends EventEmitter {
 
         const pane = await this.tmux.capturePane();
 
+        // Only scan text after the last prompt marker to avoid matching stale errors
+        // that remain in the capture-pane buffer after recovery.
+        let scanText = pane;
+        const rpg = new RegExp(readyPattern.source, readyPattern.flags.includes("g") ? readyPattern.flags : readyPattern.flags + "g");
+        let lastIdx = -1;
+        let m: RegExpExecArray | null;
+        while ((m = rpg.exec(pane)) !== null) lastIdx = m.index;
+        if (lastIdx >= 0) scanText = pane.slice(lastIdx);
+
         // Auto-dismiss runtime dialogs (e.g. Codex rate limit model switch)
         for (const dialog of dialogs) {
           if (!dialog.pattern.test(pane)) continue;
@@ -458,7 +564,7 @@ export class Daemon extends EventEmitter {
         // State: monitoring — check for new errors
         const currentPaneHash = Daemon.cheapPaneHash(pane);
         for (const ep of patterns) {
-          if (!ep.pattern.test(pane)) continue;
+          if (!ep.pattern.test(scanText)) continue;
 
           // Dedup: suppress if same error on same screen as last recovery
           if (this.lastRecoveryPaneHash && ep.type === this.lastRecoveredErrorType) {
@@ -470,7 +576,12 @@ export class Daemon extends EventEmitter {
             this.lastRecoveredErrorType = null;
           }
 
-          // Cooldown: skip failover-type errors if recently triggered
+          // Cooldown: skip if same error type was recently notified
+          const lastNotified = this.lastErrorNotifiedAt.get(ep.type) ?? 0;
+          if (Date.now() - lastNotified < Daemon.ERROR_COOLDOWN_MS) {
+            this.logger.debug({ errorType: ep.type }, "PTY error suppressed (cooldown active)");
+            break;
+          }
           if (ep.action === "failover" && Date.now() - this.lastFailoverAt < Daemon.FAILOVER_COOLDOWN_MS) {
             this.logger.debug({ errorType: ep.type }, "PTY error suppressed (failover cooldown active)");
             break;
@@ -479,6 +590,7 @@ export class Daemon extends EventEmitter {
           this.errorWaitingForRecovery = true;
           this.errorDetectedAt = Date.now();
           this.lastDetectedErrorType = ep.type;
+          this.lastErrorNotifiedAt.set(ep.type, Date.now());
           if (ep.action === "failover") this.lastFailoverAt = Date.now();
           this.logger.warn({ errorType: ep.type, action: ep.action }, `PTY error detected: ${ep.message}`);
           this.emit("pty_error", { name: this.name, ...ep });
@@ -501,16 +613,40 @@ export class Daemon extends EventEmitter {
     this.transcriptMonitor?.stop();
     this.guardian?.stop();
     if (this.adapter) await this.adapter.stop();
-    await this.ipcServer?.close();
-    // Strategy A: kill window on stop, resume via --resume on next start
-    // MCP server has no reconnection → keeping window alive would leave
-    // Claude without channel/approval connectivity
+
+    // Notify MCP servers of graceful shutdown (prevents reconnect attempts)
+    this.ipcServer?.broadcast({ type: "shutdown" });
+
+    // Quit CLI FIRST — this kills MCP server child processes cleanly.
+    // IPC must stay open during quit so MCP servers receive the shutdown message.
     if (this.tmux) {
       this.saveSessionId();
+      this.healthCheckPaused = true;
+      let killed = false;
+      const quitCmd = this.backend?.getQuitCommand();
+      if (quitCmd) {
+        await this.tmux.sendKeys(quitCmd);
+        // Delay before Enter to prevent tmux server race when multiple
+        // instances stop in parallel (same pattern as pasteText).
+        await new Promise(r => setTimeout(r, 150));
+        await this.tmux.sendSpecialKey("Enter");
+        // Wait up to 10s for graceful exit
+        for (let i = 0; i < 20; i++) {
+          await new Promise(r => setTimeout(r, 500));
+          const status = await this.tmux.getPaneStatus();
+          if (!status || !status.alive) { killed = true; break; }
+        }
+      }
+      if (!killed) this.logger.warn("CLI did not exit gracefully within 10s, force killing window");
+      // Always kill window — remain-on-exit keeps dead panes around after CLI exits
       await this.tmux.killWindow();
       const windowIdFile = join(this.instanceDir, "window-id");
       try { unlinkSync(windowIdFile); } catch (e) { this.logger.debug({ err: e }, "Failed to remove window-id file"); }
     }
+
+    // Close IPC AFTER CLI has exited — MCP servers are already dead at this point
+    await this.ipcServer?.close();
+
     // Clean up backend config files
     if (this.backend?.cleanup) {
       this.backend.cleanup(this.buildBackendConfig());
@@ -612,12 +748,18 @@ export class Daemon extends EventEmitter {
     if (fromInstance) {
       formatted = `[from:${fromInstance}] ${content}\n(Reply using send_to_instance tool, NOT direct text)`;
     } else {
-      formatted = `[user:${user}] ${content}\n(Reply using the reply tool — do NOT respond with direct text)`;
+      const via = meta.source ? ` via ${meta.source}` : "";
+      formatted = `[user:${user}${via}] ${content}\n(Reply using the reply tool — do NOT respond with direct text)`;
+    }
+    if (meta.reply_to_text) {
+      formatted += `\n(reply_to: "${meta.reply_to_text}")`;
     }
 
     // Serialize deliveries: each message waits for the previous to complete,
     // and each waits for the CLI to be idle before pasting.
-    this.pasteLock = this.pasteLock.then(() => this.deliverMessage(formatted));
+    this.pasteLock = this.pasteLock.then(() => this.deliverMessage(formatted)).catch(err => {
+      this.logger.warn({ err: (err as Error).message }, "pasteLock delivery error — chain continues");
+    });
     this.logger.debug({ user: meta.user, text: content.slice(0, 100) }, "Queued channel message for delivery");
   }
 
@@ -682,12 +824,6 @@ export class Daemon extends EventEmitter {
     const respond = (result: unknown, error?: string) => {
       this.ipcServer?.send(socket, { requestId, result, error });
     };
-
-    // Schedule tools → route to fleet manager
-    const CROSS_INSTANCE_TOOLS = new Set(["send_to_instance", "list_instances", "start_instance", "create_instance", "delete_instance", "request_information", "delegate_task", "report_result", "describe_instance"]);
-    const SCHEDULE_TOOLS = new Set(["create_schedule", "list_schedules", "update_schedule", "delete_schedule"]);
-    const DECISION_TOOLS = new Set(["post_decision", "list_decisions", "update_decision"]);
-    const TASK_TOOL = "task";
 
     // Repo checkout — handled locally in daemon (no fleet-manager)
     if (tool === "checkout_repo") {
@@ -868,9 +1004,37 @@ export class Daemon extends EventEmitter {
     if (!existsSync(serverJs)) {
       serverJs = join(__dirname, "..", "dist", "channel", "mcp-server.js");
     }
-    // Build MCP server env — fleet context is injected via MCP instructions,
-    // NOT via CLI --system-prompt flags.  This keeps all backends uniform and
-    // avoids overriding each CLI's built-in system prompt.
+
+    // ── Resolve workflow and systemPrompt once, share between MCP env and instructions ──
+    let resolvedWorkflow: string | false | undefined;
+    if (this.config.workflow === false) {
+      resolvedWorkflow = false;
+    } else {
+      const wf = this.config.workflow ?? "builtin";
+      if (wf !== "builtin") {
+        let content = wf;
+        if (content.startsWith("file:")) {
+          try { content = readFileSync(content.slice(5), "utf-8"); } catch { content = ""; }
+        }
+        resolvedWorkflow = content || undefined;
+      }
+    }
+
+    let resolvedCustomPrompt: string | undefined;
+    if (this.config.systemPrompt) {
+      let p = this.config.systemPrompt;
+      if (p.startsWith("file:")) {
+        try { p = readFileSync(p.slice(5), "utf-8"); } catch { p = ""; }
+      }
+      if (p) resolvedCustomPrompt = p;
+    }
+
+    let decisions: { title: string; content: string }[] | undefined;
+    if (process.env.AGEND_DECISIONS) {
+      try { decisions = JSON.parse(process.env.AGEND_DECISIONS); } catch { /* invalid JSON */ }
+    }
+
+    // ── MCP server env (dual-track: still passes env vars for MCP instructions fallback) ──
     const mcpEnv: Record<string, string> = {
       AGEND_SOCKET_PATH: sockPath,
       AGEND_INSTANCE_NAME: this.name,
@@ -879,28 +1043,21 @@ export class Daemon extends EventEmitter {
     if (this.config.tool_set) mcpEnv.AGEND_TOOL_SET = this.config.tool_set;
     if (this.config.display_name) mcpEnv.AGEND_DISPLAY_NAME = this.config.display_name;
     if (this.config.description) mcpEnv.AGEND_DESCRIPTION = this.config.description;
-    // Workflow template: pass resolved content or "false" to disable
-    if (this.config.workflow === false) {
-      mcpEnv.AGEND_WORKFLOW = "false";
-    } else {
-      const wf = this.config.workflow ?? "builtin";
-      if (wf !== "builtin") {
-        let content = wf;
-        if (wf.startsWith("file:")) {
-          try { content = readFileSync(wf.slice(5), "utf-8"); } catch { content = ""; }
-        }
-        if (content) mcpEnv.AGEND_WORKFLOW = content;
-      }
-      // "builtin" → no env var, mcp-server.ts reads the bundled template
-    }
-    // Custom systemPrompt: resolve file: prefix before passing
-    if (this.config.systemPrompt) {
-      let userPrompt = this.config.systemPrompt;
-      if (userPrompt.startsWith("file:")) {
-        try { userPrompt = readFileSync(userPrompt.slice(5), "utf-8"); } catch { userPrompt = ""; }
-      }
-      if (userPrompt) mcpEnv.AGEND_CUSTOM_PROMPT = userPrompt;
-    }
+    if (resolvedWorkflow === false) mcpEnv.AGEND_WORKFLOW = "false";
+    else if (resolvedWorkflow) mcpEnv.AGEND_WORKFLOW = resolvedWorkflow;
+    if (resolvedCustomPrompt) mcpEnv.AGEND_CUSTOM_PROMPT = resolvedCustomPrompt;
+    if (process.env.AGEND_DECISIONS) mcpEnv.AGEND_DECISIONS = process.env.AGEND_DECISIONS;
+
+    // ── Fleet instructions for additive system prompt injection ──
+    const instructions = buildFleetInstructions({
+      instanceName: this.name,
+      workingDirectory: this.config.working_directory,
+      displayName: this.config.display_name,
+      description: this.config.description,
+      customPrompt: resolvedCustomPrompt,
+      workflow: resolvedWorkflow,
+      decisions,
+    });
 
     return {
       workingDirectory: this.config.working_directory,
@@ -915,6 +1072,8 @@ export class Daemon extends EventEmitter {
       },
       skipPermissions: this.config.skipPermissions,
       model: this.modelOverride ?? this.config.model,
+      skipResume: this.skipResume,
+      instructions,
     };
   }
 
@@ -929,8 +1088,14 @@ export class Daemon extends EventEmitter {
     if (!snapshot || !this.tmux) return;
     // Small delay to let the CLI fully render its ready prompt
     await new Promise(r => setTimeout(r, 1_000));
-    await this.tmux.pasteText(`[system:session-snapshot]\n${snapshot}\n\nThis is a background context restore — do NOT reply to or acknowledge this message. Simply resume normal operation when the next user or instance message arrives.`);
-    this.logger.info("Injected session snapshot as first message");
+    try {
+      await this.tmux.pasteText(`[system:session-snapshot]\n${snapshot}\n\nThis is a background context restore — do NOT reply to or acknowledge this message. Simply resume normal operation when the next user or instance message arrives.`);
+      this.logger.info("Injected session snapshot as first message");
+      this.emit("snapshot_injected", this.name);
+    } catch (err) {
+      this.logger.error({ err }, "Snapshot injection failed — session continues without context");
+      this.emit("snapshot_failed", this.name);
+    }
   }
 
   /** Spawn (or respawn) a CLI window in tmux */
@@ -946,10 +1111,11 @@ export class Daemon extends EventEmitter {
     const alive = await this.trySpawn();
     if (!alive) {
       // First attempt failed (stale --resume, crash, rate limit, etc.)
-      // Clean slate: clear session-id and retry once.
-      this.logger.warn("CLI startup failed — clearing session-id and retrying");
+      // Clean slate: clear session-id, skip resume, and retry once.
+      this.logger.warn("CLI startup failed — clearing session-id and retrying without resume");
       const sidFile = join(this.instanceDir, "session-id");
       try { unlinkSync(sidFile); } catch { /* may not exist */ }
+      this.skipResume = true;
       await this.tmux!.killWindow();
 
       const retryAlive = await this.trySpawn();
@@ -960,6 +1126,7 @@ export class Daemon extends EventEmitter {
     }
 
     this.lastSpawnAt = Date.now();
+    this.skipResume = false; // CLI started successfully — reset for next spawn
     } finally {
       this.spawning = false;
     }
@@ -973,24 +1140,50 @@ export class Daemon extends EventEmitter {
    */
   private async trySpawn(): Promise<boolean> {
     const backendConfig = this.buildBackendConfig();
+
+    // Detect instructions change → force new session for backends that don't
+    // re-read instruction files on --resume (Codex, Gemini, Kiro).
+    if (!backendConfig.skipResume && !this.backend!.instructionsReloadedOnResume && backendConfig.instructions) {
+      const prevFile = join(this.instanceDir, "prev-instructions");
+      let prev = "";
+      try { prev = readFileSync(prevFile, "utf-8"); } catch {}
+      if (prev && prev !== backendConfig.instructions) {
+        this.logger.info("Instructions changed — skipping resume to reload");
+        backendConfig.skipResume = true;
+      }
+      writeFileSync(prevFile, backendConfig.instructions);
+    }
+
     this.backend!.writeConfig(backendConfig);
     this.backend!.preTrust?.(this.config.working_directory);
     const cmd = `TERM=xterm-256color AGEND_INSTANCE_NAME=${this.name} ` + this.backend!.buildCommand(backendConfig);
 
+    // Ensure tmux session exists (may have been destroyed if all windows died)
+    await TmuxManager.ensureSession(this.tmuxSessionName);
     const windowId = await this.tmux!.createWindow(cmd, this.config.working_directory, this.name);
     writeFileSync(join(this.instanceDir, "window-id"), windowId);
+
+    // Enable remain-on-exit to capture exit codes on crash
+    await this.tmux!.setRemainOnExit().catch(err => {
+      this.logger.warn({ err }, "Failed to set remain-on-exit — exit codes will not be captured");
+    });
 
     // Register with control client and wait for output + idle
     await this.controlClient?.registerWindow(windowId);
     if (this.controlClient) {
-      const hasOutput = await this.controlClient.waitForOutput(windowId, 15_000);
+      const total = this.config.startup_timeout_ms ?? 25_000;
+      const outputTimeout = Math.round(total * 0.6);
+      const idleTimeout = total - outputTimeout;
+      const hasOutput = await this.controlClient.waitForOutput(windowId, outputTimeout);
       if (!hasOutput) return false;
-      await this.controlClient.waitForIdle(windowId, 10_000);
+      await this.controlClient.waitForIdle(windowId, idleTimeout);
     } else {
       await new Promise(r => setTimeout(r, 10_000));
     }
 
-    // Dismiss confirmation dialogs and verify CLI reached prompt
+    // Dismiss confirmation dialogs and verify CLI reached prompt.
+    // With remain-on-exit, isWindowAlive() returns true even for dead panes,
+    // but a startup crash would already be caught by waitForOutput/waitForIdle above.
     if (!await this.tmux!.isWindowAlive()) return false;
     return this.dismissDialogsUntilReady(3);
   }
@@ -1000,48 +1193,47 @@ export class Daemon extends EventEmitter {
    * and return true once CLI reaches a ready prompt.
    */
   private async dismissDialogsUntilReady(maxAttempts: number): Promise<boolean> {
+    // Backend-specific startup dialogs, with hardcoded fallback for backward compat
+    const startupDialogs: StartupDialog[] = this.backend?.getStartupDialogs?.() ?? [
+      { pattern: /[❯›]\s*\d+\.\s*No/m, keys: ["Down", "Enter"], description: "Confirmation dialog — navigate past No" },
+      { pattern: /[❯›]\s*Don't trust/m, keys: ["Up", "Up", "Enter"], description: "Trust dialog — navigate to trust option" },
+      { pattern: /No, exit|No, quit|Don't trust|I accept|I trust|Yes, continue|Trust folder/i, keys: ["Enter"], description: "Generic confirmation dialog" },
+      { pattern: /Resume Session/i, keys: ["Escape"], description: "Resume session picker — start fresh" },
+    ];
+
     for (let i = 0; i < maxAttempts; i++) {
       try {
         const pane = await this.tmux!.capturePane();
 
-        // Confirmation dialog: check BEFORE ready pattern so dialogs aren't mistaken as ready
-        // Claude "Yes, I accept" / Codex "Yes, continue" / Gemini "Trust folder"
-        if (/No, exit|No, quit|Don't trust|I accept|I trust|Yes, continue|Trust folder/i.test(pane)) {
-          this.logger.debug("Dismissing confirmation dialog");
-          // If "No"/"Don't trust" is selected, navigate to the accept option
-          if (/[❯›]\s*\d+\.\s*No/m.test(pane)) {
-            await this.tmux!.sendSpecialKey("Down");
-            await new Promise(r => setTimeout(r, 200));
-          } else if (/[❯›]\s*Don't trust/m.test(pane)) {
-            // Gemini: "Don't trust" is last of 3 options, go up twice to "Trust folder"
-            await this.tmux!.sendSpecialKey("Up");
-            await new Promise(r => setTimeout(r, 200));
-            await this.tmux!.sendSpecialKey("Up");
-            await new Promise(r => setTimeout(r, 200));
+        // Try each startup dialog pattern before checking ready state
+        let matched = false;
+        for (const dialog of startupDialogs) {
+          if (dialog.pattern.test(pane)) {
+            this.logger.debug(`Dismissing startup dialog: ${dialog.description}`);
+            for (const key of dialog.keys) {
+              if (key === "Up" || key === "Down" || key === "Enter" || key === "Escape") {
+                await this.tmux!.sendSpecialKey(key);
+              } else {
+                await this.tmux!.sendKeys(key);
+              }
+              await new Promise(r => setTimeout(r, 200));
+            }
+            // Wait for next screen to render
+            if (this.controlClient) {
+              const wid = readFileSync(join(this.instanceDir, "window-id"), "utf-8").trim();
+              await this.controlClient.waitForIdle(wid, 10_000);
+            } else {
+              await new Promise(r => setTimeout(r, 3_000));
+            }
+            if (!await this.tmux!.isWindowAlive()) return false;
+            matched = true;
+            break;
           }
-          await this.tmux!.sendSpecialKey("Enter");
-          // Wait for next screen to render
-          if (this.controlClient) {
-            const wid = readFileSync(join(this.instanceDir, "window-id"), "utf-8").trim();
-            await this.controlClient.waitForIdle(wid, 10_000);
-          } else {
-            await new Promise(r => setTimeout(r, 3_000));
-          }
-          if (!await this.tmux!.isWindowAlive()) return false;
-          continue;
         }
+        if (matched) continue;
 
         // CLI is ready (pattern defined by each backend)
         if (this.backend!.getReadyPattern().test(pane)) return true;
-
-        // Resume Session picker: press Escape to start fresh session
-        if (/Resume Session/i.test(pane)) {
-          this.logger.debug("Dismissing resume session picker");
-          await this.tmux!.sendSpecialKey("Escape");
-          await new Promise(r => setTimeout(r, 2_000));
-          if (!await this.tmux!.isWindowAlive()) return false;
-          continue;
-        }
 
         // Fatal: command not found
         if (/command not found|not found/i.test(pane)) return false;
@@ -1150,6 +1342,32 @@ export class Daemon extends EventEmitter {
     return snapshot;
   }
 
+  private appendCrashHistory(data: { exitCode?: number; lastOutput?: string; crashType: "server" | "window" }): void {
+    try {
+      const historyPath = join(this.instanceDir, "crash-history.jsonl");
+      const entry = {
+        timestamp: new Date().toISOString(),
+        instance: this.name,
+        crashType: data.crashType,
+        exitCode: data.exitCode,
+        lastOutput: data.lastOutput,
+        crashCount: this.crashCount + 1,
+        rapidCrashCount: this.rapidCrashCount,
+      };
+      appendFileSync(historyPath, JSON.stringify(entry) + "\n");
+
+      // Rotate based on file size (cheaper than parsing every time)
+      try {
+        const stat = statSync(historyPath);
+        if (stat.size > 512_000) {
+          const content = readFileSync(historyPath, "utf-8");
+          const lines = content.trim().split("\n").filter(Boolean);
+          writeFileSync(historyPath, lines.slice(-50).join("\n") + "\n");
+        }
+      } catch { /* best effort */ }
+    } catch { /* best effort */ }
+  }
+
   private readStatuslineData(): import("./types.js").StatusLineData | null {
     try {
       const sf = join(this.instanceDir, "statusline.json");
@@ -1237,8 +1455,9 @@ export class Daemon extends EventEmitter {
       const snapshot: RotationSnapshot = JSON.parse(readFileSync(snapshotPath, "utf-8"));
 
       // Mark consumed in-memory to prevent re-injection on crash respawn.
-      // File stays on disk so daemon restart can re-read it.
+      // Delete file so subsequent daemon restarts don't re-inject stale snapshot.
       this.snapshotConsumed = true;
+      try { unlinkSync(snapshotPath); } catch { /* best effort */ }
 
       const lines: string[] = ["## Previous Session Snapshot", ""];
       lines.push(`Restart reason: ${snapshot.reason}`);

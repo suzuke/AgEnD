@@ -1,9 +1,10 @@
-import { existsSync, readFileSync, mkdirSync, writeFileSync, unlinkSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync, writeFileSync, unlinkSync, rmSync, readdirSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { access } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { join, dirname, basename } from "node:path";
-import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { getAgendHome } from "./paths.js";
 import yaml from "js-yaml";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -36,6 +37,7 @@ import { InstanceLifecycle, type LifecycleContext } from "./instance-lifecycle.j
 import { TopicArchiver, type ArchiverContext } from "./topic-archiver.js";
 import { StatuslineWatcher, type StatuslineWatcherContext } from "./statusline-watcher.js";
 import { outboundHandlers, type OutboundContext } from "./outbound-handlers.js";
+import { handleWebRequest } from "./web-api.js";
 
 import { getTmuxSession } from "./config.js";
 
@@ -88,6 +90,14 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
   // Health endpoint
   private healthServer: Server | null = null;
   private startedAt = 0;
+
+  // Mirror topic: buffer cross-instance messages, flush every 3s
+  private mirrorBuffer: string[] = [];
+  private mirrorTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Web UI: SSE clients + auth token
+  private sseClients = new Set<import("node:http").ServerResponse>();
+  private webToken: string | null = null;
 
   constructor(public dataDir: string) {
     this.lifecycle = new InstanceLifecycle(this);
@@ -157,12 +167,89 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
   }
 
   async startInstance(name: string, config: InstanceConfig, topicMode: boolean): Promise<void> {
-    return this.lifecycle.start(name, config, topicMode);
+    if (config.general_topic) {
+      this.ensureGeneralInstructions(config.working_directory, config.backend);
+    }
+    await this.lifecycle.start(name, config, topicMode);
+    // Auto-connect IPC — daemon.start() ensures socket is ready before resolving
+    await this.connectIpcToInstance(name);
+  }
+
+  /**
+   * Start instances with configurable concurrency and stagger delay.
+   * Instances sharing the same working_directory are serialized within a group
+   * to avoid config file races. Stagger delay is group-to-group, not instance-to-instance.
+   * TODO: per-instance startup timeout (existing issue, not introduced here)
+   */
+  private async startInstancesWithConcurrency(
+    entries: [string, InstanceConfig][],
+    topicMode: boolean,
+  ): Promise<void> {
+    const raw = this.fleetConfig?.defaults?.startup;
+    const concurrency = Math.max(1, Math.min(20, raw?.concurrency ?? 3));
+    const staggerMs = Math.max(0, Math.min(30_000, raw?.stagger_delay_ms ?? 2000));
+
+    const byWorkDir = new Map<string, [string, InstanceConfig][]>();
+    for (const [name, config] of entries) {
+      const dir = config.working_directory;
+      if (!byWorkDir.has(dir)) byWorkDir.set(dir, []);
+      byWorkDir.get(dir)!.push([name, config]);
+    }
+    const groups = [...byWorkDir.values()];
+
+    let running = 0;
+    let idx = 0;
+    let lastStartAt = 0;
+    let pendingTimer = false;
+
+    await new Promise<void>((resolve) => {
+      if (groups.length === 0) { resolve(); return; }
+      const startNext = () => {
+        if (pendingTimer) return;
+        while (running < concurrency && idx < groups.length) {
+          const now = Date.now();
+          const elapsed = now - lastStartAt;
+          if (lastStartAt > 0 && elapsed < staggerMs) {
+            pendingTimer = true;
+            setTimeout(() => { pendingTimer = false; startNext(); }, staggerMs - elapsed);
+            return;
+          }
+          const group = groups[idx++];
+          running++;
+          lastStartAt = Date.now();
+          (async () => {
+            for (const [name, config] of group) {
+              await this.startInstance(name, config, topicMode).catch((err) =>
+                this.logger.error({ err, name }, "Failed to start instance"),
+              );
+            }
+          })().finally(() => {
+            running--;
+            if (idx >= groups.length && running === 0) resolve();
+            else startNext();
+          });
+        }
+      };
+      startNext();
+    });
   }
 
   async stopInstance(name: string): Promise<void> {
     this.failoverActive.delete(name);
     return this.lifecycle.stop(name);
+  }
+
+  /** Restart a single instance, reloading fleet.yaml first to pick up config changes. */
+  async restartSingleInstance(name: string): Promise<void> {
+    if (this.configPath) {
+      this.loadConfig(this.configPath);
+      this.routing.rebuild(this.fleetConfig!);
+    }
+    const config = this.fleetConfig?.instances[name];
+    if (!config) throw new Error(`Instance not found: ${name}`);
+    await this.stopInstance(name);
+    const topicMode = this.fleetConfig?.channel?.mode === "topic";
+    await this.startInstance(name, config, topicMode ?? false);
   }
 
   /** Load .env file from data dir into process.env */
@@ -178,9 +265,9 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       const key = trimmed.slice(0, eqIdx);
       const raw = trimmed.slice(eqIdx + 1);
       const value = raw.replace(/^["'](.*)["']$/, '$1');
-      if (!process.env[key]) {
-        process.env[key] = value;
-      }
+      // .env file always wins over inherited shell env vars, so that
+      // quickstart's newly written token overrides any stale value.
+      process.env[key] = value;
     }
   }
 
@@ -190,6 +277,10 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     this.loadEnvFile();
     const fleet = this.loadConfig(configPath);
     const topicMode = fleet.channel?.mode === "topic";
+
+    // Set tmux socket isolation for custom AGEND_HOME
+    const { getTmuxSocketName: getSocket } = await import("./paths.js");
+    TmuxManager.setSocketName(getSocket());
 
     await TmuxManager.ensureSession(getTmuxSession());
 
@@ -203,14 +294,26 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       await this.stopInstance(name);
     }
 
-    // Then kill all remaining agend instance windows to prevent orphans
-    const existingWindows = await TmuxManager.listWindows(getTmuxSession());
-    for (const w of existingWindows) {
-      if (w.name !== "zsh") {
-        const tm = new TmuxManager(getTmuxSession(), w.id);
-        await tm.killWindow();
+    // Then kill all remaining agend instance windows to prevent orphans.
+    // Kill both known instance windows (stale from previous run) and orphaned
+    // windows from deleted instances that are no longer in fleet.yaml.
+    const agendNames = new Set(Object.keys(fleet.instances));
+    agendNames.add("general");
+    try {
+      const existingWindows = await TmuxManager.listWindows(getTmuxSession());
+      for (const w of existingWindows) {
+        // Kill known instance windows (will be recreated)
+        // Also kill orphaned windows: any window with a topic ID suffix (name-tNNNNN)
+        // that isn't in the current config — these are leftovers from deleted instances
+        const isKnownInstance = agendNames.has(w.name);
+        const isOrphanedInstance = !isKnownInstance && /-t\d+$/.test(w.name);
+        if (isKnownInstance || isOrphanedInstance) {
+          if (isOrphanedInstance) this.logger.info({ window: w.name }, "Cleaning up orphaned tmux window");
+          const tm = new TmuxManager(getTmuxSession(), w.id);
+          await tm.killWindow();
+        }
       }
-    }
+    } catch { /* best effort — don't block startup */ }
 
     const pidPath = join(this.dataDir, "fleet.pid");
     writeFileSync(pidPath, String(process.pid), "utf-8");
@@ -219,13 +322,12 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
 
     const costGuardConfig: CostGuardConfig = {
       ...DEFAULT_COST_GUARD,
-      ...(fleet.defaults as Record<string, unknown>)?.cost_guard as Partial<CostGuardConfig> ?? {},
+      ...fleet.defaults.cost_guard,
     };
     this.costGuard = new CostGuard(costGuardConfig, this.eventLog);
     this.costGuard.startMidnightReset();
 
-    const webhookConfigs: WebhookConfig[] =
-      (fleet.defaults as Record<string, unknown>)?.webhooks as WebhookConfig[] ?? [];
+    const webhookConfigs: WebhookConfig[] = fleet.defaults.webhooks ?? [];
     if (webhookConfigs.length > 0) {
       this.webhookEmitter = new WebhookEmitter(webhookConfigs, this.logger);
       this.logger.info({ count: webhookConfigs.length }, "Webhook emitter initialized");
@@ -245,7 +347,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
 
     const summaryConfig: DailySummaryConfig = {
       ...DEFAULT_DAILY_SUMMARY,
-      ...(fleet.defaults as Record<string, unknown>)?.daily_summary as Partial<DailySummaryConfig> ?? {},
+      ...fleet.defaults.daily_summary,
     };
     this.dailySummary = new DailySummary(summaryConfig, costGuardConfig.timezone, (text) => {
       if (!this.adapter || !this.fleetConfig?.channel?.group_id) return;
@@ -270,34 +372,10 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     const hasGeneralTopic = Object.values(fleet.instances).some(inst => inst.general_topic === true);
     if (!hasGeneralTopic) {
       this.logger.info("Auto-creating general instance for General Topic");
-      const generalDir = join(homedir(), ".agend", "general");
+      const generalDir = join(getAgendHome(), "general");
       mkdirSync(generalDir, { recursive: true });
-      const claudeMdPath = join(generalDir, "CLAUDE.md");
-      if (!existsSync(claudeMdPath)) {
-        writeFileSync(claudeMdPath, `# General Assistant
-
-你是這個 AgEnD fleet 的通用入口。
-
-## 行為準則
-
-- 簡單任務（搜尋、翻譯、一般問答）：自己處理。
-- 屬於特定專案的任務：用 list_instances() 找到對應 agent，需要時用 start_instance() 啟動，再用 send_to_instance() 委派。
-- 需要多個 agent 協作的任務：協調各 agent 並行或串行執行，收集結果後彙整。
-- 使用者想開新的專案 agent：用 create_instance() 建立。
-- 不再需要的 instance（例如功能完成）：用 delete_instance() 清除。
-- 收到其他 instance 委派的任務時，完成後一定要用 send_to_instance() 回報結果。
-
-## 委派原則
-
-只在有具體理由時才委派：
-- 任務需要存取特定專案的檔案
-- 任務可以從多 agent 平行執行中受益
-- 保留自己的 context 更重要，把不相關的工作交出去
-- 絕不把任務回委給委派你的 instance
-
-自己能做的，就自己做。
-`, "utf-8");
-      }
+      const backendName = fleet.defaults.backend ?? "claude-code";
+      this.ensureGeneralInstructions(generalDir, backendName);
       const generalConfig: InstanceConfig = {
         ...DEFAULT_INSTANCE_CONFIG,
         working_directory: generalDir,
@@ -310,7 +388,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     if (topicMode && fleet.channel) {
       const schedulerConfig: SchedulerConfig = {
         ...DEFAULT_SCHEDULER_CONFIG,
-        ...(this.fleetConfig?.defaults as Record<string, unknown>)?.scheduler as Partial<SchedulerConfig> ?? {},
+        ...this.fleetConfig?.defaults.scheduler,
       };
 
       this.scheduler = new Scheduler(
@@ -321,14 +399,21 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       );
       this.scheduler.init();
       this.logger.info("Scheduler initialized");
+
+      // Inject active decisions as env var for MCP instructions.
+      // Snapshotted at startup — new decisions via post_decision are available
+      // through list_decisions tool but not auto-injected until restart.
+      try {
+        const decisions = this.scheduler.db.listDecisions("", { includeArchived: false });
+        if (decisions.length > 0) {
+          const capped = decisions.slice(0, 20).map(d => ({ title: d.title, content: (d.content ?? "").slice(0, 200) }));
+          process.env.AGEND_DECISIONS = JSON.stringify(capped);
+          this.logger.info({ count: decisions.length, injected: capped.length }, "Injected active decisions into env");
+        }
+      } catch { /* no decisions available */ }
     }
 
-    const instanceEntries = Object.entries(fleet.instances);
-    for (const [name, config] of instanceEntries) {
-      await this.startInstance(name, config, topicMode).catch(err =>
-        this.logger.error({ err, name }, "Failed to start instance")
-      );
-    }
+    await this.startInstancesWithConcurrency(Object.entries(fleet.instances), topicMode);
 
     if (topicMode && fleet.channel) {
 
@@ -348,6 +433,21 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
 
       for (const name of Object.keys(fleet.instances)) {
         this.startStatuslineWatcher(name);
+      }
+
+      // Notify General topic that fleet is up
+      const total = Object.keys(fleet.instances).length;
+      const started = this.daemons.size;
+      const failedNames = Object.keys(fleet.instances).filter(n => !this.daemons.has(n));
+      const generalName = this.findGeneralInstance();
+      const generalThreadId = generalName ? fleet.instances[generalName]?.topic_id : undefined;
+      if (this.adapter && fleet.channel?.group_id) {
+        const text = failedNames.length === 0
+          ? `Fleet ready. ${started}/${total} instances running.`
+          : `Fleet ready. ${started}/${total} instances running. Failed: ${failedNames.join(", ")}`;
+        this.adapter.sendText(String(fleet.channel.group_id), text, {
+          threadId: generalThreadId != null ? String(generalThreadId) : undefined,
+        }).catch(e => this.logger.debug({ err: e }, "Failed to send fleet start notification"));
       }
     }
 
@@ -427,8 +527,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
           if (config) {
             const topicMode = this.fleetConfig?.channel?.mode === "topic";
             await this.startInstance(instanceName, config, topicMode);
-            await new Promise(r => setTimeout(r, 3000));
-            await this.connectIpcToInstance(instanceName);
+            // startInstance already calls connectIpcToInstance
           }
           this.adapter?.editMessage(data.chatId, data.messageId, `🔄 ${instanceName} restarted.`).catch(() => {});
         } else {
@@ -478,6 +577,13 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
 
   /** Connect IPC to a single instance with all handlers */
   async connectIpcToInstance(name: string): Promise<void> {
+    // Close existing client to prevent socket leak on reconnect
+    const existing = this.instanceIpcClients.get(name);
+    if (existing) {
+      try { existing.close(); } catch { /* already closed */ }
+      this.instanceIpcClients.delete(name);
+    }
+
     const sockPath = join(this.getInstanceDir(name), "channel.sock");
     if (!existsSync(sockPath)) return;
 
@@ -557,7 +663,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       // Forward to General Topic instance if configured
       const generalInstance = this.findGeneralInstance();
       if (generalInstance) {
-        if (this.replyIfRateLimited(generalInstance, msg)) return;
+        this.warnIfRateLimited(generalInstance, msg);
         const { text, extraMeta } = await processAttachments(msg, this.adapter!, this.logger, generalInstance);
         const ipc = this.instanceIpcClients.get(generalInstance);
         if (ipc) {
@@ -576,6 +682,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
               user_id: msg.userId,
               ts: msg.timestamp.toISOString(),
               thread_id: "",
+              source: msg.source,
               ...(msg.replyToText ? { reply_to_text: msg.replyToText } : {}),
               ...extraMeta,
             },
@@ -583,6 +690,10 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
           this.lastInboundUser.set(generalInstance, msg.username);
           this.logger.info(`${msg.username} → ${generalInstance}: ${(text ?? "").slice(0, 100)}`);
           this.eventLog?.logActivity("message", msg.username, (text ?? "").slice(0, 200), generalInstance);
+          this.emitSseEvent("message", {
+            instance: generalInstance, sender: msg.username,
+            text: (text ?? "").slice(0, 2000), ts: new Date().toISOString(),
+          });
         }
       }
       return;
@@ -603,7 +714,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     this.touchActivity(instanceName);
     this.setTopicIcon(instanceName, "blue");
 
-    if (this.replyIfRateLimited(instanceName, msg)) return;
+    this.warnIfRateLimited(instanceName, msg);
 
     const { text, extraMeta } = await processAttachments(msg, this.adapter!, this.logger, instanceName);
 
@@ -629,6 +740,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
         user_id: msg.userId,
         ts: msg.timestamp.toISOString(),
         thread_id: msg.threadId ?? "",
+        source: msg.source,
         ...(msg.replyToText ? { reply_to_text: msg.replyToText } : {}),
         ...extraMeta,
       },
@@ -636,19 +748,31 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     this.lastInboundUser.set(instanceName, msg.username);
     this.logger.info(`${msg.username} → ${instanceName}: ${(text ?? "").slice(0, 100)}`);
     this.eventLog?.logActivity("message", msg.username, (text ?? "").slice(0, 200), instanceName);
+    this.emitSseEvent("message", {
+      instance: instanceName, sender: msg.username,
+      text: (text ?? "").slice(0, 2000), ts: new Date().toISOString(),
+    });
   }
 
   /** Handle outbound tool calls from a daemon instance */
-  private replyIfRateLimited(instanceName: string, msg: InboundMessage): boolean {
+  /** Warn (but don't block) when rate limits are high. 30-min debounce per instance. */
+  private rateLimitWarnedAt = new Map<string, number>();
+  private warnIfRateLimited(instanceName: string, msg: InboundMessage): void {
     const rl = this.statuslineWatcher.getRateLimits(instanceName);
-    if (!rl || rl.seven_day_pct < 100) return false;
-    if (this.adapter && msg.chatId) {
-      const threadId = msg.threadId ?? undefined;
-      this.adapter.sendText(msg.chatId, `⏸ ${instanceName} has hit the weekly usage limit. Your message was not delivered. Limit resets automatically — check /status for details.`, { threadId })
-        .catch(e => this.logger.warn({ err: e }, "Failed to send rate limit notice"));
+    if (!rl) return;
+    let warning = "";
+    if (rl.five_hour_pct >= 95) {
+      warning = `⚠️ ${instanceName} at ${Math.round(rl.five_hour_pct)}% of 5h rate limit. Responses may be slower.`;
+    } else if (rl.seven_day_pct >= 95) {
+      warning = `⚠️ ${instanceName} at ${Math.round(rl.seven_day_pct)}% weekly usage. Responses may be slower or fail.`;
     }
-    this.logger.info({ instanceName }, "Blocked inbound message — weekly rate limit at 100%");
-    return true;
+    if (!warning) return;
+    const lastWarn = this.rateLimitWarnedAt.get(instanceName) ?? 0;
+    if (Date.now() - lastWarn < 30 * 60_000) return;
+    this.rateLimitWarnedAt.set(instanceName, Date.now());
+    if (this.adapter && msg.chatId) {
+      this.adapter.sendText(msg.chatId, warning, { threadId: msg.threadId ?? undefined }).catch(() => {});
+    }
   }
 
   /** Handle outbound tool calls from a daemon instance */
@@ -671,15 +795,26 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       }
     };
 
-    // Resolve threadId from instance → topic_id mapping
-    const instanceConfig = this.fleetConfig?.instances[instanceName];
-    const threadId = resolveReplyThreadId(args.thread_id, instanceConfig);
+    // Resolve threadId: use sender's topic_id if sender is a known fleet instance,
+    // fall back to general topic if sender is unknown, or IPC owner if no sender.
+    const senderInstanceName = senderSessionName && this.fleetConfig?.instances[senderSessionName]
+      ? senderSessionName
+      : null;
+    const routingConfig = senderInstanceName
+      ? this.fleetConfig?.instances[senderInstanceName]
+      : (senderSessionName ? undefined : this.fleetConfig?.instances[instanceName]);
+    const threadId = resolveReplyThreadId(args.thread_id, routingConfig);
 
     // Route standard channel tools (reply, react, edit_message, download_attachment)
     if (routeToolCall(this.adapter, tool, args, threadId, respond)) {
       if (tool === "reply") {
         const replyTo = this.lastInboundUser.get(instanceName) ?? "user";
         this.logger.info(`${instanceName} → ${replyTo}: ${(args.text as string ?? "").slice(0, 100)}`);
+        this.emitSseEvent("message", {
+          instance: instanceName, sender: senderSessionName ?? instanceName,
+          text: (args.text as string ?? "").slice(0, 2000),
+          ts: new Date().toISOString(),
+        });
       }
       return;
     }
@@ -703,8 +838,14 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
 
     const text = msg.text as string;
     const editMessageId = msg.editMessageId as string | null;
-    const instanceConfig = this.fleetConfig?.instances[instanceName];
-    const threadId = instanceConfig?.topic_id ? String(instanceConfig.topic_id) : undefined;
+    const senderSessionName = msg.senderSessionName as string | undefined;
+    const senderInstanceName = senderSessionName && this.fleetConfig?.instances[senderSessionName]
+      ? senderSessionName
+      : null;
+    const routingConfig = senderInstanceName
+      ? this.fleetConfig?.instances[senderInstanceName]
+      : (senderSessionName ? undefined : this.fleetConfig?.instances[instanceName]);
+    const threadId = routingConfig?.topic_id ? String(routingConfig.topic_id) : undefined;
     const chatId = this.adapter.getChatId();
     if (!chatId) return;
 
@@ -738,11 +879,10 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       return;
     }
 
-    const defaults = this.fleetConfig?.defaults as Record<string, unknown> | undefined;
-    const schedulerDefaults = defaults?.scheduler as Record<string, unknown> | undefined;
+    const schedulerDefaults = this.fleetConfig?.defaults.scheduler;
 
-    const retryCount = (schedulerDefaults?.retry_count as number) ?? 3;
-    const retryInterval = (schedulerDefaults?.retry_interval_ms as number) ?? 30_000;
+    const retryCount = schedulerDefaults?.retry_count ?? 3;
+    const retryInterval = schedulerDefaults?.retry_interval_ms ?? 30_000;
 
     const deliver = (): boolean => {
       const ipc = this.instanceIpcClients.get(target);
@@ -750,7 +890,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
 
       ipc.send({
         type: "fleet_schedule_trigger",
-        payload: { schedule_id: id, message: `[排程任務] ${message}`, label },
+        payload: { schedule_id: id, message: `[Scheduled] ${message}`, label },
         meta: { chat_id: reply_chat_id, thread_id: reply_thread_id, user: "scheduler" },
       });
       return true;
@@ -777,7 +917,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
 
   private notifySourceTopic(schedule: Schedule): void {
     if (!this.adapter) return;
-    const text = `⏰ 排程「${schedule.label ?? schedule.id}」已觸發，目標實例：${schedule.target}`;
+    const text = `⏰ Schedule "${schedule.label ?? schedule.id}" triggered, target: ${schedule.target}`;
     this.adapter.sendText(schedule.reply_chat_id, text, {
       threadId: schedule.reply_thread_id ?? undefined,
     }).catch((err: unknown) => this.logger.error({ err }, "Failed to send cross-instance notification"));
@@ -785,7 +925,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
 
   private notifyScheduleFailure(schedule: Schedule): void {
     if (!this.adapter) return;
-    const text = `⏰ 排程「${schedule.label ?? schedule.id}」觸發失敗：實例 ${schedule.target} 未在線。`;
+    const text = `⏰ Schedule "${schedule.label ?? schedule.id}" trigger failed: instance ${schedule.target} is offline.`;
     this.adapter.sendText(schedule.reply_chat_id, text, {
       threadId: schedule.reply_thread_id ?? undefined,
     }).catch((err: unknown) => this.logger.error({ err }, "Failed to send schedule failure notification"));
@@ -1071,6 +1211,9 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     if (this.fleetConfig.teams && Object.keys(this.fleetConfig.teams).length > 0) {
       toSave.teams = this.fleetConfig.teams;
     }
+    if (this.fleetConfig.templates && Object.keys(this.fleetConfig.templates).length > 0) {
+      toSave.templates = this.fleetConfig.templates;
+    }
     toSave.instances = {};
     for (const [name, inst] of Object.entries(this.fleetConfig.instances)) {
       const serialized: Record<string, unknown> = {
@@ -1105,6 +1248,21 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
         this.logger.info({ name, count }, "Cleaned up schedules for deleted instance");
       }
     }
+    // Clean up team memberships
+    if (this.fleetConfig?.teams) {
+      for (const [teamName, team] of Object.entries(this.fleetConfig.teams)) {
+        const idx = team.members.indexOf(name);
+        if (idx !== -1) {
+          team.members.splice(idx, 1);
+          this.logger.info({ team: teamName, instance: name }, "Removed deleted instance from team");
+        }
+        if (team.members.length === 0) {
+          delete this.fleetConfig.teams[teamName];
+          this.logger.info({ team: teamName }, "Deleted empty team");
+        }
+      }
+    }
+
     await this.lifecycle.remove(name);
 
     // Clean up statusline watcher + instance directory
@@ -1173,6 +1331,34 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     }).catch(e => this.logger.debug({ err: e }, "Failed to send notification"));
   }
 
+  queueMirrorMessage(text: string): void {
+    const mirrorTopicId = this.fleetConfig?.channel?.mirror_topic_id;
+    if (mirrorTopicId == null || !this.adapter) return;
+    const ts = new Date().toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit" });
+    this.mirrorBuffer.push(`[${ts}] ${text}`);
+    if (!this.mirrorTimer) {
+      this.mirrorTimer = setTimeout(() => {
+        const batch = this.mirrorBuffer.join("\n");
+        this.mirrorBuffer = [];
+        this.mirrorTimer = null;
+        const groupId = this.fleetConfig?.channel?.group_id;
+        if (groupId && this.adapter) {
+          this.adapter.sendText(String(groupId), batch, {
+            threadId: String(mirrorTopicId),
+          }).catch(e => this.logger.debug({ err: e }, "Mirror topic send failed"));
+        }
+      }, 3000);
+    }
+  }
+
+  /** Push an SSE event to all connected Web UI clients. */
+  emitSseEvent(event: string, data: unknown): void {
+    const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+    for (const client of this.sseClients) {
+      client.write(payload);
+    }
+  }
+
   async sendHangNotification(instanceName: string): Promise<void> {
     if (!this.adapter) return;
     const groupId = this.fleetConfig?.channel?.group_id;
@@ -1195,6 +1381,162 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
   }
 
   // ── Topic icon + auto-archive ─────────────────────────────────────────────
+
+  private static INSTRUCTIONS_FILENAME: Record<string, string> = {
+    "claude-code": "CLAUDE.md",
+    "codex": "AGENTS.md",
+    "gemini-cli": "GEMINI.md",
+    "opencode": "AGENTS.md",
+    "kiro-cli": ".kiro/steering/project.md",
+    "mock": "CLAUDE.md",
+  };
+
+  private static GENERAL_INSTRUCTIONS = `# Fleet Coordinator
+
+You are the fleet coordinator — the central entry point for this AgEnD fleet.
+You route tasks, manage instances, enforce policies, and synthesize results.
+Do NOT modify project files directly — delegate file changes to the project's instance.
+You CAN write code snippets, explain code, and answer technical questions directly.
+
+-----
+
+## Task Classification
+
+Classify every incoming request before acting.
+
+### Handle Directly (ALL conditions must be true)
+
+- No file system access needed
+- No external execution needed
+- Answerable from static knowledge
+- ≤ 2 reasoning steps
+
+Examples: Q&A, translation, fleet status queries, explaining a concept, writing code snippets.
+
+### Delegate to 1 Instance
+
+- Task scoped to a single project or repo
+- Requires file access, code changes, or execution
+
+### Coordinate Multiple Instances
+
+- Task spans multiple repos or domains
+- Requires outputs from one instance to feed into another
+- Benefits from parallel execution (max 3 instances per task)
+
+-----
+
+## Instance Discovery (in this order)
+1. list_teams()        → reuse existing teams first
+2. list_instances()    → find by working_directory, description, or tags
+3. describe_instance() → confirm capabilities before delegating
+4. create_instance()   → only if no suitable instance exists
+
+Rules: prefer reuse over creation. Do NOT create duplicates of running instances.
+
+-----
+
+## Delegation Protocol
+
+Every delegation via send_to_instance() MUST include:
+
+1. Task scope — what exactly to do, bounded clearly
+2. Expected output — what to return and in what form
+3. Policy reminder — "Follow Development Workflow policy" (for code tasks)
+
+### Loop Prevention
+
+- Never re-delegate a task back to the instance that sent it to you
+- If a task has bounced 3 times, stop and solve locally or reduce scope
+
+### Execution Strategy
+
+Parallel — use only when tasks are independent with no shared state
+Sequential — use when one task's output feeds into the next
+
+-----
+
+## Result Handling
+
+When an instance reports back, classify the outcome:
+
+- Success → Summarize key results for user. Omit internal coordination noise.
+- Partial → State what succeeded, what remains, proposed next steps.
+- Failure → Retry up to 2 times. If still failing: try alternative instance, reduce scope, or return partial result clearly marked.
+- No response → Ping again after reasonable wait. If still silent: report to user with options.
+
+### Output to User
+
+Every final response to the user should contain:
+
+- Result — the actual answer or deliverable
+- Gaps — anything incomplete or unresolved (omit if none)
+
+-----
+
+## Shared Decisions
+
+Use post_decision() / list_decisions() for any choice that affects more than 1 instance, changes an API contract, introduces a new dependency, or alters deployment process.
+
+When instances disagree, collect both viewpoints, make a decision, and record it via post_decision.
+
+-----
+
+## Context Rotation Bootstrap
+
+After your context rotates, run this sequence BEFORE processing any new messages:
+1. list_instances()   → rebuild fleet awareness
+2. list_teams()       → restore team structure
+3. list_decisions()   → reload policies and conventions
+
+Only then handle incoming requests.
+
+-----
+
+## Development Workflow Policy
+
+All code changes across the fleet should follow this workflow.
+The coordinator enforces compliance but does not perform these steps directly.
+Remind instances of this policy when delegating code tasks.
+
+### Workflow Stages
+Design Proposed → Design Approved → Implementation → Submit for Review → Under Review → Approved → Merge
+
+### Policy Rules
+
+1. Design before code — developer sends design proposal to reviewer before implementation. Consensus required before proceeding.
+2. Challenger pairing — every code task should have a developer + reviewer. Reviewer actively questions decisions and finds risks.
+3. Verify by execution — backend/CLI changes must be tested by running them. Do not trust documentation alone.
+4. Independent review — every merge requires code review from someone other than the author.
+5. Root cause first — bug fixes require confirmed root cause before proposing a fix.
+6. Merge conditions: tests pass, reviewer approved, branch and worktree cleaned up.
+
+### Specialist Instance Rules
+
+- Execute within defined scope only
+- Return structured output: result, assumptions, uncertainties, verification status
+- Do NOT create new instances without coordinator approval
+
+-----
+
+## Team Management
+
+- Always check existing teams before creating new ones
+- Default to ephemeral teams (created for a specific task, dissolved after completion)
+- Clean up ephemeral teams and instances after task completion
+`;
+
+  /** Ensure the general instance has its project instructions file */
+  private ensureGeneralInstructions(workDir: string, backendName?: string): void {
+    const backend = backendName ?? "claude-code";
+    const filename = FleetManager.INSTRUCTIONS_FILENAME[backend] ?? "CLAUDE.md";
+    const filePath = join(workDir, filename);
+    mkdirSync(dirname(filePath), { recursive: true });
+    if (!existsSync(filePath)) {
+      writeFileSync(filePath, FleetManager.GENERAL_INSTRUCTIONS, "utf-8");
+      this.logger.info({ filePath }, "Created general instance instructions file");
+    }
+  }
 
   /** Fetch forum topic icon stickers and pick emoji IDs for each state */
   private async resolveTopicIcons(): Promise<void> {
@@ -1265,16 +1607,17 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
 
     this.scheduler?.shutdown();
 
-    await Promise.allSettled(
-      [...this.daemons.entries()].map(async ([name, daemon]) => {
-        try {
-          await daemon.stop();
-        } catch (err) {
-          this.logger.warn({ name, err }, "Stop failed");
-        }
-        this.daemons.delete(name);
-      })
-    );
+    // Stop instances sequentially to avoid tmux send-keys race conditions.
+    // Each stop sends quit + Enter via separate tmux commands; parallel stops
+    // can cause the Enter to arrive before the quit text is processed.
+    for (const [name, daemon] of this.daemons) {
+      try {
+        await daemon.stop();
+      } catch (err) {
+        this.logger.warn({ name, err }, "Stop failed");
+      }
+      this.daemons.delete(name);
+    }
 
     for (const [, ipc] of this.instanceIpcClients) {
       await ipc.close();
@@ -1390,6 +1733,17 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
 
     this.logger.info("All instances idle — stopping for reload...");
     await this.stopAll();
+
+    // Clean up tmux session if no foreign windows remain
+    try {
+      const remaining = await TmuxManager.listWindows(getTmuxSession());
+      if (remaining.length <= 1) {
+        await TmuxManager.killSession(getTmuxSession());
+        this.logger.info("Killed tmux session (clean)");
+      } else {
+        this.logger.warn({ remaining: remaining.map(w => w.name) }, "Windows remain after stopAll — skipping session kill");
+      }
+    } catch { /* best effort — don't block exit */ }
   }
 
   /**
@@ -1429,20 +1783,16 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     // Start new + restart modified instances
     for (const [name, config] of Object.entries(newInstances)) {
       if (!this.daemons.has(name)) {
-        // New instance
+        // New instance — startInstance already calls connectIpcToInstance
         this.logger.info({ name }, "New instance in config — starting");
-        await this.startInstance(name, config, topicMode).then(() =>
-          this.connectIpcToInstance(name)
-        ).catch(err =>
+        await this.startInstance(name, config, topicMode).catch(err =>
           this.logger.error({ err, name }, "Failed to start new instance"));
       } else if (oldConfig?.instances[name]) {
         // Restart if any config field changed
         if (JSON.stringify(oldConfig.instances[name]) !== JSON.stringify(config)) {
           this.logger.info({ name }, "Instance config changed — restarting");
           await this.stopInstance(name).catch(() => {});
-          await this.startInstance(name, config, topicMode).then(() =>
-            this.connectIpcToInstance(name)
-          ).catch(err =>
+          await this.startInstance(name, config, topicMode).catch(err =>
             this.logger.error({ err, name }, "Failed to restart modified instance"));
         }
       }
@@ -1465,8 +1815,11 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     this.logger.info(`Graceful restart: waiting for ${instanceNames.length} instances to idle...`);
 
     const groupId = this.fleetConfig?.channel?.group_id;
+    const generalName = this.findGeneralInstance();
+    const generalThreadId = generalName ? this.fleetConfig?.instances[generalName]?.topic_id : undefined;
+    const notifyOpts = { threadId: generalThreadId != null ? String(generalThreadId) : undefined };
     if (groupId && this.adapter) {
-      await this.adapter.sendText(String(groupId), `🔄 Graceful restart initiated — waiting for all instances to idle...`)
+      await this.adapter.sendText(String(groupId), `🔄 Graceful restart initiated — waiting for all instances to idle...`, notifyOpts)
         .catch(e => this.logger.debug({ err: e }, "Failed to post restart notification"));
     }
 
@@ -1509,18 +1862,28 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       instanceNames.map(name => this.stopInstance(name))
     );
 
+    // Kill remaining orphan windows to prevent stale state on restart
+    try {
+      const agendNames = new Set(instanceNames);
+      agendNames.add("general");
+      const existingWindows = await TmuxManager.listWindows(getTmuxSession());
+      for (const w of existingWindows) {
+        if (agendNames.has(w.name)) {
+          const tm = new TmuxManager(getTmuxSession(), w.id);
+          await tm.killWindow();
+        }
+      }
+    } catch { /* best effort — don't block restart */ }
+
     const fleet = this.loadConfig(this.configPath);
     this.fleetConfig = fleet;
     const topicMode = fleet.channel?.mode === "topic";
 
-    for (const [name, config] of Object.entries(fleet.instances)) {
-      await this.startInstance(name, config, topicMode);
-    }
+    await this.startInstancesWithConcurrency(Object.entries(fleet.instances), topicMode);
 
     if (topicMode) {
       this.routing.rebuild(this.fleetConfig!);
-      await new Promise(r => setTimeout(r, 3000));
-      await this.connectToInstances(fleet);
+      // startInstance already calls connectIpcToInstance, no need for connectToInstances here
 
       for (const name of Object.keys(fleet.instances)) {
         this.startStatuslineWatcher(name);
@@ -1529,7 +1892,13 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
 
     this.logger.info("Graceful restart complete");
     if (groupId && this.adapter) {
-      await this.adapter.sendText(String(groupId), `✅ Graceful restart complete — ${this.daemons.size} instances running`)
+      const total = Object.keys(fleet.instances).length;
+      const started = this.daemons.size;
+      const failedNames = Object.keys(fleet.instances).filter(n => !this.daemons.has(n));
+      const restartText = failedNames.length === 0
+        ? `Fleet ready. ${started}/${total} instances running.`
+        : `Fleet ready. ${started}/${total} instances running. Failed: ${failedNames.join(", ")}`;
+      await this.adapter.sendText(String(groupId), restartText, notifyOpts)
         .catch(e => this.logger.debug({ err: e }, "Failed to post restart completion notification"));
 
       // Notify each instance's channel so Claude resumes work
@@ -1662,6 +2031,56 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
         return;
       }
 
+      // Instance start via API
+      if (req.method === "POST" && req.url?.startsWith("/api/instance/") && req.url.endsWith("/start")) {
+        const name = decodeURIComponent(req.url.slice("/api/instance/".length, -"/start".length));
+        const config = this.fleetConfig?.instances[name];
+        if (!config) {
+          res.writeHead(404);
+          res.end(JSON.stringify({ error: `Instance not found: ${name}` }));
+          return;
+        }
+        (async () => {
+          try {
+            const topicMode = this.fleetConfig?.channel?.mode === "topic";
+            await this.startInstance(name, config, topicMode ?? false);
+            this.emitSseEvent("status", this.getUiStatus());
+            res.writeHead(200);
+            res.end(JSON.stringify({ ok: true }));
+          } catch (err) {
+            res.writeHead(500);
+            res.end(JSON.stringify({ error: `Start failed: ${(err as Error).message}` }));
+          }
+        })();
+        return;
+      }
+
+      // Instance restart (immediate, no idle wait)
+      if (req.method === "POST" && req.url?.startsWith("/restart/")) {
+        const name = decodeURIComponent(req.url.slice("/restart/".length));
+        this.logger.info({ name }, "Instance restart requested via HTTP");
+        (async () => {
+          try {
+            await this.restartSingleInstance(name);
+            this.logger.info({ name }, "Instance restarted");
+            this.emitSseEvent("status", this.getUiStatus());
+            res.writeHead(200);
+            res.end(JSON.stringify({ restarted: name }));
+          } catch (err) {
+            this.logger.error({ err, name }, "Instance restart failed");
+            const status = (err as Error).message.includes("not found") ? 404 : 500;
+            res.writeHead(status);
+            res.end(JSON.stringify({ error: `Restart failed: ${(err as Error).message}` }));
+          }
+        })();
+        return;
+      }
+
+      // ── Web UI endpoints (delegated to web-api.ts) ─────
+
+      const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+      if (handleWebRequest(req, res, url, this as unknown as import("./web-api.js").WebApiContext)) return;
+
       res.writeHead(404);
       res.end(JSON.stringify({ error: "not found" }));
     });
@@ -1669,6 +2088,32 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     this.healthServer.listen(port, "127.0.0.1", () => {
       this.logger.info({ port }, "Health endpoint listening");
     });
+
+    // Generate and save web token
+    this.webToken = randomBytes(24).toString("hex");
+    const tokenPath = join(this.dataDir, "web.token");
+    writeFileSync(tokenPath, this.webToken);
+    this.logger.info({ url: `http://localhost:${port}/ui?token=${this.webToken}` }, "Web UI available");
+  }
+
+  getUiStatus(): unknown {
+    const instances = Object.keys(this.fleetConfig?.instances ?? {}).map(name => {
+      const statusFile = join(this.getInstanceDir(name), "statusline.json");
+      let context_pct = 0;
+      let cost = 0;
+      let model = "";
+      try {
+        const data = JSON.parse(readFileSync(statusFile, "utf-8"));
+        context_pct = data.context_window?.used_percentage ?? 0;
+        cost = data.cost?.total_cost_usd ?? 0;
+        model = data.model?.display_name ?? "";
+      } catch { /* not yet available */ }
+      return { name, status: this.getInstanceStatus(name), context_pct, cost, model };
+    });
+    return {
+      instances,
+      uptime: Math.floor((Date.now() - this.startedAt) / 1000),
+    };
   }
 }
 

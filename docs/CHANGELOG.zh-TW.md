@@ -17,6 +17,109 @@
 ### 修復
 - 最小化的 `claude-settings.json` — 允許列表中僅包含 AgEnD MCP 工具，不再覆蓋使用者全域的權限設定
 
+## [1.14.0] - 2026-04-07
+
+### 新增
+- **Plugin 系統 + Discord adapter 獨立** — Discord adapter 搬到獨立 `agend-plugin-discord` package；factory.ts 支援 `agend-plugin-{type}` / `agend-adapter-{type}` / 裸名稱慣例；主 package 匯出（`/channel`、`/types`）讓第三方 plugin 可用
+- **Web UI Phase 2：完整操控面板** — instance stop/start/restart/delete（name 確認）、建立 instance 表單（directory 可選、backend 自動偵測）、Task board CRUD、排程管理、團隊管理、Fleet 設定編輯器（表單式 + 敏感欄位遮蔽）
+- **Web UI 版面：Fleet vs Instance** — Sidebar 加「Fleet」入口顯示 fleet 級 tabs（Tasks、Schedules、Teams、Config）；Instance 只保留 Chat + Detail；跨導航連結
+- **Web UI UX 改善** — Toast 通知、載入狀態、Cron 人類可讀描述、加大狀態點、空狀態引導、成本標註、網站一致風格（`#2AABEE` 強調色、Inter + JetBrains Mono 字體）
+- **Backend 自動偵測** — `GET /ui/backends` 掃描 PATH；建立 instance 的 dropdown 顯示安裝/未安裝狀態
+- **指定 instance 重啟** — `agend fleet restart <instance>` 透過 fleet HTTP API
+- **一鍵安裝腳本** — `curl -fsSL https://suzuke.github.io/AgEnD/install.sh | bash`
+- **project_roots 限制** — `create_instance` 拒絕不在設定 roots 範圍內的目錄
+
+### 修復
+- **Web UI 回覆 context** — 首次 web 訊息不再出現「No active chat context」；使用真實 Telegram group_id/topic_id
+- **Web↔Telegram 雙向同步** — Web 訊息以 `🌐` 前綴轉發到 Telegram；Telegram 訊息透過 SSE 推送到 Web UI
+- **SSE 即時狀態刷新** — 操作按鈕在 stop/start/restart/delete 後即時更新
+- **.env 覆蓋** — `.env` 檔案值無條件覆蓋繼承的 shell 環境變數
+- **tmux duplicate session race** — `ensureSession()` 處理並行啟動時的競爭條件
+- **建立 Instance 表單** — directory 改為可選，topic_name 動態必填
+
+### 變更
+- **discord.js 從核心依賴移除** — 僅在安裝 `agend-plugin-discord` 時需要
+- **Web API 抽取到 `web-api.ts`** — 縮減 fleet-manager.ts；所有 `/ui/*` 路由集中管理
+- **認證統一** — 所有 Web UI 端點（含 restart）都需要 token 認證
+
+## [1.13.0] - 2026-04-06
+
+### 新增
+- **Web UI Phase 2：完整操控面板** — 建立/刪除 instance、Task board CRUD（建立、認領、完成）、排程管理（建立、刪除）、團隊管理（成員勾選建立、刪除）、Fleet 設定檢視（唯讀、已清理敏感資訊）
+- **Web UI 風格統一** — 對齊網站設計：Telegram 藍 `#2AABEE` 強調色、Inter + JetBrains Mono 字體、深色主題、圓角卡片、Toast 通知、載入狀態
+- **一鍵安裝腳本** — `curl -fsSL https://suzuke.github.io/AgEnD/install.sh | bash` 一行完成安裝（Node.js via nvm、tmux、agend、後端偵測）
+- **project_roots 限制** — `create_instance` 拒絕不在 `project_roots` 範圍內的目錄
+- **認證統一** — 所有 Web UI 端點（包含 restart）都需要 token 認證
+
+### 修復
+- **Web UI 回覆 context** — 首次從 Web UI 發訊不再出現「No active chat context」錯誤；使用真實 Telegram group_id/topic_id
+- **即時狀態刷新** — Instance 操作按鈕在 stop/start/restart/delete 後透過 SSE 即時更新
+- **Web↔Telegram 雙向同步** — Web 訊息以 `🌐` 前綴轉發到 Telegram topic；Telegram 訊息透過 SSE 推送到 Web UI
+
+### 文件
+- 全面文件盤點：所有文件新增 20+ 遺漏功能
+- 網站全面改版為 Spectra 風格深色設計
+
+## [1.12.0] - 2026-04-06
+
+### 新增
+- **Web UI 儀表板** — `agend web` 啟動瀏覽器 fleet 監控，SSE 即時更新 + 整合聊天介面，支援 Telegram 雙向同步
+- **agend quickstart** — 簡化 4 問題設定精靈，取代 `agend init` 作為推薦的新手入口
+- **project_roots 限制** — `create_instance` 驗證工作目錄在設定的 `project_roots` 範圍內
+- **HTML 對話匯出** — `agend export-chat` 匯出 fleet 活動為獨立 HTML，支援日期篩選（`--from`、`--to`）
+- **Mirror Topic** — `mirror_topic_id` 設定，在專屬 topic 觀察跨 instance 通訊
+
+### 修復
+- **平行啟動** — 處理多 instance 同時啟動時的 tmux duplicate session race
+- **.env 優先覆蓋** — `.env` 的值正確覆蓋繼承的 shell 環境變數
+- **Web UI 聊天同步** — Web UI 與 Telegram 之間的雙向訊息同步
+
+### 文件
+- README 大改版：hero section、功能亮點、架構圖、運作原理說明
+- Quick Start 改為使用 `agend quickstart`
+- 全面文件盤點：features.md、cli.md、configuration.md 更新所有 v1.11.0-v1.12.0 功能
+
+## [1.11.0] - 2026-04-05
+
+### 新增
+- **Kiro CLI backend** — 新增 AWS Kiro CLI 支援（`backend: kiro-cli`）。支援 session resume、MCP config、error patterns。模型：auto、claude-sonnet-4.5、claude-haiku-4.5、deepseek-3.2 等
+- **內建 workflow 模板** — fleet 協作流程透過 MCP instructions 自動注入。可在 fleet.yaml 的 `workflow` 欄位設定（`"builtin"`、`"file:path"` 或 `false`）
+- **Workflow 分層：coordinator vs executor** — General instance 取得完整 coordinator 指南（Choosing Collaborators、Task Sizing、Delegation Principles、Goal & Decision Management）。其他 instance 取得精簡的 executor 版本（Communication Rules、Progress Tracking、Context Protection）
+- **`create_instance` 的 systemPrompt 參數** — 建立 instance 時可傳入自訂 system prompt（僅支援 inline 文字）
+- **Fleet ready Telegram 通知** — `startAll` 和 `restartInstances` 完成後發送「Fleet ready. N/M instances running.」到 General topic，含失敗 instance 報告
+- **E2E 測試框架** — 79+ 測試在 Tart VM 中隔離執行。Mock backend 支援 `pty_output` 指令模擬錯誤。T15 workflow 模板測試、T16 failover cooldown 測試
+- **Token overhead 量測** — 測試腳本（`scripts/measure-token-overhead.sh`）與報告。Full profile：+887 tokens（佔 200K context 的 0.44%，$0.003/msg）
+- **Codex 用量限制偵測** — 「You've hit your usage limit」error pattern（action: pause）
+- **MockBackend error patterns** — `MOCK_RATE_LIMIT` 和 `MOCK_AUTH_ERROR` 供 E2E 測試使用
+
+### 修復
+- **Crash recovery snapshot restore** — 在 crash 偵測時寫入 snapshot（不只 context rotation）；以 in-memory `snapshotConsumed` flag 取代 single-consume 刪除，檔案保留供 daemon 重啟恢復
+- **Codex session resume** — `CodexBackend.buildCommand()` 現在在 session-id 存在時使用 `codex resume <session-id>`（#11）
+- **Rate limit failover 循環** — failover 類型的 PTY error 加入 5 分鐘 cooldown，防止 terminal buffer 殘留文字重複觸發（#10）
+- **PTY error monitor hash dedup** — recovery 時記錄 pane hash，同畫面同 error 不重複觸發
+- **CLI restart 等待** — bootout/bootstrap 之間的固定 1 秒改為動態 polling（最多 30 秒），修復多 instance 時「Bootstrap failed: Input/output error」
+- **CLI attach 互動選單** — fuzzy match 多個結果時顯示編號選單而非報錯
+- **CLI logs ANSI 清理** — 增強 `stripAnsi()` 處理 cursor 移動、DEC private modes、carriage returns 等
+- **agent 訊息中的 `reply_to_text`** — 用戶回覆的原始訊息內容現在包含在 paste 給 agent 的格式化訊息中
+- **General instructions 按 backend 產生** — auto-create 根據 `fleet.defaults.backend` 寫入對應檔案（CLAUDE.md、AGENTS.md、GEMINI.md、.kiro/steering/project.md）
+- **General instructions 每次啟動確認** — `ensureGeneralInstructions()` 在每次 `startInstance` 時呼叫，不只 auto-create
+- **內建文字英文化** — 所有系統產生的文字從中文改為英文（排程通知、語音訊息標籤、general instructions）
+- **General 委派原則** — 改寫為 coordinator 角色：主動委派，以具體條件判斷
+
+### 變更
+- Fleet start/restart 通知統一為「Fleet ready. N/M instances running.」格式，送到 General topic
+- 移除 `buildDecisionsPrompt()` dead code（v1.9.0 已故意停用）
+- 移除 fleet-manager 的 `getActiveDecisionsForProject()`（dead code）
+
+### 文件
+- OpenCode MCP instructions 限制（v1.3.10 不讀取 MCP instructions 欄位）
+- Kiro CLI MCP instructions 限制（未驗證）
+- Token overhead 報告（EN + zh-TW）含可重現的測試腳本
+
+## [1.10.0] - 2026-04-05
+
+_中間版本，改動已包含在 1.11.0。_
+
 ## [1.9.1] - 2026-04-03
 
 ### 修復

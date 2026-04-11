@@ -1,7 +1,8 @@
 import { join, dirname } from "node:path";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
-import { type CliBackend, type CliBackendConfig, type ErrorPattern, resolveBinary } from "./types.js";
+import { type CliBackend, type CliBackendConfig, type ErrorPattern, type StartupDialog, resolveBinary } from "./types.js";
+import { appendWithMarker, removeMarker } from "./marker-utils.js";
 
 export class GeminiCliBackend implements CliBackend {
   readonly binaryName = "gemini";
@@ -14,7 +15,8 @@ export class GeminiCliBackend implements CliBackend {
   buildCommand(config: CliBackendConfig): string {
     // --resume latest lets Gemini auto-resume without showing a session picker.
     // Using specific session IDs causes a picker dialog that daemon can't handle.
-    let cmd = `${this.binaryPath} --yolo --resume latest`;
+    let cmd = `${this.binaryPath} --yolo`;
+    if (!config.skipResume) cmd += " --resume latest";
 
     if (config.model) {
       cmd += ` --model ${config.model}`;
@@ -35,21 +37,33 @@ export class GeminiCliBackend implements CliBackend {
     } catch { /* new file */ }
 
     // Inject AGEND_INSTANCE_NAME into each MCP server's env so the MCP server
-    // identifies as this instance (Gemini spawns MCP servers as separate processes)
-    const mcpWithInstanceName: Record<string, unknown> = {};
+    // identifies as this instance (Gemini spawns MCP servers as separate processes).
+    // Use instance-namespaced key to avoid conflicts when multiple instances share
+    // the same working directory.
+    const servers = (settings.mcpServers ?? {}) as Record<string, unknown>;
     for (const [name, entry] of Object.entries(config.mcpServers)) {
-      mcpWithInstanceName[name] = {
+      const instanceKey = `${name}-${config.instanceName}`;
+      servers[instanceKey] = {
         ...entry,
         env: { ...entry.env, AGEND_INSTANCE_NAME: config.instanceName },
       };
     }
-    settings.mcpServers = mcpWithInstanceName;
+    // Clean up old non-namespaced key if present (one-time migration)
+    delete servers["agend"];
+    settings.mcpServers = servers;
     // Write model to per-project settings (Gemini reads model.name from settings.json)
     if (config.model) {
       settings.model = { name: config.model };
     }
     writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 
+    // Write fleet instructions into GEMINI.md (additive via marker block)
+    if (config.instructions) {
+      try {
+        const geminiMd = join(config.workingDirectory, "GEMINI.md");
+        appendWithMarker(geminiMd, config.instanceName, config.instructions);
+      } catch { /* best effort */ }
+    }
   }
 
   preTrust(workDir: string): void {
@@ -76,7 +90,14 @@ export class GeminiCliBackend implements CliBackend {
     return [
       { pattern: /RESOURCE_EXHAUSTED|quota exceeded/i, type: "rate_limit", action: "notify", message: "Gemini quota exhausted" },
       { pattern: /PERMISSION_DENIED|API key not valid/i, type: "auth_error", action: "pause", message: "Gemini authentication error" },
-      { pattern: /UNAVAILABLE|503/i, type: "network", action: "notify", message: "Gemini service unavailable" },
+      { pattern: /(?:google|googleapis|grpc).*UNAVAILABLE|503 Service/i, type: "network", action: "notify", message: "Gemini service unavailable" },
+    ];
+  }
+
+  getStartupDialogs(): StartupDialog[] {
+    return [
+      { pattern: /[❯›]\s*Don't trust/m, keys: ["Up", "Up", "Enter"], description: "Gemini 'Don't trust' selected — navigate to Trust folder" },
+      { pattern: /Trust folder/i, keys: ["Enter"], description: "Gemini trust folder dialog" },
     ];
   }
 
@@ -92,19 +113,41 @@ export class GeminiCliBackend implements CliBackend {
     } catch { return null; }
   }
 
+  getQuitCommand(): string { return "/quit"; }
+
   cleanup(config: CliBackendConfig): void {
-    // Clean up .gemini/settings.json MCP entries
+    // Only remove namespaced keys — non-namespaced keys may belong to
+    // another instance sharing this working directory.
     try {
       const settingsPath = join(config.workingDirectory, ".gemini", "settings.json");
       if (existsSync(settingsPath)) {
         const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
         if (settings.mcpServers) {
           for (const name of Object.keys(config.mcpServers)) {
-            delete settings.mcpServers[name];
+            delete settings.mcpServers[`${name}-${config.instanceName}`];
           }
           writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
         }
       }
+    } catch { /* best effort */ }
+
+    // Remove fleet instructions marker block from GEMINI.md
+    try {
+      const geminiMd = join(config.workingDirectory, "GEMINI.md");
+      const isEmpty = removeMarker(geminiMd, config.instanceName);
+      if (isEmpty && existsSync(geminiMd)) unlinkSync(geminiMd);
+    } catch { /* best effort */ }
+
+    // Remove trust entries added by preTrust()
+    try {
+      const trustFile = join(homedir(), ".gemini", "trustedFolders.json");
+      const trusted = JSON.parse(readFileSync(trustFile, "utf-8"));
+      const workDir = config.workingDirectory;
+      const parent = dirname(workDir);
+      let changed = false;
+      if (trusted[workDir] === "TRUST_FOLDER") { delete trusted[workDir]; changed = true; }
+      if (parent !== workDir && trusted[parent] === "TRUST_PARENT") { delete trusted[parent]; changed = true; }
+      if (changed) writeFileSync(trustFile, JSON.stringify(trusted, null, 2));
     } catch { /* best effort */ }
   }
 }

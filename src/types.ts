@@ -53,11 +53,13 @@ export interface ChannelConfig {
   type: string;
   mode: "topic";
   bot_token_env: string;
-  group_id?: number;
+  group_id?: number | string;
   access: AccessConfig;
   options?: Record<string, unknown>;
   /** Override the Telegram Bot API root URL (e.g. for testing with a mock server). */
   telegram_api_root?: string;
+  /** Topic ID for mirroring all cross-instance messages (read-only observation). */
+  mirror_topic_id?: number | string;
 }
 
 export interface InstanceConfig {
@@ -100,6 +102,8 @@ export interface InstanceConfig {
   worktree_source?: string;
   /** Workflow template: "builtin" (default), "file:path", inline string, or false to disable */
   workflow?: string | false;
+  /** Total startup timeout in ms for CLI backend (split 60/40 between output detection and idle wait). Default: 25000 */
+  startup_timeout_ms?: number;
 }
 
 export interface WebhookConfig {
@@ -114,6 +118,10 @@ export interface FleetDefaults extends Partial<InstanceConfig> {
     default_timezone?: string;
     retry_count?: number;
     retry_interval_ms?: number;
+  };
+  startup?: {
+    concurrency?: number;
+    stagger_delay_ms?: number;
   };
   cost_guard?: CostGuardConfig;
   hang_detector?: HangDetectorConfig;
@@ -150,11 +158,32 @@ export interface TeamConfig {
   description?: string;
 }
 
+export interface TemplateInstanceDef {
+  description?: string;
+  backend?: string;
+  model?: string;
+  model_failover?: string[];
+  tool_set?: string;
+  systemPrompt?: string;
+  skipPermissions?: boolean;
+  lightweight?: boolean;
+  workflow?: string | false;
+  tags?: string[];
+}
+
+export interface FleetTemplate {
+  description?: string;
+  /** Auto-create a team from all deployed instances */
+  team?: boolean;
+  instances: Record<string, TemplateInstanceDef>;
+}
+
 export interface FleetConfig {
   channel?: ChannelConfig;
   project_roots?: string[];
   defaults: FleetDefaults;
   instances: Record<string, InstanceConfig>;
   teams?: Record<string, TeamConfig>;
+  templates?: Record<string, FleetTemplate>;
   health_port?: number;
 }

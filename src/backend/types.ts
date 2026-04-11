@@ -13,6 +13,10 @@ export interface CliBackendConfig {
   mcpServers: Record<string, McpServerEntry>;
   skipPermissions?: boolean;
   model?: string;
+  /** When true, backend should not resume a previous session (crash recovery). */
+  skipResume?: boolean;
+  /** Fleet instructions content to inject into the CLI's additive system prompt mechanism. */
+  instructions?: string;
 }
 
 /** Action to take when an error pattern is detected in PTY output. */
@@ -38,6 +42,9 @@ export interface RuntimeDialog {
   /** Human-readable description for logging. */
   description: string;
 }
+
+/** A dialog that may appear during CLI startup (trust prompts, session pickers, etc.). */
+export type StartupDialog = RuntimeDialog;
 
 export interface CliBackend {
   /** The CLI binary name (e.g. "claude", "gemini", "codex") */
@@ -67,8 +74,20 @@ export interface CliBackend {
    */
   getRuntimeDialogs?(): RuntimeDialog[];
 
+  /**
+   * Dialogs that may appear during CLI startup (trust prompts, confirmation dialogs).
+   * The daemon's dismissDialogsUntilReady auto-dismisses these before the CLI is ready.
+   */
+  getStartupDialogs?(): StartupDialog[];
+
+  /** Whether this backend re-reads instruction files on --resume (e.g. Claude Code's --append-system-prompt-file). */
+  readonly instructionsReloadedOnResume?: boolean;
+
   /** Pre-approve a working directory to skip trust dialogs on startup. */
   preTrust?(workingDirectory: string): void;
+
+  /** Command to gracefully quit the CLI (e.g. "/exit", "/quit"). */
+  getQuitCommand(): string;
 
   /** Clean up config files on shutdown. */
   cleanup?(config: CliBackendConfig): void;

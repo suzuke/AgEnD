@@ -1,6 +1,6 @@
 import { join } from "node:path";
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
-import { type CliBackend, type CliBackendConfig, type ErrorPattern, resolveBinary } from "./types.js";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, unlinkSync } from "node:fs";
+import { type CliBackend, type CliBackendConfig, type ErrorPattern, type StartupDialog, resolveBinary } from "./types.js";
 
 export class KiroBackend implements CliBackend {
   readonly binaryName = "kiro-cli";
@@ -12,30 +12,23 @@ export class KiroBackend implements CliBackend {
 
   buildCommand(config: CliBackendConfig): string {
     let cmd = `${this.binaryPath} chat`;
-
     if (config.skipPermissions !== false) cmd += " --trust-all-tools";
-
-    // Resume specific session if session-id file exists
-    // --resume accepts session ID as positional arg (verified kiro-cli v1.29.2, undocumented)
-    const sessionIdFile = join(this.instanceDir, "session-id");
-    if (existsSync(sessionIdFile)) {
-      const sid = readFileSync(sessionIdFile, "utf-8").trim();
-      if (sid && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(sid)) {
-        cmd += ` --resume ${sid}`;
-      }
-    }
-
+    // --resume is boolean: Kiro auto-resumes latest conversation for this working directory
+    if (!config.skipResume) cmd += " --resume";
     if (config.model) cmd += ` --model ${config.model}`;
-
-    // Fail fast if agend MCP server can't start
     cmd += " --require-mcp-startup";
-
     return cmd;
   }
 
   writeConfig(config: CliBackendConfig): void {
     // Kiro CLI reads workspace MCP config from .kiro/settings/mcp.json
     // Format: { "mcpServers": { "name": { command, args, env } } }
+    //
+    // WORKAROUND: kiro-cli ignores the "env" block in mcp.json — the MCP server
+    // subprocess inherits the fleet manager's process env, which has a stale
+    // AGEND_SOCKET_PATH from whichever daemon wrote to it last.
+    // Fix: generate a wrapper script that exports the correct env vars before
+    // exec-ing the real MCP server.
     const mcpDir = join(config.workingDirectory, ".kiro", "settings");
     mkdirSync(mcpDir, { recursive: true });
     const mcpConfigPath = join(mcpDir, "mcp.json");
@@ -43,14 +36,22 @@ export class KiroBackend implements CliBackend {
     let mcpConfig: Record<string, unknown> = {};
     try { mcpConfig = JSON.parse(readFileSync(mcpConfigPath, "utf-8")); } catch { /* new file */ }
 
-    // Use instance-namespaced key to avoid conflicts when multiple instances share working directory
     const servers = (mcpConfig.mcpServers ?? {}) as Record<string, unknown>;
     for (const [name, entry] of Object.entries(config.mcpServers)) {
       const instanceKey = `${name}-${config.instanceName}`;
+      const allEnv = { ...entry.env, AGEND_INSTANCE_NAME: config.instanceName };
+
+      // Write a wrapper script that sets env vars explicitly
+      const wrapperPath = join(this.instanceDir, `mcp-wrapper-${name}.sh`);
+      const envExports = Object.entries(allEnv)
+        .map(([k, v]) => `export ${k}=${JSON.stringify(v)}`)
+        .join("\n");
+      writeFileSync(wrapperPath, `#!/bin/bash\n${envExports}\nexec ${entry.command} ${entry.args.map((a: string) => JSON.stringify(a)).join(" ")}\n`);
+      chmodSync(wrapperPath, 0o755);
+
       servers[instanceKey] = {
-        command: entry.command,
-        args: entry.args,
-        env: { ...entry.env, AGEND_INSTANCE_NAME: config.instanceName },
+        command: wrapperPath,
+        args: [],
       };
     }
     // Clean up old non-namespaced key if present
@@ -58,6 +59,15 @@ export class KiroBackend implements CliBackend {
     mcpConfig.mcpServers = servers;
 
     writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2));
+
+    // Write fleet instructions to .kiro/steering/ (auto-loaded by Kiro CLI)
+    if (config.instructions) {
+      try {
+        const steeringDir = join(config.workingDirectory, ".kiro", "steering");
+        mkdirSync(steeringDir, { recursive: true });
+        writeFileSync(join(steeringDir, `agend-${config.instanceName}.md`), config.instructions);
+      } catch { /* best effort */ }
+    }
   }
 
   getReadyPattern(): RegExp {
@@ -77,12 +87,16 @@ export class KiroBackend implements CliBackend {
   }
 
   getSessionId(): string | null {
-    try {
-      return readFileSync(join(this.instanceDir, "session-id"), "utf-8").trim() || null;
-    } catch { return null; }
+    // Kiro manages sessions internally via SQLite keyed by working directory.
+    // No external session ID needed — --resume handles it automatically.
+    return null;
   }
 
+  getQuitCommand(): string { return "/quit"; }
+
   cleanup(config: CliBackendConfig): void {
+    // Only remove namespaced keys — non-namespaced "agend" key may belong to
+    // another instance sharing this working directory.
     try {
       const mcpConfigPath = join(config.workingDirectory, ".kiro", "settings", "mcp.json");
       if (existsSync(mcpConfigPath)) {
@@ -90,11 +104,16 @@ export class KiroBackend implements CliBackend {
         if (mcpConfig.mcpServers) {
           for (const name of Object.keys(config.mcpServers)) {
             delete mcpConfig.mcpServers[`${name}-${config.instanceName}`];
-            delete mcpConfig.mcpServers[name]; // also clean old non-namespaced key
           }
           writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2));
         }
       }
+    } catch { /* best effort */ }
+
+    // Remove fleet instructions steering file
+    try {
+      const steeringFile = join(config.workingDirectory, ".kiro", "steering", `agend-${config.instanceName}.md`);
+      if (existsSync(steeringFile)) unlinkSync(steeringFile);
     } catch { /* best effort */ }
   }
 }

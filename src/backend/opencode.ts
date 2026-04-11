@@ -1,6 +1,6 @@
 import { join } from "node:path";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { type CliBackend, type CliBackendConfig, type ErrorPattern, resolveBinary } from "./types.js";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { type CliBackend, type CliBackendConfig, type ErrorPattern, type StartupDialog, resolveBinary } from "./types.js";
 
 export class OpenCodeBackend implements CliBackend {
   readonly binaryName = "opencode";
@@ -56,6 +56,17 @@ export class OpenCodeBackend implements CliBackend {
     oc.mcp = mcp;
     delete oc.mcpServers;
 
+    // Add fleet instructions file to instructions (additive — appends to existing array)
+    if (config.instructions) {
+      try {
+        const instrFile = join(config.instanceDir, "fleet-instructions.md");
+        writeFileSync(instrFile, config.instructions);
+        const paths = (oc.instructions ?? []) as string[];
+        if (!paths.includes(instrFile)) paths.push(instrFile);
+        oc.instructions = paths;
+      } catch { /* best effort */ }
+    }
+
     writeFileSync(configPath, JSON.stringify(oc, null, 2));
   }
 
@@ -81,8 +92,12 @@ export class OpenCodeBackend implements CliBackend {
     } catch { return null; }
   }
 
+  getQuitCommand(): string { return "/quit"; }
+
   cleanup(config: CliBackendConfig): void {
-    // Clean up instance-specific MCP entries from opencode.json
+    // Clean up instance-specific MCP entries from opencode.json.
+    // Only remove namespaced keys — non-namespaced "agend" key may belong to
+    // another instance sharing this working directory.
     try {
       const configPath = join(config.workingDirectory, "opencode.json");
       if (existsSync(configPath)) {
@@ -90,11 +105,21 @@ export class OpenCodeBackend implements CliBackend {
         if (oc.mcp) {
           for (const name of Object.keys(config.mcpServers)) {
             delete oc.mcp[`${name}-${config.instanceName}`];
-            delete oc.mcp[name]; // also clean old non-namespaced key
           }
-          writeFileSync(configPath, JSON.stringify(oc, null, 2));
         }
+        // Remove fleet instructions path from instructions
+        const instrFile = join(config.instanceDir, "fleet-instructions.md");
+        if (Array.isArray(oc.instructions)) {
+          oc.instructions = oc.instructions.filter((p: string) => p !== instrFile);
+        }
+        writeFileSync(configPath, JSON.stringify(oc, null, 2));
       }
+    } catch { /* best effort */ }
+
+    // Remove fleet instructions file
+    try {
+      const instrFile = join(config.instanceDir, "fleet-instructions.md");
+      if (existsSync(instrFile)) unlinkSync(instrFile);
     } catch { /* best effort */ }
   }
 }

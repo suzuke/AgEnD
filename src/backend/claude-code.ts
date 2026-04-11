@@ -1,11 +1,12 @@
 import { join } from "node:path";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { type CliBackend, type CliBackendConfig, type ErrorPattern, resolveBinary } from "./types.js";
+import { type CliBackend, type CliBackendConfig, type ErrorPattern, type StartupDialog, resolveBinary } from "./types.js";
 
 
 export class ClaudeCodeBackend implements CliBackend {
   readonly binaryName = "claude";
+  readonly instructionsReloadedOnResume = true;
   private binaryPath: string;
 
   constructor(private instanceDir: string) {
@@ -24,13 +25,19 @@ export class ClaudeCodeBackend implements CliBackend {
     if (config.skipPermissions !== false) cmd += " --dangerously-skip-permissions";
 
     const sessionIdFile = join(this.instanceDir, "session-id");
-    if (existsSync(sessionIdFile)) {
+    if (!config.skipResume && existsSync(sessionIdFile)) {
       const sid = readFileSync(sessionIdFile, "utf-8").trim();
       if (sid && /^[a-zA-Z0-9_-]+$/.test(sid)) cmd += ` --resume ${sid}`;
     }
 
     if (config.model) {
       cmd += ` --model ${config.model}`;
+    }
+
+    // Additive system prompt: append fleet instructions without overriding Claude's built-in prompt
+    const instrFile = join(this.instanceDir, "fleet-instructions.md");
+    if (existsSync(instrFile)) {
+      cmd += ` --append-system-prompt-file ${instrFile}`;
     }
 
     return cmd;
@@ -59,6 +66,11 @@ export class ClaudeCodeBackend implements CliBackend {
 
     // 4. Pre-approve API key to skip interactive prompt on startup
     this.preApproveApiKey(config);
+
+    // 5. Write fleet instructions file (loaded via --append-system-prompt-file)
+    if (config.instructions) {
+      try { writeFileSync(join(this.instanceDir, "fleet-instructions.md"), config.instructions); } catch { /* best effort */ }
+    }
   }
 
   getReadyPattern(): RegExp {
@@ -94,6 +106,16 @@ export class ClaudeCodeBackend implements CliBackend {
       { pattern: /credit balance is too low/i, type: "quota", action: "pause", message: "Insufficient API credits" },
     ];
   }
+
+  getStartupDialogs(): StartupDialog[] {
+    return [
+      { pattern: /[❯›]\s*\d+\.\s*No/m, keys: ["Down", "Enter"], description: "Claude 'No, exit' confirmation — navigate to Yes" },
+      { pattern: /I accept|I trust/i, keys: ["Enter"], description: "Claude 'Yes, I accept' trust dialog" },
+      { pattern: /Resume Session/i, keys: ["Escape"], description: "Claude resume session picker — start fresh" },
+    ];
+  }
+
+  getQuitCommand(): string { return "/exit"; }
 
   cleanup(_config: CliBackendConfig): void {
     // mcp-config.json is in instance dir, cleaned up when instance is deleted

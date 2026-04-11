@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, mkdirSync } from "node:fs";
-import { join, basename, dirname } from "node:path";
-import { homedir } from "node:os";
-import { access } from "node:fs/promises";
+import { join, basename, dirname, resolve } from "node:path";
+import { access, unlink } from "node:fs/promises";
+import { getAgendHome } from "./paths.js";
 import type { InstanceConfig, FleetConfig } from "./types.js";
 import { DEFAULT_INSTANCE_CONFIG } from "./config.js";
 import { sanitizeInstanceName } from "./topic-commands.js";
@@ -22,6 +22,7 @@ export interface LifecycleContext {
   readonly dataDir: string;
   readonly routing: RoutingEngine;
   readonly instanceIpcClients: Map<string, IpcClient>;
+  readonly sessionRegistry: Map<string, string>;
   readonly eventLog: EventLog | null;
   readonly controlClient: TmuxControlClient | null;
 
@@ -63,6 +64,9 @@ export class InstanceLifecycle {
     const instanceDir = this.ctx.getInstanceDir(name);
     mkdirSync(instanceDir, { recursive: true });
 
+    // Defense-in-depth: clear crash state before daemon start
+    try { await unlink(join(instanceDir, "crash-state.json")); } catch {}
+
     const { Daemon } = await import("./daemon.js");
     const { createBackend } = await import("./backend/factory.js");
 
@@ -100,6 +104,11 @@ export class InstanceLifecycle {
         this.ctx.notifyInstanceTopic(generalName, `⚠️ ${name} crashed and respawned. Check ~/.agend/daemon.log for details.`);
       }
     }, this.ctx.logger, `daemon.crash_respawn[${name}]`));
+
+    daemon.on("snapshot_failed", safeHandler(() => {
+      this.ctx.eventLog?.insert(name, "snapshot_failed", {});
+      this.ctx.notifyInstanceTopic(name, `⚠️ ${name}: restarted without context (snapshot injection failed)`);
+    }, this.ctx.logger, `daemon.snapshot_failed[${name}]`));
 
     daemon.on("crash_loop", safeHandler(() => {
       this.ctx.eventLog?.insert(name, "crash_loop", {});
@@ -143,11 +152,35 @@ export class InstanceLifecycle {
       await daemon.stop();
       this.daemons.delete(name);
     } else {
-      const pidPath = join(this.ctx.getInstanceDir(name), "daemon.pid");
+      const instanceDir = this.ctx.getInstanceDir(name);
+      const pidPath = join(instanceDir, "daemon.pid");
       if (existsSync(pidPath)) {
         const pid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
         try { process.kill(pid, "SIGTERM"); } catch (e) { this.ctx.logger.debug({ err: e, pid }, "SIGTERM failed for stale process"); }
       }
+      // Kill orphaned tmux window (daemon not in memory but window may persist)
+      const windowIdPath = join(instanceDir, "window-id");
+      if (existsSync(windowIdPath)) {
+        const windowId = readFileSync(windowIdPath, "utf-8").trim();
+        if (windowId) {
+          const { TmuxManager } = await import("./tmux-manager.js");
+          const { getTmuxSession } = await import("./config.js");
+          const tmux = new TmuxManager(getTmuxSession(), windowId);
+          await tmux.killWindow();
+        }
+        try { const { unlinkSync } = await import("node:fs"); unlinkSync(windowIdPath); } catch {}
+      }
+    }
+
+    // Clean up IPC client (prevents stale routing after stop)
+    const ipc = this.ctx.instanceIpcClients.get(name);
+    if (ipc) {
+      try { ipc.close(); } catch { /* already closed */ }
+      this.ctx.instanceIpcClients.delete(name);
+    }
+    // Clean up session registry entries pointing to this instance
+    for (const [session, instance] of this.ctx.sessionRegistry) {
+      if (instance === name) this.ctx.sessionRegistry.delete(session);
     }
   }
 
@@ -165,10 +198,8 @@ export class InstanceLifecycle {
     // Access scheduler through fleetConfig — scheduler is managed by FleetManager
     // We just clean up instance-related data here
 
-    // Stop daemon if running
-    if (this.daemons.has(name)) {
-      await this.stop(name);
-    }
+    // Stop daemon and clean up tmux window (handles both in-memory and orphaned cases)
+    await this.stop(name);
 
     // Clean up git worktree if applicable
     if (config.worktree_source && config.working_directory) {
@@ -243,6 +274,22 @@ export class InstanceLifecycle {
       }
     }
 
+    // Enforce project_roots boundary when configured.
+    // Note: uses path.resolve() (string normalization), not fs.realpathSync(),
+    // so symlinks are not resolved — known limitation.
+    const roots = this.ctx.fleetConfig?.project_roots;
+    if (directory && roots?.length) {
+      const resolved = resolve(directory);
+      const allowed = roots.some(r => {
+        const root = resolve(r.replace(/^~/, process.env.HOME || "~"));
+        return resolved === root || resolved.startsWith(root + "/");
+      });
+      if (!allowed) {
+        respond(null, `Directory "${directory}" is not under project_roots. Allowed: ${roots.join(", ")}`);
+        return;
+      }
+    }
+
     // Check for duplicate early (before worktree creation) — only when directory is known and no branch
     if (directory && !branch) {
       const expandHome = (p: string) => p.replace(/^~/, process.env.HOME || "~");
@@ -296,7 +343,10 @@ export class InstanceLifecycle {
         } else if (branchExists) {
           await execFileAsync("git", ["worktree", "add", worktreePath, branch], { cwd: directory });
         } else {
-          await execFileAsync("git", ["worktree", "add", worktreePath, "-b", branch], { cwd: directory });
+          const startPoint = args.start_point as string | undefined;
+          const worktreeArgs = ["worktree", "add", worktreePath, "-b", branch];
+          if (startPoint) worktreeArgs.push(startPoint);
+          await execFileAsync("git", worktreeArgs, { cwd: directory });
         }
         this.ctx.logger.info({ worktreePath, branch, repo: directory }, "Created git worktree for instance");
         workDir = worktreePath;
@@ -331,12 +381,14 @@ export class InstanceLifecycle {
     try {
       createdTopicId = await this.ctx.createForumTopic(topicName!);
 
-      const nameBase = worktreePath ? topicName! : (directory ? basename(workDir) : topicName!);
+      // Use explicit topic_name as name base when provided; fall back to directory basename
+      const explicitTopicName = args.topic_name as string | undefined;
+      const nameBase = explicitTopicName ?? (worktreePath ? topicName! : (directory ? basename(workDir) : topicName!));
       newInstanceName = `${sanitizeInstanceName(nameBase)}-t${createdTopicId}`;
 
       // If no directory was provided, auto-create default workspace
       if (!directory) {
-        workDir = join(homedir(), ".agend", "workspaces", newInstanceName);
+        workDir = join(getAgendHome(), "workspaces", newInstanceName);
         mkdirSync(workDir, { recursive: true });
       }
 
@@ -349,6 +401,12 @@ export class InstanceLifecycle {
         ...(systemPrompt ? { systemPrompt } : {}),
         ...(args.model ? { model: args.model as string } : {}),
         ...(args.backend ? { backend: args.backend as string } : {}),
+        ...(args.model_failover ? { model_failover: args.model_failover as string[] } : {}),
+        ...(args.tool_set ? { tool_set: args.tool_set as string } : {}),
+        ...(args.skipPermissions != null ? { skipPermissions: args.skipPermissions as boolean } : {}),
+        ...(args.lightweight != null ? { lightweight: args.lightweight as boolean } : {}),
+        ...(args.workflow !== undefined ? { workflow: args.workflow === "false" ? false : args.workflow as string } : {}),
+        ...(args.tags ? { tags: args.tags as string[] } : {}),
         ...(worktreePath ? { worktree_source: directory } : {}),
       } as InstanceConfig;
       this.ctx.fleetConfig!.instances[newInstanceName] = instanceConfig;
@@ -383,6 +441,7 @@ export class InstanceLifecycle {
           const { promisify } = await import("node:util");
           const execFileAsync = promisify(execFileCb);
           await execFileAsync("git", ["worktree", "remove", "--force", worktreePath], { cwd: directory });
+          await execFileAsync("git", ["worktree", "prune"], { cwd: directory });
         } catch { /* best-effort worktree cleanup */ }
       } else if (!directory && workDir) {
         // Remove auto-created workspace directory

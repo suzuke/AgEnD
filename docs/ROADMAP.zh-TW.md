@@ -1,6 +1,6 @@
 # AgEnD 發展藍圖
 
-> 最後更新：2026-04-03 (v1.9.1)
+> 最後更新：2026-04-06 (v1.12.0)
 > 由多代理共識產出：Claude Code, Codex, Gemini CLI, OpenCode, Kiro CLI
 
 ## 已完成 (v1.0–v1.3)
@@ -18,7 +18,7 @@
 - [x] IPC socket 強化 (umask TOCTOU 修復)
 - [x] 平台無關核心（所有 Telegram/Discord 邏輯都在 adapter 中）
 
-## 已完成 (v1.4–v1.8)
+## 已完成 (v1.4-v1.12)
 
 - [x] Shared Decisions — SQLite 跨 instance 知識共享（fleet/project scope）
 - [x] Task Board — 任務追蹤，支援依賴關係、優先級、claim/done 生命週期
@@ -47,16 +47,23 @@
 - [x] 自動建立 `working_directory` — fleet.yaml 中省略時使用 `~/.agend/workspaces/<name>`
 - [x] `create_instance` directory 選填 — 省略時自動建立工作空間
 - [x] 跨 instance 通知改善 — 降低噪音、`sender → receiver: summary` 格式、過濾 General Topic
+- [x] MCP instructions 注入 — fleet context 透過 MCP server instructions 注入，取代 CLI flags（v1.9.0）
+- [x] Kiro CLI backend — AWS Kiro CLI 支援，含 session resume 與 MCP config（v1.11.0）
+- [x] 內建 workflow 模板 — coordinator/executor 分層，透過 MCP instructions 注入（v1.11.0）
+- [x] Crash-aware snapshot restore — crash 時寫入 snapshot，跨 daemon 重啟持久化（v1.11.0）
+- [x] Fleet ready 通知 — 「N/M instances running」發送到 General topic（v1.11.0）
+- [x] E2E 測試框架 — 79+ 測試在 Tart VM 中執行（v1.11.0）
+- [x] Web UI 儀表板 — SSE 即時監控，整合聊天介面（v1.12.0）
+- [x] agend quickstart — 簡化 4 問題新手引導精靈（v1.12.0）
+- [x] HTML 對話匯出 — `agend export-chat` 支援日期篩選（v1.12.0）
+- [x] Mirror Topic — 透過專屬 topic 觀察跨 instance 通訊（v1.12.0）
+- [x] project_roots 限制 — create_instance 工作目錄邊界驗證（v1.12.0）
 
 ---
 
-## 下一步：Mirror Topics 與可觀測性
+## 下一步：可觀測性
 
-**目標：** 讓跨 instance 溝通可見，且不改變 agent 行為。
-
-### Mirror topics
-- 在專用 topic 中觀察跨 instance 溝通
-- 不改變 agent 行為 — daemon 層 hook send_to_instance
+**目標：** 讓 fleet 運作可見，且不改變 agent 行為。
 
 ---
 
@@ -78,7 +85,7 @@
 - [x] Activity Log 含成本追蹤 (SQLite)
 - [x] Web UI：Agent Board、Network Graph、Replay
 - [ ] 每個 instance 的成本趨勢圖 (Chart.js)
-- [ ] 透過 SSE 或 WebSocket 即時更新
+- [x] 透過 SSE 即時更新
 
 ### ~~1.3 任務時間軸與錯誤檢視器~~ → 部分完成
 - [x] Activity Log 涵蓋任務指派/完成
@@ -140,7 +147,7 @@
 
 ### 4.2 更多後端
 - **Aider**（約 50-80 行）— 最受歡迎的開源 coding agent
-- **Kiro** (AWS) — 待 CLI 模式穩定後整合
+- ~~**Kiro** (AWS)~~ — 已完成（v1.11.0）
 - **自訂 CLI** — 說明如何為任何工具實作 `CliBackend`
 
 ### 4.3 智慧後端路由

@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { loadFleetConfig } from "../src/config.js";
 import { writeFileSync, mkdirSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir, homedir } from "node:os";
+import { tmpdir } from "node:os";
+import { getAgendHome } from "../src/paths.js";
 
 describe("loadFleetConfig", () => {
   let tmpDir: string;
@@ -77,7 +78,7 @@ instances:
 `
     );
     const fleet = loadFleetConfig(fleetPath);
-    const expectedDir = join(homedir(), ".agend", "workspaces", "badbot");
+    const expectedDir = join(getAgendHome(), "workspaces", "badbot");
     expect(fleet.instances["badbot"].working_directory).toBe(expectedDir);
     expect(existsSync(expectedDir)).toBe(true);
   });

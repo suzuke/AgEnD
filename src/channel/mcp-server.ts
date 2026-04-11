@@ -14,11 +14,10 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { readFileSync } from "node:fs";
-import { basename, join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { basename } from "node:path";
 import { IpcClient } from "./ipc-bridge.js";
 import { TOOLS } from "./mcp-tools.js";
+import { buildFleetInstructions } from "../instructions.js";
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -34,13 +33,10 @@ const SLOW_TOOLS = new Set(["start_instance", "create_instance", "delete_instanc
 // Safety nets
 // ---------------------------------------------------------------------------
 
-// When the parent Claude process dies, stdin closes. Exit immediately to avoid
-// becoming an orphaned process that spins CPU forever on reconnect loops.
-process.stdin.on("end", () => {
-  process.stderr.write("agend: stdin closed (parent died) — exiting\n");
-  process.exit(0);
-});
-process.stdin.resume(); // ensure 'end' fires even if nothing reads stdin
+// Parent death detection moved to main() via mcp.onclose — see below.
+// DO NOT call process.stdin.resume() here. It switches stdin to flowing mode
+// before StdioServerTransport starts reading, causing data loss (the CLI's
+// initialize request gets discarded, breaking the MCP handshake).
 
 process.on("unhandledRejection", (err) => {
   process.stderr.write(`agend: unhandled rejection: ${err}\n`);
@@ -66,6 +62,12 @@ const pendingRequests = new Map<
 
 function setupIpcListeners(client: IpcClient): void {
   client.on("message", (msg: Record<string, unknown>) => {
+    // Graceful shutdown: daemon tells us it's shutting down — skip reconnect
+    if (msg.type === "shutdown") {
+      process.stderr.write("agend: daemon shutting down — exiting gracefully\n");
+      process.exit(0);
+    }
+
     if (typeof msg.requestId === "number" && pendingRequests.has(msg.requestId)) {
       const pending = pendingRequests.get(msg.requestId)!;
       pendingRequests.delete(msg.requestId);
@@ -138,7 +140,7 @@ function ipcRequest(
 ): Promise<unknown> {
   return new Promise((resolve, reject) => {
     if (!ipcConnected || !ipc) {
-      reject(new Error("Not connected to daemon IPC"));
+      reject(new Error("Not connected to daemon IPC (retrying connection in background)"));
       return;
     }
 
@@ -167,78 +169,32 @@ function ipcRequest(
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Dynamic MCP instructions — carries fleet context + user custom prompt
-// so we never need to touch the CLI's own system prompt.
+// MCP instructions — thin wrapper around shared buildFleetInstructions().
+// Phase 1 (dual track): MCP instructions kept as fallback for backends that
+// read the MCP instructions field. Content delegates to the shared module
+// to avoid drift between MCP and additive system prompt paths.
 // ---------------------------------------------------------------------------
 
 function buildMcpInstructions(): string {
-  const name = process.env.AGEND_INSTANCE_NAME ?? "unknown";
-  const workDir = process.env.AGEND_WORKING_DIR ?? process.cwd();
-  const displayName = process.env.AGEND_DISPLAY_NAME;
-  const description = process.env.AGEND_DESCRIPTION;
-  const customPrompt = process.env.AGEND_CUSTOM_PROMPT;
   const workflowEnv = process.env.AGEND_WORKFLOW;
+  let workflow: string | false | undefined;
+  if (workflowEnv === "false") workflow = false;
+  else if (workflowEnv) workflow = workflowEnv;
 
-  const sections: string[] = [];
-
-  // ── Identity ──
-  sections.push(`# AgEnD Fleet Context\nYou are **${name}**, an instance in an AgEnD fleet.\nYour working directory is \`${workDir}\`.`);
-  if (displayName) {
-    sections.push(`Your display name is "${displayName}". Use this when introducing yourself.`);
-  } else {
-    sections.push("You don't have a display name yet. Use set_display_name to choose one that reflects your personality.");
-  }
-  if (description) {
-    sections.push(`## Role\n${description}`);
+  let decisions: { title: string; content: string }[] | undefined;
+  if (process.env.AGEND_DECISIONS) {
+    try { decisions = JSON.parse(process.env.AGEND_DECISIONS); } catch { /* skip */ }
   }
 
-  // ── Message format & tool usage ──
-  sections.push([
-    "## Message Format",
-    "- `[user:name]` — from a Telegram/Discord user → reply with the `reply` tool.",
-    "- `[from:instance-name]` — from another fleet instance → reply with `send_to_instance`, NOT the reply tool.",
-    "",
-    "**Always use the `reply` tool for ALL responses to users.** Do not respond directly in the terminal.",
-    "",
-    "## Tool Usage",
-    "- reply: respond to users. react: emoji reactions. edit_message: update a sent message. download_attachment: fetch files.",
-    "- If the inbound message has image_path, Read that file — it is a photo.",
-    "- If the inbound message has attachment_file_id, call download_attachment then Read the returned path.",
-    "- If the inbound message has reply_to_text, the user is quoting a previous message.",
-    "- Use list_instances to discover fleet members. Use describe_instance for details.",
-    "- High-level collaboration: request_information (ask), delegate_task (assign), report_result (return results with correlation_id).",
-    "",
-    "## Collaboration Rules",
-    "1. Use fleet tools for cross-instance communication. Never assume direct file access to another instance's repo.",
-    "2. Cross-instance messages appear as `[from:instance-name]`. Reply via send_to_instance or report_result, NOT reply.",
-    "3. Use list_instances to discover available instances before sending messages.",
-    "4. You only have direct access to files under your own working directory.",
-  ].join("\n"));
-
-  // ── Workflow template ──
-  if (workflowEnv !== "false") {
-    let workflowContent: string | null = null;
-    if (workflowEnv) {
-      // Custom workflow passed from daemon (inline or file: already resolved)
-      workflowContent = workflowEnv;
-    } else {
-      // Default: load built-in template
-      try {
-        const here = dirname(fileURLToPath(import.meta.url));
-        workflowContent = readFileSync(join(here, "../workflow-templates/default.md"), "utf-8");
-      } catch { /* template not found — skip */ }
-    }
-    if (workflowContent) {
-      sections.push(`## Development Workflow\n\n${workflowContent}`);
-    }
-  }
-
-  // ── Custom user prompt ──
-  if (customPrompt) {
-    sections.push(customPrompt);
-  }
-
-  return sections.join("\n\n");
+  return buildFleetInstructions({
+    instanceName: process.env.AGEND_INSTANCE_NAME ?? "unknown",
+    workingDirectory: process.env.AGEND_WORKING_DIR ?? process.cwd(),
+    displayName: process.env.AGEND_DISPLAY_NAME,
+    description: process.env.AGEND_DESCRIPTION,
+    customPrompt: process.env.AGEND_CUSTOM_PROMPT,
+    workflow,
+    decisions,
+  });
 }
 
 const mcp = new Server(
@@ -297,12 +253,21 @@ async function main(): Promise<void> {
     process.stderr.write("agend: AGEND_SOCKET_PATH environment variable is required\n");
     process.exit(1);
   }
-  // Connect to daemon IPC first (will auto-reconnect on disconnect)
-  await connectIpc();
 
-  // Start MCP stdio transport (Claude <-> this process)
+  // Start MCP stdio transport FIRST — must be ready before the CLI sends
+  // the initialize request. IPC connection can happen in parallel.
   const transport = new StdioServerTransport();
   await mcp.connect(transport);
+
+  // Detect parent death: when the CLI exits, stdin closes, transport shuts down.
+  // StdioServerTransport handles stdin lifecycle internally — no manual resume() needed.
+  mcp.onclose = () => {
+    process.stderr.write("agend: MCP transport closed (parent exited) — exiting\n");
+    process.exit(0);
+  };
+
+  // Connect to daemon IPC (will auto-reconnect on disconnect)
+  await connectIpc();
 
   process.stderr.write("agend: MCP server running\n");
 }

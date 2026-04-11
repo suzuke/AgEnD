@@ -2,10 +2,16 @@ import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { createInterface, type Interface } from "node:readline";
 import type { Logger } from "./logger.js";
+import { getTmuxSocketName } from "./paths.js";
+
+function tmuxArgs(args: string[]): string[] {
+  const socket = getTmuxSocketName();
+  return socket ? ["-L", socket, ...args] : args;
+}
 
 function execTmux(args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile("tmux", args, (err, stdout) => {
+    execFile("tmux", tmuxArgs(args), (err, stdout) => {
       if (err) reject(err);
       else resolve(stdout.trim());
     });
@@ -155,7 +161,7 @@ export class TmuxControlClient extends EventEmitter {
   private connect(): void {
     if (this.stopped) return;
 
-    this.proc = spawn("tmux", ["-C", "attach", "-t", this.sessionName, "-r"], {
+    this.proc = spawn("tmux", tmuxArgs(["-C", "attach", "-t", this.sessionName, "-r"]), {
       stdio: ["pipe", "pipe", "pipe"],
     });
 
