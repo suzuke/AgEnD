@@ -163,7 +163,7 @@ export class TmuxManager {
       const bufName = `paste-${this.windowId}-${Date.now()}`;
       await exec("tmux", TmuxManager.tmuxArgs(["set-buffer", "-b", bufName, "--", text]));
       await exec("tmux", TmuxManager.tmuxArgs(["paste-buffer", "-d", "-b", bufName, "-t", target, "-p"]));
-      await new Promise(r => setTimeout(r, 200));
+      await new Promise(r => setTimeout(r, 500));
       await exec("tmux", TmuxManager.tmuxArgs(["send-keys", "-t", target, "Enter"]));
       return true;
     } catch { return false; }
