@@ -486,6 +486,24 @@ export const TOOLS = [
     },
     // ── Identity ──────────────────────────────────────────────
     {
+      name: "replace_instance",
+      description: "Replace an instance with a fresh one. Collects handover context from the old instance (or falls back to daemon ring buffer), deletes it, creates a new instance with the same config, and sends the handover context to the new instance.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          name: {
+            type: "string",
+            description: "The instance name to replace",
+          },
+          reason: {
+            type: "string",
+            description: "Why the instance is being replaced (e.g. 'context polluted', 'stuck in loop')",
+          },
+        },
+        required: ["name"],
+      },
+    },
+    {
       name: "set_display_name",
       description: "Set your display name. This name will be shown in Telegram messages, activity logs, and when other agents refer to you.",
       inputSchema: {

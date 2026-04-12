@@ -263,6 +263,10 @@ const deleteInstance: Handler = async (ctx, args, respond) => {
   await ctx.lifecycle.handleDelete(args, respond);
 };
 
+const replaceInstance: Handler = async (ctx, args, respond) => {
+  await ctx.lifecycle.handleReplace(args, respond);
+};
+
 const broadcast: Handler = (ctx, args, respond, meta) => {
   const message = args.message as string;
   if (!message) { respond(null, "broadcast: missing required argument 'message'"); return; }
@@ -617,6 +621,7 @@ export const outboundHandlers = new Map<string, Handler>([
   ["start_instance", startInstance],
   ["create_instance", createInstance],
   ["delete_instance", deleteInstance],
+  ["replace_instance", replaceInstance],
   ["create_team", createTeam],
   ["delete_team", deleteTeam],
   ["list_teams", listTeams],

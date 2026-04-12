@@ -45,6 +45,7 @@ User messages arrive as text in your prompt with a prefix:
 | \`start_instance\` | Start a stopped instance |
 | \`create_instance\` | Create a new instance in the fleet |
 | \`delete_instance\` | Remove an instance from the fleet |
+| \`replace_instance\` | Replace an instance with a fresh one (handover + delete + create) |
 
 ### Scheduling
 | Tool | Purpose |

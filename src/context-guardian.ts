@@ -4,19 +4,24 @@ import type { ContextStatus, StatusLineData, InstanceConfig } from "./types.js";
 import type { Logger } from "./logger.js";
 
 type GuardianConfig = InstanceConfig["context_guardian"];
-type State = "NORMAL" | "RESTARTING" | "GRACE";
-export type RotationReason = "context_full" | "max_age";
 
+/**
+ * ContextGuardian — pure monitoring, no restart triggers.
+ *
+ * All CLI backends (Claude Code, Codex, Gemini CLI, OpenCode, Kiro CLI) have
+ * built-in auto-compact that handles context limits internally. AgEnD no longer
+ * triggers restarts based on context usage or session age.
+ *
+ * Retained responsibilities:
+ * - Poll statusline.json and emit "status_update" for dashboard/logging
+ * - Crash recovery (health check + respawn) is handled by Daemon directly
+ */
 export class ContextGuardian extends EventEmitter {
-  state: State = "NORMAL";
-  rotationReason: RotationReason | null = null;
-  private ageTimer: ReturnType<typeof setTimeout> | null = null;
-  private graceTimer: ReturnType<typeof setTimeout> | null = null;
   private statusFilePath: string;
   private consecutiveReadFailures = 0;
 
   constructor(
-    private config: GuardianConfig,
+    private _config: GuardianConfig,
     private logger: Logger,
     statusFilePath: string,
   ) {
@@ -26,7 +31,6 @@ export class ContextGuardian extends EventEmitter {
 
   startWatching(): void {
     this.logger.debug({ path: this.statusFilePath }, "Watching status line file");
-    // watchFile (polling) over fs.watch: more reliable on NFS/Docker volumes; 2s latency is acceptable
     watchFile(this.statusFilePath, { interval: 2000 }, () => this.readAndCheck());
   }
 
@@ -52,11 +56,10 @@ export class ContextGuardian extends EventEmitter {
           rate_7d: rl?.seven_day ? `${rl.seven_day.used_percentage}%` : "n/a",
         }, "Status update received");
         this.emit("status_update", { ...status, rate_limits: rl });
-        this.updateContextStatus(status);
       } else {
         this.consecutiveReadFailures++;
         if (this.consecutiveReadFailures >= 3) {
-          this.logger.warn({ consecutiveFailures: this.consecutiveReadFailures }, "Context usage unavailable for 3+ consecutive reads, skipping threshold check");
+          this.logger.warn({ consecutiveFailures: this.consecutiveReadFailures }, "Context usage unavailable for 3+ consecutive reads");
         }
       }
     } catch (err) {
@@ -69,64 +72,7 @@ export class ContextGuardian extends EventEmitter {
     }
   }
 
-  updateContextStatus(_status: ContextStatus): void {
-    // Threshold-based rotation removed: Claude Code's built-in auto-compact
-    // handles context limits. Threshold rotation caused loops because --resume
-    // restores the same context level, re-triggering rotation after grace period.
-    // Only max_age rotation is retained (opt-in, default disabled).
-  }
-
-  /** Request a restart — transitions directly to RESTARTING */
-  requestRestart(reason: RotationReason): void {
-    if (this.state !== "NORMAL") return;
-    this.state = "RESTARTING";
-    this.rotationReason = reason;
-    this.emit("restart_requested", reason);
-  }
-
-  markRestartComplete(): void {
-    if (this.state !== "RESTARTING") return;
-    this.emit("restart_complete");
-    this.enterGrace();
-  }
-
-  startTimer(): void {
-    if (this.ageTimer) return;
-    if (this.config.max_age_hours <= 0) return; // 0 = disabled
-    const ms = this.config.max_age_hours * 60 * 60 * 1000;
-    this.ageTimer = setTimeout(() => {
-      this.logger.info("Max age reached — requesting restart");
-      if (this.state === "NORMAL") this.requestRestart("max_age");
-    }, ms);
-  }
-
-  private resetAgeTimer(): void {
-    if (this.ageTimer) {
-      clearTimeout(this.ageTimer);
-      this.ageTimer = null;
-    }
-    this.startTimer();
-  }
-
   stop(): void {
-    this.clearTimer("ageTimer");
-    this.clearTimer("graceTimer");
     unwatchFile(this.statusFilePath);
-  }
-
-  private enterGrace(): void {
-    this.state = "GRACE";
-    this.graceTimer = setTimeout(() => {
-      this.state = "NORMAL";
-      this.rotationReason = null;
-      this.resetAgeTimer();
-    }, this.config.grace_period_ms);
-  }
-
-  private clearTimer(name: "ageTimer" | "graceTimer"): void {
-    if (this[name]) {
-      clearTimeout(this[name]);
-      this[name] = null;
-    }
   }
 }
