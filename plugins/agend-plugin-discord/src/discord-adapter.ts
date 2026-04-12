@@ -51,6 +51,7 @@ export class DiscordAdapter extends EventEmitter implements ChannelAdapter {
   private accessManager: AccessManager;
   private inboxDir: string;
   private guildId: string;
+  private openChannels = new Set<string>();
   private categoryName: string;
   private generalChannelId?: string;
   private queue: MessageQueue;
@@ -113,8 +114,8 @@ export class DiscordAdapter extends EventEmitter implements ChannelAdapter {
 
       const userId = msg.author.id;
 
-      // Access control — Discord snowflake IDs are strings, keep as-is to avoid precision loss
-      if (!this.accessManager.isAllowed(userId)) {
+      // Access control — skip for classic channels (open to all users)
+      if (!this.accessManager.isAllowed(userId) && !this.openChannels.has(msg.channelId)) {
         return;
       }
 
@@ -221,6 +222,11 @@ export class DiscordAdapter extends EventEmitter implements ChannelAdapter {
         threadId: channel.id,
       });
     });
+  }
+
+  /** Mark channels as open (skip access control) — used for classic bot channels */
+  setOpenChannels(channelIds: string[]): void {
+    this.openChannels = new Set(channelIds);
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────────

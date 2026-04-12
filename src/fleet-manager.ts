@@ -156,8 +156,14 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
   /** Re-register classic channels after routing rebuild (rebuild clears the table) */
   private reregisterClassicChannels(): void {
     if (!this.classicChannels) return;
-    for (const ch of this.classicChannels.getAll()) {
+    const channels = this.classicChannels.getAll();
+    for (const ch of channels) {
       this.routing.register(ch.channelId, { kind: "classic", name: ch.instanceName });
+    }
+    // Tell adapter to skip access control for classic channels
+    if (channels.length > 0) {
+      (this.adapter as any)?.setOpenChannels?.(channels.map(ch => ch.channelId));
+      this.logger.info({ count: channels.length }, "Registered classic channel routes");
     }
   }
 
