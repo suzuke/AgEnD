@@ -235,8 +235,18 @@ export class InstanceLifecycle {
             cwd: config.worktree_source,
           });
           this.ctx.logger.info({ worktree: config.working_directory }, "Removed git worktree");
-        } catch (err) {
-          this.ctx.logger.warn({ err, worktree: config.working_directory }, "Failed to remove git worktree");
+        } catch {
+          // worktree remove failed — directory exists but isn't a valid worktree.
+          // Only rm if directory is in the expected location (sibling of source repo or under ~/.agend/).
+          const expectedParent = dirname(config.working_directory);
+          const sourceParent = dirname(config.worktree_source);
+          if (expectedParent === sourceParent || config.working_directory.startsWith(getAgendHome())) {
+            const { rm } = await import("node:fs/promises");
+            await rm(config.working_directory, { recursive: true, force: true });
+            this.ctx.logger.info({ worktree: config.working_directory }, "Removed orphaned worktree directory");
+          } else {
+            this.ctx.logger.warn({ worktree: config.working_directory }, "Worktree removal failed and directory is outside expected location — skipping rm");
+          }
         }
       }
       // Prune stale worktree records (e.g. if directory was manually deleted)
