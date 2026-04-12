@@ -114,10 +114,7 @@ export class DiscordAdapter extends EventEmitter implements ChannelAdapter {
 
       const userId = msg.author.id;
 
-      // Access control — skip for classic channels (open to all users)
-      if (!this.accessManager.isAllowed(userId) && !this.openChannels.has(msg.channelId)) {
-        return;
-      }
+      // Access control moved to fleet-manager to allow classic channels for all users
 
       const chatId = this.guildId;
       const threadId = msg.channelId;
@@ -227,6 +224,7 @@ export class DiscordAdapter extends EventEmitter implements ChannelAdapter {
   /** Mark channels as open (skip access control) — used for classic bot channels */
   setOpenChannels(channelIds: string[]): void {
     this.openChannels = new Set(channelIds);
+    console.log(`[AgEnD] setOpenChannels: ${channelIds.length} channels`, channelIds);
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────────

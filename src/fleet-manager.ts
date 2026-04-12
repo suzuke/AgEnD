@@ -62,6 +62,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
   get daemons() { return this.lifecycle.daemons; }
   fleetConfig: FleetConfig | null = null;
   adapter: ChannelAdapter | null = null;
+  private accessManager: AccessManager | null = null;
   readonly routing = new RoutingEngine();
   get routingTable(): Map<string, RouteTarget> { return this.routing.map; }
   instanceIpcClients: Map<string, IpcClient> = new Map();
@@ -162,8 +163,11 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     }
     // Tell adapter to skip access control for classic channels
     if (channels.length > 0) {
-      (this.adapter as any)?.setOpenChannels?.(channels.map(ch => ch.channelId));
-      this.logger.info({ count: channels.length }, "Registered classic channel routes");
+      const hasMethod = typeof (this.adapter as any)?.setOpenChannels === "function";
+      this.logger.info({ count: channels.length, hasAdapter: !!this.adapter, hasMethod }, "Registered classic channel routes");
+      if (hasMethod) {
+        (this.adapter as any).setOpenChannels(channels.map(ch => ch.channelId));
+      }
     }
   }
 
@@ -575,6 +579,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       channelConfig.access,
       join(accessDir, "access.json"),
     );
+    this.accessManager = accessManager;
     const inboxDir = join(this.dataDir, "inbox");
     mkdirSync(inboxDir, { recursive: true });
 
@@ -760,6 +765,12 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
 
   private async handleInboundMessage(msg: InboundMessage): Promise<void> {
     const threadId = msg.threadId || undefined;
+
+    // Access control — classic channels are open to all, others require allowed user
+    if (this.accessManager && !this.accessManager.isAllowed(msg.userId)) {
+      const target = threadId ? this.routing.resolve(threadId) : undefined;
+      if (!target || target.kind !== "classic") return;
+    }
     if (threadId == null) {
       // General topic: check for /status command
       if (await this.topicCommands.handleGeneralCommand(msg)) return;
