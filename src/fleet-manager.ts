@@ -482,12 +482,19 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       await new Promise(r => setTimeout(r, 3000));
       await this.connectToInstances(fleet);
 
-      // Start classic channel instances
+      // Start classic channel instances (parallel, concurrency 3)
       if (this.classicChannels) {
         const fleetBackend = this.fleetConfig?.defaults?.backend;
-        for (const ch of this.classicChannels.getAll()) {
-          await this.startClassicInstance(ch.instanceName, this.classicChannels.getBackendByInstance(ch.instanceName, fleetBackend)).catch(err =>
-            this.logger.warn({ err, instanceName: ch.instanceName }, "Failed to start classic instance"));
+        const channels = this.classicChannels.getAll();
+        const concurrency = 3;
+        let idx = 0;
+        while (idx < channels.length) {
+          const batch = channels.slice(idx, idx + concurrency);
+          await Promise.allSettled(batch.map(ch =>
+            this.startClassicInstance(ch.instanceName, this.classicChannels!.getBackendByInstance(ch.instanceName, fleetBackend)).catch(err =>
+              this.logger.warn({ err, instanceName: ch.instanceName }, "Failed to start classic instance"))
+          ));
+          idx += concurrency;
         }
       }
 
