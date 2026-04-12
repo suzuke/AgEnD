@@ -985,11 +985,23 @@ export class Daemon extends EventEmitter {
 
     let resolvedCustomPrompt: string | undefined;
     if (this.config.systemPrompt) {
-      let p = this.config.systemPrompt;
-      if (p.startsWith("file:")) {
-        try { p = readFileSync(p.slice(5), "utf-8"); } catch { p = ""; }
-      }
-      if (p) resolvedCustomPrompt = p;
+      // Support both string and array:
+      //   systemPrompt: "file:prompts/role.md"
+      //   systemPrompt:
+      //     - file:prompts/role.md
+      //     - file:prompts/rules.md
+      //     - "inline text"
+      const parts = Array.isArray(this.config.systemPrompt)
+        ? this.config.systemPrompt as string[]
+        : [this.config.systemPrompt as string];
+      const resolved = parts.map((part: string) => {
+        const trimmed = part.trim();
+        if (trimmed.startsWith("file:")) {
+          try { return readFileSync(trimmed.slice(5), "utf-8"); } catch { return ""; }
+        }
+        return trimmed;
+      }).filter(Boolean);
+      if (resolved.length > 0) resolvedCustomPrompt = resolved.join("\n\n");
     }
 
     let decisions: { title: string; content: string }[] | undefined;
