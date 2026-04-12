@@ -48,6 +48,7 @@ export function buildFleetInstructions(params: FleetInstructionsParams): string 
     "2. Cross-instance messages appear as `[from:instance-name]`. Reply via send_to_instance or report_result, NOT reply.",
     "3. Use list_instances to discover available instances before sending messages.",
     "4. You only have direct access to files under your own working directory.",
+    "5. Task flow: `delegate_task` → silent work → `report_result`. Zero messages in between. Never send ack/confirmation.",
   ].join("\n"));
 
   // ── Workflow template ──
