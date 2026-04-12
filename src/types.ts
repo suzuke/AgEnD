@@ -88,8 +88,8 @@ export interface InstanceConfig {
   tool_set?: string;
   /** Skip non-essential subsystems (transcript monitor, context guardian, approval server, prompt detector) */
   lightweight?: boolean;
-  /** System prompt — string or array of strings (supports file: prefix for each) */
-  systemPrompt?: string | string[];
+  /** System prompt — supports comma-separated file: paths for modularization */
+  systemPrompt?: string;
   /** Skip permission checks (dangerously-skip-permissions) */
   skipPermissions?: boolean;
   /** Claude model to use (e.g. "sonnet", "opus", "haiku", or full model ID) */

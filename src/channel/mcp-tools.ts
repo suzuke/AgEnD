@@ -451,7 +451,7 @@ export const TOOLS = [
           },
           systemPrompt: {
             type: "string",
-            description: "Custom system prompt for this instance (inline text only, file: prefix not supported here). Injected after fleet context in MCP instructions.",
+            description: "Custom system prompt. Supports comma-separated file: paths for modularization (e.g. 'file:prompts/role.md, file:prompts/rules.md'). Injected after fleet context.",
           },
           tags: {
             type: "array",
