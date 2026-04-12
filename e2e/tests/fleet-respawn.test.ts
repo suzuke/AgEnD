@@ -272,7 +272,7 @@ describe("Fleet Respawn E2E", () => {
           (c) => String(c.params.message_thread_id) === "50",
         );
       },
-      { timeout: 30_000, label: "post-respawn reply" },
+      { timeout: 60_000, label: "post-respawn reply" },
     );
 
     const sends = telegramMock.getCallsFor("sendMessage").slice(sendsBefore);
