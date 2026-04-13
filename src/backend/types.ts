@@ -17,6 +17,10 @@ export interface CliBackendConfig {
   skipResume?: boolean;
   /** Fleet instructions content to inject into the CLI's additive system prompt mechanism. */
   instructions?: string;
+  /** Agent communication mode: "mcp" (default) or "cli" (HTTP endpoint). */
+  agentMode?: "mcp" | "cli";
+  /** Health server port for CLI mode (agend-agent connects here). */
+  agentPort?: number;
 }
 
 /** Action to take when an error pattern is detected in PTY output. */

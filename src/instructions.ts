@@ -10,6 +10,8 @@ export interface FleetInstructionsParams {
   customPrompt?: string;
   workflow?: string | false;
   decisions?: { title: string; content: string }[];
+  /** CLI mode: inject CLI quick reference instead of MCP tool usage section */
+  cliInstructions?: string;
 }
 
 export function buildFleetInstructions(params: FleetInstructionsParams): string {
@@ -28,28 +30,34 @@ export function buildFleetInstructions(params: FleetInstructionsParams): string 
   }
 
   // ── Message format & tool usage ──
-  sections.push([
-    "## Message Format",
-    "- `[user:name]` — from a Telegram/Discord user → reply with the `reply` tool.",
-    "- `[from:instance-name]` — from another fleet instance → reply with `send_to_instance`, NOT the reply tool.",
-    "",
-    "**Always use the `reply` tool for ALL responses to users.** Do not respond directly in the terminal.",
-    "",
-    "## Tool Usage",
-    "- reply: respond to users. react: emoji reactions. edit_message: update a sent message. download_attachment: fetch files.",
-    "- If the inbound message has image_path, Read that file — it is a photo.",
-    "- If the inbound message has attachment_file_id, call download_attachment then Read the returned path.",
-    "- If the inbound message has reply_to_text, the user is quoting a previous message.",
-    "- Use list_instances to discover fleet members. Use describe_instance for details.",
-    "- High-level collaboration: request_information (ask), delegate_task (assign), report_result (return results with correlation_id).",
-    "",
-    "## Collaboration Rules",
-    "1. Use fleet tools for cross-instance communication. Never assume direct file access to another instance's repo.",
-    "2. Cross-instance messages appear as `[from:instance-name]`. Reply via send_to_instance or report_result, NOT reply.",
-    "3. Use list_instances to discover available instances before sending messages.",
-    "4. You only have direct access to files under your own working directory.",
-    "5. Task flow: `delegate_task` → silent work → `report_result`. Zero messages in between. Never send ack/confirmation.",
-  ].join("\n"));
+  if (params.cliInstructions) {
+    // CLI mode: inject CLI quick reference
+    sections.push(params.cliInstructions);
+  } else {
+    // MCP mode: inject MCP tool usage instructions
+    sections.push([
+      "## Message Format",
+      "- `[user:name]` — from a Telegram/Discord user → reply with the `reply` tool.",
+      "- `[from:instance-name]` — from another fleet instance → reply with `send_to_instance`, NOT the reply tool.",
+      "",
+      "**Always use the `reply` tool for ALL responses to users.** Do not respond directly in the terminal.",
+      "",
+      "## Tool Usage",
+      "- reply: respond to users. react: emoji reactions. edit_message: update a sent message. download_attachment: fetch files.",
+      "- If the inbound message has image_path, Read that file — it is a photo.",
+      "- If the inbound message has attachment_file_id, call download_attachment then Read the returned path.",
+      "- If the inbound message has reply_to_text, the user is quoting a previous message.",
+      "- Use list_instances to discover fleet members. Use describe_instance for details.",
+      "- High-level collaboration: request_information (ask), delegate_task (assign), report_result (return results with correlation_id).",
+      "",
+      "## Collaboration Rules",
+      "1. Use fleet tools for cross-instance communication. Never assume direct file access to another instance's repo.",
+      "2. Cross-instance messages appear as `[from:instance-name]`. Reply via send_to_instance or report_result, NOT reply.",
+      "3. Use list_instances to discover available instances before sending messages.",
+      "4. You only have direct access to files under your own working directory.",
+      "5. Task flow: `delegate_task` → silent work → `report_result`. Zero messages in between. Never send ack/confirmation.",
+    ].join("\n"));
+  }
 
   // ── Workflow template ──
   if (params.workflow !== false) {

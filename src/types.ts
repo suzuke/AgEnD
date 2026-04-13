@@ -104,6 +104,8 @@ export interface InstanceConfig {
   worktree_source?: string;
   /** Workflow template: "builtin" (default), "file:path", inline string, or false to disable */
   workflow?: string | false;
+  /** Agent communication mode: "mcp" (default) or "cli" (HTTP endpoint, no MCP server). */
+  agent_mode?: "mcp" | "cli";
 }
 
 export interface WebhookConfig {

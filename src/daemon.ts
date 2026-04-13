@@ -962,6 +962,7 @@ export class Daemon extends EventEmitter {
 
   /** Build config object for the CLI backend */
   private buildBackendConfig(): CliBackendConfig {
+    const isCliMode = this.config.agent_mode === "cli";
     const sockPath = join(this.instanceDir, "channel.sock");
     let serverJs = join(__dirname, "channel", "mcp-server.js");
     if (!existsSync(serverJs)) {
@@ -1012,21 +1013,48 @@ export class Daemon extends EventEmitter {
     if (process.env.AGEND_DECISIONS) mcpEnv.AGEND_DECISIONS = process.env.AGEND_DECISIONS;
 
     // ── Fleet instructions for additive system prompt injection ──
-    const instructions = buildFleetInstructions({
-      instanceName: this.name,
-      workingDirectory: this.config.working_directory,
-      displayName: this.config.display_name,
-      description: this.config.description,
-      customPrompt: resolvedCustomPrompt,
-      workflow: resolvedWorkflow,
-      decisions,
-    });
+    let instructions: string;
+    if (isCliMode) {
+      // CLI mode: inject CLI quick reference instead of MCP tool schema
+      let cliRef = "";
+      try {
+        const cliInstrPath = join(__dirname, "agent-cli-instructions.md");
+        if (!existsSync(cliInstrPath)) {
+          const altPath = join(__dirname, "..", "dist", "agent-cli-instructions.md");
+          if (existsSync(altPath)) cliRef = readFileSync(altPath, "utf-8");
+        } else {
+          cliRef = readFileSync(cliInstrPath, "utf-8");
+        }
+      } catch { /* fallback to empty */ }
+      instructions = buildFleetInstructions({
+        instanceName: this.name,
+        workingDirectory: this.config.working_directory,
+        displayName: this.config.display_name,
+        description: this.config.description,
+        customPrompt: resolvedCustomPrompt,
+        workflow: resolvedWorkflow,
+        decisions,
+        cliInstructions: cliRef || undefined,
+      });
+    } else {
+      instructions = buildFleetInstructions({
+        instanceName: this.name,
+        workingDirectory: this.config.working_directory,
+        displayName: this.config.display_name,
+        description: this.config.description,
+        customPrompt: resolvedCustomPrompt,
+        workflow: resolvedWorkflow,
+        decisions,
+      });
+    }
+
+    const agentPort = parseInt(process.env.AGEND_PORT ?? "19280", 10);
 
     return {
       workingDirectory: this.config.working_directory,
       instanceDir: this.instanceDir,
       instanceName: this.name,
-      mcpServers: {
+      mcpServers: isCliMode ? {} : {
         "agend": {
           command: "node",
           args: [serverJs],
@@ -1037,6 +1065,8 @@ export class Daemon extends EventEmitter {
       model: this.modelOverride ?? this.config.model,
       skipResume: this.skipResume,
       instructions,
+      agentMode: isCliMode ? "cli" : "mcp",
+      agentPort: isCliMode ? agentPort : undefined,
     };
   }
 
@@ -1124,7 +1154,11 @@ export class Daemon extends EventEmitter {
 
     this.backend!.writeConfig(backendConfig);
     this.backend!.preTrust?.(this.config.working_directory);
-    const cmd = `TERM=xterm-256color AGEND_INSTANCE_NAME=${this.name} ` + this.backend!.buildCommand(backendConfig);
+    let envPrefix = `TERM=xterm-256color AGEND_INSTANCE_NAME=${this.name}`;
+    if (backendConfig.agentMode === "cli" && backendConfig.agentPort) {
+      envPrefix += ` AGEND_PORT=${backendConfig.agentPort}`;
+    }
+    const cmd = `${envPrefix} ` + this.backend!.buildCommand(backendConfig);
 
     // Ensure tmux session exists (may have been destroyed if all windows died)
     await TmuxManager.ensureSession(this.tmuxSessionName);

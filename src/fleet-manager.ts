@@ -1300,6 +1300,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       if (inst.lightweight) serialized.lightweight = inst.lightweight;
       if (inst.cost_guard) serialized.cost_guard = inst.cost_guard;
       if (inst.workflow !== undefined) serialized.workflow = inst.workflow;
+      if (inst.agent_mode) serialized.agent_mode = inst.agent_mode;
       (toSave.instances as Record<string, unknown>)[name] = serialized;
     }
     writeFileSync(this.configPath, yaml.dump(toSave, { lineWidth: 120 }));
