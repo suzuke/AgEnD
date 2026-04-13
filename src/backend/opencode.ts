@@ -16,12 +16,14 @@ export class OpenCodeBackend implements CliBackend {
 
     // Resume last session if session-id exists and skipResume is not set
     const sessionIdFile = join(this.instanceDir, "session-id");
-    if (!config.skipResume && existsSync(sessionIdFile)) {
-      const sid = readFileSync(sessionIdFile, "utf-8").trim();
-      if (sid) cmd += ` --session ${sid}`;
-    } else {
-      // No specific session — continue last (OpenCode auto-selects)
-      cmd += " --continue";
+    if (!config.skipResume) {
+      if (existsSync(sessionIdFile)) {
+        const sid = readFileSync(sessionIdFile, "utf-8").trim();
+        if (sid) cmd += ` --session ${sid}`;
+      } else {
+        // No specific session — continue last (OpenCode auto-selects)
+        cmd += " --continue";
+      }
     }
 
     if (config.model) {
