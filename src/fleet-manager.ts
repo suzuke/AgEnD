@@ -2091,6 +2091,32 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
       res.end(JSON.stringify({ error: "not found" }));
     });
 
+    this.healthServer.on("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "EADDRINUSE") {
+        this.logger.warn({ port }, "Health port in use — attempting takeover");
+        const pidPath = join(this.dataDir, "fleet.pid");
+        try {
+          if (existsSync(pidPath)) {
+            const oldPid = parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
+            if (oldPid && oldPid !== process.pid) {
+              process.kill(oldPid, "SIGTERM");
+              this.logger.info({ oldPid }, "Killed old fleet process");
+            }
+          }
+        } catch { /* old process already gone */ }
+        setTimeout(() => {
+          if (!this.healthServer) return;
+          this.healthServer.listen(port, "127.0.0.1", () => {
+            this.logger.info({ port }, "Health endpoint listening (after takeover)");
+          }).on("error", () => {
+            this.logger.warn({ port }, "Health port still in use — skipping health endpoint");
+          });
+        }, 1500);
+        return;
+      }
+      this.logger.error({ err, port }, "Health server error");
+    });
+
     this.healthServer.listen(port, "127.0.0.1", () => {
       this.logger.info({ port }, "Health endpoint listening");
     });
