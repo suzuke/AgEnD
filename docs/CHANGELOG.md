@@ -7,12 +7,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- `replace_instance` MCP tool — atomically replace an instance with a fresh one, collecting handover context from the daemon's ring buffer and injecting it into the new instance via standard message delivery
+- Communication efficiency rules in workflow template — no pleasantries, silence = agreement, batch points, one round-trip for reviews
 - Webhook notifications for fleet events (rotation, hang, cost alerts)
 - HTTP health endpoint (`/health`, `/status`) for external monitoring
 - Structured handover template with validation and retry on context rotation
 - Permission relay UX improvements (timeout countdown, "Always Allow" persistence, post-decision feedback)
 - Topic icon auto-update (running/stopped) + idle archive
 - Filter out Telegram service messages (topic rename, pin, etc.) to save tokens
+
+### Changed
+- **ContextGuardian simplified to pure monitoring** — removed max_age timer, state machine (NORMAL/RESTARTING/GRACE), and all restart triggers. All CLI backends (Claude Code, Codex, Gemini CLI, OpenCode, Kiro CLI) have built-in auto-compact that handles context limits internally.
+- **Crash recovery tries --resume first** — on crash respawn, attempts `--resume` to restore full conversation history before falling back to fresh session + snapshot injection. Saves context when resume succeeds.
 
 ### Fixed
 - Minimal `claude-settings.json` — only CCD MCP tools in allow list, no longer overrides user's global permission settings

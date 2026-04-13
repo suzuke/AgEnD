@@ -177,7 +177,7 @@ teams:
 | `lightweight` | boolean | `false` | 跳過 transcript monitor、context guardian 等非必要子系統 |
 | `log_level` | string | `"info"` | `debug`、`info`、`warn`、`error` |
 | `restart_policy` | object | 見下方 | 崩潰恢復設定 |
-| `context_guardian` | object | 見下方 | Context 輪替設定 |
+| `context_guardian` | object | 見下方 | Context 監控設定 |
 | `cost_guard` | object | — | 每 instance 花費守衛（覆蓋預設值） |
 | `worktree_source` | string | — | 原始 repo 路徑（使用 branch 參數時自動設定） |
 
@@ -191,10 +191,12 @@ teams:
 
 ### context_guardian
 
+Context 監控設定。Guardian 輪詢 CLI 的 statusline 以取得 context 使用量指標（用於儀表板和日誌）。Context 限制由各 CLI 內建的 auto-compact 處理 — AgEnD 不會根據 context 使用量或 session 存留時間觸發重啟。
+
 | 欄位 | 型別 | 預設 | 說明 |
 |------|------|------|------|
-| `grace_period_ms` | number | `600000` | 觸發 rotation 後等待時間（10 分鐘） |
-| `max_age_hours` | number | `0`（停用） | 強制 rotation 的小時數。`0` = 依賴 CLI 自動壓縮 |
+| `grace_period_ms` | number | `600000` | 保留供未來使用 |
+| `max_age_hours` | number | `0`（停用） | 保留供未來使用。目前忽略 — CLI auto-compact 處理 context 限制 |
 
 ---
 

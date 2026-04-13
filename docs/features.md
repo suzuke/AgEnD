@@ -19,21 +19,25 @@ Collaboration MCP tools: `list_instances`, `send_to_instance`, `start_instance`,
 
 Schedules can target a specific instance or the same instance that created them. When a schedule triggers, the daemon pushes the message to Claude as if a user sent it.
 
-## Context rotation
+## Crash recovery
 
-Watches Claude's status line JSON. When context usage exceeds the threshold or the session reaches its max age, the daemon performs a simple restart:
+Watches Claude's status line JSON for context usage metrics (used for dashboard and logging). All CLI backends (Claude Code, Codex, Gemini CLI, OpenCode, Kiro CLI) have built-in auto-compact that handles context limits internally — AgEnD does not trigger restarts based on context usage or session age.
 
-```
-NORMAL → RESTARTING → GRACE
-```
+When a CLI process crashes, the daemon's health check detects the dead tmux window and:
 
-1. **Trigger** — context exceeds threshold (default 80%) or `max_age_hours` reached (default 8h)
-2. **Idle barrier** — waits up to 5 seconds for current activity to settle (best-effort, not a handover)
-3. **Snapshot** — daemon collects recent user messages, tool activity, and statusline data into `rotation-state.json`
-4. **Restart** — kills tmux window, spawns fresh session with the snapshot injected into the system prompt
-5. **Grace** — 10-minute cooldown to prevent rapid re-rotation
+1. **Snapshot** — collects recent user messages, tool activity, and statusline data into `rotation-state.json`
+2. **Resume attempt** — tries `--resume` to restore the full conversation history
+3. **Fallback** — if resume fails, spawns a fresh session and injects the snapshot as context
+4. **Backoff** — exponential backoff on repeated crashes, pauses after 3 rapid crashes
 
-No handover prompt is sent to Claude. Recovery context comes entirely from the daemon-side snapshot.
+## Instance replacement
+
+When an instance's context is polluted or it's stuck in a loop, use `replace_instance` to atomically swap it with a fresh one:
+
+1. Collects handover context from the daemon's ring buffer (recent messages, events, tool activity)
+2. Stops the old instance and preserves its config
+3. Creates a new instance with the same config, reusing the Telegram topic
+4. Sends handover context to the new instance via the standard message delivery path
 
 ## Peer-to-peer agent collaboration
 
@@ -46,6 +50,7 @@ Every instance is an equal peer that can discover, wake, create, and message oth
 - `start_instance` — wake a stopped instance so you can message it
 - `create_instance` — create a new instance with a topic (directory optional; auto-created at `~/.agend/workspaces/<name>` if omitted); supports `branch` for git worktree isolation
 - `delete_instance` — remove an instance and its topic
+- `replace_instance` — replace an instance with a fresh one (handover + delete + create)
 - `describe_instance` — get detailed info about a specific instance (description, model, last activity)
 
 **High-level collaboration tools** (prefer these over raw `send_to_instance`):
@@ -185,7 +190,7 @@ When the 5-hour API rate limit exceeds 85%, scheduled triggers are automatically
 
 ## Model failover
 
-When the primary model hits a rate limit, the daemon automatically switches to a backup model on the next context rotation. Configure a fallback chain in `fleet.yaml`:
+When the primary model hits a rate limit, the daemon automatically switches to a backup model on the next session restart. Configure a fallback chain in `fleet.yaml`:
 
 ```yaml
 instances:

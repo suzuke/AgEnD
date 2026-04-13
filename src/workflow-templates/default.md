@@ -1,11 +1,14 @@
 # Fleet Collaboration
 
-## Communication Rules
+## Communication Protocol
 
+- **Task flow**: `delegate_task` → silent work → `report_result`. Zero messages in between.
+- **Review flow**: send all findings in one message → author fixes → `report_result`. Target 2 round-trips. If a 3rd is needed, scope it to only unresolved items.
 - **Direct communication**: talk to other instances directly via `send_to_instance`. Don't relay through a coordinator.
-- **Structured handoffs**: use `delegate_task` (with clear scope) and `report_result` (with correlation_id).
 - **Ask, don't assume**: use `request_information` when you need context from another instance.
-- **No ack spam**: don't send "got it" / "working on it" unless asked for status. Report when done.
+- **Silence = working**: Never send acknowledgment-only messages. If your entire message would be "got it" / "understood" / "working on it" or equivalent in any language — don't send it. Only send messages that contain actionable content.
+- **Silence = agreement**: if you have nothing to add, don't reply. Only reply when you have new information, a disagreement, or a question.
+- **Batch your points**: combine all feedback into one message. Don't send follow-ups for things you forgot.
 
 ## Shared Decisions
 

@@ -1,7 +1,7 @@
-# Context Rotation v3 — Daemon-Driven Restart
+# Crash Recovery & Instance Replacement — Design
 
-> claude-channel-daemon — Context Rotation 設計
-> 日期：2026-03-30（v3 rewrite，取代 v2 handover-based 設計）
+> AgEnD — Context Management 設計
+> 日期：2026-04-11（v4 rewrite — context rotation removed, replaced by crash recovery + replace_instance）
 
 ---
 
@@ -15,9 +15,14 @@
 - 60% 閾值 → 等 idle → 送 handover prompt → 驗證 `handover.md` → rotate
 - 問題：**依賴 Claude 自覺寫交接報告**，本質上脆弱
 
-### v3（現行）
+### v3（已淘汰）
 - 80% 閾值 → 5s idle barrier → daemon 收集 snapshot → kill → spawn with snapshot prompt
-- 原則：**daemon 主導恢復，不依賴 Claude 的 meta-task**
+- 問題：所有 CLI 都有 auto-compact，threshold rotation 跟 auto-compact 衝突
+
+### v4（現行）
+- **移除所有主動 rotation**（threshold + max_age）
+- Context 管理交給 CLI 內建的 auto-compact（Claude Code、Codex、Gemini CLI、OpenCode、Kiro CLI 都有）
+- AgEnD 只負責：crash recovery（health check + respawn + snapshot）和 replace_instance（跨 instance 交接）
 
 ---
 

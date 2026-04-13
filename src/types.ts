@@ -76,6 +76,8 @@ export interface InstanceConfig {
     max_retries: number;
     backoff: "exponential" | "linear";
     reset_after: number;
+    /** Health check polling interval in ms. Default: 30000 */
+    health_check_interval_ms?: number;
   };
   context_guardian: {
     grace_period_ms: number;
@@ -88,7 +90,7 @@ export interface InstanceConfig {
   tool_set?: string;
   /** Skip non-essential subsystems (transcript monitor, context guardian, approval server, prompt detector) */
   lightweight?: boolean;
-  /** System prompt for the Claude instance */
+  /** System prompt — supports comma-separated file: paths for modularization */
   systemPrompt?: string;
   /** Skip permission checks (dangerously-skip-permissions) */
   skipPermissions?: boolean;

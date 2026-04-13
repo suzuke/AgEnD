@@ -59,6 +59,8 @@ export class Daemon extends EventEmitter {
   private healthCheckPaused = false;
   private spawning = false;
   private skipResume = false;
+  /** Whether the last spawn started a fresh session (not resumed). */
+  isNewSession = false;
   // Context rotation quality tracking
   private rotationStartedAt = 0;
   private preRotationContextPct = 0;
@@ -230,7 +232,7 @@ export class Daemon extends EventEmitter {
     }
 
     const resumed = await this.spawnClaudeWindow();
-    // Only inject snapshot if resume failed — successful resume already has full history
+    this.isNewSession = !resumed;
     if (!resumed) {
       await this.injectSnapshotMessage();
     } else {
@@ -452,7 +454,7 @@ export class Daemon extends EventEmitter {
         }
 
         scheduleNext();
-      }, 30_000);
+      }, this.config.restart_policy.health_check_interval_ms ?? 30_000);
     };
 
     scheduleNext();
@@ -983,11 +985,16 @@ export class Daemon extends EventEmitter {
 
     let resolvedCustomPrompt: string | undefined;
     if (this.config.systemPrompt) {
-      let p = this.config.systemPrompt;
-      if (p.startsWith("file:")) {
-        try { p = readFileSync(p.slice(5), "utf-8"); } catch { p = ""; }
-      }
-      if (p) resolvedCustomPrompt = p;
+      // Support comma-separated file: paths for prompt modularization:
+      //   systemPrompt: "file:prompts/role.md, file:prompts/rules.md, file:prompts/context.md"
+      const parts = this.config.systemPrompt.split(",").map((s: string) => s.trim());
+      const resolved = parts.map((part: string) => {
+        if (part.startsWith("file:")) {
+          try { return readFileSync(part.slice(5), "utf-8"); } catch { return ""; }
+        }
+        return part;
+      }).filter(Boolean);
+      if (resolved.length > 0) resolvedCustomPrompt = resolved.join("\n\n");
     }
 
     let decisions: { title: string; content: string }[] | undefined;

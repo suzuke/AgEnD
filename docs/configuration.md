@@ -181,7 +181,7 @@ Use `broadcast(team: "backend-squad", message: "...")` to send to all members.
 | `lightweight` | boolean | `false` | Skip transcript monitor, context guardian, approval server |
 | `log_level` | string | `"info"` | `debug`, `info`, `warn`, `error` |
 | `restart_policy` | object | see below | Crash recovery settings |
-| `context_guardian` | object | see below | Context rotation settings |
+| `context_guardian` | object | see below | Context monitoring settings |
 | `cost_guard` | object | — | Per-instance cost guard (overrides defaults) |
 | `worktree_source` | string | — | Original repo path (auto-set when using branch parameter) |
 
@@ -195,10 +195,12 @@ Use `broadcast(team: "backend-squad", message: "...")` to send to all members.
 
 ### instances.\<name\>.context_guardian
 
+Context monitoring settings. The guardian polls the CLI's statusline for context usage metrics (used for dashboard and logging). Context limits are handled by each CLI's built-in auto-compact — AgEnD does not trigger restarts based on context usage or session age.
+
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `grace_period_ms` | number | `600000` | Wait time after rotation trigger before restart (10 min) |
-| `max_age_hours` | number | `0` (disabled) | Force rotation after N hours. `0` = rely on CLI auto-compact |
+| `grace_period_ms` | number | `600000` | Reserved for future use |
+| `max_age_hours` | number | `0` (disabled) | Reserved for future use. Currently ignored — CLI auto-compact handles context limits |
 
 ---
 

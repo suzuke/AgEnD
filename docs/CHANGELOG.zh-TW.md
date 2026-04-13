@@ -7,12 +7,18 @@
 ## [未發佈] (Unreleased)
 
 ### 新增
+- `replace_instance` MCP 工具 — 原子性替換 instance，從 daemon 的 ring buffer 收集交接 context 並透過標準訊息傳遞路徑注入新 instance
+- Workflow template 新增溝通效率規則 — 禁止客套、沉默即同意、合併要點、review 一次來回
 - Fleet 事件（輪轉、懸掛、成本警報）的 Webhook 通知
 - 用於外部監控的 HTTP 健康檢查端點 (`/health`, `/status`)
 - 在 Context 輪轉時具有驗證與重試機制的結構化交接範本
 - 權限中繼 UX 改進（逾時倒數、持久化的「一律允許」、決定後的回饋）
 - 主題圖示自動更新（執行中/已停止）+ 閒置封存
 - 過濾 Telegram 服務訊息（主題重新命名、置頂等）以節省 token
+
+### 變更
+- **ContextGuardian 簡化為純監控** — 移除 max_age 計時器、狀態機（NORMAL/RESTARTING/GRACE）和所有重啟觸發器。所有 CLI 後端（Claude Code、Codex、Gemini CLI、OpenCode、Kiro CLI）都有內建的 auto-compact 處理 context 限制。
+- **Crash recovery 優先嘗試 --resume** — 崩潰重生時先嘗試 `--resume` 恢復完整對話歷史，失敗才 fallback 到全新 session + snapshot 注入。Resume 成功時節省 context。
 
 ### 修復
 - 最小化的 `claude-settings.json` — 允許列表中僅包含 AgEnD MCP 工具，不再覆蓋使用者全域的權限設定

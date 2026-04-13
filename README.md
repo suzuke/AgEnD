@@ -41,7 +41,7 @@ AgEnD (**Agent Engineering Daemon**) turns your Telegram or Discord into a comma
 
 📱 **Mobile Control** — Approve tool use, restart sessions, and manage your fleet from Telegram inline buttons.
 
-🛡️ **Autonomous & Safe** — Cost guards, hang detection, model failover, and context rotation keep your fleet running without babysitting.
+🛡️ **Autonomous & Safe** — Cost guards, hang detection, model failover, and crash recovery keep your fleet running without babysitting.
 
 ⏰ **Persistent Schedules** — Cron-based tasks backed by SQLite. Survives restarts.
 
