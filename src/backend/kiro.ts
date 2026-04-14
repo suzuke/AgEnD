@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, unlinkSync } from "node:fs";
-import { type CliBackend, type CliBackendConfig, type ErrorPattern, type StartupDialog, resolveBinary } from "./types.js";
+import { type CliBackend, type CliBackendConfig, type ErrorPattern, type StartupDialog, type RuntimeDialog, resolveBinary } from "./types.js";
 
 export class KiroBackend implements CliBackend {
   readonly binaryName = "kiro-cli";
@@ -88,6 +88,29 @@ export class KiroBackend implements CliBackend {
       { pattern: /rate.?limit|429|too many requests/i, type: "rate_limit", action: "failover", message: "Rate limit reached" },
       { pattern: /auth.*error|unauthorized|401/i, type: "auth_error", action: "pause", message: "Authentication error" },
       { pattern: /usage limit|insufficient.?credit|credit.*exhaust/i, type: "quota", action: "pause", message: "Usage limit reached" },
+    ];
+  }
+
+  getStartupDialogs(): StartupDialog[] {
+    return [
+      {
+        // Kiro CLI --trust-all-tools now shows a confirmation prompt.
+        // Default cursor is on "No, exit" — press Down then Enter to select "Yes, I accept".
+        pattern: /[❯›]\s*No, exit/m,
+        keys: ["Down", "Enter"],
+        description: "Kiro --trust-all-tools confirmation — navigate to 'Yes, I accept'",
+      },
+    ];
+  }
+
+  getRuntimeDialogs(): RuntimeDialog[] {
+    return [
+      {
+        // Same trust prompt can also appear mid-session if Kiro re-validates.
+        pattern: /Do you trust the files|Yes, I accept[\s\S]*No, exit/m,
+        keys: ["Down", "Enter"],
+        description: "Kiro trust confirmation dialog — auto-accept",
+      },
     ];
   }
 

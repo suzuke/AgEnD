@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { type CliBackend, type CliBackendConfig, type ErrorPattern, type StartupDialog, resolveBinary } from "./types.js";
+import { type CliBackend, type CliBackendConfig, type ErrorPattern, type RuntimeDialog, type StartupDialog, resolveBinary } from "./types.js";
 
 
 export class ClaudeCodeBackend implements CliBackend {
@@ -112,6 +112,18 @@ export class ClaudeCodeBackend implements CliBackend {
       { pattern: /[❯›]\s*\d+\.\s*No/m, keys: ["Down", "Enter"], description: "Claude 'No, exit' confirmation — navigate to Yes" },
       { pattern: /I accept|I trust/i, keys: ["Enter"], description: "Claude 'Yes, I accept' trust dialog" },
       { pattern: /Resume Session/i, keys: ["Escape"], description: "Claude resume session picker — start fresh" },
+    ];
+  }
+
+  getRuntimeDialogs(): RuntimeDialog[] {
+    return [
+      {
+        // Claude Code shows a session resume prompt when session is old/large.
+        // Default cursor is on "1. Resume from summary (recommended)" — press Enter.
+        pattern: /Resume from summary \(recommended\)/,
+        keys: ["Enter"],
+        description: "Claude session resume prompt — auto-select 'Resume from summary'",
+      },
     ];
   }
 
