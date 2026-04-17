@@ -125,25 +125,30 @@ export class SchedulerDb {
   }
 
   update(id: string, params: UpdateScheduleParams): Schedule {
-    const existing = this.get(id);
-    if (!existing) throw new Error(`Schedule "${id}" not found`);
+    // Wrap SELECT-modify-UPDATE-SELECT in a transaction so concurrent updates
+    // can't interleave (the second writer would otherwise clobber the first
+    // based on a stale read).
+    return this.db.transaction((): Schedule => {
+      const existing = this.get(id);
+      if (!existing) throw new Error(`Schedule "${id}" not found`);
 
-    const sets: string[] = [];
-    const values: unknown[] = [];
+      const sets: string[] = [];
+      const values: unknown[] = [];
 
-    if (params.cron !== undefined) { sets.push("cron = ?"); values.push(params.cron); }
-    if (params.message !== undefined) { sets.push("message = ?"); values.push(params.message); }
-    if (params.target !== undefined) { sets.push("target = ?"); values.push(params.target); }
-    if (params.label !== undefined) { sets.push("label = ?"); values.push(params.label); }
-    if (params.timezone !== undefined) { sets.push("timezone = ?"); values.push(params.timezone); }
-    if (params.enabled !== undefined) { sets.push("enabled = ?"); values.push(params.enabled ? 1 : 0); }
+      if (params.cron !== undefined) { sets.push("cron = ?"); values.push(params.cron); }
+      if (params.message !== undefined) { sets.push("message = ?"); values.push(params.message); }
+      if (params.target !== undefined) { sets.push("target = ?"); values.push(params.target); }
+      if (params.label !== undefined) { sets.push("label = ?"); values.push(params.label); }
+      if (params.timezone !== undefined) { sets.push("timezone = ?"); values.push(params.timezone); }
+      if (params.enabled !== undefined) { sets.push("enabled = ?"); values.push(params.enabled ? 1 : 0); }
 
-    if (sets.length > 0) {
-      values.push(id);
-      this.db.prepare(`UPDATE schedules SET ${sets.join(", ")} WHERE id = ?`).run(...values);
-    }
+      if (sets.length > 0) {
+        values.push(id);
+        this.db.prepare(`UPDATE schedules SET ${sets.join(", ")} WHERE id = ?`).run(...values);
+      }
 
-    return this.get(id) ?? existing;
+      return this.get(id) ?? existing;
+    })();
   }
 
   delete(id: string): void {
