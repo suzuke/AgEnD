@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.21.7] - 2026-04-17
+
+### Changed
+- **MCP tool schemas unified on zod** — every outbound tool now has a zod schema in `src/outbound-schemas.ts`; `src/channel/mcp-tools.ts` derives `inputSchema` via `z.toJSONSchema()`. Hand-written JSON Schema removed. Required fields now reject empty strings (`minLength: 1`) where the old handlers relied on truthy checks.
+- **Outbound handlers validate at entry** — all 18 handlers in `src/outbound-handlers.ts` run `safeParse` before doing work; the ~35 unchecked `args.X as string` casts are gone. `wrapAsSend` also takes a schema, so `request_information` / `delegate_task` / `report_result` get the same guarantees.
+
+## [1.21.6] - 2026-04-17
+
+### Security
+- **Web API surface hardening** (H1, H2, H7)
+- **Auth, path safety, and leak fixes** across the daemon (H3, H4, H5, H6)
+- **Backend command hardening** — model name validation and env value quoting in `buildCommand()`
+- **CLI helpers** — avoid shell invocation and redact tokens from `ps` output
+- **Scheduler hardening** — timezone whitelist, file count cap, lightweight mode guard
+- **Kiro MCP wrapper permissions** — `wrapper.sh` tightened to `0o700` (owner-only)
+- **Outbound error sanitization** — tool errors returned to agents strip `$HOME` paths and truncate at 300 chars before exposure
+
+### Fixed
+- **Discord expired interaction crash** — adapter now catches expired-interaction errors to prevent daemon crash (upstream PR #26)
+- **Scheduler overlapping fires** — atomic update prevents double-firing when two ticks race
+
+### Changed
+- **Fleet-manager error observability** — previously swallowed errors are now logged; adapter notices promoted to higher severity
+
 ## [1.21.5] - 2026-04-15
 
 ### Added
