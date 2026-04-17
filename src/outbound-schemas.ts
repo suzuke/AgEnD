@@ -73,7 +73,68 @@ export const CreateInstanceArgs = z.object({
   ),
 }).passthrough();
 
+// ── Cross-instance communication ────────────────────────────────────────
+
+// request_kind: send_to_instance accepts the full 4-value enum; broadcast
+// excludes "report" (broadcasts don't reply to a specific correlation).
+const SendRequestKind = z.enum(["query", "task", "report", "update"]);
+const BroadcastRequestKind = z.enum(["query", "task", "update"]);
+
+export const BroadcastArgs = z.object({
+  message: NonEmptyString.describe("Message to send"),
+  targets: z.array(z.string()).optional().describe("Instance names. Omit for all running."),
+  team: z.string().optional()
+    .describe("Team name. Send to all running members of this team. Overrides targets."),
+  tags: z.array(z.string()).optional()
+    .describe("Filter targets by tags. Only instances with matching tags receive the message."),
+  task_summary: z.string().optional().describe("Brief summary shown in logs"),
+  request_kind: BroadcastRequestKind.optional().describe("Message intent"),
+  requires_reply: z.boolean().optional().describe("Whether recipients should reply"),
+});
+
+export const RequestInformationArgs = z.object({
+  target_instance: NonEmptyString.describe("Name of the instance to ask."),
+  question: NonEmptyString.describe("The question to ask."),
+  context: z.string().optional().describe("Optional context to help the recipient answer."),
+});
+
+export const DelegateTaskArgs = z.object({
+  target_instance: NonEmptyString.describe("Name of the instance to delegate to."),
+  task: NonEmptyString.describe("Description of the task to perform."),
+  success_criteria: z.string().optional()
+    .describe("How the recipient should judge if the task is complete."),
+  context: z.string().optional().describe("Optional background context for the task."),
+});
+
+export const ReportResultArgs = z.object({
+  target_instance: NonEmptyString.describe("Name of the instance to report to."),
+  correlation_id: z.string().optional()
+    .describe("The correlation_id from the original request."),
+  summary: NonEmptyString.describe("Summary of the result."),
+  artifacts: z.string().optional()
+    .describe("Optional details: file paths, commit hashes, URLs, etc."),
+});
+
 // ── Teams ───────────────────────────────────────────────────────────────
+
+export const CreateTeamArgs = z.object({
+  name: NonEmptyString.describe("Team name (e.g. 'sprint-1', 'reviewers')"),
+  members: z.array(z.string()).describe("Instance names to include"),
+  description: z.string().optional()
+    .describe("Optional description of the team's purpose"),
+});
+
+export const DeleteTeamArgs = z.object({
+  name: NonEmptyString.describe("Team name to delete"),
+});
+
+export const UpdateTeamArgs = z.object({
+  name: NonEmptyString.describe("Team name"),
+  add: z.array(z.string()).optional()
+    .describe("Instance names to add (duplicates ignored)"),
+  remove: z.array(z.string()).optional()
+    .describe("Instance names to remove"),
+});
 
 export const ListTeamsArgs = z.object({});
 

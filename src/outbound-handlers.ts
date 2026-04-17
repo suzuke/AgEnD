@@ -7,15 +7,23 @@ import type { Logger } from "./logger.js";
 import type { RoutingEngine } from "./routing-engine.js";
 import type { InstanceLifecycle } from "./instance-lifecycle.js";
 import type { EventLog } from "./event-log.js";
+import type { z } from "zod";
 import {
+  BroadcastArgs,
   CreateInstanceArgs,
+  CreateTeamArgs,
+  DelegateTaskArgs,
   DeleteInstanceArgs,
+  DeleteTeamArgs,
   DescribeInstanceArgs,
   ListInstancesArgs,
   ListTeamsArgs,
   ReplaceInstanceArgs,
+  ReportResultArgs,
+  RequestInformationArgs,
   StartInstanceArgs,
   TeardownDeploymentArgs,
+  UpdateTeamArgs,
   validateArgs,
 } from "./outbound-schemas.js";
 
@@ -243,50 +251,63 @@ const startInstance: Handler = async (ctx, rawArgs, respond) => {
 };
 
 /** Wrap send_to_instance with pre-filled metadata fields. */
-function wrapAsSend(
-  buildArgs: (args: Record<string, unknown>) => { targetName: string; body: string; kind: string; reply: boolean; summary: string },
-  warnMissing?: (ctx: OutboundContext, args: Record<string, unknown>, meta: OutboundMeta) => void,
+function wrapAsSend<T>(
+  schema: z.ZodType<T>,
+  toolName: string,
+  buildArgs: (args: T) => { targetName: string; body: string; kind: string; reply: boolean; summary: string },
+  warnMissing?: (ctx: OutboundContext, args: T, meta: OutboundMeta) => void,
 ): Handler {
-  return (ctx, args, respond, meta) => {
-    if (warnMissing) warnMissing(ctx, args, meta);
-    const { targetName, body, kind, reply, summary } = buildArgs(args);
-    const newArgs = { ...args, instance_name: targetName, message: body, request_kind: kind, requires_reply: reply, task_summary: summary };
+  return (ctx, rawArgs, respond, meta) => {
+    const v = validateArgs(schema, rawArgs, toolName);
+    if (!v.ok) { respond(null, v.error); return; }
+    if (warnMissing) warnMissing(ctx, v.data, meta);
+    const { targetName, body, kind, reply, summary } = buildArgs(v.data);
+    // Forward correlation_id verbatim if the caller supplied one.
+    const extra = (v.data as { correlation_id?: string }).correlation_id
+      ? { correlation_id: (v.data as { correlation_id?: string }).correlation_id }
+      : {};
+    const newArgs = {
+      ...extra,
+      instance_name: targetName,
+      message: body,
+      request_kind: kind,
+      requires_reply: reply,
+      task_summary: summary,
+    };
     // Re-dispatch through the handler map
     return sendToInstance(ctx, newArgs, respond, meta);
   };
 }
 
-const requestInformation = wrapAsSend((args) => {
-  const targetName = args.target_instance as string;
-  const question = args.question as string;
-  const context = args.context as string | undefined;
-  return {
-    targetName,
+const requestInformation = wrapAsSend(
+  RequestInformationArgs,
+  "request_information",
+  ({ target_instance, question, context }) => ({
+    targetName: target_instance,
     body: context ? `${question}\n\nContext: ${context}` : question,
     kind: "query", reply: true,
     summary: question.slice(0, 120),
-  };
-});
+  }),
+);
 
-const delegateTask = wrapAsSend((args) => {
-  const targetName = args.target_instance as string;
-  const task = args.task as string;
-  const criteria = args.success_criteria as string | undefined;
-  const context = args.context as string | undefined;
-  let body = task;
-  if (criteria) body += `\n\nSuccess criteria: ${criteria}`;
-  if (context) body += `\n\nContext: ${context}`;
-  return { targetName, body, kind: "task", reply: true, summary: task.slice(0, 120) };
-});
+const delegateTask = wrapAsSend(
+  DelegateTaskArgs,
+  "delegate_task",
+  ({ target_instance, task, success_criteria, context }) => {
+    let body = task;
+    if (success_criteria) body += `\n\nSuccess criteria: ${success_criteria}`;
+    if (context) body += `\n\nContext: ${context}`;
+    return { targetName: target_instance, body, kind: "task", reply: true, summary: task.slice(0, 120) };
+  },
+);
 
 const reportResult = wrapAsSend(
-  (args) => {
-    const targetName = args.target_instance as string;
-    const summary = args.summary as string;
-    const artifacts = args.artifacts as string | undefined;
+  ReportResultArgs,
+  "report_result",
+  ({ target_instance, summary, artifacts }) => {
     let body = summary;
     if (artifacts) body += `\n\nArtifacts: ${artifacts}`;
-    return { targetName, body, kind: "report", reply: false, summary: summary.slice(0, 120) };
+    return { targetName: target_instance, body, kind: "report", reply: false, summary: summary.slice(0, 120) };
   },
   (ctx, args, meta) => {
     if (!args.correlation_id) {
@@ -322,17 +343,15 @@ const replaceInstance: Handler = async (ctx, rawArgs, respond) => {
   await ctx.lifecycle.handleReplace(v.data, respond);
 };
 
-const broadcast: Handler = (ctx, args, respond, meta) => {
-  const message = args.message as string;
-  if (!message) { respond(null, "broadcast: missing required argument 'message'"); return; }
+const broadcast: Handler = (ctx, rawArgs, respond, meta) => {
+  const v = validateArgs(BroadcastArgs, rawArgs, "broadcast");
+  if (!v.ok) { respond(null, v.error); return; }
+  const { message, targets, team: teamName, tags: filterTags, task_summary, request_kind, requires_reply } = v.data;
 
   const senderLabel = meta.senderSessionName ?? meta.instanceName;
-  const targets = args.targets as string[] | undefined;
 
   // Resolve target list: team, explicit targets, tag filter, or all running
   let targetNames: string[];
-  const teamName = args.team as string | undefined;
-  const filterTags = args.tags as string[] | undefined;
   if (teamName) {
     const teamDef = ctx.fleetConfig?.teams?.[teamName];
     if (!teamDef) { respond(null, `Team not found: ${teamName}`); return; }
@@ -362,16 +381,16 @@ const broadcast: Handler = (ctx, args, respond, meta) => {
       user_id: `instance:${senderLabel}`, ts: new Date().toISOString(), thread_id: "",
       from_instance: senderLabel, correlation_id: correlationId,
     };
-    if (args.request_kind) ipcMeta.request_kind = args.request_kind as string;
-    if (args.requires_reply != null) ipcMeta.requires_reply = String(args.requires_reply);
-    if (args.task_summary) ipcMeta.task_summary = args.task_summary as string;
+    if (request_kind) ipcMeta.request_kind = request_kind;
+    if (requires_reply != null) ipcMeta.requires_reply = String(requires_reply);
+    if (task_summary) ipcMeta.task_summary = task_summary;
 
     targetIpc.send({ type: "fleet_inbound", targetSession: targetName, content: message, meta: ipcMeta });
     sentTo.push(targetName);
   }
 
   ctx.logger.info(`📢 ${senderLabel} broadcast to ${sentTo.length} instances: ${(message).slice(0, 80)}`);
-  const summary = (args.task_summary as string) || message.slice(0, 200);
+  const summary = task_summary || message.slice(0, 200);
   for (const target of sentTo) {
     ctx.eventLog?.logActivity("message", senderLabel, summary, target);
   }
@@ -381,11 +400,10 @@ const broadcast: Handler = (ctx, args, respond, meta) => {
 
 // ── Teams ────────────────────────────────────────────────────────────────
 
-const createTeam: Handler = (ctx, args, respond) => {
-  const name = args.name as string;
-  const members = args.members as string[];
-  const description = args.description as string | undefined;
-  if (!name || !Array.isArray(members)) { respond(null, "create_team: name and members are required"); return; }
+const createTeam: Handler = (ctx, rawArgs, respond) => {
+  const v = validateArgs(CreateTeamArgs, rawArgs, "create_team");
+  if (!v.ok) { respond(null, v.error); return; }
+  const { name, members, description } = v.data;
   if (!ctx.fleetConfig) { respond(null, "Fleet config not available"); return; }
   const invalid = members.filter(m => !ctx.fleetConfig!.instances[m]);
   if (invalid.length) { respond(null, `Invalid instance names: ${invalid.join(", ")}`); return; }
@@ -396,8 +414,10 @@ const createTeam: Handler = (ctx, args, respond) => {
   respond({ created: name, members });
 };
 
-const deleteTeam: Handler = (ctx, args, respond) => {
-  const name = args.name as string;
+const deleteTeam: Handler = (ctx, rawArgs, respond) => {
+  const v = validateArgs(DeleteTeamArgs, rawArgs, "delete_team");
+  if (!v.ok) { respond(null, v.error); return; }
+  const { name } = v.data;
   if (!ctx.fleetConfig?.teams?.[name]) { respond(null, `Team not found: ${name}`); return; }
   delete ctx.fleetConfig.teams[name];
   ctx.saveFleetConfig();
@@ -419,12 +439,12 @@ const listTeams: Handler = (ctx, rawArgs, respond) => {
   respond(result);
 };
 
-const updateTeam: Handler = (ctx, args, respond) => {
-  const name = args.name as string;
+const updateTeam: Handler = (ctx, rawArgs, respond) => {
+  const v = validateArgs(UpdateTeamArgs, rawArgs, "update_team");
+  if (!v.ok) { respond(null, v.error); return; }
+  const { name, add, remove } = v.data;
   if (!ctx.fleetConfig?.teams?.[name]) { respond(null, `Team not found: ${name}`); return; }
   const team = ctx.fleetConfig.teams[name];
-  const add = args.add as string[] | undefined;
-  const remove = args.remove as string[] | undefined;
   if (add?.length) {
     const invalid = add.filter(m => !ctx.fleetConfig!.instances[m]);
     if (invalid.length) { respond(null, `Invalid instance names: ${invalid.join(", ")}`); return; }
