@@ -11,6 +11,136 @@ import { z } from "zod";
 
 const NonEmptyString = z.string().min(1);
 
+const MessageFormat = z.enum(["text", "markdown"]);
+
+// ── Channel interaction (handled outside outbound-handlers.ts) ──────────
+
+export const ReplyArgs = z.object({
+  text: NonEmptyString,
+  reply_to: z.string().optional()
+    .describe("Message ID to thread under. Use message_id from the inbound block."),
+  files: z.array(z.string()).optional()
+    .describe("Absolute file paths to attach."),
+  format: MessageFormat.optional().describe("Rendering mode. Default: 'text'."),
+});
+
+export const ReactArgs = z.object({
+  message_id: NonEmptyString,
+  emoji: NonEmptyString,
+});
+
+export const EditMessageArgs = z.object({
+  message_id: NonEmptyString,
+  text: NonEmptyString,
+  format: MessageFormat.optional().describe("Rendering mode. Default: 'text'."),
+});
+
+export const DownloadAttachmentArgs = z.object({
+  file_id: NonEmptyString.describe("The attachment_file_id from inbound meta"),
+});
+
+// ── Schedules ───────────────────────────────────────────────────────────
+
+export const CreateScheduleArgs = z.object({
+  cron: NonEmptyString.describe("Cron expression, e.g. '0 7 * * *' (every day at 7 AM)"),
+  message: NonEmptyString.describe("Message to inject when triggered"),
+  target: z.string().optional()
+    .describe("Target instance name. Defaults to this instance if omitted."),
+  label: z.string().optional().describe("Human-readable name for this schedule"),
+  timezone: z.string().optional()
+    .describe("IANA timezone, e.g. 'Asia/Taipei'. Defaults to Asia/Taipei."),
+});
+
+export const ListSchedulesArgs = z.object({
+  target: z.string().optional().describe("Filter by target instance name"),
+});
+
+export const UpdateScheduleArgs = z.object({
+  id: NonEmptyString.describe("Schedule ID"),
+  cron: z.string().optional().describe("New cron expression"),
+  message: z.string().optional().describe("New message"),
+  target: z.string().optional().describe("New target instance"),
+  label: z.string().optional().describe("New label"),
+  timezone: z.string().optional().describe("New timezone"),
+  enabled: z.boolean().optional().describe("Enable/disable the schedule"),
+});
+
+export const DeleteScheduleArgs = z.object({
+  id: NonEmptyString.describe("Schedule ID to delete"),
+});
+
+// ── Fleet Task Board ────────────────────────────────────────────────────
+
+export const TaskBoardArgs = z.object({
+  action: z.enum(["create", "list", "claim", "done", "update"])
+    .describe("Operation to perform"),
+  title: z.string().optional().describe("Task title (create)"),
+  description: z.string().optional().describe("Task details (create)"),
+  priority: z.enum(["low", "normal", "high", "urgent"]).optional()
+    .describe("Priority (create/update)"),
+  assignee: z.string().optional().describe("Instance name to assign (create/update)"),
+  depends_on: z.array(z.string()).optional()
+    .describe("Task IDs this depends on (create)"),
+  id: z.string().optional().describe("Task ID (claim/done/update)"),
+  result: z.string().optional().describe("Completion summary (done)"),
+  status: z.enum(["open", "claimed", "done", "blocked", "cancelled"]).optional()
+    .describe("New status (update)"),
+  filter_assignee: z.string().optional().describe("Filter by assignee (list)"),
+  filter_status: z.string().optional().describe("Filter by status (list)"),
+});
+
+// ── Shared Decisions ────────────────────────────────────────────────────
+
+export const PostDecisionArgs = z.object({
+  title: NonEmptyString.describe("Short title for the decision"),
+  content: NonEmptyString.describe("Full decision description"),
+  scope: z.enum(["project", "fleet"]).optional()
+    .describe("'project' (default) = same working directory. 'fleet' = all instances."),
+  tags: z.array(z.string()).optional()
+    .describe("Optional tags for categorization"),
+  ttl_days: z.number().optional()
+    .describe("Days until auto-archive. Default: permanent. Set e.g. 7 for temporary decisions."),
+  supersedes: z.string().optional()
+    .describe("Decision ID to supersede (marks old one as superseded)"),
+});
+
+export const ListDecisionsArgs = z.object({
+  include_archived: z.boolean().optional()
+    .describe("Include archived/superseded decisions. Default: false"),
+  tags: z.array(z.string()).optional().describe("Filter by tags"),
+});
+
+export const UpdateDecisionArgs = z.object({
+  id: NonEmptyString.describe("Decision ID"),
+  content: z.string().optional().describe("Updated content"),
+  tags: z.array(z.string()).optional().describe("Updated tags"),
+  ttl_days: z.number().optional().describe("Updated TTL in days"),
+  archive: z.boolean().optional().describe("Set to true to archive this decision"),
+});
+
+// ── Identity ────────────────────────────────────────────────────────────
+
+export const SetDisplayNameArgs = z.object({
+  name: NonEmptyString.describe("Your chosen display name"),
+});
+
+export const SetDescriptionArgs = z.object({
+  description: NonEmptyString.describe(
+    "Your role description, e.g. 'Code reviewer focused on security and error handling'",
+  ),
+});
+
+// ── Repo checkout ───────────────────────────────────────────────────────
+
+export const CheckoutRepoArgs = z.object({
+  source: NonEmptyString.describe("Repo path (absolute or ~-prefixed) or instance name."),
+  branch: z.string().optional().describe("Branch or commit to checkout. Default: HEAD."),
+});
+
+export const ReleaseRepoArgs = z.object({
+  path: NonEmptyString.describe("Path returned by checkout_repo."),
+});
+
 // ── Instance management ─────────────────────────────────────────────────
 
 export const ListInstancesArgs = z.object({
@@ -95,9 +225,8 @@ export const SendToInstanceArgs = z.object({
 });
 
 
-// request_kind: send_to_instance accepts the full 4-value enum; broadcast
-// excludes "report" (broadcasts don't reply to a specific correlation).
-const SendRequestKind = z.enum(["query", "task", "report", "update"]);
+// broadcast excludes "report" (broadcasts don't reply to a specific correlation);
+// send_to_instance accepts all four inline.
 const BroadcastRequestKind = z.enum(["query", "task", "update"]);
 
 export const BroadcastArgs = z.object({
