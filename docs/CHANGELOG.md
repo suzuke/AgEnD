@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.22.0] - 2026-04-18
+
+### Added
+- **`agend ls` shows Kiro CLI context usage** — for instances running Kiro backend, the listing now reports current context window consumption alongside the other status columns.
+- **`agend ls` shows system memory usage** — top-of-listing summary includes host memory pressure so fleet operators can spot memory-starved boxes at a glance.
+- **Install script WSL detection** — `install.sh` now detects WSL and avoids picking up a Windows-side `node` on the Linux PATH, which previously caused silent failures during first-run setup.
+
+### Changed
+- **Install script URL uses GitHub Pages** — README one-liner points at `https://suzuke.github.io/AgEnD/install.sh` (the official hosted copy) instead of a raw GitHub URL.
+
+### Docs
+- **Install one-liner surfaced in both READMEs and the website hero** — previously only documented in the CHANGELOG.
+- **WSL installation notes added to README**.
+- **Website zh-TW hero tightened** — dropped shipping-speak (`交付`) in favor of dispatcher vocabulary consistent with the rest of the page.
+
 ## [1.21.7] - 2026-04-17
 
 ### Changed

@@ -6,6 +6,21 @@
 
 ## [未發佈] (Unreleased)
 
+## [1.22.0] - 2026-04-18
+
+### 新增
+- **`agend ls` 顯示 Kiro CLI context 用量** — 使用 Kiro backend 的 instance，清單會額外顯示目前 context window 的使用情形。
+- **`agend ls` 顯示系統記憶體用量** — 清單頂端摘要加入主機記憶體壓力資訊，方便 fleet 運維者一眼看出記憶體吃緊的機器。
+- **安裝腳本 WSL 偵測** — `install.sh` 偵測到 WSL 環境時會避開 Windows 側的 `node`，解決先前首次安裝因 PATH 誤抓而靜默失敗的問題。
+
+### 變更
+- **安裝腳本改用 GitHub Pages 連結** — README 一行安裝改指向 `https://suzuke.github.io/AgEnD/install.sh`（官方 host 版本），不再用 raw GitHub URL。
+
+### 文件
+- **一行安裝指令補到 README 與網站首頁** — 先前僅見於 CHANGELOG。
+- **README 新增 WSL 安裝說明**。
+- **網站 zh-TW hero 調整** — 捨棄商務感的「交付」，改用頁面其他處使用的調度（dispatcher）詞彙。
+
 ## [1.21.7] - 2026-04-17
 
 ### 變更
