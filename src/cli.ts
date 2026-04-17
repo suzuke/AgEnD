@@ -1393,7 +1393,8 @@ async function lsAction(opts: { json?: boolean }): Promise<void> {
           const pane = execFileSync("tmux", tmuxArgs([
             "capture-pane", "-t", `${sessionName}:${name}`, "-p"
           ]), { encoding: "utf-8", timeout: 2000 });
-          const m = pane.match(/(\d+)%\s*!>\s*$/m);
+          // Classic mode: "X% !>" | TUI mode: "◔ X%"
+          const m = pane.match(/(\d+)%\s*!>\s*$/m) || pane.match(/◔\s*(\d+)%/);
           if (m) context = parseInt(m[1], 10);
         } catch { /* tmux capture failed */ }
       }
