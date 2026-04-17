@@ -314,7 +314,9 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
           await tm.killWindow();
         }
       }
-    } catch { /* best effort — don't block startup */ }
+    } catch (err) {
+      this.logger.debug({ err }, "Startup tmux window cleanup failed (best effort)");
+    }
 
     const pidPath = join(this.dataDir, "fleet.pid");
     writeFileSync(pidPath, String(process.pid), "utf-8");
@@ -353,7 +355,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     this.dailySummary = new DailySummary(summaryConfig, costGuardConfig.timezone, (text) => {
       if (!this.adapter || !this.fleetConfig?.channel?.group_id) return;
       this.adapter.sendText(String(this.fleetConfig.channel.group_id), text)
-        .catch(e => this.logger.debug({ err: e }, "Failed to send daily summary"));
+        .catch(e => this.logger.warn({ err: e }, "Failed to send daily summary"));
     }, () => {
       const instances = Object.keys(this.fleetConfig?.instances ?? {});
       const costMap = new Map<string, number>();
@@ -411,7 +413,9 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
           process.env.AGEND_DECISIONS = JSON.stringify(capped);
           this.logger.info({ count: decisions.length, injected: capped.length }, "Injected active decisions into env");
         }
-      } catch { /* no decisions available */ }
+      } catch (err) {
+        this.logger.debug({ err }, "Decision injection skipped (no decisions db or query failed)");
+      }
     }
 
     await this.startInstancesWithConcurrency(Object.entries(fleet.instances), topicMode);
@@ -448,7 +452,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
           : `Fleet ready. ${started}/${total} instances running. Failed: ${failedNames.join(", ")}`;
         this.adapter.sendText(String(fleet.channel.group_id), text, {
           threadId: generalThreadId != null ? String(generalThreadId) : undefined,
-        }).catch(e => this.logger.debug({ err: e }, "Failed to send fleet start notification"));
+        }).catch(e => this.logger.warn({ err: e }, "Failed to send fleet start notification"));
       }
     }
 
@@ -581,7 +585,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     // Close existing client to prevent socket leak on reconnect
     const existing = this.instanceIpcClients.get(name);
     if (existing) {
-      try { existing.close(); } catch { /* already closed */ }
+      try { existing.close(); } catch (err) { this.logger.debug({ err, name }, "IPC client close failed (likely already closed)"); }
       this.instanceIpcClients.delete(name);
     }
 
@@ -1408,7 +1412,11 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
 
     // Clean up statusline watcher + instance directory
     this.statuslineWatcher.unwatch(name);
-    try { rmSync(this.getInstanceDir(name), { recursive: true, force: true }); } catch {}
+    try {
+      rmSync(this.getInstanceDir(name), { recursive: true, force: true });
+    } catch (err) {
+      this.logger.debug({ err, name }, "Instance dir cleanup failed");
+    }
   }
 
   startStatuslineWatcher(name: string): void {
@@ -1469,7 +1477,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     const threadId = this.fleetConfig?.instances[instanceName]?.topic_id;
     this.adapter.sendText(String(groupId), text, {
       threadId: threadId != null ? String(threadId) : undefined,
-    }).catch(e => this.logger.debug({ err: e }, "Failed to send notification"));
+    }).catch(e => this.logger.warn({ err: e, instanceName }, "Failed to send instance topic notification"));
   }
 
   queueMirrorMessage(text: string): void {
@@ -1524,7 +1532,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       ],
     }, {
       threadId: threadId != null ? String(threadId) : undefined,
-    }).catch(e => this.logger.debug({ err: e }, "Failed to send hang notification"));
+    }).catch(e => this.logger.warn({ err: e }, "Failed to send hang notification"));
   }
 
   // ── Topic icon + auto-archive ─────────────────────────────────────────────
@@ -1859,7 +1867,7 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
     const groupId = this.fleetConfig?.channel?.group_id;
     if (groupId && this.adapter) {
       await this.adapter.sendText(String(groupId), `🔄 Full restart initiated — waiting for all instances to idle, then reloading process...`)
-        .catch(e => this.logger.debug({ err: e }, "Failed to post full restart notification"));
+        .catch(e => this.logger.warn({ err: e }, "Failed to post full restart notification"));
     }
 
     // Wait for idle with 5-minute timeout
@@ -1901,7 +1909,9 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
       } else {
         this.logger.warn({ remaining: remaining.map(w => w.name) }, "Windows remain after stopAll — skipping session kill");
       }
-    } catch { /* best effort — don't block exit */ }
+    } catch (err) {
+      this.logger.debug({ err }, "Exit tmux session cleanup failed (best effort)");
+    }
   }
 
   /**
@@ -1978,7 +1988,7 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
     const notifyOpts = { threadId: generalThreadId != null ? String(generalThreadId) : undefined };
     if (groupId && this.adapter) {
       await this.adapter.sendText(String(groupId), `🔄 Graceful restart initiated — waiting for all instances to idle...`, notifyOpts)
-        .catch(e => this.logger.debug({ err: e }, "Failed to post restart notification"));
+        .catch(e => this.logger.warn({ err: e }, "Failed to post restart notification"));
     }
 
     const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
@@ -2031,7 +2041,9 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
           await tm.killWindow();
         }
       }
-    } catch { /* best effort — don't block restart */ }
+    } catch (err) {
+      this.logger.debug({ err }, "Restart tmux window cleanup failed (best effort)");
+    }
 
     const fleet = this.loadConfig(this.configPath);
     this.fleetConfig = fleet;
@@ -2057,7 +2069,7 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
         ? `Fleet ready. ${started}/${total} instances running.`
         : `Fleet ready. ${started}/${total} instances running. Failed: ${failedNames.join(", ")}`;
       await this.adapter.sendText(String(groupId), restartText, notifyOpts)
-        .catch(e => this.logger.debug({ err: e }, "Failed to post restart completion notification"));
+        .catch(e => this.logger.warn({ err: e }, "Failed to post restart completion notification"));
 
       // Notify each instance's channel — tailor message based on session state
       const instances = Object.entries(this.fleetConfig?.instances ?? {});
@@ -2145,7 +2157,9 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
             const data = JSON.parse(readFileSync(statusFile, "utf-8"));
             context_pct = data.context_window?.used_percentage ?? 0;
             cost = data.cost?.total_cost_usd ?? 0;
-          } catch { /* statusline not yet available */ }
+          } catch (err) {
+            this.logger.debug({ err, name }, "statusline.json read failed (/status)");
+          }
           return {
             name,
             status: this.getInstanceStatus(name),
@@ -2168,7 +2182,9 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
           try {
             const tasks = this.scheduler?.db.listTasks({ assignee: inst.name, status: "claimed" });
             if (tasks?.length) currentTask = tasks[0].title;
-          } catch { /* no scheduler */ }
+          } catch (err) {
+            this.logger.debug({ err, name: inst.name }, "Scheduler listTasks failed (/api/fleet)");
+          }
           return {
             ...inst,
             description: config?.description ?? null,
@@ -2289,7 +2305,9 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
               this.logger.info({ oldPid }, "Killed old fleet process");
             }
           }
-        } catch { /* old process already gone */ }
+        } catch (err) {
+          this.logger.debug({ err }, "Old fleet process kill skipped (already gone or no permission)");
+        }
         setTimeout(() => {
           if (!this.healthServer) return;
           this.healthServer.listen(port, "127.0.0.1", () => {
@@ -2321,7 +2339,9 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
         context_pct = data.context_window?.used_percentage ?? 0;
         cost = data.cost?.total_cost_usd ?? 0;
         model = data.model?.display_name ?? "";
-      } catch { /* not yet available */ }
+      } catch (err) {
+        this.logger.debug({ err, name }, "statusline.json read failed (getUiStatus)");
+      }
       return { name, status: this.getInstanceStatus(name), context_pct, cost, model };
     });
     return {
