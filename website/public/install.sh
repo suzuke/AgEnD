@@ -58,9 +58,9 @@ if [ "$OS" = "Linux" ] && grep -qiE "microsoft|WSL" /proc/version 2>/dev/null; t
 
   # Check if node resolves to a Windows binary
   if command_exists node; then
-    NODE_PATH=$(which node)
-    if [[ "$NODE_PATH" == /mnt/c/* ]] || [[ "$NODE_PATH" == /mnt/d/* ]]; then
-      warn "Windows Node.js detected at $NODE_PATH — this causes issues in WSL"
+    NODE_BIN_PATH=$(command -v node)
+    if [[ "$NODE_BIN_PATH" == /mnt/[a-z]/* ]]; then
+      warn "Windows Node.js detected at $NODE_BIN_PATH — this causes issues in WSL"
       warn "Will install a native Linux Node.js via nvm instead"
       # Shadow the Windows node so the version check below triggers nvm install
       node() { return 1; }
@@ -133,8 +133,8 @@ fi
 if [ "$IS_WSL" = true ] && [ -d "${NVM_DIR:-$HOME/.nvm}" ]; then
   export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
   [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-  NODE_PATH=$(which node 2>/dev/null || true)
-  if [[ "$NODE_PATH" == /mnt/c/* ]] || [[ "$NODE_PATH" == /mnt/d/* ]]; then
+  NODE_BIN_PATH=$(command -v node 2>/dev/null || true)
+  if [[ "$NODE_BIN_PATH" == /mnt/[a-z]/* ]]; then
     warn "Windows node still first in PATH — nvm node may not be active"
   fi
 fi
