@@ -1387,6 +1387,17 @@ async function lsAction(opts: { json?: boolean }): Promise<void> {
         }
       } catch { /* ignore */ }
 
+      // Fallback: capture context from tmux pane (e.g. Kiro CLI shows "X% !>")
+      if (context == null) {
+        try {
+          const pane = execFileSync("tmux", tmuxArgs([
+            "capture-pane", "-t", `agend:${name}`, "-p"
+          ]), { encoding: "utf-8", timeout: 2000 });
+          const m = pane.match(/(\d+)%\s*!>\s*$/m);
+          if (m) context = parseInt(m[1], 10);
+        } catch { /* tmux capture failed */ }
+      }
+
       // Memory: sum RSS of pane process tree
       let memMb: number | null = null;
       const panePid = pidByName.get(name);
