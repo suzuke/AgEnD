@@ -114,6 +114,13 @@ graph LR
 
 > **⚠️** All CLI backends run with `--dangerously-skip-permissions` (or equivalent). See [Security](SECURITY.md).
 
+> **WSL (Windows Subsystem for Linux):** Fully supported. The install script auto-detects WSL and avoids using Windows `node.exe` from PATH. If you encounter PATH issues, add to `/etc/wsl.conf`:
+> ```ini
+> [interop]
+> appendWindowsPath=false
+> ```
+> Then restart WSL (`wsl --shutdown`). Install with: `curl -fsSL https://raw.githubusercontent.com/suzuke/AgEnD/main/website/public/install.sh | bash`
+
 ## Documentation
 
 - [Features](docs/features.md) — detailed feature documentation
