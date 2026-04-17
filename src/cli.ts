@@ -1350,6 +1350,15 @@ function formatTimeSince(isoStr: string): string {
   return `${Math.floor(diff / 86_400_000)}d ago`;
 }
 
+/** Backend-specific parsers for extracting context usage from tmux pane output. */
+const contextParsers: Record<string, (output: string) => number | null> = {
+  "kiro-cli": (output) => {
+    // Classic mode: "8% !>" | TUI mode: "◔ 1%"
+    const m = output.match(/(\d+)%\s*!>\s*$/m) || output.match(/◔\s*(\d+)%/);
+    return m ? parseInt(m[1], 10) : null;
+  },
+};
+
 async function lsAction(opts: { json?: boolean }): Promise<void> {
     const yaml = (await import("js-yaml")).default;
     const config = yaml.load(readFileSync(FLEET_CONFIG_PATH, "utf-8")) as import("./types.js").FleetConfig;
@@ -1376,6 +1385,8 @@ async function lsAction(opts: { json?: boolean }): Promise<void> {
     const rows = names.map(name => {
       const status = getInstanceStatusStandalone(name);
       const teams = getTeamsForInstance(config, name);
+      const inst = config.instances[name];
+      const backend = (inst as unknown as Record<string, unknown>)?.backend as string ?? config.defaults?.backend ?? "claude-code";
 
       // Read statusline for context
       let context: number | null = null;
@@ -1386,6 +1397,19 @@ async function lsAction(opts: { json?: boolean }): Promise<void> {
           context = data.context_window?.used_percentage ?? null;
         }
       } catch { /* ignore */ }
+
+      // Fallback: parse context from tmux pane using backend-specific parser
+      if (context == null) {
+        const parser = contextParsers[backend];
+        if (parser) {
+          try {
+            const pane = execFileSync("tmux", tmuxArgs([
+              "capture-pane", "-t", `${sessionName}:${name}`, "-p"
+            ]), { encoding: "utf-8", timeout: 2000 });
+            context = parser(pane);
+          } catch { /* tmux capture failed */ }
+        }
+      }
 
       // Memory: sum RSS of pane process tree
       let memMb: number | null = null;
@@ -1408,9 +1432,6 @@ async function lsAction(opts: { json?: boolean }): Promise<void> {
           }
         } catch { /* ignore */ }
       }
-
-      const inst = config.instances[name];
-      const backend = (inst as unknown as Record<string, unknown>)?.backend as string ?? config.defaults?.backend ?? "claude-code";
 
       return { name, backend, status, teams, context, memMb, lastActivity };
     });
