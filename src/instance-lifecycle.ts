@@ -46,6 +46,40 @@ export interface LifecycleContext {
 
 type Daemon = InstanceType<typeof import("./daemon.js").Daemon>;
 
+/** Arguments accepted by handleCreate — mirrors CreateInstanceArgs in outbound-schemas.ts
+ *  plus internal-only fields forwarded by deploy_template (profile-derived). */
+export interface LifecycleCreateArgs {
+  directory?: string;
+  topic_name?: string;
+  description?: string;
+  model?: string;
+  backend?: string;
+  branch?: string;
+  detach?: boolean;
+  worktree_path?: string;
+  systemPrompt?: string;
+  tags?: string[];
+  workflow?: string | false;
+  model_failover?: string[];
+  tool_set?: string;
+  skipPermissions?: boolean;
+  lightweight?: boolean;
+  /** Internal: used by deploy_template when branch is specified to base a new branch off this ref. */
+  start_point?: string;
+  /** Preserve any other passthrough keys without loss. */
+  [key: string]: unknown;
+}
+
+export interface LifecycleDeleteArgs {
+  name: string;
+  delete_topic?: boolean;
+}
+
+export interface LifecycleReplaceArgs {
+  name: string;
+  reason?: string;
+}
+
 export class InstanceLifecycle {
   /** Active daemon processes: instanceName → Daemon */
   readonly daemons = new Map<string, Daemon>();
@@ -298,16 +332,16 @@ export class InstanceLifecycle {
 
   /** Handle create_instance tool call from a daemon. */
   async handleCreate(
-    args: Record<string, unknown>,
+    args: LifecycleCreateArgs,
     respond: (result: unknown, error?: string) => void,
   ): Promise<void> {
-    const rawDirectory = args.directory as string | undefined;
+    const rawDirectory = args.directory;
     const directory = rawDirectory ? rawDirectory.replace(/^~/, process.env.HOME || "~") : undefined;
-    const topicName = (args.topic_name as string) || (directory ? basename(directory) : undefined);
-    const description = args.description as string | undefined;
-    const systemPrompt = args.systemPrompt as string | undefined;
-    const branch = args.branch as string | undefined;
-    const detach = (args.detach as boolean) ?? false;
+    const topicName = args.topic_name || (directory ? basename(directory) : undefined);
+    const description = args.description;
+    const systemPrompt = args.systemPrompt;
+    const branch = args.branch;
+    const detach = args.detach ?? false;
 
     if (!directory && !topicName) {
       respond(null, "topic_name is required when directory is not specified");
@@ -373,7 +407,7 @@ export class InstanceLifecycle {
 
         await execFileAsync("git", ["rev-parse", "--git-dir"], { cwd: directory });
 
-        const customPath = args.worktree_path as string | undefined;
+        const customPath = args.worktree_path;
         if (customPath) {
           worktreePath = customPath.replace(/^~/, process.env.HOME || "~");
         } else {
@@ -393,7 +427,7 @@ export class InstanceLifecycle {
         } else if (branchExists) {
           await execFileAsync("git", ["worktree", "add", worktreePath, branch], { cwd: directory });
         } else {
-          const startPoint = args.start_point as string | undefined;
+          const startPoint = args.start_point;
           const worktreeArgs = ["worktree", "add", worktreePath, "-b", branch];
           if (startPoint) worktreeArgs.push(startPoint);
           await execFileAsync("git", worktreeArgs, { cwd: directory });
@@ -432,7 +466,7 @@ export class InstanceLifecycle {
       createdTopicId = await this.ctx.createForumTopic(topicName!);
 
       // Use explicit topic_name as name base when provided; fall back to directory basename
-      const explicitTopicName = args.topic_name as string | undefined;
+      const explicitTopicName = args.topic_name;
       const nameBase = explicitTopicName ?? (worktreePath ? topicName! : (directory ? basename(workDir) : topicName!));
       newInstanceName = `${sanitizeInstanceName(nameBase)}-t${createdTopicId}`;
 
@@ -449,14 +483,14 @@ export class InstanceLifecycle {
         topic_id: createdTopicId,
         ...(description ? { description } : {}),
         ...(systemPrompt ? { systemPrompt } : {}),
-        ...(args.model ? { model: args.model as string } : {}),
-        ...(args.backend ? { backend: args.backend as string } : {}),
-        ...(args.model_failover ? { model_failover: args.model_failover as string[] } : {}),
-        ...(args.tool_set ? { tool_set: args.tool_set as string } : {}),
-        ...(args.skipPermissions != null ? { skipPermissions: args.skipPermissions as boolean } : {}),
-        ...(args.lightweight != null ? { lightweight: args.lightweight as boolean } : {}),
-        ...(args.workflow !== undefined ? { workflow: args.workflow === "false" ? false : args.workflow as string } : {}),
-        ...(args.tags ? { tags: args.tags as string[] } : {}),
+        ...(args.model ? { model: args.model } : {}),
+        ...(args.backend ? { backend: args.backend } : {}),
+        ...(args.model_failover ? { model_failover: args.model_failover } : {}),
+        ...(args.tool_set ? { tool_set: args.tool_set } : {}),
+        ...(args.skipPermissions != null ? { skipPermissions: args.skipPermissions } : {}),
+        ...(args.lightweight != null ? { lightweight: args.lightweight } : {}),
+        ...(args.workflow !== undefined ? { workflow: args.workflow === "false" ? false : args.workflow } : {}),
+        ...(args.tags ? { tags: args.tags } : {}),
         ...(worktreePath ? { worktree_source: directory } : {}),
       } as InstanceConfig;
       this.ctx.fleetConfig!.instances[newInstanceName] = instanceConfig;
@@ -506,11 +540,11 @@ export class InstanceLifecycle {
 
   /** Handle delete_instance tool call from a daemon. */
   async handleDelete(
-    args: Record<string, unknown>,
+    args: LifecycleDeleteArgs,
     respond: (result: unknown, error?: string) => void,
   ): Promise<void> {
-    const instanceName = args.name as string;
-    const deleteTopic = (args.delete_topic as boolean) ?? false;
+    const instanceName = args.name;
+    const deleteTopic = args.delete_topic ?? false;
 
     const instanceConfig = this.ctx.fleetConfig?.instances[instanceName];
     if (!instanceConfig) {
@@ -539,11 +573,11 @@ export class InstanceLifecycle {
    *  If the old instance has a worktree_source, ownership transfers to the new instance
    *  implicitly via savedConfig — the worktree itself is not recreated or removed. */
   async handleReplace(
-    args: Record<string, unknown>,
+    args: LifecycleReplaceArgs,
     respond: (result: unknown, error?: string) => void,
   ): Promise<void> {
-    const instanceName = args.name as string;
-    const reason = (args.reason as string) || "replaced";
+    const instanceName = args.name;
+    const reason = args.reason || "replaced";
 
     const oldConfig = this.ctx.fleetConfig?.instances[instanceName];
     if (!oldConfig) { respond(null, `Instance not found: ${instanceName}`); return; }

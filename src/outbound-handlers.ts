@@ -5,7 +5,7 @@ import type { ChannelAdapter } from "./channel/types.js";
 import type { IpcClient } from "./channel/ipc-bridge.js";
 import type { Logger } from "./logger.js";
 import type { RoutingEngine } from "./routing-engine.js";
-import type { InstanceLifecycle } from "./instance-lifecycle.js";
+import type { InstanceLifecycle, LifecycleCreateArgs } from "./instance-lifecycle.js";
 import type { EventLog } from "./event-log.js";
 import type { z } from "zod";
 import {
@@ -524,7 +524,7 @@ const deployTemplate: Handler = async (ctx, rawArgs, respond) => {
         `role:${role}`,
         ...(instanceDef.tags ?? []),
       ];
-      const createArgs: Record<string, unknown> = {
+      const createArgs: LifecycleCreateArgs = {
         directory,
         topic_name: topicName,
         ...(instanceDef.description ? { description: instanceDef.description } : {}),

@@ -7,6 +7,8 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
+import type { LifecycleCreateArgs } from "./instance-lifecycle.js";
+import { CreateInstanceArgs, validateArgs } from "./outbound-schemas.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -36,7 +38,7 @@ export interface WebApiContext {
   removeInstance(name: string): Promise<void>;
   lastInboundUser: Map<string, string>;
   saveFleetConfig(): void;
-  readonly lifecycle: { handleCreate(args: Record<string, unknown>, respond: (result: unknown, error?: string) => void): Promise<void> };
+  readonly lifecycle: { handleCreate(args: LifecycleCreateArgs, respond: (result: unknown, error?: string) => void): Promise<void> };
   connectIpcToInstance(name: string): Promise<void>;
   readonly scheduler: {
     db: {
@@ -294,9 +296,11 @@ export function handleWebRequest(
     (async () => {
       try {
         const body = await parseBody(req);
+        const v = validateArgs(CreateInstanceArgs, body, "create_instance");
+        if (!v.ok) { json(res, 400, { error: v.error }); return; }
         let result: unknown = null;
         let error: string | undefined;
-        await ctx.lifecycle.handleCreate(body, (r, e) => { result = r; error = e; });
+        await ctx.lifecycle.handleCreate(v.data, (r, e) => { result = r; error = e; });
         if (error) {
           json(res, 400, { error });
         } else {
