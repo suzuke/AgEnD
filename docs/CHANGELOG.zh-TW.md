@@ -6,19 +6,230 @@
 
 ## [未發佈] (Unreleased)
 
+## [1.21.7] - 2026-04-17
+
+### 變更
+- **MCP 工具 schema 統一為 zod** — 所有 outbound 工具現在都在 `src/outbound-schemas.ts` 有對應 zod schema；`src/channel/mcp-tools.ts` 透過 `z.toJSONSchema()` 自動產生 `inputSchema`。移除手寫的 JSON Schema。必填欄位現在拒絕空字串（`minLength: 1`），不再依賴 handler 端的 truthy 檢查。
+- **Outbound handler 在入口統一驗證** — `src/outbound-handlers.ts` 的 18 個 handler 先呼叫 `safeParse` 再執行邏輯；先前約 35 處未檢查的 `args.X as string` cast 全部消除。`wrapAsSend` 也接收 schema，`request_information` / `delegate_task` / `report_result` 享有同樣的保證。
+
+## [1.21.6] - 2026-04-17
+
+### 安全
+- **Web API 介面強化**（H1、H2、H7）
+- **daemon 的認證、路徑安全與資料洩漏修補**（H3、H4、H5、H6）
+- **後端命令強化** — `buildCommand()` 加入 model 名稱驗證與 env 值 quoting
+- **CLI 輔助函式** — 避免 shell invocation，並從 `ps` 輸出中遮蔽 token
+- **Scheduler 強化** — 時區白名單、檔案數量上限、lightweight 模式守衛
+- **Kiro MCP wrapper 權限** — `wrapper.sh` 收緊至 `0o700`（僅擁有者）
+- **Outbound 錯誤清理** — 回傳給 agent 的工具錯誤先移除 `$HOME` 路徑並截斷至 300 字元
+
+### 修復
+- **Discord 過期互動崩潰** — adapter 現在捕捉過期互動錯誤以避免 daemon 崩潰（上游 PR #26）
+- **Scheduler 重複觸發** — 原子更新避免兩個 tick 競爭時的重複發動
+
+### 變更
+- **Fleet-manager 錯誤可觀測性** — 先前被吞掉的錯誤現在會記錄；adapter 通知提升至較高嚴重度
+
+## [1.21.5] - 2026-04-15
+
 ### 新增
-- `replace_instance` MCP 工具 — 原子性替換 instance，從 daemon 的 ring buffer 收集交接 context 並透過標準訊息傳遞路徑注入新 instance
-- Workflow template 新增溝通效率規則 — 禁止客套、沉默即同意、合併要點、review 一次來回
+- **`send_to_instance` 錯誤狀態警示** — 當目標 instance 被 rate-limited、暫停或處於 crash loop，發送者會在工具回應中收到警告（#24）
+- **Codex 週限額偵測** — 偵測「less than N% of your weekly limit」警告並透過 Telegram 通知（action: notify）
+
+### 修復
+- **MCP server 透過 ppid 輪詢偵測孤兒** — 主要的孤兒偵測改用 `process.ppid` 輪詢（5 秒間隔）取代 stdin EOF；後者在 macOS 因 libuv/kqueue bug 造成 CPU 空轉而非 `'end'` 事件
+- **Fleet 級 tmux server 熔斷器** — 5 分鐘內 2 次以上 tmux server 崩潰會暫停所有 instance 重生 30 秒，防止 thundering herd
+- **spawn 失敗時的整棵 process 樹終止** — `killProcessTree()` 對整個 process group（CLI + MCP server）發送 SIGTERM，然後才關閉 tmux window
+- **滑動視窗崩潰偵測** — 以 `crashTimestamps` 滑動視窗（5 分鐘內 3 次以上觸發暫停）取代被 backoff > 60s 破壞的 `rapidCrashCount`
+
+## [1.21.4] - 2026-04-14
+
+### 修復
+- **崩潰重生時清理孤兒 MCP server** — daemon 讀取 `channel.mcp.pid`，在 spawn 新 CLI 前先清理孤兒 MCP server
+- **MCP server 的 stdin EOF 偵測** — 加入 `process.stdin.on('end'/'close'/'error')` 監聽與 PID 檔機制（後於 v1.21.5 被 ppid 輪詢取代）
+
+## [1.21.3] - 2026-04-14
+
+### 修復
+- E2E：mock CLI 崩潰應以 exit code 1 結束，而非 0
+
+## [1.21.2] - 2026-04-13
+
+### 修復
+- **延遲寫入 prev-instructions 直到 session 建立** — 避免首次 spawn 失敗時 retry 上的變更偵測失敗
+- E2E：更新 workflow-template 測試斷言以配合新的標題行為
+
+## [1.21.1] - 2026-04-13
+
+### 修復
+- **Kiro CLI 2.0.0 支援** — 更新新版 TUI 的 ready pattern 與啟動對話，修復誤報「找不到」
+
+## [1.21.0] - 2026-04-13
+
+### 新增
+- **CLI 模式** — `agent_mode: cli` 設定從 MCP 工具切換為 HTTP 的 agent CLI 端點
+- **Agent CLI 端點** — 為 MCP 支援不佳的後端提供 HTTP 替代路徑
+- **閒置任務提醒** — 自動對有待辦任務且閒置的 instance 發送提醒
+
+### 修復
+- Kiro：啟動時自動關閉 trust-all-tools TUI 確認
+- OpenCode：`skipResume` 為 true 時不加上 `--continue`
+
+## [1.20.4] - 2026-04-12
+
+### 新增
+- **自動關閉互動式對話** — 後端定義的啟動與執行期對話會自動關閉（trust folders、resume picker、rate limit model 切換）
+- **systemPrompt 支援 `file:` 路徑** — 支援逗號分隔的 `file:` 路徑與 YAML 陣列做多檔 prompt 模組化
+
+### 修復
+- Claude Code：在啟動對話中加入 session resume prompt
+- Instructions：workflow 內容自帶標題時不再出現空的 Development Workflow 標題
+- 健康檢查 server 遇到 EADDRINUSE 時關掉舊 process 並重試
+- Discord onboarding：10 個 UX 痛點修復
+- Kiro：MCP wrapper 中的 env 匯出改為單引號以避免 backtick / dollar 解譯
+
+## [1.20.2] - 2026-04-11
+
+### 新增
+- **`agend health`** — 透過 HTTP 端點（`/health`、`/status`）提供 fleet 健康診斷
+- **Workflow template 溝通效率規則** — 結構化任務流程、沉默即同意、合併要點
+
+### 修復
+- OpenCode `skipResume` 未被遵守 + 重啟通知不一致
+- 目錄不是有效的 git worktree 時安全清理
+
+### 變更
+- 溝通協定重構 — 以結構化任務流程減少 ack 洗頻
+
+## [1.20.0] - 2026-04-10
+
+### 新增
+- **`replace_instance` 工具** — 原子性以新 instance 取代舊 instance，從 daemon 的 ring buffer 收集交接 context
+- **ContextGuardian 簡化為純監控** — 移除 max_age 計時器、狀態機與所有重啟觸發器。
+
+### 修復
+- 崩潰恢復時若 `--resume` 成功則略過 snapshot 注入
+- 刪除 instance 時清理過時的 MCP 項目 + writeConfig
+
+## [1.19.1] - 2026-04-10
+
+### 修復
+- **3 個 UX 痛點** — 重啟時重新載入 instructions、單一 instance 重啟時重新載入設定、Web UI 建立 instance 缺欄位
+
+## [1.19.0] - 2026-04-09
+
+### 新增
+- **Fleet 範本** — `deploy_template` / `teardown_deployment` / `list_deployments` 支援可重用的 fleet 組態
+- **可設定的錯開啟動** — `fleet.yaml` defaults 下的 `startup.concurrency` 與 `startup.stagger_delay_ms`
+- **Fleet 狀態與 MCP `list_instances` 的 Backend 欄位**
+
+### 變更
+- `agend logs` 整合 — 直接讀取 fleet.log
+- `agend fleet status` 與 `agend ls` 合併為單一指令
+
+### 修復
+- fleet 啟動時清理孤兒 tmux window
+- 避免 fleet stopAll 期間的 quit 命令競爭條件
+
+## [1.18.0] - 2026-04-08
+
+### 新增
+- **統一的附加式 system prompt 注入** — 5 種後端全部改用 `--append-system-prompt-file`（Claude Code）、steering 檔（Kiro）或等效機制。Fleet instructions 不再覆蓋內建 prompt。
+
+### 修復
+- instance 停止／刪除時一律關閉 tmux window
+- OpenCode `opencode.json` 使用 "instructions" 而非 "contextPaths"
+
+## [1.17.5] - 2026-04-08
+
+### 新增
+- **崩潰輸出擷取** — 崩潰時擷取 tmux pane 內容供診斷
+- **tmux server 崩潰偵測** — 區分 server 級崩潰與單一 window 崩潰
+
+### 修復
+- Kiro MCP env 隔離 — 以 wrapper script 取代 process.env 污染
+- Kiro MCP transport handshake 失敗 — stdin 競爭條件
+- 關閉 tmux window 前透過 quit 指令優雅結束
+- 健康檢查以 exit code 區分正常離開（0）與崩潰
+- 預先信任 codex 工作區 + 新增 trust 對話 pattern
+- `fleet start --instance` 透過 HTTP API 委派給執行中的 daemon
+
+## [1.17.3] - 2026-04-07
+
+### 新增
+- **`agend ls` 顯示每個 instance 的記憶體使用量**
+- **Channel-aware replies** — inbound meta 帶上 source，並修正格式 passthrough
+
+### 修復
+- Codex MCP shell escape + 重啟時注入過時的 snapshot
+
+## [1.17.1] - 2026-04-07
+
+### 新增
+- **自訂 AGEND_HOME 的 tmux socket 隔離** — 避免多個 AgEnD 安裝互相衝突
+
+## [1.17.0] - 2026-04-07
+
+### 新增
+- **`AGEND_HOME` 環境變數** — 可設定資料目錄（預設：`~/.agend`）
+
+### 修復
+- Kiro CLI 重啟崩潰迴圈 — `skipResume` + tmux 清理
+
+## [1.16.2] - 2026-04-07
+
+### 修復
+- 崩潰重生的孤兒清理不得阻塞 `spawnClaudeWindow`
+
+## [1.16.1] - 2026-04-07
+
+### 修復
+- 避免並行 context 輪轉期間 tmux server 死亡
+- P2 code review 改善
+
+## [1.16.0] - 2026-04-07
+
+### 修復
+- P0+P1 code review 發現（安全性、錯誤處理、邊界條件）
+
+## [1.15.8] - 2026-04-06
+
+### 修復
+- Codex 使用 `resume --last`（依 CWD 範圍，無 SQLite 相依）
+
+## [1.15.6] - 2026-04-06
+
+### 修復
+- Kiro resume 改用 boolean `--resume` 旗標
+
+## [1.15.5] - 2026-04-06
+
+### 修復
+- 錯誤監控僅掃描最後一個 prompt marker 之後（減少誤判）
+
+## [1.15.3] - 2026-04-06
+
+### 修復
+- stop() 清理 + 重啟時 IPC 重連（#14、#12）
+
+## [1.15.1] - 2026-04-06
+
+### 新增
+- **自動注入 active decisions** 到 MCP instructions（透過環境變數）
+- `/update` topic 指令用於刷新 instance 設定
+
+## [1.15.0] - 2026-04-06
+
+### 新增
 - Fleet 事件（輪轉、懸掛、成本警報）的 Webhook 通知
-- 用於外部監控的 HTTP 健康檢查端點 (`/health`, `/status`)
+- 用於外部監控的 HTTP 健康檢查端點（`/health`、`/status`）
 - 在 Context 輪轉時具有驗證與重試機制的結構化交接範本
 - 權限中繼 UX 改進（逾時倒數、持久化的「一律允許」、決定後的回饋）
-- 主題圖示自動更新（執行中/已停止）+ 閒置封存
+- 主題圖示自動更新（執行中 / 已停止）+ 閒置封存
 - 過濾 Telegram 服務訊息（主題重新命名、置頂等）以節省 token
 
 ### 變更
-- **ContextGuardian 簡化為純監控** — 移除 max_age 計時器、狀態機（NORMAL/RESTARTING/GRACE）和所有重啟觸發器。所有 CLI 後端（Claude Code、Codex、Gemini CLI、OpenCode、Kiro CLI）都有內建的 auto-compact 處理 context 限制。
-- **Crash recovery 優先嘗試 --resume** — 崩潰重生時先嘗試 `--resume` 恢復完整對話歷史，失敗才 fallback 到全新 session + snapshot 注入。Resume 成功時節省 context。
+- **Crash recovery 優先嘗試 --resume** — 崩潰重生時先嘗試 `--resume` 恢復完整對話歷史，失敗才 fallback 到全新 session + snapshot 注入
 
 ### 修復
 - 最小化的 `claude-settings.json` — 允許列表中僅包含 AgEnD MCP 工具，不再覆蓋使用者全域的權限設定
