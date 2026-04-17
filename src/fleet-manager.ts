@@ -1400,6 +1400,12 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
 
     await this.lifecycle.remove(name);
 
+    // Clean up per-instance tracking maps so they don't grow unbounded
+    // as instances are created and deleted over the lifetime of the fleet.
+    this.lastActivity.delete(name);
+    this.lastInboundUser.delete(name);
+    this.rateLimitWarnedAt.delete(name);
+
     // Clean up statusline watcher + instance directory
     this.statuslineWatcher.unwatch(name);
     try { rmSync(this.getInstanceDir(name), { recursive: true, force: true }); } catch {}
@@ -1744,6 +1750,11 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
       clearInterval(this.sessionPruneTimer);
       this.sessionPruneTimer = null;
     }
+    if (this.mirrorTimer) {
+      clearTimeout(this.mirrorTimer);
+      this.mirrorTimer = null;
+      this.mirrorBuffer = [];
+    }
     this.topicArchiver.stop();
 
     this.scheduler?.shutdown();
@@ -1792,17 +1803,23 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
     const liveSessions = new Set<string>();
 
     // Ask each daemon for its currently connected external sessions
-    const queries = [...this.instanceIpcClients.entries()].map(([name, ipc]) => {
+    const queries = [...this.instanceIpcClients.entries()].map(([_name, ipc]) => {
       if (!ipc.connected) return Promise.resolve();
       return new Promise<void>((resolve) => {
-        const timeout = setTimeout(resolve, 5000);
-        const handler = (msg: Record<string, unknown>) => {
-          if (msg.type !== "query_sessions_response") return;
-          ipc.removeListener("message", handler);
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
           clearTimeout(timeout);
-          for (const s of msg.sessions as string[]) liveSessions.add(s);
+          ipc.removeListener("message", handler);
           resolve();
         };
+        const handler = (msg: Record<string, unknown>) => {
+          if (msg.type !== "query_sessions_response") return;
+          for (const s of msg.sessions as string[]) liveSessions.add(s);
+          finish();
+        };
+        const timeout = setTimeout(finish, 5000);
         ipc.on("message", handler);
         ipc.send({ type: "query_sessions" });
       });

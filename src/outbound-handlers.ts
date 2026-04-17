@@ -1,3 +1,4 @@
+import { resolve as pathResolve, isAbsolute } from "node:path";
 import type { FleetConfig, InstanceConfig } from "./types.js";
 import type { ChannelAdapter } from "./channel/types.js";
 import type { IpcClient } from "./channel/ipc-bridge.js";
@@ -263,7 +264,17 @@ const createInstance: Handler = async (ctx, args, respond) => {
   await ctx.lifecycle.handleCreate(args, respond);
 };
 
-const deleteInstance: Handler = async (ctx, args, respond) => {
+const deleteInstance: Handler = async (ctx, args, respond, meta) => {
+  const targetName = args.name as string | undefined;
+  if (!targetName) { respond(null, "delete_instance: missing required argument 'name'"); return; }
+  const caller = meta.instanceName;
+  const callerConfig = ctx.fleetConfig?.instances[caller];
+  const isSelf = targetName === caller;
+  const isCoordinator = callerConfig?.general_topic === true;
+  if (!isSelf && !isCoordinator) {
+    respond(null, `delete_instance denied: '${caller}' may only delete itself (coordinator instances may delete any)`);
+    return;
+  }
   await ctx.lifecycle.handleDelete(args, respond);
 };
 
@@ -389,12 +400,19 @@ const updateTeam: Handler = (ctx, args, respond) => {
 const deployTemplate: Handler = async (ctx, args, respond) => {
   const templateName = args.template as string;
   const rawDirectory = args.directory as string | undefined;
-  const directory = rawDirectory?.replace(/^~/, process.env.HOME || "~");
   const deploymentName = (args.name as string) || templateName;
   const branch = args.branch as string | undefined;
 
   if (!templateName) { respond(null, "deploy_template: missing required argument 'template'"); return; }
-  if (!directory) { respond(null, "deploy_template: missing required argument 'directory'"); return; }
+  if (!rawDirectory) { respond(null, "deploy_template: missing required argument 'directory'"); return; }
+
+  // Reject relative paths; require absolute or ~-prefixed. Resolve and normalize (collapses `..`).
+  const expanded = rawDirectory.replace(/^~/, process.env.HOME || "~");
+  if (!isAbsolute(expanded)) {
+    respond(null, `deploy_template: directory must be an absolute path (got: ${rawDirectory})`);
+    return;
+  }
+  const directory = pathResolve(expanded);
   if (!ctx.fleetConfig) { respond(null, "Fleet config not available"); return; }
 
   const template = ctx.fleetConfig.templates?.[templateName];

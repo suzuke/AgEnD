@@ -1,4 +1,4 @@
-import { join, dirname, basename } from "node:path";
+import { join, dirname, basename, resolve } from "node:path";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync, rmSync, appendFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
@@ -1335,11 +1335,20 @@ export class Daemon extends EventEmitter {
   /** Public wrapper for graceful restart — wait for instance to be idle. */
   waitForIdle(quietMs = 5000): Promise<void> {
     return new Promise((resolve) => {
+      const monitor = this.transcriptMonitor;
+      // No transcript monitor (e.g. lightweight mode) — no events to wait for.
+      if (!monitor) { setTimeout(resolve, quietMs); return; }
+
       const events = ["tool_use", "tool_result", "assistant_text"];
       let timer: ReturnType<typeof setTimeout>;
+      let settled = false;
 
       const done = () => {
-        events.forEach(e => this.transcriptMonitor?.removeListener(e, reset));
+        if (settled) return;
+        settled = true;
+        // Always remove from the same monitor we registered on — avoids
+        // imbalance if this.transcriptMonitor is later reassigned.
+        events.forEach(e => monitor.removeListener(e, reset));
         resolve();
       };
       const reset = () => {
@@ -1348,7 +1357,7 @@ export class Daemon extends EventEmitter {
       };
 
       timer = setTimeout(done, quietMs);
-      events.forEach(e => this.transcriptMonitor?.on(e, reset));
+      events.forEach(e => monitor.on(e, reset));
     });
   }
 
@@ -1479,15 +1488,26 @@ export class Daemon extends EventEmitter {
     const { promisify } = await import("node:util");
     const execFileAsync = promisify(execFileCb);
 
-    let source = (args.source as string).replace(/^~/, process.env.HOME || "~");
-    const branch = (args.branch as string) || "HEAD";
+    const rawSource = args.source as string | undefined;
+    if (!rawSource) { respond(null, "checkout_repo: missing required argument 'source'"); return; }
+    const expanded = rawSource.replace(/^~/, process.env.HOME || "~");
 
     // Resolve instance name to working_directory via IPC query
     // If source doesn't look like a path, treat it as an instance name
-    if (!source.startsWith("/")) {
+    if (!expanded.startsWith("/")) {
       // Broadcast to get instance info — but we don't have fleet config in daemon.
       // Instead, rely on fleet manager to resolve. For now, reject non-path sources.
       respond(null, `Source must be an absolute path or ~-prefixed path. Use describe_instance to find a repo's working_directory.`);
+      return;
+    }
+    // Normalize to collapse any `..` segments.
+    const source = resolve(expanded);
+
+    const branch = (args.branch as string) || "HEAD";
+    // Validate branch ref: git refs allow [A-Za-z0-9._/-], reject `..` to prevent
+    // worktreePath escape via basename(source)-${branch.replace("/", "-")}.
+    if (!/^[A-Za-z0-9._/-]+$/.test(branch) || branch.includes("..")) {
+      respond(null, `Invalid branch name: ${branch}`);
       return;
     }
 
