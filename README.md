@@ -61,6 +61,14 @@ AgEnD (**Agent Engineering Daemon**) turns your Telegram or Discord into a comma
 
 ## Quick Start
 
+One-liner (macOS / Linux — installs Node.js via nvm + tmux + agend, then runs quickstart):
+
+```bash
+curl -fsSL https://suzuke.github.io/AgEnD/install.sh | bash
+```
+
+Or install manually:
+
 ```bash
 npm install -g @suzuke/agend    # 1. Install
 agend quickstart                # 2. Setup — bot token, backend, done

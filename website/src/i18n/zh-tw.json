@@ -65,6 +65,11 @@
   "quickstart": {
     "sectionLabel": "開始使用",
     "title": "幾分鐘就能上線",
+    "oneLiner": {
+      "label": "一行安裝（macOS / Linux）",
+      "cmd": "curl -fsSL https://suzuke.github.io/AgEnD/install.sh | bash",
+      "note": "自動裝 Node.js（經 nvm）、tmux、agend，完成後直接帶你進設定精靈。或照下面三步手動來。"
+    },
     "step1": { "label": "安裝", "cmd": "npm install -g @suzuke/agend" },
     "step2": { "label": "設定", "cmd": "agend quickstart" },
     "step3": { "label": "啟動", "cmd": "agend fleet start" },

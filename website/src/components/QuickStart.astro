@@ -18,6 +18,14 @@ const steps = [data.quickstart.step1, data.quickstart.step2, data.quickstart.ste
       <h2 class="font-display font-bold text-3xl sm:text-4xl tracking-tight">{data.quickstart.title}</h2>
     </div>
 
+    <div class="reveal mb-12 mx-auto max-w-3xl">
+      <p class="text-center text-xs uppercase tracking-widest text-text-secondary mb-3">{data.quickstart.oneLiner.label}</p>
+      <div class="bg-bg border border-accent/40 rounded-xl p-5 font-mono text-sm text-text-primary overflow-x-auto whitespace-nowrap">
+        {data.quickstart.oneLiner.cmd}
+      </div>
+      <p class="text-center text-text-secondary text-sm mt-3">{data.quickstart.oneLiner.note}</p>
+    </div>
+
     <div class="grid grid-cols-1 md:grid-cols-3 gap-5 stagger">
       {steps.map((step, i) => (
         <div class="reveal text-center">
