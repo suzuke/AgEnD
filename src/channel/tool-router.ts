@@ -36,6 +36,10 @@ export function routeToolCall(
   switch (tool) {
     case "reply": {
       const files = Array.isArray(args.files) ? args.files as string[] : [];
+      if (files.length > 20) {
+        respond(null, `reply: too many files (${files.length}); max 20 per message`);
+        return true;
+      }
       try {
         for (const f of files) assertSendable(f);
       } catch (e: any) {

@@ -2,6 +2,19 @@ import { Cron } from "croner";
 import { SchedulerDb } from "./db.js";
 import type { Schedule, CreateScheduleParams, UpdateScheduleParams, SchedulerConfig, ScheduleRun } from "./types.js";
 
+/**
+ * Reject unknown timezones. Uses `Intl.DateTimeFormat`, which throws RangeError
+ * for invalid IANA names but accepts canonical aliases like "UTC" that
+ * `Intl.supportedValuesOf("timeZone")` doesn't enumerate.
+ */
+function validateTimezone(tz: string): void {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+  } catch {
+    throw new Error(`Unknown timezone: ${tz}`);
+  }
+}
+
 export class Scheduler {
   readonly db: SchedulerDb;
   private jobs: Map<string, Cron> = new Map();
@@ -40,8 +53,10 @@ export class Scheduler {
   }
 
   create(params: CreateScheduleParams): Schedule {
+    const tz = params.timezone ?? this.config.default_timezone;
+    validateTimezone(tz);
     try {
-      new Cron(params.cron, { timezone: params.timezone ?? this.config.default_timezone });
+      new Cron(params.cron, { timezone: tz });
     } catch (err) {
       throw new Error(`Invalid cron expression: ${(err as Error).message}`);
     }
@@ -64,9 +79,12 @@ export class Scheduler {
   }
 
   update(id: string, params: UpdateScheduleParams): Schedule {
+    if (params.timezone !== undefined) {
+      validateTimezone(params.timezone);
+    }
     if (params.cron !== undefined) {
       try {
-        new Cron(params.cron, { timezone: this.db.get(id)?.timezone ?? this.config.default_timezone });
+        new Cron(params.cron, { timezone: params.timezone ?? this.db.get(id)?.timezone ?? this.config.default_timezone });
       } catch (err) {
         throw new Error(`Invalid cron expression: ${(err as Error).message}`);
       }

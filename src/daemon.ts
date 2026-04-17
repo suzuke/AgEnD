@@ -508,7 +508,8 @@ export class Daemon extends EventEmitter {
     const dialogs = this.backend?.getRuntimeDialogs?.() ?? [];
     if (!patterns.length && !dialogs.length) return;
     if (!this.tmux) return;
-    const readyPattern = this.backend!.getReadyPattern();
+    if (!this.backend) return; // lightweight mode has no backend
+    const readyPattern = this.backend.getReadyPattern();
 
     this.errorMonitorTimer = setInterval(async () => {
       if (!this.tmux || this.spawning) return;
@@ -1038,7 +1039,11 @@ export class Daemon extends EventEmitter {
 
     let decisions: { title: string; content: string }[] | undefined;
     if (process.env.AGEND_DECISIONS) {
-      try { decisions = JSON.parse(process.env.AGEND_DECISIONS); } catch { /* invalid JSON */ }
+      try {
+        decisions = JSON.parse(process.env.AGEND_DECISIONS);
+      } catch (err) {
+        this.logger.warn({ err }, "AGEND_DECISIONS env var is not valid JSON — decisions will not be injected");
+      }
     }
 
     // ── MCP server env (dual-track: still passes env vars for MCP instructions fallback) ──
