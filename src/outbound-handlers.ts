@@ -1,4 +1,5 @@
 import { resolve as pathResolve, isAbsolute } from "node:path";
+import { homedir } from "node:os";
 import type { FleetConfig, InstanceConfig } from "./types.js";
 import type { ChannelAdapter } from "./channel/types.js";
 import type { IpcClient } from "./channel/ipc-bridge.js";
@@ -34,6 +35,23 @@ export interface OutboundMeta {
 
 type Respond = (result: unknown, error?: string) => void;
 type Handler = (ctx: OutboundContext, args: Record<string, unknown>, respond: Respond, meta: OutboundMeta) => Promise<void> | void;
+
+const HOME_DIR = homedir();
+
+/**
+ * Sanitize an error for inclusion in outbound responses sent to agents.
+ * Logs the full error server-side, then returns a redacted message that
+ * drops the user's home directory and truncates length. Agents get enough
+ * context to react without leaking host layout.
+ */
+function sanitizeError(err: unknown, ctx: OutboundContext, operation: string): string {
+  const e = err instanceof Error ? err : new Error(String(err));
+  ctx.logger.warn({ err: e, operation }, `${operation} failed`);
+  let msg = e.message || String(err);
+  if (HOME_DIR) msg = msg.split(HOME_DIR).join("~");
+  if (msg.length > 300) msg = msg.slice(0, 297) + "...";
+  return msg;
+}
 
 // ── Handler implementations ─────────────────────────────────────────────
 
@@ -203,7 +221,7 @@ const startInstance: Handler = async (ctx, args, respond) => {
     await ctx.connectIpcToInstance(targetName);
     respond({ success: true, status: "started" });
   } catch (err) {
-    respond(null, `Failed to start instance '${targetName}': ${(err as Error).message}`);
+    respond(null, `Failed to start instance '${targetName}': ${sanitizeError(err, ctx, `start_instance(${targetName})`)}`);
   }
 };
 
@@ -543,13 +561,13 @@ const deployTemplate: Handler = async (ctx, args, respond) => {
           );
         });
       } catch (e) {
-        rollbackErrors.push(`${inst.name}: ${(e as Error).message}`);
+        rollbackErrors.push(`${inst.name}: ${sanitizeError(e, ctx, `deploy_template.rollback(${inst.name})`)}`);
       }
     }
     const rollbackNote = rollbackErrors.length
       ? ` Rollback errors (manual cleanup needed): ${rollbackErrors.join("; ")}`
       : " All created instances rolled back.";
-    respond(null, `${(err as Error).message}${rollbackNote}`);
+    respond(null, `${sanitizeError(err, ctx, "deploy_template")}${rollbackNote}`);
   }
 };
 
@@ -586,7 +604,7 @@ const teardownDeployment: Handler = async (ctx, args, respond) => {
         );
       });
     } catch (e) {
-      errors.push(`${instanceName}: ${(e as Error).message}`);
+      errors.push(`${instanceName}: ${sanitizeError(e, ctx, `teardown_deployment(${instanceName})`)}`);
     }
   }
 
