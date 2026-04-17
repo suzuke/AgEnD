@@ -1,7 +1,7 @@
 import { join, dirname } from "node:path";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
-import { type CliBackend, type CliBackendConfig, type ErrorPattern, type StartupDialog, resolveBinary } from "./types.js";
+import { type CliBackend, type CliBackendConfig, type ErrorPattern, type StartupDialog, resolveBinary, validateModel } from "./types.js";
 import { appendWithMarker, removeMarker } from "./marker-utils.js";
 
 export class GeminiCliBackend implements CliBackend {
@@ -19,7 +19,7 @@ export class GeminiCliBackend implements CliBackend {
     if (!config.skipResume) cmd += " --resume latest";
 
     if (config.model) {
-      cmd += ` --model ${config.model}`;
+      cmd += ` --model ${validateModel(config.model)}`;
     }
 
     return cmd;

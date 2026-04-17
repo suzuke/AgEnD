@@ -109,3 +109,23 @@ export function resolveBinary(name: string): string {
     return name; // fallback to bare name
   }
 }
+
+/**
+ * Whitelist for model names embedded into the shell command line.
+ * Allows letters, digits, dot, underscore, hyphen, colon, slash
+ * (e.g. "claude-3-5-sonnet", "gpt-4o-mini-2024-07-18", "openrouter/anthropic:beta").
+ * Throws if `model` contains anything else, since `buildCommand` returns a
+ * shell string consumed by tmux and we cannot rely on argv-style quoting.
+ */
+const SAFE_MODEL_RE = /^[A-Za-z0-9._:/-]+$/;
+export function validateModel(model: string): string {
+  if (!SAFE_MODEL_RE.test(model)) {
+    throw new Error(`Invalid model name: ${JSON.stringify(model)} — must match ${SAFE_MODEL_RE}`);
+  }
+  return model;
+}
+
+/** POSIX single-quote escape for embedding arbitrary values in a shell command. */
+export function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`;
+}

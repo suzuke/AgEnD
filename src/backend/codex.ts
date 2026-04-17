@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { type CliBackend, type CliBackendConfig, type ErrorPattern, type RuntimeDialog, type StartupDialog, resolveBinary } from "./types.js";
+import { type CliBackend, type CliBackendConfig, type ErrorPattern, type RuntimeDialog, type StartupDialog, resolveBinary, validateModel } from "./types.js";
 import { appendWithMarker, removeMarker } from "./marker-utils.js";
 
 const CODEX_PROJECT_DOC_MAX_BYTES = 32_768;
@@ -30,7 +30,7 @@ export class CodexBackend implements CliBackend {
     } else {
       cmd = `${this.binaryPath} resume --last ${approvalFlag}`;
     }
-    if (config.model) cmd += ` -c model="${config.model}"`;
+    if (config.model) cmd += ` -c model="${validateModel(config.model)}"`;
     return cmd;
   }
 

@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { type CliBackend, type CliBackendConfig, type ErrorPattern, type StartupDialog, resolveBinary } from "./types.js";
+import { type CliBackend, type CliBackendConfig, type ErrorPattern, type StartupDialog, resolveBinary, validateModel } from "./types.js";
 
 export class OpenCodeBackend implements CliBackend {
   readonly binaryName = "opencode";
@@ -26,7 +26,7 @@ export class OpenCodeBackend implements CliBackend {
     }
 
     if (config.model) {
-      cmd += ` --model ${config.model}`;
+      cmd += ` --model ${validateModel(config.model)}`;
     }
 
     return cmd;

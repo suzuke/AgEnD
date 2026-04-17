@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { type CliBackend, type CliBackendConfig, type ErrorPattern, type RuntimeDialog, type StartupDialog, resolveBinary } from "./types.js";
+import { type CliBackend, type CliBackendConfig, type ErrorPattern, type RuntimeDialog, type StartupDialog, resolveBinary, shellQuote, validateModel } from "./types.js";
 
 
 export class ClaudeCodeBackend implements CliBackend {
@@ -17,9 +17,9 @@ export class ClaudeCodeBackend implements CliBackend {
     const settingsPath = join(this.instanceDir, "claude-settings.json");
     const mcpConfigPath = join(this.instanceDir, "mcp-config.json");
     const envPrefix = ["CMUX_CLAUDE_HOOKS_DISABLED=1", "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1"];
-    if (process.env.ANTHROPIC_BASE_URL) envPrefix.push(`ANTHROPIC_BASE_URL=${process.env.ANTHROPIC_BASE_URL}`);
+    if (process.env.ANTHROPIC_BASE_URL) envPrefix.push(`ANTHROPIC_BASE_URL=${shellQuote(process.env.ANTHROPIC_BASE_URL)}`);
     if (process.env.ANTHROPIC_API_KEY && !this.hasOAuthSession()) {
-      envPrefix.push(`ANTHROPIC_API_KEY=${process.env.ANTHROPIC_API_KEY}`);
+      envPrefix.push(`ANTHROPIC_API_KEY=${shellQuote(process.env.ANTHROPIC_API_KEY)}`);
     }
     let cmd = `${envPrefix.join(" ")} ${this.binaryPath} --settings ${settingsPath} --mcp-config ${mcpConfigPath}`;
     if (config.skipPermissions !== false) cmd += " --dangerously-skip-permissions";
@@ -31,7 +31,7 @@ export class ClaudeCodeBackend implements CliBackend {
     }
 
     if (config.model) {
-      cmd += ` --model ${config.model}`;
+      cmd += ` --model ${validateModel(config.model)}`;
     }
 
     // Additive system prompt: append fleet instructions without overriding Claude's built-in prompt

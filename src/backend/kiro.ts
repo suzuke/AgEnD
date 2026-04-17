@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, unlinkSync } from "node:fs";
-import { type CliBackend, type CliBackendConfig, type ErrorPattern, type StartupDialog, type RuntimeDialog, resolveBinary } from "./types.js";
+import { type CliBackend, type CliBackendConfig, type ErrorPattern, type StartupDialog, type RuntimeDialog, resolveBinary, validateModel } from "./types.js";
 
 export class KiroBackend implements CliBackend {
   readonly binaryName = "kiro-cli";
@@ -15,7 +15,7 @@ export class KiroBackend implements CliBackend {
     if (config.skipPermissions !== false) cmd += " --trust-all-tools";
     // --resume is boolean: Kiro auto-resumes latest conversation for this working directory
     if (!config.skipResume) cmd += " --resume";
-    if (config.model) cmd += ` --model ${config.model}`;
+    if (config.model) cmd += ` --model ${validateModel(config.model)}`;
     cmd += " --require-mcp-startup";
     return cmd;
   }
