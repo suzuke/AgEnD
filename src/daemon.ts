@@ -1,7 +1,8 @@
 import { join, dirname, basename, resolve } from "node:path";
-import { mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync, rmSync, appendFileSync, statSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync, rmSync, appendFileSync, statSync, chmodSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
+import { randomBytes } from "node:crypto";
 import { EventEmitter } from "node:events";
 import type { InstanceConfig, RotationSnapshot, RotationSnapshotEvent } from "./types.js";
 import { createLogger, type Logger } from "./logger.js";
@@ -1222,7 +1223,22 @@ export class Daemon extends EventEmitter {
 
     this.backend!.writeConfig(backendConfig);
     this.backend!.preTrust?.(this.config.working_directory);
-    let envPrefix = `TERM=xterm-256color AGEND_INSTANCE_NAME=${this.name}`;
+
+    // Generate a fresh per-instance agent token each spawn. agent-cli reads
+    // this file from <instanceDir>/agent.token (mode 0o600) and sends its
+    // value in the X-Agend-Instance-Token header; the daemon-side /agent
+    // endpoint verifies it matches the on-disk value for the claimed
+    // instance. This prevents other local processes (even those holding
+    // the global web token) from impersonating instances.
+    const agentTokenPath = join(this.instanceDir, "agent.token");
+    const agentToken = randomBytes(32).toString("hex");
+    writeFileSync(agentTokenPath, agentToken, { mode: 0o600 });
+    try { chmodSync(agentTokenPath, 0o600); } catch {}
+
+    // AGEND_HOME points the child's agent-cli at the same data dir the daemon
+    // is using, so it can locate <instanceDir>/agent.token.
+    const agendHome = join(this.instanceDir, "..", "..");
+    let envPrefix = `TERM=xterm-256color AGEND_INSTANCE_NAME=${this.name} AGEND_HOME=${JSON.stringify(agendHome)}`;
     if (backendConfig.agentMode === "cli" && backendConfig.agentPort) {
       envPrefix += ` AGEND_PORT=${backendConfig.agentPort}`;
     }
