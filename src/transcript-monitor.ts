@@ -10,6 +10,10 @@ export class TranscriptMonitor extends EventEmitter {
   private transcriptPath: string | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private offsetFile: string;
+  /** Reentry guard — if the previous tick is still in flight we drop the
+   *  current one so we never read the same byte range twice and emit
+   *  duplicate tool_use/tool_result events. */
+  private polling = false;
 
   constructor(private instanceDir: string, private logger: Logger) {
     super();
@@ -54,50 +58,56 @@ export class TranscriptMonitor extends EventEmitter {
   }
 
   async pollIncrement(): Promise<void> {
-    if (!this.transcriptPath) {
-      this.transcriptPath = await this.resolveTranscriptPath();
-      if (!this.transcriptPath) return;
-      // If we have a saved offset for a different path, reset
-      // If no saved offset, skip to end (first run)
-      if (this.byteOffset === 0) {
-        try {
-          const initial = await stat(this.transcriptPath);
-          this.byteOffset = initial.size;
-          this.saveOffset();
-          return;
-        } catch { return; }
-      }
-    }
-    if (!existsSync(this.transcriptPath)) return;
-
+    if (this.polling) return;
+    this.polling = true;
     try {
-      const stats = await stat(this.transcriptPath);
-      if (stats.size <= this.byteOffset) return;
-
-      const fh = await open(this.transcriptPath, "r");
-      try {
-        const length = stats.size - this.byteOffset;
-        const buffer = Buffer.alloc(length);
-        await fh.read(buffer, 0, length, this.byteOffset);
-        this.byteOffset = stats.size;
-
-        const text = buffer.toString("utf-8");
-        for (const line of text.split("\n")) {
-          if (!line.trim()) continue;
+      if (!this.transcriptPath) {
+        this.transcriptPath = await this.resolveTranscriptPath();
+        if (!this.transcriptPath) return;
+        // If we have a saved offset for a different path, reset
+        // If no saved offset, skip to end (first run)
+        if (this.byteOffset === 0) {
           try {
-            const entry = JSON.parse(line);
-            this.processEntry(entry);
-          } catch {
-            // Malformed JSONL line in transcript — skip
-          }
+            const initial = await stat(this.transcriptPath);
+            this.byteOffset = initial.size;
+            this.saveOffset();
+            return;
+          } catch { return; }
         }
-
-        this.saveOffset();
-      } finally {
-        await fh.close();
       }
-    } catch (err) {
-      this.logger.debug({ err }, "TranscriptMonitor poll error");
+      if (!existsSync(this.transcriptPath)) return;
+
+      try {
+        const stats = await stat(this.transcriptPath);
+        if (stats.size <= this.byteOffset) return;
+
+        const fh = await open(this.transcriptPath, "r");
+        try {
+          const length = stats.size - this.byteOffset;
+          const buffer = Buffer.alloc(length);
+          await fh.read(buffer, 0, length, this.byteOffset);
+          this.byteOffset = stats.size;
+
+          const text = buffer.toString("utf-8");
+          for (const line of text.split("\n")) {
+            if (!line.trim()) continue;
+            try {
+              const entry = JSON.parse(line);
+              this.processEntry(entry);
+            } catch {
+              // Malformed JSONL line in transcript — skip
+            }
+          }
+
+          this.saveOffset();
+        } finally {
+          await fh.close();
+        }
+      } catch (err) {
+        this.logger.debug({ err }, "TranscriptMonitor poll error");
+      }
+    } finally {
+      this.polling = false;
     }
   }
 

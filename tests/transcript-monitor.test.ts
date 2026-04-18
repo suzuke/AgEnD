@@ -81,4 +81,19 @@ describe("TranscriptMonitor", () => {
     await monitor.pollIncrement(); // no new data
     expect(texts).toHaveLength(1);
   });
+
+  it("P2.4: concurrent pollIncrement calls don't double-emit", async () => {
+    const jsonlPath = join(tmpDir, "transcript.jsonl");
+    const entry = { message: { role: "assistant", content: [{ type: "text", text: "one" }] } };
+    writeFileSync(jsonlPath, JSON.stringify(entry) + "\n");
+
+    monitor.setTranscriptPath(jsonlPath);
+    const texts: string[] = [];
+    monitor.on("assistant_text", (t) => texts.push(t));
+
+    // Fire two overlapping polls — the reentry guard must make the second
+    // bail out early so we emit the event exactly once.
+    await Promise.all([monitor.pollIncrement(), monitor.pollIncrement()]);
+    expect(texts).toHaveLength(1);
+  });
 });
