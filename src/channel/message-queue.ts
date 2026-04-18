@@ -117,12 +117,23 @@ export class MessageQueue {
         continue;
       }
 
-      // Apply flood control: drop status_update items if backoff > threshold
+      // Apply flood control: drop status_update items if backoff > threshold.
+      // The previous implementation dropped the items but forgot to reset the
+      // backoff, so subsequent arrivals kept tripping the same guard and the
+      // backoff ceiling crept toward MAX_BACKOFF_MS even after the queue had
+      // recovered. Reset backoff when flood control actually removes work —
+      // we've paid the cost of dropping traffic and should give the next
+      // send a clean attempt.
       if (state.backoffMs > FLOOD_CONTROL_THRESHOLD_MS) {
         const before = state.items.length;
         state.items = state.items.filter(item => item.type !== "status_update");
         if (before !== state.items.length) {
-          // Items were dropped; reset backoff now that we've cleaned up
+          state.backoffMs = INITIAL_BACKOFF_MS;
+          state.backoffUntil = 0;
+          this.logger?.warn(
+            { chatId: state.key.chatId, dropped: before - state.items.length },
+            "Flood control dropped status updates and reset backoff",
+          );
         }
       }
 
