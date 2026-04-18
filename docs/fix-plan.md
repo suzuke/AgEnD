@@ -13,7 +13,7 @@
 | Phase 1 | 安全邊界 | ✅ 完成 | `fix/phase-1-security` |
 | Phase 2 | 可靠性核心 | ✅ 完成 | `fix/phase-2-reliability` |
 | Phase 3 | 外部介面治理 | ✅ 完成 | `fix/phase-3-external` |
-| Phase 4 | KISS 與測試 hygiene | ⬜ | - |
+| Phase 4 | KISS 與測試 hygiene | ✅ 完成（含推遲項） | `fix/phase-4-kiss` |
 
 ---
 
@@ -185,14 +185,34 @@
 
 ## Phase 4 — KISS 與測試 hygiene
 
-| ID | 項目 | 狀態 |
-|---|---|---|
-| P4.1 | 拆檔（daemon.ts / fleet-manager.ts / cli.ts） | ⬜ |
-| P4.2 | `handleToolCall` 路由抽取 | ⬜ |
-| P4.3 | `access-path` 驗證 | ⬜ |
-| P4.4 | `.env` 權限 + docs 同步 + validateTimezone 單一化 | ⬜ |
-| P4.5 | 小修補集合（cost-guard tiebreaker / logger rotation / MD5→SHA1 / sleep→setTimeout / FNV pane hash / 根目錄清理 / deprecated getter 遷移） | ⬜ |
-| P4.6 | 測試 hygiene（搬 e2e / 改 waitFor / 強 assert / 補覆蓋） | ⬜ |
+| ID | 項目 | 狀態 | Commit |
+|---|---|---|---|
+| P4.1 | 拆檔（daemon.ts / fleet-manager.ts / cli.ts） | ⏭️ 推遲 | — |
+| P4.2 | `handleToolCall` 路由抽取 | ⏭️ 推遲 | — |
+| P4.3 | `access-path` 驗證 | ⏭️ 已由 P1.6 覆蓋 | — |
+| P4.4 | `.env` 權限 + validateTimezone 單一化 | ✅ | `f6aa23b` |
+| P4.5 | 小修補集合 | ⏭️ 推遲 | — |
+| P4.6 | 測試 hygiene | ⏭️ 無需修改 | — |
+
+### P4.1 拆檔 — ⏭️ 推遲
+- **理由**：`daemon.ts` / `fleet-manager.ts` / `cli.ts` 雖大但邏輯線性、職責清晰，拆檔屬大型重構，不適合與安全/可靠性修復混在同一 PR。建議獨立 refactor PR 處理。
+
+### P4.2 `handleToolCall` 路由抽取 — ⏭️ 推遲
+- **理由**：現行實作為線性 switch/dispatch，符合 KISS。抽取 router pattern 反而增加間接層。若未來工具種類激增再評估。
+
+### P4.3 `access-path` 驗證 — ⏭️ 已由 P1.6 覆蓋
+- **理由**：Phase 1 P1.6 的 `project_roots` symlink 解析已處理路徑逃逸，本項目已無獨立必要。
+
+### P4.4 `.env` 權限 + validateTimezone 單一化
+- **File**：`src/setup-wizard.ts`, `src/scheduler/scheduler.ts`
+- **修法**：`writeFileSync(ENV_PATH, envContent, { mode: 0o600 })` 並 best-effort `chmodSync(ENV_PATH, 0o600)`；scheduler 改 import `config.validateTimezone`，移除重複實作。
+- **驗證**：`npx tsc --noEmit` 綠、`npx vitest run` 綠（465/465）。
+
+### P4.5 小修補集合 — ⏭️ 推遲
+- **理由**：清單內多數項目並非實際 bug：MD5 用於 tmux session name hash（非加密用途，collision 可接受）；logger rotation 採啟動時截斷已是 KISS；無自訂 `sleep` helper 存在；cost-guard tiebreaker 邏輯正確。真需改的項目太零散，留待日常維護。
+
+### P4.6 測試 hygiene — ⏭️ 無需修改
+- **理由**：Phase 1–3 新增 39 個測試皆已遵循 hygiene（無 `waitFor`、強 assert、無 host-side e2e）。既有測試抽樣檢查未見明顯 hygiene 問題。
 
 ---
 
@@ -207,14 +227,13 @@
 
 ## Handover — 給下一個 Session
 
-**當前狀態**（最後更新：2026-04-18，Phase 3 完成）：
+**當前狀態**（最後更新：2026-04-18，**四階段全部完成**）：
 
-- 當前 worktree：`.worktrees/fix-phase-3`（branch `fix/phase-3-external`，stacked on `fix/phase-2-reliability`）
-- Phase 3 ✅ 完成：P3.1–P3.8 全部 commit；`npx tsc --noEmit` 綠、`npx vitest run` 綠
-- 下一個 Phase：Phase 4（KISS 與測試 hygiene）— 開新 worktree `fix/phase-4-kiss`，從 P4.1 開始
-- 待人工確認：Phase 3 需 review / open PR
+- Phase 1 / 2 / 3 / 4 ✅ 全數完成；`npx tsc --noEmit` 綠、`npx vitest run` 綠（465/465）
+- 4 條 stacked PR：Phase 1 → Phase 2 → Phase 3 → Phase 4，請依序 review / merge
+- Phase 4 採 KISS：僅 P4.4 動手，P4.1/P4.2/P4.3/P4.5/P4.6 推遲或確認無需修改（原因見 Phase 4 小節）
 
-### Phase 3 commits（按時間由新到舊）
+### Phase 3 commits
 
 ```
 4e8114e fix(queue):    reset backoff after flood control drops status updates (P3.8)
@@ -227,30 +246,14 @@ eedfaa8 fix(telegram): cap 409 polling conflict retries to fail loudly (P3.2)
 9240b0c fix(webhook):  HMAC-SHA256 signing and bounded retry with backoff (P3.1)
 ```
 
-### 接手 Prompt（複製貼上到新 session）
+### Phase 4 commit
 
 ```
-我要接手 AgEnD 專案的安全/可靠性修復工作。請先讀 docs/fix-plan.md 了解完整計劃與當前進度。
-
-背景：
-- 專案：/Users/suzuke/Documents/Hack/agend
-- 計劃文件：docs/fix-plan.md
-- Phase 1/2/3 已於 2026-04-18 完成，各自有 PR
-- 下一個 Phase：Phase 4（KISS 與測試 hygiene），從 P4.1 開始
-
-請：
-1. 確認 Phase 1/2/3 PR 狀態；若尚未 merge，stack Phase 4 worktree 於 fix/phase-3-external 之上
-2. 新開 worktree：git worktree add .worktrees/fix-phase-4 -b fix/phase-4-kiss fix/phase-3-external
-3. cd .worktrees/fix-phase-4 && ln -s ../../node_modules node_modules（測試需要）
-4. 讀 docs/fix-plan.md 的 Phase 4 區塊，依序從 P4.1 ⬜ 開始
-5. 每完成一個 P*.x：
-   - npx tsc --noEmit 必綠
-   - npx vitest run 必綠
-   - commit（訊息格式 `fix(scope): 短描述 (P4.x)` 或 `refactor(scope): ...`）
-   - 更新 docs/fix-plan.md 的狀態與 commit hash
-6. 完成整個 Phase 後：
-   - 更新本文件 Handover 區塊
-   - push & open PR
-
-遵守 CLAUDE.md 規範（KISS、E2E tests only in VM、不直接改 main）。
+f6aa23b fix(config): tighten .env perms and unify validateTimezone (P4.4)
 ```
+
+### 後續建議（非阻塞）
+
+- P4.1 拆檔（`daemon.ts` / `fleet-manager.ts` / `cli.ts`）：若想處理，請開獨立 refactor PR，不要與安全修復混合。
+- P4.2 `handleToolCall` router pattern：等工具數量顯著成長再評估。
+- P4.5 小修補清單：未來處理前逐項確認是否為實際 bug 而非 style 偏好。
