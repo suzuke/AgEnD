@@ -311,6 +311,19 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
     // Start tmux control mode client for idle detection
     if (!this.controlClient) {
       this.controlClient = new TmuxControlClient(getTmuxSession(), 2000, this.logger);
+      // On reconnect, pane→window maps were cleared because pane IDs may have
+      // been recycled. Re-register every live daemon's window so idle detection
+      // resumes working.
+      this.controlClient.on("reconnected", () => {
+        for (const [name, daemon] of this.daemons) {
+          const wid = daemon.getWindowId();
+          if (wid) {
+            this.controlClient?.registerWindow(wid).catch(err => {
+              this.logger.debug({ err, name, wid }, "re-register after reconnect failed");
+            });
+          }
+        }
+      });
       this.controlClient.start();
     }
     // Stop any running daemons first (their health checks would respawn killed windows)

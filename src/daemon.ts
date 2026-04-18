@@ -797,7 +797,7 @@ export class Daemon extends EventEmitter {
     }
   }
 
-  private getWindowId(): string | undefined {
+  getWindowId(): string | undefined {
     try {
       return readFileSync(join(this.instanceDir, "window-id"), "utf-8").trim() || undefined;
     } catch {

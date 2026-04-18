@@ -35,6 +35,7 @@ export class TmuxControlClient extends EventEmitter {
   private paneToWindow = new Map<string, string>();  // paneId → windowId
   private stopped = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private hadPreviousConnection = false;
 
   constructor(
     private sessionName: string,
@@ -169,6 +170,11 @@ export class TmuxControlClient extends EventEmitter {
     this.rl.on("line", (line) => this.parseLine(line));
 
     this.proc.on("close", () => {
+      // Drop stale state — %output timestamps are invalid after a gap, and
+      // pane IDs may have been recycled by tmux while we were disconnected.
+      // On reconnect, listeners must re-register their windows.
+      this.paneToWindow.clear();
+      this.lastOutputAt.clear();
       this.cleanup();
       if (!this.stopped) {
         this.logger?.debug("Control mode disconnected — reconnecting in 2s");
@@ -181,6 +187,11 @@ export class TmuxControlClient extends EventEmitter {
     });
 
     this.logger?.debug("tmux control mode connected");
+    if (this.hadPreviousConnection) {
+      // Give listeners a tick to attach via .on("reconnected", ...) before firing.
+      setImmediate(() => this.emit("reconnected"));
+    }
+    this.hadPreviousConnection = true;
   }
 
   private parseLine(line: string): void {
