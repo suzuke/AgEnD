@@ -12,7 +12,7 @@
 |---|---|---|---|
 | Phase 1 | 安全邊界 | ✅ 完成 | `fix/phase-1-security` |
 | Phase 2 | 可靠性核心 | ✅ 完成 | `fix/phase-2-reliability` |
-| Phase 3 | 外部介面治理 | ⬜ | - |
+| Phase 3 | 外部介面治理 | ✅ 完成 | `fix/phase-3-external` |
 | Phase 4 | KISS 與測試 hygiene | ⬜ | - |
 
 ---
@@ -130,16 +130,56 @@
 
 ## Phase 3 — 外部介面治理
 
-| ID | 項目 | 狀態 |
-|---|---|---|
-| P3.1 | Webhook HMAC + retry 策略 | ⬜ |
-| P3.2 | Telegram 409 polling 上限 | ⬜ |
-| P3.3 | Telegram apiRoot 白名單 | ⬜ |
-| P3.4 | STT 隱私開關（opt-in） | ⬜ |
-| P3.5 | CORS 收緊 + Bearer header | ⬜ |
-| P3.6 | `/update` 安全化（版本鎖、回滾、二次確認） | ⬜ |
-| P3.7 | IPC 單行上限 10MB → 1MB | ⬜ |
-| P3.8 | MessageQueue flood control reset | ⬜ |
+| ID | 項目 | 狀態 | Commit |
+|---|---|---|---|
+| P3.1 | Webhook HMAC + retry 策略 | ✅ | `9240b0c` |
+| P3.2 | Telegram 409 polling 上限 | ✅ | `eedfaa8` |
+| P3.3 | Telegram apiRoot 白名單 | ✅ | `3b0db65` |
+| P3.4 | STT 隱私開關（opt-in） | ✅ | `13e1190` |
+| P3.5 | CORS 收緊 + Bearer header | ✅ | `5454967` |
+| P3.6 | `/update` 安全化（版本鎖、回滾、二次確認） | ✅ | `e3118b9` |
+| P3.7 | IPC 單行上限 10MB → 1MB | ✅ | `8fe7fa1` |
+| P3.8 | MessageQueue flood control reset | ✅ | `4e8114e` |
+
+### P3.1 Webhook HMAC + retry
+- **File**：`src/webhook-emitter.ts`, `src/types.ts`, `tests/webhook-emitter.test.ts`
+- **修法**：`WebhookConfig` 新增 `secret` / `max_attempts`；有 secret 時以 HMAC-SHA256 簽 body，送 `X-Agend-Signature: sha256=<hex>`；原本「只重試 1 次」改為 bounded exponential backoff（預設 3 次，1s/2s/4s），4xx 視為 non-retryable 立即失敗。
+- **驗證**：5 個新測試（HMAC 有/無 secret、5xx 重試、4xx 不重試、超過上限停止）。
+
+### P3.2 Telegram 409 polling cap
+- **File**：`src/channel/adapters/telegram.ts`
+- **修法**：409 Conflict 重試加上 `MAX_CONFLICT_ATTEMPTS = 30`（約 7 分鐘 backoff）上限；達上限 emit `polling_conflict_fatal` + `error` 讓 operator 介入。
+- **驗證**：既有 telegram 測試涵蓋。
+
+### P3.3 Telegram apiRoot allowlist
+- **File**：`src/channel/adapters/telegram.ts`, `tests/telegram-api-root.test.ts`
+- **修法**：新增 `validateTelegramApiRoot(raw)` 白名單（預設 api.telegram.org + loopback），可透過 `AGEND_TELEGRAM_API_ROOT_ALLOWLIST` 加自訂 host。constructor 呼叫前驗證。
+- **驗證**：6 個新測試（官方/loopback 允許、第三方拒絕、非 http(s) 拒絕、URL malformed 拒絕、env 覆寫）。
+
+### P3.4 STT opt-in
+- **File**：`src/channel/attachment-handler.ts`, `tests/attachment-handler.test.ts`
+- **修法**：轉語音改為需要 `AGEND_STT_ENABLED=1` 明示 opt-in；單純設定 `GROQ_API_KEY` 不再算同意上傳。
+- **驗證**：3 個新測試（未 opt-in 不下載/不轉錄；opt-in 但無 key；opt-in 時 file_id 仍附上）。
+
+### P3.5 CORS 收緊 + Bearer
+- **File**：`src/fleet-manager.ts`, `src/web-auth.ts`, `tests/web-auth.test.ts`
+- **修法**：預設關閉 CORS；`AGEND_WEB_CORS_ORIGINS` 指定允許 origin 才回 Access-Control-Allow-Origin；OPTIONS 預檢 origin 不合法回 403。Auth 支援 `Authorization: Bearer` / `X-Agend-Token` / `?token=`（順序）；helper 抽到 `src/web-auth.ts`。
+- **驗證**：14 個新測試（Bearer/X-header/query 三路、大小寫、CORS 白名單與 `*`、env 解析）。
+
+### P3.6 `/update` 兩步確認 + 版本鎖
+- **File**：`src/topic-commands.ts`, `tests/update-version.test.ts`
+- **修法**：`/update [version]` 先顯示 preview（目前版本、目標版本、6-hex token），60 秒內 `/update confirm <token>` 才真正執行；`validateUpdateVersion()` 白名單 `[A-Za-z0-9][A-Za-z0-9._+-]*` 拒絕 shell meta / 路徑 / URL。
+- **驗證**：7 個新測試（各種合法 semver/dist-tag、shell 注入、path、空白、前綴拒絕）。
+
+### P3.7 IPC 1MB 上限
+- **File**：`src/channel/ipc-bridge.ts`, `tests/ipc-bridge.test.ts`
+- **修法**：`MAX_LINE_BUFFER` 10MB → 1MB；可透過 `AGEND_IPC_MAX_LINE_MB` 覆寫；export `makeLineParser` 便於測試。
+- **驗證**：5 個新測試（上限範圍、正常解析、overflow 觸發、overflow 後能恢復、malformed JSON 容忍）。
+
+### P3.8 MessageQueue flood control reset
+- **File**：`src/channel/message-queue.ts`, `tests/message-queue.test.ts`
+- **修法**：flood control 丟棄 status_update 後同時 reset `backoffMs` / `backoffUntil`，避免 backoff 繼續膨脹；加上警告 log。
+- **驗證**：2 個新測試（status_update 被丟棄後 backoff reset；content 不被丟棄時 backoff 持續膨脹）。
 
 ---
 
@@ -167,24 +207,24 @@
 
 ## Handover — 給下一個 Session
 
-**當前狀態**（最後更新：2026-04-18，Phase 2 完成）：
+**當前狀態**（最後更新：2026-04-18，Phase 3 完成）：
 
-- 當前 worktree：`.worktrees/fix-phase-2`（branch `fix/phase-2-reliability`，stacked on `fix/phase-1-security`）
-- Phase 2 ✅ 完成：P2.1–P2.8 全部 commit；`npx tsc --noEmit` 綠、`npx vitest run` 423/423 全綠
-- 下一個 Phase：Phase 3（外部介面治理）— 開新 worktree `fix/phase-3-external`，從 P3.1 Webhook HMAC 開始
-- 待人工確認：Phase 2 需 review / open PR；若 Phase 1 尚未合回 main，Phase 3 worktree 可再 stack 在 Phase 2 之上
+- 當前 worktree：`.worktrees/fix-phase-3`（branch `fix/phase-3-external`，stacked on `fix/phase-2-reliability`）
+- Phase 3 ✅ 完成：P3.1–P3.8 全部 commit；`npx tsc --noEmit` 綠、`npx vitest run` 綠
+- 下一個 Phase：Phase 4（KISS 與測試 hygiene）— 開新 worktree `fix/phase-4-kiss`，從 P4.1 開始
+- 待人工確認：Phase 3 需 review / open PR
 
-### Phase 2 commits（按時間由新到舊）
+### Phase 3 commits（按時間由新到舊）
 
 ```
-1c982b8 fix(cost-guard): DST-safe msUntilMidnight via Intl formatToParts (P2.8)
-4cc5f6b fix(daemon):     transcript-idle wait in place of fixed 10s sleep on spawn (P2.7)
-d672bfa fix(archiver):   persist archived-topics set across daemon restarts (P2.6)
-cbc9e76 fix(sse):        idempotent client cleanup on req/res close + drop dead writers (P2.5)
-1f4ebea fix(transcript): guard against reentrant pollIncrement (P2.4)
-47d36c8 fix(scheduler):  catch up missed runs on startup within window (P2.3)
-f5bc568 fix(cost-guard): reset warn/limit flags on session rotation (P2.2)
-8b716c0 fix(tmux):       clear stale pane map and re-register on control reconnect (P2.1)
+4e8114e fix(queue):    reset backoff after flood control drops status updates (P3.8)
+8fe7fa1 fix(ipc):      cap single line buffer at 1 MB (was 10 MB) (P3.7)
+e3118b9 fix(update):   two-step confirm + version pinning for /update (P3.6)
+5454967 fix(web):      lock down CORS by default and accept Bearer auth (P3.5)
+13e1190 fix(stt):      require explicit opt-in before transcribing user voice (P3.4)
+3b0db65 fix(telegram): allowlist apiRoot to block bot-token exfiltration (P3.3)
+eedfaa8 fix(telegram): cap 409 polling conflict retries to fail loudly (P3.2)
+9240b0c fix(webhook):  HMAC-SHA256 signing and bounded retry with backoff (P3.1)
 ```
 
 ### 接手 Prompt（複製貼上到新 session）
@@ -195,21 +235,21 @@ f5bc568 fix(cost-guard): reset warn/limit flags on session rotation (P2.2)
 背景：
 - 專案：/Users/suzuke/Documents/Hack/agend
 - 計劃文件：docs/fix-plan.md
-- Phase 1（安全邊界）、Phase 2（可靠性核心）已於 2026-04-18 完成，各自有 PR
-- 下一個 Phase：Phase 3（外部介面治理），從 P3.1 開始
+- Phase 1/2/3 已於 2026-04-18 完成，各自有 PR
+- 下一個 Phase：Phase 4（KISS 與測試 hygiene），從 P4.1 開始
 
 請：
-1. 確認 Phase 1/2 PR 狀態；若尚未 merge，stack Phase 3 worktree 於 fix/phase-2-reliability 之上
-2. 新開 worktree：git worktree add .worktrees/fix-phase-3 -b fix/phase-3-external fix/phase-2-reliability
-3. cd .worktrees/fix-phase-3 && ln -s ../../node_modules node_modules（測試需要）
-4. 讀 docs/fix-plan.md 的 Phase 3 區塊，依序從 P3.1 ⬜ 開始
+1. 確認 Phase 1/2/3 PR 狀態；若尚未 merge，stack Phase 4 worktree 於 fix/phase-3-external 之上
+2. 新開 worktree：git worktree add .worktrees/fix-phase-4 -b fix/phase-4-kiss fix/phase-3-external
+3. cd .worktrees/fix-phase-4 && ln -s ../../node_modules node_modules（測試需要）
+4. 讀 docs/fix-plan.md 的 Phase 4 區塊，依序從 P4.1 ⬜ 開始
 5. 每完成一個 P*.x：
    - npx tsc --noEmit 必綠
    - npx vitest run 必綠
-   - commit（訊息格式 `fix(scope): 短描述 (P3.x)`）
+   - commit（訊息格式 `fix(scope): 短描述 (P4.x)` 或 `refactor(scope): ...`）
    - 更新 docs/fix-plan.md 的狀態與 commit hash
 6. 完成整個 Phase 後：
-   - 更新本文件 Handover 區塊（含下一 Phase 的接手 prompt）
+   - 更新本文件 Handover 區塊
    - push & open PR
 
 遵守 CLAUDE.md 規範（KISS、E2E tests only in VM、不直接改 main）。
