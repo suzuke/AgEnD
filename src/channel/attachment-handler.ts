@@ -34,11 +34,15 @@ export async function processAttachments(
     }
   }
 
-  // Transcribe voice/audio
+  // Transcribe voice/audio — opt-in only. Uploading user voice to a third-party
+  // STT service is a privacy decision the operator must make explicitly; the
+  // presence of GROQ_API_KEY alone (which may be set for unrelated features) is
+  // not sufficient consent. Set AGEND_STT_ENABLED=1 to enable.
   const voiceAttachment = msg.attachments?.find(a => a.kind === "voice" || a.kind === "audio");
   if (voiceAttachment) {
+    const sttEnabled = process.env.AGEND_STT_ENABLED === "1";
     const groqKey = process.env.GROQ_API_KEY;
-    if (groqKey) {
+    if (sttEnabled && groqKey) {
       try {
         const localPath = await adapter.downloadAttachment(voiceAttachment.fileId);
         const result = await transcribe(localPath, groqKey);
@@ -49,6 +53,8 @@ export async function processAttachments(
         logger.warn({ err: (err as Error).message }, "Voice transcription failed");
         text = text || "[Voice message — transcription failed]";
       }
+    } else if (!sttEnabled) {
+      text = text || "[Voice message — STT disabled (set AGEND_STT_ENABLED=1 to enable)]";
     } else {
       text = text || "[Voice message — STT API key not set]";
     }
