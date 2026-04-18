@@ -10,7 +10,7 @@
 
 | Phase | 範圍 | 狀態 | 分支 |
 |---|---|---|---|
-| Phase 1 | 安全邊界 | 🟦 進行中 | `fix/phase-1-security` |
+| Phase 1 | 安全邊界 | ✅ 完成 | `fix/phase-1-security` |
 | Phase 2 | 可靠性核心 | ⬜ | - |
 | Phase 3 | 外部介面治理 | ⬜ | - |
 | Phase 4 | KISS 與測試 hygiene | ⬜ | - |
@@ -21,14 +21,14 @@
 
 | ID | 項目 | 狀態 | Commit |
 |---|---|---|---|
-| P1.1 | `/agent` endpoint 身份驗證（per-instance token） | ⬜ | - |
-| P1.2 | `web.token` 檔權限 0o600 | ⬜ | - |
-| P1.3 | `/ui/*` 與 `/agent` 全面 zod 化 | ⬜ | - |
-| P1.4 | Zip-slip 防護 | ⬜ | - |
-| P1.5 | Service installer template injection | ⬜ | - |
-| P1.6 | `project_roots` symlink 繞過 | ⬜ | - |
-| P1.7 | `confirmPairing` rate-limit 修復 | ⬜ | - |
-| P1.8 | Branch / tmux 命令注入防護 | ⬜ | - |
+| P1.1 | `/agent` endpoint 身份驗證（per-instance token） | ✅ | `3d2cdd3` |
+| P1.2 | `web.token` 檔權限 0o600 | ✅ | `6efd3a9` |
+| P1.3 | `/ui/*` 與 `/agent` 全面 zod 化 | ✅ | `8e7c716` |
+| P1.4 | Zip-slip 防護 | ✅ | `5dff398` |
+| P1.5 | Service installer template injection | ✅ | `1ba2c16` |
+| P1.6 | `project_roots` symlink 繞過 | ✅ | `de67e6d` |
+| P1.7 | `confirmPairing` rate-limit 修復 | ✅ | `ee8691a` |
+| P1.8 | Branch / tmux 命令注入防護 | ✅ | `c3216ab` |
 
 ### P1.1 `/agent` endpoint 身份偽造
 - **File**: `src/agent-endpoint.ts`, `src/agent-cli.ts`, `src/fleet-manager.ts`
@@ -129,12 +129,26 @@
 
 ## Handover — 給下一個 Session
 
-**當前狀態**（最後更新：待第一次 commit 後填入）：
+**當前狀態**（最後更新：2026-04-18，Phase 1 完成）：
 
-- 最近 commit：
-- 當前 worktree：`.worktrees/fix-phase-1`（branch `fix/phase-1-security`）
-- 已完成：（無）
-- 下一個待辦：
+- 當前 worktree：`.worktrees/fix-phase-1`（branch `fix/phase-1-security`，領先 main 9 commits）
+- Phase 1 ✅ 完成：P1.1–P1.8 全部 commit；`npx tsc --noEmit` 綠、`npx vitest run` 404/405（唯一 fail 為 `tests/context-guardian.test.ts` 的 watchFile 計時 flake，單跑通過，與本 Phase 改動無關）
+- 下一個 Phase：Phase 2（可靠性核心）— 開新 worktree `fix/phase-2-reliability`，從 P2.1 TmuxControlClient reconnect 清 pane map 開始
+- 待人工確認：Phase 1 需 review / open PR 合回 main；Phase 2 應從合回後的 main 分支出
+
+### Phase 1 commits（按時間由新到舊）
+
+```
+3d2cdd3 fix(agent): require per-instance token on /agent endpoint (P1.1)
+8e7c716 fix(web):   strict zod validation for all /ui/* mutation endpoints (P1.3)
+1ba2c16 fix(service): validate template vars to prevent directive injection (P1.5)
+5dff398 fix(import): validate tar entries before extraction (P1.4)
+de67e6d fix(security): resolve symlinks when enforcing project_roots (P1.6)
+c3216ab fix(cmd):     harden branch and logPath against argument injection (P1.8)
+ee8691a fix(access):  forward callerUserId from confirmPairing for rate-limit (P1.7)
+6efd3a9 fix(web):     set web.token file permission to 0o600 (P1.2)
+0a1a935 docs: add fix plan from ultrareview
+```
 
 ### 接手 Prompt（複製貼上到新 session）
 
@@ -144,21 +158,22 @@
 背景：
 - 專案：/Users/suzuke/Documents/Hack/agend
 - 計劃文件：docs/fix-plan.md
-- 當前 Phase：Phase 1（安全邊界）
-- 當前 worktree：.worktrees/fix-phase-1（branch fix/phase-1-security）
+- Phase 1（安全邊界）已於 2026-04-18 完成，branch：fix/phase-1-security（9 commits），等待 PR / merge
+- 下一個 Phase：Phase 2（可靠性核心），從 P2.1 開始
 
 請：
-1. 切到該 worktree：cd .worktrees/fix-phase-1
-2. git log --oneline fix/phase-1-security ^main 查看已完成 commits
-3. 檢查 docs/fix-plan.md 的進度表找到下一個 ⬜ 項目
-4. 繼續該項目的實作
+1. 若 Phase 1 還沒合回 main：先讓我確認是否 open PR，再決定要不要等 merge
+2. 新開 worktree：git worktree add .worktrees/fix-phase-2 -b fix/phase-2-reliability
+3. cd .worktrees/fix-phase-2 && ln -s ../../node_modules node_modules（測試需要）
+4. 讀 docs/fix-plan.md 的 Phase 2 區塊，依序從 P2.1 ⬜ 開始
 5. 每完成一個 P*.x：
-   - 跑 npm test 確認未 break 現有測試
-   - commit（訊息格式 `fix(scope): 短描述 (P1.x)`）
+   - npx tsc --noEmit 必綠
+   - npx vitest run 必綠（忽略既有的 context-guardian watchFile flake）
+   - commit（訊息格式 `fix(scope): 短描述 (P2.x)`）
    - 更新 docs/fix-plan.md 的狀態與 commit hash
 6. 完成整個 Phase 後：
-   - 更新 Handover 區塊
+   - 更新本文件 Handover 區塊（含下一 Phase 的接手 prompt）
    - 提示我 review & open PR
 
-遵守 CLAUDE.md 規範（KISS、E2E tests only in VM）。
+遵守 CLAUDE.md 規範（KISS、E2E tests only in VM、不直接改 main）。
 ```
