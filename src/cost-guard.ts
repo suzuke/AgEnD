@@ -86,6 +86,12 @@ export class CostGuard extends EventEmitter {
     tracker.accumulatedCents += sessionCents;
     const previousUsd = tracker.lastReportedUsd;
     tracker.lastReportedUsd = 0;
+    // Reset per-session notification flags so the next session gets its own
+    // warn/limit notifications even if total (accumulated + new session) still
+    // straddles the same thresholds — the operator wants to know when a fresh
+    // session also ramps up spending, not only the first time it crosses today.
+    tracker.warnEmitted = false;
+    tracker.limitEmitted = false;
 
     this.eventLog.insert(instance, "cost_snapshot", {
       session_cost_usd: previousUsd,

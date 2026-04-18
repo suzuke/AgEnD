@@ -111,6 +111,26 @@ describe("CostGuard", () => {
     expect(guard.getFleetTotalCents()).toBe(650);
   });
 
+  it("re-emits warn after rotation if new session crosses threshold (P2.2)", () => {
+    const warnSpy = vi.fn();
+    guard.on("warn", warnSpy);
+    guard.updateCost("agent1", 8.50);        // total 850 → warn fires
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    guard.snapshotAndReset("agent1");        // accumulated 850, flags cleared
+    guard.updateCost("agent1", 0.50);        // total 900 → warn fires again
+    expect(warnSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("re-emits limit after rotation if new session crosses limit (P2.2)", () => {
+    const limitSpy = vi.fn();
+    guard.on("limit", limitSpy);
+    guard.updateCost("agent1", 10.50);       // total 1050 → limit fires
+    expect(limitSpy).toHaveBeenCalledTimes(1);
+    guard.snapshotAndReset("agent1");        // flags cleared
+    guard.updateCost("agent1", 0.10);        // total 1060 → limit fires again
+    expect(limitSpy).toHaveBeenCalledTimes(2);
+  });
+
   it("does not emit warn/limit twice for the same day", () => {
     const warnSpy = vi.fn();
     const limitSpy = vi.fn();
