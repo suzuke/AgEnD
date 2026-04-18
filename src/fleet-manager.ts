@@ -1539,9 +1539,23 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
   /** Push an SSE event to all connected Web UI clients. */
   emitSseEvent(event: string, data: unknown): void {
     const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+    // Collect dead clients and remove them after iteration to avoid mutating
+    // during the for-of walk. A client is dead if its socket was destroyed
+    // (e.g. network dropped, peer closed) — writes to it would throw and, on
+    // older Node, silently buffer forever.
+    const dead: import("node:http").ServerResponse[] = [];
     for (const client of this.sseClients) {
-      client.write(payload);
+      if (client.destroyed || client.writableEnded) {
+        dead.push(client);
+        continue;
+      }
+      try {
+        client.write(payload);
+      } catch {
+        dead.push(client);
+      }
     }
+    for (const client of dead) this.sseClients.delete(client);
   }
 
   listClaimedTasks(assignee: string): Array<{ id: string; title: string }> {

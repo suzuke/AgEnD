@@ -234,10 +234,20 @@ export function handleWebRequest(
     const interval = setInterval(() => {
       res.write(`event: status\ndata: ${JSON.stringify(ctx.getUiStatus())}\n\n`);
     }, 10_000);
-    req.on("close", () => {
+    // Idempotent cleanup — removing from the Set and clearing the heartbeat
+    // on any of the signals that mean "client is gone". Without listening to
+    // both req+res close and socket errors, network blips could leave stale
+    // entries in ctx.sseClients and the heartbeat running forever.
+    let cleanedUp = false;
+    const cleanup = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
       ctx.sseClients.delete(res);
       clearInterval(interval);
-    });
+    };
+    req.on("close", cleanup);
+    res.on("close", cleanup);
+    res.on("error", cleanup);
     return true;
   }
 

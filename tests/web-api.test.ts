@@ -145,4 +145,28 @@ describe("web-api zod validation", () => {
     );
     expect(res.status).toBe(400);
   });
+
+  it("P2.5: GET /ui/events cleans up sseClients on req close", () => {
+    const sseClients = new Set<ServerResponse>();
+    const customCtx = makeCtx({ sseClients });
+    const req = makeReq("GET", "/ui/events");
+    const res = new CaptureRes(req);
+    const urlObj = new URL("/ui/events", "http://localhost");
+    handleWebRequest(req, res, urlObj, customCtx);
+    expect(sseClients.size).toBe(1);
+    (req as unknown as { emit: (e: string) => boolean }).emit("close");
+    expect(sseClients.size).toBe(0);
+  });
+
+  it("P2.5: GET /ui/events cleans up on res close", () => {
+    const sseClients = new Set<ServerResponse>();
+    const customCtx = makeCtx({ sseClients });
+    const req = makeReq("GET", "/ui/events");
+    const res = new CaptureRes(req);
+    const urlObj = new URL("/ui/events", "http://localhost");
+    handleWebRequest(req, res, urlObj, customCtx);
+    expect(sseClients.size).toBe(1);
+    (res as unknown as { emit: (e: string) => boolean }).emit("close");
+    expect(sseClients.size).toBe(0);
+  });
 });
