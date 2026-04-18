@@ -141,4 +141,118 @@ describe("Scheduler", () => {
     expect(count).toBe(1);
     expect(scheduler.list()).toHaveLength(0);
   });
+
+  it("P2.3: catches up a missed fire on init when within window", async () => {
+    // Create schedule via first instance, seed last_triggered_at to be
+    // older than the most recent expected fire.
+    const s = scheduler.create({
+      cron: "*/5 * * * *",           // every 5 minutes
+      message: "catchup",
+      source: "proj-a",
+      target: "proj-a",
+      reply_chat_id: "1",
+      reply_thread_id: null,
+    });
+    // Directly poke the db to simulate "daemon was down for 10 minutes after
+    // the last trigger" — last_triggered 20 min ago; previous expected fire
+    // ≤5 min ago, which is strictly newer than last_triggered.
+    const twentyMinAgo = new Date(Date.now() - 20 * 60_000).toISOString();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ((scheduler.db as unknown) as { db: import("better-sqlite3").Database })
+      .db.prepare("UPDATE schedules SET last_triggered_at = ? WHERE id = ?")
+      .run(twentyMinAgo, s.id);
+    scheduler.shutdown();
+
+    // Reopen scheduler — init() should catch up.
+    triggered.length = 0;
+    scheduler = new Scheduler(
+      join(dir, "scheduler.db"),
+      (schedule) => { triggered.push(schedule); },
+      DEFAULT_SCHEDULER_CONFIG,
+      () => true,
+    );
+    scheduler.init();
+    // setImmediate — wait a tick for the catch-up to fire.
+    await new Promise((r) => setImmediate(r));
+    expect(triggered.map((t) => t.id)).toContain(s.id);
+  });
+
+  it("P2.3: does not catch up outside window", async () => {
+    const s = scheduler.create({
+      cron: "*/5 * * * *",
+      message: "stale",
+      source: "proj-a",
+      target: "proj-a",
+      reply_chat_id: "1",
+      reply_thread_id: null,
+    });
+    const oneHourAgo = new Date(Date.now() - 60 * 60_000).toISOString();
+    ((scheduler.db as unknown) as { db: import("better-sqlite3").Database })
+      .db.prepare("UPDATE schedules SET last_triggered_at = ? WHERE id = ?")
+      .run(oneHourAgo, s.id);
+    scheduler.shutdown();
+
+    // Re-open with a 0.001-min window — any prev fire older than 60ms skips.
+    triggered.length = 0;
+    scheduler = new Scheduler(
+      join(dir, "scheduler.db"),
+      (schedule) => { triggered.push(schedule); },
+      { ...DEFAULT_SCHEDULER_CONFIG, catchup_window_minutes: 0.001 },
+      () => true,
+    );
+    scheduler.init();
+    await new Promise((r) => setImmediate(r));
+    expect(triggered.map((t) => t.id)).not.toContain(s.id);
+  });
+
+  it("P2.3: catchup_window_minutes=0 disables catch-up entirely", async () => {
+    const s = scheduler.create({
+      cron: "*/5 * * * *",
+      message: "disabled-catchup",
+      source: "proj-a",
+      target: "proj-a",
+      reply_chat_id: "1",
+      reply_thread_id: null,
+    });
+    const twentyMinAgo = new Date(Date.now() - 20 * 60_000).toISOString();
+    ((scheduler.db as unknown) as { db: import("better-sqlite3").Database })
+      .db.prepare("UPDATE schedules SET last_triggered_at = ? WHERE id = ?")
+      .run(twentyMinAgo, s.id);
+    scheduler.shutdown();
+
+    triggered.length = 0;
+    scheduler = new Scheduler(
+      join(dir, "scheduler.db"),
+      (schedule) => { triggered.push(schedule); },
+      { ...DEFAULT_SCHEDULER_CONFIG, catchup_window_minutes: 0 },
+      () => true,
+    );
+    scheduler.init();
+    await new Promise((r) => setImmediate(r));
+    expect(triggered.map((t) => t.id)).not.toContain(s.id);
+  });
+
+  it("P2.3: does not catch up a fresh schedule with no prior trigger", async () => {
+    // Create and immediately restart — schedule has null last_triggered_at.
+    scheduler.create({
+      cron: "*/5 * * * *",
+      message: "fresh",
+      source: "proj-a",
+      target: "proj-a",
+      reply_chat_id: "1",
+      reply_thread_id: null,
+    });
+    scheduler.shutdown();
+
+    triggered.length = 0;
+    scheduler = new Scheduler(
+      join(dir, "scheduler.db"),
+      (schedule) => { triggered.push(schedule); },
+      DEFAULT_SCHEDULER_CONFIG,
+      () => true,
+    );
+    scheduler.init();
+    await new Promise((r) => setImmediate(r));
+    expect(triggered).toHaveLength(0);
+  });
 });

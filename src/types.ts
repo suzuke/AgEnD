@@ -122,6 +122,7 @@ export interface FleetDefaults extends Partial<InstanceConfig> {
     default_timezone?: string;
     retry_count?: number;
     retry_interval_ms?: number;
+    catchup_window_minutes?: number;
   };
   startup?: {
     concurrency?: number;

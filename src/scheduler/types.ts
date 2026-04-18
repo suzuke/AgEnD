@@ -47,6 +47,13 @@ export interface SchedulerConfig {
   default_timezone: string;
   retry_count: number;
   retry_interval_ms: number;
+  /**
+   * How long after a missed cron fire we still catch up on startup, in minutes.
+   * If the daemon was down longer than this, the missed fire is skipped to
+   * avoid surprising the user with very stale notifications. 0 disables
+   * catch-up entirely.
+   */
+  catchup_window_minutes: number;
 }
 
 export const DEFAULT_SCHEDULER_CONFIG: SchedulerConfig = {
@@ -54,6 +61,7 @@ export const DEFAULT_SCHEDULER_CONFIG: SchedulerConfig = {
   default_timezone: "Asia/Taipei",
   retry_count: 3,
   retry_interval_ms: 30_000,
+  catchup_window_minutes: 60,
 };
 
 // ── Shared Decisions ──────────────────────────────────────────

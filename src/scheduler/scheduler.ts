@@ -39,7 +39,42 @@ export class Scheduler {
 
   init(): void {
     this.db.pruneOldRuns();
+    this.catchUpMissedRuns();
     this.registerAllJobs();
+  }
+
+  /**
+   * On startup, fire any schedule whose most recent expected cron time is
+   * within `catchup_window_minutes` and newer than last_triggered_at. This
+   * covers daemon downtime (crash, reboot) without triggering stale fires
+   * from long outages or fresh schedules (which have no last_triggered_at).
+   */
+  private catchUpMissedRuns(): void {
+    const windowMin = this.config.catchup_window_minutes ?? 0;
+    if (windowMin <= 0) return;
+    const now = Date.now();
+    const maxAgeMs = windowMin * 60_000;
+    for (const schedule of this.db.list()) {
+      if (!schedule.enabled) continue;
+      // Never triggered before = fresh schedule, don't fire catch-up at install time.
+      if (!schedule.last_triggered_at) continue;
+      let prev: Date | undefined;
+      try {
+        const [firstPrev] = new Cron(schedule.cron, { timezone: schedule.timezone })
+          .previousRuns(1, new Date(now));
+        prev = firstPrev;
+      } catch {
+        continue;
+      }
+      if (!prev) continue;
+      const prevMs = prev.getTime();
+      const lastTriggeredMs = Date.parse(schedule.last_triggered_at);
+      if (!Number.isFinite(lastTriggeredMs)) continue;
+      if (prevMs <= lastTriggeredMs) continue;  // already ran at/after the last expected fire
+      if (now - prevMs > maxAgeMs) continue;    // too stale to be useful
+      // Defer to next tick so callers don't hit onTrigger before init() returns.
+      setImmediate(() => this.runWithLock(schedule));
+    }
   }
 
   reload(): void {
