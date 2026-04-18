@@ -1,6 +1,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
+import { randomBytes } from "node:crypto";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
 
@@ -11,6 +12,25 @@ import { DEFAULT_INSTANCE_CONFIG } from "./config.js";
 import { formatCents } from "./cost-guard.js";
 import { detectPlatform } from "./service-installer.js";
 
+/** npm-compatible version spec. Accepts semver (1.2.3, 1.2.3-beta.1),
+ *  dist-tags (latest, next, beta), or empty → "latest". Anything else
+ *  (shell meta, spaces, paths) is refused so it can't escape the
+ *  `npm install -g @suzuke/agend@<VERSION>` argument. */
+export function validateUpdateVersion(raw: string | undefined): string {
+  const v = (raw ?? "").trim();
+  if (!v) return "latest";
+  if (!/^[A-Za-z0-9][A-Za-z0-9._+-]*$/.test(v)) {
+    throw new Error(`Invalid version spec: ${raw}`);
+  }
+  return v;
+}
+
+interface PendingUpdate {
+  version: string;
+  token: string;
+  expiresAt: number;
+}
+
 /** Sanitize a directory name into a valid instance name. Keeps Unicode letters (incl. CJK). */
 export function sanitizeInstanceName(name: string): string {
   const sanitized = name.toLowerCase().replace(/[^\p{L}\d-]/gu, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
@@ -18,6 +38,9 @@ export function sanitizeInstanceName(name: string): string {
 }
 
 export class TopicCommands {
+  /** Per-user pending /update confirmations. Cleared on confirm or expiry. */
+  private pendingUpdates = new Map<string, PendingUpdate>();
+
   constructor(private ctx: FleetContext) {}
 
   /** Parse and dispatch commands from the General topic */
@@ -135,20 +158,122 @@ export class TopicCommands {
     if (!this.ctx.adapter) return;
     const chatId = msg.chatId;
     const threadId = msg.threadId;
+    const userId = String(msg.userId);
 
     // Access control — only allowed users can trigger update
     const allowed = this.ctx.fleetConfig?.channel?.access?.allowed_users ?? [];
-    if (allowed.length > 0 && !allowed.some(u => String(u) === String(msg.userId))) {
+    if (allowed.length > 0 && !allowed.some(u => String(u) === userId)) {
       await this.ctx.adapter.sendText(chatId, "⛔ Not authorized", { threadId });
       return;
     }
 
-    await this.ctx.adapter.sendText(chatId, "📦 Updating AgEnD...", { threadId });
+    // Parse arguments. Supported forms (after the command token is stripped):
+    //   /update                        → preview update to @latest, require confirmation
+    //   /update <version>              → preview pinned update, require confirmation
+    //   /update confirm <token>        → execute the pending update for this user
+    const text = (msg.text ?? "").trim();
+    const parts = text.split(/\s+/).slice(1); // drop "/update" or "/update@bot"
+    const subcommand = parts[0];
+
+    if (subcommand === "confirm") {
+      await this.runConfirmedUpdate(msg, parts[1] ?? "");
+      return;
+    }
+
+    // Preview phase: validate version and stash a confirmation token.
+    let version: string;
+    try {
+      version = validateUpdateVersion(subcommand);
+    } catch (err) {
+      await this.ctx.adapter.sendText(
+        chatId,
+        `❌ ${(err as Error).message}. Use /update [version] (e.g. /update 1.22.0 or /update latest).`,
+        { threadId },
+      );
+      return;
+    }
+
+    const token = randomBytes(3).toString("hex"); // 6-char hex is ample for a 60s TTL
+    const expiresAt = Date.now() + 60_000;
+    this.pendingUpdates.set(userId, { version, token, expiresAt });
+
+    const currentVersion = this.getCurrentPackageVersion();
+    await this.ctx.adapter.sendText(
+      chatId,
+      [
+        "⚙️ Update preview",
+        `Current: ${currentVersion ?? "unknown"}`,
+        `Target:  @suzuke/agend@${version}`,
+        "",
+        `Reply within 60s to confirm: /update confirm ${token}`,
+      ].join("\n"),
+      { threadId },
+    );
+  }
+
+  /** Read version from the running package. Returns null on failure. */
+  private getCurrentPackageVersion(): string | null {
+    try {
+      const pkg = JSON.parse(readFileSync(join(this.ctx.dataDir, "..", "package.json"), "utf-8"));
+      if (typeof pkg.version === "string") return pkg.version;
+    } catch { /* ignore */ }
+    // Fall back to reading from the installed package's own entry path.
+    try {
+      const selfPkg = JSON.parse(
+        readFileSync(new URL("../package.json", import.meta.url), "utf-8"),
+      );
+      if (typeof selfPkg.version === "string") return selfPkg.version;
+    } catch { /* ignore */ }
+    return null;
+  }
+
+  private async runConfirmedUpdate(msg: InboundMessage, providedToken: string): Promise<void> {
+    if (!this.ctx.adapter) return;
+    const chatId = msg.chatId;
+    const threadId = msg.threadId;
+    const userId = String(msg.userId);
+
+    const pending = this.pendingUpdates.get(userId);
+    if (!pending) {
+      await this.ctx.adapter.sendText(
+        chatId,
+        "❌ No pending update. Run /update first.",
+        { threadId },
+      );
+      return;
+    }
+    if (Date.now() > pending.expiresAt) {
+      this.pendingUpdates.delete(userId);
+      await this.ctx.adapter.sendText(
+        chatId,
+        "⏳ Confirmation expired. Run /update again.",
+        { threadId },
+      );
+      return;
+    }
+    if (providedToken.trim() !== pending.token) {
+      await this.ctx.adapter.sendText(
+        chatId,
+        "❌ Wrong confirmation token.",
+        { threadId },
+      );
+      return;
+    }
+
+    this.pendingUpdates.delete(userId);
+    const version = pending.version;
+    await this.ctx.adapter.sendText(chatId, `📦 Installing @suzuke/agend@${version}...`, { threadId });
 
     try {
-      await execAsync("npm install -g @suzuke/agend@latest", { timeout: 120_000 });
+      // version is already shape-validated by validateUpdateVersion; safe to
+      // interpolate into the npm argument.
+      await execAsync(`npm install -g @suzuke/agend@${version}`, { timeout: 120_000 });
     } catch {
-      await this.ctx.adapter.sendText(chatId, "❌ npm install failed. Try manually: npm install -g @suzuke/agend@latest", { threadId });
+      await this.ctx.adapter.sendText(
+        chatId,
+        `❌ npm install failed. Try manually: npm install -g @suzuke/agend@${version}`,
+        { threadId },
+      );
       return;
     }
 
