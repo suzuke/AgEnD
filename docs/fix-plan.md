@@ -11,7 +11,7 @@
 | Phase | 範圍 | 狀態 | 分支 |
 |---|---|---|---|
 | Phase 1 | 安全邊界 | ✅ 完成 | `fix/phase-1-security` |
-| Phase 2 | 可靠性核心 | ⬜ | - |
+| Phase 2 | 可靠性核心 | ✅ 完成 | `fix/phase-2-reliability` |
 | Phase 3 | 外部介面治理 | ⬜ | - |
 | Phase 4 | KISS 與測試 hygiene | ⬜ | - |
 
@@ -75,18 +75,56 @@
 
 ## Phase 2 — 可靠性核心
 
-| ID | 項目 | 狀態 |
-|---|---|---|
-| P2.1 | TmuxControlClient reconnect 清 pane map | ⬜ |
-| P2.2 | Cost guard rotation reset emitted flags | ⬜ |
-| P2.3 | Scheduler catch-up 機制 | ⬜ |
-| P2.4 | TranscriptMonitor 防重入 | ⬜ |
-| P2.5 | SSE client 清理 | ⬜ |
-| P2.6 | Topic archiver 持久化 | ⬜ |
-| P2.7 | 啟動 waitForIdle 取代 setTimeout | ⬜ |
-| P2.8 | msUntilMidnight DST 修復 | ⬜ |
+| ID | 項目 | 狀態 | Commit |
+|---|---|---|---|
+| P2.1 | TmuxControlClient reconnect 清 pane map | ✅ | `8b716c0` |
+| P2.2 | Cost guard rotation reset emitted flags | ✅ | `f5bc568` |
+| P2.3 | Scheduler catch-up 機制 | ✅ | `47d36c8` |
+| P2.4 | TranscriptMonitor 防重入 | ✅ | `1f4ebea` |
+| P2.5 | SSE client 清理 | ✅ | `cbc9e76` |
+| P2.6 | Topic archiver 持久化 | ✅ | `d672bfa` |
+| P2.7 | 啟動 waitForIdle 取代 setTimeout | ✅ | `4cc5f6b` |
+| P2.8 | msUntilMidnight DST 修復 | ✅ | `1c982b8` |
 
-詳細修法見原 review 彙整。
+### P2.1 TmuxControlClient reconnect pane map
+- **File**：`src/tmux-control.ts`, `src/daemon.ts`, `src/fleet-manager.ts`, `tests/tmux-control.test.ts`
+- **修法**：reconnect 前清 `paneToWindow` / `lastOutputAt`，重連成功後 emit `reconnected`；FleetManager 訂閱重連事件，對所有 daemon 重跑 `registerWindow(wid)`。
+- **驗證**：`tests/tmux-control.test.ts` 以 private state cast 檢查清理與 reconnected 事件。
+
+### P2.2 Cost guard rotation flags reset
+- **File**：`src/cost-guard.ts`, `tests/cost-guard.test.ts`
+- **修法**：`snapshotAndReset` 內重置 `warnEmitted` / `limitEmitted`，使新 session 跨閾值時仍觸發通知。
+- **驗證**：新增 rotation 後 warn/limit 再觸發測試。
+
+### P2.3 Scheduler catch-up window
+- **File**：`src/scheduler/scheduler.ts`, `src/scheduler/types.ts`, `src/types.ts`, `src/scheduler/scheduler.test.ts`
+- **修法**：新增 `catchup_window_minutes`（預設 60，0 停用）。init() 對每個 schedule 用 `Cron(...).previousRuns(1, now)` 抓上次觸發時間，若 `last_triggered_at` 在它之前且距今 ≤ 窗內，setImmediate 補跑一次。
+- **驗證**：3 個新測試（窗內補跑、窗外不跑、全新 schedule 不補跑）。
+
+### P2.4 TranscriptMonitor reentrancy guard
+- **File**：`src/transcript-monitor.ts`, `tests/transcript-monitor.test.ts`
+- **修法**：欄位 `polling: boolean`，`pollIncrement` 入口 `if (this.polling) return; this.polling = true;`，try/finally 還原。
+- **驗證**：併發呼叫測試只處理一次。
+
+### P2.5 SSE client cleanup
+- **File**：`src/web-api.ts`, `src/fleet-manager.ts`, `tests/web-api.test.ts`
+- **修法**：`/ui/events` idempotent cleanup（`cleanedUp` flag），req.close / res.close / res.error 三路觸發；`emitSseEvent` 寫入前檢查 `destroyed || writableEnded`，寫入 throw 則標記 dead，迴圈後批次移除。
+- **驗證**：2 個新測試驗 req.close 與 res.close 都會清。
+
+### P2.6 Topic archiver persistence
+- **File**：`src/topic-archiver.ts`, `src/fleet-manager.ts`, `tests/topic-archiver.test.ts`
+- **修法**：constructor 接 `persistPath`（預設 `<dataDir>/archived-topics.json`）；`load()` 讀取並容忍壞檔；`archiveIdle` / `reopen` 修改後呼叫 `save()` 寫 JSON 陣列。
+- **驗證**：3 個新測試（persist+reload、reopen 移除、壞檔容忍）。
+
+### P2.7 Startup waitForIdle in place of 10s sleep
+- **File**：`src/daemon.ts`
+- **修法**：spawn 後用 `Promise.race([waitForIdle(5_000), setTimeout(startup_timeout_ms ?? 25_000)])` 取代固定 10s sleep。
+- **驗證**：原有 daemon 測試覆蓋；idle 較快時可提前進入就緒。
+
+### P2.8 msUntilMidnight DST safety
+- **File**：`src/cost-guard.ts`, `tests/cost-guard.test.ts`
+- **修法**：改用 `Intl.DateTimeFormat` + `hourCycle: "h23"` 讀 TZ-local h/m/s，直接算 `(24 - h) * 3_600_000 - m * 60_000 - s * 1000`；結果 clamp 到 `[1 min, 25 h]` 吸收 DST ±1h 漂移。export helper 便於直接測試。
+- **驗證**：對 UTC / America/New_York / Asia/Taipei 斷言回傳值落在合理區間。
 
 ---
 
@@ -129,25 +167,24 @@
 
 ## Handover — 給下一個 Session
 
-**當前狀態**（最後更新：2026-04-18，Phase 1 完成）：
+**當前狀態**（最後更新：2026-04-18，Phase 2 完成）：
 
-- 當前 worktree：`.worktrees/fix-phase-1`（branch `fix/phase-1-security`，領先 main 9 commits）
-- Phase 1 ✅ 完成：P1.1–P1.8 全部 commit；`npx tsc --noEmit` 綠、`npx vitest run` 404/405（唯一 fail 為 `tests/context-guardian.test.ts` 的 watchFile 計時 flake，單跑通過，與本 Phase 改動無關）
-- 下一個 Phase：Phase 2（可靠性核心）— 開新 worktree `fix/phase-2-reliability`，從 P2.1 TmuxControlClient reconnect 清 pane map 開始
-- 待人工確認：Phase 1 需 review / open PR 合回 main；Phase 2 應從合回後的 main 分支出
+- 當前 worktree：`.worktrees/fix-phase-2`（branch `fix/phase-2-reliability`，stacked on `fix/phase-1-security`）
+- Phase 2 ✅ 完成：P2.1–P2.8 全部 commit；`npx tsc --noEmit` 綠、`npx vitest run` 423/423 全綠
+- 下一個 Phase：Phase 3（外部介面治理）— 開新 worktree `fix/phase-3-external`，從 P3.1 Webhook HMAC 開始
+- 待人工確認：Phase 2 需 review / open PR；若 Phase 1 尚未合回 main，Phase 3 worktree 可再 stack 在 Phase 2 之上
 
-### Phase 1 commits（按時間由新到舊）
+### Phase 2 commits（按時間由新到舊）
 
 ```
-3d2cdd3 fix(agent): require per-instance token on /agent endpoint (P1.1)
-8e7c716 fix(web):   strict zod validation for all /ui/* mutation endpoints (P1.3)
-1ba2c16 fix(service): validate template vars to prevent directive injection (P1.5)
-5dff398 fix(import): validate tar entries before extraction (P1.4)
-de67e6d fix(security): resolve symlinks when enforcing project_roots (P1.6)
-c3216ab fix(cmd):     harden branch and logPath against argument injection (P1.8)
-ee8691a fix(access):  forward callerUserId from confirmPairing for rate-limit (P1.7)
-6efd3a9 fix(web):     set web.token file permission to 0o600 (P1.2)
-0a1a935 docs: add fix plan from ultrareview
+1c982b8 fix(cost-guard): DST-safe msUntilMidnight via Intl formatToParts (P2.8)
+4cc5f6b fix(daemon):     transcript-idle wait in place of fixed 10s sleep on spawn (P2.7)
+d672bfa fix(archiver):   persist archived-topics set across daemon restarts (P2.6)
+cbc9e76 fix(sse):        idempotent client cleanup on req/res close + drop dead writers (P2.5)
+1f4ebea fix(transcript): guard against reentrant pollIncrement (P2.4)
+47d36c8 fix(scheduler):  catch up missed runs on startup within window (P2.3)
+f5bc568 fix(cost-guard): reset warn/limit flags on session rotation (P2.2)
+8b716c0 fix(tmux):       clear stale pane map and re-register on control reconnect (P2.1)
 ```
 
 ### 接手 Prompt（複製貼上到新 session）
@@ -158,22 +195,22 @@ ee8691a fix(access):  forward callerUserId from confirmPairing for rate-limit (P
 背景：
 - 專案：/Users/suzuke/Documents/Hack/agend
 - 計劃文件：docs/fix-plan.md
-- Phase 1（安全邊界）已於 2026-04-18 完成，branch：fix/phase-1-security（9 commits），等待 PR / merge
-- 下一個 Phase：Phase 2（可靠性核心），從 P2.1 開始
+- Phase 1（安全邊界）、Phase 2（可靠性核心）已於 2026-04-18 完成，各自有 PR
+- 下一個 Phase：Phase 3（外部介面治理），從 P3.1 開始
 
 請：
-1. 若 Phase 1 還沒合回 main：先讓我確認是否 open PR，再決定要不要等 merge
-2. 新開 worktree：git worktree add .worktrees/fix-phase-2 -b fix/phase-2-reliability
-3. cd .worktrees/fix-phase-2 && ln -s ../../node_modules node_modules（測試需要）
-4. 讀 docs/fix-plan.md 的 Phase 2 區塊，依序從 P2.1 ⬜ 開始
+1. 確認 Phase 1/2 PR 狀態；若尚未 merge，stack Phase 3 worktree 於 fix/phase-2-reliability 之上
+2. 新開 worktree：git worktree add .worktrees/fix-phase-3 -b fix/phase-3-external fix/phase-2-reliability
+3. cd .worktrees/fix-phase-3 && ln -s ../../node_modules node_modules（測試需要）
+4. 讀 docs/fix-plan.md 的 Phase 3 區塊，依序從 P3.1 ⬜ 開始
 5. 每完成一個 P*.x：
    - npx tsc --noEmit 必綠
-   - npx vitest run 必綠（忽略既有的 context-guardian watchFile flake）
-   - commit（訊息格式 `fix(scope): 短描述 (P2.x)`）
+   - npx vitest run 必綠
+   - commit（訊息格式 `fix(scope): 短描述 (P3.x)`）
    - 更新 docs/fix-plan.md 的狀態與 commit hash
 6. 完成整個 Phase 後：
    - 更新本文件 Handover 區塊（含下一 Phase 的接手 prompt）
-   - 提示我 review & open PR
+   - push & open PR
 
 遵守 CLAUDE.md 規範（KISS、E2E tests only in VM、不直接改 main）。
 ```
