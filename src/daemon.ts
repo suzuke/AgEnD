@@ -1511,7 +1511,9 @@ export class Daemon extends EventEmitter {
     const branch = (args.branch as string) || "HEAD";
     // Validate branch ref: git refs allow [A-Za-z0-9._/-], reject `..` to prevent
     // worktreePath escape via basename(source)-${branch.replace("/", "-")}.
-    if (!/^[A-Za-z0-9._/-]+$/.test(branch) || branch.includes("..")) {
+    // Reject leading `-` or `+` so git cannot interpret the value as an option
+    // flag (e.g. `--upload-pack=...`), which execFile cannot prevent on its own.
+    if (!/^[A-Za-z0-9._/-]+$/.test(branch) || branch.includes("..") || /^[-+]/.test(branch)) {
       respond(null, `Invalid branch name: ${branch}`);
       return;
     }
@@ -1530,8 +1532,9 @@ export class Daemon extends EventEmitter {
     const worktreePath = join(repoDir, safeName);
 
     try {
-      // Resolve branch/ref to verify it exists
-      await execFileAsync("git", ["rev-parse", "--verify", branch], { cwd: source });
+      // Resolve branch/ref to verify it exists. Use `--` so git never treats
+      // branch as an option flag (defense in depth on top of the regex above).
+      await execFileAsync("git", ["rev-parse", "--verify", "--", branch], { cwd: source });
       await execFileAsync("git", ["worktree", "add", "--detach", worktreePath, branch], { cwd: source });
       const { stdout: commitHash } = await execFileAsync("git", ["rev-parse", "--short", "HEAD"], { cwd: worktreePath });
       respond({ path: worktreePath, branch, source, commit: commitHash.trim() });
