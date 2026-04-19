@@ -50,8 +50,11 @@ const TeamCreateSchema = z.object({
 
 const ConfigUpdateSchema = z.object({
   channel: z.object({
-    group_id: z.union([z.number(), z.string()]).optional(),
-    access: z.record(z.string(), z.unknown()).optional(),
+    group_id: z.union([z.number(), z.string().max(128)]).optional(),
+    access: z.object({
+      mode: z.enum(["pairing", "locked"]).optional(),
+      allowed_users: z.array(z.union([z.number(), z.string().min(1).max(128)])).max(1024).optional(),
+    }).strict().optional(),
   }).strict().optional(),
   defaults: z.object({
     backend: z.enum(["claude-code", "gemini-cli", "codex", "opencode", "kiro-cli"]).optional(),

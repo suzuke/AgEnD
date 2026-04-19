@@ -125,16 +125,19 @@ describe("ccd import", () => {
     }) as never;
     console.error = () => {};
     try {
-      await importConfig(dstDir, tarFile);
-    } catch {
-      // expected
-    }
-    process.exit = origExit;
-    console.error = origErr;
+      try {
+        await importConfig(dstDir, tarFile);
+      } catch {
+        // expected
+      }
 
-    expect(exited).toBe(true);
-    // And no stray file escaped.
-    expect(existsSync(join(TMP, "pwned.txt"))).toBe(false);
+      expect(exited).toBe(true);
+      // And no stray file escaped.
+      expect(existsSync(join(TMP, "pwned.txt"))).toBe(false);
+    } finally {
+      process.exit = origExit;
+      console.error = origErr;
+    }
   });
 
   it("warns about missing paths after import", async () => {

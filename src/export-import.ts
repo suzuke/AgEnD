@@ -22,6 +22,9 @@ const RUNTIME_EXCLUDES = [
 
 // Reject tarballs above this size to blunt zip-bomb style exhaustion.
 const MAX_IMPORT_BYTES = 500 * 1024 * 1024;
+// Additional cap on the *uncompressed* size reported by the gzip footer, so
+// a small tarball that expands to many GB is rejected before tar extraction.
+const MAX_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024;
 
 export async function exportConfig(
   dataDir: string,
@@ -86,6 +89,27 @@ export async function importConfig(
     process.exit(1);
   }
 
+  // Read the uncompressed size advertised in the gzip footer. gzip stores this
+  // as a 32-bit value (wraps above 4 GB) so treat it as a hint: if the report
+  // already exceeds the cap, reject; otherwise fall through. Combined with the
+  // compressed cap above this covers common zip-bomb shapes.
+  try {
+    const gzList = execFileSync("gzip", ["-l", "-q", absFile], {
+      stdio: ["ignore", "pipe", "pipe"],
+    }).toString("utf8");
+    const line = gzList.split("\n").find((l) => /^\s*\d/.test(l));
+    const cols = line?.trim().split(/\s+/) ?? [];
+    const reportedUncompressed = Number(cols[1]);
+    if (Number.isFinite(reportedUncompressed) && reportedUncompressed > MAX_UNCOMPRESSED_BYTES) {
+      console.error(
+        `Import archive uncompressed size exceeds ${MAX_UNCOMPRESSED_BYTES} bytes: ${reportedUncompressed}`,
+      );
+      process.exit(1);
+    }
+  } catch {
+    // gzip -l failed — leave enforcement to tar extraction below.
+  }
+
   mkdirSync(dataDir, { recursive: true });
 
   // Zip-slip / absolute-path protection: list every entry in the archive and
@@ -96,9 +120,7 @@ export async function importConfig(
   const expectedBase = basename(resolve(dataDir));
   let entries: string[];
   try {
-    const { stdout } = {
-      stdout: execFileSync("tar", ["tzf", absFile], { stdio: ["ignore", "pipe", "pipe"] }),
-    };
+    const stdout = execFileSync("tar", ["tzf", absFile], { stdio: ["ignore", "pipe", "pipe"] });
     entries = stdout
       .toString("utf8")
       .split("\n")

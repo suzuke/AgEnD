@@ -13,6 +13,7 @@ import { IpcServer } from "./channel/ipc-bridge.js";
 import { MessageBus } from "./channel/message-bus.js";
 import { ToolTracker } from "./channel/tool-tracker.js";
 import type { CliBackend, CliBackendConfig, ErrorPattern, StartupDialog } from "./backend/types.js";
+import { shellQuote } from "./backend/types.js";
 import type { ChannelAdapter, InboundMessage } from "./channel/types.js";
 import { getTmuxSession } from "./config.js";
 import { routeToolCall } from "./channel/tool-router.js";
@@ -1236,9 +1237,12 @@ export class Daemon extends EventEmitter {
     try { chmodSync(agentTokenPath, 0o600); } catch {}
 
     // AGEND_HOME points the child's agent-cli at the same data dir the daemon
-    // is using, so it can locate <instanceDir>/agent.token.
-    const agendHome = join(this.instanceDir, "..", "..");
-    let envPrefix = `TERM=xterm-256color AGEND_INSTANCE_NAME=${this.name} AGEND_HOME=${JSON.stringify(agendHome)}`;
+    // is using, so it can locate <instanceDir>/agent.token. resolve() normalizes
+    // the path so a trailing slash on instanceDir doesn't leak into env. The
+    // value is POSIX single-quoted (JSON quoting would let $, `, \ through to
+    // the shell) before being splice into the tmux command line.
+    const agendHome = resolve(this.instanceDir, "..", "..");
+    let envPrefix = `TERM=xterm-256color AGEND_INSTANCE_NAME=${shellQuote(this.name)} AGEND_HOME=${shellQuote(agendHome)}`;
     if (backendConfig.agentMode === "cli" && backendConfig.agentPort) {
       envPrefix += ` AGEND_PORT=${backendConfig.agentPort}`;
     }
@@ -1551,7 +1555,9 @@ export class Daemon extends EventEmitter {
       // Resolve branch/ref to verify it exists. Use `--` so git never treats
       // branch as an option flag (defense in depth on top of the regex above).
       await execFileAsync("git", ["rev-parse", "--verify", "--", branch], { cwd: source });
-      await execFileAsync("git", ["worktree", "add", "--detach", worktreePath, branch], { cwd: source });
+      // `--` prevents git from parsing branch (or a future path variable) as
+      // an option flag; mirrors the rev-parse call above.
+      await execFileAsync("git", ["worktree", "add", "--detach", "--", worktreePath, branch], { cwd: source });
       const { stdout: commitHash } = await execFileAsync("git", ["rev-parse", "--short", "HEAD"], { cwd: worktreePath });
       respond({ path: worktreePath, branch, source, commit: commitHash.trim() });
     } catch (err) {
