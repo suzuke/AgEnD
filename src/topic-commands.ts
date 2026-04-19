@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import { randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
 
@@ -213,16 +213,19 @@ export class TopicCommands {
 
   /** Read version from the running package. Returns null on failure. */
   private getCurrentPackageVersion(): string | null {
-    try {
-      const pkg = JSON.parse(readFileSync(join(this.ctx.dataDir, "..", "package.json"), "utf-8"));
-      if (typeof pkg.version === "string") return pkg.version;
-    } catch { /* ignore */ }
-    // Fall back to reading from the installed package's own entry path.
+    // Prefer the installed package's own package.json — the module-relative
+    // URL is anchored to the compiled entry point, so it works whether
+    // agend was installed globally, locally, or run via `npx`.
     try {
       const selfPkg = JSON.parse(
         readFileSync(new URL("../package.json", import.meta.url), "utf-8"),
       );
       if (typeof selfPkg.version === "string") return selfPkg.version;
+    } catch { /* ignore */ }
+    // Fallback: dataDir's parent may be the repo root in dev setups.
+    try {
+      const pkg = JSON.parse(readFileSync(join(this.ctx.dataDir, "..", "package.json"), "utf-8"));
+      if (typeof pkg.version === "string") return pkg.version;
     } catch { /* ignore */ }
     return null;
   }
@@ -251,7 +254,11 @@ export class TopicCommands {
       );
       return;
     }
-    if (providedToken.trim() !== pending.token) {
+    // Constant-time compare to match the per-instance token handling in
+    // P1.1; mismatched lengths short-circuit without leaking timing info.
+    const provided = Buffer.from(providedToken.trim());
+    const expected = Buffer.from(pending.token);
+    if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
       await this.ctx.adapter.sendText(
         chatId,
         "❌ Wrong confirmation token.",

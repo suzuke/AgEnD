@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createHmac } from "node:crypto";
-import { WebhookEmitter } from "../src/webhook-emitter.js";
+import { WebhookEmitter, parseRetryAfter } from "../src/webhook-emitter.js";
 import type { WebhookConfig } from "../src/types.js";
 
 const makeLogger = () => ({
@@ -71,6 +71,67 @@ describe("WebhookEmitter (P3.1)", () => {
     e.emit("test", "agent1");
     await vi.advanceTimersByTimeAsync(10_000);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries on 429 and honours Retry-After delta-seconds", async () => {
+    vi.useFakeTimers();
+    const now = Date.now();
+    vi.setSystemTime(now);
+    fetchMock
+      .mockResolvedValueOnce(new Response(null, { status: 429, headers: { "Retry-After": "2" } }))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }));
+    const cfg: WebhookConfig = { url: "http://x/y", events: ["*"], max_attempts: 3 };
+    const e = new WebhookEmitter([cfg], makeLogger());
+    e.emit("test", "agent1");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // Retry-After: 2 means wait 2000ms — 1000ms is not enough.
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back to exponential backoff when 429 has no Retry-After", async () => {
+    vi.useFakeTimers();
+    fetchMock
+      .mockResolvedValueOnce(new Response(null, { status: 429 }))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }));
+    const cfg: WebhookConfig = { url: "http://x/y", events: ["*"], max_attempts: 3 };
+    const e = new WebhookEmitter([cfg], makeLogger());
+    e.emit("test", "agent1");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // Default backoff on attempt 1 = 1000ms (2^0 * 1000).
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("caps Retry-After at 60s to prevent denial-of-wallet", async () => {
+    vi.useFakeTimers();
+    fetchMock
+      .mockResolvedValueOnce(new Response(null, { status: 429, headers: { "Retry-After": "3600" } }))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }));
+    const cfg: WebhookConfig = { url: "http://x/y", events: ["*"], max_attempts: 3 };
+    const e = new WebhookEmitter([cfg], makeLogger());
+    e.emit("test", "agent1");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // Server asked for 1h but we cap at 60s.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("parseRetryAfter accepts delta-seconds and HTTP-date", () => {
+    expect(parseRetryAfter("120")).toBe(120_000);
+    expect(parseRetryAfter(null)).toBeNull();
+    expect(parseRetryAfter("garbage")).toBeNull();
+    // HTTP-date: exercise the branch by passing a date ~5s in the future.
+    const future = new Date(Date.now() + 5000).toUTCString();
+    const ms = parseRetryAfter(future);
+    expect(ms).not.toBeNull();
+    expect(ms!).toBeGreaterThanOrEqual(0);
+    expect(ms!).toBeLessThanOrEqual(5000);
   });
 
   it("caps retries at max_attempts", async () => {

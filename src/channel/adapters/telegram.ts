@@ -24,6 +24,48 @@ const DEFAULT_API_ROOT = "https://api.telegram.org";
  * Rejected otherwise — blocks accidentally (or maliciously) routing bot
  * traffic, including the bot token, to an arbitrary third-party endpoint.
  */
+/**
+ * Drive a polling-style bot.start() with 409 Conflict backoff. Extracted from
+ * TelegramAdapter.start() so the escalation-to-fatal path is testable
+ * without spinning a real grammy Bot. Emits on the supplied emitter:
+ *
+ *  - "polling_conflict"        { attempt, delay } — transient 409, backing off
+ *  - "polling_conflict_fatal"  { attempts } — hit maxAttempts; giving up
+ *  - "error"                   err — non-conflict failure (or final 409)
+ *
+ * Resolves cleanly when startFn resolves (bot.stop called) or when an
+ * "Aborted delay" error is observed (grammy's shutdown signal).
+ */
+export async function runBotWithConflictRetry(
+  startFn: (dropPendingUpdates: boolean) => Promise<void>,
+  emitter: { emit: (event: string, payload?: unknown) => boolean | void },
+  options: { maxAttempts?: number; backoffMs?: (attempt: number) => number } = {},
+): Promise<void> {
+  const maxAttempts = options.maxAttempts ?? 30; // ≈ 7 min of backoff total
+  const backoff = options.backoffMs ?? ((n) => Math.min(1000 * n, 15000));
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await startFn(attempt === 1);
+      return;
+    } catch (err) {
+      if (err instanceof GrammyError && err.error_code === 409) {
+        if (attempt >= maxAttempts) {
+          emitter.emit("polling_conflict_fatal", { attempts: attempt });
+          emitter.emit("error", err);
+          return;
+        }
+        const delay = backoff(attempt);
+        emitter.emit("polling_conflict", { attempt, delay });
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+      if (err instanceof Error && err.message === "Aborted delay") return;
+      emitter.emit("error", err);
+      return;
+    }
+  }
+}
+
 export function validateTelegramApiRoot(raw: string): string {
   let u: URL;
   try {
@@ -303,38 +345,17 @@ export class TelegramAdapter extends EventEmitter implements ChannelAdapter {
     });
 
     // 409 Conflict = another getUpdates consumer is active (official plugin zombie,
-    // or second Claude Code instance). Retry with backoff until the slot frees up,
-    // but bail after MAX_CONFLICT_ATTEMPTS so a permanent collision doesn't spin
-    // forever — the operator needs to know.
-    const MAX_CONFLICT_ATTEMPTS = 30; // ≈ 7 min of backoff total
-    void (async () => {
-      for (let attempt = 1; ; attempt++) {
-        try {
-          await this.bot.start({
-            drop_pending_updates: attempt === 1,
-            onStart: (info) => {
-              this.emit("started", info.username);
-            },
-          });
-          return; // bot.stop() was called — clean exit
-        } catch (err) {
-          if (err instanceof GrammyError && err.error_code === 409) {
-            if (attempt >= MAX_CONFLICT_ATTEMPTS) {
-              this.emit("polling_conflict_fatal", { attempts: attempt });
-              this.emit("error", err);
-              return;
-            }
-            const delay = Math.min(1000 * attempt, 15000);
-            this.emit("polling_conflict", { attempt, delay });
-            await new Promise(r => setTimeout(r, delay));
-            continue;
-          }
-          if (err instanceof Error && err.message === "Aborted delay") return;
-          this.emit("error", err);
-          return;
-        }
-      }
-    })();
+    // or second Claude Code instance). Extracted to runBotWithConflictRetry so
+    // the escalation-to-fatal path has independent regression coverage.
+    void runBotWithConflictRetry(
+      (dropPending) => this.bot.start({
+        drop_pending_updates: dropPending,
+        onStart: (info) => {
+          this.emit("started", info.username);
+        },
+      }),
+      this,
+    );
   }
 
   async stop(): Promise<void> {

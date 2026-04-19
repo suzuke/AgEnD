@@ -2185,6 +2185,10 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
         res.setHeader("Access-Control-Allow-Origin", corsOrigin);
         res.setHeader("Vary", "Origin");
         res.setHeader("Access-Control-Allow-Headers", "Authorization, X-Agend-Token, Content-Type");
+        // Explicit methods so future PUT/DELETE endpoints don't silently fail
+        // the browser's preflight. OPTIONS is implicit but listing it here
+        // makes the contract self-describing.
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
       }
 
       // Preflight: no auth required, just echo CORS decision.

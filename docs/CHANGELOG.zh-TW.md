@@ -6,6 +6,17 @@
 
 ## [未發佈] (Unreleased)
 
+### 安全
+- **Web API CORS 預設鎖定** — 不再預設回 `Access-Control-Allow-Origin: *`。跨來源請求只有在 `Origin` 命中 `AGEND_WEB_CORS_ORIGINS`（逗號分隔白名單）才會放行；儀表板若從不同 host 提供請顯式設定。帶 `Authorization: Bearer …` 的帶憑證請求同樣需要命中白名單。
+- **Webhook 發送器遵守 429 Retry-After** — 回 HTTP 429 的接收端可透過 `Retry-After`（delta-seconds 或 HTTP-date）節流 daemon。429 現歸類為可重試（先前和其他 4xx 一起被丟棄）。為避免失控接收端永久卡隊列，延遲上限設 60 秒。
+- **Telegram 409 polling 衝突可自癒** — duplicate bot 的 `Conflict` 錯誤改以 capped 指數退避重試（最多 30 次、上限 15 秒），不再讓 adapter 當掉。運維可見事件：`polling_conflict`、`polling_conflict_fatal`。
+- **Topic `/register` token 比對改為固定時間** — 使用 `crypto.timingSafeEqual` 比對 6 字元配對 token，避免時序側信道。
+
+### 變更（breaking）
+- **STT 語音轉錄改為選擇性啟用** — 透過 `whisper` / `faster-whisper` 轉錄語音訊息現在需要 `AGEND_STT_ENABLED=1`。預設關閉的原因：這些二進位檔體積大、且在收到語音時會 exec 外部命令。需要語音輸入的主機請顯式設定 env。
+- **IPC 單行上限下修為 1 MB（原 10 MB）** — 保護 daemon 免於失控或惡意的 agent 灌爆 IPC 通道。確有合法大流量可用 `AGEND_IPC_MAX_LINE_MB`（整數 MB）覆寫。
+- **`/update` 改為兩步驟確認** — `/update` 回應目標版本後，必須再發 `/update confirm <version>` 才會實際執行。避免單一筆誤靜默升級整個 fleet；版本釘選讓運維者可拒絕意外升版。
+
 ### 變更
 - **Scheduler catch-up 預設窗從 60 分縮為 15 分** — daemon 啟動時只補跑最近錯過時間在 `scheduler.catchup_window_minutes` 內的 schedule。較短的預設值可避免長時間停機後意外重放。若想維持原 60 分行為，在 `fleet.yaml` 設 `scheduler.catchup_window_minutes: 60`；設 `0` 則完全停用 catch-up。
 - **Instance 啟動 fallback 不再固定 sleep 10 秒** — tmux control client 不可用時，spawn 改為以 5 秒 transcript idle 檢測與 `startup_timeout_ms`（預設 25 秒）競賽，不再硬性阻塞 10 秒。快的 CLI 一安靜就回；慢的 CLI 拿到完整 budget。過去靠 10 秒 pause 掩蓋啟動 race 的使用者請改靠 `startup_timeout_ms`。

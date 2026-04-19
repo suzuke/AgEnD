@@ -11,6 +11,20 @@ export interface WebhookPayload {
 
 const DEFAULT_MAX_ATTEMPTS = 3;
 
+/**
+ * Parse the Retry-After response header. Accepts either delta-seconds
+ * ("120") or an HTTP-date ("Wed, 21 Oct 2026 07:28:00 GMT"). Returns the
+ * delay in milliseconds, or null if the header is missing or malformed.
+ */
+export function parseRetryAfter(raw: string | null | undefined): number | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (/^\d+$/.test(trimmed)) return Math.max(0, Number(trimmed)) * 1000;
+  const ts = Date.parse(trimmed);
+  if (!Number.isFinite(ts)) return null;
+  return Math.max(0, ts - Date.now());
+}
+
 export class WebhookEmitter {
   constructor(
     private configs: WebhookConfig[],
@@ -53,8 +67,20 @@ export class WebhookEmitter {
           body,
           signal: AbortSignal.timeout(5000),
         });
-        // Only 2xx is success; 4xx is a non-retryable client error; 5xx is retryable.
+        // Only 2xx is success; 4xx is a non-retryable client error; 5xx is
+        // retryable. 429 (Too Many Requests) is rate-limiting and retryable
+        // — honour Retry-After when the server sets it so we don't pound a
+        // throttled receiver.
         if (res.ok) return;
+        if (res.status === 429) {
+          lastErr = new Error("HTTP 429");
+          const retryAfter = parseRetryAfter(res.headers.get("Retry-After"));
+          if (attempt < maxAttempts) {
+            const delayMs = retryAfter ?? 1000 * 2 ** (attempt - 1);
+            await new Promise((r) => setTimeout(r, Math.min(delayMs, 60_000)));
+          }
+          continue;
+        }
         if (res.status >= 400 && res.status < 500) {
           this.logger.warn(
             { url: config.url, event: payload.event, status: res.status },

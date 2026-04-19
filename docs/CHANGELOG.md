@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security
+- **Web API CORS locked down by default** — `Access-Control-Allow-Origin: *` is no longer the default. Cross-origin requests are refused unless the caller's `Origin` matches `AGEND_WEB_CORS_ORIGINS` (comma-separated allowlist). Set it explicitly when serving the dashboard from a different host. Credentialed requests (`Authorization: Bearer …`) also require an allowlist match.
+- **Webhook emitter honours 429 Retry-After** — receivers that return HTTP 429 can now pace the daemon with a `Retry-After` header (delta-seconds or HTTP-date). 429 is treated as retryable (was previously lumped with other 4xx and dropped). Delay is capped at 60 s to prevent a misbehaving receiver from stalling the queue indefinitely.
+- **Telegram 409 polling conflict survives restarts** — duplicate-bot `Conflict` errors are retried with capped exponential backoff (up to 30 attempts, 15 s cap) instead of crashing the adapter. Operator-visible events: `polling_conflict`, `polling_conflict_fatal`.
+- **Topic `/register` token comparison is constant-time** — uses `crypto.timingSafeEqual` to prevent timing side-channels on the 6-char pairing token.
+
+### Changed (breaking)
+- **STT transcription is opt-in** — voice-note transcription via `whisper` / `faster-whisper` now requires `AGEND_STT_ENABLED=1`. Default-off because the binaries ship with large models and exec arbitrary commands on receipt of a voice note. Set the env var on hosts where voice input is expected.
+- **IPC single-line cap reduced to 1 MB (was 10 MB)** — protects the daemon from a malicious or runaway agent flooding the IPC channel. Override with `AGEND_IPC_MAX_LINE_MB` (integer MB) if a legitimate workload needs more.
+- **`/update` is a two-step confirm** — `/update` now replies with the target version and requires `/update confirm <version>` to proceed. Prevents a single typo from silently upgrading a fleet. Version pin lets operators reject a surprise bump.
+
 ### Changed
 - **Scheduler catch-up window default shrunk from 60 min → 15 min** — on daemon start, we only fire catch-up runs for schedules whose most recent missed fire is within `scheduler.catchup_window_minutes`. The shorter default is safer against accidental replays after extended downtime. Operators who relied on the old 60-minute window should set `scheduler.catchup_window_minutes: 60` in `fleet.yaml`; `0` disables catch-up entirely.
 - **Instance startup fallback no longer sleeps a fixed 10 s** — when the tmux control client is unavailable, spawn now races a 5 s transcript-idle check against `startup_timeout_ms` (default 25 s), instead of blocking on a hardcoded 10-second sleep. Fast CLIs return as soon as their transcript quiets; slow CLIs get the full configured budget. Users who previously relied on the 10-second pause to hide a race should lean on `startup_timeout_ms`.
