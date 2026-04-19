@@ -6,6 +6,11 @@
 
 ## [未發佈] (Unreleased)
 
+## [1.22.1] - 2026-04-19
+
+### 修正
+- **Discord 附件下載** — `downloadAttachment()` 現在可以正常運作。附件在 `messageCreate` 當下就從 Discord CDN 下載到 `inboxDir`（避開 CDN URL 過期問題），`downloadAttachment()` 改為回傳本地路徑。另外：圖片類附件會被標記為 `photo`（讓 agent 端觸發自動下載）、本地檔名會加上 Discord attachment ID 前綴避免碰撞、同一訊息的多個附件改為並行下載、下載失敗改為 log 而非靜默吞掉，`stop()` 會清理未被消費的暫存檔。關閉 #27。
+
 ## [1.22.0] - 2026-04-18
 
 ### 新增

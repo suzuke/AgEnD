@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.22.1] - 2026-04-19
+
+### Fixed
+- **Discord attachment download** — `downloadAttachment()` now actually works. Attachments are fetched from the Discord CDN and written to `inboxDir` during `messageCreate` (before the CDN URL expires), and `downloadAttachment()` returns the local path. Also: image attachments are classified as `photo` (enables auto-download on the agent side), filenames are prefixed with the Discord attachment ID to prevent collisions, downloads run in parallel across a message's attachments, failures are logged instead of silently swallowed, and `stop()` cleans up any undrained files. Closes #27.
+
 ## [1.22.0] - 2026-04-18
 
 ### Added
