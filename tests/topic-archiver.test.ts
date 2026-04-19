@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { TopicArchiver, type ArchiverContext } from "../src/topic-archiver.js";
@@ -60,7 +60,7 @@ describe("TopicArchiver persistence (P2.6)", () => {
   });
 
   it("tolerates corrupt persistence file", () => {
-    require("node:fs").writeFileSync(persistPath, "{not valid json");
+    writeFileSync(persistPath, "{not valid json");
     const a = new TopicArchiver(makeCtx(), persistPath);
     expect(a.isArchived("42")).toBe(false); // starts empty, not crashed
   });

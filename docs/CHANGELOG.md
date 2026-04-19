@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **Instance startup fallback no longer sleeps a fixed 10 s** — when the tmux control client is unavailable, spawn now races a 5 s transcript-idle check against `startup_timeout_ms` (default 25 s), instead of blocking on a hardcoded 10-second sleep. Fast CLIs return as soon as their transcript quiets; slow CLIs get the full configured budget. Users who previously relied on the 10-second pause to hide a race should lean on `startup_timeout_ms`.
+
 ## [1.22.0] - 2026-04-18
 
 ### Added

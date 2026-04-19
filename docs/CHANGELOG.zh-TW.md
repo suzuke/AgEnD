@@ -6,6 +6,9 @@
 
 ## [未發佈] (Unreleased)
 
+### 變更
+- **Instance 啟動 fallback 不再固定 sleep 10 秒** — tmux control client 不可用時，spawn 改為以 5 秒 transcript idle 檢測與 `startup_timeout_ms`（預設 25 秒）競賽，不再硬性阻塞 10 秒。快的 CLI 一安靜就回；慢的 CLI 拿到完整 budget。過去靠 10 秒 pause 掩蓋啟動 race 的使用者請改靠 `startup_timeout_ms`。
+
 ## [1.22.0] - 2026-04-18
 
 ### 新增

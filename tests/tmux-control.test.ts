@@ -1,52 +1,88 @@
-import { describe, it, expect } from "vitest";
-import { TmuxControlClient } from "../src/tmux-control.js";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { EventEmitter } from "node:events";
+import { Readable, Writable } from "node:stream";
+
+// Stub node:child_process.spawn so we never launch a real tmux control
+// process in tests. Each spawn() call returns a MockProc we can close at
+// will to drive the real close handler in TmuxControlClient.connect().
+class MockProc extends EventEmitter {
+  stdout = new Readable({ read() {} });
+  stderr = new Readable({ read() {} });
+  stdin = new Writable({ write(_c, _e, cb) { cb(); } });
+  killed = false;
+  kill() { this.killed = true; }
+}
+
+const spawned: MockProc[] = [];
+vi.mock("node:child_process", async () => {
+  const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
+  return {
+    ...actual,
+    spawn: vi.fn(() => {
+      const p = new MockProc();
+      spawned.push(p);
+      return p;
+    }),
+  };
+});
+
+// Imported after vi.mock so the mock is in place.
+const { TmuxControlClient } = await import("../src/tmux-control.js");
 
 /**
- * Regression test for P2.1: when the control-mode proc closes, the
- * pane→window map and %output timestamps must be cleared, because on
- * reconnect tmux may have recycled pane IDs. A 'reconnected' event must
- * fire so owners (FleetManager) can re-register live windows.
+ * Regression test for P2.1: when the control-mode proc closes, the real
+ * close handler in connect() must clear paneToWindow + lastOutputAt
+ * (recycled pane IDs) and on successful reconnect the client must emit
+ * "reconnected" so FleetManager can re-register live windows.
  */
 describe("TmuxControlClient reconnect", () => {
-  it("clears stale pane maps on disconnect and emits 'reconnected'", async () => {
-    const client = new TmuxControlClient("agend-test", 2000);
+  beforeEach(() => {
+    spawned.length = 0;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "setImmediate", "clearImmediate"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
-    // Seed fake state as if registerWindow + %output had run.
-    // We reach in directly — these are private but the regression is about
-    // what happens to this state on reconnect.
+  it("close handler wipes pane maps; reconnect emits 'reconnected'", async () => {
+    const client = new TmuxControlClient("agend-test", 2000);
     const inner = client as unknown as {
       paneToWindow: Map<string, string>;
       lastOutputAt: Map<string, number>;
-      hadPreviousConnection: boolean;
     };
+
+    client.start();
+    expect(spawned).toHaveLength(1);
+
+    // Seed state as if a window were registered and producing output.
     inner.paneToWindow.set("%1", "@5");
     inner.lastOutputAt.set("%1", Date.now());
 
-    // Simulate: we've already connected once, then the connection dropped.
-    // (We can't spawn a real tmux here; drive the state transition directly.)
-    inner.hadPreviousConnection = true;
+    // Listener must be attached BEFORE the reconnect fires.
+    const reconnected = new Promise<void>((resolve) => {
+      client.once("reconnected", () => resolve());
+    });
 
-    // The actual connect() logic we want to assert: close handler clears maps.
-    // Replicate what the close handler does:
-    inner.paneToWindow.clear();
-    inner.lastOutputAt.clear();
-
+    // Drop the first connection — triggers the real close handler, which
+    // should clear maps AND schedule a reconnect via setTimeout(2000).
+    spawned[0].emit("close");
     expect(inner.paneToWindow.size).toBe(0);
     expect(inner.lastOutputAt.size).toBe(0);
 
-    // 'reconnected' is emitted from connect() after a successful re-spawn.
-    const reconnected = new Promise<void>((resolve) => {
-      client.on("reconnected", () => resolve());
-    });
-    // Manually trigger the setImmediate path that connect() runs after
-    // hadPreviousConnection is true.
-    setImmediate(() => client.emit("reconnected"));
+    // Fire the reconnect timer; connect() spawns a second mock and, because
+    // hadPreviousConnection is true, schedules emit("reconnected") via
+    // setImmediate.
+    await vi.runOnlyPendingTimersAsync();
+    expect(spawned).toHaveLength(2);
+    await vi.runOnlyPendingTimersAsync();
     await reconnected;
+
+    client.stop();
   });
 
   it("isIdle returns true for unknown window after reconnect wipe", () => {
     const client = new TmuxControlClient("agend-test", 2000);
-    // Without any registered window, isIdle must not block.
+    // Without any registered window, isIdle must not block the caller.
     expect(client.isIdle("@99")).toBe(true);
   });
 });
