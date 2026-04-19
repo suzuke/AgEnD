@@ -7,6 +7,7 @@
 ## [未發佈] (Unreleased)
 
 ### 變更
+- **Scheduler catch-up 預設窗從 60 分縮為 15 分** — daemon 啟動時只補跑最近錯過時間在 `scheduler.catchup_window_minutes` 內的 schedule。較短的預設值可避免長時間停機後意外重放。若想維持原 60 分行為，在 `fleet.yaml` 設 `scheduler.catchup_window_minutes: 60`；設 `0` 則完全停用 catch-up。
 - **Instance 啟動 fallback 不再固定 sleep 10 秒** — tmux control client 不可用時，spawn 改為以 5 秒 transcript idle 檢測與 `startup_timeout_ms`（預設 25 秒）競賽，不再硬性阻塞 10 秒。快的 CLI 一安靜就回；慢的 CLI 拿到完整 budget。過去靠 10 秒 pause 掩蓋啟動 race 的使用者請改靠 `startup_timeout_ms`。
 
 ## [1.22.0] - 2026-04-18

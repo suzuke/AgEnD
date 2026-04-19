@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- **Scheduler catch-up window default shrunk from 60 min → 15 min** — on daemon start, we only fire catch-up runs for schedules whose most recent missed fire is within `scheduler.catchup_window_minutes`. The shorter default is safer against accidental replays after extended downtime. Operators who relied on the old 60-minute window should set `scheduler.catchup_window_minutes: 60` in `fleet.yaml`; `0` disables catch-up entirely.
 - **Instance startup fallback no longer sleeps a fixed 10 s** — when the tmux control client is unavailable, spawn now races a 5 s transcript-idle check against `startup_timeout_ms` (default 25 s), instead of blocking on a hardcoded 10-second sleep. Fast CLIs return as soon as their transcript quiets; slow CLIs get the full configured budget. Users who previously relied on the 10-second pause to hide a race should lean on `startup_timeout_ms`.
 
 ## [1.22.0] - 2026-04-18

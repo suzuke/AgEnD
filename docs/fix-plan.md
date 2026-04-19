@@ -98,7 +98,7 @@
 
 ### P2.3 Scheduler catch-up window
 - **File**：`src/scheduler/scheduler.ts`, `src/scheduler/types.ts`, `src/types.ts`, `src/scheduler/scheduler.test.ts`
-- **修法**：新增 `catchup_window_minutes`（預設 60，0 停用）。init() 對每個 schedule 用 `Cron(...).previousRuns(1, now)` 抓上次觸發時間，若 `last_triggered_at` 在它之前且距今 ≤ 窗內，setImmediate 補跑一次。
+- **修法**：新增 `catchup_window_minutes`（預設 15，0 停用；可在 `fleet.yaml` 的 `scheduler.catchup_window_minutes` 覆寫）。init() 對每個 schedule 用 `Cron(...).previousRuns(1, now)` 抓上次觸發時間，若 `last_triggered_at` 在它之前且距今 ≤ 窗內，setImmediate 補跑一次。
 - **驗證**：3 個新測試（窗內補跑、窗外不跑、全新 schedule 不補跑）。
 
 ### P2.4 TranscriptMonitor reentrancy guard
