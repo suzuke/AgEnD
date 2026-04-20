@@ -195,6 +195,28 @@ Webhook events:
 
 ---
 
+## stt
+
+Speech-to-text settings for voice/audio attachments. **Disabled by default
+for privacy** — voice messages are NOT uploaded to any third-party service
+unless `stt.enabled: true` is explicitly set in `fleet.yaml`. Setting only
+`GROQ_API_KEY` in the environment is no longer enough.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | boolean | `false` | Must be `true` to allow voice→cloud upload. Privacy default is OFF |
+| `provider` | `"groq"` | `"groq"` | Currently the only supported transcription backend |
+| `api_key_env` | string | `GROQ_API_KEY` | Env var name to read the API key from |
+
+```yaml
+stt:
+  enabled: true
+  provider: groq
+  api_key_env: GROQ_API_KEY
+```
+
+---
+
 ## teams.\<name\>
 
 Named groups of instances for targeted broadcasting. Managed via `create_team`, `list_teams`, `update_team`, `delete_team` MCP tools, or defined directly in fleet.yaml.

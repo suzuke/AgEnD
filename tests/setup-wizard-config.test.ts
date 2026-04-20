@@ -126,4 +126,19 @@ describe("buildFleetConfig", () => {
     const config = buildFleetConfig({ ...defaults, groupId: -1001234567890 });
     expect((config.channel as any).group_id).toBe(-1001234567890);
   });
+
+  it("stt block omitted by default (privacy default)", () => {
+    const config = buildFleetConfig({ ...defaults });
+    expect((config as any).stt).toBeUndefined();
+  });
+
+  it("stt block written when wizard caller opts in", () => {
+    const config = buildFleetConfig({
+      ...defaults,
+      stt: { enabled: true, provider: "groq", apiKeyEnv: "GROQ_API_KEY" },
+    });
+    expect((config as any).stt).toEqual({
+      enabled: true, provider: "groq", api_key_env: "GROQ_API_KEY",
+    });
+  });
 });

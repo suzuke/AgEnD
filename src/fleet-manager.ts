@@ -716,7 +716,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       const generalInstance = this.findGeneralInstance();
       if (generalInstance) {
         this.warnIfRateLimited(generalInstance, msg);
-        const { text, extraMeta } = await processAttachments(msg, this.adapter!, this.logger, generalInstance);
+        const { text, extraMeta } = await processAttachments(msg, this.adapter!, this.logger, generalInstance, this.fleetConfig?.stt);
         const ipc = this.instanceIpcClients.get(generalInstance);
         if (ipc) {
           if (this.adapter && msg.chatId && msg.messageId) {
@@ -768,7 +768,7 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
 
     this.warnIfRateLimited(instanceName, msg);
 
-    const { text, extraMeta } = await processAttachments(msg, this.adapter!, this.logger, instanceName);
+    const { text, extraMeta } = await processAttachments(msg, this.adapter!, this.logger, instanceName, this.fleetConfig?.stt);
 
     const ipc = this.instanceIpcClients.get(instanceName);
     if (!ipc) {
