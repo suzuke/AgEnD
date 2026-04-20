@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdirSync, rmSync } from "node:fs";
-import { CostGuard } from "../src/cost-guard.js";
+import { CostGuard, msUntilMidnight } from "../src/cost-guard.js";
 import { EventLog } from "../src/event-log.js";
 import type { CostGuardConfig } from "../src/types.js";
 
@@ -191,9 +191,56 @@ describe("CostGuard", () => {
     const resetSpy = vi.fn();
     guard.on("daily_reset", resetSpy);
     guard.startMidnightReset();
-    // Advance past 24 hours to ensure midnight fires
-    vi.advanceTimersByTime(25 * 60 * 60 * 1000);
+    // 26h covers the worst-case 25-hour fall-back day
+    vi.advanceTimersByTime(26 * 60 * 60 * 1000);
     expect(resetSpy).toHaveBeenCalled();
     guard.stop();
+  });
+});
+
+describe("msUntilMidnight (DST handling — P2.8)", () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("returns time until next UTC midnight on a normal day", () => {
+    // 2025-06-15 23:30:00 UTC — 30 minutes until next UTC midnight
+    vi.setSystemTime(new Date("2025-06-15T23:30:00Z"));
+    const ms = msUntilMidnight("UTC");
+    expect(ms).toBeGreaterThan(29 * 60 * 1000);
+    expect(ms).toBeLessThanOrEqual(30 * 60 * 1000 + 1);
+  });
+
+  it("spring-forward: returns 21.5h (not the buggy 22.5h) at LA pre-jump 01:30 PST", () => {
+    // 2025-03-09 09:30 UTC = LA 01:30 PST (pre-jump; LA jumps at 10:00 UTC).
+    // Next LA midnight = 2025-03-10 00:00 PDT = 2025-03-10 07:00 UTC.
+    // Real ms = 21.5 hours. Old code returned 22.5h because its fake-local
+    // arithmetic doesn't notice the DST hour we're about to lose.
+    vi.setSystemTime(new Date("2025-03-09T09:30:00Z"));
+    const ms = msUntilMidnight("America/Los_Angeles");
+    expect(ms).toBeGreaterThan(21 * 60 * 60 * 1000 + 29 * 60 * 1000);
+    expect(ms).toBeLessThanOrEqual(21 * 60 * 60 * 1000 + 30 * 60 * 1000 + 1);
+  });
+
+  it("fall-back: returns 23.5h (not the buggy 22.5h) at LA pre-fallback 01:30 PDT", () => {
+    // 2025-11-02 08:30 UTC = LA 01:30 PDT (pre-fallback; LA falls back at 09:00 UTC).
+    // Next LA midnight = 2025-11-03 00:00 PST = 2025-11-03 08:00 UTC.
+    // Real ms = 23.5 hours. Old code returned 22.5h because its fake-local
+    // arithmetic doesn't notice the DST hour we're about to gain.
+    vi.setSystemTime(new Date("2025-11-02T08:30:00Z"));
+    const ms = msUntilMidnight("America/Los_Angeles");
+    expect(ms).toBeGreaterThan(23 * 60 * 60 * 1000 + 29 * 60 * 1000);
+    expect(ms).toBeLessThanOrEqual(23 * 60 * 60 * 1000 + 30 * 60 * 1000 + 1);
+  });
+
+  it("never returns more than 26 hours", () => {
+    vi.setSystemTime(new Date("2025-01-15T00:00:00Z"));
+    expect(msUntilMidnight("UTC")).toBeLessThanOrEqual(26 * 60 * 60 * 1000);
+    expect(msUntilMidnight("Pacific/Kiritimati")).toBeLessThanOrEqual(26 * 60 * 60 * 1000);
+    expect(msUntilMidnight("Pacific/Pago_Pago")).toBeLessThanOrEqual(26 * 60 * 60 * 1000);
+  });
+
+  it("always returns a positive value", () => {
+    vi.setSystemTime(new Date("2025-06-15T23:59:59.999Z"));
+    expect(msUntilMidnight("UTC")).toBeGreaterThan(0);
   });
 });
