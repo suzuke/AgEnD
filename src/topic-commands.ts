@@ -223,8 +223,19 @@ export class TopicCommands {
       targetVersion = args[0];
     }
 
+    // If a different user already has a live pending request, tell them that
+    // their token was just superseded so they don't sit confused waiting for
+    // a token that will silently fail.
+    const prior = this.pendingUpdate;
+    if (prior && Date.now() <= prior.expiresAt
+        && prior.userId && String(prior.userId) !== String(msg.userId)) {
+      await this.ctx.adapter.sendText(chatId,
+        `ℹ️ Note: a previous pending /update from user ${prior.userId} was superseded by this request.`,
+        { threadId });
+    }
+
     const previous = this.readCurrentVersion();
-    const token = randomBytes(3).toString("hex"); // 6 hex chars
+    const token = randomBytes(4).toString("hex"); // 8 hex chars (32 bits)
     this.pendingUpdate = {
       version: targetVersion,
       previousVersion: previous,

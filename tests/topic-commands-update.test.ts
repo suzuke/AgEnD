@@ -79,7 +79,7 @@ describe("/update safety (P3.6)", () => {
     expect(sent[0].text).toContain("Pending update");
     expect(sent[0].text).toMatch(/Current: 1\.20\.0/);
     expect(sent[0].text).toMatch(/Target: {2}@latest/);
-    expect(sent[0].text).toMatch(/\/update confirm [0-9a-f]{6}/);
+    expect(sent[0].text).toMatch(/\/update confirm [0-9a-f]{8}/);
   });
 
   it("rejects /update confirm with no pending request", async () => {
@@ -103,7 +103,7 @@ describe("/update safety (P3.6)", () => {
     const { ctx, sent } = makeCtx(["u1"]);
     const tc = new TestableTopicCommands(ctx);
     await tc.callHandle(msg("/update"));
-    const tokenLine = sent[0].text.match(/\/update confirm ([0-9a-f]{6})/);
+    const tokenLine = sent[0].text.match(/\/update confirm ([0-9a-f]{8})/);
     expect(tokenLine).not.toBeNull();
     vi.advanceTimersByTime(61_000);
     await tc.callHandle(msg(`/update confirm ${tokenLine![1]}`));
@@ -115,7 +115,7 @@ describe("/update safety (P3.6)", () => {
     const { ctx, sent } = makeCtx(["u1", "u2"]);
     const tc = new TestableTopicCommands(ctx);
     await tc.callHandle(msg("/update", "u1"));
-    const token = sent[0].text.match(/\/update confirm ([0-9a-f]{6})/)![1];
+    const token = sent[0].text.match(/\/update confirm ([0-9a-f]{8})/)![1];
     await tc.callHandle(msg(`/update confirm ${token}`, "u2"));
     expect(tc.execLog).toHaveLength(0);
     expect(sent.at(-1)!.text).toContain("Only the user");
@@ -136,7 +136,7 @@ describe("/update safety (P3.6)", () => {
     const tc = new TestableTopicCommands(ctx);
     tc.execResponses = ["ok", "ok"]; // npm install + agend --version probe
     await tc.callHandle(msg("/update 1.22.5"));
-    const token = sent[0].text.match(/\/update confirm ([0-9a-f]{6})/)![1];
+    const token = sent[0].text.match(/\/update confirm ([0-9a-f]{8})/)![1];
     await tc.callHandle(msg(`/update confirm ${token}`));
     // First exec is npm install with pinned version
     expect(tc.execLog[0].cmd).toBe("npm install -g @suzuke/agend@1.22.5");
@@ -151,7 +151,7 @@ describe("/update safety (P3.6)", () => {
     // npm install OK, probe FAIL, rollback OK
     tc.execResponses = ["ok", "fail", "ok"];
     await tc.callHandle(msg("/update 1.99.0"));
-    const token = sent[0].text.match(/\/update confirm ([0-9a-f]{6})/)![1];
+    const token = sent[0].text.match(/\/update confirm ([0-9a-f]{8})/)![1];
     await tc.callHandle(msg(`/update confirm ${token}`));
     expect(tc.execLog[0].cmd).toBe("npm install -g @suzuke/agend@1.99.0");
     expect(tc.execLog[1].cmd).toBe("agend --version");
@@ -164,7 +164,7 @@ describe("/update safety (P3.6)", () => {
     const { ctx, sent } = makeCtx(["u1"]);
     const tc = new TestableTopicCommands(ctx);
     await tc.callHandle(msg("/update"));
-    const token = sent[0].text.match(/\/update confirm ([0-9a-f]{6})/)![1];
+    const token = sent[0].text.match(/\/update confirm ([0-9a-f]{8})/)![1];
     await tc.callHandle(msg("/update cancel"));
     expect(sent.at(-1)!.text).toContain("cancelled");
     await tc.callHandle(msg(`/update confirm ${token}`));
@@ -172,12 +172,28 @@ describe("/update safety (P3.6)", () => {
     expect(sent.at(-1)!.text).toContain("No pending");
   });
 
+  it("notifies when a second user's /update supersedes a pending request", async () => {
+    const { ctx, sent } = makeCtx(["u1", "u2"]);
+    const tc = new TestableTopicCommands(ctx);
+    await tc.callHandle(msg("/update", "u1"));
+    const oldToken = sent[0].text.match(/\/update confirm ([0-9a-f]{8})/)![1];
+    await tc.callHandle(msg("/update", "u2"));
+    // u2's interaction should mention that u1's pending was superseded.
+    const supersedeNotice = sent.find(s => s.text.includes("superseded"));
+    expect(supersedeNotice).toBeDefined();
+    expect(supersedeNotice!.text).toContain("u1");
+    // u1's old token must no longer work.
+    await tc.callHandle(msg(`/update confirm ${oldToken}`, "u1"));
+    expect(tc.execLog).toHaveLength(0);
+    expect(sent.at(-1)!.text).toMatch(/Wrong confirmation token|Only the user/);
+  });
+
   it("token is single-use", async () => {
     const { ctx, sent } = makeCtx(["u1"]);
     const tc = new TestableTopicCommands(ctx);
     tc.execResponses = ["ok", "ok", "ok"]; // install + probe + (optional) launchctl/systemctl
     await tc.callHandle(msg("/update"));
-    const token = sent[0].text.match(/\/update confirm ([0-9a-f]{6})/)![1];
+    const token = sent[0].text.match(/\/update confirm ([0-9a-f]{8})/)![1];
     await tc.callHandle(msg(`/update confirm ${token}`));
     // First two execs are deterministic; a third (restart) may or may not run depending on host.
     expect(tc.execLog[0].cmd).toBe("npm install -g @suzuke/agend@latest");
