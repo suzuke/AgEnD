@@ -34,13 +34,13 @@ export class Daemon extends EventEmitter {
   private logger: Logger;
   private tmuxSessionName: string;
   private tmux: TmuxManager | null = null;
-  private ipcServer: IpcServer | null = null;
+  protected ipcServer: IpcServer | null = null;
   private messageBus: MessageBus;
   private transcriptMonitor: TranscriptMonitor | null = null;
   private toolTracker: ToolTracker | null = null;
   private guardian: ContextGuardian | null = null;
   private adapter: ChannelAdapter | null = null;
-  private pendingIpcRequests = new Map<string, (msg: Record<string, unknown>) => void>();
+  protected pendingIpcRequests = new Map<string, (msg: Record<string, unknown>) => void>();
   // Track chatId/threadId from inbound messages for automatic outbound routing
   private lastChatId: string | undefined;
   private lastThreadId: string | undefined;
@@ -818,7 +818,7 @@ export class Daemon extends EventEmitter {
    * Centralises the broadcast + setTimeout + pendingIpcRequests.set pattern that
    * each handleToolCall branch repeated five times.
    */
-  private dispatchFleetRpc(
+  protected dispatchFleetRpc(
     fleetReqId: string,
     broadcast: Record<string, unknown>,
     timeoutMs: number,
