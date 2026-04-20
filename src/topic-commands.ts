@@ -1,8 +1,10 @@
 import { readFileSync, existsSync } from "node:fs";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import { join, basename } from "node:path";
+import { join, basename, dirname } from "node:path";
 import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
+import { randomBytes } from "node:crypto";
 
 const execAsync = promisify(exec);
 import type { FleetContext } from "./fleet-context.js";
@@ -17,7 +19,29 @@ export function sanitizeInstanceName(name: string): string {
   return sanitized || "project";
 }
 
+const SEMVER_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+const UPDATE_CONFIRM_TTL_MS = 60_000;
+
+interface PendingUpdate {
+  /** Resolved version to install (e.g. "1.22.3"); null means "@latest". */
+  version: string | null;
+  /** Pre-install version captured from the running install's package.json. */
+  previousVersion: string;
+  /** One-time confirmation token. */
+  token: string;
+  /** User who initiated; only this user can confirm. */
+  userId: string | null;
+  /** Wall-clock ms after which the pending request is rejected. */
+  expiresAt: number;
+}
+
 export class TopicCommands {
+  /** Test seam: replaceable child_process runner. */
+  protected exec: (cmd: string, opts: { timeout: number }) => Promise<unknown> = execAsync;
+
+  /** Pending /update awaiting `/update confirm <token>`. */
+  private pendingUpdate: PendingUpdate | null = null;
+
   constructor(private ctx: FleetContext) {}
 
   /** Parse and dispatch commands from the General topic */
@@ -41,7 +65,8 @@ export class TopicCommands {
       return true;
     }
 
-    if (text === "/update" || text === "/update@" || text.startsWith("/update@")) {
+    if (text === "/update" || text === "/update@" || text.startsWith("/update@")
+        || text.startsWith("/update ")) {
       await this.handleUpdateCommand(msg);
       return true;
     }
@@ -131,28 +156,157 @@ export class TopicCommands {
     await this.ctx.adapter.sendText(msg.chatId, lines.join("\n"), { threadId: msg.threadId });
   }
 
+  /** Read the version string from the running install's package.json. */
+  protected readCurrentVersion(): string {
+    try {
+      const here = dirname(fileURLToPath(import.meta.url));
+      const pkg = JSON.parse(readFileSync(join(here, "..", "package.json"), "utf-8"));
+      return pkg.version ?? "unknown";
+    } catch {
+      return "unknown";
+    }
+  }
+
+  /**
+   * /update                       → preview latest, request confirmation
+   * /update <semver>              → preview that version, request confirmation
+   * /update confirm <token>       → execute (originator only, within 60s)
+   * /update cancel                → clear pending request
+   *
+   * Authorization: requires a non-empty `channel.access.allowed_users` list AND
+   * the requester to be on it. An empty allow-list means no one can /update —
+   * we will not accept the dangerous default of "open to anyone".
+   */
   private async handleUpdateCommand(msg: InboundMessage): Promise<void> {
     if (!this.ctx.adapter) return;
     const chatId = msg.chatId;
     const threadId = msg.threadId;
+    const text = (msg.text ?? "").trim();
 
-    // Access control — only allowed users can trigger update
     const allowed = this.ctx.fleetConfig?.channel?.access?.allowed_users ?? [];
-    if (allowed.length > 0 && !allowed.some(u => String(u) === String(msg.userId))) {
+    if (allowed.length === 0) {
+      await this.ctx.adapter.sendText(chatId,
+        "⛔ /update is disabled — channel.access.allowed_users is empty. Add at least one user ID to fleet.yaml to enable updates.",
+        { threadId });
+      return;
+    }
+    if (!allowed.some(u => String(u) === String(msg.userId))) {
       await this.ctx.adapter.sendText(chatId, "⛔ Not authorized", { threadId });
       return;
     }
 
-    await this.ctx.adapter.sendText(chatId, "📦 Updating AgEnD...", { threadId });
+    // Parse the args after the command word.
+    const parts = text.split(/\s+/);
+    // parts[0] is "/update" or "/update@bot"; the rest are args.
+    const args = parts.slice(1);
 
-    try {
-      await execAsync("npm install -g @suzuke/agend@latest", { timeout: 120_000 });
-    } catch {
-      await this.ctx.adapter.sendText(chatId, "❌ npm install failed. Try manually: npm install -g @suzuke/agend@latest", { threadId });
+    if (args[0] === "cancel") {
+      this.pendingUpdate = null;
+      await this.ctx.adapter.sendText(chatId, "🗑️ Pending /update cancelled.", { threadId });
       return;
     }
 
-    await this.ctx.adapter.sendText(chatId, "✅ Updated. Restarting service...", { threadId });
+    if (args[0] === "confirm") {
+      await this.confirmAndApplyUpdate(msg, args[1]);
+      return;
+    }
+
+    // Stage 1: register a pending update + show confirmation prompt.
+    let targetVersion: string | null = null;
+    if (args[0]) {
+      if (!SEMVER_RE.test(args[0])) {
+        await this.ctx.adapter.sendText(chatId,
+          `⛔ Invalid version "${args[0]}". Expected semver (e.g. 1.22.3).`,
+          { threadId });
+        return;
+      }
+      targetVersion = args[0];
+    }
+
+    const previous = this.readCurrentVersion();
+    const token = randomBytes(3).toString("hex"); // 6 hex chars
+    this.pendingUpdate = {
+      version: targetVersion,
+      previousVersion: previous,
+      token,
+      userId: msg.userId ?? null,
+      expiresAt: Date.now() + UPDATE_CONFIRM_TTL_MS,
+    };
+
+    const targetLabel = targetVersion ? `@${targetVersion}` : "@latest";
+    await this.ctx.adapter.sendText(chatId,
+      `⚠️ Pending update\n` +
+      `Current: ${previous}\n` +
+      `Target:  ${targetLabel}\n\n` +
+      `Reply within 60s:\n` +
+      `  /update confirm ${token}\n` +
+      `Or cancel:\n` +
+      `  /update cancel`,
+      { threadId });
+  }
+
+  private async confirmAndApplyUpdate(msg: InboundMessage, providedToken: string | undefined): Promise<void> {
+    const adapter = this.ctx.adapter!;
+    const chatId = msg.chatId;
+    const threadId = msg.threadId;
+
+    const pending = this.pendingUpdate;
+    if (!pending) {
+      await adapter.sendText(chatId, "ℹ️ No pending /update. Run /update to start.", { threadId });
+      return;
+    }
+    if (Date.now() > pending.expiresAt) {
+      this.pendingUpdate = null;
+      await adapter.sendText(chatId, "⏱ Confirmation expired. Run /update again.", { threadId });
+      return;
+    }
+    if (!providedToken || providedToken !== pending.token) {
+      await adapter.sendText(chatId, "⛔ Wrong confirmation token.", { threadId });
+      return;
+    }
+    if (pending.userId && String(pending.userId) !== String(msg.userId)) {
+      await adapter.sendText(chatId, "⛔ Only the user who ran /update can confirm.", { threadId });
+      return;
+    }
+    // Single-use: clear immediately so a repeat /update confirm <token> is rejected.
+    this.pendingUpdate = null;
+
+    const targetSpec = pending.version ? `@suzuke/agend@${pending.version}` : "@suzuke/agend@latest";
+    await adapter.sendText(chatId, `📦 Installing ${targetSpec}...`, { threadId });
+
+    try {
+      await this.exec(`npm install -g ${targetSpec}`, { timeout: 120_000 });
+    } catch {
+      await adapter.sendText(chatId,
+        `❌ npm install failed. Previous version (${pending.previousVersion}) is still in place.`,
+        { threadId });
+      return;
+    }
+
+    // Health probe: best-effort sanity check that the new install loads.
+    let probeOk = true;
+    try {
+      await this.exec("agend --version", { timeout: 10_000 });
+    } catch {
+      probeOk = false;
+    }
+
+    if (!probeOk) {
+      await adapter.sendText(chatId,
+        `⚠️ New install failed --version probe. Rolling back to ${pending.previousVersion}...`,
+        { threadId });
+      try {
+        await this.exec(`npm install -g @suzuke/agend@${pending.previousVersion}`, { timeout: 120_000 });
+        await adapter.sendText(chatId, `↩️ Rolled back to ${pending.previousVersion}.`, { threadId });
+      } catch {
+        await adapter.sendText(chatId,
+          `🚨 Rollback failed. Manual recovery needed: npm install -g @suzuke/agend@${pending.previousVersion}`,
+          { threadId });
+      }
+      return;
+    }
+
+    await adapter.sendText(chatId, "✅ Updated. Restarting service...", { threadId });
     // Brief delay to let sendText complete before process dies
     await new Promise(r => setTimeout(r, 1000));
 
@@ -164,16 +318,16 @@ export class TopicCommands {
       if (existsSync(plistPath)) {
         const uid = process.getuid?.() ?? 501;
         try {
-          await execAsync(`launchctl kickstart -k gui/${uid}/${label}`, { timeout: 15_000 });
+          await this.exec(`launchctl kickstart -k gui/${uid}/${label}`, { timeout: 15_000 });
           return;
         } catch {
-          await this.ctx.adapter.sendText(chatId, "⚠️ Failed to restart launchd service", { threadId });
+          await adapter.sendText(chatId, "⚠️ Failed to restart launchd service", { threadId });
           return;
         }
       }
     } else {
       try {
-        await execAsync(`systemctl --user restart ${label}`, { timeout: 15_000 });
+        await this.exec(`systemctl --user restart ${label}`, { timeout: 15_000 });
         return;
       } catch { /* no systemd service */ }
     }
@@ -185,10 +339,10 @@ export class TopicCommands {
       try {
         process.kill(pid, "SIGUSR1");
       } catch {
-        await this.ctx.adapter.sendText(chatId, "⚠️ Fleet not running", { threadId });
+        await adapter.sendText(chatId, "⚠️ Fleet not running", { threadId });
       }
     } else {
-      await this.ctx.adapter.sendText(chatId, "⚠️ No service or running fleet found", { threadId });
+      await adapter.sendText(chatId, "⚠️ No service or running fleet found", { threadId });
     }
   }
 
@@ -294,7 +448,7 @@ export class TopicCommands {
               { command: "status", description: "Show fleet status and costs" },
               { command: "restart", description: "Graceful restart all instances" },
               { command: "sysinfo", description: "System diagnostics" },
-              { command: "update", description: "Update AgEnD and restart service" },
+              { command: "update", description: "Update AgEnD (two-step confirm; allow-listed users only)" },
             ],
             scope: { type: "chat", chat_id: groupId },
           }),
