@@ -86,6 +86,14 @@ export class CostGuard extends EventEmitter {
     tracker.accumulatedCents += sessionCents;
     const previousUsd = tracker.lastReportedUsd;
     tracker.lastReportedUsd = 0;
+    // Reset per-day notification flags so a new session that pushes the
+    // accumulated total past the threshold re-fires `warn` / `limit`. This
+    // matters for the limit handler in particular: it pauses the instance,
+    // and without re-firing a user-restarted instance can blow past the
+    // daily cap again silently. We're still bounded — a single session
+    // can fire each event at most once.
+    tracker.warnEmitted = false;
+    tracker.limitEmitted = false;
 
     this.eventLog.insert(instance, "cost_snapshot", {
       session_cost_usd: previousUsd,

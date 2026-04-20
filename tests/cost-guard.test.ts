@@ -136,6 +136,57 @@ describe("CostGuard", () => {
     guardDisabled.stop();
   });
 
+  it("re-emits limit after rotation if accumulated still exceeds (P2.2)", () => {
+    // Reproduces the bug where a user manually restarts a paused instance
+    // and the new session burns through the daily budget unannounced.
+    const limitSpy = vi.fn();
+    guard.on("limit", limitSpy);
+
+    // Session 1: blow past $10 limit → emit + (in real fleet) instance paused
+    guard.updateCost("agent1", 10.50);
+    expect(limitSpy).toHaveBeenCalledTimes(1);
+
+    // User manually restarts → new session reports cost=0 → rotation detected
+    guard.updateCost("agent1", 0);
+    // Then ramps the new session up past the (already-exceeded) accumulated cap
+    guard.updateCost("agent1", 0.50);
+
+    // Should re-emit so the fleet can re-pause the instance
+    expect(limitSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("re-emits warn after rotation if accumulated still above warn threshold (P2.2)", () => {
+    const warnSpy = vi.fn();
+    guard.on("warn", warnSpy);
+
+    guard.updateCost("agent1", 8.50); // warn at 80% of $10
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+
+    // Rotation
+    guard.updateCost("agent1", 0);
+    guard.updateCost("agent1", 0.10);
+
+    // accumulated $8.50 + new $0.10 = $8.60, still > warn threshold $8
+    expect(warnSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not re-emit on rotation if accumulated drops below threshold (sanity)", () => {
+    // If the next session doesn't push us back over the threshold, no re-emit.
+    const warnSpy = vi.fn();
+    guard.on("warn", warnSpy);
+
+    // Session 1: under warn threshold
+    guard.updateCost("agent1", 5.00);
+    expect(warnSpy).not.toHaveBeenCalled();
+
+    // Rotation, low new session
+    guard.updateCost("agent1", 0);
+    guard.updateCost("agent1", 1.00);
+
+    // accumulated $5 + $1 = $6, below $8 warn → still no emit
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
   it("schedules midnight reset via startMidnightReset", () => {
     const resetSpy = vi.fn();
     guard.on("daily_reset", resetSpy);
