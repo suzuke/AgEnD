@@ -486,8 +486,9 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       await this.resolveTopicIcons();
       this.topicArchiver.startPoller();
 
-      await new Promise(r => setTimeout(r, 3000));
-      await this.connectToInstances(fleet);
+      // IPC is already wired by startInstancesWithConcurrency → startInstance →
+      // connectIpcToInstance. The previous 3s sleep + connectToInstances loop
+      // was redundant.
 
       for (const name of Object.keys(fleet.instances)) {
         this.startStatuslineWatcher(name);
@@ -624,13 +625,6 @@ export class FleetManager implements FleetContext, LifecycleContext, ArchiverCon
       this.pruneStaleExternalSessions().catch(err =>
         this.logger.debug({ err }, "Session prune failed"));
     }, 5 * 60 * 1000);
-  }
-
-  /** Connect IPC clients to each daemon instance's channel.sock */
-  private async connectToInstances(fleet: FleetConfig): Promise<void> {
-    for (const name of Object.keys(fleet.instances)) {
-      await this.connectIpcToInstance(name);
-    }
   }
 
   /** Connect IPC to a single instance with all handlers */
