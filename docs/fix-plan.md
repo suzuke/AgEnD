@@ -113,8 +113,28 @@
 | P4.2 | `handleToolCall` 路由抽取 | ✅ | `e6a9596` 抽出 `dispatchFleetRpc(fleetReqId, broadcast, timeoutMs, timeoutMessage, respond)`；五個 fleet-RPC 分支 + fleet_outbound 後備改用 helper，`handleToolCall` 從 182 行降到 ~120 行，daemon.ts 整體 -51 行 |
 | P4.3 | `access-path` 驗證 | ✅ | `d5d41b7` `access-path.ts` 加 `assertSafeInstanceName` 拒 `..`/`/`/`\\`/NUL/empty；topic 模式不受影響 |
 | P4.4 | `.env` 權限 + validateTimezone 單一化 | ✅ | `49a4328` scheduler 改 import `config.ts` 的 `validateTimezone`；`quickstart.ts`/`setup-wizard.ts` 寫 `.env` 帶 `mode: 0o600` + chmod 兜底 |
-| P4.5 | 小修補集合 | 🟦 部分 | `1f91c3c` `paths.ts` md5 → sha256（避開 FIPS / 掃描器告警，預期會改 custom AGEND_HOME 的 tmux session/socket 後綴一次）；`test-perm-detect.ts` 已確認在 `.gitignore`；logger 仍只在啟動 truncate 一次（長駐 daemon 需排程，暫緩）；cost-guard tiebreaker 規格不明，暫緩 |
+| P4.5 | 小修補集合 | ✅ | `1f91c3c` `paths.ts` md5 → sha256（避開 FIPS / 掃描器告警）；`test-perm-detect.ts` 已確認在 `.gitignore`。剩餘兩項（logger rotation、cost-guard tiebreaker）非 fix 而屬 feature／規格未明，移至下方 **Deferred / Future Work**。 |
 | P4.6 | 測試 hygiene | ✅ | e2e 已在 `e2e/tests/`；單元測試使用 `waitFor`；無已知 hygiene 問題 |
+
+**Phase 4 結案（2026-04-20）**：6 項全綠，主修復計畫（Phase 1–4）完成。後續工作見下方 Deferred / Future Work。
+
+---
+
+## Deferred / Future Work
+
+以下項目原列在 fix-plan，但經評估後判定不屬於「修補」範疇，故自進度表移除、轉入 future work。後續若要做，應以獨立 feature ticket 規劃，而非本計畫的延伸。
+
+### Logger rotation（原 P4.5）
+
+- **現況**：`createLogger` 啟動時跑一次 `truncateLogIfNeeded`；長駐 daemon 之 log 不會自動輪替。
+- **為何不在本計畫修**：pino 使用 `SonicBoom` 持有 fd，外部從 0 偏移截斷後，pino 下一筆寫入會落在原 offset，產生稀疏檔（中間 NUL bytes）。安全的 rotation 需 daemon 內部排程 + reopen fd，或引入 `pino-roll`／外部 `logrotate`。屬 feature，不屬安全/可靠性 fix。
+- **建議走向**：(a) 引入 `pino-roll` dependency；或 (b) 文件化建議用戶自行配 `logrotate` + `copytruncate` 並提供範例。當前用戶若 log 過大可週期性重啟 daemon。
+
+### Cost-guard tiebreaker（原 P4.5）
+
+- **現況**：cost-guard 在多 instance 同時觸發 limit 時無明確 tiebreak 順序。
+- **為何不在本計畫修**：原 fix-plan 僅一句「無 cost-guard tiebreaker」，未指定多 instance 同時 trip 時誰該先被 throttle 的規則（依優先級？依最近活動？依累計成本？）。程式碼亦無對應 TODO。需求未定義時不應臆測。
+- **建議走向**：原作者提供 tiebreak 規則後再以獨立 PR 實作 + 測試。
 
 ---
 
@@ -198,6 +218,22 @@
   - **P4.5 logger rotation** — 重新評估後維持原狀。現行 `truncateLogIfNeeded` 在 `createLogger` 開始時跑一次（在 pino 開檔之前），因此每次 daemon 重啟會重置。改成 `setInterval` 週期 truncate **不安全**：pino 的 `SonicBoom` 流持有 fd，外部從 0 偏移截斷後 pino 下一筆寫入會落在原 offset，產生稀疏檔（中間是 NUL bytes）。要做真正 rotation 需引入 `pino-roll` 等 dependency 或改用外部 logrotate；屬 feature，不屬 fix。長駐 daemon 用戶若 log 過大應週期性重啟，或自行配 logrotate。
   - **P4.5 cost-guard tiebreaker** — 規格仍不明，待原作者澄清。
 - 下一輪建議優先：**P4.1 拆檔**（fleet-manager.ts，獨立 PR）。Phase 4 完成度：P4.2/P4.3/P4.4 全綠，P4.5 已交付主要兩項，P4.6 已綠，剩 P4.1。
+
+---
+
+**更新（2026-04-20，Phase 4 round 3：fleet-manager 拆檔 + Phase 4 結案）：**
+
+- PR #43 已合（round 3）— 6 commits：
+  - `b674a11` P4.1 抽 `fleet-dashboard-html.ts`（dashboard HTML 常數，442 行）
+  - `2336db4` P4.1 抽 `fleet-instructions.ts`（GENERAL_INSTRUCTIONS + ensureGeneralInstructions，168 行）
+  - `d555c33` P4.1 抽 `fleet-rpc-handlers.ts`（5 個 IPC CRUD + 5 個 HTTP CRUD + summarizeToolCall + resolveDisplayName，387 行；FleetManager 留 thin forwarder 給 *Http 因 AgentEndpointContext/WebApiContext 介面要求）
+  - `d38b0b2` P4.1 抽 `fleet-health-server.ts`（startHealthServer + getUiStatus + extractWebToken，326 行；circular import 經 extractWebToken 移到此模組解決）
+  - `5e385d6` docs(fix-plan) 標 P4.1 done + 歸檔 split plan
+  - `3b88d61` review fix：刪掉 fleet-manager.ts:44 dead `ACTIVITY_VIEWER_HTML` import
+- 結果：`fleet-manager.ts` 2842 → 1658 行（-1184）。新模組共 1323 行，皆採 Context-injection（narrow `XxxContext` interface，FleetManager `implements`，外部以 `this` 呼叫純函數），daemon.ts/cli.ts 拆檔暫不必要（Phase 4 不要求）。
+- 驗證：`npx tsc --noEmit` 綠；`npx vitest run` 全綠。
+- **Phase 4 全部完成**。原 P4.5 兩項 leftover（logger rotation、cost-guard tiebreaker）經評估非 fix 範疇，已從進度表移除並記錄於 **Deferred / Future Work** 區塊。
+- 主修復計畫（Phase 1–4）至此告一段落；後續工作以獨立 ticket 推進。
 
 ### Phase 1 commits（按時間由新到舊）
 
