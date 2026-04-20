@@ -1,6 +1,7 @@
 import { unlinkSync } from "node:fs";
 import { transcribe } from "../stt.js";
 import type { InboundMessage, ChannelAdapter } from "./types.js";
+import type { STTConfig } from "../types.js";
 
 export interface AttachmentResult {
   text: string;
@@ -10,7 +11,9 @@ export interface AttachmentResult {
 /**
  * Process attachments on an inbound message:
  * - Auto-download photos → extraMeta.image_path
- * - Transcribe voice/audio via Groq Whisper → prepend to text
+ * - Transcribe voice/audio via Groq Whisper → prepend to text (only if
+ *   `stt.enabled === true` is explicitly set in fleet.yaml — privacy default
+ *   is off so audio never silently leaves the system based on env var alone)
  * - Pass other attachment types as file_id for manual download
  */
 export async function processAttachments(
@@ -18,6 +21,7 @@ export async function processAttachments(
   adapter: ChannelAdapter,
   logger: { info(obj: unknown, msg?: string): void; warn(obj: unknown, msg?: string): void },
   logPrefix?: string,
+  stt?: STTConfig,
 ): Promise<AttachmentResult> {
   let text = msg.text;
   const extraMeta: Record<string, string> = {};
@@ -34,11 +38,20 @@ export async function processAttachments(
     }
   }
 
-  // Transcribe voice/audio
+  // Transcribe voice/audio — opt-in only.
   const voiceAttachment = msg.attachments?.find(a => a.kind === "voice" || a.kind === "audio");
   if (voiceAttachment) {
-    const groqKey = process.env.GROQ_API_KEY;
-    if (groqKey) {
+    const sttEnabled = stt?.enabled === true;
+    const apiKeyEnv = stt?.api_key_env ?? "GROQ_API_KEY";
+    const groqKey = sttEnabled ? process.env[apiKeyEnv] : undefined;
+
+    if (!sttEnabled) {
+      // Privacy default. Audio never uploaded.
+      text = text || "[Voice message — STT disabled in fleet.yaml]";
+    } else if (!groqKey) {
+      logger.warn({ apiKeyEnv }, "STT enabled but API key env var is not set");
+      text = text || `[Voice message — STT enabled but ${apiKeyEnv} not set]`;
+    } else {
       try {
         const localPath = await adapter.downloadAttachment(voiceAttachment.fileId);
         const result = await transcribe(localPath, groqKey);
@@ -49,8 +62,6 @@ export async function processAttachments(
         logger.warn({ err: (err as Error).message }, "Voice transcription failed");
         text = text || "[Voice message — transcription failed]";
       }
-    } else {
-      text = text || "[Voice message — STT API key not set]";
     }
     extraMeta.attachment_file_id = voiceAttachment.fileId;
   }

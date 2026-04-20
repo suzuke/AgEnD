@@ -132,6 +132,30 @@ health_port: 19280
 | `url` | string | Webhook endpoint URL |
 | `events` | string[] | 通知事件：`rotation`、`hang`、`cost_warn`、`cost_limit`、`crash_loop` |
 | `headers` | object | 選用的 HTTP headers |
+| `secret` | string | 選用的 HMAC-SHA256 簽章金鑰；設置後每次 POST 帶 `X-AgEnD-Signature: sha256=<hex>`（簽 `${timestamp}.${rawBody}`）與 `X-AgEnD-Timestamp`（防 replay） |
+
+每個 POST 都附 `X-AgEnD-Delivery: <uuid>` header，retry 時保持不變 — receiver 可用此做 idempotency。
+
+POST 失敗時：network error 或 `5xx` 會 retry（延遲 1s、4s，最多 3 次）；`4xx` 視為設定錯誤，不重試。
+
+---
+
+## stt
+
+語音轉文字設定（針對語音/音訊附件）。**預設關閉以保護隱私** — 除非在 `fleet.yaml` 明確設定 `stt.enabled: true`，否則語音訊息不會被上傳到任何第三方服務。只設定 `GROQ_API_KEY` 環境變數已不足。
+
+| 欄位 | 型別 | 預設 | 說明 |
+|------|------|------|------|
+| `enabled` | boolean | `false` | 必須設為 `true` 才允許語音上傳到雲端轉錄；隱私預設為 OFF |
+| `provider` | `"groq"` | `"groq"` | 目前唯一支援的轉錄後端 |
+| `api_key_env` | string | `GROQ_API_KEY` | 讀取 API key 的環境變數名稱 |
+
+```yaml
+stt:
+  enabled: true
+  provider: groq
+  api_key_env: GROQ_API_KEY
+```
 
 ---
 

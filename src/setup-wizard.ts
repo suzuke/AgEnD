@@ -133,6 +133,7 @@ export interface WizardAnswers {
   instances: Array<{ name: string; workDir: string; topicId?: string | number }>;
   costGuard: { enabled: boolean; dailyLimitUsd?: number; timezone?: string };
   dailySummary: { enabled: boolean; hour?: number };
+  stt?: { enabled: boolean; provider?: "groq"; apiKeyEnv?: string };
 }
 
 export function buildFleetConfig(answers: WizardAnswers): Record<string, unknown> {
@@ -185,6 +186,14 @@ export function buildFleetConfig(answers: WizardAnswers): Record<string, unknown
     };
   }
   fleetData.instances = instancesObj;
+
+  if (answers.stt?.enabled) {
+    fleetData.stt = {
+      enabled: true,
+      provider: answers.stt.provider ?? "groq",
+      api_key_env: answers.stt.apiKeyEnv ?? "GROQ_API_KEY",
+    };
+  }
 
   return fleetData;
 }
@@ -615,6 +624,7 @@ export async function runSetupWizard(): Promise<void> {
     instances,
     costGuard: { enabled: costGuardLimit > 0, dailyLimitUsd: costGuardLimit || undefined, timezone: costGuardTimezone },
     dailySummary: { enabled: enableSummary, hour: dailySummaryHour },
+    stt: groqApiKey ? { enabled: true, provider: "groq", apiKeyEnv: "GROQ_API_KEY" } : undefined,
   });
 
   writeFileSync(FLEET_CONFIG_PATH, yaml.dump(fleetData, { lineWidth: 120 }));

@@ -114,6 +114,15 @@ export interface WebhookConfig {
   url: string;
   events: string[];
   headers?: Record<string, string>;
+  /**
+   * Optional HMAC-SHA256 secret. When set, every POST includes:
+   *   X-AgEnD-Signature: sha256=<hex digest of `${timestamp}.${body}`>
+   *   X-AgEnD-Timestamp: <unix seconds at send time>
+   * Receivers verify by recomputing the HMAC over `${timestamp}.${rawBody}`
+   * and rejecting if `|now - timestamp|` exceeds their tolerance window
+   * (recommended ≤5 min, to neutralize replay).
+   */
+  secret?: string;
 }
 
 export interface FleetDefaults extends Partial<InstanceConfig> {
@@ -192,6 +201,20 @@ export interface FleetTemplate {
   instances: Record<string, TemplateInstanceDef>;
 }
 
+/**
+ * Speech-to-text settings. Voice/audio attachments are uploaded to a
+ * third-party transcription service when enabled — this is OFF by default
+ * (privacy default; opt-in must be explicit in fleet.yaml).
+ */
+export interface STTConfig {
+  /** Must be `true` to allow voice→cloud transcription. Default: false. */
+  enabled: boolean;
+  /** Currently the only supported value. */
+  provider?: "groq";
+  /** Env var name to read the API key from. Default: `GROQ_API_KEY`. */
+  api_key_env?: string;
+}
+
 export interface FleetConfig {
   channel?: ChannelConfig;
   project_roots?: string[];
@@ -201,4 +224,5 @@ export interface FleetConfig {
   templates?: Record<string, FleetTemplate>;
   profiles?: Record<string, ProfileConfig>;
   health_port?: number;
+  stt?: STTConfig;
 }
