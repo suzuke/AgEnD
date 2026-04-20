@@ -33,6 +33,7 @@ export class TmuxControlClient extends EventEmitter {
   private rl: Interface | null = null;
   private lastOutputAt = new Map<string, number>(); // paneId → timestamp
   private paneToWindow = new Map<string, string>();  // paneId → windowId
+  private registeredWindows = new Set<string>();    // windowIds we should re-resolve on reconnect
   private stopped = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -65,6 +66,24 @@ export class TmuxControlClient extends EventEmitter {
    * Call this after createWindow().
    */
   async registerWindow(windowId: string): Promise<void> {
+    this.registeredWindows.add(windowId);
+    await this.resolvePane(windowId);
+  }
+
+  /** Unregister a window (call on killWindow) */
+  unregisterWindow(windowId: string): void {
+    this.registeredWindows.delete(windowId);
+    for (const [pane, win] of this.paneToWindow) {
+      if (win === windowId) {
+        this.paneToWindow.delete(pane);
+        this.lastOutputAt.delete(pane);
+        break;
+      }
+    }
+  }
+
+  /** Resolve a window's current pane id and cache the mapping. */
+  private async resolvePane(windowId: string): Promise<void> {
     try {
       const paneId = await execTmux([
         "list-panes", "-t", `${this.sessionName}:${windowId}`,
@@ -76,17 +95,6 @@ export class TmuxControlClient extends EventEmitter {
       }
     } catch {
       this.logger?.debug({ windowId }, "Failed to resolve pane ID for window");
-    }
-  }
-
-  /** Unregister a window (call on killWindow) */
-  unregisterWindow(windowId: string): void {
-    for (const [pane, win] of this.paneToWindow) {
-      if (win === windowId) {
-        this.paneToWindow.delete(pane);
-        this.lastOutputAt.delete(pane);
-        break;
-      }
     }
   }
 
@@ -161,6 +169,13 @@ export class TmuxControlClient extends EventEmitter {
   private connect(): void {
     if (this.stopped) return;
 
+    // Pane IDs are tmux-server-scoped: a server restart (or a long-enough
+    // disconnect that windows churned) can leave our cached paneId →
+    // windowId mapping pointing at a stale or recycled pane. Drop the
+    // cache and re-resolve every registered window from the new server.
+    this.paneToWindow.clear();
+    this.lastOutputAt.clear();
+
     this.proc = spawn("tmux", tmuxArgs(["-C", "attach", "-t", this.sessionName, "-r"]), {
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -179,6 +194,12 @@ export class TmuxControlClient extends EventEmitter {
     this.proc.on("error", (err) => {
       this.logger?.warn({ err: (err as Error).message }, "Control mode spawn error");
     });
+
+    // Re-resolve panes for any windows that were registered before this
+    // (re)connect. Safe even on first connect: registeredWindows is empty.
+    for (const windowId of this.registeredWindows) {
+      void this.resolvePane(windowId);
+    }
 
     this.logger?.debug("tmux control mode connected");
   }
