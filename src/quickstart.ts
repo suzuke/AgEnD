@@ -1,5 +1,5 @@
 import { createInterface } from "node:readline/promises";
-import { writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from "node:fs";
+import { writeFileSync, mkdirSync, existsSync, readdirSync, statSync, chmodSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { homedir, platform } from "node:os";
 import { stdin, stdout } from "node:process";
@@ -339,7 +339,12 @@ export async function runQuickstart(): Promise<void> {
     writeFileSync(FLEET_CONFIG_PATH, fleetYaml);
     console.log(`\n  ${green("✓")} ${FLEET_CONFIG_PATH}`);
 
-    writeFileSync(ENV_PATH, `${tokenEnvName}=${token}\n`);
+    // .env contains the bot token — restrict to owner-only read/write so a
+    // multi-user system (or a curious sibling process) can't grab it.
+    writeFileSync(ENV_PATH, `${tokenEnvName}=${token}\n`, { mode: 0o600 });
+    // writeFileSync's mode is only honoured when the file did not previously
+    // exist; chmod the realised file to cover the overwrite case as well.
+    try { chmodSync(ENV_PATH, 0o600); } catch { /* best-effort on Windows */ }
     console.log(`  ${green("✓")} ${ENV_PATH}`);
 
     // ── Next steps ───────────────────────────────────────

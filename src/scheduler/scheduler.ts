@@ -2,19 +2,7 @@ import { Cron } from "croner";
 import { SchedulerDb } from "./db.js";
 import type { Schedule, CreateScheduleParams, UpdateScheduleParams, SchedulerConfig, ScheduleRun } from "./types.js";
 import type { Logger } from "../logger.js";
-
-/**
- * Reject unknown timezones. Uses `Intl.DateTimeFormat`, which throws RangeError
- * for invalid IANA names but accepts canonical aliases like "UTC" that
- * `Intl.supportedValuesOf("timeZone")` doesn't enumerate.
- */
-function validateTimezone(tz: string): void {
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone: tz });
-  } catch {
-    throw new Error(`Unknown timezone: ${tz}`);
-  }
-}
+import { validateTimezone } from "../config.js";
 
 export class Scheduler {
   /** Cap how far back we look for missed fires on init. Avoids dumping
@@ -104,7 +92,7 @@ export class Scheduler {
 
   create(params: CreateScheduleParams): Schedule {
     const tz = params.timezone ?? this.config.default_timezone;
-    validateTimezone(tz);
+    validateTimezone(tz, "timezone");
     try {
       new Cron(params.cron, { timezone: tz });
     } catch (err) {
@@ -130,7 +118,7 @@ export class Scheduler {
 
   update(id: string, params: UpdateScheduleParams): Schedule {
     if (params.timezone !== undefined) {
-      validateTimezone(params.timezone);
+      validateTimezone(params.timezone, "timezone");
     }
     if (params.cron !== undefined) {
       try {

@@ -1,5 +1,5 @@
 import { createInterface } from "node:readline/promises";
-import { writeFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
+import { writeFileSync, mkdirSync, existsSync, readFileSync, chmodSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { stdin, stdout } from "node:process";
@@ -608,7 +608,12 @@ export async function runSetupWizard(): Promise<void> {
   }
   envContent += `${tokenEnvName}=${token}\n`;
   if (groqApiKey) envContent += `GROQ_API_KEY=${groqApiKey}\n`;
-  writeFileSync(ENV_PATH, envContent);
+  // .env contains the bot token (and possibly third-party API keys) — restrict
+  // to owner read/write so other local users / curious processes can't grab it.
+  writeFileSync(ENV_PATH, envContent, { mode: 0o600 });
+  // writeFileSync's mode is only honoured when the file did not previously
+  // exist; chmod the realised file to cover the overwrite case as well.
+  try { chmodSync(ENV_PATH, 0o600); } catch { /* best-effort on Windows */ }
   console.log(`  ${green("✓")} ${ENV_PATH}`);
 
   // fleet.yaml
