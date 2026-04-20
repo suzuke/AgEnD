@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { FleetConfig } from "./types.js";
 import type { ChannelAdapter } from "./channel/types.js";
@@ -48,8 +48,12 @@ export class TopicArchiver {
   }
 
   private save(): void {
+    // Atomic write: tmp + rename so a crash mid-write cannot leave a
+    // truncated JSON that load() would reject.
+    const tmp = `${this.statePath}.tmp`;
     try {
-      writeFileSync(this.statePath, JSON.stringify([...this.archived]));
+      writeFileSync(tmp, JSON.stringify([...this.archived]));
+      renameSync(tmp, this.statePath);
     } catch (err) {
       this.ctx.logger.warn({ err, path: this.statePath }, "Failed to save archived-topics state");
     }
