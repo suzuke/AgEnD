@@ -42,6 +42,35 @@ import { handleAgentRequest, type AgentEndpointContext } from "./agent-endpoint.
 
 import { getTmuxSession } from "./config.js";
 
+/**
+ * Extract a web token from a request, accepting (in order):
+ *   1. `?token=` query string
+ *   2. `Authorization: Bearer <token>` header (standard)
+ *   3. `X-Agend-Token: <token>` header (legacy compatibility)
+ *
+ * Centralized so the CLI/SDK callers can rely on Bearer alongside the
+ * existing query/header schemes without duplicating parsing.
+ */
+export function extractWebToken(
+  parsedUrl: URL,
+  headers: Record<string, string | string[] | undefined>,
+): string | null {
+  const queryToken = parsedUrl.searchParams.get("token");
+  if (queryToken) return queryToken;
+
+  const auth = headers["authorization"];
+  const authStr = Array.isArray(auth) ? auth[0] : auth;
+  if (authStr && /^Bearer\s+/i.test(authStr)) {
+    return authStr.replace(/^Bearer\s+/i, "").trim();
+  }
+
+  const headerToken = headers["x-agend-token"];
+  if (typeof headerToken === "string") return headerToken;
+  if (Array.isArray(headerToken) && headerToken.length > 0) return headerToken[0];
+
+  return null;
+}
+
 export function resolveReplyThreadId(
   argsThreadId: unknown,
   instanceConfig?: InstanceConfig,
@@ -2151,12 +2180,11 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
       if (req.method === "GET" && req.url === "/health") {
         // fallthrough to existing handler below
       } else {
-        // All other endpoints require a valid token (query ?token= or X-Agend-Token header).
+        // All other endpoints require a valid token. Accepts ?token= query,
+        // Authorization: Bearer <token>, or legacy X-Agend-Token header.
         // /ui/* will also re-check in web-api.ts, which is harmless.
         const parsedUrl = new URL(req.url ?? "/", `http://localhost:${port}`);
-        const headerToken = req.headers["x-agend-token"];
-        const providedToken = parsedUrl.searchParams.get("token")
-          ?? (typeof headerToken === "string" ? headerToken : null);
+        const providedToken = extractWebToken(parsedUrl, req.headers);
         if (!this.webToken || providedToken !== this.webToken) {
           res.writeHead(401);
           res.end(JSON.stringify({ error: "Unauthorized" }));
@@ -2224,7 +2252,8 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
             currentTask,
           };
         });
-        res.setHeader("Access-Control-Allow-Origin", "*");
+        // Same-origin only — token-bearing requests come from the dashboard
+        // served by this same daemon, so no CORS allowance is needed.
         res.writeHead(200);
         res.end(JSON.stringify({
           ...sysInfo,
@@ -2248,7 +2277,7 @@ Design Proposed → Design Approved → Implementation → Submit for Review →
         }
 
         const rows = this.eventLog?.listActivity({ since: sinceIso, limit: parseInt(limitParam, 10) }) ?? [];
-        res.setHeader("Access-Control-Allow-Origin", "*");
+        // Same-origin only — see /api/fleet rationale.
         res.writeHead(200);
         res.end(JSON.stringify(rows));
         return;
