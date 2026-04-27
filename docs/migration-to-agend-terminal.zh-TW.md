@@ -194,7 +194,7 @@ ERROR FATAL (warn-but-permit one daemon cycle): instance '<name>' outbound_capab
 
 該 op 仍會繼續執行 —— 但這條 warning 在每個 daemon process 內每個 instance 只會發一次(以 mutex-guarded `HashSet` 限速,不會 spam log)。Sprint 23 ship 後,鍵不存在會變成 hard parse error,daemon 會直接拒絕載入 config。**不要依賴 grace window 撐到 Sprint 22 P0 之後**。
 
-**Built-in coordinator 自動注入。** `general` instance(以及未來自動建立的 coordinator)會在啟動時由 [`bootstrap::fleet_normalize::auto_create_general`](https://github.com/suzuke/agend-terminal/blob/main/src/bootstrap/fleet_normalize.rs#L24-L67) 自動注入 `[reply, react, edit, inject_provenance]`。**User 自己寫的 YAML entry 不會自動注入** —— Sprint 23 之前,operator 定義的每個 instance 都必須明確宣告 `outbound_capabilities`。
+**Built-in coordinator 自動注入。** `general` instance(以及未來自動建立的 coordinator)會在啟動時由 [`bootstrap::fleet_normalize::auto_create_general`](https://github.com/suzuke/agend-terminal/blob/main/src/bootstrap/fleet_normalize.rs#L23-L87) 自動注入 `[reply, react, edit, inject_provenance]`(連結範圍同時涵蓋定義四項預設值的 `default_built_in_outbound_capabilities()` helper 與消費它的 `auto_create_general` fn)。**User 自己寫的 YAML entry 不會自動注入** —— Sprint 23 之前,operator 定義的每個 instance 都必須明確宣告 `outbound_capabilities`。
 
 **遷移動作。** 把既有 `@suzuke/agend` `fleet.yaml` 移到 `agend-terminal` 時,給每一個 operator 自寫的 instance 加上 `outbound_capabilities`:
 

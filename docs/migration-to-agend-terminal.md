@@ -196,7 +196,7 @@ ERROR FATAL (warn-but-permit one daemon cycle): instance '<name>' outbound_capab
 
 The op proceeds — but the warning is fired once per instance per daemon process (mutex-guarded `HashSet`, rate-limited so no log spam). When Sprint 23 ships, the absent state becomes a hard parse error and the daemon refuses to load the config. Do not depend on the grace window past Sprint 22 P0.
 
-**Built-in coordinators are auto-injected.** The `general` instance (and any future auto-created coordinator) gets `[reply, react, edit, inject_provenance]` injected automatically by [`bootstrap::fleet_normalize::auto_create_general`](https://github.com/suzuke/agend-terminal/blob/main/src/bootstrap/fleet_normalize.rs#L24-L67) at startup. **User-authored YAML entries do not get auto-inject** — every operator-defined instance must declare `outbound_capabilities` explicitly before Sprint 23.
+**Built-in coordinators are auto-injected.** The `general` instance (and any future auto-created coordinator) gets `[reply, react, edit, inject_provenance]` injected automatically at startup by [`bootstrap::fleet_normalize::auto_create_general`](https://github.com/suzuke/agend-terminal/blob/main/src/bootstrap/fleet_normalize.rs#L23-L87) (the linked range covers both the `default_built_in_outbound_capabilities()` helper that defines the four-cap default and the `auto_create_general` fn that consumes it). **User-authored YAML entries do not get auto-inject** — every operator-defined instance must declare `outbound_capabilities` explicitly before Sprint 23.
 
 **Migration action.** When porting an existing `@suzuke/agend` `fleet.yaml`, add `outbound_capabilities` to every operator-authored instance:
 
