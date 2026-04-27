@@ -172,6 +172,44 @@ channel:
 
 **其他值得注意的 int-vs-string parity:** `instances.<name>.topic_id` 在 Rust 也是嚴格 `Option<i32>` (fleet.rs:160) —— 僅裸 int。
 
+### 高摩擦變更 #3:`outbound_capabilities` 是 Rust 端必填的新增欄位
+
+**參考:** Sprint 22 P0 PR [#230](https://github.com/suzuke/agend-terminal/pull/230)。Schema doc-comment 在 [`src/fleet.rs:173-208`](https://github.com/suzuke/agend-terminal/blob/main/src/fleet.rs#L173-L208);enforcement helper 在 [`src/channel/auth.rs::gate_outbound_for_agent`](https://github.com/suzuke/agend-terminal/blob/main/src/channel/auth.rs);enum 在同檔案的 `ChannelOpKind`。Operator 完整參考:[`docs/MIGRATION-OUTBOUND-CAPS.md`](https://github.com/suzuke/agend-terminal/blob/main/docs/MIGRATION-OUTBOUND-CAPS.md)。
+
+`@suzuke/agend` 沒有對等欄位 —— outbound channel ACL 過去是隱式的(「任何工具任何 instance 都能呼叫」)。`agend-terminal` 引入 `instances.<name>.outbound_capabilities: Vec<ChannelOpKind>`,用來限制每個 instance 可呼叫哪些 agent-driven channel ops。目前四個變體 (YAML 用 snake_case → 對應 `ChannelOpKind` variant):`reply` → `Reply`、`react` → `React`、`edit` → `Edit`、`inject_provenance` → `InjectProvenance`。
+
+**三態語意** (與高摩擦變更 #1 的 `channel.user_allowlist` 同模式):
+
+| YAML | Sprint 22 P0(目前) | Sprint 23(下一階段) |
+|---|---|---|
+| `outbound_capabilities: [reply, react]` | 列出的 ops 允許 | 同 |
+| `outbound_capabilities: []` | fail-closed(明確不允許 agent outbound) | 同 |
+| 鍵不存在 | FATAL warn-but-permit one daemon cycle | hard parse error |
+
+**鍵不存在時的症狀(Sprint 22 P0 grace 期間)。** Daemon 透過 `tracing::error!` 發:
+
+```
+ERROR FATAL (warn-but-permit one daemon cycle): instance '<name>' outbound_capabilities NOT SET. Sprint 22 P0 grants this <op> call under gradual-migration grace. ...
+```
+
+該 op 仍會繼續執行 —— 但這條 warning 在每個 daemon process 內每個 instance 只會發一次(以 mutex-guarded `HashSet` 限速,不會 spam log)。Sprint 23 ship 後,鍵不存在會變成 hard parse error,daemon 會直接拒絕載入 config。**不要依賴 grace window 撐到 Sprint 22 P0 之後**。
+
+**Built-in coordinator 自動注入。** `general` instance(以及未來自動建立的 coordinator)會在啟動時由 [`bootstrap::fleet_normalize::auto_create_general`](https://github.com/suzuke/agend-terminal/blob/main/src/bootstrap/fleet_normalize.rs#L23-L87) 自動注入 `[reply, react, edit, inject_provenance]`(連結範圍同時涵蓋定義四項預設值的 `default_built_in_outbound_capabilities()` helper 與消費它的 `auto_create_general` fn)。**User 自己寫的 YAML entry 不會自動注入** —— Sprint 23 之前,operator 定義的每個 instance 都必須明確宣告 `outbound_capabilities`。
+
+**遷移動作。** 把既有 `@suzuke/agend` `fleet.yaml` 移到 `agend-terminal` 時,給每一個 operator 自寫的 instance 加上 `outbound_capabilities`:
+
+```yaml
+instances:
+  worker-a:
+    working_directory: /path/to/repo
+    outbound_capabilities: [reply, react]      # 明確列出 agent 應該用的 channel ops
+  worker-b:
+    working_directory: /path/to/other-repo
+    outbound_capabilities: []                  # 明確 lockdown —— agent 不可呼叫 channel ops
+```
+
+完整的 `ChannelOpKind` enum 參考、2-stage transition timeline 的 rationale、以及跨 channel 架構備註(Telegram-vs-Discord 共用 gate 的行為),請見 operator 完整參考 [`docs/MIGRATION-OUTBOUND-CAPS.md`](https://github.com/suzuke/agend-terminal/blob/main/docs/MIGRATION-OUTBOUND-CAPS.md)。
+
 ### Top-level keys
 
 `@suzuke/agend` 的 `FleetConfig` (`src/types.ts:218`) → `agend-terminal` 的 `FleetConfig` (`src/fleet.rs:7-29`):
@@ -220,6 +258,7 @@ channel:
 
 | Rust 欄位 | 型別 | 用途 |
 |---|---|---|
+| `outbound_capabilities` | `Vec<ChannelOpKind>` | **Sprint 23 起,operator 自寫的每個 instance 都必填。** 限制該 instance 可呼叫哪些 agent-driven channel ops(`reply` / `react` / `edit` / `inject_provenance`)。三態語意 + 2-stage timeline + `general` 自動注入 —— 詳見上方「高摩擦變更 #3」。 |
 | `receive_fleet_updates` | `Option<bool>` | 預設 opt-in。對不該收到 fleet `<fleet-update>` 注入的 instance 設 `false`。 |
 | `cols`、`rows` | `Option<u16>` | 覆寫該 instance 的 PTY 尺寸。 |
 | `env` | `HashMap<String, String>` | Per-instance 加 env。注意:Rust 會依 `agent.rs::SENSITIVE_ENV_KEYS` 過濾類 credential 鍵 —— 從這裡注入的 secrets 可能會被 redacted。 |
