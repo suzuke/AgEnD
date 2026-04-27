@@ -115,17 +115,18 @@ The Rust schema lives at [`src/fleet.rs:7-183`](https://github.com/suzuke/agend-
 
 **Outbound failure mode (post-PR #216 fail-closed for outbound notify):**
 
-If the daemon would have notified the channel but the recipient is not allowlisted, you'll see this line in `daemon.log`:
+If the daemon would have notified the channel but the recipient is not allowlisted, this line is emitted to `daemon.log` at **DEBUG** level (`tracing::debug!` at `src/channel/mod.rs:251-255`):
 
 ```
-WARN  outbound notify dropped — channel not authorised (fail-closed; configure user_allowlist to opt in)
+DEBUG  outbound notify dropped — channel not authorised (fail-closed; configure user_allowlist to opt in)
 ```
 
-(Source: `src/channel/mod.rs:254`.)
+> [!IMPORTANT]
+> The drop event is logged at `DEBUG`, **not** `WARN`. With the default `RUST_LOG=info` you will not see it — `grep` against `daemon.log` returns nothing and the operator's natural conclusion is "config OK," which is exactly the wrong inference. **When reproducing this failure mode, set `RUST_LOG=debug` (or `RUST_LOG=agend_terminal=debug`) before starting the daemon.** A separate `agend-terminal`-side change to raise this line to `WARN` is being tracked by dev-team; this guide reflects the current behaviour.
 
 **Inbound failure mode:**
 
-Each rejected inbound is dropped with a `WARN` log naming the offending `user_id`.
+Each rejected inbound is dropped with a log naming the offending `user_id`. Same caveat: confirm log level on `agend-terminal` source before relying on a specific level for grep.
 
 **Migration action**
 
@@ -135,7 +136,7 @@ channel:
   type: telegram
   bot_token_env: BOT_TOKEN
   group_id: -1001234567890           # bare int, see High-friction #2
-  user_allowlist:                    # top-level on channel; copy from access.allowed_users on @suzuke/agend
+  user_allowlist:                    # top-level on channel; copy from channel.access.allowed_users on @suzuke/agend
     - 111111111                      # Telegram numeric user ID, bare int
     - 222222222
 ```
@@ -144,24 +145,25 @@ channel:
 
 1. `grep "outbound notify dropped" $AGEND_HOME/daemon.log` — confirms the gate fired.
 2. Confirm `channel.user_allowlist` is set in `fleet.yaml` and your numeric user ID is in it (use [@userinfobot](https://t.me/userinfobot) on Telegram if unsure).
-3. If you previously had `access.allowed_users` on `@suzuke/agend`, that path is **not read** by Rust — copy the entries to top-level `channel.user_allowlist` and use bare int form for IDs.
+3. If you previously had `channel.access.allowed_users` on `@suzuke/agend` (the fully qualified path; `access` is nested under `channel` per `src/types.ts:57`), that path is **not read** by Rust — copy the entries to top-level `channel.user_allowlist` and use bare int form for IDs.
+4. **TS pairing-mode users** (those who got their user IDs onto `channel.access.allowed_users` via `agend access pair` issuing pairing codes) must also be enumerated into `channel.user_allowlist` directly — `agend-terminal` has no pairing flow equivalent. If your `@suzuke/agend` install used `access.mode: "pairing"`, list every active user ID in the Rust allowlist explicitly.
 
 > **Why fail-closed:** an empty/absent allowlist on a Telegram bot is a credential exposure waiting to happen — anyone who guesses or exfiltrates the bot token can DM the bot and trigger arbitrary backend tool use. Failing closed forces the operator to make an explicit access decision, which is both safer and more debuggable than silently exposing the bot.
 
 ### High-friction change #2: `group_id` is strict `i64` — **bare int form only**
 
-**Reference:** [`src/fleet.rs:46`](https://github.com/suzuke/agend-terminal/blob/main/src/fleet.rs#L46) (field type) and [`src/fleet.rs:725-826`](https://github.com/suzuke/agend-terminal/blob/main/src/fleet.rs#L725-L826) (round-trip tests covering `-100123456`, `-100999`, `-3`, `-1`, `-2`).
+**Reference:** [`src/fleet.rs:46`](https://github.com/suzuke/agend-terminal/blob/main/src/fleet.rs#L46) (field type) and [`src/fleet.rs:725-826`](https://github.com/suzuke/agend-terminal/blob/main/src/fleet.rs#L725-L826) (round-trip tests).
 
-In `@suzuke/agend`, `channel.group_id` is typed as `number | string` and the YAML loader accepts either. Operator guidance has been "always quote large negative IDs as strings" because some code paths mishandled the negative-prefix supergroup IDs as numbers (precision/sign edge cases).
+In `@suzuke/agend`, `channel.group_id` was typed as `number | string` and the YAML loader accepted either. **Canonical TS docs used the bare int form for Telegram supergroup IDs** — see `docs/configuration.md:23` (`group_id: -1001234567890`) and `tests/setup-wizard-config.test.ts:127` (`toBe(-1001234567890)`). The quoted-string form was reserved for **Discord guild IDs** (positive 18–19-digit snowflakes that exceed JavaScript's `Number.MAX_SAFE_INTEGER` of 2^53 − 1) — see `docs/features.md:302`, `docs/plugin-development.md:293`, `docs/plugin-adapter-architecture.md:28,298`. Quoting Discord IDs dodged JS `Number` precision loss; quoting Telegram IDs was never the canonical TS recommendation.
 
-In `agend-terminal`, `channel.group_id` is typed as **`i64`** with strict serde deserialization. **Only the bare int form is accepted** — a quoted-string form (`group_id: "-1001234567890"`) **fails at startup** with a serde error like `"invalid type: string \"-1001234567890\", expected i64"`. The Rust YAML parser does not auto-coerce string ↔ int.
+In `agend-terminal`, `channel.group_id` is typed as **`i64`** with strict serde deserialization. **Only the bare int form is accepted** — a quoted-string form (`group_id: "-1001234567890"`) **fails at startup** with a serde error like `"invalid type: string \"-1001234567890\", expected i64"`. The Rust YAML parser does not auto-coerce string ↔ int. `i64` covers both Telegram negative supergroup IDs (well within range) and Discord snowflakes (which fit in 2^63 − 1) with the same bare-int form.
 
-The TS string-handling bug does not apply on Rust (i64 covers the full negative supergroup range natively, with round-trip tests committed at fleet.rs:725-826).
+Round-trip tests at [`src/fleet.rs:725-826`](https://github.com/suzuke/agend-terminal/blob/main/src/fleet.rs#L725-L826) lock the bare-int parsing contract for representative negative IDs (`-100123456`, `-100999`, `-3`, `-1`, `-2`). Quoted-string rejection is serde's default behaviour for `i64`-typed fields and is not separately regression-tested — a future serde version with a permissive coercion knob could change it, though the typed-field contract makes such drift unlikely.
 
-**This reverses the TS migration guidance.** If you have been quoting `group_id` on `@suzuke/agend` (the recommended workaround), you must **un-quote** it before the new daemon will load your `fleet.yaml`.
+**Migration action.** If your `fleet.yaml` quoted any `group_id` value (Discord users especially, where quoting was the standard TS workaround for the precision issue), un-quote it before the new daemon will load the config:
 
 ```yaml
-# Required form on agend-terminal:
+# Required form on agend-terminal (Telegram and Discord both):
 channel:
   group_id: -1001234567890            # bare int
 
@@ -182,7 +184,7 @@ channel:
 | `project_roots` | **removed** | No fleet-level allowlist of project roots; use per-instance `working_directory`. |
 | `defaults` | `defaults: InstanceDefaults` ✓ | Field set differs significantly — see instance table below. |
 | `instances` | `instances: HashMap<String, InstanceConfig>` ✓ | Same role; field set leaner. |
-| `teams` | `teams: HashMap<String, TeamConfig>` ✓ | Same shape (`{ members, description? }`). |
+| `teams` | `teams: HashMap<String, TeamConfig>` ✓ | Rust shape (`src/fleet.rs:175-183`): `{ members, orchestrator?, description? }`. The new `orchestrator: Option<String>` field names a member that acts as the routing target for team-addressed `delegate_task` and groups the team in the TUI's team-tab view. TS `TeamConfig` has only `{ members, description? }` — when porting, leave `orchestrator` unset to preserve TS-equivalent behaviour, or set it once you adopt the new routing convention. |
 | `templates` | `templates: Option<HashMap<String, serde_yaml::Value>>` | **Parser-only on Rust today** — keys round-trip but template expansion is not implemented yet. Do not depend on TS template semantics. |
 | `profiles` | **removed** | Per-instance fields are flat; reusable profiles will return as a separate concern if needed. |
 | `health_port` | **removed** | Daemon does not expose a separate health port; use `agend-terminal doctor`. |

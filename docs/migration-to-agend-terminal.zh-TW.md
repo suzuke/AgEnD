@@ -113,17 +113,18 @@ Rust schema 在 [`src/fleet.rs:7-183`](https://github.com/suzuke/agend-terminal/
 
 **Outbound 失敗模式 (post-PR #216 outbound notify fail-closed):**
 
-如果 daemon 想對 channel 通知,但收件者不在 allowlist 中,你會在 `daemon.log` 看到:
+如果 daemon 想對 channel 通知,但收件者不在 allowlist 中,以下這行會以 **DEBUG** level 寫入 `daemon.log` (`tracing::debug!` 在 `src/channel/mod.rs:251-255`):
 
 ```
-WARN  outbound notify dropped — channel not authorised (fail-closed; configure user_allowlist to opt in)
+DEBUG  outbound notify dropped — channel not authorised (fail-closed; configure user_allowlist to opt in)
 ```
 
-(來源:`src/channel/mod.rs:254`。)
+> [!IMPORTANT]
+> Drop 事件是 `DEBUG`,**不是** `WARN`。預設 `RUST_LOG=info` 下你看不到 ——`grep daemon.log` 也找不到,operator 自然會結論「config OK」,**這正好是相反的判斷**。**重現此失敗模式時請先設 `RUST_LOG=debug` (或 `RUST_LOG=agend_terminal=debug`) 再啟動 daemon。** 把這行升到 `WARN` 是 `agend-terminal` 端的修正 (dev-team backlog),本指引反映目前行為。
 
 **Inbound 失敗模式:**
 
-每筆被拒絕的 inbound 會 drop,並記一條帶該 `user_id` 的 `WARN` log。
+每筆被拒絕的 inbound 會 drop,並記一條帶該 `user_id` 的 log。同樣注意:依特定 log level 做 grep 前,請先在 `agend-terminal` 原始碼確認 level。
 
 **遷移動作**
 
@@ -133,7 +134,7 @@ channel:
   type: telegram
   bot_token_env: BOT_TOKEN
   group_id: -1001234567890           # 裸 int,見 High-friction #2
-  user_allowlist:                    # channel 的 top-level;從 @suzuke/agend 的 access.allowed_users 複製
+  user_allowlist:                    # channel 的 top-level;從 @suzuke/agend 的 channel.access.allowed_users 複製
     - 111111111                      # Telegram 數字 user ID,裸 int
     - 222222222
 ```
@@ -142,24 +143,25 @@ channel:
 
 1. `grep "outbound notify dropped" $AGEND_HOME/daemon.log` —— 確認 gate 觸發了。
 2. 確認 `channel.user_allowlist` 已設定於 `fleet.yaml`,且你的數字 user ID 在裡面 (不確定可在 Telegram 用 [@userinfobot](https://t.me/userinfobot))。
-3. 如果你之前在 `@suzuke/agend` 用 `access.allowed_users`,該路徑 Rust **不再讀取** —— 把條目搬到 top-level `channel.user_allowlist`,IDs 用裸 int 形式。
+3. 如果你之前在 `@suzuke/agend` 用 `channel.access.allowed_users` (完整路徑;`access` 在 `src/types.ts:57` 嵌在 `channel` 之下),該路徑 Rust **不再讀取** —— 把條目搬到 top-level `channel.user_allowlist`,IDs 用裸 int 形式。
+4. **TS pairing-mode 使用者** (透過 `agend access pair` 發 pairing 碼,使用者兌換後 ID 進到 `channel.access.allowed_users`) 也必須直接列進 `channel.user_allowlist` —— `agend-terminal` 沒有 pairing flow 等價物。如果你的 `@suzuke/agend` 環境用 `access.mode: "pairing"`,請把每個目前 active 的 user ID 明列進 Rust allowlist。
 
 > **為什麼 fail-closed:** Telegram bot 上空的 / 不存在的 allowlist 是 credential 暴露的等待事故 —— 任何人猜到或外洩 bot token 後可以 DM bot 觸發任意 backend tool use。Fail-closed 強迫 operator 做出明確的存取決策,比靜默暴露更安全也更易 debug。
 
 ### 高摩擦變更 #2:`group_id` 嚴格 `i64` —— **僅接受裸 int**
 
-**參考:** [`src/fleet.rs:46`](https://github.com/suzuke/agend-terminal/blob/main/src/fleet.rs#L46) (欄位型別) 與 [`src/fleet.rs:725-826`](https://github.com/suzuke/agend-terminal/blob/main/src/fleet.rs#L725-L826) (round-trip 測試覆蓋 `-100123456`、`-100999`、`-3`、`-1`、`-2`)。
+**參考:** [`src/fleet.rs:46`](https://github.com/suzuke/agend-terminal/blob/main/src/fleet.rs#L46) (欄位型別) 與 [`src/fleet.rs:725-826`](https://github.com/suzuke/agend-terminal/blob/main/src/fleet.rs#L725-L826) (round-trip 測試)。
 
-在 `@suzuke/agend`,`channel.group_id` 型別是 `number | string`,YAML loader 兩種都接受。Operator 指引一直是「大型負 ID 永遠 quote 成字串」,因為某些 code path 把 negative-prefix supergroup IDs 當 number 處理會 hit precision/sign 邊界。
+在 `@suzuke/agend`,`channel.group_id` 型別是 `number | string`,YAML loader 兩種都接受。**TS canonical 文件對 Telegram supergroup ID 採裸 int** —— 見 `docs/configuration.md:23` (`group_id: -1001234567890`) 與 `tests/setup-wizard-config.test.ts:127` (`toBe(-1001234567890)`)。需要 quote 成字串的是 **Discord guild ID** (正向 18-19 位 snowflake,超過 JavaScript `Number.MAX_SAFE_INTEGER` 即 2^53 − 1) —— 見 `docs/features.md:302`、`docs/plugin-development.md:293`、`docs/plugin-adapter-architecture.md:28,298`。Quote Discord ID 是為了避開 JS `Number` 的精度損失;quote Telegram ID 從來不是 TS 的 canonical 建議。
 
-在 `agend-terminal`,`channel.group_id` 嚴格定為 **`i64`**,serde deserialization 嚴格。**只接受裸 int 形式** —— quoted-string 形式 (`group_id: "-1001234567890"`) **會在啟動時失敗**,serde error 形如 `"invalid type: string \"-1001234567890\", expected i64"`。Rust YAML parser 不會自動 string ↔ int 互轉。
+在 `agend-terminal`,`channel.group_id` 嚴格定為 **`i64`**,serde deserialization 嚴格。**只接受裸 int 形式** —— quoted-string 形式 (`group_id: "-1001234567890"`) **會在啟動時失敗**,serde error 形如 `"invalid type: string \"-1001234567890\", expected i64"`。Rust YAML parser 不會自動 string ↔ int 互轉。`i64` 同時涵蓋 Telegram 負向 supergroup ID (在範圍內) 與 Discord snowflake (適合 2^63 − 1),兩者都可用同一裸 int 形式。
 
-TS 的 string-handling bug 在 Rust 上不適用 (i64 原生覆蓋整個負 supergroup 範圍,並有 fleet.rs:725-826 的 round-trip 測試)。
+[`src/fleet.rs:725-826`](https://github.com/suzuke/agend-terminal/blob/main/src/fleet.rs#L725-L826) 的 round-trip 測試鎖定的是裸 int 解析契約,代表性負 ID 包含 (`-100123456`、`-100999`、`-3`、`-1`、`-2`)。Quoted-string 拒絕是 serde 對 `i64`-typed 欄位的預設行為,沒有單獨 regression-pinned —— 將來若 serde 出現允許寬鬆轉型的旋鈕,行為可能變,不過 typed-field 契約讓這種漂移不太可能發生。
 
-**這 反轉了 TS 的遷移建議。** 如果你之前依 `@suzuke/agend` 建議 quote `group_id`,在新 daemon 載入 `fleet.yaml` 之前必須 **取消 quote**。
+**遷移動作。** 如果你的 `fleet.yaml` 對任何 `group_id` 值有 quote (尤其是 Discord 用戶,quote 是 TS 端的標準避坑作法),在新 daemon 載入 config 之前先取消 quote:
 
 ```yaml
-# agend-terminal 必要形式:
+# agend-terminal 必要形式 (Telegram 與 Discord 皆然):
 channel:
   group_id: -1001234567890            # 裸 int
 
@@ -180,7 +182,7 @@ channel:
 | `project_roots` | **移除** | 沒有 fleet-level 的 project root allowlist;改用 per-instance `working_directory`。 |
 | `defaults` | `defaults: InstanceDefaults` ✓ | 欄位集合差異很大 —— 見下方 instance 表。 |
 | `instances` | `instances: HashMap<String, InstanceConfig>` ✓ | 角色相同;欄位集合精簡。 |
-| `teams` | `teams: HashMap<String, TeamConfig>` ✓ | 形狀相同 (`{ members, description? }`)。 |
+| `teams` | `teams: HashMap<String, TeamConfig>` ✓ | Rust 形狀 (`src/fleet.rs:175-183`):`{ members, orchestrator?, description? }`。新增的 `orchestrator: Option<String>` 欄位指定一個成員作為 team-addressed `delegate_task` 的 routing 目標,並用於 TUI team-tab 視圖的分組。TS `TeamConfig` 只有 `{ members, description? }` —— port 時若想保持 TS 等價行為,`orchestrator` 留空即可;採用新 routing 慣例後再設定。 |
 | `templates` | `templates: Option<HashMap<String, serde_yaml::Value>>` | **Rust 目前僅 parser** —— 鍵會 round-trip,但 template 展開尚未實作。**不要** 依賴 TS template 語意。 |
 | `profiles` | **移除** | Per-instance 欄位攤平;將來若需要,reusable profiles 會以另一個 concern 重新引入。 |
 | `health_port` | **移除** | Daemon 不開獨立 health port;改用 `agend-terminal doctor`。 |
