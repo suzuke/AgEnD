@@ -18,7 +18,7 @@
 
 ### 你會得到什麼
 
-- **原生 PTY multiplexing。** Rust daemon 直接和 PTY 對話 (Unix 用 `openpty`,Windows 用 `ConPTY`)。`@suzuke/agend` 每次啟 backend 都 shell out 給 `tmux new-window`,把 tmux 的所有問題都繼承下來 (server 崩、stale window IDs、attach 怪行為)。Rust 上,daemon 自己的 TUI 就是 multiplexer。
+- **原生 PTY multiplexing。** Rust daemon 透過跨平台的 `portable-pty` crate 直接和 PTY 對話 (該 crate 在 Unix 用 `openpty`,在 Windows 用 `ConPTY`)。`@suzuke/agend` 每次啟 backend 都 shell out 給 `tmux new-window`,把 tmux 的所有問題都繼承下來 (server 崩、stale window IDs、attach 怪行為)。Rust 上,daemon 自己的 TUI 就是 multiplexer。
 - **跨平台支援。** Rust 跑 macOS / Linux / Windows;TS 只有 macOS / Linux (`tmux` 在 Windows 跑不起來)。`which::which` 會看 `PATHEXT`,所以 Windows 上的 `claude.cmd` / `codex.ps1` 可正確解析。
 - **Type safety 落在重要的地方。** [§3 fleet.yaml schema diff](#fleet-yaml-schema-diff) 中的遷移項目 —— `group_id` 精度、`topic_id` 寬度、`outbound_capabilities` enum 收斂 —— Rust 在 config 載入時就檢查。TS daemon 是透過 bug report 學到同一組教訓。
 - **Async daemon,沒有 per-instance Node process。** Rust 把每個 agent 以子程序形式起在單一 daemon binary 之下。TS daemon 是單一 Node process,但每實例的 runtime overhead 比 Rust task 高很多;重 fleet (>5 instance 同時跑) 感受最深。
@@ -610,7 +610,7 @@ git worktree add ../my-repo.worktrees/<branch-name> <branch-name>
 - [ ] **Daemon 啟動。** `agend-terminal start --detached` (或你慣用的啟動路徑)。`agend-terminal status` 回報 daemon alive 並列出每個 configured instance。
 - [ ] **Bot 回基本訊息。** 從 allowlisted 的 Telegram 帳號發任何訊息。綁定 instance 收到 (`agend-terminal logs <instance>` 或 pane scrollback 顯示 inbound) 並回覆 —— 代表 `outbound_capabilities` (尤其 `reply`) 設定正確。
 - [ ] **Inbound user-allowlist gate。** 從非 allowlisted 帳號發訊息。確認 daemon log 有對應 user_id 的 inbound 拒絕記錄 (`grep "outbound notify dropped" $AGEND_HOME/daemon.log` —— 沒看到記得 `RUST_LOG=debug`)。Bot 不回覆。
-- [ ] **跨實例 dispatch。** 從一個 agent 對另一個發 `delegate_task`。收件方看到 `[AGEND-MSG]` system reminder,可透過 `inbox` drain。`describe_message(message_id=…)` 確認 pickup。
+- [ ] **跨實例 dispatch。** 從一個 agent 對另一個發 `delegate_task`。收件方看到 `[AGEND-MSG]` system reminder,可透過 `inbox` drain。`describe_message(message_id=…)` 確認 pickup。請確保兩個 agent 都 idle 時跑這個測試,或若想驗證 busy-override 路徑就傳 `force: true` —— 對 mid-LLM-turn 收件方發 `delegate_task` 預設會回 BUSY (Rust 端 post-PR #197/#199)。
 - [ ] **`set_waiting_on` round-trip。** 一個 agent 宣告 `set_waiting_on(condition=…)`,第二個 agent `describe_instance(<first>)` 確認欄位浮現。
 - [ ] **Cost-guard 預檢。** 若有設 `cost_guard`,刻意把 target 推過日預算 (或在測試中 stub `isLimited`),確認 sender 拿到 cost-guard error 字串而非靜默 drop。
 - [ ] **CI watch loop** (僅在你之前用 `gh pr checks --watch` 輪詢時相關)。發 `watch_ci(repo, branch)`,確認 CI 結束時自動注 inbox event,不需 agent 自己輪詢。
@@ -674,7 +674,7 @@ git worktree add ../my-repo.worktrees/<branch-name> <branch-name>
 這些不是「移除」—— 是 Rust 目前缺 TS 功能、且有計畫補 (或硬化現有行為) 的項目。**不要** 依賴 *目前* 行為跨過下面所列的里程碑:
 
 - **`outbound_capabilities` 兩階段 transition。** Sprint 22 P0 給「warn-but-permit one daemon cycle」grace;**Sprint 23 把 absent 升為 hard parse error**。Sprint 23 ship 後,operator 自寫的每個 instance 必須在 `fleet.yaml` 明確宣告 `outbound_capabilities`,不然 daemon 拒絕載入。Built-in coordinator (`general` 與未來自動建立的 coordinator) 自動注入 `[reply, react, edit, inject_provenance]`;user-authored entry 不會自動注入。詳見 [Phase A High-friction #3](#fleet-yaml-schema-diff)。
-- **PTY transport / signal capability matrix。** [§4 信號與 ESC byte 語意](#backend-invocation-diff) 把四個 backend 的 `interrupt` / `tool_kill` 語意標 `pending`。Rust 專案 Sprint 11 會做 real-CLI 驗證;在那之前,對應 cell 上的 semantic 主張請當作未驗證。
+- **PTY transport / signal capability matrix。** [§4 信號與 ESC byte 語意](#backend-invocation-diff) 把四個 backend 的 `interrupt` / `tool_kill` 語意標 `pending`。Real-CLI 驗證目前以 backlog item 形式追蹤,filed in Sprint 11 (`t-20260425040356199333-6`);Sprint 22-25 roadmap 沒 commit 完成這項工作的特定 sprint window,且 operator 對「這項工作是否還值得做」本身在 review。對應 cell 上的 semantic 主張請當作未驗證。
 - **`AGEND_TOOL_SET` profile。** TS 透過 `AGEND_TOOL_SET` 開放 `standard` (12-tool) 與 `minimal` (4-tool) tool profile (`src/channel/mcp-tools.ts:120-126`)。Rust 目前對所有 spawn 出來的 agent 都暴露完整 set (約 45 個工具)。如果你之前用 `minimal` 降低 per-instance token overhead,Rust 上 token 用量會比較高,直到 profile 機制實作。Tracked as follow-up;沒有 committed 的 Rust release。
 - **跨 channel 架構。** `channel.user_allowlist` 與 `outbound_capabilities` 兩個 gate 目前以 Telegram 為主。Discord/Slack adapter 在 channel parity 完成後會透過 `auth.rs::gate_outbound_for_agent` 繼承同一組 gate;在那之前,各 channel 行為可能仍有落差。`agend-terminal` 的 `docs/MIGRATION-OUTBOUND-CAPS.md` operator 完整參考有跨 channel 架構備註。
 - **`list_instances` 的 `tags` filter** (TS-only)。[Phase B §5.2](#mcp-tool-api-diff) 標記為 open question —— TS `list_instances` 接 `tags` filter,Rust 目前不接參數。如果你依賴 tag-filter 的 instance 列舉,在 parity 補上前請改手動列。
