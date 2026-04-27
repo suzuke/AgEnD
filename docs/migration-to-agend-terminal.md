@@ -174,6 +174,44 @@ channel:
 
 **Other int-vs-string parity worth knowing:** `instances.<name>.topic_id` is also strictly `Option<i32>` on Rust (fleet.rs:160) — bare int only.
 
+### High-friction change #3: `outbound_capabilities` is a Rust-only required field
+
+**Reference:** Sprint 22 P0 PR [#230](https://github.com/suzuke/agend-terminal/pull/230). Schema doc-comment at [`src/fleet.rs:173-208`](https://github.com/suzuke/agend-terminal/blob/main/src/fleet.rs#L173-L208); enforcement helper at [`src/channel/auth.rs::gate_outbound_for_agent`](https://github.com/suzuke/agend-terminal/blob/main/src/channel/auth.rs); enum at the same file's `ChannelOpKind`. Operator deeper-dive: [`docs/MIGRATION-OUTBOUND-CAPS.md`](https://github.com/suzuke/agend-terminal/blob/main/docs/MIGRATION-OUTBOUND-CAPS.md).
+
+`@suzuke/agend` has no equivalent — outbound channel ACLs were implicit ("any tool surface is callable by any instance"). `agend-terminal` introduces `instances.<name>.outbound_capabilities: Vec<ChannelOpKind>` to gate which agent-driven channel ops each instance may invoke. The four current variants (snake_case in YAML → `ChannelOpKind` variant): `reply` → `Reply`, `react` → `React`, `edit` → `Edit`, `inject_provenance` → `InjectProvenance`.
+
+**Tri-state semantics** (mirrors `channel.user_allowlist` from High-friction #1):
+
+| YAML | Sprint 22 P0 (current) | Sprint 23 (next) |
+|---|---|---|
+| `outbound_capabilities: [reply, react]` | listed ops permitted | same |
+| `outbound_capabilities: []` | fail-closed (explicit no agent outbound) | same |
+| key absent | FATAL warn-but-permit one daemon cycle | hard parse error |
+
+**Symptom when key is absent (Sprint 22 P0 grace window).** The daemon emits via `tracing::error!`:
+
+```
+ERROR FATAL (warn-but-permit one daemon cycle): instance '<name>' outbound_capabilities NOT SET. Sprint 22 P0 grants this <op> call under gradual-migration grace. ...
+```
+
+The op proceeds — but the warning is fired once per instance per daemon process (mutex-guarded `HashSet`, rate-limited so no log spam). When Sprint 23 ships, the absent state becomes a hard parse error and the daemon refuses to load the config. Do not depend on the grace window past Sprint 22 P0.
+
+**Built-in coordinators are auto-injected.** The `general` instance (and any future auto-created coordinator) gets `[reply, react, edit, inject_provenance]` injected automatically by [`bootstrap::fleet_normalize::auto_create_general`](https://github.com/suzuke/agend-terminal/blob/main/src/bootstrap/fleet_normalize.rs#L24-L67) at startup. **User-authored YAML entries do not get auto-inject** — every operator-defined instance must declare `outbound_capabilities` explicitly before Sprint 23.
+
+**Migration action.** When porting an existing `@suzuke/agend` `fleet.yaml`, add `outbound_capabilities` to every operator-authored instance:
+
+```yaml
+instances:
+  worker-a:
+    working_directory: /path/to/repo
+    outbound_capabilities: [reply, react]      # explicit; matches the channel ops the agent should use
+  worker-b:
+    working_directory: /path/to/other-repo
+    outbound_capabilities: []                  # explicit lockdown — agent cannot call channel ops
+```
+
+For the full `ChannelOpKind` enum reference, the rationale behind the 2-stage transition timeline, and cross-channel architecture notes (Telegram-vs-Discord shared gate behaviour), see the operator deeper-dive at [`docs/MIGRATION-OUTBOUND-CAPS.md`](https://github.com/suzuke/agend-terminal/blob/main/docs/MIGRATION-OUTBOUND-CAPS.md).
+
 ### Top-level keys
 
 `@suzuke/agend` `FleetConfig` (`src/types.ts:218`) → `agend-terminal` `FleetConfig` (`src/fleet.rs:7-29`):
@@ -222,6 +260,7 @@ channel:
 
 | Rust field | Type | Purpose |
 |---|---|---|
+| `outbound_capabilities` | `Vec<ChannelOpKind>` | **Required for every operator-authored instance from Sprint 23.** Gates which agent-driven channel ops (`reply` / `react` / `edit` / `inject_provenance`) the instance may invoke. Tri-state semantics + 2-stage timeline + built-in auto-inject for `general` — see High-friction #3 above. |
 | `receive_fleet_updates` | `Option<bool>` | Default opt-in. Set `false` on instances that should not see fleet `<fleet-update>` injections. |
 | `cols`, `rows` | `Option<u16>` | Override PTY size for the instance's terminal. |
 | `env` | `HashMap<String, String>` | Per-instance env additions. Note: Rust filters credential-like keys per `agent.rs::SENSITIVE_ENV_KEYS` — secrets injected here may be redacted. |
