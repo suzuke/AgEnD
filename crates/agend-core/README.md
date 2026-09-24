@@ -3,13 +3,13 @@
 > **TL;DR**
 > - 純邏輯 crate：型別、協定、trait、流水線狀態機、policy、螢幕分類器。
 > - 記住：**`#![no_std]` + `alloc` + `forbid(unsafe_code)`，沒有依賴、沒有 build script**；時間只經 `Clock` trait。
-> - 下一步：第 1 關在這裡開始（見 docs/ROADMAP.md）。
+> - 下一步：第 1 施工關在這裡開始（見 docs/ROADMAP.md）。
 
 ## 負責
 
 - 所有 crate 共用的型別（`model`）：backend、`general` team、`lifetime`、訊息送達狀態、branch 命名空間
 - 兩套有版本的協定定義：client（protocol v1）與 holder
-- 邊界 trait：`Driver`、`Forge`、`Store`、`Runtime`、`Notifier`、`Clock`（簽章第 1 關設計）
+- 邊界 trait：`Driver`、`Forge`、`Store`、`Runtime`、`Notifier`、`Clock`（簽章第 1 施工關設計）
 - 流水線狀態機（6 種關卡、task 關係與操作、workflow 存檔檢查）
 - policy：忙碌策略、去抖動、衝突偵測、merge 門檻與 patch-id、角色分派
 - 螢幕分類器（只認 hard gate；規則是資料）
@@ -40,7 +40,7 @@
 | `policy::merge_gate` | merge 門檻、D14 核准保留 |
 | `policy::assign` | D18 分派規則；daemon 只提供候選成員與負載等輸入（D25） |
 | `screen` | hard gate 分類器 |
-| `setup` | 安裝規則（第 13 關）：已測的 backend 版本範圍、登入判斷、git 最低版本、launchd／systemd unit 文字；只有資料與純函式 |
+| `setup` | 安裝規則（第 13 施工關）：已測的 backend 版本範圍、登入判斷、git 最低版本、launchd／systemd unit 文字；只有資料與純函式 |
 
 ## 依賴規則
 

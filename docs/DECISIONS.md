@@ -32,9 +32,9 @@
 | D19 | workflow 以 TOML 定義、存檔檢查、`agend workflow` 管版本 | [d17-d25](decisions/d17-d25.md#d19) |
 | D20 | 人工核准 merge = 在 workflow 加 `approval(by = "human")` | [d17-d25](decisions/d17-d25.md#d20) |
 | D21 | task 固定建立時的 workflow 版本 | [d17-d25](decisions/d17-d25.md#d21) |
-| D22 | 施工依 crate 由下往上分關，每關使用者確認後才開下一關（第 13 關見 D24） | [d17-d25](decisions/d17-d25.md#d22) |
+| D22 | 施工依 crate 由下往上分成施工關，每個施工關使用者確認後才開下一個施工關（第 13 施工關見 D24） | [d17-d25](decisions/d17-d25.md#d22) |
 | D23 | 文件繁中為主、程式輸出英文；每 crate 有 README／TESTING；AGENTS.md 唯一入口 | [d17-d25](decisions/d17-d25.md#d23) |
-| D24 | 第 13 關「安裝與發布」；第 9 關只做 doctor、init；安裝規則在 core `setup` | [d17-d25](decisions/d17-d25.md#d24) |
+| D24 | 第 13 施工關「安裝與發布」；第 9 施工關只做 doctor、init；安裝規則在 core `setup` | [d17-d25](decisions/d17-d25.md#d24) |
 | D25 | D18 分派規則是純邏輯，放 core `policy::assign`；daemon 只提供輸入 | [d17-d25](decisions/d17-d25.md#d25) |
 
 ## 來源衝突與處理
@@ -46,8 +46,8 @@
 | 規劃 §4.4 第一張表：claude 排隊 = channel、opencode 插入／中斷「未查證」 | 以 spike 表與 D16 為準（見 BACKEND-BEHAVIORS） |
 | 規劃 §5／§5.1 的 `checks/{command,forge}` 模組與 Checks trait | 以 architecture 頁為準：daemon 用 `runner`，trait 清單無 Checks |
 | runtime spike 建議用 herdr | D3 選自有 holder（見 D3 細節） |
-| 規劃 §6 的功能階段 | D22 改為分關施工；功能階段只當里程碑 |
-| D22 原文寫 12 關 | D24 加上第 13 關；以 ROADMAP 的 13 關為準 |
+| 規劃 §6 的功能階段 | D22 改為分成施工關；功能階段只當里程碑 |
+| D22 原文寫 12 個施工關 | D24 加上第 13 施工關；以 ROADMAP 的 13 個施工關為準 |
 
 ## 下一步
 

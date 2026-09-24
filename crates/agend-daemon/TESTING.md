@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 目前只有 codex socket 路徑解析的測試。
 > - 記住：每個領域模組都要能對 testkit 的假實作單獨測；每個 adapter 要跑契約測試。
-> - 下一步：第 5 關加入 store 的 in-memory SQLite 測試。
+> - 下一步：第 5 施工關加入 store 的 in-memory SQLite 測試。
 
 ## 怎麼跑
 
@@ -23,12 +23,12 @@ cargo test -p agend-daemon
 
 ## 還沒測的
 
-- [ ] store：migration、交易、保留期限、`VACUUM INTO`（第 5 關）
-- [ ] runtime 與真 holder（第 6 關）
-- [ ] codex driver 對假 app-server、delivery 的冪等與重連不遺失不重複（第 7 關）
-- [ ] protocol server（第 8 關）
-- [ ] pipeline、git、runner、forge local、supervisor、reconcile（第 10 關）
-- [ ] claude／opencode driver、forge github、notifier（第 12 關）
+- [ ] store：migration、交易、保留期限、`VACUUM INTO`（第 5 施工關）
+- [ ] runtime 與真 holder（第 6 施工關）
+- [ ] codex driver 對假 app-server、delivery 的冪等與重連不遺失不重複（第 7 施工關）
+- [ ] protocol server（第 8 施工關）
+- [ ] pipeline、git、runner、forge local、supervisor、reconcile（第 10 施工關）
+- [ ] claude／opencode driver、forge github、notifier（第 12 施工關）
 
 ## 下一步
 

@@ -3,7 +3,7 @@
 > **TL;DR**
 > - `opencode serve`：HTTP + SSE；server 原生排隊，abort 乾淨，沒有 steer。
 > - 記住：**SSE 沒有 replay**，重連後用 REST 補狀態；授權以 `GET /permission` 輪詢為準。
-> - 下一步：driver 在 `crates/agend-daemon/src/driver/opencode.rs`（第 12 關）。
+> - 下一步：driver 在 `crates/agend-daemon/src/driver/opencode.rs`（第 12 施工關）。
 
 來源：spike-opencode.md（O1–O6），2026-09-24，`opencode 1.18.31`。
 

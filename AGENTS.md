@@ -13,11 +13,12 @@ daemon 負責派工、worktree、checks、互審綁 head、merge；人只處理�
 ## 先讀什麼（依序）
 
 1. [README.md](README.md)：是什麼、系統圖、repo 結構。
-2. [docs/ROADMAP.md](docs/ROADMAP.md)：13 關、目前在哪一關、完成定義、進度紀錄；目前這一關的頁面在 [docs/gates/](docs/gates/README.md)。
-3. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)：程序模型、crate 地圖、daemon 分層。
-4. 你要動的 crate 的 `README.md` 與 `TESTING.md`。
-5. 需要時：[docs/DECISIONS.md](docs/DECISIONS.md)、[docs/BACKEND-BEHAVIORS.md](docs/BACKEND-BEHAVIORS.md)、[docs/V1-LESSONS.md](docs/V1-LESSONS.md)。
-6. 選讀，最後才看：[docs/research/](docs/research/README.md)，原始證據；要質疑或重新驗證某個決定時才查。
+2. [docs/GLOSSARY.md](docs/GLOSSARY.md)：名詞表；人和 agent 用同一套詞（例如「關卡」≠「施工關」）。
+3. [docs/ROADMAP.md](docs/ROADMAP.md)：13 個施工關、目前在哪個施工關、完成定義、進度紀錄；目前這個施工關的頁面在 [docs/gates/](docs/gates/README.md)。
+4. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)：程序模型、crate 地圖、daemon 分層。
+5. 你要動的 crate 的 `README.md` 與 `TESTING.md`。
+6. 需要時：[docs/DECISIONS.md](docs/DECISIONS.md)、[docs/BACKEND-BEHAVIORS.md](docs/BACKEND-BEHAVIORS.md)、[docs/V1-LESSONS.md](docs/V1-LESSONS.md)。
+7. 選讀，最後才看：[docs/research/](docs/research/README.md)，原始證據；要質疑或重新驗證某個決定時才查。
 
 ## Repo 地圖
 
@@ -31,9 +32,9 @@ daemon 負責派工、worktree、checks、互審綁 head、merge；人只處理�
 | `crates/agend-tui` | attention-first TUI |
 | `crates/agend` | 唯一 binary |
 | `crates/agend-testkit` | dev-only 測試基礎設施 |
-| `xtask/` | `check-deps`、`accept <關>` |
+| `xtask/` | `check-deps`、`accept <施工關>` |
 | `docs/` | 設計文件；`docs/decisions/`、`docs/backends/`、`docs/architecture/` 是分頁 |
-| `docs/gates/` | 13 關各一頁：範圍、驗收步驟（含你親自驗收）、驗收紀錄、進度紀錄 |
+| `docs/gates/` | 13 個施工關各一頁：範圍、驗收步驟（含你親自驗收）、驗收紀錄、進度紀錄 |
 
 ## Crate 邊界規則
 
@@ -91,7 +92,7 @@ cargo test -p <crate>                                  # 單一 crate
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all                                        # 或 -- --check
 cargo xtask check-deps
-cargo xtask accept <關>                                # 1–13 或名稱，如 core
+cargo xtask accept <施工關>                                # 1–13 或名稱，如 core
 ```
 
 工具鏈釘在 `rust-toolchain.toml`（1.96.0，含 rustfmt、clippy）。
@@ -101,7 +102,7 @@ cargo xtask accept <關>                                # 1–13 或名稱，如
 | 範圍 | 條件 |
 |---|---|
 | 一個改動 | 下方清單：fmt、clippy、測試、check-deps、文件 |
-| 一關 | 「一個改動」的全部 + `cargo xtask accept <關>` 的 demo + fresh-context verifier 重跑並嘗試推翻 + 使用者完成該關「你親自驗收」並填驗收紀錄 + 使用者確認（見 [ROADMAP](docs/ROADMAP.md#每關的完成定義)） |
+| 一個施工關 | 「一個改動」的全部 + `cargo xtask accept <施工關>` 的 demo + fresh-context verifier 重跑並嘗試推翻 + 使用者完成該施工關「你親自驗收」並填驗收紀錄 + 使用者確認（見 [ROADMAP](docs/ROADMAP.md#每個施工關的完成定義)） |
 
 ### 一個改動
 
@@ -110,6 +111,7 @@ cargo xtask accept <關>                                # 1–13 或名稱，如
 - [ ] `cargo test --workspace` 通過（至少 `cargo test -p <改到的 crate>`）
 - [ ] `cargo xtask check-deps` 通過
 - [ ] 行為變了 → 對應的 crate `README.md`／`TESTING.md` 與 `docs/` 已更新
+- [ ] 新名詞已寫進名詞表（[docs/GLOSSARY.md](docs/GLOSSARY.md)）
 - [ ] 在自己的 branch + worktree 上完成，以 PR 合併進 `v2`（沒有直接改 `v2`／`main`）
 
 
@@ -117,6 +119,7 @@ cargo xtask accept <關>                                # 1–13 或名稱，如
 
 | 項目 | 規則 |
 |---|---|
+| 名詞 | 新增或改名的名詞，先更新 [docs/GLOSSARY.md](docs/GLOSSARY.md)；程式識別字與名詞表一致 |
 | 文件 | 繁體中文為主；程式識別字、指令、路徑、技術名詞保留原文 |
 | 程式輸出 | 英文：CLI 輸出、錯誤訊息、log、`--help`、測試名稱與 assert 訊息 |
 | 程式註解與 `//!` | 英文 |
@@ -137,7 +140,7 @@ cargo xtask accept <關>                                # 1–13 或名稱，如
 規則：
 
 - 每次完成一件事，就在 ROADMAP「進度紀錄」加一行（日期 + 一行 + commit／PR）。
-- 關卡狀態改變時，同步更新該關頁面（`docs/gates/gate-NN-*.md`）的「狀態」與「進度紀錄」，以及 ROADMAP 的狀態欄。
+- 施工關狀態改變時，同步更新該施工關頁面（`docs/gates/gate-NN-*.md`）的「狀態」與「進度紀錄」，以及 ROADMAP 的狀態欄。
 
 ## 下一步
 

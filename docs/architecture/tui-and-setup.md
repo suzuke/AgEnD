@@ -47,7 +47,7 @@ Telegram（D13）：一個「需要你」topic + 每個 team 一個 topic；個�
 
 原則：每個設定錯誤都在第一次使用前被明確指出，並附修正指令。
 
-施工：`doctor`、`init` 在第 9 關；服務註冊、`uninstall`、`telegram setup`、打包與發布在第 13 關。規則（版本範圍、登入判斷、git 最低版本、unit 文字）在 `agend_core::setup`，執行在 `agend` crate 的 `setup` 模組。
+施工：`doctor`、`init` 在第 9 施工關；服務註冊、`uninstall`、`telegram setup`、打包與發布在第 13 施工關。規則（版本範圍、登入判斷、git 最低版本、unit 文字）在 `agend_core::setup`，執行在 `agend` crate 的 `setup` 模組。
 
 1. `agend doctor`：git 版本（merge-tree 需 ≥ 2.38）、gh 登入（僅 github forge）、各 backend 安裝／版本／登入、服務狀態、磁碟、Telegram（allowlist 為空即報錯）。支援 `--json`。
 2. `agend init`：建 home 與 `config.toml`、註冊 launchd／systemd、偵測 backend、建 `general` team 與一個 agent；在 repo 內才詢問是否登記；最後跑 doctor。只在互動終端發問。

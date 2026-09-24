@@ -1,9 +1,9 @@
-# 第 4 關：agend-holder（`holder`）
+# 第 4 施工關：agend-holder（`holder`）
 
 > **TL;DR**
 > - 每個 instance 一個 holder：PTY、畫面、附屬程序、holder 協定。
-> - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這關才算完成。
-> - 下一步：等前一關完成後開工；開工時把標「開工時細化」的步驟寫定。
+> - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這個施工關才算完成。
+> - 下一步：等前一個施工關完成後開工；開工時把標「開工時細化」的步驟寫定。
 
 ## 狀態
 
@@ -23,7 +23,7 @@
 - [ ] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨
 - [ ] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`（出現 `SKIPPED` 不算通過）
 - [ ] `~/.cargo/bin/cargo xtask accept holder` 通過，並印出下方「你親自驗收」用到的 demo
-- [ ] 本關 crate 的 `README.md`／`TESTING.md` 已更新
+- [ ] 本施工關 crate 的 `README.md`／`TESTING.md` 已更新
 - [ ] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」
 
 ## 你親自驗收

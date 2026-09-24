@@ -1,9 +1,9 @@
-# 第 7 關：daemon：codex driver + 送達（`codex`）
+# 第 7 施工關：daemon：codex driver + 送達（`codex`）
 
 > **TL;DR**
 > - codex driver、送達模型、三級忙碌策略。
-> - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這關才算完成。
-> - 下一步：等前一關完成後開工；開工時把標「開工時細化」的步驟寫定。
+> - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這個施工關才算完成。
+> - 下一步：等前一個施工關完成後開工；開工時把標「開工時細化」的步驟寫定。
 
 ## 狀態
 
@@ -21,7 +21,7 @@
 - [ ] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨
 - [ ] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`（出現 `SKIPPED` 不算通過）
 - [ ] `~/.cargo/bin/cargo xtask accept codex` 通過，並印出下方「你親自驗收」用到的 demo
-- [ ] 本關 crate 的 `README.md`／`TESTING.md` 已更新
+- [ ] 本施工關 crate 的 `README.md`／`TESTING.md` 已更新
 - [ ] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」
 
 ## 你親自驗收
@@ -46,7 +46,7 @@
 
    - [ ] 通過
 
-3. （選做）對真的 codex 做 smoke test（開工時細化：`--real` 參數還不存在，會在這關加上）。
+3. （選做）對真的 codex 做 smoke test（開工時細化：`--real` 參數還不存在，會在這個施工關加上）。
 
    ```bash
    ~/.cargo/bin/cargo xtask accept codex --real

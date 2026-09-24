@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 這是 AgEnD（Agent Engineering Daemon）v2：異質 agent 團隊的自主 merge 流水線。
 > - 狀態：**pre-alpha，設計階段**。目前只有 crate 骨架與設計文件，沒有可用功能。
-> - 下一步：先讀 [AGENTS.md](AGENTS.md)，再照 [docs/ROADMAP.md](docs/ROADMAP.md) 開第 1 關。
+> - 下一步：先讀 [AGENTS.md](AGENTS.md)，再照 [docs/ROADMAP.md](docs/ROADMAP.md) 開第 1 施工關。
 
 ## 這是什麼
 
@@ -46,7 +46,7 @@ agent 側沒有任何 daemon 子程序；agent 與附屬程序都由 holder 持�
 | `crates/agend-tui` | attention-first TUI |
 | `crates/agend` | 唯一 binary：argv[0] 分派、CLI |
 | `crates/agend-testkit` | dev-only：假實作、契約測試、假 daemon、假 agent |
-| `xtask/` | `cargo xtask check-deps`、`cargo xtask accept <關>` |
+| `xtask/` | `cargo xtask check-deps`、`cargo xtask accept <施工關>` |
 | `docs/` | 架構、決策、backend 行為、v1 教訓、施工順序 |
 
 每個 crate 目錄都有 `README.md`（負責什麼）與 `TESTING.md`（怎麼測）。
@@ -68,6 +68,7 @@ cargo xtask check-deps
 | 想知道 | 讀 |
 |---|---|
 | 怎麼開始工作 | [AGENTS.md](AGENTS.md) |
+| 名詞怎麼用 | [docs/GLOSSARY.md](docs/GLOSSARY.md) |
 | 系統怎麼組成 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | 決定了什麼、為什麼 | [docs/DECISIONS.md](docs/DECISIONS.md) |
 | 三個 backend 實測行為 | [docs/BACKEND-BEHAVIORS.md](docs/BACKEND-BEHAVIORS.md) |

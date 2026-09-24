@@ -1,13 +1,13 @@
-# 關卡頁
+# 施工關頁
 
 > **TL;DR**
-> - 13 關各有一頁：範圍、自動驗收、你親自驗收的步驟、驗收紀錄、進度紀錄。
-> - 記住：**一關要等你跑完「你親自驗收」並填好「驗收紀錄」才算完成**。
-> - 下一步：打開目前這一關（第 1 關，提案中）逐條確認提案。
+> - 13 個施工關各有一頁：範圍、自動驗收、你親自驗收的步驟、驗收紀錄、進度紀錄。
+> - 記住：**一個施工關要等你跑完「你親自驗收」並填好「驗收紀錄」才算完成**。
+> - 下一步：打開目前這個施工關（第 1 施工關，提案中）逐條確認提案。
 
 ## 索引
 
-| 關 | 頁面 | 範圍 | 狀態 | 自動驗收指令 |
+| 施工關 | 頁面 | 範圍 | 狀態 | 自動驗收指令 |
 |---|---|---|---|---|
 | 1 | [`core`](gate-01-core.md) | agend-core | 提案中 | `cargo xtask accept core` |
 | 2 | [`testkit`](gate-02-testkit.md) | agend-testkit | 未開始 | `cargo xtask accept testkit` |
@@ -25,7 +25,7 @@
 
 ## 每個終端機先做這一步
 
-第 6、8–12 關的步驟會用到 `agend`。第 13 關之前沒有安裝程式，而你的 PATH 上有舊的 Node 版 `agend`（`/opt/homebrew/bin/agend`，v1-ts 1.24.0）。所以**每個新開的終端機分頁都要先跑**（包括 daemon 在前景跑時開的第二個終端）：
+第 6、8–12 施工關的步驟會用到 `agend`。第 13 施工關之前沒有安裝程式，而你的 PATH 上有舊的 Node 版 `agend`（`/opt/homebrew/bin/agend`，v1-ts 1.24.0）。所以**每個新開的終端機分頁都要先跑**（包括 daemon 在前景跑時開的第二個終端）：
 
 ```bash
 cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
@@ -40,7 +40,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 ## 每個終端機先做這一步
 
-第 6、8–12 關的步驟會用到 `agend`。第 13 關之前沒有安裝程式，而你的 PATH 上有舊的 Node 版 `agend`（`/opt/homebrew/bin/agend`，v1-ts 1.24.0）。所以**每個新開的終端機分頁都要先跑**（包括 daemon 在前景跑時開的第二個終端）：
+第 6、8–12 施工關的步驟會用到 `agend`。第 13 施工關之前沒有安裝程式，而你的 PATH 上有舊的 Node 版 `agend`（`/opt/homebrew/bin/agend`，v1-ts 1.24.0）。所以**每個新開的終端機分頁都要先跑**（包括 daemon 在前景跑時開的第二個終端）：
 
 ```bash
 cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
@@ -53,7 +53,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 ## 狀態
 
-狀態只用這五個：未開始、提案中、實作中、驗收中、完成（後面加日期）。狀態改變時，同步更新該關頁面與 [ROADMAP 的狀態欄](../ROADMAP.md)。
+狀態只用這五個：未開始、提案中、實作中、驗收中、完成（後面加日期）。狀態改變時，同步更新該施工關頁面與 [ROADMAP 的狀態欄](../ROADMAP.md)。
 
 ## 範本
 
@@ -61,11 +61,11 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 | 章節 | 內容 |
 |---|---|
-| TL;DR | 3 行：這關做什麼、要記住的一件事、下一步 |
+| TL;DR | 3 行：這個施工關做什麼、要記住的一件事、下一步 |
 | 狀態 | 五種之一 + 日期 |
-| 範圍 | 這關要交付的東西 |
-| 開工前提案 | 只有還有設計問題的關卡才有；每項：問題 · 建議 · 理由 · 替代方案 · `- [ ] 使用者確認` |
-| 自動驗收（完成定義） | `cargo test -p`、clippy `-D warnings`、`check-deps`（不能是 SKIPPED）、`cargo xtask accept <關>`、crate README／TESTING 已更新、verifier |
+| 範圍 | 這個施工關要交付的東西 |
+| 開工前提案 | 只有還有設計問題的施工關才有；每項：問題 · 建議 · 理由 · 替代方案 · `- [ ] 使用者確認` |
+| 自動驗收（完成定義） | `cargo test -p`、clippy `-D warnings`、`check-deps`（不能是 SKIPPED）、`cargo xtask accept <施工關>`、crate README／TESTING 已更新、verifier |
 | 你親自驗收 | 編號步驟：指令、應該看到什麼、`- [ ] 通過`；至少一步是「故意弄壞 → 看到它失敗或拒絕」；還不能寫定的標「開工時細化」 |
 | 驗收紀錄 | 你填：日期、結果、備註 |
 | 進度紀錄 | 日期 + 一行 + commit／PR，新的在上面 |

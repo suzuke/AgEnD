@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 目前只測語言切換。
 > - 記住：畫面測試用 ratatui `TestBackend` snapshot，餵假 protocol 事件。
-> - 下一步：第 11 關。
+> - 下一步：第 11 施工關。
 
 ## 怎麼跑
 
@@ -19,11 +19,11 @@ cargo test -p agend-tui
 
 ## 用到的假實作
 
-- 目前無；第 11 關用 `agend_testkit::fake_daemon` 的事件
+- 目前無；第 11 施工關用 `agend_testkit::fake_daemon` 的事件
 
 ## 還沒測的
 
-- [ ] 所有畫面與按鍵（第 11 關）
+- [ ] 所有畫面與按鍵（第 11 施工關）
 
 ## 下一步
 

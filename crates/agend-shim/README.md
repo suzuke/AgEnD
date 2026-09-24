@@ -3,7 +3,7 @@
 > **TL;DR**
 > - agent PATH 上的 `git`、`kill`、`killall`、`pkill` 防護；由 `agend` binary 依 argv[0] 分派進來。
 > - 記住：**啟動要輕**：不建 runtime、不讀設定、不開 DB；只讀 daemon 寫的唯讀 binding 快照。
-> - 下一步：第 3 關實作；目前 `run` 一律拒絕並說明未實作。
+> - 下一步：第 3 施工關實作；目前 `run` 一律拒絕並說明未實作。
 
 ## 負責
 

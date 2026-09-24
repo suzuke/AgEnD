@@ -64,7 +64,7 @@
 - [ ] claude：規劃 §4.1 提到的 channel bridge「SSE 帶 last_event_id」重連，spike 未測。
 - [ ] codex：`item/fileChange/requestApproval`、`item/permissions/requestApproval` 未觸發過。
 - [ ] opencode：`permission.asked` 漏發的原因未查明；V2 permission API（`permission.v2.asked`）未測。
-- [ ] 以上都不是在 holder 內跑的；holder 持有附屬程序時的重連要在第 6 關驗證。
+- [ ] 以上都不是在 holder 內跑的；holder 持有附屬程序時的重連要在第 6 施工關驗證。
 
 ## 下一步
 

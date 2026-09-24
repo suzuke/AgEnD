@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 目前只測控制鍵的位元組。
 > - 記住：holder 測試用 `sh`、`cat` 這類假程式取代 agent。
-> - 下一步：第 4 關的探測 client 與斷線重連測試。
+> - 下一步：第 4 施工關的探測 client 與斷線重連測試。
 
 ## 怎麼跑
 
@@ -19,7 +19,7 @@ cargo test -p agend-holder
 
 ## 用到的假實作
 
-- 目前無；第 4 關會用 testkit 的假 agent 程式
+- 目前無；第 4 施工關會用 testkit 的假 agent 程式
 
 ## 還沒測的
 

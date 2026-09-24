@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 唯一的大型 I/O 層：常駐、單一 tokio runtime、DB 專屬執行緒。
 > - 記住：**agent 與附屬程序不是 daemon 的子程序**；daemon 可隨時重啟。
-> - 下一步：第 5 關（store）開始實作。
+> - 下一步：第 5 施工關（store）開始實作。
 
 ## 負責
 
