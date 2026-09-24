@@ -59,6 +59,9 @@
 - [ ] merge 前有 `bind_head` 的 approval，否則須明寫 `allow_unreviewed = true`
 - [ ] `on_fail` 只能指向前面的 `work` 關卡（原因要交給 task 持有者，D33）
 - [ ] 角色存在於套用的 team
+- [ ] `fanout` 的 `join = "pick"` 後面緊接著負責挑選的 `approval`
+- [ ] 有 merge 的 workflow，最後一個產出 branch 的 `work` 之後不能再有 `work`
+- [ ] 可完成證明（completability witness）：以上都通過後，存檔檢查用純函式 `step` 實際走一次：(1) 全部成功的標準事件序列；(2) 每個 `command`／`approval` 各失敗一次（返工）再照成功序列走；(3) 產出 branch 之後的每個關卡各收到一次新 commit（在 merge 關卡是送出中收到、接著 merge 失敗）再照成功序列走。每一趟都要在上限內走到 done，否則拒絕存檔，錯誤訊息指出是哪一趟、卡在哪個關卡。序列是固定的，不用亂數。forge local 不回傳 change id，所以 local 下用到 `{pr}` 的 workflow 會在這一步被拒絕。
 
 ## team 與 repo（D12、D13、D15）
 

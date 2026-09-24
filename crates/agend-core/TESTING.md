@@ -35,6 +35,10 @@ cargo xtask accept core
 | `policy::merge_gate::tests` | merge 門檻唯一實作：每個 command 關卡對目前 head 通過、每個 approval 關卡都覆蓋目前 head（不綁 head 的只需存在）、`allow_unreviewed` 只免除「至少一個綁 head 的核准」；rebase 以 patch-id 判斷保留 |
 | `screen::tests` | backend-specific startup prompt 片段比對，不分類一般畫面；Claude 的片段不是完整 holder 擷取 |
 
+## 可完成證明（存檔檢查裡）
+
+`Workflow::validate` 在靜態規則之後呼叫 `pipeline::state::completability_witness`：用純函式 `step` 走固定的事件序列——全部成功一次、每個 command／approval 各失敗一次後再成功、產出 branch 之後每個關卡各收到一次新 commit 後再成功——每一趟都要在上限內到 done，否則回 `WorkflowError::NotCompletable { scenario, stage_id, reason }`。它是存檔規則的一部分，所以所有測試裡的 workflow 都先經過它。
+
 ## 狀態機探索器
 
 `tests/pipeline_explorer.rs` 是不加依賴的 property test（core 的依賴與 dev-dependency allowlist 不變）：xorshift 固定種子產生事件序列，跑在 11 個 workflow 上（內建 `code`、`research`、`planned`、`epic`，epic 的 `first`／`pick` 變體，以及 5 個自訂：兩個 approval、review 夾在兩個 command 之間、`allow_unreviewed`、command 在 submit 之前加 `count = 2` 與不綁 head 的 approval 和指向 work 的 `on_fail`、`{pr}`／`{head}` 佔位符）。
@@ -45,6 +49,7 @@ cargo xtask accept core
 | 每條序列最多步數 | 60；進入終止狀態後再送 3 個事件，必須全被拒絕 |
 | 事件組成 | 約 6 成是目前關卡的合理事件、1.5 成 head 變更、2 成過期或偽造的結果、其餘是失敗、逾時、取消 |
 | 竄改狀態測試 | 在 crate 內（`pipeline::state::tests`，外部無法偽造 state）：5 個 workflow × 3,000 個竄改狀態 × 14 個事件 = 210,000 次 |
+| 可完成性 | `tests/workflow_completability.rs`：存檔檢查的可完成證明（見下方）之外的獨立檢查。verifier r2 的反例寫成 `verifier_r2_*` 回歸測試；隨機 workflow 產生器預設 200,000 個 workflow（`-- --ignored` 再跑 1,000,000 個），每個被 `validate` 接受的都要能用獨立的成功事件驅動器走到 done，隨機干擾（失敗、要求修改、新 commit、main 前進、merge 失敗、逾時）之後也要。拿掉可完成證明與新文法的舊 validate 會讓它失敗 |
 | 第二個探索器 | `tests/pipeline_explorer_splitmix.rs`：fresh-context verifier 寫的 SplitMix64 探索器，6 個 workflow × 3,000 條序列 × 最多 80 步（`AGEND_EXPLORER2_SEQUENCES` 可調大）；它的 oracle 只算「前一個 work 最近一次完成之後」的 check 與核准 |
 
 每一步之後，用**只看被接受的事件與 `ReturnToWork`** 建立的 oracle（不讀 state 自己的紀錄；返工時忘掉退回的 work 之後所有關卡的 check 與核准，只有 D14 能延續核准）檢查：

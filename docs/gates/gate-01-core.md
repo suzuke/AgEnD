@@ -99,12 +99,14 @@ P1–P7 已由你在 2026-09-25 確認（記為決策 D26–D32）。實作草�
 
 - `crates/agend-holder/src/pty.rs`（第 4 施工關的 crate）：隨 `ControlKey` 擴充（Enter、方向鍵、1–3、Y、N 等 11 種），`control_key_bytes` 的按鍵位元組對照與回傳型別改成 `Option`（未知的鍵回 `None`，不送任何位元組）。這是第 4 施工關的設計，改動必要且無害，但按鍵位元組與 `Option` 回傳需要你追認。
   - [ ] 使用者追認
-- 夜間步驟（2026-09-25，你睡著時）決定的兩條規則：merge、command、綁 head 的 approval 前面必須有產出 branch 的 work，且須 `requires = ["repo"]`；merge 送出後的 head 變更只記成待處理，等 forge 回報結果（`MergeFailed` 才套用）。
+- 夜間步驟（2026-09-25，你睡著時）決定的規則：merge、command、綁 head 的 approval 前面必須有產出 branch 的 work，且須 `requires = ["repo"]`；merge 送出後的 head 變更只記成待處理，等 forge 回報結果（`MergeFailed` 才套用）。
+  - [ ] 使用者追認
+- 夜間步驟 r2（2026-09-25）：存檔檢查加上**可完成證明**：用 `step` 實際走成功序列、每個 command／approval 各返工一次、每個關卡各來一次新 commit，走不到 done 就拒絕（見 [pipeline 存檔檢查清單](../architecture/pipeline.md#workflow-管理d19d21)）；文法收斂：pick fanout 後面緊接挑選的 approval；有 merge 時最後的 branch work 之後不能再有 work。另外：返工到 fanout 之後的 work 不再清掉 fanout 的子 task；merge 失敗時多筆待處理變更只為最新 head 發一次 checks；branch 出現前的 main 前進直接忽略。
   - [ ] 使用者追認
 
 ## 自動驗收（完成定義）
 
-- [x] `~/.cargo/bin/cargo test --workspace` 通過（145 tests）；其中 `agend-core` 105 unit tests（含 210,000 次竄改狀態）、兩個狀態機探索器（44,000 + 18,000 條事件序列）、xtask protocol compatibility 7 tests、workflow TOML golden 2 tests（2026-09-25）
+- [x] `~/.cargo/bin/cargo test --workspace` 通過（153 tests）；其中 `agend-core` 105 unit tests（含 210,000 次竄改狀態）、兩個狀態機探索器（44,000 + 18,000 條事件序列）、可完成性測試 8 個（含 200,000 個隨機 workflow）、xtask protocol compatibility 7 tests、workflow TOML golden 2 tests（2026-09-25）
 - [x] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨（2026-09-25）
 - [x] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`；注入 `std::fs` 時 checker exit 1，還原後通過（2026-09-25）
 - [x] `~/.cargo/bin/cargo xtask accept core` 通過，並印出下方 demo（2026-09-25）
@@ -221,6 +223,7 @@ task T-1 workflow=code v1
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-25 第 1 施工關 verifier r2 推翻（843a235）：同一類問題（存檔放行、執行走不完）第二次出現，改成結構性解法（ba30886）：存檔檢查用 `step` 做可完成證明、文法收斂、三個執行期修正、隨機 workflow 產生器成為常駐測試（拿掉新規則的舊 validate 會被它抓到）。
 - 2026-09-25 第 1 施工關 verifier r1 推翻（832a4dc）後修正（f458545、ebdac60）：merge、command、綁 head 的 approval 前面必須有產出 branch 的 work 且需要 repo；merge 送出後的 head 變更記成待處理、等 forge 結果（新事件 `MergeFailed`）；demo 與 transcript 改走這條路；「作者」改稱 task 持有者；pty.rs 列入「待你追認」。
 - 2026-09-25 rebase 到 v2（#104 名詞表，b04c260），文件改用「施工關」等名詞（832a4dc）。
 - 2026-09-25 使用者決定 D34–D37（`planned` workflow、對話式請示、請示排序、context recap）並核准 P7 範圍擴充到 workflow 定義型別（條件：golden TOML 測試）；實作與測試（7468ba0、d91865a）。
