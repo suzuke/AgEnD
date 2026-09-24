@@ -5,9 +5,9 @@
 //!    normal,build --target all`; dev-dependencies are not checked). A deny
 //!    entry ending in `*` is a name prefix.
 //! 2. `agend-testkit` is never a normal dependency of any crate.
-//! 3. agend-core structural checks (`check_core`): no build script, no
-//!    dependencies outside an explicit allowlist, and it compiles for a target
-//!    that has no std at all.
+//! 3. agend-core structural checks (`check_core`): no build script, only its
+//!    reviewed no-std serde dependency configuration, and it compiles for a
+//!    target that has no std at all.
 use crate::{cargo, workspace_root};
 use std::process::Command;
 

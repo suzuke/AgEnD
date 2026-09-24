@@ -1,10 +1,9 @@
 //! `cargo xtask accept <gate>`: acceptance checks for one build gate
 //! (docs/ROADMAP.md).
 //!
-//! Current behaviour (skeleton): for the gate's crates run
-//! `cargo fmt --check`, `cargo clippy --all-targets -D warnings` and
-//! `cargo test`, then `check-deps`. The human-readable demo of each gate is
-//! added when that gate is built; until then this says so explicitly.
+//! For gate 1 run workspace formatting and clippy, test agend-core and its
+//! protocol compatibility contract, run check-deps, then show the core demo. Other gates use the
+//! current per-crate checks until their acceptance flow is built.
 
 use crate::{cargo, check_deps, workspace_root};
 use std::process::Command;
@@ -106,25 +105,44 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
         gate.number, gate.name, gate.number, gate.name
     );
 
-    for krate in gate.crates {
-        step(&["fmt", "-p", krate, "--", "--check"])?;
+    if gate.number == 1 {
+        step(&["fmt", "--all", "--", "--check"])?;
         step(&[
             "clippy",
-            "-p",
-            krate,
+            "--workspace",
             "--all-targets",
             "--",
             "-D",
             "warnings",
         ])?;
-        step(&["test", "-p", krate])?;
+        step(&["test", "-p", "agend-core"])?;
+        step(&["test", "-p", "xtask", "--test", "protocol_compat"])?;
+    } else {
+        for krate in gate.crates {
+            step(&["fmt", "-p", krate, "--", "--check"])?;
+            step(&[
+                "clippy",
+                "-p",
+                krate,
+                "--all-targets",
+                "--",
+                "-D",
+                "warnings",
+            ])?;
+            step(&["test", "-p", krate])?;
+        }
     }
     check_deps::run(false)?;
 
-    println!(
-        "gate {} ({}): checks passed; demo not implemented yet (it is added when this gate is built)",
-        gate.number, gate.name
-    );
+    if gate.number == 1 {
+        crate::core_demo::run()?;
+        println!("gate 1 (core): checks passed");
+    } else {
+        println!(
+            "gate {} ({}): checks passed; demo not implemented yet (it is added when this gate is built)",
+            gate.number, gate.name
+        );
+    }
     Ok(())
 }
 

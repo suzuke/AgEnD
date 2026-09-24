@@ -1,65 +1,65 @@
 # agend-core
 
 > **TL;DR**
-> - 純邏輯 crate：型別、協定、trait、流水線狀態機、policy、螢幕分類器。
-> - 記住：**`#![no_std]` + `alloc` + `forbid(unsafe_code)`，沒有依賴、沒有 build script**；時間只經 `Clock` trait。
-> - 下一步：第 1 施工關在這裡開始（見 docs/ROADMAP.md）。
+> - 純邏輯 crate：共用型別、協定、traits、workflow 狀態機、policy 與螢幕分類器。
+> - 記住：**`#![no_std]` + `alloc` + `forbid(unsafe_code)`；唯一直接依賴是停用預設功能的 `serde`（只開 `derive` + `alloc`）**；時間只經 `Clock` trait。
+> - 下一步：跑 `cargo xtask accept core`，看純邏輯 demo 與 crate 邊界檢查。
 
 ## 負責
 
-- 所有 crate 共用的型別（`model`）：backend、`general` team、`lifetime`、訊息送達狀態、branch 命名空間
-- 兩套有版本的協定定義：client（protocol v1）與 holder
-- 邊界 trait：`Driver`、`Forge`、`Store`、`Runtime`、`Notifier`、`Clock`（簽章第 1 施工關設計）
-- 流水線狀態機（6 種關卡、task 關係與操作、workflow 存檔檢查）
-- policy：忙碌策略、去抖動、衝突偵測、merge 門檻與 patch-id、角色分派
-- 螢幕分類器（只認 hard gate；規則是資料）
-- `config.toml` 的結構（呼叫端傳入文字）
-- 安裝規則（`setup`）：只有資料與純函式；執行在 `agend` crate
+- 所有 crate 共用型別（`model`）：backend、team、task、送達狀態、branch 命名空間
+- 兩套有版本的協定定義：client 與 holder；JSON Lines hello、版本協商、未知 variant 相容、PTY bytes 的 base64 欄位
+- 邊界 traits：`Driver`、`Forge`、`Store`、`Runtime`、`Runner`、`Notifier`、`Clock`
+- 純函式 pipeline：六種關卡、task 關係與操作、workflow 存檔檢查、`{pr}`／`{head}`／`{branch}` 展開、`step(state, event)` 狀態機
+- 純函式 policy：busy、去抖動、檔案衝突、merge 門檻、分派與 team wait-cycle 偵測
+- 螢幕 hard-gate 分類器；規則資料須附版本化 prompt 證據，完整 holder 畫面逐 backend 補齊
+- `config.toml` 結構與安裝規則：只有資料與純函式，I/O 由呼叫端負責
 
 ## 不負責
 
-- 讀寫檔案、環境變數、socket、子程序
-- 執行關卡（daemon 的 `pipeline` 做）
-- 判斷 busy／idle（來自結構化事件）
+- 讀寫檔案、環境變數、socket、子程序，或提供 JSON codec／transport（serde 只定義資料序列化）
+- 執行關卡；daemon 的 `pipeline` 依 action 執行副作用
+- 讀取時鐘或自行判斷 busy／idle；時間與結構化事件由呼叫端傳入
+- 自動按螢幕提示的按鍵；classifier 只回報分類，holder 只接受單一控制鍵
 
 ## 模組
 
 | 模組 | 職責 |
 |---|---|
-| `config` | daemon 層級 `config.toml` |
 | `model` | 共用型別與 branch／worktree 命名 |
-| `protocol::client` | client protocol v1 |
-| `protocol::holder` | holder 協定；`ControlKey`（PTY 只能送的單一控制鍵） |
-| `traits` | 邊界 trait（尚未定義） |
-| `pipeline::stage` | `StageKind`（6 種）、`FanoutJoin` |
-| `pipeline::task` | task 關係與操作 |
-| `pipeline::workflow` | workflow 定義與存檔檢查（D19） |
+| `protocol` | client／holder 型別、hello 與版本協商 |
+| `traits` | 外部邊界契約，不含 adapter 實作 |
+| `pipeline::stage` | 六種關卡與 fanout join |
+| `pipeline::task` | task 關係、workflow 版本 pinning 與操作 |
+| `pipeline::workflow` | typed workflow、內建 workflow、存檔檢查（D19） |
+| `pipeline::state` | 純函式 `step` 與 side-effect actions；fanout `all`／`first`／`pick` join 和選擇 |
 | `policy::busy` | `BusyLevel`、`effective_level` |
-| `policy::debounce` | 去抖動 |
+| `policy::debounce` | busy 立即生效；idle 穩定 5 秒 |
 | `policy::conflict` | 檔案重疊偵測 |
-| `policy::merge_gate` | merge 門檻、D14 核准保留 |
-| `policy::assign` | D18 分派規則；daemon 只提供候選成員與負載等輸入（D25） |
-| `screen` | hard gate 分類器 |
-| `setup` | 安裝規則（第 13 施工關）：已測的 backend 版本範圍、登入判斷、git 最低版本、launchd／systemd unit 文字；只有資料與純函式 |
+| `policy::merge_gate` | checks、head 綁定核准與 patch-id 保留（D14） |
+| `policy::assign` | D18/D25 角色分派、role instance headcount、臨時 instance 決定與等待循環 |
+| `screen` | 以 fixture 支持的規則分類 hard gate |
 
 ## 依賴規則
 
-- `#![no_std]` + `alloc`；沒有任何依賴、沒有 `[features]`、沒有 build script
-- 不用 std：`alloc` 的 `String`、`Vec`、`format!`；雜湊表用 `BTreeMap`／`BTreeSet`；錯誤型別用 `core::error::Error`
+- `#![no_std]` + `alloc`；允許唯一依賴 `serde`，`default-features = false`，只開 `derive` + `alloc`
+- `serde` 只 derive protocol 與 workflow 設定型別；不使用 `serde_json`、transport、clock 或 runtime
+- 沒有 `[features]`、build script、unsafe；錯誤型別使用 `core::error::Error`
+- 時間只由 `Clock` 傳入；集合用 `BTreeMap`／`BTreeSet`
 
 | 保護 | 擋下什麼 | 工具 |
 |---|---|---|
-| 以 `--all-features` 對無 std 的 target（`thumbv7em-none-eabihf`）編譯 agend-core | 會被編譯到的 std 使用：`extern crate std` 的各種寫法、`[lib] path` 改指、`include!`、用到 std 的依賴（驗證過的案例見 `xtask/TESTING.md`） | `cargo xtask check-deps`（需要該 target） |
-| 同一次編譯帶 `-F unsafe-code` | `unsafe extern "C"` 之類直接呼叫 libc 的 FFI；原始碼的 `#![forbid(unsafe_code)]` 被刪也照擋（屬性留著給 IDE 即時提示） | `cargo xtask check-deps` |
-| `cargo metadata` 規則 | agend-core 有 build script、有任何 `[features]`，或有任何依賴（normal／build／dev）不在 `CORE_DEP_ALLOWLIST`（目前是空的） | `cargo xtask check-deps` |
+| 對無 std target 編譯 core，並帶 `-F unsafe-code` | std／I/O、FFI、以及會用 std 的依賴 | `cargo xtask check-deps`（需要 `thumbv7em-none-eabihf`） |
+| `cargo metadata` 檢查 | build script、任何 crate feature、非 `serde` 直接依賴、serde 預設功能或 derive／alloc 以外的 feature | `cargo xtask check-deps` |
 
-威脅模型：這些保護擋的是意外把 I/O 帶進 core，不是刻意繞過（例如改 xtask 本身、把 allowlist 加長）；後者靠 code review。
-
-已知缺口（接受，只有刻意才會發生）：以對無 std target 為假的 cfg 包住的程式碼，例如 `#[cfg(not(target_os = "none"))]`，在那個 target 上不會被編譯，所以擋不到。
+威脅模型：這些保護擋意外把 I/O 帶進 core；刻意改 allowlist 或 xtask 由 code review 把關。
 
 ## 入口
 
-- `agend_core::model`、`agend_core::pipeline::stage::StageKind`、`agend_core::policy::busy::effective_level`、`agend_core::protocol::holder::ControlKey`
+- `agend_core::protocol::{client, holder}`
+- `agend_core::pipeline::state::{step, PipelineState, PipelineEvent}`
+- `agend_core::policy::{assign, debounce, merge_gate}`
+- `agend_core::screen::classify`
 
 ## 下一步
 

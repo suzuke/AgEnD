@@ -19,6 +19,7 @@
 | `fanout` | 拆子 task 再匯合 | 子 task 來源；匯合 `all`／`first`／`pick` |
 
 - 所有關卡共用 `timeout` 與逾時動作（通知、改派、取消）。
+- `fanout all` 收到整組 child IDs 後前進；`first` 記錄先完成的 child 並取消其他 child；`pick` 把候選 child IDs 傳給後續 approval，核准時選一個並取消其餘 child。
 - task 關係（不是關卡）：`parent`、`depends_on`（可改、可跨 team）、`superseded_by`。
 - task 操作：改派、reopen（done 之後由人打開）、supersede（輸入變了，新 task 接手，不算失敗）。
 
@@ -43,6 +44,7 @@
 - [ ] 關卡 id 唯一、kind 合法
 - [ ] submit 前有產出 branch 的 work
 - [ ] 有 submit／merge 就必須 `requires = ["repo"]`
+- [ ] merge 前至少有一個 `command` check
 - [ ] merge 前有 `bind_head` 的 approval，否則須明寫 `allow_unreviewed = true`
 - [ ] `on_fail` 只能指向前面的關卡
 - [ ] 角色存在於套用的 team
@@ -58,6 +60,7 @@
 
 - agent 不建立 instance：`agend task create --role <角色>`，daemon 依角色範本分派或開臨時 instance。
 - 角色範本：允許的 backend、模型等級、指示、人數上限（min／max）、session 策略。
+- 分派輸入分開帶角色目前／最小／最大 instance 數、可用 backend 額度與每個 instance 的 task concurrency；最大 headcount 未滿且有可用額度時可回傳 `SpawnEphemeral`。
 - 審查排除作者並優先不同 backend；退回修改回原作者；超過上限就排隊。
 - 等待 fanout 的父 task 不佔名額；偵測 team 內互等並通知；需要不存在的角色時轉成 ask；額度用盡改派其他允許的 backend。
 
