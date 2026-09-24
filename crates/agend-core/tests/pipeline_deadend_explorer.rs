@@ -858,8 +858,20 @@ fn explore(wf: Workflow, stats: &mut Stats, shown: &mut u32, cap: usize, heads: 
                 }
             }
             // invariants
+            // Documented exception (r5): during an in-flight merge a commit back
+            // at the sent head is a branch reset and only drops pending changes.
+            let branch_reset = matches!(ev, PipelineEvent::CommitCreated { .. })
+                && st.merge_in_flight()
+                && !st.pending_head_changes().is_empty()
+                && nx.pending_head_changes().is_empty()
+                && nx.stage_index() == st.stage_index()
+                && nx.attempt() == st.attempt()
+                && nx.current_head() == st.current_head()
+                && nx.approvals() == st.approvals()
+                && nx.passed_checks() == st.passed_checks();
             if cls == Cls::Noise
                 && nx != *st
+                && !branch_reset
                 && !matches!(
                     ev,
                     PipelineEvent::WorkCompleted { .. }
