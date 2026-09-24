@@ -21,11 +21,12 @@
 - 所有關卡共用 `timeout` 與逾時動作（通知、改派、取消）。
 - 失敗與要求修改：`command` 失敗、`approval` 被要求修改（`review changes`）時，預設退回最近的 `work`，交回 task 持有者返工；`on_fail` 可指定其他更前面的 `work`；其他關卡失敗且沒有 `on_fail` 時 task 失敗。取消（人下指令或逾時動作「取消」）是獨立的終止狀態，不算失敗；但 merge 關卡送出 merge 之後不能取消（forge 隨時可能完成），daemon 要等 merge 結果。
 - 事件身分（daemon 契約）：task 每進入一個關卡一次（第一次、返工、重跑 checks、fanout 重跑），那個關卡的 attempt 就加 1。要求結果的 action（`AssignWork`、`ReturnToWork`、`Submit`、`RunCommand`、`RequestApproval`、`Fanout`、`Merge`、`ScheduleTimeout`）都帶 `stage_id` 與 `attempt`，綁 head 的關卡（command、merge、綁 head 的 approval）另帶 head；daemon 把它們原樣放回結果事件。`step` 只有一條規則：結果的 stage、attempt（與綁 head 關卡的 head）不是目前的，就回 `StaleResult`，狀態完全不變——重複、遲到、上一輪的結果都一樣。新 commit、main 前進、取消、開始是觀察，不是結果，沒有身分。沒有任何產出 branch 的 work 的 workflow 收到新 commit 會被拒絕（沒有 head 可換）。
-- merge 送出中（daemon 契約）：`Merge` action 發出後，task 留在 merge 關卡直到 forge 回報結果。這段期間只接受這次 merge 的 `MergeCompleted`／`MergeFailed`，以及新 commit、main 前進（記成待處理，不讓 task 離開 merge）；其他事件（關卡失敗、逾時、取消……）一律回 `MergeInFlight`，狀態不變。forge 回報 `MergeCompleted`（送出的那個 head）→ task done，待處理的變更丟棄；回報 `MergeFailed` → 依序套用待處理的變更（照 D14：patch 相同保留核准只重跑 checks，改變則退回 work），沒有待處理的就對目前 head 重跑 checks 再送 merge。
+- merge 送出中（daemon 契約）：`Merge` action 發出後，task 留在 merge 關卡直到 forge 回報結果。這段期間只接受這次 merge 的 `MergeCompleted`／`MergeFailed`，以及新 commit、main 前進（記成待處理，不讓 task 離開 merge）；其他事件（關卡失敗、逾時、取消……）一律回 `MergeInFlight`，狀態不變。送出中收到回到已送出 head 的新 commit，代表 branch 被重設：待處理的變更全部丟棄。forge 回報 `MergeCompleted`（送出的那個 head）→ task done，待處理的變更丟棄；回報 `MergeFailed` → 依序套用待處理的變更（照 D14：patch 相同保留核准只重跑 checks，改變則退回 work），沒有待處理的就對目前 head 重跑 checks 再送 merge。
 - head 變更（新 commit、main 前進後 rebase）不會讓 task 往前：`work` 中只記錄新 head，返工不會被丟掉；`submit` 中記錄後仍要等提交完成；更後面的關卡退回最後一個產出 branch 的 `work` 之後第一個 `command` 或綁 head 的 `approval` 重跑（D14 的保留規則照舊）。
 - merge 門檻：merge 前**每個** `command` 都對目前 head 通過，**每個** `approval` 都覆蓋目前 head（不綁 head 的只要有核准）。
 - `{pr}` 是 submit 回傳的 change id（如 PR 編號）；forge local 沒有，所以用到 `{pr}` 的 command 在 local forge 下會讓 task 失敗。佔位符不可加引號，展開時已逐一加單引號。
-- pick：每個核准者的挑選要一致；人數湊齊時才定下勝出者，之前只是暫定。head 變更讓核准作廢時，暫定與已定的挑選一起作廢。定下後其他子 task 被取消，不再出現在之後的挑選清單（`RequestApproval.choices` 只列這一輪還活著的子 task）。
+- pick 規則：每個核准者的挑選要一致，人數湊齊時才定下勝出者，之前只是暫定。head 變更到達挑選所在的 approval 關卡時，暫定的挑選與已收的核准作廢（開新的 attempt、重新詢問）。已由完成的 approval 定下的勝出者保留，除非 task 回到該 fanout 或更前面（fanout 重跑），或那個 approval 綁 head 而 head 變了（它的核准作廢、要重挑）。定下後其他子 task 被取消，不再出現在挑選清單。
+- 新 attempt 規則：凡是讓目前關卡已收集的結果作廢（head 變更清掉 approval 關卡的部分核准與暫定挑選、head 變更時進行中的 fanout 這一輪）或換人產出結果（逾時改派）的事，都讓目前關卡開新的 attempt 並重發要求（`RequestApproval`、`Fanout`、指派等）；舊 attempt 的結果一律過期。work 與 submit 關卡的 head 變更不作廢任何東西（task 持有者繼續做），attempt 不變。
 - `fanout` 每次進入（包括 head 變更後重跑）都產生新的子 task：舊的子 task、挑選結果與它之後的所有核准紀錄都作廢，pick 要對新的子 task 重新挑；送出的 `Fanout` action 帶目前的 head 與 work 產出。
 - `fanout all` 收到整組 child IDs 後前進；`first` 記錄先完成的 child 並取消其他 child；`pick` 把候選 child IDs 傳給後續 approval，核准時選一個並取消其餘 child。
 - task 關係（不是關卡）：`parent`、`depends_on`（可改、可跨 team）、`superseded_by`。
