@@ -1,15 +1,13 @@
 //! `cargo xtask check-deps`: enforces the crate-boundary rules.
 //!
-//! For each rule, the crate's normal dependency tree (`cargo tree -e normal
-//! --target all`, so build- and dev-dependencies are excluded and every
-//! platform is included) must not contain a denied crate. A deny entry ending
-//! in `*` is a name prefix.
-//!
-//! Source-level purity of agend-core is guaranteed by the compiler: the crate
-//! is `#![no_std]` + `alloc`, so no fs/process/net/env/thread/stdio API exists
-//! there. This check only makes sure the attribute stays (see
-//! `NO_STD_LINE`); it does not try to list forbidden APIs.
-
+//! 1. Dependency rules for other crates: each rule's crate must not have a
+//!    denied crate in its normal + build dependency tree (`cargo tree -e
+//!    normal,build --target all`; dev-dependencies are not checked). A deny
+//!    entry ending in `*` is a name prefix.
+//! 2. `agend-testkit` is never a normal dependency of any crate.
+//! 3. agend-core structural checks (`check_core`): no build script, no
+//!    dependencies outside an explicit allowlist, and it compiles for a target
+//!    that has no std at all.
 use crate::{cargo, workspace_root};
 use std::process::Command;
 
@@ -17,21 +15,6 @@ use std::process::Command;
 const ASYNC_RUNTIME: &[&str] = &["tokio", "tokio-*", "async-std", "smol", "mio"];
 /// Databases: only the daemon's store touches SQLite.
 const DATABASE: &[&str] = &["rusqlite", "libsqlite3-sys", "sqlx", "sqlx-*"];
-/// Network clients/servers.
-const NETWORK: &[&str] = &[
-    "hyper",
-    "hyper-*",
-    "reqwest",
-    "ureq",
-    "h2",
-    "socket2",
-    "tungstenite",
-    "tokio-tungstenite",
-    "teloxide",
-];
-/// Process, PTY and signal handling.
-const PROCESS: &[&str] = &["portable-pty", "nix", "signal-hook", "signal-hook-*"];
-
 pub struct Rule {
     pub krate: &'static str,
     pub deny: &'static [&'static [&'static str]],
@@ -39,11 +22,6 @@ pub struct Rule {
 }
 
 pub const RULES: &[Rule] = &[
-    Rule {
-        krate: "agend-core",
-        deny: &[ASYNC_RUNTIME, DATABASE, NETWORK, PROCESS, &["agend-*"]],
-        why: "agend-core is pure logic and the root of the dependency graph",
-    },
     Rule {
         krate: "agend-shim",
         deny: &[ASYNC_RUNTIME, DATABASE, &["agend-daemon"]],
@@ -56,56 +34,42 @@ pub const RULES: &[Rule] = &[
     },
 ];
 
-/// The exact line `crates/agend-core/src/lib.rs` must contain.
-pub const NO_STD_LINE: &str = "#![no_std]";
-
 /// Crates that may depend on `agend-testkit` only as a dev-dependency: all of them.
 const TESTKIT: &str = "agend-testkit";
 
-pub fn run() -> Result<(), String> {
+pub fn run(allow_skip: bool) -> Result<(), String> {
     let members = workspace_members()?;
     let mut problems = Vec::new();
 
     for rule in RULES {
-        let names = normal_dependencies(rule.krate)?;
+        let names = dependencies(rule.krate, "normal,build")?;
         for v in violations(rule, &names) {
             problems.push(format!(
-                "{} depends on {v} ({}); inspect with `cargo tree -e normal -p {} -i {v}`",
+                "{} depends on {v} ({}); inspect with `cargo tree -e normal,build -p {} -i {v}`",
                 rule.krate, rule.why, rule.krate
             ));
         }
     }
 
     for member in members.iter().filter(|m| m.as_str() != TESTKIT) {
-        if normal_dependencies(member)?.iter().any(|n| n == TESTKIT) {
+        if dependencies(member, "normal")?.iter().any(|n| n == TESTKIT) {
             problems.push(format!(
                 "{member} has {TESTKIT} as a normal dependency; it is dev-only (D10)"
             ));
         }
     }
 
-    let core_lib = workspace_root().join("crates/agend-core/src/lib.rs");
-    let text =
-        std::fs::read_to_string(&core_lib).map_err(|e| format!("{}: {e}", core_lib.display()))?;
-    for file in rust_files(&workspace_root().join("crates/agend-core/src"))? {
-        let src = std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
-        if !std_only_for_tests(&src) {
-            problems.push(format!(
-                "{}: `extern crate std` is allowed only directly under `#[cfg(test)]`",
-                file.display()
-            ));
-        }
-    }
-    if !declares_no_std(&text) {
-        problems.push(format!(
-            "{} lost `{NO_STD_LINE}`; agend-core must stay no_std + alloc",
-            core_lib.display()
-        ));
-    }
+    let (core_problems, skipped) = crate::check_core::run(allow_skip)?;
+    problems.extend(core_problems);
 
     if problems.is_empty() {
+        let core = if skipped {
+            "agend-core metadata ok, no-std build SKIPPED"
+        } else {
+            "agend-core metadata ok, no-std build ok"
+        };
         println!(
-            "check-deps: ok ({} rules, {} crates checked for {TESTKIT}, agend-core is no_std)",
+            "check-deps: ok ({} rules, {} crates checked for {TESTKIT}, {core})",
             RULES.len(),
             members.len() - 1
         );
@@ -116,34 +80,6 @@ pub fn run() -> Result<(), String> {
         }
         Err(format!("{} dependency rule violation(s)", problems.len()))
     }
-}
-
-/// Whether a crate root has the exact `#![no_std]` line.
-pub fn declares_no_std(lib_rs: &str) -> bool {
-    lib_rs.lines().any(|l| l.trim_end() == NO_STD_LINE)
-}
-
-/// All `.rs` files under `dir`, recursively.
-fn rust_files(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf>, String> {
-    let mut out = Vec::new();
-    for entry in std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))? {
-        let path = entry.map_err(|e| e.to_string())?.path();
-        if path.is_dir() {
-            out.extend(rust_files(&path)?);
-        } else if path.extension().is_some_and(|e| e == "rs") {
-            out.push(path);
-        }
-    }
-    Ok(out)
-}
-
-/// Whether every `extern crate std` in a source file sits directly under
-/// `#[cfg(test)]` (the only way core code may see std).
-pub fn std_only_for_tests(lib_rs: &str) -> bool {
-    let lines: Vec<&str> = lib_rs.lines().map(str::trim).collect();
-    lines.iter().enumerate().all(|(i, l)| {
-        !l.starts_with("extern crate std") || (i > 0 && lines[i - 1] == "#[cfg(test)]")
-    })
 }
 
 /// Denied crate names found in `names` (the crate itself is ignored).
@@ -181,10 +117,10 @@ pub fn parse_tree_names(output: &str) -> Vec<String> {
         .collect()
 }
 
-fn normal_dependencies(krate: &str) -> Result<Vec<String>, String> {
+fn dependencies(krate: &str, edges: &str) -> Result<Vec<String>, String> {
     let out = Command::new(cargo())
         .current_dir(workspace_root())
-        .args(["tree", "--quiet", "-e", "normal", "--target", "all"])
+        .args(["tree", "--quiet", "-e", edges, "--target", "all"])
         .args(["--prefix", "none", "--format", "{p}", "-p", krate])
         .output()
         .map_err(|e| format!("cannot run cargo tree: {e}"))?;
@@ -221,8 +157,8 @@ fn workspace_members() -> Result<Vec<String>, String> {
 mod tests {
     use super::*;
 
-    fn core_rule() -> &'static Rule {
-        RULES.iter().find(|r| r.krate == "agend-core").unwrap()
+    fn shim_rule() -> &'static Rule {
+        RULES.iter().find(|r| r.krate == "agend-shim").unwrap()
     }
 
     #[test]
@@ -243,38 +179,31 @@ mod tests {
 
     #[test]
     fn denies_runtime_and_prefix_matches() {
-        let names: Vec<String> = ["agend-core", "serde", "tokio", "tokio-util", "agend-daemon"]
-            .map(String::from)
-            .to_vec();
+        let names: Vec<String> = [
+            "agend-shim",
+            "agend-core",
+            "serde",
+            "tokio",
+            "tokio-util",
+            "agend-daemon",
+        ]
+        .map(String::from)
+        .to_vec();
         assert_eq!(
-            violations(core_rule(), &names),
+            violations(shim_rule(), &names),
             ["agend-daemon", "tokio", "tokio-util"]
         );
     }
 
     #[test]
     fn a_crate_is_not_a_violation_of_its_own_rule() {
-        assert!(violations(core_rule(), &["agend-core".to_string()]).is_empty());
-    }
-
-    #[test]
-    fn no_std_attribute_is_required() {
-        assert!(declares_no_std(
-            "//! doc\n\n#![no_std]\n\nextern crate alloc;\n"
-        ));
-        assert!(!declares_no_std("//! doc\n\nextern crate alloc;\n"));
-        assert!(!declares_no_std("// #![no_std]\n"));
-    }
-
-    #[test]
-    fn std_is_only_linked_for_tests() {
-        assert!(std_only_for_tests("#[cfg(test)]\nextern crate std;\n"));
-        assert!(!std_only_for_tests("extern crate std;\n"));
-        assert!(!std_only_for_tests("extern crate std as s;\n"));
+        assert!(violations(shim_rule(), &["agend-shim".to_string()]).is_empty());
     }
 
     #[test]
     fn current_workspace_passes() {
-        run().unwrap();
+        // allow_skip: under a non-rustup cargo the no-std target may be missing;
+        // CI runs `cargo xtask check-deps` without --allow-skip.
+        run(true).unwrap();
     }
 }

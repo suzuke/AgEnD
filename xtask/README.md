@@ -7,12 +7,16 @@
 
 ## 負責
 
-- `check-deps`：檢查每條規則的 crate 在 `cargo tree -e normal --target all` 裡沒有被禁止的 crate；檢查 agend-testkit 不是任何 crate 的一般依賴；檢查 `crates/agend-core/src/lib.rs` 有 `#![no_std]` 這一行，且 core 裡的 `extern crate std` 都直接在 `#[cfg(test)]` 下
+- `check-deps`：
+  1. shim／client 在 `cargo tree -e normal,build --target all` 裡沒有被禁止的 crate（dev 依賴不檢查）
+  2. agend-testkit 不是任何 crate 的一般依賴
+  3. agend-core：`cargo metadata` 顯示沒有 build script、沒有 allowlist 以外的依賴；而且能對無 std 的 `thumbv7em-none-eabihf` 編譯（見 `check_core.rs`）
+  4. target 沒裝時印 `SKIPPED` 並失敗；`--allow-skip` 才不失敗（仍印 SKIPPED）
 - `accept <關>`：對該關的 crate 跑 fmt、clippy、test，再跑 check-deps；demo 隨各關加入
 
 ## 不負責
 
-- agend-core 的純度：由編譯器保證（`#![no_std]` + `alloc`）；xtask 只確認這個屬性還在
+- 擋刻意繞過（例如改 xtask、加長 allowlist）：靠 code review
 - 產生 protocol JSON schema、打包 release、錄製 backend 畫面 fixture（規劃中，未實作）
 
 ## 模組
@@ -24,7 +28,7 @@
 
 ## 依賴規則
 
-- 一般依賴：無（只用 std，透過 `$CARGO` 執行 cargo）
+- 一般依賴：`serde_json`（解析 `cargo metadata`）；透過 `$CARGO` 執行 cargo，無 std 編譯時用同一個 toolchain 的 rustc
 - workspace 根目錄在執行時用 `cargo locate-project --workspace` 從目前目錄找，所以在 repo 副本裡跑會檢查副本本身
 - 不屬於 release binary
 
@@ -45,16 +49,16 @@
 
 | crate | 禁止 |
 |---|---|
-| `agend-core` | 四個群組全部 + `agend-*` |
+| `agend-core` | 任何依賴（allowlist 為空），由 `check_core.rs` 以 `cargo metadata` 檢查 |
 | `agend-shim` | async runtime、database、`agend-daemon` |
 | `agend-client` | async runtime、database、`agend-daemon` |
 | 所有 crate | `agend-testkit` 當一般依賴 |
 
-build-dependency 與 dev-dependency 不檢查。`libc` 不在清單內（很多純 crate 也會間接用到）。
+shim／client 檢查 normal 與 build 依賴，不檢查 dev 依賴。`network`、`process` 群組目前沒有規則使用，保留當文件。`libc` 不在清單內。
 
 ## 下一步
 
 ```bash
-cargo xtask check-deps
+~/.cargo/bin/cargo xtask check-deps   # rustup 的 cargo；Homebrew cargo 會 SKIPPED
 cargo xtask accept core
 ```

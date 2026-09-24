@@ -2,7 +2,7 @@
 
 > **TL;DR**
 > - 純邏輯 crate：型別、協定、trait、流水線狀態機、policy、螢幕分類器。
-> - 記住：**`#![no_std]` + `alloc`**，編譯器保證沒有任何 I/O；時間只經 `Clock` trait。
+> - 記住：**`#![no_std]` + `alloc` + `forbid(unsafe_code)`，沒有依賴、沒有 build script**；時間只經 `Clock` trait。
 > - 下一步：第 1 關在這裡開始（見 docs/ROADMAP.md）。
 
 ## 負責
@@ -43,9 +43,15 @@
 ## 依賴規則
 
 - 一般依賴：無（只有 std）
-- 禁止依賴：async runtime、SQLite、network、process crate、任何其他 `agend-*`（`cargo xtask check-deps`）
-- `#![no_std]` + `alloc`：沒有檔案、程序、網路、環境變數、thread、stdio、時鐘；要雜湊表時用 `BTreeMap`／`BTreeSet`，錯誤型別用 `core::error::Error`（編譯器強制）
-- `cargo xtask check-deps` 確認 `#![no_std]` 這一行還在，且 `extern crate std` 只出現在 `#[cfg(test)]` 下
+- 不用 std：`alloc` 的 `String`、`Vec`、`format!`；雜湊表用 `BTreeMap`／`BTreeSet`；錯誤型別用 `core::error::Error`
+
+| 保護 | 擋下什麼 | 工具 |
+|---|---|---|
+| 對無 std 的 target（`thumbv7em-none-eabihf`）編譯 agend-core | 任何形式重新引入 std：`extern crate std` 各種寫法、`[lib] path` 改指、`include!`、build.rs／rustflags 洩漏的 cfg(test)、用到 std 的依賴 | `cargo xtask check-deps`（需要該 target） |
+| `#![forbid(unsafe_code)]` | `unsafe extern "C"` 之類直接呼叫 libc 的 FFI | 編譯器 |
+| `cargo metadata` 規則 | agend-core 有 build script，或有任何依賴（normal／build／dev）不在 `CORE_DEP_ALLOWLIST`（目前是空的） | `cargo xtask check-deps` |
+
+威脅模型：這些保護擋的是意外把 I/O 帶進 core，不是刻意繞過（例如改 xtask 本身、把 allowlist 加長）；後者靠 code review。
 
 ## 入口
 

@@ -37,14 +37,19 @@ daemon 負責派工、worktree、checks、互審綁 head、merge；人只處理�
 
 | 規則 | 怎麼強制 |
 |---|---|
-| `agend-core` 不依賴 tokio、rusqlite、任何 process／network crate、其他 `agend-*` | `cargo xtask check-deps` |
-| `agend-core` 是 `#![no_std]` + `alloc`：沒有任何 I/O（檔案、程序、網路、環境變數、thread、stdio、時鐘）；時間只經 `Clock` trait | 編譯器（std 不存在）；`cargo xtask check-deps` 確認 `#![no_std]` 還在、`extern crate std` 只出現在 `#[cfg(test)]` 下 |
+| `agend-core` 不用 std（`#![no_std]` + `alloc`），所以沒有檔案、程序、網路、環境變數、thread、stdio、時鐘；時間只經 `Clock` trait | `cargo xtask check-deps` 對無 std 的 target 編譯 core |
+| `agend-core` 沒有 unsafe（擋 FFI） | `#![forbid(unsafe_code)]`，編譯器 |
+| `agend-core` 沒有 build script、沒有任何依賴（allowlist 目前為空） | `cargo xtask check-deps`（`cargo metadata`） |
 | `agend-shim`、`agend-client` 不依賴 async runtime、SQLite、`agend-daemon`（啟動要輕） | `cargo xtask check-deps` |
 | `agend-testkit` 只能當 dev-dependency | `cargo xtask check-deps` |
 | 模組之間只透過 `agend_core` 的 trait 與型別溝通 | code review |
 | 只有符合四條準則才新增 crate（見 ARCHITECTURE） | code review |
 
+這些保護擋的是意外，不是刻意繞過；刻意的改動靠 code review。
+
 CI（`.github/workflows/ci.yml`）在 ubuntu 與 macOS 跑同一組檢查。
+
+本機若 `cargo` 是 Homebrew 版（沒有額外 target），check-deps 會印 `SKIPPED` 並失敗。改用 rustup 的 cargo：`~/.cargo/bin/cargo xtask check-deps`（`rust-toolchain.toml` 會裝好 target）；只想跑其他檢查可加 `--allow-skip`，它仍會印出 SKIPPED。
 
 ## 指令
 

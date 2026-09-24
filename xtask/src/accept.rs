@@ -111,7 +111,7 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
         ])?;
         step(&["test", "-p", krate])?;
     }
-    check_deps::run()?;
+    check_deps::run(false)?;
 
     println!(
         "gate {} ({}): checks passed; demo not implemented yet (it is added when this gate is built)",

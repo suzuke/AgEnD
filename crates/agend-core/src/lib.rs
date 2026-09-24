@@ -4,15 +4,16 @@
 //! traits, the pipeline state machine, the policies and the screen
 //! classifier. Everything here is a pure function over data.
 //!
-//! The crate is `#![no_std]` + `alloc`: the compiler itself guarantees no
-//! filesystem, process, network, env, thread, stdio or clock access. Time
-//! comes in only through the `Clock` trait. Dependency rules (no tokio,
-//! rusqlite, process/network crates, other `agend-*`) are checked by
-//! `cargo xtask check-deps`, which also fails if `#![no_std]` is removed.
+//! The crate is `#![no_std]` + `alloc` with `#![forbid(unsafe_code)]`; time
+//! comes in only through the `Clock` trait. `cargo xtask check-deps` builds it
+//! for a target without std and checks (via `cargo metadata`) that it has no
+//! build script and no dependencies. These guards stop accidental I/O, not
+//! deliberate evasion.
 //!
-//! Must NOT: gain a `std` feature or dependency that reintroduces I/O.
+//! Must NOT: perform I/O of any kind, or gain a build script or dependency.
 
 #![no_std]
+#![forbid(unsafe_code)]
 
 extern crate alloc;
 

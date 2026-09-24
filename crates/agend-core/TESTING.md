@@ -25,7 +25,7 @@ cargo test -p agend-core
 
 ## 還沒測的
 
-- [ ] no_std 本身不需要測試：由編譯器保證；移除 `#![no_std]` 會被 `cargo xtask check-deps` 抓到。
+- [ ] 「core 不用 std、沒有依賴、沒有 build script」不在本 crate 測：由 `cargo xtask check-deps`（無 std target 編譯 + `cargo metadata`）檢查，見 `xtask/TESTING.md`。
 - [ ] trait 與協定（尚未定義）
 - [ ] pipeline 狀態機、workflow 存檔檢查、merge 門檻、去抖動、衝突偵測、分派規則、螢幕分類器（第 1 關）
 - [ ] property test（規劃 §5.1）

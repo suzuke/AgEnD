@@ -3,4 +3,6 @@
 [toolchain]
 channel = "1.96.0"
 components = ["rustfmt", "clippy"]
+# no-std target used by `cargo xtask check-deps` to prove agend-core has no std.
+targets = ["thumbv7em-none-eabihf"]
 profile = "minimal"

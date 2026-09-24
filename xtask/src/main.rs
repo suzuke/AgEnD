@@ -1,7 +1,8 @@
 //! Developer tasks for the AgEnD workspace. Run as `cargo xtask <command>`.
 //!
 //! Commands:
-//! - `check-deps`: enforce the crate-boundary rules (see `check_deps`).
+//! - `check-deps [--allow-skip]`: enforce the crate-boundary rules (see
+//!   `check_deps` and `check_core`).
 //! - `accept <gate>`: run the acceptance checks of one build gate
 //!   (docs/ROADMAP.md). For now it runs fmt, clippy, tests and check-deps for
 //!   the gate's crates; each gate adds its human-readable demo when it is built.
@@ -10,6 +11,7 @@
 //! packaging, backend screen fixture recording.
 
 mod accept;
+mod check_core;
 mod check_deps;
 
 use std::process::ExitCode;
@@ -18,14 +20,16 @@ const USAGE: &str = "\
 Usage: cargo xtask <command>
 
 Commands:
-  check-deps       Check crate-boundary dependency rules
+  check-deps [--allow-skip]
+                   Check crate-boundary rules (--allow-skip: do not fail if the
+                   no-std target is not installed; still prints SKIPPED)
   accept <gate>    Run the acceptance checks of a build gate (1-12 or its name)
 ";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
-        Some("check-deps") => check_deps::run(),
+        Some("check-deps") => check_deps::run(args.iter().any(|a| a == "--allow-skip")),
         Some("accept") => accept::run(args.get(1).map(String::as_str)),
         _ => {
             eprint!("{USAGE}");

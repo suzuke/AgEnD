@@ -49,12 +49,20 @@
 
 | 規則 | 工具 |
 |---|---|
-| `agend-core` 沒有 async runtime、SQLite、network、process crate，也不依賴其他 `agend-*` | `cargo xtask check-deps` |
 | `agend-shim`、`agend-client` 沒有 async runtime、SQLite，也不依賴 `agend-daemon` | `cargo xtask check-deps` |
 | 任何 crate 都不能把 `agend-testkit` 當一般依賴 | `cargo xtask check-deps` |
-| `agend-core` 是 `#![no_std]` + `alloc`：沒有任何 I/O（檔案、程序、網路、環境變數、thread、stdio、時鐘）；時間只經 `Clock` trait | 編譯器；`cargo xtask check-deps` 確認 `#![no_std]` 還在、`extern crate std` 只在 `#[cfg(test)]` 下 |
 
-依賴清單在 `xtask/src/check_deps.rs`（說明見 [xtask/README.md](../xtask/README.md)）。core 的純度不靠「禁止 API 清單」：`no_std` 下 std 根本不存在，任何 import 寫法或別名都編譯不過。
+依賴清單在 `xtask/src/check_deps.rs`（說明見 [xtask/README.md](../xtask/README.md)）；shim／client 檢查 normal 與 build 依賴，不檢查 dev 依賴。
+
+agend-core 不用 std（`#![no_std]` + `alloc`），時間只經 `Clock` trait。保護方式：
+
+| 保護 | 擋下什麼 | 工具 |
+|---|---|---|
+| 對無 std 的 target（`thumbv7em-none-eabihf`）編譯 agend-core | 任何形式重新引入 std：`extern crate std` 各種寫法、`[lib] path` 改指、`include!`、build.rs／rustflags 洩漏的 cfg(test)、用到 std 的依賴 | `cargo xtask check-deps`（需要該 target） |
+| `#![forbid(unsafe_code)]` | `unsafe extern "C"` 之類直接呼叫 libc 的 FFI | 編譯器 |
+| `cargo metadata` 規則 | agend-core 有 build script，或有任何依賴（normal／build／dev）不在 `CORE_DEP_ALLOWLIST`（目前是空的） | `cargo xtask check-deps` |
+
+威脅模型：這些保護擋的是意外把 I/O 帶進 core，不是刻意繞過（例如改 xtask 本身、把 allowlist 加長）；後者靠 code review。
 
 ## daemon 分層
 
