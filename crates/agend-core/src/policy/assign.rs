@@ -164,11 +164,13 @@ pub fn choose(request: &AssignmentRequest, candidates: &[Candidate]) -> Assignme
             reason: QueueReason::NoAllowedBackend,
         };
     }
-    let excluded_backend = match &request.purpose {
-        Purpose::Review { author_backend, .. } => Some(*author_backend),
+    // Review prefers a backend other than the author's, but falls back to
+    // the same backend rather than queueing when it is the only one allowed.
+    let preferred_spawn = match &request.purpose {
+        Purpose::Review { author_backend, .. } => spawn_backend(request, Some(*author_backend)),
         _ => None,
     };
-    if let Some(backend) = spawn_backend(request, excluded_backend) {
+    if let Some(backend) = preferred_spawn.or_else(|| spawn_backend(request, None)) {
         return AssignmentDecision::SpawnEphemeral { backend };
     }
 
@@ -501,5 +503,44 @@ mod tests {
                 waits_for: "A".into(),
             }
         ));
+    }
+
+    /// Round-2 review N6: "prefer a different backend" must not become "only a
+    /// different backend": with one allowed backend a reviewer is spawned on
+    /// it instead of queueing for a usage limit that is not reached.
+    #[test]
+    fn review_n6_review_spawns_on_the_author_backend_when_it_is_the_only_one() {
+        let request = AssignmentRequest {
+            team_id: "team-a".into(),
+            role: "reviewer".into(),
+            allowed_backends: alloc::vec![Backend::Claude],
+            available_backends: alloc::vec![Backend::Claude],
+            role_capacity: Some(RoleCapacity {
+                minimum_instances: 0,
+                maximum_instances: 2,
+                current_instances: 0,
+            }),
+            purpose: Purpose::Review {
+                author_instance: "dev-1".into(),
+                author_backend: Backend::Claude,
+            },
+        };
+        assert_eq!(
+            choose(&request, &[]),
+            AssignmentDecision::SpawnEphemeral {
+                backend: Backend::Claude
+            }
+        );
+        let request = AssignmentRequest {
+            allowed_backends: alloc::vec![Backend::Claude, Backend::Codex],
+            available_backends: alloc::vec![Backend::Claude, Backend::Codex],
+            ..request
+        };
+        assert_eq!(
+            choose(&request, &[]),
+            AssignmentDecision::SpawnEphemeral {
+                backend: Backend::Codex
+            }
+        );
     }
 }

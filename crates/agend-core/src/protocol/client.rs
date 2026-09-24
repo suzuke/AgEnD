@@ -6,7 +6,6 @@
 
 use alloc::string::String;
 use alloc::vec::Vec;
-use core::fmt;
 use serde::{Deserialize, Serialize};
 
 use super::{Hello, ProtocolVersion, VersionMismatch, negotiate};
@@ -275,17 +274,6 @@ pub struct InstanceChangedData {
 pub fn negotiate_version(remote: &Hello) -> Result<ProtocolVersion, VersionMismatch> {
     negotiate("client", &SUPPORTED_VERSIONS, &remote.supported)
 }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ClientProtocolError(pub VersionMismatch);
-
-impl fmt::Display for ClientProtocolError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl core::error::Error for ClientProtocolError {}
 
 #[cfg(test)]
 mod tests {
