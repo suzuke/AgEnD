@@ -36,7 +36,7 @@
 
 - portable-pty + VTerm「重連時送乾淨畫面」的做法（runtime-spike）。
 - codex 用 `turn/steer` 插入的做法（injection.md Q4）。
-- `block_on` 巢狀 runtime 已用共用 helper + 測試鎖死，近 60 天 0 次新 fix（history.md §2）。
+- `block_on` 巢狀 tokio runtime 已用共用 helper + 測試鎖死，近 60 天 0 次新 fix（history.md §2）。
 
 ## 細節
 

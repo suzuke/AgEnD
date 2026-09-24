@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 目前只測 `TempDir`。
 > - 記住：fixture 只碰自己建的暫存目錄。
-> - 下一步：第 2 關：契約測試通過、假 agent 可單獨啟動並回應。
+> - 下一步：第 2 施工關：契約測試通過、假 agent 可單獨啟動並回應。
 
 ## 怎麼跑
 
@@ -23,7 +23,7 @@ cargo test -p agend-testkit
 
 ## 還沒測的
 
-- [ ] 假實作、契約測試、假 daemon、假 agent、git fixture（第 2 關）
+- [ ] 假實作、契約測試、假 daemon、假 agent、git fixture（第 2 施工關）
 
 ## 下一步
 

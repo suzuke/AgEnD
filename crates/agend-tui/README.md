@@ -3,7 +3,7 @@
 > **TL;DR**
 > - attention-first TUI：先看「需要你」，再看各 team。
 > - 記住：**只透過 `agend-client` 跟 daemon 溝通**，和其他 client 一樣。
-> - 下一步：第 11 關實作（沿用 DEMO-01 原型的教訓）。
+> - 下一步：第 11 施工關實作（沿用 DEMO-01 原型的教訓）。
 
 ## 負責
 

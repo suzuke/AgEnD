@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 整合測試直接執行建好的 binary。
 > - 記住：argv[0] 分派用真的 symlink 驗證，不是呼叫函式。
-> - 下一步：第 9 關加每個命令的輸出與錯誤 snapshot。
+> - 下一步：第 9 施工關加每個命令的輸出與錯誤 snapshot。
 
 ## 怎麼跑
 
@@ -25,7 +25,7 @@ cargo test -p agend
 
 ## 還沒測的
 
-- [ ] 所有 CLI 命令、doctor、init（第 9 關）
+- [ ] 所有 CLI 命令、doctor、init（第 9 施工關）
 
 ## 下一步
 

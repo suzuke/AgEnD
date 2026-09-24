@@ -1,8 +1,8 @@
-# 第 1 關：agend-core（`core`）
+# 第 1 施工關：agend-core（`core`）
 
 > **TL;DR**
 > - 純邏輯 crate：型別、兩套協定、trait、流水線狀態機、busy policy、去抖動、衝突偵測、merge 門檻、螢幕分類器。
-> - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這關才算完成。
+> - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這個施工關才算完成。
 > - 下一步：逐條確認「開工前提案」。
 
 ## 狀態
@@ -56,7 +56,7 @@
 ### P5：去抖動
 
 - 問題：idle↔busy 要穩定多久才生效？
-- 建議：不對稱：轉 busy 立即生效（絕不送進忙碌中的 agent）；轉 idle 要穩定 5 秒。先用常數，第 7 關用真實資料重新校準。
+- 建議：不對稱：轉 busy 立即生效（絕不送進忙碌中的 agent）；轉 idle 要穩定 5 秒。先用常數，第 7 施工關用真實資料重新校準。
 - 理由：v1 約兩天 75 萬次轉換；送錯時機的代價在「送進忙碌 agent」那一側。
 - 替代方案：對稱的 N 秒（兩邊都延遲）。
 - [ ] 使用者確認
@@ -64,7 +64,7 @@
 ### P6：保留期限
 
 - 問題：各類資料留多久？
-- 建議：task／workflow／decision 紀錄永久保留（量小）；訊息 30 天；事件與狀態轉換 14 天；封存的 WIP patch 30 天；每日 DB 快照留 7 份。第 5 關重新校準。
+- 建議：task／workflow／請示紀錄永久保留（量小）；訊息 30 天；事件與狀態轉換 14 天；封存的 WIP patch 30 天；每日 DB 快照留 7 份。第 5 施工關重新校準。
 - 理由：先給保守可用的預設值，實作 store 時用實際大小修正。
 - 替代方案：全部永久保留（v1 home 長到 161G 的教訓）；或全部同一個期限。
 - [ ] 使用者確認
@@ -84,7 +84,7 @@
 - [ ] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨
 - [ ] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`（出現 `SKIPPED` 不算通過）
 - [ ] `~/.cargo/bin/cargo xtask accept core` 通過，並印出下方「你親自驗收」用到的 demo
-- [ ] 本關 crate 的 `README.md`／`TESTING.md` 已更新
+- [ ] 本施工關 crate 的 `README.md`／`TESTING.md` 已更新
 - [ ] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」
 
 ## 你親自驗收

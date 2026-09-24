@@ -3,7 +3,7 @@
 > **TL;DR**
 > - `codex app-server`：JSON-RPC over WebSocket over unix socket；三種忙碌等級都有原生方法。
 > - 記住：**連線前先 `realpath` socket 路徑**；重連後要 `thread/resume` 才拿得到完整事件。
-> - 下一步：driver 在 `crates/agend-daemon/src/driver/codex.rs`（第 7 關）。
+> - 下一步：driver 在 `crates/agend-daemon/src/driver/codex.rs`（第 7 施工關）。
 
 來源：spike-codex.md（2026-09-24，`codex-cli 0.156.1`）。協定清單由 `codex app-server generate-json-schema --experimental` 產生：164 個 client→server 方法、11 個 server→client 請求、82 種通知。
 

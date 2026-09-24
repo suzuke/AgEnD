@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 只有純函式單元測試；crate 是 no_std，測試透過 `#[cfg(test)] extern crate std;` 才能用 std。
 > - 記住：測 consumer 時用 producer 產生輸入（例：`task_id_of_branch` 吃 `work_branch` 的輸出）。
-> - 下一步：第 1 關加入 property test 與 `code` workflow 模擬。
+> - 下一步：第 1 施工關加入 property test 與 `code` workflow 模擬。
 
 ## 怎麼跑
 
@@ -27,7 +27,7 @@ cargo test -p agend-core
 
 - [ ] 「core 不用 std、沒有依賴、沒有 build script」不在本 crate 測：由 `cargo xtask check-deps`（無 std target 編譯 + `cargo metadata`）檢查，見 `xtask/TESTING.md`。
 - [ ] trait 與協定（尚未定義）
-- [ ] pipeline 狀態機、workflow 存檔檢查、merge 門檻、去抖動、衝突偵測、分派規則、螢幕分類器（第 1 關）
+- [ ] pipeline 狀態機、workflow 存檔檢查、merge 門檻、去抖動、衝突偵測、分派規則、螢幕分類器（第 1 施工關）
 - [ ] property test（規劃 §5.1）
 
 ## 下一步

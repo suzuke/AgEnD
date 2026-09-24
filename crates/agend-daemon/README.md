@@ -3,13 +3,13 @@
 > **TL;DR**
 > - 唯一的大型 I/O 層：常駐、單一 tokio runtime、DB 專屬執行緒。
 > - 記住：**agent 與附屬程序不是 daemon 的子程序**；daemon 可隨時重啟。
-> - 下一步：第 5 關（store）開始實作。
+> - 下一步：第 5 施工關（store）開始實作。
 
 ## 負責
 
 - 入口：protocol server、command handlers、hook／事件接收（含磁碟佇列補送）
 - 領域：驅動流水線、送達、監督（卡住、額度、轉派）、排程（timeout、cron）、DB ↔ git 對帳
-- adapter：driver（codex、claude、opencode）、runtime（holder client）、forge（local、github）、git、runner、store（SQLite）、notifier（Telegram）
+- adapter：driver（codex、claude、opencode）、agent runtime（holder client）、forge（local、github）、git、runner、store（SQLite）、notifier（Telegram）
 
 ## 不負責
 

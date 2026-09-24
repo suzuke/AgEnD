@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 互動式 TUI + hooks（狀態）+ MCP channel（送訊息）；忙碌時用 Stop hook 排隊。
 > - 記住：**`Esc` 中斷後的 channel 訊息，要有來源說明才會被處理**（無說明 0/3，有說明 3/3）。
-> - 下一步：driver 在 `crates/agend-daemon/src/driver/claude.rs`（第 12 關）；規則見 D16。
+> - 下一步：driver 在 `crates/agend-daemon/src/driver/claude.rs`（第 12 施工關）；規則見 D16。
 
 來源：spike-claude.md（C1–C7）、spike-claude-f.md（F1–F5），2026-09-24，Claude Code 2.1.281。
 
