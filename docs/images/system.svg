@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 660" width="980" height="660" role="img" aria-label="AgEnD v2 系統架構">
+<style>
+  svg { --bg:#ffffff; --surface:#ffffff; --ink:#1b2130; --muted:#5d6678; --line:#c6ccd8;
+        --warn:#b4441f; --warn-bg:#fbede6; --new:#1b7652; --new-bg:#e4f3eb; }
+  @media (prefers-color-scheme: dark) {
+    svg { --bg:#0d1117; --surface:#161b22; --ink:#e6edf3; --muted:#9aa3b5; --line:#3a4354;
+          --warn:#f08a62; --warn-bg:#3a2219; --new:#5ec796; --new-bg:#15301f; }
+  }
+  text { font-family: "Noto Sans TC","PingFang TC","Microsoft JhengHei",-apple-system,"Segoe UI",sans-serif; }
+  .mono { font-family: "IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace; }
+  .bg { fill: var(--bg); }
+  .box { fill: var(--surface); stroke: var(--line); stroke-width: 1.2; }
+  .frame-new { fill: none; stroke: var(--new); stroke-width: 1.6; }
+  .nbox { fill: var(--new-bg); stroke: var(--new); stroke-width: 1.2; }
+  .t { fill: var(--ink); font-size: 14px; font-weight: 500; }
+  .s { fill: var(--muted); font-size: 12px; }
+  .tn { fill: var(--new); font-size: 12.5px; }
+  .tfn { fill: var(--new); font-size: 13px; font-weight: 700; }
+  .edge { fill: none; stroke: var(--muted); stroke-width: 1.3; }
+  .edge-n { fill: none; stroke: var(--new); stroke-width: 1.5; stroke-dasharray: 5 4; }
+  .ah { fill: var(--muted); }
+  .ahn { fill: var(--new); }
+</style>
+<rect class="bg" x="0" y="0" width="980" height="660" rx="8"/>
+  <defs>
+    <marker id="s1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ah"/></marker>
+    <marker id="s2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="ahn"/></marker>
+  </defs>
+  <rect class="box" x="20" y="16" width="170" height="54" rx="4"/>
+  <text class="t" x="105" y="39" text-anchor="middle">TUI</text>
+  <text class="s" x="105" y="58" text-anchor="middle">attention-first</text>
+  <rect class="box" x="205" y="16" width="130" height="54" rx="4"/>
+  <text class="t" x="270" y="39" text-anchor="middle">agend CLI</text>
+  <text class="s" x="270" y="58" text-anchor="middle">人與 agent 共用</text>
+  <rect class="box" x="350" y="16" width="130" height="54" rx="4" stroke-dasharray="5 4"/>
+  <text class="t" x="415" y="39" text-anchor="middle">GUI</text>
+  <text class="s" x="415" y="58" text-anchor="middle">未來</text>
+  <rect class="box" x="640" y="16" width="150" height="54" rx="4"/>
+  <text class="t" x="715" y="39" text-anchor="middle">Telegram</text>
+  <text class="s" x="715" y="58" text-anchor="middle">需要你 + 各 team</text>
+  <rect class="box" x="810" y="16" width="150" height="54" rx="4"/>
+  <text class="t" x="885" y="39" text-anchor="middle">GitHub</text>
+  <text class="s" x="885" y="58" text-anchor="middle">forge github 才用</text>
+
+  <line class="edge" x1="105" y1="70" x2="105" y2="118" marker-start="url(#s1)" marker-end="url(#s1)"/>
+  <line class="edge" x1="270" y1="70" x2="270" y2="118" marker-start="url(#s1)" marker-end="url(#s1)"/>
+  <line class="edge" x1="415" y1="70" x2="415" y2="118" marker-start="url(#s1)" marker-end="url(#s1)" stroke-dasharray="5 4"/>
+  <text class="tn" x="440" y="88">protocol v1（有版本）</text>
+  <text class="tn" x="440" y="105">agend-client · unix socket</text>
+  <text class="s" x="723" y="100">經 notifier</text>
+  <text class="s" x="893" y="100">經 forge</text>
+  <line class="edge" x1="715" y1="70" x2="715" y2="118" marker-start="url(#s1)" marker-end="url(#s1)"/>
+  <line class="edge" x1="885" y1="70" x2="885" y2="118" marker-start="url(#s1)" marker-end="url(#s1)"/>
+
+  <rect class="frame-new" x="20" y="120" width="940" height="320" rx="6"/>
+  <text class="tfn" x="36" y="144">agend daemon · 常駐 · 單一 tokio runtime · DB 專屬執行緒 · 外部指令一律 tokio::process + timeout</text>
+
+  <text class="s" x="36" y="176">入口</text>
+  <rect class="box" x="100" y="160" width="250" height="34" rx="4"/><text class="t" x="225" y="182" text-anchor="middle">protocol server</text>
+  <rect class="box" x="365" y="160" width="250" height="34" rx="4"/><text class="t" x="490" y="182" text-anchor="middle">command handlers</text>
+  <rect class="box" x="630" y="160" width="310" height="34" rx="4"/><text class="t" x="785" y="182" text-anchor="middle">hook／事件接收（含磁碟佇列補送）</text>
+
+  <text class="s" x="36" y="240">領域</text>
+  <rect class="nbox" x="100" y="216" width="160" height="50" rx="4"/><text class="t" x="180" y="238" text-anchor="middle">pipeline</text><text class="s" x="180" y="256" text-anchor="middle">執行 core 狀態機</text>
+  <rect class="nbox" x="270" y="216" width="160" height="50" rx="4"/><text class="t" x="350" y="238" text-anchor="middle">delivery</text><text class="s" x="350" y="256" text-anchor="middle">送達模型</text>
+  <rect class="nbox" x="440" y="216" width="160" height="50" rx="4"/><text class="t" x="520" y="238" text-anchor="middle">supervisor</text><text class="s" x="520" y="256" text-anchor="middle">卡住、額度、轉派</text>
+  <rect class="nbox" x="610" y="216" width="160" height="50" rx="4"/><text class="t" x="690" y="238" text-anchor="middle">scheduler</text><text class="s" x="690" y="256" text-anchor="middle">timeout、cron</text>
+  <rect class="nbox" x="780" y="216" width="160" height="50" rx="4"/><text class="t" x="860" y="238" text-anchor="middle">reconcile</text><text class="s" x="860" y="256" text-anchor="middle">DB ↔ git 對帳</text>
+
+  <text class="s" x="36" y="318">adapter</text>
+  <rect class="box" x="100" y="290" width="200" height="50" rx="4"/><text class="t mono" x="200" y="312" text-anchor="middle">driver</text><text class="s" x="200" y="330" text-anchor="middle">codex · claude · opencode</text>
+  <rect class="box" x="310" y="290" width="150" height="50" rx="4"/><text class="t mono" x="385" y="312" text-anchor="middle">runtime</text><text class="s" x="385" y="330" text-anchor="middle">holder client</text>
+  <rect class="box" x="470" y="290" width="150" height="50" rx="4"/><text class="t mono" x="545" y="312" text-anchor="middle">forge</text><text class="s" x="545" y="330" text-anchor="middle">local · github</text>
+  <rect class="box" x="630" y="290" width="150" height="50" rx="4"/><text class="t mono" x="705" y="312" text-anchor="middle">git · runner</text><text class="s" x="705" y="330" text-anchor="middle">worktree、command</text>
+  <rect class="box" x="790" y="290" width="150" height="50" rx="4"/><text class="t mono" x="865" y="312" text-anchor="middle">notifier</text><text class="s" x="865" y="330" text-anchor="middle">telegram</text>
+
+  <rect class="nbox" x="100" y="360" width="840" height="56" rx="4"/>
+  <text class="t" x="116" y="383">store：SQLite（唯一持久狀態）</text>
+  <text class="s" x="116" y="403">instance · team · repo · workflow · task · 訊息 · binding · review · decision · schedule · 事件；每張表有保留期限；每日 VACUUM INTO 快照</text>
+
+  <line class="edge" x1="385" y1="440" x2="385" y2="488" marker-start="url(#s1)" marker-end="url(#s1)"/>
+  <text class="s" x="393" y="468">holder 協定（有版本、向後相容；daemon 重啟後重連）</text>
+
+  <rect class="nbox" x="20" y="490" width="215" height="58" rx="4"/><text class="t" x="34" y="512">holder</text><text class="s" x="34" y="532">PTY + 畫面 + app-server</text>
+  <rect class="nbox" x="250" y="490" width="215" height="58" rx="4"/><text class="t" x="264" y="512">holder</text><text class="s" x="264" y="532">PTY + 畫面</text>
+  <rect class="nbox" x="480" y="490" width="215" height="58" rx="4"/><text class="t" x="494" y="512">holder</text><text class="s" x="494" y="532">PTY + 畫面 + serve</text>
+  <line class="edge" x1="127" y1="548" x2="127" y2="578" marker-end="url(#s1)"/>
+  <line class="edge" x1="357" y1="548" x2="357" y2="578" marker-end="url(#s1)"/>
+  <line class="edge" x1="587" y1="548" x2="587" y2="578" marker-end="url(#s1)"/>
+
+  <rect class="box" x="20" y="580" width="215" height="62" rx="4"/><text class="t" x="34" y="602">codex</text><text class="s" x="34" y="622">PATH：git → shim、agend</text>
+  <rect class="box" x="250" y="580" width="215" height="62" rx="4"/><text class="t" x="264" y="602">claude</text><text class="s" x="264" y="620">PATH：git → shim、agend</text><text class="s" x="264" y="636">hooks + channel</text>
+  <rect class="box" x="480" y="580" width="215" height="62" rx="4"/><text class="t" x="494" y="602">opencode</text><text class="s" x="494" y="622">PATH：git → shim、agend</text>
+
+  <path class="edge-n" d="M695 611 L716 611 L716 442" marker-end="url(#s2)"/>
+  <text class="tn" transform="translate(730 525) rotate(-90)" text-anchor="middle">CLI、hook、結構化事件</text>
+
+  <rect class="box" x="745" y="490" width="215" height="152" rx="4"/>
+  <text class="t" x="760" y="512">home 目錄</text>
+  <text class="s mono" x="760" y="534">config.toml</text>
+  <text class="s mono" x="760" y="554">agend.db</text>
+  <text class="s mono" x="760" y="574">teams/&lt;team&gt;/</text>
+  <text class="s mono" x="760" y="594">worktrees/&lt;task-id&gt;/</text>
+  <text class="s mono" x="760" y="614">workspace/&lt;instance&gt;/</text>
+  <text class="s mono" x="760" y="634">archive/（WIP patch）</text>
+</svg>

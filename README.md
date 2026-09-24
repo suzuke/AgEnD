@@ -24,58 +24,15 @@
 
 ## 系統圖
 
-```mermaid
-flowchart TB
-    subgraph clients["client"]
-        direction LR
-        tui["TUI<br/>attention-first"]
-        cli["agend CLI<br/>人與 agent 共用"]
-        gui["GUI<br/>未來"]
-    end
-    tg["Telegram<br/>需要你 + 各 team<br/>（經 notifier）"]
-    gh["GitHub<br/>forge github 才用<br/>（經 forge）"]
-
-    subgraph daemon["agend daemon · 常駐 · 單一 tokio runtime · DB 專屬執行緒 · 外部指令一律 tokio::process + timeout"]
-        direction TB
-        entry["入口<br/>protocol server · command handlers · hook／事件接收（含磁碟佇列補送）"]
-        domain["領域<br/>pipeline（執行 core 狀態機）· delivery（送達模型）· supervisor（卡住、額度、轉派）<br/>scheduler（timeout、cron）· reconcile（DB ↔ git 對帳）"]
-        adapter["adapter<br/>driver（codex · claude · opencode）· runtime（holder client）· forge（local · github）<br/>git · runner（worktree、command）· notifier（telegram）"]
-        store[("store：SQLite（唯一持久狀態）<br/>instance · team · repo · workflow · task · 訊息 · binding · review · decision · schedule · 事件")]
-        entry --- domain --- adapter --- store
-    end
-
-    h1["holder<br/>PTY + 畫面 + app-server"]
-    h2["holder<br/>PTY + 畫面"]
-    h3["holder<br/>PTY + 畫面 + serve"]
-    codex["codex<br/>PATH：git → shim、agend"]
-    claude["claude<br/>PATH：git → shim、agend<br/>hooks + channel"]
-    opencode["opencode<br/>PATH：git → shim、agend"]
-    home["home 目錄<br/>config.toml · agend.db<br/>teams/#lt;team#gt;/ · worktrees/#lt;task-id#gt;/<br/>workspace/#lt;instance#gt;/ · archive/（WIP patch）"]
-
-    tui <-->|"protocol v1（有版本）· agend-client · unix socket"| entry
-    cli <--> entry
-    gui -.-> entry
-    tg <--> adapter
-    gh <--> adapter
-    adapter <-->|"holder 協定（有版本、向後相容；daemon 重啟後重連）"| h1
-    adapter <--> h2
-    adapter <--> h3
-    h1 --> codex
-    h2 --> claude
-    h3 --> opencode
-    report(["CLI、hook、結構化事件"])
-    codex & claude & opencode -.-> report
-    report -.-> entry
-    home ~~~ h1
-```
+![AgEnD v2 系統架構](docs/images/system.svg)
 
 agent 側沒有任何 daemon 子程序；agent 與附屬程序都由 holder 持有，所以 daemon 可以隨時重啟或升級；daemon、holder、shim 都執行已安裝的 release 版，開發中的 AgEnD 在另一個 clone。
 
 圖註：
 
-- Telegram 與 GitHub 不走 protocol v1，而是由 daemon 的 `notifier`、`forge` adapter 連出去，所以圖上連到 adapter。
-- 三個 agent 都經「CLI、hook、結構化事件」虛線回報給 daemon 入口；hook 只有 claude 有。
-- 這張圖是唯一版本；其他文件只連結到這裡。
+- Telegram 與 GitHub 不走 protocol v1，而是由 daemon 的 `notifier`、`forge` adapter 連出去；圖上以「經 notifier」「經 forge」標示。
+- 「CLI、hook、結構化事件」虛線是三個 agent 共用的回報路徑（圖上從最右邊畫出，代表全部）；hook 只有 claude 有。
+- 這張圖是唯一版本：`docs/images/system.svg`（手寫 SVG，直接改這個檔案；顏色與字級在檔頭 `<style>`，會依 GitHub 淺色／深色主題切換）。其他文件只連結到這裡。
 
 ## Repo 結構
 
