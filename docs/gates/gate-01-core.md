@@ -103,10 +103,12 @@ P1–P7 已由你在 2026-09-25 確認（記為決策 D26–D32）。實作草�
   - [ ] 使用者追認
 - 夜間步驟 r2（2026-09-25）：存檔檢查加上**可完成證明**：用 `step` 實際走成功序列、每個 command／approval 各返工一次、每個關卡各來一次新 commit，走不到 done 就拒絕（見 [pipeline 存檔檢查清單](../architecture/pipeline.md#workflow-管理d19d21)）；文法收斂：pick fanout 後面緊接挑選的 approval；有 merge 時最後的 branch work 之後不能再有 work。另外：返工到 fanout 之後的 work 不再清掉 fanout 的子 task；merge 失敗時多筆待處理變更只為最新 head 發一次 checks；branch 出現前的 main 前進直接忽略。
   - [ ] 使用者追認
+- 夜間步驟 r3（2026-09-25）：「最後的 branch work 之後不能再有 work」這條規則擴大到所有有 merge、command 或綁 head 的 approval 的 workflow（不只有 merge 的），讓沒有 merge 的 workflow 在 done 時 checks 與核准也涵蓋最後的 head；可完成證明在 done 時檢查這點與 pick 的有效性。fanout 每次重跑都要重新挑 pick，之後的核准作廢。
+  - [ ] 使用者追認
 
 ## 自動驗收（完成定義）
 
-- [x] `~/.cargo/bin/cargo test --workspace` 通過（153 tests）；其中 `agend-core` 105 unit tests（含 210,000 次竄改狀態）、兩個狀態機探索器（44,000 + 18,000 條事件序列）、可完成性測試 8 個（含 200,000 個隨機 workflow）、xtask protocol compatibility 7 tests、workflow TOML golden 2 tests（2026-09-25）
+- [x] `~/.cargo/bin/cargo test --workspace` 通過（156 tests，另有 2 個 `--ignored` 深度測試）；其中 `agend-core` 105 unit tests（含 210,000 次竄改狀態）、兩個狀態機探索器（52,000 + 24,000 條事件序列）、可完成性測試 11 個（含 200,000 個隨機 workflow）、xtask protocol compatibility 7 tests、workflow TOML golden 2 tests（2026-09-25）
 - [x] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨（2026-09-25）
 - [x] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`；注入 `std::fs` 時 checker exit 1，還原後通過（2026-09-25）
 - [x] `~/.cargo/bin/cargo xtask accept core` 通過，並印出下方 demo（2026-09-25）
@@ -167,7 +169,7 @@ P1–P7 已由你在 2026-09-25 確認（記為決策 D26–D32）。實作草�
    ~/.cargo/bin/cargo test -p agend-core --test pipeline_explorer_splitmix -- --nocapture 2>&1 | grep -E "merged|test result"
    ```
 
-   應該看到：第一個指令有 11 行 `explorer <workflow>: 4000 sequences, …`，每行的 `done` 大於 0，有 merge 的 workflow（`code`、`planned`、`human-gate`、`review-between-checks`、`unreviewed`、`checks-before-submit`、`pr-placeholders`）`merged` 大於 0，接著 `explorer total: 44000 sequences` 與 `test result: ok. 1 passed`。第二個指令有 6 行 `<workflow>: merged N reworks M`（N、M 都大於 0）與 `test result: ok. 1 passed`。檢查的不變量列在 [crates/agend-core/TESTING.md](../../crates/agend-core/TESTING.md#狀態機探索器)。
+   應該看到：第一個指令有 13 行 `explorer <workflow>: 4000 sequences, …`，每行的 `done` 大於 0，有 merge 的 workflow（`code`、`planned`、`human-gate`、`review-between-checks`、`unreviewed`、`pick-then-review`、`checks-before-submit`、`pr-placeholders`）`merged` 大於 0，接著 `explorer total: 52000 sequences` 與 `test result: ok. 1 passed`。第二個指令有 8 行 `<workflow>: merged N reworks M`（M 都大於 0；N 除了沒有 merge 的 `checks-no-merge` 之外都大於 0）與 `test result: ok. 1 passed`。檢查的不變量列在 [crates/agend-core/TESTING.md](../../crates/agend-core/TESTING.md#狀態機探索器)。
 
    - [ ] 通過
 
@@ -223,6 +225,7 @@ task T-1 workflow=code v1
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-25 第 1 施工關 verifier r3 推翻（3e8b3a3）兩個新類型問題，已修（4b05a60）：沒有 merge 的 workflow 在最後的 branch work 之後的 work 裡換 head 仍會 done（改為存檔規則，並加入可完成證明的 done 檢查）；pick fanout 重跑後沿用舊的 pick（進入 fanout 時清掉子 task、挑選與之後的核准，`Fanout` action 帶目前 head）。兩個反例寫成 `verifier_r3_*` 測試，探索器加上對應 workflow 與 pick 不變量，verifier 的死路探索器移植為 `--ignored` 測試。
 - 2026-09-25 第 1 施工關 verifier r2 推翻（843a235）：同一類問題（存檔放行、執行走不完）第二次出現，改成結構性解法（ba30886）：存檔檢查用 `step` 做可完成證明、文法收斂、三個執行期修正、隨機 workflow 產生器成為常駐測試（拿掉新規則的舊 validate 會被它抓到）。
 - 2026-09-25 第 1 施工關 verifier r1 推翻（832a4dc）後修正（f458545、ebdac60）：merge、command、綁 head 的 approval 前面必須有產出 branch 的 work 且需要 repo；merge 送出後的 head 變更記成待處理、等 forge 結果（新事件 `MergeFailed`）；demo 與 transcript 改走這條路；「作者」改稱 task 持有者；pty.rs 列入「待你追認」。
 - 2026-09-25 rebase 到 v2（#104 名詞表，b04c260），文件改用「施工關」等名詞（832a4dc）。

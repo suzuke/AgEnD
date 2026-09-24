@@ -24,6 +24,7 @@
 - head 變更（新 commit、main 前進後 rebase）不會讓 task 往前：`work` 中只記錄新 head，返工不會被丟掉；`submit` 中記錄後仍要等提交完成；更後面的關卡退回最後一個產出 branch 的 `work` 之後第一個 `command` 或綁 head 的 `approval` 重跑（D14 的保留規則照舊）。
 - merge 門檻：merge 前**每個** `command` 都對目前 head 通過，**每個** `approval` 都覆蓋目前 head（不綁 head 的只要有核准）。
 - `{pr}` 是 submit 回傳的 change id（如 PR 編號）；forge local 沒有，所以用到 `{pr}` 的 command 在 local forge 下會讓 task 失敗。佔位符不可加引號，展開時已逐一加單引號。
+- `fanout` 每次進入（包括 head 變更後重跑）都產生新的子 task：舊的子 task、挑選結果與它之後的所有核准紀錄都作廢，pick 要對新的子 task 重新挑；送出的 `Fanout` action 帶目前的 head 與 work 產出。
 - `fanout all` 收到整組 child IDs 後前進；`first` 記錄先完成的 child 並取消其他 child；`pick` 把候選 child IDs 傳給後續 approval，核准時選一個並取消其餘 child。
 - task 關係（不是關卡）：`parent`、`depends_on`（可改、可跨 team）、`superseded_by`。
 - task 操作：改派、reopen（done 之後由人打開）、supersede（輸入變了，新 task 接手，不算失敗）。
@@ -60,8 +61,8 @@
 - [ ] `on_fail` 只能指向前面的 `work` 關卡（原因要交給 task 持有者，D33）
 - [ ] 角色存在於套用的 team
 - [ ] `fanout` 的 `join = "pick"` 後面緊接著負責挑選的 `approval`
-- [ ] 有 merge 的 workflow，最後一個產出 branch 的 `work` 之後不能再有 `work`
-- [ ] 可完成證明（completability witness）：以上都通過後，存檔檢查用純函式 `step` 實際走一次：(1) 全部成功的標準事件序列；(2) 每個 `command`／`approval` 各失敗一次（返工）再照成功序列走；(3) 產出 branch 之後的每個關卡各收到一次新 commit（在 merge 關卡是送出中收到、接著 merge 失敗）再照成功序列走。每一趟都要在上限內走到 done，否則拒絕存檔，錯誤訊息指出是哪一趟、卡在哪個關卡。序列是固定的，不用亂數。forge local 不回傳 change id，所以 local 下用到 `{pr}` 的 workflow 會在這一步被拒絕。
+- [ ] 有 merge、`command` 或綁 head 的 `approval` 的 workflow，最後一個產出 branch 的 `work` 之後不能再有 `work`（有沒有 merge 都一樣：done 時 checks 與核准要涵蓋最後的 head）
+- [ ] 可完成證明（completability witness）：以上都通過後，存檔檢查用純函式 `step` 實際走一次：(1) 全部成功的標準事件序列；(2) 每個 `command`／`approval` 各失敗一次（返工）再照成功序列走；(3) 產出 branch 之後的每個關卡各收到一次新 commit（在 merge 關卡是送出中收到、接著 merge 失敗）再照成功序列走。每一趟都要在上限內走到 done，且 done 時每個 `command` 與綁 head 的 `approval` 都涵蓋最後的 head、最後一個 pick `fanout` 的勝出者是它目前的子 task，否則拒絕存檔，錯誤訊息指出是哪一趟、卡在哪個關卡。序列是固定的，不用亂數。forge local 不回傳 change id，所以 local 下用到 `{pr}` 的 workflow 會在這一步被拒絕。
 
 ## team 與 repo（D12、D13、D15）
 

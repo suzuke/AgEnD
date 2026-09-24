@@ -41,7 +41,7 @@ cargo xtask accept core
 
 ## 狀態機探索器
 
-`tests/pipeline_explorer.rs` 是不加依賴的 property test（core 的依賴與 dev-dependency allowlist 不變）：xorshift 固定種子產生事件序列，跑在 11 個 workflow 上（內建 `code`、`research`、`planned`、`epic`，epic 的 `first`／`pick` 變體，以及 5 個自訂：兩個 approval、review 夾在兩個 command 之間、`allow_unreviewed`、command 在 submit 之前加 `count = 2` 與不綁 head 的 approval 和指向 work 的 `on_fail`、`{pr}`／`{head}` 佔位符）。
+`tests/pipeline_explorer.rs` 是不加依賴的 property test（core 的依賴與 dev-dependency allowlist 不變）：xorshift 固定種子產生事件序列，跑在 13 個 workflow 上（內建 `code`、`research`、`planned`、`epic`，epic 的 `first`／`pick` 變體，以及 7 個自訂：pick fanout 在 checks 之後再 review、沒有 merge 但有 checks 與綁 head 的 approval、兩個 approval、review 夾在兩個 command 之間、`allow_unreviewed`、command 在 submit 之前加 `count = 2` 與不綁 head 的 approval 和指向 work 的 `on_fail`、`{pr}`／`{head}` 佔位符）。
 
 | 項目 | 數量 |
 |---|---|
@@ -49,12 +49,13 @@ cargo xtask accept core
 | 每條序列最多步數 | 60；進入終止狀態後再送 3 個事件，必須全被拒絕 |
 | 事件組成 | 約 6 成是目前關卡的合理事件、1.5 成 head 變更、2 成過期或偽造的結果、其餘是失敗、逾時、取消 |
 | 竄改狀態測試 | 在 crate 內（`pipeline::state::tests`，外部無法偽造 state）：5 個 workflow × 3,000 個竄改狀態 × 14 個事件 = 210,000 次 |
-| 可完成性 | `tests/workflow_completability.rs`：存檔檢查的可完成證明（見下方）之外的獨立檢查。verifier r2 的反例寫成 `verifier_r2_*` 回歸測試；隨機 workflow 產生器預設 200,000 個 workflow（`-- --ignored` 再跑 1,000,000 個），每個被 `validate` 接受的都要能用獨立的成功事件驅動器走到 done，隨機干擾（失敗、要求修改、新 commit、main 前進、merge 失敗、逾時）之後也要。拿掉可完成證明與新文法的舊 validate 會讓它失敗 |
-| 第二個探索器 | `tests/pipeline_explorer_splitmix.rs`：fresh-context verifier 寫的 SplitMix64 探索器，6 個 workflow × 3,000 條序列 × 最多 80 步（`AGEND_EXPLORER2_SEQUENCES` 可調大）；它的 oracle 只算「前一個 work 最近一次完成之後」的 check 與核准 |
+| 可完成性 | `tests/workflow_completability.rs`：存檔檢查的可完成證明（見下方）之外的獨立檢查。verifier r2、r3 的反例寫成 `verifier_r2_*`、`verifier_r3_*` 回歸測試；隨機 workflow 產生器預設 200,000 個 workflow（`-- --ignored` 再跑 1,000,000 個），每個被 `validate` 接受的都要能用獨立的成功事件驅動器走到 done，隨機干擾（失敗、要求修改、新 commit、main 前進、merge 失敗、逾時）之後也要。拿掉可完成證明與新文法的舊 validate 會讓它失敗 |
+| 死路探索器 | `tests/pipeline_deadend_explorer.rs`（`--ignored`，建議 `--release`，約 2 分鐘）：verifier r3 寫的 PCG32 產生器與廣度優先搜尋，對每個被接受的 workflow 探索有限次 head 變更與失敗，確認每個可達狀態都還能只靠成功事件走到 done；60,000 個 workflow、約 410 萬個狀態、0 死路、0 違反 |
+| 第二個探索器 | `tests/pipeline_explorer_splitmix.rs`：fresh-context verifier 寫的 SplitMix64 探索器，8 個 workflow × 3,000 條序列 × 最多 80 步（`AGEND_EXPLORER2_SEQUENCES` 可調大）；它的 oracle 只算「前一個 work 最近一次完成之後」的 check 與核准 |
 
 每一步之後，用**只看被接受的事件與 `ReturnToWork`** 建立的 oracle（不讀 state 自己的紀錄；返工時忘掉退回的 work 之後所有關卡的 check 與核准，只有 D14 能延續核准）檢查：
 
-1. merge 門檻：`Merge` action、`MergeCompleted` 與沒有 merge 的 workflow 的 `Done`，都要每個 command 關卡對目前 head 通過、每個 approval 關卡有足夠的核准覆蓋目前 head（D14：乾淨且 patch 相同的 rebase 讓核准延續到新 head）。
+1. merge 門檻：`Merge` action、`MergeCompleted` 與沒有 merge 的 workflow 的 `Done`，都要每個 command 關卡對目前 head 通過、每個 approval 關卡有足夠的核准覆蓋目前 head（D14：乾淨且 patch 相同的 rebase 讓核准延續到新 head）；最後一個 pick fanout 的勝出者是它目前的子 task（fanout 重跑後要重新挑）。沒有 merge 的 workflow 也成立，因為存檔檢查不允許在最後的 branch work 之後再有 work，可完成證明在 done 時也檢查這兩點。
 2. 不跳過關卡：關卡只會因目前關卡自己的完成事件前進，中間只能跳過已滿足的 approval；過了 submit 之後一定收過 `Submitted`。
 3. 返工不遺失：work 期間 head 變更不改關卡、不發 action；要求修改與 command 失敗會退回（預設最近的 work），不會讓 task 失敗；head 變更永遠不讓 task 前進。
 4. 核准與結果只算給它所屬的 head 與關卡。
