@@ -35,3 +35,12 @@ fn invoked_as_git_reaches_the_shim() {
     assert!(stderr.contains("agend shim (git)"), "stderr was: {stderr}");
     assert!(out.stdout.is_empty(), "the shim must not act like the CLI");
 }
+
+#[test]
+fn non_utf8_argument_is_an_error_not_a_panic() {
+    use std::os::unix::ffi::OsStrExt;
+    let arg = std::ffi::OsStr::from_bytes(b"\xff");
+    let out = Command::new(BIN).arg(arg).output().unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("not valid UTF-8"));
+}

@@ -1,7 +1,7 @@
 # Backend 實測行為（2026-09-24）
 
 > **TL;DR**
-> - 三個 backend 都有結構化的排隊、中斷與 resume；只有 codex 能「插入不中斷」。
+> - codex、opencode 的排隊與中斷都是結構化 API；claude 的排隊走 Stop hook，中斷是 PTY 送 `Esc` + channel 訊息（專案 CLAUDE.md 須說明訊息來源）。只有 codex 能「插入不中斷」。
 > - 記住：**這些結論綁定下表的版本**；backend 升版就要重測並更新本頁。
 > - 下一步：寫 driver 前讀對應的分頁與「陷阱」。
 
@@ -40,7 +40,7 @@
 | backend | 細節 |
 |---|---|
 | codex | [backends/codex.md](backends/codex.md) |
-| claude | [backends/claude.md](backends/claude.md) |
+| claude | [backends/claude-code.md](backends/claude-code.md) |
 | opencode | [backends/opencode.md](backends/opencode.md) |
 
 ## 仍未驗證

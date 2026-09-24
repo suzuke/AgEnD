@@ -48,7 +48,7 @@ flowchart TB
     h2["holder<br/>PTY + 畫面"]
     h3["holder<br/>PTY + 畫面 + serve"]
     codex["codex<br/>PATH：git → shim、agend"]
-    claude["claude<br/>hooks + channel"]
+    claude["claude<br/>PATH：git → shim、agend<br/>hooks + channel"]
     opencode["opencode<br/>PATH：git → shim、agend"]
     home["home 目錄<br/>config.toml · agend.db<br/>teams/#lt;team#gt;/ · worktrees/#lt;task-id#gt;/<br/>workspace/#lt;instance#gt;/ · archive/（WIP patch）"]
 
@@ -63,8 +63,10 @@ flowchart TB
     h1 --> codex
     h2 --> claude
     h3 --> opencode
-    opencode -.->|"CLI、hook、結構化事件"| entry
-    store ~~~ home
+    report(["CLI、hook、結構化事件"])
+    codex & claude & opencode -.-> report
+    report -.-> entry
+    home ~~~ h1
 ```
 
 agent 側沒有任何 daemon 子程序；agent 與附屬程序都由 holder 持有，所以 daemon 可以隨時重啟或升級；daemon、holder、shim 都執行已安裝的 release 版，開發中的 AgEnD 在另一個 clone。
@@ -72,7 +74,7 @@ agent 側沒有任何 daemon 子程序；agent 與附屬程序都由 holder 持�
 圖註：
 
 - Telegram 與 GitHub 不走 protocol v1，而是由 daemon 的 `notifier`、`forge` adapter 連出去，所以圖上連到 adapter。
-- 「CLI、hook、結構化事件」的虛線為了版面只畫在 opencode；三個 agent 都有這條回報路徑。
+- 三個 agent 都經「CLI、hook、結構化事件」虛線回報給 daemon 入口；hook 只有 claude 有。
 - 這張圖是唯一版本；其他文件只連結到這裡。
 
 ## Repo 結構

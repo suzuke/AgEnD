@@ -2,7 +2,7 @@
 
 > **TL;DR**
 > - 純邏輯 crate：型別、協定、trait、流水線狀態機、policy、螢幕分類器。
-> - 記住：**不做任何 I/O**，不依賴 tokio、rusqlite、process／network crate 或其他 `agend-*`。
+> - 記住：**不做任何 I/O**；依賴由 check-deps 管，原始碼用法由本 crate 的 `clippy.toml` 管。
 > - 下一步：第 1 關在這裡開始（見 docs/ROADMAP.md）。
 
 ## 負責
@@ -43,8 +43,8 @@
 ## 依賴規則
 
 - 一般依賴：無（只有 std）
-- 禁止：async runtime、SQLite、network、process crate、任何其他 `agend-*`；原始碼不用 `std::process`、`std::net`
-- 強制：`cargo xtask check-deps`
+- 禁止依賴：async runtime、SQLite、network、process crate、任何其他 `agend-*`（`cargo xtask check-deps`）
+- 禁止使用：`std::process`、socket、`std::fs` I/O、`std::env::var*`、`std::thread::spawn`（clippy，`clippy.toml`）
 
 ## 入口
 

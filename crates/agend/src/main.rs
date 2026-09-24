@@ -19,5 +19,5 @@ fn main() -> ExitCode {
     if let Some(tool) = agend_shim::Tool::from_argv0(&argv0) {
         return agend_shim::run(tool);
     }
-    cli::run(std::env::args().skip(1).collect())
+    cli::run(std::env::args_os().skip(1).collect())
 }

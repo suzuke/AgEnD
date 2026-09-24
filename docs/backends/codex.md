@@ -42,5 +42,5 @@
 ## 下一步
 
 ```bash
-cat docs/backends/claude.md
+cat docs/backends/claude-code.md
 ```

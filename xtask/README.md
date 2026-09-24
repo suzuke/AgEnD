@@ -7,11 +7,12 @@
 
 ## 負責
 
-- `check-deps`：檢查每條規則的 crate 在 `cargo tree -e normal --target all` 裡沒有被禁止的 crate；檢查 agend-core 原始碼不用 `std::process`、`std::net`；檢查 agend-testkit 不是任何 crate 的一般依賴
+- `check-deps`：檢查每條規則的 crate 在 `cargo tree -e normal --target all` 裡沒有被禁止的 crate；檢查 agend-testkit 不是任何 crate 的一般依賴
 - `accept <關>`：對該關的 crate 跑 fmt、clippy、test，再跑 check-deps；demo 隨各關加入
 
 ## 不負責
 
+- 原始碼層級的規則（agend-core 不起程序、不開 socket／檔案）：由 clippy 與 `crates/agend-core/clippy.toml` 負責
 - 產生 protocol JSON schema、打包 release、錄製 backend 畫面 fixture（規劃中，未實作）
 
 ## 模組
@@ -30,7 +31,9 @@
 
 - `cargo xtask check-deps`、`cargo xtask accept <1-12 或名稱>`（alias 在 `.cargo/config.toml`）
 
-## 禁止清單
+## 細節
+
+### 禁止清單
 
 | 群組 | crate（`*` = 前綴） |
 |---|---|

@@ -11,6 +11,7 @@
 mod agent;
 mod operator;
 
+use std::ffi::OsString;
 use std::process::ExitCode;
 
 const USAGE: &str = "\
@@ -21,7 +22,17 @@ Usage:
   agend --help       Print this help
 ";
 
-pub fn run(args: Vec<String>) -> ExitCode {
+pub fn run(args: Vec<OsString>) -> ExitCode {
+    let args: Vec<String> = match args.into_iter().map(OsString::into_string).collect() {
+        Ok(args) => args,
+        Err(bad) => {
+            eprintln!(
+                "agend: argument is not valid UTF-8: {}",
+                bad.to_string_lossy()
+            );
+            return ExitCode::from(2);
+        }
+    };
     match args.first().map(String::as_str) {
         Some("--version" | "-V") => {
             println!("agend {}", env!("CARGO_PKG_VERSION"));

@@ -3,11 +3,14 @@
 //! For each rule, the crate's normal dependency tree (`cargo tree -e normal
 //! --target all`, so build- and dev-dependencies are excluded and every
 //! platform is included) must not contain a denied crate. A deny entry ending
-//! in `*` is a name prefix. In addition, `agend-core`'s sources must not use
-//! `std::process` or `std::net`.
+//! in `*` is a name prefix.
+//!
+//! Source-level rules (agend-core must not use processes, sockets, the
+//! filesystem, env or threads) are NOT checked here: they are clippy
+//! `disallowed-types` / `disallowed-methods` in `crates/agend-core/clippy.toml`,
+//! which resolve types and so cannot be bypassed by import style.
 
 use crate::{cargo, workspace_root};
-use std::path::Path;
 use std::process::Command;
 
 /// Async runtimes: must not be linked by pure or light-startup crates.
@@ -77,9 +80,6 @@ pub fn run() -> Result<(), String> {
             ));
         }
     }
-
-    let core_src = workspace_root().join("crates/agend-core/src");
-    problems.extend(forbidden_std_uses(&core_src)?);
 
     if problems.is_empty() {
         println!(
@@ -167,41 +167,6 @@ fn workspace_members() -> Result<Vec<String>, String> {
     Ok(names)
 }
 
-/// Non-comment lines in `dir` (recursively, `.rs` files) that use
-/// `std::process` or `std::net`, including grouped imports like
-/// `use std::{net, process}`.
-pub fn forbidden_std_uses(dir: &Path) -> Result<Vec<String>, String> {
-    let mut found = Vec::new();
-    let entries = std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    for entry in entries {
-        let path = entry.map_err(|e| e.to_string())?.path();
-        if path.is_dir() {
-            found.extend(forbidden_std_uses(&path)?);
-        } else if path.extension().is_some_and(|e| e == "rs") {
-            let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-            for (i, line) in text.lines().enumerate() {
-                if line_uses_forbidden_std(line) {
-                    found.push(format!(
-                        "{}:{}: agend-core must not use std::process or std::net",
-                        path.display(),
-                        i + 1
-                    ));
-                }
-            }
-        }
-    }
-    Ok(found)
-}
-
-fn line_uses_forbidden_std(line: &str) -> bool {
-    let code = line.trim_start();
-    if code.starts_with("//") || !code.contains("std::") {
-        return false;
-    }
-    code.split(|c: char| !(c.is_alphanumeric() || c == '_'))
-        .any(|word| word == "process" || word == "net")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,20 +205,6 @@ mod tests {
     #[test]
     fn a_crate_is_not_a_violation_of_its_own_rule() {
         assert!(violations(core_rule(), &["agend-core".to_string()]).is_empty());
-    }
-
-    #[test]
-    fn flags_process_and_net_uses_but_not_comments() {
-        assert!(line_uses_forbidden_std("use std::process::Command;"));
-        assert!(line_uses_forbidden_std(
-            "    let s = std::net::TcpStream::connect(a);"
-        ));
-        assert!(line_uses_forbidden_std("use std::{fmt, process};"));
-        assert!(!line_uses_forbidden_std(
-            "//! Must NOT: use `std::process`."
-        ));
-        assert!(!line_uses_forbidden_std("use std::fmt;"));
-        assert!(!line_uses_forbidden_std("let network = 1;"));
     }
 
     #[test]

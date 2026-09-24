@@ -45,13 +45,16 @@
 | `agend` | 以上全部；唯一 binary |
 | `agend-testkit` | `agend-core`；只被當 dev-dependency |
 
-`cargo xtask check-deps` 檢查的規則：
+邊界規則與強制工具：
 
-- [ ] `agend-core`：沒有 async runtime、SQLite、network、process crate，也不依賴其他 `agend-*`；原始碼不用 `std::process`、`std::net`。
-- [ ] `agend-shim`、`agend-client`：沒有 async runtime、SQLite，也不依賴 `agend-daemon`。
-- [ ] 任何 crate 都不能把 `agend-testkit` 當一般依賴。
+| 規則 | 工具 |
+|---|---|
+| `agend-core` 沒有 async runtime、SQLite、network、process crate，也不依賴其他 `agend-*` | `cargo xtask check-deps` |
+| `agend-shim`、`agend-client` 沒有 async runtime、SQLite，也不依賴 `agend-daemon` | `cargo xtask check-deps` |
+| 任何 crate 都不能把 `agend-testkit` 當一般依賴 | `cargo xtask check-deps` |
+| `agend-core` 原始碼不起程序、不開 socket／檔案、不讀環境變數、不開 thread | clippy `disallowed-types`／`disallowed-methods`（`crates/agend-core/clippy.toml`） |
 
-完整清單在 `xtask/src/check_deps.rs`，說明在 [xtask/README.md](../xtask/README.md)。
+依賴清單在 `xtask/src/check_deps.rs`（說明見 [xtask/README.md](../xtask/README.md)）；clippy 規則會解析型別，所以 import 寫法或 `use std as s;` 別名繞不過去。
 
 ## daemon 分層
 
