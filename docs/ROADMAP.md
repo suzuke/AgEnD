@@ -11,7 +11,7 @@
 
 | 施工關 | 狀態 | 範圍 | 驗收（可觀察） |
 |---|---|---|---|
-| 1 `core` | [實作中](gates/gate-01-core.md) | agend-core：型別、兩套協定（client + holder）、trait、流水線狀態機（6 種關卡）、busy policy、去抖動、衝突偵測、merge 門檻（patch-id）、螢幕分類器 | `cargo xtask accept core` 跑測試並印出一個模擬 task 走完 `code` workflow（純邏輯，無 daemon） |
+| 1 `core` | [驗收中](gates/gate-01-core.md) | agend-core：型別、兩套協定（client + holder）、trait、流水線狀態機（6 種關卡）、busy policy、去抖動、衝突偵測、merge 門檻（patch-id）、螢幕分類器 | `cargo xtask accept core` 跑測試並印出一個模擬 task 走完 `code` workflow（純邏輯，無 daemon） |
 | 2 `testkit` | [未開始](gates/gate-02-testkit.md) | 每個 trait 的假實作、契約測試套件、假 daemon、假 agent 程式 | 契約測試通過；假 agent 可單獨啟動並回應 |
 | 3 `shim` | [未開始](gates/gate-03-shim.md) | git／kill 防護、導向 worktree、protected-ref、快照與還原 | 在暫存 repo 以 `git` 名稱執行 shim：導向、拒絕、快照後還原 |
 | 4 `holder` | [未開始](gates/gate-04-holder.md) | PTY、畫面、附屬程序、holder 協定 | `agend holder` 包 bash + 小型探測 client：讀畫面、送鍵、中途斷線重連，bash 存活 |
@@ -77,6 +77,7 @@ cat docs/gates/gate-01-core.md
 
 每完成一件事加一行（日期 + 一行 + commit／PR），新的在上面。
 
+- 2026-09-25 第 1 施工關 merge（#105，`90794d4`）；verifier r6 CONFIRMED；狀態改為驗收中，等使用者親自驗收。後續 #106。
 - 2026-09-25 第 1 施工關 verifier r5 推翻（dc2d6db）後修正：目前關卡的結果被作廢或換人產出就開新的 attempt 並重發要求；merge 送出中 branch 被重設時丟棄待處理的變更。
 - 2026-09-25 第 1 施工關 verifier r4 推翻（02aca89）後改成結構性的事件身分：結果事件帶 stage、attempt、head，身分不符一律 `StaleResult`；merge 送出中只接受它的結果與 head 變更；pick 人數湊齊才定下。
 - 2026-09-25 第 1 施工關 verifier r3 推翻（3e8b3a3）後修正：沒有 merge 的 workflow 也不允許最後的 branch work 之後再有 work；pick fanout 重跑要重新挑（4b05a60）。
