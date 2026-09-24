@@ -10,7 +10,7 @@
 - `check-deps`：
   1. shim／client 在 `cargo tree -e normal,build --target all` 裡沒有被禁止的 crate（dev 依賴不檢查）
   2. agend-testkit 不是任何 crate 的一般依賴
-  3. agend-core：`cargo metadata` 顯示沒有 build script、沒有 allowlist 以外的依賴；而且能對無 std 的 `thumbv7em-none-eabihf` 編譯（見 `check_core.rs`）
+  3. agend-core：`cargo metadata` 顯示沒有 build script、沒有 `[features]`、沒有 allowlist 以外的依賴；而且能以 `--all-features`、`-F unsafe-code` 對無 std 的 `thumbv7em-none-eabihf` 編譯（見 `check_core.rs`）
   4. target 沒裝時印 `SKIPPED` 並失敗；`--allow-skip` 才不失敗（仍印 SKIPPED）
 - `accept <關>`：對該關的 crate 跑 fmt、clippy、test，再跑 check-deps；demo 隨各關加入
 
@@ -24,6 +24,7 @@
 | 模組 | 職責 |
 |---|---|
 | `check_deps` | 規則與檢查 |
+| `check_core` | agend-core 的結構檢查：`cargo metadata` 規則與無 std 編譯 |
 | `accept` | 13 關的 crate 對照與執行 |
 
 ## 依賴規則
@@ -49,7 +50,7 @@
 
 | crate | 禁止 |
 |---|---|
-| `agend-core` | 任何依賴（allowlist 為空），由 `check_core.rs` 以 `cargo metadata` 檢查 |
+| `agend-core` | 任何依賴（allowlist 為空）與任何 `[features]`，由 `check_core.rs` 以 `cargo metadata` 檢查 |
 | `agend-shim` | async runtime、database、`agend-daemon` |
 | `agend-client` | async runtime、database、`agend-daemon` |
 | 所有 crate | `agend-testkit` 當一般依賴 |

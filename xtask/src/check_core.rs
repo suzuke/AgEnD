@@ -6,9 +6,13 @@
 //!
 //! | guard | stops |
 //! |---|---|
-//! | `#![no_std]` + building for [`NO_STD_TARGET`] | any use of std, in any spelling (`extern crate std` variants, `[lib] path` redirects, `include!`, cfg(test) leaks via build.rs or rustflags, std-using dependencies), because that target has no std to link |
-//! | `#![forbid(unsafe_code)]` in core | FFI calls such as `unsafe extern "C"` into libc |
-//! | `cargo metadata` rules below | build scripts and any dependency not in [`CORE_DEP_ALLOWLIST`] |
+//! | building for [`NO_STD_TARGET`] with `--all-features` | std reaching the compiled crate: `extern crate std` variants, `[lib] path` redirects, `include!`, std-using dependencies (verified cases listed in xtask/TESTING.md) |
+//! | `-F unsafe-code` passed by that build | FFI such as `unsafe extern "C"` into libc, even if the source attribute is removed |
+//! | `cargo metadata` rules below | a build script, any `[features]`, and any dependency not in [`CORE_DEP_ALLOWLIST`] |
+//!
+//! Known gap (accepted, deliberate evasion only): code gated on a cfg that is
+//! false for the no-std target, e.g. `#[cfg(not(target_os = "none"))]`, is not
+//! compiled there and so is not caught.
 
 use crate::{cargo, workspace_root};
 use serde_json::Value;
@@ -59,6 +63,11 @@ pub fn metadata_problems(metadata: &Value) -> Vec<String> {
         return vec![format!("{CORE} not found in cargo metadata")];
     };
     let mut problems = Vec::new();
+    if pkg["features"].as_object().is_some_and(|f| !f.is_empty()) {
+        problems.push(format!(
+            "{CORE} must not declare [features] (a `std` feature could re-enable I/O)"
+        ));
+    }
     for target in pkg["targets"].as_array().into_iter().flatten() {
         let kinds = target["kind"].as_array().into_iter().flatten();
         if kinds.clone().any(|k| k == "custom-build") {
@@ -112,19 +121,22 @@ fn build_for_no_std_target() -> Result<NoStdBuild, String> {
     let out = cmd
         .current_dir(&root)
         .args([
-            "build",
+            "rustc",
             "--quiet",
             "-p",
             CORE,
             "--lib",
+            "--all-features",
             "--target",
             NO_STD_TARGET,
         ])
         // Separate target dir: this may run while an outer cargo holds target/.
         .arg("--target-dir")
         .arg(root.join("target").join("xtask-no-std"))
+        // Enforce no unsafe code from here, independent of the source attribute.
+        .args(["--", "-F", "unsafe-code"])
         .output()
-        .map_err(|e| format!("cannot run cargo build: {e}"))?;
+        .map_err(|e| format!("cannot run cargo rustc: {e}"))?;
     if out.status.success() {
         return Ok(NoStdBuild::Ok);
     }
@@ -186,6 +198,17 @@ mod tests {
             let problems = metadata_problems(&meta);
             assert!(problems.iter().any(|p| p.contains("leaky")), "{problems:?}");
         }
+    }
+
+    #[test]
+    fn features_are_rejected() {
+        let mut meta = workspace_metadata().unwrap();
+        core_mut(&mut meta)["features"] = serde_json::json!({"std": []});
+        let problems = metadata_problems(&meta);
+        assert!(
+            problems.iter().any(|p| p.contains("[features]")),
+            "{problems:?}"
+        );
     }
 
     #[test]

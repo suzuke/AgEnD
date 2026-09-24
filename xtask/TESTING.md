@@ -22,6 +22,7 @@ cargo test -p xtask
 | `check_core::tests::real_metadata_of_core_passes` | 真的 `cargo metadata` 下 agend-core 沒有 build script、沒有依賴 |
 | `check_core::tests::build_script_is_rejected` | 在真的 metadata 上加一個 `custom-build` target 會被抓 |
 | `check_core::tests::any_dependency_kind_is_rejected` | normal、build、dev 依賴都會被抓 |
+| `check_core::tests::features_are_rejected` | 在真的 metadata 上加一個 `std` feature 會被抓 |
 | `check_core::tests::missing_target_is_recognised` | 「target 沒裝」與「程式用了 std」分得開 |
 | `accept::tests::*` | 13 關編號連續、可用編號或名稱找到、每關的 crate 都存在 |
 
@@ -31,7 +32,7 @@ cargo test -p xtask
 
 ## 還沒測的
 
-- [ ] 無 std 編譯本身沒有自動化反例測試。已在 repo 外的暫存副本手動驗證，以下全部讓 `check-deps` 失敗：`#[macro_use] extern crate std`、`pub extern crate std`、`[lib] path` 改指到用 std 的檔案、path 依賴 re-export `std::fs::read`、`unsafe extern "C" { fn getpid() }`、build.rs 輸出 `cargo:rustc-cfg=test`。
+- [ ] 無 std 編譯本身沒有自動化反例測試。已在 repo 外的暫存副本手動驗證，以下全部讓 `check-deps` 失敗：`#[macro_use] extern crate std`、`pub extern crate std`、`[lib] path` 改指到用 std 的檔案、path 依賴 re-export `std::fs::read`、`unsafe extern "C" { fn getpid() }`（含刪掉 `#![forbid(unsafe_code)]` 之後）、build.rs 輸出 `cargo:rustc-cfg=test`、由其他 crate 啟用的選用 `std` feature。
 - [ ] `accept` 真的去跑 fmt／clippy／test（要遞迴呼叫 cargo，只手動驗證過）。
 
 ## 下一步

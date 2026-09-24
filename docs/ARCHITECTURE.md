@@ -58,11 +58,13 @@ agend-core 不用 std（`#![no_std]` + `alloc`），時間只經 `Clock` trait�
 
 | 保護 | 擋下什麼 | 工具 |
 |---|---|---|
-| 對無 std 的 target（`thumbv7em-none-eabihf`）編譯 agend-core | 任何形式重新引入 std：`extern crate std` 各種寫法、`[lib] path` 改指、`include!`、build.rs／rustflags 洩漏的 cfg(test)、用到 std 的依賴 | `cargo xtask check-deps`（需要該 target） |
-| `#![forbid(unsafe_code)]` | `unsafe extern "C"` 之類直接呼叫 libc 的 FFI | 編譯器 |
-| `cargo metadata` 規則 | agend-core 有 build script，或有任何依賴（normal／build／dev）不在 `CORE_DEP_ALLOWLIST`（目前是空的） | `cargo xtask check-deps` |
+| 以 `--all-features` 對無 std 的 target（`thumbv7em-none-eabihf`）編譯 agend-core | 會被編譯到的 std 使用：`extern crate std` 的各種寫法、`[lib] path` 改指、`include!`、用到 std 的依賴（驗證過的案例見 `xtask/TESTING.md`） | `cargo xtask check-deps`（需要該 target） |
+| 同一次編譯帶 `-F unsafe-code` | `unsafe extern "C"` 之類直接呼叫 libc 的 FFI；原始碼的 `#![forbid(unsafe_code)]` 被刪也照擋（屬性留著給 IDE 即時提示） | `cargo xtask check-deps` |
+| `cargo metadata` 規則 | agend-core 有 build script、有任何 `[features]`，或有任何依賴（normal／build／dev）不在 `CORE_DEP_ALLOWLIST`（目前是空的） | `cargo xtask check-deps` |
 
 威脅模型：這些保護擋的是意外把 I/O 帶進 core，不是刻意繞過（例如改 xtask 本身、把 allowlist 加長）；後者靠 code review。
+
+已知缺口（接受，只有刻意才會發生）：以對無 std target 為假的 cfg 包住的程式碼，例如 `#[cfg(not(target_os = "none"))]`，在那個 target 上不會被編譯，所以擋不到。
 
 ## daemon 分層
 

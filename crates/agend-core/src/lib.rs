@@ -6,9 +6,9 @@
 //!
 //! The crate is `#![no_std]` + `alloc` with `#![forbid(unsafe_code)]`; time
 //! comes in only through the `Clock` trait. `cargo xtask check-deps` builds it
-//! for a target without std and checks (via `cargo metadata`) that it has no
-//! build script and no dependencies. These guards stop accidental I/O, not
-//! deliberate evasion.
+//! for a target without std (all features, `-F unsafe-code`) and checks via
+//! `cargo metadata` that it has no build script, no features and no
+//! dependencies. These guards stop accidental I/O, not deliberate evasion.
 //!
 //! Must NOT: perform I/O of any kind, or gain a build script or dependency.
 
