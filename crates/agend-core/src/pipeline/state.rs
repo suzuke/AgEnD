@@ -105,6 +105,9 @@ pub struct PipelineState {
     /// Head changes seen while the merge was in flight, in order; applied
     /// only if the forge reports the merge failed.
     pending_head_changes: Vec<PendingHeadChange>,
+    /// The stage attempt whose timeout was already reported (notify action),
+    /// so a repeated report of the same timeout is stale.
+    notified_timeout: Option<(usize, u32)>,
 }
 
 /// A head change observed after the `Merge` action went out. The task stays
@@ -151,6 +154,7 @@ impl PipelineState {
             selected_fanout_child: None,
             merge_commit: None,
             pending_head_changes: Vec::new(),
+            notified_timeout: None,
         }
     }
 
@@ -230,6 +234,16 @@ impl PipelineState {
 
     pub fn pending_head_changes(&self) -> &[PendingHeadChange] {
         &self.pending_head_changes
+    }
+
+    /// This state with no pending head changes: compares two states that may
+    /// differ only in what is pending (for example after a branch reset during
+    /// an in-flight merge).
+    pub fn without_pending_head_changes(&self) -> Self {
+        Self {
+            pending_head_changes: Vec::new(),
+            ..self.clone()
+        }
     }
 
     /// The `Merge` action is out and its result has not arrived.
@@ -615,6 +629,10 @@ pub fn step(
             ..
         } => {
             let (bind_head, count) = current_approval(state)?;
+            // A reviewer counted in this attempt already: a duplicate.
+            if state.approval_reviewers.contains(&reviewer) {
+                return Err(TransitionError::StaleResult);
+            }
             let picks =
                 pick_fanout_index_for_approval(&state.workflow, state.stage_index).is_some();
             if picks {
@@ -758,7 +776,15 @@ pub fn step(
                 .current_stage()
                 .ok_or(TransitionError::InvalidStageIndex)?;
             match stage.effective_timeout_action() {
-                TimeoutAction::Notify => actions.push(PipelineAction::NotifyTimeout { stage_id }),
+                TimeoutAction::Notify => {
+                    // This attempt's timeout was reported already: a duplicate.
+                    let this_attempt = (state.stage_index, state.attempt());
+                    if state.notified_timeout == Some(this_attempt) {
+                        return Err(TransitionError::StaleResult);
+                    }
+                    next.notified_timeout = Some(this_attempt);
+                    actions.push(PipelineAction::NotifyTimeout { stage_id });
+                }
                 TimeoutAction::Reassign => {
                     // Someone else must produce the result: a new attempt, so
                     // the old holder's result is stale, and the request again.
@@ -1205,11 +1231,15 @@ fn success_events(state: &PipelineState, counter: &mut u32) -> Vec<PipelineEvent
                         .clone()
                         .or_else(|| state.fanout_child_task_ids.first().cloned())
                 });
-            (0..*count)
+            // Only reviewers not yet counted in this attempt approve.
+            (0..usize::from(*count) * 2)
+                .map(|reviewer| format!("witness-reviewer-{reviewer}"))
+                .filter(|reviewer| !state.approval_reviewers.contains(reviewer))
+                .take(usize::from(*count).saturating_sub(state.approval_reviewers.len()))
                 .map(|reviewer| PipelineEvent::ApprovalGranted {
                     stage_id: stage_id.clone(),
                     attempt,
-                    reviewer: format!("witness-reviewer-{reviewer}"),
+                    reviewer,
                     head: head.clone(),
                     selected_child: selected_child.clone(),
                 })
@@ -2364,12 +2394,12 @@ mod tests {
         s = apply(&s, approve(&s, "r1")).0;
         assert_eq!(stage_id(&s), "b");
         s = apply(&s, approve(&s, "r1")).0;
-        s = apply(&s, approve(&s, "r1")).0;
         assert_eq!(
-            stage_id(&s),
-            "b",
-            "a duplicate reviewer must not count twice"
+            step(&s, approve(&s, "r1")),
+            Err(TransitionError::StaleResult),
+            "a duplicate reviewer is refused, not counted twice"
         );
+        assert_eq!(stage_id(&s), "b");
         s = apply(&s, approve(&s, "r2")).0;
         assert_eq!(stage_id(&s), "c2");
         s = apply(&s, commit("H2", "P2")).0;

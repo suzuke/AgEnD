@@ -7,7 +7,7 @@
 
 ## 狀態
 
-**實作中**（2026-09-25）
+**驗收中（待使用者親自驗收）**（2026-09-25）：#105 已 merge（`90794d4`），verifier r6 CONFIRMED。
 
 P1–P7 已由你在 2026-09-25 確認（記為決策 D26–D32）。實作草稿是在確認之前寫的；2026-09-24 的勾選是草稿作者自己打的，不算確認。
 
@@ -230,6 +230,7 @@ task T-1 workflow=code v1
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-25 verifier r6 CONFIRMED（d932b21）；#105 squash merge 為 `90794d4`，v2 CI 綠；狀態改為驗收中。後續：探索器檢查收緊與文件措辭（#106）。
 - 2026-09-25 第 1 施工關 verifier r5 推翻（dc2d6db）一個 medium：head 變更清掉 approval 關卡的部分核准與暫定挑選時沒有開新的 attempt，舊 attempt 的核准重播能讓挑選復活。改成通用規則：目前關卡的結果被作廢或換人產出，就開新的 attempt 並重發要求（approval、fanout、逾時改派）；branch 在 merge 送出中被重設時丟棄待處理的變更；pick 規則在 pipeline.md 與本頁寫成同一段。r5 反例寫成 `verifier_r5_*` 測試，兩個探索器與可完成證明檢查「關卡內作廢一定開新 attempt」，把問題放回程式會被抓到。
 - 2026-09-25 第 1 施工關 verifier r4 推翻（02aca89）：四輪的共同根因是外部結果事件沒有完整身分，改成結構性的**事件身分**：結果帶 stage、attempt、head，`step` 開頭一條規則拒收過期結果；merge 送出中一條規則；pick 人數湊齊才定下；protocol 新增選填 `identity`（stale-by-default）。r4 反例寫成 `verifier_r4_*` 測試，兩個探索器與可完成證明加上重送／過期事件，四個問題放回程式都會被測試抓到。
 - 2026-09-25 第 1 施工關 verifier r3 推翻（3e8b3a3）兩個新類型問題，已修（4b05a60）：沒有 merge 的 workflow 在最後的 branch work 之後的 work 裡換 head 仍會 done（改為存檔規則，並加入可完成證明的 done 檢查）；pick fanout 重跑後沿用舊的 pick（進入 fanout 時清掉子 task、挑選與之後的核准，`Fanout` action 帶目前 head）。兩個反例寫成 `verifier_r3_*` 測試，探索器加上對應 workflow 與 pick 不變量，verifier 的死路探索器移植為 `--ignored` 測試。
