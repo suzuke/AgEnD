@@ -3,7 +3,9 @@ use agend_core::protocol::client::{
     AgentCommand, ClientCommandData, ClientCommandResultData, ClientRequest, ClientResponse,
     CommandResult, DaemonEvent, EventData, TaskChangedData, TerminalInputData,
 };
-use agend_core::protocol::client::{AnswerAskData, AskCreatedData, AttentionRequiredData};
+use agend_core::protocol::client::{
+    AnswerAskData, AskCreatedData, AttentionRequiredData, ResultIdentity, STALE_RESULT,
+};
 use agend_core::protocol::holder::{
     ControlKey, HolderRequest, HolderResponse, OperatorTerminalInputData,
 };
@@ -22,6 +24,7 @@ fn client_request_wire_shapes_are_stable_and_approval_does_not_supply_a_head() {
             request_id: "r-1".into(),
             command: AgentCommand::ReviewApprove {
                 task_id: "T-1".into(),
+                identity: None,
             },
         },
     };
@@ -334,4 +337,71 @@ fn pre_ask_thread_messages_still_decode() {
         serde_json::from_value::<AnswerSource>(json!("slack")).unwrap(),
         AnswerSource::Unknown
     );
+}
+
+/// Event identity on agent results: the stage attempt from the assignment is
+/// echoed back. It is optional on the wire (older v1 peers decode), and a
+/// result without it is stale by default (`stale_result`).
+#[test]
+fn agent_results_carry_the_stage_attempt_identity() {
+    let identity = || {
+        Some(ResultIdentity {
+            stage_id: "checks".into(),
+            attempt: 2,
+        })
+    };
+    assert_eq!(
+        serde_json::to_value(AgentCommand::ReviewApprove {
+            task_id: "T-1".into(),
+            identity: identity(),
+        })
+        .unwrap(),
+        json!({
+            "command": "review_approve",
+            "task_id": "T-1",
+            "identity": {"stage_id": "checks", "attempt": 2}
+        })
+    );
+    assert_eq!(
+        serde_json::to_value(AgentCommand::Done {
+            task_id: "T-1".into(),
+            identity: identity(),
+        })
+        .unwrap(),
+        json!({"command": "done", "task_id": "T-1", "identity": {"stage_id": "checks", "attempt": 2}})
+    );
+    assert_eq!(
+        serde_json::to_value(AgentCommand::ReviewChanges {
+            task_id: "T-1".into(),
+            summary: "rename".into(),
+            identity: identity(),
+        })
+        .unwrap()["identity"]["attempt"],
+        json!(2)
+    );
+    // A pre-identity message still decodes, with no identity (stale by default).
+    assert_eq!(
+        serde_json::from_value::<AgentCommand>(json!({"command": "done", "task_id": "T-1"}))
+            .unwrap(),
+        AgentCommand::Done {
+            task_id: "T-1".into(),
+            identity: None,
+        }
+    );
+    assert_eq!(
+        serde_json::from_value::<AgentCommand>(json!({
+            "command": "result",
+            "task_id": "T-1",
+            "summary": "s",
+            "output": null
+        }))
+        .unwrap(),
+        AgentCommand::Result {
+            task_id: "T-1".into(),
+            summary: "s".into(),
+            output: None,
+            identity: None,
+        }
+    );
+    assert_eq!(STALE_RESULT, "stale_result");
 }

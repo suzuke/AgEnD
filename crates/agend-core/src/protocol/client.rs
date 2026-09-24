@@ -84,6 +84,21 @@ pub struct TerminalInputData {
     pub bytes_base64: String,
 }
 
+/// The stage attempt a result answers, copied from the assignment the agent
+/// received (`PipelineAction` `stage_id` and `attempt`). The field is optional
+/// on the wire so v1 peers that predate it still decode, but a result without
+/// it is stale by default: the daemon rejects it with [`STALE_RESULT`] and
+/// changes nothing, exactly like a result for another attempt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResultIdentity {
+    pub stage_id: String,
+    pub attempt: u32,
+}
+
+/// `ErrorData::code` for a result whose identity is missing or not the
+/// current stage attempt.
+pub const STALE_RESULT: &str = "stale_result";
+
 /// Agent-facing commands from D17. The daemon authenticates the caller and
 /// binds approvals to the review head; agents submit only their intent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,18 +107,26 @@ pub enum AgentCommand {
     Status,
     Done {
         task_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        identity: Option<ResultIdentity>,
     },
     Result {
         task_id: String,
         summary: String,
         output: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        identity: Option<ResultIdentity>,
     },
     ReviewApprove {
         task_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        identity: Option<ResultIdentity>,
     },
     ReviewChanges {
         task_id: String,
         summary: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        identity: Option<ResultIdentity>,
     },
     Send {
         to: String,

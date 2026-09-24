@@ -91,6 +91,12 @@ pub struct PipelineState {
     /// Reviewers who approved the current approval stage so far (below its
     /// count).
     approval_reviewers: Vec<String>,
+    /// For a pick approval below its count: the winner those reviewers
+    /// chose. It becomes `selected_fanout_child` only when the count is met.
+    pending_pick: Option<String>,
+    /// Per stage: how many times the task entered it (1 for the first time).
+    /// Results must echo the current stage's attempt.
+    attempts: Vec<u32>,
     approvals: Vec<ApprovalRecord>,
     passed_checks: Vec<PassedCheck>,
     fanout_child_task_ids: Vec<String>,
@@ -128,6 +134,7 @@ impl PipelineState {
     fn unchecked(task_id: impl Into<String>, workflow: Workflow) -> Self {
         Self {
             task_id: task_id.into(),
+            attempts: alloc::vec![0; workflow.stages.len()],
             workflow,
             stage_index: 0,
             status: PipelineStatus::Pending,
@@ -137,6 +144,7 @@ impl PipelineState {
             change_id: None,
             work_product: None,
             approval_reviewers: Vec::new(),
+            pending_pick: None,
             approvals: Vec::new(),
             passed_checks: Vec::new(),
             fanout_child_task_ids: Vec::new(),
@@ -188,6 +196,16 @@ impl PipelineState {
 
     pub fn approval_reviewers(&self) -> &[String] {
         &self.approval_reviewers
+    }
+
+    /// The current stage's attempt: results for it must carry this number.
+    pub fn attempt(&self) -> u32 {
+        self.attempts.get(self.stage_index).copied().unwrap_or(0)
+    }
+
+    /// The winner chosen so far by a pick approval below its count.
+    pub fn pending_pick(&self) -> Option<&str> {
+        self.pending_pick.as_deref()
     }
 
     pub fn approvals(&self) -> &[ApprovalRecord] {
@@ -267,23 +285,35 @@ impl PipelineState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Observed events. Every result of a stage carries its identity: the
+/// `stage_id` and `attempt` from the action that asked for it, and, for a
+/// head-bound stage (command, merge, head-bound approval), the `head` it was
+/// about. [`step`] rejects a result whose identity is not the current one with
+/// [`TransitionError::StaleResult`] and changes nothing. `Start`,
+/// `CommitCreated`, `MainAdvanced` and `Cancel` are observations, not results.
 pub enum PipelineEvent {
     Start,
     WorkCompleted {
+        stage_id: String,
+        attempt: u32,
         product: WorkProduct,
     },
     /// The forge accepted the submission; `change_id` is what it returned
     /// (for example a pull request number), if anything.
     Submitted {
+        stage_id: String,
+        attempt: u32,
         change_id: Option<String>,
     },
     CommandFinished {
         stage_id: String,
+        attempt: u32,
         head: Option<String>,
         exit_code: Option<i32>,
     },
     ApprovalGranted {
         stage_id: String,
+        attempt: u32,
         reviewer: String,
         head: Option<String>,
         selected_child: Option<String>,
@@ -291,6 +321,7 @@ pub enum PipelineEvent {
     /// A reviewer asked for changes: the task goes back to the task holder (D18, D33).
     ChangesRequested {
         stage_id: String,
+        attempt: u32,
         reviewer: String,
         head: Option<String>,
         reason: String,
@@ -304,29 +335,37 @@ pub enum PipelineEvent {
         patch_id: String,
         conflict: bool,
     },
+    /// `attempt` is the fanout run the children belong to.
     FanoutCompleted {
         stage_id: String,
+        attempt: u32,
         child_task_ids: Vec<String>,
         selected_child: Option<String>,
     },
     StageFailed {
         stage_id: String,
+        attempt: u32,
         reason: String,
     },
     StageTimedOut {
         stage_id: String,
+        attempt: u32,
     },
     /// Operator cancellation.
     Cancel {
         reason: String,
     },
     MergeCompleted {
+        stage_id: String,
+        attempt: u32,
         head: String,
         merge_commit: String,
     },
     /// The forge did not merge `head` (for example main moved or the forge
     /// refused); `reason` is for the log.
     MergeFailed {
+        stage_id: String,
+        attempt: u32,
         head: String,
         reason: String,
     },
@@ -334,8 +373,12 @@ pub enum PipelineEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PipelineAction {
+    /// Every action that asks for a result carries `stage_id` and `attempt`
+    /// (and the head, where the stage is head-bound); the daemon echoes them
+    /// in the result event.
     AssignWork {
         stage_id: String,
+        attempt: u32,
         role: String,
     },
     /// Rework: the work stage goes back to the task holder, who has held
@@ -343,16 +386,19 @@ pub enum PipelineAction {
     /// with `reason` as the review comment).
     ReturnToWork {
         stage_id: String,
+        attempt: u32,
         role: String,
         reason: String,
     },
     Submit {
         stage_id: String,
+        attempt: u32,
         forge: String,
     },
     /// `command` has its placeholders already expanded (and shell-quoted).
     RunCommand {
         stage_id: String,
+        attempt: u32,
         command: String,
         head: Option<String>,
         branch: Option<String>,
@@ -360,21 +406,25 @@ pub enum PipelineAction {
         timeout_ms: u64,
         timeout_action: TimeoutAction,
     },
-    /// `head` is the head under review for a head-bound stage.
+    /// `head` is the head under review for a head-bound stage; `choices` are
+    /// the live children of the current fanout run for a pick.
     RequestApproval {
         stage_id: String,
+        attempt: u32,
         bind_head: bool,
         head: Option<String>,
         choices: Vec<String>,
     },
     Merge {
         stage_id: String,
+        attempt: u32,
         head: String,
     },
     /// `work_product` and `head` are the current ones, also when the
     /// fanout runs again after a head change.
     Fanout {
         stage_id: String,
+        attempt: u32,
         source: FanoutSource,
         join: FanoutJoin,
         work_product: Option<WorkProduct>,
@@ -386,6 +436,7 @@ pub enum PipelineAction {
     },
     ScheduleTimeout {
         stage_id: String,
+        attempt: u32,
         timeout_ms: u64,
         action: TimeoutAction,
     },
@@ -414,7 +465,6 @@ pub enum TransitionError {
     NotRunning,
     WrongStage,
     MissingHead,
-    ApprovalHeadMismatch,
     MergeGateClosed,
     EmptyWorkflow,
     StaleResult,
@@ -434,12 +484,13 @@ impl fmt::Display for TransitionError {
             Self::NotRunning => "pipeline is not running",
             Self::WrongStage => "event does not match the current stage",
             Self::MissingHead => "the current stage requires a commit head",
-            Self::ApprovalHeadMismatch => "review must be for the current head",
             Self::MergeGateClosed => {
                 "merge requires every check to pass and every approval to cover the current head"
             }
             Self::EmptyWorkflow => "workflow has no stages",
-            Self::StaleResult => "stage result belongs to an outdated stage or head",
+            Self::StaleResult => {
+                "result does not belong to the current stage, attempt and head; nothing changed"
+            }
             Self::InvalidWorkProduct => "work output does not match the current work stage",
             Self::InvalidStageIndex => "pipeline state has an invalid stage index",
             Self::InvalidFanoutChildren => "fanout completion has no unique child task ids",
@@ -447,7 +498,7 @@ impl fmt::Display for TransitionError {
             Self::InvalidFanoutSelection => "selected task is not a completed fanout child",
             Self::UnexpectedFanoutSelection => "this approval does not select a fanout child",
             Self::MergeInFlight => {
-                "the merge has been requested and cannot be cancelled; wait for its result"
+                "the merge has been requested; only its result or a head change is accepted until then"
             }
         })
     }
@@ -460,6 +511,25 @@ pub fn step(
     state: &PipelineState,
     event: PipelineEvent,
 ) -> Result<(PipelineState, Vec<PipelineAction>), TransitionError> {
+    // One rule for the in-flight merge: only its result or a head change
+    // (recorded as pending) is accepted until the forge answers.
+    if state.merge_in_flight()
+        && !matches!(
+            event,
+            PipelineEvent::MergeCompleted { .. }
+                | PipelineEvent::MergeFailed { .. }
+                | PipelineEvent::CommitCreated { .. }
+                | PipelineEvent::MainAdvanced { .. }
+        )
+    {
+        return Err(TransitionError::MergeInFlight);
+    }
+    // One rule for staleness: a result must carry the identity of the
+    // current stage, attempt and (for a head-bound stage) head.
+    if let Some(identity) = identity(&event) {
+        check_identity(state, &identity)?;
+    }
+
     let mut next = state.clone();
     let mut actions = Vec::new();
 
@@ -474,13 +544,8 @@ pub fn step(
             next.status = PipelineStatus::Running;
             enter_stage(&mut next, 0, &mut actions)?;
         }
-        PipelineEvent::WorkCompleted { product } => {
-            ensure_running(state)?;
-            let Some(WorkflowStage {
-                stage: Stage::Work { output, .. },
-                ..
-            }) = state.current_stage()
-            else {
+        PipelineEvent::WorkCompleted { product, .. } => {
+            let Some(Stage::Work { output, .. }) = state.current_stage().map(|s| &s.stage) else {
                 return Err(TransitionError::WrongStage);
             };
             if !matches!(
@@ -498,6 +563,7 @@ pub fn step(
             } = &product
             {
                 if state.current_head.as_deref() != Some(head) {
+                    next.current_head = Some(head.clone());
                     invalidate_head_bound(&mut next);
                 }
                 next.branch = Some(branch.clone());
@@ -512,7 +578,7 @@ pub fn step(
             next.work_product = Some(product);
             enter_stage(&mut next, state.stage_index + 1, &mut actions)?;
         }
-        PipelineEvent::Submitted { change_id } => {
+        PipelineEvent::Submitted { change_id, .. } => {
             ensure_current_stage(state, StageKind::Submit)?;
             next.change_id = change_id;
             enter_stage(&mut next, state.stage_index + 1, &mut actions)?;
@@ -521,12 +587,9 @@ pub fn step(
             stage_id,
             head,
             exit_code,
+            ..
         } => {
             ensure_current_stage(state, StageKind::Command)?;
-            ensure_current_stage_id(state, &stage_id)?;
-            if state.current_head != head {
-                return Err(TransitionError::StaleResult);
-            }
             if exit_code == Some(0) {
                 if !next
                     .passed_checks
@@ -549,34 +612,33 @@ pub fn step(
             reviewer,
             head,
             selected_child,
+            ..
         } => {
-            let bind_head = current_approval(state, &stage_id, head.as_deref())?;
-            if pick_fanout_index_for_approval(&state.workflow, state.stage_index).is_some() {
+            let (bind_head, count) = current_approval(state)?;
+            let picks =
+                pick_fanout_index_for_approval(&state.workflow, state.stage_index).is_some();
+            if picks {
+                // Each reviewer's choice must agree with the ones so far; the
+                // winner is fixed only when the count is met.
                 let winner = selected_child
-                    .or_else(|| next.selected_fanout_child.clone())
+                    .or_else(|| next.pending_pick.clone())
                     .ok_or(TransitionError::FanoutSelectionRequired)?;
-                if !next.fanout_child_task_ids.contains(&winner) {
-                    return Err(TransitionError::InvalidFanoutSelection);
-                }
-                if next
-                    .selected_fanout_child
-                    .as_ref()
-                    .is_some_and(|selected| selected != &winner)
+                if !next.fanout_child_task_ids.contains(&winner)
+                    || next
+                        .pending_pick
+                        .as_ref()
+                        .is_some_and(|pending| pending != &winner)
                 {
                     return Err(TransitionError::InvalidFanoutSelection);
                 }
-                next.selected_fanout_child = Some(winner);
+                next.pending_pick = Some(winner);
             } else if selected_child.is_some() {
                 return Err(TransitionError::UnexpectedFanoutSelection);
             }
             if !next.approval_reviewers.contains(&reviewer) {
                 next.approval_reviewers.push(reviewer);
             }
-            let Some(Stage::Approval { count, .. }) = state.current_stage().map(|s| &s.stage)
-            else {
-                return Err(TransitionError::WrongStage);
-            };
-            if next.approval_reviewers.len() < usize::from(*count) {
+            if next.approval_reviewers.len() < usize::from(count) {
                 return Ok((next, actions));
             }
             next.approvals
@@ -591,36 +653,28 @@ pub fn step(
                 },
                 reviewers: core::mem::take(&mut next.approval_reviewers),
             });
-            if pick_fanout_index_for_approval(&state.workflow, state.stage_index).is_some() {
-                let winner_task_id = next
-                    .selected_fanout_child
-                    .clone()
+            if picks {
+                let winner = next
+                    .pending_pick
+                    .take()
                     .ok_or(TransitionError::FanoutSelectionRequired)?;
-                let sibling_task_ids = next
-                    .fanout_child_task_ids
-                    .iter()
-                    .filter(|task_id| **task_id != winner_task_id)
-                    .cloned()
-                    .collect();
-                actions.push(PipelineAction::CancelFanoutSiblings {
-                    winner_task_id,
-                    sibling_task_ids,
-                });
+                keep_only_winner(&mut next, winner, &mut actions);
             }
             enter_stage(&mut next, state.stage_index + 1, &mut actions)?;
         }
         PipelineEvent::ChangesRequested {
-            stage_id,
-            reviewer,
-            head,
-            reason,
+            reviewer, reason, ..
         } => {
-            current_approval(state, &stage_id, head.as_deref())?;
+            current_approval(state)?;
             let reason = format!("changes requested by {reviewer}: {reason}");
             fail_stage(&mut next, state.stage_index, reason, &mut actions)?;
         }
         PipelineEvent::CommitCreated { head, patch_id } => {
             ensure_running(state)?;
+            // A workflow without branch work has no head to change.
+            if !state.workflow.stages.iter().any(is_branch_work) {
+                return Err(TransitionError::WrongStage);
+            }
             if state.current_head.as_deref() == Some(head.as_str()) {
                 return Ok((next, actions));
             }
@@ -657,12 +711,11 @@ pub fn step(
             }
         }
         PipelineEvent::FanoutCompleted {
-            stage_id,
             child_task_ids,
             selected_child,
+            ..
         } => {
             ensure_current_stage(state, StageKind::Fanout)?;
-            ensure_current_stage_id(state, &stage_id)?;
             if child_task_ids.is_empty()
                 || child_task_ids.iter().any(String::is_empty)
                 || child_task_ids
@@ -676,40 +729,26 @@ pub fn step(
                 return Err(TransitionError::WrongStage);
             };
             next.selected_fanout_child = None;
+            next.fanout_child_task_ids = child_task_ids;
             match join {
                 FanoutJoin::All | FanoutJoin::Pick if selected_child.is_some() => {
                     return Err(TransitionError::UnexpectedFanoutSelection);
                 }
                 FanoutJoin::First => {
-                    let winner = selected_child
-                        .as_ref()
-                        .ok_or(TransitionError::FanoutSelectionRequired)?;
-                    if !child_task_ids.contains(winner) {
+                    let winner = selected_child.ok_or(TransitionError::FanoutSelectionRequired)?;
+                    if !next.fanout_child_task_ids.contains(&winner) {
                         return Err(TransitionError::InvalidFanoutSelection);
                     }
-                    actions.push(PipelineAction::CancelFanoutSiblings {
-                        winner_task_id: winner.clone(),
-                        sibling_task_ids: child_task_ids
-                            .iter()
-                            .filter(|task_id| task_id.as_str() != winner)
-                            .cloned()
-                            .collect(),
-                    });
-                    next.selected_fanout_child = Some(winner.clone());
+                    keep_only_winner(&mut next, winner, &mut actions);
                 }
                 FanoutJoin::All | FanoutJoin::Pick => {}
             }
-            next.fanout_child_task_ids = child_task_ids;
             enter_stage(&mut next, state.stage_index + 1, &mut actions)?;
         }
-        PipelineEvent::StageFailed { stage_id, reason } => {
-            ensure_running(state)?;
-            ensure_current_stage_id(state, &stage_id)?;
+        PipelineEvent::StageFailed { reason, .. } => {
             fail_stage(&mut next, state.stage_index, reason, &mut actions)?;
         }
-        PipelineEvent::StageTimedOut { stage_id } => {
-            ensure_running(state)?;
-            ensure_current_stage_id(state, &stage_id)?;
+        PipelineEvent::StageTimedOut { stage_id, .. } => {
             let stage = state
                 .current_stage()
                 .ok_or(TransitionError::InvalidStageIndex)?;
@@ -717,7 +756,6 @@ pub fn step(
                 TimeoutAction::Notify => actions.push(PipelineAction::NotifyTimeout { stage_id }),
                 TimeoutAction::Reassign => actions.push(PipelineAction::ReassignStage { stage_id }),
                 TimeoutAction::Cancel => {
-                    ensure_no_merge_in_flight(state)?;
                     let reason = format!("stage `{stage_id}` timed out");
                     cancel(&mut next, Some(stage_id), reason, &mut actions);
                 }
@@ -728,25 +766,19 @@ pub fn step(
                 PipelineStatus::Pending => None,
                 PipelineStatus::Running => {
                     ensure_running(state)?;
-                    ensure_no_merge_in_flight(state)?;
                     state.current_stage().map(|stage| stage.id.clone())
                 }
                 _ => return Err(TransitionError::NotRunning),
             };
             cancel(&mut next, stage_id, reason, &mut actions);
         }
-        PipelineEvent::MergeFailed { head, reason: _ } => {
+        PipelineEvent::MergeFailed { .. } => {
             ensure_current_stage(state, StageKind::Merge)?;
-            if state.current_head.as_deref() != Some(head.as_str()) {
-                return Err(TransitionError::StaleResult);
-            }
             merge_failed(&mut next, &mut actions)?;
         }
-        PipelineEvent::MergeCompleted { head, merge_commit } => {
+        PipelineEvent::MergeCompleted { merge_commit, .. } => {
             ensure_current_stage(state, StageKind::Merge)?;
-            if state.current_head.as_deref() != Some(head.as_str())
-                || !state.merge_gate(state.stage_index).allowed
-            {
+            if !state.merge_gate(state.stage_index).allowed {
                 return Err(TransitionError::MergeGateClosed);
             }
             next.merge_commit = Some(merge_commit.clone());
@@ -759,6 +791,118 @@ pub fn step(
     }
 
     Ok((next, actions))
+}
+
+/// The identity a result event carries.
+struct Identity<'a> {
+    stage_id: &'a str,
+    attempt: u32,
+    /// `Some` when the event names a head.
+    head: Option<Option<&'a str>>,
+}
+
+fn identity(event: &PipelineEvent) -> Option<Identity<'_>> {
+    let (stage_id, attempt, head) = match event {
+        PipelineEvent::WorkCompleted {
+            stage_id, attempt, ..
+        }
+        | PipelineEvent::Submitted {
+            stage_id, attempt, ..
+        }
+        | PipelineEvent::FanoutCompleted {
+            stage_id, attempt, ..
+        }
+        | PipelineEvent::StageFailed {
+            stage_id, attempt, ..
+        }
+        | PipelineEvent::StageTimedOut { stage_id, attempt } => (stage_id, *attempt, None),
+        PipelineEvent::CommandFinished {
+            stage_id,
+            attempt,
+            head,
+            ..
+        }
+        | PipelineEvent::ApprovalGranted {
+            stage_id,
+            attempt,
+            head,
+            ..
+        }
+        | PipelineEvent::ChangesRequested {
+            stage_id,
+            attempt,
+            head,
+            ..
+        } => (stage_id, *attempt, Some(head.as_deref())),
+        PipelineEvent::MergeCompleted {
+            stage_id,
+            attempt,
+            head,
+            ..
+        }
+        | PipelineEvent::MergeFailed {
+            stage_id,
+            attempt,
+            head,
+            ..
+        } => (stage_id, *attempt, Some(Some(head.as_str()))),
+        PipelineEvent::Start
+        | PipelineEvent::CommitCreated { .. }
+        | PipelineEvent::MainAdvanced { .. }
+        | PipelineEvent::Cancel { .. } => return None,
+    };
+    Some(Identity {
+        stage_id,
+        attempt,
+        head,
+    })
+}
+
+/// The staleness rule: the result is for the current stage and attempt and,
+/// when the stage is head-bound, for the current head.
+fn check_identity(state: &PipelineState, identity: &Identity<'_>) -> Result<(), TransitionError> {
+    ensure_running(state)?;
+    let stage = state
+        .current_stage()
+        .ok_or(TransitionError::InvalidStageIndex)?;
+    if stage.id != identity.stage_id || state.attempt() != identity.attempt {
+        return Err(TransitionError::StaleResult);
+    }
+    let head_bound = matches!(
+        stage.stage,
+        Stage::Command { .. }
+            | Stage::Merge
+            | Stage::Approval {
+                bind_head: true,
+                ..
+            }
+    );
+    if head_bound
+        && let Some(head) = identity.head
+        && head != state.current_head.as_deref()
+    {
+        return Err(TransitionError::StaleResult);
+    }
+    Ok(())
+}
+
+/// The winner of a fanout is fixed: its siblings are cancelled and no longer
+/// offered as choices.
+fn keep_only_winner(state: &mut PipelineState, winner: String, actions: &mut Vec<PipelineAction>) {
+    let sibling_task_ids = state
+        .fanout_child_task_ids
+        .iter()
+        .filter(|task_id| **task_id != winner)
+        .cloned()
+        .collect::<Vec<_>>();
+    if !sibling_task_ids.is_empty() {
+        actions.push(PipelineAction::CancelFanoutSiblings {
+            winner_task_id: winner.clone(),
+            sibling_task_ids,
+        });
+    }
+    state.fanout_child_task_ids = alloc::vec![winner.clone()];
+    state.selected_fanout_child = Some(winner);
 }
 
 /// The forge did not merge: apply the head changes seen meanwhile, or, if
@@ -896,10 +1040,23 @@ fn witness_run(
             }
             _ => success_events(&state, &mut counter),
         };
-        for event in events {
-            state = step(&state, event)
+        let before = (state.stage_index, state.attempt(), state.status);
+        for event in &events {
+            state = step(&state, event.clone())
                 .map_err(|error| stuck(&state, error.to_string()))?
                 .0;
+        }
+        // Once the stage has moved on, the same results again are stale: a
+        // duplicate must be rejected and change nothing.
+        if (state.stage_index, state.attempt(), state.status) != before {
+            for event in events.iter().filter(|event| identity(event).is_some()) {
+                if step(&state, event.clone()).is_ok() {
+                    return Err(stuck(
+                        &state,
+                        format!("a duplicate result was accepted: {event:?}"),
+                    ));
+                }
+            }
         }
     }
     Err(stuck(&state, "no progress within the bound".into()))
@@ -972,9 +1129,12 @@ fn success_events(state: &PipelineState, counter: &mut u32) -> Vec<PipelineEvent
         return Vec::new();
     };
     let stage_id = stage.id.clone();
+    let attempt = state.attempt();
     let head = state.current_head.clone();
     match &stage.stage {
         Stage::Work { output, .. } => alloc::vec![PipelineEvent::WorkCompleted {
+            stage_id,
+            attempt,
             product: match output {
                 WorkOutput::Branch => {
                     let (head, patch_id) = witness_head(counter);
@@ -995,10 +1155,13 @@ fn success_events(state: &PipelineState, counter: &mut u32) -> Vec<PipelineEvent
         }],
         // The local forge returns no change id, so `{pr}` cannot expand there.
         Stage::Submit { forge } => alloc::vec![PipelineEvent::Submitted {
+            stage_id,
+            attempt,
             change_id: (forge != "local").then(|| "witness-change".into()),
         }],
         Stage::Command { .. } => alloc::vec![PipelineEvent::CommandFinished {
             stage_id,
+            attempt,
             head,
             exit_code: Some(0),
         }],
@@ -1013,6 +1176,7 @@ fn success_events(state: &PipelineState, counter: &mut u32) -> Vec<PipelineEvent
             (0..*count)
                 .map(|reviewer| PipelineEvent::ApprovalGranted {
                     stage_id: stage_id.clone(),
+                    attempt,
                     reviewer: format!("witness-reviewer-{reviewer}"),
                     head: head.clone(),
                     selected_child: selected_child.clone(),
@@ -1028,6 +1192,7 @@ fn success_events(state: &PipelineState, counter: &mut u32) -> Vec<PipelineEvent
             };
             alloc::vec![PipelineEvent::FanoutCompleted {
                 stage_id,
+                attempt,
                 selected_child: (*join == FanoutJoin::First)
                     .then(|| children.first().cloned())
                     .flatten(),
@@ -1035,6 +1200,8 @@ fn success_events(state: &PipelineState, counter: &mut u32) -> Vec<PipelineEvent
             }]
         }
         Stage::Merge => alloc::vec![PipelineEvent::MergeCompleted {
+            stage_id,
+            attempt,
             head: head.unwrap_or_default(),
             merge_commit: "witness-merge".into(),
         }],
@@ -1050,15 +1217,18 @@ fn disturbance_events(
         return Vec::new();
     };
     let stage_id = stage.id.clone();
+    let attempt = state.attempt();
     let head = state.current_head.clone();
     match (kind, stage.stage.kind()) {
         (Disturbance::Fail, StageKind::Command) => alloc::vec![PipelineEvent::CommandFinished {
             stage_id,
+            attempt,
             head,
             exit_code: Some(1),
         }],
         (Disturbance::Fail, _) => alloc::vec![PipelineEvent::ChangesRequested {
             stage_id,
+            attempt,
             reviewer: "witness-reviewer".into(),
             head,
             reason: "witness".into(),
@@ -1071,6 +1241,8 @@ fn disturbance_events(
                     patch_id,
                 },
                 PipelineEvent::MergeFailed {
+                    stage_id,
+                    attempt,
                     head: head.unwrap_or_default(),
                     reason: "witness".into(),
                 },
@@ -1105,45 +1277,57 @@ fn ensure_current_stage(state: &PipelineState, kind: StageKind) -> Result<(), Tr
     }
 }
 
-/// Daemon contract: once the `Merge` action is out, the forge may complete
-/// it at any moment, so the task cannot be cancelled until its result.
-fn ensure_no_merge_in_flight(state: &PipelineState) -> Result<(), TransitionError> {
-    if state.merge_in_flight() {
-        Err(TransitionError::MergeInFlight)
-    } else {
-        Ok(())
-    }
-}
-
-fn ensure_current_stage_id(state: &PipelineState, stage_id: &str) -> Result<(), TransitionError> {
-    if state.current_stage().map(|stage| stage.id.as_str()) == Some(stage_id) {
-        Ok(())
-    } else {
-        Err(TransitionError::StaleResult)
-    }
-}
-
-/// Check that a review event is for the current approval stage and, when the
-/// stage is head-bound, for the current head. Returns the stage's `bind_head`.
-fn current_approval(
-    state: &PipelineState,
-    stage_id: &str,
-    head: Option<&str>,
-) -> Result<bool, TransitionError> {
+/// The current stage is an approval; returns its `bind_head` and `count`.
+fn current_approval(state: &PipelineState) -> Result<(bool, u8), TransitionError> {
     ensure_current_stage(state, StageKind::Approval)?;
-    ensure_current_stage_id(state, stage_id)?;
-    let Some(Stage::Approval { bind_head, .. }) = state.current_stage().map(|s| &s.stage) else {
+    let Some(Stage::Approval {
+        bind_head, count, ..
+    }) = state.current_stage().map(|s| &s.stage)
+    else {
         return Err(TransitionError::WrongStage);
     };
-    if *bind_head {
-        if state.current_head.is_none() {
-            return Err(TransitionError::MissingHead);
-        }
-        if head != state.current_head.as_deref() {
-            return Err(TransitionError::ApprovalHeadMismatch);
-        }
+    if *bind_head && state.current_head.is_none() {
+        return Err(TransitionError::MissingHead);
     }
-    Ok(*bind_head)
+    Ok((*bind_head, *count))
+}
+
+fn is_branch_work(stage: &WorkflowStage) -> bool {
+    matches!(
+        stage.stage,
+        Stage::Work {
+            output: WorkOutput::Branch,
+            ..
+        }
+    )
+}
+
+/// Forget the approvals of the current approval stage below its count,
+/// together with the winner they chose.
+fn clear_partial(state: &mut PipelineState) {
+    state.approval_reviewers.clear();
+    state.pending_pick = None;
+}
+
+/// Drop approval records that no longer count. If the pick approval's record
+/// goes, its winner goes with it: the pick has to be made again.
+fn drop_approvals(state: &mut PipelineState, keep: impl Fn(&Workflow, &ApprovalRecord) -> bool) {
+    let workflow = &state.workflow;
+    let mut pick_dropped = false;
+    state.approvals.retain(|approval| {
+        let kept = keep(workflow, approval);
+        if !kept
+            && stage_position(workflow, &approval.stage_id)
+                .is_some_and(|index| pick_fanout_index_for_approval(workflow, index).is_some())
+        {
+            pick_dropped = true;
+        }
+        kept
+    });
+    if pick_dropped {
+        state.selected_fanout_child = None;
+    }
+    clear_partial(state);
 }
 
 fn previous_work(state: &PipelineState, before: usize) -> Option<usize> {
@@ -1269,7 +1453,7 @@ fn main_advanced(
         ApprovalAfterRebase::Keep { new_approved_head } => {
             // D14: same diff after a clean rebase keeps review, re-runs checks.
             state.passed_checks.clear();
-            state.approval_reviewers.clear();
+            clear_partial(state);
             for approval in &mut state.approvals {
                 if approval.head.as_deref() == Some(old_head.as_str())
                     && approval.patch_id.as_deref() == Some(approved_patch.as_str())
@@ -1307,11 +1491,10 @@ fn main_advanced(
 /// for another head, checks passed on another head, partial approvals.
 fn invalidate_head_bound(state: &mut PipelineState) {
     let head = state.current_head.clone();
-    state
-        .approvals
-        .retain(|approval| approval.head.is_none() || approval.head == head);
+    drop_approvals(state, |_, approval| {
+        approval.head.is_none() || approval.head == head
+    });
     state.passed_checks.retain(|check| check.head == head);
-    state.approval_reviewers.clear();
 }
 
 fn fanout_at_or_after(state: &PipelineState, index: usize) -> bool {
@@ -1410,10 +1593,9 @@ fn forget_from(state: &mut PipelineState, target: usize) {
     state
         .passed_checks
         .retain(|check| stage_position(workflow, &check.stage_id).is_some_and(|i| i < target));
-    state.approvals.retain(|approval| {
+    drop_approvals(state, |workflow, approval| {
         stage_position(workflow, &approval.stage_id).is_some_and(|i| i < target)
     });
-    state.approval_reviewers.clear();
 }
 
 /// Hand the work stage at `target` back to the task holder. The branch and
@@ -1440,13 +1622,17 @@ fn return_to_work(
         return Err(TransitionError::WrongStage);
     };
     state.stage_index = target;
+    state.attempts[target] += 1;
+    let attempt = state.attempts[target];
     actions.push(PipelineAction::ScheduleTimeout {
         stage_id: stage.id.clone(),
+        attempt,
         timeout_ms: stage.effective_timeout_ms(),
         action: stage.effective_timeout_action(),
     });
     actions.push(PipelineAction::ReturnToWork {
         stage_id: stage.id.clone(),
+        attempt,
         role: role.clone(),
         reason,
     });
@@ -1460,7 +1646,7 @@ fn fail_task(
     actions: &mut Vec<PipelineAction>,
 ) {
     state.status = PipelineStatus::Failed;
-    state.approval_reviewers.clear();
+    clear_partial(state);
     actions.push(PipelineAction::TaskFailed { stage_id, reason });
 }
 
@@ -1471,7 +1657,7 @@ fn cancel(
     actions: &mut Vec<PipelineAction>,
 ) {
     state.status = PipelineStatus::Cancelled;
-    state.approval_reviewers.clear();
+    clear_partial(state);
     actions.push(PipelineAction::TaskCancelled { stage_id, reason });
 }
 
@@ -1512,19 +1698,25 @@ fn enter_stage(
         };
         state.stage_index = index;
         state.approval_reviewers.clear();
+        state.pending_pick = None;
 
         if approval_for_stage(state, stage) {
             index += 1;
             continue;
         }
 
+        // Entering the stage starts a new attempt; results must echo it.
+        state.attempts[index] += 1;
+        let attempt = state.attempts[index];
         let action = match &stage.stage {
             Stage::Work { role, .. } => PipelineAction::AssignWork {
                 stage_id: stage.id.clone(),
+                attempt,
                 role: role.clone(),
             },
             Stage::Submit { forge } => PipelineAction::Submit {
                 stage_id: stage.id.clone(),
+                attempt,
                 forge: forge.clone(),
             },
             Stage::Command { command } => {
@@ -1536,6 +1728,7 @@ fn enter_stage(
                 match expand_command_placeholders(command, context) {
                     Ok(command) => PipelineAction::RunCommand {
                         stage_id: stage.id.clone(),
+                        attempt,
                         command,
                         head: state.current_head.clone(),
                         branch: state.branch.clone(),
@@ -1552,6 +1745,7 @@ fn enter_stage(
             }
             Stage::Approval { bind_head, .. } => PipelineAction::RequestApproval {
                 stage_id: stage.id.clone(),
+                attempt,
                 bind_head: *bind_head,
                 head: if *bind_head {
                     state.current_head.clone()
@@ -1570,6 +1764,7 @@ fn enter_stage(
                 }
                 PipelineAction::Merge {
                     stage_id: stage.id.clone(),
+                    attempt,
                     head: state
                         .current_head
                         .clone()
@@ -1578,6 +1773,7 @@ fn enter_stage(
             }
             Stage::Fanout { source, join } => PipelineAction::Fanout {
                 stage_id: stage.id.clone(),
+                attempt,
                 source: source.clone(),
                 join: *join,
                 work_product: state.work_product.clone(),
@@ -1586,6 +1782,7 @@ fn enter_stage(
         };
         actions.push(PipelineAction::ScheduleTimeout {
             stage_id: stage.id.clone(),
+            attempt,
             timeout_ms: stage.effective_timeout_ms(),
             action: stage.effective_timeout_action(),
         });
@@ -1615,8 +1812,10 @@ mod tests {
         state_for(Workflow::builtin_code())
     }
 
-    fn work(head: &str, patch: &str) -> PipelineEvent {
+    fn work(state: &PipelineState, head: &str, patch: &str) -> PipelineEvent {
         PipelineEvent::WorkCompleted {
+            stage_id: stage_id(state),
+            attempt: state.attempt(),
             product: WorkProduct::Branch {
                 branch: "agend/T-1/demo".into(),
                 head: head.into(),
@@ -1625,13 +1824,18 @@ mod tests {
         }
     }
 
-    fn submitted() -> PipelineEvent {
-        PipelineEvent::Submitted { change_id: None }
+    fn submitted(state: &PipelineState) -> PipelineEvent {
+        PipelineEvent::Submitted {
+            stage_id: stage_id(state),
+            attempt: state.attempt(),
+            change_id: None,
+        }
     }
 
     fn command(state: &PipelineState, exit_code: Option<i32>) -> PipelineEvent {
         PipelineEvent::CommandFinished {
             stage_id: stage_id(state),
+            attempt: state.attempt(),
             head: state.current_head.clone(),
             exit_code,
         }
@@ -1640,6 +1844,7 @@ mod tests {
     fn approve(state: &PipelineState, reviewer: &str) -> PipelineEvent {
         PipelineEvent::ApprovalGranted {
             stage_id: stage_id(state),
+            attempt: state.attempt(),
             reviewer: reviewer.into(),
             head: state.current_head.clone(),
             selected_child: None,
@@ -1649,6 +1854,7 @@ mod tests {
     fn request_changes(state: &PipelineState) -> PipelineEvent {
         PipelineEvent::ChangesRequested {
             stage_id: stage_id(state),
+            attempt: state.attempt(),
             reviewer: "reviewer-1".into(),
             head: state.current_head.clone(),
             reason: "rename the flag".into(),
@@ -1670,15 +1876,19 @@ mod tests {
         }
     }
 
-    fn merged(head: &str) -> PipelineEvent {
+    fn merged(state: &PipelineState, head: &str) -> PipelineEvent {
         PipelineEvent::MergeCompleted {
+            stage_id: stage_id(state),
+            attempt: state.attempt(),
             head: head.into(),
             merge_commit: "M1".into(),
         }
     }
 
     fn stage_id(state: &PipelineState) -> String {
-        state.current_stage().unwrap().id.clone()
+        state
+            .current_stage()
+            .map_or_else(|| "none".into(), |stage| stage.id.clone())
     }
 
     fn apply(state: &PipelineState, event: PipelineEvent) -> (PipelineState, Vec<PipelineAction>) {
@@ -1687,6 +1897,8 @@ mod tests {
 
     fn merge_failed(state: &PipelineState) -> PipelineEvent {
         PipelineEvent::MergeFailed {
+            stage_id: stage_id(state),
+            attempt: state.attempt(),
             head: state.current_head.clone().unwrap(),
             reason: "main moved".into(),
         }
@@ -1710,13 +1922,13 @@ mod tests {
 
     fn at_submit(workflow: Workflow) -> PipelineState {
         let state = apply(&state_for(workflow), PipelineEvent::Start).0;
-        apply(&state, work("H1", "P1")).0
+        apply(&state, work(&state, "H1", "P1")).0
     }
 
     fn run_to_merge(state: PipelineState, head: &str, patch: &str) -> PipelineState {
         let mut state = apply(&state, PipelineEvent::Start).0;
-        state = apply(&state, work(head, patch)).0;
-        state = apply(&state, submitted()).0;
+        state = apply(&state, work(&state, head, patch)).0;
+        state = apply(&state, submitted(&state)).0;
         state = apply(&state, command(&state, Some(0))).0;
         apply(&state, approve(&state, "reviewer-1")).0
     }
@@ -1735,14 +1947,14 @@ mod tests {
     #[test]
     fn code_workflow_requires_checks_and_head_bound_approval() {
         let mut state = at_submit(Workflow::builtin_code());
-        state = apply(&state, submitted()).0;
+        state = apply(&state, submitted(&state)).0;
         assert_eq!(
             step(&state, approve(&state, "reviewer-1")),
             Err(TransitionError::WrongStage)
         );
         state = apply(&state, command(&state, Some(0))).0;
         state = apply(&state, approve(&state, "reviewer-1")).0;
-        let (done, actions) = apply(&state, merged("H1"));
+        let (done, actions) = apply(&state, merged(&state, "H1"));
         assert_eq!(done.status, PipelineStatus::Done);
         assert_eq!(
             actions,
@@ -1765,7 +1977,7 @@ mod tests {
             ),
         );
         let mut state = at_submit(workflow);
-        state = apply(&state, submitted()).0;
+        state = apply(&state, submitted(&state)).0;
         state = apply(&state, command(&state, Some(0))).0;
         assert_eq!(stage_id(&state), "lint");
         state = apply(&state, command(&state, Some(0))).0;
@@ -1775,7 +1987,7 @@ mod tests {
             .passed_checks
             .retain(|check| check.stage_id != "checks");
         assert_eq!(
-            step(&state, merged("H1")),
+            step(&state, merged(&state, "H1")),
             Err(TransitionError::MergeGateClosed)
         );
     }
@@ -1788,7 +2000,7 @@ mod tests {
         workflow.stages.insert(2, reviewer);
         workflow.stages.insert(4, approval_stage("human", true));
         let mut state = at_submit(workflow);
-        state = apply(&state, submitted()).0;
+        state = apply(&state, submitted(&state)).0;
         state = apply(&state, approve(&state, "reviewer-1")).0;
         state = apply(&state, command(&state, Some(0))).0;
         assert_eq!(stage_id(&state), "human");
@@ -1805,6 +2017,7 @@ mod tests {
             step(
                 &updated,
                 PipelineEvent::CommandFinished {
+                    attempt: updated.attempt(),
                     stage_id: "checks".into(),
                     head: Some("H1".into()),
                     exit_code: Some(0)
@@ -1839,7 +2052,7 @@ mod tests {
             ),
         );
         let mut state = at_submit(workflow);
-        state = apply(&state, submitted()).0;
+        state = apply(&state, submitted(&state)).0;
         state = apply(&state, command(&state, Some(0))).0;
         state = apply(&state, command(&state, Some(0))).0;
         state = apply(&state, approve(&state, "reviewer-1")).0;
@@ -1875,21 +2088,28 @@ mod tests {
         assert_eq!(rebased.current_head.as_deref(), Some("H2"));
         assert_eq!(stage_id(&rebased), "submit");
         assert!(actions.is_empty());
-        let (checking, actions) = apply(&rebased, submitted());
+        let (checking, actions) = apply(&rebased, submitted(&rebased));
         assert_eq!(stage_id(&checking), "checks");
         assert!(actions.iter().any(|action| matches!(
             action,
             PipelineAction::RunCommand { head: Some(head), .. } if head == "H2"
         )));
         let (merging, _) = apply(&checking, command(&checking, Some(0)));
-        assert_eq!(apply(&merging, merged("H2")).0.status, PipelineStatus::Done);
+        assert_eq!(
+            apply(&merging, merged(&merging, "H2")).0.status,
+            PipelineStatus::Done
+        );
     }
 
     /// Round-1 review I3: a new commit during checks restarts the checks for
     /// the new head.
     #[test]
     fn review_i3_commit_during_checks_restarts_them_on_the_new_head() {
-        let state = apply(&at_submit(Workflow::builtin_code()), submitted()).0;
+        let state = {
+            let submitting = at_submit(Workflow::builtin_code());
+            apply(&submitting, submitted(&submitting))
+        }
+        .0;
         let (state, actions) = apply(&state, commit("H2", "P2"));
         assert_eq!(stage_id(&state), "checks");
         assert!(actions.iter().any(|action| matches!(
@@ -1928,7 +2148,7 @@ mod tests {
                 step(&state, command(&state, Some(0))),
                 Err(TransitionError::WrongStage)
             );
-            let (state, _) = apply(&state, submitted());
+            let (state, _) = apply(&state, submitted(&state));
             assert_eq!(stage_id(&state), "checks");
         }
     }
@@ -1950,7 +2170,7 @@ mod tests {
             assert!(actions.is_empty(), "{event:?}: {actions:?}");
         }
         let (state, _) = apply(&state, commit("H4", "P10"));
-        let (state, _) = apply(&state, work("H6", "P11"));
+        let (state, _) = apply(&state, work(&state, "H6", "P11"));
         assert_eq!(stage_id(&state), "submit");
     }
 
@@ -1958,7 +2178,11 @@ mod tests {
     /// work stage, not TaskFailed (D18 rework).
     #[test]
     fn review_n3_changes_requested_return_to_the_task_holder() {
-        let state = apply(&at_submit(Workflow::builtin_code()), submitted()).0;
+        let state = {
+            let submitting = at_submit(Workflow::builtin_code());
+            apply(&submitting, submitted(&submitting))
+        }
+        .0;
         let state = apply(&state, command(&state, Some(0))).0;
         assert_eq!(stage_id(&state), "review");
         let (reworked, actions) = apply(&state, request_changes(&state));
@@ -1966,6 +2190,7 @@ mod tests {
         assert_eq!(stage_id(&reworked), "work");
         assert!(actions.contains(&PipelineAction::ReturnToWork {
             stage_id: "work".into(),
+            attempt: 2,
             role: "dev".into(),
             reason: "changes requested by reviewer-1: rename the flag".into(),
         }));
@@ -1978,6 +2203,7 @@ mod tests {
         let (reworked, _) = apply(
             &state,
             PipelineEvent::StageFailed {
+                attempt: state.attempt(),
                 stage_id: "review".into(),
                 reason: "reviewer rejected".into(),
             },
@@ -1987,19 +2213,22 @@ mod tests {
 
     #[test]
     fn changes_requested_for_an_old_head_or_stage_is_stale() {
-        let state = apply(&at_submit(Workflow::builtin_code()), submitted()).0;
+        let state = {
+            let submitting = at_submit(Workflow::builtin_code());
+            apply(&submitting, submitted(&submitting))
+        }
+        .0;
         let state = apply(&state, command(&state, Some(0))).0;
         let stale_head = PipelineEvent::ChangesRequested {
+            attempt: state.attempt(),
             stage_id: "review".into(),
             reviewer: "reviewer-1".into(),
             head: Some("H0".into()),
             reason: "old".into(),
         };
-        assert_eq!(
-            step(&state, stale_head),
-            Err(TransitionError::ApprovalHeadMismatch)
-        );
+        assert_eq!(step(&state, stale_head), Err(TransitionError::StaleResult));
         let stale_stage = PipelineEvent::ApprovalGranted {
+            attempt: state.attempt(),
             stage_id: "checks".into(),
             reviewer: "reviewer-1".into(),
             head: Some("H1".into()),
@@ -2013,10 +2242,10 @@ mod tests {
         let mut workflow = Workflow::builtin_planned();
         workflow.stages[5].on_fail = Some("plan".into());
         let mut state = apply(&state_for(workflow), PipelineEvent::Start).0;
-        state = apply(&state, result_work()).0;
+        state = apply(&state, result_work(&state)).0;
         state = apply(&state, approve(&state, "owner")).0;
-        state = apply(&state, work("H1", "P1")).0;
-        state = apply(&state, submitted()).0;
+        state = apply(&state, work(&state, "H1", "P1")).0;
+        state = apply(&state, submitted(&state)).0;
         state = apply(&state, command(&state, Some(0))).0;
         let (state, actions) = apply(&state, request_changes(&state));
         assert_eq!(stage_id(&state), "plan");
@@ -2026,8 +2255,10 @@ mod tests {
         )));
     }
 
-    fn result_work() -> PipelineEvent {
+    fn result_work(state: &PipelineState) -> PipelineEvent {
         PipelineEvent::WorkCompleted {
+            stage_id: stage_id(state),
+            attempt: state.attempt(),
             product: WorkProduct::Result {
                 summary: "plan".into(),
                 output: None,
@@ -2076,8 +2307,8 @@ mod tests {
     #[test]
     fn verifier_mixed_approvals_rework_with_same_head_and_merge_in_flight() {
         let mut s = apply(&state_for(mixed_workflow()), PipelineEvent::Start).0;
-        s = apply(&s, work("H1", "P1")).0;
-        s = apply(&s, submitted()).0;
+        s = apply(&s, work(&s, "H1", "P1")).0;
+        s = apply(&s, submitted(&s)).0;
         s = apply(&s, command(&s, Some(0))).0;
         s = apply(&s, approve(&s, "r1")).0;
         assert_eq!(stage_id(&s), "b");
@@ -2093,6 +2324,7 @@ mod tests {
         s = apply(&s, commit("H2", "P2")).0;
         assert_eq!(stage_id(&s), "c1");
         let stale = PipelineEvent::CommandFinished {
+            attempt: s.attempt(),
             stage_id: "c1".into(),
             head: Some("H1".into()),
             exit_code: Some(0),
@@ -2105,6 +2337,7 @@ mod tests {
             "unbound a is kept, bound b is asked again"
         );
         let old_head = PipelineEvent::ApprovalGranted {
+            attempt: s.attempt(),
             stage_id: "b".into(),
             reviewer: "r1".into(),
             head: Some("H1".into()),
@@ -2123,8 +2356,8 @@ mod tests {
         );
         assert!(reworked.approvals().is_empty() && reworked.passed_checks().is_empty());
         // Rework with the same head still re-runs everything and re-asks a and b.
-        let mut s = apply(&reworked, work("H2", "P2")).0;
-        s = apply(&s, submitted()).0;
+        let mut s = apply(&reworked, work(&reworked, "H2", "P2")).0;
+        s = apply(&s, submitted(&s)).0;
         s = apply(&s, command(&s, Some(0))).0;
         assert_eq!(
             stage_id(&s),
@@ -2144,15 +2377,15 @@ mod tests {
             reason: "operator".into(),
         };
         assert_eq!(step(&s, cancel), Err(TransitionError::MergeInFlight));
-        assert!(step(&s, merged("H1")).is_err());
-        let (done, _) = apply(&s, merged("H2"));
+        assert!(step(&s, merged(&s, "H1")).is_err());
+        let (done, _) = apply(&s, merged(&s, "H2"));
         assert_eq!(done.status(), PipelineStatus::Done);
         for event in [
             PipelineEvent::Start,
             PipelineEvent::Cancel { reason: "x".into() },
             commit("H9", "P9"),
             main_advanced("H9", "P2", false),
-            merged("H2"),
+            merged(&s, "H2"),
         ] {
             assert!(step(&done, event).is_err());
         }
@@ -2170,8 +2403,10 @@ mod tests {
                     let mut s = apply(&state_for(mixed_workflow()), PipelineEvent::Start).0;
                     while s.stage_index < target {
                         let event = match s.current_stage().unwrap().stage.kind() {
-                            StageKind::Work => work("H1", "P1"),
+                            StageKind::Work => work(&s, "H1", "P1"),
                             StageKind::Submit => PipelineEvent::Submitted {
+                                stage_id: stage_id(&s),
+                                attempt: s.attempt(),
                                 change_id: Some("7".into()),
                             },
                             StageKind::Command => command(&s, Some(0)),
@@ -2210,8 +2445,8 @@ mod tests {
                         }
                         let head = s.current_head.clone();
                         let event = match s.current_stage().unwrap().stage.kind() {
-                            StageKind::Work => work("H10", "P10"),
-                            StageKind::Submit => submitted(),
+                            StageKind::Work => work(&s, "H10", "P10"),
+                            StageKind::Submit => submitted(&s),
                             StageKind::Command => {
                                 passed.push((stage_id(&s), head.clone().unwrap()));
                                 command(&s, Some(0))
@@ -2236,7 +2471,7 @@ mod tests {
                                         || (same_patch && !conflict && target >= 5),
                                     "merge of {head} without approval b"
                                 );
-                                merged(&head)
+                                merged(&s, &head)
                             }
                         };
                         s = apply(&s, event).0;
@@ -2272,6 +2507,10 @@ mod tests {
         s = apply(
             &s,
             PipelineEvent::WorkCompleted {
+                stage_id: s
+                    .current_stage()
+                    .map_or_else(String::new, |stage| stage.id.clone()),
+                attempt: s.attempt(),
                 product: WorkProduct::Plan {
                     items: vec!["a".into()],
                 },
@@ -2281,6 +2520,7 @@ mod tests {
         s = apply(
             &s,
             PipelineEvent::FanoutCompleted {
+                attempt: s.attempt(),
                 stage_id: "fanout".into(),
                 child_task_ids: vec!["c1".into(), "c2".into()],
                 selected_child: None,
@@ -2289,6 +2529,7 @@ mod tests {
         .0;
         assert!(step(&s, approve(&s, "r1")).is_err());
         let pick = |reviewer: &str, child: &str| PipelineEvent::ApprovalGranted {
+            attempt: s.attempt(),
             stage_id: "review".into(),
             reviewer: reviewer.into(),
             head: None,
@@ -2302,6 +2543,7 @@ mod tests {
         let (timed_out, _) = apply(
             &s1,
             PipelineEvent::StageTimedOut {
+                attempt: s1.attempt(),
                 stage_id: "review".into(),
             },
         );
@@ -2310,6 +2552,7 @@ mod tests {
             step(
                 &s1,
                 PipelineEvent::StageTimedOut {
+                    attempt: s1.attempt(),
                     stage_id: "plan".into()
                 }
             )
@@ -2334,7 +2577,7 @@ mod tests {
             step(&held, PipelineEvent::Cancel { reason: "x".into() }),
             Err(TransitionError::MergeInFlight)
         );
-        let (done, actions) = apply(&held, merged("H1"));
+        let (done, actions) = apply(&held, merged(&held, "H1"));
         assert_eq!(done.status(), PipelineStatus::Done);
         assert!(done.pending_head_changes().is_empty());
         assert_eq!(
@@ -2353,6 +2596,10 @@ mod tests {
             step(
                 &state,
                 PipelineEvent::MergeFailed {
+                    stage_id: state
+                        .current_stage()
+                        .map_or_else(String::new, |stage| stage.id.clone()),
+                    attempt: state.attempt(),
                     head: "H0".into(),
                     reason: "x".into()
                 }
@@ -2367,10 +2614,10 @@ mod tests {
             |action| matches!(action, PipelineAction::RunCommand { head: Some(head), .. } if head == "H1")
         ));
         let (again, actions) = apply(&retry, command(&retry, Some(0)));
-        assert!(actions.contains(&PipelineAction::Merge {
-            stage_id: "merge".into(),
-            head: "H1".into()
-        }));
+        assert!(actions.iter().any(|action| matches!(
+            action,
+            PipelineAction::Merge { stage_id, head, .. } if stage_id == "merge" && head == "H1"
+        )));
         assert!(again.merge_in_flight());
         // Pending clean same-patch rebase: D14 keeps the approval, checks rerun.
         let (held, _) = apply(&state, main_advanced("H2", "P1", false));
@@ -2398,6 +2645,7 @@ mod tests {
             step(
                 &state,
                 PipelineEvent::StageTimedOut {
+                    attempt: state.attempt(),
                     stage_id: "merge".into()
                 }
             ),
@@ -2429,17 +2677,20 @@ mod tests {
         };
         state.approvals.push(record("a", Some("H1")));
         assert_eq!(
-            step(&state, merged("H1")),
+            step(&state, merged(&state, "H1")),
             Err(TransitionError::MergeGateClosed)
         );
         state.approvals.push(record("b", Some("H0")));
         state.approvals.push(record("c", None));
         assert_eq!(
-            step(&state, merged("H1")),
+            step(&state, merged(&state, "H1")),
             Err(TransitionError::MergeGateClosed)
         );
         state.approvals.push(record("b", Some("H1")));
-        assert_eq!(apply(&state, merged("H1")).0.status, PipelineStatus::Done);
+        assert_eq!(
+            apply(&state, merged(&state, "H1")).0.status,
+            PipelineStatus::Done
+        );
     }
 
     /// Round-2 review N8: RunCommand carries the expanded command and the
@@ -2457,11 +2708,16 @@ mod tests {
         let (_, actions) = apply(
             &state,
             PipelineEvent::Submitted {
+                stage_id: state
+                    .current_stage()
+                    .map_or_else(String::new, |stage| stage.id.clone()),
+                attempt: state.attempt(),
                 change_id: Some("42".into()),
             },
         );
         assert!(actions.contains(&PipelineAction::RunCommand {
             stage_id: "checks".into(),
+            attempt: 1,
             command: "gh pr checks '42' --head 'H1'".into(),
             head: Some("H1".into()),
             branch: Some("agend/T-1/demo".into()),
@@ -2469,7 +2725,7 @@ mod tests {
             timeout_ms: 300_000,
             timeout_action: TimeoutAction::Notify,
         }));
-        let (failed, actions) = apply(&state, submitted());
+        let (failed, actions) = apply(&state, submitted(&state));
         assert_eq!(failed.status, PipelineStatus::Failed);
         assert!(actions.contains(&PipelineAction::TaskFailed {
             stage_id: "checks".into(),
@@ -2487,6 +2743,7 @@ mod tests {
         let (timed_out, actions) = apply(
             &state,
             PipelineEvent::StageTimedOut {
+                attempt: state.attempt(),
                 stage_id: "work".into(),
             },
         );
@@ -2514,7 +2771,7 @@ mod tests {
         );
         assert_eq!(step(&cancelled, cancel), Err(TransitionError::NotRunning));
         assert_eq!(
-            step(&cancelled, work("H1", "P1")),
+            step(&cancelled, work(&cancelled, "H1", "P1")),
             Err(TransitionError::NotRunning)
         );
     }
@@ -2527,6 +2784,7 @@ mod tests {
         let (state, actions) = apply(
             &state,
             PipelineEvent::StageTimedOut {
+                attempt: state.attempt(),
                 stage_id: "work".into(),
             },
         );
@@ -2537,6 +2795,7 @@ mod tests {
         let (_, actions) = apply(
             &apply(&initial(), PipelineEvent::Start).0,
             PipelineEvent::StageTimedOut {
+                attempt: state.attempt(),
                 stage_id: "work".into(),
             },
         );
@@ -2574,6 +2833,10 @@ mod tests {
         state = apply(
             &state,
             PipelineEvent::WorkCompleted {
+                stage_id: state
+                    .current_stage()
+                    .map_or_else(String::new, |stage| stage.id.clone()),
+                attempt: state.attempt(),
                 product: WorkProduct::Result {
                     summary: "plan".into(),
                     output: None,
@@ -2581,8 +2844,8 @@ mod tests {
             },
         )
         .0;
-        state = apply(&state, work("H1", "P1")).0;
-        state = apply(&state, submitted()).0;
+        state = apply(&state, work(&state, "H1", "P1")).0;
+        state = apply(&state, submitted(&state)).0;
         state = apply(&state, command(&state, Some(0))).0;
         state = apply(&state, approve(&state, "reviewer-1")).0;
         assert!(matches!(state.current_stage().unwrap().stage, Stage::Merge));
@@ -2611,6 +2874,10 @@ mod tests {
         state = apply(
             &state,
             PipelineEvent::WorkCompleted {
+                stage_id: state
+                    .current_stage()
+                    .map_or_else(String::new, |stage| stage.id.clone()),
+                attempt: state.attempt(),
                 product: WorkProduct::Plan {
                     items: vec!["one".into(), "two".into()],
                 },
@@ -2624,6 +2891,7 @@ mod tests {
         let (state, actions) = apply(
             &state,
             PipelineEvent::FanoutCompleted {
+                attempt: state.attempt(),
                 stage_id: "fanout".into(),
                 child_task_ids: vec!["child-1".into(), "child-2".into()],
                 selected_child: None,
@@ -2638,6 +2906,7 @@ mod tests {
             .unwrap();
         assert_eq!(choices, &["child-1", "child-2"]);
         let pick = |selected_child: Option<&str>| PipelineEvent::ApprovalGranted {
+            attempt: state.attempt(),
             stage_id: "review".into(),
             reviewer: "operator".into(),
             head: None,
@@ -2659,6 +2928,10 @@ mod tests {
         let state = apply(
             &state,
             PipelineEvent::WorkCompleted {
+                stage_id: state
+                    .current_stage()
+                    .map_or_else(String::new, |stage| stage.id.clone()),
+                attempt: state.attempt(),
                 product: WorkProduct::Result {
                     summary: "done".into(),
                     output: None,
@@ -2690,6 +2963,10 @@ mod tests {
         state = apply(
             &state,
             PipelineEvent::WorkCompleted {
+                stage_id: state
+                    .current_stage()
+                    .map_or_else(String::new, |stage| stage.id.clone()),
+                attempt: state.attempt(),
                 product: WorkProduct::Plan {
                     items: vec!["one".into(), "two".into()],
                 },
@@ -2699,6 +2976,7 @@ mod tests {
         let (_, actions) = apply(
             &state,
             PipelineEvent::FanoutCompleted {
+                attempt: state.attempt(),
                 stage_id: "fanout".into(),
                 child_task_ids: vec!["child-1".into(), "child-2".into()],
                 selected_child: Some("child-2".into()),
@@ -2717,6 +2995,10 @@ mod tests {
         state = apply(
             &state,
             PipelineEvent::WorkCompleted {
+                stage_id: state
+                    .current_stage()
+                    .map_or_else(String::new, |stage| stage.id.clone()),
+                attempt: state.attempt(),
                 product: WorkProduct::Plan {
                     items: vec!["one".into(), "two".into()],
                 },
@@ -2726,6 +3008,7 @@ mod tests {
         let (state, actions) = apply(
             &state,
             PipelineEvent::FanoutCompleted {
+                attempt: state.attempt(),
                 stage_id: "fanout".into(),
                 child_task_ids: vec!["child-1".into(), "child-2".into()],
                 selected_child: None,
@@ -2750,6 +3033,7 @@ mod tests {
         let (state, _) = apply(
             &state,
             PipelineEvent::StageFailed {
+                attempt: state.attempt(),
                 stage_id: "submit".into(),
                 reason: "forge is unavailable".into(),
             },
@@ -2760,6 +3044,7 @@ mod tests {
         let (state, actions) = apply(
             &state,
             PipelineEvent::StageFailed {
+                attempt: state.attempt(),
                 stage_id: "work".into(),
                 reason: "driver failed".into(),
             },
@@ -2800,12 +3085,12 @@ mod tests {
             state.status = PipelineStatus::Running;
             state.stage_index = index;
             assert_eq!(
-                step(&state, submitted()),
+                step(&state, submitted(&state)),
                 Err(TransitionError::InvalidStageIndex)
             );
             assert!(step(&state, commit("H9", "P9")).is_err());
             assert!(step(&state, main_advanced("H9", "P9", false)).is_err());
-            assert!(step(&state, merged("H9")).is_err());
+            assert!(step(&state, merged(&state, "H9")).is_err());
         }
     }
 
@@ -2883,24 +3168,50 @@ mod tests {
                         _ => {}
                     }
                 }
-                let stage = workflow.stages[rng.below(len)].id.clone();
+                for attempt in &mut state.attempts {
+                    *attempt = rng.below(3) as u32;
+                }
+                let stage = if rng.chance(50) {
+                    state
+                        .current_stage()
+                        .map_or_else(|| "none".into(), |stage| stage.id.clone())
+                } else {
+                    workflow.stages[rng.below(len)].id.clone()
+                };
                 let head = state.current_head.clone();
+                // Mostly the current attempt, sometimes a stale one.
+                let attempt = state.attempt() + u32::from(rng.chance(20));
                 let events = [
                     PipelineEvent::Start,
-                    work("H5", "P5"),
-                    submitted(),
+                    PipelineEvent::WorkCompleted {
+                        stage_id: stage.clone(),
+                        attempt,
+                        product: WorkProduct::Branch {
+                            branch: "b".into(),
+                            head: "H5".into(),
+                            patch_id: "P5".into(),
+                        },
+                    },
+                    PipelineEvent::Submitted {
+                        stage_id: stage.clone(),
+                        attempt,
+                        change_id: None,
+                    },
                     PipelineEvent::CommandFinished {
+                        attempt,
                         stage_id: stage.clone(),
                         head: head.clone(),
                         exit_code: Some(rng.below(2) as i32),
                     },
                     PipelineEvent::ApprovalGranted {
+                        attempt,
                         stage_id: stage.clone(),
                         reviewer: "r2".into(),
                         head: head.clone(),
                         selected_child: rng.chance(30).then(|| "c1".into()),
                     },
                     PipelineEvent::ChangesRequested {
+                        attempt,
                         stage_id: stage.clone(),
                         reviewer: "r2".into(),
                         head: head.clone(),
@@ -2909,18 +3220,30 @@ mod tests {
                     commit("H6", "P6"),
                     main_advanced("H7", "P0", rng.chance(20)),
                     PipelineEvent::FanoutCompleted {
+                        attempt,
                         stage_id: stage.clone(),
                         child_task_ids: vec!["c1".into(), "c2".into()],
                         selected_child: None,
                     },
                     PipelineEvent::StageFailed {
+                        attempt,
                         stage_id: stage.clone(),
                         reason: "x".into(),
                     },
-                    PipelineEvent::StageTimedOut { stage_id: stage },
+                    PipelineEvent::StageTimedOut {
+                        stage_id: stage.clone(),
+                        attempt,
+                    },
                     PipelineEvent::Cancel { reason: "x".into() },
-                    merged(&head.clone().unwrap_or_default()),
+                    PipelineEvent::MergeCompleted {
+                        stage_id: stage.clone(),
+                        attempt,
+                        head: head.clone().unwrap_or_default(),
+                        merge_commit: "M".into(),
+                    },
                     PipelineEvent::MergeFailed {
+                        stage_id: stage.clone(),
+                        attempt,
                         head: head.clone().unwrap_or_default(),
                         reason: "x".into(),
                     },

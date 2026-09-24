@@ -302,12 +302,23 @@ fn success_events(st: &PipelineState, ctr: &mut u32) -> Vec<PipelineEvent> {
                     items: vec!["i1".into(), "i2".into()],
                 },
             };
-            vec![E::WorkCompleted { product: p }]
+            vec![E::WorkCompleted {
+                stage_id: st
+                    .current_stage()
+                    .map_or_else(String::new, |stage| stage.id.clone()),
+                attempt: st.attempt(),
+                product: p,
+            }]
         }
         Stage::Submit { forge } => vec![E::Submitted {
+            stage_id: st
+                .current_stage()
+                .map_or_else(String::new, |stage| stage.id.clone()),
+            attempt: st.attempt(),
             change_id: (forge != "local").then(|| "42".into()),
         }],
         Stage::Command { .. } => vec![E::CommandFinished {
+            attempt: st.attempt(),
             stage_id: id,
             head,
             exit_code: Some(0),
@@ -319,6 +330,7 @@ fn success_events(st: &PipelineState, ctr: &mut u32) -> Vec<PipelineEvent> {
             choices
                 .into_iter()
                 .map(|c| E::ApprovalGranted {
+                    attempt: st.attempt(),
                     stage_id: id.clone(),
                     reviewer: reviewer.clone(),
                     head: head.clone(),
@@ -334,6 +346,7 @@ fn success_events(st: &PipelineState, ctr: &mut u32) -> Vec<PipelineEvent> {
             if *join == FanoutJoin::First {
                 kids.iter()
                     .map(|w| E::FanoutCompleted {
+                        attempt: st.attempt(),
                         stage_id: id.clone(),
                         child_task_ids: kids.clone(),
                         selected_child: Some(w.clone()),
@@ -341,6 +354,7 @@ fn success_events(st: &PipelineState, ctr: &mut u32) -> Vec<PipelineEvent> {
                     .collect()
             } else {
                 vec![E::FanoutCompleted {
+                    attempt: st.attempt(),
                     stage_id: id,
                     child_task_ids: kids,
                     selected_child: None,
@@ -348,6 +362,10 @@ fn success_events(st: &PipelineState, ctr: &mut u32) -> Vec<PipelineEvent> {
             }
         }
         Stage::Merge => vec![E::MergeCompleted {
+            stage_id: st
+                .current_stage()
+                .map_or_else(String::new, |stage| stage.id.clone()),
+            attempt: st.attempt(),
             head: head.unwrap_or_default(),
             merge_commit: "M".into(),
         }],
@@ -403,6 +421,7 @@ fn all_events(n: &Node, ctr: &mut u32) -> Vec<(Cls, PipelineEvent)> {
         v.push((
             Cls::Fail,
             E::CommandFinished {
+                attempt: st.attempt(),
                 stage_id: id.clone(),
                 head: head.clone(),
                 exit_code: Some(1),
@@ -411,6 +430,7 @@ fn all_events(n: &Node, ctr: &mut u32) -> Vec<(Cls, PipelineEvent)> {
         v.push((
             Cls::Fail,
             E::CommandFinished {
+                attempt: st.attempt(),
                 stage_id: id.clone(),
                 head: head.clone(),
                 exit_code: None,
@@ -419,6 +439,7 @@ fn all_events(n: &Node, ctr: &mut u32) -> Vec<(Cls, PipelineEvent)> {
         v.push((
             Cls::Fail,
             E::ChangesRequested {
+                attempt: st.attempt(),
                 stage_id: id.clone(),
                 reviewer: "rvX".into(),
                 head: head.clone(),
@@ -428,6 +449,7 @@ fn all_events(n: &Node, ctr: &mut u32) -> Vec<(Cls, PipelineEvent)> {
         v.push((
             Cls::Fail,
             E::StageFailed {
+                attempt: st.attempt(),
                 stage_id: id.clone(),
                 reason: "boom".into(),
             },
@@ -435,6 +457,10 @@ fn all_events(n: &Node, ctr: &mut u32) -> Vec<(Cls, PipelineEvent)> {
         v.push((
             Cls::Fail,
             E::MergeFailed {
+                stage_id: st
+                    .current_stage()
+                    .map_or_else(String::new, |stage| stage.id.clone()),
+                attempt: st.attempt(),
                 head: head.clone().unwrap_or_default(),
                 reason: "refused".into(),
             },
@@ -445,6 +471,10 @@ fn all_events(n: &Node, ctr: &mut u32) -> Vec<(Cls, PipelineEvent)> {
         v.push((
             Cls::Noise,
             E::WorkCompleted {
+                stage_id: st
+                    .current_stage()
+                    .map_or_else(String::new, |stage| stage.id.clone()),
+                attempt: st.attempt(),
                 product: WorkProduct::Branch {
                     branch: "agend/T/b".into(),
                     head: h.clone(),
@@ -456,6 +486,10 @@ fn all_events(n: &Node, ctr: &mut u32) -> Vec<(Cls, PipelineEvent)> {
     v.push((
         Cls::Noise,
         E::WorkCompleted {
+            stage_id: st
+                .current_stage()
+                .map_or_else(String::new, |stage| stage.id.clone()),
+            attempt: st.attempt(),
             product: WorkProduct::Result {
                 summary: "wrong".into(),
                 output: None,
@@ -465,6 +499,7 @@ fn all_events(n: &Node, ctr: &mut u32) -> Vec<(Cls, PipelineEvent)> {
     v.push((
         Cls::Noise,
         E::CommandFinished {
+            attempt: st.attempt(),
             stage_id: id.clone(),
             head: Some("STALE".into()),
             exit_code: Some(0),
@@ -473,6 +508,7 @@ fn all_events(n: &Node, ctr: &mut u32) -> Vec<(Cls, PipelineEvent)> {
     v.push((
         Cls::Noise,
         E::CommandFinished {
+            attempt: st.attempt(),
             stage_id: "nope".into(),
             head: head.clone(),
             exit_code: Some(0),
@@ -481,6 +517,7 @@ fn all_events(n: &Node, ctr: &mut u32) -> Vec<(Cls, PipelineEvent)> {
     v.push((
         Cls::Noise,
         E::ApprovalGranted {
+            attempt: st.attempt(),
             stage_id: id.clone(),
             reviewer: "rv0".into(),
             head: Some("STALE".into()),
@@ -490,6 +527,7 @@ fn all_events(n: &Node, ctr: &mut u32) -> Vec<(Cls, PipelineEvent)> {
     v.push((
         Cls::Noise,
         E::ApprovalGranted {
+            attempt: st.attempt(),
             stage_id: id.clone(),
             reviewer: "rv0".into(),
             head: head.clone(),
@@ -499,6 +537,7 @@ fn all_events(n: &Node, ctr: &mut u32) -> Vec<(Cls, PipelineEvent)> {
     v.push((
         Cls::Noise,
         E::ApprovalGranted {
+            attempt: st.attempt(),
             stage_id: id.clone(),
             reviewer: "rvZ".into(),
             head: head.clone(),
@@ -508,6 +547,7 @@ fn all_events(n: &Node, ctr: &mut u32) -> Vec<(Cls, PipelineEvent)> {
     v.push((
         Cls::Noise,
         E::ApprovalGranted {
+            attempt: st.attempt(),
             stage_id: "nope".into(),
             reviewer: "rvY".into(),
             head: head.clone(),
@@ -517,6 +557,10 @@ fn all_events(n: &Node, ctr: &mut u32) -> Vec<(Cls, PipelineEvent)> {
     v.push((
         Cls::Noise,
         E::MergeCompleted {
+            stage_id: st
+                .current_stage()
+                .map_or_else(String::new, |stage| stage.id.clone()),
+            attempt: st.attempt(),
             head: "STALE".into(),
             merge_commit: "M".into(),
         },
@@ -524,6 +568,10 @@ fn all_events(n: &Node, ctr: &mut u32) -> Vec<(Cls, PipelineEvent)> {
     v.push((
         Cls::Noise,
         E::MergeFailed {
+            stage_id: st
+                .current_stage()
+                .map_or_else(String::new, |stage| stage.id.clone()),
+            attempt: st.attempt(),
             head: "STALE".into(),
             reason: "x".into(),
         },
@@ -531,6 +579,7 @@ fn all_events(n: &Node, ctr: &mut u32) -> Vec<(Cls, PipelineEvent)> {
     v.push((
         Cls::Noise,
         E::FanoutCompleted {
+            attempt: st.attempt(),
             stage_id: id.clone(),
             child_task_ids: vec![],
             selected_child: None,
@@ -541,6 +590,10 @@ fn all_events(n: &Node, ctr: &mut u32) -> Vec<(Cls, PipelineEvent)> {
     v.push((
         Cls::Noise,
         E::Submitted {
+            stage_id: st
+                .current_stage()
+                .map_or_else(String::new, |stage| stage.id.clone()),
+            attempt: st.attempt(),
             change_id: if local { None } else { Some("43".into()) },
         },
     ));
@@ -550,6 +603,7 @@ fn all_events(n: &Node, ctr: &mut u32) -> Vec<(Cls, PipelineEvent)> {
     v.push((
         Cls::Noise,
         E::StageTimedOut {
+            attempt: st.attempt(),
             stage_id: id.clone(),
         },
     ));
@@ -761,6 +815,7 @@ fn explore(wf: Workflow, stats: &mut Stats, shown: &mut u32, cap: usize, heads: 
             // oracle bookkeeping
             if let PipelineEvent::WorkCompleted {
                 product: WorkProduct::Branch { head, patch_id, .. },
+                ..
             } = &ev
             {
                 m.patch_of.insert(head.clone(), patch_id.clone());
@@ -783,6 +838,7 @@ fn explore(wf: Workflow, stats: &mut Stats, shown: &mut u32, cap: usize, heads: 
                 stage_id,
                 head: Some(h),
                 exit_code: Some(0),
+                ..
             } = &ev
             {
                 m.cmd_pass.insert((stage_id.clone(), h.clone()));

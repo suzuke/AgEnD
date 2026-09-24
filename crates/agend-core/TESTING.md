@@ -49,6 +49,7 @@ cargo xtask accept core
 | 每條序列最多步數 | 60；進入終止狀態後再送 3 個事件，必須全被拒絕 |
 | 事件組成 | 約 6 成是目前關卡的合理事件、1.5 成 head 變更、2 成過期或偽造的結果、其餘是失敗、逾時、取消 |
 | 竄改狀態測試 | 在 crate 內（`pipeline::state::tests`，外部無法偽造 state）：5 個 workflow × 3,000 個竄改狀態 × 14 個事件 = 210,000 次 |
+| 事件身分 | `tests/event_identity.rs`：verifier r4 的反例寫成 `verifier_r4_*` 回歸測試（merge 送出中收到關卡失敗、未滿人數的挑選撐過 head 變更、上一輪 fanout 的完成、重複的 work 完成），以及 action 帶身分、沒有 branch 的 workflow 拒收新 commit、挑選清單不列已取消的子 task。兩個探索器都會重送先前被接受的結果、送過期或未來的 attempt，並檢查「身分不符的事件從不被接受」與「merge 送出中只接受它的結果與 head 變更」；可完成證明在每個關卡往前走之後重送同樣的結果，必須被拒絕。把 r4 的四個問題逐一放回程式，都有測試失敗 |
 | 可完成性 | `tests/workflow_completability.rs`：存檔檢查的可完成證明（見下方）之外的獨立檢查。verifier r2、r3 的反例寫成 `verifier_r2_*`、`verifier_r3_*` 回歸測試；隨機 workflow 產生器預設 200,000 個 workflow（`-- --ignored` 再跑 1,000,000 個），每個被 `validate` 接受的都要能用獨立的成功事件驅動器走到 done，隨機干擾（失敗、要求修改、新 commit、main 前進、merge 失敗、逾時）之後也要。拿掉可完成證明與新文法的舊 validate 會讓它失敗 |
 | 死路探索器 | `tests/pipeline_deadend_explorer.rs`（`--ignored`，建議 `--release`，約 2 分鐘）：verifier r3 寫的 PCG32 產生器與廣度優先搜尋，對每個被接受的 workflow 探索有限次 head 變更與失敗，確認每個可達狀態都還能只靠成功事件走到 done；60,000 個 workflow、約 410 萬個狀態、0 死路、0 違反 |
 | 第二個探索器 | `tests/pipeline_explorer_splitmix.rs`：fresh-context verifier 寫的 SplitMix64 探索器，8 個 workflow × 3,000 條序列 × 最多 80 步（`AGEND_EXPLORER2_SEQUENCES` 可調大）；它的 oracle 只算「前一個 work 最近一次完成之後」的 check 與核准 |
@@ -59,8 +60,9 @@ cargo xtask accept core
 2. 不跳過關卡：關卡只會因目前關卡自己的完成事件前進，中間只能跳過已滿足的 approval；過了 submit 之後一定收過 `Submitted`。
 3. 返工不遺失：work 期間 head 變更不改關卡、不發 action；要求修改與 command 失敗會退回（預設最近的 work），不會讓 task 失敗；head 變更永遠不讓 task 前進。
 4. 核准與結果只算給它所屬的 head 與關卡。
-5. 終止狀態（done、failed、cancelled）不接受任何事件；merge 送出後不接受取消。
+5. 終止狀態（done、failed、cancelled）不接受任何事件；merge 送出後只接受它的結果與 head 變更。
 6. `step` 不 panic（包括竄改過的狀態）；竄改狀態下 `MergeCompleted` 被接受時，紀錄必定覆蓋每個 command 與 approval 關卡。
+7. 事件身分：被接受的結果一定是目前關卡、目前 attempt（綁 head 的關卡還要目前 head）的；重送先前被接受的結果一律被拒；merge 送出中只接受它的結果與 head 變更。
 
 失敗訊息附 workflow、種子與完整事件序列，可重現。另外確認過探索器抓得到 review 找到的錯：把 N1／N2（head 變更往前跳）、N2（work 走 D14 路徑）、N3（要求修改讓 task 失敗）、N4（門檻不看不綁 head 的 approval）、B3（command 結果不綁 head）、approval 不綁 head、返工時保留核准（verifier I3）、merge 送出後允許取消逐一放回程式，至少一個探索器或竄改狀態測試會失敗（N4 由竄改狀態測試抓到）。
 

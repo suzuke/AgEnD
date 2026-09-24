@@ -76,6 +76,65 @@ impl Rng {
     }
 }
 
+/// The current attempt, or a stale or future one.
+fn any_attempt(rng: &mut Rng, state: &PipelineState) -> u32 {
+    match rng.below(4) {
+        0 => state.attempt().saturating_sub(1),
+        1 => state.attempt() + 1,
+        _ => state.attempt(),
+    }
+}
+
+/// Stage, attempt and head of a result event (`None` for observations).
+fn result_identity(event: &PipelineEvent) -> Option<(&str, u32, Option<Option<&str>>)> {
+    match event {
+        PipelineEvent::WorkCompleted {
+            stage_id, attempt, ..
+        }
+        | PipelineEvent::Submitted {
+            stage_id, attempt, ..
+        }
+        | PipelineEvent::FanoutCompleted {
+            stage_id, attempt, ..
+        }
+        | PipelineEvent::StageFailed {
+            stage_id, attempt, ..
+        }
+        | PipelineEvent::StageTimedOut { stage_id, attempt } => Some((stage_id, *attempt, None)),
+        PipelineEvent::CommandFinished {
+            stage_id,
+            attempt,
+            head,
+            ..
+        }
+        | PipelineEvent::ApprovalGranted {
+            stage_id,
+            attempt,
+            head,
+            ..
+        }
+        | PipelineEvent::ChangesRequested {
+            stage_id,
+            attempt,
+            head,
+            ..
+        } => Some((stage_id, *attempt, Some(head.as_deref()))),
+        PipelineEvent::MergeCompleted {
+            stage_id,
+            attempt,
+            head,
+            ..
+        }
+        | PipelineEvent::MergeFailed {
+            stage_id,
+            attempt,
+            head,
+            ..
+        } => Some((stage_id, *attempt, Some(Some(head.as_str())))),
+        _ => None,
+    }
+}
+
 fn roles() -> Vec<String> {
     ["dev", "reviewer", "researcher", "planner"]
         .into_iter()
@@ -272,6 +331,8 @@ fn workflows() -> Vec<(&'static str, Workflow)> {
 struct Generator {
     counter: u64,
     heads: Vec<String>,
+    /// Results `step` accepted earlier: replayed as duplicates or stale ones.
+    accepted: Vec<PipelineEvent>,
 }
 
 impl Generator {
@@ -279,6 +340,7 @@ impl Generator {
         Self {
             counter: 0,
             heads: Vec::new(),
+            accepted: Vec::new(),
         }
     }
 
@@ -309,6 +371,10 @@ impl Generator {
     }
 
     fn event(&mut self, rng: &mut Rng, state: &PipelineState, oracle: &Oracle) -> PipelineEvent {
+        // A duplicate or late copy of an earlier accepted result.
+        if !self.accepted.is_empty() && rng.chance(8) {
+            return rng.pick(&self.accepted).clone();
+        }
         let roll = rng.below(100);
         if roll < 62
             && let Some(event) = self.plausible(rng, state)
@@ -329,10 +395,14 @@ impl Generator {
                 reason: "operator".into(),
             },
             1 => PipelineEvent::StageFailed {
+                attempt: state.attempt(),
                 stage_id,
                 reason: "infrastructure".into(),
             },
-            _ => PipelineEvent::StageTimedOut { stage_id },
+            _ => PipelineEvent::StageTimedOut {
+                attempt: state.attempt(),
+                stage_id,
+            },
         }
     }
 
@@ -345,6 +415,10 @@ impl Generator {
         let head = state.current_head().map(String::from);
         Some(match &stage.stage {
             Stage::Work { output, .. } => PipelineEvent::WorkCompleted {
+                stage_id: state
+                    .current_stage()
+                    .map_or_else(String::new, |stage| stage.id.clone()),
+                attempt: state.attempt(),
                 product: match output {
                     WorkOutput::Branch => {
                         let (head, patch_id) = match (state.current_head(), state.patch_id()) {
@@ -369,9 +443,14 @@ impl Generator {
                 },
             },
             Stage::Submit { .. } => PipelineEvent::Submitted {
+                stage_id: state
+                    .current_stage()
+                    .map_or_else(String::new, |stage| stage.id.clone()),
+                attempt: state.attempt(),
                 change_id: rng.chance(80).then(|| "42".into()),
             },
             Stage::Command { .. } => PipelineEvent::CommandFinished {
+                attempt: state.attempt(),
                 stage_id,
                 head,
                 exit_code: match rng.below(10) {
@@ -384,6 +463,7 @@ impl Generator {
                 let reviewer = rng.pick(&REVIEWERS).to_string();
                 if rng.chance(12) {
                     PipelineEvent::ChangesRequested {
+                        attempt: state.attempt(),
                         stage_id,
                         reviewer,
                         head,
@@ -394,6 +474,7 @@ impl Generator {
                         && rng.chance(85))
                     .then(|| rng.pick(state.fanout_child_task_ids()).clone());
                     PipelineEvent::ApprovalGranted {
+                        attempt: state.attempt(),
                         stage_id,
                         reviewer,
                         head,
@@ -402,15 +483,24 @@ impl Generator {
                 }
             }
             Stage::Fanout { join, .. } => PipelineEvent::FanoutCompleted {
+                attempt: state.attempt(),
                 stage_id,
                 child_task_ids: vec!["c1".into(), "c2".into(), "c3".into()],
                 selected_child: (*join == FanoutJoin::First).then(|| "c2".into()),
             },
             Stage::Merge if rng.chance(25) => PipelineEvent::MergeFailed {
+                stage_id: state
+                    .current_stage()
+                    .map_or_else(String::new, |stage| stage.id.clone()),
+                attempt: state.attempt(),
                 head: head.unwrap_or_default(),
                 reason: "forge refused".into(),
             },
             Stage::Merge => PipelineEvent::MergeCompleted {
+                stage_id: state
+                    .current_stage()
+                    .map_or_else(String::new, |stage| stage.id.clone()),
+                attempt: state.attempt(),
                 head: head.unwrap_or_default(),
                 merge_commit: self.fresh("M"),
             },
@@ -442,23 +532,36 @@ impl Generator {
         let reviewer = rng.pick(&REVIEWERS).to_string();
         match rng.below(13) {
             12 => PipelineEvent::MergeFailed {
+                stage_id: state
+                    .current_stage()
+                    .map_or_else(String::new, |stage| stage.id.clone()),
+                attempt: any_attempt(rng, state),
                 head: self.any_head(rng).unwrap_or_default(),
                 reason: "stale".into(),
             },
             0 => PipelineEvent::Start,
-            1 => PipelineEvent::Submitted { change_id: None },
+            1 => PipelineEvent::Submitted {
+                stage_id: state
+                    .current_stage()
+                    .map_or_else(String::new, |stage| stage.id.clone()),
+                attempt: any_attempt(rng, state),
+                change_id: None,
+            },
             2 => PipelineEvent::CommandFinished {
+                attempt: any_attempt(rng, state),
                 stage_id,
                 head: self.any_head(rng),
                 exit_code: Some(0),
             },
             3 => PipelineEvent::ApprovalGranted {
+                attempt: any_attempt(rng, state),
                 stage_id,
                 reviewer,
                 head: self.any_head(rng),
                 selected_child: None,
             },
             4 => PipelineEvent::ApprovalGranted {
+                attempt: any_attempt(rng, state),
                 stage_id: state
                     .current_stage()
                     .map_or_else(String::new, |stage| stage.id.clone()),
@@ -467,16 +570,25 @@ impl Generator {
                 selected_child: Some(if rng.chance(50) { "c9" } else { "c1" }.into()),
             },
             5 => PipelineEvent::ChangesRequested {
+                attempt: any_attempt(rng, state),
                 stage_id,
                 reviewer,
                 head: self.any_head(rng),
                 reason: "stale".into(),
             },
             6 => PipelineEvent::MergeCompleted {
+                stage_id: state
+                    .current_stage()
+                    .map_or_else(String::new, |stage| stage.id.clone()),
+                attempt: any_attempt(rng, state),
                 head: self.any_head(rng).unwrap_or_default(),
                 merge_commit: self.fresh("M"),
             },
             7 => PipelineEvent::WorkCompleted {
+                stage_id: state
+                    .current_stage()
+                    .map_or_else(String::new, |stage| stage.id.clone()),
+                attempt: any_attempt(rng, state),
                 product: match rng.below(3) {
                     0 => WorkProduct::Result {
                         summary: "wrong kind".into(),
@@ -491,6 +603,7 @@ impl Generator {
                 },
             },
             8 => PipelineEvent::FanoutCompleted {
+                attempt: any_attempt(rng, state),
                 stage_id,
                 child_task_ids: match rng.below(3) {
                     0 => Vec::new(),
@@ -500,10 +613,14 @@ impl Generator {
                 selected_child: None,
             },
             9 => PipelineEvent::StageFailed {
+                attempt: any_attempt(rng, state),
                 stage_id,
                 reason: "stale failure".into(),
             },
-            10 => PipelineEvent::StageTimedOut { stage_id },
+            10 => PipelineEvent::StageTimedOut {
+                attempt: any_attempt(rng, state),
+                stage_id,
+            },
             _ => PipelineEvent::MainAdvanced {
                 rebased_head: state.current_head().map(String::from).unwrap_or_default(),
                 patch_id: state.patch_id().map(String::from).unwrap_or_default(),
@@ -562,7 +679,7 @@ impl Oracle {
                 }
             }
             PipelineEvent::MergeCompleted { .. } => self.pending.clear(),
-            PipelineEvent::WorkCompleted { product } => {
+            PipelineEvent::WorkCompleted { product, .. } => {
                 if let WorkProduct::Branch { head, patch_id, .. } = product {
                     self.set_head(head, patch_id);
                     self.has_branch = true;
@@ -574,6 +691,7 @@ impl Oracle {
                 stage_id,
                 head,
                 exit_code: Some(0),
+                ..
             } => {
                 self.passed.insert((stage_id.clone(), head.clone()));
             }
@@ -766,6 +884,40 @@ fn check_step(
     // 5. Terminal states are terminal.
     if before.status().is_terminal() {
         return Err(format!("{:?} pipeline accepted an event", before.status()));
+    }
+    // Event identity: an accepted result is for the current stage, attempt
+    // and, when the stage is head-bound, head.
+    if let Some((stage_id, attempt, head)) = result_identity(event) {
+        let current = before.current_stage();
+        if current.map(|stage| stage.id.as_str()) != Some(stage_id) || before.attempt() != attempt {
+            return Err(format!("stale result accepted: {event:?}"));
+        }
+        let head_bound = current.is_some_and(|stage| {
+            matches!(
+                stage.stage,
+                Stage::Command { .. }
+                    | Stage::Merge
+                    | Stage::Approval {
+                        bind_head: true,
+                        ..
+                    }
+            )
+        });
+        if head_bound && head.is_some_and(|head| head != before.current_head()) {
+            return Err(format!("result for another head accepted: {event:?}"));
+        }
+    }
+    // While the merge is in flight only its result or a head change counts.
+    if before.merge_in_flight()
+        && !matches!(
+            event,
+            PipelineEvent::MergeCompleted { .. }
+                | PipelineEvent::MergeFailed { .. }
+                | PipelineEvent::CommitCreated { .. }
+                | PipelineEvent::MainAdvanced { .. }
+        )
+    {
+        return Err(format!("{event:?} accepted while the merge was in flight"));
     }
     // Head tracking matches the accepted events.
     if after.current_head() != oracle.head.as_deref() {
@@ -1027,6 +1179,9 @@ fn run_sequence(
             continue;
         };
         stats.accepted += 1;
+        if result_identity(&event).is_some() {
+            generator.accepted.push(event.clone());
+        }
         oracle.record(&state, &event);
         for action in &actions {
             if let PipelineAction::ReturnToWork { stage_id, .. } = action {

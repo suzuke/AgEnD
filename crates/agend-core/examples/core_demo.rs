@@ -107,11 +107,13 @@ fn main() {
     println!("  reviewer   -> {reviewer}");
 
     state = transition(&state, "start", PipelineEvent::Start);
-    state = transition(&state, "work", branch("H0", "P0"));
-    state = transition(&state, "submit", submitted());
-    state = transition(&state, "command failed", command_result(&state, Some(1)));
-    state = transition(&state, "work retry", branch("H1", "P1"));
-    state = transition(&state, "submit", submitted());
+    state = transition(&state, "work", branch(&state, "H0", "P0"));
+    state = transition(&state, "submit", submitted(&state));
+    let failed_checks = command_result(&state, Some(1));
+    state = transition(&state, "command failed", failed_checks.clone());
+    rejected(&state, "same result again", failed_checks);
+    state = transition(&state, "work retry", branch(&state, "H1", "P1"));
+    state = transition(&state, "submit", submitted(&state));
     state = transition(&state, "command passed", command_result(&state, Some(0)));
     state = transition(
         &state,
@@ -127,8 +129,8 @@ fn main() {
             conflict: false,
         },
     );
-    state = transition(&state, "rework done", branch("H1c", "P1c"));
-    state = transition(&state, "submit", submitted());
+    state = transition(&state, "rework done", branch(&state, "H1c", "P1c"));
+    state = transition(&state, "submit", submitted(&state));
     state = transition(&state, "command passed", command_result(&state, Some(0)));
     state = transition(
         &state,
@@ -148,8 +150,12 @@ fn main() {
             conflict: false,
         },
     );
-    state = transition(&state, "work after changed patch", branch("H4", "P4"));
-    state = transition(&state, "submit", submitted());
+    state = transition(
+        &state,
+        "work after changed patch",
+        branch(&state, "H4", "P4"),
+    );
+    state = transition(&state, "submit", submitted(&state));
     state = transition(&state, "command passed", command_result(&state, Some(0)));
     state = transition(&state, "approval H4", approve(&state, &reviewer));
     state = transition(
@@ -165,6 +171,8 @@ fn main() {
         &state,
         "merge failed",
         PipelineEvent::MergeFailed {
+            stage_id: stage_id(&state),
+            attempt: state.attempt(),
             head: "H4".into(),
             reason: "main moved".into(),
         },
@@ -174,6 +182,8 @@ fn main() {
         &state,
         "merge completed",
         PipelineEvent::MergeCompleted {
+            stage_id: stage_id(&state),
+            attempt: state.attempt(),
             head: "H5".into(),
             merge_commit: "M1".into(),
         },
@@ -181,8 +191,10 @@ fn main() {
     assert_eq!(state.merge_commit(), Some("M1"));
 }
 
-fn branch(head: &str, patch_id: &str) -> PipelineEvent {
+fn branch(state: &PipelineState, head: &str, patch_id: &str) -> PipelineEvent {
     PipelineEvent::WorkCompleted {
+        stage_id: stage_id(state),
+        attempt: state.attempt(),
         product: WorkProduct::Branch {
             branch: "agend/T-1/demo".into(),
             head: head.into(),
@@ -191,8 +203,12 @@ fn branch(head: &str, patch_id: &str) -> PipelineEvent {
     }
 }
 
-fn submitted() -> PipelineEvent {
-    PipelineEvent::Submitted { change_id: None }
+fn submitted(state: &PipelineState) -> PipelineEvent {
+    PipelineEvent::Submitted {
+        stage_id: stage_id(state),
+        attempt: state.attempt(),
+        change_id: None,
+    }
 }
 
 fn stage_id(state: &PipelineState) -> String {
@@ -202,6 +218,7 @@ fn stage_id(state: &PipelineState) -> String {
 fn command_result(state: &PipelineState, exit_code: Option<i32>) -> PipelineEvent {
     PipelineEvent::CommandFinished {
         stage_id: stage_id(state),
+        attempt: state.attempt(),
         head: state.current_head().map(String::from),
         exit_code,
     }
@@ -210,6 +227,7 @@ fn command_result(state: &PipelineState, exit_code: Option<i32>) -> PipelineEven
 fn approve(state: &PipelineState, reviewer: &str) -> PipelineEvent {
     PipelineEvent::ApprovalGranted {
         stage_id: stage_id(state),
+        attempt: state.attempt(),
         reviewer: reviewer.into(),
         head: state.current_head().map(String::from),
         selected_child: None,
@@ -219,10 +237,17 @@ fn approve(state: &PipelineState, reviewer: &str) -> PipelineEvent {
 fn request_changes(state: &PipelineState, reviewer: &str) -> PipelineEvent {
     PipelineEvent::ChangesRequested {
         stage_id: stage_id(state),
+        attempt: state.attempt(),
         reviewer: reviewer.into(),
         head: state.current_head().map(String::from),
         reason: "rename the flag".into(),
     }
+}
+
+/// A result whose identity is not the current stage attempt is refused.
+fn rejected(state: &PipelineState, label: &str, event: PipelineEvent) {
+    let error = step(state, event).expect_err("a stale result must be rejected");
+    println!("  {label:<25} -> rejected: {error}");
 }
 
 fn transition(state: &PipelineState, label: &str, event: PipelineEvent) -> PipelineState {
@@ -262,7 +287,7 @@ fn transition(state: &PipelineState, label: &str, event: PipelineEvent) -> Pipel
 fn action_summary(action: &PipelineAction) -> Option<String> {
     match action {
         PipelineAction::ScheduleTimeout { .. } => None,
-        PipelineAction::AssignWork { stage_id, role } => {
+        PipelineAction::AssignWork { stage_id, role, .. } => {
             Some(format!("assign role {role} ({stage_id})"))
         }
         PipelineAction::Submit { forge, .. } => Some(format!("submit via {forge}")),

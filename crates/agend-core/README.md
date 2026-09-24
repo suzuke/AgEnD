@@ -33,7 +33,7 @@
 | `pipeline::stage` | 六種關卡與 fanout join |
 | `pipeline::task` | task 關係、workflow 版本 pinning 與操作 |
 | `pipeline::workflow` | typed workflow、內建 workflow（`code`、`research`、`epic`、`planned`）、存檔檢查（D19）；`Workflow::validated` 產生唯一能建 pipeline 的 `ValidatedWorkflow` |
-| `pipeline::state` | 純函式 `step` 與 side-effect actions；head 變更不讓 task 前進（work 中只記錄 head）；要求修改與 check 失敗退回最近的 work（返工回 task 持有者）；取消（merge 送出後不可取消）；欄位私有、只讀 accessor；fanout `all`／`first`／`pick` join 和選擇 |
+| `pipeline::state` | 純函式 `step` 與 side-effect actions；事件身分：結果必須帶目前的關卡、attempt（綁 head 的關卡另帶 head），否則 `StaleResult`；head 變更不讓 task 前進（work 中只記錄 head）；要求修改與 check 失敗退回最近的 work（返工回 task 持有者）；取消（merge 送出後不可取消）；欄位私有、只讀 accessor；fanout `all`／`first`／`pick` join 和選擇 |
 | `policy::busy` | `BusyLevel`、`effective_level` |
 | `policy::debounce` | busy 立即生效；idle 穩定 5 秒 |
 | `policy::conflict` | 檔案重疊偵測 |

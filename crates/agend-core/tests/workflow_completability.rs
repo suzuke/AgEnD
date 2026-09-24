@@ -87,8 +87,12 @@ fn merge() -> WorkflowStage {
     WorkflowStage::new("m", Stage::Merge)
 }
 
-fn branch(head: &str, patch: &str) -> PipelineEvent {
+fn branch(state: &PipelineState, head: &str, patch: &str) -> PipelineEvent {
     PipelineEvent::WorkCompleted {
+        stage_id: state
+            .current_stage()
+            .map_or_else(String::new, |stage| stage.id.clone()),
+        attempt: state.attempt(),
         product: WorkProduct::Branch {
             branch: "b".into(),
             head: head.into(),
@@ -103,6 +107,7 @@ fn ok(state: &PipelineState, event: PipelineEvent) -> (PipelineState, Vec<Pipeli
 
 fn command_result(state: &PipelineState, exit_code: i32) -> PipelineEvent {
     PipelineEvent::CommandFinished {
+        attempt: state.attempt(),
         stage_id: state.current_stage().unwrap().id.clone(),
         head: state.current_head().map(String::from),
         exit_code: Some(exit_code),
@@ -188,6 +193,10 @@ fn rework_after_a_fanout_keeps_its_children() {
     state = ok(
         &state,
         PipelineEvent::WorkCompleted {
+            stage_id: state
+                .current_stage()
+                .map_or_else(String::new, |stage| stage.id.clone()),
+            attempt: state.attempt(),
             product: WorkProduct::Result {
                 summary: "s".into(),
                 output: None,
@@ -198,6 +207,7 @@ fn rework_after_a_fanout_keeps_its_children() {
     state = ok(
         &state,
         PipelineEvent::FanoutCompleted {
+            attempt: state.attempt(),
             stage_id: "fan".into(),
             child_task_ids: vec!["a".into(), "b".into()],
             selected_child: None,
@@ -207,6 +217,7 @@ fn rework_after_a_fanout_keeps_its_children() {
     state = ok(
         &state,
         PipelineEvent::ApprovalGranted {
+            attempt: state.attempt(),
             stage_id: "pick".into(),
             reviewer: "r".into(),
             head: None,
@@ -214,11 +225,12 @@ fn rework_after_a_fanout_keeps_its_children() {
         },
     )
     .0;
-    state = ok(&state, branch("H1", "P1")).0;
+    state = ok(&state, branch(&state, "H1", "P1")).0;
     let failing = command_result(&state, 1);
     let (reworked, _) = ok(&state, failing);
     assert_eq!(reworked.current_stage().unwrap().id, "impl");
-    assert_eq!(reworked.fanout_child_task_ids(), ["a", "b"]);
+    // The pick cancelled the sibling, so only the winner is still a child.
+    assert_eq!(reworked.fanout_child_task_ids(), ["b"]);
     assert_eq!(reworked.selected_fanout_child(), Some("b"));
 }
 
@@ -240,13 +252,24 @@ fn verifier_r2_merge_failure_with_several_pending_changes_runs_checks_once() {
     ]);
     let mut state = PipelineState::new("T", workflow.validated(&roles()).unwrap());
     state = ok(&state, PipelineEvent::Start).0;
-    state = ok(&state, branch("H1", "P1")).0;
-    state = ok(&state, PipelineEvent::Submitted { change_id: None }).0;
+    state = ok(&state, branch(&state, "H1", "P1")).0;
+    state = ok(
+        &state,
+        PipelineEvent::Submitted {
+            stage_id: state
+                .current_stage()
+                .map_or_else(String::new, |stage| stage.id.clone()),
+            attempt: state.attempt(),
+            change_id: None,
+        },
+    )
+    .0;
     let passing = command_result(&state, 0);
     state = ok(&state, passing).0;
     state = ok(
         &state,
         PipelineEvent::ApprovalGranted {
+            attempt: state.attempt(),
             stage_id: "r".into(),
             reviewer: "x".into(),
             head: Some("H1".into()),
@@ -286,6 +309,10 @@ fn verifier_r2_merge_failure_with_several_pending_changes_runs_checks_once() {
         Err(TransitionError::MergeInFlight)
     );
     let stale_failure = PipelineEvent::MergeFailed {
+        stage_id: state
+            .current_stage()
+            .map_or_else(String::new, |stage| stage.id.clone()),
+        attempt: state.attempt(),
         head: "H2".into(),
         reason: "r".into(),
     };
@@ -294,6 +321,10 @@ fn verifier_r2_merge_failure_with_several_pending_changes_runs_checks_once() {
         Err(TransitionError::StaleResult)
     );
     let failed = PipelineEvent::MergeFailed {
+        stage_id: state
+            .current_stage()
+            .map_or_else(String::new, |stage| stage.id.clone()),
+        attempt: state.attempt(),
         head: "H1".into(),
         reason: "r".into(),
     };
@@ -311,6 +342,10 @@ fn verifier_r2_merge_failure_with_several_pending_changes_runs_checks_once() {
     let (done, _) = ok(
         &state,
         PipelineEvent::MergeCompleted {
+            stage_id: state
+                .current_stage()
+                .map_or_else(String::new, |stage| stage.id.clone()),
+            attempt: state.attempt(),
             head: "H1".into(),
             merge_commit: "M".into(),
         },
@@ -321,6 +356,10 @@ fn verifier_r2_merge_failure_with_several_pending_changes_runs_checks_once() {
     let (back, _) = ok(
         &conflicted,
         PipelineEvent::MergeFailed {
+            stage_id: conflicted
+                .current_stage()
+                .map_or_else(String::new, |stage| stage.id.clone()),
+            attempt: conflicted.attempt(),
             head: "H1".into(),
             reason: "r".into(),
         },
@@ -423,12 +462,13 @@ fn verifier_r3_pick_fanout_rerun_requires_a_new_pick() {
     ]);
     let mut state = PipelineState::new("T", workflow.validated(&roles()).unwrap());
     state = ok(&state, PipelineEvent::Start).0;
-    state = ok(&state, branch("H1", "P1")).0;
+    state = ok(&state, branch(&state, "H1", "P1")).0;
     let passing = command_result(&state, 0);
     state = ok(&state, passing).0;
     state = ok(
         &state,
         PipelineEvent::FanoutCompleted {
+            attempt: state.attempt(),
             stage_id: "f".into(),
             child_task_ids: vec!["a".into(), "b".into()],
             selected_child: None,
@@ -438,6 +478,7 @@ fn verifier_r3_pick_fanout_rerun_requires_a_new_pick() {
     state = ok(
         &state,
         PipelineEvent::ApprovalGranted {
+            attempt: state.attempt(),
             stage_id: "pick".into(),
             reviewer: "human".into(),
             head: None,
@@ -475,6 +516,7 @@ fn verifier_r3_pick_fanout_rerun_requires_a_new_pick() {
     let (state, _) = ok(
         &state,
         PipelineEvent::FanoutCompleted {
+            attempt: state.attempt(),
             stage_id: "f".into(),
             child_task_ids: vec!["a2".into(), "b2".into()],
             selected_child: None,
@@ -486,6 +528,7 @@ fn verifier_r3_pick_fanout_rerun_requires_a_new_pick() {
         "the pick is asked again"
     );
     let stale_pick = PipelineEvent::ApprovalGranted {
+        attempt: state.attempt(),
         stage_id: "pick".into(),
         reviewer: "human".into(),
         head: None,
@@ -498,6 +541,7 @@ fn verifier_r3_pick_fanout_rerun_requires_a_new_pick() {
     let (state, _) = ok(
         &state,
         PipelineEvent::ApprovalGranted {
+            attempt: state.attempt(),
             stage_id: "pick".into(),
             reviewer: "human".into(),
             head: None,
@@ -507,6 +551,7 @@ fn verifier_r3_pick_fanout_rerun_requires_a_new_pick() {
     let (state, _) = ok(
         &state,
         PipelineEvent::ApprovalGranted {
+            attempt: state.attempt(),
             stage_id: "rev".into(),
             reviewer: "r".into(),
             head: Some("H2".into()),
@@ -516,6 +561,10 @@ fn verifier_r3_pick_fanout_rerun_requires_a_new_pick() {
     let (done, _) = ok(
         &state,
         PipelineEvent::MergeCompleted {
+            stage_id: state
+                .current_stage()
+                .map_or_else(String::new, |stage| stage.id.clone()),
+            attempt: state.attempt(),
             head: "H2".into(),
             merge_commit: "M".into(),
         },
@@ -663,6 +712,10 @@ fn success(state: &PipelineState, variant: usize) -> Vec<PipelineEvent> {
     let head = state.current_head().map(String::from);
     match &stage.stage {
         Stage::Work { output, .. } => vec![PipelineEvent::WorkCompleted {
+            stage_id: state
+                .current_stage()
+                .map_or_else(String::new, |stage| stage.id.clone()),
+            attempt: state.attempt(),
             product: match output {
                 WorkOutput::Branch => {
                     let head = fresh_head();
@@ -682,9 +735,14 @@ fn success(state: &PipelineState, variant: usize) -> Vec<PipelineEvent> {
             },
         }],
         Stage::Submit { forge } => vec![PipelineEvent::Submitted {
+            stage_id: state
+                .current_stage()
+                .map_or_else(String::new, |stage| stage.id.clone()),
+            attempt: state.attempt(),
             change_id: (forge != "local").then(|| "9".into()),
         }],
         Stage::Command { .. } => vec![PipelineEvent::CommandFinished {
+            attempt: state.attempt(),
             stage_id,
             head,
             exit_code: Some(0),
@@ -700,6 +758,7 @@ fn success(state: &PipelineState, variant: usize) -> Vec<PipelineEvent> {
             };
             (0..*count)
                 .map(|reviewer| PipelineEvent::ApprovalGranted {
+                    attempt: state.attempt(),
                     stage_id: stage_id.clone(),
                     reviewer: format!("r{reviewer}"),
                     head: if *bind_head { head.clone() } else { None },
@@ -713,12 +772,17 @@ fn success(state: &PipelineState, variant: usize) -> Vec<PipelineEvent> {
                 FanoutSource::WorkOutput => vec!["k1".into(), "k2".into()],
             };
             vec![PipelineEvent::FanoutCompleted {
+                attempt: state.attempt(),
                 stage_id,
                 selected_child: (*join == FanoutJoin::First).then(|| children[0].clone()),
                 child_task_ids: children,
             }]
         }
         Stage::Merge => vec![PipelineEvent::MergeCompleted {
+            stage_id: state
+                .current_stage()
+                .map_or_else(String::new, |stage| stage.id.clone()),
+            attempt: state.attempt(),
             head: head.unwrap_or_default(),
             merge_commit: "M".into(),
         }],
@@ -770,11 +834,13 @@ fn disturbance(rng: &mut SplitMix, state: &PipelineState) -> PipelineEvent {
     let head = state.current_head().map(String::from);
     match rng.below(9) {
         0 => PipelineEvent::CommandFinished {
+            attempt: state.attempt(),
             stage_id,
             head,
             exit_code: Some(1),
         },
         1 => PipelineEvent::ChangesRequested {
+            attempt: state.attempt(),
             stage_id,
             reviewer: "r0".into(),
             head,
@@ -797,11 +863,19 @@ fn disturbance(rng: &mut SplitMix, state: &PipelineState) -> PipelineEvent {
             conflict: rng.chance(30),
         },
         4 => PipelineEvent::MergeFailed {
+            stage_id: state
+                .current_stage()
+                .map_or_else(String::new, |stage| stage.id.clone()),
+            attempt: state.attempt(),
             head: head.unwrap_or_default(),
             reason: "x".into(),
         },
-        5 => PipelineEvent::StageTimedOut { stage_id },
+        5 => PipelineEvent::StageTimedOut {
+            attempt: state.attempt(),
+            stage_id,
+        },
         6 => PipelineEvent::StageFailed {
+            attempt: state.attempt(),
             stage_id,
             reason: "x".into(),
         },

@@ -309,6 +309,65 @@ fn head_event(o: &mut Or, e: &PipelineEvent) {
     }
 }
 
+/// Stage, attempt and head of a result event (`None` for observations).
+fn result_identity(e: &PipelineEvent) -> Option<(&str, u32, Option<Option<&str>>)> {
+    match e {
+        PipelineEvent::WorkCompleted {
+            stage_id, attempt, ..
+        }
+        | PipelineEvent::Submitted {
+            stage_id, attempt, ..
+        }
+        | PipelineEvent::FanoutCompleted {
+            stage_id, attempt, ..
+        }
+        | PipelineEvent::StageFailed {
+            stage_id, attempt, ..
+        }
+        | PipelineEvent::StageTimedOut { stage_id, attempt } => Some((stage_id, *attempt, None)),
+        PipelineEvent::CommandFinished {
+            stage_id,
+            attempt,
+            head,
+            ..
+        }
+        | PipelineEvent::ApprovalGranted {
+            stage_id,
+            attempt,
+            head,
+            ..
+        }
+        | PipelineEvent::ChangesRequested {
+            stage_id,
+            attempt,
+            head,
+            ..
+        } => Some((stage_id, *attempt, Some(head.as_deref()))),
+        PipelineEvent::MergeCompleted {
+            stage_id,
+            attempt,
+            head,
+            ..
+        }
+        | PipelineEvent::MergeFailed {
+            stage_id,
+            attempt,
+            head,
+            ..
+        } => Some((stage_id, *attempt, Some(Some(head.as_str())))),
+        _ => None,
+    }
+}
+
+/// The current attempt, or a stale or future one.
+fn jitter(r: &mut Sm, s: &PipelineState) -> u32 {
+    match r.b(4) {
+        0 => s.attempt().saturating_sub(1),
+        1 => s.attempt() + 1,
+        _ => s.attempt(),
+    }
+}
+
 fn genev(r: &mut Sm, s: &PipelineState, heads: &mut Vec<String>, o: &Or) -> PipelineEvent {
     let ids: Vec<String> = s
         .workflow()
@@ -354,11 +413,16 @@ fn genev(r: &mut Sm, s: &PipelineState, heads: &mut Vec<String>, o: &Or) -> Pipe
         match &st.stage {
             Stage::Submit { .. } => {
                 return PipelineEvent::Submitted {
+                    stage_id: s
+                        .current_stage()
+                        .map_or_else(String::new, |stage| stage.id.clone()),
+                    attempt: s.attempt(),
                     change_id: Some("5".into()),
                 };
             }
             Stage::Command { .. } => {
                 return PipelineEvent::CommandFinished {
+                    attempt: s.attempt(),
                     stage_id: cur.clone(),
                     head: s.current_head().map(String::from),
                     exit_code: if r.p(90) { Some(0) } else { Some(1) },
@@ -366,6 +430,7 @@ fn genev(r: &mut Sm, s: &PipelineState, heads: &mut Vec<String>, o: &Or) -> Pipe
             }
             Stage::Approval { .. } if r.p(90) => {
                 return PipelineEvent::ApprovalGranted {
+                    attempt: s.attempt(),
                     stage_id: cur.clone(),
                     reviewer: rv(r),
                     head: s.current_head().map(String::from),
@@ -377,6 +442,7 @@ fn genev(r: &mut Sm, s: &PipelineState, heads: &mut Vec<String>, o: &Or) -> Pipe
             }
             Stage::Fanout { .. } => {
                 return PipelineEvent::FanoutCompleted {
+                    attempt: s.attempt(),
                     stage_id: cur.clone(),
                     child_task_ids: vec!["k1".into(), "k2".into()],
                     selected_child: None,
@@ -384,12 +450,20 @@ fn genev(r: &mut Sm, s: &PipelineState, heads: &mut Vec<String>, o: &Or) -> Pipe
             }
             Stage::Merge if r.p(25) => {
                 return PipelineEvent::MergeFailed {
+                    stage_id: s
+                        .current_stage()
+                        .map_or_else(String::new, |stage| stage.id.clone()),
+                    attempt: s.attempt(),
                     head: s.current_head().map(String::from).unwrap_or_default(),
                     reason: "refused".into(),
                 };
             }
             Stage::Merge => {
                 return PipelineEvent::MergeCompleted {
+                    stage_id: s
+                        .current_stage()
+                        .map_or_else(String::new, |stage| stage.id.clone()),
+                    attempt: s.attempt(),
                     head: s.current_head().map(String::from).unwrap_or_default(),
                     merge_commit: "m".into(),
                 };
@@ -399,6 +473,10 @@ fn genev(r: &mut Sm, s: &PipelineState, heads: &mut Vec<String>, o: &Or) -> Pipe
     }
     match r.b(15) {
         0 | 1 => PipelineEvent::WorkCompleted {
+            stage_id: s
+                .current_stage()
+                .map_or_else(String::new, |stage| stage.id.clone()),
+            attempt: jitter(r, s),
             product: match s.current_stage().map(|x| &x.stage) {
                 Some(Stage::Work {
                     output: WorkOutput::Plan,
@@ -428,14 +506,20 @@ fn genev(r: &mut Sm, s: &PipelineState, heads: &mut Vec<String>, o: &Or) -> Pipe
             },
         },
         2 => PipelineEvent::Submitted {
+            stage_id: s
+                .current_stage()
+                .map_or_else(String::new, |stage| stage.id.clone()),
+            attempt: jitter(r, s),
             change_id: r.p(70).then(|| "5".into()),
         },
         3 | 4 => PipelineEvent::CommandFinished {
+            attempt: jitter(r, s),
             stage_id: sid(r),
             head: hd(r, heads),
             exit_code: [Some(0), Some(0), Some(0), Some(2), None][r.b(5)],
         },
         5..=7 => PipelineEvent::ApprovalGranted {
+            attempt: jitter(r, s),
             stage_id: sid(r),
             reviewer: rv(r),
             head: hd(r, heads),
@@ -446,6 +530,7 @@ fn genev(r: &mut Sm, s: &PipelineState, heads: &mut Vec<String>, o: &Or) -> Pipe
             },
         },
         8 => PipelineEvent::ChangesRequested {
+            attempt: jitter(r, s),
             stage_id: sid(r),
             reviewer: rv(r),
             head: hd(r, heads),
@@ -472,6 +557,7 @@ fn genev(r: &mut Sm, s: &PipelineState, heads: &mut Vec<String>, o: &Or) -> Pipe
             }
         }
         11 => PipelineEvent::FanoutCompleted {
+            attempt: jitter(r, s),
             stage_id: sid(r),
             child_task_ids: if r.p(90) {
                 vec!["k1".into(), "k2".into()]
@@ -481,14 +567,22 @@ fn genev(r: &mut Sm, s: &PipelineState, heads: &mut Vec<String>, o: &Or) -> Pipe
             selected_child: None,
         },
         12 => PipelineEvent::MergeCompleted {
+            stage_id: s
+                .current_stage()
+                .map_or_else(String::new, |stage| stage.id.clone()),
+            attempt: jitter(r, s),
             head: hd(r, heads).unwrap_or_default(),
             merge_commit: "m".into(),
         },
         13 => {
             if r.p(50) {
-                PipelineEvent::StageTimedOut { stage_id: sid(r) }
+                PipelineEvent::StageTimedOut {
+                    attempt: jitter(r, s),
+                    stage_id: sid(r),
+                }
             } else {
                 PipelineEvent::StageFailed {
+                    attempt: jitter(r, s),
                     stage_id: sid(r),
                     reason: "f".into(),
                 }
@@ -520,8 +614,14 @@ fn splitmix_explorer_keeps_the_pipeline_invariants() {
             let mut o = Or::default();
             let mut heads = Vec::new();
             let mut trace = Vec::new();
+            let mut accepted: Vec<PipelineEvent> = Vec::new();
             for _ in 0..80 {
-                let e = genev(&mut r, &s, &mut heads, &o);
+                // Sometimes replay an earlier accepted result (duplicate or late).
+                let e = if !accepted.is_empty() && r.p(8) {
+                    accepted[r.b(accepted.len())].clone()
+                } else {
+                    genev(&mut r, &s, &mut heads, &o)
+                };
                 trace.push(format!("{e:?}"));
                 let res =
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| step(&s, e.clone())));
@@ -531,12 +631,46 @@ fn splitmix_explorer_keeps_the_pipeline_invariants() {
                 if s.status().is_terminal() {
                     fail("terminal accepted".into());
                 }
+                // Event identity: an accepted result matches the current
+                // stage, attempt and (head-bound stage) head.
+                if let Some((stage_id, attempt, head)) = result_identity(&e) {
+                    let cur = s.current_stage();
+                    if cur.map(|x| x.id.as_str()) != Some(stage_id) || s.attempt() != attempt {
+                        fail(format!("stale result accepted: {e:?}"));
+                    }
+                    let head_bound = cur.is_some_and(|x| {
+                        matches!(
+                            x.stage,
+                            Stage::Command { .. }
+                                | Stage::Merge
+                                | Stage::Approval {
+                                    bind_head: true,
+                                    ..
+                                }
+                        )
+                    });
+                    if head_bound && head.is_some_and(|h| h != s.current_head()) {
+                        fail(format!("result for another head accepted: {e:?}"));
+                    }
+                    accepted.push(e.clone());
+                }
+                if s.merge_in_flight()
+                    && !matches!(
+                        e,
+                        PipelineEvent::MergeCompleted { .. }
+                            | PipelineEvent::MergeFailed { .. }
+                            | PipelineEvent::CommitCreated { .. }
+                            | PipelineEvent::MainAdvanced { .. }
+                    )
+                {
+                    fail(format!("{e:?} accepted while the merge was in flight"));
+                }
                 o.t += 1;
                 let (from, to) = (s.stage_index(), nx.stage_index());
                 let fk = s.current_stage().map(|x| x.stage.kind());
                 // record event
                 match &e {
-                    PipelineEvent::WorkCompleted { product } => {
+                    PipelineEvent::WorkCompleted { product, .. } => {
                         if let WorkProduct::Branch { head, patch_id, .. } = product {
                             if o.head.as_ref() != Some(head) {
                                 o.carry.clear();
@@ -553,6 +687,7 @@ fn splitmix_explorer_keeps_the_pipeline_invariants() {
                         stage_id,
                         head,
                         exit_code: Some(0),
+                        ..
                     } => o.passes.push((o.t, stage_id.clone(), head.clone())),
                     PipelineEvent::ApprovalGranted {
                         stage_id,
