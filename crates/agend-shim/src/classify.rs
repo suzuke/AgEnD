@@ -1,27 +1,44 @@
 //! Classifies a git invocation: run it as is, route it into the bound
-//! worktree, or refuse it with the exact next step. Refuses agent-created
-//! worktrees and branches (`git worktree`, `checkout -b`, `switch -c`,
-//! `branch <new>` outside the agent's own `agend/<task-id>/` namespace),
-//! branch switches, protected-ref writes, and every mutation while unbound or
-//! without a usable binding snapshot.
+//! worktree, or refuse it with the exact next step.
 //!
-//! Pure: the caller supplies the parsed argv, the snapshot, the location and
-//! a commit-ish resolver (the only question that needs git itself).
+//! Structure (each closes a class of bypass, not one spelling):
+//! - Options of every subcommand whose verdict depends on them are parsed
+//!   with exact spellings only (`opts`, `specs`); abbreviations and
+//!   unlisted options are refused.
+//! - Ref destinations must be explicit and checkable: pushes need
+//!   `src:dst` refspecs, fetch refmaps (command line and config) must land in
+//!   `refs/remotes/` or the agent's namespace, config that picks destinations
+//!   cannot be set (`config_keys`), and symbolic refs are followed before a
+//!   destination is checked.
+//! - A write acts on the bound worktree only: `--work-tree`,
+//!   `GIT_WORK_TREE` and `GIT_INDEX_FILE` pointing elsewhere are refused.
+//! - Anything that could leave the bound branch (DWIM checkout, `<x> --`,
+//!   rebase of another branch, `stash branch`) is refused unless its target
+//!   is the bound branch itself.
+//! - Foreign repos stay the agent's business, except clones of the team repo
+//!   and pushes whose destination is the team repo (`team`).
+//!
+//! Pure apart from `Probe` (the questions that need git itself) and
+//! existence checks on the bound worktree.
 //!
 //! Must NOT: guess a binding when the snapshot is missing.
 
 use crate::Refusal;
 use crate::binding::{Binding, Snapshot, SnapshotError};
+use crate::config_keys;
 use crate::location::Location;
 use crate::protected_ref::ProtectedRefs;
 use std::path::{Path, PathBuf};
 
 mod commands;
-use commands::{
-    BranchOp, branch, branch_op, checkout, clean_is_forced, fetch, fetch_refspecs, push,
-    restore_touches_worktree, switch, symbolic_ref, symbolic_ref_writes, tag, tag_is_list,
-    update_ref,
-};
+mod opts;
+mod refs;
+mod specs;
+#[cfg(test)]
+mod tests;
+
+use commands::{BranchOp, Guard};
+pub use opts::Parsed;
 
 /// A git argv split into leading global options and the subcommand.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -35,6 +52,8 @@ pub struct GitArgs {
     /// `--git-dir` (or `--bare`, which means `.`).
     pub git_dir: Option<String>,
     pub work_tree: Option<String>,
+    /// Config keys set with `-c key[=value]` or `--config-env key=VAR`.
+    pub config_keys: Vec<String>,
     /// `--version`, `--help` and similar: git prints something and exits.
     pub info_only: bool,
     /// argv indexes of globals that retarget git (`-C`, `--git-dir`,
@@ -66,17 +85,11 @@ const FLAG_GLOBALS: &[&str] = &[
     "--no-lazy-fetch",
     "--no-advice",
 ];
-const VALUE_GLOBALS: &[&str] = &[
-    "-c",
-    "--namespace",
-    "--super-prefix",
-    "--config-env",
-    "--attr-source",
-];
+const VALUE_GLOBALS: &[&str] = &["--namespace", "--super-prefix", "--attr-source"];
 
-/// Splits leading global options from the subcommand. An unrecognised
-/// option ends the globals and becomes the "subcommand", so it is refused
-/// as unknown instead of hiding the real one.
+/// Splits leading global options from the subcommand. git matches globals
+/// exactly (no abbreviations); an unrecognised option ends the globals and
+/// becomes the "subcommand", so it is refused as unknown.
 pub fn parse(args: &[String]) -> GitArgs {
     let mut g = GitArgs::default();
     let mut i = 0;
@@ -106,6 +119,12 @@ pub fn parse(args: &[String]) -> GitArgs {
         } else if a == "--bare" {
             g.retarget_indexes.push(i);
             g.git_dir = Some(".".into());
+        } else if a == "-c" || a == "--config-env" {
+            let Some(v) = args.get(i + 1) else { break };
+            g.config_keys.push(config_key_of(v));
+            i += 1;
+        } else if let Some(v) = a.strip_prefix("--config-env=") {
+            g.config_keys.push(config_key_of(v));
         } else if VALUE_GLOBALS.contains(&a) {
             if i + 1 >= args.len() {
                 break;
@@ -124,6 +143,11 @@ pub fn parse(args: &[String]) -> GitArgs {
     g.sub = args.get(i).cloned();
     g.rest = args.get(i + 1..).unwrap_or_default().to_vec();
     g
+}
+
+/// `key=value` / `key` → `key`.
+fn config_key_of(v: &str) -> String {
+    v.split('=').next().unwrap_or_default().to_string()
 }
 
 /// What to do with the call.
@@ -151,22 +175,62 @@ impl Decision {
     }
 }
 
+/// Questions only git can answer, asked lazily.
+pub trait Probe {
+    /// Where `full_ref` finally points if it is a symbolic ref (following
+    /// chains), in the repo the command acts on.
+    fn symref_target(&self, full_ref: &str) -> Option<String>;
+    /// `git config --get-regexp <regex>` in the repo the command acts on.
+    fn config(&self, regex: &str) -> Vec<(String, String)>;
+    /// A foreign repo: whether one of its remotes is the team repo.
+    fn is_team_clone(&self) -> bool;
+    /// A foreign repo: whether push destination `dest` is the team repo.
+    fn is_team_remote(&self, dest: &str) -> bool;
+}
+
+/// The caller's git environment, as it affects where a write lands.
+#[derive(Debug, Clone)]
+pub struct GitEnv {
+    /// `GIT_DIR`/`GIT_WORK_TREE`/`GIT_COMMON_DIR`/`GIT_INDEX_FILE` are set.
+    pub retargets: bool,
+    /// The work tree the caller chose (`--work-tree` or `GIT_WORK_TREE`),
+    /// resolved against the directory git runs in.
+    pub work_tree: Option<PathBuf>,
+    /// `GIT_INDEX_FILE`, resolved likewise.
+    pub index_file: Option<PathBuf>,
+    /// Keys set through `GIT_CONFIG_COUNT` / `GIT_CONFIG_PARAMETERS`, or why
+    /// they could not be read.
+    pub config_keys: Result<Vec<String>, String>,
+}
+
+impl Default for GitEnv {
+    fn default() -> GitEnv {
+        GitEnv {
+            retargets: false,
+            work_tree: None,
+            index_file: None,
+            config_keys: Ok(Vec::new()),
+        }
+    }
+}
+
 pub struct Input<'a> {
     pub args: &'a GitArgs,
     pub snapshot: Result<&'a Snapshot, &'a SnapshotError>,
     pub location: Location,
-    /// `GIT_DIR`/`GIT_WORK_TREE`/`GIT_COMMON_DIR` are set in the env.
-    pub env_retargets: bool,
+    pub env: &'a GitEnv,
     pub protected: &'a ProtectedRefs,
     /// Where the caller pointed git (cwd with `-C` applied), for messages.
     pub dir: &'a Path,
-    /// Whether a name resolves to a commit in the bound worktree.
-    pub is_commit: &'a dyn Fn(&str) -> bool,
+    pub probe: &'a dyn Probe,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Kind {
     Read,
+    /// Writes only remote-tracking refs (after its checks): no binding
+    /// needed, routed like a read.
+    Fetch,
     Write,
     NewRepo,
 }
@@ -179,10 +243,10 @@ pub fn classify(input: &Input) -> Decision {
     if args.info_only {
         return Decision::pass();
     }
-    if input.location == Location::Foreign {
-        return Decision::pass();
-    }
     let rest = args.rest.as_slice();
+    if input.location == Location::Foreign {
+        return foreign(input, sub, rest);
+    }
     let binding = input.snapshot.ok().and_then(|s| s.binding.as_ref());
 
     if sub == "worktree" && !matches!(first_positional(rest), Some("list")) {
@@ -195,7 +259,15 @@ pub fn classify(input: &Input) -> Decision {
             "commit fixes on your branch instead; if history must change, ask a human: agend ask \"<question>\"",
         ));
     }
-    let Some(kind) = kind(sub, rest) else {
+    if sub == "fast-import" {
+        return Decision::Refuse(refs::refuse_stdin(sub));
+    }
+    let parsed = match specs::of(sub).map(|spec| opts::parse(spec, rest)) {
+        None => None,
+        Some(Ok(p)) => Some(p),
+        Some(Err(u)) => return Decision::Refuse(refuse_option(sub, &u)),
+    };
+    let Some(kind) = kind(sub, rest, parsed.as_ref()) else {
         return Decision::Refuse(Refusal::new(
             "unknown_command",
             format!(
@@ -204,10 +276,26 @@ pub fn classify(input: &Input) -> Decision {
             "run the underlying built-in git command directly; list them with: git help -a",
         ));
     };
-    match kind {
-        Kind::NewRepo => return Decision::pass(),
-        Kind::Read => return route_read(input, binding),
-        Kind::Write => {}
+    if kind == Kind::NewRepo {
+        return Decision::pass();
+    }
+    if kind == Kind::Read {
+        return route_read(input, binding);
+    }
+    if let Err(r) = check_config_channel(input) {
+        return Decision::Refuse(r);
+    }
+    let guard = Guard {
+        binding,
+        protected: input.protected,
+        probe: input.probe,
+    };
+    let parsed = parsed.unwrap_or_default();
+    if kind == Kind::Fetch {
+        return match refs::fetch(sub, &parsed, &guard) {
+            Ok(()) => route_read(input, binding),
+            Err(r) => Decision::Refuse(r),
+        };
     }
 
     let snapshot = match input.snapshot {
@@ -228,18 +316,24 @@ pub fn classify(input: &Input) -> Decision {
         ));
     }
     let route = (input.location != Location::Worktree).then(|| binding.worktree().to_path_buf());
-    if route.is_some() && input.env_retargets {
+    if route.is_some() && input.env.retargets {
         return Decision::Refuse(Refusal::new(
             "git_env_retarget",
-            "GIT_DIR / GIT_WORK_TREE / GIT_COMMON_DIR point git outside your bound worktree"
+            "GIT_DIR / GIT_WORK_TREE / GIT_COMMON_DIR / GIT_INDEX_FILE point git outside your bound worktree"
                 .to_string(),
             format!(
-                "unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR and run plain `git {sub} ...`; it runs in {}",
+                "unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE and run plain `git {sub} ...`; it runs in {}",
                 binding.worktree().display()
             ),
         ));
     }
-    let snapshot_op = match check_write(sub, rest, binding, input) {
+    if let Err(r) = check_work_tree(sub, input, binding) {
+        return Decision::Refuse(r);
+    }
+    if let Err(r) = guard.own_branch_is_real(sub) {
+        return Decision::Refuse(r);
+    }
+    let snapshot_op = match check_write(sub, rest, &parsed, &guard, binding) {
         Ok(op) => op,
         Err(r) => return Decision::Refuse(r),
     };
@@ -265,7 +359,7 @@ fn route_read(input: &Input, binding: Option<&Binding>) -> Decision {
         input.location,
         Location::Canonical | Location::OtherWorktree | Location::NoRepo
     );
-    if !outside || input.env_retargets || !binding.worktree().is_dir() {
+    if !outside || input.env.retargets || !binding.worktree().is_dir() {
         return Decision::pass();
     }
     let note = (input.location != Location::NoRepo).then(|| routed_note(binding, input.dir));
@@ -284,30 +378,157 @@ fn routed_note(binding: &Binding, dir: &Path) -> String {
     )
 }
 
+/// A foreign repo is the agent's own business, except a clone of the team
+/// repo (writes refused) and a push whose destination is the team repo.
+fn foreign(input: &Input, sub: &str, rest: &[String]) -> Decision {
+    let parsed = specs::of(sub).and_then(|spec| opts::parse(spec, rest).ok());
+    if matches!(
+        kind(sub, rest, parsed.as_ref()),
+        Some(Kind::Read | Kind::NewRepo)
+    ) {
+        return Decision::pass();
+    }
+    let binding = input.snapshot.ok().and_then(|s| s.binding.as_ref());
+    let next = match binding {
+        Some(b) => format!(
+            "change the team repo only from your bound worktree: cd {} and run it there",
+            b.worktree().display()
+        ),
+        None => {
+            "run `agend status`; the daemon gives you a worktree when it assigns a task".to_string()
+        }
+    };
+    if input.probe.is_team_clone() {
+        return Decision::Refuse(Refusal::new(
+            "team_clone",
+            format!(
+                "`git {sub}` in {}: this repo is a clone of the team repo, which agents change only through their bound worktree",
+                input.dir.display()
+            ),
+            next,
+        ));
+    }
+    if sub == "push" {
+        let dests = rest
+            .iter()
+            .filter(|a| !a.starts_with('-'))
+            .map(String::as_str)
+            .chain(rest.iter().filter_map(|a| a.strip_prefix("--repo=")));
+        for dest in dests {
+            if input.probe.is_team_remote(dest) {
+                return Decision::Refuse(Refusal::new(
+                    "team_remote",
+                    format!("pushing to {dest} is refused: it is the team repo"),
+                    next,
+                ));
+            }
+        }
+    }
+    Decision::pass()
+}
+
+/// Config set for this one call (`-c`, `--config-env`, `GIT_CONFIG_*`) may
+/// only touch keys an agent may set at all.
+fn check_config_channel(input: &Input) -> Result<(), Refusal> {
+    let env_keys = match &input.env.config_keys {
+        Ok(keys) => keys.as_slice(),
+        Err(e) => {
+            return Err(Refusal::new(
+                "config_override",
+                format!("cannot read the config set in the environment: {e}"),
+                "unset GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT and retry",
+            ));
+        }
+    };
+    let bad = input
+        .args
+        .config_keys
+        .iter()
+        .chain(env_keys)
+        .find(|k| !config_keys::allowed(k));
+    match bad {
+        None => Ok(()),
+        Some(key) => Err(Refusal::new(
+            "config_override",
+            format!(
+                "setting {key} for this command is refused: that config can redirect refs, the work tree, hooks or command names"
+            ),
+            format!(
+                "drop the -c / --config-env / GIT_CONFIG_* setting; only these keys may be set: {}",
+                config_keys::ALLOWED_HINT
+            ),
+        )),
+    }
+}
+
+/// A write must act on the bound worktree: a work tree or index chosen by
+/// the caller must be the bound worktree's own.
+fn check_work_tree(sub: &str, input: &Input, binding: &Binding) -> Result<(), Refusal> {
+    let wt = binding.worktree();
+    let bound = std::fs::canonicalize(wt).ok();
+    let same = |p: &Path| {
+        std::fs::canonicalize(p)
+            .ok()
+            .is_some_and(|c| Some(c) == bound)
+    };
+    let refuse = |what: &str, p: &Path| {
+        Refusal::new(
+            "work_tree_retarget",
+            format!(
+                "{what} {} is not your bound worktree {}; `git {sub}` would change another checkout",
+                p.display(),
+                wt.display()
+            ),
+            format!(
+                "drop --work-tree / unset GIT_WORK_TREE GIT_INDEX_FILE and run `git {sub} ...` in {}",
+                wt.display()
+            ),
+        )
+    };
+    if let Some(p) = &input.env.work_tree
+        && !same(p)
+    {
+        return Err(refuse("work tree", p));
+    }
+    if let Some(p) = &input.env.index_file {
+        let gitdir = crate::location::gitdir_of_checkout(wt);
+        let parent = p.parent().and_then(|d| std::fs::canonicalize(d).ok());
+        let inside = matches!((&gitdir, &parent), (Some(g), Some(d)) if d.starts_with(g));
+        if !inside {
+            return Err(refuse("index file", p));
+        }
+    }
+    Ok(())
+}
+
 /// Command-specific checks for a bound agent's write. Returns the name of the
 /// destructive operation to snapshot, if any.
 fn check_write(
     sub: &str,
     rest: &[String],
+    p: &Parsed,
+    g: &Guard,
     binding: &Binding,
-    input: &Input,
 ) -> Result<Option<&'static str>, Refusal> {
-    let p = input.protected;
     match sub {
-        "checkout" => checkout(rest, binding, p, input.is_commit),
-        "switch" => switch(rest, binding, p),
-        "branch" => branch(rest, binding, p).map(|_| None),
-        "tag" => tag(rest, p).map(|_| None),
-        "push" => push(rest, binding, p).map(|_| None),
-        "fetch" => fetch(rest, binding, p).map(|_| None),
-        "update-ref" => update_ref(rest, binding, p).map(|_| None),
-        "symbolic-ref" => symbolic_ref(rest, binding, p).map(|_| None),
-        "reset" => Ok(rest
-            .iter()
-            .any(|a| matches!(a.as_str(), "--hard" | "--merge" | "--keep"))
-            .then_some("reset")),
-        "clean" => Ok(clean_is_forced(rest).then_some("clean")),
-        "restore" => Ok(restore_touches_worktree(rest).then_some("restore")),
+        "checkout" => commands::checkout(p, g, binding),
+        "switch" => commands::switch(p, g, binding),
+        "branch" => commands::branch(p, g, binding).map(|_| None),
+        "tag" => commands::tag(p, g).map(|_| None),
+        "rebase" => commands::rebase(p, g, binding).map(|_| None),
+        "stash" => commands::stash(rest, binding).map(|_| None),
+        "config" => commands::config(p).map(|_| None),
+        "remote" => commands::remote(rest, g).map(|_| None),
+        "push" => refs::push(p, g, binding).map(|_| None),
+        "pull" => refs::fetch(sub, p, g)
+            .and_then(|_| commands::pull_rebase(p, g))
+            .map(|_| None),
+        "update-ref" => refs::update_ref(p, g, binding).map(|_| None),
+        "symbolic-ref" => refs::symbolic_ref(p, g, binding).map(|_| None),
+        "reset" => Ok(p.any(&["--hard", "--merge", "--keep"]).then_some("reset")),
+        "clean" => Ok((!p.has("--dry-run")).then_some("clean")),
+        "restore" => Ok((!p.has("--staged") || p.has("--worktree")).then_some("restore")),
+        "read-tree" => Ok((p.has("-u") && !p.has("--dry-run")).then_some("read-tree")),
         _ => Ok(None),
     }
 }
@@ -409,37 +630,38 @@ const WRITE: &[&str] = &[
     "config",
     "remote",
     "reflog",
-    "fetch",
-    "fast-import",
     "unpack-objects",
 ];
 
-fn kind(sub: &str, rest: &[String]) -> Option<Kind> {
+/// `parsed` is the exact-spelling parse for subcommands that have a spec;
+/// without it (foreign repos, parse failure) option-dependent reads count as
+/// writes.
+fn kind(sub: &str, rest: &[String], parsed: Option<&Parsed>) -> Option<Kind> {
     if matches!(sub, "init" | "clone") {
         return Some(Kind::NewRepo);
     }
-    if READ.contains(&sub) {
-        return Some(Kind::Read);
+    if READ.contains(&sub) || sub == "worktree" {
+        return Some(Kind::Read); // only `worktree list` gets this far
     }
-    if sub == "worktree" {
-        return Some(Kind::Read); // only `worktree list` gets here
+    if sub == "fetch" {
+        return Some(Kind::Fetch);
     }
     if !WRITE.contains(&sub) {
         return None;
     }
     let first = first_positional(rest);
+    let with = |f: fn(&Parsed) -> bool| parsed.is_some_and(f);
     let read = match sub {
-        "branch" => matches!(branch_op(rest), BranchOp::List),
-        "tag" => tag_is_list(rest),
+        "branch" => with(|p| commands::branch_op(p) == BranchOp::List),
+        "tag" => with(commands::tag_is_list),
+        "config" => with(commands::config_is_read),
+        "symbolic-ref" => with(|p| !refs::symbolic_ref_writes(p)),
         "stash" => matches!(first, Some("list" | "show")),
         "remote" => matches!(first, None | Some("show" | "get-url")),
-        "config" => config_is_read(rest),
         "reflog" => !matches!(first, Some("expire" | "delete")),
         "notes" => matches!(first, None | Some("list" | "show")),
         "submodule" => matches!(first, None | Some("status" | "summary")),
         "sparse-checkout" => matches!(first, Some("list")),
-        "symbolic-ref" => !symbolic_ref_writes(rest),
-        "fetch" => !fetch_refspecs(rest).iter().any(|s| s.contains(':')),
         _ => false,
     };
     Some(if read { Kind::Read } else { Kind::Write })
@@ -451,47 +673,27 @@ fn first_positional(rest: &[String]) -> Option<&str> {
         .find(|a| !a.starts_with('-'))
 }
 
-fn config_is_read(rest: &[String]) -> bool {
-    const READ_FLAGS: &[&str] = &[
-        "--get",
-        "--get-all",
-        "--get-regexp",
-        "--get-urlmatch",
-        "--list",
-        "-l",
-        "--get-color",
-        "--get-colorbool",
-        "get",
-        "list",
-    ];
-    if rest.iter().any(|a| READ_FLAGS.contains(&a.as_str())) {
-        return true;
-    }
-    let value_flags = ["--file", "-f", "--blob", "--type", "--default"];
-    let mut positionals = 0;
-    let mut skip = false;
-    for a in rest {
-        if skip {
-            skip = false;
-        } else if value_flags.contains(&a.as_str()) {
-            skip = true;
-        } else if a.starts_with('-') {
-            if matches!(
-                a.as_str(),
-                "--unset" | "--unset-all" | "--add" | "--replace-all" | "--edit" | "-e"
-            ) || a.starts_with("--rename-section")
-                || a.starts_with("--remove-section")
-            {
-                return false;
-            }
-        } else {
-            positionals += 1;
-        }
-    }
-    positionals == 1
-}
+// ── refusals shared by every command ────────────────────────────────────
 
-// ── worktree / unbound / no binding ─────────────────────────────────────
+fn refuse_option(sub: &str, u: &opts::Unknown) -> Refusal {
+    let reason = match u.like {
+        Some(full) => format!(
+            "`{}` looks like an abbreviation of `--{full}`; the agend shim only accepts options spelled in full for `git {sub}`",
+            u.arg
+        ),
+        None => format!(
+            "`{}` is not an option the agend shim accepts for `git {sub}` (abbreviated, attached or unsupported spellings are refused)",
+            u.arg
+        ),
+    };
+    Refusal::new(
+        "option_unknown",
+        reason,
+        format!(
+            "spell the option in full as `git {sub} -h` lists it, or run without it; if a real option is missing, ask: agend ask \"shim option for git {sub}\""
+        ),
+    )
+}
 
 fn refuse_worktree(sub: &str, rest: &[String], binding: Option<&Binding>) -> Refusal {
     let what = first_positional(rest).unwrap_or("");
@@ -543,393 +745,5 @@ fn refuse_unbound(sub: &str, location: Location, dir: &Path) -> Refusal {
             format!("`git {sub}` changes the repo but you have no task bound"),
             next,
         )
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::binding::SNAPSHOT_VERSION;
-    use agend_core::model::work_branch;
-
-    fn argv(s: &str) -> Vec<String> {
-        s.split_whitespace().map(String::from).collect()
-    }
-
-    fn work() -> Snapshot {
-        Snapshot {
-            version: SNAPSHOT_VERSION,
-            instance: "dev-1".into(),
-            source_repo: Some("/repo".into()),
-            protected_refs: vec!["release".into()],
-            binding: Some(Binding::Work {
-                task_id: "t-1".into(),
-                branch: work_branch("t-1", "fix"),
-                // An existing directory, so `worktree_missing` does not fire.
-                worktree: std::env::temp_dir(),
-            }),
-        }
-    }
-
-    fn review() -> Snapshot {
-        Snapshot {
-            binding: Some(Binding::Review {
-                task_id: "t-2".into(),
-                head: "abc123".into(),
-                worktree: std::env::temp_dir(),
-            }),
-            ..work()
-        }
-    }
-
-    fn unbound() -> Snapshot {
-        Snapshot {
-            binding: None,
-            ..work()
-        }
-    }
-
-    /// Commit-ish names in the fake repo.
-    fn commits(name: &str) -> bool {
-        matches!(name, "main" | "master" | "feature" | "HEAD~1" | "abc123")
-    }
-
-    fn decide_at(snap: Result<&Snapshot, &SnapshotError>, loc: Location, cmd: &str) -> Decision {
-        let args = argv(cmd);
-        let parsed = parse(&args);
-        let protected =
-            ProtectedRefs::new(snap.map(|s| s.protected_refs.as_slice()).unwrap_or(&[]));
-        classify(&Input {
-            args: &parsed,
-            snapshot: snap,
-            location: loc,
-            env_retargets: false,
-            protected: &protected,
-            dir: Path::new("/somewhere"),
-            is_commit: &commits,
-        })
-    }
-
-    fn decide(snap: &Snapshot, cmd: &str) -> Decision {
-        decide_at(Ok(snap), Location::Worktree, cmd)
-    }
-
-    fn code(d: &Decision) -> &'static str {
-        match d {
-            Decision::Refuse(r) => r.code,
-            Decision::Run { .. } => "run",
-        }
-    }
-
-    fn snapshot_of(d: &Decision) -> Option<&'static str> {
-        match d {
-            Decision::Run { snapshot, .. } => *snapshot,
-            Decision::Refuse(_) => None,
-        }
-    }
-
-    #[test]
-    fn globals_are_split_from_the_subcommand() {
-        let g = parse(&argv("-C /a -c x=y --no-pager -C b commit -m hi"));
-        assert_eq!(g.sub.as_deref(), Some("commit"));
-        assert_eq!(g.rest, argv("-m hi"));
-        assert_eq!(g.chdirs, argv("/a b"));
-        assert_eq!(g.retarget_indexes, vec![0, 1, 5, 6]);
-        let g = parse(&argv("--git-dir=/x/.git --work-tree /y status"));
-        assert_eq!(g.git_dir.as_deref(), Some("/x/.git"));
-        assert_eq!(g.work_tree.as_deref(), Some("/y"));
-        assert_eq!(g.sub.as_deref(), Some("status"));
-        assert!(parse(&argv("--version")).info_only);
-        assert_eq!(parse(&argv("")).sub, None);
-        // An unknown global becomes the "subcommand" and is refused.
-        assert_eq!(parse(&argv("--frob push")).sub.as_deref(), Some("--frob"));
-    }
-
-    #[test]
-    fn bound_writes_route_into_the_worktree() {
-        let s = work();
-        for loc in [
-            Location::NoRepo,
-            Location::Canonical,
-            Location::OtherWorktree,
-        ] {
-            let d = decide_at(Ok(&s), loc, "commit -m x");
-            match d {
-                Decision::Run { route, .. } => {
-                    assert_eq!(route.as_deref(), Some(std::env::temp_dir().as_path()))
-                }
-                other => panic!("{loc:?}: {other:?}"),
-            }
-        }
-        assert_eq!(
-            decide(&s, "commit -m x"),
-            Decision::Run {
-                route: None,
-                snapshot: None,
-                note: None
-            }
-        );
-    }
-
-    #[test]
-    fn reads_route_only_when_bound_and_outside() {
-        let s = work();
-        let d = decide_at(Ok(&s), Location::Canonical, "status");
-        assert!(matches!(
-            d,
-            Decision::Run {
-                route: Some(_),
-                note: Some(_),
-                ..
-            }
-        ));
-        let d = decide_at(Ok(&unbound()), Location::Canonical, "status");
-        assert_eq!(d, Decision::pass());
-        let err = SnapshotError::NotAnAgent;
-        assert_eq!(
-            decide_at(Err(&err), Location::Unknown, "log"),
-            Decision::pass()
-        );
-    }
-
-    #[test]
-    fn foreign_repos_and_new_repos_pass() {
-        assert_eq!(
-            decide_at(Ok(&unbound()), Location::Foreign, "reset --hard"),
-            Decision::pass()
-        );
-        let err = SnapshotError::NotAnAgent;
-        assert_eq!(
-            decide_at(Err(&err), Location::NoRepo, "clone x"),
-            Decision::pass()
-        );
-    }
-
-    #[test]
-    fn mutations_need_a_binding() {
-        let err = SnapshotError::Missing("/h/bindings/dev-1.json".into());
-        assert_eq!(
-            code(&decide_at(Err(&err), Location::Unknown, "commit -m x")),
-            "no_binding"
-        );
-        assert_eq!(
-            code(&decide_at(Ok(&unbound()), Location::NoRepo, "commit -m x")),
-            "unbound"
-        );
-        assert_eq!(
-            code(&decide_at(Ok(&unbound()), Location::Canonical, "add .")),
-            "canonical_checkout"
-        );
-    }
-
-    #[test]
-    fn worktree_lifecycle_is_refused_even_when_bound() {
-        for cmd in ["worktree add ../x", "worktree remove x", "worktree prune"] {
-            assert_eq!(code(&decide(&work(), cmd)), "worktree_managed", "{cmd}");
-            assert_eq!(code(&decide(&unbound(), cmd)), "worktree_managed", "{cmd}");
-        }
-        assert_eq!(code(&decide(&work(), "worktree list")), "run");
-    }
-
-    #[test]
-    fn branch_switches_are_refused() {
-        let s = work();
-        for cmd in [
-            "checkout main",
-            "checkout feature",
-            "checkout -",
-            "checkout --detach",
-            "checkout abc123",
-            "switch main",
-            "switch -",
-            "switch --detach HEAD~1",
-            "symbolic-ref HEAD refs/heads/main",
-            "update-ref --no-deref HEAD abc123",
-        ] {
-            assert_eq!(code(&decide(&s, cmd)), "branch_switch", "{cmd}");
-        }
-        let Decision::Refuse(r) = decide(&s, "checkout main") else {
-            unreachable!()
-        };
-        assert!(r.reason.contains("main is protected"), "{}", r.reason);
-        assert!(r.next.contains("agend task create"), "{}", r.next);
-        for cmd in [
-            "checkout agend/t-1/fix",
-            "checkout HEAD",
-            "switch agend/t-1/fix",
-            "checkout",
-        ] {
-            assert_eq!(code(&decide(&s, cmd)), "run", "{cmd}");
-        }
-        for cmd in ["checkout abc123", "switch agend/t-1/fix"] {
-            assert_eq!(code(&decide(&review(), cmd)), "branch_switch", "{cmd}");
-        }
-    }
-
-    #[test]
-    fn branch_creation_is_limited_to_the_own_namespace() {
-        let s = work();
-        for cmd in [
-            "checkout -b feat/x",
-            "checkout -b agend/t-1/x",
-            "switch -c x",
-            "switch --create=x",
-            "branch feat/x",
-            "branch agend/t-2/x",
-        ] {
-            assert_eq!(code(&decide(&s, cmd)), "branch_create", "{cmd}");
-        }
-        assert_eq!(code(&decide(&s, "branch agend/t-1/scratch")), "run");
-        assert_eq!(
-            code(&decide(&review(), "branch agend/t-2/x")),
-            "branch_create"
-        );
-        for cmd in [
-            "branch",
-            "branch -a",
-            "branch --list 'agend/*'",
-            "branch -vv",
-        ] {
-            assert_eq!(code(&decide(&unbound(), cmd)), "run", "{cmd}");
-        }
-        assert_eq!(code(&decide(&s, "branch -m other")), "branch_rename");
-        assert_eq!(code(&decide(&s, "branch -D feat/x")), "branch_delete");
-        assert_eq!(
-            code(&decide(&s, "branch -d agend/t-1/fix")),
-            "branch_delete"
-        );
-        assert_eq!(code(&decide(&s, "branch -d agend/t-1/scratch")), "run");
-        assert_eq!(code(&decide(&s, "branch -u origin/agend/t-1/fix")), "run");
-    }
-
-    #[test]
-    fn protected_refs_are_refused_for_bound_agents() {
-        let s = work();
-        for cmd in [
-            "update-ref refs/heads/main abc123",
-            "update-ref main abc123",
-            "update-ref -d refs/heads/master",
-            "update-ref -m msg refs/heads/release abc123",
-            "push . HEAD:main",
-            "push origin HEAD:main",
-            "push origin +agend/t-1/fix:refs/heads/master",
-            "push origin --delete main",
-            "push origin main",
-            "branch -f main abc123",
-            "branch -D main",
-            "fetch origin main:main",
-        ] {
-            assert_eq!(code(&decide(&s, cmd)), "protected_ref", "{cmd}");
-        }
-        assert_eq!(code(&decide(&s, "update-ref --stdin")), "update_ref_stdin");
-        assert_eq!(code(&decide(&s, "push --all origin")), "push_scope");
-        assert_eq!(
-            code(&decide(&s, "push origin HEAD:feat/x")),
-            "ref_not_yours"
-        );
-        assert_eq!(
-            code(&decide(&s, "update-ref refs/heads/agend/t-2/x abc")),
-            "ref_not_yours"
-        );
-        for cmd in [
-            "push",
-            "push origin HEAD",
-            "push -u origin agend/t-1/fix",
-            "push origin HEAD:agend/t-1/fix",
-            "update-ref refs/heads/agend/t-1/fix abc123",
-            "update-ref HEAD abc123",
-            "fetch origin",
-            "fetch origin main:refs/remotes/origin/main",
-        ] {
-            assert_eq!(code(&decide(&s, cmd)), "run", "{cmd}");
-        }
-        assert_eq!(code(&decide(&review(), "push")), "review_readonly");
-    }
-
-    #[test]
-    fn destructive_operations_take_a_snapshot() {
-        let s = work();
-        for (cmd, op) in [
-            ("reset --hard HEAD~1", Some("reset")),
-            ("reset --keep HEAD~1", Some("reset")),
-            ("reset HEAD~1", None),
-            ("clean -fd", Some("clean")),
-            ("clean -xdf", Some("clean")),
-            ("clean --force", Some("clean")),
-            ("clean -nd", None),
-            ("clean -fdn", None),
-            ("checkout -- .", Some("checkout")),
-            ("checkout .", Some("checkout")),
-            ("checkout src/lib.rs", Some("checkout")),
-            ("checkout main -- src", Some("checkout")),
-            ("checkout -f", Some("checkout")),
-            ("checkout -p", Some("checkout")),
-            ("restore .", Some("restore")),
-            ("restore --staged .", None),
-            ("restore --staged --worktree .", Some("restore")),
-            ("switch --discard-changes agend/t-1/fix", Some("switch")),
-            ("commit -am x", None),
-        ] {
-            assert_eq!(snapshot_of(&decide(&s, cmd)), op, "{cmd}");
-        }
-    }
-
-    #[test]
-    fn unknown_commands_and_rewrites_are_refused() {
-        let s = work();
-        assert_eq!(code(&decide(&s, "co main")), "unknown_command");
-        assert_eq!(code(&decide(&s, "--frob push")), "unknown_command");
-        assert_eq!(
-            code(&decide(&s, "filter-branch -- --all")),
-            "history_rewrite"
-        );
-        assert_eq!(code(&decide(&s, "--version")), "run");
-        assert_eq!(code(&decide(&s, "")), "run");
-    }
-
-    #[test]
-    fn env_retargeting_blocks_routing() {
-        let s = work();
-        let args = argv("commit -m x");
-        let parsed = parse(&args);
-        let protected = ProtectedRefs::new(&[]);
-        let mut input = Input {
-            args: &parsed,
-            snapshot: Ok(&s),
-            location: Location::Canonical,
-            env_retargets: true,
-            protected: &protected,
-            dir: Path::new("/repo"),
-            is_commit: &commits,
-        };
-        assert_eq!(code(&classify(&input)), "git_env_retarget");
-        input.location = Location::Worktree;
-        assert_eq!(code(&classify(&input)), "run", "hooks run with GIT_DIR set");
-    }
-
-    #[test]
-    fn missing_worktree_refuses_writes() {
-        let mut s = work();
-        s.binding = Some(Binding::Work {
-            task_id: "t-1".into(),
-            branch: work_branch("t-1", "fix"),
-            worktree: "/definitely/not/here".into(),
-        });
-        assert_eq!(code(&decide(&s, "commit -m x")), "worktree_missing");
-    }
-
-    #[test]
-    fn config_reads_and_writes() {
-        for (cmd, read) in [
-            ("config user.name", true),
-            ("config --get user.name", true),
-            ("config -l", true),
-            ("config user.name x", false),
-            ("config --unset user.name", false),
-            ("config alias.co checkout", false),
-        ] {
-            let rest = argv(cmd)[1..].to_vec();
-            assert_eq!(config_is_read(&rest), read, "{cmd}");
-        }
     }
 }

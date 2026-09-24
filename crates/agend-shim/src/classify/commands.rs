@@ -1,51 +1,104 @@
-//! Per-command checks for a bound agent's git writes: branch switching and
-//! creation, branch/tag edits, protected-ref writes (`push`, `fetch`,
-//! `update-ref`, `symbolic-ref`) and which operations destroy working-tree
-//! state.
+//! Per-command checks for a bound agent's git writes, on the exact-spelling
+//! parse (`opts`): branch switching and creation, branch/tag edits, config
+//! writes, rebase, stash, remote, and which operations destroy working-tree
+//! state. Ref destinations (push/fetch/update-ref/symbolic-ref) are in
+//! `refs`.
+//!
+//! Rule for anything that can leave the bound branch: allowed only when its
+//! target is the bound branch itself; there is no guessing whether an
+//! argument "is probably a path".
 //!
 //! Must NOT: allow writes to protected refs, whatever the binding.
 
+use super::opts::Parsed;
+use super::{Probe, first_positional};
 use crate::Refusal;
 use crate::binding::Binding;
-use crate::protected_ref::{ProtectedRefs, refspec_dst};
+use crate::config_keys;
+use crate::protected_ref::ProtectedRefs;
 use agend_core::model::BRANCH_NAMESPACE;
 
-// ── branch switching ────────────────────────────────────────────────────
+/// What every check needs: the binding (if any), the protected refs, and
+/// git for symbolic refs and config.
+pub(crate) struct Guard<'a> {
+    pub(crate) binding: Option<&'a Binding>,
+    pub(crate) protected: &'a ProtectedRefs,
+    pub(crate) probe: &'a dyn Probe,
+}
 
-fn short_branch(name: &str) -> &str {
+impl Guard<'_> {
+    /// The bound branch must be a real branch: if it were a symbolic ref,
+    /// every commit on it would move the ref it points to.
+    pub(crate) fn own_branch_is_real(&self, sub: &str) -> Result<(), Refusal> {
+        let Some(branch) = self.binding.and_then(Binding::branch) else {
+            return Ok(());
+        };
+        let full = format!("refs/heads/{branch}");
+        match self.probe.symref_target(&full) {
+            None => Ok(()),
+            Some(target) => Err(Refusal::new(
+                "symref",
+                format!(
+                    "your branch {branch} is a symbolic ref to {target}: `git {sub}` would write {target}"
+                ),
+                "ask a human to restore it: agend ask \"my task branch became a symbolic ref\"",
+            )),
+        }
+    }
+
+    /// Whether config `key` (a boolean) is on in the repo.
+    pub(crate) fn config_on(&self, key: &str) -> bool {
+        let regex = format!("^{}$", key.replace('.', r"\."));
+        self.probe
+            .config(&regex)
+            .iter()
+            .next_back()
+            .is_some_and(|(_, v)| {
+                matches!(
+                    v.trim().to_ascii_lowercase().as_str(),
+                    "" | "true" | "yes" | "on" | "1"
+                )
+            })
+    }
+}
+
+// ── names ───────────────────────────────────────────────────────────────
+
+pub(crate) fn short_branch(name: &str) -> &str {
     name.strip_prefix("refs/heads/").unwrap_or(name)
 }
 
-fn is_current(target: &str, binding: &Binding) -> bool {
+pub(crate) fn is_current(target: &str, binding: &Binding) -> bool {
     matches!(target, "HEAD" | "@") || binding.branch() == Some(short_branch(target))
 }
 
-fn own_namespace(binding: &Binding) -> Option<String> {
+pub(crate) fn own_namespace(binding: &Binding) -> Option<String> {
     match binding {
         Binding::Work { task_id, .. } => Some(format!("{BRANCH_NAMESPACE}{task_id}/")),
         Binding::Review { .. } => None,
     }
 }
 
-fn in_own_namespace(name: &str, binding: &Binding) -> bool {
+pub(crate) fn in_own_namespace(name: &str, binding: &Binding) -> bool {
     own_namespace(binding).is_some_and(|ns| short_branch(name).starts_with(&ns))
 }
 
-fn stay_hint(binding: &Binding) -> String {
+pub(crate) fn stay_hint(binding: Option<&Binding>) -> String {
     match binding {
-        Binding::Work {
+        Some(Binding::Work {
             branch, worktree, ..
-        } => format!(
+        }) => format!(
             "stay on {branch} in {}. To read another branch without switching: git log <branch>, git show <branch>:<path>, git diff <branch>...HEAD. For other work: agend task create \"<title>\"",
             worktree.display()
         ),
-        Binding::Review { head, .. } => format!(
+        Some(Binding::Review { head, .. }) => format!(
             "this is a review of {head}; inspect with git log / git show / git diff, then run: agend review approve  or  agend review changes \"<what to fix>\""
         ),
+        None => "run `agend status` to see your assignment".to_string(),
     }
 }
 
-fn refuse_switch(target: &str, binding: &Binding, p: &ProtectedRefs) -> Refusal {
+pub(crate) fn refuse_switch(target: &str, binding: &Binding, p: &ProtectedRefs) -> Refusal {
     let bound = binding.branch().unwrap_or("a detached review head");
     let protected = if p.names_protected(target) {
         format!(" ({target} is protected: only the daemon changes it)")
@@ -55,7 +108,7 @@ fn refuse_switch(target: &str, binding: &Binding, p: &ProtectedRefs) -> Refusal 
     Refusal::new(
         "branch_switch",
         format!("switching to {target} is refused: you are bound to {bound}{protected}"),
-        stay_hint(binding),
+        stay_hint(Some(binding)),
     )
 }
 
@@ -66,92 +119,97 @@ fn refuse_create(name: &str, binding: &Binding) -> Refusal {
         ),
         None => format!("creating branch {name} is refused: review bindings are read-only"),
     };
-    Refusal::new("branch_create", reason, stay_hint(binding))
+    Refusal::new("branch_create", reason, stay_hint(Some(binding)))
 }
 
-pub(super) fn checkout(
-    rest: &[String],
-    binding: &Binding,
-    p: &ProtectedRefs,
-    is_commit: &dyn Fn(&str) -> bool,
-) -> Result<Option<&'static str>, Refusal> {
-    let mut force = false;
-    let mut paths_mode = false;
-    let mut positionals: Vec<&str> = Vec::new();
-    let mut iter = rest.iter();
-    while let Some(a) = iter.next() {
-        match a.as_str() {
-            "--" => {
-                paths_mode = true;
-                break;
-            }
-            "-b" | "-B" | "--orphan" => {
-                let name = iter.next().map(String::as_str).unwrap_or("");
-                return Err(refuse_create(name, binding));
-            }
-            "--detach" => return Err(refuse_switch("a detached HEAD", binding, p)),
-            "-f" | "--force" => force = true,
-            "-p" | "--patch" => paths_mode = true,
-            "-" => positionals.push("-"),
-            s if s.starts_with("--pathspec-from-file") => paths_mode = true,
-            s if s.starts_with('-') => {}
-            s => positionals.push(s),
-        }
-    }
-    let Some(&target) = positionals.first() else {
-        return Ok((force || paths_mode).then_some("checkout"));
+// ── checkout / switch ───────────────────────────────────────────────────
+
+/// Options that create a branch; the value is its name (`--track` derives
+/// the name from the remote branch).
+const CREATE: &[&str] = &[
+    "-b",
+    "-B",
+    "--orphan",
+    "--create",
+    "--force-create",
+    "--track",
+];
+
+fn created(p: &Parsed) -> Option<String> {
+    let opt = p.first_of(CREATE)?;
+    let name = match opt {
+        "--track" => p.pos.first().map(String::as_str),
+        _ => p.value(opt),
     };
-    if paths_mode || positionals.len() > 1 {
-        return Ok(Some("checkout")); // `<tree-ish> -- <paths>` or several paths
-    }
-    if target == "-" {
-        return Err(refuse_switch("the previous branch (-)", binding, p));
-    }
-    if is_current(target, binding) {
-        return Ok(force.then_some("checkout"));
-    }
-    if p.names_protected(target) || is_commit(target) {
-        return Err(refuse_switch(target, binding, p));
-    }
-    Ok(Some("checkout")) // `git checkout <path>`: restores the path
+    Some(name.unwrap_or("").to_string())
 }
 
-pub(super) fn switch(
-    rest: &[String],
+/// `git checkout`, by git's own cases (builtin/checkout.c):
+/// - `-- <paths>`, `<tree-ish> -- <paths>`, `<a> <b>...`, `-p`,
+///   `--pathspec-from-file`: restore paths (snapshot), never a switch;
+/// - `<x>` alone or `<x> --`: a switch, or DWIM-create from a remote
+///   branch; allowed only when `<x>` is the bound branch (or `<x>` is `.`,
+///   `./…`, `../…`, which cannot name a ref: a path restore).
+pub(crate) fn checkout(
+    p: &Parsed,
+    g: &Guard,
     binding: &Binding,
-    p: &ProtectedRefs,
 ) -> Result<Option<&'static str>, Refusal> {
-    let mut force = false;
-    let mut target = None;
-    let mut iter = rest.iter();
-    while let Some(a) = iter.next() {
-        match a.as_str() {
-            "-c" | "-C" | "--create" | "--force-create" | "--orphan" => {
-                let name = iter.next().map(String::as_str).unwrap_or("");
-                return Err(refuse_create(name, binding));
-            }
-            s if s.starts_with("--create=")
-                || s.starts_with("--force-create=")
-                || s.starts_with("--orphan=") =>
-            {
-                return Err(refuse_create(
-                    s.split_once('=').map_or("", |x| x.1),
-                    binding,
-                ));
-            }
-            "-d" | "--detach" => return Err(refuse_switch("a detached HEAD", binding, p)),
-            "-f" | "--force" | "--discard-changes" => force = true,
-            "-" => {
-                target.get_or_insert("-");
-            }
-            s if s.starts_with('-') => {}
-            s => {
-                target.get_or_insert(s);
-            }
+    if let Some(name) = created(p) {
+        return Err(refuse_create(&name, binding));
+    }
+    if p.has("--detach") {
+        return Err(refuse_switch("a detached HEAD", binding, g.protected));
+    }
+    let force = p.any(&["--force", "--merge"]);
+    let restores_paths = p.any(&["--patch", "--pathspec-from-file"])
+        || p.pos.len() > 1
+        || (p.dashdash && !p.paths.is_empty())
+        || (!p.dashdash && p.pos.len() == 1 && cannot_be_a_ref(&p.pos[0]));
+    if restores_paths {
+        return Ok(Some("checkout"));
+    }
+    match p.pos.first() {
+        None => Ok(force.then_some("checkout")),
+        Some(target) if is_current(target, binding) => Ok(force.then_some("checkout")),
+        Some(target) => {
+            let shown = if target == "-" {
+                "the previous branch (-)"
+            } else {
+                target
+            };
+            let mut r = refuse_switch(shown, binding, g.protected);
+            r.next = format!(
+                "{}. To restore a file instead: git checkout -- <path>  or  git restore <path>",
+                r.next
+            );
+            Err(r)
         }
     }
-    match target {
-        Some(t) if !is_current(t, binding) => Err(refuse_switch(t, binding, p)),
+}
+
+/// `.`, `./x`, `../x`: no ref name or revision can look like this (a ref
+/// name component cannot start with `.`; revisions need one of `:~^@{`), so
+/// git can only read it as a path.
+fn cannot_be_a_ref(arg: &str) -> bool {
+    (arg == "." || arg.starts_with("./") || arg.starts_with("../"))
+        && !arg.contains([':', '~', '^', '@', '{'])
+}
+
+pub(crate) fn switch(
+    p: &Parsed,
+    g: &Guard,
+    binding: &Binding,
+) -> Result<Option<&'static str>, Refusal> {
+    if let Some(name) = created(p) {
+        return Err(refuse_create(&name, binding));
+    }
+    if p.has("--detach") {
+        return Err(refuse_switch("a detached HEAD", binding, g.protected));
+    }
+    let force = p.any(&["--force", "--discard-changes", "--merge"]);
+    match p.pos.first() {
+        Some(t) if !is_current(t, binding) => Err(refuse_switch(t, binding, g.protected)),
         _ => Ok(force.then_some("switch")),
     }
 }
@@ -159,7 +217,7 @@ pub(super) fn switch(
 // ── branch / tag ────────────────────────────────────────────────────────
 
 #[derive(Debug, PartialEq, Eq)]
-pub(super) enum BranchOp {
+pub(crate) enum BranchOp {
     List,
     Upstream,
     Delete(Vec<String>),
@@ -167,77 +225,53 @@ pub(super) enum BranchOp {
     Create { name: String },
 }
 
-pub(super) fn branch_op(rest: &[String]) -> BranchOp {
-    const VALUE_FLAGS: &[&str] = &[
-        "--contains",
-        "--no-contains",
-        "--merged",
-        "--no-merged",
-        "--points-at",
-        "--sort",
-        "--format",
-    ];
-    let (mut delete, mut rename, mut list, mut upstream) = (false, false, false, false);
-    let mut positionals = Vec::new();
-    let mut iter = rest.iter();
-    while let Some(a) = iter.next() {
-        let s = a.as_str();
-        if VALUE_FLAGS.contains(&s) {
-            list = true;
-            iter.next();
-        } else if s == "-u" || s == "--set-upstream-to" {
-            upstream = true;
-            iter.next();
-        } else if let Some(long) = s.strip_prefix("--") {
-            match long.split('=').next().unwrap_or("") {
-                "delete" => delete = true,
-                "move" | "copy" => rename = true,
-                "list" | "all" | "remotes" | "show-current" | "contains" | "no-contains"
-                | "merged" | "no-merged" | "points-at" => list = true,
-                "set-upstream-to" | "unset-upstream" | "edit-description" => upstream = true,
-                _ => {}
-            }
-        } else if let Some(shorts) = s.strip_prefix('-') {
-            for c in shorts.chars() {
-                match c {
-                    'd' | 'D' => delete = true,
-                    'm' | 'M' | 'c' | 'C' => rename = true,
-                    'l' | 'a' | 'r' => list = true,
-                    'u' => upstream = true,
-                    _ => {}
-                }
-            }
-        } else {
-            positionals.push(s.to_string());
-        }
-    }
-    if delete {
-        BranchOp::Delete(positionals)
-    } else if rename {
+/// What `git branch` does (builtin/branch.c: delete, move/copy, upstream
+/// edits, list when filtering or without names, else create).
+pub(crate) fn branch_op(p: &Parsed) -> BranchOp {
+    if p.any(&["--delete", "-D"]) {
+        BranchOp::Delete(p.pos.clone())
+    } else if p.any(&["--move", "-M", "--copy", "-C"]) {
         BranchOp::Rename
-    } else if upstream {
+    } else if p.any(&[
+        "--set-upstream-to",
+        "--unset-upstream",
+        "--edit-description",
+    ]) {
         BranchOp::Upstream
-    } else if list || positionals.is_empty() {
+    } else if p.pos.is_empty()
+        || p.any(&[
+            "--list",
+            "--all",
+            "--remotes",
+            "--show-current",
+            "--contains",
+            "--no-contains",
+            "--merged",
+            "--no-merged",
+            "--points-at",
+            "--verbose",
+        ])
+    {
         BranchOp::List
     } else {
         BranchOp::Create {
-            name: positionals.swap_remove(0),
+            name: p.pos[0].clone(),
         }
     }
 }
 
-pub(super) fn branch(rest: &[String], binding: &Binding, p: &ProtectedRefs) -> Result<(), Refusal> {
-    match branch_op(rest) {
+pub(crate) fn branch(p: &Parsed, g: &Guard, binding: &Binding) -> Result<(), Refusal> {
+    match branch_op(p) {
         BranchOp::List | BranchOp::Upstream => Ok(()),
         BranchOp::Rename => Err(Refusal::new(
             "branch_rename",
             "renaming or copying branches is refused: the daemon owns branch names".to_string(),
-            stay_hint(binding),
+            stay_hint(Some(binding)),
         )),
         BranchOp::Delete(names) => {
             for name in &names {
-                if p.names_protected(name) {
-                    return Err(refuse_protected(name, binding));
+                if g.protected.names_protected(name) {
+                    return Err(g.refuse_protected(name));
                 }
                 if is_current(name, binding) || !in_own_namespace(name, binding) {
                     return Err(Refusal::new(
@@ -253,302 +287,222 @@ pub(super) fn branch(rest: &[String], binding: &Binding, p: &ProtectedRefs) -> R
             Ok(())
         }
         BranchOp::Create { name } => {
-            if p.names_protected(&name) {
-                return Err(refuse_protected(&name, binding));
+            if g.protected.names_protected(&name) {
+                return Err(g.refuse_protected(&name));
             }
-            if in_own_namespace(&name, binding) && !is_current(&name, binding) {
-                Ok(())
-            } else {
-                Err(refuse_create(&name, binding))
+            if !in_own_namespace(&name, binding) || is_current(&name, binding) {
+                return Err(refuse_create(&name, binding));
             }
+            g.check_dst(&format!("refs/heads/{}", short_branch(&name)))
         }
     }
 }
 
-pub(super) fn tag_is_list(rest: &[String]) -> bool {
-    let value_flags = [
-        "-m",
-        "-F",
-        "-u",
-        "--contains",
-        "--no-contains",
-        "--points-at",
-        "--merged",
-        "--no-merged",
-    ];
-    let mut positionals = 0;
-    let mut skip = false;
-    for a in rest {
-        if skip {
-            skip = false;
-            continue;
-        }
-        match a.as_str() {
-            "-l" | "--list" | "-v" | "--verify" => return true,
-            s if value_flags.contains(&s) => skip = true,
-            s if s.starts_with('-') => {}
-            _ => positionals += 1,
-        }
-    }
-    positionals == 0
+pub(crate) fn tag_is_list(p: &Parsed) -> bool {
+    p.pos.is_empty()
+        || p.any(&[
+            "--list",
+            "--verify",
+            "-n",
+            "--contains",
+            "--no-contains",
+            "--merged",
+            "--no-merged",
+            "--points-at",
+        ])
 }
 
-pub(super) fn tag(rest: &[String], p: &ProtectedRefs) -> Result<(), Refusal> {
-    let value_flags = ["-m", "-F", "-u", "--cleanup"];
-    let mut skip = false;
-    for a in rest {
-        if skip {
-            skip = false;
-        } else if value_flags.contains(&a.as_str()) {
-            skip = true;
-        } else if !a.starts_with('-') {
-            let full = format!("refs/tags/{}", a.trim_start_matches("refs/tags/"));
-            if p.is_protected(&full) {
-                return Err(Refusal::new(
-                    "protected_ref",
-                    format!("writing protected tag {a} is refused: only the daemon changes it"),
-                    "leave protected tags alone; ask a human if one must change: agend ask \"<question>\"",
-                ));
-            }
-            break; // the tag name; later positionals are the target
-        }
-    }
-    Ok(())
-}
-
-// ── protected refs: push / fetch / update-ref / symbolic-ref ────────────
-
-fn refuse_protected(name: &str, binding: &Binding) -> Refusal {
-    let next = match binding {
-        Binding::Work { branch, .. } => format!(
-            "commit to your branch {branch}; when the task is done run `agend done` and the daemon merges it"
-        ),
-        Binding::Review { .. } => {
-            "finish the review with: agend review approve  or  agend review changes \"<what to fix>\""
-                .to_string()
-        }
+pub(crate) fn tag(p: &Parsed, g: &Guard) -> Result<(), Refusal> {
+    let names: &[String] = if p.has("--delete") {
+        &p.pos
+    } else {
+        &p.pos[..p.pos.len().min(1)]
     };
-    Refusal::new(
-        "protected_ref",
-        format!("writing {name} is refused: it is a protected ref and only the daemon changes it"),
-        next,
-    )
-}
-
-/// A local branch/ref write a bound agent may make: its own branch or its
-/// own namespace, and nothing protected.
-fn check_local_dst(dst: &str, binding: &Binding, p: &ProtectedRefs) -> Result<(), Refusal> {
-    if p.names_protected(dst) {
-        return Err(refuse_protected(dst, binding));
-    }
-    let is_branch = dst.starts_with("refs/heads/") || !dst.starts_with("refs/");
-    if is_branch && !is_current(dst, binding) && !in_own_namespace(dst, binding) {
-        return Err(Refusal::new(
-            "ref_not_yours",
-            format!(
-                "writing {dst} is refused: agents only write their own branch{}",
-                binding
-                    .branch()
-                    .map(|b| format!(" {b}"))
-                    .unwrap_or_default()
-            ),
-            stay_hint(binding),
-        ));
-    }
-    Ok(())
-}
-
-fn push_positionals(rest: &[String]) -> Vec<&str> {
-    let value_flags = ["-o", "--push-option", "--receive-pack", "--exec", "--repo"];
-    let mut out = Vec::new();
-    let mut skip = false;
-    for a in rest {
-        if skip {
-            skip = false;
-        } else if value_flags.contains(&a.as_str()) {
-            skip = true;
-        } else if !a.starts_with('-') {
-            out.push(a.as_str());
-        }
-    }
-    out
-}
-
-pub(super) fn push(rest: &[String], binding: &Binding, p: &ProtectedRefs) -> Result<(), Refusal> {
-    if matches!(binding, Binding::Review { .. }) {
-        return Err(Refusal::new(
-            "review_readonly",
-            "pushing is refused: review bindings are read-only".to_string(),
-            stay_hint(binding),
-        ));
-    }
-    if let Some(flag) = rest
-        .iter()
-        .find(|a| matches!(a.as_str(), "--all" | "--branches" | "--mirror" | "--prune"))
-    {
-        return Err(Refusal::new(
-            "push_scope",
-            format!("`git push {flag}` is refused: it can write branches other than yours"),
-            "push only your branch: git push origin HEAD",
-        ));
-    }
-    let delete = rest.iter().any(|a| a == "--delete" || a == "-d");
-    let positionals = push_positionals(rest);
-    for spec in positionals.iter().skip(1) {
-        let dst = if delete {
-            Some(*spec)
-        } else if *spec == "HEAD" || *spec == "@" {
-            None
-        } else {
-            refspec_dst(spec).map(|d| if d == "HEAD" { "@" } else { d })
-        };
-        let Some(dst) = dst.filter(|d| *d != "@") else {
-            continue;
-        };
-        if dst.starts_with("refs/tags/") {
-            if p.is_protected(dst) {
-                return Err(refuse_protected(dst, binding));
-            }
-            continue;
-        }
-        check_local_dst(dst, binding, p)?;
-        if delete && is_current(dst, binding) {
+    for name in names {
+        let full = format!("refs/tags/{}", name.trim_start_matches("refs/tags/"));
+        if g.protected.is_protected(&full) {
             return Err(Refusal::new(
-                "ref_not_yours",
-                format!("deleting {dst} is refused: the daemon owns the task branch lifecycle"),
-                stay_hint(binding),
+                "protected_ref",
+                format!("writing protected tag {name} is refused: only the daemon changes it"),
+                "leave protected tags alone; ask a human if one must change: agend ask \"<question>\"",
             ));
         }
     }
     Ok(())
 }
 
-pub(super) fn fetch_refspecs(rest: &[String]) -> Vec<&str> {
-    let value_flags = [
-        "--depth",
-        "--deepen",
-        "--shallow-since",
-        "--shallow-exclude",
-        "-j",
-        "--jobs",
-        "--upload-pack",
-        "--refmap",
-        "-o",
-        "--server-option",
-        "--negotiation-tip",
-        "--recurse-submodules-default",
-        "--submodule-prefix",
+// ── rebase / pull --rebase / stash ──────────────────────────────────────
+
+fn refuse_update_refs(what: &str, next: &str) -> Refusal {
+    Refusal::new(
+        "rebase_update_refs",
+        format!("{what} moves every branch that points into the rebased commits, not only yours"),
+        next.to_string(),
+    )
+}
+
+/// `git rebase [<upstream> [<branch>]]` / `--root [<branch>]`: `<branch>` is
+/// checked out first, so it must be the bound branch; `--update-refs` (or
+/// `rebase.updateRefs`) would move other branches.
+pub(crate) fn rebase(p: &Parsed, g: &Guard, binding: &Binding) -> Result<(), Refusal> {
+    const SEQUENCER: &[&str] = &[
+        "--continue",
+        "--skip",
+        "--abort",
+        "--quit",
+        "--edit-todo",
+        "--show-current-patch",
     ];
-    let mut out = Vec::new();
-    let mut skip = false;
-    for a in rest {
-        if skip {
-            skip = false;
-        } else if value_flags.contains(&a.as_str()) {
-            skip = true;
-        } else if !a.starts_with('-') {
-            out.push(a.as_str());
-        }
-    }
-    out.into_iter().skip(1).collect()
-}
-
-pub(super) fn fetch(rest: &[String], binding: &Binding, p: &ProtectedRefs) -> Result<(), Refusal> {
-    for spec in fetch_refspecs(rest) {
-        if let Some((_, dst)) = spec.split_once(':')
-            && !dst.is_empty()
-            && !dst.starts_with("refs/remotes/")
-        {
-            check_local_dst(dst, binding, p)?;
-        }
-    }
-    Ok(())
-}
-
-pub(super) fn update_ref(
-    rest: &[String],
-    binding: &Binding,
-    p: &ProtectedRefs,
-) -> Result<(), Refusal> {
-    if rest.iter().any(|a| a == "--stdin") {
-        return Err(Refusal::new(
-            "update_ref_stdin",
-            "`git update-ref --stdin` is refused: the shim cannot check which refs it writes"
-                .to_string(),
-            "run one `git update-ref <ref> <new>` per ref instead",
+    if p.has("--update-refs") {
+        return Err(refuse_update_refs(
+            "`git rebase --update-refs`",
+            "rebase only your branch: git rebase <upstream>",
         ));
     }
-    let no_deref = rest.iter().any(|a| a == "--no-deref");
-    let mut skip = false;
-    let mut name = None;
-    for a in rest {
-        if skip {
-            skip = false;
-        } else if a == "-m" {
-            skip = true;
-        } else if !a.starts_with('-') {
-            name = Some(a.as_str());
-            break;
-        }
+    if !p.any(SEQUENCER) && !p.has("--no-update-refs") && g.config_on("rebase.updateRefs") {
+        return Err(refuse_update_refs(
+            "`git rebase` with rebase.updateRefs=true",
+            "add --no-update-refs: git rebase --no-update-refs <upstream>",
+        ));
     }
-    let Some(name) = name else { return Ok(()) };
-    if name == "HEAD" {
-        return if no_deref {
-            Err(refuse_switch("a detached HEAD", binding, p))
-        } else {
-            Ok(())
-        };
-    }
-    check_local_dst(name, binding, p)
-}
-
-pub(super) fn symbolic_ref_writes(rest: &[String]) -> bool {
-    rest.iter().any(|a| a == "-d" || a == "--delete")
-        || rest.iter().filter(|a| !a.starts_with('-')).count() >= 2
-}
-
-pub(super) fn symbolic_ref(
-    rest: &[String],
-    binding: &Binding,
-    p: &ProtectedRefs,
-) -> Result<(), Refusal> {
-    let mut skip = false;
-    let mut positionals = Vec::new();
-    for a in rest {
-        if skip {
-            skip = false;
-        } else if a == "-m" {
-            skip = true;
-        } else if !a.starts_with('-') {
-            positionals.push(a.as_str());
-        }
-    }
-    let delete = rest.iter().any(|a| a == "-d" || a == "--delete");
-    match positionals.as_slice() {
-        ["HEAD", ..] if delete => Err(refuse_switch("no HEAD", binding, p)),
-        ["HEAD", target, ..] if !is_current(target, binding) => {
-            Err(refuse_switch(target, binding, p))
-        }
+    let branch = if p.has("--root") {
+        p.pos.first()
+    } else {
+        p.pos.get(1)
+    };
+    match branch {
+        Some(b) if !is_current(b, binding) => Err(refuse_switch(b, binding, g.protected)),
         _ => Ok(()),
     }
 }
 
-// ── destructive working-tree operations ─────────────────────────────────
-
-/// `clean -f` in any spelling (`-fd`, `-xdf`, `--force`), unless a dry run.
-pub(super) fn clean_is_forced(rest: &[String]) -> bool {
-    let dry = rest.iter().any(|a| {
-        a == "--dry-run" || (a.starts_with('-') && !a.starts_with("--") && a.contains('n'))
-    });
-    let force = rest.iter().any(|a| {
-        a == "--force" || (a.starts_with('-') && !a.starts_with("--") && a[1..].contains('f'))
-    });
-    force && !dry
+/// `git pull` rebases with `rebase.updateRefs` honoured; refuse that combo.
+pub(crate) fn pull_rebase(p: &Parsed, g: &Guard) -> Result<(), Refusal> {
+    if !p.has("--no-rebase") && g.config_on("rebase.updateRefs") {
+        return Err(refuse_update_refs(
+            "`git pull` (which may rebase) with rebase.updateRefs=true",
+            "merge instead: git pull --no-rebase ...; or: git fetch, then git rebase --no-update-refs <upstream>",
+        ));
+    }
+    Ok(())
 }
 
-/// `restore` overwrites the working tree unless it is `--staged` only.
-pub(super) fn restore_touches_worktree(rest: &[String]) -> bool {
-    let staged = rest.iter().any(|a| a == "--staged" || a == "-S");
-    let worktree = rest.iter().any(|a| a == "--worktree" || a == "-W");
-    !staged || worktree
+/// `git stash branch <name>` creates a branch and switches to it.
+pub(crate) fn stash(rest: &[String], binding: &Binding) -> Result<(), Refusal> {
+    if first_positional(rest) == Some("branch") {
+        let name = rest
+            .iter()
+            .skip_while(|a| a.as_str() != "branch")
+            .nth(1)
+            .map(String::as_str)
+            .unwrap_or("");
+        return Err(refuse_create(name, binding));
+    }
+    Ok(())
+}
+
+// ── config / remote ─────────────────────────────────────────────────────
+
+const CONFIG_READ: &[&str] = &[
+    "--get",
+    "--get-all",
+    "--get-regexp",
+    "--get-urlmatch",
+    "--list",
+    "--get-color",
+    "--get-colorbool",
+    "--blob",
+];
+const CONFIG_WRITE: &[&str] = &[
+    "--replace-all",
+    "--add",
+    "--unset",
+    "--unset-all",
+    "--rename-section",
+    "--remove-section",
+    "--edit",
+];
+
+pub(crate) fn config_is_read(p: &Parsed) -> bool {
+    if p.any(CONFIG_WRITE) {
+        return false;
+    }
+    if p.any(CONFIG_READ) {
+        return true;
+    }
+    match p.pos.first().map(String::as_str) {
+        Some("get" | "list") => true,
+        Some("set" | "unset" | "rename-section" | "remove-section" | "edit") => false,
+        _ => p.pos.len() <= 1,
+    }
+}
+
+/// Config writes: only keys an agent may set (`config_keys`); section edits
+/// and the editor cannot be checked.
+pub(crate) fn config(p: &Parsed) -> Result<(), Refusal> {
+    let sub = p.pos.first().map(String::as_str);
+    let unchecked = p.any(&["--rename-section", "--remove-section", "--edit"])
+        || matches!(sub, Some("rename-section" | "remove-section" | "edit"));
+    let key = match sub {
+        Some("set" | "unset") => p.pos.get(1),
+        _ => p.pos.first(),
+    };
+    let next = format!(
+        "agents may set only: {}; for anything else ask a human: agend ask \"<question>\"",
+        config_keys::ALLOWED_HINT
+    );
+    if unchecked {
+        return Err(Refusal::new(
+            "config_write",
+            "renaming, removing or editing config sections is refused: the shim cannot check which keys change".to_string(),
+            next,
+        ));
+    }
+    match key {
+        Some(k) if config_keys::allowed(k) => Ok(()),
+        k => Err(Refusal::new(
+            "config_write",
+            format!(
+                "setting {} is refused: that config can redirect refs, the work tree, hooks or command names",
+                k.map(String::as_str).unwrap_or("<no key>")
+            ),
+            next,
+        )),
+    }
+}
+
+const REMOTE_ADD: &[&str] = &[
+    "-f|--fetch",
+    "--tags",
+    "--no-tags",
+    "-t|--track=",
+    "-m|--master=",
+    "--mirror?",
+];
+
+/// `git remote add` may not mirror; `add -f` and `update` fetch with the
+/// configured refmaps, which must be safe (see `refs::config_refmaps`).
+pub(crate) fn remote(rest: &[String], g: &Guard) -> Result<(), Refusal> {
+    let Some(at) = rest.iter().position(|a| !a.starts_with('-')) else {
+        return Ok(());
+    };
+    match rest[at].as_str() {
+        "add" => {
+            let p = super::opts::parse(&[REMOTE_ADD], &rest[at + 1..])
+                .map_err(|u| super::refuse_option("remote add", &u))?;
+            if p.has("--mirror") {
+                return Err(Refusal::new(
+                    "push_scope",
+                    "`git remote add --mirror` maps every ref of the remote onto yours".to_string(),
+                    "add a normal remote: git remote add <name> <url>",
+                ));
+            }
+            if p.has("--fetch") {
+                super::refs::config_refmaps(g, false)?;
+            }
+            Ok(())
+        }
+        "update" => super::refs::config_refmaps(g, false),
+        _ => Ok(()),
+    }
 }

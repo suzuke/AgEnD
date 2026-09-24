@@ -3,15 +3,17 @@
 //! command (routed into the bound worktree or unchanged).
 //!
 //! Must NOT: run the real git itself (the caller execs the returned command),
-//! except for the read-only commit-ish probe and the snapshot.
+//! except for the read-only probes (symbolic refs, config) and the snapshot.
 
 use crate::audit::{self, Record};
 use crate::binding::{self, Snapshot};
-use crate::classify::{self, Decision, Input};
+use crate::classify::{self, Decision, GitEnv, Input, Probe};
 use crate::ctx::{Ctx, MAX_DEPTH, lossy};
 use crate::location::{self, Anchors};
 use crate::protected_ref::ProtectedRefs;
+use crate::team::{self, Key, Remotes};
 use crate::{Action, Outcome, Refusal, snapshot};
+use std::cell::OnceCell;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -51,27 +53,52 @@ pub fn plan(ctx: &Ctx, args: &[OsString]) -> Outcome {
         .or_else(|| ctx.git_dir.clone());
     let snap_ref = snap.as_ref().ok();
     let bound = snap_ref.and_then(|s| s.binding.as_ref());
+    let source_repo = snap_ref.and_then(|s| s.source_repo.as_deref());
     let anchors = Anchors {
-        source_repo: snap_ref.and_then(|s| s.source_repo.as_deref()),
+        source_repo,
         worktree: bound.map(|b| b.worktree()),
+        home: ctx.home.as_deref(),
         snapshot_ok: snap.is_ok(),
     };
-    let location = location::locate(&dir, git_dir.as_deref(), &anchors);
+    let location = location::locate(
+        &dir,
+        git_dir.as_deref(),
+        ctx.git_common_dir.as_deref(),
+        &anchors,
+    );
     let protected = ProtectedRefs::new(snap_ref.map_or(&[][..], |s: &Snapshot| &s.protected_refs));
-    let probe_dir = bound.map(|b| b.worktree().to_path_buf());
-    let is_commit = |name: &str| {
-        probe_dir
+    let env = GitEnv {
+        retargets: ctx.git_env_retargets(),
+        work_tree: parsed
+            .work_tree
             .as_deref()
-            .is_some_and(|wt| resolves_to_commit(&real, wt, name))
+            .map(PathBuf::from)
+            .or_else(|| ctx.git_work_tree.clone())
+            .map(|p| dir.join(p)),
+        index_file: ctx.git_index_file.as_ref().map(|p| dir.join(p)),
+        config_keys: match &ctx.config_env_error {
+            Some(e) => Err(e.clone()),
+            None => Ok(ctx.config_env_keys.clone()),
+        },
+    };
+    let probe = RealProbe {
+        git: &real,
+        bound: bound
+            .filter(|b| b.worktree().is_dir())
+            .map(|b| b.worktree().to_path_buf()),
+        here: dir.clone(),
+        source_repo: source_repo.map(Path::to_path_buf),
+        team: OnceCell::new(),
+        here_remotes: OnceCell::new(),
     };
     let decision = classify::classify(&Input {
         args: &parsed,
         snapshot: snap.as_ref(),
         location,
-        env_retargets: ctx.git_env_retargets(),
+        env: &env,
         protected: &protected,
         dir: &dir,
-        is_commit: &is_commit,
+        probe: &probe,
     });
 
     let (route, snapshot_op, note) = match decision {
@@ -144,20 +171,118 @@ fn routed_args(args: &[OsString], worktree: &Path, drop: &[usize]) -> Vec<OsStri
     out
 }
 
-/// Whether `name` names a commit in `worktree` (so `checkout <name>` would
-/// switch branches rather than restore a path).
-fn resolves_to_commit(git: &Path, worktree: &Path, name: &str) -> bool {
-    let mut cmd = Command::new(git);
-    cmd.arg("-C")
-        .arg(worktree)
-        .args(["rev-parse", "--verify", "--quiet"])
-        .arg(format!("{name}^{{commit}}"))
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    for var in ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR"] {
-        cmd.env_remove(var);
+/// The real git behind `classify::Probe`. Questions about refs and config
+/// go to the bound worktree when there is one (env retargeting stripped),
+/// else to where git would run; team questions compare remotes (`team`).
+struct RealProbe<'a> {
+    git: &'a Path,
+    bound: Option<PathBuf>,
+    here: PathBuf,
+    source_repo: Option<PathBuf>,
+    team: OnceCell<Vec<Key>>,
+    here_remotes: OnceCell<Remotes>,
+}
+
+impl RealProbe<'_> {
+    /// stdout of `git -C <dir> <args>` if it succeeded. `clean` strips the
+    /// caller's retargeting env (the question is about `dir` itself).
+    fn run(&self, dir: &Path, args: &[&str], clean: bool) -> Option<String> {
+        let mut cmd = Command::new(self.git);
+        cmd.arg("-C")
+            .arg(dir)
+            .args(args)
+            .stdin(Stdio::null())
+            .stderr(Stdio::null());
+        if clean {
+            for var in [
+                "GIT_DIR",
+                "GIT_WORK_TREE",
+                "GIT_COMMON_DIR",
+                "GIT_INDEX_FILE",
+            ] {
+                cmd.env_remove(var);
+            }
+        }
+        let out = cmd.output().ok()?;
+        out.status
+            .success()
+            .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
     }
-    cmd.status().is_ok_and(|s| s.success())
+
+    fn repo(&self) -> (&Path, bool) {
+        match &self.bound {
+            Some(wt) => (wt, true),
+            None => (&self.here, false),
+        }
+    }
+
+    fn config_in(&self, dir: &Path, regex: &str, clean: bool) -> Vec<(String, String)> {
+        let out = self
+            .run(dir, &["config", "-z", "--get-regexp", regex], clean)
+            .unwrap_or_default();
+        out.split('\0')
+            .filter(|e| !e.is_empty())
+            .map(|e| match e.split_once('\n') {
+                Some((k, v)) => (k.to_string(), v.to_string()),
+                None => (e.to_string(), String::new()),
+            })
+            .collect()
+    }
+
+    fn team(&self) -> &[Key] {
+        self.team.get_or_init(|| match &self.source_repo {
+            Some(src) => team::team_keys(
+                src,
+                &Remotes::from_config(&self.config_in(src, team::CONFIG_REGEX, true)),
+            ),
+            None => Vec::new(),
+        })
+    }
+
+    fn here_remotes(&self) -> &Remotes {
+        self.here_remotes.get_or_init(|| {
+            Remotes::from_config(&self.config_in(&self.here, team::CONFIG_REGEX, false))
+        })
+    }
+}
+
+impl Probe for RealProbe<'_> {
+    fn symref_target(&self, full_ref: &str) -> Option<String> {
+        let (dir, clean) = self.repo();
+        let mut name = full_ref.to_string();
+        let mut target = None;
+        for _ in 0..5 {
+            match self.run(dir, &["symbolic-ref", "-q", &name], clean) {
+                Some(t) if !t.trim().is_empty() && t.trim() != name => {
+                    name = t.trim().to_string();
+                    target = Some(name.clone());
+                }
+                _ => break,
+            }
+        }
+        target
+    }
+
+    fn config(&self, regex: &str) -> Vec<(String, String)> {
+        let (dir, clean) = self.repo();
+        self.config_in(dir, regex, clean)
+    }
+
+    fn is_team_clone(&self) -> bool {
+        let team = self.team();
+        self.here_remotes()
+            .keys(&self.here)
+            .iter()
+            .any(|k| team.contains(k))
+    }
+
+    fn is_team_remote(&self, dest: &str) -> bool {
+        let team = self.team();
+        self.here_remotes()
+            .dest_keys(dest, &self.here)
+            .iter()
+            .any(|k| team.contains(k))
+    }
 }
 
 fn display_argv(argv: &[String]) -> String {

@@ -6,7 +6,10 @@
 //! - `AGEND_HOME`: AgEnD home; binding snapshots and the audit log live here.
 //! - `AGEND_INSTANCE`: this agent's instance id.
 //! - `AGEND_SHIM_BYPASS=1`: run the real tool unchecked (audited).
-//! - `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`: git's own retargeting.
+//! - `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_INDEX_FILE`: git's
+//!   own retargeting.
+//! - `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_<n>`, `GIT_CONFIG_PARAMETERS`:
+//!   config set for one call (keys checked like `-c`).
 //!
 //! Must NOT: read config files, open the DB or contact the daemon.
 
@@ -34,11 +37,22 @@ pub struct Ctx {
     pub git_dir: Option<PathBuf>,
     pub git_work_tree: Option<PathBuf>,
     pub git_common_dir: Option<PathBuf>,
+    pub git_index_file: Option<PathBuf>,
+    /// Keys set through `GIT_CONFIG_COUNT`/`GIT_CONFIG_PARAMETERS`.
+    pub config_env_keys: Vec<String>,
+    /// Why those could not be read (the shim then refuses writes).
+    pub config_env_error: Option<String>,
 }
 
 impl Ctx {
     pub fn from_env() -> Ctx {
         let non_empty = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty());
+        let var = |k: &str| std::env::var(k).ok();
+        let config_env = crate::config_keys::from_env(
+            var("GIT_CONFIG_PARAMETERS").as_deref(),
+            var("GIT_CONFIG_COUNT").as_deref(),
+            &|i| var(&format!("GIT_CONFIG_KEY_{i}")),
+        );
         Ctx {
             home: non_empty("AGEND_HOME").map(PathBuf::from),
             instance: non_empty("AGEND_INSTANCE").map(|v| v.to_string_lossy().into_owned()),
@@ -53,12 +67,18 @@ impl Ctx {
             git_dir: non_empty("GIT_DIR").map(PathBuf::from),
             git_work_tree: non_empty("GIT_WORK_TREE").map(PathBuf::from),
             git_common_dir: non_empty("GIT_COMMON_DIR").map(PathBuf::from),
+            git_index_file: non_empty("GIT_INDEX_FILE").map(PathBuf::from),
+            config_env_keys: config_env.clone().unwrap_or_default(),
+            config_env_error: config_env.err(),
         }
     }
 
     /// Whether git's retargeting env vars are set.
     pub fn git_env_retargets(&self) -> bool {
-        self.git_dir.is_some() || self.git_work_tree.is_some() || self.git_common_dir.is_some()
+        self.git_dir.is_some()
+            || self.git_work_tree.is_some()
+            || self.git_common_dir.is_some()
+            || self.git_index_file.is_some()
     }
 
     /// The real `name` binary: the first executable `name` on PATH that is

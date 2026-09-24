@@ -1,175 +1,17 @@
-//! End-to-end behaviour of the git guard against real temporary repos: a
-//! canonical checkout, a daemon-style worktree on `agend/t-1/fix`, and a
-//! binding snapshot written with the shim's own `Snapshot` type (the same
-//! producer the daemon will use).
-//!
-//! Local fixture helpers; switch to `agend_testkit::git_fixture` once it has
-//! repo builders (see TESTING.md).
+//! End-to-end behaviour of the git guard against real temporary repos (see
+//! `common`): a canonical checkout, a daemon-style worktree on
+//! `agend/t-1/fix`, and a binding snapshot written with the shim's own
+//! `Snapshot` type. Kill-guard behaviour lives in `bypass_corpus.rs`, against
+//! a fake kill recorder only.
 
 #![cfg(unix)]
 
-use agend_core::model::work_branch;
-use agend_shim::binding::{Binding, SNAPSHOT_VERSION, Snapshot, snapshot_path};
+mod common;
+
+use agend_shim::audit;
+use agend_shim::binding::snapshot_path;
 use agend_shim::ctx::Ctx;
-use agend_shim::{Action, Tool, audit, plan};
-use agend_testkit::tempdir::TempDir;
-use std::ffi::OsString;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
-
-const INSTANCE: &str = "dev-1";
-
-struct Fixture {
-    _dir: TempDir,
-    home: PathBuf,
-    repo: PathBuf,
-    worktree: PathBuf,
-    workspace: PathBuf,
-    branch: String,
-}
-
-fn git(dir: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8_lossy(&out.stdout).trim().to_string()
-}
-
-impl Fixture {
-    fn new(label: &str) -> Fixture {
-        let dir = TempDir::new(label).unwrap();
-        let root = std::fs::canonicalize(dir.path()).unwrap();
-        let home = root.join("home");
-        let repo = root.join("repo");
-        let workspace = home.join("workspace").join(INSTANCE);
-        std::fs::create_dir_all(&workspace).unwrap();
-        std::fs::create_dir_all(&repo).unwrap();
-        git(&repo, &["init", "-q", "-b", "main"]);
-        git(&repo, &["config", "user.name", "Test"]);
-        git(&repo, &["config", "user.email", "test@example.com"]);
-        std::fs::write(repo.join("README.md"), "hello\n").unwrap();
-        git(&repo, &["add", "README.md"]);
-        git(&repo, &["commit", "-q", "-m", "init"]);
-        git(&repo, &["branch", "feature"]);
-        let branch = work_branch("t-1", "fix");
-        let worktree = home.join("worktrees").join("t-1");
-        git(
-            &repo,
-            &[
-                "worktree",
-                "add",
-                "-q",
-                "-b",
-                &branch,
-                worktree.to_str().unwrap(),
-                "main",
-            ],
-        );
-        let f = Fixture {
-            _dir: dir,
-            home,
-            repo,
-            worktree,
-            workspace,
-            branch,
-        };
-        f.write_snapshot(true);
-        f
-    }
-
-    fn snapshot(&self, bound: bool) -> Snapshot {
-        Snapshot {
-            version: SNAPSHOT_VERSION,
-            instance: INSTANCE.into(),
-            source_repo: Some(self.repo.clone()),
-            protected_refs: vec!["release".into()],
-            binding: bound.then(|| Binding::Work {
-                task_id: "t-1".into(),
-                branch: self.branch.clone(),
-                worktree: self.worktree.clone(),
-            }),
-        }
-    }
-
-    fn write_snapshot(&self, bound: bool) {
-        let path = snapshot_path(&self.home, INSTANCE);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(
-            path,
-            serde_json::to_string_pretty(&self.snapshot(bound)).unwrap(),
-        )
-        .unwrap();
-    }
-
-    fn ctx(&self, cwd: &Path) -> Ctx {
-        Ctx {
-            home: Some(self.home.clone()),
-            instance: Some(INSTANCE.into()),
-            cwd: cwd.to_path_buf(),
-            path: std::env::var_os("PATH").unwrap(),
-            ..Ctx::default()
-        }
-    }
-
-    fn head(&self, dir: &Path, rev: &str) -> String {
-        git(dir, &["rev-parse", rev])
-    }
-}
-
-/// Result of one shim call: stderr lines, and the real git's output if run.
-struct Ran {
-    messages: Vec<String>,
-    refused: Option<&'static str>,
-    output: Option<Output>,
-}
-
-impl Ran {
-    fn text(&self) -> String {
-        self.messages.join("\n")
-    }
-
-    fn ok(&self) -> &Output {
-        assert_eq!(self.refused, None, "refused:\n{}", self.text());
-        let out = self.output.as_ref().unwrap();
-        assert!(
-            out.status.success(),
-            "real git failed:\n{}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        out
-    }
-}
-
-fn shim(ctx: &Ctx, tool: Tool, cmd: &[&str]) -> Ran {
-    let args: Vec<OsString> = cmd.iter().map(OsString::from).collect();
-    let outcome = plan(ctx, tool, &args);
-    match outcome.action {
-        Action::Exec(mut c) => Ran {
-            messages: outcome.messages,
-            refused: None,
-            output: Some(c.env("GIT_CONFIG_NOSYSTEM", "1").output().unwrap()),
-        },
-        Action::Refuse(r) => Ran {
-            messages: outcome.messages,
-            refused: Some(r.code),
-            output: None,
-        },
-        Action::NotFound => panic!("real tool not found: {:?}", outcome.messages),
-    }
-}
-
-fn gitshim(ctx: &Ctx, cmd: &[&str]) -> Ran {
-    shim(ctx, Tool::Git, cmd)
-}
+use common::{Fixture, INSTANCE, git, gitshim};
 
 #[test]
 fn bound_commit_from_workspace_lands_on_the_task_branch() {
@@ -301,7 +143,7 @@ fn protected_refs_are_refused_and_main_does_not_move() {
     std::fs::write(f.worktree.join("w.txt"), "w\n").unwrap();
     gitshim(&ctx, &["add", "w.txt"]).ok();
     gitshim(&ctx, &["commit", "-q", "-m", "w"]).ok();
-    let main_before = f.head(&f.repo, "main");
+    let before = f.protected_state();
     let head = f.head(&f.worktree, "HEAD");
     for cmd in [
         vec!["update-ref", "refs/heads/main", head.as_str()],
@@ -316,13 +158,10 @@ fn protected_refs_are_refused_and_main_does_not_move() {
             "{cmd:?}"
         );
     }
-    assert_eq!(f.head(&f.repo, "main"), main_before);
     assert_eq!(
-        git(
-            &f.repo,
-            &["for-each-ref", "--format=%(refname)", "refs/heads/release"]
-        ),
-        ""
+        f.protected_state(),
+        before,
+        "main/master/release did not move"
     );
     // The agent's own branch may be updated.
     gitshim(
@@ -455,48 +294,4 @@ fn git_dir_of_the_bound_worktree_is_trusted() {
         gitshim(&canon, &["add", "h.txt"]).refused,
         Some("git_env_retarget")
     );
-}
-
-#[test]
-fn kill_guard_protects_agend_processes() {
-    let dir = TempDir::new("kill").unwrap();
-    // A stand-in holder: `sleep` exec'd under the name `agend`.
-    let fake = dir.path().join("agend");
-    std::os::unix::fs::symlink("/bin/sleep", &fake).unwrap();
-    let mut holder = Command::new(&fake).arg("60").spawn().unwrap();
-    let mut other = Command::new("/bin/sleep").arg("60").spawn().unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    let ctx = Ctx {
-        home: Some(dir.path().to_path_buf()),
-        instance: Some(INSTANCE.into()),
-        cwd: dir.path().to_path_buf(),
-        path: std::env::var_os("PATH").unwrap(),
-        ..Ctx::default()
-    };
-    let hpid = holder.id().to_string();
-    assert_eq!(
-        shim(&ctx, Tool::Kill, &[&hpid]).refused,
-        Some("kill_protected")
-    );
-    assert_eq!(
-        shim(&ctx, Tool::Pkill, &["-f", "sleep 60"]).refused,
-        Some("pattern_kill")
-    );
-    assert_eq!(
-        shim(&ctx, Tool::Killall, &["sleep"]).refused,
-        Some("pattern_kill")
-    );
-    assert!(holder.try_wait().unwrap().is_none(), "holder still alive");
-    assert!(other.try_wait().unwrap().is_none(), "other still alive");
-
-    let opid = other.id().to_string();
-    shim(&ctx, Tool::Kill, &[&opid]).ok();
-    let status = other.wait().unwrap();
-    assert!(
-        !status.success(),
-        "explicit pid of a normal process is killed"
-    );
-    holder.kill().unwrap();
-    holder.wait().unwrap();
-    assert_eq!(audit::read(dir.path()).len(), 3);
 }

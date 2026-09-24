@@ -6,9 +6,14 @@
 //! - `pkill`/`killall` match processes by name across the whole host, so they
 //!   are refused (only purely informational flags pass); the message shows
 //!   the scoped alternative: `pgrep`, then `kill <pid>`.
-//! - `kill <pid>...`: explicit pids pass, except a pid whose executable is
-//!   `agend` (the daemon and every holder run the `agend` binary) and
-//!   negative targets (a whole process group; `-1` is every process you own).
+//! - `kill <pid>...`: parsed deny-by-default. At most one leading signal
+//!   spec (`-9`, `-KILL`, `-s SIG`, `-n NUM`, `--signal[=]SIG`), an optional
+//!   `--`, then targets. Every target must be a plain pid once surrounding
+//!   whitespace is trimmed (kill implementations skip it: `" 123"` is pid
+//!   123). Refused: `0` and negative targets (process groups; `-1` is every
+//!   process you own), names (`kill agend` on util-linux), job specs,
+//!   unknown options, and a pid whose executable is `agend` (the daemon and
+//!   every holder run the `agend` binary).
 //!
 //! Limits: `kill` is a shell builtin in bash/zsh/sh, so only the external
 //! `kill` (`/bin/kill`, `command kill`, `xargs kill`) reaches the shim. A
@@ -94,21 +99,9 @@ pub fn classify(
             ))
         }
         Tool::Kill => {
-            for op in kill_operands(args) {
-                let Ok(n) = op.parse::<i64>() else { continue };
-                if n < 0 {
-                    return Err(Refusal::new(
-                        "group_kill",
-                        format!(
-                            "target {op} is negative: it signals a whole process group and can reach beyond your own processes"
-                        ),
-                        "kill explicit pids instead: pgrep -fl <pattern>, then kill <pid> ...",
-                    ));
-                }
-                let Ok(pid) = u32::try_from(n) else { continue };
-                if pid == 0 {
-                    continue;
-                }
+            let operands = kill_operands(args)?;
+            for op in operands {
+                let pid = kill_target(op)?;
                 if let Some(name) = name_of(pid)
                     && is_protected_name(&name)
                 {
@@ -134,20 +127,89 @@ fn is_protected_name(name: &str) -> bool {
         .is_some_and(|n| n == PROTECTED_EXE)
 }
 
-/// Target operands of `kill`, after an optional leading signal spec
-/// (`-s SIG`, `-n NUM`, `--signal SIG`, `-9`, `-TERM`) and `--`.
-fn kill_operands(args: &[String]) -> Vec<&str> {
-    let skip = match args.first().map(String::as_str) {
-        Some("-s" | "--signal" | "-n") => 2,
-        Some("--") => 1,
-        Some(s) if s.starts_with('-') && s.len() > 1 => 1,
-        _ => 0,
+const KILL_INFO: &[&str] = &["-l", "-L", "--list", "--table", "--help", "--version"];
+
+fn refuse_kill_form(what: &str) -> Refusal {
+    Refusal::new(
+        "kill_target",
+        format!("{what}: the kill guard only accepts `kill [-SIGNAL] <pid>...` with plain pids"),
+        "find the pid first (pgrep -fl <pattern>), then: kill <pid> ...",
+    )
+}
+
+/// Target operands of `kill` after one optional leading signal spec and
+/// `--`. `Ok(empty)` for informational forms (`-l`, `--help`). A numeric
+/// signal spec with no targets (`kill -1`) is refused: some kills read it
+/// as pid -1.
+fn kill_operands(args: &[String]) -> Result<Vec<&str>, Refusal> {
+    let first = args.first().map(String::as_str);
+    if first.is_some_and(|a| KILL_INFO.contains(&a)) {
+        return Ok(Vec::new());
+    }
+    let skip = match first {
+        None => return Ok(Vec::new()),
+        Some("-s" | "-n" | "--signal") => 2,
+        Some(a) if a.starts_with("--signal=") => 1,
+        Some("--") => 0,
+        Some(a) if a.starts_with("--") => {
+            return Err(refuse_kill_form(&format!("option {a} is not accepted")));
+        }
+        Some(a)
+            if a.len() > 1
+                && a.starts_with('-')
+                && a[1..].bytes().all(|b| b.is_ascii_alphanumeric()) =>
+        {
+            1
+        }
+        Some(_) => 0,
     };
-    args.iter()
-        .skip(skip.min(args.len()))
-        .map(String::as_str)
-        .filter(|a| *a != "--")
-        .collect()
+    let mut rest: Vec<&str> = args.iter().skip(skip).map(String::as_str).collect();
+    if rest.first() == Some(&"--") {
+        rest.remove(0);
+    }
+    if rest.is_empty()
+        && skip == 1
+        && first.is_some_and(|a| a[1..].bytes().all(|b| b.is_ascii_digit()))
+    {
+        return Err(Refusal::new(
+            "group_kill",
+            format!(
+                "`kill {}` without a pid can be read as target {}: every process you own",
+                first.unwrap_or_default(),
+                first.unwrap_or_default()
+            ),
+            "kill explicit pids instead: pgrep -fl <pattern>, then kill -SIGNAL <pid> ...",
+        ));
+    }
+    Ok(rest)
+}
+
+/// A plain positive pid, the way kill implementations read it (surrounding
+/// whitespace skipped, `+` and leading zeros allowed).
+fn kill_target(op: &str) -> Result<u32, Refusal> {
+    let t = op.trim_matches(|c: char| c.is_ascii_whitespace());
+    let digits = t.strip_prefix(['+', '-']).unwrap_or(t);
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(refuse_kill_form(&format!("target {op:?} is not a pid")));
+    }
+    let n: i128 = t
+        .parse()
+        .map_err(|_| refuse_kill_form(&format!("target {op:?} is not a pid")))?;
+    if n <= 0 {
+        return Err(Refusal::new(
+            "group_kill",
+            format!(
+                "target {op} is {}: it signals a whole process group and can reach beyond your own processes",
+                if n == 0 {
+                    "0 (your own process group)"
+                } else {
+                    "negative"
+                }
+            ),
+            "kill explicit pids instead: pgrep -fl <pattern>, then kill <pid> ...",
+        ));
+    }
+    u32::try_from(n).map_err(|_| refuse_kill_form(&format!("target {op:?} is out of range")))
 }
 
 /// The pattern part of a pkill/killall argv, for the `pgrep` hint.
@@ -227,10 +289,48 @@ mod tests {
         assert_eq!(code(Tool::Kill, "100"), "kill_protected");
         assert_eq!(code(Tool::Kill, "-9 300 200"), "kill_protected");
         assert_eq!(code(Tool::Kill, "-s TERM 100"), "kill_protected");
+        assert_eq!(code(Tool::Kill, "--signal=TERM 100"), "kill_protected");
         assert_eq!(code(Tool::Kill, "-- -1"), "group_kill");
         assert_eq!(code(Tool::Kill, "-9 -1234"), "group_kill");
-        for cmd in ["300", "-9 300", "0", "999", "-l", "%1"] {
+        for cmd in ["300", "-9 300", "999", "-l", "-l 9", "--", ""] {
             assert_eq!(code(Tool::Kill, cmd), "allow", "{cmd}");
+        }
+    }
+
+    /// T9 round 1: forms that reached a holder or a group before.
+    #[test]
+    fn kill_targets_are_normalised_and_deny_by_default() {
+        let k = |args: &[&str]| {
+            let v: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+            match classify(Tool::Kill, &v, &names) {
+                Ok(()) => "allow",
+                Err(r) => r.code,
+            }
+        };
+        for spaced in [" 100", "100 ", "\t100\n", "+100", "0100", "000200"] {
+            assert_eq!(k(&[spaced]), "kill_protected", "{spaced:?}");
+            assert_eq!(k(&["-9", spaced]), "kill_protected", "{spaced:?}");
+        }
+        for group in [
+            &["0"][..],
+            &["-9", "0"],
+            &["-1"],
+            &["-9"],
+            &["-s", "9", "-1"],
+            &["-9", "--", "-300"],
+            &["00"],
+        ] {
+            assert_eq!(k(group), "group_kill", "{group:?}");
+        }
+        for bad in [
+            &["agend"][..],
+            &["%1"],
+            &["-9", "-a", "300"],
+            &["--timeout", "1", "300"],
+            &["1e3"],
+            &["99999999999"],
+        ] {
+            assert_eq!(k(bad), "kill_target", "{bad:?}");
         }
     }
 

@@ -12,12 +12,14 @@
 pub mod audit;
 pub mod binding;
 pub mod classify;
+pub mod config_keys;
 pub mod ctx;
 pub mod git;
 pub mod kill_guard;
 pub mod location;
 pub mod protected_ref;
 pub mod snapshot;
+pub mod team;
 
 use std::ffi::{OsStr, OsString};
 use std::path::Path;

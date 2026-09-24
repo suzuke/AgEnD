@@ -4,6 +4,10 @@
 //!
 //! Set `AGEND_SHIM_DEMO_KEEP=1` to keep the temp dir and get the env lines
 //! for trying the shim by hand.
+//!
+//! Safety: the shim's "real" `kill`/`pkill`/`killall` resolve to fake
+//! recorders in `<tmp>/fakebin` (they only log their argv), so no signal is
+//! ever delivered by the demo, even if the guard had a bug.
 
 #[cfg(unix)]
 fn main() -> std::process::ExitCode {
@@ -34,6 +38,7 @@ mod demo {
     struct Env {
         root: PathBuf,
         bin: PathBuf,
+        kill_log: PathBuf,
         home: PathBuf,
         repo: PathBuf,
         worktree: PathBuf,
@@ -124,6 +129,23 @@ mod demo {
         for tool in ["git", "kill", "pkill", "killall"] {
             std::os::unix::fs::symlink(&agend, bin.join(tool)).map_err(|e| e.to_string())?;
         }
+        // Fake "real" kill tools: the shim finds these, never /bin/kill.
+        let fakebin = root.join("fakebin");
+        let kill_log = root.join("kill.log");
+        std::fs::create_dir_all(&fakebin).map_err(|e| e.to_string())?;
+        for tool in ["kill", "pkill", "killall"] {
+            let p = fakebin.join(tool);
+            std::fs::write(
+                &p,
+                format!(
+                    "#!/bin/sh\nprintf '%s %s\\n' {tool} \"$*\" >> '{}'\n",
+                    kill_log.display()
+                ),
+            )
+            .map_err(|e| e.to_string())?;
+            std::fs::set_permissions(&p, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+                .map_err(|e| e.to_string())?;
+        }
         git(&repo, &["init", "-q", "-b", "main"])?;
         git(&repo, &["config", "user.name", "Demo"])?;
         git(&repo, &["config", "user.email", "demo@example.com"])?;
@@ -158,6 +180,8 @@ mod demo {
 
         let mut path = OsString::from(&bin);
         path.push(":");
+        path.push(&fakebin);
+        path.push(":");
         path.push(std::env::var_os("PATH").unwrap_or_default());
         println!("setup: temp dir {}", root.display());
         println!("   canonical repo   <tmp>/repo (branch main)");
@@ -167,9 +191,13 @@ mod demo {
             "   shim             <tmp>/bin/{{git,kill,pkill,killall}} -> {}",
             agend.display()
         );
+        println!(
+            "   fake kill tools  <tmp>/fakebin/{{kill,pkill,killall}} (record argv, send no signal)"
+        );
         Ok(Env {
             root,
             bin,
+            kill_log,
             home,
             repo,
             worktree,
@@ -199,6 +227,7 @@ mod demo {
         refuse(env)?;
         snapshot(env)?;
         protected(env)?;
+        structural(env)?;
         kill_guard(env)?;
         audit(env)
     }
@@ -308,6 +337,49 @@ mod demo {
         )
     }
 
+    fn structural(env: &Env) -> Result<(), String> {
+        println!(
+            "\n-- structural (round 1): abbreviations, implicit destinations, other work trees, symbolic refs"
+        );
+        let repo = env.repo.to_str().ok_or("non-UTF-8 temp dir")?;
+        let main_before = git(&env.repo, &["rev-parse", "main"])?;
+        std::fs::write(env.repo.join("canon-wip.txt"), "canonical wip\n")
+            .map_err(|e| e.to_string())?;
+        let wt_flag = format!("--work-tree={repo}");
+        for (args, code_text) in [
+            (&["reset", "--har"][..], "spelled in full"),
+            (&["push", ".", "HEAD"][..], "no explicit destination"),
+            (
+                &[wt_flag.as_str(), "clean", "-fd"][..],
+                "is not your bound worktree",
+            ),
+            (
+                &[
+                    "symbolic-ref",
+                    "refs/heads/agend/t-1/alias",
+                    "refs/heads/main",
+                ][..],
+                "symbolic ref",
+            ),
+        ] {
+            let out = env.shim("git", args, &env.worktree)?;
+            check(
+                out.status.code() == Some(1)
+                    && String::from_utf8_lossy(&out.stderr).contains(code_text),
+                &format!("refused: {code_text}"),
+            )?;
+        }
+        check(
+            git(&env.repo, &["rev-parse", "main"])? == main_before,
+            "main did not move",
+        )?;
+        check(
+            env.repo.join("canon-wip.txt").exists(),
+            "the canonical checkout's untracked file survived",
+        )?;
+        std::fs::remove_file(env.repo.join("canon-wip.txt")).map_err(|e| e.to_string())
+    }
+
     fn sleep_bin() -> &'static str {
         if Path::new("/bin/sleep").exists() {
             "/bin/sleep"
@@ -347,7 +419,11 @@ mod demo {
             let mpid = mine.id().to_string();
             let out = env.shim("kill", &[&mpid], &env.workspace)?;
             check(out.status.success(), "kill <own pid> is allowed")?;
-            let _ = mine.wait();
+            let log = std::fs::read_to_string(&env.kill_log).unwrap_or_default();
+            check(
+                log == format!("kill {mpid}\n"),
+                "only that call reached the (fake) real kill",
+            )?;
             Ok(())
         })();
         let _ = holder.kill();
@@ -372,8 +448,8 @@ mod demo {
         let refusals = records.iter().filter(|r| r.event == "refuse").count();
         let snaps = records.iter().filter(|r| r.event == "snapshot").count();
         check(
-            refusals == 7,
-            &format!("{refusals} refusals recorded (want 7)"),
+            refusals == 11,
+            &format!("{refusals} refusals recorded (want 11)"),
         )?;
         check(snaps >= 2, &format!("{snaps} snapshots recorded"))
     }

@@ -2,6 +2,12 @@
 //! process): the bound worktree, the canonical checkout, another checkout of
 //! the same repo, a foreign repo, or no repo at all.
 //!
+//! A repo that merely encloses `$AGEND_HOME` (a dotfiles repo in `$HOME`)
+//! does not own the agent's workspace: a call from inside `$AGEND_HOME` that
+//! only finds such a repo is `NoRepo`, and is routed like one.
+//! `GIT_COMMON_DIR` is honoured, so it cannot relabel the canonical repo's
+//! refs as a foreign repo.
+//!
 //! Must NOT: spawn git; this runs on every call.
 
 use std::path::{Path, PathBuf};
@@ -14,7 +20,8 @@ pub enum Location {
     Canonical,
     /// Another worktree of the same repo (a sibling's, or a stale one).
     OtherWorktree,
-    /// A repo unrelated to the team's repo; the shim does not guard it.
+    /// A repo other than the team's checkout; the shim guards only what can
+    /// reach the team repo from it (see `team`).
     Foreign,
     /// Not inside any repo (e.g. the agent's workspace directory).
     NoRepo,
@@ -36,16 +43,24 @@ impl Location {
 pub struct Anchors<'a> {
     pub source_repo: Option<&'a Path>,
     pub worktree: Option<&'a Path>,
+    /// `$AGEND_HOME`: repos enclosing it do not own the workspace.
+    pub home: Option<&'a Path>,
     /// False when the snapshot is unusable: every repo is then `Unknown`.
     pub snapshot_ok: bool,
 }
 
 /// Resolves the location of a git call made in `dir` (the caller's cwd with
-/// any `-C` applied), with `git_dir` from `--git-dir`/`GIT_DIR` if given.
-pub fn locate(dir: &Path, git_dir: Option<&Path>, anchors: &Anchors) -> Location {
+/// any `-C` applied), with `git_dir` from `--git-dir`/`GIT_DIR` and
+/// `common` from `GIT_COMMON_DIR` if given.
+pub fn locate(
+    dir: &Path,
+    git_dir: Option<&Path>,
+    common: Option<&Path>,
+    anchors: &Anchors,
+) -> Location {
     let gitdir = match git_dir {
         Some(g) => Some(dir.join(g)),
-        None => discover_gitdir(dir),
+        None => discover_gitdir(dir, anchors.home),
     };
     let Some(gitdir) = gitdir.and_then(|g| std::fs::canonicalize(g).ok()) else {
         return Location::NoRepo;
@@ -53,6 +68,10 @@ pub fn locate(dir: &Path, git_dir: Option<&Path>, anchors: &Anchors) -> Location
     if !anchors.snapshot_ok {
         return Location::Unknown;
     }
+    let own_common = match common {
+        Some(c) => std::fs::canonicalize(dir.join(c)).unwrap_or_else(|_| dir.join(c)),
+        None => common_dir(&gitdir),
+    };
     if let Some(wt) = anchors.worktree
         && gitdir_of_checkout(wt).as_deref() == Some(gitdir.as_path())
     {
@@ -65,7 +84,7 @@ pub fn locate(dir: &Path, git_dir: Option<&Path>, anchors: &Anchors) -> Location
     else {
         return Location::Foreign;
     };
-    if common_dir(&gitdir) != source_common {
+    if own_common != source_common {
         Location::Foreign
     } else if gitdir == source_common {
         Location::Canonical
@@ -75,10 +94,14 @@ pub fn locate(dir: &Path, git_dir: Option<&Path>, anchors: &Anchors) -> Location
 }
 
 /// Walks up from `dir` to the first `.git` (directory or `gitdir:` file).
-fn discover_gitdir(dir: &Path) -> Option<PathBuf> {
+/// From inside `home`, a `.git` at or above `home` does not count.
+fn discover_gitdir(dir: &Path, home: Option<&Path>) -> Option<PathBuf> {
     let start = std::fs::canonicalize(dir).ok()?;
+    let home = home.and_then(|h| std::fs::canonicalize(h).ok());
+    let inside_home = home.as_deref().is_some_and(|h| start.starts_with(h));
     start
         .ancestors()
+        .take_while(|d| !(inside_home && home.as_deref().is_some_and(|h| h.starts_with(d))))
         .find_map(|d| resolve_dot_git(&d.join(".git")))
 }
 
@@ -99,7 +122,7 @@ fn resolve_dot_git(dot_git: &Path) -> Option<PathBuf> {
 }
 
 /// The shared git dir (`commondir` file of a linked worktree), canonical.
-fn common_dir(gitdir: &Path) -> PathBuf {
+pub fn common_dir(gitdir: &Path) -> PathBuf {
     std::fs::read_to_string(gitdir.join("commondir"))
         .ok()
         .and_then(|c| std::fs::canonicalize(gitdir.join(c.trim())).ok())
