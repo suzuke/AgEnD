@@ -1,0 +1,103 @@
+# 架構總覽
+
+> **TL;DR**
+> - daemon 是唯一的大型 I/O 層；agent 與附屬程序由每個 instance 一個的 holder 持有，所以 daemon 可隨時重啟。
+> - 記住：**crate 邊界就是架構**，由 `cargo xtask check-deps` 強制。
+> - 下一步：系統圖看 [README](../README.md#系統圖)；細節看本頁底部的分頁連結。
+
+來源：規劃 r4（§4、§5）與決策 D1–D23。後來的決策優先於規劃本文。
+
+## 程序模型
+
+| 程序 | 數量 | 職責 |
+|---|---|---|
+| daemon | 1，常駐（launchd／systemd） | protocol server、流水線、送達、監督、排程、對帳、DB |
+| holder | 每個 instance 1 個 | PTY、畫面（alacritty_terminal）、附屬程序（codex app-server、opencode serve） |
+| agent | 每個 instance 1 個 | codex／claude／opencode；PATH 上有 shim 與 `agend` |
+| client | 任意 | TUI、CLI、未來的 GUI；都走 protocol v1 |
+
+規則：
+
+1. agent 側沒有 daemon 的子程序。v1 由 daemon 啟動 codex app-server 與 opencode serve，v2 改由 holder 持有。
+2. daemon 重啟後：重連 holder → 直接取 holder 裡的現成畫面（不重播位元組）→ 重連 backend 補回斷線期間的事件。
+3. holder 被硬殺時裡面的 agent 會一起死。這是所有方案（自有 holder、tmux、herdr）共同的上限。
+4. holder 與 claude channel bridge 升級前仍跑舊 binary，兩者的協定都必須有版本且向後相容。
+5. 自舉隔離：daemon、holder、shim 跑已安裝的 release 版；開發中的 AgEnD 在另一個 clone。
+
+## Crate 地圖
+
+切 crate 的四條準則（D10）；其餘一律是模組 + trait。
+
+| # | 準則 | 例子 |
+|---|---|---|
+| 1 | 需要編譯器強制的限制 | `agend-core` 不能依賴 tokio、rusqlite、process／network crate |
+| 2 | 獨立程序、有自己的穩定性要求 | `agend-daemon`、`agend-holder`、`agend-shim`、`agend-tui` |
+| 3 | 對外使用 | `agend-client`（TUI、CLI、未來 Rust GUI 共用） |
+| 4 | 多個 crate 共用的測試基礎設施 | `agend-testkit`（只能當 dev-dependency） |
+
+依賴方向（實線 = 編譯期依賴）：
+
+| crate | 依賴 |
+|---|---|
+| `agend-core` | 無（只有 std） |
+| `agend-daemon`、`agend-holder`、`agend-shim`、`agend-client` | `agend-core` |
+| `agend-tui` | `agend-core`、`agend-client` |
+| `agend` | 以上全部；唯一 binary |
+| `agend-testkit` | `agend-core`；只被當 dev-dependency |
+
+`cargo xtask check-deps` 檢查的規則：
+
+- [ ] `agend-core`：沒有 async runtime、SQLite、network、process crate，也不依賴其他 `agend-*`；原始碼不用 `std::process`、`std::net`。
+- [ ] `agend-shim`、`agend-client`：沒有 async runtime、SQLite，也不依賴 `agend-daemon`。
+- [ ] 任何 crate 都不能把 `agend-testkit` 當一般依賴。
+
+完整清單在 `xtask/src/check_deps.rs`，說明在 [xtask/README.md](../xtask/README.md)。
+
+## daemon 分層
+
+| 層 | 模組 | 做什麼 |
+|---|---|---|
+| 入口 | `server`、`handlers`、`ingest` | protocol server；命令處理（與傳輸分離）；hook／事件接收與磁碟佇列補送 |
+| 領域 | `pipeline`、`delivery`、`supervisor`、`scheduler`、`reconcile` | 驅動 core 狀態機；送達；卡住／額度／轉派；timeout／cron；DB ↔ git 對帳 |
+| adapter | `driver/{codex,claude,opencode}`、`runtime`、`forge/{local,github}`、`git`、`runner`、`store`、`notifier` | 對外的一切 I/O |
+
+- 領域模組只透過 `agend_core::traits` 呼叫 adapter，所以能對 testkit 的假實作測。
+- runtime 為 tokio multi-thread；SQLite 由專屬執行緒持有、經 channel 存取；git、gh、checks 指令一律 `tokio::process` + timeout。
+- v1 兩天有 861 次「scanner-thread slip」，這是上一條的理由。
+
+## core 內容
+
+| 模組 | 內容 |
+|---|---|
+| `config` | `config.toml`（daemon 層級，人寫、daemon 只讀） |
+| `model` | 共用型別（backend、team、訊息狀態、branch 命名空間…） |
+| `protocol/{client,holder}` | 兩套有版本的協定；外部 GUI 用產生的 JSON schema |
+| `traits` | `Driver`、`Forge`、`Store`、`Runtime`、`Notifier`、`Clock` |
+| `pipeline/{stage,task,workflow}` | 6 種關卡狀態機、task 關係與操作、workflow 存檔檢查 |
+| `policy/{busy,debounce,conflict,merge_gate,assign}` | 忙碌策略、去抖動、衝突偵測、merge 門檻與 patch-id、角色分派 |
+| `screen` | hard gate 分類器；規則是資料檔 |
+
+`policy/assign`（D18 分派規則）放在 core 是骨架的選擇，來源沒有指定位置。
+
+## 細節
+
+| 主題 | 文件 |
+|---|---|
+| 流水線、workflow、merge、worktree／branch 生命週期、shim | [architecture/pipeline.md](architecture/pipeline.md) |
+| 訊息送達、狀態偵測、啟動提示 | [architecture/delivery.md](architecture/delivery.md) |
+| TUI、設定與目錄、安裝 | [architecture/tui-and-setup.md](architecture/tui-and-setup.md) |
+
+## 待定（來源未決定）
+
+- [ ] 兩套協定的 wire format 與版本協商方式。
+- [ ] `traits` 的方法簽章（第 1 關設計）。
+- [ ] `command` 關卡的 runner 是否需要自己的 trait 供假實作；規劃 §5.1 原本有 Checks trait，D19／D20 後已不存在。
+- [ ] forge CI（GitHub checks）結果怎麼進流水線：規劃原本的「Checks forge」在 D19／D20 後沒有新的對應說法。
+- [ ] 去抖動的 N 秒、快照保留份數 N、各表保留期限。
+
+## 下一步
+
+```bash
+cat docs/architecture/pipeline.md
+cargo xtask check-deps
+```
