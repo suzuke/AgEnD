@@ -30,17 +30,23 @@
 
 每一步：照抄指令 → 對照「應該看到」→ 對了就打勾。任何一步不符就停，記在「驗收紀錄」。標「開工時細化」的地方，開工時會改成確切指令與輸出。
 
-1. 暫存 repo + 假 agent：建立 task。
+先讓 `agend` 指到這個 repo 建出來的 binary（第 13 關之前沒有安裝程式；在 repo 根目錄執行）：
+
+```bash
+~/.cargo/bin/cargo build -p agend && alias agend="$PWD/target/debug/agend"
+```
+
+1. 暫存 repo + 假 agent：建立 task（開工時細化：暫存 repo 與假 agent 的準備指令，以及它印出的 repo 路徑 `<暫存 repo>`、home 路徑 `<home>`）。
 
    ```bash
-   agend task create --role dev "demo"`（開工時細化）
+   agend task create --role dev "demo"
    ```
 
-   應該看到：`agend status` 依序顯示 work → submit(local) → command → approval → merge。
+   應該看到：接著 `agend status` 依序顯示 work → submit(local) → command → approval → merge。
 
    - [ ] 通過
 
-2. 確認 merge 結果。
+2. 確認 merge 結果（把 `<暫存 repo>` 換成第 1 步印出的路徑）。
 
    ```bash
    git -C <暫存 repo> log --oneline -1 main
@@ -50,7 +56,7 @@
 
    - [ ] 通過
 
-3. 確認清理。
+3. 確認清理（同上，換掉 `<暫存 repo>`、`<home>`）。
 
    ```bash
    git -C <暫存 repo> branch --list "agend/*"; ls <home>/worktrees/

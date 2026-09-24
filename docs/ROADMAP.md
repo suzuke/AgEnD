@@ -79,6 +79,6 @@ cat docs/gates/gate-01-core.md
 
 - 2026-09-24 第 1 關提案中（#102）
 - 2026-09-24 README 系統圖改為 SVG（#101, e893877）
-- 2026-09-24 CI 首次通過（ubuntu + macOS）
+- 2026-09-24 CI 首次通過（ubuntu + macOS，8a5b0fd，[run 35979128418](https://github.com/suzuke/AgEnD/actions/runs/35979128418)）
 - 2026-09-24 骨架與文件 push 到 v2（8a5b0fd）
-- 2026-09-24 spike 完成（codex／claude／opencode + claude 追加）
+- 2026-09-24 spike 完成（codex／claude／opencode + claude 追加；紀錄在 [research/](research/README.md)：[spike-codex](research/spike-codex.md)、[spike-claude](research/spike-claude.md)、[spike-claude-f](research/spike-claude-f.md)、[spike-opencode](research/spike-opencode.md)、[runtime-spike](research/runtime-spike.md)）

@@ -27,23 +27,29 @@
 
 每一步：照抄指令 → 對照「應該看到」→ 對了就打勾。任何一步不符就停，記在「驗收紀錄」。標「開工時細化」的地方，開工時會改成確切指令與輸出。
 
-1. 故意弄壞：daemon 停著時跑 `agend status`。
+先讓 `agend` 指到這個 repo 建出來的 binary（第 13 關之前沒有安裝程式；在 repo 根目錄執行）：
+
+```bash
+~/.cargo/bin/cargo build -p agend && alias agend="$PWD/target/debug/agend"
+```
+
+1. 故意弄壞：daemon 停著時用最小的連線探測（開工時細化：`agend debug ping` 是暫定名稱，屬於這關；`agend status` 要到第 9 關才有）。
 
    ```bash
-   time agend status
+   time agend debug ping
    ```
 
-   應該看到：大約 10 秒後印出清楚的錯誤（daemon 沒在跑、怎麼啟動），exit 非 0。
+   應該看到：大約 10 秒後印出清楚的錯誤（daemon 沒在跑、怎麼啟動），exit 非 0；`time` 顯示約 10 秒。
 
    - [ ] 通過
 
-2. 啟動 daemon 後再跑。
+2. 啟動 daemon 後再跑（啟動方式同第 6 關）。
 
    ```bash
-   agend status
+   agend debug ping
    ```
 
-   應該看到：馬上回應目前狀態，exit 0。
+   應該看到：馬上回應 daemon 的協定版本，exit 0。
 
    - [ ] 通過
 

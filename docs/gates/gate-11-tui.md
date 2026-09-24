@@ -28,7 +28,13 @@
 
 每一步：照抄指令 → 對照「應該看到」→ 對了就打勾。任何一步不符就停，記在「驗收紀錄」。標「開工時細化」的地方，開工時會改成確切指令與輸出。
 
-1. 對有假 agent 的 daemon 開 TUI。
+先讓 `agend` 指到這個 repo 建出來的 binary（第 13 關之前沒有安裝程式；在 repo 根目錄執行）：
+
+```bash
+~/.cargo/bin/cargo build -p agend && alias agend="$PWD/target/debug/agend"
+```
+
+1. 對有假 agent 的 daemon 開 TUI（daemon 與假 agent 的啟動方式同第 6 關，開工時細化）。
 
    ```bash
    agend app

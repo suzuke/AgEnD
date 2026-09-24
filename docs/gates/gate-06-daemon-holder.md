@@ -27,6 +27,12 @@
 
 每一步：照抄指令 → 對照「應該看到」→ 對了就打勾。任何一步不符就停，記在「驗收紀錄」。標「開工時細化」的地方，開工時會改成確切指令與輸出。
 
+先讓 `agend` 指到這個 repo 建出來的 binary（第 13 關之前沒有安裝程式；在 repo 根目錄執行）：
+
+```bash
+~/.cargo/bin/cargo build -p agend && alias agend="$PWD/target/debug/agend"
+```
+
 1. 前景啟動 daemon，並起一個假 agent（計數器）在 holder 裡。
 
    操作：開工時細化：例如 `agend daemon --foreground` + `agend debug spawn-fake counter`
@@ -46,7 +52,7 @@
 3. 確認沒有重複的 holder。
 
    ```bash
-   ps -ax | grep "agend holder"
+   pgrep -fl "agend holder"
    ```
 
    應該看到：只有一個 holder 程序（重啟 daemon 沒有多生一個）。

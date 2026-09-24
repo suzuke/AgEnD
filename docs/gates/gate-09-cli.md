@@ -29,6 +29,12 @@
 
 每一步：照抄指令 → 對照「應該看到」→ 對了就打勾。任何一步不符就停，記在「驗收紀錄」。標「開工時細化」的地方，開工時會改成確切指令與輸出。
 
+先讓 `agend` 指到這個 repo 建出來的 binary（第 13 關之前沒有安裝程式；在 repo 根目錄執行）：
+
+```bash
+~/.cargo/bin/cargo build -p agend && alias agend="$PWD/target/debug/agend"
+```
+
 1. 對有假 agent 的 daemon 跑每個 agent 命令。
 
    ```bash
@@ -49,23 +55,27 @@
 
    - [ ] 通過
 
-3. 故意弄壞：藏起一個 backend。
+3. 故意弄壞：只藏起 opencode（agend、codex、claude 仍找得到）。
 
    ```bash
-   PATH=/usr/bin:/bin agend doctor
+   T=$(mktemp -d)
+   ln -s "$PWD/target/debug/agend" "$T/agend"
+   ln -s "$(command -v codex)" "$T/codex"
+   ln -s "$(command -v claude)" "$T/claude"
+   PATH="$T:/usr/bin:/bin" "$T/agend" doctor; echo "exit=$?"
    ```
 
-   應該看到：該 backend 那一項失敗，並附上修正指令。
+   應該看到：opencode 那一行是失敗，說明在 PATH 上找不到 opencode，並附安裝指令（例如 `brew install opencode`）；codex、claude 兩行仍是 ok；`exit=1`（確切措辭開工時細化）。
 
    - [ ] 通過
 
-4. 在暫存 HOME 跑 `agend init`。
+4. 在暫存 HOME 跑 `agend init`（開工時細化：`--non-interactive` 是暫定參數名）。
 
    ```bash
    HOME=$(mktemp -d) agend init --non-interactive
    ```
 
-   應該看到：建立 home 與 `config.toml`、`general` team 與一個 agent，最後跑 doctor。（開工時細化：確切參數）
+   應該看到：建立 home 與 `config.toml`、`general` team 與一個 agent，最後跑 doctor。
 
    - [ ] 通過
 

@@ -29,6 +29,12 @@
 
 每一步：照抄指令 → 對照「應該看到」→ 對了就打勾。任何一步不符就停，記在「驗收紀錄」。標「開工時細化」的地方，開工時會改成確切指令與輸出。
 
+先讓 `agend` 指到這個 repo 建出來的 binary（第 13 關之前沒有安裝程式；在 repo 根目錄執行）：
+
+```bash
+~/.cargo/bin/cargo build -p agend && alias agend="$PWD/target/debug/agend"
+```
+
 1. 三個真 backend 互傳訊息。
 
    操作：開工時細化
@@ -53,13 +59,13 @@
 
    - [ ] 通過
 
-4. 故意弄壞：Telegram allowlist 清空。
+4. 故意弄壞：把 `config.toml` 裡 Telegram 的 allowlist 改成空的（開工時細化：確切鍵名；目前沒有清空 allowlist 的命令），然後跑 doctor。
 
    ```bash
-   agend doctor
+   agend doctor; echo "exit=$?"
    ```
 
-   應該看到：doctor 報錯並附修正指令（v1 #2207 的情境）。
+   應該看到：Telegram 那一行是失敗：allowlist 是空的、所有訊息會被丟棄，並附修正指令 `agend telegram setup`；`exit=1`（v1 #2207 的情境）。
 
    - [ ] 通過
 

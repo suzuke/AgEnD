@@ -47,7 +47,7 @@
 
    - [ ] 通過
 
-3. 解除安裝。
+3. 解除安裝（這時的 `agend` 是第 1 步裝好的正式版，不是 alias）。
 
    ```bash
    agend uninstall

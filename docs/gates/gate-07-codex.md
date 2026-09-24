@@ -46,13 +46,13 @@
 
    - [ ] 通過
 
-3. （選做）對真的 codex 做 smoke test。
+3. （選做）對真的 codex 做 smoke test（開工時細化：`--real` 參數還不存在，會在這關加上）。
 
    ```bash
    ~/.cargo/bin/cargo xtask accept codex --real
    ```
 
-   應該看到：你的 codex 回 `ok`；訊息狀態到 `confirmed`。（開工時細化：需要的 codex 設定）
+   應該看到：你的 codex 回 `ok`；訊息狀態到 `confirmed`。
 
    - [ ] 通過
 

@@ -101,7 +101,7 @@
 
    - [ ] 通過
 
-2. 看 busy 等級表。
+2. 看 busy 等級表（開工時細化：確切的表頭與排版）。
 
    操作：同一次輸出，往上找 `busy levels`
 
@@ -123,9 +123,10 @@
    echo 'pub fn leak() { let _ = std::fs::read("/etc/hosts"); }' >> crates/agend-core/src/lib.rs
    ~/.cargo/bin/cargo xtask check-deps; echo "exit=$?"
    git checkout crates/agend-core/src/lib.rs
+   ~/.cargo/bin/cargo xtask check-deps
    ```
 
-   應該看到：`check-deps: agend-core does not compile for the no-std target …` 與 `exit=1`；還原後重跑 `check-deps` 回到 ok。
+   應該看到：第一次：`check-deps: agend-core does not compile for the no-std target …` 與 `exit=1`；還原後最後一行回到 `check-deps: ok (… no-std build ok)`。
 
    - [ ] 通過
 
