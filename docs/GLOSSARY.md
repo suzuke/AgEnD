@@ -8,7 +8,7 @@
 ## 怎麼讀
 
 - 程式識別字取自 `feat/gate-01-core`（第 1 施工關的 branch，尚未併入 `v2`）；沒有對應型別或模組的寫「—」。crate 名稱寫成 crate `agend-x`。
-- 出處：D 編號見 [DECISIONS.md](DECISIONS.md)；D26–D33 目前只在第 1 施工關的 branch 上。「規劃 §x」指 [research/REWRITE-PLAN.md](research/REWRITE-PLAN.md)。
+- 出處：D 編號見 [DECISIONS.md](DECISIONS.md)；D26–D37 目前只在第 1 施工關的 branch 上。「規劃 §x」指 [research/REWRITE-PLAN.md](research/REWRITE-PLAN.md)。
 - 兩份文件用法不同時，以最新的決策為準（AGENTS「決策在哪」）。
 - 加粗的混淆詞是已經撞過的詞，寫文件時一定要分清楚。
 
@@ -23,32 +23,40 @@
 | agent | agent | `client::AgentCommand`（agent 命令） | instance 裡執行的 backend 程序（codex／claude／opencode），PATH 上有 shim 與 `agend`。 | instance；操作者（人，用操作者命令） | [ARCHITECTURE](ARCHITECTURE.md#程序模型)、D17 |
 | backend | backend | `model::Backend` | agent 使用的產品：`claude`、`codex`、`opencode`（v2.0 只有這三個）。 | driver（daemon 裡對接 backend 的 adapter） | [BACKEND-BEHAVIORS](BACKEND-BEHAVIORS.md) |
 | 常駐／臨時 | persistent／ephemeral | `model::Lifetime::{Persistent, Ephemeral}` | instance 的 `lifetime`：常駐的由 daemon 啟動時拉起；臨時的隨 task／team 結束清理。 | agent 的暫存目錄（也會被清掉，但不是 instance） | D8、[tui-and-setup](architecture/tui-and-setup.md#設定與目錄d8) |
-| task 持有者 | task holder | `Candidate::held_task`、`Purpose::Rework { task_holder }`（第 1 施工關 branch 改名中） | 從派工到 done／取消都持有某個 task 的 agent；一個 agent 同時只持有一個 task，返工回到它。 | **holder**（只指每個 instance 的程序）：一律寫「task 持有者」／task holder，不單寫 holder | D33 |
+| task 持有者 | task holder | `Candidate::held_task`、`Purpose::Rework { task_holder }` | 從派工到 done／取消都持有某個 task 的 agent；一個 agent 同時只持有一個 task，返工回到它。 | **holder**（只指每個 instance 的程序）：一律寫「task 持有者」／task holder，不單寫 holder | D33 |
 
 ## 流水線
 
 | 名詞（中文） | English | 程式識別字 | 定義 | 不要跟…混淆 | 出處 |
 |---|---|---|---|---|---|
-| workflow | workflow | `pipeline::workflow::Workflow` | 關卡的依序組合；TOML 定義、存 DB、每次存檔一個新版本；內建 `code`、`research`、`epic` 唯讀。 | 流水線（daemon 執行 workflow 的機制，模組 `pipeline`） | D19、D21 |
+| workflow | workflow | `pipeline::workflow::Workflow` | 關卡的依序組合；TOML 定義、存 DB、每次存檔一個新版本；內建 `code`、`research`、`epic`、`planned` 唯讀。 | 流水線（daemon 執行 workflow 的機制，模組 `pipeline`） | D19、D21 |
 | 關卡 | stage | `pipeline::stage::StageKind`、`workflow::Stage` | workflow 裡的一步，共 6 種：work、command、approval、submit、merge、fanout；都有 `timeout` 與逾時動作。 | **施工關**（gate）；merge 門檻；hard gate | [pipeline](architecture/pipeline.md#6-種關卡)、D11 |
+| planned | planned workflow | `Workflow::builtin_planned` | 內建 workflow：work(計畫) → 人工核准計畫（不綁 head）→ work(branch) → submit → command → reviewer 核准（綁 head）→ merge；人只審計畫，實作交給 reviewer agent 與 checks。 | epic（拆子 task，不是先審計畫） | D34、[pipeline](architecture/pipeline.md#內建-workflow唯讀) |
+| 已驗證 workflow | validated workflow | `workflow::ValidatedWorkflow`、`Workflow::validated` | 通過存檔檢查（D19）的 workflow；流水線狀態只能從它建立，所以不合規則的 workflow 跑不起來。 | workflow 版本（存檔次數，不是驗證） | D19、[pipeline](architecture/pipeline.md#workflow-管理d19d21) |
+| 可完成證明 | completability witness | `pipeline::state::completability_witness`、`WorkflowError::NotCompletable` | 存檔檢查的最後一步：用純函式 `step` 實際走固定的成功序列、每個 command／approval 各返工一次、產出 branch 之後的每個關卡各收到一次新 commit（在 merge 關卡是送出中收到、接著 merge 失敗），每一趟都要走到 done，而且 done 時每個 command 與綁 head 的 approval 都涵蓋最後的 head、最後一個 pick fanout 的勝出者是它目前的子 task；否則拒絕存檔並指出卡住的關卡。 | 探索器（測試用、隨機序列；可完成證明是存檔規則、固定序列） | [pipeline](architecture/pipeline.md#workflow-管理d19d21) |
+| 事件身分 | event identity | `PipelineEvent` 的 `stage_id`／`attempt`／`head`、`TransitionError::StaleResult`、`protocol::client::ResultIdentity` | 每個結果事件帶著要求它的 action 的身分：關卡 id、attempt，綁 head 的關卡另帶 head。`step` 只接受目前關卡、目前 attempt（與目前 head）的結果，其他一律 `StaleResult`、狀態不變。agent 回報的結果（`done`、`result`、`review approve`／`changes`）在 client protocol 帶 `identity`；沒帶的一律當成過期（`stale_result`）。 | head（commit）；task id | [pipeline](architecture/pipeline.md#6-種關卡) |
+| attempt | attempt | `PipelineState::attempt`、action 與事件的 `attempt` 欄位 | task 進入某個關卡的次數（第一次是 1；返工、重跑 checks、fanout 重跑都加 1），以及關卡內作廢時的新一輪：head 變更清掉 approval 關卡已收的核准或 fanout 這一輪、逾時改派，都開新的 attempt 並重發要求。結果必須帶目前的 attempt。fanout 的 attempt 就是它這一輪的 run id。 | 重試次數；patch-id | [pipeline](architecture/pipeline.md#6-種關卡) |
 | task | task | `pipeline::task::Task` | 一件工作：屬於一個 team、固定建立時的 workflow 版本；有 `parent`／`depends_on`／`superseded_by` 關係。 | 關卡（task 走過的步驟） | [pipeline](architecture/pipeline.md#6-種關卡)、D21 |
 | epic | epic | `Workflow::builtin_epic` | 內建 workflow：work(plan) → fanout → approval，不需要 repo。 | fanout（epic 裡的一個關卡） | [pipeline](architecture/pipeline.md#內建-workflow唯讀) |
 | fanout | fanout | `Stage::Fanout`、`FanoutJoin` | 拆出子 task 再匯合的關卡；子 task 來自 work 產出或明列，匯合方式 `all`／`first`／`pick`。 | `depends_on`（task 關係，不是關卡） | [pipeline](architecture/pipeline.md#6-種關卡) |
 | work | work | `Stage::Work`、`WorkOutput` | 指派給 agent 做事的關卡；參數：角色、指示、產出（branch、result 或 plan）。 | worktree；返工（回到 work 關卡的動作） | [pipeline](architecture/pipeline.md#6-種關卡) |
 | command | command | `Stage::Command` | 跑指令、exit 0 才通過的關卡，在 head 的臨時 detached worktree 執行。 | CLI 命令（agent 命令、操作者命令） | [pipeline](architecture/pipeline.md#6-種關卡)、D4 |
+| change id／`{pr}` | change id／`{pr}` placeholder | `PipelineEvent::Submitted { change_id }`、`PipelineState::change_id`、`CommandContext::pr` | submit 關卡從 forge 拿回的變更編號（例如 PR 編號）；`command` 的 `{pr}` 佔位符展開成它（加單引號）。forge local 沒有 change id，所以用到 `{pr}` 的 command 在 local 下會讓 task 失敗。 | head（commit）；task id | D29、[pipeline](architecture/pipeline.md#6-種關卡) |
 | checks | checks | `PassedCheck`、`GateFact::Check` | `command` 關卡的結果；merge 門檻要求 checks 在目前 head 上通過。 | 舊規劃的 Checks 介面（已取消，不是 trait） | D4、[DECISIONS 來源衝突](DECISIONS.md#來源衝突與處理) |
 | approval | approval | `Stage::Approval`、`Approver`、`ApprovalRecord` | 等人或某角色的 agent 核准的關卡；參數：核准者、人數、是否綁 head（`bind_head`）。人工核准 merge = `approval(by = "human")`。 | backend 的授權提示（permission／approval 請求） | [pipeline](architecture/pipeline.md#6-種關卡)、D20 |
+| 要求修改 | changes requested | `PipelineEvent::ChangesRequested`、`AgentCommand::ReviewChanges` | approval 關卡的審查者要求修改：task 退回最近的 work 關卡（或 `on_fail` 指定的 work），原因交給 task 持有者返工，不算 task 失敗。 | `StageFailed`（關卡本身出錯）；核准 | D18、D33、[pipeline](architecture/pipeline.md#6-種關卡) |
 | submit | submit | `Stage::Submit` | 透過 forge 提交變更的關卡。 | merge | [pipeline](architecture/pipeline.md#6-種關卡)、D4 |
 | merge | merge | `Stage::Merge`、`PipelineAction::Merge` | daemon 執行 merge 的關卡；只有 daemon 會 merge，而且要先過 merge 門檻。 | `git merge`（local forge 用 merge-tree + CAS `update-ref`，不在使用者目錄 merge） | [pipeline](architecture/pipeline.md#merge-與-main-前進) |
-| merge 門檻 | merge gate | `policy::merge_gate`（`evaluate`、`MergeBlocker`） | merge 的條件：checks 通過且核准的 head = 目前 head（patch-id 例外見 D14）。 | **施工關**（gate）；hard gate | [pipeline](architecture/pipeline.md#merge-與-main-前進)、D14 |
+| merge 門檻 | merge gate | `policy::merge_gate`（`evaluate`、`MergeBlocker`） | merge 的條件：merge 前每個 `command` 關卡都在目前 head 上通過，每個 approval 關卡都有核准覆蓋目前 head（不綁 head 的只要有核准；patch-id 例外見 D14）。 | **施工關**（gate）；hard gate | [pipeline](architecture/pipeline.md#merge-與-main-前進)、D14 |
+| merge 送出中 | merge in flight | `PipelineState::merge_in_flight`、`pending_head_changes`、`TransitionError::MergeInFlight`、`PipelineEvent::MergeFailed` | merge 關卡已發出 `Merge` action、還沒收到 forge 結果的狀態（daemon 契約）：只接受這次 merge 的 `MergeCompleted`／`MergeFailed` 與新 commit、main 前進（記成待處理，task 不離開 merge）；其他事件（取消、關卡失敗、逾時）一律回 `MergeInFlight`。`MergeFailed` 才套用待處理的變更（D14）或重跑 checks；收到回到已送出 head 的新 commit 代表 branch 被重設，待處理的變更丟棄。 | 取消；merge 門檻 | [pipeline](architecture/pipeline.md#6-種關卡) |
 | head | head | `PipelineState::current_head` | `refs/heads/<branch>` 指向的 commit（不含未 commit 的變更）；核准與 checks 都綁它。 | git 的 `HEAD`（目前 checkout） | [pipeline](architecture/pipeline.md#merge-與-main-前進) |
 | patch-id | patch-id | `PipelineState::patch_id`、`merge_gate::approval_after_rebase` | branch 自身 diff 的 `git patch-id`；main 前進後乾淨 rebase 且它不變就保留核准，否則退回 work。 | head SHA（rebase 後一定會變） | D14 |
 | binding（工作／審查） | binding (work／review) | — | agent 目前唯一作用中的指派：工作 = (instance, task, branch, worktree)；審查 = detached 審查 worktree + 被審的 head。 | binding 快照（daemon 寫給 shim 的唯讀檔）；v1 的 HMAC binding | [pipeline](architecture/pipeline.md#binding)、D6 |
 | 返工 | rework | `PipelineAction::ReturnToWork`、`Purpose::Rework` | 被要求修改、checks 失敗（`on_fail` 指向 work）或 patch-id 變了之後回到 work 關卡，由 task 持有者繼續。 | reopen（done 之後才發生） | D14、D18、D19（`on_fail`）、D33 |
-| 改派 | reassign | `TaskOperation::Reassign`、`AssignmentDecision::Reassigned` | 同一個 task 換另一個 instance 接手（逾時動作，或持有者額度用盡、被刪除）。 | supersede（換成新 task） | [pipeline](architecture/pipeline.md#分派d18)、D33 |
+| 改派 | reassign | `TaskOperation::Reassign`、`AssignmentDecision::Reassigned` | 同一個 task 換另一個 instance 接手（逾時動作，或 task 持有者額度用盡、被刪除）；新的 task 持有者拿到交接（`Handoff`：branch 與審查意見）。 | supersede（換成新 task） | [pipeline](architecture/pipeline.md#分派d18)、D33 |
 | supersede | supersede | `TaskOperation::Supersede`、`TaskStatus::Superseded` | 輸入變了，由新 task 接手舊 task；不算失敗。 | 取消；改派 | [pipeline](architecture/pipeline.md#6-種關卡) |
 | reopen | reopen | `TaskOperation::Reopen` | task done 之後由人重新打開。 | 返工 | [pipeline](architecture/pipeline.md#6-種關卡) |
-| 取消 | cancel | `TimeoutAction::Cancel`、`PipelineEvent::Cancel` | 終止 task；目前文件只寫了關卡逾時動作的取消，branch／worktree 清理與 merge 完成走同一流程。操作者取消正在第 1 施工關 branch 加入（決策待定）。 | supersede；fanout `pick` 取消落選的子 task | [pipeline](architecture/pipeline.md#worktree-與-branch-生命週期) |
+| 取消 | cancel | `TimeoutAction::Cancel`、`PipelineEvent::Cancel`、`PipelineStatus::Cancelled` | 終止 task：操作者下指令或關卡逾時動作「取消」；是獨立的終止狀態，不算失敗；branch／worktree 清理與 merge 完成走同一流程。merge 送出後不能取消（見 merge 送出中）。 | supersede；fanout `pick` 取消落選的子 task | [pipeline](architecture/pipeline.md#worktree-與-branch-生命週期) |
 
 ## 送達
 
@@ -71,7 +79,7 @@
 | forge | forge | `traits::Forge`、`forge/{local,github}` | 提交與 merge 的 adapter：local（merge-tree + CAS `update-ref`）或 github（API）。 | GitHub CI（用 `command` 關卡接，第 1 施工關 P4） | D4、[pipeline](architecture/pipeline.md#merge-與-main-前進) |
 | runner | runner | `traits::Runner`、daemon `runner` 模組 | 跑程序的 adapter；`command` 關卡與 git adapter 都經它：`run(cmd, dir, timeout)`。 | `command` 關卡本身 | [第 1 施工關 P3](gates/gate-01-core.md#p3runner-要不要-trait) |
 | store | store | `traits::Store`、daemon `store` 模組 | daemon 的 SQLite 資料層，是唯一真相來源（instance、team、repo、workflow）。 | `config.toml`（人寫、daemon 只讀） | D8、[ARCHITECTURE](ARCHITECTURE.md#daemon-分層) |
-| notifier | notifier | `traits::Notifier`、daemon `notifier` 模組 | 對外通知的 adapter（Telegram）；Telegram 配對也由它做。 | 訊息送達（給 agent 的走 driver） | [README](../README.md#系統圖)、D13 |
+| notifier | notifier | `traits::Notifier`、daemon `notifier` 模組 | 對外通知的 adapter（Telegram）；`agend telegram setup` 的配對也由它做（CLI 只請 daemon 配對）。 | 訊息送達（給 agent 的走 driver） | [README](../README.md#系統圖)、D13、[tui-and-setup](architecture/tui-and-setup.md#安裝與設定)、[第 13 施工關](gates/gate-13-install.md#範圍) |
 | shim | git shim | crate `agend-shim` | 只放在 agent PATH 上的 git／kill 防護：導向 worktree、擋自建 branch／worktree 與寫 main；讀唯讀 binding 快照。 | 使用者自己的 git（shim 不改它） | D5、D6 |
 | worktree | worktree | `model::worktree_dir`、`model::work_branch` | 只由 daemon 建立的 git worktree：`worktrees/<task-id>/`，branch `agend/<task-id>/<slug>`；審查另有 detached worktree。 | workspace（每個 instance 的常駐工作目錄） | [pipeline](architecture/pipeline.md#worktree-與-branch-生命週期) |
 | 協定（client／holder） | protocol (client／holder) | `protocol::client`、`protocol::holder` | 兩套有版本的協定：client 協定給 TUI／CLI／GUI 連 daemon；holder 協定給 daemon 連 holder。 | backend 的協定（app-server、HTTP + SSE、hooks） | D1、D11 |
@@ -83,7 +91,9 @@
 | 名詞（中文） | English | 程式識別字 | 定義 | 不要跟…混淆 | 出處 |
 |---|---|---|---|---|---|
 | 需要你 | needs-you | `DaemonEvent::AttentionRequired`、`NotificationSeverity::Attention` | 要人處理的例外（請示、門檻卡住、agent 卡住）：TUI 首頁最上方跨 team 的區塊，Telegram 有同名 topic。 | 已讀（看過不會離開「需要你」） | D13、[tui-and-setup](architecture/tui-and-setup.md#tui)、[README](../README.md#這是什麼) |
-| 請示 | ask (needs-you item) | — | 「需要你」裡 agent 問人的一項，由 `agend ask` 建立；人在 TUI 或 Telegram 回覆後變成已解決（v1 叫 `decision`）。擴充中：D35（使用者 2026-09-25 決定，記錄於第 1 施工關 PR）加上選項選擇與自由文字多輪對話。 | **決策**（D 編號）；**Stop hook decision** | D17、規劃 §3.1、[gate-11](gates/gate-11-tui.md#你親自驗收)、[gate-12](gates/gate-12-adapters.md#你親自驗收) |
+| 請示 | ask (needs-you item) | `protocol::ask::AskThread`、`AttentionRequiredData::ask` | 「需要你」裡 agent 問人的一項，由 `agend ask` 建立（v1 叫 `decision`）。是一段對話：提問可附選項，人可選選項或用自由文字回答（TUI、Telegram 或 CLI），agent 可追問，最後以結論結束（D35）。 | **決策**（D 編號）；**Stop hook decision** | D35、D17、規劃 §3.1、[gate-11](gates/gate-11-tui.md#你親自驗收)、[gate-12](gates/gate-12-adapters.md#你親自驗收) |
+| 請示排序 | needs-you ordering | `policy::attention::order`、`AttentionItem` | 「需要你」的排序：解決後能讓越多 task／agent 繼續的越前面，再來等越久的越前面，最後以 id 決定。 | 已讀／已解決（狀態，不是順序） | D36 |
+| 脈絡摘要 | context recap | `protocol::ask::ContextRecap`、`AttentionRequiredData::recap` | 跟著「需要你」項目的摘要：功能目標、目前為止的決定、在問什麼、之後會發生什麼；切換到該項目時顯示。core 只定型別，內容由 daemon 產生（第 11 施工關）。 | 請示本身；task 歷史 | D37 |
 | ask | ask | `AgentCommand::Ask` | agent 命令 `agend ask`：建立一個請示；分派時需要的角色不存在也會轉成 ask。 | opencode 權限設定的 `"ask"` | D17、D18 |
 | attention-first | attention-first | crate `agend-tui` | TUI 的原則：先看「需要你」，再看各 team。 | — | [tui-and-setup](architecture/tui-and-setup.md#tui) |
 | 已讀／已解決 | read／resolved | — | 「需要你」的兩種狀態：看過只去掉粗體（已讀）；選了動作才解除（已解決）。 | — | [tui-and-setup](architecture/tui-and-setup.md#tui) |
@@ -98,6 +108,8 @@
 | 進度紀錄 | progress log | — | 每完成一件事加一行（日期 + 一行 + commit／PR，新的在上面）；ROADMAP 與每個施工關頁面各一份。 | 驗收紀錄 | [AGENTS](../AGENTS.md#目前狀態)、[ROADMAP](ROADMAP.md#進度紀錄) |
 | 開工前提案 | pre-work proposal | — | 施工關開工前要使用者逐條確認的設計問題（例如第 1 施工關的 P1–P7）。 | 決策（確認後才會編成 D 編號） | [gates/README](gates/README.md#範本) |
 | spike | spike | — | 開工前的實測（第 0 階段）；結論在 BACKEND-BEHAVIORS，原始紀錄在 research/。 | 施工關 | [ROADMAP](ROADMAP.md#第-0-階段spike)、[research](research/README.md) |
+| 探索器 | explorer | `tests/pipeline_explorer.rs`、`tests/pipeline_explorer_splitmix.rs` | 不加依賴的 property test：固定種子產生大量事件序列跑狀態機，每一步用只看被接受事件的 oracle 檢查 merge 門檻、不跳過關卡、返工不遺失等不變量。 | 單元測試；竄改狀態測試 | [agend-core TESTING](../crates/agend-core/TESTING.md#狀態機探索器) |
+| 竄改狀態 | tampered state | `pipeline::state::tests::tampered_states_never_panic_and_never_merge_past_the_records` | 刻意改壞欄位（任意關卡位置、status、head、紀錄）的流水線狀態；只有 crate 內的測試造得出來，用來證明 `step` 不 panic、紀錄不足時不會 merge。 | 已驗證 workflow（外部只能從它建立狀態） | [agend-core TESTING](../crates/agend-core/TESTING.md#狀態機探索器) |
 | 決策 | decision (D*n*) | — | 經使用者確認的設計決定，有 D 編號；沒有新證據就不重開。 | **請示**；**Stop hook decision** | [DECISIONS](DECISIONS.md) |
 
 ## 細節：為什麼是「關卡」與「施工關」

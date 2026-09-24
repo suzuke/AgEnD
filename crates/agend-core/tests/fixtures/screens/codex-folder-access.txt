@@ -1,0 +1,6 @@
+Folder access
+/tmp/agend-screen-fixture
+Trust this folder? Codex can read, edit, and run files here, subject to
+your permission settings. Your trust decision will be saved.
+› 1. Trust and continue
+  2. Quit

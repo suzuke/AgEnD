@@ -10,7 +10,7 @@
 - `check-deps`：
   1. shim／client 在 `cargo tree -e normal,build --target all` 裡沒有被禁止的 crate（dev 依賴不檢查）
   2. agend-testkit 不是任何 crate 的一般依賴
-  3. agend-core：`cargo metadata` 顯示沒有 build script、沒有 `[features]`、沒有 allowlist 以外的依賴；而且能以 `--all-features`、`-F unsafe-code` 對無 std 的 `thumbv7em-none-eabihf` 編譯（見 `check_core.rs`）
+  3. agend-core：`cargo metadata` 顯示沒有 build script、沒有 `[features]`、唯一直接依賴是停用 default features 且只開 `derive` + `alloc` 的 serde（D32）；而且能以 `--all-features`、`-F unsafe-code` 對無 std 的 `thumbv7em-none-eabihf` 編譯（見 `check_core.rs`）
   4. target 沒裝時印 `SKIPPED` 並失敗；`--allow-skip` 才不失敗（仍印 SKIPPED）
 
 `SKIPPED` 代表**沒有驗證**，不是通過。
@@ -19,7 +19,8 @@
 - `--allow-skip` 只在你明白這一項沒驗證時用；它仍印出 SKIPPED。
 - CI 一定會跑這一項（不加 `--allow-skip`）。
 
-- `accept <施工關>`：對該施工關的 crate 跑 fmt、clippy、test，再跑 check-deps；demo 隨各施工關加入
+- `accept core`：跑 workspace fmt、workspace clippy、core tests、protocol compatibility tests、check-deps，再執行 core example 的 protocol 與 code workflow demo。
+- 其他 `accept <施工關>`：對該施工關的 crate 跑 fmt、clippy、test，再跑 check-deps；demo 隨各施工關加入
 
 ## 不負責
 
@@ -36,7 +37,7 @@
 
 ## 依賴規則
 
-- 一般依賴：`serde_json`（解析 `cargo metadata`）；透過 `$CARGO` 執行 cargo，無 std 編譯時用同一個 toolchain 的 rustc
+- 一般依賴：`serde_json`（metadata）；`agend-core` 與 `toml`（workflow golden 測試）只作為 xtask 測試的 dev-dependency，core acceptance demo 由子程序執行獨立 example，避免 checker 連結待檢查的 core；透過 `$CARGO` 執行 cargo，無 std 編譯時用同一個 toolchain 的 rustc
 - workspace 根目錄在執行時用 `cargo locate-project --workspace` 從目前目錄找，所以在 repo 副本裡跑會檢查副本本身
 - 不屬於 release binary
 
@@ -77,7 +78,7 @@
 
 | crate | 禁止 |
 |---|---|
-| `agend-core` | 任何依賴（allowlist 為空）與任何 `[features]`，由 `check_core.rs` 以 `cargo metadata` 檢查 |
+| `agend-core` | serde 以外的依賴、default features、derive／alloc 以外的 serde features，以及任何 `[features]`，由 `check_core.rs` 以 `cargo metadata` 檢查 |
 | `agend-shim` | async runtime、database、`agend-daemon` |
 | `agend-client` | async runtime、database、`agend-daemon` |
 | 所有 crate | `agend-testkit` 當一般依賴 |

@@ -13,6 +13,7 @@
 mod accept;
 mod check_core;
 mod check_deps;
+mod core_demo;
 
 use std::process::ExitCode;
 

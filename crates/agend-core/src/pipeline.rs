@@ -6,5 +6,6 @@
 //! state machine and performs the side effects.
 
 pub mod stage;
+pub mod state;
 pub mod task;
 pub mod workflow;

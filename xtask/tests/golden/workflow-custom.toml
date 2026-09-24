@@ -1,0 +1,76 @@
+id = "custom"
+version = 3
+requires = ["repo"]
+allow_unreviewed = false
+
+[[stages]]
+id = "split"
+
+[stages.stage]
+kind = "work"
+role = "planner"
+instructions = "Split the work."
+output = "plan"
+
+[[stages]]
+id = "fanout"
+
+[stages.stage]
+kind = "fanout"
+join = "pick"
+
+[stages.stage.source]
+listed = ["api", "ui"]
+
+[[stages]]
+id = "pick"
+
+[stages.stage]
+kind = "approval"
+count = 1
+bind_head = false
+
+[stages.stage.by]
+role = "reviewer"
+
+[[stages]]
+id = "work"
+
+[stages.stage]
+kind = "work"
+role = "dev"
+instructions = "Implement the picked design."
+output = "branch"
+
+[[stages]]
+id = "submit"
+
+[stages.stage]
+kind = "submit"
+forge = "github"
+
+[[stages]]
+id = "checks"
+timeout_ms = 900000
+on_timeout = "reassign"
+on_fail = "work"
+
+[stages.stage]
+kind = "command"
+command = "gh pr checks {pr} --watch"
+
+[[stages]]
+id = "human"
+on_timeout = "cancel"
+
+[stages.stage]
+kind = "approval"
+by = "human"
+count = 2
+bind_head = true
+
+[[stages]]
+id = "merge"
+
+[stages.stage]
+kind = "merge"

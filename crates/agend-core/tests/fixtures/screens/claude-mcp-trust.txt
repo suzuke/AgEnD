@@ -1,0 +1,3 @@
+Use this MCP server
+Use this and all future MCP servers in this project
+Continue without using this MCP server

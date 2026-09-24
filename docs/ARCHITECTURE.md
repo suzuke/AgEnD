@@ -5,7 +5,7 @@
 > - 記住：**crate 邊界就是架構**，由 `cargo xtask check-deps` 強制。
 > - 下一步：系統圖看 [README](../README.md#系統圖)；細節看本頁底部的分頁連結。
 
-來源：規劃 r4（§4、§5）與決策 D1–D25。後來的決策優先於規劃本文。
+來源：規劃 r4（§4、§5）與決策 D1–D37。後來的決策優先於規劃本文。
 
 ## 程序模型
 
@@ -39,7 +39,7 @@
 
 | crate | 依賴 |
 |---|---|
-| `agend-core` | 無（只有 std） |
+| `agend-core` | `serde`（`default-features = false`，`derive` + `alloc`；JSON I/O 在 adapter；D32） |
 | `agend-daemon`、`agend-holder`、`agend-shim`、`agend-client` | `agend-core` |
 | `agend-tui` | `agend-core`、`agend-client` |
 | `agend` | 以上全部；唯一 binary |
@@ -54,13 +54,13 @@
 
 依賴清單在 `xtask/src/check_deps.rs`（說明見 [xtask/README.md](../xtask/README.md)）；shim／client 檢查 normal 與 build 依賴，不檢查 dev 依賴。
 
-agend-core 不用 std（`#![no_std]` + `alloc`），時間只經 `Clock` trait。保護方式：
+agend-core 不用 std（`#![no_std]` + `alloc`），只有 `serde` 可供型別 derive（無預設 features，只開 `derive` + `alloc`；D32）；JSON 編碼留在 adapter，時間只經 `Clock` trait。保護方式：
 
 | 保護 | 擋下什麼 | 工具 |
 |---|---|---|
 | 以 `--all-features` 對無 std 的 target（`thumbv7em-none-eabihf`）編譯 agend-core | 會被編譯到的 std 使用：`extern crate std` 的各種寫法、`[lib] path` 改指、`include!`、用到 std 的依賴（驗證過的案例見 `xtask/TESTING.md`） | `cargo xtask check-deps`（需要該 target） |
 | 同一次編譯帶 `-F unsafe-code` | `unsafe extern "C"` 之類直接呼叫 libc 的 FFI；原始碼的 `#![forbid(unsafe_code)]` 被刪也照擋（屬性留著給 IDE 即時提示） | `cargo xtask check-deps` |
-| `cargo metadata` 規則 | agend-core 有 build script、有任何 `[features]`，或有任何依賴（normal／build／dev）不在 `CORE_DEP_ALLOWLIST`（目前是空的） | `cargo xtask check-deps` |
+| `cargo metadata` 規則 | agend-core 有 build script、有任何 `[features]`、serde default features 或 derive／alloc 以外 features，或有 serde 以外的依賴（normal／build／dev） | `cargo xtask check-deps` |
 
 威脅模型：這些保護擋的是意外把 I/O 帶進 core，不是刻意繞過（例如改 xtask 本身、把 allowlist 加長）；後者靠 code review。
 

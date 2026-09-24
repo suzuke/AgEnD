@@ -1,0 +1,24 @@
+id = "research"
+version = 1
+requires = []
+allow_unreviewed = false
+
+[[stages]]
+id = "work"
+
+[stages.stage]
+kind = "work"
+role = "researcher"
+instructions = ""
+output = "result"
+
+[[stages]]
+id = "review"
+
+[stages.stage]
+kind = "approval"
+count = 1
+bind_head = false
+
+[stages.stage.by]
+role = "reviewer"

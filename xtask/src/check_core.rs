@@ -23,9 +23,9 @@ pub const CORE: &str = "agend-core";
 /// A tier-2 target without std. If core compiles for it, core does not use std.
 pub const NO_STD_TARGET: &str = "thumbv7em-none-eabihf";
 
-/// Dependencies (of any kind) agend-core may have. Empty on purpose; adding one
-/// is a reviewed change.
-pub const CORE_DEP_ALLOWLIST: &[&str] = &[];
+/// Dependencies (of any kind) agend-core may have: only `serde`, approved by
+/// the owner as decision D32 (gate 1 proposal P7) for no-std type derives.
+pub const CORE_DEP_ALLOWLIST: &[&str] = &["serde"];
 
 /// Runs all core checks. Returns (problems, whether the no-std build was
 /// skipped); `Err` only if a check could not run.
@@ -81,6 +81,31 @@ pub fn metadata_problems(metadata: &Value) -> Vec<String> {
             problems.push(format!(
                 "{CORE} has a {kind} dependency on {name}; core dependencies must be in CORE_DEP_ALLOWLIST (xtask/src/check_core.rs)"
             ));
+        } else if name == "serde" {
+            if dep["kind"] != Value::Null {
+                problems.push(format!("{CORE} serde must be a normal dependency"));
+            }
+            if dep["optional"] != false || dep["target"] != Value::Null {
+                problems.push(format!(
+                    "{CORE} serde dependency must not be optional or target-specific"
+                ));
+            }
+            if dep["uses_default_features"] != false {
+                problems.push(format!(
+                    "{CORE} serde dependency must disable default features"
+                ));
+            }
+            let features = dep["features"].as_array().cloned().unwrap_or_default();
+            let reviewed_features = ["alloc", "derive"];
+            if features.len() != reviewed_features.len()
+                || reviewed_features
+                    .iter()
+                    .any(|feature| !features.iter().any(|actual| actual == feature))
+            {
+                problems.push(format!(
+                    "{CORE} serde dependency must enable only derive and alloc features"
+                ));
+            }
         }
     }
     problems
@@ -161,6 +186,64 @@ mod tests {
     fn real_metadata_of_core_passes() {
         let meta = workspace_metadata().unwrap();
         assert_eq!(metadata_problems(&meta), Vec::<String>::new());
+    }
+
+    #[test]
+    fn real_metadata_has_only_the_reviewed_no_std_serde_dependency() {
+        let metadata = workspace_metadata().unwrap();
+        let pkg = metadata["packages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == CORE)
+            .unwrap();
+        let dependencies = pkg["dependencies"].as_array().unwrap();
+        assert_eq!(dependencies.len(), 1, "{dependencies:?}");
+        let serde = &dependencies[0];
+        assert_eq!(serde["name"], "serde");
+        assert_eq!(serde["kind"], Value::Null);
+        assert_eq!(serde["optional"], false);
+        assert_eq!(serde["target"], Value::Null);
+        assert_eq!(serde["uses_default_features"], false);
+        assert_eq!(serde["features"], serde_json::json!(["derive", "alloc"]));
+        assert!(metadata_problems(&metadata).is_empty());
+    }
+
+    #[test]
+    fn serde_must_be_a_normal_non_optional_dependency() {
+        for (field, value) in [
+            ("kind", Value::String("dev".into())),
+            ("optional", Value::Bool(true)),
+            ("target", Value::String("cfg(unix)".into())),
+        ] {
+            let mut meta = workspace_metadata().unwrap();
+            core_mut(&mut meta)["dependencies"][0][field] = value;
+            assert!(
+                !metadata_problems(&meta).is_empty(),
+                "serde {field} configuration must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn serde_default_features_are_rejected() {
+        let mut meta = workspace_metadata().unwrap();
+        core_mut(&mut meta)["dependencies"][0]["uses_default_features"] = Value::Bool(true);
+        let problems = metadata_problems(&meta);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("disable default features"))
+        );
+    }
+
+    #[test]
+    fn serde_features_outside_derive_and_alloc_are_rejected() {
+        let mut meta = workspace_metadata().unwrap();
+        core_mut(&mut meta)["dependencies"][0]["features"] =
+            serde_json::json!(["derive", "alloc", "std"]);
+        let problems = metadata_problems(&meta);
+        assert!(problems.iter().any(|p| p.contains("only derive and alloc")));
     }
 
     fn core_mut(meta: &mut Value) -> &mut Value {

@@ -3,6 +3,7 @@
 //! Must NOT: perform I/O or keep state between calls (callers pass state in).
 
 pub mod assign;
+pub mod attention;
 pub mod busy;
 pub mod conflict;
 pub mod debounce;

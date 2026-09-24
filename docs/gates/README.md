@@ -3,13 +3,13 @@
 > **TL;DR**
 > - 13 個施工關各有一頁：範圍、自動驗收、你親自驗收的步驟、驗收紀錄、進度紀錄。
 > - 記住：**一個施工關要等你跑完「你親自驗收」並填好「驗收紀錄」才算完成**。
-> - 下一步：打開目前這個施工關（第 1 施工關，提案中）逐條確認提案。
+> - 下一步：打開目前這個施工關（第 1 施工關，實作中）。
 
 ## 索引
 
 | 施工關 | 頁面 | 範圍 | 狀態 | 自動驗收指令 |
 |---|---|---|---|---|
-| 1 | [`core`](gate-01-core.md) | agend-core | 提案中 | `cargo xtask accept core` |
+| 1 | [`core`](gate-01-core.md) | agend-core | 實作中 | `cargo xtask accept core` |
 | 2 | [`testkit`](gate-02-testkit.md) | agend-testkit | 未開始 | `cargo xtask accept testkit` |
 | 3 | [`shim`](gate-03-shim.md) | agend-shim | 未開始 | `cargo xtask accept shim` |
 | 4 | [`holder`](gate-04-holder.md) | agend-holder | 未開始 | `cargo xtask accept holder` |
