@@ -1,0 +1,91 @@
+# 第 9 關：agend CLI（`cli`）
+
+> **TL;DR**
+> - agent 命令、操作者命令、status、doctor、init。
+> - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這關才算完成。
+> - 下一步：等前一關完成後開工；開工時把標「開工時細化」的步驟寫定。
+
+## 狀態
+
+**未開始**（2026-09-24）
+
+## 範圍
+
+- 11 個 agent 命令（D17）
+- 操作者命令
+- `agend status`
+- `agend doctor`、`agend init`（服務註冊在第 13 關）
+
+## 自動驗收（完成定義）
+
+- [ ] `~/.cargo/bin/cargo test -p agend` 單獨通過
+- [ ] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨
+- [ ] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`（出現 `SKIPPED` 不算通過）
+- [ ] `~/.cargo/bin/cargo xtask accept cli` 通過，並印出下方「你親自驗收」用到的 demo
+- [ ] 本關 crate 的 `README.md`／`TESTING.md` 已更新
+- [ ] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」
+
+## 你親自驗收
+
+每一步：照抄指令 → 對照「應該看到」→ 對了就打勾。任何一步不符就停，記在「驗收紀錄」。標「開工時細化」的地方，開工時會改成確切指令與輸出。
+
+1. 對有假 agent 的 daemon 跑每個 agent 命令。
+
+   ```bash
+   ~/.cargo/bin/cargo xtask accept cli
+   ```
+
+   應該看到：每個命令一段：輸入、輸出、exit code；錯誤訊息都附正確命令。
+
+   - [ ] 通過
+
+2. `agend doctor`。
+
+   ```bash
+   agend doctor
+   ```
+
+   應該看到：列出每一項檢查與結果（git 版本、backend、磁碟…）。
+
+   - [ ] 通過
+
+3. 故意弄壞：藏起一個 backend。
+
+   ```bash
+   PATH=/usr/bin:/bin agend doctor
+   ```
+
+   應該看到：該 backend 那一項失敗，並附上修正指令。
+
+   - [ ] 通過
+
+4. 在暫存 HOME 跑 `agend init`。
+
+   ```bash
+   HOME=$(mktemp -d) agend init --non-interactive
+   ```
+
+   應該看到：建立 home 與 `config.toml`、`general` team 與一個 agent，最後跑 doctor。（開工時細化：確切參數）
+
+   - [ ] 通過
+
+## 驗收紀錄
+
+由你填寫。
+
+| 日期 | 結果（通過／不通過） | 備註 |
+|---|---|---|
+|  |  |  |
+
+## 進度紀錄
+
+日期 + 一行 + commit／PR，新的在上面。
+
+- （尚無）
+
+## 下一步
+
+```bash
+cat docs/gates/gate-09-cli.md
+~/.cargo/bin/cargo xtask accept cli
+```

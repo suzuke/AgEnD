@@ -46,6 +46,26 @@
 
 ## 細節
 
+### 關卡對照
+
+`cargo xtask accept <編號或名稱>`：
+
+| 編號 | 名稱 | 關卡頁 |
+|---|---|---|
+| 1 | `core` | [docs/gates/gate-01-core.md](../docs/gates/gate-01-core.md) |
+| 2 | `testkit` | [docs/gates/gate-02-testkit.md](../docs/gates/gate-02-testkit.md) |
+| 3 | `shim` | [docs/gates/gate-03-shim.md](../docs/gates/gate-03-shim.md) |
+| 4 | `holder` | [docs/gates/gate-04-holder.md](../docs/gates/gate-04-holder.md) |
+| 5 | `store` | [docs/gates/gate-05-store.md](../docs/gates/gate-05-store.md) |
+| 6 | `daemon-holder` | [docs/gates/gate-06-daemon-holder.md](../docs/gates/gate-06-daemon-holder.md) |
+| 7 | `codex` | [docs/gates/gate-07-codex.md](../docs/gates/gate-07-codex.md) |
+| 8 | `client` | [docs/gates/gate-08-client.md](../docs/gates/gate-08-client.md) |
+| 9 | `cli` | [docs/gates/gate-09-cli.md](../docs/gates/gate-09-cli.md) |
+| 10 | `pipeline` | [docs/gates/gate-10-pipeline.md](../docs/gates/gate-10-pipeline.md) |
+| 11 | `tui` | [docs/gates/gate-11-tui.md](../docs/gates/gate-11-tui.md) |
+| 12 | `adapters` | [docs/gates/gate-12-adapters.md](../docs/gates/gate-12-adapters.md) |
+| 13 | `install` | [docs/gates/gate-13-install.md](../docs/gates/gate-13-install.md) |
+
 ### 禁止清單
 
 | 群組 | crate（`*` = 前綴） |
