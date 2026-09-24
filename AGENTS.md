@@ -57,6 +57,31 @@ CI（`.github/workflows/ci.yml`）在 ubuntu 與 macOS 跑同一組檢查。
 - `--allow-skip` 只在你明白這一項沒驗證時用；它仍印出 SKIPPED。
 - CI 一定會跑這一項（不加 `--allow-skip`）。
 
+## Git 工作流程（必守）
+
+> **TL;DR** 所有實作都在自己的 branch + git worktree 上做，用 PR 合併；**絕不直接改整合 branch**。
+
+- 整合 branch：**`v2`**（`main` 目前是舊版 TypeScript；切換後整合 branch 改為 `main`，規則不變）。
+- 禁止：在 `v2` 或 `main` 上直接 commit、push、`--force`；在別人的 worktree 裡改東西。
+- 一律用 PR 合併；合併方式與時機由使用者決定，agent 不自行 merge。
+
+開工：
+
+```bash
+git fetch origin
+git worktree add ../AgEnD-<主題> -b <類型>/<主題> origin/v2   # 類型：feat／fix／docs／test／build
+cd ../AgEnD-<主題>
+```
+
+收工：
+
+```bash
+git push -u origin <類型>/<主題>
+gh pr create --base v2
+# PR 合併後
+git worktree remove ../AgEnD-<主題> && git branch -d <類型>/<主題>
+```
+
 ## 指令
 
 ```bash
@@ -85,6 +110,7 @@ cargo xtask accept <關>                                # 1–13 或名稱，如
 - [ ] `cargo test --workspace` 通過（至少 `cargo test -p <改到的 crate>`）
 - [ ] `cargo xtask check-deps` 通過
 - [ ] 行為變了 → 對應的 crate `README.md`／`TESTING.md` 與 `docs/` 已更新
+- [ ] 在自己的 branch + worktree 上完成，以 PR 合併進 `v2`（沒有直接改 `v2`／`main`）
 
 
 ## 寫作與程式規則
