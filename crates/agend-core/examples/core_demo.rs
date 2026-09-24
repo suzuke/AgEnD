@@ -1,6 +1,6 @@
 use agend_core::model::Backend;
 use agend_core::pipeline::state::{
-    PipelineAction, PipelineEvent, PipelineState, WorkProduct, step,
+    PendingHeadChange, PipelineAction, PipelineEvent, PipelineState, WorkProduct, step,
 };
 use agend_core::pipeline::workflow::Workflow;
 use agend_core::policy::assign::{
@@ -72,8 +72,8 @@ fn main() {
             current_instances: 1,
         }),
         purpose: Purpose::Review {
-            author_instance: assigned.clone(),
-            author_backend: Backend::Codex,
+            task_holder: assigned.clone(),
+            task_holder_backend: Backend::Codex,
         },
     };
     let reviewer_candidates = [Candidate {
@@ -130,8 +130,6 @@ fn main() {
     state = transition(&state, "rework done", branch("H1c", "P1c"));
     state = transition(&state, "submit", submitted());
     state = transition(&state, "command passed", command_result(&state, Some(0)));
-    state = transition(&state, "approval H1c", approve(&state, &reviewer));
-
     state = transition(
         &state,
         "new commit",
@@ -141,31 +139,37 @@ fn main() {
         },
     );
     state = transition(&state, "command passed", command_result(&state, Some(0)));
-    state = transition(&state, "approval H2", approve(&state, &reviewer));
-
-    state = transition(
-        &state,
-        "clean rebase",
-        PipelineEvent::MainAdvanced {
-            rebased_head: "H3".into(),
-            patch_id: "P2".into(),
-            conflict: false,
-        },
-    );
-    state = transition(&state, "checks rerun", command_result(&state, Some(0)));
     state = transition(
         &state,
         "changed rebase",
         PipelineEvent::MainAdvanced {
-            rebased_head: "H4".into(),
+            rebased_head: "H3".into(),
             patch_id: "P3".into(),
             conflict: false,
         },
     );
-    state = transition(&state, "work after changed patch", branch("H5", "P3"));
+    state = transition(&state, "work after changed patch", branch("H4", "P4"));
     state = transition(&state, "submit", submitted());
     state = transition(&state, "command passed", command_result(&state, Some(0)));
-    state = transition(&state, "approval H5", approve(&state, &reviewer));
+    state = transition(&state, "approval H4", approve(&state, &reviewer));
+    state = transition(
+        &state,
+        "main advanced in flight",
+        PipelineEvent::MainAdvanced {
+            rebased_head: "H5".into(),
+            patch_id: "P4".into(),
+            conflict: false,
+        },
+    );
+    state = transition(
+        &state,
+        "merge failed",
+        PipelineEvent::MergeFailed {
+            head: "H4".into(),
+            reason: "main moved".into(),
+        },
+    );
+    state = transition(&state, "checks rerun", command_result(&state, Some(0)));
     state = transition(
         &state,
         "merge completed",
@@ -228,8 +232,23 @@ fn transition(state: &PipelineState, label: &str, event: PipelineEvent) -> Pipel
         .filter_map(action_summary)
         .collect::<Vec<_>>();
     let outcome = if summaries.is_empty() {
+        let pending = next
+            .pending_head_changes()
+            .iter()
+            .map(|change| match change {
+                PendingHeadChange::CommitCreated { head, .. }
+                | PendingHeadChange::MainAdvanced {
+                    rebased_head: head, ..
+                } => head.as_str(),
+            })
+            .collect::<Vec<_>>();
+        let pending = if pending.is_empty() {
+            String::new()
+        } else {
+            format!(", {} pending until the merge result", pending.join(", "))
+        };
         format!(
-            "stay in {} at {}",
+            "stay in {} at {}{pending}",
             stage_id(&next),
             next.current_head().unwrap_or("<no head>")
         )
@@ -266,7 +285,7 @@ fn action_summary(action: &PipelineAction) -> Option<String> {
         PipelineAction::Merge { head, .. } => Some(format!("merge at {head}")),
         PipelineAction::ReturnToWork {
             stage_id, reason, ..
-        } => Some(format!("return {stage_id} to its author ({reason})")),
+        } => Some(format!("return {stage_id} to its task holder ({reason})")),
         PipelineAction::TaskDone { merge_commit } => Some(format!("task done at {merge_commit:?}")),
         other => Some(format!("{other:?}")),
     }

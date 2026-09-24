@@ -55,8 +55,8 @@ pub struct RoleCapacity {
 pub enum Purpose {
     NewTask,
     Review {
-        author_instance: String,
-        author_backend: Backend,
+        task_holder: String,
+        task_holder_backend: Backend,
     },
     /// The task's work continues — rework after requested changes, or its
     /// task holder has to be replaced. `branch` and `review_comments` travel
@@ -169,14 +169,14 @@ pub fn choose(request: &AssignmentRequest, candidates: &[Candidate]) -> Assignme
     let mut eligible = free_candidates(request, candidates, None);
 
     if let Purpose::Review {
-        author_instance,
-        author_backend,
+        task_holder,
+        task_holder_backend,
     } = &request.purpose
     {
-        eligible.retain(|candidate| candidate.instance_id != *author_instance);
+        eligible.retain(|candidate| candidate.instance_id != *task_holder);
         eligible.sort_by_key(|candidate| {
             (
-                candidate.backend == *author_backend,
+                candidate.backend == *task_holder_backend,
                 candidate.instance_id.as_str(),
             )
         });
@@ -193,10 +193,13 @@ pub fn choose(request: &AssignmentRequest, candidates: &[Candidate]) -> Assignme
             reason: QueueReason::NoAllowedBackend,
         };
     }
-    // Review prefers a backend other than the author's, but falls back to
+    // Review prefers a backend other than the task holder's, but falls back to
     // the same backend rather than queueing when it is the only one allowed.
     let preferred_spawn = match &request.purpose {
-        Purpose::Review { author_backend, .. } => spawn_backend(request, Some(*author_backend)),
+        Purpose::Review {
+            task_holder_backend,
+            ..
+        } => spawn_backend(request, Some(*task_holder_backend)),
         _ => None,
     };
     if let Some(backend) = preferred_spawn.or_else(|| spawn_backend(request, None)) {
@@ -206,13 +209,11 @@ pub fn choose(request: &AssignmentRequest, candidates: &[Candidate]) -> Assignme
         };
     }
 
-    if let Purpose::Review {
-        author_instance, ..
-    } = &request.purpose
+    if let Purpose::Review { task_holder, .. } = &request.purpose
         && !role_candidates.is_empty()
         && role_candidates
             .iter()
-            .all(|candidate| candidate.instance_id == *author_instance)
+            .all(|candidate| candidate.instance_id == *task_holder)
     {
         return AssignmentDecision::Queue {
             reason: QueueReason::NoEligibleReviewer,
@@ -419,17 +420,17 @@ mod tests {
     }
 
     #[test]
-    fn review_excludes_author_and_prefers_another_backend() {
+    fn review_excludes_the_task_holder_and_prefers_another_backend() {
         let candidates = [
-            candidate("author", Backend::Codex, Some("T-1"), true),
+            candidate("task-holder", Backend::Codex, Some("T-1"), true),
             candidate("same", Backend::Codex, None, true),
             candidate("other", Backend::Claude, None, true),
         ];
         assert_eq!(
             choose(
                 &request(Purpose::Review {
-                    author_instance: "author".into(),
-                    author_backend: Backend::Codex,
+                    task_holder: "task-holder".into(),
+                    task_holder_backend: Backend::Codex,
                 }),
                 &candidates,
             ),
@@ -460,8 +461,8 @@ mod tests {
         let review = AssignmentRequest {
             role_capacity: capacity(2, 2),
             ..request(Purpose::Review {
-                author_instance: "author".into(),
-                author_backend: Backend::Opencode,
+                task_holder: "task-holder".into(),
+                task_holder_backend: Backend::Opencode,
             })
         };
         assert_eq!(
@@ -506,28 +507,28 @@ mod tests {
     /// D33 rule 2: rework returns to the task holder, who still holds it.
     #[test]
     fn rework_returns_to_the_task_holder_that_still_holds_the_task() {
-        let task_holder = candidate("author", Backend::Codex, Some("T-1"), true);
+        let task_holder = candidate("task-holder", Backend::Codex, Some("T-1"), true);
         let other = candidate("other", Backend::Claude, None, true);
         let full = AssignmentRequest {
             role_capacity: capacity(2, 2),
-            ..request(rework("author"))
+            ..request(rework("task-holder"))
         };
         assert_eq!(
             choose(&full, &[task_holder, other]),
             AssignmentDecision::Assigned {
-                instance_id: "author".into()
+                instance_id: "task-holder".into()
             }
         );
     }
 
     #[test]
     fn rework_finds_the_task_holder_even_when_their_role_changed() {
-        let mut task_holder = candidate("author", Backend::Codex, Some("T-1"), true);
+        let mut task_holder = candidate("task-holder", Backend::Codex, Some("T-1"), true);
         task_holder.role = "reviewer".into();
         assert_eq!(
-            choose(&request(rework("author")), &[task_holder]),
+            choose(&request(rework("task-holder")), &[task_holder]),
             AssignmentDecision::Assigned {
-                instance_id: "author".into()
+                instance_id: "task-holder".into()
             }
         );
     }
@@ -537,28 +538,28 @@ mod tests {
     /// an ephemeral instance on another backend; else it queues.
     #[test]
     fn usage_limited_rework_moves_to_another_backend_with_the_branch() {
-        let task_holder = candidate("author", Backend::Codex, Some("T-1"), false);
+        let task_holder = candidate("task-holder", Backend::Codex, Some("T-1"), false);
         let same_backend = candidate("codex-2", Backend::Codex, None, true);
         let other_backend = candidate("claude-1", Backend::Claude, None, true);
         assert_eq!(
             choose(
-                &request(rework("author")),
+                &request(rework("task-holder")),
                 &[task_holder.clone(), same_backend.clone(), other_backend]
             ),
             AssignmentDecision::Reassigned {
                 instance_id: "claude-1".into(),
-                handoff: handoff("author"),
+                handoff: handoff("task-holder"),
             }
         );
         let spawn = AssignmentRequest {
             available_backends: vec![Backend::Codex, Backend::Opencode],
-            ..request(rework("author"))
+            ..request(rework("task-holder"))
         };
         assert_eq!(
             choose(&spawn, &[task_holder.clone(), same_backend.clone()]),
             AssignmentDecision::SpawnEphemeral {
                 backend: Backend::Opencode,
-                handoff: Some(handoff("author")),
+                handoff: Some(handoff("task-holder")),
             }
         );
         let full = AssignmentRequest {
@@ -580,23 +581,26 @@ mod tests {
     fn removed_task_holder_is_replaced_immediately() {
         let same_backend = candidate("codex-2", Backend::Codex, None, true);
         assert_eq!(
-            choose(&request(rework("author")), &[same_backend]),
+            choose(&request(rework("task-holder")), &[same_backend]),
             AssignmentDecision::Reassigned {
                 instance_id: "codex-2".into(),
-                handoff: handoff("author"),
+                handoff: handoff("task-holder"),
             }
         );
         let busy = candidate("codex-2", Backend::Codex, Some("T-9"), true);
         assert_eq!(
-            choose(&request(rework("author")), core::slice::from_ref(&busy)),
+            choose(
+                &request(rework("task-holder")),
+                core::slice::from_ref(&busy)
+            ),
             AssignmentDecision::SpawnEphemeral {
                 backend: Backend::Claude,
-                handoff: Some(handoff("author")),
+                handoff: Some(handoff("task-holder")),
             }
         );
         let full = AssignmentRequest {
             role_capacity: capacity(1, 1),
-            ..request(rework("author"))
+            ..request(rework("task-holder"))
         };
         assert_eq!(
             choose(&full, &[busy]),
@@ -691,7 +695,7 @@ mod tests {
     /// different backend": with one allowed backend a reviewer is spawned on
     /// it instead of queueing for a usage limit that is not reached.
     #[test]
-    fn review_n6_review_spawns_on_the_author_backend_when_it_is_the_only_one() {
+    fn review_n6_review_spawns_on_the_task_holder_backend_when_it_is_the_only_one() {
         let request = AssignmentRequest {
             team_id: "team-a".into(),
             role: "reviewer".into(),
@@ -699,8 +703,8 @@ mod tests {
             available_backends: vec![Backend::Claude],
             role_capacity: capacity(0, 2),
             purpose: Purpose::Review {
-                author_instance: "dev-1".into(),
-                author_backend: Backend::Claude,
+                task_holder: "dev-1".into(),
+                task_holder_backend: Backend::Claude,
             },
         };
         assert_eq!(
@@ -732,26 +736,26 @@ mod tests {
         let free = candidate("dev-2", Backend::Claude, None, true);
         let reassigned = AssignmentDecision::Reassigned {
             instance_id: "dev-2".into(),
-            handoff: handoff("author"),
+            handoff: handoff("task-holder"),
         };
 
-        let mut other_team = candidate("author", Backend::Codex, Some("T-1"), true);
+        let mut other_team = candidate("task-holder", Backend::Codex, Some("T-1"), true);
         other_team.team_id = "team-b".into();
         assert_eq!(
-            choose(&request(rework("author")), &[other_team, free.clone()]),
+            choose(&request(rework("task-holder")), &[other_team, free.clone()]),
             reassigned
         );
 
-        let other_task = candidate("author", Backend::Codex, Some("T-9"), true);
+        let other_task = candidate("task-holder", Backend::Codex, Some("T-9"), true);
         assert_eq!(
-            choose(&request(rework("author")), &[other_task, free.clone()]),
+            choose(&request(rework("task-holder")), &[other_task, free.clone()]),
             reassigned
         );
 
-        let disallowed = candidate("author", Backend::Codex, Some("T-1"), true);
+        let disallowed = candidate("task-holder", Backend::Codex, Some("T-1"), true);
         let only_claude = AssignmentRequest {
             allowed_backends: vec![Backend::Claude],
-            ..request(rework("author"))
+            ..request(rework("task-holder"))
         };
         assert_eq!(
             choose(&only_claude, &[disallowed, free.clone()]),
@@ -760,9 +764,9 @@ mod tests {
 
         let no_role = AssignmentRequest {
             role_capacity: None,
-            ..request(rework("author"))
+            ..request(rework("task-holder"))
         };
-        let task_holder = candidate("author", Backend::Codex, Some("T-1"), true);
+        let task_holder = candidate("task-holder", Backend::Codex, Some("T-1"), true);
         assert_eq!(
             choose(&no_role, &[task_holder, free]),
             AssignmentDecision::AskForRole { role: "dev".into() }

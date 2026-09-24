@@ -96,6 +96,26 @@ pub struct PipelineState {
     fanout_child_task_ids: Vec<String>,
     selected_fanout_child: Option<String>,
     merge_commit: Option<String>,
+    /// Head changes seen while the merge was in flight, in order; applied
+    /// only if the forge reports the merge failed.
+    pending_head_changes: Vec<PendingHeadChange>,
+}
+
+/// A head change observed after the `Merge` action went out. The task stays
+/// in the merge stage until the forge reports the result: on `MergeCompleted`
+/// these are dropped (the sent head was merged), on `MergeFailed` they are
+/// applied in order with the usual rules (D14).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PendingHeadChange {
+    CommitCreated {
+        head: String,
+        patch_id: String,
+    },
+    MainAdvanced {
+        rebased_head: String,
+        patch_id: String,
+        conflict: bool,
+    },
 }
 
 /// Read access. Fields are private so a state can only come from
@@ -122,6 +142,7 @@ impl PipelineState {
             fanout_child_task_ids: Vec::new(),
             selected_fanout_child: None,
             merge_commit: None,
+            pending_head_changes: Vec::new(),
         }
     }
 
@@ -187,6 +208,18 @@ impl PipelineState {
 
     pub fn merge_commit(&self) -> Option<&str> {
         self.merge_commit.as_deref()
+    }
+
+    pub fn pending_head_changes(&self) -> &[PendingHeadChange] {
+        &self.pending_head_changes
+    }
+
+    /// The `Merge` action is out and its result has not arrived.
+    pub fn merge_in_flight(&self) -> bool {
+        self.status == PipelineStatus::Running
+            && self
+                .current_stage()
+                .is_some_and(|stage| stage.stage.kind() == StageKind::Merge)
     }
 
     /// The merge gate for the merge stage at `merge_index`, from the recorded
@@ -255,7 +288,7 @@ pub enum PipelineEvent {
         head: Option<String>,
         selected_child: Option<String>,
     },
-    /// A reviewer asked for changes: the task goes back to the author (D18).
+    /// A reviewer asked for changes: the task goes back to the task holder (D18, D33).
     ChangesRequested {
         stage_id: String,
         reviewer: String,
@@ -290,6 +323,12 @@ pub enum PipelineEvent {
     MergeCompleted {
         head: String,
         merge_commit: String,
+    },
+    /// The forge did not merge `head` (for example main moved or the forge
+    /// refused); `reason` is for the log.
+    MergeFailed {
+        head: String,
+        reason: String,
     },
 }
 
@@ -580,8 +619,12 @@ pub fn step(
             if state.current_head.as_deref() == Some(head.as_str()) {
                 return Ok((next, actions));
             }
-            record_new_head(&mut next, head, patch_id);
-            recheck_for_new_head(&mut next, &mut actions)?;
+            let change = PendingHeadChange::CommitCreated { head, patch_id };
+            if state.merge_in_flight() {
+                next.pending_head_changes.push(change);
+            } else {
+                apply_head_change(&mut next, change, &mut actions)?;
+            }
         }
         PipelineEvent::MainAdvanced {
             rebased_head,
@@ -597,7 +640,16 @@ pub fn step(
             {
                 return Err(TransitionError::WrongStage);
             }
-            main_advanced(&mut next, rebased_head, patch_id, conflict, &mut actions)?;
+            let change = PendingHeadChange::MainAdvanced {
+                rebased_head,
+                patch_id,
+                conflict,
+            };
+            if state.merge_in_flight() {
+                next.pending_head_changes.push(change);
+            } else {
+                apply_head_change(&mut next, change, &mut actions)?;
+            }
         }
         PipelineEvent::FanoutCompleted {
             stage_id,
@@ -678,6 +730,13 @@ pub fn step(
             };
             cancel(&mut next, stage_id, reason, &mut actions);
         }
+        PipelineEvent::MergeFailed { head, reason: _ } => {
+            ensure_current_stage(state, StageKind::Merge)?;
+            if state.current_head.as_deref() != Some(head.as_str()) {
+                return Err(TransitionError::StaleResult);
+            }
+            merge_failed(&mut next, &mut actions)?;
+        }
         PipelineEvent::MergeCompleted { head, merge_commit } => {
             ensure_current_stage(state, StageKind::Merge)?;
             if state.current_head.as_deref() != Some(head.as_str())
@@ -686,6 +745,7 @@ pub fn step(
                 return Err(TransitionError::MergeGateClosed);
             }
             next.merge_commit = Some(merge_commit.clone());
+            next.pending_head_changes.clear();
             next.status = PipelineStatus::Done;
             actions.push(PipelineAction::TaskDone {
                 merge_commit: Some(merge_commit),
@@ -694,6 +754,48 @@ pub fn step(
     }
 
     Ok((next, actions))
+}
+
+/// The forge did not merge: apply the head changes seen meanwhile, or, if
+/// there were none (or they changed nothing), repeat the checks for the
+/// current head before asking for the merge again.
+fn merge_failed(
+    state: &mut PipelineState,
+    actions: &mut Vec<PipelineAction>,
+) -> Result<(), TransitionError> {
+    for change in core::mem::take(&mut state.pending_head_changes) {
+        apply_head_change(state, change, actions)?;
+    }
+    if state.merge_in_flight() {
+        let merge = state.stage_index;
+        let target = recheck_target(state, merge).ok_or(TransitionError::MergeGateClosed)?;
+        enter_stage(state, target, actions)?;
+    }
+    Ok(())
+}
+
+fn apply_head_change(
+    state: &mut PipelineState,
+    change: PendingHeadChange,
+    actions: &mut Vec<PipelineAction>,
+) -> Result<(), TransitionError> {
+    if state.status != PipelineStatus::Running {
+        return Ok(());
+    }
+    match change {
+        PendingHeadChange::CommitCreated { head, patch_id } => {
+            if state.current_head.as_deref() == Some(head.as_str()) {
+                return Ok(());
+            }
+            record_new_head(state, head, patch_id);
+            recheck_for_new_head(state, actions)
+        }
+        PendingHeadChange::MainAdvanced {
+            rebased_head,
+            patch_id,
+            conflict,
+        } => main_advanced(state, rebased_head, patch_id, conflict, actions),
+    }
 }
 
 fn ensure_running(state: &PipelineState) -> Result<(), TransitionError> {
@@ -721,10 +823,7 @@ fn ensure_current_stage(state: &PipelineState, kind: StageKind) -> Result<(), Tr
 /// Daemon contract: once the `Merge` action is out, the forge may complete
 /// it at any moment, so the task cannot be cancelled until its result.
 fn ensure_no_merge_in_flight(state: &PipelineState) -> Result<(), TransitionError> {
-    if state
-        .current_stage()
-        .is_some_and(|stage| stage.stage.kind() == StageKind::Merge)
-    {
+    if state.merge_in_flight() {
         Err(TransitionError::MergeInFlight)
     } else {
         Ok(())
@@ -785,7 +884,7 @@ fn is_head_bound(stage: &WorkflowStage) -> bool {
 /// The first stage that must be repeated when the head changes while the task
 /// is at `current`: the first command or head-bound approval after the most
 /// recent branch work stage, up to and including `current`. `None` in a work stage
-/// (the author is still working) or when nothing before `current` depends on
+/// (the task holder is still working) or when nothing before `current` depends on
 /// the head.
 fn recheck_target(state: &PipelineState, current: usize) -> Option<usize> {
     let stages = &state.workflow.stages;
@@ -1013,8 +1112,8 @@ fn forget_from(state: &mut PipelineState, target: usize) {
     state.approval_reviewers.clear();
 }
 
-/// Hand the work stage at `target` back to its author. The branch and head
-/// stay: the author continues on the same branch.
+/// Hand the work stage at `target` back to the task holder. The branch and
+/// head stay: the task holder continues on the same branch.
 fn return_to_work(
     state: &mut PipelineState,
     target: usize,
@@ -1263,6 +1362,29 @@ mod tests {
         step(state, event).unwrap()
     }
 
+    fn merge_failed(state: &PipelineState) -> PipelineEvent {
+        PipelineEvent::MergeFailed {
+            head: state.current_head.clone().unwrap(),
+            reason: "main moved".into(),
+        }
+    }
+
+    /// Apply a head change while the merge is in flight: the task must stay
+    /// in the merge stage with no action; then the forge reports the merge
+    /// failed and the pending change is applied.
+    fn through_merge(
+        state: &PipelineState,
+        event: PipelineEvent,
+    ) -> (PipelineState, Vec<PipelineAction>) {
+        assert!(state.merge_in_flight());
+        let (held, actions) = apply(state, event);
+        assert_eq!(held.stage_index, state.stage_index);
+        assert_eq!(held.current_head, state.current_head);
+        assert!(actions.is_empty(), "{actions:?}");
+        assert_eq!(held.pending_head_changes.len(), 1);
+        apply(&held, merge_failed(state))
+    }
+
     fn at_submit(workflow: Workflow) -> PipelineState {
         let state = apply(&state_for(workflow), PipelineEvent::Start).0;
         apply(&state, work("H1", "P1")).0
@@ -1355,7 +1477,7 @@ mod tests {
     #[test]
     fn review_b3_stale_command_result_cannot_pass_checks_for_a_new_head() {
         let state = run_to_merge(initial(), "H1", "P1");
-        let (updated, _) = apply(&state, commit("H2", "P2"));
+        let (updated, _) = through_merge(&state, commit("H2", "P2"));
         assert_eq!(
             step(
                 &updated,
@@ -1398,7 +1520,7 @@ mod tests {
         state = apply(&state, command(&state, Some(0))).0;
         state = apply(&state, command(&state, Some(0))).0;
         state = apply(&state, approve(&state, "reviewer-1")).0;
-        let (rebased, _) = apply(&state, main_advanced("H1-rebased", "P1", false));
+        let (rebased, _) = through_merge(&state, main_advanced("H1-rebased", "P1", false));
         assert_eq!(stage_id(&rebased), "checks");
         assert!(rebased.passed_checks.is_empty());
         assert!(
@@ -1456,7 +1578,7 @@ mod tests {
     #[test]
     fn changed_patch_after_main_advance_returns_to_work() {
         let state = run_to_merge(initial(), "H1", "P1");
-        let (changed, actions) = apply(&state, main_advanced("H1-other", "P2", false));
+        let (changed, actions) = through_merge(&state, main_advanced("H1-other", "P2", false));
         assert!(
             changed
                 .approvals
@@ -1489,11 +1611,11 @@ mod tests {
     }
 
     /// Round-2 review N2: a head change during rework keeps the task in work;
-    /// the author's `WorkCompleted` is still accepted afterwards.
+    /// the task holder's `WorkCompleted` is still accepted afterwards.
     #[test]
     fn review_n2_head_change_during_rework_keeps_the_task_in_work() {
         let state = run_to_merge(initial(), "H1", "P1");
-        let (state, _) = apply(&state, main_advanced("H2", "P9", false));
+        let (state, _) = through_merge(&state, main_advanced("H2", "P9", false));
         assert_eq!(stage_id(&state), "work");
         for event in [
             main_advanced("H3", "P9", false),
@@ -1509,10 +1631,10 @@ mod tests {
         assert_eq!(stage_id(&state), "submit");
     }
 
-    /// Round-2 review N3: requested changes return the task to the author's
+    /// Round-2 review N3: requested changes return the task to the task holder's
     /// work stage, not TaskFailed (D18 rework).
     #[test]
-    fn review_n3_changes_requested_return_to_the_author() {
+    fn review_n3_changes_requested_return_to_the_task_holder() {
         let state = apply(&at_submit(Workflow::builtin_code()), submitted()).0;
         let state = apply(&state, command(&state, Some(0))).0;
         assert_eq!(stage_id(&state), "review");
@@ -1747,6 +1869,11 @@ mod tests {
                     else {
                         continue;
                     };
+                    if before.merge_in_flight() {
+                        assert_eq!(s.stage_index, before.stage_index, "left an in-flight merge");
+                        assert!(actions.is_empty());
+                        s = apply(&s, merge_failed(&before)).0;
+                    }
                     assert!(s.stage_index <= before.stage_index, "moved forward");
                     if before.current_stage().unwrap().stage.kind() == StageKind::Work {
                         assert_eq!(s.stage_index, before.stage_index);
@@ -1865,6 +1992,78 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    /// Verifier r1 (important): a head change after the merge request went
+    /// out must not pull the task out of the merge stage; the forge's result
+    /// for the sent head decides. Cancel stays rejected.
+    #[test]
+    fn verifier_r1_head_change_while_merge_in_flight_waits_for_the_forge() {
+        let state = run_to_merge(initial(), "H1", "P1");
+        assert!(state.merge_in_flight());
+        let (held, actions) = apply(&state, main_advanced("H2", "P1", false));
+        assert!(actions.is_empty());
+        assert_eq!(stage_id(&held), "merge");
+        assert_eq!(held.current_head(), Some("H1"));
+        let (held, _) = apply(&held, commit("H3", "P3"));
+        assert_eq!(held.pending_head_changes().len(), 2);
+        assert_eq!(
+            step(&held, PipelineEvent::Cancel { reason: "x".into() }),
+            Err(TransitionError::MergeInFlight)
+        );
+        let (done, actions) = apply(&held, merged("H1"));
+        assert_eq!(done.status(), PipelineStatus::Done);
+        assert!(done.pending_head_changes().is_empty());
+        assert_eq!(
+            actions,
+            [PipelineAction::TaskDone {
+                merge_commit: Some("M1".into())
+            }]
+        );
+    }
+
+    #[test]
+    fn merge_failure_applies_pending_head_changes_or_rechecks() {
+        let state = run_to_merge(initial(), "H1", "P1");
+        // Stale failure for another head.
+        assert_eq!(
+            step(
+                &state,
+                PipelineEvent::MergeFailed {
+                    head: "H0".into(),
+                    reason: "x".into()
+                }
+            ),
+            Err(TransitionError::StaleResult)
+        );
+        // No pending change: repeat the checks for the same head; the
+        // approval still covers it, so the merge is requested again after.
+        let (retry, actions) = apply(&state, merge_failed(&state));
+        assert_eq!(stage_id(&retry), "checks");
+        assert!(actions.iter().any(
+            |action| matches!(action, PipelineAction::RunCommand { head: Some(head), .. } if head == "H1")
+        ));
+        let (again, actions) = apply(&retry, command(&retry, Some(0)));
+        assert!(actions.contains(&PipelineAction::Merge {
+            stage_id: "merge".into(),
+            head: "H1".into()
+        }));
+        assert!(again.merge_in_flight());
+        // Pending clean same-patch rebase: D14 keeps the approval, checks rerun.
+        let (held, _) = apply(&state, main_advanced("H2", "P1", false));
+        let (rebased, _) = apply(&held, merge_failed(&state));
+        assert_eq!(stage_id(&rebased), "checks");
+        assert_eq!(rebased.current_head(), Some("H2"));
+        assert!(
+            rebased
+                .approvals()
+                .iter()
+                .any(|approval| approval.head.as_deref() == Some("H2"))
+        );
+        // Pending changed patch: back to the task holder.
+        let (held, _) = apply(&state, main_advanced("H2", "P9", false));
+        let (reworked, _) = apply(&held, merge_failed(&state));
+        assert_eq!(stage_id(&reworked), "work");
     }
 
     #[test]
@@ -2061,9 +2260,9 @@ mod tests {
         state = apply(&state, command(&state, Some(0))).0;
         state = apply(&state, approve(&state, "reviewer-1")).0;
         assert!(matches!(state.current_stage().unwrap().stage, Stage::Merge));
-        let (rebased, _) = apply(&state, main_advanced("H2", "P2", false));
+        let (rebased, _) = through_merge(&state, main_advanced("H2", "P2", false));
         assert_eq!(stage_id(&rebased), "work");
-        let (conflicted, _) = apply(&state, main_advanced("H2", "P1", true));
+        let (conflicted, _) = through_merge(&state, main_advanced("H2", "P1", true));
         assert_eq!(stage_id(&conflicted), "work");
         assert_eq!(conflicted.current_head.as_deref(), Some("H1"));
         let mut checks = state.clone();
@@ -2395,6 +2594,10 @@ mod tests {
                     PipelineEvent::StageTimedOut { stage_id: stage },
                     PipelineEvent::Cancel { reason: "x".into() },
                     merged(&head.clone().unwrap_or_default()),
+                    PipelineEvent::MergeFailed {
+                        head: head.clone().unwrap_or_default(),
+                        reason: "x".into(),
+                    },
                 ];
                 for event in events {
                     attempts += 1;
@@ -2411,7 +2614,7 @@ mod tests {
                 }
             }
         }
-        assert_eq!(attempts, 5 * 3_000 * 13);
+        assert_eq!(attempts, 5 * 3_000 * 14);
     }
 
     fn records_cover_merge(state: &PipelineState, head: &str) -> bool {

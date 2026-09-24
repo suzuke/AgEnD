@@ -165,6 +165,8 @@ struct Or {
     passes: Vec<(usize, String, Option<String>)>, // (t, stage, head)
     approvals: Vec<(usize, String, String, Option<String>)>, // (t, stage, reviewer, head)
     submitted_at: Option<usize>,
+    /// Head changes seen while the merge was in flight (applied on MergeFailed).
+    pending: Vec<PipelineEvent>,
     t: usize,
 }
 impl Or {
@@ -217,6 +219,42 @@ impl Or {
             }
         }
         Ok(())
+    }
+}
+
+/// Oracle update for a head change that took effect.
+fn head_event(o: &mut Or, e: &PipelineEvent) {
+    match e {
+        PipelineEvent::CommitCreated { head, patch_id } => {
+            if o.head.as_ref() != Some(head) {
+                o.head = Some(head.clone());
+                o.patch.insert(head.clone(), patch_id.clone());
+            }
+        }
+        PipelineEvent::MainAdvanced {
+            rebased_head,
+            patch_id,
+            conflict: false,
+        } if o.head.as_ref() != Some(rebased_head) => {
+            let prev = o.head.clone();
+            if let Some(p) = &prev
+                && o.patch.get(p) == Some(patch_id)
+            {
+                let srcs: Vec<String> = o
+                    .carry
+                    .iter()
+                    .filter(|(k, v)| *k == p || v.contains(p))
+                    .map(|(k, _)| k.clone())
+                    .chain([p.clone()])
+                    .collect();
+                for k in srcs {
+                    o.carry.entry(k).or_default().insert(rebased_head.clone());
+                }
+            }
+            o.head = Some(rebased_head.clone());
+            o.patch.insert(rebased_head.clone(), patch_id.clone());
+        }
+        _ => {}
     }
 }
 
@@ -291,6 +329,12 @@ fn genev(r: &mut Sm, s: &PipelineState, heads: &mut Vec<String>, o: &Or) -> Pipe
                     stage_id: cur.clone(),
                     child_task_ids: vec!["k1".into(), "k2".into()],
                     selected_child: None,
+                };
+            }
+            Stage::Merge if r.p(25) => {
+                return PipelineEvent::MergeFailed {
+                    head: s.current_head().map(String::from).unwrap_or_default(),
+                    reason: "refused".into(),
                 };
             }
             Stage::Merge => {
@@ -465,35 +509,19 @@ fn splitmix_explorer_keeps_the_pipeline_invariants() {
                     } => o
                         .approvals
                         .push((o.t, stage_id.clone(), reviewer.clone(), head.clone())),
-                    PipelineEvent::CommitCreated { head, patch_id } => {
-                        if o.head.as_ref() != Some(head) {
-                            o.head = Some(head.clone());
-                            o.patch.insert(head.clone(), patch_id.clone());
+                    PipelineEvent::CommitCreated { .. } | PipelineEvent::MainAdvanced { .. } => {
+                        if s.merge_in_flight() {
+                            o.pending.push(e.clone());
+                        } else {
+                            head_event(&mut o, &e);
                         }
                     }
-                    PipelineEvent::MainAdvanced {
-                        rebased_head,
-                        patch_id,
-                        conflict: false,
-                    } if o.head.as_ref() != Some(rebased_head) => {
-                        let prev = o.head.clone();
-                        if let Some(p) = &prev
-                            && o.patch.get(p) == Some(patch_id)
-                        {
-                            let srcs: Vec<String> = o
-                                .carry
-                                .iter()
-                                .filter(|(k, v)| *k == p || v.contains(p))
-                                .map(|(k, _)| k.clone())
-                                .chain([p.clone()])
-                                .collect();
-                            for k in srcs {
-                                o.carry.entry(k).or_default().insert(rebased_head.clone());
-                            }
+                    PipelineEvent::MergeFailed { .. } => {
+                        for pending in std::mem::take(&mut o.pending) {
+                            head_event(&mut o, &pending);
                         }
-                        o.head = Some(rebased_head.clone());
-                        o.patch.insert(rebased_head.clone(), patch_id.clone());
                     }
+                    PipelineEvent::MergeCompleted { .. } => o.pending.clear(),
                     _ => {}
                 }
                 if nx.current_head() != o.head.as_deref() {
@@ -562,6 +590,9 @@ fn splitmix_explorer_keeps_the_pipeline_invariants() {
                 );
                 if hc && (to > from || nx.status() != s.status()) {
                     fail("head change moved forward/changed status".into());
+                }
+                if hc && s.merge_in_flight() && (to != from || !acts.is_empty()) {
+                    fail("head change pulled the task out of an in-flight merge".into());
                 }
                 if hc && fk == Some(StageKind::Work) && (to != from || !acts.is_empty()) {
                     fail("head change in work".into());

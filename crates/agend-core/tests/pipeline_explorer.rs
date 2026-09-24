@@ -369,6 +369,10 @@ impl Generator {
                 child_task_ids: vec!["c1".into(), "c2".into(), "c3".into()],
                 selected_child: (*join == FanoutJoin::First).then(|| "c2".into()),
             },
+            Stage::Merge if rng.chance(25) => PipelineEvent::MergeFailed {
+                head: head.unwrap_or_default(),
+                reason: "forge refused".into(),
+            },
             Stage::Merge => PipelineEvent::MergeCompleted {
                 head: head.unwrap_or_default(),
                 merge_commit: self.fresh("M"),
@@ -399,7 +403,11 @@ impl Generator {
     fn adversarial(&mut self, rng: &mut Rng, state: &PipelineState) -> PipelineEvent {
         let stage_id = self.any_stage_id(rng, state);
         let reviewer = rng.pick(&REVIEWERS).to_string();
-        match rng.below(12) {
+        match rng.below(13) {
+            12 => PipelineEvent::MergeFailed {
+                head: self.any_head(rng).unwrap_or_default(),
+                reason: "stale".into(),
+            },
             0 => PipelineEvent::Start,
             1 => PipelineEvent::Submitted { change_id: None },
             2 => PipelineEvent::CommandFinished {
@@ -476,6 +484,9 @@ struct Oracle {
     /// (stage, reviewer, heads covered; `None` for an unbound approval).
     approvals: Vec<(String, String, Option<BTreeSet<String>>)>,
     submitted_since_work: bool,
+    /// Head changes seen while the merge was in flight; they only count if
+    /// the forge reports the merge failed.
+    pending: Vec<PipelineEvent>,
 }
 
 impl Oracle {
@@ -486,6 +497,7 @@ impl Oracle {
             passed: BTreeSet::new(),
             approvals: Vec::new(),
             submitted_since_work: false,
+            pending: Vec::new(),
         }
     }
 
@@ -495,7 +507,21 @@ impl Oracle {
     }
 
     fn record(&mut self, before: &PipelineState, event: &PipelineEvent) {
+        if is_head_change(event) && before.merge_in_flight() {
+            self.pending.push(event.clone());
+            return;
+        }
+        self.apply_event(before, event);
+    }
+
+    fn apply_event(&mut self, before: &PipelineState, event: &PipelineEvent) {
         match event {
+            PipelineEvent::MergeFailed { .. } => {
+                for pending in std::mem::take(&mut self.pending) {
+                    self.apply_event(before, &pending);
+                }
+            }
+            PipelineEvent::MergeCompleted { .. } => self.pending.clear(),
             PipelineEvent::WorkCompleted { product } => {
                 if let WorkProduct::Branch { head, patch_id, .. } = product {
                     self.set_head(head, patch_id);
@@ -757,6 +783,11 @@ fn check_step(
         if from_kind == Some(StageKind::Submit) && to == from && !actions.is_empty() {
             return Err(format!("head change in submit emitted {actions:?}"));
         }
+        if before.merge_in_flight() && (to != from || !actions.is_empty()) {
+            return Err(format!(
+                "head change pulled the task out of an in-flight merge: {actions:?}"
+            ));
+        }
     }
     // Requested changes and failed checks are rework, not task failure (D18).
     let rework_event = matches!(event, PipelineEvent::ChangesRequested { .. })
@@ -826,6 +857,7 @@ fn check_step(
                 PipelineEvent::ChangesRequested { .. }
                     | PipelineEvent::StageFailed { .. }
                     | PipelineEvent::CommandFinished { .. }
+                    | PipelineEvent::MergeFailed { .. }
             )
         {
             return Err(format!("{event:?} moved the task backwards"));
