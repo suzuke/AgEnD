@@ -19,8 +19,8 @@
 | `fanout` | 拆子 task 再匯合 | 子 task 來源；匯合 `all`／`first`／`pick` |
 
 - 所有關卡共用 `timeout` 與逾時動作（通知、改派、取消）。
-- 失敗與要求修改：`command` 失敗、`approval` 被要求修改（`review changes`）時，預設退回最近的 `work`，交回原作者返工；`on_fail` 可指定其他更前面的關卡；其他關卡失敗且沒有 `on_fail` 時 task 失敗。取消（人下指令或逾時動作「取消」）是獨立的終止狀態，不算失敗。
-- head 變更（新 commit、main 前進後 rebase）不會讓 task 往前：`work` 中只記錄新 head，返工不會被丟掉；`submit` 中記錄後仍要等提交完成；更後面的關卡退回最後一個 `work` 之後第一個 `command` 或綁 head 的 `approval` 重跑（D14 的保留規則照舊）。
+- 失敗與要求修改：`command` 失敗、`approval` 被要求修改（`review changes`）時，預設退回最近的 `work`，交回原作者返工；`on_fail` 可指定其他更前面的 `work`；其他關卡失敗且沒有 `on_fail` 時 task 失敗。取消（人下指令或逾時動作「取消」）是獨立的終止狀態，不算失敗；但 merge 關卡送出 merge 之後不能取消（forge 隨時可能完成），daemon 要等 merge 結果。
+- head 變更（新 commit、main 前進後 rebase）不會讓 task 往前：`work` 中只記錄新 head，返工不會被丟掉；`submit` 中記錄後仍要等提交完成；更後面的關卡退回最後一個產出 branch 的 `work` 之後第一個 `command` 或綁 head 的 `approval` 重跑（D14 的保留規則照舊）。
 - merge 門檻：merge 前**每個** `command` 都對目前 head 通過，**每個** `approval` 都覆蓋目前 head（不綁 head 的只要有核准）。
 - `{pr}` 是 submit 回傳的 change id（如 PR 編號）；forge local 沒有，所以用到 `{pr}` 的 command 在 local forge 下會讓 task 失敗。佔位符不可加引號，展開時已逐一加單引號。
 - `fanout all` 收到整組 child IDs 後前進；`first` 記錄先完成的 child 並取消其他 child；`pick` 把候選 child IDs 傳給後續 approval，核准時選一個並取消其餘 child。
@@ -34,8 +34,9 @@
 | `code` | work → submit → command → approval → merge | 是 |
 | `research` | work(result) → approval | 否 |
 | `epic` | work(plan) → fanout → approval | 否 |
+| `planned`（D34） | work(計畫 result) → approval(human，不綁 head) → work(branch) → submit → command → approval(reviewer，綁 head) → merge | 是 |
 
-需要人工核准 merge：在 merge 前加 `approval(by = "human")`（D20）。沒有「每個 repo 選自動或人工」的設定。
+需要人工核准 merge：在 merge 前加 `approval(by = "human")`（D20）。人的注意力是瓶頸時用 `planned`：人審計畫（最便宜修正），實作交給 reviewer agent 與 checks（D34）。沒有「每個 repo 選自動或人工」的設定。
 
 ## workflow 管理（D19、D21）
 
@@ -48,10 +49,13 @@
 - [ ] 關卡 id 唯一、kind 合法
 - [ ] submit 前有產出 branch 的 work
 - [ ] 有 submit／merge 就必須 `requires = ["repo"]`
-- [ ] merge 前至少有一個 `command` check，且都在 merge 前最後一個 `work` 之後
+- [ ] merge 前至少有一個 `command` check
+- [ ] 有 merge 就必須是最後一個關卡
+- [ ] 每個 `command` 與綁 head 的 `approval` 都在最後一個產出 branch 的 `work` 之後（否則永遠通不過 merge 門檻）
+- [ ] 每個 `command` 與 `approval` 前面都有 `work`（失敗或要求修改時要有 task 持有者可退回）
 - [ ] `command` 的佔位符沒有加引號，且有來源：`{pr}` 前面要有 submit，`{head}`／`{branch}` 前面要有產出 branch 的 work
 - [ ] merge 前有 `bind_head` 的 approval，否則須明寫 `allow_unreviewed = true`
-- [ ] `on_fail` 只能指向前面的關卡
+- [ ] `on_fail` 只能指向前面的 `work` 關卡（原因要交給 task 持有者，D33）
 - [ ] 角色存在於套用的 team
 
 ## team 與 repo（D12、D13、D15）

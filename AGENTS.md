@@ -129,7 +129,7 @@ cargo xtask accept <施工關>                                # 1–13 或名稱
 
 ## 決策在哪
 
-- 已確認的決策：[docs/DECISIONS.md](docs/DECISIONS.md)（D1–D33）。
+- 已確認的決策：[docs/DECISIONS.md](docs/DECISIONS.md)（D1–D37）。
 - 沒有新證據不要重開討論。要推翻：先補證據，再提新的決策編號，由使用者確認。
 - 文件間衝突時：後來的決策優先於規劃本文。
 

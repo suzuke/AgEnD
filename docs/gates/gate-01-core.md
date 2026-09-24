@@ -1,7 +1,7 @@
-# 第 1 關：agend-core（`core`）
+# 第 1 施工關：agend-core（`core`）
 
 > **TL;DR**
-> - 純邏輯 crate：型別、兩套協定、trait、流水線狀態機、busy policy、去抖動、衝突偵測、merge 門檻、螢幕分類器。
+> - 純邏輯 crate：型別、兩套協定（含對話式請示）、trait、流水線狀態機、busy policy、去抖動、衝突偵測、merge 門檻、分派、請示排序、螢幕分類器。
 > - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這關才算完成。
 > - 下一步：fresh-context verifier 重跑並嘗試推翻；之後你親自驗收。
 
@@ -13,9 +13,10 @@ P1–P7 已由你在 2026-09-25 確認（記為決策 D26–D32）。實作草�
 
 ## 範圍
 
-- 型別、client 與 holder 兩套協定、trait（`Driver`、`Forge`、`Store`、`Runtime`、`Runner`、`Notifier`、`Clock`，依 P2／P3）
-- 流水線狀態機（6 種關卡、task 關係與操作、workflow 存檔檢查）
-- policy：busy、去抖動、衝突偵測、merge 門檻（patch-id）、分派（D25、D33）
+- 型別、client 與 holder 兩套協定、trait（`Driver`、`Forge`、`Store`、`Runtime`（agent runtime）、`Runner`、`Notifier`、`Clock`，依 P2／P3）
+- 流水線狀態機（6 種關卡、task 關係與操作、workflow 存檔檢查）；內建 workflow `code`、`research`、`epic`，以及 2026-09-25 加入的 `planned`（D34）
+- policy：busy、去抖動、衝突偵測、merge 門檻（patch-id）、分派（D25、D33）、請示排序 `policy::attention`（D36，2026-09-25 加入）
+- 請示（needs-you）協定型別：選項或自由文字回答、多輪 thread（D35），以及附帶的 context recap 型別（D37）；2026-09-25 加入
 - 螢幕分類器與規則資料
 - `cargo xtask accept core` 的 demo
 
@@ -66,7 +67,7 @@ P1–P7 已由你在 2026-09-25 確認（記為決策 D26–D32）。實作草�
 ### P6：保留期限
 
 - 問題：各類資料留多久？
-- 建議：task／workflow／decision 紀錄永久保留（量小）；訊息 30 天；事件與狀態轉換 14 天；封存的 WIP patch 30 天；每日 DB 快照留 7 份。第 5 關重新校準。
+- 建議：task／workflow／請示紀錄（`agend ask` 建立的 needs-you 請示）永久保留（量小）；訊息 30 天；事件與狀態轉換 14 天；封存的 WIP patch 30 天；每日 DB 快照留 7 份。第 5 施工關重新校準。
 - 理由：先給保守可用的預設值，實作 store 時用實際大小修正。
 - 替代方案：全部永久保留（v1 home 長到 161G 的教訓）；或全部同一個期限。
 - [x] 使用者確認（2026-09-25）
@@ -77,7 +78,7 @@ P1–P7 已由你在 2026-09-25 確認（記為決策 D26–D32）。實作草�
 - 建議：允許 `serde`（+ `serde_derive`），`default-features = false`，只開 `derive` + `alloc`，讓 protocol 型別在 no_std 下 derive；JSON 編碼本身放在 daemon／client。這會改動原本為空的 `CORE_DEP_ALLOWLIST`，所以需要明確核准。
 - 理由：兩邊共用同一份型別定義（D11），又不讓 core 碰 I/O。
 - 替代方案：在 daemon／client 各自手寫轉換（重複且易漂移）；或 core 保持零依賴、協定型別不 derive。
-- 實作範圍：serde derive 用在 protocol 型別，以及 workflow 定義型別（`Workflow`、`WorkflowStage`、`Stage` 與其欄位型別、`FanoutJoin`）。理由：D19 的 workflow 以 TOML 存進 DB、匯出／存回，存檔檢查（`Workflow::validate`）在 core，adapter 需要把 TOML 解成同一份型別，不另寫一份轉換。`Task`、`PipelineState`、`Candidate` 等執行期型別**不** derive：它們的持久化格式屬第 5 關 store，屆時再決定。
+- 範圍擴充（使用者 2026-09-25 核准，併入 D32）：serde derive 用在 protocol 型別，以及 workflow 定義型別（`Workflow`、`WorkflowStage`、`Stage` 與其欄位型別、`FanoutJoin`）；條件是以 golden TOML 測試鎖住存檔格式（`xtask/tests/workflow_toml.rs`，內建四個 workflow 加一個自訂）。理由：D19 的 workflow 以 TOML 存進 DB、匯出／存回，存檔檢查（`Workflow::validate`）在 core，adapter 需要把 TOML 解成同一份型別，不另寫一份轉換。`Task`、`PipelineState`、`Candidate` 等執行期型別**不** derive：它們的持久化格式屬第 5 施工關 store，屆時再決定。
 - 落實位置：`crates/agend-core/Cargo.toml`、`xtask/src/check_core.rs` 的 `CORE_DEP_ALLOWLIST`，規則寫在 AGENTS.md 與 ARCHITECTURE.md（D32）。
 - [x] 使用者確認（2026-09-25）
 
@@ -88,13 +89,13 @@ P1–P7 已由你在 2026-09-25 確認（記為決策 D26–D32）。實作草�
 
 ### Q1：返工時原作者不能接（round-1 review I8）
 
-- 已決定（2026-09-25），記為 [D33](../decisions/d26-d33.md#d33)，已實作在 `policy::assign`：一個 agent 同時只持有一個 task（到 done／取消為止，含等待 checks／review；審查指派是 reviewer 的那一個 task）；返工一定回到持有者；持有者額度用盡 → 改派同角色、另一個 backend 的空成員並交接 branch 與審查意見，否則在人數上限內開臨時 instance，否則排隊（`UsageLimit`）；持有者被刪 → 立即改派或開臨時 instance；臨時 instance 在 task 結束後才回收；等待 fanout 的父 task 照樣佔名額。
+- 已決定（2026-09-25），記為 [D33](../decisions/d26-d37.md#d33)，已實作在 `policy::assign`：一個 agent 同時只持有一個 task（到 done／取消為止，含等待 checks／review；審查指派是 reviewer 的那一個 task）；返工一定回到持有者；持有者額度用盡 → 改派同角色、另一個 backend 的空成員並交接 branch 與審查意見，否則在人數上限內開臨時 instance，否則排隊（`UsageLimit`）；持有者被刪 → 立即改派或開臨時 instance；臨時 instance 在 task 結束後才回收；等待 fanout 的父 task 照樣佔名額。
 - 草稿原本的行為（已取代）：每個 instance 可設定 task 數；原作者有額度但沒空位就排隊等原作者（`AtCapacity`）；原作者不在 team 就排隊不改派（`ReworkAuthorUnavailable`）；等待 fanout 的父 task 不佔名額。
 - [x] 使用者決定（2026-09-25）
 
 ## 自動驗收（完成定義）
 
-- [x] `~/.cargo/bin/cargo test --workspace` 通過；其中 `agend-core` 87 unit tests + 2 個狀態機探索器 tests（40,000 條事件序列、160,000 次竄改狀態）、xtask protocol compatibility 5 tests（2026-09-25）
+- [x] `~/.cargo/bin/cargo test --workspace` 通過（142 tests）；其中 `agend-core` 102 unit tests（含 195,000 次竄改狀態）、兩個狀態機探索器（44,000 + 18,000 條事件序列）、xtask protocol compatibility 7 tests、workflow TOML golden 2 tests（2026-09-25）
 - [x] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨（2026-09-25）
 - [x] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`；注入 `std::fs` 時 checker exit 1，還原後通過（2026-09-25）
 - [x] `~/.cargo/bin/cargo xtask accept core` 通過，並印出下方 demo（2026-09-25）
@@ -105,7 +106,7 @@ P1–P7 已由你在 2026-09-25 確認（記為決策 D26–D32）。實作草�
 
 每一步：照抄指令 → 對照「應該看到」→ 對了就打勾。任何一步不符就停，記在「驗收紀錄」。標「開工時細化」的地方，開工時會改成確切指令與輸出。
 
-1. 跑 acceptance。它會先執行格式、workspace clippy、core tests、protocol compatibility tests、check-deps，再跑實際 core demo。
+1. 跑 acceptance。它會先執行格式、workspace clippy、core tests（含兩個探索器）、protocol compatibility tests、workflow TOML golden tests、check-deps，再跑實際 core demo。
 
    ```bash
    ~/.cargo/bin/cargo xtask accept core
@@ -148,13 +149,14 @@ P1–P7 已由你在 2026-09-25 確認（記為決策 D26–D32）。實作草�
 
    - [ ] 通過
 
-5. 看狀態機探索器：隨機事件序列下，merge 門檻、不跳關、返工不遺失都成立。
+5. 看狀態機探索器：隨機事件序列下，merge 門檻、不跳關、返工不遺失都成立。有兩個獨立的探索器。
 
    ```bash
-   ~/.cargo/bin/cargo test -p agend-core --test pipeline_explorer -- --nocapture 2>&1 | grep -E "explorer|tampered|test result"
+   ~/.cargo/bin/cargo test -p agend-core --test pipeline_explorer -- --nocapture 2>&1 | grep -E "^explorer|test result"
+   ~/.cargo/bin/cargo test -p agend-core --test pipeline_explorer_splitmix -- --nocapture 2>&1 | grep -E "merged|test result"
    ```
 
-   應該看到：`Running tests/pipeline_explorer.rs` 之後有 10 行 `explorer <workflow>: 4000 sequences, …`（兩個測試平行跑，行的順序可能和 `tampered…` 交錯），每行的 `done` 大於 0，有 merge 的 workflow（`code`、`human-gate`、`review-between-checks`、`unreviewed`、`checks-before-submit`、`pr-placeholders`）`merged` 大於 0；`explorer total: 40000 sequences`、`tampered-state attempts: 160000`；最後 `test result: ok. 2 passed`。檢查的不變量列在 [crates/agend-core/TESTING.md](../../crates/agend-core/TESTING.md#狀態機探索器)。
+   應該看到：第一個指令有 11 行 `explorer <workflow>: 4000 sequences, …`，每行的 `done` 大於 0，有 merge 的 workflow（`code`、`planned`、`human-gate`、`review-between-checks`、`unreviewed`、`checks-before-submit`、`pr-placeholders`）`merged` 大於 0，接著 `explorer total: 44000 sequences` 與 `test result: ok. 1 passed`。第二個指令有 6 行 `<workflow>: merged N reworks M`（N、M 都大於 0）與 `test result: ok. 1 passed`。檢查的不變量列在 [crates/agend-core/TESTING.md](../../crates/agend-core/TESTING.md#狀態機探索器)。
 
    - [ ] 通過
 
@@ -212,7 +214,9 @@ task T-1 workflow=code v1
 日期 + 一行 + commit／PR，新的在上面。
 
 - 2026-09-25 修正第 2 輪 review 仍未解的項目（047101c、ac556c8、28b2b25）：N1／N2 head 變更在 work／submit 不改關卡、N3 `ChangesRequested` 退回最近的 work、N4 `merge_gate::evaluate` 逐關 fact、N5 狀態機探索器、N6 reviewer 同 backend fallback、N7 引號佔位符存檔擋下、N8 `RunCommand` 帶展開後指令與 change id、N9 `Cancel` 與 `Cancelled`；round-1 返工目標一致、`InvalidCommand` 訊息、移除 `ClientProtocolError`。N10：草稿另改了第 4 關的 `crates/agend-holder/src/pty.rs`（`control_key_bytes` 回傳 `Option`，隨 `ControlKey` 擴充）。review probe 情境都寫成 `review_*` 回歸測試。
-- 2026-09-25 使用者決定 Q1（記為 D33）：一個 agent 一個 task、返工回持有者、額度用盡或被刪才交接；`policy::assign` 照此改寫並補測試。
+- 2026-09-25 使用者決定 D34–D37（`planned` workflow、對話式請示、請示排序、context recap）並核准 P7 範圍擴充到 workflow 定義型別（條件：golden TOML 測試）；實作與測試（0194608、f202aa8）。
+- 2026-09-25 fresh-context verifier 推翻（REFUTED）幾個窄點，已修（7cc8f1e、fd37c37）：merge 必須是最後一個關卡；command 與綁 head 的 approval 必須在最後一個產出 branch 的 work 之後；`on_fail` 只能指向 work，command／approval 前面必須有 work；探索器 oracle 在返工時忘掉紀錄，並加入 verifier 的 SplitMix64 探索器；`PipelineState` 欄位私有、只能由驗證過的 workflow 建立；merge 送出後不能取消；D33 的 task 持有者要仍持有此 task、backend 仍允許、角色仍存在；程式裡 `holder` 改名 `task_holder`。verifier 情境寫成 `verifier_*` 回歸測試。
+- 2026-09-25 使用者決定 Q1（記為 D33）：一個 agent 一個 task、返工回 task 持有者、額度用盡或被刪才交接；`policy::assign` 照此改寫並補測試（c894ed0）。
 - 2026-09-25 使用者確認 P1–P7（記為 D26–D32）；Q1（返工 fallback）當時仍待決定。
 - 2026-09-25 草稿原樣匯入 `feat/gate-01-core`（f540247），接手修正 review 第 2 輪仍未解的項目；草稿作者 2026-09-24 未經確認就打的 P1–P7 勾選先還原（432a842）。
 - 2026-09-25 （草稿作者）修正兩份 review 的 pipeline、assignment、protocol 與 check-deps findings；workspace tests 通過（66 core tests、5 protocol compatibility tests）、workspace clippy、check-deps、accept core 通過；人工注入 std 的 check-deps 失敗路徑亦通過（工作樹，尚未提交；待 fresh-context verifier 與使用者親自驗收）。

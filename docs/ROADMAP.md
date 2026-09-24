@@ -60,7 +60,7 @@
 
 需要改 agend-core 時：先改 core，重過第 1 關的測試。crate 之間不得有私下耦合。
 
-第 1 關的 demo 由 `agend-core` example 呼叫 protocol、policy、assignment 與 pipeline API。第 2 輪 review 修正後，workspace tests（87 core unit tests、2 個狀態機探索器 tests、5 protocol compatibility tests）、clippy、check-deps 與 acceptance 已通過；仍待 fresh-context verifier 與使用者手動驗收。
+第 1 施工關的 demo 由 `agend-core` example 呼叫 protocol、policy、assignment 與 pipeline API。verifier 回饋修正後，workspace tests（142 個，含 102 core unit tests、兩個狀態機探索器、7 protocol compatibility tests、2 workflow TOML golden tests）、clippy、check-deps 與 acceptance 已通過；仍待 fresh-context verifier 重跑與使用者手動驗收。
 
 ## 第 0 階段（spike）
 
@@ -77,7 +77,9 @@ cat docs/gates/gate-01-core.md
 
 每完成一件事加一行（日期 + 一行 + commit／PR），新的在上面。
 
-- 2026-09-25 使用者決定第 1 關 Q1，記為 D33（一個 agent 一個 task、返工回持有者）；`policy::assign` 照此改寫。
+- 2026-09-25 使用者決定 D34–D37（`planned` workflow、對話式請示、請示排序、context recap），並核准 D32 擴充到 workflow 定義型別（以 golden TOML 測試鎖格式）；實作（0194608、f202aa8）。
+- 2026-09-25 第 1 施工關 fresh-context verifier 推翻幾個窄點，已修：merge 須為最後關卡、綁 head 的關卡須在最後的 branch work 之後、`on_fail` 只能指向 work、merge 送出後不可取消、`PipelineState` 不可偽造、第二個探索器（7cc8f1e、fd37c37）。
+- 2026-09-25 使用者決定第 1 施工關 Q1，記為 D33（一個 agent 一個 task、返工回 task 持有者）；`policy::assign` 照此改寫（c894ed0）。
 - 2026-09-25 第 1 關第 2 輪 review 修正：head 變更不跳關、返工不遺失、要求修改退回作者、merge 門檻逐關檢查、取消獨立狀態、佔位符存檔檢查、reviewer 同 backend fallback；新增狀態機探索器（047101c、ac556c8、28b2b25）。
 - 2026-09-25 使用者確認第 1 關提案 P1–P7，記為 D26–D32。
 - 2026-09-25 草稿原樣匯入 `feat/gate-01-core`（f540247）；草稿作者未經確認的 P1–P7 勾選先更正為未確認（432a842）。
