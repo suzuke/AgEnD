@@ -676,6 +676,11 @@ pub fn step(
                 return Err(TransitionError::WrongStage);
             }
             if state.current_head.as_deref() == Some(head.as_str()) {
+                // During an in-flight merge, the branch back at the sent head
+                // means it was reset: the pending changes no longer exist.
+                if state.merge_in_flight() {
+                    next.pending_head_changes.clear();
+                }
                 return Ok((next, actions));
             }
             let change = PendingHeadChange::CommitCreated { head, patch_id };
@@ -754,7 +759,12 @@ pub fn step(
                 .ok_or(TransitionError::InvalidStageIndex)?;
             match stage.effective_timeout_action() {
                 TimeoutAction::Notify => actions.push(PipelineAction::NotifyTimeout { stage_id }),
-                TimeoutAction::Reassign => actions.push(PipelineAction::ReassignStage { stage_id }),
+                TimeoutAction::Reassign => {
+                    // Someone else must produce the result: a new attempt, so
+                    // the old holder's result is stale, and the request again.
+                    actions.push(PipelineAction::ReassignStage { stage_id });
+                    enter_stage(&mut next, state.stage_index, &mut actions)?;
+                }
                 TimeoutAction::Cancel => {
                     let reason = format!("stage `{stage_id}` timed out");
                     cancel(&mut next, Some(stage_id), reason, &mut actions);
@@ -1041,10 +1051,32 @@ fn witness_run(
             _ => success_events(&state, &mut counter),
         };
         let before = (state.stage_index, state.attempt(), state.status);
+        let collected_before = !state.approval_reviewers.is_empty() || state.pending_pick.is_some();
+        let collecting = state.current_stage().is_some_and(|stage| {
+            matches!(stage.stage.kind(), StageKind::Approval | StageKind::Fanout)
+        });
+        let head_before = state.current_head.clone();
+        let in_flight = state.merge_in_flight();
         for event in &events {
             state = step(&state, event.clone())
                 .map_err(|error| stuck(&state, error.to_string()))?
                 .0;
+        }
+        // An in-stage invalidation (a head change in an approval or fanout
+        // stage, collected approvals cleared in place) starts a new attempt.
+        if state.status == PipelineStatus::Running
+            && state.stage_index == before.0
+            && !in_flight
+            && ((collecting && state.current_head != head_before)
+                || (collected_before
+                    && state.approval_reviewers.is_empty()
+                    && state.pending_pick.is_none()))
+            && state.attempt() <= before.1
+        {
+            return Err(stuck(
+                &state,
+                "the current stage was invalidated without a new attempt".into(),
+            ));
         }
         // Once the stage has moved on, the same results again are stale: a
         // duplicate must be rejected and change nothing.
@@ -1399,7 +1431,26 @@ fn recheck_for_new_head(
 ) -> Result<(), TransitionError> {
     match recheck_target(state, state.stage_index) {
         Some(target) => enter_stage(state, target, actions),
-        None => Ok(()),
+        None => restart_if_collected(state, actions),
+    }
+}
+
+/// The rule for in-stage invalidation: when a head change voids what the
+/// current stage has collected (partial approvals and a tentative pick, or
+/// a fanout run started for the old head), the stage starts a new attempt and
+/// asks again, so results of the old attempt are stale. Work and submit
+/// collect nothing a head change voids: the holder's work goes on.
+fn restart_if_collected(
+    state: &mut PipelineState,
+    actions: &mut Vec<PipelineAction>,
+) -> Result<(), TransitionError> {
+    let collects = state
+        .current_stage()
+        .is_some_and(|stage| matches!(stage.stage.kind(), StageKind::Approval | StageKind::Fanout));
+    if collects && !state.merge_in_flight() {
+        enter_stage(state, state.stage_index, actions)
+    } else {
+        Ok(())
     }
 }
 
@@ -2792,10 +2843,36 @@ mod tests {
         assert!(actions.contains(&PipelineAction::ReassignStage {
             stage_id: "work".into()
         }));
+        // Verifier r5 low 3: reassign is a new attempt, re-requested; the old
+        // holder's result and a replay of the timeout are stale.
+        assert_eq!(state.attempt(), 2);
+        assert!(actions.contains(&PipelineAction::AssignWork {
+            stage_id: "work".into(),
+            attempt: 2,
+            role: "dev".into(),
+        }));
+        let old_holder = PipelineEvent::WorkCompleted {
+            stage_id: "work".into(),
+            attempt: 1,
+            product: WorkProduct::Branch {
+                branch: "b".into(),
+                head: "H1".into(),
+                patch_id: "P1".into(),
+            },
+        };
+        assert_eq!(step(&state, old_holder), Err(TransitionError::StaleResult));
+        let replayed_timeout = PipelineEvent::StageTimedOut {
+            attempt: 1,
+            stage_id: "work".into(),
+        };
+        assert_eq!(
+            step(&state, replayed_timeout),
+            Err(TransitionError::StaleResult)
+        );
         let (_, actions) = apply(
             &apply(&initial(), PipelineEvent::Start).0,
             PipelineEvent::StageTimedOut {
-                attempt: state.attempt(),
+                attempt: 1,
                 stage_id: "work".into(),
             },
         );

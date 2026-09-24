@@ -654,6 +654,30 @@ fn splitmix_explorer_keeps_the_pipeline_invariants() {
                     }
                     accepted.push(e.clone());
                 }
+                // In-stage invalidation starts a new attempt.
+                if nx.status() == PipelineStatus::Running
+                    && nx.stage_index() == s.stage_index()
+                    && !s.merge_in_flight()
+                {
+                    let cleared = (!s.approval_reviewers().is_empty()
+                        && nx.approval_reviewers().is_empty())
+                        || (s.pending_pick().is_some() && nx.pending_pick().is_none());
+                    let head_moved = matches!(
+                        e,
+                        PipelineEvent::CommitCreated { .. } | PipelineEvent::MainAdvanced { .. }
+                    ) && nx.current_head() != s.current_head()
+                        && s.current_stage().is_some_and(|x| {
+                            matches!(x.stage.kind(), StageKind::Approval | StageKind::Fanout)
+                        });
+                    let reassigned = acts
+                        .iter()
+                        .any(|a| matches!(a, PipelineAction::ReassignStage { .. }));
+                    if (cleared || head_moved || reassigned) && nx.attempt() <= s.attempt() {
+                        fail(format!(
+                            "{e:?} invalidated the current stage without a new attempt"
+                        ));
+                    }
+                }
                 if s.merge_in_flight()
                     && !matches!(
                         e,

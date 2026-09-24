@@ -387,3 +387,113 @@ fn actions_carry_the_identity_results_must_echo() {
     assert_eq!(step(&state, stale), Err(TransitionError::StaleResult));
     assert!(step(&state, branch(&state, "H2")).is_ok());
 }
+
+/// r5 medium (P2): a head change that clears the partial approvals and the
+/// tentative pick of the current approval stage starts a new attempt and asks
+/// again, so a replay of the old attempt's approval cannot bring the pick
+/// back.
+#[test]
+fn verifier_r5_head_change_in_an_approval_stage_starts_a_new_attempt() {
+    let mut state = start(workflow(vec![
+        stage("work", work("dev", WorkOutput::Branch)),
+        stage(
+            "fan",
+            Stage::Fanout {
+                source: FanoutSource::Listed(vec!["c1".into(), "c2".into()]),
+                join: FanoutJoin::Pick,
+            },
+        ),
+        stage("pick", approval(2, false)),
+    ]));
+    state = ok(&state, branch(&state, "H1")).0;
+    state = ok(&state, fanout_done(&state, &["c1", "c2"])).0;
+    let first = approve(&state, "rA", Some("c1"));
+    state = ok(&state, first.clone()).0;
+    assert_eq!(state.pending_pick(), Some("c1"));
+    let (state, actions) = ok(&state, commit("H2"));
+    assert_eq!(current(&state), ("pick".into(), 2));
+    assert_eq!(state.pending_pick(), None);
+    assert!(state.approval_reviewers().is_empty());
+    assert!(actions.iter().any(|action| matches!(
+        action,
+        PipelineAction::RequestApproval { stage_id, attempt: 2, choices, .. }
+            if stage_id == "pick" && choices == &["c1".to_string(), "c2".to_string()]
+    )));
+    assert_eq!(step(&state, first), Err(TransitionError::StaleResult));
+}
+
+/// r5 P1: replaying a partial approval of the current attempt is harmless:
+/// the same reviewer is counted once and nothing else changes.
+#[test]
+fn verifier_r5_replay_of_a_current_partial_approval_changes_nothing() {
+    let mut state = start(Workflow {
+        requires: Vec::new(),
+        ..workflow(vec![
+            stage("work", work("dev", WorkOutput::Result)),
+            stage("a", approval(2, false)),
+        ])
+    });
+    let (stage_id, attempt) = current(&state);
+    state = ok(
+        &state,
+        PipelineEvent::WorkCompleted {
+            stage_id,
+            attempt,
+            product: WorkProduct::Result {
+                summary: "s".into(),
+                output: None,
+            },
+        },
+    )
+    .0;
+    let partial = approve(&state, "r1", None);
+    let (once, _) = ok(&state, partial.clone());
+    let (twice, actions) = ok(&once, partial);
+    assert_eq!(twice, once);
+    assert!(actions.is_empty());
+}
+
+/// r5 P4: a head change during a fanout run started for the old head starts
+/// a new run; the old run's completion is stale.
+#[test]
+fn verifier_r5_head_change_during_a_fanout_starts_a_new_run() {
+    let mut state = start(workflow(vec![
+        stage("w", work("dev", WorkOutput::Branch)),
+        stage(
+            "f",
+            Stage::Fanout {
+                source: FanoutSource::Listed(vec!["c1".into(), "c2".into()]),
+                join: FanoutJoin::Pick,
+            },
+        ),
+        stage("a", approval(1, true)),
+        stage("c", command()),
+        stage("m", Stage::Merge),
+    ]));
+    state = ok(&state, branch(&state, "H1")).0;
+    let old_run = fanout_done(&state, &["c1", "c2"]);
+    let (state, actions) = ok(&state, commit("H2"));
+    assert_eq!(current(&state), ("f".into(), 2));
+    assert!(actions.iter().any(|action| matches!(
+        action,
+        PipelineAction::Fanout { attempt: 2, head: Some(head), .. } if head == "H2"
+    )));
+    assert_eq!(step(&state, old_run), Err(TransitionError::StaleResult));
+}
+
+/// r5 low 2: during an in-flight merge, a commit back at the sent head means
+/// the branch was reset: the pending changes are dropped.
+#[test]
+fn verifier_r5_branch_reset_to_the_sent_head_drops_pending_changes() {
+    let mut state = start(Workflow::builtin_code());
+    state = ok(&state, branch(&state, "H1")).0;
+    state = ok(&state, submitted(&state)).0;
+    state = ok(&state, passed(&state)).0;
+    state = ok(&state, approve(&state, "r", None)).0;
+    assert!(state.merge_in_flight());
+    state = ok(&state, commit("H2")).0;
+    assert_eq!(state.pending_head_changes().len(), 1);
+    let (state, actions) = ok(&state, commit("H1"));
+    assert!(actions.is_empty());
+    assert!(state.pending_head_changes().is_empty());
+}

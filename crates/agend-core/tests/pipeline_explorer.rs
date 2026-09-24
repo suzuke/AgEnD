@@ -907,6 +907,32 @@ fn check_step(
             return Err(format!("result for another head accepted: {event:?}"));
         }
     }
+    // In-stage invalidation starts a new attempt: collected partial approvals
+    // or a tentative pick cleared in place, a head change reaching an
+    // approval or fanout stage, and a reassignment.
+    if after.status() == PipelineStatus::Running
+        && after.stage_index() == before.stage_index()
+        && !before.merge_in_flight()
+    {
+        let cleared = (!before.approval_reviewers().is_empty()
+            && after.approval_reviewers().is_empty())
+            || (before.pending_pick().is_some() && after.pending_pick().is_none());
+        let head_moved_in_collecting_stage = is_head_change(event)
+            && after.current_head() != before.current_head()
+            && before.current_stage().is_some_and(|stage| {
+                matches!(stage.stage.kind(), StageKind::Approval | StageKind::Fanout)
+            });
+        let reassigned = actions
+            .iter()
+            .any(|action| matches!(action, PipelineAction::ReassignStage { .. }));
+        if (cleared || head_moved_in_collecting_stage || reassigned)
+            && after.attempt() <= before.attempt()
+        {
+            return Err(format!(
+                "{event:?} invalidated the current stage without a new attempt"
+            ));
+        }
+    }
     // While the merge is in flight only its result or a head change counts.
     if before.merge_in_flight()
         && !matches!(
