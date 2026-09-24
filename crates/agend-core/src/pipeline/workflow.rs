@@ -13,11 +13,70 @@ use super::stage::{FanoutJoin, StageKind};
 
 pub const DEFAULT_STAGE_TIMEOUT_MS: u64 = 300_000;
 
+/// Values for command placeholders. `pr` is the change id returned by the
+/// submit stage (for example a pull request number); `None` when the forge
+/// returned none. `head` and `branch` come from the branch work product.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommandContext<'a> {
     pub pr: Option<&'a str>,
-    pub head: &'a str,
-    pub branch: &'a str,
+    pub head: Option<&'a str>,
+    pub branch: Option<&'a str>,
+}
+
+/// The placeholders a command template may use, with their names.
+const PLACEHOLDERS: [(&str, &str); 3] =
+    [("{pr}", "pr"), ("{head}", "head"), ("{branch}", "branch")];
+
+fn placeholder_at(rest: &str) -> Option<(&'static str, &'static str)> {
+    PLACEHOLDERS
+        .into_iter()
+        .find(|(placeholder, _)| rest.starts_with(placeholder))
+}
+
+/// Names of the placeholders a command template uses, in first-use order.
+/// `Err(name)` when a placeholder is written inside shell quotes or after a
+/// backslash: expansion already emits each value as a single-quoted word, so
+/// a quoted placeholder would put literal quote characters into the value.
+pub fn command_placeholders(template: &str) -> Result<Vec<&'static str>, &'static str> {
+    #[derive(PartialEq)]
+    enum Quote {
+        None,
+        Single,
+        Double,
+    }
+    let mut quote = Quote::None;
+    let mut used = Vec::new();
+    let mut offset = 0;
+    while offset < template.len() {
+        let rest = &template[offset..];
+        if let Some((placeholder, name)) = placeholder_at(rest) {
+            if quote != Quote::None {
+                return Err(name);
+            }
+            if !used.contains(&name) {
+                used.push(name);
+            }
+            offset += placeholder.len();
+            continue;
+        }
+        let character = rest.chars().next().expect("offset is on a char boundary");
+        offset += character.len_utf8();
+        match (&quote, character) {
+            (Quote::Single, '\'') | (Quote::Double, '"') => quote = Quote::None,
+            (Quote::None, '\'') => quote = Quote::Single,
+            (Quote::None, '"') => quote = Quote::Double,
+            (Quote::None | Quote::Double, '\\') => {
+                if let Some((_, name)) = placeholder_at(&template[offset..]) {
+                    return Err(name);
+                }
+                if let Some(escaped) = template[offset..].chars().next() {
+                    offset += escaped.len_utf8();
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(used)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,8 +95,9 @@ impl fmt::Display for CommandTemplateError {
 impl core::error::Error for CommandTemplateError {}
 
 /// Expand placeholders as single-quoted POSIX shell words. Workflow authors
-/// must leave placeholders unquoted. Other braces stay untouched so shell
-/// syntax such as `awk '{print $1}'` remains valid.
+/// must leave placeholders unquoted; [`Workflow::validate`] rejects quoted ones
+/// (see [`command_placeholders`]). Other braces stay untouched so shell syntax
+/// such as `awk '{print $1}'` remains valid.
 pub fn expand_command_placeholders(
     template: &str,
     context: CommandContext<'_>,
@@ -46,14 +106,12 @@ pub fn expand_command_placeholders(
     let mut offset = 0;
     while offset < template.len() {
         let rest = &template[offset..];
-        let placeholder = [
-            ("{pr}", "pr", context.pr),
-            ("{head}", "head", Some(context.head)),
-            ("{branch}", "branch", Some(context.branch)),
-        ]
-        .into_iter()
-        .find(|(placeholder, _, _)| rest.starts_with(placeholder));
-        if let Some((placeholder, name, value)) = placeholder {
+        if let Some((placeholder, name)) = placeholder_at(rest) {
+            let value = match name {
+                "pr" => context.pr,
+                "head" => context.head,
+                _ => context.branch,
+            };
             let value = value.ok_or(CommandTemplateError::MissingValue(name))?;
             expanded.push('\'');
             for character in value.chars() {
@@ -262,6 +320,38 @@ impl Workflow {
                         stage_id: stage.id.clone(),
                     });
                 }
+                Stage::Command { command } => match command_placeholders(command) {
+                    Err(placeholder) => errors.push(WorkflowError::QuotedPlaceholder {
+                        stage_id: stage.id.clone(),
+                        placeholder: placeholder.into(),
+                    }),
+                    Ok(used) => {
+                        let earlier = &self.stages[..index];
+                        for placeholder in used {
+                            let has_source = if placeholder == "pr" {
+                                earlier
+                                    .iter()
+                                    .any(|stage| stage.stage.kind() == StageKind::Submit)
+                            } else {
+                                earlier.iter().any(|stage| {
+                                    matches!(
+                                        stage.stage,
+                                        Stage::Work {
+                                            output: WorkOutput::Branch,
+                                            ..
+                                        }
+                                    )
+                                })
+                            };
+                            if !has_source {
+                                errors.push(WorkflowError::PlaceholderWithoutSource {
+                                    stage_id: stage.id.clone(),
+                                    placeholder: placeholder.into(),
+                                });
+                            }
+                        }
+                    }
+                },
                 _ => {}
             }
         }
@@ -306,6 +396,22 @@ impl Workflow {
                 errors.push(WorkflowError::MergeWithoutCommand {
                     stage_id: merge.id.clone(),
                 });
+            }
+            // A work stage produces a new head; a command before it could never
+            // cover the head that reaches this merge, so the gate would stay shut.
+            if let Some(last_work) = self.stages[..merge_index]
+                .iter()
+                .rposition(|stage| stage.stage.kind() == StageKind::Work)
+            {
+                for command in self.stages[..last_work]
+                    .iter()
+                    .filter(|stage| stage.stage.kind() == StageKind::Command)
+                {
+                    errors.push(WorkflowError::CommandBeforeWork {
+                        stage_id: command.id.clone(),
+                        work_stage_id: self.stages[last_work].id.clone(),
+                    });
+                }
             }
             let has_bound_approval = self.stages[..merge_index].iter().any(|stage| {
                 matches!(
@@ -479,18 +585,52 @@ impl Workflow {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkflowError {
     DuplicateStageId(String),
-    ZeroTimeout { stage_id: String },
-    InvalidFailureTarget { stage_id: String, target: String },
-    UnknownRole { stage_id: String, role: String },
-    ZeroApprovalCount { stage_id: String },
-    InvalidCommand { stage_id: String },
+    ZeroTimeout {
+        stage_id: String,
+    },
+    InvalidFailureTarget {
+        stage_id: String,
+        target: String,
+    },
+    UnknownRole {
+        stage_id: String,
+        role: String,
+    },
+    ZeroApprovalCount {
+        stage_id: String,
+    },
+    InvalidCommand {
+        stage_id: String,
+    },
+    QuotedPlaceholder {
+        stage_id: String,
+        placeholder: String,
+    },
+    PlaceholderWithoutSource {
+        stage_id: String,
+        placeholder: String,
+    },
+    CommandBeforeWork {
+        stage_id: String,
+        work_stage_id: String,
+    },
     SubmitWithoutBranchWork,
     RepoRequired,
-    MergeWithoutBoundApproval { stage_id: String },
-    MergeWithoutCommand { stage_id: String },
-    FanoutWithoutPlan { stage_id: String },
-    InvalidFanoutSource { stage_id: String },
-    PickWithoutApproval { stage_id: String },
+    MergeWithoutBoundApproval {
+        stage_id: String,
+    },
+    MergeWithoutCommand {
+        stage_id: String,
+    },
+    FanoutWithoutPlan {
+        stage_id: String,
+    },
+    InvalidFanoutSource {
+        stage_id: String,
+    },
+    PickWithoutApproval {
+        stage_id: String,
+    },
 }
 
 impl fmt::Display for WorkflowError {
@@ -514,8 +654,29 @@ impl fmt::Display for WorkflowError {
                 )
             }
             Self::InvalidCommand { stage_id } => {
-                write!(f, "stage `{stage_id}` command and timeout must be valid")
+                write!(f, "stage `{stage_id}` command must not be empty")
             }
+            Self::QuotedPlaceholder {
+                stage_id,
+                placeholder,
+            } => write!(
+                f,
+                "stage `{stage_id}` writes `{{{placeholder}}}` inside quotes or after a backslash; leave placeholders unquoted, expansion quotes the value"
+            ),
+            Self::PlaceholderWithoutSource {
+                stage_id,
+                placeholder,
+            } => write!(
+                f,
+                "stage `{stage_id}` uses `{{{placeholder}}}` but no earlier stage provides it (`pr` needs a submit stage; `head` and `branch` need a work stage with branch output)"
+            ),
+            Self::CommandBeforeWork {
+                stage_id,
+                work_stage_id,
+            } => write!(
+                f,
+                "command stage `{stage_id}` runs before work stage `{work_stage_id}`, so it can never pass for the head that reaches merge; move it after that work stage"
+            ),
             Self::SubmitWithoutBranchWork => {
                 f.write_str("submit requires an earlier work stage that produces a branch")
             }
@@ -618,8 +779,8 @@ mod tests {
                 command,
                 CommandContext {
                     pr: Some("42"),
-                    head: "abc123",
-                    branch: "agend/T-1/demo",
+                    head: Some("abc123"),
+                    branch: Some("agend/T-1/demo"),
                 }
             ),
             Ok("gh pr checks '42' --head 'abc123' --branch 'agend/T-1/demo'".into())
@@ -629,8 +790,8 @@ mod tests {
                 "awk '{print $1}' {head}",
                 CommandContext {
                     pr: None,
-                    head: "abc123",
-                    branch: "main",
+                    head: Some("abc123"),
+                    branch: Some("main"),
                 }
             ),
             Ok("awk '{print $1}' 'abc123'".into())
@@ -644,8 +805,8 @@ mod tests {
                 "gh pr checks {pr}",
                 CommandContext {
                     pr: None,
-                    head: "abc123",
-                    branch: "main",
+                    head: Some("abc123"),
+                    branch: Some("main"),
                 }
             ),
             Err(CommandTemplateError::MissingValue("pr"))
@@ -659,8 +820,8 @@ mod tests {
                 "echo {pr}",
                 CommandContext {
                     pr: Some("{head}"),
-                    head: "abc123",
-                    branch: "main",
+                    head: Some("abc123"),
+                    branch: Some("main"),
                 }
             ),
             Ok("echo '{head}'".into())
@@ -670,8 +831,8 @@ mod tests {
                 "echo {pr}",
                 CommandContext {
                     pr: Some("42'; touch /tmp/not-run; echo '"),
-                    head: "abc123",
-                    branch: "main",
+                    head: Some("abc123"),
+                    branch: Some("main"),
                 }
             ),
             Ok("echo '42'\\''; touch /tmp/not-run; echo '\\'''".into())
@@ -714,5 +875,110 @@ mod tests {
             error,
             WorkflowError::InvalidFanoutSource { stage_id } if stage_id == "fanout"
         )));
+    }
+
+    fn with_checks_command(command: &str) -> Workflow {
+        let mut workflow = Workflow::builtin_code();
+        workflow.stages[2].stage = Stage::Command {
+            command: command.into(),
+        };
+        workflow
+    }
+
+    /// Round-2 review N7: a quoted placeholder would expand to a value with
+    /// literal quotes (`"{head}"` -> `"'H'"`), so saving must reject it.
+    #[test]
+    fn review_n7_quoted_placeholders_are_rejected_at_save_time() {
+        for command in [
+            "git show \"{head}\"",
+            "git show '{head}'",
+            "echo \"branch={branch}\"",
+            "gh pr view \\{pr}",
+        ] {
+            let errors = with_checks_command(command).validate(&roles()).unwrap_err();
+            assert!(
+                errors
+                    .iter()
+                    .any(|error| matches!(error, WorkflowError::QuotedPlaceholder { .. })),
+                "{command}: {errors:?}"
+            );
+        }
+        for command in [
+            "gh pr checks {pr} --watch",
+            "git show {head} -- \"src\"",
+            "awk '{print $1}' {branch}",
+        ] {
+            assert_eq!(
+                with_checks_command(command).validate(&roles()),
+                Ok(()),
+                "{command}"
+            );
+        }
+        assert_eq!(
+            command_placeholders("a {head} {pr} {head}"),
+            Ok(vec!["head", "pr"])
+        );
+    }
+
+    #[test]
+    fn placeholders_need_an_earlier_stage_that_provides_them() {
+        let mut workflow = Workflow::builtin_code();
+        let checks = workflow.stages.remove(2);
+        workflow.stages.insert(1, checks);
+        workflow.stages[1].stage = Stage::Command {
+            command: "gh pr checks {pr}".into(),
+        };
+        let errors = workflow.validate(&roles()).unwrap_err();
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            WorkflowError::PlaceholderWithoutSource { placeholder, .. } if placeholder == "pr"
+        )));
+
+        let mut workflow = Workflow::builtin_research();
+        workflow.stages.insert(
+            1,
+            WorkflowStage::new(
+                "show",
+                Stage::Command {
+                    command: "git show {head}".into(),
+                },
+            ),
+        );
+        let errors = workflow.validate(&roles()).unwrap_err();
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            WorkflowError::PlaceholderWithoutSource { placeholder, .. } if placeholder == "head"
+        )));
+    }
+
+    #[test]
+    fn command_before_a_later_work_stage_cannot_gate_a_merge() {
+        let mut workflow = Workflow::builtin_code();
+        workflow.stages.insert(
+            3,
+            WorkflowStage::new(
+                "fixup",
+                Stage::Work {
+                    role: "dev".into(),
+                    instructions: String::new(),
+                    output: WorkOutput::Branch,
+                },
+            ),
+        );
+        let errors = workflow.validate(&roles()).unwrap_err();
+        assert!(errors.iter().any(|error| matches!(
+            error,
+            WorkflowError::CommandBeforeWork { stage_id, work_stage_id }
+                if stage_id == "checks" && work_stage_id == "fixup"
+        )));
+    }
+
+    #[test]
+    fn invalid_command_message_does_not_mention_timeout() {
+        let message = WorkflowError::InvalidCommand {
+            stage_id: "checks".into(),
+        }
+        .to_string();
+        assert_eq!(message, "stage `checks` command must not be empty");
     }
 }

@@ -103,12 +103,29 @@ fn main() {
 
     state = transition(&state, "start", PipelineEvent::Start);
     state = transition(&state, "work", branch("H0", "P0"));
-    state = transition(&state, "submit", PipelineEvent::Submitted);
+    state = transition(&state, "submit", submitted());
     state = transition(&state, "command failed", command_result(&state, Some(1)));
     state = transition(&state, "work retry", branch("H1", "P1"));
-    state = transition(&state, "submit", PipelineEvent::Submitted);
+    state = transition(&state, "submit", submitted());
     state = transition(&state, "command passed", command_result(&state, Some(0)));
-    state = transition(&state, "approval H1", approve(&state, &reviewer));
+    state = transition(
+        &state,
+        "changes requested",
+        request_changes(&state, &reviewer),
+    );
+    state = transition(
+        &state,
+        "rework, main advanced",
+        PipelineEvent::MainAdvanced {
+            rebased_head: "H1b".into(),
+            patch_id: "P1".into(),
+            conflict: false,
+        },
+    );
+    state = transition(&state, "rework done", branch("H1c", "P1c"));
+    state = transition(&state, "submit", submitted());
+    state = transition(&state, "command passed", command_result(&state, Some(0)));
+    state = transition(&state, "approval H1c", approve(&state, &reviewer));
 
     state = transition(
         &state,
@@ -141,7 +158,7 @@ fn main() {
         },
     );
     state = transition(&state, "work after changed patch", branch("H5", "P3"));
-    state = transition(&state, "submit", PipelineEvent::Submitted);
+    state = transition(&state, "submit", submitted());
     state = transition(&state, "command passed", command_result(&state, Some(0)));
     state = transition(&state, "approval H5", approve(&state, &reviewer));
     state = transition(
@@ -165,19 +182,37 @@ fn branch(head: &str, patch_id: &str) -> PipelineEvent {
     }
 }
 
+fn submitted() -> PipelineEvent {
+    PipelineEvent::Submitted { change_id: None }
+}
+
+fn stage_id(state: &PipelineState) -> String {
+    state.current_stage().expect("current stage").id.clone()
+}
+
 fn command_result(state: &PipelineState, exit_code: Option<i32>) -> PipelineEvent {
     PipelineEvent::CommandFinished {
-        stage_id: state.current_stage().expect("current stage").id.clone(),
-        head: state.current_head.clone().expect("branch head"),
+        stage_id: stage_id(state),
+        head: state.current_head.clone(),
         exit_code,
     }
 }
 
 fn approve(state: &PipelineState, reviewer: &str) -> PipelineEvent {
     PipelineEvent::ApprovalGranted {
+        stage_id: stage_id(state),
         reviewer: reviewer.into(),
         head: state.current_head.clone(),
         selected_child: None,
+    }
+}
+
+fn request_changes(state: &PipelineState, reviewer: &str) -> PipelineEvent {
+    PipelineEvent::ChangesRequested {
+        stage_id: stage_id(state),
+        reviewer: reviewer.into(),
+        head: state.current_head.clone(),
+        reason: "rename the flag".into(),
     }
 }
 
@@ -187,7 +222,16 @@ fn transition(state: &PipelineState, label: &str, event: PipelineEvent) -> Pipel
         .iter()
         .filter_map(action_summary)
         .collect::<Vec<_>>();
-    println!("  {label:<25} -> {}", summaries.join(", "));
+    let outcome = if summaries.is_empty() {
+        format!(
+            "stay in {} at {}",
+            stage_id(&next),
+            next.current_head.as_deref().unwrap_or("<no head>")
+        )
+    } else {
+        summaries.join(", ")
+    };
+    println!("  {label:<25} -> {outcome}");
     next
 }
 
@@ -215,7 +259,9 @@ fn action_summary(action: &PipelineAction) -> Option<String> {
             "request {stage_id} approval (head-bound={bind_head})"
         )),
         PipelineAction::Merge { head, .. } => Some(format!("merge at {head}")),
-        PipelineAction::ReturnToWork => Some("return to work".into()),
+        PipelineAction::ReturnToWork {
+            stage_id, reason, ..
+        } => Some(format!("return {stage_id} to its author ({reason})")),
         PipelineAction::TaskDone { merge_commit } => Some(format!("task done at {merge_commit:?}")),
         other => Some(format!("{other:?}")),
     }
