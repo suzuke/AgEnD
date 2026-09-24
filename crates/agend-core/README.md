@@ -32,11 +32,11 @@
 | `pipeline::stage` | 六種關卡與 fanout join |
 | `pipeline::task` | task 關係、workflow 版本 pinning 與操作 |
 | `pipeline::workflow` | typed workflow、內建 workflow、存檔檢查（D19） |
-| `pipeline::state` | 純函式 `step` 與 side-effect actions；fanout `all`／`first`／`pick` join 和選擇 |
+| `pipeline::state` | 純函式 `step` 與 side-effect actions；head 變更不讓 task 前進（work 中只記錄 head）；要求修改與 check 失敗退回最近的 work（返工回原作者）；取消；fanout `all`／`first`／`pick` join 和選擇 |
 | `policy::busy` | `BusyLevel`、`effective_level` |
 | `policy::debounce` | busy 立即生效；idle 穩定 5 秒 |
 | `policy::conflict` | 檔案重疊偵測 |
-| `policy::merge_gate` | checks、head 綁定核准與 patch-id 保留（D14） |
+| `policy::merge_gate` | merge 門檻的唯一實作（每個 command 與 approval 關卡一個 fact）與 patch-id 保留（D14） |
 | `policy::assign` | D18/D25 角色分派、role instance headcount、臨時 instance 決定與等待循環 |
 | `screen` | 以 fixture 支持的規則分類 hard gate |
 
