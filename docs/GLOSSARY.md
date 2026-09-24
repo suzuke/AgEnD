@@ -38,13 +38,14 @@
 | fanout | fanout | `Stage::Fanout`、`FanoutJoin` | 拆出子 task 再匯合的關卡；子 task 來自 work 產出或明列，匯合方式 `all`／`first`／`pick`。 | `depends_on`（task 關係，不是關卡） | [pipeline](architecture/pipeline.md#6-種關卡) |
 | work | work | `Stage::Work`、`WorkOutput` | 指派給 agent 做事的關卡；參數：角色、指示、產出（branch、result 或 plan）。 | worktree；返工（回到 work 關卡的動作） | [pipeline](architecture/pipeline.md#6-種關卡) |
 | command | command | `Stage::Command` | 跑指令、exit 0 才通過的關卡，在 head 的臨時 detached worktree 執行。 | CLI 命令（agent 命令、操作者命令） | [pipeline](architecture/pipeline.md#6-種關卡)、D4 |
+| change id／`{pr}` | change id／`{pr}` placeholder | `PipelineEvent::Submitted { change_id }`、`PipelineState::change_id`、`CommandContext::pr` | submit 關卡從 forge 拿回的變更編號（例如 PR 編號）；`command` 的 `{pr}` 佔位符展開成它（加單引號）。forge local 沒有 change id，所以用到 `{pr}` 的 command 在 local 下會讓 task 失敗。 | head（commit）；task id | D29、[pipeline](architecture/pipeline.md#6-種關卡) |
 | checks | checks | `PassedCheck`、`GateFact::Check` | `command` 關卡的結果；merge 門檻要求 checks 在目前 head 上通過。 | 舊規劃的 Checks 介面（已取消，不是 trait） | D4、[DECISIONS 來源衝突](DECISIONS.md#來源衝突與處理) |
 | approval | approval | `Stage::Approval`、`Approver`、`ApprovalRecord` | 等人或某角色的 agent 核准的關卡；參數：核准者、人數、是否綁 head（`bind_head`）。人工核准 merge = `approval(by = "human")`。 | backend 的授權提示（permission／approval 請求） | [pipeline](architecture/pipeline.md#6-種關卡)、D20 |
 | 要求修改 | changes requested | `PipelineEvent::ChangesRequested`、`AgentCommand::ReviewChanges` | approval 關卡的審查者要求修改：task 退回最近的 work 關卡（或 `on_fail` 指定的 work），原因交給 task 持有者返工，不算 task 失敗。 | `StageFailed`（關卡本身出錯）；核准 | D18、D33、[pipeline](architecture/pipeline.md#6-種關卡) |
 | submit | submit | `Stage::Submit` | 透過 forge 提交變更的關卡。 | merge | [pipeline](architecture/pipeline.md#6-種關卡)、D4 |
 | merge | merge | `Stage::Merge`、`PipelineAction::Merge` | daemon 執行 merge 的關卡；只有 daemon 會 merge，而且要先過 merge 門檻。 | `git merge`（local forge 用 merge-tree + CAS `update-ref`，不在使用者目錄 merge） | [pipeline](architecture/pipeline.md#merge-與-main-前進) |
 | merge 門檻 | merge gate | `policy::merge_gate`（`evaluate`、`MergeBlocker`） | merge 的條件：merge 前每個 `command` 關卡都在目前 head 上通過，每個 approval 關卡都有核准覆蓋目前 head（不綁 head 的只要有核准；patch-id 例外見 D14）。 | **施工關**（gate）；hard gate | [pipeline](architecture/pipeline.md#merge-與-main-前進)、D14 |
-| merge 送出中 | merge in flight | `TransitionError::MergeInFlight` | merge 關卡已發出 `Merge` action、forge 隨時可能完成；這時的取消會被拒絕，daemon 要等 merge 結果（daemon 契約）。 | 取消；merge 門檻 | [pipeline](architecture/pipeline.md#6-種關卡) |
+| merge 送出中 | merge in flight | `PipelineState::merge_in_flight`、`pending_head_changes`、`TransitionError::MergeInFlight`、`PipelineEvent::MergeFailed` | merge 關卡已發出 `Merge` action、還沒收到 forge 結果的狀態（daemon 契約）：取消被拒絕；新 commit 或 main 前進只記成待處理，task 不離開 merge；`MergeCompleted` 結束 task，`MergeFailed` 才套用待處理的變更（D14）或重跑 checks。 | 取消；merge 門檻 | [pipeline](architecture/pipeline.md#6-種關卡) |
 | head | head | `PipelineState::current_head` | `refs/heads/<branch>` 指向的 commit（不含未 commit 的變更）；核准與 checks 都綁它。 | git 的 `HEAD`（目前 checkout） | [pipeline](architecture/pipeline.md#merge-與-main-前進) |
 | patch-id | patch-id | `PipelineState::patch_id`、`merge_gate::approval_after_rebase` | branch 自身 diff 的 `git patch-id`；main 前進後乾淨 rebase 且它不變就保留核准，否則退回 work。 | head SHA（rebase 後一定會變） | D14 |
 | binding（工作／審查） | binding (work／review) | — | agent 目前唯一作用中的指派：工作 = (instance, task, branch, worktree)；審查 = detached 審查 worktree + 被審的 head。 | binding 快照（daemon 寫給 shim 的唯讀檔）；v1 的 HMAC binding | [pipeline](architecture/pipeline.md#binding)、D6 |
@@ -104,6 +105,8 @@
 | 進度紀錄 | progress log | — | 每完成一件事加一行（日期 + 一行 + commit／PR，新的在上面）；ROADMAP 與每個施工關頁面各一份。 | 驗收紀錄 | [AGENTS](../AGENTS.md#目前狀態)、[ROADMAP](ROADMAP.md#進度紀錄) |
 | 開工前提案 | pre-work proposal | — | 施工關開工前要使用者逐條確認的設計問題（例如第 1 施工關的 P1–P7）。 | 決策（確認後才會編成 D 編號） | [gates/README](gates/README.md#範本) |
 | spike | spike | — | 開工前的實測（第 0 階段）；結論在 BACKEND-BEHAVIORS，原始紀錄在 research/。 | 施工關 | [ROADMAP](ROADMAP.md#第-0-階段spike)、[research](research/README.md) |
+| 探索器 | explorer | `tests/pipeline_explorer.rs`、`tests/pipeline_explorer_splitmix.rs` | 不加依賴的 property test：固定種子產生大量事件序列跑狀態機，每一步用只看被接受事件的 oracle 檢查 merge 門檻、不跳過關卡、返工不遺失等不變量。 | 單元測試；竄改狀態測試 | [agend-core TESTING](../crates/agend-core/TESTING.md#狀態機探索器) |
+| 竄改狀態 | tampered state | `pipeline::state::tests::tampered_states_never_panic_and_never_merge_past_the_records` | 刻意改壞欄位（任意關卡位置、status、head、紀錄）的流水線狀態；只有 crate 內的測試造得出來，用來證明 `step` 不 panic、紀錄不足時不會 merge。 | 已驗證 workflow（外部只能從它建立狀態） | [agend-core TESTING](../crates/agend-core/TESTING.md#狀態機探索器) |
 | 決策 | decision (D*n*) | — | 經使用者確認的設計決定，有 D 編號；沒有新證據就不重開。 | **請示**；**Stop hook decision** | [DECISIONS](DECISIONS.md) |
 
 ## 細節：為什麼是「關卡」與「施工關」

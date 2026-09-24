@@ -87,15 +87,24 @@ P1–P7 已由你在 2026-09-25 確認（記為決策 D26–D32）。實作草�
 
 目前沒有待決定事項。
 
-### Q1：返工時原作者不能接（round-1 review I8）
+### Q1：返工時 task 持有者不能接（round-1 review I8）
 
 - 已決定（2026-09-25），記為 [D33](../decisions/d26-d37.md#d33)，已實作在 `policy::assign`：一個 agent 同時只持有一個 task（到 done／取消為止，含等待 checks／review；審查指派是 reviewer 的那一個 task）；返工一定回到持有者；持有者額度用盡 → 改派同角色、另一個 backend 的空成員並交接 branch 與審查意見，否則在人數上限內開臨時 instance，否則排隊（`UsageLimit`）；持有者被刪 → 立即改派或開臨時 instance；臨時 instance 在 task 結束後才回收；等待 fanout 的父 task 照樣佔名額。
-- 草稿原本的行為（已取代）：每個 instance 可設定 task 數；原作者有額度但沒空位就排隊等原作者（`AtCapacity`）；原作者不在 team 就排隊不改派（`ReworkAuthorUnavailable`）；等待 fanout 的父 task 不佔名額。
+- 草稿原本的行為（已取代）：每個 instance 可設定 task 數；task 持有者有額度但沒空位就排隊等它（`AtCapacity`）；task 持有者不在 team 就排隊不改派（`ReworkAuthorUnavailable`）；等待 fanout 的父 task 不佔名額。
 - [x] 使用者決定（2026-09-25）
+
+## 待你追認
+
+草稿或夜間步驟先做了、依規則要你事後確認的事項。確認前照目前的做法運作。
+
+- `crates/agend-holder/src/pty.rs`（第 4 施工關的 crate）：隨 `ControlKey` 擴充（Enter、方向鍵、1–3、Y、N 等 11 種），`control_key_bytes` 的按鍵位元組對照與回傳型別改成 `Option`（未知的鍵回 `None`，不送任何位元組）。這是第 4 施工關的設計，改動必要且無害，但按鍵位元組與 `Option` 回傳需要你追認。
+  - [ ] 使用者追認
+- 夜間步驟（2026-09-25，你睡著時）決定的兩條規則：merge、command、綁 head 的 approval 前面必須有產出 branch 的 work，且須 `requires = ["repo"]`；merge 送出後的 head 變更只記成待處理，等 forge 回報結果（`MergeFailed` 才套用）。
+  - [ ] 使用者追認
 
 ## 自動驗收（完成定義）
 
-- [x] `~/.cargo/bin/cargo test --workspace` 通過（142 tests）；其中 `agend-core` 102 unit tests（含 195,000 次竄改狀態）、兩個狀態機探索器（44,000 + 18,000 條事件序列）、xtask protocol compatibility 7 tests、workflow TOML golden 2 tests（2026-09-25）
+- [x] `~/.cargo/bin/cargo test --workspace` 通過（145 tests）；其中 `agend-core` 105 unit tests（含 210,000 次竄改狀態）、兩個狀態機探索器（44,000 + 18,000 條事件序列）、xtask protocol compatibility 7 tests、workflow TOML golden 2 tests（2026-09-25）
 - [x] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨（2026-09-25）
 - [x] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`；注入 `std::fs` 時 checker exit 1，還原後通過（2026-09-25）
 - [x] `~/.cargo/bin/cargo xtask accept core` 通過，並印出下方 demo（2026-09-25）
@@ -112,7 +121,7 @@ P1–P7 已由你在 2026-09-25 確認（記為決策 D26–D32）。實作草�
    ~/.cargo/bin/cargo xtask accept core
    ```
 
-   應該看到：demo 先列出實際 protocol hello、busy 與 debounce 結果，再以 `assign::choose` 派出作者及不同 backend 的 reviewer，並以 `pipeline::state::step` 走完：command 失敗退回作者、reviewer 要求修改退回作者、返工期間 main 前進仍留在 work（`stay in work`）、新 commit 重跑 checks 與 review、同 patch rebase 保留核准只重跑 checks、diff 改變後退回作者，最後 merge。完整輸出見下方；最後一行是 `gate 1 (core): checks passed`。
+   應該看到：demo 先列出實際 protocol hello、busy 與 debounce 結果，再以 `assign::choose` 派出 task 持有者及不同 backend 的 reviewer，並以 `pipeline::state::step` 走完：command 失敗退回 task 持有者、reviewer 要求修改退回 task 持有者、返工期間 main 前進仍留在 work（`stay in work`）、審查中的新 commit 重跑 checks、diff 改變的 rebase 退回 task 持有者、merge 送出後 main 前進只記成待處理（`stay in merge at H4, H5 pending until the merge result`）、forge 回報 merge 失敗後套用 H5（patch 相同，保留核准、只重跑 checks），最後 merge。完整輸出見下方；最後一行是 `gate 1 (core): checks passed`。
 
    - [ ] 通過
 
@@ -177,26 +186,25 @@ task T-1 workflow=code v1
   start                     -> assign role dev (work)
   work                      -> submit via local
   submit                    -> run checks (cargo test) at H0
-  command failed            -> return work to its author (command `checks` failed with exit code 1)
+  command failed            -> return work to its task holder (command `checks` failed with exit code 1)
   work retry                -> submit via local
   submit                    -> run checks (cargo test) at H1
   command passed            -> request review approval (head-bound=true)
-  changes requested         -> return work to its author (changes requested by review-1: rename the flag)
+  changes requested         -> return work to its task holder (changes requested by review-1: rename the flag)
   rework, main advanced     -> stay in work at H1b
   rework done               -> submit via local
   submit                    -> run checks (cargo test) at H1c
   command passed            -> request review approval (head-bound=true)
-  approval H1c              -> merge at H1c
   new commit                -> run checks (cargo test) at H2
   command passed            -> request review approval (head-bound=true)
-  approval H2               -> merge at H2
-  clean rebase              -> run checks (cargo test) at H3
-  checks rerun              -> merge at H3
-  changed rebase            -> return work to its author (main advanced and the rebase changed the patch)
+  changed rebase            -> return work to its task holder (main advanced and the rebase changed the patch)
   work after changed patch  -> submit via local
-  submit                    -> run checks (cargo test) at H5
+  submit                    -> run checks (cargo test) at H4
   command passed            -> request review approval (head-bound=true)
-  approval H5               -> merge at H5
+  approval H4               -> merge at H4
+  main advanced in flight   -> stay in merge at H4, H5 pending until the merge result
+  merge failed              -> run checks (cargo test) at H5
+  checks rerun              -> merge at H5
   merge completed           -> task done at Some("M1")
 ```
 
@@ -213,11 +221,13 @@ task T-1 workflow=code v1
 
 日期 + 一行 + commit／PR，新的在上面。
 
-- 2026-09-25 修正第 2 輪 review 仍未解的項目（2a6e29b、4f78b31、e867d52）：N1／N2 head 變更在 work／submit 不改關卡、N3 `ChangesRequested` 退回最近的 work、N4 `merge_gate::evaluate` 逐個關卡的 fact、N5 狀態機探索器、N6 reviewer 同 backend fallback、N7 引號佔位符存檔擋下、N8 `RunCommand` 帶展開後指令與 change id、N9 `Cancel` 與 `Cancelled`；round-1 返工目標一致、`InvalidCommand` 訊息、移除 `ClientProtocolError`。N10：草稿另改了第 4 施工關的 `crates/agend-holder/src/pty.rs`（`control_key_bytes` 回傳 `Option`，隨 `ControlKey` 擴充）。review probe 情境都寫成 `review_*` 回歸測試。
+- 2026-09-25 第 1 施工關 verifier r1 推翻（832a4dc）後修正（f458545、ebdac60）：merge、command、綁 head 的 approval 前面必須有產出 branch 的 work 且需要 repo；merge 送出後的 head 變更記成待處理、等 forge 結果（新事件 `MergeFailed`）；demo 與 transcript 改走這條路；「作者」改稱 task 持有者；pty.rs 列入「待你追認」。
+- 2026-09-25 rebase 到 v2（#104 名詞表，b04c260），文件改用「施工關」等名詞（832a4dc）。
 - 2026-09-25 使用者決定 D34–D37（`planned` workflow、對話式請示、請示排序、context recap）並核准 P7 範圍擴充到 workflow 定義型別（條件：golden TOML 測試）；實作與測試（7468ba0、d91865a）。
 - 2026-09-25 fresh-context verifier 推翻（REFUTED）幾個窄點，已修（13c0dbc、6ae6364）：merge 必須是最後一個關卡；command 與綁 head 的 approval 必須在最後一個產出 branch 的 work 之後；`on_fail` 只能指向 work，command／approval 前面必須有 work；探索器 oracle 在返工時忘掉紀錄，並加入 verifier 的 SplitMix64 探索器；`PipelineState` 欄位私有、只能由驗證過的 workflow 建立；merge 送出後不能取消；D33 的 task 持有者要仍持有此 task、backend 仍允許、角色仍存在；程式裡 `holder` 改名 `task_holder`。verifier 情境寫成 `verifier_*` 回歸測試。
 - 2026-09-25 使用者決定 Q1（記為 D33）：一個 agent 一個 task、返工回 task 持有者、額度用盡或被刪才交接；`policy::assign` 照此改寫並補測試（ba1fe59）。
 - 2026-09-25 使用者確認 P1–P7（記為 D26–D32）；Q1（返工 fallback）當時仍待決定。
+- 2026-09-25 修正第 2 輪 review 仍未解的項目（2a6e29b、4f78b31、e867d52）：N1／N2 head 變更在 work／submit 不改關卡、N3 `ChangesRequested` 退回最近的 work、N4 `merge_gate::evaluate` 逐個關卡的 fact、N5 狀態機探索器、N6 reviewer 同 backend fallback、N7 引號佔位符存檔擋下、N8 `RunCommand` 帶展開後指令與 change id、N9 `Cancel` 與 `Cancelled`；round-1 返工目標一致、`InvalidCommand` 訊息、移除 `ClientProtocolError`。N10：草稿另改了第 4 施工關的 `crates/agend-holder/src/pty.rs`（`control_key_bytes` 回傳 `Option`，隨 `ControlKey` 擴充）。review probe 情境都寫成 `review_*` 回歸測試。
 - 2026-09-25 草稿原樣匯入 `feat/gate-01-core`（80c4de9），接手修正 review 第 2 輪仍未解的項目；草稿作者 2026-09-24 未經確認就打的 P1–P7 勾選先還原（b480311）。
 - 2026-09-25 （草稿作者）修正兩份 review 的 pipeline、assignment、protocol 與 check-deps findings；workspace tests 通過（66 core tests、5 protocol compatibility tests）、workspace clippy、check-deps、accept core 通過；人工注入 std 的 check-deps 失敗路徑亦通過（工作樹，尚未提交；待 fresh-context verifier 與使用者親自驗收）。
 - 2026-09-24 初次自動驗收通過；待 fresh-context verifier 與使用者親自驗收（工作樹，尚未提交）。

@@ -25,7 +25,7 @@ cargo xtask accept core
 | `xtask/tests/workflow_toml.rs` | workflow 存檔 TOML 格式的 golden 檔（內建四個與一個自訂），鎖住 serde 形狀（D32 的條件） |
 | `pipeline::task::tests` | workflow 版本固定、reopen／supersede／關係檢查 |
 | `pipeline::workflow::tests` | 四個內建 workflow（含 D34 `planned`）、repo 要求、角色、approval；佔位符不可加引號、要有來源關卡；merge 必須最後；command 與綁 head 的 approval 必須在最後的 branch work 之後；`on_fail` 只能指向前面的 work；command／approval 前面必須有 work；只有 `validated` 過的 workflow 能建 pipeline |
-| `pipeline::state::tests` | code stage 轉換、失敗與要求修改都回最近的 work（返工回 task 持有者）、work／submit 期間 head 變更不改關卡、D14 核准保留、每個 approval 關卡都要覆蓋目前 head 才能 merge、`RunCommand` 帶展開後的指令與 change id、取消是獨立狀態、merge 送出後不能取消；竄改狀態測試（只有 crate 內能造出竄改狀態） |
+| `pipeline::state::tests` | code stage 轉換、失敗與要求修改都回最近的 work（返工回 task 持有者）、work／submit 期間 head 變更不改關卡、D14 核准保留、每個 approval 關卡都要覆蓋目前 head 才能 merge、`RunCommand` 帶展開後的指令與 change id、取消是獨立狀態、merge 送出後不能取消且 head 變更只記成待處理（`MergeFailed` 才套用）；竄改狀態測試（只有 crate 內能造出竄改狀態） |
 | `tests/pipeline_explorer.rs`、`tests/pipeline_explorer_splitmix.rs` | 兩個獨立的事件序列探索器，見下方「狀態機探索器」 |
 | `policy::assign::tests` | D33：持有 task（含審查）的 agent 不再接其他 task；全員都持有時在人數上限內開臨時 instance，否則排隊；返工回 task 持有者；task 持有者額度用盡改派另一個 backend 並交接 branch 與意見；被刪、換了 team、持有別的 task、backend 不再允許時立即改派（角色不存在則轉 ask）；臨時 instance 在 task 結束前不回收。另有 reviewer 優先跨 backend（只有同一個 backend 時仍開臨時 instance）、額度轉派、缺角色轉 ask、wait cycle |
 | `policy::busy::tests` | codex steer；claude／opencode steer 退成 interrupt；queue 不變 |
@@ -44,7 +44,7 @@ cargo xtask accept core
 | 每個 workflow 的序列 | 4,000（`AGEND_EXPLORER_SEQUENCES` 可調大） |
 | 每條序列最多步數 | 60；進入終止狀態後再送 3 個事件，必須全被拒絕 |
 | 事件組成 | 約 6 成是目前關卡的合理事件、1.5 成 head 變更、2 成過期或偽造的結果、其餘是失敗、逾時、取消 |
-| 竄改狀態測試 | 在 crate 內（`pipeline::state::tests`，外部無法偽造 state）：5 個 workflow × 3,000 個竄改狀態 × 13 個事件 = 195,000 次 |
+| 竄改狀態測試 | 在 crate 內（`pipeline::state::tests`，外部無法偽造 state）：5 個 workflow × 3,000 個竄改狀態 × 14 個事件 = 210,000 次 |
 | 第二個探索器 | `tests/pipeline_explorer_splitmix.rs`：fresh-context verifier 寫的 SplitMix64 探索器，6 個 workflow × 3,000 條序列 × 最多 80 步（`AGEND_EXPLORER2_SEQUENCES` 可調大）；它的 oracle 只算「前一個 work 最近一次完成之後」的 check 與核准 |
 
 每一步之後，用**只看被接受的事件與 `ReturnToWork`** 建立的 oracle（不讀 state 自己的紀錄；返工時忘掉退回的 work 之後所有關卡的 check 與核准，只有 D14 能延續核准）檢查：

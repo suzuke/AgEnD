@@ -19,7 +19,8 @@
 | `fanout` | 拆子 task 再匯合 | 子 task 來源；匯合 `all`／`first`／`pick` |
 
 - 所有關卡共用 `timeout` 與逾時動作（通知、改派、取消）。
-- 失敗與要求修改：`command` 失敗、`approval` 被要求修改（`review changes`）時，預設退回最近的 `work`，交回原作者返工；`on_fail` 可指定其他更前面的 `work`；其他關卡失敗且沒有 `on_fail` 時 task 失敗。取消（人下指令或逾時動作「取消」）是獨立的終止狀態，不算失敗；但 merge 關卡送出 merge 之後不能取消（forge 隨時可能完成），daemon 要等 merge 結果。
+- 失敗與要求修改：`command` 失敗、`approval` 被要求修改（`review changes`）時，預設退回最近的 `work`，交回 task 持有者返工；`on_fail` 可指定其他更前面的 `work`；其他關卡失敗且沒有 `on_fail` 時 task 失敗。取消（人下指令或逾時動作「取消」）是獨立的終止狀態，不算失敗；但 merge 關卡送出 merge 之後不能取消（forge 隨時可能完成），daemon 要等 merge 結果。
+- merge 送出中（daemon 契約）：`Merge` action 發出後，task 留在 merge 關卡直到 forge 回報結果。這段期間的新 commit 或 main 前進只記成待處理，不讓 task 離開 merge。forge 回報 `MergeCompleted`（送出的那個 head）→ task done，待處理的變更丟棄；回報 `MergeFailed` → 依序套用待處理的變更（照 D14：patch 相同保留核准只重跑 checks，改變則退回 work），沒有待處理的就對目前 head 重跑 checks 再送 merge。
 - head 變更（新 commit、main 前進後 rebase）不會讓 task 往前：`work` 中只記錄新 head，返工不會被丟掉；`submit` 中記錄後仍要等提交完成；更後面的關卡退回最後一個產出 branch 的 `work` 之後第一個 `command` 或綁 head 的 `approval` 重跑（D14 的保留規則照舊）。
 - merge 門檻：merge 前**每個** `command` 都對目前 head 通過，**每個** `approval` 都覆蓋目前 head（不綁 head 的只要有核准）。
 - `{pr}` 是 submit 回傳的 change id（如 PR 編號）；forge local 沒有，所以用到 `{pr}` 的 command 在 local forge 下會讓 task 失敗。佔位符不可加引號，展開時已逐一加單引號。
@@ -48,11 +49,12 @@
 
 - [ ] 關卡 id 唯一、kind 合法
 - [ ] submit 前有產出 branch 的 work
-- [ ] 有 submit／merge 就必須 `requires = ["repo"]`
+- [ ] 有 submit、merge、`command` 或綁 head 的 `approval` 就必須 `requires = ["repo"]`
 - [ ] merge 前至少有一個 `command` check
 - [ ] 有 merge 就必須是最後一個關卡
 - [ ] 每個 `command` 與綁 head 的 `approval` 都在最後一個產出 branch 的 `work` 之後（否則永遠通不過 merge 門檻）
 - [ ] 每個 `command` 與 `approval` 前面都有 `work`（失敗或要求修改時要有 task 持有者可退回）
+- [ ] 每個 `merge`、`command` 與綁 head 的 `approval` 前面都有產出 branch 的 `work`（否則永遠沒有 head，task 走不完）
 - [ ] `command` 的佔位符沒有加引號，且有來源：`{pr}` 前面要有 submit，`{head}`／`{branch}` 前面要有產出 branch 的 work
 - [ ] merge 前有 `bind_head` 的 approval，否則須明寫 `allow_unreviewed = true`
 - [ ] `on_fail` 只能指向前面的 `work` 關卡（原因要交給 task 持有者，D33）
@@ -71,7 +73,7 @@
 - 角色範本：允許的 backend、模型等級、指示、人數上限（min／max）、session 策略。
 - 一個 agent 同時只持有一個 task，從派工持有到 done 或取消，包括等 checks／review 的期間；審查指派是 reviewer 的那一個 task（D33）。
 - 分派輸入分開帶角色目前／最小／最大 instance 數、可用 backend 額度與每個 instance 持有的 task；沒有空的成員、角色人數未達上限且有可用額度時回傳 `SpawnEphemeral`，否則排隊。
-- 審查排除作者並優先不同 backend（只允許同一個 backend 時仍用它）；退回修改一定回到持有者（作者）。
+- 審查排除 task 持有者並優先不同 backend（只允許同一個 backend 時仍用它）；退回修改一定回到 task 持有者。
 - 持有者額度用盡 → 改派同角色、另一個 backend 的空成員（交接 branch 與審查意見），或開臨時 instance，否則排隊；持有者被刪除 → 立即改派或開臨時 instance。臨時 instance 在它的 task 結束後才回收。
 - 等待 fanout 的父 task 照樣佔名額；偵測 team 內互等並通知使用者；需要不存在的角色時轉成 ask。
 

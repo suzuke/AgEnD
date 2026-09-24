@@ -45,7 +45,7 @@
 ## 依賴規則
 
 - `#![no_std]` + `alloc`；唯一依賴 `serde`，`default-features = false`，只開 `derive` + `alloc`（D32）
-- `serde` 只 derive protocol 與 workflow 定義型別（workflow 以 TOML 存 DB，D19）；`Task`、`PipelineState` 等執行期型別不 derive；不使用 `serde_json`、transport、clock 或 runtime
+- `serde` 只 derive protocol 與 workflow 定義型別（workflow 以 TOML 存 DB，D19）；`Task`、`PipelineState` 等執行期型別不 derive；不使用 `serde_json`、transport、clock、tokio runtime 或 agent runtime
 - 沒有 `[features]`、build script、unsafe；錯誤型別使用 `core::error::Error`
 - 時間只由 `Clock` 傳入；集合用 `BTreeMap`／`BTreeSet`
 
