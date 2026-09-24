@@ -8,7 +8,9 @@
 //! stale or forged results, failures, timeouts and cancellations.
 //!
 //! After every step an independent oracle — built only from the events that
-//! `step` accepted, never from the state's own records — checks:
+//! `step` accepted and the `ReturnToWork` actions it emitted, never from the
+//! state's own records — checks (rework forgets every check and approval at
+//! or after the work stage it returns to; only D14 carries approvals):
 //!
 //! 1. merge gate: `Merge` and `MergeCompleted` (and `Done` of a workflow
 //!    without merge) only when every command stage before it passed for the
@@ -24,8 +26,10 @@
 //!    instead of failing it; head changes never move a task forward;
 //! 4. approvals and results only count for the head (and stage) they were
 //!    given for;
-//! 5. terminal states accept no event;
-//! 6. `step` never panics, including on tampered states (separate test).
+//! 5. terminal states accept no event, and an in-flight merge cannot be
+//!    cancelled;
+//! 6. `step` never panics (tampered states are tested inside the crate,
+//!    `pipeline::state::tests`, the only place a state can be forged).
 //!
 //! On failure the message names the workflow, seed and full event trace.
 //! `AGEND_EXPLORER_SEQUENCES` overrides the per-workflow sequence count for
@@ -36,8 +40,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use agend_core::pipeline::stage::{FanoutJoin, StageKind};
 use agend_core::pipeline::state::{
-    ApprovalRecord, PassedCheck, PipelineAction, PipelineEvent, PipelineState, PipelineStatus,
-    WorkProduct, step,
+    PipelineAction, PipelineEvent, PipelineState, PipelineStatus, WorkProduct, step,
 };
 use agend_core::pipeline::workflow::{
     Approver, FanoutSource, Stage, TimeoutAction, WorkOutput, Workflow, WorkflowStage,
@@ -154,12 +157,13 @@ fn workflows() -> Vec<(&'static str, Workflow)> {
     );
     unreviewed.allow_unreviewed = true;
     let mut design = approval("design", Approver::Human, 1, false);
-    design.on_fail = Some("checks".into());
+    design.on_fail = Some("work".into());
     let mut reviewed_twice = approval("review", reviewer(), 2, true);
     reviewed_twice.on_timeout = Some(TimeoutAction::Cancel);
     let workflows = vec![
         ("code", Workflow::builtin_code()),
         ("research", Workflow::builtin_research()),
+        ("planned", Workflow::builtin_planned()),
         ("epic", Workflow::builtin_epic()),
         ("epic-first", epic_with(FanoutJoin::First)),
         ("epic-pick", epic_with(FanoutJoin::Pick)),
@@ -264,7 +268,7 @@ impl Generator {
         if rng.chance(10) {
             return "no-such-stage".into();
         }
-        rng.pick(&state.workflow.stages).id.clone()
+        rng.pick(&state.workflow().stages).id.clone()
     }
 
     fn event(&mut self, rng: &mut Rng, state: &PipelineState, oracle: &Oracle) -> PipelineEvent {
@@ -296,19 +300,19 @@ impl Generator {
     }
 
     fn plausible(&mut self, rng: &mut Rng, state: &PipelineState) -> Option<PipelineEvent> {
-        if state.status == PipelineStatus::Pending {
+        if state.status() == PipelineStatus::Pending {
             return Some(PipelineEvent::Start);
         }
         let stage = state.current_stage()?;
         let stage_id = stage.id.clone();
-        let head = state.current_head.clone();
+        let head = state.current_head().map(String::from);
         Some(match &stage.stage {
             Stage::Work { output, .. } => PipelineEvent::WorkCompleted {
                 product: match output {
                     WorkOutput::Branch => {
-                        let (head, patch_id) = match (&state.current_head, &state.patch_id) {
+                        let (head, patch_id) = match (state.current_head(), state.patch_id()) {
                             (Some(head), Some(patch)) if rng.chance(25) => {
-                                (head.clone(), patch.clone())
+                                (head.to_string(), patch.to_string())
                             }
                             _ => (self.fresh_head(), self.fresh("P")),
                         };
@@ -349,9 +353,9 @@ impl Generator {
                         reason: "please change".into(),
                     }
                 } else {
-                    let selected_child = (!state.fanout_child_task_ids.is_empty()
+                    let selected_child = (!state.fanout_child_task_ids().is_empty()
                         && rng.chance(85))
-                    .then(|| rng.pick(&state.fanout_child_task_ids).clone());
+                    .then(|| rng.pick(state.fanout_child_task_ids()).clone());
                     PipelineEvent::ApprovalGranted {
                         stage_id,
                         reviewer,
@@ -414,7 +418,7 @@ impl Generator {
                     .current_stage()
                     .map_or_else(String::new, |stage| stage.id.clone()),
                 reviewer,
-                head: state.current_head.clone(),
+                head: state.current_head().map(String::from),
                 selected_child: Some(if rng.chance(50) { "c9" } else { "c1" }.into()),
             },
             5 => PipelineEvent::ChangesRequested {
@@ -456,8 +460,8 @@ impl Generator {
             },
             10 => PipelineEvent::StageTimedOut { stage_id },
             _ => PipelineEvent::MainAdvanced {
-                rebased_head: state.current_head.clone().unwrap_or_default(),
-                patch_id: state.patch_id.clone().unwrap_or_default(),
+                rebased_head: state.current_head().map(String::from).unwrap_or_default(),
+                patch_id: state.patch_id().map(String::from).unwrap_or_default(),
                 conflict: false,
             },
         }
@@ -543,6 +547,19 @@ impl Oracle {
         }
     }
 
+    /// Rework invalidates every check and approval at or after the work stage
+    /// it returns to (only D14 carries approvals across a head change).
+    fn forget_from(&mut self, workflow: &Workflow, work_stage_id: &str) {
+        let position = |id: &str| workflow.stages.iter().position(|stage| stage.id == id);
+        let Some(target) = position(work_stage_id) else {
+            return;
+        };
+        self.passed
+            .retain(|(stage_id, _)| position(stage_id).is_some_and(|index| index < target));
+        self.approvals
+            .retain(|(stage_id, _, _)| position(stage_id).is_some_and(|index| index < target));
+    }
+
     /// Why the gate over `stages[..upto]` is shut for `head`, if it is.
     fn gate_blocker(&self, workflow: &Workflow, upto: usize, head: Option<&str>) -> Option<String> {
         for stage in &workflow.stages[..upto] {
@@ -590,7 +607,7 @@ impl Oracle {
 }
 
 fn bound(state: &PipelineState, stage_id: &str) -> bool {
-    state.workflow.stages.iter().any(|stage| {
+    state.workflow().stages.iter().any(|stage| {
         stage.id == stage_id
             && matches!(
                 stage.stage,
@@ -646,19 +663,20 @@ fn check_step(
     actions: &[PipelineAction],
     oracle: &Oracle,
 ) -> Result<(), String> {
-    let workflow = &after.workflow;
-    let (from, to) = (before.stage_index, after.stage_index);
+    let workflow = &after.workflow();
+    let (from, to) = (before.stage_index(), after.stage_index());
     let from_kind = kind_at(workflow, from);
 
     // 5. Terminal states are terminal.
-    if before.status.is_terminal() {
-        return Err(format!("{:?} pipeline accepted an event", before.status));
+    if before.status().is_terminal() {
+        return Err(format!("{:?} pipeline accepted an event", before.status()));
     }
     // Head tracking matches the accepted events.
-    if after.current_head != oracle.head {
+    if after.current_head() != oracle.head.as_deref() {
         return Err(format!(
             "state head {:?} differs from observed head {:?}",
-            after.current_head, oracle.head
+            after.current_head(),
+            oracle.head
         ));
     }
 
@@ -666,7 +684,7 @@ fn check_step(
     match event {
         PipelineEvent::CommandFinished { stage_id, head, .. }
             if before.current_stage().map(|s| &s.id) != Some(stage_id)
-                || *head != before.current_head =>
+                || head.as_deref() != before.current_head() =>
         {
             return Err("command result for another stage or head was accepted".into());
         }
@@ -676,24 +694,29 @@ fn check_step(
                 return Err("review for another stage was accepted".into());
             }
             if bound(before, stage_id)
-                && (*head != before.current_head || before.current_head.is_none())
+                && (head.as_deref() != before.current_head() || before.current_head().is_none())
             {
                 return Err("head-bound review for another head was accepted".into());
             }
         }
         PipelineEvent::MergeCompleted { head, .. }
-            if before.current_head.as_deref() != Some(head.as_str()) =>
+            if before.current_head() != Some(head.as_str()) =>
         {
             return Err("merge of a head other than the current one was accepted".into());
         }
         _ => {}
     }
 
+    // An in-flight merge cannot be cancelled.
+    if matches!(event, PipelineEvent::Cancel { .. }) && from_kind == Some(StageKind::Merge) {
+        return Err("cancel accepted while the merge was in flight".into());
+    }
+
     // 1. Merge gate, from the oracle.
     for action in actions {
         if let PipelineAction::Merge { head, .. } = action {
             let merge = merge_index(workflow).ok_or("merge action without merge stage")?;
-            if Some(head) != after.current_head.as_ref() {
+            if Some(head.as_str()) != after.current_head() {
                 return Err("merge action for a head other than the current one".into());
             }
             if let Some(blocker) = oracle.gate_blocker(workflow, merge, Some(head)) {
@@ -701,7 +724,7 @@ fn check_step(
             }
         }
     }
-    if after.status == PipelineStatus::Done {
+    if after.status() == PipelineStatus::Done {
         let upto = match merge_index(workflow) {
             Some(merge) => {
                 if !matches!(event, PipelineEvent::MergeCompleted { .. }) {
@@ -711,7 +734,7 @@ fn check_step(
             }
             None => workflow.stages.len(),
         };
-        if let Some(blocker) = oracle.gate_blocker(workflow, upto, after.current_head.as_deref()) {
+        if let Some(blocker) = oracle.gate_blocker(workflow, upto, after.current_head()) {
             return Err(format!("task done while gate shut: {blocker}"));
         }
         if merge_index(workflow).is_some() && !oracle.submitted_since_work {
@@ -725,7 +748,7 @@ fn check_step(
             return Err(format!("head change moved the task forward {from} -> {to}"));
         }
         if from_kind == Some(StageKind::Work)
-            && (to != from || !actions.is_empty() || after.status != before.status)
+            && (to != from || !actions.is_empty() || after.status() != before.status())
         {
             return Err(format!(
                 "head change during work left the work stage or acted: {actions:?}"
@@ -747,10 +770,10 @@ fn check_step(
         || workflow.stages[..from]
             .iter()
             .any(|stage| stage.stage.kind() == StageKind::Work);
-    if rework_event && has_target && (after.status != PipelineStatus::Running || to >= from) {
+    if rework_event && has_target && (after.status() != PipelineStatus::Running || to >= from) {
         return Err(format!(
             "{event:?} did not send the task back: status {:?}, stage {from} -> {to}",
-            after.status
+            after.status()
         ));
     }
     for action in actions {
@@ -775,7 +798,7 @@ fn check_step(
     }
 
     // 2. No skipped stage.
-    if after.status == PipelineStatus::Running || after.status == PipelineStatus::Done {
+    if after.status() == PipelineStatus::Running || after.status() == PipelineStatus::Done {
         if matches!(event, PipelineEvent::Start) {
             if to != 0 {
                 return Err("start did not enter the first stage".into());
@@ -788,7 +811,7 @@ fn check_step(
             for skipped in from + 1..to.min(workflow.stages.len()) {
                 let stage = &workflow.stages[skipped];
                 if stage.stage.kind() != StageKind::Approval
-                    || !oracle.approval_covered(stage, after.current_head.as_deref())
+                    || !oracle.approval_covered(stage, after.current_head())
                 {
                     return Err(format!(
                         "skipped stage {} without it being satisfied",
@@ -820,8 +843,8 @@ fn check_step(
     }
 
     // Status changes are explained by their action.
-    if after.status != before.status {
-        let explained = match after.status {
+    if after.status() != before.status() {
+        let explained = match after.status() {
             PipelineStatus::Failed => actions
                 .iter()
                 .any(|action| matches!(action, PipelineAction::TaskFailed { .. })),
@@ -842,7 +865,8 @@ fn check_step(
         if !explained {
             return Err(format!(
                 "status {:?} -> {:?} without a matching action",
-                before.status, after.status
+                before.status(),
+                after.status()
             ));
         }
     }
@@ -877,7 +901,7 @@ fn run_sequence(
     let mut rng = Rng(seed);
     let mut generator = Generator::new();
     let mut oracle = Oracle::new();
-    let mut state = PipelineState::new("T-1", workflow.clone());
+    let mut state = PipelineState::new("T-1", workflow.clone().validated(&roles()).unwrap());
     let mut trace: Vec<String> = Vec::new();
     for _ in 0..STEPS_PER_SEQUENCE {
         let event = generator.event(&mut rng, &state, &oracle);
@@ -890,9 +914,15 @@ fn run_sequence(
         };
         stats.accepted += 1;
         oracle.record(&state, &event);
+        for action in &actions {
+            if let PipelineAction::ReturnToWork { stage_id, .. } = action {
+                oracle.forget_from(workflow, stage_id);
+            }
+        }
         check_step(&state, &event, &next, &actions, &oracle)
             .map_err(|error| format!("{name} seed {seed:#x}: {error}; trace {trace:#?}"))?;
-        if is_head_change(&event) && kind_at(workflow, state.stage_index) == Some(StageKind::Work) {
+        if is_head_change(&event) && kind_at(workflow, state.stage_index()) == Some(StageKind::Work)
+        {
             stats.head_changes_in_work += 1;
         }
         stats.reworks += actions
@@ -900,23 +930,23 @@ fn run_sequence(
             .filter(|action| matches!(action, PipelineAction::ReturnToWork { .. }))
             .count();
         state = next;
-        match state.status {
+        match state.status() {
             PipelineStatus::Done => {
                 stats.done += 1;
-                stats.merged += usize::from(state.merge_commit.is_some());
+                stats.merged += usize::from(state.merge_commit().is_some());
             }
             PipelineStatus::Cancelled => stats.cancelled += 1,
             PipelineStatus::Failed => stats.failed += 1,
             _ => {}
         }
-        if state.status.is_terminal() {
+        if state.status().is_terminal() {
             // A few more events against the terminal state: all must fail.
             for _ in 0..3 {
                 let event = generator.event(&mut rng, &state, &oracle);
                 if step(&state, event.clone()).is_ok() {
                     return Err(format!(
                         "{name} seed {seed:#x}: terminal {:?} accepted {event:?}; trace {trace:#?}",
-                        state.status
+                        state.status()
                     ));
                 }
             }
@@ -963,95 +993,4 @@ fn random_event_sequences_keep_every_pipeline_invariant() {
         total += sequences;
     }
     eprintln!("explorer total: {total} sequences");
-}
-
-/// Tampered states (any stage index, status, head and records) never make
-/// `step` panic, and `MergeCompleted` is still only accepted when the
-/// records cover every command and approval stage for the current head.
-#[test]
-fn tampered_states_never_panic_and_never_merge_past_the_records() {
-    let mut rng = Rng(SEED ^ 0xdead_beef);
-    let mut attempts = 0;
-    for (_, workflow) in workflows() {
-        let mut generator = Generator::new();
-        let oracle = Oracle::new();
-        for _ in 0..2_000 {
-            let mut state = PipelineState::new("T-1", workflow.clone());
-            let len = workflow.stages.len();
-            // Bias toward sitting at merge: that is where forged records matter.
-            state.stage_index = match (rng.below(10), merge_index(&workflow)) {
-                (0..4, Some(merge)) => merge,
-                (4, _) => usize::MAX,
-                (5, _) => len + rng.below(3),
-                _ => rng.below(len),
-            };
-            state.status = *rng.pick(&[
-                PipelineStatus::Pending,
-                PipelineStatus::Running,
-                PipelineStatus::Running,
-                PipelineStatus::Running,
-                PipelineStatus::Done,
-                PipelineStatus::Failed,
-                PipelineStatus::Cancelled,
-            ]);
-            state.current_head = rng.chance(80).then(|| format!("H{}", rng.below(2)));
-            state.patch_id = rng.chance(80).then(|| format!("P{}", rng.below(2)));
-            for stage in &workflow.stages {
-                match stage.stage {
-                    Stage::Command { .. } if rng.chance(60) => {
-                        state.passed_checks.push(PassedCheck {
-                            stage_id: stage.id.clone(),
-                            head: rng.chance(90).then(|| format!("H{}", rng.below(2))),
-                        })
-                    }
-                    Stage::Approval { .. } if rng.chance(60) => {
-                        state.approvals.push(ApprovalRecord {
-                            stage_id: stage.id.clone(),
-                            head: rng.chance(80).then(|| format!("H{}", rng.below(2))),
-                            patch_id: rng.chance(80).then(|| format!("P{}", rng.below(2))),
-                            reviewers: vec!["r1".into()],
-                        })
-                    }
-                    _ => {}
-                }
-            }
-            for _ in 0..8 {
-                let mut event = generator.event(&mut rng, &state, &oracle);
-                if rng.chance(30) {
-                    event = PipelineEvent::MergeCompleted {
-                        head: state.current_head.clone().unwrap_or_default(),
-                        merge_commit: "M".into(),
-                    };
-                }
-                attempts += 1;
-                let result = catch_unwind(AssertUnwindSafe(|| step(&state, event.clone())))
-                    .unwrap_or_else(|_| panic!("step panicked on {event:?} in {state:#?}"));
-                if let (PipelineEvent::MergeCompleted { head, .. }, Ok(_)) = (&event, &result) {
-                    assert!(
-                        records_cover_merge(&state, head),
-                        "merge accepted past the records: {state:#?}"
-                    );
-                }
-            }
-        }
-    }
-    eprintln!("tampered-state attempts: {attempts}");
-}
-
-fn records_cover_merge(state: &PipelineState, head: &str) -> bool {
-    let Some(stages) = state.workflow.stages.get(..state.stage_index) else {
-        return false;
-    };
-    state.current_head.as_deref() == Some(head)
-        && stages.iter().all(|stage| match stage.stage {
-            Stage::Command { .. } => state
-                .passed_checks
-                .iter()
-                .any(|check| check.stage_id == stage.id && check.head.as_deref() == Some(head)),
-            Stage::Approval { bind_head, .. } => state.approvals.iter().any(|approval| {
-                approval.stage_id == stage.id
-                    && (!bind_head || approval.head.as_deref() == Some(head))
-            }),
-            _ => true,
-        })
 }

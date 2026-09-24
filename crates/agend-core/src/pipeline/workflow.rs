@@ -276,7 +276,11 @@ impl Workflow {
                     .iter()
                     .position(|candidate| candidate.id == *target)
                 {
-                    Some(target_index) if target_index < index => {}
+                    // Failures go back to an earlier work stage: its holder
+                    // gets the reason (D33).
+                    Some(target_index)
+                        if target_index < index
+                            && self.stages[target_index].stage.kind() == StageKind::Work => {}
                     _ => errors.push(WorkflowError::InvalidFailureTarget {
                         stage_id: stage.id.clone(),
                         target: target.clone(),
@@ -397,21 +401,10 @@ impl Workflow {
                     stage_id: merge.id.clone(),
                 });
             }
-            // A work stage produces a new head; a command before it could never
-            // cover the head that reaches this merge, so the gate would stay shut.
-            if let Some(last_work) = self.stages[..merge_index]
-                .iter()
-                .rposition(|stage| stage.stage.kind() == StageKind::Work)
-            {
-                for command in self.stages[..last_work]
-                    .iter()
-                    .filter(|stage| stage.stage.kind() == StageKind::Command)
-                {
-                    errors.push(WorkflowError::CommandBeforeWork {
-                        stage_id: command.id.clone(),
-                        work_stage_id: self.stages[last_work].id.clone(),
-                    });
-                }
+            if merge_index + 1 != self.stages.len() {
+                errors.push(WorkflowError::MergeNotLast {
+                    stage_id: merge.id.clone(),
+                });
             }
             let has_bound_approval = self.stages[..merge_index].iter().any(|stage| {
                 matches!(
@@ -470,11 +463,50 @@ impl Workflow {
             }
         }
 
+        // A branch work stage produces a new head; a check or head-bound
+        // approval before it could never cover the head that is merged.
+        if let Some(last_branch_work) = self.stages.iter().rposition(is_branch_work) {
+            for stage in self.stages[..last_branch_work].iter().filter(|stage| {
+                matches!(
+                    stage.stage,
+                    Stage::Command { .. }
+                        | Stage::Approval {
+                            bind_head: true,
+                            ..
+                        }
+                )
+            }) {
+                errors.push(WorkflowError::HeadBoundBeforeWork {
+                    stage_id: stage.id.clone(),
+                    work_stage_id: self.stages[last_branch_work].id.clone(),
+                });
+            }
+        }
+        // A failed check or requested change returns to an earlier work stage
+        // and its holder (D33), so there must be one.
+        for (index, stage) in self.stages.iter().enumerate() {
+            if matches!(stage.stage.kind(), StageKind::Command | StageKind::Approval)
+                && !self.stages[..index]
+                    .iter()
+                    .any(|earlier| earlier.stage.kind() == StageKind::Work)
+            {
+                errors.push(WorkflowError::NoEarlierWork {
+                    stage_id: stage.id.clone(),
+                });
+            }
+        }
+
         if errors.is_empty() {
             Ok(())
         } else {
             Err(errors)
         }
+    }
+
+    /// Validate and wrap: only a validated workflow can start a pipeline.
+    pub fn validated(self, team_roles: &[String]) -> Result<ValidatedWorkflow, Vec<WorkflowError>> {
+        self.validate(team_roles)?;
+        Ok(ValidatedWorkflow(self))
     }
 
     pub fn builtin_code() -> Self {
@@ -547,6 +579,67 @@ impl Workflow {
         }
     }
 
+    /// D34: a human reviews the plan (cheapest to correct); agents review
+    /// and check the implementation.
+    pub fn builtin_planned() -> Self {
+        Self {
+            id: "planned".to_string(),
+            version: 1,
+            requires: alloc::vec![WorkflowRequirement::Repo],
+            allow_unreviewed: false,
+            stages: alloc::vec![
+                WorkflowStage::new(
+                    "plan",
+                    Stage::Work {
+                        role: "planner".to_string(),
+                        instructions: String::new(),
+                        output: WorkOutput::Result,
+                    },
+                ),
+                WorkflowStage::new(
+                    "plan_review",
+                    Stage::Approval {
+                        by: Approver::Human,
+                        count: 1,
+                        bind_head: false,
+                    },
+                ),
+                WorkflowStage::new(
+                    "work",
+                    Stage::Work {
+                        role: "dev".to_string(),
+                        instructions: String::new(),
+                        output: WorkOutput::Branch,
+                    },
+                ),
+                WorkflowStage::new(
+                    "submit",
+                    Stage::Submit {
+                        forge: "local".to_string(),
+                    },
+                ),
+                WorkflowStage {
+                    id: "checks".to_string(),
+                    stage: Stage::Command {
+                        command: "cargo test".to_string(),
+                    },
+                    timeout_ms: Some(300_000),
+                    on_timeout: None,
+                    on_fail: None,
+                },
+                WorkflowStage::new(
+                    "review",
+                    Stage::Approval {
+                        by: Approver::Role("reviewer".to_string()),
+                        count: 1,
+                        bind_head: true,
+                    },
+                ),
+                WorkflowStage::new("merge", Stage::Merge),
+            ],
+        }
+    }
+
     pub fn builtin_epic() -> Self {
         Self {
             id: "epic".to_string(),
@@ -582,6 +675,31 @@ impl Workflow {
     }
 }
 
+fn is_branch_work(stage: &WorkflowStage) -> bool {
+    matches!(
+        stage.stage,
+        Stage::Work {
+            output: WorkOutput::Branch,
+            ..
+        }
+    )
+}
+
+/// A workflow that passed [`Workflow::validate`]; the only input a pipeline
+/// accepts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidatedWorkflow(Workflow);
+
+impl ValidatedWorkflow {
+    pub fn workflow(&self) -> &Workflow {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> Workflow {
+        self.0
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkflowError {
     DuplicateStageId(String),
@@ -610,9 +728,15 @@ pub enum WorkflowError {
         stage_id: String,
         placeholder: String,
     },
-    CommandBeforeWork {
+    HeadBoundBeforeWork {
         stage_id: String,
         work_stage_id: String,
+    },
+    MergeNotLast {
+        stage_id: String,
+    },
+    NoEarlierWork {
+        stage_id: String,
     },
     SubmitWithoutBranchWork,
     RepoRequired,
@@ -642,7 +766,7 @@ impl fmt::Display for WorkflowError {
             }
             Self::InvalidFailureTarget { stage_id, target } => write!(
                 f,
-                "stage `{stage_id}` on_fail must point to an earlier stage; got `{target}`"
+                "stage `{stage_id}` on_fail must point to an earlier work stage; got `{target}`"
             ),
             Self::UnknownRole { stage_id, role } => {
                 write!(f, "stage `{stage_id}` refers to unknown role `{role}`")
@@ -670,12 +794,19 @@ impl fmt::Display for WorkflowError {
                 f,
                 "stage `{stage_id}` uses `{{{placeholder}}}` but no earlier stage provides it (`pr` needs a submit stage; `head` and `branch` need a work stage with branch output)"
             ),
-            Self::CommandBeforeWork {
+            Self::HeadBoundBeforeWork {
                 stage_id,
                 work_stage_id,
             } => write!(
                 f,
-                "command stage `{stage_id}` runs before work stage `{work_stage_id}`, so it can never pass for the head that reaches merge; move it after that work stage"
+                "stage `{stage_id}` checks or approves a head before work stage `{work_stage_id}` produces the final one; move it after that work stage"
+            ),
+            Self::MergeNotLast { stage_id } => {
+                write!(f, "merge stage `{stage_id}` must be the last stage")
+            }
+            Self::NoEarlierWork { stage_id } => write!(
+                f,
+                "stage `{stage_id}` needs an earlier work stage to return to when it fails or changes are requested"
             ),
             Self::SubmitWithoutBranchWork => {
                 f.write_str("submit requires an earlier work stage that produces a branch")
@@ -951,26 +1082,148 @@ mod tests {
         )));
     }
 
+    fn branch_work(id: &str) -> WorkflowStage {
+        WorkflowStage::new(
+            id,
+            Stage::Work {
+                role: "dev".into(),
+                instructions: String::new(),
+                output: WorkOutput::Branch,
+            },
+        )
+    }
+
+    fn reviewer_approval(id: &str, bind_head: bool) -> WorkflowStage {
+        WorkflowStage::new(
+            id,
+            Stage::Approval {
+                by: Approver::Role("reviewer".into()),
+                count: 1,
+                bind_head,
+            },
+        )
+    }
+
+    fn has(errors: &[WorkflowError], check: impl Fn(&WorkflowError) -> bool) -> bool {
+        errors.iter().any(check)
+    }
+
+    /// Verifier I1: a command or head-bound approval before a later branch
+    /// work stage could never cover the merged head, so the task would stall.
     #[test]
-    fn command_before_a_later_work_stage_cannot_gate_a_merge() {
+    fn verifier_i1_head_bound_stage_before_a_later_branch_work_is_rejected() {
         let mut workflow = Workflow::builtin_code();
-        workflow.stages.insert(
-            3,
-            WorkflowStage::new(
-                "fixup",
-                Stage::Work {
-                    role: "dev".into(),
-                    instructions: String::new(),
-                    output: WorkOutput::Branch,
-                },
-            ),
-        );
+        workflow.stages.insert(3, branch_work("fixup"));
         let errors = workflow.validate(&roles()).unwrap_err();
-        assert!(errors.iter().any(|error| matches!(
+        assert!(has(&errors, |error| matches!(
             error,
-            WorkflowError::CommandBeforeWork { stage_id, work_stage_id }
+            WorkflowError::HeadBoundBeforeWork { stage_id, work_stage_id }
                 if stage_id == "checks" && work_stage_id == "fixup"
         )));
+
+        let mut workflow = Workflow::builtin_code();
+        workflow.stages.insert(1, reviewer_approval("design", true));
+        workflow.stages.insert(2, branch_work("implement"));
+        let errors = workflow.validate(&roles()).unwrap_err();
+        assert!(has(&errors, |error| matches!(
+            error,
+            WorkflowError::HeadBoundBeforeWork { stage_id, .. } if stage_id == "design"
+        )));
+
+        // An unbound approval before the branch work (plan review) is fine.
+        workflow.stages[1] = reviewer_approval("design", false);
+        assert_eq!(workflow.validate(&roles()), Ok(()));
+    }
+
+    /// Verifier B1: a stage after merge would never run.
+    #[test]
+    fn verifier_b1_merge_must_be_the_last_stage() {
+        let mut workflow = Workflow::builtin_code();
+        workflow.stages.push(WorkflowStage::new(
+            "post",
+            Stage::Command {
+                command: "run post".into(),
+            },
+        ));
+        let errors = workflow.validate(&roles()).unwrap_err();
+        assert!(has(&errors, |error| matches!(
+            error,
+            WorkflowError::MergeNotLast { stage_id } if stage_id == "merge"
+        )));
+    }
+
+    /// Verifier I2: on_fail may only target an earlier work stage, so the
+    /// reason always reaches the task holder.
+    #[test]
+    fn verifier_i2_on_fail_must_target_an_earlier_work_stage() {
+        let mut workflow = Workflow::builtin_code();
+        workflow.stages[3].on_fail = Some("submit".into());
+        let errors = workflow.validate(&roles()).unwrap_err();
+        assert!(has(&errors, |error| matches!(
+            error,
+            WorkflowError::InvalidFailureTarget { target, .. } if target == "submit"
+        )));
+        workflow.stages[3].on_fail = Some("work".into());
+        assert_eq!(workflow.validate(&roles()), Ok(()));
+    }
+
+    /// Verifier I2: a command or approval with no earlier work stage has
+    /// nobody to return to (changes requested would fail the task).
+    #[test]
+    fn verifier_i2_command_and_approval_need_an_earlier_work_stage() {
+        let workflow = Workflow {
+            id: "gate-first".into(),
+            version: 1,
+            requires: Vec::new(),
+            allow_unreviewed: false,
+            stages: vec![
+                WorkflowStage::new(
+                    "gate",
+                    Stage::Approval {
+                        by: Approver::Human,
+                        count: 1,
+                        bind_head: false,
+                    },
+                ),
+                WorkflowStage::new(
+                    "work",
+                    Stage::Work {
+                        role: "dev".into(),
+                        instructions: String::new(),
+                        output: WorkOutput::Result,
+                    },
+                ),
+            ],
+        };
+        let errors = workflow.validate(&roles()).unwrap_err();
+        assert!(has(&errors, |error| matches!(
+            error,
+            WorkflowError::NoEarlierWork { stage_id } if stage_id == "gate"
+        )));
+    }
+
+    #[test]
+    fn built_in_planned_workflow_reviews_the_plan_with_a_human_first() {
+        let workflow = Workflow::builtin_planned();
+        assert_eq!(workflow.validate(&roles()), Ok(()));
+        assert!(matches!(
+            workflow.stages[1].stage,
+            Stage::Approval {
+                by: Approver::Human,
+                bind_head: false,
+                ..
+            }
+        ));
+        assert!(matches!(
+            workflow.stages[5].stage,
+            Stage::Approval {
+                by: Approver::Role(_),
+                bind_head: true,
+                ..
+            }
+        ));
+        assert!(workflow.clone().validated(&roles()).is_ok());
+        assert!(Workflow::builtin_code().validated(&[]).is_err());
     }
 
     #[test]

@@ -91,10 +91,17 @@ fn main() {
     };
 
     let workflow = Workflow::builtin_code();
-    let mut state = PipelineState::new("T-1", workflow.clone());
+    let roles = ["dev".to_string(), "reviewer".to_string()];
+    let validated = workflow
+        .clone()
+        .validated(&roles)
+        .expect("built-in code workflow is valid");
+    let mut state = PipelineState::new("T-1", validated);
     println!(
         "task {} workflow={} v{}",
-        state.task_id, workflow.id, workflow.version
+        state.task_id(),
+        workflow.id,
+        workflow.version
     );
     println!("  assignment -> {assigned}");
     println!("  reviewer   -> {reviewer}");
@@ -167,7 +174,7 @@ fn main() {
             merge_commit: "M1".into(),
         },
     );
-    assert_eq!(state.merge_commit.as_deref(), Some("M1"));
+    assert_eq!(state.merge_commit(), Some("M1"));
 }
 
 fn branch(head: &str, patch_id: &str) -> PipelineEvent {
@@ -191,7 +198,7 @@ fn stage_id(state: &PipelineState) -> String {
 fn command_result(state: &PipelineState, exit_code: Option<i32>) -> PipelineEvent {
     PipelineEvent::CommandFinished {
         stage_id: stage_id(state),
-        head: state.current_head.clone(),
+        head: state.current_head().map(String::from),
         exit_code,
     }
 }
@@ -200,7 +207,7 @@ fn approve(state: &PipelineState, reviewer: &str) -> PipelineEvent {
     PipelineEvent::ApprovalGranted {
         stage_id: stage_id(state),
         reviewer: reviewer.into(),
-        head: state.current_head.clone(),
+        head: state.current_head().map(String::from),
         selected_child: None,
     }
 }
@@ -209,7 +216,7 @@ fn request_changes(state: &PipelineState, reviewer: &str) -> PipelineEvent {
     PipelineEvent::ChangesRequested {
         stage_id: stage_id(state),
         reviewer: reviewer.into(),
-        head: state.current_head.clone(),
+        head: state.current_head().map(String::from),
         reason: "rename the flag".into(),
     }
 }
@@ -224,7 +231,7 @@ fn transition(state: &PipelineState, label: &str, event: PipelineEvent) -> Pipel
         format!(
             "stay in {} at {}",
             stage_id(&next),
-            next.current_head.as_deref().unwrap_or("<no head>")
+            next.current_head().unwrap_or("<no head>")
         )
     } else {
         summaries.join(", ")
