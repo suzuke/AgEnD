@@ -506,13 +506,11 @@ impl Workflow {
             }
         }
 
-        // With a merge, the branch work that produces the merged head is the
-        // last work stage: a later work stage could change the head without
-        // any check running for it again.
-        if self
-            .stages
-            .iter()
-            .any(|stage| stage.stage.kind() == StageKind::Merge)
+        // When anything is bound to the head (merge, command, head-bound
+        // approval), the branch work that produces the final head is the last
+        // work stage: a later work stage could take a new head that no check
+        // or approval covers before merge or done.
+        if self.stages.iter().any(needs_head)
             && let Some(last_branch_work) = self.stages.iter().rposition(is_branch_work)
         {
             for stage in self.stages[last_branch_work + 1..]
@@ -908,7 +906,7 @@ impl fmt::Display for WorkflowError {
                 work_stage_id,
             } => write!(
                 f,
-                "work stage `{stage_id}` comes after `{work_stage_id}`, the last work stage producing a branch; in a workflow with merge that branch work must be the last work stage"
+                "work stage `{stage_id}` comes after `{work_stage_id}`, the last work stage producing a branch; when a merge, command or head-bound approval depends on the head, that branch work must be the last work stage"
             ),
             Self::NotCompletable {
                 scenario,

@@ -78,6 +78,33 @@ fn sub() -> WorkflowStage {
 fn merge() -> WorkflowStage {
     WorkflowStage::new("merge", Stage::Merge)
 }
+fn pick_is_current(state: &PipelineState) -> bool {
+    let stages = &state.workflow().stages;
+    let upto = state.stage_index().min(stages.len());
+    let Some(fanout) = stages[..upto]
+        .iter()
+        .rposition(|stage| stage.stage.kind() == StageKind::Fanout)
+    else {
+        return true;
+    };
+    if !matches!(
+        stages[fanout].stage,
+        Stage::Fanout {
+            join: FanoutJoin::Pick,
+            ..
+        }
+    ) || upto <= fanout + 1
+    {
+        return true;
+    }
+    state.selected_fanout_child().is_some_and(|winner| {
+        state
+            .fanout_child_task_ids()
+            .iter()
+            .any(|child| child == winner)
+    })
+}
+
 fn wf(stages: Vec<WorkflowStage>) -> Workflow {
     let mut x = Workflow::builtin_code();
     x.id = "t".into();
@@ -147,6 +174,28 @@ fn workflows() -> Vec<(&'static str, Workflow)> {
         ),
         ("pick-then-code", pickw),
         ("code", Workflow::builtin_code()),
+        (
+            "pick-after-checks",
+            wf(vec![
+                w("work", Branch),
+                cmd("c1"),
+                WorkflowStage::new(
+                    "fan",
+                    Stage::Fanout {
+                        source: FanoutSource::Listed(vec!["a".into(), "b".into()]),
+                        join: FanoutJoin::Pick,
+                    },
+                ),
+                appr("pick", 1, false),
+                appr("rev", 1, true),
+                merge(),
+            ]),
+        ),
+        ("checks-no-merge", {
+            let mut workflow = wf(vec![w("work", Branch), cmd("c1"), appr("a", 1, true)]);
+            workflow.id = "checks-no-merge".into();
+            workflow
+        }),
         ("planned", Workflow::builtin_planned()),
     ];
     for (n, x) in &v {
@@ -571,6 +620,13 @@ fn splitmix_explorer_keeps_the_pipeline_invariants() {
                         fail(format!("Merge action: {m}"));
                     }
                 }
+                // A pick is made among the current children of the last pick fanout.
+                let merging = acts
+                    .iter()
+                    .any(|a| matches!(a, PipelineAction::Merge { .. }));
+                if (merging || nx.status() == PipelineStatus::Done) && !pick_is_current(&nx) {
+                    fail("merge or done without a pick among the current children".into());
+                }
                 if nx.status() == PipelineStatus::Done {
                     if let Some(mi) = mi {
                         if !matches!(e, PipelineEvent::MergeCompleted { .. }) {
@@ -579,7 +635,11 @@ fn splitmix_explorer_keeps_the_pipeline_invariants() {
                         if let Err(m) = o.gate(&wfl, mi, nx.current_head()) {
                             fail(format!("MergeCompleted: {m}"));
                         }
-                        if o.submitted_at.is_none() {
+                        let has_submit = wfl
+                            .stages
+                            .iter()
+                            .any(|x| x.stage.kind() == StageKind::Submit);
+                        if has_submit && o.submitted_at.is_none() {
                             fail("merged without Submitted since last work".into());
                         }
                         merged += 1;
@@ -676,8 +736,12 @@ fn splitmix_explorer_keeps_the_pipeline_invariants() {
             }
         }
         totals += &format!("{name}: merged {merged} reworks {reworks}\n");
+        let has_merge = wfl
+            .stages
+            .iter()
+            .any(|x| x.stage.kind() == StageKind::Merge);
         assert!(
-            merged > 0 && reworks > 0,
+            reworks > 0 && (merged > 0 || !has_merge),
             "{name}: exploration never merged or reworked"
         );
     }

@@ -374,6 +374,192 @@ fn completability_witness_rejects_a_workflow_that_cannot_finish() {
     }
 }
 
+/// Verifier r3 (medium): without merge, a work stage after the last branch
+/// work could take a new head and the task would finish with checks and
+/// approvals covering an older one. Such workflows are rejected, like merge
+/// workflows.
+#[test]
+fn verifier_r3_no_work_after_the_last_branch_work_when_anything_is_head_bound() {
+    let workflow = repo_workflow(vec![
+        work("w", WorkOutput::Branch),
+        command("c"),
+        approval("a", true),
+        work("notes", WorkOutput::Result),
+    ]);
+    let errors = workflow.validate(&roles()).unwrap_err();
+    assert!(errors.iter().any(|error| matches!(
+        error,
+        WorkflowError::WorkAfterBranchWork { stage_id, .. } if stage_id == "notes"
+    )));
+    // Without head-bound stages a later work stage stays allowed.
+    let mut plain = repo_workflow(vec![
+        work("w", WorkOutput::Branch),
+        approval("a", false),
+        work("notes", WorkOutput::Result),
+    ]);
+    plain.requires.clear();
+    assert_eq!(plain.validate(&roles()), Ok(()));
+}
+
+/// Verifier r3 (medium): a pick fanout that runs again after a head change
+/// makes new children, so the pick must be made again among them; the old
+/// pick no longer counts, and the re-sent fanout carries the new head.
+#[test]
+fn verifier_r3_pick_fanout_rerun_requires_a_new_pick() {
+    let workflow = repo_workflow(vec![
+        work("w", WorkOutput::Branch),
+        command("c"),
+        pick_fanout("f"),
+        approval("pick", false),
+        WorkflowStage::new(
+            "rev",
+            Stage::Approval {
+                by: Approver::Role("reviewer".into()),
+                count: 1,
+                bind_head: true,
+            },
+        ),
+        merge(),
+    ]);
+    let mut state = PipelineState::new("T", workflow.validated(&roles()).unwrap());
+    state = ok(&state, PipelineEvent::Start).0;
+    state = ok(&state, branch("H1", "P1")).0;
+    let passing = command_result(&state, 0);
+    state = ok(&state, passing).0;
+    state = ok(
+        &state,
+        PipelineEvent::FanoutCompleted {
+            stage_id: "f".into(),
+            child_task_ids: vec!["a".into(), "b".into()],
+            selected_child: None,
+        },
+    )
+    .0;
+    state = ok(
+        &state,
+        PipelineEvent::ApprovalGranted {
+            stage_id: "pick".into(),
+            reviewer: "human".into(),
+            head: None,
+            selected_child: Some("a".into()),
+        },
+    )
+    .0;
+    state = ok(
+        &state,
+        PipelineEvent::CommitCreated {
+            head: "H2".into(),
+            patch_id: "P2".into(),
+        },
+    )
+    .0;
+    assert_eq!(state.current_stage().unwrap().id, "c");
+    let passing = command_result(&state, 0);
+    let (state, actions) = ok(&state, passing);
+    assert!(actions.iter().any(|action| matches!(
+        action,
+        PipelineAction::Fanout {
+            head: Some(head),
+            work_product: Some(WorkProduct::Branch { head: product_head, .. }),
+            ..
+        } if head == "H2" && product_head == "H2"
+    )));
+    assert!(state.fanout_child_task_ids().is_empty());
+    assert!(state.selected_fanout_child().is_none());
+    assert!(
+        state
+            .approvals()
+            .iter()
+            .all(|approval| approval.stage_id != "pick")
+    );
+    let (state, _) = ok(
+        &state,
+        PipelineEvent::FanoutCompleted {
+            stage_id: "f".into(),
+            child_task_ids: vec!["a2".into(), "b2".into()],
+            selected_child: None,
+        },
+    );
+    assert_eq!(
+        state.current_stage().unwrap().id,
+        "pick",
+        "the pick is asked again"
+    );
+    let stale_pick = PipelineEvent::ApprovalGranted {
+        stage_id: "pick".into(),
+        reviewer: "human".into(),
+        head: None,
+        selected_child: Some("a".into()),
+    };
+    assert_eq!(
+        step(&state, stale_pick),
+        Err(TransitionError::InvalidFanoutSelection)
+    );
+    let (state, _) = ok(
+        &state,
+        PipelineEvent::ApprovalGranted {
+            stage_id: "pick".into(),
+            reviewer: "human".into(),
+            head: None,
+            selected_child: Some("b2".into()),
+        },
+    );
+    let (state, _) = ok(
+        &state,
+        PipelineEvent::ApprovalGranted {
+            stage_id: "rev".into(),
+            reviewer: "r".into(),
+            head: Some("H2".into()),
+            selected_child: None,
+        },
+    );
+    let (done, _) = ok(
+        &state,
+        PipelineEvent::MergeCompleted {
+            head: "H2".into(),
+            merge_commit: "M".into(),
+        },
+    );
+    assert_eq!(done.status(), PipelineStatus::Done);
+    assert_eq!(done.selected_fanout_child(), Some("b2"));
+}
+
+/// Verifier r3 probe: the witness rejects a known-bad shape (two fanouts with
+/// head-bound approvals and a plan between them).
+#[test]
+fn verifier_r3_witness_rejects_a_known_bad_shape() {
+    let mut workflow = repo_workflow(vec![
+        work("w", WorkOutput::Branch),
+        pick_fanout("f1"),
+        approval("a1", true),
+        WorkflowStage::new(
+            "p2",
+            Stage::Work {
+                role: "planner".into(),
+                instructions: String::new(),
+                output: WorkOutput::Plan,
+            },
+        ),
+        WorkflowStage::new(
+            "f2",
+            Stage::Fanout {
+                source: FanoutSource::WorkOutput,
+                join: FanoutJoin::All,
+            },
+        ),
+        WorkflowStage::new(
+            "a3",
+            Stage::Approval {
+                by: Approver::Role("reviewer".into()),
+                count: 1,
+                bind_head: true,
+            },
+        ),
+    ]);
+    workflow.id = "bad".into();
+    assert!(workflow.validate(&roles()).is_err());
+}
+
 // ---- random workflow generator (ported from the verifier) ----
 
 struct SplitMix(u64);

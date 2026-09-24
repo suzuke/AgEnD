@@ -371,11 +371,14 @@ pub enum PipelineAction {
         stage_id: String,
         head: String,
     },
+    /// `work_product` and `head` are the current ones, also when the
+    /// fanout runs again after a head change.
     Fanout {
         stage_id: String,
         source: FanoutSource,
         join: FanoutJoin,
         work_product: Option<WorkProduct>,
+        head: Option<String>,
     },
     CancelFanoutSiblings {
         winner_task_id: String,
@@ -871,7 +874,9 @@ fn witness_run(
     };
     for _ in 0..workflow.stages.len() * 8 + 16 {
         match state.status {
-            PipelineStatus::Done => return Ok(()),
+            PipelineStatus::Done => {
+                return done_invariants(&state).map_err(|reason| stuck(&state, reason));
+            }
             PipelineStatus::Failed | PipelineStatus::Cancelled => {
                 return Err(stuck(
                     &state,
@@ -898,6 +903,56 @@ fn witness_run(
         }
     }
     Err(stuck(&state, "no progress within the bound".into()))
+}
+
+/// What must hold when a task is done, with or without merge: every command
+/// passed and every head-bound approval covers the final head, and when the
+/// last fanout is a pick, its winner is one of its current children.
+fn done_invariants(state: &PipelineState) -> Result<(), String> {
+    let head = state.current_head.as_deref();
+    for stage in &state.workflow.stages {
+        match stage.stage {
+            Stage::Command { .. }
+                if !state
+                    .passed_checks
+                    .iter()
+                    .any(|check| check.stage_id == stage.id && check.head.as_deref() == head) =>
+            {
+                return Err(format!("done but `{}` never passed on {head:?}", stage.id));
+            }
+            Stage::Approval {
+                bind_head: true, ..
+            } if !state.approvals.iter().any(|approval| {
+                approval.stage_id == stage.id && approval.head.as_deref() == head
+            }) =>
+            {
+                return Err(format!("done but `{}` does not cover {head:?}", stage.id));
+            }
+            _ => {}
+        }
+    }
+    let last_fanout = state
+        .workflow
+        .stages
+        .iter()
+        .rev()
+        .find(|stage| stage.stage.kind() == StageKind::Fanout);
+    if let Some(WorkflowStage {
+        stage: Stage::Fanout {
+            join: FanoutJoin::Pick,
+            ..
+        },
+        id,
+        ..
+    }) = last_fanout
+        && !state
+            .selected_fanout_child
+            .as_ref()
+            .is_some_and(|winner| state.fanout_child_task_ids.contains(winner))
+    {
+        return Err(format!("done without a pick among the children of `{id}`"));
+    }
+    Ok(())
 }
 
 fn witness_head(counter: &mut u32) -> (String, String) {
@@ -1138,6 +1193,15 @@ fn recheck_target(state: &PipelineState, current: usize) -> Option<usize> {
 }
 
 fn record_new_head(state: &mut PipelineState, head: String, patch_id: String) {
+    if let Some(WorkProduct::Branch {
+        head: product_head,
+        patch_id: product_patch,
+        ..
+    }) = &mut state.work_product
+    {
+        product_head.clone_from(&head);
+        product_patch.clone_from(&patch_id);
+    }
     state.current_head = Some(head);
     state.patch_id = Some(patch_id);
     invalidate_head_bound(state);
@@ -1213,9 +1277,7 @@ fn main_advanced(
                     approval.head = Some(new_approved_head.clone());
                 }
             }
-            state.current_head = Some(new_approved_head);
-            state.patch_id = Some(patch_id);
-            invalidate_head_bound(state);
+            record_new_head(state, new_approved_head, patch_id);
             recheck_for_new_head(state, actions)
         }
         ApprovalAfterRebase::ReturnToWork => {
@@ -1426,6 +1488,20 @@ fn enter_stage(
     actions: &mut Vec<PipelineAction>,
 ) -> Result<(), TransitionError> {
     loop {
+        // A fanout that runs (again) makes new children: its old children,
+        // the pick among them and every later approval no longer count.
+        if state
+            .workflow
+            .stages
+            .get(index)
+            .is_some_and(|stage| stage.stage.kind() == StageKind::Fanout)
+        {
+            clear_fanout(state);
+            let workflow = &state.workflow;
+            state.approvals.retain(|approval| {
+                stage_position(workflow, &approval.stage_id).is_some_and(|i| i < index)
+            });
+        }
         let Some(stage) = state.workflow.stages.get(index) else {
             state.stage_index = state.workflow.stages.len();
             state.status = PipelineStatus::Done;
@@ -1505,6 +1581,7 @@ fn enter_stage(
                 source: source.clone(),
                 join: *join,
                 work_product: state.work_product.clone(),
+                head: state.current_head.clone(),
             },
         };
         actions.push(PipelineAction::ScheduleTimeout {

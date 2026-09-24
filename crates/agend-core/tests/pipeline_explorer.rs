@@ -199,6 +199,37 @@ fn workflows() -> Vec<(&'static str, Workflow)> {
         ),
         ("unreviewed", unreviewed),
         (
+            "pick-then-review",
+            repo_workflow(
+                "pick-then-review",
+                vec![
+                    work_stage("work", WorkOutput::Branch),
+                    command_stage("checks", "cargo test"),
+                    WorkflowStage::new(
+                        "fan",
+                        Stage::Fanout {
+                            source: FanoutSource::Listed(vec!["a".into(), "b".into()]),
+                            join: FanoutJoin::Pick,
+                        },
+                    ),
+                    approval("pick", Approver::Human, 1, false),
+                    approval("review", reviewer(), 1, true),
+                    WorkflowStage::new("merge", Stage::Merge),
+                ],
+            ),
+        ),
+        (
+            "checks-no-merge",
+            repo_workflow(
+                "checks-no-merge",
+                vec![
+                    work_stage("work", WorkOutput::Branch),
+                    command_stage("checks", "cargo test"),
+                    approval("review", reviewer(), 1, true),
+                ],
+            ),
+        ),
+        (
             "checks-before-submit",
             repo_workflow(
                 "checks-before-submit",
@@ -655,6 +686,35 @@ fn bound(state: &PipelineState, stage_id: &str) -> bool {
     })
 }
 
+/// When the last fanout before the current stage is a pick whose approval
+/// has passed, the winner is one of its current children.
+fn pick_is_current(state: &PipelineState) -> bool {
+    let stages = &state.workflow().stages;
+    let upto = state.stage_index().min(stages.len());
+    let Some(fanout) = stages[..upto]
+        .iter()
+        .rposition(|stage| stage.stage.kind() == StageKind::Fanout)
+    else {
+        return true;
+    };
+    if !matches!(
+        stages[fanout].stage,
+        Stage::Fanout {
+            join: FanoutJoin::Pick,
+            ..
+        }
+    ) || upto <= fanout + 1
+    {
+        return true;
+    }
+    state.selected_fanout_child().is_some_and(|winner| {
+        state
+            .fanout_child_task_ids()
+            .iter()
+            .any(|child| child == winner)
+    })
+}
+
 fn kind_at(workflow: &Workflow, index: usize) -> Option<StageKind> {
     workflow.stages.get(index).map(|stage| stage.stage.kind())
 }
@@ -760,6 +820,13 @@ fn check_step(
             }
         }
     }
+    // A pick is made among the current children of the last pick fanout.
+    let merging = actions
+        .iter()
+        .any(|action| matches!(action, PipelineAction::Merge { .. }));
+    if (merging || after.status() == PipelineStatus::Done) && !pick_is_current(after) {
+        return Err("merge or done without a pick among the current fanout children".into());
+    }
     if after.status() == PipelineStatus::Done {
         let upto = match merge_index(workflow) {
             Some(merge) => {
@@ -773,7 +840,11 @@ fn check_step(
         if let Some(blocker) = oracle.gate_blocker(workflow, upto, after.current_head()) {
             return Err(format!("task done while gate shut: {blocker}"));
         }
-        if merge_index(workflow).is_some() && !oracle.submitted_since_work {
+        let has_submit = workflow
+            .stages
+            .iter()
+            .any(|stage| stage.stage.kind() == StageKind::Submit);
+        if merge_index(workflow).is_some() && has_submit && !oracle.submitted_since_work {
             return Err("task merged without Submitted".into());
         }
     }
