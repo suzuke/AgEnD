@@ -8,6 +8,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
+use super::ask::{AnswerSource, AskReply, AskThread, ContextRecap};
 use super::{Hello, ProtocolVersion, VersionMismatch, negotiate};
 
 pub const V1: ProtocolVersion = ProtocolVersion::new(1, 0);
@@ -37,6 +38,10 @@ pub enum ClientRequest {
     TerminalInput {
         data: TerminalInputData,
     },
+    /// Operator answer to a needs-you ask, from the TUI, Telegram or CLI (D35).
+    AnswerAsk {
+        data: AnswerAskData,
+    },
     #[serde(other)]
     Unknown,
 }
@@ -63,6 +68,14 @@ pub struct SubscribeEventsData {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InstanceData {
     pub instance_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnswerAskData {
+    pub request_id: String,
+    pub ask_id: String,
+    pub source: AnswerSource,
+    pub reply: AskReply,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -99,8 +112,24 @@ pub enum AgentCommand {
     Inbox {
         after_message_id: Option<String>,
     },
+    /// Open a needs-you ask; `options` are optional choices, and the
+    /// operator may always answer in free text (D35).
     Ask {
         question: String,
+        #[serde(default)]
+        options: Vec<String>,
+    },
+    /// Continue an open ask after an answer.
+    AskFollowUp {
+        ask_id: String,
+        question: String,
+        #[serde(default)]
+        options: Vec<String>,
+    },
+    /// Close an ask with what was decided.
+    AskResolve {
+        ask_id: String,
+        summary: String,
     },
     Block {
         task_id: String,
@@ -198,8 +227,16 @@ pub enum CommandResult {
     TaskCreated {
         data: TaskCreatedData,
     },
+    AskCreated {
+        data: AskCreatedData,
+    },
     #[serde(other)]
     Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AskCreatedData {
+    pub ask_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -242,6 +279,10 @@ pub enum DaemonEvent {
     InstanceChanged {
         data: InstanceChangedData,
     },
+    /// A needs-you thread gained an entry (answer, follow-up, resolution).
+    AskUpdated {
+        data: AskThread,
+    },
     #[serde(other)]
     Unknown,
 }
@@ -250,6 +291,12 @@ pub enum DaemonEvent {
 pub struct AttentionRequiredData {
     pub reason: String,
     pub task_id: Option<String>,
+    /// The ask thread when the item is a needs-you ask (D35).
+    #[serde(default)]
+    pub ask: Option<AskThread>,
+    /// Where the operator is when switching to this item (D37).
+    #[serde(default)]
+    pub recap: Option<ContextRecap>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

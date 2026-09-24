@@ -1,7 +1,9 @@
+use agend_core::protocol::ask::{AnswerSource, AskEntry, AskReply, AskThread, ContextRecap};
 use agend_core::protocol::client::{
     AgentCommand, ClientCommandData, ClientCommandResultData, ClientRequest, ClientResponse,
     CommandResult, DaemonEvent, EventData, TaskChangedData, TerminalInputData,
 };
+use agend_core::protocol::client::{AnswerAskData, AskCreatedData, AttentionRequiredData};
 use agend_core::protocol::holder::{
     ControlKey, HolderRequest, HolderResponse, OperatorTerminalInputData,
 };
@@ -159,4 +161,177 @@ fn additive_fields_and_hello_version_round_trip() {
     let encoded = serde_json::to_value(hello).unwrap();
     let decoded: Hello = serde_json::from_value(encoded).unwrap();
     assert_eq!(decoded.supported, [ProtocolVersion::new(1, 0)]);
+}
+
+/// D35: asks take optional options and free-text answers, and continue as a
+/// thread (question, answer, follow-up, resolution). D37: attention items
+/// carry a context recap. All additive in v1.
+#[test]
+fn ask_threads_answers_and_recap_have_stable_wire_shapes() {
+    let ask = AgentCommand::Ask {
+        question: "Which storage?".into(),
+        options: vec!["sqlite".into(), "files".into()],
+    };
+    assert_eq!(
+        serde_json::to_value(ask).unwrap(),
+        json!({"command": "ask", "question": "Which storage?", "options": ["sqlite", "files"]})
+    );
+    assert_eq!(
+        serde_json::to_value(AgentCommand::AskFollowUp {
+            ask_id: "A-1".into(),
+            question: "About 2 GB. Still sqlite?".into(),
+            options: Vec::new(),
+        })
+        .unwrap(),
+        json!({"command": "ask_follow_up", "ask_id": "A-1", "question": "About 2 GB. Still sqlite?", "options": []})
+    );
+    assert_eq!(
+        serde_json::to_value(AgentCommand::AskResolve {
+            ask_id: "A-1".into(),
+            summary: "Use sqlite.".into(),
+        })
+        .unwrap(),
+        json!({"command": "ask_resolve", "ask_id": "A-1", "summary": "Use sqlite."})
+    );
+
+    let answer = ClientRequest::AnswerAsk {
+        data: AnswerAskData {
+            request_id: "r-3".into(),
+            ask_id: "A-1".into(),
+            source: AnswerSource::Telegram,
+            reply: AskReply::Text {
+                text: "depends on size".into(),
+            },
+        },
+    };
+    assert_eq!(
+        serde_json::to_value(answer).unwrap(),
+        json!({
+            "type": "answer_ask",
+            "data": {
+                "request_id": "r-3",
+                "ask_id": "A-1",
+                "source": "telegram",
+                "reply": {"reply": "text", "text": "depends on size"}
+            }
+        })
+    );
+    assert_eq!(
+        serde_json::to_value(AskReply::Choice {
+            option: "sqlite".into()
+        })
+        .unwrap(),
+        json!({"reply": "choice", "option": "sqlite"})
+    );
+    assert_eq!(
+        serde_json::to_value(CommandResult::AskCreated {
+            data: AskCreatedData {
+                ask_id: "A-1".into()
+            }
+        })
+        .unwrap(),
+        json!({"result": "ask_created", "data": {"ask_id": "A-1"}})
+    );
+
+    let thread = AskThread {
+        ask_id: "A-1".into(),
+        task_id: Some("T-1".into()),
+        entries: vec![
+            AskEntry::Question {
+                from: "dev-1".into(),
+                text: "Which storage?".into(),
+                options: vec!["sqlite".into()],
+            },
+            AskEntry::Answer {
+                from: "operator".into(),
+                source: AnswerSource::Tui,
+                reply: AskReply::Choice {
+                    option: "sqlite".into(),
+                },
+            },
+            AskEntry::Resolution {
+                from: "dev-1".into(),
+                summary: "Use sqlite.".into(),
+            },
+        ],
+    };
+    let attention = DaemonEvent::AttentionRequired {
+        data: AttentionRequiredData {
+            reason: "ask".into(),
+            task_id: Some("T-1".into()),
+            ask: Some(thread.clone()),
+            recap: Some(ContextRecap {
+                goal: "Persist the task queue".into(),
+                decisions: vec!["Queue lives in the daemon".into()],
+                asking: "Which storage?".into(),
+                next: "dev-1 implements the store".into(),
+            }),
+        },
+    };
+    assert_eq!(
+        serde_json::to_value(attention).unwrap(),
+        json!({
+            "event": "attention_required",
+            "data": {
+                "reason": "ask",
+                "task_id": "T-1",
+                "ask": {
+                    "ask_id": "A-1",
+                    "task_id": "T-1",
+                    "entries": [
+                        {"entry": "question", "from": "dev-1", "text": "Which storage?", "options": ["sqlite"]},
+                        {"entry": "answer", "from": "operator", "source": "tui", "reply": {"reply": "choice", "option": "sqlite"}},
+                        {"entry": "resolution", "from": "dev-1", "summary": "Use sqlite."}
+                    ]
+                },
+                "recap": {
+                    "goal": "Persist the task queue",
+                    "decisions": ["Queue lives in the daemon"],
+                    "asking": "Which storage?",
+                    "next": "dev-1 implements the store"
+                }
+            }
+        })
+    );
+    assert_eq!(
+        serde_json::to_value(DaemonEvent::AskUpdated { data: thread }).unwrap()["event"],
+        json!("ask_updated")
+    );
+}
+
+/// Messages from a peer that predates D35/D37 still decode: the new fields
+/// default, so the change stays additive within v1.
+#[test]
+fn pre_ask_thread_messages_still_decode() {
+    assert_eq!(
+        serde_json::from_value::<AgentCommand>(json!({"command": "ask", "question": "Proceed?"}))
+            .unwrap(),
+        AgentCommand::Ask {
+            question: "Proceed?".into(),
+            options: Vec::new(),
+        }
+    );
+    assert_eq!(
+        serde_json::from_value::<DaemonEvent>(json!({
+            "event": "attention_required",
+            "data": {"reason": "usage limit", "task_id": null}
+        }))
+        .unwrap(),
+        DaemonEvent::AttentionRequired {
+            data: AttentionRequiredData {
+                reason: "usage limit".into(),
+                task_id: None,
+                ask: None,
+                recap: None,
+            }
+        }
+    );
+    assert_eq!(
+        serde_json::from_value::<AskEntry>(json!({"entry": "future_entry", "x": 1})).unwrap(),
+        AskEntry::Unknown
+    );
+    assert_eq!(
+        serde_json::from_value::<AnswerSource>(json!("slack")).unwrap(),
+        AnswerSource::Unknown
+    );
 }
