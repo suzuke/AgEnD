@@ -9,7 +9,8 @@
 //! for a target without std (all features, `-F unsafe-code`) and checks via
 //! `cargo metadata` that it has no build script or crate features, and that
 //! its only direct dependency is `serde` with default features disabled and
-//! only `derive` plus `alloc`. These guards stop accidental I/O, not deliberate
+//! only `derive` plus `alloc` (the gate 1 draft's exception, pending the
+//! owner's decision on proposal P7). These guards stop accidental I/O, not deliberate
 //! evasion.
 //!
 //! Must NOT: perform I/O of any kind, or gain a build script, unapproved

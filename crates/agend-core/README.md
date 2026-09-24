@@ -2,7 +2,7 @@
 
 > **TL;DR**
 > - 純邏輯 crate：共用型別、協定、traits、workflow 狀態機、policy 與螢幕分類器。
-> - 記住：**`#![no_std]` + `alloc` + `forbid(unsafe_code)`；唯一直接依賴是停用預設功能的 `serde`（只開 `derive` + `alloc`）**；時間只經 `Clock` trait。
+> - 記住：**`#![no_std]` + `alloc` + `forbid(unsafe_code)`；唯一直接依賴是停用預設功能的 `serde`（只開 `derive` + `alloc`；待使用者確認 P7）**；時間只經 `Clock` trait。
 > - 下一步：跑 `cargo xtask accept core`，看純邏輯 demo 與 crate 邊界檢查。
 
 ## 負責
@@ -42,8 +42,8 @@
 
 ## 依賴規則
 
-- `#![no_std]` + `alloc`；允許唯一依賴 `serde`，`default-features = false`，只開 `derive` + `alloc`
-- `serde` 只 derive protocol 與 workflow 設定型別；不使用 `serde_json`、transport、clock 或 runtime
+- `#![no_std]` + `alloc`；草稿允許唯一依賴 `serde`，`default-features = false`，只開 `derive` + `alloc`；這是待使用者確認的 P7，否決則移除
+- `serde` 只 derive protocol 與 workflow 定義型別（workflow 以 TOML 存 DB，D19）；`Task`、`PipelineState` 等執行期型別不 derive；不使用 `serde_json`、transport、clock 或 runtime
 - 沒有 `[features]`、build script、unsafe；錯誤型別使用 `core::error::Error`
 - 時間只由 `Clock` 傳入；集合用 `BTreeMap`／`BTreeSet`
 
