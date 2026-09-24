@@ -2,8 +2,11 @@
 //! (docs/ROADMAP.md).
 //!
 //! For gate 1 run workspace formatting and clippy, test agend-core and its
-//! protocol compatibility contract, run check-deps, then show the core demo. Other gates use the
-//! current per-crate checks until their acceptance flow is built.
+//! protocol compatibility contract, run check-deps, then show the core demo.
+//! For gate 2 run the per-crate checks (the testkit tests include every
+//! contract suite and the fake agent binaries), check-deps, then the testkit
+//! demo. Other gates use the current per-crate checks until their acceptance
+//! flow is built.
 
 use crate::{cargo, check_deps, workspace_root};
 use std::process::Command;
@@ -138,6 +141,17 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
     if gate.number == 1 {
         crate::core_demo::run()?;
         println!("gate 1 (core): checks passed");
+    } else if gate.number == 2 {
+        step(&["build", "--quiet", "-p", "agend-testkit", "--bins"])?;
+        step(&[
+            "run",
+            "--quiet",
+            "-p",
+            "agend-testkit",
+            "--example",
+            "testkit_demo",
+        ])?;
+        println!("gate 2 (testkit): checks passed");
     } else {
         println!(
             "gate {} ({}): checks passed; demo not implemented yet (it is added when this gate is built)",
