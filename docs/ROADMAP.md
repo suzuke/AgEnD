@@ -77,7 +77,7 @@ cat docs/gates/gate-01-core.md
 
 每完成一件事加一行（日期 + 一行 + commit／PR），新的在上面。
 
-- 2026-09-25 新增名詞表 docs/GLOSSARY.md；施工階段統一稱「施工關」、workflow 步驟稱「關卡」（PR 待填）
+- 2026-09-25 新增名詞表 docs/GLOSSARY.md；施工階段統一稱「施工關」、workflow 步驟稱「關卡」（#104）
 - 2026-09-24 AGENTS.md 加入必守的 Git 工作流程：branch + worktree、只經 PR 合併（#103）
 - 2026-09-24 第 1 施工關提案中（#102）
 - 2026-09-24 README 系統圖改為 SVG（#101, e893877）
