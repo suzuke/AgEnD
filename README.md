@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - 這是 AgEnD（Agent Engineering Daemon）v2：異質 agent 團隊的自主 merge 流水線。
-> - 狀態：**pre-alpha，設計階段**。目前只有 crate 骨架與設計文件，沒有可用功能。
-> - 下一步：先讀 [AGENTS.md](AGENTS.md)，再照 [docs/ROADMAP.md](docs/ROADMAP.md) 開第 1 施工關。
+> - 狀態：**pre-alpha**。第 1 施工關 `agend-core` 已 merge（#105），等使用者親自驗收；其他 crate 還是骨架，沒有可用功能。
+> - 下一步：先讀 [AGENTS.md](AGENTS.md)，再看 [docs/ROADMAP.md](docs/ROADMAP.md) 的目前狀態。
 
 ## 這是什麼
 
