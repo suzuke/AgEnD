@@ -2,8 +2,10 @@
 //! (docs/ROADMAP.md).
 //!
 //! For gate 1 run workspace formatting and clippy, test agend-core and its
-//! protocol compatibility contract, run check-deps, then show the core demo. Other gates use the
-//! current per-crate checks until their acceptance flow is built.
+//! protocol compatibility contract, run check-deps, then show the core demo.
+//! Gate 3 runs the per-crate checks plus the binary's argv[0] dispatch test,
+//! then the shim demo. Other gates use the per-crate checks until their
+//! acceptance flow is built.
 
 use crate::{cargo, check_deps, workspace_root};
 use std::process::Command;
@@ -132,12 +134,18 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
             ])?;
             step(&["test", "-p", krate])?;
         }
+        if gate.number == 3 {
+            step(&["test", "-p", "agend", "--test", "argv0_dispatch"])?;
+        }
     }
     check_deps::run(false)?;
 
     if gate.number == 1 {
         crate::core_demo::run()?;
         println!("gate 1 (core): checks passed");
+    } else if gate.number == 3 {
+        crate::shim_demo::run()?;
+        println!("gate 3 (shim): checks passed");
     } else {
         println!(
             "gate {} ({}): checks passed; demo not implemented yet (it is added when this gate is built)",

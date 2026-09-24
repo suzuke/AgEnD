@@ -49,6 +49,9 @@ name = "agend-shim"
 version = "0.0.0"
 dependencies = [
  "agend-core",
+ "agend-testkit",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
