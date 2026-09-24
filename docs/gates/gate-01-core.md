@@ -7,7 +7,7 @@
 
 ## 狀態
 
-**驗收中（待使用者親自驗收）**（2026-09-25）：#105 已 merge（`90794d4`），verifier r6 CONFIRMED。
+**完成**（2026-09-25）：#105 已 merge（`90794d4`），verifier r6 CONFIRMED，使用者親自驗收通過。「待你追認」的項目另外確認。
 
 P1–P7 已由你在 2026-09-25 確認（記為決策 D26–D32）。實作草稿是在確認之前寫的；2026-09-24 的勾選是草稿作者自己打的，不算確認。
 
@@ -125,31 +125,39 @@ P1–P7 已由你在 2026-09-25 確認（記為決策 D26–D32）。實作草�
 
 1. 跑 acceptance。它會先執行格式、workspace clippy、core tests（含兩個探索器）、protocol compatibility tests、workflow TOML golden tests、check-deps，再跑實際 core demo。
 
+   **這步在驗什麼**：core 的 API 串起來，能照設計走完一個 task。重點看三件事：(a) 過期的結果會被拒絕，避免舊的 checks 結果放行新的 commit；(b) 返工回到原本的 task 持有者（D33）；(c) merge 送出後 main 又前進時，不會 merge 錯 head。這是自主 merge 的安全核心，錯了就會 merge 沒審過的 code。
+
    ```bash
    ~/.cargo/bin/cargo xtask accept core
    ```
 
    應該看到：demo 先列出實際 protocol hello、busy 與 debounce 結果，再以 `assign::choose` 派出 task 持有者及不同 backend 的 reviewer，並以 `pipeline::state::step` 走完：command 失敗退回 task 持有者、同一個結果再送一次被拒絕（`rejected: result does not belong to the current stage, attempt and head`）、reviewer 要求修改退回 task 持有者、返工期間 main 前進仍留在 work（`stay in work`）、審查中的新 commit 重跑 checks、diff 改變的 rebase 退回 task 持有者、merge 送出後 main 前進只記成待處理（`stay in merge at H4, H5 pending until the merge result`）、forge 回報 merge 失敗後套用 H5（patch 相同，保留核准、只重跑 checks），最後 merge。完整輸出見下方；最後一行是 `gate 1 (core): checks passed`。
 
-   - [ ] 通過
+   - [x] 通過
 
 2. 看 busy 等級表（開工時細化：確切的表頭與排版）。
+
+   **這步在驗什麼**：agent 忙碌時送訊息進去的方式。codex 支援「插話但不打斷」（steer）；claude、opencode 不支援，只能中斷。表錯了，訊息會被吞掉，或把 agent 做到一半的工作打斷。
 
    操作：同一次輸出，往上找 `busy levels for steer`
 
    應該看到三行：Codex 的 `Steer` 保留；Claude 與 Opencode 的 `Steer` 轉為 `Interrupt`。
 
-   - [ ] 通過
+   - [x] 通過
 
 3. 看去抖動行為。
+
+   **這步在驗什麼**：agent 看起來閒下來時，要再等 5 秒確認真的閒置，才能派新工作，避免它只是短暫停頓就被塞任務；變成忙碌則立刻反映。
 
    操作：同一次輸出，找 `debounce`
 
    應該看到：`idle immediate=false`、`before 5s=false`、`at 5s=true`，且 `busy immediate=true`。
 
-   - [ ] 通過
+   - [x] 通過
 
 4. 故意弄壞：讓 core 用到 std，確認被擋。
+
+   **這步在驗什麼**：core 必須是純邏輯，不碰檔案、網路、時鐘（no_std），這樣它的每個行為都能用測試完整重現。這步證明 `check-deps` 真的會擋，不是永遠亮綠燈。
 
    ```bash
    backup="$(mktemp)"
@@ -164,9 +172,11 @@ P1–P7 已由你在 2026-09-25 確認（記為決策 D26–D32）。實作草�
 
    應該看到：第一次 no-std 編譯失敗、checker 報 `agend-core does not compile for the no-std target`，`exit=1`；原檔從暫存副本還原後，最後一行回到 `check-deps: ok (… no-std build ok)`。此檢查不連結 agend-core 的 production dependency，因此即使 core 編譯失敗也能啟動 checker。
 
-   - [ ] 通過
+   - [x] 通過
 
 5. 看狀態機探索器：隨機事件序列下，merge 門檻、不跳過關卡、返工不遺失都成立。有兩個獨立的探索器。
+
+   **這步在驗什麼**：步驟 1 的 demo 只走一條路。探索器用上萬條隨機事件序列打狀態機，檢查三條規則永遠成立：沒有通過 checks 和核准就不會 merge、不會跳過關卡、返工不會遺失。這證明不是只有 demo 那條路是對的。
 
    ```bash
    ~/.cargo/bin/cargo test -p agend-core --test pipeline_explorer -- --nocapture 2>&1 | grep -E "^explorer|test result"
@@ -175,7 +185,7 @@ P1–P7 已由你在 2026-09-25 確認（記為決策 D26–D32）。實作草�
 
    應該看到：第一個指令有 13 行 `explorer <workflow>: 4000 sequences, …`，每行的 `done` 大於 0，有 merge 的 workflow（`code`、`planned`、`human-gate`、`review-between-checks`、`unreviewed`、`pick-then-review`、`checks-before-submit`、`pr-placeholders`）`merged` 大於 0，接著 `explorer total: 52000 sequences` 與 `test result: ok. 1 passed`。第二個指令有 8 行 `<workflow>: merged N reworks M`（M 都大於 0；N 除了沒有 merge 的 `checks-no-merge` 之外都大於 0）與 `test result: ok. 1 passed`。檢查的不變量列在 [crates/agend-core/TESTING.md](../../crates/agend-core/TESTING.md#狀態機探索器)。
 
-   - [ ] 通過
+   - [x] 通過
 
 ### 預期 transcript
 
@@ -224,12 +234,13 @@ task T-1 workflow=code v1
 
 | 日期 | 結果（通過／不通過） | 備註 |
 |---|---|---|
-|  |  |  |
+| 2026-09-25 | 通過 | 使用者在 `v2`（`d9a800a`）跑完步驟 1–5，輸出與「應該看到」逐項相符。回饋：原本的步驟沒說明每一步在驗什麼，已補上「這步在驗什麼」，範本也加上這條規定。「待你追認」各項另外確認。 |
 
 ## 進度紀錄
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-25 使用者親自驗收步驟 1–5 通過，狀態改為完成；每一步補上「這步在驗什麼」。
 - 2026-09-25 verifier r6 CONFIRMED（d932b21）；#105 squash merge 為 `90794d4`，v2 CI 綠；狀態改為驗收中。後續：探索器檢查收緊與文件措辭（#106）。
 - 2026-09-25 第 1 施工關 verifier r5 推翻（dc2d6db）一個 medium：head 變更清掉 approval 關卡的部分核准與暫定挑選時沒有開新的 attempt，舊 attempt 的核准重播能讓挑選復活。改成通用規則：目前關卡的結果被作廢或換人產出，就開新的 attempt 並重發要求（approval、fanout、逾時改派）；branch 在 merge 送出中被重設時丟棄待處理的變更；pick 規則在 pipeline.md 與本頁寫成同一段。r5 反例寫成 `verifier_r5_*` 測試，兩個探索器與可完成證明檢查「關卡內作廢一定開新 attempt」，把問題放回程式會被抓到。
 - 2026-09-25 第 1 施工關 verifier r4 推翻（02aca89）：四輪的共同根因是外部結果事件沒有完整身分，改成結構性的**事件身分**：結果帶 stage、attempt、head，`step` 開頭一條規則拒收過期結果；merge 送出中一條規則；pick 人數湊齊才定下；protocol 新增選填 `identity`（stale-by-default）。r4 反例寫成 `verifier_r4_*` 測試，兩個探索器與可完成證明加上重送／過期事件，四個問題放回程式都會被測試抓到。
