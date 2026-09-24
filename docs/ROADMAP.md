@@ -77,7 +77,7 @@ cat docs/gates/gate-01-core.md
 
 每完成一件事加一行（日期 + 一行 + commit／PR），新的在上面。
 
-- 2026-09-24 第 1 關提案中（PR：docs/gate-pages）
+- 2026-09-24 第 1 關提案中（#102）
 - 2026-09-24 README 系統圖改為 SVG（#101, e893877）
 - 2026-09-24 CI 首次通過（ubuntu + macOS）
 - 2026-09-24 骨架與文件 push 到 v2（8a5b0fd）
