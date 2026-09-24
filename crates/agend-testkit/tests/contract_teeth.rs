@@ -49,6 +49,9 @@ impl forge::ForgeFixture for MergesStaleHeads {
     fn commit_to(&self, branch: &str) -> String {
         self.0.push(branch)
     }
+    fn base_head(&self) -> String {
+        self.0.base_head()
+    }
 }
 
 #[test]
@@ -56,7 +59,10 @@ fn forge_contract_catches_a_merge_that_ignores_the_head() {
     let report = forge::run("broken", || MergesStaleHeads(FakeForge::new()));
     assert_eq!(
         failing_cases(&report),
-        ["merge_with_stale_head_echoes_actual_head"],
+        [
+            "merge_with_stale_head_echoes_actual_head",
+            "stale_merge_changes_nothing"
+        ],
         "{report}"
     );
     assert!(
@@ -298,6 +304,237 @@ impl runner::RunnerFixture for TimeoutExitCode {
 #[test]
 fn runner_contract_catches_a_timeout_with_an_exit_code() {
     let report = runner::run("broken", || TimeoutExitCode(FakeRunnerFixture::new()));
+    assert_eq!(
+        failing_cases(&report),
+        ["timeout_reports_timed_out_without_exit_code"],
+        "{report}"
+    );
+}
+
+/// Merges the current head, then claims the head changed (a check-after-merge
+/// race in a real forge): the refusal is a lie, the base moved.
+struct MergesThenRefuses(FakeForge);
+
+impl Forge for MergesThenRefuses {
+    type Error = FakeError;
+    async fn submit(&self, change: &Submission) -> Result<SubmittedChange, FakeError> {
+        self.0.submit(change).await
+    }
+    async fn head(&self, branch: &str) -> Result<String, FakeError> {
+        self.0.head(branch).await
+    }
+    async fn merge_if_head_is(&self, request: &MergeRequest) -> Result<MergeResult, FakeError> {
+        let current = self.0.head(&request.branch).await?;
+        let merged = self
+            .0
+            .merge_if_head_is(&MergeRequest {
+                branch: request.branch.clone(),
+                expected_head: current.clone(),
+            })
+            .await?;
+        if current == request.expected_head {
+            Ok(merged)
+        } else {
+            Ok(MergeResult::HeadChanged {
+                actual_head: current,
+            })
+        }
+    }
+}
+
+impl forge::ForgeFixture for MergesThenRefuses {
+    type Forge = Self;
+    type Error = FakeError;
+    fn forge(&self) -> &Self {
+        self
+    }
+    fn commit_to(&self, branch: &str) -> String {
+        self.0.push(branch)
+    }
+    fn base_head(&self) -> String {
+        self.0.base_head()
+    }
+}
+
+#[test]
+fn forge_contract_catches_a_refused_merge_that_merged_anyway() {
+    let report = forge::run("broken", || MergesThenRefuses(FakeForge::new()));
+    assert_eq!(
+        failing_cases(&report),
+        ["stale_merge_changes_nothing"],
+        "{report}"
+    );
+}
+
+/// Versions toggle 1 -> 2 -> 1 (ABA): every single write looks newer.
+struct TogglingVersions {
+    inner: FakeStore,
+}
+
+fn toggled(version: u64) -> u64 {
+    if version % 2 == 1 { 1 } else { 2 }
+}
+
+impl Store for TogglingVersions {
+    type Error = FakeError;
+    async fn load_task(&self, id: &str) -> Result<Option<VersionedTask>, FakeError> {
+        Ok(self.inner.load_task(id).await?.map(|v| VersionedTask {
+            version: toggled(v.version),
+            task: v.task,
+        }))
+    }
+    async fn create_task(&self, task: &Task) -> Result<(), FakeError> {
+        self.inner.create_task(task).await
+    }
+    async fn compare_and_swap_task(
+        &self,
+        task: &Task,
+        expected: u64,
+    ) -> Result<CasResult, FakeError> {
+        let Some(current) = self.inner.load_task(&task.id).await? else {
+            return self.inner.compare_and_swap_task(task, expected).await;
+        };
+        if toggled(current.version) != expected {
+            return Ok(CasResult::Conflict {
+                current_version: Some(toggled(current.version)),
+            });
+        }
+        Ok(
+            match self
+                .inner
+                .compare_and_swap_task(task, current.version)
+                .await?
+            {
+                CasResult::Written { new_version } => CasResult::Written {
+                    new_version: toggled(new_version),
+                },
+                CasResult::Conflict { current_version } => CasResult::Conflict {
+                    current_version: current_version.map(toggled),
+                },
+            },
+        )
+    }
+    async fn load_workflow(&self, id: &str, version: u64) -> Result<Option<Workflow>, FakeError> {
+        self.inner.load_workflow(id, version).await
+    }
+    async fn append_event(&self, id: &str, event: &StoredEvent) -> Result<(), FakeError> {
+        self.inner.append_event(id, event).await
+    }
+}
+
+impl store::StoreFixture for TogglingVersions {
+    type Store = Self;
+    type Error = FakeError;
+    fn store(&self) -> &Self {
+        self
+    }
+    fn insert_workflow(&self, workflow: &Workflow) {
+        self.inner.insert_workflow(workflow.clone());
+    }
+    fn events(&self, task_id: &str) -> Vec<StoredEvent> {
+        self.inner.events(task_id)
+    }
+}
+
+#[test]
+fn store_contract_catches_versions_that_go_back() {
+    let report = store::run("broken", || TogglingVersions {
+        inner: FakeStore::new(),
+    });
+    assert_eq!(
+        failing_cases(&report),
+        ["cas_with_current_version_writes_a_newer_version"],
+        "{report}"
+    );
+}
+
+/// Reports the timeout only after the command would have finished (a runner
+/// that checks elapsed time after `wait()`).
+struct TimesOutLate(FakeRunnerFixture);
+
+impl Runner for TimesOutLate {
+    type Error = FakeError;
+    async fn run(&self, c: &str, wd: &str, timeout_ms: u64) -> Result<CommandOutput, FakeError> {
+        let output = self.0.runner.run(c, wd, timeout_ms).await?;
+        if output.timed_out {
+            std::thread::sleep(std::time::Duration::from_millis(
+                runner::TIMES_OUT.duration_ms,
+            ));
+        }
+        Ok(output)
+    }
+}
+
+impl runner::RunnerFixture for TimesOutLate {
+    type Runner = Self;
+    type Error = FakeError;
+    fn runner(&self) -> &Self {
+        self
+    }
+    fn working_directory(&self) -> &str {
+        runner::RunnerFixture::working_directory(&self.0)
+    }
+}
+
+#[test]
+fn runner_contract_catches_a_timeout_reported_late() {
+    let report = runner::run("broken", || TimesOutLate(FakeRunnerFixture::new()));
+    assert_eq!(
+        failing_cases(&report),
+        ["timeout_reports_timed_out_without_exit_code"],
+        "{report}"
+    );
+}
+
+/// Reports the timeout on time but never kills the command: it really runs
+/// the command with `sh` and leaves it running. The child is waited for (not
+/// signalled) when the wrapper drops.
+struct LeavesChildRunning {
+    fixture: FakeRunnerFixture,
+    children: std::sync::Mutex<Vec<std::process::Child>>,
+}
+
+impl Runner for LeavesChildRunning {
+    type Error = FakeError;
+    async fn run(&self, c: &str, wd: &str, timeout_ms: u64) -> Result<CommandOutput, FakeError> {
+        let output = self.fixture.runner.run(c, wd, timeout_ms).await?;
+        if output.timed_out {
+            let child = std::process::Command::new("sh")
+                .args(["-c", c])
+                .current_dir(wd)
+                .spawn()
+                .expect("spawn sh");
+            self.children.lock().unwrap().push(child);
+        }
+        Ok(output)
+    }
+}
+
+impl Drop for LeavesChildRunning {
+    fn drop(&mut self) {
+        for mut child in self.children.lock().unwrap().drain(..) {
+            let _ = child.wait();
+        }
+    }
+}
+
+impl runner::RunnerFixture for LeavesChildRunning {
+    type Runner = Self;
+    type Error = FakeError;
+    fn runner(&self) -> &Self {
+        self
+    }
+    fn working_directory(&self) -> &str {
+        runner::RunnerFixture::working_directory(&self.fixture)
+    }
+}
+
+#[test]
+fn runner_contract_catches_a_timeout_that_leaves_the_child_running() {
+    let report = runner::run("broken", || LeavesChildRunning {
+        fixture: FakeRunnerFixture::new(),
+        children: std::sync::Mutex::new(Vec::new()),
+    });
     assert_eq!(
         failing_cases(&report),
         ["timeout_reports_timed_out_without_exit_code"],

@@ -20,11 +20,16 @@
 | `contract::tests` | 報表格式：每條失敗都寫出 `<trait>.<case>` 與原因；case panic 也算失敗 |
 | `executor::tests` | `block_on` 會在 wake 後再 poll |
 | `tests/contract_fakes.rs` | 7 個契約 suite 對假實作全部通過；`run_all_fakes` 每個 trait 剛好一次 |
-| `tests/contract_teeth.rs` | 每個 suite 抓得到一種漂移：merge 不看 head、CAS 不看版本、事件不看 cursor、送達停在 Queued、recover 忘了 holder、通知被截斷、秒當毫秒、逾時帶 exit code；失敗的正是那一條 |
-| `tests/fake_daemon.rs` | hello 必須在前、major 不合的錯誤訊息、狀態與未知請求、事件身分（沒帶、舊 attempt、別的關卡、重播都 `stale_result`）、backlog 再即時事件、請示回答 |
-| `tests/fake_codex.rs` | turn 完成事件帶回 threadId／turnId；steer（錯的 turn id 被拒）、queue 自動出列成新 turn、interrupt；approval 等待決定；只有 resume 過的 thread 才推事件；長路徑 symlink |
+| `tests/contract_teeth.rs` | 每個 suite 抓得到漂移：merge 不看 head、回報 head 不對卻已經 merge、CAS 不看版本、版本來回跳（1→2→1）、事件不看 cursor、送達停在 Queued、recover 忘了 holder、通知被截斷、秒當毫秒、逾時帶 exit code、逾時等指令跑完才回報、逾時沒停掉指令；失敗的正是那一條 |
+| `tests/fake_knobs.rs` | 每個假實作（Forge、Driver、Store、Runtime、Runner、Notifier）的每個方法：`fail_next` 只讓下一次失敗、`calls()` 依序記下每次呼叫（含失敗的）；`FakeForge::merges`／`base_head` 只記成功的 merge |
+| `tests/fake_daemon.rs` | hello 必須在前（無效 JSON 也回 `hello_required` 並關閉）、hello 之後的無效 JSON 不斷線、drop 時已開的連線讀到 EOF（2 秒內）、major 不合的錯誤訊息、狀態與未知請求、事件身分（沒帶、舊 attempt、別的關卡、重播都 `stale_result`）、backlog 再即時事件、請示回答 |
+| `tests/fake_codex.rs` | turn 完成事件帶回 threadId／turnId；steer（錯的 turn id 被拒）、queue 自動出列成新 turn、interrupt；approval 等待決定；只有 resume 過的 thread 才推事件；長路徑 symlink 指到 temp dir 裡的短 socket（不留目錄） |
 | `tests/fake_opencode.rs` | SSE 事件順序、同步 prompt 回覆、忙碌排隊、abort 標 `MessageAbortedError`、REST 補歷史、status |
-| `tests/fake_claude.rs` | Stop hook block 多一輪（`stop_hook_active` false → true）、Esc 中斷不觸發 Stop、hook payload、channel 包裝、未知 channel server 的錯誤 |
+| `tests/fake_claude.rs` | Stop hook block 多一輪（`stop_hook_active` false → true）、Esc 中斷不觸發 Stop、hook payload、channel 包裝、未知 channel server 的錯誤、transcript 在專案目錄內 |
+
+## 花時間的地方
+
+- Runner 契約的逾時 case 用真的時間：指令 `sleep 3; touch timed-out-command-finished` 以 200 ms 逾時跑，要在 2 秒內回報，並等到約 4.5 秒確認標記檔沒出現。假實作也一樣等（約 4.5 秒），所以 `contract_fakes`、`contract_teeth` 與 `accept testkit` 各多約 5 秒。
 
 ## 輸入從哪來（#1493）
 

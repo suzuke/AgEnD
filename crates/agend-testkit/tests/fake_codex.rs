@@ -225,6 +225,12 @@ fn long_listen_path_is_a_symlink_to_a_short_socket() {
         "{}",
         real.display()
     );
+    let temp = std::fs::canonicalize(std::env::temp_dir()).unwrap();
+    assert_eq!(
+        real.parent(),
+        Some(temp.as_path()),
+        "the short socket sits directly in the temp dir, with no directory to leave behind"
+    );
     let mut probe = server.probe();
     start_thread(&mut probe);
     server.stop();

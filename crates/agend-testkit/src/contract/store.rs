@@ -1,5 +1,6 @@
 //! `Store` contract: tasks round-trip exactly, writes are compare-and-swap on
-//! a version that grows with every write, and a conflict changes nothing and
+//! a version that strictly grows with every write (checked over a sequence
+//! of writes, so a version that returns to an old value fails), and a conflict changes nothing and
 //! reports the current version.
 //!
 //! Not pinned: the first version number; what appending an event to an
@@ -114,25 +115,44 @@ fn duplicate_create_fails_and_keeps_the_original<F: StoreFixture>(fx: &F) -> Cas
 fn cas_with_current_version_writes_a_newer_version<F: StoreFixture>(fx: &F) -> CaseResult {
     let task = full_task("T-cas");
     ok("create_task", block_on(fx.store().create_task(&task)))?;
-    let version = current_version(fx, &task.id)?;
-    let mut next = task.clone();
-    next.status = TaskStatus::Blocked;
-    let result = ok(
-        "compare_and_swap_task",
-        block_on(fx.store().compare_and_swap_task(&next, version)),
-    )?;
-    let CasResult::Written { new_version } = result else {
-        return Err(format!("expected Written, got {result:?}"));
-    };
-    ensure(new_version > version, || {
-        format!("new version {new_version} is not greater than {version}")
-    })?;
-    let loaded = ok("load_task", block_on(fx.store().load_task(&task.id)))?;
-    ensure(
-        loaded.as_ref().map(|v| (v.version, &v.task)) == Some((new_version, &next)),
-        || format!("expected version {new_version} with the new task, got {loaded:?}"),
-    )
+    let mut version = current_version(fx, &task.id)?;
+    // Several writes in a row: a version that only has to differ from the
+    // previous one (1 -> 2 -> 1) would let a stale writer succeed (ABA).
+    for (n, status) in WRITE_SEQUENCE.into_iter().enumerate() {
+        let mut next = task.clone();
+        next.status = status;
+        next.title = format!("write {n}");
+        let result = ok(
+            "compare_and_swap_task",
+            block_on(fx.store().compare_and_swap_task(&next, version)),
+        )?;
+        let CasResult::Written { new_version } = result else {
+            return Err(format!("write {n}: expected Written, got {result:?}"));
+        };
+        ensure(new_version > version, || {
+            format!("write {n}: new version {new_version} is not greater than {version}")
+        })?;
+        let loaded = ok("load_task", block_on(fx.store().load_task(&task.id)))?;
+        ensure(
+            loaded.as_ref().map(|v| (v.version, &v.task)) == Some((new_version, &next)),
+            || {
+                format!(
+                    "write {n}: expected version {new_version} with the new task, got {loaded:?}"
+                )
+            },
+        )?;
+        version = new_version;
+    }
+    Ok(())
 }
+
+/// Statuses written one after another by the CAS case.
+const WRITE_SEQUENCE: [TaskStatus; 4] = [
+    TaskStatus::Blocked,
+    TaskStatus::Running,
+    TaskStatus::Blocked,
+    TaskStatus::Running,
+];
 
 fn cas_with_stale_version_conflicts_and_changes_nothing<F: StoreFixture>(fx: &F) -> CaseResult {
     let task = full_task("T-stale");

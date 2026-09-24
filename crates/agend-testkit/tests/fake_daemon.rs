@@ -7,7 +7,7 @@ use agend_core::protocol::client::{
     DaemonEvent, InstanceData, ResultIdentity, STALE_RESULT, SubscribeEventsData, V1,
 };
 use agend_testkit::fake_daemon::{
-    FakeDaemon, HELLO_REQUIRED, ProbeClient, UNKNOWN_REQUEST, VERSION_MISMATCH,
+    FakeDaemon, HELLO_REQUIRED, INVALID_REQUEST, ProbeClient, UNKNOWN_REQUEST, VERSION_MISMATCH,
 };
 
 fn connected(daemon: &FakeDaemon) -> ProbeClient {
@@ -51,6 +51,30 @@ fn first_message_must_be_hello() {
         .unwrap();
     assert_eq!(error_code(reply), HELLO_REQUIRED);
     assert!(client.recv().unwrap().is_none(), "connection must close");
+}
+
+#[test]
+fn invalid_json_before_hello_gets_hello_required_and_close() {
+    let daemon = FakeDaemon::start().unwrap();
+    let mut client = ProbeClient::connect(daemon.socket_path()).unwrap();
+    client.send_raw("not json").unwrap();
+    assert_eq!(error_code(client.recv().unwrap().unwrap()), HELLO_REQUIRED);
+    assert!(client.recv().unwrap().is_none(), "connection must close");
+}
+
+#[test]
+fn invalid_json_after_hello_is_rejected_and_the_connection_stays_open() {
+    let daemon = FakeDaemon::start().unwrap();
+    let mut client = connected(&daemon);
+    client.send_raw("not json").unwrap();
+    assert_eq!(error_code(client.recv().unwrap().unwrap()), INVALID_REQUEST);
+    let reply = client
+        .request(&command("r-1", AgentCommand::Status))
+        .unwrap();
+    assert!(
+        matches!(reply, ClientResponse::CommandResult { .. }),
+        "{reply:?}"
+    );
 }
 
 #[test]
@@ -223,4 +247,27 @@ fn events_replay_the_backlog_then_stream_live() {
         ClientResponse::TerminalSnapshot { .. }
     ));
     assert_eq!(daemon.requests().len(), 7);
+}
+
+#[test]
+fn dropping_the_daemon_closes_open_connections() {
+    let daemon = FakeDaemon::start().unwrap();
+    let mut client = connected(&daemon);
+    drop(daemon);
+    let started = std::time::Instant::now();
+    let outcome = client
+        .send(&command("r-1", AgentCommand::Status))
+        .and_then(|()| client.recv());
+    let elapsed = started.elapsed();
+    match outcome {
+        Ok(None) => {}
+        Err(e)
+            if e.kind() != std::io::ErrorKind::WouldBlock
+                && e.kind() != std::io::ErrorKind::TimedOut => {}
+        other => panic!("expected EOF or a connection error after drop, got {other:?}"),
+    }
+    assert!(
+        elapsed < std::time::Duration::from_secs(2),
+        "closing took {elapsed:?}"
+    );
 }

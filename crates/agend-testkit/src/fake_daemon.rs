@@ -6,7 +6,8 @@
 //! Covered:
 //! - `hello` first; version negotiation with `protocol::negotiate`; mismatch
 //!   answers an `error` (`version_mismatch`) and closes; any other first
-//!   request answers `hello_required` and closes.
+//!   line (another request or invalid JSON) answers `hello_required` and
+//!   closes.
 //! - `command`: `status`, `inbox`, `send`, `task_create`, `ask`, the other
 //!   agent commands (`accepted`), and the result commands (`done`, `result`,
 //!   `review_approve`, `review_changes`) with the event-identity rule: the
@@ -25,6 +26,7 @@
 
 use std::collections::BTreeMap;
 use std::io::{self, BufRead, BufReader, Write};
+use std::net::Shutdown;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -68,9 +70,12 @@ struct State {
 struct Shared {
     state: Mutex<State>,
     stopping: AtomicBool,
+    /// Every accepted connection, so drop can close them.
+    connections: Mutex<Vec<UnixStream>>,
 }
 
-/// A running fake daemon; stops and removes its socket on drop.
+/// A running fake daemon. Drop stops accepting, closes every open
+/// connection (clients read EOF) and removes the socket.
 pub struct FakeDaemon {
     socket_path: PathBuf,
     shared: Arc<Shared>,
@@ -91,6 +96,7 @@ impl FakeDaemon {
                 ..State::default()
             }),
             stopping: AtomicBool::new(false),
+            connections: Mutex::new(Vec::new()),
         });
         let accept_shared = Arc::clone(&shared);
         let accept = std::thread::Builder::new()
@@ -151,6 +157,10 @@ impl Drop for FakeDaemon {
         if let Some(accept) = self.accept.take() {
             let _ = accept.join();
         }
+        // The accept loop has exited, so no connection is added after this.
+        for connection in lock(&self.shared.connections).drain(..) {
+            let _ = connection.shutdown(Shutdown::Both);
+        }
     }
 }
 
@@ -160,11 +170,18 @@ fn accept_loop(listener: UnixListener, shared: Arc<Shared>) {
             break;
         }
         let Ok(stream) = stream else { continue };
+        let (Ok(for_drop), Ok(for_close)) = (stream.try_clone(), stream.try_clone()) else {
+            continue;
+        };
+        lock(&shared.connections).push(for_drop);
         let shared = Arc::clone(&shared);
         let _ = std::thread::Builder::new()
             .name("fake-daemon-conn".into())
             .spawn(move || {
                 let _ = serve(stream, &shared);
+                // Other handles (the drop list, subscribers) keep the socket
+                // open; shut it down so the client reads EOF.
+                let _ = for_close.shutdown(Shutdown::Both);
             });
     }
 }
@@ -206,6 +223,10 @@ fn serve(stream: UnixStream, shared: &Shared) -> io::Result<()> {
         }
         let request: ClientRequest = match serde_json::from_str(&line) {
             Ok(request) => request,
+            Err(e) if !negotiated => {
+                let message = format!("the first message must be hello (invalid JSON line: {e})");
+                return send(&writer, &error(None, HELLO_REQUIRED, message));
+            }
             Err(e) => {
                 send(
                     &writer,

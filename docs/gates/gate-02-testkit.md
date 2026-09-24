@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 共用測試基礎設施：每個 trait 的假實作、契約測試、假 daemon、假 agent 程式。
 > - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這個施工關才算完成。
-> - 下一步：照「你親自驗收」跑 4 步，填「驗收紀錄」；先看「待你追認」的 8 個決定。
+> - 下一步：照「你親自驗收」跑 4 步，填「驗收紀錄」；先看「待你追認」的 11 個決定。
 
 ## 狀態
 
@@ -122,6 +122,9 @@ owner 睡著時由實作者決定、可以反悔的事。每項：決定 · 理�
 | A6 | 假 codex 的 approval 由 prompt 前綴 `run: ` 觸發；假 claude 在忙碌時收到的 channel 訊息一律不處理（spike C1 的最壞情況） | 需要可重現的觸發點；最壞情況逼 driver 走 Stop hook 排隊（D16） | 改觸發方式：各自模組內 |
 | A7 | 假 agent 欄位只放 spike 紀錄與上表列的最少集合，未用真 schema 逐欄比對；各模組開頭列出涵蓋與未涵蓋 | spike 沒有保存 schema dump；第 7、12 施工關接真 backend 時再比對 | 補欄位：加法，不破壞既有測試 |
 | A8 | `git_fixture` 不做（只留說明），假 daemon 與假 agent 只支援 unix；本頁狀態寫「實作中」而不是「驗收中」 | 不在本施工關範圍；CI 只有 ubuntu／macOS；比照第 1 施工關，verifier 前仍是實作中 | 第 3 施工關需要時加 git fixture |
+| A9 | `ForgeFixture` 多一個 `base_head()`：契約從 trait 外面讀 base branch 的 head，確認 merge 讓 base 移到 merge commit、head 不對時 base 不動 | 只看 work branch 的 head 抓不到「回報 `HeadChanged` 卻已經 merge」（verifier r1 HIGH）；trait 本身沒有讀 base 的方法 | 改成別的觀察方式（例如列出 merge 紀錄）：改 `contract/forge.rs` 與各 fixture |
+| A10 | Runner 逾時 case：`sleep 3; touch timed-out-command-finished` 以 200 ms 逾時，要在 2 秒內回報，約 4.5 秒時標記檔不能存在（用標記檔判斷指令被停掉，不送 signal 探測） | 餘裕大（2 秒是逾時的 10 倍）不易 flake；代價是每跑一次 Runner suite 多約 4.5 秒 | 調常數：`contract/runner.rs` 開頭 |
+| A11 | 假 claude 的 transcript 寫在專案內 `.claude/fake-transcripts/`；假 daemon 在 hello 之前收到無效 JSON 也回 `hello_required` 並關閉（照 README） | 測試的暫存專案 drop 時一起刪掉，不再共用 `<tmp>/fake-claude/`；文件與程式一致 | 改路徑或改回 `invalid_request`：各一處 |
 
 ## 驗收紀錄
 
@@ -135,6 +138,7 @@ owner 睡著時由實作者決定、可以反悔的事。每項：決定 · 理�
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-25 修 verifier r1（REFUTED @ e7650cd）：Forge 契約用 `base_head()` 看 merge 是否真的發生（HIGH）；Store 連續寫入版本嚴格遞增；Runner 逾時有時間上限並確認指令被停掉；假 daemon drop 關閉已開連線；新增 `tests/fake_knobs.rs`（`fail_next`／`calls()`／`merges()`，31 個手動 mutation 全抓到）；假 claude transcript 移進專案、假 codex 短 socket 不留目錄；hello 前無效 JSON 回 `hello_required`。故意弄壞的包裝測試 8 → 12（`feat/gate-02-testkit`，draft PR #108）。
 - 2026-09-25 實作完成、自動驗收通過：7 個假實作與 7 個契約 suite（36 條，另有 8 個故意弄壞的包裝測試）、假 daemon、3 個假 agent 程式、`accept testkit` demo；fmt、workspace clippy、workspace test、check-deps、accept 通過；待 verifier 與你親自驗收（`feat/gate-02-testkit`，draft PR）。
 
 ## 下一步

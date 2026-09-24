@@ -16,6 +16,8 @@ pub enum ForgeCall {
 
 /// A forge without git: branches are lists of generated commit ids (40 hex
 /// digits from a counter). `push` is the fixture for "someone committed".
+/// The base branch starts at [`FakeForge::BASE_ROOT`] and moves to each
+/// merge commit.
 /// Beyond the contract: submitting a branch again returns the same change id
 /// with the current head, like updating an open pull request.
 #[derive(Debug)]
@@ -41,6 +43,9 @@ impl State {
 }
 
 impl FakeForge {
+    /// Base head before any merge (commit number 0; pushes start at 1).
+    pub const BASE_ROOT: &'static str = "0000000000000000000000000000000000000000";
+
     pub fn new() -> Self {
         Self {
             state: Mutex::new(State {
@@ -65,6 +70,14 @@ impl FakeForge {
     /// `(branch, merge_commit)` for every successful merge, in order.
     pub fn merges(&self) -> Vec<(String, String)> {
         lock(&self.state).merges.clone()
+    }
+
+    /// Head of the base branch: the last merge commit, or [`Self::BASE_ROOT`].
+    pub fn base_head(&self) -> String {
+        lock(&self.state)
+            .merges
+            .last()
+            .map_or_else(|| Self::BASE_ROOT.to_owned(), |(_, commit)| commit.clone())
     }
 
     pub fn fail_next(&self, operation: &str, message: &str) {

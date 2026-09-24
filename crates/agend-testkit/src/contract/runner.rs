@@ -1,11 +1,15 @@
 //! `Runner` contract: exit codes, stdout and stderr come back separately and
 //! unchanged; a command that outlives its timeout reports `timed_out` and no
-//! exit code; commands run in the given working directory.
+//! exit code, soon after the timeout (not when the command would have
+//! finished), and the command is stopped (it never gets to write
+//! [`LATE_MARKER`]); commands run in the given working directory.
 //!
 //! The commands are POSIX `sh` snippets. A real runner executes them; a fake
 //! fixture scripts [`COMMANDS`] (each entry says what the shell does).
 
 use std::fmt::Debug;
+use std::path::Path;
+use std::time::{Duration, Instant};
 
 use agend_core::traits::{CommandOutput, Runner};
 
@@ -16,6 +20,14 @@ use crate::block_on;
 pub const TIMEOUT_MS: u64 = 10_000;
 /// Timeout for [`TIMES_OUT`]; its command takes far longer.
 pub const SHORT_TIMEOUT_MS: u64 = 200;
+/// A timed-out `run` must return within this many ms of starting: ten times
+/// the timeout, but well before [`TIMES_OUT`] would finish on its own.
+pub const TIMEOUT_REPORT_LIMIT_MS: u64 = 2_000;
+/// File [`TIMES_OUT`] creates in the working directory if it is not stopped.
+pub const LATE_MARKER: &str = "timed-out-command-finished";
+/// How long after [`TIMES_OUT`] would have finished the case looks for
+/// [`LATE_MARKER`].
+pub const LATE_MARKER_GRACE_MS: u64 = 1_500;
 /// Prints the working directory; the expected stdout depends on the fixture.
 pub const PWD: &str = "pwd";
 
@@ -53,12 +65,13 @@ pub const SEPARATES_STREAMS: ContractCommand = ContractCommand {
     duration_ms: 0,
 };
 
+/// Sleeps, then writes [`LATE_MARKER`]; `sh` exits 0 after about 3 s.
 pub const TIMES_OUT: ContractCommand = ContractCommand {
-    command: "sleep 30",
+    command: "sleep 3; touch timed-out-command-finished",
     exit_code: 0,
     stdout: b"",
     stderr: b"",
-    duration_ms: 30_000,
+    duration_ms: 3_000,
 };
 
 pub const COMMANDS: [ContractCommand; 4] = [SUCCEEDS, FAILS, SEPARATES_STREAMS, TIMES_OUT];
@@ -69,7 +82,7 @@ pub trait RunnerFixture {
 
     fn runner(&self) -> &Self::Runner;
 
-    /// An existing directory, canonical (symlinks resolved).
+    /// An existing, fresh directory, canonical (symlinks resolved).
     fn working_directory(&self) -> &str;
 }
 
@@ -130,11 +143,33 @@ fn expect<F: RunnerFixture>(fx: &F, command: &ContractCommand) -> CaseResult {
 }
 
 fn timeout_reports_timed_out_without_exit_code<F: RunnerFixture>(fx: &F) -> CaseResult {
+    let started = Instant::now();
     let output = run_command(fx, TIMES_OUT.command, SHORT_TIMEOUT_MS)?;
+    let elapsed = started.elapsed();
     ensure(output.timed_out && output.exit_code.is_none(), || {
         format!(
             "`{}` with a {SHORT_TIMEOUT_MS} ms timeout: expected timed_out and no exit code, got {output:?}",
             TIMES_OUT.command
+        )
+    })?;
+    ensure(
+        elapsed < Duration::from_millis(TIMEOUT_REPORT_LIMIT_MS),
+        || {
+            format!(
+                "`{}` with a {SHORT_TIMEOUT_MS} ms timeout: reported after {} ms, limit {TIMEOUT_REPORT_LIMIT_MS} ms",
+                TIMES_OUT.command,
+                elapsed.as_millis()
+            )
+        },
+    )?;
+    let finished = Duration::from_millis(TIMES_OUT.duration_ms + LATE_MARKER_GRACE_MS);
+    std::thread::sleep(finished.saturating_sub(started.elapsed()));
+    let marker = Path::new(fx.working_directory()).join(LATE_MARKER);
+    ensure(!marker.exists(), || {
+        format!(
+            "`{}` kept running after it timed out: {} exists",
+            TIMES_OUT.command,
+            marker.display()
         )
     })
 }

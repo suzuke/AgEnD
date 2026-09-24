@@ -4,7 +4,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdout, Command, Stdio};
 
-use agend_testkit::fake_agent::claude::{ESC, IDLE_LINE, INTERRUPTED_LINE};
+use agend_testkit::fake_agent::claude::{ESC, IDLE_LINE, INTERRUPTED_LINE, TRANSCRIPT_DIR};
 use agend_testkit::tempdir::TempDir;
 use serde_json::Value;
 
@@ -139,6 +139,15 @@ fn stop_hook_block_runs_one_more_turn_and_esc_skips_stop() {
     assert_eq!(log[0]["source"], "startup");
     assert_eq!(log[0]["session_id"], "s-1");
     assert_eq!(log[1]["prompt"], "fix the bug");
+    // The transcript stays inside the project, so dropping the temp project
+    // removes it (no shared `<tmp>/fake-claude/s-1.jsonl` across runs).
+    let transcript = std::fs::canonicalize(root)
+        .unwrap()
+        .join(TRANSCRIPT_DIR)
+        .join("s-1.jsonl");
+    assert_eq!(log[0]["transcript_path"], transcript.to_str().unwrap());
+    let recorded = std::fs::read_to_string(&transcript).unwrap();
+    assert!(recorded.contains("fix the bug"), "{recorded}");
 }
 
 #[test]

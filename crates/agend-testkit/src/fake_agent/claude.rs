@@ -39,6 +39,9 @@ use super::{Args, reply_to};
 
 pub const ESC: u8 = 0x1b;
 pub const IDLE_LINE: &str = "fake-claude: idle";
+/// Where transcripts go, relative to the project dir (the real Claude Code
+/// writes under `~/.claude/projects/`; the fake keeps them in the project).
+pub const TRANSCRIPT_DIR: &str = ".claude/fake-transcripts";
 pub const INTERRUPTED_LINE: &str = "Interrupted · What should Claude do instead?";
 
 enum Event {
@@ -101,9 +104,8 @@ fn run(args: &Args) -> Result<(), String> {
         || format!("00000000-0000-4000-8000-{:012}", std::process::id()),
         str::to_owned,
     );
-    let transcript = std::env::temp_dir()
-        .join("fake-claude")
-        .join(format!("{session_id}.jsonl"));
+    // Inside the project, so a test's temp project takes it along on drop.
+    let transcript = cwd.join(TRANSCRIPT_DIR).join(format!("{session_id}.jsonl"));
     let mut hooks = load_hooks(&cwd.join(".claude/settings.json"))?;
     if let Some(extra) = args.get("--settings") {
         hooks.extend(load_hooks(Path::new(extra))?);

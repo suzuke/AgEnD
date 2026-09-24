@@ -86,7 +86,6 @@ impl Server {
     pub fn bind(requested: &Path, turn: Duration) -> io::Result<Server> {
         let bound = socket_path_for(requested);
         if bound != requested {
-            std::fs::create_dir_all(bound.parent().expect("short path has a parent"))?;
             let _ = std::fs::remove_file(&bound);
             std::os::unix::fs::symlink(&bound, requested)?;
         }
@@ -126,16 +125,15 @@ impl Drop for Server {
     }
 }
 
-/// `requested` itself if it fits, else `<tmp>/fake-codex-daemon/<hash>.sock`.
+/// `requested` itself if it fits, else `<tmp>/fake-codex-<hash>.sock` (a
+/// file directly in the temp dir, so nothing is left behind once removed).
 pub fn socket_path_for(requested: &Path) -> PathBuf {
     if requested.as_os_str().len() <= MAX_DIRECT_SOCKET_PATH {
         return requested.to_path_buf();
     }
     let mut hasher = DefaultHasher::new();
     requested.hash(&mut hasher);
-    std::env::temp_dir()
-        .join("fake-codex-daemon")
-        .join(format!("{:016x}.sock", hasher.finish()))
+    std::env::temp_dir().join(format!("fake-codex-{:016x}.sock", hasher.finish()))
 }
 
 struct Shared {

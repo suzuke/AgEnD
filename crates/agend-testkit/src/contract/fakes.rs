@@ -25,6 +25,10 @@ impl forge::ForgeFixture for FakeForge {
     fn commit_to(&self, branch: &str) -> String {
         self.push(branch)
     }
+
+    fn base_head(&self) -> String {
+        FakeForge::base_head(self)
+    }
 }
 
 impl store::StoreFixture for FakeStore {
