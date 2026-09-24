@@ -32,8 +32,8 @@ flowchart TB
         cli["agend CLI<br/>人與 agent 共用"]
         gui["GUI<br/>未來"]
     end
-    tg["Telegram<br/>需要你 + 各 team"]
-    gh["GitHub<br/>forge github 才用"]
+    tg["Telegram<br/>需要你 + 各 team<br/>（經 notifier）"]
+    gh["GitHub<br/>forge github 才用<br/>（經 forge）"]
 
     subgraph daemon["agend daemon · 常駐 · 單一 tokio runtime · DB 專屬執行緒 · 外部指令一律 tokio::process + timeout"]
         direction TB
@@ -55,8 +55,8 @@ flowchart TB
     tui <-->|"protocol v1（有版本）· agend-client · unix socket"| entry
     cli <--> entry
     gui -.-> entry
-    tg <-->|"notifier"| adapter
-    gh <-->|"forge github"| adapter
+    tg <--> adapter
+    gh <--> adapter
     adapter <-->|"holder 協定（有版本、向後相容；daemon 重啟後重連）"| h1
     adapter <--> h2
     adapter <--> h3

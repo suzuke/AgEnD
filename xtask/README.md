@@ -7,12 +7,12 @@
 
 ## 負責
 
-- `check-deps`：檢查每條規則的 crate 在 `cargo tree -e normal --target all` 裡沒有被禁止的 crate；檢查 agend-testkit 不是任何 crate 的一般依賴
+- `check-deps`：檢查每條規則的 crate 在 `cargo tree -e normal --target all` 裡沒有被禁止的 crate；檢查 agend-testkit 不是任何 crate 的一般依賴；檢查 `crates/agend-core/src/lib.rs` 有 `#![no_std]` 這一行，且 core 裡的 `extern crate std` 都直接在 `#[cfg(test)]` 下
 - `accept <關>`：對該關的 crate 跑 fmt、clippy、test，再跑 check-deps；demo 隨各關加入
 
 ## 不負責
 
-- 原始碼層級的規則（agend-core 不起程序、不開 socket／檔案）：由 clippy 與 `crates/agend-core/clippy.toml` 負責
+- agend-core 的純度：由編譯器保證（`#![no_std]` + `alloc`）；xtask 只確認這個屬性還在
 - 產生 protocol JSON schema、打包 release、錄製 backend 畫面 fixture（規劃中，未實作）
 
 ## 模組
@@ -25,6 +25,7 @@
 ## 依賴規則
 
 - 一般依賴：無（只用 std，透過 `$CARGO` 執行 cargo）
+- workspace 根目錄在執行時用 `cargo locate-project --workspace` 從目前目錄找，所以在 repo 副本裡跑會檢查副本本身
 - 不屬於 release binary
 
 ## 入口

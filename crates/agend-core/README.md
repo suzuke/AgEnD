@@ -2,7 +2,7 @@
 
 > **TL;DR**
 > - 純邏輯 crate：型別、協定、trait、流水線狀態機、policy、螢幕分類器。
-> - 記住：**不做任何 I/O**；依賴由 check-deps 管，原始碼用法由本 crate 的 `clippy.toml` 管。
+> - 記住：**`#![no_std]` + `alloc`**，編譯器保證沒有任何 I/O；時間只經 `Clock` trait。
 > - 下一步：第 1 關在這裡開始（見 docs/ROADMAP.md）。
 
 ## 負責
@@ -44,7 +44,8 @@
 
 - 一般依賴：無（只有 std）
 - 禁止依賴：async runtime、SQLite、network、process crate、任何其他 `agend-*`（`cargo xtask check-deps`）
-- 禁止使用：`std::process`、socket、`std::fs` I/O、`std::env::var*`、`std::thread::spawn`（clippy，`clippy.toml`）
+- `#![no_std]` + `alloc`：沒有檔案、程序、網路、環境變數、thread、stdio、時鐘；要雜湊表時用 `BTreeMap`／`BTreeSet`，錯誤型別用 `core::error::Error`（編譯器強制）
+- `cargo xtask check-deps` 確認 `#![no_std]` 這一行還在，且 `extern crate std` 只出現在 `#[cfg(test)]` 下
 
 ## 入口
 

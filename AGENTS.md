@@ -38,7 +38,7 @@ daemon 負責派工、worktree、checks、互審綁 head、merge；人只處理�
 | 規則 | 怎麼強制 |
 |---|---|
 | `agend-core` 不依賴 tokio、rusqlite、任何 process／network crate、其他 `agend-*` | `cargo xtask check-deps` |
-| `agend-core` 原始碼不起程序、不開 socket／檔案、不讀環境變數、不開 thread | clippy（`crates/agend-core/clippy.toml`，CI 以 `-D warnings` 跑） |
+| `agend-core` 是 `#![no_std]` + `alloc`：沒有任何 I/O（檔案、程序、網路、環境變數、thread、stdio、時鐘）；時間只經 `Clock` trait | 編譯器（std 不存在）；`cargo xtask check-deps` 確認 `#![no_std]` 還在、`extern crate std` 只出現在 `#[cfg(test)]` 下 |
 | `agend-shim`、`agend-client` 不依賴 async runtime、SQLite、`agend-daemon`（啟動要輕） | `cargo xtask check-deps` |
 | `agend-testkit` 只能當 dev-dependency | `cargo xtask check-deps` |
 | 模組之間只透過 `agend_core` 的 trait 與型別溝通 | code review |

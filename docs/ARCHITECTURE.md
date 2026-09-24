@@ -52,9 +52,9 @@
 | `agend-core` 沒有 async runtime、SQLite、network、process crate，也不依賴其他 `agend-*` | `cargo xtask check-deps` |
 | `agend-shim`、`agend-client` 沒有 async runtime、SQLite，也不依賴 `agend-daemon` | `cargo xtask check-deps` |
 | 任何 crate 都不能把 `agend-testkit` 當一般依賴 | `cargo xtask check-deps` |
-| `agend-core` 原始碼不起程序、不開 socket／檔案、不讀環境變數、不開 thread | clippy `disallowed-types`／`disallowed-methods`（`crates/agend-core/clippy.toml`） |
+| `agend-core` 是 `#![no_std]` + `alloc`：沒有任何 I/O（檔案、程序、網路、環境變數、thread、stdio、時鐘）；時間只經 `Clock` trait | 編譯器；`cargo xtask check-deps` 確認 `#![no_std]` 還在、`extern crate std` 只在 `#[cfg(test)]` 下 |
 
-依賴清單在 `xtask/src/check_deps.rs`（說明見 [xtask/README.md](../xtask/README.md)）；clippy 規則會解析型別，所以 import 寫法或 `use std as s;` 別名繞不過去。
+依賴清單在 `xtask/src/check_deps.rs`（說明見 [xtask/README.md](../xtask/README.md)）。core 的純度不靠「禁止 API 清單」：`no_std` 下 std 根本不存在，任何 import 寫法或別名都編譯不過。
 
 ## daemon 分層
 

@@ -4,10 +4,20 @@
 //! traits, the pipeline state machine, the policies and the screen
 //! classifier. Everything here is a pure function over data.
 //!
-//! Must NOT: depend on tokio, rusqlite, or any process/network crate, or on
-//! another `agend-*` crate (enforced by `cargo xtask check-deps`); spawn
-//! processes, open sockets or files, read env vars, or spawn threads (enforced
-//! by clippy via this crate's `clippy.toml`).
+//! The crate is `#![no_std]` + `alloc`: the compiler itself guarantees no
+//! filesystem, process, network, env, thread, stdio or clock access. Time
+//! comes in only through the `Clock` trait. Dependency rules (no tokio,
+//! rusqlite, process/network crates, other `agend-*`) are checked by
+//! `cargo xtask check-deps`, which also fails if `#![no_std]` is removed.
+//!
+//! Must NOT: gain a `std` feature or dependency that reintroduces I/O.
+
+#![no_std]
+
+extern crate alloc;
+
+#[cfg(test)]
+extern crate std;
 
 pub mod config;
 pub mod model;

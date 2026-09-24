@@ -6,6 +6,9 @@
 //!
 //! Must NOT: perform I/O or know about storage layout.
 
+use alloc::format;
+use alloc::string::String;
+
 /// Agent backends supported by v2.0 (plan §1; other v1 backends are out of scope).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Backend {

@@ -46,10 +46,33 @@ fn cargo() -> String {
     std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string())
 }
 
-/// Workspace root (the parent of this crate's directory).
+/// Workspace root of the checkout we are run from, resolved at runtime with
+/// `cargo locate-project --workspace` from the current directory. Not taken
+/// from `CARGO_MANIFEST_DIR`: a stale xtask binary built in another checkout
+/// would otherwise inspect that checkout instead of this one.
 fn workspace_root() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+    static ROOT: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    ROOT.get_or_init(|| match locate_workspace() {
+        Ok(root) => root,
+        Err(msg) => {
+            eprintln!("xtask: cannot find the workspace root: {msg}");
+            std::process::exit(2);
+        }
+    })
+    .clone()
+}
+
+fn locate_workspace() -> Result<std::path::PathBuf, String> {
+    let out = std::process::Command::new(cargo())
+        .args(["locate-project", "--workspace", "--message-format", "plain"])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    let manifest = std::path::PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
+    manifest
         .parent()
-        .expect("xtask lives one level below the workspace root")
-        .to_path_buf()
+        .map(std::path::Path::to_path_buf)
+        .ok_or_else(|| format!("unexpected manifest path {}", manifest.display()))
 }

@@ -1,7 +1,7 @@
 # agend-core 測試
 
 > **TL;DR**
-> - 只有純函式單元測試；不需要任何其他 crate 或程序。
+> - 只有純函式單元測試；crate 是 no_std，測試透過 `#[cfg(test)] extern crate std;` 才能用 std。
 > - 記住：測 consumer 時用 producer 產生輸入（例：`task_id_of_branch` 吃 `work_branch` 的輸出）。
 > - 下一步：第 1 關加入 property test 與 `code` workflow 模擬。
 
@@ -25,6 +25,7 @@ cargo test -p agend-core
 
 ## 還沒測的
 
+- [ ] no_std 本身不需要測試：由編譯器保證；移除 `#![no_std]` 會被 `cargo xtask check-deps` 抓到。
 - [ ] trait 與協定（尚未定義）
 - [ ] pipeline 狀態機、workflow 存檔檢查、merge 門檻、去抖動、衝突偵測、分派規則、螢幕分類器（第 1 關）
 - [ ] property test（規劃 §5.1）
