@@ -25,7 +25,7 @@
 | 12 `adapters` | [未開始](gates/gate-12-adapters.md) | claude + opencode driver、forge github、telegram | 先對假實作，再做真 backend smoke test |
 | 13 `install` | [未開始](gates/gate-13-install.md) | 安裝與發布（最後一關）：服務註冊、`agend uninstall`、`agend telegram setup`（由 daemon 配對）、`xtask release`、brew、GitHub release、`cargo install` | CI 用全新 HOME + 假 agent，從安裝到第一個 task 完成 < 5 分鐘；每個 `doctor` 檢查都有「故意弄壞 → 看到修正指令」的測試 |
 
-## 第 1 關：開工前提案（已確認）
+## 第 1 關：開工前先提案、經使用者確認才實作
 
 7 項提案（P1–P7）列在 [gate-01-core.md](gates/gate-01-core.md#開工前提案)，使用者 2026-09-25 確認，記為決策 D26–D32。實作草稿是在確認前寫的；草稿作者 2026-09-24 自己打的勾不算確認。
 
@@ -60,7 +60,7 @@
 
 需要改 agend-core 時：先改 core，重過第 1 關的測試。crate 之間不得有私下耦合。
 
-第 1 關的 demo 由 `agend-core` example 呼叫 protocol、policy、assignment 與 pipeline API。review 修正後，workspace tests（66 core tests、5 protocol compatibility tests）、clippy、check-deps 與 acceptance 已通過；仍待 fresh-context verifier 與使用者手動驗收。
+第 1 關的 demo 由 `agend-core` example 呼叫 protocol、policy、assignment 與 pipeline API。第 2 輪 review 修正後，workspace tests（85 core unit tests、2 個狀態機探索器 tests、5 protocol compatibility tests）、clippy、check-deps 與 acceptance 已通過；仍待 Q1 決定、fresh-context verifier 與使用者手動驗收。
 
 ## 第 0 階段（spike）
 
@@ -77,6 +77,7 @@ cat docs/gates/gate-01-core.md
 
 每完成一件事加一行（日期 + 一行 + commit／PR），新的在上面。
 
+- 2026-09-25 第 1 關第 2 輪 review 修正：head 變更不跳關、返工不遺失、要求修改退回作者、merge 門檻逐關檢查、取消獨立狀態、佔位符存檔檢查、reviewer 同 backend fallback；新增狀態機探索器（047101c、ac556c8、28b2b25）。
 - 2026-09-25 使用者確認第 1 關提案 P1–P7，記為 D26–D32；返工 fallback（Q1）仍待決定。
 - 2026-09-25 草稿原樣匯入 `feat/gate-01-core`（f540247）；草稿作者未經確認的 P1–P7 勾選先更正為未確認（432a842）。
 - 2026-09-25 （草稿作者）review 修正 pipeline、assignment、protocol 相容與 check-deps 自我檢查；workspace tests（66 core tests、5 protocol compatibility tests）、clippy、check-deps、accept core 通過；待 fresh-context verifier 與使用者親自驗收（工作樹，尚未提交）。

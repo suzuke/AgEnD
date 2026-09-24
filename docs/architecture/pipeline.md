@@ -19,6 +19,10 @@
 | `fanout` | 拆子 task 再匯合 | 子 task 來源；匯合 `all`／`first`／`pick` |
 
 - 所有關卡共用 `timeout` 與逾時動作（通知、改派、取消）。
+- 失敗與要求修改：`command` 失敗、`approval` 被要求修改（`review changes`）時，預設退回最近的 `work`，交回原作者返工；`on_fail` 可指定其他更前面的關卡；其他關卡失敗且沒有 `on_fail` 時 task 失敗。取消（人下指令或逾時動作「取消」）是獨立的終止狀態，不算失敗。
+- head 變更（新 commit、main 前進後 rebase）不會讓 task 往前：`work` 中只記錄新 head，返工不會被丟掉；`submit` 中記錄後仍要等提交完成；更後面的關卡退回最後一個 `work` 之後第一個 `command` 或綁 head 的 `approval` 重跑（D14 的保留規則照舊）。
+- merge 門檻：merge 前**每個** `command` 都對目前 head 通過，**每個** `approval` 都覆蓋目前 head（不綁 head 的只要有核准）。
+- `{pr}` 是 submit 回傳的 change id（如 PR 編號）；forge local 沒有，所以用到 `{pr}` 的 command 在 local forge 下會讓 task 失敗。佔位符不可加引號，展開時已逐一加單引號。
 - `fanout all` 收到整組 child IDs 後前進；`first` 記錄先完成的 child 並取消其他 child；`pick` 把候選 child IDs 傳給後續 approval，核准時選一個並取消其餘 child。
 - task 關係（不是關卡）：`parent`、`depends_on`（可改、可跨 team）、`superseded_by`。
 - task 操作：改派、reopen（done 之後由人打開）、supersede（輸入變了，新 task 接手，不算失敗）。
@@ -44,7 +48,8 @@
 - [ ] 關卡 id 唯一、kind 合法
 - [ ] submit 前有產出 branch 的 work
 - [ ] 有 submit／merge 就必須 `requires = ["repo"]`
-- [ ] merge 前至少有一個 `command` check
+- [ ] merge 前至少有一個 `command` check，且都在 merge 前最後一個 `work` 之後
+- [ ] `command` 的佔位符沒有加引號，且有來源：`{pr}` 前面要有 submit，`{head}`／`{branch}` 前面要有產出 branch 的 work
 - [ ] merge 前有 `bind_head` 的 approval，否則須明寫 `allow_unreviewed = true`
 - [ ] `on_fail` 只能指向前面的關卡
 - [ ] 角色存在於套用的 team
@@ -61,7 +66,7 @@
 - agent 不建立 instance：`agend task create --role <角色>`，daemon 依角色範本分派或開臨時 instance。
 - 角色範本：允許的 backend、模型等級、指示、人數上限（min／max）、session 策略。
 - 分派輸入分開帶角色目前／最小／最大 instance 數、可用 backend 額度與每個 instance 的 task concurrency；最大 headcount 未滿且有可用額度時可回傳 `SpawnEphemeral`。
-- 審查排除作者並優先不同 backend；退回修改回原作者；超過上限就排隊。
+- 審查排除作者並優先不同 backend（只允許同一個 backend 時仍用它）；退回修改回原作者；超過上限就排隊。
 - 等待 fanout 的父 task 不佔名額；偵測 team 內互等並通知；需要不存在的角色時轉成 ask；額度用盡改派其他允許的 backend。
 
 ## merge 與 main 前進
