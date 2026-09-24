@@ -101,7 +101,10 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
             names.join(", ")
         )
     })?;
-    println!("== gate {} ({}) ==", gate.number, gate.name);
+    println!(
+        "== gate {} ({}) == docs/gates/gate-{:02}-{}.md",
+        gate.number, gate.name, gate.number, gate.name
+    );
 
     for krate in gate.crates {
         step(&["fmt", "-p", krate, "--", "--check"])?;
@@ -157,6 +160,15 @@ mod tests {
         assert_eq!(find("13").map(|g| g.name), Some("install"));
         assert!(find("14").is_none());
         assert!(find("").is_none());
+    }
+
+    #[test]
+    fn every_gate_has_a_gate_page() {
+        let root = workspace_root();
+        for gate in GATES {
+            let page = format!("docs/gates/gate-{:02}-{}.md", gate.number, gate.name);
+            assert!(root.join(&page).is_file(), "missing {page}");
+        }
     }
 
     #[test]

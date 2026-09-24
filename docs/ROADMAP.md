@@ -2,35 +2,32 @@
 
 > **TL;DR**
 > - 依 crate 由下往上分 13 關；每關單獨驗收，使用者確認後才開下一關（D22）。
-> - 目前狀態：**第 0 階段（spike）完成；第 1 關尚未開始**。骨架與文件已就位。
-> - 下一步：開第 1 關（agend-core），驗收指令 `cargo xtask accept core`。
+> - 目前狀態：**第 1 關提案中**；每關狀態看下表，做了什麼看最下面的「進度紀錄」。
+> - 下一步：逐條確認 [第 1 關的提案](gates/gate-01-core.md#開工前提案)。
 
 ## 13 關
 
-| 關 | 範圍 | 驗收（可觀察） |
-|---|---|---|
-| 1 `core` | agend-core：型別、兩套協定（client + holder）、trait、流水線狀態機（6 種關卡）、busy policy、去抖動、衝突偵測、merge 門檻（patch-id）、螢幕分類器 | `cargo xtask accept core` 跑測試並印出一個模擬 task 走完 `code` workflow（純邏輯，無 daemon） |
-| 2 `testkit` | 每個 trait 的假實作、契約測試套件、假 daemon、假 agent 程式 | 契約測試通過；假 agent 可單獨啟動並回應 |
-| 3 `shim` | git／kill 防護、導向 worktree、protected-ref、快照與還原 | 在暫存 repo 以 `git` 名稱執行 shim：導向、拒絕、快照後還原 |
-| 4 `holder` | PTY、畫面、附屬程序、holder 協定 | `agend holder` 包 bash + 小型探測 client：讀畫面、送鍵、中途斷線重連，bash 存活 |
-| 5 `store` | daemon store：SQLite schema、migration、保留期限、每日快照 | in-memory 測試；xtask 命令印出資料表 |
-| 6 `daemon-holder` | 整合關：runtime adapter | 真 daemon + 真 holder；重啟 daemon，agent 與畫面存活 |
-| 7 `codex` | codex driver + 送達模型、三級忙碌策略 | 對假 app-server；可選的真 codex smoke test |
-| 8 `client` | 整合關：agend-client + protocol server | CLI 連得上；daemon 重啟時會重試 |
-| 9 `cli` | agend CLI：agent 命令、操作者命令、status；安裝相關只做 `doctor`、`init`（讓前面各關能在本機跑；`init` 的服務註冊步驟在第 13 關補上） | 對假 daemon 驗每個命令的輸出與錯誤；再對真 daemon |
-| 10 `pipeline` | daemon：pipeline、git、runner、forge local、supervisor、reconcile | 假 driver + 暫存 repo：task 從派工走到 merge |
-| 11 `tui` | attention-first TUI（沿用 DEMO-01 原型的教訓：`github.com/suzuke/agend-attention-tui-demo`，private） | 先餵假事件，再接真 daemon |
-| 12 `adapters` | claude + opencode driver、forge github、telegram | 先對假實作，再做真 backend smoke test |
-| 13 `install` | 安裝與發布（最後一關，需要其他全部）：launchd／systemd 服務註冊、`agend uninstall`（移除服務與 shim；刪資料前先問）、`agend telegram setup`（CLI 請 daemon 配對：貼 token → 使用者對 bot 傳 `/start` → chat id 加入 allowlist；配對由 daemon 的 notifier 做，CLI 沒有 Telegram client）、`xtask release` 打包、brew formula、GitHub release workflow、`cargo install` | CI 用全新 HOME + 假 agent，從安裝到第一個 task 完成 < 5 分鐘；每個 `doctor` 檢查都有「故意弄壞 → 看到修正指令」的測試 |
+每關的細節、你親自驗收的步驟與紀錄在 [docs/gates/](gates/README.md)。
+
+| 關 | 狀態 | 範圍 | 驗收（可觀察） |
+|---|---|---|---|
+| 1 `core` | [提案中](gates/gate-01-core.md) | agend-core：型別、兩套協定（client + holder）、trait、流水線狀態機（6 種關卡）、busy policy、去抖動、衝突偵測、merge 門檻（patch-id）、螢幕分類器 | `cargo xtask accept core` 跑測試並印出一個模擬 task 走完 `code` workflow（純邏輯，無 daemon） |
+| 2 `testkit` | [未開始](gates/gate-02-testkit.md) | 每個 trait 的假實作、契約測試套件、假 daemon、假 agent 程式 | 契約測試通過；假 agent 可單獨啟動並回應 |
+| 3 `shim` | [未開始](gates/gate-03-shim.md) | git／kill 防護、導向 worktree、protected-ref、快照與還原 | 在暫存 repo 以 `git` 名稱執行 shim：導向、拒絕、快照後還原 |
+| 4 `holder` | [未開始](gates/gate-04-holder.md) | PTY、畫面、附屬程序、holder 協定 | `agend holder` 包 bash + 小型探測 client：讀畫面、送鍵、中途斷線重連，bash 存活 |
+| 5 `store` | [未開始](gates/gate-05-store.md) | daemon store：SQLite schema、migration、保留期限、每日快照 | in-memory 測試；xtask 命令印出資料表 |
+| 6 `daemon-holder` | [未開始](gates/gate-06-daemon-holder.md) | 整合關：runtime adapter | 真 daemon + 真 holder；重啟 daemon，agent 與畫面存活 |
+| 7 `codex` | [未開始](gates/gate-07-codex.md) | codex driver + 送達模型、三級忙碌策略 | 對假 app-server；可選的真 codex smoke test |
+| 8 `client` | [未開始](gates/gate-08-client.md) | 整合關：agend-client + protocol server | CLI 連得上；daemon 重啟時會重試 |
+| 9 `cli` | [未開始](gates/gate-09-cli.md) | agend CLI：agent 命令、操作者命令、status；安裝相關只做 `doctor`、`init`（讓前面各關能在本機跑；`init` 的服務註冊步驟在第 13 關補上） | 對假 daemon 驗每個命令的輸出與錯誤；再對真 daemon |
+| 10 `pipeline` | [未開始](gates/gate-10-pipeline.md) | daemon：pipeline、git、runner、forge local、supervisor、reconcile | 假 driver + 暫存 repo：task 從派工走到 merge |
+| 11 `tui` | [未開始](gates/gate-11-tui.md) | attention-first TUI（沿用 DEMO-01 原型的教訓：`github.com/suzuke/agend-attention-tui-demo`，private） | 先餵假事件，再接真 daemon |
+| 12 `adapters` | [未開始](gates/gate-12-adapters.md) | claude + opencode driver、forge github、telegram | 先對假實作，再做真 backend smoke test |
+| 13 `install` | [未開始](gates/gate-13-install.md) | 安裝與發布（最後一關）：服務註冊、`agend uninstall`、`agend telegram setup`（由 daemon 配對）、`xtask release`、brew、GitHub release、`cargo install` | CI 用全新 HOME + 假 agent，從安裝到第一個 task 完成 < 5 分鐘；每個 `doctor` 檢查都有「故意弄壞 → 看到修正指令」的測試 |
 
 ## 第 1 關：開工前先提案、經使用者確認才實作
 
-- [ ] client protocol 與 holder protocol 的 wire format 與版本協商
-- [ ] trait 簽章：`Driver`、`Forge`、`Store`、`Runtime`、`Notifier`、`Clock`
-- [ ] `command` 關卡的 runner 是否需要自己的 trait
-- [ ] GitHub CI 結果怎麼進流水線（Checks 已是 `command` 關卡）：由 forge github 的 submit 帶回，或由 `command` 跑 `gh pr checks`
-- [ ] 去抖動的 N 秒
-- [ ] 每張表的保留期限
+7 項提案（P1–P7）只列在 [gate-01-core.md](gates/gate-01-core.md#開工前提案)，逐條勾選確認後才實作。
 
 ## 安裝相關的程式放在哪
 
@@ -54,34 +51,34 @@
 
 - [ ] `cargo test -p <crate>` 單獨通過
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings` 乾淨
-- [ ] `cargo xtask check-deps` 通過
+- [ ] `cargo xtask check-deps` 通過（不能是 SKIPPED）
 - [ ] `cargo xtask accept <關>` 存在、會跑測試並印出人看得懂的 demo
 - [ ] 該 crate 的 `README.md`／`TESTING.md` 已更新
 - [ ] fresh-context verifier 重跑並嘗試推翻
+- [ ] 使用者完成該關「你親自驗收」清單並填寫驗收紀錄
 - [ ] 使用者確認後才開下一關
 
 需要改 agend-core 時：先改 core，重過第 1 關的測試。crate 之間不得有私下耦合。
 
 `cargo xtask accept <關>` 目前是骨架：對該關的 crate 跑 fmt、clippy、test 與 check-deps，並明說 demo 尚未實作。demo 隨各關加入。
 
-## 第 0 階段（spike）結果
+## 第 0 階段（spike）
 
-全部完成，結論在 [BACKEND-BEHAVIORS.md](BACKEND-BEHAVIORS.md)。
-
-| # | 問題 | 結論 |
-|---|---|---|
-| 1 | 附屬程序存活時 daemon 能否重連並補回事件 | codex、opencode 可以（以獨立程序測，非 holder 內） |
-| 2 | codex 是否通知 TUI 手動發起的 turn | 可以，但要先 `thread/resume` |
-| 3 | claude `Esc` 後 channel 訊息是否立即處理 | 有 CLAUDE.md 來源說明 3/3；程式化 send-now 只在 headless 驗證 |
-| 4 | opencode 插入與中斷 | 無插入；abort 可用 |
-| 5 | 以明確 id resume | 三個都可以 |
-| 6 | codex sandbox 內 CLI 能否連 unix socket | 預設被擋；需 approval 或把 socket 放進 workspace |
-| 7 | claude 以 allowlist 免除 `agend` 權限提示 | allow 規則有效；反例與 `agend` 本身未直接驗證 |
-| 8 | 啟動提示能否全部避免；授權是否有結構化管道 | codex 可預寫 trust；opencode 無提示；claude 預寫設定 BLOCKED。授權：codex、opencode 可用，claude 未驗證 |
+已完成；8 個問題的結論在 [BACKEND-BEHAVIORS.md](BACKEND-BEHAVIORS.md#第-0-階段的-8-個問題)。
 
 ## 下一步
 
 ```bash
-cargo xtask accept core    # 目前只跑檢查；demo 屬於第 1 關的工作
-cat crates/agend-core/README.md
+cat docs/gates/gate-01-core.md
+~/.cargo/bin/cargo xtask accept core    # 目前只跑檢查；demo 屬於第 1 關的工作
 ```
+
+## 進度紀錄
+
+每完成一件事加一行（日期 + 一行 + commit／PR），新的在上面。
+
+- 2026-09-24 第 1 關提案中（#102）
+- 2026-09-24 README 系統圖改為 SVG（#101, e893877）
+- 2026-09-24 CI 首次通過（ubuntu + macOS，8a5b0fd，[run 35979128418](https://github.com/suzuke/AgEnD/actions/runs/35979128418)）
+- 2026-09-24 骨架與文件 push 到 v2（8a5b0fd）
+- 2026-09-24 spike 完成（codex／claude／opencode + claude 追加；紀錄在 [research/](research/README.md)：[spike-codex](research/spike-codex.md)、[spike-claude](research/spike-claude.md)、[spike-claude-f](research/spike-claude-f.md)、[spike-opencode](research/spike-opencode.md)、[runtime-spike](research/runtime-spike.md)）

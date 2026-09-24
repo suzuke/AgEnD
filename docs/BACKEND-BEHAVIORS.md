@@ -43,6 +43,19 @@
 | claude | [backends/claude-code.md](backends/claude-code.md) |
 | opencode | [backends/opencode.md](backends/opencode.md) |
 
+## 第 0 階段的 8 個問題
+
+| # | 問題 | 結論 |
+|---|---|---|
+| 1 | 附屬程序存活時 daemon 能否重連並補回事件 | codex、opencode 可以（以獨立程序測，非 holder 內） |
+| 2 | codex 是否通知 TUI 手動發起的 turn | 可以，但要先 `thread/resume` |
+| 3 | claude `Esc` 後 channel 訊息是否立即處理 | 有 CLAUDE.md 來源說明 3/3；程式化 send-now 只在 headless 驗證 |
+| 4 | opencode 插入與中斷 | 無插入；abort 可用 |
+| 5 | 以明確 id resume | 三個都可以 |
+| 6 | codex sandbox 內 CLI 能否連 unix socket | 預設被擋；需 approval 或把 socket 放進 workspace |
+| 7 | claude 以 allowlist 免除 `agend` 權限提示 | allow 規則有效；反例與 `agend` 本身未直接驗證 |
+| 8 | 啟動提示能否全部避免；授權是否有結構化管道 | codex 可預寫 trust；opencode 無提示；claude 預寫設定 BLOCKED。授權：codex、opencode 可用，claude 未驗證 |
+
 ## 仍未驗證
 
 - [ ] claude：在隔離的 `CLAUDE_CONFIG_DIR` 預寫設定以跳過 trust／dev-channels 提示（需要重新登入，BLOCKED）。

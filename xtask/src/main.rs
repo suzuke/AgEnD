@@ -23,7 +23,8 @@ Commands:
   check-deps [--allow-skip]
                    Check crate-boundary rules (--allow-skip: do not fail if the
                    no-std target is not installed; still prints SKIPPED)
-  accept <gate>    Run the acceptance checks of a build gate (1-13 or its name)
+  accept <gate>    Run the acceptance checks of a build gate (1-13 or its name);
+                   each gate is described in docs/gates/gate-NN-<name>.md
 ";
 
 fn main() -> ExitCode {
