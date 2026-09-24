@@ -5,8 +5,9 @@
 //! D33: an agent holds at most one task, from assignment until the task is
 //! done or cancelled, including while it waits for submit, checks or review;
 //! a review assignment is the reviewer's one task. Rework therefore always
-//! returns to the task's holder, who cannot be busy with something else. The
-//! holder is replaced only when it hits a usage limit or is removed.
+//! returns to the task holder, who cannot be busy with something else. The
+//! task holder is replaced only when it hits a usage limit or is removed.
+//! ("Holder" alone means the per-instance holder process, not this.)
 //!
 //! Must NOT: spawn instances or talk to drivers.
 
@@ -35,7 +36,7 @@ impl Candidate {
 }
 
 /// An ephemeral instance may be reclaimed only once the task it holds has
-/// ended, so a rework author is never reclaimed mid-task (D33).
+/// ended, so a task holder doing rework is never reclaimed mid-task (D33).
 pub fn may_reclaim(candidate: &Candidate) -> bool {
     candidate.ephemeral && candidate.is_free()
 }
@@ -58,10 +59,11 @@ pub enum Purpose {
         author_backend: Backend,
     },
     /// The task's work continues — rework after requested changes, or its
-    /// holder has to be replaced. `branch` and `review_comments` travel with
-    /// the task if another instance takes it over.
+    /// task holder has to be replaced. `branch` and `review_comments` travel
+    /// with the task if another instance takes it over.
     Rework {
-        holder: String,
+        task_id: String,
+        task_holder: String,
         branch: Option<String>,
         review_comments: Vec<String>,
     },
@@ -88,7 +90,7 @@ pub enum QueueReason {
     NoEligibleReviewer,
 }
 
-/// What a new holder receives when a task changes hands.
+/// What a new task holder receives when a task changes hands.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Handoff {
     pub from_instance: String,
@@ -101,7 +103,7 @@ pub enum AssignmentDecision {
     Assigned {
         instance_id: String,
     },
-    /// The holder cannot continue; another instance takes the task over.
+    /// The task holder cannot continue; another instance takes the task over.
     Reassigned {
         instance_id: String,
         handoff: Handoff,
@@ -120,24 +122,32 @@ pub enum AssignmentDecision {
 
 pub fn choose(request: &AssignmentRequest, candidates: &[Candidate]) -> AssignmentDecision {
     if let Purpose::Rework {
-        holder,
+        task_id,
+        task_holder,
         branch,
         review_comments,
     } = &request.purpose
     {
+        // Instance ids are team-scoped. The task holder still counts only if
+        // it holds this task, its backend is still allowed and the role still
+        // exists; otherwise it is treated as removed.
         let current = candidates.iter().find(|candidate| {
-            candidate.team_id == request.team_id && candidate.instance_id == *holder
+            candidate.team_id == request.team_id
+                && candidate.instance_id == *task_holder
+                && candidate.held_task.as_deref() == Some(task_id.as_str())
+                && is_allowed(candidate, &request.allowed_backends)
+                && request.role_capacity.is_some()
         });
-        // The holder keeps the task: it cannot be busy with another one.
+        // The task holder keeps the task: it cannot be busy with another one.
         if let Some(current) = current
             && current.usage_available
         {
             return AssignmentDecision::Assigned {
-                instance_id: holder.clone(),
+                instance_id: task_holder.clone(),
             };
         }
         let handoff = Handoff {
-            from_instance: holder.clone(),
+            from_instance: task_holder.clone(),
             branch: branch.clone(),
             review_comments: review_comments.clone(),
         };
@@ -213,10 +223,10 @@ pub fn choose(request: &AssignmentRequest, candidates: &[Candidate]) -> Assignme
     }
 }
 
-/// The holder cannot continue. Usage limit (`current` still present): a free
-/// same-role member on another allowed backend, else an ephemeral instance on
-/// another backend, else queue for the usage limit. Removed holder
-/// (`current` is `None`): any free same-role member, else an ephemeral
+/// The task holder cannot continue. Usage limit (`current` still present): a
+/// free same-role member on another allowed backend, else an ephemeral
+/// instance on another backend, else queue for the usage limit. Removed task
+/// holder (`current` is `None`): any free same-role member, else an ephemeral
 /// instance within headcount, else queue.
 fn take_over(
     request: &AssignmentRequest,
@@ -234,7 +244,7 @@ fn take_over(
             reason: QueueReason::InvalidRoleCapacity,
         };
     }
-    let excluded_backend = current.map(|holder| holder.backend);
+    let excluded_backend = current.map(|task_holder| task_holder.backend);
     if let Some(candidate) = free_candidates(request, candidates, Some(&handoff.from_instance))
         .into_iter()
         .find(|candidate| Some(candidate.backend) != excluded_backend)
@@ -383,9 +393,10 @@ mod tests {
         }
     }
 
-    fn rework(holder: &str) -> Purpose {
+    fn rework(task_holder: &str) -> Purpose {
         Purpose::Rework {
-            holder: holder.into(),
+            task_id: "T-1".into(),
+            task_holder: task_holder.into(),
             branch: Some("agend/T-1/demo".into()),
             review_comments: vec!["rename the flag".into()],
         }
@@ -492,17 +503,17 @@ mod tests {
         );
     }
 
-    /// D33 rule 2: rework returns to the task's holder, who still holds it.
+    /// D33 rule 2: rework returns to the task holder, who still holds it.
     #[test]
-    fn rework_returns_to_the_holder_even_though_it_holds_the_task() {
-        let holder = candidate("author", Backend::Codex, Some("T-1"), true);
+    fn rework_returns_to_the_task_holder_that_still_holds_the_task() {
+        let task_holder = candidate("author", Backend::Codex, Some("T-1"), true);
         let other = candidate("other", Backend::Claude, None, true);
         let full = AssignmentRequest {
             role_capacity: capacity(2, 2),
             ..request(rework("author"))
         };
         assert_eq!(
-            choose(&full, &[holder, other]),
+            choose(&full, &[task_holder, other]),
             AssignmentDecision::Assigned {
                 instance_id: "author".into()
             }
@@ -510,29 +521,29 @@ mod tests {
     }
 
     #[test]
-    fn rework_finds_the_holder_even_when_their_role_changed() {
-        let mut holder = candidate("author", Backend::Codex, Some("T-1"), true);
-        holder.role = "reviewer".into();
+    fn rework_finds_the_task_holder_even_when_their_role_changed() {
+        let mut task_holder = candidate("author", Backend::Codex, Some("T-1"), true);
+        task_holder.role = "reviewer".into();
         assert_eq!(
-            choose(&request(rework("author")), &[holder]),
+            choose(&request(rework("author")), &[task_holder]),
             AssignmentDecision::Assigned {
                 instance_id: "author".into()
             }
         );
     }
 
-    /// D33 rule 3: a holder at its usage limit hands the task, with branch and
+    /// D33 rule 3: a task holder at its usage limit hands the task, with branch and
     /// review comments, to a free same-role member on another backend; else
     /// an ephemeral instance on another backend; else it queues.
     #[test]
     fn usage_limited_rework_moves_to_another_backend_with_the_branch() {
-        let holder = candidate("author", Backend::Codex, Some("T-1"), false);
+        let task_holder = candidate("author", Backend::Codex, Some("T-1"), false);
         let same_backend = candidate("codex-2", Backend::Codex, None, true);
         let other_backend = candidate("claude-1", Backend::Claude, None, true);
         assert_eq!(
             choose(
                 &request(rework("author")),
-                &[holder.clone(), same_backend.clone(), other_backend]
+                &[task_holder.clone(), same_backend.clone(), other_backend]
             ),
             AssignmentDecision::Reassigned {
                 instance_id: "claude-1".into(),
@@ -544,7 +555,7 @@ mod tests {
             ..request(rework("author"))
         };
         assert_eq!(
-            choose(&spawn, &[holder.clone(), same_backend.clone()]),
+            choose(&spawn, &[task_holder.clone(), same_backend.clone()]),
             AssignmentDecision::SpawnEphemeral {
                 backend: Backend::Opencode,
                 handoff: Some(handoff("author")),
@@ -555,18 +566,18 @@ mod tests {
             ..spawn
         };
         assert_eq!(
-            choose(&full, &[holder, same_backend]),
+            choose(&full, &[task_holder, same_backend]),
             AssignmentDecision::Queue {
                 reason: QueueReason::UsageLimit
             }
         );
     }
 
-    /// D33 rule 3: a holder removed by the operator is replaced immediately
+    /// D33 rule 3: a task holder removed by the operator is replaced immediately
     /// by any free same-role member, or an ephemeral instance within
     /// headcount.
     #[test]
-    fn removed_holder_is_replaced_immediately() {
+    fn removed_task_holder_is_replaced_immediately() {
         let same_backend = candidate("codex-2", Backend::Codex, None, true);
         assert_eq!(
             choose(&request(rework("author")), &[same_backend]),
@@ -597,12 +608,12 @@ mod tests {
 
     /// D33 rule 3: an ephemeral instance is reclaimed only after its task.
     #[test]
-    fn ephemeral_holder_is_not_reclaimed_before_its_task_ends() {
-        let mut holder = candidate("eph-1", Backend::Claude, Some("T-1"), true);
-        holder.ephemeral = true;
-        assert!(!may_reclaim(&holder));
-        holder.held_task = None;
-        assert!(may_reclaim(&holder));
+    fn ephemeral_task_holder_is_not_reclaimed_before_its_task_ends() {
+        let mut task_holder = candidate("eph-1", Backend::Claude, Some("T-1"), true);
+        task_holder.ephemeral = true;
+        assert!(!may_reclaim(&task_holder));
+        task_holder.held_task = None;
+        assert!(may_reclaim(&task_holder));
         let persistent = candidate("dev-1", Backend::Claude, None, true);
         assert!(!may_reclaim(&persistent));
     }
@@ -710,6 +721,51 @@ mod tests {
                 backend: Backend::Codex,
                 handoff: None,
             }
+        );
+    }
+
+    /// Verifier (D33 edge cases): the task holder counts only while it is in
+    /// the same team, holds this task and runs on an allowed backend, and the
+    /// role still exists; otherwise the task is reassigned with its handoff.
+    #[test]
+    fn verifier_task_holder_that_no_longer_qualifies_is_treated_as_removed() {
+        let free = candidate("dev-2", Backend::Claude, None, true);
+        let reassigned = AssignmentDecision::Reassigned {
+            instance_id: "dev-2".into(),
+            handoff: handoff("author"),
+        };
+
+        let mut other_team = candidate("author", Backend::Codex, Some("T-1"), true);
+        other_team.team_id = "team-b".into();
+        assert_eq!(
+            choose(&request(rework("author")), &[other_team, free.clone()]),
+            reassigned
+        );
+
+        let other_task = candidate("author", Backend::Codex, Some("T-9"), true);
+        assert_eq!(
+            choose(&request(rework("author")), &[other_task, free.clone()]),
+            reassigned
+        );
+
+        let disallowed = candidate("author", Backend::Codex, Some("T-1"), true);
+        let only_claude = AssignmentRequest {
+            allowed_backends: vec![Backend::Claude],
+            ..request(rework("author"))
+        };
+        assert_eq!(
+            choose(&only_claude, &[disallowed, free.clone()]),
+            reassigned
+        );
+
+        let no_role = AssignmentRequest {
+            role_capacity: None,
+            ..request(rework("author"))
+        };
+        let task_holder = candidate("author", Backend::Codex, Some("T-1"), true);
+        assert_eq!(
+            choose(&no_role, &[task_holder, free]),
+            AssignmentDecision::AskForRole { role: "dev".into() }
         );
     }
 }
