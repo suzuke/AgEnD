@@ -77,6 +77,7 @@ cat docs/gates/gate-01-core.md
 
 每完成一件事加一行（日期 + 一行 + commit／PR），新的在上面。
 
+- 2026-09-24 AGENTS.md 加入必守的 Git 工作流程：branch + worktree、只經 PR 合併（#103）
 - 2026-09-24 第 1 關提案中（#102）
 - 2026-09-24 README 系統圖改為 SVG（#101, e893877）
 - 2026-09-24 CI 首次通過（ubuntu + macOS，8a5b0fd，[run 35979128418](https://github.com/suzuke/AgEnD/actions/runs/35979128418)）
