@@ -11,7 +11,7 @@
 
 | 檔案 | 是什麼 | 支持的決策／文件 |
 |---|---|---|
-| [REWRITE-PLAN.md](REWRITE-PLAN.md) | 設計階段的正式計畫（規劃 r4）與 D1–D23 原文 | 全部；後來的決策優先於規劃本文 |
+| [REWRITE-PLAN.md](REWRITE-PLAN.md) | 設計階段的正式計畫（規劃 r4）與 D1–D24 原文 | 全部；後來的決策優先於規劃本文 |
 | [spike-codex.md](spike-codex.md) | codex 0.156.1 app-server 實測（S1–S7） | D3、D4、BACKEND-BEHAVIORS |
 | [spike-claude.md](spike-claude.md) | Claude Code 2.1.281 實測（C1–C7） | D16、BACKEND-BEHAVIORS |
 | [spike-claude-f.md](spike-claude-f.md) | claude 追加實測（F1–F5：來源說明 0/3 → 3/3、Stop hook 排隊） | D16 |

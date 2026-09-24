@@ -38,7 +38,7 @@
 | `policy::debounce` | 去抖動 |
 | `policy::conflict` | 檔案重疊偵測 |
 | `policy::merge_gate` | merge 門檻、D14 核准保留 |
-| `policy::assign` | D18 分派規則（放 core 是骨架的選擇） |
+| `policy::assign` | D18 分派規則；daemon 只提供候選成員與負載等輸入（D25） |
 | `screen` | hard gate 分類器 |
 | `setup` | 安裝規則（第 13 關）：已測的 backend 版本範圍、登入判斷、git 最低版本、launchd／systemd unit 文字；只有資料與純函式 |
 

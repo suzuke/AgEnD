@@ -5,7 +5,7 @@
 > - 記住：**crate 邊界就是架構**，由 `cargo xtask check-deps` 強制。
 > - 下一步：系統圖看 [README](../README.md#系統圖)；細節看本頁底部的分頁連結。
 
-來源：規劃 r4（§4、§5）與決策 D1–D23。後來的決策優先於規劃本文。
+來源：規劃 r4（§4、§5）與決策 D1–D25。後來的決策優先於規劃本文。
 
 ## 程序模型
 
@@ -90,7 +90,7 @@ agend-core 不用 std（`#![no_std]` + `alloc`），時間只經 `Clock` trait�
 | `policy/{busy,debounce,conflict,merge_gate,assign}` | 忙碌策略、去抖動、衝突偵測、merge 門檻與 patch-id、角色分派 |
 | `screen` | hard gate 分類器；規則是資料檔 |
 
-`policy/assign`（D18 分派規則）放在 core 是骨架的選擇，來源沒有指定位置。
+`policy/assign`：D18 分派規則是純邏輯，放在 core；daemon 只提供候選成員與負載等輸入（D25）。
 
 ## 細節
 
@@ -100,13 +100,13 @@ agend-core 不用 std（`#![no_std]` + `alloc`），時間只經 `Clock` trait�
 | 訊息送達、狀態偵測、啟動提示 | [architecture/delivery.md](architecture/delivery.md) |
 | TUI、設定與目錄、安裝 | [architecture/tui-and-setup.md](architecture/tui-and-setup.md) |
 
-## 待定（來源未決定）
+## 待定
 
-- [ ] 兩套協定的 wire format 與版本協商方式。
-- [ ] `traits` 的方法簽章（第 1 關設計）。
-- [ ] `command` 關卡的 runner 是否需要自己的 trait 供假實作；規劃 §5.1 原本有 Checks trait，D19／D20 後已不存在。
-- [ ] forge CI（GitHub checks）結果怎麼進流水線：規劃原本的「Checks forge」在 D19／D20 後沒有新的對應說法。
-- [ ] 去抖動的 N 秒、快照保留份數 N、各表保留期限。
+第 1 關開工前要提案的事項只列在一個地方：[ROADMAP.md](ROADMAP.md#第-1-關開工前先提案經使用者確認才實作)。
+
+另外還沒決定、不在那份清單裡的：
+
+- [ ] 每日 `VACUUM INTO` 快照保留的份數 N。
 
 ## 下一步
 

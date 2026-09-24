@@ -12,6 +12,13 @@
   2. agend-testkit 不是任何 crate 的一般依賴
   3. agend-core：`cargo metadata` 顯示沒有 build script、沒有 `[features]`、沒有 allowlist 以外的依賴；而且能以 `--all-features`、`-F unsafe-code` 對無 std 的 `thumbv7em-none-eabihf` 編譯（見 `check_core.rs`）
   4. target 沒裝時印 `SKIPPED` 並失敗；`--allow-skip` 才不失敗（仍印 SKIPPED）
+
+`SKIPPED` 代表**沒有驗證**，不是通過。
+
+- 本機要驗證：`rustup target add thumbv7em-none-eabihf`，再跑 `~/.cargo/bin/cargo xtask check-deps`（不加 `--allow-skip`）。Homebrew 的 `cargo` 沒有額外 target，一定會 SKIPPED。
+- `--allow-skip` 只在你明白這一項沒驗證時用；它仍印出 SKIPPED。
+- CI 一定會跑這一項（不加 `--allow-skip`）。
+
 - `accept <關>`：對該關的 crate 跑 fmt、clippy、test，再跑 check-deps；demo 隨各關加入
 
 ## 不負責

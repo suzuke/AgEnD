@@ -50,7 +50,11 @@ daemon 負責派工、worktree、checks、互審綁 head、merge；人只處理�
 
 CI（`.github/workflows/ci.yml`）在 ubuntu 與 macOS 跑同一組檢查。
 
-本機若 `cargo` 是 Homebrew 版（沒有額外 target），check-deps 會印 `SKIPPED` 並失敗。改用 rustup 的 cargo：`~/.cargo/bin/cargo xtask check-deps`（`rust-toolchain.toml` 會裝好 target）；只想跑其他檢查可加 `--allow-skip`，它仍會印出 SKIPPED。
+`SKIPPED` 代表**沒有驗證**，不是通過。
+
+- 本機要驗證：`rustup target add thumbv7em-none-eabihf`，再跑 `~/.cargo/bin/cargo xtask check-deps`（不加 `--allow-skip`）。Homebrew 的 `cargo` 沒有額外 target，一定會 SKIPPED。
+- `--allow-skip` 只在你明白這一項沒驗證時用；它仍印出 SKIPPED。
+- CI 一定會跑這一項（不加 `--allow-skip`）。
 
 ## 指令
 
@@ -66,7 +70,14 @@ cargo xtask accept <關>                                # 1–13 或名稱，如
 
 工具鏈釘在 `rust-toolchain.toml`（1.96.0，含 rustfmt、clippy）。
 
-## 一個改動的完成定義
+## 完成定義（兩種）
+
+| 範圍 | 條件 |
+|---|---|
+| 一個改動 | 下方清單：fmt、clippy、測試、check-deps、文件 |
+| 一關 | 「一個改動」的全部 + `cargo xtask accept <關>` 的 demo + fresh-context verifier 重跑並嘗試推翻 + 使用者確認（見 [ROADMAP](docs/ROADMAP.md#每關的完成定義)） |
+
+### 一個改動
 
 - [ ] `cargo fmt --all -- --check` 通過
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings` 通過
@@ -74,7 +85,6 @@ cargo xtask accept <關>                                # 1–13 或名稱，如
 - [ ] `cargo xtask check-deps` 通過
 - [ ] 行為變了 → 對應的 crate `README.md`／`TESTING.md` 與 `docs/` 已更新
 
-一關的完成定義（多了 `accept` demo、verifier、使用者確認）見 [docs/ROADMAP.md](docs/ROADMAP.md#每關的完成定義)。
 
 ## 寫作與程式規則
 
@@ -89,7 +99,7 @@ cargo xtask accept <關>                                # 1–13 或名稱，如
 
 ## 決策在哪
 
-- 已確認的決策：[docs/DECISIONS.md](docs/DECISIONS.md)（D1–D23）。
+- 已確認的決策：[docs/DECISIONS.md](docs/DECISIONS.md)（D1–D25）。
 - 沒有新證據不要重開討論。要推翻：先補證據，再提新的決策編號，由使用者確認。
 - 文件間衝突時：後來的決策優先於規劃本文。
 

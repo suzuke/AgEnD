@@ -7,7 +7,7 @@
 //! inside a team and notify; a missing role turns into an `ask`; on usage
 //! limit, reassign to another allowed backend. Agents never create instances.
 //!
-//! Placement note: the sources do not say where these pure rules live; the
-//! skeleton puts them in core next to the other policies.
+//! These are pure rules (D25): the daemon supplies the inputs (candidate
+//! members, current load); this module decides.
 //!
 //! Must NOT: spawn instances or talk to drivers.

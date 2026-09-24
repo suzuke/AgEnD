@@ -23,7 +23,7 @@
 - 身分與上下文從「呼叫者身分 → DB 裡的 binding」推得，不看 cwd（v1 agent 的 cwd 是 `workspace/<instance>`）。
 - agent 只傳意圖：收件者、內容、請求類型或 review 結論、完成條件、附件、回覆對象、期望回覆時間。
 - daemon 推得：task_id、branch、repository、PR 編號、reviewed_head／expected_head、correlation_id。
-- agent 命令：status、done、result、review approve/changes、send、inbox、ask、block/unblock、task create、remind。
+- agent 命令（11 個，D17）：`status`、`done`、`result`、`review approve`、`review changes`、`send`、`inbox`、`ask`、`block`／`unblock`（一個命令、兩個動詞）、`task create`、`remind`。
 - 命令總數 < 15、常用命令參數 ≤ 2；`agend status` 顯示所在步驟與可用下一步；錯誤附正確命令；`--help` 範例優先；支援 `--json`。
 - daemon 重啟中：CLI 重試最多 10 秒後印出明確訊息。
 - 啟動路徑：CLI 與 shim 不建 runtime、不讀設定、不開 DB；argv[0] 分派在 main 最前面。實測啟動 p50 4.1 ms、unix socket 來回 0.014 ms。
