@@ -9,6 +9,7 @@ members = [
     "crates/agend-tui",
     "crates/agend",
     "crates/agend-testkit",
+    "xtask",
 ]
 
 [workspace.package]

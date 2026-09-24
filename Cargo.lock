@@ -62,3 +62,7 @@ dependencies = [
  "agend-client",
  "agend-core",
 ]
+
+[[package]]
+name = "xtask"
+version = "0.0.0"
