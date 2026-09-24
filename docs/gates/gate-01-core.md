@@ -105,10 +105,12 @@ P1–P7 已由你在 2026-09-25 確認（記為決策 D26–D32）。實作草�
   - [ ] 使用者追認
 - 夜間步驟 r3（2026-09-25）：「最後的 branch work 之後不能再有 work」這條規則擴大到所有有 merge、command 或綁 head 的 approval 的 workflow（不只有 merge 的），讓沒有 merge 的 workflow 在 done 時 checks 與核准也涵蓋最後的 head；可完成證明在 done 時檢查這點與 pick 的有效性。fanout 每次重跑都要重新挑 pick，之後的核准作廢。
   - [ ] 使用者追認
+- r4（2026-09-25，orchestrator 在你授權的夜間範圍內決定）：**事件身分**。每個結果事件帶要求它的 action 的 `stage_id`、`attempt`（task 每進入該關卡一次加 1），綁 head 的關卡另帶 head；`step` 開頭只有一條規則：身分不是目前的就回 `StaleResult`、狀態不變。merge 送出中只接受這次 merge 的結果與 head 變更，其他一律 `MergeInFlight`。pick 的挑選在人數湊齊時才定下，head 變更時暫定與已定的挑選一起作廢，挑選清單只列還活著的子 task。沒有產出 branch 的 work 的 workflow 拒收新 commit。client protocol 的 agent 結果命令（`done`、`result`、`review approve`／`changes`）新增選填的 `identity`，沒帶的一律當成過期（`stale_result`）；舊訊息仍可解碼。
+  - [ ] 使用者追認
 
 ## 自動驗收（完成定義）
 
-- [x] `~/.cargo/bin/cargo test --workspace` 通過（156 tests，另有 2 個 `--ignored` 深度測試）；其中 `agend-core` 105 unit tests（含 210,000 次竄改狀態）、兩個狀態機探索器（52,000 + 24,000 條事件序列）、可完成性測試 11 個（含 200,000 個隨機 workflow）、xtask protocol compatibility 7 tests、workflow TOML golden 2 tests（2026-09-25）
+- [x] `~/.cargo/bin/cargo test --workspace` 通過（163 tests，另有 2 個 `--ignored` 深度測試）；其中 `agend-core` 105 unit tests（含 210,000 次竄改狀態）、兩個狀態機探索器（52,000 + 24,000 條事件序列）、可完成性測試 11 個（含 200,000 個隨機 workflow）、事件身分 6 tests、xtask protocol compatibility 8 tests、workflow TOML golden 2 tests（2026-09-25）
 - [x] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨（2026-09-25）
 - [x] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`；注入 `std::fs` 時 checker exit 1，還原後通過（2026-09-25）
 - [x] `~/.cargo/bin/cargo xtask accept core` 通過，並印出下方 demo（2026-09-25）
@@ -125,7 +127,7 @@ P1–P7 已由你在 2026-09-25 確認（記為決策 D26–D32）。實作草�
    ~/.cargo/bin/cargo xtask accept core
    ```
 
-   應該看到：demo 先列出實際 protocol hello、busy 與 debounce 結果，再以 `assign::choose` 派出 task 持有者及不同 backend 的 reviewer，並以 `pipeline::state::step` 走完：command 失敗退回 task 持有者、reviewer 要求修改退回 task 持有者、返工期間 main 前進仍留在 work（`stay in work`）、審查中的新 commit 重跑 checks、diff 改變的 rebase 退回 task 持有者、merge 送出後 main 前進只記成待處理（`stay in merge at H4, H5 pending until the merge result`）、forge 回報 merge 失敗後套用 H5（patch 相同，保留核准、只重跑 checks），最後 merge。完整輸出見下方；最後一行是 `gate 1 (core): checks passed`。
+   應該看到：demo 先列出實際 protocol hello、busy 與 debounce 結果，再以 `assign::choose` 派出 task 持有者及不同 backend 的 reviewer，並以 `pipeline::state::step` 走完：command 失敗退回 task 持有者、同一個結果再送一次被拒絕（`rejected: result does not belong to the current stage, attempt and head`）、reviewer 要求修改退回 task 持有者、返工期間 main 前進仍留在 work（`stay in work`）、審查中的新 commit 重跑 checks、diff 改變的 rebase 退回 task 持有者、merge 送出後 main 前進只記成待處理（`stay in merge at H4, H5 pending until the merge result`）、forge 回報 merge 失敗後套用 H5（patch 相同，保留核准、只重跑 checks），最後 merge。完整輸出見下方；最後一行是 `gate 1 (core): checks passed`。
 
    - [ ] 通過
 
@@ -191,6 +193,7 @@ task T-1 workflow=code v1
   work                      -> submit via local
   submit                    -> run checks (cargo test) at H0
   command failed            -> return work to its task holder (command `checks` failed with exit code 1)
+  same result again         -> rejected: result does not belong to the current stage, attempt and head; nothing changed
   work retry                -> submit via local
   submit                    -> run checks (cargo test) at H1
   command passed            -> request review approval (head-bound=true)
@@ -225,6 +228,7 @@ task T-1 workflow=code v1
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-25 第 1 施工關 verifier r4 推翻（02aca89）：四輪的共同根因是外部結果事件沒有完整身分，改成結構性的**事件身分**：結果帶 stage、attempt、head，`step` 開頭一條規則拒收過期結果；merge 送出中一條規則；pick 人數湊齊才定下；protocol 新增選填 `identity`（stale-by-default）。r4 反例寫成 `verifier_r4_*` 測試，兩個探索器與可完成證明加上重送／過期事件，四個問題放回程式都會被測試抓到。
 - 2026-09-25 第 1 施工關 verifier r3 推翻（3e8b3a3）兩個新類型問題，已修（4b05a60）：沒有 merge 的 workflow 在最後的 branch work 之後的 work 裡換 head 仍會 done（改為存檔規則，並加入可完成證明的 done 檢查）；pick fanout 重跑後沿用舊的 pick（進入 fanout 時清掉子 task、挑選與之後的核准，`Fanout` action 帶目前 head）。兩個反例寫成 `verifier_r3_*` 測試，探索器加上對應 workflow 與 pick 不變量，verifier 的死路探索器移植為 `--ignored` 測試。
 - 2026-09-25 第 1 施工關 verifier r2 推翻（843a235）：同一類問題（存檔放行、執行走不完）第二次出現，改成結構性解法（ba30886）：存檔檢查用 `step` 做可完成證明、文法收斂、三個執行期修正、隨機 workflow 產生器成為常駐測試（拿掉新規則的舊 validate 會被它抓到）。
 - 2026-09-25 第 1 施工關 verifier r1 推翻（832a4dc）後修正（f458545、ebdac60）：merge、command、綁 head 的 approval 前面必須有產出 branch 的 work 且需要 repo；merge 送出後的 head 變更記成待處理、等 forge 結果（新事件 `MergeFailed`）；demo 與 transcript 改走這條路；「作者」改稱 task 持有者；pty.rs 列入「待你追認」。
