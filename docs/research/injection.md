@@ -186,7 +186,7 @@ error 訊息分群：
 | 訊息模板 | 次數 | 意義 |
 |---|---|---|
 | `error=OpenCode session already has an ordinary turn in flight` | 61 | busy collision——多數已被內部 park+redrive 接住（見上），但仍以 WARN 形式記成「失敗」，觀測面尚未跟上修復 |
-| `error=agent '<name>' not found` | 60（`suzuke` 52 次、`cheerc` 8 次，取自 `src/error.rs:31` `AgentNotFound`）| 目標似乎是操作者/人類帳號名而非 agent instance 名——像是有訊息被誤路由進 agent 專用的結構化投遞路徑；未深入追查呼叫端，**標「未查證」根因** |
+| `error=agent '<name>' not found` | 60（`suzuke` 52 次、`operator-2` 8 次（第三方帳號，已改為代稱），取自 `src/error.rs:31` `AgentNotFound`）| 目標似乎是操作者/人類帳號名而非 agent instance 名——像是有訊息被誤路由進 agent 專用的結構化投遞路徑；未深入追查呼叫端，**標「未查證」根因** |
 | `error=Claude ChannelBridge locator is not owned by a live bridge` | 3 | bridge 尚未起來或已被回收時的競態 |
 
 其他訊號：`busy-gated dispatch parked — auto-redrive`
