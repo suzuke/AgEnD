@@ -17,7 +17,7 @@ use core::fmt;
 use super::stage::{FanoutJoin, StageKind};
 use super::workflow::{
     CommandContext, FanoutSource, Stage, TimeoutAction, ValidatedWorkflow, WorkOutput, Workflow,
-    WorkflowStage, expand_command_placeholders,
+    WorkflowError, WorkflowStage, expand_command_placeholders,
 };
 use crate::policy::merge_gate::{
     ApprovalAfterRebase, GateFact, MergeGateResult, RebaseOutcome, approval_after_rebase,
@@ -501,7 +501,9 @@ pub fn step(
                 next.current_head = Some(head.clone());
                 next.patch_id = Some(patch_id.clone());
             }
-            if matches!(&product, WorkProduct::Plan { .. }) {
+            if matches!(&product, WorkProduct::Plan { .. })
+                && fanout_at_or_after(state, state.stage_index)
+            {
                 clear_fanout(&mut next);
             }
             next.work_product = Some(product);
@@ -763,9 +765,17 @@ fn merge_failed(
     state: &mut PipelineState,
     actions: &mut Vec<PipelineAction>,
 ) -> Result<(), TransitionError> {
+    // Apply every pending change, but only the last change that did
+    // something speaks: earlier ones would ask for checks on a stale head.
+    let mut last_actions = Vec::new();
     for change in core::mem::take(&mut state.pending_head_changes) {
-        apply_head_change(state, change, actions)?;
+        let mut change_actions = Vec::new();
+        apply_head_change(state, change, &mut change_actions)?;
+        if !change_actions.is_empty() {
+            last_actions = change_actions;
+        }
     }
+    actions.extend(last_actions);
     if state.merge_in_flight() {
         let merge = state.stage_index;
         let target = recheck_target(state, merge).ok_or(TransitionError::MergeGateClosed)?;
@@ -795,6 +805,226 @@ fn apply_head_change(
             patch_id,
             conflict,
         } => main_advanced(state, rebased_head, patch_id, conflict, actions),
+    }
+}
+
+/// Completability witness, run by `Workflow::validate` after the static
+/// rules: drive `step` with the canonical all-success script, then once per
+/// command/approval stage with one failure there (rework), then once per
+/// stage after a branch exists with a new commit there. Every run
+/// must reach done within a bound; otherwise the workflow is rejected with the
+/// stage where it got stuck. Deterministic and bounded.
+pub(crate) fn completability_witness(workflow: &Workflow) -> Result<(), WorkflowError> {
+    witness_run(workflow, None, "success script")?;
+    for (index, stage) in workflow.stages.iter().enumerate() {
+        if matches!(stage.stage.kind(), StageKind::Command | StageKind::Approval) {
+            witness_run(
+                workflow,
+                Some((index, Disturbance::Fail)),
+                &format!("rework after `{}` fails", stage.id),
+            )?;
+        }
+    }
+    for (index, stage) in workflow.stages.iter().enumerate() {
+        let has_branch_before = workflow.stages[..index].iter().any(|earlier| {
+            matches!(
+                earlier.stage,
+                Stage::Work {
+                    output: WorkOutput::Branch,
+                    ..
+                }
+            )
+        });
+        if has_branch_before {
+            witness_run(
+                workflow,
+                Some((index, Disturbance::NewCommit)),
+                &format!("new commit at `{}`", stage.id),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Disturbance {
+    /// The command exits 1, or the reviewer asks for changes.
+    Fail,
+    /// A new commit arrives (at merge: while in flight, then the merge fails).
+    NewCommit,
+}
+
+fn witness_run(
+    workflow: &Workflow,
+    disturbance: Option<(usize, Disturbance)>,
+    scenario: &str,
+) -> Result<(), WorkflowError> {
+    let mut state = PipelineState::unchecked("witness", workflow.clone());
+    let mut counter = 0_u32;
+    let mut disturbed = false;
+    let stuck = |state: &PipelineState, reason: String| WorkflowError::NotCompletable {
+        scenario: scenario.into(),
+        stage_id: state
+            .current_stage()
+            .map_or_else(|| "<end>".into(), |stage| stage.id.clone()),
+        reason,
+    };
+    for _ in 0..workflow.stages.len() * 8 + 16 {
+        match state.status {
+            PipelineStatus::Done => return Ok(()),
+            PipelineStatus::Failed | PipelineStatus::Cancelled => {
+                return Err(stuck(
+                    &state,
+                    format!("the task ended as {:?}", state.status),
+                ));
+            }
+            _ => {}
+        }
+        let events = match disturbance {
+            Some((index, kind))
+                if !disturbed
+                    && state.status == PipelineStatus::Running
+                    && state.stage_index == index =>
+            {
+                disturbed = true;
+                disturbance_events(&state, kind, &mut counter)
+            }
+            _ => success_events(&state, &mut counter),
+        };
+        for event in events {
+            state = step(&state, event)
+                .map_err(|error| stuck(&state, error.to_string()))?
+                .0;
+        }
+    }
+    Err(stuck(&state, "no progress within the bound".into()))
+}
+
+fn witness_head(counter: &mut u32) -> (String, String) {
+    *counter += 1;
+    (
+        format!("witness-head-{counter}"),
+        format!("witness-patch-{counter}"),
+    )
+}
+
+/// The events that complete the current stage successfully.
+fn success_events(state: &PipelineState, counter: &mut u32) -> Vec<PipelineEvent> {
+    if state.status == PipelineStatus::Pending {
+        return alloc::vec![PipelineEvent::Start];
+    }
+    let Some(stage) = state.current_stage() else {
+        return Vec::new();
+    };
+    let stage_id = stage.id.clone();
+    let head = state.current_head.clone();
+    match &stage.stage {
+        Stage::Work { output, .. } => alloc::vec![PipelineEvent::WorkCompleted {
+            product: match output {
+                WorkOutput::Branch => {
+                    let (head, patch_id) = witness_head(counter);
+                    WorkProduct::Branch {
+                        branch: "witness-branch".into(),
+                        head,
+                        patch_id,
+                    }
+                }
+                WorkOutput::Result => WorkProduct::Result {
+                    summary: "witness".into(),
+                    output: None,
+                },
+                WorkOutput::Plan => WorkProduct::Plan {
+                    items: alloc::vec!["witness-item".into()],
+                },
+            },
+        }],
+        // The local forge returns no change id, so `{pr}` cannot expand there.
+        Stage::Submit { forge } => alloc::vec![PipelineEvent::Submitted {
+            change_id: (forge != "local").then(|| "witness-change".into()),
+        }],
+        Stage::Command { .. } => alloc::vec![PipelineEvent::CommandFinished {
+            stage_id,
+            head,
+            exit_code: Some(0),
+        }],
+        Stage::Approval { count, .. } => {
+            let selected_child = pick_fanout_index_for_approval(&state.workflow, state.stage_index)
+                .and_then(|_| {
+                    state
+                        .selected_fanout_child
+                        .clone()
+                        .or_else(|| state.fanout_child_task_ids.first().cloned())
+                });
+            (0..*count)
+                .map(|reviewer| PipelineEvent::ApprovalGranted {
+                    stage_id: stage_id.clone(),
+                    reviewer: format!("witness-reviewer-{reviewer}"),
+                    head: head.clone(),
+                    selected_child: selected_child.clone(),
+                })
+                .collect()
+        }
+        Stage::Fanout { source, join } => {
+            let children: Vec<String> = match source {
+                FanoutSource::Listed(children) => children.clone(),
+                FanoutSource::WorkOutput => {
+                    alloc::vec!["witness-child-1".into(), "witness-child-2".into()]
+                }
+            };
+            alloc::vec![PipelineEvent::FanoutCompleted {
+                stage_id,
+                selected_child: (*join == FanoutJoin::First)
+                    .then(|| children.first().cloned())
+                    .flatten(),
+                child_task_ids: children,
+            }]
+        }
+        Stage::Merge => alloc::vec![PipelineEvent::MergeCompleted {
+            head: head.unwrap_or_default(),
+            merge_commit: "witness-merge".into(),
+        }],
+    }
+}
+
+fn disturbance_events(
+    state: &PipelineState,
+    kind: Disturbance,
+    counter: &mut u32,
+) -> Vec<PipelineEvent> {
+    let Some(stage) = state.current_stage() else {
+        return Vec::new();
+    };
+    let stage_id = stage.id.clone();
+    let head = state.current_head.clone();
+    match (kind, stage.stage.kind()) {
+        (Disturbance::Fail, StageKind::Command) => alloc::vec![PipelineEvent::CommandFinished {
+            stage_id,
+            head,
+            exit_code: Some(1),
+        }],
+        (Disturbance::Fail, _) => alloc::vec![PipelineEvent::ChangesRequested {
+            stage_id,
+            reviewer: "witness-reviewer".into(),
+            head,
+            reason: "witness".into(),
+        }],
+        (Disturbance::NewCommit, StageKind::Merge) => {
+            let (new_head, patch_id) = witness_head(counter);
+            alloc::vec![
+                PipelineEvent::CommitCreated {
+                    head: new_head,
+                    patch_id,
+                },
+                PipelineEvent::MergeFailed {
+                    head: head.unwrap_or_default(),
+                    reason: "witness".into(),
+                },
+            ]
+        }
+        (Disturbance::NewCommit, _) => {
+            let (head, patch_id) = witness_head(counter);
+            alloc::vec![PipelineEvent::CommitCreated { head, patch_id }]
+        }
     }
 }
 
@@ -938,6 +1168,10 @@ fn main_advanced(
         .ok_or(TransitionError::InvalidStageIndex)?
         .stage
         .kind();
+    // Before any branch exists there is nothing to rebase.
+    if state.branch.is_none() {
+        return Ok(());
+    }
     if !conflict && state.current_head.as_deref() == Some(rebased_head.as_str()) {
         return Ok(());
     }
@@ -1016,6 +1250,14 @@ fn invalidate_head_bound(state: &mut PipelineState) {
         .retain(|approval| approval.head.is_none() || approval.head == head);
     state.passed_checks.retain(|check| check.head == head);
     state.approval_reviewers.clear();
+}
+
+fn fanout_at_or_after(state: &PipelineState, index: usize) -> bool {
+    state.workflow.stages.get(index..).is_some_and(|stages| {
+        stages
+            .iter()
+            .any(|stage| stage.stage.kind() == StageKind::Fanout)
+    })
 }
 
 fn clear_fanout(state: &mut PipelineState) {
@@ -1121,7 +1363,11 @@ fn return_to_work(
     actions: &mut Vec<PipelineAction>,
 ) -> Result<(), TransitionError> {
     forget_from(state, target);
-    clear_fanout(state);
+    // Fanout children belong to their fanout: forget them only when the task
+    // goes back to (or before) a fanout that will run again.
+    if fanout_at_or_after(state, target) {
+        clear_fanout(state);
+    }
     state.work_product = None;
     let stage = state
         .workflow
@@ -2124,6 +2370,9 @@ mod tests {
     #[test]
     fn review_n8_run_command_carries_the_expanded_command_and_change_id() {
         let mut workflow = Workflow::builtin_code();
+        workflow.stages[1].stage = Stage::Submit {
+            forge: "github".into(),
+        };
         workflow.stages[2].stage = Stage::Command {
             command: "gh pr checks {pr} --head {head}".into(),
         };

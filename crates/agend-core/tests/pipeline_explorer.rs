@@ -43,7 +43,8 @@ use agend_core::pipeline::state::{
     PipelineAction, PipelineEvent, PipelineState, PipelineStatus, WorkProduct, step,
 };
 use agend_core::pipeline::workflow::{
-    Approver, FanoutSource, Stage, TimeoutAction, WorkOutput, Workflow, WorkflowStage,
+    Approver, FanoutSource, Stage, TimeoutAction, ValidatedWorkflow, WorkOutput, Workflow,
+    WorkflowStage,
 };
 
 const SEED: u64 = 0x5eed_a9e1_d000_0001;
@@ -217,7 +218,12 @@ fn workflows() -> Vec<(&'static str, Workflow)> {
                 "pr-placeholders",
                 vec![
                     work_stage("work", WorkOutput::Branch),
-                    submit_stage(),
+                    WorkflowStage::new(
+                        "submit",
+                        Stage::Submit {
+                            forge: "github".into(),
+                        },
+                    ),
                     command_stage("checks", "gh pr checks {pr} --head {head}"),
                     approval("review", reviewer(), 1, true),
                     WorkflowStage::new("merge", Stage::Merge),
@@ -487,6 +493,8 @@ struct Oracle {
     /// Head changes seen while the merge was in flight; they only count if
     /// the forge reports the merge failed.
     pending: Vec<PipelineEvent>,
+    /// A branch work stage has completed; before that MainAdvanced is a no-op.
+    has_branch: bool,
 }
 
 impl Oracle {
@@ -498,6 +506,7 @@ impl Oracle {
             approvals: Vec::new(),
             submitted_since_work: false,
             pending: Vec::new(),
+            has_branch: false,
         }
     }
 
@@ -525,6 +534,7 @@ impl Oracle {
             PipelineEvent::WorkCompleted { product } => {
                 if let WorkProduct::Branch { head, patch_id, .. } = product {
                     self.set_head(head, patch_id);
+                    self.has_branch = true;
                 }
                 self.submitted_since_work = false;
             }
@@ -552,7 +562,7 @@ impl Oracle {
                 rebased_head,
                 patch_id,
                 conflict: false,
-            } => {
+            } if self.has_branch => {
                 let previous = self.head.clone();
                 let same_patch = previous
                     .as_ref()
@@ -926,14 +936,15 @@ fn sequences() -> usize {
 
 fn run_sequence(
     name: &str,
-    workflow: &Workflow,
+    validated: &ValidatedWorkflow,
     seed: u64,
     stats: &mut Stats,
 ) -> Result<(), String> {
     let mut rng = Rng(seed);
     let mut generator = Generator::new();
     let mut oracle = Oracle::new();
-    let mut state = PipelineState::new("T-1", workflow.clone().validated(&roles()).unwrap());
+    let workflow = validated.workflow();
+    let mut state = PipelineState::new("T-1", validated.clone());
     let mut trace: Vec<String> = Vec::new();
     for _ in 0..STEPS_PER_SEQUENCE {
         let event = generator.event(&mut rng, &state, &oracle);
@@ -994,10 +1005,11 @@ fn random_event_sequences_keep_every_pipeline_invariant() {
     let mut seeds = Rng(SEED);
     let mut total = 0;
     for (name, workflow) in workflows() {
+        let validated = workflow.clone().validated(&roles()).unwrap();
         let mut stats = Stats::default();
         for _ in 0..sequences {
             let seed = seeds.next() | 1;
-            if let Err(failure) = run_sequence(name, &workflow, seed, &mut stats) {
+            if let Err(failure) = run_sequence(name, &validated, seed, &mut stats) {
                 panic!("{failure}");
             }
         }

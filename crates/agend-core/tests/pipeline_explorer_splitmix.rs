@@ -167,6 +167,8 @@ struct Or {
     submitted_at: Option<usize>,
     /// Head changes seen while the merge was in flight (applied on MergeFailed).
     pending: Vec<PipelineEvent>,
+    /// A branch work stage has completed; before that MainAdvanced is a no-op.
+    has_branch: bool,
     t: usize,
 }
 impl Or {
@@ -235,7 +237,7 @@ fn head_event(o: &mut Or, e: &PipelineEvent) {
             rebased_head,
             patch_id,
             conflict: false,
-        } if o.head.as_ref() != Some(rebased_head) => {
+        } if o.has_branch && o.head.as_ref() != Some(rebased_head) => {
             let prev = o.head.clone();
             if let Some(p) = &prev
                 && o.patch.get(p) == Some(patch_id)
@@ -462,9 +464,10 @@ fn splitmix_explorer_keeps_the_pipeline_invariants() {
     let mut totals = String::new();
     for (wi, (name, wfl)) in workflows().into_iter().enumerate() {
         let (mut merged, mut reworks) = (0, 0);
+        let validated = wfl.clone().validated(&roles()).unwrap();
         for seq in 0..n {
             let mut r = Sm(((wi as u64) << 40) ^ (seq as u64).wrapping_mul(0xA24BAED4963EE407));
-            let mut s = PipelineState::new("T", wfl.clone().validated(&roles()).unwrap());
+            let mut s = PipelineState::new("T", validated.clone());
             let mut o = Or::default();
             let mut heads = Vec::new();
             let mut trace = Vec::new();
@@ -491,6 +494,7 @@ fn splitmix_explorer_keeps_the_pipeline_invariants() {
                             }
                             o.head = Some(head.clone());
                             o.patch.insert(head.clone(), patch_id.clone());
+                            o.has_branch = true;
                         }
                         o.epoch.insert(from, o.t);
                         o.submitted_at = None;

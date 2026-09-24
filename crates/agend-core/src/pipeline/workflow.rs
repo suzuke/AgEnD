@@ -451,10 +451,12 @@ impl Workflow {
                         stage_id: stage.id.clone(),
                     });
                 }
+                // The approval that picks the winner comes right after.
                 if *join == FanoutJoin::Pick
-                    && !self.stages[index + 1..]
-                        .iter()
-                        .any(|following| following.stage.kind() == StageKind::Approval)
+                    && self
+                        .stages
+                        .get(index + 1)
+                        .is_none_or(|following| following.stage.kind() != StageKind::Approval)
                 {
                     errors.push(WorkflowError::PickWithoutApproval {
                         stage_id: stage.id.clone(),
@@ -502,6 +504,34 @@ impl Workflow {
                     stage_id: stage.id.clone(),
                 });
             }
+        }
+
+        // With a merge, the branch work that produces the merged head is the
+        // last work stage: a later work stage could change the head without
+        // any check running for it again.
+        if self
+            .stages
+            .iter()
+            .any(|stage| stage.stage.kind() == StageKind::Merge)
+            && let Some(last_branch_work) = self.stages.iter().rposition(is_branch_work)
+        {
+            for stage in self.stages[last_branch_work + 1..]
+                .iter()
+                .filter(|stage| stage.stage.kind() == StageKind::Work)
+            {
+                errors.push(WorkflowError::WorkAfterBranchWork {
+                    stage_id: stage.id.clone(),
+                    work_stage_id: self.stages[last_branch_work].id.clone(),
+                });
+            }
+        }
+
+        // The static rules above describe shapes; the witness proves the
+        // pure state machine can actually finish this workflow.
+        if errors.is_empty()
+            && let Err(error) = super::state::completability_witness(self)
+        {
+            errors.push(error);
         }
 
         if errors.is_empty() {
@@ -779,6 +809,17 @@ pub enum WorkflowError {
     PickWithoutApproval {
         stage_id: String,
     },
+    WorkAfterBranchWork {
+        stage_id: String,
+        work_stage_id: String,
+    },
+    /// The completability witness (`step` over a canonical event script)
+    /// did not reach done.
+    NotCompletable {
+        scenario: String,
+        stage_id: String,
+        reason: String,
+    },
 }
 
 impl fmt::Display for WorkflowError {
@@ -860,7 +901,22 @@ impl fmt::Display for WorkflowError {
             ),
             Self::PickWithoutApproval { stage_id } => write!(
                 f,
-                "fanout stage `{stage_id}` with pick join requires a following approval stage"
+                "fanout stage `{stage_id}` with pick join must be immediately followed by the approval that picks"
+            ),
+            Self::WorkAfterBranchWork {
+                stage_id,
+                work_stage_id,
+            } => write!(
+                f,
+                "work stage `{stage_id}` comes after `{work_stage_id}`, the last work stage producing a branch; in a workflow with merge that branch work must be the last work stage"
+            ),
+            Self::NotCompletable {
+                scenario,
+                stage_id,
+                reason,
+            } => write!(
+                f,
+                "workflow cannot finish ({scenario}): stuck at stage `{stage_id}`: {reason}"
             ),
         }
     }
@@ -1040,6 +1096,9 @@ mod tests {
 
     fn with_checks_command(command: &str) -> Workflow {
         let mut workflow = Workflow::builtin_code();
+        workflow.stages[1].stage = Stage::Submit {
+            forge: "github".into(),
+        };
         workflow.stages[2].stage = Stage::Command {
             command: command.into(),
         };
