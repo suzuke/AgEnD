@@ -52,9 +52,8 @@ fn main() {
         team_id: "team-a".into(),
         role: "dev".into(),
         backend: Backend::Codex,
-        active_tasks: 0,
-        waiting_fanout_parents: 0,
-        max_concurrent_tasks: 1,
+        held_task: None,
+        ephemeral: false,
         usage_available: true,
     }];
     let assignment = choose(&request, &candidates);
@@ -82,9 +81,8 @@ fn main() {
         team_id: "team-a".into(),
         role: "reviewer".into(),
         backend: Backend::Claude,
-        active_tasks: 0,
-        waiting_fanout_parents: 0,
-        max_concurrent_tasks: 1,
+        held_task: None,
+        ephemeral: false,
         usage_available: true,
     }];
     let reviewer = match choose(&reviewer_request, &reviewer_candidates) {

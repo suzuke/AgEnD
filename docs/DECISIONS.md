@@ -1,11 +1,11 @@
-# 決策索引（D1–D32）
+# 決策索引（D1–D33）
 
 > **TL;DR**
 > - 這裡是已確認的設計決策；每條都經使用者確認。
 > - 記住：**沒有新證據就不重開討論**；要推翻，先補證據再提新決策編號。
 > - 下一步：找到相關決策，點進細節檔看理由、被否決的方案與證據。
 
-來源：規劃 r4 §2（D1–D24）；D25 為使用者在設計討論中確認與 architecture 頁；D26–D32 是第 1 關開工前提案 P1–P7，使用者 2026-09-25 確認，細節在 [第 1 關頁面](gates/gate-01-core.md#開工前提案)。「規劃 §x」指 [research/REWRITE-PLAN.md](research/REWRITE-PLAN.md)；原始證據索引在 [research/README.md](research/README.md)。規劃本文與後來的決策衝突時，以後來的決策為準（見本頁底部）。
+來源：規劃 r4 §2（D1–D24）；D25 為使用者在設計討論中確認與 architecture 頁；D26–D32 是第 1 關開工前提案 P1–P7，使用者 2026-09-25 確認，細節在 [第 1 關頁面](gates/gate-01-core.md#開工前提案)；D33 是使用者 2026-09-25 對第 1 關待決定事項（分派容量與返工）的決定。「規劃 §x」指 [research/REWRITE-PLAN.md](research/REWRITE-PLAN.md)；原始證據索引在 [research/README.md](research/README.md)。規劃本文與後來的決策衝突時，以後來的決策為準（見本頁底部）。
 
 ## 索引
 
@@ -32,9 +32,9 @@
 | D19 | workflow 以 TOML 定義、存檔檢查、`agend workflow` 管版本 | [d17-d25](decisions/d17-d25.md#d19) |
 | D20 | 人工核准 merge = 在 workflow 加 `approval(by = "human")` | [d17-d25](decisions/d17-d25.md#d20) |
 | D21 | task 固定建立時的 workflow 版本 | [d17-d25](decisions/d17-d25.md#d21) |
-| D22 | 施工依 crate 由下往上分成施工關，每個施工關使用者確認後才開下一個施工關（第 13 施工關見 D24） | [d17-d25](decisions/d17-d25.md#d22) |
+| D22 | 施工依 crate 由下往上分關，每關使用者確認後才開下一關（第 13 關見 D24） | [d17-d25](decisions/d17-d25.md#d22) |
 | D23 | 文件繁中為主、程式輸出英文；每 crate 有 README／TESTING；AGENTS.md 唯一入口 | [d17-d25](decisions/d17-d25.md#d23) |
-| D24 | 第 13 施工關「安裝與發布」；第 9 施工關只做 doctor、init；安裝規則在 core `setup` | [d17-d25](decisions/d17-d25.md#d24) |
+| D24 | 第 13 關「安裝與發布」；第 9 關只做 doctor、init；安裝規則在 core `setup` | [d17-d25](decisions/d17-d25.md#d24) |
 | D25 | D18 分派規則是純邏輯，放 core `policy::assign`；daemon 只提供輸入 | [d17-d25](decisions/d17-d25.md#d25) |
 | D26 | client／holder 協定用 unix socket 上的 JSON Lines（PTY 位元組 base64）；`hello` 協商版本，同 major 只加欄位；新 daemon 要能跟舊一個 major 的 holder 溝通（P1） | [gate-01 P1](gates/gate-01-core.md#p1wire-format-與版本協商) |
 | D27 | 狀態機是純函式 `step(state, event) -> (state, actions)`，不呼叫 trait；trait 放 core、用 async、每個只放用到的最少方法（P2） | [gate-01 P2](gates/gate-01-core.md#p2trait-簽章) |
@@ -43,6 +43,7 @@
 | D30 | 去抖動不對稱：轉 busy 立即生效、轉 idle 穩定 5 秒；第 7 關用真實資料校準（P5） | [gate-01 P5](gates/gate-01-core.md#p5去抖動) |
 | D31 | 保留期限：task／workflow／decision 永久，訊息 30 天，事件與狀態轉換 14 天，WIP patch 30 天，DB 快照 7 份；第 5 關校準（P6） | [gate-01 P6](gates/gate-01-core.md#p6保留期限) |
 | D32 | core 唯一依賴 `serde`（`default-features = false`，只開 `derive` + `alloc`）供型別 derive；JSON 編碼在 adapter（P7） | [gate-01 P7](gates/gate-01-core.md#p7core-依賴-allowlist) |
+| D33 | 一個 agent 同時只持有一個 task（到 done／取消為止，含審查）；返工回持有者；持有者額度用盡或被刪才改派並交接 branch 與審查意見；臨時 instance 在 task 結束後才回收 | [d26-d33](decisions/d26-d33.md#d33) |
 
 ## 來源衝突與處理
 
@@ -53,8 +54,9 @@
 | 規劃 §4.4 第一張表：claude 排隊 = channel、opencode 插入／中斷「未查證」 | 以 spike 表與 D16 為準（見 BACKEND-BEHAVIORS） |
 | 規劃 §5／§5.1 的 `checks/{command,forge}` 模組與 Checks trait | 以 architecture 頁為準：daemon 用 `runner`，trait 清單無 Checks |
 | runtime spike 建議用 herdr | D3 選自有 holder（見 D3 細節） |
-| 規劃 §6 的功能階段 | D22 改為分成施工關；功能階段只當里程碑 |
-| D22 原文寫 12 個施工關 | D24 加上第 13 施工關；以 ROADMAP 的 13 個施工關為準 |
+| 規劃 §6 的功能階段 | D22 改為分關施工；功能階段只當里程碑 |
+| D22 原文寫 12 關 | D24 加上第 13 關；以 ROADMAP 的 13 關為準 |
+| D18「超過上限排隊」「等待 fanout 的父 task 不佔名額」與每個 instance 的 task 數 | D33 取代：一個 agent 一個 task，父 task 照樣佔名額；上限指角色人數上限 |
 
 ## 下一步
 

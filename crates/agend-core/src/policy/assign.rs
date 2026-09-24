@@ -1,5 +1,12 @@
-//! Assignment rules for role templates (D18, D25). The daemon supplies team
-//! candidates, loads and allowed backends; core makes the deterministic choice.
+//! Assignment rules for role templates (D18, D25, D33). The daemon supplies
+//! team candidates, what each holds and allowed backends; core makes the
+//! deterministic choice.
+//!
+//! D33: an agent holds at most one task, from assignment until the task is
+//! done or cancelled, including while it waits for submit, checks or review;
+//! a review assignment is the reviewer's one task. Rework therefore always
+//! returns to the task's holder, who cannot be busy with something else. The
+//! holder is replaced only when it hits a usage limit or is removed.
 //!
 //! Must NOT: spawn instances or talk to drivers.
 
@@ -14,22 +21,23 @@ pub struct Candidate {
     pub team_id: String,
     pub role: String,
     pub backend: Backend,
-    pub active_tasks: usize,
-    pub waiting_fanout_parents: usize,
-    /// Per-instance concurrency supplied by the daemon's session policy.
-    pub max_concurrent_tasks: usize,
+    /// The one task this instance holds (D33); `None` when it is free.
+    pub held_task: Option<String>,
+    /// Spawned on demand within the role's maximum headcount.
+    pub ephemeral: bool,
     pub usage_available: bool,
 }
 
 impl Candidate {
-    pub fn occupied_slots(&self) -> usize {
-        self.active_tasks
-            .saturating_sub(self.waiting_fanout_parents)
+    pub fn is_free(&self) -> bool {
+        self.held_task.is_none()
     }
+}
 
-    pub fn has_capacity(&self) -> bool {
-        self.occupied_slots() < self.max_concurrent_tasks
-    }
+/// An ephemeral instance may be reclaimed only once the task it holds has
+/// ended, so a rework author is never reclaimed mid-task (D33).
+pub fn may_reclaim(candidate: &Candidate) -> bool {
+    candidate.ephemeral && candidate.is_free()
 }
 
 /// Role template headcount. `current_instances` counts persistent and live
@@ -49,8 +57,13 @@ pub enum Purpose {
         author_instance: String,
         author_backend: Backend,
     },
+    /// The task's work continues — rework after requested changes, or its
+    /// holder has to be replaced. `branch` and `review_comments` travel with
+    /// the task if another instance takes it over.
     Rework {
-        original_author: String,
+        holder: String,
+        branch: Option<String>,
+        review_comments: Vec<String>,
     },
 }
 
@@ -70,54 +83,65 @@ pub struct AssignmentRequest {
 pub enum QueueReason {
     AtCapacity,
     UsageLimit,
-    ReworkAuthorUnavailable,
     InvalidRoleCapacity,
     NoAllowedBackend,
     NoEligibleReviewer,
 }
 
+/// What a new holder receives when a task changes hands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Handoff {
+    pub from_instance: String,
+    pub branch: Option<String>,
+    pub review_comments: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AssignmentDecision {
-    Assigned { instance_id: String },
-    SpawnEphemeral { backend: Backend },
-    Queue { reason: QueueReason },
-    AskForRole { role: String },
+    Assigned {
+        instance_id: String,
+    },
+    /// The holder cannot continue; another instance takes the task over.
+    Reassigned {
+        instance_id: String,
+        handoff: Handoff,
+    },
+    SpawnEphemeral {
+        backend: Backend,
+        handoff: Option<Handoff>,
+    },
+    Queue {
+        reason: QueueReason,
+    },
+    AskForRole {
+        role: String,
+    },
 }
 
 pub fn choose(request: &AssignmentRequest, candidates: &[Candidate]) -> AssignmentDecision {
-    if let Purpose::Rework { original_author } = &request.purpose {
-        let author = candidates.iter().find(|candidate| {
-            candidate.team_id == request.team_id && candidate.instance_id == *original_author
+    if let Purpose::Rework {
+        holder,
+        branch,
+        review_comments,
+    } = &request.purpose
+    {
+        let current = candidates.iter().find(|candidate| {
+            candidate.team_id == request.team_id && candidate.instance_id == *holder
         });
-        let Some(author) = author else {
-            return AssignmentDecision::Queue {
-                reason: QueueReason::ReworkAuthorUnavailable,
-            };
-        };
-        if author.usage_available && author.has_capacity() {
+        // The holder keeps the task: it cannot be busy with another one.
+        if let Some(current) = current
+            && current.usage_available
+        {
             return AssignmentDecision::Assigned {
-                instance_id: author.instance_id.clone(),
+                instance_id: holder.clone(),
             };
         }
-        if !author.usage_available {
-            if let Some(candidate) = eligible_candidates(request, candidates, Some(original_author))
-                .into_iter()
-                .find(|candidate| candidate.backend != author.backend)
-            {
-                return AssignmentDecision::Assigned {
-                    instance_id: candidate.instance_id.clone(),
-                };
-            }
-            if let Some(backend) = spawn_backend(request, Some(author.backend)) {
-                return AssignmentDecision::SpawnEphemeral { backend };
-            }
-            return AssignmentDecision::Queue {
-                reason: QueueReason::UsageLimit,
-            };
-        }
-        return AssignmentDecision::Queue {
-            reason: QueueReason::AtCapacity,
+        let handoff = Handoff {
+            from_instance: holder.clone(),
+            branch: branch.clone(),
+            review_comments: review_comments.clone(),
         };
+        return take_over(request, candidates, current, handoff);
     }
 
     let Some(capacity) = request.role_capacity else {
@@ -132,8 +156,7 @@ pub fn choose(request: &AssignmentRequest, candidates: &[Candidate]) -> Assignme
     }
 
     let role_candidates = role_candidates(request, candidates);
-
-    let mut eligible = eligible_candidates(request, candidates, None);
+    let mut eligible = free_candidates(request, candidates, None);
 
     if let Purpose::Review {
         author_instance,
@@ -144,13 +167,9 @@ pub fn choose(request: &AssignmentRequest, candidates: &[Candidate]) -> Assignme
         eligible.sort_by_key(|candidate| {
             (
                 candidate.backend == *author_backend,
-                candidate.occupied_slots(),
                 candidate.instance_id.as_str(),
             )
         });
-    } else {
-        eligible
-            .sort_by_key(|candidate| (candidate.occupied_slots(), candidate.instance_id.as_str()));
     }
 
     if let Some(candidate) = eligible.first() {
@@ -171,7 +190,10 @@ pub fn choose(request: &AssignmentRequest, candidates: &[Candidate]) -> Assignme
         _ => None,
     };
     if let Some(backend) = preferred_spawn.or_else(|| spawn_backend(request, None)) {
-        return AssignmentDecision::SpawnEphemeral { backend };
+        return AssignmentDecision::SpawnEphemeral {
+            backend,
+            handoff: None,
+        };
     }
 
     if let Purpose::Review {
@@ -186,17 +208,62 @@ pub fn choose(request: &AssignmentRequest, candidates: &[Candidate]) -> Assignme
             reason: QueueReason::NoEligibleReviewer,
         };
     }
+    AssignmentDecision::Queue {
+        reason: queue_reason(capacity),
+    }
+}
 
-    if request
-        .role_capacity
-        .is_some_and(|capacity| capacity.current_instances >= capacity.maximum_instances)
-    {
+/// The holder cannot continue. Usage limit (`current` still present): a free
+/// same-role member on another allowed backend, else an ephemeral instance on
+/// another backend, else queue for the usage limit. Removed holder
+/// (`current` is `None`): any free same-role member, else an ephemeral
+/// instance within headcount, else queue.
+fn take_over(
+    request: &AssignmentRequest,
+    candidates: &[Candidate],
+    current: Option<&Candidate>,
+    handoff: Handoff,
+) -> AssignmentDecision {
+    let Some(capacity) = request.role_capacity else {
+        return AssignmentDecision::AskForRole {
+            role: request.role.clone(),
+        };
+    };
+    if !valid_role_capacity(capacity) {
         return AssignmentDecision::Queue {
-            reason: QueueReason::AtCapacity,
+            reason: QueueReason::InvalidRoleCapacity,
+        };
+    }
+    let excluded_backend = current.map(|holder| holder.backend);
+    if let Some(candidate) = free_candidates(request, candidates, Some(&handoff.from_instance))
+        .into_iter()
+        .find(|candidate| Some(candidate.backend) != excluded_backend)
+    {
+        return AssignmentDecision::Reassigned {
+            instance_id: candidate.instance_id.clone(),
+            handoff,
+        };
+    }
+    if let Some(backend) = spawn_backend(request, excluded_backend) {
+        return AssignmentDecision::SpawnEphemeral {
+            backend,
+            handoff: Some(handoff),
         };
     }
     AssignmentDecision::Queue {
-        reason: QueueReason::UsageLimit,
+        reason: if current.is_some() {
+            QueueReason::UsageLimit
+        } else {
+            queue_reason(capacity)
+        },
+    }
+}
+
+fn queue_reason(capacity: RoleCapacity) -> QueueReason {
+    if capacity.current_instances >= capacity.maximum_instances {
+        QueueReason::AtCapacity
+    } else {
+        QueueReason::UsageLimit
     }
 }
 
@@ -214,22 +281,24 @@ fn role_candidates<'a>(
         .collect()
 }
 
-fn eligible_candidates<'a>(
+/// Same-team, same-role instances on an allowed backend with usage left that
+/// hold no task, ordered by instance id.
+fn free_candidates<'a>(
     request: &AssignmentRequest,
     candidates: &'a [Candidate],
     exclude_instance: Option<&str>,
 ) -> Vec<&'a Candidate> {
-    let mut eligible: Vec<&Candidate> = role_candidates(request, candidates)
+    let mut free: Vec<&Candidate> = role_candidates(request, candidates)
         .into_iter()
         .filter(|candidate| {
             is_allowed(candidate, &request.allowed_backends)
                 && candidate.usage_available
-                && candidate.has_capacity()
+                && candidate.is_free()
                 && exclude_instance != Some(candidate.instance_id.as_str())
         })
         .collect();
-    eligible.sort_by_key(|candidate| (candidate.occupied_slots(), candidate.instance_id.as_str()));
-    eligible
+    free.sort_by_key(|candidate| candidate.instance_id.as_str());
+    free
 }
 
 fn valid_role_capacity(capacity: RoleCapacity) -> bool {
@@ -285,24 +354,17 @@ pub fn creates_wait_cycle(existing: &[WaitEdge], new_edge: &WaitEdge) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
 
-    fn candidate(
-        id: &str,
-        backend: Backend,
-        active_tasks: usize,
-        waiting_parents: usize,
-        max_concurrent_tasks: usize,
-        usage_available: bool,
-    ) -> Candidate {
+    fn candidate(id: &str, backend: Backend, held_task: Option<&str>, usage: bool) -> Candidate {
         Candidate {
             instance_id: id.into(),
             team_id: "team-a".into(),
             role: "dev".into(),
             backend,
-            active_tasks,
-            waiting_fanout_parents: waiting_parents,
-            max_concurrent_tasks,
-            usage_available,
+            held_task: held_task.map(Into::into),
+            ephemeral: false,
+            usage_available: usage,
         }
     }
 
@@ -321,12 +383,36 @@ mod tests {
         }
     }
 
+    fn rework(holder: &str) -> Purpose {
+        Purpose::Rework {
+            holder: holder.into(),
+            branch: Some("agend/T-1/demo".into()),
+            review_comments: vec!["rename the flag".into()],
+        }
+    }
+
+    fn handoff(from: &str) -> Handoff {
+        Handoff {
+            from_instance: from.into(),
+            branch: Some("agend/T-1/demo".into()),
+            review_comments: vec!["rename the flag".into()],
+        }
+    }
+
+    fn capacity(current: usize, maximum: usize) -> Option<RoleCapacity> {
+        Some(RoleCapacity {
+            minimum_instances: 0,
+            maximum_instances: maximum,
+            current_instances: current,
+        })
+    }
+
     #[test]
     fn review_excludes_author_and_prefers_another_backend() {
         let candidates = [
-            candidate("author", Backend::Codex, 0, 0, 2, true),
-            candidate("same", Backend::Codex, 0, 0, 2, true),
-            candidate("other", Backend::Claude, 1, 0, 2, true),
+            candidate("author", Backend::Codex, Some("T-1"), true),
+            candidate("same", Backend::Codex, None, true),
+            candidate("other", Backend::Claude, None, true),
         ];
         assert_eq!(
             choose(
@@ -342,37 +428,81 @@ mod tests {
         );
     }
 
+    /// D33 rule 1: one task per agent; a held task (including a review)
+    /// makes the agent unavailable for anything else.
     #[test]
-    fn rework_goes_back_to_the_original_author() {
-        let mut author = candidate("author", Backend::Codex, 0, 0, 1, true);
-        author.role = "reviewer".into();
-        let candidates = [author, candidate("other", Backend::Claude, 0, 0, 1, true)];
-        assert_eq!(
-            choose(
-                &request(Purpose::Rework {
-                    original_author: "author".into(),
-                }),
-                &candidates,
-            ),
-            AssignmentDecision::Assigned {
-                instance_id: "author".into()
-            }
-        );
-    }
-
-    #[test]
-    fn rework_finds_the_original_author_even_when_their_role_changed() {
-        let mut author = candidate("author", Backend::Codex, 0, 0, 1, true);
-        author.role = "reviewer".into();
-        let request = AssignmentRequest {
-            role: "dev".into(),
-            purpose: Purpose::Rework {
-                original_author: "author".into(),
-            },
+    fn an_agent_holding_a_task_gets_no_other_task_or_review() {
+        let candidates = [
+            candidate("busy", Backend::Codex, Some("T-1"), true),
+            candidate("reviewing", Backend::Claude, Some("review:T-2"), true),
+        ];
+        let full = AssignmentRequest {
+            role_capacity: capacity(2, 2),
             ..request(Purpose::NewTask)
         };
         assert_eq!(
-            choose(&request, &[author]),
+            choose(&full, &candidates),
+            AssignmentDecision::Queue {
+                reason: QueueReason::AtCapacity
+            }
+        );
+        let review = AssignmentRequest {
+            role_capacity: capacity(2, 2),
+            ..request(Purpose::Review {
+                author_instance: "author".into(),
+                author_backend: Backend::Opencode,
+            })
+        };
+        assert_eq!(
+            choose(&review, &candidates),
+            AssignmentDecision::Queue {
+                reason: QueueReason::AtCapacity
+            }
+        );
+    }
+
+    /// D33: a new task when every member holds one spawns within the role's
+    /// maximum headcount, otherwise queues.
+    #[test]
+    fn new_task_when_all_members_hold_tasks_spawns_within_headcount_else_queues() {
+        let members = [
+            candidate("dev-1", Backend::Codex, Some("T-1"), true),
+            candidate("dev-2", Backend::Claude, Some("T-2"), true),
+        ];
+        let room = AssignmentRequest {
+            role_capacity: capacity(2, 3),
+            ..request(Purpose::NewTask)
+        };
+        assert_eq!(
+            choose(&room, &members),
+            AssignmentDecision::SpawnEphemeral {
+                backend: Backend::Claude,
+                handoff: None,
+            }
+        );
+        let full = AssignmentRequest {
+            role_capacity: capacity(3, 3),
+            ..room
+        };
+        assert_eq!(
+            choose(&full, &members),
+            AssignmentDecision::Queue {
+                reason: QueueReason::AtCapacity
+            }
+        );
+    }
+
+    /// D33 rule 2: rework returns to the task's holder, who still holds it.
+    #[test]
+    fn rework_returns_to_the_holder_even_though_it_holds_the_task() {
+        let holder = candidate("author", Backend::Codex, Some("T-1"), true);
+        let other = candidate("other", Backend::Claude, None, true);
+        let full = AssignmentRequest {
+            role_capacity: capacity(2, 2),
+            ..request(rework("author"))
+        };
+        assert_eq!(
+            choose(&full, &[holder, other]),
             AssignmentDecision::Assigned {
                 instance_id: "author".into()
             }
@@ -380,17 +510,108 @@ mod tests {
     }
 
     #[test]
-    fn fanout_waiting_parent_does_not_consume_a_slot() {
-        let candidate = candidate("dev", Backend::Codex, 2, 1, 2, true);
-        assert_eq!(candidate.occupied_slots(), 1);
-        assert!(candidate.has_capacity());
+    fn rework_finds_the_holder_even_when_their_role_changed() {
+        let mut holder = candidate("author", Backend::Codex, Some("T-1"), true);
+        holder.role = "reviewer".into();
+        assert_eq!(
+            choose(&request(rework("author")), &[holder]),
+            AssignmentDecision::Assigned {
+                instance_id: "author".into()
+            }
+        );
+    }
+
+    /// D33 rule 3: a holder at its usage limit hands the task, with branch and
+    /// review comments, to a free same-role member on another backend; else
+    /// an ephemeral instance on another backend; else it queues.
+    #[test]
+    fn usage_limited_rework_moves_to_another_backend_with_the_branch() {
+        let holder = candidate("author", Backend::Codex, Some("T-1"), false);
+        let same_backend = candidate("codex-2", Backend::Codex, None, true);
+        let other_backend = candidate("claude-1", Backend::Claude, None, true);
+        assert_eq!(
+            choose(
+                &request(rework("author")),
+                &[holder.clone(), same_backend.clone(), other_backend]
+            ),
+            AssignmentDecision::Reassigned {
+                instance_id: "claude-1".into(),
+                handoff: handoff("author"),
+            }
+        );
+        let spawn = AssignmentRequest {
+            available_backends: vec![Backend::Codex, Backend::Opencode],
+            ..request(rework("author"))
+        };
+        assert_eq!(
+            choose(&spawn, &[holder.clone(), same_backend.clone()]),
+            AssignmentDecision::SpawnEphemeral {
+                backend: Backend::Opencode,
+                handoff: Some(handoff("author")),
+            }
+        );
+        let full = AssignmentRequest {
+            role_capacity: capacity(3, 3),
+            ..spawn
+        };
+        assert_eq!(
+            choose(&full, &[holder, same_backend]),
+            AssignmentDecision::Queue {
+                reason: QueueReason::UsageLimit
+            }
+        );
+    }
+
+    /// D33 rule 3: a holder removed by the operator is replaced immediately
+    /// by any free same-role member, or an ephemeral instance within
+    /// headcount.
+    #[test]
+    fn removed_holder_is_replaced_immediately() {
+        let same_backend = candidate("codex-2", Backend::Codex, None, true);
+        assert_eq!(
+            choose(&request(rework("author")), &[same_backend]),
+            AssignmentDecision::Reassigned {
+                instance_id: "codex-2".into(),
+                handoff: handoff("author"),
+            }
+        );
+        let busy = candidate("codex-2", Backend::Codex, Some("T-9"), true);
+        assert_eq!(
+            choose(&request(rework("author")), core::slice::from_ref(&busy)),
+            AssignmentDecision::SpawnEphemeral {
+                backend: Backend::Claude,
+                handoff: Some(handoff("author")),
+            }
+        );
+        let full = AssignmentRequest {
+            role_capacity: capacity(1, 1),
+            ..request(rework("author"))
+        };
+        assert_eq!(
+            choose(&full, &[busy]),
+            AssignmentDecision::Queue {
+                reason: QueueReason::AtCapacity
+            }
+        );
+    }
+
+    /// D33 rule 3: an ephemeral instance is reclaimed only after its task.
+    #[test]
+    fn ephemeral_holder_is_not_reclaimed_before_its_task_ends() {
+        let mut holder = candidate("eph-1", Backend::Claude, Some("T-1"), true);
+        holder.ephemeral = true;
+        assert!(!may_reclaim(&holder));
+        holder.held_task = None;
+        assert!(may_reclaim(&holder));
+        let persistent = candidate("dev-1", Backend::Claude, None, true);
+        assert!(!may_reclaim(&persistent));
     }
 
     #[test]
     fn exhausted_backend_is_replaced_by_an_allowed_backend() {
         let candidates = [
-            candidate("codex", Backend::Codex, 0, 0, 1, false),
-            candidate("claude", Backend::Claude, 0, 0, 1, true),
+            candidate("codex", Backend::Codex, None, false),
+            candidate("claude", Backend::Claude, None, true),
         ];
         assert_eq!(
             choose(&request(Purpose::NewTask), &candidates),
@@ -408,7 +629,7 @@ mod tests {
             ..request(Purpose::NewTask)
         };
         assert_eq!(
-            choose(&request, &[candidate("dev", Backend::Codex, 0, 0, 1, true)]),
+            choose(&request, &[candidate("dev", Backend::Codex, None, true)]),
             AssignmentDecision::AskForRole {
                 role: "analyst".into()
             }
@@ -418,64 +639,14 @@ mod tests {
     #[test]
     fn role_with_no_live_instance_spawns_ephemeral_below_its_headcount_maximum() {
         let request = AssignmentRequest {
-            role_capacity: Some(RoleCapacity {
-                minimum_instances: 0,
-                maximum_instances: 2,
-                current_instances: 0,
-            }),
+            role_capacity: capacity(0, 2),
             ..request(Purpose::NewTask)
         };
         assert_eq!(
             choose(&request, &[]),
             AssignmentDecision::SpawnEphemeral {
-                backend: Backend::Claude
-            }
-        );
-    }
-
-    #[test]
-    fn role_headcount_maximum_queues_when_no_candidate_has_capacity() {
-        let request = AssignmentRequest {
-            role_capacity: Some(RoleCapacity {
-                minimum_instances: 1,
-                maximum_instances: 1,
-                current_instances: 1,
-            }),
-            ..request(Purpose::NewTask)
-        };
-        let full = candidate("dev", Backend::Codex, 1, 0, 1, true);
-        assert_eq!(
-            choose(&request, &[full]),
-            AssignmentDecision::Queue {
-                reason: QueueReason::AtCapacity
-            }
-        );
-    }
-
-    #[test]
-    fn rework_returns_to_author_or_uses_an_allowed_backend_after_quota_exhaustion() {
-        let author = candidate("author", Backend::Codex, 0, 0, 1, true);
-        let other = candidate("other", Backend::Claude, 0, 0, 1, true);
-        assert_eq!(
-            choose(
-                &request(Purpose::Rework {
-                    original_author: "author".into(),
-                }),
-                &[author.clone(), other],
-            ),
-            AssignmentDecision::Assigned {
-                instance_id: "author".into()
-            }
-        );
-        let mut request = request(Purpose::Rework {
-            original_author: "author".into(),
-        });
-        request.available_backends = alloc::vec![Backend::Claude];
-        let exhausted_author = candidate("author", Backend::Codex, 0, 0, 1, false);
-        assert_eq!(
-            choose(&request, &[exhausted_author]),
-            AssignmentDecision::SpawnEphemeral {
-                backend: Backend::Claude
+                backend: Backend::Claude,
+                handoff: None,
             }
         );
     }
@@ -513,13 +684,9 @@ mod tests {
         let request = AssignmentRequest {
             team_id: "team-a".into(),
             role: "reviewer".into(),
-            allowed_backends: alloc::vec![Backend::Claude],
-            available_backends: alloc::vec![Backend::Claude],
-            role_capacity: Some(RoleCapacity {
-                minimum_instances: 0,
-                maximum_instances: 2,
-                current_instances: 0,
-            }),
+            allowed_backends: vec![Backend::Claude],
+            available_backends: vec![Backend::Claude],
+            role_capacity: capacity(0, 2),
             purpose: Purpose::Review {
                 author_instance: "dev-1".into(),
                 author_backend: Backend::Claude,
@@ -528,18 +695,20 @@ mod tests {
         assert_eq!(
             choose(&request, &[]),
             AssignmentDecision::SpawnEphemeral {
-                backend: Backend::Claude
+                backend: Backend::Claude,
+                handoff: None,
             }
         );
         let request = AssignmentRequest {
-            allowed_backends: alloc::vec![Backend::Claude, Backend::Codex],
-            available_backends: alloc::vec![Backend::Claude, Backend::Codex],
+            allowed_backends: vec![Backend::Claude, Backend::Codex],
+            available_backends: vec![Backend::Claude, Backend::Codex],
             ..request
         };
         assert_eq!(
             choose(&request, &[]),
             AssignmentDecision::SpawnEphemeral {
-                backend: Backend::Codex
+                backend: Backend::Codex,
+                handoff: None,
             }
         );
     }

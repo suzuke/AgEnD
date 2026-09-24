@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 純邏輯 crate：型別、兩套協定、trait、流水線狀態機、busy policy、去抖動、衝突偵測、merge 門檻、螢幕分類器。
 > - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這關才算完成。
-> - 下一步：你決定「待你決定」的 Q1；fresh-context verifier 重跑；之後你親自驗收。
+> - 下一步：fresh-context verifier 重跑並嘗試推翻；之後你親自驗收。
 
 ## 狀態
 
@@ -15,7 +15,7 @@ P1–P7 已由你在 2026-09-25 確認（記為決策 D26–D32）。實作草�
 
 - 型別、client 與 holder 兩套協定、trait（`Driver`、`Forge`、`Store`、`Runtime`、`Runner`、`Notifier`、`Clock`，依 P2／P3）
 - 流水線狀態機（6 種關卡、task 關係與操作、workflow 存檔檢查）
-- policy：busy、去抖動、衝突偵測、merge 門檻（patch-id）、分派（D25）
+- policy：busy、去抖動、衝突偵測、merge 門檻（patch-id）、分派（D25、D33）
 - 螢幕分類器與規則資料
 - `cargo xtask accept core` 的 demo
 
@@ -84,27 +84,17 @@ P1–P7 已由你在 2026-09-25 確認（記為決策 D26–D32）。實作草�
 
 ## 待你決定
 
-草稿作者先選了行為、但沒有經你決定的事項。確認前照「草稿目前的行為」運作。
+目前沒有待決定事項。
 
 ### Q1：返工時原作者不能接（round-1 review I8）
 
-- 問題：D18 同時說「退回修改回原作者」與「額度用盡改派其他允許的 backend」；原作者不能接時兩條衝突。
-- 草稿目前的行為（`policy::assign::choose`，`Purpose::Rework`）：
-
-  | 情況 | 結果 |
-  |---|---|
-  | 原作者在 team、有額度、有空位 | 派回原作者 |
-  | 原作者額度用盡 | 改派同角色、不同 backend、有空位的 instance；沒有就在另一個有額度的 backend 開臨時 instance（受角色人數上限）；都不行就排隊（`UsageLimit`） |
-  | 原作者有額度但沒空位 | 排隊等原作者（`AtCapacity`） |
-  | 原作者已不在 team | 排隊（`ReworkAuthorUnavailable`），不改派 |
-  | 角色範本已刪除 | 不轉成 ask，照上面規則 |
-
-- 要你決定：額度用盡時改派他人（目前）還是等原作者？原作者不在時要不要改派同角色的其他人？
-- [ ] 使用者決定
+- 已決定（2026-09-25），記為 [D33](../decisions/d26-d33.md#d33)，已實作在 `policy::assign`：一個 agent 同時只持有一個 task（到 done／取消為止，含等待 checks／review；審查指派是 reviewer 的那一個 task）；返工一定回到持有者；持有者額度用盡 → 改派同角色、另一個 backend 的空成員並交接 branch 與審查意見，否則在人數上限內開臨時 instance，否則排隊（`UsageLimit`）；持有者被刪 → 立即改派或開臨時 instance；臨時 instance 在 task 結束後才回收；等待 fanout 的父 task 照樣佔名額。
+- 草稿原本的行為（已取代）：每個 instance 可設定 task 數；原作者有額度但沒空位就排隊等原作者（`AtCapacity`）；原作者不在 team 就排隊不改派（`ReworkAuthorUnavailable`）；等待 fanout 的父 task 不佔名額。
+- [x] 使用者決定（2026-09-25）
 
 ## 自動驗收（完成定義）
 
-- [x] `~/.cargo/bin/cargo test --workspace` 通過；其中 `agend-core` 85 unit tests + 2 個狀態機探索器 tests（40,000 條事件序列、160,000 次竄改狀態）、xtask protocol compatibility 5 tests（2026-09-25）
+- [x] `~/.cargo/bin/cargo test --workspace` 通過；其中 `agend-core` 87 unit tests + 2 個狀態機探索器 tests（40,000 條事件序列、160,000 次竄改狀態）、xtask protocol compatibility 5 tests（2026-09-25）
 - [x] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨（2026-09-25）
 - [x] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`；注入 `std::fs` 時 checker exit 1，還原後通過（2026-09-25）
 - [x] `~/.cargo/bin/cargo xtask accept core` 通過，並印出下方 demo（2026-09-25）
@@ -222,7 +212,8 @@ task T-1 workflow=code v1
 日期 + 一行 + commit／PR，新的在上面。
 
 - 2026-09-25 修正第 2 輪 review 仍未解的項目（047101c、ac556c8、28b2b25）：N1／N2 head 變更在 work／submit 不改關卡、N3 `ChangesRequested` 退回最近的 work、N4 `merge_gate::evaluate` 逐關 fact、N5 狀態機探索器、N6 reviewer 同 backend fallback、N7 引號佔位符存檔擋下、N8 `RunCommand` 帶展開後指令與 change id、N9 `Cancel` 與 `Cancelled`；round-1 返工目標一致、`InvalidCommand` 訊息、移除 `ClientProtocolError`。N10：草稿另改了第 4 關的 `crates/agend-holder/src/pty.rs`（`control_key_bytes` 回傳 `Option`，隨 `ControlKey` 擴充）。review probe 情境都寫成 `review_*` 回歸測試。
-- 2026-09-25 使用者確認 P1–P7（記為 D26–D32）；Q1（返工 fallback）仍待決定。
+- 2026-09-25 使用者決定 Q1（記為 D33）：一個 agent 一個 task、返工回持有者、額度用盡或被刪才交接；`policy::assign` 照此改寫並補測試。
+- 2026-09-25 使用者確認 P1–P7（記為 D26–D32）；Q1（返工 fallback）當時仍待決定。
 - 2026-09-25 草稿原樣匯入 `feat/gate-01-core`（f540247），接手修正 review 第 2 輪仍未解的項目；草稿作者 2026-09-24 未經確認就打的 P1–P7 勾選先還原（432a842）。
 - 2026-09-25 （草稿作者）修正兩份 review 的 pipeline、assignment、protocol 與 check-deps findings；workspace tests 通過（66 core tests、5 protocol compatibility tests）、workspace clippy、check-deps、accept core 通過；人工注入 std 的 check-deps 失敗路徑亦通過（工作樹，尚未提交；待 fresh-context verifier 與使用者親自驗收）。
 - 2026-09-24 初次自動驗收通過；待 fresh-context verifier 與使用者親自驗收（工作樹，尚未提交）。

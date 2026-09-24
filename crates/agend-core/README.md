@@ -37,7 +37,7 @@
 | `policy::debounce` | busy 立即生效；idle 穩定 5 秒 |
 | `policy::conflict` | 檔案重疊偵測 |
 | `policy::merge_gate` | merge 門檻的唯一實作（每個 command 與 approval 關卡一個 fact）與 patch-id 保留（D14） |
-| `policy::assign` | D18/D25 角色分派、role instance headcount、臨時 instance 決定與等待循環 |
+| `policy::assign` | D18/D25/D33 角色分派：一個 agent 一個 task、返工回持有者、額度用盡或被刪才交接、role headcount 內開臨時 instance、臨時 instance 回收條件、等待循環 |
 | `screen` | 以 fixture 支持的規則分類 hard gate |
 
 ## 依賴規則

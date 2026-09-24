@@ -233,8 +233,9 @@ pub enum PipelineAction {
         stage_id: String,
         role: String,
     },
-    /// Rework: hand the work stage back to its previous author
-    /// (`policy::assign::Purpose::Rework`).
+    /// Rework: the work stage goes back to the task's holder, who has held
+    /// the task since it was assigned (D33; `policy::assign::Purpose::Rework`
+    /// with `reason` as the review comment).
     ReturnToWork {
         stage_id: String,
         role: String,

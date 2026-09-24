@@ -25,7 +25,7 @@ cargo xtask accept core
 | `pipeline::workflow::tests` | 三個內建 workflow、repo 要求、角色、approval、on_fail 驗證；佔位符不可加引號、要有來源關卡；merge 前的 command 不可在最後一個 work 之前 |
 | `pipeline::state::tests` | code stage 轉換、失敗與要求修改都回最近的 work（返工回原作者）、work／submit 期間 head 變更不改關卡、D14 核准保留、每個 approval 關卡都要覆蓋目前 head 才能 merge、`RunCommand` 帶展開後的指令與 change id、取消是獨立狀態 |
 | `tests/pipeline_explorer.rs` | 固定種子的事件序列探索器，見下方「狀態機探索器」 |
-| `policy::assign::tests` | reviewer 優先跨 backend（只有同一個 backend 時仍會開臨時 instance）、作者排除、原作者返工、額度轉派、fanout 名額、wait cycle |
+| `policy::assign::tests` | D33：持有 task（含審查）的 agent 不再接其他 task；全員都持有時在人數上限內開臨時 instance，否則排隊；返工回持有者；持有者額度用盡改派另一個 backend 並交接 branch 與意見；持有者被刪立即改派；臨時 instance 在 task 結束前不回收。另有 reviewer 優先跨 backend（只有同一個 backend 時仍開臨時 instance）、額度轉派、缺角色轉 ask、wait cycle |
 | `policy::busy::tests` | codex steer；claude／opencode steer 退成 interrupt；queue 不變 |
 | `policy::debounce::tests` | busy 立即生效，idle 穩定 5 秒，busy 會取消待定 idle |
 | `policy::conflict::tests` | pairwise 重疊檔案排序與去重 |

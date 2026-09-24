@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 依 crate 由下往上分 13 關；每關單獨驗收，使用者確認後才開下一關（D22）。
 > - 目前狀態：**第 1 關實作中**（P1–P7 已確認）；每關狀態看下表，做了什麼看最下面的「進度紀錄」。
-> - 下一步：決定 [第 1 關的 Q1](gates/gate-01-core.md#待你決定)；fresh-context verifier 與使用者親自驗收第 1 關。
+> - 下一步：fresh-context verifier 與使用者親自驗收第 1 關。
 
 ## 13 關
 
@@ -60,7 +60,7 @@
 
 需要改 agend-core 時：先改 core，重過第 1 關的測試。crate 之間不得有私下耦合。
 
-第 1 關的 demo 由 `agend-core` example 呼叫 protocol、policy、assignment 與 pipeline API。第 2 輪 review 修正後，workspace tests（85 core unit tests、2 個狀態機探索器 tests、5 protocol compatibility tests）、clippy、check-deps 與 acceptance 已通過；仍待 Q1 決定、fresh-context verifier 與使用者手動驗收。
+第 1 關的 demo 由 `agend-core` example 呼叫 protocol、policy、assignment 與 pipeline API。第 2 輪 review 修正後，workspace tests（87 core unit tests、2 個狀態機探索器 tests、5 protocol compatibility tests）、clippy、check-deps 與 acceptance 已通過；仍待 fresh-context verifier 與使用者手動驗收。
 
 ## 第 0 階段（spike）
 
@@ -77,8 +77,9 @@ cat docs/gates/gate-01-core.md
 
 每完成一件事加一行（日期 + 一行 + commit／PR），新的在上面。
 
+- 2026-09-25 使用者決定第 1 關 Q1，記為 D33（一個 agent 一個 task、返工回持有者）；`policy::assign` 照此改寫。
 - 2026-09-25 第 1 關第 2 輪 review 修正：head 變更不跳關、返工不遺失、要求修改退回作者、merge 門檻逐關檢查、取消獨立狀態、佔位符存檔檢查、reviewer 同 backend fallback；新增狀態機探索器（047101c、ac556c8、28b2b25）。
-- 2026-09-25 使用者確認第 1 關提案 P1–P7，記為 D26–D32；返工 fallback（Q1）仍待決定。
+- 2026-09-25 使用者確認第 1 關提案 P1–P7，記為 D26–D32。
 - 2026-09-25 草稿原樣匯入 `feat/gate-01-core`（f540247）；草稿作者未經確認的 P1–P7 勾選先更正為未確認（432a842）。
 - 2026-09-25 （草稿作者）review 修正 pipeline、assignment、protocol 相容與 check-deps 自我檢查；workspace tests（66 core tests、5 protocol compatibility tests）、clippy、check-deps、accept core 通過；待 fresh-context verifier 與使用者親自驗收（工作樹，尚未提交）。
 - 2026-09-24 `agend-core` 草稿初次自動驗收通過：workspace fmt/clippy、49 core tests、no-std check 與 demo；草稿作者自行對照 P1–P7（不是使用者確認），P6 由第 5 關 Store 落地（工作樹，尚未提交）。

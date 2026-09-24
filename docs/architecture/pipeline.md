@@ -65,9 +65,11 @@
 
 - agent 不建立 instance：`agend task create --role <角色>`，daemon 依角色範本分派或開臨時 instance。
 - 角色範本：允許的 backend、模型等級、指示、人數上限（min／max）、session 策略。
-- 分派輸入分開帶角色目前／最小／最大 instance 數、可用 backend 額度與每個 instance 的 task concurrency；最大 headcount 未滿且有可用額度時可回傳 `SpawnEphemeral`。
-- 審查排除作者並優先不同 backend（只允許同一個 backend 時仍用它）；退回修改回原作者；超過上限就排隊。
-- 等待 fanout 的父 task 不佔名額；偵測 team 內互等並通知；需要不存在的角色時轉成 ask；額度用盡改派其他允許的 backend。
+- 一個 agent 同時只持有一個 task，從派工持有到 done 或取消，包括等 checks／review 的期間；審查指派是 reviewer 的那一個 task（D33）。
+- 分派輸入分開帶角色目前／最小／最大 instance 數、可用 backend 額度與每個 instance 持有的 task；沒有空的成員、角色人數未達上限且有可用額度時回傳 `SpawnEphemeral`，否則排隊。
+- 審查排除作者並優先不同 backend（只允許同一個 backend 時仍用它）；退回修改一定回到持有者（作者）。
+- 持有者額度用盡 → 改派同角色、另一個 backend 的空成員（交接 branch 與審查意見），或開臨時 instance，否則排隊；持有者被刪除 → 立即改派或開臨時 instance。臨時 instance 在它的 task 結束後才回收。
+- 等待 fanout 的父 task 照樣佔名額；偵測 team 內互等並通知使用者；需要不存在的角色時轉成 ask。
 
 ## merge 與 main 前進
 
