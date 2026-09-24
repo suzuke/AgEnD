@@ -47,13 +47,17 @@
 
    - [ ] 通過
 
-3. 解除安裝（這時的 `agend` 是第 1 步裝好的正式版，不是 alias）。
+3. 解除安裝（這時的 `agend` 是第 1 步裝好的正式版；v2 服務標籤暫定 `dev.agend.daemon`，確切值開工時細化）。
 
    ```bash
    agend uninstall
+   # macOS
+   launchctl list | grep -F dev.agend.daemon; echo "service matches: $?"
+   # Linux
+   systemctl --user list-units --all | grep -F agend-daemon.service; echo "service matches: $?"
    ```
 
-   應該看到：刪資料前先問；結束後 `launchctl list | grep agend`（或 `systemctl --user list-units | grep agend`）沒有結果，agent PATH 的 shim 不見了。
+   應該看到：刪資料前先問；之後服務檢查印 `service matches: 1`（grep 找不到東西），agent PATH 的 shim 不見了。只比對 v2 的標籤，所以 v1 的 `com.agend-terminal.daemon` 不會被算進來。
 
    - [ ] 通過
 
