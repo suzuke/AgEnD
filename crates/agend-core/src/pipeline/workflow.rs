@@ -382,7 +382,7 @@ impl Workflow {
         let has_repo_stage = self
             .stages
             .iter()
-            .any(|stage| matches!(stage.stage.kind(), StageKind::Submit | StageKind::Merge));
+            .any(|stage| matches!(stage.stage.kind(), StageKind::Submit) || needs_head(stage));
         if has_repo_stage && !self.requires_repo() {
             errors.push(WorkflowError::RepoRequired);
         }
@@ -491,6 +491,14 @@ impl Workflow {
                     .any(|earlier| earlier.stage.kind() == StageKind::Work)
             {
                 errors.push(WorkflowError::NoEarlierWork {
+                    stage_id: stage.id.clone(),
+                });
+            }
+            // A merge, a command or a head-bound approval works on a branch
+            // head; without an earlier branch work stage there never is one
+            // and the task could not finish.
+            if needs_head(stage) && !self.stages[..index].iter().any(is_branch_work) {
+                errors.push(WorkflowError::NoEarlierBranchWork {
                     stage_id: stage.id.clone(),
                 });
             }
@@ -675,6 +683,19 @@ impl Workflow {
     }
 }
 
+/// Stages that need a branch head: merge, command, head-bound approval.
+fn needs_head(stage: &WorkflowStage) -> bool {
+    matches!(
+        stage.stage,
+        Stage::Merge
+            | Stage::Command { .. }
+            | Stage::Approval {
+                bind_head: true,
+                ..
+            }
+    )
+}
+
 fn is_branch_work(stage: &WorkflowStage) -> bool {
     matches!(
         stage.stage,
@@ -736,6 +757,9 @@ pub enum WorkflowError {
         stage_id: String,
     },
     NoEarlierWork {
+        stage_id: String,
+    },
+    NoEarlierBranchWork {
         stage_id: String,
     },
     SubmitWithoutBranchWork,
@@ -811,7 +835,13 @@ impl fmt::Display for WorkflowError {
             Self::SubmitWithoutBranchWork => {
                 f.write_str("submit requires an earlier work stage that produces a branch")
             }
-            Self::RepoRequired => f.write_str("submit and merge require `requires = [\"repo\"]`"),
+            Self::NoEarlierBranchWork { stage_id } => write!(
+                f,
+                "stage `{stage_id}` needs a branch head, but no earlier work stage has `output = \"branch\"`"
+            ),
+            Self::RepoRequired => f.write_str(
+                "submit, merge, command and head-bound approval stages require `requires = [\"repo\"]`",
+            ),
             Self::MergeWithoutBoundApproval { stage_id } => write!(
                 f,
                 "merge stage `{stage_id}` requires an earlier head-bound approval or allow_unreviewed = true"
@@ -1233,5 +1263,74 @@ mod tests {
         }
         .to_string();
         assert_eq!(message, "stage `checks` command must not be empty");
+    }
+
+    /// Verifier r1 (blocking): a merge, command or head-bound approval with no
+    /// earlier branch work stage never gets a head, so the task could never
+    /// finish; saving must reject it, and such stages need a repo.
+    #[test]
+    fn verifier_r1_head_stages_need_an_earlier_branch_work_and_a_repo() {
+        let result_work = WorkflowStage::new(
+            "w",
+            Stage::Work {
+                role: "dev".into(),
+                instructions: String::new(),
+                output: WorkOutput::Result,
+            },
+        );
+        let command = WorkflowStage::new(
+            "c",
+            Stage::Command {
+                command: "true".into(),
+            },
+        );
+        let bound = WorkflowStage::new(
+            "a",
+            Stage::Approval {
+                by: Approver::Role("reviewer".into()),
+                count: 1,
+                bind_head: true,
+            },
+        );
+        let merge = WorkflowStage::new("m", Stage::Merge);
+        let workflow =
+            |allow_unreviewed: bool, requires: Vec<WorkflowRequirement>, stages| Workflow {
+                id: "x".into(),
+                version: 1,
+                requires,
+                allow_unreviewed,
+                stages,
+            };
+        let repo = || vec![WorkflowRequirement::Repo];
+        let no_branch = |errors: &[WorkflowError], id: &str| {
+            errors.iter().any(|error| {
+                matches!(error, WorkflowError::NoEarlierBranchWork { stage_id } if stage_id == id)
+            })
+        };
+
+        let errors = workflow(
+            false,
+            repo(),
+            vec![
+                result_work.clone(),
+                command.clone(),
+                bound.clone(),
+                merge.clone(),
+            ],
+        )
+        .validate(&roles())
+        .unwrap_err();
+        assert!(no_branch(&errors, "c") && no_branch(&errors, "a") && no_branch(&errors, "m"));
+
+        let errors = workflow(true, repo(), vec![result_work.clone(), command, merge])
+            .validate(&roles())
+            .unwrap_err();
+        assert!(no_branch(&errors, "c") && no_branch(&errors, "m"));
+
+        let errors = workflow(false, Vec::new(), vec![result_work, bound])
+            .validate(&roles())
+            .unwrap_err();
+        assert!(no_branch(&errors, "a"));
+        assert!(errors.contains(&WorkflowError::RepoRequired));
     }
 }
