@@ -17,6 +17,7 @@ daemon 負責派工、worktree、checks、互審綁 head、merge；人只處理�
 3. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)：程序模型、crate 地圖、daemon 分層。
 4. 你要動的 crate 的 `README.md` 與 `TESTING.md`。
 5. 需要時：[docs/DECISIONS.md](docs/DECISIONS.md)、[docs/BACKEND-BEHAVIORS.md](docs/BACKEND-BEHAVIORS.md)、[docs/V1-LESSONS.md](docs/V1-LESSONS.md)。
+6. 選讀，最後才看：[docs/research/](docs/research/README.md)，原始證據；要質疑或重新驗證某個決定時才查。
 
 ## Repo 地圖
 
@@ -82,7 +83,7 @@ cargo xtask accept <關>                                # 1–13 或名稱，如
 | 文件 | 繁體中文為主；程式識別字、指令、路徑、技術名詞保留原文 |
 | 程式輸出 | 英文：CLI 輸出、錯誤訊息、log、`--help`、測試名稱與 assert 訊息 |
 | 程式註解與 `//!` | 英文 |
-| 文件格式 | 開頭 3 行 TL;DR；先結論；表格與清單；深入背景放「細節」；需要動作的文件以「下一步」結尾；超過約 150 行就拆 |
+| 文件格式 | 開頭 3 行 TL;DR；先結論；表格與清單；深入背景放「細節」；需要動作的文件以「下一步」結尾；超過約 150 行就拆（`docs/research/` 的原始紀錄除外，原樣保存） |
 | 測試 | 測 consumer 時用真的 producer 產生輸入，不手寫格式（v1 #1493） |
 | 骨架 | 不寫假實作或佔位邏輯；還沒決定的東西只寫 `//!` 說明 |
 
@@ -97,6 +98,7 @@ cargo xtask accept <關>                                # 1–13 或名稱，如
 - 第 0 階段（backend spike）完成。
 - 骨架與設計文件完成（本 commit set）。
 - 第 1 關（agend-core）尚未開始，需要使用者確認後開始。
+- 第 1 關開工前要先提案、經使用者確認的事項：見 [docs/ROADMAP.md](docs/ROADMAP.md#第-1-關開工前先提案經使用者確認才實作)。
 
 ## 下一步
 

@@ -23,6 +23,15 @@
 | 12 `adapters` | claude + opencode driver、forge github、telegram | 先對假實作，再做真 backend smoke test |
 | 13 `install` | 安裝與發布（最後一關，需要其他全部）：launchd／systemd 服務註冊、`agend uninstall`（移除服務與 shim；刪資料前先問）、`agend telegram setup`（CLI 請 daemon 配對：貼 token → 使用者對 bot 傳 `/start` → chat id 加入 allowlist；配對由 daemon 的 notifier 做，CLI 沒有 Telegram client）、`xtask release` 打包、brew formula、GitHub release workflow、`cargo install` | CI 用全新 HOME + 假 agent，從安裝到第一個 task 完成 < 5 分鐘；每個 `doctor` 檢查都有「故意弄壞 → 看到修正指令」的測試 |
 
+## 第 1 關：開工前先提案、經使用者確認才實作
+
+- [ ] client protocol 與 holder protocol 的 wire format 與版本協商
+- [ ] trait 簽章：`Driver`、`Forge`、`Store`、`Runtime`、`Notifier`、`Clock`
+- [ ] `command` 關卡的 runner 是否需要自己的 trait
+- [ ] GitHub CI 結果怎麼進流水線（Checks 已是 `command` 關卡）：由 forge github 的 submit 帶回，或由 `command` 跑 `gh pr checks`
+- [ ] 去抖動的 N 秒
+- [ ] 每張表的保留期限
+
 ## 安裝相關的程式放在哪
 
 | 內容 | 位置 |

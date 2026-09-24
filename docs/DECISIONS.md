@@ -5,7 +5,7 @@
 > - 記住：**沒有新證據就不重開討論**；要推翻，先補證據再提新決策編號。
 > - 下一步：找到相關決策，點進細節檔看理由、被否決的方案與證據。
 
-來源：規劃 r4 §2（D1–D23）與 architecture 頁。規劃本文與後來的決策衝突時，以後來的決策為準（見本頁底部）。
+來源：規劃 r4 §2（D1–D23）與 architecture 頁。「規劃 §x」指 [research/REWRITE-PLAN.md](research/REWRITE-PLAN.md)；原始證據索引在 [research/README.md](research/README.md)。規劃本文與後來的決策衝突時，以後來的決策為準（見本頁底部）。
 
 ## 索引
 
