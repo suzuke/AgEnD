@@ -1,7 +1,7 @@
 # xtask
 
 > **TL;DR**
-> - 開發者工具：`cargo xtask check-deps` 與 `cargo xtask accept <關>`。
+> - 開發者工具：`cargo xtask check-deps` 與 `cargo xtask accept <施工關>`。
 > - 記住：**crate 邊界規則由 `check-deps` 強制**；規則是 `xtask/src/check_deps.rs` 裡的資料。
 > - 下一步：改依賴後跑 `cargo xtask check-deps`。
 
@@ -20,7 +20,7 @@
 - CI 一定會跑這一項（不加 `--allow-skip`）。
 
 - `accept core`：跑 workspace fmt、workspace clippy、core tests、protocol compatibility tests、check-deps，再執行 core example 的 protocol 與 code workflow demo。
-- 其他 `accept <關>`：對該關的 crate 跑 fmt、clippy、test，再跑 check-deps；demo 隨各關加入
+- 其他 `accept <施工關>`：對該施工關的 crate 跑 fmt、clippy、test，再跑 check-deps；demo 隨各施工關加入
 
 ## 不負責
 
@@ -33,7 +33,7 @@
 |---|---|
 | `check_deps` | 規則與檢查 |
 | `check_core` | agend-core 的結構檢查：`cargo metadata` 規則與無 std 編譯 |
-| `accept` | 13 關的 crate 對照與執行 |
+| `accept` | 13 個施工關的 crate 對照與執行 |
 
 ## 依賴規則
 
@@ -47,11 +47,11 @@
 
 ## 細節
 
-### 關卡對照
+### 施工關對照
 
 `cargo xtask accept <編號或名稱>`：
 
-| 編號 | 名稱 | 關卡頁 |
+| 編號 | 名稱 | 施工關頁 |
 |---|---|---|
 | 1 | `core` | [docs/gates/gate-01-core.md](../docs/gates/gate-01-core.md) |
 | 2 | `testkit` | [docs/gates/gate-02-testkit.md](../docs/gates/gate-02-testkit.md) |

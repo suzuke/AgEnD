@@ -50,7 +50,7 @@ cargo xtask accept core
 每一步之後，用**只看被接受的事件與 `ReturnToWork`** 建立的 oracle（不讀 state 自己的紀錄；返工時忘掉退回的 work 之後所有關卡的 check 與核准，只有 D14 能延續核准）檢查：
 
 1. merge 門檻：`Merge` action、`MergeCompleted` 與沒有 merge 的 workflow 的 `Done`，都要每個 command 關卡對目前 head 通過、每個 approval 關卡有足夠的核准覆蓋目前 head（D14：乾淨且 patch 相同的 rebase 讓核准延續到新 head）。
-2. 不跳關：關卡只會因目前關卡自己的完成事件前進，中間只能跳過已滿足的 approval；過了 submit 之後一定收過 `Submitted`。
+2. 不跳過關卡：關卡只會因目前關卡自己的完成事件前進，中間只能跳過已滿足的 approval；過了 submit 之後一定收過 `Submitted`。
 3. 返工不遺失：work 期間 head 變更不改關卡、不發 action；要求修改與 command 失敗會退回（預設最近的 work），不會讓 task 失敗；head 變更永遠不讓 task 前進。
 4. 核准與結果只算給它所屬的 head 與關卡。
 5. 終止狀態（done、failed、cancelled）不接受任何事件；merge 送出後不接受取消。

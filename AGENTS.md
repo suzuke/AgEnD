@@ -42,7 +42,7 @@ daemon 負責派工、worktree、checks、互審綁 head、merge；人只處理�
 |---|---|
 | `agend-core` 不用 std（`#![no_std]` + `alloc`），所以沒有檔案、程序、網路、環境變數、thread、stdio、時鐘；時間只經 `Clock` trait | `cargo xtask check-deps` 對無 std 的 target 編譯 core |
 | `agend-core` 沒有 unsafe（擋 FFI） | `cargo xtask check-deps` 的無 std 編譯帶 `-F unsafe-code`；原始碼的 `#![forbid(unsafe_code)]` 給 IDE 即時提示 |
-| `agend-core` 沒有 build script、沒有 `[features]`；唯一直接依賴是停用預設功能且只開 `derive` + `alloc` 的 `serde`（D32，第 1 關提案 P7） | `cargo xtask check-deps`（`cargo metadata`） |
+| `agend-core` 沒有 build script、沒有 `[features]`；唯一直接依賴是停用預設功能且只開 `derive` + `alloc` 的 `serde`（D32，第 1 施工關提案 P7） | `cargo xtask check-deps`（`cargo metadata`） |
 | `agend-shim`、`agend-client` 不依賴 async runtime、SQLite、`agend-daemon`（啟動要輕） | `cargo xtask check-deps` |
 | `agend-testkit` 只能當 dev-dependency | `cargo xtask check-deps` |
 | 模組之間只透過 `agend_core` 的 trait 與型別溝通 | code review |

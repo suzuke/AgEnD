@@ -2,7 +2,7 @@
 
 > **TL;DR**
 > - 純邏輯 crate：型別、兩套協定（含對話式請示）、trait、流水線狀態機、busy policy、去抖動、衝突偵測、merge 門檻、分派、請示排序、螢幕分類器。
-> - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這關才算完成。
+> - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這個施工關才算完成。
 > - 下一步：fresh-context verifier 重跑並嘗試推翻；之後你親自驗收。
 
 ## 狀態
@@ -59,7 +59,7 @@ P1–P7 已由你在 2026-09-25 確認（記為決策 D26–D32）。實作草�
 ### P5：去抖動
 
 - 問題：idle↔busy 要穩定多久才生效？
-- 建議：不對稱：轉 busy 立即生效（絕不送進忙碌中的 agent）；轉 idle 要穩定 5 秒。先用常數，第 7 關用真實資料重新校準。
+- 建議：不對稱：轉 busy 立即生效（絕不送進忙碌中的 agent）；轉 idle 要穩定 5 秒。先用常數，第 7 施工關用真實資料重新校準。
 - 理由：v1 約兩天 75 萬次轉換；送錯時機的代價在「送進忙碌 agent」那一側。
 - 替代方案：對稱的 N 秒（兩邊都延遲）。
 - [x] 使用者確認（2026-09-25）
@@ -99,7 +99,7 @@ P1–P7 已由你在 2026-09-25 確認（記為決策 D26–D32）。實作草�
 - [x] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨（2026-09-25）
 - [x] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`；注入 `std::fs` 時 checker exit 1，還原後通過（2026-09-25）
 - [x] `~/.cargo/bin/cargo xtask accept core` 通過，並印出下方 demo（2026-09-25）
-- [x] 本關 crate 的 `README.md`／`TESTING.md` 已更新
+- [x] 本施工關 crate 的 `README.md`／`TESTING.md` 已更新
 - [ ] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」
 
 ## 你親自驗收
@@ -149,7 +149,7 @@ P1–P7 已由你在 2026-09-25 確認（記為決策 D26–D32）。實作草�
 
    - [ ] 通過
 
-5. 看狀態機探索器：隨機事件序列下，merge 門檻、不跳關、返工不遺失都成立。有兩個獨立的探索器。
+5. 看狀態機探索器：隨機事件序列下，merge 門檻、不跳過關卡、返工不遺失都成立。有兩個獨立的探索器。
 
    ```bash
    ~/.cargo/bin/cargo test -p agend-core --test pipeline_explorer -- --nocapture 2>&1 | grep -E "^explorer|test result"
@@ -213,15 +213,15 @@ task T-1 workflow=code v1
 
 日期 + 一行 + commit／PR，新的在上面。
 
-- 2026-09-25 修正第 2 輪 review 仍未解的項目（047101c、ac556c8、28b2b25）：N1／N2 head 變更在 work／submit 不改關卡、N3 `ChangesRequested` 退回最近的 work、N4 `merge_gate::evaluate` 逐關 fact、N5 狀態機探索器、N6 reviewer 同 backend fallback、N7 引號佔位符存檔擋下、N8 `RunCommand` 帶展開後指令與 change id、N9 `Cancel` 與 `Cancelled`；round-1 返工目標一致、`InvalidCommand` 訊息、移除 `ClientProtocolError`。N10：草稿另改了第 4 關的 `crates/agend-holder/src/pty.rs`（`control_key_bytes` 回傳 `Option`，隨 `ControlKey` 擴充）。review probe 情境都寫成 `review_*` 回歸測試。
-- 2026-09-25 使用者決定 D34–D37（`planned` workflow、對話式請示、請示排序、context recap）並核准 P7 範圍擴充到 workflow 定義型別（條件：golden TOML 測試）；實作與測試（0194608、f202aa8）。
-- 2026-09-25 fresh-context verifier 推翻（REFUTED）幾個窄點，已修（7cc8f1e、fd37c37）：merge 必須是最後一個關卡；command 與綁 head 的 approval 必須在最後一個產出 branch 的 work 之後；`on_fail` 只能指向 work，command／approval 前面必須有 work；探索器 oracle 在返工時忘掉紀錄，並加入 verifier 的 SplitMix64 探索器；`PipelineState` 欄位私有、只能由驗證過的 workflow 建立；merge 送出後不能取消；D33 的 task 持有者要仍持有此 task、backend 仍允許、角色仍存在；程式裡 `holder` 改名 `task_holder`。verifier 情境寫成 `verifier_*` 回歸測試。
-- 2026-09-25 使用者決定 Q1（記為 D33）：一個 agent 一個 task、返工回 task 持有者、額度用盡或被刪才交接；`policy::assign` 照此改寫並補測試（c894ed0）。
+- 2026-09-25 修正第 2 輪 review 仍未解的項目（2a6e29b、4f78b31、e867d52）：N1／N2 head 變更在 work／submit 不改關卡、N3 `ChangesRequested` 退回最近的 work、N4 `merge_gate::evaluate` 逐個關卡的 fact、N5 狀態機探索器、N6 reviewer 同 backend fallback、N7 引號佔位符存檔擋下、N8 `RunCommand` 帶展開後指令與 change id、N9 `Cancel` 與 `Cancelled`；round-1 返工目標一致、`InvalidCommand` 訊息、移除 `ClientProtocolError`。N10：草稿另改了第 4 施工關的 `crates/agend-holder/src/pty.rs`（`control_key_bytes` 回傳 `Option`，隨 `ControlKey` 擴充）。review probe 情境都寫成 `review_*` 回歸測試。
+- 2026-09-25 使用者決定 D34–D37（`planned` workflow、對話式請示、請示排序、context recap）並核准 P7 範圍擴充到 workflow 定義型別（條件：golden TOML 測試）；實作與測試（7468ba0、d91865a）。
+- 2026-09-25 fresh-context verifier 推翻（REFUTED）幾個窄點，已修（13c0dbc、6ae6364）：merge 必須是最後一個關卡；command 與綁 head 的 approval 必須在最後一個產出 branch 的 work 之後；`on_fail` 只能指向 work，command／approval 前面必須有 work；探索器 oracle 在返工時忘掉紀錄，並加入 verifier 的 SplitMix64 探索器；`PipelineState` 欄位私有、只能由驗證過的 workflow 建立；merge 送出後不能取消；D33 的 task 持有者要仍持有此 task、backend 仍允許、角色仍存在；程式裡 `holder` 改名 `task_holder`。verifier 情境寫成 `verifier_*` 回歸測試。
+- 2026-09-25 使用者決定 Q1（記為 D33）：一個 agent 一個 task、返工回 task 持有者、額度用盡或被刪才交接；`policy::assign` 照此改寫並補測試（ba1fe59）。
 - 2026-09-25 使用者確認 P1–P7（記為 D26–D32）；Q1（返工 fallback）當時仍待決定。
-- 2026-09-25 草稿原樣匯入 `feat/gate-01-core`（f540247），接手修正 review 第 2 輪仍未解的項目；草稿作者 2026-09-24 未經確認就打的 P1–P7 勾選先還原（432a842）。
+- 2026-09-25 草稿原樣匯入 `feat/gate-01-core`（80c4de9），接手修正 review 第 2 輪仍未解的項目；草稿作者 2026-09-24 未經確認就打的 P1–P7 勾選先還原（b480311）。
 - 2026-09-25 （草稿作者）修正兩份 review 的 pipeline、assignment、protocol 與 check-deps findings；workspace tests 通過（66 core tests、5 protocol compatibility tests）、workspace clippy、check-deps、accept core 通過；人工注入 std 的 check-deps 失敗路徑亦通過（工作樹，尚未提交；待 fresh-context verifier 與使用者親自驗收）。
 - 2026-09-24 初次自動驗收通過；待 fresh-context verifier 與使用者親自驗收（工作樹，尚未提交）。
-- 2026-09-24 草稿作者自行對照 P1–P7（不是使用者確認）：P6 保留期限由第 5 關 Store 落地；holder 升 major 時須保留前一 major。修正 Claude MCP fixture pattern；49 tests、fmt、clippy、check-deps 與 demo 通過（工作樹，尚未提交）。
+- 2026-09-24 草稿作者自行對照 P1–P7（不是使用者確認）：P6 保留期限由第 5 施工關 Store 落地；holder 升 major 時須保留前一 major。修正 Claude MCP fixture pattern；49 tests、fmt、clippy、check-deps 與 demo 通過（工作樹，尚未提交）。
 - 2026-09-24 在 P1–P7 確認之前開始實作草稿（codex/gate-01-core 工作樹，尚未提交）；草稿作者自行勾選 P1–P7，並非使用者確認。
 - 2026-09-24 狀態改為提案中；提案 P1–P7 待確認（#102）。
 
