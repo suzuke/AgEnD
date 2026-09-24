@@ -756,11 +756,15 @@ fn success(state: &PipelineState, variant: usize) -> Vec<PipelineEvent> {
             } else {
                 Some(children[variant % children.len()].clone())
             };
-            (0..*count)
+            // Only reviewers not yet counted in this attempt approve.
+            (0..usize::from(*count) * 2)
+                .map(|reviewer| format!("r{reviewer}"))
+                .filter(|reviewer| !state.approval_reviewers().contains(reviewer))
+                .take(usize::from(*count).saturating_sub(state.approval_reviewers().len()))
                 .map(|reviewer| PipelineEvent::ApprovalGranted {
                     attempt: state.attempt(),
                     stage_id: stage_id.clone(),
-                    reviewer: format!("r{reviewer}"),
+                    reviewer,
                     head: if *bind_head { head.clone() } else { None },
                     selected_child: selected.clone(),
                 })
