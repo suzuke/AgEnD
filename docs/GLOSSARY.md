@@ -23,7 +23,7 @@
 | agent | agent | `client::AgentCommand`（agent 命令） | instance 裡執行的 backend 程序（codex／claude／opencode），PATH 上有 shim 與 `agend`。 | instance；操作者（人，用操作者命令） | [ARCHITECTURE](ARCHITECTURE.md#程序模型)、D17 |
 | backend | backend | `model::Backend` | agent 使用的產品：`claude`、`codex`、`opencode`（v2.0 只有這三個）。 | driver（daemon 裡對接 backend 的 adapter） | [BACKEND-BEHAVIORS](BACKEND-BEHAVIORS.md) |
 | 常駐／臨時 | persistent／ephemeral | `model::Lifetime::{Persistent, Ephemeral}` | instance 的 `lifetime`：常駐的由 daemon 啟動時拉起；臨時的隨 task／team 結束清理。 | agent 的暫存目錄（也會被清掉，但不是 instance） | D8、[tui-and-setup](architecture/tui-and-setup.md#設定與目錄d8) |
-| task 持有者 | task holder | `Candidate::held_task`、`Purpose::Rework { holder }` | 從派工到 done／取消都持有某個 task 的 agent；一個 agent 同時只持有一個 task，返工回到它。 | **holder**（每個 instance 的程序）：一律寫「task 持有者」，不單寫 holder | D33 |
+| task 持有者 | task holder | `Candidate::held_task`、`Purpose::Rework { task_holder }`（第 1 施工關 branch 改名中） | 從派工到 done／取消都持有某個 task 的 agent；一個 agent 同時只持有一個 task，返工回到它。 | **holder**（只指每個 instance 的程序）：一律寫「task 持有者」／task holder，不單寫 holder | D33 |
 
 ## 流水線
 
@@ -57,6 +57,7 @@
 | 訊息 | message | `traits::AgentMessage`、`client::InboxMessage` | 送給 agent 的內容：一律完整內容、走 backend 的結構化 API；每則有 id，以 id 冪等。 | PTY 控制鍵（holder 只送單一按鍵）；Telegram 通知 | [delivery](architecture/delivery.md#送達模型) |
 | 送達狀態 | delivery state | `model::DeliveryState` | 訊息狀態 `queued → sent → confirmed／failed`；確認不了就標未確認，不假裝成功。 | 忙碌等級的「排隊」（`queued` 是送達狀態） | [delivery](architecture/delivery.md#送達模型) |
 | 忙碌等級：排隊／插入／中斷 | busy level: queue／steer／interrupt | `policy::busy::BusyLevel`、`effective_level` | agent 忙碌時的三種送法：turn 結束後送、插入不中斷、中斷後立即處理；只有 codex 能插入，其他改用中斷。 | 去抖動（判斷 busy／idle 何時生效） | [delivery](architecture/delivery.md#忙碌策略三級)、D16 |
+| Stop hook decision | Stop hook decision | — | claude Stop hook 的輸出 `{"decision": "block", "reason": …}`：turn 結束時把排隊的訊息當成下一個 turn 送進去。 | **決策**；**請示** | D16、[delivery](architecture/delivery.md#claude-特別規則d16) |
 | 來源說明 | source framing | — | 讓 claude 處理 agend channel 訊息的說明：專案 CLAUDE.md 寫明訊息來自使用者自己的團隊，訊息內可另加 from／task／request 標頭。 | 本 repo 的 AGENTS.md（給開發 AgEnD 的人和 agent） | D16、[spike-claude-f](research/spike-claude-f.md) |
 
 ## 執行環境
@@ -64,8 +65,8 @@
 | 名詞（中文） | English | 程式識別字 | 定義 | 不要跟…混淆 | 出處 |
 |---|---|---|---|---|---|
 | daemon | daemon | crate `agend-daemon` | 常駐的唯一大型 I/O 層：protocol server、流水線、送達、監督、排程、對帳、DB。 | holder（agent 由 holder 持有，所以 daemon 可隨時重啟） | [ARCHITECTURE](ARCHITECTURE.md#程序模型)、D2 |
-| holder | holder | crate `agend-holder`、`protocol::holder` | 每個 instance 一個的程序，持有 PTY、畫面與附屬程序；daemon 重啟時 agent 不斷線。 | **task 持有者**；runtime | D3、D11 |
-| runtime | runtime | `traits::Runtime`、daemon `runtime` 模組 | daemon 啟動、停止、重新接回 holder 的 adapter（薄 `Runtime` 介面）。 | daemon 內的 tokio runtime | D3、[ARCHITECTURE](ARCHITECTURE.md#daemon-分層) |
+| holder | holder | crate `agend-holder`、`protocol::holder` | 每個 instance 一個的程序，持有 PTY、畫面與附屬程序；daemon 重啟時 agent 不斷線。 | **task 持有者**；agent runtime（管 holder 的 adapter） | D3、D11 |
+| agent runtime | agent runtime | `traits::Runtime`、daemon `runtime` 模組 | daemon 啟動、停止、重新接回 holder 的 adapter（薄 `Runtime` 介面，即 holder 層）。 | **tokio runtime**（daemon 的 async runtime）：文中一律寫「agent runtime」或「tokio runtime」，不單寫 runtime | D3、[ARCHITECTURE](ARCHITECTURE.md#daemon-分層) |
 | driver | driver | `traits::Driver`、`driver/{codex,claude,opencode}` | daemon 對一個 backend 的 adapter：送訊息、收狀態事件、重連。 | backend（產品本身） | D11、D16 |
 | forge | forge | `traits::Forge`、`forge/{local,github}` | 提交與 merge 的 adapter：local（merge-tree + CAS `update-ref`）或 github（API）。 | GitHub CI（用 `command` 關卡接，第 1 施工關 P4） | D4、[pipeline](architecture/pipeline.md#merge-與-main-前進) |
 | runner | runner | `traits::Runner`、daemon `runner` 模組 | 跑程序的 adapter；`command` 關卡與 git adapter 都經它：`run(cmd, dir, timeout)`。 | `command` 關卡本身 | [第 1 施工關 P3](gates/gate-01-core.md#p3runner-要不要-trait) |
@@ -82,8 +83,8 @@
 | 名詞（中文） | English | 程式識別字 | 定義 | 不要跟…混淆 | 出處 |
 |---|---|---|---|---|---|
 | 需要你 | needs-you | `DaemonEvent::AttentionRequired`、`NotificationSeverity::Attention` | 要人處理的例外（請示、門檻卡住、agent 卡住）：TUI 首頁最上方跨 team 的區塊，Telegram 有同名 topic。 | 已讀（看過不會離開「需要你」） | D13、[tui-and-setup](architecture/tui-and-setup.md#tui)、[README](../README.md#這是什麼) |
-| 請示 | decision | — | 交給人回答的問題（v1 的 `decision`，v2 保留）；v2 的形式尚未定。 | **決策**（D 編號）；claude Stop hook 的 `decision: block` | 規劃 §3.1 |
-| ask | ask | `AgentCommand::Ask` | agent 命令 `agend ask`：向人提問；分派時需要的角色不存在也會轉成 ask。 | opencode 權限設定的 `"ask"` | D17、D18 |
+| 請示 | ask (needs-you item) | — | 「需要你」裡 agent 問人的一項，由 `agend ask` 建立；可以是選項選擇，也可以是自由文字的多輪對話（v1 叫 `decision`）。 | **決策**（D 編號）；**Stop hook decision** | 規劃 §3.1、D35（即將提出） |
+| ask | ask | `AgentCommand::Ask` | agent 命令 `agend ask`：建立一個請示；分派時需要的角色不存在也會轉成 ask。 | opencode 權限設定的 `"ask"` | D17、D18 |
 | attention-first | attention-first | crate `agend-tui` | TUI 的原則：先看「需要你」，再看各 team。 | — | [tui-and-setup](architecture/tui-and-setup.md#tui) |
 | 已讀／已解決 | read／resolved | — | 「需要你」的兩種狀態：看過只去掉粗體（已讀）；選了動作才解除（已解決）。 | — | [tui-and-setup](architecture/tui-and-setup.md#tui) |
 
@@ -97,14 +98,14 @@
 | 進度紀錄 | progress log | — | 每完成一件事加一行（日期 + 一行 + commit／PR，新的在上面）；ROADMAP 與每個施工關頁面各一份。 | 驗收紀錄 | [AGENTS](../AGENTS.md#目前狀態)、[ROADMAP](ROADMAP.md#進度紀錄) |
 | 開工前提案 | pre-work proposal | — | 施工關開工前要使用者逐條確認的設計問題（例如第 1 施工關的 P1–P7）。 | 決策（確認後才會編成 D 編號） | [gates/README](gates/README.md#範本) |
 | spike | spike | — | 開工前的實測（第 0 階段）；結論在 BACKEND-BEHAVIORS，原始紀錄在 research/。 | 施工關 | [ROADMAP](ROADMAP.md#第-0-階段spike)、[research](research/README.md) |
-| 決策 | decision (D*n*) | — | 經使用者確認的設計決定，有 D 編號；沒有新證據就不重開。 | **請示**（v1 的 `decision`） | [DECISIONS](DECISIONS.md) |
+| 決策 | decision (D*n*) | — | 經使用者確認的設計決定，有 D 編號；沒有新證據就不重開。 | **請示**；**Stop hook decision** | [DECISIONS](DECISIONS.md) |
 
 ## 細節：為什麼是「關卡」與「施工關」
 
 - 衝突：「關卡」原本同時指 workflow 的 6 種步驟和 13 個施工階段（「第 1 關」「每關」「關卡頁」），讀的人要看上下文猜。
 - 決定：workflow 的一步叫「關卡」（stage）。程式已經用 `stage`／`StageKind`，而且 workflow 的 TOML 與存檔檢查（D19）都叫它關卡，改名的成本最大。
 - 施工階段改叫「施工關」（gate）：保留「第 N 關」的讀法，加上「施工」就不會和關卡混淆；英文沿用 xtask 的 `gate`。檔名 `docs/gates/gate-NN-*.md` 不變。
-- 英文 gate 還出現在 merge gate（merge 門檻）與 hard gate，這兩個一律帶前綴，不單寫 gate。
+- 英文單寫 gate 只指施工關；merge gate（merge 門檻）與 hard gate 一律帶前綴。
 
 ## 下一步
 

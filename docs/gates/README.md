@@ -35,22 +35,6 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 應該看到 `agend 0.x.y`（目前是 `agend 0.0.0`）。印出 `1.24.0` 就是跑到舊的 Node CLI，在這個終端機重跑上面那段。
 
 要不要移除舊的全域 CLI（`npm uninstall -g @suzuke/agend`）由你決定；不移除也可以，只要每個終端機都先跑上面那段。
-
-## 狀態
-
-## 每個終端機先做這一步
-
-第 6、8–12 施工關的步驟會用到 `agend`。第 13 施工關之前沒有安裝程式，而你的 PATH 上有舊的 Node 版 `agend`（`/opt/homebrew/bin/agend`，v1-ts 1.24.0）。所以**每個新開的終端機分頁都要先跑**（包括 daemon 在前景跑時開的第二個終端）：
-
-```bash
-cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
-~/.cargo/bin/cargo build -p agend && export PATH="$PWD/target/debug:$PATH" && agend --version
-```
-
-應該看到 `agend 0.x.y`（目前是 `agend 0.0.0`）。印出 `1.24.0` 就是跑到舊的 Node CLI，在這個終端機重跑上面那段。
-
-要不要移除舊的全域 CLI（`npm uninstall -g @suzuke/agend`）由你決定；不移除也可以，只要每個終端機都先跑上面那段。
-
 ## 狀態
 
 狀態只用這五個：未開始、提案中、實作中、驗收中、完成（後面加日期）。狀態改變時，同步更新該施工關頁面與 [ROADMAP 的狀態欄](../ROADMAP.md)。
