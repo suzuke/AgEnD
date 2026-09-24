@@ -12,7 +12,7 @@ cargo test -p agend-core
 cargo xtask accept core
 ```
 
-`accept core` 會跑 workspace fmt、workspace clippy、core tests、xtask protocol compatibility tests、`check-deps`，再啟動 `agend-core` 的 `core_demo` example。demo 實際呼叫 protocol hello、assignment、busy、debounce 與 pipeline 狀態機；JSON wire shape 由 `cargo test -p xtask --test protocol_compat` 驗證。
+`accept core` 會跑 workspace fmt、workspace clippy、core tests、xtask protocol compatibility tests、workflow TOML golden tests、`check-deps`，再啟動 `agend-core` 的 `core_demo` example。demo 實際呼叫 protocol hello、assignment、busy、debounce 與 pipeline 狀態機；JSON wire shape 由 `cargo test -p xtask --test protocol_compat` 驗證。
 
 ## 測試分類
 
@@ -21,6 +21,7 @@ cargo xtask accept core
 | `model::tests` | backend 名稱與 delivery 狀態轉換；branch producer／consumer 往返 |
 | `protocol::tests`、`protocol::client::tests`、`protocol::holder::tests` | major 不相容會有明確錯誤；daemon 可與仍支援的舊 holder major 協商 |
 | `xtask/tests/protocol_compat.rs` | exact JSON wire shape、unknown tagged variants、忽略 additive fields；approval request 不接受 caller 指定 head |
+| `xtask/tests/workflow_toml.rs` | workflow 存檔 TOML 格式的 golden 檔（內建四個與一個自訂），鎖住 serde 形狀（D32 的條件） |
 | `pipeline::task::tests` | workflow 版本固定、reopen／supersede／關係檢查 |
 | `pipeline::workflow::tests` | 三個內建 workflow、repo 要求、角色、approval、on_fail 驗證；佔位符不可加引號、要有來源關卡；merge 前的 command 不可在最後一個 work 之前 |
 | `pipeline::state::tests` | code stage 轉換、失敗與要求修改都回最近的 work（返工回原作者）、work／submit 期間 head 變更不改關卡、D14 核准保留、每個 approval 關卡都要覆蓋目前 head 才能 merge、`RunCommand` 帶展開後的指令與 change id、取消是獨立狀態 |

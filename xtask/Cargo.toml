@@ -10,3 +10,4 @@ serde_json = "1"
 
 [dev-dependencies]
 agend-core = { path = "../crates/agend-core" }
+toml = "1.1.6"

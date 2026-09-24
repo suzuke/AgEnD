@@ -117,6 +117,7 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
         ])?;
         step(&["test", "-p", "agend-core"])?;
         step(&["test", "-p", "xtask", "--test", "protocol_compat"])?;
+        step(&["test", "-p", "xtask", "--test", "workflow_toml"])?;
     } else {
         for krate in gate.crates {
             step(&["fmt", "-p", krate, "--", "--check"])?;

@@ -37,7 +37,7 @@
 
 ## 依賴規則
 
-- 一般依賴：`serde_json`（metadata）；`agend-core` 只作為 xtask 測試的 dev-dependency，core acceptance demo 由子程序執行獨立 example，避免 checker 連結待檢查的 core；透過 `$CARGO` 執行 cargo，無 std 編譯時用同一個 toolchain 的 rustc
+- 一般依賴：`serde_json`（metadata）；`agend-core` 與 `toml`（workflow golden 測試）只作為 xtask 測試的 dev-dependency，core acceptance demo 由子程序執行獨立 example，避免 checker 連結待檢查的 core；透過 `$CARGO` 執行 cargo，無 std 編譯時用同一個 toolchain 的 rustc
 - workspace 根目錄在執行時用 `cargo locate-project --workspace` 從目前目錄找，所以在 repo 副本裡跑會檢查副本本身
 - 不屬於 release binary
 

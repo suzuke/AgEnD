@@ -276,7 +276,7 @@ impl Workflow {
                     .iter()
                     .position(|candidate| candidate.id == *target)
                 {
-                    // Failures go back to an earlier work stage: its holder
+                    // Failures go back to an earlier work stage: its task holder
                     // gets the reason (D33).
                     Some(target_index)
                         if target_index < index
@@ -483,7 +483,7 @@ impl Workflow {
             }
         }
         // A failed check or requested change returns to an earlier work stage
-        // and its holder (D33), so there must be one.
+        // and its task holder (D33), so there must be one.
         for (index, stage) in self.stages.iter().enumerate() {
             if matches!(stage.stage.kind(), StageKind::Command | StageKind::Approval)
                 && !self.stages[..index]

@@ -1,0 +1,30 @@
+id = "epic"
+version = 1
+requires = []
+allow_unreviewed = false
+
+[[stages]]
+id = "plan"
+
+[stages.stage]
+kind = "work"
+role = "planner"
+instructions = ""
+output = "plan"
+
+[[stages]]
+id = "fanout"
+
+[stages.stage]
+kind = "fanout"
+source = "work_output"
+join = "all"
+
+[[stages]]
+id = "review"
+
+[stages.stage]
+kind = "approval"
+by = "human"
+count = 1
+bind_head = false

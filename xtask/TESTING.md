@@ -28,6 +28,7 @@ cargo test -p xtask
 | `check_core::tests::features_are_rejected` | 在真的 metadata 上加一個 `std` feature 會被抓 |
 | `check_core::tests::missing_target_is_recognised` | 「target 沒裝」與「程式用了 std」分得開 |
 | `tests/protocol_compat.rs` | client／holder JSON wire shape、未來 tagged variant 容忍、additive fields 與 approval head binding |
+| `tests/workflow_toml.rs` | workflow 存檔的 TOML 格式（D19、D32）：內建 `code`、`research`、`epic`、`planned` 與一個用到所有選填欄位的自訂 workflow，逐字比對 `tests/golden/workflow-*.toml`，並能解回同一個值、通過存檔檢查；格式有意改變時用 `AGEND_BLESS_GOLDEN=1` 重產再審 diff |
 | `accept::tests::*` | 13 關編號連續、可用編號或名稱找到、每關的 crate 都存在 |
 | `cargo xtask accept core` | workspace fmt/clippy、core tests、check-deps，並以子程序執行 core example |
 

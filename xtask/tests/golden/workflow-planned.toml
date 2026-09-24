@@ -1,0 +1,63 @@
+id = "planned"
+version = 1
+requires = ["repo"]
+allow_unreviewed = false
+
+[[stages]]
+id = "plan"
+
+[stages.stage]
+kind = "work"
+role = "planner"
+instructions = ""
+output = "result"
+
+[[stages]]
+id = "plan_review"
+
+[stages.stage]
+kind = "approval"
+by = "human"
+count = 1
+bind_head = false
+
+[[stages]]
+id = "work"
+
+[stages.stage]
+kind = "work"
+role = "dev"
+instructions = ""
+output = "branch"
+
+[[stages]]
+id = "submit"
+
+[stages.stage]
+kind = "submit"
+forge = "local"
+
+[[stages]]
+id = "checks"
+timeout_ms = 300000
+
+[stages.stage]
+kind = "command"
+command = "cargo test"
+
+[[stages]]
+id = "review"
+
+[stages.stage]
+kind = "approval"
+count = 1
+bind_head = true
+
+[stages.stage.by]
+role = "reviewer"
+
+[[stages]]
+id = "merge"
+
+[stages.stage]
+kind = "merge"
