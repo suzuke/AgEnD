@@ -1,0 +1,22 @@
+[package]
+name = "agend"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "agend"
+path = "src/main.rs"
+
+[dependencies]
+agend-core.workspace = true
+agend-daemon.workspace = true
+agend-holder.workspace = true
+agend-shim.workspace = true
+agend-client.workspace = true
+agend-tui.workspace = true
+
+[dev-dependencies]
+agend-testkit.workspace = true

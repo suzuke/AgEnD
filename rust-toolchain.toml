@@ -1,0 +1,6 @@
+# Pinned so CI and rustup users get the same rustfmt/clippy as the version the
+# skeleton was verified with. Bump deliberately (and fix new lints in the same PR).
+[toolchain]
+channel = "1.96.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

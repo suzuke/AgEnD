@@ -1,0 +1,28 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/agend-core",
+    "crates/agend-daemon",
+    "crates/agend-holder",
+    "crates/agend-shim",
+    "crates/agend-client",
+    "crates/agend-tui",
+    "crates/agend",
+    "crates/agend-testkit",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/suzuke/AgEnD"
+publish = false
+
+[workspace.dependencies]
+agend-core = { path = "crates/agend-core" }
+agend-daemon = { path = "crates/agend-daemon" }
+agend-holder = { path = "crates/agend-holder" }
+agend-shim = { path = "crates/agend-shim" }
+agend-client = { path = "crates/agend-client" }
+agend-tui = { path = "crates/agend-tui" }
+agend-testkit = { path = "crates/agend-testkit" }

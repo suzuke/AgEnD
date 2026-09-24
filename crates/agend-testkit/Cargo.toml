@@ -1,0 +1,10 @@
+[package]
+name = "agend-testkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+agend-core.workspace = true
