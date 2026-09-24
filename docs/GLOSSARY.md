@@ -7,8 +7,8 @@
 
 ## 怎麼讀
 
-- 程式識別字取自 `feat/gate-01-core`（第 1 施工關的 branch，尚未併入 `v2`）；沒有對應型別或模組的寫「—」。crate 名稱寫成 crate `agend-x`。
-- 出處：D 編號見 [DECISIONS.md](DECISIONS.md)；D26–D37 目前只在第 1 施工關的 branch 上。「規劃 §x」指 [research/REWRITE-PLAN.md](research/REWRITE-PLAN.md)。
+- 程式識別字取自 `v2`（第 1 施工關已由 #105 併入）；沒有對應型別或模組的寫「—」。crate 名稱寫成 crate `agend-x`。
+- 出處：D 編號見 [DECISIONS.md](DECISIONS.md)。「規劃 §x」指 [research/REWRITE-PLAN.md](research/REWRITE-PLAN.md)。
 - 兩份文件用法不同時，以最新的決策為準（AGENTS「決策在哪」）。
 - 加粗的混淆詞是已經撞過的詞，寫文件時一定要分清楚。
 
