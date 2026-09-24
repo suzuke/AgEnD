@@ -23,10 +23,8 @@ pub const CORE: &str = "agend-core";
 /// A tier-2 target without std. If core compiles for it, core does not use std.
 pub const NO_STD_TARGET: &str = "thumbv7em-none-eabihf";
 
-/// Dependencies (of any kind) agend-core may have. `serde` is the gate 1 draft's
-/// no-std serialization exception and is PENDING the owner's decision on
-/// proposal P7 (docs/gates/gate-01-core.md); if P7 is rejected this list goes
-/// back to empty.
+/// Dependencies (of any kind) agend-core may have: only `serde`, approved by
+/// the owner as decision D32 (gate 1 proposal P7) for no-std type derives.
 pub const CORE_DEP_ALLOWLIST: &[&str] = &["serde"];
 
 /// Runs all core checks. Returns (problems, whether the no-std build was

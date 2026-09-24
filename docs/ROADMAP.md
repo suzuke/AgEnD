@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - 依 crate 由下往上分 13 關；每關單獨驗收，使用者確認後才開下一關（D22）。
-> - 目前狀態：**第 1 關提案中（實作草稿完成，待使用者確認 P1–P7）**；每關狀態看下表，做了什麼看最下面的「進度紀錄」。
-> - 下一步：逐條確認 [第 1 關的提案](gates/gate-01-core.md#開工前提案) 與待決定事項。
+> - 目前狀態：**第 1 關實作中**（P1–P7 已確認）；每關狀態看下表，做了什麼看最下面的「進度紀錄」。
+> - 下一步：決定 [第 1 關的 Q1](gates/gate-01-core.md#待你決定)；fresh-context verifier 與使用者親自驗收第 1 關。
 
 ## 13 關
 
@@ -11,7 +11,7 @@
 
 | 關 | 狀態 | 範圍 | 驗收（可觀察） |
 |---|---|---|---|
-| 1 `core` | [提案中（草稿完成）](gates/gate-01-core.md) | agend-core：型別、兩套協定（client + holder）、trait、流水線狀態機（6 種關卡）、busy policy、去抖動、衝突偵測、merge 門檻（patch-id）、螢幕分類器 | `cargo xtask accept core` 跑測試並印出一個模擬 task 走完 `code` workflow（純邏輯，無 daemon） |
+| 1 `core` | [實作中](gates/gate-01-core.md) | agend-core：型別、兩套協定（client + holder）、trait、流水線狀態機（6 種關卡）、busy policy、去抖動、衝突偵測、merge 門檻（patch-id）、螢幕分類器 | `cargo xtask accept core` 跑測試並印出一個模擬 task 走完 `code` workflow（純邏輯，無 daemon） |
 | 2 `testkit` | [未開始](gates/gate-02-testkit.md) | 每個 trait 的假實作、契約測試套件、假 daemon、假 agent 程式 | 契約測試通過；假 agent 可單獨啟動並回應 |
 | 3 `shim` | [未開始](gates/gate-03-shim.md) | git／kill 防護、導向 worktree、protected-ref、快照與還原 | 在暫存 repo 以 `git` 名稱執行 shim：導向、拒絕、快照後還原 |
 | 4 `holder` | [未開始](gates/gate-04-holder.md) | PTY、畫面、附屬程序、holder 協定 | `agend holder` 包 bash + 小型探測 client：讀畫面、送鍵、中途斷線重連，bash 存活 |
@@ -25,9 +25,9 @@
 | 12 `adapters` | [未開始](gates/gate-12-adapters.md) | claude + opencode driver、forge github、telegram | 先對假實作，再做真 backend smoke test |
 | 13 `install` | [未開始](gates/gate-13-install.md) | 安裝與發布（最後一關）：服務註冊、`agend uninstall`、`agend telegram setup`（由 daemon 配對）、`xtask release`、brew、GitHub release、`cargo install` | CI 用全新 HOME + 假 agent，從安裝到第一個 task 完成 < 5 分鐘；每個 `doctor` 檢查都有「故意弄壞 → 看到修正指令」的測試 |
 
-## 第 1 關：開工前先提案、經使用者確認才實作
+## 第 1 關：開工前提案（已確認）
 
-7 項提案（P1–P7）只列在 [gate-01-core.md](gates/gate-01-core.md#開工前提案)，逐條勾選確認。實作草稿在確認前就寫了，目前 P1–P7 都尚未確認；確認結果若與草稿不同，草稿照確認結果調整。
+7 項提案（P1–P7）列在 [gate-01-core.md](gates/gate-01-core.md#開工前提案)，使用者 2026-09-25 確認，記為決策 D26–D32。實作草稿是在確認前寫的；草稿作者 2026-09-24 自己打的勾不算確認。
 
 ## 安裝相關的程式放在哪
 
@@ -77,7 +77,8 @@ cat docs/gates/gate-01-core.md
 
 每完成一件事加一行（日期 + 一行 + commit／PR），新的在上面。
 
-- 2026-09-25 草稿原樣匯入 `feat/gate-01-core`（f540247）；P1–P7 狀態更正為未確認。
+- 2026-09-25 使用者確認第 1 關提案 P1–P7，記為 D26–D32；返工 fallback（Q1）仍待決定。
+- 2026-09-25 草稿原樣匯入 `feat/gate-01-core`（f540247）；草稿作者未經確認的 P1–P7 勾選先更正為未確認（432a842）。
 - 2026-09-25 （草稿作者）review 修正 pipeline、assignment、protocol 相容與 check-deps 自我檢查；workspace tests（66 core tests、5 protocol compatibility tests）、clippy、check-deps、accept core 通過；待 fresh-context verifier 與使用者親自驗收（工作樹，尚未提交）。
 - 2026-09-24 `agend-core` 草稿初次自動驗收通過：workspace fmt/clippy、49 core tests、no-std check 與 demo；草稿作者自行對照 P1–P7（不是使用者確認），P6 由第 5 關 Store 落地（工作樹，尚未提交）。
 - 2026-09-24 在 P1–P7 確認前開始 `agend-core` 實作草稿（codex/gate-01-core 工作樹，尚未提交）。

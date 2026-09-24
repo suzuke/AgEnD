@@ -3,13 +3,13 @@
 > **TL;DR**
 > - 純邏輯 crate：型別、兩套協定、trait、流水線狀態機、busy policy、去抖動、衝突偵測、merge 門檻、螢幕分類器。
 > - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這關才算完成。
-> - 下一步：使用者逐條確認 P1–P7 與「待你決定」；之後才進 fresh-context verifier 與親自驗收。
+> - 下一步：你決定「待你決定」的 Q1；fresh-context verifier 重跑；之後你親自驗收。
 
 ## 狀態
 
-**提案中（實作草稿完成，待使用者確認 P1–P7）**（2026-09-25）
+**實作中**（2026-09-25）
 
-實作草稿是在 P1–P7 確認之前寫的；若你否決或修改任何一項，草稿依你的決定調整。
+P1–P7 已由你在 2026-09-25 確認（記為決策 D26–D32）。實作草稿是在確認之前寫的；2026-09-24 的勾選是草稿作者自己打的，不算確認。
 
 ## 範圍
 
@@ -21,7 +21,7 @@
 
 ## 開工前提案
 
-每一項都要你逐條確認（勾選）。目前 7 項都**尚未確認**；草稿先照「建議」實作，確認前不算定案。
+每一項都要你逐條確認（勾選）。7 項已於 2026-09-25 確認，對應決策 D26–D32（[DECISIONS](../DECISIONS.md)）。
 
 ### P1：wire format 與版本協商
 
@@ -29,7 +29,7 @@
 - 建議：兩套協定都用 unix socket 上的 JSON Lines；PTY 位元組以 base64 放在 JSON 裡。連線第一則訊息是 `hello`，交換協定版本；major 不同 → 印出清楚的錯誤；同一個 major 內只准新增欄位，未知欄位忽略。holder 協定最保守：新 daemon 必須能跟舊一個 major 的 holder 溝通。
 - 理由：好除錯（`nc`／`jq` 就看得懂）；holder 很少更新，daemon 升級時舊 holder 還在跑。
 - 替代方案：長度前綴的二進位 frame（較快，但難除錯）。
-- [ ] 使用者確認
+- [x] 使用者確認（2026-09-25）
 
 ### P2：trait 簽章
 
@@ -37,7 +37,7 @@
 - 建議：「functional core, imperative shell」：流水線狀態機是純函式 `step(state, event) -> (state, Vec<Action>)`，不呼叫任何 trait。trait 仍放 core（D11），用 `async fn`、不含 tokio 型別（相容 no_std）。每個 trait 只放實際用到的最少方法，例如 Forge：`submit`、`head`、`merge_if_head_is`；Store：每個用途一個方法、寫入帶 CAS 版本，不做通用查詢語言。
 - 理由：core 的測試不需要任何假實作；trait 保持小，假實作與契約測試才容易寫。
 - 替代方案：狀態機直接呼叫 trait（每個 core 測試都要假實作）。
-- [ ] 使用者確認
+- [x] 使用者確認（2026-09-25）
 
 ### P3：runner 要不要 trait
 
@@ -45,7 +45,7 @@
 - 建議：要：`Runner::run(cmd, dir, timeout) -> Output`。
 - 理由：D9 要求每個外部邊界都有 trait + 假實作；`command` 關卡與 git adapter 都要跑程序。
 - 替代方案：不設 trait、直接用 `tokio::process`（交接測試的 agent 提出）——否決：不跑真指令就無法測試。
-- [ ] 使用者確認
+- [x] 使用者確認（2026-09-25）
 
 ### P4：GitHub CI 怎麼進流水線
 
@@ -53,7 +53,7 @@
 - 建議：用 `command` 關卡，例如 `run = "gh pr checks {pr} --watch --fail-fast"`；`command` 新增佔位符 `{pr}`、`{head}`、`{branch}`。forge 維持 3 個方法，local forge 不需要空實作。
 - 理由：一種機制（command）涵蓋本機與 GitHub；forge 保持小。
 - 替代方案：由 forge github 回報 CI 狀態（forge 變大，local forge 要有空方法）。
-- [ ] 使用者確認
+- [x] 使用者確認（2026-09-25）
 
 ### P5：去抖動
 
@@ -61,7 +61,7 @@
 - 建議：不對稱：轉 busy 立即生效（絕不送進忙碌中的 agent）；轉 idle 要穩定 5 秒。先用常數，第 7 關用真實資料重新校準。
 - 理由：v1 約兩天 75 萬次轉換；送錯時機的代價在「送進忙碌 agent」那一側。
 - 替代方案：對稱的 N 秒（兩邊都延遲）。
-- [ ] 使用者確認
+- [x] 使用者確認（2026-09-25）
 
 ### P6：保留期限
 
@@ -69,7 +69,7 @@
 - 建議：task／workflow／decision 紀錄永久保留（量小）；訊息 30 天；事件與狀態轉換 14 天；封存的 WIP patch 30 天；每日 DB 快照留 7 份。第 5 關重新校準。
 - 理由：先給保守可用的預設值，實作 store 時用實際大小修正。
 - 替代方案：全部永久保留（v1 home 長到 161G 的教訓）；或全部同一個期限。
-- [ ] 使用者確認
+- [x] 使用者確認（2026-09-25）
 
 ### P7：core 依賴 allowlist
 
@@ -77,9 +77,9 @@
 - 建議：允許 `serde`（+ `serde_derive`），`default-features = false`，只開 `derive` + `alloc`，讓 protocol 型別在 no_std 下 derive；JSON 編碼本身放在 daemon／client。這會改動原本為空的 `CORE_DEP_ALLOWLIST`，所以需要明確核准。
 - 理由：兩邊共用同一份型別定義（D11），又不讓 core 碰 I/O。
 - 替代方案：在 daemon／client 各自手寫轉換（重複且易漂移）；或 core 保持零依賴、協定型別不 derive。
-- 草稿的實際範圍（比建議多一項，請一併確認）：serde derive 用在 protocol 型別，以及 workflow 定義型別（`Workflow`、`WorkflowStage`、`Stage` 與其欄位型別、`FanoutJoin`）。理由：D19 的 workflow 以 TOML 存進 DB、匯出／存回，存檔檢查（`Workflow::validate`）在 core，adapter 需要把 TOML 解成同一份型別，不另寫一份轉換。`Task`、`PipelineState`、`Candidate` 等執行期型別**不** derive：它們的持久化格式屬第 5 關 store，屆時再決定。
-- 草稿已照此改了 `crates/agend-core/Cargo.toml`、`xtask/src/check_core.rs` 的 `CORE_DEP_ALLOWLIST` 與 AGENTS.md／ARCHITECTURE.md 的說明，並在這些地方註明「待 P7 確認」。否決 P7 時：移除 serde 依賴、allowlist 改回空，protocol 型別的 JSON 轉換改放 adapter。
-- [ ] 使用者確認
+- 實作範圍：serde derive 用在 protocol 型別，以及 workflow 定義型別（`Workflow`、`WorkflowStage`、`Stage` 與其欄位型別、`FanoutJoin`）。理由：D19 的 workflow 以 TOML 存進 DB、匯出／存回，存檔檢查（`Workflow::validate`）在 core，adapter 需要把 TOML 解成同一份型別，不另寫一份轉換。`Task`、`PipelineState`、`Candidate` 等執行期型別**不** derive：它們的持久化格式屬第 5 關 store，屆時再決定。
+- 落實位置：`crates/agend-core/Cargo.toml`、`xtask/src/check_core.rs` 的 `CORE_DEP_ALLOWLIST`，規則寫在 AGENTS.md 與 ARCHITECTURE.md（D32）。
+- [x] 使用者確認（2026-09-25）
 
 
 ## 待你決定
@@ -104,7 +104,7 @@
 
 ## 自動驗收（完成定義）
 
-- [x] `cargo test --workspace` 通過；其中 `agend-core` 66 tests、xtask protocol compatibility 5 tests（2026-09-25）
+- [x] `~/.cargo/bin/cargo test --workspace` 通過；其中 `agend-core` 85 unit tests + 2 個狀態機探索器 tests（40,000 條事件序列、160,000 次竄改狀態）、xtask protocol compatibility 5 tests（2026-09-25）
 - [x] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨（2026-09-25）
 - [x] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`；注入 `std::fs` 時 checker exit 1，還原後通過（2026-09-25）
 - [x] `~/.cargo/bin/cargo xtask accept core` 通過，並印出下方 demo（2026-09-25）
@@ -121,7 +121,7 @@
    ~/.cargo/bin/cargo xtask accept core
    ```
 
-   應該看到：demo 先列出實際 protocol hello、busy 與 debounce 結果，再以 `assign::choose` 派出作者及不同 backend 的 reviewer，並以 `pipeline::state::step` 完成一次 command 失敗返工、head 更新、同 patch rebase 重跑 checks、diff 改變後返工及最終 merge。完整輸出見下方；最後一行是 `gate 1 (core): checks passed`。
+   應該看到：demo 先列出實際 protocol hello、busy 與 debounce 結果，再以 `assign::choose` 派出作者及不同 backend 的 reviewer，並以 `pipeline::state::step` 走完：command 失敗退回作者、reviewer 要求修改退回作者、返工期間 main 前進仍留在 work（`stay in work`）、新 commit 重跑 checks 與 review、同 patch rebase 保留核准只重跑 checks、diff 改變後退回作者，最後 merge。完整輸出見下方；最後一行是 `gate 1 (core): checks passed`。
 
    - [ ] 通過
 
@@ -158,9 +158,19 @@
 
    - [ ] 通過
 
+5. 看狀態機探索器：隨機事件序列下，merge 門檻、不跳關、返工不遺失都成立。
+
+   ```bash
+   ~/.cargo/bin/cargo test -p agend-core --test pipeline_explorer -- --nocapture 2>&1 | grep -E "explorer|tampered|test result"
+   ```
+
+   應該看到：`Running tests/pipeline_explorer.rs` 之後有 10 行 `explorer <workflow>: 4000 sequences, …`（兩個測試平行跑，行的順序可能和 `tampered…` 交錯），每行的 `done` 大於 0，有 merge 的 workflow（`code`、`human-gate`、`review-between-checks`、`unreviewed`、`checks-before-submit`、`pr-placeholders`）`merged` 大於 0；`explorer total: 40000 sequences`、`tampered-state attempts: 160000`；最後 `test result: ok. 2 passed`。檢查的不變量列在 [crates/agend-core/TESTING.md](../../crates/agend-core/TESTING.md#狀態機探索器)。
+
+   - [ ] 通過
+
 ### 預期 transcript
 
-以下是 core example 的實際輸出（不含 accept 前面的檢查指令）；work、assignment、policy 與 pipeline action 均由 core 函式產生。
+以下是 core example 的實際輸出（不含 accept 前面的檢查指令），逐字元相同；work、assignment、policy 與 pipeline action 均由 core 函式產生。
 
 ```text
 client hello: supports 1.0
@@ -169,23 +179,28 @@ busy levels for steer:
   codex: Steer
   opencode: Interrupt
 debounce: idle immediate=false, before 5s=false, at 5s=true; busy immediate=true, state=Busy
-task T-1  workflow=code v1
+task T-1 workflow=code v1
   assignment -> dev-1
   reviewer   -> review-1
   start                     -> assign role dev (work)
   work                      -> submit via local
   submit                    -> run checks (cargo test) at H0
-  command failed            -> return to work, assign role dev (work)
+  command failed            -> return work to its author (command `checks` failed with exit code 1)
   work retry                -> submit via local
   submit                    -> run checks (cargo test) at H1
   command passed            -> request review approval (head-bound=true)
-  approval H1               -> merge at H1
+  changes requested         -> return work to its author (changes requested by review-1: rename the flag)
+  rework, main advanced     -> stay in work at H1b
+  rework done               -> submit via local
+  submit                    -> run checks (cargo test) at H1c
+  command passed            -> request review approval (head-bound=true)
+  approval H1c              -> merge at H1c
   new commit                -> run checks (cargo test) at H2
   command passed            -> request review approval (head-bound=true)
   approval H2               -> merge at H2
   clean rebase              -> run checks (cargo test) at H3
   checks rerun              -> merge at H3
-  changed rebase            -> return to work, assign role dev (work)
+  changed rebase            -> return work to its author (main advanced and the rebase changed the patch)
   work after changed patch  -> submit via local
   submit                    -> run checks (cargo test) at H5
   command passed            -> request review approval (head-bound=true)
@@ -206,16 +221,17 @@ task T-1  workflow=code v1
 
 日期 + 一行 + commit／PR，新的在上面。
 
-- 2026-09-25 草稿原樣匯入 `feat/gate-01-core`（f540247），接手修正 review 第 2 輪仍未解的項目；P1–P7 勾選還原為未確認。
+- 2026-09-25 使用者確認 P1–P7（記為 D26–D32）；Q1（返工 fallback）仍待決定。
+- 2026-09-25 草稿原樣匯入 `feat/gate-01-core`（f540247），接手修正 review 第 2 輪仍未解的項目；草稿作者 2026-09-24 未經確認就打的 P1–P7 勾選先還原（432a842）。
 - 2026-09-25 （草稿作者）修正兩份 review 的 pipeline、assignment、protocol 與 check-deps findings；workspace tests 通過（66 core tests、5 protocol compatibility tests）、workspace clippy、check-deps、accept core 通過；人工注入 std 的 check-deps 失敗路徑亦通過（工作樹，尚未提交；待 fresh-context verifier 與使用者親自驗收）。
 - 2026-09-24 初次自動驗收通過；待 fresh-context verifier 與使用者親自驗收（工作樹，尚未提交）。
 - 2026-09-24 草稿作者自行對照 P1–P7（不是使用者確認）：P6 保留期限由第 5 關 Store 落地；holder 升 major 時須保留前一 major。修正 Claude MCP fixture pattern；49 tests、fmt、clippy、check-deps 與 demo 通過（工作樹，尚未提交）。
-- 2026-09-24 在 P1–P7 確認之前開始實作草稿（codex/gate-01-core 工作樹，尚未提交）；P1–P7 仍待使用者確認。
+- 2026-09-24 在 P1–P7 確認之前開始實作草稿（codex/gate-01-core 工作樹，尚未提交）；草稿作者自行勾選 P1–P7，並非使用者確認。
 - 2026-09-24 狀態改為提案中；提案 P1–P7 待確認（#102）。
 
 ## 下一步
 
 ```bash
-cargo test -p agend-core
-cargo xtask accept core
+~/.cargo/bin/cargo test -p agend-core
+~/.cargo/bin/cargo xtask accept core
 ```

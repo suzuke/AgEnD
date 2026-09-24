@@ -1,11 +1,11 @@
-# 決策索引（D1–D25）
+# 決策索引（D1–D32）
 
 > **TL;DR**
 > - 這裡是已確認的設計決策；每條都經使用者確認。
 > - 記住：**沒有新證據就不重開討論**；要推翻，先補證據再提新決策編號。
 > - 下一步：找到相關決策，點進細節檔看理由、被否決的方案與證據。
 
-來源：規劃 r4 §2（D1–D24）；D25 為使用者在設計討論中確認與 architecture 頁。「規劃 §x」指 [research/REWRITE-PLAN.md](research/REWRITE-PLAN.md)；原始證據索引在 [research/README.md](research/README.md)。規劃本文與後來的決策衝突時，以後來的決策為準（見本頁底部）。
+來源：規劃 r4 §2（D1–D24）；D25 為使用者在設計討論中確認與 architecture 頁；D26–D32 是第 1 關開工前提案 P1–P7，使用者 2026-09-25 確認，細節在 [第 1 關頁面](gates/gate-01-core.md#開工前提案)。「規劃 §x」指 [research/REWRITE-PLAN.md](research/REWRITE-PLAN.md)；原始證據索引在 [research/README.md](research/README.md)。規劃本文與後來的決策衝突時，以後來的決策為準（見本頁底部）。
 
 ## 索引
 
@@ -36,6 +36,13 @@
 | D23 | 文件繁中為主、程式輸出英文；每 crate 有 README／TESTING；AGENTS.md 唯一入口 | [d17-d25](decisions/d17-d25.md#d23) |
 | D24 | 第 13 施工關「安裝與發布」；第 9 施工關只做 doctor、init；安裝規則在 core `setup` | [d17-d25](decisions/d17-d25.md#d24) |
 | D25 | D18 分派規則是純邏輯，放 core `policy::assign`；daemon 只提供輸入 | [d17-d25](decisions/d17-d25.md#d25) |
+| D26 | client／holder 協定用 unix socket 上的 JSON Lines（PTY 位元組 base64）；`hello` 協商版本，同 major 只加欄位；新 daemon 要能跟舊一個 major 的 holder 溝通（P1） | [gate-01 P1](gates/gate-01-core.md#p1wire-format-與版本協商) |
+| D27 | 狀態機是純函式 `step(state, event) -> (state, actions)`，不呼叫 trait；trait 放 core、用 async、每個只放用到的最少方法（P2） | [gate-01 P2](gates/gate-01-core.md#p2trait-簽章) |
+| D28 | `command` 關卡與 git adapter 跑程序都經 `Runner` trait：`run(cmd, dir, timeout)`（P3） | [gate-01 P3](gates/gate-01-core.md#p3runner-要不要-trait) |
+| D29 | GitHub CI 用 `command` 關卡接（如 `gh pr checks {pr} --watch`），佔位符 `{pr}`／`{head}`／`{branch}`；forge 維持 3 個方法（P4） | [gate-01 P4](gates/gate-01-core.md#p4github-ci-怎麼進流水線) |
+| D30 | 去抖動不對稱：轉 busy 立即生效、轉 idle 穩定 5 秒；第 7 關用真實資料校準（P5） | [gate-01 P5](gates/gate-01-core.md#p5去抖動) |
+| D31 | 保留期限：task／workflow／decision 永久，訊息 30 天，事件與狀態轉換 14 天，WIP patch 30 天，DB 快照 7 份；第 5 關校準（P6） | [gate-01 P6](gates/gate-01-core.md#p6保留期限) |
+| D32 | core 唯一依賴 `serde`（`default-features = false`，只開 `derive` + `alloc`）供型別 derive；JSON 編碼在 adapter（P7） | [gate-01 P7](gates/gate-01-core.md#p7core-依賴-allowlist) |
 
 ## 來源衝突與處理
 
