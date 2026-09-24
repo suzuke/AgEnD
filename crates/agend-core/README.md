@@ -14,6 +14,7 @@
 - policy：忙碌策略、去抖動、衝突偵測、merge 門檻與 patch-id、角色分派
 - 螢幕分類器（只認 hard gate；規則是資料）
 - `config.toml` 的結構（呼叫端傳入文字）
+- 安裝規則（`setup`）：只有資料與純函式；執行在 `agend` crate
 
 ## 不負責
 
@@ -39,6 +40,7 @@
 | `policy::merge_gate` | merge 門檻、D14 核准保留 |
 | `policy::assign` | D18 分派規則（放 core 是骨架的選擇） |
 | `screen` | hard gate 分類器 |
+| `setup` | 安裝規則（第 13 關）：已測的 backend 版本範圍、登入判斷、git 最低版本、launchd／systemd unit 文字；只有資料與純函式 |
 
 ## 依賴規則
 

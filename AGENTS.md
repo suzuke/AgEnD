@@ -13,7 +13,7 @@ daemon 負責派工、worktree、checks、互審綁 head、merge；人只處理�
 ## 先讀什麼（依序）
 
 1. [README.md](README.md)：是什麼、系統圖、repo 結構。
-2. [docs/ROADMAP.md](docs/ROADMAP.md)：12 關、目前在哪一關、完成定義。
+2. [docs/ROADMAP.md](docs/ROADMAP.md)：13 關、目前在哪一關、完成定義。
 3. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)：程序模型、crate 地圖、daemon 分層。
 4. 你要動的 crate 的 `README.md` 與 `TESTING.md`。
 5. 需要時：[docs/DECISIONS.md](docs/DECISIONS.md)、[docs/BACKEND-BEHAVIORS.md](docs/BACKEND-BEHAVIORS.md)、[docs/V1-LESSONS.md](docs/V1-LESSONS.md)。
@@ -60,7 +60,7 @@ cargo test -p <crate>                                  # 單一 crate
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all                                        # 或 -- --check
 cargo xtask check-deps
-cargo xtask accept <關>                                # 1–12 或名稱，如 core
+cargo xtask accept <關>                                # 1–13 或名稱，如 core
 ```
 
 工具鏈釘在 `rust-toolchain.toml`（1.96.0，含 rustfmt、clippy）。

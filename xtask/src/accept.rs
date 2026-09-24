@@ -76,6 +76,11 @@ pub const GATES: &[Gate] = &[
         name: "adapters",
         crates: &["agend-daemon"],
     },
+    Gate {
+        number: 13,
+        name: "install",
+        crates: &["agend-core", "agend-daemon", "agend"],
+    },
 ];
 
 /// Finds a gate by number (`1`) or name (`core`).
@@ -139,9 +144,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn gates_are_numbered_one_to_twelve_in_order() {
+    fn gates_are_numbered_one_to_thirteen_in_order() {
         let numbers: Vec<u8> = GATES.iter().map(|g| g.number).collect();
-        assert_eq!(numbers, (1..=12).collect::<Vec<u8>>());
+        assert_eq!(numbers, (1..=13).collect::<Vec<u8>>());
     }
 
     #[test]
@@ -149,7 +154,8 @@ mod tests {
         assert_eq!(find("1").map(|g| g.name), Some("core"));
         assert_eq!(find("core").map(|g| g.number), Some(1));
         assert_eq!(find("12").map(|g| g.name), Some("adapters"));
-        assert!(find("13").is_none());
+        assert_eq!(find("13").map(|g| g.name), Some("install"));
+        assert!(find("14").is_none());
         assert!(find("").is_none());
     }
 

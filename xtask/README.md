@@ -24,7 +24,7 @@
 | 模組 | 職責 |
 |---|---|
 | `check_deps` | 規則與檢查 |
-| `accept` | 12 關的 crate 對照與執行 |
+| `accept` | 13 關的 crate 對照與執行 |
 
 ## 依賴規則
 
@@ -34,7 +34,7 @@
 
 ## 入口
 
-- `cargo xtask check-deps`、`cargo xtask accept <1-12 或名稱>`（alias 在 `.cargo/config.toml`）
+- `cargo xtask check-deps`、`cargo xtask accept <1-13 或名稱>`（alias 在 `.cargo/config.toml`）
 
 ## 細節
 

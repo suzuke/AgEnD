@@ -23,7 +23,7 @@ cargo test -p xtask
 | `check_core::tests::build_script_is_rejected` | 在真的 metadata 上加一個 `custom-build` target 會被抓 |
 | `check_core::tests::any_dependency_kind_is_rejected` | normal、build、dev 依賴都會被抓 |
 | `check_core::tests::missing_target_is_recognised` | 「target 沒裝」與「程式用了 std」分得開 |
-| `accept::tests::*` | 12 關編號連續、可用編號或名稱找到、每關的 crate 都存在 |
+| `accept::tests::*` | 13 關編號連續、可用編號或名稱找到、每關的 crate 都存在 |
 
 ## 用到的假實作
 

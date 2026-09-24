@@ -9,7 +9,8 @@
 
 - argv[0] 分派
 - CLI：agent 命令與操作者命令（D17）
-- `doctor`、`init`、debug
+- `doctor`、`init`（第 9 關）、debug
+- 第 13 關：服務註冊、`agend uninstall`、`agend telegram setup`（請 daemon 配對，本 crate 沒有 Telegram client）
 - 之後：`daemon`、`holder`、`app` 子命令
 
 ## 不負責
@@ -28,6 +29,7 @@
 | `doctor` | `agend doctor` |
 | `init` | `agend init` |
 | `debug` | 除錯子命令 |
+| `setup` | 執行 `agend_core::setup` 的規則：跑探測指令、寫 unit 檔、註冊服務、安裝／移除 shim（第 13 關） |
 
 ## 依賴規則
 

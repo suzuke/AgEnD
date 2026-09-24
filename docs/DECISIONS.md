@@ -32,7 +32,7 @@
 | D19 | workflow 以 TOML 定義、存檔檢查、`agend workflow` 管版本 | [d17-d23](decisions/d17-d23.md#d19) |
 | D20 | 人工核准 merge = 在 workflow 加 `approval(by = "human")` | [d17-d23](decisions/d17-d23.md#d20) |
 | D21 | task 固定建立時的 workflow 版本 | [d17-d23](decisions/d17-d23.md#d21) |
-| D22 | 施工依 crate 由下往上分 12 關，每關使用者確認後才開下一關 | [d17-d23](decisions/d17-d23.md#d22) |
+| D22 | 施工依 crate 由下往上分關（原 12 關，後加第 13 關「安裝與發布」），每關使用者確認後才開下一關 | [d17-d23](decisions/d17-d23.md#d22) |
 | D23 | 文件繁中為主、程式輸出英文；每 crate 有 README／TESTING；AGENTS.md 唯一入口 | [d17-d23](decisions/d17-d23.md#d23) |
 
 ## 來源衝突與處理
@@ -44,7 +44,8 @@
 | 規劃 §4.4 第一張表：claude 排隊 = channel、opencode 插入／中斷「未查證」 | 以 spike 表與 D16 為準（見 BACKEND-BEHAVIORS） |
 | 規劃 §5／§5.1 的 `checks/{command,forge}` 模組與 Checks trait | 以 architecture 頁為準：daemon 用 `runner`，trait 清單無 Checks |
 | runtime spike 建議用 herdr | D3 選自有 holder（見 D3 細節） |
-| 規劃 §6 的功能階段 | D22 改為 12 關；功能階段只當里程碑 |
+| 規劃 §6 的功能階段 | D22 改為分關施工；功能階段只當里程碑 |
+| D22 原文寫 12 關 | 使用者之後核准第 13 關「安裝與發布」；以 ROADMAP 的 13 關為準 |
 | D17 寫「11 個」agent 命令，但列出的項目依拆法可數成 10～12 個 | 未決：以列出的項目為準，數量待第 9 關定案 |
 
 ## 下一步

@@ -11,6 +11,7 @@ mod cli;
 mod debug;
 mod doctor;
 mod init;
+mod setup;
 
 use std::process::ExitCode;
 

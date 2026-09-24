@@ -47,10 +47,12 @@ Telegram（D13）：一個「需要你」topic + 每個 team 一個 topic；個�
 
 原則：每個設定錯誤都在第一次使用前被明確指出，並附修正指令。
 
+施工：`doctor`、`init` 在第 9 關；服務註冊、`uninstall`、`telegram setup`、打包與發布在第 13 關。規則（版本範圍、登入判斷、git 最低版本、unit 文字）在 `agend_core::setup`，執行在 `agend` crate 的 `setup` 模組。
+
 1. `agend doctor`：git 版本（merge-tree 需 ≥ 2.38）、gh 登入（僅 github forge）、各 backend 安裝／版本／登入、服務狀態、磁碟、Telegram（allowlist 為空即報錯）。支援 `--json`。
 2. `agend init`：建 home 與 `config.toml`、註冊 launchd／systemd、偵測 backend、建 `general` team 與一個 agent；在 repo 內才詢問是否登記；最後跑 doctor。只在互動終端發問。
 3. TUI 空畫面即引導：第一步「開始第一個 agent」，repo 是可選的下一步；不做獨立精靈。
-4. `agend telegram setup`：貼 token → 對 bot 傳 `/start` → 自動取得 chat id 並加入 allowlist。
+4. `agend telegram setup`：貼 token → 對 bot 傳 `/start` → 自動取得 chat id 並加入 allowlist。CLI 只請 daemon 配對，配對由 daemon 的 notifier 做。
 5. 自動處理 trust 設定、shim 安裝、agent PATH；shim 只進 agent 的 PATH，不改使用者自己的 git。
 6. `agend uninstall`：移除服務與 shim；資料是否刪除另外詢問。
 7. 驗收：安裝到第一個 agent 完成 task < 5 分鐘；CI 以全新 HOME + 假 agent 跑 e2e。

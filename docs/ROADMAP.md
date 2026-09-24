@@ -1,11 +1,11 @@
-# 施工路線圖：12 關
+# 施工路線圖：13 關
 
 > **TL;DR**
-> - 依 crate 由下往上分 12 關；每關單獨驗收，使用者確認後才開下一關（D22）。
+> - 依 crate 由下往上分 13 關；每關單獨驗收，使用者確認後才開下一關（D22）。
 > - 目前狀態：**第 0 階段（spike）完成；第 1 關尚未開始**。骨架與文件已就位。
 > - 下一步：開第 1 關（agend-core），驗收指令 `cargo xtask accept core`。
 
-## 12 關
+## 13 關
 
 | 關 | 範圍 | 驗收（可觀察） |
 |---|---|---|
@@ -17,10 +17,18 @@
 | 6 `daemon-holder` | 整合關：runtime adapter | 真 daemon + 真 holder；重啟 daemon，agent 與畫面存活 |
 | 7 `codex` | codex driver + 送達模型、三級忙碌策略 | 對假 app-server；可選的真 codex smoke test |
 | 8 `client` | 整合關：agend-client + protocol server | CLI 連得上；daemon 重啟時會重試 |
-| 9 `cli` | agend CLI：agent 命令、操作者命令、status、doctor、init | 對假 daemon 驗每個命令的輸出與錯誤；再對真 daemon |
+| 9 `cli` | agend CLI：agent 命令、操作者命令、status；安裝相關只做 `doctor`、`init`（讓前面各關能在本機跑；`init` 的服務註冊步驟在第 13 關補上） | 對假 daemon 驗每個命令的輸出與錯誤；再對真 daemon |
 | 10 `pipeline` | daemon：pipeline、git、runner、forge local、supervisor、reconcile | 假 driver + 暫存 repo：task 從派工走到 merge |
 | 11 `tui` | attention-first TUI（沿用 DEMO-01 原型的教訓：`github.com/suzuke/agend-attention-tui-demo`，private） | 先餵假事件，再接真 daemon |
 | 12 `adapters` | claude + opencode driver、forge github、telegram | 先對假實作，再做真 backend smoke test |
+| 13 `install` | 安裝與發布（最後一關，需要其他全部）：launchd／systemd 服務註冊、`agend uninstall`（移除服務與 shim；刪資料前先問）、`agend telegram setup`（CLI 請 daemon 配對：貼 token → 使用者對 bot 傳 `/start` → chat id 加入 allowlist；配對由 daemon 的 notifier 做，CLI 沒有 Telegram client）、`xtask release` 打包、brew formula、GitHub release workflow、`cargo install` | CI 用全新 HOME + 假 agent，從安裝到第一個 task 完成 < 5 分鐘；每個 `doctor` 檢查都有「故意弄壞 → 看到修正指令」的測試 |
+
+## 安裝相關的程式放在哪
+
+| 內容 | 位置 |
+|---|---|
+| 規則：已測的 backend 版本範圍、怎麼判斷已登入、git 最低版本、產生的 launchd／systemd unit 文字 | `agend_core::setup`（資料 + 純函式，無 I/O，符合 no_std） |
+| 執行：跑指令、寫檔、註冊服務 | `agend` crate 的 `setup` 模組 |
 
 ## 里程碑（使用者可見）
 
@@ -29,6 +37,7 @@
 | 第 1–9 關 | 兩個 codex agent 互傳訊息；重啟 daemon 時不中斷、不遺失、不重複 |
 | 第 10–11 關 | 本機 repo 從派工走到 merge，TUI 可看可操作 |
 | 第 12 關 | 三個 backend + GitHub + 手機（Telegram） |
+| 第 13 關 | 其他人可以自己安裝 |
 
 之後：與 v1 並行一週（另一個 Telegram bot、另一份 repo clone、另一個 home），一週內日常工作不需回 v1；learnability 複測（規劃 §6 第 5 階段）。
 

@@ -26,4 +26,5 @@ pub mod pipeline;
 pub mod policy;
 pub mod protocol;
 pub mod screen;
+pub mod setup;
 pub mod traits;
