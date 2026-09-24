@@ -23,6 +23,7 @@
 | [usage.md](usage.md) | v1 實際使用率（MCP 呼叫次數、log、磁碟） | D8、D17、範圍（規劃 §3） |
 | [workflow-validation.md](workflow-validation.md) | 用 v1 8,347 個真實 task 驗證關卡模型 | D15、D18、D19 |
 | [competitors.md](competitors.md) | 17 個同類工具的市場調查 | 定位、D5、D20 |
+| [v1-architecture-rfc.md](v1-architecture-rfc.md) | v1 未合併的架構簡化 RFC：被推翻的前提與方法論教訓 | D10、方法論（先證據後解法） |
 
 ## 下一步
 
