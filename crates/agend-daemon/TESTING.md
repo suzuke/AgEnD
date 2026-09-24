@@ -24,7 +24,7 @@ cargo test -p agend-daemon
 ## 還沒測的
 
 - [ ] store：migration、交易、保留期限、`VACUUM INTO`（第 5 施工關）
-- [ ] runtime 與真 holder（第 6 施工關）
+- [ ] agent runtime 與真 holder（第 6 施工關）
 - [ ] codex driver 對假 app-server、delivery 的冪等與重連不遺失不重複（第 7 施工關）
 - [ ] protocol server（第 8 施工關）
 - [ ] pipeline、git、runner、forge local、supervisor、reconcile（第 10 施工關）

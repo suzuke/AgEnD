@@ -9,7 +9,7 @@
 
 - 入口：protocol server、command handlers、hook／事件接收（含磁碟佇列補送）
 - 領域：驅動流水線、送達、監督（卡住、額度、轉派）、排程（timeout、cron）、DB ↔ git 對帳
-- adapter：driver（codex、claude、opencode）、runtime（holder client）、forge（local、github）、git、runner、store（SQLite）、notifier（Telegram）
+- adapter：driver（codex、claude、opencode）、agent runtime（holder client）、forge（local、github）、git、runner、store（SQLite）、notifier（Telegram）
 
 ## 不負責
 

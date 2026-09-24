@@ -75,7 +75,7 @@ agend-core 不用 std（`#![no_std]` + `alloc`），時間只經 `Clock` trait�
 | adapter | `driver/{codex,claude,opencode}`、`runtime`、`forge/{local,github}`、`git`、`runner`、`store`、`notifier` | 對外的一切 I/O |
 
 - 領域模組只透過 `agend_core::traits` 呼叫 adapter，所以能對 testkit 的假實作測。
-- runtime 為 tokio multi-thread；SQLite 由專屬執行緒持有、經 channel 存取；git、gh、checks 指令一律 `tokio::process` + timeout。
+- tokio runtime 為 multi-thread；SQLite 由專屬執行緒持有、經 channel 存取；git、gh、checks 指令一律 `tokio::process` + timeout。
 - v1 兩天有 861 次「scanner-thread slip」，這是上一條的理由。
 
 ## core 內容

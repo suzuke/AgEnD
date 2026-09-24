@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 這是 AgEnD v2 的工作入口；人和任何 AI agent（Claude、Codex、opencode…）都從這裡開始。本 repo 不設 CLAUDE.md。
 > - 記住：**crate 邊界是架構**；改動前後都跑 `cargo xtask check-deps`。
-> - 下一步：照「先讀什麼」讀三份文件，然後看「目前狀態」。
+> - 下一步：照「先讀什麼」讀前四份文件，然後看「目前狀態」。
 
 ## 專案目的
 

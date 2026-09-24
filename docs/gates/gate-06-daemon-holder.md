@@ -1,7 +1,7 @@
 # 第 6 施工關：daemon ↔ holder（整合施工關）（`daemon-holder`）
 
 > **TL;DR**
-> - runtime adapter：daemon 重啟時 agent 不斷線。
+> - agent runtime adapter：daemon 重啟時 agent 不斷線。
 > - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這個施工關才算完成。
 > - 下一步：等前一個施工關完成後開工；開工時把標「開工時細化」的步驟寫定。
 
@@ -13,7 +13,7 @@
 
 ## 範圍
 
-- daemon 端的 holder 協定 client（runtime adapter）
+- daemon 端的 holder 協定 client（agent runtime adapter）
 - daemon 重啟後重連 holder、取回畫面
 
 ## 自動驗收（完成定義）

@@ -26,7 +26,7 @@
 - agent 命令（11 個，D17）：`status`、`done`、`result`、`review approve`、`review changes`、`send`、`inbox`、`ask`、`block`／`unblock`（一個命令、兩個動詞）、`task create`、`remind`。
 - 命令總數 < 15、常用命令參數 ≤ 2；`agend status` 顯示所在步驟與可用下一步；錯誤附正確命令；`--help` 範例優先；支援 `--json`。
 - daemon 重啟中：CLI 重試最多 10 秒後印出明確訊息。
-- 啟動路徑：CLI 與 shim 不建 runtime、不讀設定、不開 DB；argv[0] 分派在 main 最前面。實測啟動 p50 4.1 ms、unix socket 來回 0.014 ms。
+- 啟動路徑：CLI 與 shim 不建 tokio runtime、不讀設定、不開 DB；argv[0] 分派在 main 最前面。實測啟動 p50 4.1 ms、unix socket 來回 0.014 ms。
 - 需要時由同一份定義產生 MCP 轉接層。
 
 ## 設定與目錄（D8）

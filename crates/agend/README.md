@@ -16,7 +16,7 @@
 ## 不負責
 
 - 在 argv[0] 分派前做任何事
-- CLI 路徑上建 runtime、讀設定、開 DB
+- CLI 路徑上建 tokio runtime、讀設定、開 DB
 
 ## 模組
 

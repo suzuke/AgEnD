@@ -44,11 +44,11 @@
 | head | head | `PipelineState::current_head` | `refs/heads/<branch>` 指向的 commit（不含未 commit 的變更）；核准與 checks 都綁它。 | git 的 `HEAD`（目前 checkout） | [pipeline](architecture/pipeline.md#merge-與-main-前進) |
 | patch-id | patch-id | `PipelineState::patch_id`、`merge_gate::approval_after_rebase` | branch 自身 diff 的 `git patch-id`；main 前進後乾淨 rebase 且它不變就保留核准，否則退回 work。 | head SHA（rebase 後一定會變） | D14 |
 | binding（工作／審查） | binding (work／review) | — | agent 目前唯一作用中的指派：工作 = (instance, task, branch, worktree)；審查 = detached 審查 worktree + 被審的 head。 | binding 快照（daemon 寫給 shim 的唯讀檔）；v1 的 HMAC binding | [pipeline](architecture/pipeline.md#binding)、D6 |
-| 返工 | rework | `PipelineAction::ReturnToWork`、`Purpose::Rework` | 被要求修改、checks 失敗或 patch-id 變了之後回到 work 關卡，由 task 持有者繼續。 | reopen（done 之後才發生） | D14、D18、D33 |
+| 返工 | rework | `PipelineAction::ReturnToWork`、`Purpose::Rework` | 被要求修改、checks 失敗（`on_fail` 指向 work）或 patch-id 變了之後回到 work 關卡，由 task 持有者繼續。 | reopen（done 之後才發生） | D14、D18、D19（`on_fail`）、D33 |
 | 改派 | reassign | `TaskOperation::Reassign`、`AssignmentDecision::Reassigned` | 同一個 task 換另一個 instance 接手（逾時動作，或持有者額度用盡、被刪除）。 | supersede（換成新 task） | [pipeline](architecture/pipeline.md#分派d18)、D33 |
 | supersede | supersede | `TaskOperation::Supersede`、`TaskStatus::Superseded` | 輸入變了，由新 task 接手舊 task；不算失敗。 | 取消；改派 | [pipeline](architecture/pipeline.md#6-種關卡) |
 | reopen | reopen | `TaskOperation::Reopen` | task done 之後由人重新打開。 | 返工 | [pipeline](architecture/pipeline.md#6-種關卡) |
-| 取消 | cancel | `PipelineEvent::Cancel`、`TimeoutAction::Cancel` | 由操作者或逾時動作終止 task；branch／worktree 清理與 merge 完成走同一流程。 | supersede；fanout `pick` 取消落選的子 task | [pipeline](architecture/pipeline.md#worktree-與-branch-生命週期) |
+| 取消 | cancel | `TimeoutAction::Cancel`、`PipelineEvent::Cancel` | 終止 task；目前文件只寫了關卡逾時動作的取消，branch／worktree 清理與 merge 完成走同一流程。操作者取消正在第 1 施工關 branch 加入（決策待定）。 | supersede；fanout `pick` 取消落選的子 task | [pipeline](architecture/pipeline.md#worktree-與-branch-生命週期) |
 
 ## 送達
 
@@ -57,7 +57,7 @@
 | 訊息 | message | `traits::AgentMessage`、`client::InboxMessage` | 送給 agent 的內容：一律完整內容、走 backend 的結構化 API；每則有 id，以 id 冪等。 | PTY 控制鍵（holder 只送單一按鍵）；Telegram 通知 | [delivery](architecture/delivery.md#送達模型) |
 | 送達狀態 | delivery state | `model::DeliveryState` | 訊息狀態 `queued → sent → confirmed／failed`；確認不了就標未確認，不假裝成功。 | 忙碌等級的「排隊」（`queued` 是送達狀態） | [delivery](architecture/delivery.md#送達模型) |
 | 忙碌等級：排隊／插入／中斷 | busy level: queue／steer／interrupt | `policy::busy::BusyLevel`、`effective_level` | agent 忙碌時的三種送法：turn 結束後送、插入不中斷、中斷後立即處理；只有 codex 能插入，其他改用中斷。 | 去抖動（判斷 busy／idle 何時生效） | [delivery](architecture/delivery.md#忙碌策略三級)、D16 |
-| Stop hook decision | Stop hook decision | — | claude Stop hook 的輸出 `{"decision": "block", "reason": …}`：turn 結束時把排隊的訊息當成下一個 turn 送進去。 | **決策**；**請示** | D16、[delivery](architecture/delivery.md#claude-特別規則d16) |
+| Stop hook decision | Stop hook decision | — | claude Stop hook 的輸出 `{"decision": "block", "reason": …}`：turn 結束時把排隊的訊息當成下一個 turn 送進去。 | **決策**；**請示** | D16、[delivery](architecture/delivery.md#claude-特別規則d16)、[spike-claude-f](research/spike-claude-f.md)（`reason`） |
 | 來源說明 | source framing | — | 讓 claude 處理 agend channel 訊息的說明：專案 CLAUDE.md 寫明訊息來自使用者自己的團隊，訊息內可另加 from／task／request 標頭。 | 本 repo 的 AGENTS.md（給開發 AgEnD 的人和 agent） | D16、[spike-claude-f](research/spike-claude-f.md) |
 
 ## 執行環境
@@ -83,7 +83,7 @@
 | 名詞（中文） | English | 程式識別字 | 定義 | 不要跟…混淆 | 出處 |
 |---|---|---|---|---|---|
 | 需要你 | needs-you | `DaemonEvent::AttentionRequired`、`NotificationSeverity::Attention` | 要人處理的例外（請示、門檻卡住、agent 卡住）：TUI 首頁最上方跨 team 的區塊，Telegram 有同名 topic。 | 已讀（看過不會離開「需要你」） | D13、[tui-and-setup](architecture/tui-and-setup.md#tui)、[README](../README.md#這是什麼) |
-| 請示 | ask (needs-you item) | — | 「需要你」裡 agent 問人的一項，由 `agend ask` 建立；可以是選項選擇，也可以是自由文字的多輪對話（v1 叫 `decision`）。 | **決策**（D 編號）；**Stop hook decision** | 規劃 §3.1、D35（即將提出） |
+| 請示 | ask (needs-you item) | — | 「需要你」裡 agent 問人的一項，由 `agend ask` 建立；人在 TUI 或 Telegram 回覆後變成已解決（v1 叫 `decision`）。擴充中：D35（使用者 2026-09-25 決定，記錄於第 1 施工關 PR）加上選項選擇與自由文字多輪對話。 | **決策**（D 編號）；**Stop hook decision** | D17、規劃 §3.1、[gate-11](gates/gate-11-tui.md#你親自驗收)、[gate-12](gates/gate-12-adapters.md#你親自驗收) |
 | ask | ask | `AgentCommand::Ask` | agent 命令 `agend ask`：建立一個請示；分派時需要的角色不存在也會轉成 ask。 | opencode 權限設定的 `"ask"` | D17、D18 |
 | attention-first | attention-first | crate `agend-tui` | TUI 的原則：先看「需要你」，再看各 team。 | — | [tui-and-setup](architecture/tui-and-setup.md#tui) |
 | 已讀／已解決 | read／resolved | — | 「需要你」的兩種狀態：看過只去掉粗體（已讀）；選了動作才解除（已解決）。 | — | [tui-and-setup](architecture/tui-and-setup.md#tui) |
