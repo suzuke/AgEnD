@@ -50,7 +50,7 @@
 
 - 問題：daemon 怎麼知道該有哪些 instance？開機時接回、新起、巡查孤兒，邏輯放哪？第 9 施工關的 CLI 還沒有，demo 怎麼加 instance？
 - 建議：
-  - migration `0002_instances` 加 `instances` 表；保留期限規則是「永久」（第 5 施工關 P8 的規則表）。instance id 只能是 `[a-z0-9-]{1,24}`，讓 socket 路徑不超過 100 bytes（第 4 施工關 P3）。
+  - migration `0002_instances` 加 `instances` 表；保留期限規則是「永久」（第 5 施工關 P8 的規則表）。instance id 只能是 `[a-z0-9-]{1,24}`，讓 socket 路徑較短；真正保證不超過 100 bytes 的是第 4 施工關 P3 的啟動時檢查（`$AGEND_HOME` 太長時 holder 拒絕啟動）。
   - 純函式 `plan_boot(DB 的 instances, run/holders/ 的鎖檔) -> 動作清單`，一次決定三件事：鎖被持有而且 DB 有 → **接回**；DB 有、鎖沒被持有 → **啟動**（有 session id 就帶 `--resume`，見 P6）；鎖被持有、DB 沒有 → **孤兒**，送 `Shutdown`。純函式用表格測試逐列驗。
   - demo 用 `agend-daemon` 的 example `daemon_probe add|remove|list`，直接開 DB，所以只能在 daemon 停著時用（daemon 跑著時它拿不到鎖，照 P1 報錯）。不做 production 命令，也不做 `agend debug spawn-fake`。
 - 理由：開機決策集中在一個純函式，孤兒巡查、接回、補救不會分散在三處各自判斷；example 不必為了測試多一個正式命令。
@@ -62,7 +62,7 @@
 
 - 問題：daemon 用什麼指令起 holder？怎麼確定它起來了？agent 的環境變數從哪來？holder 死了誰收？
 - 建議：
-  - 起 holder：`current_exe() holder <id>`，`env_clear()`、`process_group(0)`。之後每 50 ms 試連 socket，5 秒連不上算失敗（交給 P6）。
+  - 起 holder：`current_exe() holder <id>`，`env_clear()`；**不設** `process_group(0)`（holder 自己 `setsid()`，已經是 process-group leader 時 `setsid` 會失敗 EPERM；見第 4 施工關 P2 與實作偏離 G7。夜間驗證 2026-09-26 抓到並更正）。之後每 50 ms 試連 socket，5 秒連不上算失敗（交給 P6）。
   - 先把 instance 狀態寫進 DB，再送 `Spawn`；daemon 在兩者之間當掉，重啟後重送 `Spawn`，holder 回 `already_spawned`（第 4 施工關要補，見風險）。
   - agent 環境用白名單組出來：`AGEND_*`、`PATH`（以 `$AGEND_HOME/bin` 開頭，shim 才會先被找到）、`HOME`、`USER`、`LANG`、`TMPDIR`、`TERM`…（完整清單開工時細化）。不在清單上的一律不給。
   - 開機時確認 `$AGEND_HOME/bin/` 的 shim symlink 存在、指向目前的 binary；缺了或指錯就重建。
@@ -116,7 +116,7 @@
 ### P7：D2 的重啟預檢
 
 - 問題：D2 要求「重啟前預檢新 binary，失敗就不切換」。這關要做嗎？
-- 建議：移到第 9 施工關（`agend daemon restart` 在那關才有）。設計先定：新 binary 用最新 DB 快照的**複本**跑 migration 加 `quick_check`；在暫存 home 起一個自己的 holder 跑一次（hello、Spawn、Shutdown）；都過了才切換，任何一步失敗就留在舊版。本關只在 core 加一個測試：`SUPPORTED_VERSIONS` 包含前一個 major（D26）。
+- 建議：移到第 9 施工關（`agend daemon restart` 在那關才有）。設計先定：新 binary 用最新 DB 快照的**複本**跑 migration 加 `quick_check`；在暫存 home 起一個自己的 holder 跑一次（hello、Spawn、Shutdown）；都過了才切換，任何一步失敗就留在舊版。core 的「`SUPPORTED_VERSIONS` 包含前一個 major」測試等到第一次升 major 時才有意義（目前只有 V1），開工時細化。
 - 理由：本關沒有觸發 restart 的命令，現在做沒有呼叫點、驗不到；用快照複本預檢，DB 本身一個 byte 都不動。
 - 替代方案：本關就做（沒有使用者）；直接對 `agend.db` 跑 migration 預檢（失敗時 DB 已被改）。
 - 例子：新版 migration 有錯：預檢印 `preflight failed: migration 0003 …`，舊 daemon 照常跑。
@@ -158,7 +158,7 @@
 - [ ] `~/.cargo/bin/cargo test -p agend-daemon`、`~/.cargo/bin/cargo test -p agend-holder` 單獨通過，包括：`plan_boot` 表格測試（P2）；agent 環境白名單、secret 不外漏（P3）；重起 3 次後 `failed`、不全新啟動（P6）；log 與 audit 輪替用假時鐘（P8）；`instances` 表有保留規則（P2）
 - [ ] 契約三層都通過（P4）：RTM-1..9 對真 holder；重新執行自己的四次開機；真 `agend daemon` 四次開機（含一次硬殺 daemon）。反向檢查「每次開機用新的 `AGEND_HOME`」必須失敗。重啟類 case（RTM-8、RTM-9，見 [CONTRACTS.md](../../crates/agend-testkit/CONTRACTS.md)）跨真的 process 重啟跑（分開的 process、真的檔案／DB）**（已追認 2026-09-25，第 2 施工關 A25）**
 - [ ] 第二個 daemon 在 10 秒重試後被拒絕、第一個不受影響；Ctrl-C 後 holder 還在、沒有收到 `Shutdown`（P1）
-- [ ] core 加測試：`SUPPORTED_VERSIONS` 包含前一個 major（P7）
+- [ ] core 加測試：`SUPPORTED_VERSIONS` 包含前一個 major（P7；目前只有 V1，開工時細化）
 - [ ] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨
 - [ ] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`（出現 `SKIPPED` 不算通過），並有新規則：`agend-daemon` 不能依賴 `agend-holder`、`agend-shim`（P9；開工時細化：故意加依賴會失敗）
 - [ ] `~/.cargo/bin/cargo xtask accept daemon-holder` 通過，並印出下方「你親自驗收」用到的 demo
