@@ -299,6 +299,7 @@ owner 睡著時由實作者決定、可以反悔的事（頁面沒寫到的設�
 | S8 | `RETENTION` 列出 `audit/shim.jsonl` 每日輪替留 14 天（gate 6 P8），測試確認這列存在；`prune` 不處理檔案規則，輪替本身是第 6 施工關的 TODO，不寫 stub | AGENTS：不寫假實作；寫 audit 的是 shim、每日觸發在第 6 施工關，放那裡才測得到 | 第 6 施工關實作時可以把檔案規則搬到它自己的模組，規則表測試跟著改 | 待追認 |
 | S9 | 校準用 v1 的 8,347 個 task（V1-LESSONS），每個 20 個事件且全部在 14 天內（上限估計）；先經 store 寫一個 task 與 20 個事件（真 producer），再用 SQL 複製到 v1 量級 | v1 沒有事件數；經 API 逐筆寫 16 萬次 fsync 要幾分鐘，SQL 複製保持列的形狀與 production 一致。實測 DB 57.2 MB、7 份快照 395.8 MB、單次快照 0.19 秒（debug build） | 改事件數或改成逐筆寫：`store_demo.rs` 的常數 | 待追認 |
 | S10 | `SqliteStore::open_with(home, now, migrations)` 與 `MIGRATIONS` 是公開 API；`open` 就是 `open_with(…, MIGRATIONS)` | 頁面要「清單是參數，不留測試後門」：同一條 production 路徑、只是清單當參數，整合測試才能跑壞 migration 與升級前快照 | 改成 `pub(crate)`：相關測試搬進 crate 內的單元測試 | 待追認 |
+| S11 | `store` 模組與它的測試以 `cfg(unix)` 編譯（檔案權限用 unix mode） | CI 只有 ubuntu、macOS；testkit 的 socket 部分也是 unix-only | 要支援 Windows：權限改用 ACL 或略過，拿掉 `cfg(unix)` | 待追認 |
 
 ## 驗收紀錄
 
