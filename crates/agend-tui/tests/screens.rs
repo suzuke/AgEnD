@@ -138,6 +138,13 @@ fn needs_you_expands_the_selected_item_with_recap_thread_and_options() {
     let screen = render(&mut app);
     assert!(screen.contains("━━ 需要你 · 3 項待處理"));
     assert!(screen.contains("┃    來自 dev-2 · 任務 T-45 · team archfix"));
+    // What happens if it is left alone (DEMO-01 §4B), right under who/which task.
+    let lines: Vec<&str> = screen.lines().collect();
+    let from = lines.iter().position(|l| l.contains("來自 dev-2")).unwrap();
+    assert!(
+        lines[from + 1].starts_with("┃    不處理的話：T-45 stays blocked at implement"),
+        "{screen}"
+    );
     assert!(screen.contains("┃    目標：Split the state module"));
     assert!(screen.contains("┃    目前已決定：Keep the public API unchanged."));
     assert!(screen.contains("┃    [1] fixed seed 42"));
@@ -152,6 +159,7 @@ fn needs_you_expands_the_selected_item_with_recap_thread_and_options() {
         screen.contains("client protocol v1 還沒有處理這一項的操作（第 8 施工關）"),
         "{screen}"
     );
+    assert!(screen.contains("┃    不處理的話：T-88 review stays stopped until reviewer-1"));
 }
 
 #[test]

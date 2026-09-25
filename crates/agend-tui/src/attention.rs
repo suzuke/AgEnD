@@ -3,8 +3,9 @@
 //! to the daemon, and the item leaves the list when the daemon's
 //! `ask_updated` event shows the question answered.
 //!
-//! The selected item expands to show who asks about which task, the context
-//! recap (D37), the conversation so far (D35) and the options.
+//! The selected item expands to show who asks about which task, what happens
+//! if it is left alone (DEMO-01 §4B), the context recap (D37), the
+//! conversation so far (D35) and the options.
 //!
 //! Must NOT: resolve an item just because it was viewed.
 
@@ -52,6 +53,9 @@ fn details(ctx: &Ctx, item: &Attention) -> Vec<Row> {
     let team = team_of(ctx.fleet, item).unwrap_or_else(|| ctx.tr(Text::NoTeam).into());
     let line = |text: String| Row::line(BAR, format!("  {text}"));
     let mut rows = vec![line(ctx.fmt(Text::AskFrom, &[&from, task, &team])).dim()];
+    if let Some(text) = ctx.fleet.catalog.if_ignored.get(task) {
+        rows.push(line(ctx.fmt(Text::IfIgnored, &[text])));
+    }
     if let Some(recap) = &item.data.recap {
         rows.push(line(ctx.fmt(Text::RecapGoal, &[&recap.goal])));
         if !recap.decisions.is_empty() {

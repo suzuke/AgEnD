@@ -13,6 +13,8 @@
 
 pub mod scripted;
 
+use std::collections::BTreeMap;
+
 use agend_core::model::Backend;
 use agend_core::pipeline::stage::StageKind;
 use agend_core::policy::attention::{AttentionItem, order};
@@ -90,6 +92,10 @@ pub struct Catalog {
     pub teams: Vec<String>,
     pub tasks: Vec<TaskInfo>,
     pub agents: Vec<AgentInfo>,
+    /// Task id → what happens to that task if its needs-you item is left
+    /// alone (DEMO-01 §4B). `attention_required` has no such field, so the
+    /// demo catalog carries fixed text (gap G1 for gate 8).
+    pub if_ignored: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

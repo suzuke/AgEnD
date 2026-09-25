@@ -334,6 +334,24 @@ pub fn demo_catalog() -> Catalog {
                 None,
             ),
         ],
+        // Fixed text: protocol v1 has no "if ignored" field (gap G1).
+        if_ignored: [
+            (
+                "T-45",
+                "T-45 stays blocked at implement; dev-2 cannot rerun the suite.",
+            ),
+            (
+                "T-88",
+                "T-88 review stays stopped until reviewer-1's usage limit resets.",
+            ),
+            (
+                "T-90",
+                "dev-3 keeps waiting; the T-90 survey does not start.",
+            ),
+        ]
+        .into_iter()
+        .map(|(task, text)| (task.to_owned(), text.to_owned()))
+        .collect(),
     }
 }
 

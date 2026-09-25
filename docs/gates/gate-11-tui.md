@@ -185,7 +185,8 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 | T13 | 首頁「需要你」列 `→` 開「需要你」畫面並展開該項；Task Detail 只有目前關卡 `→` 會開它的請示；`t` 在請示列開提問的 agent，非請示項目開 task 持有者 | 同 DEMO-01 的層級；「誰問的」比「誰持有」更接近要看的終端 | 改 `App::open_selected` | 待追認 |
 | T14 | 你親自驗收 A 段的步驟本身（上面 A1–A5，含 `F2`／`F3` 這兩個只在 `tui_fake` 範例有的 demo 鍵） | 你要求先寫定步驟再驗 | 改這一頁 | 待追認 |
 | T15 | 想改但依規則沒改的文件（列給你決定）：名詞表加「資料來源（data source，`source::Source`）」與「目錄（catalog，`source::Catalog`）」；AGENTS.md 的 crate 邊界表加一列「`agend-tui` 不依賴 SQLite、`agend-daemon`」；ROADMAP 與 docs/gates/README.md 的狀態欄 | 這次的規則不准改 ROADMAP、gates/README、GLOSSARY、AGENTS、DECISIONS | 另一個 docs PR | 待追認 |
-| G1 | 缺口：沒有列出 team、task、agent 的請求，也沒有 task 的關卡清單與狀態、agent 的結構化狀態（working／idle／needs you／stuck／unknown）與 backend → 現在由 `source::Catalog`（TUI 本地型別）在 connect 時給 | 畫面要分組、要畫 `■□` 進度條、要顯示 agent 狀態，只有 `task_changed`／`instance_changed` 的文字摘要不夠 | 第 8 施工關：加 list 請求（或快照事件），`Catalog` 改用 core 型別 | 待追認 |
+| T16 | 「需要你」展開後，在「來自 … · 任務 … · team …」下一行加「不處理的話：…」（DEMO-01 §4B 第 3 點）；`attention_required` 沒有這個欄位，所以放在 `Catalog.if_ignored`（以 task id 為鍵），demo catalog 給三句固定文字 | DEMO 規格要讓人一眼看懂不處理會怎樣；不在 TUI 自己推算 | 第 8 施工關加欄位後改讀協定；刪一個欄位與一行 | 待追認 |
+| G1 | 缺口：沒有列出 team、task、agent 的請求，也沒有 task 的關卡清單與狀態、agent 的結構化狀態（working／idle／needs you／stuck／unknown）與 backend，也沒有「不處理的話會怎樣」（見 T16） → 現在由 `source::Catalog`（TUI 本地型別）在 connect 時給 | 畫面要分組、要畫 `■□` 進度條、要顯示 agent 狀態，只有 `task_changed`／`instance_changed` 的文字摘要不夠 | 第 8 施工關：加 list 請求（或快照事件），`Catalog` 改用 core 型別 | 待追認 |
 | G2 | 缺口：`attention_required` 沒有「解決後能放行多少工作」與「開始等待的時間」→ D36 排序時 unblocks 一律 0、用 event id 代替等待時間（最舊的在前） | 不在 TUI 自己推算 | 第 8 施工關：`AttentionRequiredData` 加兩個欄位（additive） | 待追認 |
 | G3 | 缺口：不是請示的「需要你」（agent 卡住、用量上限）沒有操作，也沒有「已處理」事件 → 畫面寫明「client protocol v1 還沒有處理這一項的操作」，而且一直留在清單 | 不發明 wire 訊息 | 第 8 施工關：加操作（重試、暫停…）與清除事件 | 待追認 |
 | G4 | 缺口：沒有已讀狀態 → 見 T4 | 同上 | 第 8 施工關：加已讀請求與事件，TUI 與 Telegram 共用 | 待追認 |
