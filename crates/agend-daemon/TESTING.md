@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 目前只有 codex socket 路徑解析的測試。
 > - 記住：每個領域模組都要能對 testkit 的假實作單獨測；每個 adapter 要跑契約測試。
-> - 下一步：第 5 施工關加入 store 的 in-memory SQLite 測試。
+> - 下一步：第 5 施工關加入 store 的測試——真的 DB 檔（temp dir）；重開／持久化案例跨真的 process 重啟驗（第 5 施工關 P7）。
 
 ## 怎麼跑
 

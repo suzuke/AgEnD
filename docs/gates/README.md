@@ -13,7 +13,7 @@
 | 2 | [`testkit`](gate-02-testkit.md) | agend-testkit | 完成（2026-09-25） | `cargo xtask accept testkit` |
 | 3 | [`shim`](gate-03-shim.md) | agend-shim | 未開始 | `cargo xtask accept shim` |
 | 4 | [`holder`](gate-04-holder.md) | agend-holder | 提案中 | `cargo xtask accept holder` |
-| 5 | [`store`](gate-05-store.md) | agend-daemon：store | 未開始 | `cargo xtask accept store` |
+| 5 | [`store`](gate-05-store.md) | agend-daemon：store | 提案中 | `cargo xtask accept store` |
 | 6 | [`daemon-holder`](gate-06-daemon-holder.md) | daemon ↔ holder | 未開始 | `cargo xtask accept daemon-holder` |
 | 7 | [`codex`](gate-07-codex.md) | codex driver + 送達 | 未開始 | `cargo xtask accept codex` |
 | 8 | [`client`](gate-08-client.md) | agend-client + protocol server | 未開始 | `cargo xtask accept client` |
