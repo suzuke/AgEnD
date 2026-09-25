@@ -116,6 +116,9 @@
 | 契約規則／mutant | contract rule／mutant | `Case::rule`（`DRV-1`…`RUN-9`）、`tests/contract_teeth/` | 契約測試裡一條有編號的規則，全部列在 [CONTRACTS.md](../crates/agend-testkit/CONTRACTS.md)；mutant 是故意違反某條規則的實作，契約 suite 必須在標著那條規則的 case 上失敗。 | 決策編號（D1…）；mutation testing 工具 | D9、[agend-testkit](../crates/agend-testkit/CONTRACTS.md) |
 | 假 daemon | fake daemon | `fake_daemon::FakeDaemon`、`ProbeClient` | 測試行程內的 client protocol v1 server，給 client／CLI／TUI 測試用；會執行事件身分規則。 | 真 daemon 的 `server` 模組 | [agend-testkit](../crates/agend-testkit/README.md#假-daemon) |
 | 假 agent | fake agent | `fake-codex-app-server`、`fake-opencode-serve`、`fake-claude`（`fake_agent::*`） | 只講真 backend 協定一小部分的程式，回覆固定、stdin 結束就正常結束；涵蓋範圍寫在各模組開頭。 | 假實作（trait 層）；真 backend 的 smoke test | [agend-testkit](../crates/agend-testkit/README.md#假-agent-程式) |
+| 錄製器 | backend recorder | `recorder::Backend`、`recorder::BACKENDS`、bin `agend-record`、`cargo xtask record` | 在寫入沙箱裡用假 agent 模擬的同一條傳輸驅動真 backend CLI 跑固定情境，把兩個方向的每則訊息遮蔽後存成錄製檔。 | 螢幕 fixture（畫面擷取）；v1 的 smoke test | [RECORDER](../crates/agend-testkit/RECORDER.md) |
+| 錄製檔 | transcript | `recorder::read_transcript`、`crates/agend-testkit/transcripts/<backend>/<scenario>.jsonl` | 一個情境的錄製結果：header（CLI 版本、日期）加上依序的訊息。 | 真 CLI 自己的 transcript（claude 的 `~/.claude/projects/`） | [RECORDER](../crates/agend-testkit/RECORDER.md) |
+| 一致性檢查 | conformance check | `tests/conformance.rs`、`recorder::shape::compare` | 用同一套情境驅動假 agent，和錄製檔按形狀（訊息種類、欄位、型別、順序）比對；規則只在 `recorder::shape`。 | 契約測試（trait 層，比規則不比形狀） | [RECORDER](../crates/agend-testkit/RECORDER.md#一致性檢查的比對規則recordershape唯一出處) |
 | 決策 | decision (D*n*) | — | 經使用者確認的設計決定，有 D 編號；沒有新證據就不重開。 | **請示**；**Stop hook decision** | [DECISIONS](DECISIONS.md) |
 
 ## 細節：為什麼是「關卡」與「施工關」

@@ -28,6 +28,9 @@
 - [ ] `GET /session/status` 閒置時回 `{}`，只列出忙碌的 session。
 - [ ] 公開 issue `anomalyco/opencode#46842` 回報某版本忙碌時 `prompt_async` 會卡住不排程（injection.md）；1.18.31 實測是正常排隊。升版時要重測。
 - [ ] 隔離做法：`XDG_DATA_HOME`／`XDG_CONFIG_HOME` 指到專屬目錄並複製 `auth.json`，不需重新登入。
+- [ ] 2026-09-25 錄製（[RECORDER.md](../../crates/agend-testkit/RECORDER.md)）：abort 後先 `session.error`、idle，之後帶 error 的 assistant message 再 idle 一次（`session.idle` 出現兩次）。
+- [ ] 權限回 `reject` 後這輪直接結束（`finish: "tool-calls"`），不再回覆文字；`permission.asked` 這次有送到 SSE。
+- [ ] `--pure` 下第一個 prompt 仍送出大量 `plugin.added`、`catalog.updated` 事件。
 
 ## 另一套 API
 

@@ -24,6 +24,7 @@
 - [ ] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨
 - [ ] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`（出現 `SKIPPED` 不算通過）
 - [ ] `~/.cargo/bin/cargo xtask accept adapters` 通過，並印出下方「你親自驗收」用到的 demo
+- [ ] 真 CLI 一致性檢查（必要；使用者已決定 2026-09-25）：`claude --version`、`opencode --version` 和 `crates/agend-testkit/transcripts/{claude,opencode}/` 錄製檔 header 的 `version` 相同，不同就先用錄製器重錄（[RECORDER.md](../../crates/agend-testkit/RECORDER.md#重錄cli-升版時)）；`~/.cargo/bin/cargo test -p agend-testkit --test conformance` 通過
 - [ ] 本施工關 crate 的 `README.md`／`TESTING.md` 已更新
 - [ ] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」
 
@@ -74,6 +75,20 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
    - [ ] 通過
 
+5. 真 CLI 一致性檢查（必做；使用者已決定 2026-09-25）。
+
+   ```bash
+   claude --version; opencode --version
+   head -1 crates/agend-testkit/transcripts/claude/one_turn.jsonl crates/agend-testkit/transcripts/opencode/one_turn.jsonl
+   ~/.cargo/bin/cargo test -p agend-testkit --test conformance
+   ```
+
+   應該看到：兩個版本各自和錄製檔 header 的 `"version"` 相同；最後 `test result: ok. 5 passed`。版本不同：先重錄那個 backend（`~/.cargo/bin/cargo xtask record claude --sandbox ~/Documents/Hack/AgEnD-ops/record-sandbox.sh`，或 `opencode`；會跑真的 CLI、花少量 token，見 [RECORDER.md](../../crates/agend-testkit/RECORDER.md)）再跑一次；檢查不過就改假 agent，不改錄製檔。
+
+   **這步在驗什麼**：driver 測試用的假 claude／假 opencode 和你機器上真的 CLI 形狀一致。壞了的話，driver 對假的全綠、接上真的才出錯（v1 #1483）。
+
+   - [ ] 通過
+
 ## 驗收紀錄
 
 由你填寫。
@@ -86,7 +101,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 日期 + 一行 + commit／PR，新的在上面。
 
-- （尚無）
+- 2026-09-25 使用者決定：真 CLI 一致性檢查（錄製器 + `tests/conformance.rs`）列為必要完成條件（`feat/backend-recorder`）。
 
 ## 下一步
 

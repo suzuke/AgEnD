@@ -1,0 +1,112 @@
+{"backend":"opencode","cli":"opencode","format":1,"recorded":"2026-09-25","run":{"program":"opencode"},"scenario":"approval","type":"header","version":"1.18.31"}
+{"from":"client","msg":{"body":null,"method":"GET","path":"/event"},"via":"http"}
+{"from":"backend","msg":{"body":null,"status":200},"via":"http"}
+{"from":"backend","msg":{"id":"<evt-1>","properties":{},"type":"server.connected"},"via":"sse"}
+{"from":"client","msg":{"body":{},"method":"POST","path":"/session"},"via":"http"}
+{"from":"backend","msg":{"body":{"cost":0,"directory":"<rec>/project","id":"<ses-1>","path":"private<rec>/project","projectID":"global","slug":"swift-moon","time":{"created":1790316937791,"updated":1790316937791},"title":"New session - 2026-09-25T06:15:37.791Z","tokens":{"cache":{"read":0,"write":0},"input":0,"output":0,"reasoning":0},"version":"1.18.31"},"status":200},"via":"http"}
+{"from":"client","msg":{"body":{"model":{"modelID":"space-bunny-free","providerID":"opencode"},"parts":[{"text":"run: echo agend-record\nUse your bash tool to run exactly that command once, then reply DONE.","type":"text"}]},"method":"POST","path":"/session/<ses-1>/prompt_async"},"via":"http"}
+{"from":"backend","msg":{"id":"<evt-2>","properties":{"info":{"cost":0,"directory":"<rec>/project","id":"<ses-1>","path":"private<rec>/project","projectID":"global","slug":"swift-moon","time":{"created":1790316937791,"updated":1790316937791},"title":"New session - 2026-09-25T06:15:37.791Z","tokens":{"cache":{"read":0,"write":0},"input":0,"output":0,"reasoning":0},"version":"1.18.31"},"sessionID":"<ses-1>"},"type":"session.created"},"via":"sse"}
+{"from":"backend","msg":{"body":null,"status":204},"via":"http"}
+{"from":"client","msg":{"body":null,"method":"GET","path":"/permission"},"via":"http"}
+{"from":"backend","msg":{"body":[],"status":200},"via":"http"}
+{"from":"backend","msg":{"id":"<evt-3>","properties":{"info":{"agent":"build","cost":0,"directory":"<rec>/project","id":"<ses-1>","model":{"id":"space-bunny-free","providerID":"opencode","variant":"default"},"path":"private<rec>/project","projectID":"global","slug":"swift-moon","time":{"created":1790316937791,"updated":1790316937840},"title":"New session - 2026-09-25T06:15:37.791Z","tokens":{"cache":{"read":0,"write":0},"input":0,"output":0,"reasoning":0},"version":"1.18.31"},"sessionID":"<ses-1>"},"type":"session.updated"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-4>","properties":{"info":{"agent":"build","id":"<msg-1>","model":{"modelID":"space-bunny-free","providerID":"opencode"},"role":"user","sessionID":"<ses-1>","time":{"created":1790316937840}},"sessionID":"<ses-1>"},"type":"message.updated"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-5>","properties":{"part":{"id":"<prt-1>","messageID":"<msg-1>","sessionID":"<ses-1>","text":"run: echo agend-record\nUse your bash tool to run exactly that command once, then reply DONE.","type":"text"},"sessionID":"<ses-1>","time":1790316938033},"type":"message.part.updated"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-6>","properties":{"info":{"agent":"build","cost":0,"directory":"<rec>/project","id":"<ses-1>","model":{"id":"space-bunny-free","providerID":"opencode","variant":"default"},"path":"private<rec>/project","projectID":"global","slug":"swift-moon","time":{"created":1790316937791,"updated":1790316938034},"title":"New session - 2026-09-25T06:15:37.791Z","tokens":{"cache":{"read":0,"write":0},"input":0,"output":0,"reasoning":0},"version":"1.18.31"},"sessionID":"<ses-1>"},"type":"session.updated"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-7>","properties":{"sessionID":"<ses-1>","status":{"type":"busy"}},"type":"session.status"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-8>","properties":{"info":{"agent":"build","cost":0,"id":"<msg-2>","mode":"build","modelID":"space-bunny-free","parentID":"<msg-1>","path":{"cwd":"<rec>/project","root":"/"},"providerID":"opencode","role":"assistant","sessionID":"<ses-1>","time":{"created":1790316938039},"tokens":{"cache":{"read":0,"write":0},"input":0,"output":0,"reasoning":0}},"sessionID":"<ses-1>"},"type":"message.updated"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-9>","properties":{"info":{"agent":"build","cost":0,"directory":"<rec>/project","id":"<ses-1>","model":{"id":"space-bunny-free","providerID":"opencode","variant":"default"},"path":"private<rec>/project","projectID":"global","slug":"swift-moon","summary":{"additions":0,"deletions":0,"files":0},"time":{"created":1790316937791,"updated":1790316938065},"title":"New session - 2026-09-25T06:15:37.791Z","tokens":{"cache":{"read":0,"write":0},"input":0,"output":0,"reasoning":0},"version":"1.18.31"},"sessionID":"<ses-1>"},"type":"session.updated"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-10>","properties":{"diff":[],"sessionID":"<ses-1>"},"type":"session.diff"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-11>","properties":{"info":{"agent":"build","id":"<msg-1>","model":{"modelID":"space-bunny-free","providerID":"opencode"},"role":"user","sessionID":"<ses-1>","summary":{"diffs":[]},"time":{"created":1790316937840}},"sessionID":"<ses-1>"},"type":"message.updated"},"via":"sse"}
+{"from":"client","msg":{"body":null,"method":"GET","path":"/permission"},"via":"http"}
+{"from":"backend","msg":{"id":"<evt-12>","properties":{"id":"core/config-reference"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-13>","properties":{"id":"agent"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-14>","properties":{"id":"command"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-15>","properties":{"id":"skill"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-16>","properties":{"id":"models-dev"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-17>","properties":{"id":"config-agent"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-18>","properties":{"id":"config-command"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-19>","properties":{"id":"config-skill"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-20>","properties":{"id":"alibaba"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-21>","properties":{"id":"amazon-bedrock"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-22>","properties":{"id":"anthropic"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-23>","properties":{"id":"azure-cognitive-services"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-24>","properties":{"id":"azure"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-25>","properties":{"id":"cerebras"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-26>","properties":{"id":"cloudflare-ai-gateway"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-27>","properties":{"id":"cloudflare-workers-ai"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-28>","properties":{"id":"cohere"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-29>","properties":{"id":"deepinfra"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-30>","properties":{"id":"gateway"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-31>","properties":{"id":"github-copilot"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-32>","properties":{"id":"gitlab"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-33>","properties":{"id":"google"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-34>","properties":{"id":"google-vertex-anthropic"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-35>","properties":{"id":"google-vertex"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"body":[],"status":200},"via":"http"}
+{"from":"backend","msg":{"id":"<evt-36>","properties":{"id":"groq"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-37>","properties":{"id":"kilo"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-38>","properties":{"id":"llmgateway"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-39>","properties":{"id":"mistral"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-40>","properties":{"id":"nvidia"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-41>","properties":{"id":"opencode"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-42>","properties":{"id":"snowflake-cortex"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-43>","properties":{"id":"openai-compatible"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-44>","properties":{"id":"openai"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-45>","properties":{"id":"openrouter"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-46>","properties":{"id":"perplexity"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-47>","properties":{"id":"sap-ai-core"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-48>","properties":{},"type":"catalog.updated"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-49>","properties":{"id":"togetherai"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-50>","properties":{"id":"vercel"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-51>","properties":{"id":"venice"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-52>","properties":{"id":"xai"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-53>","properties":{"id":"zenmux"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-54>","properties":{"id":"dynamic-provider"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-55>","properties":{"id":"config-plugin"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-56>","properties":{"id":"config-provider"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-57>","properties":{"id":"variant"},"type":"plugin.added"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-58>","properties":{},"type":"reference.updated"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-59>","properties":{},"type":"integration.updated"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-60>","properties":{},"type":"catalog.updated"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-61>","properties":{"sessionID":"<ses-1>","status":{"type":"busy"}},"type":"session.status"},"via":"sse"}
+{"from":"client","msg":{"body":null,"method":"GET","path":"/permission"},"via":"http"}
+{"from":"backend","msg":{"body":[],"status":200},"via":"http"}
+{"from":"client","msg":{"body":null,"method":"GET","path":"/permission"},"via":"http"}
+{"from":"backend","msg":{"body":[],"status":200},"via":"http"}
+{"from":"client","msg":{"body":null,"method":"GET","path":"/permission"},"via":"http"}
+{"from":"backend","msg":{"body":[],"status":200},"via":"http"}
+{"from":"backend","msg":{"id":"<evt-62>","properties":{"info":{"agent":"build","cost":0,"directory":"<rec>/project","id":"<ses-1>","model":{"id":"space-bunny-free","providerID":"opencode","variant":"default"},"path":"private<rec>/project","projectID":"global","slug":"swift-moon","summary":{"additions":0,"deletions":0,"files":0},"time":{"created":1790316937791,"updated":1790316938065},"title":"Running agend-record echo command","tokens":{"cache":{"read":0,"write":0},"input":0,"output":0,"reasoning":0},"version":"1.18.31"},"sessionID":"<ses-1>"},"type":"session.updated"},"via":"sse"}
+{"from":"client","msg":{"body":null,"method":"GET","path":"/permission"},"via":"http"}
+{"from":"backend","msg":{"body":[],"status":200},"via":"http"}
+{"from":"client","msg":{"body":null,"method":"GET","path":"/permission"},"via":"http"}
+{"from":"backend","msg":{"body":[],"status":200},"via":"http"}
+{"from":"client","msg":{"body":null,"method":"GET","path":"/permission"},"via":"http"}
+{"from":"backend","msg":{"body":[],"status":200},"via":"http"}
+{"from":"backend","msg":{"id":"<evt-63>","properties":{"part":{"id":"<prt-2>","messageID":"<msg-2>","sessionID":"<ses-1>","type":"step-start"},"sessionID":"<ses-1>","time":1790316941746},"type":"message.part.updated"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-64>","properties":{"part":{"id":"<prt-3>","messageID":"<msg-2>","sessionID":"<ses-1>","text":"","time":{"start":1790316941748},"type":"reasoning"},"sessionID":"<ses-1>","time":1790316941748},"type":"message.part.updated"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-65>","properties":{"delta":"We need comply","field":"text","messageID":"<msg-2>","partID":"<prt-3>","sessionID":"<ses-1>"},"type":"message.part.delta"},"via":"sse"}
+{"from":"client","msg":{"body":null,"method":"GET","path":"/permission"},"via":"http"}
+{"from":"backend","msg":{"body":[],"status":200},"via":"http"}
+{"from":"backend","msg":{"id":"<evt-66>","properties":{"delta":". Need run exact command once, then DONE. No explanation due explicit exact and reply. Use bash commentary.","field":"text","messageID":"<msg-2>","partID":"<prt-3>","sessionID":"<ses-1>"},"type":"message.part.delta"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-67>","properties":{"part":{"id":"<prt-3>","messageID":"<msg-2>","sessionID":"<ses-1>","text":"We need comply. Need run exact command once, then DONE. No explanation due explicit exact and reply. Use bash commentary.","time":{"end":1790316942000,"start":1790316941748},"type":"reasoning"},"sessionID":"<ses-1>","time":1790316942000},"type":"message.part.updated"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-68>","properties":{"part":{"callID":"<call-1>","id":"<prt-4>","messageID":"<msg-2>","sessionID":"<ses-1>","state":{"input":{},"raw":"","status":"pending"},"tool":"bash","type":"tool"},"sessionID":"<ses-1>","time":1790316942003},"type":"message.part.updated"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-69>","properties":{"part":{"callID":"<call-1>","id":"<prt-4>","messageID":"<msg-2>","sessionID":"<ses-1>","state":{"input":{"command":"echo agend-record","timeout":120000,"workdir":"<rec>/project"},"status":"running","time":{"start":1790316942261}},"tool":"bash","type":"tool"},"sessionID":"<ses-1>","time":1790316942261},"type":"message.part.updated"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-70>","properties":{"always":["echo *"],"id":"<per-1>","metadata":{"command":"echo agend-record"},"patterns":["echo agend-record"],"permission":"bash","sessionID":"<ses-1>","tool":{"callID":"<call-1>","messageID":"<msg-2>"}},"type":"permission.asked"},"via":"sse"}
+{"from":"client","msg":{"body":null,"method":"GET","path":"/permission"},"via":"http"}
+{"from":"backend","msg":{"body":[{"always":["echo *"],"id":"<per-1>","metadata":{"command":"echo agend-record"},"patterns":["echo agend-record"],"permission":"bash","sessionID":"<ses-1>","tool":{"callID":"<call-1>","messageID":"<msg-2>"}}],"status":200},"via":"http"}
+{"from":"client","msg":{"body":{"response":"reject"},"method":"POST","path":"/session/<ses-1>/permissions/<per-1>"},"via":"http"}
+{"from":"backend","msg":{"body":true,"status":200},"via":"http"}
+{"from":"backend","msg":{"id":"<evt-71>","properties":{"reply":"reject","requestID":"<per-1>","sessionID":"<ses-1>"},"type":"permission.replied"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-72>","properties":{"part":{"callID":"<call-1>","id":"<prt-4>","messageID":"<msg-2>","sessionID":"<ses-1>","state":{"error":"The user rejected permission to use this specific tool call.","input":{"command":"echo agend-record","timeout":120000,"workdir":"<rec>/project"},"status":"error","time":{"end":1790316942439,"start":1790316942261}},"tool":"bash","type":"tool"},"sessionID":"<ses-1>","time":1790316942439},"type":"message.part.updated"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-73>","properties":{"part":{"cost":0,"id":"<prt-5>","messageID":"<msg-2>","reason":"tool-calls","sessionID":"<ses-1>","tokens":{"cache":{"read":1928,"write":0},"input":15175,"output":58,"reasoning":27,"total":17188},"type":"step-finish"},"sessionID":"<ses-1>","time":1790316942441},"type":"message.part.updated"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-74>","properties":{"info":{"agent":"build","cost":0,"finish":"tool-calls","id":"<msg-2>","mode":"build","modelID":"space-bunny-free","parentID":"<msg-1>","path":{"cwd":"<rec>/project","root":"/"},"providerID":"opencode","role":"assistant","sessionID":"<ses-1>","time":{"completed":1790316942444,"created":1790316938039},"tokens":{"cache":{"read":1928,"write":0},"input":15175,"output":58,"reasoning":27,"total":17188}},"sessionID":"<ses-1>"},"type":"message.updated"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-75>","properties":{"info":{"agent":"build","cost":0,"finish":"tool-calls","id":"<msg-2>","mode":"build","modelID":"space-bunny-free","parentID":"<msg-1>","path":{"cwd":"<rec>/project","root":"/"},"providerID":"opencode","role":"assistant","sessionID":"<ses-1>","time":{"completed":1790316942444,"created":1790316938039},"tokens":{"cache":{"read":1928,"write":0},"input":15175,"output":58,"reasoning":27,"total":17188}},"sessionID":"<ses-1>"},"type":"message.updated"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-76>","properties":{"sessionID":"<ses-1>","status":{"type":"idle"}},"type":"session.status"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-77>","properties":{"sessionID":"<ses-1>"},"type":"session.idle"},"via":"sse"}
+{"from":"client","msg":{"body":null,"method":"GET","path":"/session/<ses-1>/message"},"via":"http"}
+{"from":"backend","msg":{"id":"<evt-78>","properties":{"info":{"agent":"build","cost":0,"directory":"<rec>/project","id":"<ses-1>","model":{"id":"space-bunny-free","providerID":"opencode","variant":"default"},"path":"private<rec>/project","projectID":"global","slug":"swift-moon","summary":{"additions":0,"deletions":0,"files":0},"time":{"created":1790316937791,"updated":1790316942445},"title":"Running agend-record echo command","tokens":{"cache":{"read":1928,"write":0},"input":15175,"output":58,"reasoning":27},"version":"1.18.31"},"sessionID":"<ses-1>"},"type":"session.updated"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-79>","properties":{"diff":[],"sessionID":"<ses-1>"},"type":"session.diff"},"via":"sse"}
+{"from":"backend","msg":{"id":"<evt-80>","properties":{"info":{"agent":"build","id":"<msg-1>","model":{"modelID":"space-bunny-free","providerID":"opencode"},"role":"user","sessionID":"<ses-1>","summary":{"diffs":[]},"time":{"created":1790316937840}},"sessionID":"<ses-1>"},"type":"message.updated"},"via":"sse"}
+{"from":"backend","msg":{"body":[{"info":{"agent":"build","id":"<msg-1>","model":{"modelID":"space-bunny-free","providerID":"opencode"},"role":"user","sessionID":"<ses-1>","summary":{"diffs":[]},"time":{"created":1790316937840}},"parts":[{"id":"<prt-1>","messageID":"<msg-1>","sessionID":"<ses-1>","text":"run: echo agend-record\nUse your bash tool to run exactly that command once, then reply DONE.","type":"text"}]},{"info":{"agent":"build","cost":0,"finish":"tool-calls","id":"<msg-2>","mode":"build","modelID":"space-bunny-free","parentID":"<msg-1>","path":{"cwd":"<rec>/project","root":"/"},"providerID":"opencode","role":"assistant","sessionID":"<ses-1>","time":{"completed":1790316942444,"created":1790316938039},"tokens":{"cache":{"read":1928,"write":0},"input":15175,"output":58,"reasoning":27,"total":17188}},"parts":[{"id":"<prt-2>","messageID":"<msg-2>","sessionID":"<ses-1>","type":"step-start"},{"id":"<prt-3>","messageID":"<msg-2>","sessionID":"<ses-1>","text":"We need comply. Need run exact command once, then DONE. No explanation due explicit exact and reply. Use bash commentary.","time":{"end":1790316942000,"start":1790316941748},"type":"reasoning"},{"callID":"<call-1>","id":"<prt-4>","messageID":"<msg-2>","sessionID":"<ses-1>","state":{"error":"The user rejected permission to use this specific tool call.","input":{"command":"echo agend-record","timeout":120000,"workdir":"<rec>/project"},"status":"error","time":{"end":1790316942439,"start":1790316942261}},"tool":"bash","type":"tool"},{"cost":0,"id":"<prt-5>","messageID":"<msg-2>","reason":"tool-calls","sessionID":"<ses-1>","tokens":{"cache":{"read":1928,"write":0},"input":15175,"output":58,"reasoning":27,"total":17188},"type":"step-finish"}]}],"status":200},"via":"http"}
+{"from":"backend","msg":{"id":"<evt-81>","properties":{},"type":"server.heartbeat"},"via":"sse"}

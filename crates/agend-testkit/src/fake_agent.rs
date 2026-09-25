@@ -1,7 +1,9 @@
 //! Fake agent programs: tiny stand-ins for the backends that speak only the
-//! subset of each real protocol recorded in `docs/backends/*` (codex
-//! 0.156.1, opencode 1.18.31, claude 2.1.281). Each module documents what it
-//! covers and what it does not. The binaries in `src/bin/` call `main` here.
+//! subset of each real protocol recorded in `docs/backends/*` and in the
+//! real-CLI recordings under `transcripts/` (codex 0.156.1, opencode
+//! 1.18.31, claude 2.1.282; `tests/conformance.rs` compares them by shape).
+//! Each module documents what it covers and what it does not. The binaries
+//! in `src/bin/` call `main` here.
 //!
 //! Replies are deterministic (`fake reply: <prompt>`); a turn takes
 //! `--turn-ms` milliseconds so tests can steer or interrupt it. Every fake
@@ -16,6 +18,19 @@ pub mod claude;
 pub mod codex;
 pub mod http;
 pub mod opencode;
+
+/// Environment variable naming the directory where a fake persists state
+/// across a restart (resume). Unset: nothing persists. Fake-only on purpose:
+/// the real CLIs' own variables (`CODEX_HOME`, `XDG_DATA_HOME`) may point at
+/// the user's real directories.
+pub const STATE_DIR_ENV: &str = "AGEND_FAKE_STATE_DIR";
+
+/// The state directory from [`STATE_DIR_ENV`].
+pub(crate) fn state_dir() -> Option<PathBuf> {
+    std::env::var_os(STATE_DIR_ENV)
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
+}
 
 /// Default turn duration of every fake agent.
 pub const DEFAULT_TURN_MS: u64 = 100;

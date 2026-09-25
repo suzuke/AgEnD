@@ -1,7 +1,7 @@
 # agend-testkit 測試
 
 > **TL;DR**
-> - 測假實作本身、7 個契約 suite（對假實作全過；[CONTRACTS.md](CONTRACTS.md) 的 56 條規則各有 mutant，每個 mutant 都被它那條規則的 case 抓到）、假 daemon、3 個假 agent 程式（以真的子程序跑）。
+> - 測假實作本身、7 個契約 suite（對假實作全過；[CONTRACTS.md](CONTRACTS.md) 的 56 條規則各有 mutant，每個 mutant 都被它那條規則的 case 抓到）、假 daemon、3 個假 agent 程式（以真的子程序跑）、假 agent 對真 CLI 錄製檔的一致性檢查。
 > - 記住：假 agent 的測試啟動 `src/bin/` 的真 binary，走真的 socket／HTTP；不在行程內呼叫。
 > - 下一步：`~/.cargo/bin/cargo test -p agend-testkit`。
 
@@ -25,20 +25,23 @@
 | `tests/contract_teeth/real_runner.rs` | 一個真的 `sh -c` runner（子程序放進自己的新 process group，逾時只對那個 group 送 SIGKILL）：全部旋鈕正確時通過整個 Runner 契約；只殺 `sh`、結束後才讀管線、在別的目錄跑，是 RUN-8、RUN-4、RUN-9 的 mutant |
 | `tests/fake_knobs.rs` | 每個假實作（Forge、Driver、Store、Runtime、Runner、Notifier）的每個方法：`fail_next` 只讓下一次失敗、`calls()` 依序記下每次呼叫（含失敗的）；`FakeForge::merges`／`base_head` 只記成功的 merge |
 | `tests/fake_daemon.rs` | hello 必須在前（無效 JSON 也回 `hello_required` 並關閉）、hello 之後的無效 JSON 不斷線、drop 時已開的連線讀到 EOF（2 秒內）、major 不合的錯誤訊息、狀態與未知請求、事件身分（沒帶、舊 attempt、別的關卡、重播都 `stale_result`）、backlog 再即時事件、請示回答 |
-| `tests/fake_codex.rs` | turn 完成事件帶回 threadId／turnId；steer（錯的 turn id 被拒）、queue 自動出列成新 turn、interrupt；approval 等待決定；只有 resume 過的 thread 才推事件；長路徑 symlink 指到 temp dir 裡的短 socket（不留目錄） |
-| `tests/fake_opencode.rs` | SSE 事件順序、同步 prompt 回覆、忙碌排隊、abort 標 `MessageAbortedError`、REST 補歷史、status |
+| `tests/fake_codex.rs` | turn 完成事件帶回 threadId／turnId 與回覆；steer（錯的 turn id 被拒；在同一輪另成一則回覆）、queue 自動出列成新 turn、interrupt；approval 等待決定；只有 resume 過的 thread 才推事件；長路徑與短路徑都是 symlink 指到 temp dir 裡的短 socket（不留目錄） |
+| `tests/fake_opencode.rs` | SSE 事件順序（照 `transcripts/opencode/one_turn.jsonl`）、同步 prompt 回覆、忙碌排隊、abort 標 `MessageAbortedError`、REST 補歷史、status |
 | `tests/fake_claude.rs` | Stop hook block 多一輪（`stop_hook_active` false → true）、Esc 中斷不觸發 Stop、hook payload、channel 包裝、未知 channel server 的錯誤、transcript 在專案目錄內 |
+| `tests/conformance.rs` | 一致性檢查：用錄製器的同一套情境（`one_turn`、`interrupt`、`approval`、`busy`、`resume`）驅動 3 個假 agent，和 `transcripts/<backend>/` 的真 CLI 錄製檔按形狀比對（比對規則只在 `recorder::shape`，見 [RECORDER.md](RECORDER.md)）；每個 backend 支援的情境剛好各有一個錄製檔；錄製檔通過 secret scan。`AGEND_CONFORMANCE_DUMP=<dir>` 另外把假 agent 的流量寫成錄製檔以便對照 |
+| `recorder::{redact,shape}::tests` | 遮蔽保留型別、id 換成穩定的 placeholder、secret scan 抓得到漏網的 UUID／家目錄／email／id；形狀比對忽略值與 id、但抓得到型別、欄位、分類值與順序的差異 |
 
 ## 花時間的地方
 
 - Runner 契約的兩個「停掉了嗎」case 用真的時間：`sleep 3; touch timed-out-command-finished` 與 `sh -c 'sleep 3; touch timed-out-child-finished'; true` 以 200 ms 逾時跑，各等到約 4.5 秒確認標記檔沒出現（只讀檔，不送 signal 探測）。假實作也一樣等，所以 Runner suite 每跑一次約 9 秒。
 - `contract_teeth` 約 15 秒：mutant 平行跑，最慢的是 Runner mutant（約 9–15 秒）與真 `sh` runner 的對照測試。
+- `conformance` 約 21 秒：3 個 backend 平行，每個情境啟動假 agent（`--turn-ms 900`）走完整個情境；claude 與 codex 的 `resume` 各啟動兩次。
 
 ## 輸入從哪來（#1493）
 
 - 假 daemon 與測試都用 `agend_core::protocol::client` 型別 + `serde_json` 編碼；沒有手寫 client protocol JSON。
 - 契約 suite 用 core 的建構子（`Task::new`、`Workflow::builtin_code`、`model::work_branch`）產生輸入。
-- backend 協定（codex、opencode、claude）是外部格式，沒有 Rust producer：測試寫的 JSON 取自 `docs/research/spike-*.md` 記錄的形狀。
+- backend 協定（codex、opencode、claude）是外部格式，沒有 Rust producer：真的 producer 是真 CLI，它的輸出錄在 `transcripts/`；假 agent 的形狀由一致性檢查對錄製檔比對，錄製器與假 agent 測試共用同一套情境程式（`recorder`）。
 
 ## 用到的假實作
 
@@ -47,7 +50,7 @@
 ## 還沒測的
 
 - [ ] 契約 suite 對真實作（各施工關接上：Store 第 5、agent runtime 第 6、Driver 第 7／12、Runner 與 Forge local 第 10、Notifier 與 Forge github 第 12）
-- [ ] 假 agent 的欄位對真 backend schema 逐一比對（第 7、12 施工關）
+- [x] 假 agent 的欄位與事件順序對真 CLI 比對：`tests/conformance.rs` 對 `transcripts/`（2026-09-25 錄製；CLI 升版時重錄，見 [RECORDER.md](RECORDER.md)）
 - [ ] git fixture（第 3 施工關需要時）
 
 ## 下一步

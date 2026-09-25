@@ -37,8 +37,8 @@
 
    應該看到（約 1 分鐘，第一次要編譯）：
 
-   - `== fake codex app-server ==`：`-> turn/start ...`，之後 `<- turn/started`、兩個 `<- item/completed`（`userMessage`、`"text":"fake reply: say hello"`）、`<- turn/completed {... "status":"completed" ...}`，最後 `fake-codex-app-server exited cleanly (exit status: 0)`。
-   - `== fake opencode serve ==`：`<- 204`，接著 8 個 `<- event`（從 `server.connected` 到 `session.idle`），最後 `fake-opencode-serve exited cleanly (exit status: 0)`。
+   - `== fake codex app-server ==`：`-> turn/start ...`，之後 `<- turn/started`、`<- item/started`／`<- item/completed`（先 `userMessage`，再 `agentMessage` 帶 `"text":"fake reply: say hello"`）、`<- turn/completed {... "status":"completed" ...}`，最後 `fake-codex-app-server exited cleanly (exit status: 0)`。（2026-09-25 起假 agent 照真 CLI 的錄製檔補齊，行數比最初多，見 [RECORDER.md](../../crates/agend-testkit/RECORDER.md)。）
+   - `== fake opencode serve ==`：`<- 204`，接著 21 個 `<- event`（從 `server.connected` 到 `session.idle`），最後 `fake-opencode-serve exited cleanly (exit status: 0)`。
    - `== fake claude with hooks ==`：`> <channel source="agend" ...>`、`Stop hook error: queued message from dev-2: ...`、`Interrupted · What should Claude do instead?`、`fake-claude exited cleanly (exit status: 0)`；hook 清單依序是 `SessionStart source=startup`、`UserPromptSubmit ...`、`Stop stop_hook_active=false`、`Stop stop_hook_active=true`、`UserPromptSubmit prompt="long task"`（Esc 之後**沒有** Stop）。
    - `== fake daemon (client protocol v1) ==`：attempt 1 的 `done` 得到 `"code":"stale_result"`，attempt 2 得到 `"result":"accepted"`。
    - 最後兩行：`testkit demo: all fake agents exited cleanly; all contract suites pass` 與 `gate 2 (testkit): checks passed`。
@@ -188,6 +188,7 @@ owner 睡著時由實作者決定、可以反悔的事。每項：決定 · 理�
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-25 錄製器 + 真 CLI 一致性檢查（使用者決定，A7 未追認）：`agend-record`／`cargo xtask record` 在寫入沙箱裡錄下 claude 2.1.282、codex 0.156.1、opencode 1.18.31 各 5 個情境（`transcripts/`），`tests/conformance.rs` 按形狀比對假 agent；假 agent 照錄製檔補齊（差異與處理見 [RECORDER.md](../../crates/agend-testkit/RECORDER.md#發現的差異與處理2026-09-25-錄製)）；假 claude 忙碌時不處理 channel 訊息仍保留（D16、A6），真 claude 會排隊照做；上面第 1 步 demo 的行數跟著改（`feat/backend-recorder`）。
 - 2026-09-25 使用者親自驗收步驟 1–5 通過，狀態改為完成；步驟 3 的 curl 改成先存變數，避免複製時截斷。
 - 2026-09-25 verifier r6 CONFIRMED（`00fbf45`）；#108 squash merge 為 `6d7b540`；狀態改為驗收中。
 - 2026-09-25 修 verifier r5（REFUTED @ 6d471e8，owner 核准的最後一輪）：生命週期多一次閒置開機（做事 → 閒置 → 做事 → 檢查），fixture 改成從持久狀態開機（`Persisted` + `boot`），case 自己的 fixture 在第一次開機前就 drop，daemon 不在時的 backend 動作只經過持久狀態；DRV-9 重啟前送兩個 id、重啟後先重送舊的，DRV-6 重啟後也從較舊的 cursor 補回；r5 的 `RewriteOnChange`、`TruncOnOpen`、`LastIdDedup`、`ReadAck`、`SharedMem`、`LiveJournal`、`LastOneOut` 與新的 `FrozenRegistry`、`FrozenDatabase` 註冊為 mutant（共 56 條規則、80 個 mutant）；helper mutation H1–H8（H6、H8 改成讀 case 的 fixture 就編譯不過）與新的 H9–H13 全部抓到；CONTRACTS.md、第 5、6 施工關頁面加「重啟／持久化 case 跨真的 process 重啟跑」（待你追認）（`feat/gate-02-testkit`，draft PR #108）。

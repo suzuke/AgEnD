@@ -41,6 +41,11 @@
 - [ ] 顯式 `--mcp-config <file>` 時 `server:<name>` 找不到；改用專案根目錄 `.mcp.json` 自動發現 + `--dangerously-load-development-channels server:<name>`。
 - [ ] 在 claude 接管 tty 之前送進 PTY 的按鍵會出現在它的輸入框（typeahead）。
 - [ ] `Notification`、`PermissionRequest`、`PreCompact`、`SessionEnd` hook 從未觀察到觸發。
+- [ ] 2.1.282 錄製（[RECORDER.md](../../crates/agend-testkit/RECORDER.md)）：`PermissionRequest`（授權對話框時）與 `SessionEnd`（`/exit`）有觸發。
+- [ ] 2.1.282 錄製：忙碌時送到的 channel 訊息會排隊，這輪（含 Stop hook 續行）結束後才觸發 `UserPromptSubmit` 並照做，和 C1 不同；D16 仍用 Stop hook 排隊（只有一次錄製）。
+- [ ] 2.1.282：帶 `--dangerously-load-development-channels` 時仍會出現「New MCP server found in this project」對話框（預設游標「Continue without using this MCP server」）。
+- [ ] `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` 會讓 channel 被忽略（「Channels are not currently available」）。
+- [ ] `--setting-sources project,local`：不載入使用者自己的設定、hook 與 allow 規則。
 
 ## 下一步
 

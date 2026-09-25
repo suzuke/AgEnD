@@ -56,6 +56,15 @@ fn event_type(event: &str) -> String {
         .to_owned()
 }
 
+/// The text of a message's `text` part.
+fn text_of(message: &Value) -> Option<&str> {
+    message["parts"]
+        .as_array()?
+        .iter()
+        .find(|p| p["type"] == "text")?["text"]
+        .as_str()
+}
+
 #[test]
 fn sync_prompt_streams_events_and_answers() {
     let server = Running::start(30);
@@ -79,20 +88,36 @@ fn sync_prompt_streams_events_and_answers() {
     );
     assert_eq!(status, 200);
     assert_eq!(reply["info"]["role"], "assistant");
-    assert_eq!(reply["parts"][0]["text"], "fake reply: hello");
-    let kinds: Vec<String> = (0..7)
+    assert_eq!(reply["info"]["finish"], "stop");
+    assert_eq!(text_of(&reply), Some("fake reply: hello"));
+    // The order recorded from opencode 1.18.31 (transcripts/opencode/one_turn.jsonl).
+    let kinds: Vec<String> = (0..21)
         .map(|_| event_type(&events.next_event().unwrap()))
         .collect();
     assert_eq!(
         kinds,
         [
             "message.updated",
+            "message.part.updated",
+            "session.updated",
             "session.status",
             "message.updated",
+            "session.updated",
+            "session.diff",
+            "message.updated",
+            "session.status",
+            "message.part.updated",
+            "message.part.updated",
+            "message.part.delta",
+            "message.part.updated",
             "message.part.updated",
             "message.updated",
+            "message.updated",
             "session.status",
-            "session.idle"
+            "session.status",
+            "session.idle",
+            "session.updated",
+            "message.updated",
         ]
     );
     assert_eq!(server.json("GET", "/session/ses_missing", None).0, 404);
@@ -127,7 +152,7 @@ fn prompt_async_queues_and_abort_marks_the_message() {
         Some(prompt("C")),
     );
     assert_eq!(code, 200);
-    assert_eq!(reply["parts"][0]["text"], "fake reply: C");
+    assert_eq!(text_of(&reply), Some("fake reply: C"));
     let messages = server
         .json("GET", &format!("/session/{session}/message"), None)
         .1;
@@ -135,7 +160,7 @@ fn prompt_async_queues_and_abort_marks_the_message() {
         .as_array()
         .unwrap()
         .iter()
-        .filter_map(|m| m["parts"][0]["text"].as_str())
+        .filter_map(text_of)
         .collect();
     assert_eq!(texts, ["A", "B", "fake reply: B", "C", "fake reply: C"]);
     assert_eq!(server.json("GET", "/session/status", None).1, json!({}));
