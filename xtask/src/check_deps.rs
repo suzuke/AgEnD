@@ -32,6 +32,11 @@ pub const RULES: &[Rule] = &[
         deny: &[ASYNC_RUNTIME, DATABASE, &["agend-daemon"]],
         why: "CLI startup must stay light: sync I/O only (D11, plan 4.7)",
     },
+    Rule {
+        krate: "agend-tui",
+        deny: &[DATABASE, &["agend-daemon"]],
+        why: "only the daemon opens agend.db; the TUI goes through the daemon protocol (gate 5 P2)",
+    },
 ];
 
 /// Crates that may depend on `agend-testkit` only as a dev-dependency: all of them.
@@ -192,6 +197,24 @@ mod tests {
         assert_eq!(
             violations(shim_rule(), &names),
             ["agend-daemon", "tokio", "tokio-util"]
+        );
+    }
+
+    #[test]
+    fn tui_may_not_reach_sqlite_or_the_daemon() {
+        let tui = RULES.iter().find(|r| r.krate == "agend-tui").unwrap();
+        let names: Vec<String> = [
+            "agend-tui",
+            "agend-client",
+            "rusqlite",
+            "libsqlite3-sys",
+            "agend-daemon",
+        ]
+        .map(String::from)
+        .to_vec();
+        assert_eq!(
+            violations(tui, &names),
+            ["agend-daemon", "libsqlite3-sys", "rusqlite"]
         );
     }
 
