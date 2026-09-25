@@ -23,7 +23,7 @@
 
 ## 狀態
 
-**實作中**（2026-09-25，draft PR #107；verifier 第 1–3 輪的發現已修或依威脅模型列入已知限制，待你親自驗收）
+**實作中**（2026-09-25，draft PR #107；verifier 第 1–4 輪的發現已修或依威脅模型列入已知限制，待你親自驗收）
 
 ## 範圍
 
@@ -51,11 +51,12 @@
 ~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings
 ~/.cargo/bin/cargo test -p agend-shim
 ~/.cargo/bin/cargo test --workspace
+TMPDIR=$(mktemp -d) ~/.cargo/bin/cargo test --workspace   # 不靠暫存目錄裡原有的東西
 ~/.cargo/bin/cargo xtask check-deps
 ~/.cargo/bin/cargo xtask accept shim
 ```
 
-- [x] `cargo test -p agend-shim` 通過：`53 passed`（unit）+ `12 passed`（`tests/bypass_corpus.rs`）+ `11 passed`（`tests/git_shim.rs`）+ `6 passed`（`tests/location_matrix.rs`）
+- [x] `cargo test -p agend-shim` 通過：`53 passed`（unit）+ `13 passed`（`tests/bypass_corpus.rs`）+ `2 passed`（`tests/everyday.rs`）+ `11 passed`（`tests/git_shim.rs`）+ `6 passed`（`tests/location_matrix.rs`）；`TMPDIR` 設成新的空目錄時一樣全過
 - [x] clippy 乾淨
 - [x] `check-deps` 最後一行是 `check-deps: ok (2 rules, 8 crates checked for agend-testkit, agend-core metadata ok, no-std build ok)`
 - [x] `cargo xtask accept shim` 最後兩行是 `shim demo: all checks passed`、`gate 3 (shim): checks passed`
@@ -63,6 +64,7 @@
 - [x] verifier 第 1 輪的 bypass corpus 全部變成回歸測試（`tests/bypass_corpus.rs`），修正前全紅、修正後全綠
 - [x] verifier 第 2 輪要修的三項（T9 大 pid、T5 不帶 `.git` 的 team 路徑、自己的 git dir + canonical cwd）各有回歸測試，修正前紅、修正後綠
 - [x] verifier 第 3 輪（T20）：`tests/location_matrix.rs` 跑 7 種拼法 × 有無 `--work-tree` × 4 個 cwd × 6 個保護動作（336 案）與 4 個 cwd × 7 種拼法 × 6 個正常工作步驟（168 步）；修正前 24 案 + 48 步失敗，修正後全綠
+- [x] verifier 第 4 輪：`location::tests::parses_rev_parse_output` 改在自己的暫存目錄建路徑（以前要 `$TMPDIR/x` 剛好存在，CI 紅）；team 本機 remote 與 clone 裡的 `worktree add|remove|move|prune|lock|unlock|repair` 有回歸測試（含 verifier 的原指令），修正前紅、修正後綠；`tests/everyday.rs` 跑正常工作清單，以及經 symlink、含空格的路徑
 - [ ] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」
 
 ## 你親自驗收
@@ -184,7 +186,7 @@
 
 ## 待你追認
 
-owner 睡覺時我自己做的決定；都可逆。每條打勾＝同意，不同意就寫在「驗收紀錄」備註。T5、T7、T9、T13 在 verifier 第 1 輪後改過；T14–T18 是第 1 輪後新增的；第 2 輪後改了 T5、T9、T13、T15；第 3 輪後改了 T5、T13，新增 T20；T19 是你已經決定的。
+owner 睡覺時我自己做的決定；都可逆。每條打勾＝同意，不同意就寫在「驗收紀錄」備註。T5、T7、T9、T13 在 verifier 第 1 輪後改過；T14–T18 是第 1 輪後新增的；第 2 輪後改了 T5、T9、T13、T15；第 3 輪後改了 T5、T13，新增 T20；第 4 輪後改了 T5、T20；T19 是你已經決定的。
 
 - [x] T19 威脅模型（**使用者已決定 2026-09-25**）：shim 只防好意但會犯錯的 agent，不防刻意繞過；protected ref 的硬保證在 daemon 的 `reference-transaction` hook（第 6 或第 10 施工關）與 forge 端 branch protection。見[威脅模型](#威脅模型)。
 - [ ] T1 binding 快照格式：`$AGEND_HOME/bindings/<instance>.json`，JSON `{version: 1, instance, source_repo?, protected_refs?, binding?: {kind: "work", task_id, branch, worktree} | {kind: "review", task_id, head, worktree}}`；work branch 必須是 `agend/<task_id>/<slug>`（用 core 的 `task_id_of_branch` 驗）。型別暫放 `agend_shim::binding::Snapshot`：core 沒有 binding 型別，照指示不改 core。建議第 10 施工關搬到 `agend_core::model`，daemon 寫、shim 讀同一個型別。
@@ -198,6 +200,7 @@ owner 睡覺時我自己做的決定；都可逆。每條打勾＝同意，不�
   - 比對前先套 `url.*.insteadOf`／`pushInsteadOf`，再正規化（`git@host:o/r.git` = `https://host/o/r`）；本機路徑比 git common dir。
   - 本機路徑照 git 找 repo 的順序：`<path>/.git`、`<path>`、`<path>.git/.git`、`<path>.git`。所以 `/x/origin`、`/x/origin/`、`file:///x/origin` 都等於 `/x/origin.git`（第 2 輪）。git 不看 `file://` 的主機名，所以 `file://localhost/x`、`file://127.0.0.1/x` 也是 `/x`（第 3 輪）。
   - 直接在 team 的本機 remote（例如 `origin.git`）裡跑寫入，當成 team repo 拒絕（第 3 輪）。
+  - `git worktree` 只有 `list` 算讀取（第 4 輪）：`add`、`remove`、`move`、`prune`、`lock`、`unlock`、`repair` 在 team 的本機 remote 與 clone 裡拒絕（`team_clone`），在跟 team 無關的 repo 裡放行。擋的是 `git -C <team>/origin.git worktree add ../zm main`：它在 team remote 上把 `main` checkout 出來，之後 daemon 的 `git push origin main` 失敗（`branch is currently checked out`）。
   - 只看 repo 已存的 remote 設定與命令列目的地；在 scratch repo 用 `-c` 特製的目的地不擋（見已知限制）。
   - 從 `$AGEND_HOME` 裡面往上找到、但包住 `$AGEND_HOME` 的 repo（例如 `$HOME` 的 dotfiles repo）不算；workspace 仍當「不在 repo」並導向。
 - [ ] T6 讀取命令在未綁定、canonical checkout 裡都放行；綁定時在 worktree 外跑的讀取與寫入都導向 worktree，在 canonical／別的 worktree 時印一行 `running in your bound worktree …`。
@@ -242,6 +245,7 @@ owner 睡覺時我自己做的決定；都可逆。每條打勾＝同意，不�
   - 從 `$AGEND_HOME` 裡面跑、沒指定 git dir 時，帶 `GIT_CEILING_DIRECTORIES=$AGEND_HOME`，包住 `$AGEND_HOME` 的 repo 仍不算（沿用 T5）。
   - `--version`、`--help`、`init`、`clone` 不問。
   - 代價：每次多一個 git 程序。macOS 經 `/usr/bin/git`（xcrun 轉接）實測 guarded 呼叫從約 9 ms 變約 16–18 ms；`git --version` 不變（約 8 ms）。
+  - 第 4 輪重測（debug build，各 30 次取中位數）：`git status` 真 git 8.6 ms、經 shim 16.7 ms（從 workspace 導向 16.4 ms）；`rev-parse HEAD` 6.9 → 15.0 ms；寫入 `git branch -f agend/t-1/…` 28.3 ms；`git --version` 8.6 ms。
   - 需要 git 2.13 以上（`--absolute-git-dir`）。
 - [ ] T18 holder 防不了 agent 自己 shell 的內建 `kill`：PATH shim 攔不到 bash／zsh 內建的 `kill`，包括 `kill -9 -1`（殺掉同 uid 的所有程序；驗證時真的發生過，整個桌面當掉）。要保護 holder 需要別的層：holder 跑在不同 session／uid，或 daemon 重生 holder。建議交給第 4 施工關（holder）或第 6 施工關（daemon ↔ holder）決定；本施工關只記錄，不處理。
 
@@ -273,6 +277,7 @@ shim 是安全帶，不是安全邊界（同 uid 的 agent 能改檔案、能直
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-25 verifier 第 4 輪修正（draft PR #107）：`parses_rev_parse_output` 不再靠 `$TMPDIR/x`（CI 紅的原因）；測試的 git 不讀 `~/.gitconfig`、不帶 agent 的 `AGEND_*`；team remote／clone 裡 `worktree` 除 `list` 都拒絕（T5）；新增 `tests/everyday.rs`：正常工作清單、symlink 與空格路徑 8 種拼法組合
 - 2026-09-25 verifier 第 3 輪修正（draft PR #107）：位置改問真的 git（T20），刪掉自己寫的 repo 探索；gitfile `--git-dir`、`GIT_DIR` 與真正的 git dir 走同一套檢查；需要導向的寫入帶 `--git-dir`／`--work-tree` 改拒絕；`file://<host>/` 認得；team 本機 remote 裡的寫入拒絕；快照壞時的訊息改正確；`tests/location_matrix.rs` 336 + 168 案
 - 2026-09-25 verifier 第 2 輪修正（draft PR #107）：寫入威脅模型（T19，使用者已決定）；T9 pid 限 `1..=i32::MAX`、最多 10 位數；T5 本機路徑照 git 補 `.git`；有 git dir 沒 work tree 時 cwd 必須是綁定的 worktree；`-c` 特製目的地與執行程式的 config key 列入已知限制；三項各有回歸測試
 - 2026-09-25 verifier 第 1 輪修正（draft PR #107）：選項 deny-by-default、push 要明確目的地、fetch refmap 與 config key 檢查、symbolic ref、work tree 綁定、checkout 不猜路徑、T5 用目的地認 team repo、T9 kill 參數正規化；verifier 的 bypass corpus 變成回歸測試

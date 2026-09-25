@@ -33,10 +33,16 @@ pub struct Fixture {
     pub branch: String,
 }
 
-/// Env that isolates a git child from the host: no system config, and no
-/// repo discovery above the temp dir.
+/// Env that isolates a git child from the host: no system or global config
+/// (the developer's `~/.gitconfig` must not change results), and no repo
+/// discovery above the temp dir. Run from an agent shell, the child must not
+/// see that agent's own binding (`AGEND_*`) either.
 pub fn isolate(cmd: &mut Command) -> &mut Command {
     cmd.env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env_remove("AGEND_HOME")
+        .env_remove("AGEND_INSTANCE")
+        .env_remove("AGEND_SHIM_BYPASS")
         .env("GIT_CEILING_DIRECTORIES", ceiling())
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")

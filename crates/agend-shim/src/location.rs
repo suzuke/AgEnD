@@ -204,9 +204,13 @@ mod tests {
         assert_eq!(locate(&canon, true, &none), Location::Foreign);
     }
 
+    /// Hermetic: every path is made in a fresh temp dir (round 4: `x` used
+    /// to be `$TMPDIR/x`, which existed only on one machine).
     #[test]
     fn parses_rev_parse_output() {
-        let tmp = std::fs::canonicalize(std::env::temp_dir()).unwrap();
+        let dir = agend_testkit::tempdir::TempDir::new("rev-parse").unwrap();
+        let tmp = std::fs::canonicalize(dir.path()).unwrap();
+        std::fs::create_dir(tmp.join("x")).unwrap();
         let t = tmp.clone();
         let full = Resolved::from_lines(&[t.clone(), t.clone(), t.clone()], &t).unwrap();
         assert_eq!(full.work_tree.as_deref(), Some(tmp.as_path()));

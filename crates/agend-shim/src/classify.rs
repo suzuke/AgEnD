@@ -677,8 +677,16 @@ fn kind(sub: &str, rest: &[String], parsed: Option<&Parsed>) -> Option<Kind> {
     if matches!(sub, "init" | "clone") {
         return Some(Kind::NewRepo);
     }
-    if READ.contains(&sub) || sub == "worktree" {
-        return Some(Kind::Read); // only `worktree list` gets this far
+    if READ.contains(&sub) {
+        return Some(Kind::Read);
+    }
+    if sub == "worktree" {
+        // Only `worktree list` reads. `add`/`remove`/`move`/`prune`/`lock`/
+        // `repair` change the repo's worktree list (and `add` creates a
+        // branch), so in a foreign repo they are writes too: refused in the
+        // team's remote and its clones, run in a truly foreign repo.
+        let list = first_positional(rest) == Some("list");
+        return Some(if list { Kind::Read } else { Kind::Write });
     }
     if sub == "fetch" {
         return Some(Kind::Fetch);

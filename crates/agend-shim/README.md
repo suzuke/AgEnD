@@ -50,7 +50,7 @@
 1. bypass → 記 audit，原樣執行
 2. 解析 argv：全域選項（含 `-c` 的 key）、子命令
 3. 位置：用呼叫者的全域選項、cwd、`GIT_*` 跑 `git rev-parse --absolute-git-dir --git-common-dir --show-toplevel`，照答案分成綁定的 worktree／canonical checkout／同 repo 的其他 worktree／外部 repo／不在 repo／不知道（快照壞）；`--version`、`init`、`clone` 不問
-4. 外部 repo → 放行，除非是 team 的本機 remote 本身或 team repo 的 clone（寫入拒絕），或 push 目的地是 team repo（本機路徑照 git 補 `.git`，`file://` 不看主機名）
+4. 外部 repo → 放行，除非是 team 的本機 remote 本身或 team repo 的 clone（寫入拒絕；`worktree` 只有 `list` 算讀取），或 push 目的地是 team repo（本機路徑照 git 補 `.git`，`file://` 不看主機名）
 5. `worktree`（`list` 除外）、`filter-branch`、`fast-import`、不認得的子命令 → 拒絕
 6. 結果取決於選項的子命令：用 `specs` 的表做完整拼寫解析，失敗就拒絕
 7. 讀取 → 綁定且在 worktree 外就導向，否則放行

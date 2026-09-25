@@ -961,6 +961,24 @@ fn foreign_repos_are_guarded_only_towards_the_team() {
     assert_eq!(at(&clone, "commit -m x"), "team_clone");
     assert_eq!(at(&clone, "log"), "run");
     assert_eq!(at(&clone, "branch -a"), "run");
+    // Round 4: only `worktree list` reads; the rest change the team repo's
+    // worktrees (`add` also creates a branch) and are team_clone writes.
+    assert_eq!(at(&clone, "worktree list"), "run");
+    assert_eq!(at(&clone, "worktree list --porcelain"), "run");
+    for cmd in [
+        "worktree add ../zm main",
+        "worktree add -b x ../zm",
+        "worktree remove ../zm",
+        "worktree move ../zm ../zn",
+        "worktree prune",
+        "worktree lock ../zm",
+        "worktree unlock ../zm",
+        "worktree repair",
+        "worktree",
+    ] {
+        assert_eq!(at(&clone, cmd), "team_clone", "{cmd}");
+        assert_eq!(at(&free, cmd), "run", "scratch repo: {cmd}");
+    }
     let remote = Fake {
         team_remotes: vec!["/team.git", "team"],
         ..Fake::default()

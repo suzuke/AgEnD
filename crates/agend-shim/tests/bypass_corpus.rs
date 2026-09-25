@@ -443,6 +443,87 @@ fn clone_of_the_canonical_checkout_is_guarded() {
     assert_eq!(f.protected_state(), before);
 }
 
+/// Round 4: `worktree` subcommands other than `list` are writes in the
+/// team's bare remote and in team clones too. The verifier's repro, run
+/// from the workspace, used to add a worktree on `main` inside `origin.git`,
+/// after which a normal `git push origin main` failed ("branch is currently
+/// checked out").
+#[test]
+fn worktree_changes_in_the_team_remote_and_clones_are_refused() {
+    let f = Fixture::new("t5-worktree");
+    git(
+        &f.workspace,
+        &["clone", "-q", f.origin.to_str().unwrap(), "clone"],
+    );
+    let clone = f.workspace.join("clone");
+    let scratch = f.workspace.join("scratch");
+    std::fs::create_dir_all(&scratch).unwrap();
+    git(&scratch, &["init", "-q", "-b", "trunk"]);
+    git(&scratch, &["commit", "-q", "--allow-empty", "-m", "s"]);
+    let before = f.protected_state();
+    let origin = f.origin.to_str().unwrap();
+    let ws = f.ctx(&f.workspace);
+    // The exact repro: `git -C <team bare>.git worktree add ../zm main`.
+    let ran = gitshim(&ws, &["-C", origin, "worktree", "add", "../zm", "main"]);
+    assert_eq!(ran.refused, Some("team_clone"), "{}", ran.text());
+    let zm = f.root.join("zm");
+    let at_origin: &[&[&str]] = &[
+        &["worktree", "add", "-b", "zb", "../zm"],
+        &["worktree", "remove", "../zm"],
+        &["worktree", "move", "../zm", "../zn"],
+        &["worktree", "prune"],
+        &["worktree", "lock", "../zm"],
+        &["worktree", "unlock", "../zm"],
+        &["worktree", "repair"],
+    ];
+    for cmd in at_origin {
+        let argv: Vec<&str> = ["-C", origin].iter().chain(cmd.iter()).copied().collect();
+        let ran = gitshim(&ws, &argv);
+        assert_eq!(ran.refused, Some("team_clone"), "{argv:?}: {}", ran.text());
+        let git_dir = format!("--git-dir={origin}");
+        let argv: Vec<&str> = [git_dir.as_str()]
+            .iter()
+            .chain(cmd.iter())
+            .copied()
+            .collect();
+        let ran = gitshim(&ws, &argv);
+        assert_eq!(ran.refused, Some("team_clone"), "{argv:?}: {}", ran.text());
+    }
+    let ran = gitshim(&f.ctx(&clone), &["worktree", "add", "../zc", "main"]);
+    assert_eq!(ran.refused, Some("team_clone"), "{}", ran.text());
+    // Reading the worktree list stays allowed everywhere.
+    gitshim(&ws, &["-C", origin, "worktree", "list"]).ok();
+    gitshim(&f.ctx(&clone), &["worktree", "list", "--porcelain"]).ok();
+    // A truly foreign repo stays the agent's business (T5).
+    gitshim(
+        &f.ctx(&scratch),
+        &["worktree", "add", "-q", "../scratch-wt"],
+    )
+    .ok();
+    assert!(f.workspace.join("scratch-wt").is_dir());
+
+    assert!(!zm.exists(), "worktree created next to origin.git");
+    assert!(
+        !f.workspace.join("zc").exists(),
+        "worktree created from the clone"
+    );
+    assert!(
+        !f.origin.join("worktrees").exists(),
+        "origin.git has worktrees"
+    );
+    assert_eq!(
+        try_git(&f.origin, &["rev-parse", "-q", "--verify", "refs/heads/zb"])
+            .status
+            .code(),
+        Some(1),
+        "branch created on the team remote"
+    );
+    assert_eq!(f.protected_state(), before);
+    // The symptom: the daemon's normal push to main still works.
+    git(&f.repo, &["commit", "-q", "--allow-empty", "-m", "daemon"]);
+    git(&f.repo, &["push", "-q", "origin", "main"]);
+}
+
 #[test]
 fn push_from_a_scratch_repo_to_the_team_url_is_refused() {
     let f = Fixture::new("t5-scratch");
