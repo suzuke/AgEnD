@@ -8,7 +8,7 @@
 ## 負責
 
 - 首頁：跨 team 的「需要你」＋每個 team 一個區塊（agent 狀態數量、進行中的目標、最近變更）
-- 「需要你」：展開項目看脈絡摘要（D37）與對話（D35），選選項或用自由文字回答；已讀與已解決分開
+- 「需要你」：展開項目看脈絡摘要（D37）與對話（D35），選選項或用自由文字回答；已讀與已解決分開，agent 追問後回到未讀
 - team 頁：目標、Agents、流水線三個 tab
 - Task Detail（repo 只在這裡）、Agent Detail、單一 agent 終端（`t`，目前是唯讀快照）
 - `/` 快速跳轉；英文與繁中，執行中按 `L` 切換
@@ -27,7 +27,7 @@
 | `source` | `Source` trait、`Fleet`（catalog + 事件重播）、`Catalog`（protocol v1 還列不出來的 team／task／agent） |
 | `source::scripted` | 記憶體裡的腳本假來源與 demo 資料（測試與 demo 用） |
 | `app` | `App`：導覽堆疊、按鍵、`tick`（拉事件、斷線重連） |
-| `ui` | `Row` 與畫面繪製、選取反白（不含邊框）、寬字元寬度 |
+| `ui` | `Row` 與畫面繪製、選取反白（不含邊框與框線）、只列有用鍵的底部說明在 `App::help`、寬字元寬度 |
 | `home` | 首頁 |
 | `attention` | 「需要你」畫面 |
 | `team` | team 頁 |

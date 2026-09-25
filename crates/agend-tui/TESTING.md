@@ -19,9 +19,9 @@
 | `i18n::tests` | `L` 在英文與繁中之間切換；`{}` 依序填入 |
 | `source::tests` | 回答後離開「需要你」、追問後回來；依 event id 由舊到新 |
 | `ui::tests` | 靠右對齊、CJK 算兩格、截斷加 `…` 且右欄保留 |
-| `tests/screens.rs` | 首頁（需要你在最上、各 team 區塊、首頁沒有 repo）、繁中在 80×24／100×30／140×40 靠右對齊、team 三個 tab（不混別的 team 的成員）、Task Detail（repo 只在這裡）、Agent Detail、終端快照、需要你展開（脈絡摘要、對話、選項、非請示項目寫明沒有操作）、`/` 結果（含 CJK 查詢）、選取反白不含邊框、太小的終端與 70×20 捲到底 |
+| `tests/screens.rs` | 首頁（需要你在最上、各 team 區塊、首頁沒有 repo）、繁中在 80×24／100×30／140×40 靠右對齊、team 三個 tab（不混別的 team 的成員）、Task Detail（repo 只在這裡）、Agent Detail、終端快照、需要你展開（「不處理的話」、脈絡摘要、對話、選項、非請示項目寫明沒有操作）、`/` 結果（含 CJK 查詢）、選取反白不含邊框（每種選取列的所有框線格子，含 team 標題的 `─` 線）、底部說明只列有用的鍵、回答後 team 標題數量與 agent 的「需要你」更新、太小的終端與 70×20 捲到底 |
 | `tests/navigation.rs` | 每種畫面 `→` 與 `Enter` 結果相同、`←` 回上一層並還原選取、tab 只用數字與 Tab 切、`t` 從各種列開對的 agent（沒有 agent／沒有輸出只給訊息）、`/` 的三種目的地與 `Esc`、`L` 不改狀態（小寫 `l` 不動作）、已讀不等於已解決、選項與自由文字回答、空的需要你、目前關卡開請示、`q`／`Ctrl-C`、斷線畫面與重連回到原畫面、啟動時沒有 daemon |
-| `tests/owner_steps.rs` | 第 11 施工關頁「你親自驗收」A2–A4 逐鍵照做（繁中），頁面寫的畫面內容都出現；A5 由 `tests/daemon_source.rs` 的斷線測試涵蓋 |
+| `tests/owner_steps.rs` | 第 11 施工關頁「你親自驗收」A2–A4 逐鍵照做（繁中），頁面寫的畫面內容都出現（含追問回到未讀）；A5 由 `tests/daemon_source.rs` 的斷線測試涵蓋 |
 | `tests/daemon_source.rs` | 接 testkit 假 daemon 的真 socket：畫面與腳本假來源一字不差、即時事件、回答真的送到 daemon、終端快照、停掉 daemon 顯示斷線、換新 daemon 後重連 |
 
 ## 用到的假實作

@@ -150,17 +150,27 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 1. 對有假 agent 的 daemon 開 TUI（第 8 施工關後接上；daemon 與假 agent 的啟動方式同第 6 施工關）。`agend app` → 首頁最上面是「需要你」，下面每個 team 一個區塊。
 
+   **這步在驗什麼**：同一套畫面接上真 daemon 後，資料改從 client protocol 來（不再是 catalog 與腳本），需要你與 team 分組一樣正確。壞了的話，A 段的證據只證明了假資料，真的用起來首頁會是空的或分錯組。
+
    - [ ] 通過
 2. 處理一項請示（第 8 施工關後接上）：選一項 → 選一個動作 → 該項從「需要你」消失；只是看過不會消失。
+
+   **這步在驗什麼**：回答真的送到 daemon、由 daemon 決定這一項解決，已讀和已解決仍然分開。壞了的話，你以為回答了，agent 其實還在等。
 
    - [ ] 通過
 3. 看 agent 輸出（第 8 施工關後接上）：選一個 agent → `t` → 顯示該 agent 的終端畫面（即時串流）。
 
+   **這步在驗什麼**：`t` 看到的是真 agent 的即時終端，不是快照。壞了的話，你看到的是過期畫面，會照舊資訊做決定。
+
    - [ ] 通過
 4. 導覽（第 8 施工關後接上）：`←`／`→`、`/`、`L` 同 A 段第 4 步。
 
+   **這步在驗什麼**：接真 daemon 後按鍵行為沒變（資料變多、會即時更新時選取不亂跳）。壞了的話，畫面一更新你就迷路。
+
    - [ ] 通過
 5. 故意弄壞（第 8 施工關後接上）：另一個終端停 daemon → TUI 顯示斷線狀態而不是當掉；daemon 回來後自動恢復。
+
+   **這步在驗什麼**：真 daemon 停掉時 TUI 說清楚、自動重連，daemon 回來後回到原本的畫面。壞了的話，daemon 重啟一次 TUI 就當掉或顯示過期資料。
 
    - [ ] 通過
 
@@ -205,6 +215,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-26 驗證報告 C-r1 修正：team 標題的 `─` 線不反白；底部說明只列有用的鍵；需要你展開加「不處理的話」（T16）；追問回到未讀（T17）；標題數量與 agent 的「需要你」跟著清單重算（T18）；B1–B5 補「這步在驗什麼」（`feat/gate-11-tui-screens`，PR #120）。
 - 2026-09-25 畫面層提前（你同意並行、放寬 D22）：`Source` 接縫 + 腳本假來源 + testkit 假 daemon socket 來源（demo 用）；首頁、需要你、team 頁、Task／Agent Detail、終端快照、`/`、`L`、斷線與重連；`cargo xtask accept tui` demo；check-deps 加 agend-tui 規則；testkit 加 `FakeDaemon::open_ask`（`feat/gate-11-tui-screens`，draft PR）。
 
 ## 下一步
