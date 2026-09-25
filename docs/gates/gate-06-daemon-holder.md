@@ -15,6 +15,12 @@
 
 - daemon 端的 holder 協定 client（agent runtime adapter）
 - daemon 重啟後重連 holder、取回畫面
+- 開機巡查孤兒 holder：掃 `$AGEND_HOME/run/holders/` 鎖檔，DB 裡沒有的 instance → 送 `Shutdown`（第 4 施工關 P2，使用者 2026-09-25 決定）
+- holder 被 `kill -9` 之後的補救：偵測 holder 死了 → 用 backend 的 `--resume <id>` 把 agent 接回（第 4 施工關 P2／第 3 施工關 T18）
+- daemon 對自己啟動的 holder 收屍（`wait`），避免殭屍
+- 本頁步驟 2（Ctrl-C 停 daemon，agent 還在）依賴第 4 施工關 P2 的 session 分離；步驟 3 的 `pgrep` 只比對這個 `AGEND_HOME` 的 holder
+- daemon 開機時與之後每 24 小時跑一次 store 的 `prune` 與每日 DB 快照（第 5 施工關 P8/P9）
+- 開 DB 時重試到 10 秒，因為重啟時 EXCLUSIVE lock 交接需要時間（第 5 施工關風險）
 - 綁定 worktree 時呼叫 `agend_shim::install_hooks`、釋放時呼叫 `agend_shim::uninstall_hooks`（agend 的 git hook 只裝在該 agent worktree，見[第 3 施工關](gate-03-shim.md#範圍)）
 
 ## 自動驗收（完成定義）
@@ -24,7 +30,7 @@
 - [ ] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`（出現 `SKIPPED` 不算通過）
 - [ ] `~/.cargo/bin/cargo xtask accept daemon-holder` 通過，並印出下方「你親自驗收」用到的 demo
 - [ ] 本施工關 crate 的 `README.md`／`TESTING.md` 已更新
-- [ ] 重啟／持久化類的契約 case（RTM-8、RTM-9，見 [CONTRACTS.md](../../crates/agend-testkit/CONTRACTS.md)）對真實作、跨真的 process 重啟跑（分開的 process、真的檔案／DB）**（待你追認）**
+- [ ] 重啟／持久化類的契約 case（RTM-8、RTM-9，見 [CONTRACTS.md](../../crates/agend-testkit/CONTRACTS.md)）對真實作、跨真的 process 重啟跑（分開的 process、真的檔案／DB）**（已追認 2026-09-25，第 2 施工關 A25）**
 - [ ] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」
 
 ## 你親自驗收

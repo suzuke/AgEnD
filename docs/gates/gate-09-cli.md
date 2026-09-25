@@ -17,6 +17,7 @@
 - 操作者命令
 - `agend status`
 - `agend doctor`、`agend init`（服務註冊在第 13 施工關）
+- `agend doctor` 列出所有 holder 並標出孤兒（DB 沒有的 instance）（第 4 施工關 P2，使用者 2026-09-25 決定）
 
 ## 自動驗收（完成定義）
 

@@ -8,13 +8,17 @@
 //!   the gate's crates; each gate adds its human-readable demo when it is built
 //!   (gate 1: `core_demo`, gate 3: `shim_demo`).
 //!
+//! - `record <backend> [scenario...] --sandbox <script>`: record the real
+//!   backend CLI into `crates/agend-testkit/transcripts/` (see `record`).
+//!
 //! Planned, not implemented: protocol JSON schema generation, release
-//! packaging, backend screen fixture recording.
+//! packaging.
 
 mod accept;
 mod check_core;
 mod check_deps;
 mod core_demo;
+mod record;
 mod shim_demo;
 
 use std::process::ExitCode;
@@ -28,6 +32,9 @@ Commands:
                    no-std target is not installed; still prints SKIPPED)
   accept <gate>    Run the acceptance checks of a build gate (1-13 or its name);
                    each gate is described in docs/gates/gate-NN-<name>.md
+  record <backend> [scenario...] --sandbox <script>
+                   Record the REAL backend CLI (codex, opencode, claude) under a
+                   write sandbox into crates/agend-testkit/transcripts/
 ";
 
 fn main() -> ExitCode {
@@ -35,6 +42,7 @@ fn main() -> ExitCode {
     let result = match args.first().map(String::as_str) {
         Some("check-deps") => check_deps::run(args.iter().any(|a| a == "--allow-skip")),
         Some("accept") => accept::run(args.get(1).map(String::as_str)),
+        Some("record") => record::run(&args[1..]),
         _ => {
             eprint!("{USAGE}");
             return ExitCode::from(2);

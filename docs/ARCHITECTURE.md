@@ -106,7 +106,7 @@ agend-core 不用 std（`#![no_std]` + `alloc`），只有 `serde` 可供型別 
 
 另外還沒決定、不在那份清單裡的：
 
-- [ ] 每日 `VACUUM INTO` 快照保留的份數 N。
+（無。每日 `VACUUM INTO` 快照保留份數已決定為 7 份，第 5 施工關 D31。）
 
 ## 下一步
 

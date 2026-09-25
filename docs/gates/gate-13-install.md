@@ -15,6 +15,7 @@
 - `agend uninstall`（移除服務與 shim；刪資料前先問）
 - `agend telegram setup`（由 daemon 的 notifier 配對）
 - `xtask release`、brew formula、GitHub release workflow、`cargo install`
+- systemd unit 必須 `KillMode=process`（預設 `control-group` 會在重啟 daemon 時殺掉所有 holder，D3 失效）；實測 launchd 重啟 daemon 時 holder 存活（第 4 施工關風險，使用者 2026-09-25 決定）
 
 ## 自動驗收（完成定義）
 
