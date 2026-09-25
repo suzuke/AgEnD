@@ -1,4 +1,6 @@
-//! Driver mutants: a `FakeDriver` with one method replaced.
+//! Driver mutants: a `FakeDriver` with one method replaced. `restart`
+//! builds the next mutant over `FakeDriver::restarted` (the same backend)
+//! with the same replaced methods.
 
 use std::collections::BTreeSet;
 use std::sync::Mutex;
@@ -22,6 +24,8 @@ const INSTANCE: &str = FakeDriverFixture::INSTANCE;
 pub struct M {
     fx: FakeDriverFixture,
     seen: Mutex<BTreeSet<String>>,
+    /// How many events the backend had when this driver was created.
+    born: usize,
     deliver: Deliver,
     events: Events,
 }
@@ -31,6 +35,7 @@ impl M {
         Self {
             fx: FakeDriverFixture::new(),
             seen: Mutex::new(BTreeSet::new()),
+            born: 0,
             deliver: |m, id, msg, mode| m.real_deliver(id, msg, mode),
             events: |m, id, after| m.real_events(id, after),
         }
@@ -85,6 +90,17 @@ impl DriverFixture for M {
     /// The fake completes a turn inside `deliver`; no need to wait long.
     fn turn_timeout(&self) -> std::time::Duration {
         std::time::Duration::from_millis(200)
+    }
+    fn restart(&self) -> Self {
+        let fx = self.fx.restart();
+        let born = block_on(fx.driver.events(INSTANCE, None)).map_or(0, |e| e.len());
+        Self {
+            fx,
+            seen: Mutex::new(BTreeSet::new()),
+            born,
+            deliver: self.deliver,
+            events: self.events,
+        }
     }
 }
 
@@ -225,6 +241,41 @@ pub fn mutants() -> Vec<Mutant> {
                         } else {
                             Ok(Vec::new())
                         }
+                    })
+                })
+            },
+        },
+        // DRV-6 (verifier r3 M4): a driver only knows the events of its own
+        // lifetime; a cursor from before the restart backfills nothing.
+        Mutant {
+            rule: "DRV-6",
+            name: "OnlyOwnLifetimeEvents",
+            run: |name| {
+                driver::run(name, || {
+                    M::new().events(|m, id, after| {
+                        let all = m.real_events(id, None)?;
+                        let own = &all[m.born.min(all.len())..];
+                        let start = after
+                            .and_then(|c| own.iter().position(|e| e.cursor == c))
+                            .map_or(0, |i| i + 1);
+                        Ok(own[start..].to_vec())
+                    })
+                })
+            },
+        },
+        // DRV-9 (verifier r3 M2): no deduplication by message id; every
+        // delivery starts a turn.
+        Mutant {
+            rule: "DRV-9",
+            name: "RedeliversSameId",
+            run: |name| {
+                driver::run(name, || {
+                    M::new().deliver(|m, id, msg, mode| {
+                        let mut unique = msg.clone();
+                        let n = m.seen.lock().unwrap().len();
+                        m.seen.lock().unwrap().insert(format!("{}#{n}", msg.id));
+                        unique.id = format!("{}#{n}", msg.id);
+                        m.real_deliver(id, &unique, mode)
                     })
                 })
             },

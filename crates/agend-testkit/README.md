@@ -34,10 +34,10 @@
 
 | 假實作 | 編排 |
 |---|---|
-| `FakeDriver` | `with_instance`／`add_instance`；預設每次送達自動產生 busy → confirmed → turn completed → idle 事件；`set_auto_turn(false)` 後用 `push_event`；`next_receipt` |
+| `FakeDriver` | `with_instance`／`add_instance`；預設每次送達自動產生 busy → confirmed → turn completed → idle 事件，同一個訊息 id 再送只回回條、不再產生 turn；`set_auto_turn(false)` 後用 `push_event`；`next_receipt`；`restarted()`（daemon 重啟：同一個 backend 上的新 driver，事件與 cursor 都在） |
 | `FakeForge` | `push(branch)` 加一個 commit；`merges()`；`base_head()`（base branch 的 head：最後一個 merge commit，還沒 merge 時是 `BASE_ROOT`） |
-| `FakeStore` | `insert_workflow`、`events(task)` |
-| `FakeRuntime` | `crash(id)`（holder 自己死掉）、`adopt(handle)`（daemon 重啟後還活著的 holder）、`running()` |
+| `FakeStore` | `insert_workflow`、`events(task)`；`reopen()`（daemon 重啟：同一份資料上的新 handle） |
+| `FakeRuntime` | `crash(id)`（holder 自己死掉）、`adopt(handle)`（外來的 holder）、`running()`；`restarted()`（daemon 重啟：同一張 holder 表上的新 runtime） |
 | `FakeNotifier` | `delivered()` |
 | `FakeClock` | `advance(ms)`、`set(ms)`（往回設會 panic）、`peek()`（不算一次讀取）、`reads()` |
 | `FakeRunner` | `on(command, ScriptedCommand)`；`takes_ms` 大於 timeout 就回 timed out；沒編排的指令 exit 127 |
@@ -52,15 +52,17 @@
 
 | suite | 規則 | 重點 |
 |---|---|---|
-| Driver | `DRV-1`–`8` | 閒置送達 Sent／Confirmed；最後 `TurnCompleted`；從任何 cursor 補回之後的**全部**事件、不含舊的、讀了不消耗 |
-| Forge | `FRG-1`–`9` | 整串 head 相等才 merge（空字串、短 SHA 不算）；比的是 merge 當下的 head；不符回真正的 head 且什麼都不變（從 `base_head()` 看） |
-| Store | `STO-1`–`11` | CAS 是相等（舊版本、未來版本都衝突）；衝突回報實際版本；版本嚴格遞增；事件依序、依 task 分開 |
-| Runtime | `RTM-1`–`7` | recover 回的 handle 與 start 的相同；停止要真的停（`is_running()` 從 trait 外看） |
+| Driver | `DRV-1`–`9` | 閒置送達 Sent／Confirmed；最後 `TurnCompleted`；同一個訊息 id 只一個 turn；從任何 cursor 補回之後的**全部**事件、不含舊的、讀了不消耗，daemon 重啟後的新 driver 也一樣 |
+| Forge | `FRG-1`–`9` | change id 可以是空的（local）；整串 head 相等才 merge（空字串、短 SHA 不算）；比的是 merge 當下的 head；不符回真正的 head 且什麼都不變（從 `base_head()` 看） |
+| Store | `STO-1`–`12` | CAS 是相等（舊版本、未來版本都衝突）；衝突回報實際版本；版本嚴格遞增；事件依序、依 task 分開；重新開啟後全部還在 |
+| Runtime | `RTM-1`–`9` | recover 回的 handle 與 start 的相同；停止要真的停（`is_running()` 從 trait 外看）；daemon 重啟後 holder 還在，新 runtime 找得回、停得掉（D3） |
 | Notifier | `NTF-1`–`4` | 欄位原樣、3,000 字多位元組 body 不截斷、不修剪空白、順序不變 |
 | Clock | `CLK-1`–`4` | unix 毫秒、UTC（對照 `utc_now_unix_ms()`）、不倒退、不凍結 |
 | Runner | `RUN-1`–`9` | 輸出逐位元組、256 KiB 不卡；逾時 2 秒內回報，`sh` 與它啟動的子程序都停掉（標記檔判斷）；在指定目錄跑 |
 
 每條規則至少有一個故意弄壞的實作（mutant），列在 CONTRACTS.md 那一列；`tests/contract_teeth/` 跑全部 mutant，並檢查規則表、case、mutant 三者互相對得上（見 [TESTING.md](TESTING.md)）。接真實作時 fixture 多實作的方法：`ForgeFixture::base_head`、`RuntimeFixture::is_running`、`ClockFixture::utc_now_unix_ms`；`DriverFixture::turn_timeout` 可選（預設 10 秒）。
+
+daemon 重啟的三個 hook：`RuntimeFixture::restart`、`DriverFixture::restart`、`StoreFixture::reopen`，都是 `fn(&self) -> Self`：回傳一個新 fixture，裡面是在**同一份持久狀態**上新建的 trait 物件（真實作：同一個 run 目錄與 holder 程序、同一個 backend、同一個 SQLite 檔）。case 先 drop 舊的 fixture 再建新的，所以舊物件 drop 時做的事（例如殺掉 holder）都會被看到。
 
 ## 假 daemon
 

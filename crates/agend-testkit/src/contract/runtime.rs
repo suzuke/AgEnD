@@ -1,9 +1,12 @@
-//! `Runtime` contract (rules RTM-1..7 in CONTRACTS.md): a started holder is
+//! `Runtime` contract (rules RTM-1..9 in CONTRACTS.md): a started holder is
 //! reported for the instance that was launched and really runs; recovery
 //! lists exactly the running holders with the same handles `start_holder`
 //! returned (the daemon reconnects through them); a stopped holder really
 //! stops (observed outside the trait, through [`RuntimeFixture::is_running`]),
-//! is no longer recovered, and can be started again.
+//! is no longer recovered, and can be started again. Across a daemon restart
+//! ([`RuntimeFixture::restart`]: the old runtime is dropped, a new one is
+//! built over the same persisted state) holders keep running, and the new
+//! runtime recovers them with the same handles and can stop them (D3).
 //!
 //! Not pinned: starting an instance twice; stopping an unknown instance.
 
@@ -27,6 +30,13 @@ pub trait RuntimeFixture {
     /// trait (a real runtime: the process exists and the socket accepts a
     /// connection; the fake: its table of running holders).
     fn is_running(&self, handle: &HolderHandle) -> bool;
+
+    /// A daemon restart: a new fixture whose runtime is a new instance built
+    /// over the same persisted state as `self` (holder processes, run
+    /// directory), the way a restarted daemon builds it. Cases drop the old
+    /// fixture before creating the next one, so whatever the old runtime
+    /// does when it goes away has happened.
+    fn restart(&self) -> Self;
 }
 
 pub fn cases<F: RuntimeFixture>() -> Vec<Case<F>> {
@@ -65,6 +75,16 @@ pub fn cases<F: RuntimeFixture>() -> Vec<Case<F>> {
             rule: "RTM-7",
             name: "stopped_instance_can_start_again",
             check: stopped_instance_can_start_again,
+        },
+        Case {
+            rule: "RTM-8",
+            name: "holders_survive_a_daemon_restart",
+            check: holders_survive_a_daemon_restart,
+        },
+        Case {
+            rule: "RTM-9",
+            name: "restarted_daemon_stops_recovered_holders",
+            check: restarted_daemon_stops_recovered_holders,
         },
     ]
 }
@@ -173,5 +193,44 @@ fn stopped_instance_can_start_again<F: RuntimeFixture>(fx: &F) -> CaseResult {
     stop(fx, "contract-a")?;
     ensure(running, || {
         format!("restarted contract-a as {again:?} but it is not running")
+    })
+}
+
+/// D3: the daemon that started the holders goes away; a new runtime over the
+/// same state finds them still running and recovers the same handles.
+fn holders_survive_a_daemon_restart<F: RuntimeFixture>(fx: &F) -> CaseResult {
+    let first = fx.restart();
+    let started = vec![start(&first, "contract-a")?, start(&first, "contract-b")?];
+    drop(first);
+    let second = fx.restart();
+    let stopped: Vec<&HolderHandle> = started.iter().filter(|h| !second.is_running(h)).collect();
+    let recovered = recover(&second);
+    // Cleanup; a runtime that lost the holders fails below anyway.
+    let _ = stop(&second, "contract-a");
+    let _ = stop(&second, "contract-b");
+    ensure(stopped.is_empty(), || {
+        format!("holders died with the daemon that started them: {stopped:?}")
+    })?;
+    let recovered = recovered?;
+    ensure(recovered == started, || {
+        format!(
+            "after a daemon restart the new runtime must recover the holders the old one started: started {started:?}, recovered {recovered:?}"
+        )
+    })
+}
+
+/// The restarted daemon manages the recovered holders: stopping one really
+/// stops it.
+fn restarted_daemon_stops_recovered_holders<F: RuntimeFixture>(fx: &F) -> CaseResult {
+    let first = fx.restart();
+    let a = start(&first, "contract-a")?;
+    drop(first);
+    let second = fx.restart();
+    recover(&second)?;
+    stop(&second, "contract-a")?;
+    ensure(!second.is_running(&a), || {
+        format!(
+            "the restarted runtime's stop_holder(contract-a) returned Ok but {a:?} is still running"
+        )
     })
 }

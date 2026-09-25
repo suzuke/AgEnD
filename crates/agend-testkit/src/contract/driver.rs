@@ -1,8 +1,10 @@
-//! `Driver` contract (rules DRV-1..8 in CONTRACTS.md): delivery to a
+//! `Driver` contract (rules DRV-1..9 in CONTRACTS.md): delivery to a
 //! running, idle instance is accepted and eventually completes a turn;
-//! events are resumable from any cursor they returned (reconnect backfill:
-//! exactly the newer events, reading does not consume them); unknown
-//! instances are errors.
+//! delivering the same message id again starts no second turn; events are
+//! resumable from any cursor they returned, also by a new driver after a
+//! daemon restart ([`DriverFixture::restart`]; reconnect backfill: exactly
+//! the newer events, reading does not consume them); unknown instances are
+//! errors.
 //!
 //! Not pinned: whether a delivery is confirmed (some paths cannot confirm,
 //! docs/architecture/delivery.md); busy behaviour; unknown cursors; whether
@@ -36,6 +38,11 @@ pub trait DriverFixture {
     fn turn_timeout(&self) -> Duration {
         TURN_TIMEOUT
     }
+
+    /// A daemon restart: a new fixture whose driver is a new instance over
+    /// the same backend and instance (the agent keeps running in its
+    /// holder). Cases drop the old fixture before creating the next one.
+    fn restart(&self) -> Self;
 }
 
 pub fn cases<F: DriverFixture>() -> Vec<Case<F>> {
@@ -71,6 +78,11 @@ pub fn cases<F: DriverFixture>() -> Vec<Case<F>> {
             check: events_after_a_cursor_are_all_newer_ones,
         },
         Case {
+            rule: "DRV-6",
+            name: "restarted_driver_backfills_after_an_old_cursor",
+            check: restarted_driver_backfills_after_an_old_cursor,
+        },
+        Case {
             rule: "DRV-7",
             name: "replay_from_a_cursor_only_grows",
             check: replay_from_a_cursor_only_grows,
@@ -79,6 +91,11 @@ pub fn cases<F: DriverFixture>() -> Vec<Case<F>> {
             rule: "DRV-8",
             name: "events_of_unknown_instance_are_an_error",
             check: events_of_unknown_instance_are_an_error,
+        },
+        Case {
+            rule: "DRV-9",
+            name: "same_message_id_makes_one_turn",
+            check: same_message_id_makes_one_turn,
         },
     ]
 }
@@ -214,5 +231,53 @@ fn events_of_unknown_instance_are_an_error<F: DriverFixture>(fx: &F) -> CaseResu
     let result = block_on(fx.driver().events(UNKNOWN_INSTANCE, None));
     ensure(result.is_err(), || {
         format!("expected an error for an unknown instance, got {result:?}")
+    })
+}
+
+/// ARCHITECTURE process model 2: after a daemon restart the new driver
+/// backfills from the cursor the old one handed out.
+fn restarted_driver_backfills_after_an_old_cursor<F: DriverFixture>(fx: &F) -> CaseResult {
+    let first = fx.restart();
+    let seen = deliver_and_finish(&first, "m-contract-d1")?;
+    let cursor = seen
+        .last()
+        .map(|e| e.cursor.clone())
+        .ok_or("a completed turn produced no events")?;
+    let all = deliver_and_finish(&first, "m-contract-d2")?;
+    drop(first);
+    let second = fx.restart();
+    let newer = events(&second, Some(&cursor))?;
+    let expected = &all[seen.len()..];
+    ensure(newer == expected, || {
+        format!(
+            "after a restart, events after {cursor} must be the {} events the old driver saw after it: expected {expected:?}, got {newer:?}",
+            expected.len()
+        )
+    })
+}
+
+/// delivery.md: messages are idempotent by id. The second delivery is not
+/// an error, and no second turn completes within the turn timeout.
+fn same_message_id_makes_one_turn<F: DriverFixture>(fx: &F) -> CaseResult {
+    let turns = |all: &[DriverEvent]| {
+        all.iter()
+            .filter(|e| matches!(e.kind, DriverEventKind::TurnCompleted { .. }))
+            .count()
+    };
+    let once = turns(&deliver_and_finish(fx, "m-contract-dup")?);
+    ok(
+        "deliver (same id again)",
+        block_on(fx.driver().deliver(
+            fx.instance_id(),
+            &message("m-contract-dup"),
+            BusyLevel::Queue,
+        )),
+    )?;
+    let twice = eventually(fx.turn_timeout(), || {
+        let all = events(fx, None)?;
+        Ok((turns(&all) > once).then_some(all))
+    })?;
+    ensure(twice.is_none(), || {
+        format!("delivering m-contract-dup twice completed two turns: {twice:?}")
     })
 }

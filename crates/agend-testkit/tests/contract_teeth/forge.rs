@@ -124,15 +124,15 @@ pub fn mutants() -> Vec<Mutant> {
                 })
             },
         },
-        // FRG-3: the submitted change has no id.
+        // FRG-3: every change gets the same (non-empty) id.
         Mutant {
             rule: "FRG-3",
-            name: "SubmitWithoutId",
+            name: "SameIdForEveryChange",
             run: |name| {
                 forge::run(name, || {
                     M::new().submit(|m, c| {
                         let mut change = m.real_submit(c)?;
-                        change.id.clear();
+                        change.id = "change-1".into();
                         Ok(change)
                     })
                 })
@@ -283,4 +283,20 @@ pub fn mutants() -> Vec<Mutant> {
             },
         },
     ]
+}
+
+/// FRG-3 follows the docs: a local forge has no change id
+/// (docs/GLOSSARY.md, docs/architecture/pipeline.md), so a forge that
+/// returns an empty id passes the whole suite. Formerly the `SubmitWithoutId`
+/// mutant.
+#[test]
+fn forge_without_change_ids_passes() {
+    forge::run("SubmitWithoutId", || {
+        M::new().submit(|m, c| {
+            let mut change = m.real_submit(c)?;
+            change.id.clear();
+            Ok(change)
+        })
+    })
+    .assert_passed();
 }

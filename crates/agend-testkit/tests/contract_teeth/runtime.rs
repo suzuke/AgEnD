@@ -1,8 +1,10 @@
 //! Runtime mutants: a `FakeRuntime` with one method replaced. The fixture's
 //! `is_running` always looks at the fake's own table, like a real fixture
-//! looking at processes and sockets.
+//! looking at processes and sockets. `restart` builds the next mutant over
+//! `FakeRuntime::restarted` (the same holders) with the same replaced
+//! methods and an empty memo: what one daemon remembered is gone.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 
 use agend_core::traits::{HolderHandle, HolderLaunch, Runtime};
@@ -35,6 +37,13 @@ impl M {
             stop: |m, id| m.real_stop(id),
             recover: |m| m.real_recover(),
         }
+    }
+
+    /// Start that also remembers the handle in this daemon's memo.
+    fn start_and_remember(&self, launch: &HolderLaunch) -> Result<HolderHandle, FakeError> {
+        let handle = self.real_start(launch)?;
+        self.remember(&handle);
+        Ok(handle)
     }
 
     fn real_start(&self, launch: &HolderLaunch) -> Result<HolderHandle, FakeError> {
@@ -85,6 +94,81 @@ impl RuntimeFixture for M {
     }
     fn is_running(&self, handle: &HolderHandle) -> bool {
         RuntimeFixture::is_running(&self.rt, handle)
+    }
+    fn restart(&self) -> Self {
+        Self {
+            rt: self.rt.restarted(),
+            memo: Mutex::new(BTreeMap::new()),
+            start: self.start,
+            stop: self.stop,
+            recover: self.recover,
+        }
+    }
+}
+
+/// Verifier r3 `DaemonScoped`: a runtime scoped to one daemon process. It
+/// recovers only the holders it started itself and kills them when it is
+/// dropped (the daemon exits), which is v1's behaviour (V1-LESSONS #7).
+pub struct DaemonScoped {
+    world: FakeRuntime,
+    mine: Mutex<BTreeSet<String>>,
+}
+
+impl DaemonScoped {
+    fn new(world: FakeRuntime) -> Self {
+        Self {
+            world,
+            mine: Mutex::new(BTreeSet::new()),
+        }
+    }
+}
+
+impl Drop for DaemonScoped {
+    fn drop(&mut self) {
+        for id in self.mine.lock().unwrap().iter() {
+            let _ = block_on(self.world.stop_holder(id));
+        }
+    }
+}
+
+impl Runtime for DaemonScoped {
+    type Error = FakeError;
+    async fn start_holder(&self, l: &HolderLaunch) -> Result<HolderHandle, FakeError> {
+        let h = self.world.start_holder(l).await?;
+        self.mine.lock().unwrap().insert(l.instance_id.clone());
+        Ok(h)
+    }
+    async fn stop_holder(&self, id: &str) -> Result<(), FakeError> {
+        self.world.stop_holder(id).await?;
+        self.mine.lock().unwrap().remove(id);
+        Ok(())
+    }
+    async fn recover_holders(&self) -> Result<Vec<HolderHandle>, FakeError> {
+        let mine = self.mine.lock().unwrap().clone();
+        Ok(self
+            .world
+            .recover_holders()
+            .await?
+            .into_iter()
+            .filter(|h| mine.contains(&h.instance_id))
+            .collect())
+    }
+}
+
+impl RuntimeFixture for DaemonScoped {
+    type Runtime = Self;
+    type Error = FakeError;
+    fn runtime(&self) -> &Self {
+        self
+    }
+    fn launch(&self, id: &str) -> HolderLaunch {
+        RuntimeFixture::launch(&self.world, id)
+    }
+    fn is_running(&self, h: &HolderHandle) -> bool {
+        RuntimeFixture::is_running(&self.world, h)
+    }
+    fn restart(&self) -> Self {
+        Self::new(self.world.restarted())
     }
 }
 
@@ -199,11 +283,7 @@ pub fn mutants() -> Vec<Mutant> {
             name: "RecoversStoppedHolders",
             run: |name| {
                 runtime::run(name, || M {
-                    start: |m, l| {
-                        let handle = m.real_start(l)?;
-                        m.remember(&handle);
-                        Ok(handle)
-                    },
+                    start: M::start_and_remember,
                     recover: |m| Ok(m.memo.lock().unwrap().values().cloned().collect()),
                     ..M::new()
                 })
@@ -228,6 +308,51 @@ pub fn mutants() -> Vec<Mutant> {
                             m.remember(&h);
                         }
                         m.real_stop(id)
+                    },
+                    ..M::new()
+                })
+            },
+        },
+        // RTM-8 (verifier r3 M1): holders die with the daemon that started
+        // them, and a new daemon only knows its own.
+        Mutant {
+            rule: "RTM-8",
+            name: "DaemonScoped",
+            run: |name| runtime::run(name, || DaemonScoped::new(FakeRuntime::new())),
+        },
+        // RTM-8 (verifier r3 M1, without the kill): holders outlive the
+        // daemon but a new one never reconnects them (orphans).
+        Mutant {
+            rule: "RTM-8",
+            name: "RecoversOnlyOwnHolders",
+            run: |name| {
+                runtime::run(name, || M {
+                    start: M::start_and_remember,
+                    recover: |m| {
+                        let mine = m.memo.lock().unwrap().clone();
+                        Ok(m.real_recover()?
+                            .into_iter()
+                            .filter(|h| mine.contains_key(&h.instance_id))
+                            .collect())
+                    },
+                    ..M::new()
+                })
+            },
+        },
+        // RTM-9: a restarted daemon sees the holders but cannot stop the
+        // ones an earlier daemon started.
+        Mutant {
+            rule: "RTM-9",
+            name: "StopsOnlyOwnHolders",
+            run: |name| {
+                runtime::run(name, || M {
+                    start: M::start_and_remember,
+                    stop: |m, id| match m.memo.lock().unwrap().remove(id) {
+                        Some(_) => m.real_stop(id),
+                        None => Err(FakeError {
+                            operation: "stop_holder",
+                            message: format!("{id} was not started by this daemon"),
+                        }),
                     },
                     ..M::new()
                 })

@@ -128,17 +128,26 @@ fn head_of_unknown_branch_is_an_error<F: ForgeFixture>(fx: &F) -> CaseResult {
     })
 }
 
+/// The change id may be empty: a local forge has none (GLOSSARY change id,
+/// pipeline.md). When two changes both have one, the ids differ.
 fn submit_reports_the_submitted_head<F: ForgeFixture>(fx: &F) -> CaseResult {
-    let b = branch("submit");
-    let head = fx.commit_to(&b);
-    let change = ok("submit", block_on(fx.forge().submit(&submission(&b))))?;
-    ensure(!change.id.is_empty(), || {
-        "submitted change has an empty id".into()
-    })?;
-    ensure(change.head == head, || {
+    let mut ids = Vec::new();
+    for slug in ["submit", "submit-other"] {
+        let b = branch(slug);
+        let head = fx.commit_to(&b);
+        let change = ok("submit", block_on(fx.forge().submit(&submission(&b))))?;
+        ensure(change.head == head, || {
+            format!(
+                "submit must echo the branch head {head}, got {}",
+                change.head
+            )
+        })?;
+        ids.push(change.id);
+    }
+    ensure(ids.iter().any(String::is_empty) || ids[0] != ids[1], || {
         format!(
-            "submit must echo the branch head {head}, got {}",
-            change.head
+            "two changes on different branches share the change id {:?}",
+            ids[0]
         )
     })
 }

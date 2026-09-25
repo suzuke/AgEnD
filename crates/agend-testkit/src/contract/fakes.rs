@@ -46,6 +46,10 @@ impl store::StoreFixture for FakeStore {
     fn events(&self, task_id: &str) -> Vec<StoredEvent> {
         FakeStore::events(self, task_id)
     }
+
+    fn reopen(&self) -> Self {
+        FakeStore::reopen(self)
+    }
 }
 
 /// A `FakeDriver` with one running instance.
@@ -80,6 +84,18 @@ impl driver::DriverFixture for FakeDriverFixture {
     fn instance_id(&self) -> &str {
         Self::INSTANCE
     }
+
+    /// The fake finishes a turn inside `deliver`; waiting longer for a turn
+    /// that is not coming (DRV-9) only slows the suite down.
+    fn turn_timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(200)
+    }
+
+    fn restart(&self) -> Self {
+        Self {
+            driver: self.driver.restarted(),
+        }
+    }
 }
 
 impl runtime::RuntimeFixture for FakeRuntime {
@@ -102,6 +118,10 @@ impl runtime::RuntimeFixture for FakeRuntime {
 
     fn is_running(&self, handle: &HolderHandle) -> bool {
         self.running().contains(handle)
+    }
+
+    fn restart(&self) -> Self {
+        self.restarted()
     }
 }
 

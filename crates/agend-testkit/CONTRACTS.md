@@ -1,24 +1,27 @@
 # 契約規則表
 
 > **TL;DR**
-> - 7 個 trait 的契約規則，每條一個編號（`DRV-1`…`RUN-9`，共 52 條，5 條標「新增，待你追認」）；契約 suite 的每個 case 標著它驗的規則編號。
+> - 7 個 trait 的契約規則，每條一個編號（`DRV-1`…`RUN-9`，共 56 條，5 條標「新增，待你追認」）；契約 suite 的每個 case 標著它驗的規則編號。
 > - 記住：**每條規則至少一個 case、至少一個故意弄壞的實作（mutant）**；`tests/contract_teeth/` 的覆蓋測試讀這張表，缺一個就失敗。
 > - 下一步：加規則 = 這裡加一列（含 mutant 名）+ 標了編號的 case + 註冊 mutant。
 
-每列：規則（一行、可測）· 來源 · mutant（`tests/contract_teeth/<trait>.rs` 裡的名字）。來源寫「推得」表示文件沒逐字寫，但是文件規則的必然結果。標 **（新增，待你追認）** 的規則文件沒有寫，是實作者判斷需要而加的，見 [gate 2「待你追認」](../../docs/gates/gate-02-testkit.md#待你追認)。「不釘」列出刻意不驗的行為與理由。
+每列：規則（一行、可測）· 來源 · mutant（`tests/contract_teeth/<trait>.rs` 裡的名字）。來源寫「**推得**自 X」表示 X 沒逐字寫這條，但這條是 X 的必然結果（冒號後寫怎麼推）。標 **（新增，待你追認）** 的規則文件沒有寫，是實作者判斷需要而加的，見 [gate 2「待你追認」](../../docs/gates/gate-02-testkit.md#待你追認)。「不釘」列出刻意不驗的行為與理由。
 
-## Driver（`DRV`，8 條）
+「daemon 重啟」在契約裡的意思：舊的 trait 物件丟掉（drop），在同一份持久狀態上建一個新的。fixture 用 `RuntimeFixture::restart`、`DriverFixture::restart`、`StoreFixture::reopen` 表達，case 先 drop 舊的再建新的。
+
+## Driver（`DRV`，9 條）
 
 | ID | 規則 | 來源 | mutant |
 |---|---|---|---|
-| DRV-1 | 送到閒置的 instance，回條是 `Sent` 或 `Confirmed`，不是 `Queued`／`Failed` | [delivery](../../docs/architecture/delivery.md#送達模型)；排隊只在忙碌時 | `QueuedReceipt` |
+| DRV-1 | 送到閒置的 instance，回條是 `Sent` 或 `Confirmed`，不是 `Queued`／`Failed` | **推得**自 [delivery 忙碌策略](../../docs/architecture/delivery.md#忙碌策略三級)：排隊是忙碌時的等級，閒置時直接送 | `QueuedReceipt` |
 | DRV-2 | 送到不存在的 instance 是錯誤，不會改送別的 instance | 推得：`deliver(instance_id, …)` | `DeliversUnknownToDefault` |
-| DRV-3 | 送達之後，事件裡最後會出現 `TurnCompleted` | [GLOSSARY driver](../../docs/GLOSSARY.md)：收狀態事件 | `HidesTurnCompleted` |
+| DRV-3 | 送達之後，事件裡最後會出現 `TurnCompleted` | **推得**自 [GLOSSARY driver](../../docs/GLOSSARY.md)：driver 收狀態事件，一輪結束是其中之一 | `HidesTurnCompleted` |
 | DRV-4 | 每個事件的 cursor 都不同 | 推得：能從任何 cursor 接續 | `ConstantCursor` |
 | DRV-5 | `events(after)` 不含該 cursor 本身，也不含更舊的事件 | `events(after_cursor)` 簽章；重連補回（[ARCHITECTURE](../../docs/ARCHITECTURE.md) 程序模型 2） | `IgnoresCursor`、`IncludesTheCursorEvent` |
-| DRV-6 | `events(after)` 回傳該 cursor 之後的全部事件：一個不少、不截斷、順序不變 | 同上：重連補回斷線期間的事件 | `SkipsFirstAfterCursor`、`OnlyLastTwoAfterCursor` |
+| DRV-6 | `events(after)` 回傳該 cursor 之後的全部事件：一個不少、不截斷、順序不變；daemon 重啟後，新的 driver 拿舊 driver 給的 cursor 也一樣 | [ARCHITECTURE](../../docs/ARCHITECTURE.md) 程序模型 2、[D3](../../docs/decisions/d01-d08.md#d3) 規則 2：重啟後重連 backend 補回斷線期間的事件 | `SkipsFirstAfterCursor`、`OnlyLastTwoAfterCursor`、`OnlyOwnLifetimeEvents` |
 | DRV-7 | 同一個 cursor 重讀，結果只會變長；讀取不消耗事件 | 推得：能從任何 cursor 接續 | `ConsumesOnRead` |
 | DRV-8 | 讀不存在的 instance 的事件是錯誤，不是空清單 | 推得：`events(instance_id, …)` | `UnknownInstanceHasNoEvents` |
+| DRV-9 | 同一個訊息 id 送第二次：`deliver` 不是錯誤，也不多一個 turn（`turn_timeout` 內不出現第二個 `TurnCompleted`） | [delivery](../../docs/architecture/delivery.md#送達模型)：以 id 冪等，只有一套去重；[GLOSSARY 訊息](../../docs/GLOSSARY.md)；[V1-LESSONS #1](../../docs/V1-LESSONS.md) | `RedeliversSameId` |
 
 不釘：送達是否一定被確認（有些路徑無法確認，[delivery](../../docs/architecture/delivery.md)）；忙碌時的行為（第 7 施工關對真 backend 定）；未知 cursor；不同 instance 的事件是否分開（fixture 只給一個 instance）。
 
@@ -28,35 +31,38 @@
 |---|---|---|---|
 | FRG-1 | `head` 回報 branch 目前最新的 commit | [pipeline：head](../../docs/architecture/pipeline.md#merge-與-main-前進) | `CachesFirstHead` |
 | FRG-2 | 不存在的 branch，`head` 是錯誤 | 推得：沒有 `refs/heads/<branch>` | `UnknownBranchHeadIsBase` |
-| FRG-3 | `submit` 回報非空的 change id 與送出當下的 head | [GLOSSARY change id](../../docs/GLOSSARY.md) | `SubmitWithoutId` |
+| FRG-3 | `submit` 回報送出當下的 head；change id 可以是空字串（forge local 沒有 change id），兩個不同 branch 的 change 都有 id 時，id 不同 | [GLOSSARY change id](../../docs/GLOSSARY.md)、[pipeline](../../docs/architecture/pipeline.md#6-種關卡)：local 沒有 change id；`agend-core` `pipeline/state.rs` 的可完成證明也這樣假設 | `SameIdForEveryChange` |
 | FRG-4 | 不存在的 branch，`submit` 是錯誤 | 推得 | `SubmitsUnknownBranch` |
 | FRG-5 | `expected_head` 等於 merge 當下的 head 就 merge：回 `Merged{merge_commit}`，base 移到那個 commit（submit 之後又 commit 也一樣） | [pipeline](../../docs/architecture/pipeline.md#merge-與-main-前進)：帶核准的 head merge | `MergedWithoutMerging`、`ComparesSubmittedHead` |
-| FRG-6 | head 不符回 `HeadChanged{actual_head}`，`actual_head` 是當下真正的 head | 事件身分（[GLOSSARY](../../docs/GLOSSARY.md)） | `EchoesExpectedHead` |
-| FRG-7 | head 不符時什麼都不變：base 不動、branch 不動；之後用目前的 head 仍可 merge | 同上；merge 只有 daemon 做、只做一次 | `MergesStaleHeads`、`MergesThenRefuses` |
+| FRG-6 | head 不符回 `HeadChanged{actual_head}`，`actual_head` 是當下真正的 head | **推得**自事件身分（[GLOSSARY](../../docs/GLOSSARY.md)）：daemon 靠回報的 head 判斷結果是不是目前的 | `EchoesExpectedHead` |
+| FRG-7 | head 不符時什麼都不變：base 不動、branch 不動；之後用目前的 head 仍可 merge | **推得**自同上與 [pipeline](../../docs/architecture/pipeline.md#merge-與-main-前進)：merge 只有 daemon 做、只做一次 | `MergesStaleHeads`、`MergesThenRefuses` |
 | FRG-8 | `expected_head` 要整串相等：空字串、短 SHA、少一個字都算不符 | 推得：核准綁的是完整 head SHA | `PrefixMatchesHead` |
 | FRG-9 | 不存在的 branch，merge 是錯誤 | 推得 | `UnknownBranchMergeIsHeadChanged` |
 
-不釘（local 與 GitHub 不同）：同一 branch 重複 submit 的回傳；merge 後 branch 是否還在；已 merge 的 head 再要求 merge 一次會怎樣（verifier r2 的 F2 包裝與假實作行為相同，不是反例）。
+不釘（local 與 GitHub 不同）：同一 branch 重複 submit 的回傳；merge 後 branch 是否還在；已 merge 的 head 再要求 merge 一次會怎樣（verifier r2 的 F2 包裝與假實作行為相同，不是反例）。回空 change id 的 forge 通過整個 suite（`contract_teeth` 的 `forge_without_change_ids_passes`，原本的 `SubmitWithoutId`）。
 
-## Store（`STO`，11 條）
+建議，未釘：merge 落在目前的 base 上、不弄丟之前的 merge（[pipeline](../../docs/architecture/pipeline.md#merge-與-main-前進) 的 CAS `update-ref` 機制；文件沒有逐字規則，`ForgeFixture` 也看不到 ancestry）。要釘的話先加一個讀 base 歷史的 fixture 方法。
+
+## Store（`STO`，12 條）
 
 | ID | 規則 | 來源 | mutant |
 |---|---|---|---|
 | STO-1 | 建立的 task 讀回來每個欄位都相同 | [ARCHITECTURE](../../docs/ARCHITECTURE.md)：store 是唯一真相來源 | `DropsDependsOn` |
 | STO-2 | 不存在的 task 讀到 `None`，不是錯誤 | `load_task -> Option` 簽章 | `MissingTaskIsAnError` |
 | STO-3 | 重複建立同一個 id 失敗，原本的 task 不變 | 推得：寫入只能經 CAS | `CreateOverwrites` |
-| STO-4 | 用目前版本 CAS 會寫入，版本每次都嚴格變大（連續多次，擋 1→2→1） | [gate 1 P2](../../docs/gates/gate-01-core.md#p2trait-簽章)：寫入帶 CAS 版本 | `TogglingVersions` |
+| STO-4 | 用目前版本 CAS 會寫入，版本每次都嚴格變大（連續多次，擋 1→2→1） | **推得**自 [gate 1 P2](../../docs/gates/gate-01-core.md#p2trait-簽章)（寫入帶 CAS 版本）：版本回到舊值（ABA）時，拿著舊版本的寫入者會成功 | `TogglingVersions` |
 | STO-5 | 用較舊的版本 CAS 回 `Conflict`，task 不變 | 同上 | `LastWriterWins` |
-| STO-6 | 用比目前新的版本 CAS 也回 `Conflict`，task 不變（CAS 是相等，不是「至少」） | 同上 | `AcceptsFutureVersions` |
+| STO-6 | 用比目前新的版本 CAS 也回 `Conflict`，task 不變（CAS 是相等，不是「至少」） | **推得**自同上：compare-and-swap 比的是相等 | `AcceptsFutureVersions` |
 | STO-7 | `Conflict` 回報的 `current_version` 是實際存著的版本 | `CasResult::Conflict{current_version}` | `GuessesCurrentVersion` |
 | STO-8 | 對不存在的 task CAS 回 `Conflict{None}`，不會建立它 | 同上 | `CasCreatesMissingTask` |
 | STO-9 | workflow 依 (id, 版本) 精確讀回；沒存過的版本是 `None`，不退回別的版本 | [GLOSSARY workflow](../../docs/GLOSSARY.md)：task 固定建立時的版本 | `FallsBackToOlderWorkflow` |
 | STO-10 | 同一個 task 的事件依附加順序保存 | `append_event` | `PrependsEvents` |
 | STO-11 | 事件依 task 分開，交錯附加也不混 | `append_event(task_id, …)` 簽章 | `SharedEventLog` |
+| STO-12 | 重新開啟（daemon 重啟）後 task、版本、workflow、事件都還在；舊版本 CAS 衝突、保存的版本 CAS 可寫入 | [GLOSSARY store](../../docs/GLOSSARY.md)：SQLite、唯一真相來源（D8）；[pipeline](../../docs/architecture/pipeline.md#worktree-與-branch-生命週期)：先寫 DB，崩潰後開機接續 | `InMemoryOnly` |
 
 不釘：第一個版本號；對不存在的 task 附加事件。
 
-## Runtime（`RTM`，7 條）
+## Runtime（`RTM`，9 條）
 
 「在跑」從 trait 外面看（`RuntimeFixture::is_running`：真實作看程序與 socket）。
 
@@ -65,10 +71,12 @@
 | RTM-1 | `start_holder` 回的 handle 是啟動的那個 instance，socket 路徑非空 | [D3](../../docs/decisions/d01-d08.md#d3) | `HandleNamesTheExecutable` |
 | RTM-2 | `start_holder` 回來之後 holder 真的在跑 | 同上 | `StartsNothing` |
 | RTM-3 | `recover_holders` 剛好列出正在跑的 holder | [ARCHITECTURE](../../docs/ARCHITECTURE.md) 程序模型 2：重啟後重連 holder | `RecoversNothing` |
-| RTM-4 | recover 回的 handle 與 start 回的完全相同（pid、socket） | 同上：daemon 靠 handle 重連 | `RecoversWrongHandles` |
+| RTM-4 | recover 回的 handle 與 start 回的完全相同（pid、socket） | **推得**自同上：daemon 靠 handle 重連，handle 錯了就連不上 | `RecoversWrongHandles` |
 | RTM-5 | `stop_holder` 之後 holder 真的停了，不只是從清單拿掉；別的 holder 不受影響 | 推得：停止 | `StopOnlyHides` |
 | RTM-6 | 停掉的 holder 不再被 recover | 同 RTM-3 | `RecoversStoppedHolders` |
 | RTM-7 | 停掉的 instance 可以再啟動 | 推得：重啟 agent | `RefusesRestart` |
+| RTM-8 | daemon 重啟後 holder 還在跑；新的 runtime 的 `recover_holders` 列出它們，handle 與舊 runtime 的 `start_holder` 回的相同 | [D3](../../docs/decisions/d01-d08.md#d3)：daemon 重啟時 agent 不斷線，重啟後重連 holder；[ARCHITECTURE](../../docs/ARCHITECTURE.md) 程序模型 2；[V1-LESSONS #7](../../docs/V1-LESSONS.md) | `DaemonScoped`、`RecoversOnlyOwnHolders` |
+| RTM-9 | 重啟後的新 runtime 停得掉舊 runtime 啟動的 holder（真的停） | **推得**自 D3：重啟後由新 daemon 管理重連的 holder | `StopsOnlyOwnHolders` |
 
 不釘：同一 instance 啟動兩次；停止不存在的 instance。
 
@@ -102,9 +110,9 @@
 | RUN-2 | stdout 與 stderr 分開回報 | `CommandOutput` | `MergesStderrIntoStdout` |
 | RUN-3 | 輸出逐位元組不變：不修剪空白、不轉碼（含非 UTF-8 位元組） | `stdout: Vec<u8>` | `TrimsStdout`、`DecodesOutputLossily` |
 | RUN-4 | 大量輸出（stdout、stderr 各 256 KiB）完整回來，不因管線塞滿卡住或誤報逾時 **（新增，待你追認）** | 由 RUN-3 延伸；checks 的輸出常超過 64 KiB | `CapsOutputAt64KiB`、`RealDrainsAfterExit` |
-| RUN-5 | 超過 timeout 回 `timed_out: true` 且沒有 exit code | [V1-LESSONS #10](../../docs/V1-LESSONS.md)：外部指令一律帶 timeout | `TimeoutExitCode124` |
-| RUN-6 | 逾時在 timeout 後不久回報（200 ms 逾時要在 2 秒內），不等指令自己結束 | 同上 | `TimesOutLate` |
-| RUN-7 | 逾時的指令被停掉（`sh` 沒機會寫標記檔） | 同上 | `LeavesCommandRunning` |
+| RUN-5 | 超過 timeout 回 `timed_out: true` 且沒有 exit code | **推得**自 [V1-LESSONS #10](../../docs/V1-LESSONS.md)（外部指令一律帶 timeout）：逾時的指令沒有自己結束，沒有 exit code 可回報；回 124 之類的值會被當成指令失敗 | `TimeoutExitCode124` |
+| RUN-6 | 逾時在 timeout 後不久回報（200 ms 逾時要在 2 秒內），不等指令自己結束 | **推得**自同上：等指令自己結束就等於沒有 timeout | `TimesOutLate` |
+| RUN-7 | 逾時的指令被停掉（`sh` 沒機會寫標記檔） | **推得**自同上：沒停掉的指令繼續占資源、改檔案 | `LeavesCommandRunning` |
 | RUN-8 | 逾時時指令啟動的子程序也一起停掉（整個 process group） **（新增，待你追認）** | owner 2026-09-25 要求；文件沒寫 | `RealKillsShOnly` |
 | RUN-9 | 在指定的工作目錄執行 | `run(cmd, dir, timeout)`（D28） | `RealIgnoresWorkingDirectory` |
 

@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use agend_core::traits::{HolderHandle, HolderLaunch, Runtime};
 
@@ -17,19 +17,29 @@ pub enum RuntimeCall {
     Recover,
 }
 
-/// Starts no processes: keeps a table of "running" holders. Beyond the
-/// contract: starting an instance that is already running and stopping one
-/// that is not both fail, so a test notices a double start or stray stop.
+/// Starts no processes: keeps a table of "running" holders. The table plays
+/// the part of the machine: [`FakeRuntime::restarted`] is a new runtime (a
+/// restarted daemon) over the same table, so holders outlive the runtime
+/// that started them (D3). `calls()` and `fail_next` stay per runtime.
+/// Beyond the contract: starting an instance that is already running and
+/// stopping one that is not both fail, so a test notices a double start or
+/// stray stop.
 #[derive(Debug)]
 pub struct FakeRuntime {
     socket_dir: String,
+    holders: Arc<Mutex<Holders>>,
     state: Mutex<State>,
+}
+
+/// What outlives a daemon: the running holders and the pid counter.
+#[derive(Debug)]
+struct Holders {
+    running: BTreeMap<String, HolderHandle>,
+    next_pid: u32,
 }
 
 #[derive(Debug)]
 struct State {
-    running: BTreeMap<String, HolderHandle>,
-    next_pid: u32,
     calls: Vec<RuntimeCall>,
     failures: Failures,
 }
@@ -41,31 +51,47 @@ impl FakeRuntime {
 
     /// Holder sockets are reported as `<socket_dir>/<instance_id>.sock`.
     pub fn with_socket_dir(socket_dir: &str) -> Self {
-        Self {
-            socket_dir: socket_dir.trim_end_matches('/').to_owned(),
-            state: Mutex::new(State {
+        Self::over(
+            socket_dir.trim_end_matches('/').to_owned(),
+            Arc::new(Mutex::new(Holders {
                 running: BTreeMap::new(),
                 next_pid: FIRST_FAKE_PID,
+            })),
+        )
+    }
+
+    fn over(socket_dir: String, holders: Arc<Mutex<Holders>>) -> Self {
+        Self {
+            socket_dir,
+            holders,
+            state: Mutex::new(State {
                 calls: Vec::new(),
                 failures: Failures::new(OPERATIONS),
             }),
         }
     }
 
+    /// A new runtime over the same holders, as after a daemon restart: it
+    /// recovers and stops the holders this one started. Its `calls()` start
+    /// empty.
+    pub fn restarted(&self) -> Self {
+        Self::over(self.socket_dir.clone(), Arc::clone(&self.holders))
+    }
+
     /// Simulates a holder dying on its own (it disappears from recovery).
     pub fn crash(&self, instance_id: &str) -> Option<HolderHandle> {
-        lock(&self.state).running.remove(instance_id)
+        lock(&self.holders).running.remove(instance_id)
     }
 
     /// Simulates a holder that outlived a daemon restart.
     pub fn adopt(&self, handle: HolderHandle) {
-        lock(&self.state)
+        lock(&self.holders)
             .running
             .insert(handle.instance_id.clone(), handle);
     }
 
     pub fn running(&self) -> Vec<HolderHandle> {
-        lock(&self.state).running.values().cloned().collect()
+        lock(&self.holders).running.values().cloned().collect()
     }
 
     pub fn fail_next(&self, operation: &str, message: &str) {
@@ -92,7 +118,8 @@ impl Runtime for FakeRuntime {
         if let Some(error) = state.failures.take("start_holder") {
             return Err(error);
         }
-        if state.running.contains_key(&launch.instance_id) {
+        let mut holders = lock(&self.holders);
+        if holders.running.contains_key(&launch.instance_id) {
             return Err(FakeError::new(
                 "start_holder",
                 format!("holder already running for {}", launch.instance_id),
@@ -100,11 +127,11 @@ impl Runtime for FakeRuntime {
         }
         let handle = HolderHandle {
             instance_id: launch.instance_id.clone(),
-            process_id: Some(state.next_pid),
+            process_id: Some(holders.next_pid),
             socket_path: format!("{}/{}.sock", self.socket_dir, launch.instance_id),
         };
-        state.next_pid += 1;
-        state
+        holders.next_pid += 1;
+        holders
             .running
             .insert(launch.instance_id.clone(), handle.clone());
         Ok(handle)
@@ -118,7 +145,7 @@ impl Runtime for FakeRuntime {
         if let Some(error) = state.failures.take("stop_holder") {
             return Err(error);
         }
-        match state.running.remove(instance_id) {
+        match lock(&self.holders).running.remove(instance_id) {
             Some(_) => Ok(()),
             None => Err(FakeError::new(
                 "stop_holder",
@@ -133,7 +160,7 @@ impl Runtime for FakeRuntime {
         if let Some(error) = state.failures.take("recover_holders") {
             return Err(error);
         }
-        Ok(state.running.values().cloned().collect())
+        Ok(lock(&self.holders).running.values().cloned().collect())
     }
 }
 
@@ -172,6 +199,20 @@ mod tests {
             .map(|h| h.instance_id)
             .collect();
         assert_eq!(ids, vec!["b", "c"]);
+    }
+
+    #[test]
+    fn restarted_runtime_shares_holders_but_not_calls() {
+        let first = FakeRuntime::new();
+        let a = block_on(first.start_holder(&launch("a"))).unwrap();
+        let second = first.restarted();
+        drop(first);
+        assert_eq!(block_on(second.recover_holders()).unwrap(), vec![a]);
+        let b = block_on(second.start_holder(&launch("b"))).unwrap();
+        assert_eq!(b.process_id, Some(FIRST_FAKE_PID + 1));
+        block_on(second.stop_holder("a")).unwrap();
+        assert_eq!(second.running(), vec![b]);
+        assert_eq!(second.calls().len(), 3);
     }
 
     #[test]

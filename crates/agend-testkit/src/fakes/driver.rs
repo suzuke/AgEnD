@@ -1,5 +1,5 @@
-use std::collections::{BTreeMap, VecDeque};
-use std::sync::Mutex;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::sync::{Arc, Mutex};
 
 use agend_core::model::DeliveryState;
 use agend_core::policy::busy::BusyLevel;
@@ -29,24 +29,41 @@ pub enum DriverCall {
 /// `BusyChanged{false}`. `set_auto_turn(false)` turns that off so a test
 /// scripts events with `push_event`.
 ///
+/// Delivery is idempotent by message id (per instance): delivering an id
+/// again answers with a receipt but starts no second turn.
+///
+/// The instances, their events and the delivered ids play the part of the
+/// backend: [`FakeDriver::restarted`] is a new driver (after a daemon
+/// restart) over the same backend, so it backfills events from cursors the
+/// old driver handed out. Receipts, `calls()` and `fail_next` stay per
+/// driver.
+///
 /// Cursors are one global zero-padded counter, so they are unique and
 /// ordered. Beyond the contract: an unknown cursor is an error.
 #[derive(Debug)]
 pub struct FakeDriver {
+    backend: Arc<Mutex<Backend>>,
     state: Mutex<State>,
+}
+
+/// What outlives a driver: the backend's instances, events and history.
+#[derive(Debug)]
+struct Backend {
+    instances: BTreeMap<String, Vec<DriverEvent>>,
+    /// `(instance id, message id)` of every accepted delivery.
+    delivered: BTreeSet<(String, String)>,
+    auto_turn: bool,
+    next_cursor: u64,
 }
 
 #[derive(Debug)]
 struct State {
-    instances: BTreeMap<String, Vec<DriverEvent>>,
     receipts: VecDeque<DeliveryReceipt>,
-    auto_turn: bool,
-    next_cursor: u64,
     calls: Vec<DriverCall>,
     failures: Failures,
 }
 
-impl State {
+impl Backend {
     fn push(&mut self, instance_id: &str, kind: DriverEventKind) -> String {
         self.next_cursor += 1;
         let cursor = format!("{:010}", self.next_cursor);
@@ -63,16 +80,29 @@ impl State {
 
 impl FakeDriver {
     pub fn new() -> Self {
+        Self::over(Arc::new(Mutex::new(Backend {
+            instances: BTreeMap::new(),
+            delivered: BTreeSet::new(),
+            auto_turn: true,
+            next_cursor: 0,
+        })))
+    }
+
+    fn over(backend: Arc<Mutex<Backend>>) -> Self {
         Self {
+            backend,
             state: Mutex::new(State {
-                instances: BTreeMap::new(),
                 receipts: VecDeque::new(),
-                auto_turn: true,
-                next_cursor: 0,
                 calls: Vec::new(),
                 failures: Failures::new(OPERATIONS),
             }),
         }
+    }
+
+    /// A new driver over the same backend, as after a daemon restart. Its
+    /// `calls()` and scripted receipts start empty.
+    pub fn restarted(&self) -> Self {
+        Self::over(Arc::clone(&self.backend))
     }
 
     pub fn with_instance(self, instance_id: &str) -> Self {
@@ -81,14 +111,14 @@ impl FakeDriver {
     }
 
     pub fn add_instance(&self, instance_id: &str) {
-        lock(&self.state)
+        lock(&self.backend)
             .instances
             .entry(instance_id.to_owned())
             .or_default();
     }
 
     pub fn set_auto_turn(&self, enabled: bool) {
-        lock(&self.state).auto_turn = enabled;
+        lock(&self.backend).auto_turn = enabled;
     }
 
     /// The receipt for the next delivery instead of the default one.
@@ -98,12 +128,12 @@ impl FakeDriver {
 
     /// Appends an event for a known instance and returns its cursor.
     pub fn push_event(&self, instance_id: &str, kind: DriverEventKind) -> String {
-        let mut state = lock(&self.state);
+        let mut backend = lock(&self.backend);
         assert!(
-            state.instances.contains_key(instance_id),
+            backend.instances.contains_key(instance_id),
             "push_event: add instance {instance_id} first"
         );
-        state.push(instance_id, kind)
+        backend.push(instance_id, kind)
     }
 
     pub fn fail_next(&self, operation: &str, message: &str) {
@@ -155,7 +185,8 @@ impl Driver for FakeDriver {
         if let Some(error) = state.failures.take("deliver") {
             return Err(error);
         }
-        if !state.instances.contains_key(instance_id) {
+        let mut backend = lock(&self.backend);
+        if !backend.instances.contains_key(instance_id) {
             return Err(FakeError::new(
                 "deliver",
                 format!("unknown instance {instance_id}"),
@@ -165,21 +196,24 @@ impl Driver for FakeDriver {
             backend_message_id: Some(format!("fake-{}", message.id)),
             state: DeliveryState::Sent,
         });
-        if state.auto_turn {
-            state.push(instance_id, DriverEventKind::BusyChanged { busy: true });
-            state.push(
+        let first = backend
+            .delivered
+            .insert((instance_id.to_owned(), message.id.clone()));
+        if first && backend.auto_turn {
+            backend.push(instance_id, DriverEventKind::BusyChanged { busy: true });
+            backend.push(
                 instance_id,
                 DriverEventKind::MessageConfirmed {
                     message_id: message.id.clone(),
                 },
             );
-            state.push(
+            backend.push(
                 instance_id,
                 DriverEventKind::TurnCompleted {
                     summary: Some(format!("fake reply to {}", message.id)),
                 },
             );
-            state.push(instance_id, DriverEventKind::BusyChanged { busy: false });
+            backend.push(instance_id, DriverEventKind::BusyChanged { busy: false });
         }
         Ok(receipt)
     }
@@ -197,7 +231,8 @@ impl Driver for FakeDriver {
         if let Some(error) = state.failures.take("events") {
             return Err(error);
         }
-        let Some(events) = state.instances.get(instance_id) else {
+        let backend = lock(&self.backend);
+        let Some(events) = backend.instances.get(instance_id) else {
             return Err(FakeError::new(
                 "events",
                 format!("unknown instance {instance_id}"),
@@ -231,6 +266,29 @@ mod tests {
             task_id: None,
             body: "hi".into(),
         }
+    }
+
+    #[test]
+    fn same_message_id_makes_one_turn_and_a_restarted_driver_backfills() {
+        let driver = FakeDriver::new().with_instance("dev-1");
+        block_on(driver.deliver("dev-1", &message("m-1"), BusyLevel::Queue)).unwrap();
+        let cursor = block_on(driver.events("dev-1", None)).unwrap()[1]
+            .cursor
+            .clone();
+        let again = block_on(driver.deliver("dev-1", &message("m-1"), BusyLevel::Queue));
+        assert_eq!(again.unwrap().state, DeliveryState::Sent);
+        assert_eq!(block_on(driver.events("dev-1", None)).unwrap().len(), 4);
+        let restarted = driver.restarted();
+        drop(driver);
+        assert_eq!(
+            block_on(restarted.events("dev-1", Some(&cursor)))
+                .unwrap()
+                .len(),
+            2
+        );
+        block_on(restarted.deliver("dev-1", &message("m-1"), BusyLevel::Queue)).unwrap();
+        assert_eq!(block_on(restarted.events("dev-1", None)).unwrap().len(), 4);
+        assert_eq!(restarted.calls().len(), 3);
     }
 
     #[test]

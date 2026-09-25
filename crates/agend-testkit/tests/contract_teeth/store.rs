@@ -1,5 +1,7 @@
 //! Store mutants: a `FakeStore` with one method replaced. Mutants that keep
-//! events themselves also replace the fixture's view of them.
+//! events themselves also replace the fixture's view of them. `reopen`
+//! builds the next mutant over `FakeStore::reopen` (the same data) with the
+//! same replaced methods; a mutant's own event log does not survive it.
 
 use std::sync::Mutex;
 
@@ -18,6 +20,7 @@ type Cas = fn(&M, &Task, u64) -> Result<CasResult, FakeError>;
 type LoadWorkflow = fn(&M, &str, u64) -> Result<Option<Workflow>, FakeError>;
 type Append = fn(&M, &str, &StoredEvent) -> Result<(), FakeError>;
 type Events = fn(&M, &str) -> Vec<StoredEvent>;
+type Reopen = fn(&M) -> FakeStore;
 
 /// A fake store with one operation replaced.
 pub struct M {
@@ -30,6 +33,7 @@ pub struct M {
     load_workflow: LoadWorkflow,
     append: Append,
     events: Events,
+    reopen: Reopen,
 }
 
 impl M {
@@ -43,6 +47,7 @@ impl M {
             load_workflow: |m, id, v| m.real_load_workflow(id, v),
             append: |m, id, e| block_on(m.store.append_event(id, e)),
             events: |m, id| m.store.events(id),
+            reopen: |m| m.store.reopen(),
         }
     }
 
@@ -108,6 +113,13 @@ impl StoreFixture for M {
     }
     fn events(&self, task_id: &str) -> Vec<StoredEvent> {
         (self.events)(self, task_id)
+    }
+    fn reopen(&self) -> Self {
+        Self {
+            store: (self.reopen)(self),
+            log: Mutex::new(Vec::new()),
+            ..*self
+        }
     }
 }
 
@@ -302,6 +314,18 @@ pub fn mutants() -> Vec<Mutant> {
                         Ok(())
                     },
                     events: |m, _| m.logged(""),
+                    ..M::new()
+                })
+            },
+        },
+        // STO-12 (verifier r3 M3): everything lives in memory; a reopened
+        // store starts empty.
+        Mutant {
+            rule: "STO-12",
+            name: "InMemoryOnly",
+            run: |name| {
+                store::run(name, || M {
+                    reopen: |_| FakeStore::new(),
                     ..M::new()
                 })
             },

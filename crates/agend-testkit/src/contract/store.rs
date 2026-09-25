@@ -1,9 +1,11 @@
-//! `Store` contract (rules STO-1..11 in CONTRACTS.md): tasks round-trip
+//! `Store` contract (rules STO-1..12 in CONTRACTS.md): tasks round-trip
 //! exactly; writes are compare-and-swap on a version that must equal the
 //! current one (older and newer both conflict) and strictly grows with
 //! every write (checked over a sequence, so a version that returns to an old
 //! value fails); a conflict changes nothing and reports the version actually
-//! stored; events keep their order and stay with their task.
+//! stored; events keep their order and stay with their task; everything,
+//! versions included, survives a reopen ([`StoreFixture::reopen`]: a daemon
+//! restart).
 //!
 //! Not pinned: the first version number; what appending an event to an
 //! unknown task does.
@@ -29,6 +31,11 @@ pub trait StoreFixture {
 
     /// Events appended for `task_id`, in append order.
     fn events(&self, task_id: &str) -> Vec<StoredEvent>;
+
+    /// A daemon restart: a new fixture whose store is a new handle opened on
+    /// the same persisted data as `self` (the same database file). Cases
+    /// drop the old fixture before creating the next one.
+    fn reopen(&self) -> Self;
 }
 
 pub fn cases<F: StoreFixture>() -> Vec<Case<F>> {
@@ -87,6 +94,11 @@ pub fn cases<F: StoreFixture>() -> Vec<Case<F>> {
             rule: "STO-11",
             name: "events_are_kept_per_task",
             check: events_are_kept_per_task,
+        },
+        Case {
+            rule: "STO-12",
+            name: "data_survives_a_reopen",
+            check: data_survives_a_reopen,
         },
     ]
 }
@@ -370,4 +382,55 @@ fn current_version<F: StoreFixture>(fx: &F, task_id: &str) -> Result<u64, String
     ok("load_task", block_on(fx.store().load_task(task_id)))?
         .map(|v| v.version)
         .ok_or_else(|| format!("task {task_id} vanished"))
+}
+
+/// GLOSSARY store / D8: the store is the only source of truth, so tasks,
+/// versions, workflows and events survive a restart, and CAS continues from
+/// the stored version.
+fn data_survives_a_reopen<F: StoreFixture>(fx: &F) -> CaseResult {
+    let first = fx.reopen();
+    let task = full_task("T-reopen");
+    ok("create_task", block_on(first.store().create_task(&task)))?;
+    let created = current_version(&first, &task.id)?;
+    let written = write(&first, &task, "written before the restart", created)?;
+    let version = current_version(&first, &task.id)?;
+    let workflow = Workflow::builtin_code();
+    first.insert_workflow(&workflow);
+    let event = StoredEvent {
+        id: "e-reopen".into(),
+        occurred_at_unix_ms: 1_790_000_000_000,
+        kind: "stage_completed".into(),
+        detail: "before the restart".into(),
+    };
+    ok(
+        "append_event",
+        block_on(first.store().append_event(&task.id, &event)),
+    )?;
+    drop(first);
+
+    let second = fx.reopen();
+    let loaded = ok("load_task", block_on(second.store().load_task(&task.id)))?;
+    ensure(
+        loaded.as_ref().map(|v| (v.version, &v.task)) == Some((version, &written)),
+        || format!("after a reopen expected version {version} with {written:?}, got {loaded:?}"),
+    )?;
+    let loaded = ok(
+        "load_workflow",
+        block_on(second.store().load_workflow(&workflow.id, workflow.version)),
+    )?;
+    ensure(loaded.as_ref() == Some(&workflow), || {
+        format!("after a reopen the workflow loaded as {loaded:?}")
+    })?;
+    let events = second.events(&task.id);
+    ensure(events == [event.clone()], || {
+        format!("after a reopen expected events [{event:?}], got {events:?}")
+    })?;
+    let stale = ok(
+        "compare_and_swap_task",
+        block_on(second.store().compare_and_swap_task(&task, created)),
+    )?;
+    ensure(matches!(stale, CasResult::Conflict { .. }), || {
+        format!("after a reopen the pre-write version {created} must conflict, got {stale:?}")
+    })?;
+    write(&second, &written, "written after the restart", version).map(|_| ())
 }
