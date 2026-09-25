@@ -1,8 +1,8 @@
 //! Drawing: every screen is a list of [`Row`]s drawn into the body between a
 //! breadcrumb header and a message + help footer. The selected row is marked
 //! with `›` and drawn in reverse video from the marker to the right edge; the
-//! row's border glyphs (`▌ ┃ ┏ ┗ ├─ └─`) are never highlighted (DEMO-01
-//! round 4). Widths are display columns (CJK = 2).
+//! row's border glyphs (`▌ ┃ ┏ ┗ ├─ └─`) and a `─`/`━` border run inside it
+//! (a team header's top line) are never highlighted (DEMO-01 round 4). Widths are display columns (CJK = 2).
 //!
 //! Must NOT: change state (only `App::key` and `App::tick` do).
 
@@ -18,6 +18,9 @@ use crate::source::{AgentState, Fleet, StageState, TaskInfo};
 
 pub const MIN_WIDTH: u16 = 70;
 pub const MIN_HEIGHT: u16 = 20;
+
+/// Padding characters that draw a border line, never highlighted.
+const FRAME_FILL: [char; 2] = ['─', '━'];
 
 /// One line of a screen.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -105,20 +108,26 @@ impl Row {
     /// The row as plain text of exactly `width` columns (wide characters
     /// count twice), split into (border, rest).
     pub fn layout(&self, width: usize, selected: bool) -> (String, String) {
+        let (border, head, pad, right) = self.segments(width, selected);
+        (border, head + &pad + &right)
+    }
+
+    /// The row split into (border, marker + text, padding, right text),
+    /// `width` columns in total.
+    fn segments(&self, width: usize, selected: bool) -> (String, String, String, String) {
         let border = truncate(&self.border, width);
-        let mut rest = String::new();
+        let mut head = String::new();
         if self.marker {
-            rest.push(if selected { '›' } else { ' ' });
+            head.push(if selected { '›' } else { ' ' });
         }
-        let avail = width.saturating_sub(border.width() + rest.width());
+        let avail = width.saturating_sub(border.width() + head.width());
         let right = truncate(&self.right, avail.saturating_sub(4));
         let gap = if right.is_empty() { 0 } else { 1 };
         let text = truncate(&self.text, avail.saturating_sub(right.width() + gap));
-        rest.push_str(&text);
+        head.push_str(&text);
         let pad = avail.saturating_sub(text.width() + right.width());
-        rest.extend(std::iter::repeat_n(self.fill, pad));
-        rest.push_str(&right);
-        (border, rest)
+        let pad = std::iter::repeat_n(self.fill, pad).collect();
+        (border, head, pad, right)
     }
 }
 
@@ -325,7 +334,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 }
 
 fn draw_row(buf: &mut Buffer, y: u16, width: u16, row: &Row, selected: bool) {
-    let (border, rest) = row.layout(width as usize, selected);
+    let (border, head, pad, right) = row.segments(width as usize, selected);
     let mut style = Style::default();
     if row.bold {
         style = style.add_modifier(Modifier::BOLD);
@@ -333,19 +342,28 @@ fn draw_row(buf: &mut Buffer, y: u16, width: u16, row: &Row, selected: bool) {
     if row.dim {
         style = style.add_modifier(Modifier::DIM);
     }
-    let border_width = border.width() as u16;
-    put(buf, 0, y, width, &border, Style::default());
-    if selected {
-        style = style.add_modifier(Modifier::REVERSED);
+    let content = if selected {
+        style.add_modifier(Modifier::REVERSED)
+    } else {
+        style
+    };
+    // A `─`/`━` padding run is part of the frame (a team header's top
+    // border), so it keeps the unselected style like the border itself.
+    let pad_style = if FRAME_FILL.contains(&row.fill) {
+        style
+    } else {
+        content
+    };
+    let mut x = 0u16;
+    for (text, style) in [
+        (border, Style::default()),
+        (head, content),
+        (pad, pad_style),
+        (right, content),
+    ] {
+        put(buf, x, y, width.saturating_sub(x), &text, style);
+        x += text.width() as u16;
     }
-    put(
-        buf,
-        border_width,
-        y,
-        width.saturating_sub(border_width),
-        &rest,
-        style,
-    );
 }
 
 fn put(buf: &mut Buffer, x: u16, y: u16, width: u16, text: &str, style: Style) {

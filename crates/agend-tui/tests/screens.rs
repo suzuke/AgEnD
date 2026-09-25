@@ -172,19 +172,29 @@ fn finder_lists_matches_by_kind() {
     );
 }
 
+/// Frame glyphs: block borders, bars, tree connectors and border lines.
+const FRAME: [&str; 9] = ["▌", "┃", "┏", "┗", "━", "│", "─", "├", "└"];
+
 #[test]
 fn highlight_covers_content_but_never_border_glyphs() {
+    // (keys from Home, what the selected row starts with)
+    let cases: &[(&[KeyCode], &str)] = &[
+        (&[], "▌"),
+        // Team headers: `┏›archfix ` is highlighted, the `─` run is not.
+        (&[Down, Down, Down], "┏"),
+        (&[Down, Down, Down, Down, Down, Down], "┏"),
+        (&[Down, Down, Down, Down], "┃ "),
+        (&[Down, Down, Down, Down, Enter], "  ├─"),
+        (&[Down, Down, Down, Enter], ""),
+        (&[Down, Down, Down, Enter, ch('2')], ""),
+        (&[Enter, Enter], "┃ "),
+    ];
     for lang in [Language::En, Language::ZhTw] {
-        let (mut app, _) = demo(lang);
-        // Home rows: needs-you (▌), team header (┏), goal (┃).
-        for (downs, border) in [(0, "▌"), (3, "┏"), (4, "┃ ")] {
-            let (mut app2, _) = demo(lang);
-            press(&mut app2, &vec![Down; downs]);
-            assert_highlight(&mut app2, border);
+        for (keys, border) in cases {
+            let (mut app, _) = demo(lang);
+            press(&mut app, keys);
+            assert_highlight(&mut app, border);
         }
-        // Task Detail stage rows (tree connector).
-        press(&mut app, &[Down, Down, Down, Down, Enter]);
-        assert_highlight(&mut app, "  ├─");
     }
 }
 
@@ -192,26 +202,37 @@ fn assert_highlight(app: &mut agend_tui::App, border: &str) {
     let (buffer, text) = render_buffer(app, 100, 30);
     let y = text
         .lines()
-        .position(|l| l.starts_with(border) && l.contains('›'))
+        .position(|l| {
+            l.strip_prefix(border)
+                .is_some_and(|rest| rest.starts_with('›'))
+        })
         .unwrap_or_else(|| panic!("no selected row starting with {border:?}:\n{text}"))
         as u16;
-    let border_cols = border.width() as u16;
-    for x in 0..border_cols {
-        let modifier = buffer[(x, y)].style().add_modifier;
-        assert!(
-            !modifier.contains(Modifier::REVERSED),
-            "border column {x} highlighted:\n{text}"
-        );
+    let reversed = |x: u16| {
+        buffer[(x, y)]
+            .style()
+            .add_modifier
+            .contains(Modifier::REVERSED)
+    };
+    for x in 0..border.width() as u16 {
+        assert!(!reversed(x), "border column {x} highlighted:\n{text}");
     }
-    // A wide character at the right edge leaves its second cell unstyled
-    // (ratatui resets it), so check the marker column and the middle.
-    for x in [border_cols, 60] {
-        let modifier = buffer[(x, y)].style().add_modifier;
-        assert!(
-            modifier.contains(Modifier::REVERSED),
-            "content column {x} not highlighted"
-        );
+    let mut content = 0;
+    for x in 0..buffer.area.width {
+        let symbol = buffer[(x, y)].symbol();
+        if FRAME.contains(&symbol) {
+            assert!(
+                !reversed(x),
+                "frame glyph {symbol:?} at column {x} highlighted:\n{text}"
+            );
+        } else if symbol == "›" {
+            assert!(reversed(x), "marker column {x} not highlighted:\n{text}");
+            content += 1;
+        } else if reversed(x) {
+            content += 1;
+        }
     }
+    assert!(content > 5, "the selected row's content is highlighted");
 }
 
 #[test]
