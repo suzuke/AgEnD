@@ -286,19 +286,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         (rows, selected, offset, lang.tr(Text::HelpFinder).to_owned())
     } else {
         let view = app.view();
-        let help = match view.screen {
-            Screen::Home => Text::HelpHome,
-            Screen::NeedsYou => Text::HelpNeedsYou,
-            Screen::Team { .. } => Text::HelpTeam,
-            Screen::Terminal { .. } => Text::HelpTerminal,
-            Screen::Task { .. } | Screen::Agent { .. } => Text::HelpDetail,
-        };
-        (
-            app.rows(),
-            view.selected.clone(),
-            view.offset,
-            lang.fmt(help, &[lang_key]),
-        )
+        (app.rows(), view.selected.clone(), view.offset, app.help())
     };
 
     let offset = offset.min(rows.len().saturating_sub(body_height));

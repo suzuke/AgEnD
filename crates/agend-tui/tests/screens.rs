@@ -249,3 +249,52 @@ fn small_terminal_shows_a_hint_and_min_size_keeps_everything_reachable() {
     assert!(!end.contains("more lines below"), "{end}");
     press(&mut app, &[Esc]);
 }
+
+#[test]
+fn help_line_lists_only_the_keys_that_work_on_the_selected_row() {
+    let help = |app: &mut agend_tui::App| render(app).lines().last().unwrap_or("").to_owned();
+    let (mut app, _) = demo(Language::En);
+    // Home, needs-you row with an asker: `t` works.
+    assert_eq!(
+        help(&mut app),
+        "↑↓ move · →/Enter open · t terminal · ! needs you · / find · L 中文 · q quit"
+    );
+    // Home, team header: no agent, so no `t`.
+    press(&mut app, &[Down, Down, Down]);
+    assert_eq!(
+        help(&mut app),
+        "↑↓ move · →/Enter open · ! needs you · / find · L 中文 · q quit"
+    );
+    press(&mut app, &[ch('t')]);
+    assert_eq!(
+        render(&mut app).lines().nth(28),
+        Some("This row has no agent.")
+    );
+
+    // Needs you, an ask with options: choose, option and answer all work.
+    let (mut app, _) = demo(Language::En);
+    press(&mut app, &[Enter]);
+    assert_eq!(
+        help(&mut app),
+        "↑↓ move · →/Enter choose · 1-9 option · a answer · t terminal · ←/Esc back · L 中文"
+    );
+    // The non-ask item (reviewer-1's usage limit): none of them do anything.
+    press(&mut app, &[Down, Down, Down]);
+    assert!(render(&mut app).contains("›! reviewer-1 hit its usage limit"));
+    assert_eq!(help(&mut app), "↑↓ move · t terminal · ←/Esc back · L 中文");
+    let before = render(&mut app);
+    press(&mut app, &[Enter, ch('1'), ch('a')]);
+    assert_eq!(
+        render(&mut app),
+        before,
+        "the keys left out really do nothing"
+    );
+
+    // Traditional Chinese uses the same rule.
+    let (mut app, _) = demo(Language::ZhTw);
+    press(&mut app, &[Down, Down, Down]);
+    assert_eq!(
+        help(&mut app),
+        "↑↓ 移動 · →/Enter 開啟 · ! 需要你 · / 搜尋 · L English · q 離開"
+    );
+}

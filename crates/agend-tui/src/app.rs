@@ -434,21 +434,32 @@ impl App {
         }
     }
 
+    /// Whether `→`/`Enter` does something on `target` right now.
+    fn opens(&self, target: &Target) -> bool {
+        match target {
+            Target::Item(key) if self.view().screen == Screen::NeedsYou => self
+                .fleet
+                .attention(key)
+                .is_some_and(|a| a.waiting() && !a.question().1.is_empty()),
+            Target::Stage(task, stage) => {
+                let current = self.fleet.task(task).and_then(|t| t.current_stage());
+                current == Some(*stage) && self.fleet.needs_you_for_task(task).is_some()
+            }
+            _ => true,
+        }
+    }
+
     fn open_selected(&mut self) {
         let Some(target) = self.view().selected.clone() else {
             return;
         };
-        let on_needs_you = self.view().screen == Screen::NeedsYou;
+        if !self.opens(&target) {
+            return;
+        }
         match target {
             Target::Home => self.stack.truncate(1),
-            Target::Item(key) if on_needs_you => {
-                let has_options = self
-                    .fleet
-                    .attention(&key)
-                    .is_some_and(|a| a.waiting() && !a.question().1.is_empty());
-                if has_options {
-                    self.select(Some(Target::Choice(key, 0)));
-                }
+            Target::Item(key) if self.view().screen == Screen::NeedsYou => {
+                self.select(Some(Target::Choice(key, 0)));
             }
             Target::Item(key) => self.push(Screen::NeedsYou, Some(Target::Item(key))),
             Target::Choice(key, n) => self.choose(&key, n),
@@ -460,17 +471,89 @@ impl App {
                 None,
             ),
             Target::Task(task) => self.push(Screen::Task { task }, None),
-            Target::Stage(task, stage) => {
-                let current = self.fleet.task(&task).and_then(|t| t.current_stage());
-                if current == Some(stage)
-                    && let Some(item) = self.fleet.needs_you_for_task(&task)
-                {
+            Target::Stage(task, _) => {
+                if let Some(item) = self.fleet.needs_you_for_task(&task) {
                     let key = item.key();
                     self.push(Screen::NeedsYou, Some(Target::Item(key)));
                 }
             }
             Target::Agent(agent) => self.push(Screen::Agent { agent }, None),
         }
+    }
+
+    /// The help line: only the keys that do something in the current state
+    /// (DEMO-01 Amendment 9).
+    pub fn help(&self) -> String {
+        let view = self.view();
+        let row_agent = match &view.screen {
+            Screen::Agent { .. } => true,
+            _ => view.selected.as_ref().is_some_and(|t| {
+                self.rows()
+                    .iter()
+                    .any(|r| r.target.as_ref() == Some(t) && r.agent.is_some())
+            }),
+        };
+        let opens = view.selected.as_ref().is_some_and(|t| self.opens(t));
+        let waiting_ask = self
+            .expanded_item()
+            .filter(|_| view.screen == Screen::NeedsYou)
+            .and_then(|key| self.fleet.attention(&key))
+            .filter(|a| a.waiting() && a.data.ask.is_some());
+        let has_options = waiting_ask.is_some_and(|a| !a.question().1.is_empty());
+        let movement = if view.selected.is_some() {
+            Text::KeyMove
+        } else {
+            Text::KeyScroll
+        };
+        let keys: Vec<(Text, bool)> = match &view.screen {
+            Screen::Home => vec![
+                (movement, true),
+                (Text::KeyOpen, opens),
+                (Text::KeyTerminal, row_agent),
+                (Text::KeyNeedsYou, true),
+                (Text::KeyFind, true),
+                (Text::LangKey, true),
+                (Text::KeyQuit, true),
+            ],
+            Screen::NeedsYou => vec![
+                (movement, true),
+                (Text::KeyChoose, opens),
+                (Text::KeyOption, has_options),
+                (Text::KeyAnswer, waiting_ask.is_some()),
+                (Text::KeyTerminal, row_agent),
+                (Text::KeyBack, true),
+                (Text::LangKey, true),
+            ],
+            Screen::Team { .. } => vec![
+                (Text::KeyTabs, true),
+                (movement, true),
+                (Text::KeyOpen, opens),
+                (Text::KeyTerminal, row_agent),
+                (Text::KeyBack, true),
+                (Text::LangKey, true),
+            ],
+            Screen::Task { .. } | Screen::Agent { .. } => vec![
+                (movement, true),
+                (Text::KeyOpen, opens),
+                (Text::KeyTerminal, row_agent),
+                (Text::KeyBack, true),
+                (Text::KeyHome, true),
+                (Text::KeyFind, true),
+                (Text::LangKey, true),
+            ],
+            Screen::Terminal { .. } => vec![
+                (Text::KeyScroll, true),
+                (Text::KeyBack, true),
+                (Text::KeyHome, true),
+                (Text::LangKey, true),
+                (Text::KeyQuit, true),
+            ],
+        };
+        keys.into_iter()
+            .filter(|(_, works)| *works)
+            .map(|(text, _)| self.lang.tr(text))
+            .collect::<Vec<_>>()
+            .join(" · ")
     }
 
     fn choose(&mut self, key: &str, n: usize) {
