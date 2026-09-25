@@ -543,7 +543,8 @@ impl Demo {
         println!("{}", send_key(&mut client, ControlKey::Unknown, "unknown")?);
         std::thread::sleep(Duration::from_millis(2500));
         let after = keys(&fresh_screen(&mut client)?).unwrap_or(before);
-        println!("pty bytes written: {}", after - before);
+        // bash reads one byte per `read -n 1` and counts each one.
+        println!("bytes the agent read after it: {}", after - before);
         if after != before {
             return Err("unknown key reached the agent".into());
         }

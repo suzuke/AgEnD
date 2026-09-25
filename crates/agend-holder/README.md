@@ -29,7 +29,8 @@
 | 指令 | `agend holder <instance-id>`，需要絕對路徑的 `AGEND_HOME`；instance id 只能用 `A-Z a-z 0-9 _ -`、最多 32 字 |
 | 檔案 | `$AGEND_HOME/run/holders/`（0700）下的 `<id>.sock`、`<id>.lock`（內容是 holder pid）、`<id>.log` |
 | exit code | 0：停止（`Shutdown` 或安全網）；1：已有 holder（印 `holder for <id> already running (pid N)`）；2：用法或設定錯誤（例如 socket 路徑超過 100 bytes） |
-| 在跑嗎 | 只看 lock：`paths::is_running`。不連 socket，因為新連線會搶走 daemon 的連線 |
+| 在跑嗎 | 只看 lock：`paths::is_running`，只回活著、大於 1 的 pid（絕不回 0）。不連 socket，因為新連線會搶走 daemon 的連線 |
+| 上限 | `hello` 10 秒內送完；一行請求最多 1 MiB（`request_too_large`）；`Resize` 1–1000（`invalid_size`） |
 | 測試用環境變數 | `AGEND_HOLDER_IDLE_EXIT_SECS`：把 24 小時安全網改短 |
 
 ## 模組
@@ -48,7 +49,7 @@
 ## Shutdown 做什麼
 
 1. agent 還在：對 agent 的 process group（＝ agent pid，一定大於 1）送 SIGHUP。
-2. 最多等 5 秒，再對同一個 group 送 SIGKILL。agent 早就結束了就不送任何訊號（pid 可能已被重用）。
+2. 最多等 5 秒，再對同一個 group 送 SIGKILL。agent 早就結束的，直接對 group 送 SIGKILL 清掉留下的子程序：結束的 agent 一直保留成 zombie 直到這裡才回收，所以 group id 不會被別的程序重用。
 3. 刪 socket、放掉 lock、exit 0。
 
 ## 依賴規則

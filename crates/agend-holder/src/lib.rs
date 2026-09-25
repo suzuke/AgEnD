@@ -21,9 +21,9 @@
 
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
+use std::io;
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, FileExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::UnixListener;
 use std::path::Path;
 use std::process::ExitCode;
@@ -78,13 +78,23 @@ fn start(id: &str) -> Result<ExitCode, String> {
         .map_err(|e| format!("chmod {}: {e}", paths.dir.display()))?;
 
     // Before anything else is touched, so a refused start changes nothing.
-    let Some(mut lock) = take_lock(&paths.lock)? else {
-        let pid = paths::read_lock_pid(&paths.lock).map_or("?".into(), |p| p.to_string());
+    let Some(lock) = take_lock(&paths.lock)? else {
+        let pid = match paths::lock_holder(&paths.lock) {
+            Ok(Some(pid)) => pid.to_string(),
+            _ => "?".into(),
+        };
         eprintln!("holder for {id} already running (pid {pid})");
         return Ok(ExitCode::from(1));
     };
-    lock.set_len(0)
-        .and_then(|()| writeln!(lock, "{}", std::process::id()))
+    // One fixed-width write over the old content, never an empty file in
+    // between, so a reader sees either the old (stale) pid or ours.
+    let record = format!(
+        "{:<width$}\n",
+        std::process::id(),
+        width = paths::LOCK_PID_WIDTH - 1
+    );
+    lock.write_all_at(record.as_bytes(), 0)
+        .and_then(|()| lock.set_len(paths::LOCK_PID_WIDTH as u64))
         .map_err(|e| format!("write {}: {e}", paths.lock.display()))?;
 
     detach(&paths.log)?;
@@ -104,11 +114,14 @@ fn start(id: &str) -> Result<ExitCode, String> {
             instance_id: id.to_string(),
             agend_home,
             idle_exit,
+            lag_limit: server::LAG_LIMIT,
         },
     );
     let _ = fs::remove_file(&paths.socket);
     server::log(id, &format!("stopped ({stop:?}); socket removed"));
-    drop(lock); // releases the flock; exiting would too
+    // Clear our pid while still holding the lock, then release it.
+    let _ = lock.set_len(0);
+    drop(lock);
     Ok(ExitCode::SUCCESS)
 }
 
@@ -124,8 +137,10 @@ fn idle_exit_from_env() -> Result<Duration, String> {
     }
 }
 
-/// Opens and exclusively locks the lock file; `None` if another process
-/// holds it. The file is not truncated before the lock is ours.
+/// Opens and exclusively locks the lock file; `None` if another holder holds
+/// it. The file is not truncated before the lock is ours. A probe
+/// (`paths::lock_holder`) holds a shared lock for a moment, so a failed
+/// attempt is retried for up to 500 ms before giving up.
 fn take_lock(path: &Path) -> Result<Option<File>, String> {
     let file = OpenOptions::new()
         .read(true)
@@ -135,15 +150,20 @@ fn take_lock(path: &Path) -> Result<Option<File>, String> {
         .mode(0o600)
         .open(path)
         .map_err(|e| format!("open {}: {e}", path.display()))?;
-    // SAFETY: flock on an fd we own; held until `file` is dropped or we exit.
-    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
-        return Ok(Some(file));
-    }
-    let err = io::Error::last_os_error();
-    if err.raw_os_error() == Some(libc::EWOULDBLOCK) {
-        Ok(None)
-    } else {
-        Err(format!("lock {}: {err}", path.display()))
+    let deadline = std::time::Instant::now() + Duration::from_millis(500);
+    loop {
+        // SAFETY: flock on an fd we own; held until `file` is dropped or we exit.
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            return Ok(Some(file));
+        }
+        let err = io::Error::last_os_error();
+        if err.raw_os_error() != Some(libc::EWOULDBLOCK) {
+            return Err(format!("lock {}: {err}", path.display()));
+        }
+        if std::time::Instant::now() >= deadline {
+            return Ok(None);
+        }
+        std::thread::sleep(Duration::from_millis(10));
     }
 }
 

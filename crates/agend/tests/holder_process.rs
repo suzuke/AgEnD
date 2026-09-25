@@ -31,7 +31,79 @@ fn instance(tag: &str) -> String {
     format!("{tag}{}", std::process::id() % 100_000)
 }
 
+/// Ends the whole test process if a test runs longer than 180 s, so a hang
+/// fails in minutes instead of running into the CI job timeout.
+struct Watchdog(Option<std::sync::mpsc::Sender<()>>);
+
+impl Watchdog {
+    fn arm() -> Self {
+        let name = std::thread::current().name().unwrap_or("test").to_string();
+        let (done, wait) = std::sync::mpsc::channel::<()>();
+        std::thread::spawn(move || {
+            if let Err(std::sync::mpsc::RecvTimeoutError::Timeout) =
+                wait.recv_timeout(Duration::from_secs(180))
+            {
+                eprintln!("watchdog: {name} ran over 180 s; aborting the test process");
+                std::process::exit(101);
+            }
+        });
+        Self(Some(done))
+    }
+}
+
+impl Drop for Watchdog {
+    fn drop(&mut self) {
+        if let Some(done) = self.0.take() {
+            let _ = done.send(());
+        }
+    }
+}
+
+/// Waits for a child this test spawned, for at most `limit`. On timeout the
+/// child (never anything else) is killed and the test fails.
+fn wait_within(child: &mut std::process::Child, limit: Duration) -> std::process::ExitStatus {
+    let deadline = Instant::now() + limit;
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            return status;
+        }
+        if Instant::now() > deadline {
+            assert!(child.id() > 1);
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("child {} did not finish within {limit:?}", child.id());
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// `Command::output` with a deadline.
+fn output_within(cmd: &mut Command, limit: Duration) -> Output {
+    let mut child = cmd
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdout = child.stdout.take().unwrap();
+    let mut stderr = child.stderr.take().unwrap();
+    let out = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        std::io::Read::read_to_end(&mut stdout, &mut buf).map(|_| buf)
+    });
+    let err = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        std::io::Read::read_to_end(&mut stderr, &mut buf).map(|_| buf)
+    });
+    let status = wait_within(&mut child, limit);
+    Output {
+        status,
+        stdout: out.join().unwrap().unwrap_or_default(),
+        stderr: err.join().unwrap().unwrap_or_default(),
+    }
+}
+
 struct Home {
+    _watchdog: Watchdog,
     dir: TempDir,
     ids: Vec<String>,
 }
@@ -39,6 +111,7 @@ struct Home {
 impl Home {
     fn new() -> Self {
         Self {
+            _watchdog: Watchdog::arm(),
             dir: TempDir::new("hp").unwrap(),
             ids: Vec::new(),
         }
@@ -63,7 +136,7 @@ impl Home {
         for (k, v) in extra {
             cmd.env(k, v);
         }
-        let out = cmd.output().unwrap();
+        let out = output_within(&mut cmd, Duration::from_secs(60));
         let stdout = String::from_utf8_lossy(&out.stdout);
         assert!(
             out.status.success(),
@@ -106,21 +179,21 @@ impl Home {
 
     /// Fails if a holder of this test is still alive.
     fn assert_no_leftovers(&self) {
+        let out = output_within(
+            Command::new("/bin/ps").args(["-A", "-o", "command="]),
+            Duration::from_secs(30),
+        );
+        let ps = String::from_utf8_lossy(&out.stdout);
         for id in &self.ids {
             assert_eq!(
                 is_running(&self.paths(id)).unwrap(),
                 None,
                 "{id} still locked"
             );
-            let out = Command::new("/bin/ps")
-                .args(["-A", "-o", "command="])
-                .output()
-                .unwrap();
             let needle = format!("agend holder {id}");
-            let ps = String::from_utf8_lossy(&out.stdout);
             assert!(
                 !ps.lines()
-                    .any(|l| l.contains(&needle) && l.ends_with(id.as_str())),
+                    .any(|l| l.contains(&needle) && l.trim_end().ends_with(id.as_str())),
                 "holder process {id} left over"
             );
         }
@@ -213,7 +286,7 @@ fn a_second_holder_for_the_same_instance_exits_1() {
     let mut home = Home::new();
     let id = instance("d");
     let pid = home.launch(&id, "sleep 60");
-    let out: Output = home.holder_cmd(&id).output().unwrap();
+    let out: Output = output_within(&mut home.holder_cmd(&id), Duration::from_secs(30));
     assert_eq!(out.status.code(), Some(1));
     assert_eq!(
         String::from_utf8_lossy(&out.stderr).trim(),
@@ -262,7 +335,7 @@ fn idle_safety_net_ends_a_real_holder_whose_agent_exited() {
     let (mut client, _) = HolderClient::connect(&paths.socket, Duration::from_millis(50)).unwrap();
     client.send(&spawn(&home, &id, "exit 3")).unwrap();
     drop(client);
-    let status = holder.wait().unwrap();
+    let status = wait_within(&mut holder, Duration::from_secs(30));
     assert!(status.success());
     assert!(!paths.socket.exists());
     home.assert_no_leftovers();
@@ -272,16 +345,71 @@ fn idle_safety_net_ends_a_real_holder_whose_agent_exited() {
 fn a_socket_path_over_100_bytes_is_refused_before_touching_anything() {
     let home = Home::new();
     let deep: PathBuf = home.path().join("d".repeat(60));
-    let out = Command::new(BIN)
-        .args(["holder", "dev-1"])
-        .env("AGEND_HOME", &deep)
-        .output()
-        .unwrap();
+    let out = output_within(
+        Command::new(BIN)
+            .args(["holder", "dev-1"])
+            .env("AGEND_HOME", &deep),
+        Duration::from_secs(30),
+    );
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("over the 100-byte limit"), "{stderr}");
     assert!(stderr.contains("dev-1.sock"), "{stderr}");
     assert!(!deep.exists(), "created directories for a refused holder");
+}
+
+/// Verifier r1 scenario s8: a stale lock file (as left by a killed holder)
+/// and a tight `is_running` poll while a new holder starts. The probe must
+/// never report a pid other than the new holder's (never 0, never the stale
+/// one), and the probe's shared lock must never make the start fail.
+#[test]
+fn lock_probe_never_reports_a_stale_or_zero_pid_while_a_holder_starts() {
+    let mut home = Home::new();
+    // A pid that certainly exited: a child we ran and reaped.
+    let stale = Command::new("/usr/bin/true")
+        .spawn()
+        .map(|mut c| {
+            let _ = c.wait();
+            c.id()
+        })
+        .unwrap();
+    for it in 0..200 {
+        let id = format!("{}_{it}", instance("q"));
+        home.ids.push(id.clone());
+        let paths = home.paths(&id);
+        std::fs::create_dir_all(&paths.dir).unwrap();
+        std::fs::write(&paths.lock, format!("{stale}\n")).unwrap();
+        let mut holder = home.holder_cmd(&id).stderr(Stdio::piped()).spawn().unwrap();
+        let expected = holder.id();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut after_start = 0;
+        while after_start < 20 {
+            assert!(
+                Instant::now() < deadline,
+                "iteration {it}: holder never showed"
+            );
+            match is_running(&paths) {
+                Ok(Some(pid)) => {
+                    assert_eq!(pid, expected, "iteration {it}: probe reported pid {pid}");
+                    after_start += 1;
+                }
+                Ok(None) => assert_eq!(after_start, 0, "iteration {it}: lock lost"),
+                Err(e) => assert_eq!(e.kind(), std::io::ErrorKind::WouldBlock, "{e}"),
+            }
+            if let Some(status) = holder.try_wait().unwrap() {
+                let mut stderr = String::new();
+                let _ = std::io::Read::read_to_string(holder.stderr.as_mut().unwrap(), &mut stderr);
+                panic!("iteration {it}: holder exited ({status}): {stderr}");
+            }
+        }
+        // The lock (with the pid) is taken before the socket is bound.
+        wait_until("socket bound", || {
+            std::os::unix::net::UnixStream::connect(&paths.socket).is_ok()
+        });
+        home.shutdown(&id);
+        assert!(wait_within(&mut holder, Duration::from_secs(30)).success());
+    }
+    home.assert_no_leftovers();
 }
 
 fn spawn(home: &Home, id: &str, script: &str) -> HolderRequest {

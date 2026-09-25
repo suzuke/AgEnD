@@ -12,6 +12,7 @@ use std::fs::File;
 use std::io::{self, Read};
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 /// Longest socket path a holder accepts (macOS `sun_path` holds 104 bytes).
 pub const MAX_SOCKET_PATH: usize = 100;
@@ -85,31 +86,67 @@ pub fn validate_instance_id(id: &str) -> Result<(), String> {
     }
 }
 
-/// The pid written in a lock file, if it parses.
+/// Width of the pid record the holder writes into its lock file: one write,
+/// padded, never truncated first, so a reader never sees it empty.
+pub const LOCK_PID_WIDTH: usize = 11;
+
+/// The pid written in a lock file, if it parses. It may be stale (from a
+/// holder that was killed) or not yet written; see [`lock_holder`].
 pub fn read_lock_pid(lock: &Path) -> Option<u32> {
     let mut text = String::new();
     File::open(lock).ok()?.read_to_string(&mut text).ok()?;
     text.trim().parse().ok()
 }
 
-/// `Some(pid)` while a holder holds `lock`; `None` when nobody does (or the
-/// file does not exist). Probes with a shared lock that it drops at once.
-pub fn lock_holder(lock: &Path) -> io::Result<Option<u32>> {
-    let file = match File::open(lock) {
-        Ok(file) => file,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(e),
+/// True if a process with this pid exists. Uses `getpgid`, which sends no
+/// signal.
+pub fn process_exists(pid: u32) -> bool {
+    let Ok(pid) = libc::pid_t::try_from(pid) else {
+        return false;
     };
-    // SAFETY: flock on an fd we own; the lock is released when `file` drops.
-    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) };
-    if rc == 0 {
-        return Ok(None);
-    }
-    let err = io::Error::last_os_error();
-    if err.raw_os_error() == Some(libc::EWOULDBLOCK) {
-        Ok(Some(read_lock_pid(lock).unwrap_or(0)))
-    } else {
-        Err(err)
+    // SAFETY: getpgid only reads process table state.
+    let found = unsafe { libc::getpgid(pid) } != -1;
+    found || io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+/// How long [`lock_holder`] waits for a locked file to show a live pid (a
+/// holder that just took the lock writes its pid right after).
+const PID_SETTLE: Duration = Duration::from_secs(1);
+
+/// `Some(pid)` while a holder holds `lock`; `None` when nobody does (or the
+/// file does not exist). Never returns 0, 1 or the pid of a process that does
+/// not exist: while the lock is held but the file shows no live pid (a holder
+/// starting next to a stale pid), it re-checks for up to 1 s and then fails
+/// with `WouldBlock`. Each probe holds a shared lock for a moment; a starting
+/// holder retries around it.
+pub fn lock_holder(lock: &Path) -> io::Result<Option<u32>> {
+    let deadline = Instant::now() + PID_SETTLE;
+    loop {
+        let file = match File::open(lock) {
+            Ok(file) => file,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        // SAFETY: flock on an fd we own; the lock is released when `file` drops.
+        let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) };
+        if rc == 0 {
+            return Ok(None);
+        }
+        let err = io::Error::last_os_error();
+        if err.raw_os_error() != Some(libc::EWOULDBLOCK) {
+            return Err(err);
+        }
+        drop(file);
+        if let Some(pid) = read_lock_pid(lock).filter(|&p| p > 1 && process_exists(p)) {
+            return Ok(Some(pid));
+        }
+        if Instant::now() >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                format!("{} is locked but holds no live pid", lock.display()),
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(5));
     }
 }
 
@@ -161,9 +198,10 @@ mod tests {
         let dir = agend_testkit::tempdir::TempDir::new("hp").unwrap();
         let lock = dir.path().join("x.lock");
         assert_eq!(lock_holder(&lock).unwrap(), None);
-        std::fs::write(&lock, "4242\n").unwrap();
+        let me = std::process::id();
+        std::fs::write(&lock, format!("{me}\n")).unwrap();
         assert_eq!(lock_holder(&lock).unwrap(), None);
-        assert_eq!(read_lock_pid(&lock), Some(4242));
+        assert_eq!(read_lock_pid(&lock), Some(me));
 
         let held = File::open(&lock).unwrap();
         // SAFETY: flock on an fd we own.
@@ -171,8 +209,23 @@ mod tests {
             unsafe { libc::flock(held.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
             0
         );
-        assert_eq!(lock_holder(&lock).unwrap(), Some(4242));
+        assert_eq!(lock_holder(&lock).unwrap(), Some(me));
         drop(held);
         assert_eq!(lock_holder(&lock).unwrap(), None);
+    }
+
+    #[test]
+    fn a_locked_file_without_a_live_pid_is_never_reported_as_a_pid() {
+        let dir = agend_testkit::tempdir::TempDir::new("hp").unwrap();
+        let lock = dir.path().join("x.lock");
+        // Empty (not yet written), 0, 1, and a stale pid nobody has.
+        for content in ["", "0\n", "1\n", "99999999\n"] {
+            std::fs::write(&lock, content).unwrap();
+            let held = File::open(&lock).unwrap();
+            // SAFETY: flock on an fd we own.
+            unsafe { libc::flock(held.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+            let err = lock_holder(&lock).unwrap_err();
+            assert_eq!(err.kind(), io::ErrorKind::WouldBlock, "{content:?}");
+        }
     }
 }
