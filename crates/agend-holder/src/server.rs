@@ -9,8 +9,12 @@
 //! - A new client that completes `hello` takes over; the old connection is
 //!   closed. A version mismatch gets `Error` and is closed; the holder keeps
 //!   running.
-//! - A client more than 1 MiB behind is disconnected; it reconnects for a
-//!   fresh snapshot. The agent never waits on a slow client.
+//! - A client more than 1 MiB behind is disconnected (output side only); it
+//!   reconnects for a fresh snapshot. The agent never waits on a slow client.
+//!   A `Shutdown` it had already sent is still honoured; a client that was
+//!   replaced by a newer one is ignored.
+//! - Limits: `hello` within 10 s in total, request lines up to 1 MiB,
+//!   `Resize` 1 to 1000 rows and columns (`invalid_size`).
 //!
 //! Threads (std only, no async runtime): accept, one reader + one writer per
 //! connection, PTY reader, PTY writer (`pty`), agent waiter, and the caller's
@@ -39,13 +43,19 @@ use portable_pty::{MasterPty, PtySize};
 use crate::pty::{self, QueueError};
 use crate::screen::{DEFAULT_COLUMNS, DEFAULT_ROWS, ReplySink, Screen};
 
-/// Outbound bytes a client may leave unread before it is disconnected.
+/// Default for `Config::lag_limit`: outbound bytes a client may leave unread
+/// before it is disconnected (P4).
 pub const LAG_LIMIT: usize = 1 << 20;
 /// Time the agent gets to end after SIGHUP before its group is SIGKILLed.
 pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 /// With no agent running, exit after this long with no connection (P2).
 pub const DEFAULT_IDLE_EXIT: Duration = Duration::from_secs(24 * 60 * 60);
+/// A client must complete `hello` within this time (total, not per read).
 const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
+/// Longest request line; a longer one gets `request_too_large` and is closed.
+pub const MAX_REQUEST_LINE: usize = 1 << 20;
+/// Largest `Resize` accepted, in rows and in columns (`invalid_size` above).
+pub const MAX_SCREEN_SIDE: u16 = 1000;
 /// After the agent ends, how long to wait for its last output before `Exited`
 /// (only reached when a leftover child keeps the PTY open, or under heavy load).
 const OUTPUT_DRAIN: Duration = Duration::from_secs(2);
@@ -55,6 +65,8 @@ pub struct Config {
     /// Deleting this directory stops the holder (P2 safety net).
     pub agend_home: PathBuf,
     pub idle_exit: Duration,
+    /// Normally [`LAG_LIMIT`]; tests use a smaller value.
+    pub lag_limit: usize,
 }
 
 /// Why `serve` returned.
@@ -76,8 +88,16 @@ struct Conn {
 }
 
 impl Conn {
+    /// Replaced by a newer client: close both directions.
     fn close(&self) {
         let _ = self.stream.shutdown(Shutdown::Both);
+    }
+
+    /// Dropped for lagging: stop sending, but keep reading what the client
+    /// already sent (on macOS `shutdown(Both)` discards unread input, which
+    /// could lose a `Shutdown` sent just before).
+    fn close_output(&self) {
+        let _ = self.stream.shutdown(Shutdown::Write);
     }
 }
 
@@ -92,6 +112,9 @@ struct State {
     replies: ReplySink,
     conn: Option<Conn>,
     next_conn: u64,
+    /// Id of the newest connection that completed `hello`; older ones were
+    /// replaced (as opposed to dropped for lagging).
+    latest_conn: u64,
     agent: Option<Agent>,
     exited: Option<ExitedData>,
     output_done: bool,
@@ -101,6 +124,7 @@ struct State {
 }
 
 struct Holder {
+    lag_limit: usize,
     instance_id: String,
     state: Mutex<State>,
     changed: Condvar,
@@ -129,12 +153,14 @@ pub fn log(instance_id: &str, message: &str) {
 pub fn serve(listener: UnixListener, config: Config) -> Stop {
     let replies = ReplySink::default();
     let holder = Arc::new(Holder {
+        lag_limit: config.lag_limit,
         instance_id: config.instance_id.clone(),
         state: Mutex::new(State {
             screen: Screen::new(DEFAULT_ROWS, DEFAULT_COLUMNS, replies.clone()),
             replies,
             conn: None,
             next_conn: 1,
+            latest_conn: 0,
             agent: None,
             exited: None,
             output_done: false,
@@ -178,33 +204,40 @@ pub fn serve(listener: UnixListener, config: Config) -> Stop {
 }
 
 /// P7: SIGHUP the agent's process group (what closing the PTY delivers),
-/// wait up to 5 s, then SIGKILL the group. Only runs while the agent is
-/// still alive: once it is reaped its pid may be reused.
+/// wait up to 5 s, then SIGKILL the group, then reap the agent. If the agent
+/// already ended, its leftover children in the group are SIGKILLed right
+/// away: the unreaped agent (see `exit`) keeps the group id from being reused.
 fn stop_agent(holder: &Holder, mut state: MutexGuard<'_, State>) {
     let Some(agent) = state.agent.take() else {
         return;
     };
-    if state.exited.is_some() {
-        return;
-    }
+    let pid = agent.pid;
     // The agent is a session leader (portable-pty calls setsid), so its
     // process group id is its own pid; never 0 or 1, never negative.
-    let pgid = libc::pid_t::try_from(agent.pid).expect("pid fits pid_t");
+    let pgid = libc::pid_t::try_from(pid).expect("pid fits pid_t");
     assert!(pgid > 1, "refusing to signal process group {pgid}");
     // Closing our master handles; the PTY reader thread still holds a
     // duplicate, so the hangup signal is sent explicitly.
     drop(agent);
-    signal_group(pgid, libc::SIGHUP);
-    let deadline = Instant::now() + SHUTDOWN_GRACE;
+    if state.exited.is_none() {
+        signal_group(pgid, libc::SIGHUP);
+        wait_exited(holder, &mut state, SHUTDOWN_GRACE);
+    }
+    signal_group(pgid, libc::SIGKILL);
+    wait_exited(holder, &mut state, Duration::from_secs(2));
+    crate::exit::reap(pid);
+    holder.log(&format!("agent process group {pgid} stopped"));
+}
+
+fn wait_exited(holder: &Holder, state: &mut MutexGuard<'_, State>, limit: Duration) {
+    let deadline = Instant::now() + limit;
     while state.exited.is_none() {
         let left = deadline.saturating_duration_since(Instant::now());
         if left.is_zero() {
             break;
         }
-        holder.changed.wait_for(&mut state, left);
+        holder.changed.wait_for(state, left);
     }
-    signal_group(pgid, libc::SIGKILL);
-    holder.log(&format!("agent process group {pgid} stopped"));
 }
 
 fn signal_group(pgid: libc::pid_t, signal: libc::c_int) {
@@ -242,24 +275,65 @@ fn push(holder: &Holder, state: &mut State, response: &HolderResponse) {
     };
     let line = frame(response);
     let len = line.len();
-    let lagging = conn.pending.load(Ordering::SeqCst) + len > LAG_LIMIT;
+    let lagging = conn.pending.load(Ordering::SeqCst) + len > holder.lag_limit;
     if !lagging {
         conn.pending.fetch_add(len, Ordering::SeqCst);
         if conn.frames.send(line).is_ok() {
             return;
         }
     } else {
-        holder.log("client fell more than 1 MiB behind; disconnected");
+        holder.log(&format!(
+            "client fell more than {} bytes behind; disconnected",
+            holder.lag_limit
+        ));
     }
-    conn.close();
+    conn.close_output();
     state.conn = None;
     state.last_seen = Instant::now();
     holder.changed.notify_all();
 }
 
-fn read_line(reader: &mut impl BufRead, line: &mut Vec<u8>) -> io::Result<bool> {
+/// Reads one request line of at most [`MAX_REQUEST_LINE`] bytes. With a
+/// deadline, the whole line must arrive before it (a slow trickle times out).
+/// `Ok(false)` at end of stream.
+fn read_line(
+    reader: &mut BufReader<UnixStream>,
+    line: &mut Vec<u8>,
+    deadline: Option<Instant>,
+) -> io::Result<bool> {
     line.clear();
-    Ok(reader.read_until(b'\n', line)? > 0)
+    loop {
+        if let Some(deadline) = deadline {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Err(io::ErrorKind::TimedOut.into());
+            }
+            reader.get_ref().set_read_timeout(Some(left))?;
+        }
+        let buf = match reader.fill_buf() {
+            Ok(buf) => buf,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        };
+        if buf.is_empty() {
+            return Ok(false);
+        }
+        let (take, complete) = match buf.iter().position(|&b| b == b'\n') {
+            Some(end) => (end + 1, true),
+            None => (buf.len(), false),
+        };
+        line.extend_from_slice(&buf[..take]);
+        reader.consume(take);
+        if line.len() > MAX_REQUEST_LINE {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "request line over 1 MiB",
+            ));
+        }
+        if complete {
+            return Ok(true);
+        }
+    }
 }
 
 fn connection(holder: &Arc<Holder>, stream: UnixStream) {
@@ -268,11 +342,15 @@ fn connection(holder: &Arc<Holder>, stream: UnixStream) {
     };
     let mut reader = BufReader::new(read_half);
     let mut line = Vec::new();
-    let _ = stream.set_read_timeout(Some(HELLO_TIMEOUT));
-    if !matches!(read_line(&mut reader, &mut line), Ok(true)) {
-        return;
-    }
     let mut direct = &stream;
+    match read_line(&mut reader, &mut line, Some(Instant::now() + HELLO_TIMEOUT)) {
+        Ok(true) => {}
+        Err(e) if e.kind() == io::ErrorKind::InvalidData => {
+            let _ = direct.write_all(&frame(&error("request_too_large", e.to_string())));
+            return;
+        }
+        _ => return,
+    }
     let hello = match serde_json::from_slice(&line) {
         Ok(HolderRequest::Hello { data }) => data,
         _ => {
@@ -303,11 +381,12 @@ fn connection(holder: &Arc<Holder>, stream: UnixStream) {
         let mut out = out;
         for line in queue {
             if out.write_all(&line).is_err() {
-                let _ = out.shutdown(Shutdown::Both);
+                let _ = out.shutdown(Shutdown::Write);
                 break;
             }
             unsent.fetch_sub(line.len(), Ordering::SeqCst);
         }
+        let _ = out.shutdown(Shutdown::Write);
     });
 
     let id = {
@@ -318,6 +397,7 @@ fn connection(holder: &Arc<Holder>, stream: UnixStream) {
             old.close();
             holder.log("connection replaced by a new client");
         }
+        state.latest_conn = id;
         state.conn = Some(Conn {
             id,
             frames,
@@ -342,11 +422,36 @@ fn connection(holder: &Arc<Holder>, stream: UnixStream) {
         id
     };
 
-    while let Ok(true) = read_line(&mut reader, &mut line) {
+    loop {
+        match read_line(&mut reader, &mut line, None) {
+            Ok(true) => {}
+            Ok(false) => break,
+            Err(e) => {
+                if e.kind() == io::ErrorKind::InvalidData {
+                    let mut state = holder.lock();
+                    if state.conn.as_ref().map(|c| c.id) == Some(id) {
+                        push(
+                            holder,
+                            &mut state,
+                            &error("request_too_large", e.to_string()),
+                        );
+                    }
+                }
+                break;
+            }
+        }
         let request = serde_json::from_slice::<HolderRequest>(&line);
         let mut state = holder.lock();
         if state.conn.as_ref().map(|c| c.id) != Some(id) {
-            return; // replaced or dropped for lagging
+            if state.latest_conn > id {
+                return; // replaced by a newer client: it is in charge now
+            }
+            // Dropped for lagging: nothing can be replied, but a `Shutdown`
+            // the client sent is still honoured.
+            if matches!(request, Ok(HolderRequest::Shutdown)) {
+                handle(holder, &mut state, HolderRequest::Shutdown);
+            }
+            continue;
         }
         let reply = match request {
             Ok(request) => handle(holder, &mut state, request),
@@ -359,9 +464,9 @@ fn connection(holder: &Arc<Holder>, stream: UnixStream) {
 
     let mut state = holder.lock();
     if state.conn.as_ref().map(|c| c.id) == Some(id) {
-        if let Some(conn) = state.conn.take() {
-            conn.close();
-        }
+        // Dropping the queue lets the writer send what is left (for example
+        // a final `Error`) and then close its side.
+        state.conn = None;
         state.last_seen = Instant::now();
         holder.changed.notify_all();
     }
@@ -388,8 +493,12 @@ fn handle(
         HolderRequest::Resize {
             data: ResizeData { rows, columns },
         } => {
-            if rows == 0 || columns == 0 {
-                return Some(error("bad_request", "rows and columns must be positive"));
+            let valid = 1..=MAX_SCREEN_SIDE;
+            if !valid.contains(&rows) || !valid.contains(&columns) {
+                return Some(error(
+                    "invalid_size",
+                    format!("rows and columns must be 1 to {MAX_SCREEN_SIDE}"),
+                ));
             }
             state.screen.resize(rows, columns);
             let resized = state.agent.as_ref().map(|agent| {

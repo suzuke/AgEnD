@@ -22,7 +22,36 @@ use agend_testkit::tempdir::TempDir;
 const ID: &str = "t1";
 const LONG: Duration = Duration::from_secs(10);
 
+/// Ends the whole test process if a test runs longer than 120 s, so a hang
+/// fails in minutes instead of running into the CI job timeout.
+struct Watchdog(Option<std::sync::mpsc::Sender<()>>);
+
+impl Watchdog {
+    fn arm(name: &str) -> Self {
+        let (done, wait) = std::sync::mpsc::channel::<()>();
+        let name = name.to_string();
+        std::thread::spawn(move || {
+            if let Err(std::sync::mpsc::RecvTimeoutError::Timeout) =
+                wait.recv_timeout(Duration::from_secs(120))
+            {
+                eprintln!("watchdog: {name} ran over 120 s; aborting the test process");
+                std::process::exit(101);
+            }
+        });
+        Self(Some(done))
+    }
+}
+
+impl Drop for Watchdog {
+    fn drop(&mut self) {
+        if let Some(done) = self.0.take() {
+            let _ = done.send(());
+        }
+    }
+}
+
 struct TestHolder {
+    _watchdog: Watchdog,
     dir: TempDir,
     home: PathBuf,
     socket: PathBuf,
@@ -31,6 +60,10 @@ struct TestHolder {
 
 impl TestHolder {
     fn start(idle_exit: Duration) -> Self {
+        Self::start_with(idle_exit, agend_holder::server::LAG_LIMIT)
+    }
+
+    fn start_with(idle_exit: Duration, lag_limit: usize) -> Self {
         let dir = TempDir::new("hs").unwrap();
         let home = dir.path().join("home");
         std::fs::create_dir(&home).unwrap();
@@ -40,9 +73,12 @@ impl TestHolder {
             instance_id: ID.into(),
             agend_home: home.clone(),
             idle_exit,
+            lag_limit,
         };
+        let watchdog = Watchdog::arm(std::thread::current().name().unwrap_or("test"));
         let server = std::thread::spawn(move || serve(listener, config));
         Self {
+            _watchdog: watchdog,
             dir,
             home,
             socket,
@@ -83,23 +119,51 @@ impl TestHolder {
     }
 
     /// Stops the holder with `Shutdown` and returns why `serve` ended.
+    /// Sends `Shutdown` right after `hello` (without waiting for the
+    /// greeting, which a flooding agent may delay) and retries until `serve`
+    /// returns. Never blocks forever: after 30 s it panics instead.
     fn shutdown(&mut self) -> Stop {
-        if let Ok((mut client, _)) = HolderClient::connect(&self.socket, Duration::from_millis(10))
-        {
-            let _ = client.send(&HolderRequest::Shutdown);
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !self.server.as_ref().unwrap().is_finished() {
+            assert!(Instant::now() < deadline, "holder did not stop");
+            if let Ok(mut client) =
+                HolderClient::connect_with(&self.socket, &HolderRequest::hello())
+            {
+                let _ = client.send(&HolderRequest::Shutdown);
+                let _ = client.wait_closed(Duration::from_secs(2));
+            }
+            std::thread::sleep(Duration::from_millis(100));
         }
         self.join()
     }
 
+    /// Waits for `serve` to return, for at most 30 s.
     fn join(&mut self) -> Stop {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !self.server.as_ref().unwrap().is_finished() {
+            assert!(
+                Instant::now() < deadline,
+                "serve did not return within 30 s"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
         self.server.take().unwrap().join().unwrap()
     }
 }
 
 impl Drop for TestHolder {
     fn drop(&mut self) {
-        if self.server.is_some() {
+        if self.server.is_none() {
+            return;
+        }
+        if !std::thread::panicking() {
             self.shutdown();
+            return;
+        }
+        // Already panicking: one best-effort Shutdown, never hang or panic here.
+        if let Ok(mut client) = HolderClient::connect_with(&self.socket, &HolderRequest::hello()) {
+            let _ = client.send(&HolderRequest::Shutdown);
+            let _ = client.wait_closed(Duration::from_secs(10));
         }
     }
 }
@@ -327,10 +391,12 @@ fn version_mismatch_is_refused_and_the_holder_keeps_serving() {
 }
 
 #[test]
-fn a_client_more_than_1_mib_behind_is_disconnected() {
-    let holder = TestHolder::start(LONG);
+fn a_client_too_far_behind_is_disconnected() {
+    // A 64 KiB limit instead of the production 1 MiB, so a slow CI runner
+    // still overflows it within the wait; the mechanism is the same.
+    let holder = TestHolder::start_with(LONG, 64 * 1024);
     let (mut slow, _) = holder.spawn_bash("exec yes 0123456789abcdef0123456789abcdef");
-    // Read nothing while the agent writes far more than 1 MiB.
+    // Read nothing while the agent writes far more than the limit.
     std::thread::sleep(Duration::from_secs(3));
     // Still connected, this read would never end; dropped, it hits EOF.
     assert!(
@@ -339,6 +405,28 @@ fn a_client_more_than_1_mib_behind_is_disconnected() {
     );
     let (_fresh, greeting) = holder.connect();
     assert!(greeting.screen.contains("0123456789abcdef"));
+}
+
+#[test]
+fn a_client_dropped_for_lagging_can_still_send_shutdown() {
+    let mut holder = TestHolder::start_with(LONG, 64 * 1024);
+    let (mut slow, _) = holder.spawn_bash("exec yes 0123456789abcdef0123456789abcdef");
+    std::thread::sleep(Duration::from_secs(3));
+    // Sent while (or after) being dropped, then the client goes away.
+    slow.send(&HolderRequest::Shutdown).unwrap();
+    drop(slow);
+    assert_eq!(holder.join(), Stop::Shutdown);
+}
+
+#[test]
+fn a_replaced_client_cannot_shut_the_holder_down() {
+    let holder = TestHolder::start(LONG);
+    let (mut old, _) = holder.spawn_bash("sleep 60");
+    let (mut new, _) = holder.connect();
+    let _ = old.send(&HolderRequest::Shutdown);
+    std::thread::sleep(Duration::from_millis(500));
+    assert!(!holder.server.as_ref().unwrap().is_finished());
+    wait_screen(&mut new, |_| true);
 }
 
 #[test]
@@ -362,6 +450,95 @@ fn shutdown_hangs_up_then_kills_an_agent_that_ignores_hup() {
     assert!(took >= Duration::from_secs(5), "no grace period: {took:?}");
     assert!(took < Duration::from_secs(9), "shutdown too slow: {took:?}");
     assert!(processes_in_group(pid).is_empty(), "agent group survived");
+}
+
+#[test]
+fn shutdown_after_the_agent_exited_kills_its_leftover_children() {
+    let mut holder = TestHolder::start(LONG);
+    let (mut client, pid) = holder
+        .spawn_bash("trap '' HUP; sleep 61 </dev/null >/dev/null 2>&1 & echo started; exit 0");
+    wait_exited(&mut client);
+    assert!(
+        !processes_in_group(pid).is_empty(),
+        "leftover child expected"
+    );
+    assert_eq!(holder.shutdown(), Stop::Shutdown);
+    assert!(
+        processes_in_group(pid).is_empty(),
+        "leftover child survived"
+    );
+}
+
+#[test]
+fn oversized_resize_is_refused_and_the_holder_stays_responsive() {
+    let holder = TestHolder::start(LONG);
+    let (mut client, _) = holder.spawn_bash("echo ready; sleep 60");
+    for (rows, columns) in [(65535, 65535), (0, 80), (24, 1001)] {
+        client
+            .send(&HolderRequest::Resize {
+                data: agend_core::protocol::holder::ResizeData { rows, columns },
+            })
+            .unwrap();
+        assert_eq!(wait_error(&mut client), "invalid_size");
+    }
+    client
+        .send(&HolderRequest::Resize {
+            data: agend_core::protocol::holder::ResizeData {
+                rows: 1000,
+                columns: 1000,
+            },
+        })
+        .unwrap();
+    let started = Instant::now();
+    let screen = wait_screen(&mut client, |s| s.contains("ready"));
+    assert_eq!(screen.split('\n').count(), 1000);
+    assert!(started.elapsed() < Duration::from_secs(5));
+}
+
+#[test]
+fn a_request_line_over_1_mib_is_refused_and_closed() {
+    let holder = TestHolder::start(LONG);
+    let huge = format!(
+        "{{\"type\":\"operator_terminal_input\",\"data\":{{\"bytes_base64\":\"{}\"}}}}",
+        "A".repeat(agend_holder::server::MAX_REQUEST_LINE)
+    );
+    use std::io::Write;
+    // A raw connection: hello, then the huge line.
+    let mut raw = std::os::unix::net::UnixStream::connect(&holder.socket).unwrap();
+    let hello = serde_json::to_string(&HolderRequest::hello()).unwrap();
+    raw.write_all(format!("{hello}\n").as_bytes()).unwrap();
+    let _ = raw.write_all(huge.as_bytes());
+    let mut reply = String::new();
+    use std::io::Read;
+    raw.set_read_timeout(Some(LONG)).unwrap();
+    let _ = raw.read_to_string(&mut reply);
+    assert!(reply.contains("request_too_large"), "{reply}");
+    // The holder still serves new clients.
+    holder.connect();
+}
+
+#[test]
+fn hello_must_complete_within_10_s_even_when_trickled() {
+    let holder = TestHolder::start(LONG);
+    use std::io::{Read, Write};
+    let mut raw = std::os::unix::net::UnixStream::connect(&holder.socket).unwrap();
+    let started = Instant::now();
+    raw.set_read_timeout(Some(Duration::from_millis(900)))
+        .unwrap();
+    let mut buf = [0u8; 64];
+    loop {
+        assert!(
+            started.elapsed() < Duration::from_secs(15),
+            "trickle never cut off"
+        );
+        if raw.write_all(b"{").is_err() {
+            break;
+        }
+        if let Ok(0) = raw.read(&mut buf) {
+            break;
+        }
+    }
+    assert!(started.elapsed() >= Duration::from_secs(9));
 }
 
 #[test]
