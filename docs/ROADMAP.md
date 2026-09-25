@@ -14,7 +14,7 @@
 | 1 `core` | [完成（2026-09-25）](gates/gate-01-core.md) | agend-core：型別、兩套協定（client + holder）、trait、流水線狀態機（6 種關卡）、busy policy、去抖動、衝突偵測、merge 門檻（patch-id）、螢幕分類器 | `cargo xtask accept core` 跑測試並印出一個模擬 task 走完 `code` workflow（純邏輯，無 daemon） |
 | 2 `testkit` | [完成（2026-09-25）](gates/gate-02-testkit.md) | 每個 trait 的假實作、契約測試套件、假 daemon、假 agent 程式 | 契約測試通過；假 agent 可單獨啟動並回應 |
 | 3 `shim` | [未開始](gates/gate-03-shim.md) | git／kill 防護、導向 worktree、protected-ref、快照與還原 | 在暫存 repo 以 `git` 名稱執行 shim：導向、拒絕、快照後還原 |
-| 4 `holder` | [未開始](gates/gate-04-holder.md) | PTY、畫面、附屬程序、holder 協定 | `agend holder` 包 bash + 小型探測 client：讀畫面、送鍵、中途斷線重連，bash 存活 |
+| 4 `holder` | [提案中](gates/gate-04-holder.md) | PTY、畫面、holder 協定、活過 daemon（附屬程序移到第 7 施工關） | `agend holder` 包 bash + 小型探測 client：啟動器結束後 holder 還在、讀畫面、送鍵、中途斷線重連、四次開機，bash 存活 |
 | 5 `store` | [未開始](gates/gate-05-store.md) | daemon store：SQLite schema、migration、保留期限、每日快照 | in-memory 測試；xtask 命令印出資料表 |
 | 6 `daemon-holder` | [未開始](gates/gate-06-daemon-holder.md) | 整合施工關：agent runtime adapter | 真 daemon + 真 holder；重啟 daemon，agent 與畫面存活 |
 | 7 `codex` | [未開始](gates/gate-07-codex.md) | codex driver + 送達模型、三級忙碌策略 | 對假 app-server；可選的真 codex smoke test |
@@ -77,6 +77,7 @@ cat docs/gates/gate-01-core.md
 
 每完成一件事加一行（日期 + 一行 + commit／PR），新的在上面。
 
+- 2026-09-25 第 4 施工關開工前提案 P1–P9 使用者逐題確認；狀態改為提案中（等第 3 施工關完成後開工）。
 - 2026-09-25 錄製器 + 真 CLI 一致性檢查（使用者決定）：錄下 claude、codex、opencode 各 5 個情境，假 agent 照錄製檔修正；第 7、12 施工關把一致性檢查列為必要完成條件（`feat/backend-recorder`，見 [RECORDER.md](../crates/agend-testkit/RECORDER.md)）。
 - 2026-09-25 第 2 施工關使用者親自驗收通過，狀態改為完成。
 - 2026-09-25 第 2 施工關 merge（#108，`6d7b540`）；verifier r6 CONFIRMED（規則表 56 條、80 個故意弄壞的實作、四次啟動的重啟生命週期）；狀態改為驗收中。
