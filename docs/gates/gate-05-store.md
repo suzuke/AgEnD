@@ -297,6 +297,7 @@ owner 睡著時由實作者決定、可以反悔的事（頁面沒寫到的設�
 | S6 | 四次開機裡的過期寫入者拿的是開機 1 最後一次寫入前的版本 3：輸出 `stale v=3 -> conflict current=4, task unchanged; v=5`；步驟 4 的「應該看到」照改 | 草稿的 `stale v=4 -> conflict current=4` 自相矛盾：拿目前版本 4 寫入依 CAS 應該成功 | 改成別的過期版本：`boot1` 的 `stale` 變數 | 待追認 |
 | S7 | 崩潰段印 `acked=<子程序印出的最後一個 ack> found=<重開後的寫入數>`；測試要求 `found ≥ acked`、且最多多 1（硬殺時正在 commit 的那次） | 父程序讀到第 50 個 ack 才送 kill，子程序可能多寫幾次；頁面的 `acked=50 found=50` 只是常見情況 | 改成固定 50：子程序每次 ack 後等父程序回覆（多一條管線） | 待追認 |
 | S8 | `RETENTION` 列出 `audit/shim.jsonl` 每日輪替留 14 天（gate 6 P8），測試確認這列存在；`prune` 不處理檔案規則，輪替本身是第 6 施工關的 TODO，不寫 stub | AGENTS：不寫假實作；寫 audit 的是 shim、每日觸發在第 6 施工關，放那裡才測得到 | 第 6 施工關實作時可以把檔案規則搬到它自己的模組，規則表測試跟著改 | 待追認 |
+| S9 | 校準用 v1 的 8,347 個 task（V1-LESSONS），每個 20 個事件且全部在 14 天內（上限估計）；先經 store 寫一個 task 與 20 個事件（真 producer），再用 SQL 複製到 v1 量級 | v1 沒有事件數；經 API 逐筆寫 16 萬次 fsync 要幾分鐘，SQL 複製保持列的形狀與 production 一致。實測 DB 57.2 MB、7 份快照 395.8 MB、單次快照 0.19 秒（debug build） | 改事件數或改成逐筆寫：`store_demo.rs` 的常數 | 待追認 |
 
 ## 驗收紀錄
 
