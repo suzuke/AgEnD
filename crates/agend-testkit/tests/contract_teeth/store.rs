@@ -2,8 +2,11 @@
 //! events themselves also replace the fixture's view of them. `reopen`
 //! builds the next mutant over `FakeStore::reopen` (the same data) with the
 //! same replaced methods; a mutant's own event log does not survive it.
+//! `CounterStore` (verifier r4) is standalone.
 
-use std::sync::Mutex;
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use agend_core::pipeline::task::Task;
 use agend_core::pipeline::workflow::Workflow;
@@ -126,6 +129,117 @@ impl StoreFixture for M {
 /// Versions toggle 1 -> 2 -> 1 (ABA): every single write looks newer.
 fn toggled(version: u64) -> u64 {
     if version % 2 == 1 { 1 } else { 2 }
+}
+
+/// What `CounterStore` persists: everything but its version counter.
+#[derive(Default)]
+pub struct Disk {
+    tasks: BTreeMap<String, VersionedTask>,
+    workflows: BTreeMap<(String, u64), Workflow>,
+    events: BTreeMap<String, Vec<StoredEvent>>,
+}
+
+/// Verifier r4 `CounterStore`: persists tasks, versions, workflows and
+/// events, but issues versions from a counter in the object, which starts
+/// at 0 again after a reopen (versions go backwards: ABA across restarts).
+pub struct CounterStore {
+    disk: Arc<Mutex<Disk>>,
+    counter: AtomicU64,
+}
+
+impl CounterStore {
+    fn open(disk: Arc<Mutex<Disk>>) -> Self {
+        Self {
+            disk,
+            counter: AtomicU64::new(0),
+        }
+    }
+
+    fn next(&self) -> u64 {
+        self.counter.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    fn disk(&self) -> std::sync::MutexGuard<'_, Disk> {
+        self.disk.lock().unwrap()
+    }
+}
+
+impl Store for CounterStore {
+    type Error = String;
+    async fn load_task(&self, id: &str) -> Result<Option<VersionedTask>, String> {
+        Ok(self.disk().tasks.get(id).cloned())
+    }
+    async fn create_task(&self, task: &Task) -> Result<(), String> {
+        let version = self.next();
+        let mut disk = self.disk();
+        if disk.tasks.contains_key(&task.id) {
+            return Err(format!("{} exists", task.id));
+        }
+        disk.tasks.insert(
+            task.id.clone(),
+            VersionedTask {
+                version,
+                task: task.clone(),
+            },
+        );
+        Ok(())
+    }
+    async fn compare_and_swap_task(&self, task: &Task, expected: u64) -> Result<CasResult, String> {
+        let mut disk = self.disk();
+        let Some(current) = disk.tasks.get_mut(&task.id) else {
+            return Ok(CasResult::Conflict {
+                current_version: None,
+            });
+        };
+        if current.version != expected {
+            return Ok(CasResult::Conflict {
+                current_version: Some(current.version),
+            });
+        }
+        let version = self.next();
+        current.version = version;
+        current.task = task.clone();
+        Ok(CasResult::Written {
+            new_version: version,
+        })
+    }
+    async fn load_workflow(&self, id: &str, version: u64) -> Result<Option<Workflow>, String> {
+        Ok(self
+            .disk()
+            .workflows
+            .get(&(id.to_owned(), version))
+            .cloned())
+    }
+    async fn append_event(&self, id: &str, event: &StoredEvent) -> Result<(), String> {
+        let mut disk = self.disk();
+        if !disk.tasks.contains_key(id) {
+            return Err(format!("no task {id}"));
+        }
+        disk.events
+            .entry(id.to_owned())
+            .or_default()
+            .push(event.clone());
+        Ok(())
+    }
+}
+
+impl StoreFixture for CounterStore {
+    type Store = Self;
+    type Error = String;
+    fn store(&self) -> &Self {
+        self
+    }
+    fn insert_workflow(&self, workflow: &Workflow) {
+        self.disk()
+            .workflows
+            .insert((workflow.id.clone(), workflow.version), workflow.clone());
+    }
+    fn events(&self, task_id: &str) -> Vec<StoredEvent> {
+        self.disk().events.get(task_id).cloned().unwrap_or_default()
+    }
+    fn reopen(&self) -> Self {
+        Self::open(Arc::clone(&self.disk))
+    }
 }
 
 pub fn mutants() -> Vec<Mutant> {
@@ -329,6 +443,13 @@ pub fn mutants() -> Vec<Mutant> {
                     ..M::new()
                 })
             },
+        },
+        // STO-4 (verifier r4 R4-2): the version counter is not persisted;
+        // after a reopen versions start over and a stale writer wins.
+        Mutant {
+            rule: "STO-4",
+            name: "CounterStore",
+            run: |name| store::run(name, || CounterStore::open(Arc::default())),
         },
     ]
 }

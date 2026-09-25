@@ -184,6 +184,34 @@ pub(crate) fn eventually<T>(
     }
 }
 
+/// Boots in a [`daemon_lifecycle`]: two restarts, so a daemon that was
+/// itself restarted is restarted again (state handed over only once, or
+/// consumed at the first recovery, does not survive).
+pub const BOOTS: usize = 3;
+
+/// A daemon lifecycle (CONTRACTS.md "daemon 重啟"): [`BOOTS`] daemons in a
+/// row over the same persisted state. Boot `n` (1-based) gets a new daemon
+/// from `new_daemon`; `boot` recovers the way a real daemon does at every
+/// boot, checks the rule's invariants and does more work. Then the daemon is
+/// dropped, and before the next boot `while_down(n)` lets the backend side
+/// act with no daemon running. Errors name the boot.
+pub(crate) fn daemon_lifecycle<D>(
+    mut new_daemon: impl FnMut() -> D,
+    mut while_down: impl FnMut(usize),
+    mut boot: impl FnMut(usize, &D) -> CaseResult,
+) -> CaseResult {
+    for n in 1..=BOOTS {
+        let daemon = new_daemon();
+        let result = boot(n, &daemon);
+        drop(daemon);
+        result.map_err(|e| format!("boot {n} of {BOOTS}: {e}"))?;
+        if n < BOOTS {
+            while_down(n);
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

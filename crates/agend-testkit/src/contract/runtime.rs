@@ -5,8 +5,10 @@
 //! stops (observed outside the trait, through [`RuntimeFixture::is_running`]),
 //! is no longer recovered, and can be started again. Across a daemon restart
 //! ([`RuntimeFixture::restart`]: the old runtime is dropped, a new one is
-//! built over the same persisted state) holders keep running, and the new
-//! runtime recovers them with the same handles and can stop them (D3).
+//! built over the same persisted state) holders keep running, and every new
+//! runtime recovers them with the same handles and can stop them (D3). The
+//! restart cases run a whole daemon lifecycle (three boots, each recovering
+//! first, see [`super::daemon_lifecycle`]).
 //!
 //! Not pinned: starting an instance twice; stopping an unknown instance.
 
@@ -14,7 +16,7 @@ use std::fmt::Debug;
 
 use agend_core::traits::{HolderHandle, HolderLaunch, Runtime};
 
-use super::{Case, CaseResult, Report, ensure, ok, run_suite};
+use super::{BOOTS, Case, CaseResult, Report, daemon_lifecycle, ensure, ok, run_suite};
 use crate::block_on;
 
 pub trait RuntimeFixture {
@@ -35,7 +37,10 @@ pub trait RuntimeFixture {
     /// over the same persisted state as `self` (holder processes, run
     /// directory), the way a restarted daemon builds it. Cases drop the old
     /// fixture before creating the next one, so whatever the old runtime
-    /// does when it goes away has happened.
+    /// does when it goes away has happened. Cases call it several times on
+    /// the fixture they got. A real fixture goes through the real persisted
+    /// state (the run directory, the holder processes), never a
+    /// process-global static (CONTRACTS.md).
     fn restart(&self) -> Self;
 }
 
@@ -78,8 +83,8 @@ pub fn cases<F: RuntimeFixture>() -> Vec<Case<F>> {
         },
         Case {
             rule: "RTM-8",
-            name: "holders_survive_a_daemon_restart",
-            check: holders_survive_a_daemon_restart,
+            name: "holders_survive_every_daemon_restart",
+            check: holders_survive_every_daemon_restart,
         },
         Case {
             rule: "RTM-9",
@@ -196,41 +201,79 @@ fn stopped_instance_can_start_again<F: RuntimeFixture>(fx: &F) -> CaseResult {
     })
 }
 
-/// D3: the daemon that started the holders goes away; a new runtime over the
-/// same state finds them still running and recovers the same handles.
-fn holders_survive_a_daemon_restart<F: RuntimeFixture>(fx: &F) -> CaseResult {
-    let first = fx.restart();
-    let started = vec![start(&first, "contract-a")?, start(&first, "contract-b")?];
-    drop(first);
-    let second = fx.restart();
-    let stopped: Vec<&HolderHandle> = started.iter().filter(|h| !second.is_running(h)).collect();
-    let recovered = recover(&second);
-    // Cleanup; a runtime that lost the holders fails below anyway.
-    let _ = stop(&second, "contract-a");
-    let _ = stop(&second, "contract-b");
-    ensure(stopped.is_empty(), || {
-        format!("holders died with the daemon that started them: {stopped:?}")
-    })?;
-    let recovered = recovered?;
-    ensure(recovered == started, || {
-        format!(
-            "after a daemon restart the new runtime must recover the holders the old one started: started {started:?}, recovered {recovered:?}"
-        )
+/// A daemon lifecycle ([`daemon_lifecycle`]) for the runtime: every boot
+/// starts with `recover_holders`, the way a restarted daemon reconnects its
+/// holders, and `boot` gets what it recovered. Holders keep running while no
+/// daemon is up.
+fn lifecycle<F: RuntimeFixture>(
+    fx: &F,
+    mut boot: impl FnMut(usize, &F, Vec<HolderHandle>) -> CaseResult,
+) -> CaseResult {
+    daemon_lifecycle(
+        || fx.restart(),
+        |_| {},
+        |n, daemon| boot(n, daemon, recover(daemon)?),
+    )
+}
+
+/// Instances the lifecycle cases start, one per boot but the last.
+const LIFECYCLE_INSTANCES: [&str; BOOTS - 1] = ["contract-a", "contract-b"];
+
+/// D3: holders outlive every daemon, not only the one that started them. At
+/// every boot each holder started so far still runs and is recovered with
+/// the handle `start_holder` returned; then the boot starts one more.
+fn holders_survive_every_daemon_restart<F: RuntimeFixture>(fx: &F) -> CaseResult {
+    let mut started: Vec<HolderHandle> = Vec::new();
+    lifecycle(fx, |n, daemon, recovered| {
+        let stopped: Vec<&HolderHandle> =
+            started.iter().filter(|h| !daemon.is_running(h)).collect();
+        let verdict = ensure(stopped.is_empty(), || {
+            format!("holders died with an earlier daemon: {stopped:?}")
+        })
+        .and_then(|()| {
+            ensure(recovered == started, || {
+                format!(
+                    "the daemon must recover every holder started so far: started {started:?}, recovered {recovered:?}"
+                )
+            })
+        });
+        match LIFECYCLE_INSTANCES.get(n - 1) {
+            Some(id) if verdict.is_ok() => started.push(start(daemon, id)?),
+            // Last boot (or a failed one): clean up whatever runs.
+            _ => {
+                for handle in &recovered {
+                    let _ = stop(daemon, &handle.instance_id);
+                }
+            }
+        }
+        verdict
     })
 }
 
-/// The restarted daemon manages the recovered holders: stopping one really
-/// stops it.
+/// The restarted daemon manages the recovered holders: at every boot after
+/// the first it stops one that an earlier daemon started, and it really
+/// stops while the other keeps running.
 fn restarted_daemon_stops_recovered_holders<F: RuntimeFixture>(fx: &F) -> CaseResult {
-    let first = fx.restart();
-    let a = start(&first, "contract-a")?;
-    drop(first);
-    let second = fx.restart();
-    recover(&second)?;
-    stop(&second, "contract-a")?;
-    ensure(!second.is_running(&a), || {
-        format!(
-            "the restarted runtime's stop_holder(contract-a) returned Ok but {a:?} is still running"
-        )
+    let mut started: Vec<HolderHandle> = Vec::new();
+    lifecycle(fx, |n, daemon, _| {
+        if n == 1 {
+            for id in LIFECYCLE_INSTANCES {
+                started.push(start(daemon, id)?);
+            }
+            return Ok(());
+        }
+        let handle = started.remove(0);
+        stop(daemon, &handle.instance_id)?;
+        ensure(!daemon.is_running(&handle), || {
+            format!(
+                "the restarted runtime's stop_holder({}) returned Ok but {handle:?} is still running",
+                handle.instance_id
+            )
+        })?;
+        let stopped: Vec<&HolderHandle> =
+            started.iter().filter(|h| !daemon.is_running(h)).collect();
+        ensure(stopped.is_empty(), || {
+            format!("stopping {} also stopped {stopped:?}", handle.instance_id)
+        })
     })
 }

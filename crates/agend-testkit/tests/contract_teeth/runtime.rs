@@ -3,9 +3,10 @@
 //! looking at processes and sockets. `restart` builds the next mutant over
 //! `FakeRuntime::restarted` (the same holders) with the same replaced
 //! methods and an empty memo: what one daemon remembered is gone.
+//! `DaemonScoped` (verifier r3) and `Handoff` (verifier r4) are standalone.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use agend_core::traits::{HolderHandle, HolderLaunch, Runtime};
 use agend_testkit::block_on;
@@ -169,6 +170,74 @@ impl RuntimeFixture for DaemonScoped {
     }
     fn restart(&self) -> Self {
         Self::new(self.world.restarted())
+    }
+}
+
+/// Verifier r4 `Handoff`: persists a registry of started holders, but
+/// recovery reads and deletes it (like consuming a handoff file) and keeps
+/// the ids only in the runtime object. The first restart recovers them; the
+/// one after that orphans them.
+pub struct Handoff {
+    world: FakeRuntime,
+    registry: Arc<Mutex<BTreeSet<String>>>,
+    mine: Mutex<BTreeSet<String>>,
+}
+
+impl Handoff {
+    fn over(world: FakeRuntime, registry: Arc<Mutex<BTreeSet<String>>>) -> Self {
+        Self {
+            world,
+            registry,
+            mine: Mutex::new(BTreeSet::new()),
+        }
+    }
+}
+
+impl Runtime for Handoff {
+    type Error = FakeError;
+    async fn start_holder(&self, l: &HolderLaunch) -> Result<HolderHandle, FakeError> {
+        let h = self.world.start_holder(l).await?;
+        self.registry.lock().unwrap().insert(l.instance_id.clone());
+        Ok(h)
+    }
+    async fn stop_holder(&self, id: &str) -> Result<(), FakeError> {
+        self.world.stop_holder(id).await?;
+        self.registry.lock().unwrap().remove(id);
+        self.mine.lock().unwrap().remove(id);
+        Ok(())
+    }
+    async fn recover_holders(&self) -> Result<Vec<HolderHandle>, FakeError> {
+        let taken = std::mem::take(&mut *self.registry.lock().unwrap());
+        let mine = {
+            let mut mine = self.mine.lock().unwrap();
+            mine.extend(taken);
+            mine.clone()
+        };
+        let registry = self.registry.lock().unwrap().clone();
+        Ok(self
+            .world
+            .recover_holders()
+            .await?
+            .into_iter()
+            .filter(|h| mine.contains(&h.instance_id) || registry.contains(&h.instance_id))
+            .collect())
+    }
+}
+
+impl RuntimeFixture for Handoff {
+    type Runtime = Self;
+    type Error = FakeError;
+    fn runtime(&self) -> &Self {
+        self
+    }
+    fn launch(&self, id: &str) -> HolderLaunch {
+        RuntimeFixture::launch(&self.world, id)
+    }
+    fn is_running(&self, h: &HolderHandle) -> bool {
+        RuntimeFixture::is_running(&self.world, h)
+    }
+    fn restart(&self) -> Self {
+        Self::over(self.world.restarted(), Arc::clone(&self.registry))
     }
 }
 
@@ -357,6 +426,13 @@ pub fn mutants() -> Vec<Mutant> {
                     ..M::new()
                 })
             },
+        },
+        // RTM-8 (verifier r4 R4-1): recovery consumes the persisted
+        // registry; a daemon restarted twice orphans the holders.
+        Mutant {
+            rule: "RTM-8",
+            name: "Handoff",
+            run: |name| runtime::run(name, || Handoff::over(FakeRuntime::new(), Arc::default())),
         },
     ]
 }

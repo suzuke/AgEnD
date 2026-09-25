@@ -4,8 +4,9 @@
 //! every write (checked over a sequence, so a version that returns to an old
 //! value fails); a conflict changes nothing and reports the version actually
 //! stored; events keep their order and stay with their task; everything,
-//! versions included, survives a reopen ([`StoreFixture::reopen`]: a daemon
-//! restart).
+//! versions included, survives every reopen ([`StoreFixture::reopen`]: a
+//! daemon restart), and versions keep growing across reopens. The reopen
+//! cases run a whole daemon lifecycle ([`super::daemon_lifecycle`]).
 //!
 //! Not pinned: the first version number; what appending an event to an
 //! unknown task does.
@@ -16,7 +17,7 @@ use agend_core::pipeline::task::{Task, TaskStatus};
 use agend_core::pipeline::workflow::Workflow;
 use agend_core::traits::{CasResult, Store, StoredEvent};
 
-use super::{Case, CaseResult, Report, ensure, ok, run_suite};
+use super::{Case, CaseResult, Report, daemon_lifecycle, ensure, ok, run_suite};
 use crate::block_on;
 
 pub trait StoreFixture {
@@ -34,7 +35,10 @@ pub trait StoreFixture {
 
     /// A daemon restart: a new fixture whose store is a new handle opened on
     /// the same persisted data as `self` (the same database file). Cases
-    /// drop the old fixture before creating the next one.
+    /// drop the old fixture before creating the next one, and call it
+    /// several times on the fixture they got. A real fixture goes through
+    /// the real persistence (the database file), never a process-global
+    /// static (CONTRACTS.md).
     fn reopen(&self) -> Self;
 }
 
@@ -59,6 +63,11 @@ pub fn cases<F: StoreFixture>() -> Vec<Case<F>> {
             rule: "STO-4",
             name: "cas_with_current_version_writes_a_newer_version",
             check: cas_with_current_version_writes_a_newer_version,
+        },
+        Case {
+            rule: "STO-4",
+            name: "versions_keep_growing_across_reopens",
+            check: versions_keep_growing_across_reopens,
         },
         Case {
             rule: "STO-5",
@@ -97,8 +106,8 @@ pub fn cases<F: StoreFixture>() -> Vec<Case<F>> {
         },
         Case {
             rule: "STO-12",
-            name: "data_survives_a_reopen",
-            check: data_survives_a_reopen,
+            name: "data_survives_every_reopen",
+            check: data_survives_every_reopen,
         },
     ]
 }
@@ -384,53 +393,111 @@ fn current_version<F: StoreFixture>(fx: &F, task_id: &str) -> Result<u64, String
         .ok_or_else(|| format!("task {task_id} vanished"))
 }
 
-/// GLOSSARY store / D8: the store is the only source of truth, so tasks,
-/// versions, workflows and events survive a restart, and CAS continues from
-/// the stored version.
-fn data_survives_a_reopen<F: StoreFixture>(fx: &F) -> CaseResult {
-    let first = fx.reopen();
-    let task = full_task("T-reopen");
-    ok("create_task", block_on(first.store().create_task(&task)))?;
-    let created = current_version(&first, &task.id)?;
-    let written = write(&first, &task, "written before the restart", created)?;
-    let version = current_version(&first, &task.id)?;
-    let workflow = Workflow::builtin_code();
-    first.insert_workflow(&workflow);
-    let event = StoredEvent {
-        id: "e-reopen".into(),
-        occurred_at_unix_ms: 1_790_000_000_000,
-        kind: "stage_completed".into(),
-        detail: "before the restart".into(),
-    };
-    ok(
-        "append_event",
-        block_on(first.store().append_event(&task.id, &event)),
-    )?;
-    drop(first);
+/// A daemon lifecycle ([`daemon_lifecycle`]) for the store: every boot
+/// reopens the same data ([`StoreFixture::reopen`]).
+fn lifecycle<F: StoreFixture>(fx: &F, boot: impl FnMut(usize, &F) -> CaseResult) -> CaseResult {
+    daemon_lifecycle(|| fx.reopen(), |_| {}, boot)
+}
 
-    let second = fx.reopen();
-    let loaded = ok("load_task", block_on(second.store().load_task(&task.id)))?;
-    ensure(
-        loaded.as_ref().map(|v| (v.version, &v.task)) == Some((version, &written)),
-        || format!("after a reopen expected version {version} with {written:?}, got {loaded:?}"),
-    )?;
-    let loaded = ok(
-        "load_workflow",
-        block_on(second.store().load_workflow(&workflow.id, workflow.version)),
-    )?;
-    ensure(loaded.as_ref() == Some(&workflow), || {
-        format!("after a reopen the workflow loaded as {loaded:?}")
-    })?;
-    let events = second.events(&task.id);
-    ensure(events == [event.clone()], || {
-        format!("after a reopen expected events [{event:?}], got {events:?}")
-    })?;
-    let stale = ok(
-        "compare_and_swap_task",
-        block_on(second.store().compare_and_swap_task(&task, created)),
-    )?;
-    ensure(matches!(stale, CasResult::Conflict { .. }), || {
-        format!("after a reopen the pre-write version {created} must conflict, got {stale:?}")
-    })?;
-    write(&second, &written, "written after the restart", version).map(|_| ())
+/// STO-4 across reopens: every version the store ever issued, before any
+/// reopen, stays behind. At every boot the stored version is the last one
+/// issued, a write gets a version greater than all of them, and a writer
+/// holding any earlier one (from this boot or an earlier one) conflicts.
+fn versions_keep_growing_across_reopens<F: StoreFixture>(fx: &F) -> CaseResult {
+    let task = full_task("T-versions");
+    let mut issued: Vec<u64> = Vec::new();
+    let mut stored = task.clone();
+    lifecycle(fx, |n, daemon| {
+        if n == 1 {
+            ok("create_task", block_on(daemon.store().create_task(&task)))?;
+            issued.push(current_version(daemon, &task.id)?);
+        }
+        let mut held = current_version(daemon, &task.id)?;
+        let last = issued.last().copied();
+        ensure(Some(held) == last, || {
+            format!("the stored version is {held}, but the last one issued was {last:?}")
+        })?;
+        for (k, status) in WRITE_SEQUENCE.into_iter().take(2).enumerate() {
+            let mut next = task.clone();
+            next.status = status;
+            next.title = format!("boot {n} write {k}");
+            let result = ok(
+                "compare_and_swap_task",
+                block_on(daemon.store().compare_and_swap_task(&next, held)),
+            )?;
+            let CasResult::Written { new_version } = result else {
+                return Err(format!("write {k}: expected Written, got {result:?}"));
+            };
+            let highest = issued.iter().max().copied().unwrap_or(0);
+            ensure(new_version > highest, || {
+                format!(
+                    "write {k}: new version {new_version} is not greater than every version issued before ({issued:?})"
+                )
+            })?;
+            issued.push(new_version);
+            held = new_version;
+            stored = next;
+        }
+        for &old in &issued[..issued.len() - 1] {
+            let result = ok(
+                "compare_and_swap_task",
+                block_on(daemon.store().compare_and_swap_task(&task, old)),
+            )?;
+            ensure(matches!(result, CasResult::Conflict { .. }), || {
+                format!(
+                    "a writer holding the earlier version {old} (issued {issued:?}) must conflict, got {result:?}"
+                )
+            })?;
+        }
+        unchanged(daemon, &stored)
+    })
+}
+
+/// GLOSSARY store / D8: the store is the only source of truth, so tasks,
+/// versions, workflows and events survive every restart, and CAS continues
+/// from the stored version. Each boot checks everything the earlier boots
+/// wrote, then writes the task and appends an event.
+fn data_survives_every_reopen<F: StoreFixture>(fx: &F) -> CaseResult {
+    let task = full_task("T-reopen");
+    let workflow = Workflow::builtin_code();
+    let mut written = task.clone();
+    let mut version = 0;
+    let mut appended: Vec<StoredEvent> = Vec::new();
+    lifecycle(fx, |n, daemon| {
+        if n == 1 {
+            ok("create_task", block_on(daemon.store().create_task(&task)))?;
+            version = current_version(daemon, &task.id)?;
+            daemon.insert_workflow(&workflow);
+        }
+        let loaded = ok("load_task", block_on(daemon.store().load_task(&task.id)))?;
+        ensure(
+            loaded.as_ref().map(|v| (v.version, &v.task)) == Some((version, &written)),
+            || format!("expected version {version} with {written:?}, got {loaded:?}"),
+        )?;
+        let loaded = ok(
+            "load_workflow",
+            block_on(daemon.store().load_workflow(&workflow.id, workflow.version)),
+        )?;
+        ensure(loaded.as_ref() == Some(&workflow), || {
+            format!("the workflow loaded as {loaded:?}")
+        })?;
+        let events = daemon.events(&task.id);
+        ensure(events == appended, || {
+            format!("expected events {appended:?}, got {events:?}")
+        })?;
+        written = write(daemon, &written, &format!("written at boot {n}"), version)?;
+        version = current_version(daemon, &task.id)?;
+        let event = StoredEvent {
+            id: format!("e-boot{n}"),
+            occurred_at_unix_ms: 1_790_000_000_000 + n as u64,
+            kind: "stage_completed".into(),
+            detail: format!("boot {n}"),
+        };
+        ok(
+            "append_event",
+            block_on(daemon.store().append_event(&task.id, &event)),
+        )?;
+        appended.push(event);
+        Ok(())
+    })
 }

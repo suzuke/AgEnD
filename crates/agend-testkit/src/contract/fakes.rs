@@ -2,7 +2,7 @@
 
 use agend_core::model::Backend;
 use agend_core::pipeline::workflow::Workflow;
-use agend_core::traits::{HolderHandle, HolderLaunch, Notification, StoredEvent};
+use agend_core::traits::{DriverEventKind, HolderHandle, HolderLaunch, Notification, StoredEvent};
 
 use super::{Report, clock, driver, forge, notifier, runner, runtime, store};
 use crate::fakes::{
@@ -94,6 +94,20 @@ impl driver::DriverFixture for FakeDriverFixture {
     fn restart(&self) -> Self {
         Self {
             driver: self.driver.restarted(),
+        }
+    }
+
+    /// Pushes a whole turn straight into the shared backend
+    /// ([`FakeDriver::push_event`]), not through a delivery.
+    fn emit_while_down(&self) {
+        for kind in [
+            DriverEventKind::BusyChanged { busy: true },
+            DriverEventKind::TurnCompleted {
+                summary: Some("finished while the daemon was down".into()),
+            },
+            DriverEventKind::BusyChanged { busy: false },
+        ] {
+            self.driver.push_event(Self::INSTANCE, kind);
         }
     }
 }
