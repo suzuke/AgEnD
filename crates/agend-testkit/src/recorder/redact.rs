@@ -319,12 +319,19 @@ fn times(s: &str) -> String {
 }
 
 /// `/tmp/<name>-<digits>` (a per-uid directory such as
-/// `/private/tmp/claude-501`) → `/tmp/<name>-<uid>`.
+/// `/private/tmp/claude-501`) → `/tmp/<name>-<uid>`; also after `<tmpdir>/`
+/// (where `$TMPDIR` is `/tmp`, e.g. on Linux).
 fn tmp_uids(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut rest = s;
-    while let Some(i) = rest.find("/tmp/") {
-        let (head, tail) = rest.split_at(i + 5);
+    let next = |r: &str| {
+        ["/tmp/", "<tmpdir>/"]
+            .iter()
+            .filter_map(|p| r.find(p).map(|i| i + p.len()))
+            .min()
+    };
+    while let Some(end) = next(rest) {
+        let (head, tail) = rest.split_at(end);
         out.push_str(head);
         let seg_len = tail
             .find(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')))
@@ -686,10 +693,13 @@ mod tests {
         );
         assert_eq!(out["title"], "New session - <time>");
         assert_eq!(out["protocolVersion"], "2025-11-25");
-        assert_eq!(
-            out["scratchpad_dir"],
-            "/private/tmp/claude-<uid>/p/scratchpad"
+        // `/private/tmp` itself becomes `<tmpdir>` where `$TMPDIR` is `/tmp`.
+        let scratch = out["scratchpad_dir"].as_str().unwrap_or_default();
+        assert!(
+            scratch.ends_with("/claude-<uid>/p/scratchpad") && !scratch.contains("501"),
+            "{scratch}"
         );
+        assert_eq!(tmp_uids("<tmpdir>/claude-501/x"), "<tmpdir>/claude-<uid>/x");
         assert_eq!(out["platformOs"], "<redacted>");
         assert_eq!(out["authMode"], "<redacted>");
         assert_eq!(out["key"], "<sk-key>");
