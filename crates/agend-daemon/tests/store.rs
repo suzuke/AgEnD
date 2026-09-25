@@ -670,6 +670,44 @@ fn daily_snapshots_keep_the_seven_newest_and_never_touch_other_files() {
     assert_eq!((check.as_str(), tasks), ("ok", 1));
 }
 
+/// Verifier finding (gate 5 round 1): a snapshot killed mid-write can
+/// leave SQLite's `-journal` (or `-wal`, `-shm`) next to the temporary
+/// file. The next snapshot removes them with it; files that only look
+/// similar are kept.
+#[test]
+fn a_killed_snapshots_temporary_file_and_its_sidecars_are_removed() {
+    let dir = TempDir::new("store-snapshot-sidecars").unwrap();
+    let home = dir.path().join("home");
+    let store = SqliteStore::open(&home, NOW).unwrap();
+    let backups = home.join(BACKUPS_DIR);
+    fs::create_dir_all(&backups).unwrap();
+    let tmp = format!(".{}.tmp", snapshot::daily_name(NOW - DAY_MS));
+    let stale: Vec<String> = ["", "-journal", "-wal", "-shm"]
+        .iter()
+        .map(|s| format!("{tmp}{s}"))
+        .collect();
+    let foreign = [
+        format!("{tmp}-journal.bak"),
+        format!("{tmp}-other"),
+        ".agend-notes.db.tmp-journal".to_owned(),
+        format!("{}-journal", snapshot::daily_name(NOW - DAY_MS)),
+        "notes.tmp-journal".to_owned(),
+    ];
+    for name in stale.iter().chain(&foreign) {
+        fs::write(backups.join(name), b"x").unwrap();
+    }
+
+    let report = block_on(store.snapshot(NOW)).unwrap();
+    let mut removed = report.stale_tmp_removed.clone();
+    removed.sort();
+    let mut expected = stale.clone();
+    expected.sort();
+    assert_eq!(removed, expected);
+    let mut left: BTreeSet<String> = foreign.iter().cloned().collect();
+    left.insert(snapshot::daily_name(NOW));
+    assert_eq!(listing(&backups), left);
+}
+
 #[test]
 fn a_restored_snapshot_opens_as_the_database() {
     let dir = TempDir::new("store-restore").unwrap();

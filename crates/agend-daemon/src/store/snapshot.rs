@@ -9,7 +9,8 @@
 //! `agend.db`, delete `agend.db-wal`.
 //!
 //! Must NOT: delete or overwrite a file whose name does not match the
-//! snapshot pattern (or its temporary-file pattern).
+//! snapshot pattern (or its temporary-file pattern, with or without a
+//! `-journal`, `-wal` or `-shm` suffix).
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -38,7 +39,8 @@ pub struct SnapshotReport {
     pub elapsed: Duration,
     /// Snapshot files deleted by the rotation, oldest first.
     pub rotated_out: Vec<String>,
-    /// Leftover temporary files from an interrupted snapshot, deleted.
+    /// Leftover temporary files (and their SQLite sidecars) from an
+    /// interrupted snapshot, deleted.
     pub stale_tmp_removed: Vec<String>,
     /// Snapshot files in `backups/` after the rotation.
     pub kept: Vec<String>,
@@ -100,7 +102,17 @@ fn tmp_name(name: &str) -> String {
     format!(".{name}{TMP_SUFFIX}")
 }
 
+/// Files SQLite may leave next to a temporary file when a snapshot is
+/// killed mid-write.
+const TMP_SIDECARS: [&str; 3] = ["-journal", "-wal", "-shm"];
+
+/// Whether `name` is a temporary snapshot file (`.agend-….db.tmp`) or one
+/// of its [`TMP_SIDECARS`].
 fn is_tmp_name(name: &str) -> bool {
+    let name = TMP_SIDECARS
+        .iter()
+        .find_map(|s| name.strip_suffix(s))
+        .unwrap_or(name);
     name.strip_prefix('.')
         .and_then(|n| n.strip_suffix(TMP_SUFFIX))
         .is_some_and(is_snapshot_name)
