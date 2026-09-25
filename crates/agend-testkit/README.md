@@ -90,8 +90,8 @@ daemon 重啟：`RuntimeFixture`、`DriverFixture`、`StoreFixture` 各有一個
 ## 錄製器：新增一個 backend
 
 1. 在 `src/recorder/` 加一個模組，實作 `recorder::Backend`（`name`、`program`、`fake`、`scenarios`、`run`：啟動、傳輸、情境步驟；同一段 `run` 要能驅動真的與假的）。
-2. 加進 `recorder::BACKENDS`；需要時在 `recorder::shape` 的 `IGNORED`／`UNORDERED` 加規則並寫原因。
-3. `cargo xtask record <name> --sandbox <寫入沙箱腳本>` 錄製、確認遮蔽、commit；`tests/conformance.rs` 加一個 `#[test]`。
+2. 加進 `recorder::BACKENDS`；需要時在 `recorder::shape` 的 `IGNORED`／`UNORDERED`／`COLLAPSED` 加規則並寫原因。
+3. `cargo xtask record <name> --sandbox <寫入沙箱腳本>` 錄製、確認遮蔽、commit。`tests/conformance.rs` 不用改：它逐一檢查 `BACKENDS` 裡的每個 backend。
 
 ## 依賴規則
 

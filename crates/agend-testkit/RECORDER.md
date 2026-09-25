@@ -25,7 +25,9 @@
 
 ## 遮蔽（`recorder::redact`）
 
-寫檔前一律遮蔽，保留 JSON 型別：情境目錄 → `<rec>`、`$HOME` → `~`、使用者名稱與主機名稱、UUID 與 `ses_…`／`msg_…`／`toolu_…`／`call_…` 等 id → 穩定的 `<uuid-1>`、`<ses-2>`、email、token／JWT、帳號資訊（`planType`、`userAgent`、用量）、使用者自己的 MCP server 名稱。寫檔前再跑 `redact::scan`（家目錄路徑、UUID、email、token、CLI auth 檔裡的字串……），有任何發現就不寫。規則改了：`agend-record redact <檔案>…` 就地重跑。
+寫檔前一律遮蔽，保留 JSON 型別：情境目錄 → `<rec>`、`$HOME` → `~`、使用者名稱與主機名稱、UUID 與 `ses_…`／`msg_…`／`toolu_…`／`call_…` 等 id → 穩定的 `<uuid-1>`、`<ses-2>`、email、token／JWT、`sk-…` key → `<sk-key>`、帳號與機器資訊（`planType`、`userAgent`、用量、`platformOs`、`authMode`）→ `<redacted>`、時刻（codex rollout 檔名裡的本地時間、opencode 標題裡的 UTC；兩者並列就推得出時區）→ `<time>`、`/tmp/<名稱>-<uid>`（例如 claude 的 `/private/tmp/claude-<uid>`）→ `<uid>`。使用者自己的 MCP server：codex 每個 server、每次狀態變化各發一則 `mcpServer/startupStatus/updated`，遮蔽後只留第一則、所有值清空，名稱和個數都不留。
+
+寫檔前再跑 `redact::scan`（家目錄路徑、UUID、email、token、短的 `sk-proj-…`、時刻、`/tmp` 裡的 uid、secret key 底下沒清空的值、超過一則的 MCP 狀態、CLI auth 檔裡的字串……），有任何發現就不寫。scan 另外比對**本機的 denylist**（不分大小寫、整個字）：環境變數 `AGEND_RECORD_DENYLIST`（逗號或空白分隔）加上檔案 `AGEND_RECORD_DENYLIST_FILE`（預設 `~/.config/agend-record/denylist`，一行一個，`#` 起註解）。把自己 MCP server 的名稱等私人字詞放在那裡；**不要 commit**，發現時也只印編號（`denylist word #1`），不印字詞。一致性檢查的 `committed_transcripts_pass_the_secret_scan` 也會讀這份清單。規則改了：`agend-record redact <檔案>…` 就地重跑（重跑結果不變）。
 
 ## 一致性檢查的比對規則（`recorder::shape`，唯一出處）
 
@@ -33,7 +35,7 @@
 2. 訊息種類：JSON-RPC 的 `request`／`notify`／`result`／`error <method>`；HTTP 的 `方法 路徑`（id 段落 → `:id`）與回應 `狀態 請求`；SSE 的 `type`；hook 的事件名與回覆；按鍵；畫面標記。
 3. 兩邊都先丟掉：`IGNORED`（機器、帳號、計時器雜訊，各附原因）與模型自己決定的 reasoning（事件與訊息內容裡的 reasoning part／item）。
 4. `DELIBERATE`：假 agent 刻意和真 CLI 不同的地方，從真的那邊丟掉最後一則（目前只有 claude `busy`，見下表）。
-5. `UNORDERED`：非同步的簿記事件（opencode 的 `session.*`、`message.updated`，codex 的 `thread/queue/changed`）只比「有沒有」與合併後的形狀，不比順序。其餘保持順序，連續同種類合併成一則（串流 delta）。
+5. `UNORDERED`：非同步的簿記事件（opencode 的 `session.*`、`message.updated`，codex 的 `thread/queue/changed`）只比「有沒有」與合併後的形狀，不比順序。其餘保持順序**與則數**：重複的生命週期事件（兩個 `turn/completed`）就是差異。只有 `COLLAPSED` 列出的串流與輪詢種類（codex `item/agentMessage/delta`、opencode `message.part.delta`、`GET /permission` 與其回應；則數是時序）連續多則合併成一則，形狀取聯集。
 6. 形狀：欄位名稱、巢狀、值的型別；值本身不比，只有 `type`、`status`、`role`、`kind`、`source`、`hook_event_name`、`decision`、`stop_hook_active`、`method` 保留值。
 7. 陣列比元素形狀的集合，空陣列和任何陣列相符；是 id 的物件 key 當成 `:id`。
 
@@ -73,14 +75,17 @@ target/debug/agend-record startup-check claude   # 在沙箱裡：只啟動、�
 ~/.cargo/bin/cargo test -p agend-testkit --test conformance
 ```
 
-沙箱腳本只允許寫 `/private/tmp`、`TMPDIR` 與 CLI 自己的狀態目錄（`~/.claude`、`~/.claude.json`、`~/.codex`、opencode 的資料／設定／快取目錄），而且這些目錄裡使用者自己的設定檔仍是唯讀；repo 在錄製時不可寫。錄製檔先寫到 `mktemp -d /private/tmp/agend-rec-out-XXXX`，由 xtask 在沙箱外複製進 `transcripts/`（失敗的情境留在輸出目錄，名為 `<情境>.failed.jsonl`）。
+沙箱腳本（`record-sandbox.sh`）只允許寫 `/private/tmp`、`TMPDIR`，以及每個 CLI 的 session／狀態檔：claude 的 `~/.claude.json`（含原子寫入的暫存與備份）、這次情境自己的 `~/.claude/projects/-private-tmp-agend-rec-*`、`~/.claude/` 底下的 `sessions`、`session-env`、`shell-snapshots`、`todos`、`statsig`、`cache`、`backups`、`file-history`、`paste-cache`、`debug`、`telemetry`、`plans`、`history.jsonl`；codex 的 `~/.codex/` 底下 `sessions`、`log`、`.tmp`、`tmp`、`shell_snapshots`、`cache`、`thread-writer-locks`、`rollout-migrations`、狀態資料庫 `<名稱>_<n>.sqlite`（含 `-wal`／`-shm`）、`models_cache.json`、`history.jsonl`、`session_index.jsonl`、`version.json`；opencode 的資料（`~/.local/share/opencode`，`auth.json` 除外）、狀態、快取目錄。其他一律不可寫，包括 `~/.claude/{rules,agents,skills,commands,hooks,plugins,CLAUDE.md,settings.json}`、`~/.codex/{auth.json,AGENTS.md,config.toml}`、`~/.config/opencode` 與 repo。讀取不受限。`~/.codex/auth.json` 唯讀，所以錄製中若剛好刷新 token 不會存檔：錄製前先正常用一次 codex。新版 CLI 需要別的路徑時會在 stderr 或失敗的錄製檔裡出現 `Operation not permitted` 和路徑（sandbox-exec 不記 log），確認後再加進腳本。
+錄製檔先寫到 `mktemp -d /private/tmp/agend-rec-out-XXXX`，由 xtask 在沙箱外複製進 `transcripts/`（失敗的情境留在輸出目錄，名為 `<情境>.failed.jsonl`）。
+
+**錄 codex 會啟動使用者自己的 MCP server**：`codex app-server` 讀 `~/.codex/config.toml` 與 plugin，錄製器給的 `-c mcp_servers={}` 關不掉它們（`-c` 是合併進設定表，不是取代）。遮蔽會把它們的狀態通知縮成一則空白的（見「遮蔽」），比對規則也忽略它們（`IGNORED`），但程序確實會跑起來。要避免：錄製前確認 `codex mcp list --json --disable plugins -c mcp_servers.<名稱>.enabled=false …`（每個名稱一個 `-c`，名稱來自不帶這些旗標的 `codex mcp list --json --disable plugins`）列出的全部 `"enabled": false`，這幾個旗標不花 token，2026-09-25 在 codex 0.156.1 驗過；再把同樣的旗標加進 `src/recorder/codex.rs` 的 `spawn` 參數後重錄。錄製器目前沒有自動這麼做，因為那會改變錄製條件（plugin 關掉），要重錄才能確認不影響其他訊息。
 
 ## 新增一個 backend
 
 1. 在 `src/recorder/` 加一個模組，實作 `recorder::Backend`：`name`、`program`（真 CLI）、`fake`（假 agent binary）、`scenarios`（支援的情境）、`run`（在 `<dir>/project` 啟動 agent、走傳輸、跑情境步驟、把每則訊息 `log.push` 進來、最後關掉）。同一段 `run` 要能跑真的與假的（看 `Agent::fake`）。
 2. 把它加進 `recorder::BACKENDS`。
 3. 需要時在 `recorder::shape` 的 `IGNORED`／`UNORDERED` 加規則（附原因）。
-4. `cargo xtask record <name> --sandbox <script>` 錄製，檢查遮蔽結果後 commit；`tests/conformance.rs` 加一個 `#[test]`。
+4. `cargo xtask record <name> --sandbox <script>` 錄製，檢查遮蔽結果後 commit。`tests/conformance.rs` 不用改：`every_fake_matches_its_real_recordings` 逐一檢查 `BACKENDS` 裡的每個 backend（各一個 thread），錄製檔齊全與 secret scan 也一樣。
 
 ## 下一步
 

@@ -28,8 +28,8 @@
 | `tests/fake_codex.rs` | turn 完成事件帶回 threadId／turnId 與回覆；steer（錯的 turn id 被拒；在同一輪另成一則回覆）、queue 自動出列成新 turn、interrupt；approval 等待決定；只有 resume 過的 thread 才推事件；長路徑與短路徑都是 symlink 指到 temp dir 裡的短 socket（不留目錄） |
 | `tests/fake_opencode.rs` | SSE 事件順序（照 `transcripts/opencode/one_turn.jsonl`）、同步 prompt 回覆、忙碌排隊、abort 標 `MessageAbortedError`、REST 補歷史、status |
 | `tests/fake_claude.rs` | Stop hook block 多一輪（`stop_hook_active` false → true）、Esc 中斷不觸發 Stop、hook payload、channel 包裝、未知 channel server 的錯誤、transcript 在專案目錄內 |
-| `tests/conformance.rs` | 一致性檢查：用錄製器的同一套情境（`one_turn`、`interrupt`、`approval`、`busy`、`resume`）驅動 3 個假 agent，和 `transcripts/<backend>/` 的真 CLI 錄製檔按形狀比對（比對規則只在 `recorder::shape`，見 [RECORDER.md](RECORDER.md)）；每個 backend 支援的情境剛好各有一個錄製檔；錄製檔通過 secret scan。`AGEND_CONFORMANCE_DUMP=<dir>` 另外把假 agent 的流量寫成錄製檔以便對照 |
-| `recorder::{redact,shape}::tests` | 遮蔽保留型別、id 換成穩定的 placeholder、secret scan 抓得到漏網的 UUID／家目錄／email／id；形狀比對忽略值與 id、但抓得到型別、欄位、分類值與順序的差異 |
+| `tests/conformance.rs` | 一致性檢查：用錄製器的同一套情境（`one_turn`、`interrupt`、`approval`、`busy`、`resume`）驅動 `recorder::BACKENDS` 的每個假 agent（新增 backend 不用加測試），和 `transcripts/<backend>/` 的真 CLI 錄製檔按形狀比對（比對規則只在 `recorder::shape`，見 [RECORDER.md](RECORDER.md)）；突變檢查：錄製檔裡的 `turn/completed` 多一則要比出差異、串流 delta 多一則不算；每個 backend 支援的情境剛好各有一個錄製檔；錄製檔通過 secret scan（含本機 denylist）。`AGEND_CONFORMANCE_DUMP=<dir>` 另外把假 agent 的流量寫成錄製檔以便對照 |
+| `recorder::{redact,shape}::tests` | 遮蔽保留型別、id 換成穩定的 placeholder、時刻／`/tmp` uid／`platformOs`／`authMode`／`sk-` key 換掉、MCP 狀態通知只留一則空白的；secret scan 抓得到漏網的 UUID／家目錄／email／id／短 `sk-proj-…`／時刻／uid／denylist 字詞（且不印出字詞）；形狀比對忽略值與 id、但抓得到型別、欄位、分類值、順序與生命週期事件則數的差異，串流 delta 則數不算 |
 
 ## 花時間的地方
 

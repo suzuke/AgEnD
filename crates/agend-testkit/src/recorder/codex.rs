@@ -143,6 +143,8 @@ fn spawn(agent: &Agent, project: &Path, socket: &Path) -> Result<Spawned, String
         ("model", format!("{MODEL:?}")),
         ("model_reasoning_effort", format!("{EFFORT:?}")),
         ("notify", "[]".to_owned()),
+        // Merged into the user's table, NOT a replacement: the user's own
+        // MCP servers still start (RECORDER.md, "重錄").
         ("mcp_servers", "{}".to_owned()),
     ] {
         args.push("-c".into());

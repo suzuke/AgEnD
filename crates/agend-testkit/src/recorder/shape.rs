@@ -23,8 +23,10 @@
 //! 5. Kinds in [`UNORDERED`] (bookkeeping the backend emits asynchronously)
 //!    are compared as a set: each kind must occur on both sides, with the
 //!    same shape merged over all its occurrences. Everything else keeps its
-//!    order; runs of the same kind collapse into one (streaming deltas) with
-//!    their shapes merged (union of fields and types).
+//!    order and its count: a repeated lifecycle message (two
+//!    `turn/completed`) is a difference. Only kinds in [`COLLAPSED`]
+//!    (streaming deltas and polling, whose count is timing) have their runs
+//!    collapsed into one, with the shapes merged (union of fields and types).
 //! 6. Shape of a message: field names and nesting, and value types
 //!    (`null`, `bool`, `number`, `string`). Values are ignored except under
 //!    the discriminator keys in [`DISCRIMINATORS`], which keep their value
@@ -148,6 +150,36 @@ pub const UNORDERED: &[Rule] = &[
         "sse/backend",
         "message.updated",
         "message info updates (summary, completion) race the part events; turn state is read from session.status / session.idle and the parts",
+    ),
+];
+
+/// Streaming and polling kinds: a run of consecutive messages of one of
+/// these kinds counts as one (rule 5). Any other kind must repeat exactly as
+/// often as in the recording.
+pub const COLLAPSED: &[Rule] = &[
+    (
+        "codex",
+        "ws/backend",
+        "notify item/agentMessage/delta",
+        "streaming text; the number of chunks is timing",
+    ),
+    (
+        "opencode",
+        "sse/backend",
+        "message.part.delta",
+        "streaming text; the number of chunks is timing",
+    ),
+    (
+        "opencode",
+        "http/client",
+        "GET /permission",
+        "the client polls until the permission shows up; the number of polls is timing",
+    ),
+    (
+        "opencode",
+        "http/backend",
+        "200 GET /permission",
+        "the replies to that polling",
     ),
 ];
 
@@ -339,7 +371,7 @@ impl fmt::Display for Shape {
     }
 }
 
-/// One normalised message (or collapsed run).
+/// One normalised message (or a collapsed run of a [`COLLAPSED`] kind).
 #[derive(Clone, Debug)]
 pub struct Item {
     pub stream: String,
@@ -351,7 +383,7 @@ pub struct Item {
 /// A transcript after rules 1–5.
 #[derive(Default)]
 pub struct Normal {
-    /// Per stream, in order, runs collapsed.
+    /// Per stream, in order, runs of [`COLLAPSED`] kinds collapsed.
     pub ordered: BTreeMap<String, Vec<Item>>,
     /// Per stream, the [`UNORDERED`] kinds with their merged shape.
     pub unordered: BTreeMap<String, BTreeMap<String, Shape>>,
@@ -430,7 +462,7 @@ pub fn normalise(backend: &str, scenario: Option<&str>, entries: &[Entry]) -> No
         }
         let items = out.ordered.entry(stream.clone()).or_default();
         match items.last_mut() {
-            Some(last) if last.kind == kind => {
+            Some(last) if last.kind == kind && listed(COLLAPSED, backend, &stream, &kind) => {
                 last.shape = std::mem::replace(&mut last.shape, Shape::Null).merge(shape);
                 last.count += 1;
             }
@@ -615,12 +647,12 @@ mod tests {
             e(
                 Side::Backend,
                 "ws",
-                json!({"method": "d", "params": {"delta": "x"}}),
+                json!({"method": "item/agentMessage/delta", "params": {"delta": "x"}}),
             ),
             e(
                 Side::Backend,
                 "ws",
-                json!({"method": "d", "params": {"delta": "y"}}),
+                json!({"method": "item/agentMessage/delta", "params": {"delta": "y"}}),
             ),
         ];
         let same = [
@@ -632,7 +664,7 @@ mod tests {
             e(
                 Side::Backend,
                 "ws",
-                json!({"method": "d", "params": {"delta": "z"}}),
+                json!({"method": "item/agentMessage/delta", "params": {"delta": "z"}}),
             ),
             e(
                 Side::Backend,
@@ -642,13 +674,13 @@ mod tests {
             e(
                 Side::Backend,
                 "ws",
-                json!({"method": "d", "params": {"delta": "z"}}),
+                json!({"method": "item/agentMessage/delta", "params": {"delta": "z"}}),
             ),
         ];
         // Order within the backend stream differs: result first vs delta first.
-        assert!(!compare("x", "s", &real, &same).is_empty());
+        assert!(!compare("codex", "s", &real, &same).is_empty());
         let same = [same[0].clone(), same[2].clone(), same[1].clone()];
-        assert_eq!(compare("x", "s", &real, &same), Vec::<String>::new());
+        assert_eq!(compare("codex", "s", &real, &same), Vec::<String>::new());
         let wrong = [
             real[0].clone(),
             e(
@@ -658,7 +690,7 @@ mod tests {
             ),
             real[2].clone(),
         ];
-        let diffs = compare("x", "s", &real, &wrong);
+        let diffs = compare("codex", "s", &real, &wrong);
         assert!(
             diffs
                 .iter()
@@ -698,6 +730,36 @@ mod tests {
         assert_eq!(
             items.ordered["http/backend"][0].kind,
             "200 GET /session/:id/message"
+        );
+    }
+
+    #[test]
+    fn a_repeated_lifecycle_message_differs_but_repeated_deltas_do_not() {
+        let delta = |t: &str| {
+            e(
+                Side::Backend,
+                "ws",
+                json!({"method": "item/agentMessage/delta", "params": {"delta": t}}),
+            )
+        };
+        let done = e(
+            Side::Backend,
+            "ws",
+            json!({"method": "turn/completed", "params": {"turn": {"status": "completed"}}}),
+        );
+        let real = [delta("a"), delta("b"), done.clone()];
+        let fewer_deltas = [delta("ab"), done.clone()];
+        assert_eq!(
+            compare("codex", "s", &real, &fewer_deltas),
+            Vec::<String>::new()
+        );
+        let twice = [delta("ab"), done.clone(), done];
+        let diffs = compare("codex", "s", &real, &twice);
+        assert!(
+            diffs
+                .iter()
+                .any(|d| d.contains("real `(end)`, fake `notify turn/completed`")),
+            "{diffs:?}"
         );
     }
 }

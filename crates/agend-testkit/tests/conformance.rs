@@ -17,21 +17,41 @@ fn transcripts() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("transcripts")
 }
 
-fn check(name: &str) {
-    let backend = recorder::backend(name).expect("known backend");
+/// Every backend in `recorder::BACKENDS` is checked (one thread each), so a
+/// new backend needs no new test here.
+#[test]
+fn every_fake_matches_its_real_recordings() {
+    let reports: Vec<String> = std::thread::scope(|scope| {
+        let runs: Vec<_> = recorder::BACKENDS
+            .iter()
+            .map(|&backend| scope.spawn(move || check(backend)))
+            .collect();
+        runs.into_iter()
+            .map(|run| run.join().expect("conformance thread"))
+            .filter(|report| !report.is_empty())
+            .collect()
+    });
+    assert!(reports.is_empty(), "{}", reports.join("\n"));
+}
+
+/// The differences between `backend`'s fake and its recordings, as one
+/// report (empty when they match).
+fn check(backend: &dyn Backend) -> String {
     let mut report = Vec::new();
     for &scenario in backend.scenarios() {
         if let Err(e) = check_one(backend, scenario, &mut report) {
-            report.push(format!("{name}/{}: {e}", scenario.name()));
+            report.push(format!("{}/{}: {e}", backend.name(), scenario.name()));
         }
     }
-    assert!(
-        report.is_empty(),
+    if report.is_empty() {
+        return String::new();
+    }
+    format!(
         "fake {} differs from the real {} recordings:\n{}",
         backend.fake(),
         backend.program(),
         report.join("\n")
-    );
+    )
 }
 
 fn check_one(
@@ -63,19 +83,35 @@ fn check_one(
     Ok(())
 }
 
+/// Mutation check on a real recording: a repeated lifecycle message must
+/// be a difference, repeated streaming chunks must not (`shape::COLLAPSED`).
 #[test]
-fn fake_codex_app_server_matches_the_codex_recordings() {
-    check("codex");
-}
-
-#[test]
-fn fake_opencode_serve_matches_the_opencode_recordings() {
-    check("opencode");
-}
-
-#[test]
-fn fake_claude_matches_the_claude_recordings() {
-    check("claude");
+fn a_duplicated_turn_completed_is_a_difference_but_extra_deltas_are_not() {
+    let path = transcripts().join("codex").join("one_turn.jsonl");
+    let (_, real) = recorder::read_transcript(&path).expect("transcript");
+    let method = |e: &recorder::Entry| e.msg["method"].as_str().unwrap_or_default().to_owned();
+    let dup = |m: &str| {
+        let i = real
+            .iter()
+            .position(|e| method(e) == m)
+            .unwrap_or_else(|| panic!("{m} in {}", path.display()));
+        let mut out = real.clone();
+        out.insert(i, real[i].clone());
+        out
+    };
+    assert_eq!(
+        shape::compare("codex", "one_turn", &real, &real),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        shape::compare("codex", "one_turn", &real, &dup("item/agentMessage/delta")),
+        Vec::<String>::new()
+    );
+    let diffs = shape::compare("codex", "one_turn", &real, &dup("turn/completed"));
+    assert!(
+        diffs.iter().any(|d| d.contains("notify turn/completed")),
+        "a second turn/completed went unnoticed: {diffs:?}"
+    );
 }
 
 #[test]

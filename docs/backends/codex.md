@@ -31,7 +31,7 @@
 - [ ] 每個不同的 `--listen` 路徑各有一個 app-server 程序。
 - [ ] `model_reasoning_effort = "minimal"` 會被模型拒絕（HTTP 400）；spike 改用 `low`。這是設定問題，不是協定問題。
 - [ ] 2026-09-25 錄製（[RECORDER.md](../../crates/agend-testkit/RECORDER.md)）：`--listen` 路徑再短也綁在 `/private/tmp/codex-daemon-<uid>/<sha256>`，要求的路徑是 symlink。
-- [ ] `-c mcp_servers={}` 關不掉使用者 `config.toml` 裡的 MCP server（錄製時仍啟動）；它們的 `mcpServer/startupStatus/updated` 通知依機器而定。
+- [ ] `-c mcp_servers={}` 關不掉使用者 `config.toml` 與 plugin 的 MCP server（`-c` 合併進設定表，不是取代；錄製時仍啟動）；它們的 `mcpServer/startupStatus/updated` 通知依機器而定。關掉的方法：`--disable plugins` 加上每個 server 一個 `-c mcp_servers.<名稱>.enabled=false`（`codex mcp list --json` 驗證，不花 token）；只對 config.toml 裡的 server 有效，對 plugin 提供的會報 `invalid transport`。
 - [ ] `turn/steer` 在同一輪裡另成一則 user message 與一則回覆；`thread/resume` 沒帶 `excludeTurns: true` 時先送 `deprecationNotice`。
 
 ## 對 v2 的含意

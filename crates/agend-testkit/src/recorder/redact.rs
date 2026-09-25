@@ -12,11 +12,19 @@
 //! | UUIDs anywhere in a string | `<uuid-N>` |
 //! | prefixed ids (`ses_…`, `msg_…`, `toolu_…`, `call_…`) | `<ses-N>`, `<msg-N>`, … |
 //! | hex runs of 24+ chars, other 40+ char tokens, JWTs | `<hex-N>`, `<token-N>`, `<jwt>` |
-//! | e-mail addresses | `<email>` |
-//! | values under secret-looking keys (`token`, `apiKey`, `authorization`, `email`, `accountId`, …) and account details (`planType`, `userAgent`, usage limits) | `"<redacted>"`, `0`, or the same for every leaf |
-//! | the names of the user's MCP servers (codex `mcpServer/startupStatus/updated`) | `"<redacted>"` |
+//! | e-mail addresses, `sk-…` keys | `<email>`, `<sk-key>` |
+//! | wall-clock times (`2026-09-25T14-12-36` in codex rollout file names, `…T06:15:18.454Z` in opencode titles): local time next to UTC would give away the time zone | `<time>` |
+//! | the uid in `/tmp/<name>-<uid>` (`/private/tmp/claude-501/…`) | `/tmp/<name>-<uid>` |
+//! | values under secret-looking keys (`token`, `apiKey`, `authorization`, `email`, `accountId`, …), account and machine details (`planType`, `userAgent`, usage limits, `platformOs`, `authMode`) | `"<redacted>"`, `0`, or the same for every leaf |
+//! | the user's own MCP servers (codex `mcpServer/startupStatus/updated`, one per server and state change) | ONE entry, every leaf blanked; the others are dropped, so neither names nor count remain |
 //!
 //! Object keys are redacted like strings (maps keyed by session id).
+//!
+//! [`scan`] also flags every word of a local denylist (e.g. the names of
+//! the user's MCP servers), read from `AGEND_RECORD_DENYLIST` (words
+//! separated by commas or whitespace) and from the file
+//! `AGEND_RECORD_DENYLIST_FILE` (default `~/.config/agend-record/denylist`,
+//! one word per line, `#` comments). Never commit that list.
 //!
 //! Must NOT: change a value's JSON type.
 
@@ -59,11 +67,14 @@ const SECRET_KEYS: &[&str] = &[
     "resetsat",
     "balance",
     "windowdurationmins",
+    "platformos",
+    "authmode",
 ];
 
-/// `(method, field in params)`: user-specific values inside one message
-/// kind (the names of the user's own MCP servers).
-const SECRET_PARAMS: &[(&str, &str)] = &[("mcpServer/startupStatus/updated", "name")];
+/// Methods whose messages describe the user's machine, one per item (codex
+/// sends one `mcpServer/startupStatus/updated` per MCP server and state):
+/// only the first is kept, blanked, so the number of items is not recorded.
+const ONE_BLANK_ENTRY: &[&str] = &["mcpServer/startupStatus/updated"];
 
 pub struct Redactor {
     /// (literal, placeholder), longest literal first.
@@ -111,26 +122,31 @@ impl Redactor {
     }
 
     pub fn entries(&self, entries: &[Entry]) -> Vec<Entry> {
+        let mut seen = Vec::new();
         entries
             .iter()
-            .map(|e| Entry {
-                from: e.from,
-                via: e.via.clone(),
-                msg: self.value(&e.msg),
+            .filter_map(|e| {
+                let mut msg = e.msg.clone();
+                if let Some(method) = ONE_BLANK_ENTRY.iter().find(|m| msg["method"] == **m) {
+                    if seen.contains(method) {
+                        return None;
+                    }
+                    seen.push(method);
+                    if let Some(params) = msg.get_mut("params") {
+                        *params = blank(params);
+                    }
+                }
+                Some(Entry {
+                    from: e.from,
+                    via: e.via.clone(),
+                    msg: self.value(&msg),
+                })
             })
             .collect()
     }
 
     pub fn value(&self, value: &Value) -> Value {
-        let mut value = value.clone();
-        for (method, field) in SECRET_PARAMS {
-            if value["method"] == *method
-                && let Some(v) = value.get_mut("params").and_then(|p| p.get_mut(*field))
-            {
-                *v = blank(v);
-            }
-        }
-        self.walk(&value)
+        self.walk(value)
     }
 
     fn walk(&self, value: &Value) -> Value {
@@ -162,6 +178,8 @@ impl Redactor {
         }
         let s = self.uuids(&s);
         let s = emails(&s);
+        let s = times(&s);
+        let s = tmp_uids(&s);
         self.words(&s)
     }
 
@@ -219,6 +237,9 @@ impl Redactor {
         if w.starts_with("eyJ") && w.len() >= 16 {
             return "<jwt>".to_owned();
         }
+        if is_sk_key(w) {
+            return "<sk-key>".to_owned();
+        }
         // `ses_2e9c…`, `toolu_01…`, `call_function_ehm47i2fsh0p_1`; a
         // snake_case word (`stop_hook_active`) has no digit after the prefix.
         if let Some((prefix, rest)) = w.split_once('_')
@@ -241,6 +262,89 @@ impl Redactor {
         }
         w.to_owned()
     }
+}
+
+/// `sk-…` API keys (`sk-ant-…`, `sk-proj-…`), also short ones.
+fn is_sk_key(word: &str) -> bool {
+    word.strip_prefix("sk-").is_some_and(|rest| {
+        rest.len() >= 12
+            && rest.chars().any(|c| c.is_ascii_digit())
+            && rest.chars().any(|c| c.is_ascii_alphabetic())
+    })
+}
+
+/// Replaces ISO-8601 date-times (`2026-09-25T14-12-36`,
+/// `2026-09-25T06:15:18.454Z`) with `<time>`; plain dates stay.
+fn times(s: &str) -> String {
+    let b = s.as_bytes();
+    let digits =
+        |i: usize, n: usize| i + n <= b.len() && b[i..i + n].iter().all(u8::is_ascii_digit);
+    let at = |i: usize, set: &[u8]| i < b.len() && set.contains(&b[i]);
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    let mut copied = 0;
+    while i < b.len() {
+        let hit = digits(i, 4)
+            && at(i + 4, b"-")
+            && digits(i + 5, 2)
+            && at(i + 7, b"-")
+            && digits(i + 8, 2)
+            && at(i + 10, b"T")
+            && digits(i + 11, 2)
+            && at(i + 13, b":-")
+            && digits(i + 14, 2)
+            && at(i + 16, b":-")
+            && digits(i + 17, 2);
+        if !hit {
+            i += 1;
+            continue;
+        }
+        let mut end = i + 19;
+        if at(end, b".") && digits(end + 1, 1) {
+            end += 1;
+            while digits(end, 1) {
+                end += 1;
+            }
+        }
+        if at(end, b"Z") {
+            end += 1;
+        }
+        out.push_str(&s[copied..i]);
+        out.push_str("<time>");
+        copied = end;
+        i = end;
+    }
+    out.push_str(&s[copied..]);
+    out
+}
+
+/// `/tmp/<name>-<digits>` (a per-uid directory such as
+/// `/private/tmp/claude-501`) → `/tmp/<name>-<uid>`.
+fn tmp_uids(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find("/tmp/") {
+        let (head, tail) = rest.split_at(i + 5);
+        out.push_str(head);
+        let seg_len = tail
+            .find(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')))
+            .unwrap_or(tail.len());
+        let seg = &tail[..seg_len];
+        match seg.rsplit_once('-') {
+            Some((name, uid))
+                if !name.is_empty()
+                    && !uid.is_empty()
+                    && uid.chars().all(|c| c.is_ascii_digit()) =>
+            {
+                out.push_str(name);
+                out.push_str("-<uid>");
+            }
+            _ => out.push_str(seg),
+        }
+        rest = &tail[seg_len..];
+    }
+    out.push_str(rest);
+    out
 }
 
 fn is_secret_key(key: &str) -> bool {
@@ -335,8 +439,15 @@ fn host_name() -> String {
 }
 
 /// Everything in a redacted transcript that still looks secret or
-/// user-specific. Must be empty before the transcript is written.
+/// user-specific. Must be empty before the transcript is written. Uses the
+/// local denylist (see the module docs).
 pub fn scan(header: &Value, entries: &[Entry]) -> Vec<String> {
+    scan_with(header, entries, &denylist())
+}
+
+/// [`scan`] with an explicit denylist: words (case-insensitive, whole word)
+/// that must not appear anywhere.
+pub fn scan_with(header: &Value, entries: &[Entry], deny: &[String]) -> Vec<String> {
     let mut text = header.to_string();
     for entry in entries {
         text.push('\n');
@@ -375,17 +486,100 @@ pub fn scan(header: &Value, entries: &[Entry]) -> Vec<String> {
     if probe.words(&text) != text {
         findings.push("id or token-like word".to_owned());
     }
-    if let Some(i) = text.find("sk-")
-        && text[i + 3..]
+    if times(&text) != text {
+        findings.push("wall-clock time (gives away the time zone)".to_owned());
+    }
+    if tmp_uids(&text) != text {
+        findings.push("uid in a /tmp path".to_owned());
+    }
+    let mut blanked = 0;
+    let mut values = vec![header];
+    values.extend(entries.iter().map(|e| &e.msg));
+    for value in values {
+        secret_leaves(value, &mut findings);
+        if ONE_BLANK_ENTRY.iter().any(|m| value["method"] == *m) {
+            blanked += 1;
+            if value["params"] != blank(&value["params"]) {
+                findings.push(format!("{} not blanked", value["method"]));
+            }
+        }
+    }
+    if blanked > 1 {
+        findings.push(format!("{blanked} machine-list entries (at most 1)"));
+    }
+    let words: Vec<String> = text
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .map(str::to_ascii_lowercase)
+        .collect();
+    for (n, word) in deny.iter().enumerate() {
+        let word = word.to_ascii_lowercase();
+        let found = if word.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            words.contains(&word)
+        } else {
+            text.to_ascii_lowercase().contains(&word)
+        };
+        if found {
+            // The word itself is not printed: it is private.
+            findings.push(format!("denylist word #{}", n + 1));
+        }
+    }
+    for i in text.match_indices("sk-").map(|(i, _)| i) {
+        let before = text[..i].chars().next_back();
+        if before.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+            continue;
+        }
+        let word: String = text[i..]
             .chars()
-            .take(10)
-            .filter(char::is_ascii_alphanumeric)
-            .count()
-            == 10
-    {
-        findings.push("sk- key".to_owned());
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+            .collect();
+        if is_sk_key(&word) {
+            findings.push("sk- key".to_owned());
+            break;
+        }
     }
     findings
+}
+
+/// Values under secret keys that are not blanked.
+fn secret_leaves(value: &Value, findings: &mut Vec<String>) {
+    match value {
+        Value::Array(items) => items.iter().for_each(|v| secret_leaves(v, findings)),
+        Value::Object(map) => {
+            for (k, v) in map {
+                if is_secret_key(k) && *v != blank(v) {
+                    findings.push(format!("value under `{k}`"));
+                } else {
+                    secret_leaves(v, findings);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The local denylist: `AGEND_RECORD_DENYLIST` plus the file
+/// `AGEND_RECORD_DENYLIST_FILE` (default `~/.config/agend-record/denylist`).
+pub fn denylist() -> Vec<String> {
+    let mut out: Vec<String> = std::env::var("AGEND_RECORD_DENYLIST")
+        .unwrap_or_default()
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|w| !w.is_empty())
+        .map(str::to_owned)
+        .collect();
+    let file = std::env::var_os("AGEND_RECORD_DENYLIST_FILE")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME").map(|h| Path::new(&h).join(".config/agend-record/denylist"))
+        });
+    if let Some(text) = file.and_then(|f| std::fs::read_to_string(f).ok()) {
+        out.extend(
+            text.lines()
+                .map(|l| l.split('#').next().unwrap_or_default().trim())
+                .filter(|w| !w.is_empty())
+                .map(str::to_owned),
+        );
+    }
+    out
 }
 
 /// String values (16+ chars) from the CLIs' auth files, read only. None of
@@ -471,5 +665,89 @@ mod tests {
         for msg in leaked {
             assert!(!scan(&header, &[entry(msg.clone())]).is_empty(), "{msg}");
         }
+    }
+
+    #[test]
+    fn machine_details_times_uids_and_mcp_servers_are_redacted() {
+        let r = Redactor::new(Path::new("/private/tmp/agend-rec-x-AbCd"));
+        let v = json!({
+            "path": "~/.codex/sessions/2026/09/25/rollout-2026-09-25T14-12-36-x.jsonl",
+            "title": "New session - 2026-09-25T06:15:18.454Z",
+            "protocolVersion": "2025-11-25",
+            "scratchpad_dir": "/private/tmp/claude-501/p/scratchpad",
+            "platformOs": "macos",
+            "authMode": "chatgpt",
+            "key": "sk-proj-abc123def456ghi789",
+        });
+        let out = r.value(&v);
+        assert_eq!(
+            out["path"],
+            "~/.codex/sessions/2026/09/25/rollout-<time>-x.jsonl"
+        );
+        assert_eq!(out["title"], "New session - <time>");
+        assert_eq!(out["protocolVersion"], "2025-11-25");
+        assert_eq!(
+            out["scratchpad_dir"],
+            "/private/tmp/claude-<uid>/p/scratchpad"
+        );
+        assert_eq!(out["platformOs"], "<redacted>");
+        assert_eq!(out["authMode"], "<redacted>");
+        assert_eq!(out["key"], "<sk-key>");
+
+        let status = |name: &str, state: &str| Entry {
+            from: super::super::Side::Backend,
+            via: "ws".into(),
+            msg: json!({"method": "mcpServer/startupStatus/updated",
+                "params": {"name": name, "status": state, "error": null}}),
+        };
+        let entries = [
+            status("a", "starting"),
+            status("b", "starting"),
+            status("a", "ready"),
+        ];
+        let out = r.entries(&entries);
+        assert_eq!(out.len(), 1);
+        assert_eq!(
+            out[0].msg["params"],
+            json!({"name": "<redacted>", "status": "<redacted>", "error": null})
+        );
+        assert_eq!(r.entries(&out), out, "idempotent");
+        assert!(scan_with(&json!({}), &out, &[]).is_empty());
+    }
+
+    #[test]
+    fn scan_flags_short_keys_times_uids_machine_details_and_denylisted_words() {
+        let entry = |msg: Value| Entry {
+            from: super::super::Side::Backend,
+            via: "ws".into(),
+            msg,
+        };
+        let header = json!({"type": "header"});
+        let deny = vec!["myserver".to_owned()];
+        let clean = [entry(
+            json!({"text": "ask-me <sk-key> myservers task-12345678901234"}),
+        )];
+        assert_eq!(scan_with(&header, &clean, &deny), Vec::<String>::new());
+        let leaked = [
+            json!({"k": "key sk-proj-abc123def456ghi789"}),
+            json!({"t": "New session - 2026-09-25T06:15:18.454Z"}),
+            json!({"p": "/private/tmp/claude-501/x"}),
+            json!({"platformOs": "macos"}),
+            json!({"name": "MyServer"}),
+        ];
+        for msg in leaked {
+            let found = scan_with(&header, &[entry(msg.clone())], &deny);
+            assert!(!found.is_empty(), "{msg}");
+            assert!(!found.iter().any(|f| f.contains("yserver")), "{found:?}");
+        }
+        let twice = [
+            entry(
+                json!({"method": "mcpServer/startupStatus/updated", "params": {"name": "<redacted>"}}),
+            ),
+            entry(
+                json!({"method": "mcpServer/startupStatus/updated", "params": {"name": "<redacted>"}}),
+            ),
+        ];
+        assert!(!scan_with(&header, &twice, &[]).is_empty());
     }
 }

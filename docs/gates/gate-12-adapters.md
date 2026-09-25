@@ -83,7 +83,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
    ~/.cargo/bin/cargo test -p agend-testkit --test conformance
    ```
 
-   應該看到：兩個版本各自和錄製檔 header 的 `"version"` 相同；最後 `test result: ok. 5 passed`。版本不同：先重錄那個 backend（`~/.cargo/bin/cargo xtask record claude --sandbox ~/Documents/Hack/AgEnD-ops/record-sandbox.sh`，或 `opencode`；會跑真的 CLI、花少量 token，見 [RECORDER.md](../../crates/agend-testkit/RECORDER.md)）再跑一次；檢查不過就改假 agent，不改錄製檔。
+   應該看到：兩個版本各自和錄製檔 header 的 `"version"` 相同；最後 `test result: ok. 4 passed`。版本不同：先重錄那個 backend（`~/.cargo/bin/cargo xtask record claude --sandbox ~/Documents/Hack/AgEnD-ops/record-sandbox.sh`，或 `opencode`；會跑真的 CLI、花少量 token，見 [RECORDER.md](../../crates/agend-testkit/RECORDER.md)）再跑一次；檢查不過就改假 agent，不改錄製檔。
 
    **這步在驗什麼**：driver 測試用的假 claude／假 opencode 和你機器上真的 CLI 形狀一致。壞了的話，driver 對假的全綠、接上真的才出錯（v1 #1483）。
 
