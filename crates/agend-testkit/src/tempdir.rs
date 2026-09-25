@@ -16,9 +16,13 @@ pub struct TempDir {
 impl TempDir {
     /// Creates `<tmp>/agend-test-<label>-<pid>-<n>`. Fails if it already exists.
     pub fn new(label: &str) -> io::Result<TempDir> {
+        TempDir::new_in(&std::env::temp_dir(), label)
+    }
+
+    /// Like [`TempDir::new`], but under `parent` instead of the system temp dir.
+    pub(crate) fn new_in(parent: &Path, label: &str) -> io::Result<TempDir> {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let path =
-            std::env::temp_dir().join(format!("agend-test-{label}-{}-{n}", std::process::id()));
+        let path = parent.join(format!("agend-test-{label}-{}-{n}", std::process::id()));
         std::fs::create_dir(&path)?;
         Ok(TempDir { path })
     }

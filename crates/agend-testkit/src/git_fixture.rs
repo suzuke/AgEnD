@@ -7,9 +7,14 @@
 //! commit ids are reproducible), `GIT_CEILING_DIRECTORIES` at the fixture
 //! root, and every inherited `GIT_*` / `AGEND_*` variable removed.
 //!
-//! Must NOT: run anything in a directory outside its own temp directory.
-//! [`GitFixture::command`] asserts that before building the command (a
-//! harness whose `cd` failed once ran destructive git in a real repo).
+//! Must NOT: run a command whose working directory is not strictly inside
+//! its temp directory (the root itself is only a container: git's ceiling
+//! stops discovery below it, never at it), let [`GitFixture::git`] take a
+//! global option (`-C`, `--git-dir`, `-c`, …) that picks another repo, or
+//! let [`GitFixture::commit`] write through a symlink. A harness whose `cd`
+//! failed once ran destructive git in a real repo. Not checked: path
+//! arguments after the subcommand, and anything passed to
+//! [`GitFixture::command`] besides its directory.
 
 use std::ffi::OsStr;
 use std::io;
@@ -47,7 +52,11 @@ impl GitFixture {
     /// Creates the canonical repo with one commit on [`MAIN`] and the bare
     /// origin it is pushed to.
     pub fn new(label: &str) -> io::Result<GitFixture> {
-        let dir = TempDir::new(&format!("git-{label}"))?;
+        GitFixture::new_in(&std::env::temp_dir(), label)
+    }
+
+    fn new_in(parent: &Path, label: &str) -> io::Result<GitFixture> {
+        let dir = TempDir::new_in(parent, &format!("git-{label}"))?;
         // Canonical: absolute, symlinks resolved (macOS /var -> /private/var),
         // so containment checks and git's own paths agree.
         let root = std::fs::canonicalize(dir.path())?;
@@ -81,7 +90,8 @@ impl GitFixture {
     }
 
     /// A hygienic command running `program` in `dir`. Panics unless `dir`
-    /// exists inside [`Self::root`].
+    /// exists strictly inside [`Self::root`]. Only `dir` is checked, not
+    /// the arguments the caller adds.
     pub fn command(&self, program: impl AsRef<OsStr>, dir: &Path) -> Command {
         self.assert_inside(dir);
         let mut cmd = Command::new(program);
@@ -109,8 +119,14 @@ impl GitFixture {
     }
 
     /// Runs git in `dir` and returns its trimmed stdout. Panics (with
-    /// stderr) if git fails.
+    /// stderr) if git fails, or if `args` starts with a global option
+    /// instead of the subcommand (`-C`, `--git-dir`, `--work-tree`, `-c`,
+    /// … could point git at another repo; pass the repo as `dir`).
     pub fn git(&self, dir: &Path, args: &[&str]) -> String {
+        assert!(
+            args.first().is_some_and(|a| !a.starts_with('-')),
+            "git fixture: {args:?} must start with the subcommand, not a global option"
+        );
         let output = self
             .command("git", dir)
             .args(args)
@@ -129,15 +145,27 @@ impl GitFixture {
     /// `dir`, commits it and returns the new head. Commit ids depend only on
     /// content, parent and message (dates are fixed), so give different
     /// commits different messages.
+    /// Panics if any component of `file` is a symlink.
     pub fn commit(&self, dir: &Path, file: &str, message: &str) -> String {
-        self.assert_inside(dir);
+        let work_tree = self.assert_inside(dir);
+        let mut path = work_tree.clone();
+        for c in Path::new(file).components() {
+            assert!(
+                matches!(c, Component::Normal(_)),
+                "commit file {file:?} must be a plain relative path"
+            );
+            path.push(c);
+            let is_link = std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_symlink());
+            assert!(!is_link, "commit file {file:?}: {path:?} is a symlink");
+        }
+        let parent = path.parent().expect("commit file has a parent");
+        let parent = std::fs::canonicalize(parent)
+            .unwrap_or_else(|e| panic!("commit file {file:?}: cannot resolve {parent:?}: {e}"));
         assert!(
-            Path::new(file)
-                .components()
-                .all(|c| matches!(c, Component::Normal(_))),
-            "commit file {file:?} must be a plain relative path"
+            parent.starts_with(&work_tree),
+            "commit file {file:?} resolves outside {work_tree:?}"
         );
-        std::fs::write(dir.join(file), message).expect("write commit file");
+        std::fs::write(&path, message).expect("write commit file");
         self.git(dir, &["add", "--", file]);
         self.git(dir, &["commit", "-q", "-m", message]);
         self.rev_parse(dir, "HEAD")
@@ -189,14 +217,18 @@ impl GitFixture {
         }
     }
 
-    fn assert_inside(&self, dir: &Path) {
+    /// Returns `dir` resolved. Panics unless it is absolute and strictly
+    /// inside [`Self::root`]: in the root itself git's ceiling does not
+    /// apply, so discovery would walk up into an enclosing repo.
+    fn assert_inside(&self, dir: &Path) -> PathBuf {
         let resolved = std::fs::canonicalize(dir)
             .unwrap_or_else(|e| panic!("git fixture: cannot resolve {dir:?}: {e}"));
         assert!(
-            dir.is_absolute() && resolved.starts_with(&self.root),
-            "git fixture: refusing to operate on {dir:?} (resolves to {resolved:?}), outside {:?}",
+            dir.is_absolute() && resolved.starts_with(&self.root) && resolved != self.root,
+            "git fixture: refusing to operate on {dir:?} (resolves to {resolved:?}), not strictly inside {:?}",
             self.root
         );
+        resolved
     }
 }
 
@@ -299,5 +331,105 @@ mod tests {
         assert!(fx.is_ancestor(&a, MAIN) && fx.is_ancestor(&b, MAIN));
         fx.git(&canonical, &["update-ref", "refs/heads/main", &b]);
         assert!(!fx.is_ancestor(&a, MAIN));
+    }
+
+    fn plain_git(dir: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env("GIT_CONFIG_GLOBAL", NULL_DEVICE)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} in {dir:?}: {status}");
+    }
+
+    /// F1: the fixture sits inside an enclosing repo; nothing it runs may
+    /// reach that repo, and every directory it allows finds its own repo.
+    #[test]
+    fn no_command_reaches_an_enclosing_repo() {
+        let outer_dir = TempDir::new("git-enclosing").unwrap();
+        let outer = std::fs::canonicalize(outer_dir.path()).unwrap();
+        plain_git(&outer, &["init", "-q"]);
+        let fx = GitFixture::new_in(&outer, "herm").unwrap();
+        let wt = fx.add_worktree("w", "w", MAIN);
+        let container = fx.root().join("worktrees");
+        for dir in [fx.root().to_path_buf(), container.clone()] {
+            let _ =
+                std::panic::catch_unwind(|| fx.git(&dir, &["config", "escaped.from", "fixture"]));
+        }
+        let config = std::fs::read_to_string(outer.join(".git/config")).unwrap();
+        assert!(
+            !config.contains("escaped"),
+            "wrote the enclosing repo's config"
+        );
+
+        let result = std::panic::catch_unwind(|| fx.command("git", fx.root()));
+        assert!(result.is_err(), "command in the fixture root was allowed");
+        for dir in [fx.canonical(), wt] {
+            let top = fx.git(&dir, &["rev-parse", "--show-toplevel"]);
+            assert!(Path::new(&top).starts_with(fx.root()), "{dir:?} -> {top}");
+        }
+        let git_dir = fx.git(&fx.origin(), &["rev-parse", "--absolute-git-dir"]);
+        assert!(
+            Path::new(&git_dir).starts_with(fx.root()),
+            "origin -> {git_dir}"
+        );
+        let found = fx
+            .command("git", &container)
+            .args(["rev-parse", "--absolute-git-dir"])
+            .output()
+            .unwrap();
+        assert!(
+            !found.status.success(),
+            "{container:?} found a repo: {}",
+            String::from_utf8_lossy(&found.stdout)
+        );
+    }
+
+    /// F2: a symlink inside the work tree must not let `commit` write
+    /// outside it.
+    #[cfg(unix)]
+    #[test]
+    fn commit_refuses_symlinks_in_the_file_path() {
+        let fx = GitFixture::new("unit").unwrap();
+        let outside = TempDir::new("git-outside").unwrap();
+        let canonical = fx.canonical();
+        std::os::unix::fs::symlink(outside.path(), canonical.join("ln")).unwrap();
+        std::os::unix::fs::symlink(outside.path().join("f.txt"), canonical.join("lf")).unwrap();
+        for file in ["ln/escaped.txt", "lf"] {
+            let result = std::panic::catch_unwind(|| fx.commit(&canonical, file, "escape"));
+            assert!(result.is_err(), "commit to {file:?} was allowed");
+        }
+        let written: Vec<_> = std::fs::read_dir(outside.path()).unwrap().collect();
+        assert!(written.is_empty(), "wrote outside the fixture: {written:?}");
+    }
+
+    /// F3: global options that pick another repo or work tree are refused.
+    #[test]
+    fn git_refuses_global_options() {
+        let fx = GitFixture::new("unit").unwrap();
+        let outside = TempDir::new("git-outside").unwrap();
+        let out = outside.path().to_str().unwrap();
+        let git_dir = format!("--git-dir={out}/.git");
+        let work_tree = format!("--work-tree={out}");
+        let attempts: [&[&str]; 6] = [
+            &["-C", out, "init", "-q"],
+            &[&git_dir, "init", "-q"],
+            &["--work-tree", out, "status"],
+            &[&work_tree, "status"],
+            &["--namespace=x", "status"],
+            &["-c", "core.bare=true", "status"],
+        ];
+        for args in attempts {
+            let result = std::panic::catch_unwind(|| fx.git(&fx.canonical(), args));
+            assert!(result.is_err(), "git {args:?} was allowed");
+        }
+        assert!(
+            !outside.path().join(".git").exists(),
+            "created a repo outside"
+        );
     }
 }

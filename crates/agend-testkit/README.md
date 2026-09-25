@@ -81,7 +81,10 @@ daemon 重啟：`RuntimeFixture`、`DriverFixture`、`StoreFixture` 各有一個
 
 衛生規則（每個 command 都套用）：
 
-- **只在自己的暫存目錄裡跑**：`dir` 解析後不在 `root()` 裡（或不是絕對路徑）就 panic；`commit` 的檔名只能是單純的相對路徑。
+- **只在自己的暫存目錄裡跑**：`dir` 必須是絕對路徑，解析後嚴格在 `root()` 裡面，否則 panic。`root()` 本身也拒絕：它只是容器，git 的 ceiling 只擋在它下面的目錄，在它本身跑 git 會往上找到外層的 repo。
+- `git(dir, args)` 的第一個參數必須是子指令；`-C`、`--git-dir`、`--work-tree`、`--namespace`、`-c` 等全域選項一律 panic（repo 用 `dir` 指定）。
+- `commit` 的檔名只能是單純的相對路徑，路徑上任何一段是 symlink 就 panic，寫檔前確認上層目錄解析後仍在 work tree 裡。
+- **不檢查的**：子指令後面的路徑參數（例如 `worktree add <path>`），以及 `command(program, dir)` 除了 `dir` 以外的參數；測試要自己只傳 fixture 裡的路徑。
 - 一律 `Command::current_dir(<絕對路徑>)`，不用 process 的 cwd；`root()` 已解析 symlink（macOS 的 `/var` → `/private/var`）。
 - `GIT_CONFIG_GLOBAL=/dev/null`、`GIT_CONFIG_NOSYSTEM=1`、`GIT_CEILING_DIRECTORIES=<root>`；固定 author／committer 與日期，所以同樣的內容、parent、訊息得到同樣的 commit id（不同 commit 請用不同訊息）。
 - 移除繼承來的 `GIT_*`、`AGEND_*`（含 `GIT_DIR`、`GIT_WORK_TREE`、`AGEND_HOME`）。
