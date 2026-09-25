@@ -26,6 +26,8 @@ use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
 const NOW: u64 = FakeClock::DEFAULT_START_UNIX_MS;
+/// The build file of a new database.
+const NEW_DB: &str = ".agend.db.new";
 
 fn manifest_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -469,10 +471,10 @@ fn a_failing_migration_rolls_back_and_leaves_user_version_unchanged() {
 
 /// A new database is built beside `agend.db` and only linked into place
 /// once every migration has committed: a failed creation leaves no
-/// `agend.db` (which the next boot would refuse), and the next open
-/// finishes the build.
+/// `agend.db` (which the next boot would refuse), and the next open builds
+/// the database again.
 #[test]
-fn a_failed_creation_leaves_no_database_and_the_next_open_finishes_it() {
+fn a_failed_creation_leaves_no_database_and_the_next_open_builds_it_again() {
     const BROKEN: Migration = Migration {
         name: "9002_test_broken",
         sql: "INSERT INTO no_such_table VALUES (1);",
@@ -484,7 +486,7 @@ fn a_failed_creation_leaves_no_database_and_the_next_open_finishes_it() {
         .unwrap();
     assert!(matches!(error, StoreError::Migration { .. }), "{error}");
     assert!(!home.join(DB_FILE).exists(), "no half-made agend.db");
-    assert_eq!(user_version(&home.join(".agend.db.new")), 1);
+    assert_eq!(user_version(&home.join(NEW_DB)), 1);
 
     let store = SqliteStore::open(&home, NOW).unwrap();
     block_on(store.create_task(&task("T-1"))).unwrap();
@@ -500,16 +502,72 @@ fn a_failed_creation_leaves_no_database_and_the_next_open_finishes_it() {
 
 /// A kill between creating the build file and SQLite's first write leaves
 /// a 0-byte `.agend.db.new`; unlike a 0-byte `agend.db` it is only a build
-/// file, and the next open builds the database in it.
+/// file, and the next open builds the database again.
 #[test]
-fn an_empty_build_file_from_a_killed_creation_is_finished() {
+fn an_empty_build_file_from_a_killed_creation_is_rebuilt() {
     let dir = TempDir::new("store-create-killed").unwrap();
     let home = dir.path().join("home");
     fs::create_dir(&home).unwrap();
-    fs::write(home.join(".agend.db.new"), b"").unwrap();
+    fs::write(home.join(NEW_DB), b"").unwrap();
     let store = SqliteStore::open(&home, NOW).unwrap();
     block_on(store.create_task(&task("T-1"))).unwrap();
-    assert!(!home.join(".agend.db.new").exists());
+    assert!(!home.join(NEW_DB).exists());
+}
+
+/// Verifier finding (gate 5 round 2): a leftover build file was linked in
+/// as it was, keeping its mode and its version. It is removed and the
+/// database built from scratch.
+#[test]
+fn a_leftover_build_file_is_replaced_by_a_fresh_0600_v1_database() {
+    let dir = TempDir::new("store-leftover-build").unwrap();
+    let home = dir.path().join("home");
+    fs::create_dir(&home).unwrap();
+    let new = home.join(NEW_DB);
+    let leftover = Connection::open(&new).unwrap();
+    leftover
+        .execute_batch("CREATE TABLE leftover (a); PRAGMA user_version = 5;")
+        .unwrap();
+    drop(leftover);
+    fs::set_permissions(&new, fs::Permissions::from_mode(0o644)).unwrap();
+    fs::write(home.join(format!("{NEW_DB}-journal")), b"stale journal").unwrap();
+
+    let store = SqliteStore::open(&home, NOW).unwrap();
+    block_on(store.create_task(&task("T-1"))).unwrap();
+    drop(store);
+    let db = home.join(DB_FILE);
+    assert_eq!(mode(&db), 0o600);
+    assert_eq!(user_version(&db), LATEST_VERSION);
+    assert_eq!(schema_dump(&db), golden().1, "no table of the leftover");
+    assert_eq!(listing(&home), BTreeSet::from([DB_FILE.to_owned()]));
+}
+
+/// A build file that is a symlink (or not a regular file) is not the
+/// store's; it is refused with the path named, and nothing is created.
+#[test]
+fn a_leftover_build_file_that_is_a_symlink_is_refused() {
+    let dir = TempDir::new("store-leftover-symlink").unwrap();
+    let home = dir.path().join("home");
+    fs::create_dir(&home).unwrap();
+    let outside = dir.path().join("outside.db");
+    fs::write(&outside, b"").unwrap();
+    let new = home.join(NEW_DB);
+    std::os::unix::fs::symlink(&outside, &new).unwrap();
+
+    let error = SqliteStore::open(&home, NOW).err().unwrap();
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "refusing to use {}: a leftover build file that is not a regular file owned by \
+             the home's owner; remove it by hand",
+            new.display()
+        )
+    );
+    assert_eq!(listing(&home), BTreeSet::from([NEW_DB.to_owned()]));
+    assert_eq!(
+        fs::metadata(&outside).unwrap().len(),
+        0,
+        "the target is untouched"
+    );
 }
 
 /// Verifier finding (gate 5 round 1): an `agend.db` truncated to 0 bytes,

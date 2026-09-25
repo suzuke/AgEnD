@@ -13,7 +13,8 @@
 //!   the store reads no environment variable.
 //! - A new database is built as `<home>/.agend.db.new` and hard-linked to
 //!   `agend.db` only after every migration has committed, so an existing
-//!   `agend.db` is always a database this store finished creating. One that
+//!   `agend.db` is always a database this store finished creating. A build
+//!   file left by a failed or killed creation is removed and built again. One that
 //!   is empty (0 bytes) or has schema version 0 was damaged or replaced; the
 //!   store refuses it ([`StoreError::Empty`], [`StoreError::NoSchema`])
 //!   without changing a byte, instead of starting over with an empty
@@ -42,7 +43,7 @@ mod task_row;
 use std::fmt;
 use std::fs::{self, DirBuilder, File, OpenOptions};
 use std::io;
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -104,6 +105,16 @@ pub enum StoreError {
     Invalid(String),
     /// A snapshot failed its `quick_check`; it was not kept.
     SnapshotCheck(String),
+    /// A file in the home is not what the store expects; nothing was changed.
+    Refused {
+        path: PathBuf,
+        reason: &'static str,
+    },
+    /// Creating `agend.db` failed at `step`.
+    Create {
+        step: String,
+        source: io::Error,
+    },
     Sqlite(rusqlite::Error),
     Io(io::Error),
 }
@@ -145,6 +156,12 @@ impl fmt::Display for StoreError {
             Self::UnknownTask(id) => write!(f, "no task {id}"),
             Self::Invalid(what) => write!(f, "invalid stored value: {what}"),
             Self::SnapshotCheck(what) => write!(f, "DB snapshot failed quick_check: {what}"),
+            Self::Refused { path, reason } => {
+                write!(f, "refusing to use {}: {reason}", path.display())
+            }
+            Self::Create { step, source } => {
+                write!(f, "creating {DB_FILE} failed: {step}: {source}")
+            }
             Self::Sqlite(e) => write!(f, "sqlite: {e}"),
             Self::Io(e) => write!(f, "io: {e}"),
         }
@@ -404,10 +421,15 @@ fn open_connection(
             home: home.to_path_buf(),
         });
     }
-    // Holding the lock, so no other process is using it: the build file of
-    // a creation that crashed after linking.
-    remove_if_present(&home.join(NEW_DB_FILE))?;
-    remove_if_present(&home.join(format!("{NEW_DB_FILE}-journal")))?;
+    // A creation killed between linking and removing the build file's name
+    // leaves a second name for this file; the lock on it is held here. A
+    // build file that is another file belongs to a creator still running.
+    let new = home.join(NEW_DB_FILE);
+    if fs::symlink_metadata(&new).is_ok_and(|m| fs::metadata(&db).is_ok_and(|d| same_file(&m, &d)))
+    {
+        remove_if_present(&new)?;
+        remove_if_present(&home.join(format!("{NEW_DB_FILE}-journal")))?;
+    }
     let journal: String = conn.query_row("PRAGMA journal_mode = WAL", [], |r| r.get(0))?;
     if journal != "wal" {
         return Err(StoreError::Invalid(format!("journal_mode is {journal}")));
@@ -422,34 +444,101 @@ fn open_connection(
 }
 
 /// Builds a new database in [`NEW_DB_FILE`] (rollback journal, every
-/// migration committed) and hard-links it to `db`. A crash leaves at most
-/// the build file, which the next creation continues from; a hard link
-/// never replaces an `agend.db` another process linked first.
+/// migration committed) and publishes it as `db`.
+///
+/// Creators are serialised by the build file's exclusive lock: only the
+/// process holding the lock on the file currently at `.agend.db.new` changes
+/// that path (removes a leftover one, or publishes its own). A leftover is
+/// locked before it is removed and that lock is kept until the new build
+/// file is created and locked, so a creator that opened the old file gets
+/// [`StoreError::InUse`]; one whose file was replaced between its create and
+/// its lock finds a different file at the path and stops with `InUse` too.
 fn create_database(home: &Path, db: &Path, migrations: &[Migration]) -> Result<(), StoreError> {
     let new = home.join(NEW_DB_FILE);
+    let leftover = remove_leftover_build(home, &new)?;
     // SQLite would create the file with the umask's mode; create it 0600
     // first (an empty file is an empty database). SQLite gives the -wal
     // file the database file's mode.
-    OpenOptions::new()
+    let file = match OpenOptions::new()
         .write(true)
-        .create(true)
-        .truncate(false)
+        .create_new(true)
         .mode(0o600)
-        .open(&new)?;
+        .open(&new)
+    {
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => return Err(StoreError::InUse),
+        opened => opened?,
+    };
     let mut conn = lock(&new)?;
-    let found = user_version(&conn)?;
+    drop(leftover);
+    if !same_file(&file.metadata()?, &fs::symlink_metadata(&new)?) {
+        return Err(StoreError::InUse);
+    }
     conn.pragma_update(None, "synchronous", "FULL")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
-    migrate::apply(&mut conn, found, migrations)?;
+    migrate::apply(&mut conn, 0, migrations)?;
+    publish(&new, db)?;
     conn.close().map_err(|(_, e)| e)?;
-    if let Err(e) = fs::hard_link(&new, db) {
-        // Another process finished the same creation first.
-        if !db.exists() {
-            return Err(e.into());
-        }
-    }
     File::open(home)?.sync_all()?;
     Ok(())
+}
+
+/// Removes a build file left by a creation that failed or was killed. It
+/// holds no user data (it was never published), so the database is built
+/// again from scratch instead of finishing it: its mode, version and content
+/// are whatever the crash left. Returns the lock taken on it, which the
+/// caller keeps until its own build file is locked; [`StoreError::InUse`]
+/// when a creator is building it right now.
+fn remove_leftover_build(home: &Path, new: &Path) -> Result<Option<Connection>, StoreError> {
+    let journal = home.join(format!("{NEW_DB_FILE}-journal"));
+    let meta = match fs::symlink_metadata(new) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            // A journal without its database would be rolled back into the
+            // new build file.
+            remove_if_present(&journal)?;
+            return Ok(None);
+        }
+        found => found?,
+    };
+    if !meta.file_type().is_file() || meta.uid() != fs::metadata(home)?.uid() {
+        return Err(StoreError::Refused {
+            path: new.to_path_buf(),
+            reason: "a leftover build file that is not a regular file owned by the home's \
+                     owner; remove it by hand",
+        });
+    }
+    let held = match lock(new) {
+        Ok(conn) => Some(conn),
+        // Not a database, so no creator holds a lock on it.
+        Err(StoreError::Sqlite(e)) if e.sqlite_error_code() == Some(ErrorCode::NotADatabase) => {
+            None
+        }
+        Err(e) => return Err(e),
+    };
+    remove_if_present(new)?;
+    remove_if_present(&journal)?;
+    Ok(held)
+}
+
+/// Makes the build file `db`, never replacing an existing `db`: a hard
+/// link, then the build file's name is removed. The caller holds the build
+/// file's lock, so no other creator is here at the same time.
+fn publish(new: &Path, db: &Path) -> Result<(), StoreError> {
+    match fs::hard_link(new, db) {
+        // A creator that finished before this one took the lock.
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => return Ok(()),
+        linked => linked.map_err(|source| StoreError::Create {
+            step: format!("hard-linking {NEW_DB_FILE} to {DB_FILE}"),
+            source,
+        })?,
+    }
+    fs::remove_file(new).map_err(|source| StoreError::Create {
+        step: format!("removing {NEW_DB_FILE} after linking it"),
+        source,
+    })
+}
+
+fn same_file(a: &fs::Metadata, b: &fs::Metadata) -> bool {
+    (a.dev(), a.ino()) == (b.dev(), b.ino())
 }
 
 /// Opens `path` read-write and takes the exclusive lock, held until the
