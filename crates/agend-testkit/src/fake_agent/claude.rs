@@ -1,30 +1,35 @@
-//! `fake-claude`: the subset of Claude Code 2.1.281 in interactive mode that
-//! docs/backends/claude-code.md, research/spike-claude.md and
-//! spike-claude-f.md record (D16): hooks for state, an MCP channel for
-//! messages, `Esc` to interrupt.
+//! `fake-claude`: the subset of Claude Code 2.1.282 in interactive mode that
+//! docs/backends/claude-code.md, research/spike-claude.md, spike-claude-f.md
+//! (D16) and the recordings in `transcripts/claude/` show: hooks for state,
+//! an MCP channel for messages, `Esc` to interrupt. The conformance test
+//! (`tests/conformance.rs`) compares its hooks, MCP messages, keys and
+//! screen markers with the recordings by shape.
 //!
 //! | Covered | Behaviour |
 //! |---|---|
-//! | hooks from `.claude/settings.json` (and `--settings <file>`) | `{"hooks": {"<Event>": [{"hooks": [{"type": "command", "command": ...}]}]}}`; each command runs with `sh -c` in the project dir, the JSON payload on stdin and `CLAUDE_PROJECT_DIR` set |
-//! | `SessionStart` | `source` `startup` or `resume` (with `--resume <id>`) |
-//! | `UserPromptSubmit` | for typed prompts and channel messages, `prompt` holds the text |
-//! | `Stop` | after every finished turn, with `stop_hook_active`; a hook printing `{"decision":"block","reason":...}` starts one more turn with the reason (the next Stop has `stop_hook_active: true`) |
+//! | hooks from `.claude/settings.json` (and `--settings <file>`) | `{"hooks": {"<Event>": [{"hooks": [{"type": "command", "command": ...}]}]}}`; each command runs with `sh -c` in the project dir, the JSON payload on stdin and `CLAUDE_PROJECT_DIR` set. Every payload has `session_id`, `transcript_path`, `cwd`, `hook_event_name`, `scratchpad_dir` |
+//! | `SessionStart` | `source` `startup` (with `model`) or `resume` (with `--resume <id>`; `context_tokens`, `estimated_cache_write_usd`, `prompt_cache_likely_expired`, `seconds_since_last_response` instead of `model`) |
+//! | `UserPromptSubmit` | `prompt` holds the text; `permission_mode`, `prompt_id` |
+//! | `Stop` | after every finished turn: `stop_hook_active`, `last_assistant_message`, `background_tasks`, `session_crons`, `permission_mode`, `prompt_id`; a hook printing `{"decision":"block","reason":...}` starts one more turn with the reason (the next Stop has `stop_hook_active: true`) |
+//! | `SessionEnd` | on `/exit`: `reason: "prompt_input_exit"`, `prompt_id` |
 //! | `Esc` (byte 0x1b on stdin) | interrupts the running turn; no Stop hook fires (spike F3) |
 //! | typed input | stdin bytes up to `\r` or `\n`; typed while busy → runs after the turn |
-//! | channel | with `--dangerously-load-development-channels server:<name>`: starts `mcpServers.<name>` from `.mcp.json`, MCP `initialize` over stdio (needs `capabilities.experimental["claude/channel"]`), then each `notifications/claude/channel {content, meta}` becomes the prompt `<channel source="<name>" k="v"...>\n<content>\n</channel>` |
-//! | channel while busy | `UserPromptSubmit` fires but the message is not acted on (spike C1: it may be dropped; the fake always drops it), so drivers must queue with the Stop hook |
+//! | `run: <command>` on a line of the prompt | the turn asks to use Bash: `PreToolUse` (`tool_name: "Bash"`, `tool_input {command, description}`, `tool_use_id`), then `PermissionRequest`, then the screen shows `Do you want to proceed?`; `Esc` cancels (no more hooks, no Stop). Allowing is not modelled (never recorded); other input waits as while busy |
+//! | channel | with `--dangerously-load-development-channels server:<name>`: starts `mcpServers.<name>` from `.mcp.json`, MCP `initialize` (protocol `2025-11-25`, `capabilities {elicitation, roots}`) over stdio (needs `capabilities.experimental["claude/channel"]`), `notifications/initialized`, `tools/list`; then each `notifications/claude/channel {content, meta}` becomes the prompt `<channel source="<name>" k="v"...>\n<content>\n</channel>` |
+//! | channel while busy | **deliberately differs from real claude.** Real 2.1.282 queues the message and, after the turn (and any Stop-hook turn), fires `UserPromptSubmit` and answers it (recording `busy`). The fake fires `UserPromptSubmit` at that same point but never acts on the message (no turn, no Stop): the worst case of spike C1, kept because D16 requires drivers to queue busy messages through the Stop hook (gate-02 A6); the conformance check lists this in `shape::DELIBERATE` |
 //!
 //! Output lines (stdout): `> <prompt>`, `⏺ fake reply: ...`,
 //! `Stop hook error: <reason>` (Claude Code's label for a blocking Stop hook),
-//! `Interrupted · What should Claude do instead?`, and the fake-only
-//! `fake-claude: idle` after each settled turn so tests can wait for it.
+//! `Interrupted · What should Claude do instead?`, `Do you want to proceed?`,
+//! and the fake-only `fake-claude: idle` after each settled turn so tests can
+//! wait for it.
 //!
-//! Not covered: the TUI screen, startup prompts, tools and
-//! `PreToolUse`/`PostToolUse`, permissions, hook exit code 2, hook matchers
-//! and timeouts, the channel `reply` tool, the CLAUDE.md source-note effect
-//! after `Esc` (spike F: 0/3 vs 3/3), `-p` stream-json.
+//! Not covered: the TUI screen, startup dialogs, tools other than the Bash
+//! permission request, `PostToolUse`, `Notification`, hook exit code 2, hook
+//! matchers and timeouts, the channel `reply` tool, the CLAUDE.md
+//! source-note effect after `Esc` (spike F: 0/3 vs 3/3), `-p` stream-json.
 //!
-//! Must NOT: call a model.
+//! Must NOT: call a model or run the command it asks permission for.
 
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -43,6 +48,17 @@ pub const IDLE_LINE: &str = "fake-claude: idle";
 /// writes under `~/.claude/projects/`; the fake keeps them in the project).
 pub const TRANSCRIPT_DIR: &str = ".claude/fake-transcripts";
 pub const INTERRUPTED_LINE: &str = "Interrupted · What should Claude do instead?";
+pub const PERMISSION_LINE: &str = "Do you want to proceed?";
+/// Reported as `scratchpad_dir` (`<dir>/<session>`), never created.
+pub const SCRATCHPAD_DIR: &str = ".claude/fake-scratchpad";
+
+/// The command of the first `run: <command>` line in a prompt.
+fn run_command(prompt: &str) -> Option<String> {
+    prompt
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("run: "))
+        .map(|c| c.trim().to_owned())
+}
 
 enum Event {
     Input(Vec<u8>),
@@ -56,7 +72,10 @@ enum Event {
 struct Turn {
     deadline: Instant,
     prompt: String,
+    prompt_id: String,
     stop_hook_active: bool,
+    /// `Some(command)` while the turn waits for a Bash permission answer.
+    asking: Option<String>,
 }
 
 struct Claude {
@@ -67,7 +86,10 @@ struct Claude {
     turn_length: Duration,
     turn: Option<Turn>,
     typed: VecDeque<String>,
+    /// Channel messages that arrived while busy (see the module docs).
+    busy_channel: VecDeque<String>,
     channel_name: Option<String>,
+    next_id: u64,
 }
 
 pub fn main(args: impl IntoIterator<Item = String>) -> ExitCode {
@@ -79,6 +101,8 @@ pub fn main(args: impl IntoIterator<Item = String>) -> ExitCode {
         "--turn-ms",
         "--model",
         "--permission-mode",
+        "--effort",
+        "--setting-sources",
     ];
     let switches = ["--dangerously-skip-permissions"];
     let args = match Args::parse(args, &known, &switches, &[]) {
@@ -127,19 +151,22 @@ fn run(args: &Args) -> Result<(), String> {
         turn_length: Duration::from_millis(args.turn_ms()?),
         turn: None,
         typed: VecDeque::new(),
+        busy_channel: VecDeque::new(),
         channel_name,
+        next_id: 0,
     };
     println!(
         "fake-claude: session {} in {}",
         claude.session_id,
         claude.cwd.display()
     );
-    let source = if resumed.is_some() {
-        "resume"
+    let start = if resumed.is_some() {
+        json!({"source": "resume", "context_tokens": 0, "estimated_cache_write_usd": 0.0,
+               "prompt_cache_likely_expired": false, "seconds_since_last_response": 0})
     } else {
-        "startup"
+        json!({"source": "startup", "model": "fake"})
     };
-    claude.hook("SessionStart", json!({"source": source, "model": "fake"}));
+    claude.hook("SessionStart", start);
     println!("{IDLE_LINE}");
     let result = claude.event_loop(&rx);
     if let Some((mut child, stdin)) = channel {
@@ -180,6 +207,11 @@ impl Claude {
                                 let text = String::from_utf8_lossy(&line).trim().to_owned();
                                 line.clear();
                                 if text == "/exit" {
+                                    let id = self.prompt_id();
+                                    self.hook(
+                                        "SessionEnd",
+                                        json!({"reason": "prompt_input_exit", "prompt_id": id}),
+                                    );
                                     return Ok(());
                                 }
                                 if !text.is_empty() {
@@ -211,8 +243,7 @@ impl Claude {
         }
         let prompt = format!("{open}>\n{content}\n</channel>");
         if self.turn.is_some() {
-            self.hook("UserPromptSubmit", json!({"prompt": prompt}));
-            println!("(channel message arrived while busy; not acted on)");
+            self.busy_channel.push_back(prompt);
             return;
         }
         self.start_turn(prompt, false, true);
@@ -224,16 +255,27 @@ impl Claude {
         }
     }
 
+    fn prompt_id(&mut self) -> String {
+        self.next_id += 1;
+        format!("00000000-0000-4000-9000-{:012}", self.next_id)
+    }
+
     fn start_turn(&mut self, prompt: String, stop_hook_active: bool, submit_hook: bool) {
+        let prompt_id = self.prompt_id();
         if submit_hook {
-            self.hook("UserPromptSubmit", json!({"prompt": prompt}));
+            self.hook(
+                "UserPromptSubmit",
+                json!({"prompt": prompt, "permission_mode": "default", "prompt_id": prompt_id}),
+            );
         }
         println!("> {}", prompt.replace('\n', "\\n"));
         self.record("user", &prompt);
         self.turn = Some(Turn {
             deadline: Instant::now() + self.turn_length,
             prompt,
+            prompt_id,
             stop_hook_active,
+            asking: None,
         });
     }
 
@@ -245,11 +287,38 @@ impl Claude {
     }
 
     fn finish_turn(&mut self) {
-        let Some(turn) = self.turn.take() else { return };
+        let Some(mut turn) = self.turn.take() else {
+            return;
+        };
+        if turn.asking.is_some() {
+            // Waiting for a permission answer: no deadline applies.
+            turn.deadline = Instant::now() + Duration::from_secs(3600);
+            self.turn = Some(turn);
+            return;
+        }
+        if let Some(command) = run_command(&turn.prompt) {
+            let input = json!({"command": command, "description": format!("Run {command}")});
+            let common = json!({"permission_mode": "default", "prompt_id": turn.prompt_id,
+                                "tool_name": "Bash", "tool_input": input});
+            let mut pre = common.clone();
+            pre["tool_use_id"] = json!(format!("toolu_fake{:016}", self.next_id));
+            self.hook("PreToolUse", pre);
+            self.hook("PermissionRequest", common);
+            println!("{PERMISSION_LINE}");
+            turn.asking = Some(command);
+            turn.deadline = Instant::now() + Duration::from_secs(3600);
+            self.turn = Some(turn);
+            return;
+        }
         let reply = reply_to(&turn.prompt);
         println!("⏺ {reply}");
         self.record("assistant", &reply);
-        let outputs = self.hook("Stop", json!({"stop_hook_active": turn.stop_hook_active}));
+        let outputs = self.hook(
+            "Stop",
+            json!({"stop_hook_active": turn.stop_hook_active, "last_assistant_message": reply,
+                   "background_tasks": [], "session_crons": [], "permission_mode": "default",
+                   "prompt_id": turn.prompt_id}),
+        );
         let block = outputs
             .iter()
             .find(|o| o["decision"] == "block")
@@ -264,6 +333,14 @@ impl Claude {
     }
 
     fn settle(&mut self) {
+        while let Some(prompt) = self.busy_channel.pop_front() {
+            let id = self.prompt_id();
+            self.hook(
+                "UserPromptSubmit",
+                json!({"prompt": prompt, "permission_mode": "default", "prompt_id": id}),
+            );
+            println!("(channel message arrived while busy; not acted on)");
+        }
         self.next_typed();
         if self.turn.is_none() {
             println!("{IDLE_LINE}");
@@ -286,12 +363,13 @@ impl Claude {
 
     /// Runs every hook for `event`; returns the JSON each one printed.
     fn hook(&self, event: &str, extra: Value) -> Vec<Value> {
+        let scratchpad = self.cwd.join(SCRATCHPAD_DIR).join(&self.session_id);
         let mut payload = json!({
             "session_id": self.session_id,
             "transcript_path": self.transcript,
             "cwd": self.cwd,
             "hook_event_name": event,
-            "permission_mode": "default",
+            "scratchpad_dir": scratchpad,
         });
         if let (Some(payload), Value::Object(extra)) = (payload.as_object_mut(), extra) {
             payload.extend(extra);
@@ -405,7 +483,11 @@ fn start_channel(cwd: &Path, name: &str, tx: Sender<Event>) -> Result<(Child, Ch
     let mut stdout = BufReader::new(child.stdout.take().expect("piped stdout"));
     let initialize = json!({
         "jsonrpc": "2.0", "id": 0, "method": "initialize",
-        "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "fake-claude", "version": "2.1.281-fake"}}
+        "params": {"protocolVersion": "2025-11-25",
+                   "capabilities": {"elicitation": {}, "roots": {"listChanged": true}},
+                   "clientInfo": {"name": "fake-claude", "title": "fake-claude", "version": "2.1.282-fake",
+                                  "description": "agend-testkit fake of Claude Code",
+                                  "websiteUrl": "https://github.com/suzuke/AgEnD"}}
     });
     writeln!(stdin, "{initialize}").map_err(|e| format!("channel initialize: {e}"))?;
     let mut line = String::new();
@@ -419,12 +501,12 @@ fn start_channel(cwd: &Path, name: &str, tx: Sender<Event>) -> Result<(Child, Ch
             "server:{name} does not declare the claude/channel capability"
         ));
     }
-    writeln!(
-        stdin,
-        "{}",
-        json!({"jsonrpc": "2.0", "method": "notifications/initialized"})
-    )
-    .map_err(|e| format!("channel initialized: {e}"))?;
+    for message in [
+        json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+        json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}),
+    ] {
+        writeln!(stdin, "{message}").map_err(|e| format!("channel initialized: {e}"))?;
+    }
     std::thread::spawn(move || {
         for line in stdout.lines().map_while(Result::ok) {
             let Ok(message) = serde_json::from_str::<Value>(&line) else {

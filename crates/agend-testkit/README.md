@@ -1,9 +1,9 @@
 # agend-testkit
 
 > **TL;DR**
-> - 共用測試基礎設施（只能當 dev-dependency）：7 個 trait 的假實作、契約測試、假 daemon、3 個假 agent 程式。
-> - 記住：**假實作要跑和真實作同一套契約測試**，才不會漂移（v1 #1483）；真實作在各自的施工關接上同一個 suite。
-> - 下一步：`~/.cargo/bin/cargo xtask accept testkit`；契約規則看 [CONTRACTS.md](CONTRACTS.md)。
+> - 共用測試基礎設施（只能當 dev-dependency）：7 個 trait 的假實作、契約測試、假 daemon、3 個假 agent 程式、真 backend 的錄製器。
+> - 記住：**假實作要跑和真實作同一套契約測試，假 agent 要和真 CLI 的錄製檔形狀一致**，才不會漂移（v1 #1483）。
+> - 下一步：`~/.cargo/bin/cargo xtask accept testkit`；契約規則看 [CONTRACTS.md](CONTRACTS.md)，錄製與一致性檢查看 [RECORDER.md](RECORDER.md)。
 
 ## 負責
 
@@ -15,6 +15,7 @@
 | 假 agent | `fake_agent` + `src/bin/` | `fake-codex-app-server`、`fake-opencode-serve`、`fake-claude` |
 | 執行 future | `executor` | `block_on`：不用 async runtime 就能跑 trait 的 future |
 | 暫存目錄 | `tempdir` | `TempDir`：唯一目錄，drop 時刪除 |
+| 錄製器 | `recorder` + `src/bin/agend-record.rs` | 用假 agent 模擬的傳輸驅動真 CLI 跑 5 個情境，錄成 `transcripts/<backend>/<scenario>.jsonl`；同一段情境程式也驅動假 agent，`tests/conformance.rs` 按形狀比對（[RECORDER.md](RECORDER.md)） |
 | 暫存 git repo | `git_fixture` | `GitFixture`：canonical repo、bare team origin、linked worktree 與 branch，全部在一個新的暫存目錄裡；見下方「git fixture」 |
 
 ## 不負責
@@ -75,7 +76,7 @@ daemon 重啟：`RuntimeFixture`、`DriverFixture`、`StoreFixture` 各有一個
 |---|---|
 | `canonical()` | repo，`main` 上有一個初始 commit，`origin` 指向下面的 bare repo，`main` 已 push |
 | `origin()` | bare 的 team origin（`origin.git`） |
-| `add_worktree(name, branch, from)` | `worktrees/<name>`：canonical 的 linked worktree，在新 branch 上 |
+| `add_worktree(name, branch, from)` | `worktrees/<name>`：canonical 的 linked worktree，在新 branch 上；`name` 是 `.git`（不分大小寫）就 panic，不建任何東西 |
 
 其他：`branch(name, from)`、`commit(dir, file, message)`（回新的 head）、`rev_parse`、`is_ancestor`、`git(dir, args)`（失敗就 panic 並印 stderr）、`command(program, dir)`（給要自己跑程式的測試，例如第 3 施工關的 shim）。drop 時整個目錄刪掉。
 
@@ -101,15 +102,21 @@ daemon 重啟：`RuntimeFixture`、`DriverFixture`、`StoreFixture` 各有一個
 
 ## 假 agent 程式
 
-所有假 agent：回覆固定為 `fake reply: <prompt>`；一個 turn 花 `--turn-ms`（預設 100）毫秒；**stdin 結束就以 0 結束**。
+所有假 agent：回覆固定為 `fake reply: <prompt>`；一個 turn 花 `--turn-ms`（預設 100）毫秒；**stdin 結束就以 0 結束**；prompt 有一行以 `run: <指令>` 開頭時要求授權（不會真的執行）；設了 `AGEND_FAKE_STATE_DIR` 才把 thread／session 存在那裡，重啟後可接續（沒設就不寫任何檔）。
 
 | 程式 | 真的指令 | 涵蓋 | 沒涵蓋 |
 |---|---|---|---|
-| `fake-codex-app-server` | `codex app-server --listen unix://<path>` | WebSocket（unix socket）上的 JSON-RPC：`initialize`、`thread/start`、`thread/resume`、`turn/start` → `turn/completed`、`turn/steer`、`turn/interrupt`、`thread/queue/add`、`item/commandExecution/requestApproval`（prompt 以 `run: ` 開頭時）；長路徑改用短路徑 `<tmp>/fake-codex-<hash>.sock` + symlink（陷阱 1） | `thread/turns/list`、delta、token usage、其他 approval、sandbox |
-| `fake-opencode-serve` | `opencode serve --hostname 127.0.0.1 --port <p>` | `POST /session`、`message`、`prompt_async`（忙碌時排隊）、`abort`（`MessageAbortedError`）、`GET /session/:id/message`、`/session/status`、`/event` SSE（無 replay） | permission、delta、config、model |
-| `fake-claude` | `claude`（互動模式） | `.claude/settings.json` hooks：`SessionStart`、`UserPromptSubmit`、`Stop`（`decision: block` 多跑一輪，`stop_hook_active`）；stdin 的 `Esc` 中斷且不觸發 Stop；`.mcp.json` channel server 的 `notifications/claude/channel` 包成 `<channel source=...>`；忙碌時的 channel 訊息不處理；transcript 寫在專案內 `.claude/fake-transcripts/<session>.jsonl`（真的 Claude Code 寫在 `~/.claude/projects/`） | TUI 畫面、啟動提示、工具與 Pre/PostToolUse、權限、hook exit 2、CLAUDE.md 來源說明的效果 |
+| `fake-codex-app-server` | `codex app-server --listen unix://<path>`（0.156.1） | WebSocket（unix socket）上的 JSON-RPC：`initialize`、`thread/start`／`resume`（重啟後也可）、`turn/start` → item 與 delta、`thread/tokenUsage/updated`、`thread/status/changed`、`turn/completed`；`turn/steer`（同一輪另一則回覆）、`turn/interrupt`、`thread/queue/add`（自動出列）、`item/commandExecution/requestApproval`；socket 一律在短路徑、要求的路徑是 symlink（陷阱 1） | `thread/turns/list`、reasoning item、其他授權種類、sandbox、MCP／帳號通知 |
+| `fake-opencode-serve` | `opencode serve --pure --hostname 127.0.0.1 --port <p>`（1.18.31） | `POST /session`、`prompt_async`（忙碌時排隊）、`message`、`abort`（`session.error` + `MessageAbortedError`）、`GET /session/:id`、`…/message`、`/session/status`、`/permission` 與 `POST …/permissions/:id`、`/event` SSE（step／text part、delta、session 簿記事件；無 replay） | reasoning part、plugin／catalog 事件、heartbeat、V2 permission、config、model |
+| `fake-claude` | `claude`（互動模式，2.1.282） | `.claude/settings.json` hooks：`SessionStart`（startup／resume）、`UserPromptSubmit`、`Stop`（`decision: block` 多跑一輪，`stop_hook_active`）、`PreToolUse` + `PermissionRequest`（`run: `）、`SessionEnd`（`/exit`）；stdin 的 `Esc` 中斷（不觸發 Stop）；`.mcp.json` channel server：`initialize`、`tools/list`、`notifications/claude/channel` 包成 `<channel source=...>`；**忙碌時的 channel 訊息刻意不處理**（真的會排隊並照做；D16、gate-02 A6）；transcript 寫在專案內 `.claude/fake-transcripts/` | TUI 畫面、啟動對話框、Bash 以外的工具、`PostToolUse`、`Notification`、hook exit 2、CLAUDE.md 來源說明的效果 |
 
-各模組開頭的表格是準確的清單。欄位只有上面列的最少集合；第 7、12 施工關接真 backend 前要用真的 schema 對一次。
+各模組開頭的表格是準確的清單。欄位與事件順序由一致性檢查（`tests/conformance.rs`）對真 CLI 的錄製檔按形狀比對；CLI 升版時用 `cargo xtask record` 重錄（[RECORDER.md](RECORDER.md)）。
+
+## 錄製器：新增一個 backend
+
+1. 在 `src/recorder/` 加一個模組，實作 `recorder::Backend`（`name`、`program`、`fake`、`scenarios`、`run`：啟動、傳輸、情境步驟；同一段 `run` 要能驅動真的與假的）。
+2. 加進 `recorder::BACKENDS`；需要時在 `recorder::shape` 的 `IGNORED`／`UNORDERED`／`COLLAPSED` 加規則並寫原因。
+3. `cargo xtask record <name> --sandbox <寫入沙箱腳本>` 錄製、確認遮蔽、commit。`tests/conformance.rs` 不用改：它逐一檢查 `BACKENDS` 裡的每個 backend。
 
 ## 依賴規則
 
@@ -128,6 +135,7 @@ daemon 重啟：`RuntimeFixture`、`DriverFixture`、`StoreFixture` 各有一個
 - `agend_testkit::fakes::*`、`agend_testkit::contract::{<trait>::run, run_all_fakes}`
 - `agend_testkit::fake_daemon::{FakeDaemon, ProbeClient}`
 - `agend_testkit::fake_agent::{locate, codex::Probe, http::{call, EventStream}}`
+- `agend_testkit::recorder::{BACKENDS, Backend, Scenario, run_fake, read_transcript, shape::compare}`；`cargo xtask record`、`agend-record`
 - 其他 crate 的測試要用假 agent 程式：先 `cargo build -p agend-testkit --bins`，再用 `fake_agent::locate("fake-codex-app-server")`
 
 ## 下一步

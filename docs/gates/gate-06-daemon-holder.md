@@ -15,6 +15,11 @@
 
 - daemon 端的 holder 協定 client（agent runtime adapter）
 - daemon 重啟後重連 holder、取回畫面
+- 開機巡查孤兒 holder：掃 `$AGEND_HOME/run/holders/` 鎖檔，DB 裡沒有的 instance → 送 `Shutdown`（第 4 施工關 P2，使用者 2026-09-25 決定）
+- holder 被 `kill -9` 之後的補救：偵測 holder 死了 → 用 backend 的 `--resume <id>` 把 agent 接回（第 4 施工關 P2／第 3 施工關 T18）
+- daemon 對自己啟動的 holder 收屍（`wait`），避免殭屍
+- 綁定／釋放 worktree 時呼叫 shim 的 `install_hooks`／`uninstall_hooks`（第 3 施工關）
+- 本頁步驟 2（Ctrl-C 停 daemon，agent 還在）依賴第 4 施工關 P2 的 session 分離；步驟 3 的 `pgrep` 只比對這個 `AGEND_HOME` 的 holder
 - daemon 開機時與之後每 24 小時跑一次 store 的 `prune` 與每日 DB 快照（第 5 施工關 P8/P9）
 - 開 DB 時重試到 10 秒，因為重啟時 EXCLUSIVE lock 交接需要時間（第 5 施工關風險）
 

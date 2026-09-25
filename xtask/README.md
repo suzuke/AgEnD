@@ -1,7 +1,7 @@
 # xtask
 
 > **TL;DR**
-> - 開發者工具：`cargo xtask check-deps` 與 `cargo xtask accept <施工關>`。
+> - 開發者工具：`cargo xtask check-deps`、`cargo xtask accept <施工關>`、`cargo xtask record <backend>`。
 > - 記住：**crate 邊界規則由 `check-deps` 強制**；規則是 `xtask/src/check_deps.rs` 裡的資料。
 > - 下一步：改依賴後跑 `cargo xtask check-deps`。
 
@@ -22,11 +22,13 @@
 - `accept core`：跑 workspace fmt、workspace clippy、core tests、protocol compatibility tests、check-deps，再執行 core example 的 protocol 與 code workflow demo。
 - `accept testkit`：對 agend-testkit 跑 fmt、clippy、test（含 7 個契約 suite 與假 agent 程式測試），再跑 check-deps，然後 build 假 agent binary、執行 `testkit_demo` example（三個假 agent 各一段往來並正常結束、假 daemon 的事件身分、契約摘要）。
 - 其他 `accept <施工關>`：對該施工關的 crate 跑 fmt、clippy、test，再跑 check-deps；demo 隨各施工關加入
+- `record <backend> [情境…] --sandbox <腳本>`：build `agend-record`（agend-testkit），在 `<腳本>`（寫入沙箱）裡對**真的** CLI 錄製到 `mktemp -d /private/tmp/agend-rec-out-XXXX`，再在沙箱外把成功的錄製檔複製進 `crates/agend-testkit/transcripts/<backend>/`（見 [RECORDER.md](../crates/agend-testkit/RECORDER.md)）。沒有 `--sandbox` 就不跑
 
 ## 不負責
 
 - 擋刻意繞過（例如改 xtask、加長 allowlist）：靠 code review
-- 產生 protocol JSON schema、打包 release、錄製 backend 畫面 fixture（規劃中，未實作）
+- 產生 protocol JSON schema、打包 release（規劃中，未實作）
+- 錄製器本身（在 agend-testkit；xtask 不依賴 testkit，只執行它的 binary）
 
 ## 模組
 
@@ -35,6 +37,7 @@
 | `check_deps` | 規則與檢查 |
 | `check_core` | agend-core 的結構檢查：`cargo metadata` 規則與無 std 編譯 |
 | `accept` | 13 個施工關的 crate 對照與執行 |
+| `record` | 在寫入沙箱裡跑 `agend-record`，複製錄製檔 |
 
 ## 依賴規則
 

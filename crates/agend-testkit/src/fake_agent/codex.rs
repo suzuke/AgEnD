@@ -1,24 +1,27 @@
 //! `fake-codex-app-server`: the subset of `codex app-server` 0.156.1 that
-//! docs/backends/codex.md and research/spike-codex.md record. JSON-RPC
-//! messages without a `jsonrpc` field (`{id, method, params}`,
-//! `{method, params}`, `{id, result}`, `{id, error}`) in WebSocket text
-//! frames over a unix socket (`--listen unix://<path>`).
+//! docs/backends/codex.md, research/spike-codex.md and the recordings in
+//! `transcripts/codex/` show. JSON-RPC messages without a `jsonrpc` field
+//! (`{id, method, params}`, `{method, params}` with `emittedAtMs`,
+//! `{id, result}`, `{id, error}`) in WebSocket text frames over a unix
+//! socket (`--listen unix://<path>`). The conformance test
+//! (`tests/conformance.rs`) compares its traffic with the recordings by shape.
 //!
 //! | Covered | Behaviour |
 //! |---|---|
-//! | `initialize` | `{userAgent}` |
-//! | `thread/start`, `thread/resume {threadId}` | `{thread: {id}}`; the connection then receives the thread's `turn/*` and `item/*` notifications (only after start or resume, spike S2) |
-//! | `turn/start {threadId, input}` | `{turn: {id, status: "inProgress"}}`, `turn/started`, `item/completed` (userMessage); after `--turn-ms`: `item/completed` (agentMessage), `turn/completed` status `completed`. While a turn runs, a new `turn/start` joins it (spike S3) |
-//! | `turn/steer {threadId, expectedTurnId, input}` | `{turnId}`; the reply covers the steered text; wrong turn id → error -32600 |
-//! | `turn/interrupt {threadId, turnId}` | `{}`, then `turn/completed` status `interrupted` |
-//! | `thread/queue/add {threadId, clientUserMessageId, input}` | `{}`; runs as its own turn after the current one (auto-dequeue) |
-//! | `item/commandExecution/requestApproval` | server→client request when the prompt starts with `run: <command>`; the reply `{decision}` decides whether the command "runs" |
-//! | long `--listen` path | like codex: the socket lives at a short path and the requested path is a symlink to it (pitfall 1) |
+//! | `initialize` | `{codexHome, platformFamily, platformOs, userAgent}` |
+//! | `thread/start {model?, cwd?, approvalPolicy?, sandbox?, config?}` | the full thread settings and `thread` object; `thread/started`. The connection then receives the thread's notifications (only after start or resume, spike S2) |
+//! | `turn/start {threadId, input}` | `{turn}` (`inProgress`), `thread/status/changed` active, `turn/started`. After `--turn-ms` the turn "runs": per input (the prompt, then each steer) `item/started` + `item/completed` userMessage, `item/started` agentMessage, one `item/agentMessage/delta`, `item/completed`, `thread/tokenUsage/updated`; then `thread/status/changed` idle and `turn/completed` (`completed`, the agent messages as `items`). A `turn/start` while a turn runs joins it (spike S3) |
+//! | `turn/steer {threadId, expectedTurnId, input}` | `{turnId}`; the text is one more input of the running turn (its own user message and reply); wrong turn id → error -32600 |
+//! | `turn/interrupt {threadId, turnId}` | `{}`, `thread/status/changed` idle, `turn/completed` `interrupted` |
+//! | `thread/queue/add {threadId, clientUserMessageId, input}` | `{queuedSubmission}`, `thread/queue/changed`; runs as its own turn after the current one (auto-dequeue: `thread/queue/changed`, active, `turn/started`; its user message has `clientId`) |
+//! | `run: <command>` as the prompt | the turn asks: `thread/status/changed` `waitingOnApproval`, a `commandExecution` item (`/bin/zsh -lc '<command>'`), and the server→client request `item/commandExecution/requestApproval`; the reply `{decision}` gives `serverRequest/resolved`, the item `declined` (or `completed` for `accept*`, without running anything; not recorded), then the agent message |
+//! | `thread/resume {threadId}` | `deprecationNotice` (no `excludeTurns`), `thread/status/changed` idle, the settings with the full `thread` (all turns), `thread/tokenUsage/updated`, `thread/goal/cleared` |
+//! | restart | with `AGEND_FAKE_STATE_DIR` set, threads persist in `$AGEND_FAKE_STATE_DIR/fake-codex/threads.json` (the real server keeps rollouts under `CODEX_HOME`), so a restarted fake resumes by id (spike S4); without it nothing persists |
+//! | `--listen` path | like codex: the socket always lives at a short path (`<tmp>/fake-codex-<hash>.sock`, codex: `/private/tmp/codex-daemon-<uid>/<sha256>`) and the requested path is a symlink to it (pitfall 1) |
 //!
-//! Not covered: `thread/turns/list`, `thread/items/list`, streaming deltas,
-//! `thread/status/changed`, token usage, the other approval kinds, sandbox,
-//! real persistence across restarts. Field sets are the minimum above; the
-//! real schema (`codex app-server generate-json-schema`) has more.
+//! Not covered: `thread/turns/list`, `thread/items/list`, reasoning items
+//! (the model's choice), the other approval kinds, sandboxing, MCP server,
+//! account and rate-limit notifications (see `recorder::shape::IGNORED`).
 //!
 //! Must NOT: call a model or run the commands it is asked to approve.
 
@@ -38,14 +41,20 @@ use tungstenite::{Message, WebSocket};
 use super::{Args, reply_to};
 use crate::fakes::lock;
 
-/// Longest socket path bound directly; longer ones get a short real path.
+/// Longest path the short socket path can have.
 pub const MAX_DIRECT_SOCKET_PATH: usize = 100;
 const INVALID_REQUEST: i64 = -32600;
 const METHOD_NOT_FOUND: i64 = -32601;
 const APPROVAL_PREFIX: &str = "run: ";
+const CLI_VERSION: &str = "0.156.1";
+/// Where threads persist, under `$AGEND_FAKE_STATE_DIR`.
+pub const THREADS_FILE: &str = "fake-codex/threads.json";
 
 pub fn main(args: impl IntoIterator<Item = String>) -> ExitCode {
-    let args = match Args::parse(args, &["--listen", "--turn-ms"], &[], &["app-server"]) {
+    // `-c key=value` and `--disable <feature>` are accepted and ignored
+    // (the recorder passes the real CLI's run settings).
+    let known = ["--listen", "--turn-ms", "-c", "--disable"];
+    let args = match Args::parse(args, &known, &[], &["app-server"]) {
         Ok(args) => args,
         Err(e) => return usage(&e),
     };
@@ -56,7 +65,8 @@ pub fn main(args: impl IntoIterator<Item = String>) -> ExitCode {
         Ok(ms) => ms,
         Err(e) => return usage(&e),
     };
-    let server = match Server::bind(Path::new(path), Duration::from_millis(turn_ms)) {
+    let home = super::state_dir();
+    let server = match Server::bind(Path::new(path), Duration::from_millis(turn_ms), home) {
         Ok(server) => server,
         Err(e) => {
             eprintln!("fake-codex-app-server: cannot listen on {path}: {e}");
@@ -71,7 +81,7 @@ pub fn main(args: impl IntoIterator<Item = String>) -> ExitCode {
 
 fn usage(error: &str) -> ExitCode {
     eprintln!(
-        "fake-codex-app-server: {error}\nusage: fake-codex-app-server [app-server] --listen unix://<path> [--turn-ms <ms>]"
+        "fake-codex-app-server: {error}\nusage: fake-codex-app-server [app-server] --listen unix://<path> [-c key=value]... [--disable <feature>]... [--turn-ms <ms>]"
     );
     ExitCode::from(2)
 }
@@ -83,15 +93,24 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn bind(requested: &Path, turn: Duration) -> io::Result<Server> {
+    /// Listens on `requested` (a symlink to a short socket path). With
+    /// `state_dir`, threads are loaded from and saved under it.
+    pub fn bind(
+        requested: &Path,
+        turn: Duration,
+        state_dir: Option<PathBuf>,
+    ) -> io::Result<Server> {
         let bound = socket_path_for(requested);
-        if bound != requested {
-            let _ = std::fs::remove_file(&bound);
-            std::os::unix::fs::symlink(&bound, requested)?;
-        }
+        let _ = std::fs::remove_file(&bound);
+        std::os::unix::fs::symlink(&bound, requested)?;
         let listener = UnixListener::bind(&bound)?;
+        let mut state = State {
+            home: state_dir,
+            ..State::default()
+        };
+        state.load();
         let shared = Arc::new(Shared {
-            state: Mutex::new(State::default()),
+            state: Mutex::new(state),
             turn,
         });
         let ticker = Arc::clone(&shared);
@@ -119,18 +138,14 @@ impl Server {
 impl Drop for Server {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.bound);
-        if self.bound != self.requested {
-            let _ = std::fs::remove_file(&self.requested);
-        }
+        let _ = std::fs::remove_file(&self.requested);
     }
 }
 
-/// `requested` itself if it fits, else `<tmp>/fake-codex-<hash>.sock` (a
-/// file directly in the temp dir, so nothing is left behind once removed).
+/// `<tmp>/fake-codex-<hash>.sock` for any requested path (a file directly in
+/// the temp dir, so nothing is left behind once removed). Real codex always
+/// binds under `/private/tmp/codex-daemon-<uid>/` too, even for short paths.
 pub fn socket_path_for(requested: &Path) -> PathBuf {
-    if requested.as_os_str().len() <= MAX_DIRECT_SOCKET_PATH {
-        return requested.to_path_buf();
-    }
     let mut hasher = DefaultHasher::new();
     requested.hash(&mut hasher);
     std::env::temp_dir().join(format!("fake-codex-{:016x}.sock", hasher.finish()))
@@ -145,41 +160,106 @@ struct Shared {
 struct State {
     connections: BTreeMap<u64, Sender<Value>>,
     threads: BTreeMap<String, ThreadState>,
+    /// (connection, request id) → (thread, turn).
     pending_approvals: BTreeMap<(u64, i64), (String, String)>,
     next_id: u64,
     next_request_id: i64,
+    home: Option<PathBuf>,
+    originator: String,
 }
 
-#[derive(Default)]
 struct ThreadState {
+    /// The thread object (`turns` kept empty; see `turns`).
+    thread: Value,
+    /// Settings echoed by `thread/start` and `thread/resume`.
+    settings: Value,
+    turns: Vec<Value>,
     subscribers: BTreeSet<u64>,
     active: Option<Turn>,
-    queue: VecDeque<String>,
+    queue: VecDeque<(String, String)>,
 }
 
 struct Turn {
     id: String,
-    texts: Vec<String>,
+    /// The prompt, then each steer (or joining `turn/start`).
+    inputs: Vec<String>,
+    /// Inputs already answered.
+    done: usize,
+    client_id: Option<String>,
+    started_at: u64,
     deadline: Instant,
     owner: u64,
-    approval: Approval,
-}
-
-enum Approval {
-    NotNeeded,
-    Needed(String),
-    Asked,
-    Answered(String),
+    /// `Some(item)` while waiting for an approval decision.
+    asking: Option<Value>,
+    items: Vec<Value>,
+    agent_items: Vec<Value>,
 }
 
 impl State {
-    fn id(&mut self, prefix: &str) -> String {
+    fn id(&mut self) -> String {
         self.next_id += 1;
-        format!("{prefix}-{}", self.next_id)
+        format!("00000000-0000-7000-8000-{:012}", self.next_id)
     }
 
-    fn notify(&self, thread_id: &str, method: &str, params: Value) {
-        let message = json!({"method": method, "params": params});
+    /// A fake clock: strictly increasing milliseconds.
+    fn now_ms(&mut self) -> u64 {
+        self.next_id += 1;
+        1_700_000_000_000 + self.next_id
+    }
+
+    fn load(&mut self) {
+        let Some(file) = self.home.as_ref().map(|h| h.join(THREADS_FILE)) else {
+            return;
+        };
+        let Ok(saved) = std::fs::read_to_string(file)
+            .map_err(|_| ())
+            .and_then(|t| serde_json::from_str::<Value>(&t).map_err(|_| ()))
+        else {
+            return;
+        };
+        self.next_id = saved["next_id"].as_u64().unwrap_or(0);
+        for t in saved["threads"].as_array().into_iter().flatten() {
+            let id = t["thread"]["id"].as_str().unwrap_or_default().to_owned();
+            self.threads.insert(
+                id,
+                ThreadState {
+                    thread: t["thread"].clone(),
+                    settings: t["settings"].clone(),
+                    turns: t["turns"].as_array().cloned().unwrap_or_default(),
+                    subscribers: BTreeSet::new(),
+                    active: None,
+                    queue: VecDeque::new(),
+                },
+            );
+        }
+    }
+
+    fn save(&self) {
+        let Some(file) = self.home.as_ref().map(|h| h.join(THREADS_FILE)) else {
+            return;
+        };
+        let threads: Vec<Value> = self
+            .threads
+            .values()
+            .map(|t| json!({"thread": t.thread, "settings": t.settings, "turns": t.turns}))
+            .collect();
+        if let Some(dir) = file.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(
+            file,
+            json!({"next_id": self.next_id, "threads": threads}).to_string(),
+        );
+    }
+
+    fn notification(&mut self, method: &str, params: Value) -> Value {
+        let at = self.now_ms();
+        json!({"method": method, "params": params, "emittedAtMs": at})
+    }
+
+    /// Sends a notification to every connection subscribed to the thread.
+    fn notify(&mut self, thread_id: &str, method: &str, params: Value) {
+        let message = self.notification(method, params);
         if let Some(thread) = self.threads.get(thread_id) {
             for id in &thread.subscribers {
                 if let Some(tx) = self.connections.get(id) {
@@ -189,31 +269,343 @@ impl State {
         }
     }
 
-    fn start_turn(&mut self, thread_id: &str, text: String, owner: u64, turn: Duration) -> String {
-        let turn_id = self.id("turn");
-        let item_id = self.id("item");
-        let approval = match text.strip_prefix(APPROVAL_PREFIX) {
-            Some(command) => Approval::Needed(command.to_owned()),
-            None => Approval::NotNeeded,
-        };
-        let thread = self.threads.get_mut(thread_id).expect("known thread");
-        thread.active = Some(Turn {
-            id: turn_id.clone(),
-            texts: vec![text.clone()],
-            deadline: Instant::now() + turn,
-            owner,
-            approval,
-        });
-        let started =
-            json!({"threadId": thread_id, "turn": {"id": turn_id, "status": "inProgress"}});
-        self.notify(thread_id, "turn/started", started);
-        let item = json!({"type": "userMessage", "id": item_id, "content": [{"type": "text", "text": text}]});
+    fn status(&mut self, thread_id: &str, status: Value) {
         self.notify(
             thread_id,
-            "item/completed",
-            json!({"threadId": thread_id, "turnId": turn_id, "item": item}),
+            "thread/status/changed",
+            json!({"threadId": thread_id, "status": status}),
         );
-        turn_id
+    }
+
+    fn item_event(&mut self, thread_id: &str, turn_id: &str, method: &str, item: &Value) {
+        let at = self.now_ms();
+        let key = if method == "item/started" {
+            "startedAtMs"
+        } else {
+            "completedAtMs"
+        };
+        self.notify(
+            thread_id,
+            method,
+            json!({"threadId": thread_id, "turnId": turn_id, "item": item, key: at}),
+        );
+    }
+
+    fn start_thread(&mut self, params: &Value) -> Value {
+        let id = self.id();
+        let cwd = params["cwd"].as_str().map_or_else(
+            || {
+                std::env::current_dir()
+                    .map(|d| d.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            },
+            str::to_owned,
+        );
+        let model = params["model"].as_str().unwrap_or("fake-model").to_owned();
+        let effort = params["config"]["model_reasoning_effort"]
+            .as_str()
+            .unwrap_or("medium")
+            .to_owned();
+        let sandbox = match params["sandbox"].as_str().unwrap_or("workspace-write") {
+            "read-only" => "readOnly",
+            "danger-full-access" => "dangerFullAccess",
+            _ => "workspaceWrite",
+        };
+        let now = self.now_ms() / 1000;
+        let home = self.home.clone().unwrap_or_else(std::env::temp_dir);
+        let thread = json!({
+            "id": id, "sessionId": id, "cwd": cwd, "model": model, "modelProvider": "openai",
+            "reasoningEffort": effort, "cliVersion": CLI_VERSION, "originator": self.originator,
+            "path": home.join("sessions").join(format!("rollout-{id}.jsonl")),
+            "preview": "", "name": null, "source": "vscode", "status": {"type": "idle"},
+            "createdAt": now, "updatedAt": now, "recencyAt": now, "historyMode": "paginated",
+            "canAcceptDirectInput": true, "ephemeral": false, "extra": null, "gitInfo": null,
+            "agentNickname": null, "agentRole": null, "daybreakEnabled": null,
+            "forkedFromId": null, "parentThreadId": null, "projectId": null, "section": null,
+            "sectionEnteredAt": null, "threadSource": null, "turns": [],
+            "environments": [{"cwd": cwd, "environmentId": "local", "runtimeWorkspaceRoots": [cwd]}],
+        });
+        let settings = json!({
+            "approvalPolicy": params["approvalPolicy"].as_str().unwrap_or("on-request"),
+            "approvalsReviewer": "user", "cwd": cwd, "model": model, "modelProvider": "openai",
+            "reasoningEffort": effort, "multiAgentMode": "explicitRequestOnly",
+            "serviceTier": "default", "disabledPluginIds": [], "instructionSources": [],
+            "runtimeWorkspaceRoots": [cwd], "sandbox": {"type": sandbox, "networkAccess": false},
+        });
+        self.threads.insert(
+            id,
+            ThreadState {
+                thread: thread.clone(),
+                settings: settings.clone(),
+                turns: Vec::new(),
+                subscribers: BTreeSet::new(),
+                active: None,
+                queue: VecDeque::new(),
+            },
+        );
+        self.save();
+        let mut result = settings;
+        result["activePermissionProfile"] = Value::Null;
+        result["thread"] = thread;
+        result
+    }
+
+    /// The `thread/resume` result: settings plus the thread with all turns.
+    fn resume_result(&self, thread_id: &str) -> Value {
+        let t = &self.threads[thread_id];
+        let mut thread = t.thread.clone();
+        thread["turns"] = Value::Array(t.turns.clone());
+        let preview = t
+            .turns
+            .first()
+            .and_then(|turn| turn["items"][0]["content"][0]["text"].as_str());
+        if let Some(preview) = preview {
+            thread["preview"] = json!(preview);
+        }
+        let cursor = |kind: &str| {
+            json!({"requestedThreadId": thread_id, "scope": {"kind": kind}}).to_string()
+        };
+        let mut result = t.settings.clone();
+        result["activePermissionProfile"] = json!({"id": ":read-only", "extends": null});
+        result["collaborationMode"] = json!({"mode": "default", "settings": {
+            "developer_instructions": null, "model": t.settings["model"],
+            "reasoning_effort": t.settings["reasoningEffort"]}});
+        result["initialTurnsPage"] = Value::Null;
+        result["itemsBackwardsCursor"] = json!(cursor("itemsByCreatedAtOrdinal"));
+        result["turnsBackwardsCursor"] = json!(cursor("turns"));
+        result["thread"] = thread;
+        result
+    }
+
+    fn turn_json(
+        turn: &Turn,
+        status: &str,
+        completed_at: Option<u64>,
+        items: Value,
+        view: &str,
+    ) -> Value {
+        json!({
+            "id": turn.id, "status": status, "items": items, "itemsView": view, "error": null,
+            "startedAt": turn.started_at, "completedAt": completed_at,
+            "durationMs": completed_at.map(|c| c.saturating_sub(turn.started_at) * 1000),
+        })
+    }
+
+    fn start_turn(
+        &mut self,
+        thread_id: &str,
+        text: String,
+        client_id: Option<String>,
+        owner: u64,
+        turn: Duration,
+    ) -> Value {
+        let id = self.id();
+        let started_at = self.now_ms() / 1000;
+        let t = Turn {
+            id,
+            inputs: vec![text],
+            done: 0,
+            client_id,
+            started_at,
+            deadline: Instant::now() + turn,
+            owner,
+            asking: None,
+            items: Vec::new(),
+            agent_items: Vec::new(),
+        };
+        let pending = json!({"id": t.id, "status": "inProgress", "items": [], "itemsView": "notLoaded",
+                             "error": null, "startedAt": null, "completedAt": null, "durationMs": null});
+        let started = Self::turn_json(&t, "inProgress", None, json!([]), "notLoaded");
+        self.threads
+            .get_mut(thread_id)
+            .expect("known thread")
+            .active = Some(t);
+        self.status(thread_id, json!({"type": "active", "activeFlags": []}));
+        self.notify(
+            thread_id,
+            "turn/started",
+            json!({"threadId": thread_id, "turn": started}),
+        );
+        pending
+    }
+
+    fn user_item(&mut self, text: &str, client_id: Option<String>) -> Value {
+        let id = self.id();
+        json!({"type": "userMessage", "id": id, "clientId": client_id,
+               "content": [{"type": "text", "text": text, "text_elements": []}]})
+    }
+
+    fn token_usage(&mut self, thread_id: &str, turn_id: &str) {
+        let usage = json!({"inputTokens": 0, "cachedInputTokens": 0, "cacheWriteInputTokens": 0,
+                           "outputTokens": 0, "reasoningOutputTokens": 0, "totalTokens": 0});
+        self.notify(
+            thread_id,
+            "thread/tokenUsage/updated",
+            json!({"threadId": thread_id, "turnId": turn_id,
+                   "tokenUsage": {"last": usage, "total": usage, "modelContextWindow": 258_400}}),
+        );
+    }
+
+    fn agent_message(&mut self, thread_id: &str, turn_id: &str, text: &str) {
+        let id = format!("msg_fake{:016}", self.next_id + 1);
+        self.next_id += 1;
+        let mut item = json!({"type": "agentMessage", "id": id, "text": "", "phase": "final_answer",
+                              "delivery": null, "memoryCitation": null, "questions": null});
+        self.item_event(thread_id, turn_id, "item/started", &item);
+        self.notify(
+            thread_id,
+            "item/agentMessage/delta",
+            json!({"threadId": thread_id, "turnId": turn_id, "itemId": id, "delta": text}),
+        );
+        item["text"] = json!(text);
+        self.item_event(thread_id, turn_id, "item/completed", &item);
+        self.token_usage(thread_id, turn_id);
+        if let Some(turn) = self
+            .threads
+            .get_mut(thread_id)
+            .and_then(|t| t.active.as_mut())
+        {
+            turn.items.push(item.clone());
+            turn.agent_items.push(item);
+        }
+    }
+
+    /// Answers the inputs not yet answered; stops at an approval request.
+    fn run_turn(&mut self, thread_id: &str, turn: Duration) {
+        loop {
+            let Some(active) = self.threads.get(thread_id).and_then(|t| t.active.as_ref()) else {
+                return;
+            };
+            if active.asking.is_some() {
+                return;
+            }
+            let (turn_id, done) = (active.id.clone(), active.done);
+            let Some(text) = active.inputs.get(done).cloned() else {
+                self.finish_turn(thread_id, "completed", turn);
+                return;
+            };
+            let client_id = if done == 0 {
+                active.client_id.clone()
+            } else {
+                None
+            };
+            let user = self.user_item(&text, client_id);
+            self.item_event(thread_id, &turn_id, "item/started", &user);
+            self.item_event(thread_id, &turn_id, "item/completed", &user);
+            let active = self
+                .threads
+                .get_mut(thread_id)
+                .and_then(|t| t.active.as_mut())
+                .expect("active");
+            active.items.push(user);
+            active.done += 1;
+            match text.strip_prefix(APPROVAL_PREFIX) {
+                Some(command) if done == 0 => {
+                    self.ask(
+                        thread_id,
+                        &turn_id,
+                        command.lines().next().unwrap_or_default().trim(),
+                    );
+                    return;
+                }
+                _ => self.agent_message(thread_id, &turn_id, &reply_to(&text)),
+            }
+        }
+    }
+
+    fn ask(&mut self, thread_id: &str, turn_id: &str, command: &str) {
+        self.status(
+            thread_id,
+            json!({"type": "active", "activeFlags": ["waitingOnApproval"]}),
+        );
+        let id = format!("exec-{}", self.id());
+        let cwd = self.threads[thread_id].settings["cwd"].clone();
+        let item = json!({
+            "type": "commandExecution", "id": id, "status": "inProgress", "source": "agent",
+            "command": format!("/bin/zsh -lc '{command}'"),
+            "commandActions": [{"command": command, "type": "unknown"}], "cwd": cwd,
+            "aggregatedOutput": null, "durationMs": null, "exitCode": null, "pluginId": null,
+            "processId": null, "scriptPath": null,
+        });
+        self.item_event(thread_id, turn_id, "item/started", &item);
+        let words: Vec<&str> = command.split_whitespace().collect();
+        let request_id = self.next_request_id;
+        self.next_request_id += 1;
+        let started = self.now_ms();
+        let request = json!({
+            "id": request_id,
+            "method": "item/commandExecution/requestApproval",
+            "params": {
+                "kind": "command", "threadId": thread_id, "turnId": turn_id, "itemId": id,
+                "reason": "fake-codex-app-server asks before every `run:` command",
+                "command": item["command"], "commandActions": item["commandActions"], "cwd": cwd,
+                "environmentId": "local", "startedAtMs": started,
+                "availableDecisions": ["accept", {"acceptWithExecpolicyAmendment": {"execpolicy_amendment": words}}, "cancel"],
+                "proposedExecpolicyAmendment": words,
+            }
+        });
+        let Some(active) = self
+            .threads
+            .get_mut(thread_id)
+            .and_then(|t| t.active.as_mut())
+        else {
+            return;
+        };
+        active.asking = Some(item);
+        let owner = active.owner;
+        self.pending_approvals.insert(
+            (owner, request_id),
+            (thread_id.to_owned(), turn_id.to_owned()),
+        );
+        if let Some(tx) = self.connections.get(&owner) {
+            let _ = tx.send(request);
+        }
+    }
+
+    fn answer(&mut self, thread_id: &str, request_id: i64, decision: &str, turn: Duration) {
+        let Some(active) = self
+            .threads
+            .get_mut(thread_id)
+            .and_then(|t| t.active.as_mut())
+        else {
+            return;
+        };
+        let Some(mut item) = active.asking.take() else {
+            return;
+        };
+        let turn_id = active.id.clone();
+        self.notify(
+            thread_id,
+            "serverRequest/resolved",
+            json!({"threadId": thread_id, "requestId": request_id}),
+        );
+        let accepted = decision.starts_with("accept");
+        item["status"] = json!(if accepted { "completed" } else { "declined" });
+        if accepted {
+            item["exitCode"] = json!(0);
+            item["aggregatedOutput"] = json!("");
+        }
+        self.item_event(thread_id, &turn_id, "item/completed", &item);
+        self.status(thread_id, json!({"type": "active", "activeFlags": []}));
+        self.token_usage(thread_id, &turn_id);
+        let command = item["commandActions"][0]["command"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        let text = if accepted {
+            format!("ran `{command}`")
+        } else {
+            format!("command not run: {decision}")
+        };
+        if let Some(active) = self
+            .threads
+            .get_mut(thread_id)
+            .and_then(|t| t.active.as_mut())
+        {
+            active.items.push(item);
+        }
+        self.agent_message(thread_id, &turn_id, &text);
+        self.run_turn(thread_id, turn);
     }
 
     fn finish_turn(&mut self, thread_id: &str, status: &str, turn: Duration) {
@@ -221,30 +613,46 @@ impl State {
         let Some(active) = thread.active.take() else {
             return;
         };
+        let completed_at = self.now_ms() / 1000;
+        let (summary, view) = if status == "completed" {
+            (Value::Array(active.agent_items.clone()), "summary")
+        } else {
+            (json!([]), "notLoaded")
+        };
+        let full = Self::turn_json(
+            &active,
+            status,
+            Some(completed_at),
+            Value::Array(active.items.clone()),
+            "full",
+        );
+        let thread = self.threads.get_mut(thread_id).expect("known thread");
+        thread.turns.push(full);
+        if thread.thread["preview"] == "" {
+            let first = active
+                .items
+                .first()
+                .map(|i| i["content"][0]["text"].clone());
+            thread.thread["preview"] = first.unwrap_or_else(|| json!(""));
+        }
         let queued = thread.queue.pop_front();
-        if status == "completed" {
-            let text = match &active.approval {
-                Approval::Answered(decision) if decision.starts_with("accept") => {
-                    format!(
-                        "ran `{}`",
-                        active.texts[0].trim_start_matches(APPROVAL_PREFIX)
-                    )
-                }
-                Approval::Answered(decision) => format!("command not run: {decision}"),
-                _ => reply_to(&active.texts.join(" / ")),
-            };
-            let item_id = self.id("item");
-            let item = json!({"type": "agentMessage", "id": item_id, "text": text});
+        // Persist before telling anyone: a client may stop the server as
+        // soon as it sees `turn/completed`.
+        self.save();
+        self.status(thread_id, json!({"type": "idle"}));
+        let done = Self::turn_json(&active, status, Some(completed_at), summary, view);
+        self.notify(
+            thread_id,
+            "turn/completed",
+            json!({"threadId": thread_id, "turn": done}),
+        );
+        if let Some((text, client_id)) = queued {
             self.notify(
                 thread_id,
-                "item/completed",
-                json!({"threadId": thread_id, "turnId": active.id, "item": item}),
+                "thread/queue/changed",
+                json!({"threadId": thread_id}),
             );
-        }
-        let completed = json!({"threadId": thread_id, "turn": {"id": active.id, "status": status}});
-        self.notify(thread_id, "turn/completed", completed);
-        if let Some(text) = queued {
-            self.start_turn(thread_id, text, active.owner, turn);
+            self.start_turn(thread_id, text, Some(client_id), active.owner, turn);
         }
     }
 }
@@ -253,53 +661,19 @@ fn tick_loop(shared: &Shared) {
     loop {
         std::thread::sleep(Duration::from_millis(5));
         let mut state = lock(&shared.state);
+        let now = Instant::now();
         let due: Vec<String> = state
             .threads
             .iter()
             .filter(|(_, t)| {
                 t.active
                     .as_ref()
-                    .is_some_and(|a| a.deadline <= Instant::now())
+                    .is_some_and(|a| a.done == 0 && a.asking.is_none() && a.deadline <= now)
             })
             .map(|(id, _)| id.clone())
             .collect();
         for thread_id in due {
-            let turn = state
-                .threads
-                .get_mut(&thread_id)
-                .and_then(|t| t.active.as_mut());
-            let Some(turn) = turn else { continue };
-            match &turn.approval {
-                Approval::Needed(command) => {
-                    let (command, owner, turn_id) = (command.clone(), turn.owner, turn.id.clone());
-                    turn.approval = Approval::Asked;
-                    state.next_request_id += 1;
-                    let request_id = state.next_request_id - 1;
-                    let item_id = state.id("exec");
-                    let request = json!({
-                        "id": request_id,
-                        "method": "item/commandExecution/requestApproval",
-                        "params": {
-                            "kind": "command",
-                            "threadId": thread_id,
-                            "turnId": turn_id,
-                            "itemId": item_id,
-                            "reason": "fake-codex-app-server asks before every `run:` command",
-                            "command": command,
-                        }
-                    });
-                    state
-                        .pending_approvals
-                        .insert((owner, request_id), (thread_id.clone(), turn_id));
-                    if let Some(tx) = state.connections.get(&owner) {
-                        let _ = tx.send(request);
-                    }
-                }
-                Approval::Asked => {}
-                Approval::NotNeeded | Approval::Answered(_) => {
-                    state.finish_turn(&thread_id, "completed", shared.turn);
-                }
-            }
+            state.run_turn(&thread_id, shared.turn);
         }
     }
 }
@@ -344,7 +718,8 @@ fn pump(
                 let Ok(message) = serde_json::from_str::<Value>(text.as_str()) else {
                     continue;
                 };
-                if let Some(reply) = handle(&message, connection, shared) {
+                // Messages for this connection, in order (the reply among them).
+                for reply in handle(&message, connection, shared) {
                     socket.send(Message::text(reply.to_string()))?;
                 }
             }
@@ -376,54 +751,115 @@ fn text_of(params: &Value) -> String {
         .unwrap_or_default()
 }
 
-/// Handles one client message; returns the response for requests.
-fn handle(message: &Value, connection: u64, shared: &Shared) -> Option<Value> {
+/// Handles one client message; returns what to send back on this
+/// connection before any queued notification: the response to a request,
+/// plus the notifications `thread/resume` sends around it.
+fn handle(message: &Value, connection: u64, shared: &Shared) -> Vec<Value> {
     let mut state = lock(&shared.state);
     let Some(method) = message["method"].as_str() else {
         // A response to one of our requests (approval decision).
-        let id = message["id"].as_i64()?;
-        let (thread_id, turn_id) = state.pending_approvals.remove(&(connection, id))?;
-        let decision = message["result"]["decision"]
-            .as_str()
-            .unwrap_or("cancel")
-            .to_owned();
-        let turn = state.threads.get_mut(&thread_id)?.active.as_mut()?;
-        if turn.id == turn_id {
-            turn.approval = Approval::Answered(decision);
+        let Some(id) = message["id"].as_i64() else {
+            return Vec::new();
+        };
+        if let Some((thread_id, _)) = state.pending_approvals.remove(&(connection, id)) {
+            let decision = message["result"]["decision"]
+                .as_str()
+                .unwrap_or("cancel")
+                .to_owned();
+            state.answer(&thread_id, id, &decision, shared.turn);
         }
-        return None;
+        return Vec::new();
     };
-    let id = message.get("id")?.clone();
+    let Some(id) = message.get("id").cloned() else {
+        return Vec::new();
+    };
     let params = &message["params"];
     let thread_id = params["threadId"].as_str().unwrap_or_default().to_owned();
+    let known = state.threads.contains_key(&thread_id);
+    let mut before = Vec::new();
+    let mut after = Vec::new();
     let result: Result<Value, (i64, String)> = match method {
-        "initialize" => Ok(json!({"userAgent": "fake-codex-app-server (codex 0.156.1 subset)"})),
-        "thread/start" => {
-            let new_id = state.id("thr");
-            let mut thread = ThreadState::default();
-            thread.subscribers.insert(connection);
-            state.threads.insert(new_id.clone(), thread);
-            Ok(json!({"thread": {"id": new_id}}))
+        "initialize" => {
+            state.originator = params["clientInfo"]["name"]
+                .as_str()
+                .unwrap_or("fake")
+                .to_owned();
+            let home = state.home.clone().unwrap_or_else(std::env::temp_dir);
+            Ok(
+                json!({"codexHome": home, "platformFamily": std::env::consts::FAMILY,
+                      "platformOs": std::env::consts::OS,
+                      "userAgent": format!("fake-codex-app-server/{CLI_VERSION}")}),
+            )
         }
-        "thread/resume" => match state.threads.get_mut(&thread_id) {
-            Some(thread) => {
-                thread.subscribers.insert(connection);
-                Ok(json!({"thread": {"id": thread_id}}))
+        "thread/start" => {
+            let result = state.start_thread(params);
+            let new_id = result["thread"]["id"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned();
+            if let Some(t) = state.threads.get_mut(&new_id) {
+                t.subscribers.insert(connection);
             }
-            None => Err((INVALID_REQUEST, format!("thread not found: {thread_id}"))),
-        },
+            state.notify(
+                &new_id,
+                "thread/started",
+                json!({"thread": result["thread"]}),
+            );
+            Ok(result)
+        }
+        "thread/resume" if known => {
+            if let Some(t) = state.threads.get_mut(&thread_id) {
+                t.subscribers.insert(connection);
+            }
+            if params["excludeTurns"] != true {
+                let summary = "Full-history hydration is deprecated for paginated threads; use `excludeTurns: true`, then page with `thread/turns/list` and `thread/items/list`.";
+                before.push(state.notification(
+                    "deprecationNotice",
+                    json!({"summary": summary, "details": null}),
+                ));
+            }
+            let status = if state.threads[&thread_id].active.is_some() {
+                json!({"type": "active", "activeFlags": []})
+            } else {
+                json!({"type": "idle"})
+            };
+            before.push(state.notification(
+                "thread/status/changed",
+                json!({"threadId": thread_id, "status": status}),
+            ));
+            let last_turn = state.threads[&thread_id]
+                .turns
+                .last()
+                .map(|t| t["id"].clone());
+            let usage = json!({"inputTokens": 0, "cachedInputTokens": 0, "cacheWriteInputTokens": 0,
+                               "outputTokens": 0, "reasoningOutputTokens": 0, "totalTokens": 0});
+            after.push(state.notification("thread/tokenUsage/updated", json!({"threadId": thread_id,
+                "turnId": last_turn, "tokenUsage": {"last": usage, "total": usage, "modelContextWindow": 258_400}})));
+            after.push(state.notification("thread/goal/cleared", json!({"threadId": thread_id})));
+            Ok(state.resume_result(&thread_id))
+        }
+        "thread/resume" | "turn/start" | "turn/steer" | "turn/interrupt" | "thread/queue/add"
+            if !known =>
+        {
+            Err((INVALID_REQUEST, format!("thread not found: {thread_id}")))
+        }
         "turn/start" => {
             let text = text_of(params);
-            match state.threads.get_mut(&thread_id).map(|t| t.active.as_mut()) {
-                None => Err((INVALID_REQUEST, format!("thread not found: {thread_id}"))),
-                Some(Some(active)) => {
-                    active.texts.push(text);
-                    Ok(json!({"turn": {"id": active.id, "status": "inProgress"}}))
+            let active = state
+                .threads
+                .get_mut(&thread_id)
+                .and_then(|t| t.active.as_mut());
+            match active {
+                Some(active) => {
+                    active.inputs.push(text);
+                    Ok(
+                        json!({"turn": {"id": active.id, "status": "inProgress", "items": [], "itemsView": "notLoaded",
+                                       "error": null, "startedAt": null, "completedAt": null, "durationMs": null}}),
+                    )
                 }
-                Some(None) => {
-                    let turn_id = state.start_turn(&thread_id, text, connection, shared.turn);
-                    Ok(json!({"turn": {"id": turn_id, "status": "inProgress"}}))
-                }
+                None => Ok(
+                    json!({"turn": state.start_turn(&thread_id, text, None, connection, shared.turn)}),
+                ),
             }
         }
         "turn/steer" => {
@@ -435,7 +871,7 @@ fn handle(message: &Value, connection: u64, shared: &Shared) -> Option<Value> {
                 .and_then(|t| t.active.as_mut())
             {
                 Some(active) if active.id == expected => {
-                    active.texts.push(text);
+                    active.inputs.push(text);
                     Ok(json!({"turnId": active.id}))
                 }
                 _ => Err((
@@ -446,12 +882,12 @@ fn handle(message: &Value, connection: u64, shared: &Shared) -> Option<Value> {
         }
         "turn/interrupt" => {
             let turn_id = params["turnId"].as_str().unwrap_or_default();
-            let matches = state
-                .threads
-                .get(&thread_id)
-                .and_then(|t| t.active.as_ref())
+            let matches = state.threads[&thread_id]
+                .active
+                .as_ref()
                 .is_some_and(|a| a.id == turn_id);
             if matches {
+                state.pending_approvals.retain(|_, (t, _)| *t != thread_id);
                 state.finish_turn(&thread_id, "interrupted", shared.turn);
                 Ok(json!({}))
             } else {
@@ -463,24 +899,37 @@ fn handle(message: &Value, connection: u64, shared: &Shared) -> Option<Value> {
         }
         "thread/queue/add" => {
             let text = text_of(params);
-            match state.threads.get_mut(&thread_id) {
-                None => Err((INVALID_REQUEST, format!("thread not found: {thread_id}"))),
-                Some(thread) if thread.active.is_some() => {
-                    thread.queue.push_back(text);
-                    Ok(json!({}))
+            let client_id = params["clientUserMessageId"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned();
+            let submission = state.id();
+            let result = json!({"queuedSubmission": {"id": submission, "clientUserMessageId": client_id,
+                                                     "input": params["input"]}});
+            let busy = state.threads[&thread_id].active.is_some();
+            if busy {
+                if let Some(t) = state.threads.get_mut(&thread_id) {
+                    t.queue.push_back((text, client_id));
                 }
-                Some(_) => {
-                    state.start_turn(&thread_id, text, connection, shared.turn);
-                    Ok(json!({}))
-                }
+                state.notify(
+                    &thread_id,
+                    "thread/queue/changed",
+                    json!({"threadId": thread_id}),
+                );
+            } else {
+                state.start_turn(&thread_id, text, Some(client_id), connection, shared.turn);
             }
+            Ok(result)
         }
         other => Err((METHOD_NOT_FOUND, format!("method not found: {other}"))),
     };
-    Some(match result {
+    let reply = match result {
         Ok(result) => json!({"id": id, "result": result}),
         Err((code, message)) => json!({"id": id, "error": {"code": code, "message": message}}),
-    })
+    };
+    before.push(reply);
+    before.extend(after);
+    before
 }
 
 /// Waits until a server accepts connections on `listen_path` (the socket
