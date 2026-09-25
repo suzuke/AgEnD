@@ -36,22 +36,22 @@ pub fn cases<F: ClockFixture>() -> Vec<Case<F>> {
         Case {
             rule: "CLK-1",
             name: "reads_unix_milliseconds",
-            check: reads_unix_milliseconds,
+            check: |fx| reads_unix_milliseconds(&fx),
         },
         Case {
             rule: "CLK-2",
             name: "never_goes_backwards",
-            check: never_goes_backwards,
+            check: |fx| never_goes_backwards(&fx),
         },
         Case {
             rule: "CLK-3",
             name: "reads_utc",
-            check: reads_utc,
+            check: |fx| reads_utc(&fx),
         },
         Case {
             rule: "CLK-4",
             name: "moves_forward_as_time_passes",
-            check: moves_forward_as_time_passes,
+            check: |fx| moves_forward_as_time_passes(&fx),
         },
     ]
 }

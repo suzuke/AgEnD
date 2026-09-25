@@ -1,11 +1,13 @@
-//! Driver mutants: a `FakeDriver` with one method replaced. `restart`
-//! builds the next mutant over `FakeDriver::restarted` (the same backend)
-//! with the same replaced methods. `ObjDedup` and `Gap` (verifier r4) keep
-//! restart-relevant state in the driver object.
+//! Driver mutants: a `FakeDriver` with one method replaced. Each mutant's
+//! persisted state is the fake backend ([`FakeBackend`]) plus whatever the
+//! mutant itself persists; `boot` builds the next mutant over it (with the
+//! same replaced methods). `ObjDedup`, `Gap` (verifier r4) and `LastIdDedup`,
+//! `ReadAck`, `LiveJournal` (verifier r5) are standalone.
 
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use agend_core::model::DeliveryState;
 use agend_core::policy::busy::BusyLevel;
@@ -13,7 +15,7 @@ use agend_core::traits::{AgentMessage, DeliveryReceipt, Driver, DriverEvent, Dri
 use agend_testkit::block_on;
 use agend_testkit::contract::driver::{self, DriverFixture};
 use agend_testkit::contract::fakes::FakeDriverFixture;
-use agend_testkit::fakes::FakeError;
+use agend_testkit::fakes::{FakeBackend, FakeError};
 
 use super::Mutant;
 
@@ -21,6 +23,45 @@ type Deliver = fn(&M, &str, &AgentMessage, BusyLevel) -> Result<DeliveryReceipt,
 type Events = fn(&M, &str, Option<&str>) -> Result<Vec<DriverEvent>, FakeError>;
 
 const INSTANCE: &str = FakeDriverFixture::INSTANCE;
+
+/// The fake completes a turn inside `deliver`; no need to wait long.
+const TURN_TIMEOUT: Duration = Duration::from_millis(200);
+
+fn event_count(fx: &FakeDriverFixture) -> usize {
+    block_on(fx.driver.events(INSTANCE, None)).map_or(0, |e| e.len())
+}
+
+/// Implements `DriverFixture` for a mutant with a `fx: FakeDriverFixture`
+/// field: `$persisted` maps the mutant to its persisted state (the first
+/// element is the fake backend), `$boot` builds a mutant from it.
+macro_rules! driver_fixture {
+    ($ty:ty, $persisted:ty, |$me:ident| $save:expr, |$p:ident| $boot:expr) => {
+        impl DriverFixture for $ty {
+            type Driver = Self;
+            type Error = FakeError;
+            type Persisted = $persisted;
+            fn driver(&self) -> &Self {
+                self
+            }
+            fn instance_id(&self) -> &str {
+                INSTANCE
+            }
+            fn turn_timeout(&self) -> Duration {
+                TURN_TIMEOUT
+            }
+            fn persisted(&self) -> $persisted {
+                let $me = self;
+                $save
+            }
+            fn boot($p: &$persisted) -> Self {
+                $boot
+            }
+            fn emit_while_down(persisted: &$persisted) {
+                FakeDriverFixture::emit_while_down(&persisted.0);
+            }
+        }
+    };
+}
 
 /// A fake driver whose `deliver` or `events` is replaced.
 pub struct M {
@@ -80,34 +121,21 @@ impl Driver for M {
     }
 }
 
-impl DriverFixture for M {
-    type Driver = Self;
-    type Error = FakeError;
-    fn driver(&self) -> &Self {
-        self
-    }
-    fn instance_id(&self) -> &str {
-        INSTANCE
-    }
-    /// The fake completes a turn inside `deliver`; no need to wait long.
-    fn turn_timeout(&self) -> std::time::Duration {
-        std::time::Duration::from_millis(200)
-    }
-    fn restart(&self) -> Self {
-        let fx = self.fx.restart();
-        let born = block_on(fx.driver.events(INSTANCE, None)).map_or(0, |e| e.len());
+driver_fixture!(
+    M,
+    (FakeBackend, Deliver, Events),
+    |m| (m.fx.persisted(), m.deliver, m.events),
+    |p| {
+        let fx = FakeDriverFixture::boot(&p.0);
         Self {
+            born: event_count(&fx),
             fx,
             seen: Mutex::new(BTreeSet::new()),
-            born,
-            deliver: self.deliver,
-            events: self.events,
+            deliver: p.1,
+            events: p.2,
         }
     }
-    fn emit_while_down(&self) {
-        self.fx.emit_while_down();
-    }
-}
+);
 
 /// Verifier r4 `ObjDedup`: deduplicates message ids in the driver object,
 /// and gives the backend an id unique to this object, so a daemon restart
@@ -138,10 +166,7 @@ impl Driver for ObjDedup {
         mode: BusyLevel,
     ) -> Result<DeliveryReceipt, FakeError> {
         if !self.seen.lock().unwrap().insert(msg.id.clone()) {
-            return Ok(DeliveryReceipt {
-                backend_message_id: None,
-                state: DeliveryState::Sent,
-            });
+            return Ok(sent());
         }
         let mut unique = msg.clone();
         unique.id = format!("{}@{}", msg.id, self.generation);
@@ -152,23 +177,33 @@ impl Driver for ObjDedup {
     }
 }
 
-impl DriverFixture for ObjDedup {
-    type Driver = Self;
-    type Error = FakeError;
-    fn driver(&self) -> &Self {
-        self
+driver_fixture!(ObjDedup, (FakeBackend,), |m| (m.fx.persisted(),), |p| {
+    Self::over(FakeDriverFixture::boot(&p.0))
+});
+
+fn sent() -> DeliveryReceipt {
+    DeliveryReceipt {
+        backend_message_id: None,
+        state: DeliveryState::Sent,
     }
-    fn instance_id(&self) -> &str {
-        INSTANCE
-    }
-    fn turn_timeout(&self) -> std::time::Duration {
-        self.fx.turn_timeout()
-    }
-    fn restart(&self) -> Self {
-        Self::over(self.fx.restart())
-    }
-    fn emit_while_down(&self) {
-        self.fx.emit_while_down();
+}
+
+/// The events of `all` from index `start` on, without the indexes in `gaps`.
+fn without(all: Vec<DriverEvent>, start: usize, gaps: &[(usize, usize)]) -> Vec<DriverEvent> {
+    all.into_iter()
+        .enumerate()
+        .skip(start)
+        .filter(|(k, _)| !gaps.iter().any(|(from, to)| (*from..*to).contains(k)))
+        .map(|(_, e)| e)
+        .collect()
+}
+
+/// Where a backfill from `after` starts in `all`; `None` for an unknown
+/// cursor (left to the fake to reject).
+fn start_of(all: &[DriverEvent], after: Option<&str>) -> Option<usize> {
+    match after {
+        None => Some(0),
+        Some(cursor) => all.iter().position(|e| e.cursor == cursor).map(|i| i + 1),
     }
 }
 
@@ -184,12 +219,8 @@ pub struct Gap {
 }
 
 impl Gap {
-    fn len(fx: &FakeDriverFixture) -> usize {
-        block_on(fx.driver.events(INSTANCE, None)).map_or(0, |e| e.len())
-    }
-
     fn fresh(fx: FakeDriverFixture) -> Self {
-        let n = Self::len(&fx);
+        let n = event_count(&fx);
         Self {
             fx,
             dropped_at: Arc::default(),
@@ -200,7 +231,7 @@ impl Gap {
 
 impl Drop for Gap {
     fn drop(&mut self) {
-        *self.dropped_at.lock().unwrap() = Some(Self::len(&self.fx));
+        *self.dropped_at.lock().unwrap() = Some(event_count(&self.fx));
     }
 }
 
@@ -216,50 +247,190 @@ impl Driver for Gap {
     }
     async fn events(&self, id: &str, after: Option<&str>) -> Result<Vec<DriverEvent>, FakeError> {
         let all = self.fx.driver.events(id, None).await?;
-        let start = match after {
-            None => 0,
-            Some(cursor) => match all.iter().position(|e| e.cursor == cursor) {
-                Some(index) => index + 1,
-                None => return self.fx.driver.events(id, after).await,
-            },
+        let Some(start) = start_of(&all, after) else {
+            return self.fx.driver.events(id, after).await;
         };
-        let (from, to) = self.gap;
-        Ok(all
-            .into_iter()
-            .enumerate()
-            .skip(start)
-            .filter(|(k, _)| !(from..to).contains(k))
-            .map(|(_, e)| e)
-            .collect())
+        Ok(without(all, start, &[self.gap]))
     }
 }
 
-impl DriverFixture for Gap {
-    type Driver = Self;
-    type Error = FakeError;
-    fn driver(&self) -> &Self {
-        self
-    }
-    fn instance_id(&self) -> &str {
-        INSTANCE
-    }
-    fn turn_timeout(&self) -> std::time::Duration {
-        self.fx.turn_timeout()
-    }
-    fn restart(&self) -> Self {
-        let fx = self.fx.restart();
-        let born = Self::len(&fx);
-        let from = self.dropped_at.lock().unwrap().take().unwrap_or(born);
+driver_fixture!(
+    Gap,
+    (FakeBackend, Arc<Mutex<Option<usize>>>),
+    |m| (m.fx.persisted(), Arc::clone(&m.dropped_at)),
+    |p| {
+        let fx = FakeDriverFixture::boot(&p.0);
+        let born = event_count(&fx);
+        let from = p.1.lock().unwrap().take().unwrap_or(born);
         Self {
             fx,
-            dropped_at: Arc::clone(&self.dropped_at),
+            dropped_at: Arc::clone(&p.1),
             gap: (from.min(born), born),
         }
     }
-    fn emit_while_down(&self) {
-        self.fx.emit_while_down();
+);
+
+/// Verifier r5 `LastIdDedup`: dedup is persisted and survives restarts, but
+/// it remembers only the last message id. After a crash every unconfirmed
+/// message is resent, not only the last one.
+pub struct LastIdDedup {
+    fx: FakeDriverFixture,
+    /// The persisted dedup record: the last id and a delivery counter.
+    last: Arc<Mutex<(Option<String>, u64)>>,
+}
+
+impl Driver for LastIdDedup {
+    type Error = FakeError;
+    async fn deliver(
+        &self,
+        id: &str,
+        msg: &AgentMessage,
+        mode: BusyLevel,
+    ) -> Result<DeliveryReceipt, FakeError> {
+        let n = {
+            let mut last = self.last.lock().unwrap();
+            if last.0.as_deref() == Some(msg.id.as_str()) {
+                return Ok(sent());
+            }
+            last.0 = Some(msg.id.clone());
+            last.1 += 1;
+            last.1
+        };
+        let mut unique = msg.clone();
+        unique.id = format!("{}#{n}", msg.id);
+        self.fx.driver.deliver(id, &unique, mode).await
+    }
+    async fn events(&self, id: &str, after: Option<&str>) -> Result<Vec<DriverEvent>, FakeError> {
+        self.fx.driver.events(id, after).await
     }
 }
+
+driver_fixture!(
+    LastIdDedup,
+    (FakeBackend, Arc<Mutex<(Option<String>, u64)>>),
+    |m| (m.fx.persisted(), Arc::clone(&m.last)),
+    |p| Self {
+        fx: FakeDriverFixture::boot(&p.0),
+        last: Arc::clone(&p.1),
+    }
+);
+
+/// Verifier r5 `ReadAck`: the backend acks on read. A restarted driver
+/// serves only the events after the highest index any earlier driver read,
+/// whatever cursor it is given, so backfill from an older cursor (a daemon
+/// that crashed before it saved its newest cursor) loses events.
+pub struct ReadAck {
+    fx: FakeDriverFixture,
+    /// The persisted ack: how many events some driver has read.
+    acked: Arc<Mutex<usize>>,
+    floor: usize,
+}
+
+impl Driver for ReadAck {
+    type Error = FakeError;
+    async fn deliver(
+        &self,
+        id: &str,
+        msg: &AgentMessage,
+        mode: BusyLevel,
+    ) -> Result<DeliveryReceipt, FakeError> {
+        self.fx.driver.deliver(id, msg, mode).await
+    }
+    async fn events(&self, id: &str, after: Option<&str>) -> Result<Vec<DriverEvent>, FakeError> {
+        let all = self.fx.driver.events(id, None).await?;
+        let Some(mut start) = start_of(&all, after) else {
+            return self.fx.driver.events(id, after).await;
+        };
+        if after.is_some() {
+            start = start.max(self.floor).min(all.len());
+        }
+        let mut acked = self.acked.lock().unwrap();
+        *acked = (*acked).max(all.len());
+        Ok(all[start..].to_vec())
+    }
+}
+
+driver_fixture!(
+    ReadAck,
+    (FakeBackend, Arc<Mutex<usize>>),
+    |m| (m.fx.persisted(), Arc::clone(&m.acked)),
+    |p| Self {
+        fx: FakeDriverFixture::boot(&p.0),
+        acked: Arc::clone(&p.1),
+        floor: *p.1.lock().unwrap(),
+    }
+);
+
+/// What `LiveJournal` drivers share: how many are alive, and the event
+/// ranges emitted while none was.
+#[derive(Default)]
+pub struct Lineage {
+    alive: usize,
+    dead_from: Option<usize>,
+    gaps: Vec<(usize, usize)>,
+}
+
+/// Verifier r5 `LiveJournal`: keeps only the events emitted while at least
+/// one driver is alive; what the agent emitted while no driver ran (a real
+/// downtime) is never backfilled.
+pub struct LiveJournal {
+    fx: FakeDriverFixture,
+    lineage: Arc<Mutex<Lineage>>,
+}
+
+impl LiveJournal {
+    fn attach(fx: FakeDriverFixture, lineage: Arc<Mutex<Lineage>>) -> Self {
+        {
+            let n = event_count(&fx);
+            let mut l = lineage.lock().unwrap();
+            if l.alive == 0
+                && let Some(from) = l.dead_from.take()
+            {
+                l.gaps.push((from, n));
+            }
+            l.alive += 1;
+        }
+        Self { fx, lineage }
+    }
+}
+
+impl Drop for LiveJournal {
+    fn drop(&mut self) {
+        let n = event_count(&self.fx);
+        let mut l = self.lineage.lock().unwrap();
+        l.alive -= 1;
+        if l.alive == 0 {
+            l.dead_from = Some(n);
+        }
+    }
+}
+
+impl Driver for LiveJournal {
+    type Error = FakeError;
+    async fn deliver(
+        &self,
+        id: &str,
+        msg: &AgentMessage,
+        mode: BusyLevel,
+    ) -> Result<DeliveryReceipt, FakeError> {
+        self.fx.driver.deliver(id, msg, mode).await
+    }
+    async fn events(&self, id: &str, after: Option<&str>) -> Result<Vec<DriverEvent>, FakeError> {
+        let all = self.fx.driver.events(id, None).await?;
+        let Some(start) = start_of(&all, after) else {
+            return self.fx.driver.events(id, after).await;
+        };
+        let gaps = self.lineage.lock().unwrap().gaps.clone();
+        Ok(without(all, start, &gaps))
+    }
+}
+
+driver_fixture!(
+    LiveJournal,
+    (FakeBackend, Arc<Mutex<Lineage>>),
+    |m| (m.fx.persisted(), Arc::clone(&m.lineage)),
+    |p| Self::attach(FakeDriverFixture::boot(&p.0), Arc::clone(&p.1))
+);
 
 pub fn mutants() -> Vec<Mutant> {
     vec![
@@ -450,6 +621,42 @@ pub fn mutants() -> Vec<Mutant> {
             rule: "DRV-6",
             name: "Gap",
             run: |name| driver::run(name, || Gap::fresh(FakeDriverFixture::new())),
+        },
+        // DRV-9 (verifier r5 R5-3): dedup remembers only the last id; the
+        // older of two ids resent after a crash starts a second turn.
+        Mutant {
+            rule: "DRV-9",
+            name: "LastIdDedup",
+            run: |name| {
+                driver::run(name, || LastIdDedup {
+                    fx: FakeDriverFixture::new(),
+                    last: Arc::default(),
+                })
+            },
+        },
+        // DRV-6 (verifier r5 R5-4): a restarted driver skips what an
+        // earlier driver read; backfill from an older cursor loses events.
+        Mutant {
+            rule: "DRV-6",
+            name: "ReadAck",
+            run: |name| {
+                driver::run(name, || ReadAck {
+                    fx: FakeDriverFixture::new(),
+                    acked: Arc::default(),
+                    floor: 0,
+                })
+            },
+        },
+        // DRV-6 (verifier r5 R5-6): events emitted while no driver is alive
+        // are lost.
+        Mutant {
+            rule: "DRV-6",
+            name: "LiveJournal",
+            run: |name| {
+                driver::run(name, || {
+                    LiveJournal::attach(FakeDriverFixture::new(), Arc::default())
+                })
+            },
         },
     ]
 }

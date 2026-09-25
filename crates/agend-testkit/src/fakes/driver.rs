@@ -33,10 +33,9 @@ pub enum DriverCall {
 /// again answers with a receipt but starts no second turn.
 ///
 /// The instances, their events and the delivered ids play the part of the
-/// backend: [`FakeDriver::restarted`] is a new driver (after a daemon
-/// restart) over the same backend, so it backfills events from cursors the
-/// old driver handed out. Receipts, `calls()` and `fail_next` stay per
-/// driver.
+/// backend ([`FakeBackend`]): [`FakeDriver::connect`] is a new driver (after
+/// a daemon restart) on it, so it backfills events from cursors earlier
+/// drivers handed out. Receipts, `calls()` and `fail_next` stay per driver.
 ///
 /// Cursors are one global zero-padded counter, so they are unique and
 /// ordered. Beyond the contract: an unknown cursor is an error.
@@ -44,6 +43,24 @@ pub enum DriverCall {
 pub struct FakeDriver {
     backend: Arc<Mutex<Backend>>,
     state: Mutex<State>,
+}
+
+/// The backend of a [`FakeDriver`], standing in for the agents in their
+/// holders: not a driver, and it outlives every driver. Clones share it.
+#[derive(Debug, Clone)]
+pub struct FakeBackend(Arc<Mutex<Backend>>);
+
+impl FakeBackend {
+    /// The agent emits an event on its own (no driver involved); returns
+    /// its cursor. The instance must exist.
+    pub fn push_event(&self, instance_id: &str, kind: DriverEventKind) -> String {
+        let mut backend = lock(&self.0);
+        assert!(
+            backend.instances.contains_key(instance_id),
+            "push_event: add instance {instance_id} first"
+        );
+        backend.push(instance_id, kind)
+    }
 }
 
 /// What outlives a driver: the backend's instances, events and history.
@@ -80,17 +97,19 @@ impl Backend {
 
 impl FakeDriver {
     pub fn new() -> Self {
-        Self::over(Arc::new(Mutex::new(Backend {
+        Self::connect(&FakeBackend(Arc::new(Mutex::new(Backend {
             instances: BTreeMap::new(),
             delivered: BTreeSet::new(),
             auto_turn: true,
             next_cursor: 0,
-        })))
+        }))))
     }
 
-    fn over(backend: Arc<Mutex<Backend>>) -> Self {
+    /// A new driver on `backend`, as a restarted daemon reconnects. Its
+    /// `calls()` and scripted receipts start empty.
+    pub fn connect(backend: &FakeBackend) -> Self {
         Self {
-            backend,
+            backend: Arc::clone(&backend.0),
             state: Mutex::new(State {
                 receipts: VecDeque::new(),
                 calls: Vec::new(),
@@ -99,10 +118,9 @@ impl FakeDriver {
         }
     }
 
-    /// A new driver over the same backend, as after a daemon restart. Its
-    /// `calls()` and scripted receipts start empty.
-    pub fn restarted(&self) -> Self {
-        Self::over(Arc::clone(&self.backend))
+    /// The backend this driver talks to.
+    pub fn backend(&self) -> FakeBackend {
+        FakeBackend(Arc::clone(&self.backend))
     }
 
     pub fn with_instance(self, instance_id: &str) -> Self {
@@ -128,12 +146,7 @@ impl FakeDriver {
 
     /// Appends an event for a known instance and returns its cursor.
     pub fn push_event(&self, instance_id: &str, kind: DriverEventKind) -> String {
-        let mut backend = lock(&self.backend);
-        assert!(
-            backend.instances.contains_key(instance_id),
-            "push_event: add instance {instance_id} first"
-        );
-        backend.push(instance_id, kind)
+        self.backend().push_event(instance_id, kind)
     }
 
     pub fn fail_next(&self, operation: &str, message: &str) {
@@ -278,8 +291,9 @@ mod tests {
         let again = block_on(driver.deliver("dev-1", &message("m-1"), BusyLevel::Queue));
         assert_eq!(again.unwrap().state, DeliveryState::Sent);
         assert_eq!(block_on(driver.events("dev-1", None)).unwrap().len(), 4);
-        let restarted = driver.restarted();
+        let backend = driver.backend();
         drop(driver);
+        let restarted = FakeDriver::connect(&backend);
         assert_eq!(
             block_on(restarted.events("dev-1", Some(&cursor)))
                 .unwrap()

@@ -7,16 +7,30 @@
 
 每列：規則（一行、可測）· 來源 · mutant（`tests/contract_teeth/<trait>.rs` 裡的名字）。來源寫「**推得**自 X」表示 X 沒逐字寫這條，但這條是 X 的必然結果（冒號後寫怎麼推）。標 **（新增，待你追認）** 的規則文件沒有寫，是實作者判斷需要而加的，見 [gate 2「待你追認」](../../docs/gates/gate-02-testkit.md#待你追認)。「不釘」列出刻意不驗的行為與理由。
 
-「daemon 重啟」在契約裡的意思：舊的 trait 物件丟掉（drop），在同一份持久狀態上建一個新的。fixture 用 `RuntimeFixture::restart`、`DriverFixture::restart`、`StoreFixture::reopen` 表達，case 先 drop 舊的再建新的。
+「daemon 重啟」在契約裡的意思：daemon 那一側的物件全部丟掉（drop），只剩持久狀態，再從持久狀態建一個新的。三個 fixture（Runtime、Driver、Store）各有一個 `Persisted` 型別與兩個方法：`persisted()` 取出持久狀態，`boot(&persisted)` 從持久狀態開機一個新的 fixture。`Persisted` 本身不是 trait 物件，也不能讓任何 trait 物件活著；Runtime 的 `is_running` 與 Driver 的 `emit_while_down` 只拿 `Persisted`，所以 daemon 不在時 backend 的動作（holder 繼續跑、agent 自己跑完一輪）不經過任何 daemon 那一側的物件。
 
-重啟類規則（DRV-6、DRV-9、STO-4、STO-12、RTM-8、RTM-9）都用同一個 daemon 生命週期（`contract::daemon_lifecycle`）驗，一次重啟不夠：只在 Rust 物件裡的狀態、第一次讀就被消耗的狀態，撐得過一次重啟，撐不過第二次（verifier r4）。
+重啟類規則（DRV-6、DRV-9、STO-4、STO-12、RTM-8、RTM-9）都用同一個 daemon 生命週期（`contract::daemon_lifecycle`）驗。case 拿到的 fixture 先轉成持久狀態、drop 掉，之後一共 4 次開機，每次開機都先做開機復原（Runtime `recover_holders`；Driver 從上一個 daemon 最後看到的 cursor 補回事件；Store 就是打開），兩次開機之間沒有任何實例活著：
 
-1. 開機 1：建 daemon，像真的 daemon 一樣先做開機復原（Runtime `recover_holders`；Driver 從上一個 daemon 最後看到的 cursor 補回事件；Store 就是打開），再做事。
-2. drop。daemon 不在時 backend 照常動：holder 繼續跑；agent 自己跑完一輪（`DriverFixture::emit_while_down`，不經過 driver）。
-3. 開機 2：同一份持久狀態上的新 daemon，開機復原、檢查不變量、再做事。
-4. 再 drop，開機 3：開機復原，再檢查一次全部不變量。
+| 開機 | 種類 | 做什麼 |
+|---|---|---|
+| 1 | 做事 | 開機復原，再做事（寫入、啟動 holder、送訊息） |
+| 2 | 閒置 | 只做開機復原，不做事就結束 |
+| 3 | 做事 | 開機復原、檢查前面留下的，再做事 |
+| 4 | 檢查 | 開機復原，檢查前面留下的全部（只做檢查需要的寫入，例如 CAS 看下一個版本） |
 
-**fixture 要求**：真實作的 `restart`／`reopen`／`emit_while_down` 要走真的持久層：同一個 DB 檔、同一個 run 目錄與 holder socket、真的 fake agent 程序，不可以用 process 內的全域 `static` 把狀態帶過去。契約在同一個 process 裡跑，分不出「真的存下來」與「藏在全域變數」；能真的重啟 process 的 fixture 更好。
+每次開機之後、下一次開機之前，daemon 不在時 backend 照常動（holder 繼續跑、從 `Persisted` 確認還在跑；agent 自己跑完一輪）。
+
+每一段擋一類實作（verifier r4、r5）：
+
+- 只重啟一次不夠：只在 Rust 物件裡的狀態、第一次讀就被消耗的狀態，撐得過一次，撐不過第二次（`CounterStore`、`ObjDedup`、`Handoff`）。
+- 閒置開機：打開時把持久狀態讀走清空、只在有變動時才寫回的實作，每次開機都做事時看不出來（`RewriteOnChange`、`TruncOnOpen`）。
+- 開機 4 的檢查：重啟後的 daemon 寫的東西沒存下來（`FrozenRegistry`、`FrozenDatabase`）。
+- 先 drop case 自己的 fixture：只要還有一個實例活著就不丟資料的實作（SQLite shared-cache 的記憶體 DB、只保留有 driver 活著時的事件、最後一個 runtime 走時 holder 跟著死）在 fixture 一直活著時看不出來（`SharedMem`、`LiveJournal`、`LastOneOut`）。
+- DRV-9 在重啟前送兩個以上不同的 id，重啟後先重送舊的（`LastIdDedup`）；DRV-6 在重啟後也從較舊的 cursor 補回（daemon 在存下最新 cursor 前崩潰），要拿到那之後的全部事件（`ReadAck`）。
+
+**fixture 要求**：真實作的 `Persisted`／`boot`／`emit_while_down`／`is_running` 要走真的持久層：同一個 DB 檔、同一個 run 目錄與 holder socket、真的 fake agent 程序，不可以用 process 內的全域 `static`、shared-cache 記憶體 DB，或 `Persisted` 裡藏一個活著的實例把狀態帶過去。契約在同一個 process 裡跑，分不出「真的存下來」與「藏在 process 裡」，所以：
+
+**重啟／持久化類的契約 case，要對真實作、跨真的 process 重啟跑（分開的 process、真的檔案／DB）**：Store 在[第 5 施工關](../../docs/gates/gate-05-store.md)、Runtime（holder）在[第 6 施工關](../../docs/gates/gate-06-daemon-holder.md)。本表的 mutant 都是同一個 process 裡的模型；例如 `LastOneOut`（holder 是 daemon 程序的子程序、daemon 結束就跟著死）在這裡用共享的 `Weak` 模擬，真的 process 版本在第 6 施工關驗。
 
 ## Driver（`DRV`，9 條）
 
@@ -27,10 +41,10 @@
 | DRV-3 | 送達之後，事件裡最後會出現 `TurnCompleted` | **推得**自 [GLOSSARY driver](../../docs/GLOSSARY.md)：driver 收狀態事件，一輪結束是其中之一 | `HidesTurnCompleted` |
 | DRV-4 | 每個事件的 cursor 都不同 | 推得：能從任何 cursor 接續 | `ConstantCursor` |
 | DRV-5 | `events(after)` 不含該 cursor 本身，也不含更舊的事件 | `events(after_cursor)` 簽章；重連補回（[ARCHITECTURE](../../docs/ARCHITECTURE.md) 程序模型 2） | `IgnoresCursor`、`IncludesTheCursorEvent` |
-| DRV-6 | `events(after)` 回傳該 cursor 之後的全部事件：一個不少、不截斷、順序不變；每次 daemon 重啟後，新的 driver 拿上一個 driver 最後看到的 cursor 也一樣，而且包含 daemon 不在時 agent 產生的事件 | [ARCHITECTURE](../../docs/ARCHITECTURE.md#程序模型) 程序模型規則 2：daemon 重啟後「重連 backend 補回斷線期間的事件」 | `SkipsFirstAfterCursor`、`OnlyLastTwoAfterCursor`、`OnlyOwnLifetimeEvents`、`Gap` |
+| DRV-6 | `events(after)` 回傳該 cursor 之後的全部事件：一個不少、不截斷、順序不變；每次 daemon 重啟後，新的 driver 拿上一個 driver 最後看到的 cursor 或更舊的 cursor 也一樣，而且包含 daemon 不在時 agent 產生的事件 | [ARCHITECTURE](../../docs/ARCHITECTURE.md#程序模型) 程序模型規則 2：daemon 重啟後「重連 backend 補回斷線期間的事件」 | `SkipsFirstAfterCursor`、`OnlyLastTwoAfterCursor`、`OnlyOwnLifetimeEvents`、`Gap`、`ReadAck`、`LiveJournal` |
 | DRV-7 | 同一個 cursor 重讀，結果只會變長；讀取不消耗事件 | 推得：能從任何 cursor 接續 | `ConsumesOnRead` |
 | DRV-8 | 讀不存在的 instance 的事件是錯誤，不是空清單 | 推得：`events(instance_id, …)` | `UnknownInstanceHasNoEvents` |
-| DRV-9 | 同一個訊息 id 再送一次不多一個 turn（`turn_timeout` 內不出現新的 `TurnCompleted`），daemon 重啟後再送也一樣；再送時 `deliver` 不是錯誤 | [delivery](../../docs/architecture/delivery.md#送達模型)：以 id 冪等，只有一套去重；[GLOSSARY 訊息](../../docs/GLOSSARY.md)；[V1-LESSONS #1](../../docs/V1-LESSONS.md)；[REWRITE-PLAN](../../docs/research/REWRITE-PLAN.md) 假 driver「重連後不遺失不重複」。「再送不是錯誤」是**推得**自 delivery 的「以 id 冪等」：冪等的操作重做一次結果相同，回錯誤會讓崩潰後重送的一方以為沒送到 | `RedeliversSameId`、`ObjDedup` |
+| DRV-9 | 同一個訊息 id 再送一次不多一個 turn（`turn_timeout` 內不出現新的 `TurnCompleted`），daemon 重啟後再送也一樣（不只最後一個 id：之前送過的每個 id 都一樣）；再送時 `deliver` 不是錯誤 | [delivery](../../docs/architecture/delivery.md#送達模型)：以 id 冪等，只有一套去重；[GLOSSARY 訊息](../../docs/GLOSSARY.md)；[V1-LESSONS #1](../../docs/V1-LESSONS.md)；[REWRITE-PLAN](../../docs/research/REWRITE-PLAN.md) 假 driver「重連後不遺失不重複」。「再送不是錯誤」是**推得**自 delivery 的「以 id 冪等」：冪等的操作重做一次結果相同，回錯誤會讓崩潰後重送的一方以為沒送到 | `RedeliversSameId`、`ObjDedup`、`LastIdDedup` |
 
 不釘：送達是否一定被確認（有些路徑無法確認，[delivery](../../docs/architecture/delivery.md)）；忙碌時的行為（第 7 施工關對真 backend 定）；未知 cursor；不同 instance 的事件是否分開（fixture 只給一個 instance）。
 
@@ -67,13 +81,13 @@
 | STO-9 | workflow 依 (id, 版本) 精確讀回；沒存過的版本是 `None`，不退回別的版本 | [GLOSSARY workflow](../../docs/GLOSSARY.md)：task 固定建立時的版本 | `FallsBackToOlderWorkflow` |
 | STO-10 | 同一個 task 的事件依附加順序保存 | `append_event` | `PrependsEvents` |
 | STO-11 | 事件依 task 分開，交錯附加也不混 | `append_event(task_id, …)` 簽章 | `SharedEventLog` |
-| STO-12 | 每次重新開啟（daemon 重啟）後 task、版本、workflow、事件都還在；保存的版本 CAS 可寫入 | [GLOSSARY store](../../docs/GLOSSARY.md)：SQLite、唯一真相來源（D8）；[pipeline](../../docs/architecture/pipeline.md#worktree-與-branch-生命週期)：先寫 DB，崩潰後開機接續 | `InMemoryOnly` |
+| STO-12 | 每次重新開啟（daemon 重啟）後 task、版本、workflow、事件都還在；保存的版本 CAS 可寫入 | [GLOSSARY store](../../docs/GLOSSARY.md)：SQLite、唯一真相來源（D8）；[pipeline](../../docs/architecture/pipeline.md#worktree-與-branch-生命週期)：先寫 DB，崩潰後開機接續 | `InMemoryOnly`、`TruncOnOpen`、`SharedMem`、`FrozenDatabase` |
 
 不釘：第一個版本號；對不存在的 task 附加事件。
 
 ## Runtime（`RTM`，9 條）
 
-「在跑」從 trait 外面看（`RuntimeFixture::is_running`：真實作看程序與 socket）。
+「在跑」從 trait 外面看（`RuntimeFixture::is_running`：只拿 `Persisted`，真實作看程序與 socket，daemon 不在時也能問）。
 
 | ID | 規則 | 來源 | mutant |
 |---|---|---|---|
@@ -84,7 +98,7 @@
 | RTM-5 | `stop_holder` 之後 holder 真的停了，不只是從清單拿掉；別的 holder 不受影響 | 推得：停止 | `StopOnlyHides` |
 | RTM-6 | 停掉的 holder 不再被 recover | 同 RTM-3 | `RecoversStoppedHolders` |
 | RTM-7 | 停掉的 instance 可以再啟動 | 推得：重啟 agent | `RefusesRestart` |
-| RTM-8 | 每次 daemon 重啟後（不只啟動它的 daemon 之後那一次），之前啟動、還沒停的 holder 都還在跑；新的 runtime 的 `recover_holders` 列出它們，handle 與當初 `start_holder` 回的相同 | [D3](../../docs/decisions/d01-d08.md#d3)：daemon 重啟時 agent 不斷線，重啟後重連 holder；[ARCHITECTURE](../../docs/ARCHITECTURE.md) 程序模型 2；[V1-LESSONS #7](../../docs/V1-LESSONS.md) | `DaemonScoped`、`RecoversOnlyOwnHolders`、`Handoff` |
+| RTM-8 | 每次 daemon 重啟後（不只啟動它的 daemon 之後那一次），之前啟動、還沒停的 holder 都還在跑；新的 runtime 的 `recover_holders` 列出它們，handle 與當初 `start_holder` 回的相同 | [D3](../../docs/decisions/d01-d08.md#d3)：daemon 重啟時 agent 不斷線，重啟後重連 holder；[ARCHITECTURE](../../docs/ARCHITECTURE.md) 程序模型 2；[V1-LESSONS #7](../../docs/V1-LESSONS.md) | `DaemonScoped`、`RecoversOnlyOwnHolders`、`Handoff`、`RewriteOnChange`、`LastOneOut`、`FrozenRegistry` |
 | RTM-9 | 重啟後的新 runtime 停得掉之前的 runtime 啟動的 holder（真的停，別的不受影響），每次重啟都一樣 | **推得**自 D3：重啟後由新 daemon 管理重連的 holder | `StopsOnlyOwnHolders` |
 
 不釘：同一 instance 啟動兩次；停止不存在的 instance。

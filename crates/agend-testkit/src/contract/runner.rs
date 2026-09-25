@@ -162,49 +162,49 @@ pub fn cases<F: RunnerFixture>() -> Vec<Case<F>> {
             rule: "RUN-1",
             name: "exit_codes_are_reported",
             check: |fx| {
-                expect(fx, &SUCCEEDS, TIMEOUT_MS)?;
-                expect(fx, &FAILS, TIMEOUT_MS)
+                expect(&fx, &SUCCEEDS, TIMEOUT_MS)?;
+                expect(&fx, &FAILS, TIMEOUT_MS)
             },
         },
         Case {
             rule: "RUN-2",
             name: "stdout_and_stderr_stay_separate",
-            check: |fx| expect(fx, &SEPARATES_STREAMS, TIMEOUT_MS),
+            check: |fx| expect(&fx, &SEPARATES_STREAMS, TIMEOUT_MS),
         },
         Case {
             rule: "RUN-3",
             name: "output_is_kept_byte_for_byte",
-            check: |fx| expect(fx, &KEEPS_BYTES, TIMEOUT_MS),
+            check: |fx| expect(&fx, &KEEPS_BYTES, TIMEOUT_MS),
         },
         Case {
             rule: "RUN-4",
             name: "large_output_comes_back_whole",
-            check: |fx| expect(fx, &LARGE_OUTPUT, LARGE_OUTPUT_TIMEOUT_MS),
+            check: |fx| expect(&fx, &LARGE_OUTPUT, LARGE_OUTPUT_TIMEOUT_MS),
         },
         Case {
             rule: "RUN-5",
             name: "timeout_reports_timed_out_without_exit_code",
-            check: timeout_reports_timed_out_without_exit_code,
+            check: |fx| timeout_reports_timed_out_without_exit_code(&fx),
         },
         Case {
             rule: "RUN-6",
             name: "timeout_is_reported_promptly",
-            check: timeout_is_reported_promptly,
+            check: |fx| timeout_is_reported_promptly(&fx),
         },
         Case {
             rule: "RUN-7",
             name: "timed_out_command_is_stopped",
-            check: |fx| stopped_after_timeout(fx, &TIMES_OUT, LATE_MARKER),
+            check: |fx| stopped_after_timeout(&fx, &TIMES_OUT, LATE_MARKER),
         },
         Case {
             rule: "RUN-8",
             name: "timed_out_command_children_are_stopped",
-            check: |fx| stopped_after_timeout(fx, &STARTS_A_CHILD, CHILD_MARKER),
+            check: |fx| stopped_after_timeout(&fx, &STARTS_A_CHILD, CHILD_MARKER),
         },
         Case {
             rule: "RUN-9",
             name: "runs_in_the_working_directory",
-            check: runs_in_the_working_directory,
+            check: |fx| runs_in_the_working_directory(&fx),
         },
     ]
 }

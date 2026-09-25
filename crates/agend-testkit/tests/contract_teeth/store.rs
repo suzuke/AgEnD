@@ -1,19 +1,21 @@
 //! Store mutants: a `FakeStore` with one method replaced. Mutants that keep
-//! events themselves also replace the fixture's view of them. `reopen`
-//! builds the next mutant over `FakeStore::reopen` (the same data) with the
-//! same replaced methods; a mutant's own event log does not survive it.
-//! `CounterStore` (verifier r4) is standalone.
+//! events themselves also replace the fixture's view of them. A mutant's
+//! persisted state is the fake's data ([`FakeStoreFile`]) and its replaced
+//! methods; `boot` opens the next mutant on it (`open`, replaced by
+//! `InMemoryOnly`); a mutant's own event log does not survive it.
+//! `CounterStore` (verifier r4), `TruncOnOpen` and `SharedMem` (verifier
+//! r5) are standalone.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use agend_core::pipeline::task::Task;
 use agend_core::pipeline::workflow::Workflow;
 use agend_core::traits::{CasResult, Store, StoredEvent, VersionedTask};
 use agend_testkit::block_on;
 use agend_testkit::contract::store::{self, StoreFixture};
-use agend_testkit::fakes::{FakeError, FakeStore};
+use agend_testkit::fakes::{FakeError, FakeStore, FakeStoreFile};
 
 use super::Mutant;
 
@@ -23,7 +25,7 @@ type Cas = fn(&M, &Task, u64) -> Result<CasResult, FakeError>;
 type LoadWorkflow = fn(&M, &str, u64) -> Result<Option<Workflow>, FakeError>;
 type Append = fn(&M, &str, &StoredEvent) -> Result<(), FakeError>;
 type Events = fn(&M, &str) -> Vec<StoredEvent>;
-type Reopen = fn(&M) -> FakeStore;
+type Open = fn(&FakeStoreFile) -> FakeStore;
 
 /// A fake store with one operation replaced.
 pub struct M {
@@ -36,7 +38,19 @@ pub struct M {
     load_workflow: LoadWorkflow,
     append: Append,
     events: Events,
-    reopen: Reopen,
+    open: Open,
+}
+
+/// What an `M` keeps across a restart: the data and its replaced methods.
+#[derive(Clone, Copy)]
+pub struct Methods {
+    load: Load,
+    create: Create,
+    cas: Cas,
+    load_workflow: LoadWorkflow,
+    append: Append,
+    events: Events,
+    open: Open,
 }
 
 impl M {
@@ -50,7 +64,7 @@ impl M {
             load_workflow: |m, id, v| m.real_load_workflow(id, v),
             append: |m, id, e| block_on(m.store.append_event(id, e)),
             events: |m, id| m.store.events(id),
-            reopen: |m| m.store.reopen(),
+            open: FakeStore::open,
         }
     }
 
@@ -108,6 +122,7 @@ impl Store for M {
 impl StoreFixture for M {
     type Store = Self;
     type Error = FakeError;
+    type Persisted = (FakeStoreFile, Methods);
     fn store(&self) -> &Self {
         self
     }
@@ -117,11 +132,29 @@ impl StoreFixture for M {
     fn events(&self, task_id: &str) -> Vec<StoredEvent> {
         (self.events)(self, task_id)
     }
-    fn reopen(&self) -> Self {
+    fn persisted(&self) -> Self::Persisted {
+        let methods = Methods {
+            load: self.load,
+            create: self.create,
+            cas: self.cas,
+            load_workflow: self.load_workflow,
+            append: self.append,
+            events: self.events,
+            open: self.open,
+        };
+        (self.store.file(), methods)
+    }
+    fn boot((file, m): &Self::Persisted) -> Self {
         Self {
-            store: (self.reopen)(self),
+            store: (m.open)(file),
             log: Mutex::new(Vec::new()),
-            ..*self
+            load: m.load,
+            create: m.create,
+            cas: m.cas,
+            load_workflow: m.load_workflow,
+            append: m.append,
+            events: m.events,
+            open: m.open,
         }
     }
 }
@@ -131,8 +164,9 @@ fn toggled(version: u64) -> u64 {
     if version % 2 == 1 { 1 } else { 2 }
 }
 
-/// What `CounterStore` persists: everything but its version counter.
-#[derive(Default)]
+/// What `CounterStore` and `TruncOnOpen` persist: tasks, versions,
+/// workflows, events.
+#[derive(Default, Clone)]
 pub struct Disk {
     tasks: BTreeMap<String, VersionedTask>,
     workflows: BTreeMap<(String, u64), Workflow>,
@@ -226,6 +260,7 @@ impl Store for CounterStore {
 impl StoreFixture for CounterStore {
     type Store = Self;
     type Error = String;
+    type Persisted = Arc<Mutex<Disk>>;
     fn store(&self) -> &Self {
         self
     }
@@ -237,8 +272,206 @@ impl StoreFixture for CounterStore {
     fn events(&self, task_id: &str) -> Vec<StoredEvent> {
         self.disk().events.get(task_id).cloned().unwrap_or_default()
     }
-    fn reopen(&self) -> Self {
-        Self::open(Arc::clone(&self.disk))
+    fn persisted(&self) -> Arc<Mutex<Disk>> {
+        Arc::clone(&self.disk)
+    }
+    fn boot(disk: &Arc<Mutex<Disk>>) -> Self {
+        Self::open(Arc::clone(disk))
+    }
+}
+
+/// A store that reads the whole file into memory when it opens and writes
+/// the whole snapshot back on every mutation. Two ways to get it wrong:
+///
+/// - verifier r5 `TruncOnOpen` (`truncates`): opening leaves the file
+///   empty. A daemon that boots, reads and idles loses everything at its
+///   next restart.
+/// - `FrozenDatabase` (round 6): only the daemon that created the file
+///   writes it; what a restarted daemon writes is gone at the next restart.
+pub struct TruncOnOpen {
+    file: Arc<Mutex<Option<Disk>>>,
+    mem: Mutex<Disk>,
+    truncates: bool,
+    writes: bool,
+}
+
+impl TruncOnOpen {
+    fn open(file: Arc<Mutex<Option<Disk>>>, truncates: bool) -> Self {
+        let (mem, writes) = {
+            let mut stored = file.lock().unwrap();
+            let writes = truncates || stored.is_none();
+            let mem = if truncates {
+                stored.take()
+            } else {
+                stored.clone()
+            };
+            (mem.unwrap_or_default(), writes)
+        };
+        Self {
+            file,
+            mem: Mutex::new(mem),
+            truncates,
+            writes,
+        }
+    }
+
+    fn mem(&self) -> std::sync::MutexGuard<'_, Disk> {
+        self.mem.lock().unwrap()
+    }
+
+    fn flush(&self) {
+        if self.writes {
+            *self.file.lock().unwrap() = Some(self.mem().clone());
+        }
+    }
+}
+
+impl Store for TruncOnOpen {
+    type Error = String;
+    async fn load_task(&self, id: &str) -> Result<Option<VersionedTask>, String> {
+        Ok(self.mem().tasks.get(id).cloned())
+    }
+    async fn create_task(&self, task: &Task) -> Result<(), String> {
+        {
+            let mut mem = self.mem();
+            if mem.tasks.contains_key(&task.id) {
+                return Err(format!("{} exists", task.id));
+            }
+            mem.tasks.insert(
+                task.id.clone(),
+                VersionedTask {
+                    version: 1,
+                    task: task.clone(),
+                },
+            );
+        }
+        self.flush();
+        Ok(())
+    }
+    async fn compare_and_swap_task(&self, task: &Task, expected: u64) -> Result<CasResult, String> {
+        let result = {
+            let mut mem = self.mem();
+            let Some(current) = mem.tasks.get_mut(&task.id) else {
+                return Ok(CasResult::Conflict {
+                    current_version: None,
+                });
+            };
+            if current.version != expected {
+                return Ok(CasResult::Conflict {
+                    current_version: Some(current.version),
+                });
+            }
+            current.version += 1;
+            current.task = task.clone();
+            CasResult::Written {
+                new_version: current.version,
+            }
+        };
+        self.flush();
+        Ok(result)
+    }
+    async fn load_workflow(&self, id: &str, version: u64) -> Result<Option<Workflow>, String> {
+        Ok(self.mem().workflows.get(&(id.to_owned(), version)).cloned())
+    }
+    async fn append_event(&self, id: &str, event: &StoredEvent) -> Result<(), String> {
+        {
+            let mut mem = self.mem();
+            if !mem.tasks.contains_key(id) {
+                return Err(format!("no task {id}"));
+            }
+            mem.events
+                .entry(id.to_owned())
+                .or_default()
+                .push(event.clone());
+        }
+        self.flush();
+        Ok(())
+    }
+}
+
+impl StoreFixture for TruncOnOpen {
+    type Store = Self;
+    type Error = String;
+    type Persisted = (Arc<Mutex<Option<Disk>>>, bool);
+    fn store(&self) -> &Self {
+        self
+    }
+    fn insert_workflow(&self, workflow: &Workflow) {
+        self.mem()
+            .workflows
+            .insert((workflow.id.clone(), workflow.version), workflow.clone());
+        self.flush();
+    }
+    fn events(&self, task_id: &str) -> Vec<StoredEvent> {
+        self.mem().events.get(task_id).cloned().unwrap_or_default()
+    }
+    fn persisted(&self) -> Self::Persisted {
+        (Arc::clone(&self.file), self.truncates)
+    }
+    fn boot((file, truncates): &Self::Persisted) -> Self {
+        Self::open(Arc::clone(file), *truncates)
+    }
+}
+
+/// Verifier r5 `SharedMem`: SQLite shared-cache in memory. The data lives
+/// while any handle to it is open and is gone when the last one closes; the
+/// persisted state is only the database's name.
+pub struct SharedMem {
+    db: Arc<FakeStore>,
+    name: Arc<Mutex<Weak<FakeStore>>>,
+}
+
+impl SharedMem {
+    fn open(name: Arc<Mutex<Weak<FakeStore>>>) -> Self {
+        let db = {
+            let mut slot = name.lock().unwrap();
+            slot.upgrade().unwrap_or_else(|| {
+                let db = Arc::new(FakeStore::new());
+                *slot = Arc::downgrade(&db);
+                db
+            })
+        };
+        Self { db, name }
+    }
+}
+
+impl Store for SharedMem {
+    type Error = FakeError;
+    async fn load_task(&self, id: &str) -> Result<Option<VersionedTask>, FakeError> {
+        self.db.load_task(id).await
+    }
+    async fn create_task(&self, task: &Task) -> Result<(), FakeError> {
+        self.db.create_task(task).await
+    }
+    async fn compare_and_swap_task(&self, task: &Task, v: u64) -> Result<CasResult, FakeError> {
+        self.db.compare_and_swap_task(task, v).await
+    }
+    async fn load_workflow(&self, id: &str, v: u64) -> Result<Option<Workflow>, FakeError> {
+        self.db.load_workflow(id, v).await
+    }
+    async fn append_event(&self, id: &str, event: &StoredEvent) -> Result<(), FakeError> {
+        self.db.append_event(id, event).await
+    }
+}
+
+impl StoreFixture for SharedMem {
+    type Store = Self;
+    type Error = FakeError;
+    type Persisted = Arc<Mutex<Weak<FakeStore>>>;
+    fn store(&self) -> &Self {
+        self
+    }
+    fn insert_workflow(&self, workflow: &Workflow) {
+        self.db.insert_workflow(workflow.clone());
+    }
+    fn events(&self, task_id: &str) -> Vec<StoredEvent> {
+        self.db.events(task_id)
+    }
+    fn persisted(&self) -> Arc<Mutex<Weak<FakeStore>>> {
+        Arc::clone(&self.name)
+    }
+    fn boot(name: &Arc<Mutex<Weak<FakeStore>>>) -> Self {
+        Self::open(Arc::clone(name))
     }
 }
 
@@ -439,7 +672,7 @@ pub fn mutants() -> Vec<Mutant> {
             name: "InMemoryOnly",
             run: |name| {
                 store::run(name, || M {
-                    reopen: |_| FakeStore::new(),
+                    open: |_| FakeStore::new(),
                     ..M::new()
                 })
             },
@@ -450,6 +683,27 @@ pub fn mutants() -> Vec<Mutant> {
             rule: "STO-4",
             name: "CounterStore",
             run: |name| store::run(name, || CounterStore::open(Arc::default())),
+        },
+        // STO-12 (verifier r5 R5-2): opening empties the file; data survives
+        // only while every boot writes something.
+        Mutant {
+            rule: "STO-12",
+            name: "TruncOnOpen",
+            run: |name| store::run(name, || TruncOnOpen::open(Arc::default(), true)),
+        },
+        // STO-12 (round 6, helper mutation H2): what a restarted daemon
+        // writes is never persisted; the last boot reads stale data.
+        Mutant {
+            rule: "STO-12",
+            name: "FrozenDatabase",
+            run: |name| store::run(name, || TruncOnOpen::open(Arc::default(), false)),
+        },
+        // STO-12 (verifier r5 R5-5): shared in-memory database; the data is
+        // gone once no handle is open.
+        Mutant {
+            rule: "STO-12",
+            name: "SharedMem",
+            run: |name| store::run(name, || SharedMem::open(Arc::default())),
         },
     ]
 }

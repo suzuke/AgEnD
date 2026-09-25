@@ -4,8 +4,9 @@
 //! against the real implementation at its gate. That is what keeps fakes from
 //! drifting away from production (v1 #1483).
 //!
-//! Each case gets a fresh fixture. [`run_all_fakes`] runs every suite
-//! against the fakes in `crate::fakes`.
+//! Each case gets a fresh fixture, by value: a daemon-restart case hands its
+//! fixture's persisted state to [`daemon_lifecycle`] and drops the fixture.
+//! [`run_all_fakes`] runs every suite against the fakes in `crate::fakes`.
 //!
 //! Every case names the rule it checks (`DRV-1`, `STO-6`, ...). The rules
 //! are numbered in `crates/agend-testkit/CONTRACTS.md`; a coverage test in
@@ -32,11 +33,12 @@ pub use fakes::run_all_fakes;
 /// Outcome of one case: `Err` carries an English explanation.
 pub type CaseResult = Result<(), String>;
 
-/// One named check of one numbered contract rule (see CONTRACTS.md).
+/// One named check of one numbered contract rule (see CONTRACTS.md). The
+/// check owns the fixture, so it can drop it.
 pub struct Case<F> {
     pub rule: &'static str,
     pub name: &'static str,
-    pub check: fn(&F) -> CaseResult,
+    pub check: fn(F) -> CaseResult,
 }
 
 /// The result of one case.
@@ -129,7 +131,7 @@ pub fn run_suite<F>(
         .iter()
         .map(|case| {
             let fixture = make();
-            let result = catch_unwind(AssertUnwindSafe(|| (case.check)(&fixture)))
+            let result = catch_unwind(AssertUnwindSafe(|| (case.check)(fixture)))
                 .unwrap_or_else(|panic| Err(format!("panicked: {}", panic_message(&*panic))));
             Outcome {
                 rule: case.rule,
@@ -184,29 +186,54 @@ pub(crate) fn eventually<T>(
     }
 }
 
-/// Boots in a [`daemon_lifecycle`]: two restarts, so a daemon that was
-/// itself restarted is restarted again (state handed over only once, or
-/// consumed at the first recovery, does not survive).
-pub const BOOTS: usize = 3;
+/// What one boot of a [`daemon_lifecycle`] does after its boot recovery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Boot {
+    /// Checks what earlier boots left, then changes state (writes, starts
+    /// holders, delivers).
+    Work,
+    /// Only the boot recovery (recover holders, backfill, open the store),
+    /// then the daemon goes away: state destroyed when read and written
+    /// back only on a change is lost here.
+    Idle,
+    /// Checks everything the earlier boots left; writes only what a check
+    /// needs (a CAS to see the next version).
+    Check,
+}
 
-/// A daemon lifecycle (CONTRACTS.md "daemon 重啟"): [`BOOTS`] daemons in a
-/// row over the same persisted state. Boot `n` (1-based) gets a new daemon
-/// from `new_daemon`; `boot` recovers the way a real daemon does at every
-/// boot, checks the rule's invariants and does more work. Then the daemon is
-/// dropped, and before the next boot `while_down(n)` lets the backend side
-/// act with no daemon running. Errors name the boot.
-pub(crate) fn daemon_lifecycle<D>(
-    mut new_daemon: impl FnMut() -> D,
-    mut while_down: impl FnMut(usize),
-    mut boot: impl FnMut(usize, &D) -> CaseResult,
+/// The boots of every daemon lifecycle, in order: a restarted daemon works
+/// again, and an idle boot sits between two working ones.
+pub const LIFECYCLE: [Boot; 4] = [Boot::Work, Boot::Idle, Boot::Work, Boot::Check];
+
+/// A daemon lifecycle (CONTRACTS.md "daemon 重啟"). The case's fixture is
+/// turned into its persisted state (`persist`) and dropped before the first
+/// boot, so from then on no instance of the implementation is alive except
+/// the booted daemon, and between boots none at all. Boot `n` (1-based, of
+/// kind `LIFECYCLE[n - 1]`) gets a new daemon from `boot_daemon` over the
+/// persisted state; `boot` recovers the way a real daemon does at every boot
+/// and then does what its [`Boot`] says. Then the daemon is dropped, and
+/// before the next boot `while_down(n)` lets the backend act and checks it
+/// through the persisted state, with no daemon running. Errors name the
+/// boot.
+pub(crate) fn daemon_lifecycle<F, P>(
+    fx: F,
+    persist: impl FnOnce(&F) -> P,
+    boot_daemon: impl Fn(&P) -> F,
+    mut while_down: impl FnMut(&P, usize) -> CaseResult,
+    mut boot: impl FnMut(usize, Boot, &F) -> CaseResult,
 ) -> CaseResult {
-    for n in 1..=BOOTS {
-        let daemon = new_daemon();
-        let result = boot(n, &daemon);
+    let persisted = persist(&fx);
+    drop(fx);
+    let boots = LIFECYCLE.len();
+    for (index, kind) in LIFECYCLE.into_iter().enumerate() {
+        let n = index + 1;
+        let daemon = boot_daemon(&persisted);
+        let result = boot(n, kind, &daemon);
         drop(daemon);
-        result.map_err(|e| format!("boot {n} of {BOOTS}: {e}"))?;
-        if n < BOOTS {
-            while_down(n);
+        result.map_err(|e| format!("boot {n} of {boots} ({kind:?}): {e}"))?;
+        if n < boots {
+            while_down(&persisted, n)
+                .map_err(|e| format!("while down after boot {n} of {boots}: {e}"))?;
         }
     }
     Ok(())
@@ -227,7 +254,7 @@ mod tests {
             Case {
                 rule: "DEM-2",
                 name: "fails",
-                check: |n| ensure(*n == 0, || format!("expected 0, got {n}")),
+                check: |n| ensure(n == 0, || format!("expected 0, got {n}")),
             },
             Case {
                 rule: "DEM-3",

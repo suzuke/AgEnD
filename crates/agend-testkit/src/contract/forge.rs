@@ -39,52 +39,52 @@ pub fn cases<F: ForgeFixture>() -> Vec<Case<F>> {
         Case {
             rule: "FRG-1",
             name: "head_reports_the_latest_commit",
-            check: head_reports_the_latest_commit,
+            check: |fx| head_reports_the_latest_commit(&fx),
         },
         Case {
             rule: "FRG-2",
             name: "head_of_unknown_branch_is_an_error",
-            check: head_of_unknown_branch_is_an_error,
+            check: |fx| head_of_unknown_branch_is_an_error(&fx),
         },
         Case {
             rule: "FRG-3",
             name: "submit_reports_the_submitted_head",
-            check: submit_reports_the_submitted_head,
+            check: |fx| submit_reports_the_submitted_head(&fx),
         },
         Case {
             rule: "FRG-4",
             name: "submit_of_unknown_branch_is_an_error",
-            check: submit_of_unknown_branch_is_an_error,
+            check: |fx| submit_of_unknown_branch_is_an_error(&fx),
         },
         Case {
             rule: "FRG-5",
             name: "merge_with_expected_head_merges",
-            check: merge_with_expected_head_merges,
+            check: |fx| merge_with_expected_head_merges(&fx),
         },
         Case {
             rule: "FRG-5",
             name: "merge_compares_the_head_at_merge_time",
-            check: merge_compares_the_head_at_merge_time,
+            check: |fx| merge_compares_the_head_at_merge_time(&fx),
         },
         Case {
             rule: "FRG-6",
             name: "merge_with_stale_head_echoes_actual_head",
-            check: merge_with_stale_head_echoes_actual_head,
+            check: |fx| merge_with_stale_head_echoes_actual_head(&fx),
         },
         Case {
             rule: "FRG-7",
             name: "stale_merge_changes_nothing",
-            check: stale_merge_changes_nothing,
+            check: |fx| stale_merge_changes_nothing(&fx),
         },
         Case {
             rule: "FRG-8",
             name: "merge_needs_the_whole_head",
-            check: merge_needs_the_whole_head,
+            check: |fx| merge_needs_the_whole_head(&fx),
         },
         Case {
             rule: "FRG-9",
             name: "merge_of_unknown_branch_is_an_error",
-            check: merge_of_unknown_branch_is_an_error,
+            check: |fx| merge_of_unknown_branch_is_an_error(&fx),
         },
     ]
 }

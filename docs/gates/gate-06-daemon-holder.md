@@ -23,6 +23,7 @@
 - [ ] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`（出現 `SKIPPED` 不算通過）
 - [ ] `~/.cargo/bin/cargo xtask accept daemon-holder` 通過，並印出下方「你親自驗收」用到的 demo
 - [ ] 本施工關 crate 的 `README.md`／`TESTING.md` 已更新
+- [ ] 重啟／持久化類的契約 case（RTM-8、RTM-9，見 [CONTRACTS.md](../../crates/agend-testkit/CONTRACTS.md)）對真實作、跨真的 process 重啟跑（分開的 process、真的檔案／DB）**（待你追認）**
 - [ ] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」
 
 ## 你親自驗收

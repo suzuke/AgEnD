@@ -6,8 +6,8 @@ use agend_core::traits::{DriverEventKind, HolderHandle, HolderLaunch, Notificati
 
 use super::{Report, clock, driver, forge, notifier, runner, runtime, store};
 use crate::fakes::{
-    FakeClock, FakeDriver, FakeError, FakeForge, FakeNotifier, FakeRunner, FakeRuntime, FakeStore,
-    ScriptedCommand,
+    FakeBackend, FakeClock, FakeDriver, FakeError, FakeForge, FakeHolders, FakeNotifier,
+    FakeRunner, FakeRuntime, FakeStore, FakeStoreFile, ScriptedCommand,
 };
 use crate::tempdir::TempDir;
 
@@ -34,6 +34,7 @@ impl forge::ForgeFixture for FakeForge {
 impl store::StoreFixture for FakeStore {
     type Store = FakeStore;
     type Error = FakeError;
+    type Persisted = FakeStoreFile;
 
     fn store(&self) -> &FakeStore {
         self
@@ -47,8 +48,12 @@ impl store::StoreFixture for FakeStore {
         FakeStore::events(self, task_id)
     }
 
-    fn reopen(&self) -> Self {
-        FakeStore::reopen(self)
+    fn persisted(&self) -> FakeStoreFile {
+        self.file()
+    }
+
+    fn boot(file: &FakeStoreFile) -> Self {
+        FakeStore::open(file)
     }
 }
 
@@ -76,6 +81,7 @@ impl Default for FakeDriverFixture {
 impl driver::DriverFixture for FakeDriverFixture {
     type Driver = FakeDriver;
     type Error = FakeError;
+    type Persisted = FakeBackend;
 
     fn driver(&self) -> &FakeDriver {
         &self.driver
@@ -91,15 +97,19 @@ impl driver::DriverFixture for FakeDriverFixture {
         std::time::Duration::from_millis(200)
     }
 
-    fn restart(&self) -> Self {
+    fn persisted(&self) -> FakeBackend {
+        self.driver.backend()
+    }
+
+    fn boot(backend: &FakeBackend) -> Self {
         Self {
-            driver: self.driver.restarted(),
+            driver: FakeDriver::connect(backend),
         }
     }
 
-    /// Pushes a whole turn straight into the shared backend
-    /// ([`FakeDriver::push_event`]), not through a delivery.
-    fn emit_while_down(&self) {
+    /// Pushes a whole turn straight into the backend
+    /// ([`FakeBackend::push_event`]), not through a driver.
+    fn emit_while_down(backend: &FakeBackend) {
         for kind in [
             DriverEventKind::BusyChanged { busy: true },
             DriverEventKind::TurnCompleted {
@@ -107,7 +117,7 @@ impl driver::DriverFixture for FakeDriverFixture {
             },
             DriverEventKind::BusyChanged { busy: false },
         ] {
-            self.driver.push_event(Self::INSTANCE, kind);
+            backend.push_event(Self::INSTANCE, kind);
         }
     }
 }
@@ -115,6 +125,7 @@ impl driver::DriverFixture for FakeDriverFixture {
 impl runtime::RuntimeFixture for FakeRuntime {
     type Runtime = FakeRuntime;
     type Error = FakeError;
+    type Persisted = FakeHolders;
 
     fn runtime(&self) -> &FakeRuntime {
         self
@@ -130,12 +141,16 @@ impl runtime::RuntimeFixture for FakeRuntime {
         }
     }
 
-    fn is_running(&self, handle: &HolderHandle) -> bool {
-        self.running().contains(handle)
+    fn is_running(holders: &FakeHolders, handle: &HolderHandle) -> bool {
+        holders.running().contains(handle)
     }
 
-    fn restart(&self) -> Self {
-        self.restarted()
+    fn persisted(&self) -> FakeHolders {
+        self.holders()
+    }
+
+    fn boot(holders: &FakeHolders) -> Self {
+        FakeRuntime::on(holders)
     }
 }
 

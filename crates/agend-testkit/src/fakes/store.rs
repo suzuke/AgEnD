@@ -25,15 +25,20 @@ pub enum StoreCall {
 }
 
 /// In-memory store. Versions start at 1 and grow by 1 per successful
-/// compare-and-swap. The data plays the part of the database file:
-/// [`FakeStore::reopen`] is a new handle over the same data (a daemon
-/// restart), while `calls()` and `fail_next` stay per handle. Beyond the
-/// contract: appending an event to an unknown task fails.
+/// compare-and-swap. The data plays the part of the database file
+/// ([`FakeStoreFile`]): [`FakeStore::open`] is a new handle over it (a
+/// daemon restart), while `calls()` and `fail_next` stay per handle. Beyond
+/// the contract: appending an event to an unknown task fails.
 #[derive(Debug)]
 pub struct FakeStore {
     data: Arc<Mutex<Data>>,
     state: Mutex<State>,
 }
+
+/// The data of a [`FakeStore`], standing in for the database file: it is
+/// not a store, and it outlives every handle opened on it. Clones share it.
+#[derive(Debug, Clone, Default)]
+pub struct FakeStoreFile(Arc<Mutex<Data>>);
 
 /// What outlives a handle: everything a real store keeps on disk.
 #[derive(Debug, Default)]
@@ -53,12 +58,14 @@ impl FakeStore {
     pub const FIRST_VERSION: u64 = 1;
 
     pub fn new() -> Self {
-        Self::over(Arc::default())
+        Self::open(&FakeStoreFile::default())
     }
 
-    fn over(data: Arc<Mutex<Data>>) -> Self {
+    /// A new handle on `file`, as a restarted daemon opens its database.
+    /// Its `calls()` start empty.
+    pub fn open(file: &FakeStoreFile) -> Self {
         Self {
-            data,
+            data: Arc::clone(&file.0),
             state: Mutex::new(State {
                 calls: Vec::new(),
                 failures: Failures::new(OPERATIONS),
@@ -66,10 +73,9 @@ impl FakeStore {
         }
     }
 
-    /// A new handle over the same data, as after a daemon restart. Its
-    /// `calls()` start empty.
-    pub fn reopen(&self) -> Self {
-        Self::over(Arc::clone(&self.data))
+    /// The data this handle works on.
+    pub fn file(&self) -> FakeStoreFile {
+        FakeStoreFile(Arc::clone(&self.data))
     }
 
     /// Saves a workflow version (the trait has no write method for them).
@@ -236,8 +242,9 @@ mod tests {
         let task = Task::new("T-1", "fix", "general", "code", 1);
         block_on(store.create_task(&task)).unwrap();
         block_on(store.append_event("T-1", &event())).unwrap();
-        let reopened = store.reopen();
+        let file = store.file();
         drop(store);
+        let reopened = FakeStore::open(&file);
         let loaded = block_on(reopened.load_task("T-1")).unwrap().unwrap();
         assert_eq!((loaded.version, loaded.task), (1, task));
         assert_eq!(reopened.events("T-1"), vec![event()]);

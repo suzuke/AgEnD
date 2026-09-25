@@ -32,22 +32,22 @@ pub fn cases<F: NotifierFixture>() -> Vec<Case<F>> {
         Case {
             rule: "NTF-1",
             name: "fields_arrive_unchanged",
-            check: fields_arrive_unchanged,
+            check: |fx| fields_arrive_unchanged(&fx),
         },
         Case {
             rule: "NTF-2",
             name: "long_body_arrives_whole",
-            check: long_body_arrives_whole,
+            check: |fx| long_body_arrives_whole(&fx),
         },
         Case {
             rule: "NTF-3",
             name: "whitespace_is_kept",
-            check: whitespace_is_kept,
+            check: |fx| whitespace_is_kept(&fx),
         },
         Case {
             rule: "NTF-4",
             name: "notifications_keep_their_order",
-            check: notifications_keep_their_order,
+            check: |fx| notifications_keep_their_order(&fx),
         },
     ]
 }

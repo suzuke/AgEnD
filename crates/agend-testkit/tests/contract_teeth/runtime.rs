@@ -1,19 +1,50 @@
 //! Runtime mutants: a `FakeRuntime` with one method replaced. The fixture's
-//! `is_running` always looks at the fake's own table, like a real fixture
-//! looking at processes and sockets. `restart` builds the next mutant over
-//! `FakeRuntime::restarted` (the same holders) with the same replaced
-//! methods and an empty memo: what one daemon remembered is gone.
-//! `DaemonScoped` (verifier r3) and `Handoff` (verifier r4) are standalone.
+//! `is_running` always looks at the fake's holder table ([`FakeHolders`]),
+//! like a real fixture looking at processes and sockets. A mutant's
+//! persisted state is that table plus whatever the mutant itself persists;
+//! `boot` builds the next mutant over it with the same replaced methods and
+//! an empty memo: what one daemon remembered is gone. `DaemonScoped`
+//! (verifier r3), `Handoff` (verifier r4), `RewriteOnChange` and
+//! `LastOneOut` (verifier r5) are standalone.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use agend_core::traits::{HolderHandle, HolderLaunch, Runtime};
 use agend_testkit::block_on;
 use agend_testkit::contract::runtime::{self, RuntimeFixture};
-use agend_testkit::fakes::{FakeError, FakeRuntime};
+use agend_testkit::fakes::{FakeError, FakeHolders, FakeRuntime};
 
 use super::Mutant;
+
+/// Implements `RuntimeFixture` for a mutant with a `FakeRuntime` field
+/// `$rt`: `$save` maps the mutant to its persisted state (the first element
+/// is the fake's holder table), `$boot` builds a mutant from it.
+macro_rules! runtime_fixture {
+    ($ty:ty, $rt:ident, $persisted:ty, |$me:ident| $save:expr, |$p:ident| $boot:expr) => {
+        impl RuntimeFixture for $ty {
+            type Runtime = Self;
+            type Error = FakeError;
+            type Persisted = $persisted;
+            fn runtime(&self) -> &Self {
+                self
+            }
+            fn launch(&self, id: &str) -> HolderLaunch {
+                RuntimeFixture::launch(&self.$rt, id)
+            }
+            fn is_running(persisted: &$persisted, handle: &HolderHandle) -> bool {
+                FakeRuntime::is_running(&persisted.0, handle)
+            }
+            fn persisted(&self) -> $persisted {
+                let $me = self;
+                $save
+            }
+            fn boot($p: &$persisted) -> Self {
+                $boot
+            }
+        }
+    };
+}
 
 type Start = fn(&M, &HolderLaunch) -> Result<HolderHandle, FakeError>;
 type Stop = fn(&M, &str) -> Result<(), FakeError>;
@@ -84,28 +115,19 @@ impl Runtime for M {
     }
 }
 
-impl RuntimeFixture for M {
-    type Runtime = Self;
-    type Error = FakeError;
-    fn runtime(&self) -> &Self {
-        self
+runtime_fixture!(
+    M,
+    rt,
+    (FakeHolders, Start, Stop, Recover),
+    |m| (m.rt.holders(), m.start, m.stop, m.recover),
+    |p| Self {
+        rt: FakeRuntime::on(&p.0),
+        memo: Mutex::new(BTreeMap::new()),
+        start: p.1,
+        stop: p.2,
+        recover: p.3,
     }
-    fn launch(&self, id: &str) -> HolderLaunch {
-        RuntimeFixture::launch(&self.rt, id)
-    }
-    fn is_running(&self, handle: &HolderHandle) -> bool {
-        RuntimeFixture::is_running(&self.rt, handle)
-    }
-    fn restart(&self) -> Self {
-        Self {
-            rt: self.rt.restarted(),
-            memo: Mutex::new(BTreeMap::new()),
-            start: self.start,
-            stop: self.stop,
-            recover: self.recover,
-        }
-    }
-}
+);
 
 /// Verifier r3 `DaemonScoped`: a runtime scoped to one daemon process. It
 /// recovers only the holders it started itself and kills them when it is
@@ -156,22 +178,13 @@ impl Runtime for DaemonScoped {
     }
 }
 
-impl RuntimeFixture for DaemonScoped {
-    type Runtime = Self;
-    type Error = FakeError;
-    fn runtime(&self) -> &Self {
-        self
-    }
-    fn launch(&self, id: &str) -> HolderLaunch {
-        RuntimeFixture::launch(&self.world, id)
-    }
-    fn is_running(&self, h: &HolderHandle) -> bool {
-        RuntimeFixture::is_running(&self.world, h)
-    }
-    fn restart(&self) -> Self {
-        Self::new(self.world.restarted())
-    }
-}
+runtime_fixture!(
+    DaemonScoped,
+    world,
+    (FakeHolders,),
+    |m| (m.world.holders(),),
+    |p| Self::new(FakeRuntime::on(&p.0))
+);
 
 /// Verifier r4 `Handoff`: persists a registry of started holders, but
 /// recovery reads and deletes it (like consuming a handoff file) and keeps
@@ -224,22 +237,158 @@ impl Runtime for Handoff {
     }
 }
 
-impl RuntimeFixture for Handoff {
-    type Runtime = Self;
-    type Error = FakeError;
-    fn runtime(&self) -> &Self {
-        self
+runtime_fixture!(
+    Handoff,
+    world,
+    (FakeHolders, Arc<Mutex<BTreeSet<String>>>),
+    |m| (m.world.holders(), Arc::clone(&m.registry)),
+    |p| Self::over(FakeRuntime::on(&p.0), Arc::clone(&p.1))
+);
+
+/// A runtime that reads the persisted holder registry into memory when it
+/// opens and writes it back on start and stop. Two ways to get it wrong:
+///
+/// - verifier r5 `RewriteOnChange` (`truncates`): opening truncates the
+///   registry (like `File::create` after the read). A daemon that boots,
+///   recovers and idles leaves an empty registry, so the next one orphans
+///   the holders.
+/// - `FrozenRegistry` (round 6): only the daemon that found no registry
+///   writes one; a restarted daemon's starts are never recorded, so the
+///   holders it started are orphaned at the next restart.
+pub struct RewriteOnChange {
+    world: FakeRuntime,
+    file: Arc<Mutex<BTreeSet<String>>>,
+    mine: Mutex<BTreeSet<String>>,
+    truncates: bool,
+    writes: bool,
+}
+
+impl RewriteOnChange {
+    fn open(world: FakeRuntime, file: Arc<Mutex<BTreeSet<String>>>, truncates: bool) -> Self {
+        let (mine, writes) = {
+            let mut registry = file.lock().unwrap();
+            let writes = truncates || registry.is_empty();
+            let mine = if truncates {
+                std::mem::take(&mut *registry)
+            } else {
+                registry.clone()
+            };
+            (mine, writes)
+        };
+        Self {
+            world,
+            file,
+            mine: Mutex::new(mine),
+            truncates,
+            writes,
+        }
     }
-    fn launch(&self, id: &str) -> HolderLaunch {
-        RuntimeFixture::launch(&self.world, id)
-    }
-    fn is_running(&self, h: &HolderHandle) -> bool {
-        RuntimeFixture::is_running(&self.world, h)
-    }
-    fn restart(&self) -> Self {
-        Self::over(self.world.restarted(), Arc::clone(&self.registry))
+
+    fn flush(&self) {
+        if self.writes {
+            *self.file.lock().unwrap() = self.mine.lock().unwrap().clone();
+        }
     }
 }
+
+impl Runtime for RewriteOnChange {
+    type Error = FakeError;
+    async fn start_holder(&self, l: &HolderLaunch) -> Result<HolderHandle, FakeError> {
+        let h = self.world.start_holder(l).await?;
+        self.mine.lock().unwrap().insert(l.instance_id.clone());
+        self.flush();
+        Ok(h)
+    }
+    async fn stop_holder(&self, id: &str) -> Result<(), FakeError> {
+        self.world.stop_holder(id).await?;
+        self.mine.lock().unwrap().remove(id);
+        self.flush();
+        Ok(())
+    }
+    async fn recover_holders(&self) -> Result<Vec<HolderHandle>, FakeError> {
+        let mine = self.mine.lock().unwrap().clone();
+        Ok(self
+            .world
+            .recover_holders()
+            .await?
+            .into_iter()
+            .filter(|h| mine.contains(&h.instance_id))
+            .collect())
+    }
+}
+
+runtime_fixture!(
+    RewriteOnChange,
+    world,
+    (FakeHolders, Arc<Mutex<BTreeSet<String>>>, bool),
+    |m| (m.world.holders(), Arc::clone(&m.file), m.truncates),
+    |p| Self::open(FakeRuntime::on(&p.0), Arc::clone(&p.1), p.2)
+);
+
+/// The daemon process of `LastOneOut`: stops every holder when the last
+/// runtime of the lineage goes.
+pub struct Process {
+    machine: FakeRuntime,
+}
+
+impl Drop for Process {
+    fn drop(&mut self) {
+        for h in self.machine.running() {
+            let _ = block_on(self.machine.stop_holder(&h.instance_id));
+        }
+    }
+}
+
+/// Verifier r5 `LastOneOut`: holders outlive one runtime but die when the
+/// last runtime alive goes, as if they were children of the daemon process.
+/// In one test process this is modelled with a shared `Weak`; the
+/// real-process version of the same bug is what gate 6 checks.
+pub struct LastOneOut {
+    rt: FakeRuntime,
+    _process: Arc<Process>,
+    slot: Arc<Mutex<Weak<Process>>>,
+}
+
+impl LastOneOut {
+    fn open(rt: FakeRuntime, slot: &Arc<Mutex<Weak<Process>>>) -> Self {
+        let process = {
+            let mut slot = slot.lock().unwrap();
+            slot.upgrade().unwrap_or_else(|| {
+                let process = Arc::new(Process {
+                    machine: FakeRuntime::on(&rt.holders()),
+                });
+                *slot = Arc::downgrade(&process);
+                process
+            })
+        };
+        Self {
+            rt,
+            _process: process,
+            slot: Arc::clone(slot),
+        }
+    }
+}
+
+impl Runtime for LastOneOut {
+    type Error = FakeError;
+    async fn start_holder(&self, l: &HolderLaunch) -> Result<HolderHandle, FakeError> {
+        self.rt.start_holder(l).await
+    }
+    async fn stop_holder(&self, id: &str) -> Result<(), FakeError> {
+        self.rt.stop_holder(id).await
+    }
+    async fn recover_holders(&self) -> Result<Vec<HolderHandle>, FakeError> {
+        self.rt.recover_holders().await
+    }
+}
+
+runtime_fixture!(
+    LastOneOut,
+    rt,
+    (FakeHolders, Arc<Mutex<Weak<Process>>>),
+    |m| (m.rt.holders(), Arc::clone(&m.slot)),
+    |p| Self::open(FakeRuntime::on(&p.0), &p.1)
+);
 
 pub fn mutants() -> Vec<Mutant> {
     vec![
@@ -433,6 +582,38 @@ pub fn mutants() -> Vec<Mutant> {
             rule: "RTM-8",
             name: "Handoff",
             run: |name| runtime::run(name, || Handoff::over(FakeRuntime::new(), Arc::default())),
+        },
+        // RTM-8 (verifier r5 R5-1): opening truncates the persisted
+        // registry; after an idle boot the holders are orphaned.
+        Mutant {
+            rule: "RTM-8",
+            name: "RewriteOnChange",
+            run: |name| {
+                runtime::run(name, || {
+                    RewriteOnChange::open(FakeRuntime::new(), Arc::default(), true)
+                })
+            },
+        },
+        // RTM-8 (round 6, helper mutation H2): a restarted daemon never
+        // records the holders it starts; the last boot orphans them.
+        Mutant {
+            rule: "RTM-8",
+            name: "FrozenRegistry",
+            run: |name| {
+                runtime::run(name, || {
+                    RewriteOnChange::open(FakeRuntime::new(), Arc::default(), false)
+                })
+            },
+        },
+        // RTM-8 (verifier r5 R5-7): holders die when the last runtime goes.
+        Mutant {
+            rule: "RTM-8",
+            name: "LastOneOut",
+            run: |name| {
+                runtime::run(name, || {
+                    LastOneOut::open(FakeRuntime::new(), &Arc::default())
+                })
+            },
         },
     ]
 }

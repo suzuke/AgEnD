@@ -2,11 +2,12 @@
 //! running, idle instance is accepted and eventually completes a turn;
 //! delivering the same message id again starts no second turn, also after
 //! daemon restarts; events are resumable from any cursor they returned, also
-//! by every new driver after a daemon restart ([`DriverFixture::restart`];
+//! by every new driver after a daemon restart ([`DriverFixture::boot`];
 //! reconnect backfill: exactly the newer events, including those the agent
-//! emitted while no daemon ran, [`DriverFixture::emit_while_down`]; reading
-//! does not consume them); unknown instances are errors. The restart cases
-//! run a whole daemon lifecycle ([`super::daemon_lifecycle`]).
+//! emitted while no daemon ran, [`DriverFixture::emit_while_down`], and from
+//! older cursors too; reading does not consume them); unknown instances are
+//! errors. The restart cases run a whole daemon lifecycle
+//! ([`super::daemon_lifecycle`]).
 //!
 //! Not pinned: whether a delivery is confirmed (some paths cannot confirm,
 //! docs/architecture/delivery.md); busy behaviour; unknown cursors; whether
@@ -20,16 +21,21 @@ use agend_core::model::DeliveryState;
 use agend_core::policy::busy::BusyLevel;
 use agend_core::traits::{AgentMessage, Driver, DriverEvent, DriverEventKind};
 
-use super::{Case, CaseResult, Report, daemon_lifecycle, ensure, eventually, ok, run_suite};
+use super::{Boot, Case, CaseResult, Report, daemon_lifecycle, ensure, eventually, ok, run_suite};
 use crate::block_on;
 
 /// Default for [`DriverFixture::turn_timeout`]: how long a real driver may
 /// take to finish a turn on a fake agent.
 pub const TURN_TIMEOUT: Duration = Duration::from_secs(10);
 
-pub trait DriverFixture {
+pub trait DriverFixture: Sized {
     type Driver: Driver<Error = Self::Error>;
     type Error: Send + Debug;
+    /// What survives a daemon restart: the backend, i.e. the agent running
+    /// in its holder, and whatever the driver persists (the fake:
+    /// [`crate::fakes::FakeBackend`]). It is not a driver and keeps none
+    /// alive.
+    type Persisted;
 
     fn driver(&self) -> &Self::Driver;
 
@@ -41,21 +47,24 @@ pub trait DriverFixture {
         TURN_TIMEOUT
     }
 
-    /// A daemon restart: a new fixture whose driver is a new instance over
-    /// the same backend and instance (the agent keeps running in its
-    /// holder). Cases drop the old fixture before creating the next one, and
-    /// call it several times on the fixture they got. A real fixture goes
-    /// through the real persisted state (the holder and backend sockets, the
-    /// DB), never a process-global static (CONTRACTS.md).
-    fn restart(&self) -> Self;
+    /// The persisted state this fixture's driver works on.
+    fn persisted(&self) -> Self::Persisted;
+
+    /// A daemon boot: a new fixture whose driver is a new instance over
+    /// `persisted`, for the same instance (the agent keeps running in its
+    /// holder). Restart cases drop the case's fixture before the first boot
+    /// and each booted one before the next. A real fixture goes through the
+    /// real persisted state (the holder and backend sockets, the DB), never
+    /// a process-global static (CONTRACTS.md).
+    fn boot(persisted: &Self::Persisted) -> Self;
 
     /// The backend acts while no daemon runs: the agent in its holder
     /// finishes a turn on its own, so the backend emits at least one event
-    /// for [`instance_id`](Self::instance_id), one of them a
-    /// `TurnCompleted`. Called on the fixture the case got, between
-    /// dropping one restarted fixture and creating the next; it must not go
-    /// through a driver (a real fixture talks to the fake agent directly).
-    fn emit_while_down(&self);
+    /// for the instance, one of them a `TurnCompleted`. Called between
+    /// dropping one booted fixture and booting the next, with no driver
+    /// alive; it goes through `persisted` only (a real fixture talks to the
+    /// fake agent directly).
+    fn emit_while_down(persisted: &Self::Persisted);
 }
 
 pub fn cases<F: DriverFixture>() -> Vec<Case<F>> {
@@ -63,32 +72,32 @@ pub fn cases<F: DriverFixture>() -> Vec<Case<F>> {
         Case {
             rule: "DRV-1",
             name: "delivery_to_idle_instance_is_sent",
-            check: delivery_to_idle_instance_is_sent,
+            check: |fx| delivery_to_idle_instance_is_sent(&fx),
         },
         Case {
             rule: "DRV-2",
             name: "delivery_to_unknown_instance_is_an_error",
-            check: delivery_to_unknown_instance_is_an_error,
+            check: |fx| delivery_to_unknown_instance_is_an_error(&fx),
         },
         Case {
             rule: "DRV-3",
             name: "delivered_message_completes_a_turn",
-            check: delivered_message_completes_a_turn,
+            check: |fx| delivered_message_completes_a_turn(&fx),
         },
         Case {
             rule: "DRV-4",
             name: "cursors_are_unique",
-            check: cursors_are_unique,
+            check: |fx| cursors_are_unique(&fx),
         },
         Case {
             rule: "DRV-5",
             name: "events_after_a_cursor_are_only_newer_ones",
-            check: events_after_a_cursor_are_only_newer_ones,
+            check: |fx| events_after_a_cursor_are_only_newer_ones(&fx),
         },
         Case {
             rule: "DRV-6",
             name: "events_after_a_cursor_are_all_newer_ones",
-            check: events_after_a_cursor_are_all_newer_ones,
+            check: |fx| events_after_a_cursor_are_all_newer_ones(&fx),
         },
         Case {
             rule: "DRV-6",
@@ -98,12 +107,12 @@ pub fn cases<F: DriverFixture>() -> Vec<Case<F>> {
         Case {
             rule: "DRV-7",
             name: "replay_from_a_cursor_only_grows",
-            check: replay_from_a_cursor_only_grows,
+            check: |fx| replay_from_a_cursor_only_grows(&fx),
         },
         Case {
             rule: "DRV-8",
             name: "events_of_unknown_instance_are_an_error",
-            check: events_of_unknown_instance_are_an_error,
+            check: |fx| events_of_unknown_instance_are_an_error(&fx),
         },
         Case {
             rule: "DRV-9",
@@ -254,17 +263,26 @@ fn events_of_unknown_instance_are_an_error<F: DriverFixture>(fx: &F) -> CaseResu
 /// daemon runs, the agent finishes a turn on its own
 /// ([`DriverFixture::emit_while_down`]).
 fn lifecycle<F: DriverFixture>(
-    fx: &F,
-    mut boot: impl FnMut(usize, &F, &[DriverEvent]) -> CaseResult,
+    fx: F,
+    mut boot: impl FnMut(usize, Boot, &F, &[DriverEvent]) -> CaseResult,
 ) -> CaseResult {
     let mut cursor: Option<String> = None;
     daemon_lifecycle(
-        || fx.restart(),
-        |_| fx.emit_while_down(),
-        |n, daemon| {
+        fx,
+        F::persisted,
+        F::boot,
+        |persisted, _| {
+            F::emit_while_down(persisted);
+            Ok(())
+        },
+        |n, kind, daemon| {
             let backfill = events(daemon, cursor.as_deref())?;
-            boot(n, daemon, &backfill)?;
-            let seen = events(daemon, cursor.as_deref())?;
+            boot(n, kind, daemon, &backfill)?;
+            let seen = if kind == Boot::Idle {
+                backfill
+            } else {
+                events(daemon, cursor.as_deref())?
+            };
             if let Some(last) = seen.last() {
                 cursor = Some(last.cursor.clone());
             }
@@ -279,26 +297,30 @@ fn turns(all: &[DriverEvent]) -> usize {
         .count()
 }
 
+/// The events of `all` after `cursor`; `Err` when `cursor` is not in it.
+fn after<'a>(all: &'a [DriverEvent], cursor: &str) -> Result<&'a [DriverEvent], String> {
+    let index = all
+        .iter()
+        .position(|e| e.cursor == cursor)
+        .ok_or_else(|| format!("the cursor {cursor} an earlier daemon saw is gone: {all:?}"))?;
+    Ok(&all[index + 1..])
+}
+
 /// ARCHITECTURE process model rule 2: a restarted daemon backfills the
 /// events of the downtime. At every boot the backfill from the previous
 /// daemon's last cursor is exactly what followed that cursor, and after a
-/// downtime it holds the turn the agent finished meanwhile; then the boot
-/// completes a turn of its own.
-fn every_boot_backfills_what_happened_while_down<F: DriverFixture>(fx: &F) -> CaseResult {
+/// downtime it holds the turn the agent finished meanwhile. A boot that is
+/// not idle then backfills from every older cursor an earlier daemon saw
+/// (a daemon that crashed before it saved its newest cursor) and gets
+/// exactly what followed each; a working boot completes a turn of its own.
+fn every_boot_backfills_what_happened_while_down<F: DriverFixture>(fx: F) -> CaseResult {
     let mut last_cursor: Option<String> = None;
-    lifecycle(fx, |n, daemon, backfill| {
+    let mut earlier: Vec<String> = Vec::new();
+    lifecycle(fx, |n, kind, daemon, backfill| {
         let all = events(daemon, None)?;
         let expected = match &last_cursor {
             None => &all[..],
-            Some(cursor) => {
-                let index = all
-                    .iter()
-                    .position(|e| &e.cursor == cursor)
-                    .ok_or_else(|| {
-                        format!("the cursor {cursor} an earlier daemon saw is gone: {all:?}")
-                    })?;
-                &all[index + 1..]
-            }
+            Some(cursor) => after(&all, cursor)?,
         };
         ensure(backfill == expected, || {
             format!(
@@ -313,37 +335,71 @@ fn every_boot_backfills_what_happened_while_down<F: DriverFixture>(fx: &F) -> Ca
                 )
             })?;
         }
-        let seen = deliver_and_finish(daemon, &format!("m-contract-boot{n}"))?;
+        if kind != Boot::Idle {
+            for cursor in &earlier {
+                let expected = after(&all, cursor)?;
+                let got = events(daemon, Some(cursor))?;
+                ensure(got == expected, || {
+                    format!(
+                        "backfill from the older cursor {cursor} must be the {} events that followed it: expected {expected:?}, got {got:?}",
+                        expected.len()
+                    )
+                })?;
+            }
+        }
+        let seen = match kind {
+            Boot::Work => deliver_and_finish(daemon, &format!("m-contract-boot{n}"))?,
+            Boot::Idle | Boot::Check => all,
+        };
         last_cursor = seen.last().map(|e| e.cursor.clone());
+        earlier = seen.iter().map(|e| e.cursor.clone()).collect();
         Ok(())
     })
 }
 
-/// delivery.md: messages are idempotent by id, also across restarts (a
-/// message resent after a crash). Boot 1 delivers the id and waits for its
-/// turn; every boot then delivers it again: not an error, and no new turn
-/// completes within the turn timeout.
-fn same_message_id_makes_one_turn_across_restarts<F: DriverFixture>(fx: &F) -> CaseResult {
-    const ID: &str = "m-contract-dup";
-    lifecycle(fx, |n, daemon, _| {
-        if n == 1 {
-            deliver_and_finish(daemon, ID)?;
-        }
-        let before = turns(&events(daemon, None)?);
+/// Delivers every id in `ids` again, oldest first, then waits one turn
+/// timeout: every delivery must be accepted and no new turn may complete.
+fn redeliver<F: DriverFixture>(daemon: &F, ids: &[String]) -> CaseResult {
+    let before = turns(&events(daemon, None)?);
+    for id in ids {
         ok(
             "deliver (same id again)",
             block_on(
                 daemon
                     .driver()
-                    .deliver(daemon.instance_id(), &message(ID), BusyLevel::Queue),
+                    .deliver(daemon.instance_id(), &message(id), BusyLevel::Queue),
             ),
         )?;
-        let again = eventually(daemon.turn_timeout(), || {
-            let all = events(daemon, None)?;
-            Ok((turns(&all) > before).then_some(all))
-        })?;
-        ensure(again.is_none(), || {
-            format!("delivering {ID} again completed another turn: {again:?}")
-        })
+    }
+    let again = eventually(daemon.turn_timeout(), || {
+        let all = events(daemon, None)?;
+        Ok((turns(&all) > before).then_some(all))
+    })?;
+    ensure(again.is_none(), || {
+        format!("delivering {ids:?} again completed another turn: {again:?}")
+    })
+}
+
+/// delivery.md: messages are idempotent by id, also across restarts (after
+/// a crash every unconfirmed message is resent, not only the last one). A
+/// working boot delivers two new ids and waits for their turns; every boot
+/// that is not idle then delivers every id so far again, oldest first (so
+/// after a restart the ids an earlier daemon delivered come first): not an
+/// error, and no new turn completes within the turn timeout.
+fn same_message_id_makes_one_turn_across_restarts<F: DriverFixture>(fx: F) -> CaseResult {
+    let mut delivered: Vec<String> = Vec::new();
+    lifecycle(fx, |n, kind, daemon, _| {
+        match kind {
+            Boot::Idle => return Ok(()),
+            Boot::Work => {
+                for k in 1..=2 {
+                    let id = format!("m-contract-dup-boot{n}-{k}");
+                    deliver_and_finish(daemon, &id)?;
+                    delivered.push(id);
+                }
+            }
+            Boot::Check => {}
+        }
+        redeliver(daemon, &delivered)
     })
 }

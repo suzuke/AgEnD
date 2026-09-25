@@ -27,12 +27,12 @@ mod runtime;
 mod store;
 
 pub use clock::FakeClock;
-pub use driver::{DriverCall, FakeDriver};
+pub use driver::{DriverCall, FakeBackend, FakeDriver};
 pub use forge::{FakeForge, ForgeCall};
 pub use notifier::FakeNotifier;
 pub use runner::{FakeRunner, RunnerCall, ScriptedCommand};
-pub use runtime::{FakeRuntime, RuntimeCall};
-pub use store::{FakeStore, StoreCall};
+pub use runtime::{FakeHolders, FakeRuntime, RuntimeCall};
+pub use store::{FakeStore, FakeStoreFile, StoreCall};
 
 /// Error returned by every fake: a scripted failure or a precondition the
 /// fake enforces (unknown branch, unknown instance, ...).

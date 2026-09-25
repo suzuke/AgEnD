@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 共用測試基礎設施：每個 trait 的假實作、契約測試、假 daemon、假 agent 程式。
 > - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這個施工關才算完成。
-> - 下一步：照「你親自驗收」跑 5 步，填「驗收紀錄」；先看「待你追認」的 24 個決定（A20–A23 是 verifier r3 那一輪加的：daemon 重啟 hook、訊息 id 冪等、FRG-3 改寫與一個 core 型別提案；A24 是 verifier r4 這一輪：重啟類規則改走三次開機的 daemon 生命週期）。
+> - 下一步：照「你親自驗收」跑 5 步，填「驗收紀錄」；先看「待你追認」的 25 個決定（A20–A23 是 verifier r3 那一輪加的：daemon 重啟 hook、訊息 id 冪等、FRG-3 改寫與一個 core 型別提案；A24 是 verifier r4：重啟類規則改走 daemon 生命週期；A25 是 verifier r5 這一輪：fixture 改成從持久狀態開機、多一次閒置開機，重啟／持久化 case 在第 5、6 施工關要跨真的 process 跑）。
 
 ## 狀態
 
@@ -121,21 +121,23 @@
 
    ```bash
    ~/.cargo/bin/cargo test -p agend-testkit --test contract_teeth -- --nocapture 2>&1 \
-     | grep -E '^mutant (SkipsFirstAfterCursor|AcceptsFutureVersions|RealKillsShOnly|DaemonScoped|Handoff) |test result'
+     | grep -E '^mutant (SkipsFirstAfterCursor|AcceptsFutureVersions|RealKillsShOnly|DaemonScoped|Handoff|RewriteOnChange|SharedMem) |test result'
    ```
 
    應該看到（約 20 秒；毫秒數會不同）：
 
    ```text
    mutant AcceptsFutureVersions (STO-6): failing rules ["STO-6", "STO-7"] in 0 ms
-   mutant SkipsFirstAfterCursor (DRV-6): failing rules ["DRV-6", "DRV-6"] in 627 ms
-   mutant DaemonScoped (RTM-8): failing rules ["RTM-8", "RTM-9"] in 0 ms
+   mutant SharedMem (STO-12): failing rules ["STO-4", "STO-12"] in 0 ms
    mutant Handoff (RTM-8): failing rules ["RTM-8"] in 0 ms
+   mutant DaemonScoped (RTM-8): failing rules ["RTM-8", "RTM-9"] in 0 ms
+   mutant RewriteOnChange (RTM-8): failing rules ["RTM-8"] in 0 ms
+   mutant SkipsFirstAfterCursor (DRV-6): failing rules ["DRV-6", "DRV-6"] in 612 ms
    mutant RealKillsShOnly (RUN-8): failing rules ["RUN-8"] in 9485 ms
    test result: ok. 4 passed; 0 failed; ...
    ```
 
-   五行 `mutant` 的順序可能不同；每行括號裡的規則都出現在它的 `failing rules` 裡（同一條規則有兩個 case 都失敗就出現兩次）。`DaemonScoped` 是 v1 的行為：daemon 結束時把自己啟動的 holder 一起殺掉，新的 daemon 只認得自己啟動的。`Handoff` 撐得過一次重啟、撐不過第二次：recover 把持久的 holder 登記讀走刪掉，只記在自己的物件裡，第三個 daemon 就找不回 holder。
+   七行 `mutant` 的順序可能不同；每行括號裡的規則都出現在它的 `failing rules` 裡（同一條規則有兩個 case 都失敗就出現兩次）。`DaemonScoped` 是 v1 的行為：daemon 結束時把自己啟動的 holder 一起殺掉，新的 daemon 只認得自己啟動的。`Handoff` 撐得過一次重啟、撐不過第二次：recover 把持久的 holder 登記讀走刪掉，只記在自己的物件裡，第三個 daemon 就找不回 holder。`RewriteOnChange` 在打開時把 holder 登記清空、只在啟動或停止 holder 時寫回：只做復原的閒置開機之後，下一個 daemon 就找不回 holder。`SharedMem` 是記憶體裡的 DB，只要還有一個 handle 開著資料就在：契約先把 case 自己的 fixture 丟掉，兩次開機之間沒有 handle 開著，資料就不見了。
 
    **這步在驗什麼**：規則表上每條規則都有一個故意弄壞的實作，而且 suite 在標著那條規則的 case 上失敗；覆蓋測試另外確認表、case、mutant 三者對得上。壞了的話，就回到之前的打地鼠：某條規則其實沒人驗，要等 verifier 一條條找出來。
 
@@ -170,6 +172,7 @@ owner 睡著時由實作者決定、可以反悔的事。每項：決定 · 理�
 | A21 | 新增 DRV-9：同一個訊息 id 送第二次，`deliver` 不是錯誤，也不多一個 turn；去重放在 driver（`FakeDriver` 改成照 id 去重）。case 等滿 `turn_timeout` 看有沒有第二個 `TurnCompleted`，所以 `FakeDriverFixture::turn_timeout` 設 200 ms（假 driver 在 `deliver` 裡就完成 turn） | verifier r3 M2；delivery.md「以 id 冪等，只有一套去重」。「第二次不是錯誤」是冪等的一般意思，文件沒逐字寫。真 driver 在第 7 施工關每跑一次多等一個 `turn_timeout` | 去重改放 daemon：刪 DRV-9、`FakeDriver` 的 `delivered` 集合，「不釘」寫「去重在 daemon」 |
 | A22 | FRG-3 改寫：change id 可以是空字串（forge local 沒有 change id），兩個不同 branch 的 change 都有 id 時 id 不同；mutant `SubmitWithoutId` 改成必須通過的測試 `forge_without_change_ids_passes`，新 mutant `SameIdForEveryChange`。**提案（未做）**：`agend_core::traits::SubmittedChange.id` 改成 `Option<String>`，讓「沒有 change id」在型別上看得到，和 `PipelineEvent::Submitted { change_id: Option<_> }` 一致 | verifier r3 F1：舊規則逼 local forge 生出一個 id，和 GLOSSARY、pipeline.md、`state.rs` 可完成證明相反。core 型別不在本輪範圍，所以先用空字串 | 採納提案：改 core 型別、`FakeForge`、FRG-3 的 case 與 mutant（約 20 行） |
 | A23 | 「merge 落在目前的 base 上、不弄丟之前的 merge」只寫成 CONTRACTS.md Forge 段的「建議，未釘」 | 文件只有 CAS `update-ref` 機制、沒有逐字規則；`ForgeFixture` 看不到 ancestry | 要釘：加一個讀 base 歷史的 fixture 方法、一條規則、一個 mutant |
+| A25 | fixture 改成從持久狀態開機：`RuntimeFixture`、`DriverFixture`、`StoreFixture` 的 `restart`／`reopen` 換成 `type Persisted` + `persisted(&self)` + `boot(&Persisted) -> Self`；`RuntimeFixture::is_running` 與 `DriverFixture::emit_while_down` 只拿 `Persisted`；`Case::check` 拿 fixture by value，重啟類 case 先把它轉成持久狀態再 drop。生命週期變成 4 次開機：做事 → 閒置（只復原）→ 做事 → 檢查，兩次開機之間沒有實例活著、確認 holder 還在跑。DRV-9 每次做事的開機送兩個 id，之後重送全部（舊的先）；DRV-6 重啟後也從每個較舊的 cursor 補回。假實作多三個持久狀態型別：`FakeHolders`、`FakeBackend`、`FakeStoreFile`。verifier r5 的七個實作註冊成 mutant，另加 `FrozenRegistry`、`FrozenDatabase`（重啟後寫的沒存下來，讓開機 4 有牙齒）；共 80 個 mutant。CONTRACTS.md 與第 5、6 施工關頁面加一條：重啟／持久化類的契約 case 要對真實作、跨真的 process 重啟跑（分開的 process、真的檔案／DB） | verifier r5：每次開機都做事，打開時清空、只在變動時寫回的實作（`RewriteOnChange`、`TruncOnOpen`）能通過；case 自己的 fixture 活過整個生命週期，只要還有一個實例活著就不丟資料的實作（`SharedMem`、`LiveJournal`、`LastOneOut`）能通過；DRV-9 只用一個 id、DRV-6 只從最新的 cursor 補回（`LastIdDedup`、`ReadAck`）。同一個 process 裡的契約分不出「真的存下來」與「藏在 process 裡」，所以更嚴的持久化檢查放到有真檔案、真 DB、真 process 的第 5、6 施工關。代價：DRV-9 真 driver 每跑一次等 3 次 `turn_timeout`（預設各 10 秒）；DRV-6 真 driver 多一些 `events` 讀取 | 回到 `fn(&self) -> Self`：三個 fixture trait、三個假實作、case 的 `check` 型別；拿掉閒置開機：`contract.rs` 的 `LIFECYCLE` 一行（`RewriteOnChange`、`TruncOnOpen` 會通過） |
 | A24 | 重啟類規則（DRV-6、DRV-9、STO-4、STO-12、RTM-8、RTM-9）改走同一個 daemon 生命週期 `contract::daemon_lifecycle`：3 次開機，每次先做開機復原（`recover_holders`；從上一個 daemon 最後的 cursor 補回事件；打開 store）、檢查不變量、再做事，兩次開機之間 backend 照常動。`DriverFixture` 多一個必須實作的 `emit_while_down`（daemon 不在時 agent 自己跑完一輪，不經過 driver）；STO-4 多一個跨重新開啟的 case。CONTRACTS.md 寫明 fixture 要求：真實作的重啟要走真的持久層（DB 檔、run 目錄與 socket），不用 process 內的全域 `static` | verifier r4：r3 的重啟 case 只重啟一次、兩次開機之間沒事發生，狀態只在 Rust 物件裡（`CounterStore`、`ObjDedup`）、第一次讀就消耗（`Handoff`）、丟掉斷線期間的事件（`Gap`）的實作都能通過。一個共用 helper 讓每條重啟類規則得到同樣的處理，之後加規則不會再漏。代價：DRV-9 case 要等 3 次 `turn_timeout`（真 driver 預設 10 秒，每跑一次約 30 秒） | 改開機次數：`contract.rs` 的 `BOOTS`；拿掉 `emit_while_down`：一個 fixture 方法、DRV-6 case 的一段檢查、`Gap` mutant |
 
 ## 驗收紀錄
@@ -184,6 +187,7 @@ owner 睡著時由實作者決定、可以反悔的事。每項：決定 · 理�
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-25 修 verifier r5（REFUTED @ 6d471e8，owner 核准的最後一輪）：生命週期多一次閒置開機（做事 → 閒置 → 做事 → 檢查），fixture 改成從持久狀態開機（`Persisted` + `boot`），case 自己的 fixture 在第一次開機前就 drop，daemon 不在時的 backend 動作只經過持久狀態；DRV-9 重啟前送兩個 id、重啟後先重送舊的，DRV-6 重啟後也從較舊的 cursor 補回；r5 的 `RewriteOnChange`、`TruncOnOpen`、`LastIdDedup`、`ReadAck`、`SharedMem`、`LiveJournal`、`LastOneOut` 與新的 `FrozenRegistry`、`FrozenDatabase` 註冊為 mutant（共 56 條規則、80 個 mutant）；helper mutation H1–H8（H6、H8 改成讀 case 的 fixture 就編譯不過）與新的 H9–H13 全部抓到；CONTRACTS.md、第 5、6 施工關頁面加「重啟／持久化 case 跨真的 process 重啟跑」（待你追認）（`feat/gate-02-testkit`，draft PR #108）。
 - 2026-09-25 修 verifier r4（REFUTED @ ea61cba）：重啟類 case 只重啟一次，狀態只在物件裡或第一次讀就消耗的實作能通過。改成共用的 daemon 生命週期 helper（3 次開機、每次先復原、兩次開機之間 backend 照常動，新 fixture 方法 `DriverFixture::emit_while_down`），DRV-6／DRV-9／STO-4／STO-12／RTM-8／RTM-9 都走它；r4 的 `Handoff`（RTM-8）、`CounterStore`（STO-4）、`ObjDedup`（DRV-9）、`Gap`（DRV-6）註冊為 mutant；CONTRACTS.md 寫明 fixture 要走真的持久層；FRG-4、FRG-9、DRV-9 的推得標出來源，DRV-6 改引 ARCHITECTURE 程序模型規則 2；共 56 條規則、71 個 mutant（`feat/gate-02-testkit`，draft PR #108）。
 - 2026-09-25 修 verifier r3（REFUTED @ e251dff）：加 daemon 重啟 hook（`RuntimeFixture::restart`、`DriverFixture::restart`、`StoreFixture::reopen`），新規則 RTM-8／RTM-9（D3 重啟不斷線，擋 `DaemonScoped`）、STO-12（重新開啟後資料與版本還在）、DRV-9（訊息 id 冪等，`FakeDriver` 改成去重），DRV-6 多重啟補回 case；FRG-3 改成允許空 change id（local）；推得的規則標出來源；共 56 條規則、67 個 mutant（`feat/gate-02-testkit`，draft PR #108）。
 - 2026-09-25 修 verifier r2（REFUTED @ 2a7f2f7）：契約改成編號規則表 CONTRACTS.md（52 條，5 條待追認），每個 case 標規則編號，每條規則至少一個 mutant（61 個，含 r2 的 D1、D2、S1–S3、F1、F4、R1、R2、N1–N3、C1、C2、RN1–RN3），覆蓋測試比對表／case／mutant；新增 fixture 方法 `is_running`、`utc_now_unix_ms`、`turn_timeout`；測試裡的真 `sh` runner（process group）通過整個 Runner 契約；「你親自驗收」加第 5 步與每步「這步在驗什麼」（`feat/gate-02-testkit`，draft PR #108）。

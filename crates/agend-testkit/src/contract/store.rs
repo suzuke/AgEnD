@@ -4,9 +4,10 @@
 //! every write (checked over a sequence, so a version that returns to an old
 //! value fails); a conflict changes nothing and reports the version actually
 //! stored; events keep their order and stay with their task; everything,
-//! versions included, survives every reopen ([`StoreFixture::reopen`]: a
-//! daemon restart), and versions keep growing across reopens. The reopen
-//! cases run a whole daemon lifecycle ([`super::daemon_lifecycle`]).
+//! versions included, survives every reopen ([`StoreFixture::boot`]: a
+//! daemon restart, also one after a boot that only opened the store), and
+//! versions keep growing across reopens. The reopen cases run a whole daemon
+//! lifecycle ([`super::daemon_lifecycle`]).
 //!
 //! Not pinned: the first version number; what appending an event to an
 //! unknown task does.
@@ -17,12 +18,16 @@ use agend_core::pipeline::task::{Task, TaskStatus};
 use agend_core::pipeline::workflow::Workflow;
 use agend_core::traits::{CasResult, Store, StoredEvent};
 
-use super::{Case, CaseResult, Report, daemon_lifecycle, ensure, ok, run_suite};
+use super::{Boot, Case, CaseResult, Report, daemon_lifecycle, ensure, ok, run_suite};
 use crate::block_on;
 
-pub trait StoreFixture {
+pub trait StoreFixture: Sized {
     type Store: Store<Error = Self::Error>;
     type Error: Send + Debug;
+    /// What survives a daemon restart: the database (a real fixture: the
+    /// database file; the fake: [`crate::fakes::FakeStoreFile`]). It is not
+    /// a store handle and keeps none open.
+    type Persisted;
 
     fn store(&self) -> &Self::Store;
 
@@ -33,13 +38,16 @@ pub trait StoreFixture {
     /// Events appended for `task_id`, in append order.
     fn events(&self, task_id: &str) -> Vec<StoredEvent>;
 
-    /// A daemon restart: a new fixture whose store is a new handle opened on
-    /// the same persisted data as `self` (the same database file). Cases
-    /// drop the old fixture before creating the next one, and call it
-    /// several times on the fixture they got. A real fixture goes through
-    /// the real persistence (the database file), never a process-global
-    /// static (CONTRACTS.md).
-    fn reopen(&self) -> Self;
+    /// The persisted state this fixture's store works on.
+    fn persisted(&self) -> Self::Persisted;
+
+    /// A daemon boot: a new fixture whose store is a new handle opened on
+    /// `persisted` (the same database file). Restart cases drop the case's
+    /// fixture before the first boot and each booted one before the next,
+    /// so no handle is open in between. A real fixture goes through the real
+    /// persistence (the database file), never a process-global static or a
+    /// shared in-memory database (CONTRACTS.md).
+    fn boot(persisted: &Self::Persisted) -> Self;
 }
 
 pub fn cases<F: StoreFixture>() -> Vec<Case<F>> {
@@ -47,22 +55,22 @@ pub fn cases<F: StoreFixture>() -> Vec<Case<F>> {
         Case {
             rule: "STO-1",
             name: "created_task_round_trips",
-            check: created_task_round_trips,
+            check: |fx| created_task_round_trips(&fx),
         },
         Case {
             rule: "STO-2",
             name: "unknown_task_loads_as_none",
-            check: unknown_task_loads_as_none,
+            check: |fx| unknown_task_loads_as_none(&fx),
         },
         Case {
             rule: "STO-3",
             name: "duplicate_create_fails_and_keeps_the_original",
-            check: duplicate_create_fails_and_keeps_the_original,
+            check: |fx| duplicate_create_fails_and_keeps_the_original(&fx),
         },
         Case {
             rule: "STO-4",
             name: "cas_with_current_version_writes_a_newer_version",
-            check: cas_with_current_version_writes_a_newer_version,
+            check: |fx| cas_with_current_version_writes_a_newer_version(&fx),
         },
         Case {
             rule: "STO-4",
@@ -72,37 +80,37 @@ pub fn cases<F: StoreFixture>() -> Vec<Case<F>> {
         Case {
             rule: "STO-5",
             name: "cas_with_stale_version_conflicts_and_changes_nothing",
-            check: cas_with_stale_version_conflicts_and_changes_nothing,
+            check: |fx| cas_with_stale_version_conflicts_and_changes_nothing(&fx),
         },
         Case {
             rule: "STO-6",
             name: "cas_with_future_version_conflicts_and_changes_nothing",
-            check: cas_with_future_version_conflicts_and_changes_nothing,
+            check: |fx| cas_with_future_version_conflicts_and_changes_nothing(&fx),
         },
         Case {
             rule: "STO-7",
             name: "conflict_reports_the_actual_current_version",
-            check: conflict_reports_the_actual_current_version,
+            check: |fx| conflict_reports_the_actual_current_version(&fx),
         },
         Case {
             rule: "STO-8",
             name: "cas_on_unknown_task_conflicts_without_a_version",
-            check: cas_on_unknown_task_conflicts_without_a_version,
+            check: |fx| cas_on_unknown_task_conflicts_without_a_version(&fx),
         },
         Case {
             rule: "STO-9",
             name: "workflow_versions_load_exactly",
-            check: workflow_versions_load_exactly,
+            check: |fx| workflow_versions_load_exactly(&fx),
         },
         Case {
             rule: "STO-10",
             name: "appended_events_keep_their_order",
-            check: appended_events_keep_their_order,
+            check: |fx| appended_events_keep_their_order(&fx),
         },
         Case {
             rule: "STO-11",
             name: "events_are_kept_per_task",
-            check: events_are_kept_per_task,
+            check: |fx| events_are_kept_per_task(&fx),
         },
         Case {
             rule: "STO-12",
@@ -394,20 +402,34 @@ fn current_version<F: StoreFixture>(fx: &F, task_id: &str) -> Result<u64, String
 }
 
 /// A daemon lifecycle ([`daemon_lifecycle`]) for the store: every boot
-/// reopens the same data ([`StoreFixture::reopen`]).
-fn lifecycle<F: StoreFixture>(fx: &F, boot: impl FnMut(usize, &F) -> CaseResult) -> CaseResult {
-    daemon_lifecycle(|| fx.reopen(), |_| {}, boot)
+/// opens the same data ([`StoreFixture::boot`]); the idle boot does nothing
+/// else, the others run `boot`.
+fn lifecycle<F: StoreFixture>(
+    fx: F,
+    mut boot: impl FnMut(usize, Boot, &F) -> CaseResult,
+) -> CaseResult {
+    daemon_lifecycle(
+        fx,
+        F::persisted,
+        F::boot,
+        |_, _| Ok(()),
+        |n, kind, daemon| match kind {
+            Boot::Idle => Ok(()),
+            Boot::Work | Boot::Check => boot(n, kind, daemon),
+        },
+    )
 }
 
 /// STO-4 across reopens: every version the store ever issued, before any
-/// reopen, stays behind. At every boot the stored version is the last one
-/// issued, a write gets a version greater than all of them, and a writer
-/// holding any earlier one (from this boot or an earlier one) conflicts.
-fn versions_keep_growing_across_reopens<F: StoreFixture>(fx: &F) -> CaseResult {
+/// reopen, stays behind. At every boot that is not idle the stored version
+/// is the last one issued, a write gets a version greater than all of them,
+/// and a writer holding any earlier one (from this boot or an earlier one)
+/// conflicts.
+fn versions_keep_growing_across_reopens<F: StoreFixture>(fx: F) -> CaseResult {
     let task = full_task("T-versions");
     let mut issued: Vec<u64> = Vec::new();
     let mut stored = task.clone();
-    lifecycle(fx, |n, daemon| {
+    lifecycle(fx, |n, _, daemon| {
         if n == 1 {
             ok("create_task", block_on(daemon.store().create_task(&task)))?;
             issued.push(current_version(daemon, &task.id)?);
@@ -455,15 +477,16 @@ fn versions_keep_growing_across_reopens<F: StoreFixture>(fx: &F) -> CaseResult {
 
 /// GLOSSARY store / D8: the store is the only source of truth, so tasks,
 /// versions, workflows and events survive every restart, and CAS continues
-/// from the stored version. Each boot checks everything the earlier boots
-/// wrote, then writes the task and appends an event.
-fn data_survives_every_reopen<F: StoreFixture>(fx: &F) -> CaseResult {
+/// from the stored version. Every boot that is not idle checks everything
+/// the earlier boots wrote; a working boot then writes the task and appends
+/// an event.
+fn data_survives_every_reopen<F: StoreFixture>(fx: F) -> CaseResult {
     let task = full_task("T-reopen");
     let workflow = Workflow::builtin_code();
     let mut written = task.clone();
     let mut version = 0;
     let mut appended: Vec<StoredEvent> = Vec::new();
-    lifecycle(fx, |n, daemon| {
+    lifecycle(fx, |n, kind, daemon| {
         if n == 1 {
             ok("create_task", block_on(daemon.store().create_task(&task)))?;
             version = current_version(daemon, &task.id)?;
@@ -485,6 +508,9 @@ fn data_survives_every_reopen<F: StoreFixture>(fx: &F) -> CaseResult {
         ensure(events == appended, || {
             format!("expected events {appended:?}, got {events:?}")
         })?;
+        if kind == Boot::Check {
+            return Ok(());
+        }
         written = write(daemon, &written, &format!("written at boot {n}"), version)?;
         version = current_version(daemon, &task.id)?;
         let event = StoredEvent {
