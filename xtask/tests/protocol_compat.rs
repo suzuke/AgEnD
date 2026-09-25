@@ -7,7 +7,7 @@ use agend_core::protocol::client::{
     AnswerAskData, AskCreatedData, AttentionRequiredData, ResultIdentity, STALE_RESULT,
 };
 use agend_core::protocol::holder::{
-    ControlKey, HolderRequest, HolderResponse, OperatorTerminalInputData,
+    ControlKey, ExitedData, HolderRequest, HolderResponse, OperatorTerminalInputData,
 };
 use agend_core::protocol::{Hello, ProtocolVersion};
 use serde_json::json;
@@ -109,6 +109,42 @@ fn holder_operator_input_and_control_keys_have_stable_wire_shapes() {
     assert_eq!(
         serde_json::to_value(ControlKey::Digit1).unwrap(),
         json!("digit1")
+    );
+}
+
+#[test]
+fn holder_exited_signal_is_an_additive_optional_field() {
+    // A holder that predates `signal` sends only `code`; it must still parse.
+    assert_eq!(
+        serde_json::from_value::<HolderResponse>(json!({"type": "exited", "data": {"code": 7}}))
+            .unwrap(),
+        HolderResponse::Exited {
+            data: ExitedData {
+                code: Some(7),
+                signal: None
+            }
+        }
+    );
+    // A normal exit keeps the old wire shape exactly (no `signal` key).
+    assert_eq!(
+        serde_json::to_value(HolderResponse::Exited {
+            data: ExitedData {
+                code: Some(7),
+                signal: None
+            }
+        })
+        .unwrap(),
+        json!({"type": "exited", "data": {"code": 7}})
+    );
+    assert_eq!(
+        serde_json::to_value(HolderResponse::Exited {
+            data: ExitedData {
+                code: None,
+                signal: Some("SIGKILL".into())
+            }
+        })
+        .unwrap(),
+        json!({"type": "exited", "data": {"code": null, "signal": "SIGKILL"}})
     );
 }
 

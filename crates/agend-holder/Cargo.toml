@@ -8,3 +8,16 @@ publish.workspace = true
 
 [dependencies]
 agend-core.workspace = true
+# Only `Term` + the vte parser are used, never alacritty's own event loop.
+# `event_loop` (and its `polling` dependency) cannot be switched off by a
+# feature; the default `serde` feature can, so it is off.
+alacritty_terminal = { version = "0.26", default-features = false }
+base64 = "0.22"
+libc = "0.2"
+# Fair unlock for the PTY reader; already in the tree through alacritty_terminal.
+parking_lot = "0.12"
+portable-pty = "0.9"
+serde_json = "1"
+
+[dev-dependencies]
+agend-testkit.workspace = true

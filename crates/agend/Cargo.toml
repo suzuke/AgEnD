@@ -20,3 +20,4 @@ agend-tui.workspace = true
 
 [dev-dependencies]
 agend-testkit.workspace = true
+libc = "0.2"
