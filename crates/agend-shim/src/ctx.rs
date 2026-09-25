@@ -7,7 +7,8 @@
 //! - `AGEND_INSTANCE`: this agent's instance id.
 //! - `AGEND_SHIM_BYPASS=1`: run the real tool unchecked (audited).
 //! - `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_INDEX_FILE`: git's
-//!   own retargeting.
+//!   own retargeting; `GIT_CEILING_DIRECTORIES` (kept when the shim asks
+//!   git where a call acts).
 //! - `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_<n>`, `GIT_CONFIG_PARAMETERS`:
 //!   config set for one call (keys checked like `-c`).
 //!
@@ -38,6 +39,7 @@ pub struct Ctx {
     pub git_work_tree: Option<PathBuf>,
     pub git_common_dir: Option<PathBuf>,
     pub git_index_file: Option<PathBuf>,
+    pub git_ceiling_dirs: Option<OsString>,
     /// Keys set through `GIT_CONFIG_COUNT`/`GIT_CONFIG_PARAMETERS`.
     pub config_env_keys: Vec<String>,
     /// Why those could not be read (the shim then refuses writes).
@@ -68,9 +70,16 @@ impl Ctx {
             git_work_tree: non_empty("GIT_WORK_TREE").map(PathBuf::from),
             git_common_dir: non_empty("GIT_COMMON_DIR").map(PathBuf::from),
             git_index_file: non_empty("GIT_INDEX_FILE").map(PathBuf::from),
+            git_ceiling_dirs: non_empty("GIT_CEILING_DIRECTORIES"),
             config_env_keys: config_env.clone().unwrap_or_default(),
             config_env_error: config_env.err(),
         }
+    }
+
+    /// Whether the env chooses the git dir, work tree or common dir (git
+    /// then does not find the repo from the work tree).
+    pub fn git_env_names_repo(&self) -> bool {
+        self.git_dir.is_some() || self.git_work_tree.is_some() || self.git_common_dir.is_some()
     }
 
     /// Whether git's retargeting env vars are set.

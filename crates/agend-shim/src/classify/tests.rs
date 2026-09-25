@@ -48,7 +48,7 @@ fn unbound() -> Snapshot {
 struct Fake {
     symrefs: Vec<(&'static str, &'static str)>,
     config: Vec<(&'static str, &'static str)>,
-    team_clone: bool,
+    team_repo: bool,
     team_remotes: Vec<&'static str>,
     asked: RefCell<Vec<String>>,
 }
@@ -72,17 +72,54 @@ impl Probe for Fake {
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect()
     }
-    fn is_team_clone(&self) -> bool {
-        self.team_clone
+    fn is_team_repo(&self) -> bool {
+        self.team_repo
     }
     fn is_team_remote(&self, dest: &str) -> bool {
         self.team_remotes.contains(&dest)
     }
 }
 
-fn run_with(
+/// The bound worktree of `work()`, as git reports it (canonical).
+fn bound_wt() -> PathBuf {
+    std::fs::canonicalize(std::env::temp_dir()).unwrap()
+}
+
+/// What git would answer at `loc`; at `Worktree`, the bound worktree's own
+/// git dir and work tree.
+fn resolved_at(loc: Location) -> Option<Resolved> {
+    let r = |g: PathBuf, c: &str, w: Option<PathBuf>| {
+        Some(Resolved {
+            git_dir: g,
+            common_dir: c.into(),
+            work_tree: w,
+        })
+    };
+    match loc {
+        Location::Worktree => r(
+            bound_wt().join("fake-gitdir"),
+            "/repo/.git",
+            Some(bound_wt()),
+        ),
+        Location::Canonical => r("/repo/.git".into(), "/repo/.git", Some("/repo".into())),
+        Location::OtherWorktree => r(
+            "/repo/.git/worktrees/t-9".into(),
+            "/repo/.git",
+            Some("/wt/t-9".into()),
+        ),
+        Location::Foreign => r(
+            "/scratch/.git".into(),
+            "/scratch/.git",
+            Some("/scratch".into()),
+        ),
+        Location::NoRepo | Location::Unknown => None,
+    }
+}
+
+fn run_full(
     snap: Result<&Snapshot, &SnapshotError>,
     loc: Location,
+    resolved: Option<&Resolved>,
     env: &GitEnv,
     probe: &Fake,
     cmd: &str,
@@ -94,11 +131,22 @@ fn run_with(
         args: &parsed,
         snapshot: snap,
         location: loc,
+        resolved,
         env,
         protected: &protected,
         dir: Path::new("/somewhere"),
         probe,
     })
+}
+
+fn run_with(
+    snap: Result<&Snapshot, &SnapshotError>,
+    loc: Location,
+    env: &GitEnv,
+    probe: &Fake,
+    cmd: &str,
+) -> Decision {
+    run_full(snap, loc, resolved_at(loc).as_ref(), env, probe, cmd)
 }
 
 fn decide_at(snap: Result<&Snapshot, &SnapshotError>, loc: Location, cmd: &str) -> Decision {
@@ -698,74 +746,115 @@ fn symbolic_refs_cannot_alias_protected_refs() {
     }
 }
 
-/// Round 1, class 4: work tree / index retargeting.
+/// Round 1, class 4: work tree / index retargeting. Round 3: the work tree
+/// is git's answer, so every spelling (`--work-tree`, `GIT_WORK_TREE`, a git
+/// dir without a work tree, a gitfile) is the same case.
 #[test]
 fn writes_must_use_the_bound_work_tree() {
     let s = work();
-    let wt = std::env::temp_dir();
     let other = Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf();
     let fake = Fake::default();
-    let run = |e: &GitEnv, cmd| code(&run_with(Ok(&s), Location::Worktree, e, &fake, cmd));
-    let with_wt = |p: &Path| GitEnv {
-        work_tree: Some(p.to_path_buf()),
-        ..GitEnv::default()
+    let own = resolved_at(Location::Worktree).unwrap();
+    let with_wt = |w: Option<PathBuf>| Resolved {
+        work_tree: w,
+        ..own.clone()
     };
-    for cmd in ["reset --hard", "checkout -- .", "clean -fd", "commit -m x"] {
-        assert_eq!(run(&with_wt(&other), cmd), "work_tree_retarget", "{cmd}");
-        assert_eq!(run(&with_wt(&wt), cmd), "run", "{cmd}");
+    let at = |r: &Resolved, env: &GitEnv, cmd| {
+        code(&run_full(
+            Ok(&s),
+            Location::Worktree,
+            Some(r),
+            env,
+            &fake,
+            cmd,
+        ))
+    };
+    let plain = GitEnv::default();
+    for cmd in [
+        "reset --hard",
+        "checkout -- .",
+        "clean -fd",
+        "commit -m x",
+        "add -A",
+    ] {
+        assert_eq!(
+            at(&with_wt(Some(other.clone())), &plain, cmd),
+            "work_tree_retarget",
+            "{cmd}"
+        );
+        assert_eq!(
+            at(&with_wt(None), &plain, cmd),
+            "work_tree_retarget",
+            "bare: {cmd}"
+        );
+        assert_eq!(at(&own, &plain, cmd), "run", "{cmd}");
     }
-    let idx = GitEnv {
-        index_file: Some(other.join("index")),
+    // Hooks run with GIT_DIR set, in the worktree: env retargeting is fine
+    // when git resolves to the bound worktree.
+    let hook = GitEnv {
+        retargets: true,
         ..GitEnv::default()
     };
-    assert_eq!(run(&idx, "add x"), "work_tree_retarget");
+    assert_eq!(at(&own, &hook, "commit -m x"), "run");
+    let idx = |p: PathBuf| GitEnv {
+        retargets: true,
+        index_file: Some(p),
+        ..GitEnv::default()
+    };
+    assert_eq!(
+        at(&own, &idx(other.join("index")), "add x"),
+        "work_tree_retarget"
+    );
+    let gd = agend_testkit::tempdir::TempDir::new("classify-gitdir").unwrap();
+    let own = Resolved {
+        git_dir: std::fs::canonicalize(gd.path()).unwrap(),
+        ..own.clone()
+    };
+    assert_eq!(
+        at(&own, &idx(own.git_dir.join("index.lock")), "add x"),
+        "run"
+    );
     // Reads may look anywhere.
-    assert_eq!(run(&with_wt(&other), "status"), "run");
+    assert_eq!(at(&with_wt(Some(other)), &plain, "status"), "run");
 }
 
-/// Round 2, class 4: a git dir without a work tree makes the directory git
-/// runs in the work tree; for writes it must be the bound worktree.
+/// Round 3: a write that has to be routed drops the caller's `--git-dir` /
+/// `--work-tree`; naming one is refused instead of silently rewritten.
+/// `-C` alone still routes.
 #[test]
-fn git_dir_without_work_tree_uses_the_cwd() {
+fn routed_writes_do_not_drop_a_named_git_dir() {
     let s = work();
-    let wt = std::env::temp_dir();
-    let canonical = Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf();
     let fake = Fake::default();
-    let at = |dir: &Path, env: &GitEnv, cmd: &str| {
-        let args = parse(&argv(cmd));
-        let protected = ProtectedRefs::new(&s.protected_refs);
-        code(&classify(&Input {
-            args: &args,
-            snapshot: Ok(&s),
-            location: Location::Worktree,
-            env,
-            protected: &protected,
-            dir,
-            probe: &fake,
-        }))
-    };
-    let gd = GitEnv {
-        retargets: true,
-        git_dir: true,
-        ..GitEnv::default()
-    };
-    for cmd in ["clean -fd", "reset --hard", "checkout -- .", "add -A"] {
-        assert_eq!(at(&canonical, &gd, cmd), "work_tree_retarget", "{cmd}");
-        assert_eq!(at(&wt, &gd, cmd), "run", "hooks run in the worktree: {cmd}");
+    let env = GitEnv::default();
+    for loc in [
+        Location::Canonical,
+        Location::OtherWorktree,
+        Location::NoRepo,
+    ] {
+        for cmd in [
+            "--git-dir=/repo/.git commit -m x",
+            "--work-tree=/repo clean -fd",
+            "--git-dir /nowhere reset --hard",
+            "--bare update-ref refs/heads/agend/t-1/x HEAD",
+        ] {
+            assert_eq!(
+                code(&run_with(Ok(&s), loc, &env, &fake, cmd)),
+                "work_tree_retarget",
+                "{loc:?} {cmd}"
+            );
+        }
+        let d = run_with(Ok(&s), loc, &env, &fake, "-C /repo commit -m x");
+        assert!(
+            matches!(&d, Decision::Run { route: Some(_), .. }),
+            "{loc:?}: {d:?}"
+        );
+        // Reads still route, dropping the retargeting globals.
+        let d = run_with(Ok(&s), loc, &env, &fake, "--git-dir=/repo/.git status");
+        assert!(
+            matches!(&d, Decision::Run { route: Some(_), .. }),
+            "{loc:?}: {d:?}"
+        );
     }
-    // An explicit work tree decides instead of the cwd.
-    let explicit = GitEnv {
-        work_tree: Some(wt.clone()),
-        ..gd.clone()
-    };
-    assert_eq!(at(&canonical, &explicit, "reset --hard"), "run");
-    // Reads are not affected; neither is a call without a git dir.
-    assert_eq!(at(&canonical, &gd, "status"), "run");
-    assert_eq!(
-        at(&canonical, &GitEnv::default(), "reset --hard"),
-        "run",
-        "location Worktree came from discovery, so git finds the worktree itself"
-    );
 }
 
 #[test]
@@ -865,7 +954,7 @@ fn foreign_repos_are_guarded_only_towards_the_team() {
         assert_eq!(at(&free, cmd), "run", "{cmd}");
     }
     let clone = Fake {
-        team_clone: true,
+        team_repo: true,
         ..Fake::default()
     };
     assert_eq!(at(&clone, "push origin HEAD:main"), "team_clone");

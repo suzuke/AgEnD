@@ -10,10 +10,12 @@
 //!   `refs/remotes/` or the agent's namespace, config that picks destinations
 //!   cannot be set (`config_keys`), and symbolic refs are followed before a
 //!   destination is checked.
-//! - A write acts on the bound worktree only: `--work-tree`,
-//!   `GIT_WORK_TREE` and `GIT_INDEX_FILE` pointing elsewhere are refused, and
-//!   so is a git dir (`--git-dir`, `GIT_DIR`) without a work tree when git
-//!   runs outside the bound worktree (git would use that directory).
+//! - Where a call acts is git's answer (`location`), so every spelling of a
+//!   git dir or work tree resolves alike. A write acts on the bound worktree
+//!   only: in its git dir, the work tree git would use must be the bound
+//!   worktree and `GIT_INDEX_FILE` its own; a write that has to be routed
+//!   there is refused if the caller named a git dir or work tree
+//!   (`--git-dir`, `--work-tree`, `--bare`, `GIT_*`) instead of rewritten.
 //! - Anything that could leave the bound branch (DWIM checkout, `<x> --`,
 //!   rebase of another branch, `stash branch`) is refused unless its target
 //!   is the bound branch itself.
@@ -28,7 +30,7 @@
 use crate::Refusal;
 use crate::binding::{Binding, Snapshot, SnapshotError};
 use crate::config_keys;
-use crate::location::Location;
+use crate::location::{Location, Resolved};
 use crate::protected_ref::ProtectedRefs;
 use std::path::{Path, PathBuf};
 
@@ -184,8 +186,9 @@ pub trait Probe {
     fn symref_target(&self, full_ref: &str) -> Option<String>;
     /// `git config --get-regexp <regex>` in the repo the command acts on.
     fn config(&self, regex: &str) -> Vec<(String, String)>;
-    /// A foreign repo: whether one of its remotes is the team repo.
-    fn is_team_clone(&self) -> bool;
+    /// A foreign repo: whether it is the team's remote itself, or one of its
+    /// remotes is the team repo (a clone).
+    fn is_team_repo(&self) -> bool;
     /// A foreign repo: whether push destination `dest` is the team repo.
     fn is_team_remote(&self, dest: &str) -> bool;
 }
@@ -193,17 +196,11 @@ pub trait Probe {
 /// The caller's git environment, as it affects where a write lands.
 #[derive(Debug, Clone)]
 pub struct GitEnv {
-    /// `GIT_DIR`/`GIT_WORK_TREE`/`GIT_COMMON_DIR`/`GIT_INDEX_FILE` are set.
+    /// `GIT_DIR`/`GIT_WORK_TREE`/`GIT_COMMON_DIR`/`GIT_INDEX_FILE` are set
+    /// (routing cannot drop them, so a call that needs routing is refused).
     pub retargets: bool,
-    /// The work tree the caller chose (`--work-tree` or `GIT_WORK_TREE`),
-    /// resolved against the directory git runs in.
-    pub work_tree: Option<PathBuf>,
-    /// `GIT_INDEX_FILE`, resolved likewise.
+    /// `GIT_INDEX_FILE`, resolved against the directory git runs in.
     pub index_file: Option<PathBuf>,
-    /// Whether a git dir was given (`--git-dir`, `--bare` or `GIT_DIR`).
-    /// Without a work tree, git then uses the directory it runs in as the
-    /// work tree (the top of it, not the checkout that owns the git dir).
-    pub git_dir: bool,
     /// Keys set through `GIT_CONFIG_COUNT` / `GIT_CONFIG_PARAMETERS`, or why
     /// they could not be read.
     pub config_keys: Result<Vec<String>, String>,
@@ -213,9 +210,7 @@ impl Default for GitEnv {
     fn default() -> GitEnv {
         GitEnv {
             retargets: false,
-            work_tree: None,
             index_file: None,
-            git_dir: false,
             config_keys: Ok(Vec::new()),
         }
     }
@@ -225,6 +220,8 @@ pub struct Input<'a> {
     pub args: &'a GitArgs,
     pub snapshot: Result<&'a Snapshot, &'a SnapshotError>,
     pub location: Location,
+    /// Git's answer for the call (`None`: not a repo, or not resolved).
+    pub resolved: Option<&'a Resolved>,
     pub env: &'a GitEnv,
     pub protected: &'a ProtectedRefs,
     /// Where the caller pointed git (cwd with `-C` applied), for messages.
@@ -240,6 +237,12 @@ enum Kind {
     Fetch,
     Write,
     NewRepo,
+}
+
+/// Whether the decision depends on where the call acts. Calls that print
+/// and exit, or create a repo, do not need git asked first.
+pub fn needs_location(args: &GitArgs) -> bool {
+    !args.info_only && !matches!(args.sub.as_deref(), None | Some("init" | "clone"))
 }
 
 pub fn classify(input: &Input) -> Decision {
@@ -326,7 +329,7 @@ pub fn classify(input: &Input) -> Decision {
     if route.is_some() && input.env.retargets {
         return Decision::Refuse(Refusal::new(
             "git_env_retarget",
-            "GIT_DIR / GIT_WORK_TREE / GIT_COMMON_DIR / GIT_INDEX_FILE point git outside your bound worktree"
+            "GIT_DIR / GIT_WORK_TREE / GIT_COMMON_DIR / GIT_INDEX_FILE make git act outside your bound worktree"
                 .to_string(),
             format!(
                 "unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE and run plain `git {sub} ...`; it runs in {}",
@@ -405,12 +408,13 @@ fn foreign(input: &Input, sub: &str, rest: &[String]) -> Decision {
             "run `agend status`; the daemon gives you a worktree when it assigns a task".to_string()
         }
     };
-    if input.probe.is_team_clone() {
+    if input.probe.is_team_repo() {
+        let repo = input.resolved.map_or(input.dir, Resolved::root);
         return Decision::Refuse(Refusal::new(
             "team_clone",
             format!(
-                "`git {sub}` in {}: this repo is a clone of the team repo, which agents change only through their bound worktree",
-                input.dir.display()
+                "`git {sub}` in {}: this repo is the team's remote or a clone of the team repo, which agents change only through their bound worktree",
+                repo.display()
             ),
             next,
         ));
@@ -468,54 +472,67 @@ fn check_config_channel(input: &Input) -> Result<(), Refusal> {
     }
 }
 
-/// A write must act on the bound worktree: a work tree or index chosen by
-/// the caller must be the bound worktree's own. A git dir given without a
-/// work tree makes the directory git runs in the work tree, so that
-/// directory must be the bound worktree (hooks run there).
+/// A write must act on the bound worktree. In its git dir (`Worktree`),
+/// the work tree git resolved must be the bound worktree (a git dir given
+/// without a work tree makes git use the directory it runs in; hooks run in
+/// the worktree) and `GIT_INDEX_FILE` must be inside its git dir. A routed
+/// write drops the caller's `--git-dir` / `--work-tree`, so naming one that
+/// resolves elsewhere is refused rather than silently rewritten.
 fn check_work_tree(sub: &str, input: &Input, binding: &Binding) -> Result<(), Refusal> {
     let wt = binding.worktree();
-    let bound = std::fs::canonicalize(wt).ok();
-    let same = |p: &Path| {
-        std::fs::canonicalize(p)
-            .ok()
-            .is_some_and(|c| Some(c) == bound)
-    };
-    let refuse = |what: &str, p: &Path| {
+    let refuse = |reason: String| {
         Refusal::new(
             "work_tree_retarget",
-            format!(
-                "{what} {} is not your bound worktree {}; `git {sub}` would change another checkout",
-                p.display(),
-                wt.display()
-            ),
+            reason,
             format!(
                 "drop --git-dir / --work-tree, unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE, and run `git {sub} ...` in {}",
                 wt.display()
             ),
         )
     };
-    if let Some(p) = &input.env.work_tree
-        && !same(p)
-    {
-        return Err(refuse("work tree", p));
+    if input.location != Location::Worktree {
+        let named = input.args.git_dir.is_some() || input.args.work_tree.is_some();
+        return match (named, input.resolved) {
+            (false, _) => Ok(()),
+            (true, Some(r)) => Err(refuse(format!(
+                "--git-dir / --work-tree point `git {sub}` at {}, which is not your bound worktree {}",
+                r.root().display(),
+                wt.display()
+            ))),
+            (true, None) => Err(refuse(format!(
+                "with --git-dir / --work-tree as given, git finds no repository for `git {sub}`; your bound worktree is {}",
+                wt.display()
+            ))),
+        };
     }
-    // Routed calls drop `--git-dir` (and refuse `GIT_DIR`) before this.
-    if input.location == Location::Worktree
-        && input.env.work_tree.is_none()
-        && input.env.git_dir
-        && !same(input.dir)
-    {
-        return Err(refuse(
-            "with a git dir set and no work tree, git uses the current directory as the work tree:",
-            input.dir,
-        ));
+    let bound = std::fs::canonicalize(wt).ok();
+    let resolved = input.resolved;
+    let other = |subject: String| {
+        refuse(format!(
+            "{subject} is not your bound worktree {}; `git {sub}` would change another checkout",
+            wt.display()
+        ))
+    };
+    match resolved.and_then(|r| r.work_tree.as_deref()) {
+        None => {
+            return Err(refuse(format!(
+                "git would run `git {sub}` without a work tree, not in your bound worktree {}",
+                wt.display()
+            )));
+        }
+        Some(p) if Some(p) != bound.as_deref() => {
+            return Err(other(format!(
+                "the work tree git would use ({})",
+                p.display()
+            )));
+        }
+        Some(_) => {}
     }
     if let Some(p) = &input.env.index_file {
-        let gitdir = crate::location::gitdir_of_checkout(wt);
         let parent = p.parent().and_then(|d| std::fs::canonicalize(d).ok());
-        let inside = matches!((&gitdir, &parent), (Some(g), Some(d)) if d.starts_with(g));
+        let inside = matches!((resolved, &parent), (Some(r), Some(d)) if d.starts_with(&r.git_dir));
         if !inside {
-            return Err(refuse("index file", p));
+            return Err(other(format!("the index file {}", p.display())));
         }
     }
     Ok(())
@@ -738,7 +755,7 @@ fn refuse_no_binding(sub: &str, err: &SnapshotError) -> Refusal {
             "this git is the agend agent shim; agents get AGEND_HOME and AGEND_INSTANCE from their holder. Humans: use the git outside the agent PATH (e.g. /usr/bin/git)"
         }
         _ => {
-            "run `agend status` (the daemon rewrites the snapshot); read-only git commands still work"
+            "run `agend status` (the daemon rewrites the snapshot). Until then read-only git commands run only inside a checkout: they are not routed to your worktree, so from your workspace use git -C <your worktree> status"
         }
     };
     Refusal::new(

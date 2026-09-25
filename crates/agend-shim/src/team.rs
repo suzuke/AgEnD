@@ -5,12 +5,12 @@
 //! Remote URLs are compared after `url.<base>.insteadOf` /
 //! `pushInsteadOf` rewriting and normalisation (`git@host:o/r.git`,
 //! `ssh://git@host/o/r`, `https://host/o/r/` are the same remote; a local
-//! path is compared by its git common dir, found the way git finds it:
-//! `/x/origin` and `file:///x/origin` reach `/x/origin.git`).
+//! path is compared by its git common dir, found the way git's `enter_repo`
+//! finds a local remote: `/x/origin` and `file:///x/origin` reach
+//! `/x/origin.git`; git ignores the host of a `file://` URL).
 //!
 //! Must NOT: spawn git (callers pass the config they read).
 
-use crate::location;
 use std::path::{Path, PathBuf};
 
 /// A normalised remote identity.
@@ -106,7 +106,9 @@ pub fn key(url: &str, base: &Path) -> Option<Key> {
     }
     if let Some((scheme, rest)) = url.split_once("://") {
         if scheme.eq_ignore_ascii_case("file") {
-            return local_key(&base.join(rest));
+            // git drops the host: `file://localhost/x` and `file://h/x` are `/x`.
+            let path = rest.find('/').map_or(rest, |i| &rest[i..]);
+            return local_key(&base.join(path));
         }
         let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
         let host = authority.rsplit('@').next().unwrap_or(authority);
@@ -152,12 +154,30 @@ fn local_key(p: &Path) -> Option<Key> {
         .or_else(|| std::fs::canonicalize(p).ok().map(Key::Local))
 }
 
-/// `Some` when `p` is a checkout (`p/.git`) or a git dir itself.
+/// `Some` when `p` is a checkout (`p/.git`, a directory or a `gitdir:`
+/// file) or a git dir itself (a `HEAD` file plus objects of its own or a
+/// `commondir` pointing at them); keyed by the common dir.
 fn repo_key(p: &Path) -> Option<Key> {
     let p = std::fs::canonicalize(p).ok()?;
-    let gitdir =
-        location::gitdir_of_checkout(&p).or_else(|| location::is_git_dir(&p).then(|| p.clone()))?;
-    Some(Key::Local(location::common_dir(&gitdir)))
+    let is_git_dir = |d: &Path| {
+        d.join("HEAD").is_file() && (d.join("objects").is_dir() || d.join("commondir").is_file())
+    };
+    let dot_git = p.join(".git");
+    let from_dot_git = if dot_git.is_dir() {
+        Some(dot_git)
+    } else {
+        std::fs::read_to_string(&dot_git).ok().and_then(|text| {
+            let target = text.trim().strip_prefix("gitdir:")?.trim().to_string();
+            Some(p.join(target))
+        })
+    };
+    let gitdir = from_dot_git.or_else(|| is_git_dir(&p).then(|| p.clone()))?;
+    let gitdir = std::fs::canonicalize(gitdir).ok()?;
+    let common = std::fs::read_to_string(gitdir.join("commondir"))
+        .ok()
+        .and_then(|c| std::fs::canonicalize(gitdir.join(c.trim())).ok())
+        .unwrap_or(gitdir);
+    Some(Key::Local(common))
 }
 
 #[cfg(test)]
@@ -217,6 +237,9 @@ mod tests {
             format!("{r}/./origin"),
             format!("file://{r}/origin"),
             format!("file://{r}/origin.git/"),
+            format!("file://localhost{r}/origin.git"),
+            format!("file://LOCALHOST{r}/origin"),
+            format!("file://127.0.0.1{r}/origin"),
             "origin".to_string(),
             "../x/../origin".to_string(),
         ] {

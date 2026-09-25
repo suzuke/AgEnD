@@ -1,20 +1,20 @@
-//! Where a git invocation would act, found from the filesystem alone (no git
-//! process): the bound worktree, the canonical checkout, another checkout of
-//! the same repo, a foreign repo, or no repo at all.
+//! Where a git invocation acts, decided from git's own answer. `git::resolve`
+//! asks the real git (`rev-parse` with the caller's global options, cwd and
+//! `GIT_*` environment); this module classifies that answer against the
+//! binding: the bound worktree, the canonical checkout, another worktree of
+//! the team repo, a foreign repo, or no repo at all.
 //!
-//! A repo that merely encloses `$AGEND_HOME` (a dotfiles repo in `$HOME`)
-//! does not own the agent's workspace: a call from inside `$AGEND_HOME` that
-//! only finds such a repo is `NoRepo`, and is routed like one.
-//! `GIT_COMMON_DIR` is honoured, so it cannot relabel the canonical repo's
-//! refs as a foreign repo.
+//! Because git resolves the location, every spelling git accepts (a `.git`
+//! gitfile, the real git dir, `-C`, `GIT_DIR`, `GIT_COMMON_DIR`, relative
+//! paths, subdirectories) lands on the same answer.
 //!
-//! Must NOT: spawn git; this runs on every call.
+//! Must NOT: look for repos on its own; git is the only source of truth.
 
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Location {
-    /// The agent's bound worktree.
+    /// The agent's bound worktree: git acts on its git dir.
     Worktree,
     /// The canonical checkout of the team's repo (`source_repo`).
     Canonical,
@@ -25,7 +25,8 @@ pub enum Location {
     Foreign,
     /// Not inside any repo (e.g. the agent's workspace directory).
     NoRepo,
-    /// Cannot tell (no usable snapshot); treated as the team's repo.
+    /// Not resolved: no usable snapshot, or a call that does not need it.
+    /// Treated as the team's repo.
     Unknown,
 }
 
@@ -39,99 +40,187 @@ impl Location {
     }
 }
 
-/// What the location check needs to know about the agent.
-pub struct Anchors<'a> {
-    pub source_repo: Option<&'a Path>,
-    pub worktree: Option<&'a Path>,
-    /// `$AGEND_HOME`: repos enclosing it do not own the workspace.
-    pub home: Option<&'a Path>,
-    /// False when the snapshot is unusable: every repo is then `Unknown`.
-    pub snapshot_ok: bool,
+/// What git answered for the call, with canonical paths.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Resolved {
+    pub git_dir: PathBuf,
+    pub common_dir: PathBuf,
+    /// The work tree git would use; `None` without one (a bare repo).
+    pub work_tree: Option<PathBuf>,
 }
 
-/// Resolves the location of a git call made in `dir` (the caller's cwd with
-/// any `-C` applied), with `git_dir` from `--git-dir`/`GIT_DIR` and
-/// `common` from `GIT_COMMON_DIR` if given.
-pub fn locate(
-    dir: &Path,
-    git_dir: Option<&Path>,
-    common: Option<&Path>,
-    anchors: &Anchors,
-) -> Location {
-    let gitdir = match git_dir {
-        Some(g) => Some(dir.join(g)),
-        None => discover_gitdir(dir, anchors.home),
-    };
-    let Some(gitdir) = gitdir.and_then(|g| std::fs::canonicalize(g).ok()) else {
-        return Location::NoRepo;
-    };
-    if !anchors.snapshot_ok {
-        return Location::Unknown;
+impl Resolved {
+    /// From the output lines of `rev-parse --absolute-git-dir
+    /// --git-common-dir --show-toplevel` run in `base` (the directory git
+    /// runs in, after `-C`), which relative answers are relative to. Without
+    /// a work tree git prints the first two and then fails on
+    /// `--show-toplevel`; with no repo it prints nothing.
+    pub fn from_lines(lines: &[PathBuf], base: &Path) -> Option<Resolved> {
+        let canon = |p: &PathBuf| std::fs::canonicalize(base.join(p)).ok();
+        match lines {
+            [g, c] => Some(Resolved {
+                git_dir: canon(g)?,
+                common_dir: canon(c)?,
+                work_tree: None,
+            }),
+            [g, c, w] => Some(Resolved {
+                git_dir: canon(g)?,
+                common_dir: canon(c)?,
+                work_tree: Some(canon(w)?),
+            }),
+            _ => None,
+        }
     }
-    let own_common = match common {
-        Some(c) => std::fs::canonicalize(dir.join(c)).unwrap_or_else(|_| dir.join(c)),
-        None => common_dir(&gitdir),
-    };
-    if let Some(wt) = anchors.worktree
-        && gitdir_of_checkout(wt).as_deref() == Some(gitdir.as_path())
-    {
-        return Location::Worktree;
-    }
-    let Some(source_common) = anchors
-        .source_repo
-        .and_then(gitdir_of_checkout)
-        .map(|g| common_dir(&g))
-    else {
-        return Location::Foreign;
-    };
-    if own_common != source_common {
-        Location::Foreign
-    } else if gitdir == source_common {
-        Location::Canonical
-    } else {
-        Location::OtherWorktree
+
+    /// The directory git works from: the work tree, else the git dir.
+    pub fn root(&self) -> &Path {
+        self.work_tree.as_deref().unwrap_or(&self.git_dir)
     }
 }
 
-/// Walks up from `dir` to the first `.git` (directory or `gitdir:` file).
-/// From inside `home`, a `.git` at or above `home` does not count.
-fn discover_gitdir(dir: &Path, home: Option<&Path>) -> Option<PathBuf> {
-    let start = std::fs::canonicalize(dir).ok()?;
-    let home = home.and_then(|h| std::fs::canonicalize(h).ok());
-    let inside_home = home.as_deref().is_some_and(|h| start.starts_with(h));
-    start
-        .ancestors()
-        .take_while(|d| !(inside_home && home.as_deref().is_some_and(|h| h.starts_with(d))))
-        .find_map(|d| resolve_dot_git(&d.join(".git")))
+/// What the classification compares against, asked of git lazily.
+pub trait Anchors {
+    /// The bound worktree (canonical path), if bound and present.
+    fn worktree(&self) -> Option<&Path>;
+    /// The canonical checkout (`source_repo`, canonical path).
+    fn source_repo(&self) -> Option<&Path>;
+    /// Git dir and common dir of the bound worktree.
+    fn worktree_dirs(&self) -> Option<(PathBuf, PathBuf)>;
+    /// Common dir of the canonical checkout (`source_repo`).
+    fn team_common_dir(&self) -> Option<PathBuf>;
 }
 
-/// Canonical git dir of the checkout rooted at `root`.
-pub fn gitdir_of_checkout(root: &Path) -> Option<PathBuf> {
-    resolve_dot_git(&root.join(".git")).and_then(|g| std::fs::canonicalize(g).ok())
-}
-
-/// A `.git` entry: a directory is the git dir; a file holds `gitdir: <path>`.
-fn resolve_dot_git(dot_git: &Path) -> Option<PathBuf> {
-    let meta = std::fs::metadata(dot_git).ok()?;
-    if meta.is_dir() {
-        return Some(dot_git.to_path_buf());
+/// Classifies git's answer (no answer, no repo: the caller's `NoRepo`). `explicit` is whether the caller chose the git
+/// dir, work tree or common dir (`--git-dir`, `--work-tree`, `--bare`,
+/// `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`); without that, git found the
+/// repo by walking up to the work tree, so a work tree equal to the bound
+/// worktree (or the canonical checkout) means its own git dir, and git is not
+/// asked about the anchor.
+pub fn locate(r: &Resolved, explicit: bool, anchors: &dyn Anchors) -> Location {
+    if let Some(wt) = anchors.worktree() {
+        let own = if explicit {
+            anchors
+                .worktree_dirs()
+                .is_some_and(|(g, c)| g == r.git_dir && c == r.common_dir)
+        } else {
+            r.work_tree.as_deref() == Some(wt)
+        };
+        if own {
+            return Location::Worktree;
+        }
     }
-    let text = std::fs::read_to_string(dot_git).ok()?;
-    let target = text.trim().strip_prefix("gitdir:")?.trim();
-    Some(dot_git.parent()?.join(target))
+    if !explicit && r.work_tree.is_some() && r.work_tree.as_deref() == anchors.source_repo() {
+        return if r.git_dir == r.common_dir {
+            Location::Canonical
+        } else {
+            Location::OtherWorktree
+        };
+    }
+    match anchors.team_common_dir() {
+        Some(team) if team == r.common_dir && r.git_dir == team => Location::Canonical,
+        Some(team) if team == r.common_dir => Location::OtherWorktree,
+        _ => Location::Foreign,
+    }
 }
 
-/// Whether `p` looks like a git dir (bare repo, `.git` dir or a linked
-/// worktree's git dir): a `HEAD` file plus objects of its own or a
-/// `commondir` pointing at them.
-pub fn is_git_dir(p: &Path) -> bool {
-    p.join("HEAD").is_file() && (p.join("objects").is_dir() || p.join("commondir").is_file())
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// The shared git dir (`commondir` file of a linked worktree), canonical.
-pub fn common_dir(gitdir: &Path) -> PathBuf {
-    std::fs::read_to_string(gitdir.join("commondir"))
-        .ok()
-        .and_then(|c| std::fs::canonicalize(gitdir.join(c.trim())).ok())
-        .unwrap_or_else(|| gitdir.to_path_buf())
+    struct Fixed {
+        wt: Option<PathBuf>,
+        src: Option<PathBuf>,
+        wt_dirs: Option<(PathBuf, PathBuf)>,
+        team: Option<PathBuf>,
+    }
+
+    impl Anchors for Fixed {
+        fn worktree(&self) -> Option<&Path> {
+            self.wt.as_deref()
+        }
+        fn source_repo(&self) -> Option<&Path> {
+            self.src.as_deref()
+        }
+        fn worktree_dirs(&self) -> Option<(PathBuf, PathBuf)> {
+            self.wt_dirs.clone()
+        }
+        fn team_common_dir(&self) -> Option<PathBuf> {
+            self.team.clone()
+        }
+    }
+
+    fn r(g: &str, c: &str, w: Option<&str>) -> Resolved {
+        Resolved {
+            git_dir: g.into(),
+            common_dir: c.into(),
+            work_tree: w.map(PathBuf::from),
+        }
+    }
+
+    #[test]
+    fn classifies_git_answers_against_the_binding() {
+        let a = Fixed {
+            wt: Some("/h/wt".into()),
+            src: Some("/repo".into()),
+            wt_dirs: Some(("/repo/.git/worktrees/t".into(), "/repo/.git".into())),
+            team: Some("/repo/.git".into()),
+        };
+        let own = r("/repo/.git/worktrees/t", "/repo/.git", Some("/h/wt"));
+        assert_eq!(locate(&own, false, &a), Location::Worktree);
+        assert_eq!(locate(&own, true, &a), Location::Worktree);
+        // The worktree's git dir with another work tree is still the bound
+        // worktree's repo; `classify` refuses writes whose work tree differs.
+        let elsewhere = r("/repo/.git/worktrees/t", "/repo/.git", Some("/h/ws"));
+        assert_eq!(locate(&elsewhere, true, &a), Location::Worktree);
+        // Canonical git dir with the bound work tree: not the worktree.
+        let canon_wt = r("/repo/.git", "/repo/.git", Some("/h/wt"));
+        assert_eq!(locate(&canon_wt, true, &a), Location::Canonical);
+        let canon = r("/repo/.git", "/repo/.git", Some("/repo"));
+        assert_eq!(locate(&canon, false, &a), Location::Canonical);
+        let bare_canon = r("/repo/.git", "/repo/.git", None);
+        assert_eq!(locate(&bare_canon, true, &a), Location::Canonical);
+        let sibling = r("/repo/.git/worktrees/u", "/repo/.git", Some("/h/u"));
+        assert_eq!(locate(&sibling, false, &a), Location::OtherWorktree);
+        // GIT_COMMON_DIR relabelling the worktree's refs is not the worktree.
+        let relabelled = r("/repo/.git/worktrees/t", "/x/origin.git", Some("/h/wt"));
+        assert_eq!(locate(&relabelled, true, &a), Location::Foreign);
+        let scratch = r("/s/.git", "/s/.git", Some("/s"));
+        assert_eq!(locate(&scratch, false, &a), Location::Foreign);
+    }
+
+    #[test]
+    fn unbound_agents_still_know_the_canonical_checkout() {
+        let a = Fixed {
+            wt: None,
+            src: Some("/repo".into()),
+            wt_dirs: None,
+            team: Some("/repo/.git".into()),
+        };
+        let canon = r("/repo/.git", "/repo/.git", Some("/repo"));
+        assert_eq!(locate(&canon, false, &a), Location::Canonical);
+        // Found from the canonical checkout itself: git is not asked again.
+        let none = Fixed { team: None, ..a };
+        assert_eq!(locate(&canon, false, &none), Location::Canonical);
+        assert_eq!(locate(&canon, true, &none), Location::Foreign);
+    }
+
+    #[test]
+    fn parses_rev_parse_output() {
+        let tmp = std::fs::canonicalize(std::env::temp_dir()).unwrap();
+        let t = tmp.clone();
+        let full = Resolved::from_lines(&[t.clone(), t.clone(), t.clone()], &t).unwrap();
+        assert_eq!(full.work_tree.as_deref(), Some(tmp.as_path()));
+        let bare = Resolved::from_lines(&[t.clone(), t.clone()], &t).unwrap();
+        assert_eq!(bare.work_tree, None);
+        assert_eq!(bare.root(), tmp.as_path());
+        // `--git-common-dir` may be relative to where git ran.
+        let rel = Resolved::from_lines(&[t.clone(), "..".into()], &t.join("x")).unwrap();
+        assert_eq!(rel.common_dir, tmp);
+        assert_eq!(Resolved::from_lines(&[], &t), None);
+        assert_eq!(Resolved::from_lines(std::slice::from_ref(&t), &t), None);
+        assert_eq!(
+            Resolved::from_lines(&[t.clone(), t.join("no-such-dir")], &t),
+            None
+        );
+    }
 }
