@@ -1142,5 +1142,37 @@ mod tests {
         };
         reloaded.load().unwrap();
         assert!(reloaded.threads.contains_key("t_fake1"));
+
+        // Prove the save actually replaces the directory entry rather than
+        // truncating the existing inode in place: a hard link taken right
+        // before the next save must keep observing the OLD content, and the
+        // inode behind `file` must change. `std::fs::write` truncates the
+        // same inode, so a plain-write implementation would make the link
+        // observe the NEW content and the inode would stay the same — this
+        // is what would let this test pass against a non-atomic save.
+        let old = file.with_extension("json.old");
+        std::fs::hard_link(&file, &old).unwrap();
+        let old_ino = std::os::unix::fs::MetadataExt::ino(&std::fs::metadata(&old).unwrap());
+
+        state
+            .threads
+            .insert("t_fake2".to_owned(), thread_state("t_fake2"));
+        state.next_id = 2;
+        state.save();
+
+        let new_ino = std::os::unix::fs::MetadataExt::ino(&std::fs::metadata(&file).unwrap());
+        assert_ne!(
+            old_ino, new_ino,
+            "save must replace the file's inode via rename, not truncate it in place"
+        );
+
+        let old_text = std::fs::read_to_string(&old).unwrap();
+        let old_parsed: Value = serde_json::from_str(&old_text).unwrap();
+        assert_eq!(old_parsed["threads"].as_array().unwrap().len(), 1);
+        assert_eq!(old_parsed["threads"][0]["thread"]["id"], "t_fake1");
+
+        let new_text = std::fs::read_to_string(&file).unwrap();
+        let new_parsed: Value = serde_json::from_str(&new_text).unwrap();
+        assert_eq!(new_parsed["threads"].as_array().unwrap().len(), 2);
     }
 }
