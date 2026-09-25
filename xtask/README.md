@@ -8,7 +8,7 @@
 ## 負責
 
 - `check-deps`：
-  1. shim／client 在 `cargo tree -e normal,build --target all` 裡沒有被禁止的 crate（dev 依賴不檢查）
+  1. shim／client／tui 在 `cargo tree -e normal,build --target all` 裡沒有被禁止的 crate（dev 依賴不檢查）：shim 與 client 不可有 async runtime、SQLite、agend-daemon；tui 不可有 SQLite、agend-daemon（crossterm 會帶 `mio`，所以不擋 runtime）
   2. agend-testkit 不是任何 crate 的一般依賴
   3. agend-core：`cargo metadata` 顯示沒有 build script、沒有 `[features]`、唯一直接依賴是停用 default features 且只開 `derive` + `alloc` 的 serde（D32）；而且能以 `--all-features`、`-F unsafe-code` 對無 std 的 `thumbv7em-none-eabihf` 編譯（見 `check_core.rs`）
   4. target 沒裝時印 `SKIPPED` 並失敗；`--allow-skip` 才不失敗（仍印 SKIPPED）
@@ -21,6 +21,7 @@
 
 - `accept core`：跑 workspace fmt、workspace clippy、core tests、protocol compatibility tests、check-deps，再執行 core example 的 protocol 與 code workflow demo。
 - `accept testkit`：對 agend-testkit 跑 fmt、clippy、test（含 7 個契約 suite 與假 agent 程式測試），再跑 check-deps，然後 build 假 agent binary、執行 `testkit_demo` example（三個假 agent 各一段往來並正常結束、假 daemon 的事件身分、契約摘要）。
+- `accept tui`：對 agend-tui 跑 fmt、clippy、test，再跑 check-deps，然後執行 `tui_accept` example（`== screens`／`== navigate`／`== resolve`／`== disconnect`，接 testkit 假 daemon 的 socket，每段有檢查），最後一行 `gate 11 (tui): checks passed`。
 - 其他 `accept <施工關>`：對該施工關的 crate 跑 fmt、clippy、test，再跑 check-deps；demo 隨各施工關加入
 - `record <backend> [情境…] --sandbox <腳本>`：build `agend-record`（agend-testkit），在 `<腳本>`（寫入沙箱）裡對**真的** CLI 錄製到 `mktemp -d /private/tmp/agend-rec-out-XXXX`，再在沙箱外把成功的錄製檔複製進 `crates/agend-testkit/transcripts/<backend>/`（見 [RECORDER.md](../crates/agend-testkit/RECORDER.md)）。沒有 `--sandbox` 就不跑
 

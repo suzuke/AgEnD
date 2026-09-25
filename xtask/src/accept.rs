@@ -5,8 +5,10 @@
 //! protocol compatibility contract, run check-deps, then show the core demo.
 //! For gate 2 run the per-crate checks (the testkit tests include every
 //! contract suite and the fake agent binaries), check-deps, then the testkit
-//! demo. Other gates use the current per-crate checks until their acceptance
-//! flow is built.
+//! demo. For gate 11 run the per-crate checks, check-deps, then the TUI demo
+//! (screens, navigation, resolve, disconnect against the testkit fake
+//! daemon). Other gates use the current per-crate checks until their
+//! acceptance flow is built.
 
 use crate::{cargo, check_deps, workspace_root};
 use std::process::Command;
@@ -152,6 +154,16 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
             "testkit_demo",
         ])?;
         println!("gate 2 (testkit): checks passed");
+    } else if gate.number == 11 {
+        step(&[
+            "run",
+            "--quiet",
+            "-p",
+            "agend-tui",
+            "--example",
+            "tui_accept",
+        ])?;
+        println!("gate 11 (tui): checks passed");
     } else {
         println!(
             "gate {} ({}): checks passed; demo not implemented yet (it is added when this gate is built)",
