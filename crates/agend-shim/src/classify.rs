@@ -280,6 +280,9 @@ fn write(input: &Input, sub: &str, rest: &[String]) -> Decision {
     if let Some(flag) = copy_or_rename(sub, rest) {
         return refuse(refuse_copy_or_rename(flag, binding));
     }
+    if let Some(r) = untracked_ref_write(sub, rest, binding) {
+        return refuse(r);
+    }
     let note = match (&route, input.location) {
         (Some(to), Location::Canonical) => Some(routed_note(to, input.dir)),
         _ => None,
@@ -641,17 +644,54 @@ fn refuse_copy_or_rename(flag: &str, b: &Binding) -> Refusal {
     )
 }
 
+/// `symbolic-ref` writes (a target, `-d`, `-m`) and `reflog delete|expire`:
+/// git 2.39 changes the ref outside a ref transaction, so the hook never
+/// sees it (round 7: `symbolic-ref refs/heads/main <own>` repointed main,
+/// `reflog delete --updateref main@{0}` moved it, `reflog expire --all`
+/// wiped every branch's reflog). Reads stay: `symbolic-ref [-q] [--short]
+/// <name>`, `reflog [show|exists]`.
+fn untracked_ref_write(sub: &str, rest: &[String], b: &Binding) -> Option<Refusal> {
+    let next = match sub {
+        "symbolic-ref" => {
+            let (flags, names): (Vec<&String>, Vec<&String>) =
+                rest.iter().partition(|a| a.starts_with('-'));
+            let read_flags = "-q --quiet --short --recurse --no-recurse";
+            if names.len() == 1 && flags.iter().all(|a| listed(read_flags, a)) {
+                return None;
+            }
+            let ns = b.namespace().unwrap_or_else(|| "agend/<task-id>/".into());
+            format!(
+                "read it with: git symbolic-ref <name>; to start a branch: git branch {ns}<name> <commit>"
+            )
+        }
+        "reflog" if matches!(first_positional(rest), Some("expire" | "delete")) => {
+            "read it with: git reflog show <ref>; agents do not delete or expire reflog entries"
+                .into()
+        }
+        _ => return None,
+    };
+    Some(Refusal::new(
+        "ref_outside_hook",
+        format!(
+            "`git {sub} {}` changes refs outside git's ref transaction, so the agend hook cannot check it",
+            rest.join(" ")
+        ),
+        next,
+    ))
+}
+
 // ── snapshots ───────────────────────────────────────────────────────────
 
 /// Operations that are snapshotted (v1 agentic-git's scope).
 const SNAPSHOT_OPS: &str =
-    "reset clean checkout restore switch stash rm merge rebase pull cherry-pick revert am";
+    "reset clean checkout restore switch stash rm mv merge rebase pull cherry-pick revert am";
 
 /// The name of the destructive operation to snapshot before, if any:
 /// `reset --hard|--merge|--keep`, `clean` (any), `checkout` (any that is
 /// allowed: paths, or `-f`), `restore` of the work tree, `switch -f` /
-/// `--discard-changes`, `stash drop|clear`, `rm -f` (not `--cached`, not
-/// `-n`), and merge / rebase / pull / cherry-pick / revert / am.
+/// `--discard-changes`, `stash drop|clear`, `rm -f` / `mv -f` (not
+/// `--cached`, not `-n`), and merge / rebase / pull / cherry-pick / revert /
+/// am. `mv -f` overwrites a destination with uncommitted edits.
 fn destructive(sub: &str, rest: &[String]) -> Option<&'static str> {
     let has = |l: &str| options(rest).any(|a| long(a, l));
     let has_short = |c: &str| options(rest).any(|a| short(a, c));
@@ -660,7 +700,7 @@ fn destructive(sub: &str, rest: &[String]) -> Option<&'static str> {
         "restore" => !(has("--staged") || has_short("S")) || has("--worktree") || has_short("W"),
         "switch" => has("--force") || has("--discard-changes") || has_short("f"),
         "stash" => matches!(first_positional(rest), Some("drop" | "clear")),
-        "rm" => {
+        "rm" | "mv" => {
             (has("--force") || has_short("f"))
                 && !has("--cached")
                 && !has("--dry-run")
@@ -681,12 +721,14 @@ fn options(rest: &[String]) -> impl Iterator<Item = &str> {
     rest.iter().map(String::as_str).take_while(|a| *a != "--")
 }
 
-/// `arg` is the long option `l`, or an abbreviation git accepts (at least
-/// five characters, `=value` allowed). `--force` is itself an option, so it
-/// never abbreviates `--force-create`.
+/// `arg` is the long option `l`, or any abbreviation of it (git accepts
+/// every unambiguous prefix, even `--d` for `checkout --detach`; an
+/// ambiguous one is git's error, so matching it too is harmless; `=value`
+/// allowed). `--force` is itself an option, so it never abbreviates
+/// `--force-create`.
 fn long(arg: &str, l: &str) -> bool {
     let name = arg.split('=').next().unwrap_or(arg);
-    name == l || (name.len() >= 5 && l.starts_with(name) && name != "--force")
+    name == l || (name.len() >= 3 && l.starts_with(name) && name != "--force")
 }
 
 /// `arg` is a cluster of short options containing one of `letters`.

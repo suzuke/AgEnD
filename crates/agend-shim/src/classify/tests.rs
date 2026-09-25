@@ -478,6 +478,10 @@ fn leaving_the_bound_branch_is_refused() {
             "checkout feature",
             "checkout --detach",
             "checkout --deta",
+            // Round 7, finding 5: git takes any unambiguous prefix.
+            "checkout --de",
+            "checkout --d",
+            "checkout --orp o",
             "checkout abc123",
             "checkout HEAD~1",
             "checkout -b feat/x",
@@ -491,6 +495,9 @@ fn leaving_the_bound_branch_is_refused() {
             "switch main",
             "switch --detach HEAD~1",
             "switch --deta",
+            "switch --de",
+            "switch --de HEAD~1",
+            "switch --cr x",
             "switch -c agend/t-1/x",
             "switch -cfoo",
             "switch --create x",
@@ -581,6 +588,51 @@ fn branch_copy_and_rename_are_refused() {
         r.next
     );
     assert!(r.next.contains("git branch -D <old>"), "{}", r.next);
+}
+
+/// Round 7, findings 1–2 and 4: `symbolic-ref` writes and `reflog
+/// delete|expire` change refs outside a ref transaction (the hook never
+/// sees them); refused in every spelling. Reads still run.
+#[test]
+fn ref_writes_outside_the_hook_are_refused() {
+    let s = work();
+    assert_codes(
+        &s,
+        "ref_outside_hook",
+        &[
+            "symbolic-ref refs/heads/main refs/heads/agend/t-1/fix",
+            "symbolic-ref refs/heads/master refs/heads/agend/t-1/fix",
+            "symbolic-ref HEAD refs/heads/agend/t-1/fix",
+            "symbolic-ref -m why HEAD refs/heads/main",
+            "symbolic-ref -d refs/heads/agend/t-1/alias",
+            "symbolic-ref --delete HEAD",
+            "symbolic-ref -qd HEAD",
+            "symbolic-ref -- HEAD refs/heads/main",
+            "symbolic-ref",
+            "reflog delete --updateref main@{0}",
+            "reflog delete --updateref --rewrite master@{0}",
+            "reflog expire --expire=now --all",
+            "reflog expire --expire-unreachable=now refs/heads/agend/t-1/fix",
+        ],
+    );
+    assert_codes(
+        &s,
+        "run",
+        &[
+            "symbolic-ref HEAD",
+            "symbolic-ref -q HEAD",
+            "symbolic-ref --short HEAD",
+            "symbolic-ref --quiet --no-recurse refs/heads/agend/t-1/alias",
+            "reflog",
+            "reflog show main",
+            "reflog -n 5",
+            "reflog exists main",
+        ],
+    );
+    let Decision::Refuse(r) = decide(&s, "reflog expire --expire=now --all") else {
+        panic!()
+    };
+    assert!(r.next.contains("git reflog show"), "{}", r.next);
 }
 
 #[test]
@@ -738,6 +790,14 @@ fn destructive_operations_take_a_snapshot() {
         ("rm --cached -f x", None),
         ("rm -n -rf .", None),
         ("rm --dry-run --force .", None),
+        // Round 7, finding 3: overwrites a destination with edits.
+        ("mv -f a.txt b.txt", Some("mv")),
+        ("mv --force a b", Some("mv")),
+        ("mv --f a b", Some("mv")),
+        ("mv -vf a b", Some("mv")),
+        ("mv a b", None),
+        ("mv -n -f a b", None),
+        ("mv -k a b", None),
         ("reset --hard HEAD~1", Some("reset")),
         ("reset --har", Some("reset")),
         ("reset --keep HEAD~1", Some("reset")),

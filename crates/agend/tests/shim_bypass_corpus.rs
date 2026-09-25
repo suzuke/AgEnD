@@ -209,6 +209,10 @@ const ABBREVIATED: &[Case] = &[
     refused("checkout -bfoo"),
     refused("switch --deta"),
     refused("switch -cfoo"),
+    // Round 7, finding 5: git takes any unambiguous prefix of `--detach`.
+    refused("checkout --de"),
+    refused("checkout --d"),
+    refused("switch --de"),
     snapshot("reset --har"),
     snapshot("checkout --forc"),
     snapshot("switch --discard agend/t-1/fix"),
@@ -221,10 +225,10 @@ const ABBREVIATED: &[Case] = &[
     snapshot("clean -fd -enone"),
 ];
 
-/// Class 3: symbolic refs that alias a protected branch. Creating one is a
-/// known limit (git < 2.46 does not report it to the hook, see
-/// `KNOWN_LIMITS`); every write through one reaches the hook as the real
-/// target.
+/// Class 3: symbolic refs that alias a protected branch, made by someone
+/// else (the shim refuses `symbolic-ref` writes, round 7: git 2.39 does not
+/// report them to the hook); every write through one reaches the hook as
+/// the real target.
 const SYMREFS: &[Case] = &[
     after(
         &["symbolic-ref refs/heads/agend/t-1/alias refs/heads/master"],
@@ -275,20 +279,7 @@ const LEAVE_BRANCH: &[Case] = &[
 /// Known limits (gate page): not a plausible mistake, or git before 2.46
 /// does not report the change to the hook. Checked for what still holds:
 /// no protected ref moves and no work is lost (git 2.46+ may refuse).
-const KNOWN_LIMITS: &[Case] = &[
-    case(
-        &[],
-        "symbolic-ref refs/heads/agend/t-1/alias refs/heads/master",
-        Expect::Harmless,
-    ),
-    case(
-        &[],
-        "symbolic-ref refs/heads/agend/t-1/fix refs/heads/main",
-        Expect::Harmless,
-    ),
-    case(&[], "symbolic-ref HEAD refs/heads/main", Expect::Harmless),
-    case(&[], "rebase main feature", Expect::Harmless),
-];
+const KNOWN_LIMITS: &[Case] = &[case(&[], "rebase main feature", Expect::Harmless)];
 
 fn fill(s: &str, f: &Fixture, head: &str) -> String {
     s.replace("{repo}", f.repo.to_str().unwrap())
@@ -773,6 +764,117 @@ fn branch_copy_and_rename_are_refused_before_git_runs() {
     gitshim(&ctx, &["branch", "-D", "agend/t-1/side"]).ok();
     git(&f.repo, &["branch", "-c", "userwip", "userwip-copy"]);
     assert!(!tmp_log.exists());
+}
+
+/// Round 7, findings 1, 2 and 4 (the verifier's commands): git 2.39 runs
+/// `symbolic-ref <name> <target>` and `reflog delete|expire` outside a ref
+/// transaction, so the hook never saw them: `symbolic-ref refs/heads/main
+/// refs/heads/agend/t-1/fix` repointed main at the agent's commit,
+/// `reflog delete --updateref main@{0}` moved main, and `reflog expire
+/// --expire=now --all` wiped every branch's reflog. The shim refuses them
+/// before git runs, from every place it routes from; reads still run.
+#[test]
+fn ref_writes_outside_the_hook_are_refused_before_git_runs() {
+    let f = Fixture::new("r7-raw-refs");
+    git(&f.worktree, &["commit", "-q", "--allow-empty", "-m", "own"]);
+    // main (checked out in the canonical checkout) and master each get a
+    // second reflog entry, as in the repro.
+    git(
+        &f.repo,
+        &["commit", "-q", "--allow-empty", "-m", "human-on-main"],
+    );
+    let main = f.head(&f.repo, "main");
+    git(
+        &f.repo,
+        &["update-ref", "-m", "h2", "refs/heads/master", &main],
+    );
+    let state = || {
+        let refs = git(
+            &f.repo,
+            &[
+                "for-each-ref",
+                "--format=%(refname) %(objectname) %(symref)",
+            ],
+        );
+        let logs: Vec<String> = ["main", "master", "release", "feature", &f.branch]
+            .iter()
+            .map(|r| git(&f.repo, &["reflog", "show", "--format=%H %gs", r]))
+            .collect();
+        let status = git(&f.repo, &["status", "--porcelain"]);
+        format!(
+            "{refs}\n--reflogs--\n{}\n--status--\n{status}",
+            logs.join("\n")
+        )
+    };
+    let before = state();
+    let wt = f.worktree.to_str().unwrap();
+    for cmd in [
+        "symbolic-ref refs/heads/main refs/heads/agend/t-1/fix",
+        "symbolic-ref refs/heads/master refs/heads/agend/t-1/fix",
+        "symbolic-ref refs/heads/release refs/heads/agend/t-1/fix",
+        "symbolic-ref HEAD refs/heads/master",
+        "reflog delete --updateref main@{0}",
+        "reflog delete --updateref --rewrite master@{0}",
+        "reflog expire --updateref --rewrite --expire=now master",
+        "reflog expire --expire=now --all",
+    ] {
+        for (at, prefix) in [
+            (&f.worktree, None),
+            (&f.repo, None),
+            (&f.workspace, None),
+            (&f.workspace, Some(wt)),
+        ] {
+            let mut argv: Vec<&str> = prefix.map(|p| vec!["-C", p]).unwrap_or_default();
+            argv.extend(cmd.split_whitespace());
+            let ran = gitshim(&f.ctx(at), &argv);
+            assert_eq!(ran.refused, Some("ref_outside_hook"), "{argv:?} in {at:?}");
+            assert!(ran.output.is_none(), "{argv:?}: git ran");
+            assert_eq!(state(), before, "{argv:?} in {at:?}");
+        }
+    }
+    let ctx = f.ctx(&f.worktree);
+    let out = gitshim(&ctx, &["symbolic-ref", "--short", "HEAD"]);
+    assert_eq!(String::from_utf8_lossy(&out.ok().stdout).trim(), f.branch);
+    assert!(
+        !gitshim(&ctx, &["reflog", "show", "main"])
+            .ok()
+            .stdout
+            .is_empty()
+    );
+}
+
+/// Round 7, finding 3: after `git mv` fails with "destination exists", the
+/// reflex `git mv -f` overwrites the destination's uncommitted edits. The
+/// shim snapshots first (like `rm -f`), and the snapshot holds the edits.
+#[test]
+fn mv_force_over_uncommitted_edits_takes_a_snapshot() {
+    let f = Fixture::new("r7-mv-force");
+    std::fs::write(f.worktree.join("a.txt"), "a\n").unwrap();
+    std::fs::write(f.worktree.join("b.txt"), "b\n").unwrap();
+    git(&f.worktree, &["add", "a.txt", "b.txt"]);
+    git(&f.worktree, &["commit", "-q", "-m", "ab"]);
+    std::fs::write(f.worktree.join("b.txt"), "precious\n").unwrap();
+    let ctx = f.ctx(&f.worktree);
+    let plain = gitshim(&ctx, &["mv", "a.txt", "b.txt"]);
+    assert!(plain.refused.is_none() && !plain.output.unwrap().status.success());
+    gitshim(&ctx, &["mv", "-f", "a.txt", "b.txt"]).ok();
+    assert_eq!(
+        std::fs::read_to_string(f.worktree.join("b.txt")).unwrap(),
+        "a\n"
+    );
+    let snaps = git(
+        &f.repo,
+        &[
+            "for-each-ref",
+            "--format=%(refname)",
+            "refs/agend/snapshots/",
+        ],
+    );
+    assert_eq!(snaps.lines().count(), 1, "{snaps}");
+    assert_eq!(
+        git(&f.repo, &["show", &format!("{snaps}:b.txt")]),
+        "precious"
+    );
 }
 
 // ── T9: kill forms, against a fake recorder only ─────────────────────────

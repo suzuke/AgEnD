@@ -1,6 +1,6 @@
 //! Takes a snapshot before destructive git operations (the scope of v1
 //! agentic-git: `reset --hard|--merge|--keep`, `clean`, `checkout`,
-//! `restore`, `switch -f|--discard-changes`, `stash drop|clear`, `rm -f`,
+//! `restore`, `switch -f|--discard-changes`, `stash drop|clear`, `rm -f`, `mv -f`,
 //! merge / rebase / pull / cherry-pick / revert / am; see `classify`) so
 //! they can be undone.
 //!
