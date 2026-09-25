@@ -498,4 +498,107 @@ fn a_deleted_cwd_is_refused_not_widened() {
         .iter()
         .filter(|r| r.code.as_deref() == Some("cwd_unreadable"));
     assert_eq!(refused.count(), dirs.len() * cmds.len());
+
+    // Round 12 notes: a call that does not use the cwd behaves like real
+    // git (`--version`, a first `-C` that is absolute); a write that way
+    // follows the normal rules (snapshotted first).
+    let gone = wt.join("target/debug");
+    let out = from_deleted(&l, &shim_git, &gone, &["--version"]);
+    assert!(out.status.success(), "{out:?}");
+    assert!(String::from_utf8_lossy(&out.stdout).starts_with("git version"));
+    let at_wt = ["-C", wt.to_str().unwrap()];
+    let out = from_deleted(&l, &shim_git, &gone, &[&at_wt[..], &["status"]].concat());
+    assert!(out.status.success(), "{out:?}");
+    let restore = [&at_wt[..], &["restore", "src/sub/f.txt"]].concat();
+    let out = from_deleted(&l, &shim_git, &gone, &restore);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{err}");
+    assert!(err.contains("saved before"), "{err}");
+    assert_eq!(read(&wt.join("src/sub/f.txt")).as_deref(), Some("s\n"));
+    assert_eq!(snapshots(&l.f).len(), 1);
+}
+
+/// Round 12: a plain call from a directory in no repo that is not the
+/// agent's workspace (a scratch dir outside `AGEND_HOME`, a subdirectory of
+/// it, the parent of `AGEND_HOME` like `~`) ran on the whole bound worktree,
+/// where real git says `not a git repository`. Writes are now refused with
+/// git's wording and `cd <worktree>`, reads run as typed (git reports it),
+/// and nothing changes; the workspace and below it still route, with a note.
+#[test]
+fn a_plain_call_from_a_non_repo_dir_is_refused_not_widened() {
+    let l = lab("scope-norepo");
+    let wt = &l.f.worktree;
+    let scratch = l.f.root.join("scratch");
+    std::fs::create_dir_all(scratch.join("sub")).unwrap();
+    let ceiling = l.f.root.parent().unwrap().as_os_str().to_os_string();
+    let ctx = |at: &Path| agend_shim::ctx::Ctx {
+        git_ceiling_dirs: Some(ceiling.clone()),
+        ..l.f.ctx(at)
+    };
+    let head = git(wt, &["rev-parse", "HEAD"]);
+    let cmds: [&[&str]; 7] = [
+        &["checkout", "."],
+        &["restore", "."],
+        &["reset", "--hard"],
+        &["clean", "-fd"],
+        &["rm", "-r", "-q", "-f", "."],
+        &["add", "."],
+        &["commit", "-q", "-a", "-m", "scratch"],
+    ];
+    for at in [scratch.clone(), scratch.join("sub"), l.f.root.clone()] {
+        assert!(!at.starts_with(&l.f.home) && l.f.home.starts_with(&l.f.root));
+        let mut real = shim_common::git_base();
+        let real = real
+            .current_dir(&at)
+            .args(["checkout", "."])
+            .output()
+            .unwrap();
+        let err = String::from_utf8_lossy(&real.stderr);
+        assert!(
+            err.contains("not a git repository"),
+            "real git in {at:?}: {err}"
+        );
+        for cmd in cmds {
+            let what = format!("{at:?} {cmd:?}");
+            let ran = gitshim(&ctx(&at), cmd);
+            let text = ran.text();
+            assert_eq!(ran.refused, Some("no_repo_there"), "{what}: {text}");
+            assert!(text.contains("not a git repository"), "{what}: {text}");
+            let next = format!("next step: cd {} and run it there", wt.display());
+            assert!(text.contains(&next), "{what}: {text}");
+            assert_eq!(
+                read(&wt.join("src/sub/f.txt")).as_deref(),
+                Some("s\nunsaved-sub-edit\n"),
+                "{what}"
+            );
+            assert!(wt.join("src/sub/tmp.txt").exists(), "{what}");
+            assert_root_untouched(&l, &what);
+            assert_others_untouched(&l, &what);
+        }
+        // A read runs as typed: git reports that there is no repo.
+        let ran = gitshim(&ctx(&at), &["status"]);
+        assert!(!ran.output.as_ref().expect("a read runs").status.success());
+        assert!(
+            ran.text().contains("not a git repository"),
+            "{}",
+            ran.text()
+        );
+    }
+    assert_eq!(git(wt, &["rev-parse", "HEAD"]), head);
+    assert!(snapshots(&l.f).is_empty());
+    // A dry-run `remote prune` is a read.
+    gitshim(&ctx(wt), &["remote", "prune", "--dry-run", "origin"]).ok();
+    // The workspace and a directory below it still route to the worktree's
+    // top, and say so.
+    let deep = l.f.workspace.join("dl/x");
+    std::fs::create_dir_all(&deep).unwrap();
+    let note = format!("running in your bound worktree {}", wt.display());
+    let ran = gitshim(&ctx(&deep), &["status", "--short"]);
+    ran.ok();
+    assert!(ran.text().contains(&note), "{}", ran.text());
+    let ran = gitshim(&ctx(&l.f.workspace), &["checkout", "."]);
+    ran.ok();
+    assert!(ran.text().contains(&note), "{}", ran.text());
+    assert_eq!(read(&wt.join("README.md")).as_deref(), Some("hello\n"));
+    assert_eq!(snapshots(&l.f).len(), 1, "checkout . is snapshotted");
 }

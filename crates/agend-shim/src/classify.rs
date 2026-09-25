@@ -230,21 +230,25 @@ fn write(input: &Input, sub: &str, rest: &[String]) -> Decision {
             "run `agend status`; the daemon re-creates or re-assigns the worktree",
         ));
     }
-    let named_target = !input.args.retarget_indexes.is_empty() || input.env.retargets;
-    if input.location == Location::NoRepo && named_target {
+    // Only the workspace stands for the bound worktree (rounds 10, 12).
+    if input.location == Location::NoRepo {
+        let (dir, w) = (input.dir.display(), wt.display());
         let what = match input.dir.is_dir() {
             true => "not a git repository".to_string(),
-            false => format!("cannot change to '{}'", input.dir.display()),
+            false => format!("cannot change to '{dir}'"),
+        };
+        let at = match !input.args.retarget_indexes.is_empty() || input.env.retargets {
+            true => {
+                "where you pointed it with -C, --git-dir, --work-tree, GIT_DIR or GIT_WORK_TREE"
+            }
+            false => &format!("in {dir}, which is in no repo and is not your workspace"),
         };
         return refuse(Refusal::new(
             "no_repo_there",
             format!(
-                "git would fail ({what}) where you pointed it with -C, --git-dir, --work-tree, GIT_DIR or GIT_WORK_TREE, so the shim will not run `git {sub}` in your bound worktree instead"
+                "git would fail ({what}) {at}, so the shim will not run `git {sub}` in your bound worktree instead"
             ),
-            format!(
-                "fix the path, or cd {} and run it without them",
-                wt.display()
-            ),
+            format!("cd {w} and run it there (fix or drop any -C, --git-dir, --work-tree, GIT_*)"),
         ));
     }
     let named = input.args.git_dir.is_some() || input.args.work_tree.is_some();
@@ -307,10 +311,7 @@ fn write(input: &Input, sub: &str, rest: &[String]) -> Decision {
     if let Some(r) = autostash(sub, rest, input) {
         return refuse(r);
     }
-    let note = match (&route, input.location) {
-        (Some(to), Location::Canonical) => Some(routed_note(to, input.dir)),
-        _ => None,
-    };
+    let note = route.as_deref().map(|to| routed_note(to, input.dir));
     Decision::Run {
         route,
         snapshot: destructive(sub, rest),
@@ -319,15 +320,14 @@ fn write(input: &Input, sub: &str, rest: &[String]) -> Decision {
 }
 
 /// Read-only commands: run in the bound worktree from the canonical checkout
-/// or, by a plain call, the workspace (no repo); else as typed (git reports a
-/// `-C` typo itself). In another worktree a read shows that worktree, which
-/// is what the agent asked for, and routing it would be a surprise.
+/// or, by a plain call, the agent's own workspace; else as typed (git reports
+/// a `-C` typo or no repo itself). In another worktree a read shows that
+/// worktree, which is what the agent asked for; routing it would surprise.
 fn route_read(input: &Input, binding: Option<&Binding>) -> Decision {
     let Some(binding) = binding else {
         return PASS;
     };
-    let outside = input.location == Location::Canonical
-        || (input.location == Location::NoRepo && input.args.retarget_indexes.is_empty());
+    let outside = matches!(input.location, Location::Canonical | Location::Workspace);
     if !outside || input.env.retargets || !binding.worktree().is_dir() {
         return PASS;
     }
@@ -336,11 +336,10 @@ fn route_read(input: &Input, binding: Option<&Binding>) -> Decision {
         Ok(to) => to,
         Err(r) => return Decision::Refuse(r),
     };
-    let note = (input.location != Location::NoRepo).then(|| routed_note(&to, input.dir));
     Decision::Run {
+        note: Some(routed_note(&to, input.dir)),
         route: Some(to),
         snapshot: None,
-        note,
     }
 }
 
@@ -882,6 +881,10 @@ fn kind(sub: &str, rest: &[String]) -> Option<Kind> {
         // Listing forms only; anything with a name counts as a write.
         "branch" | "tag" => first.is_none(),
         "stash" => matches!(first, Some("list" | "show")),
+        "remote" if first == Some("prune") => {
+            let negated = options(rest).any(|a| a.starts_with("--no-"));
+            !negated && options(rest).any(|a| a == "-n" || long(a, "--dry-run"))
+        }
         "remote" => matches!(first, None | Some("show" | "get-url")),
         "reflog" => !matches!(first, Some("expire" | "delete")),
         "submodule" => matches!(first, None | Some("status" | "summary")),

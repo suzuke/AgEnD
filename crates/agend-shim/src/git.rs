@@ -51,8 +51,10 @@ pub fn plan(ctx: &Ctx, args: &[OsString]) -> Outcome {
     let parsed = classify::parse(&argv);
     let snap_ref = snap.as_ref().ok();
     let bound = snap_ref.and_then(|s| s.binding.as_ref());
-    // A deleted cwd: git fails, and nothing may stand in for it (round 11).
-    let Some(cwd) = ctx.cwd.clone() else {
+    // A deleted cwd: nothing stands in for it (round 11) unless unused (round 12).
+    let absolute = |c: &String| Path::new(c).is_absolute();
+    let unused = parsed.chdirs.first().is_some_and(absolute) || !classify::needs_location(&parsed);
+    let Some(cwd) = ctx.cwd.clone().or_else(|| unused.then(PathBuf::new)) else {
         let go = bound.map_or(Path::new("a directory that exists"), |b| b.worktree());
         let r = Refusal::new(
             "cwd_unreadable",
@@ -77,8 +79,10 @@ pub fn plan(ctx: &Ctx, args: &[OsString]) -> Outcome {
     let resolved = needs_location
         .then(|| resolve(ctx, &real, &args[..parsed.sub_index], &dir, names_git_dir))
         .flatten();
+    let plain = parsed.retarget_indexes.is_empty() && !ctx.git_env_retargets();
     let location = match &resolved {
         _ if !needs_location => Location::Unknown,
+        None if plain && in_workspace(ctx.home.as_deref(), snap_ref, &dir) => Location::Workspace,
         None => Location::NoRepo,
         Some(_) if snap.is_err() => Location::Unknown,
         Some(r) => location::locate(r, explicit, &anchors),
@@ -234,6 +238,16 @@ fn resolve(
     }
     let out = cmd.output().ok()?;
     Resolved::from_lines(&lines_keeping_empty(&out.stdout), dir)
+}
+
+/// Whether `dir` is the agent's own workspace (`<AGEND_HOME>/workspace/<instance>`)
+/// or below it, compared canonical; round 12: only it stands for the worktree.
+fn in_workspace(home: Option<&Path>, snap: Option<&binding::Snapshot>, dir: &Path) -> bool {
+    let canon = |p: &Path| std::fs::canonicalize(p).ok();
+    let ws = home
+        .zip(snap)
+        .map(|(h, s)| h.join("workspace").join(&s.instance));
+    matches!((ws.as_deref().and_then(canon), canon(dir)), (Some(w), Some(d)) if d.starts_with(&w))
 }
 
 /// `rev-parse` arguments shared by every location question (git 2.13+;

@@ -26,8 +26,12 @@ pub enum Location {
     /// A foreign repo inside the bound worktree (a submodule, a nested
     /// clone): writes run there, destructive ones snapshotted in that repo.
     Nested,
-    /// Not inside any repo (e.g. the agent's workspace directory).
+    /// Not inside any repo and not `Workspace` (`/tmp/x`, `~`, `-C typo`).
     NoRepo,
+    /// Not inside any repo, in the agent's own workspace
+    /// (`<AGEND_HOME>/workspace/<instance>` or below), without `-C`,
+    /// `--git-dir`, `--work-tree` or `GIT_*`: stands for the bound worktree.
+    Workspace,
     /// Not resolved: no usable snapshot, or a call that does not need it.
     /// Treated as the team's repo.
     Unknown,
@@ -92,7 +96,7 @@ pub trait Anchors {
     fn team_common_dir(&self) -> Option<PathBuf>;
 }
 
-/// Classifies git's answer (no answer, no repo: the caller's `NoRepo`). `explicit` is whether the caller chose the git
+/// Classifies git's answer (no answer, no repo: the caller's `NoRepo` / `Workspace`). `explicit` is whether the caller chose the git
 /// dir, work tree or common dir (`--git-dir`, `--work-tree`, `--bare`,
 /// `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`); without that, git found the
 /// repo by walking up to the work tree, so a work tree equal to the bound

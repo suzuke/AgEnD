@@ -146,7 +146,7 @@ fn resolved_at(loc: Location) -> Option<Resolved> {
             "/repo/.git/worktrees/t-1/modules/mod",
             Some(bound_wt().join("mod")),
         ),
-        Location::NoRepo | Location::Unknown => None,
+        Location::NoRepo | Location::Workspace | Location::Unknown => None,
     }
 }
 
@@ -244,14 +244,26 @@ fn globals_are_split_from_the_subcommand() {
 #[test]
 fn bound_writes_route_into_the_worktree() {
     let s = work();
-    for loc in [Location::NoRepo, Location::Canonical] {
+    for loc in [Location::Workspace, Location::Canonical] {
         match decide_at(Ok(&s), loc, "commit -m x") {
-            Decision::Run { route, .. } => {
-                assert_eq!(route.as_deref(), Some(std::env::temp_dir().as_path()))
+            Decision::Run { route, note, .. } => {
+                assert_eq!(route.as_deref(), Some(std::env::temp_dir().as_path()));
+                assert!(note.unwrap().contains("running in your bound worktree"));
             }
             other => panic!("{loc:?}: {other:?}"),
         }
     }
+    // Round 12: no repo and not the workspace (`/tmp/x`, `~`): git would
+    // fail, so a write is refused and a read runs as typed (git reports it).
+    let Decision::Refuse(r) = decide_at(Ok(&s), Location::NoRepo, "checkout .") else {
+        panic!("a write from a non-repo directory ran")
+    };
+    assert_eq!(r.code, "no_repo_there");
+    assert!(r.reason.contains("is not your workspace"), "{}", r.reason);
+    assert!(r.next.starts_with("cd "), "{}", r.next);
+    assert_eq!(decide_at(Ok(&s), Location::NoRepo, "status"), PASS);
+    let d = decide_at(Ok(&s), Location::Workspace, "status");
+    assert!(matches!(d, Decision::Run { note: Some(_), .. }), "{d:?}");
     assert_eq!(decide(&s, "commit -m x"), PASS);
     // Round 5: another agent's worktree is the wrong directory, not a
     // place to route from.
@@ -835,12 +847,13 @@ fn remote_writes_are_refused() {
         "remote set-head origin -a",
         "remote set-branches origin main",
         "remote prune origin",
+        "remote prune -n --no-dry-run origin",
         "remote update --prune",
         "remote update -p origin",
         "remote update --pru",
     ];
     assert_codes(&s, "remote_write", &writes);
-    for loc in [Location::Canonical, Location::NoRepo] {
+    for loc in [Location::Canonical, Location::Workspace] {
         let d = decide_at(Ok(&s), loc, "remote set-url origin /tmp/typo.git");
         assert_eq!(code(&d), "remote_write", "{loc:?}");
     }
@@ -855,6 +868,9 @@ fn remote_writes_are_refused() {
         "remote show origin",
         "remote update",
         "remote update origin",
+        "remote prune --dry-run origin",
+        "remote prune -n origin",
+        "remote prune origin --dry",
     ];
     assert_codes(&s, "run", &reads);
 }
