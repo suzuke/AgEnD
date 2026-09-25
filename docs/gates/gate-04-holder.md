@@ -309,32 +309,32 @@
 實作時做了、提案沒寫到或與提案字面不同的選擇。確認前照目前的做法運作。
 
 - G1：holder 協定版本**不升**，`Exited.signal` 直接加進 1.0。理由：還沒有任何已發布的 holder；欄位選填、沒有時不送（一般結束的 wire shape 完全不變），舊 daemon 忽略、新 daemon 讀到舊 holder 當成 `None`。替代：升成 1.1。
-  - [ ] 使用者追認
+  - [x] 使用者追認（2026-09-26）
 - G2：`Shutdown` 的「關 PTY」改成**直接對 agent 的 process group 送 SIGHUP**（關 PTY 時 kernel 送的就是它）。理由：PTY 讀取 thread 持有 master 的複本，關掉 holder 手上的 handle 不會真的掛斷。agent 已結束時直接對 group 送 SIGKILL 清掉留下的子程序（verifier r1 LOW-1 之後；安全性見 G11 的 zombie 保留）。
-  - [ ] 使用者追認
+  - [x] 使用者追認（2026-09-26）
 - G3：agent 環境除了 `Spawn.env` 與預設 `TERM`，還會有 `SHELL`（portable-pty 一定會設，值是使用者的登入 shell）。不是 secret，但與「只有 Spawn.env」字面不同。要完全去掉得改用自己的 spawn。
-  - [ ] 使用者追認
+  - [x] 使用者追認（2026-09-26）
 - G4：新連線要**完成 `hello`** 才接手；版本不合或第一個請求不是 `hello` 的連線直接回錯誤、斷線，不影響目前的連線。錯誤碼：`expected_hello`、`version_mismatch`、`unexpected_hello`、`bad_request`、`unsupported_request`（未知請求）、`not_spawned`、`agent_exited`、`already_spawned`、`instance_mismatch`、`spawn_failed`、`resize_failed`，加上提案的 `pty_busy`、`unknown_control_key`。控制鍵與操作者輸入成功時**不回覆**（協定沒有 ack）。
-  - [ ] 使用者追認
+  - [x] 使用者追認（2026-09-26）
 - G5：24 小時安全網的「agent 已結束」也包含「從來沒 spawn」；計時從最後一次連線開或關、或 agent 結束算起。測試用 `AGEND_HOLDER_IDLE_EXIT_SECS` 改短；檢查間隔是它的 1/4（50 毫秒到 60 秒）。
-  - [ ] 使用者追認
+  - [x] 使用者追認（2026-09-26）
 - G6：狀態鎖用 `parking_lot`（已經因 alacritty_terminal 在依賴樹裡），PTY 讀取 thread 每處理一段就公平釋放。理由：實測 agent 狂印輸出（`yes`）時，macOS 的一般 mutex 會讓 `Shutdown` 與新連線永遠拿不到鎖。
-  - [ ] 使用者追認
+  - [x] 使用者追認（2026-09-26）
 - G7：`agend holder` 必須由別的程序啟動（`setsid` 在 process group leader 上會失敗，holder 印原因並 exit 2），不自己 fork。daemon 與 `holder_probe start` 都符合。
-  - [ ] 使用者追認
+  - [x] 使用者追認（2026-09-26）
 - G8：跨程序測試的每次開機（與啟動器）是**同一個測試 binary 以 `HOLDER_PROBE_ROLE` 重新執行**（`probe_child`），因為 `agend` 的測試拿不到 example binary；demo 則是 `holder_probe` 重新執行自己。
-  - [ ] 使用者追認
+  - [x] 使用者追認（2026-09-26）
 - G10：holder 收到第二個 `Spawn`（例如 daemon 在 holder 啟動後、`Spawn` 前當掉，新 daemon 接上後重送）一律回 `Error{code: "already_spawned"}`，其他什麼都不做（不重啟、不換 agent）。第 6 施工關依賴這點。這條不在確認過的 P1–P9 裡（第 6 施工關設計稿追加）；測試 `a_second_spawn_is_refused_and_changes_nothing`，協定說明在 `HolderRequest::Spawn`。
-  - [ ] 使用者追認
+  - [x] 使用者追認（2026-09-26）
 - G11（verifier r1 修正，協定行為）：
   - 落後被斷線的連線只關**送出**方向，client 已送出的 `Shutdown` 仍然照辦（macOS 的 `shutdown(Both)` 會丟掉還沒讀的輸入）；被新連線**取代**的舊連線送的任何請求都不理。
   - 新錯誤碼：`invalid_size`（`Resize` 的列與欄要在 1–1000）、`request_too_large`（一行請求超過 1 MiB，回錯誤後斷線）。
   - `hello` 要在 10 秒內**整行**送完（原本是每次讀取 10 秒）。
   - agent 結束後保留成 zombie（`waitid` + `WNOWAIT` 取結束狀態、不回收）直到停止：它的 pid／process group id 因此不會被重用，`Shutdown` 可以安全地對 group 送 SIGKILL，清掉 agent 結束後留下、忽略 SIGHUP 的子程序；停止時才回收。
   - lock 檔的 pid 改成一次寫入固定寬度（不先清空）；holder 啟動時搶鎖重試 500 毫秒；`is_running` 只回活著、大於 1 的 pid，否則最多重查 1 秒後回 `WouldBlock`，**絕不回 0**。正常停止時先清空 pid 再放鎖。
-  - [ ] 使用者追認
+  - [x] 使用者追認（2026-09-26）
 - G9：**延後**「錄下的 PTY 位元組餵給 holder 畫面再跑 `classify`」。repo 裡沒有真 backend 的原始 PTY 位元組（現有 fixture 是畫面文字摘錄），要做得在沙箱跑真的 codex／claude 錄製；手寫 ANSI 違反 #1493。建議併到第 6 或第 7 施工關第一次用 holder 接真 backend 時錄。
-  - [ ] 使用者決定
+  - [x] 使用者決定（2026-09-26）：同意延後到第 6／7 施工關
 
 ## 驗收紀錄
 
@@ -348,6 +348,7 @@
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-26 使用者逐題追認 G1–G11（G2、G3 經舉例說明後追認；G9 同意延後到第 6／7 施工關）。
 - 2026-09-26 verifier r1（REFUTED `097ddc6`）修正：macOS CI 卡在落後斷線測試（測試關閉沒有期限）→ 看門狗與期限、落後只關送出方向且照辦已送出的 `Shutdown`；`Resize` 上限、請求行 1 MiB、hello 10 秒；鎖檔 pid 競態（`is_running` 曾回 0）；agent 結束後的子程序也清掉；已知限制四點；「待你追認」加 G11。
 - 2026-09-25 實作（draft PR，branch `feat/gate-04-holder`）：`agend holder` 子命令、協定 server、畫面、三種 PTY 寫入、`Exited.signal`、check-deps 規則、`holder_probe` demo、跨程序四次開機測試；狀態改為實作中；「待你追認」G1–G10。fresh-context verifier 尚未跑。
 - 2026-09-25 開工前提案 P1–P9 寫定，使用者逐題確認（P2 追加防孤兒四點、24 小時安全網）；附屬程序移到第 7 施工關；systemd `KillMode=process` 記入第 13 施工關；狀態改為提案中。
