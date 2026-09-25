@@ -74,10 +74,11 @@ fn turn_start_ends_with_turn_completed_and_echoes_ids() {
     assert_eq!(reply["params"]["item"]["text"], "fake reply: say hi");
     assert_eq!(reply["params"]["turnId"], turn);
     let completed = probe.next_method("turn/completed").unwrap();
-    assert_eq!(
-        completed["params"],
-        json!({"threadId": thread, "turn": {"id": turn, "status": "completed"}})
-    );
+    let params = &completed["params"];
+    assert_eq!(params["threadId"], thread);
+    assert_eq!(params["turn"]["id"], turn);
+    assert_eq!(params["turn"]["status"], "completed");
+    assert_eq!(params["turn"]["items"][0]["text"], "fake reply: say hi");
     server.stop();
 }
 
@@ -112,16 +113,17 @@ fn steer_interrupt_and_queue() {
             json!({"threadId": thread, "clientUserMessageId": "m-2", "input": input("queued")}),
         )
         .unwrap();
-    let reply = loop {
+    // Like codex 0.156.1 (transcripts/codex/busy.jsonl): the steer is its
+    // own user message and reply inside the same turn.
+    let mut replies = Vec::new();
+    while replies.len() < 2 {
         let message = probe.next_method("item/completed").unwrap();
         if message["params"]["item"]["type"] == "agentMessage" {
-            break message;
+            assert_eq!(message["params"]["turnId"], turn);
+            replies.push(message["params"]["item"]["text"].clone());
         }
-    };
-    assert_eq!(
-        reply["params"]["item"]["text"],
-        "fake reply: first / steered"
-    );
+    }
+    assert_eq!(replies, ["fake reply: first", "fake reply: steered"]);
     probe.next_method("turn/completed").unwrap();
     let queued = probe.next_method("turn/started").unwrap();
     let queued_turn = queued["params"]["turn"]["id"].clone();
@@ -156,7 +158,11 @@ fn approval_request_waits_for_the_decision() {
         let request = probe
             .next_method("item/commandExecution/requestApproval")
             .unwrap();
-        assert_eq!(request["params"]["command"], "cargo test");
+        assert_eq!(request["params"]["command"], "/bin/zsh -lc 'cargo test'");
+        assert_eq!(
+            request["params"]["commandActions"][0]["command"],
+            "cargo test"
+        );
         probe
             .send(json!({"id": request["id"], "result": {"decision": decision}}))
             .unwrap();
@@ -235,4 +241,20 @@ fn long_listen_path_is_a_symlink_to_a_short_socket() {
     start_thread(&mut probe);
     server.stop();
     assert!(!real.exists());
+}
+
+#[test]
+fn a_short_listen_path_is_a_symlink_too() {
+    // codex 0.156.1 binds under /private/tmp/codex-daemon-<uid>/ even for a
+    // short --listen path (seen while recording); the fake does the same.
+    let dir = TempDir::new("cx").unwrap();
+    let requested = dir.path().join("s.sock");
+    let server = Running::start(&requested, 20);
+    assert!(
+        std::fs::symlink_metadata(&requested)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    server.stop();
 }

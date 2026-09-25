@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 共用測試基礎設施：每個 trait 的假實作、契約測試、假 daemon、假 agent 程式。
 > - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這個施工關才算完成。
-> - 下一步：「待你追認」A1–A25 已有結果（2026-09-25，見表的最後一欄）；A7 的真 CLI 錄音比對在另一個 PR（backend recorder），A8、A22、A23 的後續在 `feat/gate-02-followups`。
+> - 下一步：「待你追認」A1–A25 已有結果（2026-09-25，見表的最後一欄）；A7 的真 CLI 錄音比對在 #114（backend recorder）完成，A8、A22、A23 的後續在 #113（`f8108f5`）完成；D16 維持（見「待你追認」）。
 
 ## 狀態
 
@@ -37,8 +37,8 @@
 
    應該看到（約 1 分鐘，第一次要編譯）：
 
-   - `== fake codex app-server ==`：`-> turn/start ...`，之後 `<- turn/started`、兩個 `<- item/completed`（`userMessage`、`"text":"fake reply: say hello"`）、`<- turn/completed {... "status":"completed" ...}`，最後 `fake-codex-app-server exited cleanly (exit status: 0)`。
-   - `== fake opencode serve ==`：`<- 204`，接著 8 個 `<- event`（從 `server.connected` 到 `session.idle`），最後 `fake-opencode-serve exited cleanly (exit status: 0)`。
+   - `== fake codex app-server ==`：`-> turn/start ...`，之後 `<- turn/started`、`<- item/started`／`<- item/completed`（先 `userMessage`，再 `agentMessage` 帶 `"text":"fake reply: say hello"`）、`<- turn/completed {... "status":"completed" ...}`，最後 `fake-codex-app-server exited cleanly (exit status: 0)`。（2026-09-25 起假 agent 照真 CLI 的錄製檔補齊，行數比最初多，見 [RECORDER.md](../../crates/agend-testkit/RECORDER.md)。）
+   - `== fake opencode serve ==`：`<- 204`，接著 21 個 `<- event`（從 `server.connected` 到 `session.idle`），最後 `fake-opencode-serve exited cleanly (exit status: 0)`。
    - `== fake claude with hooks ==`：`> <channel source="agend" ...>`、`Stop hook error: queued message from dev-2: ...`、`Interrupted · What should Claude do instead?`、`fake-claude exited cleanly (exit status: 0)`；hook 清單依序是 `SessionStart source=startup`、`UserPromptSubmit ...`、`Stop stop_hook_active=false`、`Stop stop_hook_active=true`、`UserPromptSubmit prompt="long task"`（Esc 之後**沒有** Stop）。
    - `== fake daemon (client protocol v1) ==`：attempt 1 的 `done` 得到 `"code":"stale_result"`，attempt 2 得到 `"result":"accepted"`。
    - 最後兩行：`testkit demo: all fake agents exited cleanly; all contract suites pass` 與 `gate 2 (testkit): checks passed`。
@@ -148,6 +148,8 @@
 
 owner 睡著時由實作者決定、可以反悔的事。每項：決定 · 理由 · 反悔的成本 · 追認結果。使用者 2026-09-25 追認 A1–A6、A9–A21、A24、A25；A7、A8 不追認，A22 採納提案，A23 現在釘（最後一欄）。
 
+使用者 2026-09-25 確認維持 D16：claude 忙碌時由 driver 自己排隊（Stop hook），假 claude 維持最壞情況（A6；錄製時看到真 claude 會把忙碌時的 channel 訊息排隊照做，見 [RECORDER.md](../../crates/agend-testkit/RECORDER.md#發現的差異與處理2026-09-25-錄製)）。
+
 | # | 決定 | 理由 | 反悔成本 | 追認結果 |
 |---|---|---|---|---|
 | A1 | 契約 suite 寫成「case 清單 + fixture trait」，由 `block_on` 在呼叫端執行緒驅動；需要 tokio 的真實作在 fixture 裡進 runtime | 不讓 testkit 依賴 async runtime；同一份 case 可跑假與真 | 改成 async case：改 `contract.rs` 與 7 個 suite 的呼叫方式 | 使用者已追認 2026-09-25 |
@@ -156,8 +158,8 @@ owner 睡著時由實作者決定、可以反悔的事。每項：決定 · 理�
 | A4 | 假 daemon 除 `stale_result` 外的錯誤碼（`hello_required`、`version_mismatch`、`invalid_request`、`unknown_request`、`unknown_ask`）是假 daemon 自己定的常數 | core 目前只定了 `STALE_RESULT`；第 8 施工關定案時要搬進 `agend_core::protocol::client` 並讓假 daemon 改用 | 改常數名：假 daemon 與它的測試 | 使用者已追認 2026-09-25 |
 | A5 | 假 agent 以「stdin 結束」為正常結束訊號（exit 0），codex 假 server 收掉 socket 與 symlink | 測試與 demo 不必送 signal；holder 裡 stdin 是 PTY，不會意外結束 | 改成 SIGTERM：三個 `main` | 使用者已追認 2026-09-25 |
 | A6 | 假 codex 的 approval 由 prompt 前綴 `run: ` 觸發；假 claude 在忙碌時收到的 channel 訊息一律不處理（spike C1 的最壞情況） | 需要可重現的觸發點；最壞情況逼 driver 走 Stop hook 排隊（D16） | 改觸發方式：各自模組內 | 使用者已追認 2026-09-25 |
-| A7 | 假 agent 欄位只放 spike 紀錄與上表列的最少集合，未用真 schema 逐欄比對；各模組開頭列出涵蓋與未涵蓋 | spike 沒有保存 schema dump；第 7、12 施工關接真 backend 時再比對 | 補欄位：加法，不破壞既有測試 | 不追認：改為現在用真 CLI 錄音逐欄比對（另一個 PR：backend recorder） |
-| A8 | `git_fixture` 不做（只留說明），假 daemon 與假 agent 只支援 unix；本頁狀態寫「實作中」而不是「驗收中」 | 不在本施工關範圍；CI 只有 ubuntu／macOS；比照第 1 施工關，verifier 前仍是實作中 | 第 3 施工關需要時加 git fixture | 不追認：git_fixture 現在做（本 PR） |
+| A7 | 假 agent 欄位只放 spike 紀錄與上表列的最少集合，未用真 schema 逐欄比對；各模組開頭列出涵蓋與未涵蓋 | spike 沒有保存 schema dump；第 7、12 施工關接真 backend 時再比對 | 補欄位：加法，不破壞既有測試 | 不追認：改為現在用真 CLI 錄音逐欄比對。已在 #114（backend recorder）完成：錄製檔 `transcripts/`、一致性檢查 `tests/conformance.rs`，見 [RECORDER.md](../../crates/agend-testkit/RECORDER.md) |
+| A8 | `git_fixture` 不做（只留說明），假 daemon 與假 agent 只支援 unix；本頁狀態寫「實作中」而不是「驗收中」 | 不在本施工關範圍；CI 只有 ubuntu／macOS；比照第 1 施工關，verifier 前仍是實作中 | 第 3 施工關需要時加 git fixture | 不追認：git_fixture 現在做（#113） |
 | A9 | `ForgeFixture` 多一個 `base_head()`：契約從 trait 外面讀 base branch 的 head，確認 merge 讓 base 移到 merge commit、head 不對時 base 不動 | 只看 work branch 的 head 抓不到「回報 `HeadChanged` 卻已經 merge」（verifier r1 HIGH）；trait 本身沒有讀 base 的方法 | 改成別的觀察方式（例如列出 merge 紀錄）：改 `contract/forge.rs` 與各 fixture | 使用者已追認 2026-09-25 |
 | A10 | Runner 逾時 case：`sleep 3; touch timed-out-command-finished` 以 200 ms 逾時，要在 2 秒內回報，約 4.5 秒時標記檔不能存在（用標記檔判斷指令被停掉，不送 signal 探測） | 餘裕大（2 秒是逾時的 10 倍）不易 flake；代價是每跑一次 Runner suite 多約 4.5 秒（加上 A17 共約 9 秒） | 調常數：`contract/runner.rs` 開頭 | 使用者已追認 2026-09-25 |
 | A11 | 假 claude 的 transcript 寫在專案內 `.claude/fake-transcripts/`；假 daemon 在 hello 之前收到無效 JSON 也回 `hello_required` 並關閉（照 README） | 測試的暫存專案 drop 時一起刪掉，不再共用 `<tmp>/fake-claude/`；文件與程式一致 | 改路徑或改回 `invalid_request`：各一處 | 使用者已追認 2026-09-25 |
@@ -171,8 +173,8 @@ owner 睡著時由實作者決定、可以反悔的事。每項：決定 · 理�
 | A19 | `tests/contract_teeth/real_runner.rs`：測試裡的真 `sh` runner（`process_group(0)`，逾時只 `kill -s KILL -- -<子程序 pid>`），全部正確時通過整個 Runner 契約，也當 RUN-4／8／9 的 mutant 底座；不放進 library | 證明新規則真實作做得到；runner 實作屬第 10 施工關，testkit 不放 production 邏輯 | 第 10 施工關的真 runner 接上後，可改用它的旋鈕版本 | 使用者已追認 2026-09-25 |
 | A20 | daemon 重啟寫成 fixture hook：`RuntimeFixture::restart`、`DriverFixture::restart`、`StoreFixture::reopen`，都是 `fn(&self) -> Self`（在同一份持久狀態上建新的 trait 物件）；case 先 drop 舊的再建新的。新規則 RTM-8、RTM-9、STO-12，DRV-6 多一個重啟 case。假實作把「活過重啟」的狀態（holder 表、backend 事件、store 資料）放在共用的 `Arc` 裡，`calls()` 每個物件各自一份 | verifier r3 M1（HIGH）、M3、M4：D3 的「重啟不斷線」原本只在同一個物件裡驗，`DaemonScoped` 能通過；`&self` 讓 case 可以依序建多個 daemon、明確 drop 舊的 | 改成別的形狀（例如 factory）：三個 fixture trait、三個假實作的 hook、6 個 case | 使用者已追認 2026-09-25 |
 | A21 | 新增 DRV-9：同一個訊息 id 送第二次，`deliver` 不是錯誤，也不多一個 turn；去重放在 driver（`FakeDriver` 改成照 id 去重）。case 等滿 `turn_timeout` 看有沒有第二個 `TurnCompleted`，所以 `FakeDriverFixture::turn_timeout` 設 200 ms（假 driver 在 `deliver` 裡就完成 turn） | verifier r3 M2；delivery.md「以 id 冪等，只有一套去重」。「第二次不是錯誤」是冪等的一般意思，文件沒逐字寫。真 driver 在第 7 施工關每跑一次多等一個 `turn_timeout` | 去重改放 daemon：刪 DRV-9、`FakeDriver` 的 `delivered` 集合，「不釘」寫「去重在 daemon」 | 使用者已追認 2026-09-25 |
-| A22 | FRG-3 改寫：change id 可以是空字串（forge local 沒有 change id），兩個不同 branch 的 change 都有 id 時 id 不同；mutant `SubmitWithoutId` 改成必須通過的測試 `forge_without_change_ids_passes`，新 mutant `SameIdForEveryChange`。**提案（未做）**：`agend_core::traits::SubmittedChange.id` 改成 `Option<String>`，讓「沒有 change id」在型別上看得到，和 `PipelineEvent::Submitted { change_id: Option<_> }` 一致 | verifier r3 F1：舊規則逼 local forge 生出一個 id，和 GLOSSARY、pipeline.md、`state.rs` 可完成證明相反。core 型別不在本輪範圍，所以先用空字串 | 採納提案：改 core 型別、`FakeForge`、FRG-3 的 case 與 mutant（約 20 行） | 採納提案（本 PR） |
-| A23 | 「merge 落在目前的 base 上、不弄丟之前的 merge」只寫成 CONTRACTS.md Forge 段的「建議，未釘」 | 文件只有 CAS `update-ref` 機制、沒有逐字規則；`ForgeFixture` 看不到 ancestry | 要釘：加一個讀 base 歷史的 fixture 方法、一條規則、一個 mutant | 現在釘（本 PR） |
+| A22 | FRG-3 改寫：change id 可以是空字串（forge local 沒有 change id），兩個不同 branch 的 change 都有 id 時 id 不同；mutant `SubmitWithoutId` 改成必須通過的測試 `forge_without_change_ids_passes`，新 mutant `SameIdForEveryChange`。**提案（未做）**：`agend_core::traits::SubmittedChange.id` 改成 `Option<String>`，讓「沒有 change id」在型別上看得到，和 `PipelineEvent::Submitted { change_id: Option<_> }` 一致 | verifier r3 F1：舊規則逼 local forge 生出一個 id，和 GLOSSARY、pipeline.md、`state.rs` 可完成證明相反。core 型別不在本輪範圍，所以先用空字串 | 採納提案：改 core 型別、`FakeForge`、FRG-3 的 case 與 mutant（約 20 行） | 採納提案（#113） |
+| A23 | 「merge 落在目前的 base 上、不弄丟之前的 merge」只寫成 CONTRACTS.md Forge 段的「建議，未釘」 | 文件只有 CAS `update-ref` 機制、沒有逐字規則；`ForgeFixture` 看不到 ancestry | 要釘：加一個讀 base 歷史的 fixture 方法、一條規則、一個 mutant | 現在釘（#113） |
 | A25 | fixture 改成從持久狀態開機：`RuntimeFixture`、`DriverFixture`、`StoreFixture` 的 `restart`／`reopen` 換成 `type Persisted` + `persisted(&self)` + `boot(&Persisted) -> Self`；`RuntimeFixture::is_running` 與 `DriverFixture::emit_while_down` 只拿 `Persisted`；`Case::check` 拿 fixture by value，重啟類 case 先把它轉成持久狀態再 drop。生命週期變成 4 次開機：做事 → 閒置（只復原）→ 做事 → 檢查，兩次開機之間沒有實例活著、確認 holder 還在跑。DRV-9 每次做事的開機送兩個 id，之後重送全部（舊的先）；DRV-6 重啟後也從每個較舊的 cursor 補回。假實作多三個持久狀態型別：`FakeHolders`、`FakeBackend`、`FakeStoreFile`。verifier r5 的七個實作註冊成 mutant，另加 `FrozenRegistry`、`FrozenDatabase`（重啟後寫的沒存下來，讓開機 4 有牙齒）；共 80 個 mutant。CONTRACTS.md 與第 5、6 施工關頁面加一條：重啟／持久化類的契約 case 要對真實作、跨真的 process 重啟跑（分開的 process、真的檔案／DB） | verifier r5：每次開機都做事，打開時清空、只在變動時寫回的實作（`RewriteOnChange`、`TruncOnOpen`）能通過；case 自己的 fixture 活過整個生命週期，只要還有一個實例活著就不丟資料的實作（`SharedMem`、`LiveJournal`、`LastOneOut`）能通過；DRV-9 只用一個 id、DRV-6 只從最新的 cursor 補回（`LastIdDedup`、`ReadAck`）。同一個 process 裡的契約分不出「真的存下來」與「藏在 process 裡」，所以更嚴的持久化檢查放到有真檔案、真 DB、真 process 的第 5、6 施工關。代價：DRV-9 真 driver 每跑一次等 3 次 `turn_timeout`（預設各 10 秒）；DRV-6 真 driver 多一些 `events` 讀取 | 回到 `fn(&self) -> Self`：三個 fixture trait、三個假實作、case 的 `check` 型別；拿掉閒置開機：`contract.rs` 的 `LIFECYCLE` 一行（`RewriteOnChange`、`TruncOnOpen` 會通過） | 使用者已追認 2026-09-25 |
 | A24 | 重啟類規則（DRV-6、DRV-9、STO-4、STO-12、RTM-8、RTM-9）改走同一個 daemon 生命週期 `contract::daemon_lifecycle`：3 次開機，每次先做開機復原（`recover_holders`；從上一個 daemon 最後的 cursor 補回事件；打開 store）、檢查不變量、再做事，兩次開機之間 backend 照常動。`DriverFixture` 多一個必須實作的 `emit_while_down`（daemon 不在時 agent 自己跑完一輪，不經過 driver）；STO-4 多一個跨重新開啟的 case。CONTRACTS.md 寫明 fixture 要求：真實作的重啟要走真的持久層（DB 檔、run 目錄與 socket），不用 process 內的全域 `static` | verifier r4：r3 的重啟 case 只重啟一次、兩次開機之間沒事發生，狀態只在 Rust 物件裡（`CounterStore`、`ObjDedup`）、第一次讀就消耗（`Handoff`）、丟掉斷線期間的事件（`Gap`）的實作都能通過。一個共用 helper 讓每條重啟類規則得到同樣的處理，之後加規則不會再漏。代價：DRV-9 case 要等 3 次 `turn_timeout`（真 driver 預設 10 秒，每跑一次約 30 秒） | 改開機次數：`contract.rs` 的 `BOOTS`；拿掉 `emit_while_down`：一個 fixture 方法、DRV-6 case 的一段檢查、`Gap` mutant | 使用者已追認 2026-09-25 |
 
@@ -188,7 +190,8 @@ owner 睡著時由實作者決定、可以反悔的事。每項：決定 · 理�
 
 日期 + 一行 + commit／PR，新的在上面。
 
-- 2026-09-25 「待你追認」記下使用者的決定：A1–A6、A9–A21、A24、A25 追認；A7、A8 不追認；A22 採納、A23 現在釘。後續：`agend_testkit::git_fixture`（A8）；`SubmittedChange.id` 改成 `Option<String>`，FRG-3 多 mutant `EmptyIdInsteadOfNone`（A22）；新規則 FRG-10「merge 落在目前的 base 上、不弄丟之前的 merge」，fixture 方法 `ForgeFixture::base_contains`，mutant `OverwritesBase`（A23）；共 57 條規則、82 個 mutant；步驟 2、4 的 Forge 數字改成 11 個 case（`feat/gate-02-followups`，draft PR）。
+- 2026-09-25 錄製器 + 真 CLI 一致性檢查（使用者決定，A7 未追認）：`agend-record`／`cargo xtask record` 在寫入沙箱裡錄下 claude 2.1.282、codex 0.156.1、opencode 1.18.31 各 5 個情境（`transcripts/`），`tests/conformance.rs` 按形狀比對假 agent；假 agent 照錄製檔補齊（差異與處理見 [RECORDER.md](../../crates/agend-testkit/RECORDER.md#發現的差異與處理2026-09-25-錄製)）；假 claude 忙碌時不處理 channel 訊息仍保留（A6），真 claude 會排隊照做；使用者 2026-09-25 確認維持 D16：claude 忙碌時由 driver 自己排隊（Stop hook），假 claude 維持最壞情況；上面第 1 步 demo 的行數跟著改；merge #113 之後重跑步驟 1、2、4、5（`feat/backend-recorder`，draft PR #114）。
+- 2026-09-25 「待你追認」記下使用者的決定：A1–A6、A9–A21、A24、A25 追認；A7、A8 不追認；A22 採納、A23 現在釘。後續：`agend_testkit::git_fixture`（A8）；`SubmittedChange.id` 改成 `Option<String>`，FRG-3 多 mutant `EmptyIdInsteadOfNone`（A22）；新規則 FRG-10「merge 落在目前的 base 上、不弄丟之前的 merge」，fixture 方法 `ForgeFixture::base_contains`，mutant `OverwritesBase`（A23）；共 57 條規則、82 個 mutant；步驟 2、4 的 Forge 數字改成 11 個 case（#113，merge 為 `f8108f5`）。
 - 2026-09-25 使用者親自驗收步驟 1–5 通過，狀態改為完成；步驟 3 的 curl 改成先存變數，避免複製時截斷。
 - 2026-09-25 verifier r6 CONFIRMED（`00fbf45`）；#108 squash merge 為 `6d7b540`；狀態改為驗收中。
 - 2026-09-25 修 verifier r5（REFUTED @ 6d471e8，owner 核准的最後一輪）：生命週期多一次閒置開機（做事 → 閒置 → 做事 → 檢查），fixture 改成從持久狀態開機（`Persisted` + `boot`），case 自己的 fixture 在第一次開機前就 drop，daemon 不在時的 backend 動作只經過持久狀態；DRV-9 重啟前送兩個 id、重啟後先重送舊的，DRV-6 重啟後也從較舊的 cursor 補回；r5 的 `RewriteOnChange`、`TruncOnOpen`、`LastIdDedup`、`ReadAck`、`SharedMem`、`LiveJournal`、`LastOneOut` 與新的 `FrozenRegistry`、`FrozenDatabase` 註冊為 mutant（共 56 條規則、80 個 mutant）；helper mutation H1–H8（H6、H8 改成讀 case 的 fixture 就編譯不過）與新的 H9–H13 全部抓到；CONTRACTS.md、第 5、6 施工關頁面加「重啟／持久化 case 跨真的 process 重啟跑」（待你追認）（`feat/gate-02-testkit`，draft PR #108）。

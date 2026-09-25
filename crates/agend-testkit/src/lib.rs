@@ -10,6 +10,9 @@
 //! - `fake_agent`: the fake backend programs (`fake-codex-app-server`,
 //!   `fake-opencode-serve`, `fake-claude`); the binaries in `src/bin/` are
 //!   thin wrappers around these modules.
+//! - `recorder`: drives the real backend CLIs (and the fakes) through fixed
+//!   scenarios and records transcripts; the conformance test compares the
+//!   fakes to the recordings by shape.
 //!
 //! Must NOT: be a normal dependency of any crate, or contain production logic.
 
@@ -21,6 +24,8 @@ pub mod fake_agent;
 pub mod fake_daemon;
 pub mod fakes;
 pub mod git_fixture;
+#[cfg(unix)]
+pub mod recorder;
 pub mod tempdir;
 
 pub use executor::block_on;

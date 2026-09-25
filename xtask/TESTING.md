@@ -40,6 +40,7 @@ cargo test -p xtask
 
 - [ ] 無 std 編譯本身沒有自動化反例測試。已在 repo 外的暫存副本手動驗證，以下全部讓 `check-deps` 失敗：`#[macro_use] extern crate std`、`pub extern crate std`、`[lib] path` 改指到用 std 的檔案、path 依賴 re-export `std::fs::read`、`unsafe extern "C" { fn getpid() }`（含刪掉 `#![forbid(unsafe_code)]` 之後）、build.rs 輸出 `cargo:rustc-cfg=test`、由其他 crate 啟用的選用 `std` feature。
 - [ ] `accept core` 對 cargo 子程序的失敗傳遞需以故障注入方式測；目前由驗收命令實際執行完整成功路徑。
+- [ ] `record` 會跑真的 CLI、花 token，不在自動測試裡；只在 CLI 升版時手動跑（錄製器的情境程式由 agend-testkit 的 `tests/conformance.rs` 對假 agent 跑）。
 
 ## 下一步
 
