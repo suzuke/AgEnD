@@ -294,3 +294,97 @@ fn a_directory_missing_from_the_worktree_is_refused() {
     let out = try_git(&l.f.worktree, &["status", "--porcelain"]);
     assert!(out.status.success());
 }
+
+/// Round 10: a `-C` (or `--git-dir` / `--work-tree` / `GIT_DIR` /
+/// `GIT_WORK_TREE`) where git finds no repo made git fail, but the shim
+/// used to drop it and run the write on the whole bound worktree: a typo
+/// like `git -C src/sbu checkout .` reverted every file. Every destructive
+/// command, from the worktree, a subdirectory, canonical and the
+/// workspace, is now refused before git runs, and nothing changes.
+#[test]
+fn a_named_target_without_a_repo_is_refused_not_widened() {
+    let l = lab("scope-typo");
+    let wt = &l.f.worktree;
+    let cmds: [&[&str]; 5] = [
+        &["reset", "--hard"],
+        &["checkout", "."],
+        &["restore", "."],
+        &["clean", "-fd"],
+        &["rm", "-r", "-f", "."],
+    ];
+    let cwds = [
+        wt.clone(),
+        wt.join("src"),
+        l.f.repo.clone(),
+        l.f.workspace.clone(),
+    ];
+    let not_repo = l.f.workspace.to_str().unwrap();
+    let mut cases: Vec<(PathBuf, Vec<&str>, &str)> = Vec::new();
+    for at in &cwds {
+        for cmd in cmds {
+            let typo = [&["-C", "typo"][..], cmd].concat();
+            cases.push((at.clone(), typo, "cannot change to"));
+        }
+    }
+    cases.push((
+        wt.clone(),
+        vec!["-C", "src/sbu", "checkout", "."],
+        "cannot change to",
+    ));
+    for extra in [
+        &["-C", not_repo, "reset", "--hard"][..],
+        &["--git-dir=typo", "reset", "--hard"][..],
+        &["--work-tree", "typo", "checkout", "."][..],
+    ] {
+        cases.push((wt.clone(), extra.to_vec(), "not a git repository"));
+    }
+    // `mod` exists only in the bound worktree: from canonical, git fails.
+    std::fs::create_dir_all(wt.join("mod")).unwrap();
+    cases.push((
+        l.f.repo.clone(),
+        vec!["-C", "mod", "reset", "--hard"],
+        "cannot change to",
+    ));
+    for (at, cmd, meaning) in &cases {
+        let ran = gitshim(&l.f.ctx(at), cmd);
+        let text = ran.text();
+        assert_eq!(ran.refused, Some("no_repo_there"), "{at:?} {cmd:?}: {text}");
+        assert!(text.contains(meaning), "{cmd:?}: {text}");
+        assert!(
+            text.contains(&format!("cd {}", wt.display())),
+            "{cmd:?}: {text}"
+        );
+        assert_eq!(
+            read(&wt.join("src/sub/f.txt")).as_deref(),
+            Some("s\nunsaved-sub-edit\n"),
+            "{at:?} {cmd:?}"
+        );
+        assert!(wt.join("src/sub/tmp.txt").exists(), "{at:?} {cmd:?}");
+        assert_root_untouched(&l, &format!("{at:?} {cmd:?}"));
+        assert_others_untouched(&l, &format!("{at:?} {cmd:?}"));
+    }
+    assert!(snapshots(&l.f).is_empty());
+    // `GIT_DIR` / `GIT_WORK_TREE` naming no repo: refused the same way.
+    for (dir, work_tree) in [(Some("typo"), None), (None, Some("typo"))] {
+        let mut ctx = l.f.ctx(wt);
+        ctx.git_dir = dir.map(Into::into);
+        ctx.git_work_tree = work_tree.map(Into::into);
+        let ran = gitshim(&ctx, &["reset", "--hard"]);
+        assert_eq!(ran.refused, Some("no_repo_there"), "{}", ran.text());
+    }
+    assert_root_untouched(&l, "GIT_*");
+    // A read runs as typed: git reports the typo itself.
+    let ran = gitshim(&l.f.ctx(wt), &["-C", "typo", "log", "-1"]);
+    let out = ran.output.as_ref().expect("a read runs");
+    assert!(!out.status.success());
+    assert!(ran.text().contains("cannot change to"), "{}", ran.text());
+    // The documented case stays: a plain call from the workspace routes to
+    // the worktree's top.
+    let ran = gitshim(&l.f.ctx(&l.f.workspace), &["checkout", "."]);
+    ran.ok();
+    assert_eq!(
+        read(&wt.join("README.md")).as_deref(),
+        Some("hello\n"),
+        "plain call from the workspace"
+    );
+}

@@ -261,6 +261,34 @@ fn bound_writes_route_into_the_worktree() {
     );
 }
 
+/// Round 10: git found no repo where the caller pointed it (`-C typo`,
+/// `--git-dir`, `--work-tree`, `GIT_*`): a write is refused, never routed
+/// (widened) to the whole worktree; a read runs as typed and git reports it.
+#[test]
+fn a_named_target_without_a_repo_is_never_routed() {
+    let s = work();
+    for (globals, write) in [
+        ("-C typo", "reset --hard"),
+        ("-C src/sbu", "checkout ."),
+        ("--git-dir=typo", "restore ."),
+        ("--work-tree typo", "clean -fd"),
+        ("--bare", "rm -r -f ."),
+    ] {
+        let cmd = format!("{globals} {write}");
+        let d = decide_at(Ok(&s), Location::NoRepo, &cmd);
+        assert_eq!(code(&d), "no_repo_there", "{cmd}");
+        let read = format!("{globals} log");
+        assert_eq!(decide_at(Ok(&s), Location::NoRepo, &read), PASS, "{read}");
+    }
+    let env = GitEnv {
+        retargets: true,
+        ..GitEnv::default()
+    };
+    let at = |cmd| run_with(Ok(&s), Location::NoRepo, &env, &Fake::default(), cmd);
+    assert_eq!(code(&at("reset --hard")), "no_repo_there");
+    assert_eq!(at("log"), PASS);
+}
+
 /// Round 5, finding 1: routing keeps the caller's directory inside its
 /// checkout (git's `--show-prefix`), so `git rm -rf .` from
 /// `<canonical>/src/sub` acts on `<worktree>/src/sub`, never the whole
@@ -1053,7 +1081,9 @@ fn routed_writes_do_not_drop_a_named_git_dir() {
             "{cmd}"
         );
     }
-    for loc in [Location::Canonical, Location::NoRepo] {
+    // `NoRepo` with a named target is refused, never routed (round 10):
+    // `a_named_target_without_a_repo_is_never_routed`.
+    for loc in [Location::Canonical] {
         for cmd in [
             "--git-dir=/repo/.git commit -m x",
             "--work-tree=/repo clean -fd",

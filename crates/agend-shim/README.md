@@ -71,8 +71,8 @@ daemon 在綁定 worktree 時呼叫 `install_hooks`、釋放時呼叫 `uninstall
 4. 外部 repo → 放行，除非是 team 的本機 remote 或 team repo 的 clone（寫入拒絕），或 push 目的地是 team repo；綁定 worktree 裡的巢狀 repo 的破壞性操作先在那個 repo 快照
 5. 設 `core.hooksPath` 或 `push --no-verify` → 拒絕
 6. `worktree`（`list` 除外）、不認得的子命令 → 拒絕
-7. 讀取 → 綁定且在 workspace 或 canonical checkout 就導向，否則原地放行
-8. 寫入 → 要有效快照與綁定；在綁定的 worktree 裡：git 回答的 work tree 是它、`GIT_INDEX_FILE` 在它的 git dir 裡；需要導向時：不是從別的 worktree、不在 git dir 裡、沒有 `GIT_*`、沒有 `--git-dir`／`--work-tree`、同一個子目錄在 worktree 裡存在；worktree 有 hook；`checkout`／`switch` 不離開綁定的 branch；不是 `branch` 複製或改名、`symbolic-ref` 寫入、`reflog delete|expire`、`stash` 寫入、autostash、`clean -x|-X|-ff`、recurse 進 submodule、`submodule foreach`；破壞性操作先快照
+7. 讀取 → 綁定且在 canonical checkout，或在 workspace 而沒帶 `-C`／`--git-dir`／`--work-tree`／`GIT_*`，就導向；否則原地放行（`-C` 打錯字由 git 自己報錯）
+8. 寫入 → 要有效快照與綁定；在綁定的 worktree 裡：git 回答的 work tree 是它、`GIT_INDEX_FILE` 在它的 git dir 裡；呼叫者用 `-C`／`--git-dir`／`--work-tree`／`GIT_*` 指定的地方 git 找不到 repo 時拒絕（`no_repo_there`，不改成在整個 worktree 跑）；需要導向時：不是從別的 worktree、不在 git dir 裡、沒有 `GIT_*`、沒有 `--git-dir`／`--work-tree`、同一個子目錄在 worktree 裡存在而且不是 submodule／巢狀 repo；worktree 有 hook；`checkout`／`switch` 不離開綁定的 branch；不是 `branch` 複製或改名、`symbolic-ref` 寫入、`reflog delete|expire`、`stash` 寫入、autostash、`clean -x|-X|-ff`、recurse 進 submodule、`submodule foreach`；破壞性操作先快照
 9. 導向 = 真 git 加 `-C <worktree>/<prefix>`、拿掉呼叫者的 `-C`／`--git-dir`／`--work-tree`；之後 ref 的變更由 hook 檢查
 
 ## 模組

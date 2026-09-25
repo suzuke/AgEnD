@@ -230,6 +230,23 @@ fn write(input: &Input, sub: &str, rest: &[String]) -> Decision {
             "run `agend status`; the daemon re-creates or re-assigns the worktree",
         ));
     }
+    let named_target = !input.args.retarget_indexes.is_empty() || input.env.retargets;
+    if input.location == Location::NoRepo && named_target {
+        let what = match input.dir.is_dir() {
+            true => "not a git repository".to_string(),
+            false => format!("cannot change to '{}'", input.dir.display()),
+        };
+        return refuse(Refusal::new(
+            "no_repo_there",
+            format!(
+                "git would fail ({what}) where you pointed it with -C, --git-dir, --work-tree, GIT_DIR or GIT_WORK_TREE, so the shim will not run `git {sub}` in your bound worktree instead"
+            ),
+            format!(
+                "fix the path, or cd {} and run it without them",
+                wt.display()
+            ),
+        ));
+    }
     let named = input.args.git_dir.is_some() || input.args.work_tree.is_some();
     let no_work_tree = input.resolved.is_some_and(|r| r.work_tree.is_none());
     if input.location != Location::Worktree && no_work_tree && !named {
@@ -301,15 +318,16 @@ fn write(input: &Input, sub: &str, rest: &[String]) -> Decision {
     }
 }
 
-/// Read-only commands: run in the bound worktree when the caller is in the
-/// workspace (no repo) or the canonical checkout, else as is. In another
-/// worktree a read runs where it was typed: it shows that worktree, which
+/// Read-only commands: run in the bound worktree from the canonical checkout
+/// or, by a plain call, the workspace (no repo); else as typed (git reports a
+/// `-C` typo itself). In another worktree a read shows that worktree, which
 /// is what the agent asked for, and routing it would be a surprise.
 fn route_read(input: &Input, binding: Option<&Binding>) -> Decision {
     let Some(binding) = binding else {
         return PASS;
     };
-    let outside = matches!(input.location, Location::Canonical | Location::NoRepo);
+    let outside = input.location == Location::Canonical
+        || (input.location == Location::NoRepo && input.args.retarget_indexes.is_empty());
     if !outside || input.env.retargets || !binding.worktree().is_dir() {
         return PASS;
     }
@@ -329,23 +347,24 @@ fn route_read(input: &Input, binding: Option<&Binding>) -> Decision {
 /// Where a call from outside the bound worktree runs: the same directory
 /// inside the bound worktree as the caller's inside its checkout (git's
 /// `--show-prefix`), so `.` and other relative pathspecs keep their scope.
-/// From the workspace (no repo) that is the worktree's top.
+/// A plain call from the workspace (no repo) runs at the worktree's top.
 ///
 /// Refused instead of routed: a call from another worktree of the team
 /// repo (the agent is in the wrong directory; acting on its own worktree
 /// would surprise it), and a directory the bound worktree does not have.
 fn route_dir(sub: &str, input: &Input, binding: &Binding) -> Result<PathBuf, Refusal> {
     let wt = binding.worktree();
-    let prefix = input
-        .resolved
-        .filter(|_| input.location != Location::NoRepo)
-        .map_or(Path::new(""), |r| r.prefix.as_path());
+    let prefix = input.resolved.map_or(Path::new(""), |r| r.prefix.as_path());
     // Joined by component: `Path::join("")` would add a trailing slash.
     let target = prefix.components().fold(wt.to_path_buf(), |p, c| p.join(c));
     let target_ok = prefix
         .components()
         .all(|c| matches!(c, std::path::Component::Normal(_)))
         && target.is_dir()
+        && !target
+            .ancestors()
+            .take_while(|a| *a != wt)
+            .any(|a| a.join(".git").exists())
         && match (std::fs::canonicalize(&target), std::fs::canonicalize(wt)) {
             (Ok(t), Ok(w)) => t.starts_with(w),
             _ => false,
@@ -370,7 +389,7 @@ fn route_dir(sub: &str, input: &Input, binding: &Binding) -> Result<PathBuf, Ref
     Err(Refusal::new(
         "route_dir_missing",
         format!(
-            "you ran `git {sub}` in {}, outside your bound worktree; the same directory ({}) does not exist in your bound worktree {}, so the shim will not run it there (relative paths would mean something else)",
+            "you ran `git {sub}` in {}, outside your bound worktree; the same directory ({}) does not exist in your bound worktree {} (or is a submodule or nested repo there), so the shim will not run it there (relative paths would mean something else)",
             input.dir.display(),
             prefix.display(),
             wt.display()

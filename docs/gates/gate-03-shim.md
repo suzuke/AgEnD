@@ -33,7 +33,7 @@
   - 每個 hook 檢查完接著跑專案的同名 hook（同參數、同 stdin），專案 hook 照常跑；hook 目錄在 hook 執行時才查（共用 config 的 `core.hooksPath`，否則 `<common dir>/hooks`），綁定之後才設的（例如 husky）也串接
   - `install_hooks`／`uninstall_hooks`：`extensions.worktreeConfig`，只寫該 agent worktree 的 `config.worktree`（`core.hooksPath`、`gc.packRefs=false`）；canonical checkout、別的 checkout、`~/.gitconfig` 不動
 - git shim：hook 看不到的
-  - 導向：綁定時從 workspace、canonical checkout 跑的 git 改在綁定的 worktree 跑，保留子目錄；別的 worktree 裡的寫入、worktree 沒有的目錄、git dir 裡的寫入拒絕；位置問真的 git（`rev-parse`，T20）
+  - 導向：綁定時從 canonical checkout、或從 workspace 不帶 `-C`／`--git-dir`／`--work-tree`／`GIT_DIR`／`GIT_WORK_TREE` 跑的 git 改在綁定的 worktree 跑，保留子目錄；別的 worktree 裡的寫入、worktree 沒有的目錄（或在 worktree 裡是 submodule／巢狀 repo）、git dir 裡的寫入拒絕；呼叫者指定的地方 git 找不到 repo 時（`-C` 打錯字）寫入拒絕，絕不改成在整個 worktree 跑（第 10 輪）；位置問真的 git（`rev-parse`，T20）
   - 寫入只作用在綁定的 worktree：work tree、`GIT_INDEX_FILE` 要是它的；需要導向的寫入帶 `--git-dir`／`--work-tree`／`GIT_*` 就拒絕（T13）
   - 離開綁定的 branch：`checkout`／`switch` 到別的 branch、detach（含 `checkout refs/heads/<自己的 branch>`：寫完整 ref 名稱 git 會 detach）、`-b`／`-c`／`--orphan`（git 2.39 不把 HEAD 換 branch 告訴 hook）；`git worktree`（`list` 除外）；不認得的子命令（alias）
   - `branch -c/-C/-m/-M`（`--copy`／`--move`，含縮寫與 `-fm` 這類組合）一律拒絕，自己命名空間裡的也一樣：git 2.39 寫新名稱不經 ref transaction，hook 看不到；下一步給 `git branch <新> <舊>`（經 hook）再 `git branch -D <舊>`
@@ -58,7 +58,7 @@ TMPDIR=$(mktemp -d) ~/.cargo/bin/cargo test --workspace   # 不靠暫存目錄�
 ~/.cargo/bin/cargo xtask accept shim
 ```
 
-- [x] `cargo test -p agend-shim`：`53 passed`（unit）；`cargo test -p agend`：`4`（argv0）+ `18`（`shim_bypass_corpus`）+ `2`（`shim_everyday`）+ `14`（`shim_git`）+ `8`（`shim_hooks`）+ `6`（`shim_location_matrix`）+ `2`（`shim_push_hook`）+ `7`（`shim_route_scope`）+ `4`（`shim_submodule`）passed；`TMPDIR` 設成新的空目錄時一樣全過
+- [x] `cargo test -p agend-shim`：`54 passed`（unit）；`cargo test -p agend`：`4`（argv0）+ `18`（`shim_bypass_corpus`）+ `2`（`shim_everyday`）+ `14`（`shim_git`）+ `8`（`shim_hooks`）+ `6`（`shim_location_matrix`）+ `2`（`shim_push_hook`）+ `8`（`shim_route_scope`）+ `5`（`shim_submodule`）passed；`TMPDIR` 設成新的空目錄時一樣全過
 - [x] clippy 乾淨；`check-deps` 最後一行 `check-deps: ok (2 rules, 8 crates checked for agend-testkit, agend-core metadata ok, no-std build ok)`
 - [x] `cargo xtask accept shim` 最後兩行 `shim demo: all checks passed`、`gate 3 (shim): checks passed`
 - [x] 第 1–8 輪的犯錯類案例都是回歸測試，斷言「被 shim 或 hook 拒絕，protected ref 不動」（`crates/agend/tests/shim_bypass_corpus.rs`）；把 hook 的判斷改成永遠放行時 corpus 變紅；第 9 輪的 submodule 與巢狀 repo 在 `crates/agend/tests/shim_submodule.rs`，在舊程式碼上 4 個都紅
@@ -200,7 +200,7 @@ owner 睡覺時我自己做的決定；都可逆。每條打勾＝同意，不�
 - [ ] T3 建 branch：`git branch agend/<自己的 task-id>/<名稱>` 可以；其他名稱由 hook 拒絕。`checkout -b`／`switch -c` 一律由 shim 拒絕（會離開綁定的 branch），自己命名空間的也一樣；`branch -c/-C/-m/-M` 也一律拒絕（第 6 輪：hook 看不到新名稱），改用 `git branch <新> <舊>`。[pipeline.md](../architecture/pipeline.md#worktree-與-branch-生命週期) 寫「擋 `branch <new>`」，兩者有出入，請你決定。
 - [ ] T4 不認得的子命令（git alias、外部 `git-*`）拒絕：擋 `git co main` 這類 alias（git 2.39 看不到 HEAD 換 branch）。`filter-branch`、`fast-import`、`replace` 不再特別拒絕：它們寫的 ref 由 hook 檢查。
 - [ ] T5 team repo 用「目的地」認（沒有 hook 的 repo 由 shim 守）：跟 team 無關的 scratch repo 不管；remote 指向 team remote 或 canonical checkout 的 clone、team 的本機 remote 本身：讀取放行、寫入拒絕（`worktree` 只有 `list` 算讀取）；從任何 repo push 到 team remote 或 canonical 路徑拒絕。比對前套 `insteadOf`、正規化 URL；本機路徑照 git 找 repo 的順序（`/x/origin` = `/x/origin.git`），`file://` 不看主機名。包住 `$AGEND_HOME` 的 repo 不算。
-- [ ] T6 導向：綁定時在 workspace 或 canonical checkout 跑的讀取與寫入都導向 worktree，保留子目錄（`--show-prefix`）；worktree 沒有那個子目錄、或在 canonical 的 `.git` 裡的寫入拒絕；別的 agent 的 worktree 裡寫入拒絕、讀取原地跑。
+- [ ] T6 導向：綁定時在 canonical checkout 跑的讀取與寫入都導向 worktree，保留子目錄（`--show-prefix`）；在 workspace（不在任何 repo）只有**沒帶** `-C`／`--git-dir`／`--work-tree`／`GIT_DIR`／`GIT_WORK_TREE` 的呼叫導向，跑在 worktree 頂層。worktree 沒有那個子目錄、或那個子目錄在 worktree 裡是 submodule／巢狀 repo（另一個 repo），讀取與寫入都拒絕（`route_dir_missing`）；在 canonical 的 `.git` 裡的寫入拒絕；別的 agent 的 worktree 裡寫入拒絕、讀取原地跑。第 10 輪：呼叫者用上面那些指定了地方、git 在那裡找不到 repo（例如 `git -C src/sbu checkout .` 打錯字；真 git 是 `fatal: cannot change to 'src/sbu'`），shim 原本丟掉 `-C`、在整個 worktree 跑；現在寫入拒絕（`no_repo_there`，理由照 git：`cannot change to '<dir>'` 或 `not a git repository`），讀取照打的跑、由 git 自己報錯。
 - [x] T7 push（**使用者已決定 2026-09-25：放行解析到自己 branch 的 push**）：現在由 `pre-push` hook 實作，git 自己解析 `git push`／`git push origin`／`-u origin <branch>`／`push origin HEAD`，hook 看到真正的遠端 ref，是自己 branch 就放行。`--all`、`--mirror`、`--tags`、`--prune` 會列出別的 ref，所以被拒絕；刪除自己的 branch 拒絕；審查 binding 不能 push。
 - [ ] T8 快照：範圍對齊 v1 agentic-git（見[範圍](#範圍)），新增 merge／rebase／pull／cherry-pick／revert／am，拿掉 `read-tree -u`；`stash drop|clear` 拿掉（快照只存 work tree，救不回 stash；stash 寫入改由 T22 拒絕）；每次都做（不只 dirty 時）；含未追蹤、不含 ignored 檔，所以 `clean -x`／`-X` 改成拒絕（第 8 輪：`clean -fdx` 刪掉 `.env`，快照裡沒有）；submodule 與巢狀 repo 只存 gitlink，所以會 recurse 的破壞性操作、`clean -ff`、`submodule foreach` 拒絕，worktree 裡的 submodule／巢狀 repo 改在它自己快照（第 9 輪）；ref `refs/agend/snapshots/<instance>/<id>`，id = `<unix 秒>-<pid>`（同一程序第二次加 `-<n>`）；快照用的 git 不跑 hook；shim 不清舊快照；快照失敗就拒絕該操作。
 - [ ] T9 kill（未改）：`pkill`／`killall` 拒絕；`kill` 只接受 `kill [-SIGNAL | -s SIG | -n NUM | --signal SIG] [--] <pid>...`，pid 去空白後只接受 `1..=2147483647` 且最多 10 位數；`0`、負數、名字、job spec、執行檔是 `agend` 的 pid 拒絕。
@@ -232,7 +232,7 @@ shim 是安全帶，不是安全邊界。照[威脅模型](#威脅模型)，以�
   - 在 submodule 或巢狀 repo **裡面**：它自己的 submodule（第二層）的 recurse、`clean -x|-X`／`-ff`、`stash`、autostash 不擋，那個 repo 是 agent 自己的；它的快照一樣沒有 ignored 檔與下一層 repo 的內容。快照 ref 寫進那個 repo，`push --mirror` 會把它推出去。
   - `-c submodule.recurse=false` 也拒絕（寬鬆比對，同 autostash）；改用 `--no-recurse-submodules`。`merge`／`rebase`／`cherry-pick`／`revert`／`pull` 在 `submodule.recurse` 下不擋：git 不改 submodule 的 work tree（`pull` 遇到有修改的 submodule 時 git 自己中止），實測修改都還在。
   - canonical checkout 裡不是 submodule 的巢狀 repo（自己 clone 進去的）仍當外部 repo，寫入放行。
-- 從 workspace（不在任何 repo）導向時跑在 worktree 頂層：`.` 指 worktree 頂層。
+- 從 workspace（不在任何 repo）沒帶 `-C`／`--git-dir`／`--work-tree`／`GIT_DIR`／`GIT_WORK_TREE` 的呼叫導向時跑在 worktree 頂層：`.` 指 worktree 頂層（真 git 會說 `not a git repository`；破壞性的先快照）。帶了而 git 在那裡找不到 repo 時不導向（T6）。
 - T5 認不出用 ssh `Host` 別名或不同網址指到同一個 team remote 的 clone。
 - receive 端的 hook（`pre-receive`、`update`…）與 `push-to-checkout` 不裝也不串接：沒有人 push 進 agent worktree。
 - `git bisect` 會暫時 detach HEAD，放行；`git bisect reset master`（或別的 protected branch）結束時把 agent 的 worktree 留在 master 上（git 2.39 看不到 HEAD 換 branch）。master 不會動：之後的 commit／reset／merge 由 hook 拒絕，要自己 `git checkout <自己的 branch>` 切回來（第 7 輪發現 5）。
@@ -252,6 +252,8 @@ shim 是安全帶，不是安全邊界。照[威脅模型](#威脅模型)，以�
 ## 進度紀錄
 
 日期 + 一行 + commit／PR，新的在上面。
+
+- 2026-09-25 verifier 第 10 輪修正（draft PR #107）：`-C`／`--git-dir`／`--work-tree`／`GIT_DIR`／`GIT_WORK_TREE` 指到 git 找不到 repo 的地方時（`git -C src/sbu checkout .` 這類打錯字），shim 原本當成「不在 repo」丟掉 `-C`、在整個綁定的 worktree 跑（LOW，T6 原本寫錯）；現在寫入拒絕（`no_repo_there`，照 git 的意思寫 `cannot change to '<dir>'`／`not a git repository`），讀取照打的跑，workspace 導向只留給沒帶這些的呼叫；另外 canonical 裡沒初始化的 submodule（空的 `mod/`）導向時會落進 worktree 裡初始化好的 submodule（另一個 repo，快照只有 gitlink，修改會不見），改為 `route_dir_missing` 拒絕；T6、範圍、已知限制改正；回歸測試 `shim_route_scope.rs`（5 個命令 × worktree／子目錄／canonical／workspace 的 `-C typo`，加 `-C src/sbu`、`-C <不是 repo 的目錄>`、canonical 的 `-C mod`、`--git-dir`、`--work-tree`、`GIT_DIR`、`GIT_WORK_TREE`）與 `shim_submodule.rs` 在舊程式碼上都紅（25 案裡 23 案真的丟了修改；`--git-dir`／`--work-tree` 原本就以 `work_tree_retarget` 拒絕）；production 3,200 → 3,219 行
 
 - 2026-09-25 verifier 第 9 輪修正（draft PR #107）：快照只存 submodule 與巢狀 repo 的 gitlink，範圍與 T8 寫清楚；有 `.gitmodules` 時會 recurse 的破壞性 `reset`／`checkout`／`restore`／`switch` 拒絕（下一步：先在 submodule 裡 commit，或加 `--no-recurse-submodules`）；`submodule foreach` 拒絕（git 用自己的 git 跑，不經 shim）；綁定 worktree 裡的 submodule／巢狀 repo 原本當外部 repo、沒快照，現在破壞性操作前在那個 repo 快照；canonical 與別的 worktree 的 submodule 寫入拒絕；`clean -ff` 拒絕（刪巢狀 repo），與 `clean -x|-X` 共用代碼 `clean_unsnapshotted`；剩下的列入已知限制；回歸測試 `shim_submodule.rs` 在舊程式碼上 4 個都紅；production 3,161 → 3,200 行
 - 2026-09-25 使用者決定 agent 不用 autostash（T23，draft PR #107）：shim 在 git 執行前拒絕 `pull`／`rebase`／`merge` 的 `--autostash`（含縮寫）與 `-c rebase|merge.autoStash`；config 檔設了而沒帶 `--no-autostash` 也拒絕（選拒絕，不改寫 argv）；下一步 `git commit -m "wip: …"`，再帶 `--no-autostash` 重跑；`Probe::rev_parse` 改成通用的唯讀 `Probe::git`；回歸測試在舊程式碼上紅（`pull --rebase --autostash` 有衝突時 branch 被移動、`cannot store`）；production 3,131 → 3,161 行

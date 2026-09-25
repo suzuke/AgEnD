@@ -155,3 +155,44 @@ fn clean_forced_twice_keeps_nested_repos() {
     assert!(!f.worktree.join("junk.txt").exists());
     assert_eq!(git(&lib, &["rev-parse", "HEAD"]), local);
 }
+
+/// Round 10: in canonical the submodule is not initialised (`mod/` is an
+/// empty directory), in the bound worktree it is. Routing from
+/// `<canonical>/mod` kept the prefix and ran git in `<worktree>/mod`, which
+/// is the submodule, another repo, after a worktree snapshot that has it
+/// only as a gitlink: its work was lost. Routing into a nested repo is
+/// refused; the verifier's `-C mod` from canonical, with no `mod/` there
+/// at all, is refused as git would fail (`shim_route_scope.rs`).
+#[test]
+fn routing_from_canonical_never_lands_in_a_submodule() {
+    let f = Fixture::new("sub-route");
+    add_submodule(&f, &f.repo);
+    git(&f.worktree, &["merge", "-q", "--ff-only", "main"]);
+    let init = ["-c", "protocol.file.allow=always", "submodule", "update"];
+    git(&f.worktree, &[&init[..], &["-q", "--init"][..]].concat());
+    git(&f.repo, &["submodule", "deinit", "-q", "-f", "mod"]);
+    assert!(f.repo.join("mod").is_dir(), "empty mod/ in canonical");
+    let m = f.worktree.join("mod");
+    std::fs::write(m.join("s.txt"), "SUBWORK\n").unwrap();
+    for (cwd, cmd) in [
+        (f.repo.clone(), &["-C", "mod", "checkout", "."][..]),
+        (f.repo.clone(), &["-C", "mod", "clean", "-fd"][..]),
+        (f.repo.join("mod"), &["reset", "--hard"][..]),
+        (f.repo.join("mod"), &["restore", "."][..]),
+        (f.repo.join("mod"), &["status"][..]),
+    ] {
+        let ran = gitshim(&f.ctx(&cwd), cmd);
+        assert_eq!(
+            ran.refused,
+            Some("route_dir_missing"),
+            "{cmd:?}: {}",
+            ran.text()
+        );
+        assert!(
+            ran.text().contains("submodule or nested repo"),
+            "{}",
+            ran.text()
+        );
+        assert_eq!(read(&m.join("s.txt")), "SUBWORK\n", "{cmd:?}");
+    }
+}
