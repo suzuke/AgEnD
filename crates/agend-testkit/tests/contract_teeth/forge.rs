@@ -93,6 +93,9 @@ impl ForgeFixture for M {
     fn base_head(&self) -> String {
         self.forge.base_head()
     }
+    fn base_contains(&self, commit: &str) -> bool {
+        self.forge.base_contains(commit)
+    }
 }
 
 pub fn mutants() -> Vec<Mutant> {
@@ -132,7 +135,21 @@ pub fn mutants() -> Vec<Mutant> {
                 forge::run(name, || {
                     M::new().submit(|m, c| {
                         let mut change = m.real_submit(c)?;
-                        change.id = "change-1".into();
+                        change.id = Some("change-1".into());
+                        Ok(change)
+                    })
+                })
+            },
+        },
+        // FRG-3: "no change id" as an empty string instead of `None`.
+        Mutant {
+            rule: "FRG-3",
+            name: "EmptyIdInsteadOfNone",
+            run: |name| {
+                forge::run(name, || {
+                    M::new().submit(|m, c| {
+                        let mut change = m.real_submit(c)?;
+                        change.id = Some(String::new());
                         Ok(change)
                     })
                 })
@@ -147,7 +164,7 @@ pub fn mutants() -> Vec<Mutant> {
                     M::new().submit(|m, c| {
                         m.real_submit(c).or_else(|_| {
                             Ok(SubmittedChange {
-                                id: "change-ghost".into(),
+                                id: Some("change-ghost".into()),
                                 url: None,
                                 head: "0".repeat(40),
                             })
@@ -282,19 +299,41 @@ pub fn mutants() -> Vec<Mutant> {
                 })
             },
         },
+        // FRG-10 (A23): fast-forwards the base to the branch head, so a
+        // branch started before an earlier merge drops that merge.
+        Mutant {
+            rule: "FRG-10",
+            name: "OverwritesBase",
+            run: |name| {
+                forge::run(name, || {
+                    M::new().merge(|m, r| {
+                        let current = m.real_head(&r.branch)?;
+                        if current != r.expected_head {
+                            return Ok(MergeResult::HeadChanged {
+                                actual_head: current,
+                            });
+                        }
+                        m.forge.set_base(&current);
+                        Ok(MergeResult::Merged {
+                            merge_commit: current,
+                        })
+                    })
+                })
+            },
+        },
     ]
 }
 
 /// FRG-3 follows the docs: a local forge has no change id
 /// (docs/GLOSSARY.md, docs/architecture/pipeline.md), so a forge that
-/// returns an empty id passes the whole suite. Formerly the `SubmitWithoutId`
+/// returns `None` passes the whole suite. Formerly the `SubmitWithoutId`
 /// mutant.
 #[test]
 fn forge_without_change_ids_passes() {
     forge::run("SubmitWithoutId", || {
         M::new().submit(|m, c| {
             let mut change = m.real_submit(c)?;
-            change.id.clear();
+            change.id = None;
             Ok(change)
         })
     })
