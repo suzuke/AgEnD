@@ -7,8 +7,7 @@
 //! re-implements repository discovery.
 //!
 //! Must NOT: run the real git itself (the caller execs the returned command),
-//! except for read-only probes (`rev-parse`, remote config) and the
-//! snapshot.
+//! except for read-only probes (`rev-parse`, config) and the snapshot.
 
 use crate::audit::{self, Record};
 use crate::binding;
@@ -394,9 +393,9 @@ impl Probe for RealProbe<'_> {
             .any(|k| team.contains(k))
     }
 
-    fn rev_parse(&self, args: &[&str]) -> Option<String> {
+    fn git(&self, args: &[&str]) -> Option<String> {
         let wt = self.bound.as_deref()?;
-        let mut full: Vec<&OsStr> = vec![OsStr::new("-C"), wt.as_os_str(), OsStr::new("rev-parse")];
+        let mut full: Vec<&OsStr> = vec![OsStr::new("-C"), wt.as_os_str()];
         full.extend(args.iter().map(OsStr::new));
         let out = run_clean(self.git, &full)?;
         Some(String::from_utf8_lossy(&out).trim().to_string())

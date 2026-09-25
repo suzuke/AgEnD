@@ -6,8 +6,8 @@
 //! another worktree or with a git dir / work tree / index named elsewhere);
 //! leaving the bound branch with `checkout`/`switch` and changing worktrees;
 //! snapshots before destructive commands (v1 agentic-git's scope); what a
-//! snapshot cannot undo (`stash` writes, `clean -x|-X`); config that would
-//! skip the hooks; and repos without hooks (the team's remote
+//! snapshot cannot undo (`stash` writes and autostash, `clean -x|-X`);
+//! config that would skip the hooks; and repos without hooks (the team's remote
 //! and its clones, `team`). Options are matched generously: a false match
 //! only adds a snapshot or refuses an unusual spelling.
 //!
@@ -136,9 +136,9 @@ pub trait Probe {
     fn is_team_repo(&self) -> bool;
     /// A foreign repo: whether push destination `dest` is the team repo.
     fn is_team_remote(&self, dest: &str) -> bool;
-    /// `git rev-parse <args>` in the bound worktree: trimmed stdout, if it
-    /// succeeded.
-    fn rev_parse(&self, args: &[&str]) -> Option<String>;
+    /// A read-only `git <args>` (`rev-parse`, `config --get`) in the bound
+    /// worktree: trimmed stdout, if it succeeded.
+    fn git(&self, args: &[&str]) -> Option<String>;
     /// Whether the bound worktree has the agend hooks (`hook::MARKER_FILE`).
     fn hooks_installed(&self) -> bool;
 }
@@ -285,6 +285,9 @@ fn write(input: &Input, sub: &str, rest: &[String]) -> Decision {
         return refuse(r);
     }
     if let Some(r) = unsnapshotted(sub, rest, binding) {
+        return refuse(r);
+    }
+    if let Some(r) = autostash(sub, rest, input) {
         return refuse(r);
     }
     let note = match (&route, input.location) {
@@ -556,9 +559,10 @@ fn leaves_branch(sub: &str, rest: &[String], b: &Binding, probe: &dyn Probe) -> 
         if paths_after || pos.len() > 1 {
             return None;
         }
+        let commit = format!("{target}^{{commit}}");
         let names_commit = previous(target).is_some()
             || probe
-                .rev_parse(&["--verify", "-q", &format!("{target}^{{commit}}")])
+                .git(&["rev-parse", "--verify", "-q", &commit])
                 .is_some();
         if dashdash.is_none() && !names_commit {
             return None;
@@ -589,7 +593,7 @@ fn stays(target: &str, b: &Binding, probe: &dyn Probe) -> bool {
     // plain branch name), so only `-` / `@{-N}` resolve through the full name.
     match previous(target) {
         Some(rev) => probe
-            .rev_parse(&["--symbolic-full-name", &rev])
+            .git(&["rev-parse", "--symbolic-full-name", &rev])
             .is_some_and(|f| f.strip_prefix("refs/heads/") == Some(branch)),
         None => target == branch,
     }
@@ -708,6 +712,33 @@ fn unsnapshotted(sub: &str, rest: &[String], b: &Binding) -> Option<Refusal> {
         )),
         _ => None,
     }
+}
+
+/// Autostash (owner decision 2026-09-25): git stores a conflicting autostash
+/// in `refs/stash`, which agents do not write (T22), so it fails with `cannot
+/// store` and leaves conflict markers. A config file's key counts unless the
+/// call has `--no-autostash` or an action (`--continue`), spelled out.
+fn autostash(sub: &str, rest: &[String], input: &Input) -> Option<Refusal> {
+    let keys: &[&str] = match sub {
+        "rebase" => &["rebase.autostash"],
+        "merge" => &["merge.autostash"],
+        "pull" => &["rebase.autostash", "merge.autostash"],
+        _ => return None,
+    };
+    let mut config = input.args.config.iter().chain(&input.env.config);
+    let in_file = |k: &&str| {
+        let v = input.probe.git(&["config", "--get", "--type=bool", k]);
+        v.as_deref() == Some("true")
+    };
+    let skip = "--no-autostash --continue --abort --skip --quit --edit-todo --show-current-patch";
+    let on = options(rest).any(|a| long(a, "--autostash"))
+        || config.any(|v| keys.iter().any(|k| v.to_ascii_lowercase().contains(k)))
+        || (!options(rest).any(|a| listed(skip, a)) && keys.iter().any(in_file));
+    let why = "autostash (`--autostash`, or rebase.autoStash / merge.autoStash set with -c, GIT_CONFIG_* or in your git config) puts your changes in git stash, which agents do not write (refs/stash is shared with the canonical checkout): on a conflict git fails with `cannot store` and leaves conflict markers";
+    let next = format!(
+        "commit your changes on your bound branch: git add -A && git commit -m \"wip: <what>\", then run `git {sub} --no-autostash ...` again (without --autostash or -c ...autoStash)"
+    );
+    on.then(|| Refusal::new("autostash", why, next))
 }
 
 // ── snapshots ───────────────────────────────────────────────────────────

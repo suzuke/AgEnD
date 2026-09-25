@@ -11,7 +11,7 @@ mod shim_common;
 use agend_shim::audit;
 use agend_shim::binding::snapshot_path;
 use agend_shim::ctx::Ctx;
-use shim_common::{Fixture, INSTANCE, git, git_base, gitshim};
+use shim_common::{Fixture, INSTANCE, git, git_base, gitshim, try_git};
 
 #[test]
 fn bound_commit_from_workspace_lands_on_the_task_branch() {
@@ -319,6 +319,92 @@ fn human_stash_survives_agent_stash_writes() {
             untouched(&format!("real git {args:?}"));
         }
     }
+}
+
+/// A new commit on origin's main that edits README.md, fetched, and the
+/// agent's uncommitted README.md edit, which conflicts with it when an
+/// autostash is applied. Returns a check that nothing changed.
+fn upstream_edits_readme(f: &Fixture) -> impl Fn(&str) + '_ {
+    std::fs::write(f.repo.join("README.md"), "upstream\n").unwrap();
+    git(&f.repo, &["commit", "-q", "-am", "upstream"]);
+    git(&f.repo, &["push", "-q", "origin", "main"]);
+    git(&f.repo, &["fetch", "-q", "origin"]);
+    std::fs::write(f.worktree.join("README.md"), "AGENT-WIP\n").unwrap();
+    let head = f.head(&f.worktree, "HEAD");
+    move |what: &str| {
+        assert_eq!(f.head(&f.worktree, "HEAD"), head, "{what}");
+        let readme = std::fs::read_to_string(f.worktree.join("README.md")).unwrap();
+        assert_eq!(readme, "AGENT-WIP\n", "{what}");
+        let stash = try_git(&f.repo, &["rev-parse", "-q", "--verify", "refs/stash"]);
+        assert!(stash.stdout.is_empty(), "{what}: refs/stash written");
+    }
+}
+
+/// Owner decision 2026-09-25: agents do not autostash. Before: `pull
+/// --rebase --autostash` with a conflicting edit moved the branch, then git
+/// could not store the autostash (`refs/stash`, refused by the hook) and
+/// left conflict markers in README.md. Now refused before git runs.
+#[test]
+fn autostash_is_refused_before_git_runs() {
+    let f = Fixture::new("autostash");
+    let unchanged = upstream_edits_readme(&f);
+    let ctx = f.ctx(&f.worktree);
+    for cmd in [
+        "pull --rebase --autostash origin main",
+        "pull --autost origin main",
+        "rebase --autostash origin/main",
+        "merge --autostash origin/main",
+        "-c rebase.autoStash=true pull --rebase origin main",
+        "-c MERGE.AUTOSTASH=true merge origin/main",
+    ] {
+        let argv: Vec<&str> = cmd.split_whitespace().collect();
+        let ran = gitshim(&ctx, &argv);
+        assert_eq!(ran.refused, Some("autostash"), "{cmd}: {}", ran.text());
+        assert!(
+            ran.text().contains("git commit -m \"wip: "),
+            "{}",
+            ran.text()
+        );
+        unchanged(cmd);
+    }
+}
+
+/// `rebase.autoStash` / `merge.autoStash` in the repo config: a plain
+/// `pull --rebase` / `rebase` / `merge` is refused the same way (git would
+/// autostash); with `--no-autostash` git itself refuses the dirty worktree
+/// (nothing stashed, nothing changed), and runs once the edit is committed.
+#[test]
+fn config_autostash_is_refused_unless_no_autostash() {
+    let f = Fixture::new("autostash-config");
+    let unchanged = upstream_edits_readme(&f);
+    git(&f.repo, &["config", "rebase.autoStash", "true"]);
+    git(&f.repo, &["config", "merge.autoStash", "true"]);
+    let ctx = f.ctx(&f.worktree);
+    for cmd in [
+        "rebase origin/main",
+        "pull --rebase origin main",
+        "pull origin main",
+        "merge origin/main",
+    ] {
+        let argv: Vec<&str> = cmd.split_whitespace().collect();
+        let ran = gitshim(&ctx, &argv);
+        assert_eq!(ran.refused, Some("autostash"), "{cmd}: {}", ran.text());
+        assert!(ran.text().contains("--no-autostash"), "{}", ran.text());
+        unchanged(cmd);
+    }
+    let ran = gitshim(&ctx, &["rebase", "--no-autostash", "origin/main"]);
+    assert_eq!(ran.refused, None, "{}", ran.text());
+    assert!(!ran.output.as_ref().unwrap().status.success());
+    unchanged("rebase --no-autostash");
+    gitshim(&ctx, &["commit", "-q", "-am", "wip: readme"]).ok();
+    let ran = gitshim(&ctx, &["rebase", "--no-autostash", "origin/main"]);
+    assert_eq!(ran.refused, None, "{}", ran.text());
+    assert!(ran.text().contains("could not apply"), "{}", ran.text());
+    gitshim(&ctx, &["rebase", "--abort"]).ok();
+    assert_eq!(
+        git(&f.worktree, &["log", "-1", "--format=%s"]),
+        "wip: readme"
+    );
 }
 
 #[test]

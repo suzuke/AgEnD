@@ -52,6 +52,8 @@ struct Fake {
     /// Revisions that name a commit.
     commits: Vec<&'static str>,
     hooks: bool,
+    /// Config keys `config --get --type=bool` answers `true` for.
+    config: Vec<&'static str>,
 }
 
 impl Default for Fake {
@@ -72,6 +74,7 @@ impl Default for Fake {
                 "origin/other-feature",
             ],
             hooks: true,
+            config: Vec::new(),
         }
     }
 }
@@ -83,18 +86,21 @@ impl Probe for Fake {
     fn is_team_remote(&self, dest: &str) -> bool {
         self.team_remotes.contains(&dest)
     }
-    fn rev_parse(&self, args: &[&str]) -> Option<String> {
+    fn git(&self, args: &[&str]) -> Option<String> {
         match args {
-            ["--symbolic-full-name", rev] => self
+            ["config", "--get", "--type=bool", key] => {
+                self.config.contains(key).then(|| "true".to_string())
+            }
+            ["rev-parse", "--symbolic-full-name", rev] => self
                 .names
                 .iter()
                 .find(|(r, _)| r == rev)
                 .map(|(_, n)| n.to_string()),
-            ["--verify", "-q", rev] => {
+            ["rev-parse", "--verify", "-q", rev] => {
                 let rev = rev.strip_suffix("^{commit}")?;
                 self.commits.contains(&rev).then(|| "c0ffee".to_string())
             }
-            other => panic!("unexpected rev-parse {other:?}"),
+            other => panic!("unexpected git {other:?}"),
         }
     }
     fn hooks_installed(&self) -> bool {
@@ -634,6 +640,87 @@ fn ref_writes_outside_the_hook_are_refused() {
         panic!()
     };
     assert!(r.next.contains("git reflog show"), "{}", r.next);
+}
+
+/// Owner decision 2026-09-25: agents do not autostash (a conflicting
+/// autostash goes to `refs/stash`: `cannot store`, conflict markers). The
+/// flag in any prefix, `-c` / `--config-env` / `GIT_CONFIG_*` in any case,
+/// and a config file's key (no `--no-autostash`) are refused before git runs.
+#[test]
+fn autostash_is_refused() {
+    let s = work();
+    let refused = [
+        "pull --rebase --autostash",
+        "pull --autost origin main",
+        "pull --au",
+        "rebase --autostash main",
+        "rebase -i --autostash main",
+        "merge --autostash main",
+        "-c rebase.autoStash=true pull --rebase",
+        "-c REBASE.AUTOSTASH=true rebase main",
+        "-c rebase.autostash pull",
+        "--config-env=merge.autoStash=V merge main",
+    ];
+    assert_codes(&s, "autostash", &refused);
+    let Decision::Refuse(r) = decide(&s, "pull --rebase --autostash") else {
+        unreachable!()
+    };
+    assert!(r.next.contains("git commit -m \"wip: "), "{}", r.next);
+    assert!(r.next.contains("git pull --no-autostash"), "{}", r.next);
+    let env = GitEnv {
+        config: vec!["'rebase.autostash'='true'".into()],
+        ..GitEnv::default()
+    };
+    let d = run_with(
+        Ok(&s),
+        Location::Worktree,
+        &env,
+        &Fake::default(),
+        "rebase main",
+    );
+    assert_eq!(code(&d), "autostash");
+    let runs = [
+        "pull --rebase --no-autostash",
+        "rebase --autosquash main",
+        "rebase main",
+        "pull --all",
+        "merge --edit main",
+        "-c rebase.autoStash=true commit -m x",
+    ];
+    assert_codes(&s, "run", &runs);
+    // Set in a config file: refused unless `--no-autostash` or an action.
+    let rebase_key = Fake {
+        config: vec!["rebase.autostash"],
+        ..Fake::default()
+    };
+    let merge_key = Fake {
+        config: vec!["merge.autostash"],
+        ..Fake::default()
+    };
+    for (probe, cmd, want) in [
+        (&rebase_key, "rebase main", "autostash"),
+        (&rebase_key, "pull --rebase", "autostash"),
+        (&rebase_key, "pull", "autostash"),
+        (&merge_key, "pull", "autostash"),
+        (&merge_key, "merge main", "autostash"),
+        (&merge_key, "merge --edit main", "autostash"),
+        (&rebase_key, "rebase --no-autostash main", "run"),
+        (&rebase_key, "pull --rebase --no-autostash", "run"),
+        (&rebase_key, "rebase --continue", "run"),
+        (&rebase_key, "rebase --abort", "run"),
+        (&rebase_key, "rebase --skip", "run"),
+        (&merge_key, "merge --abort", "run"),
+        (&rebase_key, "merge main", "run"),
+        (&merge_key, "rebase main", "run"),
+        (&rebase_key, "commit -m x", "run"),
+    ] {
+        assert_eq!(
+            code(&with_probe(probe, cmd)),
+            want,
+            "{:?} git {cmd}",
+            probe.config
+        );
+    }
 }
 
 /// Round 8, findings 1–3 (owner decision 2026-09-25): `refs/stash` is one
