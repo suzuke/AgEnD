@@ -817,6 +817,48 @@ fn what_a_snapshot_cannot_undo_is_refused() {
     }
 }
 
+/// Round 11: `git remote` writes change the repo config the canonical
+/// checkout shares (`remove` also drops `branch.main.remote` and
+/// `refs/remotes/origin/*`), from the worktree and from canonical alike;
+/// the listing forms and a plain `remote update` (a fetch) still run.
+#[test]
+fn remote_writes_are_refused() {
+    let s = work();
+    let writes = [
+        "remote add mine /tmp/x.git",
+        "remote -v add mine /tmp/x.git",
+        "remote remove origin",
+        "remote rm origin",
+        "remote rename origin up",
+        "remote set-url origin /tmp/typo.git",
+        "remote set-url --push origin /tmp/typo.git",
+        "remote set-head origin -a",
+        "remote set-branches origin main",
+        "remote prune origin",
+        "remote update --prune",
+        "remote update -p origin",
+        "remote update --pru",
+    ];
+    assert_codes(&s, "remote_write", &writes);
+    for loc in [Location::Canonical, Location::NoRepo] {
+        let d = decide_at(Ok(&s), loc, "remote set-url origin /tmp/typo.git");
+        assert_eq!(code(&d), "remote_write", "{loc:?}");
+    }
+    let Decision::Refuse(r) = decide(&s, "remote remove origin") else {
+        unreachable!()
+    };
+    assert!(r.next.contains("git remote -v"), "{}", r.next);
+    let reads = [
+        "remote",
+        "remote -v",
+        "remote get-url origin",
+        "remote show origin",
+        "remote update",
+        "remote update origin",
+    ];
+    assert_codes(&s, "run", &reads);
+}
+
 /// Round 9, finding 2: `clean -ff` also deletes nested repos (their `.git`
 /// and local commits), which a snapshot keeps only as a gitlink.
 #[test]

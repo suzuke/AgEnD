@@ -48,7 +48,7 @@ pub fn plan(ctx: &Ctx, tool: Tool, args: &[OsString]) -> Outcome {
         event: event.into(),
         code: code.map(String::from),
         argv: argv.clone(),
-        cwd: ctx.cwd.clone(),
+        cwd: ctx.cwd.clone().unwrap_or_default(),
         detail,
     };
     if ctx.bypass {

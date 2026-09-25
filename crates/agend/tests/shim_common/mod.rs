@@ -202,7 +202,7 @@ impl Fixture {
         Ctx {
             home: Some(self.home.clone()),
             instance: Some(INSTANCE.into()),
-            cwd: cwd.to_path_buf(),
+            cwd: Some(cwd.to_path_buf()),
             path: std::env::var_os("PATH").unwrap(),
             ..Ctx::default()
         }

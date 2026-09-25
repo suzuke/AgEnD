@@ -168,7 +168,8 @@ const CONFIG_DESTINATIONS: &[Case] = &[
     refused("pull . HEAD:master"),
     refused("pull --no-rebase . HEAD:master"),
     after(&[ORIGIN_AHEAD], "pull origin main:release"),
-    harmless("remote add --mirror=fetch mirror {origin}"),
+    // Round 11: `git remote` writes change the shared config; refused.
+    refused("remote add --mirror=fetch mirror {origin}"),
     case(
         &["remote add --mirror=fetch mirror {origin}"],
         "fetch mirror",

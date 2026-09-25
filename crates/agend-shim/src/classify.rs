@@ -715,13 +715,15 @@ fn untracked_ref_write(sub: &str, rest: &[String], b: &Binding) -> Option<Refusa
     ))
 }
 
-/// What a snapshot cannot undo. `stash` writes (owner decision 2026-09-25):
-/// `refs/stash` is one list shared by the canonical checkout and every
-/// worktree, so `stash pop` takes someone else's work and `clear` destroys
-/// it (the hook refuses `refs/stash` too). A snapshot has submodules and
-/// nested repos only as gitlinks, and no ignored files (`clean -x|-X`, `-ff`);
-/// `submodule foreach` runs git's own git, past the shim. A short option
-/// cluster ends at `-e` (its value).
+/// What a snapshot cannot undo. `remote` writes change the repo config shared
+/// with the canonical checkout (round 11; `remote update` without `--prune`
+/// is a fetch). `stash` writes (owner decision 2026-09-25): `refs/stash` is
+/// one list shared by the canonical checkout and every worktree, so `stash
+/// pop` takes someone else's work and `clear` destroys it (the hook refuses
+/// `refs/stash` too). A snapshot has submodules and nested repos only as
+/// gitlinks, and no ignored files (`clean -x|-X`, `-ff`); `submodule foreach`
+/// runs git's own git, past the shim. A short option cluster ends at `-e`
+/// (its value).
 fn unsnapshotted(sub: &str, rest: &[String], input: &Input, b: &Binding) -> Option<Refusal> {
     let flag = |l: &str| options(rest).any(|a| long(a, l));
     let shorts: String = options(rest)
@@ -740,9 +742,17 @@ fn unsnapshotted(sub: &str, rest: &[String], input: &Input, b: &Binding) -> Opti
                 || !flag("--no-recurse-submodules")
                     && (input.args.config.iter().any(set) || config_true(input.probe, key)))
     };
+    let first = first_positional(rest).unwrap_or("");
+    let prune = options(rest).any(|a| a == "-p" || long(a, "--prune"));
+    let remotes = "add remove rm rename set-url set-head set-branches prune";
     match sub {
         "stash" => Some(refuse_stash(Some(b))),
-        "submodule" if first_positional(rest) == Some("foreach") => Some(Refusal::new(
+        "remote" if listed(remotes, first) || first == "update" && prune => Some(Refusal::new(
+            "remote_write",
+            "this `git remote` form changes the remotes in the repo config that the canonical checkout and every worktree share; a snapshot does not undo it",
+            "agents do not change remotes; read them with: git remote -v, git remote get-url <name> or git remote show <name>",
+        )),
+        "submodule" if first == "foreach" => Some(Refusal::new(
             "submodule_foreach",
             "git runs the `submodule foreach` command with its own git, past the agend shim, so a `reset --hard` there loses uncommitted work in the submodules without a snapshot",
             "run it in each submodule yourself (snapshotted): git -C <path> <command>; list the paths with: git submodule status",

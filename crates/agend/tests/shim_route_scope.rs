@@ -15,8 +15,10 @@
 
 mod shim_common;
 
-use shim_common::{Fixture, git, gitshim, try_git};
+use shim_common::{AGEND, Fixture, INSTANCE, git, gitshim, isolate, try_git};
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
 
 /// The fixture plus `src/sub` in main, the bound worktree and a second
 /// agent's worktree (`t-2`), with the verifier's dirty state in the bound
@@ -387,4 +389,113 @@ fn a_named_target_without_a_repo_is_refused_not_widened() {
         Some("hello\n"),
         "plain call from the workspace"
     );
+}
+
+/// Runs the agend binary as `git` (argv[0]) from `gone` after deleting it,
+/// as a shell left in `target/debug` by `cargo clean` would: the shell
+/// cds in, removes the directory, then execs git with the agent's env.
+fn from_deleted(l: &Lab, git_cmd: &Path, gone: &Path, cmd: &[&str]) -> Output {
+    assert!(gone.starts_with(&l.f.root) && gone != l.f.root, "{gone:?}");
+    std::fs::create_dir_all(gone).unwrap();
+    let mut path = OsString::from(git_cmd.parent().unwrap());
+    path.push(":");
+    path.push(std::env::var_os("PATH").unwrap_or_default());
+    let mut sh = Command::new("/bin/sh");
+    isolate(&mut sh)
+        .arg("-c")
+        .arg(r#"cd "$0" && rm -rf "$0" && exec "$@""#)
+        .arg(gone)
+        .arg(git_cmd)
+        .args(cmd)
+        .current_dir(&l.f.root)
+        .env("PATH", path)
+        .env("AGEND_HOME", &l.f.home)
+        .env("AGEND_INSTANCE", INSTANCE);
+    let out = sh.output().unwrap();
+    assert!(!gone.exists(), "{gone:?} was not deleted");
+    out
+}
+
+/// Round 11: a command run from a directory deleted under the shell
+/// (`cd target/debug; cargo clean; git restore .`). Real git fails with
+/// `Unable to read current working directory`; the shim fell back to `.`,
+/// found no repo and ran the write on the whole bound worktree: from the
+/// worktree, canonical, another agent's worktree (instead of refusing) and
+/// a nested repo (acting on the parent). It is now refused before git
+/// runs, with git's wording and `cd <worktree>`, and nothing changes.
+#[test]
+fn a_deleted_cwd_is_refused_not_widened() {
+    let l = lab("scope-gone");
+    let wt = &l.f.worktree;
+    let nested = wt.join("vendor/lib");
+    std::fs::create_dir_all(&nested).unwrap();
+    git(&nested, &["init", "-q", "-b", "main"]);
+    std::fs::write(nested.join("n.txt"), "n\n").unwrap();
+    git(&nested, &["add", "n.txt"]);
+    git(&nested, &["commit", "-q", "-m", "n"]);
+    std::fs::write(nested.join("n.txt"), "n\nnested-edit\n").unwrap();
+    let bin = l.f.root.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let shim_git = bin.join("git");
+    std::os::unix::fs::symlink(AGEND, &shim_git).unwrap();
+
+    // Real git refuses: the wording the shim repeats.
+    let gone = wt.join("target/debug");
+    let real = from_deleted(&l, Path::new("/usr/bin/git"), &gone, &["restore", "."]);
+    let err = String::from_utf8_lossy(&real.stderr);
+    assert!(!real.status.success(), "real git: {err}");
+    assert!(
+        err.contains("Unable to read current working directory"),
+        "{err}"
+    );
+    assert_root_untouched(&l, "real git");
+
+    let cmds: [&[&str]; 4] = [
+        &["restore", "."],
+        &["checkout", "."],
+        &["clean", "-fd"],
+        &["rm", "-r", "-f", "."],
+    ];
+    let dirs = [
+        wt.join("target/debug"),
+        l.f.repo.join("build"),
+        l.wt2.join("build"),
+        nested.join("build"),
+    ];
+    for gone in &dirs {
+        for cmd in cmds {
+            let what = format!("{gone:?} {cmd:?}");
+            let out = from_deleted(&l, &shim_git, gone, cmd);
+            let err = String::from_utf8_lossy(&out.stderr);
+            assert_eq!(out.status.code(), Some(1), "{what}: {err}");
+            assert!(err.contains("agend-shim: refused"), "{what}: {err}");
+            assert!(
+                err.contains("Unable to read current working directory"),
+                "{what}: {err}"
+            );
+            assert!(
+                err.contains(&format!("next step: cd {} ", wt.display())),
+                "{what}: {err}"
+            );
+            assert_root_untouched(&l, &what);
+            assert_others_untouched(&l, &what);
+            assert_eq!(
+                read(&wt.join("src/sub/f.txt")).as_deref(),
+                Some("s\nunsaved-sub-edit\n"),
+                "{what}"
+            );
+            assert!(wt.join("src/sub/tmp.txt").exists(), "{what}");
+            assert_eq!(
+                read(&nested.join("n.txt")).as_deref(),
+                Some("n\nnested-edit\n"),
+                "{what}"
+            );
+        }
+    }
+    assert!(snapshots(&l.f).is_empty());
+    let audit = agend_shim::audit::read(&l.f.home);
+    let refused = audit
+        .iter()
+        .filter(|r| r.code.as_deref() == Some("cwd_unreadable"));
+    assert_eq!(refused.count(), dirs.len() * cmds.len());
 }

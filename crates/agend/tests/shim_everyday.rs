@@ -73,6 +73,8 @@ fn everyday_work_passes_through() {
     }
     let own = format!("HEAD:refs/heads/{}", f.branch);
     let own_to_own = format!("{0}:{0}", f.branch);
+    let typo = f.root.join("typo.git");
+    let typo = typo.to_str().unwrap();
     let steps: Vec<Step> = vec![
         Step::Ok("wt", vec!["status"]),
         Step::Ok("wt", vec!["log", "--oneline", "-3"]),
@@ -130,6 +132,16 @@ fn everyday_work_passes_through() {
         Step::Ok("wt", vec!["stash", "list"]),
         Step::Ok("wt", vec!["commit", "-q", "-am", "wip: c2"]),
         Step::Ok("wt", vec!["worktree", "list"]),
+        // Round 11: remotes live in the config the canonical checkout shares.
+        Step::Ok("wt", vec!["remote", "-v"]),
+        Step::Ok("wt", vec!["remote", "get-url", "origin"]),
+        Step::Ok("wt", vec!["remote", "show", "origin"]),
+        Step::Ok("wt", vec!["remote", "update"]),
+        Step::Refused("wt", vec!["remote", "set-url", "origin", typo]),
+        Step::Refused("wt", vec!["remote", "remove", "origin"]),
+        Step::Refused("repo", vec!["remote", "rename", "origin", "up"]),
+        Step::Refused("ws", vec!["remote", "add", "mine", typo]),
+        Step::Refused("wt", vec!["remote", "update", "--prune"]),
         Step::Ok("wt", vec!["-C", "sub", "status"]),
         Step::Edit("sub/s.txt"),
         Step::Ok("wt", vec!["-C", "sub", "add", "s.txt"]),
@@ -172,6 +184,14 @@ fn everyday_work_passes_through() {
         git(&f.worktree, &["rev-parse", "HEAD"]),
         git(&f.origin, &["rev-parse", &f.branch]),
         "own branch pushed"
+    );
+    let remotes = git(&f.repo, &["remote", "-v"]);
+    assert_eq!(remotes.lines().count(), 2, "{remotes}");
+    let url = git(&f.repo, &["remote", "get-url", "origin"]);
+    assert_eq!(Path::new(&url), f.origin, "canonical remote unchanged");
+    git(
+        &f.repo,
+        &["rev-parse", "--verify", "-q", "refs/remotes/origin/main"],
     );
     let log = std::fs::read_to_string(&marker).unwrap();
     assert!(log.matches("pre-commit").count() >= 5, "{log}");

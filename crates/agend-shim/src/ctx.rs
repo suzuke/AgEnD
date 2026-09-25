@@ -38,7 +38,8 @@ pub struct Ctx {
     pub instance: Option<String>,
     pub bypass: bool,
     pub depth: u32,
-    pub cwd: PathBuf,
+    /// `None` when the cwd cannot be read (deleted); never guessed.
+    pub cwd: Option<PathBuf>,
     /// `PATH` used to find the real tool.
     pub path: OsString,
     /// The running shim binary; candidates resolving to it are skipped.
@@ -70,7 +71,7 @@ impl Ctx {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0),
-            cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            cwd: std::env::current_dir().ok(),
             path: std::env::var_os("PATH").unwrap_or_default(),
             self_exe: std::env::current_exe().ok(),
             git_dir: non_empty("GIT_DIR").map(PathBuf::from),
@@ -104,13 +105,14 @@ impl Ctx {
             .find(|cand| is_executable(cand) && (me.is_none() || identity(cand) != me))
     }
 
-    /// A command for the real tool, with the nesting depth bumped and the
-    /// working directory set to the caller's.
+    /// A command for the real tool, with the nesting depth bumped, in the
+    /// caller's working directory (inherited when unreadable).
     pub fn real_command(&self, real: &Path, args: &[OsString]) -> std::process::Command {
         let mut cmd = std::process::Command::new(real);
-        cmd.args(args)
-            .current_dir(&self.cwd)
-            .env(DEPTH_ENV, (self.depth + 1).to_string());
+        cmd.args(args).env(DEPTH_ENV, (self.depth + 1).to_string());
+        if let Some(cwd) = &self.cwd {
+            cmd.current_dir(cwd);
+        }
         cmd
     }
 }

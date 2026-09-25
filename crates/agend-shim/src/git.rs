@@ -36,7 +36,7 @@ pub fn plan(ctx: &Ctx, args: &[OsString]) -> Outcome {
         event: event.into(),
         code: (!code.is_empty()).then(|| code.to_string()),
         argv: argv.clone(),
-        cwd: ctx.cwd.clone(),
+        cwd: ctx.cwd.clone().unwrap_or_default(),
         detail,
     };
     if ctx.bypass {
@@ -49,9 +49,19 @@ pub fn plan(ctx: &Ctx, args: &[OsString]) -> Outcome {
 
     let snap = binding::load(ctx.home.as_deref(), ctx.instance.as_deref());
     let parsed = classify::parse(&argv);
-    let dir = parsed.chdirs.iter().fold(ctx.cwd.clone(), |d, c| d.join(c));
     let snap_ref = snap.as_ref().ok();
     let bound = snap_ref.and_then(|s| s.binding.as_ref());
+    // A deleted cwd: git fails, and nothing may stand in for it (round 11).
+    let Some(cwd) = ctx.cwd.clone() else {
+        let go = bound.map_or(Path::new("a directory that exists"), |b| b.worktree());
+        let r = Refusal::new(
+            "cwd_unreadable",
+            "Unable to read current working directory (deleted, e.g. by `cargo clean` or `rm -rf`); git fails the same way, so the shim will not guess where to run",
+            format!("cd {} and run it again", go.display()),
+        );
+        return refuse(ctx, &argv, r, &record);
+    };
+    let dir = parsed.chdirs.iter().fold(cwd, |d, c| d.join(c));
     let source_repo = snap_ref.and_then(|s| s.source_repo.as_deref());
     let names_git_dir = parsed.git_dir.is_some() || ctx.git_dir.is_some();
     let explicit = names_git_dir || parsed.work_tree.is_some() || ctx.git_env_names_repo();
@@ -190,11 +200,9 @@ fn resolve(
     dir: &Path,
     names_git_dir: bool,
 ) -> Option<Resolved> {
-    let mut cmd = Command::new(git);
-    cmd.args(globals)
-        .args(REV_PARSE)
+    let mut cmd = ctx.real_command(git, globals);
+    cmd.args(REV_PARSE)
         .args(["--show-toplevel", "--show-prefix"])
-        .current_dir(&ctx.cwd)
         .stdin(Stdio::null())
         .stderr(Stdio::null());
     for (var, value) in [

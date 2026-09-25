@@ -78,7 +78,7 @@ pub fn run(name: &'static str) -> ExitCode {
             event: "refuse".into(),
             code: Some(r.code.into()),
             argv: std::iter::once(name.to_string()).chain(argv).collect(),
-            cwd: ctx.cwd.clone(),
+            cwd: ctx.cwd.clone().unwrap_or_default(),
             detail: Some(r.reason),
         };
         audit::append(ctx.home.as_deref(), &record);
