@@ -295,6 +295,7 @@ owner 睡著時由實作者決定、可以反悔的事（頁面沒寫到的設�
 | S4 | 只有 `0 < 版本 < 最新` 才做升級前快照；全新空 DB（版本 0）直接建 schema | 空 DB 沒有資料可保護；否則每次全新安裝都在 `backups/` 留一份空快照 | 改成也做：條件改成 `found < supported` | 待追認 |
 | S5 | 開 DB 時 `busy_timeout(0)`：被鎖就立刻回 `InUse`，不等待 | 第二個 daemon 要立刻知道；頁面風險表寫的「最多重試 10 秒」屬第 6 施工關的重啟交接，那時在呼叫端重試 | 第 6 施工關在 `SqliteStore::open` 外面包重試迴圈，store 不必改 | 待追認 |
 | S6 | 四次開機裡的過期寫入者拿的是開機 1 最後一次寫入前的版本 3：輸出 `stale v=3 -> conflict current=4, task unchanged; v=5`；步驟 4 的「應該看到」照改 | 草稿的 `stale v=4 -> conflict current=4` 自相矛盾：拿目前版本 4 寫入依 CAS 應該成功 | 改成別的過期版本：`boot1` 的 `stale` 變數 | 待追認 |
+| S7 | 崩潰段印 `acked=<子程序印出的最後一個 ack> found=<重開後的寫入數>`；測試要求 `found ≥ acked`、且最多多 1（硬殺時正在 commit 的那次） | 父程序讀到第 50 個 ack 才送 kill，子程序可能多寫幾次；頁面的 `acked=50 found=50` 只是常見情況 | 改成固定 50：子程序每次 ack 後等父程序回覆（多一條管線） | 待追認 |
 
 ## 驗收紀錄
 
