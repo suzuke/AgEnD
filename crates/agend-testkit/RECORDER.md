@@ -66,6 +66,8 @@
 | claude | **忙碌時的 channel 訊息會排隊**：這輪（含 Stop hook 續行）結束後才觸發 `UserPromptSubmit`，然後照做（多一個 Stop） | 立刻觸發 `UserPromptSubmit` 並丟掉 | `UserPromptSubmit` 的時間點改成和真的一樣；**仍然不處理**（D16 要 driver 用 Stop hook 排隊、gate-02 A6 的最壞情況），列入 `shape::DELIBERATE`，寫在假 claude 模組開頭 |
 | claude | 啟動時多一個「專案 MCP server」對話框（spike-claude-f 說這條路徑沒有）；`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` 會關掉 channel | — | 錄製器處理；假 agent 不模擬對話框（已寫在模組開頭） |
 
+忙碌時的 channel 訊息：真 claude 會排隊照做，假 claude 仍然不處理。使用者 2026-09-25 確認維持 D16：claude 忙碌時由 driver 自己排隊（Stop hook），假 claude 維持最壞情況（gate-02 [待你追認](../../docs/gates/gate-02-testkit.md#待你追認)）。
+
 ## 重錄（CLI 升版時）
 
 ```bash
