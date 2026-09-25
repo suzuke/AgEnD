@@ -448,9 +448,23 @@ fn verifier_r5_replay_of_a_current_partial_approval_changes_nothing() {
     .0;
     let partial = approve(&state, "r1", None);
     let (once, _) = ok(&state, partial.clone());
-    let (twice, actions) = ok(&once, partial);
-    assert_eq!(twice, once);
-    assert!(actions.is_empty());
+    // A duplicate of a reviewer already counted in this attempt is refused.
+    assert_eq!(step(&once, partial), Err(TransitionError::StaleResult));
+}
+
+/// r6 low: a repeated report of the same notify timeout is refused.
+#[test]
+fn a_repeated_notify_timeout_for_the_same_attempt_is_stale() {
+    let state = start(Workflow::builtin_code());
+    let (stage_id, attempt) = current(&state);
+    let timeout = PipelineEvent::StageTimedOut { stage_id, attempt };
+    let (notified, actions) = ok(&state, timeout.clone());
+    assert!(
+        actions
+            .iter()
+            .any(|action| matches!(action, PipelineAction::NotifyTimeout { .. }))
+    );
+    assert_eq!(step(&notified, timeout), Err(TransitionError::StaleResult));
 }
 
 /// r5 P4: a head change during a fanout run started for the old head starts
@@ -485,15 +499,52 @@ fn verifier_r5_head_change_during_a_fanout_starts_a_new_run() {
 /// the branch was reset: the pending changes are dropped.
 #[test]
 fn verifier_r5_branch_reset_to_the_sent_head_drops_pending_changes() {
-    let mut state = start(Workflow::builtin_code());
+    // A fixed pick and a change id are in the state, so a reset that
+    // touched anything besides the pending changes would show.
+    let mut state = start(workflow(vec![
+        stage("work", work("dev", WorkOutput::Branch)),
+        stage(
+            "fan",
+            Stage::Fanout {
+                source: FanoutSource::Listed(vec!["a".into(), "b".into()]),
+                join: FanoutJoin::Pick,
+            },
+        ),
+        stage("pick", approval(1, false)),
+        stage(
+            "submit",
+            Stage::Submit {
+                forge: "github".into(),
+            },
+        ),
+        stage("checks", command()),
+        stage("review", approval(1, true)),
+        stage("merge", Stage::Merge),
+    ]));
     state = ok(&state, branch(&state, "H1")).0;
-    state = ok(&state, submitted(&state)).0;
+    state = ok(&state, fanout_done(&state, &["a", "b"])).0;
+    state = ok(&state, approve(&state, "r", Some("b"))).0;
+    let (stage_id, attempt) = current(&state);
+    state = ok(
+        &state,
+        PipelineEvent::Submitted {
+            stage_id,
+            attempt,
+            change_id: Some("42".into()),
+        },
+    )
+    .0;
     state = ok(&state, passed(&state)).0;
     state = ok(&state, approve(&state, "r", None)).0;
     assert!(state.merge_in_flight());
+    assert_eq!(state.selected_fanout_child(), Some("b"));
+    assert_eq!(state.change_id(), Some("42"));
+    let before = state.clone();
     state = ok(&state, commit("H2")).0;
     assert_eq!(state.pending_head_changes().len(), 1);
-    let (state, actions) = ok(&state, commit("H1"));
+    let (reset, actions) = ok(&state, commit("H1"));
     assert!(actions.is_empty());
-    assert!(state.pending_head_changes().is_empty());
+    // Only the pending changes went away; everything else is as before.
+    assert_eq!(reset, before.without_pending_head_changes());
+    assert_eq!(reset, state.without_pending_head_changes());
 }

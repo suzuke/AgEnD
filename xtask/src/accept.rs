@@ -3,6 +3,9 @@
 //!
 //! For gate 1 run workspace formatting and clippy, test agend-core and its
 //! protocol compatibility contract, run check-deps, then show the core demo.
+//! For gate 2 run the per-crate checks (the testkit tests include every
+//! contract suite and the fake agent binaries), check-deps, then the testkit
+//! demo.
 //! Gate 3 runs the per-crate checks plus the `agend` crate's tests (argv[0]
 //! dispatch, and the shim and hook tests against real repos, which need the
 //! real binary), then the shim demo. Other gates use the per-crate checks until their
@@ -144,6 +147,17 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
     if gate.number == 1 {
         crate::core_demo::run()?;
         println!("gate 1 (core): checks passed");
+    } else if gate.number == 2 {
+        step(&["build", "--quiet", "-p", "agend-testkit", "--bins"])?;
+        step(&[
+            "run",
+            "--quiet",
+            "-p",
+            "agend-testkit",
+            "--example",
+            "testkit_demo",
+        ])?;
+        println!("gate 2 (testkit): checks passed");
     } else if gate.number == 3 {
         crate::shim_demo::run()?;
         println!("gate 3 (shim): checks passed");

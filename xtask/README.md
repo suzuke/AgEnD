@@ -20,6 +20,7 @@
 - CI 一定會跑這一項（不加 `--allow-skip`）。
 
 - `accept core`：跑 workspace fmt、workspace clippy、core tests、protocol compatibility tests、check-deps，再執行 core example 的 protocol 與 code workflow demo。
+- `accept testkit`：對 agend-testkit 跑 fmt、clippy、test（含 7 個契約 suite 與假 agent 程式測試），再跑 check-deps，然後 build 假 agent binary、執行 `testkit_demo` example（三個假 agent 各一段往來並正常結束、假 daemon 的事件身分、契約摘要）。
 - `accept shim`：對 agend-shim 跑 fmt、clippy、test，加上 `agend` 的 argv[0] 分派測試與 check-deps，再 build `agend` 並執行 `agend-shim` 的 `shim_demo` example（以 `git`／`kill`／`pkill` 名稱在暫存 repo 裡跑真的 binary）
 - 其他 `accept <施工關>`：對該施工關的 crate 跑 fmt、clippy、test，再跑 check-deps；demo 隨各施工關加入
 
