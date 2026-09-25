@@ -3,14 +3,14 @@
 > **TL;DR**
 > - 13 個施工關各有一頁：範圍、自動驗收、你親自驗收的步驟、驗收紀錄、進度紀錄。
 > - 記住：**一個施工關要等你跑完「你親自驗收」並填好「驗收紀錄」才算完成**。
-> - 下一步：第 1 施工關已完成；第 2、3 施工關的 draft PR 在驗證中。
+> - 下一步：第 2 施工關（驗收中）照「你親自驗收」跑一遍並填驗收紀錄；第 3 施工關 draft PR #107 重構中。
 
 ## 索引
 
 | 施工關 | 頁面 | 範圍 | 狀態 | 自動驗收指令 |
 |---|---|---|---|---|
 | 1 | [`core`](gate-01-core.md) | agend-core | 完成（2026-09-25） | `cargo xtask accept core` |
-| 2 | [`testkit`](gate-02-testkit.md) | agend-testkit | 未開始 | `cargo xtask accept testkit` |
+| 2 | [`testkit`](gate-02-testkit.md) | agend-testkit | 驗收中 | `cargo xtask accept testkit` |
 | 3 | [`shim`](gate-03-shim.md) | agend-shim | 未開始 | `cargo xtask accept shim` |
 | 4 | [`holder`](gate-04-holder.md) | agend-holder | 未開始 | `cargo xtask accept holder` |
 | 5 | [`store`](gate-05-store.md) | agend-daemon：store | 未開始 | `cargo xtask accept store` |

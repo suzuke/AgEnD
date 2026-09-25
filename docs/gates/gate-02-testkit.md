@@ -7,7 +7,7 @@
 
 ## 狀態
 
-**實作中**（2026-09-25）：自動驗收通過（`feat/gate-02-testkit`，draft PR）；待 fresh-context verifier 與你親自驗收。
+**驗收中（待使用者親自驗收）**（2026-09-25）：#108 已 merge（`6d7b540`），verifier r6 CONFIRMED。
 
 ## 範圍
 
@@ -187,6 +187,7 @@ owner 睡著時由實作者決定、可以反悔的事。每項：決定 · 理�
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-25 verifier r6 CONFIRMED（`00fbf45`）；#108 squash merge 為 `6d7b540`；狀態改為驗收中。
 - 2026-09-25 修 verifier r5（REFUTED @ 6d471e8，owner 核准的最後一輪）：生命週期多一次閒置開機（做事 → 閒置 → 做事 → 檢查），fixture 改成從持久狀態開機（`Persisted` + `boot`），case 自己的 fixture 在第一次開機前就 drop，daemon 不在時的 backend 動作只經過持久狀態；DRV-9 重啟前送兩個 id、重啟後先重送舊的，DRV-6 重啟後也從較舊的 cursor 補回；r5 的 `RewriteOnChange`、`TruncOnOpen`、`LastIdDedup`、`ReadAck`、`SharedMem`、`LiveJournal`、`LastOneOut` 與新的 `FrozenRegistry`、`FrozenDatabase` 註冊為 mutant（共 56 條規則、80 個 mutant）；helper mutation H1–H8（H6、H8 改成讀 case 的 fixture 就編譯不過）與新的 H9–H13 全部抓到；CONTRACTS.md、第 5、6 施工關頁面加「重啟／持久化 case 跨真的 process 重啟跑」（待你追認）（`feat/gate-02-testkit`，draft PR #108）。
 - 2026-09-25 修 verifier r4（REFUTED @ ea61cba）：重啟類 case 只重啟一次，狀態只在物件裡或第一次讀就消耗的實作能通過。改成共用的 daemon 生命週期 helper（3 次開機、每次先復原、兩次開機之間 backend 照常動，新 fixture 方法 `DriverFixture::emit_while_down`），DRV-6／DRV-9／STO-4／STO-12／RTM-8／RTM-9 都走它；r4 的 `Handoff`（RTM-8）、`CounterStore`（STO-4）、`ObjDedup`（DRV-9）、`Gap`（DRV-6）註冊為 mutant；CONTRACTS.md 寫明 fixture 要走真的持久層；FRG-4、FRG-9、DRV-9 的推得標出來源，DRV-6 改引 ARCHITECTURE 程序模型規則 2；共 56 條規則、71 個 mutant（`feat/gate-02-testkit`，draft PR #108）。
 - 2026-09-25 修 verifier r3（REFUTED @ e251dff）：加 daemon 重啟 hook（`RuntimeFixture::restart`、`DriverFixture::restart`、`StoreFixture::reopen`），新規則 RTM-8／RTM-9（D3 重啟不斷線，擋 `DaemonScoped`）、STO-12（重新開啟後資料與版本還在）、DRV-9（訊息 id 冪等，`FakeDriver` 改成去重），DRV-6 多重啟補回 case；FRG-3 改成允許空 change id（local）；推得的規則標出來源；共 56 條規則、67 個 mutant（`feat/gate-02-testkit`，draft PR #108）。
