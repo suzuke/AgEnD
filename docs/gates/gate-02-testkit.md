@@ -7,7 +7,7 @@
 
 ## 狀態
 
-**驗收中（待使用者親自驗收）**（2026-09-25）：#108 已 merge（`6d7b540`），verifier r6 CONFIRMED。
+**完成**（2026-09-25）：#108 已 merge（`6d7b540`），verifier r6 CONFIRMED，使用者親自驗收通過。「待你追認」A1–A25 另外確認。
 
 ## 範圍
 
@@ -45,7 +45,7 @@
 
    **這步在驗什麼**：三個假 agent 程式真的以子程序啟動、走真的 socket／HTTP 說完一輪話並正常結束，假 daemon 擋掉過期的結果。壞了的話，後面接 codex／opencode／claude driver 的施工關就沒有可重現的對手可以測。
 
-   - [ ] 通過
+   - [x] 通過
 
 2. 看契約測試摘要。
 
@@ -69,7 +69,7 @@
 
    **這步在驗什麼**：7 個假實作都守住規則表上的每一條。壞了的話，用假實作測的上層程式（流水線、daemon）拿到的是真實作不會有的行為，測試綠了也不代表接上真的會對（v1 #1483）。
 
-   - [ ] 通過
+   - [x] 通過
 
 3. 單獨啟動一個假 agent，用 curl 跟它說話。
 
@@ -78,7 +78,8 @@
    sleep 5 | ./target/debug/fake-opencode-serve --port 47123 &
    sleep 1
    curl -s -X POST http://127.0.0.1:47123/session -d '{}'; echo
-   curl -s -X POST http://127.0.0.1:47123/session/ses_fake0001/message -d '{"parts":[{"type":"text","text":"hi"}]}'; echo
+   BODY='{"parts":[{"type":"text","text":"hi"}]}'
+   curl -s -X POST http://127.0.0.1:47123/session/ses_fake0001/message -d "$BODY"; echo
    wait; echo "exit=$?"
    ```
 
@@ -86,7 +87,7 @@
 
    **這步在驗什麼**：假 agent 在測試框架之外也能單獨用，講的是真的 HTTP，stdin 關了就乾淨結束。壞了的話，別的 crate 的測試（或你手動除錯）沒辦法拿它當真的 backend 用，行程也可能留著不結束。
 
-   - [ ] 通過
+   - [x] 通過
 
 4. 故意弄壞：讓假 Forge 在 head 不符時回報錯的 head。
 
@@ -115,7 +116,7 @@
 
    **這步在驗什麼**：契約 suite 真的抓得到假實作漂移，而且失敗訊息指出是哪一條規則（FRG-6、FRG-8）。壞了的話，假實作可以悄悄偏離規則而測試照樣全綠，正是這個施工關要防的事。
 
-   - [ ] 通過
+   - [x] 通過
 
 5. 看規則覆蓋：每條規則都有 mutant，而且都被抓到。
 
@@ -141,7 +142,7 @@
 
    **這步在驗什麼**：規則表上每條規則都有一個故意弄壞的實作，而且 suite 在標著那條規則的 case 上失敗；覆蓋測試另外確認表、case、mutant 三者對得上。壞了的話，就回到之前的打地鼠：某條規則其實沒人驗，要等 verifier 一條條找出來。
 
-   - [ ] 通過
+   - [x] 通過
 
 ## 待你追認
 
@@ -181,12 +182,13 @@ owner 睡著時由實作者決定、可以反悔的事。每項：決定 · 理�
 
 | 日期 | 結果（通過／不通過） | 備註 |
 |---|---|---|
-|  |  |  |
+| 2026-09-25 | 通過 | 使用者在 `v2`（`5035b2e`）跑完步驟 1–5。步驟 1、2 使用者自行比對；步驟 3–5 的輸出由 agent 逐項比對相符（第 4 步還原後 `git status` 乾淨）。步驟 3 原本的長 curl 行複製時被截斷，已改成先存 `BODY` 變數。「待你追認」A1–A25 另外確認。 |
 
 ## 進度紀錄
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-25 使用者親自驗收步驟 1–5 通過，狀態改為完成；步驟 3 的 curl 改成先存變數，避免複製時截斷。
 - 2026-09-25 verifier r6 CONFIRMED（`00fbf45`）；#108 squash merge 為 `6d7b540`；狀態改為驗收中。
 - 2026-09-25 修 verifier r5（REFUTED @ 6d471e8，owner 核准的最後一輪）：生命週期多一次閒置開機（做事 → 閒置 → 做事 → 檢查），fixture 改成從持久狀態開機（`Persisted` + `boot`），case 自己的 fixture 在第一次開機前就 drop，daemon 不在時的 backend 動作只經過持久狀態；DRV-9 重啟前送兩個 id、重啟後先重送舊的，DRV-6 重啟後也從較舊的 cursor 補回；r5 的 `RewriteOnChange`、`TruncOnOpen`、`LastIdDedup`、`ReadAck`、`SharedMem`、`LiveJournal`、`LastOneOut` 與新的 `FrozenRegistry`、`FrozenDatabase` 註冊為 mutant（共 56 條規則、80 個 mutant）；helper mutation H1–H8（H6、H8 改成讀 case 的 fixture 就編譯不過）與新的 H9–H13 全部抓到；CONTRACTS.md、第 5、6 施工關頁面加「重啟／持久化 case 跨真的 process 重啟跑」（待你追認）（`feat/gate-02-testkit`，draft PR #108）。
 - 2026-09-25 修 verifier r4（REFUTED @ ea61cba）：重啟類 case 只重啟一次，狀態只在物件裡或第一次讀就消耗的實作能通過。改成共用的 daemon 生命週期 helper（3 次開機、每次先復原、兩次開機之間 backend 照常動，新 fixture 方法 `DriverFixture::emit_while_down`），DRV-6／DRV-9／STO-4／STO-12／RTM-8／RTM-9 都走它；r4 的 `Handoff`（RTM-8）、`CounterStore`（STO-4）、`ObjDedup`（DRV-9）、`Gap`（DRV-6）註冊為 mutant；CONTRACTS.md 寫明 fixture 要走真的持久層；FRG-4、FRG-9、DRV-9 的推得標出來源，DRV-6 改引 ARCHITECTURE 程序模型規則 2；共 56 條規則、71 個 mutant（`feat/gate-02-testkit`，draft PR #108）。
