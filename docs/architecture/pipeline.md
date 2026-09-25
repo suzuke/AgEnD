@@ -103,7 +103,7 @@
 
 ## worktree 與 branch 生命週期
 
-1. 只有 daemon 建 worktree 與 branch；shim 擋 agent 自建（`git worktree`、`checkout -b`、`switch -c`、`branch <new>`）。
+1. 只有 daemon 建 worktree 與 branch；shim 擋 agent 自建（`git worktree`、`checkout -b`、`switch -c`），agent worktree 的 git hook 擋 `agend/<task>/` 以外的 branch（第 3 施工關 T3、T21）。
 2. 先寫 DB「準備建立」，建好再標記完成；崩潰後開機接續。
 3. 固定命名空間：branch `agend/<task-id>/<slug>`、worktree `worktrees/<task-id>/`。命名空間內但 DB 無記錄 = 孤兒；命名空間外一律不碰。
 4. 清理由關卡事件觸發：merge 完成 → 刪 branch 與 worktree；審查 worktree 在核准或駁回時刪；取消走同一流程。
@@ -114,7 +114,7 @@
 
 - 以 v1 agentic-git 為基礎；binding 格式沿用 BindingV1（agent、task_id、branch、worktree、source_repo）+ binding 類型。
 - 不用 HMAC：daemon 為每個 agent 寫唯讀快照檔。唯讀只是安全帶，同 uid 的 agent 仍能 chmod。
-- Forge local 必須補 protected-ref 檢查：擋 `update-ref`、`push .`、`branch -f` 對 main 的寫入。
+- Forge local 必須補 protected-ref 檢查：擋 `update-ref`、`push .`、`branch -f` 對 main 的寫入。第 3 施工關起由只裝在 agent worktree 的 `reference-transaction`／`pre-push` hook 檢查 git 回報的 ref（`agend_shim::install_hooks`，daemon 綁定時安裝）。
 - 依賴的環境：agent 身分與 home 的環境變數、bypass 環境變數、父程序是否為 gh、canonical repo 判定、worktree 是否存在、真 git 的位置（排除 shim 目錄）。holder 啟動 agent 時注入。
 - `kill`、`killall`、`pkill` 的防護一併保留。
 

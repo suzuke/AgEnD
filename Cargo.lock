@@ -13,6 +13,7 @@ dependencies = [
  "agend-shim",
  "agend-testkit",
  "agend-tui",
+ "serde_json",
 ]
 
 [[package]]

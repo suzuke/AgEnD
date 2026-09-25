@@ -5,17 +5,17 @@
 //!   for both protected and normal commands, whichever spelling the binding
 //!   snapshot, `AGEND_HOME` and the cwd use.
 //!
-//! Real temporary repos only (`git init` / `git clone`, via `common`);
+//! Real temporary repos only (`git init` / `git clone`, via `shim_common`);
 //! every call names absolute paths and its own cwd.
 
 #![cfg(unix)]
 
-mod common;
+mod shim_common;
 
 use agend_shim::binding::snapshot_path;
 use agend_shim::ctx::Ctx;
 use agend_testkit::tempdir::TempDir;
-use common::{Fixture, INSTANCE, Ran, git, gitshim, try_git};
+use shim_common::{Fixture, INSTANCE, Ran, git, gitshim, try_git};
 use std::path::{Path, PathBuf};
 
 enum Step<'a> {
@@ -37,12 +37,7 @@ fn dir_of(f: &Fixture, at: &str) -> PathBuf {
 }
 
 fn describe(ran: &Ran) -> String {
-    let stderr = ran
-        .output
-        .as_ref()
-        .map(|o| String::from_utf8_lossy(&o.stderr).into_owned())
-        .unwrap_or_default();
-    format!("{} {stderr}", ran.text())
+    ran.text()
 }
 
 fn succeeded(ran: &Ran) -> bool {
@@ -101,12 +96,12 @@ fn everyday_work_passes_through() {
         ),
         Step::Ok("wt", vec!["push", "-q", "origin", &own_to_own]),
         // T7 (owner decision 2026-09-25): a push git resolves to the bound
-        // branch on the team remote runs; one that resolves elsewhere is
-        // refused with the exact command.
+        // branch runs; the pre-push hook sees where git really pushes.
         Step::Ok("wt", vec!["push", "-q", "-u", "origin", &f.branch]),
         Step::Ok("wt", vec!["push", "-q"]),
         Step::Ok("wt", vec!["push", "-q", "origin", "HEAD"]),
-        Step::Refused("wt", vec!["push", "origin", "main"]),
+        // Refused by the pre-push hook: git reports refs/heads/main.
+        Step::Refused("wt", vec!["push", "origin", "HEAD:main"]),
         Step::Ok("wt", vec!["pull", "-q", "--rebase"]),
         Step::Ok("wt", vec!["pull", "-q", "--rebase", "origin", "main"]),
         Step::Ok("wt", vec!["branch", "agend/t-1/x"]),
@@ -163,7 +158,7 @@ fn everyday_work_passes_through() {
         let good = if want_ok {
             succeeded(&ran)
         } else {
-            ran.refused.is_some() && ran.text().contains("next step: ")
+            ran.is_refused() && ran.text().contains("next step: ")
         };
         if !good {
             failures.push(format!("({at}) git {}: {}", cmd.join(" "), describe(&ran)));
@@ -233,13 +228,15 @@ fn symlinked_and_spaced_paths_resolve_alike() {
         let wt_s = spell(&wt, cwd_alt).display().to_string();
         let own = format!("HEAD:refs/heads/{}", f.branch);
         let label = format!("snapshot alt={snap_alt} home alt={home_alt} cwd alt={cwd_alt}");
+        // One commit ahead, so a push to main would really move it.
+        git(&wt, &["commit", "-q", "--allow-empty", "-m", "ahead"]);
         let before = protected(&f);
 
         let mut check = |ran: Ran, want_ok: bool, what: &str| {
             let good = if want_ok {
                 succeeded(&ran)
             } else {
-                ran.refused.is_some()
+                ran.is_refused()
             };
             if !good {
                 failures.push(format!("{label}: {what}: {}", describe(&ran)));

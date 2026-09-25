@@ -1,52 +1,26 @@
 //! Classifies a git invocation: run it as is, route it into the bound
-//! worktree, or refuse it with the exact next step.
-//!
-//! Structure (each closes a class of bypass, not one spelling):
-//! - Options of every subcommand whose verdict depends on them are parsed
-//!   with exact spellings only (`opts`, `specs`); abbreviations and
-//!   unlisted options are refused.
-//! - Ref destinations must be checkable: a push's `src:dst` is checked as
-//!   typed, and a push without one only when git's own resolution (config
-//!   read with the real git) lands on the bound branch on the team remote;
-//!   fetch refmaps (command line and config) must land in `refs/remotes/` or
-//!   the agent's namespace, config that picks destinations cannot be set
-//!   (`config_keys`), and symbolic refs are followed before a destination
-//!   is checked.
-//! - Where a call acts is git's answer (`location`), so every spelling of a
-//!   git dir or work tree resolves alike. A write acts on the bound worktree
-//!   only: in its git dir, the work tree git would use must be the bound
-//!   worktree and `GIT_INDEX_FILE` its own; a write that has to be routed
-//!   there is refused if the caller named a git dir or work tree
-//!   (`--git-dir`, `--work-tree`, `--bare`, `GIT_*`) instead of rewritten.
-//!   Routing keeps the caller's directory inside its checkout (`route_dir`),
-//!   and never starts from another agent's worktree.
-//! - Anything that could leave the bound branch (DWIM checkout, `<x> --`,
-//!   rebase of another branch, `stash branch`) is refused unless its target
-//!   is the bound branch itself.
-//! - Foreign repos stay the agent's business, except clones of the team repo
-//!   and pushes whose destination is the team repo (`team`).
-//!
-//! Pure apart from `Probe` (the questions that need git itself) and
-//! existence checks on the bound worktree.
+//! worktree, or refuse it with the exact next step. Only what the agend
+//! hooks (`hook`, which see every ref git changes) cannot see is decided
+//! here: where a write acts (git's `location` answer; routed from the
+//! workspace and canonical checkout keeping the subdirectory, refused from
+//! another worktree or with a git dir / work tree / index named elsewhere);
+//! leaving the bound branch with `checkout`/`switch` and changing worktrees;
+//! snapshots before destructive commands (v1 agentic-git's scope); config
+//! that would skip the hooks; and repos without hooks (the team's remote
+//! and its clones, `team`). Options are matched generously: a false match
+//! only adds a snapshot or refuses an unusual spelling.
 //!
 //! Must NOT: guess a binding when the snapshot is missing.
 
 use crate::Refusal;
 use crate::binding::{Binding, Snapshot, SnapshotError};
-use crate::config_keys;
+use crate::hook::stay_hint;
 use crate::location::{Location, Resolved};
 use crate::protected_ref::ProtectedRefs;
 use std::path::{Path, PathBuf};
 
-mod commands;
-mod opts;
-mod refs;
-mod specs;
 #[cfg(test)]
 mod tests;
-
-use commands::{BranchOp, Guard};
-pub use opts::Parsed;
 
 /// A git argv split into leading global options and the subcommand.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -60,8 +34,8 @@ pub struct GitArgs {
     /// `--git-dir` (or `--bare`, which means `.`).
     pub git_dir: Option<String>,
     pub work_tree: Option<String>,
-    /// Config keys set with `-c key[=value]` or `--config-env key=VAR`.
-    pub config_keys: Vec<String>,
+    /// Values of `-c` and `--config-env` (`key=value`, `key=VAR`).
+    pub config: Vec<String>,
     /// `--version`, `--help` and similar: git prints something and exits.
     pub info_only: bool,
     /// argv indexes of globals that retarget git (`-C`, `--git-dir`,
@@ -69,30 +43,9 @@ pub struct GitArgs {
     pub retarget_indexes: Vec<usize>,
 }
 
-const INFO_GLOBALS: &[&str] = &[
-    "--version",
-    "-v",
-    "--help",
-    "-h",
-    "--html-path",
-    "--man-path",
-    "--info-path",
-    "--exec-path",
-];
-const FLAG_GLOBALS: &[&str] = &[
-    "-p",
-    "--paginate",
-    "-P",
-    "--no-pager",
-    "--no-replace-objects",
-    "--literal-pathspecs",
-    "--glob-pathspecs",
-    "--noglob-pathspecs",
-    "--icase-pathspecs",
-    "--no-optional-locks",
-    "--no-lazy-fetch",
-    "--no-advice",
-];
+const INFO_GLOBALS: &str = "--version -v --help -h --html-path --man-path --info-path --exec-path";
+const FLAG_GLOBALS: &str = "-p --paginate -P --no-pager --no-replace-objects --literal-pathspecs --glob-pathspecs \
+    --noglob-pathspecs --icase-pathspecs --no-optional-locks --no-lazy-fetch --no-advice";
 const VALUE_GLOBALS: &[&str] = &["--namespace", "--super-prefix", "--attr-source"];
 
 /// Splits leading global options from the subcommand. git matches globals
@@ -106,9 +59,9 @@ pub fn parse(args: &[String]) -> GitArgs {
         if !a.starts_with('-') {
             break;
         }
-        if INFO_GLOBALS.contains(&a) {
+        if listed(INFO_GLOBALS, a) {
             g.info_only = true;
-        } else if FLAG_GLOBALS.contains(&a) {
+        } else if listed(FLAG_GLOBALS, a) {
         } else if a == "-C" || a == "--git-dir" || a == "--work-tree" {
             let Some(v) = args.get(i + 1) else { break };
             g.retarget_indexes.extend([i, i + 1]);
@@ -129,10 +82,10 @@ pub fn parse(args: &[String]) -> GitArgs {
             g.git_dir = Some(".".into());
         } else if a == "-c" || a == "--config-env" {
             let Some(v) = args.get(i + 1) else { break };
-            g.config_keys.push(config_key_of(v));
+            g.config.push(v.clone());
             i += 1;
         } else if let Some(v) = a.strip_prefix("--config-env=") {
-            g.config_keys.push(config_key_of(v));
+            g.config.push(v.to_string());
         } else if VALUE_GLOBALS.contains(&a) {
             if i + 1 >= args.len() {
                 break;
@@ -153,17 +106,12 @@ pub fn parse(args: &[String]) -> GitArgs {
     g
 }
 
-/// `key=value` / `key` → `key`.
-fn config_key_of(v: &str) -> String {
-    v.split('=').next().unwrap_or_default().to_string()
-}
-
 /// What to do with the call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Decision {
     Run {
-        /// Run in this worktree (`-C`, retargeting globals dropped) instead
-        /// of where the caller pointed git.
+        /// Run in this directory of the bound worktree (`-C`, retargeting
+        /// globals dropped) instead of where the caller pointed git.
         route: Option<PathBuf>,
         /// Take a snapshot first; the name of the destructive operation.
         snapshot: Option<&'static str>,
@@ -173,57 +121,37 @@ pub enum Decision {
     Refuse(Refusal),
 }
 
-impl Decision {
-    fn pass() -> Decision {
-        Decision::Run {
-            route: None,
-            snapshot: None,
-            note: None,
-        }
-    }
-}
+/// Run as typed.
+pub const PASS: Decision = Decision::Run {
+    route: None,
+    snapshot: None,
+    note: None,
+};
 
-/// Questions only git can answer, asked lazily.
+/// Questions only git (or the file system) can answer, asked lazily.
 pub trait Probe {
-    /// Where `full_ref` finally points if it is a symbolic ref (following
-    /// chains), in the repo the command acts on.
-    fn symref_target(&self, full_ref: &str) -> Option<String>;
-    /// `git config --get-regexp <regex>` in the repo the command acts on.
-    fn config(&self, regex: &str) -> Vec<(String, String)>;
     /// A foreign repo: whether it is the team's remote itself, or one of its
     /// remotes is the team repo (a clone).
     fn is_team_repo(&self) -> bool;
     /// A foreign repo: whether push destination `dest` is the team repo.
     fn is_team_remote(&self, dest: &str) -> bool;
-    /// Whether `git push <remote>` from the bound worktree (or the repo the
-    /// command acts on) sends to the team repo, and only there.
-    fn is_team_push_remote(&self, remote: &str) -> bool;
-    /// `git rev-parse --symbolic-full-name <rev>` in the repo the command
-    /// acts on (`None` if git fails; empty for a detached HEAD entry).
-    fn symbolic_full_name(&self, rev: &str) -> Option<String>;
+    /// `git rev-parse <args>` in the bound worktree: trimmed stdout, if it
+    /// succeeded.
+    fn rev_parse(&self, args: &[&str]) -> Option<String>;
+    /// Whether the bound worktree has the agend hooks (`hook::CHAIN_FILE`).
+    fn hooks_installed(&self) -> bool;
 }
 
 /// The caller's git environment, as it affects where a write lands.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct GitEnv {
     /// `GIT_DIR`/`GIT_WORK_TREE`/`GIT_COMMON_DIR`/`GIT_INDEX_FILE` are set
     /// (routing cannot drop them, so a call that needs routing is refused).
     pub retargets: bool,
     /// `GIT_INDEX_FILE`, resolved against the directory git runs in.
     pub index_file: Option<PathBuf>,
-    /// Keys set through `GIT_CONFIG_COUNT` / `GIT_CONFIG_PARAMETERS`, or why
-    /// they could not be read.
-    pub config_keys: Result<Vec<String>, String>,
-}
-
-impl Default for GitEnv {
-    fn default() -> GitEnv {
-        GitEnv {
-            retargets: false,
-            index_file: None,
-            config_keys: Ok(Vec::new()),
-        }
-    }
+    /// Values of `GIT_CONFIG_PARAMETERS` and `GIT_CONFIG_KEY_<n>`.
+    pub config: Vec<String>,
 }
 
 pub struct Input<'a> {
@@ -233,20 +161,17 @@ pub struct Input<'a> {
     /// Git's answer for the call (`None`: not a repo, or not resolved).
     pub resolved: Option<&'a Resolved>,
     pub env: &'a GitEnv,
-    pub protected: &'a ProtectedRefs,
     /// Where the caller pointed git (cwd with `-C` applied), for messages.
     pub dir: &'a Path,
     pub probe: &'a dyn Probe,
 }
 
+/// Read-only, or creating a new repo elsewhere (`init`, `clone`): no
+/// binding needed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Kind {
     Read,
-    /// Writes only remote-tracking refs (after its checks): no binding
-    /// needed, routed like a read.
-    Fetch,
     Write,
-    NewRepo,
 }
 
 /// Whether the decision depends on where the call acts. Calls that print
@@ -258,80 +183,49 @@ pub fn needs_location(args: &GitArgs) -> bool {
 pub fn classify(input: &Input) -> Decision {
     let args = input.args;
     let Some(sub) = args.sub.as_deref() else {
-        return Decision::pass();
+        return PASS;
     };
     if args.info_only {
-        return Decision::pass();
+        return PASS;
     }
     let rest = args.rest.as_slice();
     if input.location == Location::Foreign {
         return foreign(input, sub, rest);
     }
+    if let Err(r) = check_hooks_kept(sub, rest, input) {
+        return Decision::Refuse(r);
+    }
     let binding = input.snapshot.ok().and_then(|s| s.binding.as_ref());
-
-    if sub == "worktree" && !matches!(first_positional(rest), Some("list")) {
-        return Decision::Refuse(refuse_worktree(sub, rest, binding));
+    if sub == "worktree" && first_positional(rest) != Some("list") {
+        return Decision::Refuse(refuse_worktree(rest, binding));
     }
-    if matches!(sub, "filter-branch" | "filter-repo" | "replace") {
-        return Decision::Refuse(Refusal::new(
-            "history_rewrite",
-            format!("`git {sub}` rewrites shared history and is not allowed for agents"),
-            "commit fixes on your branch instead; if history must change, ask a human: agend ask \"<question>\"",
-        ));
-    }
-    if sub == "fast-import" {
-        return Decision::Refuse(refs::refuse_stdin(sub));
-    }
-    let parsed = match specs::of(sub).map(|spec| opts::parse(spec, rest)) {
-        None => None,
-        Some(Ok(p)) => Some(p),
-        Some(Err(u)) => return Decision::Refuse(refuse_option(sub, &u)),
-    };
-    let Some(kind) = kind(sub, rest, parsed.as_ref()) else {
-        return Decision::Refuse(Refusal::new(
+    match kind(sub, rest) {
+        None => Decision::Refuse(Refusal::new(
             "unknown_command",
             format!(
                 "`git {sub}` is not a git command the agend shim knows (aliases and external git-* commands are not allowed for agents)"
             ),
             "run the underlying built-in git command directly; list them with: git help -a",
-        ));
-    };
-    if kind == Kind::NewRepo {
-        return Decision::pass();
+        )),
+        Some(Kind::Read) => route_read(input, binding),
+        Some(Kind::Write) => write(input, sub, rest),
     }
-    if kind == Kind::Read {
-        return route_read(input, binding);
-    }
-    if let Err(r) = check_config_channel(input) {
-        return Decision::Refuse(r);
-    }
-    let guard = Guard {
-        binding,
-        protected: input.protected,
-        probe: input.probe,
-    };
-    let parsed = parsed.unwrap_or_default();
-    if kind == Kind::Fetch {
-        return match refs::fetch(sub, &parsed, &guard) {
-            Ok(()) => route_read(input, binding),
-            Err(r) => Decision::Refuse(r),
-        };
-    }
+}
 
+fn write(input: &Input, sub: &str, rest: &[String]) -> Decision {
+    let refuse = Decision::Refuse;
     let snapshot = match input.snapshot {
         Ok(s) => s,
-        Err(e) => return Decision::Refuse(refuse_no_binding(sub, e)),
+        Err(e) => return refuse(refuse_no_binding(sub, e)),
     };
     let Some(binding) = snapshot.binding.as_ref() else {
-        return Decision::Refuse(refuse_unbound(sub, input.location, input.dir));
+        return refuse(refuse_unbound(sub, input.location, input.dir));
     };
-    if !binding.worktree().is_dir() {
-        return Decision::Refuse(Refusal::new(
+    let wt = binding.worktree();
+    if !wt.is_dir() {
+        return refuse(Refusal::new(
             "worktree_missing",
-            format!(
-                "your bound worktree {} does not exist",
-                binding.worktree().display()
-            ),
+            format!("your bound worktree {} does not exist", wt.display()),
             "run `agend status`; the daemon re-creates or re-assigns the worktree",
         ));
     }
@@ -340,50 +234,56 @@ pub fn classify(input: &Input) -> Decision {
     if input.location != Location::Worktree && no_work_tree && !named {
         // e.g. cwd inside the canonical `.git`: git itself would refuse a
         // work-tree write there; routing must not make it act anyway.
-        return Decision::Refuse(Refusal::new(
+        return refuse(Refusal::new(
             "route_dir_missing",
             format!(
                 "you ran `git {sub}` in {}, inside a git directory (git sees no work tree there), so the shim will not run it in your bound worktree",
                 input.dir.display()
             ),
-            format!("cd {} and run it there", binding.worktree().display()),
+            format!("cd {} and run it there", wt.display()),
         ));
     }
     let route = match input.location {
         Location::Worktree => None,
         _ => match route_dir(sub, input, binding) {
             Ok(dir) => Some(dir),
-            Err(r) => return Decision::Refuse(r),
+            Err(r) => return refuse(r),
         },
     };
     if route.is_some() && input.env.retargets {
-        return Decision::Refuse(Refusal::new(
+        return refuse(Refusal::new(
             "git_env_retarget",
-            "GIT_DIR / GIT_WORK_TREE / GIT_COMMON_DIR / GIT_INDEX_FILE make git act outside your bound worktree"
-                .to_string(),
+            "GIT_DIR / GIT_WORK_TREE / GIT_COMMON_DIR / GIT_INDEX_FILE make git act outside your bound worktree",
             format!(
                 "unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE and run plain `git {sub} ...`; it runs in {}",
-                binding.worktree().display()
+                wt.display()
             ),
         ));
     }
     if let Err(r) = check_work_tree(sub, input, binding) {
-        return Decision::Refuse(r);
+        return refuse(r);
     }
-    if let Err(r) = guard.own_branch_is_real(sub) {
-        return Decision::Refuse(r);
+    if !input.probe.hooks_installed() {
+        return refuse(Refusal::new(
+            "hooks_missing",
+            format!(
+                "your bound worktree {} has no agend git hooks, which guard protected refs, so `git {sub}` is refused",
+                wt.display()
+            ),
+            "run `agend status`; the daemon installs the hooks when it binds your worktree",
+        ));
     }
-    let snapshot_op = match check_write(sub, rest, &parsed, &guard, binding) {
-        Ok(op) => op,
-        Err(r) => return Decision::Refuse(r),
-    };
+    let protected = ProtectedRefs::new(&snapshot.protected_refs);
+    if let Some(target) = leaves_branch(sub, rest, binding, input.probe) {
+        return refuse(refuse_switch(sub, &target, binding, &protected));
+    }
     let note = match (&route, input.location) {
         (Some(to), Location::Canonical) => Some(routed_note(to, input.dir)),
         _ => None,
     };
     Decision::Run {
         route,
-        snapshot: snapshot_op,
+        snapshot: destructive(sub, rest),
         note,
     }
 }
@@ -394,11 +294,11 @@ pub fn classify(input: &Input) -> Decision {
 /// is what the agent asked for, and routing it would be a surprise.
 fn route_read(input: &Input, binding: Option<&Binding>) -> Decision {
     let Some(binding) = binding else {
-        return Decision::pass();
+        return PASS;
     };
     let outside = matches!(input.location, Location::Canonical | Location::NoRepo);
     if !outside || input.env.retargets || !binding.worktree().is_dir() {
-        return Decision::pass();
+        return PASS;
     }
     let sub = input.args.sub.as_deref().unwrap_or("");
     let to = match route_dir(sub, input, binding) {
@@ -437,7 +337,6 @@ fn route_dir(sub: &str, input: &Input, binding: &Binding) -> Result<PathBuf, Ref
             (Ok(t), Ok(w)) => t.starts_with(w),
             _ => false,
         };
-    let shown = |p: &Path| p.display().to_string();
     if input.location == Location::OtherWorktree {
         let there = input.resolved.map_or(input.dir, Resolved::root);
         let go = if target_ok { &target } else { wt };
@@ -449,7 +348,7 @@ fn route_dir(sub: &str, input: &Input, binding: &Binding) -> Result<PathBuf, Ref
                 there.display(),
                 wt.display()
             ),
-            format!("cd {} and run it there", shown(go)),
+            format!("cd {} and run it there", go.display()),
         ));
     }
     if target_ok {
@@ -478,15 +377,12 @@ fn routed_note(to: &Path, dir: &Path) -> String {
     )
 }
 
-/// A foreign repo is the agent's own business, except a clone of the team
-/// repo (writes refused) and a push whose destination is the team repo.
+/// A foreign repo has no agend hooks and is the agent's own business,
+/// except a clone of the team repo or the team's remote itself (writes
+/// refused) and a push whose destination is the team repo (T5).
 fn foreign(input: &Input, sub: &str, rest: &[String]) -> Decision {
-    let parsed = specs::of(sub).and_then(|spec| opts::parse(spec, rest).ok());
-    if matches!(
-        kind(sub, rest, parsed.as_ref()),
-        Some(Kind::Read | Kind::NewRepo)
-    ) {
-        return Decision::pass();
+    if kind(sub, rest) == Some(Kind::Read) {
+        return PASS;
     }
     let binding = input.snapshot.ok().and_then(|s| s.binding.as_ref());
     let next = match binding {
@@ -525,49 +421,30 @@ fn foreign(input: &Input, sub: &str, rest: &[String]) -> Decision {
             }
         }
     }
-    Decision::pass()
+    PASS
 }
 
-/// Config set for this one call (`-c`, `--config-env`, `GIT_CONFIG_*`) may
-/// only touch keys an agent may set at all.
-fn check_config_channel(input: &Input) -> Result<(), Refusal> {
-    let env_keys = match &input.env.config_keys {
-        Ok(keys) => keys.as_slice(),
-        Err(e) => {
-            return Err(Refusal::new(
-                "config_override",
-                format!("cannot read the config set in the environment: {e}"),
-                "unset GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT and retry",
-            ));
-        }
-    };
-    let bad = input
-        .args
-        .config_keys
-        .iter()
-        .chain(env_keys)
-        .find(|k| !config_keys::allowed(k));
-    match bad {
-        None => Ok(()),
-        Some(key) => {
-            let mut next = format!(
-                "drop the -c / --config-env / GIT_CONFIG_* setting; only these keys may be set: {}",
-                config_keys::ALLOWED_HINT
-            );
-            if let Some(hint) = config_keys::editor_hint(key) {
-                next = format!("{next}; {hint}");
-            }
-            Err(Refusal::new(
-                "config_override",
-                config_keys::refused_because(key).replacen(
-                    " is refused",
-                    " for this command is refused",
-                    1,
-                ),
-                next,
-            ))
-        }
+/// The agend hooks must run: no `core.hooksPath` set for one call (`-c`,
+/// `--config-env`, `GIT_CONFIG_*`), no `push --no-verify` (skips pre-push).
+fn check_hooks_kept(sub: &str, rest: &[String], input: &Input) -> Result<(), Refusal> {
+    let mut config = input.args.config.iter().chain(&input.env.config);
+    if config.any(|v| v.to_ascii_lowercase().contains("core.hookspath")) {
+        return Err(Refusal::new(
+            "hooks_skipped",
+            format!(
+                "setting core.hooksPath for `git {sub}` would skip the agend git hooks that guard protected refs"
+            ),
+            "drop the -c / --config-env / GIT_CONFIG_* core.hooksPath setting; your project's own hooks still run (the agend hooks chain to them)",
+        ));
     }
+    if sub == "push" && options(rest).any(|a| long(a, "--no-verify")) {
+        return Err(Refusal::new(
+            "hooks_skipped",
+            "`git push --no-verify` would skip the agend pre-push hook",
+            "push without --no-verify: git push origin HEAD:refs/heads/<your branch>",
+        ));
+    }
+    Ok(())
 }
 
 /// A write must act on the bound worktree. In its git dir (`Worktree`),
@@ -636,182 +513,190 @@ fn check_work_tree(sub: &str, input: &Input, binding: &Binding) -> Result<(), Re
     Ok(())
 }
 
-/// Command-specific checks for a bound agent's write. Returns the name of the
-/// destructive operation to snapshot, if any.
-fn check_write(
-    sub: &str,
-    rest: &[String],
-    p: &Parsed,
-    g: &Guard,
-    binding: &Binding,
-) -> Result<Option<&'static str>, Refusal> {
-    match sub {
-        "checkout" => commands::checkout(p, g, binding),
-        "switch" => commands::switch(p, g, binding),
-        "branch" => commands::branch(p, g, binding).map(|_| None),
-        "tag" => commands::tag(p, g).map(|_| None),
-        "rebase" => commands::rebase(p, g, binding).map(|_| None),
-        "stash" => commands::stash(rest, binding).map(|_| None),
-        "config" => commands::config(p).map(|_| None),
-        "remote" => commands::remote(rest, g).map(|_| None),
-        "push" => refs::push(p, g, binding).map(|_| None),
-        "pull" => refs::fetch(sub, p, g)
-            .and_then(|_| commands::pull_rebase(p, g))
-            .map(|_| None),
-        "update-ref" => refs::update_ref(p, g, binding).map(|_| None),
-        "symbolic-ref" => refs::symbolic_ref(p, g, binding).map(|_| None),
-        "reset" => Ok(p.any(&["--hard", "--merge", "--keep"]).then_some("reset")),
-        "clean" => Ok((!p.has("--dry-run")).then_some("clean")),
-        "restore" => Ok((!p.has("--staged") || p.has("--worktree")).then_some("restore")),
-        "read-tree" => Ok((p.has("-u") && !p.has("--dry-run")).then_some("read-tree")),
-        // Without `--force` git refuses to remove a file whose content is not
-        // committed; with it, uncommitted edits are gone. `--cached` only
-        // touches the index.
-        "rm" => Ok((p.has("--force") && !p.any(&["--cached", "--dry-run"])).then_some("rm")),
-        _ => Ok(None),
+// ── leaving the bound branch ────────────────────────────────────────────
+
+/// The target named when `checkout`/`switch` would leave the bound branch.
+/// `checkout` with paths (after `--`, or several arguments, or one that is
+/// not a commit) restores files instead; a new branch it would create from
+/// a remote one is refused by the hook.
+fn leaves_branch(sub: &str, rest: &[String], b: &Binding, probe: &dyn Probe) -> Option<String> {
+    // Options that create a branch or detach HEAD.
+    let (longs, letters): (&[&str], &str) = match sub {
+        "checkout" => (&["--detach", "--orphan"], "bBd"),
+        "switch" => (
+            &["--detach", "--orphan", "--create", "--force-create"],
+            "cCd",
+        ),
+        _ => return None,
+    };
+    if let Some(flag) =
+        options(rest).find(|a| longs.iter().any(|l| long(a, l)) || short(a, letters))
+    {
+        return Some(flag.to_string());
     }
+    let dashdash = rest.iter().position(|a| a == "--");
+    let pos: Vec<&str> = rest[..dashdash.unwrap_or(rest.len())]
+        .iter()
+        .map(String::as_str)
+        .filter(|a| !a.starts_with('-') || *a == "-")
+        .collect();
+    let target = *pos.first()?;
+    if sub == "checkout" {
+        let paths_after = dashdash.is_some_and(|i| i + 1 < rest.len());
+        if paths_after || pos.len() > 1 {
+            return None;
+        }
+        let names_commit = previous(target).is_some()
+            || probe
+                .rev_parse(&["--verify", "-q", &format!("{target}^{{commit}}")])
+                .is_some();
+        if dashdash.is_none() && !names_commit {
+            return None;
+        }
+    }
+    (!stays(target, b, probe)).then(|| target.to_string())
 }
 
-// ── command kinds ───────────────────────────────────────────────────────
+/// `-` and `@{-<n>}` (a previously checked-out branch) as a revision.
+fn previous(target: &str) -> Option<String> {
+    let n = match target {
+        "-" => "1",
+        t => t.strip_prefix("@{-")?.strip_suffix('}')?,
+    };
+    (!n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())).then(|| format!("@{{-{n}}}"))
+}
 
-const READ: &[&str] = &[
-    "status",
-    "log",
-    "diff",
-    "show",
-    "blame",
-    "annotate",
-    "ls-files",
-    "ls-tree",
-    "rev-parse",
-    "rev-list",
-    "cat-file",
-    "describe",
-    "shortlog",
-    "grep",
-    "for-each-ref",
-    "show-ref",
-    "name-rev",
-    "merge-base",
-    "merge-tree",
-    "diff-tree",
-    "diff-index",
-    "diff-files",
-    "difftool",
-    "count-objects",
-    "check-ignore",
-    "check-attr",
-    "check-mailmap",
-    "check-ref-format",
-    "var",
-    "help",
-    "version",
-    "whatchanged",
-    "format-patch",
-    "range-diff",
-    "cherry",
-    "fsck",
-    "verify-commit",
-    "verify-tag",
-    "verify-pack",
-    "archive",
-    "show-branch",
-    "patch-id",
-    "ls-remote",
-    "hash-object",
-    "request-pull",
-    "interpret-trailers",
-    "stripspace",
-    "column",
-    "get-tar-commit-id",
-];
-
-const WRITE: &[&str] = &[
-    "add",
-    "rm",
-    "mv",
-    "commit",
-    "reset",
-    "restore",
-    "checkout",
-    "switch",
-    "merge",
-    "rebase",
-    "cherry-pick",
-    "revert",
-    "pull",
-    "push",
-    "am",
-    "apply",
-    "stash",
-    "tag",
-    "branch",
-    "notes",
-    "clean",
-    "gc",
-    "prune",
-    "repack",
-    "pack-refs",
-    "maintenance",
-    "update-index",
-    "read-tree",
-    "write-tree",
-    "commit-tree",
-    "mktree",
-    "mktag",
-    "update-ref",
-    "symbolic-ref",
-    "bisect",
-    "sparse-checkout",
-    "lfs",
-    "rerere",
-    "submodule",
-    "config",
-    "remote",
-    "reflog",
-    "unpack-objects",
-];
-
-/// `parsed` is the exact-spelling parse for subcommands that have a spec;
-/// without it (foreign repos, parse failure) option-dependent reads count as
-/// writes.
-fn kind(sub: &str, rest: &[String], parsed: Option<&Parsed>) -> Option<Kind> {
-    if matches!(sub, "init" | "clone") {
-        return Some(Kind::NewRepo);
+/// Whether switching to `target` stays on the bound branch (`-` resolved by
+/// git in the bound worktree).
+fn stays(target: &str, b: &Binding, probe: &dyn Probe) -> bool {
+    if matches!(target, "HEAD" | "@") {
+        return true;
     }
-    if READ.contains(&sub) {
+    let Some(branch) = b.branch() else {
+        return false;
+    };
+    let full = match previous(target) {
+        Some(rev) => probe.rev_parse(&["--symbolic-full-name", &rev]),
+        None => Some(target.to_string()),
+    };
+    full.is_some_and(|f| f == branch || f.strip_prefix("refs/heads/") == Some(branch))
+}
+
+fn refuse_switch(sub: &str, target: &str, b: &Binding, p: &ProtectedRefs) -> Refusal {
+    let bound = b.branch().unwrap_or("a detached review head");
+    let protected = if p.is_protected(&format!("refs/heads/{target}")) {
+        format!(" ({target} is protected: only the daemon changes it)")
+    } else {
+        String::new()
+    };
+    let mut next = stay_hint(Some(b));
+    if sub == "checkout" {
+        next.push_str(
+            ". To restore a file instead: git checkout -- <path>  or  git restore <path>",
+        );
+    }
+    Refusal::new(
+        "branch_switch",
+        format!(
+            "`git {sub} {target}` would leave your branch: you are bound to {bound}{protected}"
+        ),
+        next,
+    )
+}
+
+// ── snapshots ───────────────────────────────────────────────────────────
+
+/// Operations that are snapshotted (v1 agentic-git's scope).
+const SNAPSHOT_OPS: &str =
+    "reset clean checkout restore switch stash rm merge rebase pull cherry-pick revert am";
+
+/// The name of the destructive operation to snapshot before, if any:
+/// `reset --hard|--merge|--keep`, `clean` (any), `checkout` (any that is
+/// allowed: paths, or `-f`), `restore` of the work tree, `switch -f` /
+/// `--discard-changes`, `stash drop|clear`, `rm -f` (not `--cached`, not
+/// `-n`), and merge / rebase / pull / cherry-pick / revert / am.
+fn destructive(sub: &str, rest: &[String]) -> Option<&'static str> {
+    let has = |l: &str| options(rest).any(|a| long(a, l));
+    let has_short = |c: &str| options(rest).any(|a| short(a, c));
+    let yes = match sub {
+        "reset" => has("--hard") || has("--merge") || has("--keep"),
+        "restore" => !(has("--staged") || has_short("S")) || has("--worktree") || has_short("W"),
+        "switch" => has("--force") || has("--discard-changes") || has_short("f"),
+        "stash" => matches!(first_positional(rest), Some("drop" | "clear")),
+        "rm" => {
+            (has("--force") || has_short("f"))
+                && !has("--cached")
+                && !has("--dry-run")
+                && !options(rest).any(|a| a == "-n")
+        }
+        _ => true,
+    };
+    SNAPSHOT_OPS
+        .split_whitespace()
+        .find(|o| *o == sub)
+        .filter(|_| yes)
+}
+
+// ── option matching and command kinds ───────────────────────────────────
+
+/// Arguments before `--`.
+fn options(rest: &[String]) -> impl Iterator<Item = &str> {
+    rest.iter().map(String::as_str).take_while(|a| *a != "--")
+}
+
+/// `arg` is the long option `l`, or an abbreviation git accepts (at least
+/// five characters, `=value` allowed). `--force` is itself an option, so it
+/// never abbreviates `--force-create`.
+fn long(arg: &str, l: &str) -> bool {
+    let name = arg.split('=').next().unwrap_or(arg);
+    name == l || (name.len() >= 5 && l.starts_with(name) && name != "--force")
+}
+
+/// `arg` is a cluster of short options containing one of `letters`.
+fn short(arg: &str, letters: &str) -> bool {
+    arg.len() > 1
+        && arg.starts_with('-')
+        && !arg.starts_with("--")
+        && arg[1..].chars().any(|c| letters.contains(c))
+}
+
+const READ: &str = "init clone status log diff show blame annotate ls-files ls-tree rev-parse rev-list cat-file describe \
+    shortlog grep for-each-ref show-ref name-rev merge-base merge-tree diff-tree diff-index \
+    diff-files difftool count-objects check-ignore check-attr check-mailmap check-ref-format \
+    var help version whatchanged format-patch range-diff cherry fsck verify-commit verify-tag \
+    verify-pack archive show-branch patch-id ls-remote hash-object request-pull \
+    interpret-trailers stripspace column get-tar-commit-id";
+
+const WRITE: &str = "add rm mv commit reset restore checkout switch merge rebase cherry-pick revert pull push \
+    fetch am apply clean gc prune repack pack-refs maintenance update-index read-tree \
+    write-tree commit-tree mktree mktag update-ref symbolic-ref bisect lfs rerere config \
+    filter-branch fast-import replace unpack-objects";
+
+/// Read or write, by the subcommand and (for the mixed ones) its first
+/// positional; `None` for a command the shim does not know.
+fn kind(sub: &str, rest: &[String]) -> Option<Kind> {
+    if listed(READ, sub) {
         return Some(Kind::Read);
     }
-    if sub == "worktree" {
-        // Only `worktree list` reads. `add`/`remove`/`move`/`prune`/`lock`/
-        // `repair` change the repo's worktree list (and `add` creates a
-        // branch), so in a foreign repo they are writes too: refused in the
-        // team's remote and its clones, run in a truly foreign repo.
-        let list = first_positional(rest) == Some("list");
-        return Some(if list { Kind::Read } else { Kind::Write });
-    }
-    if sub == "fetch" {
-        return Some(Kind::Fetch);
-    }
-    if !WRITE.contains(&sub) {
-        return None;
-    }
     let first = first_positional(rest);
-    let with = |f: fn(&Parsed) -> bool| parsed.is_some_and(f);
     let read = match sub {
-        "branch" => with(|p| commands::branch_op(p) == BranchOp::List),
-        "tag" => with(commands::tag_is_list),
-        "config" => with(commands::config_is_read),
-        "symbolic-ref" => with(|p| !refs::symbolic_ref_writes(p)),
+        // Listing forms only; anything with a name counts as a write.
+        "branch" | "tag" => first.is_none(),
         "stash" => matches!(first, Some("list" | "show")),
         "remote" => matches!(first, None | Some("show" | "get-url")),
         "reflog" => !matches!(first, Some("expire" | "delete")),
-        "notes" => matches!(first, None | Some("list" | "show")),
         "submodule" => matches!(first, None | Some("status" | "summary")),
-        "sparse-checkout" => matches!(first, Some("list")),
-        _ => false,
+        "notes" => matches!(first, None | Some("list" | "show")),
+        "sparse-checkout" | "worktree" => first == Some("list"),
+        s if listed(WRITE, s) => false,
+        _ => return None,
     };
     Some(if read { Kind::Read } else { Kind::Write })
+}
+
+/// Whether `word` is one of the whitespace-separated words of `list`.
+fn listed(list: &str, word: &str) -> bool {
+    list.split_whitespace().any(|w| w == word)
 }
 
 fn first_positional(rest: &[String]) -> Option<&str> {
@@ -822,27 +707,7 @@ fn first_positional(rest: &[String]) -> Option<&str> {
 
 // ── refusals shared by every command ────────────────────────────────────
 
-fn refuse_option(sub: &str, u: &opts::Unknown) -> Refusal {
-    let reason = match u.like {
-        Some(full) => format!(
-            "`{}` looks like an abbreviation of `--{full}`; the agend shim only accepts options spelled in full for `git {sub}`",
-            u.arg
-        ),
-        None => format!(
-            "`{}` is not an option the agend shim accepts for `git {sub}` (abbreviated, attached or unsupported spellings are refused)",
-            u.arg
-        ),
-    };
-    Refusal::new(
-        "option_unknown",
-        reason,
-        format!(
-            "spell the option in full as `git {sub} -h` lists it, or run without it; if a real option is missing, ask: agend ask \"shim option for git {sub}\""
-        ),
-    )
-}
-
-fn refuse_worktree(sub: &str, rest: &[String], binding: Option<&Binding>) -> Refusal {
+fn refuse_worktree(rest: &[String], binding: Option<&Binding>) -> Refusal {
     let what = first_positional(rest).unwrap_or("");
     let next = match binding {
         Some(b) => format!(
@@ -854,7 +719,7 @@ fn refuse_worktree(sub: &str, rest: &[String], binding: Option<&Binding>) -> Ref
     };
     Refusal::new(
         "worktree_managed",
-        format!("`git {sub} {what}` is refused: only the daemon creates and removes worktrees"),
+        format!("`git worktree {what}` is refused: only the daemon creates and removes worktrees"),
         next,
     )
 }
@@ -876,21 +741,22 @@ fn refuse_no_binding(sub: &str, err: &SnapshotError) -> Refusal {
 }
 
 fn refuse_unbound(sub: &str, location: Location, dir: &Path) -> Refusal {
-    let next = "run `agend status` to see your assignment; the daemon gives you a worktree when it assigns a task. To start new work: agend task create \"<title>\"";
-    if location == Location::Canonical {
-        Refusal::new(
+    let (code, reason) = match location {
+        Location::Canonical => (
             "canonical_checkout",
             format!(
                 "`git {sub}` would change the canonical checkout {} and you have no task bound; agents never change the canonical checkout",
                 dir.display()
             ),
-            next,
-        )
-    } else {
-        Refusal::new(
+        ),
+        _ => (
             "unbound",
             format!("`git {sub}` changes the repo but you have no task bound"),
-            next,
-        )
-    }
+        ),
+    };
+    Refusal::new(
+        code,
+        reason,
+        "run `agend status` to see your assignment; the daemon gives you a worktree when it assigns a task. To start new work: agend task create \"<title>\"",
+    )
 }

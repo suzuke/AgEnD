@@ -9,8 +9,8 @@
 //! - `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_INDEX_FILE`: git's
 //!   own retargeting; `GIT_CEILING_DIRECTORIES` (kept when the shim asks
 //!   git where a call acts).
-//! - `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_<n>`, `GIT_CONFIG_PARAMETERS`:
-//!   config set for one call (keys checked like `-c`).
+//! - `GIT_CONFIG_KEY_<n>`, `GIT_CONFIG_PARAMETERS`: config set for one
+//!   call (checked only for `core.hooksPath`, like `-c`).
 //!
 //! Must NOT: read config files, open the DB or contact the daemon.
 
@@ -23,6 +23,14 @@ pub const BYPASS_ENV: &str = "AGEND_SHIM_BYPASS";
 pub const DEPTH_ENV: &str = "AGEND_SHIM_DEPTH";
 /// Depth at which the shim refuses instead of recursing further.
 pub const MAX_DEPTH: u32 = 8;
+/// git's env vars that choose the repo, work tree or index; removed when
+/// the shim asks git about a repo it names itself.
+pub const RETARGET_ENV: [&str; 4] = [
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_COMMON_DIR",
+    "GIT_INDEX_FILE",
+];
 
 #[derive(Debug, Clone, Default)]
 pub struct Ctx {
@@ -40,21 +48,20 @@ pub struct Ctx {
     pub git_common_dir: Option<PathBuf>,
     pub git_index_file: Option<PathBuf>,
     pub git_ceiling_dirs: Option<OsString>,
-    /// Keys set through `GIT_CONFIG_COUNT`/`GIT_CONFIG_PARAMETERS`.
-    pub config_env_keys: Vec<String>,
-    /// Why those could not be read (the shim then refuses writes).
-    pub config_env_error: Option<String>,
+    /// Values of `GIT_CONFIG_PARAMETERS` and every `GIT_CONFIG_KEY_<n>`.
+    pub config_env: Vec<String>,
 }
 
 impl Ctx {
     pub fn from_env() -> Ctx {
         let non_empty = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty());
-        let var = |k: &str| std::env::var(k).ok();
-        let config_env = crate::config_keys::from_env(
-            var("GIT_CONFIG_PARAMETERS").as_deref(),
-            var("GIT_CONFIG_COUNT").as_deref(),
-            &|i| var(&format!("GIT_CONFIG_KEY_{i}")),
-        );
+        let config_env = std::env::vars_os()
+            .filter(|(k, _)| {
+                k == "GIT_CONFIG_PARAMETERS"
+                    || k.to_str().is_some_and(|k| k.starts_with("GIT_CONFIG_KEY_"))
+            })
+            .map(|(_, v)| v.to_string_lossy().into_owned())
+            .collect();
         Ctx {
             home: non_empty("AGEND_HOME").map(PathBuf::from),
             instance: non_empty("AGEND_INSTANCE").map(|v| v.to_string_lossy().into_owned()),
@@ -71,8 +78,7 @@ impl Ctx {
             git_common_dir: non_empty("GIT_COMMON_DIR").map(PathBuf::from),
             git_index_file: non_empty("GIT_INDEX_FILE").map(PathBuf::from),
             git_ceiling_dirs: non_empty("GIT_CEILING_DIRECTORIES"),
-            config_env_keys: config_env.clone().unwrap_or_default(),
-            config_env_error: config_env.err(),
+            config_env,
         }
     }
 
@@ -84,10 +90,7 @@ impl Ctx {
 
     /// Whether git's retargeting env vars are set.
     pub fn git_env_retargets(&self) -> bool {
-        self.git_dir.is_some()
-            || self.git_work_tree.is_some()
-            || self.git_common_dir.is_some()
-            || self.git_index_file.is_some()
+        self.git_env_names_repo() || self.git_index_file.is_some()
     }
 
     /// The real `name` binary: the first executable `name` on PATH that is
@@ -115,18 +118,18 @@ impl Ctx {
 /// Identity of a file: (device, inode) on unix, so symlinks and hard links
 /// to the same binary compare equal; the resolved path elsewhere.
 #[cfg(unix)]
-fn identity(p: &Path) -> Option<(u64, u64)> {
+pub(crate) fn identity(p: &Path) -> Option<(u64, u64)> {
     use std::os::unix::fs::MetadataExt;
     let meta = std::fs::metadata(p).ok()?;
     Some((meta.dev(), meta.ino()))
 }
 
 #[cfg(not(unix))]
-fn identity(p: &Path) -> Option<PathBuf> {
+pub(crate) fn identity(p: &Path) -> Option<PathBuf> {
     std::fs::canonicalize(p).ok()
 }
 
-fn is_executable(p: &Path) -> bool {
+pub(crate) fn is_executable(p: &Path) -> bool {
     let Ok(meta) = std::fs::metadata(p) else {
         return false;
     };
@@ -149,37 +152,4 @@ pub fn lossy(args: &[OsString]) -> Vec<String> {
 }
 
 #[cfg(all(test, unix))]
-mod tests {
-    use super::*;
-    use agend_testkit::tempdir::TempDir;
-    use std::os::unix::fs::symlink;
-
-    #[test]
-    fn real_tool_skips_links_to_the_shim() {
-        let dir = TempDir::new("ctx").unwrap();
-        let shim_dir = dir.path().join("shim");
-        let real_dir = dir.path().join("real");
-        std::fs::create_dir_all(&shim_dir).unwrap();
-        std::fs::create_dir_all(&real_dir).unwrap();
-        let me = dir.path().join("agend");
-        std::fs::write(&me, "#!/bin/sh\n").unwrap();
-        std::fs::set_permissions(&me, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
-        symlink(&me, shim_dir.join("git")).unwrap();
-        std::fs::hard_link(&me, real_dir.join("pkill")).unwrap();
-        let real_git = real_dir.join("git");
-        std::fs::write(&real_git, "#!/bin/sh\n").unwrap();
-        std::fs::set_permissions(
-            &real_git,
-            std::os::unix::fs::PermissionsExt::from_mode(0o755),
-        )
-        .unwrap();
-        let ctx = Ctx {
-            path: std::env::join_paths([&shim_dir, &real_dir]).unwrap(),
-            self_exe: Some(me),
-            ..Ctx::default()
-        };
-        assert_eq!(ctx.find_real("git"), Some(real_git));
-        assert_eq!(ctx.find_real("pkill"), None, "hard link to the shim");
-        assert_eq!(ctx.find_real("nope"), None);
-    }
-}
+mod tests;

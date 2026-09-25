@@ -1,10 +1,10 @@
 //! Decision tests: argv (+ a fake `Probe`) → run / route / snapshot /
-//! refuse. Real-git behaviour is in `tests/`.
+//! refuse. Real-git behaviour, including the hooks, is in
+//! `crates/agend/tests/shim_*.rs`.
 
 use super::*;
 use crate::binding::SNAPSHOT_VERSION;
 use agend_core::model::work_branch;
-use std::cell::RefCell;
 
 fn argv(s: &str) -> Vec<String> {
     s.split_whitespace().map(String::from).collect()
@@ -43,56 +43,62 @@ fn unbound() -> Snapshot {
     }
 }
 
-/// Answers from fixed tables; records config questions.
-#[derive(Default)]
+/// Answers from fixed tables.
 struct Fake {
-    symrefs: Vec<(&'static str, &'static str)>,
-    config: Vec<(&'static str, &'static str)>,
     team_repo: bool,
     team_remotes: Vec<&'static str>,
-    /// Remote names `is_team_push_remote` accepts.
-    team_push: Vec<&'static str>,
     /// `rev-parse --symbolic-full-name` answers.
     names: Vec<(&'static str, &'static str)>,
-    asked: RefCell<Vec<String>>,
+    /// Revisions that name a commit.
+    commits: Vec<&'static str>,
+    hooks: bool,
+}
+
+impl Default for Fake {
+    fn default() -> Fake {
+        Fake {
+            team_repo: false,
+            team_remotes: Vec::new(),
+            names: Vec::new(),
+            commits: vec![
+                "main",
+                "master",
+                "feature",
+                "abc123",
+                "HEAD",
+                "HEAD~1",
+                "agend/t-1/fix",
+                "refs/heads/agend/t-1/fix",
+                "origin/other-feature",
+            ],
+            hooks: true,
+        }
+    }
 }
 
 impl Probe for Fake {
-    fn symref_target(&self, full_ref: &str) -> Option<String> {
-        self.symrefs
-            .iter()
-            .find(|(n, _)| *n == full_ref)
-            .map(|(_, t)| t.to_string())
-    }
-    fn config(&self, regex: &str) -> Vec<(String, String)> {
-        self.asked.borrow_mut().push(regex.to_string());
-        let key_part = regex.trim_start_matches('^').trim_end_matches('$');
-        self.config
-            .iter()
-            .filter(|(k, _)| match key_part {
-                r"remote\..*\.fetch" => k.starts_with("remote.") && k.ends_with(".fetch"),
-                r"(push|remote|branch)\." => ["push.", "remote.", "branch."]
-                    .iter()
-                    .any(|p| k.starts_with(p)),
-                other => k.eq_ignore_ascii_case(&other.replace('\\', "")),
-            })
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect()
-    }
     fn is_team_repo(&self) -> bool {
         self.team_repo
     }
     fn is_team_remote(&self, dest: &str) -> bool {
         self.team_remotes.contains(&dest)
     }
-    fn is_team_push_remote(&self, remote: &str) -> bool {
-        self.team_push.contains(&remote)
+    fn rev_parse(&self, args: &[&str]) -> Option<String> {
+        match args {
+            ["--symbolic-full-name", rev] => self
+                .names
+                .iter()
+                .find(|(r, _)| r == rev)
+                .map(|(_, n)| n.to_string()),
+            ["--verify", "-q", rev] => {
+                let rev = rev.strip_suffix("^{commit}")?;
+                self.commits.contains(&rev).then(|| "c0ffee".to_string())
+            }
+            other => panic!("unexpected rev-parse {other:?}"),
+        }
     }
-    fn symbolic_full_name(&self, rev: &str) -> Option<String> {
-        self.names
-            .iter()
-            .find(|(r, _)| *r == rev)
-            .map(|(_, n)| n.to_string())
+    fn hooks_installed(&self) -> bool {
+        self.hooks
     }
 }
 
@@ -143,14 +149,12 @@ fn run_full(
 ) -> Decision {
     let args = argv(cmd);
     let parsed = parse(&args);
-    let protected = ProtectedRefs::new(snap.map(|s| s.protected_refs.as_slice()).unwrap_or(&[]));
     classify(&Input {
         args: &parsed,
         snapshot: snap,
         location: loc,
         resolved,
         env,
-        protected: &protected,
         dir: Path::new("/somewhere"),
         probe,
     })
@@ -211,15 +215,15 @@ fn globals_are_split_from_the_subcommand() {
     assert_eq!(g.rest, argv("-m hi"));
     assert_eq!(g.chdirs, argv("/a b"));
     assert_eq!(g.retarget_indexes, vec![0, 1, 5, 6]);
-    assert_eq!(g.config_keys, ["x"]);
+    assert_eq!(g.config, ["x=y"]);
     let g = parse(&argv("--git-dir=/x/.git --work-tree /y status"));
     assert_eq!(g.git_dir.as_deref(), Some("/x/.git"));
     assert_eq!(g.work_tree.as_deref(), Some("/y"));
     assert_eq!(g.sub.as_deref(), Some("status"));
     let g = parse(&argv(
-        "--config-env=core.worktree=WT --config-env a.b=V -c flag.only log",
+        "--config-env=core.hooksPath=H --config-env a.b=V log",
     ));
-    assert_eq!(g.config_keys, ["core.worktree", "a.b", "flag.only"]);
+    assert_eq!(g.config, ["core.hooksPath=H", "a.b=V"]);
     assert!(parse(&argv("--version")).info_only);
     assert_eq!(parse(&argv("")).sub, None);
     // An unknown global becomes the "subcommand" and is refused.
@@ -237,7 +241,7 @@ fn bound_writes_route_into_the_worktree() {
             other => panic!("{loc:?}: {other:?}"),
         }
     }
-    assert_eq!(decide(&s, "commit -m x"), Decision::pass());
+    assert_eq!(decide(&s, "commit -m x"), PASS);
     // Round 5: another agent's worktree is the wrong directory, not a
     // place to route from.
     assert_eq!(
@@ -353,12 +357,8 @@ fn routing_keeps_the_callers_subdirectory() {
     );
     assert_eq!(code(&d), "route_dir_missing");
     // Reads there run where they were typed (not routed, not refused).
-    for cmd in ["status", "log", "diff", "fetch origin"] {
-        assert_eq!(
-            at(Location::OtherWorktree, "src/sub/", cmd),
-            Decision::pass(),
-            "{cmd}"
-        );
+    for cmd in ["status", "log", "diff", "branch --show-current"] {
+        assert_eq!(at(Location::OtherWorktree, "src/sub/", cmd), PASS, "{cmd}");
     }
 }
 
@@ -375,21 +375,21 @@ fn reads_route_only_when_bound_and_outside() {
         }
     ));
     let d = decide_at(Ok(&unbound()), Location::Canonical, "status");
-    assert_eq!(d, Decision::pass());
+    assert_eq!(d, PASS);
     let err = SnapshotError::NotAnAgent;
-    assert_eq!(
-        decide_at(Err(&err), Location::Unknown, "log"),
-        Decision::pass()
-    );
+    assert_eq!(decide_at(Err(&err), Location::Unknown, "log"), PASS);
 }
 
 #[test]
 fn mutations_need_a_binding() {
     let err = SnapshotError::Missing("/h/bindings/dev-1.json".into());
-    assert_eq!(
-        code(&decide_at(Err(&err), Location::Unknown, "commit -m x")),
-        "no_binding"
-    );
+    for cmd in ["commit -m x", "fetch origin", "branch x", "config a.b c"] {
+        assert_eq!(
+            code(&decide_at(Err(&err), Location::Unknown, cmd)),
+            "no_binding",
+            "{cmd}"
+        );
+    }
     assert_eq!(
         code(&decide_at(Ok(&unbound()), Location::NoRepo, "commit -m x")),
         "unbound"
@@ -397,6 +397,64 @@ fn mutations_need_a_binding() {
     assert_eq!(
         code(&decide_at(Ok(&unbound()), Location::Canonical, "add .")),
         "canonical_checkout"
+    );
+}
+
+/// The shim no longer checks refs: a bound worktree without the agend hooks
+/// would leave protected refs unguarded, so writes there are refused.
+#[test]
+fn writes_need_the_hooks_installed() {
+    let none = Fake {
+        hooks: false,
+        ..Fake::default()
+    };
+    for cmd in [
+        "commit -m x",
+        "push origin HEAD",
+        "update-ref refs/heads/main HEAD",
+    ] {
+        assert_eq!(code(&with_probe(&none, cmd)), "hooks_missing", "{cmd}");
+    }
+    assert_eq!(code(&with_probe(&none, "status")), "run");
+}
+
+#[test]
+fn skipping_the_hooks_is_refused() {
+    let s = work();
+    assert_codes(
+        &s,
+        "hooks_skipped",
+        &[
+            "-c core.hooksPath=/dev/null commit -m x",
+            "-c CORE.HOOKSPATH=x status",
+            "--config-env=core.hooksPath=H push",
+            "push --no-verify origin HEAD",
+            "push --no-veri origin HEAD",
+        ],
+    );
+    let env = |v: &str| GitEnv {
+        config: vec![v.to_string()],
+        ..GitEnv::default()
+    };
+    for v in ["core.hooksPath", "'core.hookspath'='/x'"] {
+        let d = run_with(
+            Ok(&s),
+            Location::Worktree,
+            &env(v),
+            &Fake::default(),
+            "commit -m x",
+        );
+        assert_eq!(code(&d), "hooks_skipped", "{v}");
+    }
+    // Other config, and `--no-verify` elsewhere, are the agent's business.
+    assert_codes(
+        &s,
+        "run",
+        &[
+            "-c core.editor=true commit --amend",
+            "-c remote.origin.push=HEAD:refs/heads/main push origin",
+            "commit --no-verify -m x",
+        ],
     );
 }
 
@@ -410,7 +468,7 @@ fn worktree_lifecycle_is_refused_even_when_bound() {
 }
 
 #[test]
-fn branch_switches_are_refused() {
+fn leaving_the_bound_branch_is_refused() {
     let s = work();
     assert_codes(
         &s,
@@ -418,18 +476,26 @@ fn branch_switches_are_refused() {
         &[
             "checkout main",
             "checkout feature",
-            "checkout -",
             "checkout --detach",
+            "checkout --deta",
             "checkout abc123",
             "checkout HEAD~1",
-            "checkout src/lib.rs",
+            "checkout -b feat/x",
+            "checkout -bfoo",
+            "checkout -B agend/t-1/x",
+            "checkout --orphan o",
+            "checkout --orph o",
+            "checkout other-feature --",
+            "checkout master --",
+            "checkout --track origin/other-feature",
             "switch main",
-            "switch -",
             "switch --detach HEAD~1",
-            "symbolic-ref HEAD refs/heads/main",
-            "update-ref --no-deref HEAD abc123",
-            "rebase main feature",
-            "rebase --root feature",
+            "switch --deta",
+            "switch -c agend/t-1/x",
+            "switch -cfoo",
+            "switch --create x",
+            "switch --force-create x",
+            "switch --orphan x",
         ],
     );
     let Decision::Refuse(r) = decide(&s, "checkout main") else {
@@ -443,12 +509,18 @@ fn branch_switches_are_refused() {
         "run",
         &[
             "checkout agend/t-1/fix",
+            "checkout refs/heads/agend/t-1/fix",
             "checkout HEAD",
             "switch agend/t-1/fix",
+            "switch --force agend/t-1/fix",
             "checkout",
-            "rebase main",
-            "rebase main agend/t-1/fix",
-            "rebase --continue",
+            // Paths: not a commit, several arguments, or after `--`. A
+            // remote-only branch git would create here is the hook's.
+            "checkout src/lib.rs",
+            "checkout other-feature",
+            "checkout main src/lib.rs",
+            "checkout main -- src",
+            "checkout -- .",
         ],
     );
     assert_codes(
@@ -459,7 +531,7 @@ fn branch_switches_are_refused() {
 }
 
 /// Round 5, finding 3: `checkout -` / `switch -` resolve `@{-1}` with git;
-/// back to the bound branch runs, anywhere else is refused naming it.
+/// back to the bound branch runs, anywhere else is refused.
 #[test]
 fn previous_branch_is_resolved() {
     let prev = |name: &'static str| Fake {
@@ -480,704 +552,17 @@ fn previous_branch_is_resolved() {
         )),
         Some("switch")
     );
-    for (probe, cmd, why) in [
-        (
-            prev("refs/heads/main"),
-            "checkout -",
-            "main (the previous branch, `-`)",
-        ),
-        (
-            prev("refs/heads/main"),
-            "switch -",
-            "main (the previous branch, `-`)",
-        ),
-        (
-            prev("refs/heads/agend/t-1/fix"),
-            "checkout @{-2}",
-            "main (the previous branch, `@{-2}`)",
-        ),
-        (prev(""), "checkout -", "a detached HEAD"),
-        (Fake::default(), "switch -", "cannot resolve"),
-    ] {
-        let d = with_probe(&probe, cmd);
-        let Decision::Refuse(r) = &d else {
-            panic!("{cmd}: {d:?}")
-        };
-        assert_eq!(r.code, "branch_switch", "{cmd}");
-        assert!(r.reason.contains(why), "{cmd}: {}", r.reason);
-    }
-}
-
-/// Round 1, class 5: DWIM creation from a remote-only branch, `<x> --`
-/// (which git also reads as a switch), and other side doors.
-#[test]
-fn leaving_the_branch_by_dwim_or_side_doors_is_refused() {
-    let s = work();
-    assert_codes(
-        &s,
-        "branch_switch",
-        &[
-            "checkout other-feature",
-            "checkout other-feature --",
-            "checkout master --",
-        ],
-    );
-    assert_codes(
-        &s,
-        "branch_create",
-        &[
-            "checkout --track origin/other-feature",
-            "checkout -t origin/x",
-            "switch --track origin/x",
-            "stash branch newb",
-        ],
-    );
-    assert_eq!(
-        code(&decide(&s, "rebase --update-refs main")),
-        "rebase_update_refs"
-    );
-    let on = Fake {
-        config: vec![("rebase.updaterefs", "true")],
-        ..Fake::default()
-    };
-    assert_eq!(code(&with_probe(&on, "rebase main")), "rebase_update_refs");
-    assert_eq!(
-        code(&with_probe(&on, "rebase --no-update-refs main")),
-        "run"
-    );
-    assert_eq!(code(&with_probe(&on, "rebase --continue")), "run");
-    assert_eq!(code(&with_probe(&on, "pull origin")), "rebase_update_refs");
-    assert_eq!(code(&with_probe(&on, "pull --no-rebase origin")), "run");
-}
-
-#[test]
-fn branch_creation_is_limited_to_the_own_namespace() {
-    let s = work();
-    assert_codes(
-        &s,
-        "branch_create",
-        &[
-            "checkout -b feat/x",
-            "checkout -bfeat/x",
-            "checkout -b agend/t-1/x",
-            "checkout --orphan x",
-            "switch -c x",
-            "switch -cx",
-            "switch --create=x",
-            "switch --create x",
-            "branch feat/x",
-            "branch agend/t-2/x",
-        ],
-    );
-    assert_eq!(code(&decide(&s, "branch agend/t-1/scratch")), "run");
-    assert_eq!(
-        code(&decide(&review(), "branch agend/t-2/x")),
-        "branch_create"
-    );
-    for cmd in [
-        "branch",
-        "branch -a",
-        "branch --list agend/*",
-        "branch -vv",
-        "branch --contains HEAD",
-        "branch --sort=-committerdate",
-    ] {
-        assert_eq!(code(&decide(&unbound(), cmd)), "run", "{cmd}");
-    }
-    assert_codes(
-        &s,
-        "branch_rename",
-        &["branch -m other", "branch --move other", "branch -c x"],
-    );
-    assert_eq!(code(&decide(&s, "branch -D feat/x")), "branch_delete");
-    assert_eq!(
-        code(&decide(&s, "branch -d agend/t-1/fix")),
-        "branch_delete"
-    );
-    assert_eq!(code(&decide(&s, "branch -d agend/t-1/scratch")), "run");
-    assert_eq!(code(&decide(&s, "branch -u origin/agend/t-1/fix")), "run");
-}
-
-#[test]
-fn protected_refs_are_refused_for_bound_agents() {
-    let s = work();
-    assert_codes(
-        &s,
-        "protected_ref",
-        &[
-            "update-ref refs/heads/main abc123",
-            "update-ref main abc123",
-            "update-ref -d refs/heads/master",
-            "update-ref -m msg refs/heads/release abc123",
-            "push . HEAD:main",
-            "push origin HEAD:main",
-            "push origin +agend/t-1/fix:refs/heads/master",
-            "push origin --delete main",
-            "push origin :master",
-            "branch -f main abc123",
-            "branch -D main",
-            "fetch origin main:main",
-            "fetch . HEAD:release",
-            "pull . HEAD:master",
-        ],
-    );
-    assert_eq!(code(&decide(&s, "update-ref --stdin")), "update_ref_stdin");
-    assert_codes(
-        &s,
-        "push_scope",
-        &[
-            "push --all origin",
-            "push --mirror origin",
-            "push --tags origin",
-            "push --repo=x HEAD:refs/heads/agend/t-1/fix",
-        ],
-    );
-    assert_codes(
-        &s,
-        "ref_not_yours",
-        &[
-            "push origin HEAD:feat/x",
-            "push origin HEAD:HEAD",
-            "push origin refs/heads/*:refs/heads/*",
-            "update-ref refs/heads/agend/t-2/x abc",
-            "fetch origin main:feat/x",
-            "push -fd origin agend/t-1/fix",
-        ],
-    );
-    assert_codes(
-        &s,
-        "run",
-        &[
-            "push origin HEAD:agend/t-1/fix",
-            "push origin HEAD:refs/heads/agend/t-1/fix",
-            "push -u origin HEAD:refs/heads/agend/t-1/fix",
-            "push --force-with-lease origin HEAD:refs/heads/agend/t-1/fix",
-            "push origin HEAD:refs/heads/agend/t-1/fix --no-verify",
-            "push origin :refs/heads/agend/t-1/scratch",
-            "update-ref refs/heads/agend/t-1/fix abc123",
-            "update-ref HEAD abc123",
-            "fetch origin",
-            "fetch --all --prune",
-            "fetch origin main",
-            "fetch origin main:refs/remotes/origin/main",
-            "fetch origin tag v9",
-            "pull",
-            "pull origin main",
-        ],
-    );
-    assert_eq!(code(&decide(&review(), "push")), "review_readonly");
-}
-
-/// A bound worktree on its branch whose `origin` is the team remote, with
-/// extra config.
-fn pushing(config: &[(&'static str, &'static str)]) -> Fake {
-    Fake {
-        symrefs: vec![("HEAD", "refs/heads/agend/t-1/fix")],
-        team_push: vec!["origin"],
-        config: [("remote.origin.url", "/team/origin.git")]
-            .into_iter()
-            .chain(config.iter().copied())
-            .collect(),
-        ..Fake::default()
-    }
-}
-
-const UPSTREAM_OWN: &[(&str, &str)] = &[
-    ("branch.agend/t-1/fix.remote", "origin"),
-    ("branch.agend/t-1/fix.merge", "refs/heads/agend/t-1/fix"),
-];
-const UPSTREAM_MAIN: &[(&str, &str)] = &[
-    ("branch.agend/t-1/fix.remote", "origin"),
-    ("branch.agend/t-1/fix.merge", "refs/heads/main"),
-];
-
-/// T7, owner decision 2026-09-25: a push without `src:dst` runs when the
-/// destination git resolves (push.default, upstream, pushRemote, the typed
-/// branch) is the bound branch on the team remote; anything else, or
-/// anything the shim cannot resolve, is refused with the exact command.
-#[test]
-fn implicit_pushes_run_only_when_they_resolve_to_the_bound_branch() {
-    let with = |cfg: &[(&'static str, &'static str)]| {
-        let mut all = UPSTREAM_OWN.to_vec();
-        all.extend_from_slice(cfg);
-        pushing(&all)
-    };
-    let run = |probe: &Fake, cmd: &str| code(&with_probe(probe, cmd));
-    // Allowed.
     for (probe, cmd) in [
-        (with(&[]), "push"),
-        (with(&[]), "push origin"),
-        (with(&[]), "push -u"),
-        (with(&[]), "push --force-with-lease"),
-        (with(&[("push.default", "simple")]), "push"),
-        (with(&[("push.default", "upstream")]), "push"),
-        (with(&[("push.default", "tracking")]), "push origin"),
-        (with(&[("push.default", "current")]), "push"),
-        (pushing(&[("push.default", "current")]), "push"),
-        (pushing(&[("push.autosetupremote", "true")]), "push"),
-        (pushing(&[]), "push -u origin agend/t-1/fix"),
-        (pushing(&[]), "push -u origin HEAD"),
-        (pushing(&[]), "push origin HEAD"),
-        (pushing(&[]), "push origin @"),
-        (pushing(&[]), "push origin refs/heads/agend/t-1/fix"),
-        (pushing(&[]), "push origin +HEAD"),
-        (with(&[("push.default", "upstream")]), "push origin HEAD"),
-        // Triangular: push remote differs from the upstream remote, so
-        // `simple` pushes the same name.
-        (
-            pushing(&[
-                ("branch.agend/t-1/fix.remote", "upstream"),
-                ("branch.agend/t-1/fix.merge", "refs/heads/main"),
-                ("remote.pushdefault", "origin"),
-            ]),
-            "push",
-        ),
+        (prev("refs/heads/main"), "checkout -"),
+        (prev("refs/heads/main"), "switch -"),
+        (prev("refs/heads/agend/t-1/fix"), "checkout @{-2}"),
+        (prev(""), "checkout -"),
+        (Fake::default(), "switch -"),
     ] {
-        assert_eq!(run(&probe, cmd), "run", "git {cmd} with {:?}", probe.config);
-    }
-    // Refused: resolves elsewhere, or git would refuse / the shim cannot tell.
-    for (probe, cmd, code_want, why) in [
-        (
-            pushing(&[]),
-            "push",
-            "push_explicit",
-            "has no upstream branch",
-        ),
-        (
-            pushing(&[]),
-            "push origin",
-            "push_explicit",
-            "has no upstream branch",
-        ),
-        (
-            pushing(UPSTREAM_MAIN),
-            "push",
-            "push_explicit",
-            "a different name",
-        ),
-        (
-            with(&[("push.default", "matching")]),
-            "push",
-            "push_explicit",
-            "every branch",
-        ),
-        (
-            with(&[("push.default", "nothing")]),
-            "push",
-            "push_explicit",
-            "nothing",
-        ),
-        (
-            with(&[("push.default", "bogus")]),
-            "push",
-            "push_explicit",
-            "bogus",
-        ),
-        (
-            with(&[("remote.origin.push", "HEAD:refs/heads/main")]),
-            "push",
-            "push_explicit",
-            "remote.origin.push",
-        ),
-        (
-            with(&[("remote.origin.push", "HEAD:refs/heads/main")]),
-            "push origin HEAD",
-            "push_explicit",
-            "remote.origin.push",
-        ),
-        (
-            with(&[("remote.origin.mirror", "true")]),
-            "push",
-            "push_explicit",
-            "mirror",
-        ),
-        (
-            pushing(&[]),
-            "push fork HEAD",
-            "push_explicit",
-            "not the team remote",
-        ),
-        (
-            with(&[("branch.agend/t-1/fix.pushremote", "fork")]),
-            "push",
-            "push_explicit",
-            "not the team remote",
-        ),
-        (
-            with(&[("push.default", "upstream")]),
-            "push fork",
-            "push_explicit",
-            "not the upstream remote",
-        ),
-        (
-            pushing(&[]),
-            "push origin main",
-            "push_explicit",
-            "would push main",
-        ),
-        (
-            pushing(&[]),
-            "push origin agend/t-1/fix:",
-            "push_explicit",
-            "empty destination",
-        ),
-        (
-            pushing(&[]),
-            "push --delete origin",
-            "push_explicit",
-            "--delete",
-        ),
-        (
-            Fake {
-                symrefs: vec![("HEAD", "refs/heads/other")],
-                ..with(&[("push.default", "current")])
-            },
-            "push",
-            "push_explicit",
-            "would push other",
-        ),
-        (
-            Fake {
-                symrefs: vec![],
-                ..with(&[("push.default", "current")])
-            },
-            "push",
-            "push_explicit",
-            "not on a branch",
-        ),
-        // A misconfigured upstream pointing at main.
-        (
-            pushing(&[
-                UPSTREAM_MAIN[0],
-                UPSTREAM_MAIN[1],
-                ("push.default", "upstream"),
-            ]),
-            "push",
-            "protected_ref",
-            "refs/heads/main",
-        ),
-        (
-            pushing(&[
-                UPSTREAM_MAIN[0],
-                UPSTREAM_MAIN[1],
-                ("push.default", "upstream"),
-            ]),
-            "push -u origin agend/t-1/fix",
-            "protected_ref",
-            "refs/heads/main",
-        ),
-        (
-            pushing(&[
-                ("branch.agend/t-1/fix.remote", "origin"),
-                ("branch.agend/t-1/fix.merge", "refs/heads/agend/t-2/x"),
-                ("push.default", "upstream"),
-            ]),
-            "push origin HEAD",
-            "push_explicit",
-            "refs/heads/agend/t-2/x",
-        ),
-    ] {
-        let d = with_probe(&probe, cmd);
-        let Decision::Refuse(r) = &d else {
-            panic!("git {cmd} with {:?}: {d:?}", probe.config)
-        };
-        assert_eq!(r.code, code_want, "git {cmd}: {}", r.reason);
-        assert!(r.reason.contains(why), "git {cmd}: {}", r.reason);
-        assert!(
-            r.next
-                .contains("git push origin HEAD:refs/heads/agend/t-1/fix"),
-            "git {cmd}: {}",
-            r.next
-        );
+        assert_eq!(code(&with_probe(&probe, cmd)), "branch_switch", "{cmd}");
     }
 }
 
-/// Round 1, class 1: destinations git takes from config.
-#[test]
-fn implicit_push_destinations_are_refused() {
-    let s = work();
-    assert_codes(
-        &s,
-        "push_explicit",
-        &[
-            "push",
-            "push origin",
-            "push origin HEAD",
-            "push -u origin agend/t-1/fix",
-            "push origin agend/t-1/fix",
-            "push origin agend/t-1/fix:",
-        ],
-    );
-    let Decision::Refuse(r) = decide(&s, "push -u upstream") else {
-        unreachable!()
-    };
-    assert!(
-        r.next
-            .contains("git push upstream HEAD:refs/heads/agend/t-1/fix"),
-        "{}",
-        r.next
-    );
-    let cfg = |k: &'static str, v: &'static str| Fake {
-        config: vec![(k, v)],
-        ..Fake::default()
-    };
-    // Config refmaps apply to every fetch, with or without refspecs.
-    for cmd in ["fetch origin", "fetch origin main", "fetch --all", "pull"] {
-        let bad = cfg("remote.origin.fetch", "+refs/heads/main:refs/heads/release");
-        assert_eq!(code(&with_probe(&bad, cmd)), "fetch_refmap", "{cmd}");
-        let glob = cfg("remote.origin.fetch", "+refs/heads/*:refs/heads/*");
-        assert_eq!(code(&with_probe(&glob, cmd)), "fetch_refmap", "{cmd}");
-        let ok = cfg("remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*");
-        assert_eq!(code(&with_probe(&ok, cmd)), "run", "{cmd}");
-    }
-    let bad = cfg("remote.m.fetch", "+refs/*:refs/*");
-    assert_eq!(code(&with_probe(&bad, "remote update")), "fetch_refmap");
-    assert_codes(
-        &s,
-        "protected_ref",
-        &[
-            "fetch origin master --refmap +refs/heads/master:refs/heads/release",
-            "fetch origin main --refmap=+refs/heads/main:refs/heads/main",
-        ],
-    );
-    assert_codes(
-        &s,
-        "ref_not_yours",
-        &["fetch origin main --refmap=+refs/heads/*:refs/heads/*"],
-    );
-    assert_codes(
-        &s,
-        "fetch_scope",
-        &[
-            "fetch --tags --force origin",
-            "fetch origin +refs/tags/*:refs/tags/*",
-            "fetch -u origin",
-            "fetch --prune-tags origin",
-            "fetch --upload-pack=x origin",
-        ],
-    );
-    assert_eq!(code(&decide(&s, "fetch --stdin origin")), "stdin_refs");
-    assert_eq!(code(&decide(&s, "fast-import")), "stdin_refs");
-    // Unbound agents may fetch into remote-tracking refs only.
-    assert_eq!(code(&decide(&unbound(), "fetch origin")), "run");
-    assert_eq!(
-        code(&decide(&unbound(), "fetch origin main:agend/t-1/x")),
-        "ref_not_yours"
-    );
-}
-
-#[test]
-fn config_that_redirects_refs_cannot_be_set() {
-    let s = work();
-    assert_codes(
-        &s,
-        "config_override",
-        &[
-            "-c remote.origin.push=HEAD:refs/heads/main push origin HEAD:refs/heads/agend/t-1/fix",
-            "-c push.default=matching commit -m x",
-            "-c core.worktree=/repo reset --hard",
-            "-c core.hooksPath=/x commit -m x",
-            "--config-env=core.worktree=WT restore .",
-            "-c alias.co=checkout fetch origin",
-        ],
-    );
-    assert_eq!(
-        code(&decide(&s, "-c user.name=A -c user.email=a@b commit -m x")),
-        "run"
-    );
-    // Round 5, finding 2: sequence.editor is an editor like core.editor.
-    assert_eq!(
-        code(&decide(
-            &s,
-            "-c sequence.editor=: rebase -i --autosquash origin/main"
-        )),
-        "run"
-    );
-    assert_eq!(code(&decide(&s, "config sequence.editor true")), "run");
-    for cmd in ["-c gui.editor=: commit -m x", "config gui.editor vi"] {
-        let Decision::Refuse(r) = decide(&s, cmd) else {
-            panic!("{cmd}")
-        };
-        assert!(
-            r.reason.contains("core.editor and sequence.editor"),
-            "{}",
-            r.reason
-        );
-        assert!(r.next.contains("GIT_SEQUENCE_EDITOR"), "{}", r.next);
-    }
-    let env = |keys: Result<Vec<String>, String>| GitEnv {
-        config_keys: keys,
-        ..GitEnv::default()
-    };
-    let fake = Fake::default();
-    let run = |e: &GitEnv, cmd| code(&run_with(Ok(&s), Location::Worktree, e, &fake, cmd));
-    assert_eq!(
-        run(&env(Ok(vec!["core.worktree".into()])), "checkout -- ."),
-        "config_override"
-    );
-    assert_eq!(
-        run(&env(Err("bad".into())), "commit -m x"),
-        "config_override"
-    );
-    assert_eq!(
-        run(&env(Ok(vec!["user.name".into()])), "commit -m x"),
-        "run"
-    );
-    assert_eq!(run(&env(Ok(vec!["core.worktree".into()])), "status"), "run");
-    assert_codes(
-        &s,
-        "config_write",
-        &[
-            "config remote.origin.push +HEAD:refs/heads/master",
-            "config --add remote.origin.push x",
-            "config branch.agend/t-1/fix.merge refs/heads/main",
-            "config push.default upstream",
-            "config core.hooksPath hooks",
-            "config alias.co checkout",
-            "config --global core.worktree /x",
-            "config set push.default upstream",
-            "config --rename-section remote.origin remote.x",
-            "config -e",
-        ],
-    );
-    assert_codes(
-        &s,
-        "run",
-        &[
-            "config user.name x",
-            "config --global user.email a@b",
-            "config remote.origin.push",
-            "config --get-all remote.origin.fetch",
-            "config -l",
-            "config get user.name",
-        ],
-    );
-}
-
-/// Round 1, class 2: abbreviations and attached values never skip a check.
-#[test]
-fn abbreviated_or_unknown_options_are_refused() {
-    let s = work();
-    assert_codes(
-        &s,
-        "option_unknown",
-        &[
-            "push --mirr origin",
-            "push --al origin",
-            "push --bran origin",
-            "push --prun origin",
-            "push --delet origin agend/t-1/fix",
-            "update-ref --stdi",
-            "update-ref --std",
-            "branch --mov agend/t-1/renamed",
-            "branch --cop main agend/t-1/x",
-            "checkout --orph orphan1",
-            "checkout --deta",
-            "checkout --forc",
-            "switch --deta",
-            "switch --discard agend/t-1/fix",
-            "reset --har",
-            "clean --forc -d",
-            "restore --wor .",
-            "config --ad remote.origin.push x",
-            "fetch --refm=+refs/heads/*:refs/heads/* origin",
-            "rebase --update-ref main",
-            "remote add --mirr=fetch m /x",
-            "checkout --force=yes",
-        ],
-    );
-    let Decision::Refuse(r) = decide(&s, "push --mirr origin") else {
-        unreachable!()
-    };
-    assert!(r.reason.contains("`--mirror`"), "{}", r.reason);
-    // Unknown options are refused on reads of guarded commands too, and on
-    // unbound agents: the parse runs before any other decision.
-    assert_eq!(code(&decide(&unbound(), "branch --lis")), "option_unknown");
-}
-
-/// Round 1, class 3: symbolic refs.
-#[test]
-fn symbolic_refs_cannot_alias_protected_refs() {
-    let s = work();
-    assert_codes(
-        &s,
-        "symref",
-        &[
-            "symbolic-ref refs/heads/agend/t-1/fix refs/heads/main",
-            "symbolic-ref refs/heads/agend/t-1/alias refs/heads/master",
-            "symbolic-ref refs/agend/x refs/heads/agend/t-1/fix",
-        ],
-    );
-    assert_eq!(
-        code(&decide(&s, "symbolic-ref HEAD refs/heads/agend/t-1/fix")),
-        "run"
-    );
-    assert_eq!(code(&decide(&s, "symbolic-ref HEAD")), "run");
-    assert_eq!(
-        code(&decide(
-            &s,
-            "symbolic-ref --delete refs/heads/agend/t-1/alias"
-        )),
-        "run"
-    );
-    assert_eq!(
-        code(&decide(
-            &s,
-            "symbolic-ref --delete refs/remotes/origin/HEAD"
-        )),
-        "run",
-        "not a branch"
-    );
-    assert_eq!(
-        code(&decide(&s, "symbolic-ref -d refs/heads/main")),
-        "protected_ref"
-    );
-
-    let alias = Fake {
-        symrefs: vec![
-            ("refs/heads/agend/t-1/alias", "refs/heads/master"),
-            ("refs/heads/agend/t-1/mine", "refs/heads/agend/t-1/fix"),
-            ("refs/remotes/origin/sneaky", "refs/heads/release"),
-        ],
-        ..Fake::default()
-    };
-    for cmd in [
-        "update-ref refs/heads/agend/t-1/alias abc",
-        "branch -f agend/t-1/alias abc",
-        "push . HEAD:refs/heads/agend/t-1/alias",
-        "fetch . HEAD:refs/heads/agend/t-1/alias",
-        "fetch origin main:refs/remotes/origin/sneaky",
-    ] {
-        assert_eq!(code(&with_probe(&alias, cmd)), "symref", "{cmd}");
-    }
-    assert_eq!(
-        code(&with_probe(
-            &alias,
-            "update-ref --no-deref refs/heads/agend/t-1/alias abc"
-        )),
-        "run",
-        "--no-deref replaces the symref itself"
-    );
-    assert_eq!(
-        code(&with_probe(
-            &alias,
-            "update-ref refs/heads/agend/t-1/mine abc"
-        )),
-        "run"
-    );
-    // The bound branch itself being a symref blocks every write.
-    let own = Fake {
-        symrefs: vec![("refs/heads/agend/t-1/fix", "refs/heads/main")],
-        ..Fake::default()
-    };
-    for cmd in ["commit -m x", "merge feature", "reset --hard"] {
-        assert_eq!(code(&with_probe(&own, cmd)), "symref", "{cmd}");
-    }
-}
-
-/// Round 1, class 4: work tree / index retargeting. Round 3: the work tree
-/// is git's answer, so every spelling (`--work-tree`, `GIT_WORK_TREE`, a git
-/// dir without a work tree, a gitfile) is the same case.
 #[test]
 fn writes_must_use_the_bound_work_tree() {
     let s = work();
@@ -1289,61 +674,66 @@ fn routed_writes_do_not_drop_a_named_git_dir() {
     }
 }
 
+/// v1 agentic-git's scope; options matched generously (an extra snapshot
+/// is harmless, a missing one loses work).
 #[test]
 fn destructive_operations_take_a_snapshot() {
     let s = work();
     for (cmd, op) in [
-        // Round 5, finding 1 (E): `rm -f` drops uncommitted edits.
         ("rm -rf .", Some("rm")),
         ("rm -r --force src", Some("rm")),
-        ("rm -f x", Some("rm")),
-        ("rm --force -q x", Some("rm")),
+        ("rm --forc x", Some("rm")),
         ("rm x", None),
-        ("rm -r src", None),
         ("rm --cached -f x", None),
-        ("rm -rf --cached .", None),
         ("rm -n -rf .", None),
         ("rm --dry-run --force .", None),
         ("reset --hard HEAD~1", Some("reset")),
+        ("reset --har", Some("reset")),
         ("reset --keep HEAD~1", Some("reset")),
+        ("reset --merge", Some("reset")),
         ("reset HEAD~1", None),
+        ("reset --soft HEAD~1", None),
         ("clean -fd", Some("clean")),
-        ("clean -xdf", Some("clean")),
-        ("clean --force", Some("clean")),
-        ("clean -d", Some("clean")),
+        ("clean --forc -d", Some("clean")),
         ("clean -fd -enone", Some("clean")),
-        ("clean -i", Some("clean")),
-        ("clean -nd", None),
-        ("clean -fdn", None),
+        ("clean -d", Some("clean")),
         ("checkout -- .", Some("checkout")),
         ("checkout .", Some("checkout")),
-        ("checkout ./src", Some("checkout")),
         ("checkout main -- src", Some("checkout")),
-        ("checkout main src other", Some("checkout")),
         ("checkout -f", Some("checkout")),
-        ("checkout -p", Some("checkout")),
+        ("checkout --forc", Some("checkout")),
         ("restore .", Some("restore")),
         ("restore --staged .", None),
+        ("restore -S .", None),
         ("restore --staged --worktree .", Some("restore")),
-        ("restore -s HEAD~1 .", Some("restore")),
+        ("restore -SW .", Some("restore")),
         ("switch --discard-changes agend/t-1/fix", Some("switch")),
-        ("read-tree -u --reset HEAD", Some("read-tree")),
-        ("read-tree HEAD", None),
+        ("switch --discard agend/t-1/fix", Some("switch")),
+        ("switch -f agend/t-1/fix", Some("switch")),
+        ("switch agend/t-1/fix", None),
+        ("stash drop", Some("stash")),
+        ("stash clear", Some("stash")),
+        ("stash", None),
+        ("stash pop", None),
+        ("merge origin/main", Some("merge")),
+        ("merge --abort", Some("merge")),
+        ("rebase origin/main", Some("rebase")),
+        ("pull --rebase", Some("pull")),
+        ("cherry-pick abc", Some("cherry-pick")),
+        ("revert abc", Some("revert")),
+        ("am x.patch", Some("am")),
         ("commit -am x", None),
+        ("read-tree -u --reset HEAD", None),
     ] {
         assert_eq!(snapshot_of(&decide(&s, cmd)), op, "{cmd}");
     }
 }
 
 #[test]
-fn unknown_commands_and_rewrites_are_refused() {
+fn unknown_commands_are_refused() {
     let s = work();
     assert_eq!(code(&decide(&s, "co main")), "unknown_command");
     assert_eq!(code(&decide(&s, "--frob push")), "unknown_command");
-    assert_eq!(
-        code(&decide(&s, "filter-branch -- --all")),
-        "history_rewrite"
-    );
     assert_eq!(code(&decide(&s, "--version")), "run");
     assert_eq!(code(&decide(&s, "")), "run");
 }
@@ -1373,8 +763,8 @@ fn missing_worktree_refuses_writes() {
     assert_eq!(code(&decide(&s, "commit -m x")), "worktree_missing");
 }
 
-/// T5: foreign repos are free, except clones of the team repo and pushes
-/// to it.
+/// T5: foreign repos have no agend hooks; they are free, except the team's
+/// remote, clones of the team repo, and pushes to it.
 #[test]
 fn foreign_repos_are_guarded_only_towards_the_team() {
     let s = work();
@@ -1393,6 +783,7 @@ fn foreign_repos_are_guarded_only_towards_the_team() {
         "checkout -b x",
         "push origin HEAD:main",
         "co main",
+        "-c core.hooksPath=x commit",
     ] {
         assert_eq!(at(&free, cmd), "run", "{cmd}");
     }
@@ -1432,7 +823,7 @@ fn foreign_repos_are_guarded_only_towards_the_team() {
     assert_eq!(at(&remote, "fetch /team.git"), "run");
 }
 
-/// Deny-by-default must not break everyday agent work.
+/// Everyday agent work runs (refs are the hooks' business).
 #[test]
 fn everyday_commands_still_run() {
     assert_codes(
@@ -1446,28 +837,27 @@ fn everyday_commands_still_run() {
             "diff --stat origin/main...HEAD",
             "log --oneline -5",
             "fetch origin",
-            "fetch --prune origin",
             "pull --rebase",
             "pull --ff-only origin main",
             "rebase origin/main",
             "rebase -i HEAD~3",
+            "rebase --onto origin/main main",
             "merge --no-ff origin/main",
             "cherry-pick abc123",
             "stash",
-            "stash push -m wip",
             "stash pop",
             "checkout -- src/lib.rs",
             "restore --staged src/lib.rs",
-            "reset HEAD~1",
             "reset --soft HEAD~1",
             "branch -vv",
-            "branch --show-current",
+            "branch agend/t-1/x",
             "tag",
-            "tag -l v*",
+            "tag v1",
             "clean -n",
-            "push origin HEAD:refs/heads/agend/t-1/fix",
+            "push",
+            "push -u origin agend/t-1/fix",
             "push --force-with-lease origin HEAD:refs/heads/agend/t-1/fix",
-            "-c user.name=Bot -c user.email=bot@x commit -m x",
+            "-c user.name=Bot -c sequence.editor=true rebase -i HEAD~2",
             "config user.email bot@x",
             "remote -v",
             "worktree list",

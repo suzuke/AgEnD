@@ -1,76 +1,102 @@
-//! The verifier's bypass corpus (PR #107 round 1), replayed against real
-//! temporary repos. Each case runs optional setup with the real git (state
-//! that could exist before the shim is asked), then one command through the
-//! shim, then checks the invariants the guard exists for:
+//! The verifier's bypass corpus (PR #107 rounds 1–5), replayed against
+//! real temporary repos with the agend hooks installed. Each case runs
+//! optional setup with the harness's git (state that could exist before the
+//! agent acts), then one command through the shim, then checks the
+//! invariants the guard exists for:
 //! - main / master / release did not move, locally or on origin;
 //! - the bound worktree is still on `agend/t-1/fix`, which is a real branch;
 //! - no branch outside `agend/t-1/` appeared;
 //! - the canonical checkout's uncommitted work is intact;
 //! - the worktree's uncommitted work is intact, or a snapshot holds it.
 //!
+//! Since the hook refactor most ref cases are refused by an agend hook
+//! (git reports the real destination), not by the shim: `Refused` accepts
+//! either, and nothing else (a git error is not a refusal). Setups make
+//! each case really try to move a ref (an up-to-date ref is not a write).
+//!
 //! Kill forms run against a fake `kill` recorder only (never a real kill),
 //! with targets that are this test's own children.
 
 #![cfg(unix)]
 
-mod common;
+mod shim_common;
 
 use agend_shim::Tool;
 use agend_shim::ctx::Ctx;
-use common::{Fixture, git, gitshim, shim, try_git};
+use shim_common::{Fixture, git, gitshim, shim, shim_input, try_git};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Expect {
-    /// The shim refuses.
+    /// Refused by the shim or by an agend hook.
     Refused,
     /// The shim runs it, after taking a snapshot.
     Snapshot,
+    /// Runs, and changes nothing the invariants guard (a config write whose
+    /// effect is refused in the case that follows it).
+    Harmless,
+    /// git itself refuses first (it never fetches into a branch checked out
+    /// in any worktree, here the canonical `main`).
+    GitRefuses,
 }
 
 struct Case {
-    /// Real-git setup commands, run in the worktree before the shim call.
+    /// Harness git commands, run in the worktree before the shim call.
     setup: &'static [&'static str],
     /// The command given to the shim (whitespace split; placeholders
     /// `{repo}`, `{origin}`, `{head}`).
     cmd: &'static str,
     /// `GIT_WORK_TREE` / `GIT_INDEX_FILE` for the shim call, if any.
     env: Option<(&'static str, &'static str)>,
+    /// stdin of the real git.
+    input: &'static str,
     expect: Expect,
 }
 
-const fn refused(cmd: &'static str) -> Case {
-    Case {
-        setup: &[],
-        cmd,
-        env: None,
-        expect: Expect::Refused,
-    }
-}
-
-const fn after(setup: &'static [&'static str], cmd: &'static str) -> Case {
+const fn case(setup: &'static [&'static str], cmd: &'static str, expect: Expect) -> Case {
     Case {
         setup,
         cmd,
         env: None,
-        expect: Expect::Refused,
+        input: "",
+        expect,
     }
+}
+
+const fn refused(cmd: &'static str) -> Case {
+    case(&[], cmd, Expect::Refused)
+}
+
+const fn after(setup: &'static [&'static str], cmd: &'static str) -> Case {
+    case(setup, cmd, Expect::Refused)
+}
+
+const fn harmless(cmd: &'static str) -> Case {
+    case(&[], cmd, Expect::Harmless)
+}
+
+const fn snapshot(cmd: &'static str) -> Case {
+    case(&[], cmd, Expect::Snapshot)
 }
 
 const fn with_env(env: (&'static str, &'static str), cmd: &'static str) -> Case {
     Case {
-        setup: &[],
-        cmd,
         env: Some(env),
-        expect: Expect::Refused,
+        ..refused(cmd)
     }
 }
 
+/// origin's main one commit ahead (the worktree's `ahead`), so a fetch
+/// that maps it onto a local branch really moves that branch.
+const ORIGIN_AHEAD: &str = "push -q origin HEAD:refs/heads/main";
+
 /// Class 1: destinations that come from config, `-c`, `--refmap` or `pull`.
+/// The shim no longer reads config: git resolves the destination and the
+/// pre-push / reference-transaction hook refuses it.
 const CONFIG_DESTINATIONS: &[Case] = &[
     refused("-c remote.origin.push=HEAD:refs/heads/main push origin"),
-    refused("config remote.origin.push +HEAD:refs/heads/master"),
+    harmless("config remote.origin.push +HEAD:refs/heads/master"),
     after(
         &["config remote.origin.push +HEAD:refs/heads/master"],
         "push origin",
@@ -94,62 +120,112 @@ const CONFIG_DESTINATIONS: &[Case] = &[
         ],
         "push origin agend/t-1/fix",
     ),
-    refused("-c push.default=matching push origin"),
-    refused("config branch.agend/t-1/fix.merge refs/heads/main"),
-    refused("config push.default upstream"),
-    refused("config core.hooksPath hooks"),
-    refused("config alias.co checkout"),
-    refused("config remote.origin.fetch +refs/heads/main:refs/heads/release"),
+    // matching pushes local branches that differ from origin's.
     after(
-        &["config remote.origin.fetch +refs/heads/main:refs/heads/release"],
+        &["update-ref refs/heads/master HEAD"],
+        "-c push.default=matching push origin",
+    ),
+    harmless("config branch.agend/t-1/fix.merge refs/heads/main"),
+    harmless("config push.default upstream"),
+    // The worktree's own `core.hooksPath` (config.worktree) wins over the
+    // shared config: the agend hook still runs.
+    harmless("config core.hooksPath hooks"),
+    after(
+        &["config core.hooksPath hooks"],
+        "update-ref refs/heads/main HEAD",
+    ),
+    harmless("config alias.co checkout"),
+    after(&["config alias.co checkout"], "co main"),
+    harmless("config remote.origin.fetch +refs/heads/main:refs/heads/release"),
+    after(
+        &[
+            ORIGIN_AHEAD,
+            "config remote.origin.fetch +refs/heads/main:refs/heads/release",
+        ],
         "fetch origin",
     ),
     after(
-        &["config remote.origin.fetch +refs/heads/main:refs/heads/release"],
+        &[
+            ORIGIN_AHEAD,
+            "config remote.origin.fetch +refs/heads/main:refs/heads/release",
+        ],
         "fetch origin main",
     ),
-    refused("-c remote.origin.fetch=+refs/heads/*:refs/heads/* fetch origin"),
-    refused("fetch origin master --refmap +refs/heads/master:refs/heads/release"),
-    refused("fetch origin main --refmap=+refs/heads/*:refs/heads/*"),
+    case(
+        &[],
+        "-c remote.origin.fetch=+refs/heads/*:refs/heads/* fetch origin",
+        Expect::GitRefuses,
+    ),
+    refused("-c remote.origin.fetch=+refs/heads/*:refs/heads/copy/* fetch origin"),
+    after(
+        &[ORIGIN_AHEAD],
+        "fetch origin main --refmap +refs/heads/main:refs/heads/release",
+    ),
+    after(
+        &[ORIGIN_AHEAD],
+        "fetch origin main --refmap=+refs/heads/*:refs/heads/copy/*",
+    ),
     refused("pull . HEAD:master"),
     refused("pull --no-rebase . HEAD:master"),
-    refused("pull origin main:release"),
-    refused("remote add --mirror=fetch mirror {origin}"),
+    after(&[ORIGIN_AHEAD], "pull origin main:release"),
+    harmless("remote add --mirror=fetch mirror {origin}"),
+    case(
+        &["remote add --mirror=fetch mirror {origin}"],
+        "fetch mirror",
+        Expect::GitRefuses,
+    ),
+    after(
+        &["remote add --mirror=fetch mirror {origin}"],
+        "fetch mirror refs/heads/other-feature:refs/heads/other-feature",
+    ),
     refused("push origin +HEAD:main"),
-    refused("push origin HEAD:HEAD"),
+    refused("push origin HEAD:refs/heads/HEAD"),
+    refused("push --no-verify origin HEAD:main"),
+    refused("-c core.hooksPath=/dev/null push origin HEAD:main"),
 ];
 
-/// Class 2: abbreviated or attached-value options.
+/// Class 2: abbreviated or attached-value options. Branch switches are the
+/// shim's (matched generously); ref writes are the hooks'; destructive ones
+/// are snapshotted.
 const ABBREVIATED: &[Case] = &[
     refused("push --mirr origin"),
     refused("push --al origin"),
-    refused("push -fd origin agend/t-1/fix"),
-    refused("update-ref --stdi"),
-    refused("update-ref --std"),
+    after(
+        &["push -q origin HEAD:refs/heads/agend/t-1/fix"],
+        "push -fd origin agend/t-1/fix",
+    ),
+    Case {
+        input: "update refs/heads/main {head}\n",
+        ..refused("update-ref --stdi")
+    },
+    Case {
+        input: "delete refs/heads/release\n",
+        ..refused("update-ref --std")
+    },
     refused("branch --mov agend/t-1/renamed"),
-    refused("branch --cop agend/t-1/copy"),
+    harmless("branch --cop agend/t-1/copy"),
     refused("checkout --orph orphan1"),
     refused("checkout --deta"),
     refused("checkout -bfoo"),
     refused("switch --deta"),
     refused("switch -cfoo"),
-    refused("reset --har"),
-    refused("checkout --forc"),
-    refused("switch --discard agend/t-1/fix"),
-    refused("clean --forc -d"),
-    refused("config --ad remote.origin.push HEAD:refs/heads/main"),
-    Case {
-        setup: &[],
-        cmd: "clean -fd -enone",
-        env: None,
-        expect: Expect::Snapshot,
-    },
+    snapshot("reset --har"),
+    snapshot("checkout --forc"),
+    snapshot("switch --discard agend/t-1/fix"),
+    snapshot("clean --forc -d"),
+    harmless("config --ad remote.origin.push HEAD:refs/heads/main"),
+    after(
+        &["config --add remote.origin.push HEAD:refs/heads/main"],
+        "push origin",
+    ),
+    snapshot("clean -fd -enone"),
 ];
 
-/// Class 3: symbolic refs that alias a protected branch.
+/// Class 3: symbolic refs that alias a protected branch. Creating one is a
+/// known limit (git < 2.46 does not report it to the hook, see
+/// `KNOWN_LIMITS`); every write through one reaches the hook as the real
+/// target.
 const SYMREFS: &[Case] = &[
-    refused("symbolic-ref refs/heads/agend/t-1/fix refs/heads/main"),
-    refused("symbolic-ref refs/heads/agend/t-1/alias refs/heads/master"),
     after(
         &["symbolic-ref refs/heads/agend/t-1/alias refs/heads/master"],
         "update-ref refs/heads/agend/t-1/alias {head}",
@@ -180,14 +256,38 @@ const WORK_TREE: &[Case] = &[
 
 /// Class 5: leaving the bound branch by DWIM or a side door.
 const LEAVE_BRANCH: &[Case] = &[
+    // DWIM from a remote-only branch: git creates `other-feature`, the hook
+    // refuses that branch.
     refused("checkout other-feature"),
     refused("checkout other-feature --"),
     refused("checkout master --"),
     refused("checkout --track origin/other-feature"),
     refused("switch other-feature"),
-    refused("rebase main feature"),
-    refused("rebase --update-refs main"),
-    refused("stash branch newb"),
+    after(
+        &[
+            "stash push -q -m s -- README.md",
+            "checkout -q stash@{0} -- README.md",
+        ],
+        "stash branch newb",
+    ),
+];
+
+/// Known limits (gate page): not a plausible mistake, or git before 2.46
+/// does not report the change to the hook. Checked for what still holds:
+/// no protected ref moves and no work is lost (git 2.46+ may refuse).
+const KNOWN_LIMITS: &[Case] = &[
+    case(
+        &[],
+        "symbolic-ref refs/heads/agend/t-1/alias refs/heads/master",
+        Expect::Harmless,
+    ),
+    case(
+        &[],
+        "symbolic-ref refs/heads/agend/t-1/fix refs/heads/main",
+        Expect::Harmless,
+    ),
+    case(&[], "symbolic-ref HEAD refs/heads/main", Expect::Harmless),
+    case(&[], "rebase main feature", Expect::Harmless),
 ];
 
 fn fill(s: &str, f: &Fixture, head: &str) -> String {
@@ -221,38 +321,54 @@ fn snapshots(f: &Fixture) -> usize {
     .count()
 }
 
-/// The invariants; returns the violations.
-fn violations(f: &Fixture, before: &str, expect: Expect, ran: &common::Ran) -> Vec<String> {
+/// The invariants; returns the violations. Known limits check only that
+/// no protected ref moved and no work was lost.
+fn violations(
+    f: &Fixture,
+    before: &str,
+    expect: Expect,
+    ran: &shim_common::Ran,
+    limit: bool,
+) -> Vec<String> {
     let mut bad = Vec::new();
-    match (expect, ran.refused) {
-        (Expect::Refused, None) => bad.push("was not refused".to_string()),
-        (Expect::Snapshot, Some(code)) => bad.push(format!("refused ({code}), expected to run")),
-        (Expect::Snapshot, None) if snapshots(f) == 0 => bad.push("no snapshot taken".into()),
+    let ok = ran.output.as_ref().is_some_and(|o| o.status.success());
+    match expect {
+        Expect::Refused if !ran.is_refused() => bad.push("was not refused (shim or hook)".into()),
+        Expect::Snapshot if !ok => bad.push("did not run".into()),
+        Expect::Snapshot if snapshots(f) == 0 => bad.push("no snapshot taken".into()),
+        Expect::Harmless if !ok && !limit => bad.push("did not run".into()),
+        Expect::GitRefuses if ok || ran.is_refused() => {
+            bad.push("expected git itself to refuse".into())
+        }
         _ => {}
     }
     if f.protected_state() != before {
         bad.push(format!("protected refs moved:\n{}", f.protected_state()));
     }
-    let head = try_git(&f.worktree, &["symbolic-ref", "-q", "HEAD"]);
-    let head = String::from_utf8_lossy(&head.stdout).trim().to_string();
-    if head != format!("refs/heads/{}", f.branch) {
-        bad.push(format!("worktree HEAD is {head:?}"));
-    }
-    let own = format!("refs/heads/{}", f.branch);
-    if try_git(&f.repo, &["symbolic-ref", "-q", &own])
-        .status
-        .success()
-    {
-        bad.push(format!("{own} became a symbolic ref"));
-    }
-    for b in git(
-        &f.repo,
-        &["for-each-ref", "--format=%(refname:short)", "refs/heads/"],
-    )
-    .lines()
-    {
-        if !matches!(b, "main" | "master" | "release" | "feature") && !b.starts_with("agend/t-1/") {
-            bad.push(format!("new branch {b}"));
+    if !limit {
+        let head = try_git(&f.worktree, &["symbolic-ref", "-q", "HEAD"]);
+        let head = String::from_utf8_lossy(&head.stdout).trim().to_string();
+        if head != format!("refs/heads/{}", f.branch) {
+            bad.push(format!("worktree HEAD is {head:?}"));
+        }
+        let own = format!("refs/heads/{}", f.branch);
+        if try_git(&f.repo, &["symbolic-ref", "-q", &own])
+            .status
+            .success()
+        {
+            bad.push(format!("{own} became a symbolic ref"));
+        }
+        for b in git(
+            &f.repo,
+            &["for-each-ref", "--format=%(refname:short)", "refs/heads/"],
+        )
+        .lines()
+        {
+            if !matches!(b, "main" | "master" | "release" | "feature")
+                && !b.starts_with("agend/t-1/")
+            {
+                bad.push(format!("new branch {b}"));
+            }
         }
     }
     if !f.repo.join("canon-wip.txt").exists()
@@ -269,14 +385,17 @@ fn violations(f: &Fixture, before: &str, expect: Expect, ran: &common::Ran) -> V
     bad
 }
 
-fn run_corpus(label: &str, cases: &[Case]) {
+fn run_cases(label: &str, cases: &[Case], limit: bool) {
     let mut failures = Vec::new();
     for case in cases {
         let f = Fixture::new(label);
         dirty(&f);
         let head = f.head(&f.worktree, "HEAD");
         for s in case.setup {
-            let words: Vec<String> = s.split_whitespace().map(String::from).collect();
+            let words: Vec<String> = fill(s, &f, &head)
+                .split_whitespace()
+                .map(String::from)
+                .collect();
             let words: Vec<&str> = words.iter().map(String::as_str).collect();
             git(&f.worktree, &words);
         }
@@ -292,11 +411,12 @@ fn run_corpus(label: &str, cases: &[Case]) {
                 other => panic!("unsupported env {other}"),
             }
         }
-        let ran = gitshim(&ctx, &argv);
-        let bad = violations(&f, &before, case.expect, &ran);
+        let input = fill(case.input, &f, &head);
+        let ran = shim_input(&ctx, Tool::Git, &argv, input.as_bytes());
+        let bad = violations(&f, &before, case.expect, &ran, limit);
         if !bad.is_empty() {
             failures.push(format!(
-                "`git {}` (setup {:?}, env {:?}):\n  - {}\n  shim said: {}",
+                "`git {}` (setup {:?}, env {:?}):\n  - {}\n  said: {}",
                 case.cmd,
                 case.setup,
                 case.env,
@@ -316,27 +436,32 @@ fn run_corpus(label: &str, cases: &[Case]) {
 
 #[test]
 fn corpus_config_destinations() {
-    run_corpus("c-config", CONFIG_DESTINATIONS);
+    run_cases("c-config", CONFIG_DESTINATIONS, false);
 }
 
 #[test]
 fn corpus_abbreviated_options() {
-    run_corpus("c-abbrev", ABBREVIATED);
+    run_cases("c-abbrev", ABBREVIATED, false);
 }
 
 #[test]
 fn corpus_symbolic_refs() {
-    run_corpus("c-symref", SYMREFS);
+    run_cases("c-symref", SYMREFS, false);
 }
 
 #[test]
 fn corpus_work_tree_retargeting() {
-    run_corpus("c-worktree", WORK_TREE);
+    run_cases("c-worktree", WORK_TREE, false);
 }
 
 #[test]
 fn corpus_leaving_the_bound_branch() {
-    run_corpus("c-leave", LEAVE_BRANCH);
+    run_cases("c-leave", LEAVE_BRANCH, false);
+}
+
+#[test]
+fn corpus_known_limits_keep_protected_refs() {
+    run_cases("c-limits", KNOWN_LIMITS, true);
 }
 
 /// Round 2, class 4: a git dir without a work tree makes the cwd the work
@@ -373,7 +498,7 @@ fn own_git_dir_with_the_cwd_elsewhere_is_refused() {
                 gitshim(&f.ctx(&f.repo), &argv)
             }
         };
-        let bad = violations(&f, &before, Expect::Refused, &ran);
+        let bad = violations(&f, &before, Expect::Refused, &ran, false);
         assert!(bad.is_empty(), "{how} {cmd:?}: {bad:?}\n{}", ran.text());
         assert_eq!(ran.refused, Some("work_tree_retarget"), "{how} {cmd:?}");
     }
@@ -388,6 +513,8 @@ fn own_git_dir_with_the_cwd_elsewhere_is_refused() {
     gitshim(&ctx, &["reset", "-q", "--hard"]).ok();
 }
 
+/// A bound branch made a symbolic ref to main (by hand, a known limit):
+/// every commit through it would move main, and the hook refuses it.
 #[test]
 fn bound_branch_that_is_a_symref_refuses_commits() {
     let f = Fixture::new("c-own-symref");
@@ -401,7 +528,8 @@ fn bound_branch_that_is_a_symref_refuses_commits() {
     );
     let main_before = f.head(&f.repo, "main");
     let ran = gitshim(&f.ctx(&f.worktree), &["commit", "--allow-empty", "-m", "x"]);
-    assert!(ran.refused.is_some(), "{}", ran.text());
+    assert!(ran.hook_refused(), "{}", ran.text());
+    assert!(ran.text().contains("refs/heads/main"), "{}", ran.text());
     assert_eq!(f.head(&f.repo, "main"), main_before);
 }
 

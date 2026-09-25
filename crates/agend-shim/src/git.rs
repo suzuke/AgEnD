@@ -1,5 +1,5 @@
-//! The `git` guard: gathers the inputs (snapshot, location, protected refs),
-//! asks `classify`, takes a snapshot when needed, and builds the real git
+//! The `git` guard: gathers the inputs (snapshot, location), asks
+//! `classify`, takes a snapshot when needed, and builds the real git
 //! command (routed into the bound worktree or unchanged).
 //!
 //! The location comes from the real git (`resolve`): one `rev-parse` with
@@ -7,15 +7,15 @@
 //! re-implements repository discovery.
 //!
 //! Must NOT: run the real git itself (the caller execs the returned command),
-//! except for read-only probes (`rev-parse`, symbolic refs, config) and the
+//! except for read-only probes (`rev-parse`, remote config) and the
 //! snapshot.
 
 use crate::audit::{self, Record};
-use crate::binding::{self, Snapshot};
+use crate::binding;
 use crate::classify::{self, Decision, GitEnv, Input, Probe};
 use crate::ctx::{Ctx, MAX_DEPTH, lossy};
+use crate::hook::CHAIN_FILE;
 use crate::location::{self, Anchors, Location, Resolved};
-use crate::protected_ref::ProtectedRefs;
 use crate::team::{self, Key, Remotes};
 use crate::{Action, Outcome, Refusal, snapshot};
 use std::cell::OnceCell;
@@ -74,21 +74,22 @@ pub fn plan(ctx: &Ctx, args: &[OsString]) -> Outcome {
         Some(_) if snap.is_err() => Location::Unknown,
         Some(r) => location::locate(r, explicit, &anchors),
     };
-    let protected = ProtectedRefs::new(snap_ref.map_or(&[][..], |s: &Snapshot| &s.protected_refs));
     let env = GitEnv {
         retargets: ctx.git_env_retargets(),
         index_file: ctx.git_index_file.as_ref().map(|p| dir.join(p)),
-        config_keys: match &ctx.config_env_error {
-            Some(e) => Err(e.clone()),
-            None => Ok(ctx.config_env_keys.clone()),
-        },
+        config: ctx.config_env.clone(),
     };
     let probe = RealProbe {
         git: &real,
         bound: bound
             .filter(|b| b.worktree().is_dir())
             .map(|b| b.worktree().to_path_buf()),
-        here: dir.clone(),
+        // In the bound worktree git already named its git dir.
+        worktree_git_dir: resolved
+            .as_ref()
+            .filter(|_| location == Location::Worktree)
+            .map(|r| r.git_dir.clone()),
+        anchors: &anchors,
         acting: resolved.clone(),
         source_repo: source_repo.map(Path::to_path_buf),
         team: OnceCell::new(),
@@ -100,7 +101,6 @@ pub fn plan(ctx: &Ctx, args: &[OsString]) -> Outcome {
         location,
         resolved: resolved.as_ref(),
         env: &env,
-        protected: &protected,
         dir: &dir,
         probe: &probe,
     });
@@ -119,7 +119,7 @@ pub fn plan(ctx: &Ctx, args: &[OsString]) -> Outcome {
         let id = format!("{}-{}", audit::now(), std::process::id());
         match snapshot::take(&real, b.worktree(), instance, &id) {
             Ok(saved) => {
-                let shown = display_argv(&argv[parsed.sub_index..]);
+                let shown = argv[parsed.sub_index..].join(" ");
                 messages.extend(saved.report(&shown));
                 audit::append(
                     ctx.home.as_deref(),
@@ -158,7 +158,7 @@ fn refuse(
         &record("refuse", r.code, Some(r.reason.clone())),
     );
     Outcome {
-        messages: r.render(&format!("git {}", display_argv(argv))),
+        messages: r.render(&format!("git {}", argv.join(" "))),
         action: Action::Refuse(r),
     }
 }
@@ -236,12 +236,7 @@ const REV_PARSE: &[&str] = &["rev-parse", "--absolute-git-dir", "--git-common-di
 fn run_clean(git: &Path, args: &[&OsStr]) -> Option<Vec<u8>> {
     let mut cmd = Command::new(git);
     cmd.args(args).stdin(Stdio::null()).stderr(Stdio::null());
-    for var in [
-        "GIT_DIR",
-        "GIT_WORK_TREE",
-        "GIT_COMMON_DIR",
-        "GIT_INDEX_FILE",
-    ] {
+    for var in crate::ctx::RETARGET_ENV {
         cmd.env_remove(var);
     }
     let out = cmd.output().ok()?;
@@ -257,15 +252,6 @@ fn lines_keeping_empty(stdout: &[u8]) -> Vec<PathBuf> {
         return Vec::new();
     }
     body.split(|b| *b == b'\n').map(path_of).collect()
-}
-
-/// Non-empty output lines as paths (bytes kept as is on unix).
-fn lines(stdout: &[u8]) -> Vec<PathBuf> {
-    stdout
-        .split(|b| *b == b'\n')
-        .filter(|l| !l.is_empty())
-        .map(path_of)
-        .collect()
 }
 
 #[cfg(unix)]
@@ -295,7 +281,7 @@ impl RealAnchors<'_> {
     fn dirs_of(&self, dir: &Path) -> Option<(PathBuf, PathBuf)> {
         let mut args: Vec<&OsStr> = vec![OsStr::new("-C"), dir.as_os_str()];
         args.extend(REV_PARSE.iter().map(OsStr::new));
-        let out = lines(&run_clean(self.git, &args)?);
+        let out = lines_keeping_empty(&run_clean(self.git, &args)?);
         let canon = |p: &PathBuf| std::fs::canonicalize(dir.join(p)).ok();
         match out.as_slice() {
             [g, c] => Some((canon(g)?, canon(c)?)),
@@ -326,14 +312,14 @@ impl Anchors for RealAnchors<'_> {
     }
 }
 
-/// The real git behind `classify::Probe`. Questions about refs and config
-/// go to the bound worktree when there is one, else to the repo git resolved
-/// for the call (both with the caller's retargeting env removed), else to
-/// the caller's directory; team questions compare remotes (`team`).
+/// The real git behind `classify::Probe`. Revision questions go to the
+/// bound worktree; team questions compare remotes (`team`).
 struct RealProbe<'a> {
     git: &'a Path,
     bound: Option<PathBuf>,
-    here: PathBuf,
+    /// The bound worktree's git dir when git resolved the call there.
+    worktree_git_dir: Option<PathBuf>,
+    anchors: &'a RealAnchors<'a>,
     /// Git's answer for the call.
     acting: Option<Resolved>,
     source_repo: Option<PathBuf>,
@@ -341,68 +327,33 @@ struct RealProbe<'a> {
     here_remotes: OnceCell<Remotes>,
 }
 
-/// Which repo a probe question is about.
-enum At<'p> {
-    /// A checkout, by directory (`-C`).
-    Checkout(&'p Path),
-    /// A git dir git resolved for the call (`--git-dir`).
-    GitDir(&'p Path),
-    /// The caller's directory with the caller's env (no repo resolved).
-    Caller(&'p Path),
-}
-
 impl RealProbe<'_> {
-    /// stdout of git `args` in `at` if it succeeded.
-    fn run(&self, at: At, args: &[&str]) -> Option<String> {
-        let (flag, path) = match at {
-            At::Checkout(p) | At::Caller(p) => ("-C", p),
-            At::GitDir(p) => ("--git-dir", p),
-        };
-        let mut full: Vec<&OsStr> = vec![OsStr::new(flag), path.as_os_str()];
-        full.extend(args.iter().map(OsStr::new));
-        let out = match at {
-            At::Caller(_) => {
-                let out = Command::new(self.git)
-                    .args(&full)
-                    .stdin(Stdio::null())
-                    .stderr(Stdio::null())
-                    .output()
-                    .ok()?;
-                out.status.success().then_some(out.stdout)?
-            }
-            _ => run_clean(self.git, &full)?,
-        };
-        Some(String::from_utf8_lossy(&out).into_owned())
-    }
-
-    /// The repo ref and config questions are about.
-    fn repo(&self) -> At<'_> {
-        match (&self.bound, &self.acting) {
-            (Some(wt), _) => At::Checkout(wt),
-            (None, Some(r)) => At::GitDir(&r.git_dir),
-            (None, None) => At::Caller(&self.here),
-        }
-    }
-
-    fn config_in(&self, at: At, regex: &str) -> Vec<(String, String)> {
-        let out = self
-            .run(at, &["config", "-z", "--get-regexp", regex])
-            .unwrap_or_default();
-        out.split('\0')
+    /// `git config --get-regexp` of the remote settings `team` reads, in the
+    /// checkout at `dir` (`-C`) or the git dir `git_dir` (`--git-dir`).
+    fn remotes(&self, flag: &str, path: &Path) -> Remotes {
+        let args = [
+            OsStr::new(flag),
+            path.as_os_str(),
+            OsStr::new("config"),
+            OsStr::new("-z"),
+            OsStr::new("--get-regexp"),
+            OsStr::new(team::CONFIG_REGEX),
+        ];
+        let out = run_clean(self.git, &args).unwrap_or_default();
+        let entries: Vec<(String, String)> = String::from_utf8_lossy(&out)
+            .split('\0')
             .filter(|e| !e.is_empty())
             .map(|e| match e.split_once('\n') {
                 Some((k, v)) => (k.to_string(), v.to_string()),
                 None => (e.to_string(), String::new()),
             })
-            .collect()
+            .collect();
+        Remotes::from_config(&entries)
     }
 
     fn team(&self) -> &[Key] {
         self.team.get_or_init(|| match &self.source_repo {
-            Some(src) => team::team_keys(
-                src,
-                &Remotes::from_config(&self.config_in(At::Checkout(src), team::CONFIG_REGEX)),
-            ),
+            Some(src) => team::team_keys(src, &self.remotes("-C", src)),
             None => Vec::new(),
         })
     }
@@ -411,38 +362,17 @@ impl RealProbe<'_> {
     /// paths from the top of its work tree).
     fn here_remotes(&self) -> &Remotes {
         self.here_remotes.get_or_init(|| match &self.acting {
-            Some(r) => {
-                Remotes::from_config(&self.config_in(At::GitDir(&r.git_dir), team::CONFIG_REGEX))
-            }
+            Some(r) => self.remotes("--git-dir", &r.git_dir),
             None => Remotes::default(),
         })
     }
 
     fn base(&self) -> &Path {
-        self.acting.as_ref().map_or(&self.here, Resolved::root)
+        self.acting.as_ref().map_or(Path::new("."), Resolved::root)
     }
 }
 
 impl Probe for RealProbe<'_> {
-    fn symref_target(&self, full_ref: &str) -> Option<String> {
-        let mut name = full_ref.to_string();
-        let mut target = None;
-        for _ in 0..5 {
-            match self.run(self.repo(), &["symbolic-ref", "-q", &name]) {
-                Some(t) if !t.trim().is_empty() && t.trim() != name => {
-                    name = t.trim().to_string();
-                    target = Some(name.clone());
-                }
-                _ => break,
-            }
-        }
-        target
-    }
-
-    fn config(&self, regex: &str) -> Vec<(String, String)> {
-        self.config_in(self.repo(), regex)
-    }
-
     fn is_team_repo(&self) -> bool {
         let team = self.team();
         let own = self
@@ -464,32 +394,19 @@ impl Probe for RealProbe<'_> {
             .any(|k| team.contains(k))
     }
 
-    /// The team remote is a remote of the canonical checkout (its `origin`),
-    /// not the local repo itself: `git push . HEAD` is not a push to it.
-    fn is_team_push_remote(&self, remote: &str) -> bool {
-        let Some(src) = &self.source_repo else {
-            return false;
+    fn rev_parse(&self, args: &[&str]) -> Option<String> {
+        let wt = self.bound.as_deref()?;
+        let mut full: Vec<&OsStr> = vec![OsStr::new("-C"), wt.as_os_str(), OsStr::new("rev-parse")];
+        full.extend(args.iter().map(OsStr::new));
+        let out = run_clean(self.git, &full)?;
+        Some(String::from_utf8_lossy(&out).trim().to_string())
+    }
+
+    fn hooks_installed(&self) -> bool {
+        let git_dir = match &self.worktree_git_dir {
+            Some(g) => Some(g.clone()),
+            None => self.anchors.worktree_dirs().map(|(g, _)| g),
         };
-        let canonical =
-            Remotes::from_config(&self.config_in(At::Checkout(src), team::CONFIG_REGEX));
-        let team_remotes = canonical.keys(src);
-        let local = team::key(".", src);
-        let remotes = Remotes::from_config(&self.config(team::CONFIG_REGEX));
-        let base = self.bound.as_deref().unwrap_or_else(|| self.base());
-        let keys = remotes.push_keys(remote, base);
-        !keys.is_empty()
-            && keys
-                .iter()
-                .all(|k| team_remotes.contains(k) && Some(k) != local.as_ref())
+        git_dir.is_some_and(|g| g.join(CHAIN_FILE).is_file())
     }
-
-    fn symbolic_full_name(&self, rev: &str) -> Option<String> {
-        // Callers pass `@{-<n>}` only (never an option-like string).
-        let out = self.run(self.repo(), &["rev-parse", "--symbolic-full-name", rev])?;
-        Some(out.trim().to_string())
-    }
-}
-
-fn display_argv(argv: &[String]) -> String {
-    argv.join(" ")
 }

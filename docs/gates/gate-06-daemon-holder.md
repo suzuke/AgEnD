@@ -15,6 +15,7 @@
 
 - daemon 端的 holder 協定 client（agent runtime adapter）
 - daemon 重啟後重連 holder、取回畫面
+- 綁定 worktree 時呼叫 `agend_shim::install_hooks`、釋放時呼叫 `agend_shim::uninstall_hooks`（agend 的 git hook 只裝在該 agent worktree，見[第 3 施工關](gate-03-shim.md#範圍)）
 
 ## 自動驗收（完成定義）
 

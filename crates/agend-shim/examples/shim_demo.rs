@@ -1,6 +1,8 @@
 //! Gate 3 walkthrough (`cargo xtask accept shim`): runs the real `agend`
 //! binary under the names `git`, `kill` and `pkill` against a temporary repo
-//! and checks every outcome. Usage: `shim_demo <path to agend binary>`.
+//! whose agent worktree has the agend git hooks installed (as the daemon
+//! will do), and checks every outcome. Usage: `shim_demo <path to agend
+//! binary>`.
 //!
 //! Set `AGEND_SHIM_DEMO_KEEP=1` to keep the temp dir and get the env lines
 //! for trying the shim by hand.
@@ -41,6 +43,7 @@ mod demo {
         kill_log: PathBuf,
         home: PathBuf,
         repo: PathBuf,
+        origin: PathBuf,
         worktree: PathBuf,
         workspace: PathBuf,
         branch: String,
@@ -146,12 +149,18 @@ mod demo {
             std::fs::set_permissions(&p, std::os::unix::fs::PermissionsExt::from_mode(0o755))
                 .map_err(|e| e.to_string())?;
         }
+        let origin = root.join("origin.git");
+        git(&root, &["init", "-q", "--bare", "-b", "main", "origin.git"])?;
         git(&repo, &["init", "-q", "-b", "main"])?;
         git(&repo, &["config", "user.name", "Demo"])?;
         git(&repo, &["config", "user.email", "demo@example.com"])?;
         std::fs::write(repo.join("README.md"), "hello\n").map_err(|e| e.to_string())?;
         git(&repo, &["add", "README.md"])?;
         git(&repo, &["commit", "-q", "-m", "init"])?;
+        git(&repo, &["branch", "master"])?;
+        let origin_s = origin.to_str().ok_or("non-UTF-8 temp dir")?;
+        git(&repo, &["remote", "add", "origin", origin_s])?;
+        git(&repo, &["push", "-q", "origin", "main", "master"])?;
 
         // What the daemon does when it assigns task t-1 (gate 10 will own
         // this): create the worktree and write the binding snapshot.
@@ -159,6 +168,14 @@ mod demo {
         let worktree = home.join("worktrees").join("t-1");
         let wt = worktree.to_str().ok_or("non-UTF-8 temp dir")?;
         git(&repo, &["worktree", "add", "-q", "-b", &branch, wt, "main"])?;
+        // The agend hooks, in the agent worktree only (the daemon does this
+        // when it binds a worktree).
+        agend_shim::install_hooks(
+            &|| Command::new("git"),
+            &agend_shim::hooks_dir(&home),
+            &agend,
+            &worktree,
+        )?;
         let snapshot = Snapshot {
             version: SNAPSHOT_VERSION,
             instance: INSTANCE.into(),
@@ -184,8 +201,11 @@ mod demo {
         path.push(":");
         path.push(std::env::var_os("PATH").unwrap_or_default());
         println!("setup: temp dir {}", root.display());
-        println!("   canonical repo   <tmp>/repo (branch main)");
+        println!("   canonical repo   <tmp>/repo (branch main), remote origin = <tmp>/origin.git");
         println!("   bound worktree   <tmp>/home/worktrees/t-1 (branch {branch})");
+        println!(
+            "   agend git hooks  <tmp>/home/hooks, set in the worktree's config.worktree only"
+        );
         println!("   binding snapshot <tmp>/home/bindings/{INSTANCE}.json");
         println!(
             "   shim             <tmp>/bin/{{git,kill,pkill,killall}} -> {}",
@@ -200,6 +220,7 @@ mod demo {
             kill_log,
             home,
             repo,
+            origin,
             worktree,
             workspace,
             branch,
@@ -227,7 +248,7 @@ mod demo {
         refuse(env)?;
         snapshot(env)?;
         protected(env)?;
-        structural(env)?;
+        hooks(env)?;
         kill_guard(env)?;
         audit(env)
     }
@@ -317,67 +338,107 @@ mod demo {
     }
 
     fn protected(env: &Env) -> Result<(), String> {
-        println!("\n-- protected ref: bound agent writes main directly");
+        println!(
+            "\n-- protected ref: the agend hooks refuse what git reports, however the command was spelled"
+        );
         let main_before = git(&env.repo, &["rev-parse", "main"])?;
+        let origin_main = git(&env.origin, &["rev-parse", "main"])?;
         for args in [
             &["update-ref", "refs/heads/main", "HEAD"][..],
             &["push", ".", "HEAD:main"][..],
-            &["branch", "-f", "main", "HEAD"][..],
+            &["branch", "-f", "master", "HEAD"][..],
+            &["push", "origin", "HEAD:main"][..],
         ] {
             let out = env.shim("git", args, &env.worktree)?;
             check(
-                out.status.code() == Some(1)
-                    && String::from_utf8_lossy(&out.stderr).contains("protected ref"),
-                "refused as a protected ref",
+                out.status.code() != Some(0)
+                    && String::from_utf8_lossy(&out.stderr).contains("it is a protected ref"),
+                "refused by an agend hook as a protected ref",
             )?;
         }
         check(
             git(&env.repo, &["rev-parse", "main"])? == main_before,
             "main did not move",
+        )?;
+        check(
+            git(&env.origin, &["rev-parse", "main"])? == origin_main,
+            "origin's main did not move",
+        )?;
+        let out = env.shim(
+            "git",
+            &["push", "-q", "-u", "origin", &env.branch],
+            &env.worktree,
+        )?;
+        check(out.status.success(), "pushing your own branch runs")?;
+        let out = env.shim("git", &["push", "-q"], &env.workspace)?;
+        check(
+            out.status.success(),
+            "plain `git push` runs (git resolves it to your branch)",
         )
     }
 
-    fn structural(env: &Env) -> Result<(), String> {
+    fn hooks(env: &Env) -> Result<(), String> {
         println!(
-            "\n-- structural (round 1): abbreviations, implicit destinations, other work trees, symbolic refs"
+            "\n-- hooks: only the agent worktree has them; project hooks still run; they cannot be skipped"
         );
-        let repo = env.repo.to_str().ok_or("non-UTF-8 temp dir")?;
-        let main_before = git(&env.repo, &["rev-parse", "main"])?;
-        std::fs::write(env.repo.join("canon-wip.txt"), "canonical wip\n")
+        let canonical = Command::new("git")
+            .arg("-C")
+            .arg(&env.repo)
+            .args(["config", "core.hooksPath"])
+            .output()
             .map_err(|e| e.to_string())?;
-        let wt_flag = format!("--work-tree={repo}");
-        for (args, code_text) in [
-            (&["reset", "--har"][..], "spelled in full"),
-            (&["push", ".", "HEAD"][..], "no explicit destination"),
-            (
-                &[wt_flag.as_str(), "clean", "-fd"][..],
-                "is not your bound worktree",
+        check(
+            canonical.stdout.is_empty(),
+            "the canonical checkout has no core.hooksPath",
+        )?;
+        let log = env.root.join("project-hook.log");
+        let hook = env.repo.join(".git").join("hooks").join("pre-commit");
+        std::fs::write(
+            &hook,
+            format!(
+                "#!/bin/sh\necho project pre-commit ran >> '{}'\n",
+                log.display()
             ),
-            (
-                &[
-                    "symbolic-ref",
-                    "refs/heads/agend/t-1/alias",
-                    "refs/heads/main",
-                ][..],
-                "symbolic ref",
-            ),
+        )
+        .map_err(|e| e.to_string())?;
+        std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .map_err(|e| e.to_string())?;
+        let out = env.shim(
+            "git",
+            &["commit", "-q", "--allow-empty", "-m", "hooked"],
+            &env.worktree,
+        )?;
+        check(out.status.success(), "the agent's commit ran")?;
+        check(
+            std::fs::read_to_string(&log).unwrap_or_default() == "project pre-commit ran\n",
+            "the project's pre-commit hook ran from the agent worktree",
+        )?;
+        for args in [
+            &[
+                "-c",
+                "core.hooksPath=/dev/null",
+                "update-ref",
+                "refs/heads/main",
+                "HEAD",
+            ][..],
+            &["push", "--no-verify", "origin", "HEAD:main"][..],
         ] {
             let out = env.shim("git", args, &env.worktree)?;
             check(
                 out.status.code() == Some(1)
-                    && String::from_utf8_lossy(&out.stderr).contains(code_text),
-                &format!("refused: {code_text}"),
+                    && String::from_utf8_lossy(&out.stderr).contains("skip the agend"),
+                "skipping the hooks is refused",
             )?;
         }
+        std::fs::remove_file(&hook).map_err(|e| e.to_string())?;
+        let out = git(
+            &env.repo,
+            &["commit", "-q", "--allow-empty", "-m", "human on main"],
+        );
         check(
-            git(&env.repo, &["rev-parse", "main"])? == main_before,
-            "main did not move",
-        )?;
-        check(
-            env.repo.join("canon-wip.txt").exists(),
-            "the canonical checkout's untracked file survived",
-        )?;
-        std::fs::remove_file(env.repo.join("canon-wip.txt")).map_err(|e| e.to_string())
+            out.is_ok(),
+            "a human commit on main in the canonical checkout still works",
+        )
     }
 
     fn sleep_bin() -> &'static str {
@@ -448,8 +509,10 @@ mod demo {
         let refusals = records.iter().filter(|r| r.event == "refuse").count();
         let snaps = records.iter().filter(|r| r.event == "snapshot").count();
         check(
-            refusals == 11,
-            &format!("{refusals} refusals recorded (want 11)"),
+            refusals == 10,
+            &format!(
+                "{refusals} refusals recorded (want 10: 2 by the shim's branch and worktree rules, 4 by the hooks, 2 hook skips, 2 kills)"
+            ),
         )?;
         check(snaps >= 2, &format!("{snaps} snapshots recorded"))
     }

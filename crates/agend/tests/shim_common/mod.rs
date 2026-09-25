@@ -1,11 +1,15 @@
-//! Shared fixture for the shim's integration tests: real temporary repos made
-//! with `git init` / `git clone` (never a copied worktree), a bare `origin`,
-//! a daemon-style worktree on `agend/t-1/fix`, and a binding snapshot written
-//! with the shim's own `Snapshot` type (the producer the daemon will use).
+//! Shared fixture for the shim's integration tests (they live in the `agend`
+//! crate because git runs the agend hooks as the real `agend` binary): real
+//! temporary repos made with `git init` / `git clone` (never a copied
+//! worktree), a bare `origin`, a daemon-style worktree on `agend/t-1/fix`
+//! with the agend hooks installed (`agend_shim::install_hooks`, hooks dir
+//! `<home>/hooks`), and a binding snapshot written with the shim's own
+//! `Snapshot` type (the producer the daemon will use).
 //!
 //! Every git call here is pinned to the temp dir: `-C <dir>` plus
 //! `GIT_CEILING_DIRECTORIES` so a missing `.git` can never make git fall
-//! through to a repo outside the fixture.
+//! through to a repo outside the fixture; hooks are only ever installed in
+//! the fixture's own worktrees.
 //!
 //! Switch to `agend_testkit::git_fixture` once it has repo builders.
 
@@ -17,10 +21,14 @@ use agend_shim::ctx::Ctx;
 use agend_shim::{Action, Tool, plan};
 use agend_testkit::tempdir::TempDir;
 use std::ffi::OsString;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 pub const INSTANCE: &str = "dev-1";
+
+/// The `agend` binary: git runs it as every agend hook (argv[0] dispatch).
+pub const AGEND: &str = env!("CARGO_BIN_EXE_agend");
 
 pub struct Fixture {
     pub dir: TempDir,
@@ -66,11 +74,33 @@ pub fn git(dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
+/// The base command for the real git, isolated like every git call here.
+pub fn git_base() -> Command {
+    let mut cmd = Command::new("git");
+    isolate(&mut cmd);
+    cmd
+}
+
+/// Installs the agend hooks into `worktree` (hooks dir `<home>/hooks`).
+pub fn install_hooks(home: &Path, worktree: &Path) {
+    agend_shim::install_hooks(
+        &git_base,
+        &agend_shim::hooks_dir(home),
+        Path::new(AGEND),
+        worktree,
+    )
+    .unwrap();
+}
+
+/// The harness's own git (setup and checks), not the agent's: it acts like
+/// the daemon, so it skips the agend hooks (`-c core.hooksPath=/dev/null`),
+/// which would otherwise refuse git run without the agent's binding.
 pub fn try_git(dir: &Path, args: &[&str]) -> Output {
     let mut cmd = Command::new("git");
     isolate(&mut cmd)
         .arg("-C")
         .arg(dir)
+        .args(["-c", "core.hooksPath=/dev/null"])
         .args(["-c", "user.name=Test", "-c", "user.email=test@example.com"])
         .args(args);
     cmd.output().unwrap()
@@ -129,6 +159,7 @@ impl Fixture {
                 "main",
             ],
         );
+        install_hooks(&home, &worktree);
         let f = Fixture {
             dir,
             root,
@@ -209,8 +240,27 @@ pub struct Ran {
 }
 
 impl Ran {
+    /// The shim's lines, then git's stderr (where a hook's refusal is).
     pub fn text(&self) -> String {
-        self.messages.join("\n")
+        let stderr = self
+            .output
+            .as_ref()
+            .map(|o| String::from_utf8_lossy(&o.stderr).into_owned())
+            .unwrap_or_default();
+        format!("{}\n{stderr}", self.messages.join("\n"))
+    }
+
+    /// git ran and failed because an agend hook refused.
+    pub fn hook_refused(&self) -> bool {
+        self.output.as_ref().is_some_and(|o| {
+            !o.status.success()
+                && String::from_utf8_lossy(&o.stderr).contains("agend-shim: refused")
+        })
+    }
+
+    /// Refused by the shim or by an agend hook.
+    pub fn is_refused(&self) -> bool {
+        self.refused.is_some() || self.hook_refused()
     }
 
     pub fn ok(&self) -> &Output {
@@ -226,24 +276,40 @@ impl Ran {
 }
 
 pub fn shim(ctx: &Ctx, tool: Tool, cmd: &[&str]) -> Ran {
+    shim_input(ctx, tool, cmd, b"")
+}
+
+/// Like `shim`, with `input` on the real tool's stdin.
+pub fn shim_input(ctx: &Ctx, tool: Tool, cmd: &[&str], input: &[u8]) -> Ran {
     let args: Vec<OsString> = cmd.iter().map(OsString::from).collect();
     let outcome = plan(ctx, tool, &args);
     match outcome.action {
         Action::Exec(mut c) => {
             isolate(&mut c);
-            if let Some(v) = &ctx.git_work_tree {
-                c.env("GIT_WORK_TREE", v);
+            // What the holder gives the agent; git passes it to the hooks.
+            if let (Some(home), Some(instance)) = (&ctx.home, &ctx.instance) {
+                c.env("AGEND_HOME", home).env("AGEND_INSTANCE", instance);
             }
-            if let Some(v) = &ctx.git_dir {
-                c.env("GIT_DIR", v);
+            for (var, value) in [
+                ("GIT_WORK_TREE", &ctx.git_work_tree),
+                ("GIT_DIR", &ctx.git_dir),
+                ("GIT_INDEX_FILE", &ctx.git_index_file),
+            ] {
+                if let Some(v) = value {
+                    c.env(var, v);
+                }
             }
-            if let Some(v) = &ctx.git_index_file {
-                c.env("GIT_INDEX_FILE", v);
-            }
+            let mut child = c
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            let _ = child.stdin.take().unwrap().write_all(input);
             Ran {
                 messages: outcome.messages,
                 refused: None,
-                output: Some(c.stdin(std::process::Stdio::null()).output().unwrap()),
+                output: Some(child.wait_with_output().unwrap()),
             }
         }
         Action::Refuse(r) => Ran {

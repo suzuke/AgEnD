@@ -1,18 +1,19 @@
 //! Verifier round 3: the shim asks the real git where a call acts, so every
 //! spelling of a location resolves alike. Table-driven over
 //! spellings × work tree given or not × cwd × command:
-//! - every protected action is refused, and a destructive one is refused or
+//! - every protected action is refused (by the shim, or by the agend hook
+//!   in the bound worktree), and a destructive one is refused or
 //!   snapshotted before it runs; nothing outside the bound worktree changes;
 //! - normal work passes with every spelling that names the bound worktree.
 //!
-//! Real temporary repos only (`git init` / `git clone`, via `common`).
+//! Real temporary repos only (`git init` / `git clone`, via `shim_common`).
 
 #![cfg(unix)]
 
-mod common;
+mod shim_common;
 
 use agend_shim::ctx::Ctx;
-use common::{Fixture, Ran, git, gitshim, try_git};
+use shim_common::{Fixture, Ran, git, gitshim, try_git};
 use std::path::{Path, PathBuf};
 
 /// How the call names the repo.
@@ -153,9 +154,12 @@ fn violations(
 ) -> Vec<String> {
     let mut bad = Vec::new();
     let snapped = snapshots(f) > snaps_before;
+    let refused = ran.is_refused();
     match (expect, ran.refused) {
-        (Expect::Refused, None) => bad.push("was not refused".into()),
-        (Expect::RefusedOrSnapshot, None) if !snapped => bad.push("ran without a snapshot".into()),
+        (Expect::Refused, _) if !refused => bad.push("was not refused (shim or hook)".into()),
+        (Expect::RefusedOrSnapshot, _) if !refused && !snapped => {
+            bad.push("ran without a snapshot".into())
+        }
         // Every spelling here acts on the team repo's own worktree; calling
         // it "a clone of the team repo" sends the agent the wrong way.
         (_, Some("team_clone")) => bad.push("refused as a team clone".into()),

@@ -1,17 +1,17 @@
 //! End-to-end behaviour of the git guard against real temporary repos (see
-//! `common`): a canonical checkout, a daemon-style worktree on
+//! `shim_common`): a canonical checkout, a daemon-style worktree on
 //! `agend/t-1/fix`, and a binding snapshot written with the shim's own
-//! `Snapshot` type. Kill-guard behaviour lives in `bypass_corpus.rs`, against
+//! `Snapshot` type. Kill-guard behaviour lives in `shim_bypass_corpus.rs`, against
 //! a fake kill recorder only.
 
 #![cfg(unix)]
 
-mod common;
+mod shim_common;
 
 use agend_shim::audit;
 use agend_shim::binding::snapshot_path;
 use agend_shim::ctx::Ctx;
-use common::{Fixture, INSTANCE, git, gitshim};
+use shim_common::{Fixture, INSTANCE, git, gitshim};
 
 #[test]
 fn bound_commit_from_workspace_lands_on_the_task_branch() {
@@ -89,12 +89,19 @@ fn worktree_and_branch_creation_are_refused() {
     let ctx = f.ctx(&f.worktree);
     for (cmd, code) in [
         (&["worktree", "add", "../x"][..], "worktree_managed"),
-        (&["checkout", "-b", "feat/x"][..], "branch_create"),
-        (&["switch", "-c", "feat/x"][..], "branch_create"),
-        (&["branch", "feat/x"][..], "branch_create"),
+        (&["checkout", "-b", "feat/x"][..], "branch_switch"),
+        (&["switch", "-c", "feat/x"][..], "branch_switch"),
     ] {
         assert_eq!(gitshim(&ctx, cmd).refused, Some(code), "{cmd:?}");
     }
+    // Branch writes are the reference-transaction hook's.
+    let ran = gitshim(&ctx, &["branch", "feat/x"]);
+    assert!(ran.hook_refused(), "{}", ran.text());
+    assert!(
+        ran.text().contains("only write branches under agend/t-1/"),
+        "{}",
+        ran.text()
+    );
     gitshim(&ctx, &["branch", "agend/t-1/scratch"]).ok();
     let branches = git(&f.repo, &["branch", "--format=%(refname:short)"]);
     assert!(!branches.contains("feat/x"), "{branches}");
@@ -148,14 +155,23 @@ fn protected_refs_are_refused_and_main_does_not_move() {
     for cmd in [
         vec!["update-ref", "refs/heads/main", head.as_str()],
         vec!["update-ref", "refs/heads/release", head.as_str()],
+        vec!["update-ref", "-d", "refs/heads/master"],
         vec!["push", ".", "HEAD:main"],
         vec!["push", ".", "HEAD:refs/heads/master"],
-        vec!["branch", "-f", "main", head.as_str()],
+        vec!["branch", "-f", "master", head.as_str()],
+        vec!["branch", "-D", "release"],
     ] {
-        assert_eq!(
-            gitshim(&ctx, &cmd).refused,
-            Some("protected_ref"),
-            "{cmd:?}"
+        let ran = gitshim(&ctx, &cmd);
+        assert!(ran.hook_refused(), "{cmd:?}: {}", ran.text());
+        assert!(
+            ran.text().contains("it is a protected ref"),
+            "{cmd:?}: {}",
+            ran.text()
+        );
+        assert!(
+            ran.text().contains("next step: "),
+            "{cmd:?}: {}",
+            ran.text()
         );
     }
     assert_eq!(
@@ -169,6 +185,15 @@ fn protected_refs_are_refused_and_main_does_not_move() {
         &["update-ref", &format!("refs/heads/{}", f.branch), &head],
     )
     .ok();
+    let records = audit::read(&f.home);
+    assert_eq!(
+        records
+            .iter()
+            .filter(|r| r.code.as_deref() == Some("protected_ref"))
+            .count(),
+        7,
+        "hook refusals are audited: {records:?}"
+    );
 }
 
 #[test]
@@ -250,6 +275,7 @@ fn clean_and_path_checkout_are_snapshotted() {
     );
 }
 
+/// The bypass skips the shim only; the hooks still guard refs.
 #[test]
 fn bypass_runs_unchecked_and_is_audited() {
     let f = Fixture::new("bypass");
@@ -257,10 +283,12 @@ fn bypass_runs_unchecked_and_is_audited() {
         bypass: true,
         ..f.ctx(&f.worktree)
     };
-    gitshim(&ctx, &["branch", "feat/escape"]).ok();
+    gitshim(&ctx, &["checkout", "-q", "-b", "agend/t-1/escape"]).ok();
+    assert!(gitshim(&ctx, &["branch", "feat/escape"]).hook_refused());
     let records = audit::read(&f.home);
-    assert_eq!(records.len(), 1);
+    assert_eq!(records.len(), 3, "{records:?}");
     assert_eq!(records[0].event, "bypass");
+    assert_eq!(records[2].code.as_deref(), Some("ref_not_yours"));
 }
 
 #[test]

@@ -1,6 +1,7 @@
 //! Recognises the team's repo by destination, not by cwd: a repo whose
 //! remote points at the team's remote or at the canonical checkout (a clone),
-//! and a push whose destination is either, are the team repo too.
+//! and a push whose destination is either, are the team repo too. These
+//! repos have no agend hooks, so the shim guards them (T5).
 //!
 //! Remote URLs are compared after `url.<base>.insteadOf` /
 //! `pushInsteadOf` rewriting and normalisation (`git@host:o/r.git`,
@@ -27,8 +28,6 @@ pub enum Key {
 pub struct Remotes {
     /// (remote name, url or pushurl).
     pub urls: Vec<(String, String)>,
-    /// (remote name, pushurl): where git pushes when a remote has one.
-    pub pushurls: Vec<(String, String)>,
     /// (prefix, replacement) from `url.<replacement>.insteadOf|pushInsteadOf`.
     pub rewrites: Vec<(String, String)>,
 }
@@ -47,9 +46,6 @@ impl Remotes {
                 && let Some((name, _)) = rest.rsplit_once('.')
             {
                 r.urls.push((name.to_string(), value.clone()));
-                if lower.ends_with(".pushurl") {
-                    r.pushurls.push((name.to_string(), value.clone()));
-                }
             } else if let Some(rest) = key.strip_prefix("url.")
                 && let Some((base, _)) = rest.rsplit_once('.')
             {
@@ -91,21 +87,6 @@ impl Remotes {
             return named;
         }
         key(&self.rewrite(dest), base).into_iter().collect()
-    }
-
-    /// Keys of where `git push <remote>` sends: the remote's pushurls if it
-    /// has any, else its urls, else `remote` itself as a URL or path.
-    pub fn push_keys(&self, remote: &str, base: &Path) -> Vec<Key> {
-        let push: Vec<Key> = self
-            .pushurls
-            .iter()
-            .filter(|(n, _)| n == remote)
-            .filter_map(|(_, u)| key(&self.rewrite(u), base))
-            .collect();
-        if !push.is_empty() {
-            return push;
-        }
-        self.dest_keys(remote, base)
     }
 }
 
@@ -201,80 +182,4 @@ fn repo_key(p: &Path) -> Option<Key> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn network_urls_normalise_to_host_and_path() {
-        let base = Path::new("/");
-        let want = Some(Key::Remote("github.com/suzuke/agend".into()));
-        for u in [
-            "git@github.com:suzuke/agend.git",
-            "ssh://git@github.com/suzuke/agend",
-            "https://github.com/suzuke/agend/",
-            "https://user@GitHub.com:443/suzuke/agend.git",
-            "github.com:suzuke/agend",
-        ] {
-            assert_eq!(key(u, base), want, "{u}");
-        }
-        assert_ne!(key("https://github.com/other/agend", base), want);
-    }
-
-    #[test]
-    fn insteadof_rewrites_before_comparing() {
-        let r = Remotes::from_config(&[
-            ("remote.origin.url".into(), "gh:suzuke/agend".into()),
-            ("url.https://github.com/.insteadof".into(), "gh:".into()),
-        ]);
-        assert_eq!(
-            r.rewrite("gh:suzuke/agend"),
-            "https://github.com/suzuke/agend"
-        );
-        assert_eq!(
-            r.keys(Path::new("/")),
-            vec![Key::Remote("github.com/suzuke/agend".into())]
-        );
-        assert_eq!(
-            r.dest_keys("origin", Path::new("/")),
-            r.dest_keys("gh:suzuke/agend", Path::new("/"))
-        );
-    }
-
-    /// Round 2: git resolves a local remote without its `.git` suffix.
-    #[test]
-    fn local_paths_resolve_like_git_enter_repo() {
-        let tmp = agend_testkit::tempdir::TempDir::new("team-key").unwrap();
-        let root = std::fs::canonicalize(tmp.path()).unwrap();
-        let bare = root.join("origin.git");
-        std::fs::create_dir_all(bare.join("objects")).unwrap();
-        std::fs::write(bare.join("HEAD"), "ref: refs/heads/main\n").unwrap();
-        let want = Some(Key::Local(bare.clone()));
-        let r = root.display();
-        for u in [
-            format!("{r}/origin.git"),
-            format!("{r}/origin"),
-            format!("{r}/origin/"),
-            format!("{r}/./origin"),
-            format!("file://{r}/origin"),
-            format!("file://{r}/origin.git/"),
-            format!("file://localhost{r}/origin.git"),
-            format!("file://LOCALHOST{r}/origin"),
-            format!("file://127.0.0.1{r}/origin"),
-            "origin".to_string(),
-            "../x/../origin".to_string(),
-        ] {
-            let base = if u.starts_with("..") {
-                root.join("x")
-            } else {
-                root.clone()
-            };
-            std::fs::create_dir_all(&base).unwrap();
-            assert_eq!(key(&u, &base), want, "{u}");
-        }
-        // A real repo at the suffix-less path wins, as in git.
-        let plain = root.join("origin");
-        std::fs::create_dir_all(plain.join("objects")).unwrap();
-        std::fs::write(plain.join("HEAD"), "ref: refs/heads/main\n").unwrap();
-        assert_eq!(key(&format!("{r}/origin"), &root), Some(Key::Local(plain)));
-    }
-}
+mod tests;

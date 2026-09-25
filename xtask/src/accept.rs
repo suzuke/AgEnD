@@ -3,8 +3,9 @@
 //!
 //! For gate 1 run workspace formatting and clippy, test agend-core and its
 //! protocol compatibility contract, run check-deps, then show the core demo.
-//! Gate 3 runs the per-crate checks plus the binary's argv[0] dispatch test,
-//! then the shim demo. Other gates use the per-crate checks until their
+//! Gate 3 runs the per-crate checks plus the `agend` crate's tests (argv[0]
+//! dispatch, and the shim and hook tests against real repos, which need the
+//! real binary), then the shim demo. Other gates use the per-crate checks until their
 //! acceptance flow is built.
 
 use crate::{cargo, check_deps, workspace_root};
@@ -135,7 +136,7 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
             step(&["test", "-p", krate])?;
         }
         if gate.number == 3 {
-            step(&["test", "-p", "agend", "--test", "argv0_dispatch"])?;
+            step(&["test", "-p", "agend"])?;
         }
     }
     check_deps::run(false)?;

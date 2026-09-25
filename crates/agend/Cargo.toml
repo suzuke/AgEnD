@@ -20,3 +20,5 @@ agend-tui.workspace = true
 
 [dev-dependencies]
 agend-testkit.workspace = true
+# The shim tests write binding snapshots (JSON), like the daemon will.
+serde_json = "1"

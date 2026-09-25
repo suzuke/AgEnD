@@ -8,14 +8,14 @@
 //! replayed as typed, plus `checkout -- .`, `add .` and `restore .`; each
 //! from a canonical subdirectory and from another worktree's subdirectory.
 //!
-//! Real temporary repos only (`common`); every call names absolute paths
+//! Real temporary repos only (`shim_common`); every call names absolute paths
 //! and its own cwd.
 
 #![cfg(unix)]
 
-mod common;
+mod shim_common;
 
-use common::{Fixture, git, gitshim, try_git};
+use shim_common::{Fixture, git, gitshim, try_git};
 use std::path::{Path, PathBuf};
 
 /// The fixture plus `src/sub` in main, the bound worktree and a second
