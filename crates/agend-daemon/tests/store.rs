@@ -246,6 +246,7 @@ fn a_new_home_is_private_and_the_database_is_created_0600() {
     let dir = TempDir::new("store-modes").unwrap();
     let home = dir.path().join("home");
     let store = SqliteStore::open(&home, NOW).unwrap();
+    block_on(store.create_task(&task("T-1"))).unwrap();
     block_on(store.snapshot(NOW)).unwrap();
     assert_eq!(mode(&home), 0o700, "home");
     assert_eq!(mode(&home.join(DB_FILE)), 0o600, "agend.db");
@@ -928,6 +929,42 @@ fn daily_snapshots_keep_the_seven_newest_and_never_touch_other_files() {
     assert_eq!((check.as_str(), tasks), ("ok", 1));
 }
 
+/// Verifier finding (gate 5 round 2): an empty database (a deleted
+/// `agend.db` starts one) took a daily snapshot every day and pushed all
+/// seven good ones out. No snapshot is taken while it is empty.
+#[test]
+fn an_empty_database_takes_no_daily_snapshot_and_evicts_none() {
+    let dir = TempDir::new("store-snapshot-empty").unwrap();
+    let home = dir.path().join("home");
+    let store = SqliteStore::open(&home, NOW).unwrap();
+    block_on(store.create_task(&task("T-1"))).unwrap();
+    for day in 0..KEEP as u64 {
+        assert!(block_on(store.snapshot(NOW + day * DAY_MS)).unwrap().taken);
+    }
+    drop(store);
+    let backups = home.join(BACKUPS_DIR);
+    let good = listing(&backups);
+
+    fs::remove_file(home.join(DB_FILE)).unwrap();
+    let _ = fs::remove_file(home.join(format!("{DB_FILE}-wal")));
+    let store = SqliteStore::open(&home, NOW).unwrap();
+    for day in KEEP as u64..2 * KEEP as u64 {
+        let report = block_on(store.snapshot(NOW + day * DAY_MS)).unwrap();
+        assert!(report.empty && !report.taken, "{report:?}");
+        assert!(report.rotated_out.is_empty());
+    }
+    assert_eq!(
+        listing(&backups),
+        good,
+        "every good snapshot is still there"
+    );
+
+    block_on(store.create_task(&task("T-2"))).unwrap();
+    let report = block_on(store.snapshot(NOW + 2 * KEEP as u64 * DAY_MS)).unwrap();
+    assert!(report.taken && !report.empty);
+    assert_eq!(report.rotated_out.len(), 1);
+}
+
 /// Verifier finding (gate 5 round 1): a snapshot killed mid-write can
 /// leave SQLite's `-journal` (or `-wal`, `-shm`) next to the temporary
 /// file. The next snapshot removes them with it; files that only look
@@ -937,6 +974,7 @@ fn a_killed_snapshots_temporary_file_and_its_sidecars_are_removed() {
     let dir = TempDir::new("store-snapshot-sidecars").unwrap();
     let home = dir.path().join("home");
     let store = SqliteStore::open(&home, NOW).unwrap();
+    block_on(store.create_task(&task("T-1"))).unwrap();
     let backups = home.join(BACKUPS_DIR);
     fs::create_dir_all(&backups).unwrap();
     let tmp = format!(".{}.tmp", snapshot::daily_name(NOW - DAY_MS));

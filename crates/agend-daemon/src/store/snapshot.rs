@@ -1,5 +1,5 @@
 //! DB snapshots (gate 5 P9): `backups/agend-YYYY-MM-DD.db` once a day (UTC
-//! date) and `backups/agend-YYYY-MM-DD-pre-vN.db` before a migration to
+//! date, skipped while the database has no task and no event) and `backups/agend-YYYY-MM-DD-pre-vN.db` before a migration to
 //! schema version N. Each is written as `VACUUM INTO` a hidden temporary
 //! file, checked read-only with `PRAGMA quick_check`, then renamed, so a
 //! crash never leaves half a snapshot under a snapshot name. Only the
@@ -32,8 +32,13 @@ const TMP_SUFFIX: &str = ".tmp";
 pub struct SnapshotReport {
     /// Today's snapshot.
     pub path: PathBuf,
-    /// Whether this call wrote it (false: it already existed).
+    /// Whether this call wrote it (false: it already existed, or the
+    /// database is empty).
     pub taken: bool,
+    /// The database had no task and no event, so no snapshot was written:
+    /// snapshots of an empty database (a deleted `agend.db` starts one)
+    /// would push the good ones out.
+    pub empty: bool,
     pub bytes: u64,
     /// Time spent in `VACUUM INTO` + `quick_check` (zero when not taken).
     pub elapsed: Duration,
@@ -195,16 +200,22 @@ pub(super) fn daily(
     let (backups, stale_tmp_removed) = prepare(home)?;
     let name = daily_name(now_unix_ms);
     let path = backups.join(&name);
-    let (taken, elapsed) = if path.exists() {
+    let empty: bool = conn.query_row(
+        "SELECT NOT EXISTS (SELECT 1 FROM tasks) AND NOT EXISTS (SELECT 1 FROM task_events)",
+        [],
+        |r| r.get(0),
+    )?;
+    let (taken, elapsed) = if empty || path.exists() {
         (false, Duration::ZERO)
     } else {
         (true, write(conn, &backups, &name)?)
     };
-    let bytes = fs::metadata(&path)?.len();
+    let bytes = fs::metadata(&path).map_or(0, |m| m.len());
     let (rotated_out, kept) = rotate(&backups)?;
     Ok(SnapshotReport {
         path,
         taken,
+        empty,
         bytes,
         elapsed,
         rotated_out,
