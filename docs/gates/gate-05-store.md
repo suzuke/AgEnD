@@ -291,6 +291,7 @@ owner 睡著時由實作者決定、可以反悔的事（頁面沒寫到的設�
 |---|---|---|---|---|
 | S1 | `save_workflow(&Workflow)` 存 `toml::to_string` 的結果（D19 格式，但不是使用者原始檔的文字，註解會掉）；同一個 (id, version) 再存一次回 `Exists`，不覆蓋 | D21：task 固定版本，版本內容不能變；存序列化結果保證讀得回（第 1 施工關 workflow golden 已鎖格式） | 第 9 施工關要保留原文：加 `save_workflow_toml(text)`，解析驗證後存原文；表不變 | 待追認 |
 | S2 | 0700／0600 只在 store 建立 home、`agend.db`、`backups/` 時設定；已存在的目錄或檔案權限不改 | 頁面寫「建立時就是 0600」；改使用者自己建的目錄權限太侵入 | 改成每次開啟都 chmod：`open_connection` 加兩行＋一個測試 | 待追認 |
+| S3 | 測試要求 `fixtures/schema-v1.sql` 到 `schema-v{LATEST}.sql` 全部存在，包括目前最新版（頁面只說「新增 migration 的 PR 要附前一版」） | 目前只有 v1，沒有「舊版」可測；把最新版也凍結，才能在今天就抓到「有人改了 0001_init.sql」 | 改回只要求舊版：迴圈上限改成 `LATEST_VERSION - 1` | 待追認 |
 
 ## 驗收紀錄
 
