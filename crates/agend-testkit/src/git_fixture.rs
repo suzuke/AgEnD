@@ -7,8 +7,17 @@
 //! commit ids are reproducible), `GIT_CEILING_DIRECTORIES` at the fixture
 //! root, and every inherited `GIT_*` / `AGEND_*` variable removed.
 //!
+//! Threat model: the fixture guards against well-meaning test code that
+//! makes mistakes (a wrong or empty path, a failed `cd`, an inherited env
+//! var). It is not a sandbox against test code that deliberately writes git
+//! internals to escape (e.g. a `commondir` or `core.worktree` planted
+//! through [`GitFixture::command`]); that is out of scope, as for the
+//! gate-3 shim. Unix only: Windows name rules (trailing dots, 8.3 names)
+//! are not handled.
+//!
 //! Must NOT: run a command outside the repos it created (canonical, origin,
-//! a linked worktree, or their subdirectories), so git's discovery always
+//! a linked worktree, or their subdirectories) or inside a `.git`
+//! directory, so git's discovery always
 //! starts in a fixture repo and never in a bare directory from which it
 //! could walk up into an enclosing repo; accept a temp dir or label
 //! containing the path-list separator (`:`, `;` on Windows), which would
@@ -36,14 +45,22 @@ const NULL_DEVICE: &str = if cfg!(windows) { "NUL" } else { "/dev/null" };
 const PATH_LIST_SEPARATOR: char = if cfg!(windows) { ';' } else { ':' };
 
 /// Variables removed by name even when the sweep below would not see them
-/// (e.g. set later in the parent); the sweep removes every other inherited
-/// `GIT_*` / `AGEND_*` variable.
+/// (set in the parent after [`GitFixture::command`] returns); the sweep
+/// removes every other `GIT_*` / `AGEND_*` variable inherited at that
+/// point. A variable not listed here and set later still reaches git.
 const REMOVED: &[&str] = &[
     "GIT_DIR",
     "GIT_WORK_TREE",
     "GIT_INDEX_FILE",
     "GIT_COMMON_DIR",
     "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_NAMESPACE",
+    "GIT_CONFIG",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_SYSTEM",
+    "GIT_DISCOVERY_ACROSS_FILESYSTEM",
     "AGEND_HOME",
 ];
 
@@ -122,8 +139,9 @@ impl GitFixture {
 
     /// A hygienic command running `program` in `dir`. Panics unless `dir`
     /// is absolute and inside one of the fixture's repos (canonical,
-    /// origin, a linked worktree, or a subdirectory of one). Only `dir` is
-    /// checked, not the arguments the caller adds.
+    /// origin, a linked worktree, or a subdirectory of one) and not inside
+    /// a `.git` directory. Only `dir` is checked, not the arguments the
+    /// caller adds.
     pub fn command(&self, program: impl AsRef<OsStr>, dir: &Path) -> Command {
         self.assert_in_repo(dir, true);
         let mut cmd = Command::new(program);
@@ -178,8 +196,10 @@ impl GitFixture {
     /// content, parent and message (dates are fixed), so give different
     /// commits different messages.
     /// Panics unless `dir` is in the canonical repo or a linked worktree
-    /// (not the bare origin), or if any component of `file` is `.git` (any
-    /// case) or a symlink, or if `file` exists with more than one hard link.
+    /// (not the bare origin, not a `.git` directory), or if any component
+    /// of `file` is `.git` (any case) or a symlink, or if `file` exists
+    /// with more than one hard link. Every check runs before the write, so
+    /// a refused call leaves no file behind.
     pub fn commit(&self, dir: &Path, file: &str, message: &str) -> String {
         self.assert_in_repo(dir, false);
         let work_tree = std::fs::canonicalize(dir).expect("resolve work tree");
@@ -268,10 +288,17 @@ impl GitFixture {
     /// Panics unless `dir` is absolute and resolves into the canonical
     /// repo, a linked worktree, or (if `bare_ok`) the origin. Any other
     /// directory, even inside [`Self::root`], is not a repo, so git's
-    /// discovery would start there and could walk up past the root.
+    /// discovery would start there and could walk up past the root. A
+    /// `.git` directory (any case, symlinks resolved) is refused too:
+    /// running git or writing files there edits the repo's own metadata.
     fn assert_in_repo(&self, dir: &Path, bare_ok: bool) {
         let resolved = std::fs::canonicalize(dir)
             .unwrap_or_else(|e| panic!("git fixture: cannot resolve {dir:?}: {e}"));
+        let in_root = resolved.strip_prefix(&self.root).unwrap_or(&resolved);
+        assert!(
+            !has_dot_git(in_root),
+            "git fixture: refusing to operate inside a .git directory: {dir:?}"
+        );
         let mut repos = vec![self.canonical()];
         if bare_ok {
             repos.push(self.origin());
@@ -288,6 +315,12 @@ impl GitFixture {
             "git fixture: refusing to operate on {dir:?} (resolves to {resolved:?}), not inside a fixture repo {repos:?}"
         );
     }
+}
+
+/// Whether any component of `path` is `.git`, in any letter case.
+fn has_dot_git(path: &Path) -> bool {
+    path.components()
+        .any(|c| matches!(c, Component::Normal(n) if n.eq_ignore_ascii_case(".git")))
 }
 
 #[cfg(test)]
@@ -516,6 +549,49 @@ mod tests {
         }
         assert_eq!(std::fs::read_to_string(wt.join(".git")).unwrap(), gitfile);
         assert!(!wt.join("sub").exists());
+    }
+
+    /// F1 (r3): a `dir` inside a `.git` directory is refused, and `commit`
+    /// checks before it writes. The old code wrote `commondir` or `config`
+    /// there, and later commands in canonical or the worktree reached the
+    /// enclosing repo.
+    #[test]
+    fn refuses_a_dir_inside_dot_git() {
+        let outer_dir = TempDir::new("git-enclosing").unwrap();
+        let outer = std::fs::canonicalize(outer_dir.path()).unwrap();
+        plain_git(&outer, &["init", "-q"]);
+        let fx = GitFixture::new_in(&outer, "dotgit").unwrap();
+        let wt = fx.add_worktree("w", "w", MAIN);
+        let o = outer.to_str().unwrap();
+        let writes = [
+            ("commondir", format!("{o}/.git")),
+            ("config", format!("[core]\n\tworktree = {o}\n")),
+        ];
+        let git_dir = fx.canonical().join(".git");
+        for dir in [git_dir.clone(), git_dir.join("worktrees/w")] {
+            for (file, body) in &writes {
+                let before = std::fs::read_to_string(dir.join(file)).ok();
+                let result = std::panic::catch_unwind(|| fx.commit(&dir, file, body));
+                assert!(result.is_err(), "commit({dir:?}, {file:?}) was allowed");
+                let after = std::fs::read_to_string(dir.join(file)).ok();
+                assert_eq!(before, after, "commit({dir:?}, {file:?}) wrote the file");
+            }
+            let result = std::panic::catch_unwind(|| fx.command("git", &dir));
+            assert!(result.is_err(), "command in {dir:?} was allowed");
+            let result =
+                std::panic::catch_unwind(|| fx.git(&dir, &["config", "escaped.in", "yes"]));
+            assert!(result.is_err(), "git in {dir:?} was allowed");
+        }
+        for dir in [fx.canonical(), wt] {
+            fx.git(&dir, &["config", "escaped.after", "yes"]);
+            let top = fx.git(&dir, &["rev-parse", "--show-toplevel"]);
+            assert!(Path::new(&top).starts_with(fx.root()), "{dir:?} -> {top}");
+        }
+        let config = std::fs::read_to_string(outer.join(".git/config")).unwrap();
+        assert!(
+            !config.contains("escaped"),
+            "wrote the enclosing repo's config"
+        );
     }
 
     /// `commit` must not write through a hard link to a file outside.
