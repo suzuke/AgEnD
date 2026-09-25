@@ -69,7 +69,7 @@ pub fn main(args: impl IntoIterator<Item = String>) -> ExitCode {
     let server = match Server::bind(Path::new(path), Duration::from_millis(turn_ms), home) {
         Ok(server) => server,
         Err(e) => {
-            eprintln!("fake-codex-app-server: cannot listen on {path}: {e}");
+            eprintln!("fake-codex-app-server: cannot start on {path}: {e}");
             return ExitCode::FAILURE;
         }
     };
@@ -108,7 +108,9 @@ impl Server {
             home: state_dir,
             ..State::default()
         };
-        state.load();
+        state
+            .load()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         let shared = Arc::new(Shared {
             state: Mutex::new(state),
             turn,
@@ -207,16 +209,31 @@ impl State {
         1_700_000_000_000 + self.next_id
     }
 
-    fn load(&mut self) {
+    /// Loads state from `home`/[`THREADS_FILE`]. No file is empty state
+    /// (nothing has been saved yet, or nothing persists). A present but
+    /// unparsable file is an error: `save` writes atomically (temp file +
+    /// rename), so a non-empty file that fails to parse means real
+    /// corruption, not a save caught mid-write, and starting empty would
+    /// silently answer 404 to every thread a client expects to resume.
+    fn load(&mut self) -> Result<(), String> {
         let Some(file) = self.home.as_ref().map(|h| h.join(THREADS_FILE)) else {
-            return;
+            return Ok(());
         };
-        let Ok(saved) = std::fs::read_to_string(file)
-            .map_err(|_| ())
-            .and_then(|t| serde_json::from_str::<Value>(&t).map_err(|_| ()))
-        else {
-            return;
+        let text = match std::fs::read_to_string(&file) {
+            Ok(text) => text,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(format!("cannot read state file {}: {e}", file.display())),
         };
+        if text.trim().is_empty() {
+            return Ok(());
+        }
+        let saved: Value = serde_json::from_str(&text).map_err(|e| {
+            format!(
+                "corrupt state file {} ({} bytes): {e}",
+                file.display(),
+                text.len()
+            )
+        })?;
         self.next_id = saved["next_id"].as_u64().unwrap_or(0);
         for t in saved["threads"].as_array().into_iter().flatten() {
             let id = t["thread"]["id"].as_str().unwrap_or_default().to_owned();
@@ -232,6 +249,7 @@ impl State {
                 },
             );
         }
+        Ok(())
     }
 
     fn save(&self) {
@@ -243,13 +261,8 @@ impl State {
             .values()
             .map(|t| json!({"thread": t.thread, "settings": t.settings, "turns": t.turns}))
             .collect();
-        if let Some(dir) = file.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        let _ = std::fs::write(
-            file,
-            json!({"next_id": self.next_id, "threads": threads}).to_string(),
-        );
+        let saved = json!({"next_id": self.next_id, "threads": threads});
+        let _ = super::write_state_atomic(&file, &saved.to_string());
     }
 
     fn notification(&mut self, method: &str, params: Value) -> Value {
@@ -1030,5 +1043,104 @@ impl Probe {
                 return Ok(message);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tempdir::TempDir;
+
+    fn thread_state(id: &str) -> ThreadState {
+        ThreadState {
+            thread: json!({"id": id}),
+            settings: json!({}),
+            turns: Vec::new(),
+            subscribers: BTreeSet::new(),
+            active: None,
+            queue: VecDeque::new(),
+        }
+    }
+
+    /// A state file with no bytes is treated like a missing file.
+    #[test]
+    fn load_empty_file_is_empty_state() {
+        let dir = TempDir::new("codex-empty").unwrap();
+        let file = dir.path().join(THREADS_FILE);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, "").unwrap();
+        let mut state = State {
+            home: Some(dir.path().to_path_buf()),
+            ..State::default()
+        };
+        state.load().unwrap();
+        assert!(state.threads.is_empty());
+    }
+
+    /// A missing file is empty state, not an error.
+    #[test]
+    fn load_missing_file_is_empty_state() {
+        let dir = TempDir::new("codex-missing").unwrap();
+        let mut state = State {
+            home: Some(dir.path().to_path_buf()),
+            ..State::default()
+        };
+        state.load().unwrap();
+        assert!(state.threads.is_empty());
+    }
+
+    /// A non-empty file that fails to parse — the shape a process killed
+    /// mid-write left behind before `save` became atomic — is a loud,
+    /// clearly labelled error instead of a silent empty start.
+    #[test]
+    fn load_truncated_file_is_a_clear_error() {
+        let dir = TempDir::new("codex-truncated").unwrap();
+        let file = dir.path().join(THREADS_FILE);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, r#"{"next_id": 2, "threads": [{"thread": {"id"#).unwrap();
+        let mut state = State {
+            home: Some(dir.path().to_path_buf()),
+            ..State::default()
+        };
+        let err = state.load().unwrap_err();
+        assert!(
+            err.contains(&file.display().to_string()),
+            "error should name the file: {err}"
+        );
+        assert!(state.threads.is_empty());
+    }
+
+    /// `save` goes through the temp-file-then-rename path: no partial file
+    /// is ever observable at the final path.
+    #[test]
+    fn save_is_atomic_no_partial_file_observable() {
+        let dir = TempDir::new("codex-atomic").unwrap();
+        let file = dir.path().join(THREADS_FILE);
+        let mut state = State {
+            home: Some(dir.path().to_path_buf()),
+            ..State::default()
+        };
+        state
+            .threads
+            .insert("t_fake1".to_owned(), thread_state("t_fake1"));
+        state.next_id = 1;
+        state.save();
+
+        let text = std::fs::read_to_string(&file).unwrap();
+        let parsed: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(parsed["threads"][0]["thread"]["id"], "t_fake1");
+        let leftovers: Vec<_> = std::fs::read_dir(file.parent().unwrap())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".tmp."))
+            .collect();
+        assert!(leftovers.is_empty(), "temp file left behind: {leftovers:?}");
+
+        let mut reloaded = State {
+            home: Some(dir.path().to_path_buf()),
+            ..State::default()
+        };
+        reloaded.load().unwrap();
+        assert!(reloaded.threads.contains_key("t_fake1"));
     }
 }
