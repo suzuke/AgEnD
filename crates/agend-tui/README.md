@@ -26,8 +26,8 @@
 |---|---|
 | `source` | `Source` trait、`Fleet`（catalog + 事件重播）、`Catalog`（protocol v1 還列不出來的 team／task／agent） |
 | `source::scripted` | 記憶體裡的腳本假來源與 demo 資料（測試與 demo 用） |
-| `app` | `App`：導覽堆疊、按鍵、`tick`（拉事件、斷線重連） |
-| `ui` | `Row` 與畫面繪製、選取反白（不含邊框與框線）、只列有用鍵的底部說明在 `App::help`、寬字元寬度 |
+| `app` | `App`：導覽堆疊、按鍵、`tick`（拉事件、斷線重連）、底部說明（只列目前有用的鍵） |
+| `ui` | `Row` 與畫面繪製、選取反白（不含邊框與框線）、寬字元寬度 |
 | `home` | 首頁 |
 | `attention` | 「需要你」畫面 |
 | `team` | team 頁 |
