@@ -1,7 +1,9 @@
-//! `Store` contract: tasks round-trip exactly, writes are compare-and-swap on
-//! a version that strictly grows with every write (checked over a sequence
-//! of writes, so a version that returns to an old value fails), and a conflict changes nothing and
-//! reports the current version.
+//! `Store` contract (rules STO-1..11 in CONTRACTS.md): tasks round-trip
+//! exactly; writes are compare-and-swap on a version that must equal the
+//! current one (older and newer both conflict) and strictly grows with
+//! every write (checked over a sequence, so a version that returns to an old
+//! value fails); a conflict changes nothing and reports the version actually
+//! stored; events keep their order and stay with their task.
 //!
 //! Not pinned: the first version number; what appending an event to an
 //! unknown task does.
@@ -32,36 +34,59 @@ pub trait StoreFixture {
 pub fn cases<F: StoreFixture>() -> Vec<Case<F>> {
     vec![
         Case {
+            rule: "STO-1",
             name: "created_task_round_trips",
             check: created_task_round_trips,
         },
         Case {
+            rule: "STO-2",
             name: "unknown_task_loads_as_none",
             check: unknown_task_loads_as_none,
         },
         Case {
+            rule: "STO-3",
             name: "duplicate_create_fails_and_keeps_the_original",
             check: duplicate_create_fails_and_keeps_the_original,
         },
         Case {
+            rule: "STO-4",
             name: "cas_with_current_version_writes_a_newer_version",
             check: cas_with_current_version_writes_a_newer_version,
         },
         Case {
+            rule: "STO-5",
             name: "cas_with_stale_version_conflicts_and_changes_nothing",
             check: cas_with_stale_version_conflicts_and_changes_nothing,
         },
         Case {
+            rule: "STO-6",
+            name: "cas_with_future_version_conflicts_and_changes_nothing",
+            check: cas_with_future_version_conflicts_and_changes_nothing,
+        },
+        Case {
+            rule: "STO-7",
+            name: "conflict_reports_the_actual_current_version",
+            check: conflict_reports_the_actual_current_version,
+        },
+        Case {
+            rule: "STO-8",
             name: "cas_on_unknown_task_conflicts_without_a_version",
             check: cas_on_unknown_task_conflicts_without_a_version,
         },
         Case {
+            rule: "STO-9",
             name: "workflow_versions_load_exactly",
             check: workflow_versions_load_exactly,
         },
         Case {
+            rule: "STO-10",
             name: "appended_events_keep_their_order",
             check: appended_events_keep_their_order,
+        },
+        Case {
+            rule: "STO-11",
+            name: "events_are_kept_per_task",
+            check: events_are_kept_per_task,
         },
     ]
 }
@@ -158,28 +183,92 @@ fn cas_with_stale_version_conflicts_and_changes_nothing<F: StoreFixture>(fx: &F)
     let task = full_task("T-stale");
     ok("create_task", block_on(fx.store().create_task(&task)))?;
     let stale = current_version(fx, &task.id)?;
-    let mut first = task.clone();
-    first.title = "first writer".into();
-    ok(
-        "compare_and_swap_task",
-        block_on(fx.store().compare_and_swap_task(&first, stale)),
-    )?;
-    let current = current_version(fx, &task.id)?;
+    let first = write(fx, &task, "first writer", stale)?;
     let mut second = task.clone();
     second.title = "second writer".into();
     let result = ok(
         "compare_and_swap_task",
         block_on(fx.store().compare_and_swap_task(&second, stale)),
     )?;
-    let expected = CasResult::Conflict {
-        current_version: Some(current),
-    };
-    ensure(result == expected, || {
-        format!("expected {expected:?}, got {result:?}")
+    ensure(
+        matches!(
+            result,
+            CasResult::Conflict {
+                current_version: Some(_)
+            }
+        ),
+        || format!("a stale version {stale}: expected Conflict with a version, got {result:?}"),
+    )?;
+    unchanged(fx, &first)
+}
+
+/// A writer that claims a version the store never issued (a newer one) must
+/// not win either: CAS is equality, not "at least".
+fn cas_with_future_version_conflicts_and_changes_nothing<F: StoreFixture>(fx: &F) -> CaseResult {
+    let task = full_task("T-future");
+    ok("create_task", block_on(fx.store().create_task(&task)))?;
+    let first = write(fx, &task, "first writer", current_version(fx, &task.id)?)?;
+    let current = current_version(fx, &task.id)?;
+    for future in [current + 1, current + 100] {
+        let mut other = task.clone();
+        other.title = format!("writer claiming version {future}");
+        let result = ok(
+            "compare_and_swap_task",
+            block_on(fx.store().compare_and_swap_task(&other, future)),
+        )?;
+        ensure(matches!(result, CasResult::Conflict { .. }), || {
+            format!("version {future} (current {current}): expected Conflict, got {result:?}")
+        })?;
+        unchanged(fx, &first)?;
+    }
+    Ok(())
+}
+
+/// The conflict names the version actually stored, not a guess derived from
+/// the caller's version (three writes apart, so `expected + 1` is wrong).
+fn conflict_reports_the_actual_current_version<F: StoreFixture>(fx: &F) -> CaseResult {
+    let task = full_task("T-current");
+    ok("create_task", block_on(fx.store().create_task(&task)))?;
+    let original = current_version(fx, &task.id)?;
+    let mut version = original;
+    for n in 0..3 {
+        write(fx, &task, &format!("write {n}"), version)?;
+        version = current_version(fx, &task.id)?;
+    }
+    for claimed in [original, version + 7] {
+        let result = ok(
+            "compare_and_swap_task",
+            block_on(fx.store().compare_and_swap_task(&task, claimed)),
+        )?;
+        let expected = CasResult::Conflict {
+            current_version: Some(version),
+        };
+        ensure(result == expected, || {
+            format!("version {claimed}: expected {expected:?}, got {result:?}")
+        })?;
+    }
+    Ok(())
+}
+
+/// Writes `task` with `title` at `version`; returns what was written.
+fn write<F: StoreFixture>(fx: &F, task: &Task, title: &str, version: u64) -> Result<Task, String> {
+    let mut next = task.clone();
+    next.title = title.into();
+    let result = ok(
+        "compare_and_swap_task",
+        block_on(fx.store().compare_and_swap_task(&next, version)),
+    )?;
+    ensure(matches!(result, CasResult::Written { .. }), || {
+        format!("write {title:?} at the current version {version}: got {result:?}")
     })?;
-    let loaded = ok("load_task", block_on(fx.store().load_task(&task.id)))?;
-    ensure(loaded.map(|v| v.task) == Some(first), || {
-        "a conflicting write changed the task".into()
+    Ok(next)
+}
+
+/// The stored task is still `expected`.
+fn unchanged<F: StoreFixture>(fx: &F, expected: &Task) -> CaseResult {
+    let loaded = ok("load_task", block_on(fx.store().load_task(&expected.id)))?;
+    ensure(loaded.as_ref().map(|v| &v.task) == Some(expected), || {
+        format!("a conflicting write changed the task: {loaded:?}")
     })
 }
 
@@ -242,6 +331,39 @@ fn appended_events_keep_their_order<F: StoreFixture>(fx: &F) -> CaseResult {
     ensure(stored == events, || {
         format!("expected {events:?}, got {stored:?}")
     })
+}
+
+/// Two tasks' events never mix, even when appended interleaved.
+fn events_are_kept_per_task<F: StoreFixture>(fx: &F) -> CaseResult {
+    let tasks = [full_task("T-events-a"), full_task("T-events-b")];
+    for task in &tasks {
+        ok("create_task", block_on(fx.store().create_task(task)))?;
+    }
+    let event = |task: &str, n: u64| StoredEvent {
+        id: format!("{task}-e{n}"),
+        occurred_at_unix_ms: 1_790_000_000_000 + n,
+        kind: "stage_completed".into(),
+        detail: format!("{task} step {n}"),
+    };
+    for n in 1..=2 {
+        for task in &tasks {
+            ok(
+                "append_event",
+                block_on(fx.store().append_event(&task.id, &event(&task.id, n))),
+            )?;
+        }
+    }
+    for task in &tasks {
+        let expected = vec![event(&task.id, 1), event(&task.id, 2)];
+        let stored = fx.events(&task.id);
+        ensure(stored == expected, || {
+            format!(
+                "events of {}: expected {expected:?}, got {stored:?}",
+                task.id
+            )
+        })?;
+    }
+    Ok(())
 }
 
 fn current_version<F: StoreFixture>(fx: &F, task_id: &str) -> Result<u64, String> {

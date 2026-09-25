@@ -2,7 +2,7 @@
 
 use agend_core::model::Backend;
 use agend_core::pipeline::workflow::Workflow;
-use agend_core::traits::{HolderLaunch, Notification, StoredEvent};
+use agend_core::traits::{HolderHandle, HolderLaunch, Notification, StoredEvent};
 
 use super::{Report, clock, driver, forge, notifier, runner, runtime, store};
 use crate::fakes::{
@@ -11,7 +11,7 @@ use crate::fakes::{
 };
 use crate::tempdir::TempDir;
 
-/// Name used for the fake side in reports (`contract Forge: fake 8/8 pass`).
+/// Name used for the fake side in reports (`contract Forge: fake 10/10 pass`).
 pub const FAKE: &str = "fake";
 
 impl forge::ForgeFixture for FakeForge {
@@ -99,6 +99,10 @@ impl runtime::RuntimeFixture for FakeRuntime {
             working_directory: "/fake/workspace".into(),
         }
     }
+
+    fn is_running(&self, handle: &HolderHandle) -> bool {
+        self.running().contains(handle)
+    }
 }
 
 impl notifier::NotifierFixture for FakeNotifier {
@@ -124,6 +128,12 @@ impl clock::ClockFixture for FakeClock {
     fn let_time_pass(&self) {
         self.advance(1);
     }
+
+    fn utc_now_unix_ms(&self) -> u64 {
+        // The fake's "now" is whatever the test set; reading it through the
+        // trait would count as a read, so peek at the same value.
+        self.peek()
+    }
 }
 
 /// A `FakeRunner` scripted with what `sh` does for the contract commands,
@@ -146,8 +156,8 @@ impl FakeRunnerFixture {
             runner.on(
                 command.command,
                 ScriptedCommand::exits(command.exit_code)
-                    .stdout(command.stdout)
-                    .stderr(command.stderr)
+                    .stdout(command.expected_stdout())
+                    .stderr(command.expected_stderr())
                     .takes_ms(command.duration_ms),
             );
         }
@@ -184,6 +194,26 @@ impl runner::RunnerFixture for FakeRunnerFixture {
     fn working_directory(&self) -> &str {
         &self.canonical
     }
+}
+
+/// Every contract case as `(contract, rule, case name)`, in trait order.
+pub fn case_rules() -> Vec<(&'static str, &'static str, &'static str)> {
+    fn tag<F>(
+        contract: &'static str,
+        cases: Vec<super::Case<F>>,
+    ) -> Vec<(&'static str, &'static str, &'static str)> {
+        cases.iter().map(|c| (contract, c.rule, c.name)).collect()
+    }
+    [
+        tag("Driver", driver::cases::<FakeDriverFixture>()),
+        tag("Forge", forge::cases::<FakeForge>()),
+        tag("Store", store::cases::<FakeStore>()),
+        tag("Runtime", runtime::cases::<FakeRuntime>()),
+        tag("Notifier", notifier::cases::<FakeNotifier>()),
+        tag("Clock", clock::cases::<FakeClock>()),
+        tag("Runner", runner::cases::<FakeRunnerFixture>()),
+    ]
+    .concat()
 }
 
 /// Runs every contract suite against its fake, in trait order.

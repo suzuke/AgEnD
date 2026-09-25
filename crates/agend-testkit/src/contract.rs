@@ -7,6 +7,11 @@
 //! Each case gets a fresh fixture. [`run_all_fakes`] runs every suite
 //! against the fakes in `crate::fakes`.
 //!
+//! Every case names the rule it checks (`DRV-1`, `STO-6`, ...). The rules
+//! are numbered in `crates/agend-testkit/CONTRACTS.md`; a coverage test in
+//! `tests/contract_teeth/main.rs` fails when a rule has no case or no deliberately
+//! broken implementation that the suite rejects.
+//!
 //! Must NOT: hand-write wire shapes; build inputs with the real producer (#1493).
 
 use std::fmt;
@@ -27,10 +32,19 @@ pub use fakes::run_all_fakes;
 /// Outcome of one case: `Err` carries an English explanation.
 pub type CaseResult = Result<(), String>;
 
-/// One named contract rule.
+/// One named check of one numbered contract rule (see CONTRACTS.md).
 pub struct Case<F> {
+    pub rule: &'static str,
     pub name: &'static str,
     pub check: fn(&F) -> CaseResult,
+}
+
+/// The result of one case.
+#[derive(Debug, Clone)]
+pub struct Outcome {
+    pub rule: &'static str,
+    pub name: &'static str,
+    pub result: CaseResult,
 }
 
 /// Results of running one suite against one implementation.
@@ -38,12 +52,21 @@ pub struct Case<F> {
 pub struct Report {
     pub contract: &'static str,
     pub implementation: String,
-    pub results: Vec<(&'static str, CaseResult)>,
+    pub results: Vec<Outcome>,
 }
 
 impl Report {
     pub fn passed(&self) -> usize {
-        self.results.iter().filter(|(_, r)| r.is_ok()).count()
+        self.results.iter().filter(|o| o.result.is_ok()).count()
+    }
+
+    /// Rule ids of the failing cases, in case order.
+    pub fn failing_rules(&self) -> Vec<&'static str> {
+        self.results
+            .iter()
+            .filter(|o| o.result.is_err())
+            .map(|o| o.rule)
+            .collect()
     }
 
     pub fn total(&self) -> usize {
@@ -54,7 +77,7 @@ impl Report {
         self.passed() == self.total()
     }
 
-    /// `contract Forge: fake 8/8 pass` (or `..., 1 FAIL`).
+    /// `contract Forge: fake 10/10 pass` (or `..., 1 FAIL`).
     pub fn summary(&self) -> String {
         let failed = self.total() - self.passed();
         let mut line = format!(
@@ -79,12 +102,14 @@ impl Report {
 impl fmt::Display for Report {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.summary())?;
-        for (name, result) in &self.results {
-            if let Err(reason) = result {
+        for outcome in &self.results {
+            if let Err(reason) = &outcome.result {
                 write!(
                     f,
-                    "\n  FAIL {}.{name}: {reason}",
-                    self.contract.to_lowercase()
+                    "\n  FAIL {}.{} ({}): {reason}",
+                    self.contract.to_lowercase(),
+                    outcome.name,
+                    outcome.rule
                 )?;
             }
         }
@@ -104,9 +129,13 @@ pub fn run_suite<F>(
         .iter()
         .map(|case| {
             let fixture = make();
-            let outcome = catch_unwind(AssertUnwindSafe(|| (case.check)(&fixture)))
+            let result = catch_unwind(AssertUnwindSafe(|| (case.check)(&fixture)))
                 .unwrap_or_else(|panic| Err(format!("panicked: {}", panic_message(&*panic))));
-            (case.name, outcome)
+            Outcome {
+                rule: case.rule,
+                name: case.name,
+                result,
+            }
         })
         .collect();
     Report {
@@ -163,14 +192,17 @@ mod tests {
     fn report_names_each_failing_case_and_counts_panics() {
         let cases: [Case<u32>; 3] = [
             Case {
+                rule: "DEM-1",
                 name: "passes",
                 check: |_| Ok(()),
             },
             Case {
+                rule: "DEM-2",
                 name: "fails",
                 check: |n| ensure(*n == 0, || format!("expected 0, got {n}")),
             },
             Case {
+                rule: "DEM-3",
                 name: "panics",
                 check: |_| panic!("boom"),
             },
@@ -179,9 +211,13 @@ mod tests {
         assert_eq!(report.summary(), "contract Demo: fake 1/3 pass, 2 FAIL");
         let text = report.to_string();
         assert!(
-            text.contains("FAIL demo.fails: expected 0, got 7"),
+            text.contains("FAIL demo.fails (DEM-2): expected 0, got 7"),
             "{text}"
         );
-        assert!(text.contains("FAIL demo.panics: panicked: boom"), "{text}");
+        assert!(
+            text.contains("FAIL demo.panics (DEM-3): panicked: boom"),
+            "{text}"
+        );
+        assert_eq!(report.failing_rules(), ["DEM-2", "DEM-3"]);
     }
 }

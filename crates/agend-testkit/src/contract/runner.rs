@@ -1,11 +1,16 @@
-//! `Runner` contract: exit codes, stdout and stderr come back separately and
-//! unchanged; a command that outlives its timeout reports `timed_out` and no
-//! exit code, soon after the timeout (not when the command would have
-//! finished), and the command is stopped (it never gets to write
-//! [`LATE_MARKER`]); commands run in the given working directory.
+//! `Runner` contract (rules RUN-1..9 in CONTRACTS.md): exit codes come back
+//! as they are; stdout and stderr come back separately and byte for byte,
+//! however large (no pipe deadlock); a command that outlives its timeout
+//! reports `timed_out` and no exit code, soon after the timeout (not when
+//! the command would have finished), and the command is stopped together
+//! with every process it started (it never gets to write [`LATE_MARKER`] or
+//! [`CHILD_MARKER`]); commands run in the given working directory.
 //!
 //! The commands are POSIX `sh` snippets. A real runner executes them; a fake
 //! fixture scripts [`COMMANDS`] (each entry says what the shell does).
+//!
+//! Not pinned: the exit code of a command killed by a signal; processes that
+//! leave the command's process group on purpose (`setsid`); stdin.
 
 use std::fmt::Debug;
 use std::path::Path;
@@ -16,18 +21,25 @@ use agend_core::traits::{CommandOutput, Runner};
 use super::{Case, CaseResult, Report, ensure, ok, run_suite};
 use crate::block_on;
 
-/// Timeout for every case except the timeout case.
+/// Timeout for every case except the timeout cases.
 pub const TIMEOUT_MS: u64 = 10_000;
-/// Timeout for [`TIMES_OUT`]; its command takes far longer.
+/// Timeout for [`TIMES_OUT`] and [`STARTS_A_CHILD`]; they take far longer.
 pub const SHORT_TIMEOUT_MS: u64 = 200;
 /// A timed-out `run` must return within this many ms of starting: ten times
 /// the timeout, but well before [`TIMES_OUT`] would finish on its own.
 pub const TIMEOUT_REPORT_LIMIT_MS: u64 = 2_000;
 /// File [`TIMES_OUT`] creates in the working directory if it is not stopped.
 pub const LATE_MARKER: &str = "timed-out-command-finished";
-/// How long after [`TIMES_OUT`] would have finished the case looks for
-/// [`LATE_MARKER`].
+/// File the child `sh` of [`STARTS_A_CHILD`] creates if it is not stopped.
+pub const CHILD_MARKER: &str = "timed-out-child-finished";
+/// How long after a timed-out command would have finished the case looks
+/// for its marker.
 pub const LATE_MARKER_GRACE_MS: u64 = 1_500;
+/// Bytes [`LARGE_OUTPUT`] writes to stdout and again to stderr: far more
+/// than a pipe buffer (64 KiB on Linux and macOS).
+pub const LARGE_OUTPUT_BYTES: usize = 256 * 1024;
+/// Timeout for [`LARGE_OUTPUT`]; it finishes in milliseconds when drained.
+pub const LARGE_OUTPUT_TIMEOUT_MS: u64 = 5_000;
 /// Prints the working directory; the expected stdout depends on the fixture.
 pub const PWD: &str = "pwd";
 
@@ -38,7 +50,19 @@ pub struct ContractCommand {
     pub exit_code: i32,
     pub stdout: &'static [u8],
     pub stderr: &'static [u8],
+    /// `stdout` and `stderr` are each written this many times.
+    pub repeat: usize,
     pub duration_ms: u64,
+}
+
+impl ContractCommand {
+    pub fn expected_stdout(&self) -> Vec<u8> {
+        self.stdout.repeat(self.repeat)
+    }
+
+    pub fn expected_stderr(&self) -> Vec<u8> {
+        self.stderr.repeat(self.repeat)
+    }
 }
 
 pub const SUCCEEDS: ContractCommand = ContractCommand {
@@ -46,6 +70,7 @@ pub const SUCCEEDS: ContractCommand = ContractCommand {
     exit_code: 0,
     stdout: b"ok",
     stderr: b"",
+    repeat: 1,
     duration_ms: 0,
 };
 
@@ -54,6 +79,7 @@ pub const FAILS: ContractCommand = ContractCommand {
     exit_code: 3,
     stdout: b"",
     stderr: b"",
+    repeat: 1,
     duration_ms: 0,
 };
 
@@ -62,6 +88,29 @@ pub const SEPARATES_STREAMS: ContractCommand = ContractCommand {
     exit_code: 0,
     stdout: b"out",
     stderr: b"err",
+    repeat: 1,
+    duration_ms: 0,
+};
+
+/// Leading and trailing whitespace, blank lines and a byte that is not
+/// UTF-8: a runner that trims or decodes output loses them.
+pub const KEEPS_BYTES: ContractCommand = ContractCommand {
+    command: "printf ' \\377 out \\n\\n'; printf ' err \\n' >&2",
+    exit_code: 0,
+    stdout: b" \xff out \n\n",
+    stderr: b" err \n",
+    repeat: 1,
+    duration_ms: 0,
+};
+
+/// [`LARGE_OUTPUT_BYTES`] of `x` on stdout, then as many `y` on stderr.
+pub const LARGE_OUTPUT: ContractCommand = ContractCommand {
+    command: "dd if=/dev/zero bs=1024 count=256 2>/dev/null | tr '\\000' x; \
+              dd if=/dev/zero bs=1024 count=256 2>/dev/null | tr '\\000' y >&2",
+    exit_code: 0,
+    stdout: b"x",
+    stderr: b"y",
+    repeat: LARGE_OUTPUT_BYTES,
     duration_ms: 0,
 };
 
@@ -71,10 +120,31 @@ pub const TIMES_OUT: ContractCommand = ContractCommand {
     exit_code: 0,
     stdout: b"",
     stderr: b"",
+    repeat: 1,
     duration_ms: 3_000,
 };
 
-pub const COMMANDS: [ContractCommand; 4] = [SUCCEEDS, FAILS, SEPARATES_STREAMS, TIMES_OUT];
+/// Starts a child `sh` that sleeps, then writes [`CHILD_MARKER`] (`; true`
+/// keeps the outer shell from exec'ing it). Stopping only the outer `sh`
+/// leaves the child running.
+pub const STARTS_A_CHILD: ContractCommand = ContractCommand {
+    command: "sh -c 'sleep 3; touch timed-out-child-finished'; true",
+    exit_code: 0,
+    stdout: b"",
+    stderr: b"",
+    repeat: 1,
+    duration_ms: 3_000,
+};
+
+pub const COMMANDS: [ContractCommand; 7] = [
+    SUCCEEDS,
+    FAILS,
+    SEPARATES_STREAMS,
+    KEEPS_BYTES,
+    LARGE_OUTPUT,
+    TIMES_OUT,
+    STARTS_A_CHILD,
+];
 
 pub trait RunnerFixture {
     type Runner: Runner<Error = Self::Error>;
@@ -89,22 +159,50 @@ pub trait RunnerFixture {
 pub fn cases<F: RunnerFixture>() -> Vec<Case<F>> {
     vec![
         Case {
-            name: "success_reports_exit_code_zero_and_stdout",
-            check: |fx| expect(fx, &SUCCEEDS),
+            rule: "RUN-1",
+            name: "exit_codes_are_reported",
+            check: |fx| {
+                expect(fx, &SUCCEEDS, TIMEOUT_MS)?;
+                expect(fx, &FAILS, TIMEOUT_MS)
+            },
         },
         Case {
-            name: "failure_reports_its_exit_code",
-            check: |fx| expect(fx, &FAILS),
-        },
-        Case {
+            rule: "RUN-2",
             name: "stdout_and_stderr_stay_separate",
-            check: |fx| expect(fx, &SEPARATES_STREAMS),
+            check: |fx| expect(fx, &SEPARATES_STREAMS, TIMEOUT_MS),
         },
         Case {
+            rule: "RUN-3",
+            name: "output_is_kept_byte_for_byte",
+            check: |fx| expect(fx, &KEEPS_BYTES, TIMEOUT_MS),
+        },
+        Case {
+            rule: "RUN-4",
+            name: "large_output_comes_back_whole",
+            check: |fx| expect(fx, &LARGE_OUTPUT, LARGE_OUTPUT_TIMEOUT_MS),
+        },
+        Case {
+            rule: "RUN-5",
             name: "timeout_reports_timed_out_without_exit_code",
             check: timeout_reports_timed_out_without_exit_code,
         },
         Case {
+            rule: "RUN-6",
+            name: "timeout_is_reported_promptly",
+            check: timeout_is_reported_promptly,
+        },
+        Case {
+            rule: "RUN-7",
+            name: "timed_out_command_is_stopped",
+            check: |fx| stopped_after_timeout(fx, &TIMES_OUT, LATE_MARKER),
+        },
+        Case {
+            rule: "RUN-8",
+            name: "timed_out_command_children_are_stopped",
+            check: |fx| stopped_after_timeout(fx, &STARTS_A_CHILD, CHILD_MARKER),
+        },
+        Case {
+            rule: "RUN-9",
             name: "runs_in_the_working_directory",
             check: runs_in_the_working_directory,
         },
@@ -126,32 +224,61 @@ fn run_command<F: RunnerFixture>(
     )
 }
 
-fn expect<F: RunnerFixture>(fx: &F, command: &ContractCommand) -> CaseResult {
-    let output = run_command(fx, command.command, TIMEOUT_MS)?;
+/// Shows short output in full and long output by length and first bytes.
+fn describe(output: &CommandOutput) -> String {
+    let bytes = |b: &[u8]| {
+        if b.len() <= 64 {
+            format!("{:?}", String::from_utf8_lossy(b))
+        } else {
+            format!(
+                "{} bytes starting {:?}",
+                b.len(),
+                String::from_utf8_lossy(&b[..16])
+            )
+        }
+    };
+    format!(
+        "exit_code {:?}, timed_out {}, stdout {}, stderr {}",
+        output.exit_code,
+        output.timed_out,
+        bytes(&output.stdout),
+        bytes(&output.stderr)
+    )
+}
+
+fn expect<F: RunnerFixture>(fx: &F, command: &ContractCommand, timeout_ms: u64) -> CaseResult {
+    let output = run_command(fx, command.command, timeout_ms)?;
     let expected = CommandOutput {
         exit_code: Some(command.exit_code),
-        stdout: command.stdout.to_vec(),
-        stderr: command.stderr.to_vec(),
+        stdout: command.expected_stdout(),
+        stderr: command.expected_stderr(),
         timed_out: false,
     };
     ensure(output == expected, || {
         format!(
-            "`{}`: expected {expected:?}, got {output:?}",
-            command.command
+            "`{}`: expected {}, got {}",
+            command.command,
+            describe(&expected),
+            describe(&output)
         )
     })
 }
 
 fn timeout_reports_timed_out_without_exit_code<F: RunnerFixture>(fx: &F) -> CaseResult {
-    let started = Instant::now();
     let output = run_command(fx, TIMES_OUT.command, SHORT_TIMEOUT_MS)?;
-    let elapsed = started.elapsed();
     ensure(output.timed_out && output.exit_code.is_none(), || {
         format!(
-            "`{}` with a {SHORT_TIMEOUT_MS} ms timeout: expected timed_out and no exit code, got {output:?}",
-            TIMES_OUT.command
+            "`{}` with a {SHORT_TIMEOUT_MS} ms timeout: expected timed_out and no exit code, got {}",
+            TIMES_OUT.command,
+            describe(&output)
         )
-    })?;
+    })
+}
+
+fn timeout_is_reported_promptly<F: RunnerFixture>(fx: &F) -> CaseResult {
+    let started = Instant::now();
+    run_command(fx, TIMES_OUT.command, SHORT_TIMEOUT_MS)?;
+    let elapsed = started.elapsed();
     ensure(
         elapsed < Duration::from_millis(TIMEOUT_REPORT_LIMIT_MS),
         || {
@@ -161,14 +288,32 @@ fn timeout_reports_timed_out_without_exit_code<F: RunnerFixture>(fx: &F) -> Case
                 elapsed.as_millis()
             )
         },
-    )?;
-    let finished = Duration::from_millis(TIMES_OUT.duration_ms + LATE_MARKER_GRACE_MS);
+    )
+}
+
+/// Runs `command` into a timeout, waits until it would have finished, and
+/// checks (read-only) that it never wrote `marker`.
+fn stopped_after_timeout<F: RunnerFixture>(
+    fx: &F,
+    command: &ContractCommand,
+    marker: &str,
+) -> CaseResult {
+    let started = Instant::now();
+    let output = run_command(fx, command.command, SHORT_TIMEOUT_MS)?;
+    ensure(output.timed_out, || {
+        format!(
+            "`{}` with a {SHORT_TIMEOUT_MS} ms timeout did not time out: {}",
+            command.command,
+            describe(&output)
+        )
+    })?;
+    let finished = Duration::from_millis(command.duration_ms + LATE_MARKER_GRACE_MS);
     std::thread::sleep(finished.saturating_sub(started.elapsed()));
-    let marker = Path::new(fx.working_directory()).join(LATE_MARKER);
+    let marker = Path::new(fx.working_directory()).join(marker);
     ensure(!marker.exists(), || {
         format!(
             "`{}` kept running after it timed out: {} exists",
-            TIMES_OUT.command,
+            command.command,
             marker.display()
         )
     })
@@ -176,14 +321,9 @@ fn timeout_reports_timed_out_without_exit_code<F: RunnerFixture>(fx: &F) -> Case
 
 fn runs_in_the_working_directory<F: RunnerFixture>(fx: &F) -> CaseResult {
     let output = run_command(fx, PWD, TIMEOUT_MS)?;
-    let printed = String::from_utf8_lossy(&output.stdout);
+    let expected = format!("{}\n", fx.working_directory());
     ensure(
-        output.exit_code == Some(0) && printed.trim_end() == fx.working_directory(),
-        || {
-            format!(
-                "`pwd`: expected {:?}, got {output:?}",
-                fx.working_directory()
-            )
-        },
+        output.exit_code == Some(0) && output.stdout == expected.as_bytes(),
+        || format!("`pwd`: expected {expected:?}, got {}", describe(&output)),
     )
 }

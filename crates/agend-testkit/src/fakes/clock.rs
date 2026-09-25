@@ -33,6 +33,11 @@ impl FakeClock {
         );
     }
 
+    /// The current time, without counting a read.
+    pub fn peek(&self) -> u64 {
+        self.now_unix_ms.load(Ordering::SeqCst)
+    }
+
     /// How many times `now_unix_ms` was called.
     pub fn reads(&self) -> u64 {
         self.reads.load(Ordering::SeqCst)

@@ -3,14 +3,14 @@
 > **TL;DR**
 > - 共用測試基礎設施（只能當 dev-dependency）：7 個 trait 的假實作、契約測試、假 daemon、3 個假 agent 程式。
 > - 記住：**假實作要跑和真實作同一套契約測試**，才不會漂移（v1 #1483）；真實作在各自的施工關接上同一個 suite。
-> - 下一步：`~/.cargo/bin/cargo xtask accept testkit`。
+> - 下一步：`~/.cargo/bin/cargo xtask accept testkit`；契約規則看 [CONTRACTS.md](CONTRACTS.md)。
 
 ## 負責
 
 | 項目 | 模組 | 內容 |
 |---|---|---|
 | 假實作 | `fakes` | `FakeDriver`、`FakeForge`、`FakeStore`、`FakeRuntime`、`FakeNotifier`、`FakeClock`、`FakeRunner` |
-| 契約測試 | `contract` | 每個 trait 一個 suite：`contract::<trait>::run(實作名, 建 fixture 的函式)` 回傳 `Report` |
+| 契約測試 | `contract` | 每個 trait 一個 suite：`contract::<trait>::run(實作名, 建 fixture 的函式)` 回傳 `Report`；規則編號見 [CONTRACTS.md](CONTRACTS.md) |
 | 假 daemon | `fake_daemon` | 行程內的 client protocol v1 server（unix socket + JSON Lines）與 `ProbeClient` |
 | 假 agent | `fake_agent` + `src/bin/` | `fake-codex-app-server`、`fake-opencode-serve`、`fake-claude` |
 | 執行 future | `executor` | `block_on`：不用 async runtime 就能跑 trait 的 future |
@@ -39,7 +39,7 @@
 | `FakeStore` | `insert_workflow`、`events(task)` |
 | `FakeRuntime` | `crash(id)`（holder 自己死掉）、`adopt(handle)`（daemon 重啟後還活著的 holder）、`running()` |
 | `FakeNotifier` | `delivered()` |
-| `FakeClock` | `advance(ms)`、`set(ms)`（往回設會 panic）、`reads()` |
+| `FakeClock` | `advance(ms)`、`set(ms)`（往回設會 panic）、`peek()`（不算一次讀取）、`reads()` |
 | `FakeRunner` | `on(command, ScriptedCommand)`；`takes_ms` 大於 timeout 就回 timed out；沒編排的指令 exit 127 |
 
 ## 契約測試：怎麼接真實作
@@ -48,17 +48,19 @@
 2. 在該 crate 的測試裡：`agend_testkit::contract::forge::run("local", MyFixture::new).assert_passed();`
 3. 需要 tokio 的真實作：在 fixture 裡進入 runtime（future 仍由 `block_on` 驅動）。
 
-| suite | 條數 | 釘住的規則 |
-|---|---|---|
-| Driver | 7 | 閒置送達是 Sent／Confirmed；最後會 `TurnCompleted`；cursor 唯一；從 cursor 之後只拿到新事件；重播只會變長；未知 instance 是錯誤 |
-| Forge | 8 | head 是最新 commit；submit 回報送出的 head；head 對才 merge，且 base 移到回報的 merge commit；head 不對回 `HeadChanged{actual_head}` 且什麼都不變（base 沒動、work branch 沒動）；未知 branch 是錯誤 |
-| Store | 8 | task 完整往返；連續多次 CAS，版本每次都嚴格變大（擋 1→2→1）；過期版本 `Conflict{Some(目前)}` 且不變；不存在 `Conflict{None}`；重複建立失敗；workflow 依版本讀；事件依序 |
-| Runtime | 4 | handle 對應啟動的 instance；recover 列出正在跑的；停掉的不再出現、可再啟動 |
-| Notifier | 2 | 內容完整（不截斷）；順序不變 |
-| Clock | 2 | 是 unix 毫秒（2020–2100）；不倒退 |
-| Runner | 5 | exit code、stdout／stderr 分開；逾時 `timed_out` 且沒有 exit code，2 秒內回報，指令被停掉（沒寫出標記檔 `timed-out-command-finished`）；在指定目錄跑 |
+規則的唯一清單是 [CONTRACTS.md](CONTRACTS.md)：每條一個編號，每個 case 標著它驗的編號（失敗訊息 `FAIL forge.<case> (FRG-6): …`）。
 
-每個 suite 都有「故意弄壞的包裝」測試（`tests/contract_teeth.rs`），證明它抓得到漂移。
+| suite | 規則 | 重點 |
+|---|---|---|
+| Driver | `DRV-1`–`8` | 閒置送達 Sent／Confirmed；最後 `TurnCompleted`；從任何 cursor 補回之後的**全部**事件、不含舊的、讀了不消耗 |
+| Forge | `FRG-1`–`9` | 整串 head 相等才 merge（空字串、短 SHA 不算）；比的是 merge 當下的 head；不符回真正的 head 且什麼都不變（從 `base_head()` 看） |
+| Store | `STO-1`–`11` | CAS 是相等（舊版本、未來版本都衝突）；衝突回報實際版本；版本嚴格遞增；事件依序、依 task 分開 |
+| Runtime | `RTM-1`–`7` | recover 回的 handle 與 start 的相同；停止要真的停（`is_running()` 從 trait 外看） |
+| Notifier | `NTF-1`–`4` | 欄位原樣、3,000 字多位元組 body 不截斷、不修剪空白、順序不變 |
+| Clock | `CLK-1`–`4` | unix 毫秒、UTC（對照 `utc_now_unix_ms()`）、不倒退、不凍結 |
+| Runner | `RUN-1`–`9` | 輸出逐位元組、256 KiB 不卡；逾時 2 秒內回報，`sh` 與它啟動的子程序都停掉（標記檔判斷）；在指定目錄跑 |
+
+每條規則至少有一個故意弄壞的實作（mutant），列在 CONTRACTS.md 那一列；`tests/contract_teeth/` 跑全部 mutant，並檢查規則表、case、mutant 三者互相對得上（見 [TESTING.md](TESTING.md)）。接真實作時 fixture 多實作的方法：`ForgeFixture::base_head`、`RuntimeFixture::is_running`、`ClockFixture::utc_now_unix_ms`；`DriverFixture::turn_timeout` 可選（預設 10 秒）。
 
 ## 假 daemon
 
