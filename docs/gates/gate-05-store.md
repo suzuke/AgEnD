@@ -301,6 +301,7 @@ owner 睡著時由實作者決定、可以反悔的事（頁面沒寫到的設�
 | S10 | `SqliteStore::open_with(home, now, migrations)` 與 `MIGRATIONS` 是公開 API；`open` 就是 `open_with(…, MIGRATIONS)` | 頁面要「清單是參數，不留測試後門」：同一條 production 路徑、只是清單當參數，整合測試才能跑壞 migration 與升級前快照 | 改成 `pub(crate)`：相關測試搬進 crate 內的單元測試 | 待追認 |
 | S11 | `store` 模組與它的測試以 `cfg(unix)` 編譯（檔案權限用 unix mode） | CI 只有 ubuntu、macOS；testkit 的 socket 部分也是 unix-only | 要支援 Windows：權限改用 ACL 或略過，拿掉 `cfg(unix)` | 待追認 |
 | S12 | `open`、`prune`、`snapshot` 收 `now_unix_ms: u64`（呼叫端從 `Clock` 取），不收 `&dyn Clock`；另加公開方法 `load_events`（契約 fixture 的 `events` 要用）與 `counts`（demo 與日後 doctor） | 時間只在呼叫端讀一次，store 不持有時鐘；Store trait 沒有讀事件的方法 | 改收 `&dyn Clock`：三個簽章＋呼叫端 | 待追認 |
+| S13 | `tasks` 加 CHECK（`status` 字面值、`requires_repo` 0/1、`depends_on` 是 JSON 陣列、版本 ≥ 1）；`task_events.seq` 是 `INTEGER PRIMARY KEY` 不加 `AUTOINCREMENT`；事件兩個 index（依 task、依時間） | CHECK 擋手動 `sqlite3` 寫壞的值；`AUTOINCREMENT` 會多一張 `sqlite_sequence` 表（又要保留規則），而 seq 只用來排序，被刪的 seq 重用無害；index 讓讀事件與 prune 不掃全表 | 要改就是新 migration（已發佈的 0001 不能改） | 待追認 |
 
 ## 驗收紀錄
 
