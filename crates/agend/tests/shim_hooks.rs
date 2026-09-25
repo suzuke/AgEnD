@@ -4,7 +4,8 @@
 //! - only the agent worktree gets them: the canonical checkout has no
 //!   `core.hooksPath`, and a commit on main there still works;
 //! - the project's own hooks keep running from the agent worktree
-//!   (chaining, with arguments, stdin and exit code);
+//!   (chaining, with arguments, stdin and exit code), including a
+//!   `core.hooksPath` the project sets after install;
 //! - install refuses the main worktree, is idempotent, and uninstall
 //!   removes them (after which the shim refuses writes);
 //! - without the agent's binding the hook fails closed.
@@ -135,6 +136,51 @@ fn a_previous_hooks_path_is_chained() {
     )
     .ok();
     assert_eq!(std::fs::read_to_string(&log).unwrap(), "from-githooks\n");
+}
+
+/// Round 6, finding 3: a `core.hooksPath` the project sets after the
+/// worktree was bound (`npm install` running husky writes `.husky` to the
+/// shared config) is chained too: the hooks dir is looked up when the hook
+/// runs, not recorded at install. Unset again, `.git/hooks` is back.
+#[test]
+fn a_hooks_path_set_after_install_is_chained() {
+    let f = Fixture::new("hooks-husky");
+    let log = f.root.join("husky.log");
+    let l = log.display();
+    write_hook(
+        &f.repo.join(".git/hooks"),
+        "pre-commit",
+        &format!("echo git-hooks >> '{l}'"),
+    );
+    write_hook(
+        &f.worktree.join(".husky"),
+        "pre-commit",
+        &format!("echo husky >> '{l}'"),
+    );
+    write_hook(
+        &f.worktree.join(".husky"),
+        "pre-push",
+        &format!("echo \"husky pre-push $1\" >> '{l}'"),
+    );
+    let ctx = f.ctx(&f.worktree);
+    let commit = |m: &str| {
+        gitshim(&ctx, &["commit", "-q", "--allow-empty", "-m", m]).ok();
+    };
+    commit("before");
+    // What husky does, from the canonical checkout: the shared config.
+    git(&f.repo, &["config", "core.hooksPath", ".husky"]);
+    commit("husky");
+    let own = format!("HEAD:refs/heads/{}", f.branch);
+    gitshim(&ctx, &["push", "-q", "origin", &own]).ok();
+    // The agend hooks still guard the worktree.
+    let ran = gitshim(&ctx, &["update-ref", "refs/heads/main", "HEAD"]);
+    assert!(ran.hook_refused(), "{}", ran.text());
+    git(&f.repo, &["config", "--unset", "core.hooksPath"]);
+    commit("after");
+    assert_eq!(
+        std::fs::read_to_string(&log).unwrap(),
+        "git-hooks\nhusky\nhusky pre-push origin\ngit-hooks\n"
+    );
 }
 
 #[test]

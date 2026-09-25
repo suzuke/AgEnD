@@ -14,7 +14,7 @@ use crate::audit::{self, Record};
 use crate::binding;
 use crate::classify::{self, Decision, GitEnv, Input, Probe};
 use crate::ctx::{Ctx, MAX_DEPTH, lossy};
-use crate::hook::CHAIN_FILE;
+use crate::hook::MARKER_FILE;
 use crate::location::{self, Anchors, Location, Resolved};
 use crate::team::{self, Key, Remotes};
 use crate::{Action, Outcome, Refusal, snapshot};
@@ -407,6 +407,6 @@ impl Probe for RealProbe<'_> {
             Some(g) => Some(g.clone()),
             None => self.anchors.worktree_dirs().map(|(g, _)| g),
         };
-        git_dir.is_some_and(|g| g.join(CHAIN_FILE).is_file())
+        git_dir.is_some_and(|g| g.join(MARKER_FILE).is_file())
     }
 }

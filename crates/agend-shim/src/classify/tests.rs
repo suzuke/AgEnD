@@ -532,6 +532,57 @@ fn leaving_the_bound_branch_is_refused() {
 
 /// Round 5, finding 3: `checkout -` / `switch -` resolve `@{-1}` with git;
 /// back to the bound branch runs, anywhere else is refused.
+/// Round 6, finding 1: git 2.39 copies / renames branches outside a ref
+/// transaction (the hook never sees the new name), so the shim refuses
+/// every spelling; other `branch` calls are the hook's.
+#[test]
+fn branch_copy_and_rename_are_refused() {
+    let s = work();
+    assert_codes(
+        &s,
+        "branch_copy",
+        &[
+            "branch -C master",
+            "branch -c agend/t-1/side release/9",
+            "branch -m agend/t-1/better-name",
+            "branch -M agend/t-1/side master",
+            "branch -fm a b",
+            "branch -Mf a b",
+            "branch -vC a",
+            "branch --copy a b",
+            "branch --move a b",
+            "branch --mo a b",
+            "branch --cop a b",
+            "branch --force --move=x a b",
+            "branch a -m b",
+        ],
+    );
+    assert_codes(
+        &s,
+        "run",
+        &[
+            "branch agend/t-1/x",
+            "branch -f agend/t-1/x HEAD",
+            "branch -D agend/t-1/x",
+            "branch -uorigin/main agend/t-1/x",
+            "branch --set-upstream-to=origin/main",
+            "branch --merged main",
+            "branch --color --contains HEAD",
+            "branch -tmerge agend/t-1/x",
+            "branch agend/t-1/x -- -m",
+        ],
+    );
+    let Decision::Refuse(r) = decide(&s, "branch -m agend/t-1/y") else {
+        panic!()
+    };
+    assert!(
+        r.next.contains("git branch agend/t-1/<name> <old>"),
+        "{}",
+        r.next
+    );
+    assert!(r.next.contains("git branch -D <old>"), "{}", r.next);
+}
+
 #[test]
 fn previous_branch_is_resolved() {
     let prev = |name: &'static str| Fake {

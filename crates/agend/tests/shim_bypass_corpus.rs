@@ -1,4 +1,4 @@
-//! The verifier's bypass corpus (PR #107 rounds 1–5), replayed against
+//! The verifier's bypass corpus (PR #107 rounds 1–6), replayed against
 //! real temporary repos with the agend hooks installed. Each case runs
 //! optional setup with the harness's git (state that could exist before the
 //! agent acts), then one command through the shim, then checks the
@@ -184,9 +184,9 @@ const CONFIG_DESTINATIONS: &[Case] = &[
     refused("-c core.hooksPath=/dev/null push origin HEAD:main"),
 ];
 
-/// Class 2: abbreviated or attached-value options. Branch switches are the
-/// shim's (matched generously); ref writes are the hooks'; destructive ones
-/// are snapshotted.
+/// Class 2: abbreviated or attached-value options. Branch switches, copies
+/// and renames are the shim's (matched generously); ref writes are the
+/// hooks'; destructive ones are snapshotted.
 const ABBREVIATED: &[Case] = &[
     refused("push --mirr origin"),
     refused("push --al origin"),
@@ -203,7 +203,7 @@ const ABBREVIATED: &[Case] = &[
         ..refused("update-ref --std")
     },
     refused("branch --mov agend/t-1/renamed"),
-    harmless("branch --cop agend/t-1/copy"),
+    refused("branch --cop agend/t-1/copy"),
     refused("checkout --orph orphan1"),
     refused("checkout --deta"),
     refused("checkout -bfoo"),
@@ -712,6 +712,67 @@ fn workspace_nested_in_another_repo_is_still_the_workspace() {
         !outer.status.success(),
         "nothing was committed to the outer repo"
     );
+}
+
+/// Round 6, findings 1–2: git 2.39 copies / renames a branch outside a ref
+/// transaction, so the hook never saw the new name (`branch -C master`
+/// moved master), and a hook refusal halfway through a rename deleted the
+/// old branch and left `.git/logs/refs/.tmp-renamed-log`, after which every
+/// `branch -c` in the repo failed. The shim now refuses every form before
+/// git runs, from every place it routes from; nothing changes on disk.
+#[test]
+fn branch_copy_and_rename_are_refused_before_git_runs() {
+    let f = Fixture::new("r6-branch-copy");
+    git(&f.worktree, &["commit", "-q", "--allow-empty", "-m", "own"]);
+    for b in ["agend/t-1/side", "agend/t-1/side2"] {
+        git(&f.worktree, &["branch", b]);
+    }
+    git(&f.repo, &["branch", "userwip", "main"]);
+    let tmp_log = f.repo.join(".git/logs/refs/.tmp-renamed-log");
+    let state = || {
+        let refs = git(
+            &f.repo,
+            &["for-each-ref", "--format=%(refname) %(objectname)"],
+        );
+        let reflog = git(&f.repo, &["reflog", "show", &f.branch]);
+        format!("{refs}\n--reflog--\n{reflog}")
+    };
+    let before = state();
+    let wt = f.worktree.to_str().unwrap();
+    for cmd in [
+        "branch -C master",
+        "branch -C agend/t-1/side release",
+        "branch -c agend/t-1/side feat/copy",
+        "branch -m agend/t-1/side2 feat/renamed",
+        "branch -M agend/t-1/side master",
+        "branch -m agend/t-1/better-name",
+        "branch -C agend/t-1/fix userwip",
+        "branch -fm agend/t-1/side master",
+        "branch --move agend/t-1/side agend/t-1/moved",
+        "branch --cop agend/t-1/side agend/t-1/copied",
+    ] {
+        for (at, prefix) in [
+            (&f.worktree, None),
+            (&f.repo, None),
+            (&f.workspace, None),
+            (&f.workspace, Some(wt)),
+        ] {
+            let mut argv: Vec<&str> = prefix.map(|p| vec!["-C", p]).unwrap_or_default();
+            argv.extend(cmd.split_whitespace());
+            let ran = gitshim(&f.ctx(at), &argv);
+            assert!(!tmp_log.exists(), "{argv:?} left {tmp_log:?}");
+            assert_eq!(state(), before, "{argv:?} in {at:?}");
+            assert_eq!(ran.refused, Some("branch_copy"), "{argv:?} in {at:?}");
+            assert!(ran.text().contains("git branch agend/t-1/<name> <old>"));
+        }
+    }
+    // The alternative the refusal gives works, and the human's own copy in
+    // the canonical checkout is not blocked by a leftover.
+    let ctx = f.ctx(&f.worktree);
+    gitshim(&ctx, &["branch", "agend/t-1/renamed", "agend/t-1/side"]).ok();
+    gitshim(&ctx, &["branch", "-D", "agend/t-1/side"]).ok();
+    git(&f.repo, &["branch", "-c", "userwip", "userwip-copy"]);
+    assert!(!tmp_log.exists());
 }
 
 // ── T9: kill forms, against a fake recorder only ─────────────────────────

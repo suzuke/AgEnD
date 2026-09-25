@@ -138,7 +138,7 @@ pub trait Probe {
     /// `git rev-parse <args>` in the bound worktree: trimmed stdout, if it
     /// succeeded.
     fn rev_parse(&self, args: &[&str]) -> Option<String>;
-    /// Whether the bound worktree has the agend hooks (`hook::CHAIN_FILE`).
+    /// Whether the bound worktree has the agend hooks (`hook::MARKER_FILE`).
     fn hooks_installed(&self) -> bool;
 }
 
@@ -276,6 +276,9 @@ fn write(input: &Input, sub: &str, rest: &[String]) -> Decision {
     let protected = ProtectedRefs::new(&snapshot.protected_refs);
     if let Some(target) = leaves_branch(sub, rest, binding, input.probe) {
         return refuse(refuse_switch(sub, &target, binding, &protected));
+    }
+    if let Some(flag) = copy_or_rename(sub, rest) {
+        return refuse(refuse_copy_or_rename(flag, binding));
     }
     let note = match (&route, input.location) {
         (Some(to), Location::Canonical) => Some(routed_note(to, input.dir)),
@@ -601,6 +604,40 @@ fn refuse_switch(sub: &str, target: &str, b: &Binding, p: &ProtectedRefs) -> Ref
             "`git {sub} {target}` would leave your branch: you are bound to {bound}{protected}"
         ),
         next,
+    )
+}
+
+/// `git branch -c/-C/-m/-M` (`--copy`, `--move`, any prefix, in a cluster
+/// like `-fm`): git 2.39 writes the new name outside a ref transaction, so
+/// the hook never sees it, and a hook refusal halfway through (deleting the
+/// old name) loses a branch. A cluster ends at `-u`/`-t` (their value).
+fn copy_or_rename<'a>(sub: &str, rest: &'a [String]) -> Option<&'a str> {
+    (sub == "branch").then_some(())?;
+    options(rest).find(|a| match a.strip_prefix("--") {
+        Some(n) => {
+            let n = n.split('=').next().unwrap_or(n);
+            !n.is_empty() && ("move".starts_with(n) || "copy".starts_with(n))
+        }
+        None => {
+            a.starts_with('-')
+                && a[1..]
+                    .chars()
+                    .take_while(|c| !"ut".contains(*c))
+                    .any(|c| "cCmM".contains(c))
+        }
+    })
+}
+
+fn refuse_copy_or_rename(flag: &str, b: &Binding) -> Refusal {
+    let ns = b.namespace().unwrap_or_else(|| "agend/<task-id>/".into());
+    Refusal::new(
+        "branch_copy",
+        format!(
+            "`git branch {flag}` copies or renames a branch outside git's ref transaction, so the agend hook cannot check the new name"
+        ),
+        format!(
+            "create the new branch instead (the hook checks it): git branch {ns}<name> <old>; if <old> is your own {ns} side branch, then delete it: git branch -D <old>"
+        ),
     )
 }
 

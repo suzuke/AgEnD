@@ -5,8 +5,10 @@
 //!   Symbolic-ref updates (HEAD moved to a branch) are not read, so
 //!   `classify` refuses `checkout`/`switch` away from the bound branch.
 //! - `pre-push`: refuses unless every remote ref is the bound branch.
-//! - Every hook then chains to the repo's original hook of the same name
-//!   (same arguments and stdin), so project hooks keep running.
+//! - Every hook then chains to the project's hook of the same name (same
+//!   arguments and stdin), so project hooks keep running. Its directory is
+//!   looked up at run time: the shared `core.hooksPath` (set later, e.g. by
+//!   husky, still counts), else `<common dir>/hooks`.
 //!
 //! Installed per agent worktree (`install_hooks`): `core.hooksPath` in its
 //! own `config.worktree`, pointing at `$AGEND_HOME/hooks/` (symlinks to
@@ -32,9 +34,9 @@ pub const NAMES: &str = "applypatch-msg pre-applypatch post-applypatch pre-commi
     prepare-commit-msg commit-msg post-commit pre-rebase post-checkout post-merge pre-push \
     pre-auto-gc post-rewrite sendemail-validate post-index-change reference-transaction";
 
-/// File in the worktree's own git dir naming the original hooks directory.
-/// Its presence also marks the worktree as having the agend hooks.
-pub const CHAIN_FILE: &str = "agend-hooks-chain";
+/// Empty file in the worktree's own git dir marking it as having the agend
+/// hooks (the shim refuses writes without it).
+pub const MARKER_FILE: &str = "agend-hooks-installed";
 
 /// The shared hooks directory: `$AGEND_HOME/hooks`.
 pub fn hooks_dir(home: &Path) -> PathBuf {
@@ -44,7 +46,8 @@ pub fn hooks_dir(home: &Path) -> PathBuf {
 /// Hook entry point (`agend` invoked as `<hooks dir>/<name>` by git).
 pub fn run(name: &'static str) -> ExitCode {
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
-    let chained = chain_target(name).map(|hook| {
+    let ctx = Ctx::from_env();
+    let chained = chain_target(&ctx, name).map(|hook| {
         let mut cmd = Command::new(hook);
         cmd.args(&args);
         cmd
@@ -60,7 +63,6 @@ pub fn run(name: &'static str) -> ExitCode {
         eprintln!("agend-shim: refused: the {name} hook cannot read what git sent: {e}");
         return ExitCode::from(REFUSED_EXIT);
     }
-    let ctx = Ctx::from_env();
     let argv = lossy(&args);
     let snap = binding::load(ctx.home.as_deref(), ctx.instance.as_deref());
     let input_text = String::from_utf8_lossy(&input);
@@ -255,16 +257,37 @@ pub fn stay_hint(binding: Option<&Binding>) -> String {
 
 // ── chaining ────────────────────────────────────────────────────────────
 
-/// The original hook `name` to run after ours: `<recorded dir>/<name>` if it
-/// is an executable file that is not this binary. git exports `GIT_DIR` to
-/// hooks; the recorded dir is in `$GIT_DIR/agend-hooks-chain`.
-fn chain_target(name: &str) -> Option<PathBuf> {
-    let git_dir = std::env::var_os("GIT_DIR")?;
-    let dir = std::fs::read_to_string(Path::new(&git_dir).join(CHAIN_FILE)).ok()?;
-    let hook = Path::new(dir.trim()).join(name);
-    let me = std::env::current_exe().ok();
-    let is_me = me.is_some_and(|me| crate::ctx::identity(&me) == crate::ctx::identity(&hook));
-    (crate::ctx::is_executable(&hook) && !is_me).then_some(hook)
+/// The project's hook `name` to run after ours, if it is an executable file
+/// that is not this binary: in the shared `core.hooksPath` (real git with
+/// `GIT_DIR` set to the common dir, so this worktree's `config.worktree`,
+/// which names the agend hooks, is not read), else `<common dir>/hooks`.
+/// git exports `GIT_DIR` to hooks and runs them at the worktree top, which
+/// a relative `core.hooksPath` is relative to.
+fn chain_target(ctx: &Ctx, name: &str) -> Option<PathBuf> {
+    let git_dir = PathBuf::from(std::env::var_os("GIT_DIR")?);
+    let common = match std::fs::read_to_string(git_dir.join("commondir")) {
+        Ok(rel) => git_dir.join(rel.trim()),
+        Err(_) => git_dir,
+    };
+    let configured = ctx.find_real("git").and_then(|git| {
+        let mut cmd = Command::new(git);
+        for var in crate::ctx::RETARGET_ENV {
+            cmd.env_remove(var);
+        }
+        let out = cmd
+            .args(["config", "--path", "--get", "core.hooksPath"])
+            .env("GIT_DIR", &common)
+            .stdin(Stdio::null())
+            .output()
+            .ok()?;
+        let dir = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        (out.status.success() && !dir.is_empty()).then(|| PathBuf::from(dir))
+    });
+    let hook = configured
+        .unwrap_or_else(|| common.join("hooks"))
+        .join(name);
+    let me = ctx.self_exe.as_deref().and_then(crate::ctx::identity);
+    (crate::ctx::is_executable(&hook) && crate::ctx::identity(&hook) != me).then_some(hook)
 }
 
 /// Runs the chained hook with `input` on its stdin; its exit code.
@@ -294,8 +317,7 @@ fn run_with_input(mut cmd: Command, input: &[u8]) -> ExitCode {
 /// 1. `extensions.worktreeConfig=true` in the repo config (a capability
 ///    switch; changes nothing by itself);
 /// 2. `hooks_dir` holds one symlink per hook name to `agend`;
-/// 3. the worktree's git dir records the original hooks directory (the
-///    previously effective `core.hooksPath`, else `<common dir>/hooks`);
+/// 3. the worktree's git dir gets `MARKER_FILE`;
 /// 4. `core.hooksPath=<hooks_dir>` and `gc.packRefs=false` in that
 ///    worktree's `config.worktree`.
 ///
@@ -316,27 +338,11 @@ pub fn install_hooks(
         ));
     }
     std::fs::create_dir_all(hooks_dir).map_err(|e| format!("{}: {e}", hooks_dir.display()))?;
-    let ours = std::fs::canonicalize(hooks_dir).map_err(|e| e.to_string())?;
-    let previous = git_in(&["config", "--path", "--get", "core.hooksPath"])
-        .ok()
-        .filter(|p| !p.is_empty())
-        .map(|p| worktree.join(p));
-    let chain = match previous {
-        Some(p) if std::fs::canonicalize(&p).is_ok_and(|p| p == ours) => {
-            // Re-install: keep the original recorded the first time.
-            match std::fs::read_to_string(git_dir.join(CHAIN_FILE)) {
-                Ok(recorded) => PathBuf::from(recorded.trim()),
-                Err(_) => common.join("hooks"),
-            }
-        }
-        Some(p) => p,
-        None => common.join("hooks"),
-    };
     for name in NAMES.split_whitespace() {
         link(agend, &hooks_dir.join(name))?;
     }
-    std::fs::write(git_dir.join(CHAIN_FILE), format!("{}\n", chain.display()))
-        .map_err(|e| format!("{}: {e}", git_dir.join(CHAIN_FILE).display()))?;
+    let marker = git_dir.join(MARKER_FILE);
+    std::fs::write(&marker, "").map_err(|e| format!("{}: {e}", marker.display()))?;
     git_in(&["config", "extensions.worktreeConfig", "true"])?;
     let dir = hooks_dir.to_str().ok_or("hooks dir is not UTF-8")?;
     // git 2.39's pack-refs reports every ref to the hook as if it were
@@ -348,8 +354,9 @@ pub fn install_hooks(
 }
 
 /// Removes the agend hooks from one worktree (the daemon calls this when it
-/// releases the binding): unsets what `install_hooks` set there.
-/// The shared hooks dir and `extensions.worktreeConfig` stay.
+/// releases the binding): unsets what `install_hooks` set there. Left
+/// behind, harmless: the shared hooks dir, `extensions.worktreeConfig` and
+/// an empty `config.worktree`.
 pub fn uninstall_hooks(git: &dyn Fn() -> Command, worktree: &Path) -> Result<(), String> {
     let (git_dir, _) = worktree_dirs(git, worktree)?;
     for key in ["core.hooksPath", "gc.packRefs"] {
@@ -361,7 +368,7 @@ pub fn uninstall_hooks(git: &dyn Fn() -> Command, worktree: &Path) -> Result<(),
             return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
         }
     }
-    match std::fs::remove_file(git_dir.join(CHAIN_FILE)) {
+    match std::fs::remove_file(git_dir.join(MARKER_FILE)) {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
         _ => Ok(()),
     }

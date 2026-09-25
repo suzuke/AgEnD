@@ -19,13 +19,13 @@
 
 - 依 argv[0] basename 判斷是哪個工具或哪個 hook（`Tool::from_argv0`）
 - git hook（`hook`）：
-  - `reference-transaction` 的 `prepared` 階段拒絕：protected ref（main、master、快照列的）、自己 `agend/<task>/` 以外的 branch（別的 agent 的、新的 `feat/x`）、刪除或改名自己的 branch；讀不到 binding 時只放行 `refs/remotes/`，看不懂的輸入行也拒絕（fail closed）
+  - `reference-transaction` 的 `prepared` 階段拒絕：protected ref（main、master、快照列的）、自己 `agend/<task>/` 以外的 branch（別的 agent 的、新的 `feat/x`）、刪除自己綁定的 branch；讀不到 binding 時只放行 `refs/remotes/`，看不懂的輸入行也拒絕（fail closed）
   - `pre-push` 拒絕：遠端 ref 不是自己綁定的 branch（或是刪除它），不管推到哪個 remote
-  - 每個 hook 檢查完都接著跑 repo 原本的同名 hook（同樣的參數與 stdin），所以專案的 hook 照常跑
+  - 每個 hook 檢查完都接著跑專案的同名 hook（同樣的參數與 stdin），所以專案的 hook 照常跑；hook 目錄在 hook 執行時才查：共用 config 的 `core.hooksPath`（綁定之後才設的也算，例如 husky），否則 `<common dir>/hooks`
   - `install_hooks`／`uninstall_hooks`：只裝在一個 agent worktree（見「hook 安裝在哪」）
 - git shim：
   - 放行、導向綁定的 worktree、拒絕（附下一步命令）；位置問真的 git（`rev-parse`），不自己找 repo
-  - 擋 hook 看不到的：`checkout`／`switch` 離開綁定的 branch、`git worktree`（`list` 除外）、不認得的子命令（alias）
+  - 擋 hook 看不到的：`checkout`／`switch` 離開綁定的 branch、`branch -c/-C/-m/-M`（`--copy`／`--move`，含縮寫與 `-fm` 這類組合；git 2.39 寫新名稱不經 ref transaction）、`git worktree`（`list` 除外）、不認得的子命令（alias）
   - 擋會跳過 hook 的：`-c`／`--config-env`／`GIT_CONFIG_*` 設 `core.hooksPath`、`push --no-verify`；綁定的 worktree 沒裝 hook 時拒絕寫入
   - 破壞性操作前快照（v1 agentic-git 的範圍；`refs/agend/snapshots/<instance>/<id>`）並印出還原命令
   - 沒有 hook 的 repo：team 的本機 remote 與 team repo 的 clone 不能寫、不能從別的 repo push 到 team repo（T5）
@@ -38,10 +38,10 @@
 | `$AGEND_HOME/hooks/<hook 名稱>` | 每個 hook 名稱一個 symlink，指向 `agend` binary（`hook::NAMES`：client 端 hook；不含 receive 端與 `push-to-checkout`） |
 | repo 的 `config`（共用） | 只有 `extensions.worktreeConfig=true`：開關，本身不改任何行為 |
 | agent worktree 的 `config.worktree` | `core.hooksPath=$AGEND_HOME/hooks`，只有這個 worktree 生效；`gc.packRefs=false`（git 2.39 的 `pack-refs` 把每個 ref 都當成寫入回報給 hook，分不出真的寫入；ref 是共用的，由 canonical 那邊 pack） |
-| agent worktree 的 git dir 裡 `agend-hooks-chain` | 原本的 hook 目錄（之前的 `core.hooksPath`，否則 `<common dir>/hooks`）；hook 串接用，也是「已安裝」的標記 |
+| agent worktree 的 git dir 裡 `agend-hooks-installed` | 空檔，「已安裝」的標記（沒有它 shim 拒絕寫入） |
 | canonical checkout、其他 checkout、`~/.gitconfig` | 不動 |
 
-daemon 在綁定 worktree 時呼叫 `install_hooks`、釋放時呼叫 `uninstall_hooks`（第 6 施工關）；第 3 施工關由測試與 demo 在暫存的 lab worktree 上呼叫。
+daemon 在綁定 worktree 時呼叫 `install_hooks`、釋放時呼叫 `uninstall_hooks`（第 6 施工關）；第 3 施工關由測試與 demo 在暫存的 lab worktree 上呼叫。`uninstall_hooks` 之後留下、但無害的：空的 `config.worktree`、共用 config 的 `extensions.worktreeConfig=true`、`$AGEND_HOME/hooks`（別的 agent worktree 還在用）。
 
 ## 不負責
 
@@ -72,7 +72,7 @@ daemon 在綁定 worktree 時呼叫 `install_hooks`、釋放時呼叫 `uninstall
 5. 設 `core.hooksPath` 或 `push --no-verify` → 拒絕
 6. `worktree`（`list` 除外）、不認得的子命令 → 拒絕
 7. 讀取 → 綁定且在 workspace 或 canonical checkout 就導向，否則原地放行
-8. 寫入 → 要有效快照與綁定；在綁定的 worktree 裡：git 回答的 work tree 是它、`GIT_INDEX_FILE` 在它的 git dir 裡；需要導向時：不是從別的 worktree、不在 git dir 裡、沒有 `GIT_*`、沒有 `--git-dir`／`--work-tree`、同一個子目錄在 worktree 裡存在；worktree 有 hook；`checkout`／`switch` 不離開綁定的 branch；破壞性操作先快照
+8. 寫入 → 要有效快照與綁定；在綁定的 worktree 裡：git 回答的 work tree 是它、`GIT_INDEX_FILE` 在它的 git dir 裡；需要導向時：不是從別的 worktree、不在 git dir 裡、沒有 `GIT_*`、沒有 `--git-dir`／`--work-tree`、同一個子目錄在 worktree 裡存在；worktree 有 hook；`checkout`／`switch` 不離開綁定的 branch；不是 `branch` 複製或改名；破壞性操作先快照
 9. 導向 = 真 git 加 `-C <worktree>/<prefix>`、拿掉呼叫者的 `-C`／`--git-dir`／`--work-tree`；之後 ref 的變更由 hook 檢查
 
 ## 模組
@@ -105,9 +105,9 @@ daemon 在綁定 worktree 時呼叫 `install_hooks`、釋放時呼叫 `uninstall
 
 ## 細節
 
-- 啟動成本：需要位置的呼叫多跑一次 `git rev-parse`；綁定 worktree 外的寫入再問一次錨點。hook 不跑 git（只讀快照與 `$GIT_DIR/agend-hooks-chain`）。需要 git 2.20 以上（`config --worktree`）。
+- 啟動成本：需要位置的呼叫多跑一次 `git rev-parse`；綁定 worktree 外的寫入再問一次錨點。hook 判斷時不跑 git（只讀快照）；串接前跑一次 `git config --get core.hooksPath`（`GIT_DIR` 設成 common dir）找專案的 hook 目錄。需要 git 2.20 以上（`config --worktree`）。
 - 拒絕訊息三行：`agend-shim: refused `<命令>``、`agend-shim: why: …`、`agend-shim: next step: …`；shim 拒絕 exit 1，hook 拒絕時 git 失敗（`ref updates aborted by hook`／`failed to push some refs`）。
-- 每個拒絕有固定的 code（`branch_switch`、`protected_ref`、`ref_not_yours`、`push_not_yours`、`hooks_skipped`、`no_binding`…），寫在 audit 裡。
+- 每個拒絕有固定的 code（`branch_switch`、`branch_copy`、`protected_ref`、`ref_not_yours`、`push_not_yours`、`hooks_skipped`、`no_binding`…），寫在 audit 裡。
 - daemon 或人要在 agent worktree 裡跑 git 又沒有 agent 的環境時，hook 會拒絕 branch 寫入；可信的呼叫者用 `git -c core.hooksPath=/dev/null …`（shim 不在它們的 PATH 上）。
 - 決定的理由與待追認事項見 [第 3 施工關頁](../../docs/gates/gate-03-shim.md#待你追認)。
 
