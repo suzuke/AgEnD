@@ -243,6 +243,10 @@ impl GitFixture {
     /// Adds a linked worktree `worktrees/<name>` of the canonical repo on a
     /// new branch `branch` starting at `from`, and returns its path.
     pub fn add_worktree(&self, name: &str, branch: &str, from: &str) -> PathBuf {
+        assert!(
+            !name.eq_ignore_ascii_case(".git"),
+            "worktree name {name:?} must not be .git"
+        );
         let parent = self.root.join("worktrees");
         std::fs::create_dir_all(&parent).expect("create worktrees dir");
         let path = parent.join(name);
@@ -422,6 +426,22 @@ mod tests {
         assert!(fx.is_ancestor(&a, MAIN) && fx.is_ancestor(&b, MAIN));
         fx.git(&canonical, &["update-ref", "refs/heads/main", &b]);
         assert!(!fx.is_ancestor(&a, MAIN));
+    }
+
+    /// `add_worktree` must not create a linked worktree named `.git` (any
+    /// case): every later `assert_in_repo` / `commit` call refuses to
+    /// operate inside a `.git` directory, so such a worktree would be
+    /// created and then permanently unusable.
+    #[test]
+    fn add_worktree_refuses_a_dot_git_name() {
+        let fx = GitFixture::new("unit").unwrap();
+        for name in [".git", ".GIT", ".Git"] {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                fx.add_worktree(name, "w", MAIN)
+            }));
+            assert!(result.is_err(), "add_worktree({name:?}) was allowed");
+        }
+        assert!(!fx.root().join("worktrees/.git").exists());
     }
 
     fn plain_git(dir: &Path, args: &[&str]) {
