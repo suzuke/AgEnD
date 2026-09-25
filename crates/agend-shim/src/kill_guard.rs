@@ -11,7 +11,9 @@
 //!   `--`, then targets. Every target must be a plain pid once surrounding
 //!   whitespace is trimmed (kill implementations skip it: `" 123"` is pid
 //!   123). Refused: `0` and negative targets (process groups; `-1` is every
-//!   process you own), names (`kill agend` on util-linux), job specs,
+//!   process you own), pids above `i32::MAX` or longer than 10 digits (BSD
+//!   `kill` keeps the pid in an `int`: 4294967295 becomes -1), names
+//!   (`kill agend` on util-linux), job specs,
 //!   unknown options, and a pid whose executable is `agend` (the daemon and
 //!   every holder run the `agend` binary).
 //!
@@ -184,15 +186,27 @@ fn kill_operands(args: &[String]) -> Result<Vec<&str>, Refusal> {
     Ok(rest)
 }
 
-/// A plain positive pid, the way kill implementations read it (surrounding
-/// whitespace skipped, `+` and leading zeros allowed).
+/// Longest pid spelling accepted: the digits of `i32::MAX` (`2147483647`).
+/// Longer strings are refused whatever their value: `strtol` saturates an
+/// overlong one to `LONG_MAX`, which an `int` pid truncates to -1.
+const MAX_PID_DIGITS: usize = 10;
+
+/// A plain positive pid in `1..=i32::MAX`, the way kill implementations read
+/// it (surrounding whitespace skipped, `+` and leading zeros allowed).
+/// BSD/macOS `kill` stores `strtol()` in an `int`, so 4294967295 would be
+/// -1: every process you own. Anything above `i32::MAX` is refused.
 fn kill_target(op: &str) -> Result<u32, Refusal> {
     let t = op.trim_matches(|c: char| c.is_ascii_whitespace());
     let digits = t.strip_prefix(['+', '-']).unwrap_or(t);
     if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
         return Err(refuse_kill_form(&format!("target {op:?} is not a pid")));
     }
-    let n: i128 = t
+    if digits.len() > MAX_PID_DIGITS {
+        return Err(refuse_kill_form(&format!(
+            "target {op:?} is longer than any pid ({MAX_PID_DIGITS} digits at most)"
+        )));
+    }
+    let n: i64 = t
         .parse()
         .map_err(|_| refuse_kill_form(&format!("target {op:?} is not a pid")))?;
     if n <= 0 {
@@ -208,6 +222,12 @@ fn kill_target(op: &str) -> Result<u32, Refusal> {
             ),
             "kill explicit pids instead: pgrep -fl <pattern>, then kill <pid> ...",
         ));
+    }
+    if n > i64::from(i32::MAX) {
+        return Err(refuse_kill_form(&format!(
+            "target {op:?} is above {} (the largest pid): some kills store it in an int, where it wraps to a negative target such as -1, every process you own",
+            i32::MAX
+        )));
     }
     u32::try_from(n).map_err(|_| refuse_kill_form(&format!("target {op:?} is out of range")))
 }
@@ -332,6 +352,54 @@ mod tests {
         ] {
             assert_eq!(k(bad), "kill_target", "{bad:?}");
         }
+    }
+
+    /// T9 round 2: BSD/macOS `kill` stores `strtol()` in an `int`, so
+    /// 4294967295 wraps to -1 (every process you own) and an overlong
+    /// string saturates to `LONG_MAX`, whose low 32 bits are also -1.
+    /// Classifier only: nothing here sends a signal.
+    #[test]
+    fn pids_outside_the_int_range_are_refused() {
+        let k = |args: &[&str]| {
+            let v: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+            match classify(Tool::Kill, &v, &names) {
+                Ok(()) => "allow",
+                Err(r) => r.code,
+            }
+        };
+        for big in [
+            "2147483648",
+            "4294967295",
+            "4294967296",
+            "4294967297",
+            "+4294967295",
+            " 4294967295",
+            "4294967295\n",
+            "04294967295",
+            "0000004294967295",
+            "18446744073709551615",
+            "9223372036854775807",
+            "99999999999999999999999999999999999999999999999999",
+        ] {
+            assert_eq!(k(&[big]), "kill_target", "{big:?}");
+            assert_eq!(k(&["-9", big]), "kill_target", "-9 {big:?}");
+            assert_eq!(k(&["-s", "KILL", "--", big]), "kill_target", "{big:?}");
+            assert_eq!(k(&["300", big]), "kill_target", "300 {big:?}");
+        }
+        // Overlong spellings of small pids are refused too: no kill needs
+        // more digits than i32::MAX has.
+        for long in ["00000000300", "+00000000300", "000000000000000000001"] {
+            assert_eq!(k(&[long]), "kill_target", "{long:?}");
+        }
+        // Zero after normalisation stays a group kill.
+        for zero in ["+0", " 0 ", "0000000000", "-0", "+00"] {
+            assert_eq!(k(&[zero]), "group_kill", "{zero:?}");
+        }
+        // The boundary itself is a plain pid.
+        assert_eq!(k(&["2147483647"]), "allow");
+        assert_eq!(k(&["0000000300"]), "allow");
+        assert!(kill_target("2147483647").is_ok());
+        assert!(kill_target("2147483648").is_err());
     }
 
     #[test]

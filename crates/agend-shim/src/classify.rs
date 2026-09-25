@@ -11,7 +11,9 @@
 //!   cannot be set (`config_keys`), and symbolic refs are followed before a
 //!   destination is checked.
 //! - A write acts on the bound worktree only: `--work-tree`,
-//!   `GIT_WORK_TREE` and `GIT_INDEX_FILE` pointing elsewhere are refused.
+//!   `GIT_WORK_TREE` and `GIT_INDEX_FILE` pointing elsewhere are refused, and
+//!   so is a git dir (`--git-dir`, `GIT_DIR`) without a work tree when git
+//!   runs outside the bound worktree (git would use that directory).
 //! - Anything that could leave the bound branch (DWIM checkout, `<x> --`,
 //!   rebase of another branch, `stash branch`) is refused unless its target
 //!   is the bound branch itself.
@@ -198,6 +200,10 @@ pub struct GitEnv {
     pub work_tree: Option<PathBuf>,
     /// `GIT_INDEX_FILE`, resolved likewise.
     pub index_file: Option<PathBuf>,
+    /// Whether a git dir was given (`--git-dir`, `--bare` or `GIT_DIR`).
+    /// Without a work tree, git then uses the directory it runs in as the
+    /// work tree (the top of it, not the checkout that owns the git dir).
+    pub git_dir: bool,
     /// Keys set through `GIT_CONFIG_COUNT` / `GIT_CONFIG_PARAMETERS`, or why
     /// they could not be read.
     pub config_keys: Result<Vec<String>, String>,
@@ -209,6 +215,7 @@ impl Default for GitEnv {
             retargets: false,
             work_tree: None,
             index_file: None,
+            git_dir: false,
             config_keys: Ok(Vec::new()),
         }
     }
@@ -462,7 +469,9 @@ fn check_config_channel(input: &Input) -> Result<(), Refusal> {
 }
 
 /// A write must act on the bound worktree: a work tree or index chosen by
-/// the caller must be the bound worktree's own.
+/// the caller must be the bound worktree's own. A git dir given without a
+/// work tree makes the directory git runs in the work tree, so that
+/// directory must be the bound worktree (hooks run there).
 fn check_work_tree(sub: &str, input: &Input, binding: &Binding) -> Result<(), Refusal> {
     let wt = binding.worktree();
     let bound = std::fs::canonicalize(wt).ok();
@@ -480,7 +489,7 @@ fn check_work_tree(sub: &str, input: &Input, binding: &Binding) -> Result<(), Re
                 wt.display()
             ),
             format!(
-                "drop --work-tree / unset GIT_WORK_TREE GIT_INDEX_FILE and run `git {sub} ...` in {}",
+                "drop --git-dir / --work-tree, unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE, and run `git {sub} ...` in {}",
                 wt.display()
             ),
         )
@@ -489,6 +498,17 @@ fn check_work_tree(sub: &str, input: &Input, binding: &Binding) -> Result<(), Re
         && !same(p)
     {
         return Err(refuse("work tree", p));
+    }
+    // Routed calls drop `--git-dir` (and refuse `GIT_DIR`) before this.
+    if input.location == Location::Worktree
+        && input.env.work_tree.is_none()
+        && input.env.git_dir
+        && !same(input.dir)
+    {
+        return Err(refuse(
+            "with a git dir set and no work tree, git uses the current directory as the work tree:",
+            input.dir,
+        ));
     }
     if let Some(p) = &input.env.index_file {
         let gitdir = crate::location::gitdir_of_checkout(wt);

@@ -723,6 +723,51 @@ fn writes_must_use_the_bound_work_tree() {
     assert_eq!(run(&with_wt(&other), "status"), "run");
 }
 
+/// Round 2, class 4: a git dir without a work tree makes the directory git
+/// runs in the work tree; for writes it must be the bound worktree.
+#[test]
+fn git_dir_without_work_tree_uses_the_cwd() {
+    let s = work();
+    let wt = std::env::temp_dir();
+    let canonical = Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf();
+    let fake = Fake::default();
+    let at = |dir: &Path, env: &GitEnv, cmd: &str| {
+        let args = parse(&argv(cmd));
+        let protected = ProtectedRefs::new(&s.protected_refs);
+        code(&classify(&Input {
+            args: &args,
+            snapshot: Ok(&s),
+            location: Location::Worktree,
+            env,
+            protected: &protected,
+            dir,
+            probe: &fake,
+        }))
+    };
+    let gd = GitEnv {
+        retargets: true,
+        git_dir: true,
+        ..GitEnv::default()
+    };
+    for cmd in ["clean -fd", "reset --hard", "checkout -- .", "add -A"] {
+        assert_eq!(at(&canonical, &gd, cmd), "work_tree_retarget", "{cmd}");
+        assert_eq!(at(&wt, &gd, cmd), "run", "hooks run in the worktree: {cmd}");
+    }
+    // An explicit work tree decides instead of the cwd.
+    let explicit = GitEnv {
+        work_tree: Some(wt.clone()),
+        ..gd.clone()
+    };
+    assert_eq!(at(&canonical, &explicit, "reset --hard"), "run");
+    // Reads are not affected; neither is a call without a git dir.
+    assert_eq!(at(&canonical, &gd, "status"), "run");
+    assert_eq!(
+        at(&canonical, &GitEnv::default(), "reset --hard"),
+        "run",
+        "location Worktree came from discovery, so git finds the worktree itself"
+    );
+}
+
 #[test]
 fn destructive_operations_take_a_snapshot() {
     let s = work();

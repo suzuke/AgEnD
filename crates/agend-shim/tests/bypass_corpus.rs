@@ -339,6 +339,55 @@ fn corpus_leaving_the_bound_branch() {
     run_corpus("c-leave", LEAVE_BRANCH);
 }
 
+/// Round 2, class 4: a git dir without a work tree makes the cwd the work
+/// tree. With the bound worktree's own git dir and the cwd in the canonical
+/// checkout, `clean` / `reset --hard` would wipe the canonical checkout.
+#[test]
+fn own_git_dir_with_the_cwd_elsewhere_is_refused() {
+    let gitdir_of = |f: &Fixture| git(&f.worktree, &["rev-parse", "--absolute-git-dir"]);
+    for (how, cmd) in [
+        ("env", &["clean", "-fd"][..]),
+        ("env", &["reset", "--hard"][..]),
+        ("env", &["checkout", "--", "."][..]),
+        ("env", &["add", "-A"][..]),
+        ("argv", &["clean", "-fd"][..]),
+        ("argv", &["reset", "--hard"][..]),
+    ] {
+        let f = Fixture::new("c-gitdir-cwd");
+        dirty(&f);
+        let before = f.protected_state();
+        let gitdir = gitdir_of(&f);
+        let ran = match how {
+            "env" => {
+                let ctx = Ctx {
+                    git_dir: Some(PathBuf::from(&gitdir)),
+                    ..f.ctx(&f.repo)
+                };
+                gitshim(&ctx, cmd)
+            }
+            _ => {
+                let flag = format!("--git-dir={gitdir}");
+                let argv: Vec<&str> = std::iter::once(flag.as_str())
+                    .chain(cmd.iter().copied())
+                    .collect();
+                gitshim(&f.ctx(&f.repo), &argv)
+            }
+        };
+        let bad = violations(&f, &before, Expect::Refused, &ran);
+        assert!(bad.is_empty(), "{how} {cmd:?}: {bad:?}\n{}", ran.text());
+        assert_eq!(ran.refused, Some("work_tree_retarget"), "{how} {cmd:?}");
+    }
+    // Hooks keep working: the git dir with the cwd in the bound worktree.
+    let f = Fixture::new("c-gitdir-hook");
+    let ctx = Ctx {
+        git_dir: Some(PathBuf::from(gitdir_of(&f))),
+        ..f.ctx(&f.worktree)
+    };
+    std::fs::write(f.worktree.join("h.txt"), "h\n").unwrap();
+    gitshim(&ctx, &["add", "h.txt"]).ok();
+    gitshim(&ctx, &["reset", "-q", "--hard"]).ok();
+}
+
 #[test]
 fn bound_branch_that_is_a_symref_refuses_commits() {
     let f = Fixture::new("c-own-symref");
@@ -403,17 +452,40 @@ fn push_from_a_scratch_repo_to_the_team_url_is_refused() {
     git(&scratch, &["commit", "-q", "--allow-empty", "-m", "s"]);
     let before = f.protected_state();
     let ctx = f.ctx(&scratch);
+    // Round 2: git also tries `<path>.git` (and `<path>/.git`), so the team
+    // remote without its `.git` suffix is the same destination.
+    let bare = f.origin.with_extension("");
+    let rel = format!(
+        "../../../../{}",
+        bare.file_name().unwrap().to_str().unwrap()
+    );
+    assert!(scratch.join(&rel).with_extension("git").is_dir(), "{rel}");
     for dest in [
         f.origin.to_str().unwrap().to_string(),
         format!("file://{}", f.origin.display()),
         f.repo.to_str().unwrap().to_string(),
+        bare.to_str().unwrap().to_string(),
+        format!("{}/", bare.display()),
+        format!("file://{}", bare.display()),
+        rel,
     ] {
+        let ran = gitshim(&ctx, &["push", &dest, "HEAD:refs/heads/probe"]);
+        assert!(ran.refused.is_some(), "{dest}: {}", ran.text());
         let ran = gitshim(&ctx, &["push", &dest, "HEAD:refs/heads/main"]);
         assert!(ran.refused.is_some(), "{dest}: {}", ran.text());
     }
-    assert_eq!(f.protected_state(), before);
     // The scratch repo itself stays the agent's business.
     gitshim(&ctx, &["checkout", "-q", "-b", "anything"]).ok();
+    // A remote saved with the suffix-less URL makes it a team clone.
+    git(&scratch, &["remote", "add", "mine", bare.to_str().unwrap()]);
+    let ran = gitshim(&ctx, &["push", "mine", "HEAD:refs/heads/probe"]);
+    assert!(ran.refused.is_some(), "remote mine: {}", ran.text());
+    assert_eq!(f.protected_state(), before);
+    let probe = try_git(
+        &f.origin,
+        &["rev-parse", "-q", "--verify", "refs/heads/probe"],
+    );
+    assert!(!probe.status.success(), "probe branch reached origin");
 }
 
 #[test]

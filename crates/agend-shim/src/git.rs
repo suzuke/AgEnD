@@ -76,6 +76,7 @@ pub fn plan(ctx: &Ctx, args: &[OsString]) -> Outcome {
             .or_else(|| ctx.git_work_tree.clone())
             .map(|p| dir.join(p)),
         index_file: ctx.git_index_file.as_ref().map(|p| dir.join(p)),
+        git_dir: git_dir.is_some(),
         config_keys: match &ctx.config_env_error {
             Some(e) => Err(e.clone()),
             None => Ok(ctx.config_env_keys.clone()),

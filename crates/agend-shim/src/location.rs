@@ -121,6 +121,13 @@ fn resolve_dot_git(dot_git: &Path) -> Option<PathBuf> {
     Some(dot_git.parent()?.join(target))
 }
 
+/// Whether `p` looks like a git dir (bare repo, `.git` dir or a linked
+/// worktree's git dir): a `HEAD` file plus objects of its own or a
+/// `commondir` pointing at them.
+pub fn is_git_dir(p: &Path) -> bool {
+    p.join("HEAD").is_file() && (p.join("objects").is_dir() || p.join("commondir").is_file())
+}
+
 /// The shared git dir (`commondir` file of a linked worktree), canonical.
 pub fn common_dir(gitdir: &Path) -> PathBuf {
     std::fs::read_to_string(gitdir.join("commondir"))

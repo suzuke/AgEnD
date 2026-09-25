@@ -5,7 +5,8 @@
 //! Remote URLs are compared after `url.<base>.insteadOf` /
 //! `pushInsteadOf` rewriting and normalisation (`git@host:o/r.git`,
 //! `ssh://git@host/o/r`, `https://host/o/r/` are the same remote; a local
-//! path is compared by its git common dir).
+//! path is compared by its git common dir, found the way git finds it:
+//! `/x/origin` and `file:///x/origin` reach `/x/origin.git`).
 //!
 //! Must NOT: spawn git (callers pass the config they read).
 
@@ -135,9 +136,27 @@ fn remote_key(host: &str, path: &str) -> Key {
 }
 
 /// A local repo (checkout, worktree, bare or git dir) by common git dir.
+/// Resolved the way git's `enter_repo` does for a local remote: it tries
+/// `<p>/.git`, `<p>`, `<p>.git/.git`, `<p>.git` and takes the first repo,
+/// so `/x/origin` reaches `/x/origin.git`. If none looks like a repo, the
+/// path itself (canonical) is the key.
 fn local_key(p: &Path) -> Option<Key> {
+    // `components()` drops trailing slashes, so `/x/origin/` + `.git` is
+    // `/x/origin.git`, not `/x/origin/.git`.
+    let plain: PathBuf = p.components().collect();
+    let mut dotgit = plain.clone().into_os_string();
+    dotgit.push(".git");
+    [plain, PathBuf::from(dotgit)]
+        .iter()
+        .find_map(|c| repo_key(c))
+        .or_else(|| std::fs::canonicalize(p).ok().map(Key::Local))
+}
+
+/// `Some` when `p` is a checkout (`p/.git`) or a git dir itself.
+fn repo_key(p: &Path) -> Option<Key> {
     let p = std::fs::canonicalize(p).ok()?;
-    let gitdir = location::gitdir_of_checkout(&p).unwrap_or(p);
+    let gitdir =
+        location::gitdir_of_checkout(&p).or_else(|| location::is_git_dir(&p).then(|| p.clone()))?;
     Some(Key::Local(location::common_dir(&gitdir)))
 }
 
@@ -179,5 +198,40 @@ mod tests {
             r.dest_keys("origin", Path::new("/")),
             r.dest_keys("gh:suzuke/agend", Path::new("/"))
         );
+    }
+
+    /// Round 2: git resolves a local remote without its `.git` suffix.
+    #[test]
+    fn local_paths_resolve_like_git_enter_repo() {
+        let tmp = agend_testkit::tempdir::TempDir::new("team-key").unwrap();
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let bare = root.join("origin.git");
+        std::fs::create_dir_all(bare.join("objects")).unwrap();
+        std::fs::write(bare.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        let want = Some(Key::Local(bare.clone()));
+        let r = root.display();
+        for u in [
+            format!("{r}/origin.git"),
+            format!("{r}/origin"),
+            format!("{r}/origin/"),
+            format!("{r}/./origin"),
+            format!("file://{r}/origin"),
+            format!("file://{r}/origin.git/"),
+            "origin".to_string(),
+            "../x/../origin".to_string(),
+        ] {
+            let base = if u.starts_with("..") {
+                root.join("x")
+            } else {
+                root.clone()
+            };
+            std::fs::create_dir_all(&base).unwrap();
+            assert_eq!(key(&u, &base), want, "{u}");
+        }
+        // A real repo at the suffix-less path wins, as in git.
+        let plain = root.join("origin");
+        std::fs::create_dir_all(plain.join("objects")).unwrap();
+        std::fs::write(plain.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        assert_eq!(key(&format!("{r}/origin"), &root), Some(Key::Local(plain)));
     }
 }

@@ -2,8 +2,18 @@
 
 > **TL;DR**
 > - agent PATH 上的 `git`、`kill`、`killall`、`pkill` 防護；由 `agend` binary 依 argv[0] 分派進來。
-> - 記住：**啟動要輕**：不建 tokio runtime、不讀設定、不開 DB、不連 daemon；只讀 daemon 寫的唯讀 binding 快照。
+> - 記住：**啟動要輕**：不建 tokio runtime、不讀設定、不開 DB、不連 daemon；只讀 daemon 寫的唯讀 binding 快照。只防好意但會犯錯的 agent（見「威脅模型」）。
 > - 下一步：`cargo xtask accept shim` 看 demo；行為規則看 [第 3 施工關頁](../../docs/gates/gate-03-shim.md)。
+
+## 威脅模型
+
+使用者已決定（2026-09-25）；完整版在[第 3 施工關頁](../../docs/gates/gate-03-shim.md#威脅模型)。
+
+| | 內容 |
+|---|---|
+| 防 | 好意但會犯錯的 agent：打錯字、習慣性 `reset --hard`／`clean -fd`、push 錯 branch、在錯的目錄跑、kill 錯 pid |
+| 不防 | 故意繞過的 agent：特製的 `-c remote.x.url=…`、直接跑 `/usr/bin/git`、改檔案 |
+| 硬保證在哪 | daemon 擁有的 `reference-transaction` hook（第 6 或第 10 施工關改成拒絕受保護 ref）＋ forge 端 branch protection |
 
 ## 負責
 
@@ -21,6 +31,7 @@
 - 管 team repo 以外的 repo（agent 自己的 scratch repo 直接放行）；例外：team repo 的 clone 不能寫、不能 push 到 team repo
 - git 自己啟動的程序（hooks、`rebase --exec`）與 shell 內建的 `kill`：攔不到，見[已知限制](../../docs/gates/gate-03-shim.md#已知限制)
 - 安全邊界：唯讀快照只是安全帶，同 uid 可 chmod；`AGEND_SHIM_BYPASS=1` 可跳過（會記 audit）
+- 刻意組出來的繞法（例如 scratch repo 裡用 `-c remote.<x>.url=<team>` 特製 push 目的地）：見[已知限制](../../docs/gates/gate-03-shim.md#已知限制)
 
 ## 輸入
 
@@ -30,7 +41,7 @@
 | binding 快照 | `source_repo`、`protected_refs`、`binding`（work：task、branch、worktree；review：task、head、worktree） |
 | `AGEND_SHIM_BYPASS=1` | 不檢查，直接執行真的工具（記 audit） |
 | `GIT_DIR`、`GIT_WORK_TREE`、`GIT_COMMON_DIR`、`GIT_INDEX_FILE`、`-C`、`--git-dir`、`--work-tree` | 判斷 git 實際作用在哪個 repo、哪個 work tree |
-| `-c`、`--config-env`、`GIT_CONFIG_COUNT`／`GIT_CONFIG_KEY_<n>`、`GIT_CONFIG_PARAMETERS` | 這次呼叫設定的 config key；只允許白名單 |
+| `-c`、`--config-env`、`GIT_CONFIG_COUNT`／`GIT_CONFIG_KEY_<n>`、`GIT_CONFIG_PARAMETERS` | 這次呼叫設定的 config key；寫入類命令只允許白名單，讀取類命令不檢查 |
 | `PATH` | 找真的工具：第一個不是 shim 自己（同 inode）的同名執行檔 |
 
 ## 判斷順序（git）
@@ -38,11 +49,11 @@
 1. bypass → 記 audit，原樣執行
 2. 解析 argv：全域選項（含 `-c` 的 key）、子命令
 3. 位置：綁定的 worktree／canonical checkout／同 repo 的其他 worktree／外部 repo／不在 repo／不知道（快照壞）
-4. 外部 repo → 放行，除非是 team repo 的 clone（寫入拒絕）或 push 目的地是 team repo
+4. 外部 repo → 放行，除非是 team repo 的 clone（寫入拒絕）或 push 目的地是 team repo（本機路徑照 git 補 `.git`）
 5. `worktree`（`list` 除外）、`filter-branch`、`fast-import`、不認得的子命令 → 拒絕
 6. 結果取決於選項的子命令：用 `specs` 的表做完整拼寫解析，失敗就拒絕
 7. 讀取 → 綁定且在 worktree 外就導向，否則放行
-8. 寫入 → config key 白名單（`-c`、env）；`fetch` 檢查目的地後像讀取一樣導向；其餘要有效快照與綁定、work tree／index 是綁定的、自己的 branch 不是 symref；逐命令檢查；破壞性操作先快照
+8. 寫入 → config key 白名單（`-c`、env）；`fetch` 檢查目的地後像讀取一樣導向；其餘要有效快照與綁定、work tree／index 是綁定的（有 git dir 沒 work tree 時，cwd 就是 work tree，必須是綁定的 worktree）、自己的 branch 不是 symref；逐命令檢查；破壞性操作先快照
 9. 導向 = 真 git 加 `-C <worktree>`、拿掉呼叫者的 `-C`／`--git-dir`／`--work-tree`
 
 ## 模組

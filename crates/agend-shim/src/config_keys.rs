@@ -8,6 +8,12 @@
 //! and what a command name means (`alias.*`, `include.*`). Only identity,
 //! display and editor-style keys are allowed.
 //!
+//! Command-valued keys (`core.editor`, `core.pager`, `gpg.program`,
+//! `credential.helper`) stay allowed: git runs them with its exec-path (the
+//! real git) first on PATH, which only a deliberate bypass would exploit;
+//! out of scope per the gate 3 threat model (see the gate page's known
+//! limits). Read commands do not check this list at all.
+//!
 //! Must NOT: allow a key that changes ref destinations, the work tree, hooks
 //! or command names.
 
