@@ -145,6 +145,18 @@ impl Attention {
         }
     }
 
+    /// What "read" is recorded against: the key plus how many questions the
+    /// thread has, so a follow-up counts as new again.
+    pub fn read_key(&self) -> String {
+        let questions = self.data.ask.as_ref().map_or(0, |ask| {
+            ask.entries
+                .iter()
+                .filter(|e| matches!(e, AskEntry::Question { .. } | AskEntry::FollowUp { .. }))
+                .count()
+        });
+        format!("{}#{questions}", self.key())
+    }
+
     /// Whether the item still needs the operator. An ask needs you while a
     /// question waits for an answer; once answered (or resolved) it leaves
     /// "needs you" until the agent follows up. Protocol v1 has no event that

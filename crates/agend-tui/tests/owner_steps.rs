@@ -49,6 +49,8 @@ fn owner_steps_a2_to_a4_in_traditional_chinese() {
             .contains("Seed 42 hides the flake"),
         "{home}"
     );
+    // The follow-up is a new question: unread again.
+    assert!(line_with(&home, "Seed 42 hides").ends_with("新  archfix · T-45"));
     press(&mut app, &[Enter]);
     assert!(render(&mut app).contains("你（tui）：fixed seed 42"));
 

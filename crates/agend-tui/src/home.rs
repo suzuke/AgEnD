@@ -35,7 +35,7 @@ pub fn rows(ctx: &Ctx) -> Vec<Row> {
 /// `▌ ! question   [new]  team · T-id`, bold until viewed.
 pub fn needs_you_row(ctx: &Ctx, item: &Attention) -> Row {
     let key = item.key();
-    let unread = !ctx.read.contains(&key);
+    let unread = !ctx.read.contains(&item.read_key());
     let task = item.task_id().unwrap_or("—");
     let team = team_of(ctx.fleet, item).unwrap_or_else(|| ctx.tr(Text::NoTeam).to_owned());
     let new = if unread { ctx.tr(Text::New) } else { "" };

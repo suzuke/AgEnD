@@ -94,7 +94,7 @@
 
    操作：`F3`（假 agent dev-2 追問）→ `h`
 
-   應該看到：`需要你 · 3`，第一項變成 `Seed 42 hides the flake. Also run 20 times nightly?`；`Enter` 展開後看得到 `你（tui）：fixed seed 42` 這段歷史。
+   應該看到：`需要你 · 3`，第一項變成 `Seed 42 hides the flake. Also run 20 times nightly?`，右邊又有 `新`（追問是新的問題，算未讀）；`Enter` 展開後看得到 `你（tui）：fixed seed 42` 這段歷史。
 
    **這步在驗什麼**：D35 的請示是對話，已讀和已解決分開。壞了的話，只是看一眼就把事情「處理掉」，agent 會卡著等一個永遠不會來的回答。
 
@@ -186,6 +186,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 | T14 | 你親自驗收 A 段的步驟本身（上面 A1–A5，含 `F2`／`F3` 這兩個只在 `tui_fake` 範例有的 demo 鍵） | 你要求先寫定步驟再驗 | 改這一頁 | 待追認 |
 | T15 | 想改但依規則沒改的文件（列給你決定）：名詞表加「資料來源（data source，`source::Source`）」與「目錄（catalog，`source::Catalog`）」；AGENTS.md 的 crate 邊界表加一列「`agend-tui` 不依賴 SQLite、`agend-daemon`」；ROADMAP 與 docs/gates/README.md 的狀態欄 | 這次的規則不准改 ROADMAP、gates/README、GLOSSARY、AGENTS、DECISIONS | 另一個 docs PR | 待追認 |
 | T16 | 「需要你」展開後，在「來自 … · 任務 … · team …」下一行加「不處理的話：…」（DEMO-01 §4B 第 3 點）；`attention_required` 沒有這個欄位，所以放在 `Catalog.if_ignored`（以 task id 為鍵），demo catalog 給三句固定文字 | DEMO 規格要讓人一眼看懂不處理會怎樣；不在 TUI 自己推算 | 第 8 施工關加欄位後改讀協定；刪一個欄位與一行 | 待追認 |
+| T17 | 已讀記在「哪一題」上（`Attention::read_key` = 請示 id + 問題數）：agent 追問後這一項回到未讀（粗體、`新`） | 追問是新的問題，你還沒看過；只記請示 id 會讓追問靜靜回來，容易漏看 | 改 `read_key` 一處（只用請示 id 就回到舊行為） | 待追認 |
 | G1 | 缺口：沒有列出 team、task、agent 的請求，也沒有 task 的關卡清單與狀態、agent 的結構化狀態（working／idle／needs you／stuck／unknown）與 backend，也沒有「不處理的話會怎樣」（見 T16） → 現在由 `source::Catalog`（TUI 本地型別）在 connect 時給 | 畫面要分組、要畫 `■□` 進度條、要顯示 agent 狀態，只有 `task_changed`／`instance_changed` 的文字摘要不夠 | 第 8 施工關：加 list 請求（或快照事件），`Catalog` 改用 core 型別 | 待追認 |
 | G2 | 缺口：`attention_required` 沒有「解決後能放行多少工作」與「開始等待的時間」→ D36 排序時 unblocks 一律 0、用 event id 代替等待時間（最舊的在前） | 不在 TUI 自己推算 | 第 8 施工關：`AttentionRequiredData` 加兩個欄位（additive） | 待追認 |
 | G3 | 缺口：不是請示的「需要你」（agent 卡住、用量上限）沒有操作，也沒有「已處理」事件 → 畫面寫明「client protocol v1 還沒有處理這一項的操作」，而且一直留在清單 | 不發明 wire 訊息 | 第 8 施工關：加操作（重試、暫停…）與清除事件 | 待追認 |

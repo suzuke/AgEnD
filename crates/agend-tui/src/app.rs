@@ -102,8 +102,9 @@ pub struct App {
     pub lang: Language,
     stack: Vec<View>,
     pub connection: Connection,
-    /// Needs-you items the operator has viewed. Viewing only drops the bold;
-    /// it never resolves (protocol v1 has no read state: TUI-local).
+    /// Needs-you questions the operator has viewed (`Attention::read_key`):
+    /// a follow-up is new again. Viewing only drops the bold; it never
+    /// resolves (protocol v1 has no read state: TUI-local).
     pub read: BTreeSet<String>,
     pub finder: Option<Finder>,
     /// Free-text answer being typed: (ask id, text).
@@ -286,10 +287,13 @@ impl App {
             }
         }
         view.offset = view.offset.min(rows.len().saturating_sub(height));
-        if view.screen == Screen::NeedsYou
-            && let Some(Target::Item(key) | Target::Choice(key, _)) = view.selected.clone()
+        let on_needs_you = view.screen == Screen::NeedsYou;
+        let selected = view.selected.clone();
+        if on_needs_you
+            && let Some(Target::Item(key) | Target::Choice(key, _)) = &selected
+            && let Some(item) = self.fleet.attention(key)
         {
-            self.read.insert(key);
+            self.read.insert(item.read_key());
         }
     }
 
