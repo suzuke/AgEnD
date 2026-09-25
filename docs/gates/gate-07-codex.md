@@ -14,6 +14,7 @@
 - codex driver（app-server，JSON-RPC over WebSocket over unix socket）
 - 送達模型：id、`queued → sent → confirmed | failed`、單一冪等
 - 三級忙碌策略：queue、steer、interrupt
+- 附屬程序（codex app-server）：新增 holder 請求 `SpawnSidecar`，就緒判斷放 daemon 的 driver（從第 4 施工關移來，第 4 施工關 P8，使用者 2026-09-25 決定）
 
 ## 自動驗收（完成定義）
 
