@@ -14,10 +14,12 @@ pub enum ForgeCall {
     MergeIfHeadIs(MergeRequest),
 }
 
-/// A forge without git: branches are lists of generated commit ids (40 hex
-/// digits from a counter). `push` is the fixture for "someone committed".
-/// The base branch starts at [`FakeForge::BASE_ROOT`] and moves to each
-/// merge commit.
+/// A forge without git: commits are generated ids (40 hex digits from a
+/// counter) with parents, so ancestry can be read like `git merge-base
+/// --is-ancestor`. `push` is the fixture for "someone committed": a new
+/// branch starts from the current base. The base branch starts at
+/// [`FakeForge::BASE_ROOT`] and moves to each merge commit, whose parents
+/// are the base before the merge and the merged head.
 /// Beyond the contract: submitting a branch again returns the same change id
 /// with the current head, like updating an open pull request.
 #[derive(Debug)]
@@ -30,15 +32,37 @@ struct State {
     branches: BTreeMap<String, String>,
     changes: BTreeMap<String, SubmittedChange>,
     merges: Vec<(String, String)>,
+    base: String,
+    /// Parents of every commit except `BASE_ROOT`.
+    parents: BTreeMap<String, Vec<String>>,
     next_commit: u64,
     calls: Vec<ForgeCall>,
     failures: Failures,
 }
 
 impl State {
-    fn new_commit(&mut self) -> String {
+    fn new_commit(&mut self, parents: Vec<String>) -> String {
         self.next_commit += 1;
-        format!("{:040x}", self.next_commit)
+        let commit = format!("{:040x}", self.next_commit);
+        self.parents.insert(commit.clone(), parents);
+        commit
+    }
+
+    fn is_ancestor(&self, ancestor: &str, commit: &str) -> bool {
+        let mut todo = vec![commit];
+        while let Some(c) = todo.pop() {
+            if c == ancestor {
+                return true;
+            }
+            todo.extend(
+                self.parents
+                    .get(c)
+                    .into_iter()
+                    .flatten()
+                    .map(String::as_str),
+            );
+        }
+        false
     }
 }
 
@@ -52,6 +76,8 @@ impl FakeForge {
                 branches: BTreeMap::new(),
                 changes: BTreeMap::new(),
                 merges: Vec::new(),
+                base: Self::BASE_ROOT.to_owned(),
+                parents: BTreeMap::new(),
                 next_commit: 0,
                 calls: Vec::new(),
                 failures: Failures::new(OPERATIONS),
@@ -59,10 +85,12 @@ impl FakeForge {
         }
     }
 
-    /// Adds a new commit on `branch` (creating it) and returns the new head.
+    /// Adds a new commit on `branch` (creating it from the base) and returns
+    /// the new head.
     pub fn push(&self, branch: &str) -> String {
         let mut state = lock(&self.state);
-        let head = state.new_commit();
+        let parent = state.branches.get(branch).unwrap_or(&state.base).clone();
+        let head = state.new_commit(vec![parent]);
         state.branches.insert(branch.to_owned(), head.clone());
         head
     }
@@ -74,10 +102,24 @@ impl FakeForge {
 
     /// Head of the base branch: the last merge commit, or [`Self::BASE_ROOT`].
     pub fn base_head(&self) -> String {
-        lock(&self.state)
-            .merges
-            .last()
-            .map_or_else(|| Self::BASE_ROOT.to_owned(), |(_, commit)| commit.clone())
+        lock(&self.state).base.clone()
+    }
+
+    /// Whether `commit` is the base head or one of its ancestors.
+    pub fn base_contains(&self, commit: &str) -> bool {
+        let state = lock(&self.state);
+        state.is_ancestor(commit, &state.base)
+    }
+
+    /// Moves the base branch to `commit`, like a force push (scripting:
+    /// someone else moved the base). Panics if `commit` does not exist.
+    pub fn set_base(&self, commit: &str) {
+        let mut state = lock(&self.state);
+        assert!(
+            commit == Self::BASE_ROOT || state.parents.contains_key(commit),
+            "FakeForge::set_base: unknown commit {commit}"
+        );
+        state.base = commit.to_owned();
     }
 
     pub fn fail_next(&self, operation: &str, message: &str) {
@@ -116,7 +158,7 @@ impl Forge for FakeForge {
             .changes
             .entry(change.branch.clone())
             .or_insert_with(|| SubmittedChange {
-                id: format!("change-{number}"),
+                id: Some(format!("change-{number}")),
                 url: Some(format!("fake://forge/changes/{number}")),
                 head: head.clone(),
             });
@@ -153,7 +195,9 @@ impl Forge for FakeForge {
                 actual_head: current,
             });
         }
-        let merge_commit = state.new_commit();
+        let base = state.base.clone();
+        let merge_commit = state.new_commit(vec![base, current]);
+        state.base = merge_commit.clone();
         state
             .merges
             .push((request.branch.clone(), merge_commit.clone()));
@@ -182,5 +226,25 @@ mod tests {
         let second = block_on(forge.submit(&submission)).unwrap();
         assert_eq!((second.id, second.head), (first.id, second_head));
         assert_eq!(forge.calls().len(), 2);
+    }
+
+    #[test]
+    fn merges_keep_earlier_merges_and_set_base_can_drop_them() {
+        let forge = FakeForge::new();
+        let a = forge.push("a");
+        let b = forge.push("b");
+        for (branch, head) in [("a", &a), ("b", &b)] {
+            let request = MergeRequest {
+                branch: branch.into(),
+                expected_head: head.clone(),
+            };
+            block_on(forge.merge_if_head_is(&request)).unwrap();
+        }
+        assert!(forge.base_contains(&a) && forge.base_contains(&b));
+        assert!(forge.base_contains(FakeForge::BASE_ROOT));
+        let unmerged = forge.push("c");
+        assert!(!forge.base_contains(&unmerged));
+        forge.set_base(&b);
+        assert!(!forge.base_contains(&a));
     }
 }

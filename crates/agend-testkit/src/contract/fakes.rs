@@ -29,6 +29,10 @@ impl forge::ForgeFixture for FakeForge {
     fn base_head(&self) -> String {
         FakeForge::base_head(self)
     }
+
+    fn base_contains(&self, commit: &str) -> bool {
+        FakeForge::base_contains(self, commit)
+    }
 }
 
 impl store::StoreFixture for FakeStore {

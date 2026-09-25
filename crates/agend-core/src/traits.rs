@@ -70,7 +70,10 @@ pub struct Submission {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubmittedChange {
-    pub id: String,
+    /// The forge's change id (e.g. a pull request number); `None` when the
+    /// forge has none (forge local). Becomes `PipelineEvent::Submitted`'s
+    /// `change_id`.
+    pub id: Option<String>,
     pub url: Option<String>,
     pub head: String,
 }

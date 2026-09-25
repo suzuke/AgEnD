@@ -1,4 +1,303 @@
-//! Temporary git repos and binding snapshot fixtures for shim, forge and
-//! reconcile tests.
+//! Throwaway git repos for shim, forge and reconcile tests: a canonical repo
+//! with an initial commit on `main`, a bare "team origin" it pushes to, and
+//! linked worktrees and branches, all inside one fresh [`TempDir`].
 //!
-//! Must NOT: run git against a repository outside its own temp directory.
+//! Every command is hygienic: an absolute `current_dir` (never the process
+//! cwd), no global or system git config, a fixed author and committer (so
+//! commit ids are reproducible), `GIT_CEILING_DIRECTORIES` at the fixture
+//! root, and every inherited `GIT_*` / `AGEND_*` variable removed.
+//!
+//! Must NOT: run anything in a directory outside its own temp directory.
+//! [`GitFixture::command`] asserts that before building the command (a
+//! harness whose `cd` failed once ran destructive git in a real repo).
+
+use std::ffi::OsStr;
+use std::io;
+use std::path::{Component, Path, PathBuf};
+use std::process::Command;
+
+use crate::tempdir::TempDir;
+
+/// Branch the canonical repo and origin start on.
+pub const MAIN: &str = "main";
+
+const NULL_DEVICE: &str = if cfg!(windows) { "NUL" } else { "/dev/null" };
+
+/// Variables removed by name even when the sweep below would not see them
+/// (e.g. set later in the parent); the sweep removes every other inherited
+/// `GIT_*` / `AGEND_*` variable.
+const REMOVED: &[&str] = &[
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_COMMON_DIR",
+    "GIT_OBJECT_DIRECTORY",
+    "AGEND_HOME",
+];
+
+/// Layout under [`GitFixture::root`]: `canonical/` (the repo, `origin`
+/// remote set, `main` pushed), `origin.git/` (bare), `worktrees/<name>/`.
+/// Removed on drop.
+pub struct GitFixture {
+    _dir: TempDir,
+    root: PathBuf,
+}
+
+impl GitFixture {
+    /// Creates the canonical repo with one commit on [`MAIN`] and the bare
+    /// origin it is pushed to.
+    pub fn new(label: &str) -> io::Result<GitFixture> {
+        let dir = TempDir::new(&format!("git-{label}"))?;
+        // Canonical: absolute, symlinks resolved (macOS /var -> /private/var),
+        // so containment checks and git's own paths agree.
+        let root = std::fs::canonicalize(dir.path())?;
+        assert!(root.is_absolute(), "fixture root {root:?} is not absolute");
+        let fx = GitFixture { _dir: dir, root };
+        std::fs::create_dir(fx.canonical())?;
+        std::fs::create_dir(fx.origin())?;
+        fx.git(&fx.origin(), &["init", "-q", "--bare", "-b", MAIN]);
+        fx.git(&fx.canonical(), &["init", "-q", "-b", MAIN]);
+        fx.commit(&fx.canonical(), "README", "initial commit");
+        let origin = fx.origin();
+        let origin = origin.to_str().expect("fixture path is UTF-8");
+        fx.git(&fx.canonical(), &["remote", "add", "origin", origin]);
+        fx.git(&fx.canonical(), &["push", "-q", "-u", "origin", MAIN]);
+        Ok(fx)
+    }
+
+    /// The fixture's temp directory (absolute, canonical).
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// The canonical repo's work tree.
+    pub fn canonical(&self) -> PathBuf {
+        self.root.join("canonical")
+    }
+
+    /// The bare team origin.
+    pub fn origin(&self) -> PathBuf {
+        self.root.join("origin.git")
+    }
+
+    /// A hygienic command running `program` in `dir`. Panics unless `dir`
+    /// exists inside [`Self::root`].
+    pub fn command(&self, program: impl AsRef<OsStr>, dir: &Path) -> Command {
+        self.assert_inside(dir);
+        let mut cmd = Command::new(program);
+        cmd.current_dir(dir);
+        for (key, _) in std::env::vars_os() {
+            let k = key.to_string_lossy();
+            if k.starts_with("GIT_") || k.starts_with("AGEND_") {
+                cmd.env_remove(&key);
+            }
+        }
+        for key in REMOVED {
+            cmd.env_remove(key);
+        }
+        cmd.env("GIT_CONFIG_GLOBAL", NULL_DEVICE)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CEILING_DIRECTORIES", &self.root)
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("GIT_AUTHOR_NAME", "AgEnD Test")
+            .env("GIT_AUTHOR_EMAIL", "test@agend.invalid")
+            .env("GIT_AUTHOR_DATE", "2026-01-01T00:00:00Z")
+            .env("GIT_COMMITTER_NAME", "AgEnD Test")
+            .env("GIT_COMMITTER_EMAIL", "test@agend.invalid")
+            .env("GIT_COMMITTER_DATE", "2026-01-01T00:00:00Z");
+        cmd
+    }
+
+    /// Runs git in `dir` and returns its trimmed stdout. Panics (with
+    /// stderr) if git fails.
+    pub fn git(&self, dir: &Path, args: &[&str]) -> String {
+        let output = self
+            .command("git", dir)
+            .args(args)
+            .output()
+            .unwrap_or_else(|e| panic!("git {args:?} in {dir:?}: {e}"));
+        assert!(
+            output.status.success(),
+            "git {args:?} in {dir:?} failed ({}): {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_owned()
+    }
+
+    /// Writes `message` to `file` (a plain relative path) in the work tree
+    /// `dir`, commits it and returns the new head. Commit ids depend only on
+    /// content, parent and message (dates are fixed), so give different
+    /// commits different messages.
+    pub fn commit(&self, dir: &Path, file: &str, message: &str) -> String {
+        self.assert_inside(dir);
+        assert!(
+            Path::new(file)
+                .components()
+                .all(|c| matches!(c, Component::Normal(_))),
+            "commit file {file:?} must be a plain relative path"
+        );
+        std::fs::write(dir.join(file), message).expect("write commit file");
+        self.git(dir, &["add", "--", file]);
+        self.git(dir, &["commit", "-q", "-m", message]);
+        self.rev_parse(dir, "HEAD")
+    }
+
+    /// Creates branch `name` at `from` in the canonical repo.
+    pub fn branch(&self, name: &str, from: &str) {
+        self.git(&self.canonical(), &["branch", name, from]);
+    }
+
+    /// Adds a linked worktree `worktrees/<name>` of the canonical repo on a
+    /// new branch `branch` starting at `from`, and returns its path.
+    pub fn add_worktree(&self, name: &str, branch: &str, from: &str) -> PathBuf {
+        let parent = self.root.join("worktrees");
+        std::fs::create_dir_all(&parent).expect("create worktrees dir");
+        let path = parent.join(name);
+        assert!(
+            path.parent() == Some(parent.as_path()),
+            "worktree name {name:?} must be one path component"
+        );
+        let target = path.to_str().expect("fixture path is UTF-8");
+        self.git(
+            &self.canonical(),
+            &["worktree", "add", "-q", "-b", branch, target, from],
+        );
+        path
+    }
+
+    /// Full commit id of `rev` in the repo at `dir`.
+    pub fn rev_parse(&self, dir: &Path, rev: &str) -> String {
+        self.git(
+            dir,
+            &["rev-parse", "--verify", &format!("{rev}^{{commit}}")],
+        )
+    }
+
+    /// Whether `ancestor` is `commit` or one of its ancestors, in the
+    /// canonical repo (`git merge-base --is-ancestor`).
+    pub fn is_ancestor(&self, ancestor: &str, commit: &str) -> bool {
+        let status = self
+            .command("git", &self.canonical())
+            .args(["merge-base", "--is-ancestor", ancestor, commit])
+            .status()
+            .expect("run git merge-base");
+        match status.code() {
+            Some(0) => true,
+            Some(1) => false,
+            _ => panic!("git merge-base --is-ancestor {ancestor} {commit}: {status}"),
+        }
+    }
+
+    fn assert_inside(&self, dir: &Path) {
+        let resolved = std::fs::canonicalize(dir)
+            .unwrap_or_else(|e| panic!("git fixture: cannot resolve {dir:?}: {e}"));
+        assert!(
+            dir.is_absolute() && resolved.starts_with(&self.root),
+            "git fixture: refusing to operate on {dir:?} (resolves to {resolved:?}), outside {:?}",
+            self.root
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builds_canonical_origin_worktrees_and_branches() {
+        let fx = GitFixture::new("unit").unwrap();
+        let canonical = fx.canonical();
+        let initial = fx.rev_parse(&canonical, MAIN);
+        assert_eq!(fx.rev_parse(&fx.origin(), MAIN), initial);
+        assert_eq!(
+            fx.git(&canonical, &["log", "-1", "--format=%an <%ae> %s"]),
+            "AgEnD Test <test@agend.invalid> initial commit"
+        );
+
+        let wt = fx.add_worktree("dev-1", "agend/T-1/fix", MAIN);
+        assert!(wt.starts_with(fx.root()) && wt.join("README").is_file());
+        assert_eq!(fx.git(&wt, &["branch", "--show-current"]), "agend/T-1/fix");
+        let head = fx.commit(&wt, "fix.txt", "fix");
+        assert_eq!(fx.rev_parse(&canonical, "agend/T-1/fix"), head);
+        assert_eq!(fx.rev_parse(&canonical, MAIN), initial, "main moved");
+        assert!(fx.is_ancestor(&initial, &head) && !fx.is_ancestor(&head, &initial));
+
+        fx.branch("other", MAIN);
+        assert_eq!(fx.rev_parse(&canonical, "other"), initial);
+
+        let root = fx.root().to_path_buf();
+        drop(fx);
+        assert!(!root.exists());
+    }
+
+    #[test]
+    fn refuses_directories_outside_its_temp_dir() {
+        let fx = GitFixture::new("unit").unwrap();
+        let outside = [
+            PathBuf::from("/"),
+            std::env::temp_dir(),
+            fx.root().join(".."),
+            fx.canonical().join("..").join(".."),
+            PathBuf::from("canonical"),
+        ];
+        for dir in outside {
+            let result = std::panic::catch_unwind(|| fx.command("git", &dir));
+            assert!(result.is_err(), "command in {dir:?} was allowed");
+        }
+        let result = std::panic::catch_unwind(|| fx.commit(&fx.canonical(), "../x", "escape"));
+        assert!(result.is_err(), "commit to ../x was allowed");
+        assert!(!fx.root().join("x").exists());
+    }
+
+    #[test]
+    fn commands_do_not_inherit_git_or_agend_environment() {
+        let fx = GitFixture::new("unit").unwrap();
+        let cmd = fx.command("git", &fx.canonical());
+        let envs: Vec<(String, Option<String>)> = cmd
+            .get_envs()
+            .map(|(k, v)| {
+                let v = v.map(|v| v.to_string_lossy().into_owned());
+                (k.to_string_lossy().into_owned(), v)
+            })
+            .collect();
+        let get = |key: &str| envs.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone());
+        for key in REMOVED {
+            assert_eq!(get(key), Some(None), "{key} is not removed");
+        }
+        for (key, _) in std::env::vars() {
+            if key.starts_with("GIT_") || key.starts_with("AGEND_") {
+                assert!(
+                    get(&key).is_some(),
+                    "inherited {key} is neither set nor removed"
+                );
+            }
+        }
+        assert_eq!(get("GIT_CONFIG_NOSYSTEM"), Some(Some("1".into())));
+        assert_eq!(get("GIT_CONFIG_GLOBAL"), Some(Some(NULL_DEVICE.into())));
+        assert_eq!(cmd.get_current_dir(), Some(fx.canonical().as_path()));
+    }
+
+    /// The observation behind Forge rule FRG-10 on real git: a proper merge
+    /// keeps an earlier merge, moving the base to a branch head drops it.
+    #[test]
+    fn overwriting_the_base_drops_an_earlier_merge() {
+        let fx = GitFixture::new("unit").unwrap();
+        let canonical = fx.canonical();
+        let a_dir = fx.add_worktree("a", "a", MAIN);
+        let b_dir = fx.add_worktree("b", "b", MAIN);
+        let a = fx.commit(&a_dir, "a.txt", "change a");
+        let b = fx.commit(&b_dir, "b.txt", "change b");
+        fx.git(
+            &canonical,
+            &["merge", "-q", "--no-ff", "--no-edit", "-m", "merge a", "a"],
+        );
+        fx.git(
+            &canonical,
+            &["merge", "-q", "--no-ff", "--no-edit", "-m", "merge b", "b"],
+        );
+        assert!(fx.is_ancestor(&a, MAIN) && fx.is_ancestor(&b, MAIN));
+        fx.git(&canonical, &["update-ref", "refs/heads/main", &b]);
+        assert!(!fx.is_ancestor(&a, MAIN));
+    }
+}

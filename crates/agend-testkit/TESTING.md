@@ -1,7 +1,7 @@
 # agend-testkit 測試
 
 > **TL;DR**
-> - 測假實作本身、7 個契約 suite（對假實作全過；[CONTRACTS.md](CONTRACTS.md) 的 56 條規則各有 mutant，每個 mutant 都被它那條規則的 case 抓到）、假 daemon、3 個假 agent 程式（以真的子程序跑）。
+> - 測假實作本身、7 個契約 suite（對假實作全過；[CONTRACTS.md](CONTRACTS.md) 的 57 條規則各有 mutant，每個 mutant 都被它那條規則的 case 抓到）、假 daemon、3 個假 agent 程式（以真的子程序跑）。
 > - 記住：假 agent 的測試啟動 `src/bin/` 的真 binary，走真的 socket／HTTP；不在行程內呼叫。
 > - 下一步：`~/.cargo/bin/cargo test -p agend-testkit`。
 
@@ -16,12 +16,13 @@
 
 | 測試 | 證明什麼 |
 |---|---|
-| `fakes::*::tests` | 每個假實作的編排：失敗排隊、回應順序、逾時、crash／adopt、重複 submit、自動 turn 可關；`FakeRuntime::on`／`FakeDriver::connect`／`FakeStore::open` 在舊物件 drop 之後仍拿到同一個 holder 表、backend、資料，但 `calls()` 各自從空開始；同一個訊息 id 只一個 turn |
+| `fakes::*::tests` | 每個假實作的編排：失敗排隊、回應順序、逾時、crash／adopt、重複 submit、`FakeForge` 的 ancestry（`base_contains`、`set_base`）、自動 turn 可關；`FakeRuntime::on`／`FakeDriver::connect`／`FakeStore::open` 在舊物件 drop 之後仍拿到同一個 holder 表、backend、資料，但 `calls()` 各自從空開始；同一個訊息 id 只一個 turn |
 | `contract::tests` | 報表格式：每條失敗都寫出 `<trait>.<case>` 與原因；case panic 也算失敗 |
 | `executor::tests` | `block_on` 會在 wake 後再 poll |
+| `git_fixture::tests` | 真的 git：canonical、origin、worktree、branch 建得出來，worktree 上的 commit 不動 `main`，drop 後目錄刪掉；`command` 拒絕暫存目錄外的目錄（`/`、`<tmp>`、`root/..`、相對路徑）與 `../x` 檔名；繼承的 `GIT_*`／`AGEND_*` 全部移除、全域與系統設定關掉；FRG-10 的觀察在真 git 上成立（正常 merge 保留之前的 merge，`update-ref` 把 main 設成 branch head 就丟掉） |
 | `tests/contract_fakes.rs` | 7 個契約 suite 對假實作全部通過；`run_all_fakes` 每個 trait 剛好一次 |
-| `tests/contract_teeth/`（`main.rs`） | 覆蓋測試：讀 CONTRACTS.md 的規則表，每條規則至少一個 case、至少一個 mutant；表上列的 mutant 名與註冊的完全一致；case 與 mutant 都不能指向表上沒有的編號；每個前綴 1..n 連號。mutant 測試：80 個 mutant 平行各跑整個 suite，每個都要讓至少一個標著它那條規則的 case 失敗（`--nocapture` 印出每個 mutant 被哪些規則抓到） |
-| `tests/contract_teeth/<trait>.rs` | 各 trait 的 mutant：包住假實作、換掉一個方法（例如 backfill 掉第一個事件、CAS 接受未來版本、prefix 比對 head、stop 只是藏起來、body 截在 64 bytes、時鐘凍結或差 8 小時）。daemon 重啟類：`DaemonScoped`（verifier r3：drop 時殺掉自己啟動的 holder、只 recover 自己的）、`OnlyOwnLifetimeEvents`、`InMemoryOnly`；verifier r4 的四個（狀態只在 Rust 物件裡，撐過一次重啟、撐不過第二次）：`Handoff`（recover 消耗 holder 登記）、`CounterStore`（版本計數器沒存）、`ObjDedup`（去重在 driver 物件裡）、`Gap`（丟掉 daemon 不在時的事件）；verifier r5 的七個：閒置開機才看得出來的 `RewriteOnChange`（打開時清空 holder 登記）、`TruncOnOpen`（打開時清空 DB 檔），`LastIdDedup`（只記最後一個 id）、`ReadAck`（重啟後從較舊的 cursor 補不回），case 自己的 fixture 一直活著才通過的 `SharedMem`（記憶體 DB）、`LiveJournal`（只保留有 driver 活著時的事件）、`LastOneOut`（最後一個 runtime 走時 holder 跟著死）；第 6 輪加的 `FrozenRegistry`、`FrozenDatabase`（重啟後的 daemon 寫的沒存下來，只有開機 4 看得出來）。`forge_without_change_ids_passes`：回空 change id 的 forge（local 的行為）通過整個 Forge suite |
+| `tests/contract_teeth/`（`main.rs`） | 覆蓋測試：讀 CONTRACTS.md 的規則表，每條規則至少一個 case、至少一個 mutant；表上列的 mutant 名與註冊的完全一致；case 與 mutant 都不能指向表上沒有的編號；每個前綴 1..n 連號。mutant 測試：82 個 mutant 平行各跑整個 suite，每個都要讓至少一個標著它那條規則的 case 失敗（`--nocapture` 印出每個 mutant 被哪些規則抓到） |
+| `tests/contract_teeth/<trait>.rs` | 各 trait 的 mutant：包住假實作、換掉一個方法（例如 backfill 掉第一個事件、CAS 接受未來版本、prefix 比對 head、stop 只是藏起來、body 截在 64 bytes、時鐘凍結或差 8 小時）。daemon 重啟類：`DaemonScoped`（verifier r3：drop 時殺掉自己啟動的 holder、只 recover 自己的）、`OnlyOwnLifetimeEvents`、`InMemoryOnly`；verifier r4 的四個（狀態只在 Rust 物件裡，撐過一次重啟、撐不過第二次）：`Handoff`（recover 消耗 holder 登記）、`CounterStore`（版本計數器沒存）、`ObjDedup`（去重在 driver 物件裡）、`Gap`（丟掉 daemon 不在時的事件）；verifier r5 的七個：閒置開機才看得出來的 `RewriteOnChange`（打開時清空 holder 登記）、`TruncOnOpen`（打開時清空 DB 檔），`LastIdDedup`（只記最後一個 id）、`ReadAck`（重啟後從較舊的 cursor 補不回），case 自己的 fixture 一直活著才通過的 `SharedMem`（記憶體 DB）、`LiveJournal`（只保留有 driver 活著時的事件）、`LastOneOut`（最後一個 runtime 走時 holder 跟著死）；第 6 輪加的 `FrozenRegistry`、`FrozenDatabase`（重啟後的 daemon 寫的沒存下來，只有開機 4 看得出來）。`forge_without_change_ids_passes`：change id 一律回 `None` 的 forge（local 的行為）通過整個 Forge suite。`OverwritesBase`（FRG-10，gate 2 A23）：merge 時把 base 直接設成 branch 的 head，丟掉 branch 開出之後才 merge 的變更 |
 | `tests/contract_teeth/real_runner.rs` | 一個真的 `sh -c` runner（子程序放進自己的新 process group，逾時只對那個 group 送 SIGKILL）：全部旋鈕正確時通過整個 Runner 契約；只殺 `sh`、結束後才讀管線、在別的目錄跑，是 RUN-8、RUN-4、RUN-9 的 mutant |
 | `tests/fake_knobs.rs` | 每個假實作（Forge、Driver、Store、Runtime、Runner、Notifier）的每個方法：`fail_next` 只讓下一次失敗、`calls()` 依序記下每次呼叫（含失敗的）；`FakeForge::merges`／`base_head` 只記成功的 merge |
 | `tests/fake_daemon.rs` | hello 必須在前（無效 JSON 也回 `hello_required` 並關閉）、hello 之後的無效 JSON 不斷線、drop 時已開的連線讀到 EOF（2 秒內）、major 不合的錯誤訊息、狀態與未知請求、事件身分（沒帶、舊 attempt、別的關卡、重播都 `stale_result`）、backlog 再即時事件、請示回答 |
@@ -48,7 +49,7 @@
 
 - [ ] 契約 suite 對真實作（各施工關接上：Store 第 5、agent runtime 第 6、Driver 第 7／12、Runner 與 Forge local 第 10、Notifier 與 Forge github 第 12）
 - [ ] 假 agent 的欄位對真 backend schema 逐一比對（第 7、12 施工關）
-- [ ] git fixture（第 3 施工關需要時）
+- [ ] binding 快照 fixture（第 3 施工關需要時）
 
 ## 下一步
 
