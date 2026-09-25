@@ -305,6 +305,7 @@ owner 睡著時由實作者決定、可以反悔的事（頁面沒寫到的設�
 | S14 | demo 是 `crates/agend-daemon/examples/store_demo.rs`，與 `tests/store_process.rs` 共用 `tests/common/store_process.rs`（`#[path]`），子程序都是重新執行自己；demo 目錄在 `$TMPDIR`，`AGEND_STORE_DEMO_KEEP=1` 保留並印 `export SNAP=…` | 不為測試多一個 production 子命令（P7）；同一份子程序邏輯，demo 印的就是測試驗的 | 改成 `agend` 的隱藏子命令：要動 `agend` crate | 待追認 |
 | S15 | 7 份輪替依檔名排序（＝日期）；同一天 `-pre-vN` 排在每日快照前（`-` < `.`），先被刪 | 檔名就是日期，不看 mtime（複製、還原會改 mtime）；同一天的每日快照是升級後做的，比較新 | 改看 mtime 或把 pre 快照另算：`snapshot::rotate` | 待追認 |
 | S16 | `agend-daemon` 另加 `serde_json`（`depends_on` 的 JSON 文字）、`toml`（workflow，與 xtask 同版本 1.1.6）；dev 依賴 `sha2`（too-new 測試與 demo 的 sha256） | 頁面只列 rusqlite 與 tokio；這三個是 P3、P5 描述的格式與檢查所需，且 workspace 已在用 | 換掉：手寫 JSON 陣列／比對整個檔案位元組 | 待追認 |
+| S18 | home 的上層目錄不存在時一併建立（`DirBuilder::recursive`，新建的每一層都是 0700），已存在的目錄權限不改 | 比「回報缺哪個路徑」簡單，第 6 施工關不必先建上層；新建的上層也是 0700 比照 home | 改成回錯：`create_private_dir` 拿掉 `recursive` | 待追認 |
 
 ## 驗收紀錄
 

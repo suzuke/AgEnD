@@ -8,9 +8,9 @@
 //!   After that thread panics every call returns [`StoreError::Stopped`]
 //!   (`store thread stopped`); nothing retries, the service manager restarts
 //!   the daemon.
-//! - The database is `<home>/agend.db` (created 0600; home and `backups/`
-//!   created 0700). The caller passes the home; the store reads no
-//!   environment variable. `locking_mode=EXCLUSIVE` is taken when the store
+//! - The database is `<home>/agend.db` (created 0600; home, any missing
+//!   parent of it, and `backups/` created 0700). The caller passes the home;
+//!   the store reads no environment variable. `locking_mode=EXCLUSIVE` is taken when the store
 //!   opens, so a second process fails with [`StoreError::InUse`].
 //! - Forward-only migrations ([`migrate`]) tracked in `PRAGMA user_version`;
 //!   a database newer than this binary is refused without a single byte
@@ -405,14 +405,10 @@ fn open_connection(
     Ok(conn)
 }
 
-/// Creates `dir` with mode 0700 unless it exists (an existing directory is
-/// left as it is).
+/// Creates `dir` and its missing parents with mode 0700; directories that
+/// already exist are left as they are.
 fn create_private_dir(dir: &Path) -> Result<(), StoreError> {
-    match DirBuilder::new().mode(0o700).create(dir) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == io::ErrorKind::AlreadyExists && dir.is_dir() => Ok(()),
-        Err(e) => Err(e.into()),
-    }
+    Ok(DirBuilder::new().recursive(true).mode(0o700).create(dir)?)
 }
 
 #[cfg(test)]

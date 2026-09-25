@@ -322,6 +322,22 @@ fn every_task_field_is_its_own_column_with_readable_values() {
     );
 }
 
+/// The home may be several directories deep in a directory that does not
+/// exist yet: the missing ones are created 0700, the existing parent keeps
+/// its mode.
+#[test]
+fn missing_parents_of_the_home_are_created_private() {
+    let dir = TempDir::new("store-parents").unwrap();
+    fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o755)).unwrap();
+    let home = dir.path().join("a").join("b").join("home");
+    drop(SqliteStore::open(&home, NOW).unwrap());
+    assert_eq!(mode(dir.path()), 0o755, "existing parent unchanged");
+    for created in [dir.path().join("a"), dir.path().join("a/b"), home.clone()] {
+        assert_eq!(mode(&created), 0o700, "{}", created.display());
+    }
+    assert_eq!(mode(&home.join(DB_FILE)), 0o600);
+}
+
 // ---- P5: schema and migrations ----
 
 #[test]

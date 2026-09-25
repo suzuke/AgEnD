@@ -42,7 +42,7 @@
 
 | 項目 | 內容 |
 |---|---|
-| 檔案 | `$AGEND_HOME/agend.db`（建立時 0600；home、`backups/` 建立時 0700）；home 由呼叫端傳入 |
+| 檔案 | `$AGEND_HOME/agend.db`（建立時 0600；home、home 不存在的上層目錄、`backups/` 建立時 0700，已存在的目錄不改）；home 由呼叫端傳入 |
 | 執行緒 | 一條 `agend-db` 執行緒持有唯一連線；async 方法經 channel（256）送 closure；該執行緒 panic 後每個呼叫回 `store thread stopped` |
 | 同時開 | `locking_mode=EXCLUSIVE`，第二個程序：`agend.db is in use by another process (is another agend daemon running?)` |
 | 表 | `tasks`、`workflows`、`task_events`（STRICT）；schema 版本在 `PRAGMA user_version`，migration 在 `src/store/migrations/` |
