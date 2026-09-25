@@ -112,37 +112,42 @@ fn screens() -> Check {
     for lang in [Language::En, Language::ZhTw] {
         let (_daemon, mut app, _) = start(lang)?;
         let tag = lang.as_str();
-        let views: [(&str, &[KeyCode], &str); 4] = [
-            ("home", &[], "archfix"),
+        use KeyCode::{Char, Down, Left, Right};
+        // (name, keys from the previous view, breadcrumb, a line it must show)
+        let views: [(&str, &[KeyCode], &str, &str); 4] = [
+            ("home", &[], "AgEnD", "┏ archfix"),
             (
                 "team archfix",
-                &[KeyCode::Down, KeyCode::Down, KeyCode::Down, KeyCode::Right],
+                &[Down, Down, Down, Right],
+                "AgEnD › archfix",
                 "[1 ",
             ),
             (
                 "task T-45",
-                &[KeyCode::Down, KeyCode::Right],
-                "repo agend-terminal",
+                &[Right],
+                "AgEnD › archfix › T-45",
+                "repo agend-terminal · T-45",
             ),
             (
                 "agent dev-2",
-                &[
-                    KeyCode::Left,
-                    KeyCode::Char('2'),
-                    KeyCode::Down,
-                    KeyCode::Right,
-                ],
-                "backend codex",
+                &[Left, Char('2'), Down, Right],
+                "AgEnD › archfix › dev-2",
+                "team archfix · backend codex",
             ),
         ];
-        for (name, path, expect) in views {
+        for (name, path, crumb, expect) in views {
             keys(&mut app, path);
             let text = render_to_string(&mut app, WIDTH, HEIGHT);
             println!("-- {name} ({tag})");
             show(&text);
+            let first = text.lines().next();
+            check(
+                first == Some(crumb),
+                &format!("{name} ({tag}): breadcrumb is {crumb:?}"),
+            )?;
             check(
                 text.contains(expect),
-                &format!("{name} ({tag}) shows {expect:?}"),
+                &format!("{name} ({tag}): shows {expect:?}"),
             )?;
         }
     }

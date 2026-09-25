@@ -46,6 +46,7 @@
    應該看到（第一次要編譯約 1 分鐘）：
 
    ```text
+   == gate 11 (tui) == docs/gates/gate-11-tui.md
    == screens (fake daemon over its socket, 100x30)
    == navigate (scripted keys; each line: keys -> breadcrumb | selected row or first line)
    == resolve (read is not resolved; answering removes the item)
