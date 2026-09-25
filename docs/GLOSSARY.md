@@ -74,8 +74,6 @@
 |---|---|---|---|---|---|
 | daemon | daemon | crate `agend-daemon` | 常駐的唯一大型 I/O 層：protocol server、流水線、送達、監督、排程、對帳、DB。 | holder（agent 由 holder 持有，所以 daemon 可隨時重啟） | [ARCHITECTURE](ARCHITECTURE.md#程序模型)、D2 |
 | holder | holder | crate `agend-holder`、`protocol::holder` | 每個 instance 一個的程序，持有 PTY、畫面與附屬程序；daemon 重啟時 agent 不斷線。 | **task 持有者**；agent runtime（管 holder 的 adapter） | D3、D11 |
-| `run/holders` | holder run directory | `paths::HolderPaths` | `$AGEND_HOME/run/holders/`（0700）：每個 holder 三個檔 `<id>.sock`（協定 socket）、`<id>.lock`（holder 鎖）、`<id>.log`（holder 的 stdout／stderr）。socket 路徑超過 100 bytes 就拒絕啟動。 | `run/<pid>/`（v1 daemon 的生命週期檔） | [第 4 施工關 P3](gates/gate-04-holder.md#p3run-目錄不重複判斷存活) |
-| holder 鎖 | holder lock | `paths::is_running`、`paths::lock_holder` | holder 活著期間持有的 `<id>.lock` 排他 `flock`，內容是 holder pid。「holder 在跑」只看這把鎖（不連 socket，連了會搶走 daemon 的連線）；程序死掉 kernel 自動放鎖，所以沒有 pid 重用誤判。第二個 holder 拿不到鎖就 exit 1。 | pid 檔（只寫 pid、不上鎖）；git 的 `index.lock` | [第 4 施工關 P3](gates/gate-04-holder.md#p3run-目錄不重複判斷存活) |
 | agent runtime | agent runtime | `traits::Runtime`、daemon `runtime` 模組 | daemon 啟動、停止、重新接回 holder 的 adapter（薄 `Runtime` 介面，即 holder 層）。 | **tokio runtime**（daemon 的 async runtime）：文中一律寫「agent runtime」或「tokio runtime」，不單寫 runtime | D3、[ARCHITECTURE](ARCHITECTURE.md#daemon-分層) |
 | driver | driver | `traits::Driver`、`driver/{codex,claude,opencode}` | daemon 對一個 backend 的 adapter：送訊息、收狀態事件、重連。 | backend（產品本身） | D11、D16 |
 | forge | forge | `traits::Forge`、`forge/{local,github}` | 提交與 merge 的 adapter：local（merge-tree + CAS `update-ref`）或 github（API）。 | GitHub CI（用 `command` 關卡接，第 1 施工關 P4） | D4、[pipeline](architecture/pipeline.md#merge-與-main-前進) |

@@ -155,7 +155,7 @@
 - [x] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨
 - [x] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`（出現 `SKIPPED` 不算通過），並包含新的 `agend-holder` 規則（`3 rules`）；在 `crates/agend-holder/Cargo.toml` 的 `[dependencies]` 加 `tokio` 會失敗：`check-deps: agend-holder depends on tokio (...)`、exit 1（2026-09-25 實測後還原）
 - [x] `~/.cargo/bin/cargo xtask accept holder` 通過，並印出下方「你親自驗收」用到的 demo
-- [x] 本施工關 crate 的 `README.md`／`TESTING.md` 已更新；skeleton 的 `Must NOT` 依 P6 改好；名詞表加上 `run/holders`、holder lock
+- [ ] 本施工關 crate 的 `README.md`／`TESTING.md` 已更新；skeleton 的 `Must NOT` 依 P6 改好；名詞表加上 `run/holders`、holder lock（前兩項已做；名詞表與 AGENTS 的 crate 規則列依夜間規則不在本 PR 改，文字交給 orchestrator）
 - [ ] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」（verifier 的 kill 探測只對自己起的 pid、在沙箱裡跑）
 
 ## 你親自驗收
@@ -317,6 +317,8 @@
   - [ ] 使用者追認
 - G8：跨程序測試的每次開機（與啟動器）是**同一個測試 binary 以 `HOLDER_PROBE_ROLE` 重新執行**（`probe_child`），因為 `agend` 的測試拿不到 example binary；demo 則是 `holder_probe` 重新執行自己。
   - [ ] 使用者追認
+- G10：holder 收到第二個 `Spawn`（例如 daemon 在 holder 啟動後、`Spawn` 前當掉，新 daemon 接上後重送）一律回 `Error{code: "already_spawned"}`，其他什麼都不做（不重啟、不換 agent）。第 6 施工關依賴這點。這條不在確認過的 P1–P9 裡（第 6 施工關設計稿追加）；測試 `a_second_spawn_is_refused_and_changes_nothing`，協定說明在 `HolderRequest::Spawn`。
+  - [ ] 使用者追認
 - G9：**延後**「錄下的 PTY 位元組餵給 holder 畫面再跑 `classify`」。repo 裡沒有真 backend 的原始 PTY 位元組（現有 fixture 是畫面文字摘錄），要做得在沙箱跑真的 codex／claude 錄製；手寫 ANSI 違反 #1493。建議併到第 6 或第 7 施工關第一次用 holder 接真 backend 時錄。
   - [ ] 使用者決定
 
@@ -332,7 +334,7 @@
 
 日期 + 一行 + commit／PR，新的在上面。
 
-- 2026-09-25 實作（draft PR，branch `feat/gate-04-holder`）：`agend holder` 子命令、協定 server、畫面、三種 PTY 寫入、`Exited.signal`、check-deps 規則、`holder_probe` demo、跨程序四次開機測試；狀態改為實作中；「待你追認」G1–G9。fresh-context verifier 尚未跑。
+- 2026-09-25 實作（draft PR，branch `feat/gate-04-holder`）：`agend holder` 子命令、協定 server、畫面、三種 PTY 寫入、`Exited.signal`、check-deps 規則、`holder_probe` demo、跨程序四次開機測試；狀態改為實作中；「待你追認」G1–G10。fresh-context verifier 尚未跑。
 - 2026-09-25 開工前提案 P1–P9 寫定，使用者逐題確認（P2 追加防孤兒四點、24 小時安全網）；附屬程序移到第 7 施工關；systemd `KillMode=process` 記入第 13 施工關；狀態改為提案中。
 
 ## 下一步
