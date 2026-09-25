@@ -293,6 +293,7 @@ owner 睡著時由實作者決定、可以反悔的事（頁面沒寫到的設�
 | S2 | 0700／0600 只在 store 建立 home、`agend.db`、`backups/` 時設定；已存在的目錄或檔案權限不改 | 頁面寫「建立時就是 0600」；改使用者自己建的目錄權限太侵入 | 改成每次開啟都 chmod：`open_connection` 加兩行＋一個測試 | 待追認 |
 | S3 | 測試要求 `fixtures/schema-v1.sql` 到 `schema-v{LATEST}.sql` 全部存在，包括目前最新版（頁面只說「新增 migration 的 PR 要附前一版」） | 目前只有 v1，沒有「舊版」可測；把最新版也凍結，才能在今天就抓到「有人改了 0001_init.sql」 | 改回只要求舊版：迴圈上限改成 `LATEST_VERSION - 1` | 待追認 |
 | S4 | 只有 `0 < 版本 < 最新` 才做升級前快照；全新空 DB（版本 0）直接建 schema | 空 DB 沒有資料可保護；否則每次全新安裝都在 `backups/` 留一份空快照 | 改成也做：條件改成 `found < supported` | 待追認 |
+| S5 | 開 DB 時 `busy_timeout(0)`：被鎖就立刻回 `InUse`，不等待 | 第二個 daemon 要立刻知道；頁面風險表寫的「最多重試 10 秒」屬第 6 施工關的重啟交接，那時在呼叫端重試 | 第 6 施工關在 `SqliteStore::open` 外面包重試迴圈，store 不必改 | 待追認 |
 
 ## 驗收紀錄
 
