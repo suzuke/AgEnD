@@ -2,7 +2,7 @@
 
 > **TL;DR**
 > - 唯一 binary：CLI、daemon、holder、TUI、shim 都在裡面。
-> - 記住：**argv[0] 分派在 `main` 第一行**；以 `git`／`kill`／`killall`／`pkill` 名稱執行時就是 shim。
+> - 記住：**argv[0] 分派在 `main` 第一行**；以 `git`／`kill`／`killall`／`pkill` 名稱執行時就是 shim，以 git hook 名稱（`reference-transaction`、`pre-push`…，由 `$AGEND_HOME/hooks/` 的 symlink）執行時就是 agend 的 git hook。
 > - 下一步：第 9 施工關實作 CLI 命令；目前只有 `--version`、`--help`。
 
 ## 負責
@@ -34,12 +34,13 @@
 ## 依賴規則
 
 - 一般依賴：所有 `agend-*` library crate（除 testkit）
-- dev 依賴：`agend-testkit`
+- dev 依賴：`agend-testkit`；`serde_json`（shim 測試寫 binding 快照）
 
 ## 入口
 
 - `agend --version`、`agend --help`
 - 以 `git` 名稱執行 → `agend_shim::run`
+- 以 git hook 名稱執行（git 從 `$AGEND_HOME/hooks/` 呼叫） → `agend_shim::run`（`Tool::Hook`）
 
 ## 下一步
 
