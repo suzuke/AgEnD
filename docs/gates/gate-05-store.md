@@ -327,6 +327,7 @@ owner 睡著時由實作者決定、可以反悔的事（頁面沒寫到的設�
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-26 verifier 第 2 輪 REFUTED（沒有 hard link 的檔案系統建不了新 home），修正：hard link 失敗改 rename（S20）；留下的 `.agend.db.new` 刪掉重建（S19，取代 S17 的「接著建」）；缺表的 DB 拒絕（S21）；比 SQLite 檔頭短、dangling symlink、非一般檔案的 `agend.db` 開檔前拒絕（S22）；空 DB 不做每日快照（S23）；README 註明刪掉 `agend.db` 等於從空 DB 開始。
 - 2026-09-26 verifier 第 1 輪 REFUTED（0 bytes 的 `agend.db` 被當新 DB 開），修正：0 bytes／版本 0 的 `agend.db` 拒絕開啟、新 DB 在 `.agend.db.new` 建好才 link（S17）；快照暫存檔的 `-journal`／`-wal`／`-shm` 一併清掉；home 的上層目錄一併建立（S18）；步驟 10 註明 merge 前在 gate05 worktree 跑。名詞表那項（DB 快照、schema 版本、`backups/`）仍未做，名詞表是共用文件，留給 owner。
 - 2026-09-26 P1–P9 實作（draft PR，branch `feat/gate-05-store`）：`SqliteStore`、3 張 STRICT 表、migration 0001 + golden + v1 fixture、`prune`、每日 DB 快照、`store_demo`、`accept store`、check-deps 規則 `agend-tui`；實作者自跑自動驗收（fmt、clippy、workspace 測試含短 TMPDIR、`--test store_process`、check-deps `no-std build ok`、`accept store`、`accept testkit`）。fresh-context verifier 尚未跑。
 - 2026-09-25 開工前提案 P1–P9 寫定，使用者逐題確認（P8 追加 audit 輪替）；狀態改為提案中。
