@@ -43,6 +43,7 @@
 | 項目 | 內容 |
 |---|---|
 | 檔案 | `$AGEND_HOME/agend.db`（建立時 0600；home、home 不存在的上層目錄、`backups/` 建立時 0700，已存在的目錄不改）；home 由呼叫端傳入 |
+| 建立 | 只有 `agend.db` 不存在時才建新 DB：先在 `.agend.db.new` 建好、所有 migration commit 後才 hard link 成 `agend.db`。`agend.db` 存在但是 0 bytes 或 schema 版本 0 → 拒絕開啟、檔案不動：`agend.db exists but is empty (0 bytes); refusing to start with an empty database — restore a snapshot from <home>/backups (see README)`，照下方步驟還原 |
 | 執行緒 | 一條 `agend-db` 執行緒持有唯一連線；async 方法經 channel（256）送 closure；該執行緒 panic 後每個呼叫回 `store thread stopped` |
 | 同時開 | `locking_mode=EXCLUSIVE`，第二個程序：`agend.db is in use by another process (is another agend daemon running?)` |
 | 表 | `tasks`、`workflows`、`task_events`（STRICT）；schema 版本在 `PRAGMA user_version`，migration 在 `src/store/migrations/` |

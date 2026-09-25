@@ -10,7 +10,14 @@
 //!   the daemon.
 //! - The database is `<home>/agend.db` (created 0600; home, any missing
 //!   parent of it, and `backups/` created 0700). The caller passes the home;
-//!   the store reads no environment variable. `locking_mode=EXCLUSIVE` is taken when the store
+//!   the store reads no environment variable.
+//! - A new database is built as `<home>/.agend.db.new` and hard-linked to
+//!   `agend.db` only after every migration has committed, so an existing
+//!   `agend.db` is always a database this store finished creating. One that
+//!   is empty (0 bytes) or has schema version 0 was damaged or replaced; the
+//!   store refuses it ([`StoreError::Empty`], [`StoreError::NoSchema`])
+//!   without changing a byte, instead of starting over with an empty
+//!   database whose daily snapshots would push the good ones out. `locking_mode=EXCLUSIVE` is taken when the store
 //!   opens, so a second process fails with [`StoreError::InUse`].
 //! - Forward-only migrations ([`migrate`]) tracked in `PRAGMA user_version`;
 //!   a database newer than this binary is refused without a single byte
@@ -33,7 +40,7 @@ pub mod snapshot;
 mod task_row;
 
 use std::fmt;
-use std::fs::{DirBuilder, OpenOptions};
+use std::fs::{self, DirBuilder, File, OpenOptions};
 use std::io;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
@@ -52,6 +59,8 @@ pub use snapshot::SnapshotReport;
 
 /// The database file inside the AgEnD home.
 pub const DB_FILE: &str = "agend.db";
+/// Where a new database is built before it is linked to [`DB_FILE`].
+const NEW_DB_FILE: &str = ".agend.db.new";
 /// The DB snapshot directory inside the AgEnD home.
 pub const BACKUPS_DIR: &str = "backups";
 /// Name of the thread that owns the connection.
@@ -69,6 +78,15 @@ pub enum StoreError {
     TooNew {
         found: i64,
         supported: i64,
+        home: PathBuf,
+    },
+    /// `agend.db` exists but is 0 bytes (truncated, or replaced).
+    Empty {
+        home: PathBuf,
+    },
+    /// `agend.db` exists but has schema version 0: it is not a database
+    /// this store created.
+    NoSchema {
         home: PathBuf,
     },
     /// The DB thread is gone (it panicked); the daemon must restart.
@@ -105,6 +123,18 @@ impl fmt::Display for StoreError {
                 f,
                 "{DB_FILE} schema version {found} is newer than this agend supports ({supported}); \
                  install a newer agend or restore a snapshot from {}",
+                home.join(BACKUPS_DIR).display()
+            ),
+            Self::Empty { home } => write!(
+                f,
+                "{DB_FILE} exists but is empty (0 bytes); refusing to start with an empty \
+                 database — restore a snapshot from {} (see README)",
+                home.join(BACKUPS_DIR).display()
+            ),
+            Self::NoSchema { home } => write!(
+                f,
+                "{DB_FILE} exists but has no agend schema (schema version 0); refusing to \
+                 start with it — restore a snapshot from {} (see README)",
                 home.join(BACKUPS_DIR).display()
             ),
             Self::Stopped => f.write_str("store thread stopped"),
@@ -144,8 +174,8 @@ pub struct SqliteStore {
 }
 
 impl SqliteStore {
-    /// Opens (creating if needed) `<home>/agend.db` and migrates it to
-    /// [`LATEST_VERSION`]. `now_unix_ms` (from the daemon's `Clock`) dates
+    /// Opens `<home>/agend.db`, creating it only when no such file exists,
+    /// and migrates it to [`LATEST_VERSION`]. `now_unix_ms` (from the daemon's `Clock`) dates
     /// the pre-upgrade DB snapshot.
     pub fn open(home: &Path, now_unix_ms: u64) -> Result<Self, StoreError> {
         Self::open_with(home, now_unix_ms, MIGRATIONS)
@@ -338,10 +368,10 @@ fn is_busy(e: &rusqlite::Error) -> bool {
     )
 }
 
-/// Everything before the DB thread starts: directories and file modes, the
-/// exclusive lock, the version check, the durability pragmas, the
-/// pre-upgrade snapshot and the migrations. Nothing is written before the
-/// version check passes.
+/// Everything before the DB thread starts: directories and file modes,
+/// creating a missing database, the exclusive lock, the version check, the
+/// durability pragmas, the pre-upgrade snapshot and the migrations. Nothing
+/// is written to an existing `agend.db` before the checks pass.
 fn open_connection(
     home: &Path,
     now_unix_ms: u64,
@@ -349,21 +379,84 @@ fn open_connection(
 ) -> Result<Connection, StoreError> {
     create_private_dir(home)?;
     let db = home.join(DB_FILE);
+    match fs::metadata(&db) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => create_database(home, &db, migrations)?,
+        Err(e) => return Err(e.into()),
+        Ok(meta) if meta.len() == 0 => {
+            return Err(StoreError::Empty {
+                home: home.to_path_buf(),
+            });
+        }
+        Ok(_) => {}
+    }
+    let mut conn = lock(&db)?;
+    let found = user_version(&conn)?;
+    let supported = migrate::version_of(migrations);
+    if found > supported {
+        return Err(StoreError::TooNew {
+            found,
+            supported,
+            home: home.to_path_buf(),
+        });
+    }
+    if found == 0 {
+        return Err(StoreError::NoSchema {
+            home: home.to_path_buf(),
+        });
+    }
+    // Holding the lock, so no other process is using it: the build file of
+    // a creation that crashed after linking.
+    remove_if_present(&home.join(NEW_DB_FILE))?;
+    remove_if_present(&home.join(format!("{NEW_DB_FILE}-journal")))?;
+    let journal: String = conn.query_row("PRAGMA journal_mode = WAL", [], |r| r.get(0))?;
+    if journal != "wal" {
+        return Err(StoreError::Invalid(format!("journal_mode is {journal}")));
+    }
+    conn.pragma_update(None, "synchronous", "FULL")?;
+    conn.pragma_update(None, "foreign_keys", "ON")?;
+    if found < supported {
+        snapshot::pre_upgrade(&conn, home, now_unix_ms, supported)?;
+    }
+    migrate::apply(&mut conn, found, migrations)?;
+    Ok(conn)
+}
+
+/// Builds a new database in [`NEW_DB_FILE`] (rollback journal, every
+/// migration committed) and hard-links it to `db`. A crash leaves at most
+/// the build file, which the next creation continues from; a hard link
+/// never replaces an `agend.db` another process linked first.
+fn create_database(home: &Path, db: &Path, migrations: &[Migration]) -> Result<(), StoreError> {
+    let new = home.join(NEW_DB_FILE);
     // SQLite would create the file with the umask's mode; create it 0600
     // first (an empty file is an empty database). SQLite gives the -wal
     // file the database file's mode.
-    match OpenOptions::new()
+    OpenOptions::new()
         .write(true)
-        .create_new(true)
+        .create(true)
+        .truncate(false)
         .mode(0o600)
-        .open(&db)
-    {
-        Ok(_) => {}
-        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
-        Err(e) => return Err(e.into()),
+        .open(&new)?;
+    let mut conn = lock(&new)?;
+    let found = user_version(&conn)?;
+    conn.pragma_update(None, "synchronous", "FULL")?;
+    conn.pragma_update(None, "foreign_keys", "ON")?;
+    migrate::apply(&mut conn, found, migrations)?;
+    conn.close().map_err(|(_, e)| e)?;
+    if let Err(e) = fs::hard_link(&new, db) {
+        // Another process finished the same creation first.
+        if !db.exists() {
+            return Err(e.into());
+        }
     }
-    let mut conn = Connection::open_with_flags(
-        &db,
+    File::open(home)?.sync_all()?;
+    Ok(())
+}
+
+/// Opens `path` read-write and takes the exclusive lock, held until the
+/// connection closes.
+fn lock(path: &Path) -> Result<Connection, StoreError> {
+    let conn = Connection::open_with_flags(
+        path,
         OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
     // Fail at once instead of waiting: a busy file means another daemon.
@@ -383,26 +476,18 @@ fn open_connection(
                 e.into()
             }
         })?;
-    let found: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    let supported = migrate::version_of(migrations);
-    if found > supported {
-        return Err(StoreError::TooNew {
-            found,
-            supported,
-            home: home.to_path_buf(),
-        });
-    }
-    let journal: String = conn.query_row("PRAGMA journal_mode = WAL", [], |r| r.get(0))?;
-    if journal != "wal" {
-        return Err(StoreError::Invalid(format!("journal_mode is {journal}")));
-    }
-    conn.pragma_update(None, "synchronous", "FULL")?;
-    conn.pragma_update(None, "foreign_keys", "ON")?;
-    if found > 0 && found < supported {
-        snapshot::pre_upgrade(&conn, home, now_unix_ms, supported)?;
-    }
-    migrate::apply(&mut conn, found, migrations)?;
     Ok(conn)
+}
+
+fn user_version(conn: &Connection) -> Result<i64, StoreError> {
+    Ok(conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)
+}
+
+fn remove_if_present(path: &Path) -> Result<(), StoreError> {
+    match fs::remove_file(path) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e.into()),
+        _ => Ok(()),
+    }
 }
 
 /// Creates `dir` and its missing parents with mode 0700; directories that

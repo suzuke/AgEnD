@@ -438,8 +438,9 @@ fn a_failing_migration_rolls_back_and_leaves_user_version_unchanged() {
     let dir = TempDir::new("store-broken").unwrap();
     let home = dir.path().join("home");
     let list = [MIGRATIONS[0], BROKEN];
+    drop(SqliteStore::open(&home, NOW).unwrap());
 
-    // From an empty database: 0001 commits, the broken one rolls back.
+    // From a v1 database: the broken one rolls back.
     let error = SqliteStore::open_with(&home, NOW, &list).err().unwrap();
     assert!(
         matches!(
@@ -464,6 +465,116 @@ fn a_failing_migration_rolls_back_and_leaves_user_version_unchanged() {
     assert_eq!(half, 0, "the failed migration's table was rolled back");
     // The database still opens with the real list.
     drop(SqliteStore::open(&home, NOW).unwrap());
+}
+
+/// A new database is built beside `agend.db` and only linked into place
+/// once every migration has committed: a failed creation leaves no
+/// `agend.db` (which the next boot would refuse), and the next open
+/// finishes the build.
+#[test]
+fn a_failed_creation_leaves_no_database_and_the_next_open_finishes_it() {
+    const BROKEN: Migration = Migration {
+        name: "9002_test_broken",
+        sql: "INSERT INTO no_such_table VALUES (1);",
+    };
+    let dir = TempDir::new("store-create-fail").unwrap();
+    let home = dir.path().join("home");
+    let error = SqliteStore::open_with(&home, NOW, &[MIGRATIONS[0], BROKEN])
+        .err()
+        .unwrap();
+    assert!(matches!(error, StoreError::Migration { .. }), "{error}");
+    assert!(!home.join(DB_FILE).exists(), "no half-made agend.db");
+    assert_eq!(user_version(&home.join(".agend.db.new")), 1);
+
+    let store = SqliteStore::open(&home, NOW).unwrap();
+    block_on(store.create_task(&task("T-1"))).unwrap();
+    drop(store);
+    assert_eq!(user_version(&home.join(DB_FILE)), LATEST_VERSION);
+    assert_eq!(mode(&home.join(DB_FILE)), 0o600);
+    assert_eq!(
+        listing(&home),
+        BTreeSet::from([DB_FILE.to_owned()]),
+        "the build file is gone; closing checkpointed the WAL"
+    );
+}
+
+/// A kill between creating the build file and SQLite's first write leaves
+/// a 0-byte `.agend.db.new`; unlike a 0-byte `agend.db` it is only a build
+/// file, and the next open builds the database in it.
+#[test]
+fn an_empty_build_file_from_a_killed_creation_is_finished() {
+    let dir = TempDir::new("store-create-killed").unwrap();
+    let home = dir.path().join("home");
+    fs::create_dir(&home).unwrap();
+    fs::write(home.join(".agend.db.new"), b"").unwrap();
+    let store = SqliteStore::open(&home, NOW).unwrap();
+    block_on(store.create_task(&task("T-1"))).unwrap();
+    assert!(!home.join(".agend.db.new").exists());
+}
+
+/// Verifier finding (gate 5 round 1): an `agend.db` truncated to 0 bytes,
+/// its WAL gone, used to open as a new, empty database, and every daily
+/// snapshot of it then pushed a good snapshot out. It must be refused, and
+/// the file left exactly as it is.
+#[test]
+fn a_zero_byte_database_is_refused_and_left_untouched() {
+    let dir = TempDir::new("store-zero-byte").unwrap();
+    let home = dir.path().join("home");
+    let store = SqliteStore::open(&home, NOW).unwrap();
+    for i in 0..400 {
+        block_on(store.create_task(&task(&format!("T-{i}")))).unwrap();
+    }
+    block_on(store.snapshot(NOW)).unwrap();
+    drop(store);
+    let db = home.join(DB_FILE);
+    let _ = fs::remove_file(home.join(format!("{DB_FILE}-wal")));
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&db)
+        .unwrap()
+        .set_len(0)
+        .unwrap();
+    let before = (listing(&home), listing(&home.join(BACKUPS_DIR)));
+
+    let error = SqliteStore::open(&home, NOW).err().unwrap();
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "agend.db exists but is empty (0 bytes); refusing to start with an empty database \
+             — restore a snapshot from {} (see README)",
+            home.join("backups").display()
+        )
+    );
+    assert_eq!(fs::metadata(&db).unwrap().len(), 0);
+    assert_eq!((listing(&home), listing(&home.join(BACKUPS_DIR))), before);
+}
+
+/// The other shape that looks new: a valid SQLite file with schema version
+/// 0. This store never links such a file to `agend.db`, so it is refused
+/// too, byte for byte unchanged.
+#[test]
+fn a_database_with_schema_version_zero_is_refused_and_left_untouched() {
+    let dir = TempDir::new("store-version-zero").unwrap();
+    let home = dir.path().join("home");
+    fs::create_dir(&home).unwrap();
+    let db = home.join(DB_FILE);
+    Connection::open(&db)
+        .unwrap()
+        .execute_batch("CREATE TABLE scratch (a); DROP TABLE scratch;")
+        .unwrap();
+    assert_eq!(user_version(&db), 0);
+    let before = (sha256(&db), listing(&home));
+
+    let error = SqliteStore::open(&home, NOW).err().unwrap();
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "agend.db exists but has no agend schema (schema version 0); refusing to start \
+             with it — restore a snapshot from {} (see README)",
+            home.join("backups").display()
+        )
+    );
+    assert_eq!((sha256(&db), listing(&home)), before);
 }
 
 #[test]
