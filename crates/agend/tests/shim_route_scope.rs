@@ -166,7 +166,7 @@ fn clean_of_ignored_files_is_refused() {
         let ran = gitshim(&l.f.ctx(&at), cmd);
         assert_eq!(
             ran.refused,
-            Some("clean_ignored"),
+            Some("clean_unsnapshotted"),
             "{cmd:?}: {}",
             ran.text()
         );

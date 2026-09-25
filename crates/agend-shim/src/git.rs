@@ -116,7 +116,9 @@ pub fn plan(ctx: &Ctx, args: &[OsString]) -> Outcome {
     if let (Some(op), Some(b)) = (snapshot_op, bound) {
         let instance = ctx.instance.as_deref().unwrap_or("unknown");
         let id = format!("{}-{}", audit::now(), std::process::id());
-        match snapshot::take(&real, b.worktree(), instance, &id) {
+        let nested = resolved.as_ref().filter(|_| location == Location::Nested);
+        let dir = nested.map_or(b.worktree(), Resolved::root);
+        match snapshot::take(&real, dir, instance, &id) {
             Ok(saved) => {
                 let shown = argv[parsed.sub_index..].join(" ");
                 messages.extend(saved.report(&shown));

@@ -141,6 +141,11 @@ fn resolved_at(loc: Location) -> Option<Resolved> {
             "/scratch/.git",
             Some("/scratch".into()),
         ),
+        Location::Nested => r(
+            "/repo/.git/worktrees/t-1/modules/mod".into(),
+            "/repo/.git/worktrees/t-1/modules/mod",
+            Some(bound_wt().join("mod")),
+        ),
         Location::NoRepo | Location::Unknown => None,
     }
 }
@@ -768,7 +773,7 @@ fn what_a_snapshot_cannot_undo_is_refused() {
         "clean -Xn",
         "clean -fdx -- src",
     ];
-    assert_codes(&s, "clean_ignored", &clean);
+    assert_codes(&s, "clean_unsnapshotted", &clean);
     let Decision::Refuse(r) = decide(&s, "clean -fdx") else {
         unreachable!()
     };
@@ -782,6 +787,155 @@ fn what_a_snapshot_cannot_undo_is_refused() {
     ] {
         assert_eq!(code(&decide(&s, cmd)), "run", "{cmd}");
     }
+}
+
+/// Round 9, finding 2: `clean -ff` also deletes nested repos (their `.git`
+/// and local commits), which a snapshot keeps only as a gitlink.
+#[test]
+fn clean_twice_forced_is_refused() {
+    let s = work();
+    let ff = [
+        "clean -ffd",
+        "clean -fdf",
+        "clean -ff",
+        "clean -f -f -d",
+        "clean --force --force -d",
+        "clean -f --forc -d",
+        "clean -dff -- src",
+    ];
+    assert_codes(&s, "clean_unsnapshotted", &ff);
+    let Decision::Refuse(r) = decide(&s, "clean -ffd") else {
+        unreachable!()
+    };
+    assert!(r.reason.contains("nested git repos"), "{}", r.reason);
+    assert!(r.next.contains("git clean -fd"), "{}", r.next);
+    for cmd in [
+        "clean -fd",
+        "clean -f -d",
+        "clean --force -d",
+        "clean -fd -eff",
+    ] {
+        assert_eq!(code(&decide(&s, cmd)), "run", "{cmd}");
+    }
+}
+
+/// Round 9, finding 1: a snapshot keeps a submodule only as a gitlink.
+/// Recursing into submodules is refused (case A), `submodule foreach` runs
+/// git's own git past the shim, and a submodule of the bound worktree gets
+/// its own snapshot (case B).
+#[test]
+fn submodule_work_is_snapshotted_or_refused() {
+    let dir = agend_testkit::tempdir::TempDir::new("classify-submodule").unwrap();
+    let wt = std::fs::canonicalize(dir.path()).unwrap();
+    let s = Snapshot {
+        binding: Some(Binding::Work {
+            task_id: "t-1".into(),
+            branch: work_branch("t-1", "fix"),
+            worktree: wt.clone(),
+        }),
+        ..work()
+    };
+    let here = Resolved {
+        git_dir: wt.join("fake-gitdir"),
+        common_dir: "/repo/.git".into(),
+        work_tree: Some(wt.clone()),
+        prefix: PathBuf::new(),
+    };
+    let at = |probe: &Fake, cmd: &str| {
+        let env = GitEnv::default();
+        code(&run_full(
+            Ok(&s),
+            Location::Worktree,
+            Some(&here),
+            &env,
+            probe,
+            cmd,
+        ))
+    };
+    let plain = Fake::default();
+    let recurse = Fake {
+        config: vec!["submodule.recurse"],
+        ..Fake::default()
+    };
+    // No `.gitmodules`: nothing to recurse into.
+    assert_eq!(at(&recurse, "reset --hard"), "run");
+    assert_eq!(at(&plain, "reset --hard --recurse-submodules"), "run");
+    std::fs::write(wt.join(".gitmodules"), "").unwrap();
+    for cmd in [
+        "reset --hard --recurse-submodules",
+        "reset --hard --recurse",
+        "checkout --recurse-submodules .",
+        "-c submodule.recurse=true reset --hard",
+        "-c Submodule.Recurse restore .",
+    ] {
+        assert_eq!(at(&plain, cmd), "submodule_recurse", "{cmd}");
+    }
+    for cmd in [
+        "reset --hard",
+        "reset --merge",
+        "checkout .",
+        "checkout -- README.md",
+        "restore .",
+        "switch -f agend/t-1/fix",
+    ] {
+        assert_eq!(at(&recurse, cmd), "submodule_recurse", "{cmd}");
+    }
+    for cmd in [
+        "reset --hard --no-recurse-submodules",
+        "checkout --no-recurse-submodules .",
+        "reset --soft HEAD~1",
+        "restore --staged .",
+        "rebase origin/main",
+        "merge origin/main",
+        "commit -m x",
+    ] {
+        assert_eq!(at(&recurse, cmd), "run", "{cmd}");
+    }
+    assert_eq!(at(&plain, "reset --hard"), "run");
+    let cmd = "reset --hard --recurse-submodules";
+    let env = GitEnv::default();
+    let Decision::Refuse(r) = run_full(Ok(&s), Location::Worktree, Some(&here), &env, &plain, cmd)
+    else {
+        unreachable!()
+    };
+    assert!(r.next.contains("--no-recurse-submodules"), "{}", r.next);
+
+    let foreach = [
+        "submodule foreach git reset --hard",
+        "submodule --quiet foreach 'git clean -fd'",
+    ];
+    assert_codes(&work(), "submodule_foreach", &foreach);
+    assert_codes(&work(), "run", &["submodule status", "submodule"]);
+    assert_eq!(code(&decide(&work(), "submodule update --init")), "run");
+
+    // Case B: inside a submodule of the bound worktree, writes run there and
+    // destructive ones are snapshotted (in that repo, see `git::plan`).
+    let nested = |cmd| decide_at(Ok(&work()), Location::Nested, cmd);
+    for (cmd, op) in [
+        ("reset --hard", Some("reset")),
+        ("checkout .", Some("checkout")),
+        ("checkout -b topic", Some("checkout")),
+        ("clean -fd", Some("clean")),
+        ("commit -m x", None),
+        ("log", None),
+    ] {
+        let d = nested(cmd);
+        assert_eq!(code(&d), "run", "{cmd}");
+        assert_eq!(snapshot_of(&d), op, "{cmd}");
+        assert!(matches!(d, Decision::Run { route: None, .. }), "{cmd}");
+    }
+    let clone = Fake {
+        team_repo: true,
+        ..Fake::default()
+    };
+    let d = run_with(
+        Ok(&work()),
+        Location::Nested,
+        &GitEnv::default(),
+        &clone,
+        "commit -m x",
+    );
+    assert_eq!(code(&d), "team_clone");
 }
 
 #[test]

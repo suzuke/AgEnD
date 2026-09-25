@@ -57,11 +57,44 @@ fn classifies_git_answers_against_the_binding() {
     assert_eq!(locate(&bare_canon, true, &a), Location::Canonical);
     let sibling = r("/repo/.git/worktrees/u", "/repo/.git", Some("/h/u"));
     assert_eq!(locate(&sibling, false, &a), Location::OtherWorktree);
-    // GIT_COMMON_DIR relabelling the worktree's refs is not the worktree.
+    // GIT_COMMON_DIR relabelling the worktree's refs is not the worktree:
+    // a foreign repo with its work tree there (destructive calls snapshot
+    // the worktree, with the relabelling env removed).
     let relabelled = r("/repo/.git/worktrees/t", "/x/origin.git", Some("/h/wt"));
-    assert_eq!(locate(&relabelled, true, &a), Location::Foreign);
+    assert_eq!(locate(&relabelled, true, &a), Location::Nested);
     let scratch = r("/s/.git", "/s/.git", Some("/s"));
     assert_eq!(locate(&scratch, false, &a), Location::Foreign);
+    // Round 9: a repo inside the bound worktree (a submodule, whose git dir
+    // is under the worktree's, or a nested clone) is the agent's own.
+    let sub = r(
+        "/repo/.git/worktrees/t/modules/m",
+        "/repo/.git/worktrees/t/modules/m",
+        Some("/h/wt/m"),
+    );
+    assert_eq!(locate(&sub, false, &a), Location::Nested);
+    let clone = r(
+        "/h/wt/vendor/lib/.git",
+        "/h/wt/vendor/lib/.git",
+        Some("/h/wt/vendor/lib"),
+    );
+    assert_eq!(locate(&clone, false, &a), Location::Nested);
+    // The team's own git dir with a work tree in the worktree is not.
+    let team_there = r("/repo/.git", "/repo/.git", Some("/h/wt/m"));
+    assert_eq!(locate(&team_there, true, &a), Location::Canonical);
+    // A submodule of the canonical checkout or of a sibling's worktree keeps
+    // its git dir in the team's: not a scratch repo.
+    let canon_sub = r(
+        "/repo/.git/modules/m",
+        "/repo/.git/modules/m",
+        Some("/repo/m"),
+    );
+    assert_eq!(locate(&canon_sub, false, &a), Location::OtherWorktree);
+    let sibling_sub = r(
+        "/repo/.git/worktrees/u/modules/m",
+        "/repo/.git/worktrees/u/modules/m",
+        Some("/h/u/m"),
+    );
+    assert_eq!(locate(&sibling_sub, false, &a), Location::OtherWorktree);
 }
 
 #[test]

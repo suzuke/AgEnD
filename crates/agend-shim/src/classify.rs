@@ -190,7 +190,7 @@ pub fn classify(input: &Input) -> Decision {
         return PASS;
     }
     let rest = args.rest.as_slice();
-    if input.location == Location::Foreign {
+    if matches!(input.location, Location::Foreign | Location::Nested) {
         return foreign(input, sub, rest);
     }
     if let Err(r) = check_hooks_kept(sub, rest, input) {
@@ -284,7 +284,7 @@ fn write(input: &Input, sub: &str, rest: &[String]) -> Decision {
     if let Some(r) = untracked_ref_write(sub, rest, binding) {
         return refuse(r);
     }
-    if let Some(r) = unsnapshotted(sub, rest, binding) {
+    if let Some(r) = unsnapshotted(sub, rest, input, binding) {
         return refuse(r);
     }
     if let Some(r) = autostash(sub, rest, input) {
@@ -434,7 +434,12 @@ fn foreign(input: &Input, sub: &str, rest: &[String]) -> Decision {
             }
         }
     }
-    PASS
+    let snapshot = destructive(sub, rest).filter(|_| input.location == Location::Nested);
+    Decision::Run {
+        route: None,
+        snapshot,
+        note: None,
+    }
 }
 
 /// The agend hooks must run: no `core.hooksPath` set for one call (`-c`,
@@ -694,24 +699,53 @@ fn untracked_ref_write(sub: &str, rest: &[String], b: &Binding) -> Option<Refusa
 /// What a snapshot cannot undo. `stash` writes (owner decision 2026-09-25):
 /// `refs/stash` is one list shared by the canonical checkout and every
 /// worktree, so `stash pop` takes someone else's work and `clear` destroys
-/// it (the hook refuses `refs/stash` too). `clean -x|-X`: ignored files
-/// (`.env`) are not in the snapshot; a short cluster ends at `-e` (its value).
-fn unsnapshotted(sub: &str, rest: &[String], b: &Binding) -> Option<Refusal> {
-    let ignored = |a: &str| {
-        !a.starts_with("--") && a.starts_with('-') && {
-            let mut letters = a[1..].chars().take_while(|c| *c != 'e');
-            letters.any(|c| "xX".contains(c))
-        }
+/// it (the hook refuses `refs/stash` too). A snapshot has submodules and
+/// nested repos only as gitlinks, and no ignored files (`clean -x|-X`, `-ff`);
+/// `submodule foreach` runs git's own git, past the shim. A short option
+/// cluster ends at `-e` (its value).
+fn unsnapshotted(sub: &str, rest: &[String], input: &Input, b: &Binding) -> Option<Refusal> {
+    let flag = |l: &str| options(rest).any(|a| long(a, l));
+    let shorts: String = options(rest)
+        .filter_map(|a| a.strip_prefix('-')?.split('e').next())
+        .filter(|l| !l.starts_with('-'))
+        .collect();
+    let forces = shorts.matches('f').count() + options(rest).filter(|a| long(a, "--force")).count();
+    let ignored = shorts.contains(['x', 'X']);
+    let recursing = || {
+        let key = "submodule.recurse";
+        let set = |v: &String| v.to_ascii_lowercase().contains(key);
+        listed("reset checkout restore switch", sub)
+            && destructive(sub, rest).is_some()
+            && b.worktree().join(".gitmodules").is_file()
+            && (flag("--recurse-submodules")
+                || !flag("--no-recurse-submodules")
+                    && (input.args.config.iter().any(set) || config_true(input.probe, key)))
     };
     match sub {
         "stash" => Some(refuse_stash(Some(b))),
-        "clean" if options(rest).any(ignored) => Some(Refusal::new(
-            "clean_ignored",
-            "`git clean -x|-X` deletes ignored files (e.g. .env), which the agend snapshot does not keep",
-            "run `git clean -fd` (snapshotted first; ignored files stay), or delete the specific paths: rm -r <path>",
+        "submodule" if first_positional(rest) == Some("foreach") => Some(Refusal::new(
+            "submodule_foreach",
+            "git runs the `submodule foreach` command with its own git, past the agend shim, so a `reset --hard` there loses uncommitted work in the submodules without a snapshot",
+            "run it in each submodule yourself (snapshotted): git -C <path> <command>; list the paths with: git submodule status",
+        )),
+        _ if recursing() => Some(Refusal::new(
+            "submodule_recurse",
+            "recursing into submodules (--recurse-submodules, or submodule.recurse set) discards uncommitted work inside them, which the agend snapshot keeps only as a gitlink",
+            "commit inside the submodule first (cd <submodule> && git add -A && git commit -m \"wip: <what>\"), or add --no-recurse-submodules",
+        )),
+        "clean" if ignored || forces > 1 => Some(Refusal::new(
+            "clean_unsnapshotted",
+            "`git clean -x|-X` deletes ignored files (e.g. .env) and `git clean -ff` deletes nested git repos with their local commits; the agend snapshot keeps neither (a nested repo only as a gitlink)",
+            "run `git clean -fd` (snapshotted first; ignored files and nested repos stay), or delete the specific paths: rm -r <path>",
         )),
         _ => None,
     }
+}
+
+/// Whether git config (files, `GIT_CONFIG_*`) sets `key` true in the worktree.
+fn config_true(probe: &dyn Probe, key: &str) -> bool {
+    let v = probe.git(&["config", "--get", "--type=bool", key]);
+    v.as_deref() == Some("true")
 }
 
 /// Autostash (owner decision 2026-09-25): git stores a conflicting autostash
@@ -726,10 +760,7 @@ fn autostash(sub: &str, rest: &[String], input: &Input) -> Option<Refusal> {
         _ => return None,
     };
     let mut config = input.args.config.iter().chain(&input.env.config);
-    let in_file = |k: &&str| {
-        let v = input.probe.git(&["config", "--get", "--type=bool", k]);
-        v.as_deref() == Some("true")
-    };
+    let in_file = |k: &&str| config_true(input.probe, k);
     let skip = "--no-autostash --continue --abort --skip --quit --edit-todo --show-current-patch";
     let on = options(rest).any(|a| long(a, "--autostash"))
         || config.any(|v| keys.iter().any(|k| v.to_ascii_lowercase().contains(k)))

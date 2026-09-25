@@ -23,6 +23,9 @@ pub enum Location {
     /// A repo other than the team's checkout; the shim guards only what can
     /// reach the team repo from it (see `team`).
     Foreign,
+    /// A foreign repo inside the bound worktree (a submodule, a nested
+    /// clone): writes run there, destructive ones snapshotted in that repo.
+    Nested,
     /// Not inside any repo (e.g. the agent's workspace directory).
     NoRepo,
     /// Not resolved: no usable snapshot, or a call that does not need it.
@@ -118,6 +121,9 @@ pub fn locate(r: &Resolved, explicit: bool, anchors: &dyn Anchors) -> Location {
     match anchors.team_common_dir() {
         Some(team) if team == r.common_dir && r.git_dir == team => Location::Canonical,
         Some(team) if team == r.common_dir => Location::OtherWorktree,
+        _ if anchors.worktree().is_some_and(|w| r.root().starts_with(w)) => Location::Nested,
+        // A submodule of another checkout keeps its git dir in the team's.
+        Some(team) if r.git_dir.starts_with(&team) => Location::OtherWorktree,
         _ => Location::Foreign,
     }
 }
