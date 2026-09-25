@@ -520,21 +520,55 @@ fn remove_leftover_build(home: &Path, new: &Path) -> Result<Option<Connection>, 
 }
 
 /// Makes the build file `db`, never replacing an existing `db`: a hard
-/// link, then the build file's name is removed. The caller holds the build
-/// file's lock, so no other creator is here at the same time.
+/// link, then the build file's name is removed. On a filesystem without
+/// hard links (ExFAT, some network filesystems) it renames the build file
+/// instead, after checking again that `db` is absent. rename replaces an
+/// existing `db`, so the check and the rename must not race another
+/// creator: the caller holds the build file's lock, and only the holder of
+/// that lock publishes (see [`create_database`]), so no other creator can
+/// create `db` in between. What is left is a process outside agend creating
+/// `agend.db` in that window, which the hard link would have refused.
 fn publish(new: &Path, db: &Path) -> Result<(), StoreError> {
-    match fs::hard_link(new, db) {
+    let link_error = match hard_link(new, db) {
+        Ok(()) => {
+            return fs::remove_file(new).map_err(|source| StoreError::Create {
+                step: format!("removing {NEW_DB_FILE} after linking it"),
+                source,
+            });
+        }
         // A creator that finished before this one took the lock.
         Err(e) if e.kind() == io::ErrorKind::AlreadyExists => return Ok(()),
-        linked => linked.map_err(|source| StoreError::Create {
-            step: format!("hard-linking {NEW_DB_FILE} to {DB_FILE}"),
-            source,
-        })?,
+        Err(e) => e,
+    };
+    match fs::symlink_metadata(db) {
+        Ok(_) => return Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(source) => {
+            return Err(StoreError::Create {
+                step: format!("checking {DB_FILE} is still absent"),
+                source,
+            });
+        }
     }
-    fs::remove_file(new).map_err(|source| StoreError::Create {
-        step: format!("removing {NEW_DB_FILE} after linking it"),
+    fs::rename(new, db).map_err(|source| StoreError::Create {
+        step: format!(
+            "renaming {NEW_DB_FILE} to {DB_FILE} (hard-linking it failed first: {link_error})"
+        ),
         source,
     })
+}
+
+/// [`fs::hard_link`]; unit tests can make it fail as on a filesystem
+/// without hard links.
+fn hard_link(src: &Path, dst: &Path) -> io::Result<()> {
+    #[cfg(test)]
+    if tests::NO_HARD_LINKS.with(std::cell::Cell::get) {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "Operation not supported (test: no hard links)",
+        ));
+    }
+    fs::hard_link(src, dst)
 }
 
 fn same_file(a: &fs::Metadata, b: &fs::Metadata) -> bool {
