@@ -285,7 +285,7 @@ fn routing_keeps_the_callers_subdirectory() {
     };
     for cmd in [
         "rm -rf .",
-        "clean -fdx .",
+        "clean -fd .",
         "checkout -- .",
         "add .",
         "restore .",
@@ -503,6 +503,8 @@ fn leaving_the_bound_branch_is_refused() {
             "switch --create x",
             "switch --force-create x",
             "switch --orphan x",
+            // Round 8, finding 5: a full ref name detaches HEAD.
+            "checkout refs/heads/agend/t-1/fix",
         ],
     );
     let Decision::Refuse(r) = decide(&s, "checkout main") else {
@@ -516,7 +518,6 @@ fn leaving_the_bound_branch_is_refused() {
         "run",
         &[
             "checkout agend/t-1/fix",
-            "checkout refs/heads/agend/t-1/fix",
             "checkout HEAD",
             "switch agend/t-1/fix",
             "switch --force agend/t-1/fix",
@@ -633,6 +634,67 @@ fn ref_writes_outside_the_hook_are_refused() {
         panic!()
     };
     assert!(r.next.contains("git reflog show"), "{}", r.next);
+}
+
+/// Round 8, findings 1–3 (owner decision 2026-09-25): `refs/stash` is one
+/// list shared with the canonical checkout, so every stash write is refused
+/// (reads run); `clean -x|-X` deletes ignored files no snapshot keeps.
+#[test]
+fn what_a_snapshot_cannot_undo_is_refused() {
+    let s = work();
+    let stash = [
+        "stash",
+        "stash -q",
+        "stash -u",
+        "stash -p",
+        "stash push -m wip",
+        "stash save wip",
+        "stash pop",
+        "stash apply",
+        "stash apply stash@{1}",
+        "stash drop",
+        "stash clear",
+        "stash branch agend/t-1/x",
+        "stash create",
+        "stash store abc123",
+    ];
+    assert_codes(&s, "stash_shared", &stash);
+    assert_eq!(
+        code(&decide_at(Ok(&s), Location::Canonical, "stash pop")),
+        "stash_shared"
+    );
+    let Decision::Refuse(r) = decide(&s, "stash pop") else {
+        unreachable!()
+    };
+    assert!(r.next.contains("git commit -m \"wip: "), "{}", r.next);
+    assert!(r.next.contains("agend/t-1/fix"), "{}", r.next);
+    assert_codes(
+        &s,
+        "run",
+        &["stash list", "stash show", "stash show -p stash@{1}"],
+    );
+    let clean = [
+        "clean -fdx",
+        "clean -fX",
+        "clean -xdf",
+        "clean -f -d -x",
+        "clean -Xn",
+        "clean -fdx -- src",
+    ];
+    assert_codes(&s, "clean_ignored", &clean);
+    let Decision::Refuse(r) = decide(&s, "clean -fdx") else {
+        unreachable!()
+    };
+    assert!(r.next.contains("git clean -fd"), "{}", r.next);
+    // `-e` takes the rest of its cluster as the pattern.
+    for cmd in [
+        "clean -fd",
+        "clean -fd -exyz",
+        "clean -n",
+        "clean -fd -- -x",
+    ] {
+        assert_eq!(code(&decide(&s, cmd)), "run", "{cmd}");
+    }
 }
 
 #[test]
@@ -822,10 +884,6 @@ fn destructive_operations_take_a_snapshot() {
         ("switch --discard agend/t-1/fix", Some("switch")),
         ("switch -f agend/t-1/fix", Some("switch")),
         ("switch agend/t-1/fix", None),
-        ("stash drop", Some("stash")),
-        ("stash clear", Some("stash")),
-        ("stash", None),
-        ("stash pop", None),
         ("merge origin/main", Some("merge")),
         ("merge --abort", Some("merge")),
         ("rebase origin/main", Some("rebase")),
@@ -955,8 +1013,8 @@ fn everyday_commands_still_run() {
             "rebase --onto origin/main main",
             "merge --no-ff origin/main",
             "cherry-pick abc123",
-            "stash",
-            "stash pop",
+            "stash list",
+            "stash show -p stash@{0}",
             "checkout -- src/lib.rs",
             "restore --staged src/lib.rs",
             "reset --soft HEAD~1",

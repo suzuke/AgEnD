@@ -267,6 +267,9 @@ const LEAVE_BRANCH: &[Case] = &[
     refused("checkout master --"),
     refused("checkout --track origin/other-feature"),
     refused("switch other-feature"),
+    // Round 8, finding 5: a full ref name detaches HEAD even for the own
+    // branch (later commits would not move it).
+    refused("checkout refs/heads/agend/t-1/fix"),
     after(
         &[
             "stash push -q -m s -- README.md",
@@ -274,6 +277,38 @@ const LEAVE_BRANCH: &[Case] = &[
         ],
         "stash branch newb",
     ),
+];
+
+/// Class 6 (round 8, owner decision 2026-09-25): what a snapshot cannot
+/// undo. Every stash write (refs/stash is shared with the canonical
+/// checkout; the shim refuses, the hook refuses the ref) and `clean -x|-X`
+/// (ignored files are not in a snapshot).
+const UNSNAPSHOTTED: &[Case] = &[
+    refused("stash"),
+    refused("stash -u"),
+    refused("stash push -m wip"),
+    refused("stash save wip"),
+    refused("stash clear"),
+    refused("stash create"),
+    after(
+        &[
+            "stash push -q -m s -- README.md",
+            "checkout -q stash@{0} -- README.md",
+        ],
+        "stash pop",
+    ),
+    after(
+        &[
+            "stash push -q -m s -- README.md",
+            "checkout -q stash@{0} -- README.md",
+        ],
+        "stash drop",
+    ),
+    refused("stash store -m x {head}"),
+    refused("update-ref refs/stash {head}"),
+    refused("clean -fdx"),
+    refused("clean -fX"),
+    refused("clean -xdf"),
 ];
 
 /// Known limits (gate page): not a plausible mistake, or git before 2.46
@@ -448,6 +483,11 @@ fn corpus_work_tree_retargeting() {
 #[test]
 fn corpus_leaving_the_bound_branch() {
     run_cases("c-leave", LEAVE_BRANCH, false);
+}
+
+#[test]
+fn corpus_what_a_snapshot_cannot_undo() {
+    run_cases("c-unsnap", UNSNAPSHOTTED, false);
 }
 
 #[test]

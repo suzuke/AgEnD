@@ -19,7 +19,7 @@
 
 - 依 argv[0] basename 判斷是哪個工具或哪個 hook（`Tool::from_argv0`）
 - git hook（`hook`）：
-  - `reference-transaction` 的 `prepared` 階段拒絕：protected ref（main、master、快照列的）、自己 `agend/<task>/` 以外的 branch（別的 agent 的、新的 `feat/x`）、刪除自己綁定的 branch；讀不到 binding 時只放行 `refs/remotes/`，看不懂的輸入行也拒絕（fail closed）
+  - `reference-transaction` 的 `prepared` 階段拒絕：protected ref（main、master、快照列的）、自己 `agend/<task>/` 以外的 branch（別的 agent 的、新的 `feat/x`）、刪除自己綁定的 branch、`refs/stash`（canonical 與每個 worktree 共用）；讀不到 binding 時只放行 `refs/remotes/`，看不懂的輸入行也拒絕（fail closed）
   - `pre-push` 拒絕：遠端 ref 不是自己綁定的 branch（或是刪除它），不管推到哪個 remote
   - 每個 hook 檢查完都接著跑專案的同名 hook（同樣的參數與 stdin），所以專案的 hook 照常跑；hook 目錄在 hook 執行時才查：共用 config 的 `core.hooksPath`（綁定之後才設的也算，例如 husky），否則 `<common dir>/hooks`
   - `install_hooks`／`uninstall_hooks`：只裝在一個 agent worktree（見「hook 安裝在哪」）
@@ -27,7 +27,7 @@
   - 放行、導向綁定的 worktree、拒絕（附下一步命令）；位置問真的 git（`rev-parse`），不自己找 repo
   - 擋 hook 看不到的：`checkout`／`switch` 離開綁定的 branch、`branch -c/-C/-m/-M`（`--copy`／`--move`，含縮寫與 `-fm` 這類組合；git 2.39 寫新名稱不經 ref transaction）、`symbolic-ref` 寫入與 `reflog delete|expire`（同樣不經 ref transaction）、`git worktree`（`list` 除外）、不認得的子命令（alias）
   - 擋會跳過 hook 的：`-c`／`--config-env`／`GIT_CONFIG_*` 設 `core.hooksPath`、`push --no-verify`；綁定的 worktree 沒裝 hook 時拒絕寫入
-  - 破壞性操作前快照（v1 agentic-git 的範圍；`refs/agend/snapshots/<instance>/<id>`）並印出還原命令
+  - 破壞性操作前快照（v1 agentic-git 的範圍；`refs/agend/snapshots/<instance>/<id>`）並印出還原命令；快照救不回的拒絕：`stash` 寫入（改用 `git commit -m "wip: …"`）、`clean -x|-X`
   - 沒有 hook 的 repo：team 的本機 remote 與 team repo 的 clone 不能寫、不能從別的 repo push 到 team repo（T5）
 - kill 防護、audit 記錄（`$AGEND_HOME/audit/shim.jsonl`；hook 的拒絕也記）
 
@@ -72,7 +72,7 @@ daemon 在綁定 worktree 時呼叫 `install_hooks`、釋放時呼叫 `uninstall
 5. 設 `core.hooksPath` 或 `push --no-verify` → 拒絕
 6. `worktree`（`list` 除外）、不認得的子命令 → 拒絕
 7. 讀取 → 綁定且在 workspace 或 canonical checkout 就導向，否則原地放行
-8. 寫入 → 要有效快照與綁定；在綁定的 worktree 裡：git 回答的 work tree 是它、`GIT_INDEX_FILE` 在它的 git dir 裡；需要導向時：不是從別的 worktree、不在 git dir 裡、沒有 `GIT_*`、沒有 `--git-dir`／`--work-tree`、同一個子目錄在 worktree 裡存在；worktree 有 hook；`checkout`／`switch` 不離開綁定的 branch；不是 `branch` 複製或改名、`symbolic-ref` 寫入、`reflog delete|expire`；破壞性操作先快照
+8. 寫入 → 要有效快照與綁定；在綁定的 worktree 裡：git 回答的 work tree 是它、`GIT_INDEX_FILE` 在它的 git dir 裡；需要導向時：不是從別的 worktree、不在 git dir 裡、沒有 `GIT_*`、沒有 `--git-dir`／`--work-tree`、同一個子目錄在 worktree 裡存在；worktree 有 hook；`checkout`／`switch` 不離開綁定的 branch；不是 `branch` 複製或改名、`symbolic-ref` 寫入、`reflog delete|expire`、`stash` 寫入、`clean -x|-X`；破壞性操作先快照
 9. 導向 = 真 git 加 `-C <worktree>/<prefix>`、拿掉呼叫者的 `-C`／`--git-dir`／`--work-tree`；之後 ref 的變更由 hook 檢查
 
 ## 模組

@@ -1,14 +1,14 @@
 //! Takes a snapshot before destructive git operations (the scope of v1
 //! agentic-git: `reset --hard|--merge|--keep`, `clean`, `checkout`,
-//! `restore`, `switch -f|--discard-changes`, `stash drop|clear`, `rm -f`, `mv -f`,
-//! merge / rebase / pull / cherry-pick / revert / am; see `classify`) so
-//! they can be undone.
+//! `restore`, `switch -f|--discard-changes`, `rm -f`, `mv -f`, merge /
+//! rebase / pull / cherry-pick / revert / am; see `classify`) so they can be
+//! undone.
 //!
 //! A snapshot is a commit of the whole working tree (tracked changes plus
 //! untracked, non-ignored files; built in a temporary index, so the real
 //! index is untouched) whose parent is the previous HEAD, kept at
-//! `refs/agend/snapshots/<instance>/<id>`. Ignored files (`clean -x`) are not
-//! captured. The shim never prunes snapshots.
+//! `refs/agend/snapshots/<instance>/<id>`. Ignored files are not captured
+//! (so `classify` refuses `clean -x|-X`), nor is `refs/stash`. The shim never prunes snapshots.
 //!
 //! Must NOT: run for read-only commands.
 

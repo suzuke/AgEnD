@@ -1,7 +1,8 @@
 //! The agend git hooks: git itself reports every ref a command changes.
 //! - `reference-transaction` (`prepared`): refuses a protected ref, a branch
 //!   outside the agent's `agend/<task>/` namespace, and deleting or renaming
-//!   the bound branch (a write through a symbolic ref shows its target).
+//!   the bound branch (a write through a symbolic ref shows its target),
+//!   and `refs/stash` (shared by every worktree; owner decision 2026-09-25).
 //!   Symbolic-ref updates (HEAD moved to a branch) are not read, so
 //!   `classify` refuses `checkout`/`switch` away from the bound branch.
 //! - `pre-push`: refuses unless every remote ref is the bound branch.
@@ -134,6 +135,9 @@ pub fn check_update(
     new: &str,
     refname: &str,
 ) -> Result<(), Refusal> {
+    if refname == "refs/stash" {
+        return Err(refuse_stash(snap.ok().and_then(|s| s.binding.as_ref())));
+    }
     let snap = match snap {
         Ok(s) => s,
         Err(_) if refname.starts_with("refs/remotes/") => return Ok(()),
@@ -236,6 +240,20 @@ fn refuse_protected(refname: &str, binding: Option<&Binding>) -> Refusal {
             "writing {refname} is refused: it is a protected ref and only the daemon changes it"
         ),
         next,
+    )
+}
+
+/// Agents never write `refs/stash`: one list shared by the canonical
+/// checkout and every worktree. Shared with `classify`.
+pub fn refuse_stash(binding: Option<&Binding>) -> Refusal {
+    let on = binding.and_then(Binding::branch);
+    Refusal::new(
+        "stash_shared",
+        "agents do not write git stash: refs/stash is one list shared by the canonical checkout and every worktree, so stash pop / drop / clear take or destroy someone else's work",
+        format!(
+            "save your work as a commit on your own branch{} instead: git add -A && git commit -m \"wip: <what>\" (nothing is lost: one task, one branch). Reading still works: git stash list, git stash show",
+            on.map_or(String::new(), |b| format!(" {b}"))
+        ),
     )
 }
 

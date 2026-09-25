@@ -51,13 +51,20 @@ fn transaction_refs_outside_the_binding_are_refused() {
         "refs/heads/agend/t-1/scratch",
         "refs/remotes/origin/main",
         "refs/tags/v1",
-        "refs/stash",
         "refs/agend/snapshots/dev-1/1-2",
         "ORIG_HEAD",
     ] {
         assert_eq!(u(A, r), "ok", "{r}");
     }
     assert_eq!(u(Z, "refs/heads/agend/t-1/scratch"), "ok");
+    // Round 8 (owner decision 2026-09-25): refs/stash is shared by every
+    // worktree; refused with or without a readable binding.
+    let e = SnapshotError::NotAnAgent;
+    for snap in [Ok(&s), Err(&e)] {
+        for new in [A, Z] {
+            assert_eq!(code(check_update(snap, new, "refs/stash")), "stash_shared");
+        }
+    }
 }
 
 #[test]

@@ -23,23 +23,24 @@
 
 ## 狀態
 
-**實作中**（2026-09-25，draft PR #107；依使用者決定改成 hook 設計（T21），verifier 第 1–7 輪的犯錯類案例改由 shim 或 hook 擋，待 fresh verifier 與你親自驗收）
+**實作中**（2026-09-25，draft PR #107；依使用者決定改成 hook 設計（T21），verifier 第 1–8 輪的犯錯類案例改由 shim 或 hook 擋；agent 不寫 git stash（使用者已決定，T22），待 fresh verifier 與你親自驗收）
 
 ## 範圍
 
 - git hook（`agend_shim::hook`；裝在哪見 [README](../../crates/agend-shim/README.md#hook-安裝在哪)）
-  - `reference-transaction`（`prepared` 階段）：拒絕寫 protected ref（main、master、binding 快照列的）、自己 `agend/<task>/` 以外的 branch（別的 agent 的、新的 `feat/x`）、刪除自己綁定的 branch；經 symbolic ref 的寫入 git 回報的是真正的目標。讀不到 binding 時只放行 `refs/remotes/`；看不懂的輸入行（未來 git 改格式）也拒絕（fail closed）
+  - `reference-transaction`（`prepared` 階段）：拒絕寫 protected ref（main、master、binding 快照列的）、自己 `agend/<task>/` 以外的 branch（別的 agent 的、新的 `feat/x`）、刪除自己綁定的 branch、`refs/stash`（T22：canonical 與每個 worktree 共用同一個 stash 清單）；經 symbolic ref 的寫入 git 回報的是真正的目標。讀不到 binding 時只放行 `refs/remotes/`；看不懂的輸入行（未來 git 改格式）也拒絕（fail closed）
   - `pre-push`：遠端 ref 必須是自己綁定的 branch、不能刪；`git push` 沒寫目的地時由 git 自己解析，hook 看到的就是真正的目的地（T7）
   - 每個 hook 檢查完接著跑專案的同名 hook（同參數、同 stdin），專案 hook 照常跑；hook 目錄在 hook 執行時才查（共用 config 的 `core.hooksPath`，否則 `<common dir>/hooks`），綁定之後才設的（例如 husky）也串接
   - `install_hooks`／`uninstall_hooks`：`extensions.worktreeConfig`，只寫該 agent worktree 的 `config.worktree`（`core.hooksPath`、`gc.packRefs=false`）；canonical checkout、別的 checkout、`~/.gitconfig` 不動
 - git shim：hook 看不到的
   - 導向：綁定時從 workspace、canonical checkout 跑的 git 改在綁定的 worktree 跑，保留子目錄；別的 worktree 裡的寫入、worktree 沒有的目錄、git dir 裡的寫入拒絕；位置問真的 git（`rev-parse`，T20）
   - 寫入只作用在綁定的 worktree：work tree、`GIT_INDEX_FILE` 要是它的；需要導向的寫入帶 `--git-dir`／`--work-tree`／`GIT_*` 就拒絕（T13）
-  - 離開綁定的 branch：`checkout`／`switch` 到別的 branch、detach、`-b`／`-c`／`--orphan`（git 2.39 不把 HEAD 換 branch 告訴 hook）；`git worktree`（`list` 除外）；不認得的子命令（alias）
+  - 離開綁定的 branch：`checkout`／`switch` 到別的 branch、detach（含 `checkout refs/heads/<自己的 branch>`：寫完整 ref 名稱 git 會 detach）、`-b`／`-c`／`--orphan`（git 2.39 不把 HEAD 換 branch 告訴 hook）；`git worktree`（`list` 除外）；不認得的子命令（alias）
   - `branch -c/-C/-m/-M`（`--copy`／`--move`，含縮寫與 `-fm` 這類組合）一律拒絕，自己命名空間裡的也一樣：git 2.39 寫新名稱不經 ref transaction，hook 看不到；下一步給 `git branch <新> <舊>`（經 hook）再 `git branch -D <舊>`
   - `symbolic-ref` 的寫入（有目標、`-d`、`-m`）與 `reflog delete`／`reflog expire` 一律拒絕：git 2.39 改 ref 不經 ref transaction，hook 看不到（第 7 輪：`symbolic-ref refs/heads/main <自己的 branch>` 讓 main 指向 agent 的 commit、`reflog delete --updateref main@{0}` 移動 main、`reflog expire --all` 清掉整個 repo 的 reflog）；讀取照常（`symbolic-ref [-q] [--short] <name>`、`reflog`／`reflog show`）
+  - 快照救不回的一律拒絕：`git stash` 的寫入（push、不帶子命令的 `stash`、save、pop、apply、drop、clear、branch、create、store；T22），下一步給 `git commit -m "wip: …"` 存在自己的 branch；`stash list`／`stash show` 照常。`clean -x`／`-X`（含 `-fdx`、`-fX` 這類組合；ignored 檔例如 `.env` 不在快照裡），下一步給 `git clean -fd`（先快照）或刪指定路徑
   - 不讓 hook 被跳過：`-c`／`--config-env`／`GIT_CONFIG_*` 設 `core.hooksPath`、`push --no-verify`；綁定的 worktree 沒裝 hook 時寫入拒絕
-  - 破壞性操作前快照：v1 agentic-git 的範圍（`reset --hard|--merge|--keep`、`clean`、`checkout`、`restore`（非只 `--staged`）、`switch -f|--discard-changes`、`stash drop|clear`、`rm -f`、`mv -f`、merge／rebase／pull／cherry-pick／revert／am）；選項寬鬆比對（git 接受的任何縮寫都算，例如 `checkout --de`）
+  - 破壞性操作前快照：v1 agentic-git 的範圍（`reset --hard|--merge|--keep`、`clean`、`checkout`、`restore`（非只 `--staged`）、`switch -f|--discard-changes`、`rm -f`、`mv -f`、merge／rebase／pull／cherry-pick／revert／am）；快照存 work tree（含未追蹤、不含 ignored），不存 `refs/stash`；選項寬鬆比對（git 接受的任何縮寫都算，例如 `checkout --de`）
   - 沒有 hook 的 repo：team 的本機 remote 與 team repo 的 clone 不能寫、從別的 repo push 到 team repo 拒絕（T5）
 - `kill`／`killall`／`pkill` 防護（T9，未改）、audit 記錄（shim 與 hook 的拒絕、bypass、快照）
 - binding 來源：daemon 寫的唯讀 binding 快照（D6，無 HMAC）
@@ -57,10 +58,10 @@ TMPDIR=$(mktemp -d) ~/.cargo/bin/cargo test --workspace   # 不靠暫存目錄�
 ~/.cargo/bin/cargo xtask accept shim
 ```
 
-- [x] `cargo test -p agend-shim`：`49 passed`（unit）；`cargo test -p agend`：`4`（argv0）+ `17`（`shim_bypass_corpus`）+ `2`（`shim_everyday`）+ `11`（`shim_git`）+ `8`（`shim_hooks`）+ `6`（`shim_location_matrix`）+ `2`（`shim_push_hook`）+ `6`（`shim_route_scope`）passed；`TMPDIR` 設成新的空目錄時一樣全過
+- [x] `cargo test -p agend-shim`：`50 passed`（unit）；`cargo test -p agend`：`4`（argv0）+ `18`（`shim_bypass_corpus`）+ `2`（`shim_everyday`）+ `12`（`shim_git`）+ `8`（`shim_hooks`）+ `6`（`shim_location_matrix`）+ `2`（`shim_push_hook`）+ `7`（`shim_route_scope`）passed；`TMPDIR` 設成新的空目錄時一樣全過
 - [x] clippy 乾淨；`check-deps` 最後一行 `check-deps: ok (2 rules, 8 crates checked for agend-testkit, agend-core metadata ok, no-std build ok)`
 - [x] `cargo xtask accept shim` 最後兩行 `shim demo: all checks passed`、`gate 3 (shim): checks passed`
-- [x] 第 1–6 輪的犯錯類案例都是回歸測試，斷言「被 shim 或 hook 拒絕，protected ref 不動」（`crates/agend/tests/shim_bypass_corpus.rs`）；把 hook 的判斷改成永遠放行時 corpus 變紅
+- [x] 第 1–8 輪的犯錯類案例都是回歸測試，斷言「被 shim 或 hook 拒絕，protected ref 不動」（`crates/agend/tests/shim_bypass_corpus.rs`）；把 hook 的判斷改成永遠放行時 corpus 變紅
 - [x] canonical checkout 沒有 agend hook、在那裡 commit 到 main 照常成功；專案原本的 hook 從 agent worktree 照常跑；agent worktree 裡 `git gc` 照常（`shim_hooks.rs`）
 - [x] 第 3 輪的位置矩陣（336 + 168）與第 4 輪的正常工作清單照常全綠
 - [x] 用真的 binary 在 sandbox 裡掃 38 個常見錯誤 × 4 個 cwd（152 案）：protected ref、canonical 的未提交工作、綁定的 branch 都沒動，破壞性操作都有快照；56 案由 hook 擋、36 案由 shim 擋
@@ -182,7 +183,7 @@ TMPDIR=$(mktemp -d) ~/.cargo/bin/cargo test --workspace   # 不靠暫存目錄�
 
 ## 待你追認
 
-owner 睡覺時我自己做的決定；都可逆。每條打勾＝同意，不同意就寫在「驗收紀錄」備註。T7、T19、T21 是你已經決定的；T21 之後 T3、T4、T7、T8、T10、T11、T17 改寫，T14、T15、T16 由 T21 取代。
+owner 睡覺時我自己做的決定；都可逆。每條打勾＝同意，不同意就寫在「驗收紀錄」備註。T7、T19、T21、T22 是你已經決定的；T21 之後 T3、T4、T7、T8、T10、T11、T17 改寫，T14、T15、T16 由 T21 取代。
 
 - [x] T19 威脅模型（**使用者已決定 2026-09-25**）：只防好意但會犯錯的 agent。見[威脅模型](#威脅模型)。
 - [x] T21 hook 設計（**使用者已決定 2026-09-25**）：protected ref 改由 git hook 守，git 自己回報要改哪些 ref，shim 不再猜。
@@ -191,6 +192,7 @@ owner 睡覺時我自己做的決定；都可逆。每條打勾＝同意，不�
   - shim 只留 hook 做不到的：導向、快照、`checkout`／`switch` 離開 branch、`worktree`、kill 防護、擋 `core.hooksPath` 覆寫與 `push --no-verify`。刪掉：選項表、config key 白名單、push 目的地解析、symbolic ref 處理、push／fetch 的 refspec 解析。
   - hook 不看 `AGEND_SHIM_BYPASS`（它是硬保證）；讀不到 binding 時 fail closed。可信的呼叫者（daemon）在 agent worktree 裡跑 git 時用 `-c core.hooksPath=/dev/null`。
   - 我的解讀，請確認：`pre-push` 對所有 remote 都只放行自己綁定的 branch（比「只管 team remote」嚴、也簡單）：推到別的 remote 的自己 branch 放行；自己命名空間的其他 branch、tag 都不能 push。
+- [x] T22 agent 不寫 git stash（**使用者已決定 2026-09-25**）：`refs/stash` 是 canonical checkout 與每個 worktree 共用的一個 ref。第 8 輪：agent 的 `stash pop` 拿走人在 canonical 的 WIP，`stash clear` 把人的 stash 清掉、`gc` 後救不回（快照只存 work tree）。兩層：shim 拒絕 `stash` 的寫入形式（`list`／`show` 照常），下一步是 `git commit -m "wip: …"` 存在自己綁定的 branch（一個 agent 一個 task 一個 branch，不會弄丟）；`reference-transaction` hook 拒絕 agent worktree 對 `refs/stash` 的任何更新（讀不到 binding 時也拒絕），任何拼法都擋。
 - [ ] T1 binding 快照格式：`$AGEND_HOME/bindings/<instance>.json`，JSON `{version: 1, instance, source_repo?, protected_refs?, binding?: {kind: "work", task_id, branch, worktree} | {kind: "review", task_id, head, worktree}}`；work branch 必須是 `agend/<task_id>/<slug>`。型別暫放 `agend_shim::binding::Snapshot`，建議第 10 施工關搬到 `agend_core::model`。
 - [ ] T2 環境變數：`AGEND_HOME`、`AGEND_INSTANCE`（holder 注入；shim 與 hook 都讀，git 會把環境傳給 hook）；`AGEND_SHIM_BYPASS=1` 只跳過 shim（寫 audit）；`AGEND_SHIM_DEPTH` 防 PATH 迴圈。
 - [ ] T3 建 branch：`git branch agend/<自己的 task-id>/<名稱>` 可以；其他名稱由 hook 拒絕。`checkout -b`／`switch -c` 一律由 shim 拒絕（會離開綁定的 branch），自己命名空間的也一樣；`branch -c/-C/-m/-M` 也一律拒絕（第 6 輪：hook 看不到新名稱），改用 `git branch <新> <舊>`。[pipeline.md](../architecture/pipeline.md#worktree-與-branch-生命週期) 寫「擋 `branch <new>`」，兩者有出入，請你決定。
@@ -198,7 +200,7 @@ owner 睡覺時我自己做的決定；都可逆。每條打勾＝同意，不�
 - [ ] T5 team repo 用「目的地」認（沒有 hook 的 repo 由 shim 守）：跟 team 無關的 scratch repo 不管；remote 指向 team remote 或 canonical checkout 的 clone、team 的本機 remote 本身：讀取放行、寫入拒絕（`worktree` 只有 `list` 算讀取）；從任何 repo push 到 team remote 或 canonical 路徑拒絕。比對前套 `insteadOf`、正規化 URL；本機路徑照 git 找 repo 的順序（`/x/origin` = `/x/origin.git`），`file://` 不看主機名。包住 `$AGEND_HOME` 的 repo 不算。
 - [ ] T6 導向：綁定時在 workspace 或 canonical checkout 跑的讀取與寫入都導向 worktree，保留子目錄（`--show-prefix`）；worktree 沒有那個子目錄、或在 canonical 的 `.git` 裡的寫入拒絕；別的 agent 的 worktree 裡寫入拒絕、讀取原地跑。
 - [x] T7 push（**使用者已決定 2026-09-25：放行解析到自己 branch 的 push**）：現在由 `pre-push` hook 實作，git 自己解析 `git push`／`git push origin`／`-u origin <branch>`／`push origin HEAD`，hook 看到真正的遠端 ref，是自己 branch 就放行。`--all`、`--mirror`、`--tags`、`--prune` 會列出別的 ref，所以被拒絕；刪除自己的 branch 拒絕；審查 binding 不能 push。
-- [ ] T8 快照：範圍對齊 v1 agentic-git（見[範圍](#範圍)），新增 `stash drop|clear`、merge／rebase／pull／cherry-pick／revert／am，拿掉 `read-tree -u`；每次都做（不只 dirty 時）；含未追蹤、不含 ignored 檔；ref `refs/agend/snapshots/<instance>/<id>`，id = `<unix 秒>-<pid>`（同一程序第二次加 `-<n>`）；快照用的 git 不跑 hook；shim 不清舊快照；快照失敗就拒絕該操作。
+- [ ] T8 快照：範圍對齊 v1 agentic-git（見[範圍](#範圍)），新增 merge／rebase／pull／cherry-pick／revert／am，拿掉 `read-tree -u`；`stash drop|clear` 拿掉（快照只存 work tree，救不回 stash；stash 寫入改由 T22 拒絕）；每次都做（不只 dirty 時）；含未追蹤、不含 ignored 檔，所以 `clean -x`／`-X` 改成拒絕（第 8 輪：`clean -fdx` 刪掉 `.env`，快照裡沒有）；ref `refs/agend/snapshots/<instance>/<id>`，id = `<unix 秒>-<pid>`（同一程序第二次加 `-<n>`）；快照用的 git 不跑 hook；shim 不清舊快照；快照失敗就拒絕該操作。
 - [ ] T9 kill（未改）：`pkill`／`killall` 拒絕；`kill` 只接受 `kill [-SIGNAL | -s SIG | -n NUM | --signal SIG] [--] <pid>...`，pid 去空白後只接受 `1..=2147483647` 且最多 10 位數；`0`、負數、名字、job spec、執行檔是 `agend` 的 pid 拒絕。
 - [ ] T10 audit：`$AGEND_HOME/audit/shim.jsonl`，記 shim 與 hook 的拒絕、bypass、快照；hook 的紀錄 argv 是 hook 名稱與參數，理由寫出哪個 ref；不輪替。
 - [ ] T11 exit code：shim 拒絕 1、找不到真的工具 127；hook 拒絕時由 git 決定（`reference-transaction` 通常 128，`pre-push` 1）。
@@ -213,7 +215,7 @@ owner 睡覺時我自己做的決定；都可逆。每條打勾＝同意，不�
 shim 是安全帶，不是安全邊界。照[威脅模型](#威脅模型)，以下要刻意組出來、影響低，或 PATH shim／git 2.39 本來就看不到。
 
 - 繞過 shim（`/usr/bin/git`、`AGEND_SHIM_BYPASS=1`）跑 `symbolic-ref` 寫入或 `reflog delete --updateref`／`reflog expire`：git 2.39 不把這些更新交給 hook（hook 在任何版本也不讀 symbolic-ref 的行），**main 會動**：`symbolic-ref refs/heads/main refs/heads/<agent 的 branch>` 讓 main（與 master、release）指向 agent 的 commit，canonical checkout 裡 main 的 `status` 變成一堆 staged 變更，人在那裡 commit 會落到 agent 的 branch、`git push origin main` 會推出 agent 的工作；`reflog delete --updateref main@{0}` 把 main 退回上一個 reflog 值；`reflog expire --expire=now --all` 清掉整個 repo 每個 branch 的 reflog，之後 `gc --prune=now` 會刪掉人 reset 掉的 commit（第 7 輪發現 1、2、4）。屬刻意繞過；agent 經 shim 時在 git 執行前就被拒絕。別人建的 symbolic ref（例如 `refs/heads/agend/t-1/x` → main）之後經它的寫入，hook 看到的是 main，照樣拒絕。
-- `rebase <upstream> <別的 branch>`、`stash branch agend/<task>/x` 會先把 HEAD 換到別的 branch（git 2.39 看不到）；別的 branch 最後的更新由 hook 拒絕，protected ref 不動，HEAD 要自己 `git checkout <自己的 branch>` 切回來。
+- `rebase <upstream> <別的 branch>` 會先把 HEAD 換到別的 branch（git 2.39 看不到）；別的 branch 最後的更新由 hook 拒絕，protected ref 不動，HEAD 要自己 `git checkout <自己的 branch>` 切回來。
 - `git config` 寫入會進共用的 repo config，影響 canonical checkout（例如 `git config core.hooksPath .githooks`、`user.email`）；agent worktree 的 `config.worktree` 優先，agend hook 不受影響，而且照樣串接到新設的 hook 目錄（hook 執行時才查）。
 - 刻意關掉 hook：`git config --worktree core.hooksPath …`／`--unset`、刪 `$AGEND_HOME/hooks` 或 `agend-hooks-installed`（刪標記時 shim 會改成拒絕寫入）、`-c include.path=…`、直接改 `.git/refs`。
 - 在 agent 的 scratch repo 裡用 `-c remote.<x>.url=<team>` 這類特製目的地 push 到 team remote（第 2 輪發現 1）；scratch repo 沒有 hook。forge 端 branch protection 是最後一道。
@@ -222,12 +224,14 @@ shim 是安全帶，不是安全邊界。照[威脅模型](#威脅模型)，以�
 - hook 只守 branch 與 protected ref：沒列進 `protected_refs` 的 tag、`refs/remotes/*`、`refs/replace/*`、`refs/notes/*` 本機可寫（ref 是整個 repo 共用的，canonical 也看得到）；推不出去（`pre-push` 只放行自己的 branch）。要保護 tag 就把 `refs/tags/*` 加進 `protected_refs`。
 - agent worktree 不 pack refs（`gc.packRefs=false`）：git 2.39 的 `pack-refs` 把每個 ref（含 main）當成寫入回報給 hook，hook 分不出來；在 agent worktree 裡明確跑 `git pack-refs` 或 `git maintenance run --task=pack-refs` 會被拒絕（沒有東西被改）；拒絕訊息會點名 git 先回報的某個 ref（例如 `delete refs/heads/agend/<task>/…` 或 `update refs/heads/<別的 branch>`），那是 git 回報 pack 的方式，ref 沒有被改。`git gc`、`git maintenance run`（預設 task）照常。
 - shell 內建的 `kill` 攔不到（T18）；git 自己啟動的程序（`rebase --exec`、`!` alias）不經過 shim，但它們在 agent worktree 裡寫的 ref 一樣經過 hook。
-- 沒快照：`rm --cached`、`update-index`、`submodule update --force`、`read-tree -u`；merge／rebase／pull 每次都快照，快照 ref 會累積（留給 daemon 清）。
+- 沒快照：`rm --cached`、`update-index`、`submodule update --force`、`submodule deinit -f`（submodule 裡未提交的修改會不見，第 8 輪發現 4；很少人打）、`read-tree -u`；merge／rebase／pull 每次都快照，快照 ref 會累積（留給 daemon 清）。
 - 從 workspace（不在任何 repo）導向時跑在 worktree 頂層：`.` 指 worktree 頂層。
 - T5 認不出用 ssh `Host` 別名或不同網址指到同一個 team remote 的 clone。
 - receive 端的 hook（`pre-receive`、`update`…）與 `push-to-checkout` 不裝也不串接：沒有人 push 進 agent worktree。
 - `git bisect` 會暫時 detach HEAD，放行；`git bisect reset master`（或別的 protected branch）結束時把 agent 的 worktree 留在 master 上（git 2.39 看不到 HEAD 換 branch）。master 不會動：之後的 commit／reset／merge 由 hook 拒絕，要自己 `git checkout <自己的 branch>` 切回來（第 7 輪發現 5）。
 - 繞過 shim（`/usr/bin/git`、`AGEND_SHIM_BYPASS=1`）跑 `branch -c/-C/-m/-M`：git 2.39 寫新名稱不經 ref transaction，hook 看不到，protected ref 可能被蓋掉（第 6 輪發現 1）；屬刻意繞過。hook 在改名中途拒絕時 git 不回滾（舊 branch 被刪、reflog 留在 `.git/logs/refs/.tmp-renamed-log`，之後整個 repo 的 `branch -c` 失敗到有人刪掉它）；agent 經 shim 時在 git 執行前就被拒絕，不會走到這一步。
+- 繞過 shim（`/usr/bin/git`、`AGEND_SHIM_BYPASS=1`）跑 `stash drop`／`pop`／`apply`：`apply`／`pop` 不寫 ref，先把 stash（可能是人的）套進 agent 的 worktree；git 2.39 刪 stash 的 reflog 項目不經 ref transaction，hook 看不到：多筆時被 drop 的那筆直接消失（rc 0），只剩一筆時 git 接著刪 `refs/stash`，hook 拒絕（rc 128），但那筆已經從 `stash list` 消失（`refs/stash` 還指著它）。屬刻意繞過；經 shim 時在 git 執行前就被拒絕，`stash`／`clear`／`store`／`update-ref refs/stash` 繞過 shim 也由 hook 拒絕。
+- `--autostash`（或 `rebase.autoStash`／`merge.autoStash` 設定）的 pull／rebase／merge 在套回修改衝突時，git 要把 autostash 存進 `refs/stash`，hook 拒絕：git 印 `error: cannot store <sha>`，修改留在 worktree 的衝突標記裡，rebase／merge／pull 前的快照也有；沒衝突時不寫 `refs/stash`，照常。
 - `uninstall_hooks` 之後留下、但無害：空的 `config.worktree`、共用 config 的 `extensions.worktreeConfig=true`、`$AGEND_HOME/hooks`（別的 agent worktree 還在用）。
 
 ## 驗收紀錄
@@ -241,6 +245,8 @@ shim 是安全帶，不是安全邊界。照[威脅模型](#威脅模型)，以�
 ## 進度紀錄
 
 日期 + 一行 + commit／PR，新的在上面。
+
+- 2026-09-25 verifier 第 8 輪修正（draft PR #107）：agent 不寫 git stash（T22，使用者已決定）：shim 拒絕 stash 寫入、hook 拒絕 `refs/stash`，人在 canonical 的 stash 不再被 agent 的 `stash pop`／`clear` 拿走或清掉；T8／範圍原本誤寫 `stash drop|clear` 可由快照還原，已改正；`clean -x`／`-X` 拒絕（ignored 檔不在快照裡）；`checkout refs/heads/<自己的 branch>` 會 detach，改為拒絕；`submodule deinit -f`、繞過 shim 的 `stash drop`、autostash 衝突列入已知限制；production 3,084 → 3,131 行
 
 - 2026-09-25 verifier 第 7 輪修正（draft PR #107）：shim 拒絕 `symbolic-ref` 寫入與 `reflog delete|expire`（git 2.39 改 ref 不經 hook；已知限制原本誤寫「main 不會動」，已改正）；`mv -f` 快照；長選項縮寫改成 git 接受的任何前綴（`checkout --de`／`switch --de` 會 detach）；`bisect reset <protected>` 列入已知限制；production 3,042 → 3,084 行
 - 2026-09-25 verifier 第 6 輪修正（draft PR #107）：shim 拒絕 `branch -c/-C/-m/-M`（含 `--copy`／`--move`、縮寫、`-fm` 組合；git 2.39 寫新名稱不經 hook，MEDIUM），因此也不會再有 hook 中途拒絕留下的 `.tmp-renamed-log`；專案 hook 目錄改在 hook 執行時查（綁定後才設的 husky 也串接），`agend-hooks-chain` 改成空標記 `agend-hooks-installed`；`maintenance run --task=pack-refs` 與 uninstall 殘留列入已知限制；production 2,998 → 3,042 行

@@ -320,12 +320,14 @@ fn normal_work_passes_with_every_spelling() {
                 "-c core.editor=true commit -q --amend --allow-empty".into(),
                 format!("push -q origin {own}"),
                 "rebase -q origin/main".into(),
-                "stash -q".into(),
-                "stash pop -q".into(),
+                // Agents save work as a wip commit, not a stash (owner
+                // decision 2026-09-25: refs/stash is shared).
+                "stash list".into(),
+                "commit -q -am wip".into(),
             ];
             for cmd in &steps {
                 n += 1;
-                if cmd == "stash -q" {
+                if cmd == "commit -q -am wip" {
                     std::fs::write(f.worktree.join("README.md"), "stash me\n").unwrap();
                 }
                 // `-c` is a global option: keep it before the spelling's.
@@ -350,8 +352,8 @@ fn normal_work_passes_with_every_spelling() {
                     ));
                 }
             }
-            if read(&f.worktree.join("README.md")) != "stash me\n" {
-                failures.push(format!("from {from:?}, {s:?}: stash pop lost the change"));
+            if git(&f.worktree, &["show", "HEAD:README.md"]) != "stash me" {
+                failures.push(format!("from {from:?}, {s:?}: wip commit lost the change"));
             }
             let origin_own = try_git(&f.origin, &["rev-parse", "-q", "--verify", &f.branch]);
             if !origin_own.status.success() {

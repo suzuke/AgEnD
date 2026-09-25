@@ -5,8 +5,9 @@
 //! workspace and canonical checkout keeping the subdirectory, refused from
 //! another worktree or with a git dir / work tree / index named elsewhere);
 //! leaving the bound branch with `checkout`/`switch` and changing worktrees;
-//! snapshots before destructive commands (v1 agentic-git's scope); config
-//! that would skip the hooks; and repos without hooks (the team's remote
+//! snapshots before destructive commands (v1 agentic-git's scope); what a
+//! snapshot cannot undo (`stash` writes, `clean -x|-X`); config that would
+//! skip the hooks; and repos without hooks (the team's remote
 //! and its clones, `team`). Options are matched generously: a false match
 //! only adds a snapshot or refuses an unusual spelling.
 //!
@@ -14,7 +15,7 @@
 
 use crate::Refusal;
 use crate::binding::{Binding, Snapshot, SnapshotError};
-use crate::hook::stay_hint;
+use crate::hook::{refuse_stash, stay_hint};
 use crate::location::{Location, Resolved};
 use crate::protected_ref::ProtectedRefs;
 use std::path::{Path, PathBuf};
@@ -281,6 +282,9 @@ fn write(input: &Input, sub: &str, rest: &[String]) -> Decision {
         return refuse(refuse_copy_or_rename(flag, binding));
     }
     if let Some(r) = untracked_ref_write(sub, rest, binding) {
+        return refuse(r);
+    }
+    if let Some(r) = unsnapshotted(sub, rest, binding) {
         return refuse(r);
     }
     let note = match (&route, input.location) {
@@ -581,11 +585,14 @@ fn stays(target: &str, b: &Binding, probe: &dyn Probe) -> bool {
     let Some(branch) = b.branch() else {
         return false;
     };
-    let full = match previous(target) {
-        Some(rev) => probe.rev_parse(&["--symbolic-full-name", &rev]),
-        None => Some(target.to_string()),
-    };
-    full.is_some_and(|f| f == branch || f.strip_prefix("refs/heads/") == Some(branch))
+    // `refs/heads/<own>` as typed detaches HEAD (git attaches only to a
+    // plain branch name), so only `-` / `@{-N}` resolve through the full name.
+    match previous(target) {
+        Some(rev) => probe
+            .rev_parse(&["--symbolic-full-name", &rev])
+            .is_some_and(|f| f.strip_prefix("refs/heads/") == Some(branch)),
+        None => target == branch,
+    }
 }
 
 fn refuse_switch(sub: &str, target: &str, b: &Binding, p: &ProtectedRefs) -> Refusal {
@@ -680,16 +687,39 @@ fn untracked_ref_write(sub: &str, rest: &[String], b: &Binding) -> Option<Refusa
     ))
 }
 
+/// What a snapshot cannot undo. `stash` writes (owner decision 2026-09-25):
+/// `refs/stash` is one list shared by the canonical checkout and every
+/// worktree, so `stash pop` takes someone else's work and `clear` destroys
+/// it (the hook refuses `refs/stash` too). `clean -x|-X`: ignored files
+/// (`.env`) are not in the snapshot; a short cluster ends at `-e` (its value).
+fn unsnapshotted(sub: &str, rest: &[String], b: &Binding) -> Option<Refusal> {
+    let ignored = |a: &str| {
+        !a.starts_with("--") && a.starts_with('-') && {
+            let mut letters = a[1..].chars().take_while(|c| *c != 'e');
+            letters.any(|c| "xX".contains(c))
+        }
+    };
+    match sub {
+        "stash" => Some(refuse_stash(Some(b))),
+        "clean" if options(rest).any(ignored) => Some(Refusal::new(
+            "clean_ignored",
+            "`git clean -x|-X` deletes ignored files (e.g. .env), which the agend snapshot does not keep",
+            "run `git clean -fd` (snapshotted first; ignored files stay), or delete the specific paths: rm -r <path>",
+        )),
+        _ => None,
+    }
+}
+
 // ── snapshots ───────────────────────────────────────────────────────────
 
 /// Operations that are snapshotted (v1 agentic-git's scope).
 const SNAPSHOT_OPS: &str =
-    "reset clean checkout restore switch stash rm mv merge rebase pull cherry-pick revert am";
+    "reset clean checkout restore switch rm mv merge rebase pull cherry-pick revert am";
 
 /// The name of the destructive operation to snapshot before, if any:
 /// `reset --hard|--merge|--keep`, `clean` (any), `checkout` (any that is
 /// allowed: paths, or `-f`), `restore` of the work tree, `switch -f` /
-/// `--discard-changes`, `stash drop|clear`, `rm -f` / `mv -f` (not
+/// `--discard-changes`, `rm -f` / `mv -f` (not
 /// `--cached`, not `-n`), and merge / rebase / pull / cherry-pick / revert /
 /// am. `mv -f` overwrites a destination with uncommitted edits.
 fn destructive(sub: &str, rest: &[String]) -> Option<&'static str> {
@@ -699,7 +729,6 @@ fn destructive(sub: &str, rest: &[String]) -> Option<&'static str> {
         "reset" => has("--hard") || has("--merge") || has("--keep"),
         "restore" => !(has("--staged") || has_short("S")) || has("--worktree") || has_short("W"),
         "switch" => has("--force") || has("--discard-changes") || has_short("f"),
-        "stash" => matches!(first_positional(rest), Some("drop" | "clear")),
         "rm" | "mv" => {
             (has("--force") || has_short("f"))
                 && !has("--cached")

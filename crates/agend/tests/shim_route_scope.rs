@@ -4,8 +4,8 @@
 //! worktree. A call from another agent's worktree, or from a directory the
 //! bound worktree lacks, is refused instead of routed.
 //!
-//! The verifier's repros E (`git rm -rf .`) and B (`git clean -fdx .`) are
-//! replayed as typed, plus `checkout -- .`, `add .` and `restore .`; each
+//! The verifier's repros E (`git rm -rf .`) and B (`git clean -fdx .`, now
+//! refused for `-x` and replayed as `clean -fd .`) are replayed, plus `checkout -- .`, `add .` and `restore .`; each
 //! from a canonical subdirectory and from another worktree's subdirectory.
 //!
 //! Real temporary repos only (`shim_common`); every call names absolute paths
@@ -135,17 +135,53 @@ fn repro_e_rm_rf_from_a_canonical_subdir_stays_in_that_subdir() {
     assert!(saved.contains("unsaved-sub-edit"), "{saved}");
 }
 
-/// B: `git clean -fdx .` from `<canonical>/src/sub` cleans `src/sub` of
+/// B: `git clean -fd .` from `<canonical>/src/sub` cleans `src/sub` of
 /// the bound worktree only; the root's ignored `.env` and `target/` stay.
 #[test]
-fn repro_b_clean_fdx_from_a_canonical_subdir_stays_in_that_subdir() {
+fn repro_b_clean_fd_from_a_canonical_subdir_stays_in_that_subdir() {
     let l = lab("scope-b");
-    gitshim(&l.f.ctx(&l.f.repo.join("src/sub")), &["clean", "-fdx", "."]).ok();
+    gitshim(&l.f.ctx(&l.f.repo.join("src/sub")), &["clean", "-fd", "."]).ok();
     let wt = &l.f.worktree;
     assert!(!wt.join("src/sub/tmp.txt").exists(), "clean ran");
-    assert!(!wt.join("src/sub/target").exists(), "clean -x ran");
+    assert!(wt.join("src/sub/target/o.bin").exists(), "ignored stays");
     assert_root_untouched(&l, "B");
     assert_others_untouched(&l, "B");
+}
+
+/// Round 8, finding 3: `clean -x|-X` deletes ignored files (`.env`) that no
+/// snapshot keeps, so every spelling is refused before git runs; `clean
+/// -fd` still runs (snapshot first) and leaves them.
+#[test]
+fn clean_of_ignored_files_is_refused() {
+    let l = lab("scope-x");
+    let wt = &l.f.worktree;
+    for (at, cmd) in [
+        (wt.clone(), &["clean", "-fdx"][..]),
+        (wt.clone(), &["clean", "-fX"][..]),
+        (wt.clone(), &["clean", "-xdf"][..]),
+        (wt.clone(), &["clean", "-f", "-d", "-x"][..]),
+        (l.f.repo.clone(), &["clean", "-fdx"][..]),
+        (l.f.repo.join("src/sub"), &["clean", "-fdX", "."][..]),
+    ] {
+        let ran = gitshim(&l.f.ctx(&at), cmd);
+        assert_eq!(
+            ran.refused,
+            Some("clean_ignored"),
+            "{cmd:?}: {}",
+            ran.text()
+        );
+        assert!(ran.text().contains("git clean -fd"), "{}", ran.text());
+        assert!(wt.join("src/sub/target/o.bin").exists(), "{cmd:?}");
+        assert!(wt.join("src/sub/tmp.txt").exists(), "{cmd:?}");
+        assert_root_untouched(&l, &format!("{cmd:?}"));
+    }
+    assert!(snapshots(&l.f).is_empty());
+    gitshim(&l.f.ctx(wt), &["clean", "-fdq"]).ok();
+    assert!(!wt.join("NOTES.md").exists(), "clean -fd ran");
+    for p in [".env", "target/build.bin", "src/sub/target/o.bin"] {
+        assert!(wt.join(p).exists(), "ignored {p} stays");
+    }
+    assert_eq!(snapshots(&l.f).len(), 1, "clean -fd is snapshotted");
 }
 
 /// C, `restore .`, D: the other path-scoped writes from a canonical subdir.
@@ -178,7 +214,7 @@ fn chdir_into_a_canonical_subdir_keeps_the_subdir_too() {
     let sub = l.f.repo.join("src/sub");
     gitshim(
         &l.f.ctx(&l.f.workspace),
-        &["-C", sub.to_str().unwrap(), "clean", "-fdx", "."],
+        &["-C", sub.to_str().unwrap(), "clean", "-fd", "."],
     )
     .ok();
     assert!(!l.f.worktree.join("src/sub/tmp.txt").exists(), "clean ran");
@@ -250,7 +286,7 @@ fn a_directory_missing_from_the_worktree_is_refused() {
     // The agent's own subdirectory still works as typed.
     let own = gitshim(
         &l.f.ctx(&l.f.worktree.join("src/sub")),
-        &["clean", "-fdx", "."],
+        &["clean", "-fd", "."],
     );
     own.ok();
     assert!(!l.f.worktree.join("src/sub/tmp.txt").exists());

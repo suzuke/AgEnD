@@ -123,10 +123,12 @@ fn everyday_work_passes_through() {
         ),
         Step::Refused("wt", vec!["switch", "agend/t-1/x"]),
         Step::Edit("README.md"),
-        Step::Ok("wt", vec!["stash", "push", "-q", "-m", "wip"]),
+        // Owner decision 2026-09-25: refs/stash is shared with the canonical
+        // checkout, so agents save work as a wip commit instead.
+        Step::Refused("wt", vec!["stash", "push", "-q", "-m", "wip"]),
+        Step::Refused("wt", vec!["stash", "pop", "-q"]),
         Step::Ok("wt", vec!["stash", "list"]),
-        Step::Ok("wt", vec!["stash", "pop", "-q"]),
-        Step::Ok("wt", vec!["commit", "-q", "-am", "c2"]),
+        Step::Ok("wt", vec!["commit", "-q", "-am", "wip: c2"]),
         Step::Ok("wt", vec!["worktree", "list"]),
         Step::Ok("wt", vec!["-C", "sub", "status"]),
         Step::Edit("sub/s.txt"),

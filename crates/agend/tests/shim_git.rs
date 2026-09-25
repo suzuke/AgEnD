@@ -11,7 +11,7 @@ mod shim_common;
 use agend_shim::audit;
 use agend_shim::binding::snapshot_path;
 use agend_shim::ctx::Ctx;
-use shim_common::{Fixture, INSTANCE, git, gitshim};
+use shim_common::{Fixture, INSTANCE, git, git_base, gitshim};
 
 #[test]
 fn bound_commit_from_workspace_lands_on_the_task_branch() {
@@ -236,6 +236,89 @@ fn reset_hard_is_snapshotted_and_restorable() {
             .any(|r| r.event == "snapshot" && r.code.as_deref() == Some("reset")),
         "{records:?}"
     );
+}
+
+/// Round 8, findings 1–2 (owner decision 2026-09-25): `refs/stash` is one
+/// list shared by the canonical checkout and every worktree. The human's
+/// stash in the canonical checkout survives every agent stash write: the
+/// shim refuses each spelling, and the hook refuses `refs/stash` when real
+/// git runs in the agent worktree (shim bypassed). Before: the agent's
+/// `stash pop` applied the human's WIP and dropped it; `stash clear`
+/// emptied the human's list.
+#[test]
+fn human_stash_survives_agent_stash_writes() {
+    let f = Fixture::new("stash");
+    std::fs::write(f.repo.join("README.md"), "HUMAN-WIP\n").unwrap();
+    git(&f.repo, &["stash", "push", "-q", "-m", "human"]);
+    let human = || {
+        let list = git(&f.repo, &["stash", "list", "--format=%H %gs"]);
+        assert!(list.ends_with("On main: human"), "{list}");
+        list
+    };
+    let before = human();
+    let untouched = |what: &str| {
+        assert_eq!(human(), before, "{what}: human's stash list");
+        assert_eq!(git(&f.worktree, &["status", "--porcelain"]), "", "{what}");
+        assert_eq!(git(&f.repo, &["status", "--porcelain"]), "", "{what}");
+    };
+    let sha = f.head(&f.repo, "refs/stash");
+    let ctx = f.ctx(&f.worktree);
+    for cmd in [
+        "stash",
+        "stash pop",
+        "stash apply",
+        "stash drop",
+        "stash clear",
+        "stash push -u",
+        "stash save x",
+        "stash branch agend/t-1/x",
+        "stash create",
+    ]
+    .iter()
+    .map(|c| c.to_string())
+    .chain([format!("stash store {sha}")])
+    {
+        let argv: Vec<&str> = cmd.split_whitespace().collect();
+        let ran = gitshim(&ctx, &argv);
+        assert_eq!(ran.refused, Some("stash_shared"), "{cmd}: {}", ran.text());
+        assert!(
+            ran.text().contains("git commit -m \"wip: "),
+            "{}",
+            ran.text()
+        );
+        untouched(&cmd);
+    }
+    let listed = gitshim(&ctx, &["stash", "list"]);
+    assert!(String::from_utf8_lossy(&listed.ok().stdout).contains("human"));
+    // The agent's own edit is refused too, and stays in its worktree.
+    std::fs::write(f.worktree.join("README.md"), "AGENT-WIP\n").unwrap();
+    assert_eq!(gitshim(&ctx, &["stash"]).refused, Some("stash_shared"));
+    assert_eq!(git(&f.repo, &["stash", "list"]).lines().count(), 1);
+    std::fs::write(f.worktree.join("README.md"), "hello\n").unwrap();
+    // Shim bypassed: real git in the agent worktree, hooks on, with and
+    // without the agent's binding in the environment.
+    for agent_env in [true, false] {
+        for args in [
+            &["stash", "clear"][..],
+            &["update-ref", "refs/stash", "HEAD"][..],
+            &["update-ref", "-d", "refs/stash"][..],
+            &["stash", "store", "-m", "x", &sha][..],
+        ] {
+            let mut cmd = git_base();
+            if agent_env {
+                cmd.env("AGEND_HOME", &f.home)
+                    .env("AGEND_INSTANCE", INSTANCE);
+            }
+            let out = cmd.arg("-C").arg(&f.worktree).args(args).output().unwrap();
+            let err = String::from_utf8_lossy(&out.stderr);
+            assert!(!out.status.success(), "{args:?} ran: {err}");
+            assert!(
+                err.contains("agents do not write git stash"),
+                "{args:?}: {err}"
+            );
+            untouched(&format!("real git {args:?}"));
+        }
+    }
 }
 
 #[test]
