@@ -15,6 +15,8 @@
 
 - daemon 端的 holder 協定 client（agent runtime adapter）
 - daemon 重啟後重連 holder、取回畫面
+- daemon 開機時與之後每 24 小時跑一次 store 的 `prune` 與每日 DB 快照（第 5 施工關 P8/P9）
+- 開 DB 時重試到 10 秒，因為重啟時 EXCLUSIVE lock 交接需要時間（第 5 施工關風險）
 
 ## 自動驗收（完成定義）
 

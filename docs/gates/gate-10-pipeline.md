@@ -18,6 +18,8 @@
 - runner（`command` 關卡）
 - forge local（merge-tree + CAS update-ref）
 - supervisor、reconcile
+- `PipelineState` 存成 task 資料列上的快照欄位，與 task 一起 CAS，不靠 replay events 重建（第 5 施工關 P4）
+- 這把 D32 延伸到 `PipelineState`，要有 golden JSON 測試；第 1 施工關的測試要重跑
 
 ## 自動驗收（完成定義）
 
