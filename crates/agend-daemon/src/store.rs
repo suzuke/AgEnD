@@ -11,17 +11,19 @@
 //! - The database is `<home>/agend.db` (created 0600; home, any missing
 //!   parent of it, and `backups/` created 0700). The caller passes the home;
 //!   the store reads no environment variable.
-//! - A new database is built as `<home>/.agend.db.new` and hard-linked to
-//!   `agend.db` only after every migration has committed, so an existing
-//!   `agend.db` is always a database this store finished creating. A build
-//!   file left by a failed or killed creation is removed and built again. One that
-//!   is empty (0 bytes) or has schema version 0 was damaged or replaced; the
-//!   store refuses it ([`StoreError::Empty`], [`StoreError::NoSchema`]), as
-//!   it does one that lacks a table of its version
-//!   ([`StoreError::MissingTables`])
-//!   without changing a byte, instead of starting over with an empty
-//!   database whose daily snapshots would push the good ones out. `locking_mode=EXCLUSIVE` is taken when the store
-//!   opens, so a second process fails with [`StoreError::InUse`].
+//! - A new database is built as `<home>/.agend.db.new` and hard-linked (or,
+//!   without hard links, renamed) to `agend.db` only after every migration
+//!   has committed, so an existing `agend.db` is always a database this
+//!   store finished creating. A build file left by a failed or killed
+//!   creation is removed and built again. An `agend.db` that is shorter
+//!   than a SQLite header, has schema version 0, or lacks a table of its
+//!   version was damaged or replaced; the store refuses it
+//!   ([`StoreError::Empty`], [`StoreError::NoSchema`],
+//!   [`StoreError::MissingTables`]) without changing a byte, instead of
+//!   starting over with an empty database whose daily snapshots would push
+//!   the good ones out. A dangling symlink or a non-file is refused too
+//!   ([`StoreError::Refused`]). `locking_mode=EXCLUSIVE` is taken when the
+//!   store opens, so a second process fails with [`StoreError::InUse`].
 //! - Forward-only migrations ([`migrate`]) tracked in `PRAGMA user_version`;
 //!   a database newer than this binary is refused without a single byte
 //!   changed, and an upgrade first writes a DB snapshot.
@@ -68,6 +70,8 @@ const NEW_DB_FILE: &str = ".agend.db.new";
 pub const BACKUPS_DIR: &str = "backups";
 /// Name of the thread that owns the connection.
 pub const THREAD_NAME: &str = "agend-db";
+/// Size of the SQLite file header; a shorter file is not a database.
+const SQLITE_HEADER_LEN: u64 = 100;
 /// Requests that may wait for the DB thread before senders wait too.
 const QUEUE_CAPACITY: usize = 256;
 
@@ -83,8 +87,10 @@ pub enum StoreError {
         supported: i64,
         home: PathBuf,
     },
-    /// `agend.db` exists but is 0 bytes (truncated, or replaced).
+    /// `agend.db` exists but is 0 bytes, or shorter than a SQLite header
+    /// (truncated, or replaced).
     Empty {
+        len: u64,
         home: PathBuf,
     },
     /// `agend.db` exists but has schema version 0: it is not a database
@@ -145,10 +151,17 @@ impl fmt::Display for StoreError {
                  install a newer agend or restore a snapshot from {}",
                 home.join(BACKUPS_DIR).display()
             ),
-            Self::Empty { home } => write!(
+            Self::Empty { len: 0, home } => write!(
                 f,
                 "{DB_FILE} exists but is empty (0 bytes); refusing to start with an empty \
                  database — restore a snapshot from {} (see README)",
+                home.join(BACKUPS_DIR).display()
+            ),
+            Self::Empty { len, home } => write!(
+                f,
+                "{DB_FILE} exists but is only {len} bytes, shorter than a SQLite header \
+                 ({SQLITE_HEADER_LEN}); refusing to start with it — restore a snapshot from {} \
+                 (see README)",
                 home.join(BACKUPS_DIR).display()
             ),
             Self::NoSchema { home } => write!(
@@ -416,15 +429,10 @@ fn open_connection(
 ) -> Result<Connection, StoreError> {
     create_private_dir(home)?;
     let db = home.join(DB_FILE);
-    match fs::metadata(&db) {
+    match fs::symlink_metadata(&db) {
         Err(e) if e.kind() == io::ErrorKind::NotFound => create_database(home, &db, migrations)?,
         Err(e) => return Err(e.into()),
-        Ok(meta) if meta.len() == 0 => {
-            return Err(StoreError::Empty {
-                home: home.to_path_buf(),
-            });
-        }
-        Ok(_) => {}
+        Ok(_) => check_existing(home, &db)?,
     }
     let mut conn = lock(&db)?;
     let found = user_version(&conn)?;
@@ -469,6 +477,34 @@ fn open_connection(
     }
     migrate::apply(&mut conn, found, migrations)?;
     Ok(conn)
+}
+
+/// What can be refused about an existing `agend.db` before SQLite opens it
+/// (opening a file shorter than the header makes SQLite write one).
+fn check_existing(home: &Path, db: &Path) -> Result<(), StoreError> {
+    let meta = match fs::metadata(db) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            return Err(StoreError::Refused {
+                path: db.to_path_buf(),
+                reason: "it is a symlink to a missing file; restore the link's target or \
+                         remove the link",
+            });
+        }
+        found => found?,
+    };
+    if !meta.is_file() {
+        return Err(StoreError::Refused {
+            path: db.to_path_buf(),
+            reason: "it is not a regular file",
+        });
+    }
+    if meta.len() < SQLITE_HEADER_LEN {
+        return Err(StoreError::Empty {
+            len: meta.len(),
+            home: home.to_path_buf(),
+        });
+    }
+    Ok(())
 }
 
 /// Builds a new database in [`NEW_DB_FILE`] (rollback journal, every

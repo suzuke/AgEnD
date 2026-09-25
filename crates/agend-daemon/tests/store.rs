@@ -607,6 +607,55 @@ fn a_zero_byte_database_is_refused_and_left_untouched() {
     assert_eq!((listing(&home), listing(&home.join(BACKUPS_DIR))), before);
 }
 
+/// Verifier finding (gate 5 round 2): a 1-byte `agend.db` was refused, but
+/// SQLite had already written a 4096-byte header into it. A file shorter
+/// than the header is refused before SQLite opens it.
+#[test]
+fn a_database_shorter_than_a_sqlite_header_is_refused_and_left_untouched() {
+    let dir = TempDir::new("store-one-byte").unwrap();
+    let home = dir.path().join("home");
+    fs::create_dir(&home).unwrap();
+    let db = home.join(DB_FILE);
+    for content in [&b"x"[..], &[0u8; 99][..]] {
+        fs::write(&db, content).unwrap();
+        let before = (sha256(&db), listing(&home));
+        let error = SqliteStore::open(&home, NOW).err().unwrap();
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "agend.db exists but is only {} bytes, shorter than a SQLite header (100); \
+                 refusing to start with it — restore a snapshot from {} (see README)",
+                content.len(),
+                home.join("backups").display()
+            )
+        );
+        assert_eq!((sha256(&db), listing(&home)), before);
+    }
+}
+
+/// Verifier finding (gate 5 round 2): a dangling-symlink `agend.db` failed
+/// with `File exists (os error 17)` and left a built `.agend.db.new`.
+#[test]
+fn a_dangling_symlink_database_is_refused_with_a_clear_message() {
+    let dir = TempDir::new("store-dangling").unwrap();
+    let home = dir.path().join("home");
+    fs::create_dir(&home).unwrap();
+    let db = home.join(DB_FILE);
+    std::os::unix::fs::symlink(dir.path().join("gone.db"), &db).unwrap();
+
+    let error = SqliteStore::open(&home, NOW).err().unwrap();
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "refusing to use {}: it is a symlink to a missing file; restore the link's \
+             target or remove the link",
+            db.display()
+        )
+    );
+    assert_eq!(listing(&home), BTreeSet::from([DB_FILE.to_owned()]));
+    assert!(!dir.path().join("gone.db").exists());
+}
+
 /// The other shape that looks new: a valid SQLite file with schema version
 /// 0. This store never links such a file to `agend.db`, so it is refused
 /// too, byte for byte unchanged.
