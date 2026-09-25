@@ -110,6 +110,12 @@
 | spike | spike | — | 開工前的實測（第 0 階段）；結論在 BACKEND-BEHAVIORS，原始紀錄在 research/。 | 施工關 | [ROADMAP](ROADMAP.md#第-0-階段spike)、[research](research/README.md) |
 | 探索器 | explorer | `tests/pipeline_explorer.rs`、`tests/pipeline_explorer_splitmix.rs` | 不加依賴的 property test：固定種子產生大量事件序列跑狀態機，每一步用只看被接受事件的 oracle 檢查 merge 門檻、不跳過關卡、返工不遺失等不變量。 | 單元測試；竄改狀態測試 | [agend-core TESTING](../crates/agend-core/TESTING.md#狀態機探索器) |
 | 竄改狀態 | tampered state | `pipeline::state::tests::tampered_states_never_panic_and_never_merge_past_the_records` | 刻意改壞欄位（任意關卡位置、status、head、紀錄）的流水線狀態；只有 crate 內的測試造得出來，用來證明 `step` 不 panic、紀錄不足時不會 merge。 | 已驗證 workflow（外部只能從它建立狀態） | [agend-core TESTING](../crates/agend-core/TESTING.md#狀態機探索器) |
+| 假實作 | fake | crate `agend-testkit` 的 `fakes::Fake*`（`FakeDriver`、`FakeForge`…） | 一個 core trait 的測試用實作：可預測（計數器產生 id）、可檢查（`calls()`）、可編排（`fail_next`）；必須通過該 trait 的契約測試。 | mock（只驗呼叫、不守契約）；假 agent（是程式，不是 trait 實作） | D9、[agend-testkit](../crates/agend-testkit/README.md) |
+| 契約測試 | contract suite | `contract::<trait>::run`、`contract::Report` | 一個 trait 的一組具名規則，對假實作與真實作跑同一份，讓假實作不會漂移；報表一行 `contract Forge: fake 10/10 pass`；規則編號見 [CONTRACTS.md](../crates/agend-testkit/CONTRACTS.md)。 | 單元測試；protocol golden 測試 | D9、v1 #1483、[agend-testkit](../crates/agend-testkit/README.md#契約測試怎麼接真實作) |
+| 契約 fixture | contract fixture | `contract::<trait>::<Trait>Fixture`（例如 `ForgeFixture`） | 契約測試除了 trait 之外需要的操作（例如「在 branch 上 commit」）；每個實作各寫一個。 | 螢幕 fixture（畫面擷取） | [agend-testkit](../crates/agend-testkit/README.md#契約測試怎麼接真實作) |
+| 契約規則／mutant | contract rule／mutant | `Case::rule`（`DRV-1`…`RUN-9`）、`tests/contract_teeth/` | 契約測試裡一條有編號的規則，全部列在 [CONTRACTS.md](../crates/agend-testkit/CONTRACTS.md)；mutant 是故意違反某條規則的實作，契約 suite 必須在標著那條規則的 case 上失敗。 | 決策編號（D1…）；mutation testing 工具 | D9、[agend-testkit](../crates/agend-testkit/CONTRACTS.md) |
+| 假 daemon | fake daemon | `fake_daemon::FakeDaemon`、`ProbeClient` | 測試行程內的 client protocol v1 server，給 client／CLI／TUI 測試用；會執行事件身分規則。 | 真 daemon 的 `server` 模組 | [agend-testkit](../crates/agend-testkit/README.md#假-daemon) |
+| 假 agent | fake agent | `fake-codex-app-server`、`fake-opencode-serve`、`fake-claude`（`fake_agent::*`） | 只講真 backend 協定一小部分的程式，回覆固定、stdin 結束就正常結束；涵蓋範圍寫在各模組開頭。 | 假實作（trait 層）；真 backend 的 smoke test | [agend-testkit](../crates/agend-testkit/README.md#假-agent-程式) |
 | 決策 | decision (D*n*) | — | 經使用者確認的設計決定，有 D 編號；沒有新證據就不重開。 | **請示**；**Stop hook decision** | [DECISIONS](DECISIONS.md) |
 
 ## 細節：為什麼是「關卡」與「施工關」
