@@ -75,7 +75,7 @@ daemon 重啟：`RuntimeFixture`、`DriverFixture`、`StoreFixture` 各有一個
 |---|---|
 | `canonical()` | repo，`main` 上有一個初始 commit，`origin` 指向下面的 bare repo，`main` 已 push |
 | `origin()` | bare 的 team origin（`origin.git`） |
-| `add_worktree(name, branch, from)` | `worktrees/<name>`：canonical 的 linked worktree，在新 branch 上 |
+| `add_worktree(name, branch, from)` | `worktrees/<name>`：canonical 的 linked worktree，在新 branch 上；`name` 是 `.git`（不分大小寫）就 panic，不建任何東西 |
 
 其他：`branch(name, from)`、`commit(dir, file, message)`（回新的 head）、`rev_parse`、`is_ancestor`、`git(dir, args)`（失敗就 panic 並印 stderr）、`command(program, dir)`（給要自己跑程式的測試，例如第 3 施工關的 shim）。drop 時整個目錄刪掉。
 
