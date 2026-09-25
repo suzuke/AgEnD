@@ -635,6 +635,46 @@ fn a_database_with_schema_version_zero_is_refused_and_left_untouched() {
     assert_eq!((sha256(&db), listing(&home)), before);
 }
 
+/// Verifier finding (gate 5 round 2): a valid header with schema version 1
+/// and no tables opened, every task call failed, and its daily snapshots
+/// pushed the good ones out. The tables of the recorded version must be
+/// there.
+#[test]
+fn a_database_missing_a_table_of_its_version_is_refused_and_left_untouched() {
+    let dir = TempDir::new("store-missing-tables").unwrap();
+    let home = dir.path().join("home");
+    drop(SqliteStore::open(&home, NOW).unwrap());
+    let db = home.join(DB_FILE);
+    Connection::open(&db)
+        .unwrap()
+        .execute_batch("DROP TABLE task_events; DROP TABLE workflows;")
+        .unwrap();
+    assert_eq!(user_version(&db), 1);
+    let before = (sha256(&db), listing(&home));
+
+    let error = SqliteStore::open(&home, NOW).err().unwrap();
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "agend.db has schema version 1 but lacks its table(s) task_events, workflows; \
+             refusing to start with it — restore a snapshot from {} (see README)",
+            home.join("backups").display()
+        )
+    );
+    assert_eq!((sha256(&db), listing(&home)), before);
+
+    // A version 1 header on a database with no tables at all.
+    fs::remove_file(&db).unwrap();
+    let conn = Connection::open(&db).unwrap();
+    conn.pragma_update(None, "user_version", 1).unwrap();
+    drop(conn);
+    let error = SqliteStore::open(&home, NOW).err().unwrap();
+    assert!(
+        matches!(&error, StoreError::MissingTables { found: 1, missing, .. } if missing.len() == 3),
+        "{error}"
+    );
+}
+
 #[test]
 fn a_too_new_database_is_refused_and_not_a_byte_changes() {
     let dir = TempDir::new("store-too-new").unwrap();

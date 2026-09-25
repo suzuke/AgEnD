@@ -16,7 +16,9 @@
 //!   `agend.db` is always a database this store finished creating. A build
 //!   file left by a failed or killed creation is removed and built again. One that
 //!   is empty (0 bytes) or has schema version 0 was damaged or replaced; the
-//!   store refuses it ([`StoreError::Empty`], [`StoreError::NoSchema`])
+//!   store refuses it ([`StoreError::Empty`], [`StoreError::NoSchema`]), as
+//!   it does one that lacks a table of its version
+//!   ([`StoreError::MissingTables`])
 //!   without changing a byte, instead of starting over with an empty
 //!   database whose daily snapshots would push the good ones out. `locking_mode=EXCLUSIVE` is taken when the store
 //!   opens, so a second process fails with [`StoreError::InUse`].
@@ -90,6 +92,13 @@ pub enum StoreError {
     NoSchema {
         home: PathBuf,
     },
+    /// `agend.db` has schema version `found` but lacks tables that version
+    /// has.
+    MissingTables {
+        found: i64,
+        missing: Vec<String>,
+        home: PathBuf,
+    },
     /// The DB thread is gone (it panicked); the daemon must restart.
     Stopped,
     /// A migration failed; it was rolled back and `user_version` is unchanged.
@@ -146,6 +155,17 @@ impl fmt::Display for StoreError {
                 f,
                 "{DB_FILE} exists but has no agend schema (schema version 0); refusing to \
                  start with it — restore a snapshot from {} (see README)",
+                home.join(BACKUPS_DIR).display()
+            ),
+            Self::MissingTables {
+                found,
+                missing,
+                home,
+            } => write!(
+                f,
+                "{DB_FILE} has schema version {found} but lacks its table(s) {}; refusing to \
+                 start with it — restore a snapshot from {} (see README)",
+                missing.join(", "),
                 home.join(BACKUPS_DIR).display()
             ),
             Self::Stopped => f.write_str("store thread stopped"),
@@ -421,6 +441,14 @@ fn open_connection(
             home: home.to_path_buf(),
         });
     }
+    let missing = missing_tables(&conn, &migrations[..found as usize])?;
+    if !missing.is_empty() {
+        return Err(StoreError::MissingTables {
+            found,
+            missing,
+            home: home.to_path_buf(),
+        });
+    }
     // A creation killed between linking and removing the build file's name
     // leaves a second name for this file; the lock on it is held here. A
     // build file that is another file belongs to a creator still running.
@@ -600,6 +628,27 @@ fn lock(path: &Path) -> Result<Connection, StoreError> {
             }
         })?;
     Ok(conn)
+}
+
+/// Tables that the `applied` migrations create but `conn` lacks. The
+/// expected list comes from running those migrations on an in-memory
+/// database, so it is right for every recorded version (the tests pin the
+/// latest one to `golden/schema.sql`). Only reads `conn`.
+fn missing_tables(conn: &Connection, applied: &[Migration]) -> Result<Vec<String>, StoreError> {
+    let mut expected = Connection::open_in_memory()?;
+    migrate::apply(&mut expected, 0, applied)?;
+    let present = table_names(conn)?;
+    Ok(table_names(&expected)?
+        .into_iter()
+        .filter(|name| !present.contains(name))
+        .collect())
+}
+
+fn table_names(conn: &Connection) -> Result<Vec<String>, StoreError> {
+    let mut stmt =
+        conn.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")?;
+    let names = stmt.query_map([], |row| row.get(0))?;
+    Ok(names.collect::<Result<_, _>>()?)
 }
 
 fn user_version(conn: &Connection) -> Result<i64, StoreError> {
