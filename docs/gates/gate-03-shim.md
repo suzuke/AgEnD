@@ -23,7 +23,7 @@
 
 ## 狀態
 
-**實作中**（2026-09-25，draft PR #107；依使用者決定改成 hook 設計（T21），verifier 第 1–9 輪的犯錯類案例改由 shim 或 hook 擋；agent 不寫 git stash（使用者已決定，T22）、不用 autostash（使用者已決定，T23），待 fresh verifier 與你親自驗收）
+**完成**（2026-09-26）：#107 已 merge（`6ead942`），verifier r13 CONFIRMED（0 finding），使用者親自驗收 8 步通過；T1–T23 使用者全部決定。
 
 ## 範圍
 
@@ -83,7 +83,7 @@ TMPDIR=$(mktemp -d) ~/.cargo/bin/cargo test --workspace   # 不靠暫存目錄�
 
    應該看到：fmt、clippy、`cargo test -p agend-shim`、`cargo test -p agend`、check-deps，接著 `== shim demo ==`，setup 有一行 `agend git hooks  <tmp>/home/hooks, set in the worktree's config.worktree only`，然後 7 段 `-- route`、`-- refuse`、`-- snapshot`、`-- protected ref`、`-- hooks`、`-- kill guard`、`-- audit`，每個檢查一行 `ok: …`。最後兩行：`shim demo: all checks passed`、`gate 3 (shim): checks passed`。
 
-   - [ ] 通過
+   - [x] 通過
 
 2. 導向：在綁定狀態下 commit。
 
@@ -93,7 +93,7 @@ TMPDIR=$(mktemp -d) ~/.cargo/bin/cargo test --workspace   # 不靠暫存目錄�
 
    應該看到：`ok: commit "fix" is on agend/t-1/fix`；在 workspace（`cwd: <tmp>/home/workspace/dev-1`）與 canonical checkout（`cwd: <tmp>/repo`）跑的 `git add`、`git commit` 都印出 `agend-shim: running in your bound worktree …`；最後 `ok: canonical main did not move`、`ok: canonical checkout is clean`。
 
-   - [ ] 通過
+   - [x] 通過
 
 3. 故意弄壞：`git checkout main`、`git worktree add`。
 
@@ -111,7 +111,7 @@ TMPDIR=$(mktemp -d) ~/.cargo/bin/cargo test --workspace   # 不靠暫存目錄�
 
    接著 `ok: still on agend/t-1/fix`；`git worktree add ../mine` 也被拒絕（`only the daemon creates and removes worktrees`）、`ok: no new worktree`。
 
-   - [ ] 通過
+   - [x] 通過
 
 4. `git reset --hard` 快照與還原。
 
@@ -121,7 +121,7 @@ TMPDIR=$(mktemp -d) ~/.cargo/bin/cargo test --workspace   # 不靠暫存目錄�
 
    應該看到：`agend-shim: snapshot <id> saved before `git reset --hard HEAD~1`` 與 `agend-shim: to undo: git reset --keep <sha> && git restore --source=refs/agend/snapshots/dev-1/<id> -- :/`；demo 照這行執行後 `ok: fix.txt is back, including the unsaved work`、`ok: the reset commits are back`。
 
-   - [ ] 通過
+   - [x] 通過
 
 5. protected ref：hook 擋住寫 main，自己的 branch 照常 push。
 
@@ -131,7 +131,7 @@ TMPDIR=$(mktemp -d) ~/.cargo/bin/cargo test --workspace   # 不靠暫存目錄�
 
    應該看到：`git update-ref refs/heads/main HEAD`、`git push . HEAD:main`、`git branch -f master HEAD`、`git push origin HEAD:main` 各有 `agend-shim: refused `… (agend reference-transaction hook)`` 或 `(agend pre-push hook)`，理由 `it is a protected ref and only the daemon changes it`；接著 `ok: main did not move`、`ok: origin's main did not move`、`ok: pushing your own branch runs`、``ok: plain `git push` runs (git resolves it to your branch)``。
 
-   - [ ] 通過
+   - [x] 通過
 
 6. hook 只在 agent worktree、專案 hook 照跑、不能跳過。
 
@@ -141,7 +141,7 @@ TMPDIR=$(mktemp -d) ~/.cargo/bin/cargo test --workspace   # 不靠暫存目錄�
 
    應該看到：`ok: the canonical checkout has no core.hooksPath`、`ok: the project's pre-commit hook ran from the agent worktree`、兩個 `ok: skipping the hooks is refused`（理由含 `would skip the agend`）、`ok: a human commit on main in the canonical checkout still works`。
 
-   - [ ] 通過
+   - [x] 通過
 
 7. 故意弄壞：`kill` 一個 holder、`pkill` 別人的程序。
 
@@ -151,7 +151,7 @@ TMPDIR=$(mktemp -d) ~/.cargo/bin/cargo test --workspace   # 不靠暫存目錄�
 
    應該看到：`kill <pid>`（假 holder）被拒絕，理由 `is an agend process`；`pkill -f sleep 300` 被拒絕，下一步 `pgrep -fl -- 'sleep 300'`；`ok: holder still alive`；`kill <自己的 pid>` 是 `exit 0`、`ok: only that call reached the (fake) real kill`。`-- audit` 段列出 10 筆 `refuse`（其中 4 筆是 hook 記的 `protected_ref`）與 3 筆 `snapshot`。
 
-   - [ ] 通過
+   - [x] 通過
 
 8. 自己動手：hook 裝在哪、binding 快照壞掉時。
 
@@ -180,7 +180,7 @@ TMPDIR=$(mktemp -d) ~/.cargo/bin/cargo test --workspace   # 不靠暫存目錄�
 
    最後一個指令直接用真的 git、繞過 shim：應該看到 `agend-shim: refused `update HEAD (agend reference-transaction hook)``、`why: the agend hook cannot read your binding …`、`fatal: ref updates aborted by hook`、`exit=128`（hook 讀不到 binding 就拒絕）。最後照輸出的 `remove it afterwards: rm -rf <tmp>` 刪掉暫存目錄，並開新終端機（`export` 改了 PATH）。
 
-   - [ ] 通過
+   - [x] 通過
 
 ## 待你追認
 
@@ -248,12 +248,13 @@ shim 是安全帶，不是安全邊界。照[威脅模型](#威脅模型)，以�
 
 | 日期 | 結果（通過／不通過） | 備註 |
 |---|---|---|
-|  |  |  |
+| 2026-09-26 | 通過 | 使用者在 PR 分支 `feat/gate-03-shim`（`65f2dfd`）由 agent 帶著跑完步驟 1–8；每步輸出由 agent 逐項比對相符。步驟 8 手動在保留的 demo 現場跑 6 項：hook 只在 agent worktree 的 `config.worktree`、使用者 repo 無 hook、workspace 導向、binding 壞掉時 shim 拒絕（exit 1）、worktree 內讀取照常、繞過 shim 直接用 `/usr/bin/git` 時 hook 仍拒絕（exit 128）。 |
 
 ## 進度紀錄
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-26 #107 merge（`6ead942`）；使用者親自驗收 8 步通過，狀態改為完成。
 - 2026-09-25 verifier 第 12 輪修正（draft PR #107）：不在任何 repo 的目錄（`/tmp/x`、`~`、`$AGEND_HOME` 的上層）裡不帶 `-C` 的 git，shim 原本都當成從 workspace 呼叫、在整個綁定的 worktree 跑（LOW；T6、已知限制、README 第 7 步都只寫 workspace；真 git 是 `not a git repository`）；現在只有自己的 workspace（`<AGEND_HOME>/workspace/<instance>` 或它底下，比對 canonical 路徑；新的 `Location::Workspace`）導向，其他地方寫入拒絕（`no_repo_there`，照 git 的 `not a git repository`，下一步 `cd <worktree>`）、讀取照打的跑；導向一律印出 `running in your bound worktree` 那行（原本從 workspace 不印）；cwd 被刪掉時不用 cwd 的呼叫（`--version`、第一個 `-C` 是絕對路徑）照真 git 跑，寫入照一般規則；`remote prune --dry-run|-n` 改算讀取；T6、範圍、已知限制、README 改正；回歸測試 `shim_route_scope.rs`（`checkout .`、`restore .`、`reset --hard`、`clean -fd`、`rm -r -q -f .`、`add .`、`commit -a` × fixture 外的 scratch、它的子目錄、`$AGEND_HOME` 的上層：21 案在舊程式碼上都紅、修改真的不見或被 commit；被刪掉的 cwd 的 `--version`、`-C <worktree>` 在舊程式碼上也紅）；production 3,239 → 3,260 行
 - 2026-09-25 verifier 第 11 輪修正（draft PR #107）：cwd 已經被刪掉時（`cd target/debug; cargo clean; git restore .`），shim 原本把 cwd 當成 `.`、git 找不到 repo，就當成從 workspace 呼叫、在整個綁定的 worktree 跑（LOW；從 canonical、別的 agent 的 worktree 也跑到自己的 worktree，從巢狀 repo 跑到上層 worktree；真 git 是 `fatal: Unable to read current working directory`）；現在讀不到 cwd 就拒絕（`cwd_unreadable`，照 git 的說法，下一步 `cd <worktree>`），拿掉 `.` 的替代；`git remote` 的寫入（add、remove／rm、rename、set-url、set-head、set-branches、prune、`update --prune`）改成拒絕（`remote_write`；原本會改 canonical 共用的 config），`remote -v`、`get-url`、`show` 照常（`shim_bypass_corpus.rs` 第 6 輪當成無害的 `remote add --mirror=fetch` 改成預期拒絕）；回歸測試 `shim_route_scope.rs`（真的 binary 從被刪掉的目錄跑 `restore .`／`checkout .`／`clean -fd`／`rm -r -f .` × worktree、canonical、別的 worktree、巢狀 repo，16 案在舊程式碼上都紅、修改真的不見）、`shim_everyday.rs` 與 unit `remote_writes_are_refused` 在舊程式碼上都紅；「待你追認」T1–T20 使用者已追認（2026-09-25）；production 3,219 → 3,239 行
 - 2026-09-25 verifier 第 10 輪修正（draft PR #107）：`-C`／`--git-dir`／`--work-tree`／`GIT_DIR`／`GIT_WORK_TREE` 指到 git 找不到 repo 的地方時（`git -C src/sbu checkout .` 這類打錯字），shim 原本當成「不在 repo」丟掉 `-C`、在整個綁定的 worktree 跑（LOW，T6 原本寫錯）；現在寫入拒絕（`no_repo_there`，照 git 的意思寫 `cannot change to '<dir>'`／`not a git repository`），讀取照打的跑，workspace 導向只留給沒帶這些的呼叫；另外 canonical 裡沒初始化的 submodule（空的 `mod/`）導向時會落進 worktree 裡初始化好的 submodule（另一個 repo，快照只有 gitlink，修改會不見），改為 `route_dir_missing` 拒絕；T6、範圍、已知限制改正；回歸測試 `shim_route_scope.rs`（5 個命令 × worktree／子目錄／canonical／workspace 的 `-C typo`，加 `-C src/sbu`、`-C <不是 repo 的目錄>`、canonical 的 `-C mod`、`--git-dir`、`--work-tree`、`GIT_DIR`、`GIT_WORK_TREE`）與 `shim_submodule.rs` 在舊程式碼上都紅（25 案裡 23 案真的丟了修改；`--git-dir`／`--work-tree` 原本就以 `work_tree_retarget` 拒絕）；production 3,200 → 3,219 行

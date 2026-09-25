@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - 依 crate 由下往上分 13 個施工關；每個施工關單獨驗收，使用者確認後才開下一個施工關（D22）。
-> - 目前狀態：**第 1、2 施工關完成**（使用者 2026-09-25 親自驗收通過）；每個施工關狀態看下表，做了什麼看最下面的「進度紀錄」。
-> - 下一步：第 3 施工關（draft PR #107）KISS 重構中，通過驗證後由使用者決定 merge 與親自驗收。
+> - 目前狀態：**第 1、2、3 施工關完成**（第 1、2 關 2026-09-25、第 3 關 2026-09-26 使用者親自驗收通過）；每個施工關狀態看下表，做了什麼看最下面的「進度紀錄」。
+> - 下一步：第 4 施工關（draft #118）、第 5 施工關（draft #122）、第 11 施工關畫面層（draft #120）已通過 verifier，等使用者追認、merge 與親自驗收。
 
 ## 13 個施工關
 
@@ -13,7 +13,7 @@
 |---|---|---|---|
 | 1 `core` | [完成（2026-09-25）](gates/gate-01-core.md) | agend-core：型別、兩套協定（client + holder）、trait、流水線狀態機（6 種關卡）、busy policy、去抖動、衝突偵測、merge 門檻（patch-id）、螢幕分類器 | `cargo xtask accept core` 跑測試並印出一個模擬 task 走完 `code` workflow（純邏輯，無 daemon） |
 | 2 `testkit` | [完成（2026-09-25）](gates/gate-02-testkit.md) | 每個 trait 的假實作、契約測試套件、假 daemon、假 agent 程式 | 契約測試通過；假 agent 可單獨啟動並回應 |
-| 3 `shim` | [未開始](gates/gate-03-shim.md) | git／kill 防護、導向 worktree、protected-ref、快照與還原 | 在暫存 repo 以 `git` 名稱執行 shim：導向、拒絕、快照後還原 |
+| 3 `shim` | [完成（2026-09-26）](gates/gate-03-shim.md) | git／kill 防護、導向 worktree、protected-ref、快照與還原 | 在暫存 repo 以 `git` 名稱執行 shim：導向、拒絕、快照後還原 |
 | 4 `holder` | [提案中](gates/gate-04-holder.md) | PTY、畫面、holder 協定、活過 daemon（附屬程序移到第 7 施工關） | `agend holder` 包 bash + 小型探測 client：啟動器結束後 holder 還在、讀畫面、送鍵、中途斷線重連、四次開機，bash 存活 |
 | 5 `store` | [提案中](gates/gate-05-store.md) | daemon store：SQLite schema、migration、保留期限、每日快照 | 真的 DB 檔（temp dir）、跨真的 process 驗；xtask 命令印出資料表 |
 | 6 `daemon-holder` | [未開始](gates/gate-06-daemon-holder.md) | 整合施工關：agent runtime adapter | 真 daemon + 真 holder；重啟 daemon，agent 與畫面存活 |
@@ -77,6 +77,7 @@ cat docs/gates/gate-01-core.md
 
 每完成一件事加一行（日期 + 一行 + commit／PR），新的在上面。
 
+- 2026-09-26 第 3 施工關 merge（#107，`6ead942`），verifier r13 CONFIRMED；使用者親自驗收通過，狀態改為完成。
 - 2026-09-25 第 5 施工關開工前提案 P1–P9 使用者逐題確認；狀態改為提案中（等第 4 施工關完成後開工）。
 - 2026-09-25 第 4 施工關開工前提案 P1–P9 使用者逐題確認；狀態改為提案中（等第 3 施工關完成後開工）。
 - 2026-09-25 錄製器 + 真 CLI 一致性檢查（使用者決定）：錄下 claude、codex、opencode 各 5 個情境，假 agent 照錄製檔修正；第 7、12 施工關把一致性檢查列為必要完成條件（`feat/backend-recorder`，見 [RECORDER.md](../crates/agend-testkit/RECORDER.md)）。
