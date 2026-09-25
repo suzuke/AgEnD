@@ -304,6 +304,7 @@ owner 睡著時由實作者決定、可以反悔的事（頁面沒寫到的設�
 | S13 | `tasks` 加 CHECK（`status` 字面值、`requires_repo` 0/1、`depends_on` 是 JSON 陣列、版本 ≥ 1）；`task_events.seq` 是 `INTEGER PRIMARY KEY` 不加 `AUTOINCREMENT`；事件兩個 index（依 task、依時間） | CHECK 擋手動 `sqlite3` 寫壞的值；`AUTOINCREMENT` 會多一張 `sqlite_sequence` 表（又要保留規則），而 seq 只用來排序，被刪的 seq 重用無害；index 讓讀事件與 prune 不掃全表 | 要改就是新 migration（已發佈的 0001 不能改） | 待追認 |
 | S14 | demo 是 `crates/agend-daemon/examples/store_demo.rs`，與 `tests/store_process.rs` 共用 `tests/common/store_process.rs`（`#[path]`），子程序都是重新執行自己；demo 目錄在 `$TMPDIR`，`AGEND_STORE_DEMO_KEEP=1` 保留並印 `export SNAP=…` | 不為測試多一個 production 子命令（P7）；同一份子程序邏輯，demo 印的就是測試驗的 | 改成 `agend` 的隱藏子命令：要動 `agend` crate | 待追認 |
 | S15 | 7 份輪替依檔名排序（＝日期）；同一天 `-pre-vN` 排在每日快照前（`-` < `.`），先被刪 | 檔名就是日期，不看 mtime（複製、還原會改 mtime）；同一天的每日快照是升級後做的，比較新 | 改看 mtime 或把 pre 快照另算：`snapshot::rotate` | 待追認 |
+| S16 | `agend-daemon` 另加 `serde_json`（`depends_on` 的 JSON 文字）、`toml`（workflow，與 xtask 同版本 1.1.6）；dev 依賴 `sha2`（too-new 測試與 demo 的 sha256） | 頁面只列 rusqlite 與 tokio；這三個是 P3、P5 描述的格式與檢查所需，且 workspace 已在用 | 換掉：手寫 JSON 陣列／比對整個檔案位元組 | 待追認 |
 
 ## 驗收紀錄
 
