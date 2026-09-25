@@ -7,19 +7,23 @@
 //! commit ids are reproducible), `GIT_CEILING_DIRECTORIES` at the fixture
 //! root, and every inherited `GIT_*` / `AGEND_*` variable removed.
 //!
-//! Must NOT: run a command whose working directory is not strictly inside
-//! its temp directory (the root itself is only a container: git's ceiling
-//! stops discovery below it, never at it), let [`GitFixture::git`] take a
-//! global option (`-C`, `--git-dir`, `-c`, …) that picks another repo, or
-//! let [`GitFixture::commit`] write through a symlink. A harness whose `cd`
-//! failed once ran destructive git in a real repo. Not checked: path
-//! arguments after the subcommand, and anything passed to
-//! [`GitFixture::command`] besides its directory.
+//! Must NOT: run a command outside the repos it created (canonical, origin,
+//! a linked worktree, or their subdirectories), so git's discovery always
+//! starts in a fixture repo and never in a bare directory from which it
+//! could walk up into an enclosing repo; accept a temp dir or label
+//! containing the path-list separator (`:`, `;` on Windows), which would
+//! silently void `GIT_CEILING_DIRECTORIES`; let [`GitFixture::git`] take a
+//! global option (`-C`, `--git-dir`, `-c`, …) that picks another repo; or
+//! let [`GitFixture::commit`] write through a symlink or a hard link or
+//! into a `.git` path. A harness whose `cd` failed once ran destructive git
+//! in a real repo. Not checked: path arguments after the subcommand, and
+//! anything passed to [`GitFixture::command`] besides its directory.
 
 use std::ffi::OsStr;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
 
 use crate::tempdir::TempDir;
 
@@ -27,6 +31,9 @@ use crate::tempdir::TempDir;
 pub const MAIN: &str = "main";
 
 const NULL_DEVICE: &str = if cfg!(windows) { "NUL" } else { "/dev/null" };
+
+/// Separator git uses to split `GIT_CEILING_DIRECTORIES`.
+const PATH_LIST_SEPARATOR: char = if cfg!(windows) { ';' } else { ':' };
 
 /// Variables removed by name even when the sweep below would not see them
 /// (e.g. set later in the parent); the sweep removes every other inherited
@@ -46,22 +53,46 @@ const REMOVED: &[&str] = &[
 pub struct GitFixture {
     _dir: TempDir,
     root: PathBuf,
+    /// Linked worktrees made by [`GitFixture::add_worktree`].
+    worktrees: Mutex<Vec<PathBuf>>,
 }
 
 impl GitFixture {
     /// Creates the canonical repo with one commit on [`MAIN`] and the bare
-    /// origin it is pushed to.
+    /// origin it is pushed to. Fails with `InvalidInput`, creating nothing,
+    /// if `label` contains `:` or `;` or the temp dir contains the
+    /// path-list separator.
     pub fn new(label: &str) -> io::Result<GitFixture> {
         GitFixture::new_in(&std::env::temp_dir(), label)
     }
 
     fn new_in(parent: &Path, label: &str) -> io::Result<GitFixture> {
-        let dir = TempDir::new_in(parent, &format!("git-{label}"))?;
+        // git splits GIT_CEILING_DIRECTORIES on the separator: a root that
+        // contains it has no ceiling at all.
+        let invalid = |what: String| Err(io::Error::new(io::ErrorKind::InvalidInput, what));
+        if label.contains([':', ';']) {
+            return invalid(format!("git fixture label {label:?} contains ':' or ';'"));
+        }
         // Canonical: absolute, symlinks resolved (macOS /var -> /private/var),
         // so containment checks and git's own paths agree.
+        let parent = std::fs::canonicalize(parent)?;
+        if parent.to_string_lossy().contains(PATH_LIST_SEPARATOR) {
+            return invalid(format!(
+                "git fixture temp dir {parent:?} contains {PATH_LIST_SEPARATOR:?}"
+            ));
+        }
+        let dir = TempDir::new_in(&parent, &format!("git-{label}"))?;
         let root = std::fs::canonicalize(dir.path())?;
         assert!(root.is_absolute(), "fixture root {root:?} is not absolute");
-        let fx = GitFixture { _dir: dir, root };
+        assert!(
+            !root.to_string_lossy().contains(PATH_LIST_SEPARATOR),
+            "fixture root {root:?} contains {PATH_LIST_SEPARATOR:?}"
+        );
+        let fx = GitFixture {
+            _dir: dir,
+            root,
+            worktrees: Mutex::new(Vec::new()),
+        };
         std::fs::create_dir(fx.canonical())?;
         std::fs::create_dir(fx.origin())?;
         fx.git(&fx.origin(), &["init", "-q", "--bare", "-b", MAIN]);
@@ -90,10 +121,11 @@ impl GitFixture {
     }
 
     /// A hygienic command running `program` in `dir`. Panics unless `dir`
-    /// exists strictly inside [`Self::root`]. Only `dir` is checked, not
-    /// the arguments the caller adds.
+    /// is absolute and inside one of the fixture's repos (canonical,
+    /// origin, a linked worktree, or a subdirectory of one). Only `dir` is
+    /// checked, not the arguments the caller adds.
     pub fn command(&self, program: impl AsRef<OsStr>, dir: &Path) -> Command {
-        self.assert_inside(dir);
+        self.assert_in_repo(dir, true);
         let mut cmd = Command::new(program);
         cmd.current_dir(dir);
         for (key, _) in std::env::vars_os() {
@@ -145,14 +177,17 @@ impl GitFixture {
     /// `dir`, commits it and returns the new head. Commit ids depend only on
     /// content, parent and message (dates are fixed), so give different
     /// commits different messages.
-    /// Panics if any component of `file` is a symlink.
+    /// Panics unless `dir` is in the canonical repo or a linked worktree
+    /// (not the bare origin), or if any component of `file` is `.git` (any
+    /// case) or a symlink, or if `file` exists with more than one hard link.
     pub fn commit(&self, dir: &Path, file: &str, message: &str) -> String {
-        let work_tree = self.assert_inside(dir);
+        self.assert_in_repo(dir, false);
+        let work_tree = std::fs::canonicalize(dir).expect("resolve work tree");
         let mut path = work_tree.clone();
         for c in Path::new(file).components() {
             assert!(
-                matches!(c, Component::Normal(_)),
-                "commit file {file:?} must be a plain relative path"
+                matches!(c, Component::Normal(n) if !n.eq_ignore_ascii_case(".git")),
+                "commit file {file:?} must be a plain relative path outside .git"
             );
             path.push(c);
             let is_link = std::fs::symlink_metadata(&path).is_ok_and(|m| m.is_symlink());
@@ -165,6 +200,15 @@ impl GitFixture {
             parent.starts_with(&work_tree),
             "commit file {file:?} resolves outside {work_tree:?}"
         );
+        #[cfg(unix)]
+        if let Ok(meta) = std::fs::symlink_metadata(&path) {
+            use std::os::unix::fs::MetadataExt;
+            assert!(
+                meta.nlink() <= 1,
+                "commit file {file:?}: {path:?} has {} hard links",
+                meta.nlink()
+            );
+        }
         std::fs::write(&path, message).expect("write commit file");
         self.git(dir, &["add", "--", file]);
         self.git(dir, &["commit", "-q", "-m", message]);
@@ -191,6 +235,10 @@ impl GitFixture {
             &self.canonical(),
             &["worktree", "add", "-q", "-b", branch, target, from],
         );
+        self.worktrees
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(path.clone());
         path
     }
 
@@ -217,18 +265,28 @@ impl GitFixture {
         }
     }
 
-    /// Returns `dir` resolved. Panics unless it is absolute and strictly
-    /// inside [`Self::root`]: in the root itself git's ceiling does not
-    /// apply, so discovery would walk up into an enclosing repo.
-    fn assert_inside(&self, dir: &Path) -> PathBuf {
+    /// Panics unless `dir` is absolute and resolves into the canonical
+    /// repo, a linked worktree, or (if `bare_ok`) the origin. Any other
+    /// directory, even inside [`Self::root`], is not a repo, so git's
+    /// discovery would start there and could walk up past the root.
+    fn assert_in_repo(&self, dir: &Path, bare_ok: bool) {
         let resolved = std::fs::canonicalize(dir)
             .unwrap_or_else(|e| panic!("git fixture: cannot resolve {dir:?}: {e}"));
-        assert!(
-            dir.is_absolute() && resolved.starts_with(&self.root) && resolved != self.root,
-            "git fixture: refusing to operate on {dir:?} (resolves to {resolved:?}), not strictly inside {:?}",
-            self.root
+        let mut repos = vec![self.canonical()];
+        if bare_ok {
+            repos.push(self.origin());
+        }
+        repos.extend(
+            self.worktrees
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .iter()
+                .cloned(),
         );
-        resolved
+        assert!(
+            dir.is_absolute() && repos.iter().any(|r| resolved.starts_with(r)),
+            "git fixture: refusing to operate on {dir:?} (resolves to {resolved:?}), not inside a fixture repo {repos:?}"
+        );
     }
 }
 
@@ -366,8 +424,10 @@ mod tests {
             "wrote the enclosing repo's config"
         );
 
-        let result = std::panic::catch_unwind(|| fx.command("git", fx.root()));
-        assert!(result.is_err(), "command in the fixture root was allowed");
+        for dir in [fx.root().to_path_buf(), container] {
+            let result = std::panic::catch_unwind(|| fx.command("git", &dir));
+            assert!(result.is_err(), "command in {dir:?} was allowed");
+        }
         for dir in [fx.canonical(), wt] {
             let top = fx.git(&dir, &["rev-parse", "--show-toplevel"]);
             assert!(Path::new(&top).starts_with(fx.root()), "{dir:?} -> {top}");
@@ -377,16 +437,99 @@ mod tests {
             Path::new(&git_dir).starts_with(fx.root()),
             "origin -> {git_dir}"
         );
-        let found = fx
-            .command("git", &container)
-            .args(["rev-parse", "--absolute-git-dir"])
-            .output()
-            .unwrap();
-        assert!(
-            !found.status.success(),
-            "{container:?} found a repo: {}",
-            String::from_utf8_lossy(&found.stdout)
-        );
+    }
+
+    /// F1 (r2): git splits `GIT_CEILING_DIRECTORIES` on `:`, so a root
+    /// with `:` in it had no ceiling; from `root/worktrees` git walked up
+    /// into the enclosing repo. A temp dir or label with `:` is refused and
+    /// nothing is created.
+    #[test]
+    fn refuses_a_root_or_label_with_a_path_list_separator() {
+        let outer_dir = TempDir::new("git-enclosing").unwrap();
+        let outer = std::fs::canonicalize(outer_dir.path()).unwrap();
+        plain_git(&outer, &["init", "-q"]);
+        let colon_tmp = outer.join("t:x");
+        std::fs::create_dir(&colon_tmp).unwrap();
+        let tin = outer.join("tin");
+        std::fs::create_dir(&tin).unwrap();
+        for (parent, label) in [(&colon_tmp, "colon"), (&tin, "a:b"), (&tin, "a;b")] {
+            let result = std::panic::catch_unwind(|| {
+                let fx = GitFixture::new_in(parent, label)?;
+                let _wt = fx.add_worktree("w", "w", MAIN);
+                let container = fx.root().join("worktrees");
+                let _ = std::panic::catch_unwind(|| {
+                    fx.git(&container, &["config", "escaped.colon", "yes"])
+                });
+                Ok::<_, io::Error>(())
+            });
+            let config = std::fs::read_to_string(outer.join(".git/config")).unwrap();
+            assert!(
+                !config.contains("escaped"),
+                "{parent:?} + {label:?}: wrote the enclosing repo's config"
+            );
+            assert!(
+                matches!(result, Ok(Err(_))),
+                "fixture in {parent:?} with label {label:?} was created"
+            );
+            let left: Vec<_> = std::fs::read_dir(parent).unwrap().collect();
+            assert!(left.is_empty(), "left behind {left:?}");
+        }
+    }
+
+    /// F1 (r2): git only runs inside a repo the fixture made (canonical,
+    /// origin, a linked worktree, or their subdirectories), so discovery
+    /// never starts in a bare container such as `root/worktrees`.
+    #[test]
+    fn refuses_directories_outside_its_repos() {
+        let fx = GitFixture::new("unit").unwrap();
+        let wt = fx.add_worktree("w", "w", MAIN);
+        std::fs::create_dir(fx.root().join("worktrees/stray")).unwrap();
+        std::fs::create_dir(fx.root().join("other")).unwrap();
+        std::fs::create_dir(wt.join("sub")).unwrap();
+        for dir in ["worktrees", "worktrees/stray", "other"] {
+            let dir = fx.root().join(dir);
+            let result = std::panic::catch_unwind(|| fx.command("git", &dir));
+            assert!(result.is_err(), "command in {dir:?} was allowed");
+        }
+        for dir in [fx.canonical(), fx.origin(), wt.clone(), wt.join("sub")] {
+            let _ = fx.command("git", &dir);
+        }
+        let result = std::panic::catch_unwind(|| fx.commit(&fx.origin(), "config", "x"));
+        assert!(result.is_err(), "commit into the bare origin was allowed");
+    }
+
+    /// `commit` must not overwrite git's own files: a linked worktree's
+    /// `.git` gitfile could point every later command at another repo.
+    #[test]
+    fn commit_refuses_a_dot_git_component() {
+        let fx = GitFixture::new("unit").unwrap();
+        let wt = fx.add_worktree("w", "w", MAIN);
+        let gitfile = std::fs::read_to_string(wt.join(".git")).unwrap();
+        for (dir, file) in [
+            (&wt, ".git"),
+            (&wt, "sub/.git"),
+            (&fx.canonical(), ".git/config"),
+            (&fx.canonical(), ".GIT/config"),
+        ] {
+            let result = std::panic::catch_unwind(|| fx.commit(dir, file, "gitdir: /x/.git"));
+            assert!(result.is_err(), "commit to {file:?} was allowed");
+        }
+        assert_eq!(std::fs::read_to_string(wt.join(".git")).unwrap(), gitfile);
+        assert!(!wt.join("sub").exists());
+    }
+
+    /// `commit` must not write through a hard link to a file outside.
+    #[cfg(unix)]
+    #[test]
+    fn commit_refuses_hard_links() {
+        let fx = GitFixture::new("unit").unwrap();
+        let outside = TempDir::new("git-outside").unwrap();
+        let target = outside.path().join("hard.txt");
+        std::fs::write(&target, "orig").unwrap();
+        std::fs::hard_link(&target, fx.canonical().join("hl")).unwrap();
+        let result = std::panic::catch_unwind(|| fx.commit(&fx.canonical(), "hl", "overwritten"));
+        assert!(result.is_err(), "commit through a hard link was allowed");
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "orig");
     }
 
     /// F2: a symlink inside the work tree must not let `commit` write

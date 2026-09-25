@@ -69,7 +69,7 @@ daemon 重啟：`RuntimeFixture`、`DriverFixture`、`StoreFixture` 各有一個
 
 ## git fixture
 
-`GitFixture::new(label)` 在 `<tmp>/agend-test-git-<label>-*` 建出：
+`GitFixture::new(label)` 在 `<tmp>/agend-test-git-<label>-*` 建出（`label` 含 `:` 或 `;`、或暫存目錄含 `:`（Windows 是 `;`）時回 `InvalidInput`，什麼都不建：git 拿這個字元切 `GIT_CEILING_DIRECTORIES`，路徑含了就等於沒有 ceiling）：
 
 | 路徑 | 內容 |
 |---|---|
@@ -81,9 +81,9 @@ daemon 重啟：`RuntimeFixture`、`DriverFixture`、`StoreFixture` 各有一個
 
 衛生規則（每個 command 都套用）：
 
-- **只在自己的暫存目錄裡跑**：`dir` 必須是絕對路徑，解析後嚴格在 `root()` 裡面，否則 panic。`root()` 本身也拒絕：它只是容器，git 的 ceiling 只擋在它下面的目錄，在它本身跑 git 會往上找到外層的 repo。
+- **只在自己建的 repo 裡跑**：`dir` 必須是絕對路徑，解析後落在 `canonical()`、`origin()` 或 `add_worktree` 建的 worktree（含子目錄）裡，否則 panic。`root()`、`root/worktrees` 與 `root()` 下其他目錄都拒絕：它們不是 repo，git 從那裡找 repo 會往上走，所以 discovery 一律從 fixture 的 repo 開始。`GIT_CEILING_DIRECTORIES=<root>` 是第二道防線（repo 的 `.git` 被刪掉時擋住往上找）。
 - `git(dir, args)` 的第一個參數必須是子指令；`-C`、`--git-dir`、`--work-tree`、`--namespace`、`-c` 等全域選項一律 panic（repo 用 `dir` 指定）。
-- `commit` 的檔名只能是單純的相對路徑，路徑上任何一段是 symlink 就 panic，寫檔前確認上層目錄解析後仍在 work tree 裡。
+- `commit` 的 `dir` 只能是 canonical 或 linked worktree（不收 bare origin）；檔名只能是單純的相對路徑，任何一段是 `.git`（不分大小寫）或 symlink 就 panic，檔案已存在且 hard link 數大於 1 也 panic（unix），寫檔前確認上層目錄解析後仍在 work tree 裡。
 - **不檢查的**：子指令後面的路徑參數（例如 `worktree add <path>`），以及 `command(program, dir)` 除了 `dir` 以外的參數；測試要自己只傳 fixture 裡的路徑。
 - 一律 `Command::current_dir(<絕對路徑>)`，不用 process 的 cwd；`root()` 已解析 symlink（macOS 的 `/var` → `/private/var`）。
 - `GIT_CONFIG_GLOBAL=/dev/null`、`GIT_CONFIG_NOSYSTEM=1`、`GIT_CEILING_DIRECTORIES=<root>`；固定 author／committer 與日期，所以同樣的內容、parent、訊息得到同樣的 commit id（不同 commit 請用不同訊息）。
