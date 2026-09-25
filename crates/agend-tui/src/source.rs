@@ -7,6 +7,8 @@
 //! structured agent state or task stages, so a source hands over a
 //! [`Catalog`] when it connects. The catalog types are TUI-local until gate 8
 //! adds them to the protocol (see docs/gates/gate-11-tui.md, "待你追認").
+//! The one derived value is an agent's "needs you", which follows the
+//! current needs-you list ([`Fleet::agent_state`], T18).
 //!
 //! Must NOT: talk to a socket (gate 11 proper implements `Source` on
 //! `agend-client`), or invent state the source did not report.
@@ -21,7 +23,8 @@ use agend_core::policy::attention::{AttentionItem, order};
 use agend_core::protocol::ask::{AskEntry, AskReply};
 use agend_core::protocol::client::{AttentionRequiredData, DaemonEvent, EventData};
 
-/// Agent state exactly as the source reports it (never derived here).
+/// Agent state as the source reports it; [`Fleet::agent_state`] adjusts
+/// "needs you" to the current needs-you list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentState {
     Working,
@@ -292,6 +295,43 @@ impl Fleet {
             .agents
             .iter()
             .filter(move |a| a.team_id == team)
+    }
+
+    /// The agent a needs-you item waits on (and `t` opens): who asked, else
+    /// the task holder.
+    pub fn asker_or_holder(&self, item: &Attention) -> Option<String> {
+        item.asker()
+            .map(str::to_owned)
+            .or_else(|| self.task(item.task_id()?)?.holder.clone())
+    }
+
+    /// An agent's state as shown. "Needs you" follows the current needs-you
+    /// list: an agent some waiting item points at needs you. Protocol v1
+    /// reports no agent state (gap G1), so otherwise the catalog's state
+    /// stands, except a catalog "needs you" with nothing waiting any more,
+    /// which becomes working while the agent holds an unfinished task and
+    /// idle otherwise.
+    pub fn agent_state(&self, agent: &AgentInfo) -> AgentState {
+        let waiting = self
+            .needs_you()
+            .iter()
+            .any(|item| self.asker_or_holder(item).as_deref() == Some(agent.id.as_str()));
+        match agent.state {
+            _ if waiting => AgentState::NeedsYou,
+            AgentState::NeedsYou => {
+                let busy = agent
+                    .task_id
+                    .as_deref()
+                    .and_then(|id| self.task(id))
+                    .is_some_and(|task| !task.is_done());
+                if busy {
+                    AgentState::Working
+                } else {
+                    AgentState::Idle
+                }
+            }
+            state => state,
+        }
     }
 
     /// The waiting needs-you item for a task, if any.

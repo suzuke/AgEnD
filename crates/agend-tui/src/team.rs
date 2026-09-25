@@ -74,7 +74,7 @@ fn agents(ctx: &Ctx, team: &str, rows: &mut Vec<Row>) {
                 None => id.to_owned(),
             })
             .unwrap_or_else(|| "—".into());
-        let state = state_label(ctx.lang, agent.state);
+        let state = state_label(ctx.lang, ctx.fleet.agent_state(agent));
         rows.push(
             Row::item(
                 "",

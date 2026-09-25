@@ -306,3 +306,37 @@ fn help_line_lists_only_the_keys_that_work_on_the_selected_row() {
         "↑↓ 移動 · →/Enter 開啟 · ! 需要你 · / 搜尋 · L English · q 離開"
     );
 }
+
+#[test]
+fn header_counts_and_agent_state_follow_the_needs_you_list() {
+    let (mut app, handle) = demo(Language::En);
+    // Answer A-1 (dev-2's question on T-45).
+    press(&mut app, &[Enter, ch('1'), ch('h')]);
+    let home = render(&mut app);
+    assert!(home.contains("Needs you · 2"), "{home}");
+    assert!(
+        line_with(&home, "┏ archfix").ends_with("● 2 working  ○ 1 idle"),
+        "{home}"
+    );
+    assert!(line_with(&home, "Restructure state boundary").contains("running: implement"));
+    // research is untouched: dev-3 still has A-2 waiting.
+    assert!(line_with(&home, "┏ research").ends_with("! 1 needs you  ⚠ 1 stuck"));
+    press(&mut app, &[Down, Down, Enter, ch('2')]);
+    let agents = render(&mut app);
+    assert_eq!(first_line(&agents), "AgEnD › archfix", "{agents}");
+    assert!(
+        line_with(&agents, "dev-2").contains("● working"),
+        "{agents}"
+    );
+    press(&mut app, &[Down, Enter]);
+    assert!(render(&mut app).contains("State: ● working"));
+
+    // The agent follows up: dev-2 needs you again, everywhere.
+    handle.follow_up("A-1", "dev-2", "Also run 20 times nightly?", &["yes", "no"]);
+    app.tick();
+    assert!(render(&mut app).contains("State: ! needs you"));
+    press(&mut app, &[ch('h')]);
+    assert!(
+        line_with(&render(&mut app), "archfix ─").ends_with("● 1 working  ! 1 needs you  ○ 1 idle")
+    );
+}

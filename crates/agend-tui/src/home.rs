@@ -42,7 +42,7 @@ pub fn needs_you_row(ctx: &Ctx, item: &Attention) -> Row {
     Row::item("▌", format!("! {}", item.question().0), Target::Item(key))
         .right(format!("{new}  {team} · {task}"))
         .bold(unread)
-        .agent(asker_or_holder(ctx.fleet, item).as_deref())
+        .agent(ctx.fleet.asker_or_holder(item).as_deref())
 }
 
 pub fn team_of(fleet: &Fleet, item: &Attention) -> Option<String> {
@@ -50,14 +50,8 @@ pub fn team_of(fleet: &Fleet, item: &Attention) -> Option<String> {
     Some(task.team_id.clone())
 }
 
-/// The agent `t` opens for a needs-you item: who asked, else the task holder.
-pub fn asker_or_holder(fleet: &Fleet, item: &Attention) -> Option<String> {
-    item.asker()
-        .map(str::to_owned)
-        .or_else(|| fleet.task(item.task_id()?)?.holder.clone())
-}
-
-/// `● 1 working  ! 1 needs you …`, zero counts left out.
+/// `● 1 working  ! 1 needs you …`, zero counts left out; counted from
+/// [`Fleet::agent_state`], so answering an item updates the header.
 pub fn team_counts(ctx: &Ctx, team: &str) -> String {
     let states = [
         AgentState::Working,
@@ -72,7 +66,7 @@ pub fn team_counts(ctx: &Ctx, team: &str) -> String {
             let n = ctx
                 .fleet
                 .agents_of(team)
-                .filter(|a| a.state == *state)
+                .filter(|a| ctx.fleet.agent_state(a) == *state)
                 .count();
             let label = state_label(ctx.lang, *state);
             let (glyph, word) = label.split_once(' ').unwrap_or((&label, ""));

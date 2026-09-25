@@ -12,7 +12,7 @@
 use agend_core::protocol::ask::{AnswerSource, AskEntry, AskReply};
 
 use crate::app::{Ctx, Target};
-use crate::home::{asker_or_holder, needs_you_row, team_of};
+use crate::home::{needs_you_row, team_of};
 use crate::i18n::Text;
 use crate::source::Attention;
 use crate::ui::Row;
@@ -47,7 +47,7 @@ pub fn rows(ctx: &Ctx) -> Vec<Row> {
 
 fn details(ctx: &Ctx, item: &Attention) -> Vec<Row> {
     let key = item.key();
-    let agent = asker_or_holder(ctx.fleet, item);
+    let agent = ctx.fleet.asker_or_holder(item);
     let from = agent.clone().unwrap_or_else(|| "—".into());
     let task = item.task_id().unwrap_or("—");
     let team = team_of(ctx.fleet, item).unwrap_or_else(|| ctx.tr(Text::NoTeam).into());

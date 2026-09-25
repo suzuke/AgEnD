@@ -3,7 +3,7 @@
 > **TL;DR**
 > - attention-first TUI；畫面層提前做（你同意與第 3–10 施工關並行，放寬 D22），資料先接假來源，draft PR 不 merge。
 > - 記住：**畫面只讀 `Source`，不知道資料從哪來**；接真 daemon 要等第 8 施工關把 client protocol 定案。
-> - 下一步：照「你親自驗收」A 段由 agent 帶著走一遍；「待你追認」T1–T15、G1–G4 逐項決定。
+> - 下一步：照「你親自驗收」A 段由 agent 帶著走一遍；「待你追認」T1–T18、G1–G4 逐項決定。
 
 **先看這條**：B 段（接真 daemon）的步驟會用到 `agend`。每個新開的終端機分頁（包括第二個終端）都要先跑 B 段開頭的設定，否則會跑到舊的 Node 版 `agend` 1.24.0。A 段只用 `cargo`，不用 `agend`。
 
@@ -187,7 +187,8 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 | T15 | 想改但依規則沒改的文件（列給你決定）：名詞表加「資料來源（data source，`source::Source`）」與「目錄（catalog，`source::Catalog`）」；AGENTS.md 的 crate 邊界表加一列「`agend-tui` 不依賴 SQLite、`agend-daemon`」；ROADMAP 與 docs/gates/README.md 的狀態欄 | 這次的規則不准改 ROADMAP、gates/README、GLOSSARY、AGENTS、DECISIONS | 另一個 docs PR | 待追認 |
 | T16 | 「需要你」展開後，在「來自 … · 任務 … · team …」下一行加「不處理的話：…」（DEMO-01 §4B 第 3 點）；`attention_required` 沒有這個欄位，所以放在 `Catalog.if_ignored`（以 task id 為鍵），demo catalog 給三句固定文字 | DEMO 規格要讓人一眼看懂不處理會怎樣；不在 TUI 自己推算 | 第 8 施工關加欄位後改讀協定；刪一個欄位與一行 | 待追認 |
 | T17 | 已讀記在「哪一題」上（`Attention::read_key` = 請示 id + 問題數）：agent 追問後這一項回到未讀（粗體、`新`） | 追問是新的問題，你還沒看過；只記請示 id 會讓追問靜靜回來，容易漏看 | 改 `read_key` 一處（只用請示 id 就回到舊行為） | 待追認 |
-| G1 | 缺口：沒有列出 team、task、agent 的請求，也沒有 task 的關卡清單與狀態、agent 的結構化狀態（working／idle／needs you／stuck／unknown）與 backend，也沒有「不處理的話會怎樣」（見 T16） → 現在由 `source::Catalog`（TUI 本地型別）在 connect 時給 | 畫面要分組、要畫 `■□` 進度條、要顯示 agent 狀態，只有 `task_changed`／`instance_changed` 的文字摘要不夠 | 第 8 施工關：加 list 請求（或快照事件），`Catalog` 改用 core 型別 | 待追認 |
+| T18 | 「需要你」數量與 agent 的「需要你」狀態跟著目前的需要你清單重算（`Fleet::agent_state`）：有等待中的項目指向這個 agent（提問者，否則 task 持有者）就是「需要你」；catalog 說「需要你」但已經沒有等待中的項目時，手上有沒做完的 task 算「工作中」，否則「閒置」；其他狀態照 catalog | 回答 A-1 後 archfix 標題還寫 `! 1 needs you` 會讓人以為還有事；DEMO-01 也是從 task 推算數量。工作中／閒置／卡住等其他狀態協定沒給，照舊是 G1 缺口，不在 TUI 推算 | 改 `Fleet::agent_state` 一處；第 8 施工關協定給 agent 狀態後改讀協定的值 | 待追認 |
+| G1 | 缺口：沒有列出 team、task、agent 的請求，也沒有 task 的關卡清單與狀態、agent 的結構化狀態（working／idle／needs you／stuck／unknown）與 backend，也沒有「不處理的話會怎樣」（見 T16）；agent 狀態只有「需要你」由 TUI 依需要你清單重算（見 T18），其餘照 catalog，事件發生後不會更新 → 現在由 `source::Catalog`（TUI 本地型別）在 connect 時給 | 畫面要分組、要畫 `■□` 進度條、要顯示 agent 狀態，只有 `task_changed`／`instance_changed` 的文字摘要不夠 | 第 8 施工關：加 list 請求（或快照事件），`Catalog` 改用 core 型別 | 待追認 |
 | G2 | 缺口：`attention_required` 沒有「解決後能放行多少工作」與「開始等待的時間」→ D36 排序時 unblocks 一律 0、用 event id 代替等待時間（最舊的在前） | 不在 TUI 自己推算 | 第 8 施工關：`AttentionRequiredData` 加兩個欄位（additive） | 待追認 |
 | G3 | 缺口：不是請示的「需要你」（agent 卡住、用量上限）沒有操作，也沒有「已處理」事件 → 畫面寫明「client protocol v1 還沒有處理這一項的操作」，而且一直留在清單 | 不發明 wire 訊息 | 第 8 施工關：加操作（重試、暫停…）與清除事件 | 待追認 |
 | G4 | 缺口：沒有已讀狀態 → 見 T4 | 同上 | 第 8 施工關：加已讀請求與事件，TUI 與 Telegram 共用 | 待追認 |

@@ -21,7 +21,10 @@ pub fn rows(ctx: &Ctx, agent_id: &str) -> Vec<Row> {
         ),
         Row::line(
             "",
-            ctx.fmt(Text::AgentStateLine, &[&state_label(ctx.lang, agent.state)]),
+            ctx.fmt(
+                Text::AgentStateLine,
+                &[&state_label(ctx.lang, ctx.fleet.agent_state(agent))],
+            ),
         ),
         Row::blank(),
     ];
