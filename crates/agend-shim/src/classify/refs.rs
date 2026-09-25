@@ -1,9 +1,13 @@
 //! Ref destinations: `push`, `fetch`/`pull`, `update-ref`, `symbolic-ref`.
 //!
 //! The destination of a ref write must be visible and checkable:
-//! - `push` needs explicit `src:dst` refspecs. A colon-less refspec or no
-//!   refspec lets git pick the destination from `remote.<name>.push`,
-//!   `push.default`, `branch.<name>.merge` or `remote.<name>.mirror`.
+//! - `push` with explicit `src:dst` refspecs is checked as typed. Without
+//!   them (`git push`, `git push origin`, `git push -u origin <branch>`)
+//!   git picks the destination from `push.default`, the upstream
+//!   (`branch.<name>.remote|merge`), `remote.pushDefault` and friends; the
+//!   shim resolves that from the repo's config the way git's push does
+//!   (`implicit_push`) and allows it only when it lands on the bound branch
+//!   on the team remote (T7, owner decision 2026-09-25).
 //! - `fetch`/`pull` destinations come from command-line refspecs, `--refmap`
 //!   and every configured `remote.*.fetch` (git applies those even when
 //!   refspecs are given); each must land in `refs/remotes/`, the agent's
@@ -157,13 +161,198 @@ fn refuse_tag_scope(dst: &str, glob: bool) -> Refusal {
 
 // ── push ────────────────────────────────────────────────────────────────
 
-fn refuse_implicit(remote: &str, binding: &Binding) -> Refusal {
+/// Config `implicit_push` reads (keys as `git config --get-regexp` prints
+/// them: section and name lowercased, subsection as is).
+pub(crate) const PUSH_CONFIG_REGEX: &str = r"^(push|remote|branch)\.";
+
+/// A refused push without `src:dst`: why, and the exact command that works
+/// (to the team remote when the resolved one is not it).
+fn refuse_implicit(g: &Guard, remote: &str, binding: &Binding, why: &str) -> Refusal {
     let branch = binding.branch().unwrap_or("<your-branch>");
+    let to = if g.probe.is_team_push_remote(remote) || !g.probe.is_team_push_remote("origin") {
+        remote
+    } else {
+        "origin"
+    };
     Refusal::new(
         "push_explicit",
-        "this push has no explicit destination: git would take it from config (remote.<name>.push, push.default, branch.<name>.merge), which the shim cannot check".to_string(),
-        format!("name source and destination: git push {remote} HEAD:refs/heads/{branch}"),
+        format!("this push has no explicit destination: {why}"),
+        format!("name source and destination: git push {to} HEAD:refs/heads/{branch}"),
     )
+}
+
+/// The repo's push-related config.
+struct PushConfig(Vec<(String, String)>);
+
+impl PushConfig {
+    fn all(&self, key: &str) -> Vec<&str> {
+        self.0
+            .iter()
+            .filter(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+            .collect()
+    }
+
+    /// Last value wins, as in git.
+    fn last(&self, key: &str) -> Option<&str> {
+        self.all(key).pop()
+    }
+
+    fn on(&self, key: &str) -> bool {
+        self.last(key).is_some_and(|v| {
+            matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "" | "true" | "yes" | "on" | "1"
+            )
+        })
+    }
+
+    /// Configured remote names (`remote.<name>.<var>`).
+    fn remotes(&self) -> std::collections::BTreeSet<&str> {
+        self.0
+            .iter()
+            .filter_map(|(k, _)| k.strip_prefix("remote.")?.rsplit_once('.'))
+            .map(|(name, _)| name)
+            .collect()
+    }
+}
+
+/// Where a push without `src:dst` writes, resolved as git's push does
+/// (git 2.39 builtin/push.c `setup_default_push_refspecs` and
+/// `refspec_append_mapped`, remote.c `pushremote_for_branch`):
+/// - remote: the typed one, else `branch.<cur>.pushRemote`,
+///   `remote.pushDefault`, `branch.<cur>.remote`, the only remote, `origin`;
+/// - `remote.<r>.push` or `remote.<r>.mirror` set: not resolved;
+/// - no refspec: `push.default` `current` = same name; `upstream` =
+///   `branch.<cur>.merge` (same remote only); `simple` (default) = same name,
+///   and to the upstream remote only if the upstream has that name;
+///   `matching` / `nothing`: not resolved;
+/// - a colon-less refspec (`HEAD`, `@`, the bound branch): same name, or
+///   the source's `branch.<b>.merge` under `push.default=upstream`.
+///
+/// `Ok((remote, destination))` or why it does not resolve. Only the bound
+/// branch as the source is resolved: anything else is refused anyway.
+fn implicit_push(
+    g: &Guard,
+    binding: &Binding,
+    remote_arg: Option<&str>,
+    spec: Option<&str>,
+) -> Result<(String, String), (String, String)> {
+    let cfg = PushConfig(g.probe.config(PUSH_CONFIG_REGEX));
+    let bound = binding.branch().unwrap_or("");
+    let head = g.probe.symref_target("HEAD");
+    let cur = head.as_deref().and_then(|h| h.strip_prefix("refs/heads/"));
+    let src = match spec.map(|s| s.trim_start_matches('+')) {
+        None | Some("HEAD" | "@") => cur,
+        Some(s) => Some(s.strip_prefix("refs/heads/").unwrap_or(s)),
+    };
+    let fallback = |r: Option<&str>| r.unwrap_or("origin").to_string();
+    let default_remote = {
+        let remotes = cfg.remotes();
+        match remotes.len() {
+            1 => remotes.into_iter().next().map(str::to_string),
+            _ => Some("origin".to_string()),
+        }
+    };
+    let Some(src) = src else {
+        return Err((
+            fallback(remote_arg),
+            "HEAD is not on a branch, so git has nothing to push".to_string(),
+        ));
+    };
+    let branch_remote = cfg
+        .last(&format!("branch.{src}.remote"))
+        .map(str::to_string)
+        .or(default_remote);
+    let remote = match remote_arg {
+        Some(r) => r.to_string(),
+        None => cfg
+            .last(&format!("branch.{src}.pushremote"))
+            .or_else(|| cfg.last("remote.pushdefault"))
+            .map(str::to_string)
+            .or_else(|| branch_remote.clone())
+            .unwrap_or_else(|| "origin".into()),
+    };
+    let err = |why: String| Err((remote.clone(), why));
+    if src != bound {
+        return err(format!("git would push {src}, not your branch {bound}"));
+    }
+    if !cfg.all(&format!("remote.{remote}.push")).is_empty() {
+        return err(format!(
+            "remote.{remote}.push is set, so git maps the destination through it"
+        ));
+    }
+    if cfg.on(&format!("remote.{remote}.mirror")) {
+        return err(format!(
+            "remote.{remote}.mirror is set, so git pushes every ref"
+        ));
+    }
+    let mode = cfg
+        .last("push.default")
+        .map_or_else(|| "simple".to_string(), |m| m.trim().to_ascii_lowercase());
+    let own = format!("refs/heads/{src}");
+    let merges = cfg.all(&format!("branch.{src}.merge"));
+    let full = |m: &str| {
+        if m.starts_with("refs/") {
+            m.to_string()
+        } else {
+            format!("refs/heads/{m}")
+        }
+    };
+    // `get_upstream_ref`: the upstream git pushes to, or why git refuses.
+    let upstream = || -> Result<String, String> {
+        match merges.as_slice() {
+            [] if cfg.on("push.autosetupremote") => Ok(own.clone()),
+            [] => Err(format!(
+                "{src} has no upstream branch, so git refuses this push"
+            )),
+            [m] if cfg.last(&format!("branch.{src}.remote")).is_some() => Ok(full(m)),
+            [_] => Err(format!(
+                "{src} has no upstream remote, so git refuses this push"
+            )),
+            _ => Err(format!(
+                "{src} has several upstream branches, so git refuses this push"
+            )),
+        }
+    };
+    if spec.is_some() {
+        let dst = match (mode.as_str(), merges.as_slice()) {
+            ("upstream" | "tracking", [m]) => full(m),
+            _ => own,
+        };
+        return Ok((remote, dst));
+    }
+    let same_remote = branch_remote.as_deref() == Some(remote.as_str());
+    let dst = match mode.as_str() {
+        "current" => own,
+        "upstream" | "tracking" if !same_remote => {
+            return err(format!(
+                "push.default=upstream and {remote} is not the upstream remote of {src}, so git refuses this push"
+            ));
+        }
+        "upstream" | "tracking" => match upstream() {
+            Ok(d) => d,
+            Err(why) => return err(why),
+        },
+        "simple" if !same_remote => own,
+        "simple" => match upstream() {
+            Ok(up) if up == own => own,
+            Ok(up) => {
+                return err(format!(
+                    "the upstream of {src} is {up}, a different name, so git (push.default=simple) refuses this push"
+                ));
+            }
+            Err(why) => return err(why),
+        },
+        "matching" => {
+            return err(format!(
+                "push.default=matching pushes every branch that also exists on {remote}"
+            ));
+        }
+        "nothing" => return err("push.default=nothing: git pushes nothing".to_string()),
+        other => return err(format!("push.default={other} is not a mode the shim knows")),
+    };
+    Ok((remote, dst))
 }
 
 pub(crate) fn push(p: &Parsed, g: &Guard, binding: &Binding) -> Result<(), Refusal> {
@@ -196,20 +385,39 @@ pub(crate) fn push(p: &Parsed, g: &Guard, binding: &Binding) -> Result<(), Refus
             format!("push only your branch: git push origin HEAD:refs/heads/{branch}"),
         ));
     }
-    let Some((remote, specs)) = p.pos.split_first() else {
-        return Err(refuse_implicit("origin", binding));
-    };
-    if specs.is_empty() {
-        return Err(refuse_implicit(remote, binding));
-    }
+    let remote_arg = p.pos.first().map(String::as_str);
+    let specs = p.pos.get(1..).unwrap_or_default();
     let delete = p.has("--delete");
+    let remote = remote_arg.unwrap_or("origin");
+    if specs.is_empty() {
+        if delete {
+            return Err(refuse_implicit(
+                g,
+                remote,
+                binding,
+                "`--delete` without a ref to delete",
+            ));
+        }
+        return check_implicit(g, binding, remote_arg, None);
+    }
     for spec in specs {
         let (dst, deleting) = if delete {
             (spec.as_str(), true)
         } else {
             match spec.trim_start_matches('+').split_once(':') {
                 Some((src, dst)) if !dst.is_empty() => (dst, src.is_empty()),
-                _ => return Err(refuse_implicit(remote, binding)),
+                Some(_) => {
+                    return Err(refuse_implicit(
+                        g,
+                        remote,
+                        binding,
+                        &format!("`{spec}` has an empty destination"),
+                    ));
+                }
+                None => {
+                    check_implicit(g, binding, remote_arg, Some(spec))?;
+                    continue;
+                }
             }
         };
         if dst.starts_with("refs/tags/") {
@@ -239,6 +447,39 @@ pub(crate) fn push(p: &Parsed, g: &Guard, binding: &Binding) -> Result<(), Refus
         }
     }
     Ok(())
+}
+
+/// A push (or one colon-less refspec) whose destination git takes from
+/// config: allowed only when it resolves to the bound branch on the team
+/// remote.
+fn check_implicit(
+    g: &Guard,
+    binding: &Binding,
+    remote_arg: Option<&str>,
+    spec: Option<&str>,
+) -> Result<(), Refusal> {
+    let bound = binding.branch().unwrap_or("");
+    match implicit_push(g, binding, remote_arg, spec) {
+        Err((remote, why)) => Err(refuse_implicit(g, &remote, binding, &why)),
+        Ok((remote, dst)) if dst != format!("refs/heads/{bound}") => {
+            let why = format!("git would push to {dst} on {remote}, not to your branch {bound}");
+            match g.check_dst(&dst) {
+                Err(r) if r.code == "protected_ref" => Err(Refusal::new(
+                    "protected_ref",
+                    format!("{why}; {}", r.reason),
+                    refuse_implicit(g, &remote, binding, &why).next,
+                )),
+                _ => Err(refuse_implicit(g, &remote, binding, &why)),
+            }
+        }
+        Ok((remote, _)) if !g.probe.is_team_push_remote(&remote) => Err(refuse_implicit(
+            g,
+            &remote,
+            binding,
+            &format!("git would push to {remote}, which is not the team remote"),
+        )),
+        Ok(_) => Ok(()),
+    }
 }
 
 // ── fetch / pull ────────────────────────────────────────────────────────

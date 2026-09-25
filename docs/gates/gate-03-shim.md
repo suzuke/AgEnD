@@ -23,22 +23,23 @@
 
 ## 狀態
 
-**實作中**（2026-09-25，draft PR #107；verifier 第 1–4 輪的發現已修或依威脅模型列入已知限制，待你親自驗收）
+**實作中**（2026-09-25，draft PR #107；verifier 第 1–5 輪的發現已修或依威脅模型列入已知限制，待你親自驗收）
 
 ## 範圍
 
 - git 呼叫分類：放行、導向綁定的 worktree、拒絕（附下一步命令）
   - 拒絕：`git worktree`（`list` 除外）、切到其他 branch 或 protected branch、在自己的 `agend/<task-id>/` 以外建 branch、未綁定時的寫入、未綁定時改 canonical checkout、binding 快照缺失或壞掉時的寫入
 - 位置問真的 git（verifier 第 3 輪後，T20）：shim 用呼叫者的全域選項、cwd、`GIT_*` 跑一次 `git rev-parse`，照 git 的答案判斷作用在綁定的 worktree、canonical checkout、同 repo 的其他 worktree、外部 repo 或不在 repo；gitfile、真正的 git dir、`-C`、`GIT_DIR`、相對路徑、子目錄都得到同一個答案
+- 導向保留子目錄（verifier 第 5 輪後，T6）：從 canonical checkout 的子目錄導向時，跑在綁定 worktree 的同一個子目錄（git 的 `--show-prefix`），所以 `.` 這類相對路徑的範圍不變；worktree 沒有那個目錄就拒絕；在別的 agent 的 worktree 裡跑的寫入拒絕、不導向
 - 結構性防護（verifier 第 1 輪後）：
   - 選項只認完整拼寫（deny-by-default，T14）
-  - ref 目的地必須看得到：push 要明確的 `src:dst`（T7）、fetch／pull 的 refmap 含設定都要檢查（T16）、會改目的地的 config 不能設（T15）
+  - ref 目的地必須看得到：push 的 `src:dst` 照寫的檢查；沒寫 `src:dst` 的 push 照 git 的規則從設定解析目的地，只放行落在自己綁定的 branch、而且是 team remote 的（T7）、fetch／pull 的 refmap 含設定都要檢查（T16）、會改目的地的 config 不能設（T15）
   - symbolic ref：agent 不能建立；寫入前先追到真正的 ref 再檢查
   - 寫入只作用在綁定的 worktree：git 解析出的 work tree 必須是綁定的 worktree、`GIT_INDEX_FILE` 必須在它的 git dir 裡；需要導向的寫入若指定了 `--git-dir`／`--work-tree`／`GIT_*`，拒絕而不是默默改寫（T13）
   - 離開綁定 branch 的旁門：DWIM checkout、`checkout <x> --`、`rebase <up> <other>`、`stash branch`、`rebase --update-refs`（T17）
   - team repo 用目的地認，不只用 cwd 認（T5）
 - protected-ref 檢查：`update-ref`、`push`／`push .`、`fetch`／`pull` 的目的地、`branch -f`、`tag` 寫 main／master 或 binding 快照列的 ref，綁定的 agent 也一樣
-- 破壞性操作前快照與還原：`reset --hard|--merge|--keep`、`clean`（非 dry-run）、`checkout -- <paths>`、`restore`、`switch --discard-changes`、`read-tree -u`
+- 破壞性操作前快照與還原：`reset --hard|--merge|--keep`、`clean`（非 dry-run）、`checkout -- <paths>`、`restore`、`switch --discard-changes`、`read-tree -u`、`rm -f`／`rm --force`（非 `--cached`、非 dry-run；第 5 輪）
 - `kill`／`killall`／`pkill` 防護（T9）、audit 記錄（拒絕、bypass、快照）
 - binding 來源：daemon 寫的唯讀 binding 快照（D6，無 HMAC）；真 git 用 PATH 找、排除 shim 自己
 
@@ -56,7 +57,7 @@ TMPDIR=$(mktemp -d) ~/.cargo/bin/cargo test --workspace   # 不靠暫存目錄�
 ~/.cargo/bin/cargo xtask accept shim
 ```
 
-- [x] `cargo test -p agend-shim` 通過：`53 passed`（unit）+ `13 passed`（`tests/bypass_corpus.rs`）+ `2 passed`（`tests/everyday.rs`）+ `11 passed`（`tests/git_shim.rs`）+ `6 passed`（`tests/location_matrix.rs`）；`TMPDIR` 設成新的空目錄時一樣全過
+- [x] `cargo test -p agend-shim` 通過：`57 passed`（unit）+ `13 passed`（`tests/bypass_corpus.rs`）+ `2 passed`（`tests/everyday.rs`）+ `11 passed`（`tests/git_shim.rs`）+ `2 passed`（`tests/implicit_push.rs`）+ `6 passed`（`tests/location_matrix.rs`）+ `6 passed`（`tests/route_scope.rs`）；`TMPDIR` 設成新的空目錄時一樣全過
 - [x] clippy 乾淨
 - [x] `check-deps` 最後一行是 `check-deps: ok (2 rules, 8 crates checked for agend-testkit, agend-core metadata ok, no-std build ok)`
 - [x] `cargo xtask accept shim` 最後兩行是 `shim demo: all checks passed`、`gate 3 (shim): checks passed`
@@ -65,6 +66,7 @@ TMPDIR=$(mktemp -d) ~/.cargo/bin/cargo test --workspace   # 不靠暫存目錄�
 - [x] verifier 第 2 輪要修的三項（T9 大 pid、T5 不帶 `.git` 的 team 路徑、自己的 git dir + canonical cwd）各有回歸測試，修正前紅、修正後綠
 - [x] verifier 第 3 輪（T20）：`tests/location_matrix.rs` 跑 7 種拼法 × 有無 `--work-tree` × 4 個 cwd × 6 個保護動作（336 案）與 4 個 cwd × 7 種拼法 × 6 個正常工作步驟（168 步）；修正前 24 案 + 48 步失敗，修正後全綠
 - [x] verifier 第 4 輪：`location::tests::parses_rev_parse_output` 改在自己的暫存目錄建路徑（以前要 `$TMPDIR/x` 剛好存在，CI 紅）；team 本機 remote 與 clone 裡的 `worktree add|remove|move|prune|lock|unlock|repair` 有回歸測試（含 verifier 的原指令），修正前紅、修正後綠；`tests/everyday.rs` 跑正常工作清單，以及經 symlink、含空格的路徑
+- [x] verifier 第 5 輪：`tests/route_scope.rs` 原樣重播 verifier 的 repro E（`git rm -rf .`）與 B（`git clean -fdx .`），加上 `checkout -- .`、`add .`、`restore .`，各從 canonical 子目錄與另一個 worktree 的子目錄跑，修正前 6 個全紅、修正後全綠；`tests/implicit_push.rs` 驗 T7 的放行與拒絕（含 push.default 各模式、upstream 指到 main）；verifier 的 `scope.sh`／`scope2.sh` 在 sandbox 裡對新 binary 重跑，根目錄的 `.env`、`target/`、未提交修改都在，另一個 worktree 的呼叫被拒絕
 - [ ] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」
 
 ## 你親自驗收
@@ -139,7 +141,7 @@ TMPDIR=$(mktemp -d) ~/.cargo/bin/cargo test --workspace   # 不靠暫存目錄�
 
    應該看到四個 `exit 1`：
    - `git reset --har`：`` `--har` looks like an abbreviation of `--hard` ``
-   - `git push . HEAD`：`this push has no explicit destination`，下一步 `git push . HEAD:refs/heads/agend/t-1/fix`
+   - `git push . HEAD`：`this push has no explicit destination: git would push to ., which is not the team remote`，下一步 `git push . HEAD:refs/heads/agend/t-1/fix`
    - `git --work-tree=<tmp>/repo clean -fd`：`is not your bound worktree`
    - `git symbolic-ref refs/heads/agend/t-1/alias refs/heads/main`：`a symbolic ref makes one ref name write another`
 
@@ -186,7 +188,7 @@ TMPDIR=$(mktemp -d) ~/.cargo/bin/cargo test --workspace   # 不靠暫存目錄�
 
 ## 待你追認
 
-owner 睡覺時我自己做的決定；都可逆。每條打勾＝同意，不同意就寫在「驗收紀錄」備註。T5、T7、T9、T13 在 verifier 第 1 輪後改過；T14–T18 是第 1 輪後新增的；第 2 輪後改了 T5、T9、T13、T15；第 3 輪後改了 T5、T13，新增 T20；第 4 輪後改了 T5、T20；T19 是你已經決定的。
+owner 睡覺時我自己做的決定；都可逆。每條打勾＝同意，不同意就寫在「驗收紀錄」備註。T5、T7、T9、T13 在 verifier 第 1 輪後改過；T14–T18 是第 1 輪後新增的；第 2 輪後改了 T5、T9、T13、T15；第 3 輪後改了 T5、T13，新增 T20；第 4 輪後改了 T5、T20；第 5 輪後改了 T6、T8、T15、T17；T7、T19 是你已經決定的。
 
 - [x] T19 威脅模型（**使用者已決定 2026-09-25**）：shim 只防好意但會犯錯的 agent，不防刻意繞過；protected ref 的硬保證在 daemon 的 `reference-transaction` hook（第 6 或第 10 施工關）與 forge 端 branch protection。見[威脅模型](#威脅模型)。
 - [ ] T1 binding 快照格式：`$AGEND_HOME/bindings/<instance>.json`，JSON `{version: 1, instance, source_repo?, protected_refs?, binding?: {kind: "work", task_id, branch, worktree} | {kind: "review", task_id, head, worktree}}`；work branch 必須是 `agend/<task_id>/<slug>`（用 core 的 `task_id_of_branch` 驗）。型別暫放 `agend_shim::binding::Snapshot`：core 沒有 binding 型別，照指示不改 core。建議第 10 施工關搬到 `agend_core::model`，daemon 寫、shim 讀同一個型別。
@@ -203,12 +205,17 @@ owner 睡覺時我自己做的決定；都可逆。每條打勾＝同意，不�
   - `git worktree` 只有 `list` 算讀取（第 4 輪）：`add`、`remove`、`move`、`prune`、`lock`、`unlock`、`repair` 在 team 的本機 remote 與 clone 裡拒絕（`team_clone`），在跟 team 無關的 repo 裡放行。擋的是 `git -C <team>/origin.git worktree add ../zm main`：它在 team remote 上把 `main` checkout 出來，之後 daemon 的 `git push origin main` 失敗（`branch is currently checked out`）。
   - 只看 repo 已存的 remote 設定與命令列目的地；在 scratch repo 用 `-c` 特製的目的地不擋（見已知限制）。
   - 從 `$AGEND_HOME` 裡面往上找到、但包住 `$AGEND_HOME` 的 repo（例如 `$HOME` 的 dotfiles repo）不算；workspace 仍當「不在 repo」並導向。
-- [ ] T6 讀取命令在未綁定、canonical checkout 裡都放行；綁定時在 worktree 外跑的讀取與寫入都導向 worktree，在 canonical／別的 worktree 時印一行 `running in your bound worktree …`。
-- [ ] T7 `push` 只接受明確的 `src:dst`：`git push origin HEAD:refs/heads/<你的 branch>`。
-  - 沒有 refspec、或 refspec 沒有 `:`（`git push`、`git push origin HEAD`）拒絕：git 會用 `remote.*.push`、`push.default`、`branch.*.merge` 決定目的地，shim 檢查不到。拒絕訊息給確切的替代指令。
-  - 目的地只能是自己的 branch、自己的命名空間、不受保護的 tag；`HEAD` 當目的地拒絕。
+- [ ] T6 讀取命令在未綁定、canonical checkout 裡都放行；綁定時在 workspace（不在 repo）或 canonical checkout 跑的讀取與寫入都導向 worktree，在 canonical 時印一行 `running in your bound worktree <目錄> …`。
+  - 第 5 輪：導向時保留呼叫者在 checkout 裡的子目錄（`rev-parse --show-prefix`）：在 `<canonical>/src/sub` 跑的 `git rm -rf .` 跑在 `<worktree>/src/sub`，不再擴大成整個 worktree。從 workspace 導向時是 worktree 頂層。
+  - worktree 沒有那個子目錄就拒絕（`route_dir_missing`），訊息寫出目錄名，下一步是 `cd <worktree>`。在 canonical 的 `.git` 裡（git 看不到 work tree）跑的寫入也拒絕。
+  - 在別的 agent 的 worktree 裡跑的寫入拒絕（`other_worktree`），不導向；下一步是 `cd <自己的 worktree>/<同一個子目錄>`。讀取在原地跑（顯示那個 worktree，就是 agent 下指令的地方）。
+- [x] T7 push（**使用者已決定 2026-09-25：放行（目的地解析為自己綁定的 branch 時）**）：
+  - 明確的 `src:dst` 照寫的檢查：目的地只能是自己的 branch、自己的命名空間、不受保護的 tag；`HEAD` 當目的地拒絕。
+  - 沒有 refspec、或 refspec 沒有 `:`（`git push`、`git push origin`、`git push -u origin <branch>`、`git push origin HEAD`）：shim 用真的 git 讀設定，照 git 2.39 push 的規則解析目的地，**落在自己綁定的 branch、而且 remote 是 team remote 才放行**。
+  - 解析規則：remote 是寫的那個，否則 `branch.<b>.pushRemote`、`remote.pushDefault`、`branch.<b>.remote`、唯一的 remote、`origin`；沒有 refspec 時看 `push.default`：`simple`（預設）＝同名，推到 upstream 的 remote 時 upstream 也必須同名；`upstream`＝`branch.<b>.merge`；`current`＝同名；`push.autoSetupRemote` 沒有 upstream 時當同名。沒有 `:` 的 refspec（`HEAD`、`@`、自己的 branch 名）＝同名，`push.default=upstream` 時照 git 對應到 `branch.<b>.merge`。
+  - 拒絕（訊息寫出 git 會推到哪、或為什麼解析不了，下一步是可以直接跑的 `git push origin HEAD:refs/heads/<你的 branch>`）：解析到別的 branch（例如 upstream 指到 main；main 是 protected，code `protected_ref`）、不是 team remote（包括 `push .`）、`push.default=matching`／`nothing`、設了 `remote.<r>.push` 或 `remote.<r>.mirror`、沒有 upstream 或 upstream 不同名（git 自己也會拒絕）、HEAD 不在 branch 上、推的不是自己的 branch。
   - `--all`、`--branches`、`--mirror`、`--prune`、`--tags`、`--follow-tags`、`--repo`、`--receive-pack`、`--exec` 拒絕；審查 binding 不能 push。
-- [ ] T8 快照：每次破壞性操作都做（不只 dirty 時），含未追蹤、不含 ignored 檔（`clean -x` 刪掉的救不回）；ref `refs/agend/snapshots/<instance>/<id>`，id = `<unix 秒>-<pid>`；shim 不清舊快照（留給 daemon）；**快照失敗就拒絕**該操作（可用 bypass）。`clean` 只要不是 dry-run 都快照（`clean.requireForce=false` 時沒有 `-f` 也會刪）。
+- [ ] T8 快照：每次破壞性操作都做（不只 dirty 時；第 5 輪起含 `rm -f`／`rm --force`，`rm --cached` 與 `rm -n` 不做），含未追蹤、不含 ignored 檔（`clean -x` 刪掉的救不回）；ref `refs/agend/snapshots/<instance>/<id>`，id = `<unix 秒>-<pid>`；shim 不清舊快照（留給 daemon）；**快照失敗就拒絕**該操作（可用 bypass）。`clean` 只要不是 dry-run 都快照（`clean.requireForce=false` 時沒有 `-f` 也會刪）。
 - [ ] T9 kill：
   - `pkill`／`killall` 一律拒絕（只放行 `--help` 等資訊旗標，沿用 v1）。
   - `kill` deny-by-default：只接受 `kill [-SIGNAL | -s SIG | -n NUM | --signal SIG] [--] <pid>...`。
@@ -228,7 +235,8 @@ owner 睡覺時我自己做的決定；都可逆。每條打勾＝同意，不�
 - [ ] T15 config：`git config` 寫入，以及寫入類命令（含 `fetch`）的 `-c`、`--config-env`、`GIT_CONFIG_COUNT`／`GIT_CONFIG_PARAMETERS`，只能設白名單的 key（`user.*`、`author.*`、`committer.*`、`core.editor`、`core.pager`、`pull.rebase`、`pull.ff`、`merge.conflictStyle`、`color.*`、`advice.*` 等，清單在 `config_keys.rs`）。
   - 其他（`remote.*`、`branch.*`、`push.*`、`core.worktree`、`core.hooksPath`、`alias.*`、`include.*`、`rebase.updateRefs`、`clean.requireForce`…）拒絕；改 section、`config --edit` 也拒絕。
   - 讀取類命令（`log`、`status`…）完全不檢查 `-c`／`GIT_CONFIG_*`；`git config` 的讀取也不限制。
-  - 白名單裡的 `core.editor`、`core.pager`、`gpg.program`、`credential.helper` 會讓 git 執行程式，而且那個程式的 PATH 最前面是真的 git。照威脅模型保留（agent 常用 `-c core.editor=true`），列在已知限制。
+  - 第 5 輪：`sequence.editor` 跟 `core.editor` 一樣放行（`git -c sequence.editor=: rebase -i --autosquash …`）。其他名字以 `editor` 結尾、不在白名單的 key 被拒時，理由寫「編輯器設定只能設 core.editor 與 sequence.editor」，下一步提到 `GIT_EDITOR=<cmd>`／`GIT_SEQUENCE_EDITOR=<cmd>` 這兩個環境變數。
+  - 白名單裡的 `core.editor`、`sequence.editor`、`core.pager`、`gpg.program`、`credential.helper` 會讓 git 執行程式，而且那個程式的 PATH 最前面是真的 git。照威脅模型保留（agent 常用 `-c core.editor=true`），列在已知限制。
 - [ ] T16 `fetch`／`pull`：命令列 refspec、`--refmap`、設定裡**所有** `remote.*.fetch` 的目的地只能是 `refs/remotes/`、自己的命名空間、或不強制的單一 tag。
   - git 在帶 refspec 時也會用設定的 refmap 順手更新，所以一律檢查設定。
   - 拒絕 `--update-head-ok`、`--prune-tags`、`--upload-pack`、`--stdin`、tag glob、強制的 tag。
@@ -238,6 +246,7 @@ owner 睡覺時我自己做的決定；都可逆。每條打勾＝同意，不�
   - 例外：`.`、`./x`、`../x` 不可能是 ref，當成還原路徑並快照。
   - `checkout <x> --` 也當成切換（git 本身就這樣解，會 DWIM 建 branch）。
   - 要還原檔案：`git checkout -- <path>` 或 `git restore <path>`；拒絕訊息會寫。
+  - 第 5 輪：`checkout -`、`switch -`（與 `@{-N}`）用真的 git 解析 `@{-1}`；解析到自己綁定的 branch 就放行，否則拒絕並寫出它是哪個 branch（或上一個是 detached HEAD、或 git 解析不了）。
 - [ ] T20 位置問真的 git（第 3 輪，方向由 owner 核可）：需要位置的 git 呼叫先跑一次 `<真 git> <呼叫者的全域選項> rev-parse --absolute-git-dir --git-common-dir --show-toplevel`（同 cwd、同 `GIT_*`），再比對：
   - 綁定的 worktree：沒指定 git dir／work tree 時看 toplevel；有指定時比對 worktree 自己的 git dir 與 common dir（再問 git 一次）。
   - canonical／同 repo 的其他 worktree／外部 repo：比對 canonical checkout 的 common dir（問 git；toplevel 就是 canonical checkout 時不用再問）。
@@ -255,11 +264,14 @@ shim 是安全帶，不是安全邊界（同 uid 的 agent 能改檔案、能直
 
 - **後續提案**：第 6 或第 10 施工關：daemon 擁有的 reference-transaction hook 在 prepared 階段拒絕受保護 ref 的變更（[第 6 施工關](gate-06-daemon-holder.md)、[第 10 施工關](gate-10-pipeline.md)）。v1 已經裝這個 hook（agend-terminal `src/binding.rs::install_hooks`），但只記 log。下面第一條由它關閉。
 - 在 agent 自己的 scratch repo 裡，用 `-c remote.<x>.url=<team>`、`-c url.<team>.insteadOf=<x>`、`-c remote.<x>.pushurl=<team>` 特製目的地，可以 push 到 team remote、移動 main／master／release（verifier 第 2 輪發現 1）。foreign repo 只比對已存的 remote 設定與命令列目的地。這是刻意組出來的繞法；真正的關閉是上面的 hook 與 forge 端 branch protection。
-- 讀取類命令不檢查 `-c`／`GIT_CONFIG_*`（T15）。白名單裡的 `core.editor`、`core.pager`、`gpg.program`、`credential.helper` 會執行程式，git 啟動它時 PATH 最前面是真的 git，不經過 shim（同 hooks）。
+- 讀取類命令不檢查 `-c`／`GIT_CONFIG_*`（T15）。白名單裡的 `core.editor`、`sequence.editor`、`core.pager`、`gpg.program`、`credential.helper` 會執行程式，git 啟動它時 PATH 最前面是真的 git，不經過 shim（同 hooks）。
 - shell 內建的 `kill` 攔不到（T18）。
 - git 自己啟動的程序不經過 shim：hooks、`rebase --exec`、`bisect run`、`submodule foreach`、`!` alias。git 會把自己的 exec-path 放在 PATH 最前面，裡面就有真的 `git`。
 - 直接改檔案：`.git/config`、`~/.gitconfig`、`GIT_CONFIG_GLOBAL` 指到的檔案、`.git/refs/…`。已存在的設定只檢查 `remote.*.fetch` 與 `rebase.updateRefs`；其餘（例如 `push.followTags` 配 `--force`）不檢查。其中已存在的 `core.worktree` 會改變 git 回答的 work tree；沒指定 git dir 的呼叫，shim 用 toplevel 認綁定的 worktree，不另外核對 git dir（T20）。
-- 沒快照：`git stash drop`、`git stash clear`（被丟掉的 stash 只能用 `git fsck` 找）、`merge --abort`、`rebase --abort`、`rm -f`、`update-index`、`submodule update --force`。
+- 沒快照：`git stash drop`、`git stash clear`（被丟掉的 stash 只能用 `git fsck` 找）、`merge --abort`、`rebase --abort`、`rm --cached`（只動 index；已 stage、跟 HEAD 和檔案都不同的內容會丟掉）、`update-index`、`submodule update --force`。
+- 從 workspace（不在任何 repo）或其他不在 repo 的目錄導向時，跑在 worktree 頂層：那裡沒有「同一個子目錄」可以對應，所以在 workspace 的子目錄裡打 `git clean -fdx .`，`.` 指的是 worktree 頂層（第 5 輪；canonical 與別的 worktree 已照子目錄處理）。
+- T7 的「team remote」沿用 T5 的認法：canonical checkout 的 remote。worktree 與 canonical 共用 config，所以 agent 用 `git remote add` 加的 remote 也算 team remote，推自己的 branch 過去會放行（只影響自己的 branch）。
+- T7 的解析照 git 2.39 的 push 規則寫在 shim 裡（`refs::implicit_push`），不是問 git 本身：`@{push}` 不處理 `matching`，對 triangular 的 `simple` 也跟真的 push 不同。解析不了的組合一律拒絕；`.git/remotes/`、`.git/branches/` 舊式 remote 檔不讀。
 - T5 認不出用 ssh `Host` 別名或不同網址指到同一個 team remote 的 clone。
 - 選項表是 git 2.39 的（T14）；新選項會被拒絕，要加進表。
 - `rebase -i` 的 todo 裡手寫 `update-ref` 行，shim 看不到。
@@ -276,6 +288,8 @@ shim 是安全帶，不是安全邊界（同 uid 的 agent 能改檔案、能直
 ## 進度紀錄
 
 日期 + 一行 + commit／PR，新的在上面。
+
+- 2026-09-25 verifier 第 5 輪修正（draft PR #107）：導向保留呼叫者的子目錄（`--show-prefix`），worktree 沒有的目錄、canonical 的 `.git` 裡、別的 worktree 裡的寫入拒絕（MEDIUM，repro E／B）；`rm -f` 快照；T7 依使用者決定放行解析到自己 branch 的 push；`-c sequence.editor` 放行；`checkout -`／`switch -` 解析 `@{-1}`；新增 `tests/route_scope.rs`、`tests/implicit_push.rs`
 
 - 2026-09-25 verifier 第 4 輪修正（draft PR #107）：`parses_rev_parse_output` 不再靠 `$TMPDIR/x`（CI 紅的原因）；測試的 git 不讀 `~/.gitconfig`、不帶 agent 的 `AGEND_*`；team remote／clone 裡 `worktree` 除 `list` 都拒絕（T5）；新增 `tests/everyday.rs`：正常工作清單、symlink 與空格路徑 8 種拼法組合
 - 2026-09-25 verifier 第 3 輪修正（draft PR #107）：位置改問真的 git（T20），刪掉自己寫的 repo 探索；gitfile `--git-dir`、`GIT_DIR` 與真正的 git dir 走同一套檢查；需要導向的寫入帶 `--git-dir`／`--work-tree` 改拒絕；`file://<host>/` 認得；team 本機 remote 裡的寫入拒絕；快照壞時的訊息改正確；`tests/location_matrix.rs` 336 + 168 案

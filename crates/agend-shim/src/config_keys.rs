@@ -8,8 +8,8 @@
 //! and what a command name means (`alias.*`, `include.*`). Only identity,
 //! display and editor-style keys are allowed.
 //!
-//! Command-valued keys (`core.editor`, `core.pager`, `gpg.program`,
-//! `credential.helper`) stay allowed: git runs them with its exec-path (the
+//! Command-valued keys (`core.editor`, `sequence.editor`, `core.pager`,
+//! `gpg.program`, `credential.helper`) stay allowed: git runs them with its exec-path (the
 //! real git) first on PATH, which only a deliberate bypass would exploit;
 //! out of scope per the gate 3 threat model (see the gate page's known
 //! limits). Read commands do not check this list at all.
@@ -32,6 +32,7 @@ const EXACT: &[&str] = &[
     "gpg.program",
     "gpg.format",
     "core.editor",
+    "sequence.editor",
     "core.pager",
     "core.quotepath",
     "core.autocrlf",
@@ -87,7 +88,34 @@ pub fn allowed(key: &str) -> bool {
 }
 
 /// Short list for refusal messages.
-pub const ALLOWED_HINT: &str = "user.*, author.*, committer.*, core.editor, core.pager, pull.rebase, pull.ff, merge.conflictStyle, color.*, advice.*";
+pub const ALLOWED_HINT: &str = "user.*, author.*, committer.*, core.editor, sequence.editor, core.pager, pull.rebase, pull.ff, merge.conflictStyle, color.*, advice.*";
+
+/// Why `key` (not allowed) is refused, for the refusal's "why" line.
+pub fn refused_because(key: &str) -> String {
+    if is_editor_like(key) {
+        format!(
+            "setting {key} is refused: of the editor settings only core.editor and sequence.editor may be set"
+        )
+    } else {
+        format!(
+            "setting {key} is refused: that config can redirect refs, the work tree, hooks or command names"
+        )
+    }
+}
+
+/// Extra advice for a refused editor-like key (`<section>.<x>editor`): the
+/// environment picks editors without config.
+pub fn editor_hint(key: &str) -> Option<&'static str> {
+    is_editor_like(key).then_some(
+        "to pick an editor for one command use the environment instead: GIT_EDITOR=<cmd> git ... (commit messages) or GIT_SEQUENCE_EDITOR=<cmd> git rebase -i ... (the rebase todo)",
+    )
+}
+
+fn is_editor_like(key: &str) -> bool {
+    key.rsplit('.')
+        .next()
+        .is_some_and(|name| name.to_ascii_lowercase().ends_with("editor"))
+}
 
 /// Keys set through the environment. `count` is `GIT_CONFIG_COUNT`,
 /// `key_n(i)` reads `GIT_CONFIG_KEY_<i>`, `params` is `GIT_CONFIG_PARAMETERS`.
@@ -171,6 +199,8 @@ mod tests {
             "user.name",
             "User.Email",
             "core.editor",
+            "sequence.editor",
+            "Sequence.Editor",
             "color.diff.meta",
             "advice.detachedHead",
             "pull.rebase",
@@ -190,9 +220,26 @@ mod tests {
             "clean.requireForce",
             "user",
             "user.name.x",
+            "sequence.editor.x",
         ] {
             assert!(!allowed(k), "{k}");
         }
+    }
+
+    #[test]
+    fn refused_editor_keys_point_at_the_environment() {
+        let why = refused_because("gui.editor");
+        assert!(
+            why.contains("only core.editor and sequence.editor"),
+            "{why}"
+        );
+        assert!(
+            editor_hint("gui.editor")
+                .unwrap()
+                .contains("GIT_SEQUENCE_EDITOR")
+        );
+        assert!(editor_hint("remote.origin.push").is_none());
+        assert!(refused_because("core.hooksPath").contains("hooks"));
     }
 
     #[test]

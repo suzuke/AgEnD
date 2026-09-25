@@ -5,17 +5,21 @@
 //! - Options of every subcommand whose verdict depends on them are parsed
 //!   with exact spellings only (`opts`, `specs`); abbreviations and
 //!   unlisted options are refused.
-//! - Ref destinations must be explicit and checkable: pushes need
-//!   `src:dst` refspecs, fetch refmaps (command line and config) must land in
-//!   `refs/remotes/` or the agent's namespace, config that picks destinations
-//!   cannot be set (`config_keys`), and symbolic refs are followed before a
-//!   destination is checked.
+//! - Ref destinations must be checkable: a push's `src:dst` is checked as
+//!   typed, and a push without one only when git's own resolution (config
+//!   read with the real git) lands on the bound branch on the team remote;
+//!   fetch refmaps (command line and config) must land in `refs/remotes/` or
+//!   the agent's namespace, config that picks destinations cannot be set
+//!   (`config_keys`), and symbolic refs are followed before a destination
+//!   is checked.
 //! - Where a call acts is git's answer (`location`), so every spelling of a
 //!   git dir or work tree resolves alike. A write acts on the bound worktree
 //!   only: in its git dir, the work tree git would use must be the bound
 //!   worktree and `GIT_INDEX_FILE` its own; a write that has to be routed
 //!   there is refused if the caller named a git dir or work tree
 //!   (`--git-dir`, `--work-tree`, `--bare`, `GIT_*`) instead of rewritten.
+//!   Routing keeps the caller's directory inside its checkout (`route_dir`),
+//!   and never starts from another agent's worktree.
 //! - Anything that could leave the bound branch (DWIM checkout, `<x> --`,
 //!   rebase of another branch, `stash branch`) is refused unless its target
 //!   is the bound branch itself.
@@ -191,6 +195,12 @@ pub trait Probe {
     fn is_team_repo(&self) -> bool;
     /// A foreign repo: whether push destination `dest` is the team repo.
     fn is_team_remote(&self, dest: &str) -> bool;
+    /// Whether `git push <remote>` from the bound worktree (or the repo the
+    /// command acts on) sends to the team repo, and only there.
+    fn is_team_push_remote(&self, remote: &str) -> bool;
+    /// `git rev-parse --symbolic-full-name <rev>` in the repo the command
+    /// acts on (`None` if git fails; empty for a detached HEAD entry).
+    fn symbolic_full_name(&self, rev: &str) -> Option<String>;
 }
 
 /// The caller's git environment, as it affects where a write lands.
@@ -325,7 +335,27 @@ pub fn classify(input: &Input) -> Decision {
             "run `agend status`; the daemon re-creates or re-assigns the worktree",
         ));
     }
-    let route = (input.location != Location::Worktree).then(|| binding.worktree().to_path_buf());
+    let named = input.args.git_dir.is_some() || input.args.work_tree.is_some();
+    let no_work_tree = input.resolved.is_some_and(|r| r.work_tree.is_none());
+    if input.location != Location::Worktree && no_work_tree && !named {
+        // e.g. cwd inside the canonical `.git`: git itself would refuse a
+        // work-tree write there; routing must not make it act anyway.
+        return Decision::Refuse(Refusal::new(
+            "route_dir_missing",
+            format!(
+                "you ran `git {sub}` in {}, inside a git directory (git sees no work tree there), so the shim will not run it in your bound worktree",
+                input.dir.display()
+            ),
+            format!("cd {} and run it there", binding.worktree().display()),
+        ));
+    }
+    let route = match input.location {
+        Location::Worktree => None,
+        _ => match route_dir(sub, input, binding) {
+            Ok(dir) => Some(dir),
+            Err(r) => return Decision::Refuse(r),
+        },
+    };
     if route.is_some() && input.env.retargets {
         return Decision::Refuse(Refusal::new(
             "git_env_retarget",
@@ -347,11 +377,10 @@ pub fn classify(input: &Input) -> Decision {
         Ok(op) => op,
         Err(r) => return Decision::Refuse(r),
     };
-    let note = matches!(
-        input.location,
-        Location::Canonical | Location::OtherWorktree
-    )
-    .then(|| routed_note(binding, input.dir));
+    let note = match (&route, input.location) {
+        (Some(to), Location::Canonical) => Some(routed_note(to, input.dir)),
+        _ => None,
+    };
     Decision::Run {
         route,
         snapshot: snapshot_op,
@@ -359,31 +388,92 @@ pub fn classify(input: &Input) -> Decision {
     }
 }
 
-/// Read-only commands: run in the bound worktree when the caller is outside
-/// it (workspace dir, canonical checkout, another worktree), else as is.
+/// Read-only commands: run in the bound worktree when the caller is in the
+/// workspace (no repo) or the canonical checkout, else as is. In another
+/// worktree a read runs where it was typed: it shows that worktree, which
+/// is what the agent asked for, and routing it would be a surprise.
 fn route_read(input: &Input, binding: Option<&Binding>) -> Decision {
     let Some(binding) = binding else {
         return Decision::pass();
     };
-    let outside = matches!(
-        input.location,
-        Location::Canonical | Location::OtherWorktree | Location::NoRepo
-    );
+    let outside = matches!(input.location, Location::Canonical | Location::NoRepo);
     if !outside || input.env.retargets || !binding.worktree().is_dir() {
         return Decision::pass();
     }
-    let note = (input.location != Location::NoRepo).then(|| routed_note(binding, input.dir));
+    let sub = input.args.sub.as_deref().unwrap_or("");
+    let to = match route_dir(sub, input, binding) {
+        Ok(to) => to,
+        Err(r) => return Decision::Refuse(r),
+    };
+    let note = (input.location != Location::NoRepo).then(|| routed_note(&to, input.dir));
     Decision::Run {
-        route: Some(binding.worktree().to_path_buf()),
+        route: Some(to),
         snapshot: None,
         note,
     }
 }
 
-fn routed_note(binding: &Binding, dir: &Path) -> String {
+/// Where a call from outside the bound worktree runs: the same directory
+/// inside the bound worktree as the caller's inside its checkout (git's
+/// `--show-prefix`), so `.` and other relative pathspecs keep their scope.
+/// From the workspace (no repo) that is the worktree's top.
+///
+/// Refused instead of routed: a call from another worktree of the team
+/// repo (the agent is in the wrong directory; acting on its own worktree
+/// would surprise it), and a directory the bound worktree does not have.
+fn route_dir(sub: &str, input: &Input, binding: &Binding) -> Result<PathBuf, Refusal> {
+    let wt = binding.worktree();
+    let prefix = input
+        .resolved
+        .filter(|_| input.location != Location::NoRepo)
+        .map_or(Path::new(""), |r| r.prefix.as_path());
+    // Joined by component: `Path::join("")` would add a trailing slash.
+    let target = prefix.components().fold(wt.to_path_buf(), |p, c| p.join(c));
+    let target_ok = prefix
+        .components()
+        .all(|c| matches!(c, std::path::Component::Normal(_)))
+        && target.is_dir()
+        && match (std::fs::canonicalize(&target), std::fs::canonicalize(wt)) {
+            (Ok(t), Ok(w)) => t.starts_with(w),
+            _ => false,
+        };
+    let shown = |p: &Path| p.display().to_string();
+    if input.location == Location::OtherWorktree {
+        let there = input.resolved.map_or(input.dir, Resolved::root);
+        let go = if target_ok { &target } else { wt };
+        return Err(Refusal::new(
+            "other_worktree",
+            format!(
+                "you ran `git {sub}` in {}, which is in another worktree of the team repo ({}), not in your bound worktree {}",
+                input.dir.display(),
+                there.display(),
+                wt.display()
+            ),
+            format!("cd {} and run it there", shown(go)),
+        ));
+    }
+    if target_ok {
+        return Ok(target);
+    }
+    Err(Refusal::new(
+        "route_dir_missing",
+        format!(
+            "you ran `git {sub}` in {}, outside your bound worktree; the same directory ({}) does not exist in your bound worktree {}, so the shim will not run it there (relative paths would mean something else)",
+            input.dir.display(),
+            prefix.display(),
+            wt.display()
+        ),
+        format!(
+            "cd {} (your bound worktree), then cd to the directory you meant and run it there",
+            wt.display()
+        ),
+    ))
+}
+
+fn routed_note(to: &Path, dir: &Path) -> String {
     format!(
         "agend-shim: running in your bound worktree {} (you ran git in {})",
-        binding.worktree().display(),
+        to.display(),
         dir.display()
     )
 }
@@ -459,16 +549,24 @@ fn check_config_channel(input: &Input) -> Result<(), Refusal> {
         .find(|k| !config_keys::allowed(k));
     match bad {
         None => Ok(()),
-        Some(key) => Err(Refusal::new(
-            "config_override",
-            format!(
-                "setting {key} for this command is refused: that config can redirect refs, the work tree, hooks or command names"
-            ),
-            format!(
+        Some(key) => {
+            let mut next = format!(
                 "drop the -c / --config-env / GIT_CONFIG_* setting; only these keys may be set: {}",
                 config_keys::ALLOWED_HINT
-            ),
-        )),
+            );
+            if let Some(hint) = config_keys::editor_hint(key) {
+                next = format!("{next}; {hint}");
+            }
+            Err(Refusal::new(
+                "config_override",
+                config_keys::refused_because(key).replacen(
+                    " is refused",
+                    " for this command is refused",
+                    1,
+                ),
+                next,
+            ))
+        }
     }
 }
 
@@ -566,6 +664,10 @@ fn check_write(
         "clean" => Ok((!p.has("--dry-run")).then_some("clean")),
         "restore" => Ok((!p.has("--staged") || p.has("--worktree")).then_some("restore")),
         "read-tree" => Ok((p.has("-u") && !p.has("--dry-run")).then_some("read-tree")),
+        // Without `--force` git refuses to remove a file whose content is not
+        // committed; with it, uncommitted edits are gone. `--cached` only
+        // touches the index.
+        "rm" => Ok((p.has("--force") && !p.any(&["--cached", "--dry-run"])).then_some("rm")),
         _ => Ok(None),
     }
 }

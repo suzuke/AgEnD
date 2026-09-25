@@ -1,7 +1,7 @@
 # agend-shim 測試
 
 > **TL;DR**
-> - unit 測試測純決定（argv → 放行／導向／拒絕）；`tests/` 在暫存 repo 裡跑真的 git；`tests/bypass_corpus.rs` 是 verifier 第 1 輪的繞法清單；`tests/location_matrix.rs` 是第 3 輪的拼法 × cwd × 命令矩陣；`tests/everyday.rs` 是第 4 輪的正常工作清單與 symlink／空格路徑。
+> - unit 測試測純決定（argv → 放行／導向／拒絕）；`tests/` 在暫存 repo 裡跑真的 git；`tests/bypass_corpus.rs` 是 verifier 第 1 輪的繞法清單；`tests/location_matrix.rs` 是第 3 輪的拼法 × cwd × 命令矩陣；`tests/everyday.rs` 是第 4 輪的正常工作清單與 symlink／空格路徑；`tests/route_scope.rs` 與 `tests/implicit_push.rs` 是第 5 輪（導向保留子目錄、T7 push 放行）。
 > - 記住：git 測試只用 `git init`／`git clone` 建的暫存 repo（不複製 worktree），並設 `GIT_CEILING_DIRECTORIES`；每個測試自己建需要的目錄，不靠 `$TMPDIR`、`~/.gitconfig`、cwd 裡原有的東西；kill 測試只打假的 kill 記錄程式，絕不送出訊號。
 > - 下一步：testkit 的 `git_fixture` 有 repo builder 後，把 `tests/git_shim.rs` 的本地 `Fixture` 換掉。
 
@@ -12,6 +12,8 @@ cargo test -p agend-shim
 cargo test -p agend-shim --test bypass_corpus   # verifier 的繞法清單
 cargo test -p agend-shim --test location_matrix # 拼法 × cwd × 命令矩陣（約 30 秒）
 cargo test -p agend-shim --test everyday        # 正常工作清單、symlink 與空格路徑
+cargo test -p agend-shim --test route_scope     # 導向保留子目錄（verifier 第 5 輪 repro）
+cargo test -p agend-shim --test implicit_push   # 沒有 src:dst 的 push 照 git 解析目的地
 TMPDIR=$(mktemp -d) cargo test -p agend-shim    # 空的暫存目錄也要全過
 cargo test -p agend --test argv0_dispatch   # 真的 binary 以 `git` 名稱執行
 cargo xtask accept shim                      # 以上 + demo
@@ -23,11 +25,11 @@ cargo xtask accept shim                      # 以上 + demo
 |---|---|
 | `tests::dispatches_on_basename`、`other_names_are_not_the_shim` | argv[0] 分派 |
 | `binding::tests::*` | 快照寫了讀得回來；版本、instance、相對路徑、branch 不在 `agend/<task>/`、缺 `source_repo` 都算壞掉；instance id 不能跳出目錄 |
-| `location::tests::*` | git 的答案怎麼分類：綁定的 worktree（toplevel，或指定時比 git dir 與 common dir）、canonical、其他 worktree、`GIT_COMMON_DIR` 改標籤、外部 repo；`rev-parse` 輸出（bare 只有兩行、相對的 common dir；路徑建在自己的暫存目錄，第 4 輪） |
-| `classify::tests::*` | 全域選項解析；綁定的 worktree 裡 git 回答的 work tree 必須是它（任何拼法）、index 在它的 git dir 裡；需要導向的寫入帶 `--git-dir`／`--work-tree` 拒絕、只帶 `-C` 導向；導向；讀取放行；未綁定／快照壞時拒絕寫入；`worktree`；branch 切換、建立、刪除、改名；protected ref；每一類繞法：縮寫選項、隱含的 push 目的地、fetch refmap、config key、symbolic ref、work tree／index、DWIM 與旁門、外部 repo 與 team repo，含 team clone 裡 `worktree` 除 `list` 都算寫入（用假的 `Probe`） |
+| `location::tests::*` | git 的答案怎麼分類：綁定的 worktree（toplevel，或指定時比 git dir 與 common dir）、canonical、其他 worktree、`GIT_COMMON_DIR` 改標籤、外部 repo；`rev-parse` 輸出（bare 只有兩行、相對的 common dir；`--show-prefix` 的空行與子目錄；路徑建在自己的暫存目錄，第 4 輪） |
+| `classify::tests::*` | 全域選項解析；綁定的 worktree 裡 git 回答的 work tree 必須是它（任何拼法）、index 在它的 git dir 裡；需要導向的寫入帶 `--git-dir`／`--work-tree` 拒絕、只帶 `-C` 導向；導向；讀取放行；未綁定／快照壞時拒絕寫入；`worktree`；branch 切換、建立、刪除、改名；protected ref；每一類繞法：縮寫選項、隱含的 push 目的地、fetch refmap、config key、symbolic ref、work tree／index、DWIM 與旁門、外部 repo 與 team repo，含 team clone 裡 `worktree` 除 `list` 都算寫入（用假的 `Probe`）。第 5 輪：導向到 `<worktree>/<prefix>`，worktree 沒有的目錄、`..`、絕對路徑、在 git dir 裡（沒有 work tree）拒絕；別的 worktree 裡的寫入拒絕、讀取原地執行；`rm -f` 快照（`--cached`、`-n` 不快照）；沒有 `src:dst` 的 push 照 push.default（simple／upstream／current／matching／nothing）、upstream、pushRemote、`remote.<r>.push`／mirror 解析，只有落在自己綁定的 branch 且是 team remote 才放行；`-c sequence.editor`；`checkout -`／`switch -` 用 `@{-1}` 解析 |
 | `classify::opts::tests::*` | 選項解析照 git 的規則，縮寫與沒列的選項是錯誤 |
 | `classify::specs::tests::*` | 選項表格式正確、沒有重複 |
-| `config_keys::tests::*` | key 白名單；`GIT_CONFIG_PARAMETERS`／`GIT_CONFIG_COUNT` 兩種格式 |
+| `config_keys::tests::*` | key 白名單（含 `sequence.editor`）；被拒的編輯器類 key 的訊息提到 `GIT_SEQUENCE_EDITOR`；`GIT_CONFIG_PARAMETERS`／`GIT_CONFIG_COUNT` 兩種格式 |
 | `team::tests::*` | URL 正規化（scp、ssh、https、埠號、`.git`）、insteadOf；本機路徑照 git 補 `.git`（`/x/origin` = `/x/origin.git`）；`file://localhost/`、`file://127.0.0.1/` 不看主機名 |
 | `protected_ref::tests::*` | 內建與設定的 protected ref、glob、refspec 目的地 |
 | `kill_guard::tests::*` | pkill／killall 拒絕、kill 拒絕 agend 程序、`0`／負數／名字／job spec；pid 去空白、`+`、前導 0 後再判斷；pid 超過 `i32::MAX`（`4294967295` 在 BSD `kill` 會變 `-1`）或超過 10 位數拒絕；`ps` 讀得到程序名（純函式，不送訊號） |
@@ -37,7 +39,9 @@ cargo xtask accept shim                      # 以上 + demo
 | `tests/git_shim.rs` | 真 repo：從 workspace／canonical commit 會落在 task branch、main 不動；`checkout main` 拒絕並記 audit；worktree／branch 建立拒絕；未綁定、快照缺失或壞掉時拒絕寫入；protected ref 不動；`reset --hard` 快照後照訊息還原；`clean -fd`、`checkout -- .` 快照；bypass 記 audit；外部 repo 不管；hook 的 `GIT_DIR` |
 | `tests/bypass_corpus.rs` | verifier 第 1 輪的指令原樣重播（有 bare `origin`、只在 remote 的 branch、先用真 git 做好的設定／symref），每條檢查不變量：main／master／release 本機與 origin 都沒動、還在 `agend/t-1/fix`、沒多出 branch、canonical 的未提交工作還在、worktree 的未提交工作還在或有快照；T5（clone、push 到 team URL 含不帶 `.git` 的路徑與 `file://`、workspace 在別的 repo 裡）；第 2 輪：自己的 git dir + canonical cwd 的 `clean`／`reset --hard`；第 4 輪：verifier 的 `git -C <origin.git> worktree add ../zm main` 原指令與其他 `worktree` 子命令在 team remote（`-C`、`--git-dir`）與 clone 裡拒絕、`list` 放行、scratch repo 放行、之後 `git push origin main` 照常；T9 kill 形式（只打假的 kill） |
 | `tests/location_matrix.rs` | 第 3 輪：7 種拼法（直接跑、`-C <worktree>/sub`、`-C <worktree>`、`--git-dir=<worktree>/.git`、`--git-dir=<真正的 git dir>`、`GIT_DIR` 兩種）× 有無 `--work-tree` × 4 個 cwd（worktree、canonical、workspace、worktree 子目錄）× 6 個保護動作（push main、update-ref main、刪 release、`checkout -b`、髒的 `reset --hard`、`clean -fd`）＝ 336 案：每案被拒絕，或破壞性操作先快照；main／master／release 本機與 origin 不動、canonical 與 workspace 的檔案都在、不被當成 team clone。另 4 個 cwd × 7 種指向綁定 worktree 的拼法 × 6 步正常工作（commit、`-c core.editor=true commit --amend`、push 自己的 branch、`rebase origin/main`、stash、stash pop）＝ 168 步全過、hooks 有跑；hook 形式的 `GIT_DIR` + `GIT_INDEX_FILE` 呼叫放行 |
-| `tests/everyday.rs` | 第 4 輪：正常工作清單逐條經 shim（status、log、diff、add、commit、`--amend`、`-c core.editor=true commit --amend`、fetch、`pull --rebase`、`rebase origin/main`、push 自己的 branch（`-u`、`--force-with-lease`）、`branch agend/<task>/x`、switch 到自己的 branch、stash push／pop、`worktree list`、`-C <子目錄>`、從 workspace／canonical 導向），hooks 有跑；刻意拒絕的（沒有 `src:dst` 的 push、切到別的 branch）附下一步。路徑含空格、經 symlink：快照、`AGEND_HOME`、cwd 各用兩種拼法（8 組）× 4 個 cwd，保護動作全拒絕、正常工作全過、`reset --hard` 有快照 |
+| `tests/everyday.rs` | 第 4 輪：正常工作清單逐條經 shim（status、log、diff、add、commit、`--amend`、`-c core.editor=true commit --amend`、fetch、`pull --rebase`、`rebase origin/main`、push 自己的 branch（`-u`、`--force-with-lease`；第 5 輪起 `git push`、`push -u origin <branch>`、`push origin HEAD` 也放行）、`branch agend/<task>/x`、switch 到自己的 branch、`checkout -`／`switch -` 回到自己的 branch、`-c sequence.editor=true rebase -i`、stash push／pop、`worktree list`、`-C <子目錄>`、從 workspace／canonical 導向），hooks 有跑；刻意拒絕的（`push origin main`、切到別的 branch）附下一步。路徑含空格、經 symlink：快照、`AGEND_HOME`、cwd 各用兩種拼法（8 組）× 4 個 cwd，保護動作全拒絕、正常工作全過、`reset --hard` 有快照 |
+| `tests/route_scope.rs` | 第 5 輪發現 1：verifier 的 repro E（`<canonical>/src/sub` 裡 `git rm -rf .`）與 B（`git clean -fdx .`）原樣重播，加上 `checkout -- .`、`add .`、`restore .`、`-C <canonical>/src/sub`：只動綁定 worktree 的 `src/sub`，根目錄的未提交修改、ignored 的 `.env`／`target/` 都在，canonical 與另一個 worktree 不動，`rm -f` 有快照且存有未提交修改；從另一個 worktree 的 `src/sub` 跑的寫入全部拒絕（`other_worktree`）、下一步是 `cd <worktree>/src/sub`，讀取在原地跑；worktree 沒有的目錄拒絕（`route_dir_missing`）並寫出目錄名。修正前 6 個全紅 |
+| `tests/implicit_push.rs` | T7（使用者 2026-09-25 決定放行）：`push -u origin <branch>`、`git push`（從 worktree、canonical、workspace）、`push origin`、`push origin HEAD`、push.default simple／upstream／current 都真的推到 origin 的 `agend/t-1/fix`；沒有 upstream、upstream 指到 main（simple 與 upstream 兩種）、matching、nothing、`remote.origin.push`、不是 team remote 的路徑與 pushRemote、`push .`、`push origin main` 都拒絕，下一步是可以直接跑的 `git push origin HEAD:refs/heads/agend/t-1/fix`，origin 的 main 與分支都沒動 |
 | `examples/shim_demo.rs` | 驗收 demo：真的 `agend` binary 以 `git`／`kill`／`pkill` 名稱執行，每一步都檢查 |
 
 ## 用到的假實作

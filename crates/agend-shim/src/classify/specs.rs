@@ -28,6 +28,7 @@ pub fn of(sub: &str) -> Option<Spec> {
         "config" => &[CONFIG],
         "rebase" => &[REBASE],
         "read-tree" => &[READ_TREE],
+        "rm" => &[RM],
         _ => return None,
     })
 }
@@ -448,6 +449,20 @@ const REBASE: &[&str] = &[
     "--no-keep-empty",
 ];
 
+/// `--force` decides the snapshot, so no `--no-*` negations (a
+/// `--no-cached` or `--no-dry-run` would cancel what the policy saw).
+const RM: &[&str] = &[
+    "-n|--dry-run",
+    "-q|--quiet",
+    "--cached",
+    "-f|--force",
+    "-r",
+    "--ignore-unmatch",
+    "--sparse",
+    "--pathspec-from-file=",
+    "--pathspec-file-nul",
+];
+
 const READ_TREE: &[&str] = &[
     "--index-output=",
     "--empty",
@@ -490,6 +505,7 @@ mod tests {
             "config",
             "rebase",
             "read-tree",
+            "rm",
         ] {
             let mut seen = std::collections::HashSet::new();
             for e in of(sub).unwrap().iter().flat_map(|g| g.iter()) {

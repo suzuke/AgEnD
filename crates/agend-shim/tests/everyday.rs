@@ -100,14 +100,32 @@ fn everyday_work_passes_through() {
             vec!["push", "-q", "--force-with-lease", "origin", &own],
         ),
         Step::Ok("wt", vec!["push", "-q", "origin", &own_to_own]),
-        // T7: implicit destinations are refused with the exact command.
-        Step::Refused("wt", vec!["push"]),
-        Step::Refused("wt", vec!["push", "-u", "origin", &f.branch]),
+        // T7 (owner decision 2026-09-25): a push git resolves to the bound
+        // branch on the team remote runs; one that resolves elsewhere is
+        // refused with the exact command.
+        Step::Ok("wt", vec!["push", "-q", "-u", "origin", &f.branch]),
+        Step::Ok("wt", vec!["push", "-q"]),
+        Step::Ok("wt", vec!["push", "-q", "origin", "HEAD"]),
+        Step::Refused("wt", vec!["push", "origin", "main"]),
         Step::Ok("wt", vec!["pull", "-q", "--rebase"]),
         Step::Ok("wt", vec!["pull", "-q", "--rebase", "origin", "main"]),
         Step::Ok("wt", vec!["branch", "agend/t-1/x"]),
         Step::Ok("wt", vec!["switch", "-q", &f.branch]),
         Step::Ok("wt", vec!["checkout", "-q", &f.branch]),
+        // Round 5: `-` resolves to the bound branch here, so it runs.
+        Step::Ok("wt", vec!["checkout", "-q", "-"]),
+        Step::Ok("wt", vec!["switch", "-q", "-"]),
+        Step::Ok(
+            "wt",
+            vec![
+                "-c",
+                "sequence.editor=true",
+                "rebase",
+                "-q",
+                "-i",
+                "origin/main",
+            ],
+        ),
         Step::Refused("wt", vec!["switch", "agend/t-1/x"]),
         Step::Edit("README.md"),
         Step::Ok("wt", vec!["stash", "push", "-q", "-m", "wip"]),

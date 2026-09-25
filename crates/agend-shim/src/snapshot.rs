@@ -1,6 +1,6 @@
 //! Takes a snapshot before destructive git operations (`reset --hard`,
-//! `clean -f`, `checkout -- <paths>`, `restore`, `switch --discard-changes`)
-//! so they can be undone.
+//! `clean -f`, `checkout -- <paths>`, `restore`, `switch --discard-changes`,
+//! `rm -f`) so they can be undone.
 //!
 //! A snapshot is a commit of the whole working tree (tracked changes plus
 //! untracked, non-ignored files; built in a temporary index, so the real

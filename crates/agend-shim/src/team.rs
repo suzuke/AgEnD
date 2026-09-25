@@ -27,6 +27,8 @@ pub enum Key {
 pub struct Remotes {
     /// (remote name, url or pushurl).
     pub urls: Vec<(String, String)>,
+    /// (remote name, pushurl): where git pushes when a remote has one.
+    pub pushurls: Vec<(String, String)>,
     /// (prefix, replacement) from `url.<replacement>.insteadOf|pushInsteadOf`.
     pub rewrites: Vec<(String, String)>,
 }
@@ -45,6 +47,9 @@ impl Remotes {
                 && let Some((name, _)) = rest.rsplit_once('.')
             {
                 r.urls.push((name.to_string(), value.clone()));
+                if lower.ends_with(".pushurl") {
+                    r.pushurls.push((name.to_string(), value.clone()));
+                }
             } else if let Some(rest) = key.strip_prefix("url.")
                 && let Some((base, _)) = rest.rsplit_once('.')
             {
@@ -86,6 +91,21 @@ impl Remotes {
             return named;
         }
         key(&self.rewrite(dest), base).into_iter().collect()
+    }
+
+    /// Keys of where `git push <remote>` sends: the remote's pushurls if it
+    /// has any, else its urls, else `remote` itself as a URL or path.
+    pub fn push_keys(&self, remote: &str, base: &Path) -> Vec<Key> {
+        let push: Vec<Key> = self
+            .pushurls
+            .iter()
+            .filter(|(n, _)| n == remote)
+            .filter_map(|(_, u)| key(&self.rewrite(u), base))
+            .collect();
+        if !push.is_empty() {
+            return push;
+        }
+        self.dest_keys(remote, base)
     }
 }
 

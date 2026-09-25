@@ -192,7 +192,7 @@ fn resolve(
     let mut cmd = Command::new(git);
     cmd.args(globals)
         .args(REV_PARSE)
-        .arg("--show-toplevel")
+        .args(["--show-toplevel", "--show-prefix"])
         .current_dir(&ctx.cwd)
         .stdin(Stdio::null())
         .stderr(Stdio::null());
@@ -224,7 +224,7 @@ fn resolve(
         }
     }
     let out = cmd.output().ok()?;
-    Resolved::from_lines(&lines(&out.stdout), dir)
+    Resolved::from_lines(&lines_keeping_empty(&out.stdout), dir)
 }
 
 /// `rev-parse` arguments shared by every location question (git 2.13+;
@@ -246,6 +246,17 @@ fn run_clean(git: &Path, args: &[&OsStr]) -> Option<Vec<u8>> {
     }
     let out = cmd.output().ok()?;
     out.status.success().then_some(out.stdout)
+}
+
+/// Output lines as paths, empty ones kept (`--show-prefix` prints an empty
+/// line at the top of the work tree); only the newline ending the output
+/// is dropped.
+fn lines_keeping_empty(stdout: &[u8]) -> Vec<PathBuf> {
+    let body = stdout.strip_suffix(b"\n").unwrap_or(stdout);
+    if body.is_empty() && stdout.is_empty() {
+        return Vec::new();
+    }
+    body.split(|b| *b == b'\n').map(path_of).collect()
 }
 
 /// Non-empty output lines as paths (bytes kept as is on unix).
@@ -451,6 +462,31 @@ impl Probe for RealProbe<'_> {
             .dest_keys(dest, self.base())
             .iter()
             .any(|k| team.contains(k))
+    }
+
+    /// The team remote is a remote of the canonical checkout (its `origin`),
+    /// not the local repo itself: `git push . HEAD` is not a push to it.
+    fn is_team_push_remote(&self, remote: &str) -> bool {
+        let Some(src) = &self.source_repo else {
+            return false;
+        };
+        let canonical =
+            Remotes::from_config(&self.config_in(At::Checkout(src), team::CONFIG_REGEX));
+        let team_remotes = canonical.keys(src);
+        let local = team::key(".", src);
+        let remotes = Remotes::from_config(&self.config(team::CONFIG_REGEX));
+        let base = self.bound.as_deref().unwrap_or_else(|| self.base());
+        let keys = remotes.push_keys(remote, base);
+        !keys.is_empty()
+            && keys
+                .iter()
+                .all(|k| team_remotes.contains(k) && Some(k) != local.as_ref())
+    }
+
+    fn symbolic_full_name(&self, rev: &str) -> Option<String> {
+        // Callers pass `@{-<n>}` only (never an option-like string).
+        let out = self.run(self.repo(), &["rev-parse", "--symbolic-full-name", rev])?;
+        Some(out.trim().to_string())
     }
 }
 

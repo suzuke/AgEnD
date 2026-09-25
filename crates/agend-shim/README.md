@@ -19,7 +19,7 @@
 
 - 依 argv[0] basename 判斷是哪個工具（`Tool::from_argv0`）
 - git：放行、導向綁定的 worktree、拒絕（附下一步命令）；位置問真的 git（`rev-parse`），不自己找 repo
-- 選項只認完整拼寫（deny-by-default）；ref 目的地要看得到（push 要 `src:dst`、fetch refmap 含設定都檢查、不能設會改目的地的 config）；symbolic ref 先追到底再檢查
+- 選項只認完整拼寫（deny-by-default）；ref 目的地要看得到（push 的 `src:dst` 照寫的檢查；沒寫 `src:dst` 的 push 照 git 的規則從設定解析目的地，只有落在自己綁定的 branch 且是 team remote 才放行；fetch refmap 含設定都檢查、不能設會改目的地的 config）；symbolic ref 先追到底再檢查
 - protected-ref：`update-ref`、`push`、`push .`、`fetch`／`pull` 的目的地、`branch -f`、`tag` 寫 main／master 或快照列的 ref 一律拒絕
 - 破壞性操作前快照（`refs/agend/snapshots/<instance>/<id>`）並印出還原命令
 - kill 防護、audit 記錄（`$AGEND_HOME/audit/shim.jsonl`）
@@ -49,13 +49,13 @@
 
 1. bypass → 記 audit，原樣執行
 2. 解析 argv：全域選項（含 `-c` 的 key）、子命令
-3. 位置：用呼叫者的全域選項、cwd、`GIT_*` 跑 `git rev-parse --absolute-git-dir --git-common-dir --show-toplevel`，照答案分成綁定的 worktree／canonical checkout／同 repo 的其他 worktree／外部 repo／不在 repo／不知道（快照壞）；`--version`、`init`、`clone` 不問
+3. 位置：用呼叫者的全域選項、cwd、`GIT_*` 跑 `git rev-parse --absolute-git-dir --git-common-dir --show-toplevel --show-prefix`，照答案分成綁定的 worktree／canonical checkout／同 repo 的其他 worktree／外部 repo／不在 repo／不知道（快照壞）；`--version`、`init`、`clone` 不問
 4. 外部 repo → 放行，除非是 team 的本機 remote 本身或 team repo 的 clone（寫入拒絕；`worktree` 只有 `list` 算讀取），或 push 目的地是 team repo（本機路徑照 git 補 `.git`，`file://` 不看主機名）
 5. `worktree`（`list` 除外）、`filter-branch`、`fast-import`、不認得的子命令 → 拒絕
 6. 結果取決於選項的子命令：用 `specs` 的表做完整拼寫解析，失敗就拒絕
-7. 讀取 → 綁定且在 worktree 外就導向，否則放行
-8. 寫入 → config key 白名單（`-c`、env）；`fetch` 檢查目的地後像讀取一樣導向；其餘要有效快照與綁定；在綁定的 worktree 裡：git 回答的 work tree 是綁定的 worktree、`GIT_INDEX_FILE` 在它的 git dir 裡；需要導向時：沒有 `GIT_*`、沒有 `--git-dir`／`--work-tree`（有就拒絕，不改寫）；自己的 branch 不是 symref；逐命令檢查；破壞性操作先快照
-9. 導向 = 真 git 加 `-C <worktree>`、拿掉呼叫者的 `-C`／`--git-dir`／`--work-tree`
+7. 讀取 → 綁定且在 workspace（不在 repo）或 canonical checkout 就導向，否則原地放行（別的 worktree 裡的讀取原地跑）
+8. 寫入 → config key 白名單（`-c`、env）；`fetch` 檢查目的地後像讀取一樣導向；其餘要有效快照與綁定；在綁定的 worktree 裡：git 回答的 work tree 是綁定的 worktree、`GIT_INDEX_FILE` 在它的 git dir 裡；需要導向時：不是從別的 worktree（拒絕）、不是在 git dir 裡（沒有 work tree，拒絕）、沒有 `GIT_*`、沒有 `--git-dir`／`--work-tree`（有就拒絕，不改寫）、同一個子目錄在 worktree 裡存在（不存在就拒絕）；自己的 branch 不是 symref；逐命令檢查；破壞性操作先快照
+9. 導向 = 真 git 加 `-C <worktree>/<prefix>`（prefix 是 git 回答的 `--show-prefix`，所以 `.` 等相對路徑範圍不變；從 workspace 來時是 worktree 頂層）、拿掉呼叫者的 `-C`／`--git-dir`／`--work-tree`
 
 ## 模組
 
@@ -69,7 +69,7 @@
 | `classify::opts` | 完整拼寫的選項解析（照 git parse-options 的規則，不收縮寫） |
 | `classify::specs` | 各子命令的選項表 |
 | `classify::commands` | 各命令的檢查：checkout／switch、branch、tag、rebase、stash、config、remote、哪些操作要快照 |
-| `classify::refs` | ref 目的地：push、fetch／pull、update-ref、symbolic-ref |
+| `classify::refs` | ref 目的地：push（含沒寫 `src:dst` 時照 git 解析目的地）、fetch／pull、update-ref、symbolic-ref |
 | `config_keys` | agent 可以設的 config key 白名單、讀 `GIT_CONFIG_*` |
 | `team` | 用 remote URL／本機路徑認 team repo（insteadOf、URL 正規化、git `enter_repo` 的本機路徑規則） |
 | `protected_ref` | protected-ref 比對 |

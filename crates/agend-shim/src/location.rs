@@ -47,29 +47,38 @@ pub struct Resolved {
     pub common_dir: PathBuf,
     /// The work tree git would use; `None` without one (a bare repo).
     pub work_tree: Option<PathBuf>,
+    /// Where the call runs inside `work_tree` (git's `--show-prefix`:
+    /// relative, empty at the top or outside the work tree). Routing keeps
+    /// it, so a relative pathspec names the same directory in the bound
+    /// worktree.
+    pub prefix: PathBuf,
 }
 
 impl Resolved {
     /// From the output lines of `rev-parse --absolute-git-dir
-    /// --git-common-dir --show-toplevel` run in `base` (the directory git
-    /// runs in, after `-C`), which relative answers are relative to. Without
-    /// a work tree git prints the first two and then fails on
-    /// `--show-toplevel`; with no repo it prints nothing.
+    /// --git-common-dir --show-toplevel --show-prefix` run in `base` (the
+    /// directory git runs in, after `-C`), which relative answers are
+    /// relative to. Without a work tree git prints the first two and then
+    /// fails on `--show-toplevel`; with no repo it prints nothing. The
+    /// prefix line is empty at the top of the work tree (so `lines` must
+    /// keep empty lines); a missing prefix line means an empty prefix.
     pub fn from_lines(lines: &[PathBuf], base: &Path) -> Option<Resolved> {
         let canon = |p: &PathBuf| std::fs::canonicalize(base.join(p)).ok();
-        match lines {
-            [g, c] => Some(Resolved {
-                git_dir: canon(g)?,
-                common_dir: canon(c)?,
-                work_tree: None,
-            }),
-            [g, c, w] => Some(Resolved {
-                git_dir: canon(g)?,
-                common_dir: canon(c)?,
-                work_tree: Some(canon(w)?),
-            }),
-            _ => None,
-        }
+        let (g, c, w, prefix) = match lines {
+            [g, c] => (g, c, None, PathBuf::new()),
+            [g, c, w] => (g, c, Some(w), PathBuf::new()),
+            [g, c, w, p] => (g, c, Some(w), p.clone()),
+            _ => return None,
+        };
+        Some(Resolved {
+            git_dir: canon(g)?,
+            common_dir: canon(c)?,
+            work_tree: match w {
+                Some(w) => Some(canon(w)?),
+                None => None,
+            },
+            prefix,
+        })
     }
 
     /// The directory git works from: the work tree, else the git dir.
@@ -154,6 +163,7 @@ mod tests {
             git_dir: g.into(),
             common_dir: c.into(),
             work_tree: w.map(PathBuf::from),
+            prefix: PathBuf::new(),
         }
     }
 
@@ -214,6 +224,12 @@ mod tests {
         let t = tmp.clone();
         let full = Resolved::from_lines(&[t.clone(), t.clone(), t.clone()], &t).unwrap();
         assert_eq!(full.work_tree.as_deref(), Some(tmp.as_path()));
+        assert_eq!(full.prefix, PathBuf::new());
+        let sub =
+            Resolved::from_lines(&[t.clone(), t.clone(), t.clone(), "x/".into()], &t).unwrap();
+        assert_eq!(sub.prefix, PathBuf::from("x/"));
+        let top = Resolved::from_lines(&[t.clone(), t.clone(), t.clone(), "".into()], &t).unwrap();
+        assert_eq!(top.prefix, PathBuf::new());
         let bare = Resolved::from_lines(&[t.clone(), t.clone()], &t).unwrap();
         assert_eq!(bare.work_tree, None);
         assert_eq!(bare.root(), tmp.as_path());

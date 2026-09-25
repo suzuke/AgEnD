@@ -169,22 +169,58 @@ pub(crate) fn checkout(
     if restores_paths {
         return Ok(Some("checkout"));
     }
-    match p.pos.first() {
-        None => Ok(force.then_some("checkout")),
-        Some(target) if is_current(target, binding) => Ok(force.then_some("checkout")),
-        Some(target) => {
-            let shown = if target == "-" {
-                "the previous branch (-)"
-            } else {
-                target
-            };
-            let mut r = refuse_switch(shown, binding, g.protected);
+    let Some(target) = p.pos.first() else {
+        return Ok(force.then_some("checkout"));
+    };
+    match switch_target(target, g, binding) {
+        Ok(()) => Ok(force.then_some("checkout")),
+        Err(shown) => {
+            let mut r = refuse_switch(&shown, binding, g.protected);
             r.next = format!(
                 "{}. To restore a file instead: git checkout -- <path>  or  git restore <path>",
                 r.next
             );
             Err(r)
         }
+    }
+}
+
+/// `Ok` when switching to `target` stays on the bound branch; else the name
+/// to show in the refusal. `-` and `@{-<n>}` (a previously checked out
+/// branch) are resolved with git in the bound worktree, so `checkout -`
+/// back to the bound branch is allowed.
+fn switch_target(target: &str, g: &Guard, binding: &Binding) -> Result<(), String> {
+    let previous = match target {
+        "-" => Some("@{-1}"),
+        t if t
+            .strip_prefix("@{-")
+            .and_then(|r| r.strip_suffix('}'))
+            .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())) =>
+        {
+            Some(t)
+        }
+        _ => None,
+    };
+    let Some(rev) = previous else {
+        return if is_current(target, binding) {
+            Ok(())
+        } else {
+            Err(target.to_string())
+        };
+    };
+    match g.probe.symbolic_full_name(rev) {
+        Some(full) if full.starts_with("refs/heads/") && is_current(&full, binding) => Ok(()),
+        Some(full) if full.starts_with("refs/heads/") => Err(format!(
+            "{} (the previous branch, `{target}`)",
+            short_branch(&full)
+        )),
+        Some(full) if full.is_empty() => Err(format!(
+            "a detached HEAD (the previous checkout, `{target}`, was not on a branch)"
+        )),
+        Some(full) => Err(format!("{full} (the previous checkout, `{target}`)")),
+        None => Err(format!(
+            "the previous branch (`{target}`), which git cannot resolve (no earlier checkout in this worktree)"
+        )),
     }
 }
 
@@ -208,8 +244,8 @@ pub(crate) fn switch(
         return Err(refuse_switch("a detached HEAD", binding, g.protected));
     }
     let force = p.any(&["--force", "--discard-changes", "--merge"]);
-    match p.pos.first() {
-        Some(t) if !is_current(t, binding) => Err(refuse_switch(t, binding, g.protected)),
+    match p.pos.first().map(|t| switch_target(t, g, binding)) {
+        Some(Err(shown)) => Err(refuse_switch(&shown, binding, g.protected)),
         _ => Ok(force.then_some("switch")),
     }
 }
@@ -460,14 +496,18 @@ pub(crate) fn config(p: &Parsed) -> Result<(), Refusal> {
     }
     match key {
         Some(k) if config_keys::allowed(k) => Ok(()),
-        k => Err(Refusal::new(
-            "config_write",
-            format!(
-                "setting {} is refused: that config can redirect refs, the work tree, hooks or command names",
-                k.map(String::as_str).unwrap_or("<no key>")
-            ),
-            next,
-        )),
+        k => {
+            let k = k.map(String::as_str).unwrap_or("<no key>");
+            let next = match config_keys::editor_hint(k) {
+                Some(hint) => format!("{next}; {hint}"),
+                None => next,
+            };
+            Err(Refusal::new(
+                "config_write",
+                config_keys::refused_because(k),
+                next,
+            ))
+        }
     }
 }
 

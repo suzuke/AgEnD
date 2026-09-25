@@ -50,6 +50,10 @@ struct Fake {
     config: Vec<(&'static str, &'static str)>,
     team_repo: bool,
     team_remotes: Vec<&'static str>,
+    /// Remote names `is_team_push_remote` accepts.
+    team_push: Vec<&'static str>,
+    /// `rev-parse --symbolic-full-name` answers.
+    names: Vec<(&'static str, &'static str)>,
     asked: RefCell<Vec<String>>,
 }
 
@@ -67,6 +71,9 @@ impl Probe for Fake {
             .iter()
             .filter(|(k, _)| match key_part {
                 r"remote\..*\.fetch" => k.starts_with("remote.") && k.ends_with(".fetch"),
+                r"(push|remote|branch)\." => ["push.", "remote.", "branch."]
+                    .iter()
+                    .any(|p| k.starts_with(p)),
                 other => k.eq_ignore_ascii_case(&other.replace('\\', "")),
             })
             .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -77,6 +84,15 @@ impl Probe for Fake {
     }
     fn is_team_remote(&self, dest: &str) -> bool {
         self.team_remotes.contains(&dest)
+    }
+    fn is_team_push_remote(&self, remote: &str) -> bool {
+        self.team_push.contains(&remote)
+    }
+    fn symbolic_full_name(&self, rev: &str) -> Option<String> {
+        self.names
+            .iter()
+            .find(|(r, _)| *r == rev)
+            .map(|(_, n)| n.to_string())
     }
 }
 
@@ -93,6 +109,7 @@ fn resolved_at(loc: Location) -> Option<Resolved> {
             git_dir: g,
             common_dir: c.into(),
             work_tree: w,
+            prefix: PathBuf::new(),
         })
     };
     match loc {
@@ -212,11 +229,7 @@ fn globals_are_split_from_the_subcommand() {
 #[test]
 fn bound_writes_route_into_the_worktree() {
     let s = work();
-    for loc in [
-        Location::NoRepo,
-        Location::Canonical,
-        Location::OtherWorktree,
-    ] {
+    for loc in [Location::NoRepo, Location::Canonical] {
         match decide_at(Ok(&s), loc, "commit -m x") {
             Decision::Run { route, .. } => {
                 assert_eq!(route.as_deref(), Some(std::env::temp_dir().as_path()))
@@ -225,6 +238,128 @@ fn bound_writes_route_into_the_worktree() {
         }
     }
     assert_eq!(decide(&s, "commit -m x"), Decision::pass());
+    // Round 5: another agent's worktree is the wrong directory, not a
+    // place to route from.
+    assert_eq!(
+        code(&decide_at(Ok(&s), Location::OtherWorktree, "commit -m x")),
+        "other_worktree"
+    );
+}
+
+/// Round 5, finding 1: routing keeps the caller's directory inside its
+/// checkout (git's `--show-prefix`), so `git rm -rf .` from
+/// `<canonical>/src/sub` acts on `<worktree>/src/sub`, never the whole
+/// worktree; a directory the worktree lacks, and another worktree, refuse.
+#[test]
+fn routing_keeps_the_callers_subdirectory() {
+    let dir = agend_testkit::tempdir::TempDir::new("classify-prefix").unwrap();
+    let wt = std::fs::canonicalize(dir.path()).unwrap();
+    std::fs::create_dir_all(wt.join("src/sub")).unwrap();
+    let s = Snapshot {
+        binding: Some(Binding::Work {
+            task_id: "t-1".into(),
+            branch: work_branch("t-1", "fix"),
+            worktree: wt.clone(),
+        }),
+        ..work()
+    };
+    let at = |loc: Location, prefix: &str, cmd: &str| {
+        let mut r = resolved_at(loc).unwrap();
+        r.prefix = prefix.into();
+        run_full(
+            Ok(&s),
+            loc,
+            Some(&r),
+            &GitEnv::default(),
+            &Fake::default(),
+            cmd,
+        )
+    };
+    let route = |d: &Decision| match d {
+        Decision::Run { route, .. } => route.clone(),
+        Decision::Refuse(r) => panic!("refused: {r:?}"),
+    };
+    for cmd in [
+        "rm -rf .",
+        "clean -fdx .",
+        "checkout -- .",
+        "add .",
+        "restore .",
+        "status",
+        "log -- .",
+    ] {
+        let d = at(Location::Canonical, "src/sub/", cmd);
+        assert_eq!(route(&d), Some(wt.join("src/sub")), "{cmd}");
+        if let Decision::Run { note, .. } = &d {
+            let note = note.as_deref().unwrap_or_default();
+            assert!(
+                note.contains(&wt.join("src/sub").display().to_string()),
+                "{note}"
+            );
+        }
+        assert_eq!(
+            route(&at(Location::Canonical, "", cmd)),
+            Some(wt.clone()),
+            "{cmd}"
+        );
+        let missing = at(Location::Canonical, "only/in/canonical/", cmd);
+        let Decision::Refuse(r) = &missing else {
+            panic!("{cmd}: {missing:?}")
+        };
+        assert_eq!(r.code, "route_dir_missing", "{cmd}");
+        assert!(r.reason.contains("only/in/canonical/"), "{}", r.reason);
+        assert!(
+            r.next.contains(&format!("cd {}", wt.display())),
+            "{}",
+            r.next
+        );
+        for bad in ["../x/", "/abs/"] {
+            assert_eq!(
+                code(&at(Location::Canonical, bad, cmd)),
+                "route_dir_missing"
+            );
+        }
+    }
+    // Writes from another worktree are refused, with the directory to use.
+    for cmd in [
+        "rm -rf .",
+        "clean -fdx .",
+        "checkout -- .",
+        "add .",
+        "restore .",
+        "commit -m x",
+    ] {
+        let d = at(Location::OtherWorktree, "src/sub/", cmd);
+        let Decision::Refuse(r) = &d else {
+            panic!("{cmd}: {d:?}")
+        };
+        assert_eq!(r.code, "other_worktree", "{cmd}");
+        assert!(r.reason.contains("another worktree"), "{}", r.reason);
+        assert_eq!(
+            r.next,
+            format!("cd {} and run it there", wt.join("src/sub").display())
+        );
+    }
+    // Inside the canonical git dir git sees no work tree: writes refuse.
+    let mut in_git_dir = resolved_at(Location::Canonical).unwrap();
+    in_git_dir.work_tree = None;
+    let d = run_full(
+        Ok(&s),
+        Location::Canonical,
+        Some(&in_git_dir),
+        &GitEnv::default(),
+        &Fake::default(),
+        "clean -fdx .",
+    );
+    assert_eq!(code(&d), "route_dir_missing");
+    // Reads there run where they were typed (not routed, not refused).
+    for cmd in ["status", "log", "diff", "fetch origin"] {
+        assert_eq!(
+            at(Location::OtherWorktree, "src/sub/", cmd),
+            Decision::pass(),
+            "{cmd}"
+        );
+    }
 }
 
 #[test]
@@ -321,6 +456,56 @@ fn branch_switches_are_refused() {
         "branch_switch",
         &["checkout abc123", "switch agend/t-1/fix"],
     );
+}
+
+/// Round 5, finding 3: `checkout -` / `switch -` resolve `@{-1}` with git;
+/// back to the bound branch runs, anywhere else is refused naming it.
+#[test]
+fn previous_branch_is_resolved() {
+    let prev = |name: &'static str| Fake {
+        names: vec![("@{-1}", name), ("@{-2}", "refs/heads/main")],
+        ..Fake::default()
+    };
+    for cmd in ["checkout -", "switch -", "checkout @{-1}", "checkout - --"] {
+        assert_eq!(
+            code(&with_probe(&prev("refs/heads/agend/t-1/fix"), cmd)),
+            "run",
+            "{cmd}"
+        );
+    }
+    assert_eq!(
+        snapshot_of(&with_probe(
+            &prev("refs/heads/agend/t-1/fix"),
+            "switch --discard-changes -"
+        )),
+        Some("switch")
+    );
+    for (probe, cmd, why) in [
+        (
+            prev("refs/heads/main"),
+            "checkout -",
+            "main (the previous branch, `-`)",
+        ),
+        (
+            prev("refs/heads/main"),
+            "switch -",
+            "main (the previous branch, `-`)",
+        ),
+        (
+            prev("refs/heads/agend/t-1/fix"),
+            "checkout @{-2}",
+            "main (the previous branch, `@{-2}`)",
+        ),
+        (prev(""), "checkout -", "a detached HEAD"),
+        (Fake::default(), "switch -", "cannot resolve"),
+    ] {
+        let d = with_probe(&probe, cmd);
+        let Decision::Refuse(r) = &d else {
+            panic!("{cmd}: {d:?}")
+        };
+        assert_eq!(r.code, "branch_switch", "{cmd}");
+        assert!(r.reason.contains(why), "{cmd}: {}", r.reason);
+    }
 }
 
 /// Round 1, class 5: DWIM creation from a remote-only branch, `<x> --`
@@ -483,6 +668,230 @@ fn protected_refs_are_refused_for_bound_agents() {
     assert_eq!(code(&decide(&review(), "push")), "review_readonly");
 }
 
+/// A bound worktree on its branch whose `origin` is the team remote, with
+/// extra config.
+fn pushing(config: &[(&'static str, &'static str)]) -> Fake {
+    Fake {
+        symrefs: vec![("HEAD", "refs/heads/agend/t-1/fix")],
+        team_push: vec!["origin"],
+        config: [("remote.origin.url", "/team/origin.git")]
+            .into_iter()
+            .chain(config.iter().copied())
+            .collect(),
+        ..Fake::default()
+    }
+}
+
+const UPSTREAM_OWN: &[(&str, &str)] = &[
+    ("branch.agend/t-1/fix.remote", "origin"),
+    ("branch.agend/t-1/fix.merge", "refs/heads/agend/t-1/fix"),
+];
+const UPSTREAM_MAIN: &[(&str, &str)] = &[
+    ("branch.agend/t-1/fix.remote", "origin"),
+    ("branch.agend/t-1/fix.merge", "refs/heads/main"),
+];
+
+/// T7, owner decision 2026-09-25: a push without `src:dst` runs when the
+/// destination git resolves (push.default, upstream, pushRemote, the typed
+/// branch) is the bound branch on the team remote; anything else, or
+/// anything the shim cannot resolve, is refused with the exact command.
+#[test]
+fn implicit_pushes_run_only_when_they_resolve_to_the_bound_branch() {
+    let with = |cfg: &[(&'static str, &'static str)]| {
+        let mut all = UPSTREAM_OWN.to_vec();
+        all.extend_from_slice(cfg);
+        pushing(&all)
+    };
+    let run = |probe: &Fake, cmd: &str| code(&with_probe(probe, cmd));
+    // Allowed.
+    for (probe, cmd) in [
+        (with(&[]), "push"),
+        (with(&[]), "push origin"),
+        (with(&[]), "push -u"),
+        (with(&[]), "push --force-with-lease"),
+        (with(&[("push.default", "simple")]), "push"),
+        (with(&[("push.default", "upstream")]), "push"),
+        (with(&[("push.default", "tracking")]), "push origin"),
+        (with(&[("push.default", "current")]), "push"),
+        (pushing(&[("push.default", "current")]), "push"),
+        (pushing(&[("push.autosetupremote", "true")]), "push"),
+        (pushing(&[]), "push -u origin agend/t-1/fix"),
+        (pushing(&[]), "push -u origin HEAD"),
+        (pushing(&[]), "push origin HEAD"),
+        (pushing(&[]), "push origin @"),
+        (pushing(&[]), "push origin refs/heads/agend/t-1/fix"),
+        (pushing(&[]), "push origin +HEAD"),
+        (with(&[("push.default", "upstream")]), "push origin HEAD"),
+        // Triangular: push remote differs from the upstream remote, so
+        // `simple` pushes the same name.
+        (
+            pushing(&[
+                ("branch.agend/t-1/fix.remote", "upstream"),
+                ("branch.agend/t-1/fix.merge", "refs/heads/main"),
+                ("remote.pushdefault", "origin"),
+            ]),
+            "push",
+        ),
+    ] {
+        assert_eq!(run(&probe, cmd), "run", "git {cmd} with {:?}", probe.config);
+    }
+    // Refused: resolves elsewhere, or git would refuse / the shim cannot tell.
+    for (probe, cmd, code_want, why) in [
+        (
+            pushing(&[]),
+            "push",
+            "push_explicit",
+            "has no upstream branch",
+        ),
+        (
+            pushing(&[]),
+            "push origin",
+            "push_explicit",
+            "has no upstream branch",
+        ),
+        (
+            pushing(UPSTREAM_MAIN),
+            "push",
+            "push_explicit",
+            "a different name",
+        ),
+        (
+            with(&[("push.default", "matching")]),
+            "push",
+            "push_explicit",
+            "every branch",
+        ),
+        (
+            with(&[("push.default", "nothing")]),
+            "push",
+            "push_explicit",
+            "nothing",
+        ),
+        (
+            with(&[("push.default", "bogus")]),
+            "push",
+            "push_explicit",
+            "bogus",
+        ),
+        (
+            with(&[("remote.origin.push", "HEAD:refs/heads/main")]),
+            "push",
+            "push_explicit",
+            "remote.origin.push",
+        ),
+        (
+            with(&[("remote.origin.push", "HEAD:refs/heads/main")]),
+            "push origin HEAD",
+            "push_explicit",
+            "remote.origin.push",
+        ),
+        (
+            with(&[("remote.origin.mirror", "true")]),
+            "push",
+            "push_explicit",
+            "mirror",
+        ),
+        (
+            pushing(&[]),
+            "push fork HEAD",
+            "push_explicit",
+            "not the team remote",
+        ),
+        (
+            with(&[("branch.agend/t-1/fix.pushremote", "fork")]),
+            "push",
+            "push_explicit",
+            "not the team remote",
+        ),
+        (
+            with(&[("push.default", "upstream")]),
+            "push fork",
+            "push_explicit",
+            "not the upstream remote",
+        ),
+        (
+            pushing(&[]),
+            "push origin main",
+            "push_explicit",
+            "would push main",
+        ),
+        (
+            pushing(&[]),
+            "push origin agend/t-1/fix:",
+            "push_explicit",
+            "empty destination",
+        ),
+        (
+            pushing(&[]),
+            "push --delete origin",
+            "push_explicit",
+            "--delete",
+        ),
+        (
+            Fake {
+                symrefs: vec![("HEAD", "refs/heads/other")],
+                ..with(&[("push.default", "current")])
+            },
+            "push",
+            "push_explicit",
+            "would push other",
+        ),
+        (
+            Fake {
+                symrefs: vec![],
+                ..with(&[("push.default", "current")])
+            },
+            "push",
+            "push_explicit",
+            "not on a branch",
+        ),
+        // A misconfigured upstream pointing at main.
+        (
+            pushing(&[
+                UPSTREAM_MAIN[0],
+                UPSTREAM_MAIN[1],
+                ("push.default", "upstream"),
+            ]),
+            "push",
+            "protected_ref",
+            "refs/heads/main",
+        ),
+        (
+            pushing(&[
+                UPSTREAM_MAIN[0],
+                UPSTREAM_MAIN[1],
+                ("push.default", "upstream"),
+            ]),
+            "push -u origin agend/t-1/fix",
+            "protected_ref",
+            "refs/heads/main",
+        ),
+        (
+            pushing(&[
+                ("branch.agend/t-1/fix.remote", "origin"),
+                ("branch.agend/t-1/fix.merge", "refs/heads/agend/t-2/x"),
+                ("push.default", "upstream"),
+            ]),
+            "push origin HEAD",
+            "push_explicit",
+            "refs/heads/agend/t-2/x",
+        ),
+    ] {
+        let d = with_probe(&probe, cmd);
+        let Decision::Refuse(r) = &d else {
+            panic!("git {cmd} with {:?}: {d:?}", probe.config)
+        };
+        assert_eq!(r.code, code_want, "git {cmd}: {}", r.reason);
+        assert!(r.reason.contains(why), "git {cmd}: {}", r.reason);
+        assert!(
+            r.next
+                .contains("git push origin HEAD:refs/heads/agend/t-1/fix"),
+            "git {cmd}: {}",
+            r.next
+        );
+    }
+}
+
 /// Round 1, class 1: destinations git takes from config.
 #[test]
 fn implicit_push_destinations_are_refused() {
@@ -576,6 +985,26 @@ fn config_that_redirects_refs_cannot_be_set() {
         code(&decide(&s, "-c user.name=A -c user.email=a@b commit -m x")),
         "run"
     );
+    // Round 5, finding 2: sequence.editor is an editor like core.editor.
+    assert_eq!(
+        code(&decide(
+            &s,
+            "-c sequence.editor=: rebase -i --autosquash origin/main"
+        )),
+        "run"
+    );
+    assert_eq!(code(&decide(&s, "config sequence.editor true")), "run");
+    for cmd in ["-c gui.editor=: commit -m x", "config gui.editor vi"] {
+        let Decision::Refuse(r) = decide(&s, cmd) else {
+            panic!("{cmd}")
+        };
+        assert!(
+            r.reason.contains("core.editor and sequence.editor"),
+            "{}",
+            r.reason
+        );
+        assert!(r.next.contains("GIT_SEQUENCE_EDITOR"), "{}", r.next);
+    }
     let env = |keys: Result<Vec<String>, String>| GitEnv {
         config_keys: keys,
         ..GitEnv::default()
@@ -826,11 +1255,14 @@ fn routed_writes_do_not_drop_a_named_git_dir() {
     let s = work();
     let fake = Fake::default();
     let env = GitEnv::default();
-    for loc in [
-        Location::Canonical,
-        Location::OtherWorktree,
-        Location::NoRepo,
-    ] {
+    for cmd in ["--git-dir=/repo/.git commit -m x", "-C /repo commit -m x"] {
+        assert_eq!(
+            code(&run_with(Ok(&s), Location::OtherWorktree, &env, &fake, cmd)),
+            "other_worktree",
+            "{cmd}"
+        );
+    }
+    for loc in [Location::Canonical, Location::NoRepo] {
         for cmd in [
             "--git-dir=/repo/.git commit -m x",
             "--work-tree=/repo clean -fd",
@@ -861,6 +1293,17 @@ fn routed_writes_do_not_drop_a_named_git_dir() {
 fn destructive_operations_take_a_snapshot() {
     let s = work();
     for (cmd, op) in [
+        // Round 5, finding 1 (E): `rm -f` drops uncommitted edits.
+        ("rm -rf .", Some("rm")),
+        ("rm -r --force src", Some("rm")),
+        ("rm -f x", Some("rm")),
+        ("rm --force -q x", Some("rm")),
+        ("rm x", None),
+        ("rm -r src", None),
+        ("rm --cached -f x", None),
+        ("rm -rf --cached .", None),
+        ("rm -n -rf .", None),
+        ("rm --dry-run --force .", None),
         ("reset --hard HEAD~1", Some("reset")),
         ("reset --keep HEAD~1", Some("reset")),
         ("reset HEAD~1", None),
