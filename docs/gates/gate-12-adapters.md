@@ -18,6 +18,12 @@
 - forge github
 - notifier：Telegram
 
+### 從其他施工關帶來的筆記（開工時處理）
+
+- **G4 已讀狀態**：第 8 施工關的協定缺口 G4（已讀狀態）決定移到本關（第 6 施工關留下的 TUI 本地已讀在那之前都夠用），理由是要 daemon 記已讀的唯一原因是跟 Telegram 共用（見 [gate-08-client P6](gate-08-client.md#p6真-daemon-本關做哪些請求g4-移走)）。
+- **claude Bash 工具的 PATH 重排**：第 7 施工關發現 macOS login zsh 的 `path_helper` 會把 shim 排到後面（P4，已用 `ZDOTDIR` 修正 codex 這一路）；任何用 login shell 跑指令的 agent 工具都一樣，claude 的 Bash 工具要在本關實測（見 [gate-03-shim 已知限制](gate-03-shim.md#已知限制)）。
+- **未查證的使用者提供事實**：claude 的 TUI 按 ctrl+enter 可以把訊息「強送」給正在工作的 agent（使用者 2026-09-26 提供，未在 repo 查證）；對應三級忙碌策略的 steer／插隊，本關的 claude driver 開工時查證。
+
 ## 自動驗收（完成定義）
 
 - [ ] `~/.cargo/bin/cargo test -p agend-daemon` 單獨通過

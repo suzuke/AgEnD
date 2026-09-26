@@ -121,6 +121,7 @@
 
 - 問題：agent 拿到哪些環境變數？附屬程序這關做不做？
 - 建議：agent 的環境**只有** `Spawn` 帶來的 `env`（先全部清空），沒給時補 `TERM=xterm-256color`。附屬程序整個移到第 7 施工關（新增 `SpawnSidecar` 請求，就緒判斷放 daemon 的 driver）。
+  - **更新（第 7 施工關）**：codex driver 的開工前提案 P2 推翻了「附屬程序＝新的 `SpawnSidecar` 請求」這個做法，改成 app-server 與 TUI 包在同一個 holder `Spawn` 裡（同一個 process group），daemon 端不另開協定訊息；就緒判斷仍放在 daemon 的 driver，但不經 `SpawnSidecar`。細節見 [第 7 施工關 P2](gate-07-codex.md#p2app-server-怎麼跟-tui-一起放進-holder不做-spawnsidecar)。
 - 理由：daemon 環境可能有 secret（例如 Telegram token），繼承就漏給 agent；附屬程序第 7 施工關才有使用者，才驗得到真正的坑（socket realpath、路徑長度）。
 - 替代方案：繼承再覆蓋（漏 secret）；照 ROADMAP 在本關做（沒人用、驗不到）。
 - 例子：daemon 環境有 `TELEGRAM_BOT_TOKEN`；agent 裡 `env | grep TELEGRAM` 什麼都不印。

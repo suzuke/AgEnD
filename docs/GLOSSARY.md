@@ -57,6 +57,9 @@
 | supersede | supersede | `TaskOperation::Supersede`、`TaskStatus::Superseded` | 輸入變了，由新 task 接手舊 task；不算失敗。 | 取消；改派 | [pipeline](architecture/pipeline.md#6-種關卡) |
 | reopen | reopen | `TaskOperation::Reopen` | task done 之後由人重新打開。 | 返工 | [pipeline](architecture/pipeline.md#6-種關卡) |
 | 取消 | cancel | `TimeoutAction::Cancel`、`PipelineEvent::Cancel`、`PipelineStatus::Cancelled` | 終止 task：操作者下指令或關卡逾時動作「取消」；是獨立的終止狀態，不算失敗；branch／worktree 清理與 merge 完成走同一流程。merge 送出後不能取消（見 merge 送出中）。 | supersede；fanout `pick` 取消落選的子 task | [pipeline](architecture/pipeline.md#worktree-與-branch-生命週期) |
+| checks worktree | checks worktree | — | `command` 關卡（runner）為每個 task 建的沙箱 worktree：保留 ignored 檔、跑完即刪、沒有 `AGEND_*`；建立與清除都經 `-c core.hooksPath=/dev/null`。開工前提案，還沒實作。 | worktree（agent 工作用的一般 worktree）；審查 worktree | [第 10 施工關 P6](gates/gate-10-pipeline.md#p6command-關卡runner) |
+| 審查 worktree | review worktree | — | `approval` 關卡給 reviewer 的 detached worktree（在審的 head），binding kind `review`，一樣裝 hook 但不能寫任何 branch。開工前提案，還沒實作。 | worktree；checks worktree | [第 10 施工關 P4](gates/gate-10-pipeline.md#p4worktreebindinghookbinding-快照) |
+| `merge_intent` | merge_intent | — | forge local 在移動 main 前先把即將產生的 merge commit SHA 存進 `tasks.merge_intent`（CAS）；main 前進後靠它與 trailer 判斷「這個 task 是不是已經 merge」。開工前提案，還沒實作。 | merge 送出中；head | [第 10 施工關 P7](gates/gate-10-pipeline.md#p7forge-local-與-merge) |
 
 ## 送達
 
@@ -64,6 +67,7 @@
 |---|---|---|---|---|---|
 | 訊息 | message | `traits::AgentMessage`、`client::InboxMessage` | 送給 agent 的內容：一律完整內容、走 backend 的結構化 API；每則有 id，以 id 冪等。 | PTY 控制鍵（holder 只送單一按鍵）；Telegram 通知 | [delivery](architecture/delivery.md#送達模型) |
 | 送達狀態 | delivery state | `model::DeliveryState` | 訊息狀態 `queued → sent → confirmed／failed`；確認不了就標未確認，不假裝成功。 | 忙碌等級的「排隊」（`queued` 是送達狀態） | [delivery](architecture/delivery.md#送達模型) |
+| `delivery`（`push`／`inbox`） | delivery mode | — | instance 的一欄：`push`（daemon 主動推，預設）或 `inbox`（不建 driver、只能被拉取，只給沒有真 driver 的假 agent 用）。開工前提案，還沒實作。 | 送達狀態（`queued→sent→confirmed`，訊息本身的狀態，不是 instance 走哪條路） | [第 10 施工關 P11](gates/gate-10-pipeline.md#p11什麼是假的什麼是真的) |
 | 忙碌等級：排隊／插入／中斷 | busy level: queue／steer／interrupt | `policy::busy::BusyLevel`、`effective_level` | agent 忙碌時的三種送法：turn 結束後送、插入不中斷、中斷後立即處理；只有 codex 能插入，其他改用中斷。 | 去抖動（判斷 busy／idle 何時生效） | [delivery](architecture/delivery.md#忙碌策略三級)、D16 |
 | Stop hook decision | Stop hook decision | — | claude Stop hook 的輸出 `{"decision": "block", "reason": …}`：turn 結束時把排隊的訊息當成下一個 turn 送進去。 | **決策**；**請示** | D16、[delivery](architecture/delivery.md#claude-特別規則d16)、[spike-claude-f](research/spike-claude-f.md)（`reason`） |
 | 來源說明 | source framing | — | 讓 claude 處理 agend channel 訊息的說明：專案 CLAUDE.md 寫明訊息來自使用者自己的團隊，訊息內可另加 from／task／request 標頭。 | 本 repo 的 AGENTS.md（給開發 AgEnD 的人和 agent） | D16、[spike-claude-f](research/spike-claude-f.md) |
@@ -101,6 +105,10 @@
 | 協定（client／holder） | protocol (client／holder) | `protocol::client`、`protocol::holder` | 兩套有版本的協定：client 協定給 TUI／CLI／GUI 連 daemon；holder 協定給 daemon 連 holder。 | backend 的協定（app-server、HTTP + SSE、hooks） | D1、D11 |
 | hard gate | hard gate | `screen::HardGateKind` | 畫面上擋住 agent 的狀況：usage limit、permission／approval、rate limit、auth error、context full、啟動與更新選單。 | **施工關**（gate）；merge 門檻；approval 關卡 | [delivery](architecture/delivery.md#狀態偵測三層) |
 | 螢幕分類器 | screen classifier | `screen::classify`、`SCREEN_RULES` | 直接讀 holder 畫面、只認 hard gate 的分類器；規則是資料，每條附真實畫面 fixture。 | 結構化事件（判斷 busy／idle 的來源） | [delivery](architecture/delivery.md#狀態偵測三層) |
+| `$GO` 交接檔 | `$GO` handoff file | — | codex 包裝寫給自己的交接檔（先寫暫存檔再 `rename`）：第 1 行 thread id、第 2 行 socket 路徑；包裝等到它出現才 `exec` TUI。開工前提案，還沒實作。 | holder 協定的 `Spawn`／`Shutdown`（daemon↔holder；`$GO` 是包裝腳本自己的檔，不經協定） | [第 7 施工關 P2](gates/gate-07-codex.md#p2app-server-怎麼跟-tui-一起放進-holder不做-spawnsidecar) |
+| 清掃 | sweep | — | holder 死掉後（不管接下來是重起、`failed` 還是 `retry`）daemon 對記下的 `agent_pid`（pgid）補送 SIGKILL，蓋掉「掛斷不保證清乾淨」時 app-server／TUI 的殘留。開工前提案，還沒實作。 | `Shutdown` 對 process group 的 SIGHUP（holder 活著時做的，第 4 施工關 G2） | [第 7 施工關 P2](gates/gate-07-codex.md#p2app-server-怎麼跟-tui-一起放進-holder不做-spawnsidecar) |
+| `legacy_no_thread` | legacy_no_thread | — | 第 7 施工關 migration 跑的那一刻，把當時已存在、`backend = codex`、`session_id` 是 NULL 又可能有對話的列標成 `1`（一併設 `failed`），跟之後才失敗的 codex 列分開，兩者其餘欄位一樣。開工前提案，還沒實作。 | `session_started`（第 8 施工關已實作的欄位，判斷 resume／session-id） | [第 7 施工關 P3](gates/gate-07-codex.md#p3codex-的-thread-id-與-resume補第-6-施工關-h2) |
+| preflight | preflight | — | `agend daemon restart` 正式收尾前，子程序在暫存 home 用新 binary 走一次 migration＋`quick_check`＋起 `agend holder pf-check` 的乾跑；任何一步失敗就回 `preflight_failed`、舊 daemon 照跑、DB 不動一個 byte。開工前提案，還沒實作。 | D2（原本的規劃，本關落地成這個子命令） | [第 9 施工關 P7](gates/gate-09-cli.md#p7agend-daemon-restart-與-d2-預檢) |
 
 ## 介面
 
@@ -115,6 +123,13 @@
 | 已讀／已解決 | read／resolved | — | 「需要你」的兩種狀態：看過只去掉粗體（已讀）；選了動作才解除（已解決）。 | — | [tui-and-setup](architecture/tui-and-setup.md#tui) |
 | 資料來源 | data source | trait `source::Source`（crate `agend-tui`） | TUI 讀資料的唯一接縫：`connect`／`poll`／`terminal`／`answer`；畫面只讀由它建出的 `source::Fleet`，不知道資料實際從哪來（腳本假來源、假 daemon、之後的真 daemon 走同一條路）。 | **來源說明**（claude 讀 agend channel 訊息的說明，跟 TUI 無關） | [第 11 施工關 T1](gates/gate-11-tui.md#你親自驗收) |
 | 目錄 | catalog | `source::Catalog`（TUI 本地型別） | `source::Source::connect` 回的初始快照：team／task／agent 與「需要你」清單；之後靠 client protocol 事件更新成畫面用的 `Fleet`。第 8 施工關補協定缺口後改用 core 型別（見 G1）。 | `source::Fleet`（catalog 建出來的畫面資料，不是 catalog 本身） | [第 11 施工關 G1](gates/gate-11-tui.md#待你追認) |
+| 全貌 | fleet view | `protocol::client::FleetView`、`get_fleet`、daemon 的 `fleet` 模組 | client protocol 一次拿到的 team／task／instance／「需要你」快照；之後只送事件，TUI 的 `Catalog` 由它建（第 8 施工關 G1）。 | 目錄（TUI 本地型別，由全貌建出） | [第 8 施工關 P4](gates/gate-08-client.md#p4g1-全貌與事件游標) |
+| 事件游標 | event cursor | `protocol::client::as_of_event_id` | `get_fleet` 回應帶的最新事件 id；訂閱它之後的事件，游標太舊或太新一律回 `event_gap`（第 8 施工關 G1）。 | attempt（流水線的重試計數，跟事件序號無關） | [第 8 施工關 P4](gates/gate-08-client.md#p4g1-全貌與事件游標) |
+| `attention_id` | attention_id | `protocol::client::AttentionRequiredData::attention_id` | 「需要你」項目的識別字：請示用 ask id，其他來源是固定字串（例如 `sandbox-missing:<task>`）；`resolve_attention` 靠它指定要處理哪一項（第 8 施工關 G2）。 | task id；ask 自己的 id（轉進 `AttentionItem` 時放進它的 `attention_id`） | [第 8 施工關 P5](gates/gate-08-client.md#p5g2g3需要你的欄位與操作) |
+| CLP | client protocol contract | [CONTRACTS.md](../crates/agend-testkit/CONTRACTS.md#client-protocolclp12-條第-8-施工關) 的 `CLP-1`…`CLP-12` | client protocol 的契約規則，對假 daemon 與真 `agend daemon` 跑同一套，抓兩邊漂移（第 8 施工關 P9）。 | 契約規則／mutant（trait 層的規則表；CLP 是 client protocol 專屬的一張） | [第 8 施工關 P9](gates/gate-08-client.md#p9client-協定契約假-daemon-與真-daemon-跑同一套) |
+| `sandbox-missing` | sandbox-missing | — | 「需要你」的新來源之一：checks 沙箱工具沒裝好或試跑失敗，task 留在 checks 關卡等 `retry`。開工前提案，還沒實作。 | hard gate（backend 卡住畫面的訊號；這是 daemon 自己偵測沙箱） | [第 10 施工關 P6](gates/gate-10-pipeline.md#p6command-關卡runner) |
+| ticket | ticket | — | 結果類 CLI 命令帶的 `<task_id>/<stage_id>/<attempt>`（例如 `t-42/review/2`）；派工訊息與 `agend status` 都印它，agent 照抄。開工前提案，還沒實作。 | task id；attempt（ticket 是兩者加 stage id 組出來的字串） | [第 9 施工關 P2](gates/gate-09-cli.md#p2agent-命令的語法task-id-與-attempt-從哪來ticket) |
+| 操作者請求 | operator request | — | client protocol 只收操作者身分的請求（`instance_add`、`instance_remove`、`daemon_restart`…），與唯讀請求、agent 專用的 `command` 請求分開。開工前提案，還沒實作。 | `command` 請求（agent 命令）；請示 | [第 9 施工關 P6](gates/gate-09-cli.md#p6操作者命令instance協定的下一個-minor) |
 
 ## 施工
 
@@ -138,6 +153,8 @@
 | 錄製器 | backend recorder | `recorder::Backend`、`recorder::BACKENDS`、bin `agend-record`、`cargo xtask record` | 在寫入沙箱裡用假 agent 模擬的同一條傳輸驅動真 backend CLI 跑固定情境，把兩個方向的每則訊息遮蔽後存成錄製檔。 | 螢幕 fixture（畫面擷取）；v1 的 smoke test | [RECORDER](../crates/agend-testkit/RECORDER.md) |
 | 錄製檔 | transcript | `recorder::read_transcript`、`crates/agend-testkit/transcripts/<backend>/<scenario>.jsonl` | 一個情境的錄製結果：header（CLI 版本、日期）加上依序的訊息。 | 真 CLI 自己的 transcript（claude 的 `~/.claude/projects/`） | [RECORDER](../crates/agend-testkit/RECORDER.md) |
 | 一致性檢查 | conformance check | `tests/conformance.rs`、`recorder::shape::compare` | 用同一套情境驅動假 agent，和錄製檔按形狀（訊息種類、欄位、型別、順序）比對；規則只在 `recorder::shape`。 | 契約測試（trait 層，比規則不比形狀） | [RECORDER](../crates/agend-testkit/RECORDER.md#一致性檢查的比對規則recordershape唯一出處) |
+| `fake-worker` | fake-worker | — | testkit 一個假 agent 程式（跑在 holder 裡）：靠 `agend inbox --after` 拉派工、`git commit`、`agend done`／`review approve`；旗標控制何時故意弄壞（`--fail-checks-once`、`--leave-wip`、`--changes-once`、`--hold`）。開工前提案，還沒實作。 | 假 agent（`fake-codex-app-server` 等，講 backend 協定；`fake-worker` 講的是 CLI／`inbox`） | [第 10 施工關 P11](gates/gate-10-pipeline.md#p11什麼是假的什麼是真的) |
+| failpoint | failpoint | — | debug build 專用的環境變數 `AGEND_FAILPOINT`，讓 daemon 在指定的窄窗口（例如 `after-main-moved`）直接 `abort()`，測開機對帳；只有兩個點，不編進 release。開工前提案，還沒實作。 | `kill -9`（測試用的粗粒度中止；failpoint 是精準落點） | [第 10 施工關 P9](gates/gate-10-pipeline.md#p9開機對帳與四次開機的重啟契約) |
 | 決策 | decision (D*n*) | — | 經使用者確認的設計決定，有 D 編號；沒有新證據就不重開。 | **請示**；**Stop hook decision** | [DECISIONS](DECISIONS.md) |
 
 ## 細節：為什麼是「關卡」與「施工關」
