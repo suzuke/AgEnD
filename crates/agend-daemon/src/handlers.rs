@@ -21,7 +21,7 @@ use agend_core::protocol::client::{
     AgentCommand, AgentState, ClientCommandResultData, ClientRequest, ClientResponse,
     CommandResult, ErrorData, FleetData, TerminalSnapshotData, error_code,
 };
-use tokio::sync::{broadcast, mpsc::UnboundedSender, oneshot};
+use tokio::sync::{broadcast, mpsc::UnboundedSender};
 
 use crate::fleet::{Fleet, Subscription};
 use crate::runtime::HolderRuntime;
@@ -123,27 +123,38 @@ pub async fn handle(ctx: &Context, caller: Option<&str>, request: ClientRequest)
                     OPERATOR_ONLY,
                 ));
             }
-            let (reply, answer) = oneshot::channel();
-            let sent = ctx.supervisor.send(Event::Resolve {
-                attention_id: data.attention_id,
-                action: data.action,
-                reply,
-            });
-            match (sent, answer.await) {
-                (Ok(()), Ok(Ok(()))) => ClientResponse::CommandResult {
-                    data: ClientCommandResultData {
-                        request_id: data.request_id,
-                        result: CommandResult::Accepted,
-                    },
-                },
-                (Ok(()), Ok(Err(refusal))) => {
-                    error(Some(data.request_id), refusal.code, refusal.message)
-                }
-                _ => error(
+            // Checked and taken off the list here, so the reply never waits
+            // for a busy supervisor (a retry can take 15 s, C6); the
+            // supervisor does the retry afterwards.
+            let Some(item) = ctx.fleet.resolve(&data.attention_id, data.action) else {
+                return Outcome::Reply(error(
+                    Some(data.request_id),
+                    error_code::UNKNOWN_ATTENTION,
+                    format!(
+                        "no needs-you item {} with action {}",
+                        data.attention_id,
+                        data.action.as_str()
+                    ),
+                ));
+            };
+            if let Err(unsent) = ctx.supervisor.send(Event::Retry {
+                item: Box::new(item),
+            }) {
+                let Event::Retry { item } = unsent.0 else {
+                    unreachable!("sent a retry")
+                };
+                ctx.fleet.raise(*item);
+                return Outcome::Reply(error(
                     Some(data.request_id),
                     error_code::NOT_SUPPORTED,
                     "the daemon is stopping; nothing changed",
-                ),
+                ));
+            }
+            ClientResponse::CommandResult {
+                data: ClientCommandResultData {
+                    request_id: data.request_id,
+                    result: CommandResult::Accepted,
+                },
             }
         }
         ClientRequest::Unknown => error(None, error_code::UNKNOWN_REQUEST, "unknown request type"),

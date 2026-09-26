@@ -143,13 +143,23 @@ impl Fleet {
         self.lock().attention.get(attention_id).cloned()
     }
 
-    /// Takes the item off the list and publishes `attention_resolved`;
-    /// false when it was not listed.
-    pub fn resolve(&self, attention_id: &str, action: AttentionAction) -> bool {
+    /// Takes the item off the list and publishes `attention_resolved`, if
+    /// it is listed with `action` among its actions; returns the item. Two
+    /// resolves of one item: only the first gets it.
+    pub fn resolve(
+        &self,
+        attention_id: &str,
+        action: AttentionAction,
+    ) -> Option<AttentionRequiredData> {
         let mut inner = self.lock();
-        if inner.attention.remove(attention_id).is_none() {
-            return false;
+        if !inner
+            .attention
+            .get(attention_id)
+            .is_some_and(|item| item.actions.contains(&action))
+        {
+            return None;
         }
+        let item = inner.attention.remove(attention_id)?;
         let event = DaemonEvent::AttentionResolved {
             data: AttentionResolvedData {
                 attention_id: attention_id.to_owned(),
@@ -157,7 +167,7 @@ impl Fleet {
             },
         };
         self.push(&mut inner, event);
-        true
+        Some(item)
     }
 
     /// The fleet view now; subscribing after its `as_of_event_id` gives every
@@ -316,8 +326,22 @@ mod tests {
         fleet.raise(item.clone());
         fleet.raise(item);
         assert_eq!(fleet.view().attention.len(), 1);
-        assert!(fleet.resolve("instance-failed:g8-1", AttentionAction::Retry));
-        assert!(!fleet.resolve("instance-failed:g8-1", AttentionAction::Retry));
+        assert!(
+            fleet
+                .resolve("instance-failed:g8-1", AttentionAction::Unknown)
+                .is_none(),
+            "an action the item does not list"
+        );
+        assert!(
+            fleet
+                .resolve("instance-failed:g8-1", AttentionAction::Retry)
+                .is_some()
+        );
+        assert!(
+            fleet
+                .resolve("instance-failed:g8-1", AttentionAction::Retry)
+                .is_none()
+        );
         assert!(fleet.view().attention.is_empty());
         let live: Vec<u64> = (0..2)
             .map(|_| sub.live.try_recv().unwrap().event_id)

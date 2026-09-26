@@ -98,14 +98,19 @@ fn open(
         }
     };
     let stream = UnixStream::connect(socket).map_err(fail)?;
+    // Connected: any failure from here until the hello reply means the
+    // connection ended before a request was sent, which is retried (P7).
+    // (macOS reports a peer that closed right after accepting as ENOTCONN
+    // or EINVAL on these calls.)
+    let ended = |e: io::Error| Attempt::Retry(format!("the connection ended during hello: {e}"));
     stream
         .set_read_timeout(Some(within.max(Duration::from_millis(10))))
-        .map_err(fail)?;
-    let mut writer = stream.try_clone().map_err(fail)?;
+        .map_err(ended)?;
+    let mut writer = stream.try_clone().map_err(ended)?;
     let mut reader = BufReader::new(stream);
     writer
         .write_all(&line_of(&ClientRequest::hello_as(caller.clone())))
-        .map_err(fail)?;
+        .map_err(ended)?;
     match read_response(&mut reader) {
         Ok(Some(ClientResponse::Hello { data })) => {
             version::check(data.selected).map_err(|m| Attempt::Fail(ClientError::Version(m)))?;
@@ -124,7 +129,10 @@ fn open(
         Ok(None) => Err(Attempt::Retry(
             "the daemon closed the connection during hello".into(),
         )),
-        Err(e) => Err(fail(e)),
+        Err(e) if e.kind() == io::ErrorKind::InvalidData => {
+            Err(Attempt::Fail(ClientError::Disconnected(e.to_string())))
+        }
+        Err(e) => Err(ended(e)),
     }
 }
 

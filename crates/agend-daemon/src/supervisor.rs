@@ -25,7 +25,8 @@
 //!   except a codex/opencode instance whose session was started: it has no
 //!   session id to resume and is never started fresh again (P6), so it has
 //!   no action.
-//! - `retry` ([`Event::Resolve`], operator only, checked by `handlers`):
+//! - `retry` ([`Event::Retry`]; `handlers` checked the caller, took the item
+//!   off the list and answered the operator already):
 //!   `Shutdown` of the holder kept for its last screen (H9), then status
 //!   `running` if the session was started (claude resumes it) or `new`
 //!   (a fresh start), a new restart budget, and a start.
@@ -40,12 +41,11 @@ use std::time::Duration;
 
 use agend_core::model::{Backend, DEFAULT_TEAM};
 use agend_core::protocol::client::{
-    AgentState, AttentionAction, AttentionRequiredData, InstanceView, TaskView, error_code,
+    AgentState, AttentionAction, AttentionRequiredData, InstanceView, TaskView,
 };
 use agend_core::protocol::holder::ExitedData;
 use agend_core::traits::HolderLaunch;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::sync::oneshot;
 
 use crate::boot::{BootAction, plan_boot};
 use crate::fleet::{Fleet, failed_attention_id};
@@ -108,13 +108,6 @@ pub fn launch(instance: &Instance, resume: bool) -> Result<HolderLaunch, String>
     })
 }
 
-/// Why a `resolve_attention` was refused: an `error_code` and a message.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Refusal {
-    pub code: &'static str,
-    pub message: String,
-}
-
 #[derive(Debug)]
 pub enum Event {
     Holder(HolderEvent),
@@ -128,11 +121,11 @@ pub enum Event {
         generation: u64,
     },
     Housekeeping,
-    /// The operator acts on a needs-you item (`resolve_attention`).
-    Resolve {
-        attention_id: String,
-        action: AttentionAction,
-        reply: oneshot::Sender<Result<(), Refusal>>,
+    /// The operator chose `retry` for this needs-you item of a `failed`
+    /// instance; it is already off the list. When the retry cannot be done
+    /// the item is listed again.
+    Retry {
+        item: Box<AttentionRequiredData>,
     },
     Stop(&'static str),
 }
@@ -462,42 +455,17 @@ impl Supervisor {
         }
     }
 
-    /// The operator's action on a needs-you item: only a listed action of a
-    /// listed item; the item leaves the list before the reply.
-    async fn resolve(
-        &mut self,
-        attention_id: String,
-        action: AttentionAction,
-        reply: oneshot::Sender<Result<(), Refusal>>,
-    ) {
-        let instance_id = self
-            .fleet
-            .attention(&attention_id)
-            .filter(|item| item.actions.contains(&action))
-            .and_then(|item| item.instance_id);
-        let Some(id) = instance_id else {
-            let _ = reply.send(Err(Refusal {
-                code: error_code::UNKNOWN_ATTENTION,
-                message: format!(
-                    "no needs-you item {attention_id} with action {}",
-                    action.as_str()
-                ),
-            }));
+    /// Starts a `failed` instance again (P5): stops the holder it left,
+    /// then resumes a started session or starts one, with a new budget. If
+    /// that cannot begin, the needs-you item is listed again.
+    async fn retry(&mut self, item: AttentionRequiredData) {
+        let Some(id) = item.instance_id.clone() else {
             return;
         };
-        self.fleet.resolve(&attention_id, action);
-        let _ = reply.send(Ok(()));
-        log::line(&format!(
-            "{id}: {} requested by the operator",
-            action.as_str()
-        ));
-        self.retry(&id).await;
-    }
-
-    /// Starts a `failed` instance again (P5): stops the holder it left,
-    /// then resumes a started session or starts one, with a new budget.
-    async fn retry(&mut self, id: &str) {
+        let id = id.as_str();
+        log::line(&format!("{id}: retry requested by the operator"));
         if let Err(e) = self.runtime.stop(id).await {
+            // `fail` lists a new item with this reason.
             return self
                 .fail(id, &format!("cannot stop its old holder: {e}"))
                 .await;
@@ -505,7 +473,10 @@ impl Supervisor {
         let instance = match self.store.instance(id).await {
             Ok(Some(instance)) => instance,
             Ok(None) => return log::line(&format!("{id}: no longer in the DB; not retried")),
-            Err(e) => return log::line(&format!("{id}: cannot read the instance: {e}")),
+            Err(e) => {
+                log::line(&format!("{id}: cannot read the instance: {e}; not retried"));
+                return self.fleet.raise(item);
+            }
         };
         let status = if instance.session_started {
             InstanceStatus::Running
@@ -513,7 +484,11 @@ impl Supervisor {
             InstanceStatus::New
         };
         if let Err(e) = self.store.set_instance_status(id, status).await {
-            return log::line(&format!("{id}: cannot record {}: {e}", status.as_str()));
+            log::line(&format!(
+                "{id}: cannot record {}: {e}; not retried",
+                status.as_str()
+            ));
+            return self.fleet.raise(item);
         }
         self.watches.remove(id);
         let instance = Instance { status, ..instance };
@@ -623,11 +598,7 @@ impl Supervisor {
                 Event::Housekeeping => {
                     crate::housekeeping::run(&self.store, &self.home, log::now_unix_ms()).await;
                 }
-                Event::Resolve {
-                    attention_id,
-                    action,
-                    reply,
-                } => self.resolve(attention_id, action, reply).await,
+                Event::Retry { item } => self.retry(*item).await,
                 Event::Stop(signal) => return signal,
             }
         }

@@ -436,7 +436,7 @@ fn check_cursor(state: &State, after: u64) -> Result<(), String> {
         .events
         .front()
         .map_or(state.latest + 1, |e| e.event_id);
-    if after + 1 >= oldest && after <= state.latest {
+    if after.saturating_add(1) >= oldest && after <= state.latest {
         Ok(())
     } else {
         Err(format!(

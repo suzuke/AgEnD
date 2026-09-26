@@ -455,7 +455,77 @@ pub fn socket(lab: &Lab) -> Result<Vec<String>, String> {
     out.push(format!(
         "101-byte socket path: exit 1: {said}; no agend.db created"
     ));
+    out.extend(bound_after_boot(lab)?);
     Ok(out)
+}
+
+/// The socket appears only after the boot plan: an instance whose holder
+/// lock is held (by this process, with its own pid) but that never
+/// answers makes the plan wait 5 s for it; a client that connects the
+/// moment the socket accepts sees the instance after it already started.
+fn bound_after_boot(lab: &Lab) -> Result<Vec<String>, String> {
+    use std::io::Write;
+    use std::os::fd::AsRawFd;
+    let home = lab.home(35);
+    let t = tag();
+    let (slow, next) = (format!("g8-{t}a"), format!("g8-{t}b"));
+    add(&home, &slow, Backend::Claude, lab::COUNTER)?;
+    add(&home, &next, Backend::Claude, lab::COUNTER)?;
+    fs::create_dir_all(files::holders_dir(&home)).map_err(|e| e.to_string())?;
+    let mut lock = fs::File::create(files::lock_path(&home, &slow)).map_err(|e| e.to_string())?;
+    write!(lock, "{}", std::process::id()).map_err(|e| e.to_string())?;
+    // SAFETY: flock on a file this function owns; released when `lock`
+    // drops, always before this function returns (the lab's cleanup must
+    // never find this process's pid in a held lock).
+    if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+        return Err("cannot lock the slow instance's lock file".into());
+    }
+    let socket = socket_of(&home);
+    let started = Instant::now();
+    let mut daemon = Daemon::start(lab, &home, &[])?;
+    let mut client = loop {
+        match ProbeClient::hello(&socket, None) {
+            Ok((client, _)) => break client,
+            Err(_) if started.elapsed() < Duration::from_secs(30) => {
+                std::thread::sleep(Duration::from_millis(10))
+            }
+            Err(e) => return Err(format!("the socket never accepted: {e}")),
+        }
+    };
+    let appeared = started.elapsed();
+    let reply = client
+        .request(&ClientRequest::GetFleet {
+            data: RequestIdData {
+                request_id: "g8-boot".into(),
+            },
+        })
+        .map_err(|e| e.to_string())?;
+    drop(lock);
+    let ClientResponse::Fleet { data } = reply else {
+        return Err(format!("get_fleet: {reply:?}"));
+    };
+    let state = |id: &str| {
+        data.fleet
+            .instances
+            .iter()
+            .find(|i| i.instance_id == id)
+            .map(|i| i.state.as_str())
+    };
+    ensure(
+        appeared >= Duration::from_secs(4) && state(&next) == Some("unknown"),
+        || {
+            format!(
+                "the socket accepted after {appeared:?}; {next} was {:?} (expected unknown: started by the boot plan)",
+                state(&next)
+            )
+        },
+    )?;
+    daemon.ready()?;
+    daemon.interrupt()?;
+    Ok(vec![format!(
+        "boot plan waiting 5 s on {slow}: the socket accepted only after {:.1} s, and the first get_fleet already shows {next} running",
+        appeared.as_secs_f64()
+    )])
 }
 
 /// `== retry` (P5): what `retry` does for each backend and whether the
@@ -570,6 +640,23 @@ pub fn retry(lab: &Lab) -> Result<Vec<String>, String> {
     for id in [&cr, &cn, &xn] {
         resolve(&socket, &format!("instance-failed:{id}"))?;
         daemon.expect(&format!("{id}: holder pid="))?;
+    }
+    // The kept holder got `Shutdown` before the new start: one start, no
+    // failed start, no restart (a start next to a live holder is refused
+    // and would only recover through a restart).
+    for id in [&cr, &cn, &xn] {
+        let lines = |needle: String| daemon.log.iter().filter(|l| l.contains(&needle)).count();
+        let (starts, failed, restarts) = (
+            lines(format!("{id}: holder pid=")),
+            lines(format!("{id}: start failed")),
+            lines(format!("{id}: restart ")),
+        );
+        ensure(starts == 1 && failed == 0 && restarts == 0, || {
+            format!(
+                "{id} after retry: {starts} holder start(s), {failed} failed start(s), {restarts} restart(s); log:\n{}",
+                daemon.log.join("\n")
+            )
+        })?;
     }
     let args = |i: &Instance| -> Result<Vec<String>, String> {
         let deadline = Instant::now() + Duration::from_secs(10);
