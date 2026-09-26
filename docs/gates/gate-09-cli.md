@@ -40,6 +40,7 @@
     | `done`、`result`、`review approve`／`changes`、`block`／`unblock`、`remind` | agent | `not_supported`，訊息寫「第 10 施工關」 |
     | `agend task create` | 兩者（操作者要帶 `--team`） | `not_supported`，handler 在第 10 施工關 |
     | `agend ask` | agent | `not_supported`，**移到第 10 施工關**（見下） |
+    | `agend task cancel <task>` | 操作者 | `not_supported`，handler `task_cancel` 在第 10 施工關（使用者 2026-09-26 決定加入） |
     | `agend instance add`／`remove`／`list` | 操作者（`list` 唯讀，兩者都可） | 做（P6） |
     | `agend daemon restart` | 操作者 | 做（P7） |
     | `agend doctor`、`agend init` | 操作者 | 不需要 daemon（P8、P9） |
@@ -49,6 +50,7 @@
   - 第 9、10 施工關的分工：**本關負責**所有命令的 CLI 語法、client 接線、錯誤對應與重送規則（P2、P4、P5）；**第 10 施工關負責** `ask`（daemon 端與 store）、`done`／`result`／`review`／`block`／`unblock`／`remind`／`task create` 的 daemon handler、`agend workflow`／`agend team` 命令。這些 handler 在第 10 施工關之前，真 daemon 一律回 `not_supported`（訊息寫「第 10 施工關」），不做半套。第 10 施工關在派工訊息印本關的 ticket（P2），`inbox` 照本關的模型（唯讀游標、`--after`）。
   - **使用者決定（2026-09-26）**：操作者**也能**跑 `agend task create`：它同時是 agent 命令與操作者命令；操作者的形式必須帶 `--team`（agent 的 team 由 daemon 從身分推得）；daemon 的 handler 仍在第 10 施工關。操作者的形式不走只收 agent 的 `command` 請求，而是 P6 `operator` 請求的 `task_create` 變體（第 10 施工關連同 handler 一起加；在那之前 CLI 回 `not_supported`）。
   - KISS 選項（使用者 2026-09-26 決定**不套用**）：(a) 沒有真 handler 的命令（`done`、`result`、`review`、`block`／`unblock`、`remind`、`task create`、`ask`）的 CLI 語法與假 daemon 的列，整批移到第 10 施工關，跟 handler 一起做；(b) `init` 再縮成只建目錄（不跑 doctor）。兩者都留在本頁。
+  - `agend task cancel <task>`（使用者 2026-09-26 從第 10 施工關決定）：操作者命令；本關做 CLI 語法、client 接線（P6 `operator` 請求的 `task_cancel` 變體）、錯誤對應；daemon handler 在第 10 施工關，之前回 `not_supported`。
   - `agend status` 一個命令兩種：有 `AGEND_INSTANCE` 送 `command {status}`，沒有送 `get_fleet`。
   - **`ask` 移到第 10 施工關**（**與第 8 施工關 P6「請示在第 9、10 施工關」不同，請明確決定**）：真的請示要新表、「需要你」來源、`answer_ask`、追問與結論（D35），本關做等於提前一半的第 10 施工關；第 11 施工關 B 段「回答請示」那半一樣等第 10 施工關。
   - 收件者是 claude／opencode（driver 在第 12 施工關）：`send` 照樣寫進 `messages` 表、狀態停在 `queued`；CLI 一樣回 `accepted`（`send` 一律回 `accepted`，core 的 `CommandResult` 沒有 `queued`；送達狀態看 daemon log、TUI）；收件者用 `agend inbox` 看得到；第 12 施工關的 driver 上線後照第 7 施工關的規則補送（實際行為以第 7 施工關 `deliver` 對沒有 driver 的 instance 怎麼做為準）。`CLI-n` 有一列驗它。
@@ -136,6 +138,7 @@
   | `send` | 是 | CLI 產生 `message_id`（UUID v4），`Send` 加選填欄位（additive），daemon 把它當成 `deliver` 的訊息 id；第 7 施工關 P5 的 `messages` 表的 id 為 UNIQUE（`seq` 為主鍵）、`deliver` 先查表，同一個 id 再送回目前的狀態、不再送一次——這就是唯一的一套冪等。daemon 在 `deliver` 寫入 DB **之後**才回應；「同 id、內容不同」的檢查與 `deliver` 的寫入在同一個 DB thread 的同一個 closure 裡做，沒有競態。**client 的 id 跟別人分開**：daemon 只收 UUID v4 格式的 `message_id`（第 10 施工關的派工訊息用 `dispatch:<ticket>`，不是 UUID，撞不到）；表裡已有這個 id、但 `from_instance`／`to_instance`／body／level 有任何一個不同 → `invalid_request: message id … is already used by another message`，不當成去重、不回 `accepted`。沒帶 `message_id` 的 `Send`（1.1 的 client）由 daemon 產生 UUID |
   | `done`、`result`、`review …` | 否 | 重送會被當成過期（`stale_result`），訊息反而誤導；檢查 `agend status` |
   | `block`／`unblock`、`remind`、`task create`、`ask` | 否 | 會重複建立或覆蓋；檢查 `agend status` |
+  | `task cancel` | 否 | 取消後再送會回錯誤或重複取消；檢查 `agend status` |
   | `instance add`／`remove` | 否 | 重送會回 `instance_exists`／`unknown_instance`；檢查 `agend instance list` |
   | `daemon restart` | 不適用 | 斷線本來就是預期的（P7），CLI 改等新 daemon |
 
@@ -268,6 +271,7 @@
 - 真 daemon 的 task 類命令與 `ask` 的 handler、store（第 10 施工關，P1；在那之前回 `not_supported`）；`send`／`inbox` 的送達本身（第 7 施工關）。
 - `agend workflow …`、`agend team …`（D19；第 10 施工關，連同第 5 施工關 S1 的 `save_workflow_toml`）。
 - `agend daemon stop`（在 launchd／systemd 下「停」要先卸載服務，第 13 施工關一起做）；`export`／`import`、`telegram setup`、`uninstall`（第 13 施工關）。
+- doctor 檢查 checks 的寫入沙箱工具（macOS `sandbox-exec`、Linux `bwrap`）：第 10 施工關的 checks 在沙箱裡跑、找不到就拒絕（fail closed），doctor 之後要報告它在不在；本關不做，留給第 10 施工關（或第 13 施工關）補一行檢查。
 - 從 CLI 處理「需要你」（`resolve_attention` 由 TUI 做，第 11 施工關 B 段）。
 - `config.toml`、`--non-interactive`、服務註冊（P9）；doctor 的登入、版本範圍、gh、服務、Telegram 檢查（P8）。
 - 顏色、shell completion、MCP 轉接層（D7「需要時」）、Windows。
@@ -470,6 +474,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-26 加操作者命令 `agend task cancel <task>`（使用者從第 10 施工關決定；handler 在第 10 施工關，之前 `not_supported`，不重送）；記下 doctor 之後要查沙箱工具。
 - 2026-09-26 使用者逐題確認 P1–P10：P1 含 `ask` 移第 10 施工關、操作者也能 `task create`（要 `--team`）、KISS 選項不套用；P3 改成 `AGEND_HOME` 一律必須設（預設位置與 `config.toml` 列不列 home 延到第 13 施工關）；P6 對使用者用 `name`、內部仍是 `instance_id`；步驟 2、3 改用 `AGEND_HOME`。
 - 2026-09-26 第 3 輪 review REFUTED（2 MEDIUM、3 LOW）後修正：`--after` 依第 7 施工關 `messages.seq`、未知／過期回 `unknown_message`；`send` 一律回 `accepted`；restart 等 EOF 最多 30 秒；同 id 檢查與寫入在同一個 DB closure。
 - 2026-09-26 第 2 輪 review REFUTED（3 MEDIUM、數個 LOW）後修正：restart 先等舊連線 EOF、以 `hello` 的 `boot_id` 確認換了；client `message_id` 只收 UUID v4、同 id 內容不同回 `invalid_request`；步驟 9 的 `pgrep` 只查 g9-1；送給 claude／opencode 停在 `queued`；`--after` 依寫入順序；`ECHILD` 後不再查；步驟 8 雙向；KISS 兩項列為待你決定。
