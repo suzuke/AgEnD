@@ -17,6 +17,11 @@
 - `xtask release`、brew formula、GitHub release workflow、`cargo install`
 - systemd unit 必須 `KillMode=process`（預設 `control-group` 會在重啟 daemon 時殺掉所有 holder，D3 失效）；實測 launchd 重啟 daemon 時 holder 存活（第 4 施工關風險，使用者 2026-09-25 決定）
 
+### 從其他施工關帶來的筆記（開工時處理）
+
+- **`AGEND_HOME` 預設位置與 `config.toml` 要不要列 home**：第 9 施工關 P3 本關（CLI）沒有預設值，本關必須設，明確延到本關決定：預設位置（例如 `~/.agend`）、`config.toml` 要不要列 home 路徑（D8／[tui-and-setup](../architecture/tui-and-setup.md#設定與目錄d8) 的寫法）（見 [gate-09-cli P3](gate-09-cli.md#p3agendhome-怎麼找)）。
+- **`sandbox-exec` 被 Apple 標為 deprecated**：第 10 施工關 checks 用的沙箱工具在 macOS 上是 `sandbox-exec`，Apple 已標為 deprecated；目前的 macOS 仍能用，未來版本拿掉時要另找工具，checks 會 fail closed 出現 `sandbox-missing`（見 [gate-10-pipeline P6](gate-10-pipeline.md#p6command-關卡runner)）。本關打包發布時留意目標 macOS 版本是否仍支援它。
+
 ## 自動驗收（完成定義）
 
 - [ ] `~/.cargo/bin/cargo test -p agend-core`、`~/.cargo/bin/cargo test -p agend-daemon`、`~/.cargo/bin/cargo test -p agend` 單獨通過
