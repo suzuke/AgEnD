@@ -149,8 +149,8 @@
    操作：同一次輸出，找 `== migrate`。應該看到：
 
    ```text
-   schema 0 -> 1
-   rows: tasks 3, workflows 2, task_events 120
+   schema 0 -> 2
+   rows: tasks 3, workflows 2, task_events 120, instances 0
    home drwx------
    agend.db -rw-------
    ```
@@ -206,8 +206,8 @@
    操作：找 `== retention`。應該看到：
 
    ```text
-   fake clock +15d: tasks 3 -> 3, workflows 2 -> 2, task_events 120 -> 0
-   calibration: v1 scale, tasks 8347, workflows 1, task_events 166940 (filled in <t> s)
+   fake clock +15d: tasks 3 -> 3, workflows 2 -> 2, task_events 120 -> 0, instances 0 -> 0
+   calibration: v1 scale, tasks 8347, workflows 1, task_events 166940, instances 0 (filled in <t> s)
    calibration: agend.db 57.2 MB (limit 1 GB), 7 snapshots 395.8 MB (limit 5 GB), slowest VACUUM INTO + quick_check <t> s
    calibration: within limits: D31 retention periods and 7 snapshots stay
    ```
@@ -237,8 +237,8 @@
    操作：找 `== too-new`（demo 把一份快照副本的 `user_version` 改成比最新版多 1）。應該看到：
 
    ```text
-   copy of a snapshot with user_version 2
-   open: agend.db schema version 2 is newer than this agend supports (1); install a newer agend or restore a snapshot from <demo 目錄>/too-new/backups
+   copy of a snapshot with user_version 3
+   open: agend.db schema version 3 is newer than this agend supports (2); install a newer agend or restore a snapshot from <demo 目錄>/too-new/backups
    sha256 before <H>
    sha256 after  <H>
    unchanged
@@ -327,6 +327,7 @@ owner 睡著時由實作者決定、可以反悔的事（頁面沒寫到的設�
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-26 第 6 施工關加 migration `0002_instances`（schema 版本 2），步驟 2、8 的「應該看到」照 `store_demo` 實跑改成 `schema 0 -> 2`、`rows: … instances 0`、`user_version 3 … supports (2)`；你 2026-09-26 驗收時看到的是當時的 v1 輸出（第 6 施工關 PR #125）。
 - 2026-09-26 使用者親自驗收 10 步通過（merge 前，branch `feat/gate-05-store`）。
 - 2026-09-26 fresh-context verifier（`be40b8a`）CONFIRMED：負數版本 -1、-2、`i32::MIN` 都拒絕且檔案不動；8 程序同時建新 home 3,600 輪沒有舊錯誤訊息。另記（`e714c08` 就有、非本次引入）：約 10% 的輪次 8 個建立者全部拿到 `InUse`、沒有人建成，下一次 `open` 會重建成功（S19）。store 照 S5 立刻回報，重試交給第 6 施工關 P1 的 10 秒重試。
 - 2026-09-26 使用者追認 S1–S23（S1–S3 逐題、S4–S23 一次追認）。

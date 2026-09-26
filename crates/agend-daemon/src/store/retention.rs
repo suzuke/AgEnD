@@ -4,8 +4,9 @@
 //!
 //! [`prune`] applies the table rules in one transaction and never VACUUMs
 //! (the space is reused by later writes; the daily snapshot is compacted by
-//! `VACUUM INTO` anyway). File rules are enforced by their writers: the shim
-//! audit log rotation is gate 6 work (gate 6 P8) and is not implemented here.
+//! `VACUUM INTO` anyway). File rules are enforced by the daemon's
+//! housekeeping (`crate::housekeeping`, gate 6 P8), which reads its periods
+//! from this table ([`file_keep_days`]).
 //!
 //! Must NOT: delete from a table whose rule is [`Keep::Forever`].
 
@@ -32,7 +33,18 @@ pub enum Target {
     /// A file under `$AGEND_HOME`, rotated daily into dated files; dated
     /// files older than the limit are deleted.
     DailyRotatedFile { path: &'static str },
+    /// Files under `$AGEND_HOME` matching `pattern`, deleted once unchanged
+    /// for longer than the limit (and, for holder logs, only while their
+    /// holder is not running).
+    IdleFiles { pattern: &'static str },
 }
+
+/// The shim's audit log (gate 3 T10), rotated to `audit/shim-YYYY-MM-DD.jsonl`.
+pub const AUDIT_LOG: &str = "audit/shim.jsonl";
+/// The daemon's log, written directly as `logs/daemon-YYYY-MM-DD.log`.
+pub const DAEMON_LOG: &str = "logs/daemon.log";
+/// Holder logs (gate 4 P3).
+pub const HOLDER_LOGS: &str = "run/holders/<id>.log";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rule {
@@ -69,13 +81,42 @@ pub const RETENTION: &[Rule] = &[
         why: "D31: events and state transitions 14 days; history for people only (P4)",
     },
     Rule {
-        target: Target::DailyRotatedFile {
-            path: "audit/shim.jsonl",
+        target: Target::Table {
+            name: "instances",
+            time_column: None,
         },
+        keep: Keep::Forever,
+        why: "gate 6 P2: an instance is kept until it is removed on purpose",
+    },
+    Rule {
+        target: Target::DailyRotatedFile { path: AUDIT_LOG },
         keep: Keep::Days(14),
-        why: "gate 3 T10 audit log; daily rotation, 14 days (gate 6 P8); enforced by gate 6",
+        why: "gate 3 T10 audit log; daily rotation, 14 days (gate 6 P8); daemon housekeeping",
+    },
+    Rule {
+        target: Target::DailyRotatedFile { path: DAEMON_LOG },
+        keep: Keep::Days(7),
+        why: "gate 6 P8: the daemon writes one file per UTC day, 7 days; daemon housekeeping",
+    },
+    Rule {
+        target: Target::IdleFiles {
+            pattern: HOLDER_LOGS,
+        },
+        keep: Keep::Days(7),
+        why: "gate 6 P8: deleted when the holder is not running and 7 days unchanged",
     },
 ];
+
+/// Days a file rule keeps (`None` for a table target or a missing rule).
+pub fn file_keep_days(target: Target) -> Option<u64> {
+    RETENTION
+        .iter()
+        .find(|rule| rule.target == target)
+        .and_then(|rule| match rule.keep {
+            Keep::Days(days) => Some(days),
+            Keep::Forever => None,
+        })
+}
 
 /// Row counts of one table before and after a prune.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,7 +142,7 @@ impl PruneReport {
 fn table_rules() -> impl Iterator<Item = (&'static str, Option<&'static str>, Keep)> {
     RETENTION.iter().filter_map(|rule| match rule.target {
         Target::Table { name, time_column } => Some((name, time_column, rule.keep)),
-        Target::DailyRotatedFile { .. } => None,
+        Target::DailyRotatedFile { .. } | Target::IdleFiles { .. } => None,
     })
 }
 

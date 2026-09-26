@@ -22,10 +22,16 @@ pub struct Migration {
 }
 
 /// Every migration of this binary, in order.
-pub const MIGRATIONS: &[Migration] = &[Migration {
-    name: "0001_init",
-    sql: include_str!("migrations/0001_init.sql"),
-}];
+pub const MIGRATIONS: &[Migration] = &[
+    Migration {
+        name: "0001_init",
+        sql: include_str!("migrations/0001_init.sql"),
+    },
+    Migration {
+        name: "0002_instances",
+        sql: include_str!("migrations/0002_instances.sql"),
+    },
+];
 
 /// The schema version this binary creates and supports.
 pub const LATEST_VERSION: i64 = MIGRATIONS.len() as i64;

@@ -42,6 +42,11 @@ pub const RULES: &[Rule] = &[
         deny: &[DATABASE, &["agend-daemon"]],
         why: "only the daemon opens agend.db; the TUI goes through the daemon protocol (gate 5 P2)",
     },
+    Rule {
+        krate: "agend-daemon",
+        deny: &[&["agend-holder", "agend-shim"]],
+        why: "the daemon reaches holders only through the holder protocol and the `agend holder` subcommand (gate 6 P9)",
+    },
 ];
 
 /// Crates that may depend on `agend-testkit` only as a dev-dependency: all of them.
@@ -234,6 +239,22 @@ mod tests {
             violations(tui, &names),
             ["agend-daemon", "libsqlite3-sys", "rusqlite"]
         );
+    }
+
+    #[test]
+    fn the_daemon_may_not_link_the_holder_or_the_shim() {
+        let daemon = RULES.iter().find(|r| r.krate == "agend-daemon").unwrap();
+        let names: Vec<String> = [
+            "agend-daemon",
+            "agend-core",
+            "tokio",
+            "rusqlite",
+            "agend-holder",
+            "agend-shim",
+        ]
+        .map(String::from)
+        .to_vec();
+        assert_eq!(violations(daemon, &names), ["agend-holder", "agend-shim"]);
     }
 
     #[test]
