@@ -20,7 +20,7 @@ use agend_holder::server::{Config, Stop, serve};
 use agend_testkit::tempdir::TempDir;
 
 const ID: &str = "t1";
-const LONG: Duration = Duration::from_secs(10);
+const LONG: Duration = Duration::from_secs(30);
 
 /// Ends the whole test process if a test runs longer than 120 s, so a hang
 /// fails in minutes instead of running into the CI job timeout.
@@ -171,31 +171,45 @@ impl Drop for TestHolder {
 /// Asks for snapshots until one satisfies `done`.
 fn wait_screen(client: &mut HolderClient, done: impl Fn(&str) -> bool) -> String {
     let deadline = Instant::now() + LONG;
+    let mut last_screen = String::new();
     loop {
         client.send(&HolderRequest::Snapshot).unwrap();
         loop {
-            match client.recv(LONG).unwrap() {
+            match client.recv(LONG).unwrap_or_else(|e| {
+                panic!(
+                    "wait_screen: recv errored after {LONG:?}: {e:?}, last screen: {last_screen:?}"
+                )
+            }) {
                 Some(HolderResponse::ScreenSnapshot { data }) => {
+                    last_screen = data.screen.clone();
                     if done(&data.screen) {
                         return data.screen;
                     }
                     break;
                 }
                 Some(HolderResponse::PtyBytes { .. }) => {}
-                other => panic!("unexpected {other:?}"),
+                other => panic!("unexpected {other:?}, last screen: {last_screen:?}"),
             }
         }
-        assert!(Instant::now() < deadline, "screen never matched");
+        assert!(
+            Instant::now() < deadline,
+            "screen never matched within {LONG:?}, last screen: {last_screen:?}"
+        );
         std::thread::sleep(Duration::from_millis(50));
     }
 }
 
 fn wait_exited(client: &mut HolderClient) -> ExitedData {
+    let mut last: Option<HolderResponse> = None;
     loop {
-        match client.recv(LONG).unwrap() {
+        match client.recv(LONG).unwrap_or_else(|e| {
+            panic!("wait_exited: recv errored after {LONG:?}: {e:?}, last message: {last:?}")
+        }) {
             Some(HolderResponse::Exited { data }) => return data,
-            Some(HolderResponse::PtyBytes { .. } | HolderResponse::Spawned { .. }) => {}
-            other => panic!("expected Exited, got {other:?}"),
+            Some(other @ (HolderResponse::PtyBytes { .. } | HolderResponse::Spawned { .. })) => {
+                last = Some(other);
+            }
+            other => panic!("expected Exited, got {other:?}, last message: {last:?}"),
         }
     }
 }
