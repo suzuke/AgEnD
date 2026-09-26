@@ -153,6 +153,7 @@
 - launchd 給的 `PATH` 很短、brew 升級後 shim symlink 可能暫時指到不存在的 binary：交給第 13 施工關（P3 開機時重建只救得了 daemon 重啟的那一次）。
 - EXCLUSIVE 鎖交接的 10 秒（P1）還沒實測，本關的四次開機要量實際等了多久。
 - 第 5 施工關 verifier 實測：多個程序同時建立**全新** home 時，約 10% 的機率全部拿到 `InUse`、沒有人建成（下一次 `open` 會成功）。P1 的 200 ms 重試已涵蓋；本關測試不要假設「同時開、一定有一個成功」。
+- **macOS login zsh 的 PATH 重排會影響本關寫定的 H3 白名單**：agent 的工具用 login shell 跑指令時，`path_helper` 會把系統路徑排到 `$AGEND_HOME/bin` 前面，H3 白名單目前沒有處理這件事。第 7 施工關 codex driver 的提案 P4 選了方案 A（加 `ZDOTDIR=$AGEND_HOME/zsh` 修正排序），需要修改本關 H3 的環境白名單；claude、opencode 是否有同樣的問題留給第 12 施工關實測（見 [第 7 施工關 P4](gate-07-codex.md#p4codex-的啟動設定與-shim-會不會被繞過安全決定請明確選)）。
 
 ## 自動驗收（完成定義）
 
