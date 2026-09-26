@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 同程序測試跑 `server::serve` 加真的 PTY 與 bash；跨程序測試（真的 binary）在 `crates/agend/tests/holder_process.rs`。
 > - 記住：每個 holder 一律用 `Shutdown` 停；測試不對自己沒起的 pid 送訊號。
-> - 下一步：第 6 施工關對真的 agent runtime 跑 RTM-1..9。
+> - 下一步：RTM-1..9 對真的 agent runtime 已在第 6 施工關跑（`crates/agend/tests/holder_runtime.rs`）。
 
 ## 怎麼跑
 
@@ -52,7 +52,7 @@
 
 - [ ] 螢幕分類器 fixture 用 holder 畫面產生（需要真 backend 的原始 PTY 位元組錄製，見第 4 施工關頁「待你追認」）
 - [ ] Linux 上的行為（CI 的 ubuntu 會跑同一組測試）
-- [ ] 對真的 agent runtime 跑 RTM-1..9（第 6 施工關）
+- [x] 對真的 agent runtime 跑 RTM-1..9（第 6 施工關：`crates/agend/tests/holder_runtime.rs`）
 
 ## 下一步
 
