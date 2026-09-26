@@ -430,6 +430,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 日期 + 一行 + commit／PR，新的在上面。
 
 - 2026-09-26 verifier r1 REFUTED（`8222f7d`）修正：F1 MEDIUM claude 第一次 `Spawn` 前 daemon 當掉 → 之後只拿到 `--resume` 沒建立過的 session：`running` 改成第一次 `Spawn` 被確認後才寫、`new` 一律 `--session-id`（H1、H2 改寫；回歸測試 `a_daemon_killed_before_the_first_spawn_still_starts_the_session_fresh` 修前失敗、修後通過；demo 加 `== crash-before-spawn`）；F2 只有 instance 的 DB 也做每日快照（`a_database_with_only_instances_takes_its_daily_snapshot`）；F3 一個鎖住卻沒有活 pid 的鎖檔不再讓整個開機失敗，跳過並記警告（`a_locked_file_without_a_live_pid_is_skipped_not_fatal`）；F4 放棄時關掉對 holder 的連線（H8 改寫）；F5 第 5 施工關頁的 demo 輸出更新；H14 標明與安全清單字面不同。
+- 2026-09-26 CI（ubuntu）偶發失敗修正：`a_second_daemon_is_refused_after_ten_seconds_and_the_first_is_untouched` 報 `the first daemon's log changed`——daemon log 先寫 stderr 再寫檔，測試看到 stderr 那行就拍檔案快照，偶爾檔案還沒寫。改成先寫檔再寫 stderr（`log::line`）。
 - 2026-09-26 使用者親自驗收 9 步通過（merge 前，branch `feat/gate-06-daemon`）。
 - 2026-09-26 使用者追認 H1–H16（H14 單獨明確允許）。
 - 2026-09-26 fresh-context verifier r2 CONFIRMED（`6316d42`）：r1 五項都修好（F1 的回歸測試拿掉修正會失敗）；另記兩個 LOW 文件差異（步驟 4 少了 `housekeeping: DB snapshot` 那行、第 5 施工關步驟 6 少了 `instances`）已補，H1 補上 R1 已知限制（「`Spawn` 被確認」≠ claude session 已存檔，第 12 施工關實測）。

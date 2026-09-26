@@ -59,7 +59,8 @@ pub fn line(message: &str) {
     let now = now_unix_ms();
     let text = format!("{} {message}\n", timestamp(now));
     let _guard = WRITE.lock().unwrap_or_else(|e| e.into_inner());
-    let _ = io::stderr().write_all(text.as_bytes());
+    // File first: whoever sees a line on stderr can rely on it being in the
+    // log file already (the second-daemon test snapshots the file then).
     if let Some(dir) = DIR.get() {
         let file = OpenOptions::new()
             .create(true)
@@ -70,6 +71,7 @@ pub fn line(message: &str) {
             let _ = file.write_all(text.as_bytes());
         }
     }
+    let _ = io::stderr().write_all(text.as_bytes());
 }
 
 #[cfg(test)]
