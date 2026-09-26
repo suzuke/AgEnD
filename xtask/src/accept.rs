@@ -11,6 +11,9 @@
 //! real binary), then the shim demo. Gate 4 runs the per-crate checks of
 //! agend-holder and agend (which holds the cross-process tests), check-deps,
 //! then the holder demo (`holder_probe demo` against the built `agend`).
+//! Gate 5 runs the agend-daemon checks (its tests include the STO-1..12
+//! contract against the real store and the cross-process restart/crash
+//! tests), check-deps, then the store demo.
 //! Other gates use the per-crate checks until their acceptance flow is built.
 
 use crate::{cargo, check_deps, workspace_root};
@@ -177,6 +180,16 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
             "demo",
         ])?;
         println!("gate 4 (holder): checks passed");
+    } else if gate.number == 5 {
+        step(&[
+            "run",
+            "--quiet",
+            "-p",
+            "agend-daemon",
+            "--example",
+            "store_demo",
+        ])?;
+        println!("gate 5 (store): checks passed");
     } else {
         println!(
             "gate {} ({}): checks passed; demo not implemented yet (it is added when this gate is built)",

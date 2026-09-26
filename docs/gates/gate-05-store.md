@@ -3,11 +3,11 @@
 > **TL;DR**
 > - daemon 的 SQLite：schema、migration、CAS、保留期限、每日 DB 快照；所有持久狀態只在這裡（D8）。
 > - 記住：**重開不遺失要用真的 DB 檔、跨真的 process 驗**（第 2 施工關 A25）；in-memory DB 正是要擋的那類實作。
-> - 下一步：開工前提案 P1–P9 已由使用者確認（2026-09-25）；等第 4 施工關完成（D22）後開工。
+> - 下一步：draft PR（build first, merge later，使用者放寬 D22）等 fresh-context verifier、你親自驗收與「待你追認」S1–S16；不 merge。
 
 ## 狀態
 
-**提案中**（2026-09-25）：P1–P9 使用者已確認，等第 4 施工關完成後開工。
+**已驗收，等 merge**（2026-09-26）：P1–P9 使用者已確認；S1–S23 使用者已追認；fresh-context verifier CONFIRMED；使用者親自驗收 10 步通過。名詞表留給之後的共用文件 PR。
 
 ## 範圍
 
@@ -117,13 +117,13 @@
 
 ## 自動驗收（完成定義）
 
-- [ ] `~/.cargo/bin/cargo test -p agend-daemon` 單獨通過，包括：STO-1..12 對真 store（P7）；golden schema、每個舊版 fixture 升級、壞 migration 退回、太新的 DB 被拒且檔案 hash 不變（P5）；每張表都有保留規則（P8）；快照 7 份輪替、不刪其他檔案（P9）；第二個程序開 DB 被拒（P2）
-- [ ] `~/.cargo/bin/cargo test -p agend-daemon --test store_process` 通過：四次開機 pid 都不同、之間沒有子程序活著；重開前的舊版本 CAS 被擋、重開後版本嚴格變大；「每次開機用新的 DB 路徑」必須失敗；硬殺後 ack 過的寫入都在、integrity ok（P6、P7）
-- [ ] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨
-- [ ] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`（出現 `SKIPPED` 不算通過），並有新規則：`agend-tui` 不能依賴 SQLite 或 `agend-daemon`（開工時細化：故意讓 `agend-tui` 依賴 `rusqlite` 會失敗）
-- [ ] `~/.cargo/bin/cargo xtask accept store` 通過，並印出下方用到的 demo（全部在暫存目錄、用假時鐘）
-- [ ] `agend-daemon` 的 `README.md`／`TESTING.md` 已更新（TESTING 的「in-memory SQLite」改成暫存目錄裡的真 DB 檔；寫上還原步驟）；名詞表加 DB 快照、schema 版本、`backups/`
-- [ ] fresh-context verifier 重跑並嘗試推翻，結果寫進「進度紀錄」（verifier 的 kill 只對自己起的子程序）
+- [x] `~/.cargo/bin/cargo test -p agend-daemon` 單獨通過，包括：STO-1..12 對真 store（P7）；golden schema、每個舊版 fixture 升級、壞 migration 退回、太新的 DB 被拒且檔案 hash 不變（P5）；每張表都有保留規則（P8）；快照 7 份輪替、不刪其他檔案（P9）；第二個程序開 DB 被拒（P2）
+- [x] `~/.cargo/bin/cargo test -p agend-daemon --test store_process` 通過：四次開機 pid 都不同、之間沒有子程序活著；重開前的舊版本 CAS 被擋、重開後版本嚴格變大；「每次開機用新的 DB 路徑」必須失敗；硬殺後 ack 過的寫入都在、integrity ok（P6、P7）
+- [x] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨
+- [x] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`（出現 `SKIPPED` 不算通過），並有新規則：`agend-tui` 不能依賴 SQLite 或 `agend-daemon`。細化：在 `crates/agend-tui/Cargo.toml` 加 `rusqlite = { version = "0.37", features = ["bundled"] }` 後 check-deps 印出 `agend-tui depends on libsqlite3-sys …`、`agend-tui depends on rusqlite …`、`xtask: 2 dependency rule violation(s)` 並失敗；還原後恢復 ok（單元測試 `tui_may_not_reach_sqlite_or_the_daemon` 也釘這條）
+- [x] `~/.cargo/bin/cargo xtask accept store` 通過，並印出下方用到的 demo（全部在暫存目錄、用假時鐘）
+- [ ] `agend-daemon` 的 `README.md`／`TESTING.md` 已更新（TESTING 的「in-memory SQLite」改成暫存目錄裡的真 DB 檔；寫上還原步驟）；名詞表加 DB 快照、schema 版本、`backups/`（README／TESTING 已做；名詞表留給之後的共用文件 PR）
+- [x] fresh-context verifier 重跑並嘗試推翻，結果寫進「進度紀錄」（verifier 的 kill 只對自己起的子程序）
 
 ## 你親自驗收
 
@@ -138,81 +138,182 @@
    ~/.cargo/bin/cargo xtask accept store
    ```
 
-   應該看到：最後一行 `gate 5 (store): checks passed`。
+   應該看到：依序出現 `== migrate`、`== restart`、`== crash`、`== retention`、`== snapshot`、`== too-new`、`== second-open` 七段，最後一行 `gate 5 (store): checks passed`。draft PR 還沒 merge 時，改在 PR 的 worktree（`~/Documents/Hack/AgEnD-v2-gate05`）跑。
 
-   - [ ] 通過
+   - [x] 通過
 
 2. 建 DB 與 migration。
 
    **這步在驗什麼**：全新 DB 升到最新 schema，檔案只有你能讀（P2、P5）。錯了的話其他使用者可能讀到 task 內容，或 schema 版本不對。
 
-   操作：同一次輸出，找 `== migrate`。應該看到：`schema 0 -> 1`、三張表各自的筆數、`agend.db -rw-------`。
+   操作：同一次輸出，找 `== migrate`。應該看到：
 
-   - [ ] 通過
+   ```text
+   schema 0 -> 1
+   rows: tasks 3, workflows 2, task_events 120
+   home drwx------
+   agend.db -rw-------
+   ```
+
+   - [x] 通過
 
 3. 四次開機，每次都是新的 process。
 
    **這步在驗什麼**：資料真的寫在磁碟上，不是藏在程序裡；開機 2 什麼都沒做，資料也沒被清掉（P7、STO-12）。錯了的話 daemon 每次重啟就遺失 task。
 
-   操作：找 `== restart`。應該看到：4 行 `boot N pid=<每行都不同>`，版本越來越大，`boot 2 (open only)`，最後 `boot 4 … ok`。
+   操作：找 `== restart`。應該看到（pid 每次不同，但 4 行彼此都不同）：
 
-   - [ ] 通過
+   ```text
+   boot 1 pid=<A> v=4 stale=3
+   boot 2 pid=<B> (open only)
+   boot 3 pid=<C> stale v=3 -> conflict current=4, task unchanged; v=5
+   boot 4 pid=<D> v=5 ok (task, workflow, 4 events; next cas v=6)
+   4 boots, 4 different pids, each child exited before the next started
+   negative check (new DB path each boot): boot 3 failed: child pid=<E> exit status: 101 (task T-1 is missing)
+   ```
+
+   最後一行是反向檢查：每次開機換一個新的 DB 路徑，開機 3 就找不到 task——證明這套檢查分得出「真的存下來」和「藏在程序裡」。
+
+   - [x] 通過
 
 4. 故意弄壞：重開前拿到版本的人，在重開後才寫入。
 
    **這步在驗什麼**：CAS 擋得住過期的寫入者，重啟之後也擋得住（STO-4）。錯了的話舊寫入會蓋掉新的 task 狀態。
 
-   操作：同一段輸出找 `stale`。應該看到：`stale v=4 -> conflict current=4`，task 內容沒變。
+   操作：同一段輸出找 `stale`。應該看到：`stale v=3 -> conflict current=4, task unchanged`。開機 1 最後一次寫入前拿到的版本是 3（`stale=3`），重開後拿它寫入被擋，回報目前版本 4；之後用 4 寫入才成功（`v=5`）。原本草稿寫的 `stale v=4 -> conflict current=4` 自相矛盾（拿目前版本寫入應該成功），見「待你追認」S6。
 
-   - [ ] 通過
+   - [x] 通過
 
 5. 故意弄壞：寫到一半硬殺。
 
    **這步在驗什麼**：commit 回來的寫入在程序被硬殺後都還在，DB 沒壞（P6）。錯了的話 daemon 當掉後資料遺失或 DB 打不開。
 
-   操作：找 `== crash`。應該看到：`killed own child pid=<N>`、`acked=50 found=50 integrity=ok`。
+   操作：找 `== crash`。應該看到：
 
-   - [ ] 通過
+   ```text
+   child pid=<N> acked 50 writes; killed own child pid=<N> (signal: 9 (SIGKILL))
+   acked=<A> found=<F> integrity=ok
+   ```
+
+   `A` 是子程序死前印出的最後一個 ack（通常 50），`F` 是重開後 DB 裡的寫入數；必須 `F ≥ A`（通常相等，最多多 1：硬殺時正在 commit 的那一次）。
+
+   - [x] 通過
 
 6. 保留期限。
 
    **這步在驗什麼**：過期事件被刪，task 與 workflow 永遠留著（P8、D31）。錯了的話 DB 無限長大，或 task 被刪。
 
-   操作：找 `== retention`。應該看到：假時鐘 `+15d` 後 `task_events 120 -> 0`、`tasks 3 -> 3`、`workflows 2 -> 2`；校準行印出 v1 量級的 DB 大小（開工時細化確切數字）。
+   操作：找 `== retention`。應該看到：
 
-   - [ ] 通過
+   ```text
+   fake clock +15d: tasks 3 -> 3, workflows 2 -> 2, task_events 120 -> 0
+   calibration: v1 scale, tasks 8347, workflows 1, task_events 166940 (filled in <t> s)
+   calibration: agend.db 57.2 MB (limit 1 GB), 7 snapshots 395.8 MB (limit 5 GB), slowest VACUUM INTO + quick_check <t> s
+   calibration: within limits: D31 retention periods and 7 snapshots stay
+   ```
+
+   校準：v1 的 8,347 個 task，每個 20 個事件且全部還在 14 天內（上限估計）。實測（2026-09-26，macOS debug build）DB 57.2 MB、7 份快照 395.8 MB、單次快照 0.18–0.19 秒，遠低於門檻，D31 的期限與 7 份維持。
+
+   - [x] 通過
 
 7. DB 快照與輪替。
 
    **這步在驗什麼**：每天一份可用的快照，只留 7 份，不刪別的檔案（P9）。錯了的話要還原時沒有能用的備份，或刪掉你的檔案。
 
-   操作：找 `== snapshot`。應該看到：快照路徑、大小、`quick_check ok`；假時鐘跑 9 天後 `backups: 7 files`、`notes.txt kept`。
+   操作：找 `== snapshot`。應該看到：
 
-   - [ ] 通過
+   ```text
+   <demo 目錄>/home/backups/agend-2026-10-06.db <N> bytes quick_check ok (-rw-------, <t> s)
+   fake clock 9 days: backups: 7 files (agend-2026-10-08.db .. agend-2026-10-14.db), notes.txt kept
+   backups is drwx------
+   ```
+
+   - [x] 通過
 
 8. 故意弄壞：舊 binary 打開新 schema 的 DB。
 
    **這步在驗什麼**：版本不合就拒絕開，DB 一個 byte 都沒動（P5）。錯了的話裝回舊版後會用錯的 schema 亂寫。
 
-   操作：找 `== too-new`（demo 把一份副本的 `user_version` 改成比最新版多 1）。應該看到：`schema version 2 is newer than this agend supports (1)`，前後 `sha256` 相同。
+   操作：找 `== too-new`（demo 把一份快照副本的 `user_version` 改成比最新版多 1）。應該看到：
 
-   - [ ] 通過
+   ```text
+   copy of a snapshot with user_version 2
+   open: agend.db schema version 2 is newer than this agend supports (1); install a newer agend or restore a snapshot from <demo 目錄>/too-new/backups
+   sha256 before <H>
+   sha256 after  <H>
+   unchanged
+   ```
+
+   兩行 `sha256` 的 `<H>` 要一模一樣。
+
+   - [x] 通過
 
 9. 故意弄壞：兩個程序開同一個 DB。
 
    **這步在驗什麼**：同時只有一個 daemon 能用這個 DB（P2）。錯了的話兩個 daemon 同時驅動同一個 task。
 
-   操作：找 `== second-open`。應該看到：`agend.db is in use by another process`，第一個 store 還能照常寫入。
+   操作：找 `== second-open`。應該看到：
 
-   - [ ] 通過
+   ```text
+   first store (pid=<P>) holds <demo 目錄>/home/agend.db
+   second-open pid=<Q> error=agend.db is in use by another process (is another agend daemon running?)
+   first store still writes: T-1 v=1 -> v=2
+   ```
+
+   - [x] 通過
 
 10. 你自己動手：不經過 agend，直接用 `sqlite3` 打開快照（開工時細化）。
 
     **這步在驗什麼**：快照是一般的 SQLite 檔，agend 壞掉時你也能自己打開、查資料、還原。錯了的話備份只有 agend 自己讀得懂。
 
-    操作（示意）：`AGEND_STORE_DEMO_KEEP=1` 跑 demo，它印出 `export SNAP=…`；貼上後跑 `sqlite3 -readonly "$SNAP" 'select count(*) from tasks;'`。應該看到：`3`。最後刪掉 demo 印出的暫存目錄。
+    操作：
 
-    - [ ] 通過
+    draft PR 還沒 merge 時，跟步驟 1 一樣改在 PR 的 worktree（`~/Documents/Hack/AgEnD-v2-gate05`）跑。
+
+    ```bash
+    cd ~/Documents/Hack/AgEnD-v2
+    AGEND_STORE_DEMO_KEEP=1 ~/.cargo/bin/cargo run --quiet -p agend-daemon --example store_demo | tail -2
+    ```
+
+    最後兩行是 `kept <demo 目錄> (delete it when done)` 與 `export SNAP=<快照路徑>`。把 `export SNAP=…` 那一行整行貼上執行，再跑：
+
+    ```bash
+    sqlite3 -readonly "$SNAP" 'select count(*) from tasks;'
+    ```
+
+    應該看到：`3`。最後刪掉 `kept` 那一行印出的 demo 目錄（`rm -rf <demo 目錄>`，只刪那一個）。
+
+    - [x] 通過
+
+## 待你追認
+
+owner 睡著時由實作者決定、可以反悔的事（頁面沒寫到的設計選擇）。每項各一個 commit，標 `[待你追認]`。每項：決定 · 理由 · 反悔的成本 · 追認結果。
+
+| # | 決定 | 理由 | 反悔成本 | 追認結果 |
+|---|---|---|---|---|
+| S1 | `save_workflow(&Workflow)` 存 `toml::to_string` 的結果（D19 格式，但不是使用者原始檔的文字，註解會掉）；同一個 (id, version) 再存一次回 `Exists`，不覆蓋 | D21：task 固定版本，版本內容不能變；存序列化結果保證讀得回（第 1 施工關 workflow golden 已鎖格式） | 第 9 施工關要保留原文：加 `save_workflow_toml(text)`，解析驗證後存原文；表不變 | 已追認（2026-09-26） |
+| S2 | 0700／0600 只在 store 建立 home、`agend.db`、`backups/` 時設定；已存在的目錄或檔案權限不改 | 頁面寫「建立時就是 0600」；改使用者自己建的目錄權限太侵入 | 改成每次開啟都 chmod：`open_connection` 加兩行＋一個測試 | 已追認（2026-09-26） |
+| S3 | 測試要求 `fixtures/schema-v1.sql` 到 `schema-v{LATEST}.sql` 全部存在，包括目前最新版（頁面只說「新增 migration 的 PR 要附前一版」） | 目前只有 v1，沒有「舊版」可測；把最新版也凍結，才能在今天就抓到「有人改了 0001_init.sql」 | 改回只要求舊版：迴圈上限改成 `LATEST_VERSION - 1` | 已追認（2026-09-26） |
+| S4 | 只有 `0 < 版本 < 最新` 才做升級前快照；全新空 DB（版本 0）直接建 schema | 空 DB 沒有資料可保護；否則每次全新安裝都在 `backups/` 留一份空快照 | 改成也做：條件改成 `found < supported` | 已追認（2026-09-26） |
+| S5 | 開 DB 時 `busy_timeout(0)`：被鎖就立刻回 `InUse`，不等待 | 第二個 daemon 要立刻知道；頁面風險表寫的「最多重試 10 秒」屬第 6 施工關的重啟交接，那時在呼叫端重試 | 第 6 施工關在 `SqliteStore::open` 外面包重試迴圈，store 不必改 | 已追認（2026-09-26） |
+| S6 | 四次開機裡的過期寫入者拿的是開機 1 最後一次寫入前的版本 3：輸出 `stale v=3 -> conflict current=4, task unchanged; v=5`；步驟 4 的「應該看到」照改 | 草稿的 `stale v=4 -> conflict current=4` 自相矛盾：拿目前版本 4 寫入依 CAS 應該成功 | 改成別的過期版本：`boot1` 的 `stale` 變數 | 已追認（2026-09-26） |
+| S7 | 崩潰段印 `acked=<子程序印出的最後一個 ack> found=<重開後的寫入數>`；測試要求 `found ≥ acked`、且最多多 1（硬殺時正在 commit 的那次） | 父程序讀到第 50 個 ack 才送 kill，子程序可能多寫幾次；頁面的 `acked=50 found=50` 只是常見情況 | 改成固定 50：子程序每次 ack 後等父程序回覆（多一條管線） | 已追認（2026-09-26） |
+| S8 | `RETENTION` 列出 `audit/shim.jsonl` 每日輪替留 14 天（gate 6 P8），測試確認這列存在；`prune` 不處理檔案規則，輪替本身是第 6 施工關的 TODO，不寫 stub | AGENTS：不寫假實作；寫 audit 的是 shim、每日觸發在第 6 施工關，放那裡才測得到 | 第 6 施工關實作時可以把檔案規則搬到它自己的模組，規則表測試跟著改 | 已追認（2026-09-26） |
+| S9 | 校準用 v1 的 8,347 個 task（V1-LESSONS），每個 20 個事件且全部在 14 天內（上限估計）；先經 store 寫一個 task 與 20 個事件（真 producer），再用 SQL 複製到 v1 量級 | v1 沒有事件數；經 API 逐筆寫 16 萬次 fsync 要幾分鐘，SQL 複製保持列的形狀與 production 一致。實測 DB 57.2 MB、7 份快照 395.8 MB、單次快照 0.19 秒（debug build） | 改事件數或改成逐筆寫：`store_demo.rs` 的常數 | 已追認（2026-09-26） |
+| S10 | `SqliteStore::open_with(home, now, migrations)` 與 `MIGRATIONS` 是公開 API；`open` 就是 `open_with(…, MIGRATIONS)` | 頁面要「清單是參數，不留測試後門」：同一條 production 路徑、只是清單當參數，整合測試才能跑壞 migration 與升級前快照 | 改成 `pub(crate)`：相關測試搬進 crate 內的單元測試 | 已追認（2026-09-26） |
+| S11 | `store` 模組與它的測試以 `cfg(unix)` 編譯（檔案權限用 unix mode） | CI 只有 ubuntu、macOS；testkit 的 socket 部分也是 unix-only | 要支援 Windows：權限改用 ACL 或略過，拿掉 `cfg(unix)` | 已追認（2026-09-26） |
+| S12 | `open`、`prune`、`snapshot` 收 `now_unix_ms: u64`（呼叫端從 `Clock` 取），不收 `&dyn Clock`；另加公開方法 `load_events`（契約 fixture 的 `events` 要用）與 `counts`（demo 與日後 doctor） | 時間只在呼叫端讀一次，store 不持有時鐘；Store trait 沒有讀事件的方法 | 改收 `&dyn Clock`：三個簽章＋呼叫端 | 已追認（2026-09-26） |
+| S13 | `tasks` 加 CHECK（`status` 字面值、`requires_repo` 0/1、`depends_on` 是 JSON 陣列、版本 ≥ 1）；`task_events.seq` 是 `INTEGER PRIMARY KEY` 不加 `AUTOINCREMENT`；事件兩個 index（依 task、依時間） | CHECK 擋手動 `sqlite3` 寫壞的值；`AUTOINCREMENT` 會多一張 `sqlite_sequence` 表（又要保留規則），而 seq 只用來排序，被刪的 seq 重用無害；index 讓讀事件與 prune 不掃全表 | 要改就是新 migration（已發佈的 0001 不能改） | 已追認（2026-09-26） |
+| S14 | demo 是 `crates/agend-daemon/examples/store_demo.rs`，與 `tests/store_process.rs` 共用 `tests/common/store_process.rs`（`#[path]`），子程序都是重新執行自己；demo 目錄在 `$TMPDIR`，`AGEND_STORE_DEMO_KEEP=1` 保留並印 `export SNAP=…` | 不為測試多一個 production 子命令（P7）；同一份子程序邏輯，demo 印的就是測試驗的 | 改成 `agend` 的隱藏子命令：要動 `agend` crate | 已追認（2026-09-26） |
+| S15 | 7 份輪替依檔名排序（＝日期）；同一天 `-pre-vN` 排在每日快照前（`-` < `.`），先被刪 | 檔名就是日期，不看 mtime（複製、還原會改 mtime）；同一天的每日快照是升級後做的，比較新 | 改看 mtime 或把 pre 快照另算：`snapshot::rotate` | 已追認（2026-09-26） |
+| S16 | `agend-daemon` 另加 `serde_json`（`depends_on` 的 JSON 文字）、`toml`（workflow，與 xtask 同版本 1.1.6）；dev 依賴 `sha2`（too-new 測試與 demo 的 sha256） | 頁面只列 rusqlite 與 tokio；這三個是 P3、P5 描述的格式與檢查所需，且 workspace 已在用 | 換掉：手寫 JSON 陣列／比對整個檔案位元組 | 已追認（2026-09-26） |
+| S17 | 只有 `agend.db` 不存在才建新 DB，而且在 `.agend.db.new` 建好（所有 migration commit）才 hard link 成 `agend.db`；`agend.db` 存在但 0 bytes 或 schema 版本 0（或負數）一律拒絕、不動檔案；建到一半失敗或被殺留下的 `.agend.db.new` 由下次開啟刪掉重建（S19） | verifier 抓到 0 bytes 的 `agend.db` 被當新 DB 開，之後每份每日快照擠掉一份好的。改成「`agend.db` 存在 ⟹ 是本 store 建完的」，版本 0 的檔案就只可能是壞掉或被換掉；若直接在 `agend.db` 上建，建立時被殺會留下 0 bytes 或版本 0 的檔案，下次開機就被這條規則擋住。原本「壞 migration 退回」測試從空 DB 開始，改成從 v1 開始，另加建立失敗的測試 | 改回直接建在 `agend.db`：`create_database` 換回 `create_new`，版本 0 改成接著 migrate（只保留 0 bytes 拒絕） | 已追認（2026-09-26） |
+| S18 | home 的上層目錄不存在時一併建立（`DirBuilder::recursive`，新建的每一層都是 0700），已存在的目錄權限不改 | 比「回報缺哪個路徑」簡單，第 6 施工關不必先建上層；新建的上層也是 0700 比照 home | 改成回錯：`create_private_dir` 拿掉 `recursive` | 已追認（2026-09-26） |
+| S19 | 建新 DB 前，留下的 `.agend.db.new`（與它的 `-journal`）若是 home 擁有者的一般檔案就刪掉、從頭重建，不再「下次開啟接著建」；是 symlink、目錄或別人的檔案 → 拒絕並指名路徑。建立者之間靠 build 檔的 EXCLUSIVE lock 排隊：刪舊檔前先鎖它、鎖到新檔建好鎖好才放；鎖完再比對 path 上的 inode 是不是自己建的，不是就回 `InUse`；link 後在同一把鎖下刪掉 `.new` 這個名字 | verifier 第 2 輪：留下的 `.new` 被原樣 link 進來，0644 會變成 0644 的 `agend.db`、版本 5 變成 `TooNew`、symlink 會讓 `agend.db` 指到 home 外。新 home 的建立被殺不會丟使用者資料（從沒發佈過），重建永遠安全 | 改回接著建：`remove_leftover_build` 換回 `create(true)`＋`truncate(false)` 開舊檔 | 已追認（2026-09-26） |
+| S20 | `hard_link` 失敗（`AlreadyExists` 以外的任何錯誤，不只 ENOTSUP／EPERM）→ 再確認 `agend.db` 不存在後 `rename(.agend.db.new → agend.db)`；錯誤訊息寫出失敗的步驟（`creating agend.db failed: renaming … (hard-linking it failed first: …): …`）。rename 會蓋掉已存在的檔案，所以「確認後 rename」不能跟別的建立者搶：發佈的人一定持有 build 檔的 EXCLUSIVE lock（S19），同一時間只有一個；剩下的窗口只有 agend 以外的程序剛好在那一瞬間建 `agend.db` | verifier 第 2 輪：ExFAT 上新 home 永遠建不起來（os error 45）還留下 `.new`。錯誤碼各平台不同（macOS ENOTSUP=45、Linux EPERM／EOPNOTSUPP=95），std 沒有對應的 `ErrorKind`；其他錯誤 rename 也會失敗、訊息兩個都寫，所以一律退回比列錯誤碼簡單。測試用 `cfg(test)` 的 thread-local 讓 `hard_link` 失敗，不需要 ExFAT 映像 | 只對特定錯誤碼退回：`publish` 的 match 加一個 errno 表 | 已追認（2026-09-26） |
+| S21 | 開啟時檢查紀錄的 schema 版本該有的表都在：把前 N 個 migration 跑在 in-memory DB 上得到表名清單，跟 `agend.db` 的 `sqlite_master` 比；缺任何一張 → `MissingTables` 拒絕（訊息列出缺的表），檔案不動。只比表名，不比欄位與 index | verifier 第 2 輪：版本 1、沒有表的 DB 能開，每份每日快照擠掉一份好的。golden `schema.sql` 只描述最新版；重跑 migration 對每個版本都對，而測試已鎖定「migration 跑完＝golden」 | 改成讀 golden：`include_str!` golden 並解析 `CREATE TABLE`，只能檢查最新版 | 已追認（2026-09-26） |
+| S22 | SQLite 開檔前先檢查既有的 `agend.db`：比 SQLite 檔頭短（< 100 bytes）→ `Empty`（訊息寫實際 byte 數，0 bytes 維持原訊息）；指向不存在檔案的 symlink → `Refused`「it is a symlink to a missing file」；不是一般檔案（目錄等）→ `Refused`「it is not a regular file」。都不動檔案。README 加一句：刪掉 `agend.db` 等於從空 DB 開始、快照照常輪替 | verifier 第 2 輪：1 byte 的 `agend.db` 被拒，但 SQLite 先把它寫成 4096 bytes（unix VFS 把 1 byte 當 0）；dangling symlink 回 `File exists (os error 17)` 還留下建好的 `.new`。開檔前的大小檢查比事後說明簡單 | 拿掉大小檢查、在 README 說明：`check_existing` 改回只擋 0 bytes | 已追認（2026-09-26） |
+| S23 | DB 沒有任何 task 也沒有任何事件時，`snapshot` 不寫每日快照（`SnapshotReport.empty = true`、`taken = false`），輪替因此也不刪任何一份；升級前快照照做 | verifier 第 2 輪：刪掉 `agend.db`（S17 照設計重建空 DB）後，空 DB 的每日快照 7 天擠掉 7 份好的。空 DB 沒有資料可保護，跳過就讓舊快照留到真的有新資料為止 | 拿掉 `snapshot::daily` 的 `empty` 判斷與報告欄位 | 已追認（2026-09-26） |
 
 ## 驗收紀錄
 
@@ -220,12 +321,19 @@
 
 | 日期 | 結果（通過／不通過） | 備註 |
 |---|---|---|
-|  |  |  |
+| 2026-09-26 | 通過 | 在 `feat/gate-05-store`（merge 前）由 agent 帶著走 10 步。步驟 1–9：同一次 `accept store` 輸出全部對上（四次開機 pid 81451–81454、stale v=3 被擋、硬殺 acked=50 found=50 integrity=ok、v1 規模 DB 57.2 MB／7 份快照 395.8 MB、too-new 前後 sha256 相同、第二個程序拿到 in use）。步驟 10：`sqlite3 -readonly` 讀快照 tasks = 3，demo 目錄已刪。 |
 
 ## 進度紀錄
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-26 使用者親自驗收 10 步通過（merge 前，branch `feat/gate-05-store`）。
+- 2026-09-26 fresh-context verifier（`be40b8a`）CONFIRMED：負數版本 -1、-2、`i32::MIN` 都拒絕且檔案不動；8 程序同時建新 home 3,600 輪沒有舊錯誤訊息。另記（`e714c08` 就有、非本次引入）：約 10% 的輪次 8 個建立者全部拿到 `InUse`、沒有人建成，下一次 `open` 會重建成功（S19）。store 照 S5 立刻回報，重試交給第 6 施工關 P1 的 10 秒重試。
+- 2026-09-26 使用者追認 S1–S23（S1–S3 逐題、S4–S23 一次追認）。
+- 2026-09-26 verifier 第 3 輪 LOW 修正：`user_version` 為負數的 `agend.db` 原本讓 `open` panic，改成拒絕開啟（`agend.db has an invalid schema version N; refusing to start with it — restore a snapshot from <home>/backups (see README)`）、檔案不動（S17）；約 8 個程序同時建新 home 時，偶爾輸家拿到 `sqlite: unable to open database file: …/.agend.db.new`，改成回報 `agend.db is in use by another process`（多程序重現 1200 次出現 3 次，修正後 2400 次為 0）。
+- 2026-09-26 verifier 第 2 輪 REFUTED（沒有 hard link 的檔案系統建不了新 home），修正：hard link 失敗改 rename（S20）；留下的 `.agend.db.new` 刪掉重建（S19，取代 S17 的「接著建」）；缺表的 DB 拒絕（S21）；比 SQLite 檔頭短、dangling symlink、非一般檔案的 `agend.db` 開檔前拒絕（S22）；空 DB 不做每日快照（S23）；README 註明刪掉 `agend.db` 等於從空 DB 開始。
+- 2026-09-26 verifier 第 1 輪 REFUTED（0 bytes 的 `agend.db` 被當新 DB 開），修正：0 bytes／版本 0 的 `agend.db` 拒絕開啟、新 DB 在 `.agend.db.new` 建好才 link（S17）；快照暫存檔的 `-journal`／`-wal`／`-shm` 一併清掉；home 的上層目錄一併建立（S18）；步驟 10 註明 merge 前在 gate05 worktree 跑。名詞表那項（DB 快照、schema 版本、`backups/`）仍未做，名詞表是共用文件，留給 owner。
+- 2026-09-26 P1–P9 實作（draft PR，branch `feat/gate-05-store`）：`SqliteStore`、3 張 STRICT 表、migration 0001 + golden + v1 fixture、`prune`、每日 DB 快照、`store_demo`、`accept store`、check-deps 規則 `agend-tui`；實作者自跑自動驗收（fmt、clippy、workspace 測試含短 TMPDIR、`--test store_process`、check-deps `no-std build ok`、`accept store`、`accept testkit`）。fresh-context verifier 尚未跑。
 - 2026-09-25 開工前提案 P1–P9 寫定，使用者逐題確認（P8 追加 audit 輪替）；狀態改為提案中。
 
 ## 下一步
