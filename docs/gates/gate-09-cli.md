@@ -50,7 +50,7 @@
   - **待你決定（KISS，本頁不套用）**：(a) 沒有真 handler 的命令（`done`、`result`、`review`、`block`／`unblock`、`remind`、`task create`、`ask`）的 CLI 語法與假 daemon 的列，整批移到第 10 施工關，跟 handler 一起做；(b) `init` 再縮成只建目錄（不跑 doctor）。目前的建議是兩者都留在本頁。
   - `agend status` 一個命令兩種：有 `AGEND_INSTANCE` 送 `command {status}`，沒有送 `get_fleet`。
   - **`ask` 移到第 10 施工關**（**與第 8 施工關 P6「請示在第 9、10 施工關」不同，請明確決定**）：真的請示要新表、「需要你」來源、`answer_ask`、追問與結論（D35），本關做等於提前一半的第 10 施工關；第 11 施工關 B 段「回答請示」那半一樣等第 10 施工關。
-  - 收件者是 claude／opencode（driver 在第 12 施工關）：`send` 照樣寫進 `messages` 表、狀態停在 `queued`，回 `queued`；收件者用 `agend inbox` 看得到；第 12 施工關的 driver 上線後照第 7 施工關的規則補送（實際行為以第 7 施工關 `deliver` 對沒有 driver 的 instance 怎麼做為準）。`CLI-n` 有一列驗它。
+  - 收件者是 claude／opencode（driver 在第 12 施工關）：`send` 照樣寫進 `messages` 表、狀態停在 `queued`；CLI 一樣回 `accepted`（`send` 一律回 `accepted`，core 的 `CommandResult` 沒有 `queued`；送達狀態看 daemon log、TUI）；收件者用 `agend inbox` 看得到；第 12 施工關的 driver 上線後照第 7 施工關的規則補送（實際行為以第 7 施工關 `deliver` 對沒有 driver 的 instance 怎麼做為準）。`CLI-n` 有一列驗它。
   - `send` 的 `level`：`agend send <to> "<message>" [--level queue|steer|interrupt]`，預設 `queue`（第 7 施工關 P6：等級由呼叫者傳入、預設 `Queue`）。`Send` 加選填的 `level` 與 `message_id`（additive，P5）。
 - 理由：里程碑「第 1–9 施工關：兩個 codex agent 互傳訊息；重啟 daemon 時不中斷、不遺失、不重複」（[ROADMAP](../ROADMAP.md#里程碑使用者可見)）只需要 `status`、`send`、`inbox` 與加 instance，而第 7 施工關只做 `deliver` API、把 `agend send` 與 `level` 交給後面，第 8 施工關沒接，所以接線由本關負責，本關結束時里程碑要真的跑得起來（步驟 8）；其他 agent 命令沒有 task 就沒有真資料可回，回明確錯誤比假資料好（第 8 施工關 P6 同一條路）。權限只放 daemon 一處，TUI、Telegram、CLI 同一套規則。
 - 替代方案：本關就做 `ask` 的真實作（範圍多一張表與請示流程）；`send`／`inbox` 在第 7 施工關沒 merge 時先回 `not_supported`、里程碑延到第 10 施工關（**會讓 ROADMAP 的里程碑延後，要改的話請明確決定**；本頁不建議）；CLI 也擋一次權限（兩處規則會漂移）；agent 連唯讀的全貌都不能看（`agend instance list` 在 agent 裡就要另開例外）。
@@ -70,7 +70,7 @@
     |---|---|
     | status | `agend status` |
     | send | `agend send <to> "<message>" [--level queue\|steer\|interrupt]`（預設 `queue`） |
-    | inbox | `agend inbox [--after <message-id>]`（不帶：最近 20 則）；「之後」依寫入順序（`messages` 的 rowid），不比 UUID；第 10 施工關的假 agent 用同一個規則 |
+    | inbox | `agend inbox [--after <message-id>]`（不帶：最近 20 則）；「之後」依第 7 施工關 `messages` 表明確的 `seq INTEGER PRIMARY KEY`（寫入順序；不用隱含的 rowid，`VACUUM` 可能重編），不比 UUID；`--after` 的 id 不存在或已過保留期限 → `unknown_message: … run agend inbox without --after`、exit 1（`CLI-n` 有一列）；第 10 施工關的假 agent 用同一個規則 |
     | done | `agend done <ticket>` |
     | result | `agend result <ticket> "<summary>"` |
     | review | `agend review approve <ticket>`、`agend review changes <ticket> "<what to change>"` |
@@ -116,7 +116,7 @@
     | 參數錯 | clap 的訊息加一行範例 | `usage` |
 
   - 修正指令由**發現錯誤的那一方**寫：daemon 的錯誤訊息自己附正確命令（D17），CLI 不再加字；CLI 自己發現的（連不上、版本、參數、home）才由 CLI 寫。
-  - 新錯誤碼（core 常數，跟第 8 施工關的放一起）：`unknown_instance`、`instance_exists`、`preflight_failed`。
+  - 新錯誤碼（core 常數，跟第 8 施工關的放一起）：`unknown_instance`、`instance_exists`、`preflight_failed`、`unknown_message`。
   - 參數解析用 `clap`（derive）；`--help` 先列範例（`before_help`）。
 - 理由：agent 讀 exit code 只需要分「成功／失敗／我打錯」；更細的分類放 JSON，exit code 就不用當成第二套錯誤碼維護。`--json` 用 protocol 型別，只有一份格式、一套版本規則（#1493）。
 - 替代方案：每種錯誤一個 exit code（連不上 = 3 之類；兩套錯誤碼要同步）；`--json` 的錯誤寫 stderr（agent 要讀兩個串流）；手寫參數解析（約 15 個命令、每個都要自己處理 `--help` 與錯誤）。
@@ -131,7 +131,7 @@
   | 命令 | 重送 | 理由／不重送時的檢查指令 |
   |---|---|---|
   | `status`、`inbox`、`instance list`、`doctor` 裡的查詢 | 是 | 唯讀（`inbox` 帶游標讀，不消耗訊息） |
-  | `send` | 是 | CLI 產生 `message_id`（UUID v4），`Send` 加選填欄位（additive），daemon 把它當成 `deliver` 的訊息 id；第 7 施工關 P5 的 `messages` 表以 id 為主鍵、`deliver` 先查表，同一個 id 再送回目前的狀態、不再送一次——這就是唯一的一套冪等。daemon 在 `deliver` 寫入 DB **之後**才回應。**client 的 id 跟別人分開**：daemon 只收 UUID v4 格式的 `message_id`（第 10 施工關的派工訊息用 `dispatch:<ticket>`，不是 UUID，撞不到）；表裡已有這個 id、但 from／to／body／level 有任何一個不同 → `invalid_request: message id … is already used by another message`，不當成去重、不回 `accepted`。沒帶 `message_id` 的 `Send`（1.1 的 client）由 daemon 產生 UUID |
+  | `send` | 是 | CLI 產生 `message_id`（UUID v4），`Send` 加選填欄位（additive），daemon 把它當成 `deliver` 的訊息 id；第 7 施工關 P5 的 `messages` 表以 id 為主鍵、`deliver` 先查表，同一個 id 再送回目前的狀態、不再送一次——這就是唯一的一套冪等。daemon 在 `deliver` 寫入 DB **之後**才回應；「同 id、內容不同」的檢查與 `deliver` 的寫入在同一個 DB thread 的同一個 closure 裡做，沒有競態。**client 的 id 跟別人分開**：daemon 只收 UUID v4 格式的 `message_id`（第 10 施工關的派工訊息用 `dispatch:<ticket>`，不是 UUID，撞不到）；表裡已有這個 id、但 from／to／body／level 有任何一個不同 → `invalid_request: message id … is already used by another message`，不當成去重、不回 `accepted`。沒帶 `message_id` 的 `Send`（1.1 的 client）由 daemon 產生 UUID |
   | `done`、`result`、`review …` | 否 | 重送會被當成過期（`stale_result`），訊息反而誤導；檢查 `agend status` |
   | `block`／`unblock`、`remind`、`task create`、`ask` | 否 | 會重複建立或覆蓋；檢查 `agend status` |
   | `instance add`／`remove` | 否 | 重送會回 `instance_exists`／`unknown_instance`；檢查 `agend instance list` |
@@ -172,7 +172,7 @@
     3. daemon 起子程序 `<binary> daemon preflight /tmp/agend-pf-XXXXXX`（60 秒逾時）：用**新 binary 的** migration 開複本、`PRAGMA quick_check`、讀一次 `instances`；DB 比新 binary 新（降版）會被第 5 施工關的 too-new 規則擋下，也算失敗。接著在暫存 home 起自己的 `agend holder pf-check`，跑 hello、`Spawn`（`/bin/sh -c 'sleep 60'`）、`Shutdown`，等鎖放掉。每步印一行。
     4. 任何一步失敗：回 `preflight_failed`（附那一行），刪暫存 home，舊 daemon 照跑，**DB 本身一個 byte 都沒動**。
     5. 都過了：回 `restarting { preflight }`，然後收尾、`exec`。
-    6. CLI 印預檢結果，**先等這條連線 EOF**（daemon 收尾時關掉它，代表舊的已經不聽了），才用 `Client::connect`（10 秒重試）連新 daemon；連上後比 `hello` 的 `boot_id`，**必須跟重啟前不同**才印 `the daemon is back`，否則繼續重試到 10 秒後報錯。pid 與版本在同一個 binary 的 `exec` 前後都一樣，不能拿來判斷。
+    6. CLI 印預檢結果，**先等這條連線 EOF**（daemon 收尾時關掉它，代表舊的已經不聽了；最多等 30 秒，逾時報 `the daemon accepted the restart but did not stop within 30 s; check the daemon's terminal or log`、exit 1），才用 `Client::connect`（10 秒重試）連新 daemon；連上後比 `hello` 的 `boot_id`，**必須跟重啟前不同**才印 `the daemon is back`，否則繼續重試到 10 秒後報錯。pid 與版本在同一個 binary 的 `exec` 前後都一樣，不能拿來判斷。
   - `hello` 回應再加選填的 `boot_id`：這次開機的起點（第 8 施工關 P4 的事件 id 起點＝開機時間 unix ms × 1000），每次開機（含 `exec`）都會變。
   - `exec` 之後 daemon 以前起的 holder 仍是它的子程序（pid 沒變），但負責 `wait()` 的 thread 已經不在。新 daemon 開機時只對**從鎖檔讀到、接回的 holder pid** 定期 `waitpid(pid, WNOHANG)`（不是自己的子程序會回 `ECHILD`）；**第一次收到 `ECHILD` 或收屍成功就不再查那個 pid**，免得 pid 被重用後誤收別的程序；**不用 `waitpid(-1)`**：那會搶走 `runtime.rs` 每個自己起的 holder 的 `child.wait()` thread 與預檢子程序的 exit status（步驟 4 靠它判斷失敗）。
   - 預檢不連**正在跑的** holder（新連線會踢掉 daemon 的長連線，第 6 施工關 P4）；「新 daemon 聽得懂舊 holder」靠 core 的 `SUPPORTED_VERSIONS` 包含前一個 major（第 6 施工關 P7 的測試）。
@@ -273,6 +273,7 @@
 
 - 第 8 施工關還在實作：本關從它 merge 後的 `v2` 開 branch；1.1 的型別名稱、錯誤型別以 merge 後的程式為準，本關的 minor 疊在上面（P6：實作時的下一個 minor，與第 10 施工關的提案不要撞號）。
 - 第 7 施工關的提案還在審（`docs/gate-07-proposal`）：`deliver(…, level)` 的簽名、`messages` 表的欄位、「同 id 再送回目前狀態」的行為以它 merge 後為準；**第 7 施工關 merge 是本關開工的硬前提**（P1）。它若改成不以 id 冪等，P5 的 `send` 重送就不成立，要回來重新決定。
+- `inbox --after` 依賴第 7 施工關的 `messages` 表有明確的 `seq INTEGER PRIMARY KEY`（已請第 7 施工關作者加）；沒有的話 `--after` 的順序要重新決定。錯誤碼 `unknown_message` 跟 P4 的新錯誤碼放一起。
 - 步驟 8 的假 codex instance 怎麼起（`--program` 指向什麼、要不要包裝）依第 7 施工關的啟動方式，開工時細化。
 - `exec`（P7）：所有 fd 要有 `CLOEXEC`（Rust 預設有；SQLite 的檔案要實測），否則新 daemon 會繼承舊的 DB 鎖；`exec` 失敗（預檢之後 binary 被刪）時 daemon 已經收尾，只能印錯誤、exit 1——前景要人重跑 `agend daemon`，第 13 施工關由服務管理器重起；launchd／systemd 下 `exec` 的行為在第 13 施工關實測。
 - doctor 看鎖（P8）：檢查的那一瞬間若剛好有 holder 在啟動，可能拿不到鎖而啟動失敗；用 `LOCK_SH | LOCK_NB` 並立刻放掉，實測機率。
@@ -465,6 +466,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-26 第 3 輪 review REFUTED（2 MEDIUM、3 LOW）後修正：`--after` 依第 7 施工關 `messages.seq`、未知／過期回 `unknown_message`；`send` 一律回 `accepted`；restart 等 EOF 最多 30 秒；同 id 檢查與寫入在同一個 DB closure。
 - 2026-09-26 第 2 輪 review REFUTED（3 MEDIUM、數個 LOW）後修正：restart 先等舊連線 EOF、以 `hello` 的 `boot_id` 確認換了；client `message_id` 只收 UUID v4、同 id 內容不同回 `invalid_request`；步驟 9 的 `pgrep` 只查 g9-1；送給 claude／opencode 停在 `queued`；`--after` 依寫入順序；`ECHILD` 後不再查；步驟 8 雙向；KISS 兩項列為待你決定。
 - 2026-09-26 補第 9、10 施工關分工（第 10 施工關負責 `ask` 與 task 類 handler、`workflow`／`team`；之前回 `not_supported`）；ticket 由第 10 施工關印在派工訊息；待你決定：操作者能不能 `task create`。
 - 2026-09-26 fresh review REFUTED（5 MEDIUM、6 LOW）後修正：收屍只對接回的 holder pid `waitpid(pid, WNOHANG)`；`hello` 加 `daemon_pid`、全貌 instance 加 `working_directory`；步驟 3 改在步驟 2 的暫存 HOME 跑；本關接 `send` → `deliver` 與 `level`，第 7 施工關 merge 為硬前提、加步驟 8（兩個 agent 互傳、中途重啟）；TL;DR 與 P1、P3、P8 標出與已定文件不同之處；`daemon_probe` 定位、重加仍在跑的 id、restart 一次一個＋`mkdtemp`、`--binary` 在 D6 範圍內、協定版本寫成「實作時的下一個 minor」。
