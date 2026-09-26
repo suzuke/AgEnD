@@ -34,6 +34,9 @@
 //! - `instances` (gate 6 P2): the agents the daemon keeps running;
 //!   `session_started` (gate 8 P5, migration 0003) says whether the
 //!   backend session was ever created.
+//! - `messages` (gate 7 P5, migration 0004): the delivery model's only
+//!   idempotency layer ([`messages`]); `instances` gains `agent_pid` (the
+//!   codex sweep) and `legacy_no_thread` (codex rows from before gate 7).
 //! - Pipeline progress (`PipelineState`) is not stored yet: gate 10 adds it as
 //!   a column of `tasks`, written together with the task by the same
 //!   compare-and-swap, and never rebuilt by replaying events (gate 5 P4).
@@ -43,6 +46,7 @@
 //! does not match the DB snapshot name pattern.
 
 pub mod instances;
+pub mod messages;
 mod migrate;
 pub mod retention;
 pub mod snapshot;
@@ -63,6 +67,7 @@ use rusqlite::{Connection, ErrorCode, OpenFlags};
 use tokio::sync::{mpsc, oneshot};
 
 pub use instances::{Instance, InstanceStatus};
+pub use messages::{Claim, Message, NewMessage};
 pub use migrate::{LATEST_VERSION, MIGRATIONS, Migration};
 pub use retention::PruneReport;
 pub use snapshot::SnapshotReport;
@@ -348,6 +353,44 @@ impl SqliteStore {
             .await
     }
 
+    /// Records the backend session id of `id` (codex: its thread, gate 7 P3).
+    pub async fn set_session_id(&self, id: &str, session: &str) -> Result<(), StoreError> {
+        let (id, session) = (id.to_owned(), session.to_owned());
+        self.call(move |conn| instances::set_session_id(conn, &id, &session))
+            .await
+    }
+
+    /// Records or clears the agent pid of `id` (gate 7 P2).
+    pub async fn set_agent_pid(&self, id: &str, pid: Option<u32>) -> Result<(), StoreError> {
+        let id = id.to_owned();
+        self.call(move |conn| instances::set_agent_pid(conn, &id, pid))
+            .await
+    }
+
+    /// Inserts `message` as `queued` unless its id exists (P5): see
+    /// [`messages::claim`]. `now_unix_ms` dates a new row.
+    pub async fn claim_message(
+        &self,
+        message: &NewMessage,
+        now_unix_ms: u64,
+    ) -> Result<Claim, StoreError> {
+        let message = message.clone();
+        self.call(move |conn| messages::claim(conn, &message, now_unix_ms))
+            .await
+    }
+
+    pub async fn message(&self, id: &str) -> Result<Option<Message>, StoreError> {
+        let id = id.to_owned();
+        self.call(move |conn| messages::get(conn, &id)).await
+    }
+
+    /// The messages to instance `to`, in `seq` order.
+    pub async fn messages_to(&self, to: &str) -> Result<Vec<Message>, StoreError> {
+        let to = to.to_owned();
+        self.call(move |conn| messages::to_instance(conn, &to))
+            .await
+    }
+
     /// Row counts of every table in the retention table, in its order.
     pub async fn counts(&self) -> Result<Vec<(&'static str, u64)>, StoreError> {
         self.call(|conn| retention::counts(conn)).await
@@ -366,6 +409,23 @@ impl SqliteStore {
         let home = self.home.clone();
         self.call(move |conn| snapshot::daily(conn, &home, now_unix_ms))
             .await
+    }
+
+    /// Runs `job` on the DB thread from a plain thread, blocking until it
+    /// is done (the codex driver's link threads, gate 7). Must not be
+    /// called from an async task.
+    pub(crate) fn call_blocking<T, F>(&self, job: F) -> Result<T, StoreError>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Connection) -> Result<T, StoreError> + Send + 'static,
+    {
+        let jobs = self.jobs.as_ref().ok_or(StoreError::Stopped)?;
+        let (reply, answer) = oneshot::channel();
+        let job: Job = Box::new(move |conn| {
+            let _ = reply.send(job(conn));
+        });
+        jobs.blocking_send(job).map_err(|_| StoreError::Stopped)?;
+        answer.blocking_recv().map_err(|_| StoreError::Stopped)?
     }
 
     /// Runs `job` on the DB thread and returns its result.

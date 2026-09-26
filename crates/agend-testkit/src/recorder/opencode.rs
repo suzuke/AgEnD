@@ -48,6 +48,13 @@ impl Backend for Opencode {
     }
 
     fn run(&self, scenario: Scenario, agent: &Agent, dir: &Path, log: &Log) -> Result<(), String> {
+        if !Scenario::ALL.contains(&scenario) {
+            return Err(format!(
+                "{} does not record {}",
+                self.name(),
+                scenario.name()
+            ));
+        }
         let project = make_project(dir)?;
         let t = agent.pace.timeout;
         let (mut server, port) = spawn(agent, &project)?;
@@ -55,6 +62,8 @@ impl Backend for Opencode {
         oc.subscribe()?;
         let session = oc.new_session()?;
         match scenario {
+            // Gate 7's codex scenarios; refused above.
+            Scenario::TurnsList | Scenario::QueueIdle | Scenario::ResumeEmpty => {}
             Scenario::OneTurn => {
                 let start = log.len();
                 oc.prompt(&session, prompts::OK)?;

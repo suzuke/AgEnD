@@ -258,3 +258,181 @@ fn a_short_listen_path_is_a_symlink_too() {
     );
     server.stop();
 }
+
+// ---- gate 7 (P8): methods the codex driver uses, not yet recorded ----
+
+/// `clientUserMessageId` on `turn/start` and `turn/steer` comes back as the
+/// user message's `clientId`; `thread/turns/list` pages every turn oldest
+/// first with its items, the running one last.
+#[test]
+fn client_ids_and_turns_list() {
+    let dir = TempDir::new("cx-g7-list").unwrap();
+    let server = Running::start(&dir.path().join("s.sock"), 300);
+    let mut probe = server.probe();
+    let thread = start_thread(&mut probe);
+    let turn = probe
+        .call(
+            "turn/start",
+            json!({"threadId": thread, "input": input("one"), "clientUserMessageId": "m-1"}),
+        )
+        .unwrap()["turn"]["id"]
+        .clone();
+    probe
+        .call(
+            "turn/steer",
+            json!({"threadId": thread, "expectedTurnId": turn, "input": input("two"), "clientUserMessageId": "m-2"}),
+        )
+        .unwrap();
+    let running = probe
+        .call("thread/turns/list", json!({"threadId": thread}))
+        .unwrap();
+    assert_eq!(running["data"][0]["status"], "inProgress");
+    probe.next_method("turn/completed").unwrap();
+    probe
+        .call(
+            "turn/start",
+            json!({"threadId": thread, "input": input("three")}),
+        )
+        .unwrap();
+    probe.next_method("turn/completed").unwrap();
+    let first = probe
+        .call("thread/turns/list", json!({"threadId": thread, "limit": 1}))
+        .unwrap();
+    assert_eq!(first["data"].as_array().unwrap().len(), 1);
+    assert_eq!(first["nextCursor"], "1");
+    let clients: Vec<Value> = first["data"][0]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|i| i["type"] == "userMessage")
+        .map(|i| i["clientId"].clone())
+        .collect();
+    assert_eq!(clients, [json!("m-1"), json!("m-2")]);
+    let rest = probe
+        .call(
+            "thread/turns/list",
+            json!({"threadId": thread, "cursor": "1"}),
+        )
+        .unwrap();
+    assert_eq!(rest["data"].as_array().unwrap().len(), 1);
+    assert_eq!(rest["nextCursor"], Value::Null);
+    assert_eq!(rest["data"][0]["items"][0]["clientId"], Value::Null);
+    drop(probe);
+    server.stop();
+}
+
+/// `thread/queue/list` shows what waits; `thread/queue/start` on a busy
+/// thread is the "active or pending turn" error; `thread/resume` of an
+/// unknown thread is "thread not found"; `excludeTurns` leaves them out.
+#[test]
+fn queue_list_queue_start_and_resume_errors() {
+    let dir = TempDir::new("cx-g7-queue").unwrap();
+    let server = Running::start(&dir.path().join("s.sock"), 300);
+    let mut probe = server.probe();
+    let thread = start_thread(&mut probe);
+    probe
+        .call(
+            "turn/start",
+            json!({"threadId": thread, "input": input("long")}),
+        )
+        .unwrap();
+    probe
+        .call(
+            "thread/queue/add",
+            json!({"threadId": thread, "input": input("later"), "clientUserMessageId": "m-q"}),
+        )
+        .unwrap();
+    let listed = probe
+        .call("thread/queue/list", json!({"threadId": thread}))
+        .unwrap();
+    assert_eq!(listed["data"][0]["clientUserMessageId"], "m-q");
+    let busy = probe
+        .call("thread/queue/start", json!({"threadId": thread}))
+        .unwrap_err();
+    assert!(
+        busy.contains("-32600") && busy.contains("active or pending turn"),
+        "{busy}"
+    );
+    let missing = probe
+        .call("thread/resume", json!({"threadId": "no-such-thread"}))
+        .unwrap_err();
+    assert!(missing.contains("thread not found"), "{missing}");
+    let resumed = probe
+        .call(
+            "thread/resume",
+            json!({"threadId": thread, "excludeTurns": true}),
+        )
+        .unwrap();
+    assert_eq!(resumed["thread"]["turns"], json!([]));
+    drop(probe);
+    server.stop();
+}
+
+/// An old symlink at the `--listen` path (a server that died) does not stop
+/// the next one.
+#[test]
+fn an_old_listen_symlink_is_replaced() {
+    let dir = TempDir::new("cx-g7-link").unwrap();
+    let socket = dir.path().join("s.sock");
+    std::os::unix::fs::symlink(dir.path().join("gone.sock"), &socket).unwrap();
+    let server = Running::start(&socket, 50);
+    drop(server.probe());
+    server.stop();
+}
+
+/// `fake-codex`: `app-server` does not stop at end of stdin (the wrapper
+/// starts it in the background with `/dev/null`); `resume` prints its
+/// arguments and the `-c` values, and ends on a line `q`.
+#[test]
+fn fake_codex_cli_app_server_and_tui() {
+    let dir = TempDir::new("cx-g7-cli").unwrap();
+    let socket = dir.path().join("s.sock");
+    let mut server = Command::new(env!("CARGO_BIN_EXE_fake-codex"))
+        .args(["-c", "a=1", "app-server", "--listen"])
+        .arg(format!("unix://{}", socket.display()))
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    wait_until_listening(&socket, Duration::from_secs(5)).unwrap();
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(
+        server.try_wait().unwrap().is_none(),
+        "exited at end of stdin"
+    );
+    let mut probe = Probe::connect(&socket).unwrap();
+    let thread = start_thread(&mut probe);
+    let _ = probe.send(json!({"id": 99, "method": "agendFake/exit", "params": {}}));
+    let status = server.wait().unwrap();
+    assert!(status.success(), "{status}");
+    assert!(
+        dir.path()
+            .join("s.sock.fake-state/fake-codex/threads.json")
+            .is_file(),
+        "threads persist next to the socket"
+    );
+    let _ = std::fs::remove_file(agend_testkit::fake_agent::codex::socket_path_for(&socket));
+
+    let mut tui = Command::new(env!("CARGO_BIN_EXE_fake-codex"))
+        .args([
+            "-c",
+            "t=1",
+            "-c",
+            "u=2",
+            "resume",
+            &thread,
+            "--remote",
+            "unix:///x.sock",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::io::Write::write_all(tui.stdin.as_mut().unwrap(), b"hello\nq\n").unwrap();
+    let out = tui.wait_with_output().unwrap();
+    assert!(out.status.success());
+    assert_eq!(
+        String::from_utf8(out.stdout).unwrap(),
+        format!("agent args: resume {thread} --remote unix:///x.sock\nagent config: t=1 | u=2\n")
+    );
+}

@@ -16,6 +16,8 @@ use std::path::PathBuf;
 
 pub mod claude;
 pub mod codex;
+#[cfg(unix)]
+pub mod codex_cli;
 pub mod http;
 pub mod opencode;
 
@@ -58,6 +60,8 @@ pub(crate) fn write_state_atomic(path: &std::path::Path, contents: &str) -> std:
 pub const DEFAULT_TURN_MS: u64 = 100;
 
 pub const CODEX_BIN: &str = "fake-codex-app-server";
+/// The `codex` CLI stand-in for the gate 7 wrapper ([`codex_cli`]).
+pub const CODEX_CLI_BIN: &str = "fake-codex";
 pub const OPENCODE_BIN: &str = "fake-opencode-serve";
 pub const CLAUDE_BIN: &str = "fake-claude";
 

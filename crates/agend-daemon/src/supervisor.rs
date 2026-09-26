@@ -31,6 +31,18 @@
 //!   `running` if the session was started (claude resumes it) or `new`
 //!   (a fresh start), a new restart budget, and a start.
 //!
+//! Gate 7 (codex):
+//! - A codex agent is the `sh` wrapper (`driver::codex::launch`); after its
+//!   holder is up the codex driver connects (ready, thread, `$GO`); a
+//!   failure there, or an app-server gone for 20 s, is a death like any
+//!   other. codex now resumes its thread, so a `failed` codex instance has
+//!   `retry` unless migration 0004 marked it `legacy_no_thread`.
+//! - The sweep (P2): every time a codex holder is found dead (before the
+//!   restart-or-`failed` decision), before a new codex holder starts, and at
+//!   boot for a `failed` one whose holder is gone, while `agent_pid` is set:
+//!   SIGKILL to the old agent's group when it is still this instance's
+//!   (`driver::codex::sweep`), then `agent_pid` is cleared.
+//!
 //! Must NOT: kill or respawn holders on daemon shutdown; start an agent
 //! fresh once it has run.
 
@@ -45,9 +57,12 @@ use agend_core::protocol::client::{
 };
 use agend_core::protocol::holder::ExitedData;
 use agend_core::traits::HolderLaunch;
+use std::path::Path;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use crate::boot::{BootAction, plan_boot};
+use crate::driver::codex::sweep::{self, Markers};
+use crate::driver::codex::{CodexDriver, CodexEvent, launch as codex_launch};
 use crate::fleet::{Fleet, failed_attention_id};
 use crate::log;
 use crate::runtime::{HolderEvent, HolderRuntime, SpawnOutcome, Started, files};
@@ -81,13 +96,14 @@ impl RestartBudget {
 
 /// The session arguments a start adds to the instance's base arguments:
 /// claude gets `--session-id <id>` on its first start and `--resume <id>`
-/// after that; codex and opencode have no session id before gates 7 and 12,
-/// so they can start fresh once and never resume.
+/// after that; codex gets none (its TUI always resumes the thread the
+/// daemon created, through `$GO`, gate 7 P3); opencode has no session id
+/// before gate 12, so it can start fresh once and never resume.
 pub fn session_args(instance: &Instance, resume: bool) -> Result<Vec<String>, String> {
     match (instance.backend, &instance.session_id, resume) {
         (Backend::Claude, Some(id), false) => Ok(vec!["--session-id".into(), id.clone()]),
         (Backend::Claude, Some(id), true) => Ok(vec!["--resume".into(), id.clone()]),
-        (_, _, false) => Ok(Vec::new()),
+        (Backend::Codex, _, _) | (_, _, false) => Ok(Vec::new()),
         (backend, _, true) => Err(format!(
             "no session id to resume ({} cannot resume yet)",
             backend.as_str()
@@ -95,14 +111,34 @@ pub fn session_args(instance: &Instance, resume: bool) -> Result<Vec<String>, St
     }
 }
 
-/// The launch of `instance`, fresh or resuming.
-pub fn launch(instance: &Instance, resume: bool) -> Result<HolderLaunch, String> {
-    let mut args = instance.args.clone();
-    args.extend(session_args(instance, resume)?);
+/// What a start does about the session, for the log.
+fn describe_session(instance: &Instance, resume: bool) -> String {
+    match (instance.backend, &instance.session_id) {
+        (Backend::Codex, Some(thread)) => format!("(codex thread {thread})"),
+        (Backend::Codex, None) => "(codex: new thread)".into(),
+        _ => session_args(instance, resume)
+            .map(|a| a.join(" "))
+            .unwrap_or_default(),
+    }
+}
+
+/// The launch of `instance` under `home`, fresh or resuming. codex runs the
+/// gate 7 wrapper (`/bin/sh`).
+pub fn launch(home: &Path, instance: &Instance, resume: bool) -> Result<HolderLaunch, String> {
+    let (executable, args) = if instance.backend == Backend::Codex {
+        (
+            codex_launch::SHELL.to_owned(),
+            codex_launch::wrapper_args(home, instance)?,
+        )
+    } else {
+        let mut args = instance.args.clone();
+        args.extend(session_args(instance, resume)?);
+        (instance.program.clone(), args)
+    };
     Ok(HolderLaunch {
         instance_id: instance.id.clone(),
         backend: instance.backend,
-        executable: instance.program.clone(),
+        executable,
         args,
         working_directory: instance.working_directory.clone(),
     })
@@ -120,6 +156,8 @@ pub enum Event {
         id: String,
         generation: u64,
     },
+    /// An instance's codex app-server is gone (gate 7).
+    Codex(CodexEvent),
     Housekeeping,
     /// The operator chose `retry` for this needs-you item of a `failed`
     /// instance; it is already off the list. When the retry cannot be done
@@ -130,12 +168,21 @@ pub enum Event {
     Stop(&'static str),
 }
 
+/// Why a codex row from before gate 7 is `failed` (gate 7 P3).
+pub const LEGACY_NO_THREAD: &str =
+    "codex instance from before gate 7 has no thread id; a human decides";
+
 /// The needs-you item of a `failed` instance (P5).
 pub fn failed_item(instance: &Instance, reason: &str, since_unix_ms: u64) -> AttentionRequiredData {
     let id = &instance.id;
-    // codex/opencode have no session id to resume (gates 7, 12): once their
-    // session started they are never started fresh again (P6).
-    let retry = instance.backend == Backend::Claude || !instance.session_started;
+    // opencode has no session id to resume (gate 12): once its session
+    // started it is never started fresh again (P6). codex resumes its
+    // thread since gate 7, except a row from before it (P3).
+    let retry = match instance.backend {
+        Backend::Claude => true,
+        Backend::Codex => !instance.legacy_no_thread,
+        Backend::Opencode => !instance.session_started,
+    };
     AttentionRequiredData {
         reason: format!("{id} failed: {reason}"),
         task_id: None,
@@ -183,8 +230,9 @@ pub struct BootReport {
 
 pub struct Supervisor {
     home: PathBuf,
-    store: SqliteStore,
+    store: Arc<SqliteStore>,
     runtime: HolderRuntime,
+    codex: CodexDriver,
     events: UnboundedSender<Event>,
     watches: BTreeMap<String, Watch>,
     fleet: Arc<Fleet>,
@@ -209,8 +257,9 @@ fn describe_exit(exited: &ExitedData) -> String {
 
 impl Supervisor {
     pub fn new(
-        store: SqliteStore,
+        store: Arc<SqliteStore>,
         runtime: HolderRuntime,
+        codex: CodexDriver,
         events: UnboundedSender<Event>,
         fleet: Arc<Fleet>,
     ) -> Self {
@@ -218,6 +267,7 @@ impl Supervisor {
             home: runtime.home().to_path_buf(),
             store,
             runtime,
+            codex,
             events,
             watches: BTreeMap::new(),
             fleet,
@@ -248,6 +298,67 @@ impl Supervisor {
 
     pub fn store(&self) -> &SqliteStore {
         &self.store
+    }
+
+    /// The sweep (gate 7 P2) of a codex instance whose holder is gone, or
+    /// before its new holder starts: only while `agent_pid` is set; clears
+    /// it afterwards.
+    async fn sweep(&self, instance: &Instance, why: &str) {
+        let (Backend::Codex, Some(pgid)) = (instance.backend, instance.agent_pid) else {
+            return;
+        };
+        let id = &instance.id;
+        let markers = Markers {
+            socket: codex_launch::socket_path(&self.home, id)
+                .display()
+                .to_string(),
+            thread: instance.session_id.clone(),
+        };
+        let swept = sweep::sweep(pgid, &markers);
+        log::line(&format!(
+            "{id}: sweep of agent group {pgid} ({why}): {swept}"
+        ));
+        if let Err(e) = self.store.set_agent_pid(id, None).await {
+            log::line(&format!("{id}: cannot clear agent_pid: {e}"));
+        }
+    }
+
+    async fn record_agent_pid(&self, id: &str, spawn: Option<SpawnOutcome>) {
+        if let Some(SpawnOutcome::Spawned {
+            agent_pid: Some(pid),
+        }) = spawn
+            && let Err(e) = self.store.set_agent_pid(id, Some(pid)).await
+        {
+            log::line(&format!("{id}: cannot record agent_pid: {e}"));
+        }
+    }
+
+    /// For a codex instance whose holder just started or was reconnected:
+    /// the driver's readiness, thread and `$GO` (gate 7 P2, P3), in the
+    /// background (up to 20 s + 30 s; the event loop and Ctrl-C do not
+    /// wait). A failure is a death of this generation.
+    fn connect_codex(&self, instance: &Instance, generation: u64) {
+        if instance.backend != Backend::Codex {
+            return;
+        }
+        let (codex, events, id) = (self.codex.clone(), self.events.clone(), instance.id.clone());
+        tokio::spawn(async move {
+            match codex.connect(&id, generation).await {
+                Ok(Some(lines)) => {
+                    for line in lines {
+                        log::line(&format!("{id}: {line}"));
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    let _ = events.send(Event::StartFailed {
+                        id,
+                        generation,
+                        error: format!("codex: {e}"),
+                    });
+                }
+            }
+        });
     }
 
     /// Runs the boot plan.
@@ -283,8 +394,17 @@ impl Supervisor {
         for instance in &instances {
             if instance.status == InstanceStatus::Failed {
                 self.show(instance, AgentState::Failed, "failed".into());
-                let reason = "it failed before this daemon started";
+                let reason = if instance.legacy_no_thread {
+                    log::line(&format!("{} failed: {LEGACY_NO_THREAD}", instance.id));
+                    LEGACY_NO_THREAD
+                } else {
+                    "it failed before this daemon started"
+                };
                 self.fleet.raise(failed_item(instance, reason, now));
+                // Its holder is left alone while it runs (gate 6 H8).
+                if !running_ids.contains(&instance.id) {
+                    self.sweep(instance, "failed, holder gone").await;
+                }
             } else {
                 self.show(instance, AgentState::Starting, "starting".into());
             }
@@ -326,16 +446,20 @@ impl Supervisor {
     async fn reconnect(&mut self, instance: &Instance, pid: u32) {
         let id = instance.id.clone();
         let resume = instance.status == InstanceStatus::Running;
-        let launch = launch(instance, resume)
-            .or_else(|_| launch(instance, false))
-            .expect("a fresh launch always exists");
+        let launch = match launch(&self.home, instance, resume)
+            .or_else(|_| launch(&self.home, instance, false))
+        {
+            Ok(launch) => launch,
+            Err(e) => return self.fail(&id, &e).await,
+        };
         match self.runtime.attach(&launch, pid).await {
             Ok(started) => {
                 if !resume {
                     self.mark_running(&id).await;
                 }
+                self.record_agent_pid(&id, started.attached.spawn).await;
                 let note = match started.attached.spawn {
-                    Some(SpawnOutcome::Spawned) => "; it had no agent, started one",
+                    Some(SpawnOutcome::Spawned { .. }) => "; it had no agent, started one",
                     _ => "",
                 };
                 log::line(&format!(
@@ -348,6 +472,7 @@ impl Supervisor {
                     format!("running (holder pid={pid})"),
                 );
                 self.watch(&id, started.generation);
+                self.connect_codex(instance, started.generation);
             }
             Err(e) => {
                 let generation = self.watches.get(&id).map_or(0, |w| w.generation);
@@ -365,13 +490,21 @@ impl Supervisor {
     /// the n-th restart, for the log.
     async fn start(&mut self, instance: &Instance, resume: bool, restart: Option<usize>) {
         let id = instance.id.clone();
-        let launch = match launch(instance, resume) {
+        let launch = match launch(&self.home, instance, resume) {
             Ok(launch) => launch,
             Err(e) => return self.fail(&id, &e).await,
         };
-        let session = session_args(instance, resume)
-            .map(|a| a.join(" "))
-            .unwrap_or_default();
+        if instance.backend == Backend::Codex {
+            self.sweep(instance, "before a new holder").await;
+            match codex_launch::prepare(&self.home, &id) {
+                Ok(removed) if !removed.is_empty() => {
+                    log::line(&format!("{id}: removed {}", removed.join(", ")))
+                }
+                Ok(_) => {}
+                Err(e) => log::line(&format!("{id}: cannot remove the old codex files: {e}")),
+            }
+        }
+        let session = describe_session(instance, resume);
         let what = match restart {
             Some(n) => format!("restart {n}/{MAX_RESTARTS} {session}"),
             None => format!("start {session}"),
@@ -380,7 +513,9 @@ impl Supervisor {
         self.show(instance, AgentState::Starting, what.trim_end().to_owned());
         match self.runtime.start(&launch).await {
             Ok(Started {
-                handle, generation, ..
+                handle,
+                generation,
+                attached,
             }) => {
                 let pid = handle.process_id.unwrap_or(0);
                 log::line(&format!("{id}: holder pid={pid} started"));
@@ -392,7 +527,9 @@ impl Supervisor {
                 if !resume {
                     self.mark_running(&id).await;
                 }
+                self.record_agent_pid(&id, attached.spawn).await;
                 self.watch(&id, generation);
+                self.connect_codex(instance, generation);
             }
             Err(e) => {
                 let generation = self.watches.get(&id).map_or(0, |w| w.generation);
@@ -435,6 +572,7 @@ impl Supervisor {
         if let Some(watch) = self.watches.get_mut(id) {
             watch.state = State::Failed;
         }
+        self.codex.disconnect(id);
         self.runtime.detach(id);
         if let Err(e) = self
             .store
@@ -496,7 +634,8 @@ impl Supervisor {
     }
 
     /// A death of the current generation: plan the restart or give up.
-    async fn died(&mut self, id: &str, generation: u64, what: String) {
+    /// `holder_gone`: the holder itself died (the codex sweep runs first).
+    async fn died(&mut self, id: &str, generation: u64, what: String, holder_gone: bool) {
         let Some(watch) = self.watches.get(id) else {
             return;
         };
@@ -513,6 +652,9 @@ impl Supervisor {
             }
             Err(e) => return log::line(&format!("{id}: cannot read the instance: {e}")),
         };
+        if holder_gone {
+            self.sweep(&instance, "holder died").await;
+        }
         let resume = instance.status == InstanceStatus::Running;
         if let (true, Err(reason)) = (resume, session_args(&instance, true)) {
             return self.fail(id, &reason).await;
@@ -580,11 +722,11 @@ impl Supervisor {
                     exited,
                 }) => {
                     let what = format!("agent {id} exited ({})", describe_exit(&exited));
-                    self.died(&id, generation, what).await;
+                    self.died(&id, generation, what, false).await;
                 }
                 Event::Holder(HolderEvent::HolderGone { id, generation }) => {
                     let what = format!("holder {id} died");
-                    self.died(&id, generation, what).await;
+                    self.died(&id, generation, what, true).await;
                 }
                 Event::StartFailed {
                     id,
@@ -592,7 +734,11 @@ impl Supervisor {
                     error,
                 } => {
                     let what = format!("{id}: start failed: {error}");
-                    self.died(&id, generation, what).await;
+                    self.died(&id, generation, what, false).await;
+                }
+                Event::Codex(CodexEvent::Gone { id, generation }) => {
+                    let what = format!("{id}: its app-server is gone");
+                    self.died(&id, generation, what, false).await;
                 }
                 Event::Restart { id, generation } => self.restart(&id, generation).await,
                 Event::Housekeeping => {
@@ -622,6 +768,8 @@ mod tests {
             session_id: session.map(str::to_owned),
             status: InstanceStatus::Running,
             session_started: false,
+            agent_pid: None,
+            legacy_no_thread: false,
         }
     }
 
@@ -655,30 +803,33 @@ mod tests {
     #[test]
     fn claude_starts_fresh_once_then_only_resumes() {
         let claude = instance(Backend::Claude, Some("s-abc"));
-        let fresh = launch(&claude, false).unwrap();
+        let fresh = launch(Path::new("/h"), &claude, false).unwrap();
         assert_eq!(fresh.args[3..], ["--session-id", "s-abc"]);
-        let resumed = launch(&claude, true).unwrap();
+        let resumed = launch(Path::new("/h"), &claude, true).unwrap();
         assert_eq!(resumed.args[3..], ["--resume", "s-abc"]);
         assert_eq!(resumed.args[..3], claude.args[..]);
         assert_eq!(resumed.executable, "/bin/bash");
     }
 
-    /// P5: `retry` for claude always; for codex/opencode only while their
-    /// session never started (no session id to resume, never fresh again).
+    /// P5: `retry` for claude always; for opencode only while its session
+    /// never started (no session id to resume, never fresh again); for
+    /// codex (gate 7) unless migration 0004 marked it `legacy_no_thread`.
     #[test]
     fn a_failed_instance_is_a_needs_you_item_with_retry_unless_it_cannot_resume() {
         let table = [
-            (Backend::Claude, true, true),
-            (Backend::Claude, false, true),
-            (Backend::Codex, false, true),
-            (Backend::Opencode, false, true),
-            (Backend::Codex, true, false),
-            (Backend::Opencode, true, false),
+            (Backend::Claude, true, false, true),
+            (Backend::Claude, false, false, true),
+            (Backend::Codex, false, false, true),
+            (Backend::Opencode, false, false, true),
+            (Backend::Codex, true, false, true),
+            (Backend::Codex, true, true, false),
+            (Backend::Opencode, true, false, false),
         ];
-        for (backend, started, retry) in table {
+        for (backend, started, legacy, retry) in table {
             let mut inst = instance(backend, None);
             inst.id = "g8-2".into();
             inst.session_started = started;
+            inst.legacy_no_thread = legacy;
             let item = failed_item(&inst, "it died", 42);
             assert_eq!(item.attention_id.as_deref(), Some("instance-failed:g8-2"));
             assert_eq!(item.instance_id.as_deref(), Some("g8-2"));
@@ -699,13 +850,28 @@ mod tests {
 
     #[test]
     fn without_a_session_id_there_is_no_resume_only_failed() {
-        for backend in [Backend::Codex, Backend::Opencode] {
-            let inst = instance(backend, None);
-            assert_eq!(launch(&inst, false).unwrap().args, inst.args);
-            let error = launch(&inst, true).unwrap_err();
-            assert!(error.starts_with("no session id to resume"), "{error}");
-        }
-        let error = launch(&instance(Backend::Claude, None), true).unwrap_err();
+        let h = Path::new("/h");
+        let inst = instance(Backend::Opencode, None);
+        assert_eq!(launch(h, &inst, false).unwrap().args, inst.args);
+        let error = launch(h, &inst, true).unwrap_err();
         assert!(error.starts_with("no session id to resume"), "{error}");
+        let error = launch(h, &instance(Backend::Claude, None), true).unwrap_err();
+        assert!(error.starts_with("no session id to resume"), "{error}");
+    }
+
+    /// Gate 7 P2, P3: codex always runs the wrapper, with or without a
+    /// thread and whether it resumes or not (the thread goes through $GO).
+    #[test]
+    fn codex_always_launches_the_wrapper() {
+        let h = Path::new("/h");
+        for session in [None, Some("thread-1")] {
+            let mut inst = instance(Backend::Codex, session);
+            inst.working_directory = "/".into();
+            for resume in [false, true] {
+                let l = launch(h, &inst, resume).unwrap();
+                assert_eq!(l.executable, "/bin/sh");
+                assert_eq!(l.args, codex_launch::wrapper_args(h, &inst).unwrap());
+            }
+        }
     }
 }
