@@ -206,8 +206,8 @@
    操作：找 `== retention`。應該看到：
 
    ```text
-   fake clock +15d: tasks 3 -> 3, workflows 2 -> 2, task_events 120 -> 0
-   calibration: v1 scale, tasks 8347, workflows 1, task_events 166940 (filled in <t> s)
+   fake clock +15d: tasks 3 -> 3, workflows 2 -> 2, task_events 120 -> 0, instances 0 -> 0
+   calibration: v1 scale, tasks 8347, workflows 1, task_events 166940, instances 0 (filled in <t> s)
    calibration: agend.db 57.2 MB (limit 1 GB), 7 snapshots 395.8 MB (limit 5 GB), slowest VACUUM INTO + quick_check <t> s
    calibration: within limits: D31 retention periods and 7 snapshots stay
    ```
