@@ -7,7 +7,7 @@
 
 ## 狀態
 
-**實作中**（2026-09-25）：P1–P9 使用者已確認。使用者同意在第 3 施工關收尾時平行開工（D22 暫時放寬）；PR 維持 draft，第 3 施工關由使用者親自驗收之前不 merge。
+**已驗收，等 merge**（2026-09-26）：P1–P9 使用者已確認；G1–G11 使用者已追認；使用者親自驗收 10 步通過。名詞表與 AGENTS 的 crate 規則列留給之後的共用文件 PR。
 
 ## 範圍
 
@@ -163,7 +163,7 @@
 - [x] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`（出現 `SKIPPED` 不算通過），並包含新的 `agend-holder` 規則（`3 rules`）；在 `crates/agend-holder/Cargo.toml` 的 `[dependencies]` 加 `tokio` 會失敗：`check-deps: agend-holder depends on tokio (...)`、exit 1（2026-09-25 實測後還原）
 - [x] `~/.cargo/bin/cargo xtask accept holder` 通過，並印出下方「你親自驗收」用到的 demo
 - [ ] 本施工關 crate 的 `README.md`／`TESTING.md` 已更新；skeleton 的 `Must NOT` 依 P6 改好；名詞表加上 `run/holders`、holder lock（前兩項已做；名詞表與 AGENTS 的 crate 規則列依夜間規則不在本 PR 改，文字交給 orchestrator）
-- [ ] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」（verifier 的 kill 探測只對自己起的 pid、在沙箱裡跑）
+- [x] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」（r2 CONFIRMED `631f66e`）（verifier 的 kill 探測只對自己起的 pid、在沙箱裡跑）
 
 ## 你親自驗收
 
@@ -180,7 +180,7 @@
 
    應該看到：倒數第二行 `holder demo: all sections passed`，最後一行 `gate 4 (holder): checks passed`。
 
-   - [ ] 通過
+   - [x] 通過
 
 2. 啟動它的程序結束後，holder 還在。
 
@@ -196,7 +196,7 @@
    | `holder parent pid: 1 (the launcher is gone)` | holder 已經被系統（launchd）收養 |
    | `counter=<a> -> counter=<b> (still increasing)`，b > a | bash 還在跑 |
 
-   - [ ] 通過
+   - [x] 通過
 
 3. 故意弄壞：探測 client 中途被砍，再重連。
 
@@ -204,7 +204,7 @@
 
    操作：找 `== reconnect`。應該看到：`before kill: counter=<A> bash pid <B>`、`probe client killed (pid <C>)`、`after reconnect: counter=<A2> bash pid <B>`（A2 > A，B 相同），最後 `counter grew (<A> -> <A2>) and bash pid is the same: ok`。
 
-   - [ ] 通過
+   - [x] 通過
 
 4. 送鍵，以及不認得的鍵。
 
@@ -212,7 +212,7 @@
 
    操作：找 `== keys`。應該看到：`sent y`、`screen shows: got y`、`sent unknown -> error unknown_control_key`、`bytes the agent read after it: 0`（bash 每次讀一個 byte 並計數，送不認得的鍵前後一樣；verifier 另用原始 PTY 讀取確認是 0 byte）。
 
-   - [ ] 通過
+   - [x] 通過
 
 5. 故意弄壞：同一個 instance 再起一個 holder。
 
@@ -220,7 +220,7 @@
 
    操作：找 `== duplicate`。應該看到：`holder for demo-1 already running (pid <H>)`、`exit=1`、`first holder still alive: pid <H>`（同一個 H）。
 
-   - [ ] 通過
+   - [x] 通過
 
 6. 故意弄壞：agent 用 shell 內建 `kill` 砍自己的 holder（T18）。
 
@@ -228,7 +228,7 @@
 
    操作：找 `== agent-kills-parent`。應該看到：`agent ran: kill -TERM <K>`、`agent: signals sent`，接著 `holder alive: pid <K>`（同一個 K）。
 
-   - [ ] 通過
+   - [x] 通過
 
 7. 四次開機。
 
@@ -236,7 +236,7 @@
 
    操作：找 `== lifecycle`。應該看到 4 行 `boot N: pid <H> counter=<c>`：pid 都是 `== detach` 的 H，counter 越來越大；再一行 `boot 4: same pid and socket (inode <I>) as boot 1`。
 
-   - [ ] 通過
+   - [x] 通過
 
 8. agent 結束，以及停止。
 
@@ -250,7 +250,7 @@
    | `killed agent: exited signal=SIGKILL` | 被訊號殺掉時回報訊號名（新欄位 `signal`） |
    | `shutdown`、`socket gone`、`lock free`、`holder gone (pid <H>)` | `Shutdown` 後 socket、鎖、程序都不在 |
 
-   - [ ] 通過
+   - [x] 通過
 
 9. 你自己動手：關掉啟動 holder 的終端機分頁。
 
@@ -280,7 +280,7 @@
 
    e. 同一個分頁試 Ctrl-C：`$PROBE watch demo-2`，看到幾行 `counter=` 後按 Ctrl-C（只停掉 watch 這個 client）；再跑一次 d 的指令，n 還在變大。
 
-   - [ ] 通過
+   - [x] 通過
 
 10. 故意弄壞：硬殺 holder，看已知上限（沙箱裡跑，只砍自己起的 pid）。
 
@@ -302,7 +302,7 @@
 
     應該看到：`connect failed: Connection refused (os error 61)`、`marker gone`（bash 跟著 holder 死了）。最後清掉：`rm -rf "$AGEND_HOME"`。
 
-    - [ ] 通過
+    - [x] 通過
 
 ## 待你追認
 
@@ -342,12 +342,13 @@
 
 | 日期 | 結果（通過／不通過） | 備註 |
 |---|---|---|
-|  |  |  |
+| 2026-09-26 | 通過 | 在 `feat/gate-04-holder`（merge 前）由 agent 帶著走 10 步。步驟 1–8：同一次 `accept holder` 輸出全部對上（H=38844；步驟 6 的 `<K>` 是另起的 `demo-k`，前後同 pid）。步驟 9：關分頁後 counter 42→51、Ctrl-C 只停 watch（80→88），bash pid 不變。步驟 10：中途關機使第一次的 demo-2 消失（關機結束所有程序、清空暫存目錄，不在本關範圍），重起後 `kill -9` holder（5458）→ `Connection refused`、`marker gone`。 |
 
 ## 進度紀錄
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-26 使用者親自驗收 10 步通過（merge 前，branch `feat/gate-04-holder`）。
 - 2026-09-26 使用者逐題追認 G1–G11（G2、G3 經舉例說明後追認；G9 同意延後到第 6／7 施工關）。
 - 2026-09-26 verifier r1（REFUTED `097ddc6`）修正：macOS CI 卡在落後斷線測試（測試關閉沒有期限）→ 看門狗與期限、落後只關送出方向且照辦已送出的 `Shutdown`；`Resize` 上限、請求行 1 MiB、hello 10 秒；鎖檔 pid 競態（`is_running` 曾回 0）；agent 結束後的子程序也清掉；已知限制四點；「待你追認」加 G11。
 - 2026-09-25 實作（draft PR，branch `feat/gate-04-holder`）：`agend holder` 子命令、協定 server、畫面、三種 PTY 寫入、`Exited.signal`、check-deps 規則、`holder_probe` demo、跨程序四次開機測試；狀態改為實作中；「待你追認」G1–G10。fresh-context verifier 尚未跑。
