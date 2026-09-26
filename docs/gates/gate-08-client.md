@@ -15,6 +15,7 @@
 
 - agend-client：同步連線、重試 10 秒、版本檢查
 - daemon 的 protocol server
+- 從第 11 施工關畫面層移來的協定缺口（TUI 提前用假來源踩出來的，見 [gate-11 待你追認](gate-11-tui.md#待你追認) G1–G4）：加 team／task／agent 的 list 請求（或快照事件）與 task 關卡清單、agent 結構化狀態（G1）；`attention_required` 加「解決後能放行多少工作」與等待起始時間兩個欄位（G2）；非請示的「需要你」項目加操作（重試、暫停…）與清除事件（G3）；加已讀狀態的請求與事件，TUI 與 Telegram 共用（G4）
 
 ## 自動驗收（完成定義）
 
