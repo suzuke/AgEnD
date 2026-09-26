@@ -375,6 +375,7 @@ fn wait_exit(child: &mut Child, timeout: Duration) -> bool {
 /// Reads `stdout` lines on a thread until one contains `marker`; returns the
 /// line. Later lines are drained so the child never blocks on a full pipe.
 pub fn wait_for_line(
+    child: &mut Child,
     stdout: impl std::io::Read + Send + 'static,
     marker: &'static str,
     timeout: Duration,
@@ -389,8 +390,28 @@ pub fn wait_for_line(
             }
         }
     });
-    rx.recv_timeout(timeout)
-        .map_err(|_| format!("no line containing {marker:?} within {timeout:?}"))
+    match rx.recv_timeout(timeout) {
+        Ok(line) => Ok(line),
+        Err(_) => match child.try_wait() {
+            Ok(Some(status)) => {
+                let stderr_tail = child
+                    .stderr
+                    .take()
+                    .map(|s| {
+                        BufReader::new(s)
+                            .lines()
+                            .map_while(Result::ok)
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })
+                    .unwrap_or_default();
+                Err(format!(
+                    "no line containing {marker:?}: process exited ({status}) before it printed one, stderr: {stderr_tail:?}"
+                ))
+            }
+            _ => Err(format!("no line containing {marker:?} within {timeout:?}")),
+        },
+    }
 }
 
 /// The header line of a transcript.
