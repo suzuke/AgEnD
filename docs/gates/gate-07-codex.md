@@ -3,13 +3,13 @@
 > **TL;DR**
 > - codex driver、送達模型、三級忙碌策略；codex 第一次有 thread id 可以 resume（補上第 6 施工關 H2 的缺口）。
 > - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這個施工關才算完成。
-> - 下一步：逐題決定下面的開工前提案 P1–P9（每題最後一行打勾）；另外請你在自己的終端跑「未查證」表裡的安全指令（不花 token），結果貼回來；U1、U3、U7、U9、U10、U11、U14、U15、U16 沒有安全指令，要真跑 codex（步驟 7、8，選做、花 token）。P2 推翻第 4 施工關 P8 的 `SpawnSidecar`、P4 是安全決定（shim 可能被繞過），請特別看。第 6 施工關已 merge（#125），確認後即可開工。
+> - 下一步：P1–P9 已確認（P4 選 A）；merge 這份提案後開工。「未查證」表的安全指令仍可在你的終端跑（不花 token），結果貼回來。
 
 **先看這條**：這頁的步驟會用到 `agend`。每個新開的終端機分頁都要先跑「你親自驗收」開頭的設定，否則會跑到舊的 Node 版 `agend` 1.24.0。
 
 ## 狀態
 
-**提案中**（2026-09-26）：開工前提案 P1–P9 待你逐題確認（P4 要你明確選 A／B／C／D）；第 6 施工關已 merge（#125，`3e28e06`）。
+**提案中**（2026-09-26）：開工前提案 P1–P9 使用者已逐題確認（P4 選 A）；第 6 施工關已 merge（#125，`3e28e06`）。
 
 ## 範圍
 
@@ -36,11 +36,12 @@ codex 的事實來源：[backends/codex.md](../backends/codex.md)、[spike-codex
   - 一個 codex instance ＝ 一個 holder 裡、同一個 process group 的**兩個程序**：`codex app-server --listen unix://…`（附屬程序，由 P2 的包裝在背景起）＋ PTY 裡的 codex TUI `codex resume <thread id> --remote unix://<真正的 socket>`（P3；子命令在前是 spike S4 驗過的順序）。TUI 只給人 attach 看、給螢幕分類器認 hard gate。
   - daemon 的 `driver::codex` 只經 app-server 講話：WebSocket（`tungstenite`，阻塞 I/O）。每個 instance 一條長連線、**一條自己的 std thread**（比照第 6 施工關 H7 與 `runtime/link.rs`：活得跟連線一樣久的阻塞工作不佔 `spawn_blocking` 的名額）；一次性的呼叫（`thread/start` 等）才用 `spawn_blocking`。連上先 `initialize`，再 `thread/resume {threadId, excludeTurns: true}`（不 resume 就只收到粗粒度狀態，spike S2）。
   - 連線前一律 `realpath` socket 路徑（已有 `socket_connect_path`，陷阱 1）。
+  - 人在 TUI 打字（第 11 施工關 B 段開放 `terminal_input` 之後；之前 AgEnD 的終端畫面是唯讀）：TUI 是 `--remote` 連同一個 app-server、同一個 thread，打的字成為**同一個 thread 的一則使用者訊息**、開始新的一輪。daemon 經 app-server 看得到這一輪（忙／閒照常），但它不是 daemon 送的，**不進 `messages` 表、不記帳**；這時 daemon 要送的訊息照 P6 的忙碌策略處理。未查證（U17）。
   - **不做**：PTY 打字、讀畫面判斷 busy／idle、v1 的「猜 TUI 開了哪個 thread」（`discover_loaded_tui_thread`，多 thread 時會拒絕送）。
 - 理由：結構化 API 有訊息 id、turn id、`turn/completed`，是「確認送達」唯一可靠的來源；v1 改走 app-server 後「貼上沒送出」幾乎消失。TUI 還是要有，因為第 11 施工關的 attach 畫面要看得到 agent。
 - 替代方案：只跑 app-server、PTY 空著（最簡單，但人 attach 看不到 agent）；讀畫面判斷（v1 的坑，V1-LESSONS #3、#4）；`tokio-tungstenite`（多一個 async 依賴，一條連線用不到）。
 - 例子：`ps -o pid,pgid,command` 看到 holder `g7-1` 底下兩個程序、pgid 相同：`codex app-server --listen unix://…/g7-1.codex.sock` 與 `codex resume 01a0d1fc-… --remote unix:///private/tmp/codex-daemon-501/…`；daemon log `g7-1: app-server connected, thread 01a0d1fc resumed (idle)`。
-- [ ] 待你確認
+- [x] 使用者確認（2026-09-26；補上「人在 TUI 打字」與 U17）
 
 ### P2：app-server 怎麼跟 TUI 一起放進 holder（**不做 `SpawnSidecar`**）
 
@@ -82,7 +83,7 @@ codex 的事實來源：[backends/codex.md](../backends/codex.md)、[spike-codex
   - E1：兩個程序 pgid、sid 相同（都等於 TUI 的 pid）。
   - E2：持有 master 的「holder」程序用 `os._exit` 直接結束（像 `kill -9`：kernel 關掉 fd）→ 0.5 秒後兩個都不在。**只代表 `sleep` 這種不處理 HUP 的程序**；reviewer 的反例（見上）說明真程式不一定如此，所以才有清掃。
   - E3：TUI 那一邊先 `exit 3`、master 仍開著、TUI 不回收（像 G11）→ 背景的 stand-in 也結束了（session leader 結束時 kernel 對前景 group 送 SIGHUP）。結束後 `pgrep` 沒有殘留。
-- [ ] 待你確認（含「推翻第 4 施工關 P8 的 `SpawnSidecar`」）
+- [x] 使用者確認（2026-09-26；含推翻第 4 施工關 P8 的 `SpawnSidecar`）
 
 ### P3：codex 的 thread id 與 resume（補第 6 施工關 H2）
 
@@ -101,7 +102,7 @@ codex 的事實來源：[backends/codex.md](../backends/codex.md)、[spike-codex
 - 理由：自己建 thread，id 在 TUI 起來**之前**就在 DB（包裝等 `$GO` 才 `exec` TUI），所以不會有「TUI 裡有對話、DB 不知道 thread」；中途被打斷只會多一個空 thread；不用像 v1 那樣從已載入的 thread 裡猜哪個是 TUI 的。第 6 施工關 H2 對 claude 也是「自己給 id」，同一個想法。
 - 替代方案：讓 TUI 自己建 thread，daemon 再 `thread/loaded/list` 找（v1 的做法，多 thread 時要拒絕送）；讀 `~/.codex/sessions/` 的 rollout 檔名找 id（綁 codex 的檔案格式）；找不到一律 `failed`（holder 在第一則訊息前死掉也要人處理）。
 - 例子：`daemon_probe add g7-1 --codex` 之後開 daemon：`g7-1: holder pid=5230 started`、`g7-1: app-server ready`、`g7-1: thread 01a0d1fc-… created`、`g7-1: go (resume 01a0d1fc-…)`；在沙箱裡砍掉 holder：`restart 1/3`、`thread 01a0d1fc-… resumed`，thread id 不變。
-- [ ] 待你確認
+- [x] 使用者確認（2026-09-26；含「空 thread 找不到 → 建新的」這個第 6 施工關 P6 的例外）
 
 ### P4：codex 的啟動設定與 **shim 會不會被繞過**（安全決定，請明確選）
 
@@ -127,7 +128,7 @@ codex 的事實來源：[backends/codex.md](../backends/codex.md)、[spike-codex
 - 替代方案：每個 instance 自己的 `CODEX_HOME`＋複製 `auth.json`（登入過期要逐個處理）；`workspace-write` sandbox＋逐一核准（第 7 施工關沒有核准的人，agent 會卡住；也不解決 PATH）；預寫 `config.toml`（改到你的檔案）。
 - 例子：選 A 時，包裝裡的 app-server 指令是 `codex -c 'projects={"/Users/you/ws/g7-1"={trust_level="trusted"}}' -c check_for_update_on_startup=false -c approval_policy="never" -c sandbox_mode="danger-full-access" app-server --listen unix://…/g7-1.codex.sock`，包裝的環境（也就是 app-server 與 TUI 的環境）多一個 `ZDOTDIR=$AGEND_HOME/zsh`；`codex_live` 印 `git`、`pkill`、`killall` 都在 `$AGEND_HOME/bin/`；跑完「你親自驗收」步驟 8 前後，`ls -l ~/.codex/config.toml` 的修改時間相同。
 - 另外（不在本關改，列給第 3、6 施工關）：**任何** agent 的工具只要用 login zsh 跑指令，macOS 上都會有同樣的 PATH 重排，claude 的 Bash 工具也要在第 12 施工關實測。
-- [ ] 待你確認（請寫明選 A／B／C／D）
+- [x] 使用者確認（2026-09-26）：**選 A**（自己的 `ZDOTDIR`），含修改第 6 施工關 H3 的環境白名單
 
 ### P5：送達模型：狀態代表什麼、冪等放哪、當掉怎麼辦
 
@@ -148,7 +149,7 @@ codex 的事實來源：[backends/codex.md](../backends/codex.md)、[spike-codex
 - 理由：一張表同時是冪等、狀態、TUI 顯示的來源；「確認」以 codex 自己的 thread 為準，不是「RPC 回 200」。重送前查歷史，把「崩潰時送一半」這個 v1 標成 `Ambiguous` 的狀態收回四狀態裡。
 - 替代方案：冪等放 driver 記憶體（daemon 重啟就忘，契約的 `ObjDedup`）；`sent` 就當 `confirmed`（v1 的假成功）；崩潰窗口直接重送（可能重複一個 turn）。
 - 例子：`deliver m-7` 兩次 → 第二次 log `m-7 already confirmed; not sent again`，thread 裡只有一則 `m-7`；daemon 在 `turn/start` 送出後、寫 `sent` 前被硬殺 → 開機 log `m-7 found in thread history (turn 3f2a…); marked sent, confirmed`；`thread/queue/add` 之後被硬殺 → `m-8 found in thread queue; marked sent`。
-- [ ] 待你確認
+- [x] 使用者確認（2026-09-26）
 
 ### P6：三級忙碌策略怎麼落到 codex
 
@@ -167,7 +168,7 @@ codex 的事實來源：[backends/codex.md](../backends/codex.md)、[spike-codex
 - 理由：等級規則是政策，現在還沒有呼叫點，先做成參數最小；busy 判斷不準也不會壞狀態（spike S3），所以只處理兩個已知競態、各一次改送，不做重試迴圈。
 - 替代方案：core 加 `urgency → level` 對照表（沒有使用者，第 10 施工關再看）；送之前先 `thread/read` 問狀態（多一次 RPC，仍有競態）；steer 一律用忙碌時的 `turn/start`（依賴沒寫在文件上的行為）；去抖動改 1 秒（沒有資料支持）。
 - 例子：demo 的 `== busy` 段分三次，每次先讓 agent 跑一個長 turn（turn A），再送一則：`m-q queue → thread/queue/add → sent → confirmed (turn A 之後的新 turn)`；`m-s steer → turn/steer → sent → confirmed (turn A 裡)`；`m-i interrupt → turn/interrupt (A interrupted), turn/start → sent → confirmed (新 turn)`。
-- [ ] 待你確認
+- [x] 使用者確認（2026-09-26；核准「回覆時已 idle → `thread/queue/start`」這個例外，`driver/codex.rs` 的 Must NOT 與 backends/codex.md 陷阱照此改寫）
 
 ### P7：driver 事件與 cursor：daemon 不在時的事件怎麼補
 
@@ -180,7 +181,7 @@ codex 的事實來源：[backends/codex.md](../backends/codex.md)、[spike-codex
 - 理由：不必多一張事件表、不必處理「DB 寫了一半」；daemon 重啟後的補回與平常的讀取是同一段程式。
 - 替代方案：daemon 把收到的通知寫進 DB 事件表、重連後用 `turns/list` 補缺口（兩個來源要對齊）；讀 `~/.codex/sessions/` 的 rollout 檔（v1 `shadow/rollout.rs` 的做法，綁 codex 的檔案格式）。
 - 例子：daemon 停著時，排隊的 `m-q` 自己跑完一個 turn；daemon 再起來、拿停機前最後的 cursor `7c1e…:3` 讀 `events` → 拿到 `BusyChanged{true}`、`MessageConfirmed{m-q}`、`TurnCompleted`、`BusyChanged{false}`，`m-q` 變 `confirmed`。
-- [ ] 待你確認
+- [x] 使用者確認（2026-09-26）
 
 ### P8：測試：什麼是假的、什麼是真的
 
@@ -195,7 +196,7 @@ codex 的事實來源：[backends/codex.md](../backends/codex.md)、[spike-codex
 - 理由：假 app-server 已經照錄製檔對過形狀，driver 的邏輯可以全部在 CI 驗；只有「真 CLI 接不接受這些參數」必須真跑，花費小、由你決定時機。
 - 替代方案：CI 跑真 codex（要登入、花錢、不穩）；完全不跑真 codex（U4、U6、U7、U8、U14、U15 只能等第 9 施工關有人真的用才發現）；TUI 也用真 codex（要登入，測試跑不動）。
 - 例子：在 `record-sandbox.sh` 裡 `AGEND_REAL_CODEX=1 target/debug/examples/codex_live` → `thread 01a0… created`、`m-1 idle → turn/start → confirmed`、`kill -9 holder → no codex left → restart 1/3, thread 01a0… resumed`、`m-2 → confirmed; reply mentions m-1`。
-- [ ] 待你確認
+- [x] 使用者確認（2026-09-26）
 
 ### P9：依賴規則、這關不做的事
 
@@ -213,7 +214,7 @@ codex 的事實來源：[backends/codex.md](../backends/codex.md)、[spike-codex
 - 理由：每一項移出去的都還沒有呼叫點，現在做只能用假資料驗。
 - 替代方案：本關先做 approval 轉發（沒有人能回答）；`Send` 現在就加 `level`（第 8 施工關才有 server）；保留「holder 不能依賴 `tungstenite`」規則（無害，但擋的是一個已經不存在的設計）。
 - 例子：demo 裡假 app-server 送來 `item/commandExecution/requestApproval` → daemon log `approval declined (gate 7 has no handler)`，那個 turn 照常結束；`agend send` 在本關還不存在。
-- [ ] 待你確認
+- [x] 使用者確認（2026-09-26；你的 `notify`／hooks／MCP server 本關不覆寫）
 
 ### 已知風險（開工時處理）
 
@@ -248,6 +249,7 @@ codex 的事實來源：[backends/codex.md](../backends/codex.md)、[spike-codex
 | U14 | app-server 綁 socket 時，舊的 symlink 或 `/private/tmp/codex-daemon-<uid>/` 下的舊 socket 檔還在，會不會失敗（假 app-server 目前 `EEXIST`） | P2 的「先刪舊 socket」 | 真跑才知道：`codex_live`（第二次啟動前不刪，看錯誤）；P2 先照最保守的「一律先刪」做 |
 | U15 | app-server 先結束時，真 TUI 會不會自己結束；app-server 會不會攔 SIGHUP（攔了就不跟 TUI 一起結束） | P2：holder 還活著時靠 `Shutdown` 的 SIGKILL；holder 死掉時靠清掃。答案決定「清掃」是不是常態 | 真跑：`codex_live` 裡 `kill -9` holder 後看 daemon log 是 `swept …` 還是 `already gone` |
 | U16 | 真 TUI 一直是 tty 的前景 group、app-server 從不 `setsid`／`setpgid` 換 group | P2 的 E1（同一個 group）是否成立 | 真跑：`codex_live` 裡 `ps -o pid,pgid,tpgid,command` 看兩個程序的 `pgid` 相同、`tpgid` 等於它；有清掃時就算不成立，holder 死掉也不留孤兒（清掃只找同 group 的；U16 不成立時見「已知風險」） |
+| U17 | 人在 `--remote` TUI 打字時，是否成為同一個 thread 的 user message、app-server 是否送出對應的 turn 事件；daemon 收到不是自己送的 turn 時忙／閒與 `messages` 狀態不受影響 | P1 的「人在 TUI 打字」 | 真跑：`codex_live` 之後在 attach 的 TUI 打一句，daemon log 出現那一輪的 busy→idle、`messages` 沒有多一列 |
 
 ## 自動驗收（完成定義）
 
@@ -375,6 +377,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-26 使用者逐題確認 P1–P9：P1 補「人在 TUI 打字」＋U17；P2 推翻第 4 施工關 P8 的 `SpawnSidecar`；P3 核准空 thread 例外；P4 選 A（`ZDOTDIR`，修改第 6 施工關 H3）；P6 核准 idle 時 `queue/start` 例外；P9 不覆寫 notify／hooks／MCP。
 - 2026-09-26 第九輪 review CONFIRMED，三個 LOW 修正：`messages` 加可為 NULL 的 `task_id`、欄位改名 `from_instance`；0004 的舊列條件加 `session_started = 1`。
 - 2026-09-26 第 9 施工關 review 提出、併入：`messages` 加明確的 `seq INTEGER PRIMARY KEY`（訊息 id 改 `UNIQUE`），順序不受 `VACUUM` 影響；同 id 不同內容回 `invalid_request`，比對與插入在同一個 DB closure。
 - 2026-09-26 第八輪 review REFUTED 後修正：migration 加 `instances.legacy_no_thread` 把舊列存下來（只標 `running`／`failed`，`new` 不動），第 8 施工關重試的後續改看這個欄位；P5 補「沒有 driver 的 instance 停在 `queued`」；`Send`＋`level` 只交給第 9 施工關。
