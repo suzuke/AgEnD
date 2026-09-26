@@ -323,3 +323,58 @@ fn a_closed_link_does_not_reconnect_to_the_next_app_server() {
         }
     }
 }
+
+/// Per-recipient order (verifier r3): a plain `Queue` row after an uncertain
+/// one waits behind it. Here m-A was lost (codex never got it) while a
+/// human's turn ran: m-B stays `queued` until m-A is resolved (sent again
+/// once idle), and the agent gets m-A before m-B.
+#[test]
+fn a_queue_row_waits_behind_an_uncertain_one() {
+    use agend_testkit::fake_agent::codex::Probe;
+    use serde_json::json;
+    let lab = lab();
+    let home = lab.home(6);
+    let id = format!("g7-{}f", tag());
+    let backend = codex::Backend::new(&home, &id, Duration::from_millis(2000)).unwrap();
+    let thread = codex::Fixture::boot(&backend).unwrap().thread().unwrap();
+    {
+        let store = SqliteStore::open(&home, 0).unwrap();
+        let new = agend_daemon::store::NewMessage {
+            id: "m-A".into(),
+            from_instance: "operator".into(),
+            to_instance: id.clone(),
+            task_id: Some("T-g7".into()),
+            body: "first".into(),
+            level: BusyLevel::Queue,
+        };
+        block_on(store.claim_message(&new, 1)).unwrap();
+        block_on(store.mark_message_attempted("m-A", 2)).unwrap();
+    }
+    let mut probe: Probe = backend.probe().unwrap();
+    probe
+        .call(
+            "thread/resume",
+            json!({"threadId": thread, "excludeTurns": true}),
+        )
+        .unwrap();
+    probe
+        .call(
+            "turn/start",
+            json!({"threadId": thread, "input": [{"type": "text", "text": "a human's turn", "text_elements": []}]}),
+        )
+        .unwrap();
+    drop(probe);
+    let fx = codex::Fixture::boot(&backend).unwrap();
+    let b = fx.deliver("m-B", "second", BusyLevel::Queue).unwrap();
+    assert_eq!(b, DeliveryState::Queued, "m-B passed the uncertain m-A");
+    assert_eq!(fx.state("m-A").unwrap(), "queued");
+    let all = fx.settle(3).unwrap();
+    let position = |m: &str| {
+        all.iter()
+            .position(|e| {
+                matches!(&e.kind, agend_core::traits::DriverEventKind::MessageConfirmed { message_id } if message_id == m)
+            })
+            .unwrap_or_else(|| panic!("{m} not confirmed: {all:?}"))
+    };
+    assert!(position("m-A") < position("m-B"), "B before A: {all:?}");
+}

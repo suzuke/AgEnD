@@ -31,6 +31,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use agend_core::model::DeliveryState;
+use agend_core::policy::busy::BusyLevel;
 use serde_json::{Value, json};
 
 use super::history::{UserItem, match_items, text_of, user_items};
@@ -597,15 +598,21 @@ impl Worker {
     /// link broke or the daemon stopped mid-send) goes out again only when
     /// neither the thread history nor its queue has it (P5), and not while
     /// a turn runs: the running turn may be it with its user message not
-    /// shown yet, so that row waits for idle and is looked at again; the
-    /// rows after it are sent meanwhile.
+    /// shown yet, so that row waits for idle and is looked at again. Rows
+    /// after it keep their order: a later `Queue` row waits behind it; only
+    /// a later steer or interrupt (which must be able to stop a runaway
+    /// turn) goes out meanwhile.
     fn flush(&mut self) -> Result<(), RpcError> {
         let mut queued = self.queued()?;
         if queued.iter().any(|r| r.attempted_at_unix_ms.is_some()) {
             self.reconcile()?;
             queued = self.queued()?;
         }
+        let mut waiting = false;
         for row in queued {
+            if waiting && row.level == BusyLevel::Queue {
+                continue;
+            }
             if row.attempted_at_unix_ms.is_some() && self.busy {
                 if !self.recheck {
                     log::line(&format!(
@@ -613,9 +620,8 @@ impl Worker {
                         self.id, row.id
                     ));
                 }
-                // Only this row waits: later ones (a steer or an interrupt
-                // that has to stop a runaway turn) still go out.
                 self.recheck = true;
+                waiting = true;
                 continue;
             }
             let (id, now) = (row.id.clone(), log::now_unix_ms());
