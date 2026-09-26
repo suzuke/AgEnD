@@ -9,7 +9,7 @@
 //! requests are always answered `reject`.
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpStream;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -159,16 +159,7 @@ fn is_status(e: &super::Entry, session: &str, status: &str) -> bool {
         && e.msg["properties"]["status"]["type"] == status
 }
 
-fn free_port() -> Result<u16, String> {
-    let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|e| e.to_string())?;
-    listener
-        .local_addr()
-        .map(|a| a.port())
-        .map_err(|e| e.to_string())
-}
-
 fn spawn(agent: &Agent, project: &Path) -> Result<(Spawned, u16), String> {
-    let port = free_port()?;
     let model = format!("{PROVIDER}/{MODEL}");
     let config = json!({
         "autoupdate": false,
@@ -177,8 +168,7 @@ fn spawn(agent: &Agent, project: &Path) -> Result<(Spawned, u16), String> {
         "permission": {"bash": "ask", "edit": "ask", "webfetch": "ask"},
     });
     let mut child = Command::new(&agent.program)
-        .args(["serve", "--pure", "--hostname", "127.0.0.1", "--port"])
-        .arg(port.to_string())
+        .args(["serve", "--pure", "--hostname", "127.0.0.1", "--port", "0"])
         .args(agent.fake_args())
         .current_dir(project)
         .env("OPENCODE_CONFIG_CONTENT", config.to_string())
@@ -186,15 +176,21 @@ fn spawn(agent: &Agent, project: &Path) -> Result<(Spawned, u16), String> {
         .envs(agent.fake_env(project))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("spawn {}: {e}", agent.program.display()))?;
     let stdout = child.stdout.take().ok_or("no stdout")?;
+    let line = wait_for_line(&mut child, stdout, "listening on", Duration::from_secs(60))?;
+    let port = line
+        .trim()
+        .rsplit(':')
+        .next()
+        .and_then(|p| p.parse().ok())
+        .ok_or_else(|| format!("no port in {line:?}"))?;
     let spawned = Spawned {
         child,
         name: "opencode serve".into(),
     };
-    wait_for_line(stdout, "listening on", Duration::from_secs(60))?;
     Ok((spawned, port))
 }
 
