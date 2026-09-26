@@ -21,7 +21,7 @@
 - git adapter：daemon 自己跑的 git 全部經 `Runner`、帶 timeout、不經 shim、不跑任何 hook（P5）
 - runner（`command` 關卡）：每次 checks 一個新的 detached worktree、在寫入沙箱裡跑（macOS `sandbox-exec`、Linux `bwrap`，沒有沙箱就不跑）、環境白名單、timeout（P6）
 - forge local：merge-tree + CAS `update-ref`、merge 前才處理 main 前進（D14）、merge 不會做兩次（P7）
-- 「需要你」的新來源：人工核准、請示、task 失敗、merge 被擋、缺角色（P8）
+- 「需要你」的新來源：人工核准、請示、task 失敗、merge 被擋、缺角色、沒有沙箱（`sandbox-missing`）（P8）
 - 開機對帳（reconcile）與四次開機的重啟契約（P9）
 - 本關擁有的命令與請示（P10）
 - 什麼是假的、什麼是真的（P11）
@@ -31,7 +31,7 @@
 | 誰 | 負責 |
 |---|---|
 | 第 10 施工關（本關） | 請示 `ask` 的 daemon 端與儲存；`done`、`result`、`review approve`／`changes`、`block`、`unblock`、`remind`、`task create` 的 daemon 端處理；`agend workflow`、`agend team` 命令（CLI 與 daemon 兩端）；新的操作者請求 `task_cancel` |
-| 第 9 施工關 | 上面那些 agent 命令的 CLI 語法、client 接線、錯誤碼對應、哪些命令斷線後可以重送；ticket 格式 `<task>/<stage>/<attempt>`；`agend inbox --after`（唯讀游標）；`operator` 請求 |
+| 第 9 施工關 | 上面那些 agent 命令的 CLI 語法、client 接線、錯誤碼對應、哪些命令斷線後可以重送；ticket 格式 `<task>/<stage>/<attempt>`；`agend inbox --after`（唯讀游標）；`operator` 請求；`agend doctor` 回報沙箱工具（`sandbox-exec`／`bwrap`）找不到或不能用（本關 P6 的後續） |
 
 ## 開工前提案
 
@@ -108,7 +108,7 @@
 - 問題：daemon 也要跑 git（建 worktree、算 patch-id、merge、看 head）。會不會被 shim 或 hook 擋？會不會觸發專案自己的 hook？卡住怎麼辦？daemon 會不會改 agent 的 worktree？
 - 建議：
   - daemon 開機時找一次真的 git：`PATH` 上第一個**不在** `$AGEND_HOME/bin` 的 `git`，記住絕對路徑；版本低於 2.38（`merge-tree --write-tree` 需要）就不處理有 repo 的 team，log 指出原因（`agend doctor` 由第 9 施工關檢查）。
-  - 每個 git 呼叫：`env_clear` 後只給 `HOME`、`PATH`、`LANG=C`、`GIT_TERMINAL_PROMPT=0`（沒有 `AGEND_*`、沒有 daemon 的 `GIT_*`）；一律加 `-c core.hooksPath=/dev/null`（不跑 agend hook，也不跑專案的 hook）；經 `Runner`，timeout 60 秒。
+  - 每個 git 呼叫：`env_clear` 後只給 `HOME`、`PATH`、`LANG=C`、`GIT_TERMINAL_PROMPT=0`（沒有 `AGEND_*`、沒有 daemon 的 `GIT_*`）；一律加 `-c core.hooksPath=/dev/null`（不跑 agend hook，也不跑專案的 hook）；碰到 checks worktree 的（建立、`worktree remove --force` 清掉）再加 `-c core.fsmonitor=false`，所以 checks 留下的設定不會讓 daemon 執行任何東西（P6）；經 `Runner`，timeout 60 秒。
   - 在 canonical checkout 跑：`worktree add/remove/list`、`branch -D`、`rev-parse`、`merge-base`、`diff`／`patch-id`、`log`、`merge-tree`、`commit-tree`、`update-ref`。
   - 在 agent 的 worktree 裡：讀（`status`、`diff`，給 P4 的 WIP patch 用）；以及 P7 的 rebase——**這會在持有者的 worktree 裡產生新的 commit、改寫它的 branch**，所以只在 task 不在 work 關卡、worktree 乾淨時做，不乾淨就不做、當成衝突。除此之外 daemon 不在 agent 的 worktree 裡寫任何東西。
   - 什麼時候看 branch 的 head：沒有輪詢。只在「收到任何結果事件時」與「送出 `Merge` 前」讀一次；和狀態裡的 head 不同就先餵 `CommitCreated`（附新的 patch-id），再處理原本的事件。
@@ -124,19 +124,24 @@
   - **每次跑一個新的** detached worktree：`$AGEND_HOME/checks/<task>-<stage>-<attempt>-<unix 毫秒>/`，在要測的 head；跑完（不管結果）就刪。不裝 hook、沒有 binding。
   - 指令：`sh -c <已展開的指令>`，自己一個 process group（RUN-8），stdin 是 `/dev/null`。環境：第 6 施工關的 agent 白名單，但**沒有** `AGEND_*`，`PATH` 也拿掉 `$AGEND_HOME/bin`。
   - timeout：`RunCommand` 帶來的 `timeout_ms`（關卡沒寫就是 core 的預設 5 分鐘，`DEFAULT_STAGE_TIMEOUT_MS`）。逾時 → 停掉整個 process group → 餵 `CommandFinished{exit_code: None}`：core 當成 checks 失敗、退回 work，持有者會收到「checks timed out after N s」。**不餵 `StageTimedOut`**：預設逾時動作是「通知」，只記一筆，task 會一直停在 checks、「需要你」也沒有。所以 `command` 關卡的 `on_timeout` 沒有作用：寫了 `on_timeout` 的 `command` 關卡在建立 task 時被拒（跟 `reassign` 一樣），訊息寫「command 逾時一律當失敗、退回 work」。
-  - 每次都是冷的 worktree，5 分鐘可能不夠：workflow 要自己寫 `timeout_ms`。本關的 `demo` workflow 寫 60 秒（checks 是 `test -f`），`slow` 寫 120 秒；Rust 專案第一次在 team 快取裡編譯會比較久，建議至少 30 分鐘。
+  - 每次都是冷的 worktree，5 分鐘可能不夠：workflow 要自己寫 `timeout_ms`。本關的 `demo` workflow 寫 60 秒（checks 是 `test -f`），`slow` 寫 120 秒；Rust 專案每次都要重新下載依賴、從頭編譯（沒有共用快取，見下），建議至少 30 分鐘。
   - 輸出：完整 stdout／stderr 存 `logs/checks/<task>/<stage>-<attempt>.log`（每個檔最多 10 MiB，超過截斷並註明）；task 事件只放最後 20 行。保留 14 天（跟事件一樣，列進第 5 施工關 P8 的規則表）。
   - 同時最多跑 1 個 check，其他排隊（log 寫出在等誰）。
   - daemon 被硬殺時正在跑的 check 會變孤兒、跑到自己結束，結果沒人收；重開後 P9 對同一個 attempt 在**另一個新目錄**重跑，兩者不共用檔案；舊目錄由對帳刪掉。
   - **寫入沙箱**（使用者 2026-09-26 決定）。checks 跑的是 agent 寫的程式碼：指令是你寫進 workflow 的（例如 `cargo test`），但它會執行 agent 改過的測試、`build.rs`、腳本。所以整個指令在沙箱裡跑，**網路照常可用**，只限制寫入：
-    - 可寫：這次的 checks worktree；這次的暫存目錄 `$AGEND_HOME/checks/<run>.tmp/`（設成 `TMPDIR`）；canonical repo 裡這個 worktree 自己的 git 目錄 `.git/worktrees/<run>/`（git 要寫它的 index）；daemon 管的每個 team 一個快取目錄 `$AGEND_HOME/cache/<team>/`，設成 `CARGO_HOME`、`CARGO_TARGET_DIR`（其下的 `target/`）與 `XDG_CACHE_HOME`；以及 `/dev/null`、`/dev/tty` 這類裝置。
-    - 其他全部唯讀：你的 home（含 `~/.ssh`）、其他 repo、canonical repo 的 refs 與 objects（所以測試改不了 main）、`$AGEND_HOME` 的其他地方。
-    - 快取選 team 的快取目錄、不選每次的暫存目錄：依賴不用每次重新下載、`target/` 可以增量編譯；原始碼仍是每次新的 worktree，「merge 出來的樹＝測過的樹」不變。代價見「已知風險」。
-    - macOS：`/usr/bin/sandbox-exec -f <profile>`，profile 由 daemon 每次產生：`(allow default)`、`(deny file-write*)`，再對上面的路徑 `(allow file-write* (subpath …))`。
-    - Linux：`bwrap --ro-bind / / --dev /dev --proc /proc --bind <路徑> <路徑> …（上面每個可寫路徑一個）--die-with-parent -- sh -c <指令>`；不加 `--unshare-net`。
-    - **fail closed**：daemon 開機時找沙箱工具並試跑一次 `true`；找不到或試跑失敗，checks **不跑**，task 留在 checks 關卡、不餵任何結果，出現「需要你」`sandbox-missing:<task>`（P8），按 `retry` 再試。第 9 施工關的 `agend doctor` 要回報這一項（列給第 9 施工關，不改它的頁）。
-- 理由：agent 寫的程式碼不該能改你的 home、其他 repo 或 main；只擋寫入、不擋網路，一般的 `cargo test`、`npm test` 照常能下載依賴。新的 worktree 就在要測的那個 head 上，沒有上一次留下的檔案，所以「merge 出來的樹＝測過的樹」（P7）；跟 agent 的 worktree 分開（`runner.rs` 的 Must NOT、[pipeline](../architecture/pipeline.md#6-種關卡)「在 head 的臨時 detached worktree 執行」）；孤兒 check 不會跟重跑的撞在同一個目錄。一次一個最簡單，也不會讓兩個 `cargo test` 搶 CPU 互相逾時。
-- 替代方案：每個 task 重複用一個 checks worktree、保留 ignored 檔（增量編譯快，但上一次的產物可能讓測試假綠，也會跟孤兒撞目錄）；在 agent 的 worktree 跑（agent 可能正在改）；同時跑多個（要設上限與排序）；不做沙箱（原本的建議，使用者改成沙箱）；容器（要裝 Docker，太重）；沒有沙箱工具時照跑、只警告（等於沒有保護）；沒有沙箱工具時讓 checks 失敗（會退回 work，agent 白做一輪，所以改成「需要你」）；快取放每次的暫存目錄（最乾淨，但每次冷編譯、重新下載）；checks worktree 也裝 agend hook（沙箱已經讓 refs 唯讀，不需要）。
+    - 可寫的只有兩個地方：這次的 checks worktree（但它的 `.git` 檔案本身唯讀）；這次的暫存目錄 `$AGEND_HOME/checks/<run>.tmp/`。再加 `/dev/null`、`/dev/tty` 這類裝置。
+    - 暫存目錄設成 `TMPDIR`，也放每次自己的快取：`CARGO_HOME`、`CARGO_TARGET_DIR`、`XDG_CACHE_HOME` 都指到它底下，跑完一起刪。**沒有跨 checks 共用的快取**：每次重新下載依賴、從頭編譯，比較慢；換來的是一次 check 留下的東西（例如在 `CARGO_HOME/config.toml` 設 `runner = "true"`）不可能讓之後別的 task 的 check 假綠。
+    - 其他全部唯讀：你的 home（含 `~/.ssh`）、其他 repo、canonical repo 的 `.git`（refs、objects、`.git/worktrees/<run>/` 這個 worktree 的 git 目錄都唯讀：所以測試改不了 main，也改不了 `commondir` 把 daemon 之後跑的 git 導到假的 repo）、`$AGEND_HOME` 的其他地方。
+    - 因此 checks 裡的 `git status`、`git diff` 照常可用；`git commit`、`git stash` 這類要寫 objects 或 index 的會失敗——checks 本來就不該改 repo，接受。
+    - macOS 的 `mktemp` 不帶 `-t` 時不看 `TMPDIR`、寫到 `/var/folders/…/T`（`DARWIN_USER_TEMP_DIR`）：**不開放**那裡（別的程式也用它）。`mktemp -t <名字>`、`mktemp "$TMPDIR/x.XXXX"`、Rust 的 `std::env::temp_dir()` 都照 `TMPDIR`，可以用；不帶 `-t` 的 `mktemp` 會得到 `Operation not permitted`（寫進已知風險）。
+    - macOS：`/usr/bin/sandbox-exec -f <profile>`，profile 由 daemon 每次產生：`(allow default)`、`(deny file-write*)`，再對上面兩個目錄 `(allow file-write* (subpath …))`、對 `<worktree>/.git` `(deny file-write* (literal …))`。profile 裡的路徑一律先轉成真實路徑（`/tmp` 是 `/private/tmp`），否則規則對不上。
+    - Linux：`bwrap --ro-bind / / --dev /dev --proc /proc --bind <worktree> <worktree> --ro-bind <worktree>/.git <worktree>/.git --bind <tmp> <tmp> --die-with-parent -- sh -c <指令>`；不加 `--unshare-net`。
+    - **fail closed，兩層**：
+      1. 開機時與每次 `retry` 時：找沙箱工具並試跑一次 `true`；找不到或試跑失敗 → checks 不跑。
+      2. 每一次 check：沙箱裡第一件事是寫一個標記檔 `$TMPDIR/.agend-sandbox-started`，再 `exec` 真的指令。結束後沒有這個標記檔 → 是沙箱自己沒起來（profile 錯、工具出錯），不是 check 失敗。
+      兩種情況都一樣：task 留在 checks 關卡、不餵任何結果，出現「需要你」`sandbox-missing:<task>`（P8），按 `retry` 再試。第 9 施工關的 `agend doctor` 要回報沙箱工具（列在上面的分工表，不改它的頁）。
+- 理由：agent 寫的程式碼不該能改你的 home、其他 repo 或 main；只擋寫入、不擋網路，一般的 `cargo test`、`npm test` 照常能下載依賴。新的 worktree 就在要測的那個 head 上，沒有上一次留下的檔案，所以「merge 出來的樹＝測過的樹」（P7）；沒有共用快取，一次 check 影響不到下一次；跟 agent 的 worktree 分開（`runner.rs` 的 Must NOT、[pipeline](../architecture/pipeline.md#6-種關卡)「在 head 的臨時 detached worktree 執行」）；孤兒 check 不會跟重跑的撞在同一個目錄。一次一個最簡單，也不會讓兩個 `cargo test` 搶 CPU 互相逾時。
+- 替代方案：每個 task 重複用一個 checks worktree、保留 ignored 檔（增量編譯快，但上一次的產物可能讓測試假綠，也會跟孤兒撞目錄）；在 agent 的 worktree 跑（agent 可能正在改）；同時跑多個（要設上限與排序）；不做沙箱（原本的建議，使用者改成沙箱）；容器（要裝 Docker，太重）；沒有沙箱工具時照跑、只警告（等於沒有保護）；沒有沙箱工具時讓 checks 失敗（會退回 work，agent 白做一輪，所以改成「需要你」）；每個 team 一個可寫的共用快取（快很多，但 review 在 macOS 重現了：一次 check 在 `CARGO_HOME/config.toml` 設 `runner = "true"`，之後別的 task 失敗的 `cargo test` 變成通過）；共用的下載快取在沙箱裡唯讀、由沙箱外另一步先下載（`cargo fetch` 本身會跑依賴的程式碼，要再想一層，先不做）；開放 `.git/worktrees/<run>/` 讓 checks 能 commit（review 重現了改 `commondir` 讓 daemon 清理時執行 `core.fsmonitor` 的逃逸）；checks worktree 也裝 agend hook（沙箱已經讓 refs 唯讀，不需要）。
 - 例子：checks 是 `test -f hello.txt`，第一次 agent 忘了加檔 → exit 1 → `t-3: checks t-3/checks/1 failed (exit 1); back to work (g10-dev)`；agent 補上再 `done` → `checks t-3/checks/2 passed`。
 - [x] 使用者確認（2026-09-26；改成寫入沙箱，見上）
 
@@ -283,9 +288,9 @@
 
 - 依賴三個還沒完成的施工關。第 7 施工關的 `messages` 表或第 9 施工關的 ticket／`inbox --after`／`operator` 請求跟這裡的理解不同時，改這頁的「你親自驗收」，不改它們。
 - **`sandbox-exec` 被 Apple 標為 deprecated**（P6）：目前的 macOS 仍能用，未來版本可能拿掉；拿掉時照 fail closed，checks 不跑、出現 `sandbox-missing`，要另找工具。
-- **`bwrap` 需要 unprivileged user namespace**：Ubuntu 24.04 起 AppArmor 預設限制它，CI 的 `ubuntu-latest` 也是。開工時先在 CI 試；不行就在 CI 加一步放寬（`sysctl kernel.apparmor_restrict_unprivileged_userns=0`）或給 `bwrap` AppArmor profile。沙箱測試**不能**因為工具不能用就 SKIP 當通過。
-- 沙箱裡 home 唯讀：會寫 `~` 的工具（例如 rustup 的鎖檔、某些語言的全域快取）可能失敗；開工時用 `cargo test` 與 `npm test` 各試一次，缺的路徑改用 `XDG_CACHE_HOME` 或加進 team 快取。
-- team 快取可寫、跨 checks 共用（P6）：agent 的程式碼能在裡面留東西，影響同一個 team 之後的 checks（例如污染 `target/`）；原始碼不受影響。要更乾淨就改成每次的暫存目錄（每次冷編譯）。
+- **`bwrap` 需要 unprivileged user namespace**：Ubuntu 24.04 起 AppArmor 預設限制它，CI 的 `ubuntu-latest` 也是。CI 先 `sudo apt-get install -y bubblewrap`（runner 預設沒有），再試；不行就在 CI 加一步放寬（`sysctl kernel.apparmor_restrict_unprivileged_userns=0`）或給 `bwrap` AppArmor profile。沙箱測試**不能**因為工具不能用就 SKIP 當通過。
+- 沙箱裡 home 唯讀：會寫 `~` 的工具（例如 rustup 的鎖檔、某些語言的全域快取）可能失敗；開工時用 `cargo test` 與 `npm test` 各試一次，缺的路徑改用 `XDG_CACHE_HOME`（在每次的暫存目錄裡）。macOS 上不帶 `-t` 的 `mktemp` 會失敗（見 P6），測試腳本要改用 `mktemp -t`。
+- checks 很慢（P6）：沒有共用快取，每次都重新下載依賴、從頭編譯。這是為了不讓一次 check 讓下一次假綠（跟 P6 拒絕重複用 worktree 是同一個理由）。之後要加速，只能加「沙箱外的受信任步驟準備、沙箱裡唯讀」的快取，不能再開放可寫的共用快取。
 - `-c core.hooksPath=/dev/null` 也跳過專案自己的 `post-checkout` 等 hook（P5）：依賴 hook 準備環境的專案，checks worktree 裡少了那一步；要的話寫進 checks 指令。
 - 在持有者的 worktree 裡 rebase（P7）：這時 task 不在 work 關卡，但 agent 仍可能剛好在跑 git。worktree 不乾淨就當成衝突退回 work，不硬做。
 - trailer 搜尋最多看 main 的 1000 個 first-parent commit（P7）：merge 之後 main 又前進超過 1000 個 commit、而且 DB 同時丟了 `merge_intent`，才會找不到；開工時量搜尋的耗時。
@@ -301,7 +306,7 @@
   - STO 新規則「存檔與事件同成同敗」對 `FakeStore` 與真 store 都過，有 mutant（P1）
   - 分派：沒有空的 dev 時排隊、空出來後自動派出；沒有角色 → `no-role`，`team join` 後消失（P3、P10）
   - daemon 的 git 呼叫都有 `-c core.hooksPath=/dev/null`、都沒有 `AGEND_*`（P5）
-  - checks：每次一個新目錄、跑完就刪；`--fail-checks-once` 回 work 再通過；逾時停掉整個 process group、餵 `CommandFinished{exit_code: None}`、task 回 work；沙箱：寫到 worktree 與 `TMPDIR` 的 check 通過，寫到 home、`$AGEND_HOME`、其他 repo、canonical 的 refs 的 check 失敗且檔案不存在，網路照常可用；找不到沙箱工具（測試用 debug-only 的覆寫指到不存在的路徑）→ check 不跑、`sandbox-missing` 出現、`retry` 後照跑（P6、P8）
+  - checks：每次一個新目錄、跑完就刪；`--fail-checks-once` 回 work 再通過；逾時停掉整個 process group、餵 `CommandFinished{exit_code: None}`、task 回 work；沙箱：寫到 worktree 與 `TMPDIR` 的 check 通過，寫到 home、`$AGEND_HOME`、其他 repo、canonical 的 refs 的 check 失敗且檔案不存在，網路照常可用；找不到沙箱工具（測試用 debug-only 的覆寫指到不存在的路徑）→ check 不跑、`sandbox-missing` 出現、`retry` 後照跑；改 `<worktree>/.git` 或 `.git/worktrees/<run>/commondir` 失敗、daemon 清理時沒有執行任何 checks 留下的設定（`core.fsmonitor` 的回歸測試）；一次 check 寫 `CARGO_HOME/config.toml` 之後，下一次 check 看不到它；沙箱 profile 故意寫壞 → 沒有標記檔 → `sandbox-missing`、不是 checks 失敗（P6、P8）
   - merge：main 沒被 checkout、只被乾淨的 canonical checkout、被 dirty 的 canonical 或別的 worktree checkout 三種；空 branch 的 `done` 被拒；main 前進 → rebase、保留核准、重跑 checks；已 merge 的由 trailer 找回、`merge_intent` 當後備、手動 merge 的記成完成（`MergeCompleted`，註明 merged outside agend）（P7）
   - 「需要你」六種來源、`resolve_attention` 的 `note`；舊 attempt 的 `approval:` id 回 `unknown_attention`；重開機後 `waiting_since` 不變（P8）
   - P10 每個命令的 daemon 端；請示的一輪提問、回答、追問、結論；`remind` 跨重開機照樣送出；`task_cancel` 只收操作者
@@ -518,6 +523,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-26 沙箱 review REFUTED（1 HIGH、1 MEDIUM、數個 LOW，在 macOS 重現）後修正：`.git/worktrees/<run>/` 與 `<worktree>/.git` 改成唯讀、daemon 碰 checks worktree 的 git 加 `-c core.fsmonitor=false`（擋逃逸）；拿掉跨 checks 的共用快取，全部放每次的暫存目錄（擋假綠，代價是慢）；macOS `mktemp` 與真實路徑、每次 check 的標記檔（沙箱自己失敗算 `sandbox-missing`）、CI 先裝 `bubblewrap`；範圍與分工表補上 `sandbox-missing` 與 `agend doctor`。
 - 2026-09-26 使用者確認 P1–P11：P6 改成 checks 在寫入沙箱裡跑（macOS `sandbox-exec`、Linux `bwrap`，網路照常，沒有工具就不跑、出現 `sandbox-missing`）；P3 拒絕刪除持有者（與 D33 不同）、P7 `--ff-only` 與手動 merge 記成完成、P8 `no-role`（與 D18 不同）、P11 `delivery = inbox` 只給假 agent，都照提案；要正式的 `agend task cancel`（語法第 9 施工關、daemon 端本關）；「你親自驗收」加一步沙箱，改成 11 步。
 - 2026-09-26 跟上第 9 施工關的使用者決定與已 merge 的第 7、8 施工關：操作者可以 `agend task create`（要 `--team`），驗收改用它、拿掉 `pipeline_probe task` 與那題待你決定；每個步驟都設 `AGEND_HOME`；使用者看到的 instance 寫成 name；migration 編號（`0003` 第 8、`0004` 第 7、本關下一個空號）與協定版本（1.1 第 8）更新。
 - 2026-09-26 第 4 輪 review（1 MEDIUM、2 LOW）後修正：分派把整個 team 的 running instance 都交給 core（`held_task` 照實填），返工與 `NoEligibleReviewer` 才正確；逾時計時器由誰排、開機重報的通知逾時回 `StaleResult` 是正常；`command` 的 `on_timeout` 也在 task create 與 `workflow check`／`apply` 被拒。
