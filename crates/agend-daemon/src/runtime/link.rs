@@ -12,9 +12,14 @@
 //!   took the connection over, gate 4 P4); once the lock is free it reports
 //!   [`HolderEvent::HolderGone`] and ends: "connection closed + lock
 //!   released" is how a holder that is not the daemon's child is seen to die.
+//! - Terminal (gate 8 P6): [`Link::terminal`] sends `Snapshot` on this
+//!   connection; the holder answers in order with the stream, so the
+//!   subscriber gets that screen and then every `PtyBytes` read after it
+//!   (per-instance broadcast of [`TERMINAL_CHUNKS`]), nothing twice or lost.
 //!
 //! Must NOT: send `Shutdown`, or report anything after [`Link::close`].
 
+use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -24,6 +29,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use agend_core::protocol::holder::{ExitedData, HolderRequest, HolderResponse, SpawnData};
+use tokio::sync::{broadcast, oneshot};
 
 use super::client::Conn;
 use super::files;
@@ -34,6 +40,18 @@ const CONNECT_EVERY: Duration = Duration::from_millis(50);
 /// Wait before connecting again after the connection ended (gate 6 P4).
 pub const RECONNECT_AFTER: Duration = Duration::from_secs(1);
 const SPAWN_REPLY_WITHIN: Duration = Duration::from_secs(10);
+/// PTY chunks a terminal subscriber may fall behind before it is dropped.
+pub const TERMINAL_CHUNKS: usize = 256;
+
+/// A terminal subscription: the screen, then the base64 PTY chunks after it.
+pub type TerminalFeed = (String, broadcast::Receiver<String>);
+
+/// Terminal subscribers of one link.
+struct Terminal {
+    /// Waiting for the answer to their `Snapshot`.
+    pending: Vec<oneshot::Sender<TerminalFeed>>,
+    live: broadcast::Sender<String>,
+}
 
 /// What a link reports about its holder. `generation` tells a link's events
 /// apart from those of an earlier link of the same instance.
@@ -71,6 +89,7 @@ pub struct Attached {
 pub struct Link {
     stopping: Arc<AtomicBool>,
     stream: Arc<Mutex<Option<UnixStream>>>,
+    terminal: Arc<Mutex<Terminal>>,
     wake: Option<Sender<()>>,
     thread: Option<JoinHandle<()>>,
 }
@@ -80,6 +99,22 @@ impl Link {
     /// not told anything (no `Shutdown`).
     pub fn close(mut self) {
         self.stop();
+    }
+
+    /// Asks the holder for its screen on this connection; the answer is the
+    /// screen and a receiver of the PTY chunks after it. `None` when the
+    /// request cannot be sent.
+    pub fn terminal(&self) -> Option<oneshot::Receiver<TerminalFeed>> {
+        let (tx, rx) = oneshot::channel();
+        let mut line = serde_json::to_vec(&HolderRequest::Snapshot).ok()?;
+        line.push(b'\n');
+        // The pending entry goes in before the request is sent, so the
+        // reader thread finds it when the answer arrives.
+        lock(&self.terminal).pending.push(tx);
+        let stream = lock(&self.stream);
+        let mut stream = stream.as_ref()?;
+        stream.write_all(&line).ok()?;
+        Some(rx)
     }
 
     fn stop(&mut self) {
@@ -107,7 +142,12 @@ struct Worker {
     sink: EventSink,
     stopping: Arc<AtomicBool>,
     stream: Arc<Mutex<Option<UnixStream>>>,
+    terminal: Arc<Mutex<Terminal>>,
     wake: Receiver<()>,
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// Connects to the holder of `id` (sending `spawn` first if given) and keeps
@@ -122,6 +162,10 @@ pub fn open(
 ) -> Result<(Link, Attached), String> {
     let stopping = Arc::new(AtomicBool::new(false));
     let stream = Arc::new(Mutex::new(None));
+    let terminal = Arc::new(Mutex::new(Terminal {
+        pending: Vec::new(),
+        live: broadcast::channel(TERMINAL_CHUNKS).0,
+    }));
     let (wake_tx, wake) = mpsc::channel();
     let (first_tx, first) = mpsc::sync_channel(1);
     let worker = Worker {
@@ -131,6 +175,7 @@ pub fn open(
         sink,
         stopping: Arc::clone(&stopping),
         stream: Arc::clone(&stream),
+        terminal: Arc::clone(&terminal),
         wake,
     };
     let thread = std::thread::Builder::new()
@@ -140,6 +185,7 @@ pub fn open(
     let link = Link {
         stopping,
         stream,
+        terminal,
         wake: Some(wake_tx),
         thread: Some(thread),
     };
@@ -248,6 +294,16 @@ impl Worker {
         loop {
             match conn.recv(None) {
                 Ok(Some(HolderResponse::Exited { data })) => self.exited(data),
+                Ok(Some(HolderResponse::ScreenSnapshot { data })) => {
+                    let mut terminal = lock(&self.terminal);
+                    for waiting in std::mem::take(&mut terminal.pending) {
+                        let _ = waiting.send((data.screen.clone(), terminal.live.subscribe()));
+                    }
+                }
+                Ok(Some(HolderResponse::PtyBytes { data })) => {
+                    // No subscriber is not an error.
+                    let _ = lock(&self.terminal).live.send(data.bytes_base64);
+                }
                 Ok(_) => {}
                 Err(_) => return,
             }

@@ -3,13 +3,13 @@
 > **TL;DR**
 > - 真 daemon 開 `run/daemon.sock` 講 client protocol；`agend-client` 同步連線、daemon 重啟時重試 10 秒、版本不合立刻說清楚；順便補上第 11 施工關的協定缺口 G1–G3（G4 移到第 12 施工關）。
 > - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這個施工關才算完成。
-> - 下一步：P1–P10 已確認；merge 這份提案後開工。
+> - 下一步：先看「待你追認」C1–C14，再照「你親自驗收」7 步走（agent 帶著做）。
 
 **先看這條**：這頁的步驟會用到 `agend`。每個新開的終端機分頁（包括第二個終端）都要先跑「你親自驗收」開頭的設定，否則會跑到舊的 Node 版 `agend` 1.24.0。
 
 ## 狀態
 
-**提案中**（2026-09-26）：開工前提案 P1–P10 使用者已確認（含改 T6、G4 移第 12 施工關），等 merge 後開工；依賴的第 6 施工關已 merge（#125，`3e28e06`）。
+**已驗收，等 merge**（2026-09-26）：draft PR #131（branch `feat/gate-08-client`）；自動驗收全部通過；C1–C14 使用者已追認；使用者親自驗收 7 步通過。P1–P10 使用者已確認（含改 T6、G4 移第 12 施工關）。
 
 ## 範圍
 
@@ -210,43 +210,54 @@
 
 ## 自動驗收（完成定義）
 
-- [ ] `~/.cargo/bin/cargo test -p agend-client`、`-p agend-daemon`、`-p agend-testkit`、`-p agend-core`、`-p agend`（真 daemon 的 CLP 契約在 `crates/agend/tests/`，P9）單獨通過，包括：重試 10 秒後的訊息、版本不合立刻失敗、送出後斷線只重送可重做的請求（P7）；1.0 的 peer 解得開 1.1 的訊息、1.1 解得開 1.0 的訊息（P3）；`failed` → `attention_required` → `retry` → `attention_resolved`，`retry` 依 `session_started` 帶 `--resume` 或 `--session-id`、codex／opencode 只有沒跑起來過才有 `retry`、migration `0003` 把現有 `running` 與 `failed` 的 codex／opencode 設成已建立（P5）；`0003` 附 `store/fixtures/schema-v3.sql`、更新 `store/golden/schema.sql`（比照 `store/migrate.rs` 的規則），`session_started` 有 `CHECK (session_started IN (0, 1))`；socket 0600、路徑太長拒絕啟動、停止時刪檔（P1）；agent 送 `resolve_attention` 回 `forbidden`（P2）
-- [ ] client 協定契約 `CLP` 對假 daemon 與真 `agend daemon` 都通過，每條有 mutant；反向檢查：假 daemon 的事件 id 改回從 1 開始時契約必須失敗（P9）
-- [ ] 慢 client（P8）：正常、讀得很慢、完全不讀三個 client，2000 個事件後正常的全部收到且順序正確；讀得很慢的收到 `event_gap` 後被關；完全不讀的在 5 秒寫入逾時後被關
-- [ ] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨
-- [ ] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`（出現 `SKIPPED` 不算通過），並有新規則：`agend-daemon` 不能依賴 `agend-client`（P10；故意加依賴會失敗）
-- [ ] `~/.cargo/bin/cargo xtask accept client` 通過，並印出下方「你親自驗收」用到的 demo
-- [ ] 本施工關 crate 的 `README.md`／`TESTING.md` 已更新；想改的共用文件（名詞表、AGENTS.md、第 11、12 施工關頁）列在 PR 裡由你決定
-- [ ] 測試不留殘留：結束時沒有 `g8-` 或測試 id 的 holder、沒有留下的 `daemon.sock`；kill 只對自己起的、大於 1 的 pid
-- [ ] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」
+- [x] `~/.cargo/bin/cargo test -p agend-client`、`-p agend-daemon`、`-p agend-testkit`、`-p agend-core`、`-p agend` 單獨通過（`cargo xtask accept client` 逐一跑）。對應的測試：重試 10 秒後的訊息、版本不合立刻失敗、送出後斷線只重送可重做的請求（`agend-client/tests/client.rs`）；1.0 解得開 1.1、1.1 解得開 1.0（`xtask/tests/protocol_compat.rs`，凍結的 1.0 型別）；`failed` → `attention_required` → `retry` → `attention_resolved`，`retry` 依 `session_started` 帶 `--resume`／`--session-id`／不帶，codex 跑過的沒有 `retry`（`crates/agend/tests/client_protocol.rs::retry_resumes_or_starts_by_session_started`、`supervisor` 單元測試）；`0003` 的回填、`CHECK`、`schema-v3.sql`、golden（`agend-daemon/tests/store.rs`）；socket 0600、101 bytes 拒絕、停止時刪檔（`the_socket_is_private_replaced_after_a_crash_and_removed_on_stop`）；agent 送 `resolve_attention` 回 `forbidden`（CLP-11、`agend-client` 測試）
+- [x] `CLP` 對假 daemon 12/12、對真 `agend daemon` 11/11 ＋ CLP-8 對 daemon 的 server 程式（見 C1）；每條有 mutant（14 個，`contract_teeth`）；反向檢查：事件 id 改回從 1 開始時 CLP-4 失敗（`client_protocol_fake_with_ids_from_one_fails_clp_4`）
+- [x] 慢 client（P8）：CLP-8 — 正常的 2000 個全部收到且順序正確；每 10 ms 讀一行的收到 `event_gap` 後被關；完全不讀的在 5 秒寫入逾時後被關、沒有 `event_gap`
+- [x] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨
+- [x] `~/.cargo/bin/cargo xtask check-deps` 最後一行 `check-deps: ok (6 rules, 8 crates checked for agend-testkit, agend-core metadata ok, no-std build ok)`；新規則 `agend-daemon` ↛ `agend-client`，故意加依賴時失敗：`check-deps: agend-daemon depends on agend-client (…); inspect with cargo tree -e normal,build -p agend-daemon -i agend-client`
+- [x] `~/.cargo/bin/cargo xtask accept client` 通過，並印出「你親自驗收」步驟 1 的 demo
+- [x] 本施工關 crate 的 `README.md`／`TESTING.md` 已更新；想改的共用文件列在 PR 裡
+- [x] 測試不留殘留：跑完 `pgrep -fl "agend (holder|daemon)"` 沒有輸出、`/tmp/g8-*` 沒有留下；只對自己起的 daemon 子程序送 SIGINT／`Child::kill`，holder 用 `Shutdown`
+- [x] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」（r1 CONFIRMED `7147763`、4 LOW 已修；修正 delta 再驗 CONFIRMED `881c120`）
 
 ## 你親自驗收
 
-由 agent 帶著一步一步做（見 [AGENTS.md](../../AGENTS.md#帶使用者親自驗收)）。每一步：照抄指令 → 對照「應該看到」→ 對了就打勾。任何一步不符就停，記在「驗收紀錄」。標「開工時細化」的地方，開工時會改成確切指令與輸出。
+由 agent 帶著一步一步做（見 [AGENTS.md](../../AGENTS.md#帶使用者親自驗收)）。每一步：照抄指令 → 對照「應該看到」→ 對了就打勾。任何一步不符就停，記在「驗收紀錄」。下面的「應該看到」是實作者 2026-09-26 在 macOS 照抄指令實跑的輸出（時間戳、pid、session id、`as_of` 每次不同）。
 
-**每個新開的終端機分頁都要先跑這段**（包括 daemon 在前景跑時開的第二個終端）。第 13 施工關之前沒有安裝程式，而你的 PATH 上有舊的 Node 版 `agend`（v1-ts 1.24.0）：
+**每個新開的終端機分頁都要先跑這段**（包括 daemon 在前景跑時開的第二、第三個終端）。第 13 施工關之前沒有安裝程式，而你的 PATH 上有舊的 Node 版 `agend`（v1-ts 1.24.0）：
 
 ```bash
 cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
+unset AGEND_BIN               # 前幾關步驟留下的 export 可能指到已刪除的 worktree
 ~/.cargo/bin/cargo build -p agend && export PATH="$PWD/target/debug:$PATH" && agend --version
 ```
 
-應該看到 `agend 0.x.y`（目前是 `agend 0.0.0`）。如果印出 `1.24.0`，跑到的是舊的 Node CLI——在這個終端機重跑上面那段。
+應該看到 `agend 0.0.0`。如果印出 `1.24.0`，跑到的是舊的 Node CLI——在這個終端機重跑上面那段。
 
-步驟 2 起用同一個暫存 home。第二個終端也要貼上步驟 2 印出的那行 `export AGEND_HOME=…`。
+步驟 2 起用同一個暫存 home。第二、第三個終端也要貼上步驟 2 印出的那行 `export AGEND_HOME=…`。
 
 1. 跑 demo。
 
-   **這步在驗什麼**：同一套 client 協定規則對假 daemon 和真 daemon 都通過，版本不合、慢 client、重啟這幾段也跑完（P3、P8、P9）。錯了代表 TUI 與 CLI 的測試對的是一個跟真 daemon 不一樣的假東西。
+   **這步在驗什麼**：同一套 client 協定規則對假 daemon 和真 daemon 都通過，版本不合、慢 client、socket、`retry`、終端、重啟這幾段也跑完（P3、P5、P8、P9）。錯了代表 TUI 與 CLI 的測試對的是一個跟真 daemon 不一樣的假東西。
 
    ```bash
    cd ~/Documents/Hack/AgEnD-v2
    ~/.cargo/bin/cargo xtask accept client
    ```
 
-   應該看到：`== contract` 段每條 `CLP-n` 印兩次（`fake ok`、`real ok`）；`== version` 段有 `needs 1.1`；`== slow-client` 段有 `slow reader: event_gap` 與 `no reader: closed after 5 s write timeout`；最後一行 `gate 8 (client): checks passed`（開工時細化確切輸出）。
+   要跑幾分鐘（前面是各 crate 的 fmt／clippy／測試，最後約 1 分鐘是 demo）。應該看到：
 
-   - [ ] 通過
+   | 段落 | 要找的字 |
+   |---|---|
+   | `== contract` | `CLP-1 fake ok`、`CLP-1 real ok` … 到 `CLP-12`，每條兩行；`CLP-8 real ok (the daemon's server code in this process: 2000 events)`（見 C1）；`negative check (fake event ids from 1 again): CLP-4 FAIL: …` |
+   | `== version` | `agend debug ping → exit 1 in 0.02 s: the daemon speaks client protocol 1.0; this agend needs 1.1 — restart the daemon with this binary` |
+   | `== slow-client` | `normal reader: all 2000 events, in order`、`slow reader: event_gap after … events, then closed`、`no reader: closed after 5 s write timeout (… no event_gap)` |
+   | `== socket` | `run/ is 700, run/daemon.sock is 600`、`Ctrl-C: run/daemon.sock removed`、`101-byte socket path: exit 1: agend daemon: socket path too long: …` |
+   | `== retry` | `retry → …cr: start --resume <S1>`、`retry → …cn: start --session-id <S2>`、`retry → …xn: start`、`…xs (codex, ran before): retry → unknown_attention` |
+   | `== terminal`、`== restart` | `terminal_snapshot …, then terminal_bytes`；`12/12 ok; ok 5/12 (retried 1.4 s)` 之類；watch 有兩行 `fleet:` |
+   | 最後 | `client demo: all sections passed`，然後 `gate 8 (client): checks passed` |
+
+   - [x] 通過
 
 2. 故意弄壞：daemon 沒在跑時連線。
 
@@ -254,23 +265,31 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
    ```bash
    export AGEND_HOME="$(mktemp -d /tmp/g8.XXXX)" && echo "export AGEND_HOME=$AGEND_HOME"
-   time agend debug ping
+   time agend debug ping; echo "exit=$?"
    ```
 
-   應該看到：約 10 秒後印 `cannot reach the AgEnD daemon at …/run/daemon.sock after 10 s (…). Is it running? Start it with: agend daemon`；`echo $?` 是 `1`；`time` 約 10 秒。
+   應該看到（約 10 秒後）：
 
-   - [ ] 通過
+   ```text
+   cannot reach the AgEnD daemon at /tmp/g8.fCmu/run/daemon.sock after 10 s (No such file or directory (os error 2)). Is it running? Start it with: agend daemon
+   agend debug ping  0.00s user 0.01s system 0% cpu 10.333 total
+   exit=1
+   ```
+
+   - [x] 通過
 
 3. 啟動 daemon，再連一次。
 
    **這步在驗什麼**：socket 在 daemon 好了之後才出現、只有你能連，連上馬上回協定版本（P1、P3）。錯了的話別的使用者能連，或 client 看到開機到一半的資料。
 
-   操作（開工時細化 `daemon_probe` 參數）：第一個終端：
+   第一個終端：
 
    ```bash
    ~/.cargo/bin/cargo run -q -p agend-daemon --example daemon_probe -- add g8-1
    agend daemon
    ```
+
+   應該看到（daemon 留在前景）：`added g8-1: claude session …`，然後 `g8-1: start --session-id …`、`listening on /tmp/g8.…/run/daemon.sock`、`agend daemon ready: instances=1 recovered=0 started=1 orphans=0`（`listening` 在 `ready` 前面）。
 
    第二個終端（先跑開頭那段、貼上 `export AGEND_HOME=…`）：
 
@@ -279,15 +298,22 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
    ls -l "$AGEND_HOME/run/daemon.sock"
    ```
 
-   應該看到：daemon 印 `agend daemon ready: instances=1 …`；`ping` 馬上印 `agend daemon: client protocol 1.1, instances=1`、exit 0；`ls` 那行開頭是 `srw-------`。
+   應該看到：
 
-   - [ ] 通過
+   ```text
+   agend daemon: client protocol 1.1, instances=1
+   srw-------@ 1 suzuke  wheel  0 Sep 26 18:45 /tmp/g8.fCmu/run/daemon.sock
+   ```
+
+   關鍵：`client protocol 1.1, instances=1`，`ls` 那行開頭是 `srw-------`（結尾的 `@` 是 macOS 的延伸屬性，不影響）。
+
+   - [x] 通過
 
 4. 命令執行中重啟 daemon。
 
    **這步在驗什麼**：這關的主要驗收：daemon 重啟時命令會等它回來，最後照樣成功（P7）。錯了的話每次重啟 daemon，正在跑的 agent 命令都會失敗。
 
-   操作：第二個終端：
+   第二個終端：
 
    ```bash
    agend debug ping --count 20 --interval 500
@@ -295,38 +321,66 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
    它跑的 10 秒內，到第一個終端按 Ctrl-C，再馬上跑 `agend daemon`。
 
-   應該看到：20 行全部是 `ok`，其中一兩行是 `ok (retried 1.4 s)` 之類；exit 0。
+   應該看到：20 行都以 `ok` 開頭，其中一兩行帶 `(retried …)`，最後回到提示符號（exit 0）：
 
-   - [ ] 通過
+   ```text
+   ok 7/20: client protocol 1.1, instances=1
+   ok 8/20 (retried 1.6 s): client protocol 1.1, instances=1
+   ok 9/20: client protocol 1.1, instances=1
+   ```
+
+   第一個終端的新 daemon 印 `g8-1: reconnected to holder pid=…; screen: counter=…`（同一個 holder，計數器沒歸零）。
+
+   - [x] 通過
 
 5. 兩個 client 看同一件事：agent 一直死，進「需要你」，再按重試。
 
    **這步在驗什麼**：事件同時送到每個 client；`failed` 的 instance 變成「需要你」，帶 id、等待時間、「不處理的話」與 `retry`；只有操作者按得了，按了才消失（P2、P5、P8）。錯了的話 TUI 看不到 agent 死掉，或看到了卻沒辦法處理。
 
-   操作（開工時細化）：第一個終端 Ctrl-C 停 daemon，再加一個一起來就死的 instance（先不要啟動 daemon）：
+   第一個終端 Ctrl-C 停 daemon，再加一個一起來就死的 instance（先不要啟動 daemon）：
 
    ```bash
    ~/.cargo/bin/cargo run -q -p agend-daemon --example daemon_probe -- add g8-2 --dies
    ```
 
-   **先開兩個 watch，再啟動 daemon**，才不會錯過一開始的事件：第二個終端跑 `agend debug watch`；再開第三個終端，先跑開頭那段設定（`cargo build` + `export PATH`，第一次開要等編譯）、貼上 `export AGEND_HOME=…`，也跑 `agend debug watch`。兩個 watch 這時會一直印 `reconnecting…`（daemon 還沒起來），這是正常的。然後在第一個終端：
+   **先開兩個 watch，再啟動 daemon**，才不會錯過一開始的事件：第二個終端跑 `agend debug watch`；再開第三個終端，先跑開頭那段設定（`cargo build` + `export PATH`）、貼上 `export AGEND_HOME=…`，也跑 `agend debug watch`。兩個 watch 這時每 0.5 秒印一行 `reconnecting… (cannot reach the AgEnD daemon at … (No such file or directory (os error 2)))`（daemon 還沒起來），這是正常的。然後在第一個終端：
 
    ```bash
    agend daemon
    ```
 
-   應該看到：兩個 watch 都先印 `fleet: …`，之後的事件（`fleet:` 那行之後）兩邊順序相同：`instance_changed g8-2 …`（第一次死掉可能落在某一邊的 `fleet:` 全貌裡、另一邊的事件裡，所以只比 `fleet:` 之後的事件），約 15 秒後 `attention_required instance-failed:g8-2 (unblocks 0, waiting since …; if ignored: g8-2 stays stopped) actions: retry`。
+   應該看到：兩個 watch 都印一行 `fleet: …`，之後的事件兩邊相同、順序相同（第一次死掉可能落在 `fleet:` 全貌裡，所以只比 `fleet:` 之後的）。約 15 秒後：
+
+   ```text
+   fleet: instances=2 (g8-1 unknown, g8-2 starting) tasks=0 teams=1 attention=0 as_of=1790419525018005
+   instance_changed g8-2 unknown: running (holder pid=93813)
+   instance_changed g8-2 starting: died; restart 2/3 in 5 s
+   instance_changed g8-2 unknown: running (holder pid=93841)
+   instance_changed g8-2 starting: died; restart 3/3 in 5 s
+   instance_changed g8-2 unknown: running (holder pid=93885)
+   instance_changed g8-2 failed: restarted 3 times in 10m and it still died; not restarting
+   attention_required instance-failed:g8-2 (unblocks 0, waiting since 1790419540451; if ignored: g8-2 stays stopped) actions: retry
+   ```
 
    操作：第三個終端按 Ctrl-C 停掉它的 watch，然後：
 
    ```bash
    ~/.cargo/bin/cargo run -q -p agend-client --example client_probe -- resolve instance-failed:g8-2 retry
-   AGEND_INSTANCE=g8-1 ~/.cargo/bin/cargo run -q -p agend-client --example client_probe -- resolve instance-failed:g8-2 retry
+   AGEND_INSTANCE=g8-1 ~/.cargo/bin/cargo run -q -p agend-client --example client_probe -- resolve instance-failed:g8-2 retry; echo "exit=$?"
    ```
 
-   應該看到：第一行 `resolved`，第二個終端的 watch 印 `attention_resolved instance-failed:g8-2 retry`，daemon log 有 `g8-2: start --resume …`（確切字樣開工時細化；`--dies` 的 agent 還是會死，約 15 秒後又回到「需要你」，這是正常的）；第二行（假裝是 agent）印 `forbidden: only the operator can resolve needs-you items …`、exit 1。
+   應該看到：
 
-   - [ ] 通過
+   | 在哪 | 要找的字 |
+   |---|---|
+   | 第三個終端第一行（操作者） | `resolved` |
+   | 第二個終端的 watch | `attention_resolved instance-failed:g8-2 retry`，接著 `instance_changed g8-2 starting: start --resume …` |
+   | 第一個終端的 daemon | `g8-2: retry requested by the operator`、`g8-2: start --resume …`（先停掉留著的 holder：`holder g8-2 (pid …) exited`） |
+   | 第三個終端第二行（假裝是 agent） | `forbidden: only the operator can resolve needs-you items; ask the operator with agend ask`、`exit=1` |
+
+   `--dies` 的 agent 還是會死：約 15 秒後又回到「需要你」，這是正常的。
+
+   - [x] 通過
 
 6. 故意弄壞：watch 開著時重啟 daemon。
 
@@ -334,9 +388,17 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
    操作：第二個終端的 watch 繼續開著；第一個終端 Ctrl-C，再跑 `agend daemon`。
 
-   應該看到：watch 印 `disconnected: the daemon closed the connection`、幾行 `reconnecting…`，daemon 回來後印 `fleet: instances=2 …`（重拿全貌），之後的事件照常出現。
+   應該看到（第二個終端）：
 
-   - [ ] 通過
+   ```text
+   disconnected: the daemon closed the connection
+   reconnecting… (cannot reach the AgEnD daemon at /tmp/g8.fCmu/run/daemon.sock (No such file or directory (os error 2)))
+   fleet: instances=2 (g8-1 unknown, g8-2 starting) tasks=0 teams=1 attention=0 as_of=1790419548311005
+   ```
+
+   關鍵：`disconnected: …`、幾行 `reconnecting…`、新的 `fleet:`，而且新的 `as_of` 比重啟前的大；之後的事件照常出現。
+
+   - [x] 通過
 
 7. 收尾。
 
@@ -351,9 +413,47 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
    agend daemon
    ```
 
-   應該看到：`ls` 只有 `holders`，沒有 `daemon.sock`；daemon 印 `agend daemon ready: … orphans=…`。在第二個終端 `pgrep -fl "agend holder g8-"` 什麼都不印。最後按 Ctrl-C，再 `rm -rf "$AGEND_HOME"`。
+   應該看到：`ls` 只有 `holders`（沒有 `daemon.sock`）；`removed g8-1`、`removed g8-2`；daemon 印 `orphan g8-1: Shutdown sent`、`orphan g8-2: Shutdown sent`、`agend daemon ready: instances=0 recovered=0 started=0 orphans=2`。
 
-   - [ ] 通過
+   然後在第二個終端：
+
+   ```bash
+   pgrep -fl "agend holder g8-"; echo "pgrep exit=$?"
+   ```
+
+   應該看到只有 `pgrep exit=1`（什麼都沒找到）。最後在第一個終端按 Ctrl-C，再 `rm -rf "$AGEND_HOME"`。
+
+   - [x] 通過
+
+## 待你追認
+
+實作時做了、提案沒寫到或與提案字面不同的選擇。確認前照目前的做法運作。每項：決定 · 理由 · 反悔的成本。
+
+**追認結果**：使用者 2026-09-26 全部追認 C1–C14（C1 單獨明確決定：CLP-8 在測試程序裡跑同一份 server 程式碼，不在正式程式加測試開關）。
+
+| # | 決定 | 理由 | 反悔成本 |
+|---|---|---|---|
+| C1 | **與 P9 字面不同，請明確決定**：CLP-8（2000 個事件的慢 client）的「真」不是真 binary，而是同一份 daemon server 程式碼（`agend_daemon::server` + `fleet`）在測試程序裡跑、直接發事件；其他 11 條都對真 `agend daemon` binary 跑 | 真 binary 裡每個事件都要一次真的 instance 狀態改變（最快的是對 `failed` 的 instance 按 `retry`，每次起一個 holder），2000 個做不到；替 binary 加「測試用發事件」的開關等於在正式程式裡放後門 | 加一個只在測試用的環境變數讓 daemon 發假事件，約 20 行＋一條「只測試用」的規則 |
+| C2 | 假 daemon 的 `subscribe_terminal` 對任何 instance id 都回一張畫面；CLP-12 只釘「先回畫面」，`no_terminal`（沒有這個 instance）只在真 daemon 的測試裡驗 | 第 11 施工關 TUI 的測試用 catalog 裡的 agent id 訂閱終端，假 daemon 若只認識自己登記的 instance，TUI 的測試要先改（本關不動 TUI） | 假 daemon 只回登記過的 instance、TUI 測試先 `set_instance`：約 15 行 |
+| C3 | mutant 與反向檢查（事件 id 改回從 1 開始）都是「假 daemon 前面加一個改行的 proxy」（`contract::client::proxy`），假 daemon 本身沒有「故意弄壞」的開關 | 開關會留在 production 的假實作裡，被別的測試誤用；proxy 只存在測試路徑 | 在 `FakeDaemon` 加開關，mutant 改用開關：約 40 行 |
+| C4 | instance 的 `state`：啟動中與「死了、等 5 秒重起」都是 `starting`；holder 起來、`Spawn` 被確認後是 `unknown`（忙碌／閒置要 driver）；放棄是 `failed` | P4 只說本關給得出這三種；等重起時 agent 正要回來，最接近「啟動中」 | 等重起時改成別的狀態（例如新加 `restarting`）：core 一個 variant + supervisor 一行 |
+| C5 | 全貌的 `tasks` 在 daemon 開機時從 DB 讀一次；關卡清單 `stages` 空、`current_stage` 無 | 第 10 施工關前 daemon 不寫 task，daemon 跑著時 `daemon_probe` 也開不了 DB（鎖），所以開機後不會變；每次 `get_fleet` 都讀 DB 要在 handler 裡多一次跨執行緒呼叫 | 改成每次 `get_fleet` 讀 DB：handler 多一個 `store.tasks().await`（store 要能從 handler 拿到） |
+| C6 | `resolve_attention` 由 handler 當場檢查並拿掉項目、發 `attention_resolved`、回 `accepted`，**不等 supervisor**（它可能正在停別的 holder，最多 15 秒，會超過 client 的 10 秒）；`retry` 之後才由 supervisor 做。`retry` 開始不了（讀／寫 DB 失敗）就把原本的項目放回清單（再發一次 `attention_required`）；停舊 holder 失敗走 `failed`，會列出新的項目（verifier r1 LOW-3、LOW-4） | CLI 不必卡住；結果看事件（`instance_changed … starting` → `unknown`，或再死一次又回到「需要你」） | 等 `start` 做完才回：handler 改回等 supervisor 的回覆（約 20 行） |
+| C7 | 終端串流：holder 那條長連線結束（agent 重起、instance 放棄）時送 `error no_terminal "the terminal of X ended; subscribe again"`，連線**不關**；落後 256 塊才關連線。游標接不上的 `event_gap` 也不關連線（可以在同一條連線重拿全貌）；只有「落後超過 1024 筆」的 `event_gap` 會關 | P8 只規定「落後就斷」；終端結束不是 client 的錯，關掉連線會連事件訂閱一起斷 | 改成一律關連線：server 兩行 |
+| C8 | 同一條連線上再訂閱一次事件或終端：新的取代舊的 | 最簡單；TUI 切換 agent 時直接重訂終端 | 改成回 `invalid_request`：server 兩行 |
+| C9 | `agend debug ping` 的輸出：單次 `agend daemon: client protocol 1.1, instances=N`；`--count` 時每行 `ok 3/20: client protocol 1.1, instances=N`，重試過的是 `ok 5/20 (retried 1.4 s): …`；中途有一次失敗就印錯誤、exit 1、不再繼續 | 頁面例子只寫 `ok (retried 1.4 s)`；加上第幾次比較好對照 | 改格式：`debug.rs` 一行 |
+| C10 | `agend debug watch` 連不上時每 500 ms 印一行 `reconnecting… (<原因>)`（帶原因）；版本不合時印錯誤、exit 1，不一直重試 | 原因能看出是 daemon 沒開還是別的；版本不合重試也不會好 | 去掉原因或版本不合也重試：各一行 |
+| C11 | 假 daemon：一個請求造成的事件，在它的回應**之後**才送到同一個 client（跟真 daemon 一樣）；原本的假 daemon 是事件先到，`tests/fake_daemon.rs` 那一條改成回應先到 | 真 daemon 處理請求時不讀事件，回應一定先寫出去；假 daemon 要跟真的一樣 | 無（改回去會讓假 daemon 跟真的不一樣） |
+| C12 | `ClientResponse` 加 `#[allow(clippy::large_enum_variant)]`（`attention_required` 多了 6 個欄位後，事件那一格比其他大） | 回應一次只處理一行、不會大量存著；改成 `Box` 要改每個建構的地方 | 改成 `Event { data: Box<EventData> }`：約 20 處 |
+| C13 | 為了編譯，`agend-tui` 改了最少的地方：3 個結構加新欄位（`None`／空）、`terminal::describe` 多一個 `attention_resolved` 的分支；行為不變，TUI 改接 `agend-client` 仍在第 11 施工關 B 段 | core 加欄位後，完整寫出欄位的地方不改就編不過 | 無 |
+| C14 | 依賴：`agend-client` 一般依賴加 `serde_json`（P10 已寫）、dev 依賴 `agend-testkit`；`agend` 的 dev 依賴加 `tokio`（C1 在測試程序裡跑 server）；`xtask` 的 dev 依賴加 `serde`（`protocol_compat.rs` 凍結的 1.0 型別） | 都不是一般依賴，`check-deps` 規則不變 | 移除時對應的測試要換寫法 |
+
+另記（事實）：
+- 開機時間（P1 已知風險）：1–7 個 instance 時，從 `agend.db opened` 到 `listening on …`／`ready` 約 0.1 秒；CLI 的 10 秒不會先放棄。instance 很多且 holder 起不來的情況沒有量。
+- 時鐘往回調（P4 已知風險）：`fleet::tests::a_clock_stepped_back_is_a_gap_unless_the_old_cursor_falls_in_range` 釘住現況：舊游標比新 daemon 最新的 id 還大 → `event_gap`；落在新範圍內會被接受（可能漏事件），所以 1.1 client 重連一律重拿全貌。
+- 終端「畫面＋之後的位元組」（P1 已知風險）：畫面用 holder 長連線上的 `Snapshot` 請求拿，holder 在同一條連線依序回，所以畫面之後讀到的 `PtyBytes` 一定是畫面之後的（`the_terminal_streams_after_the_screen`）。
+- macOS 在對方已關閉的 unix socket 上設讀取逾時會回 `EINVAL`；`ProbeClient::recv_within` 因此忽略設定逾時的錯誤（關閉前送的資料照樣讀得到）。
+- 第 4 施工關的 `agend-holder/tests/server.rs::agent_environment_is_only_what_spawn_carries` 在全 workspace 平行跑時失敗過一次（`screen never matched`），單獨重跑 3 次都通過；本關沒有改 holder。
 
 ## 驗收紀錄
 
@@ -361,12 +461,16 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 | 日期 | 結果（通過／不通過） | 備註 |
 |---|---|---|
-|  |  |  |
+| 2026-09-26 | 通過 | 在 `feat/gate-08-client`（merge 前）由 agent 帶著走 7 步。步驟 1 第一次失敗：終端分頁裡殘留第 4 施工關的 `export AGEND_BIN=…/AgEnD-v2-gate04/…`（worktree 已刪），`unset` 後通過；已加 `unset AGEND_BIN` 到開頭設定，demo 對不存在的 `AGEND_BIN` 改成直接說明。步驟 2：10.006 s 放棄、exit=1。步驟 3：`listening` 在 `ready` 前、socket `srw-------`。步驟 4：20/20 ok，第 5 次 `retried 0.9 s`，同一個 holder 17414。步驟 5：兩個 watch 事件相同同序；操作者 `resolved`、agent `forbidden` exit=1；retry 先停舊 holder 再 `start --resume <同一個 session>`。步驟 6：重連重拿全貌，`as_of` 變大、`attention=1` 保留。步驟 7：socket 已刪、`orphans=2`、`pgrep exit=1`。 |
 
 ## 進度紀錄
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-26 使用者親自驗收 7 步通過（merge 前）；開頭設定加 `unset AGEND_BIN`，`client_demo` 對不存在的 `AGEND_BIN` 直接說明。
+- 2026-09-26 使用者追認 C1–C14（C1 單獨明確決定）。
+- 2026-09-26 fresh-context verifier r1：CONFIRMED（沒有 HIGH／MEDIUM），4 LOW + 1 INFO 已修：socket 段加「開機計畫卡 5 秒時，socket 出現的第一刻連上就看到開機計畫做完的全貌」（bind 移到開機前的 mutant 會失敗）；`retry` 段加「每個 instance 只起一次 holder、沒有 start failed、沒有 restart」（拿掉先停舊 holder 的 mutant 會失敗）；`resolve_attention` 不等 supervisor；`retry` 開始不了時把項目放回清單；假 daemon 游標 `+1` 改 saturating。另外全量測試抓到一個 client 的真 bug：連上之後、`hello` 回應之前 daemon 就關掉連線時，macOS 在設定逾時／寫入時回 `ENOTCONN`／`EINVAL`，沒被當成「請求送出前就斷」而不重試；現在這段的任何錯誤都重試（P7）（#131）。
+- 2026-09-26 實作（draft PR #131，branch `feat/gate-08-client`）：core client protocol 1.1（`ClientHello`、`get_fleet`／全貌、`resolve_attention`、`attention_resolved`、錯誤碼 `client::error_code`、`order_attention`）；migration `0003`（`session_started`，`schema-v3.sql`、golden）；daemon 的 `run/daemon.sock` server、`fleet`、`handlers`、`failed` → 「需要你」→ `retry`、終端串流；`agend-client`；`agend debug ping|watch`、`client_probe`；假 daemon 1.1；CLP-1..12 契約（假 daemon、真 daemon、14 個 mutant、反向檢查）；`check-deps` 新規則；`client_demo` 與 `xtask accept client`；「你親自驗收」7 步改成確切指令與實跑輸出；「待你追認」C1–C14。fresh-context verifier 尚未跑。
 - 2026-09-26 第 4 輪 review（1 MEDIUM：第一個事件 id＝起點＋1）後修正；使用者逐題確認 P1–P10，含 P4 改掉第 11 施工關 T6（重連一律重拿全貌）、P6 把第 11 施工關 G4 移到第 12 施工關。
 - 2026-09-26 第 3 輪 review REFUTED（1 MEDIUM、數個 LOW）後修正：`0003` 把現有 `failed` 的 codex／opencode 設成已建立、加 CHECK 與 schema fixture；`retry` 先 `Shutdown` 留著的 holder；claude／0 的說明、log 字樣改 `start --resume`；游標規則寫成「最舊 − 1」；`actions: []` 的顯示；`get_fleet`／`resolve_attention` 的回應型別。
 - 2026-09-26 第 2 輪 review REFUTED（2 MEDIUM、5 LOW）後修正：`retry` 靠 migration `0003` 的 `session_started` 決定 `--resume`／`--session-id`，codex／opencode 沒跑起來過才給 `retry`；不帶游標維持 1.0 的重播 backlog；`attention_required` 加 `instance_id`；錯誤碼加 `unknown_attention`、身分先於 id 檢查；`inbox` 不預先算可重做；步驟 5 的 `daemon_probe` 參數順序。

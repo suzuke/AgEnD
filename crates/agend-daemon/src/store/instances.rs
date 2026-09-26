@@ -51,6 +51,9 @@ pub struct Instance {
     /// (codex and opencode until gates 7 and 12).
     pub session_id: Option<String>,
     pub status: InstanceStatus,
+    /// The backend session was created (the first `Spawn` was
+    /// acknowledged); set with `running` and never cleared (migration 0003).
+    pub session_started: bool,
 }
 
 /// `[a-z0-9-]{1,24}`: the id names files under `run/holders/`.
@@ -96,6 +99,7 @@ fn from_row(row: &Row<'_>) -> rusqlite::Result<Result<Instance, StoreError>> {
     let program = row.get(2)?;
     let working_directory = row.get(4)?;
     let session_id = row.get(5)?;
+    let session_started = row.get(7)?;
     Ok((|| {
         let invalid = |what: String| StoreError::Invalid(format!("instance {id}: {what}"));
         Ok(Instance {
@@ -107,12 +111,14 @@ fn from_row(row: &Row<'_>) -> rusqlite::Result<Result<Instance, StoreError>> {
             program,
             working_directory,
             session_id,
+            session_started,
             id: id.clone(),
         })
     })())
 }
 
-const COLUMNS: &str = "id, backend, program, args, working_directory, session_id, status";
+const COLUMNS: &str =
+    "id, backend, program, args, working_directory, session_id, status, session_started";
 
 pub(super) fn list(conn: &Connection) -> Result<Vec<Instance>, StoreError> {
     let mut stmt = conn.prepare(&format!("SELECT {COLUMNS} FROM instances ORDER BY id"))?;
@@ -139,11 +145,12 @@ pub(super) fn insert(conn: &Connection, instance: &Instance) -> Result<(), Store
         working_directory,
         session_id,
         status,
+        session_started,
     } = instance;
     validate_id(id).map_err(StoreError::Invalid)?;
     let args = serde_json::to_string(args).map_err(|e| StoreError::Invalid(e.to_string()))?;
     let inserted = conn.execute(
-        &format!("INSERT INTO instances ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"),
+        &format!("INSERT INTO instances ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"),
         rusqlite::params![
             id,
             backend.as_str(),
@@ -151,7 +158,8 @@ pub(super) fn insert(conn: &Connection, instance: &Instance) -> Result<(), Store
             args,
             working_directory,
             session_id,
-            status.as_str()
+            status.as_str(),
+            session_started
         ],
     );
     match inserted {
@@ -168,13 +176,17 @@ pub(super) fn remove(conn: &Connection, id: &str) -> Result<bool, StoreError> {
     Ok(conn.execute("DELETE FROM instances WHERE id = ?1", [id])? == 1)
 }
 
+/// Sets `status`; `running` also records `session_started` in the same
+/// statement (the first `Spawn` was acknowledged, gate 8 P5).
 pub(super) fn set_status(
     conn: &Connection,
     id: &str,
     status: InstanceStatus,
 ) -> Result<(), StoreError> {
     match conn.execute(
-        "UPDATE instances SET status = ?2 WHERE id = ?1",
+        "UPDATE instances SET status = ?2, \
+         session_started = CASE WHEN ?2 = 'running' THEN 1 ELSE session_started END \
+         WHERE id = ?1",
         [id, status.as_str()],
     )? {
         1 => Ok(()),

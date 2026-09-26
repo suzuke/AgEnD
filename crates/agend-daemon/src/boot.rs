@@ -64,6 +64,7 @@ mod tests {
             working_directory: "/tmp".into(),
             session_id: Some("s-1".into()),
             status,
+            session_started: false,
         }
     }
 

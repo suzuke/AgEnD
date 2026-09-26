@@ -51,3 +51,25 @@ fn run_all_fakes_covers_every_trait_once() {
         ]
     );
 }
+
+/// Gate 8 P9: the fake daemon meets the client protocol contract (the real
+/// `agend daemon` runs the same cases in `crates/agend/tests/`).
+#[cfg(unix)]
+#[test]
+fn client_protocol_fake_meets_the_contract() {
+    use agend_testkit::contract::client::{self, FakeDaemonFixture};
+    let report = client::run(FAKE, FakeDaemonFixture::new);
+    println!("{report}");
+    report.assert_passed();
+}
+
+/// Gate 8 P9, negative check: the fake with event ids counted from 1 again
+/// must fail the old-cursor rule.
+#[cfg(unix)]
+#[test]
+fn client_protocol_fake_with_ids_from_one_fails_clp_4() {
+    use agend_testkit::contract::client::{self, fake_with_ids_from_one};
+    let report = client::run_rules("ids-from-one", &["CLP-4"], fake_with_ids_from_one);
+    println!("{report}");
+    assert_eq!(report.failing_rules(), ["CLP-4"], "{report}");
+}

@@ -377,6 +377,12 @@ mod tests {
                         }],
                     }),
                     recap: None,
+                    attention_id: None,
+                    unblocks: None,
+                    waiting_since_unix_ms: None,
+                    if_ignored: None,
+                    actions: Vec::new(),
+                    instance_id: None,
                 },
             },
         }

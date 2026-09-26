@@ -23,3 +23,5 @@ agend-testkit.workspace = true
 libc = "0.2"
 # The shim tests write binding snapshots (JSON), like the daemon will.
 serde_json = "1"
+# The daemon's server run in the test process for CLP-8 (gate 8).
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread"] }

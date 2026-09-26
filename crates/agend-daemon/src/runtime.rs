@@ -12,8 +12,12 @@
 //!   connection, which would take over the daemon's own (gate 4 P4).
 //! - Stop: closes the link, then `Shutdown` on a fresh connection and waits
 //!   for the lock to be released.
-//! - Dropping the runtime closes every link and tells no holder anything:
-//!   holders outlive the daemon (D3).
+//! - Dropping the runtime (its last clone) closes every link and tells no
+//!   holder anything: holders outlive the daemon (D3).
+//! - Terminal (gate 8 P6): [`HolderRuntime::live_terminal`] goes through the
+//!   link (screen, then its PTY bytes); [`HolderRuntime::last_screen`] is a
+//!   short connection for a holder the daemon has no link to (a `failed`
+//!   instance's), used only for such holders.
 //!
 //! The blocking protocol calls run in `spawn_blocking` inside the daemon's
 //! tokio runtime.
@@ -43,7 +47,7 @@ use agend_core::traits::{HolderHandle, HolderLaunch, Runtime};
 use crate::log;
 use crate::store::instances::validate_id;
 use client::Conn;
-pub use link::{Attached, EventSink, HolderEvent, SpawnOutcome};
+pub use link::{Attached, EventSink, HolderEvent, SpawnOutcome, TerminalFeed};
 
 /// How long a stopping holder may take to release its lock (its agent gets
 /// 5 s after SIGHUP, gate 4 P7).
@@ -73,6 +77,7 @@ pub struct Started {
     pub generation: u64,
 }
 
+#[derive(Clone)]
 pub struct HolderRuntime {
     inner: Arc<Inner>,
 }
@@ -151,6 +156,34 @@ impl HolderRuntime {
             .into_iter()
             .map(|(id, pid)| self.inner.handle(&id, pid))
             .collect())
+    }
+
+    /// The screen of `id`'s holder and its PTY chunks after it, through the
+    /// daemon's link; `None` without a link.
+    pub fn live_terminal(&self, id: &str) -> Option<tokio::sync::oneshot::Receiver<TerminalFeed>> {
+        self.inner.lock_links().get(id)?.terminal()
+    }
+
+    /// The screen of a running holder the daemon has no link to, from one
+    /// short connection (it restarts the holder's idle timer, gate 4 G5);
+    /// `None` when no holder runs. Never for a holder with a link: a new
+    /// connection takes the link's over.
+    pub async fn last_screen(&self, id: &str) -> Result<Option<String>, RuntimeError> {
+        let home = self.inner.home.clone();
+        let id = id.to_owned();
+        blocking(move || {
+            if files::running(&home, &id)
+                .map_err(|e| err(format!("{id}: {e}")))?
+                .is_none()
+            {
+                return Ok(None);
+            }
+            let socket = files::socket_path(&home, &id);
+            let (_, screen) = Conn::connect(&socket)
+                .map_err(|e| err(format!("connect to {}: {e}", socket.display())))?;
+            Ok(Some(screen))
+        })
+        .await
     }
 
     /// Closes the link of `id` without telling the holder.

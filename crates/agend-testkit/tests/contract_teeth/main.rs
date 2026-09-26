@@ -11,6 +11,8 @@
 //! To add a rule: add the row (with its mutant names) to CONTRACTS.md, a
 //! case tagged with its id, and the mutants below.
 
+#[cfg(unix)]
+mod client;
 mod clock;
 mod driver;
 mod forge;
@@ -42,6 +44,8 @@ fn all_mutants() -> Vec<Mutant> {
         notifier::mutants(),
         clock::mutants(),
         runner::mutants(),
+        #[cfg(unix)]
+        client::mutants(),
     ]
     .into_iter()
     .flatten()
@@ -49,7 +53,7 @@ fn all_mutants() -> Vec<Mutant> {
 }
 
 /// Rule-id prefix of each contract, as used in CONTRACTS.md.
-const PREFIXES: [(&str, &str); 7] = [
+const PREFIXES: [(&str, &str); 8] = [
     ("Driver", "DRV"),
     ("Forge", "FRG"),
     ("Store", "STO"),
@@ -57,6 +61,7 @@ const PREFIXES: [(&str, &str); 7] = [
     ("Notifier", "NTF"),
     ("Clock", "CLK"),
     ("Runner", "RUN"),
+    ("ClientProtocol", "CLP"),
 ];
 
 const CONTRACTS_MD: &str = include_str!("../../CONTRACTS.md");
