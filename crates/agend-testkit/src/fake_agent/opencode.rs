@@ -68,7 +68,7 @@ pub fn main(args: impl IntoIterator<Item = String>) -> ExitCode {
     let server = match Server::start(port, Duration::from_millis(turn_ms), state) {
         Ok(server) => server,
         Err(e) => {
-            eprintln!("fake-opencode-serve: cannot listen on port {port}: {e}");
+            eprintln!("fake-opencode-serve: cannot start on port {port}: {e}");
             return ExitCode::FAILURE;
         }
     };
@@ -101,7 +101,9 @@ impl Server {
             file: state,
             ..State::default()
         };
-        initial.load();
+        initial
+            .load()
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         let shared = Arc::new(Shared {
             state: Mutex::new(initial),
             turn,
@@ -174,14 +176,31 @@ impl State {
         1_700_000_000_000 + self.next_id
     }
 
-    fn load(&mut self) {
-        let Some(file) = &self.file else { return };
-        let Ok(text) = std::fs::read_to_string(file) else {
-            return;
+    /// Loads state from `self.file`. No file is empty state (nothing has
+    /// been saved yet, or nothing persists). A present but unparsable file
+    /// is an error: `save` now writes atomically (temp file + rename), so a
+    /// non-empty file that fails to parse means real corruption, not a
+    /// save caught mid-write, and starting empty would silently answer 404
+    /// to every session a client expects to resume.
+    fn load(&mut self) -> Result<(), String> {
+        let Some(file) = &self.file else {
+            return Ok(());
         };
-        let Ok(saved) = serde_json::from_str::<Value>(&text) else {
-            return;
+        let text = match std::fs::read_to_string(file) {
+            Ok(text) => text,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(format!("cannot read state file {}: {e}", file.display())),
         };
+        if text.trim().is_empty() {
+            return Ok(());
+        }
+        let saved: Value = serde_json::from_str(&text).map_err(|e| {
+            format!(
+                "corrupt state file {} ({} bytes): {e}",
+                file.display(),
+                text.len()
+            )
+        })?;
         self.next_id = saved["next_id"].as_u64().unwrap_or(0);
         for s in saved["sessions"].as_array().into_iter().flatten() {
             let id = s["info"]["id"].as_str().unwrap_or_default().to_owned();
@@ -196,6 +215,7 @@ impl State {
                 },
             );
         }
+        Ok(())
     }
 
     fn save(&self) {
@@ -206,10 +226,7 @@ impl State {
             .map(|s| json!({"info": s.info, "messages": s.messages}))
             .collect();
         let saved = json!({"next_id": self.next_id, "sessions": sessions});
-        if let Some(dir) = file.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        let _ = std::fs::write(file, saved.to_string());
+        let _ = super::write_state_atomic(file, &saved.to_string());
     }
 
     fn broadcast(&mut self, kind: &str, properties: Value) {
@@ -508,10 +525,14 @@ impl State {
         let session = self.sessions.get_mut(session_id).expect("known session");
         let user_index = session.active.take().map(|a| a.user_index);
         match session.queue.pop_front() {
-            Some((next, text)) => self.start_turn(session_id, next, text, turn),
+            Some((next, text)) => {
+                self.start_turn(session_id, next, text, turn);
+                self.save();
+            }
             None => {
                 // Persist before `session.idle`: a client may stop the server
-                // as soon as it sees it.
+                // as soon as it sees it. Nothing below mutates saved state,
+                // so this is the only save this branch needs.
                 self.save();
                 self.status(session_id, "idle");
                 self.broadcast("session.idle", json!({"sessionID": session_id}));
@@ -522,7 +543,6 @@ impl State {
                 }
             }
         }
-        self.save();
     }
 
     /// `POST /session/:id/abort`: the assistant message gets
@@ -701,5 +721,144 @@ fn wait_for_reply(shared: &Shared, session_id: &str, user_index: usize) -> (u16,
             }
         }
         std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tempdir::TempDir;
+
+    fn session(id: &str) -> Session {
+        Session {
+            info: json!({"id": id}),
+            messages: Vec::new(),
+            active: None,
+            queue: VecDeque::new(),
+        }
+    }
+
+    /// A state file with no bytes is treated like a missing file (`save`
+    /// never writes an empty file, but an operator or another test tool
+    /// might leave one behind).
+    #[test]
+    fn load_empty_file_is_empty_state() {
+        let dir = TempDir::new("opencode-empty").unwrap();
+        let file = dir.path().join("state.json");
+        std::fs::write(&file, "").unwrap();
+        let mut state = State {
+            file: Some(file),
+            ..State::default()
+        };
+        state.load().unwrap();
+        assert!(state.sessions.is_empty());
+    }
+
+    /// A missing file is empty state, not an error.
+    #[test]
+    fn load_missing_file_is_empty_state() {
+        let dir = TempDir::new("opencode-missing").unwrap();
+        let file = dir.path().join("does-not-exist.json");
+        let mut state = State {
+            file: Some(file),
+            ..State::default()
+        };
+        state.load().unwrap();
+        assert!(state.sessions.is_empty());
+    }
+
+    /// A non-empty file that fails to parse — the shape a process killed
+    /// between `fs::write`'s truncate and its write left behind, before
+    /// `save` became atomic — is now a loud, clearly labelled error instead
+    /// of a silent empty start (which answered 404 to every session a
+    /// client expected to resume).
+    #[test]
+    fn load_truncated_file_is_a_clear_error() {
+        let dir = TempDir::new("opencode-truncated").unwrap();
+        let file = dir.path().join("state.json");
+        // A half-written save: valid JSON truncated mid-object, exactly
+        // what a truncate-then-write race can leave on disk.
+        std::fs::write(&file, r#"{"next_id": 3, "sessions": [{"info": {"id"#).unwrap();
+        let mut state = State {
+            file: Some(file.clone()),
+            ..State::default()
+        };
+        let err = state.load().unwrap_err();
+        assert!(
+            err.contains(&file.display().to_string()),
+            "error should name the file: {err}"
+        );
+        assert!(state.sessions.is_empty());
+    }
+
+    /// `save` goes through the temp-file-then-rename path: no partial file
+    /// is ever observable at the final path, even mid-write, because the
+    /// writer only ever creates the temp file first and `rename` is the
+    /// single step that makes the new content visible at `file`.
+    #[test]
+    fn save_is_atomic_no_partial_file_observable() {
+        let dir = TempDir::new("opencode-atomic").unwrap();
+        let file = dir.path().join("state.json");
+        let mut state = State {
+            file: Some(file.clone()),
+            ..State::default()
+        };
+        state
+            .sessions
+            .insert("ses_fake0001".to_owned(), session("ses_fake0001"));
+        state.next_id = 1;
+        state.save();
+
+        // The file exists, is fully valid JSON, and no leftover temp file
+        // is left behind next to it.
+        let text = std::fs::read_to_string(&file).unwrap();
+        let parsed: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(parsed["sessions"][0]["info"]["id"], "ses_fake0001");
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".tmp."))
+            .collect();
+        assert!(leftovers.is_empty(), "temp file left behind: {leftovers:?}");
+
+        // A save round-trips through load.
+        let mut reloaded = State {
+            file: Some(file.clone()),
+            ..State::default()
+        };
+        reloaded.load().unwrap();
+        assert!(reloaded.sessions.contains_key("ses_fake0001"));
+
+        // Prove the save actually replaces the directory entry rather than
+        // truncating the existing inode in place: a hard link taken right
+        // before the next save must keep observing the OLD content, and the
+        // inode behind `file` must change. `std::fs::write` truncates the
+        // same inode, so a plain-write implementation would make the link
+        // observe the NEW content and the inode would stay the same — this
+        // is what would let this test pass against a non-atomic save.
+        let old = dir.path().join("state.json.old");
+        std::fs::hard_link(&file, &old).unwrap();
+        let old_ino = std::os::unix::fs::MetadataExt::ino(&std::fs::metadata(&old).unwrap());
+
+        state
+            .sessions
+            .insert("ses_fake0002".to_owned(), session("ses_fake0002"));
+        state.next_id = 2;
+        state.save();
+
+        let new_ino = std::os::unix::fs::MetadataExt::ino(&std::fs::metadata(&file).unwrap());
+        assert_ne!(
+            old_ino, new_ino,
+            "save must replace the file's inode via rename, not truncate it in place"
+        );
+
+        let old_text = std::fs::read_to_string(&old).unwrap();
+        let old_parsed: Value = serde_json::from_str(&old_text).unwrap();
+        assert_eq!(old_parsed["sessions"].as_array().unwrap().len(), 1);
+        assert_eq!(old_parsed["sessions"][0]["info"]["id"], "ses_fake0001");
+
+        let new_text = std::fs::read_to_string(&file).unwrap();
+        let new_parsed: Value = serde_json::from_str(&new_text).unwrap();
+        assert_eq!(new_parsed["sessions"].as_array().unwrap().len(), 2);
     }
 }
