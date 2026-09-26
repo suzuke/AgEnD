@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 唯一 binary：CLI、daemon、holder、TUI、shim 都在裡面。
 > - 記住：**argv[0] 分派在 `main` 第一行**；以 `git`／`kill`／`killall`／`pkill` 名稱執行時就是 shim，以 git hook 名稱（`reference-transaction`、`pre-push`…，由 `$AGEND_HOME/hooks/` 的 symlink）執行時就是 agend 的 git hook。
-> - 下一步：第 9 施工關實作 CLI 命令；目前有 `--version`、`--help` 與 `holder`（第 4 施工關）。
+> - 下一步：第 9 施工關實作 CLI 命令；目前有 `--version`、`--help`、`holder`（第 4 施工關）與 `daemon`（第 6 施工關）。
 
 ## 負責
 
@@ -12,7 +12,8 @@
 - `doctor`、`init`（第 9 施工關）、debug
 - 第 13 施工關：服務註冊、`agend uninstall`、`agend telegram setup`（請 daemon 配對，本 crate 沒有 Telegram client）
 - `holder <instance-id>`：argv[0] 分派之後、CLI 解析之前就交給 `agend_holder::run`（第 4 施工關 P1）
-- 之後：`daemon`、`app` 子命令
+- `daemon`：同樣在 CLI 解析之前交給 `agend_daemon::daemon::run`，只在前景跑、要 `AGEND_HOME`（第 6 施工關 P1）；tokio runtime 在那裡面建，CLI 路徑不建
+- 之後：`app` 子命令
 
 ## 不負責
 
@@ -35,11 +36,12 @@
 ## 依賴規則
 
 - 一般依賴：所有 `agend-*` library crate（除 testkit）
-- dev 依賴：`agend-testkit`；`serde_json`（shim 測試寫 binding 快照）
+- dev 依賴：`agend-testkit`；`serde_json`（shim 測試寫 binding 快照）；`libc`（測試只對自己的子程序或自己 lock 檔裡的 pid 送訊號）
 
 ## 入口
 
 - `agend --version`、`agend --help`
+- `agend daemon`（前景；Ctrl-C 停 daemon，agent 繼續跑）
 - 以 `git` 名稱執行 → `agend_shim::run`
 - 以 git hook 名稱執行（git 從 `$AGEND_HOME/hooks/` 呼叫） → `agend_shim::run`（`Tool::Hook`）
 

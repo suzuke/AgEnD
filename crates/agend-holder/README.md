@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 每個 instance 一個 holder 程序（`agend holder <instance-id>`）：在 PTY 裡跑 agent、記住畫面、回報結束狀態，活過 daemon 重啟（D3）。
 > - 記住：**PTY 只收三種位元組**：列舉過的控制鍵、操作者輸入、終端查詢回覆；只有協定 `Shutdown` 停得掉 holder。
-> - 下一步：第 6 施工關由 daemon 的 agent runtime 啟動與接回 holder。
+> - 下一步：第 6 施工關起由 daemon 的 agent runtime（`agend_daemon::runtime`）啟動與接回 holder；daemon 不依賴本 crate，只經 holder 協定與 `agend holder` 子命令。
 
 ## 負責
 

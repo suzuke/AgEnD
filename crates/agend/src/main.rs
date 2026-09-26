@@ -6,7 +6,8 @@
 //! runtime, read config or open the DB (plan §4.7).
 //!
 //! `agend holder <instance-id>` is split off next, before CLI parsing
-//! (gate 4 P1).
+//! (gate 4 P1), and so is `agend daemon` (gate 6 P1), which builds its own
+//! runtime; the CLI path never does.
 //!
 //! Must NOT: do any work before the argv[0] dispatch.
 
@@ -28,6 +29,9 @@ fn main() -> ExitCode {
     // it splits off right after the argv[0] dispatch (gate 4 P1).
     if args.first().is_some_and(|a| a == "holder") {
         return agend_holder::run(args[1..].to_vec());
+    }
+    if args.first().is_some_and(|a| a == "daemon") {
+        return agend_daemon::daemon::run(args[1..].to_vec());
     }
     cli::run(args)
 }

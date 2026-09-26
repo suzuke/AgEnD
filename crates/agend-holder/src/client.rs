@@ -1,6 +1,7 @@
 //! Minimal synchronous client for the holder protocol: connect, `hello`, send
 //! requests, read responses with a timeout. Used by the `holder_probe` example
-//! and by tests; the daemon's own client arrives with gate 6.
+//! and by tests. The daemon has its own client (`agend_daemon::runtime`,
+//! gate 6): it does not link this crate.
 //!
 //! Must NOT: retry, reconnect or interpret the screen; callers decide.
 

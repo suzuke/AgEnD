@@ -29,8 +29,9 @@
 //!   changed, and an upgrade first writes a DB snapshot.
 //! - `journal_mode=WAL`, `synchronous=FULL`, `foreign_keys=ON`.
 //! - Retention ([`retention::RETENTION`], [`SqliteStore::prune`]) and the
-//!   daily DB snapshot ([`SqliteStore::snapshot`], 7 kept). The daemon wires
-//!   both to boot and every 24 hours in gate 6.
+//!   daily DB snapshot ([`SqliteStore::snapshot`], 7 kept). The daemon runs
+//!   both at boot and every hour (`crate::housekeeping`, gate 6 P5).
+//! - `instances` (gate 6 P2): the agents the daemon keeps running.
 //! - Pipeline progress (`PipelineState`) is not stored yet: gate 10 adds it as
 //!   a column of `tasks`, written together with the task by the same
 //!   compare-and-swap, and never rebuilt by replaying events (gate 5 P4).
@@ -39,6 +40,7 @@
 //! open a second connection to `agend.db`; delete a file in `backups/` that
 //! does not match the DB snapshot name pattern.
 
+pub mod instances;
 mod migrate;
 pub mod retention;
 pub mod snapshot;
@@ -58,6 +60,7 @@ use agend_core::traits::{CasResult, Store, StoredEvent, VersionedTask};
 use rusqlite::{Connection, ErrorCode, OpenFlags};
 use tokio::sync::{mpsc, oneshot};
 
+pub use instances::{Instance, InstanceStatus};
 pub use migrate::{LATEST_VERSION, MIGRATIONS, Migration};
 pub use retention::PruneReport;
 pub use snapshot::SnapshotReport;
@@ -301,6 +304,40 @@ impl SqliteStore {
     pub async fn load_events(&self, task_id: &str) -> Result<Vec<StoredEvent>, StoreError> {
         let task_id = task_id.to_owned();
         self.call(move |conn| task_row::load_events(conn, &task_id))
+            .await
+    }
+
+    /// Every instance, by id.
+    pub async fn instances(&self) -> Result<Vec<Instance>, StoreError> {
+        self.call(|conn| instances::list(conn)).await
+    }
+
+    /// One instance, if it exists.
+    pub async fn instance(&self, id: &str) -> Result<Option<Instance>, StoreError> {
+        let id = id.to_owned();
+        self.call(move |conn| instances::get(conn, &id)).await
+    }
+
+    /// Adds an instance; [`StoreError::Exists`] if the id is taken.
+    pub async fn add_instance(&self, instance: &Instance) -> Result<(), StoreError> {
+        let instance = instance.clone();
+        self.call(move |conn| instances::insert(conn, &instance))
+            .await
+    }
+
+    /// Removes an instance; false when there was none.
+    pub async fn remove_instance(&self, id: &str) -> Result<bool, StoreError> {
+        let id = id.to_owned();
+        self.call(move |conn| instances::remove(conn, &id)).await
+    }
+
+    pub async fn set_instance_status(
+        &self,
+        id: &str,
+        status: InstanceStatus,
+    ) -> Result<(), StoreError> {
+        let id = id.to_owned();
+        self.call(move |conn| instances::set_status(conn, &id, status))
             .await
     }
 

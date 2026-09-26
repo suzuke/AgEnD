@@ -10,13 +10,15 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use agend_core::model::Backend;
 use agend_core::pipeline::task::{Task, TaskStatus};
 use agend_core::pipeline::workflow::Workflow;
 use agend_core::traits::{CasResult, Clock, Store, StoredEvent};
 use agend_daemon::store::retention::{DAY_MS, Keep, RETENTION, Target};
 use agend_daemon::store::snapshot::{self, KEEP};
 use agend_daemon::store::{
-    BACKUPS_DIR, DB_FILE, LATEST_VERSION, MIGRATIONS, Migration, SqliteStore, StoreError,
+    BACKUPS_DIR, DB_FILE, Instance, InstanceStatus, LATEST_VERSION, MIGRATIONS, Migration,
+    SqliteStore, StoreError,
 };
 use agend_testkit::block_on;
 use agend_testkit::contract::store::{self as contract, StoreFixture};
@@ -418,13 +420,17 @@ fn an_upgrade_takes_a_pre_upgrade_snapshot_first() {
     let first = SqliteStore::open_with(&home, NOW, &[]).err().unwrap();
     assert!(matches!(first, StoreError::TooNew { .. }), "{first}");
 
-    let two = [MIGRATIONS[0], ADD_TABLE];
-    drop(SqliteStore::open_with(&home, NOW, &two).unwrap());
-    assert_eq!(user_version(&home.join(DB_FILE)), 2);
+    let next = [MIGRATIONS, &[ADD_TABLE]].concat();
+    drop(SqliteStore::open_with(&home, NOW, &next).unwrap());
+    assert_eq!(user_version(&home.join(DB_FILE)), LATEST_VERSION + 1);
     let pre = home
         .join(BACKUPS_DIR)
-        .join(snapshot::pre_upgrade_name(NOW, 2));
-    assert_eq!(user_version(&pre), 1, "the snapshot is the v1 database");
+        .join(snapshot::pre_upgrade_name(NOW, LATEST_VERSION + 1));
+    assert_eq!(
+        user_version(&pre),
+        LATEST_VERSION,
+        "the snapshot is the database before the upgrade"
+    );
     let tasks: i64 = Connection::open(&pre)
         .unwrap()
         .query_row("SELECT count(*) FROM tasks", [], |r| r.get(0))
@@ -440,10 +446,10 @@ fn a_failing_migration_rolls_back_and_leaves_user_version_unchanged() {
     };
     let dir = TempDir::new("store-broken").unwrap();
     let home = dir.path().join("home");
-    let list = [MIGRATIONS[0], BROKEN];
+    let list = [MIGRATIONS, &[BROKEN]].concat();
     drop(SqliteStore::open(&home, NOW).unwrap());
 
-    // From a v1 database: the broken one rolls back.
+    // From a database at the latest version: the broken one rolls back.
     let error = SqliteStore::open_with(&home, NOW, &list).err().unwrap();
     assert!(
         matches!(
@@ -456,7 +462,7 @@ fn a_failing_migration_rolls_back_and_leaves_user_version_unchanged() {
         "{error}"
     );
     let db = home.join(DB_FILE);
-    assert_eq!(user_version(&db), 1);
+    assert_eq!(user_version(&db), LATEST_VERSION);
     let half: i64 = Connection::open(&db)
         .unwrap()
         .query_row(
@@ -725,15 +731,15 @@ fn a_database_missing_a_table_of_its_version_is_refused_and_left_untouched() {
         .unwrap()
         .execute_batch("DROP TABLE task_events; DROP TABLE workflows;")
         .unwrap();
-    assert_eq!(user_version(&db), 1);
+    assert_eq!(user_version(&db), LATEST_VERSION);
     let before = (sha256(&db), listing(&home));
 
     let error = SqliteStore::open(&home, NOW).err().unwrap();
     assert_eq!(
         error.to_string(),
         format!(
-            "agend.db has schema version 1 but lacks its table(s) task_events, workflows; \
-             refusing to start with it — restore a snapshot from {} (see README)",
+            "agend.db has schema version {LATEST_VERSION} but lacks its table(s) task_events, \
+             workflows; refusing to start with it — restore a snapshot from {} (see README)",
             home.join("backups").display()
         )
     );
@@ -989,6 +995,34 @@ fn an_empty_database_takes_no_daily_snapshot_and_evicts_none() {
     let report = block_on(store.snapshot(NOW + 2 * KEEP as u64 * DAY_MS)).unwrap();
     assert!(report.taken && !report.empty);
     assert_eq!(report.rotated_out.len(), 1);
+}
+
+/// Verifier finding (gate 6 round 1, F2): instances are data too. A DB
+/// whose only rows are instances (every home right after gate 6's first
+/// `daemon_probe add`) gets its daily snapshot.
+#[test]
+fn a_database_with_only_instances_takes_its_daily_snapshot() {
+    let dir = TempDir::new("store-snapshot-instances").unwrap();
+    let home = dir.path().join("home");
+    let store = SqliteStore::open(&home, NOW).unwrap();
+    assert!(block_on(store.snapshot(NOW)).unwrap().empty);
+    let instance = Instance {
+        id: "g6-1".into(),
+        backend: Backend::Claude,
+        program: "/bin/bash".into(),
+        args: vec!["-c".into(), "exit 0".into()],
+        working_directory: "/tmp".into(),
+        session_id: Some("s-1".into()),
+        status: InstanceStatus::New,
+    };
+    block_on(store.add_instance(&instance)).unwrap();
+    let report = block_on(store.snapshot(NOW)).unwrap();
+    assert!(report.taken && !report.empty, "{report:?}");
+    let copied: i64 = Connection::open(&report.path)
+        .unwrap()
+        .query_row("SELECT count(*) FROM instances", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(copied, 1);
 }
 
 /// Verifier finding (gate 5 round 1): a snapshot killed mid-write can
