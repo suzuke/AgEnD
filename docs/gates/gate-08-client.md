@@ -9,7 +9,7 @@
 
 ## 狀態
 
-**實作中**（2026-09-26）：draft PR（branch `feat/gate-08-client`）；自動驗收除 fresh-context verifier 外都已通過；「待你追認」C1–C14 與「你親自驗收」等你。P1–P10 使用者已確認（含改 T6、G4 移第 12 施工關）。
+**實作中**（2026-09-26）：draft PR #131（branch `feat/gate-08-client`）；自動驗收除 fresh-context verifier 外都已通過；「待你追認」C1–C14 與「你親自驗收」等你。P1–P10 使用者已確認（含改 T6、G4 移第 12 施工關）。
 
 ## 範圍
 
@@ -464,7 +464,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 日期 + 一行 + commit／PR，新的在上面。
 
-- 2026-09-26 實作（draft PR，branch `feat/gate-08-client`）：core client protocol 1.1（`ClientHello`、`get_fleet`／全貌、`resolve_attention`、`attention_resolved`、錯誤碼 `client::error_code`、`order_attention`）；migration `0003`（`session_started`，`schema-v3.sql`、golden）；daemon 的 `run/daemon.sock` server、`fleet`、`handlers`、`failed` → 「需要你」→ `retry`、終端串流；`agend-client`；`agend debug ping|watch`、`client_probe`；假 daemon 1.1；CLP-1..12 契約（假 daemon、真 daemon、14 個 mutant、反向檢查）；`check-deps` 新規則；`client_demo` 與 `xtask accept client`；「你親自驗收」7 步改成確切指令與實跑輸出；「待你追認」C1–C14。fresh-context verifier 尚未跑。
+- 2026-09-26 實作（draft PR #131，branch `feat/gate-08-client`）：core client protocol 1.1（`ClientHello`、`get_fleet`／全貌、`resolve_attention`、`attention_resolved`、錯誤碼 `client::error_code`、`order_attention`）；migration `0003`（`session_started`，`schema-v3.sql`、golden）；daemon 的 `run/daemon.sock` server、`fleet`、`handlers`、`failed` → 「需要你」→ `retry`、終端串流；`agend-client`；`agend debug ping|watch`、`client_probe`；假 daemon 1.1；CLP-1..12 契約（假 daemon、真 daemon、14 個 mutant、反向檢查）；`check-deps` 新規則；`client_demo` 與 `xtask accept client`；「你親自驗收」7 步改成確切指令與實跑輸出；「待你追認」C1–C14。fresh-context verifier 尚未跑。
 - 2026-09-26 第 4 輪 review（1 MEDIUM：第一個事件 id＝起點＋1）後修正；使用者逐題確認 P1–P10，含 P4 改掉第 11 施工關 T6（重連一律重拿全貌）、P6 把第 11 施工關 G4 移到第 12 施工關。
 - 2026-09-26 第 3 輪 review REFUTED（1 MEDIUM、數個 LOW）後修正：`0003` 把現有 `failed` 的 codex／opencode 設成已建立、加 CHECK 與 schema fixture；`retry` 先 `Shutdown` 留著的 holder；claude／0 的說明、log 字樣改 `start --resume`；游標規則寫成「最舊 − 1」；`actions: []` 的顯示；`get_fleet`／`resolve_attention` 的回應型別。
 - 2026-09-26 第 2 輪 review REFUTED（2 MEDIUM、5 LOW）後修正：`retry` 靠 migration `0003` 的 `session_started` 決定 `--resume`／`--session-id`，codex／opencode 沒跑起來過才給 `retry`；不帶游標維持 1.0 的重播 backlog；`attention_required` 加 `instance_id`；錯誤碼加 `unknown_attention`、身分先於 id 檢查；`inbox` 不預先算可重做；步驟 5 的 `daemon_probe` 參數順序。
