@@ -3,13 +3,13 @@
 > **TL;DR**
 > - agent 命令、操作者命令（`instance add/remove/list`、`daemon restart`）、`status`、`doctor`、`init`；真 daemon 本關做 `status`、`send`、`inbox`（接第 7 施工關的送達，完成里程碑「兩個 codex agent 互傳訊息、重啟不漏不重」）與操作者命令，其他 agent 命令先對假 daemon 做完。
 > - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這個施工關才算完成。
-> - 下一步：逐題確認 P1–P10。**P1、P2、P3、P8、P9 與已定的文件不同，要明確決定**；確認後 merge 這份提案，等第 7、8 施工關都 merge 後開工。
+> - 下一步：P1–P10 使用者已確認（2026-09-26；P3 改成 `AGEND_HOME` 一律必須設、P6 對使用者叫 `name`、操作者也能 `task create`）；merge 這份提案，等第 7、8 施工關都 merge 後開工。
 
 **先看這條**：這頁的步驟會用到 `agend`。每個新開的終端機分頁（包括第二個終端）都要先跑「你親自驗收」開頭的設定，否則會跑到舊的 Node 版 `agend` 1.24.0。
 
 ## 狀態
 
-**提案中**（2026-09-26）：開工前提案 P1–P10 寫定，待使用者確認。依賴（**兩個都是開工的硬前提**）：第 8 施工關（client protocol 1.1、`agend-client`）正在實作（`feat/gate-08-client`），本頁照它已確認的設計寫，不照程式；第 7 施工關（送達、`messages` 表、`deliver` API）的提案在審（`docs/gate-07-proposal`），本頁照它的提案寫，確切介面以它 merge 後為準。
+**提案中**（2026-09-26）：開工前提案 P1–P10 使用者已確認（P3 由使用者改寫、P6 加上 `name` 用詞、P1 決定操作者也能 `task create`），等 merge 後開工。依賴（**兩個都是開工的硬前提**）：第 8 施工關（client protocol 1.1、`agend-client`）正在實作（`feat/gate-08-client`），本頁照它已確認的設計寫，不照程式；第 7 施工關（送達、`messages` 表、`deliver` API）的提案在審（`docs/gate-07-proposal`），本頁照它的提案寫，確切介面以它 merge 後為準。
 
 ## 範圍
 
@@ -37,7 +37,8 @@
     |---|---|---|
     | `agend status` | 兩者 | agent：自己的 instance、目前 task（本關一律「沒有 task」）；操作者：全貌摘要（`get_fleet`） |
     | `agend send`、`agend inbox` | agent | 做：`send` 呼叫第 7 施工關的 `deliver(…, level)`（本關負責這段接線），`inbox` 讀第 7 施工關的 `messages` 表裡寄給自己的；第 7 施工關 merge 是本關開工的硬前提 |
-    | `done`、`result`、`review approve`／`changes`、`block`／`unblock`、`task create`、`remind` | agent | `not_supported`，訊息寫「第 10 施工關」 |
+    | `done`、`result`、`review approve`／`changes`、`block`／`unblock`、`remind` | agent | `not_supported`，訊息寫「第 10 施工關」 |
+    | `agend task create` | 兩者（操作者要帶 `--team`） | `not_supported`，handler 在第 10 施工關 |
     | `agend ask` | agent | `not_supported`，**移到第 10 施工關**（見下） |
     | `agend instance add`／`remove`／`list` | 操作者（`list` 唯讀，兩者都可） | 做（P6） |
     | `agend daemon restart` | 操作者 | 做（P7） |
@@ -46,8 +47,8 @@
     已有的留著：`agend daemon`、`agend holder`、`--version`、`--help`；`agend debug ping/watch` 在第 8 施工關的實作 merge 後才有，本關不動它們。
   - 權限只在 daemon 擋（D17），CLI 不預先判斷：`command` 請求（agent 命令）只收 agent；會改東西的操作者請求（P6 的 `operator`、第 8 施工關的 `resolve_attention`、`terminal_input`）只收操作者；唯讀請求（`get_fleet`、`subscribe_*`）大家都能用。拒絕一律 `forbidden`，訊息附正確做法。
   - 第 9、10 施工關的分工：**本關負責**所有命令的 CLI 語法、client 接線、錯誤對應與重送規則（P2、P4、P5）；**第 10 施工關負責** `ask`（daemon 端與 store）、`done`／`result`／`review`／`block`／`unblock`／`remind`／`task create` 的 daemon handler、`agend workflow`／`agend team` 命令。這些 handler 在第 10 施工關之前，真 daemon 一律回 `not_supported`（訊息寫「第 10 施工關」），不做半套。第 10 施工關在派工訊息印本關的 ticket（P2），`inbox` 照本關的模型（唯讀游標、`--after`）。
-  - **待你決定（本頁不決定）**：操作者能不能跑 `task create`？本頁照 D17 把它列為 agent 命令；第 10 施工關的驗收在你決定前先用開發用的 probe 建 task。
-  - **待你決定（KISS，本頁不套用）**：(a) 沒有真 handler 的命令（`done`、`result`、`review`、`block`／`unblock`、`remind`、`task create`、`ask`）的 CLI 語法與假 daemon 的列，整批移到第 10 施工關，跟 handler 一起做；(b) `init` 再縮成只建目錄（不跑 doctor）。目前的建議是兩者都留在本頁。
+  - **使用者決定（2026-09-26）**：操作者**也能**跑 `agend task create`：它同時是 agent 命令與操作者命令；操作者的形式必須帶 `--team`（agent 的 team 由 daemon 從身分推得）；daemon 的 handler 仍在第 10 施工關。操作者的形式不走只收 agent 的 `command` 請求，而是 P6 `operator` 請求的 `task_create` 變體（第 10 施工關連同 handler 一起加；在那之前 CLI 回 `not_supported`）。
+  - KISS 選項（使用者 2026-09-26 決定**不套用**）：(a) 沒有真 handler 的命令（`done`、`result`、`review`、`block`／`unblock`、`remind`、`task create`、`ask`）的 CLI 語法與假 daemon 的列，整批移到第 10 施工關，跟 handler 一起做；(b) `init` 再縮成只建目錄（不跑 doctor）。兩者都留在本頁。
   - `agend status` 一個命令兩種：有 `AGEND_INSTANCE` 送 `command {status}`，沒有送 `get_fleet`。
   - **`ask` 移到第 10 施工關**（**與第 8 施工關 P6「請示在第 9、10 施工關」不同，請明確決定**）：真的請示要新表、「需要你」來源、`answer_ask`、追問與結論（D35），本關做等於提前一半的第 10 施工關；第 11 施工關 B 段「回答請示」那半一樣等第 10 施工關。
   - 收件者是 claude／opencode（driver 在第 12 施工關）：`send` 照樣寫進 `messages` 表、狀態停在 `queued`；CLI 一樣回 `accepted`（`send` 一律回 `accepted`，core 的 `CommandResult` 沒有 `queued`；送達狀態看 daemon log、TUI）；收件者用 `agend inbox` 看得到；第 12 施工關的 driver 上線後照第 7 施工關的規則補送（實際行為以第 7 施工關 `deliver` 對沒有 driver 的 instance 怎麼做為準）。`CLI-n` 有一列驗它。
@@ -55,7 +56,7 @@
 - 理由：里程碑「第 1–9 施工關：兩個 codex agent 互傳訊息；重啟 daemon 時不中斷、不遺失、不重複」（[ROADMAP](../ROADMAP.md#里程碑使用者可見)）只需要 `status`、`send`、`inbox` 與加 instance，而第 7 施工關只做 `deliver` API、把 `agend send` 與 `level` 交給本關，所以接線由本關負責，本關結束時里程碑要真的跑得起來（步驟 8）；其他 agent 命令沒有 task 就沒有真資料可回，回明確錯誤比假資料好（第 8 施工關 P6 同一條路）。權限只放 daemon 一處，TUI、Telegram、CLI 同一套規則。
 - 替代方案：本關就做 `ask` 的真實作（範圍多一張表與請示流程）；`send`／`inbox` 在第 7 施工關沒 merge 時先回 `not_supported`、里程碑延到第 10 施工關（**會讓 ROADMAP 的里程碑延後，要改的話請明確決定**；本頁不建議）；CLI 也擋一次權限（兩處規則會漂移）；agent 連唯讀的全貌都不能看（`agend instance list` 在 agent 裡就要另開例外）。
 - 例子：操作者跑 `agend done t-1/work/1` → `agend: forbidden: agend done is an agent command; it runs inside an agent, where AGEND_INSTANCE is set`、exit 1；agent `g9-1` 跑 `agend instance add x claude` → `agend: forbidden: only the operator can add instances; ask the operator`、exit 1。
-- [ ] 使用者確認
+- [x] 使用者確認（2026-09-26）
 
 ### P2：agent 命令的語法；task id 與 attempt 從哪來（ticket）
 
@@ -76,27 +77,28 @@
     | review | `agend review approve <ticket>`、`agend review changes <ticket> "<what to change>"` |
     | ask | `agend ask "<question>" [--option <text>]…`；追問 `--follow-up <ask-id>`、結束 `--resolve <ask-id>` |
     | block | `agend block "<reason>"`、`agend unblock` |
-    | task create | `agend task create --role <role> "<title>" [--team <team>] [--workflow <id>]` |
+    | task create | `agend task create --role <role> "<title>" [--team <team>] [--workflow <id>]`；操作者跑時 `--team` 必填 |
     | remind | `agend remind <delay>`（`90s`、`30m`、`2h`） |
 
   - **與 [tui-and-setup](../architecture/tui-and-setup.md#agent-介面clid7d17)「daemon 推得 task_id」字面不同，請明確決定**：ticket 裡有 task id；推不得的是 attempt，task id 只是順便帶著。
 - 理由：第 1 施工關的事件身分（每個結果帶 attempt，過期一律 `stale_result`）是 verifier 推翻四輪才定下的結構；在 CLI 或 daemon 補上「現在的」attempt 會把這層保護拿掉。一個 ticket 參數仍然符合 ≤ 2 個參數。
 - 替代方案：daemon 從呼叫者目前的 assignment 補 `task_id` 與 attempt（agent 最簡單；晚到的核准會算在新的 head 上）；CLI 先問 `status` 再補（同樣的問題，只是在 CLI 做）；分開三個旗標 `--task --stage --attempt`（參數太多，agent 容易抄錯一個）。
 - 例子：`agend status` → `t-42 · review (attempt 2) · ticket t-42/review/2`、`next: agend review approve t-42/review/2 | agend review changes t-42/review/2 "<what to change>"`；attempt 3 開始後才送 `agend review approve t-42/review/2` → `agend: stale_result: t-42/review/2 is no longer current (now t-42/review/3); run agend status`、exit 1。
-- [ ] 使用者確認
+- [x] 使用者確認（2026-09-26）
 
 ### P3：`AGEND_HOME` 怎麼找
 
-- 問題：第 6 施工關的 daemon 必須設 `AGEND_HOME`，預設值留給第 9、13 施工關。CLI 要用同一個 home 算出 socket。預設放哪？會不會踩到 v1？
-- 建議：
-  - 順序只有兩步：`AGEND_HOME`（必須是絕對路徑，否則 `AGEND_HOME must be an absolute path` exit 2）→ 沒設就用 **`$HOME/.agend-v2`**。
-  - 一個函式 `agend` 的 `home::resolve()`，CLI、`agend daemon`、`doctor`、`init` 都用它；`agend daemon` 改成收這個路徑（第 6 施工關 P1 的「沒設就 exit 1」改成套用預設）。holder 與 agent 照舊由 daemon 明確設 `AGEND_HOME`（第 6 施工關 H3），agent 裡的 CLI 自然連到同一個 daemon。
-  - v1 防護：解出來的 home 裡有 `fleet.yaml`（v1 的檔）就拒絕：`<path> looks like an AgEnD v1 home (fleet.yaml); set AGEND_HOME to another directory`、exit 1。
-  - 不做 `--home` 旗標、不從 `config.toml` 讀 home：設定檔本身就在 home 裡，是循環。**與已定的 D8／[tui-and-setup](../architecture/tui-and-setup.md#設定與目錄d8)「`config.toml`：home 路徑、Telegram 等連線設定」不同，請明確決定**：建議把「home 路徑」從 `config.toml` 的內容拿掉，只留連線設定。
-- 理由：v1 用 `~/.agend`（舊的是 `~/.agend-terminal`），而里程碑之後要與 v1 並行一週、分開 home；預設踩到 v1 的 DB 目錄後果最嚴重。名字直接寫 `v2`，一眼分得出。預設要一開始就定，之後改名等於要搬家。
-- 替代方案：`~/.agend` 加 v1 防護（並行那週一定被擋，最後還是要設 `AGEND_HOME`）；`~/.local/share/agend`（XDG，沒有 v2 字樣但多一條 `XDG_DATA_HOME` 規則）；macOS 的 `~/Library/Application Support/agend`（路徑有空白，指令常要加引號）；永遠必須設 `AGEND_HOME`（最簡單，但 `init` 之後每個終端都要 export）。
-- 例子：沒設 `AGEND_HOME` → `agend status` 連 `/Users/you/.agend-v2/run/daemon.sock`；`AGEND_HOME=~/.agend agend daemon`（v1 home）→ 被拒、exit 1。
-- [ ] 使用者確認
+- 問題：第 6 施工關的 daemon 必須設 `AGEND_HOME`，預設值留給第 9、13 施工關。CLI 要用同一個 home 算出 socket。要不要有預設？會不會踩到 v1？
+- 決定（**使用者 2026-09-26 改寫**；原本建議預設 `~/.agend-v2`）：
+  - **`AGEND_HOME` 一律必須設**，本關沒有預設值。沒設 → `AGEND_HOME is not set; choose a directory for AgEnD's data and run: export AGEND_HOME=<absolute path>`、exit 2。必須是絕對路徑，否則 `AGEND_HOME must be an absolute path`、exit 2。
+  - 一個函式 `agend` 的 `home::resolve()`，CLI、`agend daemon`、`doctor`、`init` 都用它（第 6 施工關 P1 的「沒設就拒絕」照舊，訊息統一成上面那句）。holder 與 agent 照舊由 daemon 明確設 `AGEND_HOME`（第 6 施工關 H3），agent 裡的 CLI 自然連到同一個 daemon。
+  - v1 防護：home 裡有 `fleet.yaml`（v1 的檔）就拒絕：`<path> looks like an AgEnD v1 home (fleet.yaml); set AGEND_HOME to another directory`、exit 1。
+  - 不做 `--home` 旗標。
+  - **延到第 13 施工關**：預設位置（例如 `~/.agend`）、`config.toml` 要不要列 home 路徑（D8／[tui-and-setup](../architecture/tui-and-setup.md#設定與目錄d8) 的寫法）。
+- 理由：沒有預設就不可能意外寫進 v1 的 `~/.agend`（里程碑之後要與 v1 並行一週）；預設位置是安裝的事，等第 13 施工關有服務註冊時一起定，不必現在挑一個之後要搬家的名字。
+- 替代方案：預設 `~/.agend-v2`（原本的建議）；`~/.agend` 加 v1 防護（並行那週一定被擋）；XDG 路徑。
+- 例子：沒設 `AGEND_HOME` → `agend status` 印上面那句、exit 2；`AGEND_HOME=~/.agend agend daemon`（v1 home）→ 被拒、exit 1。
+- [x] 使用者確認（2026-09-26，使用者改成「一律必須設」）
 
 ### P4：輸出、exit code、錯誤訊息
 
@@ -121,7 +123,7 @@
 - 理由：agent 讀 exit code 只需要分「成功／失敗／我打錯」；更細的分類放 JSON，exit code 就不用當成第二套錯誤碼維護。`--json` 用 protocol 型別，只有一份格式、一套版本規則（#1493）。
 - 替代方案：每種錯誤一個 exit code（連不上 = 3 之類；兩套錯誤碼要同步）；`--json` 的錯誤寫 stderr（agent 要讀兩個串流）；手寫參數解析（約 15 個命令、每個都要自己處理 `--help` 與錯誤）。
 - 例子：`agend status --json`（操作者）→ `{"as_of_event_id":…,"teams":[…],"instances":[…],"attention":[…]}`、exit 0；daemon 沒在跑：`agend status --json` → 10 秒後 `{"error":{"code":"daemon_unreachable","message":"cannot reach …"}}`、exit 1。
-- [ ] 使用者確認
+- [x] 使用者確認（2026-09-26）
 
 ### P5：daemon 重啟時，哪些命令斷線後重送
 
@@ -140,7 +142,7 @@
 - 理由：里程碑要求「重啟 daemon 時訊息不遺失、不重複」：只有 `send` 同時需要「不遺失」（agent 以為送出了）與「不重複」，用它自己的 id 去重是唯一兩者都做得到的路，而且就是送達模型已經有的那套冪等（V1-LESSONS #1：不再多一套去重）。
 - 替代方案：全部不重送（`send` 斷在中間時 agent 只能猜，重下一次就可能重複）；daemon 依 `request_id` 去重（要跨重啟記住，第 8 施工關 P7 已否決）；`block`／`unblock` 當成冪等也重送（第 10 施工關有真實作再說）。
 - 例子：`agend send g9-2 "hi"` 送出後 daemon 重啟 → CLI 等 1.4 秒、用同一個 `message_id` 重送 → daemon 看到已經有這個 id，回 `accepted`，`g9-2` 只收到一次；`agend instance add g9-3 claude` 斷在中間 → `agend: daemon restarted during the request; check with agend instance list`、exit 1。
-- [ ] 使用者確認
+- [x] 使用者確認（2026-09-26）
 
 ### P6：操作者命令：`instance`、協定的下一個 minor
 
@@ -150,14 +152,15 @@
   - 本關所有新增算一次 minor：client protocol 用**實作時的下一個 minor**（目前是 1.2；第 10 施工關的提案也要加一個 minor，兩關誰先 merge 誰拿 1.2，本頁的 1.2 都照這條換）。
   - 本關加的欄位（全部選填、additive）：`hello` 回應加 `daemon_version`（`agend 0.x.y`）、`daemon_pid`、`boot_id`（P7）；全貌的每個 instance 加 `working_directory`；`Send` 加 `level`、`message_id`（P1、P5）；`StatusData` 加 `identity`（P2）。`status`、`restart`、`doctor` 印的 pid 與版本、`instance list` 的 DIR 欄都從這裡來。
   - **`daemon_restart` 的形狀之後不再改**：舊 daemon 要能聽懂新 CLI 叫它重啟，否則升級時「重啟到新版」這條路會斷。
-  - `agend instance add <id> <backend> [--dir <path>] [--program <path>] [-- <args>…]`：id 規則 `[a-z0-9-]{1,24}`（第 6 施工關 P2）；`--dir` 預設 `$AGEND_HOME/workspace/<id>`（daemon 建）；`--program` 預設就是 backend 名（claude／codex／opencode，從 agent 的 `PATH` 找），測試與驗收用它指向假 agent。daemon 寫入 `new`、claude 產生 session id（第 6 施工關 H2），**馬上啟動**，回傳。team 一律 `general`（D12；本關沒有 team 表）。同一個 id 的 holder 鎖還被持有（剛 `remove`、holder 還沒結束，或留著的孤兒）→ 拒絕：`instance_exists: a holder for g9-1 is still running (run/holders/g9-1.lock); wait a few seconds or restart the daemon to sweep it`，不寫 DB。
-  - `agend instance remove <id> [--yes]`：TTY 上問 `remove g9-1? its agent is stopped; the workspace is kept [y/N]`；非 TTY 必須 `--yes`（否則 exit 2）。daemon 送 `Shutdown` 給 holder（最多等 5 秒）、刪那一列、發 `instance_changed`。holder 連不上也照樣刪，下次開機的孤兒巡查會收掉它（第 6 施工關 P2）。**workspace 不刪**，印出路徑。
-  - `agend instance list`：`ID  BACKEND  STATE  DIR` 一行一個。
+  - **用詞（使用者 2026-09-26 決定）**：對使用者一律叫 **`name`**（命令參數、`--help`、訊息、表頭）；協定與 DB 的欄位照舊叫 `instance_id`（D26，不改 wire）。`--help` 寫 `<name>  agent name you choose: a-z 0-9 -, up to 24 chars (e.g. dev-1)`。
+  - `agend instance add <name> <backend> [--dir <path>] [--program <path>] [-- <args>…]`：name 規則 `[a-z0-9-]{1,24}`（第 6 施工關 P2 的 id 規則）；已經有同名的 → `instance_exists: name dev-1 is already used`；`--dir` 預設 `$AGEND_HOME/workspace/<name>`（daemon 建）；`--program` 預設就是 backend 名（claude／codex／opencode，從 agent 的 `PATH` 找），測試與驗收用它指向假 agent。daemon 寫入 `new`、claude 產生 session id（第 6 施工關 H2），**馬上啟動**，回傳。team 一律 `general`（D12；本關沒有 team 表）。同名的 holder 鎖還被持有（剛 `remove`、holder 還沒結束，或留著的孤兒）→ 拒絕：`instance_exists: name g9-1 is already used: its holder is still running (run/holders/g9-1.lock); wait a few seconds or restart the daemon to sweep it`，不寫 DB。
+  - `agend instance remove <name> [--yes]`：TTY 上問 `remove g9-1? its agent is stopped; the workspace is kept [y/N]`；非 TTY 必須 `--yes`（否則 exit 2）。daemon 送 `Shutdown` 給 holder（最多等 5 秒）、刪那一列、發 `instance_changed`。holder 連不上也照樣刪，下次開機的孤兒巡查會收掉它（第 6 施工關 P2）。**workspace 不刪**，印出路徑。
+  - `agend instance list`：表頭 `NAME  BACKEND  STATE  DIR`，一行一個。
   - `agend instance` 是**正式**命令；`daemon_probe` 不刪，降為開發工具（daemon 停著時直接改 DB；`--dies` 與第 6、8 施工關的驗收步驟在用）。第 9 施工關之後的文件與驗收一律用 `agend instance`。
 - 理由：寫 DB 的路只有 daemon 一條，daemon 跑著時也能加減 instance（`daemon_probe` 做不到）；一個 `operator` 請求加一個 enum，之後的 team、workflow 命令只加變體。
 - 替代方案：每個操作者命令一種請求（請求種類一直變多）；把操作者命令塞進 `AgentCommand`（權限規則要逐個變體判斷）；`instance add` 在 daemon 沒跑時直接開 DB（兩條寫入路徑；CLI 路徑不開 DB，D11）；刪 instance 時一起刪 workspace（刪資料前要問，v1 教訓）。
-- 例子：`agend instance add g9-1 claude --program "$PWD/target/debug/fake-claude"` → `added g9-1 (claude, session 3f…, /Users/you/.agend-v2/workspace/g9-1); starting`；`agend instance list` → `g9-1  claude  starting  /Users/you/.agend-v2/workspace/g9-1`。
-- [ ] 使用者確認
+- 例子：`agend instance add g9-1 claude --program "$PWD/target/debug/fake-claude"` → `added g9-1 (claude, session 3f…, $AGEND_HOME/workspace/g9-1); starting`；`agend instance list` → `NAME  BACKEND  STATE  DIR`、`g9-1  claude  starting  $AGEND_HOME/workspace/g9-1`。
+- [x] 使用者確認（2026-09-26）
 
 ### P7：`agend daemon restart` 與 D2 預檢
 
@@ -190,7 +193,7 @@
   $ agend daemon restart --binary /usr/bin/false
   agend: preflight_failed: /usr/bin/false daemon preflight exited with status 1; the daemon keeps running agend 0.0.0
   ```
-- [ ] 使用者確認
+- [x] 使用者確認（2026-09-26）
 
 ### P8：`agend doctor` 本關查什麼
 
@@ -216,7 +219,7 @@
 - 例子：
 
   ```text
-  ok    home      /Users/you/.agend-v2 (0700)
+  ok    home      /Users/you/agend-home (0700)
   ok    daemon    pid 5101, agend 0.0.0, client protocol 1.2
   fail  git       git 2.30.0 is older than 2.38 (merge-tree needs it)
         fix: brew install git
@@ -227,13 +230,13 @@
   ok    disk      212 GB free, home 38 MB
   1 check failed
   ```
-- [ ] 使用者確認
+- [x] 使用者確認（2026-09-26）
 
 ### P9：`agend init` 本關做到哪
 
 - 問題：[tui-and-setup](../architecture/tui-and-setup.md#安裝與設定) 的 `init` 要建 home、`config.toml`、註冊服務、偵測 backend、建 `general` team 與一個 agent、在 repo 裡問要不要登記、最後跑 doctor。本關做哪些？原本步驟 4 的 `--non-interactive` 要不要？
 - 建議：
-  - 本關的 `init`：照 P3 解出 home → 建目錄（0700；已存在就不動，印 `already exists`）→ 跑 `doctor` → 印下一步（`agend daemon`、`agend instance add <id> <backend>`）。可以重跑。v1 home 拒絕（P3）。
+  - 本關的 `init`：照 P3 取 `AGEND_HOME`（沒設就停，exit 2）→ 建目錄（0700；已存在就不動，印 `already exists`）→ 跑 `doctor` → 印下一步（`agend daemon`、`agend instance add <name> <backend>`）。可以重跑。v1 home 拒絕（P3）。
   - **不問任何問題**，所以本關**不做 `--non-interactive`**：第一個問題出現的施工關（第 13 施工關的服務註冊）再加。
   - **不建 `config.toml`**：本關沒有任何程式讀它（Telegram 在第 12 施工關）；骨架規則是不寫佔位的東西。第一個讀它的施工關負責建。
   - **不建 agent**：寫 instance 只經 daemon（P6），而 `init` 時 daemon 還沒跑；印出下一步的指令。`general` 本來就是內建的（D12），本關沒有 team 表可寫。
@@ -241,8 +244,8 @@
   - **與 tui-and-setup 與原本步驟 4 的「建 `config.toml`、`general` team 與一個 agent」不同，請明確決定**。
 - 理由：`init` 做的每一件事都要有人用得到；只建目錄加跑 doctor，第一次使用前就能指出設定錯誤（V1-LESSONS #14），其餘等有使用者的施工關再加，不留假的檔案。
 - 替代方案：寫一份只有註解的 `config.toml`（沒人讀）；`init` 自己開 DB 加一個 agent（第二條寫入路徑）；`init` 順便在背景起 daemon（v1 的自動起 daemon，D2 否決）。
-- 例子：`HOME=/tmp/g9h.x agend init` → `created /tmp/g9h.x/.agend-v2 (0700)`，接著 doctor 的輸出，最後 `next: agend daemon   (then, in another terminal) agend instance add dev-1 claude`。
-- [ ] 使用者確認
+- 例子：`AGEND_HOME=/tmp/g9h.x/home agend init` → `created /tmp/g9h.x/home (0700)`；沒設 `AGEND_HOME` 時印 P3 那句、exit 2。接著 doctor 的輸出，最後 `next: agend daemon   (then, in another terminal) agend instance add dev-1 claude`。
+- [x] 使用者確認（2026-09-26）
 
 ### P10：怎麼測：假 daemon、真 daemon、同一張表
 
@@ -258,7 +261,7 @@
 - 理由：同一張表跑兩邊，假 daemon 一偏離就失敗（第 8 施工關 P9 同一條路）；測真的 binary 才驗得到 exit code、stderr 與 `home::resolve`。
 - 替代方案：只對假 daemon 測（真的 daemon 行為沒被釘住）；在 `agend` 的 lib 層測函式（驗不到 exit code 與輸出串流）；production 加 `AGEND_TEST_PREFLIGHT_FAIL` 之類的開關（測試碼進 production）。
 - 例子：`CLI-7`：`AGEND_INSTANCE=g9-1 agend instance add x claude` → stderr `agend: forbidden: only the operator can add instances; ask the operator`、exit 1；假 daemon `fake ok`、真 daemon `real ok`。
-- [ ] 使用者確認
+- [x] 使用者確認（2026-09-26）
 
 ### 本關不做（明確列出）
 
@@ -278,17 +281,17 @@
 - `exec`（P7）：所有 fd 要有 `CLOEXEC`（Rust 預設有；SQLite 的檔案要實測），否則新 daemon 會繼承舊的 DB 鎖；`exec` 失敗（預檢之後 binary 被刪）時 daemon 已經收尾，只能印錯誤、exit 1——前景要人重跑 `agend daemon`，第 13 施工關由服務管理器重起；launchd／systemd 下 `exec` 的行為在第 13 施工關實測。
 - doctor 看鎖（P8）：檢查的那一瞬間若剛好有 holder 在啟動，可能拿不到鎖而啟動失敗；用 `LOCK_SH | LOCK_NB` 並立刻放掉，實測機率。
 - ticket（P2）決定了第 10 施工關的派工訊息格式；第 10 施工關若要改，CLI 語法跟著改。
-- `~/.agend-v2`（P3）一旦有人用就不好改名；v1 退場後要不要改名，由第 13 施工關決定並附搬家步驟。
+- 本關沒有預設 home（P3）：每個終端都要 `export AGEND_HOME`；預設位置與 `config.toml` 是否列 home 由第 13 施工關決定。
 - `clap` 讓 binary 變大、編譯變慢；啟動時間超過 10 ms 就改手寫。
 
 ## 自動驗收（完成定義）
 
-- [ ] `~/.cargo/bin/cargo test -p agend` 單獨通過，包括：`CLI-n` 表每列對假 daemon、真 daemon 支援的列也對真 `agend daemon`（P10）；`home::resolve` 的預設、相對路徑、v1 home（P3）；`--json` 只印一個 JSON 值、錯誤也在 stdout（P4）；`send` 送出後斷線用同一個 `message_id` 重送、其他會改東西的命令不重送（P5）；非 TTY 的 `instance remove` 沒有 `--yes` 回 exit 2（P6）；`daemon restart` 成功（pid 不變、holder 不變）與 `--binary` 失敗（daemon 照跑、DB 檔 sha256 不變）、同時兩個 restart 第二個被拒、CLI 在舊連線 EOF 且 `boot_id` 變了才報成功、重用別則訊息的 `message_id` 回 `invalid_request`、接回的 holder 死掉後不留殘屍、自己起的 holder 與預檢子程序的 exit status 沒被搶（P7）；兩個假 codex instance 互送 10 則訊息、中途 `daemon restart`：每則恰好送達一次、狀態 `confirmed`（P1、P5，里程碑）；`doctor` 每個 `fail`／`warn` 都有 `fix:`（P8）
+- [ ] `~/.cargo/bin/cargo test -p agend` 單獨通過，包括：`CLI-n` 表每列對假 daemon、真 daemon 支援的列也對真 `agend daemon`（P10）；`home::resolve` 沒設（exit 2 與 export 提示）、相對路徑、v1 home（P3）；`--json` 只印一個 JSON 值、錯誤也在 stdout（P4）；`send` 送出後斷線用同一個 `message_id` 重送、其他會改東西的命令不重送（P5）；非 TTY 的 `instance remove` 沒有 `--yes` 回 exit 2（P6）；`daemon restart` 成功（pid 不變、holder 不變）與 `--binary` 失敗（daemon 照跑、DB 檔 sha256 不變）、同時兩個 restart 第二個被拒、CLI 在舊連線 EOF 且 `boot_id` 變了才報成功、重用別則訊息的 `message_id` 回 `invalid_request`、接回的 holder 死掉後不留殘屍、自己起的 holder 與預檢子程序的 exit status 沒被搶（P7）；兩個假 codex instance 互送 10 則訊息、中途 `daemon restart`：每則恰好送達一次、狀態 `confirmed`（P1、P5，里程碑）；`doctor` 每個 `fail`／`warn` 都有 `fix:`（P8）
 - [ ] `~/.cargo/bin/cargo test -p agend-core`、`-p agend-client`、`-p agend-daemon`、`-p agend-testkit` 單獨通過：1.1 的 peer 解得開本關 minor（目前 1.2）的訊息；`CLP` 新增的列對假 daemon 與真 daemon 都通過，每條有 mutant（P6、P10）
 - [ ] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨
 - [ ] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`（出現 `SKIPPED` 不算通過）
 - [ ] `~/.cargo/bin/cargo xtask accept cli` 通過，並印出下方「你親自驗收」用到的 demo 與 `agend --version` 的啟動時間（p50 < 10 ms）
-- [ ] 本施工關 crate 的 `README.md`／`TESTING.md` 已更新；想改的共用文件（名詞表：ticket、`~/.agend-v2`、`operator` 請求；tui-and-setup 的 init；第 8、10、13 施工關頁）列在 PR 裡由你決定
+- [ ] 本施工關 crate 的 `README.md`／`TESTING.md` 已更新；想改的共用文件（名詞表：ticket、`operator` 請求、使用者看到的 `name`＝`instance_id`；tui-and-setup 的 init；第 8、10、13 施工關頁）列在 PR 裡由你決定
 - [ ] 測試不留殘留：沒有 `g9-`、`pf-check` 或測試 id 的 holder，沒有 `/tmp/agend-pf-*`；kill 只對自己起的、大於 1 的 pid
 - [ ] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」
 
@@ -319,18 +322,19 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
    - [ ] 通過
 
-2. `agend init` 在暫存 HOME，再故意弄壞成 v1 home。
+2. `agend init`：先故意不設 `AGEND_HOME`，再在暫存目錄建，最後故意弄壞成 v1 home。
 
-   **這步在驗什麼**：沒設 `AGEND_HOME` 時預設是 `~/.agend-v2`，不會碰到 v1 的 `~/.agend`；看起來像 v1 的 home 一律拒絕（P3、P9）。錯了的話 v2 可能寫進你正在用的 v1 目錄。
+   **這步在驗什麼**：沒設 `AGEND_HOME` 時什麼都不建、直接說要 export 什麼；看起來像 v1 的 home 一律拒絕（P3、P9）。錯了的話 v2 可能寫進你正在用的 v1 目錄。
 
    ```bash
    H=$(mktemp -d /tmp/g9h.XXXX)
-   env -u AGEND_HOME HOME="$H" agend init; echo "exit=$?"
-   touch "$H/.agend-v2/fleet.yaml"
-   env -u AGEND_HOME HOME="$H" agend init; echo "exit=$?"
+   env -u AGEND_HOME agend init; echo "exit=$?"
+   AGEND_HOME="$H/home" agend init; echo "exit=$?"
+   touch "$H/home/fleet.yaml"
+   AGEND_HOME="$H/home" agend init; echo "exit=$?"
    ```
 
-   應該看到：第一次 `created /tmp/g9h.…/.agend-v2 (0700)`、doctor 的輸出、`next: agend daemon …`，`exit=0`（git 太舊時是 1，看 doctor 那行）；第二次 `… looks like an AgEnD v1 home (fleet.yaml); set AGEND_HOME to another directory`、`exit=1`。`$H` 先留著，步驟 3 還要用。
+   應該看到：第一次 `AGEND_HOME is not set; … export AGEND_HOME=<absolute path>`、`exit=2`；第二次 `created /tmp/g9h.…/home (0700)`、doctor 的輸出、`next: agend daemon …`，`exit=0`（git 太舊時是 1，看 doctor 那行）；第三次 `… looks like an AgEnD v1 home (fleet.yaml); set AGEND_HOME to another directory`、`exit=1`。`$H` 先留著，步驟 3 還要用。
 
    - [ ] 通過
 
@@ -341,11 +345,11 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
    在同一個終端接著步驟 2（用同一個 `$H`；先拿掉步驟 2 放的 `fleet.yaml`，home 才會是 ok）：
 
    ```bash
-   rm "$H/.agend-v2/fleet.yaml"
-   env -u AGEND_HOME HOME="$H" agend doctor; echo "exit=$?"
+   rm "$H/home/fleet.yaml"
+   AGEND_HOME="$H/home" agend doctor; echo "exit=$?"
    T=$(mktemp -d)
    printf '#!/bin/sh\necho "git version 2.30.0"\n' > "$T/git" && chmod +x "$T/git"
-   env -u AGEND_HOME HOME="$H" PATH="$T:$PATH" agend doctor; echo "exit=$?"
+   AGEND_HOME="$H/home" PATH="$T:$PATH" agend doctor; echo "exit=$?"
    rm -rf "$T" "$H"
    ```
 
@@ -373,7 +377,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
    agend status
    ```
 
-   應該看到：`added g9-1 (claude, session …, …/workspace/g9-1); starting`；daemon 那邊 `g9-1: start --session-id …`；`list` 一行 `g9-1  claude  …`；`status` 印 daemon 的 pid、版本、`client protocol 1.2`、`instances: 1`。
+   應該看到：`added g9-1 (claude, session …, …/workspace/g9-1); starting`；daemon 那邊 `g9-1: start --session-id …`；`list` 表頭 `NAME  BACKEND  STATE  DIR`、一行 `g9-1  claude  …`；`status` 印 daemon 的 pid、版本、`client protocol 1.2`、`instances: 1`。
 
    - [ ] 通過
 
@@ -466,6 +470,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-26 使用者逐題確認 P1–P10：P1 含 `ask` 移第 10 施工關、操作者也能 `task create`（要 `--team`）、KISS 選項不套用；P3 改成 `AGEND_HOME` 一律必須設（預設位置與 `config.toml` 列不列 home 延到第 13 施工關）；P6 對使用者用 `name`、內部仍是 `instance_id`；步驟 2、3 改用 `AGEND_HOME`。
 - 2026-09-26 第 3 輪 review REFUTED（2 MEDIUM、3 LOW）後修正：`--after` 依第 7 施工關 `messages.seq`、未知／過期回 `unknown_message`；`send` 一律回 `accepted`；restart 等 EOF 最多 30 秒；同 id 檢查與寫入在同一個 DB closure。
 - 2026-09-26 第 2 輪 review REFUTED（3 MEDIUM、數個 LOW）後修正：restart 先等舊連線 EOF、以 `hello` 的 `boot_id` 確認換了；client `message_id` 只收 UUID v4、同 id 內容不同回 `invalid_request`；步驟 9 的 `pgrep` 只查 g9-1；送給 claude／opencode 停在 `queued`；`--after` 依寫入順序；`ECHILD` 後不再查；步驟 8 雙向；KISS 兩項列為待你決定。
 - 2026-09-26 補第 9、10 施工關分工（第 10 施工關負責 `ask` 與 task 類 handler、`workflow`／`team`；之前回 `not_supported`）；ticket 由第 10 施工關印在派工訊息；待你決定：操作者能不能 `task create`。
