@@ -5,10 +5,15 @@
 //! protocol compatibility contract, run check-deps, then show the core demo.
 //! For gate 2 run the per-crate checks (the testkit tests include every
 //! contract suite and the fake agent binaries), check-deps, then the testkit
-//! demo. For gate 11 run the per-crate checks, check-deps, then the TUI demo
-//! (screens, navigation, resolve, disconnect against the testkit fake
-//! daemon). Other gates use the current per-crate checks until their
-//! acceptance flow is built.
+//! demo.
+//! Gate 3 runs the per-crate checks plus the `agend` crate's tests (argv[0]
+//! dispatch, and the shim and hook tests against real repos, which need the
+//! real binary), then the shim demo. Gate 4 runs the per-crate checks of
+//! agend-holder and agend (which holds the cross-process tests), check-deps,
+//! then the holder demo (`holder_probe demo` against the built `agend`).
+//! Gate 11 runs the per-crate checks, check-deps, then the TUI demo (screens,
+//! navigation, resolve, disconnect against the testkit fake daemon).
+//! Other gates use the per-crate checks until their acceptance flow is built.
 
 use crate::{cargo, check_deps, workspace_root};
 use std::process::Command;
@@ -38,7 +43,8 @@ pub const GATES: &[Gate] = &[
     Gate {
         number: 4,
         name: "holder",
-        crates: &["agend-holder"],
+        // `agend` holds the cross-process tests (tests/holder_process.rs).
+        crates: &["agend-holder", "agend"],
     },
     Gate {
         number: 5,
@@ -137,6 +143,9 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
             ])?;
             step(&["test", "-p", krate])?;
         }
+        if gate.number == 3 {
+            step(&["test", "-p", "agend"])?;
+        }
     }
     check_deps::run(false)?;
 
@@ -154,6 +163,22 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
             "testkit_demo",
         ])?;
         println!("gate 2 (testkit): checks passed");
+    } else if gate.number == 3 {
+        crate::shim_demo::run()?;
+        println!("gate 3 (shim): checks passed");
+    } else if gate.number == 4 {
+        step(&["build", "--quiet", "-p", "agend"])?;
+        step(&[
+            "run",
+            "--quiet",
+            "-p",
+            "agend-holder",
+            "--example",
+            "holder_probe",
+            "--",
+            "demo",
+        ])?;
+        println!("gate 4 (holder): checks passed");
     } else if gate.number == 11 {
         step(&[
             "run",
