@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - 依 crate 由下往上分 13 個施工關；每個施工關單獨驗收，使用者確認後才開下一個施工關（D22）。
-> - 目前狀態：**第 1–5 施工關完成**（第 1、2 關 2026-09-25，第 3、4、5 關 2026-09-26 使用者親自驗收通過）；第 11 施工關畫面層完成（2026-09-26 已 merge、A 段驗收通過），B 段等第 8 施工關；第 6 施工關開工前提案已 merge、確認完畢，實作中（branch `feat/gate-06-daemon`）。每個施工關狀態看下表，做了什麼看最下面的「進度紀錄」。
-> - 下一步：第 6 施工關 daemon↔holder 整合完成後即可親自驗收；第 11 施工關畫面層剩 B 段（接真 daemon）等第 8 施工關。
+> - 目前狀態：**第 1–6 施工關完成**（第 1、2 關 2026-09-25，第 3、4、5、6 關 2026-09-26 使用者親自驗收通過，第 6 關已 merge #125）；第 11 施工關畫面層完成（2026-09-26 已 merge、A 段驗收通過），B 段等第 8 施工關。每個施工關狀態看下表，做了什麼看最下面的「進度紀錄」。
+> - 下一步：第 7、8 施工關可以開工；第 11 施工關畫面層剩 B 段（接真 daemon）等第 8 施工關。
 
 ## 13 個施工關
 
@@ -16,7 +16,7 @@
 | 3 `shim` | [完成（2026-09-26）](gates/gate-03-shim.md) | git／kill 防護、導向 worktree、protected-ref、快照與還原 | 在暫存 repo 以 `git` 名稱執行 shim：導向、拒絕、快照後還原 |
 | 4 `holder` | [完成（2026-09-26）](gates/gate-04-holder.md) | PTY、畫面、holder 協定、活過 daemon（附屬程序移到第 7 施工關） | `agend holder` 包 bash + 小型探測 client：啟動器結束後 holder 還在、讀畫面、送鍵、中途斷線重連、四次開機，bash 存活 |
 | 5 `store` | [完成（2026-09-26）](gates/gate-05-store.md) | daemon store：SQLite schema、migration、保留期限、每日快照 | 真的 DB 檔（temp dir）、跨真的 process 驗；xtask 命令印出資料表 |
-| 6 `daemon-holder` | [實作中（2026-09-26）](gates/gate-06-daemon-holder.md) | 整合施工關：agent runtime adapter | 真 daemon + 真 holder；重啟 daemon，agent 與畫面存活 |
+| 6 `daemon-holder` | [完成（2026-09-26）](gates/gate-06-daemon-holder.md) | 整合施工關：agent runtime adapter | 真 daemon + 真 holder；重啟 daemon，agent 與畫面存活 |
 | 7 `codex` | [未開始](gates/gate-07-codex.md) | codex driver + 送達模型、三級忙碌策略 | 對假 app-server；可選的真 codex smoke test |
 | 8 `client` | [未開始](gates/gate-08-client.md) | 整合施工關：agend-client + protocol server | CLI 連得上；daemon 重啟時會重試 |
 | 9 `cli` | [未開始](gates/gate-09-cli.md) | agend CLI：agent 命令、操作者命令、status；安裝相關只做 `doctor`、`init`（讓前面各施工關能在本機跑；`init` 的服務註冊步驟在第 13 施工關補上） | 對假 daemon 驗每個命令的輸出與錯誤；再對真 daemon |
@@ -78,6 +78,7 @@ cat docs/gates/gate-01-core.md
 每完成一件事加一行（日期 + 一行 + commit／PR），新的在上面。
 
 - 2026-09-26 第 11 施工關畫面層提前（#120，`d677f35`）merge；A 段（腳本假來源＋假 daemon）使用者親自驗收 5 步通過，T1–T18／G1–G4 使用者全部追認；狀態維持實作中（畫面層完成），B 段（接真 daemon）留給第 8 施工關之後。
+- 2026-09-26 第 6 施工關 daemon-holder（#125，`3e28e06`）merge；P1–P9 使用者已確認、H1–H16 使用者已追認、fresh-context verifier r2 CONFIRMED；使用者親自驗收 9 步通過，狀態改為完成。
 - 2026-09-26 第 6 施工關開工前提案（#119，`9955309`）merge；P1–P9（含 P3 夜間更正：daemon 起 holder 不能設 `process_group(0)`）使用者全部確認或追認；狀態改為實作中（branch `feat/gate-06-daemon`）。
 - 2026-09-26 第 5 施工關 store（#122，`599a882`）merge；P1–P9 使用者已確認、S1–S23 使用者已追認、fresh-context verifier CONFIRMED；使用者親自驗收 10 步通過，狀態改為完成。
 - 2026-09-26 第 4 施工關 holder（#118，`a467b54`）merge；P1–P9 使用者已確認、G1–G11 使用者已追認；使用者親自驗收 10 步通過，狀態改為完成。

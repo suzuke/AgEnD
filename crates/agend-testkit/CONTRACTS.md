@@ -86,7 +86,7 @@
 
 ## Runtime（`RTM`，9 條）
 
-「在跑」從 trait 外面看（`RuntimeFixture::is_running`：只拿 `Persisted`，真實作看程序與 socket，daemon 不在時也能問）。
+「在跑」從 trait 外面看（`RuntimeFixture::is_running`：只拿 `Persisted`，daemon 不在時也能問；真實作只看鎖檔的 `flock` 是否被持有，不連 socket——連了會搶走 runtime 自己的長連線，見[第 4 施工關 P3](../../docs/gates/gate-04-holder.md#p3run-目錄不重複判斷存活)、[第 6 施工關 H16](../../docs/gates/gate-06-daemon-holder.md#待你追認)）。
 
 | ID | 規則 | 來源 | mutant |
 |---|---|---|---|

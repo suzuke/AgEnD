@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 13 個施工關各有一頁：範圍、自動驗收、你親自驗收的步驟、驗收紀錄、進度紀錄。
 > - 記住：**一個施工關要等你跑完「你親自驗收」並填好「驗收紀錄」才算完成**。
-> - 下一步：第 1–5 施工關已完成；第 11 施工關畫面層已完成，接真 daemon 等第 8 施工關；第 6 施工關實作中。
+> - 下一步：第 1–6 施工關已完成；第 11 施工關畫面層已完成，接真 daemon 等第 8 施工關；第 7、8 施工關可以開工。
 
 ## 索引
 
@@ -14,7 +14,7 @@
 | 3 | [`shim`](gate-03-shim.md) | agend-shim | 完成（2026-09-26） | `cargo xtask accept shim` |
 | 4 | [`holder`](gate-04-holder.md) | agend-holder | 完成（2026-09-26） | `cargo xtask accept holder` |
 | 5 | [`store`](gate-05-store.md) | agend-daemon：store | 完成（2026-09-26） | `cargo xtask accept store` |
-| 6 | [`daemon-holder`](gate-06-daemon-holder.md) | daemon ↔ holder | 實作中（2026-09-26） | `cargo xtask accept daemon-holder` |
+| 6 | [`daemon-holder`](gate-06-daemon-holder.md) | daemon ↔ holder | 完成（2026-09-26） | `cargo xtask accept daemon-holder` |
 | 7 | [`codex`](gate-07-codex.md) | codex driver + 送達 | 未開始 | `cargo xtask accept codex` |
 | 8 | [`client`](gate-08-client.md) | agend-client + protocol server | 未開始 | `cargo xtask accept client` |
 | 9 | [`cli`](gate-09-cli.md) | agend CLI | 未開始 | `cargo xtask accept cli` |
