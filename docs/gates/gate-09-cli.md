@@ -45,6 +45,8 @@
 
     已有的留著：`agend daemon`、`agend holder`、`--version`、`--help`；`agend debug ping/watch` 在第 8 施工關的實作 merge 後才有，本關不動它們。
   - 權限只在 daemon 擋（D17），CLI 不預先判斷：`command` 請求（agent 命令）只收 agent；會改東西的操作者請求（P6 的 `operator`、第 8 施工關的 `resolve_attention`、`terminal_input`）只收操作者；唯讀請求（`get_fleet`、`subscribe_*`）大家都能用。拒絕一律 `forbidden`，訊息附正確做法。
+  - 第 9、10 施工關的分工：**本關負責**所有命令的 CLI 語法、client 接線、錯誤對應與重送規則（P2、P4、P5）；**第 10 施工關負責** `ask`（daemon 端與 store）、`done`／`result`／`review`／`block`／`unblock`／`remind`／`task create` 的 daemon handler、`agend workflow`／`agend team` 命令。這些 handler 在第 10 施工關之前，真 daemon 一律回 `not_supported`（訊息寫「第 10 施工關」），不做半套。第 10 施工關在派工訊息印本關的 ticket（P2），`inbox` 照本關的模型（唯讀游標、`--after`）。
+  - **待你決定（本頁不決定）**：操作者能不能跑 `task create`？本頁照 D17 把它列為 agent 命令；第 10 施工關的驗收在你決定前先用開發用的 probe 建 task。
   - `agend status` 一個命令兩種：有 `AGEND_INSTANCE` 送 `command {status}`，沒有送 `get_fleet`。
   - **`ask` 移到第 10 施工關**（**與第 8 施工關 P6「請示在第 9、10 施工關」不同，請明確決定**）：真的請示要新表、「需要你」來源、`answer_ask`、追問與結論（D35），本關做等於提前一半的第 10 施工關；第 11 施工關 B 段「回答請示」那半一樣等第 10 施工關。
   - `send` 的 `level`：`agend send <to> "<message>" [--level queue|steer|interrupt]`，預設 `queue`（第 7 施工關 P6：等級由呼叫者傳入、預設 `Queue`）。`Send` 加選填的 `level` 與 `message_id`（additive，P5）。
@@ -257,7 +259,7 @@
 
 ### 本關不做（明確列出）
 
-- 真 daemon 的 task 類命令與 `ask`（第 10 施工關，P1）；`send`／`inbox` 的送達本身（第 7 施工關）。
+- 真 daemon 的 task 類命令與 `ask` 的 handler、store（第 10 施工關，P1；在那之前回 `not_supported`）；`send`／`inbox` 的送達本身（第 7 施工關）。
 - `agend workflow …`、`agend team …`（D19；第 10 施工關，連同第 5 施工關 S1 的 `save_workflow_toml`）。
 - `agend daemon stop`（在 launchd／systemd 下「停」要先卸載服務，第 13 施工關一起做）；`export`／`import`、`telegram setup`、`uninstall`（第 13 施工關）。
 - 從 CLI 處理「需要你」（`resolve_attention` 由 TUI 做，第 11 施工關 B 段）。
@@ -278,7 +280,7 @@
 ## 自動驗收（完成定義）
 
 - [ ] `~/.cargo/bin/cargo test -p agend` 單獨通過，包括：`CLI-n` 表每列對假 daemon、真 daemon 支援的列也對真 `agend daemon`（P10）；`home::resolve` 的預設、相對路徑、v1 home（P3）；`--json` 只印一個 JSON 值、錯誤也在 stdout（P4）；`send` 送出後斷線用同一個 `message_id` 重送、其他會改東西的命令不重送（P5）；非 TTY 的 `instance remove` 沒有 `--yes` 回 exit 2（P6）；`daemon restart` 成功（pid 不變、holder 不變）與 `--binary` 失敗（daemon 照跑、DB 檔 sha256 不變）、同時兩個 restart 第二個被拒、接回的 holder 死掉後不留殘屍、自己起的 holder 與預檢子程序的 exit status 沒被搶（P7）；兩個假 codex instance 互送 10 則訊息、中途 `daemon restart`：每則恰好送達一次、狀態 `confirmed`（P1、P5，里程碑）；`doctor` 每個 `fail`／`warn` 都有 `fix:`（P8）
-- [ ] `~/.cargo/bin/cargo test -p agend-core`、`-p agend-client`、`-p agend-daemon`、`-p agend-testkit` 單獨通過：1.1 的 peer 解得開 1.2 的訊息；`CLP` 新增的列對假 daemon 與真 daemon 都通過，每條有 mutant（P6、P10）
+- [ ] `~/.cargo/bin/cargo test -p agend-core`、`-p agend-client`、`-p agend-daemon`、`-p agend-testkit` 單獨通過：1.1 的 peer 解得開本關 minor（目前 1.2）的訊息；`CLP` 新增的列對假 daemon 與真 daemon 都通過，每條有 mutant（P6、P10）
 - [ ] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨
 - [ ] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`（出現 `SKIPPED` 不算通過）
 - [ ] `~/.cargo/bin/cargo xtask accept cli` 通過，並印出下方「你親自驗收」用到的 demo 與 `agend --version` 的啟動時間（p50 < 10 ms）
@@ -459,6 +461,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-26 補第 9、10 施工關分工（第 10 施工關負責 `ask` 與 task 類 handler、`workflow`／`team`；之前回 `not_supported`）；ticket 由第 10 施工關印在派工訊息；待你決定：操作者能不能 `task create`。
 - 2026-09-26 fresh review REFUTED（5 MEDIUM、6 LOW）後修正：收屍只對接回的 holder pid `waitpid(pid, WNOHANG)`；`hello` 加 `daemon_pid`、全貌 instance 加 `working_directory`；步驟 3 改在步驟 2 的暫存 HOME 跑；本關接 `send` → `deliver` 與 `level`，第 7 施工關 merge 為硬前提、加步驟 8（兩個 agent 互傳、中途重啟）；TL;DR 與 P1、P3、P8 標出與已定文件不同之處；`daemon_probe` 定位、重加仍在跑的 id、restart 一次一個＋`mkdtemp`、`--binary` 在 D6 範圍內、協定版本寫成「實作時的下一個 minor」。
 - 2026-09-26 開工前提案 P1–P10 寫定（draft PR），待使用者確認；`ask` 建議移到第 10 施工關（P1）、結果類命令帶 ticket（P2）、預設 home `~/.agend-v2`（P3）、restart 用原地 `exec`（P7）、`init` 不建 `config.toml` 與 agent（P9）；「你親自驗收」改成 9 步；狀態改為提案中。
 
