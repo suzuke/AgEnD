@@ -3,8 +3,9 @@
 //! intent only; context comes from caller identity -> binding (plan §4.7).
 //! Subcommands also start the daemon, a holder and the TUI (`app`).
 //!
-//! Status: only `--version` and `--help` exist here (`agend holder` is split
-//! off in `main`, gate 4). Everything else arrives with gate 9
+//! Status: only `--version` and `--help` exist here (`agend holder` and
+//! `agend daemon` are split off in `main`, gates 4 and 6). Everything else
+//! arrives with gate 9
 //! (docs/ROADMAP.md).
 //!
 //! Must NOT: build an async runtime, read config or open the DB on the CLI path.
@@ -21,6 +22,8 @@ agend - Agent Engineering Daemon (pre-alpha: no commands implemented yet)
 Usage:
   agend --version    Print the version
   agend --help       Print this help
+  agend daemon       Run the daemon in the foreground (needs AGEND_HOME;
+                     Ctrl-C stops it, the agents keep running)
   agend holder <instance-id>
                      Run the holder of one instance (started by the daemon;
                      needs AGEND_HOME)

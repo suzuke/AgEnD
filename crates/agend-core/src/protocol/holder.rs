@@ -216,6 +216,19 @@ pub fn negotiate_version(remote: &Hello) -> Result<ProtocolVersion, VersionMisma
 mod tests {
     use super::*;
 
+    /// D26: a new daemon must talk to holders one major older, which outlive
+    /// it. With only V1 there is no older major yet; the first major bump
+    /// must keep the previous one in `SUPPORTED_VERSIONS` (gate 6 P7).
+    #[test]
+    fn supported_versions_keep_the_previous_major() {
+        let newest = SUPPORTED_VERSIONS.iter().map(|v| v.major).max().unwrap();
+        assert!(
+            newest == 1 || SUPPORTED_VERSIONS.iter().any(|v| v.major == newest - 1),
+            "holder protocol {newest}.x dropped major {}",
+            newest - 1
+        );
+    }
+
     #[test]
     fn holder_hello_advertises_v1() {
         let HolderRequest::Hello { data: hello } = HolderRequest::hello() else {
