@@ -428,6 +428,8 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 實作時做了、提案沒寫到或與提案字面不同的選擇。確認前照目前的做法運作。每項：決定 · 理由 · 反悔的成本。
 
+**追認結果**：使用者 2026-09-26 全部追認 C1–C14（C1 單獨明確決定：CLP-8 在測試程序裡跑同一份 server 程式碼，不在正式程式加測試開關）。
+
 | # | 決定 | 理由 | 反悔成本 |
 |---|---|---|---|
 | C1 | **與 P9 字面不同，請明確決定**：CLP-8（2000 個事件的慢 client）的「真」不是真 binary，而是同一份 daemon server 程式碼（`agend_daemon::server` + `fleet`）在測試程序裡跑、直接發事件；其他 11 條都對真 `agend daemon` binary 跑 | 真 binary 裡每個事件都要一次真的 instance 狀態改變（最快的是對 `failed` 的 instance 按 `retry`，每次起一個 holder），2000 個做不到；替 binary 加「測試用發事件」的開關等於在正式程式裡放後門 | 加一個只在測試用的環境變數讓 daemon 發假事件，約 20 行＋一條「只測試用」的規則 |
@@ -464,6 +466,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-26 使用者追認 C1–C14（C1 單獨明確決定）。
 - 2026-09-26 fresh-context verifier r1：CONFIRMED（沒有 HIGH／MEDIUM），4 LOW + 1 INFO 已修：socket 段加「開機計畫卡 5 秒時，socket 出現的第一刻連上就看到開機計畫做完的全貌」（bind 移到開機前的 mutant 會失敗）；`retry` 段加「每個 instance 只起一次 holder、沒有 start failed、沒有 restart」（拿掉先停舊 holder 的 mutant 會失敗）；`resolve_attention` 不等 supervisor；`retry` 開始不了時把項目放回清單；假 daemon 游標 `+1` 改 saturating。另外全量測試抓到一個 client 的真 bug：連上之後、`hello` 回應之前 daemon 就關掉連線時，macOS 在設定逾時／寫入時回 `ENOTCONN`／`EINVAL`，沒被當成「請求送出前就斷」而不重試；現在這段的任何錯誤都重試（P7）（#131）。
 - 2026-09-26 實作（draft PR #131，branch `feat/gate-08-client`）：core client protocol 1.1（`ClientHello`、`get_fleet`／全貌、`resolve_attention`、`attention_resolved`、錯誤碼 `client::error_code`、`order_attention`）；migration `0003`（`session_started`，`schema-v3.sql`、golden）；daemon 的 `run/daemon.sock` server、`fleet`、`handlers`、`failed` → 「需要你」→ `retry`、終端串流；`agend-client`；`agend debug ping|watch`、`client_probe`；假 daemon 1.1；CLP-1..12 契約（假 daemon、真 daemon、14 個 mutant、反向檢查）；`check-deps` 新規則；`client_demo` 與 `xtask accept client`；「你親自驗收」7 步改成確切指令與實跑輸出；「待你追認」C1–C14。fresh-context verifier 尚未跑。
 - 2026-09-26 第 4 輪 review（1 MEDIUM：第一個事件 id＝起點＋1）後修正；使用者逐題確認 P1–P10，含 P4 改掉第 11 施工關 T6（重連一律重拿全貌）、P6 把第 11 施工關 G4 移到第 12 施工關。
