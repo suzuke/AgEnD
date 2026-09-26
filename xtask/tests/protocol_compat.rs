@@ -16,7 +16,7 @@ use serde_json::json;
 fn client_request_wire_shapes_are_stable_and_approval_does_not_supply_a_head() {
     assert_eq!(
         serde_json::to_value(ClientRequest::hello()).unwrap(),
-        json!({"type": "hello", "data": {"supported": [{"major": 1, "minor": 0}]}})
+        json!({"type": "hello", "data": {"supported": [{"major": 1, "minor": 1}]}})
     );
 
     let review = ClientRequest::Command {
@@ -74,6 +74,7 @@ fn client_response_and_event_wire_shapes_are_stable() {
         data: TaskChangedData {
             task_id: "T-1".into(),
             summary: "running".into(),
+            task: None,
         },
     };
     assert_eq!(
@@ -305,6 +306,12 @@ fn ask_threads_answers_and_recap_have_stable_wire_shapes() {
                 asking: "Which storage?".into(),
                 next: "dev-1 implements the store".into(),
             }),
+            attention_id: None,
+            unblocks: None,
+            waiting_since_unix_ms: None,
+            if_ignored: None,
+            actions: Vec::new(),
+            instance_id: None,
         },
     };
     assert_eq!(
@@ -362,6 +369,12 @@ fn pre_ask_thread_messages_still_decode() {
                 task_id: None,
                 ask: None,
                 recap: None,
+                attention_id: None,
+                unblocks: None,
+                waiting_since_unix_ms: None,
+                if_ignored: None,
+                actions: Vec::new(),
+                instance_id: None,
             }
         }
     );
@@ -440,4 +453,295 @@ fn agent_results_carry_the_stage_attempt_identity() {
         }
     );
     assert_eq!(STALE_RESULT, "stale_result");
+}
+
+/// Client protocol 1.0 as it shipped, frozen: the peer that predates gate 8.
+/// Only the parts 1.1 touches (the rest did not change).
+mod v1_0 {
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct Version {
+        pub major: u16,
+        pub minor: u16,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct Hello {
+        pub supported: Vec<Version>,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    pub enum ClientRequest {
+        Hello {
+            data: Hello,
+        },
+        SubscribeEvents {
+            data: SubscribeEventsData,
+        },
+        #[serde(other)]
+        Unknown,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct SubscribeEventsData {
+        pub after_event_id: Option<u64>,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    pub enum ClientResponse {
+        Event {
+            data: EventData,
+        },
+        #[serde(other)]
+        Unknown,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct EventData {
+        pub event_id: u64,
+        pub event: DaemonEvent,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(tag = "event", rename_all = "snake_case")]
+    pub enum DaemonEvent {
+        AttentionRequired {
+            data: AttentionRequiredData,
+        },
+        TaskChanged {
+            data: TaskChangedData,
+        },
+        InstanceChanged {
+            data: InstanceChangedData,
+        },
+        #[serde(other)]
+        Unknown,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct AttentionRequiredData {
+        pub reason: String,
+        pub task_id: Option<String>,
+        #[serde(default)]
+        pub ask: Option<serde_json::Value>,
+        #[serde(default)]
+        pub recap: Option<serde_json::Value>,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct TaskChangedData {
+        pub task_id: String,
+        pub summary: String,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct InstanceChangedData {
+        pub instance_id: String,
+        pub summary: String,
+    }
+}
+
+fn reencode<T: serde::Serialize, U: serde::de::DeserializeOwned>(value: &T) -> U {
+    serde_json::from_value(serde_json::to_value(value).unwrap()).unwrap()
+}
+
+/// Gate 8 P3: a 1.0 peer decodes every 1.1 message: new requests, replies
+/// and events are `unknown`, new fields are ignored, the rest is unchanged.
+#[test]
+fn a_1_0_peer_decodes_1_1_messages() {
+    use agend_core::protocol::client::{
+        AgentState, AttentionAction, AttentionResolvedData, FleetData, FleetView,
+        InstanceChangedData, InstanceView, RequestIdData, ResolveAttentionData,
+    };
+    let hello: v1_0::ClientRequest = reencode(&ClientRequest::hello_as(Some("g8-1".into())));
+    assert_eq!(
+        hello,
+        v1_0::ClientRequest::Hello {
+            data: v1_0::Hello {
+                supported: vec![v1_0::Version { major: 1, minor: 1 }]
+            }
+        }
+    );
+    let get_fleet = ClientRequest::GetFleet {
+        data: RequestIdData {
+            request_id: "r-1".into(),
+        },
+    };
+    let resolve = ClientRequest::ResolveAttention {
+        data: ResolveAttentionData {
+            request_id: "r-2".into(),
+            attention_id: "instance-failed:g8-2".into(),
+            action: AttentionAction::Retry,
+        },
+    };
+    for request in [get_fleet, resolve] {
+        assert_eq!(
+            reencode::<_, v1_0::ClientRequest>(&request),
+            v1_0::ClientRequest::Unknown
+        );
+    }
+    let fleet = ClientResponse::Fleet {
+        data: FleetData {
+            request_id: "r-1".into(),
+            fleet: FleetView {
+                as_of_event_id: 1_790_000_000_000_000,
+                teams: vec![],
+                tasks: vec![],
+                instances: vec![],
+                attention: vec![],
+            },
+        },
+    };
+    assert_eq!(
+        reencode::<_, v1_0::ClientResponse>(&fleet),
+        v1_0::ClientResponse::Unknown
+    );
+    let event = |event: DaemonEvent| ClientResponse::Event {
+        data: EventData { event_id: 7, event },
+    };
+    let v1_0_event = |event: v1_0::DaemonEvent| v1_0::ClientResponse::Event {
+        data: v1_0::EventData { event_id: 7, event },
+    };
+    let resolved = event(DaemonEvent::AttentionResolved {
+        data: AttentionResolvedData {
+            attention_id: "instance-failed:g8-2".into(),
+            action: AttentionAction::Retry,
+        },
+    });
+    assert_eq!(
+        reencode::<_, v1_0::ClientResponse>(&resolved),
+        v1_0_event(v1_0::DaemonEvent::Unknown)
+    );
+    let required = event(DaemonEvent::AttentionRequired {
+        data: AttentionRequiredData {
+            reason: "g8-2 failed: restarted 3 times".into(),
+            task_id: None,
+            ask: None,
+            recap: None,
+            attention_id: Some("instance-failed:g8-2".into()),
+            unblocks: Some(0),
+            waiting_since_unix_ms: Some(1_790_000_000_000),
+            if_ignored: Some("g8-2 stays stopped".into()),
+            actions: vec![AttentionAction::Retry],
+            instance_id: Some("g8-2".into()),
+        },
+    });
+    assert_eq!(
+        reencode::<_, v1_0::ClientResponse>(&required),
+        v1_0_event(v1_0::DaemonEvent::AttentionRequired {
+            data: v1_0::AttentionRequiredData {
+                reason: "g8-2 failed: restarted 3 times".into(),
+                task_id: None,
+                ask: None,
+                recap: None,
+            }
+        })
+    );
+    let changed = event(DaemonEvent::InstanceChanged {
+        data: InstanceChangedData {
+            instance_id: "g8-2".into(),
+            summary: "failed".into(),
+            instance: Some(InstanceView {
+                instance_id: "g8-2".into(),
+                team_id: "general".into(),
+                backend: "claude".into(),
+                state: AgentState::Failed,
+            }),
+        },
+    });
+    assert_eq!(
+        reencode::<_, v1_0::ClientResponse>(&changed),
+        v1_0_event(v1_0::DaemonEvent::InstanceChanged {
+            data: v1_0::InstanceChangedData {
+                instance_id: "g8-2".into(),
+                summary: "failed".into(),
+            }
+        })
+    );
+}
+
+/// Gate 8 P3: 1.1 decodes every 1.0 message; the 1.1 fields are absent.
+#[test]
+fn a_1_1_peer_decodes_1_0_messages() {
+    use agend_core::protocol::client::{InstanceChangedData, SubscribeEventsData};
+    let hello: ClientRequest = reencode(&v1_0::ClientRequest::Hello {
+        data: v1_0::Hello {
+            supported: vec![v1_0::Version { major: 1, minor: 0 }],
+        },
+    });
+    let ClientRequest::Hello { data } = hello else {
+        panic!("{hello:?}");
+    };
+    assert_eq!(data.supported, [ProtocolVersion::new(1, 0)]);
+    assert_eq!(data.caller, None, "a 1.0 hello is the operator's");
+    let subscribe: ClientRequest = reencode(&v1_0::ClientRequest::SubscribeEvents {
+        data: v1_0::SubscribeEventsData {
+            after_event_id: None,
+        },
+    });
+    assert_eq!(
+        subscribe,
+        ClientRequest::SubscribeEvents {
+            data: SubscribeEventsData {
+                after_event_id: None
+            }
+        }
+    );
+    let required: DaemonEvent = reencode(&v1_0::DaemonEvent::AttentionRequired {
+        data: v1_0::AttentionRequiredData {
+            reason: "usage limit".into(),
+            task_id: Some("T-1".into()),
+            ask: None,
+            recap: None,
+        },
+    });
+    let DaemonEvent::AttentionRequired { data } = required else {
+        panic!("{required:?}");
+    };
+    assert_eq!(
+        (
+            data.attention_id,
+            data.unblocks,
+            data.waiting_since_unix_ms,
+            data.if_ignored,
+            data.actions,
+            data.instance_id
+        ),
+        (None, None, None, None, vec![], None)
+    );
+    let changed: DaemonEvent = reencode(&v1_0::DaemonEvent::InstanceChanged {
+        data: v1_0::InstanceChangedData {
+            instance_id: "dev-1".into(),
+            summary: "started".into(),
+        },
+    });
+    assert_eq!(
+        changed,
+        DaemonEvent::InstanceChanged {
+            data: InstanceChangedData {
+                instance_id: "dev-1".into(),
+                summary: "started".into(),
+                instance: None,
+            }
+        }
+    );
+    let task: DaemonEvent = reencode(&v1_0::DaemonEvent::TaskChanged {
+        data: v1_0::TaskChangedData {
+            task_id: "T-1".into(),
+            summary: "merged".into(),
+        },
+    });
+    assert_eq!(
+        task,
+        DaemonEvent::TaskChanged {
+            data: TaskChangedData {
+                task_id: "T-1".into(),
+                summary: "merged".into(),
+                task: None,
+            }
+        }
+    );
 }

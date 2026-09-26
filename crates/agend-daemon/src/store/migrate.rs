@@ -31,6 +31,10 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0002_instances",
         sql: include_str!("migrations/0002_instances.sql"),
     },
+    Migration {
+        name: "0003_session_started",
+        sql: include_str!("migrations/0003_session_started.sql"),
+    },
 ];
 
 /// The schema version this binary creates and supports.

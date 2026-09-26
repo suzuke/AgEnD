@@ -30,7 +30,8 @@ impl ProtocolVersion {
     }
 }
 
-/// First message sent on either socket. The receiver chooses a mutually
+/// First message on the holder socket (clients send `client::ClientHello`,
+/// the same shape plus `caller`). The receiver chooses a mutually
 /// supported major and the newest minor supported by both peers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Hello {

@@ -1,4 +1,5 @@
-//! Contract test suites: one suite per `agend_core::traits` trait. A suite is
+//! Contract test suites: one suite per `agend_core::traits` trait, plus the
+//! client protocol (`client`, CLP, gate 8: a server, not a trait). A suite is
 //! a list of named cases written against a fixture trait (for example
 //! [`forge::ForgeFixture`]), so the same cases run against the fake now and
 //! against the real implementation at its gate. That is what keeps fakes from
@@ -19,6 +20,8 @@ use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::time::{Duration, Instant};
 
+#[cfg(unix)]
+pub mod client;
 pub mod clock;
 pub mod driver;
 pub mod fakes;

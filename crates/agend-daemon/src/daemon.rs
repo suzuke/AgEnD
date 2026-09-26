@@ -1,19 +1,24 @@
 //! `agend daemon` (gate 6 P1, P5): runs in the foreground only; keeping it
 //! running is launchd's or systemd's job (gate 13). Needs `AGEND_HOME`.
 //!
-//! Boot order: open `agend.db` (the one daemon per home: the DB's exclusive
-//! lock, retried every 200 ms for 10 s while an old daemon hands it over) →
-//! housekeeping (failures only logged) → shim symlinks → the boot plan
-//! (reconnect / start / orphans) → `agend daemon ready: …`, the readiness
-//! signal (no `.ready` file; gate 8 adds `run/daemon.sock`). Housekeeping
-//! runs again every hour.
+//! Boot order: check the client socket path fits (100 bytes) → open
+//! `agend.db` (the one daemon per home: the DB's exclusive lock, retried
+//! every 200 ms for 10 s while an old daemon hands it over) → remove a stale
+//! `run/daemon.sock` → housekeeping (failures only logged) → shim symlinks
+//! → the boot plan (reconnect / start / orphans) → bind `run/daemon.sock`
+//! (`run/` 0700, socket 0600, gate 8 P1) → `agend daemon ready: …`. A
+//! socket that accepts connections is the readiness signal: no `.ready`
+//! file, and a client never sees a half-booted fleet. Housekeeping runs
+//! again every hour.
 //!
-//! SIGINT / SIGTERM: stop handling events, close the holder connections,
-//! close the DB, exit 0. Holders keep running and are never sent `Shutdown`
-//! (D3).
+//! SIGINT / SIGTERM: stop handling events, stop the client socket (stop
+//! accepting, remove `daemon.sock`, close every client), close the holder
+//! connections, close the DB, exit 0. Holders keep running and are never
+//! sent `Shutdown` (D3).
 //!
 //! Exit codes: 0 after a signal, 1 when it cannot start (no `AGEND_HOME`,
-//! `agend.db` in use or broken, shims), 2 on a usage error.
+//! socket path too long, `agend.db` in use or broken, shims, socket), 2 on a
+//! usage error.
 //!
 //! Must NOT: fork into the background, write pid/ready/cookie files, or
 //! stop holders when it stops.
@@ -24,11 +29,18 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use std::fs::{self, DirBuilder};
+use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+
+use agend_core::protocol::client::DAEMON_SOCKET;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
+use crate::fleet::Fleet;
+use crate::handlers::Context;
 use crate::log;
 use crate::runtime::{EventSink, HolderRuntime, shims};
+use crate::server::{self, Server};
 use crate::store::{SqliteStore, StoreError};
 use crate::supervisor::{Event, Supervisor};
 
@@ -57,6 +69,10 @@ pub fn run(args: Vec<OsString>) -> ExitCode {
         }
         Some(home) => PathBuf::from(home),
     };
+    if let Err(e) = server::check_socket_len(&home.join(DAEMON_SOCKET)) {
+        eprintln!("agend daemon: {e}");
+        return ExitCode::from(1);
+    }
     let exe = match std::env::current_exe() {
         Ok(exe) => exe,
         Err(e) => {
@@ -115,6 +131,19 @@ fn open_store(home: &Path) -> Result<(SqliteStore, Duration), StoreError> {
     }
 }
 
+/// `run/` 0700 (created if missing, tightened if not), and no leftover
+/// `daemon.sock` from a daemon that died: this one holds `agend.db`.
+fn prepare_run_dir(home: &Path) -> std::io::Result<PathBuf> {
+    let run = home.join("run");
+    DirBuilder::new().recursive(true).mode(0o700).create(&run)?;
+    fs::set_permissions(&run, fs::Permissions::from_mode(0o700))?;
+    let socket = home.join(DAEMON_SOCKET);
+    match fs::remove_file(&socket) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+        _ => Ok(socket),
+    }
+}
+
 fn forward_signal(kind: SignalKind, name: &'static str, events: UnboundedSender<Event>) {
     match signal(kind) {
         Ok(mut stream) => {
@@ -133,6 +162,13 @@ async fn serve(home: PathBuf, exe: PathBuf, store: SqliteStore) -> ExitCode {
     forward_signal(SignalKind::interrupt(), "SIGINT", events.clone());
     forward_signal(SignalKind::terminate(), "SIGTERM", events.clone());
 
+    let socket = match prepare_run_dir(&home) {
+        Ok(socket) => socket,
+        Err(e) => {
+            log::line(&format!("agend daemon: cannot prepare run/: {e}"));
+            return ExitCode::from(1);
+        }
+    };
     crate::housekeeping::run(&store, &home, log::now_unix_ms()).await;
     match shims::ensure(&home, &exe) {
         Ok(fixed) if !fixed.is_empty() => {
@@ -155,7 +191,9 @@ async fn serve(home: PathBuf, exe: PathBuf, store: SqliteStore) -> ExitCode {
         .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
         .collect();
     let runtime = HolderRuntime::new(&home, &exe, daemon_env, sink);
-    let mut supervisor = Supervisor::new(store, runtime, events.clone());
+    let fleet = Arc::new(Fleet::new(log::now_unix_ms()));
+    let mut supervisor =
+        Supervisor::new(store, runtime.clone(), events.clone(), Arc::clone(&fleet));
     let report = match supervisor.boot().await {
         Ok(report) => report,
         Err(e) => {
@@ -163,6 +201,24 @@ async fn serve(home: PathBuf, exe: PathBuf, store: SqliteStore) -> ExitCode {
             return ExitCode::from(1);
         }
     };
+    // Bound only now (P1): a client that connects sees the whole fleet.
+    let listener = match server::bind(&socket) {
+        Ok(listener) => listener,
+        Err(e) => {
+            log::line(&format!(
+                "agend daemon: cannot listen on {}: {e}",
+                socket.display()
+            ));
+            return ExitCode::from(1);
+        }
+    };
+    let context = Arc::new(Context {
+        fleet,
+        runtime,
+        supervisor: events.clone(),
+    });
+    let server = Server::start(listener, socket.clone(), context);
+    log::line(&format!("listening on {}", socket.display()));
     log::line(&format!(
         "agend daemon ready: instances={} recovered={} started={} orphans={}",
         report.instances, report.recovered, report.started, report.orphans
@@ -184,6 +240,7 @@ async fn serve(home: PathBuf, exe: PathBuf, store: SqliteStore) -> ExitCode {
     log::line(&format!(
         "agend daemon stopping ({signal}); holders keep running"
     ));
+    server.stop().await;
     // Closes every holder connection (no Shutdown) and then the DB.
     drop(supervisor);
     log::line("agend daemon stopped");

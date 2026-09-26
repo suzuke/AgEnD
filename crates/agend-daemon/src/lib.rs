@@ -4,8 +4,9 @@
 //!
 //! Layers:
 //! - entry: `daemon` (`agend daemon`, gate 6), `server`, `handlers`, `ingest`
-//! - domain: `boot`, `pipeline`, `delivery`, `supervisor`, `scheduler`,
-//!   `reconcile`, `housekeeping`
+//! - domain: `boot`, `fleet` (fleet view and event log, gate 8),
+//!   `pipeline`, `delivery`, `supervisor`, `scheduler`, `reconcile`,
+//!   `housekeeping`
 //! - adapters: `driver`, `runtime`, `forge`, `git`, `runner`, `store`, `notifier`
 //!
 //! Domain modules talk to adapters only through the traits in
@@ -17,14 +18,18 @@
 // entry
 #[cfg(unix)]
 pub mod daemon;
+#[cfg(unix)]
 pub mod handlers;
 pub mod ingest;
+#[cfg(unix)]
 pub mod server;
 
 // domain
 #[cfg(unix)]
 pub mod boot;
 pub mod delivery;
+#[cfg(unix)]
+pub mod fleet;
 #[cfg(unix)]
 pub mod housekeeping;
 pub mod pipeline;
