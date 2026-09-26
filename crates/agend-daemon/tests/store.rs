@@ -418,13 +418,17 @@ fn an_upgrade_takes_a_pre_upgrade_snapshot_first() {
     let first = SqliteStore::open_with(&home, NOW, &[]).err().unwrap();
     assert!(matches!(first, StoreError::TooNew { .. }), "{first}");
 
-    let two = [MIGRATIONS[0], ADD_TABLE];
-    drop(SqliteStore::open_with(&home, NOW, &two).unwrap());
-    assert_eq!(user_version(&home.join(DB_FILE)), 2);
+    let next = [MIGRATIONS, &[ADD_TABLE]].concat();
+    drop(SqliteStore::open_with(&home, NOW, &next).unwrap());
+    assert_eq!(user_version(&home.join(DB_FILE)), LATEST_VERSION + 1);
     let pre = home
         .join(BACKUPS_DIR)
-        .join(snapshot::pre_upgrade_name(NOW, 2));
-    assert_eq!(user_version(&pre), 1, "the snapshot is the v1 database");
+        .join(snapshot::pre_upgrade_name(NOW, LATEST_VERSION + 1));
+    assert_eq!(
+        user_version(&pre),
+        LATEST_VERSION,
+        "the snapshot is the database before the upgrade"
+    );
     let tasks: i64 = Connection::open(&pre)
         .unwrap()
         .query_row("SELECT count(*) FROM tasks", [], |r| r.get(0))
@@ -440,10 +444,10 @@ fn a_failing_migration_rolls_back_and_leaves_user_version_unchanged() {
     };
     let dir = TempDir::new("store-broken").unwrap();
     let home = dir.path().join("home");
-    let list = [MIGRATIONS[0], BROKEN];
+    let list = [MIGRATIONS, &[BROKEN]].concat();
     drop(SqliteStore::open(&home, NOW).unwrap());
 
-    // From a v1 database: the broken one rolls back.
+    // From a database at the latest version: the broken one rolls back.
     let error = SqliteStore::open_with(&home, NOW, &list).err().unwrap();
     assert!(
         matches!(
@@ -456,7 +460,7 @@ fn a_failing_migration_rolls_back_and_leaves_user_version_unchanged() {
         "{error}"
     );
     let db = home.join(DB_FILE);
-    assert_eq!(user_version(&db), 1);
+    assert_eq!(user_version(&db), LATEST_VERSION);
     let half: i64 = Connection::open(&db)
         .unwrap()
         .query_row(
@@ -725,15 +729,15 @@ fn a_database_missing_a_table_of_its_version_is_refused_and_left_untouched() {
         .unwrap()
         .execute_batch("DROP TABLE task_events; DROP TABLE workflows;")
         .unwrap();
-    assert_eq!(user_version(&db), 1);
+    assert_eq!(user_version(&db), LATEST_VERSION);
     let before = (sha256(&db), listing(&home));
 
     let error = SqliteStore::open(&home, NOW).err().unwrap();
     assert_eq!(
         error.to_string(),
         format!(
-            "agend.db has schema version 1 but lacks its table(s) task_events, workflows; \
-             refusing to start with it — restore a snapshot from {} (see README)",
+            "agend.db has schema version {LATEST_VERSION} but lacks its table(s) task_events, \
+             workflows; refusing to start with it — restore a snapshot from {} (see README)",
             home.join("backups").display()
         )
     );
