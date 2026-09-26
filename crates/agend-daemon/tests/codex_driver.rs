@@ -220,3 +220,106 @@ fn a_lost_thread_is_replaced_only_when_it_was_never_used() {
     drop(store);
     drop(backend);
 }
+
+/// Only the uncertain row waits (verifier r2): a message sent before whose
+/// user message is not in the running turn yet does not hold back a later
+/// interrupt, which has to be able to stop a runaway turn.
+#[test]
+fn an_uncertain_row_does_not_hold_back_an_interrupt() {
+    use agend_daemon::delivery::render;
+    use agend_testkit::fake_agent::codex::Probe;
+    use serde_json::json;
+    let lab = lab();
+    let home = lab.home(3);
+    let id = format!("g7-{}u", tag());
+    let backend = codex::Backend::new(&home, &id, Duration::from_millis(3000)).unwrap();
+    let thread = codex::Fixture::boot(&backend).unwrap().thread().unwrap();
+    {
+        let store = SqliteStore::open(&home, 0).unwrap();
+        let new = agend_daemon::store::NewMessage {
+            id: "m-9".into(),
+            from_instance: "operator".into(),
+            to_instance: id.clone(),
+            task_id: Some("T-g7".into()),
+            body: "uncertain".into(),
+            level: BusyLevel::Queue,
+        };
+        block_on(store.claim_message(&new, 1)).unwrap();
+        block_on(store.mark_message_attempted("m-9", 2)).unwrap();
+    }
+    let text = render("operator", Some("T-g7"), "uncertain");
+    let mut probe: Probe = backend.probe().unwrap();
+    probe
+        .call(
+            "thread/resume",
+            json!({"threadId": thread, "excludeTurns": true}),
+        )
+        .unwrap();
+    let running = probe
+        .call(
+            "turn/start",
+            json!({"threadId": thread, "input": [{"type": "text", "text": text, "text_elements": []}],
+                   "clientUserMessageId": "m-9"}),
+        )
+        .unwrap()["turn"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    drop(probe);
+    let fx = codex::Fixture::boot(&backend).unwrap();
+    assert_eq!(fx.state("m-9").unwrap(), "queued", "m-9 waits");
+    let state = fx
+        .deliver("m-stop", "stop that", BusyLevel::Interrupt)
+        .unwrap();
+    assert_eq!(state, DeliveryState::Sent, "the interrupt was held back");
+    let all = fx.settle(2).unwrap();
+    assert_eq!(
+        codex::status_of(&all, &running).as_deref(),
+        Some("interrupted"),
+        "{all:?}"
+    );
+    assert!(codex::turn_of(&all, "m-stop").is_some(), "{all:?}");
+}
+
+/// A closed link (the supervisor closes it at the instance's death) never
+/// reconnects to the next app-server on the same socket path; an open one
+/// does (so the test can see a reconnect).
+#[test]
+fn a_closed_link_does_not_reconnect_to_the_next_app_server() {
+    use agend_daemon::driver::codex::launch;
+    use agend_testkit::fake_agent::codex::Server;
+    let lab = lab();
+    for (n, close) in [(4, true), (5, false)] {
+        let home = lab.home(n);
+        let id = format!("g7-{}o{n}", tag());
+        codex::add_codex(&home, &id, None).unwrap();
+        let listen = launch::socket_path(&home, &id);
+        let state = home.join("fake-state");
+        let first = Server::bind(&listen, Duration::from_millis(100), Some(state.clone())).unwrap();
+        let store = Arc::new(SqliteStore::open(&home, 0).unwrap());
+        let driver = CodexDriver::new(&home, Arc::clone(&store), Arc::new(|_| {}));
+        block_on(driver.connect(&id, 1)).unwrap().unwrap();
+        drop(first);
+        if close {
+            driver.disconnect(&id);
+        }
+        let next = Server::bind(&listen, Duration::from_millis(100), Some(state)).unwrap();
+        std::thread::sleep(Duration::from_millis(1500));
+        let accepted = next.accepted();
+        drop(driver);
+        drop(store);
+        drop(next);
+        let _ = std::fs::remove_file(agend_testkit::fake_agent::codex::socket_path_for(&listen));
+        if close {
+            assert_eq!(
+                accepted, 0,
+                "a closed link connected to the next app-server"
+            );
+        } else {
+            assert!(
+                accepted > 0,
+                "an open link never reconnected; the test sees nothing"
+            );
+        }
+    }
+}

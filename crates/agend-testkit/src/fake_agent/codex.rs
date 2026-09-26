@@ -103,6 +103,7 @@ fn usage(error: &str) -> ExitCode {
 pub struct Server {
     requested: PathBuf,
     bound: PathBuf,
+    shared: Arc<Shared>,
 }
 
 impl Server {
@@ -132,11 +133,20 @@ impl Server {
         let shared = Arc::new(Shared {
             state: Mutex::new(state),
             turn,
+            closed: std::sync::atomic::AtomicBool::new(false),
+            accepted: std::sync::atomic::AtomicU64::new(0),
         });
+        let handle = Arc::clone(&shared);
         let ticker = Arc::clone(&shared);
         std::thread::spawn(move || tick_loop(&ticker));
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
+                if shared.closed.load(std::sync::atomic::Ordering::SeqCst) {
+                    return;
+                }
+                shared
+                    .accepted
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let shared = Arc::clone(&shared);
                 std::thread::spawn(move || {
                     let _ = serve(stream, &shared);
@@ -144,6 +154,7 @@ impl Server {
             }
         });
         Ok(Server {
+            shared: handle,
             requested: requested.to_path_buf(),
             bound,
         })
@@ -155,8 +166,21 @@ impl Server {
     }
 }
 
+impl Server {
+    /// How many connections this server accepted.
+    pub fn accepted(&self) -> u64 {
+        self.shared
+            .accepted
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
 impl Drop for Server {
+    /// The server is gone: its connections end and its socket is removed.
     fn drop(&mut self) {
+        self.shared
+            .closed
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         let _ = std::fs::remove_file(&self.bound);
         let _ = std::fs::remove_file(&self.requested);
     }
@@ -174,6 +198,10 @@ pub fn socket_path_for(requested: &Path) -> PathBuf {
 struct Shared {
     state: Mutex<State>,
     turn: Duration,
+    /// Set when the [`Server`] is dropped: every connection ends.
+    closed: std::sync::atomic::AtomicBool,
+    /// Connections accepted so far.
+    accepted: std::sync::atomic::AtomicU64,
 }
 
 #[derive(Default)]
@@ -762,6 +790,9 @@ fn pump(
     shared: &Shared,
 ) -> tungstenite::Result<()> {
     loop {
+        if shared.closed.load(std::sync::atomic::Ordering::SeqCst) {
+            return Ok(());
+        }
         while let Ok(message) = outgoing.try_recv() {
             socket.send(Message::text(message.to_string()))?;
         }

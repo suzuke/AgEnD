@@ -597,7 +597,8 @@ impl Worker {
     /// link broke or the daemon stopped mid-send) goes out again only when
     /// neither the thread history nor its queue has it (P5), and not while
     /// a turn runs: the running turn may be it with its user message not
-    /// shown yet, so the flush waits for idle and looks again.
+    /// shown yet, so that row waits for idle and is looked at again; the
+    /// rows after it are sent meanwhile.
     fn flush(&mut self) -> Result<(), RpcError> {
         let mut queued = self.queued()?;
         if queued.iter().any(|r| r.attempted_at_unix_ms.is_some()) {
@@ -612,8 +613,10 @@ impl Worker {
                         self.id, row.id
                     ));
                 }
+                // Only this row waits: later ones (a steer or an interrupt
+                // that has to stop a runaway turn) still go out.
                 self.recheck = true;
-                return Ok(());
+                continue;
             }
             let (id, now) = (row.id.clone(), log::now_unix_ms());
             self.store

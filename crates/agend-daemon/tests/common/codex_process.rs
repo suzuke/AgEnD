@@ -380,8 +380,16 @@ pub fn give_up(lab: &Lab, tag: &str) -> Result<Vec<String>, String> {
     let restarts = lines.iter().filter(|l| l.contains(": restart ")).count();
     let resumed = lines
         .iter()
-        .filter(|l| l.contains(&format!("thread {thread} resumed (")))
+        .filter(|l| l.contains(&format!("thread {thread} resumed")))
         .count();
+    // A dead generation's link must not reconnect to the next app-server.
+    let again = lines
+        .iter()
+        .filter(|l| l.contains("connected again"))
+        .count();
+    ensure(again == 0, || {
+        format!("an old link reconnected: {lines:#?}")
+    })?;
     let created = lines.iter().filter(|l| l.contains("created")).count();
     ensure(restarts == 3 && resumed == 3 && created == 1, || {
         format!("{lines:#?}")
