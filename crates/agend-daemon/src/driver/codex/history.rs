@@ -187,6 +187,7 @@ mod tests {
             turn_id: turn.map(str::to_owned),
             created_at_unix_ms: 0,
             updated_at_unix_ms: 0,
+            attempted_at_unix_ms: None,
         }
     }
 

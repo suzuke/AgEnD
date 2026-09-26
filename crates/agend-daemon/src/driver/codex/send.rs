@@ -75,9 +75,16 @@ pub fn send(
     id: &str,
     level: BusyLevel,
 ) -> Result<Outcome, RpcError> {
-    let active = rpc.active_turn();
-    let (true, Some(turn)) = (rpc.busy(), active) else {
+    if !rpc.busy() {
         return turn_start(rpc, thread, text, id, Vec::new());
+    }
+    // Busy with the running turn's id not known yet (between
+    // `thread/status/changed` and `turn/started`): queue still queues;
+    // steer and interrupt need the id, so a `turn/start` joins the turn.
+    let turn = match (rpc.active_turn(), level) {
+        (Some(turn), _) => turn,
+        (None, BusyLevel::Queue) => String::new(),
+        (None, _) => return turn_start(rpc, thread, text, id, Vec::new()),
     };
     match level {
         BusyLevel::Queue => {
@@ -231,6 +238,22 @@ mod tests {
         )]);
         assert!(send(&mut rpc, "th", "x", "m-s", BusyLevel::Steer).is_err());
         assert_eq!(rpc.calls, ["turn/steer"], "other errors are not retried");
+    }
+
+    /// Busy before `turn/started` told the driver the turn id: a queued
+    /// message is still queued, never joined to the running turn.
+    #[test]
+    fn busy_without_a_known_turn_still_queues() {
+        let mut rpc = busy(vec![(Ok(json!({"queuedSubmission": {"id": "q"}})), None)]);
+        rpc.active = None;
+        send(&mut rpc, "th", "x", "m-q", BusyLevel::Queue).unwrap();
+        assert_eq!(rpc.calls, ["thread/queue/add"]);
+        for level in [BusyLevel::Steer, BusyLevel::Interrupt] {
+            let mut rpc = busy(vec![(Ok(json!({"turn": {"id": "t-A"}})), None)]);
+            rpc.active = None;
+            send(&mut rpc, "th", "x", "m", level).unwrap();
+            assert_eq!(rpc.calls, ["turn/start"], "{level:?}");
+        }
     }
 
     #[test]

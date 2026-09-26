@@ -44,6 +44,9 @@ pub struct Message {
     pub turn_id: Option<String>,
     pub created_at_unix_ms: u64,
     pub updated_at_unix_ms: u64,
+    /// Set just before the first RPC that sends it: a `queued` row with it
+    /// may have reached codex (the reply was lost, or the daemon stopped).
+    pub attempted_at_unix_ms: Option<u64>,
 }
 
 impl Message {
@@ -100,7 +103,7 @@ pub fn parse_state(text: &str) -> Option<DeliveryState> {
 }
 
 const COLUMNS: &str = "seq, id, from_instance, to_instance, task_id, body, level, state, \
-                       turn_id, created_at_unix_ms, updated_at_unix_ms";
+                       turn_id, created_at_unix_ms, updated_at_unix_ms, attempted_at_unix_ms";
 
 fn from_row(row: &Row<'_>) -> rusqlite::Result<Result<Message, StoreError>> {
     let id: String = row.get(1)?;
@@ -114,6 +117,7 @@ fn from_row(row: &Row<'_>) -> rusqlite::Result<Result<Message, StoreError>> {
     let task_id = row.get(4)?;
     let body = row.get(5)?;
     let turn_id = row.get(8)?;
+    let attempted: Option<i64> = row.get(11)?;
     Ok((|| {
         let invalid = |what: String| StoreError::Invalid(format!("message {id}: {what}"));
         Ok(Message {
@@ -129,6 +133,7 @@ fn from_row(row: &Row<'_>) -> rusqlite::Result<Result<Message, StoreError>> {
             task_id,
             body,
             turn_id,
+            attempted_at_unix_ms: attempted.and_then(|a| u64::try_from(a).ok()),
             id: id.clone(),
         })
     })())
@@ -210,4 +215,14 @@ pub(crate) fn advance(
         rusqlite::params![id, state_text(next), turn_id, ms(now)?],
     )?;
     get(conn, id)
+}
+
+/// Records that message `id` is about to be sent (only while `queued`).
+pub(crate) fn mark_attempted(conn: &Connection, id: &str, now: u64) -> Result<(), StoreError> {
+    conn.execute(
+        "UPDATE messages SET attempted_at_unix_ms = COALESCE(attempted_at_unix_ms, ?2) \
+         WHERE id = ?1 AND state = 'queued'",
+        rusqlite::params![id, ms(now)?],
+    )?;
+    Ok(())
 }

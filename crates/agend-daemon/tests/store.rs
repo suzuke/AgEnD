@@ -1322,7 +1322,7 @@ fn a_message_id_is_claimed_once_and_other_content_is_refused() {
 fn message_order_survives_prune_snapshot_and_restore() {
     let (_, golden) = golden();
     assert!(
-        golden.contains("seq                INTEGER NOT NULL PRIMARY KEY")
+        golden.contains("seq                INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT")
             && golden.contains("id                 TEXT    NOT NULL UNIQUE"),
         "{golden}"
     );
@@ -1369,4 +1369,21 @@ fn message_order_survives_prune_snapshot_and_restore() {
     assert_eq!(seqs(&store), before);
     block_on(store.claim_message(&new_message("m-c", "c"), NOW)).unwrap();
     assert_eq!(seqs(&store).last().unwrap(), &("m-c".to_owned(), 4));
+}
+
+/// `seq` is AUTOINCREMENT: after a prune empties the table, the next
+/// message still gets a larger number (gate 9's `inbox --after`).
+#[test]
+fn message_seq_never_goes_back_after_the_table_is_emptied() {
+    let dir = TempDir::new("store-seq-auto").unwrap();
+    let store = SqliteStore::open(&dir.path().join("home"), NOW).unwrap();
+    let old = NOW - 31 * DAY_MS;
+    for id in ["m-1", "m-2", "m-3"] {
+        block_on(store.claim_message(&new_message(id, id), old)).unwrap();
+    }
+    let report = block_on(store.prune(NOW)).unwrap();
+    assert_eq!(report.table("messages").unwrap().after, 0);
+    block_on(store.claim_message(&new_message("m-4", "x"), NOW)).unwrap();
+    let seq = block_on(store.message("m-4")).unwrap().unwrap().seq;
+    assert_eq!(seq, 4, "a pruned number was used again");
 }

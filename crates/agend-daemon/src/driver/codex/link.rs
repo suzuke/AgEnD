@@ -184,6 +184,9 @@ pub(crate) struct Worker {
     busy: bool,
     active: Option<String>,
     shared: Arc<Shared>,
+    /// A `queued` message that may already be in the running turn waits
+    /// for the thread to be idle, then the flush runs again.
+    recheck: bool,
 }
 
 impl Worker {
@@ -205,6 +208,7 @@ impl Worker {
             busy: false,
             active: None,
             shared: Arc::new(Shared::default()),
+            recheck: false,
         };
         worker.initialize()?;
         Ok(worker)
@@ -340,6 +344,12 @@ impl Worker {
                 Ok(Some(message)) => self.dispatch(message),
                 Ok(None) => {}
                 Err(_) => return false,
+            }
+            if self.recheck && !self.busy {
+                self.recheck = false;
+                if self.flush().is_err() {
+                    return false;
+                }
             }
         }
     }
@@ -572,15 +582,43 @@ impl Worker {
         Ok(())
     }
 
-    /// Sends every `queued` message in `seq` order. A broken connection
-    /// stops it (the messages stay `queued`); a refusal marks one `failed`.
-    fn flush(&mut self) -> Result<(), RpcError> {
-        let queued: Vec<Message> = messages_to(&self.store, &self.id)
+    fn queued(&self) -> Result<Vec<Message>, RpcError> {
+        Ok(messages_to(&self.store, &self.id)
             .map_err(store_error)?
             .into_iter()
             .filter(|r| r.state == DeliveryState::Queued)
-            .collect();
+            .collect())
+    }
+
+    /// Sends every `queued` message in `seq` order. A broken connection
+    /// stops it (the messages stay `queued`); a refusal marks one `failed`.
+    ///
+    /// A message sent before (`attempted_at` set: its reply was lost, the
+    /// link broke or the daemon stopped mid-send) goes out again only when
+    /// neither the thread history nor its queue has it (P5), and not while
+    /// a turn runs: the running turn may be it with its user message not
+    /// shown yet, so the flush waits for idle and looks again.
+    fn flush(&mut self) -> Result<(), RpcError> {
+        let mut queued = self.queued()?;
+        if queued.iter().any(|r| r.attempted_at_unix_ms.is_some()) {
+            self.reconcile()?;
+            queued = self.queued()?;
+        }
         for row in queued {
+            if row.attempted_at_unix_ms.is_some() && self.busy {
+                if !self.recheck {
+                    log::line(&format!(
+                        "{}: {} was sent before and is not in the thread yet; looking again when the thread is idle",
+                        self.id, row.id
+                    ));
+                }
+                self.recheck = true;
+                return Ok(());
+            }
+            let (id, now) = (row.id.clone(), log::now_unix_ms());
+            self.store
+                .call_blocking(move |conn| messages::mark_attempted(conn, &id, now))
+                .map_err(store_error)?;
             let text = text_of(&row);
             let thread = self.thread.clone();
             let level = messages::level_text(row.level);

@@ -480,6 +480,7 @@ pub fn crash_window(lab: &crate::lab::Lab, tag: &str) -> Result<Vec<String>, Str
             level: BusyLevel::Queue,
         };
         block_on(store.claim_message(&new, 1)).map_err(|e| e.to_string())?;
+        block_on(store.mark_message_attempted(m, 2)).map_err(|e| e.to_string())?;
     }
     drop(store);
     let text = |body: &str| render("operator", Some("T-g7"), body);
@@ -523,6 +524,68 @@ pub fn crash_window(lab: &crate::lab::Lab, tag: &str) -> Result<Vec<String>, Str
             "after the queue ran: m-8 {m8}; fake app-server turns: {} (m-7, a human's, m-8: nothing sent twice)",
             completed(&all)
         ),
+    ])
+}
+
+/// `== reply-lost` (P5): `turn/start` reached codex but its reply never came
+/// back (a timeout, a broken link, a stop mid-send): the row is `queued` with
+/// `attempted_at` set. On the next connect its turn is running and its user
+/// message is not in the history yet; the driver waits for the thread to be
+/// idle, finds it, and confirms it: one user message, one turn.
+pub fn reply_lost(lab: &crate::lab::Lab, tag: &str) -> Result<Vec<String>, String> {
+    let home = lab.home(24);
+    let id = format!("g7-{tag}l");
+    let backend = Backend::new(&home, &id, Duration::from_millis(1500))?;
+    let thread = Fixture::boot(&backend)?.thread()?;
+    let store = SqliteStore::open(&home, 0).map_err(|e| e.to_string())?;
+    let new = agend_daemon::store::NewMessage {
+        id: "m-9".into(),
+        from_instance: "operator".into(),
+        to_instance: id.clone(),
+        task_id: Some("T-g7".into()),
+        body: "the reply got lost".into(),
+        level: BusyLevel::Queue,
+    };
+    block_on(store.claim_message(&new, 1)).map_err(|e| e.to_string())?;
+    block_on(store.mark_message_attempted("m-9", 2)).map_err(|e| e.to_string())?;
+    drop(store);
+    let text = render("operator", Some("T-g7"), "the reply got lost");
+    let mut probe = backend.probe()?;
+    probe.call(
+        "thread/resume",
+        json!({"threadId": thread, "excludeTurns": true}),
+    )?;
+    probe.call(
+        "turn/start",
+        json!({"threadId": thread, "input": [{"type": "text", "text": text, "text_elements": []}],
+               "clientUserMessageId": "m-9"}),
+    )?;
+    drop(probe);
+    let fx = Fixture::boot(&backend)?;
+    let right_after = fx.state("m-9")?;
+    let all = fx.settle(1)?;
+    let turns = backend.turns(&thread)?;
+    let users: usize = turns
+        .iter()
+        .flat_map(|t| t["items"].as_array().cloned().unwrap_or_default())
+        .filter(|i| i["type"] == "userMessage")
+        .count();
+    let state = fx.state("m-9")?;
+    ensure(
+        completed(&all) == 1 && users == 1 && state == "confirmed",
+        || {
+            format!(
+                "turns {}, user messages {users}, m-9 {state}",
+                completed(&all)
+            )
+        },
+    )?;
+    Ok(vec![
+        "m-9: queued, attempted; codex got it (turn/start) but the reply was lost".into(),
+        format!(
+            "reconnect while its turn runs (no user message yet): m-9 still {right_after}, not sent again"
+        ),
+        format!("the turn ended: m-9 {state}; turns: 1, user messages: {users} (no duplicate)"),
     ])
 }
 

@@ -79,6 +79,12 @@ fn a_crash_between_send_and_sent_is_reconciled_from_history_and_queue() {
 }
 
 #[test]
+fn a_lost_reply_is_not_sent_again() {
+    let lab = lab();
+    show(&codex::reply_lost(&lab, &tag()).unwrap());
+}
+
+#[test]
 fn approvals_are_declined() {
     let lab = lab();
     show(&codex::approval(&lab, &tag()).unwrap());

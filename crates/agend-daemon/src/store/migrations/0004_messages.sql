@@ -5,13 +5,17 @@
 -- One row per message the daemon delivers (retention: 30 days by
 -- `created_at_unix_ms`, D31). This table is the only idempotency layer: a
 -- message id is inserted once. `seq` is the explicit order (an INTEGER
--- PRIMARY KEY is kept by VACUUM / VACUUM INTO; a bare rowid may not be).
+-- PRIMARY KEY is kept by VACUUM / VACUUM INTO; a bare rowid may not be); AUTOINCREMENT
+-- never gives a number twice, even after a prune empties the table (gate 9's
+-- `inbox --after`). `attempted_at_unix_ms`: set just before the first RPC that
+-- sends it; a `queued` row with it set may have reached codex and is only sent
+-- again after the thread history and queue show it did not.
 -- `state`: `queued` (in the DB, no backend reply yet), `sent` (the backend
 -- accepted it), `confirmed` (it is in the agent's thread), `failed` (the
 -- backend refused it, or the instance was failed). `turn_id`: the backend
 -- turn it went into, when known.
 CREATE TABLE messages (
-    seq                INTEGER NOT NULL PRIMARY KEY,
+    seq                INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
     id                 TEXT    NOT NULL UNIQUE,
     from_instance      TEXT    NOT NULL,
     to_instance        TEXT    NOT NULL,
@@ -20,6 +24,7 @@ CREATE TABLE messages (
     level              TEXT    NOT NULL CHECK (level IN ('queue', 'steer', 'interrupt')),
     state              TEXT    NOT NULL CHECK (state IN ('queued', 'sent', 'confirmed', 'failed')),
     turn_id            TEXT,
+    attempted_at_unix_ms INTEGER CHECK (attempted_at_unix_ms IS NULL OR attempted_at_unix_ms >= 0),
     created_at_unix_ms INTEGER NOT NULL CHECK (created_at_unix_ms >= 0),
     updated_at_unix_ms INTEGER NOT NULL CHECK (updated_at_unix_ms >= 0)
 ) STRICT;

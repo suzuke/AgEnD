@@ -291,7 +291,7 @@ unset AGEND_BIN
    要跑幾分鐘（前面是三個 crate 的 fmt／clippy／測試，最後約 2 分鐘是 demo；`2>/dev/null` 只是把 daemon 與 driver 的 log 藏起來）。應該看到最後三行：
 
    ```text
-   stopped 7 holder(s) with Shutdown; running now: 0
+   stopped 8 holder(s) with Shutdown; running now: 0
    codex demo: all sections passed
    gate 7 (codex): checks passed
    ```
@@ -335,7 +335,7 @@ unset AGEND_BIN
    sed -n '/^== idempotent/,/^== restart/p' /tmp/g7-accept.txt
    ```
 
-   應該看到（中間還有 `== crash-window`、`== approval` 兩個標題）：
+   應該看到（中間還有 `== crash-window`、`== reply-lost`、`== approval` 三個標題；`== reply-lost`：回覆沒回來的 m-9 在它的 turn 跑完前不重送，最後 `turns: 1, user messages: 1`）：
 
    ```text
    m-7 again: confirmed (already confirmed; not sent again); turns: 1
@@ -360,15 +360,15 @@ unset AGEND_BIN
    sed -n '/^== restart/,/^== resume/p' /tmp/g7-accept.txt
    ```
 
-   應該看到 4 行 `boot N`（`daemon pid` 每行不同、`app-server pid` 每行相同），開機 3 `backfilled=7` 與 `m-q confirmed while daemon was down`、開機 4 結尾 `ok`，最後是反向檢查（每次開機換新的 `AGEND_HOME` 在開機 2 失敗）：
+   應該看到 4 行 `boot N`（`daemon pid` 每行不同、`app-server pid` 每行相同；下面的 `<pid>`、`<turn>`、`<thread>` 每次不同），開機 3 `backfilled=7` 與 `m-q confirmed while daemon was down`、開機 4 結尾 `ok`，最後是反向檢查（每次開機換新的 `AGEND_HOME` 在開機 2 失敗）：
 
    ```text
-   boot 1 daemon pid=95816 app-server pid=95738 thread=<T> backfilled=0 from=- cursor=00000000-0000-7000-8000-000000000005:0 | app-server ready (0 ms); thread <T> created; go (resume <T>) | m-1 sent (turn/start, a 5 s turn); m-q sent (thread/queue/add)
-   boot 2 daemon pid=95817 app-server pid=95738 thread=<T> backfilled=0 from=00000000-0000-7000-8000-000000000005:0 cursor=00000000-0000-7000-8000-000000000005:0 | app-server ready (0 ms); thread <T> resumed (busy) | idle: backfill only
-   boot 3 daemon pid=95906 app-server pid=95738 thread=<T> backfilled=7 from=00000000-0000-7000-8000-000000000005:0 cursor=00000000-0000-7000-8000-000000000238:4 | app-server ready (0 ms); thread <T> resumed (idle) | m-q confirmed while daemon was down; m-1, m-q again: no new turn; m-3 confirmed
-   boot 4 daemon pid=96036 app-server pid=95738 thread=<T> backfilled=3 from=00000000-0000-7000-8000-000000000238:4 cursor=00000000-0000-7000-8000-000000000262:4 | app-server ready (0 ms); thread <T> resumed (idle) | m-1, m-q, m-3 confirmed; all three again: no new turn; ok
-   4 boots, 4 daemon pids, one app-server (pid 95738), one thread <T>=00000000-0000-7000-8000-000000000002
-   negative check (new AGEND_HOME each boot): boot 2 failed: thread 00000000-0000-7000-8000-000000000012, not boot 1's 00000000-0000-7000-8000-000000000002
+   boot 1 daemon pid=<pid> app-server pid=<pid> thread=<T> backfilled=0 from=- cursor=<turn>:0 | app-server ready (0 ms); thread <T> created; go (resume <T>) | m-1 sent (turn/start, a 5 s turn); m-q sent (thread/queue/add)
+   boot 2 daemon pid=<pid> app-server pid=<pid> thread=<T> backfilled=0 from=<turn>:0 cursor=<turn>:0 | app-server ready (0 ms); thread <T> resumed (busy) | idle: backfill only
+   boot 3 daemon pid=<pid> app-server pid=<pid> thread=<T> backfilled=7 from=<turn>:0 cursor=<turn>:4 | app-server ready (0 ms); thread <T> resumed (idle) | m-q confirmed while daemon was down; m-1, m-q again: no new turn; m-3 confirmed
+   boot 4 daemon pid=<pid> app-server pid=<pid> thread=<T> backfilled=3 from=<turn>:4 cursor=<turn>:4 | app-server ready (0 ms); thread <T> resumed (idle) | m-1, m-q, m-3 confirmed; all three again: no new turn; ok
+   4 boots, 4 daemon pids, one app-server (pid <pid>), one thread <T>=<thread>
+   negative check (new AGEND_HOME each boot): boot 2 failed: thread <thread>, not boot 1's <thread>
    ```
 
    - [ ] 通過
@@ -440,6 +440,7 @@ unset AGEND_BIN
    | `== app-server-dies` | `app-server is gone (no connection for 20 s) (after 20.x s)`、`old holder … got Shutdown`、`thread <T> resumed` |
    | `== first-start-interrupted` | `DB running, no thread, no $GO` → 下次開機 `thread <T> created` → `the waiting wrapper started the TUI` |
    | `== legacy` | `… failed: codex instance from before gate 7 has no thread id; a human decides`、holder pid 不變、`new` 那列照常起 |
+   | `== failed-holder-alive` | `failed`、holder 還在、`agent_pid` 有值而且 argv 有標記的 instance：`boot: no sweep line; the agent group is untouched` |
 
    - [ ] 通過
 
@@ -554,8 +555,8 @@ unset AGEND_BIN
 | K5 | DRV-6、DRV-9 的四次開機：每次開機是測試 binary 重新執行自己、開一個新的 store 與 `CodexDriver`；假 app-server 在父程序裡（行程內的 `Server`，真的 socket 與 WebSocket），所以 demo 印的「app-server pid」就是測試程序的 pid | backend 要活過四次開機；放在父程序最簡單，也不必找 binary | 改成獨立的 `fake-codex app-server` 程序：約 20 行 |
 | K6 | 假 app-server 的授權觸發改成「任何一行以 `run: ` 開頭」（原本是整個 prompt 以它開頭） | daemon 送的內容前面有 `From:`／`Task:` 標頭；錄製器的授權 prompt 第一行就是 `run: …`，錄製檔比對不受影響 | 改回只看開頭：一行，授權的 demo 要改 |
 | K7 | **不**給 TUI（也不給 app-server）加 `--no-daemon`（你 2026-09-26 查的 U6：codex 預設有共用的背景 app-server daemon） | `--remote` 和 `--no-daemon` 一起用有沒有衝突沒查證；衝突的話 TUI 起不來，每個 codex instance 都壞。`codex_live` 的 `ps:` 行會看到多出來的程序（U6、U18） | 包裝固定文字加一個參數，重跑步驟 8 |
-| K8 | `ZDOTDIR` 只給 codex agent（claude 等第 12 施工關實測）；`.zprofile` 只做一件事：`export PATH="$AGEND_HOME/bin:$PATH"`，不 `source` 你的 `~/.zshenv`／`~/.zprofile` | 你的 PATH 已經經 daemon 的 `PATH` 傳進來（`path_helper` 會把它接在系統目錄後面），不 source 就不會被你的 dotfile 再排一次；最簡單 | 在 `.zprofile` 加 `source` 行，再把 shim 放回最前面：幾行 |
-| K9 | 已知缺口（接受）：排隊的訊息已經開始成為 turn、但它的 user message 還沒出現在歷史時 daemon 剛好重連，對帳在 `thread/queue/list` 與歷史都找不到它，會再送一次（`Queue` 等級 → 多一個 turn）。真 codex 的 user message 也是晚出現的（`busy.jsonl` 約 2 秒後、`interrupt.jsonl` 被中斷的 turn 根本沒有）。真 codex 不認得 `thread/queue/list` 時也一樣（log 一行、照送） | 只有「RPC 送出後、寫 `sent` 前」當掉才會走到對帳，那個窗口是微秒級；補它要在重送前輪詢進行中的 turn | 重送前最多等 N 秒看進行中的 turn：約 20 行＋一條測試 |
+| K8 | `ZDOTDIR` 只給 codex agent（claude 等第 12 施工關實測）；`.zprofile` 只做一件事：`export PATH="$AGEND_HOME/bin:$PATH"`，不 `source` 你的 `~/.zshenv`／`~/.zprofile` | 你的 PATH 已經經 daemon 的 `PATH` 傳進來（`path_helper` 會把它接在系統目錄後面），不 source 就不會被你的 dotfile 再排一次；最簡單。**副作用**（verifier r1 L5）：login zsh 裡 daemon 帶進來的 `/opt/homebrew/bin`、`~/.cargo/bin` 會排在 `/usr/bin` 等系統目錄**後面**，codex 跑的 `python3` 之類會先找到系統版 | 在 `.zprofile` 加 `source` 行，再把 shim 放回最前面：幾行 |
+| K9 | 已經送過一次的 `queued` 訊息（`messages.attempted_at_unix_ms` 在 RPC 之前寫入）：回覆沒回來（30 秒逾時）、連線斷、daemon 停在送出中途，**不只是當掉**（verifier r1 L1）。這種訊息重送前一律先對帳（歷史＋`thread/queue/list`），而且 thread 有 turn 在跑時不送、等閒置再看一次（那個 turn 可能就是它，只是 user message 還沒出現；真 codex 的 user message 也是晚出現的）；兩邊都沒有才送（`== reply-lost` 與 `a_lost_reply_is_not_sent_again`）。剩下的窗口：它的 turn 被中斷、user message 永遠沒出現（`interrupt.jsonl` 那樣）→ 閒置後再送一次；真 codex 不認得 `thread/queue/list` → 還排在佇列裡的會再送（log 一行）。另一個接受的小窗口（L6）：daemon 死在 `Spawned` 與寫 `agent_pid` 之間，接回時是 `already_spawned`、拿不到 pid，那一代 holder 之後被 `kill -9` 就沒有清掃 | 真正「沒到 codex」的訊息還是要送；等閒置只延後、不丟 | 拿掉對帳前置與等待：約 30 行 |
 | K10 | `thread/resume` 的「找不到」＝ RPC 錯誤訊息含 `not found`（假 app-server 回 `-32600 thread not found: <id>`） | 真 codex 的錯誤形狀未查證（U1）；步驟 7 的 `resume_empty` 會錄到 | 改比對規則：一行 |
 | K11 | 送達的細節：送到不存在的 instance 是錯誤、不存任何列（DRV-2）；已經 `queued` 的訊息在 instance 之後變 `failed` 或被刪時不改成 `failed`（本關沒有呼叫點，第 9 施工關的 `inbox`／`status` 再看）；「`sent` 超過 10 分鐘」的顯示沒做（第 9、11 施工關）；fleet 的忙／閒沒接（instance 仍是 `unknown`，去抖動維持 5 秒不動；driver 的 `CodexDriver::busy` 已經有） | 都還沒有使用者；現在做只能用假資料驗 | 各在該施工關做 |
 | K12 | 第 8 施工關的後續（頁面「已知風險」寫的那一列）本關就做了：`failed` 的 codex 一律有 `retry`（`legacy_no_thread` 的除外），`retry` 接回原本的 thread，沒有 thread 就建。所以 `client_process.rs` 的 `== retry` 那段改了：「跑過、沒有 `retry`」那一列換成 opencode，codex `xn` 的啟動行是 `start (codex: new thread)`。第 8 施工關頁面步驟 1 的表要跟著改（本 PR 不改別的施工關頁面，列在 PR 裡） | codex 能 resume 之後，照舊「不能 retry」反而會丟掉能接回的對話 | 恢復舊規則：`failed_item` 一行＋那段測試 |
@@ -573,6 +574,7 @@ unset AGEND_BIN
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-26 fresh-context verifier r1（`942a648`）CONFIRMED、7 個 LOW，全部處理：L1 送過一次的 `queued` 訊息重送前先對帳、turn 在跑時等閒置（`attempted_at_unix_ms`、`== reply-lost`）；L2 `messages.seq` 改 `AUTOINCREMENT`（清空後不重用號碼，附測試）；L3 `failed`＋holder 還活著不清掃的測試改用真的 `agent_pid`（`== failed-holder-alive`）；L4 步驟 4 的 id 換成佔位；L5、L6 寫進 K8、K9；L7 忙碌但不知道 turn id 時 `Queue` 仍走 `thread/queue/add`。
 - 2026-09-26 實作（draft PR，branch `feat/gate-07-codex`）：migration `0004`（`messages`、`agent_pid`、`legacy_no_thread`）、`driver::codex`（`sh` 包裝、`$GO`、JSON-RPC 長連線、三級忙碌、冪等與崩潰對帳、thread 歷史當事件、清掃）、supervisor 接上（背景 connect、清掃時機、codex 可 `retry`）、`ZDOTDIR` 選項 A、假 app-server 補方法與 `fake-codex`、錄製器 3 個新情境、`codex_live`（未跑）、`cargo xtask accept codex` 的 demo。`cargo test --workspace`、clippy、check-deps、`accept codex`、`accept daemon-holder` 通過；待你追認 K1–K13；記下你查的 `--help`（U4、U6、U12，新增 U18）。
 - 2026-09-26 使用者逐題確認 P1–P9：P1 補「人在 TUI 打字」＋U17；P2 推翻第 4 施工關 P8 的 `SpawnSidecar`；P3 核准空 thread 例外；P4 選 A（`ZDOTDIR`，修改第 6 施工關 H3）；P6 核准 idle 時 `queue/start` 例外；P9 不覆寫 notify／hooks／MCP。
 - 2026-09-26 第九輪 review CONFIRMED，三個 LOW 修正：`messages` 加可為 NULL 的 `task_id`、欄位改名 `from_instance`；0004 的舊列條件加 `session_started = 1`。

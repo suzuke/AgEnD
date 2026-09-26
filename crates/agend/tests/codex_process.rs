@@ -67,3 +67,8 @@ fn a_first_start_interrupted_before_the_thread_creates_it_on_the_next_boot() {
 fn a_gate_6_codex_row_is_failed_and_left_alone() {
     run(codex::legacy, "l");
 }
+
+#[test]
+fn a_failed_instance_whose_holder_runs_is_not_swept() {
+    run(codex::failed_holder_alive, "k");
+}

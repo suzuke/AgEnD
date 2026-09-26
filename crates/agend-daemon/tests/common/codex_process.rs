@@ -584,3 +584,81 @@ pub fn legacy(lab: &Lab, tag: &str) -> Result<Vec<String>, String> {
         ),
     ])
 }
+
+/// `== failed-holder-alive` (P2, gate 6 H8): a `failed` codex instance
+/// whose holder still runs keeps it: the boot does not sweep its agent
+/// group, even though `agent_pid` is set and the group carries the
+/// instance's thread marker.
+pub fn failed_holder_alive(lab: &Lab, tag: &str) -> Result<Vec<String>, String> {
+    use agend_core::traits::HolderLaunch;
+    use agend_daemon::runtime::{HolderRuntime, SpawnOutcome};
+    let home = lab.home(7);
+    let id = format!("g7-{tag}k");
+    let thread = format!("thread-{tag}k");
+    let runtime = HolderRuntime::new(&home, &lab.agend, Vec::new(), std::sync::Arc::new(|_| {}));
+    // The agent's argv carries the marker the sweep looks for.
+    let started = block_on(runtime.start(&HolderLaunch {
+        instance_id: id.clone(),
+        backend: Backend::Codex,
+        executable: "/bin/bash".into(),
+        args: vec![
+            "-c".into(),
+            crate::lab::COUNTER.into(),
+            "agent".into(),
+            "resume".into(),
+            thread.clone(),
+        ],
+        working_directory: home.display().to_string(),
+    }))
+    .map_err(|e| e.to_string())?;
+    drop(runtime);
+    let holder = started.handle.process_id.unwrap_or(0);
+    let Some(SpawnOutcome::Spawned {
+        agent_pid: Some(agent),
+    }) = started.attached.spawn
+    else {
+        return Err(format!("no agent pid: {:?}", started.attached.spawn));
+    };
+    {
+        let store = SqliteStore::open(&home, 0).map_err(|e| e.to_string())?;
+        block_on(store.add_instance(&Instance {
+            id: id.clone(),
+            backend: Backend::Codex,
+            program: "codex".into(),
+            args: Vec::new(),
+            working_directory: home.display().to_string(),
+            session_id: Some(thread.clone()),
+            status: InstanceStatus::Failed,
+            session_started: true,
+            agent_pid: Some(agent),
+            legacy_no_thread: false,
+        }))
+        .map_err(|e| e.to_string())?;
+    }
+    let marked = codex_left(&home, &id, agent, Some(&thread));
+    ensure(!marked.is_empty(), || "the agent carries no marker".into())?;
+    let mut d = Daemon::start(lab, &home, &[])?;
+    d.ready()?;
+    std::thread::sleep(Duration::from_secs(1));
+    d.interrupt()?;
+    let swept: Vec<String> = lines_of(&d, &id)
+        .into_iter()
+        .filter(|l| l.contains("sweep"))
+        .collect();
+    ensure(swept.is_empty(), || format!("swept: {swept:?}"))?;
+    ensure(
+        files::running(&home, &id).ok().flatten() == Some(holder),
+        || format!("holder {holder} of {id} is gone"),
+    )?;
+    let still = codex_left(&home, &id, agent, Some(&thread));
+    ensure(still == marked, || {
+        format!("agent group changed: {still:?}")
+    })?;
+    let kept = read(&home, &id)?.agent_pid;
+    Ok(vec![
+        format!(
+            "{id}: failed, holder pid={holder} running, agent_pid={agent} (its argv has `resume {thread}`)"
+        ),
+        format!("boot: no sweep line; the agent group is untouched; agent_pid still {kept:?}"),
+    ])
+}

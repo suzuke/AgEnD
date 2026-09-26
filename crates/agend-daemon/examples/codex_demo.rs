@@ -97,6 +97,7 @@ fn demo() -> Result<(), String> {
     section("busy", driver::busy(&lab, tag))?;
     section("idempotent", driver::idempotent(&lab, tag))?;
     section("crash-window", driver::crash_window(&lab, tag))?;
+    section("reply-lost", driver::reply_lost(&lab, tag))?;
     section("approval", driver::approval(&lab, tag))?;
     section("restart", driver::restart(&lab, tag, false, &boot_command))?;
     match driver::restart(&lab, "n", true, &boot_command) {
@@ -115,6 +116,10 @@ fn demo() -> Result<(), String> {
         process::first_start_interrupted(&lab, tag),
     )?;
     section("legacy", process::legacy(&lab, tag))?;
+    section(
+        "failed-holder-alive",
+        process::failed_holder_alive(&lab, tag),
+    )?;
     println!("\n== cleanup");
     let stopped = lab.stop_all_holders();
     let left = lab.running_holders();

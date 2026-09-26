@@ -379,6 +379,17 @@ impl SqliteStore {
             .await
     }
 
+    /// Marks message `id` as about to be sent (only while `queued`).
+    pub async fn mark_message_attempted(
+        &self,
+        id: &str,
+        now_unix_ms: u64,
+    ) -> Result<(), StoreError> {
+        let id = id.to_owned();
+        self.call(move |conn| messages::mark_attempted(conn, &id, now_unix_ms))
+            .await
+    }
+
     pub async fn message(&self, id: &str) -> Result<Option<Message>, StoreError> {
         let id = id.to_owned();
         self.call(move |conn| messages::get(conn, &id)).await
