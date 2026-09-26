@@ -20,6 +20,7 @@
 - supervisor、reconcile
 - `PipelineState` 存成 task 資料列上的快照欄位，與 task 一起 CAS，不靠 replay events 重建（第 5 施工關 P4）
 - 這把 D32 延伸到 `PipelineState`，要有 golden JSON 測試；第 1 施工關的測試要重跑
+- 從第 6 施工關移來（[gate-06 P9](gate-06-daemon-holder.md#p9hooks-與-binding-快照依賴規則)，使用者 2026-09-26 追認）：綁定／釋放 worktree 時呼叫 `agend_shim::install_hooks`／`uninstall_hooks`；daemon 為每個 agent 寫唯讀 binding 快照 `$AGEND_HOME/bindings/<instance>.json`（見 [GLOSSARY](../GLOSSARY.md)「binding 快照」）；`check-deps` 加規則：`agend-daemon` 不能依賴 `agend-holder` 或 `agend-shim`
 
 ## 自動驗收（完成定義）
 

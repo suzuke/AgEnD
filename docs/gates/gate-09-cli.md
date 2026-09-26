@@ -18,6 +18,7 @@
 - `agend status`
 - `agend doctor`、`agend init`（服務註冊在第 13 施工關）
 - `agend doctor` 列出所有 holder 並標出孤兒（DB 沒有的 instance）（第 4 施工關 P2，使用者 2026-09-25 決定）
+- `agend daemon restart` 的 D2 重啟預檢：從第 6 施工關移來（[gate-06 P7](gate-06-daemon-holder.md#p7d2-的重啟預檢)，使用者 2026-09-26 追認）——新 binary 先用最新 DB 快照的複本跑 migration 加 `quick_check`，再用暫存 home 起一個自己的 holder 跑一次（hello、Spawn、Shutdown），都過了才切換，任何一步失敗就留在舊版
 
 ## 自動驗收（完成定義）
 

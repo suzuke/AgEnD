@@ -7,7 +7,7 @@
 
 ## 狀態
 
-**已驗收，等 merge**（2026-09-26）：P1–P9 使用者已確認；S1–S23 使用者已追認；fresh-context verifier CONFIRMED；使用者親自驗收 10 步通過。名詞表留給之後的共用文件 PR。
+**完成**（2026-09-26，已 merge）：P1–P9 使用者已確認；S1–S23 使用者已追認；fresh-context verifier CONFIRMED；使用者親自驗收 10 步通過。名詞表留給之後的共用文件 PR。
 
 ## 範圍
 
