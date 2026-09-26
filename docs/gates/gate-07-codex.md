@@ -3,7 +3,7 @@
 > **TL;DR**
 > - codex driver、送達模型、三級忙碌策略；codex 第一次有 thread id 可以 resume（補上第 6 施工關 H2 的缺口）。
 > - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這個施工關才算完成。
-> - 下一步：逐題決定下面的開工前提案 P1–P9（每題最後一行打勾）；另外請你在自己的終端跑「未查證」表裡的安全指令（不花 token），結果貼回來；U1、U3、U7、U9、U11、U14、U15、U16 沒有安全指令，要真跑 codex（步驟 7、8，選做、花 token）。P2 推翻第 4 施工關 P8 的 `SpawnSidecar`、P4 是安全決定（shim 可能被繞過），請特別看。第 6 施工關已 merge（#125），確認後即可開工。
+> - 下一步：逐題決定下面的開工前提案 P1–P9（每題最後一行打勾）；另外請你在自己的終端跑「未查證」表裡的安全指令（不花 token），結果貼回來；U1、U3、U7、U9、U10、U11、U14、U15、U16 沒有安全指令，要真跑 codex（步驟 7、8，選做、花 token）。P2 推翻第 4 施工關 P8 的 `SpawnSidecar`、P4 是安全決定（shim 可能被繞過），請特別看。第 6 施工關已 merge（#125），確認後即可開工。
 
 **先看這條**：這頁的步驟會用到 `agend`。每個新開的終端機分頁都要先跑「你親自驗收」開頭的設定，否則會跑到舊的 Node 版 `agend` 1.24.0。
 
@@ -65,12 +65,13 @@ codex 的事實來源：[backends/codex.md](../backends/codex.md)、[spike-codex
     - TUI 先結束：它是 session leader，kernel 對 group 送 SIGHUP，app-server 跟著結束（實驗 E3，在 zombie 還沒回收時也一樣）；holder 回報 `Exited`，daemon 照第 6 施工關 H9 `Shutdown`（G11 對 group 送 SIGKILL 清掉剩下的）再帶 resume 重起。
     - app-server 先結束：TUI 還在，holder 不知道。driver 的長連線斷了、20 秒連不回來 → 當成死掉：daemon 對 holder 送 `Shutdown`（SIGHUP 整個 group，5 秒後 SIGKILL）→ 照第 6 施工關 P6 重起。真 TUI 斷線後自己會不會結束**未查證**（U15）。
   - **holder 死掉後的清掃（新，本關只做 codex）**：
-    - 何時：在任何重起**之前**。兩條路都要：(a) daemon 跑著時發現 holder 死了（第 6 施工關 supervisor 的 died／HolderGone 路徑）；(b) daemon 停著時 holder 死了，開機時 `plan_boot` 給的是 `BootAction::Start`（`supervisor.rs` 的開機路徑，不經 died）：對 `agent_pid` 不是 NULL 的 codex instance，Start 前先清掃。
+    - 何時：**每一次**偵測到 holder 死掉都做，不管接下來是重起、放棄（`failed`：3 次用完或 `session_args` 出錯）還是什麼都不做；另外在任何會起新 holder 的動作之前，只要 `agent_pid` 不是 NULL 就先做。具體是：(a) daemon 跑著時發現 holder 死了（第 6 施工關 supervisor 的 died／HolderGone 路徑，在決定重起或 `fail()` **之前**）；(b) daemon 停著時 holder 死了，開機時 `plan_boot` 給的是 `BootAction::Start`（`supervisor.rs` 的開機路徑，不經 died）：Start 前先清掃；`plan_boot` 跳過的 `failed` instance 也一樣，開機時只要 `agent_pid` 不是 NULL 就清掃一次；(c) 第 8 施工關的 `retry`（使用者手動重試，不經上面兩條路）：起新 holder 前先清掃。
     - 做什麼：對舊 agent 的 process group 送一次 SIGKILL（`killpg`）。
-    - 三個條件都成立才送：① pgid 在 **1 < pgid ≤ `i32::MAX`**（存的是 u32，超過 `i32::MAX` 轉型會變負數；`killpg(1)` 等於 `kill(-1)`，會打到所有程序）；② 那個 group 還有程序；③ 其中至少一個程序的 argv **有一個元素完全等於** `unix://<完整路徑>/run/holders/<id>.codex.sock`（app-server 的 `--listen` 值、包裝的 `$2`），或 argv 裡 `resume` 後面那個元素完全等於這個 instance 的 thread id（TUI）。不用子字串比對（`g7-1.codex.sock` 會配到 `xg7-1.codex.sock`），也不用 `agend-codex`（每個 instance 都一樣，pgid 被別的 instance 重用時會誤殺健康的 instance）。
+    - 三個條件都成立才送：① pgid 在 **1 < pgid ≤ `i32::MAX`**（存的是 u32，超過 `i32::MAX` 轉型會變負數；`killpg(1)` 等於 `kill(-1)`，會打到所有程序）；② 那個 group 還有程序；③ 其中至少一個程序的 argv **有一個元素完全等於**這個 instance 的完整 socket 路徑：app-server 的 `--listen` 值是 `unix://<完整路徑>/run/holders/<id>.codex.sock`，包裝的 `$2` 是不帶 `unix://` 的 `<完整路徑>/run/holders/<id>.codex.sock`（兩種寫法各自完全相等才算），或 argv 裡 `resume` 後面那個元素完全等於這個 instance 的 thread id（TUI）。不用子字串比對（`g7-1.codex.sock` 會配到 `xg7-1.codex.sock`），也不用 `agend-codex`（每個 instance 都一樣，pgid 被別的 instance 重用時會誤殺健康的 instance）。
+    - 已知的窗口（接受）：比對完 argv 到 `killpg` 之間，group 的程序全部結束、pgid 又被別的程序拿去，SIGKILL 會打錯。這要在幾微秒內繞完一整圈 pid，照我們的威脅模型（防意外、不防刻意）接受，不另外處理。
     - pgid 從哪來：`Spawned.process_id`（agent pid；portable-pty 讓它自成 session，所以 pgid＝pid）。目前 daemon 只放記憶體、接回時拿不到，所以**新增** `instances.agent_pid` 欄位（跟 `messages` 同一個 migration），收到 `Spawned` 時寫入、清掃後清成 NULL。
     - 沒有程序符合時什麼都不做。這一步讓 U15、U16 的答案不影響「holder 死了不留 codex」。
-    - 測試：daemon 跑著時 `kill -9` holder → 沒有 codex 留下；**daemon 停著時** `kill -9` holder、再開機 → 沒有 codex 留下；pgid 被另一個 codex instance 的包裝重用（假造）→ 不送；pgid ≤ 1 或 > `i32::MAX` → 不送。
+    - 測試：daemon 跑著時 `kill -9` holder → 沒有 codex 留下；假 agent 連死 3 次 → `failed` → 沒有 codex 留下；**daemon 停著時** `kill -9` holder、再開機 → 沒有 codex 留下；pgid 被另一個 codex instance 的包裝重用（假造）→ 不送；pgid ≤ 1 或 > `i32::MAX` → 不送。
 - 理由：零協定變更、零新的程序管理程式碼；app-server 活得跟 TUI 一樣久，是它本來的樣子。v1 的 app-server 是 daemon 的子程序（V1-LESSONS #8），這裡是 holder 的孫程序，daemon 重啟照樣不斷線（D3）。
 - 替代方案：
   - `SpawnSidecar`（原計畫，前三輪的設計）：落選。三類問題：① app-server 繼承 holder 忽略的 HUP／INT／QUIT／TERM，要自己在 `pre_exec` 重設；② 結束後要自己保留 zombie，否則對 group 的 SIGKILL 可能打到重用的 pgid；③ **holder 被 `kill -9` 時 app-server 變孤兒**（自己的 group、沒有 PTY、沒人掛斷），新 holder 的 `SpawnSidecar` 甚至會經舊的 socket symlink 連到那個孤兒。每一類都要另寫程式與測試，第 4 施工關對 PTY 子程序已經全部做過。
@@ -87,8 +88,9 @@ codex 的事實來源：[backends/codex.md](../backends/codex.md)、[spike-codex
 
 - 問題：第 6 施工關 H2：codex 沒有 session id，第一次起來後一死就 `failed`。thread id 從哪來、存哪、怎麼 resume？
 - 建議：
-  - **daemon 自己先建 thread**：`instances.session_id` 是 NULL 時，app-server 就緒後 driver 呼叫 `thread/start {cwd}`，拿到 `threadId`，**先寫進 `instances.session_id`**，再寫 `$GO` 讓包裝 `exec` TUI（P2）。
-  - 所以 codex 的 TUI **每一次**都是 `resume <thread id> --remote unix://<真正的 socket>` 起，包括第一次（spike S4 的順序；反過來行不行未查證，U4），沒有「新／舊」兩種。codex 的分支看 **`session_id` 是不是 NULL**，不看 `new`／`running`；`new`／`running` 維持第 6 施工關 H1 的意思（第一次 `Spawn` 被確認後才寫 `running`），H1 不必改。第 6 施工關的 `session_args` 對 codex 回傳包裝的參數（P2），thread id 經 `$GO` 給 TUI。
+  - **daemon 自己先建 thread**：只有 `session_id` 是 NULL **而且**這個 instance 還沒啟動過（`status = new`，第 8 施工關之後是 `session_started = 0`）時，app-server 就緒後 driver 呼叫 `thread/start {cwd}`，拿到 `threadId`，**先寫進 `instances.session_id`**，再寫 `$GO` 讓包裝 `exec` TUI（P2）。
+  - 所以 codex 的 TUI **每一次**都是 `resume <thread id> --remote unix://<真正的 socket>` 起，包括第一次（spike S4 的順序；反過來行不行未查證，U4），沒有「新／舊」兩種。codex 的分支同時看 `session_id` 與是否啟動過；`new`／`running` 維持第 6 施工關 H1 的意思（第一次 `Spawn` 被確認後才寫 `running`），H1 不必改。
+  - **第 6 施工關留下的舊 codex instance**：`running`（或 `session_started = 1`）但 `session_id` 是 NULL，裡面是有真對話的裸 codex TUI、沒有 app-server。這種**不建新 thread**（那等於靜默的全新啟動，違反第 6 施工關 P6），直接標 `failed`、log `g7-1: codex instance from before gate 7 has no thread id; a human decides`，交給人。它的 holder 若還活著就**不動它**（不送 `Shutdown`、driver 不去連、不算就緒逾時），人可以 attach 進去把對話收尾。附測試：DB 裡放一個這樣的 instance、它的 holder 活著 → 開機後是 `failed`、holder pid 不變、沒有 `thread/start`。第 6 施工關的 `session_args` 對 codex 回傳包裝的參數（P2），thread id 經 `$GO` 給 TUI。
   - 重起：新 holder、新 app-server → driver `thread/resume {threadId}` → TUI `resume <id>`（spike S4：同一個 `CODEX_HOME`，砍光再起仍保有完整上下文）。
   - `thread/resume` 說找不到這個 thread：
     - daemon 從沒對這個 instance 送出過訊息（`messages` 表沒有 `sent` 以上的列，P5）→ 視為「空 thread 沒落地」，建新 thread、覆寫 `session_id`、log 一行 `thread <old> not found and never used; new thread <new>`。**未查證**：codex 是不是要等第一個 turn 才把 thread 寫到磁碟（U1）。
@@ -184,7 +186,7 @@ codex 的事實來源：[backends/codex.md](../backends/codex.md)、[spike-codex
   - 預設全部對 `fake-codex-app-server`（真的程序、真的 unix socket、真的 WebSocket）。要補的：`thread/turns/list`；`thread/queue/list`（P5 的對帳）；接受 `clientUserMessageId`（照 U2 的結果決定回不回 `clientId`）；閒置 thread 上 `queue/add` 的行為（照 U3）；`thread/resume` 找不到時的錯誤（照 U1）；`--listen` 的路徑已有舊 symlink 時先刪掉再綁（目前會 `EEXIST`，`fake_agent/codex.rs` 的 `symlink`；真 codex 的行為見 U14）。沒錄製之前，這些補丁在假 app-server 的程式註解裡標「未查證」，一致性檢查只比現有 5 個情境。
   - PTY 裡跑的是真的 P2 `sh` 包裝，只是 `codex` 換成測試的假程式：app-server 那行起 `fake-codex-app-server`，TUI 那行起新的小假程式 `fake-codex-tui`（印出收到的參數 `agent args: resume <id> --remote …` 然後等著；**不**連 app-server，daemon 不依賴 TUI）。包裝用參數拿到程式路徑（開工時細化）。
   - 契約 DRV-1..9 對 `CodexDriver` ＋假 app-server ＋真 DB 跑。DRV-6、DRV-9 用四次開機、跨真的 process（比照第 6 施工關 P4 第 2、3 層）：開機 1 送 `m-1`、`m-2`；開機 2 閒置；兩次開機之間假 app-server 自己跑完排隊的 turn；開機 3 從舊 cursor 補回、再送 `m-1`（不可多一個 turn）；開機 4 檢查。反向檢查「每次開機用新的 `AGEND_HOME`」必須失敗。
-  - 一致性檢查：新增錄製情境 `turns_list`（含 `thread/queue/list`）、`queue_idle`、`resume_empty`，讓上面的補丁有真 CLI 的依據。**錄製要跑真的 codex、花少量 token（約 5 個很短的 turn），是「你親自驗收」步驟 7 的選做步驟，由你打勾核准後你自己跑**（`cargo xtask record codex --sandbox …`）；沒錄之前，三個補丁在假 app-server 裡標「未查證」。
+  - 一致性檢查：新增錄製情境 `turns_list`（含 `thread/queue/list`；再多跑一次 `/compact` 之類的 context 壓縮，看舊 turn 有沒有被改，U10）、`queue_idle`、`resume_empty`，讓上面的補丁有真 CLI 的依據。**錄製要跑真的 codex、花少量 token（約 5 個很短的 turn），是「你親自驗收」步驟 7 的選做步驟，由你打勾核准後你自己跑**（`cargo xtask record codex --sandbox …`）；沒錄之前，三個補丁在假 app-server 裡標「未查證」。
   - 真 codex 端到端：做成**選做**的 example `codex_live`（`agend-daemon`），要設 `AGEND_REAL_CODEX=1` 才跑、在 `record-sandbox.sh` 裡跑、CI 永遠不跑；約 3 個很短的 turn。它驗假的驗不到的：`-c` 覆寫與位置、`resume … --remote`、trust 提示不出現、指令找到的是 shim、包裝在真 codex 下的行為（U4、U6、U7、U8、U12、U13、U14、U15）。
   - 本 agent 與 verifier **都不跑真 codex**。
 - 理由：假 app-server 已經照錄製檔對過形狀，driver 的邏輯可以全部在 CI 驗；只有「真 CLI 接不接受這些參數」必須真跑，花費小、由你決定時機。
@@ -214,7 +216,7 @@ codex 的事實來源：[backends/codex.md](../backends/codex.md)、[spike-codex
 
 - 第 6 施工關已 merge（#125，`3e28e06`）：本關要改它的 `supervisor::session_args`（P2、P3），holder 協定不改；第 6 施工關的驗收要重跑。
 - **migration 編號**：第 8 施工關（#127，使用者已確認）用掉 `0003`（`instances.session_started`）。本關的 migration（`messages` 表＋`instances.agent_pid`）用**開工時的下一個空號，目前是 `0004`**；要一起更新 `store/fixtures/schema-vN.sql`（新增這一版的 fixture）與 `store/golden/schema.sql`（`store/migrate.rs` 開頭的規則）。
-- **給第 8 施工關的後續**：第 8 施工關的重試表裡，codex／opencode 在 `session_started=1` 時的動作是 `[]`（不能 resume）。本關讓 codex 可以 resume 之後，那一列要重開。
+- **給第 8 施工關的後續**：第 8 施工關的重試表裡，codex／opencode 在 `session_started=1` 時的動作是 `[]`（不能 resume）。本關讓 codex 可以 resume 之後，那一列要重開，但只限 `session_id` 不是 NULL 的 codex instance（NULL 的是上面說的舊 instance，維持 `[]`）。
 - **holder 被 `kill -9` 後 agent 的子程序可能活下來（第 6 施工關的缺口，本關只補 codex）**：任何忽略或自己處理 HUP 的 agent 或它的子程序，holder 死後都沒人送 SIGKILL，這跟 D3「holder 被硬殺時 agent 一起死」的字面不符。P2 的清掃要靠每個 backend 自己的識別標記，本關只有 codex 的（socket 路徑、thread id）。claude 等其他 backend 要另排：建議的標記是 argv 裡的 session UUID（`--session-id`／`--resume` 後面那個元素）。**請你決定排在第 12 施工關還是另開一個**；第 6 施工關頁面不在本 PR 改。
 - codex 跑的指令（`/bin/zsh -lc …`）留下的子程序身上沒有標記：TUI 與 app-server 都已經不在時，清掃找不到可比對的程序就不送，這些子程序會留著（它們若還在同一個 group，只要 group 裡還有 TUI 或 app-server 就會一起被清）。本關接受，記給之後的「孤兒巡查」。
 - U16 若不成立（app-server 自己換了 group）：清掃看 pgid 會漏掉它。那時改成清掃也找 argv 有元素完全等於 `unix://<完整路徑>/run/holders/<id>.codex.sock` 的程序（不看 group），同樣要 1 < pid ≤ `i32::MAX`；開工時依 `codex_live` 的結果決定要不要加。
@@ -330,7 +332,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 7. 選做（要你核准，會跑真的 codex、花約 5 個很短的 turn）：錄三個新情境。
 
-   **這步在驗什麼**：P8 對假 app-server 補的三個行為（`thread/turns/list`、閒置時 `queue/add`、resume 空 thread）和真的 codex 一樣（U1、U3、U5、U9、U11）。不錄的話，這三個補丁只是照猜的寫，步驟 6 對它們沒有依據。
+   **這步在驗什麼**：P8 對假 app-server 補的三個行為（`thread/turns/list`、閒置時 `queue/add`、resume 空 thread）和真的 codex 一樣，也看壓縮後歷史是不是只往後長（U1、U3、U5、U9、U10、U11）。不錄的話，這三個補丁只是照猜的寫，步驟 6 對它們沒有依據。
 
    ```bash
    ~/.cargo/bin/cargo xtask record codex --sandbox ~/Documents/Hack/AgEnD-ops/record-sandbox.sh
@@ -370,6 +372,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-26 第六輪 review REFUTED 後修正：第 6 施工關留下的舊 codex instance（`running` 但沒有 thread id）不建新 thread、標 `failed`、不動它活著的 holder；清掃改成每次偵測到 holder 死掉都做（含 `failed`、開機跳過的 `failed`、第 8 施工關 `retry` 前）；比對描述修正（包裝的 `$2` 不帶 `unix://`）；記下 TOCTOU 窗口；U10 列入要真跑、併進步驟 7。
 - 2026-09-26 第五輪 review REFUTED 後修正：清掃只認完整 socket 路徑或 thread id 的 argv 元素（拿掉 `agend-codex` 與子字串比對）；清掃只做 codex，其他 backend 的缺口列給你排；開機路徑（`plan_boot` → Start）也先清掃並加測試；pgid 範圍 1 < pgid ≤ `i32::MAX`；migration 改「下一個空號，目前 0004」並列出 fixture／golden 更新；codex 指令的子程序列入風險；第 8 施工關重試表的後續。
 - 2026-09-26 第四輪 review REFUTED 後修正：E2 改寫（掛斷只打 session leader 與前景 group，reviewer 有四個反例）；P2 加「holder 死掉後的清掃」（新欄位 `instances.agent_pid`、要有標記才 SIGKILL）；新增 U16；U15 不再是「不影響」；交接檔用 rename、逾時 60 秒 > 20＋30、daemon 中途重啟時重寫；包裝參數改位置參數；步驟 8 加 U14–U16 與「沒有 codex 留下」；TL;DR 列出所有要真跑的 U。
 - 2026-09-26 第三輪 review REFUTED（holder `kill -9` 時獨立的 app-server 變孤兒、新 holder 會經舊 socket 連到它）後**改方向**：P2 不做 `SpawnSidecar`，改用 PTY 裡的 `sh` 包裝在背景起 app-server（同一個 process group，第 4 施工關的保證全部涵蓋；本機實驗 E1–E3）；推翻第 4 施工關 P8 的那半句要你確認。另修：必要的一致性檢查不再依賴選做的步驟 7；P5 的 `thread/queue/list` 進假 app-server 補丁與 U2、U5；codex 分支改看 `session_id` 是否 NULL、H1 不改；`path_helper` 與 dotfile 各加哪些目錄；shell 快照；新增 U14、U15；P9 不加 check-deps 規則。
