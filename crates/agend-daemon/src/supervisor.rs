@@ -16,22 +16,42 @@
 //!   session id to resume → `failed` at once. Never a fresh start after the
 //!   first (P6). Restart counts live in memory only.
 //!
+//! Gate 8:
+//! - Every state change is shown in the fleet view ([`Fleet`]): `starting`
+//!   (starting, or waiting to restart), `unknown` (running; working or idle
+//!   needs a driver), `failed`.
+//! - A `failed` instance is a needs-you item `instance-failed:<id>` (P5),
+//!   waiting since this daemon first saw it failed. Its action is `retry`,
+//!   except a codex/opencode instance whose session was started: it has no
+//!   session id to resume and is never started fresh again (P6), so it has
+//!   no action.
+//! - `retry` ([`Event::Resolve`], operator only, checked by `handlers`):
+//!   `Shutdown` of the holder kept for its last screen (H9), then status
+//!   `running` if the session was started (claude resumes it) or `new`
+//!   (a fresh start), a new restart budget, and a start.
+//!
 //! Must NOT: kill or respawn holders on daemon shutdown; start an agent
 //! fresh once it has run.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
-use agend_core::model::Backend;
+use agend_core::model::{Backend, DEFAULT_TEAM};
+use agend_core::protocol::client::{
+    AgentState, AttentionAction, AttentionRequiredData, InstanceView, TaskView, error_code,
+};
 use agend_core::protocol::holder::ExitedData;
 use agend_core::traits::HolderLaunch;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::oneshot;
 
 use crate::boot::{BootAction, plan_boot};
+use crate::fleet::{Fleet, failed_attention_id};
 use crate::log;
 use crate::runtime::{HolderEvent, HolderRuntime, SpawnOutcome, Started, files};
-use crate::store::{Instance, InstanceStatus, SqliteStore};
+use crate::store::{Instance, InstanceStatus, SqliteStore, task_row};
 
 /// Wait between a death and the restart.
 pub const RESTART_DELAY: Duration = Duration::from_secs(5);
@@ -88,6 +108,13 @@ pub fn launch(instance: &Instance, resume: bool) -> Result<HolderLaunch, String>
     })
 }
 
+/// Why a `resolve_attention` was refused: an `error_code` and a message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Refusal {
+    pub code: &'static str,
+    pub message: String,
+}
+
 #[derive(Debug)]
 pub enum Event {
     Holder(HolderEvent),
@@ -101,7 +128,41 @@ pub enum Event {
         generation: u64,
     },
     Housekeeping,
+    /// The operator acts on a needs-you item (`resolve_attention`).
+    Resolve {
+        attention_id: String,
+        action: AttentionAction,
+        reply: oneshot::Sender<Result<(), Refusal>>,
+    },
     Stop(&'static str),
+}
+
+/// The needs-you item of a `failed` instance (P5).
+pub fn failed_item(instance: &Instance, reason: &str, since_unix_ms: u64) -> AttentionRequiredData {
+    let id = &instance.id;
+    // codex/opencode have no session id to resume (gates 7, 12): once their
+    // session started they are never started fresh again (P6).
+    let retry = instance.backend == Backend::Claude || !instance.session_started;
+    AttentionRequiredData {
+        reason: format!("{id} failed: {reason}"),
+        task_id: None,
+        ask: None,
+        recap: None,
+        attention_id: Some(failed_attention_id(id)),
+        unblocks: Some(0),
+        waiting_since_unix_ms: Some(since_unix_ms),
+        if_ignored: Some(if retry {
+            format!("{id} stays stopped")
+        } else {
+            "delete and re-add the instance (gate 9)".into()
+        }),
+        actions: if retry {
+            vec![AttentionAction::Retry]
+        } else {
+            Vec::new()
+        },
+        instance_id: Some(id.clone()),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,6 +194,7 @@ pub struct Supervisor {
     runtime: HolderRuntime,
     events: UnboundedSender<Event>,
     watches: BTreeMap<String, Watch>,
+    fleet: Arc<Fleet>,
 }
 
 /// The screen's last non-empty line, for the log.
@@ -153,13 +215,41 @@ fn describe_exit(exited: &ExitedData) -> String {
 }
 
 impl Supervisor {
-    pub fn new(store: SqliteStore, runtime: HolderRuntime, events: UnboundedSender<Event>) -> Self {
+    pub fn new(
+        store: SqliteStore,
+        runtime: HolderRuntime,
+        events: UnboundedSender<Event>,
+        fleet: Arc<Fleet>,
+    ) -> Self {
         Self {
             home: runtime.home().to_path_buf(),
             store,
             runtime,
             events,
             watches: BTreeMap::new(),
+            fleet,
+        }
+    }
+
+    /// Shows `id` in the fleet view with `state` (and `summary` on its
+    /// `instance_changed` event).
+    fn show(&self, instance: &Instance, state: AgentState, summary: String) {
+        self.fleet.set_instance(
+            InstanceView {
+                instance_id: instance.id.clone(),
+                team_id: DEFAULT_TEAM.into(),
+                backend: instance.backend.as_str().into(),
+                state,
+            },
+            summary,
+        );
+    }
+
+    /// Changes the state of an instance already in the fleet view.
+    fn set_state(&self, id: &str, state: AgentState, summary: String) {
+        if let Some(mut view) = self.fleet.instance(id) {
+            view.state = state;
+            self.fleet.set_instance(view, summary);
         }
     }
 
@@ -177,6 +267,35 @@ impl Supervisor {
         let running = files::running_holders(self.runtime.home())
             .map_err(|e| format!("scan run/holders: {e}"))?;
         let running_ids: Vec<String> = running.iter().map(|(id, _)| id.clone()).collect();
+        let tasks = self
+            .store
+            .tasks()
+            .await
+            .map_err(|e| format!("read tasks: {e}"))?;
+        self.fleet.set_tasks(
+            tasks
+                .into_iter()
+                .map(|t| TaskView {
+                    task_id: t.id,
+                    title: t.title,
+                    team_id: t.team_id,
+                    status: task_row::status_text(t.status).into(),
+                    assignee: t.assignee,
+                    stages: Vec::new(),
+                    current_stage: None,
+                })
+                .collect(),
+        );
+        let now = log::now_unix_ms();
+        for instance in &instances {
+            if instance.status == InstanceStatus::Failed {
+                self.show(instance, AgentState::Failed, "failed".into());
+                let reason = "it failed before this daemon started";
+                self.fleet.raise(failed_item(instance, reason, now));
+            } else {
+                self.show(instance, AgentState::Starting, "starting".into());
+            }
+        }
         let mut report = BootReport {
             instances: instances.len(),
             ..BootReport::default()
@@ -230,6 +349,11 @@ impl Supervisor {
                     "{id}: reconnected to holder pid={pid}{note}; screen: {}",
                     last_line(&started.attached.screen)
                 ));
+                self.show(
+                    instance,
+                    AgentState::Unknown,
+                    format!("running (holder pid={pid})"),
+                );
                 self.watch(&id, started.generation);
             }
             Err(e) => {
@@ -260,14 +384,18 @@ impl Supervisor {
             None => format!("start {session}"),
         };
         log::line(&format!("{id}: {}", what.trim_end()));
+        self.show(instance, AgentState::Starting, what.trim_end().to_owned());
         match self.runtime.start(&launch).await {
             Ok(Started {
                 handle, generation, ..
             }) => {
-                log::line(&format!(
-                    "{id}: holder pid={} started",
-                    handle.process_id.unwrap_or(0)
-                ));
+                let pid = handle.process_id.unwrap_or(0);
+                log::line(&format!("{id}: holder pid={pid} started"));
+                self.show(
+                    instance,
+                    AgentState::Unknown,
+                    format!("running (holder pid={pid})"),
+                );
                 if !resume {
                     self.mark_running(&id).await;
                 }
@@ -323,6 +451,73 @@ impl Supervisor {
             log::line(&format!("{id}: cannot record failed: {e}"));
         }
         log::line(&format!("{id} failed: {reason}"));
+        self.set_state(id, AgentState::Failed, reason.to_owned());
+        match self.store.instance(id).await {
+            Ok(Some(instance)) => {
+                self.fleet
+                    .raise(failed_item(&instance, reason, log::now_unix_ms()));
+            }
+            Ok(None) => {}
+            Err(e) => log::line(&format!("{id}: cannot read the instance: {e}")),
+        }
+    }
+
+    /// The operator's action on a needs-you item: only a listed action of a
+    /// listed item; the item leaves the list before the reply.
+    async fn resolve(
+        &mut self,
+        attention_id: String,
+        action: AttentionAction,
+        reply: oneshot::Sender<Result<(), Refusal>>,
+    ) {
+        let instance_id = self
+            .fleet
+            .attention(&attention_id)
+            .filter(|item| item.actions.contains(&action))
+            .and_then(|item| item.instance_id);
+        let Some(id) = instance_id else {
+            let _ = reply.send(Err(Refusal {
+                code: error_code::UNKNOWN_ATTENTION,
+                message: format!(
+                    "no needs-you item {attention_id} with action {}",
+                    action.as_str()
+                ),
+            }));
+            return;
+        };
+        self.fleet.resolve(&attention_id, action);
+        let _ = reply.send(Ok(()));
+        log::line(&format!(
+            "{id}: {} requested by the operator",
+            action.as_str()
+        ));
+        self.retry(&id).await;
+    }
+
+    /// Starts a `failed` instance again (P5): stops the holder it left,
+    /// then resumes a started session or starts one, with a new budget.
+    async fn retry(&mut self, id: &str) {
+        if let Err(e) = self.runtime.stop(id).await {
+            return self
+                .fail(id, &format!("cannot stop its old holder: {e}"))
+                .await;
+        }
+        let instance = match self.store.instance(id).await {
+            Ok(Some(instance)) => instance,
+            Ok(None) => return log::line(&format!("{id}: no longer in the DB; not retried")),
+            Err(e) => return log::line(&format!("{id}: cannot read the instance: {e}")),
+        };
+        let status = if instance.session_started {
+            InstanceStatus::Running
+        } else {
+            InstanceStatus::New
+        };
+        if let Err(e) = self.store.set_instance_status(id, status).await {
+            return log::line(&format!("{id}: cannot record {}: {e}", status.as_str()));
+        }
+        self.watches.remove(id);
+        let instance = Instance { status, ..instance };
+        self.start(&instance, instance.session_started, None).await;
     }
 
     /// A death of the current generation: plan the restart or give up.
@@ -358,6 +553,8 @@ impl Supervisor {
             }
             Some(n) => {
                 watch.state = State::Restarting(n);
+                let summary = format!("died; restart {n}/{MAX_RESTARTS} in 5 s");
+                self.set_state(id, AgentState::Starting, summary);
                 let events = self.events.clone();
                 let id = id.to_owned();
                 tokio::spawn(async move {
@@ -426,6 +623,11 @@ impl Supervisor {
                 Event::Housekeeping => {
                     crate::housekeeping::run(&self.store, &self.home, log::now_unix_ms()).await;
                 }
+                Event::Resolve {
+                    attention_id,
+                    action,
+                    reply,
+                } => self.resolve(attention_id, action, reply).await,
                 Event::Stop(signal) => return signal,
             }
         }
@@ -448,6 +650,7 @@ mod tests {
             working_directory: "/tmp".into(),
             session_id: session.map(str::to_owned),
             status: InstanceStatus::Running,
+            session_started: false,
         }
     }
 
@@ -487,6 +690,40 @@ mod tests {
         assert_eq!(resumed.args[3..], ["--resume", "s-abc"]);
         assert_eq!(resumed.args[..3], claude.args[..]);
         assert_eq!(resumed.executable, "/bin/bash");
+    }
+
+    /// P5: `retry` for claude always; for codex/opencode only while their
+    /// session never started (no session id to resume, never fresh again).
+    #[test]
+    fn a_failed_instance_is_a_needs_you_item_with_retry_unless_it_cannot_resume() {
+        let table = [
+            (Backend::Claude, true, true),
+            (Backend::Claude, false, true),
+            (Backend::Codex, false, true),
+            (Backend::Opencode, false, true),
+            (Backend::Codex, true, false),
+            (Backend::Opencode, true, false),
+        ];
+        for (backend, started, retry) in table {
+            let mut inst = instance(backend, None);
+            inst.id = "g8-2".into();
+            inst.session_started = started;
+            let item = failed_item(&inst, "it died", 42);
+            assert_eq!(item.attention_id.as_deref(), Some("instance-failed:g8-2"));
+            assert_eq!(item.instance_id.as_deref(), Some("g8-2"));
+            assert_eq!(
+                (item.unblocks, item.waiting_since_unix_ms),
+                (Some(0), Some(42))
+            );
+            assert_eq!(item.reason, "g8-2 failed: it died");
+            let (actions, if_ignored) = if retry {
+                (vec![AttentionAction::Retry], "g8-2 stays stopped")
+            } else {
+                (vec![], "delete and re-add the instance (gate 9)")
+            };
+            assert_eq!(item.actions, actions, "{backend:?} started={started}");
+            assert_eq!(item.if_ignored.as_deref(), Some(if_ignored));
+        }
     }
 
     #[test]

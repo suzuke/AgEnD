@@ -19,7 +19,7 @@ cargo xtask accept core
 | 測試 | 證明什麼 |
 |---|---|
 | `model::tests` | backend 名稱與 delivery 狀態轉換；branch producer／consumer 往返 |
-| `protocol::tests`、`protocol::client::tests`、`protocol::holder::tests` | major 不相容會有明確錯誤；daemon 可與仍支援的舊 holder major 協商 |
+| `protocol::tests`、`protocol::client::tests`、`protocol::holder::tests` | major 不相容會有明確錯誤；daemon 可與仍支援的舊 holder major 協商；client hello 是 1.1、1.0 的 peer 協商到 1.0；「需要你」依 D36 排序、沒有 `attention_id` 的排最後（第 8 施工關） |
 | `protocol::ask::tests` | 請示 thread 接受提供的選項或自由文字；等待追問時才接受回答；有結論後不再接受（D35） |
 | `xtask/tests/protocol_compat.rs` | exact JSON wire shape、unknown tagged variants、忽略 additive fields；approval request 不接受 caller 指定 head；請示 thread、自由文字回答、context recap 的形狀，以及 D35 之前的舊訊息仍能解碼 |
 | `xtask/tests/workflow_toml.rs` | workflow 存檔 TOML 格式的 golden 檔（內建四個與一個自訂），鎖住 serde 形狀（D32 的條件） |

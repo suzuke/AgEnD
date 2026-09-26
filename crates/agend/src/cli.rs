@@ -3,10 +3,9 @@
 //! intent only; context comes from caller identity -> binding (plan §4.7).
 //! Subcommands also start the daemon, a holder and the TUI (`app`).
 //!
-//! Status: only `--version` and `--help` exist here (`agend holder` and
-//! `agend daemon` are split off in `main`, gates 4 and 6). Everything else
-//! arrives with gate 9
-//! (docs/ROADMAP.md).
+//! Status: `--version`, `--help` and `agend debug ping|watch` (gate 8) exist
+//! here (`agend holder` and `agend daemon` are split off in `main`, gates 4
+//! and 6). Everything else arrives with gate 9 (docs/ROADMAP.md).
 //!
 //! Must NOT: build an async runtime, read config or open the DB on the CLI path.
 
@@ -27,6 +26,11 @@ Usage:
   agend holder <instance-id>
                      Run the holder of one instance (started by the daemon;
                      needs AGEND_HOME)
+  agend debug ping [--count N] [--interval MS]
+                     Ask the daemon for its protocol version and instance
+                     count (retries up to 10 s while it restarts)
+  agend debug watch  Print the fleet view and every event after it;
+                     reconnects on its own
 ";
 
 pub fn run(args: Vec<OsString>) -> ExitCode {
@@ -49,6 +53,7 @@ pub fn run(args: Vec<OsString>) -> ExitCode {
             print!("{USAGE}");
             ExitCode::SUCCESS
         }
+        Some("debug") => crate::debug::run(&args[1..]),
         Some(other) => {
             eprintln!("agend: unknown command '{other}'\nRun `agend --help` for usage.");
             ExitCode::from(2)

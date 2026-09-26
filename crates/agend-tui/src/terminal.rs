@@ -29,6 +29,9 @@ pub fn describe(event: &DaemonEvent) -> String {
         DaemonEvent::MessageReceived { data } => format!("message from {}", data.from),
         DaemonEvent::InstanceChanged { data } => format!("{}: {}", data.instance_id, data.summary),
         DaemonEvent::AskUpdated { data } => format!("ask {} updated", data.ask_id),
+        DaemonEvent::AttentionResolved { data } => {
+            format!("{} resolved: {}", data.attention_id, data.action.as_str())
+        }
         DaemonEvent::Unknown => "unknown event".into(),
     }
 }

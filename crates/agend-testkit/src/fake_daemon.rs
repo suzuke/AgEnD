@@ -1,71 +1,101 @@
-//! Fake daemon: an in-process client protocol v1 server (JSON Lines over a
-//! unix socket, P1/D26) for testing `agend-client`, the CLI and the TUI
-//! without a real daemon. Every message is an `agend_core::protocol::client`
-//! type encoded with `serde_json`, so the wire shape is the real one.
+//! Fake daemon: an in-process client protocol 1.1 server (JSON Lines over a
+//! unix socket, D26) for testing `agend-client`, the CLI and the TUI without
+//! a real daemon. Every message is an `agend_core::protocol::client` type
+//! encoded with `serde_json`, so the wire shape is the real one; error codes
+//! are `client::error_code`.
 //!
-//! Covered:
+//! Covered (the CLP contract, `contract::client`, runs against it and the
+//! real `agend daemon`):
 //! - `hello` first; version negotiation with `protocol::negotiate`; mismatch
 //!   answers an `error` (`version_mismatch`) and closes; any other first
 //!   line (another request or invalid JSON) answers `hello_required` and
-//!   closes.
+//!   closes. The `caller` of `hello` makes the connection an agent's.
+//! - `get_fleet`: the fleet view set with [`FakeDaemon::set_instance`],
+//!   [`FakeDaemon::set_task`], [`FakeDaemon::add_attention`] and asks, as of
+//!   the newest event id.
+//! - Event ids start at a base (unix ms × 1000 when the fake starts); the
+//!   first event is base + 1; the last [`RETAINED_EVENTS`] are kept.
+//!   `subscribe_events`: no cursor replays the retained events; a cursor from
+//!   "oldest − 1" to the newest id continues after it; anything else is
+//!   `event_gap`. A subscriber more than [`RETAINED_EVENTS`] events behind
+//!   gets `event_gap` and is closed; a write that makes no progress for
+//!   [`WRITE_TIMEOUT`] closes the connection.
+//! - `resolve_attention`: `forbidden` for an agent caller (before the id is
+//!   looked at); `unknown_attention` for an unknown id or an action the item
+//!   does not list; otherwise the item leaves the list, `attention_resolved`
+//!   is emitted and the reply is `accepted`.
 //! - `command`: `status`, `inbox`, `send`, `task_create`, `ask`, the other
 //!   agent commands (`accepted`), and the result commands (`done`, `result`,
 //!   `review_approve`, `review_changes`) with the event-identity rule: the
 //!   result must carry the `stage_id` and `attempt` of the current
 //!   assignment (`FakeDaemon::assign`), otherwise `stale_result` and nothing
-//!   changes; an accepted result consumes the assignment.
-//! - `subscribe_events`: backlog after `after_event_id`, then live events.
-//! - `subscribe_terminal`: one `terminal_snapshot`.
+//!   changes; an accepted result consumes the assignment. (The real daemon
+//!   answers `not_supported` until gates 9 and 10.)
+//! - `subscribe_terminal`: one `terminal_snapshot`, for any instance id.
+//! - `terminal_input`: `not_supported` (gate 11's attach view).
 //! - `answer_ask`, for asks from the `ask` command or `FakeDaemon::open_ask`
 //!   (an ask with a task and a context recap, as a bound agent's would be).
 //!
-//! Not covered: terminal byte streaming, authentication, persistence.
-//! Error codes other than `stale_result` are the fake's own (not yet fixed in
-//! `agend_core`; gate 8 decides).
+//! Not covered: terminal byte streaming, persistence.
 //!
 //! Must NOT: share code paths with the real server beyond `agend_core::protocol`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::io::{self, BufRead, BufReader, Write};
 use std::net::Shutdown;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use agend_core::protocol::ask::{AskEntry, AskThread, ContextRecap};
 use agend_core::protocol::client::{
-    AgentCommand, AskCreatedData, AttentionRequiredData, ClientCommandResultData, ClientRequest,
-    ClientResponse, CommandResult, DaemonEvent, ErrorData, EventData, InboxMessage, MessagesData,
-    ResultIdentity, STALE_RESULT, SUPPORTED_VERSIONS, SelectedVersionData, StatusData,
-    TaskChangedData, TaskCreatedData, TerminalSnapshotData,
+    AgentCommand, AskCreatedData, AttentionRequiredData, AttentionResolvedData,
+    ClientCommandResultData, ClientRequest, ClientResponse, CommandResult, DaemonEvent, ErrorData,
+    EventData, FleetData, FleetView, InboxMessage, InstanceChangedData, InstanceView, MessagesData,
+    RETAINED_EVENTS, ResultIdentity, SUPPORTED_VERSIONS, SelectedVersionData, StatusData,
+    TaskChangedData, TaskCreatedData, TaskView, TeamView, TerminalSnapshotData, error_code,
+    order_attention,
 };
 use agend_core::protocol::{ProtocolVersion, negotiate};
 
 use crate::fakes::lock;
 use crate::tempdir::TempDir;
 
-pub const HELLO_REQUIRED: &str = "hello_required";
-pub const VERSION_MISMATCH: &str = "version_mismatch";
-pub const INVALID_REQUEST: &str = "invalid_request";
-pub const UNKNOWN_REQUEST: &str = "unknown_request";
-pub const UNKNOWN_ASK: &str = "unknown_ask";
+/// A write that makes no progress for this long closes the connection.
+pub const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// What `resolve_attention` from an agent gets (the real daemon says the
+/// same).
+pub const OPERATOR_ONLY: &str =
+    "only the operator can resolve needs-you items; ask the operator with agend ask";
 
 type Writer = Arc<Mutex<UnixStream>>;
 
-#[derive(Default)]
+struct Subscriber {
+    queue: SyncSender<EventData>,
+    lagged: Arc<AtomicBool>,
+}
+
 struct State {
     supported: Vec<ProtocolVersion>,
     requests: Vec<ClientRequest>,
-    events: Vec<EventData>,
-    subscribers: Vec<Writer>,
+    /// Event id base: the first event is `start + 1`.
+    start: u64,
+    latest: u64,
+    events: VecDeque<EventData>,
+    subscribers: Vec<Subscriber>,
     assignments: BTreeMap<String, ResultIdentity>,
     status_summary: String,
     inbox: Vec<InboxMessage>,
     asks: BTreeMap<String, AskThread>,
     next_id: u64,
+    instances: Vec<InstanceView>,
+    tasks: Vec<TaskView>,
+    attention: Vec<AttentionRequiredData>,
 }
 
 struct Shared {
@@ -81,20 +111,49 @@ pub struct FakeDaemon {
     socket_path: PathBuf,
     shared: Arc<Shared>,
     accept: Option<JoinHandle<()>>,
-    _dir: TempDir,
+    _dir: Option<TempDir>,
+}
+
+fn now_unix_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
 }
 
 impl FakeDaemon {
     /// Listens on `daemon.sock` in a new temp directory.
     pub fn start() -> io::Result<FakeDaemon> {
         let dir = TempDir::new("fd")?;
-        let socket_path = dir.path().join("daemon.sock");
-        let listener = UnixListener::bind(&socket_path)?;
+        let mut daemon = FakeDaemon::start_at(&dir.path().join("daemon.sock"))?;
+        daemon._dir = Some(dir);
+        Ok(daemon)
+    }
+
+    /// Listens on `socket_path` (a leftover socket file there is replaced),
+    /// for tests that restart the "daemon" on the same path.
+    pub fn start_at(socket_path: &Path) -> io::Result<FakeDaemon> {
+        match std::fs::remove_file(socket_path) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
+            _ => {}
+        }
+        let listener = UnixListener::bind(socket_path)?;
+        let start = now_unix_ms() * 1000;
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
                 supported: SUPPORTED_VERSIONS.to_vec(),
+                requests: Vec::new(),
+                start,
+                latest: start,
+                events: VecDeque::new(),
+                subscribers: Vec::new(),
+                assignments: BTreeMap::new(),
                 status_summary: "fake daemon: idle".into(),
-                ..State::default()
+                inbox: Vec::new(),
+                asks: BTreeMap::new(),
+                next_id: 0,
+                instances: Vec::new(),
+                tasks: Vec::new(),
+                attention: Vec::new(),
             }),
             stopping: AtomicBool::new(false),
             connections: Mutex::new(Vec::new()),
@@ -104,15 +163,20 @@ impl FakeDaemon {
             .name("fake-daemon-accept".into())
             .spawn(move || accept_loop(listener, accept_shared))?;
         Ok(FakeDaemon {
-            socket_path,
+            socket_path: socket_path.to_path_buf(),
             shared,
             accept: Some(accept),
-            _dir: dir,
+            _dir: None,
         })
     }
 
     pub fn socket_path(&self) -> &Path {
         &self.socket_path
+    }
+
+    /// The event id base: the first event is this + 1.
+    pub fn event_id_start(&self) -> u64 {
+        lock(&self.shared.state).start
     }
 
     /// Versions offered in negotiation (default: `SUPPORTED_VERSIONS`).
@@ -145,24 +209,68 @@ impl FakeDaemon {
         emit(&mut lock(&self.shared.state), event)
     }
 
+    /// Adds or replaces an instance of the fleet view and emits
+    /// `instance_changed` carrying it. Returns the event id.
+    pub fn set_instance(&self, instance: InstanceView) -> u64 {
+        let mut state = lock(&self.shared.state);
+        state
+            .instances
+            .retain(|i| i.instance_id != instance.instance_id);
+        state.instances.push(instance.clone());
+        emit(
+            &mut state,
+            DaemonEvent::InstanceChanged {
+                data: InstanceChangedData {
+                    instance_id: instance.instance_id.clone(),
+                    summary: instance.state.as_str().into(),
+                    instance: Some(instance),
+                },
+            },
+        )
+    }
+
+    /// Adds or replaces a task of the fleet view and emits `task_changed`
+    /// carrying it. Returns the event id.
+    pub fn set_task(&self, task: TaskView) -> u64 {
+        let mut state = lock(&self.shared.state);
+        state.tasks.retain(|t| t.task_id != task.task_id);
+        state.tasks.push(task.clone());
+        emit(
+            &mut state,
+            DaemonEvent::TaskChanged {
+                data: TaskChangedData {
+                    task_id: task.task_id.clone(),
+                    summary: task.status.clone(),
+                    task: Some(task),
+                },
+            },
+        )
+    }
+
+    /// Adds a needs-you item (not an ask) and emits `attention_required`.
+    /// `resolve_attention` takes it off with one of its `actions`. Returns
+    /// the event id.
+    pub fn add_attention(&self, item: AttentionRequiredData) -> u64 {
+        let mut state = lock(&self.shared.state);
+        state.attention.push(item.clone());
+        emit(&mut state, DaemonEvent::AttentionRequired { data: item })
+    }
+
     /// Opens a needs-you ask the way the daemon does after `agend ask` from
     /// an agent bound to a task: the thread becomes answerable with
     /// `answer_ask`, and an `attention_required` event carries the thread,
     /// its task and `recap`. Returns the event id.
     pub fn open_ask(&self, thread: AskThread, recap: Option<ContextRecap>) -> u64 {
         let mut state = lock(&self.shared.state);
-        state.asks.insert(thread.ask_id.clone(), thread.clone());
-        emit(
-            &mut state,
-            DaemonEvent::AttentionRequired {
-                data: AttentionRequiredData {
-                    reason: "ask".into(),
-                    task_id: thread.task_id.clone(),
-                    ask: Some(thread),
-                    recap,
-                },
-            },
-        )
+        let item = ask_item(thread.clone(), recap);
+        state.asks.insert(thread.ask_id.clone(), thread);
+        state.attention.push(item.clone());
+        emit(&mut state, DaemonEvent::AttentionRequired { data: item })
+    }
+
+    /// The fleet view `get_fleet` answers now.
+    pub fn fleet(&self) -> FleetView {
+        fleet(&lock(&self.shared.state))
     }
 
     /// Every request received, in order, from all connections.
@@ -182,6 +290,49 @@ impl Drop for FakeDaemon {
         for connection in lock(&self.shared.connections).drain(..) {
             let _ = connection.shutdown(Shutdown::Both);
         }
+        lock(&self.shared.state).subscribers.clear();
+        let _ = std::fs::remove_file(&self.socket_path);
+    }
+}
+
+fn ask_item(thread: AskThread, recap: Option<ContextRecap>) -> AttentionRequiredData {
+    AttentionRequiredData {
+        reason: "ask".into(),
+        task_id: thread.task_id.clone(),
+        attention_id: Some(thread.ask_id.clone()),
+        ask: Some(thread),
+        recap,
+        unblocks: None,
+        waiting_since_unix_ms: Some(now_unix_ms()),
+        if_ignored: None,
+        actions: Vec::new(),
+        instance_id: None,
+    }
+}
+
+fn fleet(state: &State) -> FleetView {
+    let mut teams: Vec<String> = vec![agend_core::model::DEFAULT_TEAM.to_owned()];
+    for team in state
+        .tasks
+        .iter()
+        .map(|t| &t.team_id)
+        .chain(state.instances.iter().map(|i| &i.team_id))
+    {
+        if !teams.contains(team) {
+            teams.push(team.clone());
+        }
+    }
+    let mut attention = state.attention.clone();
+    order_attention(&mut attention);
+    FleetView {
+        as_of_event_id: state.latest,
+        teams: teams
+            .into_iter()
+            .map(|team_id| TeamView { team_id })
+            .collect(),
+        tasks: state.tasks.clone(),
+        instances: state.instances.clone(),
+        attention,
     }
 }
 
@@ -191,6 +342,7 @@ fn accept_loop(listener: UnixListener, shared: Arc<Shared>) {
             break;
         }
         let Ok(stream) = stream else { continue };
+        let _ = stream.set_write_timeout(Some(WRITE_TIMEOUT));
         let (Ok(for_drop), Ok(for_close)) = (stream.try_clone(), stream.try_clone()) else {
             continue;
         };
@@ -208,9 +360,19 @@ fn accept_loop(listener: UnixListener, shared: Arc<Shared>) {
 }
 
 fn send(writer: &Writer, response: &ClientResponse) -> io::Result<()> {
+    write_line(&lock(writer), response)
+}
+
+/// Writes one response to a stream whose writer lock the caller holds.
+fn write_line(mut stream: &UnixStream, response: &ClientResponse) -> io::Result<()> {
     let mut line = serde_json::to_string(response).map_err(io::Error::other)?;
     line.push('\n');
-    lock(writer).write_all(line.as_bytes())
+    let written = stream.write_all(line.as_bytes());
+    if written.is_err() {
+        // A write timeout or a gone client: close the whole connection.
+        let _ = stream.shutdown(Shutdown::Both);
+    }
+    written
 }
 
 fn error(request_id: Option<String>, code: &str, message: String) -> ClientResponse {
@@ -224,19 +386,78 @@ fn error(request_id: Option<String>, code: &str, message: String) -> ClientRespo
 }
 
 fn emit(state: &mut State, event: DaemonEvent) -> u64 {
+    state.latest += 1;
     let data = EventData {
-        event_id: state.events.len() as u64 + 1,
+        event_id: state.latest,
         event,
     };
-    state.events.push(data.clone());
-    let response = ClientResponse::Event { data: data.clone() };
-    state.subscribers.retain(|s| send(s, &response).is_ok());
+    state.events.push_back(data.clone());
+    if state.events.len() > RETAINED_EVENTS {
+        state.events.pop_front();
+    }
+    state
+        .subscribers
+        .retain(|s| match s.queue.try_send(data.clone()) {
+            Ok(()) => true,
+            Err(TrySendError::Full(_)) => {
+                s.lagged.store(true, Ordering::SeqCst);
+                false
+            }
+            Err(TrySendError::Disconnected(_)) => false,
+        });
     data.event_id
 }
 
+/// Sends queued events to one subscriber until its queue is dropped; a
+/// lagging subscriber gets `event_gap` next and its connection is closed.
+fn forward(writer: Writer, queue: Receiver<EventData>, lagged: Arc<AtomicBool>) {
+    let gap = |writer: &Writer| {
+        let message = format!("this client fell more than {RETAINED_EVENTS} events behind");
+        let _ = send(writer, &error(None, error_code::EVENT_GAP, message));
+        let _ = lock(writer).shutdown(Shutdown::Both);
+    };
+    for data in queue.iter() {
+        if lagged.load(Ordering::SeqCst) {
+            return gap(&writer);
+        }
+        if send(&writer, &ClientResponse::Event { data }).is_err() {
+            return;
+        }
+    }
+    if lagged.load(Ordering::SeqCst) {
+        gap(&writer);
+    }
+}
+
+/// `Ok(())` when a subscription may continue after `after` (see the module
+/// docs), otherwise the `event_gap` message.
+fn check_cursor(state: &State, after: u64) -> Result<(), String> {
+    let oldest = state
+        .events
+        .front()
+        .map_or(state.latest + 1, |e| e.event_id);
+    if after + 1 >= oldest && after <= state.latest {
+        Ok(())
+    } else {
+        Err(format!(
+            "cannot continue after event {after} (this daemon has events {} to {}); fetch the fleet view again",
+            oldest, state.latest
+        ))
+    }
+}
+
+struct Connection {
+    writer: Writer,
+    negotiated: bool,
+    caller: Option<String>,
+}
+
 fn serve(stream: UnixStream, shared: &Shared) -> io::Result<()> {
-    let writer: Writer = Arc::new(Mutex::new(stream.try_clone()?));
-    let mut negotiated = false;
+    let mut conn = Connection {
+        writer: Arc::new(Mutex::new(stream.try_clone()?)),
+        negotiated: false,
+        caller: None,
+    };
     for line in BufReader::new(stream).lines() {
         let line = line?;
         if line.trim().is_empty() {
@@ -244,60 +465,80 @@ fn serve(stream: UnixStream, shared: &Shared) -> io::Result<()> {
         }
         let request: ClientRequest = match serde_json::from_str(&line) {
             Ok(request) => request,
-            Err(e) if !negotiated => {
+            Err(e) if !conn.negotiated => {
                 let message = format!("the first message must be hello (invalid JSON line: {e})");
-                return send(&writer, &error(None, HELLO_REQUIRED, message));
+                return send(
+                    &conn.writer,
+                    &error(None, error_code::HELLO_REQUIRED, message),
+                );
             }
             Err(e) => {
+                let message = format!("invalid JSON line: {e}");
                 send(
-                    &writer,
-                    &error(None, INVALID_REQUEST, format!("invalid JSON line: {e}")),
+                    &conn.writer,
+                    &error(None, error_code::INVALID_REQUEST, message),
                 )?;
                 continue;
             }
         };
+        // The writer is held until the replies are written, so an event this
+        // request causes reaches this client after the reply, as from the
+        // real server.
+        let writer = Arc::clone(&conn.writer);
+        let stream = lock(&writer);
         let mut state = lock(&shared.state);
         state.requests.push(request.clone());
-        if !negotiated {
+        if !conn.negotiated {
             let ClientRequest::Hello { data } = request else {
                 let reply = error(
                     None,
-                    HELLO_REQUIRED,
+                    error_code::HELLO_REQUIRED,
                     "the first message must be hello".into(),
                 );
                 drop(state);
-                return send(&writer, &reply);
+                return write_line(&stream, &reply);
             };
             match negotiate("client", &state.supported, &data.supported) {
                 Ok(selected) => {
-                    negotiated = true;
+                    conn.negotiated = true;
+                    conn.caller = data.caller;
                     let reply = ClientResponse::Hello {
                         data: SelectedVersionData { selected },
                     };
                     drop(state);
-                    send(&writer, &reply)?;
+                    write_line(&stream, &reply)?;
                     continue;
                 }
                 Err(mismatch) => {
                     drop(state);
-                    return send(&writer, &error(None, VERSION_MISMATCH, mismatch.message()));
+                    let reply = error(None, error_code::VERSION_MISMATCH, mismatch.message());
+                    return write_line(&stream, &reply);
                 }
             }
         }
-        let replies = handle(&mut state, request, &writer);
+        let replies = handle(&mut state, request, &conn);
         drop(state);
         for reply in replies {
-            send(&writer, &reply)?;
+            write_line(&stream, &reply)?;
         }
     }
     Ok(())
 }
 
-fn handle(state: &mut State, request: ClientRequest, writer: &Writer) -> Vec<ClientResponse> {
+fn accepted(request_id: String) -> ClientResponse {
+    ClientResponse::CommandResult {
+        data: ClientCommandResultData {
+            request_id,
+            result: CommandResult::Accepted,
+        },
+    }
+}
+
+fn handle(state: &mut State, request: ClientRequest, conn: &Connection) -> Vec<ClientResponse> {
     match request {
         ClientRequest::Hello { .. } => vec![error(
             None,
-            INVALID_REQUEST,
+            error_code::INVALID_REQUEST,
             "hello was already negotiated".into(),
         )],
         ClientRequest::Command { data } => {
@@ -309,22 +550,38 @@ fn handle(state: &mut State, request: ClientRequest, writer: &Writer) -> Vec<Cli
                 Err((code, message)) => vec![error(Some(request_id), code, message)],
             }
         }
+        ClientRequest::GetFleet { data } => vec![ClientResponse::Fleet {
+            data: FleetData {
+                request_id: data.request_id,
+                fleet: fleet(state),
+            },
+        }],
         ClientRequest::SubscribeEvents { data } => {
-            // Sent under the state lock so no live event overtakes the backlog.
-            let after = data.after_event_id.unwrap_or(0);
-            for event in state.events.iter().filter(|e| e.event_id > after) {
-                if send(
-                    writer,
-                    &ClientResponse::Event {
-                        data: event.clone(),
-                    },
-                )
-                .is_err()
-                {
-                    return Vec::new();
-                }
+            if let Some(after) = data.after_event_id
+                && let Err(message) = check_cursor(state, after)
+            {
+                return vec![error(None, error_code::EVENT_GAP, message)];
             }
-            state.subscribers.push(Arc::clone(writer));
+            let after = data.after_event_id.unwrap_or(0);
+            let backlog: Vec<EventData> = state
+                .events
+                .iter()
+                .filter(|e| e.event_id > after)
+                .cloned()
+                .collect();
+            let (queue, receiver) = sync_channel(backlog.len() + RETAINED_EVENTS);
+            for event in backlog {
+                let _ = queue.try_send(event);
+            }
+            let lagged = Arc::new(AtomicBool::new(false));
+            let writer = Arc::clone(&conn.writer);
+            let flag = Arc::clone(&lagged);
+            let started = std::thread::Builder::new()
+                .name("fake-daemon-events".into())
+                .spawn(move || forward(writer, receiver, flag));
+            if started.is_ok() {
+                state.subscribers.push(Subscriber { queue, lagged });
+            }
             Vec::new()
         }
         ClientRequest::SubscribeTerminal { data } => vec![ClientResponse::TerminalSnapshot {
@@ -333,15 +590,27 @@ fn handle(state: &mut State, request: ClientRequest, writer: &Writer) -> Vec<Cli
                 instance_id: data.instance_id,
             },
         }],
-        ClientRequest::TerminalInput { .. } => Vec::new(),
+        ClientRequest::TerminalInput { .. } => vec![error(
+            None,
+            error_code::NOT_SUPPORTED,
+            "terminal input arrives with the attach view (gate 11); nothing was written".into(),
+        )],
         ClientRequest::AnswerAsk { data } => {
             let Some(thread) = state.asks.get_mut(&data.ask_id) else {
                 let message = format!("no open ask {}", data.ask_id);
-                return vec![error(Some(data.request_id), UNKNOWN_ASK, message)];
+                return vec![error(
+                    Some(data.request_id),
+                    error_code::UNKNOWN_ASK,
+                    message,
+                )];
             };
             if !thread.accepts(&data.reply) {
                 let message = format!("ask {} does not accept this reply now", data.ask_id);
-                return vec![error(Some(data.request_id), INVALID_REQUEST, message)];
+                return vec![error(
+                    Some(data.request_id),
+                    error_code::INVALID_REQUEST,
+                    message,
+                )];
             }
             thread.entries.push(AskEntry::Answer {
                 from: "operator".into(),
@@ -349,15 +618,57 @@ fn handle(state: &mut State, request: ClientRequest, writer: &Writer) -> Vec<Cli
                 reply: data.reply,
             });
             let thread = thread.clone();
+            if let Some(item) = state
+                .attention
+                .iter_mut()
+                .find(|i| i.attention_id.as_deref() == Some(thread.ask_id.as_str()))
+            {
+                item.ask = Some(thread.clone());
+            }
             emit(state, DaemonEvent::AskUpdated { data: thread });
-            vec![ClientResponse::CommandResult {
-                data: ClientCommandResultData {
-                    request_id: data.request_id,
-                    result: CommandResult::Accepted,
-                },
-            }]
+            vec![accepted(data.request_id)]
         }
-        ClientRequest::Unknown => vec![error(None, UNKNOWN_REQUEST, "unknown request type".into())],
+        ClientRequest::ResolveAttention { data } => {
+            if conn.caller.is_some() {
+                return vec![error(
+                    Some(data.request_id),
+                    error_code::FORBIDDEN,
+                    OPERATOR_ONLY.into(),
+                )];
+            }
+            let found = state.attention.iter().position(|i| {
+                i.attention_id.as_deref() == Some(data.attention_id.as_str())
+                    && i.actions.contains(&data.action)
+            });
+            let Some(index) = found else {
+                let message = format!(
+                    "no needs-you item {} with action {}",
+                    data.attention_id,
+                    data.action.as_str()
+                );
+                return vec![error(
+                    Some(data.request_id),
+                    error_code::UNKNOWN_ATTENTION,
+                    message,
+                )];
+            };
+            state.attention.remove(index);
+            emit(
+                state,
+                DaemonEvent::AttentionResolved {
+                    data: AttentionResolvedData {
+                        attention_id: data.attention_id,
+                        action: data.action,
+                    },
+                },
+            );
+            vec![accepted(data.request_id)]
+        }
+        ClientRequest::Unknown => vec![error(
+            None,
+            error_code::UNKNOWN_REQUEST,
+            "unknown request type".into(),
+        )],
     }
 }
 
@@ -391,6 +702,7 @@ fn command(state: &mut State, command: AgentCommand) -> Result<CommandResult, Co
                     data: TaskChangedData {
                         task_id: task_id.clone(),
                         summary: format!("created: {title}"),
+                        task: None,
                     },
                 },
             );
@@ -411,17 +723,9 @@ fn command(state: &mut State, command: AgentCommand) -> Result<CommandResult, Co
                 }],
             };
             state.asks.insert(ask_id.clone(), thread.clone());
-            emit(
-                state,
-                DaemonEvent::AttentionRequired {
-                    data: AttentionRequiredData {
-                        reason: "ask".into(),
-                        task_id: None,
-                        ask: Some(thread),
-                        recap: None,
-                    },
-                },
-            );
+            let item = ask_item(thread, None);
+            state.attention.push(item.clone());
+            emit(state, DaemonEvent::AttentionRequired { data: item });
             CommandResult::AskCreated {
                 data: AskCreatedData { ask_id },
             }
@@ -437,7 +741,7 @@ fn command(state: &mut State, command: AgentCommand) -> Result<CommandResult, Co
             task_id, identity, ..
         } => accept_result(state, &task_id, identity, "result")?,
         AgentCommand::Unknown => {
-            return Err((UNKNOWN_REQUEST, "unknown command".into()));
+            return Err((error_code::UNKNOWN_REQUEST, "unknown command".into()));
         }
         AgentCommand::Send { .. }
         | AgentCommand::AskFollowUp { .. }
@@ -464,7 +768,7 @@ fn accept_result(
             |c| format!("expected stage {} attempt {}", c.stage_id, c.attempt),
         );
         return Err((
-            STALE_RESULT,
+            error_code::STALE_RESULT,
             format!("stale {what} for {task_id}: {expected}; nothing changed"),
         ));
     }
@@ -478,6 +782,7 @@ fn accept_result(
                     "{what} accepted for stage {} attempt {}",
                     identity.stage_id, identity.attempt
                 ),
+                task: None,
             },
         },
     );
@@ -489,6 +794,8 @@ fn accept_result(
 pub struct ProbeClient {
     reader: BufReader<UnixStream>,
     writer: UnixStream,
+    /// A line read partly before a timeout, completed by the next read.
+    partial: Vec<u8>,
 }
 
 impl ProbeClient {
@@ -498,7 +805,18 @@ impl ProbeClient {
         Ok(ProbeClient {
             writer: stream.try_clone()?,
             reader: BufReader::new(stream),
+            partial: Vec::new(),
         })
+    }
+
+    /// Connects and says `hello` (`caller`: `None` for the operator);
+    /// returns the client and the selected version.
+    pub fn hello(path: &Path, caller: Option<&str>) -> io::Result<(ProbeClient, ProtocolVersion)> {
+        let mut client = ProbeClient::connect(path)?;
+        match client.request(&ClientRequest::hello_as(caller.map(str::to_owned)))? {
+            ClientResponse::Hello { data } => Ok((client, data.selected)),
+            other => Err(io::Error::other(format!("hello answered {other:?}"))),
+        }
     }
 
     pub fn send(&mut self, request: &ClientRequest) -> io::Result<()> {
@@ -514,13 +832,34 @@ impl ProbeClient {
 
     /// Next response; `Ok(None)` when the server closed the connection.
     pub fn recv(&mut self) -> io::Result<Option<ClientResponse>> {
-        let mut line = String::new();
-        if self.reader.read_line(&mut line)? == 0 {
-            return Ok(None);
+        loop {
+            if self.reader.read_until(b'\n', &mut self.partial)? == 0 {
+                return Ok(None);
+            }
+            if self.partial.last() != Some(&b'\n') {
+                continue;
+            }
+            let line = std::mem::take(&mut self.partial);
+            if line.iter().all(u8::is_ascii_whitespace) {
+                continue;
+            }
+            return serde_json::from_slice(&line)
+                .map(Some)
+                .map_err(io::Error::other);
         }
-        serde_json::from_str(&line)
-            .map(Some)
-            .map_err(io::Error::other)
+    }
+
+    /// [`ProbeClient::recv`] waiting at most `timeout` for the next line; a
+    /// timeout is an error of kind `WouldBlock` or `TimedOut` (a line read in
+    /// part is kept for the next call).
+    pub fn recv_within(&mut self, timeout: Duration) -> io::Result<Option<ClientResponse>> {
+        // macOS refuses a new timeout (EINVAL) once the server has closed the
+        // connection; what it sent before closing is still there to read.
+        let _ = self
+            .reader
+            .get_ref()
+            .set_read_timeout(Some(timeout.max(Duration::from_millis(1))));
+        self.recv()
     }
 
     /// `send` then `recv`, failing if the server closed the connection.
