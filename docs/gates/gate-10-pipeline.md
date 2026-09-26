@@ -70,7 +70,7 @@
 - 問題：目前只有 `general`（沒有 repo）。task 要有 repo 才能走 `code`。instance 沒有角色，怎麼分派？instance 死了、被刪了，手上的 task 怎麼辦？
 - 建議：
   - `teams` 表（`id`、`repo`＝canonical checkout 的絕對路徑、可空、`default_workflow`），保留期限「永久」；`instances` 加 `team_id`（預設 `general`）、`role`。設定用本關的 `agend team` 命令（P10）。
-  - 分派用 core 的 `policy::assign::choose`：候選人＝同 team、同角色、狀態 `running`、手上沒有未結束 task 的 instance；人數上限先等於現有人數，所以**不開臨時 instance**（`SpawnEphemeral` 不會出現）。沒有人可用 → task 留在原地排隊，下一次有 instance 空出或加入時再試。team 裡沒有這個角色 → 同樣排隊，另外出現「需要你」`no-role`（P8）。
+  - 分派用 core 的 `policy::assign::choose`：候選人＝同 team 裡**每一個**狀態 `running` 的 instance（不先過濾），`held_task` 照實填：`tasks.assignee` 的未結束 task，或正在做的審查；誰有空、返工回持有者（`Rework`）、審查排除作者，都由 core 判斷。daemon 先過濾會讓返工找不到持有者（變成接手或排隊）、`NoEligibleReviewer` 永遠不出現；人數上限先等於現有人數，所以**不開臨時 instance**（`SpawnEphemeral` 不會出現）。沒有人可用 → task 留在原地排隊，下一次有 instance 空出或加入時再試。team 裡沒有這個角色 → 同樣排隊，另外出現「需要你」`no-role`（P8）。
   - task 持有者（D33）記在 `tasks.assignee`，到 task 結束才清掉；審查者持有的是那次審查，核准或要求修改後就空出來。
   - supervisor（第 6 施工關）不動：instance `failed` 時它手上的 task **停著等**；第 8 施工關那個「需要你」項目的 `unblocks` 從 0 變成 1。你按 `retry` 讓 agent 回來後，它的 binding 還在，照原來的工作繼續。
   - 本關**不做改派**：額度用盡、逾時動作 `reassign` 都在之後的施工關；用到 `on_timeout = reassign` 的 task 在建立時被拒（訊息寫這個動作還不支援）。
@@ -192,7 +192,7 @@
     2. binding：`pending` 的接著建（P4）；`ready` 但 worktree 不見了 → 從 branch 重建；branch 也不見 → task `Failed`。重寫**全部** binding 快照檔（檔案只是 DB 的投影），刪掉 DB 沒有的 instance 的快照檔。
     3. 命名空間裡的孤兒（`agend/<task>/…` branch、`worktrees/<task>*`、`checks/<task>-*`，DB 沒有這個 task、它已結束、或是上一次開機留下的 checks 目錄）→ 照 P4 的釋放流程（先存 WIP patch 再刪）。命名空間外一律不碰。
     4. 重做 `outstanding_actions`（P2）：派工訊息用固定的訊息 id `dispatch:<ticket>` 重送（第 7 施工關的送達以 id 冪等）；checks 在新目錄重跑同一個 attempt（P6）；merge 送出中先照 P7 判斷是不是已經 merge。
-    5. 逾時：`command` 與 `merge` 以外的關卡（merge 送出中 core 拒絕 `StageTimedOut`，每次開機都會多一行錯誤 log），deadline＝`stage_entered_at_unix_ms`＋關卡的 timeout，已經過了就立刻餵 `StageTimedOut`；`command` 的逾時由 runner 管（P6），重跑時重新計時。
+    5. 逾時：daemon 跑著時，每進入一個關卡（`ScheduleTimeout`）就排一個到 deadline 的計時器，時間到餵 `StageTimedOut`；開機時照下面重排。`command` 與 `merge` 以外的關卡（merge 送出中 core 拒絕 `StageTimedOut`，每次開機都會多一行錯誤 log），deadline＝`stage_entered_at_unix_ms`＋關卡的 timeout，已經過了就立刻餵 `StageTimedOut`（上次已經報過的「通知」逾時會回 `StaleResult`，這是正常的、只記 debug，不算錯誤）；`command` 的逾時由 runner 管（P6），重跑時重新計時。
   - 斷電丟了最後幾筆：DB 回到較舊的狀態，對帳就從那個狀態接著做。各種外部動作的處理：
     - merge：`merge_intent` 可能也丟了，所以 P7 先找 trailer，不靠 `merge_intent`。
     - worktree、hook：已存在就檢查、沿用。
@@ -222,12 +222,12 @@
     | `review approve <ticket>`／`changes <ticket> "<理由>"` | 只收這次審查的 reviewer；head 取審查 binding 的 head（agent 不必給）→ `ApprovalGranted`／`ChangesRequested` |
     | `block`／`unblock` | `TaskOperation::Block`／`Unblock`；理由顯示在 `agend status` 與 TUI，不進「需要你」（要你處理就用 `ask`） |
     | `remind` | `reminders` 表記一筆（task、到期時間），到期時送訊息 `remind:<task>/<序號>` 給 task 持有者；送出後刪那一列；重開機後照表補 |
-    | `task create` | 照 D18（語法照第 9 施工關：`task create --role <role> "<title>" [--team] [--workflow]`）：team 預設是呼叫者的 team、workflow 預設是 team 的 `default_workflow`；`--role` 必須等於那個 workflow 第一個 work 關卡的角色，不同就拒絕並寫出應該是哪個（本關不做「改寫 workflow 的角色」）；存檔檢查、要 repo 的 workflow 在沒 repo 的 team 被拒；用到 fanout 或 `reassign` 被拒。審查者照 `policy::assign` 的 `Review`：排除 task 持有者（作者），優先不同 backend。只有兩種情況出現 `no-role:<team>/<role>`：team 沒有這個角色（`AskForRole`），或這個角色只有作者（`NoEligibleReviewer`）；角色有別人但都在忙 → 只排隊（`Queue{AtCapacity}`），不進「需要你」 |
+    | `task create` | 照 D18（語法照第 9 施工關：`task create --role <role> "<title>" [--team] [--workflow]`）：team 預設是呼叫者的 team、workflow 預設是 team 的 `default_workflow`；`--role` 必須等於那個 workflow 第一個 work 關卡的角色，不同就拒絕並寫出應該是哪個（本關不做「改寫 workflow 的角色」）；存檔檢查、要 repo 的 workflow 在沒 repo 的 team 被拒；用到 fanout、`reassign`、或 `command` 關卡寫了 `on_timeout`（P6）被拒。審查者照 `policy::assign` 的 `Review`：排除 task 持有者（作者），優先不同 backend。只有兩種情況出現 `no-role:<team>/<role>`：team 沒有這個角色（`AskForRole`），或這個角色只有作者（`NoEligibleReviewer`）；角色有別人但都在忙 → 只排隊（`Queue{AtCapacity}`），不進「需要你」 |
 
   - 請示（D35）：`asks` 表（id、instance、task、狀態、建立時間）與 `ask_turns` 表（提問、選項、回答、追問、結論，依序），保留「永久」（D31）。`ask` 建一筆、出現在「需要你」；`answer_ask` 把回答記下並送給 agent（訊息 id `ask:<ask id>/<輪次>`）；`AskFollowUp` 再出現一次；`AskResolve` 結束。
   - 操作者命令（本關的 CLI，走第 9 施工關的 `operator` 請求）：
     - `agend team add <team> [--repo <path>] [--workflow <id>]`、`agend team list`、`agend team set-workflow <team> <id>`、`agend team join <team> <instance> --role <role>`
-    - `agend workflow list`、`show <id>`、`check <file>`、`apply <file>`（D19 的 `new --from`、`edit`、`history`、`rollback`、`delete` 之後再做）
+    - `agend workflow list`、`show <id>`、`check <file>`、`apply <file>`；`check`／`apply` 在 core 的存檔檢查之外，也拒絕本關還不支援的：fanout、`reassign`、`command` 關卡的 `on_timeout`（D19 的 `new --from`、`edit`、`history`、`rollback`、`delete` 之後再做）
     - 新請求 `task_cancel { task_id, reason }`（只收操作者）→ `Cancel` 事件，照 P4 釋放。本關給 `pipeline_probe cancel` 用；要不要有正式 CLI 命令見「待你決定」。
     - task 已經在 merge 關卡（包括 `merge-blocked`）時，core 不接受取消（merge 送出後不能取消，pipeline.md）：`task_cancel` 回錯誤 `merge_in_flight: <task> is merging; it cannot be cancelled now`。`merge-blocked` 的出路是把擋住的 checkout 清乾淨（commit 或 stash 你的修改、或切離 main），再按 `retry`。
 - 理由：這些都只有接上 pipeline 才有真資料可驗；team 與 workflow 的命令是跑 pipeline 的前提，放在同一關才不會兩邊互等。
@@ -489,6 +489,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-26 第 4 輪 review（1 MEDIUM、2 LOW）後修正：分派把整個 team 的 running instance 都交給 core（`held_task` 照實填），返工與 `NoEligibleReviewer` 才正確；逾時計時器由誰排、開機重報的通知逾時回 `StaleResult` 是正常；`command` 的 `on_timeout` 也在 task create 與 `workflow check`／`apply` 被拒。
 - 2026-09-26 第 3 輪 review REFUTED（2 MEDIUM、3 LOW）後修正：手動 merge 記成完成標出與 pipeline.md 不同、改寫成「最舊一個包含 head 的 commit」；開機逾時排除 merge 關卡；`command` 關卡寫 `on_timeout` 在建立時被拒；`no-role` 只在缺角色或只有作者時出現。
 - 2026-09-26 第 2 輪 review REFUTED（2 HIGH、2 MEDIUM、4 LOW）後修正：手動 merge 改記 `MergeCompleted`（`StageFailed` 在 merge 送出中會被 core 拒絕）；checks 逾時改餵 `CommandFinished{exit_code: None}` 回 work，demo workflow 寫明 timeout；請示的 attention id 用 ask id；merge 中不能取消、`merge-blocked` 的出路；`delivery = inbox` 與 `--ff-only` 標出與架構頁不同；假 agent 固定 `claude` backend；步驟 6 改用 `find`；`task create --role` 與審查者排除作者。
 - 2026-09-26 fresh review REFUTED（2 HIGH、7 MEDIUM、6 LOW）後修正：與第 9 施工關的分工寫進範圍（請示、task 類命令的 daemon 端、`agend team`／`workflow` 歸本關）；派工訊息與「需要你」用 ticket；`inbox` 讀取不算確認；驗收用 `pipeline_probe task` 開 task、`g10h` 放停住的 task 並可取消；空 branch 在 `done` 被拒、已 merge 靠 trailer 找回；demo 審查路徑一致；checks 每次新 worktree；D33 衝突標出；timeout、`waiting_since`、每日對帳、`worktree list` 檢查、rebase 措辭；failpoint 只留兩個；新增 P10（本關的命令）與「待你決定」。
