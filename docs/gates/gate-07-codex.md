@@ -91,7 +91,7 @@ codex 的事實來源：[backends/codex.md](../backends/codex.md)、[spike-codex
   - **daemon 自己先建 thread**：`session_id` 是 NULL 時（不管 `new` 還是 `running`，理由見下面「舊 instance」），app-server 就緒後 driver 呼叫 `thread/start {cwd}`，拿到 `threadId`，**先寫進 `instances.session_id`**，再寫 `$GO` 讓包裝 `exec` TUI（P2）。
   - 所以 codex 的 TUI **每一次**都是 `resume <thread id> --remote unix://<真正的 socket>` 起，包括第一次（spike S4 的順序；反過來行不行未查證，U4），沒有「新／舊」兩種。codex 的分支只看 `session_id` 是不是 NULL；`new`／`running` 維持第 6 施工關 H1 的意思（第一次 `Spawn` 被確認後就寫 `running`），H1 不改。
   - **第一次啟動被打斷**：H1 在 `Spawned` 就寫 `running`，而 thread 是之後才建（`Spawn` 包裝 → 就緒 → `thread/start` → 寫 `session_id`）。這中間出事（daemon 當掉、app-server 20 秒沒就緒、`thread/start` 超過 30 秒、codex 沒登入）會留下 `running` ＋ NULL `session_id`。這時 TUI 還沒 `exec`（包裝在等 `$GO`），沒有任何對話，所以下一次啟動照樣 `thread/start` 建新的；上一次可能建了一個沒存下 id 的空 thread，留在 codex 裡沒有害處（只是 `codex resume` 清單多一筆空的）。附測試：在 `Spawned` 之後、`thread/start` 之前把 daemon 殺掉 → 下次開機建新 thread、不是 `failed`。
-  - **第 6 施工關留下的舊 codex instance**：只在 **migration 跑的那一刻判斷一次**，不看執行時的狀態。本關的 migration（下一個空號，目前 `0004`）加一個欄位 `legacy_no_thread INTEGER NOT NULL DEFAULT 0 CHECK (legacy_no_thread IN (0, 1))`，把當時已經存在、`backend = codex`、`session_id` 是 NULL、**而且可能有對話**（`status IN ('running', 'failed')`；第 8 施工關之後即 `session_started = 1`）的每一列設成 `legacy_no_thread = 1` 並標 `failed`，log 原因 `codex instance from before gate 7 has no thread id; a human decides`。`new` 的列從沒啟動過、沒有對話，不動它，之後照常第一次啟動。這個欄位把「migration 時就判定的舊列」存下來，跟之後才 `failed` 的 codex 列（例如沒登入、第一次啟動連死 3 次）分得開，兩者其他欄位看起來一模一樣。舊列不建新 thread：它們裡面是有真對話的裸 codex TUI、沒有 app-server，建新 thread 等於靜默的全新啟動，違反第 6 施工關 P6。`failed` 的 holder 照第 6 施工關 H8 **不動它**（不送 `Shutdown`、driver 不去連），人可以 attach 進去把對話收尾。migration 之後才出現的 `running` ＋ NULL 一律是上一條「第一次啟動被打斷」。附測試：migration 前放一列這樣的 instance、它的 holder 活著 → 開機後是 `failed`、`legacy_no_thread = 1`、holder pid 不變、沒有 `thread/start`；migration 前的 `new` codex 列 → `legacy_no_thread = 0`、照常啟動。
+  - **第 6 施工關留下的舊 codex instance**：只在 **migration 跑的那一刻判斷一次**，不看執行時的狀態。本關的 migration（下一個空號，目前 `0004`）加一個欄位 `legacy_no_thread INTEGER NOT NULL DEFAULT 0 CHECK (legacy_no_thread IN (0, 1))`，把當時已經存在、`backend = codex`、`session_id` 是 NULL、**而且可能有對話**（`status IN ('running', 'failed') AND session_started = 1`；第 8 施工關建立、在第一次 `Spawn` 前就失敗的 codex 列是 `session_started = 0`，不標，保留重試）的每一列設成 `legacy_no_thread = 1` 並標 `failed`，log 原因 `codex instance from before gate 7 has no thread id; a human decides`。`new` 的列從沒啟動過、沒有對話，不動它，之後照常第一次啟動。這個欄位把「migration 時就判定的舊列」存下來，跟之後才 `failed` 的 codex 列（例如沒登入、第一次啟動連死 3 次）分得開，兩者其他欄位看起來一模一樣。舊列不建新 thread：它們裡面是有真對話的裸 codex TUI、沒有 app-server，建新 thread 等於靜默的全新啟動，違反第 6 施工關 P6。`failed` 的 holder 照第 6 施工關 H8 **不動它**（不送 `Shutdown`、driver 不去連），人可以 attach 進去把對話收尾。migration 之後才出現的 `running` ＋ NULL 一律是上一條「第一次啟動被打斷」。附測試：migration 前放一列這樣的 instance、它的 holder 活著 → 開機後是 `failed`、`legacy_no_thread = 1`、holder pid 不變、沒有 `thread/start`；migration 前的 `new` codex 列 → `legacy_no_thread = 0`、照常啟動。
   - 第 6 施工關的 `session_args` 對 codex 回傳包裝的參數（P2），thread id 經 `$GO` 給 TUI。
   - 重起：新 holder、新 app-server → driver `thread/resume {threadId}` → TUI `resume <id>`（spike S4：同一個 `CODEX_HOME`，砍光再起仍保有完整上下文）。
   - `thread/resume` 說找不到這個 thread：
@@ -133,7 +133,7 @@ codex 的事實來源：[backends/codex.md](../backends/codex.md)、[spike-codex
 
 - 問題：`sent` 與 `confirmed` 各在什麼時候成立？同一個 id 送兩次、daemon 在送出的瞬間當掉，怎麼保證不重複也不遺失？
 - 建議：
-  - 新 migration（開工時的下一個空號，目前 `0004`，見「已知風險」）：`messages` 表（`seq INTEGER PRIMARY KEY`＝明確的順序欄位；訊息 `id` 是 `TEXT NOT NULL UNIQUE`；`to_instance`、`from`、`body`、`level`、`state`、`turn_id`、時間），保留 30 天（D31，列進第 5 施工關 P8 的規則表）。**這張表就是唯一的一套冪等。**
+  - 新 migration（開工時的下一個空號，目前 `0004`，見「已知風險」）：`messages` 表（`seq INTEGER PRIMARY KEY`＝明確的順序欄位；訊息 `id` 是 `TEXT NOT NULL UNIQUE`；`to_instance`、`from_instance`（不用 SQL 保留字 `from`／`to`）、`task_id`（可為 NULL；重送與對帳時照它重建 `Task:` 標頭）、`body`、`level`、`state`、`turn_id`、時間），保留 30 天（D31，列進第 5 施工關 P8 的規則表）。**這張表就是唯一的一套冪等。**
   - 四個狀態在 codex 的意思：
     - `queued`：寫進 DB 了，還沒拿到 codex 的 RPC 回覆。app-server 連不上（holder 重起中）也停在這裡，連上後照送；**不算失敗**（V1-LESSONS #1）。送給還沒有 driver 的 instance（claude、opencode 要到第 12 施工關）也一樣停在 `queued`，等那個 backend 的 driver 出現後照送，不標 `failed`（第 9 施工關依賴這一點）。
     - `sent`：codex 回了 RPC 成功（`turn/start` 的 `turn.id`、`turn/steer` 的 `turnId`、`thread/queue/add` 的 `queuedSubmission`）。
@@ -142,7 +142,7 @@ codex 的事實來源：[backends/codex.md](../backends/codex.md)、[spike-codex
     - `sent` 一直等不到確認就停在 `sent`（誠實標未確認），不重送、不改 `failed`。
   - 送出一律帶 `clientUserMessageId = 訊息 id`（v1 在 `turn/start` 就這樣帶）。**未查證**：`turn/start`、`turn/steer` 收不收這個欄位、會不會回在 `clientId`（錄製檔裡只有 `thread/queue/add` 回 `clientId`，U2）。
   - 順序：一律照 `seq` 排（第 9 施工關的 `agend inbox --after`、第 10 施工關的假 worker 都靠它）。不用隱含的 rowid：SQLite 在 `VACUUM`／`VACUUM INTO`（第 5 施工關的快照與還原）時可能重新編號；`INTEGER PRIMARY KEY` 是 rowid 的別名、有明確宣告，`VACUUM` 不會改它。
-  - 冪等：`deliver` 先查表；id 已存在、而且 `from`、`to_instance`、`body`、`level` 都相同 → 回目前的狀態、不呼叫 codex（DRV-9：再送不是錯誤）；同一個 id 但這四個欄位任一個不同 → 回 `invalid_request`、什麼都不改。「查有沒有、比對、插入」在 **DB 執行緒的同一個 closure** 裡做（第 5 施工關 P1 的單一寫者），兩個同 id 的 `deliver` 同時到也不會都插入或都通過比對（第 9 施工關依賴這一點）。
+  - 冪等：`deliver` 先查表；id 已存在、而且 `from_instance`、`to_instance`、`task_id`、`body`、`level` 都相同 → 回目前的狀態、不呼叫 codex（DRV-9：再送不是錯誤）；同一個 id 但這幾個欄位任一個不同 → 回 `invalid_request`、什麼都不改。「查有沒有、比對、插入」在 **DB 執行緒的同一個 closure** 裡做（第 5 施工關 P1 的單一寫者），兩個同 id 的 `deliver` 同時到也不會都插入或都通過比對（第 9 施工關依賴這一點）。
   - 當掉的窗口（RPC 送出了、`sent` 還沒寫）：開機後每個 `queued` 的列先查兩個地方：**`thread/queue/list`**（排了隊、還沒輪到的訊息不在任何 turn 裡，比 `clientUserMessageId`）與 thread 歷史（P7 的 `thread/turns/list`，比 user message）。在佇列裡 → 補成 `sent`；在歷史裡 → 補成 `sent` 再 `confirmed`；兩邊都沒有才送。只查歷史會把「排隊中」的訊息再送一次（重複一個 turn，違反 DRV-9）。
   - 內容：只送完整 body，前面加兩行標頭 `From: <from>`、`Task: <task id>`（沒有 task 就省略）＋空行。不截斷。
 - 理由：一張表同時是冪等、狀態、TUI 顯示的來源；「確認」以 codex 自己的 thread 為準，不是「RPC 回 200」。重送前查歷史，把「崩潰時送一半」這個 v1 標成 `Ambiguous` 的狀態收回四狀態裡。
@@ -375,6 +375,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-26 第九輪 review CONFIRMED，三個 LOW 修正：`messages` 加可為 NULL 的 `task_id`、欄位改名 `from_instance`；0004 的舊列條件加 `session_started = 1`。
 - 2026-09-26 第 9 施工關 review 提出、併入：`messages` 加明確的 `seq INTEGER PRIMARY KEY`（訊息 id 改 `UNIQUE`），順序不受 `VACUUM` 影響；同 id 不同內容回 `invalid_request`，比對與插入在同一個 DB closure。
 - 2026-09-26 第八輪 review REFUTED 後修正：migration 加 `instances.legacy_no_thread` 把舊列存下來（只標 `running`／`failed`，`new` 不動），第 8 施工關重試的後續改看這個欄位；P5 補「沒有 driver 的 instance 停在 `queued`」；`Send`＋`level` 只交給第 9 施工關。
 - 2026-09-26 第七輪 review REFUTED 後修正：「舊 codex instance」改成只在 migration 那一刻判斷一次（那時 `session_id` 是 NULL 的 codex 列標 `failed`）；之後 `running` ＋ NULL 就是第一次啟動被打斷，照常 `thread/start`（多一個空 thread 無害），附測試；開機清掃 `failed` 只在 holder 已不在時；自動驗收補上各條測試。合入 v2（#127、#128）。
