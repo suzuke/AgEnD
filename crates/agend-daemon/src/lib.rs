@@ -32,4 +32,5 @@ pub mod git;
 pub mod notifier;
 pub mod runner;
 pub mod runtime;
+#[cfg(unix)]
 pub mod store;
