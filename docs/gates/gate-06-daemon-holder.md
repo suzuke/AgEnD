@@ -3,13 +3,13 @@
 > **TL;DR**
 > - 真 daemon 接真 holder（agent runtime adapter）：daemon 重啟時 agent 不斷線；holder 或 agent 死了，daemon 用 `--resume` 接回。
 > - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這個施工關才算完成。
-> - 下一步：開工前提案 P1–P6 已由使用者確認（2026-09-25）；P7–P9 照建議代填、**待你追認**；等第 5 施工關完成（D22）後開工。
+> - 下一步：開工前提案 P1–P6 已由使用者確認（2026-09-25）；P7–P9 與 P3 的夜間更正使用者已追認（2026-09-26）；第 4、5 施工關已完成，可以開工。
 
 **先看這條**：這頁的步驟會用到 `agend`。每個新開的終端機分頁（包括第二個終端）都要先跑「你親自驗收」開頭的設定，否則會跑到舊的 Node 版 `agend` 1.24.0。
 
 ## 狀態
 
-**提案中**（2026-09-26）：P1–P6 已確認，P7–P9 待追認；等第 5 施工關完成後開工。
+**提案已定、待開工**（2026-09-26）：P1–P9 全部由使用者確認或追認；第 4、5 施工關已完成。
 
 ## 範圍
 
@@ -21,12 +21,12 @@
 - 開機巡查孤兒 holder：掃 `$AGEND_HOME/run/holders/` 鎖檔，DB 裡沒有的 instance → 送 `Shutdown`（第 4 施工關 P2，使用者 2026-09-25 決定；做法見 P2、P5）
 - holder 被 `kill -9` 之後的補救：偵測 holder 死了 → 用 backend 的 `--resume <id>` 把 agent 接回（第 4 施工關 P2／第 3 施工關 T18；做法見 P6）
 - daemon 對自己啟動的 holder 收屍（`wait`），避免殭屍（P3）
-- 綁定／釋放 worktree 時呼叫 `agend_shim::install_hooks`／`uninstall_hooks`（agend 的 git hook 只裝在該 agent worktree，見[第 3 施工關](gate-03-shim.md#範圍)）：**移到第 10 施工關（P9，待你追認）**
+- 綁定／釋放 worktree 時呼叫 `agend_shim::install_hooks`／`uninstall_hooks`（agend 的 git hook 只裝在該 agent worktree，見[第 3 施工關](gate-03-shim.md#範圍)）：**移到第 10 施工關（P9）**
 - 本頁步驟 5（Ctrl-C 停 daemon，agent 還在）依賴第 4 施工關 P2 的 session 分離；`pgrep` 一律只比對 `g6-` 開頭的 instance id
 - daemon 開機時與之後每天跑一次 store 的 `prune` 與每日 DB 快照（第 5 施工關 P8/P9；做法見 P5）
 - 開 DB 時重試到 10 秒，因為重啟時 EXCLUSIVE lock 交接需要時間（第 5 施工關風險；做法見 P1）
-- daemon log 與 audit 輪替（P8，待你追認）
-- D2 的重啟預檢**不在本關**，移到第 9 施工關（P7，待你追認）
+- daemon log 與 audit 輪替（P8）
+- D2 的重啟預檢**不在本關**，移到第 9 施工關（P7）
 
 ## 開工前提案
 
@@ -62,7 +62,7 @@
 
 - 問題：daemon 用什麼指令起 holder？怎麼確定它起來了？agent 的環境變數從哪來？holder 死了誰收？
 - 建議：
-  - 起 holder：`current_exe() holder <id>`，`env_clear()`；**不設** `process_group(0)`（holder 自己 `setsid()`，已經是 process-group leader 時 `setsid` 會失敗 EPERM；見第 4 施工關 P2 與實作偏離 G7。夜間驗證 2026-09-26 抓到並更正）。之後每 50 ms 試連 socket，5 秒連不上算失敗（交給 P6）。
+  - 起 holder：`current_exe() holder <id>`，`env_clear()`；**不設** `process_group(0)`（holder 自己 `setsid()`，已經是 process-group leader 時 `setsid` 會失敗 EPERM；見第 4 施工關 P2 與實作偏離 G7。夜間驗證 2026-09-26 抓到並更正，使用者 2026-09-26 追認）。之後每 50 ms 試連 socket，5 秒連不上算失敗（交給 P6）。
   - 先把 instance 狀態寫進 DB，再送 `Spawn`；daemon 在兩者之間當掉，重啟後重送 `Spawn`，holder 回 `already_spawned`（第 4 施工關要補，見風險）。
   - agent 環境用白名單組出來：`AGEND_*`、`PATH`（以 `$AGEND_HOME/bin` 開頭，shim 才會先被找到）、`HOME`、`USER`、`LANG`、`TMPDIR`、`TERM`…（完整清單開工時細化）。不在清單上的一律不給。
   - 開機時確認 `$AGEND_HOME/bin/` 的 shim symlink 存在、指向目前的 binary；缺了或指錯就重建。
@@ -120,7 +120,7 @@
 - 理由：本關沒有觸發 restart 的命令，現在做沒有呼叫點、驗不到；用快照複本預檢，DB 本身一個 byte 都不動。
 - 替代方案：本關就做（沒有使用者）；直接對 `agend.db` 跑 migration 預檢（失敗時 DB 已被改）。
 - 例子：新版 migration 有錯：預檢印 `preflight failed: migration 0003 …`，舊 daemon 照常跑。
-- [ ] 待你追認（夜間代填 2026-09-26，照建議）
+- [x] 使用者追認（2026-09-26）
 
 ### P8：daemon log 與輪替
 
@@ -134,7 +134,7 @@
 - 理由：v1 的 home 長到 161G，log 一定要有期限；自己寫檔，macOS 與 Linux 看 log 的方法一樣。
 - 替代方案：只寫 stdout、交給 launchd／journald（兩個平台不同，launchd 不輪替）；`tracing_appender::rolling`（v1 用過，刪檔規則不在同一張表）。
 - 例子：`logs/` 只剩最近 7 個 `daemon-*.log`；`audit/` 有 14 份；還活著的 holder 的 log 就算 30 天沒動也不刪。
-- [ ] 待你追認（夜間代填 2026-09-26，照建議）
+- [x] 使用者追認（2026-09-26）
 
 ### P9：hooks 與 binding 快照、依賴規則
 
@@ -143,7 +143,7 @@
 - 理由：沒有呼叫點的功能只能用假資料測，第 10 施工關有真的綁定流程時才驗得到；依賴規則讓「daemon 直接呼叫 holder 內部」編譯不過。
 - 替代方案：本關先做、用假 worktree 測（驗不到真正的坑）。
 - 例子：有人在 `agend-daemon` 的 `Cargo.toml` 加 `agend-holder`，`cargo xtask check-deps` 失敗。
-- [ ] 待你追認（夜間代填 2026-09-26，照建議）
+- [x] 使用者追認（2026-09-26）
 
 ### 已知風險（開工時處理）
 
@@ -300,6 +300,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-26 使用者追認 P3 夜間更正（不設 `process_group(0)`）與 P7–P9；第 4、5 施工關已 merge。
 - 2026-09-26 開工前提案 P1–P9 寫定：P1–P6 使用者 2026-09-25 確認；P7–P9 夜間照建議代填、待你追認。舊步驟修正（拿掉 `--foreground`、`spawn-fake` 改 `daemon_probe`、`pgrep` 限 `g6-`）；`install_hooks` 移到第 10 施工關（P9）；狀態改為提案中。
 
 ## 下一步
