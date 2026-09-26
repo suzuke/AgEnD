@@ -28,11 +28,39 @@ fn invoked_as_git_reaches_the_shim() {
     let dir = TempDir::new("argv0").unwrap();
     let git = dir.path().join("git");
     std::os::unix::fs::symlink(BIN, &git).unwrap();
+    // The shim's own directory comes first on PATH, as on an agent's PATH.
+    let mut path = std::ffi::OsString::from(dir.path());
+    path.push(":");
+    path.push(std::env::var_os("PATH").unwrap_or_default());
 
-    let out = Command::new(&git).arg("--version").output().unwrap();
+    let out = Command::new(&git)
+        .arg("--version")
+        .env("PATH", &path)
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.starts_with("git version"), "real git ran: {stdout}");
+
+    let out = Command::new(&git)
+        .args(["worktree", "add", "x"])
+        .env("PATH", &path)
+        .env_remove("AGEND_HOME")
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("agend shim (git)"), "stderr was: {stderr}");
+    assert!(
+        stderr.contains("agend-shim: refused `git worktree add x`"),
+        "stderr was: {stderr}"
+    );
+    assert!(stderr.contains("next step:"), "stderr was: {stderr}");
     assert!(out.stdout.is_empty(), "the shim must not act like the CLI");
 }
 

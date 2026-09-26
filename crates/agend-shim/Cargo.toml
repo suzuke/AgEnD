@@ -8,3 +8,9 @@ publish.workspace = true
 
 [dependencies]
 agend-core.workspace = true
+# Binding snapshot (read) and audit record (write) are JSON files.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+agend-testkit.workspace = true

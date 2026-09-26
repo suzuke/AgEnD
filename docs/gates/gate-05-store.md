@@ -327,6 +327,7 @@ owner 睡著時由實作者決定、可以反悔的事（頁面沒寫到的設�
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-26 fresh-context verifier（`be40b8a`）CONFIRMED：負數版本 -1、-2、`i32::MIN` 都拒絕且檔案不動；8 程序同時建新 home 3,600 輪沒有舊錯誤訊息。另記（`e714c08` 就有、非本次引入）：約 10% 的輪次 8 個建立者全部拿到 `InUse`、沒有人建成，下一次 `open` 會重建成功（S19）。store 照 S5 立刻回報，重試交給第 6 施工關 P1 的 10 秒重試。
 - 2026-09-26 使用者追認 S1–S23（S1–S3 逐題、S4–S23 一次追認）。
 - 2026-09-26 verifier 第 3 輪 LOW 修正：`user_version` 為負數的 `agend.db` 原本讓 `open` panic，改成拒絕開啟（`agend.db has an invalid schema version N; refusing to start with it — restore a snapshot from <home>/backups (see README)`）、檔案不動（S17）；約 8 個程序同時建新 home 時，偶爾輸家拿到 `sqlite: unable to open database file: …/.agend.db.new`，改成回報 `agend.db is in use by another process`（多程序重現 1200 次出現 3 次，修正後 2400 次為 0）。
 - 2026-09-26 verifier 第 2 輪 REFUTED（沒有 hard link 的檔案系統建不了新 home），修正：hard link 失敗改 rename（S20）；留下的 `.agend.db.new` 刪掉重建（S19，取代 S17 的「接著建」）；缺表的 DB 拒絕（S21）；比 SQLite 檔頭短、dangling symlink、非一般檔案的 `agend.db` 開檔前拒絕（S22）；空 DB 不做每日快照（S23）；README 註明刪掉 `agend.db` 等於從空 DB 開始。
