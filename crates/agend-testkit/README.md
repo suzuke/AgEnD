@@ -98,6 +98,7 @@ daemon 重啟：`RuntimeFixture`、`DriverFixture`、`StoreFixture` 各有一個
 - 第一行必須是 `hello`；其他請求或無效 JSON 都回 `hello_required` 並關閉；hello 之後的無效 JSON 回 `invalid_request`，連線不關；major 不合回 `version_mismatch` 並關閉。
 - 事件身分：`assign(task, ResultIdentity)` 設定目前要的結果；`done`／`result`／`review_*` 沒帶或不符 → `stale_result`、什麼都不變；接受後這個 attempt 就用掉了。
 - 其他：`status`、`inbox`、`task_create`、`ask`、`answer_ask`、`subscribe_events`（先補 backlog 再推即時事件）、`subscribe_terminal`（一張快照）。
+- `open_ask(thread, recap)`：像綁定 task 的 agent 跑 `agend ask` 那樣建立請示（帶 task 與脈絡摘要），可以 `answer_ask`；`ask` 命令建立的請示沒有 task（TUI 的 demo 與測試用）。
 - `stale_result` 以外的錯誤碼是假 daemon 自己定的，第 8 施工關定案時要對齊。
 
 ## 假 agent 程式

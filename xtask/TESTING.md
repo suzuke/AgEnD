@@ -17,6 +17,7 @@ cargo test -p xtask
 |---|---|
 | `check_deps::tests::parses_real_cargo_tree_output` | 解析真的 `cargo tree` 輸出（producer 產生，不手寫） |
 | `check_deps::tests::denies_runtime_and_prefix_matches` | `tokio`、`tokio-*` 前綴、`agend-daemon` 會被抓；`serde`、`agend-core` 不會 |
+| `check_deps::tests::tui_may_not_reach_sqlite_or_the_daemon` | agend-tui 的規則擋 SQLite（rusqlite、libsqlite3-sys）與 agend-daemon |
 | `check_deps::tests::a_crate_is_not_a_violation_of_its_own_rule` | 規則不會因 crate 自己的名字失敗 |
 | `check_deps::tests::current_workspace_passes` | 目前 workspace 符合所有規則（以 `--allow-skip` 跑，因為 Homebrew cargo 沒有 no-std target） |
 | `check_core::tests::real_metadata_of_core_passes` | 真的 `cargo metadata` 下 agend-core 沒有 build script，依賴符合 allowlist |
@@ -33,6 +34,7 @@ cargo test -p xtask
 | `cargo xtask accept core` | workspace fmt/clippy、core tests、check-deps，並以子程序執行 core example |
 | `check_deps::tests::holder_denies_runtimes_databases_and_the_daemon` | agend-holder 規則擋 `mio`、SQLite、`agend-daemon`，不擋 alacritty 帶進來的 `polling` |
 | `cargo xtask accept holder` | agend-holder 與 agend 的 fmt/clippy/test、check-deps，再跑 `holder_probe demo` |
+| `cargo xtask accept tui` | agend-tui fmt/clippy/test、check-deps，並以子程序執行 `tui_accept` example（demo 自己檢查每段，失敗就非 0 結束） |
 
 ## 用到的假實作
 

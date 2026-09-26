@@ -17,6 +17,8 @@
 //! agend-daemon, agend-holder, agend (RTM-1..9 against real holders, the
 //! re-executed four boots, the real `agend daemon` tests) and agend-core,
 //! check-deps, then `daemon_probe demo` against the built `agend`.
+//! Gate 11 runs the per-crate checks, check-deps, then the TUI demo (screens,
+//! navigation, resolve, disconnect against the testkit fake daemon).
 //! Other gates use the per-crate checks until their acceptance flow is built.
 
 use crate::{cargo, check_deps, workspace_root};
@@ -208,6 +210,16 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
             "demo",
         ])?;
         println!("gate 6 (daemon-holder): checks passed");
+    } else if gate.number == 11 {
+        step(&[
+            "run",
+            "--quiet",
+            "-p",
+            "agend-tui",
+            "--example",
+            "tui_accept",
+        ])?;
+        println!("gate 11 (tui): checks passed");
     } else {
         println!(
             "gate {} ({}): checks passed; demo not implemented yet (it is added when this gate is built)",

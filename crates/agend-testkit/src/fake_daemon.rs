@@ -16,7 +16,8 @@
 //!   changes; an accepted result consumes the assignment.
 //! - `subscribe_events`: backlog after `after_event_id`, then live events.
 //! - `subscribe_terminal`: one `terminal_snapshot`.
-//! - `answer_ask`.
+//! - `answer_ask`, for asks from the `ask` command or `FakeDaemon::open_ask`
+//!   (an ask with a task and a context recap, as a bound agent's would be).
 //!
 //! Not covered: terminal byte streaming, authentication, persistence.
 //! Error codes other than `stale_result` are the fake's own (not yet fixed in
@@ -34,7 +35,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use agend_core::protocol::ask::{AskEntry, AskThread};
+use agend_core::protocol::ask::{AskEntry, AskThread, ContextRecap};
 use agend_core::protocol::client::{
     AgentCommand, AskCreatedData, AttentionRequiredData, ClientCommandResultData, ClientRequest,
     ClientResponse, CommandResult, DaemonEvent, ErrorData, EventData, InboxMessage, MessagesData,
@@ -142,6 +143,26 @@ impl FakeDaemon {
     /// Appends an event to the log and sends it to every subscriber.
     pub fn emit(&self, event: DaemonEvent) -> u64 {
         emit(&mut lock(&self.shared.state), event)
+    }
+
+    /// Opens a needs-you ask the way the daemon does after `agend ask` from
+    /// an agent bound to a task: the thread becomes answerable with
+    /// `answer_ask`, and an `attention_required` event carries the thread,
+    /// its task and `recap`. Returns the event id.
+    pub fn open_ask(&self, thread: AskThread, recap: Option<ContextRecap>) -> u64 {
+        let mut state = lock(&self.shared.state);
+        state.asks.insert(thread.ask_id.clone(), thread.clone());
+        emit(
+            &mut state,
+            DaemonEvent::AttentionRequired {
+                data: AttentionRequiredData {
+                    reason: "ask".into(),
+                    task_id: thread.task_id.clone(),
+                    ask: Some(thread),
+                    recap,
+                },
+            },
+        )
     }
 
     /// Every request received, in order, from all connections.
