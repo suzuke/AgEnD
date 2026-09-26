@@ -70,7 +70,7 @@
     |---|---|
     | status | `agend status` |
     | send | `agend send <to> "<message>" [--level queue\|steer\|interrupt]`（預設 `queue`） |
-    | inbox | `agend inbox [--after <message-id>]`（不帶：最近 20 則）；「之後」依第 7 施工關 `messages` 表明確的 `seq INTEGER PRIMARY KEY`（寫入順序；不用隱含的 rowid，`VACUUM` 可能重編），不比 UUID；`--after` 的 id 不存在或已過保留期限 → `unknown_message: … run agend inbox without --after`、exit 1（`CLI-n` 有一列）；第 10 施工關的假 agent 用同一個規則 |
+    | inbox | `agend inbox [--after <message-id>]`（不帶：最近 20 則）；「之後」依第 7 施工關 `messages` 表明確的 `seq INTEGER PRIMARY KEY`（寫入順序；不用隱含的 rowid，`VACUUM` 可能重編），不比 UUID；`--after` 回那一則之後、寄給自己的**全部**訊息（不設上限；保留期限 30 天本身就是上限，D31）；`--after` 的 id 不存在、已過保留期限，或不是寄給呼叫者自己的 → 一律 `unknown_message: … run agend inbox without --after`、exit 1（`CLI-n` 有一列）；第 10 施工關的假 agent 用同一個規則 |
     | done | `agend done <ticket>` |
     | result | `agend result <ticket> "<summary>"` |
     | review | `agend review approve <ticket>`、`agend review changes <ticket> "<what to change>"` |
@@ -131,7 +131,7 @@
   | 命令 | 重送 | 理由／不重送時的檢查指令 |
   |---|---|---|
   | `status`、`inbox`、`instance list`、`doctor` 裡的查詢 | 是 | 唯讀（`inbox` 帶游標讀，不消耗訊息） |
-  | `send` | 是 | CLI 產生 `message_id`（UUID v4），`Send` 加選填欄位（additive），daemon 把它當成 `deliver` 的訊息 id；第 7 施工關 P5 的 `messages` 表以 id 為主鍵、`deliver` 先查表，同一個 id 再送回目前的狀態、不再送一次——這就是唯一的一套冪等。daemon 在 `deliver` 寫入 DB **之後**才回應；「同 id、內容不同」的檢查與 `deliver` 的寫入在同一個 DB thread 的同一個 closure 裡做，沒有競態。**client 的 id 跟別人分開**：daemon 只收 UUID v4 格式的 `message_id`（第 10 施工關的派工訊息用 `dispatch:<ticket>`，不是 UUID，撞不到）；表裡已有這個 id、但 from／to／body／level 有任何一個不同 → `invalid_request: message id … is already used by another message`，不當成去重、不回 `accepted`。沒帶 `message_id` 的 `Send`（1.1 的 client）由 daemon 產生 UUID |
+  | `send` | 是 | CLI 產生 `message_id`（UUID v4），`Send` 加選填欄位（additive），daemon 把它當成 `deliver` 的訊息 id；第 7 施工關 P5 的 `messages` 表的 id 為 UNIQUE（`seq` 為主鍵）、`deliver` 先查表，同一個 id 再送回目前的狀態、不再送一次——這就是唯一的一套冪等。daemon 在 `deliver` 寫入 DB **之後**才回應；「同 id、內容不同」的檢查與 `deliver` 的寫入在同一個 DB thread 的同一個 closure 裡做，沒有競態。**client 的 id 跟別人分開**：daemon 只收 UUID v4 格式的 `message_id`（第 10 施工關的派工訊息用 `dispatch:<ticket>`，不是 UUID，撞不到）；表裡已有這個 id、但 from／to／body／level 有任何一個不同 → `invalid_request: message id … is already used by another message`，不當成去重、不回 `accepted`。沒帶 `message_id` 的 `Send`（1.1 的 client）由 daemon 產生 UUID |
   | `done`、`result`、`review …` | 否 | 重送會被當成過期（`stale_result`），訊息反而誤導；檢查 `agend status` |
   | `block`／`unblock`、`remind`、`task create`、`ask` | 否 | 會重複建立或覆蓋；檢查 `agend status` |
   | `instance add`／`remove` | 否 | 重送會回 `instance_exists`／`unknown_instance`；檢查 `agend instance list` |
@@ -273,7 +273,7 @@
 
 - 第 8 施工關還在實作：本關從它 merge 後的 `v2` 開 branch；1.1 的型別名稱、錯誤型別以 merge 後的程式為準，本關的 minor 疊在上面（P6：實作時的下一個 minor，與第 10 施工關的提案不要撞號）。
 - 第 7 施工關的提案還在審（`docs/gate-07-proposal`）：`deliver(…, level)` 的簽名、`messages` 表的欄位、「同 id 再送回目前狀態」的行為以它 merge 後為準；**第 7 施工關 merge 是本關開工的硬前提**（P1）。它若改成不以 id 冪等，P5 的 `send` 重送就不成立，要回來重新決定。
-- `inbox --after` 依賴第 7 施工關的 `messages` 表有明確的 `seq INTEGER PRIMARY KEY`（已請第 7 施工關作者加）；沒有的話 `--after` 的順序要重新決定。錯誤碼 `unknown_message` 跟 P4 的新錯誤碼放一起。
+- `inbox --after` 依賴第 7 施工關 `messages` 表的 `seq INTEGER PRIMARY KEY`：第 7 施工關的提案已經加上，以它 merge 後的版本為準；merge 後若沒有，`--after` 的順序要重新決定。錯誤碼 `unknown_message` 跟 P4 的新錯誤碼放一起。
 - 步驟 8 的假 codex instance 怎麼起（`--program` 指向什麼、要不要包裝）依第 7 施工關的啟動方式，開工時細化。
 - `exec`（P7）：所有 fd 要有 `CLOEXEC`（Rust 預設有；SQLite 的檔案要實測），否則新 daemon 會繼承舊的 DB 鎖；`exec` 失敗（預檢之後 binary 被刪）時 daemon 已經收尾，只能印錯誤、exit 1——前景要人重跑 `agend daemon`，第 13 施工關由服務管理器重起；launchd／systemd 下 `exec` 的行為在第 13 施工關實測。
 - doctor 看鎖（P8）：檢查的那一瞬間若剛好有 holder 在啟動，可能拿不到鎖而啟動失敗；用 `LOCK_SH | LOCK_NB` 並立刻放掉，實測機率。
