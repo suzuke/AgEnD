@@ -8,7 +8,7 @@
 ## 負責
 
 - 所有 crate 共用型別（`model`）：backend、team、task、送達狀態、branch 命名空間
-- 兩套有版本的協定定義：client 與 holder；JSON Lines hello、版本協商、未知 variant 相容、PTY bytes 的 base64 欄位
+- 兩套有版本的協定定義：client（1.1：全貌、「需要你」的操作、`hello` 的 `caller`、錯誤碼 `client::error_code`、事件游標規則）與 holder；JSON Lines hello、版本協商、未知 variant 相容、PTY bytes 的 base64 欄位
 - 邊界 traits：`Driver`、`Forge`、`Store`、`Runtime`、`Runner`、`Notifier`、`Clock`
 - 純函式 pipeline：六種關卡、task 關係與操作、workflow 存檔檢查、`{pr}`／`{head}`／`{branch}` 展開、`step(state, event)` 狀態機
 - 純函式 policy：busy、去抖動、檔案衝突、merge 門檻、分派與 team wait-cycle 偵測

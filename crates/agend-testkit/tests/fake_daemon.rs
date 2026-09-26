@@ -1,19 +1,20 @@
-//! The fake daemon speaks client protocol v1 with the real core types.
+//! The fake daemon speaks client protocol 1.1 with the real core types.
 
 use agend_core::protocol::ProtocolVersion;
 use agend_core::protocol::ask::{AnswerSource, AskEntry, AskReply, AskThread, ContextRecap};
+use agend_core::protocol::client::error_code::{
+    HELLO_REQUIRED, INVALID_REQUEST, UNKNOWN_REQUEST, VERSION_MISMATCH,
+};
 use agend_core::protocol::client::{
     AgentCommand, AnswerAskData, ClientCommandData, ClientRequest, ClientResponse, CommandResult,
-    DaemonEvent, InstanceData, ResultIdentity, STALE_RESULT, SubscribeEventsData, V1,
+    DaemonEvent, InstanceData, ResultIdentity, STALE_RESULT, SubscribeEventsData, V1_1,
 };
-use agend_testkit::fake_daemon::{
-    FakeDaemon, HELLO_REQUIRED, INVALID_REQUEST, ProbeClient, UNKNOWN_REQUEST, VERSION_MISMATCH,
-};
+use agend_testkit::fake_daemon::{FakeDaemon, ProbeClient};
 
 fn connected(daemon: &FakeDaemon) -> ProbeClient {
     let mut client = ProbeClient::connect(daemon.socket_path()).unwrap();
     match client.request(&ClientRequest::hello()).unwrap() {
-        ClientResponse::Hello { data } => assert_eq!(data.selected, V1),
+        ClientResponse::Hello { data } => assert_eq!(data.selected, V1_1),
         other => panic!("expected hello, got {other:?}"),
     }
     client
@@ -89,7 +90,7 @@ fn incompatible_major_gets_a_clear_error_and_close() {
     assert_eq!(data.code, VERSION_MISMATCH);
     assert_eq!(
         data.message,
-        "client protocol version mismatch: local supports 2.0, remote supports 1.0"
+        "client protocol version mismatch: local supports 2.0, remote supports 1.1"
     );
     assert!(client.recv().unwrap().is_none());
 }
@@ -193,7 +194,8 @@ fn events_replay_the_backlog_then_stream_live() {
     let ClientResponse::Event { data: backlog } = viewer.recv().unwrap().unwrap() else {
         panic!("expected the backlog event");
     };
-    assert_eq!(backlog.event_id, 1);
+    // Event ids continue from the daemon's base: the first one is base + 1.
+    assert_eq!(backlog.event_id, daemon.event_id_start() + 1);
     let reply = agent
         .request(&command(
             "r-2",
@@ -212,7 +214,7 @@ fn events_replay_the_backlog_then_stream_live() {
     let ClientResponse::Event { data: live } = viewer.recv().unwrap().unwrap() else {
         panic!("expected a live event");
     };
-    assert_eq!(live.event_id, 2);
+    assert_eq!(live.event_id, daemon.event_id_start() + 2);
     assert!(matches!(live.event, DaemonEvent::AttentionRequired { .. }));
     let answer = viewer
         .request(&ClientRequest::AnswerAsk {
@@ -226,14 +228,15 @@ fn events_replay_the_backlog_then_stream_live() {
             },
         })
         .unwrap();
-    // The subscriber sees AskUpdated first (emitted before the reply).
+    // The reply comes first, then the event it caused (as from the real
+    // server, which writes a request's reply before reading further events).
     assert!(
-        matches!(answer, ClientResponse::Event { data } if matches!(data.event, DaemonEvent::AskUpdated { .. }))
+        matches!(answer, ClientResponse::CommandResult { .. }),
+        "{answer:?}"
     );
-    let accepted = viewer.recv().unwrap().unwrap();
+    let updated = viewer.recv().unwrap().unwrap();
     assert!(
-        matches!(accepted, ClientResponse::CommandResult { .. }),
-        "{accepted:?}"
+        matches!(updated, ClientResponse::Event { data } if matches!(data.event, DaemonEvent::AskUpdated { .. }))
     );
     viewer
         .send(&ClientRequest::SubscribeTerminal {
@@ -290,7 +293,10 @@ fn open_ask_carries_task_and_recap_and_is_answerable() {
             options: vec!["x".into()],
         }],
     };
-    assert_eq!(daemon.open_ask(thread, Some(recap.clone())), 1);
+    assert_eq!(
+        daemon.open_ask(thread, Some(recap.clone())),
+        daemon.event_id_start() + 1
+    );
     let mut viewer = connected(&daemon);
     viewer
         .send(&ClientRequest::SubscribeEvents {

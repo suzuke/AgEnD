@@ -16,8 +16,8 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 serde_json = "1"
 # The daemon's one multi-thread runtime (gate 6): channels to the store
 # thread (gate 5 P1), spawn_blocking for holder protocol calls, timers,
-# SIGINT/SIGTERM.
-tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "signal", "sync", "time"] }
+# SIGINT/SIGTERM; the client socket server (gate 8: net, io-util, macros).
+tokio = { version = "1", default-features = false, features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 toml = "1.1.6"
 
 [dev-dependencies]

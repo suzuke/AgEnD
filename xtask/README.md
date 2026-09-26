@@ -8,7 +8,7 @@
 ## 負責
 
 - `check-deps`：
-  1. shim／client／tui 在 `cargo tree -e normal,build --target all` 裡沒有被禁止的 crate（dev 依賴不檢查）：shim 與 client 不可有 async runtime、SQLite、agend-daemon；tui 不可有 SQLite、agend-daemon（crossterm 會帶 `mio`，所以不擋 runtime）
+  1. shim／client／tui 在 `cargo tree -e normal,build --target all` 裡沒有被禁止的 crate（dev 依賴不檢查）：shim 與 client 不可有 async runtime、SQLite、agend-daemon；tui 不可有 SQLite、agend-daemon（crossterm 會帶 `mio`，所以不擋 runtime）；daemon 不可有 agend-holder、agend-shim（第 6 施工關）、agend-client（第 8 施工關 P10）
   2. agend-testkit 不是任何 crate 的一般依賴
   3. agend-core：`cargo metadata` 顯示沒有 build script、沒有 `[features]`、唯一直接依賴是停用 default features 且只開 `derive` + `alloc` 的 serde（D32）；而且能以 `--all-features`、`-F unsafe-code` 對無 std 的 `thumbv7em-none-eabihf` 編譯（見 `check_core.rs`）
   4. target 沒裝時印 `SKIPPED` 並失敗；`--allow-skip` 才不失敗（仍印 SKIPPED）
@@ -23,6 +23,7 @@
 - `accept testkit`：對 agend-testkit 跑 fmt、clippy、test（含 7 個契約 suite 與假 agent 程式測試），再跑 check-deps，然後 build 假 agent binary、執行 `testkit_demo` example（三個假 agent 各一段往來並正常結束、假 daemon 的事件身分、契約摘要）。
 - `accept shim`：對 agend-shim 跑 fmt、clippy、test，加上 `agend` 的 argv[0] 分派測試與 check-deps，再 build `agend` 並執行 `agend-shim` 的 `shim_demo` example（以 `git`／`kill`／`pkill` 名稱在暫存 repo 裡跑真的 binary）
 - `accept holder`：對 agend-holder 與 agend 跑 fmt、clippy、test（含跨程序的 `holder_process`），再跑 check-deps，然後 build `agend`、執行 `holder_probe demo`（`== detach` 到 `== shutdown` 各段）。
+- `accept client`：對 agend-client、agend-daemon、agend-testkit、agend-core、agend 跑 fmt、clippy、test（含 CLP 契約對假 daemon 與真 `agend daemon`、mutant），再跑 check-deps，然後 build `agend`、執行 `agend-daemon` 的 `client_demo` example（`== contract` 每條 `CLP-n` 印 `fake`／`real` 兩行與反向檢查，之後 `== version`／`== slow-client`／`== socket`／`== retry`／`== terminal`／`== restart`／`== cleanup`），最後一行 `gate 8 (client): checks passed`。
 - `accept tui`：對 agend-tui 跑 fmt、clippy、test，再跑 check-deps，然後執行 `tui_accept` example（`== screens`／`== navigate`／`== resolve`／`== disconnect`，接 testkit 假 daemon 的 socket，每段有檢查），最後一行 `gate 11 (tui): checks passed`。
 - 其他 `accept <施工關>`：對該施工關的 crate 跑 fmt、clippy、test，再跑 check-deps；demo 隨各施工關加入
 - `record <backend> [情境…] --sandbox <腳本>`：build `agend-record`（agend-testkit），在 `<腳本>`（寫入沙箱）裡對**真的** CLI 錄製到 `mktemp -d /private/tmp/agend-rec-out-XXXX`，再在沙箱外把成功的錄製檔複製進 `crates/agend-testkit/transcripts/<backend>/`（見 [RECORDER.md](../crates/agend-testkit/RECORDER.md)）。沒有 `--sandbox` 就不跑
@@ -89,6 +90,7 @@
 | `agend-core` | serde 以外的依賴、default features、derive／alloc 以外的 serde features，以及任何 `[features]`，由 `check_core.rs` 以 `cargo metadata` 檢查 |
 | `agend-shim` | async runtime、database、`agend-daemon` |
 | `agend-client` | async runtime、database、`agend-daemon` |
+| `agend-daemon` | `agend-holder`、`agend-shim`（第 6 施工關 P9）、`agend-client`（第 8 施工關 P10：server 與 client 各自編碼） |
 | 所有 crate | `agend-testkit` 當一般依賴 |
 
 shim／client 檢查 normal 與 build 依賴，不檢查 dev 依賴。`network`、`process` 群組目前沒有規則使用，保留當文件。`libc` 不在清單內。

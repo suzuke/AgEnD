@@ -25,7 +25,8 @@ fn to_u64(value: i64, what: &str) -> Result<u64, StoreError> {
     u64::try_from(value).map_err(|_| StoreError::Invalid(format!("{what} {value} is negative")))
 }
 
-fn status_text(status: TaskStatus) -> &'static str {
+/// The `tasks.status` text of `status` (also the client protocol's).
+pub fn status_text(status: TaskStatus) -> &'static str {
     match status {
         TaskStatus::Open => "open",
         TaskStatus::Running => "running",
@@ -124,6 +125,17 @@ pub(super) fn load(conn: &Connection, task_id: &str) -> Result<Option<VersionedT
     let mut stmt = conn.prepare_cached(&format!("SELECT {COLUMNS} FROM tasks WHERE id = ?1"))?;
     let mut rows = stmt.query([task_id])?;
     rows.next()?.map(read).transpose()
+}
+
+/// Every task, by id.
+pub(super) fn list(conn: &Connection) -> Result<Vec<Task>, StoreError> {
+    let mut stmt = conn.prepare_cached(&format!("SELECT {COLUMNS} FROM tasks ORDER BY id"))?;
+    let mut rows = stmt.query([])?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next()? {
+        out.push(read(row)?.task);
+    }
+    Ok(out)
 }
 
 pub(super) fn insert(conn: &Connection, task: &Task) -> Result<(), StoreError> {

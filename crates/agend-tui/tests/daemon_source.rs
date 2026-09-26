@@ -56,6 +56,7 @@ fn home_from_the_fake_daemon_matches_the_scripted_source() {
         data: TaskChangedData {
             task_id: "T-90".into(),
             summary: "survey outline pushed".into(),
+            task: None,
         },
     });
     wait_until(&mut app, |t| {

@@ -158,6 +158,12 @@ impl ScriptHandle {
                     task_id: thread.task_id.clone(),
                     ask: Some(thread),
                     recap,
+                    attention_id: None,
+                    unblocks: None,
+                    waiting_since_unix_ms: None,
+                    if_ignored: None,
+                    actions: Vec::new(),
+                    instance_id: None,
                 },
             },
         )
@@ -370,6 +376,7 @@ pub fn demo_script() -> Vec<DemoStep> {
             data: TaskChangedData {
                 task_id: id.into(),
                 summary: summary.into(),
+                task: None,
             },
         })
     };
@@ -378,6 +385,7 @@ pub fn demo_script() -> Vec<DemoStep> {
             data: InstanceChangedData {
                 instance_id: id.into(),
                 summary: summary.into(),
+                instance: None,
             },
         })
     };
@@ -408,6 +416,12 @@ pub fn demo_script() -> Vec<DemoStep> {
                 task_id: Some("T-88".into()),
                 ask: None,
                 recap: None,
+                attention_id: None,
+                unblocks: None,
+                waiting_since_unix_ms: None,
+                if_ignored: None,
+                actions: Vec::new(),
+                instance_id: None,
             },
         }),
         instance("reviewer-1", "usage limit reached"),

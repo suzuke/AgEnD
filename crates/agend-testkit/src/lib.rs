@@ -6,7 +6,7 @@
 //! - `contract`: one contract suite per trait, written against a fixture
 //!   trait so the same cases run on the fake now and on the real
 //!   implementation at its gate (v1 #1483).
-//! - `fake_daemon`: in-process client protocol v1 server (unix only).
+//! - `fake_daemon`: in-process client protocol 1.1 server (unix only).
 //! - `fake_agent`: the fake backend programs (`fake-codex-app-server`,
 //!   `fake-opencode-serve`, `fake-claude`); the binaries in `src/bin/` are
 //!   thin wrappers around these modules.

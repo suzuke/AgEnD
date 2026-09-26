@@ -31,7 +31,9 @@
 //! - Retention ([`retention::RETENTION`], [`SqliteStore::prune`]) and the
 //!   daily DB snapshot ([`SqliteStore::snapshot`], 7 kept). The daemon runs
 //!   both at boot and every hour (`crate::housekeeping`, gate 6 P5).
-//! - `instances` (gate 6 P2): the agents the daemon keeps running.
+//! - `instances` (gate 6 P2): the agents the daemon keeps running;
+//!   `session_started` (gate 8 P5, migration 0003) says whether the
+//!   backend session was ever created.
 //! - Pipeline progress (`PipelineState`) is not stored yet: gate 10 adds it as
 //!   a column of `tasks`, written together with the task by the same
 //!   compare-and-swap, and never rebuilt by replaying events (gate 5 P4).
@@ -44,7 +46,7 @@ pub mod instances;
 mod migrate;
 pub mod retention;
 pub mod snapshot;
-mod task_row;
+pub mod task_row;
 
 use std::fmt;
 use std::fs::{self, DirBuilder, File, OpenOptions};
@@ -305,6 +307,11 @@ impl SqliteStore {
         let task_id = task_id.to_owned();
         self.call(move |conn| task_row::load_events(conn, &task_id))
             .await
+    }
+
+    /// Every task, by id.
+    pub async fn tasks(&self) -> Result<Vec<Task>, StoreError> {
+        self.call(|conn| task_row::list(conn)).await
     }
 
     /// Every instance, by id.
