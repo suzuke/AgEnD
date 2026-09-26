@@ -307,11 +307,12 @@ mod tests {
             "[-c][projects={\"/w\"={trust_level=\"trusted\"}}][-c][check_for_update_on_startup=false]\
              [resume][thread-1][--remote][unix:///private/tmp/real.sock]"
         );
-        // The background app-server line goes to the log; give it a moment.
+        // The background app-server line goes to the log, one `printf` per
+        // argument: wait for its final newline.
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         let server = loop {
             let text = fs::read_to_string(&log).unwrap_or_default();
-            if !text.is_empty() || std::time::Instant::now() > deadline {
+            if text.ends_with('\n') || std::time::Instant::now() > deadline {
                 break text;
             }
             std::thread::sleep(Duration::from_millis(20));
