@@ -3,7 +3,7 @@
 > **TL;DR**
 > - attention-first TUI；畫面層提前做（你同意與第 3–10 施工關並行，放寬 D22），資料先接假來源，draft PR 不 merge。
 > - 記住：**畫面只讀 `Source`，不知道資料從哪來**；接真 daemon 要等第 8 施工關把 client protocol 定案。
-> - 下一步：A 段已驗收、T1–T18／G1–G4 已追認（2026-09-26）；第 8 施工關已 merge，**B 段開工前提案 P1–P7 待你確認**（見「B 段開工前提案」），確認後才寫程式。
+> - 下一步：A 段已驗收、T1–T18／G1–G4 已追認（2026-09-26）；第 8 施工關已 merge，**B 段開工前提案 P1–P7 待你確認**（見「B 段開工前提案」），確認後才寫程式。要你明確決定的差異：T1、T2、T12、T13、T18、第 8 施工關 C2、第 7 施工關 P1（codex 打字）。
 
 **先看這條**：B 段（接真 daemon）的步驟會用到 `agend`。每個新開的終端機分頁（包括第二個終端）都要先跑 B 段開頭的設定，否則會跑到舊的 Node 版 `agend` 1.24.0。A 段只用 `cargo`，不用 `agend`。
 
@@ -29,6 +29,8 @@
 
 已定、這裡不重問的：畫面只讀 `Fleet`、只透過 `Source` 動作（T1）；版面、按鍵、回答方式（T5、T12、T13，A 段）；已讀是 TUI 本機狀態、追問回到未讀（T4、T17；G4 已移到第 12 施工關，[第 8 施工關 P6](gate-08-client.md#p6真-daemon-本關做哪些請求g4-移走)）；**重連一律重拿全貌、不重播事件**（[第 8 施工關 P4](gate-08-client.md#p4g1-全貌與事件游標) 已改掉 T6 的「重播事件」）；身分用 `hello` 的 `caller`、從 `AGEND_INSTANCE` 來，權限只在 daemon 擋（第 8 施工關 P2、[第 9 施工關 P1](gate-09-cli.md#p1命令面本關做哪些誰能跑真-daemon-做到哪)）；client 同步 I/O、不建 runtime（D11）；`resolve_attention` 只收操作者、`retry` 的規則（第 8 施工關 P5）；`AGEND_HOME` 一律必須設（[第 9 施工關](gate-09-cli.md) P3）；codex TUI 裡人打的字是同一個 thread 的使用者訊息、不進 `messages`（[第 7 施工關 P1](gate-07-codex.md#p1daemon-怎麼跟-codex-講話)，U17 未查證）。
 
+**要你明確決定的差異**（各項裡標「請明確決定」）：T1（P1）、T2（P1）、第 8 施工關 C2（P1，假 daemon 的終端）、T12、T13、T18（P3）、第 7 施工關 P1（P6，codex 打字）。
+
 開工時的事實：第 8 施工關已 merge（#131）；第 9 施工關只有提案（還沒有 `agend instance`，驗收用 `daemon_probe`）；第 7 施工關在 review（PR #132，還起不了 codex）；第 10 施工關只有提案（真 daemon 沒有請示）。
 
 ### P1：真的 `Source` 放哪
@@ -49,7 +51,8 @@
   - 刪掉 `examples/support/daemon_source.rs`：`tui_fake --daemon`、`tui_accept` 經 socket 的段落、tests 改用 `ClientSource` 連 testkit 假 daemon（假 daemon 已有 `get_fleet`、`set_task`、`set_instance`）。腳本假來源 `ScriptedSource` 留著，A 段 demo 的畫面與導覽（`owner_steps.rs`）照舊用它（見 P3 的 T12）。
   - **本段也改一個 daemon 的小地方**：同一條連線重訂終端失敗（例如 holder 5 秒沒回畫面，`handlers.rs` 的 `terminal`）時，daemon 現在會留著舊的即時串流（`server.rs` 只在成功時換掉）。改成：重訂一開始就清掉這條連線舊的串流，失敗就是沒有串流，client 收到 `no_terminal`，照 P5 每秒重試。
   - **本段也要改 testkit 假 daemon**（`fake_daemon.rs` 現在：終端一律回 `fake screen of X`、從不送 `terminal_bytes`、`terminal_input` 回 `not_supported`），不然 `ClientSource` 的測試跑不起來：
-    - 每個 instance 自己的畫面（`set_screen(id, text)`）；`push_terminal_bytes(id, bytes)` 送位元組（之後重訂就回新的畫面）。`subscribe_terminal` 對沒登記的 instance 回 `no_terminal`（跟真 daemon 一樣；現在假 daemon 對任何 id 都回一張畫面，第 8 施工關 C2 的做法在這裡改掉，TUI 的測試先 `set_instance`）。
+    - 每個 instance 自己的畫面（`set_screen(id, text)`）；`push_terminal_bytes(id, bytes)` 送位元組（之後重訂就回新的畫面）。`subscribe_terminal` 對沒登記的 instance 回 `no_terminal`（跟真 daemon 一樣）。
+      - **與已追認的第 8 施工關 C2（假 daemon 對任何 instance id 都回一張畫面、`no_terminal` 只在真 daemon 驗）不同，請明確決定**。理由：本段的 `CLP` 新列對假 daemon 與真 daemon 都跑，假 daemon 對不存在的 instance 也回畫面，同一列在兩邊結果不同；TUI 也要測「沒有終端」那條路。代價：用假 daemon 開終端的測試與 demo 要先 `set_instance` 登記 instance：`crates/agend-tui/tests/daemon_source.rs`（改用 `ClientSource` 時一起改）、`crates/agend-tui/examples/tui_accept.rs`（A 段 demo 經 socket 的段落）、`crates/agend-tui/examples/tui_fake.rs --daemon`、`crates/agend-testkit/tests/fake_daemon.rs` 的終端測試、`crates/agend-testkit/src/contract/client.rs` 的 CLP-12（先登記再訂閱）。反悔：假 daemon 改回對任何 id 回畫面、`no_terminal` 那列只對真 daemon 跑（約 15 行）。
     - `terminal_input` 依序檢查：caller 是 agent → `forbidden`；沒有這個 instance → `no_terminal`；backend 是 codex → `not_supported`（P6）；都過了才記下位元組（`terminal_inputs()` 給測試看）。
     - `resolve_attention` 可以延後發 `attention_resolved`（`hold_resolved_events(true)`，之後 `release_resolved_events()`）：現在假 daemon 回 `accepted` 的同時就發事件（`fake_daemon.rs` 開頭的說明），測不出「收到事件才消失」。
     - `CONTRACTS.md` 的 `CLP` 表加對應的列（`terminal_bytes` 之後重訂拿到新畫面、`terminal_input` 的身分與錯誤），對假 daemon 與真 daemon 都跑（第 8 施工關 P9）。
