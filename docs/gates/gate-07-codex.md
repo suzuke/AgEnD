@@ -133,7 +133,7 @@ codex 的事實來源：[backends/codex.md](../backends/codex.md)、[spike-codex
 
 - 問題：`sent` 與 `confirmed` 各在什麼時候成立？同一個 id 送兩次、daemon 在送出的瞬間當掉，怎麼保證不重複也不遺失？
 - 建議：
-  - 新 migration（開工時的下一個空號，目前 `0004`，見「已知風險」）：`messages` 表（`id` 主鍵、`to_instance`、`from`、`body`、`level`、`state`、`turn_id`、時間），保留 30 天（D31，列進第 5 施工關 P8 的規則表）。**這張表就是唯一的一套冪等。**
+  - 新 migration（開工時的下一個空號，目前 `0004`，見「已知風險」）：`messages` 表（`seq INTEGER PRIMARY KEY`＝明確的順序欄位；訊息 `id` 是 `TEXT NOT NULL UNIQUE`；`to_instance`、`from`、`body`、`level`、`state`、`turn_id`、時間），保留 30 天（D31，列進第 5 施工關 P8 的規則表）。**這張表就是唯一的一套冪等。**
   - 四個狀態在 codex 的意思：
     - `queued`：寫進 DB 了，還沒拿到 codex 的 RPC 回覆。app-server 連不上（holder 重起中）也停在這裡，連上後照送；**不算失敗**（V1-LESSONS #1）。送給還沒有 driver 的 instance（claude、opencode 要到第 12 施工關）也一樣停在 `queued`，等那個 backend 的 driver 出現後照送，不標 `failed`（第 9 施工關依賴這一點）。
     - `sent`：codex 回了 RPC 成功（`turn/start` 的 `turn.id`、`turn/steer` 的 `turnId`、`thread/queue/add` 的 `queuedSubmission`）。
@@ -141,7 +141,8 @@ codex 的事實來源：[backends/codex.md](../backends/codex.md)、[spike-codex
     - `failed`：codex 拒絕（RPC 錯誤且不是 P6 的競態）、instance 被刪或已 `failed`。
     - `sent` 一直等不到確認就停在 `sent`（誠實標未確認），不重送、不改 `failed`。
   - 送出一律帶 `clientUserMessageId = 訊息 id`（v1 在 `turn/start` 就這樣帶）。**未查證**：`turn/start`、`turn/steer` 收不收這個欄位、會不會回在 `clientId`（錄製檔裡只有 `thread/queue/add` 回 `clientId`，U2）。
-  - 冪等：`deliver` 先查表；id 已存在就回目前的狀態、不呼叫 codex（DRV-9：再送不是錯誤）。
+  - 順序：一律照 `seq` 排（第 9 施工關的 `agend inbox --after`、第 10 施工關的假 worker 都靠它）。不用隱含的 rowid：SQLite 在 `VACUUM`／`VACUUM INTO`（第 5 施工關的快照與還原）時可能重新編號；`INTEGER PRIMARY KEY` 是 rowid 的別名、有明確宣告，`VACUUM` 不會改它。
+  - 冪等：`deliver` 先查表；id 已存在、而且 `from`、`to_instance`、`body`、`level` 都相同 → 回目前的狀態、不呼叫 codex（DRV-9：再送不是錯誤）；同一個 id 但這四個欄位任一個不同 → 回 `invalid_request`、什麼都不改。「查有沒有、比對、插入」在 **DB 執行緒的同一個 closure** 裡做（第 5 施工關 P1 的單一寫者），兩個同 id 的 `deliver` 同時到也不會都插入或都通過比對（第 9 施工關依賴這一點）。
   - 當掉的窗口（RPC 送出了、`sent` 還沒寫）：開機後每個 `queued` 的列先查兩個地方：**`thread/queue/list`**（排了隊、還沒輪到的訊息不在任何 turn 裡，比 `clientUserMessageId`）與 thread 歷史（P7 的 `thread/turns/list`，比 user message）。在佇列裡 → 補成 `sent`；在歷史裡 → 補成 `sent` 再 `confirmed`；兩邊都沒有才送。只查歷史會把「排隊中」的訊息再送一次（重複一個 turn，違反 DRV-9）。
   - 內容：只送完整 body，前面加兩行標頭 `From: <from>`、`Task: <task id>`（沒有 task 就省略）＋空行。不截斷。
 - 理由：一張表同時是冪等、狀態、TUI 顯示的來源；「確認」以 codex 自己的 thread 為準，不是「RPC 回 200」。重送前查歷史，把「崩潰時送一半」這個 v1 標成 `Ambiguous` 的狀態收回四狀態裡。
@@ -250,7 +251,7 @@ codex 的事實來源：[backends/codex.md](../backends/codex.md)、[spike-codex
 
 ## 自動驗收（完成定義）
 
-- [ ] `~/.cargo/bin/cargo test -p agend-daemon`、`~/.cargo/bin/cargo test -p agend-holder`、`~/.cargo/bin/cargo test -p agend-testkit` 單獨通過，包括：包裝起的 app-server 與 TUI 同一個 process group；holder 被測試自己 `kill -9` 後沒有殘留的假 app-server，包括假 app-server 設成忽略 HUP 的情況（清掃；清掃只在指令列有標記時才送 SIGKILL，另一條測試用不相干的 group 驗證它不送）；`$GO` 用 rename 寫入、daemon 在交接途中重啟後照樣交接；TUI 先結束時 app-server 跟著結束；app-server 先結束時 daemon 20 秒後 `Shutdown`；舊 socket 與 `$GO` 在 `Spawn` 前被刪（P2）。訊號重設、zombie 保留、`Shutdown` 的 group SIGHUP／SIGKILL 由第 4 施工關既有的 holder 行為與測試涵蓋（portable-pty `pre_exec`、G2、G11），本關不另寫；清掃在 daemon 跑著時、開機路徑（daemon 停著時 holder 被 `kill -9`）、連死 3 次變 `failed` 之後都沒有 codex 留下，holder 還活著的 `failed` instance 不清掃（P2）；thread id 先寫 DB 才寫 `$GO`、每次都 `resume <id>`；第一次啟動在 `Spawned` 與 `thread/start` 之間被打斷 → 下次建新 thread、不是 `failed`；migration 前的舊 codex 列（`running`／`failed`）→ `failed`、`legacy_no_thread = 1`、holder pid 不變、沒有 `thread/start`，`new` 列不動；schema fixture 與 golden 含新欄位（P3）；送給沒有 driver 的 instance 停在 `queued`（P5）；`-c` 參數組出來的樣子、approval 請求回 `decline`、選定的 shim 方案組出的環境（P4）；四個狀態的轉換、再送同一個 id 不呼叫 codex、崩潰窗口對帳（歷史與佇列兩邊，P5）；三級各一條、兩個競態各一條（P6）；cursor 展開與重讀（P7）
+- [ ] `~/.cargo/bin/cargo test -p agend-daemon`、`~/.cargo/bin/cargo test -p agend-holder`、`~/.cargo/bin/cargo test -p agend-testkit` 單獨通過，包括：包裝起的 app-server 與 TUI 同一個 process group；holder 被測試自己 `kill -9` 後沒有殘留的假 app-server，包括假 app-server 設成忽略 HUP 的情況（清掃；清掃只在指令列有標記時才送 SIGKILL，另一條測試用不相干的 group 驗證它不送）；`$GO` 用 rename 寫入、daemon 在交接途中重啟後照樣交接；TUI 先結束時 app-server 跟著結束；app-server 先結束時 daemon 20 秒後 `Shutdown`；舊 socket 與 `$GO` 在 `Spawn` 前被刪（P2）。訊號重設、zombie 保留、`Shutdown` 的 group SIGHUP／SIGKILL 由第 4 施工關既有的 holder 行為與測試涵蓋（portable-pty `pre_exec`、G2、G11），本關不另寫；清掃在 daemon 跑著時、開機路徑（daemon 停著時 holder 被 `kill -9`）、連死 3 次變 `failed` 之後都沒有 codex 留下，holder 還活著的 `failed` instance 不清掃（P2）；thread id 先寫 DB 才寫 `$GO`、每次都 `resume <id>`；第一次啟動在 `Spawned` 與 `thread/start` 之間被打斷 → 下次建新 thread、不是 `failed`；migration 前的舊 codex 列（`running`／`failed`）→ `failed`、`legacy_no_thread = 1`、holder pid 不變、沒有 `thread/start`，`new` 列不動；schema fixture 與 golden 含新欄位（P3）；送給沒有 driver 的 instance 停在 `queued`；`messages.seq` 是明確的 `INTEGER PRIMARY KEY`、`VACUUM INTO` 快照還原後順序不變；同 id 不同內容回 `invalid_request`、兩個同 id 同時送只插入一次（P5）；schema fixture 與 golden 含 `messages` 的 `seq` 與 `UNIQUE(id)`；`-c` 參數組出來的樣子、approval 請求回 `decline`、選定的 shim 方案組出的環境（P4）；四個狀態的轉換、再送同一個 id 不呼叫 codex、崩潰窗口對帳（歷史與佇列兩邊，P5）；三級各一條、兩個競態各一條（P6）；cursor 展開與重讀（P7）
 - [ ] 契約 DRV-1..9 對 `CodexDriver` ＋假 app-server ＋真 DB 通過；DRV-6、DRV-9 四次開機跨真的 process 通過，反向檢查「每次開機用新的 `AGEND_HOME`」必須失敗（P8）
 - [ ] 第 6 施工關的 `daemon-holder` 驗收仍通過（本關改了 `session_args`）
 - [ ] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨
@@ -374,6 +375,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-26 第 9 施工關 review 提出、併入：`messages` 加明確的 `seq INTEGER PRIMARY KEY`（訊息 id 改 `UNIQUE`），順序不受 `VACUUM` 影響；同 id 不同內容回 `invalid_request`，比對與插入在同一個 DB closure。
 - 2026-09-26 第八輪 review REFUTED 後修正：migration 加 `instances.legacy_no_thread` 把舊列存下來（只標 `running`／`failed`，`new` 不動），第 8 施工關重試的後續改看這個欄位；P5 補「沒有 driver 的 instance 停在 `queued`」；`Send`＋`level` 只交給第 9 施工關。
 - 2026-09-26 第七輪 review REFUTED 後修正：「舊 codex instance」改成只在 migration 那一刻判斷一次（那時 `session_id` 是 NULL 的 codex 列標 `failed`）；之後 `running` ＋ NULL 就是第一次啟動被打斷，照常 `thread/start`（多一個空 thread 無害），附測試；開機清掃 `failed` 只在 holder 已不在時；自動驗收補上各條測試。合入 v2（#127、#128）。
 - 2026-09-26 第六輪 review REFUTED 後修正：第 6 施工關留下的舊 codex instance（`running` 但沒有 thread id）不建新 thread、標 `failed`、不動它活著的 holder；清掃改成每次偵測到 holder 死掉都做（含 `failed`、開機跳過的 `failed`、第 8 施工關 `retry` 前）；比對描述修正（包裝的 `$2` 不帶 `unix://`）；記下 TOCTOU 窗口；U10 列入要真跑、併進步驟 7。
