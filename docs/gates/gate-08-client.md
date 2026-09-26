@@ -79,10 +79,10 @@
   - **一個請求** `get_fleet { request_id }`，回新的 `ClientResponse::Fleet { request_id, fleet }`（現有的 `command_result` 是給 agent 命令的，全貌另開一種回應）；`fleet` 有：`as_of_event_id`、`teams`、`tasks`（含關卡清單與目前關卡）、`instances`（含 backend 與 `state`）、`attention`（目前的「需要你」清單）。名稱用「全貌」（fleet view），避開名詞表裡已經很多的「快照」。
   - 接著 `subscribe_events { after_event_id: as_of_event_id }`，之後的變化靠事件；`instance_changed`、`task_changed` 各加一個選填欄位帶新的結構化內容（1.0 的文字 `summary` 保留）。
   - agent 的 `state`：`starting`／`working`／`idle`／`stuck`／`failed`／`unknown`。本關真 daemon 只給得出 `starting`、`failed`、`unknown`（忙碌／閒置要 driver，第 7、12 施工關）。「需要你」不放進 `state`：由 client 從 `attention` 算（第 11 施工關 T18 已經這樣做），只有一個真相。
-  - 事件 id 從「開機時間（unix ms）× 1000」開始往上數，事件只放記憶體（最近 1024 筆）。`after_event_id` 小於「留著的最舊一筆 − 1」（接不上：中間的事件已經丟了，包括上一次開機的 id），**或大於目前最新的 id**（例如時鐘往回調後，舊游標反而比新的大）→ `event_gap`，client 重拿全貌。等於「最舊一筆 − 1」算接得上，所以 `get_fleet` 與訂閱之間剛好有事件進來也沒問題。這兩條擋住大部分的跳號；時鐘往回調的極端情況仍可能漏（見已知風險），所以 1.1 的 client **重連後絕不沿用舊游標**，一律重拿全貌。還沒有任何事件時，「最新的 id」就是起點本身：`after_event_id` 等於起點算接得上，其他都是 `event_gap`；不帶 `after_event_id` **維持 1.0 的意思：重播留著的全部事件（最近 1024 筆）再接即時事件**（假 daemon 現在就是這樣，第 11 施工關的 `daemon_source.rs` 靠它），1.0 的 client 拿不到全貌也不會漏掉連線前的項目，D26 不破例。1.1 的 client 一律帶 `as_of_event_id`。所以 1.1 的規則只有一條：**重連一律重拿全貌**。
+  - 事件 id 以「開機時間（unix ms）× 1000」為起點，**第一個事件是起點 + 1**（起點本身不發，比照假 daemon 的編號），事件只放記憶體（最近 1024 筆）。`after_event_id` 小於「留著的最舊一筆 − 1」（接不上：中間的事件已經丟了，包括上一次開機的 id），**或大於目前最新的 id**（例如時鐘往回調後，舊游標反而比新的大）→ `event_gap`，client 重拿全貌。等於「最舊一筆 − 1」算接得上，所以 `get_fleet` 與訂閱之間剛好有事件進來也沒問題。這兩條擋住大部分的跳號；時鐘往回調的極端情況仍可能漏（見已知風險），所以 1.1 的 client **重連後絕不沿用舊游標**，一律重拿全貌。還沒有任何事件時，「最新的 id」就是起點本身：`after_event_id` 等於起點算接得上，其他都是 `event_gap`；不帶 `after_event_id` **維持 1.0 的意思：重播留著的全部事件（最近 1024 筆）再接即時事件**（假 daemon 現在就是這樣，第 11 施工關的 `daemon_source.rs` 靠它），1.0 的 client 拿不到全貌也不會漏掉連線前的項目，D26 不破例。1.1 的 client 一律帶 `as_of_event_id`。所以 1.1 的規則只有一條：**重連一律重拿全貌**。
   - **與已追認的第 11 施工關 T6 不同，請明確決定**：T6 寫「重連後重播事件」（假 daemon 從頭重播 backlog）；這裡改成「重連一律重拿全貌、只接之後的事件」。TUI 回到原本畫面與選取的行為不變。
   - 真 daemon 本關能填的：`teams` 固定一個 `general`（D12；team 表由之後的施工關加）；`tasks` 照 DB 現有的列，關卡清單第 10 施工關補；`instances` 來自 DB 與 supervisor。
-- 理由：一個請求、一個 `as_of`，全貌和事件之間沒有縫；很多個 list 請求各自有時間差。事件不存 DB：全貌本來就能從 DB 重建，重啟後重拿比記錄一份跨重啟的事件日誌簡單；id 以開機時間為底，舊 id 一定比新的小，不用另外的欄位。
+- 理由：一個請求、一個 `as_of`，全貌和事件之間沒有縫；很多個 list 請求各自有時間差。事件不存 DB：全貌本來就能從 DB 重建，重啟後重拿比記錄一份跨重啟的事件日誌簡單；id 以開機時間為底，舊 id 幾乎一定比新的小（時鐘往回調除外，見已知風險），不用另外的欄位。
 - 替代方案：每種東西一個 list 請求（G1 原本的寫法，要自己處理 list 與訂閱之間的事件）；事件存 DB 讓 client 跨重啟接續（多一張表、多一套保留規則）；每次開機 id 從 1 開始（舊 client 的游標會「剛好在範圍內」而悄悄漏事件）。
 - 例子：TUI 連上 → `get_fleet` 回 `as_of_event_id=1790000000000000`、1 個 team、2 個 instance → 訂閱；daemon 重啟 → 連線斷 → 重連、重拿全貌（新的 `as_of` 比較大）；如果拿舊游標訂閱，或游標比 daemon 最新的 id 還大，都回 `event_gap`。
 - [ ] 使用者確認
@@ -101,7 +101,7 @@
     | claude | 1 | 狀態回 `running`，帶 `--resume <id>` |
     | claude | 0 | 狀態回 `new`，帶 `--session-id <id>`。若 session 其實已存在：`Spawn` 一被確認就記 `running`，claude 拒絕後的下一次重起走 `--resume`，接回原對話 |
     | codex、opencode | 0 | 給 `retry`：從沒跑起來過，全新啟動不丟任何東西（第 6 施工關 H2） |
-    | codex、opencode | 1 | 不給 `retry`（`actions: []`）：沒有 session id 可接，P6 不全新啟動（第 7、12 施工關有 session id 後再開）。TUI 照第 11 施工關 G3 的方式顯示「沒有可用的操作」，`if_ignored` 寫 `delete and re-add the instance (gate 9)` |
+    | codex、opencode | 1 | 不給 `retry`（`actions: []`）：沒有 session id 可接，P6 不全新啟動（第 7、12 施工關有 session id 後再開）。TUI 顯示「沒有可用的操作」（第 11 施工關 G3 現在的字是「client protocol v1 還沒有處理這一項的操作」，B 段接上後改成這句），`if_ignored` 寫 `delete and re-add the instance (gate 9)` |
 
   - 真 daemon 送 `attention_required` 時也帶選填的 `instance_id`，TUI（第 11 施工關 T18）不用拆 `attention_id` 字串就知道它屬於哪個 agent。
   - 「需要你」清單不另存表：每次從 DB 的 `failed` instance 算。`waiting_since` 用「這個 daemon 第一次看到它 `failed` 的時間」：本次開機才放棄的，是放棄那一刻；開機時就已經是 `failed` 的，是開機時間。**`waiting_since` 不另加欄位**。代價：daemon 重啟後，舊的 `failed` 項目的等待時間從重啟那刻重算（排序變成同一批、再以 id 定序）。`unblocks` 是它手上的 task 數（第 10 施工關前一律 0）。
@@ -119,7 +119,7 @@
   | 請求 | 真 daemon 本關 |
   |---|---|
   | `hello`、`get_fleet`、`subscribe_events`、`resolve_attention` | 做 |
-  | `subscribe_terminal` | 做：先回 holder 當下的畫面，再轉送之後的 `terminal_bytes`（daemon 的 holder 長連線轉出來，client 絕不直接連 holder）。`failed` 的 instance：daemon 已關掉對它的長連線（第 6 施工關 H8），holder 還在就短暫連一次取 `Snapshot`、只回這張最後的畫面、不串流；holder 已經不在回 `no_terminal` |
+  | `subscribe_terminal` | 做：先回 holder 當下的畫面，再轉送之後的 `terminal_bytes`（daemon 的 holder 長連線轉出來，client 絕不直接連 holder）。`failed` 的 instance：daemon 已關掉對它的長連線（第 6 施工關 H8），holder 還在就短暫連一次取 `Snapshot`、只回這張最後的畫面、不串流（這次連線會讓 holder 的 24 小時計時從斷線時重算，第 4 施工關 G5）；holder 已經不在回 `no_terminal` |
   | `terminal_input` | 回 `not_supported`；第 11 施工關 B 段做（要先確定只有操作者能打字） |
   | `answer_ask` | 沒有請示，回 `unknown_ask`；請示在第 9、10 施工關 |
   | `command`（agent 命令） | 回 `not_supported`，訊息寫在哪個施工關做；第 9、10 施工關 |
@@ -210,7 +210,7 @@
 
 ## 自動驗收（完成定義）
 
-- [ ] `~/.cargo/bin/cargo test -p agend-client`、`-p agend-daemon`、`-p agend-testkit`、`-p agend-core` 單獨通過，包括：重試 10 秒後的訊息、版本不合立刻失敗、送出後斷線只重送可重做的請求（P7）；1.0 的 peer 解得開 1.1 的訊息、1.1 解得開 1.0 的訊息（P3）；`failed` → `attention_required` → `retry` → `attention_resolved`，`retry` 依 `session_started` 帶 `--resume` 或 `--session-id`、codex／opencode 只有沒跑起來過才有 `retry`、migration `0003` 把現有 `running` 與 `failed` 的 codex／opencode 設成已建立（P5）；`0003` 附 `store/fixtures/schema-v3.sql`、更新 `store/golden/schema.sql`（比照 `store/migrate.rs` 的規則），`session_started` 有 `CHECK (session_started IN (0, 1))`；socket 0600、路徑太長拒絕啟動、停止時刪檔（P1）；agent 送 `resolve_attention` 回 `forbidden`（P2）
+- [ ] `~/.cargo/bin/cargo test -p agend-client`、`-p agend-daemon`、`-p agend-testkit`、`-p agend-core`、`-p agend`（真 daemon 的 CLP 契約在 `crates/agend/tests/`，P9）單獨通過，包括：重試 10 秒後的訊息、版本不合立刻失敗、送出後斷線只重送可重做的請求（P7）；1.0 的 peer 解得開 1.1 的訊息、1.1 解得開 1.0 的訊息（P3）；`failed` → `attention_required` → `retry` → `attention_resolved`，`retry` 依 `session_started` 帶 `--resume` 或 `--session-id`、codex／opencode 只有沒跑起來過才有 `retry`、migration `0003` 把現有 `running` 與 `failed` 的 codex／opencode 設成已建立（P5）；`0003` 附 `store/fixtures/schema-v3.sql`、更新 `store/golden/schema.sql`（比照 `store/migrate.rs` 的規則），`session_started` 有 `CHECK (session_started IN (0, 1))`；socket 0600、路徑太長拒絕啟動、停止時刪檔（P1）；agent 送 `resolve_attention` 回 `forbidden`（P2）
 - [ ] client 協定契約 `CLP` 對假 daemon 與真 `agend daemon` 都通過，每條有 mutant；反向檢查：假 daemon 的事件 id 改回從 1 開始時契約必須失敗（P9）
 - [ ] 慢 client（P8）：正常、讀得很慢、完全不讀三個 client，2000 個事件後正常的全部收到且順序正確；讀得很慢的收到 `event_gap` 後被關；完全不讀的在 5 秒寫入逾時後被關
 - [ ] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨
@@ -315,7 +315,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
    agend daemon
    ```
 
-   應該看到：兩個 watch 都先印 `fleet: instances=2 attention=0`，接著同樣順序的 `instance_changed g8-2 …`，約 15 秒後 `attention_required instance-failed:g8-2 (unblocks 0, waiting since …; if ignored: g8-2 stays stopped) actions: retry`。
+   應該看到：兩個 watch 都先印 `fleet: …`，之後的事件（`fleet:` 那行之後）兩邊順序相同：`instance_changed g8-2 …`（第一次死掉可能落在某一邊的 `fleet:` 全貌裡、另一邊的事件裡，所以只比 `fleet:` 之後的事件），約 15 秒後 `attention_required instance-failed:g8-2 (unblocks 0, waiting since …; if ignored: g8-2 stays stopped) actions: retry`。
 
    操作：第三個終端按 Ctrl-C 停掉它的 watch，然後：
 
