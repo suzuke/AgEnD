@@ -9,7 +9,7 @@
 
 ## 狀態
 
-**實作中**（2026-09-26）：draft PR #131（branch `feat/gate-08-client`）；自動驗收除 fresh-context verifier 外都已通過；「待你追認」C1–C14 與「你親自驗收」等你。P1–P10 使用者已確認（含改 T6、G4 移第 12 施工關）。
+**已驗收，等 merge**（2026-09-26）：draft PR #131（branch `feat/gate-08-client`）；自動驗收全部通過；C1–C14 使用者已追認；使用者親自驗收 7 步通過。P1–P10 使用者已確認（含改 T6、G4 移第 12 施工關）。
 
 ## 範圍
 
@@ -218,7 +218,7 @@
 - [x] `~/.cargo/bin/cargo xtask accept client` 通過，並印出「你親自驗收」步驟 1 的 demo
 - [x] 本施工關 crate 的 `README.md`／`TESTING.md` 已更新；想改的共用文件列在 PR 裡
 - [x] 測試不留殘留：跑完 `pgrep -fl "agend (holder|daemon)"` 沒有輸出、`/tmp/g8-*` 沒有留下；只對自己起的 daemon 子程序送 SIGINT／`Child::kill`，holder 用 `Shutdown`
-- [ ] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」
+- [x] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」（r1 CONFIRMED `7147763`、4 LOW 已修；修正 delta 再驗 CONFIRMED `881c120`）
 
 ## 你親自驗收
 
@@ -228,6 +228,7 @@
 
 ```bash
 cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
+unset AGEND_BIN               # 前幾關步驟留下的 export 可能指到已刪除的 worktree
 ~/.cargo/bin/cargo build -p agend && export PATH="$PWD/target/debug:$PATH" && agend --version
 ```
 
@@ -256,7 +257,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
    | `== terminal`、`== restart` | `terminal_snapshot …, then terminal_bytes`；`12/12 ok; ok 5/12 (retried 1.4 s)` 之類；watch 有兩行 `fleet:` |
    | 最後 | `client demo: all sections passed`，然後 `gate 8 (client): checks passed` |
 
-   - [ ] 通過
+   - [x] 通過
 
 2. 故意弄壞：daemon 沒在跑時連線。
 
@@ -275,7 +276,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
    exit=1
    ```
 
-   - [ ] 通過
+   - [x] 通過
 
 3. 啟動 daemon，再連一次。
 
@@ -306,7 +307,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
    關鍵：`client protocol 1.1, instances=1`，`ls` 那行開頭是 `srw-------`（結尾的 `@` 是 macOS 的延伸屬性，不影響）。
 
-   - [ ] 通過
+   - [x] 通過
 
 4. 命令執行中重啟 daemon。
 
@@ -330,7 +331,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
    第一個終端的新 daemon 印 `g8-1: reconnected to holder pid=…; screen: counter=…`（同一個 holder，計數器沒歸零）。
 
-   - [ ] 通過
+   - [x] 通過
 
 5. 兩個 client 看同一件事：agent 一直死，進「需要你」，再按重試。
 
@@ -379,7 +380,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
    `--dies` 的 agent 還是會死：約 15 秒後又回到「需要你」，這是正常的。
 
-   - [ ] 通過
+   - [x] 通過
 
 6. 故意弄壞：watch 開著時重啟 daemon。
 
@@ -397,7 +398,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
    關鍵：`disconnected: …`、幾行 `reconnecting…`、新的 `fleet:`，而且新的 `as_of` 比重啟前的大；之後的事件照常出現。
 
-   - [ ] 通過
+   - [x] 通過
 
 7. 收尾。
 
@@ -422,7 +423,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
    應該看到只有 `pgrep exit=1`（什麼都沒找到）。最後在第一個終端按 Ctrl-C，再 `rm -rf "$AGEND_HOME"`。
 
-   - [ ] 通過
+   - [x] 通過
 
 ## 待你追認
 
@@ -460,12 +461,13 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 | 日期 | 結果（通過／不通過） | 備註 |
 |---|---|---|
-|  |  |  |
+| 2026-09-26 | 通過 | 在 `feat/gate-08-client`（merge 前）由 agent 帶著走 7 步。步驟 1 第一次失敗：終端分頁裡殘留第 4 施工關的 `export AGEND_BIN=…/AgEnD-v2-gate04/…`（worktree 已刪），`unset` 後通過；已加 `unset AGEND_BIN` 到開頭設定，demo 對不存在的 `AGEND_BIN` 改成直接說明。步驟 2：10.006 s 放棄、exit=1。步驟 3：`listening` 在 `ready` 前、socket `srw-------`。步驟 4：20/20 ok，第 5 次 `retried 0.9 s`，同一個 holder 17414。步驟 5：兩個 watch 事件相同同序；操作者 `resolved`、agent `forbidden` exit=1；retry 先停舊 holder 再 `start --resume <同一個 session>`。步驟 6：重連重拿全貌，`as_of` 變大、`attention=1` 保留。步驟 7：socket 已刪、`orphans=2`、`pgrep exit=1`。 |
 
 ## 進度紀錄
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-26 使用者親自驗收 7 步通過（merge 前）；開頭設定加 `unset AGEND_BIN`，`client_demo` 對不存在的 `AGEND_BIN` 直接說明。
 - 2026-09-26 使用者追認 C1–C14（C1 單獨明確決定）。
 - 2026-09-26 fresh-context verifier r1：CONFIRMED（沒有 HIGH／MEDIUM），4 LOW + 1 INFO 已修：socket 段加「開機計畫卡 5 秒時，socket 出現的第一刻連上就看到開機計畫做完的全貌」（bind 移到開機前的 mutant 會失敗）；`retry` 段加「每個 instance 只起一次 holder、沒有 start failed、沒有 restart」（拿掉先停舊 holder 的 mutant 會失敗）；`resolve_attention` 不等 supervisor；`retry` 開始不了時把項目放回清單；假 daemon 游標 `+1` 改 saturating。另外全量測試抓到一個 client 的真 bug：連上之後、`hello` 回應之前 daemon 就關掉連線時，macOS 在設定逾時／寫入時回 `ENOTCONN`／`EINVAL`，沒被當成「請求送出前就斷」而不重試；現在這段的任何錯誤都重試（P7）（#131）。
 - 2026-09-26 實作（draft PR #131，branch `feat/gate-08-client`）：core client protocol 1.1（`ClientHello`、`get_fleet`／全貌、`resolve_attention`、`attention_resolved`、錯誤碼 `client::error_code`、`order_attention`）；migration `0003`（`session_started`，`schema-v3.sql`、golden）；daemon 的 `run/daemon.sock` server、`fleet`、`handlers`、`failed` → 「需要你」→ `retry`、終端串流；`agend-client`；`agend debug ping|watch`、`client_probe`；假 daemon 1.1；CLP-1..12 契約（假 daemon、真 daemon、14 個 mutant、反向檢查）；`check-deps` 新規則；`client_demo` 與 `xtask accept client`；「你親自驗收」7 步改成確切指令與實跑輸出；「待你追認」C1–C14。fresh-context verifier 尚未跑。

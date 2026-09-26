@@ -34,7 +34,17 @@ fn main() -> ExitCode {
 
 fn agend_bin() -> Result<PathBuf, String> {
     if let Some(bin) = std::env::var_os("AGEND_BIN") {
-        return Ok(PathBuf::from(bin));
+        let bin = PathBuf::from(bin);
+        // A stale export (e.g. from an earlier gate's steps) must not show up
+        // later as a bare "No such file or directory".
+        return if bin.is_file() {
+            Ok(bin)
+        } else {
+            Err(format!(
+                "AGEND_BIN={} does not exist; `unset AGEND_BIN` or point it at a built agend",
+                bin.display()
+            ))
+        };
     }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let bin = exe
