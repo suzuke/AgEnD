@@ -40,7 +40,7 @@ pub const RULES: &[Rule] = &[
     Rule {
         krate: "agend-tui",
         deny: &[DATABASE, &["agend-daemon"]],
-        why: "the TUI is a client of protocol v1: it never opens the DB or links the daemon (D11)",
+        why: "only the daemon opens agend.db; the TUI goes through the daemon protocol (gate 5 P2)",
     },
 ];
 
@@ -219,12 +219,21 @@ mod tests {
     }
 
     #[test]
-    fn tui_may_not_link_sqlite_or_the_daemon() {
-        let rule = RULES.iter().find(|r| r.krate == "agend-tui").unwrap();
-        let names: Vec<String> = ["agend-tui", "ratatui", "rusqlite", "agend-daemon"]
-            .map(String::from)
-            .to_vec();
-        assert_eq!(violations(rule, &names), ["agend-daemon", "rusqlite"]);
+    fn tui_may_not_reach_sqlite_or_the_daemon() {
+        let tui = RULES.iter().find(|r| r.krate == "agend-tui").unwrap();
+        let names: Vec<String> = [
+            "agend-tui",
+            "agend-client",
+            "rusqlite",
+            "libsqlite3-sys",
+            "agend-daemon",
+        ]
+        .map(String::from)
+        .to_vec();
+        assert_eq!(
+            violations(tui, &names),
+            ["agend-daemon", "libsqlite3-sys", "rusqlite"]
+        );
     }
 
     #[test]

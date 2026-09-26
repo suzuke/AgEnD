@@ -8,6 +8,14 @@ publish.workspace = true
 
 [dependencies]
 agend-core.workspace = true
+# SQLite compiled into the binary (gate 5 P1): one version on every platform,
+# with STRICT tables and VACUUM INTO.
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde_json = "1"
+# Only the channels between async callers and the store thread (gate 5 P1).
+tokio = { version = "1", default-features = false, features = ["sync"] }
+toml = "1.1.6"
 
 [dev-dependencies]
 agend-testkit.workspace = true
+sha2 = "0.10"

@@ -11,6 +11,9 @@
 //! real binary), then the shim demo. Gate 4 runs the per-crate checks of
 //! agend-holder and agend (which holds the cross-process tests), check-deps,
 //! then the holder demo (`holder_probe demo` against the built `agend`).
+//! Gate 5 runs the agend-daemon checks (its tests include the STO-1..12
+//! contract against the real store and the cross-process restart/crash
+//! tests), check-deps, then the store demo.
 //! Gate 11 runs the per-crate checks, check-deps, then the TUI demo (screens,
 //! navigation, resolve, disconnect against the testkit fake daemon).
 //! Other gates use the per-crate checks until their acceptance flow is built.
@@ -179,6 +182,16 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
             "demo",
         ])?;
         println!("gate 4 (holder): checks passed");
+    } else if gate.number == 5 {
+        step(&[
+            "run",
+            "--quiet",
+            "-p",
+            "agend-daemon",
+            "--example",
+            "store_demo",
+        ])?;
+        println!("gate 5 (store): checks passed");
     } else if gate.number == 11 {
         step(&[
             "run",

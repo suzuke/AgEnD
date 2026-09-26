@@ -17,7 +17,7 @@ cargo test -p xtask
 |---|---|
 | `check_deps::tests::parses_real_cargo_tree_output` | 解析真的 `cargo tree` 輸出（producer 產生，不手寫） |
 | `check_deps::tests::denies_runtime_and_prefix_matches` | `tokio`、`tokio-*` 前綴、`agend-daemon` 會被抓；`serde`、`agend-core` 不會 |
-| `check_deps::tests::tui_may_not_link_sqlite_or_the_daemon` | agend-tui 的規則擋 SQLite 與 agend-daemon |
+| `check_deps::tests::tui_may_not_reach_sqlite_or_the_daemon` | agend-tui 的規則擋 SQLite（rusqlite、libsqlite3-sys）與 agend-daemon |
 | `check_deps::tests::a_crate_is_not_a_violation_of_its_own_rule` | 規則不會因 crate 自己的名字失敗 |
 | `check_deps::tests::current_workspace_passes` | 目前 workspace 符合所有規則（以 `--allow-skip` 跑，因為 Homebrew cargo 沒有 no-std target） |
 | `check_core::tests::real_metadata_of_core_passes` | 真的 `cargo metadata` 下 agend-core 沒有 build script，依賴符合 allowlist |
