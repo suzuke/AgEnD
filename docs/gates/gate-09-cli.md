@@ -1,20 +1,21 @@
 # 第 9 施工關：agend CLI（`cli`）
 
 > **TL;DR**
-> - agent 命令、操作者命令（`instance add/remove/list`、`daemon restart`）、`status`、`doctor`、`init`；本關真 daemon 只做得到 `status`、操作者命令（`send`／`inbox` 看第 7 施工關），其他 agent 命令先對假 daemon 做完。
+> - agent 命令、操作者命令（`instance add/remove/list`、`daemon restart`）、`status`、`doctor`、`init`；真 daemon 本關做 `status`、`send`、`inbox`（接第 7 施工關的送達，完成里程碑「兩個 codex agent 互傳訊息、重啟不漏不重」）與操作者命令，其他 agent 命令先對假 daemon 做完。
 > - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這個施工關才算完成。
-> - 下一步：逐題確認 P1–P10（P2、P9 與既有文件字面不同，要明確決定）；確認後 merge 這份提案，等第 8 施工關 merge 後開工。
+> - 下一步：逐題確認 P1–P10。**P1、P2、P3、P8、P9 與已定的文件不同，要明確決定**；確認後 merge 這份提案，等第 7、8 施工關都 merge 後開工。
 
 **先看這條**：這頁的步驟會用到 `agend`。每個新開的終端機分頁（包括第二個終端）都要先跑「你親自驗收」開頭的設定，否則會跑到舊的 Node 版 `agend` 1.24.0。
 
 ## 狀態
 
-**提案中**（2026-09-26）：開工前提案 P1–P10 寫定，待使用者確認。依賴：第 8 施工關（client protocol 1.1、`agend-client`）正在實作（`feat/gate-08-client`），本頁照它已確認的設計寫，不照程式；`send`／`inbox` 的真實作依賴第 7 施工關（未開始）。
+**提案中**（2026-09-26）：開工前提案 P1–P10 寫定，待使用者確認。依賴（**兩個都是開工的硬前提**）：第 8 施工關（client protocol 1.1、`agend-client`）正在實作（`feat/gate-08-client`），本頁照它已確認的設計寫，不照程式；第 7 施工關（送達、`messages` 表、`deliver` API）的提案在審（`docs/gate-07-proposal`），本頁照它的提案寫，確切介面以它 merge 後為準。
 
 ## 範圍
 
 - 11 個 agent 命令（D17）：CLI 全部做完、對假 daemon 驗；真 daemon 本關做哪些見 P1
-- 操作者命令：`agend instance add/remove/list`（取代 `daemon_probe`，第 6 施工關 H16）、`agend daemon restart`（P1、P6、P7）
+- `agend send` → 第 7 施工關 `deliver` 的接線、client protocol `Send` 加 `level` 與 `message_id`（第 7 施工關提案 P9 交給第 8、9 施工關；第 8 施工關沒做，由本關接）（P1、P5）
+- 操作者命令：`agend instance add/remove/list`（正式命令；`daemon_probe` 降為只給開發與舊驗收用的工具，見 P6）、`agend daemon restart`（P1、P6、P7）
 - `agend status`：agent 看自己、操作者看全貌（P1）
 - `agend doctor`、`agend init`（服務註冊在第 13 施工關）（P8、P9）
 - `agend doctor` 列出所有 holder 並標出孤兒（DB 沒有的 instance）（第 4 施工關 P2，使用者 2026-09-25 決定；做法見 P8）
@@ -35,19 +36,20 @@
     | 命令 | 誰 | 真 daemon 本關 |
     |---|---|---|
     | `agend status` | 兩者 | agent：自己的 instance、目前 task（本關一律「沒有 task」）；操作者：全貌摘要（`get_fleet`） |
-    | `agend send`、`agend inbox` | agent | 接第 7 施工關的送達與訊息表；開工時第 7 施工關還沒 merge 就回 `not_supported` |
+    | `agend send`、`agend inbox` | agent | 做：`send` 呼叫第 7 施工關的 `deliver(…, level)`（本關負責這段接線），`inbox` 讀第 7 施工關的 `messages` 表裡寄給自己的；第 7 施工關 merge 是本關開工的硬前提 |
     | `done`、`result`、`review approve`／`changes`、`block`／`unblock`、`task create`、`remind` | agent | `not_supported`，訊息寫「第 10 施工關」 |
     | `agend ask` | agent | `not_supported`，**移到第 10 施工關**（見下） |
     | `agend instance add`／`remove`／`list` | 操作者（`list` 唯讀，兩者都可） | 做（P6） |
     | `agend daemon restart` | 操作者 | 做（P7） |
     | `agend doctor`、`agend init` | 操作者 | 不需要 daemon（P8、P9） |
 
-    已有的留著：`agend daemon`、`agend holder`、`agend debug ping/watch`、`--version`、`--help`。
+    已有的留著：`agend daemon`、`agend holder`、`--version`、`--help`；`agend debug ping/watch` 在第 8 施工關的實作 merge 後才有，本關不動它們。
   - 權限只在 daemon 擋（D17），CLI 不預先判斷：`command` 請求（agent 命令）只收 agent；會改東西的操作者請求（P6 的 `operator`、第 8 施工關的 `resolve_attention`、`terminal_input`）只收操作者；唯讀請求（`get_fleet`、`subscribe_*`）大家都能用。拒絕一律 `forbidden`，訊息附正確做法。
   - `agend status` 一個命令兩種：有 `AGEND_INSTANCE` 送 `command {status}`，沒有送 `get_fleet`。
   - **`ask` 移到第 10 施工關**（**與第 8 施工關 P6「請示在第 9、10 施工關」不同，請明確決定**）：真的請示要新表、「需要你」來源、`answer_ask`、追問與結論（D35），本關做等於提前一半的第 10 施工關；第 11 施工關 B 段「回答請示」那半一樣等第 10 施工關。
-- 理由：里程碑「第 1–9 施工關：兩個 codex agent 互傳訊息」只需要 `status`、`send`、`inbox` 與加 instance；其他 agent 命令沒有 task 就沒有真資料可回，回明確錯誤比假資料好（第 8 施工關 P6 同一條路）。權限只放 daemon 一處，TUI、Telegram、CLI 同一套規則。
-- 替代方案：本關就做 `ask` 的真實作（範圍多一張表與請示流程）；CLI 也擋一次權限（兩處規則會漂移）；agent 連唯讀的全貌都不能看（`agend instance list` 在 agent 裡就要另開例外）。
+  - `send` 的 `level`：`agend send <to> "<message>" [--level queue|steer|interrupt]`，預設 `queue`（第 7 施工關 P6：等級由呼叫者傳入、預設 `Queue`）。`Send` 加選填的 `level` 與 `message_id`（additive，P5）。
+- 理由：里程碑「第 1–9 施工關：兩個 codex agent 互傳訊息；重啟 daemon 時不中斷、不遺失、不重複」（[ROADMAP](../ROADMAP.md#里程碑使用者可見)）只需要 `status`、`send`、`inbox` 與加 instance，而第 7 施工關只做 `deliver` API、把 `agend send` 與 `level` 交給後面，第 8 施工關沒接，所以接線由本關負責，本關結束時里程碑要真的跑得起來（步驟 8）；其他 agent 命令沒有 task 就沒有真資料可回，回明確錯誤比假資料好（第 8 施工關 P6 同一條路）。權限只放 daemon 一處，TUI、Telegram、CLI 同一套規則。
+- 替代方案：本關就做 `ask` 的真實作（範圍多一張表與請示流程）；`send`／`inbox` 在第 7 施工關沒 merge 時先回 `not_supported`、里程碑延到第 10 施工關（**會讓 ROADMAP 的里程碑延後，要改的話請明確決定**；本頁不建議）；CLI 也擋一次權限（兩處規則會漂移）；agent 連唯讀的全貌都不能看（`agend instance list` 在 agent 裡就要另開例外）。
 - 例子：操作者跑 `agend done t-1/work/1` → `agend: forbidden: agend done is an agent command; it runs inside an agent, where AGEND_INSTANCE is set`、exit 1；agent `g9-1` 跑 `agend instance add x claude` → `agend: forbidden: only the operator can add instances; ask the operator`、exit 1。
 - [ ] 使用者確認
 
@@ -63,7 +65,7 @@
     | 命令 | 語法 |
     |---|---|
     | status | `agend status` |
-    | send | `agend send <to> "<message>"` |
+    | send | `agend send <to> "<message>" [--level queue\|steer\|interrupt]`（預設 `queue`） |
     | inbox | `agend inbox [--after <message-id>]`（不帶：最近 20 則） |
     | done | `agend done <ticket>` |
     | result | `agend result <ticket> "<summary>"` |
@@ -86,7 +88,7 @@
   - 順序只有兩步：`AGEND_HOME`（必須是絕對路徑，否則 `AGEND_HOME must be an absolute path` exit 2）→ 沒設就用 **`$HOME/.agend-v2`**。
   - 一個函式 `agend` 的 `home::resolve()`，CLI、`agend daemon`、`doctor`、`init` 都用它；`agend daemon` 改成收這個路徑（第 6 施工關 P1 的「沒設就 exit 1」改成套用預設）。holder 與 agent 照舊由 daemon 明確設 `AGEND_HOME`（第 6 施工關 H3），agent 裡的 CLI 自然連到同一個 daemon。
   - v1 防護：解出來的 home 裡有 `fleet.yaml`（v1 的檔）就拒絕：`<path> looks like an AgEnD v1 home (fleet.yaml); set AGEND_HOME to another directory`、exit 1。
-  - 不做 `--home` 旗標、不從 `config.toml` 讀 home（D8 的「home 路徑」寫在 home 裡的設定檔，是循環）。
+  - 不做 `--home` 旗標、不從 `config.toml` 讀 home：設定檔本身就在 home 裡，是循環。**與已定的 D8／[tui-and-setup](../architecture/tui-and-setup.md#設定與目錄d8)「`config.toml`：home 路徑、Telegram 等連線設定」不同，請明確決定**：建議把「home 路徑」從 `config.toml` 的內容拿掉，只留連線設定。
 - 理由：v1 用 `~/.agend`（舊的是 `~/.agend-terminal`），而里程碑之後要與 v1 並行一週、分開 home；預設踩到 v1 的 DB 目錄後果最嚴重。名字直接寫 `v2`，一眼分得出。預設要一開始就定，之後改名等於要搬家。
 - 替代方案：`~/.agend` 加 v1 防護（並行那週一定被擋，最後還是要設 `AGEND_HOME`）；`~/.local/share/agend`（XDG，沒有 v2 字樣但多一條 `XDG_DATA_HOME` 規則）；macOS 的 `~/Library/Application Support/agend`（路徑有空白，指令常要加引號）；永遠必須設 `AGEND_HOME`（最簡單，但 `init` 之後每個終端都要 export）。
 - 例子：沒設 `AGEND_HOME` → `agend status` 連 `/Users/you/.agend-v2/run/daemon.sock`；`AGEND_HOME=~/.agend agend daemon`（v1 home）→ 被拒、exit 1。
@@ -125,7 +127,7 @@
   | 命令 | 重送 | 理由／不重送時的檢查指令 |
   |---|---|---|
   | `status`、`inbox`、`instance list`、`doctor` 裡的查詢 | 是 | 唯讀（`inbox` 帶游標讀，不消耗訊息） |
-  | `send` | 是（有條件） | CLI 產生 `message_id`（UUID v4），`Send` 加選填欄位（additive）；daemon 依 id 冪等（第 7 施工關的「只有一套冪等」）。**條件**：第 7 施工關的訊息表在回應之前就存下 id 並擋重複；做不到就改成不重送、檢查指令 `agend status` |
+  | `send` | 是 | CLI 產生 `message_id`（UUID v4），`Send` 加選填欄位（additive），daemon 把它當成 `deliver` 的訊息 id；第 7 施工關 P5 的 `messages` 表以 id 為主鍵、`deliver` 先查表，同一個 id 再送回目前的狀態、不再送一次——這就是唯一的一套冪等。daemon 在 `deliver` 寫入 DB **之後**才回應 |
   | `done`、`result`、`review …` | 否 | 重送會被當成過期（`stale_result`），訊息反而誤導；檢查 `agend status` |
   | `block`／`unblock`、`remind`、`task create`、`ask` | 否 | 會重複建立或覆蓋；檢查 `agend status` |
   | `instance add`／`remove` | 否 | 重送會回 `instance_exists`／`unknown_instance`；檢查 `agend instance list` |
@@ -136,17 +138,18 @@
 - 例子：`agend send g9-2 "hi"` 送出後 daemon 重啟 → CLI 等 1.4 秒、用同一個 `message_id` 重送 → daemon 看到已經有這個 id，回 `accepted`，`g9-2` 只收到一次；`agend instance add g9-3 claude` 斷在中間 → `agend: daemon restarted during the request; check with agend instance list`、exit 1。
 - [ ] 使用者確認
 
-### P6：操作者命令：`instance`、協定 1.2
+### P6：操作者命令：`instance`、協定的下一個 minor
 
 - 問題：client protocol 只有給 agent 的 `command`。加減 instance、重啟 daemon 要怎麼送？`instance add` 要哪些參數？`daemon_probe` 怎麼辦？
 - 建議：
   - 新請求 `operator { request_id, command: OperatorCommand }`，`OperatorCommand` 有 `instance_add`、`instance_remove`、`daemon_restart`（P7）與 `unknown`；成功回現有的 `command_result`：`accepted`，或新的 `instance_added { instance_id, session_id, working_directory }`、`restarting { preflight }`。`instance list` 與操作者的 `status` 用第 8 施工關的 `get_fleet`，不另開請求。
-  - 本關所有新增算一次 minor：client protocol **1.2**。`hello` 回應加選填的 `daemon_version`（`agend 0.x.y`），`status` 與 `restart` 才印得出版本。
+  - 本關所有新增算一次 minor：client protocol 用**實作時的下一個 minor**（目前是 1.2；第 10 施工關的提案也要加一個 minor，兩關誰先 merge 誰拿 1.2，本頁的 1.2 都照這條換）。
+  - 本關加的欄位（全部選填、additive）：`hello` 回應加 `daemon_version`（`agend 0.x.y`）與 `daemon_pid`；全貌的每個 instance 加 `working_directory`；`Send` 加 `level`、`message_id`（P1、P5）；`StatusData` 加 `identity`（P2）。`status`、`restart`、`doctor` 印的 pid 與版本、`instance list` 的 DIR 欄都從這裡來。
   - **`daemon_restart` 的形狀之後不再改**：舊 daemon 要能聽懂新 CLI 叫它重啟，否則升級時「重啟到新版」這條路會斷。
-  - `agend instance add <id> <backend> [--dir <path>] [--program <path>] [-- <args>…]`：id 規則 `[a-z0-9-]{1,24}`（第 6 施工關 P2）；`--dir` 預設 `$AGEND_HOME/workspace/<id>`（daemon 建）；`--program` 預設就是 backend 名（claude／codex／opencode，從 agent 的 `PATH` 找），測試與驗收用它指向假 agent。daemon 寫入 `new`、claude 產生 session id（第 6 施工關 H2），**馬上啟動**，回傳。team 一律 `general`（D12；本關沒有 team 表）。
+  - `agend instance add <id> <backend> [--dir <path>] [--program <path>] [-- <args>…]`：id 規則 `[a-z0-9-]{1,24}`（第 6 施工關 P2）；`--dir` 預設 `$AGEND_HOME/workspace/<id>`（daemon 建）；`--program` 預設就是 backend 名（claude／codex／opencode，從 agent 的 `PATH` 找），測試與驗收用它指向假 agent。daemon 寫入 `new`、claude 產生 session id（第 6 施工關 H2），**馬上啟動**，回傳。team 一律 `general`（D12；本關沒有 team 表）。同一個 id 的 holder 鎖還被持有（剛 `remove`、holder 還沒結束，或留著的孤兒）→ 拒絕：`instance_exists: a holder for g9-1 is still running (run/holders/g9-1.lock); wait a few seconds or restart the daemon to sweep it`，不寫 DB。
   - `agend instance remove <id> [--yes]`：TTY 上問 `remove g9-1? its agent is stopped; the workspace is kept [y/N]`；非 TTY 必須 `--yes`（否則 exit 2）。daemon 送 `Shutdown` 給 holder（最多等 5 秒）、刪那一列、發 `instance_changed`。holder 連不上也照樣刪，下次開機的孤兒巡查會收掉它（第 6 施工關 P2）。**workspace 不刪**，印出路徑。
   - `agend instance list`：`ID  BACKEND  STATE  DIR` 一行一個。
-  - `daemon_probe` 的 `add`／`remove`／`list` 留著當開發工具（daemon 停著時直接改 DB，第 8 施工關的驗收在用）；第 9 施工關之後的文件一律用 `agend instance`。
+  - `agend instance` 是**正式**命令；`daemon_probe` 不刪，降為開發工具（daemon 停著時直接改 DB；`--dies` 與第 6、8 施工關的驗收步驟在用）。第 9 施工關之後的文件與驗收一律用 `agend instance`。
 - 理由：寫 DB 的路只有 daemon 一條，daemon 跑著時也能加減 instance（`daemon_probe` 做不到）；一個 `operator` 請求加一個 enum，之後的 team、workflow 命令只加變體。
 - 替代方案：每個操作者命令一種請求（請求種類一直變多）；把操作者命令塞進 `AgentCommand`（權限規則要逐個變體判斷）；`instance add` 在 daemon 沒跑時直接開 DB（兩條寫入路徑；CLI 路徑不開 DB，D11）；刪 instance 時一起刪 workspace（刪資料前要問，v1 教訓）。
 - 例子：`agend instance add g9-1 claude --program "$PWD/target/debug/fake-claude"` → `added g9-1 (claude, session 3f…, /Users/you/.agend-v2/workspace/g9-1); starting`；`agend instance list` → `g9-1  claude  starting  /Users/you/.agend-v2/workspace/g9-1`。
@@ -157,15 +160,16 @@
 - 問題：D2 要能重啟 daemon、先預檢新 binary、失敗不切換。第 13 施工關之前 daemon 在前景跑，沒有 launchd／systemd 幫忙重起。誰啟動新的 daemon？新 binary 是哪一個？
 - 建議：
   - **原地 `exec`**：daemon 預檢通過後，照第 6 施工關 P1 的順序收尾（停排程、關 listener、刪 socket、關 holder 連線、關 DB；**不送 `Shutdown`**），再 `exec` 新 binary（`agend daemon`，環境不變）。pid 不變、終端不變；新 daemon 照 `plan_boot` 接回所有 holder（D3）。
-  - 新 binary ＝ 下命令的那個 `agend`（CLI 自己的 `current_exe()`，取絕對路徑），也可以 `--binary <path>` 指定。這就是第 8 施工關 P3「restart the daemon with this binary」的意思。
+  - 新 binary ＝ 下命令的那個 `agend`（CLI 自己的 `current_exe()`，取絕對路徑），也可以 `--binary <path>` 指定。這就是第 8 施工關 P3「restart the daemon with this binary」的意思。`--binary` 等於讓 daemon 在自己的環境（含 secret，第 6 施工關 H3）跑任意程式：只收操作者，而同 uid 的程式本來就做得到同樣的事，在 D6「同 uid 只是安全帶」的已接受範圍內。
+  - 同時只能有一個重啟：預檢進行中再收到 `daemon_restart` 回 `invalid_request: a restart is already in progress`；暫存 home 用 `mkdtemp`（`/tmp/agend-pf-XXXXXX`），不會跟別的撞名。
   - 流程：
     1. CLI 送 `operator {daemon_restart {binary}}`（只收操作者）。
-    2. daemon 用第 5 施工關的快照函式（`VACUUM INTO`）把 DB 複製到暫存 home `/tmp/agend-pf-<pid>/agend.db`（0700；路徑短，holder socket 才不超過 100 bytes，第 6 施工關 H13）。**細化**：「最新快照」用當下新拍的一份，不是今天稍早的每日快照，預檢看到的才是現在的資料。
-    3. daemon 起子程序 `<binary> daemon preflight /tmp/agend-pf-<pid>`（60 秒逾時）：用**新 binary 的** migration 開複本、`PRAGMA quick_check`、讀一次 `instances`；DB 比新 binary 新（降版）會被第 5 施工關的 too-new 規則擋下，也算失敗。接著在暫存 home 起自己的 `agend holder pf-check`，跑 hello、`Spawn`（`/bin/sh -c 'sleep 60'`）、`Shutdown`，等鎖放掉。每步印一行。
+    2. daemon 用第 5 施工關的快照函式（`VACUUM INTO`）把 DB 複製到暫存 home `/tmp/agend-pf-XXXXXX/agend.db`（0700；路徑短，holder socket 才不超過 100 bytes，第 6 施工關 H13）。**細化**：「最新快照」用當下新拍的一份，不是今天稍早的每日快照，預檢看到的才是現在的資料。
+    3. daemon 起子程序 `<binary> daemon preflight /tmp/agend-pf-XXXXXX`（60 秒逾時）：用**新 binary 的** migration 開複本、`PRAGMA quick_check`、讀一次 `instances`；DB 比新 binary 新（降版）會被第 5 施工關的 too-new 規則擋下，也算失敗。接著在暫存 home 起自己的 `agend holder pf-check`，跑 hello、`Spawn`（`/bin/sh -c 'sleep 60'`）、`Shutdown`，等鎖放掉。每步印一行。
     4. 任何一步失敗：回 `preflight_failed`（附那一行），刪暫存 home，舊 daemon 照跑，**DB 本身一個 byte 都沒動**。
     5. 都過了：回 `restarting { preflight }`，然後收尾、`exec`。
     6. CLI 印預檢結果，用 `Client::connect`（10 秒重試）等新 daemon，印新版本與花的時間。
-  - `exec` 之後 daemon 以前起的 holder 仍是它的子程序（pid 沒變），但負責 `wait()` 的 thread 已經不在：新 daemon 開機時加一條收屍 thread，對任何子程序 `waitpid(-1)`，避免殭屍。
+  - `exec` 之後 daemon 以前起的 holder 仍是它的子程序（pid 沒變），但負責 `wait()` 的 thread 已經不在。新 daemon 開機時只對**從鎖檔讀到、接回的 holder pid** 定期 `waitpid(pid, WNOHANG)`（不是自己的子程序會回 `ECHILD`，忽略）；**不用 `waitpid(-1)`**：那會搶走 `runtime.rs` 每個自己起的 holder 的 `child.wait()` thread 與預檢子程序的 exit status（步驟 4 靠它判斷失敗）。
   - 預檢不連**正在跑的** holder（新連線會踢掉 daemon 的長連線，第 6 施工關 P4）；「新 daemon 聽得懂舊 holder」靠 core 的 `SUPPORTED_VERSIONS` 包含前一個 major（第 6 施工關 P7 的測試）。
 - 理由：`exec` 不 fork、不另起程序，所以沒有 v1 #881／#882／#903 那種「自己 fork 到背景」的問題，也沒有「舊的還沒走、新的已經起來」的兩個 daemon；同一個 pid 在前景、launchd、systemd 下行為都一樣，本關就驗得到。預檢都在複本與暫存 home 上跑，失敗時什麼都沒改。
 - 替代方案：daemon 以特定 exit code 結束、交給服務管理器重起（第 13 施工關之前前景跑時沒人重起，本關驗不到）；CLI 自己起新 daemon（v1 的路，D2 否決）；直接對 `agend.db` 預檢（第 6 施工關 P7 已否決）；用今天的每日快照（可能差好幾個小時的資料）。
@@ -200,7 +204,7 @@
 
   - exit 1 ⟺ 至少一個 `fail`。`--json` 印每一項 `{check, status, detail, fix}`。
   - 規則（git 最低版本、各 backend 的安裝指令、門檻數字）放 `agend_core::setup` 當資料；執行在 `agend` 的 `setup` 模組（D24）。
-  - **不做**：backend 登入與版本範圍（第 12 施工關接真 backend 時才有依據）、gh 登入（第 12 施工關 forge github）、服務狀態（第 13 施工關）、Telegram（第 12 施工關）。
+  - **不做**：backend 登入與版本範圍（第 12 施工關接真 backend 時才有依據）、gh 登入（第 12 施工關 forge github）、服務狀態（第 13 施工關）、Telegram（第 12 施工關）。**與已定的 [tui-and-setup](../architecture/tui-and-setup.md#安裝與設定)（doctor 查 gh 登入、各 backend 安裝／版本／登入、服務狀態、Telegram）不同，請明確決定**：本關只做表裡這幾項，其餘延到上面寫的施工關，D24 的「每個 doctor 檢查都有故意弄壞的測試」在第 13 施工關對全部檢查補齊。
   - Must NOT：改任何東西、開 DB、連 holder 的 socket（會踢掉 daemon 的長連線）；holder 是否活著只看鎖（跟 daemon 的 `recover_holders` 用同一個函式）。
 - 理由：只有「用得到的 backend 沒裝」才是錯；每台機器都缺一兩個 backend，若一律算 `fail`，doctor 永遠是紅的，人就不看了。instance 清單只問 daemon（CLI 不開 DB）。
 - 替代方案：缺任何 backend 都 `fail`（原本步驟 3 的寫法）；doctor 自己開 DB 讀 instance（daemon 跑著時拿不到鎖）；本關就做登入檢查（沒有真 backend 的錄製資料，規則只能猜）。
@@ -240,7 +244,7 @@
 - 問題：CLI 的輸出要對假 daemon 驗每個命令，也要對真 daemon 驗。怎麼保證兩邊一致？假 daemon 要補什麼？
 - 建議：
   - CLI 測試放 `crates/agend/tests/`，跑**真的 `agend` binary**，比對 stdout、stderr、exit code。
-  - 假 daemon 加 `FakeDaemon::start_at(path)`，綁在 `$AGEND_HOME/run/daemon.sock`，CLI 照正常路徑找到它；假 daemon 補上本關的規則：P1 的權限、`operator` 請求、`send` 依 `message_id` 去重、`StatusData.identity`。回應一律用 core 型別編（#1493）。
+  - 假 daemon 加 `FakeDaemon::start_at(path)`，綁在 `$AGEND_HOME/run/daemon.sock`，CLI 照正常路徑找到它；假 daemon 補上本關的規則：P1 的權限、`operator` 請求、`send` 的 `level` 與依 `message_id` 去重、`StatusData.identity`、`daemon_pid`、instance 的 `working_directory`。回應一律用 core 型別編（#1493）。
   - 第 8 施工關的 `CLP` 契約加本關的列（權限兩個方向、`operator` 請求、`daemon_restart` 的形狀、`not_supported` 不改狀態、`send` 同 id 只收一次），照舊對假 daemon 與真 daemon 各跑一次、每條一個 mutant。
   - CLI 層一張表 `CLI-n`（放 `crates/agend/TESTING.md`）：每列＝一個命令＋輸入＋預期輸出／exit code；真 daemon 支援的列跑兩次（假、真），不支援的列標「只對假」並寫哪個施工關補。
   - 預檢的失敗路徑用 `--binary` 指向會失敗的程式（`/usr/bin/false`、一個 `daemon preflight` 時印錯的 shell script），production 程式不加測試用的開關。
@@ -262,8 +266,9 @@
 
 ### 已知風險（開工時處理）
 
-- 第 8 施工關還在實作：本關從它 merge 後的 `v2` 開 branch；1.1 的型別名稱、錯誤型別以 merge 後的程式為準，1.2 疊在上面。
-- 第 7 施工關未開始：`send`／`inbox` 的真實作與 P5 的去重條件都靠它；開工時第 7 施工關沒 merge，這兩個命令真 daemon 先回 `not_supported`，P5 的 `send` 重送等第 7 施工關再開。
+- 第 8 施工關還在實作：本關從它 merge 後的 `v2` 開 branch；1.1 的型別名稱、錯誤型別以 merge 後的程式為準，本關的 minor 疊在上面（P6：實作時的下一個 minor，與第 10 施工關的提案不要撞號）。
+- 第 7 施工關的提案還在審（`docs/gate-07-proposal`）：`deliver(…, level)` 的簽名、`messages` 表的欄位、「同 id 再送回目前狀態」的行為以它 merge 後為準；**第 7 施工關 merge 是本關開工的硬前提**（P1）。它若改成不以 id 冪等，P5 的 `send` 重送就不成立，要回來重新決定。
+- 步驟 8 的假 codex instance 怎麼起（`--program` 指向什麼、要不要包裝）依第 7 施工關的啟動方式，開工時細化。
 - `exec`（P7）：所有 fd 要有 `CLOEXEC`（Rust 預設有；SQLite 的檔案要實測），否則新 daemon 會繼承舊的 DB 鎖；`exec` 失敗（預檢之後 binary 被刪）時 daemon 已經收尾，只能印錯誤、exit 1——前景要人重跑 `agend daemon`，第 13 施工關由服務管理器重起；launchd／systemd 下 `exec` 的行為在第 13 施工關實測。
 - doctor 看鎖（P8）：檢查的那一瞬間若剛好有 holder 在啟動，可能拿不到鎖而啟動失敗；用 `LOCK_SH | LOCK_NB` 並立刻放掉，實測機率。
 - ticket（P2）決定了第 10 施工關的派工訊息格式；第 10 施工關若要改，CLI 語法跟著改。
@@ -272,7 +277,7 @@
 
 ## 自動驗收（完成定義）
 
-- [ ] `~/.cargo/bin/cargo test -p agend` 單獨通過，包括：`CLI-n` 表每列對假 daemon、真 daemon 支援的列也對真 `agend daemon`（P10）；`home::resolve` 的預設、相對路徑、v1 home（P3）；`--json` 只印一個 JSON 值、錯誤也在 stdout（P4）；`send` 送出後斷線用同一個 `message_id` 重送、其他會改東西的命令不重送（P5）；非 TTY 的 `instance remove` 沒有 `--yes` 回 exit 2（P6）；`daemon restart` 成功（pid 不變、holder 不變）與 `--binary` 失敗（daemon 照跑、DB 檔 sha256 不變）（P7）；`doctor` 每個 `fail`／`warn` 都有 `fix:`（P8）
+- [ ] `~/.cargo/bin/cargo test -p agend` 單獨通過，包括：`CLI-n` 表每列對假 daemon、真 daemon 支援的列也對真 `agend daemon`（P10）；`home::resolve` 的預設、相對路徑、v1 home（P3）；`--json` 只印一個 JSON 值、錯誤也在 stdout（P4）；`send` 送出後斷線用同一個 `message_id` 重送、其他會改東西的命令不重送（P5）；非 TTY 的 `instance remove` 沒有 `--yes` 回 exit 2（P6）；`daemon restart` 成功（pid 不變、holder 不變）與 `--binary` 失敗（daemon 照跑、DB 檔 sha256 不變）、同時兩個 restart 第二個被拒、接回的 holder 死掉後不留殘屍、自己起的 holder 與預檢子程序的 exit status 沒被搶（P7）；兩個假 codex instance 互送 10 則訊息、中途 `daemon restart`：每則恰好送達一次、狀態 `confirmed`（P1、P5，里程碑）；`doctor` 每個 `fail`／`warn` 都有 `fix:`（P8）
 - [ ] `~/.cargo/bin/cargo test -p agend-core`、`-p agend-client`、`-p agend-daemon`、`-p agend-testkit` 單獨通過：1.1 的 peer 解得開 1.2 的訊息；`CLP` 新增的列對假 daemon 與真 daemon 都通過，每條有 mutant（P6、P10）
 - [ ] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨
 - [ ] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`（出現 `SKIPPED` 不算通過）
@@ -319,7 +324,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
    env -u AGEND_HOME HOME="$H" agend init; echo "exit=$?"
    ```
 
-   應該看到：第一次 `created /tmp/g9h.…/.agend-v2 (0700)`、doctor 的輸出、`next: agend daemon …`，`exit=0`（git 太舊時是 1，看 doctor 那行）；第二次 `… looks like an AgEnD v1 home (fleet.yaml); set AGEND_HOME to another directory`、`exit=1`。最後 `rm -rf "$H"`。
+   應該看到：第一次 `created /tmp/g9h.…/.agend-v2 (0700)`、doctor 的輸出、`next: agend daemon …`，`exit=0`（git 太舊時是 1，看 doctor 那行）；第二次 `… looks like an AgEnD v1 home (fleet.yaml); set AGEND_HOME to another directory`、`exit=1`。`$H` 先留著，步驟 3 還要用。
 
    - [ ] 通過
 
@@ -327,15 +332,18 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
    **這步在驗什麼**：每項檢查都有結果；壞掉的那項是 `fail`、附修正指令、exit 1；沒 instance 用的 backend 缺了只是 `warn`（P8）。錯了的話設定錯誤會像 v1 一樣「靜靜不動」。
 
+   在同一個終端接著步驟 2（用同一個 `$H`；先拿掉步驟 2 放的 `fleet.yaml`，home 才會是 ok）：
+
    ```bash
-   agend doctor; echo "exit=$?"
+   rm "$H/.agend-v2/fleet.yaml"
+   env -u AGEND_HOME HOME="$H" agend doctor; echo "exit=$?"
    T=$(mktemp -d)
    printf '#!/bin/sh\necho "git version 2.30.0"\n' > "$T/git" && chmod +x "$T/git"
-   PATH="$T:$PATH" agend doctor; echo "exit=$?"
-   rm -rf "$T"
+   env -u AGEND_HOME HOME="$H" PATH="$T:$PATH" agend doctor; echo "exit=$?"
+   rm -rf "$T" "$H"
    ```
 
-   應該看到：第一次每項一行（home、daemon、git、claude、codex、opencode、holders、disk）；daemon 沒跑是 `warn` 附 `fix: agend daemon`；沒裝的 backend 是 `warn` 附安裝指令。第二次 git 那行 `fail  git  git 2.30.0 is older than 2.38 …`、下一行 `fix: …`、`exit=1`。
+   應該看到：第一次每項一行（home、daemon、git、claude、codex、opencode、holders、disk）；home 是 `ok`；daemon 沒跑是 `warn` 附 `fix: agend daemon`；沒裝的 backend 是 `warn` 附安裝指令；`exit=0`（你機器的 git 本來就太舊時是 1）。第二次 git 那行 `fail  git  git 2.30.0 is older than 2.38 …`、下一行 `fix: …`、`exit=1`。
 
    - [ ] 通過
 
@@ -406,7 +414,25 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
    - [ ] 通過
 
-8. 移除 instance、收尾。
+8. 里程碑：兩個 codex agent 互傳訊息，中途重啟 daemon。
+
+   **這步在驗什麼**：ROADMAP 里程碑「第 1–9 施工關：兩個 codex agent 互傳訊息；重啟 daemon 時不中斷、不遺失、不重複」：`send` 經第 7 施工關的送達、斷線時用同一個 `message_id` 重送、daemon 靠 id 去重（P1、P5、P7）。錯了的話重啟 daemon 會掉訊息或重複送。
+
+   操作（第二個終端；假 codex 的 `--program` 開工時細化，依第 7 施工關的啟動方式）：
+
+   ```bash
+   agend instance add g9-a codex --program "<假 codex>"
+   agend instance add g9-b codex --program "<假 codex>"
+   (for i in $(seq 1 10); do AGEND_INSTANCE=g9-a agend send g9-b "m$i"; sleep 0.5; done) &
+   sleep 2; agend daemon restart; wait
+   AGEND_INSTANCE=g9-b agend inbox
+   ```
+
+   應該看到：10 次 `send` 都成功（重啟那一兩次印 `(retried <t> s)`）；`restart` 照步驟 6 的樣子；`inbox` 剛好 10 行 `from g9-a`，`m1`…`m10` 各一次、沒有重複；daemon log 每則都有 `confirmed`（確切字樣開工時細化）。
+
+   - [ ] 通過
+
+9. 移除 instance、收尾。
 
    **這步在驗什麼**：`instance remove` 停掉 agent、刪掉那一列，但留下 workspace；非 TTY 沒有 `--yes` 不動手（P6）。錯了的話誤刪 agent，或把工作目錄一起刪了。
 
@@ -417,7 +443,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
    ls "$AGEND_HOME/workspace/"
    ```
 
-   應該看到：第一行拒絕（`… needs --yes when not on a terminal`）、`exit=2`；第二行 `removed g9-1; workspace kept at …/workspace/g9-1`；`pgrep` 什麼都不印；`ls` 還有 `g9-1`。最後第一個終端 Ctrl-C 停 daemon，再 `rm -rf "$AGEND_HOME"`。
+   應該看到：第一行拒絕（`… needs --yes when not on a terminal`）、`exit=2`；第二行 `removed g9-1; workspace kept at …/workspace/g9-1`；`pgrep` 什麼都不印；`ls` 還有 `g9-1`。再 `agend instance remove g9-a --yes`、`agend instance remove g9-b --yes`；最後第一個終端 Ctrl-C 停 daemon，再 `rm -rf "$AGEND_HOME"`。
 
    - [ ] 通過
 
@@ -433,7 +459,8 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 日期 + 一行 + commit／PR，新的在上面。
 
-- 2026-09-26 開工前提案 P1–P10 寫定（draft PR），待使用者確認；`ask` 建議移到第 10 施工關（P1）、結果類命令帶 ticket（P2）、預設 home `~/.agend-v2`（P3）、restart 用原地 `exec`（P7）、`init` 不建 `config.toml` 與 agent（P9）；「你親自驗收」改成 8 步；狀態改為提案中。
+- 2026-09-26 fresh review REFUTED（5 MEDIUM、6 LOW）後修正：收屍只對接回的 holder pid `waitpid(pid, WNOHANG)`；`hello` 加 `daemon_pid`、全貌 instance 加 `working_directory`；步驟 3 改在步驟 2 的暫存 HOME 跑；本關接 `send` → `deliver` 與 `level`，第 7 施工關 merge 為硬前提、加步驟 8（兩個 agent 互傳、中途重啟）；TL;DR 與 P1、P3、P8 標出與已定文件不同之處；`daemon_probe` 定位、重加仍在跑的 id、restart 一次一個＋`mkdtemp`、`--binary` 在 D6 範圍內、協定版本寫成「實作時的下一個 minor」。
+- 2026-09-26 開工前提案 P1–P10 寫定（draft PR），待使用者確認；`ask` 建議移到第 10 施工關（P1）、結果類命令帶 ticket（P2）、預設 home `~/.agend-v2`（P3）、restart 用原地 `exec`（P7）、`init` 不建 `config.toml` 與 agent（P9）；「你親自驗收」改成 9 步；狀態改為提案中。
 
 ## 下一步
 
