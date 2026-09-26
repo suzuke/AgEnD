@@ -40,12 +40,17 @@
     - 事件連線：`get_fleet` → `subscribe_events(as_of)`，之後只讀事件。
     - 請求連線：`resolve_attention`、`answer_ask`（都有 `request_id`，在主 thread 送、等回覆）。
     - 終端連線：開終端時才開（P5），離開終端就關。一條 thread 阻塞讀（`next_terminal`）；主 thread 經 `Client::sender()` 拿到的**寫入端**（`UnixStream::try_clone` 出來的 writer，只能送、不讀）寫 `subscribe_terminal` 與 `terminal_input`。`Client` 的讀寫都在 `&mut self` 後面，讀的 thread 卡在 `next_terminal` 時主 thread 拿不到它（加 Mutex 會互等），所以寫入要分出來。`subscribe_terminal` 與 **`terminal_input` 都走這條**：`terminal_input` 沒有 `request_id`，它的錯誤是不帶 `request_id` 的 `error`，而 `agend-client` 等回覆時會把不帶 id 的 `error` 當成「正在等的那個請求」的回覆（`connection.rs` 的 `wait_reply`）。放在請求連線上，打字的錯誤就會變成下一個 `retry` 的回覆。終端連線上沒有別的請求在等，所以這條連線上任何不帶 id 的 `error` 都是終端或打字的錯誤，一律顯示在底下並離開輸入模式；再依錯誤碼分兩種（見 P5、P6）：`forbidden`、`not_supported`（打字被拒）→ 畫面照常更新；`no_terminal`（終端結束、重訂失敗、打字時已沒有活的終端，三種都是這個碼）→ 標題 `· 已結束，重試中`、每秒重訂一次。
-  - `agend-client` 只加 3 個 API（加法，不改讀取方式）：`Client::answer_ask`、`Client::next_terminal`、`Client::sender()`；`sender()` 回的 `Sender` 只有 `subscribe_terminal` 與 `terminal_input` 兩個方法（只寫一行、不等回覆）。
+  - `agend-client` 只加 4 個 API（加法，不改讀取方式）：`Client::answer_ask`、`Client::next_terminal`、`Client::sender()`，以及 `Sender::close()`。`sender()` 回的 `Sender` 有 `subscribe_terminal`、`terminal_input`（只寫一行、不等回覆）與 `close()`。
+  - 終端連線的生命週期（讀的 thread 卡在沒有逾時的讀取裡，丟掉 `Sender` 只關掉複製出來的 fd、socket 還開著，所以一定要明確關）：
+    - 開（含重連）：主 thread `connect_once` → 拿 `sender()` → 把 `Client` 交給一條**新的**讀 thread。
+    - 關（離開終端畫面、重連前）：主 thread 呼叫 `Sender::close()`＝`UnixStream::shutdown(Both)`，讀的 thread 馬上讀到 EOF、自己結束。不留 thread、不留連線（例如 `t` 開 `failed` instance 的最後畫面再 `←`，每次都收乾淨）。
+    - `Sender` 寫入失敗（`EPIPE` 等）＝終端連線 EOF，走 P5 的「只重連這條」。
   - `Source` 介面：`connect` 回「`Catalog` ＋目前的需要你清單」；`FleetView` → `Catalog` 的轉換在 `ClientSource` 裡（P3），畫面看不到 `FleetView`；`ScriptedSource` 照舊直接給完整的 `Catalog`。`poll` 只給 `as_of` 之後的事件（不再從頭重播）；加 `resolve(attention_id, action)` 與終端的訂閱、輸入（P4–P6）。
   - 刪掉 `examples/support/daemon_source.rs`：`tui_fake --daemon`、`tui_accept` 經 socket 的段落、tests 改用 `ClientSource` 連 testkit 假 daemon（假 daemon 已有 `get_fleet`、`set_task`、`set_instance`）。腳本假來源 `ScriptedSource` 留著，A 段 demo 的畫面與導覽（`owner_steps.rs`）照舊用它（見 P3 的 T12）。
+  - **本段也改一個 daemon 的小地方**：同一條連線重訂終端失敗（例如 holder 5 秒沒回畫面，`handlers.rs` 的 `terminal`）時，daemon 現在會留著舊的即時串流（`server.rs` 只在成功時換掉）。改成：重訂一開始就清掉這條連線舊的串流，失敗就是沒有串流，client 收到 `no_terminal`，照 P5 每秒重試。
   - **本段也要改 testkit 假 daemon**（`fake_daemon.rs` 現在：終端一律回 `fake screen of X`、從不送 `terminal_bytes`、`terminal_input` 回 `not_supported`），不然 `ClientSource` 的測試跑不起來：
-    - 每個 instance 自己的畫面（`set_screen(id, text)`）；`push_terminal_bytes(id, bytes)` 送位元組（之後重訂就回新的畫面）。
-    - `terminal_input`：caller 是 agent → `forbidden`；沒有這個 instance → `no_terminal`；操作者 → 記下位元組（`terminal_inputs()` 給測試看）；backend 是 codex → `not_supported`（P6）。
+    - 每個 instance 自己的畫面（`set_screen(id, text)`）；`push_terminal_bytes(id, bytes)` 送位元組（之後重訂就回新的畫面）。`subscribe_terminal` 對沒登記的 instance 回 `no_terminal`（跟真 daemon 一樣；現在假 daemon 對任何 id 都回一張畫面，第 8 施工關 C2 的做法在這裡改掉，TUI 的測試先 `set_instance`）。
+    - `terminal_input` 依序檢查：caller 是 agent → `forbidden`；沒有這個 instance → `no_terminal`；backend 是 codex → `not_supported`（P6）；都過了才記下位元組（`terminal_inputs()` 給測試看）。
     - `resolve_attention` 可以延後發 `attention_resolved`（`hold_resolved_events(true)`，之後 `release_resolved_events()`）：現在假 daemon 回 `accepted` 的同時就發事件（`fake_daemon.rs` 開頭的說明），測不出「收到事件才消失」。
     - `CONTRACTS.md` 的 `CLP` 表加對應的列（`terminal_bytes` 之後重訂拿到新畫面、`terminal_input` 的身分與錯誤），對假 daemon 與真 daemon 都跑（第 8 施工關 P9）。
   - **與已追認的 T1「`Fleet` 只由 catalog ＋ client protocol v1 事件重建」不同，請明確決定**：B 段起 `ClientSource` 的 `Fleet` 由全貌（轉成 `Catalog` ＋需要你清單）＋ `as_of` 之後的事件重建；畫面只讀 `Fleet`、只透過 `Source` 動作這兩條不變。
@@ -114,7 +119,7 @@
 - 問題：T7 只顯示一張快照。第 8 施工關的 `subscribe_terminal` 先回一張畫面（holder 算好的純文字，沒有顏色與游標），之後是 PTY 原始位元組（`terminal_bytes`）。TUI 怎麼畫出即時的畫面？
 - 建議：
   - **位元組只當「畫面變了」的訊號**。終端連線收到 `terminal_bytes` 就記「有新輸出」；主 thread 每次 tick 檢查：有新輸出、而且離上一次重拿 ≥ 200 ms，就在終端連線再送一次 `subscribe_terminal`（第 8 施工關 C8：新的取代舊的），拿 holder 算好的新畫面，同時清掉記號。重拿之後才到的位元組會再設記號，所以**最後一段輸出（例如停下來的提示符號）一定會在 200 ms 後補畫**，不會卡在舊畫面。一秒最多重拿 5 次；主迴圈的 tick 改成每 100 ms 一次（原本讀鍵 250 ms）。所以從輸出到畫上去最多 **300 ms 加一次來回**（200 ms 節流＋最多一個 100 ms 的 tick＋holder 畫面的來回）。
-  - 標題：`g11-1 的終端 · 即時`（取代 `唯讀快照`）。`failed` 的 instance（daemon 只回最後畫面）：`· 最後的畫面（已停止）`。終端結束（第 8 施工關 C7 的 `no_terminal … subscribe again`）：畫面留著、標題 `· 已結束，重試中`，每秒重訂一次；重訂失敗（`no_terminal`）也是同一個狀態。只有終端連線 EOF（落後 256 塊或 5 秒寫入逾時被關，第 8 施工關 P8，不一定有 `error`）→ 同樣顯示 `· 已結束，重試中`，只重連這條終端連線、每秒一次；事件連線沒斷就不進斷線畫面。holder 已經不在：照 A 段 `g11-1 沒有終端輸出。`。
+  - 標題：`g11-1 的終端 · 即時`（取代 `唯讀快照`）。`failed` 的 instance（daemon 只回最後畫面）：`· 最後的畫面（已停止）`；這時**不能按 `i`**（底下提示「這個 agent 已停止，不能輸入」）。之後收到這個 instance 的 `instance_changed` 顯示它又跑起來（例如按了 `retry`），就自動重訂、變回 `· 即時`。終端結束（第 8 施工關 C7 的 `no_terminal … subscribe again`）：畫面留著、標題 `· 已結束，重試中`，每秒重訂一次；重訂失敗（`no_terminal`）也是同一個狀態。只有終端連線 EOF（落後 256 塊或 5 秒寫入逾時被關，第 8 施工關 P8，不一定有 `error`）→ 同樣顯示 `· 已結束，重試中`，只重連這條終端連線、每秒一次；事件連線沒斷就不進斷線畫面。holder 已經不在：照 A 段 `g11-1 沒有終端輸出。`。
   - 不改 agent 的 PTY 大小（resize）：畫面從左上角畫，超出就截掉。
   - T7 本身寫「即時串流與輸入留到第 11 施工關正式接」，這裡是兌現它，不是改它。
 - 理由：holder 已經有完整的終端模擬器（`alacritty_terminal`）；TUI 自己再跑一個，起點只有純文字快照、沒有游標與屬性，套上位元組會畫錯。讓 holder 算畫面，TUI 不用多一個重依賴。
@@ -181,7 +186,7 @@
 
 B 段（P1–P7 確認後才開工；上面畫面層的項目在 B 段要重跑一次）：
 
-- [ ] `~/.cargo/bin/cargo test -p agend-tui`、`-p agend-client`、`-p agend-daemon`、`-p agend` 單獨通過，包括：`ClientSource` 對假 daemon（全貌 → 畫面、`attention_resolved` 拿掉項目、`event_gap` 與 EOF 進斷線畫面、重連重拿全貌並回到原畫面）；`retry` 只在收到事件後消失（假 daemon `hold_resolved_events` 延後事件時，`accepted` 之後項目仍在）（P4）；只有終端連線 EOF 時只重連它、不進斷線畫面（P5）；終端收到位元組後 300 ms 加一次來回內換成新畫面、節流上限、重拿之後才到的最後一段輸出也會補畫（P5）；`terminal_input` 只走終端連線、它的錯誤不會變成 `retry` 的回覆；agent 回 `forbidden`（先查身分）、沒有活的終端回 `no_terminal`、操作者的位元組原樣到 holder、codex 回 `not_supported`（P6）；輸入模式只有 `Ctrl-]` 不送、斷線自動離開（P6）；`agend app` 沒設 home exit 2、非終端 exit 2（P2）
+- [ ] `~/.cargo/bin/cargo test -p agend-tui`、`-p agend-client`、`-p agend-daemon`、`-p agend` 單獨通過，包括：`ClientSource` 對假 daemon（全貌 → 畫面、`attention_resolved` 拿掉項目、`event_gap` 與 EOF 進斷線畫面、重連重拿全貌並回到原畫面）；`retry` 只在收到事件後消失（假 daemon `hold_resolved_events` 延後事件時，`accepted` 之後項目仍在）（P4）；只有終端連線 EOF 時只重連它、不進斷線畫面，開關終端 20 次後沒有多出來的 thread 與連線，停止的終端按 `i` 不進輸入模式（P1、P5）；終端收到位元組後 300 ms 加一次來回內換成新畫面、節流上限、重拿之後才到的最後一段輸出也會補畫（P5）；`terminal_input` 只走終端連線、它的錯誤不會變成 `retry` 的回覆；agent 回 `forbidden`（先查身分）、沒有活的終端回 `no_terminal`、操作者的位元組原樣到 holder、codex 回 `not_supported`（P6）；輸入模式只有 `Ctrl-]` 不送、斷線自動離開（P6）；`agend app` 沒設 home exit 2、非終端 exit 2（P2）
 - [ ] `~/.cargo/bin/cargo test -p agend-testkit` 通過：假 daemon 的每個 instance 畫面、`terminal_bytes`、`terminal_input`（P1）；`CLP` 新列對假 daemon 與真 `agend daemon` 都通過，每列有 mutant
 - [ ] `~/.cargo/bin/cargo xtask accept tui` 多印一段真 daemon（`agend daemon` 在暫存 home、`App` 經 `agend-client`），並對應下面 B 段步驟 1
 - [ ] `cargo xtask check-deps` 最後一行照舊 `… no-std build ok)`（`agend-tui` 仍不依賴 SQLite、`agend-daemon`）
@@ -483,6 +488,7 @@ unset AGEND_BIN               # 前幾關步驟留下的 export 可能指到已�
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-27 第 3 輪 review REFUTED（1 MEDIUM、3 LOW）後修正：`Sender::close()`（`shutdown(Both)` 叫醒讀的 thread）與終端連線的開、關、重連步驟，`agend-client` 改成加 4 個 API；停止的終端不能按 `i`、instance 又跑起來時自動重訂；假 daemon 對沒登記的 instance 回 `no_terminal`、codex 檢查排在記錄位元組之前；重訂失敗時 daemon 清掉舊串流。
 - 2026-09-27 第 2 輪 review REFUTED（1 HIGH、2 MEDIUM、3 LOW）後修正：終端連線的寫入改用 `Client::sender()`（try_clone 的寫入端，讀的 thread 阻塞時主 thread 照樣能寫），`agend-client` 改成加 3 個 API；延遲寫成「最多 300 ms 加一次來回」；假 daemon 加 `hold_resolved_events`；終端連線上錯誤碼的畫面規則、只有終端連線 EOF 時只重連它；標出與 T1、T18 不同之處。
 - 2026-09-27 fresh review REFUTED（1 HIGH、3 MEDIUM、4 LOW）後修正：`terminal_input` 改走終端連線（不帶 id 的錯誤不再變成 `retry` 的回覆）；節流加「有新輸出」記號補畫最後一段；本段加改 testkit 假 daemon 與 `CLP` 新列；標出與 T12、T13 不同之處、A 段 demo 保留 `ScriptedSource`、轉換放 `ClientSource`；holder 輸入錯誤接受靜靜丟掉並記 log；`Ctrl-]`／`Ctrl-5`；接受主 thread 最多凍結 10 秒；`/tmp/g11.` 路徑與 `agend app` exit 2。
 - 2026-09-27 B 段開工前提案 P1–P7 寫定（draft PR，branch `feat/gate-11-tui-daemon`），待使用者確認：`ClientSource` 放 lib（與 T2 不同）、`agend app` 由本段做、`Catalog` 只由全貌與事件填（新缺口 G5 給第 10 施工關）、`retry` 等事件才消失、終端以位元組為訊號重拿 holder 畫面、`i` 進輸入模式且 codex 先不開放（與第 7 施工關 P1 的預期不同）、重連重拿全貌；「你親自驗收」B 段改成 7 步確切指令。
