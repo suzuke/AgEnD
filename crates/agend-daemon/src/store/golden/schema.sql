@@ -1,8 +1,19 @@
--- user_version = 1
+-- user_version = 2
 
 CREATE INDEX task_events_by_task ON task_events (task_id, seq);
 
 CREATE INDEX task_events_by_time ON task_events (occurred_at_unix_ms);
+
+CREATE TABLE instances (
+    id                TEXT NOT NULL PRIMARY KEY
+                      CHECK (length(id) BETWEEN 1 AND 24 AND id NOT GLOB '*[^a-z0-9-]*'),
+    backend           TEXT NOT NULL CHECK (backend IN ('claude', 'codex', 'opencode')),
+    program           TEXT NOT NULL,
+    args              TEXT NOT NULL CHECK (json_valid(args) AND json_type(args) = 'array'),
+    working_directory TEXT NOT NULL,
+    session_id        TEXT,
+    status            TEXT NOT NULL CHECK (status IN ('new', 'running', 'failed'))
+) STRICT;
 
 CREATE TABLE task_events (
     seq                 INTEGER NOT NULL PRIMARY KEY,

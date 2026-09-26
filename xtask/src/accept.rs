@@ -13,7 +13,10 @@
 //! then the holder demo (`holder_probe demo` against the built `agend`).
 //! Gate 5 runs the agend-daemon checks (its tests include the STO-1..12
 //! contract against the real store and the cross-process restart/crash
-//! tests), check-deps, then the store demo.
+//! tests), check-deps, then the store demo. Gate 6 runs the checks of
+//! agend-daemon, agend-holder, agend (RTM-1..9 against real holders, the
+//! re-executed four boots, the real `agend daemon` tests) and agend-core,
+//! check-deps, then `daemon_probe demo` against the built `agend`.
 //! Gate 11 runs the per-crate checks, check-deps, then the TUI demo (screens,
 //! navigation, resolve, disconnect against the testkit fake daemon).
 //! Other gates use the per-crate checks until their acceptance flow is built.
@@ -57,7 +60,9 @@ pub const GATES: &[Gate] = &[
     Gate {
         number: 6,
         name: "daemon-holder",
-        crates: &["agend-daemon", "agend-holder"],
+        // `agend` holds the tests with the real binary (holder_runtime.rs,
+        // daemon_process.rs); `agend-core` gets the D26 version test.
+        crates: &["agend-daemon", "agend-holder", "agend", "agend-core"],
     },
     Gate {
         number: 7,
@@ -192,6 +197,19 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
             "store_demo",
         ])?;
         println!("gate 5 (store): checks passed");
+    } else if gate.number == 6 {
+        step(&["build", "--quiet", "-p", "agend"])?;
+        step(&[
+            "run",
+            "--quiet",
+            "-p",
+            "agend-daemon",
+            "--example",
+            "daemon_probe",
+            "--",
+            "demo",
+        ])?;
+        println!("gate 6 (daemon-holder): checks passed");
     } else if gate.number == 11 {
         step(&[
             "run",
