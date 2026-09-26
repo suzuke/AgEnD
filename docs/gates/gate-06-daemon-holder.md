@@ -152,6 +152,7 @@
 - `--resume` 要有 session id：claude 本關可用；codex、opencode 的 session id 要靠第 7、12 施工關，在那之前這兩個 backend 死掉就直接 `failed`。
 - launchd 給的 `PATH` 很短、brew 升級後 shim symlink 可能暫時指到不存在的 binary：交給第 13 施工關（P3 開機時重建只救得了 daemon 重啟的那一次）。
 - EXCLUSIVE 鎖交接的 10 秒（P1）還沒實測，本關的四次開機要量實際等了多久。
+- 第 5 施工關 verifier 實測：多個程序同時建立**全新** home 時，約 10% 的機率全部拿到 `InUse`、沒有人建成（下一次 `open` 會成功）。P1 的 200 ms 重試已涵蓋；本關測試不要假設「同時開、一定有一個成功」。
 
 ## 自動驗收（完成定義）
 
