@@ -48,6 +48,7 @@ daemon 負責派工、worktree、checks、互審綁 head、merge；人只處理�
 | `agend-tui` 不依賴 SQLite、`agend-daemon`（只經 daemon protocol 讀資料，第 5 施工關 P2；不擋 async runtime——crossterm 帶 `mio`，第 11 施工關 T9） | `cargo xtask check-deps` |
 | `agend-testkit` 只能當 dev-dependency | `cargo xtask check-deps` |
 | `agend-daemon` 不依賴 `agend-holder`、`agend-shim`（daemon 只經 holder 協定和子命令跟它們互動，第 6 施工關 P9） | `cargo xtask check-deps` |
+| `agend-daemon` 不依賴 `agend-client`（server 和 client 分開寫協定，讓 CLP 契約抓到兩邊不一致，第 8 施工關 P10） | `cargo xtask check-deps` |
 | 模組之間只透過 `agend_core` 的 trait 與型別溝通 | code review |
 | 只有符合四條準則才新增 crate（見 ARCHITECTURE） | code review |
 

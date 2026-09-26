@@ -192,7 +192,7 @@ P1–P7 已由你在 2026-09-25 確認（記為決策 D26–D32）。實作草�
 以下是 core example 的實際輸出（不含 accept 前面的檢查指令），逐字元相同；work、assignment、policy 與 pipeline action 均由 core 函式產生。
 
 ```text
-client hello: supports 1.0
+client hello: supports 1.1
 busy levels for steer:
   claude: Interrupt
   codex: Steer
@@ -239,6 +239,8 @@ task T-1 workflow=code v1
 ## 進度紀錄
 
 日期 + 一行 + commit／PR，新的在上面。
+
+- 2026-09-27 第 8 施工關 merge（#131）後 client protocol 升到 1.1；core demo 的預期 transcript 第一行改成 `client hello: supports 1.1`（已對 `~/.cargo/bin/cargo run -p agend-core --example core_demo` 的實跑輸出核對，其餘逐字元不變）。
 
 - 2026-09-25 使用者追認「待你追認」全部 6 項（按鍵對照、merge 前置與送出中規則、可完成證明、最後 work 規則、事件身分、新 attempt 與 pick 規則）。
 - 2026-09-25 使用者親自驗收步驟 1–5 通過，狀態改為完成；每一步補上「這步在驗什麼」。

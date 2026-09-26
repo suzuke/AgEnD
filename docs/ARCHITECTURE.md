@@ -71,7 +71,7 @@ agend-core 不用 std（`#![no_std]` + `alloc`），只有 `serde` 可供型別 
 | 層 | 模組 | 做什麼 |
 |---|---|---|
 | 入口 | `server`、`handlers`、`ingest` | protocol server；命令處理（與傳輸分離）；hook／事件接收與磁碟佇列補送 |
-| 領域 | `pipeline`、`delivery`、`supervisor`、`scheduler`、`reconcile` | 驅動 core 狀態機；送達；卡住／額度／轉派；timeout／cron；DB ↔ git 對帳 |
+| 領域 | `pipeline`、`delivery`、`supervisor`、`scheduler`、`reconcile`、`fleet` | 驅動 core 狀態機；送達；卡住／額度／轉派；timeout／cron；DB ↔ git 對帳；`fleet`：全貌快照與記憶體事件記錄，供 client protocol 的 `get_fleet`／訂閱讀（第 8 施工關） |
 | adapter | `driver/{codex,claude,opencode}`、`runtime`、`forge/{local,github}`、`git`、`runner`、`store`、`notifier` | 對外的一切 I/O |
 
 - 領域模組只透過 `agend_core::traits` 呼叫 adapter，所以能對 testkit 的假實作測。
