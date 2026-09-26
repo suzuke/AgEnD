@@ -9,7 +9,7 @@
 
 ## 狀態
 
-**實作中，draft PR**（2026-09-26）：P1–P9 已實作，自動驗收由實作者自跑通過；fresh-context verifier r2 CONFIRMED；等你追認「待你追認」H1–H16、你親自驗收。名詞表不在本 PR 改（見「自動驗收」）。
+**實作中，draft PR**（2026-09-26）：P1–P9 已實作，自動驗收由實作者自跑通過；fresh-context verifier r2 CONFIRMED；H1–H16 使用者已追認；等你親自驗收。名詞表不在本 PR 改（見「自動驗收」）。
 
 ## 範圍
 
@@ -394,6 +394,8 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 實作時做了、提案沒寫到或與提案字面不同的選擇。確認前照目前的做法運作。每項：決定 · 理由 · 反悔的成本。
 
+**追認結果**：使用者 2026-09-26 全部追認 H1–H16（H14 單獨明確允許：測試可以對自己起的 daemon 子程序送 SIGINT，pid > 1、還沒回收）。
+
 | # | 決定 | 理由 | 反悔成本 |
 |---|---|---|---|
 | H1 | instance 狀態只有 `new`（session 還沒建立）、`running`（第一次 `Spawn` 已被 holder 確認：`Spawned` 或 `already_spawned`＝agent 程序已經啟動；之後每次啟動都 resume）、`failed`。**與 P3 字面不同**：instance 那一列在任何啟動前就在 DB，但 `running` 是在第一次 `Spawn` 被確認**之後**才寫；接回時一律重送 `Spawn`（holder 已有 agent 就回 `already_spawned`、什麼都不變）。所以 daemon 死在「起 holder」與「第一次 `Spawn` 確認」之間時，下次開機重送的仍是 `--session-id`，不是 `--resume` 一個沒建立過的 session（verifier r1 F1，測試 `a_daemon_killed_before_the_first_spawn_still_starts_the_session_fresh`）；第一次啟動失敗的重起也帶 `--session-id` | 先寫 `running` 再 `Spawn`（原本的做法）會讓那個窗口裡的 claude 只拿到 `--resume`、3 次後 `failed`；「DB 不知道的 agent」本來就不會發生，因為 instance 那一列早就在 DB。剩下的極小窗口：agent 已跑、`running` 還沒寫、holder 又死掉 → 下次用 `--session-id` 起，claude 會拒絕、3 次後 `failed`、交給人（不會全新丟掉對話）。另一個已知限制（verifier r2 R1，沒有真 claude 無法測）：「`Spawn` 被確認」只代表程序起來了，不保證 claude 已經把 session 存檔；claude 在存檔前就死掉（或 session 要等第一則訊息才建立、而 agent 還沒收到訊息就連 holder 一起死掉，例如重開機），之後每次都 `--resume` 一個不存在的 session，3 次後 `failed`、交給人——照 P6 不會全新啟動。第 12 施工關接真 claude 時要實測 session 何時落地 | 改回先寫 `running`：`supervisor::start`／`reconnect` 各搬一行 |
@@ -428,6 +430,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 日期 + 一行 + commit／PR，新的在上面。
 
 - 2026-09-26 verifier r1 REFUTED（`8222f7d`）修正：F1 MEDIUM claude 第一次 `Spawn` 前 daemon 當掉 → 之後只拿到 `--resume` 沒建立過的 session：`running` 改成第一次 `Spawn` 被確認後才寫、`new` 一律 `--session-id`（H1、H2 改寫；回歸測試 `a_daemon_killed_before_the_first_spawn_still_starts_the_session_fresh` 修前失敗、修後通過；demo 加 `== crash-before-spawn`）；F2 只有 instance 的 DB 也做每日快照（`a_database_with_only_instances_takes_its_daily_snapshot`）；F3 一個鎖住卻沒有活 pid 的鎖檔不再讓整個開機失敗，跳過並記警告（`a_locked_file_without_a_live_pid_is_skipped_not_fatal`）；F4 放棄時關掉對 holder 的連線（H8 改寫）；F5 第 5 施工關頁的 demo 輸出更新；H14 標明與安全清單字面不同。
+- 2026-09-26 使用者追認 H1–H16（H14 單獨明確允許）。
 - 2026-09-26 fresh-context verifier r2 CONFIRMED（`6316d42`）：r1 五項都修好（F1 的回歸測試拿掉修正會失敗）；另記兩個 LOW 文件差異（步驟 4 少了 `housekeeping: DB snapshot` 那行、第 5 施工關步驟 6 少了 `instances`）已補，H1 補上 R1 已知限制（「`Spawn` 被確認」≠ claude session 已存檔，第 12 施工關實測）。
 - 2026-09-26 實作（draft PR，branch `feat/gate-06-daemon`）：`agend daemon`、`instances` 表（migration 0002）、`plan_boot`、`HolderRuntime`（長連線、環境白名單、shim symlink）、P6 重起、housekeeping（prune、DB 快照、log／audit／holder log 期限）、`daemon_probe` 與 demo、契約三層、check-deps 規則、core 版本測試；「你親自驗收」步驟 1–9 改成確切指令與實跑輸出（步驟 4–9 由實作者用只對自己子程序送訊號的 harness 預演過）；「待你追認」H1–H16。已知風險「EXCLUSIVE 鎖交接的 10 秒」實測：舊 daemon 收到 Ctrl-C 時新 daemon 等了約 420 ms；四次開機（前一個已結束才起下一個，含 `kill -9` 之後）等 2–4 ms。fresh-context verifier 尚未跑。
 - 2026-09-26 使用者追認 P3 夜間更正（不設 `process_group(0)`）與 P7–P9；第 4、5 施工關已 merge。
