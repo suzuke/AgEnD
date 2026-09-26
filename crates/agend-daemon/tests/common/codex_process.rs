@@ -380,7 +380,7 @@ pub fn give_up(lab: &Lab, tag: &str) -> Result<Vec<String>, String> {
     let restarts = lines.iter().filter(|l| l.contains(": restart ")).count();
     let resumed = lines
         .iter()
-        .filter(|l| l.contains(&format!("thread {thread} resumed")))
+        .filter(|l| l.contains(&format!("thread {thread} resumed (")))
         .count();
     let created = lines.iter().filter(|l| l.contains("created")).count();
     ensure(restarts == 3 && resumed == 3 && created == 1, || {

@@ -652,6 +652,9 @@ impl Supervisor {
             }
             Err(e) => return log::line(&format!("{id}: cannot read the instance: {e}")),
         };
+        // The old link would otherwise reconnect to the next app-server on
+        // the same socket path while it retries.
+        self.codex.disconnect(id);
         if holder_gone {
             self.sweep(&instance, "holder died").await;
         }
