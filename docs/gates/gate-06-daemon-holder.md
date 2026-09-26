@@ -2,14 +2,14 @@
 
 > **TL;DR**
 > - 真 daemon 接真 holder（agent runtime adapter）：daemon 重啟時 agent 不斷線；holder 或 agent 死了，daemon 用 `--resume` 接回。
-> - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這個施工關才算完成。
-> - 下一步：實作在 draft PR（branch `feat/gate-06-daemon`）；先看「待你追認」，再照「你親自驗收」一步一步做。
+> - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這個施工關才算完成——這裡已經做完了。
+> - 下一步：第 7、8 施工關可以開工；名詞表已補（見下方「自動驗收」勾選）。
 
 **先看這條**：這頁的步驟會用到 `agend`。每個新開的終端機分頁（包括第二個終端）都要先跑「你親自驗收」開頭的設定，否則會跑到舊的 Node 版 `agend` 1.24.0。
 
 ## 狀態
 
-**實作中，draft PR**（2026-09-26）：P1–P9 已實作，自動驗收由實作者自跑通過；fresh-context verifier r2 CONFIRMED；H1–H16 使用者已追認；使用者親自驗收 9 步通過，等 merge。名詞表不在本 PR 改（見「自動驗收」）。
+**完成**（2026-09-26，已 merge #125）：P1–P9 已實作，自動驗收由實作者自跑通過；fresh-context verifier r2 CONFIRMED；H1–H16 使用者已追認；使用者親自驗收 9 步通過。名詞表已在共用文件 PR 補上（見「自動驗收」）。
 
 ## 範圍
 
@@ -163,7 +163,7 @@
 - [x] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨
 - [x] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `check-deps: ok (5 rules, 8 crates checked for agend-testkit, agend-core metadata ok, no-std build ok)`，並有新規則：`agend-daemon` 不能依賴 `agend-holder`、`agend-shim`（P9）。細化：在 `crates/agend-daemon/Cargo.toml` 的 `[dependencies]` 加 `agend-holder.workspace = true` 後印出 `check-deps: agend-daemon depends on agend-holder (…gate 6 P9)`、`xtask: 1 dependency rule violation(s)` 並失敗；還原後恢復 ok（2026-09-26 實測；單元測試 `the_daemon_may_not_link_the_holder_or_the_shim` 也釘這條）
 - [x] `~/.cargo/bin/cargo xtask accept daemon-holder` 通過，並印出下方「你親自驗收」用到的 demo（最後一行 `gate 6 (daemon-holder): checks passed`）
-- [ ] 本施工關 crate 的 `README.md`／`TESTING.md` 已更新（agend-daemon、agend、agend-holder 已做）；名詞表加上 `daemon_probe`、孤兒 holder、instance 狀態（含 `failed`）、`logs/`（名詞表是共用文件，不在本 PR 改，文字交給 orchestrator）
+- [x] 本施工關 crate 的 `README.md`／`TESTING.md` 已更新（agend-daemon、agend、agend-holder 已做）；名詞表加上 `daemon_probe`、孤兒 holder、instance 狀態（含 `failed`）、`logs/`（名詞表是共用文件，在 gate 6 merge 後的共用文件 PR 補上）
 - [x] 測試不留殘留：結束時沒有 `g6-` 或測試 id 的 holder（每個測試結尾檢查 lock 與 `ps`；跑完全部測試後 `pgrep -fl "agend holder"` 什麼都不印）；kill 只對自己起的、大於 1 的 pid
 - [x] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」（verifier 的 kill 只對自己起的 pid、在沙箱裡跑；r1 REFUTED 已修，r2 CONFIRMED `6316d42`）
 
@@ -429,6 +429,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-26 merge #125（`3e28e06`）；狀態改為完成；共用文件（ROADMAP、gates/README、GLOSSARY、AGENTS.md crate 規則、CONTRACTS.md、testkit 註解）在之後的共用文件 PR 補上。
 - 2026-09-26 verifier r1 REFUTED（`8222f7d`）修正：F1 MEDIUM claude 第一次 `Spawn` 前 daemon 當掉 → 之後只拿到 `--resume` 沒建立過的 session：`running` 改成第一次 `Spawn` 被確認後才寫、`new` 一律 `--session-id`（H1、H2 改寫；回歸測試 `a_daemon_killed_before_the_first_spawn_still_starts_the_session_fresh` 修前失敗、修後通過；demo 加 `== crash-before-spawn`）；F2 只有 instance 的 DB 也做每日快照（`a_database_with_only_instances_takes_its_daily_snapshot`）；F3 一個鎖住卻沒有活 pid 的鎖檔不再讓整個開機失敗，跳過並記警告（`a_locked_file_without_a_live_pid_is_skipped_not_fatal`）；F4 放棄時關掉對 holder 的連線（H8 改寫）；F5 第 5 施工關頁的 demo 輸出更新；H14 標明與安全清單字面不同。
 - 2026-09-26 CI（ubuntu）偶發失敗修正：`a_second_daemon_is_refused_after_ten_seconds_and_the_first_is_untouched` 報 `the first daemon's log changed`——daemon log 先寫 stderr 再寫檔，測試看到 stderr 那行就拍檔案快照，偶爾檔案還沒寫。改成先寫檔再寫 stderr（`log::line`）。
 - 2026-09-26 使用者親自驗收 9 步通過（merge 前，branch `feat/gate-06-daemon`）。
