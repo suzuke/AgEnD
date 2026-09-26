@@ -193,7 +193,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
    ~/.cargo/bin/cargo xtask accept daemon-holder
    ```
 
-   應該看到：依序 `== restart`、`== give-up`、`== env`、`== second-daemon`、`== orphan`、`== cleanup`，倒數第二行 `daemon demo: all sections passed`，最後一行 `gate 6 (daemon-holder): checks passed`。整段約 3–5 分鐘（前面是測試，demo 本身約 50 秒）。
+   應該看到：依序 `== restart`、`== give-up`、`== crash-before-spawn`、`== env`、`== second-daemon`、`== orphan`、`== cleanup`，倒數第二行 `daemon demo: all sections passed`，最後一行 `gate 6 (daemon-holder): checks passed`。整段約 3–5 分鐘（前面是測試，demo 本身約 50 秒）。
 
    - [ ] 通過
 
@@ -244,6 +244,17 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
    ```
 
    第一行是 instance 的第一次啟動（全新、帶 `--session-id`）；之後每次重起都帶 `--resume`。「agent's own record」是假 agent 自己把收到的參數寫進檔案，不是 daemon 說的。
+
+   再找 `== crash-before-spawn`（daemon 在第一次 `Spawn` 前被硬殺，verifier r1 F1）。應該看到：
+
+   ```text
+   attempt 1: daemon killed -9 right after `g6-dc1: start --session-id <S>`; agent had not run; holder <…>
+   next boot: g6-dc1: <reconnected … it had no agent, started one 或 start --session-id <S>>
+   agent's own record: --session-id <S> (the session is created, not resumed)
+   DB status: running
+   ```
+
+   重點：session 還沒建立時，下次開機仍用 `--session-id`，不會 `--resume` 一個不存在的 session。
 
    - [ ] 通過
 
@@ -384,24 +395,24 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 | # | 決定 | 理由 | 反悔成本 |
 |---|---|---|---|
-| H1 | instance 狀態只有 `new`（沒起過）、`running`（daemon 讓它保持在跑；第一次之後每次啟動都 resume）、`failed`。第一次啟動前先寫 `running` 再送 `Spawn`（P3）；接回時**一律重送 `Spawn`**，holder 已有 agent 就回 `already_spawned`、什麼都不變 | 不需要「starting」狀態：重送 `Spawn` 本身就處理「daemon 死在起 holder 與 `Spawn` 之間」；一律重送比記「送過沒」簡單 | 加 `starting` 狀態：migration 改 CHECK、`plan_boot` 多一列 |
-| H2 | claude 的 session id 在加 instance 時就產生（UUID v4，`daemon_probe add`）：第一次啟動帶 `--session-id <id>`，之後只帶 `--resume <id>`。codex、opencode 還沒有 session id：第一次可以全新啟動，之後一死就 `failed` | 頁面只說「有 session id 就帶 `--resume`」；自己給 id 就不必從 claude 的輸出抓，第一次啟動就有 id 可接 | 改成啟動後從 hook／輸出讀 session id：多一個寫回 DB 的步驟 |
+| H1 | instance 狀態只有 `new`（session 還沒建立）、`running`（第一次 `Spawn` 已被 holder 確認：`Spawned` 或 `already_spawned`，session 存在，之後每次啟動都 resume）、`failed`。**與 P3 字面不同**：instance 那一列在任何啟動前就在 DB，但 `running` 是在第一次 `Spawn` 被確認**之後**才寫；接回時一律重送 `Spawn`（holder 已有 agent 就回 `already_spawned`、什麼都不變）。所以 daemon 死在「起 holder」與「第一次 `Spawn` 確認」之間時，下次開機重送的仍是 `--session-id`，不是 `--resume` 一個沒建立過的 session（verifier r1 F1，測試 `a_daemon_killed_before_the_first_spawn_still_starts_the_session_fresh`）；第一次啟動失敗的重起也帶 `--session-id` | 先寫 `running` 再 `Spawn`（原本的做法）會讓那個窗口裡的 claude 只拿到 `--resume`、3 次後 `failed`；「DB 不知道的 agent」本來就不會發生，因為 instance 那一列早就在 DB。剩下的極小窗口：agent 已跑、`running` 還沒寫、holder 又死掉 → 下次用 `--session-id` 起，claude 會拒絕、3 次後 `failed`、交給人（不會全新丟掉對話） | 改回先寫 `running`：`supervisor::start`／`reconnect` 各搬一行 |
+| H2 | claude 的 session id 在加 instance 時就產生（UUID v4，`daemon_probe add`）：session 建立前（`new`）的每次啟動帶 `--session-id <id>`，建立後（`running`）只帶 `--resume <id>`。codex、opencode 還沒有 session id：可以全新啟動直到第一次 `Spawn` 被確認，之後一死就 `failed` | 頁面只說「有 session id 就帶 `--resume`」；自己給 id 就不必從 claude 的輸出抓，第一次啟動就有 id 可接 | 改成啟動後從 hook／輸出讀 session id：多一個寫回 DB 的步驟 |
 | H3 | agent 環境白名單定為：daemon 設 `AGEND_HOME`、`AGEND_INSTANCE`、`PATH`（`$AGEND_HOME/bin:` + daemon 的 `PATH`，沒有時 `/usr/bin:/bin`）；從 daemon 複製 `HOME`、`USER`、`LOGNAME`、`LANG`、`LC_ALL`、`LC_CTYPE`、`TMPDIR`、`TZ`。**不**轉傳其他 `AGEND_*`（例如 `AGEND_SHIM_BYPASS`）與 daemon 的 `TERM`（holder 自己設 `xterm-256color`，那才是 agent 的終端） | 頁面寫「`AGEND_*`…、`TERM`…（開工時細化）」；轉傳 `AGEND_SHIM_BYPASS` 會讓 agent 繞過 shim；daemon 的 `TERM` 描述的是 daemon 的終端 | `runtime/env.rs` 的 `PASS_THROUGH` 加名字 |
 | H4 | daemon log 用自己寫的約 40 行 writer，不用 tracing：每行同時寫 stderr 與 `logs/daemon-YYYY-MM-DD.log`；拿到 `agend.db` 之前只寫 stderr | 少一組依賴（tracing + subscriber + 按日期換檔）；前景跑時人要在終端看到 `ready`；第二個 daemon 不能改到第一個的 log（步驟 7） | 換成 tracing：`log::line` 改成 `tracing::info!`，加一個按日期開檔的 writer |
 | H5 | 「每小時補做今天還沒做的」做成**每小時把全部做一次**：`prune`、今天的 DB 快照（已存在就跳過）、log／audit／holder log 期限都是冪等的 | 不必記「今天做過沒」；結果相同 | 加一個「上次做的日期」變數 |
 | H6 | 期限的「留 N 天」＝含今天共 N 個日曆日（UTC）：daemon log 留 7 個檔；audit 留 13 份輪替檔＋今天的 `shim.jsonl`＝14 份。audit 依 `shim.jsonl` 的修改日期輪替成 `shim-<那天>.jsonl`；那個名字已存在就不輪替、記一行 log | 用檔名的日期刪、不看 mtime（複製會改 mtime），與第 5 施工關 S15 一致；同名只會在時鐘倒退時發生 | 改算法：`housekeeping.rs` 的 `delete_dated` 一行 |
 | H7 | 每個 holder 的長連線是一條 std thread（活得跟 holder 一樣久），`spawn_blocking` 只用在一次性的呼叫（起、停）；不在 tokio runtime 裡時（testkit 的 `block_on` 跑契約）一次性呼叫直接在呼叫端執行 | tokio 建議長時間阻塞的工作用自己的 thread，`spawn_blocking` 的 pool 有上限；契約測試不必另外起 runtime | 長連線改 `spawn_blocking`：`link.rs` 一行，但每個 holder 永久佔一個 blocking slot |
-| H8 | `failed` 的 instance：它的 holder（agent 已結束）**留著**，保留最後的畫面給人看；開機時不接回也不算孤兒；holder 靠第 4 施工關的 24 小時安全網自己結束 | P6「交給人」：畫面是人判斷的依據 | 放棄時順便 `Shutdown`：`supervisor::fail` 加一行 |
+| H8 | `failed` 的 instance：它的 holder（agent 已結束）**留著**，保留最後的畫面給人看；daemon 放棄時關掉自己對它的連線（verifier r1 F4），所以沒有人連上時 holder 的 24 小時安全網（第 4 施工關 P2）會讓它自己結束；開機時不接回也不算孤兒 | P6「交給人」：畫面是人判斷的依據 | 放棄時順便 `Shutdown`：`supervisor::fail` 一行 |
 | H9 | 重起前若 holder 還在（agent 自己結束的情況），先送 `Shutdown` 等它結束，再起新的 holder 帶 `--resume` | holder 一生只跑一個 agent（第 4 施工關 G10），不能在同一個 holder 裡重起 | 無（這是唯一做法），列出來只因為頁面沒寫 |
 | H10 | 事件依序處理：Ctrl-C 剛好碰上「起 holder／重起」時，要等那一步做完（可能超過 P1 的 5 秒）才結束 | 依序處理最簡單，不用處理同一個 instance 同時被兩件事改；平常 Ctrl-C 實測 0.01–0.03 秒 | 起 holder 改成背景工作、Ctrl-C 時取消：多一套取消邏輯 |
 | H11 | 起不來（5 秒內連不上、`Spawn` 被拒）算一次「死掉」，走同一套 5 秒／3 次／`failed` | 頁面 P6 列了「holder 起不來」；同一個計數最簡單 | 改成起不來立刻 `failed`：`supervisor` 一個分支 |
 | H12 | 要真 `agend` binary 的測試放 `crates/agend/tests/`（`holder_runtime.rs`、`daemon_process.rs`），各段程式放 `crates/agend-daemon/tests/common/daemon_process.rs`，測試與 `daemon_probe demo` 跨 crate 用 `#[path]` 共用；`xtask accept daemon-holder` 的 crates 因此是 agend-daemon、agend-holder、agend、agend-core | agend-daemon 的測試拿不到 `agend` binary（比照第 4 施工關 G8）；demo 印的就是測試驗的（比照第 5 施工關 S14） | 各自一份：demo 與測試分開寫 |
 | H13 | 測試與 demo 的 home 放 `/tmp/g6-<pid>-<n>`，不放 `$TMPDIR` | macOS 的 `$TMPDIR` 約 49 bytes，加上 `run/holders/contract-boot1.sock` 超過 holder 的 100 bytes 上限 | 無 |
-| H14 | 測試對**自己的** daemon 子程序送 SIGINT（`libc::kill`，先確認 pid > 1、還沒回收），模擬 Ctrl-C；硬殺 daemon 用 `Child::kill()` | 頁面 P1 要驗 Ctrl-C，只有真的送 SIGINT 才驗得到；範圍仍是「只對自己起的程序」 | 無替代（不驗 Ctrl-C） |
+| H14 | **與你的安全清單字面不同，請明確決定**：你列的測試可用手段是 `Child::kill()`／`wait()`、協定 `Shutdown`、對自己 home 鎖檔裡的 pid 送 SIGKILL；測試另外對**自己的** daemon 子程序送 SIGINT（`libc::kill`，先確認 pid > 1、還沒回收）來模擬 Ctrl-C。硬殺 daemon 仍用 `Child::kill()` | 頁面 P1 要驗 Ctrl-C，只有真的送 SIGINT 才驗得到；對象仍只有自己起的程序 | 不驗 Ctrl-C：刪掉 `Daemon::interrupt`，四次開機改用 `Child::kill`（就驗不到「Ctrl-C 後 holder 沒收到 `Shutdown`」） |
 | H15 | 開機的 `ready` 行數字是計畫的動作數（`recovered` = 要接回的個數），不是成功數；接回失敗會另外記一行、走 H11 | 數字與 `plan_boot` 一一對應，好對照 | 改成成功數：`BootReport` 計數位置 |
 | H16 | 契約 fixture 的 `is_running` 只看鎖檔（pid 等於 handle 的 pid），不試連 socket；`daemon_probe add` 只做兩種 agent：bash 計數器（預設）與 `--dies`（立刻 `exit 1`），不能指定任意程式 | CONTRACTS 寫「程序存在且 socket 連得上」，但連 socket 會搶走 runtime 自己的長連線（第 4 施工關 P3 的註）；`daemon_probe` 不是 production 命令，第 9 施工關 `agend instance add` 才做完整參數 | 讓 `add` 收 `-- <program> [args]`：約 10 行 |
 
-另記（不需追認，事實）：migration 0002 讓 schema 版本變成 2，第 5 施工關 demo 的輸出跟著變：`== migrate` 是 `schema 0 -> 2`、`rows:` 多一個 `instances 0`，`== too-new` 是 `user_version 3`。第 5 施工關頁面的「應該看到」要更新（共用文件，交給 orchestrator）。
+另記（事實）：migration 0002 讓 schema 版本變成 2，第 5 施工關頁步驟 2、8 的「應該看到」已照實跑改好（該頁進度紀錄有記）。
 
 ## 驗收紀錄
 
@@ -415,6 +426,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-26 verifier r1 REFUTED（`8222f7d`）修正：F1 MEDIUM claude 第一次 `Spawn` 前 daemon 當掉 → 之後只拿到 `--resume` 沒建立過的 session：`running` 改成第一次 `Spawn` 被確認後才寫、`new` 一律 `--session-id`（H1、H2 改寫；回歸測試 `a_daemon_killed_before_the_first_spawn_still_starts_the_session_fresh` 修前失敗、修後通過；demo 加 `== crash-before-spawn`）；F2 只有 instance 的 DB 也做每日快照（`a_database_with_only_instances_takes_its_daily_snapshot`）；F3 一個鎖住卻沒有活 pid 的鎖檔不再讓整個開機失敗，跳過並記警告（`a_locked_file_without_a_live_pid_is_skipped_not_fatal`）；F4 放棄時關掉對 holder 的連線（H8 改寫）；F5 第 5 施工關頁的 demo 輸出更新；H14 標明與安全清單字面不同。
 - 2026-09-26 實作（draft PR，branch `feat/gate-06-daemon`）：`agend daemon`、`instances` 表（migration 0002）、`plan_boot`、`HolderRuntime`（長連線、環境白名單、shim symlink）、P6 重起、housekeeping（prune、DB 快照、log／audit／holder log 期限）、`daemon_probe` 與 demo、契約三層、check-deps 規則、core 版本測試；「你親自驗收」步驟 1–9 改成確切指令與實跑輸出（步驟 4–9 由實作者用只對自己子程序送訊號的 harness 預演過）；「待你追認」H1–H16。已知風險「EXCLUSIVE 鎖交接的 10 秒」實測：舊 daemon 收到 Ctrl-C 時新 daemon 等了約 420 ms；四次開機（前一個已結束才起下一個，含 `kill -9` 之後）等 2–4 ms。fresh-context verifier 尚未跑。
 - 2026-09-26 使用者追認 P3 夜間更正（不設 `process_group(0)`）與 P7–P9；第 4、5 施工關已 merge。
 - 2026-09-26 開工前提案 P1–P9 寫定：P1–P6 使用者 2026-09-25 確認；P7–P9 夜間照建議代填、待你追認。舊步驟修正（拿掉 `--foreground`、`spawn-fake` 改 `daemon_probe`、`pgrep` 限 `g6-`）；`install_hooks` 移到第 10 施工關（P9）；狀態改為提案中。

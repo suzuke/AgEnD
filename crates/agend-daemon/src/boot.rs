@@ -5,7 +5,7 @@
 //! | DB | holder lock held | action |
 //! |---|---|---|
 //! | yes (not `failed`) | yes | reconnect |
-//! | yes (not `failed`) | no | start (resume unless the instance never ran) |
+//! | yes (not `failed`) | no | start (resume only when `running`: its session exists) |
 //! | yes, `failed` | either | nothing: a human decides (gate 6 P6) |
 //! | no | yes | orphan: send `Shutdown` |
 //!
@@ -17,7 +17,7 @@ use crate::store::{Instance, InstanceStatus};
 pub enum BootAction {
     /// The holder runs: reconnect to it.
     Reconnect { id: String },
-    /// No holder runs: start one. `resume` unless the instance never ran.
+    /// No holder runs: start one; `resume` when it is `running` (its session exists).
     Start { id: String, resume: bool },
     /// A holder runs for an instance the DB does not have: stop it.
     Orphan { id: String },
@@ -104,8 +104,9 @@ mod tests {
                     resume: false,
                 }],
             ),
-            // A new instance whose holder runs (the daemon died between
-            // starting the holder and writing `running`): reconnect.
+            // A new instance whose holder runs (the daemon died before its
+            // first `Spawn` was acknowledged): reconnect; the re-sent
+            // `Spawn` starts the session.
             (
                 vec![instance("a", New)],
                 ids(&["a"]),

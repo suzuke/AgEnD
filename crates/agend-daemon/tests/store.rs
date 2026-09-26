@@ -10,13 +10,15 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use agend_core::model::Backend;
 use agend_core::pipeline::task::{Task, TaskStatus};
 use agend_core::pipeline::workflow::Workflow;
 use agend_core::traits::{CasResult, Clock, Store, StoredEvent};
 use agend_daemon::store::retention::{DAY_MS, Keep, RETENTION, Target};
 use agend_daemon::store::snapshot::{self, KEEP};
 use agend_daemon::store::{
-    BACKUPS_DIR, DB_FILE, LATEST_VERSION, MIGRATIONS, Migration, SqliteStore, StoreError,
+    BACKUPS_DIR, DB_FILE, Instance, InstanceStatus, LATEST_VERSION, MIGRATIONS, Migration,
+    SqliteStore, StoreError,
 };
 use agend_testkit::block_on;
 use agend_testkit::contract::store::{self as contract, StoreFixture};
@@ -993,6 +995,34 @@ fn an_empty_database_takes_no_daily_snapshot_and_evicts_none() {
     let report = block_on(store.snapshot(NOW + 2 * KEEP as u64 * DAY_MS)).unwrap();
     assert!(report.taken && !report.empty);
     assert_eq!(report.rotated_out.len(), 1);
+}
+
+/// Verifier finding (gate 6 round 1, F2): instances are data too. A DB
+/// whose only rows are instances (every home right after gate 6's first
+/// `daemon_probe add`) gets its daily snapshot.
+#[test]
+fn a_database_with_only_instances_takes_its_daily_snapshot() {
+    let dir = TempDir::new("store-snapshot-instances").unwrap();
+    let home = dir.path().join("home");
+    let store = SqliteStore::open(&home, NOW).unwrap();
+    assert!(block_on(store.snapshot(NOW)).unwrap().empty);
+    let instance = Instance {
+        id: "g6-1".into(),
+        backend: Backend::Claude,
+        program: "/bin/bash".into(),
+        args: vec!["-c".into(), "exit 0".into()],
+        working_directory: "/tmp".into(),
+        session_id: Some("s-1".into()),
+        status: InstanceStatus::New,
+    };
+    block_on(store.add_instance(&instance)).unwrap();
+    let report = block_on(store.snapshot(NOW)).unwrap();
+    assert!(report.taken && !report.empty, "{report:?}");
+    let copied: i64 = Connection::open(&report.path)
+        .unwrap()
+        .query_row("SELECT count(*) FROM instances", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(copied, 1);
 }
 
 /// Verifier finding (gate 5 round 1): a snapshot killed mid-write can

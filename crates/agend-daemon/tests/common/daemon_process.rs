@@ -714,3 +714,82 @@ pub fn orphan(lab: &Lab, tag: &str) -> Result<Vec<String>, String> {
         format!("holder pid={holder} gone"),
     ])
 }
+
+/// Records its arguments in its working directory, then counts.
+pub const RECORDS_ARGS: &str =
+    "echo \"$*\" >> args.log; i=0; while :; do i=$((i+1)); echo \"counter=$i\"; sleep 1; done";
+
+/// `== crash-before-spawn` (verifier r1 F1): the daemon is killed right
+/// after it logs the first start, before the agent ran. The next boot must
+/// still start the agent with `--session-id` (the session was never
+/// created), never `--resume`. Retried with a new instance (up to 5 times)
+/// when the kill came too late to hit the window.
+pub fn crash_before_spawn(lab: &Lab, tag: &str) -> Result<Vec<String>, String> {
+    let home = lab.home(94);
+    for attempt in 1..=5 {
+        let id = format!("g6-{tag}c{attempt}");
+        let instance = add(&home, &id, RECORDS_ARGS)?;
+        let session = instance.session_id.clone().unwrap_or_default();
+        let args_log = Path::new(&instance.working_directory).join("args.log");
+        let mut d = Daemon::start(lab, &home, &[])?;
+        d.expect(&format!("{id}: start --session-id {session}"))?;
+        d.kill9()?;
+        if args_log.exists() {
+            // The agent already ran: not the window this checks.
+            remove(&home, &id)?;
+            lab.stop_all_holders();
+            continue;
+        }
+        let holder = files::running(&home, &id).ok().flatten();
+        let mut d = Daemon::start(lab, &home, &[])?;
+        d.ready()?;
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let args = loop {
+            match fs::read_to_string(&args_log) {
+                Ok(text) if !text.is_empty() => break text,
+                _ if Instant::now() > deadline => {
+                    return Err(format!(
+                        "the agent never started; log:\n{}",
+                        d.log.join("\n")
+                    ));
+                }
+                _ => std::thread::sleep(Duration::from_millis(100)),
+            }
+        };
+        d.interrupt()?;
+        let first = args.lines().next().unwrap_or_default().to_owned();
+        ensure(first == format!("--session-id {session}"), || {
+            format!(
+                "after the crash the agent was started with {args:?}, expected --session-id {session}"
+            )
+        })?;
+        ensure(!args.contains("--resume"), || {
+            format!("resumed a session never created: {args:?}")
+        })?;
+        let status = status(&home, &id)?;
+        ensure(status == InstanceStatus::Running, || {
+            format!("status {status:?}")
+        })?;
+        let after = d
+            .log
+            .iter()
+            .find(|l| l.contains(&format!("{id}:")))
+            .map(|l| untimed(l).to_owned())
+            .unwrap_or_default();
+        return Ok(vec![
+            format!(
+                "attempt {attempt}: daemon killed -9 right after `{id}: start --session-id <S>`; agent had not run; holder {}",
+                holder.map_or("not started".into(), |p| format!(
+                    "pid={p} left without an agent"
+                ))
+            ),
+            format!("next boot: {}", after.replace(&session, "<S>")),
+            format!(
+                "agent's own record: {} (the session is created, not resumed)",
+                first.replace(&session, "<S>")
+            ),
+            format!("DB status: {}", status.as_str()),
+        ]);
+    }
+    Err("the kill never landed before the agent started (5 attempts)".into())
+}

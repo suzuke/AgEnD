@@ -92,7 +92,9 @@ pub fn running(home: &Path, id: &str) -> io::Result<Option<u32>> {
 }
 
 /// Every instance whose holder runs now, by id, with the holder's pid:
-/// the `*.lock` files in `run/holders/` whose lock is held.
+/// the `*.lock` files in `run/holders/` whose lock is held. A lock file that
+/// cannot be judged (held without a live pid, unreadable) is skipped with a
+/// logged warning.
 pub fn running_holders(home: &Path) -> io::Result<Vec<(String, u32)>> {
     let dir = holders_dir(home);
     let entries = match fs::read_dir(&dir) {
@@ -106,8 +108,12 @@ pub fn running_holders(home: &Path) -> io::Result<Vec<(String, u32)>> {
         let Some(id) = name.to_str().and_then(|n| n.strip_suffix(".lock")) else {
             continue;
         };
-        if let Some(pid) = lock_holder(&dir.join(&name))? {
-            out.push((id.to_owned(), pid));
+        match lock_holder(&dir.join(&name)) {
+            Ok(Some(pid)) => out.push((id.to_owned(), pid)),
+            Ok(None) => {}
+            // One odd lock file must not stop every other instance
+            // (verifier r1 F3): skipped, and said so.
+            Err(e) => crate::log::line(&format!("warning: skipping holder lock {id}: {e}")),
         }
     }
     out.sort();
@@ -144,6 +150,23 @@ mod tests {
         assert_eq!(running(home, "a").unwrap(), None);
         drop(held);
         assert_eq!(running_holders(home).unwrap(), []);
+    }
+
+    #[test]
+    fn a_locked_file_without_a_live_pid_is_skipped_not_fatal() {
+        let dir = TempDir::new("g6-files-junk").unwrap();
+        let home = dir.path();
+        fs::create_dir_all(holders_dir(home)).unwrap();
+        fs::write(lock_path(home, "junk"), "garbage\n").unwrap();
+        fs::write(lock_path(home, "ok"), format!("{}\n", std::process::id())).unwrap();
+        let junk = File::open(lock_path(home, "junk")).unwrap();
+        let ok = File::open(lock_path(home, "ok")).unwrap();
+        flock_ex(&junk);
+        flock_ex(&ok);
+        assert_eq!(
+            running_holders(home).unwrap(),
+            [("ok".to_string(), std::process::id())]
+        );
     }
 
     #[test]

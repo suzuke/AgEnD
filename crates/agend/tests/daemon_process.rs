@@ -93,6 +93,17 @@ fn a_second_daemon_is_refused_after_ten_seconds_and_the_first_is_untouched() {
     assert_no_leftovers(&lab, &tag);
 }
 
+/// Verifier r1 F1: a daemon killed between its first start and `Spawn`
+/// must not make the next boot `--resume` a session that never existed.
+#[test]
+fn a_daemon_killed_before_the_first_spawn_still_starts_the_session_fresh() {
+    let lab = lab::Lab::new(Path::new(BIN));
+    let tag = tag("c");
+    show(&lab::crash_before_spawn(&lab, &tag).unwrap());
+    lab.stop_all_holders();
+    assert_no_leftovers(&lab, &tag);
+}
+
 #[test]
 fn an_orphan_holder_is_stopped_at_the_next_boot() {
     let lab = lab::Lab::new(Path::new(BIN));

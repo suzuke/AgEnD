@@ -51,10 +51,10 @@
 | 開機順序 | 開 DB → housekeeping（失敗只記錯）→ `bin/` 的 shim symlink（git、kill、killall、pkill → 目前的 binary）→ `plan_boot` → `agend daemon ready: instances=N recovered=R started=S orphans=O` |
 | `plan_boot` | DB 有、鎖被持有 → 接回（重送 `Spawn`，holder 回 `already_spawned`）；DB 有、沒鎖 → 啟動；DB 沒有、鎖被持有 → 孤兒，送 `Shutdown`；`failed` 的不動 |
 | instance | `instances` 表（migration 0002，永久保留）：id `[a-z0-9-]{1,24}`、backend、program、args、working_directory、session_id、status（`new`／`running`／`failed`） |
-| 啟動 holder | `agend holder <id>`，環境只有 `AGEND_HOME`；每 50 ms 試連、5 秒內連不上算失敗；先把 `running` 寫進 DB 再送 `Spawn`；自己起的 holder 由一條 thread `wait` 收屍 |
+| 啟動 holder | `agend holder <id>`，環境只有 `AGEND_HOME`；每 50 ms 試連、5 秒內連不上算失敗；第一次 `Spawn` 被 holder 確認後才把 `new` 改成 `running`（session 存在，之後都 resume）；自己起的 holder 由一條 thread `wait` 收屍 |
 | agent 環境 | 白名單：`AGEND_HOME`、`AGEND_INSTANCE`、`PATH`（`$AGEND_HOME/bin` 開頭）、`HOME`、`USER`、`LOGNAME`、`LANG`、`LC_ALL`、`LC_CTYPE`、`TMPDIR`、`TZ`；其他（例如 `TELEGRAM_BOT_TOKEN`、`AGEND_SHIM_BYPASS`）一律不給 |
-| session | claude：第一次 `--session-id <id>`，之後只用 `--resume <id>`；codex、opencode 還沒有 session id（第 7、12 施工關），死了就 `failed` |
-| 死掉之後 | agent 結束、holder 死了（連線斷＋鎖放掉）、啟動失敗 → log → 5 秒後 `restart N/3 --resume <id>`；10 分鐘內 3 次仍死 → `<id> failed: …`，不再起；次數只在記憶體 |
+| session | claude：`new` 時 `--session-id <id>`，`running` 後只用 `--resume <id>`；codex、opencode 還沒有 session id（第 7、12 施工關），死了就 `failed` |
+| 死掉之後 | agent 結束、holder 死了（連線斷＋鎖放掉）、啟動失敗 → log → 5 秒後 `restart N/3 --resume <id>`（還是 `new` 就 `--session-id`）；10 分鐘內 3 次仍死 → `<id> failed: …`，不再起、關掉對 holder 的連線；次數只在記憶體 |
 | Ctrl-C | SIGINT／SIGTERM：關 holder 連線、關 DB、exit 0；**不送 `Shutdown`**，holder 照跑 |
 | log | stderr ＋ `logs/daemon-YYYY-MM-DD.log`（UTC，0600），留 7 天；`audit/shim.jsonl` 每天輪替成 `shim-YYYY-MM-DD.jsonl`、留 14 天；`run/holders/<id>.log` 在 holder 不在、7 天沒動時刪 |
 
@@ -71,7 +71,7 @@
 | 表 | `tasks`、`workflows`、`task_events`、`instances`（STRICT）；schema 版本在 `PRAGMA user_version`（目前 2），migration 在 `src/store/migrations/` |
 | 耐久 | WAL、`synchronous=FULL`、`foreign_keys=ON` |
 | 保留期限 | `store::retention::RETENTION`：task、workflow、instance 永久；事件 14 天；`audit/shim.jsonl` 每日輪替留 14 天、daemon log 7 天、holder log 7 天（第 6 施工關 `housekeeping`） |
-| DB 快照 | `backups/agend-YYYY-MM-DD.db`（UTC；DB 沒有任何 task 與事件時不做），升級前 `agend-YYYY-MM-DD-pre-vN.db`；只留最新 7 份，其他檔案不動 |
+| DB 快照 | `backups/agend-YYYY-MM-DD.db`（UTC；DB 沒有任何 task、事件與 instance 時不做），升級前 `agend-YYYY-MM-DD-pre-vN.db`；只留最新 7 份，其他檔案不動 |
 | 還沒存 | `PipelineState`（第 10 施工關：task 列上一欄、與 task 一起 CAS，不重播事件） |
 
 ### 還原 DB 快照（手動）

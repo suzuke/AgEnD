@@ -129,6 +129,7 @@ fn demo() -> Result<(), String> {
         ),
     }
     section("give-up", lab::give_up(&lab, tag))?;
+    section("crash-before-spawn", lab::crash_before_spawn(&lab, tag))?;
     section("env", lab::env(&lab, tag))?;
     section("second-daemon", lab::second_daemon(&lab, tag))?;
     section("orphan", lab::orphan(&lab, tag))?;

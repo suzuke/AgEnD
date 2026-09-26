@@ -5,8 +5,11 @@
 //! Gate 6:
 //! - Boot: runs [`crate::boot::plan_boot`]'s actions (reconnect, start,
 //!   `Shutdown` orphans).
-//! - A first start writes `running` to the DB before `Spawn` (P3), so a
-//!   daemon that dies in between never leaves an agent the DB does not know.
+//! - The instance row is in the DB before anything starts. It stays `new`
+//!   until the first `Spawn` is acknowledged (`Spawned` or
+//!   `already_spawned`): only then does the backend session exist, so only
+//!   `running` instances resume. A daemon that dies before that point starts
+//!   the session again with `--session-id` (verifier r1 F1).
 //! - Death (the agent exits, the holder dies, a start fails): wait 5 s, then
 //!   start again with the backend's resume arguments (`--resume <session>`).
 //!   Three restarts within 10 minutes and it still dies → `failed`; no
@@ -204,20 +207,21 @@ impl Supervisor {
     }
 
     /// Reconnects to a running holder and re-sends `Spawn` (P3): a holder
-    /// that already ran its agent answers `already_spawned`. The `Spawn`
-    /// resumes when the backend can; otherwise (codex, opencode: they never
-    /// restart) its holder can only lack an agent if the daemon died between
-    /// starting the holder and `Spawn`, when the agent had never run.
+    /// that already ran its agent answers `already_spawned`. A `new`
+    /// instance's `Spawn` starts the session (`--session-id`); a `running`
+    /// one's resumes when the backend can (codex and opencode never restart,
+    /// so their holder can only lack an agent if the agent never ran).
     async fn reconnect(&mut self, instance: &Instance, pid: u32) {
         let id = instance.id.clone();
-        if instance.status == InstanceStatus::New && !self.mark_running(&id).await {
-            return;
-        }
-        let launch = launch(instance, true)
+        let resume = instance.status == InstanceStatus::Running;
+        let launch = launch(instance, resume)
             .or_else(|_| launch(instance, false))
             .expect("a fresh launch always exists");
         match self.runtime.attach(&launch, pid).await {
             Ok(started) => {
+                if !resume {
+                    self.mark_running(&id).await;
+                }
                 let note = match started.attached.spawn {
                     Some(SpawnOutcome::Spawned) => "; it had no agent, started one",
                     _ => "",
@@ -248,9 +252,6 @@ impl Supervisor {
             Ok(launch) => launch,
             Err(e) => return self.fail(&id, &e).await,
         };
-        if !resume && !self.mark_running(&id).await {
-            return;
-        }
         let session = session_args(instance, resume)
             .map(|a| a.join(" "))
             .unwrap_or_default();
@@ -267,6 +268,9 @@ impl Supervisor {
                     "{id}: holder pid={} started",
                     handle.process_id.unwrap_or(0)
                 ));
+                if !resume {
+                    self.mark_running(&id).await;
+                }
                 self.watch(&id, generation);
             }
             Err(e) => {
@@ -281,18 +285,15 @@ impl Supervisor {
         }
     }
 
-    /// Writes `running` before the first `Spawn` (P3); false if that failed.
-    async fn mark_running(&mut self, id: &str) -> bool {
-        match self
+    /// Records `running` once the first `Spawn` was acknowledged: the
+    /// session exists and every later start resumes it.
+    async fn mark_running(&mut self, id: &str) {
+        if let Err(e) = self
             .store
             .set_instance_status(id, InstanceStatus::Running)
             .await
         {
-            Ok(()) => true,
-            Err(e) => {
-                log::line(&format!("{id}: cannot record running: {e}; not started"));
-                false
-            }
+            log::line(&format!("{id}: cannot record running: {e}"));
         }
     }
 
@@ -306,10 +307,14 @@ impl Supervisor {
         watch.state = State::Up;
     }
 
+    /// Gives up on `id`. Its holder (if any) keeps the last screen for a
+    /// human; the daemon drops its connection, so the holder's idle exit
+    /// (gate 4 P2, 24 h without a client) can end it.
     async fn fail(&mut self, id: &str, reason: &str) {
         if let Some(watch) = self.watches.get_mut(id) {
             watch.state = State::Failed;
         }
+        self.runtime.detach(id);
         if let Err(e) = self
             .store
             .set_instance_status(id, InstanceStatus::Failed)
@@ -338,7 +343,8 @@ impl Supervisor {
             }
             Err(e) => return log::line(&format!("{id}: cannot read the instance: {e}")),
         };
-        if let Err(reason) = session_args(&instance, true) {
+        let resume = instance.status == InstanceStatus::Running;
+        if let (true, Err(reason)) = (resume, session_args(&instance, true)) {
             return self.fail(id, &reason).await;
         }
         let now = log::now_unix_ms();
@@ -380,7 +386,10 @@ impl Supervisor {
                 .await;
         }
         match self.store.instance(id).await {
-            Ok(Some(instance)) => self.start(&instance, true, Some(n)).await,
+            Ok(Some(instance)) => {
+                let resume = instance.status == InstanceStatus::Running;
+                self.start(&instance, resume, Some(n)).await;
+            }
             Ok(None) => {
                 log::line(&format!("{id}: no longer in the DB; not restarted"));
                 self.watches.remove(id);
