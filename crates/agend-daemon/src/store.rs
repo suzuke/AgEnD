@@ -16,9 +16,9 @@
 //!   has committed, so an existing `agend.db` is always a database this
 //!   store finished creating. A build file left by a failed or killed
 //!   creation is removed and built again. An `agend.db` that is shorter
-//!   than a SQLite header, has schema version 0, or lacks a table of its
+//!   than a SQLite header, has schema version 0 or below, or lacks a table of its
 //!   version was damaged or replaced; the store refuses it
-//!   ([`StoreError::Empty`], [`StoreError::NoSchema`],
+//!   ([`StoreError::Empty`], [`StoreError::NoSchema`], [`StoreError::BadVersion`],
 //!   [`StoreError::MissingTables`]) without changing a byte, instead of
 //!   starting over with an empty database whose daily snapshots would push
 //!   the good ones out. A dangling symlink or a non-file is refused too
@@ -98,6 +98,11 @@ pub enum StoreError {
     NoSchema {
         home: PathBuf,
     },
+    /// `agend.db` has a negative schema version, which no agend writes.
+    BadVersion {
+        found: i64,
+        home: PathBuf,
+    },
     /// `agend.db` has schema version `found` but lacks tables that version
     /// has.
     MissingTables {
@@ -168,6 +173,12 @@ impl fmt::Display for StoreError {
                 f,
                 "{DB_FILE} exists but has no agend schema (schema version 0); refusing to \
                  start with it — restore a snapshot from {} (see README)",
+                home.join(BACKUPS_DIR).display()
+            ),
+            Self::BadVersion { found, home } => write!(
+                f,
+                "{DB_FILE} has an invalid schema version {found}; refusing to start with it — \
+                 restore a snapshot from {} (see README)",
                 home.join(BACKUPS_DIR).display()
             ),
             Self::MissingTables {
@@ -449,7 +460,13 @@ fn open_connection(
             home: home.to_path_buf(),
         });
     }
-    let missing = missing_tables(&conn, &migrations[..found as usize])?;
+    let Ok(applied) = usize::try_from(found) else {
+        return Err(StoreError::BadVersion {
+            found,
+            home: home.to_path_buf(),
+        });
+    };
+    let missing = missing_tables(&conn, &migrations[..applied])?;
     if !missing.is_empty() {
         return Err(StoreError::MissingTables {
             found,
@@ -532,9 +549,13 @@ fn create_database(home: &Path, db: &Path, migrations: &[Migration]) -> Result<(
         Err(e) if e.kind() == io::ErrorKind::AlreadyExists => return Err(StoreError::InUse),
         opened => opened?,
     };
-    let mut conn = lock(&new)?;
+    let mut conn = lock_build(&new)?;
     drop(leftover);
-    if !same_file(&file.metadata()?, &fs::symlink_metadata(&new)?) {
+    let at_path = match fs::symlink_metadata(&new) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Err(StoreError::InUse),
+        found => found?,
+    };
+    if !same_file(&file.metadata()?, &at_path) {
         return Err(StoreError::InUse);
     }
     conn.pragma_update(None, "synchronous", "FULL")?;
@@ -570,7 +591,7 @@ fn remove_leftover_build(home: &Path, new: &Path) -> Result<Option<Connection>, 
                      owner; remove it by hand",
         });
     }
-    let held = match lock(new) {
+    let held = match lock_build(new) {
         Ok(conn) => Some(conn),
         // Not a database, so no creator holds a lock on it.
         Err(StoreError::Sqlite(e)) if e.sqlite_error_code() == Some(ErrorCode::NotADatabase) => {
@@ -664,6 +685,21 @@ fn lock(path: &Path) -> Result<Connection, StoreError> {
             }
         })?;
     Ok(conn)
+}
+
+/// [`lock`] on the build file. The file vanishing before SQLite opens it
+/// means another creator published or removed it: [`StoreError::InUse`].
+fn lock_build(new: &Path) -> Result<Connection, StoreError> {
+    match lock(new) {
+        Err(StoreError::Sqlite(e))
+            if e.sqlite_error_code() == Some(ErrorCode::CannotOpen)
+                && fs::symlink_metadata(new)
+                    .is_err_and(|m| m.kind() == io::ErrorKind::NotFound) =>
+        {
+            Err(StoreError::InUse)
+        }
+        locked => locked,
+    }
 }
 
 /// Tables that the `applied` migrations create but `conn` lacks. The

@@ -685,6 +685,32 @@ fn a_database_with_schema_version_zero_is_refused_and_left_untouched() {
     assert_eq!((sha256(&db), listing(&home)), before);
 }
 
+/// Verifier finding (gate 5 round 3): a negative schema version made `open`
+/// panic. It is refused like version 0, byte for byte unchanged.
+#[test]
+fn a_database_with_a_negative_schema_version_is_refused_and_left_untouched() {
+    let dir = TempDir::new("store-version-negative").unwrap();
+    let home = dir.path().join("home");
+    drop(SqliteStore::open(&home, NOW).unwrap());
+    let db = home.join(DB_FILE);
+    let conn = Connection::open(&db).unwrap();
+    conn.pragma_update(None, "user_version", -1).unwrap();
+    drop(conn);
+    assert_eq!(user_version(&db), -1);
+    let before = (sha256(&db), listing(&home));
+
+    let error = SqliteStore::open(&home, NOW).err().unwrap();
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "agend.db has an invalid schema version -1; refusing to start with it — \
+             restore a snapshot from {} (see README)",
+            home.join("backups").display()
+        )
+    );
+    assert_eq!((sha256(&db), listing(&home)), before);
+}
+
 /// Verifier finding (gate 5 round 2): a valid header with schema version 1
 /// and no tables opened, every task call failed, and its daily snapshots
 /// pushed the good ones out. The tables of the recorded version must be
