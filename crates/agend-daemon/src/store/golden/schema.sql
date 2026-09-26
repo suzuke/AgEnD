@@ -1,4 +1,4 @@
--- user_version = 2
+-- user_version = 3
 
 CREATE INDEX task_events_by_task ON task_events (task_id, seq);
 
@@ -13,7 +13,8 @@ CREATE TABLE instances (
     working_directory TEXT NOT NULL,
     session_id        TEXT,
     status            TEXT NOT NULL CHECK (status IN ('new', 'running', 'failed'))
-) STRICT;
+, session_started INTEGER NOT NULL DEFAULT 0
+    CHECK (session_started IN (0, 1))) STRICT;
 
 CREATE TABLE task_events (
     seq                 INTEGER NOT NULL PRIMARY KEY,

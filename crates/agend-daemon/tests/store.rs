@@ -1014,6 +1014,7 @@ fn a_database_with_only_instances_takes_its_daily_snapshot() {
         working_directory: "/tmp".into(),
         session_id: Some("s-1".into()),
         status: InstanceStatus::New,
+        session_started: false,
     };
     block_on(store.add_instance(&instance)).unwrap();
     let report = block_on(store.snapshot(NOW)).unwrap();
@@ -1084,4 +1085,104 @@ fn a_restored_snapshot_opens_as_the_database() {
     let store = SqliteStore::open(&home, NOW).unwrap();
     let loaded = block_on(store.load_task("T-1")).unwrap().unwrap();
     assert_eq!(loaded.version, 1, "back to the snapshot's version");
+}
+
+// ---- gate 8 P5: migration 0003 `session_started` ----
+
+/// Migration 0003's backfill: `running`, and `failed` codex/opencode, count
+/// as started (they ran, so a retry must not start them fresh); `new` and
+/// `failed` claude stay 0. Run on the shipped v2 schema (the fixture).
+#[test]
+fn migration_0003_marks_running_and_failed_codex_opencode_as_started() {
+    let dir = TempDir::new("store-0003").unwrap();
+    let home = dir.path().join("home");
+    fs::create_dir(&home).unwrap();
+    let db = home.join(DB_FILE);
+    let v2 = fs::read_to_string(manifest_dir().join("src/store/fixtures/schema-v2.sql")).unwrap();
+    let conn = Connection::open(&db).unwrap();
+    conn.execute_batch(&v2).unwrap();
+    let rows = [
+        ("claude-running", "claude", "running", true),
+        ("claude-failed", "claude", "failed", false),
+        ("claude-new", "claude", "new", false),
+        ("codex-running", "codex", "running", true),
+        ("codex-failed", "codex", "failed", true),
+        ("codex-new", "codex", "new", false),
+        ("opencode-failed", "opencode", "failed", true),
+    ];
+    for (id, backend, status, _) in rows {
+        conn.execute(
+            "INSERT INTO instances (id, backend, program, args, working_directory, session_id, status) \
+             VALUES (?1, ?2, '/bin/bash', '[]', '/tmp', NULL, ?3)",
+            [id, backend, status],
+        )
+        .unwrap();
+    }
+    drop(conn);
+    let store = SqliteStore::open(&home, NOW).unwrap();
+    let started: Vec<(String, bool)> = block_on(store.instances())
+        .unwrap()
+        .into_iter()
+        .map(|i| (i.id, i.session_started))
+        .collect();
+    let mut expected: Vec<(String, bool)> = rows
+        .iter()
+        .map(|(id, _, _, s)| ((*id).to_owned(), *s))
+        .chain([("fixture-1".to_owned(), true)])
+        .collect();
+    expected.sort();
+    assert_eq!(started, expected);
+}
+
+/// `session_started` is only 0 or 1, and writing `running` sets it in the
+/// same statement; it is never cleared afterwards.
+#[test]
+fn session_started_is_set_with_running_and_checked() {
+    let dir = TempDir::new("store-session-started").unwrap();
+    let home = dir.path().join("home");
+    let store = SqliteStore::open(&home, NOW).unwrap();
+    let instance = Instance {
+        id: "g8-1".into(),
+        backend: Backend::Codex,
+        program: "/bin/bash".into(),
+        args: vec![],
+        working_directory: "/tmp".into(),
+        session_id: None,
+        status: InstanceStatus::New,
+        session_started: false,
+    };
+    block_on(store.add_instance(&instance)).unwrap();
+    let read = || block_on(store.instance("g8-1")).unwrap().unwrap();
+    assert!(!read().session_started);
+    block_on(store.set_instance_status("g8-1", InstanceStatus::Running)).unwrap();
+    assert!(read().session_started);
+    block_on(store.set_instance_status("g8-1", InstanceStatus::Failed)).unwrap();
+    block_on(store.set_instance_status("g8-1", InstanceStatus::New)).unwrap();
+    assert!(read().session_started, "never cleared");
+    drop(store);
+    let conn = Connection::open(home.join(DB_FILE)).unwrap();
+    let error = conn
+        .execute("UPDATE instances SET session_started = 2", [])
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("CHECK constraint failed"),
+        "{error}"
+    );
+}
+
+/// `tasks()` lists every stored task by id (the fleet view reads it).
+#[test]
+fn tasks_lists_every_task_by_id() {
+    let dir = TempDir::new("store-tasks").unwrap();
+    let store = SqliteStore::open(&dir.path().join("home"), NOW).unwrap();
+    assert_eq!(block_on(store.tasks()).unwrap(), vec![]);
+    for id in ["T-2", "T-1"] {
+        block_on(store.create_task(&task(id))).unwrap();
+    }
+    let ids: Vec<String> = block_on(store.tasks())
+        .unwrap()
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    assert_eq!(ids, ["T-1", "T-2"]);
 }

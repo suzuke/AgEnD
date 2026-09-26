@@ -54,8 +54,13 @@ pub struct Lab {
 
 impl Lab {
     pub fn new(agend: &Path) -> Self {
+        Self::with_prefix(agend, "g6")
+    }
+
+    /// A lab under `/tmp/<prefix>-<pid>-<n>` (gate 8 uses `g8`).
+    pub fn with_prefix(agend: &Path, prefix: &str) -> Self {
         let root = PathBuf::from(format!(
-            "/tmp/g6-{}-{}",
+            "/tmp/{prefix}-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::SeqCst)
         ));
@@ -128,6 +133,7 @@ pub fn add(home: &Path, id: &str, script: &str) -> Result<Instance, String> {
         working_directory: workdir.display().to_string(),
         session_id: Some(new_session_id().map_err(|e| e.to_string())?),
         status: InstanceStatus::New,
+        session_started: false,
     };
     let store = SqliteStore::open(home, 0).map_err(|e| format!("open store: {e}"))?;
     block_on(store.add_instance(&instance)).map_err(|e| format!("add {id}: {e}"))?;

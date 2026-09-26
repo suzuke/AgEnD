@@ -28,7 +28,7 @@ cargo test -p xtask
 | `check_core::tests::any_dependency_kind_is_rejected` | normal、build、dev 依賴都會被抓 |
 | `check_core::tests::features_are_rejected` | 在真的 metadata 上加一個 `std` feature 會被抓 |
 | `check_core::tests::missing_target_is_recognised` | 「target 沒裝」與「程式用了 std」分得開 |
-| `tests/protocol_compat.rs` | client／holder JSON wire shape、未來 tagged variant 容忍、additive fields（含 holder `Exited.signal`）與 approval head binding |
+| `tests/protocol_compat.rs` | client／holder JSON wire shape、未來 tagged variant 容忍、additive fields（含 holder `Exited.signal`）與 approval head binding；第 8 施工關：凍結的 client protocol 1.0 型別解得開 1.1 的每種訊息（新的變 `unknown`、新欄位忽略），1.1 解得開 1.0 的訊息（新欄位是空的） |
 | `tests/workflow_toml.rs` | workflow 存檔的 TOML 格式（D19、D32）：內建 `code`、`research`、`epic`、`planned` 與一個用到所有選填欄位的自訂 workflow，逐字比對 `tests/golden/workflow-*.toml`，並能解回同一個值、通過存檔檢查；格式有意改變時用 `AGEND_BLESS_GOLDEN=1` 重產再審 diff |
 | `accept::tests::*` | 13 個施工關編號連續、可用編號或名稱找到、每個施工關的 crate 都存在 |
 | `cargo xtask accept core` | workspace fmt/clippy、core tests、check-deps，並以子程序執行 core example |

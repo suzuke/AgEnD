@@ -265,6 +265,11 @@ pub fn case_rules() -> Vec<(&'static str, &'static str, &'static str)> {
         tag("Notifier", notifier::cases::<FakeNotifier>()),
         tag("Clock", clock::cases::<FakeClock>()),
         tag("Runner", runner::cases::<FakeRunnerFixture>()),
+        #[cfg(unix)]
+        tag(
+            "ClientProtocol",
+            super::client::cases::<super::client::FakeDaemonFixture>(),
+        ),
     ]
     .concat()
 }

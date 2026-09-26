@@ -10,4 +10,6 @@ serde_json = "1"
 
 [dev-dependencies]
 agend-core = { path = "../crates/agend-core" }
+# The frozen client protocol 1.0 types in tests/protocol_compat.rs.
+serde = { version = "1", features = ["derive"] }
 toml = "1.1.6"

@@ -47,6 +47,11 @@ pub const RULES: &[Rule] = &[
         deny: &[&["agend-holder", "agend-shim"]],
         why: "the daemon reaches holders only through the holder protocol and the `agend holder` subcommand (gate 6 P9)",
     },
+    Rule {
+        krate: "agend-daemon",
+        deny: &[&["agend-client"]],
+        why: "the server and the client encode the protocol separately, so the CLP contract can catch them disagreeing (gate 8 P10)",
+    },
 ];
 
 /// Crates that may depend on `agend-testkit` only as a dev-dependency: all of them.
@@ -255,6 +260,18 @@ mod tests {
         .map(String::from)
         .to_vec();
         assert_eq!(violations(daemon, &names), ["agend-holder", "agend-shim"]);
+    }
+
+    #[test]
+    fn the_daemon_may_not_link_the_client() {
+        let rule = RULES
+            .iter()
+            .find(|r| r.krate == "agend-daemon" && r.deny[0].contains(&"agend-client"))
+            .unwrap();
+        let names: Vec<String> = ["agend-daemon", "agend-core", "tokio", "agend-client"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(violations(rule, &names), ["agend-client"]);
     }
 
     #[test]
