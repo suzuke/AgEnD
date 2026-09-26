@@ -9,7 +9,7 @@
 
 ## 狀態
 
-**實作中，draft PR**（2026-09-26）：P1–P9 已實作，自動驗收由實作者自跑通過；fresh-context verifier r2 CONFIRMED；H1–H16 使用者已追認；等你親自驗收。名詞表不在本 PR 改（見「自動驗收」）。
+**實作中，draft PR**（2026-09-26）：P1–P9 已實作，自動驗收由實作者自跑通過；fresh-context verifier r2 CONFIRMED；H1–H16 使用者已追認；使用者親自驗收 9 步通過，等 merge。名詞表不在本 PR 改（見「自動驗收」）。
 
 ## 範圍
 
@@ -165,7 +165,7 @@
 - [x] `~/.cargo/bin/cargo xtask accept daemon-holder` 通過，並印出下方「你親自驗收」用到的 demo（最後一行 `gate 6 (daemon-holder): checks passed`）
 - [ ] 本施工關 crate 的 `README.md`／`TESTING.md` 已更新（agend-daemon、agend、agend-holder 已做）；名詞表加上 `daemon_probe`、孤兒 holder、instance 狀態（含 `failed`）、`logs/`（名詞表是共用文件，不在本 PR 改，文字交給 orchestrator）
 - [x] 測試不留殘留：結束時沒有 `g6-` 或測試 id 的 holder（每個測試結尾檢查 lock 與 `ps`；跑完全部測試後 `pgrep -fl "agend holder"` 什麼都不印）；kill 只對自己起的、大於 1 的 pid
-- [ ] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」（verifier 的 kill 只對自己起的 pid、在沙箱裡跑）
+- [x] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」（verifier 的 kill 只對自己起的 pid、在沙箱裡跑；r1 REFUTED 已修，r2 CONFIRMED `6316d42`）
 
 ## 你親自驗收
 
@@ -195,7 +195,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
    應該看到：依序 `== restart`、`== give-up`、`== crash-before-spawn`、`== env`、`== second-daemon`、`== orphan`、`== cleanup`，倒數第二行 `daemon demo: all sections passed`，最後一行 `gate 6 (daemon-holder): checks passed`。整段約 3–5 分鐘（前面是測試，demo 本身約 50 秒）。
 
-   - [ ] 通過
+   - [x] 通過
 
 2. 四次開機，其中一次 daemon 被硬殺。
 
@@ -221,7 +221,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
    | `killed -9 by test`，下一行照樣接回 | 硬殺 daemon 也不影響 holder |
    | 最後一行 `boot 2 failed` | 反向檢查：每次換新的 home 就接不回來——證明這套檢查分得出「真的跨重啟」 |
 
-   - [ ] 通過
+   - [x] 通過
 
 3. 故意弄壞：agent 一起來就死。
 
@@ -256,7 +256,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
    重點：session 還沒建立時，下次開機仍用 `--session-id`，不會 `--resume` 一個不存在的 session。
 
-   - [ ] 通過
+   - [x] 通過
 
 4. 你自己動手：加一個 instance，前景啟動 daemon。
 
@@ -285,7 +285,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
    daemon 留在前景，不要關這個分頁。記下 `export AGEND_HOME=…` 那一行。
 
-   - [ ] 通過
+   - [x] 通過
 
 5. 故意弄壞：在 daemon 的分頁按 Ctrl-C。
 
@@ -302,7 +302,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
    應該看到：一行 `<H> …/target/debug/agend holder g6-1`（H 與步驟 4 相同）；`counter=<n>`。隔幾秒再跑第二行，n 變大。
 
-   - [ ] 通過
+   - [x] 通過
 
 6. 再啟動 daemon，看它接回。
 
@@ -319,7 +319,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
    H 與步驟 5 相同、m 比步驟 5 的 n 大；`pgrep` 仍只有一行、同一個 pid。
 
-   - [ ] 通過
+   - [x] 通過
 
 7. 故意弄壞：在第二個分頁再起一個 daemon。
 
@@ -331,7 +331,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
    應該看到：約 10 秒後（實測 10.2 秒）`agend daemon: agend.db is in use by another process (is another agend daemon running?)`，接著 `exit=1`；第一個分頁的 daemon 沒有多印任何一行。
 
-   - [ ] 通過
+   - [x] 通過
 
 8. 故意弄壞：硬殺 holder，看 daemon 用 `--resume` 接回（沙箱裡跑，只砍步驟 6 那個 pid）。
 
@@ -366,7 +366,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
    應該看到：`pgrep` 又是一行，pid 是新的 H3；第二行 `agent args: --resume <S>`（新的 agent 自己印出它收到的參數，S 與步驟 4 相同）。`snapshot` 會暫時搶走 daemon 的連線，daemon 1 秒後自己接回，不影響 agent。
 
-   - [ ] 通過
+   - [x] 通過
 
 9. 孤兒巡查與收尾。
 
@@ -388,7 +388,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
    在第二個分頁 `pgrep -fl "agend holder g6-"` 什麼都不印。最後在第一個分頁按 Ctrl-C，再 `rm -rf "$AGEND_HOME"`。
 
-   - [ ] 通過
+   - [x] 通過
 
 ## 待你追認
 
@@ -423,13 +423,14 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 | 日期 | 結果（通過／不通過） | 備註 |
 |---|---|---|
-|  |  |  |
+| 2026-09-26 | 通過 | 在 `feat/gate-06-daemon`（merge 前）由 agent 帶著走 9 步。步驟 1–3：同一次 `accept daemon-holder` 輸出對上（四次開機 holder 都是 87708、Ctrl-C 21 ms、give-up 1 次 `--session-id` + 3 次 `--resume` 後 failed、crash-before-spawn 下次仍 `--session-id`）。步驟 4–9 兩個分頁手動：Ctrl-C 後 holder 96226 還在（counter 53→82 接回、`recovered=1 started=0`）；第二個 daemon 10 秒後 in use、exit=1；`kill -9` holder 後 5 秒 `restart 1/3 --resume <S>`、新 agent 自己印 `--resume <S>`；remove 後 `orphan g6-1: Shutdown sent`、`no holders`；暫存 home 已刪。 |
 
 ## 進度紀錄
 
 日期 + 一行 + commit／PR，新的在上面。
 
 - 2026-09-26 verifier r1 REFUTED（`8222f7d`）修正：F1 MEDIUM claude 第一次 `Spawn` 前 daemon 當掉 → 之後只拿到 `--resume` 沒建立過的 session：`running` 改成第一次 `Spawn` 被確認後才寫、`new` 一律 `--session-id`（H1、H2 改寫；回歸測試 `a_daemon_killed_before_the_first_spawn_still_starts_the_session_fresh` 修前失敗、修後通過；demo 加 `== crash-before-spawn`）；F2 只有 instance 的 DB 也做每日快照（`a_database_with_only_instances_takes_its_daily_snapshot`）；F3 一個鎖住卻沒有活 pid 的鎖檔不再讓整個開機失敗，跳過並記警告（`a_locked_file_without_a_live_pid_is_skipped_not_fatal`）；F4 放棄時關掉對 holder 的連線（H8 改寫）；F5 第 5 施工關頁的 demo 輸出更新；H14 標明與安全清單字面不同。
+- 2026-09-26 使用者親自驗收 9 步通過（merge 前，branch `feat/gate-06-daemon`）。
 - 2026-09-26 使用者追認 H1–H16（H14 單獨明確允許）。
 - 2026-09-26 fresh-context verifier r2 CONFIRMED（`6316d42`）：r1 五項都修好（F1 的回歸測試拿掉修正會失敗）；另記兩個 LOW 文件差異（步驟 4 少了 `housekeeping: DB snapshot` 那行、第 5 施工關步驟 6 少了 `instances`）已補，H1 補上 R1 已知限制（「`Spawn` 被確認」≠ claude session 已存檔，第 12 施工關實測）。
 - 2026-09-26 實作（draft PR，branch `feat/gate-06-daemon`）：`agend daemon`、`instances` 表（migration 0002）、`plan_boot`、`HolderRuntime`（長連線、環境白名單、shim symlink）、P6 重起、housekeeping（prune、DB 快照、log／audit／holder log 期限）、`daemon_probe` 與 demo、契約三層、check-deps 規則、core 版本測試；「你親自驗收」步驟 1–9 改成確切指令與實跑輸出（步驟 4–9 由實作者用只對自己子程序送訊號的 harness 預演過）；「待你追認」H1–H16。已知風險「EXCLUSIVE 鎖交接的 10 秒」實測：舊 daemon 收到 Ctrl-C 時新 daemon 等了約 420 ms；四次開機（前一個已結束才起下一個，含 `kill -9` 之後）等 2–4 ms。fresh-context verifier 尚未跑。
