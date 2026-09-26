@@ -3,13 +3,13 @@
 > **TL;DR**
 > - 真 daemon 開 `run/daemon.sock` 講 client protocol；`agend-client` 同步連線、daemon 重啟時重試 10 秒、版本不合立刻說清楚；順便補上第 11 施工關的協定缺口 G1–G3（G4 移到第 12 施工關）。
 > - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這個施工關才算完成。
-> - 下一步：逐題確認下面的開工前提案 P1–P10（每題都有建議，可以只回「照建議」）；第 6 施工關 merge 後開工。
+> - 下一步：逐題確認下面的開工前提案 P1–P10（每題都有建議，可以只回「照建議」）；第 6 施工關已 merge（#125），確認後即可開工。
 
 **先看這條**：這頁的步驟會用到 `agend`。每個新開的終端機分頁（包括第二個終端）都要先跑「你親自驗收」開頭的設定，否則會跑到舊的 Node 版 `agend` 1.24.0。
 
 ## 狀態
 
-**提案中**（2026-09-26）：開工前提案 P1–P10 待你確認；依賴的第 6 施工關（PR #125）等 merge。
+**提案中**（2026-09-26）：開工前提案 P1–P10 等使用者確認；依賴的第 6 施工關已 merge（#125，`3e28e06`）。
 
 ## 範圍
 
@@ -43,20 +43,21 @@
 - 理由：DB 鎖已經保證只有一個 daemon，刪舊 socket 是安全的；bind 在開機計畫之後，就沒有 v1 #922 那種「port 檔出現了、清單還不完整」的時間差，也不需要 `.ready`。停止時刪檔，client 看到的是「沒有 socket」，比「連線被拒」好解釋。
 - 替代方案：一拿到 DB 就 bind（client 會看到開機到一半的清單，要另外標「開機中」）；socket 放 `$XDG_RUNTIME_DIR`（兩個平台不同，而且跟 home 分開）；另做 `daemon.lock`（DB 鎖已經夠）。
 - 例子：`ls -l "$AGEND_HOME/run/daemon.sock"` → `srw-------`；daemon 被 `kill -9` 後舊檔還在，client 連線被拒、照 P7 重試；新 daemon 起來後刪掉舊檔、重新 bind。
-- [ ] 待你確認
+- [ ] 使用者確認
 
 ### P2：怎麼知道是誰在連（身分、要不要 cookie）
 
 - 問題：D17 說 daemon 依呼叫者身分限制權限。unix socket 上要不要 cookie？身分從哪來？
 - 建議：
   - **不做 cookie、不做 token**。能連上 socket 的只有同一個使用者（P1 的 0700／0600）。
-  - `hello` 多一個選填欄位 `caller`：agent 裡的 CLI 填 `AGEND_INSTANCE`（daemon 起 agent 時設的，第 6 施工關 H3）；沒填就是操作者。
+  - client 的 `hello` 改用自己的資料型別 `ClientHello { supported, caller }`（`caller` 選填）；core 的 `Hello` 是 holder 協定也在用的（`protocol/holder.rs`），不動它，`caller` 不會漏進 holder 協定。wire 上 `data` 只多一個選填欄位，1.0 的 peer 照樣解得開。
+  - agent 裡的 CLI 填 `AGEND_INSTANCE`（daemon 起 agent 時設的，第 6 施工關 H3）；沒填就是操作者。填了但 DB 沒有這個 instance：**當成 agent**（權限只少不多）。
   - 這是跟 binding 快照同級的安全帶（D6）：同 uid 的 agent 可以不填或亂填，擋的是「agent 照說明跑錯命令」，不是惡意 agent。
   - 本關只有一個地方用到身分：`resolve_attention`（P5）只接受操作者；agent 送來回 `forbidden`，訊息附正確做法。agent 命令的權限在第 9 施工關做。
 - 理由：v1 為了 TCP loopback 做 `api.cookie`，後來又加 `api.operator` 第二把，註解自己承認同 uid 的 agent 讀得到檔案、隔離「沒有解決」（v1 `src/auth_cookie.rs`）。unix socket 靠檔案權限就擋掉其他使用者，cookie 在同 uid 下多擋不了什麼。
 - 替代方案：peer credential（`SO_PEERCRED`／`LOCAL_PEERPID` 拿 pid，再往上找屬於哪個 holder）：比較難假冒，但兩個平台寫法不同，agent 用 double fork 脫離 holder 也能繞過；cookie（v1 的路，同 uid 一樣繞得過）。
-- 例子：agent `g8-1` 裡 `agend debug ping` 送 `{"type":"hello","caller":"g8-1",…}`；它若送 `resolve_attention` 會拿到 `forbidden: only the operator can resolve needs-you items; ask the operator with agend ask`。
-- [ ] 待你確認
+- 例子：agent `g8-1` 裡 `agend debug ping` 送 `{"type":"hello","data":{"supported":[…],"caller":"g8-1"}}`；它若送 `resolve_attention` 會拿到 `forbidden: only the operator can resolve needs-you items; ask the operator with agend ask`。
+- [ ] 使用者確認
 
 ### P3：協定版本與錯誤碼
 
@@ -64,12 +65,12 @@
 - 建議：
   - 本關所有新增算一次 minor：client protocol **1.1**，`SUPPORTED_VERSIONS = [1.1]`。只加選填欄位與新的請求／事件，1.0 的 peer 解得開（新的變成 `unknown`），D26 不變。
   - client 需要 1.1 的功能（`get_fleet`）卻協商到 1.0：立刻失敗，訊息 `the daemon speaks client protocol 1.0; this agend needs 1.1 — restart the daemon with this binary`，不重試。
-  - 錯誤碼變成 core 的常數（`protocol::client::error_code`）：`hello_required`、`version_mismatch`、`invalid_request`、`unknown_request`、`unknown_ask`、`stale_result`（已有）、新增 `event_gap`、`not_supported`、`forbidden`。假 daemon 改用 core 的常數。
+  - 錯誤碼變成 core 的常數（`protocol::client::error_code`）：`hello_required`、`version_mismatch`、`invalid_request`、`unknown_request`、`unknown_ask`、`stale_result`（已有）、新增 `event_gap`、`not_supported`、`forbidden`、`no_terminal`。假 daemon 改用 core 的常數。
   - 唯一的 wire 格式：真 server、假 daemon、`agend-client`、testkit 的 `ProbeClient` 都用 `serde_json` 編 core 型別，沒有第二份手寫格式（#1493）。
 - 理由：一次 minor 讓「協商到舊版要說清楚」這條路本關就被測到；錯誤碼只有一份，CLI（第 9 施工關）才能依錯誤碼決定訊息與 exit code。
 - 替代方案：不升版本（v2 還沒發布，可以直接改）——但 D26 的相容規則就一直沒被真正用過；每加一項升一次 minor（版本號變多、沒有好處）。
 - 例子：假 daemon `set_supported_versions(&[1.0])` → `agend debug ping` 印上面那行錯誤、exit 1，而且立刻結束（不等 10 秒）。
-- [ ] 待你確認
+- [ ] 使用者確認
 
 ### P4：G1 全貌與事件游標
 
@@ -78,26 +79,27 @@
   - **一個請求** `get_fleet`，回 `fleet`：`as_of_event_id`、`teams`、`tasks`（含關卡清單與目前關卡）、`instances`（含 backend 與 `state`）、`attention`（目前的「需要你」清單）。名稱用「全貌」（fleet view），避開名詞表裡已經很多的「快照」。
   - 接著 `subscribe_events { after_event_id: as_of_event_id }`，之後的變化靠事件；`instance_changed`、`task_changed` 各加一個選填欄位帶新的結構化內容（1.0 的文字 `summary` 保留）。
   - agent 的 `state`：`starting`／`working`／`idle`／`stuck`／`failed`／`unknown`。本關真 daemon 只給得出 `starting`、`failed`、`unknown`（忙碌／閒置要 driver，第 7、12 施工關）。「需要你」不放進 `state`：由 client 從 `attention` 算（第 11 施工關 T18 已經這樣做），只有一個真相。
-  - 事件 id 從「開機時間（unix ms）× 1000」開始往上數，事件只放記憶體（最近 1024 筆）。`after_event_id` 比留著的還舊（包括上一次開機的 id）→ `event_gap`，client 重拿全貌。所以規則只有一條：**重連一律重拿全貌**。
+  - 事件 id 從「開機時間（unix ms）× 1000」開始往上數，事件只放記憶體（最近 1024 筆）。`after_event_id` 比留著的最舊一筆還舊（包括上一次開機的 id），**或比目前最新的 id 還新**（例如時鐘往回調後，舊游標反而比新的大）→ `event_gap`，client 重拿全貌；兩邊都擋，才不會悄悄跳過事件。還沒有任何事件時，「最新的 id」就是起點本身：`after_event_id` 等於起點算接得上，其他都是 `event_gap`；不帶 `after_event_id` 表示「從現在開始」。所以規則只有一條：**重連一律重拿全貌**。
+  - **與已追認的第 11 施工關 T6 不同，請明確決定**：T6 寫「重連後重播事件」（假 daemon 從頭重播 backlog）；這裡改成「重連一律重拿全貌、只接之後的事件」。TUI 回到原本畫面與選取的行為不變。
   - 真 daemon 本關能填的：`teams` 固定一個 `general`（D12；team 表由之後的施工關加）；`tasks` 照 DB 現有的列，關卡清單第 10 施工關補；`instances` 來自 DB 與 supervisor。
 - 理由：一個請求、一個 `as_of`，全貌和事件之間沒有縫；很多個 list 請求各自有時間差。事件不存 DB：全貌本來就能從 DB 重建，重啟後重拿比記錄一份跨重啟的事件日誌簡單；id 以開機時間為底，舊 id 一定比新的小，不用另外的欄位。
 - 替代方案：每種東西一個 list 請求（G1 原本的寫法，要自己處理 list 與訂閱之間的事件）；事件存 DB 讓 client 跨重啟接續（多一張表、多一套保留規則）；每次開機 id 從 1 開始（舊 client 的游標會「剛好在範圍內」而悄悄漏事件）。
-- 例子：TUI 連上 → `get_fleet` 回 `as_of_event_id=1790000000000000`、1 個 team、2 個 instance → 訂閱；daemon 重啟 → 連線斷 → 重連、重拿全貌（新的 `as_of` 比較大）；如果拿舊游標訂閱，回 `event_gap`。
-- [ ] 待你確認
+- 例子：TUI 連上 → `get_fleet` 回 `as_of_event_id=1790000000000000`、1 個 team、2 個 instance → 訂閱；daemon 重啟 → 連線斷 → 重連、重拿全貌（新的 `as_of` 比較大）；如果拿舊游標訂閱，或游標比 daemon 最新的 id 還大，都回 `event_gap`。
+- [ ] 使用者確認
 
 ### P5：G2、G3「需要你」的欄位與操作
 
 - 問題：`attention_required` 沒有 id、放行數、等待時間、「不處理的話」（G2、T16）；非請示的項目沒有操作，也不會消失（G3）。怎麼補？本關有真的來源嗎？
 - 建議：
-  - `attention_required` 加選填欄位：`attention_id`（請示用 ask id；其他是固定的字串，例如 `instance-failed:g8-2`）、`unblocks`、`waiting_since_unix_ms`、`if_ignored`、`actions`。欄位名對上 core 已有的 `policy::attention::AttentionItem`，排序照 D36。
+  - `attention_required` 加選填欄位：`attention_id`（請示用 ask id；其他是固定的字串，例如 `instance-failed:g8-2`）、`unblocks`、`waiting_since_unix_ms`、`if_ignored`、`actions`。排序照 D36 用 core 的 `policy::attention::AttentionItem`：wire 上叫 `attention_id`（同一則訊息裡還有 `task_id`、ask 的 id，單叫 `id` 分不清），轉成 `AttentionItem` 時放進它的 `id`，其他兩個欄位同名。
   - 新請求 `resolve_attention { attention_id, action }`（只收操作者，P2）；新事件 `attention_resolved { attention_id, action }`。請示照舊用 `answer_ask` 與 `ask_updated`。
   - 本關的真來源：supervisor 放棄的 instance（第 6 施工關 P6「交給人」）。`actions` 只有 `retry`：清掉 `failed`、重算重起次數、帶 `--resume` 再起。沒有 session id 可接（codex、opencode）就不給 `retry`（P6 不全新啟動）。
-  - 「需要你」清單不另存表：每次從 DB 的 `failed` instance 算。`waiting_since` 要跨重啟，所以 migration `0003` 在 `instances` 加一個可空的 `failed_at_unix_ms`。`unblocks` 是它手上的 task 數（第 10 施工關前一律 0）。
+  - 「需要你」清單不另存表：每次從 DB 的 `failed` instance 算。`waiting_since` 用「這個 daemon 第一次看到它 `failed` 的時間」：本次開機才放棄的，是放棄那一刻；開機時就已經是 `failed` 的，是開機時間。**不加 migration**。代價：daemon 重啟後，舊的 `failed` 項目的等待時間從重啟那刻重算（排序變成同一批、再以 id 定序）。`unblocks` 是它手上的 task 數（第 10 施工關前一律 0）。
   - 其他操作（暫停、改派…）等有來源的施工關再加：`actions` 的 enum 有 `unknown`，舊 client 看到新操作不會壞。
-- 理由：G3 有真來源才驗得到「操作 → daemon 決定 → 消失」這條路，不用發明假的項目；`failed` 本來就要人處理，現在只能重啟 daemon 才會再試。
-- 替代方案：G3 整個移到第 10 施工關（本關就沒有任何非請示項目可驗，第 11 施工關 B 段會缺一步）；`dismiss`（只從清單拿掉、instance 還是 `failed`，容易忘記）；另開 `attention` 表（本關只有一種來源，從 instance 算就夠）。
+- 理由：G3 有真來源才驗得到「操作 → daemon 決定 → 消失」這條路，不用發明假的項目；`failed` 本來就要人處理，而且目前**沒有任何方法**讓它再試：第 6 施工關的 `plan_boot` 開機時完全不碰 `failed` 的 instance（`boot.rs`：「a human decides」），重啟 daemon 也不會，只能刪掉重加。
+- 替代方案：migration `0003` 在 `instances` 加 `failed_at_unix_ms`，跨重啟保留真正的等待時間（多一個 migration；目前只影響多個 `failed` 項目之間的先後）；G3 整個移到第 10 施工關（本關就沒有任何非請示項目可驗，第 11 施工關 B 段會缺一步）；`dismiss`（只從清單拿掉、instance 還是 `failed`，容易忘記）；另開 `attention` 表（本關只有一種來源，從 instance 算就夠）。
 - 例子：`g8-2` 一起來就死 → 3 次後 `failed` → 事件 `attention_required {attention_id:"instance-failed:g8-2", unblocks:0, waiting_since_unix_ms:…, if_ignored:"g8-2 stays stopped", actions:["retry"]}` → 操作者送 `retry` → `attention_resolved`，daemon log `restart 1/3 --resume …`。
-- [ ] 待你確認
+- [ ] 使用者確認
 
 ### P6：真 daemon 本關做哪些請求（G4 移走）
 
@@ -107,16 +109,17 @@
   | 請求 | 真 daemon 本關 |
   |---|---|
   | `hello`、`get_fleet`、`subscribe_events`、`resolve_attention` | 做 |
-  | `subscribe_terminal` | 做：先回 holder 當下的畫面，再轉送之後的 `terminal_bytes`（daemon 的 holder 長連線轉出來，client 絕不直接連 holder） |
+  | `subscribe_terminal` | 做：先回 holder 當下的畫面，再轉送之後的 `terminal_bytes`（daemon 的 holder 長連線轉出來，client 絕不直接連 holder）。`failed` 的 instance：daemon 已關掉對它的長連線（第 6 施工關 H8），holder 還在就短暫連一次取 `Snapshot`、只回這張最後的畫面、不串流；holder 已經不在回 `no_terminal` |
   | `terminal_input` | 回 `not_supported`；第 11 施工關 B 段做（要先確定只有操作者能打字） |
   | `answer_ask` | 沒有請示，回 `unknown_ask`；請示在第 9、10 施工關 |
   | `command`（agent 命令） | 回 `not_supported`，訊息寫在哪個施工關做；第 9、10 施工關 |
 
-  - **G4 已讀狀態移到第 12 施工關**：要 daemon 記已讀，唯一的理由是跟 Telegram 共用，而 Telegram 在第 12 施工關。在那之前 TUI 用本機已讀（第 11 施工關 T4、T17）。
+  - **G4 已讀狀態移到第 12 施工關**（**與已追認的第 11 施工關 G4「第 8 施工關補」不同，請明確決定**）：要 daemon 記已讀，唯一的理由是跟 Telegram 共用，而 Telegram 在第 12 施工關。在那之前 TUI 用本機已讀（第 11 施工關 T4、T17）。
+  - 第 11 施工關 B 段步驟 2（「處理一項請示」）：本關之後真 daemon 還沒有請示（`answer_ask` 回 `unknown_ask`）。建議 B 段步驟 2 在第 8 施工關之後改用 `failed` instance 的「需要你」項目按 `retry`（驗的是同一件事：由 daemon 決定解決、只看過不會消失）；「回答請示」那半等第 9、10 施工關有請示後再驗。改第 11 施工關頁不在這個 PR。
 - 理由：只做有真資料的請求；其餘回明確錯誤而不是假資料。已讀要存 DB（新表、保留規則），沒有第二個讀者時做了驗不到「共用」。
 - 替代方案：本關把 G4 也做完（多一張表，第 12 施工關前沒有第二個讀者）；`terminal_input` 本關一起做（要先定操作者限制，會把第 9 施工關的權限提前）。
 - 例子：`command {status}` → `error not_supported: agent commands arrive in gate 9 (agend status)`，連線不斷。
-- [ ] 待你確認
+- [ ] 使用者確認
 
 ### P7：agend-client 的 API、重試、錯誤訊息
 
@@ -127,12 +130,12 @@
   - 什麼不重試：版本不合（P3）、`forbidden`、其他 daemon 回的錯誤。
   - 10 秒到了的訊息：`cannot reach the AgEnD daemon at <path> after 10 s (<原因>). Is it running? Start it with: agend daemon`，exit 1。
   - socket 路徑由呼叫端給（`agend` 從 `AGEND_HOME` 算）；client 不讀環境變數與設定檔。
-  - 本關的命令（`agend debug …`，唯讀）：`agend debug ping [--count N --interval MS]` 印協定版本與 instance 數；`agend debug watch` 印全貌摘要與之後的事件，斷線時自己重連、重拿全貌。
+  - 本關的命令（`agend debug …`，唯讀）：`agend debug ping [--count N --interval MS]` 印協定版本與 instance 數；`agend debug watch` 印全貌摘要與之後的事件；連不上或斷線時跟 TUI 一樣用 `connect_once` 每 500 ms 重試、不放棄（印 `reconnecting…`），連上就重拿全貌。
   - 給第 9 施工關：錯誤型別分「連不上／版本不合／daemon 回錯誤（含錯誤碼）」三種，CLI 依此選訊息與 exit code；`caller` 由 `agend` 從 `AGEND_INSTANCE` 填。
 - 理由：10 秒是規劃定的；只重送讀取類，避免 daemon 重啟時同一個命令被做兩次（v1 的訊息重複類問題，V1-LESSONS #1）。TUI 本來就有自己的斷線畫面與重連，不必吃 10 秒的阻塞。
 - 替代方案：所有請求都重送（非冪等的命令會重複）；靠 `request_id` 讓 daemon 去重（要跨重啟記住，等於多一張表）；client 自己讀 `AGEND_HOME`（client 就依賴環境，測試難隔離）。
 - 例子：daemon 沒在跑：`time agend debug ping` → 約 10 秒後印上面那段錯誤、exit 1。`agend debug ping --count 20 --interval 500` 跑到一半重啟 daemon：20 行都成功，中間一兩行是 `ok (retried 1.4 s)`。
-- [ ] 待你確認
+- [ ] 使用者確認
 
 ### P8：server 的 thread 模型、多個 client、慢的 client
 
@@ -140,13 +143,13 @@
 - 建議：
   - 跟第 6 施工關一致：用 daemon 已有的 tokio multi-thread runtime，加 `net` feature；每個連線一個 task。命令處理在 `handlers`，`server` 只管 socket 與 JSON Lines（第 6 施工關 `server.rs` 的 `Must NOT` 已寫）。
   - 事件用一個 `tokio::sync::broadcast`（1024 筆）送給每個訂閱者。某個 client 落後到被覆蓋（`Lagged`）→ 送 `error event_gap`、關掉**它**的連線；它重連、重拿全貌（跟 daemon 重啟同一條路）。
-  - 寫入加 5 秒逾時：完全不讀的 client 5 秒後被關掉。
+  - 寫入加 5 秒逾時：完全不讀的 client 會把 socket buffer 塞滿（macOS 約 8 KB、Linux 約 200 KB），之後 server 的寫入卡住，5 秒後直接關掉它的連線。這種 client 收不到 `event_gap`（寫不進去），只會看到連線被關；兩種都走同一條「重連、重拿全貌」。
   - 終端串流：holder 長連線把 `PtyBytes` 轉進每個 instance 一個 broadcast（256 塊）；落後也是關連線，重連時先拿到當下畫面。
   - 不限制連線數；CLI 的連線是一次性的。
 - 理由：一條「落後就斷、重連重拿」的規則，慢 client 不會拖住 daemon 或其他 client，也不用替每個 client 排無限長的隊（v1 曾因為死掉的 TUI 訂閱者沒被清掉而修過，#3682）。重連本來就要做，不多一條路。
 - 替代方案：每個連線一條 std thread（像假 daemon；但 handler 要呼叫 async 的 store）；每個 client 無上限的佇列（慢 client 讓 daemon 記憶體一直長）；落後時跳過事件繼續送（client 畫面悄悄變錯）。
-- 例子：測試開一個 client 訂閱後不讀，daemon 連續發 2000 個事件：另一個正常 client 全部收到、順序正確；不讀的那個收到 `event_gap` 後被關。
-- [ ] 待你確認
+- 例子：三個 client 訂閱，daemon 連續發 2000 個事件：正常的全部收到、順序正確；**讀得很慢**的（每 10 ms 讀一筆）落後超過 1024 筆，收到 `event_gap` 後被關；**完全不讀**的在 5 秒寫入逾時後被關（收不到 `event_gap`）。
+- [ ] 使用者確認
 
 ### P9：client 協定契約：假 daemon 與真 daemon 跑同一套
 
@@ -160,7 +163,7 @@
 - 理由：v1 #1483 的假綠就是測試餵了 production 從不送的格式；同一套規則跑兩邊，假 daemon 一偏離就失敗（#1493）。
 - 替代方案：只對真 daemon 測 client（慢，而且 TUI／CLI 的測試仍然對假 daemon）；各寫各的測試（兩邊會慢慢漂移）。
 - 例子：假 daemon 的事件 id 從 1 開始（沒照 P4）→ CLP 的「舊游標回 `event_gap`」對假 daemon 失敗、對真 daemon 通過，一眼看出是假的偏了。
-- [ ] 待你確認
+- [ ] 使用者確認
 
 ### P10：依賴規則
 
@@ -172,7 +175,7 @@
 - 理由：CLI 啟動要輕（D11 實測 p50 4.1 ms）；daemon 若借用 client 的程式碼，兩邊的 bug 會一起出現、互相蓋掉。
 - 替代方案：不加 daemon 規則（靠 code review）。
 - 例子：有人在 `agend-daemon` 的 `Cargo.toml` 加 `agend-client` → `cargo xtask check-deps` 失敗，訊息附 `cargo tree … -i agend-client`。
-- [ ] 待你確認
+- [ ] 使用者確認
 
 ### 本關不做（明確列出）
 
@@ -187,7 +190,7 @@
 
 ### 已知風險（開工時處理）
 
-- 第 6 施工關（PR #125）還沒 merge：本關的 branch 要從它 merge 後的 `v2` 開。
+- 第 6 施工關已 merge（#125）：本關實作從最新的 `v2` 開 branch；本頁引用的 `boot.rs`、`link.rs` 行為以 merge 後的程式為準。
 - bind 在開機計畫之後（P1）：instance 很多、每個 holder 起不來要等 5 秒時，開機可能超過 10 秒，CLI 會先放棄。本關要量開機時間；超過就改成先 bind、全貌標「開機中」。
 - 事件 id 用開機時間當起點（P4）：系統時鐘往回調時，新的 id 可能比舊的小。實際影響是 client 多重拿一次全貌或少拿幾個事件；開工時測「時鐘往回」會怎樣，必要時改用 DB 裡遞增的開機序號。
 - 終端串流要在 holder 長連線上同時處理 `PtyBytes` 與 `Snapshot` 回應（第 6 施工關的 link 目前丟掉 `PtyBytes`）：要確認「畫面＋之後的位元組」接得起來，不重不漏。
@@ -199,7 +202,7 @@
 
 - [ ] `~/.cargo/bin/cargo test -p agend-client`、`-p agend-daemon`、`-p agend-testkit`、`-p agend-core` 單獨通過，包括：重試 10 秒後的訊息、版本不合立刻失敗、送出後斷線只重送可重做的請求（P7）；1.0 的 peer 解得開 1.1 的訊息、1.1 解得開 1.0 的訊息（P3）；`failed` → `attention_required` → `retry` → `attention_resolved`，沒有 session id 就沒有 `retry`（P5）；socket 0600、路徑太長拒絕啟動、停止時刪檔（P1）；agent 送 `resolve_attention` 回 `forbidden`（P2）
 - [ ] client 協定契約 `CLP` 對假 daemon 與真 `agend daemon` 都通過，每條有 mutant；反向檢查：假 daemon 的事件 id 改回從 1 開始時契約必須失敗（P9）
-- [ ] 慢 client：一個不讀、一個正常，2000 個事件後正常的全部收到且順序正確，不讀的被關（P8）
+- [ ] 慢 client（P8）：正常、讀得很慢、完全不讀三個 client，2000 個事件後正常的全部收到且順序正確；讀得很慢的收到 `event_gap` 後被關；完全不讀的在 5 秒寫入逾時後被關
 - [ ] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨
 - [ ] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`（出現 `SKIPPED` 不算通過），並有新規則：`agend-daemon` 不能依賴 `agend-client`（P10；故意加依賴會失敗）
 - [ ] `~/.cargo/bin/cargo xtask accept client` 通過，並印出下方「你親自驗收」用到的 demo
@@ -231,7 +234,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
    ~/.cargo/bin/cargo xtask accept client
    ```
 
-   應該看到：`== contract` 段每條 `CLP-n` 印兩次（`fake ok`、`real ok`）；`== version` 段有 `needs 1.1`；`== slow-client` 段有 `event_gap`；最後一行 `gate 8 (client): checks passed`（開工時細化確切輸出）。
+   應該看到：`== contract` 段每條 `CLP-n` 印兩次（`fake ok`、`real ok`）；`== version` 段有 `needs 1.1`；`== slow-client` 段有 `slow reader: event_gap` 與 `no reader: closed after 5 s write timeout`；最後一行 `gate 8 (client): checks passed`（開工時細化確切輸出）。
 
    - [ ] 通過
 
@@ -290,14 +293,17 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
    **這步在驗什麼**：事件同時送到每個 client；`failed` 的 instance 變成「需要你」，帶 id、等待時間、「不處理的話」與 `retry`；只有操作者按得了，按了才消失（P2、P5、P8）。錯了的話 TUI 看不到 agent 死掉，或看到了卻沒辦法處理。
 
-   操作（開工時細化）：第一個終端 Ctrl-C 停 daemon，然後：
+   操作（開工時細化）：第一個終端 Ctrl-C 停 daemon，再加一個一起來就死的 instance（先不要啟動 daemon）：
 
    ```bash
    ~/.cargo/bin/cargo run -q -p agend-daemon --example daemon_probe -- add --dies g8-2
-   agend daemon
    ```
 
-   第二個終端：`agend debug watch`。再開第三個終端（先跑開頭那段、貼上 `export AGEND_HOME=…`）也跑 `agend debug watch`。
+   **先開兩個 watch，再啟動 daemon**，才不會錯過一開始的事件：第二個終端跑 `agend debug watch`；再開第三個終端，先跑開頭那段設定（`cargo build` + `export PATH`，第一次開要等編譯）、貼上 `export AGEND_HOME=…`，也跑 `agend debug watch`。兩個 watch 這時會一直印 `reconnecting…`（daemon 還沒起來），這是正常的。然後在第一個終端：
+
+   ```bash
+   agend daemon
+   ```
 
    應該看到：兩個 watch 都先印 `fleet: instances=2 attention=0`，接著同樣順序的 `instance_changed g8-2 …`，約 15 秒後 `attention_required instance-failed:g8-2 (unblocks 0, waiting since …; if ignored: g8-2 stays stopped) actions: retry`。
 
@@ -351,7 +357,8 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 日期 + 一行 + commit／PR，新的在上面。
 
-- 2026-09-26 開工前提案 P1–P10 寫定（draft PR），待你確認；G4 建議移到第 12 施工關（P6）；「你親自驗收」改成 7 步；狀態改為提案中。
+- 2026-09-26 fresh-context review REFUTED（4 MEDIUM、7 LOW）後修正：慢 client 分「讀得慢→`event_gap`」與「不讀→5 秒逾時關閉」；`failed` 目前沒有再試的方法（`plan_boot` 不碰）；游標比最新還新也回 `event_gap`；client 自己的 `ClientHello`；`failed` 的終端只回最後畫面；`waiting_since` 不加 migration；標出與已追認 T6／G4 不同之處；第 11 施工關 B 段步驟 2 的建議；步驟 5 先開 watch 再起 daemon。
+- 2026-09-26 開工前提案 P1–P10 寫定（draft PR），待使用者確認；G4 建議移到第 12 施工關（P6）；「你親自驗收」改成 7 步；狀態改為提案中。
 
 ## 下一步
 
