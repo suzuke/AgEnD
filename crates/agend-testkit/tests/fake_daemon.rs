@@ -1,7 +1,7 @@
 //! The fake daemon speaks client protocol v1 with the real core types.
 
 use agend_core::protocol::ProtocolVersion;
-use agend_core::protocol::ask::{AnswerSource, AskReply};
+use agend_core::protocol::ask::{AnswerSource, AskEntry, AskReply, AskThread, ContextRecap};
 use agend_core::protocol::client::{
     AgentCommand, AnswerAskData, ClientCommandData, ClientRequest, ClientResponse, CommandResult,
     DaemonEvent, InstanceData, ResultIdentity, STALE_RESULT, SubscribeEventsData, V1,
@@ -270,4 +270,58 @@ fn dropping_the_daemon_closes_open_connections() {
         elapsed < std::time::Duration::from_secs(2),
         "closing took {elapsed:?}"
     );
+}
+
+#[test]
+fn open_ask_carries_task_and_recap_and_is_answerable() {
+    let daemon = FakeDaemon::start().unwrap();
+    let recap = ContextRecap {
+        goal: "g".into(),
+        decisions: vec![],
+        asking: "a".into(),
+        next: "n".into(),
+    };
+    let thread = AskThread {
+        ask_id: "A-9".into(),
+        task_id: Some("T-9".into()),
+        entries: vec![AskEntry::Question {
+            from: "dev-9".into(),
+            text: "which?".into(),
+            options: vec!["x".into()],
+        }],
+    };
+    assert_eq!(daemon.open_ask(thread, Some(recap.clone())), 1);
+    let mut viewer = connected(&daemon);
+    viewer
+        .send(&ClientRequest::SubscribeEvents {
+            data: SubscribeEventsData {
+                after_event_id: None,
+            },
+        })
+        .unwrap();
+    let Some(ClientResponse::Event { data }) = viewer.recv().unwrap() else {
+        panic!("expected the backlog event");
+    };
+    let DaemonEvent::AttentionRequired { data } = data.event else {
+        panic!("expected attention_required");
+    };
+    assert_eq!(data.task_id.as_deref(), Some("T-9"));
+    assert_eq!(data.recap, Some(recap));
+    viewer
+        .send(&ClientRequest::AnswerAsk {
+            data: AnswerAskData {
+                request_id: "r-1".into(),
+                ask_id: "A-9".into(),
+                source: AnswerSource::Tui,
+                reply: AskReply::Choice { option: "x".into() },
+            },
+        })
+        .unwrap();
+    let mut accepted = false;
+    for _ in 0..2 {
+        if let Some(ClientResponse::CommandResult { data }) = viewer.recv().unwrap() {
+            accepted = data.request_id == "r-1" && data.result == CommandResult::Accepted;
+        }
+    }
+    assert!(accepted, "open_ask threads accept answer_ask");
 }

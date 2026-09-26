@@ -14,6 +14,8 @@
 //! Gate 5 runs the agend-daemon checks (its tests include the STO-1..12
 //! contract against the real store and the cross-process restart/crash
 //! tests), check-deps, then the store demo.
+//! Gate 11 runs the per-crate checks, check-deps, then the TUI demo (screens,
+//! navigation, resolve, disconnect against the testkit fake daemon).
 //! Other gates use the per-crate checks until their acceptance flow is built.
 
 use crate::{cargo, check_deps, workspace_root};
@@ -190,6 +192,16 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
             "store_demo",
         ])?;
         println!("gate 5 (store): checks passed");
+    } else if gate.number == 11 {
+        step(&[
+            "run",
+            "--quiet",
+            "-p",
+            "agend-tui",
+            "--example",
+            "tui_accept",
+        ])?;
+        println!("gate 11 (tui): checks passed");
     } else {
         println!(
             "gate {} ({}): checks passed; demo not implemented yet (it is added when this gate is built)",
