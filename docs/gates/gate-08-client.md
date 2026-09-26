@@ -76,10 +76,10 @@
 
 - 問題：TUI 需要 team、task、agent 的清單與結構化狀態（G1）。要做很多個 list 請求，還是一個快照？重連時怎麼保證不漏、不重複事件？
 - 建議：
-  - **一個請求** `get_fleet`，回 `fleet`：`as_of_event_id`、`teams`、`tasks`（含關卡清單與目前關卡）、`instances`（含 backend 與 `state`）、`attention`（目前的「需要你」清單）。名稱用「全貌」（fleet view），避開名詞表裡已經很多的「快照」。
+  - **一個請求** `get_fleet { request_id }`，回新的 `ClientResponse::Fleet { request_id, fleet }`（現有的 `command_result` 是給 agent 命令的，全貌另開一種回應）；`fleet` 有：`as_of_event_id`、`teams`、`tasks`（含關卡清單與目前關卡）、`instances`（含 backend 與 `state`）、`attention`（目前的「需要你」清單）。名稱用「全貌」（fleet view），避開名詞表裡已經很多的「快照」。
   - 接著 `subscribe_events { after_event_id: as_of_event_id }`，之後的變化靠事件；`instance_changed`、`task_changed` 各加一個選填欄位帶新的結構化內容（1.0 的文字 `summary` 保留）。
   - agent 的 `state`：`starting`／`working`／`idle`／`stuck`／`failed`／`unknown`。本關真 daemon 只給得出 `starting`、`failed`、`unknown`（忙碌／閒置要 driver，第 7、12 施工關）。「需要你」不放進 `state`：由 client 從 `attention` 算（第 11 施工關 T18 已經這樣做），只有一個真相。
-  - 事件 id 從「開機時間（unix ms）× 1000」開始往上數，事件只放記憶體（最近 1024 筆）。`after_event_id` 比留著的最舊一筆還舊（包括上一次開機的 id），**或比目前最新的 id 還新**（例如時鐘往回調後，舊游標反而比新的大）→ `event_gap`，client 重拿全貌；兩邊都擋，才不會悄悄跳過事件。還沒有任何事件時，「最新的 id」就是起點本身：`after_event_id` 等於起點算接得上，其他都是 `event_gap`；不帶 `after_event_id` **維持 1.0 的意思：重播留著的全部事件（最近 1024 筆）再接即時事件**（假 daemon 現在就是這樣，第 11 施工關的 `daemon_source.rs` 靠它），1.0 的 client 拿不到全貌也不會漏掉連線前的項目，D26 不破例。1.1 的 client 一律帶 `as_of_event_id`。所以 1.1 的規則只有一條：**重連一律重拿全貌**。
+  - 事件 id 從「開機時間（unix ms）× 1000」開始往上數，事件只放記憶體（最近 1024 筆）。`after_event_id` 小於「留著的最舊一筆 − 1」（接不上：中間的事件已經丟了，包括上一次開機的 id），**或大於目前最新的 id**（例如時鐘往回調後，舊游標反而比新的大）→ `event_gap`，client 重拿全貌。等於「最舊一筆 − 1」算接得上，所以 `get_fleet` 與訂閱之間剛好有事件進來也沒問題。這兩條擋住大部分的跳號；時鐘往回調的極端情況仍可能漏（見已知風險），所以 1.1 的 client **重連後絕不沿用舊游標**，一律重拿全貌。還沒有任何事件時，「最新的 id」就是起點本身：`after_event_id` 等於起點算接得上，其他都是 `event_gap`；不帶 `after_event_id` **維持 1.0 的意思：重播留著的全部事件（最近 1024 筆）再接即時事件**（假 daemon 現在就是這樣，第 11 施工關的 `daemon_source.rs` 靠它），1.0 的 client 拿不到全貌也不會漏掉連線前的項目，D26 不破例。1.1 的 client 一律帶 `as_of_event_id`。所以 1.1 的規則只有一條：**重連一律重拿全貌**。
   - **與已追認的第 11 施工關 T6 不同，請明確決定**：T6 寫「重連後重播事件」（假 daemon 從頭重播 backlog）；這裡改成「重連一律重拿全貌、只接之後的事件」。TUI 回到原本畫面與選取的行為不變。
   - 真 daemon 本關能填的：`teams` 固定一個 `general`（D12；team 表由之後的施工關加）；`tasks` 照 DB 現有的列，關卡清單第 10 施工關補；`instances` 來自 DB 與 supervisor。
 - 理由：一個請求、一個 `as_of`，全貌和事件之間沒有縫；很多個 list 請求各自有時間差。事件不存 DB：全貌本來就能從 DB 重建，重啟後重拿比記錄一份跨重啟的事件日誌簡單；id 以開機時間為底，舊 id 一定比新的小，不用另外的欄位。
@@ -92,23 +92,23 @@
 - 問題：`attention_required` 沒有 id、放行數、等待時間、「不處理的話」（G2、T16）；非請示的項目沒有操作，也不會消失（G3）。怎麼補？本關有真的來源嗎？
 - 建議：
   - `attention_required` 加選填欄位：`attention_id`（請示用 ask id；其他是固定的字串，例如 `instance-failed:g8-2`）、`unblocks`、`waiting_since_unix_ms`、`if_ignored`、`actions`、`instance_id`。排序照 D36 用 core 的 `policy::attention::AttentionItem`：wire 上叫 `attention_id`（同一則訊息裡還有 `task_id`、ask 的 id，單叫 `id` 分不清），轉成 `AttentionItem` 時放進它的 `id`，其他兩個欄位同名。
-  - 新請求 `resolve_attention { attention_id, action }`（只收操作者，P2）；新事件 `attention_resolved { attention_id, action }`。請示照舊用 `answer_ask` 與 `ask_updated`。
-  - 本關的真來源：supervisor 放棄的 instance（第 6 施工關 P6「交給人」）。`actions` 只有 `retry`：清掉 `failed`、重算重起次數，再照 session 有沒有建立過決定怎麼起。
-  - **session 有沒有建立過要存下來**：`failed` 之後 DB 只剩 `failed`，分不出它死之前是 `new` 還是 `running`（第 6 施工關 H1、H11：第一次 `Spawn` 前就失敗的 claude 也會變 `failed`）。所以 **migration `0003`** 在 `instances` 加一欄 `session_started INTEGER NOT NULL DEFAULT 0`：第一次 `Spawn` 被確認、寫 `running` 的同一個交易裡設成 1；migration 把現有 `running` 的列設成 1，現有 `failed` 的列留 0（不知道就當沒建立過）。`retry` 時：
+  - 新請求 `resolve_attention { request_id, attention_id, action }`（只收操作者，P2），成功回現有的 `command_result { request_id, result: accepted }`（跟 `answer_ask` 一樣，不另加回應型別）；新事件 `attention_resolved { attention_id, action }`。請示照舊用 `answer_ask` 與 `ask_updated`。
+  - 本關的真來源：supervisor 放棄的 instance（第 6 施工關 P6「交給人」）。`actions` 只有 `retry`：holder 還在（第 6 施工關 H8 留著它給人看最後的畫面）就先送 `Shutdown` 等它結束（H9：一個 holder 一生只跑一個 agent），再清掉 `failed`、重算重起次數，照 session 有沒有建立過決定怎麼起。
+  - **session 有沒有建立過要存下來**：`failed` 之後 DB 只剩 `failed`，分不出它死之前是 `new` 還是 `running`（第 6 施工關 H1、H11：第一次 `Spawn` 前就失敗的 claude 也會變 `failed`）。所以 **migration `0003`** 在 `instances` 加一欄 `session_started INTEGER NOT NULL DEFAULT 0`：第一次 `Spawn` 被確認、寫 `running` 的同一個交易裡設成 1；migration 把 `status='running' OR (status='failed' AND backend<>'claude')` 的列設成 1，欄位加 `CHECK (session_started IN (0, 1))`。現有 `failed` 的 codex／opencode 幾乎一定跑起來過（第 6 施工關 H2：第一次 `Spawn` 確認就寫 `running`，下一次死就 `failed`），設 1 才不會被當成「沒跑過」而全新啟動（違反 P6）；現有 `failed` 的 claude 留 0 是安全的（見下表）。`retry` 時：
 
     | backend | `session_started` | `retry` |
     |---|---|---|
     | claude | 1 | 狀態回 `running`，帶 `--resume <id>` |
-    | claude | 0 | 狀態回 `new`，帶 `--session-id <id>`（若 session 其實已存在，claude 拒絕、再 3 次後回 `failed`，不會全新丟掉對話） |
+    | claude | 0 | 狀態回 `new`，帶 `--session-id <id>`。若 session 其實已存在：`Spawn` 一被確認就記 `running`，claude 拒絕後的下一次重起走 `--resume`，接回原對話 |
     | codex、opencode | 0 | 給 `retry`：從沒跑起來過，全新啟動不丟任何東西（第 6 施工關 H2） |
-    | codex、opencode | 1 | 不給 `retry`：沒有 session id 可接，P6 不全新啟動（第 7、12 施工關有 session id 後再開） |
+    | codex、opencode | 1 | 不給 `retry`（`actions: []`）：沒有 session id 可接，P6 不全新啟動（第 7、12 施工關有 session id 後再開）。TUI 照第 11 施工關 G3 的方式顯示「沒有可用的操作」，`if_ignored` 寫 `delete and re-add the instance (gate 9)` |
 
   - 真 daemon 送 `attention_required` 時也帶選填的 `instance_id`，TUI（第 11 施工關 T18）不用拆 `attention_id` 字串就知道它屬於哪個 agent。
   - 「需要你」清單不另存表：每次從 DB 的 `failed` instance 算。`waiting_since` 用「這個 daemon 第一次看到它 `failed` 的時間」：本次開機才放棄的，是放棄那一刻；開機時就已經是 `failed` 的，是開機時間。**`waiting_since` 不另加欄位**。代價：daemon 重啟後，舊的 `failed` 項目的等待時間從重啟那刻重算（排序變成同一批、再以 id 定序）。`unblocks` 是它手上的 task 數（第 10 施工關前一律 0）。
   - 其他操作（暫停、改派…）等有來源的施工關再加：`actions` 的 enum 有 `unknown`，舊 client 看到新操作不會壞。
 - 理由：G3 有真來源才驗得到「操作 → daemon 決定 → 消失」這條路，不用發明假的項目；`failed` 本來就要人處理，而且目前**沒有任何方法**讓它再試：第 6 施工關的 `plan_boot` 開機時完全不碰 `failed` 的 instance（`boot.rs`：「a human decides」），重啟 daemon 也不會，只能刪掉重加。
 - 替代方案：`session_started` 改成存「失敗前的狀態」（`failed_from`：`new`／`running`），資訊一樣、欄位語意比較繞；`failed_at_unix_ms` 也放進 `0003`，跨重啟保留真正的等待時間（目前只影響多個 `failed` 項目之間的先後，先不加）；G3 整個移到第 10 施工關（本關就沒有任何非請示項目可驗，第 11 施工關 B 段會缺一步）；`dismiss`（只從清單拿掉、instance 還是 `failed`，容易忘記）；另開 `attention` 表（本關只有一種來源，從 instance 算就夠）。
-- 例子：`g8-2` 一起來就死 → 3 次後 `failed` → 事件 `attention_required {attention_id:"instance-failed:g8-2", unblocks:0, waiting_since_unix_ms:…, if_ignored:"g8-2 stays stopped", actions:["retry"]}` → 操作者送 `retry` → `attention_resolved`，daemon log `restart 1/3 --resume …`。
+- 例子：`g8-2` 一起來就死 → 3 次後 `failed` → 事件 `attention_required {attention_id:"instance-failed:g8-2", unblocks:0, waiting_since_unix_ms:…, if_ignored:"g8-2 stays stopped", actions:["retry"]}` → 操作者送 `retry` → `attention_resolved`，daemon log `g8-2: start --resume …`（`retry` 重算次數，走 `start`、不是 `restart n/3`；確切字樣開工時細化）。
 - [ ] 使用者確認
 
 ### P6：真 daemon 本關做哪些請求（G4 移走）
@@ -136,7 +136,7 @@
 - 問題：client 怎麼重試才能讓「命令執行中重啟 daemon」最後仍成功？什麼情況不重試？第 9 施工關 CLI 需要什麼？TUI 的重連跟它是什麼關係？
 - 建議：
   - API（同步、不建 runtime）：`Client::connect(socket, caller)`：連線＋`hello`，連不上每 100 ms 重試，最多 10 秒（`RESTART_RETRY_WINDOW`）；`Client::connect_once`：只試一次，給有自己重連畫面的 TUI（第 11 施工關 T6 每 500 ms）；`request(…)`：送請求、依 `request_id` 等回應，最多等 10 秒；`events()`：阻塞讀下一個事件。
-  - 什麼會重試：socket 不存在、連線被拒、請求送出前連線就斷。**請求送出後**斷線，只有呼叫端標明「可重做」的請求才重送（本關只有讀取類的 `get_fleet`；agent 命令哪些可重做，包括 `status`、`inbox`，由第 9 施工關逐一決定）；其他回 `daemon restarted during the request; check with agend status`。哪些 agent 命令可重做由第 9 施工關逐一決定。
+  - 什麼會重試：socket 不存在、連線被拒、請求送出前連線就斷。**請求送出後**斷線，只有呼叫端標明「可重做」的請求才重送（本關只有讀取類的 `get_fleet`；agent 命令哪些可重做，包括 `status`、`inbox`，由第 9 施工關逐一決定）；其他回 `daemon restarted during the request; check with agend status`。
   - 什麼不重試：版本不合（P3）、`forbidden`、其他 daemon 回的錯誤。
   - 10 秒到了的訊息：`cannot reach the AgEnD daemon at <path> after 10 s (<原因>). Is it running? Start it with: agend daemon`，exit 1。
   - socket 路徑由呼叫端給（`agend` 從 `AGEND_HOME` 算）；client 不讀環境變數與設定檔。
@@ -210,7 +210,7 @@
 
 ## 自動驗收（完成定義）
 
-- [ ] `~/.cargo/bin/cargo test -p agend-client`、`-p agend-daemon`、`-p agend-testkit`、`-p agend-core` 單獨通過，包括：重試 10 秒後的訊息、版本不合立刻失敗、送出後斷線只重送可重做的請求（P7）；1.0 的 peer 解得開 1.1 的訊息、1.1 解得開 1.0 的訊息（P3）；`failed` → `attention_required` → `retry` → `attention_resolved`，`retry` 依 `session_started` 帶 `--resume` 或 `--session-id`、codex／opencode 只有沒跑起來過才有 `retry`、migration `0003` 把現有 `running` 設成已建立（P5）；socket 0600、路徑太長拒絕啟動、停止時刪檔（P1）；agent 送 `resolve_attention` 回 `forbidden`（P2）
+- [ ] `~/.cargo/bin/cargo test -p agend-client`、`-p agend-daemon`、`-p agend-testkit`、`-p agend-core` 單獨通過，包括：重試 10 秒後的訊息、版本不合立刻失敗、送出後斷線只重送可重做的請求（P7）；1.0 的 peer 解得開 1.1 的訊息、1.1 解得開 1.0 的訊息（P3）；`failed` → `attention_required` → `retry` → `attention_resolved`，`retry` 依 `session_started` 帶 `--resume` 或 `--session-id`、codex／opencode 只有沒跑起來過才有 `retry`、migration `0003` 把現有 `running` 與 `failed` 的 codex／opencode 設成已建立（P5）；`0003` 附 `store/fixtures/schema-v3.sql`、更新 `store/golden/schema.sql`（比照 `store/migrate.rs` 的規則），`session_started` 有 `CHECK (session_started IN (0, 1))`；socket 0600、路徑太長拒絕啟動、停止時刪檔（P1）；agent 送 `resolve_attention` 回 `forbidden`（P2）
 - [ ] client 協定契約 `CLP` 對假 daemon 與真 `agend daemon` 都通過，每條有 mutant；反向檢查：假 daemon 的事件 id 改回從 1 開始時契約必須失敗（P9）
 - [ ] 慢 client（P8）：正常、讀得很慢、完全不讀三個 client，2000 個事件後正常的全部收到且順序正確；讀得很慢的收到 `event_gap` 後被關；完全不讀的在 5 秒寫入逾時後被關
 - [ ] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨
@@ -324,7 +324,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
    AGEND_INSTANCE=g8-1 ~/.cargo/bin/cargo run -q -p agend-client --example client_probe -- resolve instance-failed:g8-2 retry
    ```
 
-   應該看到：第一行 `resolved`，第二個終端的 watch 印 `attention_resolved instance-failed:g8-2 retry`，daemon log 有 `restart 1/3 --resume …`（`--dies` 的 agent 還是會死，約 15 秒後又回到「需要你」，這是正常的）；第二行（假裝是 agent）印 `forbidden: only the operator can resolve needs-you items …`、exit 1。
+   應該看到：第一行 `resolved`，第二個終端的 watch 印 `attention_resolved instance-failed:g8-2 retry`，daemon log 有 `g8-2: start --resume …`（確切字樣開工時細化；`--dies` 的 agent 還是會死，約 15 秒後又回到「需要你」，這是正常的）；第二行（假裝是 agent）印 `forbidden: only the operator can resolve needs-you items …`、exit 1。
 
    - [ ] 通過
 
@@ -367,6 +367,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-26 第 3 輪 review REFUTED（1 MEDIUM、數個 LOW）後修正：`0003` 把現有 `failed` 的 codex／opencode 設成已建立、加 CHECK 與 schema fixture；`retry` 先 `Shutdown` 留著的 holder；claude／0 的說明、log 字樣改 `start --resume`；游標規則寫成「最舊 − 1」；`actions: []` 的顯示；`get_fleet`／`resolve_attention` 的回應型別。
 - 2026-09-26 第 2 輪 review REFUTED（2 MEDIUM、5 LOW）後修正：`retry` 靠 migration `0003` 的 `session_started` 決定 `--resume`／`--session-id`，codex／opencode 沒跑起來過才給 `retry`；不帶游標維持 1.0 的重播 backlog；`attention_required` 加 `instance_id`；錯誤碼加 `unknown_attention`、身分先於 id 檢查；`inbox` 不預先算可重做；步驟 5 的 `daemon_probe` 參數順序。
 - 2026-09-26 fresh-context review REFUTED（4 MEDIUM、7 LOW）後修正：慢 client 分「讀得慢→`event_gap`」與「不讀→5 秒逾時關閉」；`failed` 目前沒有再試的方法（`plan_boot` 不碰）；游標比最新還新也回 `event_gap`；client 自己的 `ClientHello`；`failed` 的終端只回最後畫面；`waiting_since` 不加 migration；標出與已追認 T6／G4 不同之處；第 11 施工關 B 段步驟 2 的建議；步驟 5 先開 watch 再起 daemon。
 - 2026-09-26 開工前提案 P1–P10 寫定（draft PR），待使用者確認；G4 建議移到第 12 施工關（P6）；「你親自驗收」改成 7 步；狀態改為提案中。
