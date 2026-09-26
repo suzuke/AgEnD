@@ -11,7 +11,7 @@ pub struct FakeClock {
 }
 
 impl FakeClock {
-    /// 2026-09-21T13:46:40Z: a plausible "now" in unix milliseconds.
+    /// 2026-09-21T14:13:20Z: a plausible "now" in unix milliseconds.
     pub const DEFAULT_START_UNIX_MS: u64 = 1_790_000_000_000;
 
     pub fn new(start_unix_ms: u64) -> Self {
