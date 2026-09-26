@@ -8,8 +8,10 @@
 //! demo.
 //! Gate 3 runs the per-crate checks plus the `agend` crate's tests (argv[0]
 //! dispatch, and the shim and hook tests against real repos, which need the
-//! real binary), then the shim demo. Other gates use the per-crate checks until their
-//! acceptance flow is built.
+//! real binary), then the shim demo. Gate 4 runs the per-crate checks of
+//! agend-holder and agend (which holds the cross-process tests), check-deps,
+//! then the holder demo (`holder_probe demo` against the built `agend`).
+//! Other gates use the per-crate checks until their acceptance flow is built.
 
 use crate::{cargo, check_deps, workspace_root};
 use std::process::Command;
@@ -39,7 +41,8 @@ pub const GATES: &[Gate] = &[
     Gate {
         number: 4,
         name: "holder",
-        crates: &["agend-holder"],
+        // `agend` holds the cross-process tests (tests/holder_process.rs).
+        crates: &["agend-holder", "agend"],
     },
     Gate {
         number: 5,
@@ -161,6 +164,19 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
     } else if gate.number == 3 {
         crate::shim_demo::run()?;
         println!("gate 3 (shim): checks passed");
+    } else if gate.number == 4 {
+        step(&["build", "--quiet", "-p", "agend"])?;
+        step(&[
+            "run",
+            "--quiet",
+            "-p",
+            "agend-holder",
+            "--example",
+            "holder_probe",
+            "--",
+            "demo",
+        ])?;
+        println!("gate 4 (holder): checks passed");
     } else {
         println!(
             "gate {} ({}): checks passed; demo not implemented yet (it is added when this gate is built)",

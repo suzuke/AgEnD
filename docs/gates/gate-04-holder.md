@@ -3,11 +3,11 @@
 > **TL;DR**
 > - 每個 instance 一個 holder：在 PTY 裡跑 agent、記住畫面、回報結束碼，並且**活過 daemon 重啟**（D3）。
 > - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這個施工關才算完成。
-> - 下一步：開工前提案 P1–P9 已由使用者確認（2026-09-25）；等第 3 施工關完成（D22）後開工。
+> - 下一步：實作在 draft PR（branch `feat/gate-04-holder`）；等你親自驗收第 3 施工關之後才 merge。先看「待你追認」，再照「你親自驗收」一步一步做。
 
 ## 狀態
 
-**提案中**（2026-09-25）：P1–P9 使用者已確認，等第 3 施工關完成後開工。
+**已驗收，等 merge**（2026-09-26）：P1–P9 使用者已確認；G1–G11 使用者已追認；使用者親自驗收 10 步通過。名詞表與 AGENTS 的 crate 規則列留給之後的共用文件 PR。
 
 ## 範圍
 
@@ -60,6 +60,7 @@
   - 「在跑」＝ lock 被持有，而且 socket 連得上。
   - socket 路徑超過 100 bytes 就拒絕啟動，印出路徑與長度（macOS 上限 104）。
   - `HolderHandle.process_id` 填 holder 的 pid。
+  - 註（第 6 施工關設計稿，2026-09-25）：第 6 施工關 daemon 的 `recover` 只看 flock 判斷存活，**不連 socket**，因為新連線會搶走 daemon 自己的長連線（P4）。所以給 RTM 用的 `is_running`（`agend_holder::paths::is_running`）只看鎖；上面「socket 連得上」只用在人手動檢查（例如 `holder_probe snapshot`）。
 - 理由：程序死掉時 kernel 自動放掉 flock，不會有「pid 檔還在、程序已死」或 pid 重用誤判；RTM-3／RTM-4 要求 recover 回來的 pid、socket 與啟動時相同。鎖檔也是 P2 開機巡查的依據。
 - 替代方案：只看 socket 檔（程序死了檔案還在）；pid 檔（pid 重用會誤判）。
 - 例子：連續兩次 `agend holder dev-1`：第二個拿不到 lock，印出第一個的 pid 後結束。
@@ -144,22 +145,29 @@
 - 終端查詢回覆（P6）與 200 欄排版還沒用真 CLI 驗過。
 - macOS socket 路徑 104 bytes：測試暫存路徑 + `run/holders/` + `<id>.sock` 約 97，instance id 要短。
 - 螢幕分類器的 fixture 不是 holder 產生的（違反 #1493「用真的 producer」）：本關加一個測試，把錄下的 PTY 位元組餵給 holder 畫面再跑 `classify`。
-- `check-deps` 的 async 禁用清單含 `mio`：確認 alacritty_terminal、portable-pty 的依賴樹沒有 mio／tokio。
+- `check-deps` 的 async 禁用清單含 `mio`：確認 alacritty_terminal、portable-pty 的依賴樹沒有 mio／tokio。（開工時確認：沒有；alacritty 的 `event_loop` 與 `polling` 不能用 feature 關掉，只能關掉預設的 `serde`，holder 不用 `event_loop`。）
+
+### 已知限制（verifier r1，接受、不在本關處理）
+
+- 自己 `setsid` 離開 process group 的子程序，`Shutdown` 殺不到（本質限制）。
+- 同 uid 的程式可以慢慢送請求佔住連線 thread（每條連線都有 10 秒 hello 期限與 1 MiB 行長上限，但數量不設限）；屬第 3 施工關威脅模型接受的範圍。
+- `AGEND_HOME` 被刪後在一個檢查週期內（預設最多 60 秒）又被建回來，舊 holder 不會發現、會繼續跑；它的鎖檔已不在，同一個 id 可能再起第二個 holder。
+- demo 的「agent 讀到幾個 byte」由 bash 的按鍵計數推得（每次 `read -n 1` 一個 byte），不是直接量 PTY；原始 PTY 的 0 byte 由 verifier 另外確認。
 
 ## 自動驗收（完成定義）
 
-- [ ] `~/.cargo/bin/cargo test -p agend-holder` 單獨通過
-- [ ] `~/.cargo/bin/cargo test -p agend --test holder_process` 通過：四次開機、啟動器結束後 holder 還在、重複啟動被拒絕、`Shutdown` 後沒有殘留程序（P9）
-- [ ] core 協定新增 `signal`（P7）：`~/.cargo/bin/cargo test -p agend-core` 與 xtask protocol compatibility tests 重跑通過
-- [ ] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨
-- [ ] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`（出現 `SKIPPED` 不算通過），並包含新的 `agend-holder` 規則（開工時細化：故意加 tokio 依賴會失敗）
-- [ ] `~/.cargo/bin/cargo xtask accept holder` 通過，並印出下方「你親自驗收」用到的 demo
-- [ ] 本施工關 crate 的 `README.md`／`TESTING.md` 已更新；skeleton 的 `Must NOT` 依 P6 改好；名詞表加上 `run/holders`、holder lock
-- [ ] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」（verifier 的 kill 探測只對自己起的 pid、在沙箱裡跑）
+- [x] `~/.cargo/bin/cargo test -p agend-holder` 單獨通過
+- [x] `~/.cargo/bin/cargo test -p agend --test holder_process` 通過：四次開機、啟動器結束後 holder 還在、重複啟動被拒絕、`Shutdown` 後沒有殘留程序（P9）
+- [x] core 協定新增 `signal`（P7）：`~/.cargo/bin/cargo test -p agend-core` 與 xtask protocol compatibility tests 重跑通過
+- [x] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨
+- [x] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`（出現 `SKIPPED` 不算通過），並包含新的 `agend-holder` 規則（`3 rules`）；在 `crates/agend-holder/Cargo.toml` 的 `[dependencies]` 加 `tokio` 會失敗：`check-deps: agend-holder depends on tokio (...)`、exit 1（2026-09-25 實測後還原）
+- [x] `~/.cargo/bin/cargo xtask accept holder` 通過，並印出下方「你親自驗收」用到的 demo
+- [ ] 本施工關 crate 的 `README.md`／`TESTING.md` 已更新；skeleton 的 `Must NOT` 依 P6 改好；名詞表加上 `run/holders`、holder lock（前兩項已做；名詞表與 AGENTS 的 crate 規則列依夜間規則不在本 PR 改，文字交給 orchestrator）
+- [x] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」（r2 CONFIRMED `631f66e`）（verifier 的 kill 探測只對自己起的 pid、在沙箱裡跑）
 
 ## 你親自驗收
 
-由 agent 帶著一步一步做（見 [AGENTS.md](../../AGENTS.md#帶使用者親自驗收)）。每一步：照抄指令 → 對照「應該看到」→ 對了就打勾。標「開工時細化」的地方，開工時會改成確切指令與輸出。
+由 agent 帶著一步一步做（見 [AGENTS.md](../../AGENTS.md#帶使用者親自驗收)）。每一步：照抄指令 → 對照「應該看到」→ 對了就打勾。`<N>` 這類尖括號是會變的數字。步驟 1–8 看的是同一次 `accept` 的輸出。
 
 1. 跑 demo。
 
@@ -170,81 +178,163 @@
    ~/.cargo/bin/cargo xtask accept holder
    ```
 
-   應該看到：最後一行 `gate 4 (holder): checks passed`。
+   應該看到：倒數第二行 `holder demo: all sections passed`，最後一行 `gate 4 (holder): checks passed`。
 
-   - [ ] 通過
+   - [x] 通過
 
 2. 啟動它的程序結束後，holder 還在。
 
    **這步在驗什麼**：D3 的核心：daemon（這裡用啟動器代替）結束後 holder 與 bash 繼續跑。錯了的話，每次重啟 daemon 所有 agent 都會死（v1 問題 #7）。
 
-   操作：同一次輸出，找 `== detach`。應該看到：`launcher exited`、`holder alive: pid <N>`，`counter` 還在增加。
+   操作：同一次輸出，找 `== detach`。應該看到：
 
-   - [ ] 通過
+   | 關鍵字 | 意思 |
+   |---|---|
+   | `holder started: pid <H> agent pid <B>` | 啟動器起了 holder，holder 起了 bash |
+   | `launcher exited (status 0)` | 啟動器已經結束 |
+   | `holder alive: pid <H>` | 同一個 holder 還拿著鎖 |
+   | `holder parent pid: 1 (the launcher is gone)` | holder 已經被系統（launchd）收養 |
+   | `counter=<a> -> counter=<b> (still increasing)`，b > a | bash 還在跑 |
+
+   - [x] 通過
 
 3. 故意弄壞：探測 client 中途被砍，再重連。
 
    **這步在驗什麼**：重連拿到的是當下畫面，不是從頭來或重播。錯了的話 daemon 重啟後看到舊畫面，或 agent 被重啟。
 
-   操作：找 `== reconnect`。應該看到：斷線前 `counter=A`、重連後 `counter=B`，B > A；前後 `bash pid` 相同。
+   操作：找 `== reconnect`。應該看到：`before kill: counter=<A> bash pid <B>`、`probe client killed (pid <C>)`、`after reconnect: counter=<A2> bash pid <B>`（A2 > A，B 相同），最後 `counter grew (<A> -> <A2>) and bash pid is the same: ok`。
 
-   - [ ] 通過
+   - [x] 通過
 
 4. 送鍵，以及不認得的鍵。
 
    **這步在驗什麼**：PTY 只收列舉過的按鍵（P6）。錯了的話 daemon 可能把不該送的東西打進 agent。
 
-   操作：找 `== keys`。應該看到：`sent y`、畫面出現 `got y`；`sent unknown -> error unknown_control_key`、`pty bytes written: 0`。
+   操作：找 `== keys`。應該看到：`sent y`、`screen shows: got y`、`sent unknown -> error unknown_control_key`、`bytes the agent read after it: 0`（bash 每次讀一個 byte 並計數，送不認得的鍵前後一樣；verifier 另用原始 PTY 讀取確認是 0 byte）。
 
-   - [ ] 通過
+   - [x] 通過
 
 5. 故意弄壞：同一個 instance 再起一個 holder。
 
    **這步在驗什麼**：同一個 instance 不會有兩個 holder 搶同一個 agent（P3）。錯了的話重啟 daemon 時會多出 holder。
 
-   操作：找 `== duplicate`。應該看到：`holder for demo-1 already running (pid <N>)`、`exit=1`，第一個 holder 還活著。
+   操作：找 `== duplicate`。應該看到：`holder for demo-1 already running (pid <H>)`、`exit=1`、`first holder still alive: pid <H>`（同一個 H）。
 
-   - [ ] 通過
+   - [x] 通過
 
 6. 故意弄壞：agent 用 shell 內建 `kill` 砍自己的 holder（T18）。
 
-   **這步在驗什麼**：agent 打 `kill $PPID`（預設 TERM）砍不掉 holder（P2）。錯了的話犯錯的 agent 能把自己連同 holder 弄死。
+   **這步在驗什麼**：agent 打 `kill $PPID`（預設 TERM），以及 HUP、INT、QUIT，都砍不掉 holder（P2）。錯了的話犯錯的 agent 能把自己連同 holder 弄死。
 
-   操作：找 `== agent-kills-parent`。應該看到：`agent ran: kill -TERM <holder pid>`，接著 `holder alive: pid <N>`。
+   操作：找 `== agent-kills-parent`。應該看到：`agent ran: kill -TERM <K>`、`agent: signals sent`，接著 `holder alive: pid <K>`（同一個 K）。
 
-   - [ ] 通過
+   - [x] 通過
 
 7. 四次開機。
 
-   **這步在驗什麼**：不只撐過一次重啟，四次都撐過，其中一次開機什麼都沒做（P9）。錯了的話只撐得過一次重啟的實作會混過去。
+   **這步在驗什麼**：不只撐過一次重啟，四次都撐過，其中開機 2 什麼都沒做（P9）。每次開機是獨立的程序，前一個結束後才起下一個。錯了的話只撐得過一次重啟的實作會混過去。
 
-   操作：找 `== lifecycle`。應該看到：4 行 `boot N: pid <同一個> counter=<越來越大>`。
+   操作：找 `== lifecycle`。應該看到 4 行 `boot N: pid <H> counter=<c>`：pid 都是 `== detach` 的 H，counter 越來越大；再一行 `boot 4: same pid and socket (inode <I>) as boot 1`。
 
-   - [ ] 通過
+   - [x] 通過
 
 8. agent 結束，以及停止。
 
    **這步在驗什麼**：結束碼照實回報、重連也拿得到；`Shutdown` 後什麼都不留（P7）。錯了的話結束碼遺失，或留下沒人管的 holder。
 
-   操作：找 `== exit`、`== shutdown`。應該看到：`exited code=7`；重連後仍 `exited code=7`；`shutdown`、`socket gone`、`lock free`、`holder gone`。
+   操作：找 `== exit`、`== shutdown`。應該看到：
 
-   - [ ] 通過
+   | 關鍵字 | 意思 |
+   |---|---|
+   | `exited code=7`、`after reconnect: exited code=7` | bash `exit 7`，斷線重連仍拿得到 |
+   | `killed agent: exited signal=SIGKILL` | 被訊號殺掉時回報訊號名（新欄位 `signal`） |
+   | `shutdown`、`socket gone`、`lock free`、`holder gone (pid <H>)` | `Shutdown` 後 socket、鎖、程序都不在 |
 
-9. 你自己動手：關掉啟動 holder 的終端機分頁（開工時細化）。
+   - [x] 通過
+
+9. 你自己動手：關掉啟動 holder 的終端機分頁。
 
    **這步在驗什麼**：真的終端機裡，關分頁（SIGHUP）或 Ctrl-C 都殺不掉 holder；第 6 施工關「Ctrl-C 停 daemon」靠的就是這點。
 
-   操作（示意）：`AGEND_HOLDER_DEMO_KEEP=1` 跑 demo，印出 `export AGEND_HOME=…` 與一行 `holder_probe start demo-2 -- …`；新分頁貼上執行後關掉那個分頁；再開新分頁 `holder_probe snapshot demo-2`。應該看到：`counter` 還在增加。最後 `holder_probe shutdown demo-2`。
+   a. 在原本的分頁準備（只建目錄、印指令，不跑其他段）：
 
-   - [ ] 通過
+   ```bash
+   cd ~/Documents/Hack/AgEnD-v2
+   ~/.cargo/bin/cargo build -q -p agend -p agend-holder --example holder_probe
+   AGEND_HOLDER_DEMO_KEEP=1 target/debug/examples/holder_probe demo
+   ```
+
+   應該看到：`== keep (step 9: paste these in a NEW terminal tab)`，下面 4 行：`export AGEND_HOME=…`、`export AGEND_BIN=…`、`PROBE=…`、`$PROBE start demo-2 … agend-demo-marker`。
+
+   b. 開**新分頁**，把那 4 行整段貼上執行。應該看到：`holder started: pid <H> agent pid <B>`。
+
+   c. 關掉這個新分頁（跳出「要結束程序嗎」就選結束）。
+
+   d. 再開一個新分頁，貼上前 3 行（兩個 `export` 與 `PROBE=…`），然後：
+
+   ```bash
+   $PROBE snapshot demo-2 | grep counter | tail -1
+   ```
+
+   隔幾秒再跑一次。應該看到：`counter=<n> keys=0 pid=<B>`，第二次的 n 比較大，B 與 b 的相同。
+
+   e. 同一個分頁試 Ctrl-C：`$PROBE watch demo-2`，看到幾行 `counter=` 後按 Ctrl-C（只停掉 watch 這個 client）；再跑一次 d 的指令，n 還在變大。
+
+   - [x] 通過
 
 10. 故意弄壞：硬殺 holder，看已知上限（沙箱裡跑，只砍自己起的 pid）。
 
     **這步在驗什麼**：D3 寫明的上限：holder 被 `kill -9`，裡面的 agent 一起死（補救是第 6 施工關的事）。錯了的話（bash 還活著）代表 agent 沒被 holder 持有，停止時會留孤兒。
 
-    操作（開工時細化）：只對步驟 9 印出、且大於 1 的 holder pid，在 `probe-sandbox.sh` 裡 `kill -9`。應該看到：`holder_probe snapshot demo-2` 回 `connect failed`，demo 自己的標記程序找不到。
+    接著用步驟 9 d 的分頁（`AGEND_HOME` 還在）：
 
-    - [ ] 通過
+    ```bash
+    PID=$(cat "$AGEND_HOME/run/holders/demo-2.lock"); echo "$PID"
+    ```
+
+    確認印出的就是步驟 9 b 的 H，而且大於 1。然後：
+
+    ```bash
+    ~/Documents/Hack/AgEnD-ops/probe-sandbox.sh /bin/kill -9 "$PID"
+    $PROBE snapshot demo-2
+    pgrep -f agend-demo-marker || echo "marker gone"
+    ```
+
+    應該看到：`connect failed: Connection refused (os error 61)`、`marker gone`（bash 跟著 holder 死了）。最後清掉：`rm -rf "$AGEND_HOME"`。
+
+    - [x] 通過
+
+## 待你追認
+
+實作時做了、提案沒寫到或與提案字面不同的選擇。確認前照目前的做法運作。
+
+- G1：holder 協定版本**不升**，`Exited.signal` 直接加進 1.0。理由：還沒有任何已發布的 holder；欄位選填、沒有時不送（一般結束的 wire shape 完全不變），舊 daemon 忽略、新 daemon 讀到舊 holder 當成 `None`。替代：升成 1.1。
+  - [x] 使用者追認（2026-09-26）
+- G2：`Shutdown` 的「關 PTY」改成**直接對 agent 的 process group 送 SIGHUP**（關 PTY 時 kernel 送的就是它）。理由：PTY 讀取 thread 持有 master 的複本，關掉 holder 手上的 handle 不會真的掛斷。agent 已結束時直接對 group 送 SIGKILL 清掉留下的子程序（verifier r1 LOW-1 之後；安全性見 G11 的 zombie 保留）。
+  - [x] 使用者追認（2026-09-26）
+- G3：agent 環境除了 `Spawn.env` 與預設 `TERM`，還會有 `SHELL`（portable-pty 一定會設，值是使用者的登入 shell）。不是 secret，但與「只有 Spawn.env」字面不同。要完全去掉得改用自己的 spawn。
+  - [x] 使用者追認（2026-09-26）
+- G4：新連線要**完成 `hello`** 才接手；版本不合或第一個請求不是 `hello` 的連線直接回錯誤、斷線，不影響目前的連線。錯誤碼：`expected_hello`、`version_mismatch`、`unexpected_hello`、`bad_request`、`unsupported_request`（未知請求）、`not_spawned`、`agent_exited`、`already_spawned`、`instance_mismatch`、`spawn_failed`、`resize_failed`，加上提案的 `pty_busy`、`unknown_control_key`。控制鍵與操作者輸入成功時**不回覆**（協定沒有 ack）。
+  - [x] 使用者追認（2026-09-26）
+- G5：24 小時安全網的「agent 已結束」也包含「從來沒 spawn」；計時從最後一次連線開或關、或 agent 結束算起。測試用 `AGEND_HOLDER_IDLE_EXIT_SECS` 改短；檢查間隔是它的 1/4（50 毫秒到 60 秒）。
+  - [x] 使用者追認（2026-09-26）
+- G6：狀態鎖用 `parking_lot`（已經因 alacritty_terminal 在依賴樹裡），PTY 讀取 thread 每處理一段就公平釋放。理由：實測 agent 狂印輸出（`yes`）時，macOS 的一般 mutex 會讓 `Shutdown` 與新連線永遠拿不到鎖。
+  - [x] 使用者追認（2026-09-26）
+- G7：`agend holder` 必須由別的程序啟動（`setsid` 在 process group leader 上會失敗，holder 印原因並 exit 2），不自己 fork。daemon 與 `holder_probe start` 都符合。
+  - [x] 使用者追認（2026-09-26）
+- G8：跨程序測試的每次開機（與啟動器）是**同一個測試 binary 以 `HOLDER_PROBE_ROLE` 重新執行**（`probe_child`），因為 `agend` 的測試拿不到 example binary；demo 則是 `holder_probe` 重新執行自己。
+  - [x] 使用者追認（2026-09-26）
+- G10：holder 收到第二個 `Spawn`（例如 daemon 在 holder 啟動後、`Spawn` 前當掉，新 daemon 接上後重送）一律回 `Error{code: "already_spawned"}`，其他什麼都不做（不重啟、不換 agent）。第 6 施工關依賴這點。這條不在確認過的 P1–P9 裡（第 6 施工關設計稿追加）；測試 `a_second_spawn_is_refused_and_changes_nothing`，協定說明在 `HolderRequest::Spawn`。
+  - [x] 使用者追認（2026-09-26）
+- G11（verifier r1 修正，協定行為）：
+  - 落後被斷線的連線只關**送出**方向，client 已送出的 `Shutdown` 仍然照辦（macOS 的 `shutdown(Both)` 會丟掉還沒讀的輸入）；被新連線**取代**的舊連線送的任何請求都不理。
+  - 新錯誤碼：`invalid_size`（`Resize` 的列與欄要在 1–1000）、`request_too_large`（一行請求超過 1 MiB，回錯誤後斷線）。
+  - `hello` 要在 10 秒內**整行**送完（原本是每次讀取 10 秒）。
+  - agent 結束後保留成 zombie（`waitid` + `WNOWAIT` 取結束狀態、不回收）直到停止：它的 pid／process group id 因此不會被重用，`Shutdown` 可以安全地對 group 送 SIGKILL，清掉 agent 結束後留下、忽略 SIGHUP 的子程序；停止時才回收。
+  - lock 檔的 pid 改成一次寫入固定寬度（不先清空）；holder 啟動時搶鎖重試 500 毫秒；`is_running` 只回活著、大於 1 的 pid，否則最多重查 1 秒後回 `WouldBlock`，**絕不回 0**。正常停止時先清空 pid 再放鎖。
+  - [x] 使用者追認（2026-09-26）
+- G9：**延後**「錄下的 PTY 位元組餵給 holder 畫面再跑 `classify`」。repo 裡沒有真 backend 的原始 PTY 位元組（現有 fixture 是畫面文字摘錄），要做得在沙箱跑真的 codex／claude 錄製；手寫 ANSI 違反 #1493。建議併到第 6 或第 7 施工關第一次用 holder 接真 backend 時錄。
+  - [x] 使用者決定（2026-09-26）：同意延後到第 6／7 施工關
 
 ## 驗收紀錄
 
@@ -252,12 +342,16 @@
 
 | 日期 | 結果（通過／不通過） | 備註 |
 |---|---|---|
-|  |  |  |
+| 2026-09-26 | 通過 | 在 `feat/gate-04-holder`（merge 前）由 agent 帶著走 10 步。步驟 1–8：同一次 `accept holder` 輸出全部對上（H=38844；步驟 6 的 `<K>` 是另起的 `demo-k`，前後同 pid）。步驟 9：關分頁後 counter 42→51、Ctrl-C 只停 watch（80→88），bash pid 不變。步驟 10：中途關機使第一次的 demo-2 消失（關機結束所有程序、清空暫存目錄，不在本關範圍），重起後 `kill -9` holder（5458）→ `Connection refused`、`marker gone`。 |
 
 ## 進度紀錄
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-26 使用者親自驗收 10 步通過（merge 前，branch `feat/gate-04-holder`）。
+- 2026-09-26 使用者逐題追認 G1–G11（G2、G3 經舉例說明後追認；G9 同意延後到第 6／7 施工關）。
+- 2026-09-26 verifier r1（REFUTED `097ddc6`）修正：macOS CI 卡在落後斷線測試（測試關閉沒有期限）→ 看門狗與期限、落後只關送出方向且照辦已送出的 `Shutdown`；`Resize` 上限、請求行 1 MiB、hello 10 秒；鎖檔 pid 競態（`is_running` 曾回 0）；agent 結束後的子程序也清掉；已知限制四點；「待你追認」加 G11。
+- 2026-09-25 實作（draft PR，branch `feat/gate-04-holder`）：`agend holder` 子命令、協定 server、畫面、三種 PTY 寫入、`Exited.signal`、check-deps 規則、`holder_probe` demo、跨程序四次開機測試；狀態改為實作中；「待你追認」G1–G10。fresh-context verifier 尚未跑。
 - 2026-09-25 開工前提案 P1–P9 寫定，使用者逐題確認（P2 追加防孤兒四點、24 小時安全網）；附屬程序移到第 7 施工關；systemd `KillMode=process` 記入第 13 施工關；狀態改為提案中。
 
 ## 下一步
