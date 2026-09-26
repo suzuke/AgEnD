@@ -32,6 +32,11 @@ pub const RULES: &[Rule] = &[
         deny: &[ASYNC_RUNTIME, DATABASE, &["agend-daemon"]],
         why: "CLI startup must stay light: sync I/O only (D11, plan 4.7)",
     },
+    Rule {
+        krate: "agend-holder",
+        deny: &[ASYNC_RUNTIME, DATABASE, &["agend-daemon"]],
+        why: "the holder runs for days on std threads and never opens the DB (gate 4 P1)",
+    },
 ];
 
 /// Crates that may depend on `agend-testkit` only as a dev-dependency: all of them.
@@ -192,6 +197,19 @@ mod tests {
         assert_eq!(
             violations(shim_rule(), &names),
             ["agend-daemon", "tokio", "tokio-util"]
+        );
+    }
+
+    #[test]
+    fn holder_denies_runtimes_databases_and_the_daemon() {
+        let rule = RULES.iter().find(|r| r.krate == "agend-holder").unwrap();
+        let names: Vec<String> = ["agend-holder", "polling", "mio", "rusqlite", "agend-daemon"]
+            .map(String::from)
+            .to_vec();
+        // `polling` (pulled in by alacritty_terminal's unused event loop) is not a runtime.
+        assert_eq!(
+            violations(rule, &names),
+            ["agend-daemon", "mio", "rusqlite"]
         );
     }
 

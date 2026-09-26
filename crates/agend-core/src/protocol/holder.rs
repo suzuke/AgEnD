@@ -87,6 +87,10 @@ pub enum HolderRequest {
     Hello {
         data: Hello,
     },
+    /// Starts the agent. A holder runs at most one agent in its life: a second
+    /// `Spawn` (for example re-sent by a daemon that restarted between holder
+    /// start and `Spawn`) gets `Error{code: "already_spawned"}` and changes
+    /// nothing.
     Spawn {
         data: SpawnData,
     },
@@ -187,9 +191,15 @@ pub struct PtyBytesData {
     pub bytes_base64: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// How the agent ended. `code` is `None` when a signal killed it; then
+/// `signal` names it (`"SIGKILL"`, or `"SIG<n>"` for an unnamed number).
+/// `signal` was added within v1 as an optional field: it is omitted on the
+/// wire when absent, and a missing field reads as `None`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExitedData {
     pub code: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signal: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

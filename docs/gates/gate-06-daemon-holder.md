@@ -21,7 +21,7 @@
 - 開機巡查孤兒 holder：掃 `$AGEND_HOME/run/holders/` 鎖檔，DB 裡沒有的 instance → 送 `Shutdown`（第 4 施工關 P2，使用者 2026-09-25 決定；做法見 P2、P5）
 - holder 被 `kill -9` 之後的補救：偵測 holder 死了 → 用 backend 的 `--resume <id>` 把 agent 接回（第 4 施工關 P2／第 3 施工關 T18；做法見 P6）
 - daemon 對自己啟動的 holder 收屍（`wait`），避免殭屍（P3）
-- 綁定／釋放 worktree 時呼叫 shim 的 `install_hooks`／`uninstall_hooks`（第 3 施工關）：**移到第 10 施工關（P9，待你追認）**
+- 綁定／釋放 worktree 時呼叫 `agend_shim::install_hooks`／`uninstall_hooks`（agend 的 git hook 只裝在該 agent worktree，見[第 3 施工關](gate-03-shim.md#範圍)）：**移到第 10 施工關（P9，待你追認）**
 - 本頁步驟 5（Ctrl-C 停 daemon，agent 還在）依賴第 4 施工關 P2 的 session 分離；`pgrep` 一律只比對 `g6-` 開頭的 instance id
 - daemon 開機時與之後每天跑一次 store 的 `prune` 與每日 DB 快照（第 5 施工關 P8/P9；做法見 P5）
 - 開 DB 時重試到 10 秒，因為重啟時 EXCLUSIVE lock 交接需要時間（第 5 施工關風險；做法見 P1）

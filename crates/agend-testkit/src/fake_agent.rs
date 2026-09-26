@@ -32,6 +32,28 @@ pub(crate) fn state_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+/// Writes `contents` to `path` atomically: writes a temp file in the same
+/// directory, then renames it over `path`. A plain `std::fs::write`
+/// truncates then writes in place, so a process killed mid-write (as the
+/// Resume conformance scenario does, stopping the fake as soon as it sees
+/// `session.idle`) can leave a half-written file that the next `load()`
+/// cannot parse. `rename` within one directory is atomic on the platforms
+/// the fakes run on, so a reader never observes a partial file.
+pub(crate) fn write_state_atomic(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
+    let dir = path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "state file has no parent dir",
+        )
+    })?;
+    std::fs::create_dir_all(dir)?;
+    let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("state");
+    let tmp = dir.join(format!(".{file_name}.tmp.{}", std::process::id()));
+    std::fs::write(&tmp, contents)?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
 /// Default turn duration of every fake agent.
 pub const DEFAULT_TURN_MS: u64 = 100;
 

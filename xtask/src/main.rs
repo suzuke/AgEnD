@@ -5,7 +5,8 @@
 //!   `check_deps` and `check_core`).
 //! - `accept <gate>`: run the acceptance checks of one build gate
 //!   (docs/ROADMAP.md). For now it runs fmt, clippy, tests and check-deps for
-//!   the gate's crates; each gate adds its human-readable demo when it is built.
+//!   the gate's crates; each gate adds its human-readable demo when it is built
+//!   (gate 1: `core_demo`, gate 3: `shim_demo`).
 //!
 //! - `record <backend> [scenario...] --sandbox <script>`: record the real
 //!   backend CLI into `crates/agend-testkit/transcripts/` (see `record`).
@@ -18,6 +19,7 @@ mod check_core;
 mod check_deps;
 mod core_demo;
 mod record;
+mod shim_demo;
 
 use std::process::ExitCode;
 
