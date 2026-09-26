@@ -10,18 +10,31 @@
 //! |---|---|
 //! | `initialize` | `{codexHome, platformFamily, platformOs, userAgent}` |
 //! | `thread/start {model?, cwd?, approvalPolicy?, sandbox?, config?}` | the full thread settings and `thread` object; `thread/started`. The connection then receives the thread's notifications (only after start or resume, spike S2) |
-//! | `turn/start {threadId, input}` | `{turn}` (`inProgress`), `thread/status/changed` active, `turn/started`. After `--turn-ms` the turn "runs": per input (the prompt, then each steer) `item/started` + `item/completed` userMessage, `item/started` agentMessage, one `item/agentMessage/delta`, `item/completed`, `thread/tokenUsage/updated`; then `thread/status/changed` idle and `turn/completed` (`completed`, the agent messages as `items`). A `turn/start` while a turn runs joins it (spike S3) |
-//! | `turn/steer {threadId, expectedTurnId, input}` | `{turnId}`; the text is one more input of the running turn (its own user message and reply); wrong turn id → error -32600 |
+//! | `turn/start {threadId, input, clientUserMessageId?}` | `{turn}` (`inProgress`), `thread/status/changed` active, `turn/started`. After `--turn-ms` the turn "runs": per input (the prompt, then each steer) `item/started` + `item/completed` userMessage, `item/started` agentMessage, one `item/agentMessage/delta`, `item/completed`, `thread/tokenUsage/updated`; then `thread/status/changed` idle and `turn/completed` (`completed`, the agent messages as `items`). A `turn/start` while a turn runs joins it (spike S3) |
+//! | `turn/steer {threadId, expectedTurnId, input, clientUserMessageId?}` | `{turnId}`; the text is one more input of the running turn (its own user message and reply); wrong turn id → error -32600 |
 //! | `turn/interrupt {threadId, turnId}` | `{}`, `thread/status/changed` idle, `turn/completed` `interrupted` |
 //! | `thread/queue/add {threadId, clientUserMessageId, input}` | `{queuedSubmission}`, `thread/queue/changed`; runs as its own turn after the current one (auto-dequeue: `thread/queue/changed`, active, `turn/started`; its user message has `clientId`) |
-//! | `run: <command>` as the prompt | the turn asks: `thread/status/changed` `waitingOnApproval`, a `commandExecution` item (`/bin/zsh -lc '<command>'`), and the server→client request `item/commandExecution/requestApproval`; the reply `{decision}` gives `serverRequest/resolved`, the item `declined` (or `completed` for `accept*`, without running anything; not recorded), then the agent message |
-//! | `thread/resume {threadId}` | `deprecationNotice` (no `excludeTurns`), `thread/status/changed` idle, the settings with the full `thread` (all turns), `thread/tokenUsage/updated`, `thread/goal/cleared` |
+//! | a line `run: <command>` in the prompt | the turn asks: `thread/status/changed` `waitingOnApproval`, a `commandExecution` item (`/bin/zsh -lc '<command>'`), and the server→client request `item/commandExecution/requestApproval`; the reply `{decision}` gives `serverRequest/resolved`, the item `declined` (or `completed` for `accept*`, without running anything; not recorded), then the agent message |
+//! | `thread/resume {threadId, excludeTurns?}` | `deprecationNotice` (no `excludeTurns`), `thread/status/changed` idle, the settings with the full `thread` (all turns; none with `excludeTurns: true`), `thread/tokenUsage/updated`, `thread/goal/cleared`; an unknown thread → error -32600 `thread not found: <id>` |
 //! | restart | with `AGEND_FAKE_STATE_DIR` set, threads persist in `$AGEND_FAKE_STATE_DIR/fake-codex/threads.json` (the real server keeps rollouts under `CODEX_HOME`), so a restarted fake resumes by id (spike S4); without it nothing persists |
-//! | `--listen` path | like codex: the socket always lives at a short path (`<tmp>/fake-codex-<hash>.sock`, codex: `/private/tmp/codex-daemon-<uid>/<sha256>`) and the requested path is a symlink to it (pitfall 1) |
+//! | `--listen` path | like codex: the socket always lives at a short path (`<tmp>/fake-codex-<hash>.sock`, codex: `/private/tmp/codex-daemon-<uid>/<sha256>`) and the requested path is a symlink to it (pitfall 1); an old symlink at the requested path is replaced |
 //!
-//! Not covered: `thread/turns/list`, `thread/items/list`, reasoning items
-//! (the model's choice), the other approval kinds, sandboxing, MCP server,
-//! account and rate-limit notifications (see `recorder::shape::IGNORED`).
+//! Added for gate 7 (P8) and **not verified against the real CLI** (未查證:
+//! no recording yet; the owner's optional step 7 records `turns_list`,
+//! `queue_idle`, `resume_empty`):
+//!
+//! | Method | Behaviour | Open question |
+//! |---|---|---|
+//! | `clientUserMessageId` on `turn/start`, `turn/steer` | the user message of that input carries it as `clientId` | U2 |
+//! | `thread/turns/list {threadId, cursor?, limit?}` | `{data, nextCursor}`: every turn oldest first with its full `items`, the running one last (`inProgress`, its items so far); `cursor` is the index to start at | U5, U10 |
+//! | `thread/queue/list {threadId}` | `{data: [{id, clientUserMessageId, input}]}`, oldest first | U2, U5 |
+//! | `thread/queue/start {threadId}` | active turn → error -32600 `thread already has an active or pending turn`; otherwise starts the oldest queued message, `{}` | U3 |
+//! | `thread/queue/add` on an idle thread | starts it at once as a turn | U3 |
+//! | `agendFake/exit` | fake only: the server process exits at once (a test stand-in for an app-server that dies) | — |
+//!
+//! Not covered: `thread/items/list`, reasoning items (the model's choice),
+//! the other approval kinds, sandboxing, MCP server, account and rate-limit
+//! notifications (see `recorder::shape::IGNORED`).
 //!
 //! Must NOT: call a model or run the commands it is asked to approve.
 
@@ -90,6 +103,7 @@ fn usage(error: &str) -> ExitCode {
 pub struct Server {
     requested: PathBuf,
     bound: PathBuf,
+    shared: Arc<Shared>,
 }
 
 impl Server {
@@ -102,6 +116,11 @@ impl Server {
     ) -> io::Result<Server> {
         let bound = socket_path_for(requested);
         let _ = std::fs::remove_file(&bound);
+        // An old symlink (a server that died) is replaced (U14: what the
+        // real codex does is not verified).
+        if std::fs::symlink_metadata(requested).is_ok_and(|m| m.file_type().is_symlink()) {
+            std::fs::remove_file(requested)?;
+        }
         std::os::unix::fs::symlink(&bound, requested)?;
         let listener = UnixListener::bind(&bound)?;
         let mut state = State {
@@ -114,11 +133,20 @@ impl Server {
         let shared = Arc::new(Shared {
             state: Mutex::new(state),
             turn,
+            closed: std::sync::atomic::AtomicBool::new(false),
+            accepted: std::sync::atomic::AtomicU64::new(0),
         });
+        let handle = Arc::clone(&shared);
         let ticker = Arc::clone(&shared);
         std::thread::spawn(move || tick_loop(&ticker));
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
+                if shared.closed.load(std::sync::atomic::Ordering::SeqCst) {
+                    return;
+                }
+                shared
+                    .accepted
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let shared = Arc::clone(&shared);
                 std::thread::spawn(move || {
                     let _ = serve(stream, &shared);
@@ -126,6 +154,7 @@ impl Server {
             }
         });
         Ok(Server {
+            shared: handle,
             requested: requested.to_path_buf(),
             bound,
         })
@@ -137,8 +166,21 @@ impl Server {
     }
 }
 
+impl Server {
+    /// How many connections this server accepted.
+    pub fn accepted(&self) -> u64 {
+        self.shared
+            .accepted
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
 impl Drop for Server {
+    /// The server is gone: its connections end and its socket is removed.
     fn drop(&mut self) {
+        self.shared
+            .closed
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         let _ = std::fs::remove_file(&self.bound);
         let _ = std::fs::remove_file(&self.requested);
     }
@@ -156,6 +198,10 @@ pub fn socket_path_for(requested: &Path) -> PathBuf {
 struct Shared {
     state: Mutex<State>,
     turn: Duration,
+    /// Set when the [`Server`] is dropped: every connection ends.
+    closed: std::sync::atomic::AtomicBool,
+    /// Connections accepted so far.
+    accepted: std::sync::atomic::AtomicU64,
 }
 
 #[derive(Default)]
@@ -178,16 +224,24 @@ struct ThreadState {
     turns: Vec<Value>,
     subscribers: BTreeSet<u64>,
     active: Option<Turn>,
-    queue: VecDeque<(String, String)>,
+    /// (submission id, text, client user message id, input as sent).
+    queue: VecDeque<Queued>,
+}
+
+struct Queued {
+    id: String,
+    text: String,
+    client_id: String,
+    input: Value,
 }
 
 struct Turn {
     id: String,
-    /// The prompt, then each steer (or joining `turn/start`).
-    inputs: Vec<String>,
+    /// The prompt, then each steer (or joining `turn/start`), each with its
+    /// client user message id.
+    inputs: Vec<(String, Option<String>)>,
     /// Inputs already answered.
     done: usize,
-    client_id: Option<String>,
     started_at: u64,
     deadline: Instant,
     owner: u64,
@@ -416,9 +470,8 @@ impl State {
         let started_at = self.now_ms() / 1000;
         let t = Turn {
             id,
-            inputs: vec![text],
+            inputs: vec![(text, client_id)],
             done: 0,
-            client_id,
             started_at,
             deadline: Instant::now() + turn,
             owner,
@@ -493,14 +546,9 @@ impl State {
                 return;
             }
             let (turn_id, done) = (active.id.clone(), active.done);
-            let Some(text) = active.inputs.get(done).cloned() else {
+            let Some((text, client_id)) = active.inputs.get(done).cloned() else {
                 self.finish_turn(thread_id, "completed", turn);
                 return;
-            };
-            let client_id = if done == 0 {
-                active.client_id.clone()
-            } else {
-                None
             };
             let user = self.user_item(&text, client_id);
             self.item_event(thread_id, &turn_id, "item/started", &user);
@@ -512,13 +560,9 @@ impl State {
                 .expect("active");
             active.items.push(user);
             active.done += 1;
-            match text.strip_prefix(APPROVAL_PREFIX) {
+            match text.lines().find_map(|l| l.strip_prefix(APPROVAL_PREFIX)) {
                 Some(command) if done == 0 => {
-                    self.ask(
-                        thread_id,
-                        &turn_id,
-                        command.lines().next().unwrap_or_default().trim(),
-                    );
+                    self.ask(thread_id, &turn_id, command.trim());
                     return;
                 }
                 _ => self.agent_message(thread_id, &turn_id, &reply_to(&text)),
@@ -659,14 +703,37 @@ impl State {
             "turn/completed",
             json!({"threadId": thread_id, "turn": done}),
         );
-        if let Some((text, client_id)) = queued {
+        if let Some(queued) = queued {
             self.notify(
                 thread_id,
                 "thread/queue/changed",
                 json!({"threadId": thread_id}),
             );
-            self.start_turn(thread_id, text, Some(client_id), active.owner, turn);
+            self.start_turn(
+                thread_id,
+                queued.text,
+                Some(queued.client_id),
+                active.owner,
+                turn,
+            );
         }
+    }
+
+    /// Every turn of the thread, oldest first, with full items; the running
+    /// one last with its items so far.
+    fn all_turns(&self, thread_id: &str) -> Vec<Value> {
+        let thread = &self.threads[thread_id];
+        let mut turns = thread.turns.clone();
+        if let Some(active) = &thread.active {
+            turns.push(Self::turn_json(
+                active,
+                "inProgress",
+                None,
+                Value::Array(active.items.clone()),
+                "full",
+            ));
+        }
+        turns
     }
 }
 
@@ -723,6 +790,9 @@ fn pump(
     shared: &Shared,
 ) -> tungstenite::Result<()> {
     loop {
+        if shared.closed.load(std::sync::atomic::Ordering::SeqCst) {
+            return Ok(());
+        }
         while let Ok(message) = outgoing.try_recv() {
             socket.send(Message::text(message.to_string()))?;
         }
@@ -849,42 +919,49 @@ fn handle(message: &Value, connection: u64, shared: &Shared) -> Vec<Value> {
             after.push(state.notification("thread/tokenUsage/updated", json!({"threadId": thread_id,
                 "turnId": last_turn, "tokenUsage": {"last": usage, "total": usage, "modelContextWindow": 258_400}})));
             after.push(state.notification("thread/goal/cleared", json!({"threadId": thread_id})));
-            Ok(state.resume_result(&thread_id))
+            let mut result = state.resume_result(&thread_id);
+            if params["excludeTurns"] == true {
+                result["thread"]["turns"] = json!([]);
+            }
+            Ok(result)
         }
         "thread/resume" | "turn/start" | "turn/steer" | "turn/interrupt" | "thread/queue/add"
+        | "thread/queue/list" | "thread/queue/start" | "thread/turns/list"
             if !known =>
         {
             Err((INVALID_REQUEST, format!("thread not found: {thread_id}")))
         }
         "turn/start" => {
             let text = text_of(params);
+            let client_id = params["clientUserMessageId"].as_str().map(str::to_owned);
             let active = state
                 .threads
                 .get_mut(&thread_id)
                 .and_then(|t| t.active.as_mut());
             match active {
                 Some(active) => {
-                    active.inputs.push(text);
+                    active.inputs.push((text, client_id));
                     Ok(
                         json!({"turn": {"id": active.id, "status": "inProgress", "items": [], "itemsView": "notLoaded",
                                        "error": null, "startedAt": null, "completedAt": null, "durationMs": null}}),
                     )
                 }
                 None => Ok(
-                    json!({"turn": state.start_turn(&thread_id, text, None, connection, shared.turn)}),
+                    json!({"turn": state.start_turn(&thread_id, text, client_id, connection, shared.turn)}),
                 ),
             }
         }
         "turn/steer" => {
             let expected = params["expectedTurnId"].as_str().unwrap_or_default();
             let text = text_of(params);
+            let client_id = params["clientUserMessageId"].as_str().map(str::to_owned);
             match state
                 .threads
                 .get_mut(&thread_id)
                 .and_then(|t| t.active.as_mut())
             {
                 Some(active) if active.id == expected => {
-                    active.inputs.push(text);
+                    active.inputs.push((text, client_id));
                     Ok(json!({"turnId": active.id}))
                 }
                 _ => Err((
@@ -922,7 +999,12 @@ fn handle(message: &Value, connection: u64, shared: &Shared) -> Vec<Value> {
             let busy = state.threads[&thread_id].active.is_some();
             if busy {
                 if let Some(t) = state.threads.get_mut(&thread_id) {
-                    t.queue.push_back((text, client_id));
+                    t.queue.push_back(Queued {
+                        id: submission,
+                        text,
+                        client_id,
+                        input: params["input"].clone(),
+                    });
                 }
                 state.notify(
                     &thread_id,
@@ -934,6 +1016,52 @@ fn handle(message: &Value, connection: u64, shared: &Shared) -> Vec<Value> {
             }
             Ok(result)
         }
+        "thread/queue/list" => {
+            let data: Vec<Value> = state.threads[&thread_id]
+                .queue
+                .iter()
+                .map(|q| json!({"id": q.id, "clientUserMessageId": q.client_id, "input": q.input}))
+                .collect();
+            Ok(json!({"data": data}))
+        }
+        "thread/queue/start" => {
+            let thread = state.threads.get_mut(&thread_id).expect("known thread");
+            if thread.active.is_some() {
+                Err((
+                    INVALID_REQUEST,
+                    "thread already has an active or pending turn".to_owned(),
+                ))
+            } else {
+                if let Some(queued) = thread.queue.pop_front() {
+                    state.notify(
+                        &thread_id,
+                        "thread/queue/changed",
+                        json!({"threadId": thread_id}),
+                    );
+                    state.start_turn(
+                        &thread_id,
+                        queued.text,
+                        Some(queued.client_id),
+                        connection,
+                        shared.turn,
+                    );
+                }
+                Ok(json!({}))
+            }
+        }
+        "thread/turns/list" => {
+            let turns = state.all_turns(&thread_id);
+            let start = params["cursor"]
+                .as_str()
+                .and_then(|c| c.parse::<usize>().ok())
+                .unwrap_or(0)
+                .min(turns.len());
+            let limit = params["limit"].as_u64().map_or(turns.len(), |l| l as usize);
+            let end = start.saturating_add(limit.max(1)).min(turns.len());
+            let next = (end < turns.len()).then(|| end.to_string());
+            Ok(json!({"data": turns[start..end], "nextCursor": next}))
+        }
+        "agendFake/exit" => std::process::exit(0),
         other => Err((METHOD_NOT_FOUND, format!("method not found: {other}"))),
     };
     let reply = match result {

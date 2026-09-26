@@ -292,7 +292,7 @@ impl Inner {
             instance_id: id.clone(),
             program: launch.executable.clone(),
             args: launch.args.clone(),
-            env: env::agent_env(&self.home, &id, self.daemon_env.clone()),
+            env: env::agent_env(&self.home, &id, launch.backend, self.daemon_env.clone()),
             working_directory: launch.working_directory.clone(),
         };
         let generation = self.next_generation.fetch_add(1, Ordering::SeqCst);

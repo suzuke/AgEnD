@@ -3,13 +3,13 @@
 > **TL;DR**
 > - codex driver、送達模型、三級忙碌策略；codex 第一次有 thread id 可以 resume（補上第 6 施工關 H2 的缺口）。
 > - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這個施工關才算完成。
-> - 下一步：P1–P9 已確認（P4 選 A）；merge 這份提案後開工。「未查證」表的安全指令仍可在你的終端跑（不花 token），結果貼回來。
+> - 下一步：實作在 draft PR（branch `feat/gate-07-codex`）；你追認「待你追認」K1–K13，然後照「你親自驗收」一步一步跑（步驟 7、8 選做、會花 token）。
 
 **先看這條**：這頁的步驟會用到 `agend`。每個新開的終端機分頁都要先跑「你親自驗收」開頭的設定，否則會跑到舊的 Node 版 `agend` 1.24.0。
 
 ## 狀態
 
-**提案中**（2026-09-26）：開工前提案 P1–P9 使用者已逐題確認（P4 選 A）；第 6 施工關已 merge（#125，`3e28e06`）。
+**實作中，draft PR**（2026-09-26，branch `feat/gate-07-codex`）：P1–P9 照使用者確認的做（P4 選 A）；自動驗收除了 fresh-context verifier 與「`codex --version` 對錄製檔」（要跑真 codex，留給你的步驟 6）之外都過了；實作時的決定列在「待你追認」K1–K13。
 
 ## 範圍
 
@@ -229,63 +229,73 @@ codex 的事實來源：[backends/codex.md](../backends/codex.md)、[spike-codex
 - 用你的 `~/.codex` 時，你自己的 MCP server、plugin、`notify`、hooks 也會在每個 agent 生效（backends/codex.md 陷阱）；本關不處理（P4），記給第 12 施工關。
 - 冪等依賴「同一則訊息的內容不變」：P5 崩潰對帳在沒有 `clientId` 時用內容比對，兩則內容完全相同、不同 id 的訊息在同一個 turn 裡會被當成一則（機率低；U2 若證實有 `clientId` 就沒有這個問題）。
 
-**未查證的 codex 事實**（每條都附你可以自己跑的安全查法；`--help` 與 `generate-json-schema` 不呼叫模型、不花 token。本 agent 沒有執行任何 codex 指令）：
+**未查證的 codex 事實**（每條都附你可以自己跑的安全查法；`--help` 與 `generate-json-schema` 不呼叫模型、不花 token。本 agent 沒有執行任何 codex 指令；2026-09-26 你跑了 `codex --help`、`codex resume --help`，結果記在 U4、U6、U12、U18）：
 
 | # | 事實 | 影響 | 怎麼查 |
 |---|---|---|---|
 | U1 | `thread/start` 之後還沒有任何 turn、app-server 重起，`thread/resume` 找不找得到這個 thread | P3 的「空 thread」分支是否需要 | 真跑才知道：錄製情境 `resume_empty`（P8，花極少 token） |
 | U2 | `turn/start`、`turn/steer` 收不收 `clientUserMessageId`，user message 會不會帶 `clientId`；`thread/queue/list` 回不回 `clientUserMessageId` | P5 的確認與對帳 | `codex app-server generate-json-schema --experimental -o /tmp/cx && grep -l clientUserMessageId /tmp/cx/*.json` |
 | U3 | 閒置 thread 上 `thread/queue/add` 會不會自己開始 turn | P6 的 queue 競態處理 | 真跑：錄製情境 `queue_idle` |
-| U4 | 0.156.1 的 `codex resume <id> --remote …` 接不接受 `-c` 覆寫（v1 說 0.148–0.150 拒絕權限覆寫）；`--remote` 放在 `resume` 前面（v1 的順序）是否也行（spike S4 只驗過放後面） | P4 的設定放 app-server 還是 TUI | `codex resume --help` 看有沒有 `--remote`、`-c`；實際接受與否要 P8 的 `codex_live` |
+| U4 | 0.156.1 的 `codex resume <id> --remote …` 接不接受 `-c` 覆寫（v1 說 0.148–0.150 拒絕權限覆寫）；`--remote` 放在 `resume` 前面（v1 的順序）是否也行（spike S4 只驗過放後面） | P4 的設定放 app-server 還是 TUI | **部分查證**（2026-09-26，你跑 `--help`）：`codex resume [OPTIONS] [SESSION_ID] [PROMPT]`，`resume` 本身收 `-c/--config`、`--remote <ADDR>`（`ws://`、`wss://`、`unix://`、`unix://PATH`）、`-s`、`-a`、`--no-daemon` 等，所以語法上接受；`--remote` 模式下權限覆寫有沒有生效仍未查證（包裝只給 TUI trust 與更新檢查，權限只給 app-server）。實際效果要 `codex_live` |
 | U5 | `thread/turns/list`、`thread/queue/list` 的參數與回傳形狀 | P5、P7 | 同 U2 的 schema：`grep -A40 -e '"ThreadTurnsListParams"' -e '"ThreadQueueListParams"' /tmp/cx/*.json` |
-| U6 | 帶 `--remote` 的 TUI 會不會另外起或接上 codex 共用的背景 app-server（`--no-daemon`） | P1、P2（程序數、group） | `codex --help \| grep -i -e remote -e daemon` 與 `codex resume --help \| grep -i daemon` |
+| U6 | 帶 `--remote` 的 TUI 會不會另外起或接上 codex 共用的背景 app-server（`--no-daemon`） | P1、P2（程序數、group） | **部分查證**（2026-09-26，你跑 `--help`）：codex 預設**有**共用的本機背景 app-server daemon（子命令 `remote-control`、`agents` 說的就是它；`--no-daemon`：「Run without the shared background server, even if it is already running」）。帶 `--remote` 的 TUI 還會不會起它未查證；本關不加 `--no-daemon`（K7），`codex_live` 的 `ps:` 行會列出這個 instance 以外多出來的 codex 程序 |
 | U7 | 0.156.1 的 `-c projects={…}` 仍能讓 trust 提示不出現（v1 在 0.149 驗過） | P4 | P8 的 `codex_live`（看第一個畫面） |
 | U8 | codex 的指令（`/bin/zsh -lc`）找到的 `git`、`pkill`、`killall` 是不是 `$AGEND_HOME/bin` 的 shim（含 shell 快照會不會蓋掉 PATH） | P4（安全） | 不花 token 的旁證：`env -i HOME=$HOME PATH=/tmp/x:/usr/bin:/bin /bin/zsh -lc 'echo $PATH'`；真正的答案：`codex_live` 裡跑 `command -v git pkill killall` |
 | U9 | `turn/steer` 碰到剛結束的 turn 回 `-32600`（目前只有假 app-server 這樣回） | P6 | 真跑才知道：可加進錄製情境 `queue_idle` |
 | U10 | thread 歷史只會往後長（rollback、context 壓縮不刪改舊 turn） | P7 的 cursor | schema 裡找 rollback 類方法：`ls /tmp/cx \| grep -i -e rollback -e compact`；行為要真跑 |
 | U11 | `turn/interrupt` 時已有排隊訊息，codex 先開始排隊的那一個 | P6 | 真跑：錄製情境 `queue_idle` |
-| U12 | 0.156.1 的 `-c` 放在子命令後面也有效（v1 #3402 放前面） | P4 | `codex app-server --help \| grep -e '-c'`；實際效果要 `codex_live` |
+| U12 | 0.156.1 的 `-c` 放在子命令後面也有效（v1 #3402 放前面） | P4 | **部分查證**（2026-09-26，你跑 `codex --help`）：頂層有 `-c`（放子命令前面可以，包裝就是這樣放）；`--remote` 也是頂層選項；另有 `-s danger-full-access`、`-a never` 可取代 `-c sandbox_mode=…`／`-c approval_policy=…`（本關維持 P4 的 `-c` ＋ `thread/start` 參數）。`app-server` 子命令自己的選項見 U18 |
 | U13 | codex 的 `shell_environment_policy` 會不會濾掉 `ZDOTDIR`；codex 能不能設成非 login shell；shell 快照（`~/.codex/shell_snapshots`）怎麼用 PATH | P4 選 A／B | 同 U2 的 schema：`grep -rl -i -e shell_environment_policy -e login -e snapshot /tmp/cx`；實際效果要 `codex_live` |
 | U14 | app-server 綁 socket 時，舊的 symlink 或 `/private/tmp/codex-daemon-<uid>/` 下的舊 socket 檔還在，會不會失敗（假 app-server 目前 `EEXIST`） | P2 的「先刪舊 socket」 | 真跑才知道：`codex_live`（第二次啟動前不刪，看錯誤）；P2 先照最保守的「一律先刪」做 |
 | U15 | app-server 先結束時，真 TUI 會不會自己結束；app-server 會不會攔 SIGHUP（攔了就不跟 TUI 一起結束） | P2：holder 還活著時靠 `Shutdown` 的 SIGKILL；holder 死掉時靠清掃。答案決定「清掃」是不是常態 | 真跑：`codex_live` 裡 `kill -9` holder 後看 daemon log 是 `swept …` 還是 `already gone` |
 | U16 | 真 TUI 一直是 tty 的前景 group、app-server 從不 `setsid`／`setpgid` 換 group | P2 的 E1（同一個 group）是否成立 | 真跑：`codex_live` 裡 `ps -o pid,pgid,tpgid,command` 看兩個程序的 `pgid` 相同、`tpgid` 等於它；有清掃時就算不成立，holder 死掉也不留孤兒（清掃只找同 group 的；U16 不成立時見「已知風險」） |
 | U17 | 人在 `--remote` TUI 打字時，是否成為同一個 thread 的 user message、app-server 是否送出對應的 turn 事件；daemon 收到不是自己送的 turn 時忙／閒與 `messages` 狀態不受影響 | P1 的「人在 TUI 打字」 | 真跑：`codex_live` 之後在 attach 的 TUI 打一句，daemon log 出現那一輪的 busy→idle、`messages` 沒有多一列 |
+| U18 | `codex app-server --help`：收不收 `--listen unix://…`（spike 用過）與 `--no-daemon`；`-c` 放在 `app-server` 後面是否也行 | P2、K7（要不要給 app-server 加 `--no-daemon`） | `codex app-server --help`（不花 token） |
+| U19 | app-server 被硬殺、重起後，`thread/turns/list` 的最後一個 turn 還是不是 `inProgress`（對帳看它判斷「忙」；是的話 K9 ④：送過一次、狀態不明的訊息會一直等） | P5、K9 | 真跑：步驟 8 的 `kill -9 holder` 之後，`/tmp/g7-live.log` 看 `g7-live` 有沒有 `was sent before and is not in the thread yet` 一直沒下文；或步驟 7 之後請 agent 加一個錄製情境 |
 
 ## 自動驗收（完成定義）
 
-- [ ] `~/.cargo/bin/cargo test -p agend-daemon`、`~/.cargo/bin/cargo test -p agend-holder`、`~/.cargo/bin/cargo test -p agend-testkit` 單獨通過，包括：包裝起的 app-server 與 TUI 同一個 process group；holder 被測試自己 `kill -9` 後沒有殘留的假 app-server，包括假 app-server 設成忽略 HUP 的情況（清掃；清掃只在指令列有標記時才送 SIGKILL，另一條測試用不相干的 group 驗證它不送）；`$GO` 用 rename 寫入、daemon 在交接途中重啟後照樣交接；TUI 先結束時 app-server 跟著結束；app-server 先結束時 daemon 20 秒後 `Shutdown`；舊 socket 與 `$GO` 在 `Spawn` 前被刪（P2）。訊號重設、zombie 保留、`Shutdown` 的 group SIGHUP／SIGKILL 由第 4 施工關既有的 holder 行為與測試涵蓋（portable-pty `pre_exec`、G2、G11），本關不另寫；清掃在 daemon 跑著時、開機路徑（daemon 停著時 holder 被 `kill -9`）、連死 3 次變 `failed` 之後都沒有 codex 留下，holder 還活著的 `failed` instance 不清掃（P2）；thread id 先寫 DB 才寫 `$GO`、每次都 `resume <id>`；第一次啟動在 `Spawned` 與 `thread/start` 之間被打斷 → 下次建新 thread、不是 `failed`；migration 前的舊 codex 列（`running`／`failed`）→ `failed`、`legacy_no_thread = 1`、holder pid 不變、沒有 `thread/start`，`new` 列不動；schema fixture 與 golden 含新欄位（P3）；送給沒有 driver 的 instance 停在 `queued`；`messages.seq` 是明確的 `INTEGER PRIMARY KEY`、`VACUUM INTO` 快照還原後順序不變；同 id 不同內容回 `invalid_request`、兩個同 id 同時送只插入一次（P5）；schema fixture 與 golden 含 `messages` 的 `seq` 與 `UNIQUE(id)`；`-c` 參數組出來的樣子、approval 請求回 `decline`、選定的 shim 方案組出的環境（P4）；四個狀態的轉換、再送同一個 id 不呼叫 codex、崩潰窗口對帳（歷史與佇列兩邊，P5）；三級各一條、兩個競態各一條（P6）；cursor 展開與重讀（P7）
-- [ ] 契約 DRV-1..9 對 `CodexDriver` ＋假 app-server ＋真 DB 通過；DRV-6、DRV-9 四次開機跨真的 process 通過，反向檢查「每次開機用新的 `AGEND_HOME`」必須失敗（P8）
-- [ ] 第 6 施工關的 `daemon-holder` 驗收仍通過（本關改了 `session_args`）
-- [ ] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨
-- [ ] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`（出現 `SKIPPED` 不算通過；本關不加新規則，P9）
-- [ ] `~/.cargo/bin/cargo xtask accept codex` 通過，並印出下方「你親自驗收」用到的 demo
-- [ ] 真 CLI 一致性檢查（必要；使用者已決定 2026-09-25）：`codex --version` 和 `crates/agend-testkit/transcripts/codex/` 錄製檔 header 的 `version` 相同，不同就先用錄製器重錄（[RECORDER.md](../../crates/agend-testkit/RECORDER.md#重錄cli-升版時)）；`~/.cargo/bin/cargo test -p agend-testkit --test conformance` 通過（現有 5 個情境；P8 的新情境只有在步驟 7 錄了之後才加進來，不是完成條件）
-- [ ] 本施工關 crate 的 `README.md`／`TESTING.md` 已更新
-- [ ] 測試不留殘留：結束時沒有 `g7-` 或測試 id 的 holder、假 app-server；kill 只對自己起的、大於 1 的 pid
+- [x] `~/.cargo/bin/cargo test -p agend-daemon`、`~/.cargo/bin/cargo test -p agend-holder`、`~/.cargo/bin/cargo test -p agend-testkit` 單獨通過，包括：包裝起的 app-server 與 TUI 同一個 process group；holder 被測試自己 `kill -9` 後沒有殘留的假 app-server，包括假 app-server 設成忽略 HUP 的情況（清掃；清掃只在指令列有標記時才送 SIGKILL，另一條測試用不相干的 group 驗證它不送）；`$GO` 用 rename 寫入、daemon 在交接途中重啟後照樣交接；TUI 先結束時 app-server 跟著結束；app-server 先結束時 daemon 20 秒後 `Shutdown`；舊 socket 與 `$GO` 在 `Spawn` 前被刪（P2）。訊號重設、zombie 保留、`Shutdown` 的 group SIGHUP／SIGKILL 由第 4 施工關既有的 holder 行為與測試涵蓋（portable-pty `pre_exec`、G2、G11），本關不另寫；清掃在 daemon 跑著時、開機路徑（daemon 停著時 holder 被 `kill -9`）、連死 3 次變 `failed` 之後都沒有 codex 留下，holder 還活著的 `failed` instance 不清掃（P2）；thread id 先寫 DB 才寫 `$GO`、每次都 `resume <id>`；第一次啟動在 `Spawned` 與 `thread/start` 之間被打斷 → 下次建新 thread、不是 `failed`；migration 前的舊 codex 列（`running`／`failed`）→ `failed`、`legacy_no_thread = 1`、holder pid 不變、沒有 `thread/start`，`new` 列不動；schema fixture 與 golden 含新欄位（P3）；送給沒有 driver 的 instance 停在 `queued`；`messages.seq` 是明確的 `INTEGER PRIMARY KEY`、`VACUUM INTO` 快照還原後順序不變；同 id 不同內容回 `invalid_request`、兩個同 id 同時送只插入一次（P5）；schema fixture 與 golden 含 `messages` 的 `seq` 與 `UNIQUE(id)`；`-c` 參數組出來的樣子、approval 請求回 `decline`、選定的 shim 方案組出的環境（P4）；四個狀態的轉換、再送同一個 id 不呼叫 codex、崩潰窗口對帳（歷史與佇列兩邊，P5）；三級各一條、兩個競態各一條（P6）；cursor 展開與重讀（P7）；實作者 2026-09-26：`cargo test --workspace` 全過（59 個 test binary、0 failed）。本關的真 binary 測試在 `crates/agend/tests/codex_process.rs`（K4），行程內的在 `agend-daemon/tests/codex_driver.rs`；兩個競態用照稿的連線（`driver::codex::send::tests`），不是對假 app-server
+- [x] 契約 DRV-1..9 對 `CodexDriver` ＋假 app-server ＋真 DB 通過；DRV-6、DRV-9 四次開機跨真的 process 通過，反向檢查「每次開機用新的 `AGEND_HOME`」必須失敗（P8）；實作者：`contract_drv_1_to_9_passes_against_the_codex_driver_and_the_fake_app_server`、`four_boots_in_four_processes_backfill_and_never_send_twice`、`four_boots_with_a_new_home_each_boot_fail`（`boot 2 failed: thread …, not boot 1's …`）
+- [x] 第 6 施工關的 `daemon-holder` 驗收仍通過（本關改了 `session_args`）；實作者：`daemon_process.rs`、`holder_runtime.rs` 全過；`cargo xtask accept daemon-holder` 見進度紀錄
+- [x] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨；實作者：乾淨
+- [x] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`（出現 `SKIPPED` 不算通過；本關不加新規則，P9）；實作者：`check-deps: ok (6 rules, 8 crates checked for agend-testkit, agend-core metadata ok, no-std build ok)`
+- [x] `~/.cargo/bin/cargo xtask accept codex` 通過，並印出下方「你親自驗收」用到的 demo；實作者：見進度紀錄
+- [ ] 真 CLI 一致性檢查（必要；使用者已決定 2026-09-25）：`codex --version` 和 `crates/agend-testkit/transcripts/codex/` 錄製檔 header 的 `version` 相同，不同就先用錄製器重錄（[RECORDER.md](../../crates/agend-testkit/RECORDER.md#重錄cli-升版時)）；`~/.cargo/bin/cargo test -p agend-testkit --test conformance` 通過（現有 5 個情境；P8 的新情境只有在步驟 7 錄了之後才加進來，不是完成條件）；實作者只跑了 `conformance`（5 passed，3 個新情境印 `not recorded yet … skipped`）；`codex --version` 要跑真 codex，留給你的步驟 6
+- [x] 本施工關 crate 的 `README.md`／`TESTING.md` 已更新
+- [x] 測試不留殘留：結束時沒有 `g7-` 或測試 id 的 holder、假 app-server；kill 只對自己起的、大於 1 的 pid；實作者：每次跑完 `pgrep -fl "agend (holder|daemon)"`、`pgrep -fl "fake.*codex"` 都沒有輸出，`/tmp/g7-*` 與 `$TMPDIR/fake-codex-*.sock` 沒有留下；清掃只對測試自己起的 group（`sweep::tests` 另測不相干的 group 不送）
 - [ ] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」（verifier 不跑真 codex）
 
 ## 你親自驗收
 
-由 agent 帶著一步一步做（見 [AGENTS.md](../../AGENTS.md#帶使用者親自驗收)）。每一步：照抄指令 → 對照「應該看到」→ 對了就打勾。任何一步不符就停，記在「驗收紀錄」。標「開工時細化」的地方，開工時會改成確切指令與輸出。
+由 agent 帶著一步一步做（見 [AGENTS.md](../../AGENTS.md#帶使用者親自驗收)）。每一步：照抄指令 → 對照「應該看到」→ 對了就打勾。任何一步不符就停，記在「驗收紀錄」。步驟 1–6 的「應該看到」是實作者 2026-09-26 在 macOS 照抄指令實跑的輸出（pid、thread id、時間每次不同，`<T>` 是 demo 自己把 thread id 換掉的）；步驟 6 的 `codex --version` 與步驟 7、8 要跑真的 codex，實作者**沒有跑**，那幾處的「應該看到」是照提案與程式寫的，標著「未實跑」。
 
 **每個新開的終端機分頁都要先跑這段**：
 
 ```bash
 cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
+unset AGEND_BIN
 ~/.cargo/bin/cargo build -p agend && export PATH="$PWD/target/debug:$PATH" && agend --version
 ```
 
-應該看到 `agend 0.x.y`。如果印出 `1.24.0`，跑到的是舊的 Node CLI——在這個終端機重跑上面那段。
+應該看到 `agend 0.0.0`。如果印出 `1.24.0`，跑到的是舊的 Node CLI——在這個終端機重跑上面那段。
 
 1. 跑 demo（全部對假 codex）。
 
-   **這步在驗什麼**：真 daemon、真 holder、真的 `sh` 包裝，裡面是假 app-server 與假 TUI，從頭跑完下面每一段。錯了代表最基本的「起 codex instance、送得到」不成立。
+   **這步在驗什麼**：各 crate 的檢查，再用真 daemon、真 holder、真的 `sh` 包裝（裡面是 `fake_codex`）與行程內的假 app-server 跑完每一段。錯了代表最基本的「起 codex instance、送得到」不成立。
 
    ```bash
-   ~/.cargo/bin/cargo xtask accept codex
+   cd ~/Documents/Hack/AgEnD-v2
+   ~/.cargo/bin/cargo xtask accept codex 2>/dev/null | tee /tmp/g7-accept.txt | tail -3
    ```
 
-   應該看到：最後一行 `gate 7 (codex): checks passed`（開工時細化）。
+   要跑幾分鐘（前面是三個 crate 的 fmt／clippy／測試，最後約 2 分鐘是 demo；`2>/dev/null` 只是把 daemon 與 driver 的 log 藏起來）。應該看到最後三行：
+
+   ```text
+   stopped 8 holder(s) with Shutdown; running now: 0
+   codex demo: all sections passed
+   gate 7 (codex): checks passed
+   ```
 
    - [ ] 通過
 
@@ -293,77 +303,265 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
    **這步在驗什麼**：每一級對到正確的 codex 方法，而且都走到 `confirmed`（P5、P6）。錯了的話緊急訊息會排到最後，或插入變成打斷。
 
-   操作：同一次輸出，找 `== busy`。應該看到：閒置時的一則走 `turn/start`；忙碌時三則分別是 `thread/queue/add`、`turn/steer`、`turn/interrupt, turn/start`；四則都印 `queued → sent → confirmed`，確認的 turn 跟 P6 例子一樣（queue 在長 turn 之後的新 turn、steer 在長 turn 裡、interrupt 讓長 turn 變 `interrupted`）。
+   ```bash
+   sed -n '/^== busy/,/^== idempotent/p' /tmp/g7-accept.txt
+   ```
+
+   應該看到（turn id 只留最後 4 碼）：
+
+   ```text
+   m-idle (queue, agent idle): turn/start → confirmed (turn …0005)
+   m-q (queue, agent busy in A …0024): thread/queue/add → sent → confirmed (turn …0046: a new turn after A; A completed)
+   m-s (steer, agent busy in A …0065): turn/steer → sent → confirmed (turn …0065: inside A; A completed)
+   m-i (interrupt, agent busy in A …0096): turn/interrupt, turn/start → sent → confirmed (turn …0103: a new turn; A interrupted)
+   m-long-interrupt stays sent: A was interrupted before its user message (P5: never confirmed = stays sent)
+   all four: queued → sent → confirmed
+   ```
+
+   | 要找的 | 意思 |
+   |---|---|
+   | `m-idle … turn/start` | 閒置一律 `turn/start` |
+   | `m-q … thread/queue/add … a new turn after A` | 排在長 turn A 之後的新 turn |
+   | `m-s … turn/steer … inside A` | 插進 A |
+   | `m-i … turn/interrupt, turn/start … A interrupted` | A 被中斷、新 turn |
+   | `m-long-interrupt stays sent` | 被中斷前還沒出現在 thread 的那則誠實停在 `sent`（P5） |
 
    - [ ] 通過
 
-3. 故意弄壞：同一個訊息 id 送兩次，其中一次在 daemon 重啟之後。
+3. 故意弄壞：同一個訊息 id 送兩次（其中一次在 daemon 重啟之後）、同 id 不同內容、當掉在送出與記帳之間。
 
-   **這步在驗什麼**：只有一套冪等、跨重啟也有效（P5、DRV-9）。錯了的話 agent 會做兩次同一件事（v1 三套去重並存的問題）。
+   **這步在驗什麼**：只有一套冪等、跨重啟也有效，當掉時送一半的訊息對帳收回（P5、DRV-9）。錯了的話 agent 會做兩次同一件事（v1 三套去重並存的問題）。
 
-   操作：找 `== idempotent`。應該看到：第二次印 `already confirmed; not sent again`；假 app-server 的 turn 數沒有增加。
+   ```bash
+   sed -n '/^== idempotent/,/^== restart/p' /tmp/g7-accept.txt
+   ```
+
+   應該看到（中間還有 `== crash-window`、`== reply-lost`、`== approval` 三個標題；`== reply-lost`：回覆沒回來的 m-9 在它的 turn 跑完前不重送，最後 `turns: 1, user messages: 1`）：
+
+   ```text
+   m-7 again: confirmed (already confirmed; not sent again); turns: 1
+   m-7 with other content: invalid_request: message id m-7 was already used for other content
+   m-8 twice at the same moment: stored once; turns: 2
+   after a daemon restart, m-7 again: confirmed (not sent again); fake app-server turns: 2
+
+   rows m-7, m-8 left queued; codex got m-7 (turn/start) and m-8 (thread/queue/add)
+   reconnect: m-7 found in thread history → sent → confirmed; m-8 found in thread queue → sent
+   after the queue ran: m-8 confirmed; fake app-server turns: 3 (m-7, a human's, m-8: nothing sent twice)
+
+   m-run asked to run "/bin/zsh -lc 'echo hi'": declined by the driver; the turn completed (agent: "command not run: decline"); m-run confirmed
+   ```
 
    - [ ] 通過
 
 4. 四次開機：daemon 不在時 agent 照跑，回來後補回。
 
-   **這步在驗什麼**：daemon 停著時排隊的訊息自己跑完，daemon 回來從舊 cursor 補回、不漏不重（P7、DRV-6）。錯了的話 daemon 重啟就會漏掉「已確認」或把訊息再送一次。
+   **這步在驗什麼**：daemon 停著時排隊的訊息自己跑完，daemon 回來從舊 cursor 補回、不漏不重（P7、DRV-6、DRV-9）。錯了的話 daemon 重啟就會漏掉「已確認」或把訊息再送一次。
 
-   操作：找 `== restart`。應該看到：4 行 `boot N`，daemon pid 每行不同、app-server pid 每行相同；開機 3 印 `backfilled 4 events from <cursor>`、`m-q confirmed while daemon was down`；開機 4 `ok`。
+   ```bash
+   sed -n '/^== restart/,/^== resume/p' /tmp/g7-accept.txt
+   ```
+
+   應該看到 4 行 `boot N`（`daemon pid` 每行不同、`app-server pid` 每行相同；下面的 `<pid>`、`<turn>`、`<thread>` 每次不同），開機 3 `backfilled=7` 與 `m-q confirmed while daemon was down`、開機 4 結尾 `ok`，最後是反向檢查（每次開機換新的 `AGEND_HOME` 在開機 2 失敗）：
+
+   ```text
+   boot 1 daemon pid=<pid> app-server pid=<pid> thread=<T> backfilled=0 from=- cursor=<turn>:0 | app-server ready (0 ms); thread <T> created; go (resume <T>) | m-1 sent (turn/start, a 5 s turn); m-q sent (thread/queue/add)
+   boot 2 daemon pid=<pid> app-server pid=<pid> thread=<T> backfilled=0 from=<turn>:0 cursor=<turn>:0 | app-server ready (0 ms); thread <T> resumed (busy) | idle: backfill only
+   boot 3 daemon pid=<pid> app-server pid=<pid> thread=<T> backfilled=7 from=<turn>:0 cursor=<turn>:4 | app-server ready (0 ms); thread <T> resumed (idle) | m-q confirmed while daemon was down; m-1, m-q again: no new turn; m-3 confirmed
+   boot 4 daemon pid=<pid> app-server pid=<pid> thread=<T> backfilled=3 from=<turn>:4 cursor=<turn>:4 | app-server ready (0 ms); thread <T> resumed (idle) | m-1, m-q, m-3 confirmed; all three again: no new turn; ok
+   4 boots, 4 daemon pids, one app-server (pid <pid>), one thread <T>=<thread>
+   negative check (new AGEND_HOME each boot): boot 2 failed: thread <thread>, not boot 1's <thread>
+   ```
 
    - [ ] 通過
 
-5. 故意弄壞：硬殺 holder，看 app-server 沒變孤兒、同一個 thread 接回。
+5. 故意弄壞：硬殺 holder，看 codex 沒變孤兒、同一個 thread 接回。
 
-   **這步在驗什麼**：holder 死掉時 app-server 跟著結束、不留孤兒（P2），新的一組用**同一個 thread id** resume，不再像第 6 施工關那樣直接 `failed`（P3）。錯了的話會有沒人管的 app-server 佔著 socket，或 codex agent 一死就失去全部上下文。
+   **這步在驗什麼**：holder 死掉時 app-server 跟著結束或被清掃（P2），新的一組用**同一個 thread id** resume，不再像第 6 施工關那樣直接 `failed`（P3）；codex 忽略 SIGHUP 時清掃補刀；一直死的 TUI 3 次後 `failed` 也不留 codex；app-server 自己死掉、第一次啟動被打斷、第 6 施工關的舊 codex 列都照規則處理。錯了的話會有沒人管的 app-server 佔著 socket，或 codex agent 一死就失去全部上下文。
 
-   操作：找 `== resume`（開工時細化：也可以照第 6 施工關步驟 8 的方式自己動手，在 `probe-sandbox.sh` 裡只砍自己記下的 holder pid）。應該看到：`holder g7-… killed -9 by test`、`no fake-codex-app-server left`、`restart 1/3`、`thread <T> resumed`；假 TUI 印 `agent args: … resume <T>`，`<T>` 與開頭 `thread <T> created` 相同；之後送的訊息照樣 `confirmed`。
+   ```bash
+   sed -n '/^== resume/,/^== cleanup/p' /tmp/g7-accept.txt
+   ```
+
+   應該看到（`sweep` 那兩行很長，裡面是被清掉的假 app-server 的完整指令列）：
+
+   ```text
+   == resume
+   g7-da: start (codex: new thread)
+   g7-da: holder pid=96144 started
+   g7-da: app-server ready (207 ms)
+   g7-da: thread <T> created
+   g7-da: go (resume <T>)
+   process group 96145: tui pid 96145, app-server pid 96146 (the same group)
+   TUI screen: agent args: resume <T> --remote unix://$TMPDIR/fake-codex-645c7ba358c56dcc.sock
+   holder g7-da pid=96144 killed -9 by test
+   g7-da: sweep of agent group 96145 (holder died): already gone
+   no fake codex left in group 96145
+   g7-da: restart 1/3 (codex thread <T>)
+   g7-da: thread <T> resumed (idle)
+   new TUI screen: agent args: resume <T> --remote unix://$TMPDIR/fake-codex-645c7ba358c56dcc.sock (the same thread)
+
+   == sweep
+   codex ignores SIGHUP; holder pid=96503 killed -9 by test while the daemon runs
+   g7-dh: sweep of agent group 96505 (holder died): SIGKILL sent (1 left: 96506 …/target/debug/examples/fake_codex -c projects={"/private/tmp/g7-95738-0/h2/workspace/g7-dh"={trust_level="trusted"}} -c check_for_update_on_startup=false -c approval_policy="never" -c sandbox_mode="danger-full-access" app-server --listen unix:///tmp/g7-95738-0/h2/run/holders/g7-dh.codex.sock --turn-ms 300)
+   no fake codex left in group 96505
+   daemon stopped, holder pid=96705 killed -9 by test: 1 codex process(es) left behind
+   next boot: g7-dh: sweep of agent group 96714 (before a new holder): SIGKILL sent (1 left: 96715 …/target/debug/examples/fake_codex -c projects={"/private/tmp/g7-95738-0/h2/workspace/g7-dh"={trust_level="trusted"}} -c check_for_update_on_startup=false -c approval_policy="never" -c sandbox_mode="danger-full-access" app-server --listen unix:///tmp/g7-95738-0/h2/run/holders/g7-dh.codex.sock --turn-ms 300)
+   no fake codex left in group 96714; thread <T> resumed
+
+   == give-up
+   thread <T> created once, then restart 1/3, 2/3, 3/3 each `thread <T> resumed`
+   g7-dx failed: restarted 3 times in 10m and it still died; not restarting
+   DB status failed; no fake codex left in group 96980 (the app-server ended with the TUI)
+
+   == app-server-dies
+   fake app-server told to exit; the TUI keeps running
+   g7-dg: app-server is gone (no connection for 20 s) (after 20.0 s)
+   old holder pid=96988 got Shutdown; g7-dg: holder pid=97097 started; thread <T> resumed
+
+   == first-start-interrupted
+   daemon killed -9 by test after `holder pid=…`, before the thread existed: DB running, no thread, no $GO
+   next boot: g7-ds: reconnected to holder pid=97231; screen: 
+   g7-ds: thread <T> created
+   the waiting wrapper started the TUI: agent args: resume <T> --remote unix://$TMPDIR/fake-codex-5faaa622528589b2.sock
+   DB status running
+
+   == legacy
+   schema v3: g7-do codex running, no thread, holder pid=97863; g7-dn codex new
+   g7-do failed: codex instance from before gate 7 has no thread id; a human decides
+   g7-do: legacy_no_thread=1, holder pid=97863 still runs, no app-server or thread/start
+   g7-dn: legacy_no_thread=0, thread created, status running
+
+   ```
+
+   | 段落 | 要找的 |
+   |---|---|
+   | `== resume` | `thread <T> created` 在 `go (resume <T>)` 之前；`process group G: tui pid …, app-server pid … (the same group)`；`killed -9 by test` → `sweep of agent group G (holder died): already gone` → `no fake codex left` → `restart 1/3` → `thread <T> resumed`；新 TUI 還是 `resume <T>` |
+   | `== sweep` | 兩次都是 `SIGKILL sent (1 left: … app-server --listen unix://…/g7-dh.codex.sock …)`（一次 daemon 跑著、一次下次開機），之後 `no fake codex left` |
+   | `== give-up` | `restarted 3 times in 10m and it still died`、`no fake codex left` |
+   | `== app-server-dies` | `app-server is gone (no connection for 20 s) (after 20.x s)`、`old holder … got Shutdown`、`thread <T> resumed` |
+   | `== first-start-interrupted` | `DB running, no thread, no $GO` → 下次開機 `thread <T> created` → `the waiting wrapper started the TUI` |
+   | `== legacy` | `… failed: codex instance from before gate 7 has no thread id; a human decides`、holder pid 不變、`new` 那列照常起 |
+   | `== failed-holder-alive` | `failed`、holder 還在、`agent_pid` 有值而且 argv 有標記的 instance：`boot: no sweep line; the agent group is untouched` |
 
    - [ ] 通過
 
 6. 真 CLI 一致性檢查（必做；使用者已決定 2026-09-25）。
 
-   **這步在驗什麼**：driver 測試用的假 app-server 和你機器上真的 codex 講同樣形狀的協定（現有 5 個情境）。壞了的話，driver 對假的全綠、接上真的才出錯（v1 #1483）。
+   **這步在驗什麼**：driver 測試用的假 app-server 和你機器上真的 codex 講同樣形狀的協定（現有 5 個情境；本關新增的 3 個要步驟 7 錄了才比）。壞了的話，driver 對假的全綠、接上真的才出錯（v1 #1483）。先跑 `codex app-server --help`（不花 token），回答 U18。
 
    ```bash
+   cd ~/Documents/Hack/AgEnD-v2
    codex --version
-   head -1 crates/agend-testkit/transcripts/codex/one_turn.jsonl
-   ~/.cargo/bin/cargo test -p agend-testkit --test conformance
+   codex app-server --help
+   head -1 crates/agend-testkit/transcripts/codex/one_turn.jsonl | cut -c1-200
+   ~/.cargo/bin/cargo test -p agend-testkit --test conformance -- --nocapture 2>&1 | grep -e 'not recorded' -e '^test result'
    ```
 
-   應該看到：第一行的版本和錄製檔 header 的 `"version"` 相同；最後 `test result: ok. N passed`（N 開工時細化）。版本不同：先重錄再跑一次（`~/.cargo/bin/cargo xtask record codex --sandbox ~/Documents/Hack/AgEnD-ops/record-sandbox.sh`，會跑真的 codex、花少量 token，細節見 [RECORDER.md](../../crates/agend-testkit/RECORDER.md)）；檢查不過就改假 codex，不改錄製檔。
+   應該看到：`codex --version` 印 `codex-cli 0.156.1`，和第三個指令的 `"version":"codex-cli 0.156.1"` 相同（**未實跑**：實作者不跑 codex）；`codex app-server --help` 裡找 `--listen`、`--no-daemon`、`-c`（U18，**未實跑**）；最後幾行（實跑）：
+
+   ```text
+   codex/turns_list: not recorded yet (gate 7 step 7); skipped
+   codex/queue_idle: not recorded yet (gate 7 step 7); skipped
+   codex/resume_empty: not recorded yet (gate 7 step 7); skipped
+   test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 20.93s
+   ```
+
+   版本不同：先重錄既有的 5 個再跑一次（`~/.cargo/bin/cargo xtask record codex one_turn interrupt approval busy resume --sandbox ~/Documents/Hack/AgEnD-ops/record-sandbox.sh`，會跑真的 codex、約 5 個很短的 turn，細節見 [RECORDER.md](../../crates/agend-testkit/RECORDER.md#重錄cli-升版時)）；檢查不過就改假 codex，不改錄製檔。
+
+   **貼回來**：`codex --version` 那一行、`codex app-server --help` 的完整輸出、最後的 `test result` 行。
 
    - [ ] 通過
 
-7. 選做（要你核准，會跑真的 codex、花約 5 個很短的 turn）：錄三個新情境。
+7. 選做，**你已決定 merge 前要跑**（跑真的 codex）：錄三個新情境。
 
-   **這步在驗什麼**：P8 對假 app-server 補的三個行為（`thread/turns/list`、閒置時 `queue/add`、resume 空 thread）和真的 codex 一樣，也看壓縮後歷史是不是只往後長（U1、U3、U5、U9、U10、U11）。不錄的話，這三個補丁只是照猜的寫，步驟 6 對它們沒有依據。
+   **這步在驗什麼**：P8 對假 app-server 補的、沒有依據的行為，換成真 codex 的回答：
 
-   ```bash
-   ~/.cargo/bin/cargo xtask record codex --sandbox ~/Documents/Hack/AgEnD-ops/record-sandbox.sh
-   ~/.cargo/bin/cargo test -p agend-testkit --test conformance
-   ```
+   | 情境 | 做什麼（`crates/agend-testkit/src/recorder/codex.rs`） | 回答 |
+   |---|---|---|
+   | `turns_list` | 一輪 OK；一輪長回覆（1 到 400）時 `thread/queue/add`、`thread/queue/list`；兩輪都跑完後 `thread/turns/list`；`thread/compact/start`（context 壓縮，方法名未查證，錯誤也照錄）；再 `thread/turns/list` | U2（`clientId`、`queue/list` 帶不帶 `clientUserMessageId`）、U5（兩個方法的參數與回傳）、U10（壓縮後舊 turn 變不變） |
+   | `queue_idle` | 閒置 thread 上 `thread/queue/add`（等看會不會自己開始）、`thread/queue/start`；一輪長回覆時排一則再 `turn/interrupt`（看排隊的是不是先開始）；對剛結束的 turn `turn/steer` | U3、U11、U9 |
+   | `resume_empty` | 建 thread、不送任何 turn、停掉 app-server 再起、`thread/resume` | U1 |
 
-   應該看到：`transcripts/codex/` 多出 `turns_list.jsonl`、`queue_idle.jsonl`、`resume_empty.jsonl`（開工時細化：只錄這三個的參數）；一致性檢查通過。不通過就改假 app-server 與 P3／P5／P6 對應的程式，不改錄製檔。
-
-   - [ ] 我核准花這些 token，已錄製並通過
-   - [ ] 這次不做（寫進驗收紀錄；三個補丁維持「未查證」）
-
-8. 選做（要你核准，花約 3 個很短的 turn）：真 codex 端到端。
-
-   **這步在驗什麼**：假的驗不到的事：真 codex 接受 P4 的 `-c` 參數、`resume <id> --remote …` 接得上、trust 提示沒出現、holder 被 `kill -9` 後沒有 codex 留下、舊 socket 不擋第二次啟動、**指令找到的 `git`／`pkill`／`killall` 是 shim**（`kill` 是內建，T18）（U4、U6、U7、U8、U12、U13、U14、U15、U16）。錯了的話第 9 施工關第一次有人真的用時才會發現，或 agent 可以繞過 shim。
+   花費：約 6 個短 turn（其中一個長回覆寫 1 到 400）＋一次 context 壓縮，模型 `gpt-6-luna`、reasoning `low`；和 2026-09-25 錄 5 個情境同一個量級。會啟動你 `~/.codex/config.toml` 裡的 MCP server（RECORDER.md「錄 codex 會啟動使用者自己的 MCP server」）。錄製前先正常用一次 codex，讓登入 token 是新的（沙箱裡 `auth.json` 唯讀）。
 
    ```bash
-   ls -l ~/.codex/config.toml
-   ~/.cargo/bin/cargo build -q -p agend-daemon --example codex_live
-   AGEND_REAL_CODEX=1 ~/Documents/Hack/AgEnD-ops/record-sandbox.sh target/debug/examples/codex_live
-   ls -l ~/.codex/config.toml
+   cd ~/Documents/Hack/AgEnD-v2
+   ~/.cargo/bin/cargo xtask record codex turns_list queue_idle resume_empty --sandbox ~/Documents/Hack/AgEnD-ops/record-sandbox.sh
+   git status --short crates/agend-testkit/transcripts/codex/
+   ~/.cargo/bin/cargo test -p agend-testkit --test conformance -- --nocapture 2>&1 | grep -e 'not recorded' -e 'differs' -e '^test result'
    ```
 
-   應該看到：`thread <T> created`、`ps: app-server and TUI share pgid <G>, tpgid <G>`（U16）、`m-1 … confirmed`、`kill -9 holder`、`swept agent group <G>` 或 `agent group <G> already gone`（U15）、`no codex left`、`second start on the same socket ok`（U14）、`restart 1/3`、`thread <T> resumed`、`m-2 … confirmed; reply mentions m-1`、`command -v git pkill killall` 三行都在 `<AGEND_HOME>/bin/`；前後兩次 `ls -l` 的修改時間相同（P4：不寫你的 config；沙箱本來就擋 `~/.codex/config.toml` 與 repo 的寫入，所以先在沙箱外 build）。開工時細化 home 放 `/tmp` 的參數。
+   錄製在沙箱裡跑（只能寫 `/private/tmp`、`TMPDIR` 與 codex 自己的 session／狀態檔），輸出先寫到 `/private/tmp/agend-rec-out-XXXX/codex/`，xtask 在沙箱外複製進 `crates/agend-testkit/transcripts/codex/`。應該看到（**未實跑**）：`record: output in /private/tmp/agend-rec-out-…`、`record: copied 3 transcript(s) into crates/agend-testkit/transcripts/codex/`；`git status` 多三個 `?? …/turns_list.jsonl`、`queue_idle.jsonl`、`resume_empty.jsonl`；一致性檢查不再印 `not recorded yet`。**很可能印 `fake fake-codex-app-server differs …`**：那是假 app-server 猜錯的地方，正是這步要找的；把差異貼給 agent，由 agent 改假 app-server 與 driver（不改錄製檔）。失敗的情境留在輸出目錄，名為 `<情境>.failed.jsonl`。
+
+   清理：`rm -rf /private/tmp/agend-rec-out-* /private/tmp/agend-rec-codex-*`（錄製器自己的暫存目錄；codex 在 `~/.codex/sessions/` 多的幾個 rollout 是它自己的紀錄，不必刪）。
+
+   **貼回來**：`cargo xtask record` 的最後 5 行、`git status` 那三行、一致性檢查印的全部 `differs`／`not recorded`／`test result` 行（或直接 `git add` 三個錄製檔、告訴 agent 在哪個 branch）。
+
+   - [ ] 已錄製並通過（或差異已交給 agent 修）
+   - [ ] 這次不做（寫進驗收紀錄；這些補丁維持「未查證」）
+
+8. 選做，**你已決定 merge 前要跑**（跑真的 codex）：真 codex 端到端。
+
+   **這步在驗什麼**：假的驗不到的事：真 codex 接受 P4 的 `-c` 參數與 `resume <thread> --remote unix://…`（U4、U12）；`--remote` 的 TUI 有沒有另外起共用的背景 app-server（U6）；trust 提示沒出現（U7）；**指令找到的 `git`／`pkill`／`killall` 是 shim**（U8，`command -v git pkill killall`）；`ZDOTDIR` 沒被 codex 濾掉（U13，同一行看得出來）；同一個 `--listen` 路徑第二次啟動沒問題（U14）；holder 被 `kill -9` 後 app-server 與 TUI 是自己結束還是被清掃（U15）；兩個程序同一個 process group、而且是終端的前景 group（U16）；重起後上下文還在。U17（人在 TUI 打字）不在這個程式裡，見最後。
+
+   花費：3 個短 turn（記一個詞、跑 `command -v git pkill killall`、問那個詞）。`codex_live` 沒設 `AGEND_REAL_CODEX=1` 時什麼都不做（exit 2）。home 是 `/tmp/g7-live-<pid>-0/h1`，跑完整個刪掉；不寫 `~/.codex/config.toml`（沙箱也不准）。
+
+   沙箱外先 build（沙箱擋 repo 的寫入），再在沙箱裡跑：
+
+   ```bash
+   cd ~/Documents/Hack/AgEnD-v2
+   ls -l ~/.codex/config.toml
+   ~/.cargo/bin/cargo build -q -p agend --bin agend && ~/.cargo/bin/cargo build -q -p agend-daemon --example codex_live
+   AGEND_REAL_CODEX=1 ~/Documents/Hack/AgEnD-ops/record-sandbox.sh target/debug/examples/codex_live 2>/tmp/g7-live.log | tee /tmp/g7-live.out
+   ls -l ~/.codex/config.toml
+   pgrep -fl "agend (holder|daemon)"; pgrep -fl "codex (app-server|.*resume)"
+   ```
+
+   應該看到（**未實跑**；`<T>` 是 thread id，`<H>` 是 `/tmp/g7-live-…/h1`）：
+
+   | 輸出 | 回答 |
+   |---|---|
+   | `thread <T> created` | codex 接受 `-c` 設定、`thread/start`（U12） |
+   | 幾行 `ps: <pid> <pgid> <tpgid> …`，然後 `ps: app-server and TUI share pgid <G>, tpgid <G> (same group: true; U16)` | U16；多出來、不含這個 instance socket 或 `resume <T>` 的 codex 程序不會列出，另外用 `ps -A -o pid,pgid,command \| grep -i codex` 看（U6） |
+   | `TUI screen shows a trust prompt: false` | U7 |
+   | `m-1 idle → turn/start → Sent`、`m-1 … confirmed` | 真 codex 的 user message 被確認 |
+   | `command -v git pkill killall → "…"`，接著三行 `git: <H>/bin/git (the shim)`、`pkill: …`、`killall: …` | **U8、U13**：任何一行是 `NOT the shim` 就停（codex 跑的指令繞過 shim） |
+   | `kill -9 holder pid=…`、`g7-live: sweep of agent group <G> (holder died): already gone`（或 `SIGKILL sent (…)`） | U15：`already gone`＝自己結束了，`SIGKILL sent`＝要清掃才乾淨 |
+   | `codex left right after the sweep: []` | 沒有孤兒 |
+   | `restart 1/3, thread <T> resumed; second start on the same socket ok` | U14、U4（`resume … --remote` 接得上） |
+   | `m-2 → confirmed; reply "PAPAYA" (mentions m-1's word: true)` | 上下文還在 |
+   | `~/.codex/config.toml modified … (unchanged: true)`、最後 `codex_live: ok` | P4：不寫你的 config |
+
+   前後兩次 `ls -l` 的修改時間相同；兩個 `pgrep` 都沒有輸出。失敗時印 `codex_live FAILED: …`，daemon 的 log 在 `/tmp/g7-live.log`。
+
+   U17（選做，不在程式裡）：想看人在 TUI 打字，另開一個終端照第 6 施工關步驟 8 的方式 attach（第 11 施工關 B 段前 `terminal_input` 還沒開，本關做不到），**本關不驗**，留給第 11 施工關。
+
+   清理：`codex_live` 結束（成功或失敗）時自己停 holder、刪 home；萬一中途按了 Ctrl-C，`pgrep -fl "agend holder g7-live"` 有輸出就貼給 agent（agent 用 `Shutdown` 收掉，不用 kill）。最後 `rm -f /tmp/g7-live.out /tmp/g7-live.log`。
+
+   **貼回來**：`/tmp/g7-live.out` 全部、兩次 `ls -l`、兩個 `pgrep` 的輸出；失敗時再附 `/tmp/g7-live.log` 最後 40 行。
 
    - [ ] 通過
    - [ ] 這次不做（寫進驗收紀錄）
+
+## 待你追認
+
+實作時做了、提案沒寫到或與提案字面不同的選擇。確認前照目前的做法運作。每項：決定 · 理由 · 反悔的成本。
+
+| # | 決定 | 理由 | 反悔成本 |
+|---|---|---|---|
+| K1 | codex 的「就緒 → 建／接 thread → `$GO`」在背景的 tokio task 裡跑（`Supervisor::connect_codex`），不在 supervisor 的事件迴圈裡等；driver 記每個 instance 最新一次 connect 的 holder 世代，較舊、還沒跑完的 connect 在存 thread id、寫 `$GO`、留長連線之前放棄 | 最壞要等 20＋30 秒；在迴圈裡等的話 Ctrl-C 與別的 instance 都得等（第 8 施工關的 `retry` 測試就是這樣卡住 Ctrl-C 的） | 改回在迴圈裡 `await`、拿掉世代檢查：約 30 行 |
+| K2 | codex instance 的 `args` 接在 app-server 那行 `--listen` 後面（包裝 `shift 5` 之後的 `"$@"`）；真 codex 用時是空的 | P2 沒說 instance 的 args 去哪；測試靠它把 `--turn-ms` 傳給假 app-server | 改成不用或接到 TUI：包裝一行 |
+| K3 | 假的 codex CLI 是**一個**程式 `fake-codex`（testkit 的 bin，子命令 `app-server` 與 `resume`＝假 TUI），不是另一個 `fake-codex-tui`；另有 `agend` crate 的 example `fake_codex` 包一層，讓 `cargo test -p agend` 把它編在測試旁邊。它的 app-server 不在 stdin 結束時停（包裝在背景起它，stdin 是 `/dev/null`），thread 存在 `<listen 路徑>.fake-state/`（agent 環境白名單沒有 `AGEND_FAKE_STATE_DIR`） | 包裝對 app-server 與 TUI 用同一個 `$1`（跟真 codex 一樣）；`cargo test -p agend` 不會編別的 crate 的 bin，用 `locate` 可能拿到舊的 | 拆成兩個程式、包裝多一個參數：約 30 行 |
+| K4 | 要真 `agend` binary 的測試（包裝、holder、清掃、give-up、app-server 死掉、第一次啟動被打斷、舊列）放在 `crates/agend/tests/codex_process.rs`（同第 6 施工關），所以 `cargo xtask accept codex` 跑 `agend-daemon`、`agend-testkit`、`agend` 三個 crate；`agend-holder` 只改了 `sidecar.rs` 的說明 | 只有 `agend` crate 的測試拿得到 `CARGO_BIN_EXE_agend`；holder 本關沒改程式 | 無 |
+| K5 | DRV-6、DRV-9 的四次開機：每次開機是測試 binary 重新執行自己、開一個新的 store 與 `CodexDriver`；假 app-server 在父程序裡（行程內的 `Server`，真的 socket 與 WebSocket），所以 demo 印的「app-server pid」就是測試程序的 pid | backend 要活過四次開機；放在父程序最簡單，也不必找 binary | 改成獨立的 `fake-codex app-server` 程序：約 20 行 |
+| K6 | 假 app-server 的授權觸發改成「任何一行以 `run: ` 開頭」（原本是整個 prompt 以它開頭） | daemon 送的內容前面有 `From:`／`Task:` 標頭；錄製器的授權 prompt 第一行就是 `run: …`，錄製檔比對不受影響 | 改回只看開頭：一行，授權的 demo 要改 |
+| K7 | **不**給 TUI（也不給 app-server）加 `--no-daemon`（你 2026-09-26 查的 U6：codex 預設有共用的背景 app-server daemon） | `--remote` 和 `--no-daemon` 一起用有沒有衝突沒查證；衝突的話 TUI 起不來，每個 codex instance 都壞。`codex_live` 的 `ps:` 行會看到多出來的程序（U6、U18） | 包裝固定文字加一個參數，重跑步驟 8 |
+| K8 | `ZDOTDIR` 只給 codex agent（claude 等第 12 施工關實測）；`.zprofile` 只做一件事：`export PATH="$AGEND_HOME/bin:$PATH"`，不 `source` 你的 `~/.zshenv`／`~/.zprofile` | 你的 PATH 已經經 daemon 的 `PATH` 傳進來（`path_helper` 會把它接在系統目錄後面），不 source 就不會被你的 dotfile 再排一次；最簡單。**副作用**（verifier r1 L5）：login zsh 裡 daemon 帶進來的 `/opt/homebrew/bin`、`~/.cargo/bin` 會排在 `/usr/bin` 等系統目錄**後面**，codex 跑的 `python3` 之類會先找到系統版 | 在 `.zprofile` 加 `source` 行，再把 shim 放回最前面：幾行 |
+| K9 | 已經送過一次的 `queued` 訊息（`messages.attempted_at_unix_ms` 在 RPC 之前寫入）：回覆沒回來（30 秒逾時）、連線斷、daemon 停在送出中途，**不只是當掉**（verifier r1 L1）。這種訊息重送前一律先對帳（歷史＋`thread/queue/list`），而且 thread 有 turn 在跑時不送、等閒置再看一次（那個 turn 可能就是它，只是 user message 還沒出現；真 codex 的 user message 也是晚出現的）；兩邊都沒有才送（`== reply-lost` 與 `a_lost_reply_is_not_sent_again`）。只有這一則等，排在它後面的照送（插入、中斷要能停下失控的 turn，`an_uncertain_row_does_not_hold_back_an_interrupt`）。剩下的窗口：①它的 turn 被中斷、user message 永遠沒出現（`interrupt.jsonl` 那樣）→ 閒置後再送一次；②它已經離開 `thread/queue/list`、它的 turn 還沒開始（兩個查詢之間）→ 兩邊都找不到、thread 又閒置 → 再送一次；③真 codex 不認得 `thread/queue/list` → 還排在佇列裡的會再送（log 一行）；④app-server 當掉重起後，歷史裡最後一個 turn 會不會一直是 `inProgress`（對帳只會把「忙」設成真、不會設回假，未查證 U19）→ 若是，這則會一直等、不送。另一個接受的小窗口（L6）：daemon 死在 `Spawned` 與寫 `agent_pid` 之間，接回時是 `already_spawned`、拿不到 pid，那一代 holder 之後被 `kill -9` 就沒有清掃 | 真正「沒到 codex」的訊息還是要送；等閒置只延後、不丟 | 拿掉對帳前置與等待：約 30 行 |
+| K10 | `thread/resume` 的「找不到」＝ RPC 錯誤訊息含 `not found`（假 app-server 回 `-32600 thread not found: <id>`） | 真 codex 的錯誤形狀未查證（U1）；步驟 7 的 `resume_empty` 會錄到 | 改比對規則：一行 |
+| K11 | 送達的細節：送到不存在的 instance 是錯誤、不存任何列（DRV-2）；已經 `queued` 的訊息在 instance 之後變 `failed` 或被刪時不改成 `failed`（本關沒有呼叫點，第 9 施工關的 `inbox`／`status` 再看）；「`sent` 超過 10 分鐘」的顯示沒做（第 9、11 施工關）；fleet 的忙／閒沒接（instance 仍是 `unknown`，去抖動維持 5 秒不動；driver 的 `CodexDriver::busy` 已經有） | 都還沒有使用者；現在做只能用假資料驗 | 各在該施工關做 |
+| K12 | 第 8 施工關的後續（頁面「已知風險」寫的那一列）本關就做了：`failed` 的 codex 一律有 `retry`（`legacy_no_thread` 的除外），`retry` 接回原本的 thread，沒有 thread 就建。所以 `client_process.rs` 的 `== retry` 那段改了：「跑過、沒有 `retry`」那一列換成 opencode，codex `xn` 的啟動行是 `start (codex: new thread)`。第 8 施工關頁面步驟 1 的表要跟著改（本 PR 不改別的施工關頁面，列在 PR 裡） | codex 能 resume 之後，照舊「不能 retry」反而會丟掉能接回的對話 | 恢復舊規則：`failed_item` 一行＋那段測試 |
+| K13 | log 的寫法與頁面例子不同：清掃是 `<id>: sweep of agent group <G> (holder died): already gone`（括號裡也可能是 `before a new holder`、`failed, holder gone`；結果也可能是 `SIGKILL sent (<n> left: <pid> <argv>; …)`）；送出是 `<id>: <m> (<level>) → <方法> → sent (turn <T>)`；四次開機的開機 3 補回 7 個事件（m-1 那一輪的後半 3 個＋m-q 那一輪 4 個），不是例子的 4 個 | 例子是提案時的想像；實際輸出照抄在「你親自驗收」 | 改字串：各一行 |
 
 ## 驗收紀錄
 
@@ -377,6 +575,9 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-27 targeted verifier（`a693f92`）CONFIRMED、3 個 LOW，全部處理：只有狀態不明的那一則等、後面的插入／中斷照送（附測試）；K9 補上第二個窗口與 U19（當掉後的 `inProgress`）；give-up 測試改回嚴格（不得出現 `connected again`），另加確定性的測試：關掉的 link 不會連到下一個 app-server（沒關的會，測試看得到）。
+- 2026-09-26 fresh-context verifier r1（`942a648`）CONFIRMED、7 個 LOW，全部處理：L1 送過一次的 `queued` 訊息重送前先對帳、turn 在跑時等閒置（`attempted_at_unix_ms`、`== reply-lost`）；L2 `messages.seq` 改 `AUTOINCREMENT`（清空後不重用號碼，附測試）；L3 `failed`＋holder 還活著不清掃的測試改用真的 `agent_pid`（`== failed-holder-alive`）；L4 步驟 4 的 id 換成佔位；L5、L6 寫進 K8、K9；L7 忙碌但不知道 turn id 時 `Queue` 仍走 `thread/queue/add`。
+- 2026-09-26 實作（draft PR，branch `feat/gate-07-codex`）：migration `0004`（`messages`、`agent_pid`、`legacy_no_thread`）、`driver::codex`（`sh` 包裝、`$GO`、JSON-RPC 長連線、三級忙碌、冪等與崩潰對帳、thread 歷史當事件、清掃）、supervisor 接上（背景 connect、清掃時機、codex 可 `retry`）、`ZDOTDIR` 選項 A、假 app-server 補方法與 `fake-codex`、錄製器 3 個新情境、`codex_live`（未跑）、`cargo xtask accept codex` 的 demo。`cargo test --workspace`、clippy、check-deps、`accept codex`、`accept daemon-holder` 通過；待你追認 K1–K13；記下你查的 `--help`（U4、U6、U12，新增 U18）。
 - 2026-09-26 使用者逐題確認 P1–P9：P1 補「人在 TUI 打字」＋U17；P2 推翻第 4 施工關 P8 的 `SpawnSidecar`；P3 核准空 thread 例外；P4 選 A（`ZDOTDIR`，修改第 6 施工關 H3）；P6 核准 idle 時 `queue/start` 例外；P9 不覆寫 notify／hooks／MCP。
 - 2026-09-26 第九輪 review CONFIRMED，三個 LOW 修正：`messages` 加可為 NULL 的 `task_id`、欄位改名 `from_instance`；0004 的舊列條件加 `session_started = 1`。
 - 2026-09-26 第 9 施工關 review 提出、併入：`messages` 加明確的 `seq INTEGER PRIMARY KEY`（訊息 id 改 `UNIQUE`），順序不受 `VACUUM` 影響；同 id 不同內容回 `invalid_request`，比對與插入在同一個 DB closure。
@@ -394,6 +595,8 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 ## 下一步
 
 ```bash
-cat docs/gates/gate-07-codex.md
-~/.cargo/bin/cargo xtask accept codex
+cd ~/Documents/Hack/AgEnD-v2    # checkout feat/gate-07-codex
+~/.cargo/bin/cargo xtask accept codex 2>/dev/null | tail -3
 ```
+
+然後照「你親自驗收」步驟 6、7、8（要跑真 codex）；把「貼回來」列的輸出貼給 agent。

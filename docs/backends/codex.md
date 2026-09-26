@@ -3,7 +3,7 @@
 > **TL;DR**
 > - `codex app-server`：JSON-RPC over WebSocket over unix socket；三種忙碌等級都有原生方法。
 > - 記住：**連線前先 `realpath` socket 路徑**；重連後要 `thread/resume` 才拿得到完整事件。
-> - 下一步：driver 在 `crates/agend-daemon/src/driver/codex.rs`（第 7 施工關）。
+> - 下一步：driver 在 `crates/agend-daemon/src/driver/codex.rs` 與 `driver/codex/`（第 7 施工關）。
 
 來源：spike-codex.md（2026-09-24，`codex-cli 0.156.1`）。協定清單由 `codex app-server generate-json-schema --experimental` 產生：164 個 client→server 方法、11 個 server→client 請求、82 種通知。
 
@@ -26,7 +26,7 @@
 ## 陷阱
 
 - [ ] `--listen unix://<path>` 路徑過長時，真正 socket 在 `/private/tmp/codex-daemon-<uid>/<sha256>`，`<path>` 只是 symlink。任何 client（含 codex 自己的 `--remote`）都要連解析後的路徑。
-- [ ] 不要在 `thread/queue/add` 之後呼叫 `thread/queue/start`：會和自動出列競爭，回 `-32600 thread already has an active or pending turn`。
+- [ ] 忙碌時不要在 `thread/queue/add` 之後呼叫 `thread/queue/start`：會和自動出列競爭，回 `-32600 thread already has an active or pending turn`。唯一的例外（使用者核准，第 7 施工關 P6）：`queue/add` 的回覆到時 driver 看到 thread 已經 idle，就呼叫一次 `queue/start`，回 `-32600` 當成 codex 已經自己開始了。
 - [ ] 忙碌時再送一個普通 `turn/start` 不會報錯，而是併進進行中的 turn（等同 steer）。
 - [ ] 每個不同的 `--listen` 路徑各有一個 app-server 程序。
 - [ ] `model_reasoning_effort = "minimal"` 會被模型拒絕（HTTP 400）；spike 改用 `low`。這是設定問題，不是協定問題。

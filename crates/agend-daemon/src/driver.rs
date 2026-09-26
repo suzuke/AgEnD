@@ -4,5 +4,6 @@
 //! Must NOT: spawn backend processes (holders do) or type message text into a PTY.
 
 pub mod claude;
+#[cfg(unix)]
 pub mod codex;
 pub mod opencode;

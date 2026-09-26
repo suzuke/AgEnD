@@ -1015,6 +1015,8 @@ fn a_database_with_only_instances_takes_its_daily_snapshot() {
         session_id: Some("s-1".into()),
         status: InstanceStatus::New,
         session_started: false,
+        agent_pid: None,
+        legacy_no_thread: false,
     };
     block_on(store.add_instance(&instance)).unwrap();
     let report = block_on(store.snapshot(NOW)).unwrap();
@@ -1150,6 +1152,8 @@ fn session_started_is_set_with_running_and_checked() {
         session_id: None,
         status: InstanceStatus::New,
         session_started: false,
+        agent_pid: None,
+        legacy_no_thread: false,
     };
     block_on(store.add_instance(&instance)).unwrap();
     let read = || block_on(store.instance("g8-1")).unwrap().unwrap();
@@ -1185,4 +1189,201 @@ fn tasks_lists_every_task_by_id() {
         .map(|t| t.id)
         .collect();
     assert_eq!(ids, ["T-1", "T-2"]);
+}
+
+// ---- gate 7: migration 0004, `messages` ----
+
+/// Migration 0004 decides once which codex rows are from gate 6 with a
+/// conversation (P3): `running`/`failed`, no thread, session started →
+/// `failed` + `legacy_no_thread = 1`. `new`, a failure before the first
+/// `Spawn` (`session_started = 0`), a codex row with a thread, and other
+/// backends are left alone. Run on the shipped v3 schema (the fixture).
+#[test]
+fn migration_0004_marks_only_gate_6_codex_rows_with_a_conversation() {
+    let dir = TempDir::new("store-0004").unwrap();
+    let home = dir.path().join("home");
+    fs::create_dir(&home).unwrap();
+    let v3 = fs::read_to_string(manifest_dir().join("src/store/fixtures/schema-v3.sql")).unwrap();
+    let conn = Connection::open(home.join(DB_FILE)).unwrap();
+    conn.execute_batch(&v3).unwrap();
+    // (id, backend, session, status, started) → (legacy, status after)
+    let rows = [
+        ("codex-running", "codex", None, "running", 1, true, "failed"),
+        ("codex-failed", "codex", None, "failed", 1, true, "failed"),
+        (
+            "codex-failed-early",
+            "codex",
+            None,
+            "failed",
+            0,
+            false,
+            "failed",
+        ),
+        ("codex-new", "codex", None, "new", 0, false, "new"),
+        (
+            "codex-thread",
+            "codex",
+            Some("t-1"),
+            "running",
+            1,
+            false,
+            "running",
+        ),
+        (
+            "opencode-running",
+            "opencode",
+            None,
+            "running",
+            1,
+            false,
+            "running",
+        ),
+    ];
+    for (id, backend, session, status, started, _, _) in rows {
+        conn.execute(
+            "INSERT INTO instances (id, backend, program, args, working_directory, session_id, \
+             status, session_started) VALUES (?1, ?2, 'codex', '[]', '/tmp', ?3, ?4, ?5)",
+            rusqlite::params![id, backend, session, status, started],
+        )
+        .unwrap();
+    }
+    drop(conn);
+    let store = SqliteStore::open(&home, NOW).unwrap();
+    for (id, _, _, _, _, legacy, status) in rows {
+        let i = block_on(store.instance(id)).unwrap().unwrap();
+        assert_eq!(
+            (i.legacy_no_thread, i.status.as_str(), i.agent_pid),
+            (legacy, status, None),
+            "{id}"
+        );
+    }
+}
+
+fn new_message(id: &str, body: &str) -> agend_daemon::store::NewMessage {
+    agend_daemon::store::NewMessage {
+        id: id.into(),
+        from_instance: "operator".into(),
+        to_instance: "g7-1".into(),
+        task_id: None,
+        body: body.into(),
+        level: agend_core::policy::busy::BusyLevel::Queue,
+    }
+}
+
+/// P5: one id is inserted once. Same content again → the stored row
+/// unchanged; other content → `Different`, nothing changed; 50 claims of
+/// one new id at once → one insert.
+#[test]
+fn a_message_id_is_claimed_once_and_other_content_is_refused() {
+    use agend_daemon::store::Claim;
+    let dir = TempDir::new("store-claim").unwrap();
+    let store = Arc::new(SqliteStore::open(&dir.path().join("home"), NOW).unwrap());
+    let Claim::Inserted(first) =
+        block_on(store.claim_message(&new_message("m-1", "a"), NOW)).unwrap()
+    else {
+        panic!("not inserted")
+    };
+    assert_eq!(first.state, agend_core::model::DeliveryState::Queued);
+    assert_eq!(
+        block_on(store.claim_message(&new_message("m-1", "a"), NOW + 5)).unwrap(),
+        Claim::Existing(first.clone())
+    );
+    assert_eq!(
+        block_on(store.claim_message(&new_message("m-1", "b"), NOW + 5)).unwrap(),
+        Claim::Different(first.clone())
+    );
+    let inserted = std::thread::scope(|s| {
+        let runs: Vec<_> = (0..50)
+            .map(|_| {
+                let store = Arc::clone(&store);
+                s.spawn(move || {
+                    matches!(
+                        block_on(store.claim_message(&new_message("m-2", "x"), NOW)).unwrap(),
+                        Claim::Inserted(_)
+                    )
+                })
+            })
+            .collect();
+        runs.into_iter()
+            .map(|r| r.join().unwrap())
+            .filter(|inserted| *inserted)
+            .count()
+    });
+    assert_eq!(inserted, 1);
+    let rows = block_on(store.messages_to("g7-1")).unwrap();
+    let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+    assert_eq!(ids, ["m-1", "m-2"]);
+}
+
+/// P5: `seq` is an explicit INTEGER PRIMARY KEY: after a 30-day prune
+/// leaves a gap, a `VACUUM INTO` snapshot restored as `agend.db` keeps the
+/// same order numbers. `seq` and `UNIQUE(id)` are in the golden schema.
+#[test]
+fn message_order_survives_prune_snapshot_and_restore() {
+    let (_, golden) = golden();
+    assert!(
+        golden.contains("seq                INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT")
+            && golden.contains("id                 TEXT    NOT NULL UNIQUE"),
+        "{golden}"
+    );
+    let dir = TempDir::new("store-seq").unwrap();
+    let home = dir.path().join("home");
+    let store = SqliteStore::open(&home, NOW).unwrap();
+    // A DB without instances, tasks or events gets no daily snapshot.
+    let instance = Instance {
+        id: "g7-1".into(),
+        backend: Backend::Codex,
+        program: "codex".into(),
+        args: vec![],
+        working_directory: "/tmp".into(),
+        session_id: None,
+        status: InstanceStatus::New,
+        session_started: false,
+        agent_pid: None,
+        legacy_no_thread: false,
+    };
+    block_on(store.add_instance(&instance)).unwrap();
+    let old = NOW - 31 * DAY_MS;
+    for (id, at) in [("m-old", old), ("m-a", NOW), ("m-b", NOW)] {
+        block_on(store.claim_message(&new_message(id, id), at)).unwrap();
+    }
+    let report = block_on(store.prune(NOW)).unwrap();
+    let pruned = report.table("messages").unwrap();
+    assert_eq!((pruned.before, pruned.after), (3, 2));
+    let seqs = |store: &SqliteStore| -> Vec<(String, i64)> {
+        block_on(store.messages_to("g7-1"))
+            .unwrap()
+            .into_iter()
+            .map(|m| (m.id, m.seq))
+            .collect()
+    };
+    let before = seqs(&store);
+    assert_eq!(before, [("m-a".to_owned(), 2), ("m-b".to_owned(), 3)]);
+    block_on(store.snapshot(NOW)).unwrap();
+    drop(store);
+    let snap = home.join(BACKUPS_DIR).join(snapshot::daily_name(NOW));
+    let restored = dir.path().join("restored");
+    fs::create_dir(&restored).unwrap();
+    fs::copy(&snap, restored.join(DB_FILE)).unwrap();
+    let store = SqliteStore::open(&restored, NOW).unwrap();
+    assert_eq!(seqs(&store), before);
+    block_on(store.claim_message(&new_message("m-c", "c"), NOW)).unwrap();
+    assert_eq!(seqs(&store).last().unwrap(), &("m-c".to_owned(), 4));
+}
+
+/// `seq` is AUTOINCREMENT: after a prune empties the table, the next
+/// message still gets a larger number (gate 9's `inbox --after`).
+#[test]
+fn message_seq_never_goes_back_after_the_table_is_emptied() {
+    let dir = TempDir::new("store-seq-auto").unwrap();
+    let store = SqliteStore::open(&dir.path().join("home"), NOW).unwrap();
+    let old = NOW - 31 * DAY_MS;
+    for id in ["m-1", "m-2", "m-3"] {
+        block_on(store.claim_message(&new_message(id, id), old)).unwrap();
+    }
+    let report = block_on(store.prune(NOW)).unwrap();
+    assert_eq!(report.table("messages").unwrap().after, 0);
+    block_on(store.claim_message(&new_message("m-4", "x"), NOW)).unwrap();
+    let seq = block_on(store.message("m-4")).unwrap().unwrap().seq;
+    assert_eq!(seq, 4, "a pruned number was used again");
 }

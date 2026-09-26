@@ -25,6 +25,18 @@ use super::{Agent, Backend, Entry, Log, Scenario, Side, Spawned, make_project, p
 
 pub struct Codex;
 
+/// Every scenario codex records: the common ones and gate 7's.
+const SCENARIOS: &[Scenario] = &[
+    Scenario::OneTurn,
+    Scenario::Interrupt,
+    Scenario::Approval,
+    Scenario::Busy,
+    Scenario::Resume,
+    Scenario::TurnsList,
+    Scenario::QueueIdle,
+    Scenario::ResumeEmpty,
+];
+
 pub const MODEL: &str = "gpt-6-luna";
 pub const EFFORT: &str = "low";
 const VIA: &str = "ws";
@@ -54,7 +66,7 @@ impl Backend for Codex {
     }
 
     fn scenarios(&self) -> &'static [Scenario] {
-        Scenario::ALL
+        SCENARIOS
     }
 
     fn run(&self, scenario: Scenario, agent: &Agent, dir: &Path, log: &Log) -> Result<(), String> {
@@ -121,6 +133,70 @@ impl Backend for Codex {
                 ws.request("thread/resume", json!({"threadId": thread}))?;
                 let turn = ws.turn(&thread, prompts::OK)?;
                 ws.wait_completed(&turn, t)?;
+            }
+            // Gate 7 (P8). Requests whose answer is the open question may
+            // fail; their error is what gets recorded.
+            Scenario::TurnsList => {
+                let first = ws.turn(&thread, prompts::OK)?;
+                ws.wait_completed(&first, t)?;
+                let long = ws.turn(&thread, prompts::LONG)?;
+                std::thread::sleep(agent.pace.settle);
+                let start = log.len();
+                ws.request(
+                    "thread/queue/add",
+                    json!({"threadId": thread, "clientUserMessageId": "agend-rec-queued-1", "input": input(prompts::OK)}),
+                )?;
+                let _ = ws.request("thread/queue/list", json!({"threadId": thread}));
+                ws.wait_completed(&long, t)?;
+                let queued = ws.next_turn(start, t)?;
+                ws.wait_completed(&queued, t)?;
+                let list = json!({"threadId": thread, "cursor": null, "limit": 10});
+                let _ = ws.request("thread/turns/list", list.clone());
+                let _ = ws.request("thread/compact/start", json!({"threadId": thread}));
+                log.wait_quiet(agent.pace.quiet, t, |e| {
+                    e.via == VIA && e.from == Side::Backend
+                });
+                let _ = ws.request("thread/turns/list", list);
+            }
+            Scenario::QueueIdle => {
+                let start = log.len();
+                ws.request(
+                    "thread/queue/add",
+                    json!({"threadId": thread, "clientUserMessageId": "agend-rec-idle-1", "input": input(prompts::OK)}),
+                )?;
+                let auto = ws.next_turn(start, agent.pace.settle * 2);
+                let _ = ws.request("thread/queue/start", json!({"threadId": thread}));
+                if let Ok(turn) = auto.or_else(|_| ws.next_turn(start, t)) {
+                    ws.wait_completed(&turn, t)?;
+                }
+                let long = ws.turn(&thread, prompts::LONG)?;
+                std::thread::sleep(agent.pace.settle);
+                ws.request(
+                    "thread/queue/add",
+                    json!({"threadId": thread, "clientUserMessageId": "agend-rec-queued-2", "input": input(prompts::OK)}),
+                )?;
+                let start = log.len();
+                ws.request(
+                    "turn/interrupt",
+                    json!({"threadId": thread, "turnId": long}),
+                )?;
+                ws.wait_completed(&long, t)?;
+                let queued = ws.next_turn(start, t)?;
+                ws.wait_completed(&queued, t)?;
+                let _ = ws.request(
+                    "turn/steer",
+                    json!({"threadId": thread, "expectedTurnId": long, "input": input(STEER)}),
+                );
+            }
+            Scenario::ResumeEmpty => {
+                ws.close();
+                server.stop();
+                server = spawn(agent, &project, &socket)?;
+                ws = Ws::connect(&socket, log)?;
+                let _ = ws.request(
+                    "thread/resume",
+                    json!({"threadId": thread, "excludeTurns": true}),
+                );
             }
         }
         // Let late notifications (token usage, status) arrive before closing.
@@ -242,6 +318,14 @@ impl Ws {
             json!({"threadId": thread, "input": input(text), "effort": EFFORT}),
         )?;
         id_at(&result, &["turn", "id"])
+    }
+
+    /// The id of the first `turn/started` logged after `start`.
+    fn next_turn(&self, start: usize, timeout: Duration) -> Result<String, String> {
+        let (_, started) = self.log.wait(start, timeout, "a turn to start", |e| {
+            e.via == VIA && e.from == Side::Backend && e.str("method") == Some("turn/started")
+        })?;
+        id_at(&started.msg["params"], &["turn", "id"])
     }
 
     fn wait_completed(&self, turn: &str, timeout: Duration) -> Result<Entry, String> {

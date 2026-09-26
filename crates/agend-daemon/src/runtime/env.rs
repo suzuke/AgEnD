@@ -7,12 +7,17 @@
 //!   and `PATH` = `$AGEND_HOME/bin` (the shims, found first) + the daemon's
 //!   `PATH`.
 //! - Copied from the daemon when set: [`PASS_THROUGH`].
+//! - codex only (gate 7 P4, option A; amends gate 6 H3): `ZDOTDIR` =
+//!   `$AGEND_HOME/zsh`, so the login zsh codex runs commands with puts the
+//!   shims first again after `/etc/zprofile`.
 //!
 //! Must NOT: copy any other variable, including other `AGEND_*` ones (for
 //! example `AGEND_SHIM_BYPASS`).
 
 use std::collections::BTreeMap;
 use std::path::Path;
+
+use agend_core::model::Backend;
 
 /// Variables copied from the daemon's environment when present.
 pub const PASS_THROUGH: &[&str] = &[
@@ -22,11 +27,12 @@ pub const PASS_THROUGH: &[&str] = &[
 /// `PATH` used after `$AGEND_HOME/bin` when the daemon has none.
 const DEFAULT_PATH: &str = "/usr/bin:/bin";
 
-/// The environment of instance `id`'s agent, from the daemon's environment
-/// `daemon_env` (normally `std::env::vars()`).
+/// The environment of instance `id`'s agent (a `backend` one), from the
+/// daemon's environment `daemon_env` (normally `std::env::vars()`).
 pub fn agent_env(
     home: &Path,
     id: &str,
+    backend: Backend,
     daemon_env: impl IntoIterator<Item = (String, String)>,
 ) -> BTreeMap<String, String> {
     let daemon: BTreeMap<String, String> = daemon_env.into_iter().collect();
@@ -42,6 +48,10 @@ pub fn agent_env(
     env.insert("PATH".into(), format!("{}:{rest}", bin.display()));
     env.insert("AGEND_HOME".into(), home.display().to_string());
     env.insert("AGEND_INSTANCE".into(), id.into());
+    if backend == Backend::Codex {
+        let zdotdir = crate::driver::codex::launch::zdotdir(home);
+        env.insert("ZDOTDIR".into(), zdotdir.display().to_string());
+    }
     env
 }
 
@@ -68,7 +78,7 @@ mod tests {
             ("TERM", "screen"),
             ("PATH", "/opt/homebrew/bin:/usr/bin"),
         ]);
-        let env = agent_env(Path::new("/h"), "g6-1", daemon);
+        let env = agent_env(Path::new("/h"), "g6-1", Backend::Claude, daemon.clone());
         assert_eq!(
             env,
             BTreeMap::from(
@@ -82,11 +92,15 @@ mod tests {
                 .map(|(k, v)| (k.to_owned(), v.to_owned()))
             )
         );
+        // codex: the same plus ZDOTDIR (gate 7 P4 option A).
+        let mut codex = agent_env(Path::new("/h"), "g6-1", Backend::Codex, daemon);
+        assert_eq!(codex.remove("ZDOTDIR").as_deref(), Some("/h/zsh"));
+        assert_eq!(codex, env);
     }
 
     #[test]
     fn a_daemon_without_path_still_gives_the_agent_one() {
-        let env = agent_env(Path::new("/h"), "a", vars(&[("PATH", "")]));
+        let env = agent_env(Path::new("/h"), "a", Backend::Claude, vars(&[("PATH", "")]));
         assert_eq!(env["PATH"], "/h/bin:/usr/bin:/bin");
     }
 }

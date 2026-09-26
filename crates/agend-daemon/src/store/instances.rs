@@ -47,13 +47,20 @@ pub struct Instance {
     /// The agent's base arguments; session arguments are added per start.
     pub args: Vec<String>,
     pub working_directory: String,
-    /// The backend session to resume; `None` when the backend has none yet
-    /// (codex and opencode until gates 7 and 12).
+    /// The backend session to resume: claude's session id, codex's thread
+    /// id (created by the daemon, gate 7 P3); `None` when there is none yet
+    /// (opencode until gate 12).
     pub session_id: Option<String>,
     pub status: InstanceStatus,
     /// The backend session was created (the first `Spawn` was
     /// acknowledged); set with `running` and never cleared (migration 0003).
     pub session_started: bool,
+    /// The agent's pid (its own process group) from the last `Spawned`;
+    /// cleared by the codex sweep after its holder died (gate 7 P2).
+    pub agent_pid: Option<u32>,
+    /// A codex instance migration 0004 found without a thread id that may
+    /// hold a conversation: never started again, a human decides (gate 7 P3).
+    pub legacy_no_thread: bool,
 }
 
 /// `[a-z0-9-]{1,24}`: the id names files under `run/holders/`.
@@ -100,6 +107,8 @@ fn from_row(row: &Row<'_>) -> rusqlite::Result<Result<Instance, StoreError>> {
     let working_directory = row.get(4)?;
     let session_id = row.get(5)?;
     let session_started = row.get(7)?;
+    let agent_pid: Option<i64> = row.get(8)?;
+    let legacy_no_thread = row.get(9)?;
     Ok((|| {
         let invalid = |what: String| StoreError::Invalid(format!("instance {id}: {what}"));
         Ok(Instance {
@@ -112,13 +121,17 @@ fn from_row(row: &Row<'_>) -> rusqlite::Result<Result<Instance, StoreError>> {
             working_directory,
             session_id,
             session_started,
+            agent_pid: agent_pid
+                .map(|p| u32::try_from(p).map_err(|_| invalid(format!("agent_pid {p}"))))
+                .transpose()?,
+            legacy_no_thread,
             id: id.clone(),
         })
     })())
 }
 
-const COLUMNS: &str =
-    "id, backend, program, args, working_directory, session_id, status, session_started";
+const COLUMNS: &str = "id, backend, program, args, working_directory, session_id, status, \
+                       session_started, agent_pid, legacy_no_thread";
 
 pub(super) fn list(conn: &Connection) -> Result<Vec<Instance>, StoreError> {
     let mut stmt = conn.prepare(&format!("SELECT {COLUMNS} FROM instances ORDER BY id"))?;
@@ -126,7 +139,7 @@ pub(super) fn list(conn: &Connection) -> Result<Vec<Instance>, StoreError> {
     rows.map(|row| row?).collect()
 }
 
-pub(super) fn get(conn: &Connection, id: &str) -> Result<Option<Instance>, StoreError> {
+pub(crate) fn get(conn: &Connection, id: &str) -> Result<Option<Instance>, StoreError> {
     conn.query_row(
         &format!("SELECT {COLUMNS} FROM instances WHERE id = ?1"),
         [id],
@@ -146,11 +159,15 @@ pub(super) fn insert(conn: &Connection, instance: &Instance) -> Result<(), Store
         session_id,
         status,
         session_started,
+        agent_pid,
+        legacy_no_thread,
     } = instance;
     validate_id(id).map_err(StoreError::Invalid)?;
     let args = serde_json::to_string(args).map_err(|e| StoreError::Invalid(e.to_string()))?;
     let inserted = conn.execute(
-        &format!("INSERT INTO instances ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"),
+        &format!(
+            "INSERT INTO instances ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)"
+        ),
         rusqlite::params![
             id,
             backend.as_str(),
@@ -159,7 +176,9 @@ pub(super) fn insert(conn: &Connection, instance: &Instance) -> Result<(), Store
             working_directory,
             session_id,
             status.as_str(),
-            session_started
+            session_started,
+            agent_pid,
+            legacy_no_thread
         ],
     );
     match inserted {
@@ -188,6 +207,33 @@ pub(super) fn set_status(
          session_started = CASE WHEN ?2 = 'running' THEN 1 ELSE session_started END \
          WHERE id = ?1",
         [id, status.as_str()],
+    )? {
+        1 => Ok(()),
+        _ => Err(StoreError::Invalid(format!("no instance {id}"))),
+    }
+}
+
+/// Sets the backend session id (codex: the thread the daemon created, gate
+/// 7 P3).
+pub(crate) fn set_session_id(conn: &Connection, id: &str, session: &str) -> Result<(), StoreError> {
+    match conn.execute(
+        "UPDATE instances SET session_id = ?2 WHERE id = ?1",
+        [id, session],
+    )? {
+        1 => Ok(()),
+        _ => Err(StoreError::Invalid(format!("no instance {id}"))),
+    }
+}
+
+/// Sets or clears the agent's pid (gate 7 P2).
+pub(crate) fn set_agent_pid(
+    conn: &Connection,
+    id: &str,
+    pid: Option<u32>,
+) -> Result<(), StoreError> {
+    match conn.execute(
+        "UPDATE instances SET agent_pid = ?2 WHERE id = ?1",
+        rusqlite::params![id, pid],
     )? {
         1 => Ok(()),
         _ => Err(StoreError::Invalid(format!("no instance {id}"))),

@@ -36,7 +36,8 @@
 ## 依賴規則
 
 - 一般依賴：所有 `agend-*` library crate（除 testkit）
-- dev 依賴：`agend-testkit`；`serde_json`（shim 測試寫 binding 快照）；`libc`（測試只對自己的子程序或自己 lock 檔裡的 pid 送訊號）；`tokio`（第 8 施工關：CLP-8 在測試程序裡跑 daemon 的 server）
+- dev 依賴：`agend-testkit`；`serde_json`（shim 測試寫 binding 快照）；`libc`（測試只對自己的子程序或自己 lock 檔裡的 pid 送訊號）；`tokio`（第 8 施工關：CLP-8 在測試程序裡跑 daemon 的 server）；`rusqlite`（第 7 施工關：做一個 schema v3 的 `agend.db`，放第 6 施工關的 codex 列）
+- example `fake_codex`：只給測試用的 `codex` CLI 替身（`agend_testkit::fake_agent::codex_cli`），`cargo test -p agend` 會一起編到 `target/<profile>/examples/fake_codex`；不安裝
 
 ## 入口
 

@@ -89,6 +89,14 @@ pub const RETENTION: &[Rule] = &[
         why: "gate 6 P2: an instance is kept until it is removed on purpose",
     },
     Rule {
+        target: Target::Table {
+            name: "messages",
+            time_column: Some("created_at_unix_ms"),
+        },
+        keep: Keep::Days(30),
+        why: "D31: messages 30 days; the only idempotency layer (gate 7 P5)",
+    },
+    Rule {
         target: Target::DailyRotatedFile { path: AUDIT_LOG },
         keep: Keep::Days(14),
         why: "gate 3 T10 audit log; daily rotation, 14 days (gate 6 P8); daemon housekeeping",
