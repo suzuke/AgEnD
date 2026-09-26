@@ -14,7 +14,7 @@
 ## 範圍
 
 - 11 個 agent 命令（D17）：CLI 全部做完、對假 daemon 驗；真 daemon 本關做哪些見 P1
-- `agend send` → 第 7 施工關 `deliver` 的接線、client protocol `Send` 加 `level` 與 `message_id`（第 7 施工關提案 P9 交給第 8、9 施工關；第 8 施工關沒做，由本關接）（P1、P5）
+- `agend send` → 第 7 施工關 `deliver` 的接線、client protocol `Send` 加 `level` 與 `message_id`（第 7 施工關提案 P9 交給本關）（P1、P5）
 - 操作者命令：`agend instance add/remove/list`（正式命令；`daemon_probe` 降為只給開發與舊驗收用的工具，見 P6）、`agend daemon restart`（P1、P6、P7）
 - `agend status`：agent 看自己、操作者看全貌（P1）
 - `agend doctor`、`agend init`（服務註冊在第 13 施工關）（P8、P9）
@@ -52,7 +52,7 @@
   - **`ask` 移到第 10 施工關**（**與第 8 施工關 P6「請示在第 9、10 施工關」不同，請明確決定**）：真的請示要新表、「需要你」來源、`answer_ask`、追問與結論（D35），本關做等於提前一半的第 10 施工關；第 11 施工關 B 段「回答請示」那半一樣等第 10 施工關。
   - 收件者是 claude／opencode（driver 在第 12 施工關）：`send` 照樣寫進 `messages` 表、狀態停在 `queued`；CLI 一樣回 `accepted`（`send` 一律回 `accepted`，core 的 `CommandResult` 沒有 `queued`；送達狀態看 daemon log、TUI）；收件者用 `agend inbox` 看得到；第 12 施工關的 driver 上線後照第 7 施工關的規則補送（實際行為以第 7 施工關 `deliver` 對沒有 driver 的 instance 怎麼做為準）。`CLI-n` 有一列驗它。
   - `send` 的 `level`：`agend send <to> "<message>" [--level queue|steer|interrupt]`，預設 `queue`（第 7 施工關 P6：等級由呼叫者傳入、預設 `Queue`）。`Send` 加選填的 `level` 與 `message_id`（additive，P5）。
-- 理由：里程碑「第 1–9 施工關：兩個 codex agent 互傳訊息；重啟 daemon 時不中斷、不遺失、不重複」（[ROADMAP](../ROADMAP.md#里程碑使用者可見)）只需要 `status`、`send`、`inbox` 與加 instance，而第 7 施工關只做 `deliver` API、把 `agend send` 與 `level` 交給後面，第 8 施工關沒接，所以接線由本關負責，本關結束時里程碑要真的跑得起來（步驟 8）；其他 agent 命令沒有 task 就沒有真資料可回，回明確錯誤比假資料好（第 8 施工關 P6 同一條路）。權限只放 daemon 一處，TUI、Telegram、CLI 同一套規則。
+- 理由：里程碑「第 1–9 施工關：兩個 codex agent 互傳訊息；重啟 daemon 時不中斷、不遺失、不重複」（[ROADMAP](../ROADMAP.md#里程碑使用者可見)）只需要 `status`、`send`、`inbox` 與加 instance，而第 7 施工關只做 `deliver` API、把 `agend send` 與 `level` 交給本關，所以接線由本關負責，本關結束時里程碑要真的跑得起來（步驟 8）；其他 agent 命令沒有 task 就沒有真資料可回，回明確錯誤比假資料好（第 8 施工關 P6 同一條路）。權限只放 daemon 一處，TUI、Telegram、CLI 同一套規則。
 - 替代方案：本關就做 `ask` 的真實作（範圍多一張表與請示流程）；`send`／`inbox` 在第 7 施工關沒 merge 時先回 `not_supported`、里程碑延到第 10 施工關（**會讓 ROADMAP 的里程碑延後，要改的話請明確決定**；本頁不建議）；CLI 也擋一次權限（兩處規則會漂移）；agent 連唯讀的全貌都不能看（`agend instance list` 在 agent 裡就要另開例外）。
 - 例子：操作者跑 `agend done t-1/work/1` → `agend: forbidden: agend done is an agent command; it runs inside an agent, where AGEND_INSTANCE is set`、exit 1；agent `g9-1` 跑 `agend instance add x claude` → `agend: forbidden: only the operator can add instances; ask the operator`、exit 1。
 - [ ] 使用者確認
@@ -131,7 +131,7 @@
   | 命令 | 重送 | 理由／不重送時的檢查指令 |
   |---|---|---|
   | `status`、`inbox`、`instance list`、`doctor` 裡的查詢 | 是 | 唯讀（`inbox` 帶游標讀，不消耗訊息） |
-  | `send` | 是 | CLI 產生 `message_id`（UUID v4），`Send` 加選填欄位（additive），daemon 把它當成 `deliver` 的訊息 id；第 7 施工關 P5 的 `messages` 表的 id 為 UNIQUE（`seq` 為主鍵）、`deliver` 先查表，同一個 id 再送回目前的狀態、不再送一次——這就是唯一的一套冪等。daemon 在 `deliver` 寫入 DB **之後**才回應；「同 id、內容不同」的檢查與 `deliver` 的寫入在同一個 DB thread 的同一個 closure 裡做，沒有競態。**client 的 id 跟別人分開**：daemon 只收 UUID v4 格式的 `message_id`（第 10 施工關的派工訊息用 `dispatch:<ticket>`，不是 UUID，撞不到）；表裡已有這個 id、但 from／to／body／level 有任何一個不同 → `invalid_request: message id … is already used by another message`，不當成去重、不回 `accepted`。沒帶 `message_id` 的 `Send`（1.1 的 client）由 daemon 產生 UUID |
+  | `send` | 是 | CLI 產生 `message_id`（UUID v4），`Send` 加選填欄位（additive），daemon 把它當成 `deliver` 的訊息 id；第 7 施工關 P5 的 `messages` 表的 id 為 UNIQUE（`seq` 為主鍵）、`deliver` 先查表，同一個 id 再送回目前的狀態、不再送一次——這就是唯一的一套冪等。daemon 在 `deliver` 寫入 DB **之後**才回應；「同 id、內容不同」的檢查與 `deliver` 的寫入在同一個 DB thread 的同一個 closure 裡做，沒有競態。**client 的 id 跟別人分開**：daemon 只收 UUID v4 格式的 `message_id`（第 10 施工關的派工訊息用 `dispatch:<ticket>`，不是 UUID，撞不到）；表裡已有這個 id、但 `from_instance`／`to_instance`／body／level 有任何一個不同 → `invalid_request: message id … is already used by another message`，不當成去重、不回 `accepted`。沒帶 `message_id` 的 `Send`（1.1 的 client）由 daemon 產生 UUID |
   | `done`、`result`、`review …` | 否 | 重送會被當成過期（`stale_result`），訊息反而誤導；檢查 `agend status` |
   | `block`／`unblock`、`remind`、`task create`、`ask` | 否 | 會重複建立或覆蓋；檢查 `agend status` |
   | `instance add`／`remove` | 否 | 重送會回 `instance_exists`／`unknown_instance`；檢查 `agend instance list` |
