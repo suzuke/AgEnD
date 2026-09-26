@@ -128,16 +128,17 @@
   - 輸出：完整 stdout／stderr 存 `logs/checks/<task>/<stage>-<attempt>.log`（每個檔最多 10 MiB，超過截斷並註明）；task 事件只放最後 20 行。保留 14 天（跟事件一樣，列進第 5 施工關 P8 的規則表）。
   - 同時最多跑 1 個 check，其他排隊（log 寫出在等誰）。
   - daemon 被硬殺時正在跑的 check 會變孤兒、跑到自己結束，結果沒人收；重開後 P9 對同一個 attempt 在**另一個新目錄**重跑，兩者不共用檔案；舊目錄由對帳刪掉。
-  - **寫入沙箱**（使用者 2026-09-26 決定）。checks 跑的是 agent 寫的程式碼：指令是你寫進 workflow 的（例如 `cargo test`），但它會執行 agent 改過的測試、`build.rs`、腳本。所以整個指令在沙箱裡跑，**網路照常可用**，只限制寫入：
+  - **寫入沙箱**（使用者 2026-09-26 決定）。checks 跑的是 agent 寫的程式碼：指令是你寫進 workflow 的（例如 `cargo test`），但它會執行 agent 改過的測試、`build.rs`、腳本。所以整個指令在沙箱裡跑，**IP 網路（TCP、UDP、HTTPS）照常可用**，限制兩件事：寫入、unix socket 連線。
     - 可寫的只有兩個地方：這次的 checks worktree（但它的 `.git` 檔案本身唯讀）；這次的暫存目錄 `$AGEND_HOME/checks/<run>.tmp/`。再加 `/dev/null`、`/dev/tty` 這類裝置。
     - 暫存目錄設成 `TMPDIR`，也放每次自己的快取：`CARGO_HOME`、`CARGO_TARGET_DIR`、`XDG_CACHE_HOME` 都指到它底下，跑完一起刪。**沒有跨 checks 共用的快取**：每次重新下載依賴、從頭編譯，比較慢；換來的是一次 check 留下的東西（例如在 `CARGO_HOME/config.toml` 設 `runner = "true"`）不可能讓之後別的 task 的 check 假綠。
-    - **連不到 daemon 與 holder 的 socket**：check 沒有 `AGEND_INSTANCE`，照第 8 施工關 P2 連上 `run/daemon.sock` 會被當成操作者（能核准 merge、`task_cancel`、重啟 daemon），連上 `run/holders/*.sock` 能在 agent 的 PTY 打字。所以沙箱擋掉整個 `$AGEND_HOME/run/` 的 unix socket 連線（寫法見下面兩個平台）；網路（TCP、HTTPS）照常。
-    - 每次 check 結束（不管結果、不只逾時）都停掉它的整個 process group，背景留下的子程序不會在 check 之後繼續跑。
+    - **不能連任何 unix socket（預設拒絕）**：check 沒有 `AGEND_INSTANCE`，照第 8 施工關 P2 連上 `run/daemon.sock` 會被當成操作者（能核准 merge、`task_cancel`、重啟 daemon）；連上 holder 的 socket 能在 agent 的 PTY 打字；連上 codex app-server（第 7 施工關，`run/holders/<id>.codex.sock` 是指到 `/private/tmp/codex-daemon-<uid>/…` 的 symlink）能讓 codex 不經沙箱執行命令。列路徑擋已經漏了三輪，所以改成**一律不准連 unix socket**，只有一個例外：macOS 的 DNS（`/private/var/run/mDNSResponder`，不開就查不到網址、HTTPS 也失敗；2026-09-26 在本機實測）。
+    - 結果：需要 unix socket 的 checks（docker、ssh-agent、gpg-agent 之類）在本關跑不了，是已知的限制。
+    - 每次 check 結束（不管結果、不只逾時）都停掉它的整個 process group。Linux 另有 pid namespace，沙箱裡的程序全部跟著結束；macOS 上用 `setsid` 另開 process group 的子程序停不到，但它仍在沙箱裡：寫不了外面、連不了任何 unix socket（見已知風險）。
     - 其他全部唯讀：你的 home（含 `~/.ssh`）、其他 repo、canonical repo 的 `.git`（refs、objects、`.git/worktrees/<run>/` 這個 worktree 的 git 目錄都唯讀：所以測試改不了 main，也改不了 `commondir` 把 daemon 之後跑的 git 導到假的 repo）、`$AGEND_HOME` 的其他地方。
     - 因此 checks 裡的 `git status`、`git diff` 照常可用；`git commit`、`git stash` 這類要寫 objects 或 index 的會失敗——checks 本來就不該改 repo，接受。
     - macOS 的 `mktemp` 不帶 `-t` 時不看 `TMPDIR`、寫到 `/var/folders/…/T`（`DARWIN_USER_TEMP_DIR`）：**不開放**那裡（別的程式也用它）。`mktemp -t <名字>`、`mktemp "$TMPDIR/x.XXXX"`、Rust 的 `std::env::temp_dir()` 都照 `TMPDIR`，可以用；不帶 `-t` 的 `mktemp` 會得到 `Operation not permitted`（寫進已知風險）。
-    - macOS：`/usr/bin/sandbox-exec -f <profile>`，profile 由 daemon 每次產生：`(allow default)`、`(deny file-write*)`，再對上面兩個目錄 `(allow file-write* (subpath …))`、對 `<worktree>/.git` `(deny file-write* (literal …))`，再加 `(deny network-outbound (remote unix-socket (subpath "<AGEND_HOME 的真實路徑>/run")))`（review 在 macOS 驗過：連 socket 被擋、HTTPS 照樣 200）。profile 裡的路徑一律先轉成真實路徑（`/tmp` 是 `/private/tmp`），否則規則對不上。
-    - Linux：`bwrap --ro-bind / / --dev /dev --proc /proc --bind <worktree> <worktree> --ro-bind <worktree>/.git <worktree>/.git --bind <tmp> <tmp> --tmpfs <AGEND_HOME>/run --unshare-pid --die-with-parent -- sh -c <指令>`：`--tmpfs` 把 `run/` 換成空的（看不到任何 socket），`--unshare-pid` 讓沙箱裡的程序在 check 結束時全部跟著結束；不加 `--unshare-net`。
+    - macOS：`/usr/bin/sandbox-exec -f <profile>`，profile 由 daemon 每次產生：`(allow default)`、`(deny file-write*)`，再對上面兩個目錄 `(allow file-write* (subpath …))`、對 `<worktree>/.git` `(deny file-write* (literal …))`，再加 `(deny network-outbound (remote unix-socket))`（不帶路徑＝全部）與唯一的例外 `(allow network-outbound (remote unix-socket (path-literal "/private/var/run/mDNSResponder")))`。這個寫法 2026-09-26 在本機實測：不帶路徑的形式系統內建的 profile 裡沒有範例（它們只用 `path-literal`），但 `sandbox-exec` 接受；直接連與經 symlink 連 `/private/tmp` 下的 socket 都得到 `Operation not permitted`，`curl https://example.com` 回 200（沒有 mDNSResponder 例外時 curl 查不到網址）。profile 裡的路徑一律先轉成真實路徑（`/tmp` 是 `/private/tmp`），否則規則對不上。
+    - Linux：`bwrap --ro-bind / / --dev /dev --proc /proc --bind <worktree> <worktree> --ro-bind <worktree>/.git <worktree>/.git --tmpfs /tmp --bind <tmp> <tmp> --tmpfs /run/user/<uid> --tmpfs <AGEND_HOME>/run --unshare-pid --die-with-parent -- sh -c <指令>`（`<tmp>` 在 `$AGEND_HOME/checks/` 底下，不受 `/tmp` 換掉影響）。Linux 沒有「擋所有 unix socket 連線、保留 IP 網路」的簡單開關（`--unshare-net` 會連 HTTPS 一起擋掉），所以用 `--tmpfs` 把放 socket 的目錄換成空的：`/tmp`（含 `/tmp/codex-daemon-*`）、`/run/user/<uid>`（使用者的 ssh-agent、gpg-agent、dbus）、`$AGEND_HOME/run`。**其他看得到的 socket 仍連得上**（例如 `/var/run/docker.sock`、`/run/systemd/…`），列為已知風險；abstract namespace 的 socket（不在檔案系統上）也一樣。
     - **fail closed，兩層**：
       1. 開機時與每次 `retry` 時：找沙箱工具並試跑一次 `true`；找不到或試跑失敗 → checks 不跑。
       2. 每一次 check：沙箱裡第一件事是寫一個標記檔 `$TMPDIR/.agend-sandbox-started`，再 `exec` 真的指令。結束後 daemon 只 `lstat` 這個檔（必須是一般檔案；**絕不打開它**，check 可能把它換成 FIFO 讓 daemon 卡住）。沒有這個標記檔時，daemon 當場再試跑一次 `true`：試跑失敗 → 是沙箱自己沒起來（profile 錯、工具出錯）；試跑成功 → 是 check 自己刪掉或換掉了標記檔，算 **check 失敗**（退回 work），不算 `sandbox-missing`，也就不會一直 `retry` 迴圈。
@@ -284,7 +285,7 @@
 - 派工時的檔案衝突警告（`policy::conflict`）：正確性由 P7 的 merge 前 rebase 保證，警告之後再加。
 - `agend workflow` 的 `new --from`、`edit`、`history`、`rollback`、`delete`（P10）。
 - 逾時動作「通知」只記 log 與 task 事件；Telegram 通知在第 12 施工關。
-- checks 的網路限制（沙箱只管寫入，P6）；Windows（沒有沙箱工具，照 fail closed 不跑 checks）。
+- checks 的 IP 網路限制（沙箱只管寫入與 unix socket，P6）；需要 unix socket 的 checks（docker、ssh-agent、gpg-agent）；Windows（沒有沙箱工具，照 fail closed 不跑 checks）。
 
 ### 已知風險（開工時處理）
 
@@ -293,8 +294,9 @@
 - **`bwrap` 需要 unprivileged user namespace**：Ubuntu 24.04 起 AppArmor 預設限制它，CI 的 `ubuntu-latest` 也是。CI 先 `sudo apt-get install -y bubblewrap`（runner 預設沒有），再試；不行就在 CI 加一步放寬（`sysctl kernel.apparmor_restrict_unprivileged_userns=0`）或給 `bwrap` AppArmor profile。沙箱測試**不能**因為工具不能用就 SKIP 當通過。
 - 沙箱裡 home 唯讀：會寫 `~` 的工具（例如 rustup 的鎖檔、某些語言的全域快取）可能失敗；開工時用 `cargo test` 與 `npm test` 各試一次，缺的路徑改用 `XDG_CACHE_HOME`（在每次的暫存目錄裡）。macOS 上不帶 `-t` 的 `mktemp` 會失敗（見 P6），測試腳本要改用 `mktemp -t`。
 - checks 很慢（P6）：沒有共用快取，每次都重新下載依賴、從頭編譯。這是為了不讓一次 check 讓下一次假綠（跟 P6 拒絕重複用 worktree 是同一個理由）。之後要加速，只能加「沙箱外的受信任步驟準備、沙箱裡唯讀」的快取，不能再開放可寫的共用快取。
-- 沒有 `AGEND_INSTANCE` 的程式連上 daemon socket 就被當成操作者（第 8 施工關 P2、D6 已接受的限制）：agent 寫的任何程式碼都一樣。所以 checks 絕對不能碰到 socket（P6 擋掉 `run/`）；agent 自己在它的 holder 裡跑的程式有 `AGEND_INSTANCE`，不受這條影響，但故意清掉環境變數的仍能假冒，同 D6。
-- macOS 沒有 pid namespace：check 用 `setsid` 另開 process group 的子程序，停掉 process group 時停不到（仍在沙箱裡、仍連不到 socket）；開工時量，必要時改成追蹤沙箱裡的所有子程序。
+- 沒有 `AGEND_INSTANCE` 的程式連上 daemon socket 就被當成操作者（第 8 施工關 P2、D6 已接受的限制）：agent 寫的任何程式碼都一樣。所以 checks 不能連任何 unix socket（P6）；agent 自己在它的 holder 裡跑的程式有 `AGEND_INSTANCE`，不受這條影響，但故意清掉環境變數的仍能假冒，同 D6。
+- macOS 沒有 pid namespace：check 用 `setsid` 另開 process group 的子程序，停掉 process group 時停不到，會在 check 之後繼續跑；它仍在沙箱裡，寫不了外面、連不了任何 unix socket（只剩 DNS），但能用 IP 網路。開工時量，必要時改成追蹤沙箱裡的所有子程序。
+- **Linux 只藏了三個放 socket 的目錄**（P6）：`/tmp`、`/run/user/<uid>`、`$AGEND_HOME/run`。其他在 `--ro-bind / /` 下看得到的 socket（`/var/run/docker.sock`、`/run/systemd/…`、abstract namespace）check 仍連得上；docker socket 等於 root，機器上有它時要知道這一點。要更嚴只能用 seccomp 擋 `AF_UNIX` 的 `connect`，本關不做。
 - `-c core.hooksPath=/dev/null` 也跳過專案自己的 `post-checkout` 等 hook（P5）：依賴 hook 準備環境的專案，checks worktree 裡少了那一步；要的話寫進 checks 指令。
 - 在持有者的 worktree 裡 rebase（P7）：這時 task 不在 work 關卡，但 agent 仍可能剛好在跑 git。worktree 不乾淨就當成衝突退回 work，不硬做。
 - trailer 搜尋最多看 main 的 1000 個 first-parent commit（P7）：merge 之後 main 又前進超過 1000 個 commit、而且 DB 同時丟了 `merge_intent`，才會找不到；開工時量搜尋的耗時。
@@ -310,7 +312,7 @@
   - STO 新規則「存檔與事件同成同敗」對 `FakeStore` 與真 store 都過，有 mutant（P1）
   - 分派：沒有空的 dev 時排隊、空出來後自動派出；沒有角色 → `no-role`，`team join` 後消失（P3、P10）
   - daemon 的 git 呼叫都有 `-c core.hooksPath=/dev/null`、都沒有 `AGEND_*`（P5）
-  - checks：每次一個新目錄、跑完就刪；`--fail-checks-once` 回 work 再通過；逾時停掉整個 process group、餵 `CommandFinished{exit_code: None}`、task 回 work；沙箱：寫到 worktree 與 `TMPDIR` 的 check 通過，寫到 home、`$AGEND_HOME`、其他 repo、canonical 的 refs 的 check 失敗且檔案不存在，網路照常可用；找不到沙箱工具（測試用 debug-only 的覆寫指到不存在的路徑）→ check 不跑、`sandbox-missing` 出現、`retry` 後照跑；改 `<worktree>/.git` 或 `.git/worktrees/<run>/commondir` 失敗、daemon 清理時沒有執行任何 checks 留下的設定（`core.fsmonitor` 的回歸測試）；一次 check 寫 `CARGO_HOME/config.toml` 之後，下一次 check 看不到它；沙箱 profile 故意寫壞 → 沒有標記檔 → `sandbox-missing`、不是 checks 失敗；check 刪掉或把標記檔換成 FIFO → checks 失敗、daemon 不卡住；check 連 `run/daemon.sock` 與 `run/holders/*.sock` 都失敗（連不上），HTTPS 照常；check 留下的背景子程序在 check 結束後不存在（P6、P8）
+  - checks：每次一個新目錄、跑完就刪；`--fail-checks-once` 回 work 再通過；逾時停掉整個 process group、餵 `CommandFinished{exit_code: None}`、task 回 work；沙箱：寫到 worktree 與 `TMPDIR` 的 check 通過，寫到 home、`$AGEND_HOME`、其他 repo、canonical 的 refs 的 check 失敗且檔案不存在，網路照常可用；找不到沙箱工具（測試用 debug-only 的覆寫指到不存在的路徑）→ check 不跑、`sandbox-missing` 出現、`retry` 後照跑；改 `<worktree>/.git` 或 `.git/worktrees/<run>/commondir` 失敗、daemon 清理時沒有執行任何 checks 留下的設定（`core.fsmonitor` 的回歸測試）；一次 check 寫 `CARGO_HOME/config.toml` 之後，下一次 check 看不到它；沙箱 profile 故意寫壞 → 沒有標記檔 → `sandbox-missing`、不是 checks 失敗；check 刪掉或把標記檔換成 FIFO → checks 失敗、daemon 不卡住；check 連 `run/daemon.sock`、`run/holders/*.sock`、`/private/tmp`（Linux 是 `/tmp`）下的 socket、以及經 symlink 指到它的路徑都失敗，HTTPS 照常；check 留下的背景子程序在 check 結束後不存在——**例外**是 macOS 上 `setsid` 的子程序（已知風險），測試改成斷言它連不上任何 unix socket、寫不了沙箱外（P6、P8）
   - merge：main 沒被 checkout、只被乾淨的 canonical checkout、被 dirty 的 canonical 或別的 worktree checkout 三種；空 branch 的 `done` 被拒；main 前進 → rebase、保留核准、重跑 checks；已 merge 的由 trailer 找回、`merge_intent` 當後備、手動 merge 的記成完成（`MergeCompleted`，註明 merged outside agend）（P7）
   - 「需要你」六種來源、`resolve_attention` 的 `note`；舊 attempt 的 `approval:` id 回 `unknown_attention`；重開機後 `waiting_since` 不變（P8）
   - P10 每個命令的 daemon 端；請示的一輪提問、回答、追問、結論；`remind` 跨重開機照樣送出；`task_cancel` 只收操作者
@@ -527,6 +529,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-26 沙箱第 3 輪 review（HIGH：經 symlink 連到 codex app-server）後改成預設拒絕：macOS `(deny network-outbound (remote unix-socket))`，只留 DNS 的 mDNSResponder（本機實測：socket 與 symlink 都被擋、HTTPS 200）；Linux 用 `--tmpfs` 藏 `/tmp`、`/run/user/<uid>`、`$AGEND_HOME/run`，其他看得到的 socket 列為已知風險；需要 unix socket 的 checks 列為已知限制；setsid 與測試的說法跟著改。
 - 2026-09-26 沙箱第 2 輪 review（1 MEDIUM、2 LOW）後修正：沙箱擋掉 `$AGEND_HOME/run/` 的 unix socket（macOS profile `deny network-outbound`、Linux `--tmpfs` 與 `--unshare-pid`），每次 check 後停掉整個 process group；標記檔只 `lstat`、被 check 刪掉算 checks 失敗；`agend doctor` 的沙箱一列改由本關加。
 - 2026-09-26 沙箱 review REFUTED（1 HIGH、1 MEDIUM、數個 LOW，在 macOS 重現）後修正：`.git/worktrees/<run>/` 與 `<worktree>/.git` 改成唯讀、daemon 碰 checks worktree 的 git 加 `-c core.fsmonitor=false`（擋逃逸）；拿掉跨 checks 的共用快取，全部放每次的暫存目錄（擋假綠，代價是慢）；macOS `mktemp` 與真實路徑、每次 check 的標記檔（沙箱自己失敗算 `sandbox-missing`）、CI 先裝 `bubblewrap`；範圍與分工表補上 `sandbox-missing` 與 `agend doctor`。
 - 2026-09-26 使用者確認 P1–P11：P6 改成 checks 在寫入沙箱裡跑（macOS `sandbox-exec`、Linux `bwrap`，網路照常，沒有工具就不跑、出現 `sandbox-missing`）；P3 拒絕刪除持有者（與 D33 不同）、P7 `--ff-only` 與手動 merge 記成完成、P8 `no-role`（與 D18 不同）、P11 `delivery = inbox` 只給假 agent，都照提案；要正式的 `agend task cancel`（語法第 9 施工關、daemon 端本關）；「你親自驗收」加一步沙箱，改成 11 步。
