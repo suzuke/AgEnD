@@ -123,7 +123,8 @@
 - 建議：
   - **每次跑一個新的** detached worktree：`$AGEND_HOME/checks/<task>-<stage>-<attempt>-<unix 毫秒>/`，在要測的 head；跑完（不管結果）就刪。不裝 hook、沒有 binding。
   - 指令：`sh -c <已展開的指令>`，自己一個 process group（RUN-8），stdin 是 `/dev/null`。環境：第 6 施工關的 agent 白名單，但**沒有** `AGEND_*`，`PATH` 也拿掉 `$AGEND_HOME/bin`。
-  - timeout：`RunCommand` 帶來的 `timeout_ms`（關卡沒寫就是 core 的預設 5 分鐘，`DEFAULT_STAGE_TIMEOUT_MS`）；逾時 → 停掉整個 process group → 餵 `StageTimedOut`，照關卡的逾時動作走。
+  - timeout：`RunCommand` 帶來的 `timeout_ms`（關卡沒寫就是 core 的預設 5 分鐘，`DEFAULT_STAGE_TIMEOUT_MS`）。逾時 → 停掉整個 process group → 餵 `CommandFinished{exit_code: None}`：core 當成 checks 失敗、退回 work，持有者會收到「checks timed out after N s」。**不餵 `StageTimedOut`**：預設逾時動作是「通知」，只記一筆，task 會一直停在 checks、「需要你」也沒有。
+  - 每次都是冷的 worktree，5 分鐘可能不夠：workflow 要自己寫 `timeout_ms`。本關的 `demo` workflow 寫 60 秒（checks 是 `test -f`），`slow` 寫 120 秒；Rust 專案建議至少 30 分鐘或設共用的 `CARGO_TARGET_DIR`（見已知風險）。
   - 輸出：完整 stdout／stderr 存 `logs/checks/<task>/<stage>-<attempt>.log`（每個檔最多 10 MiB，超過截斷並註明）；task 事件只放最後 20 行。保留 14 天（跟事件一樣，列進第 5 施工關 P8 的規則表）。
   - 同時最多跑 1 個 check，其他排隊（log 寫出在等誰）。
   - daemon 被硬殺時正在跑的 check 會變孤兒、跑到自己結束，結果沒人收；重開後 P9 對同一個 attempt 在**另一個新目錄**重跑，兩者不共用檔案；舊目錄由對帳刪掉。
@@ -144,16 +145,17 @@
     3. 把這個 commit 的 SHA 存進 `tasks.merge_intent`（CAS），**再**移動 main。
     4. 移動 main 前先 `git worktree list --porcelain`，看 main 被誰 checkout：
        - 沒有任何 worktree checkout main → `git update-ref refs/heads/main <新> <舊>`（CAS）。
-       - 只有 canonical checkout 在 main，而且工作目錄乾淨 → 在那裡 `git merge --ff-only <新>`（main 被別人動過就失敗，等同 CAS；工作目錄一起更新）。
+       - 只有 canonical checkout 在 main，而且工作目錄乾淨 → 在那裡 `git merge --ff-only <新>`（main 被別人動過就失敗，等同 CAS；工作目錄一起更新）。**與 [pipeline](../architecture/pipeline.md#merge-與-main-前進)「不在使用者工作目錄 `git merge`」不同，請明確決定**：這裡只做 fast-forward、只在乾淨時做，不會產生衝突或新 commit；不同意的話改成「main 被任何地方 checkout 就 `merge-blocked`」。
        - 其他情況（canonical 在 main 但有未 commit 的修改、或別的 worktree checkout 了 main）→ **不 merge**，出現「需要你」`merge-blocked`（P8），寫出是哪個目錄。
   - main 前進（D14）**只在送出 merge 前檢查一次**：head 不包含目前的 main → daemon 在持有者的 worktree 裡 rebase（P5）→ 餵 `MainAdvanced{rebased_head, patch_id, conflict}` 再餵 `MergeFailed`（core 已規定送出中的 head 變更要等 `MergeFailed` 才套用）。patch-id 相同 → 保留核准、重跑 checks；不同或衝突 → 回 work。所以 checks 一定是在「已包含最新 main 的 head」上通過的，merge 出來的樹就是測過的樹。
   - 判斷「這個 task 是不是已經 merge 了」（送 `Merge` 前、以及 P9 開機時）：
     1. 在 main 的 first-parent 歷史裡找 trailer `Agend-Task: <task>`、第二個父 commit 等於目前 head 的 commit（`git log --first-parent --grep`，最多看 1000 個）→ 找到就是已 merge，merge commit 取它。
     2. 找不到，但 `merge_intent` 有值而且在 main 裡 → 已 merge，取 `merge_intent`。
-    3. 都沒有 → 還沒 merge，照上面的步驟做。head 在 main 裡卻兩樣都找不到（有人手動 merge 了它）→ `StageFailed`，理由寫清楚，交給你。
+    3. 都沒有，但 head 已經在 main 裡（有人手動 merge 了它）→ 也算完成：餵 `MergeCompleted`，merge commit 取 main 的 first-parent 歷史裡第一個包含 head 的 commit，task 事件註明「merged outside agend」。不用 `StageFailed`：送出 `Merge` 之後 core 只接受 merge 結果與 head 變更（`MergeInFlight`），`StageFailed` 會被拒、task 卡住。
+    4. 以上都不是 → 還沒 merge，照上面的步驟做。
   - 只對 forge local 成立（它從不 squash、一定寫 trailer）；GitHub 在第 12 施工關另外處理。done 以 DB 裡的 `merge_commit` 為準；不從 git 推論其他 task（V1-LESSONS #6）。
 - 理由：`merge-tree` 不碰任何工作目錄（pipeline.md 已定）；拒絕空 branch 之後，「已經 merge」的證據只剩我們自己寫的 trailer 與 `merge_intent`，兩者都綁這個 task，不會把別人的 commit 當成自己的 merge。只在 merge 前處理 main 前進，只有一個觸發點。
-- 替代方案：只看「head 在 main 裡」（空 branch 或手動 merge 會被當成已完成）；main 一前進就 rebase 所有進行中的 task（要處理 agent 正在改的 worktree）；fast-forward merge（main 上看不出哪個 task 什麼時候 merge，也沒有 trailer 可找）；main 被 checkout 時照樣 `update-ref`（那個工作目錄會變成一堆反向修改）。
+- 替代方案：只看「head 在 main 裡」、不拒絕空 branch（空 branch 一 `done` 就被當成已 merge）；手動 merge 時讓 task 失敗（要改 core：送出 `Merge` 後 core 不接受 `StageFailed`）；main 一前進就 rebase 所有進行中的 task（要處理 agent 正在改的 worktree）；fast-forward merge（main 上看不出哪個 task 什麼時候 merge，也沒有 trailer 可找）；main 被 checkout 時照樣 `update-ref`（那個工作目錄會變成一堆反向修改）。
 - 例子：t-3、t-4 都到了 merge。t-3 先 merge；t-4 送 merge 前發現 head 不含新的 main → rebase 無衝突、patch-id 相同 → log `t-4: main advanced; rebased, approvals kept, checks run again` → checks 通過 → merge。`git log --oneline main` 最上面兩個是 `Merge agend/t-4/…`、`Merge agend/t-3/…`。
 - [ ] 使用者確認
 
@@ -165,12 +167,12 @@
   | `attention_id` | 什麼時候出現 | `actions` | 按了之後 |
   |---|---|---|---|
   | `approval:<task>/<stage>/<attempt>` | `approval(by = "human")` 關卡等你 | `approve`、`request_changes` | `ApprovalGranted`（綁 head 的關卡綁送出要求時的 head）或 `ChangesRequested`（理由必填） |
-  | `ask:<ask id>` | agent `agend ask`（P10） | 照第 8 施工關的請示：`answer_ask` | 回答送回 agent；agent 追問就再出現，結論後消失 |
+  | `<ask id>`（不加前綴） | agent `agend ask`（P10） | 照第 8 施工關的請示：`answer_ask` | 回答送回 agent；agent 追問就再出現，結論後消失 |
   | `task-failed:<task>` | task 失敗（含 P2 快照壞掉） | `acknowledge` | 從清單拿掉；task 保持 `Failed`，WIP 已存 patch |
-  | `merge-blocked:<task>` | main 被 checkout 著不能動（P7） | `retry` | 再檢查一次、可以就 merge |
+  | `merge-blocked:<task>` | main 被 checkout 著不能動（P7） | `retry` | 再檢查一次、可以就 merge；這時不能取消（P10），要先把那個 checkout 清乾淨 |
   | `no-role:<team>/<role>` | 派工時 team 裡沒有這個角色（P3） | 無 | 你用 `agend team join` 加了這個角色後自動消失 |
 
-  - **id 的寫法**：`<種類>:<對象>`，跟第 8 施工關的 `instance-failed:<id>` 一樣用 `:` 分開種類；對象是 task 關卡時**就是第 9 施工關的 ticket**（`t-3/review/1`），所以同一串字會同時出現在 `agend status`、派工訊息與「需要你」裡。
+  - **id 的寫法**：請示照第 8 施工關 P5，直接用 ask id、不加前綴；其他是 `<種類>:<對象>`，跟第 8 施工關的 `instance-failed:<id>` 一樣用 `:` 分開種類；對象是 task 關卡時**就是第 9 施工關的 ticket**（`t-3/review/1`），所以同一串字會同時出現在 `agend status`、派工訊息與「需要你」裡。
   - `request_changes` 要帶理由：`resolve_attention` 加一個選填欄位 `note`；缺少時回 `invalid_request`。
   - `approval:` 的 id 帶 attempt：head 變了、開了新的 attempt，舊項目自動消失、新項目出現；拿舊 id 按會回 `unknown_attention`，不會核准到新的 head。
   - `unblocks`：task 相關的是 1，`no-role` 是在排隊的 task 數；`waiting_since` 是 `tasks.stage_entered_at_unix_ms`（P2，重開機不重算；請示用 ask 建立的時間）；`task_id`、`instance_id`（持有者）照填。脈絡摘要（D37）本關只填最短的：目標＝task 標題、在問什麼＝「核准 `<branch>` 的 `<head 前 7 碼>`」、之後＝「merge 進 main」；完整內容是第 11 施工關的事。
@@ -190,7 +192,7 @@
     2. binding：`pending` 的接著建（P4）；`ready` 但 worktree 不見了 → 從 branch 重建；branch 也不見 → task `Failed`。重寫**全部** binding 快照檔（檔案只是 DB 的投影），刪掉 DB 沒有的 instance 的快照檔。
     3. 命名空間裡的孤兒（`agend/<task>/…` branch、`worktrees/<task>*`、`checks/<task>-*`，DB 沒有這個 task、它已結束、或是上一次開機留下的 checks 目錄）→ 照 P4 的釋放流程（先存 WIP patch 再刪）。命名空間外一律不碰。
     4. 重做 `outstanding_actions`（P2）：派工訊息用固定的訊息 id `dispatch:<ticket>` 重送（第 7 施工關的送達以 id 冪等）；checks 在新目錄重跑同一個 attempt（P6）；merge 送出中先照 P7 判斷是不是已經 merge。
-    5. 逾時：deadline＝`stage_entered_at_unix_ms`＋關卡的 timeout；已經過了就立刻餵 `StageTimedOut`。
+    5. 逾時：`command` 以外的關卡，deadline＝`stage_entered_at_unix_ms`＋關卡的 timeout，已經過了就立刻餵 `StageTimedOut`；`command` 的逾時由 runner 管（P6），重跑時重新計時。
   - 斷電丟了最後幾筆：DB 回到較舊的狀態，對帳就從那個狀態接著做。各種外部動作的處理：
     - merge：`merge_intent` 可能也丟了，所以 P7 先找 trailer，不靠 `merge_intent`。
     - worktree、hook：已存在就檢查、沿用。
@@ -220,13 +222,14 @@
     | `review approve <ticket>`／`changes <ticket> "<理由>"` | 只收這次審查的 reviewer；head 取審查 binding 的 head（agent 不必給）→ `ApprovalGranted`／`ChangesRequested` |
     | `block`／`unblock` | `TaskOperation::Block`／`Unblock`；理由顯示在 `agend status` 與 TUI，不進「需要你」（要你處理就用 `ask`） |
     | `remind` | `reminders` 表記一筆（task、到期時間），到期時送訊息 `remind:<task>/<序號>` 給 task 持有者；送出後刪那一列；重開機後照表補 |
-    | `task create` | 照 D18：team 預設是呼叫者的 team、workflow 預設是 team 的 `default_workflow`；存檔檢查、要 repo 的 workflow 在沒 repo 的 team 被拒；用到 fanout 或 `reassign` 被拒 |
+    | `task create` | 照 D18（語法照第 9 施工關：`task create --role <role> "<title>" [--team] [--workflow]`）：team 預設是呼叫者的 team、workflow 預設是 team 的 `default_workflow`；`--role` 必須等於那個 workflow 第一個 work 關卡的角色，不同就拒絕並寫出應該是哪個（本關不做「改寫 workflow 的角色」）；存檔檢查、要 repo 的 workflow 在沒 repo 的 team 被拒；用到 fanout 或 `reassign` 被拒。審查者照 `policy::assign` 的 `Review`：排除 task 持有者（作者），優先不同 backend；排除後沒有人 → 排隊，出現 `no-role:<team>/<role>` |
 
   - 請示（D35）：`asks` 表（id、instance、task、狀態、建立時間）與 `ask_turns` 表（提問、選項、回答、追問、結論，依序），保留「永久」（D31）。`ask` 建一筆、出現在「需要你」；`answer_ask` 把回答記下並送給 agent（訊息 id `ask:<ask id>/<輪次>`）；`AskFollowUp` 再出現一次；`AskResolve` 結束。
   - 操作者命令（本關的 CLI，走第 9 施工關的 `operator` 請求）：
     - `agend team add <team> [--repo <path>] [--workflow <id>]`、`agend team list`、`agend team set-workflow <team> <id>`、`agend team join <team> <instance> --role <role>`
     - `agend workflow list`、`show <id>`、`check <file>`、`apply <file>`（D19 的 `new --from`、`edit`、`history`、`rollback`、`delete` 之後再做）
     - 新請求 `task_cancel { task_id, reason }`（只收操作者）→ `Cancel` 事件，照 P4 釋放。本關給 `pipeline_probe cancel` 用；要不要有正式 CLI 命令見「待你決定」。
+    - task 已經在 merge 關卡（包括 `merge-blocked`）時，core 不接受取消（merge 送出後不能取消，pipeline.md）：`task_cancel` 回錯誤 `merge_in_flight: <task> is merging; it cannot be cancelled now`。`merge-blocked` 的出路是把擋住的 checkout 清乾淨（commit 或 stash 你的修改、或切離 main），再按 `retry`。
 - 理由：這些都只有接上 pipeline 才有真資料可驗；team 與 workflow 的命令是跑 pipeline 的前提，放在同一關才不會兩邊互等。
 - 替代方案：team 與角色放進第 9 施工關的 `instance add` 旗標（第 9 施工關就要先有 `teams` 表）；請示本關不做（第 11 施工關 B 段的「回答請示」就沒有真來源）。
 - 例子：假 reviewer 在 `t-3/review/2` 已經開始後才送 `agend review approve t-3/review/1` → `stale_result`；`agend team join g10 g10-rev --role reviewer` → 排隊中的審查馬上派給它，`no-role:g10/reviewer` 消失。
@@ -238,7 +241,7 @@
 - 建議：
   - **真的**：git（系統的 git，≥ 2.38）、暫存 repo（`/tmp/g10-…`）、forge local、runner（`sh`）、SQLite、holder、shim 與 hook、`agend daemon` binary、client 協定、CLI。
   - **假的**：agent 的腦袋。testkit 加一個假 agent 程式 `fake-worker`（放在 holder 裡跑，跟第 6 施工關的計數器一樣）：每秒跑一次 `agend inbox --after <上次最後一則的 id>`（游標存在自己 workspace 的檔案裡），收到派工就在 worktree 寫檔、經 shim `git commit`、`agend done <ticket>`；收到審查就 `agend review approve <ticket>`。旗標：`--fail-checks-once`（第一次故意不加檔案）、`--leave-wip`（done 前留一個未 commit 的檔）、`--changes-once`（reviewer 第一次要求修改）、`--hold`（收到派工後什麼都不做）。
-  - 送達：instance 加一欄 `delivery`（`push` 預設／`inbox`）。`inbox` 的 instance daemon 不主動推：訊息寫進第 7 施工關的 `messages` 表就記 `sent`（已放到 agent 拿得到的地方）。**讀取不算確認**（第 9 施工關的 `inbox` 是唯讀游標）。確認的來源是 agent 用了它：派工訊息 `dispatch:<ticket>` 在 daemon 收到帶同一個 ticket 的結果命令（`done`、`result`、`review`）時標 `confirmed`；其他訊息沒有這種回應，就一直是 `sent`（照第 7 施工關「不能確認就誠實標未確認」）。等第 12 施工關有 claude driver，真的 claude 仍是 `push`，不受影響。
+  - 送達：instance 加一欄 `delivery`（`push` 預設／`inbox`）。**與 [delivery](../architecture/delivery.md#送達模型)「推送一律帶完整內容、inbox 只作補查」不同，請明確決定**：`inbox` 多了一條只靠拉取的路，只給沒有 driver 的程式（假 agent）用。`inbox` 的 instance daemon 不建立任何 driver；假 agent 的 backend 固定登記成 `claude`（第 12 施工關之前沒有 claude driver，`fake-worker` 忽略第 6 施工關加的 `--session-id`／`--resume` 參數），**不用 `codex`**（會帶出第 7 施工關的 driver 與啟動包裝）。`inbox` 的 instance daemon 不主動推：訊息寫進第 7 施工關的 `messages` 表就記 `sent`（已放到 agent 拿得到的地方）。**讀取不算確認**（第 9 施工關的 `inbox` 是唯讀游標）。確認的來源是 agent 用了它：派工訊息 `dispatch:<ticket>` 在 daemon 收到帶同一個 ticket 的結果命令（`done`、`result`、`review`）時標 `confirmed`；其他訊息沒有這種回應，就一直是 `sent`（照第 7 施工關「不能確認就誠實標未確認」）。等第 12 施工關有 claude driver，真的 claude 仍是 `push`，不受影響。
   - pipeline 迴圈的單元測試用 testkit 的假實作（`FakeStore`、`FakeForge`、`FakeRunner`、`FakeDriver`、`FakeClock`）；整合測試與 demo 用上面「真的」那一組。
   - 開發用 example `pipeline_probe`：
     - `setup`（daemon 停著時，直接開 DB）：建暫存 repo 與 home、team `g10`（`g10-dev` dev、`g10-rev` reviewer）與 team `g10h`（`g10-hold`，`--hold` 的假 agent）、`demo` 與 `slow` 兩個 workflow；印出 `export AGEND_HOME=…` 與 repo 路徑。
@@ -256,7 +259,7 @@
 
 - 操作者直接開 task：第 9 施工關把 `task create` 定為 agent 命令，操作者不能跑。本關的驗收改用 `pipeline_probe task`（以 agent 身分）。你平常要不要能直接 `agend task create`？建議：要，做成 `operator` 請求的一個變體，放在本關或第 9 施工關都可以——請決定放哪一關。
 - 操作者取消 task 要不要正式 CLI 命令（例如 `agend task cancel <task>`）：建議要，跟上一題放同一關。
-- 與 D18 不同（P8 `no-role`）、與 D33 第 3 點不同（P3 拒絕刪除持有者）：各自在該題標了「請明確決定」。
+- 與決策或架構頁不同、各自在該題標了「請明確決定」的：D18（P8 `no-role`）、D33 第 3 點（P3 拒絕刪除持有者）、pipeline.md 不在使用者目錄 `git merge`（P7 的 `--ff-only`）、delivery.md 推送為主（P11 的 `delivery = inbox`）。
 
 ### 本關不做（明確列出）
 
@@ -290,8 +293,8 @@
   - STO 新規則「存檔與事件同成同敗」對 `FakeStore` 與真 store 都過，有 mutant（P1）
   - 分派：沒有空的 dev 時排隊、空出來後自動派出；沒有角色 → `no-role`，`team join` 後消失（P3、P10）
   - daemon 的 git 呼叫都有 `-c core.hooksPath=/dev/null`、都沒有 `AGEND_*`（P5）
-  - checks：每次一個新目錄、跑完就刪；`--fail-checks-once` 回 work 再通過；逾時停掉整個 process group（P6）
-  - merge：main 沒被 checkout、只被乾淨的 canonical checkout、被 dirty 的 canonical 或別的 worktree checkout 三種；空 branch 的 `done` 被拒；main 前進 → rebase、保留核准、重跑 checks；已 merge 的由 trailer 找回、`merge_intent` 當後備、手動 merge 的回 `StageFailed`（P7）
+  - checks：每次一個新目錄、跑完就刪；`--fail-checks-once` 回 work 再通過；逾時停掉整個 process group、餵 `CommandFinished{exit_code: None}`、task 回 work（P6）
+  - merge：main 沒被 checkout、只被乾淨的 canonical checkout、被 dirty 的 canonical 或別的 worktree checkout 三種；空 branch 的 `done` 被拒；main 前進 → rebase、保留核准、重跑 checks；已 merge 的由 trailer 找回、`merge_intent` 當後備、手動 merge 的記成完成（`MergeCompleted`，註明 merged outside agend）（P7）
   - 「需要你」五種來源、`resolve_attention` 的 `note`；舊 attempt 的 `approval:` id 回 `unknown_attention`；重開機後 `waiting_since` 不變（P8）
   - P10 每個命令的 daemon 端；請示的一輪提問、回答、追問、結論；`remind` 跨重開機照樣送出；`task_cancel` 只收操作者
   - `delivery = inbox`：讀取不改狀態；結果命令帶同一個 ticket 時派工訊息變 `confirmed`（P11）
@@ -415,11 +418,11 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
    **這步在驗什麼**：task 結束後 branch、worktree、checks 目錄都不留，binding 快照也清掉（P4、P6）。錯了的話會像 v1 一樣越堆越多。
 
    ```bash
-   git -C <repo> branch --list "agend/*"; ls "$AGEND_HOME/worktrees/" "$AGEND_HOME/checks/"
+   git -C <repo> branch --list "agend/*"; find "$AGEND_HOME/worktrees" "$AGEND_HOME/checks" -mindepth 1
    cat "$AGEND_HOME/bindings/g10-dev.json"
    ```
 
-   應該看到：前兩個指令什麼都不印；快照裡沒有 `binding`，只有 instance 與 repo。
+   應該看到：前兩個指令什麼都不印（daemon 開機時一定建好這兩個目錄，所以 `find` 不會報錯）；快照裡沒有 `binding`，只有 instance 與 repo。
 
    - [ ] 通過
 
@@ -486,6 +489,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-26 第 2 輪 review REFUTED（2 HIGH、2 MEDIUM、4 LOW）後修正：手動 merge 改記 `MergeCompleted`（`StageFailed` 在 merge 送出中會被 core 拒絕）；checks 逾時改餵 `CommandFinished{exit_code: None}` 回 work，demo workflow 寫明 timeout；請示的 attention id 用 ask id；merge 中不能取消、`merge-blocked` 的出路；`delivery = inbox` 與 `--ff-only` 標出與架構頁不同；假 agent 固定 `claude` backend；步驟 6 改用 `find`；`task create --role` 與審查者排除作者。
 - 2026-09-26 fresh review REFUTED（2 HIGH、7 MEDIUM、6 LOW）後修正：與第 9 施工關的分工寫進範圍（請示、task 類命令的 daemon 端、`agend team`／`workflow` 歸本關）；派工訊息與「需要你」用 ticket；`inbox` 讀取不算確認；驗收用 `pipeline_probe task` 開 task、`g10h` 放停住的 task 並可取消；空 branch 在 `done` 被拒、已 merge 靠 trailer 找回；demo 審查路徑一致；checks 每次新 worktree；D33 衝突標出；timeout、`waiting_since`、每日對帳、`worktree list` 檢查、rebase 措辭；failpoint 只留兩個；新增 P10（本關的命令）與「待你決定」。
 - 2026-09-26 開工前提案 P1–P10 寫定（draft PR），待使用者確認；「你親自驗收」改成 10 步；狀態改為提案中。
 
