@@ -32,12 +32,13 @@ const DEFAULT_PATH: &str = "/usr/bin:/bin";
 /// restores it (gate 7 K8).
 pub fn launch_path(home: &Path, daemon_env: &BTreeMap<String, String>) -> String {
     let bin = home.join(super::shims::BIN_DIR).display().to_string();
+    let bin = bin.trim_end_matches('/');
     let rest: Vec<&str> = daemon_env
         .get("PATH")
         .map(String::as_str)
         .unwrap_or_default()
         .split(':')
-        .filter(|p| !p.is_empty() && *p != bin)
+        .filter(|p| !p.is_empty() && p.trim_end_matches('/') != bin)
         .collect();
     if rest.is_empty() {
         DEFAULT_PATH.to_owned()
@@ -74,6 +75,18 @@ pub fn agent_env(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn launch_path_drops_every_shim_entry_including_trailing_slashes() {
+        let env = BTreeMap::from([(
+            "PATH".to_owned(),
+            "/h/bin/:/usr/local/bin:/h/bin:/usr/bin:/h/bin/".to_owned(),
+        )]);
+        assert_eq!(
+            launch_path(Path::new("/h"), &env),
+            "/usr/local/bin:/usr/bin"
+        );
+    }
 
     fn vars(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
         pairs
