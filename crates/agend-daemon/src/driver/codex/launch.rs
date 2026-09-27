@@ -23,7 +23,8 @@
 //!   under `/private/tmp/codex-daemon-<uid>/`) and the old `$GO` are removed
 //!   ([`prepare`]).
 //! - Shims under a login zsh (P4 option A): `ZDOTDIR=$AGEND_HOME/zsh`, whose
-//!   `.zprofile` ([`ZPROFILE`]) runs after `/etc/zprofile` (`path_helper`)
+//!   `.zprofile` ([`zprofile`], rewritten at every daemon start from the
+//!   agent's launch `PATH`) runs after `/etc/zprofile` (`path_helper`)
 //!   and puts `$AGEND_HOME/bin` first again ([`ensure_zdotdir`]).
 //!
 //! Must NOT: put a path or setting into the script text, or write anything
@@ -67,13 +68,19 @@ pub const THREAD_WITHIN: Duration = Duration::from_secs(30);
 
 /// The `ZDOTDIR` of codex agents, inside the AgEnD home.
 pub const ZDOTDIR: &str = "zsh";
-/// `$ZDOTDIR/.zprofile`: after `/etc/zprofile`, the shims come first again.
-pub const ZPROFILE: &str = "\
-# Written by agend (gate 7 P4). codex runs every command with `zsh -lc`; on
-# macOS /etc/zprofile (path_helper) moves the shims in $AGEND_HOME/bin
-# behind /usr/bin, so they are put first again here, last.
-export PATH=\"$AGEND_HOME/bin:$PATH\"
-";
+/// The text of `$ZDOTDIR/.zprofile` for an agent launched with `PATH` =
+/// `$AGEND_HOME/bin:<launch_path>`: it runs after `/etc/zprofile`
+/// (`path_helper`) and restores exactly that order, the shims first. The
+/// user's own dotfiles are not sourced (owner decision, K8).
+pub fn zprofile(launch_path: &str) -> String {
+    let quoted = launch_path.replace('\'', "'\\''");
+    format!(
+        "# Written by agend at every daemon start (gate 7 P4, K8). codex runs every\n\
+         # command with `zsh -lc`; on macOS /etc/zprofile (path_helper) reorders\n\
+         # PATH, so the agent's launch PATH is restored here, the shims first.\n\
+         export PATH=\"$AGEND_HOME/bin\":'{quoted}'\n"
+    )
+}
 
 /// `run/holders/<id>.codex.sock`: the app-server's `--listen` path.
 pub fn socket_path(home: &Path, id: &str) -> PathBuf {
@@ -185,19 +192,22 @@ pub fn zdotdir(home: &Path) -> PathBuf {
     home.join(ZDOTDIR)
 }
 
-/// Makes `$AGEND_HOME/zsh/.zprofile` hold [`ZPROFILE`]; true when it wrote.
-pub fn ensure_zdotdir(home: &Path) -> io::Result<bool> {
+/// Makes `$AGEND_HOME/zsh/.zprofile` hold [`zprofile`] of `launch_path`
+/// (the agent's `PATH` after the shim directory, from
+/// `crate::runtime::env::launch_path`); true when it wrote.
+pub fn ensure_zdotdir(home: &Path, launch_path: &str) -> io::Result<bool> {
+    let text = zprofile(launch_path);
     let dir = zdotdir(home);
     fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
         .create(&dir)?;
     let file = dir.join(".zprofile");
-    if fs::read_to_string(&file).is_ok_and(|s| s == ZPROFILE) {
+    if fs::read_to_string(&file).is_ok_and(|s| s == text) {
         return Ok(false);
     }
     let tmp = dir.join(".zprofile.new");
-    fs::write(&tmp, ZPROFILE)?;
+    fs::write(&tmp, &text)?;
     fs::rename(&tmp, &file)?;
     Ok(true)
 }
@@ -362,42 +372,72 @@ mod tests {
     }
 
     #[test]
-    fn the_zprofile_is_written_once() {
+    fn the_zprofile_is_written_once_and_follows_the_launch_path() {
         let dir = TempDir::new("g7-zdot").unwrap();
-        assert!(ensure_zdotdir(dir.path()).unwrap());
-        assert!(!ensure_zdotdir(dir.path()).unwrap());
+        assert!(ensure_zdotdir(dir.path(), "/usr/bin:/bin").unwrap());
+        assert!(!ensure_zdotdir(dir.path(), "/usr/bin:/bin").unwrap());
+        assert!(
+            ensure_zdotdir(dir.path(), "/opt/x:/usr/bin").unwrap(),
+            "rewritten"
+        );
         let text = fs::read_to_string(dir.path().join("zsh/.zprofile")).unwrap();
-        assert_eq!(text, ZPROFILE);
+        assert_eq!(text, zprofile("/opt/x:/usr/bin"));
+        assert!(
+            zprofile("/a'b").ends_with("export PATH=\"$AGEND_HOME/bin\":'/a'\\''b'\n"),
+            "{}",
+            zprofile("/a'b")
+        );
     }
 
-    /// Option A for real: a login zsh with our `ZDOTDIR` puts the shim
-    /// directory first even after `/etc/zprofile` (macOS `path_helper`).
-    /// Skipped where there is no `/bin/zsh`.
+    /// Option A for real (K8): a login zsh with our `ZDOTDIR` ends up with
+    /// exactly the launch `PATH`: the shims, then the launch order (a
+    /// Homebrew-like directory stays before `/usr/bin`, although macOS
+    /// `path_helper` moves system directories first), and `git`, `pkill`,
+    /// `killall` resolve to the shims. Skipped where there is no `/bin/zsh`.
     #[test]
-    fn a_login_zsh_with_our_zdotdir_finds_the_shims_first() {
+    fn a_login_zsh_with_our_zdotdir_keeps_the_launch_path_shims_first() {
         if !Path::new("/bin/zsh").exists() {
             println!("SKIPPED: no /bin/zsh here");
             return;
         }
         let dir = TempDir::new("g7-zsh").unwrap();
         let home = dir.path();
-        ensure_zdotdir(home).unwrap();
         let bin = home.join("bin");
-        fs::create_dir_all(&bin).unwrap();
+        let brew = home.join("brew bin");
+        for d in [&bin, &brew] {
+            fs::create_dir_all(d).unwrap();
+        }
+        for tool in ["git", "pkill", "killall"] {
+            fs::write(bin.join(tool), "#!/bin/sh\n").unwrap();
+            fs::set_permissions(
+                bin.join(tool),
+                std::os::unix::fs::PermissionsExt::from_mode(0o755),
+            )
+            .unwrap();
+        }
+        let launch = format!("{}:/usr/bin:/bin", brew.display());
+        ensure_zdotdir(home, &launch).unwrap();
         let out = Command::new("/bin/zsh")
-            .args(["-lc", "echo $PATH"])
+            .args(["-lc", "echo $PATH; command -v git pkill killall"])
             .env_clear()
             .env("HOME", home)
             .env("AGEND_HOME", home)
             .env("ZDOTDIR", zdotdir(home))
-            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .env("PATH", format!("{}:{launch}", bin.display()))
             .output()
             .unwrap();
-        let path = String::from_utf8(out.stdout).unwrap();
+        let text = String::from_utf8(out.stdout).unwrap();
+        let mut lines = text.lines();
         assert_eq!(
-            path.trim().split(':').next(),
-            Some(bin.display().to_string().as_str()),
-            "{path}"
+            lines.next(),
+            Some(format!("{}:{launch}", bin.display()).as_str()),
+            "{text}"
+        );
+        let found: Vec<&str> = lines.collect();
+        assert_eq!(
+            found,
+            ["git", "pkill", "killall"].map(|t| bin.join(t).display().to_string()),
+            "{text}"
         );
     }
 }

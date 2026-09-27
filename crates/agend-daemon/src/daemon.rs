@@ -183,7 +183,12 @@ async fn serve(home: PathBuf, exe: PathBuf, store: SqliteStore) -> ExitCode {
             return ExitCode::from(1);
         }
     }
-    if let Err(e) = codex_launch::ensure_zdotdir(&home) {
+    let daemon_env: Vec<(String, String)> = std::env::vars_os()
+        .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
+        .collect();
+    let launch_path =
+        crate::runtime::env::launch_path(&home, &daemon_env.iter().cloned().collect());
+    if let Err(e) = codex_launch::ensure_zdotdir(&home, &launch_path) {
         log::line(&format!(
             "agend daemon: cannot write {}: {e}",
             codex_launch::zdotdir(&home).join(".zprofile").display()
@@ -195,9 +200,6 @@ async fn serve(home: PathBuf, exe: PathBuf, store: SqliteStore) -> ExitCode {
     let sink: EventSink = Arc::new(move |event| {
         let _ = sink_events.send(Event::Holder(event));
     });
-    let daemon_env: Vec<(String, String)> = std::env::vars_os()
-        .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
-        .collect();
     let runtime = HolderRuntime::new(&home, &exe, daemon_env, sink);
     let fleet = Arc::new(Fleet::new(log::now_unix_ms()));
     let store = Arc::new(store);

@@ -3,13 +3,13 @@
 > **TL;DR**
 > - codex driver、送達模型、三級忙碌策略；codex 第一次有 thread id 可以 resume（補上第 6 施工關 H2 的缺口）。
 > - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這個施工關才算完成。
-> - 下一步：實作在 draft PR（branch `feat/gate-07-codex`）；你追認「待你追認」K1–K13，然後照「你親自驗收」一步一步跑（步驟 7、8 選做、會花 token）。
+> - 下一步：實作在 draft PR #132（branch `feat/gate-07-codex`）；K1–K13 已追認（2026-09-27）；照「你親自驗收」一步一步跑（步驟 7、8 會跑真 codex、花 token，你已決定 merge 前跑）。
 
 **先看這條**：這頁的步驟會用到 `agend`。每個新開的終端機分頁都要先跑「你親自驗收」開頭的設定，否則會跑到舊的 Node 版 `agend` 1.24.0。
 
 ## 狀態
 
-**實作中，draft PR**（2026-09-26，branch `feat/gate-07-codex`）：P1–P9 照使用者確認的做（P4 選 A）；自動驗收除了 fresh-context verifier 與「`codex --version` 對錄製檔」（要跑真 codex，留給你的步驟 6）之外都過了；實作時的決定列在「待你追認」K1–K13。
+**實作中，draft PR #132**（branch `feat/gate-07-codex`）：P1–P9 照使用者確認的做（P4 選 A）；fresh-context verifier 三輪後 CONFIRMED（見進度紀錄）；K1–K13 使用者 2026-09-27 追認（K8 改過）；剩「`codex --version` 對錄製檔」與步驟 7、8（要跑真 codex，你跑）。
 
 ## 範圍
 
@@ -547,6 +547,8 @@ unset AGEND_BIN
 
 實作時做了、提案沒寫到或與提案字面不同的選擇。確認前照目前的做法運作。每項：決定 · 理由 · 反悔的成本。
 
+**追認結果**：使用者 2026-09-27 全部追認 K1–K13（K7：步驟 8 再決定 `--no-daemon`；K8 改為還原啟動時的 PATH、不 source dotfile）
+
 | # | 決定 | 理由 | 反悔成本 |
 |---|---|---|---|
 | K1 | codex 的「就緒 → 建／接 thread → `$GO`」在背景的 tokio task 裡跑（`Supervisor::connect_codex`），不在 supervisor 的事件迴圈裡等；driver 記每個 instance 最新一次 connect 的 holder 世代，較舊、還沒跑完的 connect 在存 thread id、寫 `$GO`、留長連線之前放棄 | 最壞要等 20＋30 秒；在迴圈裡等的話 Ctrl-C 與別的 instance 都得等（第 8 施工關的 `retry` 測試就是這樣卡住 Ctrl-C 的） | 改回在迴圈裡 `await`、拿掉世代檢查：約 30 行 |
@@ -556,7 +558,7 @@ unset AGEND_BIN
 | K5 | DRV-6、DRV-9 的四次開機：每次開機是測試 binary 重新執行自己、開一個新的 store 與 `CodexDriver`；假 app-server 在父程序裡（行程內的 `Server`，真的 socket 與 WebSocket），所以 demo 印的「app-server pid」就是測試程序的 pid | backend 要活過四次開機；放在父程序最簡單，也不必找 binary | 改成獨立的 `fake-codex app-server` 程序：約 20 行 |
 | K6 | 假 app-server 的授權觸發改成「任何一行以 `run: ` 開頭」（原本是整個 prompt 以它開頭） | daemon 送的內容前面有 `From:`／`Task:` 標頭；錄製器的授權 prompt 第一行就是 `run: …`，錄製檔比對不受影響 | 改回只看開頭：一行，授權的 demo 要改 |
 | K7 | **不**給 TUI（也不給 app-server）加 `--no-daemon`（你 2026-09-26 查的 U6：codex 預設有共用的背景 app-server daemon） | `--remote` 和 `--no-daemon` 一起用有沒有衝突沒查證；衝突的話 TUI 起不來，每個 codex instance 都壞。`codex_live` 的 `ps:` 行會看到多出來的程序（U6、U18） | 包裝固定文字加一個參數，重跑步驟 8 |
-| K8 | `ZDOTDIR` 只給 codex agent（claude 等第 12 施工關實測）；`.zprofile` 只做一件事：`export PATH="$AGEND_HOME/bin:$PATH"`，不 `source` 你的 `~/.zshenv`／`~/.zprofile` | 你的 PATH 已經經 daemon 的 `PATH` 傳進來（`path_helper` 會把它接在系統目錄後面），不 source 就不會被你的 dotfile 再排一次；最簡單。**副作用**（verifier r1 L5）：login zsh 裡 daemon 帶進來的 `/opt/homebrew/bin`、`~/.cargo/bin` 會排在 `/usr/bin` 等系統目錄**後面**，codex 跑的 `python3` 之類會先找到系統版 | 在 `.zprofile` 加 `source` 行，再把 shim 放回最前面：幾行 |
+| K8 | **（使用者 2026-09-27 改過）** `ZDOTDIR` 只給 codex agent（claude 等第 12 施工關實測）。`$AGEND_HOME/zsh/.zprofile` 在每次 daemon 開機時重寫，把 agent **啟動時拿到的 PATH** 原樣寫進去：`export PATH="$AGEND_HOME/bin":'<daemon 的 PATH，去掉裡面的 $AGEND_HOME/bin>'`（單引號、`'` 有跳脫），所以 login zsh 跑完 `/etc/zprofile`（`path_helper`）之後，順序還是 shim、然後啟動時的順序（`/opt/homebrew/bin`、`~/.cargo/bin` 不會被排到 `/usr/bin` 後面，verifier r1 L5 的副作用沒了）。**不** `source` 你的 `~/.zshenv`／`~/.zprofile`（你的 dotfile 會跑 Kiro／OrbStack 的腳本，不能每個 codex 指令跑一次）。沒有新的環境變數（第 6 施工關 H3 只多 `ZDOTDIR`） | 使用者決定：還原啟動時的 PATH、不跑 dotfile | 改成動態 `$PATH` 或 source dotfile：`zprofile` 一個函式 |
 | K9 | 已經送過一次的 `queued` 訊息（`messages.attempted_at_unix_ms` 在 RPC 之前寫入）：回覆沒回來（30 秒逾時）、連線斷、daemon 停在送出中途，**不只是當掉**（verifier r1 L1）。這種訊息重送前一律先對帳（歷史＋`thread/queue/list`），而且 thread 有 turn 在跑時不送、等閒置再看一次（那個 turn 可能就是它，只是 user message 還沒出現；真 codex 的 user message 也是晚出現的）；兩邊都沒有才送（`== reply-lost` 與 `a_lost_reply_is_not_sent_again`）。這一則等的時候，排在它後面的 `Queue` 訊息也跟著等（同一個收件者照順序，`a_queue_row_waits_behind_an_uncertain_one`）；只有插入、中斷照送（要能停下失控的 turn，`an_uncertain_row_does_not_hold_back_an_interrupt`），所以它們可能比前面那則狀態不明的先到。剩下的窗口：①它的 turn 被中斷、user message 永遠沒出現（`interrupt.jsonl` 那樣）→ 閒置後再送一次；②它已經離開 `thread/queue/list`、它的 turn 還沒開始（兩個查詢之間）→ 兩邊都找不到、thread 又閒置 → 再送一次；③真 codex 不認得 `thread/queue/list` → 還排在佇列裡的會再送（log 一行）；④app-server 當掉重起後，歷史裡最後一個 turn 會不會一直是 `inProgress`（對帳只會把「忙」設成真、不會設回假，未查證 U19）→ 若是，這則會一直等、不送。另一個接受的小窗口（L6）：daemon 死在 `Spawned` 與寫 `agent_pid` 之間，接回時是 `already_spawned`、拿不到 pid，那一代 holder 之後被 `kill -9` 就沒有清掃 | 真正「沒到 codex」的訊息還是要送；等閒置只延後、不丟 | 拿掉對帳前置與等待：約 30 行 |
 | K10 | `thread/resume` 的「找不到」＝ RPC 錯誤訊息含 `not found`（假 app-server 回 `-32600 thread not found: <id>`） | 真 codex 的錯誤形狀未查證（U1）；步驟 7 的 `resume_empty` 會錄到 | 改比對規則：一行 |
 | K11 | 送達的細節：送到不存在的 instance 是錯誤、不存任何列（DRV-2）；已經 `queued` 的訊息在 instance 之後變 `failed` 或被刪時不改成 `failed`（本關沒有呼叫點，第 9 施工關的 `inbox`／`status` 再看）；「`sent` 超過 10 分鐘」的顯示沒做（第 9、11 施工關）；fleet 的忙／閒沒接（instance 仍是 `unknown`，去抖動維持 5 秒不動；driver 的 `CodexDriver::busy` 已經有） | 都還沒有使用者；現在做只能用假資料驗 | 各在該施工關做 |
@@ -575,6 +577,7 @@ unset AGEND_BIN
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-27 使用者追認 K1–K13；K8 改為 `.zprofile` 寫入啟動時的 PATH（shim 在前、不 source dotfile），真的 `/bin/zsh -lc` 測試：PATH＝shim、然後啟動順序，`command -v git pkill killall` 都是 shim；merge `origin/v2`（#134、#135）。
 - 2026-09-27 verifier（`b88f4e0`）MEDIUM：狀態不明的訊息後面的 `Queue` 訊息會插隊；改成跟著等、只有插入／中斷照送，附測試（A 在 B 之前）。
 - 2026-09-27 targeted verifier（`a693f92`）CONFIRMED、3 個 LOW，全部處理：只有狀態不明的那一則等、後面的插入／中斷照送（附測試）；K9 補上第二個窗口與 U19（當掉後的 `inProgress`）；give-up 測試改回嚴格（不得出現 `connected again`），另加確定性的測試：關掉的 link 不會連到下一個 app-server（沒關的會，測試看得到）。
 - 2026-09-26 fresh-context verifier r1（`942a648`）CONFIRMED、7 個 LOW，全部處理：L1 送過一次的 `queued` 訊息重送前先對帳、turn 在跑時等閒置（`attempted_at_unix_ms`、`== reply-lost`）；L2 `messages.seq` 改 `AUTOINCREMENT`（清空後不重用號碼，附測試）；L3 `failed`＋holder 還活著不清掃的測試改用真的 `agent_pid`（`== failed-holder-alive`）；L4 步驟 4 的 id 換成佔位；L5、L6 寫進 K8、K9；L7 忙碌但不知道 turn id 時 `Queue` 仍走 `thread/queue/add`。

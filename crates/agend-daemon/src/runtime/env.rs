@@ -27,6 +27,25 @@ pub const PASS_THROUGH: &[&str] = &[
 /// `PATH` used after `$AGEND_HOME/bin` when the daemon has none.
 const DEFAULT_PATH: &str = "/usr/bin:/bin";
 
+/// The agent's `PATH` after the shim directory: the daemon's `PATH` without
+/// `$AGEND_HOME/bin` entries, or [`DEFAULT_PATH`]. codex's `.zprofile`
+/// restores it (gate 7 K8).
+pub fn launch_path(home: &Path, daemon_env: &BTreeMap<String, String>) -> String {
+    let bin = home.join(super::shims::BIN_DIR).display().to_string();
+    let rest: Vec<&str> = daemon_env
+        .get("PATH")
+        .map(String::as_str)
+        .unwrap_or_default()
+        .split(':')
+        .filter(|p| !p.is_empty() && *p != bin)
+        .collect();
+    if rest.is_empty() {
+        DEFAULT_PATH.to_owned()
+    } else {
+        rest.join(":")
+    }
+}
+
 /// The environment of instance `id`'s agent (a `backend` one), from the
 /// daemon's environment `daemon_env` (normally `std::env::vars()`).
 pub fn agent_env(
@@ -40,10 +59,7 @@ pub fn agent_env(
         .iter()
         .filter_map(|k| daemon.get(*k).map(|v| ((*k).to_owned(), v.clone())))
         .collect();
-    let rest = daemon
-        .get("PATH")
-        .filter(|p| !p.is_empty())
-        .map_or(DEFAULT_PATH, String::as_str);
+    let rest = launch_path(home, &daemon);
     let bin = home.join(super::shims::BIN_DIR);
     env.insert("PATH".into(), format!("{}:{rest}", bin.display()));
     env.insert("AGEND_HOME".into(), home.display().to_string());
@@ -96,6 +112,15 @@ mod tests {
         let mut codex = agent_env(Path::new("/h"), "g6-1", Backend::Codex, daemon);
         assert_eq!(codex.remove("ZDOTDIR").as_deref(), Some("/h/zsh"));
         assert_eq!(codex, env);
+    }
+
+    #[test]
+    fn the_launch_path_drops_the_shim_directory() {
+        let daemon = BTreeMap::from([(
+            "PATH".to_owned(),
+            "/h/bin:/opt/b:/h/bin:/usr/bin".to_owned(),
+        )]);
+        assert_eq!(launch_path(Path::new("/h"), &daemon), "/opt/b:/usr/bin");
     }
 
     #[test]
