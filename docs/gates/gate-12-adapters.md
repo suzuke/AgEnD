@@ -48,7 +48,7 @@
 | F7 | 工具跑到一半按 `Esc` 會觸發哪些 hook | 讓它在前景跑 `python3 -c "import time; time.sleep(25)"`，`PreToolUse` 出現後按 `Esc`，等 30 秒 | 只有 `UserPromptSubmit`、`PreToolUse`；**之後沒有 `PostToolUse`、沒有 `Stop`**，畫面「Interrupted · What should Claude do instead?」 |
 | F8 | 背景工具 | 叫它跑 `sleep 25` | claude 自己改成 `run_in_background: true`；`PreToolUse`、`PostToolUse`、`Stop` 立刻出現；25 秒後背景結束時多一輪：`UserPromptSubmit`（prompt 是 `<task-notification>…`）與 `Stop`。前景的 `sleep 25` 被 claude 自己擋掉（「Blocked: standalone sleep 25」），連 `PreToolUse` 都沒有 |
 | F9 | `--session-id` 起來、還沒打任何字就被結束，再 `--resume` | 起來等到 `SessionStart`，`tmux kill-server`（SIGHUP），再 `--resume <同一個 id>` | 沒有 transcript 檔；`--resume` 的 stderr：`No conversation found with session ID: <id>`，exit 1。對照：打過 `/exit` 再結束的，transcript 在、`--resume` 接得上（`SessionStart` 的 `source` 是 `resume`） |
-| F10 | 從 Claude Code 裡面起的 claude | 第一次沒清環境 | 畫面：「Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION marker」。daemon 若把這個變數傳給 agent，session 不會存檔、resume 全壞；第 6 施工關的環境白名單本來就不傳它 |
+| F10 | 從 Claude Code 裡面起的 claude | 第一次沒清環境 | 畫面：「Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION marker」。daemon 若把這個變數傳給 agent，session 不會存檔、resume 全壞；第 6 施工關的環境白名單本來就不傳它（`crates/agend-daemon/src/runtime/env.rs` 的 `PASS_THROUGH` 只有 `HOME`、`USER`、`LOGNAME`、`LANG`、`LC_ALL`、`LC_CTYPE`、`TMPDIR`、`TZ`） |
 
 ## 開工前提案（A 段）
 
@@ -73,7 +73,7 @@ A 段的硬規則（使用者 2026-09-28）：**不加新的 core 事件，不�
 - 問題：hooks、`.mcp.json`、CLAUDE.md 寫在哪？要不要讀你自己 `~/.claude/settings.json` 裡的 hooks 與 `defaultMode: "auto"`？第 10 施工關登記成 `claude` 的假 agent 要不要也套？
 - 建議：
   - 啟動帶 `--setting-sources project,local --settings $AGEND_HOME/claude/<id>/settings.json`：不讀你的使用者設定（你的 hooks、`defaultMode` 不會跑到 agent 身上），我們的 hooks 與 `enabledMcpjsonServers: ["agend"]` 在 `--settings` 裡（F2 證實兩者一起用時 hooks 會跑、MCP 對話框不出現）。
-  - `.mcp.json` 與 CLAUDE.md 一定要在工作目錄，寫進 workspace；DB 記它們的 sha256，檔案存在但雜湊不是我們記的 → 不覆蓋、instance `failed`（原因寫出是哪個檔）。
+  - `.mcp.json` 與 CLAUDE.md 一定要在工作目錄，寫進 workspace；DB 記它們的 sha256，檔案存在但雜湊不是我們記的 → 不覆蓋，這次啟動失敗；照第 6 施工關 P6 的啟動失敗路徑（5 秒後重試，3 次後 `failed`），原因寫出是哪個檔。
   - 只套在 `delivery = push` 的 claude；`delivery = inbox`（`fake-worker`）不寫檔、不加旗標、不建 driver。
 - 理由：agent 的行為不隨你改自己的設定而變；錄製器也是這樣跑（RECORDER.md）。
 - 替代方案：讀你的使用者設定（你的 hooks 每一輪都會在每個 agent 上跑；`defaultMode` 會變成 agent 的權限模式）；隔離的 `CLAUDE_CONFIG_DIR`（要重新登入）。
@@ -115,14 +115,14 @@ A 段的硬規則（使用者 2026-09-28）：**不加新的 core 事件，不�
 
 - 問題：F1、F3：新目錄第一次有信任對話框；**每次啟動**都有 development channels 警告（包括 holder 死掉重起）。沒人按，claude 就停在那裡，也收不到訊息。
 - 選項：
-  - A. 兩個都用螢幕規則（[delivery](../architecture/delivery.md) 第 3 層：比對畫面 → 按鍵），只做這兩個已知畫面，各附一份真畫面 fixture：development channels 按 `Enter`；信任按 `Down`＋`Enter`。
+  - A. 用 core 已有的螢幕規則表 `agend_core::screen::SCREEN_RULES`（第 1 施工關；已經有 claude 信任與 MCP 兩條，類別 `StartupMenu`，`suggested_key` 目前是空的；每條最多一個鍵，[delivery](../architecture/delivery.md) 第 3 層）。改成三條，都附 F1 的真畫面 fixture：信任對話框游標在「❯ No, exit」→ `Down`；游標在「❯ Yes, I trust this folder」→ `Enter`；development channels 警告 → `Enter`。daemon 只在 claude 還沒送出 `SessionStart` 之前，對 holder 的畫面跑 `classify`，比對到有 `suggested_key` 的就經 holder 送那一個鍵（第 4 施工關的送鍵）。
   - B. development channels 用螢幕規則按 `Enter`；信任由你手動：`agend instance add` 之後印一行「第一次要在 TUI 接受信任」，你 attach 進去按一次（claude 自己記在 `~/.claude.json`，之後不再問）。
   - C. 不用 development channel（沒有 channel，D16 的「閒置經 channel 送」做不到）。
 - 建議（請你決定）：A。
-- 理由：信任只要做一次，但每新增一個 instance 都要，手動很容易忘；兩個畫面都是固定文字，fixture 就是 F1 的畫面。
+- 理由：用的是已經存在的規則表與送鍵，每條還是單一按鍵；信任要兩步，就用游標位置分成兩條。每新增一個 instance 都要過信任，手動很容易忘。
 - 替代方案：B、C；預寫 `~/.claude.json` 的信任狀態（改你的檔案）。
 - 例子：新 instance 第一次起 → log `g12-c: dialog "trust" answered (Down, Enter)`、`dialog "dev-channels" answered (Enter)`。
-- 關係：A 的信任要兩個鍵，**與 delivery.md 第 3 層「單一按鍵」不同，請明確決定**；第 3 層本身是架構頁已定的機制，這裡只用在兩個已知畫面，不做未知提示的偵測。
+- 關係：delivery.md 第 3 層照做（一條規則一個鍵）。新的部分只有兩樣：`SCREEN_RULES` 的資料改動（core，照 D22 跟 P1 一起重過第 1 施工關），以及 daemon 第一次真的用 `classify` 的結果送鍵。只認這三個已知畫面，不做未知提示的偵測。
 - [ ] 使用者確認（選 ＿＿）
 
 ### P6：claude 的三級忙碌與忙／閒
@@ -290,7 +290,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
    agend send g12-b "Reply with exactly: B-OK"
    ```
 
-   應該看到：watch 依序印 `g12-a` 第一則 `confirmed`、第二則 `queued` → 第一輪結束時 `sent`（Stop hook）→ `confirmed`；`g12-b` 那則 `confirmed`（確切字樣開工時細化）。
+   應該看到：watch 依序印 `g12-a` 第一則 `confirmed`、第二則 `queued` → 第一輪結束時 `sent`（Stop hook）→ `confirmed`；`g12-b` 那則 `confirmed`（確切字樣開工時細化）。第二則送到時如果 `g12-a` 已經數完、是閒置的，它會直接經 channel 送、沒有 `queued` 這一步，這不算失敗；再照抄一次這兩行就好。
 
    - [ ] 通過
 
@@ -305,7 +305,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
    cat /tmp/g12-mine/CLAUDE.md
    ```
 
-   應該看到：watch 印 `g12-m failed: CLAUDE.md exists and was not written by agend`；`cat` 印 `my notes`。收尾：`agend instance remove g12-m --yes; rm -rf /tmp/g12-mine`。
+   應該看到：watch 印三次 `g12-m: start failed: CLAUDE.md exists and was not written by agend`（`restart 1/3`…），約 15 秒後 `g12-m failed`；`cat` 印 `my notes`。收尾：`agend instance remove g12-m --yes; rm -rf /tmp/g12-mine`。
 
    - [ ] 通過
 
@@ -313,15 +313,21 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
    **這步在驗什麼**：什麼都不留（第 6 施工關的孤兒巡查照舊）。
 
-   各分頁 Ctrl-C，然後：
+   daemon 還在跑的時候，在第三個分頁：
 
    ```bash
    export AGEND_HOME=<home>
    agend instance remove g12-a --yes; agend instance remove g12-b --yes
-   pgrep -fl "agend holder g12-"; pgrep -fl "agend channel"
    ```
 
-   （`instance remove` 要 daemon 在跑：先在第一個分頁 `agend daemon`，跑完再 Ctrl-C。）應該看到：兩個 `pgrep` 都不印。最後 `rm -rf "$AGEND_HOME"`。
+   然後在第一個分頁按 Ctrl-C 停掉 daemon，watch 分頁也 Ctrl-C，再回第三個分頁：
+
+   ```bash
+   pgrep -fl "agend holder g12-"; pgrep -fl "agend channel"
+   rm -rf "$AGEND_HOME"
+   ```
+
+   應該看到：兩個 `pgrep` 都不印。
 
    - [ ] 通過
 
