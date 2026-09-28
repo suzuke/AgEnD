@@ -55,7 +55,7 @@
 
 - 問題：第 5 施工關 P4 已定「存快照」。格式怎麼鎖？`PipelineState` 欄位私有、「不可偽造」，從 JSON 讀回來算不算偽造？daemon 重開後怎麼知道哪些事做到一半？
 - 建議：
-  - core 加 serde derive 到 `PipelineState` 與它的欄位型別（D32 延伸，要新決策編號）。**快照不含 workflow**：workflow 由 task 的 `workflow_id`＋`workflow_version`（D21）從 `workflows` 表讀，不存兩份。
+  - core 加 serde derive 到 `PipelineState` 與它的欄位型別（D32 延伸，見 [D38](../decisions/d38.md#d38)）。**快照不含 workflow**：workflow 由 task 的 `workflow_id`＋`workflow_version`（D21）從 `workflows` 表讀，不存兩份。
   - 讀回只有一條路：`PipelineState::restore(快照, ValidatedWorkflow) -> Result`，檢查 task id、關卡位置在範圍內、每個關卡都有 attempt、紀錄裡的 stage id 都在 workflow 裡。壞掉的快照不會 panic：那個 task 標 `Failed`，出現在「需要你」（P8），其他 task 照常。
   - golden JSON 測試鎖格式；只准加欄位（比照 D26）。舊快照要讀得回來（每加欄位附一份舊 fixture，比照第 5 施工關 P5）。
   - core 加純函式 `outstanding_actions(&PipelineState) -> Vec<PipelineAction>`：目前關卡「送出了、還沒收到結果」的要求（例如 checks 的 `RunCommand`、merge 送出中的 `Merge`）。探索器加一條不變量：每一步之後，它等於「這一步送出、還沒被回應」的那些要求。P9 開機時用它重做，不另存 actions。
@@ -91,7 +91,7 @@
     4. 寫 binding 快照（先寫暫存檔再 rename、0444）。
     5. `bindings` 標 `ready`，然後才送派工訊息。
   - 每一步都可重做：死在中間，P9 從 `pending` 接著做；worktree 已存在就檢查它是不是這個 branch。
-  - binding 快照的型別從 `agend_shim::binding::Snapshot` 搬到 core（第 3 施工關 T1 已建議）：路徑改成 `String`（core 是 no_std），shim 與 daemon 共用同一個型別；golden JSON 測試證明格式沒變。這也是 D32 的延伸，跟 P2 一起給新決策編號。`bindings` 表的列在釋放時刪除。
+  - binding 快照的型別從 `agend_shim::binding::Snapshot` 搬到 core（第 3 施工關 T1 已建議）：路徑改成 `String`（core 是 no_std），shim 與 daemon 共用同一個型別；golden JSON 測試證明格式沒變。這也是 D32 的延伸，跟 P2 一起編進 [D38](../decisions/d38.md#d38)。`bindings` 表的列在釋放時刪除。
   - 審查（`approval(by = <角色>)`）：reviewer 拿到 detached 的審查 worktree `$AGEND_HOME/worktrees/<task>-review/`（在審的 head），binding kind `review`，一樣裝 hook（審查 binding 不能寫任何 branch）。核准或要求修改後就拆掉。`approval(by = "human")` 沒有 worktree，走「需要你」（P8）。
   - 釋放（task done、失敗、取消；或審查結束）：
     1. binding 快照先改成沒有 binding（shim 從這一刻起拒絕寫入）。

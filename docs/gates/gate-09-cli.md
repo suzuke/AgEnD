@@ -3,13 +3,13 @@
 > **TL;DR**
 > - agent 命令、操作者命令（`instance add/remove/list`、`daemon restart`）、`status`、`doctor`、`init`；真 daemon 本關做 `status`、`send`、`inbox`（接第 7 施工關的送達，完成里程碑「兩個 codex agent 互傳訊息、重啟不漏不重」）與操作者命令，其他 agent 命令先對假 daemon 做完。
 > - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這個施工關才算完成。
-> - 下一步：實作在 draft PR（`feat/gate-09-cli`）；你照「你親自驗收」跑 9 步、填「驗收紀錄」，再逐項決定「待你追認」L1–L21。
+> - 下一步：實作在 draft PR（`feat/gate-09-cli`）；「待你追認」L1–L21 已全部追認（2026-09-29）；你照「你親自驗收」跑 9 步、填「驗收紀錄」。
 
 **先看這條**：這頁的步驟會用到 `agend`。每個新開的終端機分頁（包括第二個終端）都要先跑「你親自驗收」開頭的設定，否則會跑到舊的 Node 版 `agend` 1.24.0。
 
 ## 狀態
 
-**實作中**（2026-09-28，draft PR，branch `feat/gate-09-cli`，從 `v2` 的 7f326de 開）：P1–P10 照使用者確認的版本實作完成，自動驗收除了 fresh-context verifier 都有證據（見「自動驗收」）；等你親自驗收與追認 L1–L21。依賴都已 merge：第 7 施工關（`deliver`、`messages` 表）、第 8 施工關（client protocol 1.1、`agend-client`）。client protocol 升到 **1.2**（本關先 merge，第 10 施工關拿 1.3）。
+**實作中**（2026-09-28，draft PR，branch `feat/gate-09-cli`，從 `v2` 的 7f326de 開）：P1–P10 照使用者確認的版本實作完成，自動驗收都有證據（見「自動驗收」）；L1–L21 已追認（2026-09-29），等你親自驗收。依賴都已 merge：第 7 施工關（`deliver`、`messages` 表）、第 8 施工關（client protocol 1.1、`agend-client`）。client protocol 升到 **1.2**（本關先 merge，第 10 施工關拿 1.3）。
 
 ## 範圍
 
@@ -301,7 +301,7 @@
 - [x] `~/.cargo/bin/cargo xtask accept cli` 通過，並印出下方「你親自驗收」用到的 demo 與 `agend --version` 的啟動時間（p50 < 10 ms）
 - [x] 本施工關 crate 的 `README.md`／`TESTING.md` 已更新；想改的共用文件（名詞表：ticket、`operator` 請求、使用者看到的 `name`＝`instance_id`；tui-and-setup 的 init；第 8、10、13 施工關頁）列在 PR 裡由你決定
 - [x] 測試不留殘留：沒有 `g9-`、`pf-check` 或測試 id 的 holder，沒有 `/tmp/agend-pf-*`；kill 只對自己起的、大於 1 的 pid
-- [ ] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」——第一輪 2026-09-28 REFUTED（5 項，見「進度紀錄」），都已修正並有重現測試；再驗一輪由協調者決定
+- [x] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」——第 1、2 輪 REFUTED，全修；第 3 輪 2026-09-29 CONFIRMED（add6d10）
 
 證據（實作者 2026-09-28，macOS）：`cargo xtask accept cli` 對 agend-core、agend-client、agend-daemon、agend-testkit、agend 各自跑 fmt、clippy、`cargo test -p <crate>` 都通過，`check-deps: ok (… no-std build ok)`，demo `cli demo: all sections passed`、`startup: agend --version p50 5.2 ms`、`gate 9 (cli): checks passed`；`cargo test --workspace` 全過；`cargo xtask accept codex`／`client`／`daemon-holder`（回歸）通過；跑完 `pgrep -fl "agend (holder|daemon)"` 沒有任何輸出、沒有 `/tmp/agend-pf-*`。對照：P3 → CLI-2..4、`init_and_doctor`；P4 → CLI-5、6、11、12、`unreachable_daemon_after_ten_seconds`；P5 → `a_lost_send_is_resent_with_its_id_and_nothing_else_is`、CLP-17；P6 → CLI-18..24、CLP-14；P7 → `restart_keeps_the_pid_and_the_holders`、`a_failed_preflight_changes_nothing`（`agend.db` 位元組完全相同，比 sha256 更嚴）、`one_restart_at_a_time`、`restart_waits_for_eof_and_a_new_boot_id`、`inherited_holders_are_reaped_and_nothing_else_is`；重用別則訊息的 `message_id` → CLP-17（`invalid_request`）；里程碑 → `milestone_two_codex_agents_across_a_restart`；P8 → `init_and_doctor`（`--json` 每個非 ok 都有 `fix`）；1.1 的 peer 解得開 1.2 → `xtask/tests/protocol_compat.rs::a_1_1_peer_decodes_1_2_messages`；CLP-13..17 → 假 daemon（`contract_fakes`）與真 daemon（`client_protocol.rs`）都 17／16 條全過，`contract_teeth` 每個 mutant 都被抓到。
 
@@ -613,7 +613,9 @@ unset AGEND_BIN AGEND_HOME AGEND_INSTANCE   # 前幾關留下的 export 可能�
 
 ## 待你追認
 
-實作時做了、提案沒寫到或與提案字面不同的選擇。確認前照目前的做法運作。每項：決定 · 理由 · 反悔的成本。
+實作時做了、提案沒寫到或與提案字面不同的選擇。每項：決定 · 理由 · 反悔的成本。
+
+**L1–L21 使用者已全部追認（2026-09-29）**，含與提案字面不同的 L18（P6）、L19（P4）。
 
 | # | 決定 | 理由 | 反悔成本 |
 |---|---|---|---|
@@ -657,6 +659,7 @@ unset AGEND_BIN AGEND_HOME AGEND_INSTANCE   # 前幾關留下的 export 可能�
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-29 fresh-context verifier 第 3 輪 CONFIRMED（add6d10；第 1、2 輪 REFUTED 的項目全修：preflight 清理、60 秒期限、大小上限、binary 換檔檢查含 ctime、codex link 死鎖與寫入逾時、負載下的計時測試）；使用者追認 L1–L21。
 - 2026-09-28 第 2 輪 verifier REFUTED 後修正（每項先寫重現測試、確認在舊程式失敗）：#1 連續送 3 則大訊息給 codex agent 時 daemon 死鎖——根本原因兩邊都有：假 app-server 寫的時候不讀（不忠實；已改成讀寫交錯），daemon 的 **第 7 施工關 codex link**（在本 PR 修）寫入沒有逾時、`Link::close` 無限期 join → 寫入 10 秒逾時當斷線、關閉時 shutdown socket、最多等 5 秒（`large_messages_to_codex_are_delivered`、`a_stuck_codex_app_server_never_wedges_the_daemon`，後者用 `fake_codex --disable duplex-io` 做出不讀的 peer）；L17 的理由改寫；#2 兩個會被機器負載拖垮的時間上限改成量產品本身（hello 次數、訊息裡的 10 秒）；#3 binary 檢查加 change time（`a_binary_swapped_during_its_preflight_is_refused`）；#4 L18、L19 標「與 P6／P4 不同，請明確決定」。重跑 r2c（預檢中錯開時間送 SIGINT）時另外發現：預檢通過後、daemon 收尾準備 `exec` 的那一刻收到的 Ctrl-C 會被舊的 image 吃掉、新的照樣起來 → 收到停止訊號就不 `exec`、直接結束（`ctrl_c_during_a_restart_stops_the_daemon`，修之前 3／3 失敗）。
 - 2026-09-28 fresh-context verifier REFUTED（1 MEDIUM、2 LOW-MEDIUM、2 LOW）後修正，每項先寫重現測試、確認在舊程式失敗再修：F1 daemon 在預檢中停止會留下 `/tmp/agend-pf-*`（含 DB 複本）與孤兒子程序 → Drop guard（`ctrl_c_during_a_preflight_leaves_nothing`）；F2 子程序留下的背景程序開著 stdout 時 60 秒逾時失效 → 逾時不等 pipe（`the_preflight_deadline_holds`）；F3 訊息沒有大小上限 → body 1 MiB、一行 8 MiB（L17，`oversized_messages_and_lines_are_refused`、CLP-17＋mutant `AcceptsHugeBody`）；F4 `--binary` 的信任範圍寫進已知風險，預檢後確認 binary 仍是同一個檔案；F5 文字：`resolve_attention` 的拒絕不再叫 agent 用 `agend ask`、`answer_ask` 寫第 10 施工關、拒絕移除的 code 改 `declined`（exit 1），補 L18–L21。
 - 2026-09-28 實作（draft PR，`feat/gate-09-cli`）：client protocol 1.2（`operator` 請求、`send` 的 `level`／`message_id`、`hello` 的 `daemon_version`／`daemon_pid`／`boot_id`、`working_directory`、`identity`）；`agend` 的 clap CLI（11 個 agent 命令、`instance add|remove|list`、`daemon restart`、`task cancel`、`status`、`doctor`、`init`、`--json`、exit 0／1／2、`home::resolve`）；daemon 端權限、`send`→`deliver`、`inbox --after`、instance 增刪、D2 預檢（`VACUUM INTO` 複本＋暫存 home 的 holder）與原地 `exec`、繼承 holder 的收屍；假 daemon 補齊、CLP-13..17 各有 mutant；CLI-n 表 46 列（假／真）；里程碑自動測試（兩個假 codex、中途重啟、代理丟掉一個回應）通過；「你親自驗收」照實跑細化；待你追認 L1–L16。fresh-context verifier 還沒跑（實作者是 leaf agent，不能自己派）。
@@ -674,4 +677,4 @@ unset AGEND_BIN AGEND_HOME AGEND_INSTANCE   # 前幾關留下的 export 可能�
 ~/.cargo/bin/cargo xtask accept cli    # 你親自驗收步驟 1
 ```
 
-然後照「你親自驗收」步驟 2–9 跑、填「驗收紀錄」，逐項決定「待你追認」L1–L21。
+然後照「你親自驗收」步驟 2–9 跑、填「驗收紀錄」（「待你追認」L1–L21 已於 2026-09-29 追認）。

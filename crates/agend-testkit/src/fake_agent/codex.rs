@@ -1036,7 +1036,7 @@ fn pump(
                     continue;
                 };
                 // Messages for this connection, in order (the reply among them).
-                for reply in handle(&message, connection, shared) {
+                for reply in handle(&message, connection, outgoing, shared) {
                     queue(socket, &reply, shared.duplex)?;
                 }
             }
@@ -1092,14 +1092,27 @@ fn text_of(params: &Value) -> String {
 }
 
 /// Handles one client message; returns what to send back on this
-/// connection before any queued notification: the response to a request,
-/// plus the notifications `thread/resume` sends around it.
-fn handle(message: &Value, connection: u64, shared: &Shared) -> Vec<Value> {
+/// connection before any notification queued later: first the messages
+/// already queued for it (`outgoing`), then the response to a request, plus
+/// the notifications `thread/resume` sends around it.
+///
+/// Every message is queued under the state lock, so draining `outgoing`
+/// under that lock takes exactly what the server emitted before handling
+/// this message: a reply must not overtake it (a first-turn user message
+/// that came due just before a `turn/interrupt` went out after the
+/// interrupt's reply, unlike interrupt.jsonl).
+fn handle(
+    message: &Value,
+    connection: u64,
+    outgoing: &Receiver<Value>,
+    shared: &Shared,
+) -> Vec<Value> {
     let mut state = lock(&shared.state);
+    let mut out: Vec<Value> = outgoing.try_iter().collect();
     let Some(method) = message["method"].as_str() else {
         // A response to one of our requests (approval decision).
         let Some(id) = message["id"].as_i64() else {
-            return Vec::new();
+            return out;
         };
         if let Some((thread_id, _)) = state.pending_approvals.remove(&(connection, id)) {
             let decision = message["result"]["decision"]
@@ -1108,10 +1121,10 @@ fn handle(message: &Value, connection: u64, shared: &Shared) -> Vec<Value> {
                 .to_owned();
             state.answer(&thread_id, id, &decision, shared.turn);
         }
-        return Vec::new();
+        return out;
     };
     let Some(id) = message.get("id").cloned() else {
-        return Vec::new();
+        return out;
     };
     let params = &message["params"];
     let thread_id = params["threadId"].as_str().unwrap_or_default().to_owned();
@@ -1410,9 +1423,10 @@ fn handle(message: &Value, connection: u64, shared: &Shared) -> Vec<Value> {
         Ok(result) => json!({"id": id, "result": result}),
         Err((code, message)) => json!({"id": id, "error": {"code": code, "message": message}}),
     };
-    before.push(reply);
-    before.extend(after);
-    before
+    out.extend(before);
+    out.push(reply);
+    out.extend(after);
+    out
 }
 
 /// Waits until a server accepts connections on `listen_path` (the socket
