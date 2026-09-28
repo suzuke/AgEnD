@@ -9,7 +9,7 @@
 
 ## 狀態
 
-**實作中，draft PR #132**（branch `feat/gate-07-codex`）：P1–P9 照使用者確認的做（P4 選 A）；fresh-context verifier 三輪後 CONFIRMED（見進度紀錄）；K1–K13 使用者 2026-09-27 追認（K8 改過）。2026-09-28：codex 自動升到 0.158.0，agent 經你授權在沙箱裡重錄（7／8 進一致性檢查）、`codex_live` 通過；真 codex 的行為推翻了幾個設計假設，改了 driver，列為 K14–K18（使用者 2026-09-28 追認；K7 結案）；`queue_idle` 修了競態後重錄，8 個情境都進一致性檢查。
+**已驗收，等 merge**（2026-09-28，draft PR #132）：P1–P9 使用者已確認（P4 選 A）；K1–K18 使用者已追認（K7 結案）；fresh-context verifier 多輪 CONFIRMED；使用者親自驗收 8 步通過，步驟 7、8 用真 codex 0.158.0（使用者授權 agent 在沙箱裡跑）。
 
 ## 範圍
 
@@ -266,7 +266,7 @@ codex 的事實來源：[backends/codex.md](../backends/codex.md)、[spike-codex
 - [x] 真 CLI 一致性檢查（必要；使用者已決定 2026-09-25）：2026-09-28 agent（經授權）：`codex --version` 與錄製檔 header 都是 `codex-cli 0.158.0`，`conformance` 5 passed（codex 8 個情境都比對；`queue_idle` 改錄製器後重錄，見步驟 7）。原文：`codex --version` 和 `crates/agend-testkit/transcripts/codex/` 錄製檔 header 的 `version` 相同，不同就先用錄製器重錄（[RECORDER.md](../../crates/agend-testkit/RECORDER.md#重錄cli-升版時)）；`~/.cargo/bin/cargo test -p agend-testkit --test conformance` 通過（現有 5 個情境；P8 的新情境只有在步驟 7 錄了之後才加進來，不是完成條件）；實作者只跑了 `conformance`（5 passed，3 個新情境印 `not recorded yet … skipped`）；`codex --version` 要跑真 codex，留給你的步驟 6
 - [x] 本施工關 crate 的 `README.md`／`TESTING.md` 已更新
 - [x] 測試不留殘留：結束時沒有 `g7-` 或測試 id 的 holder、假 app-server；kill 只對自己起的、大於 1 的 pid；實作者：每次跑完 `pgrep -fl "agend (holder|daemon)"`、`pgrep -fl "fake.*codex"` 都沒有輸出，`/tmp/g7-*` 與 `$TMPDIR/fake-codex-*.sock` 沒有留下；清掃只對測試自己起的 group（`sweep::tests` 另測不相干的 group 不送）
-- [ ] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」（verifier 不跑真 codex）
+- [x] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」（verifier 不跑真 codex；r1 CONFIRMED 942a648 起多輪，最後 K16 修正 d63d043 CONFIRMED）
 
 ## 你親自驗收
 
@@ -639,12 +639,13 @@ unset AGEND_BIN
 
 | 日期 | 結果（通過／不通過） | 備註 |
 |---|---|---|
-|  |  |  |
+| 2026-09-28 | 通過 | 在 `feat/gate-07-codex`（merge 前）。步驟 1–5 使用者照抄指令、agent 對照：accept codex 全過（8 個 holder 正常 Shutdown）、忙碌三級、冪等／當掉窗口／回覆遺失不重送、四次開機同一 app-server 與 thread、硬殺 holder 後同一 thread 接回、清掃、give-up、legacy、failed-holder-alive 全對。步驟 6：使用者跑 `codex --version`（0.157.1，當天自動升到 0.158.0）與 `app-server --help`（有 `--listen`、`-c`，無 `--no-daemon`）。步驟 7、8：使用者授權 agent 在錄音沙箱裡跑真 codex 0.158.0：沙箱補兩個路徑後錄 8 段、一致性 5 passed（queue_idle 修掉時序競賽後重錄、納入比對）；codex_live ok，`git`／`pkill`／`killall` 都是 shim，holder 硬殺後 `already gone`、重起接回同一 thread、記得 PAPAYA；`config.toml`／`auth.json` 修改時間前後不變。真 codex 帶出 K14–K18，使用者已追認。 |
 
 ## 進度紀錄
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-28 使用者親自驗收 8 步通過（步驟 7、8 由使用者授權 agent 跑真 codex），等 merge。
 - 2026-09-28 使用者追認 K14–K18、K7 結案；`queue_idle` 修競態：錄製器等長回覆開始串流才 `queue/add`＋`turn/interrupt`，只重錄 `queue_idle`（真 codex，3 個短 turn，一次成功），從 `transcripts-pending/` 移進 `transcripts/`；假 app-server 的回覆改成串流（`item/completed` 晚一點、串流中被中斷沒有 `item/completed`）；一致性檢查 8 個情境全比對、5 passed。
 - 2026-09-28 verifier（真 codex 那兩個 commit 之後）MEDIUM：人中斷後 codex 的佇列不會自己開始（U11）；driver 改成 turn 結束、閒置、佇列非空時 `thread/queue/start` 一次（連上後的對帳也做），附測試（daemon 跑著與重啟後）。K18 改寫：developer note 每輪多幾個 input token、inject 與存 DB 之間當掉會留一個沒人用的 rollout；假 app-server 的 `queue/start` 先看佇列，對齊真的 `queue is empty`。
 - 2026-09-28 agent 經使用者授權跑真 codex（0.158.0，自動從 0.156.1 升上來）：沙箱補 `installation_id`、`app-server-control/app-server-startup.lock`（二分找出；錄製器改成回報 app-server 的 stderr）；8 個情境錄製（1 次全錄＋`queue_idle` 重錄 1 次），7 個進 `transcripts/`、`queue_idle` 因時序競態放 `transcripts-pending/`；假 app-server 照錄製改（user message 時機、中斷補 user message、turns 新的在前、compact、`no rollout found`、`queue is empty`、中斷後佇列不動、`inject_items`、not materialized）；driver K14、K15、K17、K18；`codex_live` 第 1 次在 turn 之前就失敗（K17），第 2 次 `codex_live: ok`（3 個短 turn；shim 三個都對）；回答 U1–U16、U18（U19 未測）；K7 建議結案；K14–K18 待追認；`~/.codex/config.toml`、`auth.json` 前後修改時間不變。
