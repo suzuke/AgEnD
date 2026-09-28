@@ -193,6 +193,7 @@ fn mkdtemp() -> io::Result<PathBuf> {
 
 async fn preflight(ctx: &Context, binary: &Path) -> Result<Vec<String>, String> {
     let dir = mkdtemp().map_err(|e| format!("cannot make the preflight home: {e}"))?;
+    log::line(&format!("preflight home {}", dir.display()));
     let copied = ctx
         .store
         .copy_to(&dir.join(DB_FILE))

@@ -335,7 +335,7 @@ unset AGEND_BIN AGEND_HOME AGEND_INSTANCE   # 前幾關留下的 export 可能�
    | `== contract (gate 9 rules)` | `CLP-13 fake ok · real ok` … 到 `CLP-17`，五行 |
    | `== CLI-n` | 每一列：`CLI-n  $ …` 命令、輸出、`exit N · fake ok · real ok`（不需要 daemon 的列 `· ok`；CLI-33..35 `· real ok`；CLI-36..46 `· fake ok (fake only; the real daemon's handler arrives in gate 10)`）；拒絕的訊息都附正確做法（例如 CLI-11 `… it runs inside an agent, where AGEND_INSTANCE is set`） |
    | `== resend` | `(retried … s)`、`the daemon got the send twice with the same message id …; g9-b has it once`、`agend: daemon restarted during the request; check with agend instance list`、`instance_add reached the daemon once and was not sent again` |
-   | `== restart` | `the daemon is back: pid <D>, …`、`same daemon pid <D>, new boot id; holder of g9-r still pid …`、`/tmp/agend-pf-* left: 0` |
+   | `== restart` | `the daemon is back: pid <D>, …`、`same daemon pid <D>, new boot id; holder of g9-r still pid …`、`its preflight home /tmp/agend-pf-… is gone` |
    | `== preflight` | 四個 `agend: preflight_failed: …`（`status 1`、`status 3: db copy: broken on purpose`、`without reporting its steps`、`cannot run`），然後 `agend.db byte-identical …; same pid … and boot id; no exec` |
    | `== one restart at a time`、`== restart waits` | `a restart is already in progress`；`did not stop within 30 s`（約 30 秒）、`did not come back within 10 s`、最後 `the daemon is back` |
    | `== after exec` | `reaped inherited holder pid …`、`(no zombie)`、`own holder g9-o: holder g9-o (pid …) exited: exit status: 0`、`preflight child: preflight_failed: /usr/bin/false daemon preflight exited with status 1; …` |

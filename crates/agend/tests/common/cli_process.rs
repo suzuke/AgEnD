@@ -149,7 +149,6 @@ pub fn restart(lab: &Lab) -> Result<Vec<String>, String> {
     let mut daemon = start(lab, &home)?;
     let cli = Cli::new(&lab.agend, &home);
     let holder = add_sleeper(&cli, "g9-r")?;
-    let before_pf = preflight_homes();
     let (_, boot) = hello(&home)?;
     let run = cli.run(None, &["daemon", "restart"]);
     let back = format!("the daemon is back: pid {}, ", daemon.pid);
@@ -170,9 +169,10 @@ pub fn restart(lab: &Lab) -> Result<Vec<String>, String> {
     ensure(now == Some(holder), || {
         format!("holder of g9-r was {holder}, now {now:?}")
     })?;
-    ensure(preflight_homes() == before_pf, || {
-        format!("preflight homes left: {:?}", preflight_homes())
-    })?;
+    // Its own preflight home is gone (other tests may run theirs now).
+    let line = daemon.expect("preflight home /tmp/agend-pf-")?;
+    let pf = line.rsplit(' ').next().unwrap_or_default().to_owned();
+    ensure(!Path::new(&pf).exists(), || format!("{pf} is left"))?;
     let status = cli.run(None, &["status"]);
     expect_run(&status, 0, &["instances: 1 (g9-r "])?;
     let mut out = run.shown();
@@ -181,10 +181,7 @@ pub fn restart(lab: &Lab) -> Result<Vec<String>, String> {
         daemon.pid,
         crate::lab::untimed(&recovered)
     ));
-    out.push(format!(
-        "/tmp/agend-pf-* left: {}",
-        preflight_homes().len() - before_pf.len()
-    ));
+    out.push(format!("its preflight home {pf} is gone"));
     daemon.interrupt()?;
     Ok(out)
 }
