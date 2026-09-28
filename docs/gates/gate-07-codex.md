@@ -299,7 +299,7 @@ unset AGEND_BIN
    gate 7 (codex): checks passed
    ```
 
-   - [ ] 通過
+   - [x] 通過
 
 2. 三級忙碌策略。
 
@@ -328,7 +328,7 @@ unset AGEND_BIN
    | `m-i … turn/interrupt, turn/start … A interrupted` | A 被中斷、新 turn |
    | `m-long-interrupt confirmed` | 0.158.0 的 user message 在 turn 開始後幾毫秒就進 thread（第一個 turn 除外，2–4 秒），所以被中斷的那則也確認了；從沒出現的仍停在 `sent`（P5） |
 
-   - [ ] 通過
+   - [x] 通過
 
 3. 故意弄壞：同一個訊息 id 送兩次（其中一次在 daemon 重啟之後）、同 id 不同內容、當掉在送出與記帳之間。
 
@@ -353,7 +353,7 @@ unset AGEND_BIN
    m-run asked to run "/bin/zsh -lc 'echo hi'": declined by the driver; the turn completed (agent: "command not run: decline"); m-run confirmed
    ```
 
-   - [ ] 通過
+   - [x] 通過
 
 4. 四次開機：daemon 不在時 agent 照跑，回來後補回。
 
@@ -374,7 +374,7 @@ unset AGEND_BIN
    negative check (new AGEND_HOME each boot): boot 2 failed: thread <thread>, not boot 1's <thread>
    ```
 
-   - [ ] 通過
+   - [x] 通過
 
 5. 故意弄壞：硬殺 holder，看 codex 沒變孤兒、同一個 thread 接回。
 
@@ -445,7 +445,7 @@ unset AGEND_BIN
    | `== legacy` | `… failed: codex instance from before gate 7 has no thread id; a human decides`、holder pid 不變、`new` 那列照常起 |
    | `== failed-holder-alive` | `failed`、holder 還在、`agent_pid` 有值而且 argv 有標記的 instance：`boot: no sweep line; the agent group is untouched` |
 
-   - [ ] 通過
+   - [x] 通過
 
 6. 真 CLI 一致性檢查（必做；使用者已決定 2026-09-25）。
 
@@ -482,7 +482,7 @@ unset AGEND_BIN
 
    **貼回來**：`codex --version` 那一行、`codex app-server --help` 的完整輸出、最後的 `test result` 行。
 
-   - [ ] 通過
+   - [x] 通過
 
 7. 選做，**你已決定 merge 前要跑**（跑真的 codex）：錄三個新情境。
 
@@ -525,7 +525,7 @@ unset AGEND_BIN
 
    **貼回來**：`cargo xtask record` 的最後 5 行、`git status` 那三行、一致性檢查印的全部 `differs`／`not recorded`／`test result` 行（或直接 `git add` 三個錄製檔、告訴 agent 在哪個 branch）。
 
-   - [ ] 已錄製並通過（或差異已交給 agent 修）
+   - [x] 已錄製並通過（或差異已交給 agent 修）
    - [ ] 這次不做（寫進驗收紀錄；這些補丁維持「未查證」）
 
 8. 選做，**你已決定 merge 前要跑**（跑真的 codex）：真 codex 端到端。
@@ -599,7 +599,7 @@ unset AGEND_BIN
 
    **貼回來**：`/tmp/g7-live.out` 全部、兩次 `ls -l`、兩個 `pgrep` 的輸出；失敗時再附 `/tmp/g7-live.log` 最後 40 行。
 
-   - [ ] 通過
+   - [x] 通過
    - [ ] 這次不做（寫進驗收紀錄）
 
 ## 待你追認
