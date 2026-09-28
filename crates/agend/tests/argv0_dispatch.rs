@@ -20,7 +20,12 @@ fn version_prints_the_package_version() {
 fn unknown_command_fails_with_usage_hint() {
     let out = Command::new(BIN).arg("frobnicate").output().unwrap();
     assert_eq!(out.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("agend --help"));
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        said.contains("unrecognized subcommand 'frobnicate'"),
+        "{said}"
+    );
+    assert!(said.contains("try '--help'"), "{said}");
 }
 
 #[test]

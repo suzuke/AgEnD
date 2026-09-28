@@ -1,7 +1,7 @@
 # agend-testkit
 
 > **TL;DR**
-> - 共用測試基礎設施（只能當 dev-dependency）：7 個 trait 的假實作、契約測試（含 client protocol 的 CLP）、假 daemon（client protocol 1.1）、3 個假 agent 程式、真 backend 的錄製器。
+> - 共用測試基礎設施（只能當 dev-dependency）：7 個 trait 的假實作、契約測試（含 client protocol 的 CLP）、假 daemon（client protocol 1.2）、3 個假 agent 程式、真 backend 的錄製器。
 > - 記住：**假實作要跑和真實作同一套契約測試，假 agent 要和真 CLI 的錄製檔形狀一致**，才不會漂移（v1 #1483）。
 > - 下一步：`~/.cargo/bin/cargo xtask accept testkit`；契約規則看 [CONTRACTS.md](CONTRACTS.md)，錄製與一致性檢查看 [RECORDER.md](RECORDER.md)。
 
@@ -11,7 +11,7 @@
 |---|---|---|
 | 假實作 | `fakes` | `FakeDriver`、`FakeForge`、`FakeStore`、`FakeRuntime`、`FakeNotifier`、`FakeClock`、`FakeRunner` |
 | 契約測試 | `contract` | 每個 trait 一個 suite：`contract::<trait>::run(實作名, 建 fixture 的函式)` 回傳 `Report`；規則編號見 [CONTRACTS.md](CONTRACTS.md) |
-| 假 daemon | `fake_daemon` | 行程內的 client protocol 1.1 server（unix socket + JSON Lines）與 `ProbeClient` |
+| 假 daemon | `fake_daemon` | 行程內的 client protocol 1.2 server（unix socket + JSON Lines）與 `ProbeClient` |
 | client protocol 契約 | `contract::client` | CLP-1..12：同一套 case 對假 daemon 與真 `agend daemon`；`proxy` 是 mutant 用的改行 proxy（第 8 施工關 P9） |
 | 假 agent | `fake_agent` + `src/bin/` | `fake-codex-app-server`、`fake-opencode-serve`、`fake-claude`；`fake-codex`（`codex` CLI 的替身，給第 7 施工關的 `sh` 包裝用：`app-server` 與假 TUI `resume`） |
 | 執行 future | `executor` | `block_on`：不用 async runtime 就能跑 trait 的 future |
@@ -62,7 +62,7 @@
 | Notifier | `NTF-1`–`4` | 欄位原樣、3,000 字多位元組 body 不截斷、不修剪空白、順序不變 |
 | Clock | `CLK-1`–`4` | unix 毫秒、UTC（對照 `utc_now_unix_ms()`）、不倒退、不凍結 |
 | Runner | `RUN-1`–`9` | 輸出逐位元組、256 KiB 不卡；逾時 2 秒內回報，`sh` 與它啟動的子程序都停掉（標記檔判斷）；在指定目錄跑 |
-| ClientProtocol | `CLP-1`–`12` | 不是 trait，是 server：`hello` 在前、版本協商、全貌之後的事件連號、舊／未來游標 `event_gap`、不帶游標重播、未知請求不斷線、兩個 client 同序、慢 client 被關、重啟後 id 變大、拒絕的請求不改狀態、只有操作者能 `resolve_attention`、終端先畫面；fixture 是 `ClientProtocolFixture`（`FakeDaemonFixture`；真 daemon 的在 `agend-daemon/tests/common/client_process.rs`） |
+| ClientProtocol | `CLP-1`–`17` | 不是 trait，是 server（第 9 施工關加權限兩個方向、`instance_add`／`remove`、`daemon_restart` 的形狀、`task_cancel` 不改狀態、`send` 同 id 只收一次與 `inbox --after`）：`hello` 在前、版本協商、全貌之後的事件連號、舊／未來游標 `event_gap`、不帶游標重播、未知請求不斷線、兩個 client 同序、慢 client 被關、重啟後 id 變大、拒絕的請求不改狀態、只有操作者能 `resolve_attention`、終端先畫面；fixture 是 `ClientProtocolFixture`（`FakeDaemonFixture`；真 daemon 的在 `agend-daemon/tests/common/client_process.rs`） |
 
 每條規則至少有一個故意弄壞的實作（mutant），列在 CONTRACTS.md 那一列；`tests/contract_teeth/` 跑全部 mutant，並檢查規則表、case、mutant 三者互相對得上（見 [TESTING.md](TESTING.md)）。接真實作時 fixture 多實作的方法：`ForgeFixture::base_head`、`ForgeFixture::base_contains`（例如 `git merge-base --is-ancestor`）、`RuntimeFixture::is_running`（只拿持久狀態）、`ClockFixture::utc_now_unix_ms`；`DriverFixture::turn_timeout` 可選（預設 10 秒）。
 
@@ -102,7 +102,8 @@ daemon 重啟：`RuntimeFixture`、`DriverFixture`、`StoreFixture` 各有一個
 - 事件：id 從「啟動時間 unix ms × 1000」+ 1 開始（`event_id_start()`），留最近 1024 筆；游標規則與真 daemon 相同（不帶游標重播全部、「最舊 − 1」到最新接得上、其他 `event_gap`）；落後超過 1024 筆 → `event_gap` 後關連線；寫入 5 秒沒進度 → 關連線。一個請求造成的事件在它的回應之後才送出（跟真 daemon 一樣）。
 - `resolve_attention`：agent → `forbidden`（先於 id）；沒有這個 id 或操作不在 `actions` → `unknown_attention`；成功 → 項目消失、`attention_resolved`、`accepted`。
 - 事件身分：`assign(task, ResultIdentity)` 設定目前要的結果；`done`／`result`／`review_*` 沒帶或不符 → `stale_result`、什麼都不變；接受後這個 attempt 就用掉了。
-- 其他：`status`、`inbox`、`task_create`、`ask`、`answer_ask`（agent 命令真 daemon 第 9 施工關前回 `not_supported`，假 daemon 照舊處理）、`subscribe_terminal`（一張快照，任何 instance id）、`terminal_input`（`not_supported`）。
+- 第 9 施工關：`hello` 回 `daemon_version`（`agend <版本> (fake daemon)`）、`daemon_pid`（測試程序）、`boot_id`（事件 id 起點）。`command` 只收 agent、`operator` 只收操作者（`forbidden` 的訊息跟真 daemon 一字不差）。`status`：`set_status` 設了就用它，否則照真 daemon 的格式（`g9-a (claude): no task` ＋ `next: …`；呼叫者不在 instance 裡 → `unknown_instance`），有 `assign` 時帶 task 與 `identity`。`send`／`inbox` 跟真 daemon 同規則（`message_id` 要 UUID v4、同 id 同內容再送照樣 `accepted` 只存一則、不同內容 `invalid_request`；收件者不存在 `unknown_instance`；`inbox` 最近 20 則或 `--after` 之後全部，沒有那一則 → `unknown_message`；`message_ids_to(name)` 給測試看）。`instance_add`／`instance_remove` 改全貌（`instance_exists`、`unknown_instance`、名字規則；`working_directory` 預設 `<home>/workspace/<name>`，home 是 `…/run/daemon.sock` 往上兩層）。`daemon_restart`：跑 `<binary> --version`，要印 `agend …` 才算過（否則 `preflight_failed`，訊息格式同真 daemon）；過了回 `restarting`、關掉所有連線、換新的 `boot_id`（事件清空）。`task_cancel` → `not_supported`。
+- 其他：`task_create`、`ask`、`answer_ask`、`block`／`unblock`／`remind`（真 daemon 第 10 施工關前回 `not_supported`，假 daemon 照舊處理）、`subscribe_terminal`（一張快照，任何 instance id）、`terminal_input`（`not_supported`）。
 - `open_ask(thread, recap)`：像綁定 task 的 agent 跑 `agend ask` 那樣建立請示（帶 task 與脈絡摘要），可以 `answer_ask`，也列在全貌的「需要你」裡（`attention_id` = ask id）；`ask` 命令建立的請示沒有 task（TUI 的 demo 與測試用）。
 - `ProbeClient::hello(path, caller)`、`recv_within(timeout)`：契約的驅動端（逾時不丟掉讀到一半的行）。
 

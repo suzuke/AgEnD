@@ -37,6 +37,8 @@ pub fn failed_attention_id(instance_id: &str) -> String {
 pub struct Fleet {
     inner: Mutex<Inner>,
     live: broadcast::Sender<EventData>,
+    /// The event id base, also the `boot_id` of `hello` (gate 9 P7).
+    base: u64,
 }
 
 struct Inner {
@@ -59,6 +61,7 @@ impl Fleet {
     pub fn new(boot_unix_ms: u64) -> Self {
         let (live, _) = broadcast::channel(RETAINED_EVENTS);
         Self {
+            base: boot_unix_ms.saturating_mul(1000),
             inner: Mutex::new(Inner {
                 latest: boot_unix_ms.saturating_mul(1000),
                 log: VecDeque::new(),
@@ -68,6 +71,11 @@ impl Fleet {
             }),
             live,
         }
+    }
+
+    /// The event id base (boot time in unix ms × 1000): this boot's id.
+    pub fn base(&self) -> u64 {
+        self.base
     }
 
     fn lock(&self) -> MutexGuard<'_, Inner> {
@@ -123,6 +131,33 @@ impl Fleet {
 
     pub fn instance(&self, id: &str) -> Option<InstanceView> {
         self.lock().instances.get(id).cloned()
+    }
+
+    /// Takes a removed instance out of the view (`instance_changed` without
+    /// an instance) together with its needs-you item, which leaves with
+    /// `attention_resolved` (action `unknown`: nobody acted on it; gate 9).
+    pub fn remove_instance(&self, id: &str) {
+        let mut inner = self.lock();
+        if inner.instances.remove(id).is_some() {
+            let event = DaemonEvent::InstanceChanged {
+                data: InstanceChangedData {
+                    instance_id: id.to_owned(),
+                    summary: "removed".into(),
+                    instance: None,
+                },
+            };
+            self.push(&mut inner, event);
+        }
+        let item = failed_attention_id(id);
+        if inner.attention.remove(&item).is_some() {
+            let event = DaemonEvent::AttentionResolved {
+                data: AttentionResolvedData {
+                    attention_id: item,
+                    action: AttentionAction::Unknown,
+                },
+            };
+            self.push(&mut inner, event);
+        }
     }
 
     /// Adds a needs-you item (it must have an `attention_id`) and publishes
@@ -305,6 +340,7 @@ mod tests {
             team_id: DEFAULT_TEAM.into(),
             backend: "claude".into(),
             state: AgentState::Starting,
+            working_directory: None,
         };
         fleet.set_instance(view.clone(), "starting".into());
         fleet.set_instance(view.clone(), "starting".into());

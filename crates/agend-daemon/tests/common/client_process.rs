@@ -22,7 +22,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use agend_core::model::Backend;
@@ -30,6 +30,7 @@ use agend_core::protocol::client::{
     AttentionAction, ClientRequest, ClientResponse, CommandResult, DAEMON_SOCKET, DaemonEvent,
     InstanceData, RequestIdData, ResolveAttentionData, TaskChangedData, error_code,
 };
+use agend_daemon::driver::codex::CodexDriver;
 use agend_daemon::fleet::Fleet;
 use agend_daemon::handlers::Context;
 use agend_daemon::runtime::{HolderRuntime, files};
@@ -197,6 +198,15 @@ impl ClientProtocolFixture for RealDaemon {
     fn terminal_instance(&self) -> String {
         self.running.clone()
     }
+
+    fn agents(&self) -> (String, String) {
+        let peer = self.failed.first().cloned().unwrap_or_default();
+        (self.running.clone(), peer)
+    }
+
+    fn fresh_name(&mut self) -> String {
+        format!("g8-{}", tag())
+    }
 }
 
 /// The daemon's server and fleet in this process, fed events directly: the
@@ -204,6 +214,7 @@ impl ClientProtocolFixture for RealDaemon {
 pub struct InProcess {
     runtime: tokio::runtime::Runtime,
     fleet: Arc<Fleet>,
+    store: Arc<SqliteStore>,
     server: Option<Server>,
     root: PathBuf,
     socket: PathBuf,
@@ -228,9 +239,11 @@ impl InProcess {
             .build()
             .expect("runtime");
         let socket = socket_of(&root);
+        let store = Arc::new(SqliteStore::open(&root, now_ms()).expect("in-process store"));
         let mut fx = InProcess {
             runtime,
             fleet: Arc::new(Fleet::new(now_ms())),
+            store,
             server: None,
             root,
             socket,
@@ -253,6 +266,10 @@ impl InProcess {
                 Arc::new(|_| {}),
             ),
             supervisor,
+            store: Arc::clone(&self.store),
+            codex: CodexDriver::new(&self.root, Arc::clone(&self.store), Arc::new(|_| {})),
+            exe: PathBuf::from("/nonexistent/agend"),
+            restarting: AtomicBool::new(false),
         });
         let listener = server::bind(&self.socket).expect("bind");
         self.server = Some(Server::start(listener, self.socket.clone(), context));
@@ -305,6 +322,14 @@ impl ClientProtocolFixture for InProcess {
     }
 
     fn terminal_instance(&self) -> String {
+        "none".into()
+    }
+
+    fn agents(&self) -> (String, String) {
+        ("none".into(), "none".into())
+    }
+
+    fn fresh_name(&mut self) -> String {
         "none".into()
     }
 }
@@ -380,7 +405,7 @@ pub fn version(lab: &Lab) -> Result<Vec<String>, String> {
     let (out, took) = agend(lab, &home, &["debug", "ping"], &[], Duration::from_secs(20))?;
     let said = text(&out.stderr);
     ensure(
-        out.status.code() == Some(1) && said.contains("needs 1.1") && took < Duration::from_secs(3),
+        out.status.code() == Some(1) && said.contains("needs 1.2") && took < Duration::from_secs(3),
         || {
             format!(
                 "ping against a 1.0 daemon: {} in {took:?}: {said}",
@@ -795,13 +820,16 @@ pub fn terminal(lab: &Lab) -> Result<Vec<String>, String> {
             },
         })
         .map_err(|e| e.to_string())?;
-    let Some(("not_supported", message)) = (match &reply {
+    // Gate 9: agent commands are for agents; the operator is refused.
+    let Some(("forbidden", message)) = (match &reply {
         ClientResponse::Error { data } => Some((data.code.as_str(), data.message.clone())),
         _ => None,
     }) else {
         return Err(format!("command status: {reply:?}"));
     };
-    out.push(format!("command status: error not_supported: {message}"));
+    out.push(format!(
+        "command status (operator): error forbidden: {message}"
+    ));
     daemon.interrupt()?;
     Ok(out)
 }

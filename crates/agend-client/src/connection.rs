@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use agend_core::protocol::ProtocolVersion;
 use agend_core::protocol::client::{
     AttentionAction, ClientRequest, ClientResponse, CommandResult, EventData, FleetView,
-    RequestIdData, ResolveAttentionData, SubscribeEventsData, error_code,
+    RequestIdData, ResolveAttentionData, SelectedVersionData, SubscribeEventsData, error_code,
 };
 
 use crate::retry::{RESTART_RETRY_WINDOW, RETRY_EVERY, Redo};
@@ -27,7 +27,10 @@ pub struct Client {
     caller: Option<String>,
     reader: BufReader<UnixStream>,
     writer: UnixStream,
-    selected: ProtocolVersion,
+    /// The daemon's `hello` reply (selected version, 1.2: who it is).
+    hello: SelectedVersionData,
+    /// The oldest version accepted at (re)connect.
+    needed: ProtocolVersion,
     /// Events read while waiting for a reply.
     events: VecDeque<EventData>,
     next_request: u64,
@@ -81,12 +84,16 @@ fn read_response(reader: &mut BufReader<UnixStream>) -> io::Result<Option<Client
     }
 }
 
-/// One connection and `hello`, waiting at most `within` for the reply.
+type Opened = (BufReader<UnixStream>, UnixStream, SelectedVersionData);
+
+/// One connection and `hello`, waiting at most `within` for the reply; the
+/// daemon must select at least `needed`.
 fn open(
     socket: &Path,
     caller: &Option<String>,
+    needed: ProtocolVersion,
     within: Duration,
-) -> Result<(BufReader<UnixStream>, UnixStream, ProtocolVersion), Attempt> {
+) -> Result<Opened, Attempt> {
     let fail = |e: io::Error| {
         if retryable(&e) {
             Attempt::Retry(e.to_string())
@@ -113,8 +120,9 @@ fn open(
         .map_err(ended)?;
     match read_response(&mut reader) {
         Ok(Some(ClientResponse::Hello { data })) => {
-            version::check(data.selected).map_err(|m| Attempt::Fail(ClientError::Version(m)))?;
-            Ok((reader, writer, data.selected))
+            version::check_at_least(data.selected, needed)
+                .map_err(|m| Attempt::Fail(ClientError::Version(m)))?;
+            Ok((reader, writer, data))
         }
         Ok(Some(ClientResponse::Error { data })) if data.code == error_code::VERSION_MISMATCH => {
             Err(Attempt::Fail(ClientError::Version(data.message)))
@@ -141,20 +149,21 @@ fn open(
 fn open_retrying(
     socket: &Path,
     caller: &Option<String>,
-) -> Result<(BufReader<UnixStream>, UnixStream, ProtocolVersion, Duration), ClientError> {
+    needed: ProtocolVersion,
+) -> Result<(Opened, Duration), ClientError> {
     let started = Instant::now();
     let deadline = started + RESTART_RETRY_WINDOW;
     let mut failed = false;
     loop {
         let left = deadline.saturating_duration_since(Instant::now());
-        match open(socket, caller, left.min(REPLY_WITHIN)) {
-            Ok((reader, writer, selected)) => {
+        match open(socket, caller, needed, left.min(REPLY_WITHIN)) {
+            Ok(opened) => {
                 let retried = if failed {
                     started.elapsed()
                 } else {
                     Duration::ZERO
                 };
-                return Ok((reader, writer, selected, retried));
+                return Ok((opened, retried));
             }
             Err(Attempt::Fail(e)) => return Err(e),
             Err(Attempt::Retry(cause)) => {
@@ -179,6 +188,7 @@ fn request_id(request: &ClientRequest) -> Option<&str> {
         ClientRequest::AnswerAsk { data } => Some(&data.request_id),
         ClientRequest::GetFleet { data } => Some(&data.request_id),
         ClientRequest::ResolveAttention { data } => Some(&data.request_id),
+        ClientRequest::Operator { data } => Some(&data.request_id),
         _ => None,
     }
 }
@@ -189,19 +199,27 @@ impl Client {
     /// is answered. `caller` is the instance id inside an agent, `None` for
     /// the operator.
     pub fn connect(socket: &Path, caller: Option<String>) -> Result<Client, ClientError> {
-        let (reader, writer, selected, retried) = open_retrying(socket, &caller)?;
-        let mut client = Client::new(socket, caller, reader, writer, selected);
+        Self::connect_needing(socket, caller, version::NEEDED)
+    }
+
+    /// [`Client::connect`] accepting any daemon that selects at least
+    /// `needed` (`agend daemon restart` needs only `daemon_restart`).
+    pub fn connect_needing(
+        socket: &Path,
+        caller: Option<String>,
+        needed: ProtocolVersion,
+    ) -> Result<Client, ClientError> {
+        let (opened, retried) = open_retrying(socket, &caller, needed)?;
+        let mut client = Client::new(socket, caller, opened, needed);
         client.retried = retried;
         Ok(client)
     }
 
-    /// One attempt, no retry (the TUI and `agend debug watch` reconnect on
-    /// their own schedule).
+    /// One attempt, no retry (the TUI, `agend debug watch` and `agend
+    /// doctor` reconnect on their own schedule or not at all).
     pub fn connect_once(socket: &Path, caller: Option<String>) -> Result<Client, ClientError> {
-        match open(socket, &caller, REPLY_WITHIN) {
-            Ok((reader, writer, selected)) => {
-                Ok(Client::new(socket, caller, reader, writer, selected))
-            }
+        match open(socket, &caller, version::NEEDED, REPLY_WITHIN) {
+            Ok(opened) => Ok(Client::new(socket, caller, opened, version::NEEDED)),
             Err(Attempt::Fail(e)) => Err(e),
             Err(Attempt::Retry(cause)) => Err(ClientError::Connect {
                 socket: socket.to_path_buf(),
@@ -213,16 +231,17 @@ impl Client {
     fn new(
         socket: &Path,
         caller: Option<String>,
-        reader: BufReader<UnixStream>,
-        writer: UnixStream,
-        selected: ProtocolVersion,
+        opened: Opened,
+        needed: ProtocolVersion,
     ) -> Client {
+        let (reader, writer, hello) = opened;
         Client {
             socket: socket.to_path_buf(),
             caller,
             reader,
             writer,
-            selected,
+            hello,
+            needed,
             events: VecDeque::new(),
             next_request: 0,
             retried: Duration::ZERO,
@@ -231,7 +250,12 @@ impl Client {
 
     /// The version the daemon selected.
     pub fn selected(&self) -> ProtocolVersion {
-        self.selected
+        self.hello.selected
+    }
+
+    /// The daemon's `hello` reply: with 1.2, its version, pid and boot id.
+    pub fn daemon(&self) -> &SelectedVersionData {
+        &self.hello
     }
 
     /// Time spent retrying so far: connecting while the daemon was away,
@@ -248,12 +272,38 @@ impl Client {
 
     fn reconnect(&mut self) -> Result<(), ClientError> {
         let started = Instant::now();
-        let (reader, writer, selected, _) = open_retrying(&self.socket, &self.caller)?;
+        let ((reader, writer, hello), _) = open_retrying(&self.socket, &self.caller, self.needed)?;
         self.reader = reader;
         self.writer = writer;
-        self.selected = selected;
+        self.hello = hello;
         self.retried += started.elapsed();
         Ok(())
+    }
+
+    /// Reads (and drops) whatever comes until the daemon closes this
+    /// connection; false when it is still open after `within` (`agend
+    /// daemon restart` waits for the old daemon to let go, gate 9 P7).
+    pub fn wait_closed(&mut self, within: Duration) -> bool {
+        let deadline = Instant::now() + within;
+        let mut buf = [0u8; 4096];
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return false;
+            }
+            let _ = self.reader.get_ref().set_read_timeout(Some(left));
+            match std::io::Read::read(&mut self.reader, &mut buf) {
+                Ok(0) => return true,
+                Ok(_) => {}
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                    ) => {}
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                Err(_) => return true,
+            }
+        }
     }
 
     /// Sends `request` and waits (10 s) for the reply carrying its request
@@ -268,6 +318,17 @@ impl Client {
         request: &ClientRequest,
         redo: Redo,
     ) -> Result<ClientResponse, ClientError> {
+        self.request_within(request, redo, REPLY_WITHIN)
+    }
+
+    /// [`Client::request`] waiting up to `within` for the reply (a restart
+    /// preflight takes longer than 10 s at worst).
+    pub fn request_within(
+        &mut self,
+        request: &ClientRequest,
+        redo: Redo,
+        within: Duration,
+    ) -> Result<ClientResponse, ClientError> {
         let id = request_id(request).map(str::to_owned);
         let line = line_of(request);
         loop {
@@ -275,7 +336,7 @@ impl Client {
                 self.reconnect()?;
                 continue;
             }
-            match self.wait_reply(id.as_deref()) {
+            match self.wait_reply(id.as_deref(), within) {
                 Err(ReplyError::Ended) if redo == Redo::Safe => self.reconnect()?,
                 Err(ReplyError::Ended) => return Err(ClientError::Restarted),
                 Err(ReplyError::Other(e)) => return Err(e),
@@ -290,12 +351,16 @@ impl Client {
         }
     }
 
-    fn wait_reply(&mut self, id: Option<&str>) -> Result<ClientResponse, ReplyError> {
-        let deadline = Instant::now() + REPLY_WITHIN;
+    fn wait_reply(
+        &mut self,
+        id: Option<&str>,
+        within: Duration,
+    ) -> Result<ClientResponse, ReplyError> {
+        let deadline = Instant::now() + within;
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
-                return Err(ReplyError::Other(no_reply()));
+                return Err(ReplyError::Other(no_reply(within)));
             }
             let _ = self.reader.get_ref().set_read_timeout(Some(left));
             let response = match read_response(&mut self.reader) {
@@ -307,7 +372,7 @@ impl Client {
                         io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
                     ) =>
                 {
-                    return Err(ReplyError::Other(no_reply()));
+                    return Err(ReplyError::Other(no_reply(within)));
                 }
                 Err(e) if e.kind() == io::ErrorKind::InvalidData => {
                     return Err(ReplyError::Other(ClientError::Disconnected(e.to_string())));
@@ -413,10 +478,10 @@ enum ReplyError {
     Other(ClientError),
 }
 
-fn no_reply() -> ClientError {
+fn no_reply(within: Duration) -> ClientError {
     ClientError::Disconnected(format!(
         "no reply from the AgEnD daemon within {} s",
-        REPLY_WITHIN.as_secs()
+        within.as_secs()
     ))
 }
 

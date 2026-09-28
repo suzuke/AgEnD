@@ -167,6 +167,17 @@ fn write(conn: &Connection, backups: &Path, name: &str) -> Result<Duration, Stor
     Ok(started.elapsed())
 }
 
+/// `VACUUM INTO` `dest` (a new file, 0600): a copy of the database now,
+/// for the restart preflight (gate 9 P7).
+pub(super) fn copy(conn: &Connection, dest: &Path) -> Result<(), StoreError> {
+    let text = dest
+        .to_str()
+        .ok_or_else(|| StoreError::Invalid(format!("non-UTF-8 path {}", dest.display())))?;
+    conn.execute("VACUUM INTO ?1", [text])?;
+    fs::set_permissions(dest, fs::Permissions::from_mode(0o600))?;
+    Ok(())
+}
+
 /// Deletes all but the [`KEEP`] newest snapshot files; returns the deleted
 /// ones (oldest first) and the kept ones.
 fn rotate(backups: &Path) -> Result<(Vec<String>, Vec<String>), StoreError> {

@@ -330,6 +330,12 @@ impl Drop for Inner {
 /// waits until its lock is released. Blocking; takes over whatever
 /// connection the holder had.
 pub fn shutdown_holder(home: &Path, id: &str) -> Result<(), String> {
+    shutdown_holder_within(home, id, STOP_WITHIN)
+}
+
+/// [`shutdown_holder`] waiting at most `within` for the lock to be released
+/// (`agend instance remove` waits 5 s, gate 9 P6).
+pub fn shutdown_holder_within(home: &Path, id: &str, within: Duration) -> Result<(), String> {
     let running = |home: &Path| files::running(home, id).map_err(|e| format!("{id}: {e}"));
     if running(home)?.is_none() {
         return Ok(());
@@ -348,12 +354,12 @@ pub fn shutdown_holder(home: &Path, id: &str) -> Result<(), String> {
     };
     conn.send(&HolderRequest::Shutdown)
         .map_err(|e| format!("send Shutdown to {id}: {e}"))?;
-    let deadline = Instant::now() + STOP_WITHIN;
+    let deadline = Instant::now() + within;
     while running(home)?.is_some() {
         if Instant::now() >= deadline {
             return Err(format!(
                 "holder {id} still runs {}s after Shutdown",
-                STOP_WITHIN.as_secs()
+                within.as_secs()
             ));
         }
         std::thread::sleep(Duration::from_millis(50));

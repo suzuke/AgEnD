@@ -3,10 +3,11 @@
 //! command via `tokio::process` with a timeout (plan §4.1).
 //!
 //! Layers:
-//! - entry: `daemon` (`agend daemon`, gate 6), `server`, `handlers`, `ingest`
+//! - entry: `daemon` (`agend daemon`, gate 6), `preflight` (`agend daemon
+//!   preflight`, gate 9), `server`, `handlers`, `ingest`
 //! - domain: `boot`, `fleet` (fleet view and event log, gate 8),
-//!   `pipeline`, `delivery`, `supervisor`, `scheduler`, `reconcile`,
-//!   `housekeeping`
+//!   `pipeline`, `delivery`, `supervisor`, `reaper` (gate 9), `scheduler`,
+//!   `reconcile`, `housekeeping`
 //! - adapters: `driver`, `runtime`, `forge`, `git`, `runner`, `store`, `notifier`
 //!
 //! Domain modules talk to adapters only through the traits in
@@ -22,6 +23,8 @@ pub mod daemon;
 pub mod handlers;
 pub mod ingest;
 #[cfg(unix)]
+pub mod preflight;
+#[cfg(unix)]
 pub mod server;
 
 // domain
@@ -33,6 +36,8 @@ pub mod fleet;
 #[cfg(unix)]
 pub mod housekeeping;
 pub mod pipeline;
+#[cfg(unix)]
+pub mod reaper;
 pub mod reconcile;
 pub mod scheduler;
 #[cfg(unix)]

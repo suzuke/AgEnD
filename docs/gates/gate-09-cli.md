@@ -3,13 +3,13 @@
 > **TL;DR**
 > - agent 命令、操作者命令（`instance add/remove/list`、`daemon restart`）、`status`、`doctor`、`init`；真 daemon 本關做 `status`、`send`、`inbox`（接第 7 施工關的送達，完成里程碑「兩個 codex agent 互傳訊息、重啟不漏不重」）與操作者命令，其他 agent 命令先對假 daemon 做完。
 > - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這個施工關才算完成。
-> - 下一步：P1–P10 使用者已確認（2026-09-26；P3 改成 `AGEND_HOME` 一律必須設、P6 對使用者叫 `name`、操作者也能 `task create`）；merge 這份提案，等第 7、8 施工關都 merge 後開工。
+> - 下一步：實作在 draft PR（`feat/gate-09-cli`）；你照「你親自驗收」跑 9 步、填「驗收紀錄」，再逐項決定「待你追認」L1–L16。
 
 **先看這條**：這頁的步驟會用到 `agend`。每個新開的終端機分頁（包括第二個終端）都要先跑「你親自驗收」開頭的設定，否則會跑到舊的 Node 版 `agend` 1.24.0。
 
 ## 狀態
 
-**提案中**（2026-09-26）：開工前提案 P1–P10 使用者已確認（P3 由使用者改寫、P6 加上 `name` 用詞、P1 決定操作者也能 `task create`），等 merge 後開工。依賴（**兩個都是開工的硬前提**）：第 8 施工關（client protocol 1.1、`agend-client`）正在實作（`feat/gate-08-client`），本頁照它已確認的設計寫，不照程式；第 7 施工關（送達、`messages` 表、`deliver` API）的提案在審（`docs/gate-07-proposal`），本頁照它的提案寫，確切介面以它 merge 後為準。
+**實作中**（2026-09-28，draft PR，branch `feat/gate-09-cli`，從 `v2` 的 7f326de 開）：P1–P10 照使用者確認的版本實作完成，自動驗收除了 fresh-context verifier 都有證據（見「自動驗收」）；等你親自驗收與追認 L1–L16。依賴都已 merge：第 7 施工關（`deliver`、`messages` 表）、第 8 施工關（client protocol 1.1、`agend-client`）。client protocol 升到 **1.2**（本關先 merge，第 10 施工關拿 1.3）。
 
 ## 範圍
 
@@ -290,39 +290,58 @@
 
 ## 自動驗收（完成定義）
 
-- [ ] `~/.cargo/bin/cargo test -p agend` 單獨通過，包括：`CLI-n` 表每列對假 daemon、真 daemon 支援的列也對真 `agend daemon`（P10）；`home::resolve` 沒設（exit 2 與 export 提示）、相對路徑、v1 home（P3）；`--json` 只印一個 JSON 值、錯誤也在 stdout（P4）；`send` 送出後斷線用同一個 `message_id` 重送、其他會改東西的命令不重送（P5）；非 TTY 的 `instance remove` 沒有 `--yes` 回 exit 2（P6）；`daemon restart` 成功（pid 不變、holder 不變）與 `--binary` 失敗（daemon 照跑、DB 檔 sha256 不變）、同時兩個 restart 第二個被拒、CLI 在舊連線 EOF 且 `boot_id` 變了才報成功、重用別則訊息的 `message_id` 回 `invalid_request`、接回的 holder 死掉後不留殘屍、自己起的 holder 與預檢子程序的 exit status 沒被搶（P7）；兩個假 codex instance 互送 10 則訊息、中途 `daemon restart`：每則恰好送達一次、狀態 `confirmed`（P1、P5，里程碑）；`doctor` 每個 `fail`／`warn` 都有 `fix:`（P8）
-- [ ] `~/.cargo/bin/cargo test -p agend-core`、`-p agend-client`、`-p agend-daemon`、`-p agend-testkit` 單獨通過：1.1 的 peer 解得開本關 minor（目前 1.2）的訊息；`CLP` 新增的列對假 daemon 與真 daemon 都通過，每條有 mutant（P6、P10）
-- [ ] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨
-- [ ] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`（出現 `SKIPPED` 不算通過）
-- [ ] `~/.cargo/bin/cargo xtask accept cli` 通過，並印出下方「你親自驗收」用到的 demo 與 `agend --version` 的啟動時間（p50 < 10 ms）
-- [ ] 本施工關 crate 的 `README.md`／`TESTING.md` 已更新；想改的共用文件（名詞表：ticket、`operator` 請求、使用者看到的 `name`＝`instance_id`；tui-and-setup 的 init；第 8、10、13 施工關頁）列在 PR 裡由你決定
-- [ ] 測試不留殘留：沒有 `g9-`、`pf-check` 或測試 id 的 holder，沒有 `/tmp/agend-pf-*`；kill 只對自己起的、大於 1 的 pid
-- [ ] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」
+- [x] `~/.cargo/bin/cargo test -p agend` 單獨通過，包括：`CLI-n` 表每列對假 daemon、真 daemon 支援的列也對真 `agend daemon`（P10）；`home::resolve` 沒設（exit 2 與 export 提示）、相對路徑、v1 home（P3）；`--json` 只印一個 JSON 值、錯誤也在 stdout（P4）；`send` 送出後斷線用同一個 `message_id` 重送、其他會改東西的命令不重送（P5）；非 TTY 的 `instance remove` 沒有 `--yes` 回 exit 2（P6）；`daemon restart` 成功（pid 不變、holder 不變）與 `--binary` 失敗（daemon 照跑、DB 檔 sha256 不變）、同時兩個 restart 第二個被拒、CLI 在舊連線 EOF 且 `boot_id` 變了才報成功、重用別則訊息的 `message_id` 回 `invalid_request`、接回的 holder 死掉後不留殘屍、自己起的 holder 與預檢子程序的 exit status 沒被搶（P7）；兩個假 codex instance 互送 10 則訊息、中途 `daemon restart`：每則恰好送達一次、狀態 `confirmed`（P1、P5，里程碑）；`doctor` 每個 `fail`／`warn` 都有 `fix:`（P8）
+- [x] `~/.cargo/bin/cargo test -p agend-core`、`-p agend-client`、`-p agend-daemon`、`-p agend-testkit` 單獨通過：1.1 的 peer 解得開本關 minor（目前 1.2）的訊息；`CLP` 新增的列對假 daemon 與真 daemon 都通過，每條有 mutant（P6、P10）
+- [x] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨
+- [x] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`（出現 `SKIPPED` 不算通過）
+- [x] `~/.cargo/bin/cargo xtask accept cli` 通過，並印出下方「你親自驗收」用到的 demo 與 `agend --version` 的啟動時間（p50 < 10 ms）
+- [x] 本施工關 crate 的 `README.md`／`TESTING.md` 已更新；想改的共用文件（名詞表：ticket、`operator` 請求、使用者看到的 `name`＝`instance_id`；tui-and-setup 的 init；第 8、10、13 施工關頁）列在 PR 裡由你決定
+- [x] 測試不留殘留：沒有 `g9-`、`pf-check` 或測試 id 的 holder，沒有 `/tmp/agend-pf-*`；kill 只對自己起的、大於 1 的 pid
+- [ ] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」——**還沒做**（實作者是 leaf agent，不能自己派 verifier；由協調者派）
+
+證據（實作者 2026-09-28，macOS）：`cargo xtask accept cli` 對 agend-core、agend-client、agend-daemon、agend-testkit、agend 各自跑 fmt、clippy、`cargo test -p <crate>` 都通過，`check-deps: ok (… no-std build ok)`，demo `cli demo: all sections passed`、`startup: agend --version p50 5.2 ms`、`gate 9 (cli): checks passed`；`cargo test --workspace` 全過；`cargo xtask accept codex`／`client`／`daemon-holder`（回歸）通過；跑完 `pgrep -fl "agend (holder|daemon)"` 沒有任何輸出、沒有 `/tmp/agend-pf-*`。對照：P3 → CLI-2..4、`init_and_doctor`；P4 → CLI-5、6、11、12、`unreachable_daemon_after_ten_seconds`；P5 → `a_lost_send_is_resent_with_its_id_and_nothing_else_is`、CLP-17；P6 → CLI-18..24、CLP-14；P7 → `restart_keeps_the_pid_and_the_holders`、`a_failed_preflight_changes_nothing`（`agend.db` 位元組完全相同，比 sha256 更嚴）、`one_restart_at_a_time`、`restart_waits_for_eof_and_a_new_boot_id`、`inherited_holders_are_reaped_and_nothing_else_is`；重用別則訊息的 `message_id` → CLP-17（`invalid_request`）；里程碑 → `milestone_two_codex_agents_across_a_restart`；P8 → `init_and_doctor`（`--json` 每個非 ok 都有 `fix`）；1.1 的 peer 解得開 1.2 → `xtask/tests/protocol_compat.rs::a_1_1_peer_decodes_1_2_messages`；CLP-13..17 → 假 daemon（`contract_fakes`）與真 daemon（`client_protocol.rs`）都 17／16 條全過，`contract_teeth` 每個 mutant 都被抓到。
 
 ## 你親自驗收
 
-由 agent 帶著一步一步做（見 [AGENTS.md](../../AGENTS.md#帶使用者親自驗收)）。每一步：照抄指令 → 對照「應該看到」→ 對了就打勾。任何一步不符就停，記在「驗收紀錄」。標「開工時細化」的地方，開工時會改成確切指令與輸出。
+由 agent 帶著一步一步做（見 [AGENTS.md](../../AGENTS.md#帶使用者親自驗收)）。每一步：照抄指令 → 對照「應該看到」→ 對了就打勾。任何一步不符就停，記在「驗收紀錄」。下面的「應該看到」是實作者 2026-09-28 在 macOS 照抄指令實跑的輸出（暫存目錄名、pid、session id、訊息 id 每次不同；實作者的 `PATH` 沒有 claude／codex／opencode，所以那三行是 `warn`）。
 
 **每個新開的終端機分頁都要先跑這段**（包括 daemon 在前景跑時開的第二個終端）。第 13 施工關之前沒有安裝程式，而你的 PATH 上有舊的 Node 版 `agend`（v1-ts 1.24.0）：
 
 ```bash
 cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
+unset AGEND_BIN AGEND_HOME AGEND_INSTANCE   # 前幾關留下的 export 可能指到已刪除的目錄
 ~/.cargo/bin/cargo build -p agend && export PATH="$PWD/target/debug:$PATH" && agend --version
 ```
 
-應該看到 `agend 0.x.y`（目前是 `agend 0.0.0`）。如果印出 `1.24.0`，跑到的是舊的 Node CLI——在這個終端機重跑上面那段。
+應該看到 `agend 0.0.0`。如果印出 `1.24.0`，跑到的是舊的 Node CLI——在這個終端機重跑上面那段。
 
 步驟 4 起用同一個暫存 home。第二個終端也要貼上步驟 4 印出的那行 `export AGEND_HOME=…`。
 
+**注意**：`agend doctor`（步驟 2、3）會對 `PATH` 上找到的 claude、codex、opencode 跑一次 `--version`（P8）。所有 `agend instance add` 都帶 `--program` 指向假 agent；**不要省略 `--program`**，否則會啟動你真的 claude／codex。
+
 1. 跑 demo。
 
-   **這步在驗什麼**：每個命令對假 daemon 的輸入、輸出、exit code，以及真 daemon 支援的那些命令兩邊結果一樣（P1、P4、P10）。錯了代表 agent 讀到的輸出跟真 daemon 給的不一樣。
+   **這步在驗什麼**：每個命令對假 daemon 的輸入、輸出、exit code，以及真 daemon 支援的那些命令兩邊結果一樣；重送、重啟、預檢、`init`／`doctor`、里程碑都跑一遍（P1、P4、P5、P7、P8、P10）。錯了代表 agent 讀到的輸出跟真 daemon 給的不一樣。
 
    ```bash
+   cd ~/Documents/Hack/AgEnD-v2
    ~/.cargo/bin/cargo xtask accept cli
    ```
 
-   應該看到：每個命令一段：輸入、輸出、exit code；拒絕的都附正確命令；`CLI-n` 每列印 `fake ok`，真 daemon 支援的列另印 `real ok`；一行 `startup: agend --version p50 <n> ms`（小於 10）；最後一行 `gate 9 (cli): checks passed`（確切輸出開工時細化）。
+   要跑十幾分鐘（前面是 5 個 crate 的 fmt／clippy／測試，最後約 2 分鐘是 demo）。應該看到：
+
+   | 段落 | 要找的字 |
+   |---|---|
+   | `== contract (gate 9 rules)` | `CLP-13 fake ok · real ok` … 到 `CLP-17`，五行 |
+   | `== CLI-n` | 每一列：`CLI-n  $ …` 命令、輸出、`exit N · fake ok · real ok`（不需要 daemon 的列 `· ok`；CLI-33..35 `· real ok`；CLI-36..46 `· fake ok (fake only; the real daemon's handler arrives in gate 10)`）；拒絕的訊息都附正確做法（例如 CLI-11 `… it runs inside an agent, where AGEND_INSTANCE is set`） |
+   | `== resend` | `(retried … s)`、`the daemon got the send twice with the same message id …; g9-b has it once`、`agend: daemon restarted during the request; check with agend instance list`、`instance_add reached the daemon once and was not sent again` |
+   | `== restart` | `the daemon is back: pid <D>, …`、`same daemon pid <D>, new boot id; holder of g9-r still pid …`、`its preflight home /tmp/agend-pf-… is gone` |
+   | `== preflight` | 四個 `agend: preflight_failed: …`（`status 1`、`status 3: db copy: broken on purpose`、`without reporting its steps`、`cannot run`），然後 `agend.db byte-identical …; same pid … and boot id; no exec` |
+   | `== one restart at a time`、`== restart waits` | `a restart is already in progress`；`did not stop within 30 s`（約 30 秒）、`did not come back within 10 s`、最後 `the daemon is back` |
+   | `== after exec` | `reaped inherited holder pid …`、`(no zombie)`、`own holder g9-o: holder g9-o (pid …) exited: exit status: 0`、`preflight child: preflight_failed: /usr/bin/false daemon preflight exited with status 1; …` |
+   | `== init and doctor` | 見步驟 2、3（這裡用的是 stub 的 git 與 claude） |
+   | `== milestone` | `a5 after the restart: accepted: … (retried … s)`、兩行 `agend inbox of …: 10 lines from …, each once`、`all 20 messages confirmed`、兩行 `10 rows, all confirmed; each message exactly once in its codex thread` |
+   | 最後 | `startup: agend --version p50 <n> ms (limit 10 ms)`（實測 1.9–5.2 ms，機器忙時較慢）、`running now: 0`、`/tmp/agend-pf-*: 0`、`cli demo: all sections passed`，然後 `gate 9 (cli): checks passed` |
 
    - [ ] 通過
 
@@ -338,7 +357,32 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
    AGEND_HOME="$H/home" agend init; echo "exit=$?"
    ```
 
-   應該看到：第一次 `AGEND_HOME is not set; … export AGEND_HOME=<absolute path>`、`exit=2`；第二次 `created /tmp/g9h.…/home (0700)`、doctor 的輸出、`next: agend daemon …`，`exit=0`（git 太舊時是 1，看 doctor 那行）；第三次 `… looks like an AgEnD v1 home (fleet.yaml); set AGEND_HOME to another directory`、`exit=1`。`$H` 先留著，步驟 3 還要用。
+   應該看到（`$H` 先留著，步驟 3 還要用）：
+
+   ```text
+   agend: AGEND_HOME is not set; choose a directory for AgEnD's data and run: export AGEND_HOME=<absolute path>
+   exit=2
+   created /tmp/g9h.Ab12/home (0700)
+   ok    home      /tmp/g9h.Ab12/home (0700)
+   warn  daemon    not reachable: cannot reach the AgEnD daemon at /tmp/g9h.Ab12/home/run/daemon.sock (No such file or directory (os error 2))
+         fix: agend daemon
+   ok    git       git 2.39.5
+   warn  claude    not on PATH; no instance uses it
+         fix: npm install -g @anthropic-ai/claude-code
+   warn  codex     not on PATH; no instance uses it
+         fix: npm install -g @openai/codex
+   warn  opencode  not on PATH; no instance uses it
+         fix: npm install -g opencode-ai
+   ok    holders   0 running
+   ok    disk      679 GB free, home 0 KB
+   no check failed (4 warnings)
+   next: agend daemon   (then, in another terminal) agend instance add dev-1 claude
+   exit=0
+   agend: /tmp/g9h.Ab12/home looks like an AgEnD v1 home (fleet.yaml); set AGEND_HOME to another directory
+   exit=1
+   ```
+
+   你裝了的 backend 那一行是 `ok    claude    <它的 --version 第一行>`；git 太舊時 git 那行是 `fail`、`exit=1`。
 
    - [ ] 通過
 
@@ -357,7 +401,15 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
    rm -rf "$T" "$H"
    ```
 
-   應該看到：第一次每項一行（home、daemon、git、claude、codex、opencode、holders、disk）；home 是 `ok`；daemon 沒跑是 `warn` 附 `fix: agend daemon`；沒裝的 backend 是 `warn` 附安裝指令；`exit=0`（你機器的 git 本來就太舊時是 1）。第二次 git 那行 `fail  git  git 2.30.0 is older than 2.38 …`、下一行 `fix: …`、`exit=1`。
+   應該看到：第一次跟步驟 2 的 doctor 那 11 行一樣、`exit=0`；第二次只有 git 那行變了、最後一行也變了：
+
+   ```text
+   fail  git       git 2.30.0 is older than 2.38 (merge-tree needs it)
+         fix: brew install git
+   …
+   1 check failed
+   exit=1
+   ```
 
    - [ ] 通過
 
@@ -372,7 +424,9 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
    agend daemon
    ```
 
-   第二個終端（先跑開頭那段、貼上 `export AGEND_HOME=…`；假 agent 的路徑開工時細化）：
+   應該看到（daemon 留在前景）：`listening on /tmp/g9.Xy34/run/daemon.sock`、`agend daemon ready: instances=0 recovered=0 started=0 orphans=0`。
+
+   第二個終端（先跑開頭那段、貼上 `export AGEND_HOME=…`）：
 
    ```bash
    ~/.cargo/bin/cargo build -q -p agend-testkit --bin fake-claude
@@ -381,7 +435,19 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
    agend status
    ```
 
-   應該看到：`added g9-1 (claude, session …, …/workspace/g9-1); starting`；daemon 那邊 `g9-1: start --session-id …`；`list` 表頭 `NAME  BACKEND  STATE  DIR`、一行 `g9-1  claude  …`；`status` 印 daemon 的 pid、版本、`client protocol 1.2`、`instances: 1`。
+   應該看到：
+
+   ```text
+   added g9-1 (claude, session 29d836f9-5085-4e57-859a-d988e122b948, /tmp/g9.Xy34/workspace/g9-1); starting
+   NAME  BACKEND  STATE     DIR
+   g9-1  claude   starting  /tmp/g9.Xy34/workspace/g9-1
+   daemon: pid 24280, agend 0.0.0, client protocol 1.2
+   instances: 1 (g9-1 starting)
+   tasks: 0
+   needs you: 0
+   ```
+
+   `STATE` 也可能已經是 `unknown`（在跑；忙碌／閒置要 driver）。第一個終端多了 `g9-1: added (claude, …/fake-claude, …/workspace/g9-1)`、`g9-1: start --session-id <同一個 session>`、`g9-1: holder pid=<H> started`。
 
    - [ ] 通過
 
@@ -396,7 +462,18 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
    agend done t-1/work/1 --json; echo "exit=$?"
    ```
 
-   應該看到：第一行是 agent 自己的狀態（`g9-1 (claude): no task`、`next: …`）；第二行 `agend: forbidden: only the operator can add instances; ask the operator`、`exit=1`；第三行 `agend: forbidden: agend done is an agent command; …`、`exit=1`；第四行只有一行 `{"error":{"code":"forbidden",…}}`、`exit=1`。
+   應該看到：
+
+   ```text
+   g9-1 (claude): no task
+   next: agend inbox | agend send <name> "<message>"
+   agend: forbidden: only the operator can add instances; ask the operator
+   exit=1
+   agend: forbidden: agend done is an agent command; it runs inside an agent, where AGEND_INSTANCE is set
+   exit=1
+   {"error":{"code":"forbidden","message":"agend done is an agent command; it runs inside an agent, where AGEND_INSTANCE is set"}}
+   exit=1
+   ```
 
    - [ ] 通過
 
@@ -409,9 +486,27 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
    agend daemon restart
    pgrep -fl "agend holder g9-"
    agend status
+   ls -d /tmp/agend-pf-* 2>/dev/null | wc -l
    ```
 
-   應該看到：`preflight agend 0.0.0 (…)`、`db copy: … quick_check ok`、`holder: hello ok, spawn ok, shutdown ok`、`restarting the daemon (pid <D>) ...`、`the daemon is back: pid <D>, …`（同一個 D）；第一個終端的 daemon 印出新的開機紀錄、`recovered=1`；兩次 `pgrep` 同一個 pid；`status` 正常。`ls /tmp/agend-pf-*` 什麼都沒有。
+   應該看到（兩次 `pgrep` 同一個 pid；`restarting` 與 `is back` 是同一個 daemon pid）：
+
+   ```text
+   24299 /Users/you/AgEnD-v2/target/debug/agend holder g9-1
+   preflight agend 0.0.0 (/Users/you/AgEnD-v2/target/debug/agend):
+     db copy: migrations 4 -> 4, quick_check ok, instances 1
+     holder: hello ok, spawn ok, shutdown ok
+   restarting the daemon (pid 24280) ...
+   the daemon is back: pid 24280, agend 0.0.0, client protocol 1.2, instances=1 (0.1 s)
+   24299 /Users/you/AgEnD-v2/target/debug/agend holder g9-1
+   daemon: pid 24280, agend 0.0.0, client protocol 1.2
+   instances: 1 (g9-1 unknown)
+   tasks: 0
+   needs you: 0
+          0
+   ```
+
+   第一個終端：`preflight passed; restarting with …`、`agend daemon stopping (restart with …); holders keep running`、`exec … daemon`、新的 `agend daemon starting: pid=24280 …`（同一個 pid）、`inherited holder children (exec restart): 24299`、`g9-1: reconnected to holder pid=24299 …`、`agend daemon ready: instances=1 recovered=1 started=0 orphans=0`。
 
    - [ ] 通過
 
@@ -424,7 +519,18 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
    agend status
    ```
 
-   應該看到：`agend: preflight_failed: /usr/bin/false daemon preflight exited with status 1; the daemon keeps running agend 0.0.0`、`exit=1`；`status` 的 pid 跟步驟 6 一樣；daemon 那邊沒有新的開機紀錄。（「DB 一個 byte 都沒動」由自動測試比對 sha256；daemon 跑著時會寫 WAL，這裡手動比不準。）
+   應該看到：
+
+   ```text
+   agend: preflight_failed: /usr/bin/false daemon preflight exited with status 1; the daemon keeps running agend 0.0.0
+   exit=1
+   daemon: pid 24280, agend 0.0.0, client protocol 1.2
+   instances: 1 (g9-1 unknown)
+   tasks: 0
+   needs you: 0
+   ```
+
+   pid 跟步驟 6 一樣；第一個終端只多了 `restart requested: preflight of /usr/bin/false`、`preflight failed: … not restarting`，沒有新的開機紀錄。（「DB 一個 byte 都沒動」由自動測試比對：`== preflight` 的 `agend.db byte-identical`；daemon 跑著時會寫 WAL，這裡手動比不準。）
 
    - [ ] 通過
 
@@ -432,18 +538,34 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
    **這步在驗什麼**：ROADMAP 里程碑「第 1–9 施工關：兩個 codex agent 互傳訊息；重啟 daemon 時不中斷、不遺失、不重複」：`send` 經第 7 施工關的送達、斷線時用同一個 `message_id` 重送、daemon 靠 id 去重（P1、P5、P7）。錯了的話重啟 daemon 會掉訊息或重複送。
 
-   操作（第二個終端；假 codex 的 `--program` 開工時細化，依第 7 施工關的啟動方式）：
+   第二個終端（codex 是測試用的 `fake_codex`，不是真的 codex）：
 
    ```bash
-   agend instance add g9-a codex --program "<假 codex>"
-   agend instance add g9-b codex --program "<假 codex>"
+   ~/.cargo/bin/cargo build -q -p agend --example fake_codex
+   agend instance add g9-a codex --program "$PWD/target/debug/examples/fake_codex" -- --turn-ms 300
+   agend instance add g9-b codex --program "$PWD/target/debug/examples/fake_codex" -- --turn-ms 300
+   sleep 3
    (for i in $(seq 1 10); do AGEND_INSTANCE=g9-a agend send g9-b "a$i"; AGEND_INSTANCE=g9-b agend send g9-a "b$i"; sleep 0.5; done) &
    sleep 2; agend daemon restart; wait
+   sleep 5
    AGEND_INSTANCE=g9-b agend inbox
    AGEND_INSTANCE=g9-a agend inbox
+   grep -c ' confirmed (turn ' "$AGEND_HOME"/logs/daemon-*.log
    ```
 
-   應該看到：20 次 `send` 都成功（剛好碰上重啟的印 `(retried <t> s)`）；`restart` 照步驟 6 的樣子；g9-b 的 `inbox` 剛好 10 行 `from g9-a`（`a1`…`a10` 各一次），g9-a 的剛好 10 行 `from g9-b`（`b1`…`b10`），沒有重複；daemon log 每則都有 `confirmed`（確切字樣開工時細化）。手動不一定剛好碰到「請求送出、回應之前」的那一瞬間；那個情況由自動測試負責（「自動驗收」的兩個 instance 互送、中途重啟）。
+   應該看到：`added g9-a (codex, /tmp/g9.Xy34/workspace/g9-a); starting`、`added g9-b (…)`；20 行 `accepted: message <id> to g9-b (queue)`／`… to g9-a (queue)`，中間夾著步驟 6 那樣的重啟四行；剛好碰上重啟的那一次多一段 `(retried 0.1 s)`（實跑時是 `a5`）；然後
+
+   ```text
+   56cc75fa-0562-4b4d-9088-aa3b169462ac from g9-a: a1
+   …（a2 到 a9 各一行）
+   547c0209-a7a7-4325-9fa0-98acf3b0859c from g9-a: a10
+   b815e90b-1c5d-4dae-b3d5-d6d167bf8e8d from g9-b: b1
+   …（b2 到 b9 各一行）
+   5e7bb0b9-b44d-4698-b1d8-e597ae4b034a from g9-b: b10
+   20
+   ```
+
+   g9-b 剛好 10 行 `from g9-a`（`a1`…`a10` 各一次），g9-a 剛好 10 行 `from g9-b`，沒有重複；最後的 `20`＝daemon log 裡 20 則都 `confirmed`。第一個終端每則有一行 `<收件者>: <id> (queue) → turn/start → sent (turn …)` 與 `<收件者>: <id> confirmed (turn …)`；重送的那一則在新 daemon 上是 `<id> already confirmed; not sent again`。手動不一定剛好碰到「請求送出、回應之前」的那一瞬間；那個情況由自動測試負責（`== milestone` 用代理把 `a5` 的回應丟掉、再重啟）。
 
    - [ ] 通過
 
@@ -456,11 +578,63 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
    agend instance remove g9-1 --yes
    pgrep -fl "agend holder g9-1"
    ls "$AGEND_HOME/workspace/"
+   agend instance remove g9-a --yes
+   agend instance remove g9-b --yes
+   pgrep -fl "agend holder g9-"; echo "pgrep exit=$?"
    ```
 
-   應該看到：第一行拒絕（`… needs --yes when not on a terminal`）、`exit=2`；第二行 `removed g9-1; workspace kept at …/workspace/g9-1`；`pgrep` 什麼都不印（g9-a、g9-b 還在跑，所以只查 g9-1）；`ls` 還有 `g9-1`。再 `agend instance remove g9-a --yes`、`agend instance remove g9-b --yes`，之後 `pgrep -fl "agend holder g9-"` 什麼都不印；最後第一個終端 Ctrl-C 停 daemon，再 `rm -rf "$AGEND_HOME"`。
+   應該看到：
+
+   ```text
+   agend: agend instance remove needs --yes when not on a terminal
+   example: agend instance remove g9-1 --yes
+   exit=2
+   removed g9-1; workspace kept at /tmp/g9.Xy34/workspace/g9-1
+   g9-1
+   g9-a
+   g9-b
+   removed g9-a; workspace kept at /tmp/g9.Xy34/workspace/g9-a
+   removed g9-b; workspace kept at /tmp/g9.Xy34/workspace/g9-b
+   pgrep exit=1
+   ```
+
+   第一個 `pgrep` 什麼都不印；`ls` 還有 `g9-1`。第一個終端：`g9-1: removed (workspace kept at …)`、`g9-a: sweep of agent group … (removed): already gone`、`g9-a: removed …`。最後第一個終端 Ctrl-C 停 daemon（`agend daemon stopping (SIGINT); holders keep running`），再收掉暫存檔：
+
+   ```bash
+   rm -rf "$AGEND_HOME"
+   rm -f "${TMPDIR:-/tmp}"/fake-codex-*.sock   # fake_codex 被 SIGHUP 停掉時留下的 socket
+   ```
 
    - [ ] 通過
+
+## 待你追認
+
+實作時做了、提案沒寫到或與提案字面不同的選擇。確認前照目前的做法運作。每項：決定 · 理由 · 反悔的成本。
+
+| # | 決定 | 理由 | 反悔成本 |
+|---|---|---|---|
+| L1 | `home::resolve` 的錯誤在 `agend daemon` 與 `agend debug` 也一樣：`agend: AGEND_HOME is not set; …`、**exit 2**（第 6 施工關原本 daemon 是 `AGEND_HOME is not set`、exit 1；第 8 施工關的 debug 也是 exit 1）；相對路徑也是 exit 2 | P3 說 CLI、daemon、doctor、init 用同一個函式、同一句話；一個 exit code 規則（P4：`AGEND_HOME` 不對是用法錯誤） | daemon／debug 改回 exit 1：`main.rs`、`debug.rs` 各一行＋2 個測試 |
+| L2 | client 要 **1.2**（`version::NEEDED`），比 1.2 舊的 daemon 立刻失敗。訊息依 daemon 能不能自己重啟分兩種：1.2 以上 `— run: agend daemon restart`（P4 的寫法），更舊的 `— stop the daemon (Ctrl-C) and start this binary: agend daemon`（1.1 的 daemon 聽不懂 `daemon_restart`，照 P4 的字面會叫人跑一個一定失敗的命令）。`agend daemon restart` 自己只要 1.2（`Client::connect_needing`），以後的 CLI 仍能叫 1.2 的 daemon 重啟 | CLI 用了 1.2 的欄位與請求；P6「`daemon_restart` 的形狀之後不再改」要靠這個下限才有意義 | 訊息改一句：`version.rs` 一處＋測試；下限拿掉：`connect_needing` 刪掉、restart 改用 `connect` |
+| L3 | `block`／`unblock`／`remind`：在 agent 裡先送 `status` 拿 task，**沒有 task 時照樣送、`task_id` 是空字串**（真 daemon 現在回 `not_supported`，第 10 施工關決定空 task 的錯誤與訊息）；操作者跑時不先問 `status`，直接送（daemon 回 `forbidden`，訊息寫的是這個命令，不是 `status`） | 「修正指令由發現錯誤的那一方寫」（P4）：CLI 不自己發明「你沒有 task」的錯誤碼；先問 `status` 會讓操作者看到 `agend status is an agent command` 這種對不上的拒絕 | CLI 自己擋：加一個錯誤碼（例如 `no_task`）＋ agent.rs 約 10 行 |
+| L4 | P4 表以外的 `--json` code：`disconnected`（10 秒沒回應、收到不是協定的東西）、`restart_failed`（舊 daemon 30 秒沒關連線、10 秒內沒有新的 `boot_id`）、`v1_home`（exit 1）、`init_failed`（建不了 home）；`AGEND_HOME` 沒設或相對路徑用 `usage`（exit 2） | 這幾種錯誤 P4 表沒列，但 `--json` 一定要有 code；都是 CLI 自己發現的（不是 core 的 `error_code`，不進協定） | 改名：`cli.rs`／`operator.rs`／`home.rs` 各一處 |
+| L5 | 預檢「通過」除了 exit 0，還要新 binary 印出自己的步驟（`agend …`、`db copy: …`、`holder: hello ok, spawn ok, shutdown ok`）；否則 `preflight_failed: … exited 0 without reporting its steps (is it agend?)`。失敗訊息附預檢 stderr 的最後一行（`exited with status 3: db copy: broken on purpose`） | 不檢查的話 `--binary /usr/bin/true` 會「通過」，daemon 接著 `exec` 一個不是 agend 的程式、整個消失——正是 D2 要擋的事 | 只看 exit code：`handlers/operator.rs` 刪 6 行（`/usr/bin/true` 那個測試要拿掉） |
+| L6 | 收屍（reaper）對開機時**每個鎖檔裡的 pid** 做第一次 `waitpid(pid, WNOHANG)`，不只「接回」的 holder：`exec` 到新 daemon 開機之間死掉的 holder（鎖已放掉，不會被接回）也收得到。第一次查在起任何 holder 之前；之後只查還活著的自己的子程序，收到或 `ECHILD` 就不再查；仍然不用 `waitpid(-1)` | P7 的規則只涵蓋接回的 holder；那個空窗死掉的會一直是殭屍到 daemon 結束。擴大範圍不會誤收：開機時還沒有別的子程序 | 只查接回的：`reaper::inherited` 改用 `running_holders`，一行 |
+| L7 | `instance remove` 一個 `failed` 的 instance 時，它的「需要你」項目以 `attention_resolved`（`action: unknown`）離開；instance 以 `instance_changed`（不帶 `instance`、summary `removed`）離開全貌 | 第 8 施工關的事件裡沒有「項目被刪除」；不發事件的話 TUI 會一直顯示一個已刪掉的 instance 的項目；`unknown` 表示沒有人對它做了什麼 | 加一個新事件（例如 `attention_withdrawn`）：core 一個 variant＋fleet 一處＋協定相容測試 |
+| L8 | `status`、`send` 的呼叫者必須是 daemon 的 instance（否則 `unknown_instance: no instance x: AGEND_INSTANCE names no instance of this daemon …`）；`inbox` 對不存在的呼叫者回空清單 | 第 8 施工關 P2「DB 沒有的 instance 當 agent」只說它沒有操作者權限；寄件者不是 instance 的訊息，收件者無從回覆 | `send` 也放行：`handlers/agent.rs` 刪 3 行 |
+| L9 | CLI 等回應的時間：一般 10 秒（第 8 施工關）；`send` 70 秒（daemon 在訊息寫進 DB、而且 codex 的長連線送出之後才回，第 7 施工關那段最多 60 秒）；`daemon restart` 等 `restarting` 70 秒（預檢最多 60 秒＋複製 DB） | 10 秒後放棄的 `send` 其實可能已經送出，agent 若重下一次就會用新的 id、變成重複；等得夠久才能用同一個 id 的重送涵蓋 | 改數字：`agent.rs`、`operator.rs` 各一個常數 |
+| L10 | `instance add --dir` 給的目錄必須已存在（daemon 只建預設的 `$AGEND_HOME/workspace/<name>`，0700）；`--dir` 與路徑形式的 `--program` 由 CLI 轉成絕對路徑（daemon 的 cwd 跟 CLI 不同）；`--program` 只給名字時從 agent 的 `PATH` 找 | 自己建使用者指定的目錄容易建錯位置；相對路徑到 daemon 那邊意思就變了 | daemon 也建 `--dir`：supervisor 一行 |
+| L11 | 假 daemon 的 `daemon_restart` 不跑真的預檢：跑 `<binary> --version`，要印 `agend …` 才過（失敗訊息格式同真的），過了就回 `restarting`、關掉所有連線、換新的 `boot_id`（狀態保留）；CLP-15 只釘失敗的形狀，成功的重啟由 CLI-31 對假、真各跑一次 | 假 daemon 沒有 DB、holder；讓它真的跑 `agend daemon preflight` 要在暫存目錄起 holder，測試變慢又多一處要清 | 假 daemon 改跑真預檢：約 20 行＋每個重啟測試多一個 holder |
+| L12 | 人看的輸出格式（P4 只定了錯誤）：`send` → `accepted: message <id> to <name> (<level>)[ (retried 1.4 s)]`；`inbox` → 每則一行 `<id> from <name>: <第一行>`（多行的 body 其餘行縮兩格），沒有 → `no messages`；agent 的 `status` 印 daemon 給的 summary（`g9-1 (claude): no task` ＋ `next: …`），有 identity 時多一行 ticket；操作者的 `status` 四行（`daemon: pid …`、`instances: …`、`tasks: …`、`needs you: …`＋每個項目一行）；`daemon restart` 的進度行先印在 stdout 再等 | 一行一則讓 `grep -c "from g9-a"` 就能數（步驟 8）；進度先印，等 30 秒時人知道在等什麼 | 改格式：`cli/agent.rs`、`cli/operator.rs` 各幾行（CLI-n 表跟著改） |
+| L13 | `operator` 的 `task_cancel` 在協定上只有 `{ task_id }`（第 10 施工關頁寫 `task_cancel { task_id, reason }`）；操作者形式的 `task create`（帶 `--team`）不送任何東西，CLI 直接回 `not_supported: the operator's agend task create arrives in gate 10; nothing was sent`（協定沒有 `task_create` 變體，第 10 施工關連同 handler 一起加） | 本關的 CLI 沒有收 reason 的參數；選填欄位之後加是 additive（D26），現在加一個沒人填的欄位違反骨架規則 | 現在加 `reason`：core 一個選填欄位＋CLI 一個旗標 |
+| L14 | `agend` 不帶參數照舊印說明、exit 0；未知命令改成 clap 的 `unrecognized subcommand 'x'` ＋ `For more information, try '--help'.`、exit 2（原本是 `unknown command 'x'` 加一行 `Run agend --help for usage.`）；`agend daemon <別的參數>` 走 clap（exit 2） | P4 決定用 clap；argv0 的測試跟著改 | 自己攔未知命令：`cli.rs` 約 5 行 |
+| L15 | doctor 細節：daemon 跑著時孤兒的 `fix` 是 `agend daemon restart   (its boot sweep stops orphans)`（P8 寫 `agend daemon`，但 daemon 跑著時再跑一個會因為 DB 被占用而失敗）；daemon 沒跑、有 holder 在跑 → `N running; orphans unknown (the daemon is not running)`、fix `agend daemon`；git 的 `fix` 依作業系統（macOS `brew install git`，其他 `sudo apt-get install git …`）；三個 backend 的安裝指令都用 npm（opencode 是 `npm install -g opencode-ai`，頁上的例子寫 brew）；找 backend 時跳過 `$AGEND_HOME/bin`（shim）；每個 `--version` 最多等 5 秒 | 修正指令要照做就會好 | 改字：`doctor.rs`、`agend_core::setup` 各一處 |
+| L16 | `SUPPORTED_VERSIONS` 改成 `[1.2]`：daemon 與所有 client 共用，所以第 11 施工關的 TUI（還有自己的連線程式）現在也宣告 1.2；TUI 的程式沒有改。第 8 施工關的測試跟著調整：終端那段裡操作者送 `command status` 現在是 `forbidden`（原本 `not_supported`）、版本訊息、`client_demo` 的 CLP 從 12 條變 17 條；CLP-8 的行程內 server 多開一個暫存的 store 與 codex driver（`Context` 需要） | 協定 minor 只加欄位、1.1 的 peer 照樣解得開（`protocol_compat.rs` 的凍結 1.1 型別） | 無（改回去 1.1 的 client 就用不了本關的請求） |
+
+另記（事實）：
+- 啟動時間：加 `clap` 後 `agend --version` 50 次的中位數 1.9 ms（`--version` 在 clap 之前就回）。
+- `exec` 與 fd：實測 `exec` 後新 daemon 1 ms 就拿到 `agend.db`（舊的已在 `exec` 前關掉；SQLite 用 `O_CLOEXEC` 開檔），client 連線在 `exec` 前由 `Server::stop` 關掉，CLI 讀到 EOF。
+- 里程碑的自動測試用代理把 `a5` 的回應丟掉、再重啟 daemon：CLI 重連後用同一個 `message_id` 重送，新 daemon 回 `accepted`、log `already confirmed; not sent again`；codex thread 裡每則剛好一個 user message。
+- 手動跑步驟 8 時 `fake_codex` 的 app-server 在 `instance remove`（holder 的 SIGHUP）時沒有刪掉自己在 `$TMPDIR` 的短 socket（`fake-codex-<hash>.sock`）；自動測試用 `BoundSocket` 刪，步驟 9 最後手動刪。
 
 ## 驗收紀錄
 
@@ -474,6 +648,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-28 實作（draft PR，`feat/gate-09-cli`）：client protocol 1.2（`operator` 請求、`send` 的 `level`／`message_id`、`hello` 的 `daemon_version`／`daemon_pid`／`boot_id`、`working_directory`、`identity`）；`agend` 的 clap CLI（11 個 agent 命令、`instance add|remove|list`、`daemon restart`、`task cancel`、`status`、`doctor`、`init`、`--json`、exit 0／1／2、`home::resolve`）；daemon 端權限、`send`→`deliver`、`inbox --after`、instance 增刪、D2 預檢（`VACUUM INTO` 複本＋暫存 home 的 holder）與原地 `exec`、繼承 holder 的收屍；假 daemon 補齊、CLP-13..17 各有 mutant；CLI-n 表 46 列（假／真）；里程碑自動測試（兩個假 codex、中途重啟、代理丟掉一個回應）通過；「你親自驗收」照實跑細化；待你追認 L1–L16。fresh-context verifier 還沒跑（實作者是 leaf agent，不能自己派）。
 - 2026-09-26 加操作者命令 `agend task cancel <task>`（使用者從第 10 施工關決定；handler 在第 10 施工關，之前 `not_supported`，不重送）；記下 doctor 之後要查沙箱工具。
 - 2026-09-26 使用者逐題確認 P1–P10：P1 含 `ask` 移第 10 施工關、操作者也能 `task create`（要 `--team`）、KISS 選項不套用；P3 改成 `AGEND_HOME` 一律必須設（預設位置與 `config.toml` 列不列 home 延到第 13 施工關）；P6 對使用者用 `name`、內部仍是 `instance_id`；步驟 2、3 改用 `AGEND_HOME`。
 - 2026-09-26 第 3 輪 review REFUTED（2 MEDIUM、3 LOW）後修正：`--after` 依第 7 施工關 `messages.seq`、未知／過期回 `unknown_message`；`send` 一律回 `accepted`；restart 等 EOF 最多 30 秒；同 id 檢查與寫入在同一個 DB closure。
@@ -485,6 +660,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 ## 下一步
 
 ```bash
-cat docs/gates/gate-09-cli.md          # 逐題確認 P1–P10
-~/.cargo/bin/cargo xtask accept cli    # 實作後：你親自驗收步驟 1
+~/.cargo/bin/cargo xtask accept cli    # 你親自驗收步驟 1
 ```
+
+然後照「你親自驗收」步驟 2–9 跑、填「驗收紀錄」，逐項決定「待你追認」L1–L16。
