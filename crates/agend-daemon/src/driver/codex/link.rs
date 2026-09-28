@@ -188,6 +188,9 @@ pub(crate) struct Worker {
     /// A `queued` message that may already be in the running turn waits
     /// for the thread to be idle, then the flush runs again.
     recheck: bool,
+    /// A turn ended: when the thread is idle, start what codex still has
+    /// queued (K16: after an interrupt codex does not start it itself).
+    drain: bool,
 }
 
 impl Worker {
@@ -210,6 +213,7 @@ impl Worker {
             active: None,
             shared: Arc::new(Shared::default()),
             recheck: false,
+            drain: false,
         };
         worker.initialize()?;
         Ok(worker)
@@ -241,7 +245,8 @@ impl Worker {
         // history item; before that `codex resume <id> --remote` (the TUI)
         // fails with `no rollout found` and so does `thread/resume` after an
         // app-server restart (U1). One developer note, appended without a
-        // model call, materializes it (checked 2026-09-28, no tokens).
+        // model call, materializes it (checked 2026-09-28). The note stays in
+        // the model's context: a few input tokens on every turn.
         self.call_within(
             "thread/inject_items",
             json!({"threadId": self.thread, "items": [{
@@ -294,7 +299,45 @@ impl Worker {
     /// After a (re)connect: reconcile, then send what is still `queued`.
     pub fn catch_up(&mut self) -> Result<(), RpcError> {
         self.reconcile()?;
+        self.drain_queue()?;
         self.flush()
+    }
+
+    /// When the thread is idle and codex still has queued messages
+    /// (`thread/queue/list`), `thread/queue/start` once (K16, U11: an
+    /// interrupt leaves the queue waiting). "queue is empty" or "active or
+    /// pending turn" means codex started it itself: fine.
+    fn drain_queue(&mut self) -> Result<(), RpcError> {
+        if self.busy {
+            return Ok(());
+        }
+        let listed = match self.call_within(
+            "thread/queue/list",
+            json!({"threadId": self.thread}),
+            CALL_WITHIN,
+        ) {
+            Ok(listed) => listed,
+            Err(RpcError::Rpc { .. }) => return Ok(()),
+            Err(e) => return Err(e),
+        };
+        if listed["data"].as_array().is_none_or(Vec::is_empty) {
+            return Ok(());
+        }
+        match self.call_within(
+            "thread/queue/start",
+            json!({"threadId": self.thread}),
+            CALL_WITHIN,
+        ) {
+            Ok(_) => log::line(&format!(
+                "{}: the thread was idle with messages queued; thread/queue/start",
+                self.id
+            )),
+            Err(e @ RpcError::Rpc { .. }) => {
+                log::line(&format!("{}: thread/queue/start: {e}", self.id))
+            }
+            Err(e) => return Err(e),
+        }
+        Ok(())
     }
 
     /// The link thread; [`Worker::catch_up`] ran on the first connection.
@@ -358,6 +401,12 @@ impl Worker {
                 Ok(Some(message)) => self.dispatch(message),
                 Ok(None) => {}
                 Err(_) => return false,
+            }
+            if self.drain && !self.busy {
+                self.drain = false;
+                if self.drain_queue().is_err() {
+                    return false;
+                }
             }
             if self.recheck && !self.busy {
                 self.recheck = false;
@@ -460,6 +509,7 @@ impl Worker {
                     self.active = None;
                     self.set_busy(false);
                 }
+                self.drain = true;
             }
             "item/completed" => {
                 let turn = params["turnId"].as_str().unwrap_or_default();

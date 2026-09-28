@@ -378,3 +378,61 @@ fn a_queue_row_waits_behind_an_uncertain_one() {
     };
     assert!(position("m-A") < position("m-B"), "B before A: {all:?}");
 }
+
+/// K16 (U11): an interrupt from the TUI leaves codex's queue waiting; the
+/// driver starts it once the thread is idle, while it runs and after a
+/// daemon restart.
+#[test]
+fn a_queue_left_waiting_by_a_human_interrupt_is_started() {
+    use serde_json::json;
+    let lab = lab();
+    for (n, restart) in [(7, false), (8, true)] {
+        let home = lab.home(n);
+        let id = format!("g7-{}i{n}", tag());
+        let backend = codex::Backend::new(&home, &id, Duration::from_millis(1500)).unwrap();
+        let mut fx = Some(codex::Fixture::boot(&backend).unwrap());
+        let thread = fx.as_ref().unwrap().thread().unwrap();
+        let f = fx.as_ref().unwrap();
+        f.deliver("m-long", "a long task", BusyLevel::Queue)
+            .unwrap();
+        let q = f.deliver("m-q", "after it", BusyLevel::Queue).unwrap();
+        assert_eq!(q, DeliveryState::Sent, "m-q not queued in codex");
+        if restart {
+            fx = None;
+        }
+        let running = backend
+            .turns(&thread)
+            .unwrap()
+            .into_iter()
+            .rev()
+            .find(|t| t["status"] == "inProgress")
+            .and_then(|t| t["id"].as_str().map(str::to_owned))
+            .expect("a running turn");
+        let mut probe = backend.probe().unwrap();
+        probe
+            .call(
+                "thread/resume",
+                json!({"threadId": thread, "excludeTurns": true}),
+            )
+            .unwrap();
+        probe
+            .call(
+                "turn/interrupt",
+                json!({"threadId": thread, "turnId": running}),
+            )
+            .unwrap();
+        drop(probe);
+        let fx = fx.unwrap_or_else(|| codex::Fixture::boot(&backend).unwrap());
+        let all = fx.settle(2).unwrap();
+        assert_eq!(
+            codex::status_of(&all, &running).as_deref(),
+            Some("interrupted"),
+            "{all:?}"
+        );
+        assert!(
+            codex::turn_of(&all, "m-q").is_some(),
+            "restart={restart}: {all:?}"
+        );
+        assert_eq!(fx.state("m-q").unwrap(), "confirmed", "restart={restart}");
+    }
+}

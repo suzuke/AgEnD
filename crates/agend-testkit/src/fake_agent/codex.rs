@@ -17,7 +17,7 @@
 //! | `turn/interrupt {threadId, turnId}` | the user message if it has not shown yet, `{}`, `thread/status/changed` idle, `turn/completed` `interrupted`. Queued messages stay queued (U11) |
 //! | `thread/queue/add {threadId, clientUserMessageId, input}` | `{queuedSubmission}`, `thread/queue/changed`; runs as its own turn after the current one completes (auto-dequeue: `thread/queue/changed`, active, `turn/started`; its user message has `clientId`); on an idle thread it starts at once (U3) |
 //! | `thread/queue/list {threadId}` | `{data: [{id, clientUserMessageId, input}], nextCursor}`, oldest first |
-//! | `thread/queue/start {threadId}` | starts the oldest queued message, `{turn}`; nothing queued → -32600 `queue is empty` (U3); active turn → -32600 `thread already has an active or pending turn` (0.156.1 spike, not re-recorded) |
+//! | `thread/queue/start {threadId}` | starts the oldest queued message, `{turn}`; nothing queued → -32600 `queue is empty`, checked first (U3; also while a turn is active, `queue_idle` 0.158.0); something queued and a turn active → -32600 `thread already has an active or pending turn` (0.156.1 spike, not re-recorded) |
 //! | `thread/turns/list {threadId, cursor?, limit?}` | `{data, nextCursor, backwardsCursor}`: turns **newest first** (the running one first), `itemsView: "summary"`; `cursor` (the index to start at) pages back to older turns (U5). A thread with no turn and no injected items → -32600 `… is not materialized yet …` |
 //! | `thread/compact/start {threadId}` | `{}`, then a turn of its own with one `contextCompaction` item (listed with no items); older turns unchanged (U10) |
 //! | a line `run: <command>` in the prompt | the turn asks: `thread/status/changed` `waitingOnApproval`, a `commandExecution` item (`/bin/zsh -lc '<command>'`), and the server→client request `item/commandExecution/requestApproval`; the reply `{decision}` gives `serverRequest/resolved`, the item `declined` (or `completed` for `accept*`, without running anything; not recorded), then the agent message |
@@ -1186,7 +1186,11 @@ fn handle(message: &Value, connection: u64, shared: &Shared) -> Vec<Value> {
         }
         "thread/queue/start" => {
             let thread = state.threads.get_mut(&thread_id).expect("known thread");
-            if thread.active.is_some() {
+            // Real codex checks the queue first: an active turn with an
+            // empty queue is "queue is empty" (queue_idle, 0.158.0).
+            if thread.queue.is_empty() {
+                Err((INVALID_REQUEST, "queue is empty".to_owned()))
+            } else if thread.active.is_some() {
                 Err((
                     INVALID_REQUEST,
                     "thread already has an active or pending turn".to_owned(),
