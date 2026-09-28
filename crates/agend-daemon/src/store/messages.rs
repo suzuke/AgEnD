@@ -162,6 +162,32 @@ pub(crate) fn to_instance(conn: &Connection, to: &str) -> Result<Vec<Message>, S
     rows.map(|row| row?).collect()
 }
 
+/// The messages to `to` after its message `after` (by `seq`); `None` when
+/// `to` has no message with id `after` (unknown, pruned, or someone else's).
+pub(crate) fn to_instance_after(
+    conn: &Connection,
+    to: &str,
+    after: &str,
+) -> Result<Option<Vec<Message>>, StoreError> {
+    let seq: Option<i64> = conn
+        .query_row(
+            "SELECT seq FROM messages WHERE id = ?1 AND to_instance = ?2",
+            [after, to],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let Some(seq) = seq else {
+        return Ok(None);
+    };
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLUMNS} FROM messages WHERE to_instance = ?1 AND seq > ?2 ORDER BY seq"
+    ))?;
+    let rows = stmt.query_map(rusqlite::params![to, seq], from_row)?;
+    rows.map(|row| row?)
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
+}
+
 /// Looks `new.id` up, compares, and inserts it as `queued` when it is new;
 /// all in the caller's closure on the DB thread (P5).
 pub(crate) fn claim(conn: &Connection, new: &NewMessage, now: u64) -> Result<Claim, StoreError> {

@@ -1,4 +1,5 @@
-//! Client protocol contract (rules CLP-1..12 in CONTRACTS.md, gate 8 P9):
+//! Client protocol contract (rules CLP-1..12 in CONTRACTS.md, gate 8 P9;
+//! CLP-13..17, gate 9 P10):
 //! what TUI and CLI tests rely on from the testkit fake daemon must hold for
 //! the real `agend daemon` too. The same cases run against [`FakeDaemonFixture`]
 //! and against the real daemon (`crates/agend/tests/client_protocol.rs`).
@@ -7,9 +8,10 @@
 //! hide behind the same code. Every message is a core protocol type encoded
 //! with `serde_json` (#1493).
 //!
-//! Not pinned: agent commands (`command`) — the fake serves them, the real
-//! daemon answers `not_supported` until gate 9; `no_terminal` for an unknown
-//! instance (the fake answers a screen for any id).
+//! Not pinned: agent commands other than `status`, `send` and `inbox` — the
+//! fake serves them, the real daemon answers `not_supported` until gate 10;
+//! `no_terminal` for an unknown instance (the fake answers a screen for any
+//! id); a successful `daemon_restart` (the CLI tests pin it against both).
 //!
 //! Must NOT: hand-write wire shapes except for the malformed lines the rules
 //! are about.
@@ -24,8 +26,9 @@ use std::time::{Duration, Instant};
 
 use agend_core::protocol::ProtocolVersion;
 use agend_core::protocol::client::{
-    AgentState, AnswerAskData, AttentionAction, AttentionRequiredData, ClientHello, ClientRequest,
-    ClientResponse, CommandResult, DaemonEvent, EventData, FleetView, InstanceData, InstanceView,
+    AgentCommand, AgentState, AnswerAskData, AttentionAction, AttentionRequiredData,
+    ClientCommandData, ClientHello, ClientRequest, ClientResponse, CommandResult, DaemonEvent,
+    EventData, FleetView, InstanceData, InstanceView, MessageLevel, OperatorCommand, OperatorData,
     RequestIdData, ResolveAttentionData, SUPPORTED_VERSIONS, SubscribeEventsData, TaskChangedData,
     TerminalInputData, V1, error_code,
 };
@@ -57,6 +60,10 @@ pub trait ClientProtocolFixture {
     fn retry_item(&mut self) -> Result<String, String>;
     /// An instance whose terminal can be subscribed to.
     fn terminal_instance(&self) -> String;
+    /// Two instances that can message each other as agents (gate 9).
+    fn agents(&self) -> (String, String);
+    /// A name no instance has yet (a new one per call).
+    fn fresh_name(&mut self) -> String;
 }
 
 pub fn cases<F: ClientProtocolFixture>() -> Vec<Case<F>> {
@@ -120,6 +127,31 @@ pub fn cases<F: ClientProtocolFixture>() -> Vec<Case<F>> {
             rule: "CLP-12",
             name: "terminal_starts_with_the_screen",
             check: |fx| terminal_starts_with_the_screen(&fx),
+        },
+        Case {
+            rule: "CLP-13",
+            name: "agent_and_operator_requests_are_refused_the_other_way",
+            check: |mut fx| permissions_both_ways(&mut fx),
+        },
+        Case {
+            rule: "CLP-14",
+            name: "the_operator_adds_and_removes_instances",
+            check: |mut fx| operator_adds_and_removes_instances(&mut fx),
+        },
+        Case {
+            rule: "CLP-15",
+            name: "a_restart_to_a_broken_binary_changes_nothing",
+            check: |fx| restart_to_a_broken_binary_changes_nothing(&fx),
+        },
+        Case {
+            rule: "CLP-16",
+            name: "task_cancel_is_not_supported_and_changes_nothing",
+            check: |fx| task_cancel_changes_nothing(&fx),
+        },
+        Case {
+            rule: "CLP-17",
+            name: "one_message_per_id_and_inbox_after_an_own_message",
+            check: |fx| one_message_per_id(&fx),
         },
     ]
 }
@@ -811,6 +843,309 @@ fn terminal_starts_with_the_screen<F: ClientProtocolFixture>(fx: &F) -> CaseResu
     )
 }
 
+// ---- gate 9 cases ----
+
+/// A binary that cannot be run (CLP-13, CLP-15).
+const NO_BINARY: &str = "/nonexistent/agend-clp";
+
+fn command_request(request_id: &str, command: AgentCommand) -> ClientRequest {
+    ClientRequest::Command {
+        data: ClientCommandData {
+            request_id: request_id.into(),
+            command,
+        },
+    }
+}
+
+fn operator_request(request_id: &str, command: OperatorCommand) -> ClientRequest {
+    ClientRequest::Operator {
+        data: OperatorData {
+            request_id: request_id.into(),
+            command,
+        },
+    }
+}
+
+/// Sends `request` and returns the reply carrying `request_id`.
+fn ask(
+    c: &mut ProbeClient,
+    request_id: &str,
+    request: &ClientRequest,
+) -> Result<ClientResponse, String> {
+    send(c, request)?;
+    let mut skipped = Vec::new();
+    until(
+        c,
+        WITHIN,
+        |r| match r {
+            ClientResponse::CommandResult { data } => data.request_id == request_id,
+            ClientResponse::Error { data } => data.request_id.as_deref() == Some(request_id),
+            _ => false,
+        },
+        &mut skipped,
+    )
+}
+
+fn agent_client<F: ClientProtocolFixture>(fx: &F, name: &str) -> Result<ProbeClient, String> {
+    ProbeClient::hello(&fx.socket(), Some(name))
+        .map(|(c, _)| c)
+        .map_err(io("agent hello"))
+}
+
+fn add_command(name: &str) -> OperatorCommand {
+    OperatorCommand::InstanceAdd {
+        instance_id: name.into(),
+        backend: "claude".into(),
+        working_directory: None,
+        program: Some("/bin/sh".into()),
+        args: vec!["-c".into(), "sleep 60".into()],
+    }
+}
+
+fn result_of(reply: &ClientResponse) -> Option<&CommandResult> {
+    match reply {
+        ClientResponse::CommandResult { data } => Some(&data.result),
+        _ => None,
+    }
+}
+
+fn permissions_both_ways<F: ClientProtocolFixture>(fx: &mut F) -> CaseResult {
+    let (a, b) = fx.agents();
+    let fresh = fx.fresh_name();
+    let mut op = operator(fx)?;
+    let before = get_fleet(&mut op, "clp-13")?;
+    let mut agent = agent_client(fx, &a)?;
+    let refused = [
+        add_command(&fresh),
+        OperatorCommand::InstanceRemove {
+            instance_id: b.clone(),
+        },
+        OperatorCommand::DaemonRestart {
+            binary: Some(NO_BINARY.into()),
+        },
+        OperatorCommand::TaskCancel {
+            task_id: "t-clp".into(),
+        },
+    ];
+    for (n, command) in refused.into_iter().enumerate() {
+        let id = format!("clp-13a{n}");
+        let reply = ask(&mut agent, &id, &operator_request(&id, command.clone()))?;
+        ensure(error_code_of(&reply) == Some(error_code::FORBIDDEN), || {
+            format!("agent {a} sending {command:?} got {reply:?}, expected forbidden")
+        })?;
+    }
+    let commands = [
+        AgentCommand::Status,
+        AgentCommand::Send {
+            to: b.clone(),
+            message: "clp-13".into(),
+            level: None,
+            message_id: None,
+        },
+        AgentCommand::Done {
+            task_id: "t-clp".into(),
+            identity: None,
+        },
+    ];
+    for (n, command) in commands.into_iter().enumerate() {
+        let id = format!("clp-13b{n}");
+        let reply = ask(&mut op, &id, &command_request(&id, command.clone()))?;
+        ensure(error_code_of(&reply) == Some(error_code::FORBIDDEN), || {
+            format!("the operator sending {command:?} got {reply:?}, expected forbidden")
+        })?;
+    }
+    let after = get_fleet(&mut op, "clp-13c")?;
+    ensure(after == before, || {
+        format!("refused requests changed the fleet view:\n  before {before:?}\n  after  {after:?}")
+    })
+}
+
+fn operator_adds_and_removes_instances<F: ClientProtocolFixture>(fx: &mut F) -> CaseResult {
+    let name = fx.fresh_name();
+    let mut op = operator(fx)?;
+    let reply = ask(
+        &mut op,
+        "clp-14a",
+        &operator_request("clp-14a", add_command(&name)),
+    )?;
+    let Some(CommandResult::InstanceAdded { data }) = result_of(&reply) else {
+        return Err(format!(
+            "instance_add {name} got {reply:?}, expected instance_added"
+        ));
+    };
+    ensure(
+        data.instance_id == name && !data.working_directory.is_empty(),
+        || format!("instance_added {data:?} does not name {name} and its directory"),
+    )?;
+    let dir = data.working_directory.clone();
+    let view = get_fleet(&mut op, "clp-14b")?;
+    let listed = view.instances.iter().find(|i| i.instance_id == name);
+    ensure(
+        listed.is_some_and(|i| i.working_directory.as_deref() == Some(dir.as_str())),
+        || format!("the fleet view shows {listed:?}, expected {name} in {dir}"),
+    )?;
+    let reply = ask(
+        &mut op,
+        "clp-14c",
+        &operator_request("clp-14c", add_command(&name)),
+    )?;
+    ensure(
+        error_code_of(&reply) == Some(error_code::INSTANCE_EXISTS),
+        || format!("adding {name} again got {reply:?}, expected instance_exists"),
+    )?;
+    let reply = ask(
+        &mut op,
+        "clp-14d",
+        &operator_request("clp-14d", add_command("Not_A_Name")),
+    )?;
+    ensure(
+        error_code_of(&reply) == Some(error_code::INVALID_REQUEST),
+        || format!("adding an invalid name got {reply:?}, expected invalid_request"),
+    )?;
+    let remove = || OperatorCommand::InstanceRemove {
+        instance_id: name.clone(),
+    };
+    let reply = ask(&mut op, "clp-14e", &operator_request("clp-14e", remove()))?;
+    ensure(result_of(&reply) == Some(&CommandResult::Accepted), || {
+        format!("removing {name} got {reply:?}, expected accepted")
+    })?;
+    let view = get_fleet(&mut op, "clp-14f")?;
+    ensure(
+        !view.instances.iter().any(|i| i.instance_id == name),
+        || format!("{name} is still in the fleet view after it was removed"),
+    )?;
+    let reply = ask(&mut op, "clp-14g", &operator_request("clp-14g", remove()))?;
+    ensure(
+        error_code_of(&reply) == Some(error_code::UNKNOWN_INSTANCE),
+        || format!("removing {name} again got {reply:?}, expected unknown_instance"),
+    )
+}
+
+fn restart_to_a_broken_binary_changes_nothing<F: ClientProtocolFixture>(fx: &F) -> CaseResult {
+    let mut op = operator(fx)?;
+    let before = get_fleet(&mut op, "clp-15")?;
+    subscribe(&mut op, Some(before.as_of_event_id))?;
+    let restart = OperatorCommand::DaemonRestart {
+        binary: Some(NO_BINARY.into()),
+    };
+    let reply = ask(&mut op, "clp-15a", &operator_request("clp-15a", restart))?;
+    ensure(
+        error_code_of(&reply) == Some(error_code::PREFLIGHT_FAILED),
+        || format!("daemon_restart to {NO_BINARY} got {reply:?}, expected preflight_failed"),
+    )?;
+    let quiet = collect(&mut op, QUIET)?;
+    ensure(quiet.events.is_empty() && !quiet.closed, || {
+        format!(
+            "after the failed restart: events {:?}, connection closed {}",
+            ids(&quiet.events),
+            quiet.closed
+        )
+    })?;
+    let after = get_fleet(&mut op, "clp-15b")?;
+    ensure(after == before, || {
+        format!("the fleet view changed:\n  before {before:?}\n  after  {after:?}")
+    })
+}
+
+fn task_cancel_changes_nothing<F: ClientProtocolFixture>(fx: &F) -> CaseResult {
+    let mut op = operator(fx)?;
+    let before = get_fleet(&mut op, "clp-16")?;
+    subscribe(&mut op, Some(before.as_of_event_id))?;
+    let cancel = OperatorCommand::TaskCancel {
+        task_id: "t-clp".into(),
+    };
+    let reply = ask(&mut op, "clp-16a", &operator_request("clp-16a", cancel))?;
+    ensure(
+        error_code_of(&reply) == Some(error_code::NOT_SUPPORTED),
+        || format!("task_cancel got {reply:?}, expected not_supported (gate 10)"),
+    )?;
+    let quiet = collect(&mut op, QUIET)?;
+    ensure(quiet.events.is_empty(), || {
+        format!("task_cancel made events {:?}", ids(&quiet.events))
+    })?;
+    let after = get_fleet(&mut op, "clp-16b")?;
+    ensure(after == before, || {
+        format!("the fleet view changed:\n  before {before:?}\n  after  {after:?}")
+    })
+}
+
+fn inbox_of(c: &mut ProbeClient, id: &str, after: Option<&str>) -> Result<ClientResponse, String> {
+    let command = AgentCommand::Inbox {
+        after_message_id: after.map(str::to_owned),
+    };
+    ask(c, id, &command_request(id, command))
+}
+
+fn message_ids(reply: &ClientResponse) -> Option<Vec<String>> {
+    match result_of(reply)? {
+        CommandResult::Messages { data } => {
+            Some(data.messages.iter().map(|m| m.message_id.clone()).collect())
+        }
+        _ => None,
+    }
+}
+
+fn one_message_per_id<F: ClientProtocolFixture>(fx: &F) -> CaseResult {
+    const X: &str = "0c1f7e6a-3b1d-4e2a-9c4b-5d6e7f809a1b";
+    const Y: &str = "1d2e8f7b-4c2e-4f3b-8d5c-6e7f8091ab2c";
+    let (a, b) = fx.agents();
+    let mut from = agent_client(fx, &a)?;
+    let mut to = agent_client(fx, &b)?;
+    let send_as = |c: &mut ProbeClient, n: &str, id: &str, body: &str| {
+        let command = AgentCommand::Send {
+            to: b.clone(),
+            message: body.into(),
+            level: Some(MessageLevel::Queue),
+            message_id: Some(id.into()),
+        };
+        ask(c, n, &command_request(n, command))
+    };
+    for (n, id, body) in [
+        ("clp-17a", X, "one"),
+        ("clp-17b", X, "one"),
+        ("clp-17c", Y, "two"),
+    ] {
+        let reply = send_as(&mut from, n, id, body)?;
+        ensure(result_of(&reply) == Some(&CommandResult::Accepted), || {
+            format!("send {id} {body:?} ({n}) got {reply:?}, expected accepted")
+        })?;
+    }
+    for (n, id, body) in [
+        ("clp-17d", X, "not one"),
+        ("clp-17e", "clp-not-a-uuid", "x"),
+    ] {
+        let reply = send_as(&mut from, n, id, body)?;
+        ensure(
+            error_code_of(&reply) == Some(error_code::INVALID_REQUEST),
+            || format!("send {id} {body:?} got {reply:?}, expected invalid_request"),
+        )?;
+    }
+    let all = inbox_of(&mut to, "clp-17f", None)?;
+    ensure(message_ids(&all) == Some(vec![X.into(), Y.into()]), || {
+        format!("{b}'s inbox is {all:?}, expected {X} once, then {Y}")
+    })?;
+    let after = inbox_of(&mut to, "clp-17g", Some(X))?;
+    ensure(message_ids(&after) == Some(vec![Y.into()]), || {
+        format!("{b}'s inbox after {X} is {after:?}, expected only {Y}")
+    })?;
+    for (c, n, cursor, whose) in [
+        (
+            &mut to,
+            "clp-17h",
+            "2e3f9a8c-5d3f-4a4c-9e6d-7f8091a2bc3d",
+            "an unknown id",
+        ),
+        (&mut from, "clp-17i", X, "someone else's message"),
+    ] {
+        let reply = inbox_of(c, n, Some(cursor))?;
+        ensure(
+            error_code_of(&reply) == Some(error_code::UNKNOWN_MESSAGE),
+            || format!("inbox after {whose} got {reply:?}, expected unknown_message"),
+        )?;
+    }
+    Ok(())
+}
+
 // ---- the fake daemon as a fixture ----
 
 /// The testkit fake daemon behind the CLP contract: an instance with a
@@ -821,9 +1156,12 @@ pub struct FakeDaemonFixture {
     dir: TempDir,
     base: Arc<AtomicU64>,
     items: u64,
+    names: u64,
 }
 
 pub const FAKE_INSTANCE: &str = "clp-1";
+/// The second instance of the fake (the other agent of CLP-13, CLP-17).
+pub const FAKE_PEER: &str = "clp-2";
 
 impl FakeDaemonFixture {
     pub fn new() -> FakeDaemonFixture {
@@ -833,6 +1171,7 @@ impl FakeDaemonFixture {
             dir,
             base: Arc::new(AtomicU64::new(0)),
             items: 0,
+            names: 0,
         };
         fx.boot().expect("fake daemon");
         fx
@@ -845,12 +1184,15 @@ impl FakeDaemonFixture {
     fn boot(&mut self) -> io::Result<()> {
         let daemon = FakeDaemon::start_at(&self.path())?;
         self.base.store(daemon.event_id_start(), Ordering::SeqCst);
-        daemon.set_instance(InstanceView {
-            instance_id: FAKE_INSTANCE.into(),
-            team_id: "general".into(),
-            backend: "claude".into(),
-            state: AgentState::Unknown,
-        });
+        for id in [FAKE_INSTANCE, FAKE_PEER] {
+            daemon.set_instance(InstanceView {
+                instance_id: id.into(),
+                team_id: "general".into(),
+                backend: "claude".into(),
+                state: AgentState::Unknown,
+                working_directory: Some(format!("/fake/workspace/{id}")),
+            });
+        }
         self.daemon = Some(daemon);
         Ok(())
     }
@@ -922,6 +1264,15 @@ impl ClientProtocolFixture for FakeDaemonFixture {
     fn terminal_instance(&self) -> String {
         FAKE_INSTANCE.into()
     }
+
+    fn agents(&self) -> (String, String) {
+        (FAKE_INSTANCE.into(), FAKE_PEER.into())
+    }
+
+    fn fresh_name(&mut self) -> String {
+        self.names += 1;
+        format!("clp-n{}", self.names)
+    }
 }
 
 // ---- mutants: the fake behind a misbehaving proxy ----
@@ -957,6 +1308,12 @@ impl<F: ClientProtocolFixture> ClientProtocolFixture for Proxied<F> {
     }
     fn terminal_instance(&self) -> String {
         self.inner.terminal_instance()
+    }
+    fn agents(&self) -> (String, String) {
+        self.inner.agents()
+    }
+    fn fresh_name(&mut self) -> String {
+        self.inner.fresh_name()
     }
 }
 

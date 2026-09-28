@@ -1,4 +1,4 @@
-//! The fake daemon speaks client protocol 1.1 with the real core types.
+//! The fake daemon speaks client protocol 1.2 with the real core types.
 
 use agend_core::protocol::ProtocolVersion;
 use agend_core::protocol::ask::{AnswerSource, AskEntry, AskReply, AskThread, ContextRecap};
@@ -7,14 +7,19 @@ use agend_core::protocol::client::error_code::{
 };
 use agend_core::protocol::client::{
     AgentCommand, AnswerAskData, ClientCommandData, ClientRequest, ClientResponse, CommandResult,
-    DaemonEvent, InstanceData, ResultIdentity, STALE_RESULT, SubscribeEventsData, V1_1,
+    DaemonEvent, InstanceData, OperatorCommand, OperatorData, ResultIdentity, STALE_RESULT,
+    SubscribeEventsData, V1_2,
 };
 use agend_testkit::fake_daemon::{FakeDaemon, ProbeClient};
 
+/// An agent's connection (agent commands are for agents, gate 9).
 fn connected(daemon: &FakeDaemon) -> ProbeClient {
     let mut client = ProbeClient::connect(daemon.socket_path()).unwrap();
-    match client.request(&ClientRequest::hello()).unwrap() {
-        ClientResponse::Hello { data } => assert_eq!(data.selected, V1_1),
+    match client
+        .request(&ClientRequest::hello_as(Some("fd-agent".into())))
+        .unwrap()
+    {
+        ClientResponse::Hello { data } => assert_eq!(data.selected, V1_2),
         other => panic!("expected hello, got {other:?}"),
     }
     client
@@ -66,6 +71,7 @@ fn invalid_json_before_hello_gets_hello_required_and_close() {
 #[test]
 fn invalid_json_after_hello_is_rejected_and_the_connection_stays_open() {
     let daemon = FakeDaemon::start().unwrap();
+    daemon.set_status("idle");
     let mut client = connected(&daemon);
     client.send_raw("not json").unwrap();
     assert_eq!(error_code(client.recv().unwrap().unwrap()), INVALID_REQUEST);
@@ -90,7 +96,7 @@ fn incompatible_major_gets_a_clear_error_and_close() {
     assert_eq!(data.code, VERSION_MISMATCH);
     assert_eq!(
         data.message,
-        "client protocol version mismatch: local supports 2.0, remote supports 1.1"
+        "client protocol version mismatch: local supports 2.0, remote supports 1.2"
     );
     assert!(client.recv().unwrap().is_none());
 }
@@ -330,4 +336,81 @@ fn open_ask_carries_task_and_recap_and_is_answerable() {
         }
     }
     assert!(accepted, "open_ask threads accept answer_ask");
+}
+
+/// Gate 9: `hello` names the daemon; agent commands are for agents and
+/// operator requests for the operator (the real daemon's words).
+#[test]
+fn hello_names_the_daemon_and_permissions_go_both_ways() {
+    let daemon = FakeDaemon::start().unwrap();
+    let mut operator = ProbeClient::connect(daemon.socket_path()).unwrap();
+    let ClientResponse::Hello { data } = operator.request(&ClientRequest::hello()).unwrap() else {
+        panic!("no hello");
+    };
+    assert_eq!(data.daemon_pid, Some(std::process::id()));
+    assert_eq!(data.boot_id, Some(daemon.event_id_start()));
+    assert!(data.daemon_version.unwrap().starts_with("agend "));
+    let ClientResponse::Error { data } = operator
+        .request(&command("r-1", AgentCommand::Status))
+        .unwrap()
+    else {
+        panic!("the operator's status was not refused");
+    };
+    assert_eq!(
+        (data.code.as_str(), data.message.as_str()),
+        (
+            "forbidden",
+            "agend status is an agent command; it runs inside an agent, where AGEND_INSTANCE is set"
+        )
+    );
+    let mut agent = connected(&daemon);
+    let add = ClientRequest::Operator {
+        data: OperatorData {
+            request_id: "r-2".into(),
+            command: OperatorCommand::InstanceRemove {
+                instance_id: "x".into(),
+            },
+        },
+    };
+    assert_eq!(error_code(agent.request(&add).unwrap()), "forbidden");
+}
+
+/// Gate 9: `daemon_restart` answers `restarting`, closes every connection
+/// and starts a new boot id; a binary that is not agend is refused.
+#[test]
+fn a_restart_closes_connections_and_changes_the_boot_id() {
+    let daemon = FakeDaemon::start().unwrap();
+    let before = daemon.event_id_start();
+    let mut operator = ProbeClient::hello(daemon.socket_path(), None).unwrap().0;
+    let restart = |binary: Option<&str>| ClientRequest::Operator {
+        data: OperatorData {
+            request_id: "r-1".into(),
+            command: OperatorCommand::DaemonRestart {
+                binary: binary.map(Into::into),
+            },
+        },
+    };
+    let refused = operator.request(&restart(Some("/usr/bin/false"))).unwrap();
+    let ClientResponse::Error { data } = refused else {
+        panic!("{refused:?}");
+    };
+    assert_eq!(data.code, "preflight_failed");
+    assert!(
+        data.message.starts_with(
+            "/usr/bin/false daemon preflight exited with status 1; the daemon keeps running agend "
+        ),
+        "{}",
+        data.message
+    );
+    let reply = operator.request(&restart(None)).unwrap();
+    assert!(
+        matches!(&reply, ClientResponse::CommandResult { data }
+            if matches!(data.result, CommandResult::Restarting { .. })),
+        "{reply:?}"
+    );
+    assert!(
+        operator.recv().unwrap().is_none(),
+        "the connection must close"
+    );
+    assert!(daemon.event_id_start() > before, "a new boot id");
 }

@@ -8,12 +8,13 @@
 //!   the TUI) and always fetches the fleet view again (a 1.1 client never
 //!   reuses an event cursor).
 //!
-//! The socket is `$AGEND_HOME/run/daemon.sock`; the caller is
-//! `AGEND_INSTANCE` when set (an agent), otherwise the operator.
+//! The socket is `$AGEND_HOME/run/daemon.sock` (`home::resolve`, gate 9
+//! P3); the caller is `AGEND_INSTANCE` when set (an agent), otherwise the
+//! operator.
 //!
 //! Must NOT: mutate state.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
 
@@ -31,12 +32,9 @@ usage: agend debug ping [--count N] [--interval MS]
 ";
 
 pub fn run(args: &[String]) -> ExitCode {
-    let target = match (socket(), caller()) {
-        (Ok(socket), caller) => (socket, caller),
-        (Err(e), _) => {
-            eprintln!("agend: {e}");
-            return ExitCode::from(1);
-        }
+    let target = match crate::home::resolve() {
+        Ok(home) => (home.join(DAEMON_SOCKET), caller()),
+        Err(failure) => return failure.report(false),
     };
     match args.first().map(String::as_str) {
         Some("ping") => match ping_options(&args[1..]) {
@@ -51,18 +49,6 @@ pub fn run(args: &[String]) -> ExitCode {
 fn usage() -> ExitCode {
     eprint!("{USAGE}");
     ExitCode::from(2)
-}
-
-/// `$AGEND_HOME/run/daemon.sock`.
-fn socket() -> Result<PathBuf, String> {
-    match std::env::var_os("AGEND_HOME") {
-        Some(home) if Path::new(&home).is_absolute() => Ok(Path::new(&home).join(DAEMON_SOCKET)),
-        Some(home) => Err(format!(
-            "AGEND_HOME must be an absolute path, got {}",
-            Path::new(&home).display()
-        )),
-        None => Err("AGEND_HOME is not set".into()),
-    }
 }
 
 /// The instance id inside an agent (the daemon sets `AGEND_INSTANCE`).

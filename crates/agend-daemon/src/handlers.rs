@@ -7,24 +7,36 @@
 //! `get_fleet`, `subscribe_events`, `subscribe_terminal` and
 //! `resolve_attention` (operator only: any `caller` in `hello` is an agent,
 //! P2; identity is checked before the item is looked up). `terminal_input`
-//! and agent commands answer `not_supported`, `answer_ask` answers
-//! `unknown_ask` (no asks before gates 9 and 10); none of them changes
-//! anything.
+//! answers `not_supported`, `answer_ask` answers `unknown_ask` (no asks
+//! before gate 10); neither changes anything.
+//!
+//! Gate 9 (P1): permissions are checked here only. `command` (agent
+//! commands, [`agent`]) is for agents: the operator gets `forbidden`;
+//! `operator` ([`operator`]) is for the operator: an agent gets
+//! `forbidden`. Read-only requests are open to both.
 //!
 //! Must NOT: read the caller's cwd to infer context, or know which transport
 //! (socket, future MCP adapter) carried the call.
 
+pub mod agent;
+pub mod operator;
+
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
+use agend_core::protocol::ProtocolVersion;
 use agend_core::protocol::client::{
     AgentCommand, AgentState, ClientCommandResultData, ClientRequest, ClientResponse,
-    CommandResult, ErrorData, FleetData, TerminalSnapshotData, error_code,
+    CommandResult, ErrorData, FleetData, SelectedVersionData, TerminalSnapshotData, error_code,
 };
 use tokio::sync::{broadcast, mpsc::UnboundedSender};
 
+use crate::driver::codex::CodexDriver;
 use crate::fleet::{Fleet, Subscription};
 use crate::runtime::HolderRuntime;
+use crate::store::SqliteStore;
 use crate::supervisor::Event;
 
 /// What an agent gets for `resolve_attention`.
@@ -37,8 +49,29 @@ const SNAPSHOT_WITHIN: Duration = Duration::from_secs(5);
 pub struct Context {
     pub fleet: Arc<Fleet>,
     pub runtime: HolderRuntime,
-    /// The supervisor's queue (`resolve_attention` acts through it).
+    /// The supervisor's queue (`resolve_attention`, `instance_add` and
+    /// `instance_remove` act through it).
     pub supervisor: UnboundedSender<Event>,
+    pub store: Arc<SqliteStore>,
+    /// `send` delivers through it (gate 7's `deliver`).
+    pub codex: CodexDriver,
+    /// This daemon's own binary (`daemon_restart` without a binary).
+    pub exe: PathBuf,
+    /// A restart preflight is running (only one at a time, gate 9 P7).
+    pub restarting: AtomicBool,
+}
+
+impl Context {
+    /// The `hello` reply for `selected`: with the daemon's version, pid
+    /// and boot id (gate 9 P6, P7).
+    pub fn hello(&self, selected: ProtocolVersion) -> SelectedVersionData {
+        SelectedVersionData {
+            selected,
+            daemon_version: Some(format!("agend {}", env!("CARGO_PKG_VERSION"))),
+            daemon_pid: Some(std::process::id()),
+            boot_id: Some(self.fleet.base()),
+        }
+    }
 }
 
 /// What the server does with a request.
@@ -52,6 +85,12 @@ pub enum Outcome {
         snapshot: ClientResponse,
         live: Option<broadcast::Receiver<String>>,
     },
+    /// Send `reply` (`restarting`), then hand `binary` to the supervisor,
+    /// which stops the daemon so it can `exec` it.
+    Restart {
+        reply: ClientResponse,
+        binary: PathBuf,
+    },
 }
 
 pub fn error(request_id: Option<String>, code: &str, message: impl Into<String>) -> ClientResponse {
@@ -62,6 +101,14 @@ pub fn error(request_id: Option<String>, code: &str, message: impl Into<String>)
             message: message.into(),
         },
     }
+}
+
+/// What the operator gets for an agent command.
+fn agent_only(command: &AgentCommand) -> String {
+    format!(
+        "{} is an agent command; it runs inside an agent, where AGEND_INSTANCE is set",
+        command_name(command)
+    )
 }
 
 /// `agend review approve` for `review_approve`, from the command's wire tag.
@@ -107,14 +154,25 @@ pub async fn handle(ctx: &Context, caller: Option<&str>, request: ClientRequest)
                 data.ask_id
             ),
         ),
-        ClientRequest::Command { data } => error(
-            Some(data.request_id),
-            error_code::NOT_SUPPORTED,
-            format!(
-                "agent commands arrive in gate 9 ({})",
-                command_name(&data.command)
+        ClientRequest::Command { data } => match caller {
+            Some(caller) => agent::handle(ctx, caller, data).await,
+            None => error(
+                Some(data.request_id),
+                error_code::FORBIDDEN,
+                agent_only(&data.command),
             ),
-        ),
+        },
+        ClientRequest::Operator { data } => {
+            if caller.is_some() {
+                let message = operator::forbidden(&data.command);
+                return Outcome::Reply(error(
+                    Some(data.request_id),
+                    error_code::FORBIDDEN,
+                    message,
+                ));
+            }
+            return operator::handle(ctx, data).await;
+        }
         ClientRequest::ResolveAttention { data } => {
             if caller.is_some() {
                 return Outcome::Reply(error(

@@ -1,5 +1,6 @@
 //! `agend daemon` (gate 6 P1, P5): runs in the foreground only; keeping it
-//! running is launchd's or systemd's job (gate 13). Needs `AGEND_HOME`.
+//! running is launchd's or systemd's job (gate 13). The caller (`agend`'s
+//! `home::resolve`, gate 9 P3) passes the home.
 //!
 //! Boot order: check the client socket path fits (100 bytes) → open
 //! `agend.db` (the one daemon per home: the DB's exclusive lock, retried
@@ -16,17 +17,22 @@
 //! connections, close the DB, exit 0. Holders keep running and are never
 //! sent `Shutdown` (D3).
 //!
-//! Exit codes: 0 after a signal, 1 when it cannot start (no `AGEND_HOME`,
-//! socket path too long, `agend.db` in use or broken, shims, socket), 2 on a
-//! usage error.
+//! `agend daemon restart` (gate 9 P7): once the preflight passed, the same
+//! stop, then `exec` of the new binary as `agend daemon` (same pid, same
+//! environment and terminal; every fd is close-on-exec). The new image
+//! reaps the holders it inherited (`crate::reaper`). An `exec` that fails
+//! (the binary vanished after its preflight) prints why and exits 1.
+//!
+//! Exit codes: 0 after a signal, 1 when it cannot start (socket path too
+//! long, `agend.db` in use or broken, shims, socket) or cannot `exec`.
 //!
 //! Must NOT: fork into the background, write pid/ready/cookie files, or
 //! stop holders when it stops.
 
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
 use std::fs::{self, DirBuilder};
@@ -43,7 +49,7 @@ use crate::log;
 use crate::runtime::{EventSink, HolderRuntime, shims};
 use crate::server::{self, Server};
 use crate::store::{SqliteStore, StoreError};
-use crate::supervisor::{Event, Supervisor};
+use crate::supervisor::{Event, Stopped, Supervisor};
 
 /// How long `agend.db` is retried while another process holds it (P1).
 pub const DB_RETRY_FOR: Duration = Duration::from_secs(10);
@@ -51,25 +57,8 @@ pub const DB_RETRY_EVERY: Duration = Duration::from_millis(200);
 /// Housekeeping after boot (P5).
 pub const HOUSEKEEPING_EVERY: Duration = Duration::from_secs(60 * 60);
 
-pub fn run(args: Vec<OsString>) -> ExitCode {
-    if !args.is_empty() {
-        eprintln!("usage: agend daemon   (runs in the foreground; needs AGEND_HOME)");
-        return ExitCode::from(2);
-    }
-    let home = match std::env::var_os("AGEND_HOME") {
-        None => {
-            eprintln!("AGEND_HOME is not set");
-            return ExitCode::from(1);
-        }
-        Some(home) if !Path::new(&home).is_absolute() => {
-            eprintln!(
-                "AGEND_HOME must be an absolute path, got {}",
-                Path::new(&home).display()
-            );
-            return ExitCode::from(1);
-        }
-        Some(home) => PathBuf::from(home),
-    };
+/// Runs the daemon for `home` (absolute, checked by the caller).
+pub fn run(home: PathBuf) -> ExitCode {
     if let Err(e) = server::check_socket_len(&home.join(DAEMON_SOCKET)) {
         eprintln!("agend daemon: {e}");
         return ExitCode::from(1);
@@ -111,10 +100,26 @@ pub fn run(args: Vec<OsString>) -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    let code = runtime.block_on(serve(home, exe, store));
+    let stopped = runtime.block_on(serve(home, exe, store));
     // Pending restart timers and the like are dropped, not awaited.
     runtime.shutdown_timeout(Duration::from_secs(1));
-    code
+    match stopped {
+        Ok(Stopped::Signal(_)) => ExitCode::SUCCESS,
+        Ok(Stopped::Exec(binary)) => exec(&binary),
+        Err(code) => code,
+    }
+}
+
+/// Replaces this process with `<binary> daemon`; returns only on failure.
+fn exec(binary: &Path) -> ExitCode {
+    use std::os::unix::process::CommandExt;
+    log::line(&format!("exec {} daemon", binary.display()));
+    let error = std::process::Command::new(binary).arg("daemon").exec();
+    log::line(&format!(
+        "agend daemon: cannot exec {}: {error}; start it again with: agend daemon",
+        binary.display()
+    ));
+    ExitCode::from(1)
 }
 
 /// Opens `agend.db`, retrying while another process holds it (the old
@@ -158,7 +163,7 @@ fn forward_signal(kind: SignalKind, name: &'static str, events: UnboundedSender<
     }
 }
 
-async fn serve(home: PathBuf, exe: PathBuf, store: SqliteStore) -> ExitCode {
+async fn serve(home: PathBuf, exe: PathBuf, store: SqliteStore) -> Result<Stopped, ExitCode> {
     let (events, mut queue) = unbounded_channel();
     forward_signal(SignalKind::interrupt(), "SIGINT", events.clone());
     forward_signal(SignalKind::terminate(), "SIGTERM", events.clone());
@@ -167,7 +172,7 @@ async fn serve(home: PathBuf, exe: PathBuf, store: SqliteStore) -> ExitCode {
         Ok(socket) => socket,
         Err(e) => {
             log::line(&format!("agend daemon: cannot prepare run/: {e}"));
-            return ExitCode::from(1);
+            return Err(ExitCode::from(1));
         }
     };
     crate::housekeeping::run(&store, &home, log::now_unix_ms()).await;
@@ -180,7 +185,7 @@ async fn serve(home: PathBuf, exe: PathBuf, store: SqliteStore) -> ExitCode {
             log::line(&format!(
                 "agend daemon: cannot set up the shims in bin/: {e}"
             ));
-            return ExitCode::from(1);
+            return Err(ExitCode::from(1));
         }
     }
     let daemon_env: Vec<(String, String)> = std::env::vars_os()
@@ -193,13 +198,15 @@ async fn serve(home: PathBuf, exe: PathBuf, store: SqliteStore) -> ExitCode {
             "agend daemon: cannot write {}: {e}",
             codex_launch::zdotdir(&home).join(".zprofile").display()
         ));
-        return ExitCode::from(1);
+        return Err(ExitCode::from(1));
     }
 
     let sink_events = events.clone();
     let sink: EventSink = Arc::new(move |event| {
         let _ = sink_events.send(Event::Holder(event));
     });
+    // Before any holder starts: the holders an exec restart left us.
+    let inherited = crate::reaper::inherited(&home);
     let runtime = HolderRuntime::new(&home, &exe, daemon_env, sink);
     let fleet = Arc::new(Fleet::new(log::now_unix_ms()));
     let store = Arc::new(store);
@@ -209,17 +216,18 @@ async fn serve(home: PathBuf, exe: PathBuf, store: SqliteStore) -> ExitCode {
     });
     let codex = CodexDriver::new(&home, Arc::clone(&store), codex_sink);
     let mut supervisor = Supervisor::new(
-        store,
+        Arc::clone(&store),
         runtime.clone(),
-        codex,
+        codex.clone(),
         events.clone(),
         Arc::clone(&fleet),
     );
+    crate::reaper::watch(inherited);
     let report = match supervisor.boot().await {
         Ok(report) => report,
         Err(e) => {
             log::line(&format!("agend daemon: boot failed: {e}"));
-            return ExitCode::from(1);
+            return Err(ExitCode::from(1));
         }
     };
     // Bound only now (P1): a client that connects sees the whole fleet.
@@ -230,15 +238,19 @@ async fn serve(home: PathBuf, exe: PathBuf, store: SqliteStore) -> ExitCode {
                 "agend daemon: cannot listen on {}: {e}",
                 socket.display()
             ));
-            return ExitCode::from(1);
+            return Err(ExitCode::from(1));
         }
     };
     let context = Arc::new(Context {
         fleet,
         runtime,
         supervisor: events.clone(),
+        store,
+        codex,
+        exe,
+        restarting: AtomicBool::new(false),
     });
-    let server = Server::start(listener, socket.clone(), context);
+    let server = Server::start(listener, socket.clone(), Arc::clone(&context));
     log::line(&format!("listening on {}", socket.display()));
     log::line(&format!(
         "agend daemon ready: instances={} recovered={} started={} orphans={}",
@@ -257,13 +269,19 @@ async fn serve(home: PathBuf, exe: PathBuf, store: SqliteStore) -> ExitCode {
         }
     });
 
-    let signal = supervisor.run(&mut queue).await;
+    let stopped = supervisor.run(&mut queue).await;
+    let why = match &stopped {
+        Stopped::Signal(signal) => (*signal).to_owned(),
+        Stopped::Exec(binary) => format!("restart with {}", binary.display()),
+    };
     log::line(&format!(
-        "agend daemon stopping ({signal}); holders keep running"
+        "agend daemon stopping ({why}); holders keep running"
     ));
     server.stop().await;
-    // Closes every holder connection (no Shutdown) and then the DB.
+    // Closes every holder connection (no Shutdown) and then the DB: the
+    // server's tasks are gone, so this is the last handle on both.
+    drop(context);
     drop(supervisor);
     log::line("agend daemon stopped");
-    ExitCode::SUCCESS
+    Ok(stopped)
 }

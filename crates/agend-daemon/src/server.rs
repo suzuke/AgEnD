@@ -20,6 +20,9 @@
 //!   fills the socket buffer and is closed (it gets no `event_gap`).
 //! - [`Server::stop`]: stops accepting, removes the socket file, closes
 //!   every connection.
+//! - Gate 9: the `hello` reply names the daemon (version, pid, boot id);
+//!   an accepted restart is answered first and only then handed to the
+//!   supervisor.
 //!
 //! Must NOT: contain command logic (that is `handlers`).
 
@@ -32,8 +35,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use agend_core::protocol::client::{
-    ClientRequest, ClientResponse, EventData, SelectedVersionData, TerminalBytesData, error_code,
-    negotiate_version,
+    ClientRequest, ClientResponse, EventData, TerminalBytesData, error_code, negotiate_version,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::unix::OwnedWriteHalf;
@@ -219,7 +221,7 @@ async fn connection(stream: UnixStream, ctx: Arc<Context>, number: u64) {
                         Ok(selected) => {
                             negotiated = true;
                             client.caller = data.caller;
-                            let reply = ClientResponse::Hello { data: SelectedVersionData { selected } };
+                            let reply = ClientResponse::Hello { data: ctx.hello(selected) };
                             if !client.send(&reply).await {
                                 return;
                             }
@@ -245,6 +247,13 @@ async fn connection(stream: UnixStream, ctx: Arc<Context>, number: u64) {
                             }
                         }
                         events = Some(subscription.live);
+                    }
+                    Outcome::Restart { reply, binary } => {
+                        // The reply first; then the supervisor stops the
+                        // daemon, which closes this connection (the CLI
+                        // waits for that EOF, gate 9 P7).
+                        client.send(&reply).await;
+                        let _ = ctx.supervisor.send(crate::supervisor::Event::Exec(binary));
                     }
                     Outcome::Terminal { snapshot, live } => {
                         if let ClientResponse::TerminalSnapshot { data } = &snapshot {
