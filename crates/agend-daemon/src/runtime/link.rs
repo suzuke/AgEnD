@@ -73,7 +73,9 @@ pub type EventSink = Arc<dyn Fn(HolderEvent) + Send + Sync>;
 /// What the `Spawn` sent on the first connection did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpawnOutcome {
-    Spawned,
+    /// The holder started the agent now; its pid (gate 7 P2: the codex
+    /// sweep's process group).
+    Spawned { agent_pid: Option<u32> },
     /// The holder already ran its agent (gate 4 G10); nothing changed.
     AlreadySpawned,
 }
@@ -264,7 +266,11 @@ impl Worker {
             .map_err(|e| format!("send Spawn: {e}"))?;
         loop {
             match conn.recv_within(SPAWN_REPLY_WITHIN) {
-                Ok(HolderResponse::Spawned { .. }) => return Ok(SpawnOutcome::Spawned),
+                Ok(HolderResponse::Spawned { data }) => {
+                    return Ok(SpawnOutcome::Spawned {
+                        agent_pid: data.process_id,
+                    });
+                }
                 Ok(HolderResponse::Error { data }) if data.code == "already_spawned" => {
                     return Ok(SpawnOutcome::AlreadySpawned);
                 }

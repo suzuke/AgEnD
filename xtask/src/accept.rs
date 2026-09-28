@@ -17,6 +17,11 @@
 //! agend-daemon, agend-holder, agend (RTM-1..9 against real holders, the
 //! re-executed four boots, the real `agend daemon` tests) and agend-core,
 //! check-deps, then `daemon_probe demo` against the built `agend`.
+//! Gate 7 runs the checks of agend-daemon (the codex driver's DRV-1..9 and
+//! four boots against the fake app-server), agend-testkit (the fake
+//! app-server and `fake-codex`) and agend (the real daemon with the `sh`
+//! wrapper and `fake_codex`), check-deps, then `codex_demo` against the
+//! built `agend` and `fake_codex`.
 //! Gate 8 runs the checks of agend-client, agend-daemon, agend-testkit
 //! (the CLP contract against the fake, and its mutants), agend-core and
 //! agend (the CLP contract against the real daemon), check-deps, then
@@ -71,7 +76,9 @@ pub const GATES: &[Gate] = &[
     Gate {
         number: 7,
         name: "codex",
-        crates: &["agend-daemon"],
+        // `agend` holds the tests with the real binary and its `fake_codex`
+        // example (codex_process.rs); `agend-testkit` the fake app-server.
+        crates: &["agend-daemon", "agend-testkit", "agend"],
     },
     Gate {
         number: 8,
@@ -222,6 +229,26 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
             "demo",
         ])?;
         println!("gate 6 (daemon-holder): checks passed");
+    } else if gate.number == 7 {
+        step(&[
+            "build",
+            "--quiet",
+            "-p",
+            "agend",
+            "--bin",
+            "agend",
+            "--example",
+            "fake_codex",
+        ])?;
+        step(&[
+            "run",
+            "--quiet",
+            "-p",
+            "agend-daemon",
+            "--example",
+            "codex_demo",
+        ])?;
+        println!("gate 7 (codex): checks passed");
     } else if gate.number == 8 {
         step(&["build", "--quiet", "-p", "agend"])?;
         step(&[

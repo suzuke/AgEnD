@@ -52,15 +52,35 @@ pub enum Scenario {
     Busy,
     /// Stop the CLI, start it again, continue the same session by id.
     Resume,
+    /// codex (gate 7 P8): `thread/turns/list` and `thread/queue/list`
+    /// around a queued turn, then a context compaction (U5, U10).
+    TurnsList,
+    /// codex (gate 7 P8): `thread/queue/add` on an idle thread, then
+    /// `thread/queue/start`; an interrupt with a message queued; a steer
+    /// into an ended turn (U3, U9, U11).
+    QueueIdle,
+    /// codex (gate 7 P8): resume a thread that never had a turn after the
+    /// app-server restarted (U1).
+    ResumeEmpty,
 }
 
 impl Scenario {
+    /// The scenarios every backend supports.
     pub const ALL: &[Scenario] = &[
         Scenario::OneTurn,
         Scenario::Interrupt,
         Scenario::Approval,
         Scenario::Busy,
         Scenario::Resume,
+    ];
+
+    /// Added by gate 7 for codex. Until the owner records them (the gate 7
+    /// page, step 7), their transcripts may be missing: the conformance test
+    /// skips a missing one and says so.
+    pub const AWAITING_RECORDING: &[Scenario] = &[
+        Scenario::TurnsList,
+        Scenario::QueueIdle,
+        Scenario::ResumeEmpty,
     ];
 
     pub fn name(self) -> &'static str {
@@ -70,11 +90,18 @@ impl Scenario {
             Scenario::Approval => "approval",
             Scenario::Busy => "busy",
             Scenario::Resume => "resume",
+            Scenario::TurnsList => "turns_list",
+            Scenario::QueueIdle => "queue_idle",
+            Scenario::ResumeEmpty => "resume_empty",
         }
     }
 
     pub fn parse(name: &str) -> Option<Scenario> {
-        Scenario::ALL.iter().copied().find(|s| s.name() == name)
+        Scenario::ALL
+            .iter()
+            .chain(Scenario::AWAITING_RECORDING)
+            .copied()
+            .find(|s| s.name() == name)
     }
 }
 

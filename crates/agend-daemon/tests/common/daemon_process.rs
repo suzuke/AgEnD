@@ -134,6 +134,8 @@ pub fn add(home: &Path, id: &str, script: &str) -> Result<Instance, String> {
         session_id: Some(new_session_id().map_err(|e| e.to_string())?),
         status: InstanceStatus::New,
         session_started: false,
+        agent_pid: None,
+        legacy_no_thread: false,
     };
     let store = SqliteStore::open(home, 0).map_err(|e| format!("open store: {e}"))?;
     block_on(store.add_instance(&instance)).map_err(|e| format!("add {id}: {e}"))?;

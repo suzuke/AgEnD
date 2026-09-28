@@ -39,6 +39,14 @@ fn every_fake_matches_its_real_recordings() {
 fn check(backend: &dyn Backend) -> String {
     let mut report = Vec::new();
     for &scenario in backend.scenarios() {
+        if awaits_recording(backend, scenario) {
+            println!(
+                "{}/{}: not recorded yet (gate 7 step 7); skipped",
+                backend.name(),
+                scenario.name()
+            );
+            continue;
+        }
         if let Err(e) = check_one(backend, scenario, &mut report) {
             report.push(format!("{}/{}: {e}", backend.name(), scenario.name()));
         }
@@ -52,6 +60,15 @@ fn check(backend: &dyn Backend) -> String {
         backend.program(),
         report.join("\n")
     )
+}
+
+/// A gate 7 scenario whose transcript the owner has not recorded yet.
+fn awaits_recording(backend: &dyn Backend, scenario: Scenario) -> bool {
+    Scenario::AWAITING_RECORDING.contains(&scenario)
+        && !transcripts()
+            .join(backend.name())
+            .join(format!("{}.jsonl", scenario.name()))
+            .exists()
 }
 
 fn check_one(
@@ -131,6 +148,7 @@ fn every_backend_has_a_transcript_per_supported_scenario_and_nothing_else() {
         let mut expected: Vec<String> = backend
             .scenarios()
             .iter()
+            .filter(|s| !awaits_recording(*backend, **s))
             .map(|s| format!("{}.jsonl", s.name()))
             .collect();
         expected.sort();
@@ -142,12 +160,40 @@ fn every_backend_has_a_transcript_per_supported_scenario_and_nothing_else() {
 fn committed_transcripts_pass_the_secret_scan() {
     for backend in recorder::BACKENDS {
         for scenario in backend.scenarios() {
+            if awaits_recording(*backend, *scenario) {
+                continue;
+            }
             let path = transcripts()
                 .join(backend.name())
                 .join(format!("{}.jsonl", scenario.name()));
             let (header, entries) = recorder::read_transcript(&path).expect("transcript");
             let findings = recorder::redact::scan(&header, &entries);
             assert!(findings.is_empty(), "{}: {findings:?}", path.display());
+        }
+    }
+}
+
+/// Gate 7's codex scenarios run to the end against the fake (so the
+/// recorder is ready for the owner's step 7), and record the methods they
+/// are about.
+#[test]
+fn gate_7_codex_scenarios_run_against_the_fake() {
+    let codex = recorder::backend("codex").expect("codex");
+    for &scenario in Scenario::AWAITING_RECORDING {
+        let entries = recorder::run_fake(codex, scenario)
+            .unwrap_or_else(|e| panic!("{}: {e}", scenario.name()));
+        let sent: Vec<&str> = entries
+            .iter()
+            .filter(|e| e.from == recorder::Side::Client)
+            .filter_map(|e| e.msg["method"].as_str())
+            .collect();
+        let wanted: &[&str] = match scenario {
+            Scenario::TurnsList => &["thread/queue/list", "thread/turns/list"],
+            Scenario::QueueIdle => &["thread/queue/start", "turn/interrupt", "turn/steer"],
+            _ => &["thread/resume"],
+        };
+        for method in wanted {
+            assert!(sent.contains(method), "{}: {sent:?}", scenario.name());
         }
     }
 }
