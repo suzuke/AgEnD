@@ -100,6 +100,70 @@ fn check_one(
     Ok(())
 }
 
+/// Mutation check on real recordings (`shape::TIMED`): in codex `busy` the
+/// replies to the steer and the queue/add may land after the first turn's
+/// user message (codex shows it on its own clock; CI saw the fake do this
+/// under load), but an interrupt's reply landing before the user message it
+/// brings forward is still a difference (CI saw that too, a fake race).
+#[test]
+fn a_late_steer_or_queue_reply_is_timing_but_an_early_interrupt_reply_is_not() {
+    // The recording with the reply to its first `method` request moved to
+    // just after the first user message (`late`) or just before it.
+    let moved = |scenario: &str, method: &str, late: bool| {
+        let path = transcripts()
+            .join("codex")
+            .join(format!("{scenario}.jsonl"));
+        let (_, real) = recorder::read_transcript(&path).expect("transcript");
+        let id = real
+            .iter()
+            .find(|e| e.msg["method"] == method)
+            .unwrap_or_else(|| panic!("{method} in {}", path.display()))
+            .msg["id"]
+            .clone();
+        let mut out = real.clone();
+        let reply = out
+            .iter()
+            .position(|e| e.msg["id"] == id && e.msg.get("method").is_none())
+            .expect("reply");
+        let reply = out.remove(reply);
+        let (user, at) = if late {
+            ("item/completed", 1)
+        } else {
+            ("item/started", 0)
+        };
+        let user = out
+            .iter()
+            .position(|e| {
+                e.msg["method"] == user && e.msg["params"]["item"]["type"] == "userMessage"
+            })
+            .expect("user message");
+        out.insert(user + at, reply);
+        (real, out)
+    };
+    for method in ["turn/steer", "thread/queue/add"] {
+        let (real, late) = moved("busy", method, true);
+        assert_eq!(
+            shape::compare("codex", "busy", &real, &late),
+            Vec::<String>::new(),
+            "a late {method} reply"
+        );
+        // TIMED is per scenario: the same trace under another name differs.
+        let diffs = shape::compare("codex", "one_turn", &real, &late);
+        assert!(
+            diffs
+                .iter()
+                .any(|d| d.contains(&format!("result {method}"))),
+            "{diffs:?}"
+        );
+    }
+    let (real, early) = moved("interrupt", "turn/interrupt", false);
+    let diffs = shape::compare("codex", "interrupt", &real, &early);
+    assert!(
+        diffs.iter().any(|d| d.contains("result turn/interrupt")),
+        "an interrupt reply before its user message went unnoticed: {diffs:?}"
+    );
+}
+
 /// Mutation check on a real recording: a repeated lifecycle message must
 /// be a difference, repeated streaming chunks must not (`shape::COLLAPSED`).
 #[test]

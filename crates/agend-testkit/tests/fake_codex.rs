@@ -498,3 +498,82 @@ fn fake_codex_cli_app_server_and_tui() {
         format!("agent args: resume {thread} --remote unix:///x.sock\nagent config: t=1 | u=2\n")
     );
 }
+
+/// Notifications the server emitted before it handled a request go out
+/// before that request's reply. Interrupts land around the moment the first
+/// turn's user message comes due (a third into `--turn-ms`): whichever
+/// happens first, the user message must precede `result turn/interrupt`,
+/// as in transcripts/codex/interrupt.jsonl. Several clients at once, so the
+/// timer and the requests contend for the server.
+#[test]
+fn an_interrupt_reply_never_overtakes_the_user_message() {
+    const TURN_MS: u64 = 60;
+    const CLIENTS: u64 = 4;
+    const TRIALS: u64 = 60;
+    let dir = TempDir::new("cx").unwrap();
+    let server = Running::start(&dir.path().join("s.sock"), TURN_MS);
+    let overtaken: Vec<String> = std::thread::scope(|scope| {
+        let clients: Vec<_> = (0..CLIENTS)
+            .map(|client| {
+                let server = &server;
+                scope.spawn(move || {
+                    let mut probe = server.probe();
+                    let mut overtaken = Vec::new();
+                    for trial in 0..TRIALS {
+                        // Each thread's first turn shows its user message late.
+                        let thread = start_thread(&mut probe);
+                        let turn = probe
+                            .call(
+                                "turn/start",
+                                json!({"threadId": thread, "input": input("long")}),
+                            )
+                            .unwrap()["turn"]["id"]
+                            .clone();
+                        // Around TURN_MS / 3 = 20 ms, in 0.25 ms steps.
+                        let micros = 14_000 + (trial * CLIENTS + client) * 250 % 12_000;
+                        std::thread::sleep(Duration::from_micros(micros));
+                        let id = 1_000_000 + trial as i64;
+                        probe
+                            .send(json!({"id": id, "method": "turn/interrupt",
+                                         "params": {"threadId": thread, "turnId": turn}}))
+                            .unwrap();
+                        let (mut user_shown, mut completed) = (false, false);
+                        loop {
+                            let message = probe.next_message().unwrap();
+                            if message["id"] == id && message.get("method").is_none() {
+                                break;
+                            }
+                            let params = &message["params"];
+                            if message["method"] == "item/completed"
+                                && params["item"]["type"] == "userMessage"
+                                && params["turnId"] == turn
+                            {
+                                user_shown = true;
+                            }
+                            // A stalled run may finish the turn first.
+                            completed |= message["method"] == "turn/completed";
+                        }
+                        if !user_shown {
+                            overtaken.push(format!("interrupt after {micros} µs"));
+                        }
+                        if !completed {
+                            probe.next_method("turn/completed").unwrap();
+                        }
+                    }
+                    overtaken
+                })
+            })
+            .collect();
+        clients
+            .into_iter()
+            .flat_map(|c| c.join().unwrap())
+            .collect()
+    });
+    assert!(
+        overtaken.is_empty(),
+        "result turn/interrupt went out before the user message {} of {} times: {overtaken:?}",
+        overtaken.len(),
+        CLIENTS * TRIALS
+    );
+    server.stop();
+}
