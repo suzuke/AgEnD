@@ -1,24 +1,29 @@
-//! Gate 11 acceptance demo (`cargo xtask accept tui`): the screen layer
-//! against the testkit fake daemon over its real socket (client protocol
-//! v1). Prints the screens in both languages, a scripted key sequence,
-//! resolving a needs-you item, and the disconnected state, checking each;
-//! exits non-zero on the first failed check. No real daemon, no agents: the
-//! fake daemon runs in this process in its own temp dir.
+//! Gate 11 acceptance demo, fake-daemon half (`cargo xtask accept tui`
+//! runs it, then `crates/agend/examples/tui_real.rs` against the real
+//! daemon). The TUI reads the testkit fake daemon through `ClientSource`,
+//! i.e. `agend-client`, the product's path (gate 11 B P1): the screens in
+//! both languages, a scripted key sequence, answering, the disconnected
+//! state (A), then `retry`, the live terminal and typing (B). Each section
+//! checks what it prints; the first failed check exits non-zero. No real
+//! daemon, no agents: the fake runs in this process in its own temp dir.
 
-#[path = "support/daemon_source.rs"]
-mod daemon_source;
+#[path = "support/demo_daemon.rs"]
+mod demo_daemon;
 
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use agend_core::protocol::ask::AskReply;
-use agend_core::protocol::client::ClientRequest;
+use agend_core::protocol::client::{
+    AgentState, AttentionAction, AttentionRequiredData, ClientRequest, InstanceView,
+};
 use agend_testkit::fake_daemon::FakeDaemon;
+use agend_testkit::tempdir::TempDir;
 use agend_tui::i18n::Language;
-use agend_tui::source::scripted::demo_catalog;
+use agend_tui::source::client::ClientSource;
 use agend_tui::{App, render_to_string};
-use daemon_source::{Address, DaemonSource, seed_demo};
-use ratatui::crossterm::event::{KeyCode, KeyEvent};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 const WIDTH: u16 = 100;
 const HEIGHT: u16 = 30;
@@ -28,7 +33,9 @@ type Check = Result<(), String>;
 fn main() -> ExitCode {
     match run() {
         Ok(()) => {
-            println!("tui demo: screens, navigation, resolve and disconnect checks passed");
+            println!(
+                "tui demo: screens, navigation, resolve, disconnect, retry, terminal and input checks passed"
+            );
             ExitCode::SUCCESS
         }
         Err(message) => {
@@ -42,17 +49,46 @@ fn run() -> Check {
     screens()?;
     navigate()?;
     resolve()?;
-    disconnect()
+    disconnect()?;
+    retry()?;
+    terminal()?;
+    input()
 }
 
-fn start(lang: Language) -> Result<(FakeDaemon, App, Address), String> {
-    let daemon = FakeDaemon::start().map_err(|e| format!("fake daemon: {e}"))?;
-    seed_demo(&daemon);
-    let (source, address) = DaemonSource::new(daemon.socket_path().to_path_buf(), demo_catalog());
-    let mut app = App::new(Box::new(source), lang);
+/// A fake daemon on a fixed socket (so it can be started again there).
+struct Lab {
+    dir: TempDir,
+}
+
+impl Lab {
+    fn new() -> Result<Lab, String> {
+        TempDir::new("g11-demo")
+            .map(|dir| Lab { dir })
+            .map_err(|e| format!("temp dir: {e}"))
+    }
+
+    fn socket(&self) -> PathBuf {
+        self.dir.path().join("daemon.sock")
+    }
+
+    fn daemon(&self) -> Result<FakeDaemon, String> {
+        FakeDaemon::start_at(&self.socket()).map_err(|e| format!("fake daemon: {e}"))
+    }
+
+    fn app(&self, lang: Language, caller: Option<&str>) -> App {
+        let source = ClientSource::new(&self.socket(), caller.map(Into::into));
+        App::new(Box::new(source), lang)
+    }
+}
+
+fn start(lang: Language) -> Result<(Lab, FakeDaemon, App), String> {
+    let lab = Lab::new()?;
+    let daemon = lab.daemon()?;
+    demo_daemon::seed(&daemon);
+    let mut app = lab.app(lang, None);
     let needs = lang.fmt(agend_tui::i18n::Text::NeedsYouN, &["3"]);
     wait(&mut app, |t| t.contains(&needs))?;
-    Ok((daemon, app, address))
+    Ok((lab, daemon, app))
 }
 
 /// Ticks until the screen satisfies `ok` (events arrive on a reader thread).
@@ -75,6 +111,10 @@ fn keys(app: &mut App, keys: &[KeyCode]) {
     for key in keys {
         app.key(KeyEvent::from(*key));
     }
+}
+
+fn ctrl(app: &mut App, c: char) {
+    app.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL));
 }
 
 fn check(ok: bool, what: &str) -> Check {
@@ -107,10 +147,14 @@ fn selected_line(text: &str) -> String {
         .to_owned()
 }
 
+fn line_with<'a>(text: &'a str, needle: &str) -> &'a str {
+    text.lines().find(|l| l.contains(needle)).unwrap_or("")
+}
+
 fn screens() -> Check {
-    println!("== screens (fake daemon over its socket, {WIDTH}x{HEIGHT})");
+    println!("== screens (fake daemon through agend-client, {WIDTH}x{HEIGHT})");
     for lang in [Language::En, Language::ZhTw] {
-        let (_daemon, mut app, _) = start(lang)?;
+        let (_lab, _daemon, mut app) = start(lang)?;
         let tag = lang.as_str();
         use KeyCode::{Char, Down, Left, Right};
         // (name, keys from the previous view, breadcrumb, a line it must show)
@@ -118,7 +162,7 @@ fn screens() -> Check {
             ("home", &[], "AgEnD", "┏ archfix"),
             (
                 "team archfix",
-                &[Down, Down, Down, Right],
+                &[Down, Down, Down, Down, Right],
                 "AgEnD › archfix",
                 "[1 ",
             ),
@@ -126,7 +170,7 @@ fn screens() -> Check {
                 "task T-45",
                 &[Right],
                 "AgEnD › archfix › T-45",
-                "repo agend-terminal · T-45",
+                "Restructure state boundary",
             ),
             (
                 "agent dev-2",
@@ -158,11 +202,16 @@ fn navigate() -> Check {
     println!(
         "== navigate (scripted keys; each line: keys -> breadcrumb | selected row or first line)"
     );
-    let (_daemon, mut app, _) = start(Language::En)?;
+    let (_lab, _daemon, mut app) = start(Language::En)?;
     use KeyCode::{Char, Down, Enter, Left, Right};
     let steps: [(&str, Vec<KeyCode>, &str, &str); 11] = [
         ("(start)", vec![], "AgEnD", "▌›! Regression suite"),
-        ("↓ ↓ ↓", vec![Down, Down, Down], "AgEnD", "┏›archfix"),
+        (
+            "↓ ↓ ↓ ↓",
+            vec![Down, Down, Down, Down],
+            "AgEnD",
+            "┏›archfix",
+        ),
         (
             "→",
             vec![Right],
@@ -180,14 +229,14 @@ fn navigate() -> Check {
             "t",
             vec![Char('t')],
             "AgEnD › archfix › dev-2 › dev-2 Terminal",
-            "│ fake screen of dev-2",
+            "│ Running regression suite",
         ),
         ("← ← ←", vec![Left, Left, Left], "AgEnD", "┏›archfix"),
         (
             "/ rev Enter",
             vec![Char('/'), Char('r'), Char('e'), Char('v'), Enter],
             "AgEnD › reviewer-1 Terminal",
-            "│ fake screen of reviewer-1",
+            "│ Reviewing simulator report",
         ),
         ("←", vec![Left], "AgEnD", "┏›archfix"),
         ("L", vec![Char('L')], "AgEnD", "┏›archfix"),
@@ -221,7 +270,7 @@ fn navigate() -> Check {
 
 fn resolve() -> Check {
     println!("== resolve (read is not resolved; answering removes the item)");
-    let (daemon, mut app, _) = start(Language::En)?;
+    let (_lab, daemon, mut app) = start(Language::En)?;
     keys(&mut app, &[KeyCode::Enter]);
     let viewed = render_to_string(&mut app, WIDTH, HEIGHT);
     show(&viewed);
@@ -231,10 +280,7 @@ fn resolve() -> Check {
     )?;
     keys(&mut app, &[KeyCode::Char('h')]);
     let home = render_to_string(&mut app, WIDTH, HEIGHT);
-    let row = home
-        .lines()
-        .find(|l| l.contains("Regression suite"))
-        .unwrap_or("");
+    let row = line_with(&home, "Regression suite");
     println!("   home row after viewing: {row}");
     check(!row.contains("new"), "A-1 lost its new marker (read)")?;
     keys(&mut app, &[KeyCode::Enter, KeyCode::Char('1')]);
@@ -268,10 +314,16 @@ fn resolve() -> Check {
 
 fn disconnect() -> Check {
     println!("== disconnect (stop the fake daemon while the TUI is open)");
-    let (daemon, mut app, address) = start(Language::En)?;
+    let (lab, daemon, mut app) = start(Language::En)?;
     keys(
         &mut app,
-        &[KeyCode::Down, KeyCode::Down, KeyCode::Down, KeyCode::Right],
+        &[
+            KeyCode::Down,
+            KeyCode::Down,
+            KeyCode::Down,
+            KeyCode::Down,
+            KeyCode::Right,
+        ],
     );
     drop(daemon);
     println!("   fake daemon stopped (its socket is closed and removed)");
@@ -290,10 +342,9 @@ fn disconnect() -> Check {
         "no stale data while disconnected",
     )?;
 
-    let fresh = FakeDaemon::start().map_err(|e| format!("fake daemon: {e}"))?;
-    seed_demo(&fresh);
-    *address.lock().unwrap_or_else(|e| e.into_inner()) = fresh.socket_path().to_path_buf();
-    println!("   a new fake daemon started; the TUI keeps retrying");
+    let fresh = lab.daemon()?;
+    demo_daemon::seed(&fresh);
+    println!("   a new fake daemon started on the same socket; the TUI keeps retrying");
     let text = wait(&mut app, |t| t.contains("Reconnected to the daemon."))?;
     let first = text.lines().next().unwrap_or("");
     println!(
@@ -301,4 +352,194 @@ fn disconnect() -> Check {
         text.lines().rev().nth(1).unwrap_or("")
     );
     check(first == "AgEnD › archfix", "reconnected to the same screen")
+}
+
+fn instance(id: &str, state: AgentState) -> InstanceView {
+    InstanceView {
+        instance_id: id.into(),
+        team_id: "general".into(),
+        backend: "claude".into(),
+        state,
+        working_directory: None,
+    }
+}
+
+fn failed_item(id: &str) -> AttentionRequiredData {
+    AttentionRequiredData {
+        reason: format!("{id} failed: restarted 3 times in 10m and it still died"),
+        task_id: None,
+        ask: None,
+        recap: None,
+        attention_id: Some(format!("instance-failed:{id}")),
+        unblocks: Some(0),
+        waiting_since_unix_ms: Some(1),
+        if_ignored: Some(format!("{id} stays stopped")),
+        actions: vec![AttentionAction::Retry],
+        instance_id: Some(id.into()),
+    }
+}
+
+fn retry() -> Check {
+    println!("== retry (fake daemon holds attention_resolved: the item leaves only on the event)");
+    let lab = Lab::new()?;
+    let daemon = lab.daemon()?;
+    daemon.set_instance(instance("g11-2", AgentState::Failed));
+    daemon.add_attention(failed_item("g11-2"));
+    daemon.hold_resolved_events(true);
+    let mut app = lab.app(Language::ZhTw, None);
+    wait(&mut app, |t| t.contains("需要你 · 1"))?;
+    keys(&mut app, &[KeyCode::Enter]);
+    let open = render_to_string(&mut app, WIDTH, HEIGHT);
+    show(&open);
+    check(
+        open.contains("不處理的話：g11-2 stays stopped") && open.contains("[1] 重試"),
+        "expanded: if ignored, and the action row [1] 重試",
+    )?;
+    keys(&mut app, &[KeyCode::Char('1')]);
+    let sent = render_to_string(&mut app, WIDTH, HEIGHT);
+    println!("   after 1: {}", line_with(&sent, "已送出"));
+    check(
+        sent.contains("已送出：重試 g11-2"),
+        "message 已送出：重試 g11-2",
+    )?;
+    std::thread::sleep(Duration::from_millis(300));
+    app.tick();
+    let held = render_to_string(&mut app, WIDTH, HEIGHT);
+    check(
+        held.contains("需要你 · 1 項待處理"),
+        "accepted, but no attention_resolved yet: the item stays",
+    )?;
+    daemon.release_resolved_events();
+    wait(&mut app, |t| t.contains("需要你 · 0 項待處理"))?;
+    println!("   attention_resolved released: 需要你 · 0");
+    check(true, "the item left on attention_resolved")
+}
+
+fn terminal() -> Check {
+    println!(
+        "== terminal (live: output marks the screen stale; the holder's screen is fetched again)"
+    );
+    let lab = Lab::new()?;
+    let daemon = lab.daemon()?;
+    daemon.set_instance(instance("g11-1", AgentState::Unknown));
+    daemon.set_screen("g11-1", "counter=1\n");
+    let mut app = lab.app(Language::En, None);
+    wait(&mut app, |t| t.contains("general ─"))?;
+    for c in "/g11-1".chars() {
+        keys(&mut app, &[KeyCode::Char(c)]);
+    }
+    keys(&mut app, &[KeyCode::Enter]);
+    let text = render_to_string(&mut app, WIDTH, HEIGHT);
+    println!("   {}", line_with(&text, "Terminal of"));
+    check(
+        text.contains("━━ Terminal of g11-1 · live"),
+        "the title says live",
+    )?;
+    let started = Instant::now();
+    daemon.push_terminal_bytes("g11-1", b"counter=2\r\n");
+    wait(&mut app, |t| t.contains("│ counter=2"))?;
+    let took = started.elapsed();
+    println!(
+        "   counter=2 printed -> on screen after {} ms",
+        took.as_millis()
+    );
+    check(
+        took < Duration::from_millis(500),
+        "drawn within 300 ms plus a round trip",
+    )?;
+    let before = subscriptions(&daemon);
+    let burst = Instant::now();
+    for n in 3..=22 {
+        daemon.push_terminal_bytes("g11-1", format!("counter={n}\r\n").as_bytes());
+        std::thread::sleep(Duration::from_millis(50));
+        app.tick();
+    }
+    daemon.push_terminal_bytes("g11-1", b"$ ");
+    let text = wait(&mut app, |t| t.contains("│ $"))?;
+    let fetched = subscriptions(&daemon) - before;
+    let seconds = burst.elapsed().as_secs_f64();
+    println!(
+        "   21 chunks in {seconds:.1} s -> {fetched} screen fetches; the last output (a prompt) drawn"
+    );
+    check(
+        fetched as f64 <= seconds * 5.0 + 1.0,
+        "at most 5 fetches a second",
+    )?;
+    check(text.contains("│ counter=22"), "the last counter line drawn")
+}
+
+fn subscriptions(daemon: &FakeDaemon) -> usize {
+    daemon
+        .requests()
+        .iter()
+        .filter(|r| matches!(r, ClientRequest::SubscribeTerminal { .. }))
+        .count()
+}
+
+fn input() -> Check {
+    println!("== input (i types; every key goes to the agent except Ctrl-])");
+    let lab = Lab::new()?;
+    let daemon = lab.daemon()?;
+    daemon.set_instance(instance("g11-1", AgentState::Unknown));
+    daemon.set_screen("g11-1", "$ ");
+    let mut app = lab.app(Language::ZhTw, None);
+    wait(&mut app, |t| t.contains("general ─"))?;
+    for c in "/g11-1".chars() {
+        keys(&mut app, &[KeyCode::Char(c)]);
+    }
+    keys(&mut app, &[KeyCode::Enter, KeyCode::Char('i')]);
+    let typing = render_to_string(&mut app, WIDTH, HEIGHT);
+    println!("   {}", line_with(&typing, "的終端"));
+    check(
+        typing.contains("g11-1 的終端 · 輸入中（Ctrl-] 離開）"),
+        "i: typing",
+    )?;
+    for c in "hello".chars() {
+        keys(&mut app, &[KeyCode::Char(c)]);
+    }
+    keys(&mut app, &[KeyCode::Char('q'), KeyCode::Esc, KeyCode::Left]);
+    ctrl(&mut app, 'c');
+    ctrl(&mut app, ']');
+    let typed: Vec<u8> = inputs(&daemon);
+    println!("   the daemon got: {:?}", String::from_utf8_lossy(&typed));
+    check(
+        typed == b"helloq\x1b\x1b[D\x03",
+        "hello, q, Esc, ← and Ctrl-C reached the agent as bytes",
+    )?;
+    let back = render_to_string(&mut app, WIDTH, HEIGHT);
+    check(
+        back.contains("g11-1 的終端 · 即時") && !app.quit,
+        "Ctrl-] left typing; q and Ctrl-C did not quit",
+    )?;
+
+    let mut agent = lab.app(Language::ZhTw, Some("g11-1"));
+    wait(&mut agent, |t| t.contains("general ─"))?;
+    for c in "/g11-1".chars() {
+        keys(&mut agent, &[KeyCode::Char(c)]);
+    }
+    keys(
+        &mut agent,
+        &[KeyCode::Enter, KeyCode::Char('i'), KeyCode::Char('x')],
+    );
+    let refused = wait(&mut agent, |t| t.contains("forbidden"))?;
+    println!("   as agent g11-1: {}", line_with(&refused, "forbidden"));
+    check(
+        refused.contains("forbidden: only the operator can type into an agent's terminal")
+            && refused.contains("g11-1 的終端 · 即時"),
+        "an agent's typing is refused by the daemon and the view is read-only again",
+    )?;
+    check(
+        inputs(&daemon).len() == typed.len(),
+        "nothing the agent typed reached the terminal",
+    )
+}
+
+/// The daemon's recorded input, once what was sent has arrived.
+fn inputs(daemon: &FakeDaemon) -> Vec<u8> {
+    std::thread::sleep(Duration::from_millis(300));
+    daemon
+        .terminal_inputs()
+        .into_iter()
+        .flat_map(|(_, bytes)| bytes)
+        .collect()
 }

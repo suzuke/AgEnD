@@ -15,7 +15,9 @@
 //!   `event_gap` and is closed; it reconnects and fetches the fleet view.
 //! - Terminal: after `subscribe_terminal`, the screen, then PTY chunks as
 //!   `terminal_bytes`; falling behind closes the connection too; a terminal
-//!   that ends gets `no_terminal` (the connection stays).
+//!   that ends gets `no_terminal` (the connection stays). A new
+//!   `subscribe_terminal` drops the connection's old stream first, so one
+//!   that fails leaves no stream (gate 11 B P1).
 //! - Every write has [`WRITE_TIMEOUT`]: a client that does not read at all
 //!   fills the socket buffer and is closed (it gets no `event_gap`).
 //! - [`Server::stop`]: stops accepting, removes the socket file, closes
@@ -234,7 +236,11 @@ async fn connection(stream: UnixStream, ctx: Arc<Context>, number: u64) {
                     }
                     continue;
                 }
+                if matches!(request, ClientRequest::SubscribeTerminal { .. }) {
+                    terminal = None;
+                }
                 match handlers::handle(&ctx, client.caller.as_deref(), request).await {
+                    Outcome::Nothing => {}
                     Outcome::Reply(reply) => {
                         if !client.send(&reply).await {
                             return;

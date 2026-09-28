@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 同步 I/O 連 daemon 的 `run/daemon.sock`、重試、協定版本檢查；CLI、TUI、未來 Rust GUI 共用（第 8 施工關）。
 > - 記住：**不建 async runtime、不讀環境變數與設定檔**；socket 路徑與呼叫者身分由呼叫端給。
-> - 下一步：第 9 施工關的 CLI 用 `Client::connect` + `request`（要 1.2）；TUI 改接本 crate 是第 11 施工關 B 段。
+> - 下一步：第 9 施工關的 CLI 用 `Client::connect` + `request`（要 1.2）；第 11 施工關 B 段的 TUI（`ClientSource`）用 `connect_once`、`next_event`、`next_terminal` 與寫入端 `Sender`。
 
 ## 負責
 
@@ -12,6 +12,7 @@
 - 請求依 `request_id` 等回應（預設 10 秒，`request_within` 可以更久）；送出後斷線只重送標明可重做的請求
 - 記住 daemon 的 `hello`（1.2：版本、pid、`boot_id`）；等連線被 daemon 關掉（`wait_closed`，重啟用）
 - 事件：`subscribe_events` 之後的 `next_event`
+- 終端（第 11 施工關 B 段 P1）：`next_terminal` 阻塞讀畫面與 PTY 位元組；`sender()` 給只寫不讀的 `Sender`，另一條 thread 用它送 `subscribe_terminal`、`terminal_input`（base64 由本 crate 編碼）、`close()`
 
 ## 不負責
 
@@ -34,6 +35,9 @@
 | `resolve_attention(id, action)` | 操作者處理「需要你」項目（`Redo::Never`） |
 | `subscribe_events(after)`、`next_event()` | 訂閱事件、阻塞讀下一個（等回應時讀到的事件先留著） |
 | `retried()` | 這次為了重連花了多久（`agend debug ping` 印 `retried 1.4 s`） |
+| `answer_ask(ask_id, source, reply)` | 操作者回答請示（`Redo::Never`；第 11 施工關 B 段） |
+| `next_terminal()` | 阻塞讀下一個 `TerminalUpdate`：`Screen`（畫面）或 `Bytes`（解碼後的 PTY 位元組）；任何錯誤行（`no_terminal`、`forbidden`、`not_supported`）是 `Daemon`，連線結束是 `Disconnected` |
+| `sender()` → `Sender` | 這條連線的寫入端（`try_clone`）：`subscribe_terminal(id)`、`terminal_input(id, bytes)`（只寫一行、不等回覆）、`close()`（`shutdown(Both)`：卡在讀取的 thread 立刻讀到 EOF；只丟掉 `Sender` 不會關連線） |
 
 `caller`：agent 裡填 `AGEND_INSTANCE`，操作者填 `None`（`agend` 從環境變數算好再傳入）。
 
@@ -60,7 +64,7 @@
 
 ## 依賴規則
 
-- 一般依賴：`agend-core`、`serde_json`
+- 一般依賴：`agend-core`、`serde_json`、`base64`（PTY 位元組在 wire 上是 base64，由 adapter 編碼；第 11 施工關 B 段）
 - dev 依賴：`agend-testkit`（假 daemon、proxy）
 - 禁止：async runtime、SQLite、`agend-daemon`（`cargo xtask check-deps`）；反過來 `agend-daemon` 也不能依賴本 crate（server 與 client 各自編碼，契約才驗得到兩邊一致，第 8 施工關 P10）
 

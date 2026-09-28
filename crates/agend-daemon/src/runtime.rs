@@ -18,6 +18,8 @@
 //!   link (screen, then its PTY bytes); [`HolderRuntime::last_screen`] is a
 //!   short connection for a holder the daemon has no link to (a `failed`
 //!   instance's), used only for such holders.
+//! - Operator input (gate 11 B P6): [`HolderRuntime::terminal_input`] goes
+//!   through the link too.
 //!
 //! The blocking protocol calls run in `spawn_blocking` inside the daemon's
 //! tokio runtime.
@@ -162,6 +164,20 @@ impl HolderRuntime {
     /// daemon's link; `None` without a link.
     pub fn live_terminal(&self, id: &str) -> Option<tokio::sync::oneshot::Receiver<TerminalFeed>> {
         self.inner.lock_links().get(id)?.terminal()
+    }
+
+    /// Sends the operator's bytes (base64) to `id`'s agent through the
+    /// daemon's link (gate 11 B P6); false without a link.
+    pub fn terminal_input(&self, id: &str, bytes_base64: String) -> bool {
+        self.inner
+            .lock_links()
+            .get(id)
+            .is_some_and(|link| link.input(bytes_base64))
+    }
+
+    /// Whether the daemon has a link to `id`'s holder (a running instance).
+    pub fn has_link(&self, id: &str) -> bool {
+        self.inner.lock_links().contains_key(id)
     }
 
     /// The screen of a running holder the daemon has no link to, from one

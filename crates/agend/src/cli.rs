@@ -9,6 +9,9 @@
 //! `{"error":{"code":…,"message":…}}`; nothing on stderr. Exit codes: 0
 //! success, 1 failure, 2 usage error (bad arguments, `AGEND_HOME`).
 //!
+//! `agend app` (gate 11 B P2) runs the TUI (`agend_tui::run`) through the
+//! same home and caller rules.
+//!
 //! Resends after the daemon restarted mid-request (P5): reads and `send`
 //! (same message id, so the daemon keeps it once) are sent again; anything
 //! else reports `interrupted` with the command to check.
@@ -37,6 +40,7 @@ Examples:
   agend instance add dev-1 claude           (operator) add an agent and start it
   agend instance list                       (operator) every agent
   agend daemon restart                      (operator) restart the daemon to this binary
+  agend app                                 (operator) the dashboard: needs you, teams, terminals
   agend doctor                              check the setup";
 
 const MORE: &str = "\
@@ -134,6 +138,13 @@ enum Command {
     /// Restart the daemon (operator); `agend daemon` alone runs it
     #[command(subcommand)]
     Daemon(operator::Daemon),
+    /// The dashboard: needs you, teams, agent terminals
+    #[command(before_help = "Example: agend app --lang zh-TW")]
+    App {
+        /// Interface language (L switches it while running)
+        #[arg(long, value_parser = ["en", "zh-TW"], default_value = "en")]
+        lang: String,
+    },
     /// Check the setup; exit 1 when a check fails
     #[command(before_help = "Example: agend doctor")]
     Doctor,
@@ -316,6 +327,7 @@ fn example_for(args: &[String]) -> Option<&'static str> {
         ["instance", "remove"] => "agend instance remove dev-1 [--yes]",
         ["instance", ..] => "agend instance add|remove|list",
         ["daemon", ..] => "agend daemon restart [--binary <path>]",
+        ["app", ..] => "agend app [--lang en|zh-TW]",
         _ => return None,
     })
 }
@@ -428,8 +440,24 @@ fn dispatch(command: Command, json: bool) -> Result<Output, Failure> {
         Command::Task(Task::Cancel { task }) => operator::task_cancel(&target, task),
         Command::Instance(instance) => operator::instance(&target, instance, json),
         Command::Daemon(daemon) => operator::daemon(&target, daemon, json),
+        Command::App { lang } => app(target, &lang),
         Command::Doctor | Command::Init => unreachable!("handled above"),
     }
+}
+
+/// `agend app` (gate 11 B P2): the TUI on the daemon of `AGEND_HOME`, as
+/// the caller of `AGEND_INSTANCE` (inside an agent the daemon refuses
+/// `retry` and typing; the TUI does not check). It needs a terminal.
+fn app(target: Target, lang: &str) -> Result<Output, Failure> {
+    use std::io::IsTerminal;
+    if !std::io::stdout().is_terminal() {
+        return Err(Failure::usage("agend app needs a terminal"));
+    }
+    let lang = agend_tui::i18n::Language::parse(lang).unwrap_or(agend_tui::i18n::Language::En);
+    let source = agend_tui::source::client::ClientSource::new(&target.socket, target.caller);
+    agend_tui::run(Box::new(source), lang)
+        .map_err(|e| Failure::new("terminal", format!("the terminal failed: {e}")))?;
+    Ok(Output::new(Vec::new(), Value::Null))
 }
 
 /// `path` made absolute against the current directory (the daemon runs

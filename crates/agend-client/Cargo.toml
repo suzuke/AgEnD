@@ -8,6 +8,8 @@ publish.workspace = true
 
 [dependencies]
 agend-core.workspace = true
+# PTY bytes are base64 on the wire; the adapter owns the encoding (gate 11 B).
+base64 = "0.22"
 serde_json = "1"
 
 [dev-dependencies]

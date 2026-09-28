@@ -218,18 +218,17 @@ pub fn mutants() -> Vec<Mutant> {
                 })
             },
         },
-        // CLP-10: a request that is not supported is answered as accepted.
+        // CLP-10: refused requests are answered as accepted.
         Mutant {
             rule: "CLP-10",
-            name: "AcceptsUnsupported",
+            name: "AcceptsRefused",
             run: |name| {
                 with("CLP-10", name, || {
                     parsed(|_, direction, v| {
-                        if direction == Direction::ToClient && is_error(&v, "not_supported") {
-                            return vec![json!({
-                                "type": "command_result",
-                                "data": {"request_id": "clp", "result": {"result": "accepted"}}
-                            })];
+                        if direction == Direction::ToClient
+                            && (is_error(&v, "no_terminal") || is_error(&v, "unknown_ask"))
+                        {
+                            return vec![accepted_for(&v)];
                         }
                         vec![v]
                     })
@@ -386,6 +385,60 @@ pub fn mutants() -> Vec<Mutant> {
                     parsed(|_, direction, v| {
                         if direction == Direction::ToClient && v["type"] == "terminal_snapshot" {
                             return vec![];
+                        }
+                        vec![v]
+                    })
+                })
+            },
+        },
+        // CLP-18: every later screen is the first one seen on the connection.
+        Mutant {
+            rule: "CLP-18",
+            name: "FreezesScreen",
+            run: |name| {
+                with("CLP-18", name, || {
+                    parsed(|state, direction, mut v| {
+                        if direction == Direction::ToClient && v["type"] == "terminal_snapshot" {
+                            match &state.held {
+                                Some(first) => v["data"]["screen"] = json!(first),
+                                None => {
+                                    state.held = v["data"]["screen"].as_str().map(str::to_owned)
+                                }
+                            }
+                        }
+                        vec![v]
+                    })
+                })
+            },
+        },
+        // CLP-19: any id gets the fixture's terminal (gate 8's C2 fake).
+        Mutant {
+            rule: "CLP-19",
+            name: "ScreenForAnyInstance",
+            run: |name| {
+                with("CLP-19", name, || {
+                    parsed(|_, direction, mut v| {
+                        if direction == Direction::ToServer && v["type"] == "subscribe_terminal" {
+                            v["data"]["instance_id"] = json!(client::FAKE_INSTANCE);
+                        }
+                        vec![v]
+                    })
+                })
+            },
+        },
+        // CLP-20: the caller is dropped from hello, so agents type as the
+        // operator.
+        Mutant {
+            rule: "CLP-20",
+            name: "AnyoneMayType",
+            run: |name| {
+                with("CLP-20", name, || {
+                    parsed(|_, direction, mut v| {
+                        if direction == Direction::ToServer
+                            && v["type"] == "hello"
+                            && let Some(data) = v["data"].as_object_mut()
+                        {
+                            data.remove("caller");
                         }
                         vec![v]
                     })

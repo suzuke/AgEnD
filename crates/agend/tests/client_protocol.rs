@@ -35,9 +35,9 @@ fn assert_no_holders_left(lab: &lab::Lab) {
     assert_eq!(lab.running_holders(), vec![], "holders left running");
 }
 
-const REAL_RULES: [&str; 16] = [
+const REAL_RULES: [&str; 19] = [
     "CLP-1", "CLP-2", "CLP-3", "CLP-4", "CLP-5", "CLP-6", "CLP-7", "CLP-9", "CLP-10", "CLP-11",
-    "CLP-12", "CLP-13", "CLP-14", "CLP-15", "CLP-16", "CLP-17",
+    "CLP-12", "CLP-13", "CLP-14", "CLP-15", "CLP-16", "CLP-17", "CLP-18", "CLP-19", "CLP-20",
 ];
 
 #[test]

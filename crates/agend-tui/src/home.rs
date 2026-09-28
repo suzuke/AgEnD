@@ -8,7 +8,7 @@ use agend_core::protocol::client::DaemonEvent;
 
 use crate::app::{Ctx, Target};
 use crate::i18n::Text;
-use crate::source::{AgentState, Attention, Fleet};
+use crate::source::{AgentState, Attention};
 use crate::ui::{Row, goal_row, state_label};
 
 /// How many recent task changes each team block shows.
@@ -37,17 +37,15 @@ pub fn needs_you_row(ctx: &Ctx, item: &Attention) -> Row {
     let key = item.key();
     let unread = !ctx.read.contains(&item.read_key());
     let task = item.task_id().unwrap_or("—");
-    let team = team_of(ctx.fleet, item).unwrap_or_else(|| ctx.tr(Text::NoTeam).to_owned());
+    let team = ctx
+        .fleet
+        .item_team(item)
+        .unwrap_or_else(|| ctx.tr(Text::NoTeam).to_owned());
     let new = if unread { ctx.tr(Text::New) } else { "" };
     Row::item("▌", format!("! {}", item.question().0), Target::Item(key))
         .right(format!("{new}  {team} · {task}"))
         .bold(unread)
-        .agent(ctx.fleet.asker_or_holder(item).as_deref())
-}
-
-pub fn team_of(fleet: &Fleet, item: &Attention) -> Option<String> {
-    let task = fleet.task(item.task_id()?)?;
-    Some(task.team_id.clone())
+        .agent(ctx.fleet.item_agent(item).as_deref())
 }
 
 /// `● 1 working  ! 1 needs you …`, zero counts left out; counted from
@@ -57,6 +55,8 @@ pub fn team_counts(ctx: &Ctx, team: &str) -> String {
         AgentState::Working,
         AgentState::NeedsYou,
         AgentState::Stuck,
+        AgentState::Failed,
+        AgentState::Starting,
         AgentState::Idle,
         AgentState::Unknown,
     ];

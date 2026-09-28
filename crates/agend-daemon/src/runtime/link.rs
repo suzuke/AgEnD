@@ -16,6 +16,10 @@
 //!   connection; the holder answers in order with the stream, so the
 //!   subscriber gets that screen and then every `PtyBytes` read after it
 //!   (per-instance broadcast of [`TERMINAL_CHUNKS`]), nothing twice or lost.
+//! - Operator input (gate 11 B P6): [`Link::input`] sends
+//!   `OperatorTerminalInput` on this connection. The holder answers only a
+//!   refusal (`pty_busy`, `agent_exited`, …); it is logged and dropped, not
+//!   passed back to the client (the protocol has no id to match it with).
 //!
 //! Must NOT: send `Shutdown`, or report anything after [`Link::close`].
 
@@ -28,11 +32,14 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use agend_core::protocol::holder::{ExitedData, HolderRequest, HolderResponse, SpawnData};
+use agend_core::protocol::holder::{
+    ExitedData, HolderRequest, HolderResponse, OperatorTerminalInputData, SpawnData,
+};
 use tokio::sync::{broadcast, oneshot};
 
 use super::client::Conn;
 use super::files;
+use crate::log;
 
 /// How long the first connection is retried (gate 6 P3).
 pub const CONNECT_WITHIN: Duration = Duration::from_secs(5);
@@ -117,6 +124,23 @@ impl Link {
         let mut stream = stream.as_ref()?;
         stream.write_all(&line).ok()?;
         Some(rx)
+    }
+
+    /// Writes the operator's bytes (base64) to the agent's PTY through the
+    /// holder; false when the request cannot be sent.
+    pub fn input(&self, bytes_base64: String) -> bool {
+        let request = HolderRequest::OperatorTerminalInput {
+            data: OperatorTerminalInputData { bytes_base64 },
+        };
+        let Ok(mut line) = serde_json::to_vec(&request) else {
+            return false;
+        };
+        line.push(b'\n');
+        let stream = lock(&self.stream);
+        let Some(mut stream) = stream.as_ref() else {
+            return false;
+        };
+        stream.write_all(&line).is_ok()
     }
 
     fn stop(&mut self) {
@@ -310,6 +334,12 @@ impl Worker {
                     // No subscriber is not an error.
                     let _ = lock(&self.terminal).live.send(data.bytes_base64);
                 }
+                // The daemon sends nothing else on this connection that
+                // can be refused (gate 11 B P6: logged, not passed back).
+                Ok(Some(HolderResponse::Error { data })) => log::line(&format!(
+                    "{}: operator input dropped: {}",
+                    self.id, data.code
+                )),
                 Ok(_) => {}
                 Err(_) => return,
             }

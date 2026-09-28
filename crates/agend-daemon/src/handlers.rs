@@ -6,9 +6,14 @@
 //! Gate 8 serves the client protocol requests that have real data (P6):
 //! `get_fleet`, `subscribe_events`, `subscribe_terminal` and
 //! `resolve_attention` (operator only: any `caller` in `hello` is an agent,
-//! P2; identity is checked before the item is looked up). `terminal_input`
-//! answers `not_supported`, `answer_ask` answers `unknown_ask` (no asks
-//! before gate 10); neither changes anything.
+//! P2; identity is checked before the item is looked up). `answer_ask`
+//! answers `unknown_ask` (no asks before gate 10) and changes nothing.
+//!
+//! Gate 11 B (P6): `terminal_input` is the operator's only: an agent gets
+//! `forbidden` (identity first), an instance without a live terminal
+//! `no_terminal`, a codex instance `not_supported` (until U17 is verified,
+//! gate 7 P1); otherwise the bytes go to the holder and nothing is
+//! answered. Its errors carry no request id.
 //!
 //! Gate 9 (P1): permissions are checked here only. `command` (agent
 //! commands, [`agent`]) is for agents: the operator gets `forbidden`;
@@ -42,6 +47,11 @@ use crate::supervisor::Event;
 /// What an agent gets for `resolve_attention`.
 pub const OPERATOR_ONLY: &str =
     "only the operator can resolve needs-you items; ask the operator with agend ask";
+/// What an agent gets for `terminal_input`.
+pub const TYPE_OPERATOR_ONLY: &str = "only the operator can type into an agent's terminal";
+/// What `terminal_input` into a codex instance gets.
+pub const CODEX_INPUT: &str =
+    "typing into a codex terminal waits until U17 is verified (gate 7 P1); nothing was written";
 /// Longest wait for a holder's answer to `Snapshot`.
 const SNAPSHOT_WITHIN: Duration = Duration::from_secs(5);
 
@@ -77,6 +87,8 @@ impl Context {
 /// What the server does with a request.
 pub enum Outcome {
     Reply(ClientResponse),
+    /// Nothing to answer (accepted `terminal_input`).
+    Nothing,
     /// Send the backlog, then forward live events.
     Events(Subscription),
     /// Send the screen, then forward the PTY chunks (`None`: the screen
@@ -141,11 +153,9 @@ pub async fn handle(ctx: &Context, caller: Option<&str>, request: ClientRequest)
         ClientRequest::SubscribeTerminal { data } => {
             return terminal(ctx, data.instance_id).await;
         }
-        ClientRequest::TerminalInput { .. } => error(
-            None,
-            error_code::NOT_SUPPORTED,
-            "terminal input arrives with the attach view (gate 11); nothing was written",
-        ),
+        ClientRequest::TerminalInput { data } => {
+            return terminal_input(ctx, caller, data.instance_id, data.bytes_base64);
+        }
         ClientRequest::AnswerAsk { data } => error(
             Some(data.request_id),
             error_code::UNKNOWN_ASK,
@@ -218,6 +228,40 @@ pub async fn handle(ctx: &Context, caller: Option<&str>, request: ClientRequest)
         ClientRequest::Unknown => error(None, error_code::UNKNOWN_REQUEST, "unknown request type"),
     };
     Outcome::Reply(reply)
+}
+
+/// `terminal_input` (gate 11 B P6): identity, then a live terminal, then the
+/// backend; accepted input is not answered.
+fn terminal_input(
+    ctx: &Context,
+    caller: Option<&str>,
+    instance_id: String,
+    bytes_base64: String,
+) -> Outcome {
+    let refuse = |code: &str, message: String| Outcome::Reply(error(None, code, message));
+    if caller.is_some() {
+        return refuse(error_code::FORBIDDEN, TYPE_OPERATOR_ONLY.into());
+    }
+    let live = ctx
+        .fleet
+        .instance(&instance_id)
+        .filter(|view| view.state != AgentState::Failed && ctx.runtime.has_link(&instance_id));
+    let Some(view) = live else {
+        return refuse(
+            error_code::NO_TERMINAL,
+            format!("{instance_id} has no live terminal; nothing was written"),
+        );
+    };
+    if view.backend == agend_core::model::Backend::Codex.as_str() {
+        return refuse(error_code::NOT_SUPPORTED, CODEX_INPUT.into());
+    }
+    if !ctx.runtime.terminal_input(&instance_id, bytes_base64) {
+        return refuse(
+            error_code::NO_TERMINAL,
+            format!("{instance_id} has no live terminal; nothing was written"),
+        );
+    }
+    Outcome::Nothing
 }
 
 /// `subscribe_terminal`: a running instance's screen and bytes through the

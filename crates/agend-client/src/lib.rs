@@ -8,6 +8,9 @@
 //! - [`Client::request`]: send, wait for the reply with the same request id
 //!   (10 s); after a disconnect only [`Redo::Safe`] requests are sent again.
 //! - [`Client::next_event`]: the next event after `subscribe_events`.
+//! - Terminal (gate 11 B P1): [`Client::sender`] gives a write-only
+//!   [`Sender`] (`subscribe_terminal`, `terminal_input`, `close`), so one
+//!   thread can block in [`Client::next_terminal`] while another writes.
 //! - Errors ([`ClientError`]): unreachable, version mismatch, or an error the
 //!   daemon answered (with its `error_code`), so the CLI picks its message
 //!   and exit code.
@@ -26,7 +29,7 @@ pub mod version;
 use std::fmt;
 use std::path::PathBuf;
 
-pub use connection::Client;
+pub use connection::{Client, Sender, TerminalUpdate};
 pub use retry::{RESTART_RETRY_WINDOW, Redo};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

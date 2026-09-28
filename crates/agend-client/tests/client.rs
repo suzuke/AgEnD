@@ -252,3 +252,103 @@ fn events_follow_the_fleet_view_and_a_bad_cursor_is_a_gap() {
         ClientError::Disconnected("the daemon closed the connection".into())
     );
 }
+
+fn instance(id: &str) -> agend_core::protocol::client::InstanceView {
+    agend_core::protocol::client::InstanceView {
+        instance_id: id.into(),
+        team_id: "general".into(),
+        backend: "claude".into(),
+        state: agend_core::protocol::client::AgentState::Unknown,
+        working_directory: None,
+    }
+}
+
+/// Gate 11 B P1: one thread blocks in `next_terminal` while another writes
+/// through the `Sender`; `close` wakes the reader, which ends.
+#[test]
+fn a_terminal_reader_blocks_while_the_sender_writes_and_close_ends_it() {
+    use agend_client::TerminalUpdate;
+    let daemon = FakeDaemon::start().unwrap();
+    daemon.set_instance(instance("g-1"));
+    daemon.set_screen("g-1", "$ ");
+    let mut client = Client::connect_once(daemon.socket_path(), None).unwrap();
+    let mut sender = client.sender().unwrap();
+    let (tx, updates) = std::sync::mpsc::channel();
+    let reader = std::thread::spawn(move || {
+        loop {
+            let update = client.next_terminal();
+            let end = matches!(update, Err(ClientError::Disconnected(_)));
+            tx.send(update).unwrap();
+            if end {
+                return;
+            }
+        }
+    });
+    let next = || updates.recv_timeout(Duration::from_secs(5)).unwrap();
+    sender.subscribe_terminal("g-1").unwrap();
+    assert_eq!(
+        next(),
+        Ok(TerminalUpdate::Screen {
+            instance_id: "g-1".into(),
+            screen: "$ ".into()
+        })
+    );
+    daemon.push_terminal_bytes("g-1", b"hello\r\n");
+    assert_eq!(
+        next(),
+        Ok(TerminalUpdate::Bytes {
+            instance_id: "g-1".into(),
+            bytes: b"hello\r\n".to_vec()
+        })
+    );
+    sender.terminal_input("g-1", "é\x1b[A".as_bytes()).unwrap();
+    // Errors without a request id reach the reader.
+    sender.terminal_input("nobody", b"x").unwrap();
+    let error = next().unwrap_err();
+    assert!(
+        matches!(&error, ClientError::Daemon { code, .. } if code == "no_terminal"),
+        "{error:?}"
+    );
+    assert_eq!(
+        daemon.terminal_inputs(),
+        vec![("g-1".to_owned(), "é\x1b[A".as_bytes().to_vec())]
+    );
+    // The reader is still blocked; close wakes it.
+    sender.close();
+    let started = Instant::now();
+    let end = updates.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(matches!(end, Err(ClientError::Disconnected(_))), "{end:?}");
+    assert!(started.elapsed() < Duration::from_secs(1));
+    reader.join().unwrap();
+    assert!(sender.subscribe_terminal("g-1").is_err(), "closed");
+}
+
+#[test]
+fn answer_ask_reaches_the_daemon_and_unknown_asks_are_refused() {
+    use agend_core::protocol::ask::{AnswerSource, AskEntry, AskReply, AskThread};
+    let daemon = FakeDaemon::start().unwrap();
+    daemon.open_ask(
+        AskThread {
+            ask_id: "A-1".into(),
+            task_id: None,
+            entries: vec![AskEntry::Question {
+                from: "dev-1".into(),
+                text: "which?".into(),
+                options: vec!["x".into()],
+            }],
+        },
+        None,
+    );
+    let mut client = Client::connect(daemon.socket_path(), None).unwrap();
+    let reply = AskReply::Choice { option: "x".into() };
+    client
+        .answer_ask("A-1", AnswerSource::Tui, reply.clone())
+        .unwrap();
+    let error = client
+        .answer_ask("A-9", AnswerSource::Tui, reply)
+        .unwrap_err();
+    assert!(
+        matches!(&error, ClientError::Daemon { code, .. } if code == "unknown_ask"),
+        "{error:?}"
+    );
+}

@@ -24,6 +24,8 @@
 | `a_read_is_sent_again_after_the_daemon_restarts` | `get_fleet` 送出後 daemon 重啟：重連、重送、拿到新 daemon 的全貌（P7） |
 | `a_request_that_may_change_something_is_not_sent_again` | `resolve_attention` 送出後 daemon 重啟：`Restarted`，新 daemon 沒收到它（P7） |
 | `daemon_errors_keep_their_code_and_only_the_operator_resolves` | agent 身分 → `forbidden`（訊息逐字）；不存在的 id → `unknown_attention`；操作者成功後項目消失（P2、P5） |
+| `a_terminal_reader_blocks_while_the_sender_writes_and_close_ends_it` | 第 11 施工關 B 段 P1：一條 thread 卡在 `next_terminal`，另一條用 `Sender` 訂閱（收到畫面）、送 `terminal_input`（假 daemon 記下原樣位元組）；不存在的 instance 的錯誤由讀的一方收到；`close()` 1 秒內讓讀的 thread 讀到結束、之後寫入失敗 |
+| `answer_ask_reaches_the_daemon_and_unknown_asks_are_refused` | `answer_ask` 被接受；沒有的請示 → `unknown_ask` |
 | `events_follow_the_fleet_view_and_a_bad_cursor_is_a_gap` | 全貌之後的事件連號；等回應時讀到的事件留給 `next_event`；壞游標 → `event_gap`；daemon 關掉 → `Disconnected` |
 
 ## 用到的假實作

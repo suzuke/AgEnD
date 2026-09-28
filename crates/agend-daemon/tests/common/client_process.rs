@@ -207,6 +207,41 @@ impl ClientProtocolFixture for RealDaemon {
     fn fresh_name(&mut self) -> String {
         format!("g8-{}", tag())
     }
+
+    fn make_output(&mut self, _instance: &str) -> Result<(), String> {
+        // The counter prints a line every second.
+        Ok(())
+    }
+
+    fn typed(&mut self, instance: &str, expect: &str) -> Result<String, String> {
+        // The PTY echoes what is typed: wait until the screen shows it.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let screen = terminal_screen(&self.socket(), instance)?;
+            if screen.contains(expect) || Instant::now() >= deadline {
+                return Ok(screen);
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+    }
+}
+
+/// The screen `subscribe_terminal` answers for `instance` (as the operator).
+pub fn terminal_screen(socket: &Path, instance: &str) -> Result<String, String> {
+    let (mut c, _) = ProbeClient::hello(socket, None).map_err(|e| format!("hello: {e}"))?;
+    c.send(&ClientRequest::SubscribeTerminal {
+        data: InstanceData {
+            instance_id: instance.into(),
+        },
+    })
+    .map_err(|e| e.to_string())?;
+    match c
+        .recv_within(Duration::from_secs(10))
+        .map_err(|e| e.to_string())?
+    {
+        Some(ClientResponse::TerminalSnapshot { data }) => Ok(data.screen),
+        other => Err(format!("subscribe_terminal {instance}: {other:?}")),
+    }
 }
 
 /// The daemon's server and fleet in this process, fed events directly: the
@@ -331,6 +366,14 @@ impl ClientProtocolFixture for InProcess {
 
     fn fresh_name(&mut self) -> String {
         "none".into()
+    }
+
+    fn make_output(&mut self, _instance: &str) -> Result<(), String> {
+        Err("the in-process server has no holders".into())
+    }
+
+    fn typed(&mut self, _instance: &str, _expect: &str) -> Result<String, String> {
+        Err("the in-process server has no holders".into())
     }
 }
 
