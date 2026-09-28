@@ -253,7 +253,7 @@ unset AGEND_BIN               # 前幾關步驟留下的 export 可能指到已�
    | `== version` | `agend debug ping → exit 1 in 0.02 s: the daemon speaks client protocol 1.0; this agend needs 1.1 — restart the daemon with this binary` |
    | `== slow-client` | `normal reader: all 2000 events, in order`、`slow reader: event_gap after … events, then closed`、`no reader: closed after 5 s write timeout (… no event_gap)` |
    | `== socket` | `run/ is 700, run/daemon.sock is 600`、`Ctrl-C: run/daemon.sock removed`、`101-byte socket path: exit 1: agend daemon: socket path too long: …` |
-   | `== retry` | `retry → …cr: start --resume <S1>`、`retry → …cn: start --session-id <S2>`、`retry → …xn: start`、`…xs (codex, ran before): retry → unknown_attention` |
+   | `== retry` | `retry → …cr: start --resume <S1>`、`retry → …cn: start --session-id <S2>`、`retry → …xn: start (codex: new thread)`、`…os (opencode, ran before): retry → unknown_attention`（第 7 施工關 K12：codex 一律有 `retry`，「跑過、沒有 `retry`」的例子換成 opencode） |
    | `== terminal`、`== restart` | `terminal_snapshot …, then terminal_bytes`；`12/12 ok; ok 5/12 (retried 1.4 s)` 之類；watch 有兩行 `fleet:` |
    | 最後 | `client demo: all sections passed`，然後 `gate 8 (client): checks passed` |
 

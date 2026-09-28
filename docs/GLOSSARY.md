@@ -66,6 +66,7 @@
 | 名詞（中文） | English | 程式識別字 | 定義 | 不要跟…混淆 | 出處 |
 |---|---|---|---|---|---|
 | 訊息 | message | `traits::AgentMessage`、`client::InboxMessage` | 送給 agent 的內容：一律完整內容、走 backend 的結構化 API；每則有 id，以 id 冪等。 | PTY 控制鍵（holder 只送單一按鍵）；Telegram 通知 | [delivery](architecture/delivery.md#送達模型) |
+| `messages` 表 | `messages` table | `messages`（DB） | 存每則送給 agent 的訊息（`seq` 明確排序、`id` 冪等、`to_instance`／`from_instance`／`task_id`／`body`／`level`／`state`／`turn_id`），保留 30 天；codex 用它去重、對帳崩潰窗口、展開事件游標。開工前提案，還沒實作。 | 訊息（型別）；事件游標（讀事件的位置，跟這張表的 `seq` 不是同一件事） | [第 7 施工關 P5](gates/gate-07-codex.md#p5送達模型狀態代表什麼冪等放哪當掉怎麼辦)、D31 |
 | 送達狀態 | delivery state | `model::DeliveryState` | 訊息狀態 `queued → sent → confirmed／failed`；確認不了就標未確認，不假裝成功。 | 忙碌等級的「排隊」（`queued` 是送達狀態） | [delivery](architecture/delivery.md#送達模型) |
 | `delivery`（`push`／`inbox`） | delivery mode | — | instance 的一欄：`push`（daemon 主動推，預設）或 `inbox`（不建 driver、只能被拉取，只給沒有真 driver 的假 agent 用）。開工前提案，還沒實作。 | 送達狀態（`queued→sent→confirmed`，訊息本身的狀態，不是 instance 走哪條路） | [第 10 施工關 P11](gates/gate-10-pipeline.md#p11什麼是假的什麼是真的) |
 | 忙碌等級：排隊／插入／中斷 | busy level: queue／steer／interrupt | `policy::busy::BusyLevel`、`effective_level` | agent 忙碌時的三種送法：turn 結束後送、插入不中斷、中斷後立即處理；只有 codex 能插入，其他改用中斷。 | 去抖動（判斷 busy／idle 何時生效） | [delivery](architecture/delivery.md#忙碌策略三級)、D16 |
@@ -105,6 +106,7 @@
 | 協定（client／holder） | protocol (client／holder) | `protocol::client`、`protocol::holder` | 兩套有版本的協定：client 協定給 TUI／CLI／GUI 連 daemon；holder 協定給 daemon 連 holder。 | backend 的協定（app-server、HTTP + SSE、hooks） | D1、D11 |
 | hard gate | hard gate | `screen::HardGateKind` | 畫面上擋住 agent 的狀況：usage limit、permission／approval、rate limit、auth error、context full、啟動與更新選單。 | **施工關**（gate）；merge 門檻；approval 關卡 | [delivery](architecture/delivery.md#狀態偵測三層) |
 | 螢幕分類器 | screen classifier | `screen::classify`、`SCREEN_RULES` | 直接讀 holder 畫面、只認 hard gate 的分類器；規則是資料，每條附真實畫面 fixture。 | 結構化事件（判斷 busy／idle 的來源） | [delivery](architecture/delivery.md#狀態偵測三層) |
+| thread | thread | `instances.session_id`（存 thread id） | codex app-server 的對話單位，等同 claude／opencode 的 session；daemon 先建、存進 DB，agent 一律用 `resume <id>` 起；歷史（turn／user message）就是事件日誌，daemon 不另存。 | session id（claude／opencode 用的詞，同一個概念） | [第 7 施工關 P3](gates/gate-07-codex.md#p3codex-的-thread-id-與-resume補第-6-施工關-h2) |
 | `$GO` 交接檔 | `$GO` handoff file | — | codex 包裝寫給自己的交接檔（先寫暫存檔再 `rename`）：第 1 行 thread id、第 2 行 socket 路徑；包裝等到它出現才 `exec` TUI。開工前提案，還沒實作。 | holder 協定的 `Spawn`／`Shutdown`（daemon↔holder；`$GO` 是包裝腳本自己的檔，不經協定） | [第 7 施工關 P2](gates/gate-07-codex.md#p2app-server-怎麼跟-tui-一起放進-holder不做-spawnsidecar) |
 | 清掃 | sweep | — | holder 死掉後（不管接下來是重起、`failed` 還是 `retry`）daemon 對記下的 `agent_pid`（pgid）補送 SIGKILL，蓋掉「掛斷不保證清乾淨」時 app-server／TUI 的殘留。開工前提案，還沒實作。 | `Shutdown` 對 process group 的 SIGHUP（holder 活著時做的，第 4 施工關 G2） | [第 7 施工關 P2](gates/gate-07-codex.md#p2app-server-怎麼跟-tui-一起放進-holder不做-spawnsidecar) |
 | `legacy_no_thread` | legacy_no_thread | — | 第 7 施工關 migration 跑的那一刻，把當時已存在、`backend = codex`、`session_id` 是 NULL 又可能有對話的列標成 `1`（一併設 `failed`），跟之後才失敗的 codex 列分開，兩者其餘欄位一樣。開工前提案，還沒實作。 | `session_started`（第 8 施工關已實作的欄位，判斷 resume／session-id） | [第 7 施工關 P3](gates/gate-07-codex.md#p3codex-的-thread-id-與-resume補第-6-施工關-h2) |

@@ -33,6 +33,7 @@
 - [ ] 2026-09-25 錄製（[RECORDER.md](../../crates/agend-testkit/RECORDER.md)）：`--listen` 路徑再短也綁在 `/private/tmp/codex-daemon-<uid>/<sha256>`，要求的路徑是 symlink。
 - [ ] `-c mcp_servers={}` 關不掉使用者 `config.toml` 與 plugin 的 MCP server（`-c` 合併進設定表，不是取代；錄製時仍啟動）；它們的 `mcpServer/startupStatus/updated` 通知依機器而定。關掉的方法：`--disable plugins` 加上每個 server 一個 `-c mcp_servers.<名稱>.enabled=false`（`codex mcp list --json` 驗證，不花 token）；只對 config.toml 裡的 server 有效，對 plugin 提供的會報 `invalid transport`。
 - [ ] `turn/steer` 在同一輪裡另成一則 user message 與一則回覆；`thread/resume` 沒帶 `excludeTurns: true` 時先送 `deprecationNotice`。
+- [ ] codex 會自動更新（本頁記錄時是 0.156.1，2026-09-28 已自動更新到 0.158.0）。版本改變時，錄音用的 sandbox（`sandbox-exec`）原本允許寫入的路徑清單可能跟不上：0.158.0 的 `codex app-server --listen unix://...` 需要額外開放 `~/.codex/installation_id` 與 `~/.codex/app-server-control/app-server-startup.lock`（啟動時的 flock，與 codex 自己 managed 的 app-server 共用）兩個既有檔案可寫，否則程序在啟動當下就以 `Operation not permitted (os error 1)` 結束、且不帶路徑（`RUST_LOG=debug` 也一樣），只能逐一放行 profile 裡的規則 bisect 才找得出來。細節見 `AgEnD-ops/record-sandbox.sh` 開頭的註解。
 
 ## 對 v2 的含意
 
