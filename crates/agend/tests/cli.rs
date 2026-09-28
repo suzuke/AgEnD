@@ -101,6 +101,21 @@ fn milestone_two_codex_agents_across_a_restart() {
     run(sections::milestone);
 }
 
+#[test]
+fn ctrl_c_during_a_preflight_leaves_nothing() {
+    run(sections::stop_during_preflight);
+}
+
+#[test]
+fn the_preflight_deadline_holds() {
+    run(sections::preflight_deadline);
+}
+
+#[test]
+fn oversized_messages_and_lines_are_refused() {
+    run(sections::limits);
+}
+
 /// P3: the daemon has no default home either.
 #[test]
 fn unreachable_daemon_after_ten_seconds() {

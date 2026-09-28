@@ -198,7 +198,7 @@ fn daemon_errors_keep_their_code_and_only_the_operator_resolves() {
         .unwrap_err();
     assert_eq!(
         error.to_string(),
-        "forbidden: only the operator can resolve needs-you items; ask the operator with agend ask"
+        "forbidden: only the operator can resolve needs-you items; ask the operator"
     );
     let mut operator = Client::connect(daemon.socket_path(), None).unwrap();
     let error = operator

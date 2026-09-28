@@ -71,10 +71,10 @@ use agend_core::protocol::client::{
     AgentCommand, AgentState, AskCreatedData, AttentionRequiredData, AttentionResolvedData,
     ClientCommandResultData, ClientRequest, ClientResponse, CommandResult, DaemonEvent, ErrorData,
     EventData, FleetData, FleetView, InboxMessage, InstanceAddedData, InstanceChangedData,
-    InstanceView, MessageLevel, MessagesData, OperatorCommand, RETAINED_EVENTS, RestartingData,
-    ResultIdentity, SUPPORTED_VERSIONS, SelectedVersionData, StatusData, TaskChangedData,
-    TaskCreatedData, TaskView, TeamView, TerminalSnapshotData, error_code, is_uuid_v4,
-    order_attention, uuid_v4,
+    InstanceView, MAX_MESSAGE_BYTES, MessageLevel, MessagesData, OperatorCommand, RETAINED_EVENTS,
+    RestartingData, ResultIdentity, SUPPORTED_VERSIONS, SelectedVersionData, StatusData,
+    TaskChangedData, TaskCreatedData, TaskView, TeamView, TerminalSnapshotData, error_code,
+    is_uuid_v4, message_too_long, order_attention, uuid_v4,
 };
 use agend_core::protocol::{ProtocolVersion, negotiate};
 
@@ -86,8 +86,7 @@ pub const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// What `resolve_attention` from an agent gets (the real daemon says the
 /// same).
-pub const OPERATOR_ONLY: &str =
-    "only the operator can resolve needs-you items; ask the operator with agend ask";
+pub const OPERATOR_ONLY: &str = "only the operator can resolve needs-you items; ask the operator";
 
 type Writer = Arc<Mutex<UnixStream>>;
 
@@ -1012,6 +1011,9 @@ fn send_message(
     level: Option<MessageLevel>,
     message_id: Option<String>,
 ) -> Result<CommandResult, CommandError> {
+    if body.len() > MAX_MESSAGE_BYTES {
+        return Err((error_code::INVALID_REQUEST, message_too_long(body.len())));
+    }
     let level = level.unwrap_or(MessageLevel::Queue);
     if level == MessageLevel::Unknown {
         return Err((

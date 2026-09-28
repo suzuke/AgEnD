@@ -28,9 +28,9 @@ use agend_core::protocol::ProtocolVersion;
 use agend_core::protocol::client::{
     AgentCommand, AgentState, AnswerAskData, AttentionAction, AttentionRequiredData,
     ClientCommandData, ClientHello, ClientRequest, ClientResponse, CommandResult, DaemonEvent,
-    EventData, FleetView, InstanceData, InstanceView, MessageLevel, OperatorCommand, OperatorData,
-    RequestIdData, ResolveAttentionData, SUPPORTED_VERSIONS, SubscribeEventsData, TaskChangedData,
-    TerminalInputData, V1, error_code,
+    EventData, FleetView, InstanceData, InstanceView, MAX_MESSAGE_BYTES, MessageLevel,
+    OperatorCommand, OperatorData, RequestIdData, ResolveAttentionData, SUPPORTED_VERSIONS,
+    SubscribeEventsData, TaskChangedData, TerminalInputData, V1, error_code,
 };
 
 use super::{Case, CaseResult, Report, ensure, run_suite};
@@ -1110,14 +1110,25 @@ fn one_message_per_id<F: ClientProtocolFixture>(fx: &F) -> CaseResult {
             format!("send {id} {body:?} ({n}) got {reply:?}, expected accepted")
         })?;
     }
+    let huge = "h".repeat(MAX_MESSAGE_BYTES + 1);
     for (n, id, body) in [
         ("clp-17d", X, "not one"),
         ("clp-17e", "clp-not-a-uuid", "x"),
+        (
+            "clp-17j",
+            "4a5b1c0e-7f5b-4c6d-9e8f-90a1b2c3d4e5",
+            huge.as_str(),
+        ),
     ] {
         let reply = send_as(&mut from, n, id, body)?;
         ensure(
             error_code_of(&reply) == Some(error_code::INVALID_REQUEST),
-            || format!("send {id} {body:?} got {reply:?}, expected invalid_request"),
+            || {
+                format!(
+                    "send {id} ({} bytes) got {reply:?}, expected invalid_request",
+                    body.len()
+                )
+            },
         )?;
     }
     let all = inbox_of(&mut to, "clp-17f", None)?;

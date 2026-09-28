@@ -164,7 +164,7 @@ fixture（`ClientProtocolFixture`）：`socket`、`emit`（讓至少一個新事
 | CLP-14 | 操作者 `instance_add` 新名字 → `instance_added`（名字、非空的 `working_directory`），全貌出現它且 `working_directory` 相同；同名再加 → `instance_exists`；不合規則的名字 → `invalid_request`；`instance_remove` → `accepted`、全貌不再有它；再刪 → `unknown_instance` | 第 9 施工關 P6 | `ReaddIsAccepted` |
 | CLP-15 | `daemon_restart { binary }` 的形狀：`binary` 是跑不起來的路徑 → `preflight_failed`；連線不斷、沒有事件、全貌不變 | 第 9 施工關 P6、P7 | `DropsRestartBinary` |
 | CLP-16 | 操作者 `task_cancel` → `not_supported`（帶 request id），沒有事件、全貌不變（handler 在第 10 施工關） | 第 9 施工關 P1 | `AcceptsTaskCancel` |
-| CLP-17 | `send` 同一個 `message_id`（UUID v4）再送一次仍 `accepted`、收件者的 `inbox` 只有一則；同 id 不同內容、不是 UUID v4 的 id → `invalid_request`；`inbox --after` 自己的一則 → 只回之後的；不存在的 id、別人的訊息 → `unknown_message` | 第 9 施工關 P2、P5；第 7 施工關 P5 | `NewIdOnResend`、`InboxIgnoresAfter` |
+| CLP-17 | `send` 同一個 `message_id`（UUID v4）再送一次仍 `accepted`、收件者的 `inbox` 只有一則；同 id 不同內容、不是 UUID v4 的 id、超過 1 MiB 的 body（第 9 施工關 L17）→ `invalid_request`；`inbox --after` 自己的一則 → 只回之後的；不存在的 id、別人的訊息 → `unknown_message` | 第 9 施工關 P2、P5；第 7 施工關 P5 | `NewIdOnResend`、`InboxIgnoresAfter`、`AcceptsHugeBody` |
 
 不釘：`status`、`send`、`inbox` 以外的 agent 命令（假 daemon 會處理，真 daemon 第 10 施工關前回 `not_supported`）；成功的 `daemon_restart`（CLI 測試對假、真 daemon 各跑一次）；不存在的 instance 的 `subscribe_terminal`（假 daemon 對任何 id 都回畫面；真 daemon 回 `no_terminal`，在 `crates/agend/tests/client_protocol.rs` 另測）；`subscribe_terminal` 之後的 `terminal_bytes`（假 daemon 不串流）。
 

@@ -44,7 +44,7 @@
 | `Unreachable` | `connect` 10 秒內連不上 | `cannot reach the AgEnD daemon at <path> after 10 s (<原因>). Is it running? Start it with: agend daemon` |
 | `Connect` | `connect_once` 失敗，或重試也修不好（例如權限不足） | `cannot reach the AgEnD daemon at <path> (<原因>)` |
 | `Version` | daemon 協商到比 1.2 舊（立刻失敗、不重試），或 major 不合 | `the daemon speaks client protocol 1.1; this agend needs 1.2 — stop the daemon (Ctrl-C) and start this binary: agend daemon`（daemon 有 `daemon_restart`（1.2 以上）時改成 `— run: agend daemon restart`） |
-| `Daemon { code, message }` | daemon 回的錯誤；`code` 是 core 的 `client::error_code` | `<code>: <message>`，例如 `forbidden: only the operator can resolve needs-you items; ask the operator with agend ask` |
+| `Daemon { code, message }` | daemon 回的錯誤；`code` 是 core 的 `client::error_code` | `<code>: <message>`，例如 `forbidden: only the operator can resolve needs-you items; ask the operator` |
 | `Restarted` | `Redo::Never` 的請求送出後斷線 | `daemon restarted during the request; check with agend status` |
 | `Disconnected` | 讀事件時連線結束、10 秒沒有回應、收到不是協定的行 | `the daemon closed the connection` 等 |
 

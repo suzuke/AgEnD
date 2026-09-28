@@ -928,3 +928,206 @@ pub fn init_and_doctor(lab: &Lab) -> Result<Vec<String>, String> {
     out.extend(with_daemon.shown());
     Ok(out)
 }
+
+/// Whether a process with this pid is still there (and not a zombie):
+/// `ps -o stat= -p <pid>`.
+fn alive(pid: &str) -> bool {
+    let state = std::process::Command::new("ps")
+        .args(["-o", "stat=", "-p", pid.trim()])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+        .unwrap_or_default();
+    !state.is_empty() && !state.starts_with('Z')
+}
+
+/// `== stop during a preflight` (verifier F1): Ctrl-C while a preflight
+/// runs removes its home (a copy of agend.db) and ends its child.
+pub fn stop_during_preflight(lab: &Lab) -> Result<Vec<String>, String> {
+    let home = lab.home(10);
+    let mut daemon = start(lab, &home)?;
+    let cli = Cli::new(&lab.agend, &home);
+    let pid_file = lab.root.join("stopped-preflight.pid");
+    let slow = script(
+        lab,
+        "stopped-agend",
+        &format!("echo $$ > '{}'\nexec sleep 30", pid_file.display()),
+    )?;
+    let slow = slow.display().to_string();
+    let args = ["daemon", "restart", "--binary", slow.as_str()];
+    let (child, started) = cli.spawn(Some(&home), None, &args, &[])?;
+    let line = daemon.expect("preflight home /tmp/agend-pf-")?;
+    let pf = line.rsplit(' ').next().unwrap_or_default().to_owned();
+    wait_for(Duration::from_secs(10), "the preflight child", || {
+        pid_file.exists()
+    })?;
+    let pid = fs::read_to_string(&pid_file).map_err(|e| e.to_string())?;
+    daemon.interrupt()?;
+    let run = finish(
+        describe(None, &args),
+        child,
+        started,
+        Duration::from_secs(30),
+    );
+    let gone = wait_for(Duration::from_secs(5), "the preflight home to go", || {
+        !Path::new(&pf).exists()
+    });
+    let ended = wait_for(Duration::from_secs(5), "the preflight child to end", || {
+        !alive(&pid)
+    });
+    gone?;
+    ended?;
+    let stopped = daemon.expect(&format!("preflight pid {}: stopped", pid.trim()))?;
+    let mut out = run.shown();
+    out.push(crate::lab::untimed(&stopped).to_owned());
+    out.push(format!(
+        "Ctrl-C during the preflight: {pf} removed, preflight child pid {} ended",
+        pid.trim()
+    ));
+    Ok(out)
+}
+
+/// `== preflight deadline` (verifier F2): a child that exits but leaves a
+/// process holding its stdout is judged at once; one that never exits is
+/// stopped after 60 s; either way the next restart may run.
+pub fn preflight_deadline(lab: &Lab) -> Result<Vec<String>, String> {
+    let home = lab.home(11);
+    let mut daemon = start(lab, &home)?;
+    let cli = Cli::new(&lab.agend, &home);
+    let mut out = Vec::new();
+    let leaves = script(lab, "leaves-agend", "sleep 5 &\nexit 1")?;
+    let leaves = leaves.display().to_string();
+    let run = cli.run(None, &["daemon", "restart", "--binary", &leaves]);
+    expect_run(
+        &run,
+        1,
+        &["agend: preflight_failed: ", "exited with status 1"],
+    )?;
+    ensure(run.took < Duration::from_secs(3), || {
+        format!("waited for the pipe: {:?}", run.took)
+    })?;
+    out.extend(run.shown());
+    let pid_file = lab.root.join("hanging-preflight.pid");
+    let hangs = script(
+        lab,
+        "hanging-agend",
+        &format!("echo $$ > '{}'\nexec sleep 90", pid_file.display()),
+    )?;
+    let hangs = hangs.display().to_string();
+    let run = cli.run(None, &["daemon", "restart", "--binary", &hangs]);
+    expect_run(
+        &run,
+        1,
+        &[&format!(
+            "agend: preflight_failed: {hangs} daemon preflight did not finish within 60 s"
+        )],
+    )?;
+    let pf = crate::lab::untimed(&daemon.expect("preflight home /tmp/agend-pf-")?).to_owned();
+    let pid = fs::read_to_string(&pid_file).map_err(|e| e.to_string())?;
+    ensure(!alive(&pid), || {
+        format!("preflight child {} still runs", pid.trim())
+    })?;
+    ensure(preflight_left(&daemon).is_empty(), || {
+        format!("left: {:?}", preflight_left(&daemon))
+    })?;
+    out.extend(run.shown());
+    let next = cli.run(None, &["daemon", "restart", "--binary", "/usr/bin/false"]);
+    expect_run(&next, 1, &["exited with status 1"])?;
+    out.push(format!(
+        "the child (pid {}) was stopped; {pf}: every preflight home removed; the next restart ran",
+        pid.trim()
+    ));
+    daemon.interrupt()?;
+    Ok(out)
+}
+
+/// The preflight homes this daemon logged that still exist.
+fn preflight_left(daemon: &Daemon) -> Vec<String> {
+    daemon
+        .log
+        .iter()
+        .filter_map(|l| l.split("preflight home ").nth(1))
+        .map(str::to_owned)
+        .filter(|p| Path::new(p).exists())
+        .collect()
+}
+
+/// `== limits` (verifier F3, L17): a body over 1 MiB is refused before it
+/// is stored; a line over 8 MiB is refused and closed without being read;
+/// the daemon and the next messages carry on.
+pub fn limits(lab: &Lab) -> Result<Vec<String>, String> {
+    use agend_core::protocol::client::{
+        AgentCommand, ClientCommandData, MAX_LINE_BYTES, MAX_MESSAGE_BYTES,
+    };
+    let home = lab.home(12);
+    let mut daemon = start(lab, &home)?;
+    let cli = Cli::new(&lab.agend, &home);
+    add_sleeper(&cli, "g9-a")?;
+    add_sleeper(&cli, "g9-b")?;
+    let socket = home.join(DAEMON_SOCKET);
+    let send = |c: &mut ProbeClient, id: &str, body: String| {
+        c.request(&ClientRequest::Command {
+            data: ClientCommandData {
+                request_id: id.into(),
+                command: AgentCommand::Send {
+                    to: "g9-b".into(),
+                    message: body,
+                    level: None,
+                    message_id: None,
+                },
+            },
+        })
+        .map_err(|e| e.to_string())
+    };
+    let (mut c, _) = ProbeClient::hello(&socket, Some("g9-a")).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    let reply = send(&mut c, "l-1", "x".repeat(MAX_MESSAGE_BYTES + 1))?;
+    let ClientResponse::Error { data } = &reply else {
+        return Err(format!("a body of 1 MiB + 1 got {reply:?}"));
+    };
+    ensure(
+        data.code == "invalid_request"
+            && data.message
+                == format!(
+                    "the message is {} bytes; a message is limited to 1048576 bytes (1 MiB)",
+                    MAX_MESSAGE_BYTES + 1
+                ),
+        || format!("{data:?}"),
+    )?;
+    out.push(format!(
+        "send of {} bytes: {}: {}",
+        MAX_MESSAGE_BYTES + 1,
+        data.code,
+        data.message
+    ));
+    let reply = send(&mut c, "l-2", "y".repeat(MAX_MESSAGE_BYTES))?;
+    ensure(
+        matches!(&reply, ClientResponse::CommandResult { .. }),
+        || format!("a body of exactly 1 MiB got {reply:?}"),
+    )?;
+    out.push(format!("send of {MAX_MESSAGE_BYTES} bytes: accepted"));
+    let (mut long, _) = ProbeClient::hello(&socket, Some("g9-a")).map_err(|e| e.to_string())?;
+    let _ = long.send_raw(&"z".repeat(MAX_LINE_BYTES + 1024));
+    let answer = long.recv_within(Duration::from_secs(10));
+    let closed = matches!(long.recv_within(Duration::from_secs(10)), Ok(None) | Err(_));
+    let said = match &answer {
+        Ok(Some(ClientResponse::Error { data })) => format!("{}: {}", data.code, data.message),
+        other => format!("{other:?}"),
+    };
+    ensure(
+        said.starts_with("invalid_request: a protocol line is limited to 8388608 bytes") && closed,
+        || format!("a line over 8 MiB got {said}, closed {closed}"),
+    )?;
+    out.push(format!("a line over 8 MiB: {said}; closed"));
+    let after = cli.run(Some("g9-a"), &["send", "g9-b", "still fine"]);
+    expect_run(&after, 0, &["accepted: message "])?;
+    let inbox = cli.run(Some("g9-b"), &["inbox"]);
+    expect_run(&inbox, 0, &[" from g9-a: still fine"])?;
+    out.push(
+        "afterwards: agend send g9-b \"still fine\" → accepted, and it is in g9-b's inbox".into(),
+    );
+    ensure(daemon.log.iter().all(|l| !l.contains("panicked")), || {
+        "daemon panicked".into()
+    })?;
+    daemon.interrupt()?;
+    Ok(out)
+}

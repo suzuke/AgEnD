@@ -40,8 +40,7 @@ use crate::store::SqliteStore;
 use crate::supervisor::Event;
 
 /// What an agent gets for `resolve_attention`.
-pub const OPERATOR_ONLY: &str =
-    "only the operator can resolve needs-you items; ask the operator with agend ask";
+pub const OPERATOR_ONLY: &str = "only the operator can resolve needs-you items; ask the operator";
 /// Longest wait for a holder's answer to `Snapshot`.
 const SNAPSHOT_WITHIN: Duration = Duration::from_secs(5);
 
@@ -149,10 +148,7 @@ pub async fn handle(ctx: &Context, caller: Option<&str>, request: ClientRequest)
         ClientRequest::AnswerAsk { data } => error(
             Some(data.request_id),
             error_code::UNKNOWN_ASK,
-            format!(
-                "no open ask {} (asks arrive in gates 9 and 10)",
-                data.ask_id
-            ),
+            format!("no open ask {} (asks arrive in gate 10)", data.ask_id),
         ),
         ClientRequest::Command { data } => match caller {
             Some(caller) => agent::handle(ctx, caller, data).await,

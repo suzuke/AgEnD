@@ -15,8 +15,8 @@ use std::time::Duration;
 
 use agend_client::Redo;
 use agend_core::protocol::client::{
-    AgentCommand, ClientCommandData, ClientRequest, ClientResponse, CommandResult, MessageLevel,
-    Ticket, uuid_v4,
+    AgentCommand, ClientCommandData, ClientRequest, ClientResponse, CommandResult,
+    MAX_MESSAGE_BYTES, MessageLevel, Ticket, message_too_long, uuid_v4,
 };
 use clap::{Subcommand, ValueEnum};
 
@@ -136,6 +136,9 @@ fn message_id() -> Result<String, Failure> {
 }
 
 pub fn send(target: &Target, to: String, message: String, level: Level) -> Result<Output, Failure> {
+    if message.len() > MAX_MESSAGE_BYTES {
+        return Err(Failure::usage(message_too_long(message.len())));
+    }
     let id = message_id()?;
     let level = match level {
         Level::Queue => MessageLevel::Queue,
