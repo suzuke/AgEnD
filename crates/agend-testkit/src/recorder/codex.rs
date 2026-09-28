@@ -16,7 +16,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use tungstenite::{Message, WebSocket};
@@ -169,7 +169,15 @@ impl Backend for Codex {
                 if let Ok(turn) = auto.or_else(|_| ws.next_turn(start, t)) {
                     ws.wait_completed(&turn, t)?;
                 }
-                let long = ws.turn(&thread, prompts::LONG)?;
+                // U2: does `turn/start` take `clientUserMessageId`?
+                let long = id_at(
+                    &ws.request(
+                        "turn/start",
+                        json!({"threadId": thread, "input": input(prompts::LONG), "effort": EFFORT,
+                               "clientUserMessageId": "agend-rec-turn-1"}),
+                    )?,
+                    &["turn", "id"],
+                )?;
                 std::thread::sleep(agent.pace.settle);
                 ws.request(
                     "thread/queue/add",
@@ -181,6 +189,13 @@ impl Backend for Codex {
                     json!({"threadId": thread, "turnId": long}),
                 )?;
                 ws.wait_completed(&long, t)?;
+                // U11: codex 0.158.0 does not start the queued message after
+                // an interrupt (2026-09-28: nothing within 120 s); it stays
+                // queued until `thread/queue/start`.
+                if ws.next_turn(start, agent.pace.settle * 2).is_err() {
+                    let _ = ws.request("thread/queue/list", json!({"threadId": thread}));
+                    let _ = ws.request("thread/queue/start", json!({"threadId": thread}));
+                }
                 let queued = ws.next_turn(start, t)?;
                 ws.wait_completed(&queued, t)?;
                 let _ = ws.request(
@@ -229,21 +244,45 @@ fn spawn(agent: &Agent, project: &Path, socket: &Path) -> Result<Spawned, String
     args.extend(["--disable".into(), "hooks".into()]);
     args.extend(["--listen".into(), format!("unix://{}", socket.display())]);
     args.extend(agent.fake_args());
+    // stderr goes to a file next to the socket (a pipe nobody reads could
+    // fill up and block the server), so a server that never listens can
+    // say why in the error: codex 0.158.0 under a too-tight sandbox exits
+    // at once with "Operation not permitted" and nothing else.
+    let stderr_path = socket.with_extension("stderr");
+    let stderr = std::fs::File::create(&stderr_path)
+        .map_err(|e| format!("create {}: {e}", stderr_path.display()))?;
     let child = Command::new(&agent.program)
         .args(&args)
         .current_dir(project)
         .envs(agent.fake_env(project))
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(stderr)
         .spawn()
         .map_err(|e| format!("spawn {}: {e}", agent.program.display()))?;
-    let spawned = Spawned {
+    let mut spawned = Spawned {
         child,
         name: "codex app-server".into(),
     };
-    crate::fake_agent::codex::wait_until_listening(socket, Duration::from_secs(30))?;
-    Ok(spawned)
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let slice = Duration::from_millis(200);
+        let Err(e) = crate::fake_agent::codex::wait_until_listening(socket, slice) else {
+            return Ok(spawned);
+        };
+        let exited = spawned.child.try_wait().ok().flatten();
+        if exited.is_none() && Instant::now() < deadline {
+            continue;
+        }
+        let why = match exited {
+            Some(status) => format!("codex app-server exited ({status})"),
+            None => format!("{e} (waited 30s)"),
+        };
+        let text = std::fs::read_to_string(&stderr_path).unwrap_or_default();
+        let tail: Vec<&str> = text.lines().rev().take(20).collect();
+        let tail: Vec<&str> = tail.into_iter().rev().collect();
+        return Err(format!("{why}; stderr: {:?}", tail.join("\n")));
+    }
 }
 
 /// A recording WebSocket JSON-RPC client. A pump thread owns the socket:
