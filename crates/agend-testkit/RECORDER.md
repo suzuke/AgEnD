@@ -41,7 +41,7 @@
 
 ## 發現的差異與處理（2026-09-28 重錄，codex 0.158.0）
 
-8 個情境錄了 7 個進 `transcripts/codex/`；`queue_idle` 錄成了但放在 `transcripts-pending/codex/`（見表最後一列）。
+8 個情境都在 `transcripts/codex/`（`queue_idle` 改了錄製器後 2026-09-28 再重錄一次，見表最後一列）。
 
 | 真 CLI | 假 agent 原本 | 處理 |
 |---|---|---|
@@ -53,7 +53,7 @@
 | `thread/queue/add` 在閒置 thread 上立刻開始；之後 `thread/queue/start` 回 -32600 `queue is empty`；有排隊時 `thread/queue/start` 回 `{turn}` | 回 `{}` | 改假的 |
 | `turn/interrupt` 之後，排隊的訊息**不會**自己開始，要 `thread/queue/start` | 自己開始 | 改假的；錄製器的 `queue_idle` 改成等不到就 `queue/list` + `queue/start` |
 | `turn/steer` 對已結束的 turn：-32600 `no active turn to steer`；`turn/start` 收 `clientUserMessageId`，user message 帶 `clientId` | — | 改假的（錯誤訊息） |
-| `queue_idle`：長回覆（1 到 400）的 agent 訊息在 `thread/queue/add` **之前**就開始串流；同樣的步驟在 `turns_list` 是在之後。兩個錄製檔的順序互相矛盾，是時序競態 | — | **沒有收進一致性檢查**：錄製檔放 `transcripts-pending/codex/queue_idle.jsonl`，一致性檢查照樣印 `not recorded yet`。除了這段競態，假的流量和它一致。要收進來需要改錄製器（等 agent 訊息開始串流再 `queue/add`＋`turn/interrupt`）並重錄一次 |
+| `queue_idle`：第一次重錄時長回覆（1 到 400）的 agent 訊息在 `thread/queue/add` **之前**就開始串流，`turns_list` 是在之後（錄製器睡固定 2 秒，和串流開始競爭）。串流中被中斷：`thread/tokenUsage/updated` 在中斷回覆之前、沒有 agent 訊息的 `item/completed` | 回覆一次送完、沒有「串流中」 | 改錄製器：`queue_idle` 等到長回覆的第一個 `item/agentMessage/delta` 才 `queue/add`＋`turn/interrupt`（順序固定），重錄 `queue_idle`；改假的：回覆先 `item/started`＋delta，turn 時間的三分之一後才 `item/completed`，串流中被中斷照上面。`turns_list` 仍是固定睡 2 秒（和串流開始只差約 0.2 秒），下次重錄它時也該改成等事件 |
 
 ## 發現的差異與處理（2026-09-25 錄製）
 

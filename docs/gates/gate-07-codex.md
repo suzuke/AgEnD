@@ -3,13 +3,13 @@
 > **TL;DR**
 > - codex driver、送達模型、三級忙碌策略；codex 第一次有 thread id 可以 resume（補上第 6 施工關 H2 的缺口）。
 > - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這個施工關才算完成。
-> - 下一步：實作在 draft PR #132（branch `feat/gate-07-codex`）；K1–K13 已追認（2026-09-27）；2026-09-28 agent 經你授權跑了真 codex（重錄 8 個情境、`codex_live` 通過），**K14–K18 待你追認、K7 有建議**；`queue_idle` 錄製檔因時序競態還沒收進一致性檢查。
+> - 下一步：實作在 draft PR #132（branch `feat/gate-07-codex`）；K1–K13 已追認（2026-09-27）；2026-09-28 agent 經你授權跑了真 codex（重錄 8 個情境、`codex_live` 通過），K14–K18 已追認、K7 結案（2026-09-28）；8 個情境都進了一致性檢查。
 
 **先看這條**：這頁的步驟會用到 `agend`。每個新開的終端機分頁都要先跑「你親自驗收」開頭的設定，否則會跑到舊的 Node 版 `agend` 1.24.0。
 
 ## 狀態
 
-**實作中，draft PR #132**（branch `feat/gate-07-codex`）：P1–P9 照使用者確認的做（P4 選 A）；fresh-context verifier 三輪後 CONFIRMED（見進度紀錄）；K1–K13 使用者 2026-09-27 追認（K8 改過）。2026-09-28：codex 自動升到 0.158.0，agent 經你授權在沙箱裡重錄（7／8 進一致性檢查）、`codex_live` 通過；真 codex 的行為推翻了幾個設計假設，改了 driver，列為 K14–K18 待你追認。
+**實作中，draft PR #132**（branch `feat/gate-07-codex`）：P1–P9 照使用者確認的做（P4 選 A）；fresh-context verifier 三輪後 CONFIRMED（見進度紀錄）；K1–K13 使用者 2026-09-27 追認（K8 改過）。2026-09-28：codex 自動升到 0.158.0，agent 經你授權在沙箱裡重錄（7／8 進一致性檢查）、`codex_live` 通過；真 codex 的行為推翻了幾個設計假設，改了 driver，列為 K14–K18（使用者 2026-09-28 追認；K7 結案）；`queue_idle` 修了競態後重錄，8 個情境都進一致性檢查。
 
 ## 範圍
 
@@ -263,7 +263,7 @@ codex 的事實來源：[backends/codex.md](../backends/codex.md)、[spike-codex
 - [x] `~/.cargo/bin/cargo clippy --workspace --all-targets -- -D warnings` 乾淨；實作者：乾淨
 - [x] `~/.cargo/bin/cargo xtask check-deps` 最後一行是 `… no-std build ok)`（出現 `SKIPPED` 不算通過；本關不加新規則，P9）；實作者：`check-deps: ok (6 rules, 8 crates checked for agend-testkit, agend-core metadata ok, no-std build ok)`
 - [x] `~/.cargo/bin/cargo xtask accept codex` 通過，並印出下方「你親自驗收」用到的 demo；實作者：見進度紀錄
-- [x] 真 CLI 一致性檢查（必要；使用者已決定 2026-09-25）：2026-09-28 agent（經授權）：`codex --version` 與錄製檔 header 都是 `codex-cli 0.158.0`，`conformance` 5 passed（codex 7 個情境比對、`queue_idle` 印 `not recorded yet`，錄製檔在 `transcripts-pending/`，見步驟 7）。原文：`codex --version` 和 `crates/agend-testkit/transcripts/codex/` 錄製檔 header 的 `version` 相同，不同就先用錄製器重錄（[RECORDER.md](../../crates/agend-testkit/RECORDER.md#重錄cli-升版時)）；`~/.cargo/bin/cargo test -p agend-testkit --test conformance` 通過（現有 5 個情境；P8 的新情境只有在步驟 7 錄了之後才加進來，不是完成條件）；實作者只跑了 `conformance`（5 passed，3 個新情境印 `not recorded yet … skipped`）；`codex --version` 要跑真 codex，留給你的步驟 6
+- [x] 真 CLI 一致性檢查（必要；使用者已決定 2026-09-25）：2026-09-28 agent（經授權）：`codex --version` 與錄製檔 header 都是 `codex-cli 0.158.0`，`conformance` 5 passed（codex 8 個情境都比對；`queue_idle` 改錄製器後重錄，見步驟 7）。原文：`codex --version` 和 `crates/agend-testkit/transcripts/codex/` 錄製檔 header 的 `version` 相同，不同就先用錄製器重錄（[RECORDER.md](../../crates/agend-testkit/RECORDER.md#重錄cli-升版時)）；`~/.cargo/bin/cargo test -p agend-testkit --test conformance` 通過（現有 5 個情境；P8 的新情境只有在步驟 7 錄了之後才加進來，不是完成條件）；實作者只跑了 `conformance`（5 passed，3 個新情境印 `not recorded yet … skipped`）；`codex --version` 要跑真 codex，留給你的步驟 6
 - [x] 本施工關 crate 的 `README.md`／`TESTING.md` 已更新
 - [x] 測試不留殘留：結束時沒有 `g7-` 或測試 id 的 holder、假 app-server；kill 只對自己起的、大於 1 的 pid；實作者：每次跑完 `pgrep -fl "agend (holder|daemon)"`、`pgrep -fl "fake.*codex"` 都沒有輸出，`/tmp/g7-*` 與 `$TMPDIR/fake-codex-*.sock` 沒有留下；清掃只對測試自己起的 group（`sweep::tests` 另測不相干的 group 不送）
 - [ ] fresh-context verifier 重跑並嘗試推翻；結果寫進「進度紀錄」（verifier 不跑真 codex）
@@ -473,8 +473,7 @@ unset AGEND_BIN
    ```text
    codex-cli 0.158.0
    {"backend":"codex","cli":"codex","format":1,"recorded":"2026-09-28","run":{"program":"codex"},"scenario":"one_turn","type":"header","version":"codex-cli 0.158.0"}
-   codex/queue_idle: not recorded yet (gate 7 step 7); skipped
-   test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 21.06s
+   test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 21.56s
    ```
 
    `codex app-server --help`（0.158.0）：有 `--listen`、`-c`，沒有 `--no-daemon`（U18）。
@@ -520,7 +519,7 @@ unset AGEND_BIN
    agend-record: queue_idle: timed out after 120s waiting for a turn to start
    ```
 
-   `queue_idle` 失敗是 U11 的答案（中斷後排隊的訊息不會自己開始）；錄製器改成等不到就 `thread/queue/list`＋`thread/queue/start`（並讓長回覆的 `turn/start` 帶 `clientUserMessageId`，回答 U2）後單獨重錄一次：`wrote …/codex/queue_idle.jsonl (83 messages)`。一致性檢查一開始的差異（全部改假的，不改錄製檔；清單在 [RECORDER.md](../../crates/agend-testkit/RECORDER.md)）：`interrupt`（user message 在中斷回覆之前）、`turns_list`（新的在前、`thread/compact/start`）、`resume_empty`（`no rollout found`）、`queue_idle`。**`queue_idle` 沒收進 `transcripts/`**：長回覆開始串流的時間和 `thread/queue/add` 競爭，這次在它之前、`turns_list` 在它之後，同一個假的不可能兩邊都對；檔案放 `crates/agend-testkit/transcripts-pending/codex/queue_idle.jsonl`（U3、U9、U11 的答案就是從它讀的）。要收進來：改錄製器（等 agent 訊息開始串流再 `queue/add`＋`turn/interrupt`）、假的加「串流中被中斷」，再重錄 `queue_idle` 一次（約 3 個短 turn）。
+   `queue_idle` 失敗是 U11 的答案（中斷後排隊的訊息不會自己開始）；錄製器改成等不到就 `thread/queue/list`＋`thread/queue/start`（並讓長回覆的 `turn/start` 帶 `clientUserMessageId`，回答 U2）後單獨重錄一次：`wrote …/codex/queue_idle.jsonl (83 messages)`。一致性檢查一開始的差異（全部改假的，不改錄製檔；清單在 [RECORDER.md](../../crates/agend-testkit/RECORDER.md)）：`interrupt`（user message 在中斷回覆之前）、`turns_list`（新的在前、`thread/compact/start`）、`resume_empty`（`no rollout found`）、`queue_idle`。`queue_idle` 一開始沒收進 `transcripts/`：錄製器固定睡 2 秒後 `thread/queue/add`，和長回覆開始串流競爭（這次在它之前、`turns_list` 在它之後）。使用者 2026-09-28 決定現在修：錄製器改成等到長回覆的第一個 `item/agentMessage/delta` 才 `queue/add`＋`turn/interrupt`，只重錄 `queue_idle`（一次成功，3 個短 turn）：`wrote …/codex/queue_idle.jsonl (65 messages)`；假的補上「回覆串流中」與「串流中被中斷」（`tokenUsage` 在中斷回覆前、沒有 agent 訊息的 `item/completed`），`turns_list` 照樣相符；一致性檢查 `test result: ok. 5 passed`，不再印 `not recorded yet`。
 
    清理：`rm -rf /private/tmp/agend-rec-out-* /private/tmp/agend-rec-codex-*`（錄製器自己的暫存目錄；codex 在 `~/.codex/sessions/` 多的幾個 rollout 是它自己的紀錄，不必刪）。
 
@@ -607,7 +606,9 @@ unset AGEND_BIN
 
 實作時做了、提案沒寫到或與提案字面不同的選擇。確認前照目前的做法運作。每項：決定 · 理由 · 反悔的成本。
 
-**追認結果**：使用者 2026-09-27 全部追認 K1–K13（K7：步驟 8 再決定 `--no-daemon`；K8 改為還原啟動時的 PATH、不 source dotfile）。2026-09-28 新增 K14–K18 待追認。
+**追認結果**：使用者 2026-09-27 全部追認 K1–K13（K7：步驟 8 再決定 `--no-daemon`；K8 改為還原啟動時的 PATH、不 source dotfile）。2026-09-28 新增 K14–K18。
+
+**追認結果（第二批）**：使用者 2026-09-28 追認 K14–K18（K18 接受備註原文 `agend: this thread belongs to agend instance <id>.`；改動第 7 施工關 P3，已明確決定）；K7 結案：不加 `--no-daemon`（U6、U18）
 
 **K7 的建議（2026-09-28，依步驟 8 的證據）：維持不加 `--no-daemon`，K7 結案。** 證據：帶 `--remote` 的 TUI 沒有另外起、也沒有接上共用的背景 daemon（`codex_live` 期間沙箱外的 `ps`：`app-server daemon pid-update-loop`、`--managed-daemon` 兩個程序是之前就在的、pid 不變，U6）；`codex app-server` 沒有 `--no-daemon` 這個選項（U18），所以 app-server 那一行本來就加不了。加在 TUI 上沒有要解決的問題，還多一個「`--remote` 與 `--no-daemon` 衝突就每個 instance 都起不來」的風險。
 
@@ -619,18 +620,18 @@ unset AGEND_BIN
 | K4 | 要真 `agend` binary 的測試（包裝、holder、清掃、give-up、app-server 死掉、第一次啟動被打斷、舊列）放在 `crates/agend/tests/codex_process.rs`（同第 6 施工關），所以 `cargo xtask accept codex` 跑 `agend-daemon`、`agend-testkit`、`agend` 三個 crate；`agend-holder` 只改了 `sidecar.rs` 的說明 | 只有 `agend` crate 的測試拿得到 `CARGO_BIN_EXE_agend`；holder 本關沒改程式 | 無 |
 | K5 | DRV-6、DRV-9 的四次開機：每次開機是測試 binary 重新執行自己、開一個新的 store 與 `CodexDriver`；假 app-server 在父程序裡（行程內的 `Server`，真的 socket 與 WebSocket），所以 demo 印的「app-server pid」就是測試程序的 pid | backend 要活過四次開機；放在父程序最簡單，也不必找 binary | 改成獨立的 `fake-codex app-server` 程序：約 20 行 |
 | K6 | 假 app-server 的授權觸發改成「任何一行以 `run: ` 開頭」（原本是整個 prompt 以它開頭） | daemon 送的內容前面有 `From:`／`Task:` 標頭；錄製器的授權 prompt 第一行就是 `run: …`，錄製檔比對不受影響 | 改回只看開頭：一行，授權的 demo 要改 |
-| K7 | **不**給 TUI（也不給 app-server）加 `--no-daemon`（你 2026-09-26 查的 U6：codex 預設有共用的背景 app-server daemon） | `--remote` 和 `--no-daemon` 一起用有沒有衝突沒查證；衝突的話 TUI 起不來，每個 codex instance 都壞。`codex_live` 的 `ps:` 行會看到多出來的程序（U6、U18） | 包裝固定文字加一個參數，重跑步驟 8 |
+| K7 | **（使用者 2026-09-28 結案）** **不**給 TUI（也不給 app-server）加 `--no-daemon`。步驟 8 的證據：帶 `--remote` 的 TUI 沒有另外起或接上共用的背景 daemon（U6）；`codex app-server` 沒有 `--no-daemon` 選項（U18） | 加了沒有要解決的問題，還多一個「`--remote` 與 `--no-daemon` 衝突就每個 instance 都起不來」的風險 | 包裝固定文字加一個參數，重跑步驟 8 |
 | K8 | **（使用者 2026-09-27 改過）** `ZDOTDIR` 只給 codex agent（claude 等第 12 施工關實測）。`$AGEND_HOME/zsh/.zprofile` 在每次 daemon 開機時重寫，把 agent **啟動時拿到的 PATH** 原樣寫進去：`export PATH="$AGEND_HOME/bin":'<daemon 的 PATH，去掉裡面的 $AGEND_HOME/bin>'`（單引號、`'` 有跳脫），所以 login zsh 跑完 `/etc/zprofile`（`path_helper`）之後，順序還是 shim、然後啟動時的順序（`/opt/homebrew/bin`、`~/.cargo/bin` 不會被排到 `/usr/bin` 後面，verifier r1 L5 的副作用沒了）。**不** `source` 你的 `~/.zshenv`／`~/.zprofile`（你的 dotfile 會跑 Kiro／OrbStack 的腳本，不能每個 codex 指令跑一次）。沒有新的環境變數（第 6 施工關 H3 只多 `ZDOTDIR`） | 使用者決定：還原啟動時的 PATH、不跑 dotfile | 改成動態 `$PATH` 或 source dotfile：`zprofile` 一個函式 |
 | K9 | 已經送過一次的 `queued` 訊息（`messages.attempted_at_unix_ms` 在 RPC 之前寫入）：回覆沒回來（30 秒逾時）、連線斷、daemon 停在送出中途，**不只是當掉**（verifier r1 L1）。這種訊息重送前一律先對帳（歷史＋`thread/queue/list`），而且 thread 有 turn 在跑時不送、等閒置再看一次（那個 turn 可能就是它，只是 user message 還沒出現；真 codex 的 user message 也是晚出現的）；兩邊都沒有才送（`== reply-lost` 與 `a_lost_reply_is_not_sent_again`）。這一則等的時候，排在它後面的 `Queue` 訊息也跟著等（同一個收件者照順序，`a_queue_row_waits_behind_an_uncertain_one`）；只有插入、中斷照送（要能停下失控的 turn，`an_uncertain_row_does_not_hold_back_an_interrupt`），所以它們可能比前面那則狀態不明的先到。剩下的窗口：①它的 turn 被中斷、user message 永遠沒出現（`interrupt.jsonl` 那樣）→ 閒置後再送一次；②它已經離開 `thread/queue/list`、它的 turn 還沒開始（兩個查詢之間）→ 兩邊都找不到、thread 又閒置 → 再送一次；③真 codex 不認得 `thread/queue/list` → 還排在佇列裡的會再送（log 一行）；④app-server 當掉重起後，歷史裡最後一個 turn 會不會一直是 `inProgress`（對帳只會把「忙」設成真、不會設回假，未查證 U19）→ 若是，這則會一直等、不送。另一個接受的小窗口（L6）：daemon 死在 `Spawned` 與寫 `agent_pid` 之間，接回時是 `already_spawned`、拿不到 pid，那一代 holder 之後被 `kill -9` 就沒有清掃 | 真正「沒到 codex」的訊息還是要送；等閒置只延後、不丟 | 拿掉對帳前置與等待：約 30 行 |
 | K10 | `thread/resume` 的「找不到」＝ RPC 錯誤訊息含 `not found`（假 app-server 回 `-32600 thread not found: <id>`） | 真 codex 的錯誤形狀未查證（U1）；步驟 7 的 `resume_empty` 會錄到 | 改比對規則：一行 |
 | K11 | 送達的細節：送到不存在的 instance 是錯誤、不存任何列（DRV-2）；已經 `queued` 的訊息在 instance 之後變 `failed` 或被刪時不改成 `failed`（本關沒有呼叫點，第 9 施工關的 `inbox`／`status` 再看）；「`sent` 超過 10 分鐘」的顯示沒做（第 9、11 施工關）；fleet 的忙／閒沒接（instance 仍是 `unknown`，去抖動維持 5 秒不動；driver 的 `CodexDriver::busy` 已經有） | 都還沒有使用者；現在做只能用假資料驗 | 各在該施工關做 |
 | K12 | 第 8 施工關的後續（頁面「已知風險」寫的那一列）本關就做了：`failed` 的 codex 一律有 `retry`（`legacy_no_thread` 的除外），`retry` 接回原本的 thread，沒有 thread 就建。所以 `client_process.rs` 的 `== retry` 那段改了：「跑過、沒有 `retry`」那一列換成 opencode，codex `xn` 的啟動行是 `start (codex: new thread)`。第 8 施工關頁面步驟 1 的表要跟著改（本 PR 不改別的施工關頁面，列在 PR 裡） | codex 能 resume 之後，照舊「不能 retry」反而會丟掉能接回的對話 | 恢復舊規則：`failed_item` 一行＋那段測試 |
 | K13 | log 的寫法與頁面例子不同：清掃是 `<id>: sweep of agent group <G> (holder died): already gone`（括號裡也可能是 `before a new holder`、`failed, holder gone`；結果也可能是 `SIGKILL sent (<n> left: <pid> <argv>; …)`）；送出是 `<id>: <m> (<level>) → <方法> → sent (turn <T>)`；四次開機的開機 3 補回 7 個事件（m-1 那一輪的後半 3 個＋m-q 那一輪 4 個），不是例子的 4 個 | 例子是提案時的想像；實際輸出照抄在「你親自驗收」 | 改字串：各一行 |
-| K14 | **（2026-09-28，待追認）** `thread/turns/list` 的回傳是**新的在前**（`turns_list.jsonl`，U5）；driver 的 `turns_all` 讀完所有頁後反轉成舊的在前，P7 的事件展開與 cursor 不變；假 app-server 也改成新的在前（`nextCursor` 往舊的翻）。測試 helper `Backend::turns` 同樣反轉 | 不反轉的話事件順序顛倒、對帳看「最後一個 turn」會看到最舊的 | 拿掉反轉：一行（但真 codex 下 P7 就錯） |
-| K15 | **（2026-09-28，待追認）** K10 的比對改成「`not found` 或 `no rollout found`」：真 codex 對找不到的 thread 回 -32600 `no rollout found for thread id <id>`（`resume_empty.jsonl`，U1），原本的字串比不到、會走 `failed` | 照 U1 的真實錯誤 | 改回：一行 |
-| K16 | **（2026-09-28，待追認；driver 已改）** U11：中斷之後，已經排隊的訊息不會自己開始，要 `thread/queue/start`（`queue_idle`，0.158.0）。所以 driver 在每個 turn 結束（`turn/completed`，含被中斷）之後、thread 閒置時，以及每次（重新）連上的對帳之後閒置時，先 `thread/queue/list`，非空就 `thread/queue/start` 一次；回 `queue is empty` 或 `active or pending turn` 表示 codex 自己開始了，當成功（擴大 P6 已核准的例外）。人在 TUI 中斷、daemon 跑著或重啟之後都一樣（`a_queue_left_waiting_by_a_human_interrupt_is_started`，拿掉這一步時這條測試失敗）。Interrupt 級的 `turn/start` 是新的一輪，排隊的在它之後才開始。假 app-server：中斷不帶出排隊的；`queue/start` 先看佇列（空就 `queue is empty`，跟真的一樣），再看有沒有 turn 在跑 | 不然排隊的訊息會一直停在 `sent`、永遠不開始（verifier 的 MEDIUM） | 拿掉那一步：約 40 行＋一條測試 |
-| K17 | **（2026-09-28，待追認）** `thread/turns/list` 對還沒有 user message 的 thread 回 -32600 `thread … is not materialized yet; thread/turns/list is unavailable before first user message`（`codex_live` 第 1 次，每次啟動都失敗、3 次後 `failed`）；driver 把這個錯誤當成「沒有 turn」。假 app-server 對沒有 turn、也沒有 inject 的 thread 回同樣的錯誤 | 新 instance 第一次啟動必經這裡 | 拿掉：一個 match 分支（真 codex 下每個新 instance 都 `failed`） |
-| K18 | **（2026-09-28，待追認，改了 P3）** driver `thread/start` 之後立刻 `thread/inject_items` 一則 developer 訊息，全文：`agend: this thread belongs to agend instance <id>.`（`<id>` 是 instance id，例如 `agend: this thread belongs to agend instance g7-live.`）。不呼叫模型；但這則會一直留在模型的上下文裡，**之後每一輪都多算幾個 input token**（不是完全不花）。原因：0.158.0 的 thread 要有歷史才落地，否則 TUI `codex resume <id> --remote` 對同一個 app-server 也起不來（`no rollout found`，不花 token 實測），app-server 重起後 `thread/resume` 也找不到（U1）。inject 之後 TUI 起得來（實測 10 秒還在）、`codex_live` 通過；假 app-server 支援 `thread/inject_items`（inject 過的 thread 會存檔）。接受的窗口：inject 之後、thread id 存進 DB 之前 daemon 當掉，下一次會再建一個 thread，前一個留在 `~/.codex/sessions/` 當沒人用的 rollout（只有這則 developer 訊息，無害，只是 `codex resume` 清單多一筆）。替代：第一則訊息送到之前不 `exec` TUI（包裝 60 秒等不到會 `exit 1`，要改包裝與 P2 的逾時）；第一次讓 TUI 自己開新 thread（回到 v1 的猜 thread，P3 否決過） | 最小改動、保持 P3「TUI 一律 `resume <id>`」 | 拿掉那一次呼叫：約 10 行（真 codex 下每個新 instance 的 TUI 都起不來） |
+| K14 | **（2026-09-28，使用者 2026-09-28 追認）** `thread/turns/list` 的回傳是**新的在前**（`turns_list.jsonl`，U5）；driver 的 `turns_all` 讀完所有頁後反轉成舊的在前，P7 的事件展開與 cursor 不變；假 app-server 也改成新的在前（`nextCursor` 往舊的翻）。測試 helper `Backend::turns` 同樣反轉 | 不反轉的話事件順序顛倒、對帳看「最後一個 turn」會看到最舊的 | 拿掉反轉：一行（但真 codex 下 P7 就錯） |
+| K15 | **（2026-09-28，使用者 2026-09-28 追認）** K10 的比對改成「`not found` 或 `no rollout found`」：真 codex 對找不到的 thread 回 -32600 `no rollout found for thread id <id>`（`resume_empty.jsonl`，U1），原本的字串比不到、會走 `failed` | 照 U1 的真實錯誤 | 改回：一行 |
+| K16 | **（2026-09-28，使用者 2026-09-28 追認；driver 已改）** U11：中斷之後，已經排隊的訊息不會自己開始，要 `thread/queue/start`（`queue_idle`，0.158.0）。所以 driver 在每個 turn 結束（`turn/completed`，含被中斷）之後、thread 閒置時，以及每次（重新）連上的對帳之後閒置時，先 `thread/queue/list`，非空就 `thread/queue/start` 一次；回 `queue is empty` 或 `active or pending turn` 表示 codex 自己開始了，當成功（擴大 P6 已核准的例外）。人在 TUI 中斷、daemon 跑著或重啟之後都一樣（`a_queue_left_waiting_by_a_human_interrupt_is_started`，拿掉這一步時這條測試失敗）。Interrupt 級的 `turn/start` 是新的一輪，排隊的在它之後才開始。假 app-server：中斷不帶出排隊的；`queue/start` 先看佇列（空就 `queue is empty`，跟真的一樣），再看有沒有 turn 在跑 | 不然排隊的訊息會一直停在 `sent`、永遠不開始（verifier 的 MEDIUM） | 拿掉那一步：約 40 行＋一條測試 |
+| K17 | **（2026-09-28，使用者 2026-09-28 追認）** `thread/turns/list` 對還沒有 user message 的 thread 回 -32600 `thread … is not materialized yet; thread/turns/list is unavailable before first user message`（`codex_live` 第 1 次，每次啟動都失敗、3 次後 `failed`）；driver 把這個錯誤當成「沒有 turn」。假 app-server 對沒有 turn、也沒有 inject 的 thread 回同樣的錯誤 | 新 instance 第一次啟動必經這裡 | 拿掉：一個 match 分支（真 codex 下每個新 instance 都 `failed`） |
+| K18 | **（2026-09-28，使用者 2026-09-28 追認，改了 P3）** driver `thread/start` 之後立刻 `thread/inject_items` 一則 developer 訊息，全文：`agend: this thread belongs to agend instance <id>.`（`<id>` 是 instance id，例如 `agend: this thread belongs to agend instance g7-live.`）。不呼叫模型；但這則會一直留在模型的上下文裡，**之後每一輪都多算幾個 input token**（不是完全不花）。原因：0.158.0 的 thread 要有歷史才落地，否則 TUI `codex resume <id> --remote` 對同一個 app-server 也起不來（`no rollout found`，不花 token 實測），app-server 重起後 `thread/resume` 也找不到（U1）。inject 之後 TUI 起得來（實測 10 秒還在）、`codex_live` 通過；假 app-server 支援 `thread/inject_items`（inject 過的 thread 會存檔）。接受的窗口：inject 之後、thread id 存進 DB 之前 daemon 當掉，下一次會再建一個 thread，前一個留在 `~/.codex/sessions/` 當沒人用的 rollout（只有這則 developer 訊息，無害，只是 `codex resume` 清單多一筆）。替代：第一則訊息送到之前不 `exec` TUI（包裝 60 秒等不到會 `exit 1`，要改包裝與 P2 的逾時）；第一次讓 TUI 自己開新 thread（回到 v1 的猜 thread，P3 否決過） | 最小改動、保持 P3「TUI 一律 `resume <id>`」 | 拿掉那一次呼叫：約 10 行（真 codex 下每個新 instance 的 TUI 都起不來） |
 
 ## 驗收紀錄
 
@@ -644,6 +645,7 @@ unset AGEND_BIN
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-28 使用者追認 K14–K18、K7 結案；`queue_idle` 修競態：錄製器等長回覆開始串流才 `queue/add`＋`turn/interrupt`，只重錄 `queue_idle`（真 codex，3 個短 turn，一次成功），從 `transcripts-pending/` 移進 `transcripts/`；假 app-server 的回覆改成串流（`item/completed` 晚一點、串流中被中斷沒有 `item/completed`）；一致性檢查 8 個情境全比對、5 passed。
 - 2026-09-28 verifier（真 codex 那兩個 commit 之後）MEDIUM：人中斷後 codex 的佇列不會自己開始（U11）；driver 改成 turn 結束、閒置、佇列非空時 `thread/queue/start` 一次（連上後的對帳也做），附測試（daemon 跑著與重啟後）。K18 改寫：developer note 每輪多幾個 input token、inject 與存 DB 之間當掉會留一個沒人用的 rollout；假 app-server 的 `queue/start` 先看佇列，對齊真的 `queue is empty`。
 - 2026-09-28 agent 經使用者授權跑真 codex（0.158.0，自動從 0.156.1 升上來）：沙箱補 `installation_id`、`app-server-control/app-server-startup.lock`（二分找出；錄製器改成回報 app-server 的 stderr）；8 個情境錄製（1 次全錄＋`queue_idle` 重錄 1 次），7 個進 `transcripts/`、`queue_idle` 因時序競態放 `transcripts-pending/`；假 app-server 照錄製改（user message 時機、中斷補 user message、turns 新的在前、compact、`no rollout found`、`queue is empty`、中斷後佇列不動、`inject_items`、not materialized）；driver K14、K15、K17、K18；`codex_live` 第 1 次在 turn 之前就失敗（K17），第 2 次 `codex_live: ok`（3 個短 turn；shim 三個都對）；回答 U1–U16、U18（U19 未測）；K7 建議結案；K14–K18 待追認；`~/.codex/config.toml`、`auth.json` 前後修改時間不變。
 - 2026-09-27 使用者追認 K1–K13；K8 改為 `.zprofile` 寫入啟動時的 PATH（shim 在前、不 source dotfile），真的 `/bin/zsh -lc` 測試：PATH＝shim、然後啟動順序，`command -v git pkill killall` 都是 shim；merge `origin/v2`（#134、#135）。

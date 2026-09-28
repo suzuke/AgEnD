@@ -26,11 +26,10 @@
 //! | `--listen` path | like codex: the socket always lives at a short path (`<tmp>/fake-codex-<hash>.sock`, codex: `/private/tmp/codex-daemon-<uid>/<sha256>`) and the requested path is a symlink to it (pitfall 1); an old symlink at the requested path is replaced |
 //! | `agendFake/exit` | fake only: the server process exits at once (a test stand-in for an app-server that dies) |
 //!
-//! `queue_idle` was recorded (2026-09-28) but is not yet a conformance
-//! transcript: the real agent reply started streaming before the recorder's
-//! `thread/queue/add` in one run and after it in `turns_list`, a race the
-//! fake cannot match both ways (`transcripts-pending/codex/queue_idle.jsonl`;
-//! apart from that race the fake's traffic follows it).
+//! Agent replies stream: `item/started` and a first delta when the input's
+//! turn time is up, `item/completed` a third of the turn time later; an
+//! interrupt meanwhile gives `thread/tokenUsage/updated` before its reply
+//! and no `item/completed` (queue_idle.jsonl, 0.158.0).
 //!
 //! Not covered: `thread/items/list`, reasoning items (the model's choice),
 //! the other approval kinds, sandboxing, MCP server, account and rate-limit
@@ -261,6 +260,10 @@ struct Turn {
     /// A `thread/compact/start` turn: one `contextCompaction` item, no
     /// user or agent message.
     compact: bool,
+    /// The agent message streaming now: (item, full text, when it ends).
+    /// Real codex streams for seconds; an interrupt meanwhile ends the turn
+    /// without the item's `item/completed` (queue_idle.jsonl, 0.158.0).
+    streaming: Option<(Value, String, Instant)>,
     items: Vec<Value>,
     agent_items: Vec<Value>,
 }
@@ -529,6 +532,7 @@ impl State {
             user_due: (!compact)
                 .then(|| Instant::now() + if warm { Duration::ZERO } else { turn / 3 }),
             compact,
+            streaming: None,
             items: Vec::new(),
             agent_items: Vec::new(),
         };
@@ -642,52 +646,99 @@ impl State {
         }
     }
 
-    /// Answers the inputs not yet answered; stops at an approval request.
+    /// Starts streaming the reply to one input: `item/started` and a first
+    /// `item/agentMessage/delta` now, the rest when the stream ends (a third
+    /// of the turn time later, [`State::end_stream`]).
+    fn begin_stream(&mut self, thread_id: &str, turn_id: &str, text: String, turn: Duration) {
+        let id = format!("msg_fake{:016}", self.next_id + 1);
+        self.next_id += 1;
+        let item = json!({"type": "agentMessage", "id": id, "text": "", "phase": "final_answer",
+                          "delivery": null, "memoryCitation": null, "questions": null});
+        self.item_event(thread_id, turn_id, "item/started", &item);
+        self.notify(
+            thread_id,
+            "item/agentMessage/delta",
+            json!({"threadId": thread_id, "turnId": turn_id, "itemId": id, "delta": text}),
+        );
+        if let Some(active) = self
+            .threads
+            .get_mut(thread_id)
+            .and_then(|t| t.active.as_mut())
+        {
+            active.streaming = Some((item, text, Instant::now() + turn / 3));
+        }
+    }
+
+    /// The stream ended: `item/completed`, token usage; the turn goes on.
+    fn end_stream(&mut self, thread_id: &str, turn: Duration) {
+        let Some(active) = self
+            .threads
+            .get_mut(thread_id)
+            .and_then(|t| t.active.as_mut())
+        else {
+            return;
+        };
+        let Some((mut item, text, _)) = active.streaming.take() else {
+            return;
+        };
+        let turn_id = active.id.clone();
+        item["text"] = json!(text);
+        self.item_event(thread_id, &turn_id, "item/completed", &item);
+        self.token_usage(thread_id, &turn_id);
+        if let Some(active) = self
+            .threads
+            .get_mut(thread_id)
+            .and_then(|t| t.active.as_mut())
+        {
+            active.items.push(item.clone());
+            active.agent_items.push(item);
+        }
+        self.run_turn(thread_id, turn);
+    }
+
+    /// Answers the next input not yet answered: starts streaming its reply
+    /// (the stream's end calls this again), asks for an approval, or ends
+    /// the turn when every input is answered.
     fn run_turn(&mut self, thread_id: &str, turn: Duration) {
-        loop {
-            let Some(active) = self.threads.get(thread_id).and_then(|t| t.active.as_ref()) else {
-                return;
-            };
-            if active.asking.is_some() {
-                return;
-            }
-            let (turn_id, done) = (active.id.clone(), active.done);
-            if active.compact {
-                self.compact(thread_id, &turn_id);
-                self.finish_turn(thread_id, "completed", turn);
-                return;
-            }
-            let Some((text, client_id)) = active.inputs.get(done).cloned() else {
-                self.finish_turn(thread_id, "completed", turn);
-                return;
-            };
-            if done == 0 {
-                self.show_user_message(thread_id);
-            } else {
-                let user = self.user_item(&text, client_id);
-                self.item_event(thread_id, &turn_id, "item/started", &user);
-                self.item_event(thread_id, &turn_id, "item/completed", &user);
-                if let Some(active) = self
-                    .threads
-                    .get_mut(thread_id)
-                    .and_then(|t| t.active.as_mut())
-                {
-                    active.items.push(user);
-                }
-            }
-            let active = self
+        let Some(active) = self.threads.get(thread_id).and_then(|t| t.active.as_ref()) else {
+            return;
+        };
+        if active.asking.is_some() || active.streaming.is_some() {
+            return;
+        }
+        let (turn_id, done) = (active.id.clone(), active.done);
+        if active.compact {
+            self.compact(thread_id, &turn_id);
+            self.finish_turn(thread_id, "completed", turn);
+            return;
+        }
+        let Some((text, client_id)) = active.inputs.get(done).cloned() else {
+            self.finish_turn(thread_id, "completed", turn);
+            return;
+        };
+        if done == 0 {
+            self.show_user_message(thread_id);
+        } else {
+            let user = self.user_item(&text, client_id);
+            self.item_event(thread_id, &turn_id, "item/started", &user);
+            self.item_event(thread_id, &turn_id, "item/completed", &user);
+            if let Some(active) = self
                 .threads
                 .get_mut(thread_id)
                 .and_then(|t| t.active.as_mut())
-                .expect("active");
-            active.done += 1;
-            match text.lines().find_map(|l| l.strip_prefix(APPROVAL_PREFIX)) {
-                Some(command) if done == 0 => {
-                    self.ask(thread_id, &turn_id, command.trim());
-                    return;
-                }
-                _ => self.agent_message(thread_id, &turn_id, &reply_to(&text)),
+            {
+                active.items.push(user);
             }
+        }
+        let active = self
+            .threads
+            .get_mut(thread_id)
+            .and_then(|t| t.active.as_mut())
+            .expect("active");
+        active.done += 1;
+        match text.lines().find_map(|l| l.strip_prefix(APPROVAL_PREFIX)) {
+            Some(command) if done == 0 => self.ask(thread_id, &turn_id, command.trim()),
+            _ => self.begin_stream(thread_id, &turn_id, reply_to(&text), turn),
         }
     }
 
@@ -894,6 +945,20 @@ fn tick_loop(shared: &Shared) {
             .collect();
         for thread_id in due {
             state.run_turn(&thread_id, shared.turn);
+        }
+        let ended: Vec<String> = state
+            .threads
+            .iter()
+            .filter(|(_, t)| {
+                t.active
+                    .as_ref()
+                    .and_then(|a| a.streaming.as_ref())
+                    .is_some_and(|(_, _, until)| *until <= now)
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        for thread_id in ended {
+            state.end_stream(&thread_id, shared.turn);
         }
     }
 }
@@ -1134,6 +1199,17 @@ fn handle(message: &Value, connection: u64, shared: &Shared) -> Vec<Value> {
                 // 0.158.0).
                 state.hold = Some((connection, Vec::new()));
                 state.show_user_message(&thread_id);
+                // Interrupted mid-stream: token usage, no `item/completed`
+                // for the partial reply (queue_idle.jsonl, 0.158.0).
+                let streaming = state
+                    .threads
+                    .get_mut(&thread_id)
+                    .and_then(|t| t.active.as_mut())
+                    .and_then(|a| a.streaming.take())
+                    .is_some();
+                if streaming {
+                    state.token_usage(&thread_id, turn_id);
+                }
                 if let Some((_, held)) = state.hold.take() {
                     before.extend(held);
                 }

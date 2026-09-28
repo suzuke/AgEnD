@@ -170,6 +170,7 @@ impl Backend for Codex {
                     ws.wait_completed(&turn, t)?;
                 }
                 // U2: does `turn/start` take `clientUserMessageId`?
+                let before = log.len();
                 let long = id_at(
                     &ws.request(
                         "turn/start",
@@ -178,7 +179,13 @@ impl Backend for Codex {
                     )?,
                     &["turn", "id"],
                 )?;
-                std::thread::sleep(agent.pace.settle);
+                // Queue only once the reply streams, so the order is fixed
+                // (a fixed sleep raced the first delta, 2026-09-28).
+                log.wait(before, t, "the long reply to stream", |e| {
+                    e.from == Side::Backend
+                        && e.str("method") == Some("item/agentMessage/delta")
+                        && e.msg["params"]["turnId"] == long.as_str()
+                })?;
                 ws.request(
                     "thread/queue/add",
                     json!({"threadId": thread, "clientUserMessageId": "agend-rec-queued-2", "input": input(prompts::OK)}),
