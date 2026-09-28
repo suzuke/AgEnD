@@ -1,4 +1,8 @@
--- user_version = 3
+-- user_version = 4
+
+CREATE INDEX messages_by_target ON messages (to_instance, seq);
+
+CREATE INDEX messages_by_time ON messages (created_at_unix_ms);
 
 CREATE INDEX task_events_by_task ON task_events (task_id, seq);
 
@@ -14,7 +18,25 @@ CREATE TABLE instances (
     session_id        TEXT,
     status            TEXT NOT NULL CHECK (status IN ('new', 'running', 'failed'))
 , session_started INTEGER NOT NULL DEFAULT 0
-    CHECK (session_started IN (0, 1))) STRICT;
+    CHECK (session_started IN (0, 1)), agent_pid INTEGER CHECK (agent_pid IS NULL OR agent_pid > 0), legacy_no_thread INTEGER NOT NULL DEFAULT 0
+    CHECK (legacy_no_thread IN (0, 1))) STRICT;
+
+CREATE TABLE messages (
+    seq                INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    id                 TEXT    NOT NULL UNIQUE,
+    from_instance      TEXT    NOT NULL,
+    to_instance        TEXT    NOT NULL,
+    task_id            TEXT,
+    body               TEXT    NOT NULL,
+    level              TEXT    NOT NULL CHECK (level IN ('queue', 'steer', 'interrupt')),
+    state              TEXT    NOT NULL CHECK (state IN ('queued', 'sent', 'confirmed', 'failed')),
+    turn_id            TEXT,
+    attempted_at_unix_ms INTEGER CHECK (attempted_at_unix_ms IS NULL OR attempted_at_unix_ms >= 0),
+    created_at_unix_ms INTEGER NOT NULL CHECK (created_at_unix_ms >= 0),
+    updated_at_unix_ms INTEGER NOT NULL CHECK (updated_at_unix_ms >= 0)
+) STRICT;
+
+CREATE TABLE sqlite_sequence(name,seq);
 
 CREATE TABLE task_events (
     seq                 INTEGER NOT NULL PRIMARY KEY,

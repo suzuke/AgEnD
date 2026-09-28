@@ -1,27 +1,39 @@
-//! `fake-codex-app-server`: the subset of `codex app-server` 0.156.1 that
-//! docs/backends/codex.md, research/spike-codex.md and the recordings in
-//! `transcripts/codex/` show. JSON-RPC messages without a `jsonrpc` field
-//! (`{id, method, params}`, `{method, params}` with `emittedAtMs`,
-//! `{id, result}`, `{id, error}`) in WebSocket text frames over a unix
-//! socket (`--listen unix://<path>`). The conformance test
-//! (`tests/conformance.rs`) compares its traffic with the recordings by shape.
+//! `fake-codex-app-server`: the subset of `codex app-server` 0.158.0 (first
+//! modelled on 0.156.1, re-recorded 2026-09-28) that docs/backends/codex.md,
+//! research/spike-codex.md and the recordings in `transcripts/codex/` show.
+//! JSON-RPC messages without a `jsonrpc` field (`{id, method, params}`,
+//! `{method, params}` with `emittedAtMs`, `{id, result}`, `{id, error}`) in
+//! WebSocket text frames over a unix socket (`--listen unix://<path>`). The
+//! conformance test (`tests/conformance.rs`) compares its traffic with the
+//! recordings by shape.
 //!
 //! | Covered | Behaviour |
 //! |---|---|
 //! | `initialize` | `{codexHome, platformFamily, platformOs, userAgent}` |
-//! | `thread/start {model?, cwd?, approvalPolicy?, sandbox?, config?}` | the full thread settings and `thread` object; `thread/started`. The connection then receives the thread's notifications (only after start or resume, spike S2) |
-//! | `turn/start {threadId, input}` | `{turn}` (`inProgress`), `thread/status/changed` active, `turn/started`. After `--turn-ms` the turn "runs": per input (the prompt, then each steer) `item/started` + `item/completed` userMessage, `item/started` agentMessage, one `item/agentMessage/delta`, `item/completed`, `thread/tokenUsage/updated`; then `thread/status/changed` idle and `turn/completed` (`completed`, the agent messages as `items`). A `turn/start` while a turn runs joins it (spike S3) |
-//! | `turn/steer {threadId, expectedTurnId, input}` | `{turnId}`; the text is one more input of the running turn (its own user message and reply); wrong turn id → error -32600 |
-//! | `turn/interrupt {threadId, turnId}` | `{}`, `thread/status/changed` idle, `turn/completed` `interrupted` |
-//! | `thread/queue/add {threadId, clientUserMessageId, input}` | `{queuedSubmission}`, `thread/queue/changed`; runs as its own turn after the current one (auto-dequeue: `thread/queue/changed`, active, `turn/started`; its user message has `clientId`) |
-//! | `run: <command>` as the prompt | the turn asks: `thread/status/changed` `waitingOnApproval`, a `commandExecution` item (`/bin/zsh -lc '<command>'`), and the server→client request `item/commandExecution/requestApproval`; the reply `{decision}` gives `serverRequest/resolved`, the item `declined` (or `completed` for `accept*`, without running anything; not recorded), then the agent message |
-//! | `thread/resume {threadId}` | `deprecationNotice` (no `excludeTurns`), `thread/status/changed` idle, the settings with the full `thread` (all turns), `thread/tokenUsage/updated`, `thread/goal/cleared` |
+//! | `thread/start {model?, cwd?, approvalPolicy?, sandbox?, config?}` | the full thread settings and `thread` object; `thread/started`. The connection then receives the thread's notifications (only after start or resume, spike S2). The thread is not on disk until it has a turn or `thread/inject_items` (U1) |
+//! | `thread/inject_items {threadId, items}` | `{}`; the thread is on disk from now on (no turn, nothing listed) |
+//! | `turn/start {threadId, input, clientUserMessageId?}` | `{turn}` (`inProgress`), `thread/status/changed` active, `turn/started`, then the prompt's user message (`item/started` + `item/completed`, `clientId` = `clientUserMessageId`, U2): at once, except for the first turn of the thread in this process, where it shows a third into `--turn-ms` (real: 2–4 s vs 20 ms). After `--turn-ms` the turn "runs": per input (then each steer: its user message first) `item/started` agentMessage, one `item/agentMessage/delta`, `item/completed`, `thread/tokenUsage/updated`; then `thread/status/changed` idle and `turn/completed` (`completed`, the agent messages as `items`). A `turn/start` while a turn runs joins it (spike S3) |
+//! | `turn/steer {threadId, expectedTurnId, input, clientUserMessageId?}` | `{turnId}`; the text is one more input of the running turn (its own user message and reply); wrong turn id → error -32600; no running turn → -32600 `no active turn to steer` (U9) |
+//! | `turn/interrupt {threadId, turnId}` | the user message if it has not shown yet, `{}`, `thread/status/changed` idle, `turn/completed` `interrupted`. Queued messages stay queued (U11) |
+//! | `thread/queue/add {threadId, clientUserMessageId, input}` | `{queuedSubmission}`, `thread/queue/changed`; runs as its own turn after the current one completes (auto-dequeue: `thread/queue/changed`, active, `turn/started`; its user message has `clientId`); on an idle thread it starts at once (U3) |
+//! | `thread/queue/list {threadId}` | `{data: [{id, clientUserMessageId, input}], nextCursor}`, oldest first |
+//! | `thread/queue/start {threadId}` | starts the oldest queued message, `{turn}`; nothing queued → -32600 `queue is empty`, checked first (U3; also while a turn is active, `queue_idle` 0.158.0); something queued and a turn active → -32600 `thread already has an active or pending turn` (0.156.1 spike, not re-recorded) |
+//! | `thread/turns/list {threadId, cursor?, limit?}` | `{data, nextCursor, backwardsCursor}`: turns **newest first** (the running one first), `itemsView: "summary"`; `cursor` (the index to start at) pages back to older turns (U5). A thread with no turn and no injected items → -32600 `… is not materialized yet …` |
+//! | `thread/compact/start {threadId}` | `{}`, then a turn of its own with one `contextCompaction` item (listed with no items); older turns unchanged (U10) |
+//! | a line `run: <command>` in the prompt | the turn asks: `thread/status/changed` `waitingOnApproval`, a `commandExecution` item (`/bin/zsh -lc '<command>'`), and the server→client request `item/commandExecution/requestApproval`; the reply `{decision}` gives `serverRequest/resolved`, the item `declined` (or `completed` for `accept*`, without running anything; not recorded), then the agent message |
+//! | `thread/resume {threadId, excludeTurns?}` | `deprecationNotice` (no `excludeTurns`), `thread/status/changed` idle, the settings with the full `thread` (all turns; none with `excludeTurns: true`), `thread/tokenUsage/updated`, `thread/goal/cleared`; an unknown thread (or one never on disk) → error -32600 `no rollout found for thread id <id>` (U1) |
 //! | restart | with `AGEND_FAKE_STATE_DIR` set, threads persist in `$AGEND_FAKE_STATE_DIR/fake-codex/threads.json` (the real server keeps rollouts under `CODEX_HOME`), so a restarted fake resumes by id (spike S4); without it nothing persists |
-//! | `--listen` path | like codex: the socket always lives at a short path (`<tmp>/fake-codex-<hash>.sock`, codex: `/private/tmp/codex-daemon-<uid>/<sha256>`) and the requested path is a symlink to it (pitfall 1) |
+//! | `--listen` path | like codex: the socket always lives at a short path (`<tmp>/fake-codex-<hash>.sock`, codex: `/private/tmp/codex-daemon-<uid>/<sha256>`) and the requested path is a symlink to it (pitfall 1); an old symlink at the requested path is replaced |
+//! | `agendFake/exit` | fake only: the server process exits at once (a test stand-in for an app-server that dies) |
 //!
-//! Not covered: `thread/turns/list`, `thread/items/list`, reasoning items
-//! (the model's choice), the other approval kinds, sandboxing, MCP server,
-//! account and rate-limit notifications (see `recorder::shape::IGNORED`).
+//! Agent replies stream: `item/started` and a first delta when the input's
+//! turn time is up, `item/completed` a third of the turn time later; an
+//! interrupt meanwhile gives `thread/tokenUsage/updated` before its reply
+//! and no `item/completed` (queue_idle.jsonl, 0.158.0).
+//!
+//! Not covered: `thread/items/list`, reasoning items (the model's choice),
+//! the other approval kinds, sandboxing, MCP server, account and rate-limit
+//! notifications (see `recorder::shape::IGNORED`).
 //!
 //! Must NOT: call a model or run the commands it is asked to approve.
 
@@ -46,7 +58,7 @@ pub const MAX_DIRECT_SOCKET_PATH: usize = 100;
 const INVALID_REQUEST: i64 = -32600;
 const METHOD_NOT_FOUND: i64 = -32601;
 const APPROVAL_PREFIX: &str = "run: ";
-const CLI_VERSION: &str = "0.156.1";
+const CLI_VERSION: &str = "0.158.0";
 /// Where threads persist, under `$AGEND_FAKE_STATE_DIR`.
 pub const THREADS_FILE: &str = "fake-codex/threads.json";
 
@@ -90,6 +102,7 @@ fn usage(error: &str) -> ExitCode {
 pub struct Server {
     requested: PathBuf,
     bound: PathBuf,
+    shared: Arc<Shared>,
 }
 
 impl Server {
@@ -102,6 +115,11 @@ impl Server {
     ) -> io::Result<Server> {
         let bound = socket_path_for(requested);
         let _ = std::fs::remove_file(&bound);
+        // An old symlink (a server that died) is replaced (U14: what the
+        // real codex does is not verified).
+        if std::fs::symlink_metadata(requested).is_ok_and(|m| m.file_type().is_symlink()) {
+            std::fs::remove_file(requested)?;
+        }
         std::os::unix::fs::symlink(&bound, requested)?;
         let listener = UnixListener::bind(&bound)?;
         let mut state = State {
@@ -114,11 +132,20 @@ impl Server {
         let shared = Arc::new(Shared {
             state: Mutex::new(state),
             turn,
+            closed: std::sync::atomic::AtomicBool::new(false),
+            accepted: std::sync::atomic::AtomicU64::new(0),
         });
+        let handle = Arc::clone(&shared);
         let ticker = Arc::clone(&shared);
         std::thread::spawn(move || tick_loop(&ticker));
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
+                if shared.closed.load(std::sync::atomic::Ordering::SeqCst) {
+                    return;
+                }
+                shared
+                    .accepted
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let shared = Arc::clone(&shared);
                 std::thread::spawn(move || {
                     let _ = serve(stream, &shared);
@@ -126,6 +153,7 @@ impl Server {
             }
         });
         Ok(Server {
+            shared: handle,
             requested: requested.to_path_buf(),
             bound,
         })
@@ -137,8 +165,21 @@ impl Server {
     }
 }
 
+impl Server {
+    /// How many connections this server accepted.
+    pub fn accepted(&self) -> u64 {
+        self.shared
+            .accepted
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
 impl Drop for Server {
+    /// The server is gone: its connections end and its socket is removed.
     fn drop(&mut self) {
+        self.shared
+            .closed
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         let _ = std::fs::remove_file(&self.bound);
         let _ = std::fs::remove_file(&self.requested);
     }
@@ -156,6 +197,10 @@ pub fn socket_path_for(requested: &Path) -> PathBuf {
 struct Shared {
     state: Mutex<State>,
     turn: Duration,
+    /// Set when the [`Server`] is dropped: every connection ends.
+    closed: std::sync::atomic::AtomicBool,
+    /// Connections accepted so far.
+    accepted: std::sync::atomic::AtomicU64,
 }
 
 #[derive(Default)]
@@ -168,6 +213,9 @@ struct State {
     next_request_id: i64,
     home: Option<PathBuf>,
     originator: String,
+    /// While `Some((connection, held))`: notifications for that connection
+    /// are held back to go out before the reply of the request it is making.
+    hold: Option<(u64, Vec<Value>)>,
 }
 
 struct ThreadState {
@@ -178,21 +226,44 @@ struct ThreadState {
     turns: Vec<Value>,
     subscribers: BTreeSet<u64>,
     active: Option<Turn>,
-    queue: VecDeque<(String, String)>,
+    /// (submission id, text, client user message id, input as sent).
+    queue: VecDeque<Queued>,
+    /// `thread/inject_items` gave it history: on disk without a turn.
+    materialized: bool,
+    /// A turn already ran on this thread in this server process. The first
+    /// one is slow to show its user message (codex 0.158.0: 2–4 s after
+    /// `turn/started`; later turns 20 ms), see [`State::start_turn`].
+    warm: bool,
+}
+
+struct Queued {
+    id: String,
+    text: String,
+    client_id: String,
+    input: Value,
 }
 
 struct Turn {
     id: String,
-    /// The prompt, then each steer (or joining `turn/start`).
-    inputs: Vec<String>,
+    /// The prompt, then each steer (or joining `turn/start`), each with its
+    /// client user message id.
+    inputs: Vec<(String, Option<String>)>,
     /// Inputs already answered.
     done: usize,
-    client_id: Option<String>,
     started_at: u64,
     deadline: Instant,
     owner: u64,
     /// `Some(item)` while waiting for an approval decision.
     asking: Option<Value>,
+    /// When the first input's user message shows; `None` once it has.
+    user_due: Option<Instant>,
+    /// A `thread/compact/start` turn: one `contextCompaction` item, no
+    /// user or agent message.
+    compact: bool,
+    /// The agent message streaming now: (item, full text, when it ends).
+    /// Real codex streams for seconds; an interrupt meanwhile ends the turn
+    /// without the item's `item/completed` (queue_idle.jsonl, 0.158.0).
+    streaming: Option<(Value, String, Instant)>,
     items: Vec<Value>,
     agent_items: Vec<Value>,
 }
@@ -246,6 +317,8 @@ impl State {
                     subscribers: BTreeSet::new(),
                     active: None,
                     queue: VecDeque::new(),
+                    materialized: t["materialized"] == true,
+                    warm: false,
                 },
             );
         }
@@ -256,10 +329,16 @@ impl State {
         let Some(file) = self.home.as_ref().map(|h| h.join(THREADS_FILE)) else {
             return;
         };
+        // Like codex's rollouts: a thread without a turn is not on disk
+        // (U1: codex 0.158.0 answers `no rollout found` after a restart).
         let threads: Vec<Value> = self
             .threads
             .values()
-            .map(|t| json!({"thread": t.thread, "settings": t.settings, "turns": t.turns}))
+            .filter(|t| !t.turns.is_empty() || t.materialized)
+            .map(|t| {
+                json!({"thread": t.thread, "settings": t.settings, "turns": t.turns,
+                            "materialized": t.materialized})
+            })
             .collect();
         let saved = json!({"next_id": self.next_id, "threads": threads});
         let _ = super::write_state_atomic(&file, &saved.to_string());
@@ -273,11 +352,20 @@ impl State {
     /// Sends a notification to every connection subscribed to the thread.
     fn notify(&mut self, thread_id: &str, method: &str, params: Value) {
         let message = self.notification(method, params);
-        if let Some(thread) = self.threads.get(thread_id) {
-            for id in &thread.subscribers {
-                if let Some(tx) = self.connections.get(id) {
-                    let _ = tx.send(message.clone());
-                }
+        let subscribers: Vec<u64> = self
+            .threads
+            .get(thread_id)
+            .map(|t| t.subscribers.iter().copied().collect())
+            .unwrap_or_default();
+        for id in subscribers {
+            if let Some((held_for, held)) = &mut self.hold
+                && *held_for == id
+            {
+                held.push(message.clone());
+                continue;
+            }
+            if let Some(tx) = self.connections.get(&id) {
+                let _ = tx.send(message.clone());
             }
         }
     }
@@ -354,8 +442,12 @@ impl State {
                 subscribers: BTreeSet::new(),
                 active: None,
                 queue: VecDeque::new(),
+                materialized: false,
+                warm: false,
             },
         );
+        // Keeps `next_id` (ids never repeat across restarts); the thread
+        // itself is saved with its first turn.
         self.save();
         let mut result = settings;
         result["activePermissionProfile"] = Value::Null;
@@ -412,17 +504,35 @@ impl State {
         owner: u64,
         turn: Duration,
     ) -> Value {
+        self.begin_turn(thread_id, text, client_id, owner, turn, false)
+    }
+
+    fn begin_turn(
+        &mut self,
+        thread_id: &str,
+        text: String,
+        client_id: Option<String>,
+        owner: u64,
+        turn: Duration,
+        compact: bool,
+    ) -> Value {
         let id = self.id();
         let started_at = self.now_ms() / 1000;
+        let warm = self.threads.get(thread_id).is_some_and(|t| t.warm);
         let t = Turn {
             id,
-            inputs: vec![text],
+            inputs: vec![(text, client_id)],
             done: 0,
-            client_id,
             started_at,
             deadline: Instant::now() + turn,
             owner,
             asking: None,
+            // The first turn of the thread in this process shows its user
+            // message a third into the turn, later ones at once.
+            user_due: (!compact)
+                .then(|| Instant::now() + if warm { Duration::ZERO } else { turn / 3 }),
+            compact,
+            streaming: None,
             items: Vec::new(),
             agent_items: Vec::new(),
         };
@@ -439,7 +549,60 @@ impl State {
             "turn/started",
             json!({"threadId": thread_id, "turn": started}),
         );
+        if warm && !compact {
+            self.show_user_message(thread_id);
+        }
+        if let Some(t) = self.threads.get_mut(thread_id) {
+            t.warm = true;
+        }
         pending
+    }
+
+    /// `thread/compact/start` (turns_list.jsonl, 0.158.0): a turn of its own
+    /// with one `contextCompaction` item; the older turns stay as they were
+    /// (U10).
+    fn start_compaction(&mut self, thread_id: &str, owner: u64, turn: Duration) {
+        self.begin_turn(thread_id, String::new(), None, owner, turn / 3, true);
+    }
+
+    fn compact(&mut self, thread_id: &str, turn_id: &str) {
+        let id = self.id();
+        let item = json!({"type": "contextCompaction", "id": id});
+        self.item_event(thread_id, turn_id, "item/started", &item);
+        self.token_usage(thread_id, turn_id);
+        self.item_event(thread_id, turn_id, "item/completed", &item);
+        if let Some(active) = self
+            .threads
+            .get_mut(thread_id)
+            .and_then(|t| t.active.as_mut())
+        {
+            active.items.push(item);
+        }
+    }
+
+    /// Sends the first input's user message if it has not shown yet.
+    fn show_user_message(&mut self, thread_id: &str) {
+        let Some(active) = self
+            .threads
+            .get_mut(thread_id)
+            .and_then(|t| t.active.as_mut())
+        else {
+            return;
+        };
+        if active.user_due.take().is_none() {
+            return;
+        }
+        let (turn_id, (text, client_id)) = (active.id.clone(), active.inputs[0].clone());
+        let user = self.user_item(&text, client_id);
+        self.item_event(thread_id, &turn_id, "item/started", &user);
+        self.item_event(thread_id, &turn_id, "item/completed", &user);
+        if let Some(active) = self
+            .threads
+            .get_mut(thread_id)
+            .and_then(|t| t.active.as_mut())
+        {
+            active.items.push(user);
+        }
     }
 
     fn user_item(&mut self, text: &str, client_id: Option<String>) -> Value {
@@ -483,46 +646,99 @@ impl State {
         }
     }
 
-    /// Answers the inputs not yet answered; stops at an approval request.
+    /// Starts streaming the reply to one input: `item/started` and a first
+    /// `item/agentMessage/delta` now, the rest when the stream ends (a third
+    /// of the turn time later, [`State::end_stream`]).
+    fn begin_stream(&mut self, thread_id: &str, turn_id: &str, text: String, turn: Duration) {
+        let id = format!("msg_fake{:016}", self.next_id + 1);
+        self.next_id += 1;
+        let item = json!({"type": "agentMessage", "id": id, "text": "", "phase": "final_answer",
+                          "delivery": null, "memoryCitation": null, "questions": null});
+        self.item_event(thread_id, turn_id, "item/started", &item);
+        self.notify(
+            thread_id,
+            "item/agentMessage/delta",
+            json!({"threadId": thread_id, "turnId": turn_id, "itemId": id, "delta": text}),
+        );
+        if let Some(active) = self
+            .threads
+            .get_mut(thread_id)
+            .and_then(|t| t.active.as_mut())
+        {
+            active.streaming = Some((item, text, Instant::now() + turn / 3));
+        }
+    }
+
+    /// The stream ended: `item/completed`, token usage; the turn goes on.
+    fn end_stream(&mut self, thread_id: &str, turn: Duration) {
+        let Some(active) = self
+            .threads
+            .get_mut(thread_id)
+            .and_then(|t| t.active.as_mut())
+        else {
+            return;
+        };
+        let Some((mut item, text, _)) = active.streaming.take() else {
+            return;
+        };
+        let turn_id = active.id.clone();
+        item["text"] = json!(text);
+        self.item_event(thread_id, &turn_id, "item/completed", &item);
+        self.token_usage(thread_id, &turn_id);
+        if let Some(active) = self
+            .threads
+            .get_mut(thread_id)
+            .and_then(|t| t.active.as_mut())
+        {
+            active.items.push(item.clone());
+            active.agent_items.push(item);
+        }
+        self.run_turn(thread_id, turn);
+    }
+
+    /// Answers the next input not yet answered: starts streaming its reply
+    /// (the stream's end calls this again), asks for an approval, or ends
+    /// the turn when every input is answered.
     fn run_turn(&mut self, thread_id: &str, turn: Duration) {
-        loop {
-            let Some(active) = self.threads.get(thread_id).and_then(|t| t.active.as_ref()) else {
-                return;
-            };
-            if active.asking.is_some() {
-                return;
-            }
-            let (turn_id, done) = (active.id.clone(), active.done);
-            let Some(text) = active.inputs.get(done).cloned() else {
-                self.finish_turn(thread_id, "completed", turn);
-                return;
-            };
-            let client_id = if done == 0 {
-                active.client_id.clone()
-            } else {
-                None
-            };
+        let Some(active) = self.threads.get(thread_id).and_then(|t| t.active.as_ref()) else {
+            return;
+        };
+        if active.asking.is_some() || active.streaming.is_some() {
+            return;
+        }
+        let (turn_id, done) = (active.id.clone(), active.done);
+        if active.compact {
+            self.compact(thread_id, &turn_id);
+            self.finish_turn(thread_id, "completed", turn);
+            return;
+        }
+        let Some((text, client_id)) = active.inputs.get(done).cloned() else {
+            self.finish_turn(thread_id, "completed", turn);
+            return;
+        };
+        if done == 0 {
+            self.show_user_message(thread_id);
+        } else {
             let user = self.user_item(&text, client_id);
             self.item_event(thread_id, &turn_id, "item/started", &user);
             self.item_event(thread_id, &turn_id, "item/completed", &user);
-            let active = self
+            if let Some(active) = self
                 .threads
                 .get_mut(thread_id)
                 .and_then(|t| t.active.as_mut())
-                .expect("active");
-            active.items.push(user);
-            active.done += 1;
-            match text.strip_prefix(APPROVAL_PREFIX) {
-                Some(command) if done == 0 => {
-                    self.ask(
-                        thread_id,
-                        &turn_id,
-                        command.lines().next().unwrap_or_default().trim(),
-                    );
-                    return;
-                }
-                _ => self.agent_message(thread_id, &turn_id, &reply_to(&text)),
+            {
+                active.items.push(user);
             }
+        }
+        let active = self
+            .threads
+            .get_mut(thread_id)
+            .and_then(|t| t.active.as_mut())
+            .expect("active");
+        active.done += 1;
+        match text.lines().find_map(|l| l.strip_prefix(APPROVAL_PREFIX)) {
+            Some(command) if done == 0 => self.ask(thread_id, &turn_id, command.trim()),
+            _ => self.begin_stream(thread_id, &turn_id, reply_to(&text), turn),
         }
     }
 
@@ -648,7 +864,13 @@ impl State {
                 .map(|i| i["content"][0]["text"].clone());
             thread.thread["preview"] = first.unwrap_or_else(|| json!(""));
         }
-        let queued = thread.queue.pop_front();
+        // U11 (codex 0.158.0): after an interrupt the queue stays put until
+        // `thread/queue/start`; only a completed turn starts the next one.
+        let queued = if status == "completed" {
+            thread.queue.pop_front()
+        } else {
+            None
+        };
         // Persist before telling anyone: a client may stop the server as
         // soon as it sees `turn/completed`.
         self.save();
@@ -659,14 +881,37 @@ impl State {
             "turn/completed",
             json!({"threadId": thread_id, "turn": done}),
         );
-        if let Some((text, client_id)) = queued {
+        if let Some(queued) = queued {
             self.notify(
                 thread_id,
                 "thread/queue/changed",
                 json!({"threadId": thread_id}),
             );
-            self.start_turn(thread_id, text, Some(client_id), active.owner, turn);
+            self.start_turn(
+                thread_id,
+                queued.text,
+                Some(queued.client_id),
+                active.owner,
+                turn,
+            );
         }
+    }
+
+    /// Every turn of the thread, oldest first, with full items; the running
+    /// one last with its items so far.
+    fn all_turns(&self, thread_id: &str) -> Vec<Value> {
+        let thread = &self.threads[thread_id];
+        let mut turns = thread.turns.clone();
+        if let Some(active) = &thread.active {
+            turns.push(Self::turn_json(
+                active,
+                "inProgress",
+                None,
+                Value::Array(active.items.clone()),
+                "full",
+            ));
+        }
+        turns
     }
 }
 
@@ -675,6 +920,19 @@ fn tick_loop(shared: &Shared) {
         std::thread::sleep(Duration::from_millis(5));
         let mut state = lock(&shared.state);
         let now = Instant::now();
+        let users: Vec<String> = state
+            .threads
+            .iter()
+            .filter(|(_, t)| {
+                t.active
+                    .as_ref()
+                    .is_some_and(|a| a.user_due.is_some_and(|d| d <= now))
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        for thread_id in users {
+            state.show_user_message(&thread_id);
+        }
         let due: Vec<String> = state
             .threads
             .iter()
@@ -687,6 +945,20 @@ fn tick_loop(shared: &Shared) {
             .collect();
         for thread_id in due {
             state.run_turn(&thread_id, shared.turn);
+        }
+        let ended: Vec<String> = state
+            .threads
+            .iter()
+            .filter(|(_, t)| {
+                t.active
+                    .as_ref()
+                    .and_then(|a| a.streaming.as_ref())
+                    .is_some_and(|(_, _, until)| *until <= now)
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        for thread_id in ended {
+            state.end_stream(&thread_id, shared.turn);
         }
     }
 }
@@ -723,6 +995,9 @@ fn pump(
     shared: &Shared,
 ) -> tungstenite::Result<()> {
     loop {
+        if shared.closed.load(std::sync::atomic::Ordering::SeqCst) {
+            return Ok(());
+        }
         while let Ok(message) = outgoing.try_recv() {
             socket.send(Message::text(message.to_string()))?;
         }
@@ -849,48 +1124,67 @@ fn handle(message: &Value, connection: u64, shared: &Shared) -> Vec<Value> {
             after.push(state.notification("thread/tokenUsage/updated", json!({"threadId": thread_id,
                 "turnId": last_turn, "tokenUsage": {"last": usage, "total": usage, "modelContextWindow": 258_400}})));
             after.push(state.notification("thread/goal/cleared", json!({"threadId": thread_id})));
-            Ok(state.resume_result(&thread_id))
+            let mut result = state.resume_result(&thread_id);
+            if params["excludeTurns"] == true {
+                result["thread"]["turns"] = json!([]);
+            }
+            Ok(result)
         }
-        "thread/resume" | "turn/start" | "turn/steer" | "turn/interrupt" | "thread/queue/add"
+        "thread/resume" if !known => Err((
+            INVALID_REQUEST,
+            format!("no rollout found for thread id {thread_id}"),
+        )),
+        "turn/start"
+        | "turn/steer"
+        | "turn/interrupt"
+        | "thread/queue/add"
+        | "thread/queue/list"
+        | "thread/queue/start"
+        | "thread/turns/list"
+        | "thread/compact/start"
+        | "thread/inject_items"
             if !known =>
         {
             Err((INVALID_REQUEST, format!("thread not found: {thread_id}")))
         }
         "turn/start" => {
             let text = text_of(params);
+            let client_id = params["clientUserMessageId"].as_str().map(str::to_owned);
             let active = state
                 .threads
                 .get_mut(&thread_id)
                 .and_then(|t| t.active.as_mut());
             match active {
                 Some(active) => {
-                    active.inputs.push(text);
+                    active.inputs.push((text, client_id));
                     Ok(
                         json!({"turn": {"id": active.id, "status": "inProgress", "items": [], "itemsView": "notLoaded",
                                        "error": null, "startedAt": null, "completedAt": null, "durationMs": null}}),
                     )
                 }
                 None => Ok(
-                    json!({"turn": state.start_turn(&thread_id, text, None, connection, shared.turn)}),
+                    json!({"turn": state.start_turn(&thread_id, text, client_id, connection, shared.turn)}),
                 ),
             }
         }
         "turn/steer" => {
             let expected = params["expectedTurnId"].as_str().unwrap_or_default();
             let text = text_of(params);
+            let client_id = params["clientUserMessageId"].as_str().map(str::to_owned);
             match state
                 .threads
                 .get_mut(&thread_id)
                 .and_then(|t| t.active.as_mut())
             {
                 Some(active) if active.id == expected => {
-                    active.inputs.push(text);
+                    active.inputs.push((text, client_id));
                     Ok(json!({"turnId": active.id}))
                 }
-                _ => Err((
+                Some(_) => Err((
                     INVALID_REQUEST,
                     format!("no active turn {expected} on {thread_id}"),
                 )),
+                None => Err((INVALID_REQUEST, "no active turn to steer".to_owned())),
             }
         }
         "turn/interrupt" => {
@@ -900,6 +1194,25 @@ fn handle(message: &Value, connection: u64, shared: &Shared) -> Vec<Value> {
                 .as_ref()
                 .is_some_and(|a| a.id == turn_id);
             if matches {
+                // Real codex shows the user message of a turn interrupted
+                // before it appeared, before its reply (interrupt.jsonl,
+                // 0.158.0).
+                state.hold = Some((connection, Vec::new()));
+                state.show_user_message(&thread_id);
+                // Interrupted mid-stream: token usage, no `item/completed`
+                // for the partial reply (queue_idle.jsonl, 0.158.0).
+                let streaming = state
+                    .threads
+                    .get_mut(&thread_id)
+                    .and_then(|t| t.active.as_mut())
+                    .and_then(|a| a.streaming.take())
+                    .is_some();
+                if streaming {
+                    state.token_usage(&thread_id, turn_id);
+                }
+                if let Some((_, held)) = state.hold.take() {
+                    before.extend(held);
+                }
                 state.pending_approvals.retain(|_, (t, _)| *t != thread_id);
                 state.finish_turn(&thread_id, "interrupted", shared.turn);
                 Ok(json!({}))
@@ -922,7 +1235,12 @@ fn handle(message: &Value, connection: u64, shared: &Shared) -> Vec<Value> {
             let busy = state.threads[&thread_id].active.is_some();
             if busy {
                 if let Some(t) = state.threads.get_mut(&thread_id) {
-                    t.queue.push_back((text, client_id));
+                    t.queue.push_back(Queued {
+                        id: submission,
+                        text,
+                        client_id,
+                        input: params["input"].clone(),
+                    });
                 }
                 state.notify(
                     &thread_id,
@@ -934,6 +1252,106 @@ fn handle(message: &Value, connection: u64, shared: &Shared) -> Vec<Value> {
             }
             Ok(result)
         }
+        "thread/queue/list" => {
+            let data: Vec<Value> = state.threads[&thread_id]
+                .queue
+                .iter()
+                .map(|q| json!({"id": q.id, "clientUserMessageId": q.client_id, "input": q.input}))
+                .collect();
+            Ok(json!({"data": data, "nextCursor": null}))
+        }
+        "thread/queue/start" => {
+            let thread = state.threads.get_mut(&thread_id).expect("known thread");
+            // Real codex checks the queue first: an active turn with an
+            // empty queue is "queue is empty" (queue_idle, 0.158.0).
+            if thread.queue.is_empty() {
+                Err((INVALID_REQUEST, "queue is empty".to_owned()))
+            } else if thread.active.is_some() {
+                Err((
+                    INVALID_REQUEST,
+                    "thread already has an active or pending turn".to_owned(),
+                ))
+            } else if let Some(queued) = thread.queue.pop_front() {
+                state.notify(
+                    &thread_id,
+                    "thread/queue/changed",
+                    json!({"threadId": thread_id}),
+                );
+                let turn = state.start_turn(
+                    &thread_id,
+                    queued.text,
+                    Some(queued.client_id),
+                    connection,
+                    shared.turn,
+                );
+                Ok(json!({"turn": turn}))
+            } else {
+                Err((INVALID_REQUEST, "queue is empty".to_owned()))
+            }
+        }
+        "thread/turns/list"
+            if state.threads[&thread_id].turns.is_empty()
+                && state.threads[&thread_id].active.is_none()
+                && !state.threads[&thread_id].materialized =>
+        {
+            // codex 0.158.0 (codex_live 2026-09-28: a thread with no turn
+            // yet). A first turn still before its user message is not
+            // recorded; the fake lists it.
+            Err((
+                INVALID_REQUEST,
+                format!(
+                    "thread {thread_id} is not materialized yet; thread/turns/list is unavailable before first user message"
+                ),
+            ))
+        }
+        "thread/turns/list" => {
+            // Newest first (turns_list.jsonl, 0.158.0); `nextCursor` pages
+            // back to older turns.
+            let mut turns = state.all_turns(&thread_id);
+            turns.reverse();
+            // `itemsView: "summary"`: the compaction turn lists no items
+            // (what else the summary leaves out is not recorded).
+            for turn in &mut turns {
+                if let Some(items) = turn["items"].as_array_mut() {
+                    items.retain(|i| i["type"] != "contextCompaction");
+                }
+                turn["itemsView"] = json!("summary");
+            }
+            let start = params["cursor"]
+                .as_str()
+                .and_then(|c| c.parse::<usize>().ok())
+                .unwrap_or(0)
+                .min(turns.len());
+            let limit = params["limit"].as_u64().map_or(turns.len(), |l| l as usize);
+            let end = start.saturating_add(limit.max(1)).min(turns.len());
+            let next = (end < turns.len()).then(|| end.to_string());
+            let back = json!({"requestedThreadId": thread_id, "rolloutOrdinal": end,
+                              "includeAnchor": true, "scope": {"kind": "turns"}});
+            Ok(
+                json!({"data": turns[start..end], "nextCursor": next, "backwardsCursor": back.to_string()}),
+            )
+        }
+        "thread/inject_items" => {
+            // Model-visible history without a turn; the thread is on disk
+            // from now on (codex 0.158.0, 2026-09-28). Not listed as a turn.
+            if let Some(t) = state.threads.get_mut(&thread_id) {
+                t.materialized = true;
+            }
+            state.save();
+            Ok(json!({}))
+        }
+        "thread/compact/start" => {
+            if state.threads[&thread_id].active.is_some() {
+                Err((
+                    INVALID_REQUEST,
+                    "thread already has an active or pending turn".to_owned(),
+                ))
+            } else {
+                state.start_compaction(&thread_id, connection, shared.turn);
+                Ok(json!({}))
+            }
+        }
+        "agendFake/exit" => std::process::exit(0),
         other => Err((METHOD_NOT_FOUND, format!("method not found: {other}"))),
     };
     let reply = match result {
@@ -1055,10 +1473,12 @@ mod tests {
         ThreadState {
             thread: json!({"id": id}),
             settings: json!({}),
-            turns: Vec::new(),
+            turns: vec![json!({"id": "turn-1"})],
             subscribers: BTreeSet::new(),
             active: None,
             queue: VecDeque::new(),
+            materialized: false,
+            warm: false,
         }
     }
 

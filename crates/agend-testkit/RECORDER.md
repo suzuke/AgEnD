@@ -9,7 +9,7 @@
 
 | backend | 真 CLI（錄製時） | 傳輸 | 設定（只作用於這次執行） |
 |---|---|---|---|
-| codex | `codex-cli 0.156.1` | `codex app-server --listen unix://…` 上的 WebSocket JSON-RPC | 模型 `gpt-6-luna`、reasoning `low`、approval `untrusted`、sandbox `read-only`；`-c notify=[]`、`--disable hooks` |
+| codex | `codex-cli 0.158.0`（2026-09-28 重錄；原本 0.156.1） | `codex app-server --listen unix://…` 上的 WebSocket JSON-RPC | 模型 `gpt-6-luna`、reasoning `low`、approval `untrusted`、sandbox `read-only`；`-c notify=[]`、`--disable hooks` |
 | opencode | `opencode 1.18.31` | `opencode serve --pure` 的 HTTP + `/event` SSE | 免費模型 `opencode/space-bunny-free`（也當 small model）；`permission` bash／edit／webfetch 都 `ask`；關自動更新 |
 | claude | `claude 2.1.282` | 互動模式：`.claude/settings.json` hooks、`.mcp.json` channel（D16）、tmux 裡的 TTY 送按鍵 | `--model haiku --effort low --setting-sources project,local`（不載入使用者自己的設定與 hook）、專案規則 `ask: Bash(echo *)`、`DISABLE_AUTOUPDATER=1` |
 
@@ -38,6 +38,22 @@
 5. `UNORDERED`：非同步的簿記事件（opencode 的 `session.*`、`message.updated`，codex 的 `thread/queue/changed`）只比「有沒有」與合併後的形狀，不比順序。其餘保持順序**與則數**：重複的生命週期事件（兩個 `turn/completed`）就是差異。只有 `COLLAPSED` 列出的串流與輪詢種類（codex `item/agentMessage/delta`、opencode `message.part.delta`、`GET /permission` 與其回應；則數是時序）連續多則合併成一則，形狀取聯集。
 6. 形狀：欄位名稱、巢狀、值的型別；值本身不比，只有 `type`、`status`、`role`、`kind`、`source`、`hook_event_name`、`decision`、`stop_hook_active`、`method` 保留值。
 7. 陣列比元素形狀的集合，空陣列和任何陣列相符；是 id 的物件 key 當成 `:id`。
+
+## 發現的差異與處理（2026-09-28 重錄，codex 0.158.0）
+
+8 個情境都在 `transcripts/codex/`（`queue_idle` 改了錄製器後 2026-09-28 再重錄一次，見表最後一列）。
+
+| 真 CLI | 假 agent 原本 | 處理 |
+|---|---|---|
+| 沙箱：`app-server` 要能開啟寫入 `~/.codex/installation_id` 與 `~/.codex/app-server-control/app-server-startup.lock`，否則立刻結束、stderr 只有 `Operation not permitted (os error 1)`（沒有路徑） | — | `record-sandbox.sh` 加這兩個檔；錄製器改把 app-server 的 stderr 寫到情境目錄，起不來時放進錯誤訊息 |
+| user message 的 item：thread 在這個程序裡的第一個 turn 要 2–4 秒才出現，之後的 turn 20 ms；中斷時還沒出現的會在 `turn/interrupt` 回覆**之前**補送 | 到 `--turn-ms` 才送 | 改假的：第一個 turn 在 `--turn-ms` 的三分之一送，之後立刻送；中斷時先補 |
+| `thread/turns/list`：**新的在前**，回 `{data, nextCursor, backwardsCursor}`，`itemsView: "summary"`；沒有任何 turn 的 thread 回 -32600 `… is not materialized yet; thread/turns/list is unavailable before first user message` | 舊的在前 | 改假的；driver 讀完所有頁後反轉（gate 7 K14） |
+| `thread/compact/start` 回 `{}`，另起一個只有 `contextCompaction` item 的 turn（列表裡 items 是空的），舊 turn 不變 | 不支援（method not found） | 改假的 |
+| 從沒有 turn 的 thread：app-server 重起後 `thread/resume` 回 -32600 `no rollout found for thread id <id>`；`codex resume <id> --remote` 也一樣起不來 | 找得到 | 改假的：沒有 turn、也沒有 `thread/inject_items` 的 thread 不存檔；driver 建 thread 後先 `thread/inject_items` 一則 developer 訊息（gate 7 K18） |
+| `thread/queue/add` 在閒置 thread 上立刻開始；之後 `thread/queue/start` 回 -32600 `queue is empty`；有排隊時 `thread/queue/start` 回 `{turn}` | 回 `{}` | 改假的 |
+| `turn/interrupt` 之後，排隊的訊息**不會**自己開始，要 `thread/queue/start` | 自己開始 | 改假的；錄製器的 `queue_idle` 改成等不到就 `queue/list` + `queue/start` |
+| `turn/steer` 對已結束的 turn：-32600 `no active turn to steer`；`turn/start` 收 `clientUserMessageId`，user message 帶 `clientId` | — | 改假的（錯誤訊息） |
+| `queue_idle`：第一次重錄時長回覆（1 到 400）的 agent 訊息在 `thread/queue/add` **之前**就開始串流，`turns_list` 是在之後（錄製器睡固定 2 秒，和串流開始競爭）。串流中被中斷：`thread/tokenUsage/updated` 在中斷回覆之前、沒有 agent 訊息的 `item/completed` | 回覆一次送完、沒有「串流中」 | 改錄製器：`queue_idle` 等到長回覆的第一個 `item/agentMessage/delta` 才 `queue/add`＋`turn/interrupt`（順序固定），重錄 `queue_idle`；改假的：回覆先 `item/started`＋delta，turn 時間的三分之一後才 `item/completed`，串流中被中斷照上面。`turns_list` 仍是固定睡 2 秒（和串流開始只差約 0.2 秒），下次重錄它時也該改成等事件 |
 
 ## 發現的差異與處理（2026-09-25 錄製）
 
@@ -77,7 +93,7 @@ target/debug/agend-record startup-check claude   # 在沙箱裡：只啟動、�
 ~/.cargo/bin/cargo test -p agend-testkit --test conformance
 ```
 
-沙箱腳本（`record-sandbox.sh`）只允許寫 `/private/tmp`、`TMPDIR`，以及每個 CLI 的 session／狀態檔：claude 的 `~/.claude.json`（含原子寫入的暫存與備份）、這次情境自己的 `~/.claude/projects/-private-tmp-agend-rec-*`、`~/.claude/` 底下的 `sessions`、`session-env`、`shell-snapshots`、`todos`、`statsig`、`cache`、`backups`、`file-history`、`paste-cache`、`debug`、`telemetry`、`plans`、`history.jsonl`；codex 的 `~/.codex/` 底下 `sessions`、`log`、`.tmp`、`tmp`、`shell_snapshots`、`cache`、`thread-writer-locks`、`rollout-migrations`、狀態資料庫 `<名稱>_<n>.sqlite`（含 `-wal`／`-shm`）、`models_cache.json`、`history.jsonl`、`session_index.jsonl`、`version.json`；opencode 的資料（`~/.local/share/opencode`，`auth.json` 除外）、狀態、快取目錄。其他一律不可寫，包括 `~/.claude/{rules,agents,skills,commands,hooks,plugins,CLAUDE.md,settings.json}`、`~/.codex/{auth.json,AGENTS.md,config.toml}`、`~/.config/opencode` 與 repo。讀取不受限。`~/.codex/auth.json` 唯讀，所以錄製中若剛好刷新 token 不會存檔：錄製前先正常用一次 codex。新版 CLI 需要別的路徑時會在 stderr 或失敗的錄製檔裡出現 `Operation not permitted` 和路徑（sandbox-exec 不記 log），確認後再加進腳本。
+沙箱腳本（`record-sandbox.sh`）只允許寫 `/private/tmp`、`TMPDIR`，以及每個 CLI 的 session／狀態檔：claude 的 `~/.claude.json`（含原子寫入的暫存與備份）、這次情境自己的 `~/.claude/projects/-private-tmp-agend-rec-*`、`~/.claude/` 底下的 `sessions`、`session-env`、`shell-snapshots`、`todos`、`statsig`、`cache`、`backups`、`file-history`、`paste-cache`、`debug`、`telemetry`、`plans`、`history.jsonl`；codex 的 `~/.codex/` 底下 `sessions`、`log`、`.tmp`、`tmp`、`shell_snapshots`、`cache`、`thread-writer-locks`、`rollout-migrations`、狀態資料庫 `<名稱>_<n>.sqlite`（含 `-wal`／`-shm`）、`models_cache.json`、`history.jsonl`、`session_index.jsonl`、`version.json`，以及（codex 0.158.0 起）`installation_id`、`app-server-control/app-server-startup.lock`；opencode 的資料（`~/.local/share/opencode`，`auth.json` 除外）、狀態、快取目錄。其他一律不可寫，包括 `~/.claude/{rules,agents,skills,commands,hooks,plugins,CLAUDE.md,settings.json}`、`~/.codex/{auth.json,AGENTS.md,config.toml}`、`~/.config/opencode` 與 repo。讀取不受限。`~/.codex/auth.json` 唯讀，所以錄製中若剛好刷新 token 不會存檔：錄製前先正常用一次 codex。新版 CLI 需要別的路徑時會出現 `Operation not permitted`（sandbox-exec 不記 log）；codex 的 app-server 起不來時，錄製器把它的 stderr 放進錯誤訊息（0.158.0 只印 `Error: Operation not permitted (os error 1)`、沒有路徑，要把設定檔放寬再逐步收窄找出來），確認後再加進腳本。沙箱裡不能執行 setuid 的 `/bin/ps`。
 錄製檔先寫到 `mktemp -d /private/tmp/agend-rec-out-XXXX`，由 xtask 在沙箱外複製進 `transcripts/`（失敗的情境留在輸出目錄，名為 `<情境>.failed.jsonl`）。
 
 **錄 codex 會啟動使用者自己的 MCP server**：`codex app-server` 讀 `~/.codex/config.toml` 與 plugin，錄製器給的 `-c mcp_servers={}` 關不掉它們（`-c` 是合併進設定表，不是取代）。遮蔽會把它們的狀態通知縮成一則空白的（見「遮蔽」），比對規則也忽略它們（`IGNORED`），但程序確實會跑起來。要避免：錄製前確認 `codex mcp list --json --disable plugins -c mcp_servers.<名稱>.enabled=false …`（每個名稱一個 `-c`，名稱來自不帶這些旗標的 `codex mcp list --json --disable plugins`）列出的全部 `"enabled": false`，這幾個旗標不花 token，2026-09-25 在 codex 0.156.1 驗過；再把同樣的旗標加進 `src/recorder/codex.rs` 的 `spawn` 參數後重錄。錄製器目前沒有自動這麼做，因為那會改變錄製條件（plugin 關掉），要重錄才能確認不影響其他訊息。

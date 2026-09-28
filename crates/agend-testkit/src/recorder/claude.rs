@@ -84,6 +84,13 @@ impl Backend for Claude {
     }
 
     fn run(&self, scenario: Scenario, agent: &Agent, dir: &Path, log: &Log) -> Result<(), String> {
+        if !Scenario::ALL.contains(&scenario) {
+            return Err(format!(
+                "{} does not record {}",
+                self.name(),
+                scenario.name()
+            ));
+        }
         let project = make_project(dir)?;
         let socket = dir.join("rec.sock");
         let hub = Hub::start(&socket, log)?;
@@ -91,6 +98,8 @@ impl Backend for Claude {
         let t = agent.pace.timeout;
         let mut cli = Cli::start(agent, dir, &project, None, log)?;
         match scenario {
+            // Gate 7's codex scenarios; refused above.
+            Scenario::TurnsList | Scenario::QueueIdle | Scenario::ResumeEmpty => {}
             Scenario::OneTurn => {
                 let start = log.len();
                 hub.channel(prompts::OK)?;

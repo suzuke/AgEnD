@@ -1,8 +1,7 @@
-//! Side processes (codex app-server, opencode serve) are NOT in gate 4: they
-//! move to gate 7 (gate 4 P8), with a new `SpawnSidecar` request and the
-//! readiness check in the daemon's driver. In v1 the daemon spawned them
-//! (`src/transport/codex_app_server.rs:286-316`,
-//! `src/transport/opencode_server.rs:452-500`), which v2 must change so they
-//! survive a daemon restart.
+//! No side-process protocol (gate 7 P2 overturned gate 4 P8's
+//! `SpawnSidecar`): codex's app-server is started by the agent itself, a
+//! fixed `sh` wrapper in the PTY (`agend_daemon::driver::codex::launch`), in
+//! the agent's process group, so every guarantee this crate gives the PTY
+//! child covers it; opencode (gate 12) is expected to do the same.
 //!
-//! Must NOT: speak the backend's protocol (the daemon's driver does).
+//! Must NOT: grow a second child-process manager here.

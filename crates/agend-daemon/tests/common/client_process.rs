@@ -77,6 +77,8 @@ pub fn add(home: &Path, id: &str, backend: Backend, script: &str) -> Result<Inst
         },
         status: InstanceStatus::New,
         session_started: false,
+        agent_pid: None,
+        legacy_no_thread: false,
     };
     let store = SqliteStore::open(home, 0).map_err(|e| format!("open store: {e}"))?;
     block_on(store.add_instance(&instance)).map_err(|e| format!("add {id}: {e}"))?;
@@ -529,8 +531,8 @@ fn bound_after_boot(lab: &Lab) -> Result<Vec<String>, String> {
 }
 
 /// `== retry` (P5): what `retry` does for each backend and whether the
-/// session was ever started; a codex/opencode instance that ran has no
-/// action.
+/// session was ever started; an opencode instance that ran has no action
+/// (codex resumes its thread since gate 7: its supervisor unit test).
 pub fn retry(lab: &Lab) -> Result<Vec<String>, String> {
     let home = lab.home(32);
     let t = tag();
@@ -555,7 +557,7 @@ pub fn retry(lab: &Lab) -> Result<Vec<String>, String> {
     set_status(&home, &cn, InstanceStatus::Failed)?;
     add(&home, &xn, Backend::Codex, lab::RECORDS_ARGS)?;
     set_status(&home, &xn, InstanceStatus::Failed)?;
-    add(&home, &xs, Backend::Codex, lab::RECORDS_ARGS)?;
+    add(&home, &xs, Backend::Opencode, lab::RECORDS_ARGS)?;
     set_status(&home, &xs, InstanceStatus::Running)?;
     set_status(&home, &xs, InstanceStatus::Failed)?;
 
@@ -687,7 +689,7 @@ pub fn retry(lab: &Lab) -> Result<Vec<String>, String> {
             == [
                 format!("{cr}: start --resume {cr_session}"),
                 format!("{cn}: start --session-id {cn_session}"),
-                format!("{xn}: start"),
+                format!("{xn}: start (codex: new thread)"),
             ],
         || format!("starts after retry: {starts:#?}"),
     )?;
@@ -724,7 +726,7 @@ pub fn retry(lab: &Lab) -> Result<Vec<String>, String> {
         cr_args.join(" | ").replace(&cr_session, "<S1>")
     ));
     out.push(format!(
-        "{xs} (codex, ran before): retry → unknown_attention; DB now: {}",
+        "{xs} (opencode, ran before): retry → unknown_attention; DB now: {}",
         statuses.join(" ")
     ));
     Ok(out)

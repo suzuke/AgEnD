@@ -65,6 +65,8 @@ mod tests {
             session_id: Some("s-1".into()),
             status,
             session_started: false,
+            agent_pid: None,
+            legacy_no_thread: false,
         }
     }
 

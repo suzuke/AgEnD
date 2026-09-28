@@ -16,7 +16,8 @@ usage: agend-record <backend> [scenario...] --out <dir>
 
 Runs the REAL CLI. Run it only under a write sandbox (e.g. via
 `cargo xtask record`); every scenario runs in mktemp -d /private/tmp/agend-rec-<backend>-XXXX.
-Scenarios: one_turn interrupt approval busy resume (default: all the backend supports).
+Scenarios: one_turn interrupt approval busy resume; codex also turns_list queue_idle
+resume_empty (default: all the backend supports).
 ";
 
 fn main() -> ExitCode {

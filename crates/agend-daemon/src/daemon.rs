@@ -5,7 +5,7 @@
 //! `agend.db` (the one daemon per home: the DB's exclusive lock, retried
 //! every 200 ms for 10 s while an old daemon hands it over) → remove a stale
 //! `run/daemon.sock` → housekeeping (failures only logged) → shim symlinks
-//! → the boot plan (reconnect / start / orphans) → bind `run/daemon.sock`
+//! and codex's `ZDOTDIR` (`zsh/.zprofile`, gate 7 P4) → the boot plan (reconnect / start / orphans) → bind `run/daemon.sock`
 //! (`run/` 0700, socket 0600, gate 8 P1) → `agend daemon ready: …`. A
 //! socket that accepts connections is the readiness signal: no `.ready`
 //! file, and a client never sees a half-booted fleet. Housekeeping runs
@@ -36,6 +36,7 @@ use agend_core::protocol::client::DAEMON_SOCKET;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
+use crate::driver::codex::{CodexDriver, CodexSink, launch as codex_launch};
 use crate::fleet::Fleet;
 use crate::handlers::Context;
 use crate::log;
@@ -182,18 +183,38 @@ async fn serve(home: PathBuf, exe: PathBuf, store: SqliteStore) -> ExitCode {
             return ExitCode::from(1);
         }
     }
+    let daemon_env: Vec<(String, String)> = std::env::vars_os()
+        .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
+        .collect();
+    let launch_path =
+        crate::runtime::env::launch_path(&home, &daemon_env.iter().cloned().collect());
+    if let Err(e) = codex_launch::ensure_zdotdir(&home, &launch_path) {
+        log::line(&format!(
+            "agend daemon: cannot write {}: {e}",
+            codex_launch::zdotdir(&home).join(".zprofile").display()
+        ));
+        return ExitCode::from(1);
+    }
 
     let sink_events = events.clone();
     let sink: EventSink = Arc::new(move |event| {
         let _ = sink_events.send(Event::Holder(event));
     });
-    let daemon_env: Vec<(String, String)> = std::env::vars_os()
-        .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
-        .collect();
     let runtime = HolderRuntime::new(&home, &exe, daemon_env, sink);
     let fleet = Arc::new(Fleet::new(log::now_unix_ms()));
-    let mut supervisor =
-        Supervisor::new(store, runtime.clone(), events.clone(), Arc::clone(&fleet));
+    let store = Arc::new(store);
+    let codex_events = events.clone();
+    let codex_sink: CodexSink = Arc::new(move |event| {
+        let _ = codex_events.send(Event::Codex(event));
+    });
+    let codex = CodexDriver::new(&home, Arc::clone(&store), codex_sink);
+    let mut supervisor = Supervisor::new(
+        store,
+        runtime.clone(),
+        codex,
+        events.clone(),
+        Arc::clone(&fleet),
+    );
     let report = match supervisor.boot().await {
         Ok(report) => report,
         Err(e) => {

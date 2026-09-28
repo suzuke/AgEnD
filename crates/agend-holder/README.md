@@ -44,7 +44,7 @@
 | `screen` | alacritty 畫面、純文字快照、終端查詢回覆 |
 | `exit` | `waitpid` 與 signal 名稱 |
 | `client` | 同步的協定 client（探測 example 與測試用） |
-| `sidecar` | 只有說明：附屬程序在第 7 施工關 |
+| `sidecar` | 只有說明：不做附屬程序協定（第 7 施工關 P2 推翻第 4 施工關 P8 的 `SpawnSidecar`）；codex app-server 由 PTY 裡的 `sh` 包裝在背景起，跟 agent 同一個 process group |
 
 ## Shutdown 做什麼
 

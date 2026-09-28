@@ -271,7 +271,7 @@
 - 真 daemon 的 task 類命令與 `ask` 的 handler、store（第 10 施工關，P1；在那之前回 `not_supported`）；`send`／`inbox` 的送達本身（第 7 施工關）。
 - `agend workflow …`、`agend team …`（D19；第 10 施工關，連同第 5 施工關 S1 的 `save_workflow_toml`）。
 - `agend daemon stop`（在 launchd／systemd 下「停」要先卸載服務，第 13 施工關一起做）；`export`／`import`、`telegram setup`、`uninstall`（第 13 施工關）。
-- doctor 檢查 checks 的寫入沙箱工具（macOS `sandbox-exec`、Linux `bwrap`）：第 10 施工關的 checks 在沙箱裡跑、找不到就拒絕（fail closed），doctor 之後要報告它在不在；本關不做，留給第 10 施工關（或第 13 施工關）補一行檢查。
+- doctor 檢查 checks 的寫入沙箱工具（macOS `sandbox-exec`、Linux `bwrap`）：第 10 施工關的 checks 在沙箱裡跑、找不到就拒絕（fail closed），doctor 之後要報告它在不在；本關不做。**已認領**：第 10 施工關 P6 決定這一列由第 10 施工關自己加（見 [gate-10-pipeline P6](gate-10-pipeline.md#p6command-關卡runner)）。
 - 從 CLI 處理「需要你」（`resolve_attention` 由 TUI 做，第 11 施工關 B 段）。
 - `config.toml`、`--non-interactive`、服務註冊（P9）；doctor 的登入、版本範圍、gh、服務、Telegram 檢查（P8）。
 - 顏色、shell completion、MCP 轉接層（D7「需要時」）、Windows。

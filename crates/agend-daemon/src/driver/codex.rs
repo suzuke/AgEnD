@@ -1,10 +1,30 @@
-//! codex driver: JSON-RPC over WebSocket over a unix socket to
-//! `codex app-server` (held by the holder). Queue with `thread/queue/add`,
-//! steer with `turn/steer`, interrupt with `turn/interrupt`; after reconnect,
-//! `thread/resume` then `thread/turns/list`.
+//! codex driver (gate 7): JSON-RPC over WebSocket over a unix socket to
+//! `codex app-server`, which runs in the instance's holder next to the TUI
+//! (`launch`: the `sh` wrapper, P2). Queue with `thread/queue/add`, steer
+//! with `turn/steer`, interrupt with `turn/interrupt` (`send`, P6); after a
+//! reconnect, `thread/resume` then `thread/turns/list` (`link`, P7).
 //!
-//! Must NOT: call `thread/queue/start` after `thread/queue/add` (the server
-//! dequeues automatically), or connect to the literal `--listen` path.
+//! - [`CodexDriver`]: the `Driver` trait over the `messages` table (the one
+//!   idempotency layer, P5) and one link per instance.
+//! - `history`: the thread history as the event log, and matching user
+//!   messages to our messages (P5, P7).
+//! - `sweep`: the SIGKILL of a dead holder's leftover codex group (P2).
+//!
+//! Must NOT: call `thread/queue/start` after `thread/queue/add`, except
+//! once when the reply finds the thread already idle (owner-approved P6
+//! exception: codex may not have started it); connect to the literal
+//! `--listen` path; write anything under `~/.codex`.
+
+pub mod driver;
+pub mod history;
+pub mod launch;
+pub(crate) mod link;
+pub mod rpc;
+pub mod send;
+pub mod sweep;
+
+pub use driver::{CodexDriver, DriverError};
+pub use link::{CodexEvent, CodexSink};
 
 use std::io;
 use std::path::{Path, PathBuf};

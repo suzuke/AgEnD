@@ -16,7 +16,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use tungstenite::{Message, WebSocket};
@@ -24,6 +24,18 @@ use tungstenite::{Message, WebSocket};
 use super::{Agent, Backend, Entry, Log, Scenario, Side, Spawned, make_project, prompts};
 
 pub struct Codex;
+
+/// Every scenario codex records: the common ones and gate 7's.
+const SCENARIOS: &[Scenario] = &[
+    Scenario::OneTurn,
+    Scenario::Interrupt,
+    Scenario::Approval,
+    Scenario::Busy,
+    Scenario::Resume,
+    Scenario::TurnsList,
+    Scenario::QueueIdle,
+    Scenario::ResumeEmpty,
+];
 
 pub const MODEL: &str = "gpt-6-luna";
 pub const EFFORT: &str = "low";
@@ -54,7 +66,7 @@ impl Backend for Codex {
     }
 
     fn scenarios(&self) -> &'static [Scenario] {
-        Scenario::ALL
+        SCENARIOS
     }
 
     fn run(&self, scenario: Scenario, agent: &Agent, dir: &Path, log: &Log) -> Result<(), String> {
@@ -122,6 +134,92 @@ impl Backend for Codex {
                 let turn = ws.turn(&thread, prompts::OK)?;
                 ws.wait_completed(&turn, t)?;
             }
+            // Gate 7 (P8). Requests whose answer is the open question may
+            // fail; their error is what gets recorded.
+            Scenario::TurnsList => {
+                let first = ws.turn(&thread, prompts::OK)?;
+                ws.wait_completed(&first, t)?;
+                let long = ws.turn(&thread, prompts::LONG)?;
+                std::thread::sleep(agent.pace.settle);
+                let start = log.len();
+                ws.request(
+                    "thread/queue/add",
+                    json!({"threadId": thread, "clientUserMessageId": "agend-rec-queued-1", "input": input(prompts::OK)}),
+                )?;
+                let _ = ws.request("thread/queue/list", json!({"threadId": thread}));
+                ws.wait_completed(&long, t)?;
+                let queued = ws.next_turn(start, t)?;
+                ws.wait_completed(&queued, t)?;
+                let list = json!({"threadId": thread, "cursor": null, "limit": 10});
+                let _ = ws.request("thread/turns/list", list.clone());
+                let _ = ws.request("thread/compact/start", json!({"threadId": thread}));
+                log.wait_quiet(agent.pace.quiet, t, |e| {
+                    e.via == VIA && e.from == Side::Backend
+                });
+                let _ = ws.request("thread/turns/list", list);
+            }
+            Scenario::QueueIdle => {
+                let start = log.len();
+                ws.request(
+                    "thread/queue/add",
+                    json!({"threadId": thread, "clientUserMessageId": "agend-rec-idle-1", "input": input(prompts::OK)}),
+                )?;
+                let auto = ws.next_turn(start, agent.pace.settle * 2);
+                let _ = ws.request("thread/queue/start", json!({"threadId": thread}));
+                if let Ok(turn) = auto.or_else(|_| ws.next_turn(start, t)) {
+                    ws.wait_completed(&turn, t)?;
+                }
+                // U2: does `turn/start` take `clientUserMessageId`?
+                let before = log.len();
+                let long = id_at(
+                    &ws.request(
+                        "turn/start",
+                        json!({"threadId": thread, "input": input(prompts::LONG), "effort": EFFORT,
+                               "clientUserMessageId": "agend-rec-turn-1"}),
+                    )?,
+                    &["turn", "id"],
+                )?;
+                // Queue only once the reply streams, so the order is fixed
+                // (a fixed sleep raced the first delta, 2026-09-28).
+                log.wait(before, t, "the long reply to stream", |e| {
+                    e.from == Side::Backend
+                        && e.str("method") == Some("item/agentMessage/delta")
+                        && e.msg["params"]["turnId"] == long.as_str()
+                })?;
+                ws.request(
+                    "thread/queue/add",
+                    json!({"threadId": thread, "clientUserMessageId": "agend-rec-queued-2", "input": input(prompts::OK)}),
+                )?;
+                let start = log.len();
+                ws.request(
+                    "turn/interrupt",
+                    json!({"threadId": thread, "turnId": long}),
+                )?;
+                ws.wait_completed(&long, t)?;
+                // U11: codex 0.158.0 does not start the queued message after
+                // an interrupt (2026-09-28: nothing within 120 s); it stays
+                // queued until `thread/queue/start`.
+                if ws.next_turn(start, agent.pace.settle * 2).is_err() {
+                    let _ = ws.request("thread/queue/list", json!({"threadId": thread}));
+                    let _ = ws.request("thread/queue/start", json!({"threadId": thread}));
+                }
+                let queued = ws.next_turn(start, t)?;
+                ws.wait_completed(&queued, t)?;
+                let _ = ws.request(
+                    "turn/steer",
+                    json!({"threadId": thread, "expectedTurnId": long, "input": input(STEER)}),
+                );
+            }
+            Scenario::ResumeEmpty => {
+                ws.close();
+                server.stop();
+                server = spawn(agent, &project, &socket)?;
+                ws = Ws::connect(&socket, log)?;
+                let _ = ws.request(
+                    "thread/resume",
+                    json!({"threadId": thread, "excludeTurns": true}),
+                );
+            }
         }
         // Let late notifications (token usage, status) arrive before closing.
         log.wait_quiet(agent.pace.quiet, agent.pace.timeout, |e| {
@@ -153,21 +251,45 @@ fn spawn(agent: &Agent, project: &Path, socket: &Path) -> Result<Spawned, String
     args.extend(["--disable".into(), "hooks".into()]);
     args.extend(["--listen".into(), format!("unix://{}", socket.display())]);
     args.extend(agent.fake_args());
+    // stderr goes to a file next to the socket (a pipe nobody reads could
+    // fill up and block the server), so a server that never listens can
+    // say why in the error: codex 0.158.0 under a too-tight sandbox exits
+    // at once with "Operation not permitted" and nothing else.
+    let stderr_path = socket.with_extension("stderr");
+    let stderr = std::fs::File::create(&stderr_path)
+        .map_err(|e| format!("create {}: {e}", stderr_path.display()))?;
     let child = Command::new(&agent.program)
         .args(&args)
         .current_dir(project)
         .envs(agent.fake_env(project))
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(stderr)
         .spawn()
         .map_err(|e| format!("spawn {}: {e}", agent.program.display()))?;
-    let spawned = Spawned {
+    let mut spawned = Spawned {
         child,
         name: "codex app-server".into(),
     };
-    crate::fake_agent::codex::wait_until_listening(socket, Duration::from_secs(30))?;
-    Ok(spawned)
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let slice = Duration::from_millis(200);
+        let Err(e) = crate::fake_agent::codex::wait_until_listening(socket, slice) else {
+            return Ok(spawned);
+        };
+        let exited = spawned.child.try_wait().ok().flatten();
+        if exited.is_none() && Instant::now() < deadline {
+            continue;
+        }
+        let why = match exited {
+            Some(status) => format!("codex app-server exited ({status})"),
+            None => format!("{e} (waited 30s)"),
+        };
+        let text = std::fs::read_to_string(&stderr_path).unwrap_or_default();
+        let tail: Vec<&str> = text.lines().rev().take(20).collect();
+        let tail: Vec<&str> = tail.into_iter().rev().collect();
+        return Err(format!("{why}; stderr: {:?}", tail.join("\n")));
+    }
 }
 
 /// A recording WebSocket JSON-RPC client. A pump thread owns the socket:
@@ -242,6 +364,14 @@ impl Ws {
             json!({"threadId": thread, "input": input(text), "effort": EFFORT}),
         )?;
         id_at(&result, &["turn", "id"])
+    }
+
+    /// The id of the first `turn/started` logged after `start`.
+    fn next_turn(&self, start: usize, timeout: Duration) -> Result<String, String> {
+        let (_, started) = self.log.wait(start, timeout, "a turn to start", |e| {
+            e.via == VIA && e.from == Side::Backend && e.str("method") == Some("turn/started")
+        })?;
+        id_at(&started.msg["params"], &["turn", "id"])
     }
 
     fn wait_completed(&self, turn: &str, timeout: Duration) -> Result<Entry, String> {
