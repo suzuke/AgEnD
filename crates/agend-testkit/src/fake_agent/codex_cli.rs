@@ -4,7 +4,7 @@
 //!
 //! | Command | Behaviour |
 //! |---|---|
-//! | `app-server --listen unix://<path> [--turn-ms <ms>]` | the fake app-server of [`super::codex`], running until a signal ends it or a client sends `agendFake/exit` (the wrapper starts it in the background, so its stdin is `/dev/null`: it does not stop at end of file like `fake-codex-app-server`). Threads persist under `$AGEND_FAKE_STATE_DIR`, or else `<path>.fake-state/` (the agent's environment is a whitelist without that variable) |
+//! | `app-server --listen unix://<path> [--turn-ms <ms>] [--disable duplex-io]` | the fake app-server of [`super::codex`] (`duplex-io` off: a peer that stops reading while a write waits, for testing the daemon against one), running until a signal ends it or a client sends `agendFake/exit` (the wrapper starts it in the background, so its stdin is `/dev/null`: it does not stop at end of file like `fake-codex-app-server`). Threads persist under `$AGEND_FAKE_STATE_DIR`, or else `<path>.fake-state/` (the agent's environment is a whitelist without that variable) |
 //! | `resume <thread id> --remote unix://<path>` | the fake TUI: prints `agent args: resume <id> --remote <url>` and `agent config: <-c values>`, then waits; a line `q` (or end of input) ends it. It never connects to the app-server (the daemon does not depend on the TUI) |
 //!
 //! Must NOT: call a model, or read anything but its arguments and stdin.
@@ -50,7 +50,7 @@ pub fn state_dir_for(listen: &Path) -> PathBuf {
 }
 
 fn app_server(args: Vec<String>) -> ExitCode {
-    let args = match Args::parse(args, &["--listen", "--turn-ms"], &[], &[]) {
+    let args = match Args::parse(args, &["--listen", "--turn-ms", "--disable"], &[], &[]) {
         Ok(args) => args,
         Err(e) => return usage(&e),
     };
@@ -63,7 +63,10 @@ fn app_server(args: Vec<String>) -> ExitCode {
     };
     let path = Path::new(path);
     let state = state_dir_for(path);
-    let _server = match Server::bind(path, Duration::from_millis(turn_ms), Some(state)) {
+    // `--disable duplex-io`: the stuck peer (the fake's own switch).
+    let duplex = !args.all("--disable").any(|f| f == "duplex-io");
+    let turn = Duration::from_millis(turn_ms);
+    let _server = match Server::bind_with(path, turn, Some(state), duplex) {
         Ok(server) => server,
         Err(e) => {
             eprintln!(

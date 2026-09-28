@@ -263,11 +263,23 @@ impl Collected {
     }
 }
 
-/// The file a path names now: device, inode, size, modification time.
-fn identity(path: &Path) -> Option<(u64, u64, u64, i64, i64)> {
+/// The file a path names now: device, inode, size, modification time, and
+/// change time (a writer can put the modification time back, but not the
+/// change time: verifier r2).
+type Identity = (u64, u64, u64, i64, i64, i64, i64);
+
+fn identity(path: &Path) -> Option<Identity> {
     use std::os::unix::fs::MetadataExt;
     let m = fs::metadata(path).ok()?;
-    Some((m.dev(), m.ino(), m.size(), m.mtime(), m.mtime_nsec()))
+    Some((
+        m.dev(),
+        m.ino(),
+        m.size(),
+        m.mtime(),
+        m.mtime_nsec(),
+        m.ctime(),
+        m.ctime_nsec(),
+    ))
 }
 
 async fn preflight(ctx: &Context, binary: &Path) -> Result<Vec<String>, String> {

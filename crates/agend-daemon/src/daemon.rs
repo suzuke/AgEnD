@@ -20,7 +20,8 @@
 //! `agend daemon restart` (gate 9 P7): once the preflight passed, the same
 //! stop, then `exec` of the new binary as `agend daemon` (same pid, same
 //! environment and terminal; every fd is close-on-exec). The new image
-//! reaps the holders it inherited (`crate::reaper`). An `exec` that fails
+//! reaps the holders it inherited (`crate::reaper`). A SIGINT / SIGTERM
+//! that arrives during that hand-off stops the daemon instead (no `exec`). An `exec` that fails
 //! (the binary vanished after its preflight) prints why and exits 1.
 //!
 //! Exit codes: 0 after a signal, 1 when it cannot start (socket path too
@@ -32,7 +33,7 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use std::fs::{self, DirBuilder};
@@ -105,6 +106,10 @@ pub fn run(home: PathBuf) -> ExitCode {
     runtime.shutdown_timeout(Duration::from_secs(1));
     match stopped {
         Ok(Stopped::Signal(_)) => ExitCode::SUCCESS,
+        Ok(Stopped::Exec(_)) if STOP_SIGNALLED.load(Ordering::SeqCst) => {
+            log::line("a stop signal came during the restart; not restarting");
+            ExitCode::SUCCESS
+        }
         Ok(Stopped::Exec(binary)) => exec(&binary),
         Err(code) => code,
     }
@@ -150,11 +155,17 @@ fn prepare_run_dir(home: &Path) -> std::io::Result<PathBuf> {
     }
 }
 
+/// A stop signal arrived. Also read after the supervisor has returned to
+/// `exec`: a Ctrl-C during that hand-off must stop the daemon, not be lost
+/// in the old image while the new one keeps running (gate 9).
+static STOP_SIGNALLED: AtomicBool = AtomicBool::new(false);
+
 fn forward_signal(kind: SignalKind, name: &'static str, events: UnboundedSender<Event>) {
     match signal(kind) {
         Ok(mut stream) => {
             tokio::spawn(async move {
                 if stream.recv().await.is_some() {
+                    STOP_SIGNALLED.store(true, Ordering::SeqCst);
                     let _ = events.send(Event::Stop(name));
                 }
             });

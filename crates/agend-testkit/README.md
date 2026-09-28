@@ -109,6 +109,8 @@ daemon 重啟：`RuntimeFixture`、`DriverFixture`、`StoreFixture` 各有一個
 
 ## 假 agent 程式
 
+假 codex app-server（`fake-codex-app-server`、`fake-codex app-server`）跟真的 codex 一樣一邊寫一邊讀：寫不出去的資料留在 WebSocket 的緩衝區，thread 繼續讀（第 9 施工關；原本寫的時候不讀，大訊息會跟 daemon 互相卡住）。`fake-codex app-server … --disable duplex-io` 保留舊行為，當「不讀的 peer」測 daemon 用。
+
 所有假 agent（`fake-codex` 除外，見表）：回覆固定為 `fake reply: <prompt>`；一個 turn 花 `--turn-ms`（預設 100）毫秒；**stdin 結束就以 0 結束**；prompt 有一行以 `run: <指令>` 開頭時要求授權（不會真的執行）；設了 `AGEND_FAKE_STATE_DIR` 才把 thread／session 存在那裡，重啟後可接續（沒設就不寫任何檔）。
 
 | 程式 | 真的指令 | 涵蓋 | 沒涵蓋 |
