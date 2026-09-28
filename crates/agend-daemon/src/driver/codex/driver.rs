@@ -253,7 +253,14 @@ impl Inner {
                     lines.push(format!("thread {old} resumed ({busy})"));
                     old.clone()
                 }
-                Err(e @ RpcError::Rpc { .. }) if e.to_string().contains("not found") => {
+                // K10/K15: codex 0.158.0 answers a thread that never had a
+                // turn with -32600 `no rollout found for thread id <id>`
+                // (resume_empty.jsonl); the fake says `not found`.
+                Err(e @ RpcError::Rpc { .. })
+                    if ["not found", "no rollout found"]
+                        .iter()
+                        .any(|m| e.to_string().contains(m)) =>
+                {
                     let rows = link::messages_to(&self.store, id).map_err(|e| e.to_string())?;
                     let used = rows
                         .iter()

@@ -87,11 +87,20 @@ fn ensure(ok: bool, what: impl FnOnce() -> String) -> Result<(), String> {
 /// `ps` lines of this instance's processes: pid, pgid, tpgid, command.
 fn ps(home: &Path, thread: &str) -> Vec<String> {
     let socket = launch::socket_path(home, ID).display().to_string();
-    let out = Command::new("/bin/ps")
+    // sandbox-exec refuses to run the setuid /bin/ps ("Operation not
+    // permitted", 2026-09-28): say so instead of printing an empty list
+    // that reads like "no codex left". Watch `ps` from outside instead.
+    let out = match Command::new("/bin/ps")
         .args(["-A", "-o", "pid=,pgid=,tpgid=,command="])
         .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-        .unwrap_or_default();
+    {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).into_owned(),
+        Err(e) => {
+            return vec![format!(
+                "/bin/ps unavailable ({e}); run ps outside the sandbox"
+            )];
+        }
+    };
     out.lines()
         .filter(|l| l.contains(&socket) || l.contains(&format!("resume {thread}")))
         .map(|l| l.trim().to_owned())
@@ -329,10 +338,12 @@ fn last_reply(home: &Path, thread: &str) -> Result<String, String> {
         "thread/turns/list",
         json!({"threadId": thread, "cursor": null, "limit": 100}),
     )?;
+    // Newest turn first (U5): the last reply is in the first turn that has one.
     Ok(page["data"]
         .as_array()
         .into_iter()
         .flatten()
+        .rev()
         .flat_map(|t| t["items"].as_array().cloned().unwrap_or_default())
         .filter(|i| i["type"] == "agentMessage")
         .filter_map(|i| i["text"].as_str().map(str::to_owned))

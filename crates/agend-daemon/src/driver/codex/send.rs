@@ -5,7 +5,7 @@
 //! | Thread | Level | Method |
 //! |---|---|---|
 //! | idle | any | `turn/start` |
-//! | busy | `Queue` | `thread/queue/add`; if the thread is already idle when the reply comes, `thread/queue/start` once (an `invalid request` answer means codex started it itself: fine; owner-approved exception, P6) |
+//! | busy | `Queue` | `thread/queue/add`; if the thread is already idle when the reply comes, `thread/queue/start` once (an `invalid request` answer means codex started it itself: fine; codex 0.158.0 starts a message queued on an idle thread at once and then answers `queue is empty`, U3; owner-approved exception, P6) |
 //! | busy | `Steer` | `turn/steer {expectedTurnId}`; `invalid request` (the turn just ended) → `turn/start` once |
 //! | busy | `Interrupt` | `turn/interrupt`, wait at most [`INTERRUPT_WAIT`] for that turn to end, then `turn/start` (a busy `turn/start` joins the running turn: at worst a steer, spike S3) |
 //!

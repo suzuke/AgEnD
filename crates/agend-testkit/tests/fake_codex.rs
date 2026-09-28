@@ -259,11 +259,11 @@ fn a_short_listen_path_is_a_symlink_too() {
     server.stop();
 }
 
-// ---- gate 7 (P8): methods the codex driver uses, not yet recorded ----
+// ---- gate 7 (P8): methods the codex driver uses (recorded 2026-09-28) ----
 
 /// `clientUserMessageId` on `turn/start` and `turn/steer` comes back as the
-/// user message's `clientId`; `thread/turns/list` pages every turn oldest
-/// first with its items, the running one last.
+/// user message's `clientId`; `thread/turns/list` pages every turn newest
+/// first with its items, the running one first (U5, codex 0.158.0).
 #[test]
 fn client_ids_and_turns_list() {
     let dir = TempDir::new("cx-g7-list").unwrap();
@@ -300,14 +300,7 @@ fn client_ids_and_turns_list() {
         .unwrap();
     assert_eq!(first["data"].as_array().unwrap().len(), 1);
     assert_eq!(first["nextCursor"], "1");
-    let clients: Vec<Value> = first["data"][0]["items"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|i| i["type"] == "userMessage")
-        .map(|i| i["clientId"].clone())
-        .collect();
-    assert_eq!(clients, [json!("m-1"), json!("m-2")]);
+    assert_eq!(first["data"][0]["items"][0]["clientId"], Value::Null);
     let rest = probe
         .call(
             "thread/turns/list",
@@ -316,14 +309,21 @@ fn client_ids_and_turns_list() {
         .unwrap();
     assert_eq!(rest["data"].as_array().unwrap().len(), 1);
     assert_eq!(rest["nextCursor"], Value::Null);
-    assert_eq!(rest["data"][0]["items"][0]["clientId"], Value::Null);
+    let clients: Vec<Value> = rest["data"][0]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|i| i["type"] == "userMessage")
+        .map(|i| i["clientId"].clone())
+        .collect();
+    assert_eq!(clients, [json!("m-1"), json!("m-2")]);
     drop(probe);
     server.stop();
 }
 
 /// `thread/queue/list` shows what waits; `thread/queue/start` on a busy
 /// thread is the "active or pending turn" error; `thread/resume` of an
-/// unknown thread is "thread not found"; `excludeTurns` leaves them out.
+/// unknown thread is "no rollout found" (U1); `excludeTurns` leaves them out.
 #[test]
 fn queue_list_queue_start_and_resume_errors() {
     let dir = TempDir::new("cx-g7-queue").unwrap();
@@ -356,7 +356,7 @@ fn queue_list_queue_start_and_resume_errors() {
     let missing = probe
         .call("thread/resume", json!({"threadId": "no-such-thread"}))
         .unwrap_err();
-    assert!(missing.contains("thread not found"), "{missing}");
+    assert!(missing.contains("no rollout found"), "{missing}");
     let resumed = probe
         .call(
             "thread/resume",
@@ -364,6 +364,68 @@ fn queue_list_queue_start_and_resume_errors() {
         )
         .unwrap();
     assert_eq!(resumed["thread"]["turns"], json!([]));
+    drop(probe);
+    server.stop();
+}
+
+/// Recorded 2026-09-28 (codex 0.158.0, `queue_idle`): `thread/queue/start`
+/// with nothing queued is "queue is empty" (U3); after `turn/interrupt` a
+/// queued message stays queued (U11) until `thread/queue/start`, which
+/// answers with the new turn; `turn/steer` with no running turn is "no
+/// active turn to steer" (U9). `thread/turns/list` before any turn is
+/// "not materialized yet" (codex_live 2026-09-28).
+#[test]
+fn queue_after_interrupt_waits_for_queue_start() {
+    let dir = TempDir::new("cx-g7-intq").unwrap();
+    let server = Running::start(&dir.path().join("s.sock"), 300);
+    let mut probe = server.probe();
+    let thread = start_thread(&mut probe);
+    let history = probe
+        .call("thread/turns/list", json!({"threadId": thread}))
+        .unwrap_err();
+    assert!(history.contains("not materialized yet"), "{history}");
+    let empty = probe
+        .call("thread/queue/start", json!({"threadId": thread}))
+        .unwrap_err();
+    assert!(empty.contains("queue is empty"), "{empty}");
+    let turn = probe
+        .call(
+            "turn/start",
+            json!({"threadId": thread, "input": input("long")}),
+        )
+        .unwrap()["turn"]["id"]
+        .clone();
+    probe
+        .call(
+            "thread/queue/add",
+            json!({"threadId": thread, "input": input("later"), "clientUserMessageId": "m-q"}),
+        )
+        .unwrap();
+    probe
+        .call(
+            "turn/interrupt",
+            json!({"threadId": thread, "turnId": turn}),
+        )
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(400));
+    let listed = probe
+        .call("thread/queue/list", json!({"threadId": thread}))
+        .unwrap();
+    assert_eq!(listed["data"][0]["clientUserMessageId"], "m-q");
+    let started = probe
+        .call("thread/queue/start", json!({"threadId": thread}))
+        .unwrap();
+    assert_eq!(started["turn"]["status"], "inProgress");
+    let interrupted = probe.next_method("turn/completed").unwrap();
+    assert_eq!(interrupted["params"]["turn"]["status"], "interrupted");
+    probe.next_method("turn/completed").unwrap();
+    let steer = probe
+        .call(
+            "turn/steer",
+            json!({"threadId": thread, "expectedTurnId": turn, "input": input("x")}),
+        )
+        .unwrap_err();
+    assert!(steer.contains("no active turn to steer"), "{steer}");
     drop(probe);
     server.stop();
 }

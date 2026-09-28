@@ -36,7 +36,7 @@ use serde_json::{Value, json};
 
 use super::history::{UserItem, match_items, text_of, user_items};
 use super::launch;
-use super::rpc::{Conn, Incoming, RpcError};
+use super::rpc::{Conn, INVALID_REQUEST, Incoming, RpcError};
 use super::send::{self, Rpc};
 use crate::log;
 use crate::store::{Message, SqliteStore, StoreError, messages};
@@ -237,6 +237,19 @@ impl Worker {
             .as_str()
             .ok_or_else(|| RpcError::Transport(format!("thread/start without an id: {result}")))?;
         self.thread = thread.to_owned();
+        // K18: codex 0.158.0 keeps a thread on disk only once it has a
+        // history item; before that `codex resume <id> --remote` (the TUI)
+        // fails with `no rollout found` and so does `thread/resume` after an
+        // app-server restart (U1). One developer note, appended without a
+        // model call, materializes it (checked 2026-09-28, no tokens).
+        self.call_within(
+            "thread/inject_items",
+            json!({"threadId": self.thread, "items": [{
+                "type": "message", "role": "developer",
+                "content": [{"type": "input_text",
+                             "text": format!("agend: this thread belongs to agend instance {}.", self.id)}]}]}),
+            launch::THREAD_WITHIN,
+        )?;
         Ok(self.thread.clone())
     }
 
@@ -498,20 +511,37 @@ impl Worker {
         let _ = self.conn.send(&reply);
     }
 
-    /// Every turn, oldest first (all pages; U5: the paging is not verified).
+    /// Every turn, oldest first. `thread/turns/list` answers newest first
+    /// and `nextCursor` pages back to older turns (U5, turns_list.jsonl,
+    /// codex 0.158.0; K14), so the pages are read in order and reversed.
     fn turns_all(&mut self) -> Result<Vec<Value>, RpcError> {
         let mut turns = Vec::new();
         let mut cursor = Value::Null;
         loop {
-            let page = self.call_within(
+            let page = match self.call_within(
                 "thread/turns/list",
                 json!({"threadId": self.thread, "cursor": cursor, "limit": TURNS_PAGE}),
                 CALL_WITHIN,
-            )?;
+            ) {
+                Ok(page) => page,
+                // K17: codex 0.158.0 refuses the history of a thread without
+                // a user message yet (-32600 `thread <id> is not materialized
+                // yet; thread/turns/list is unavailable before first user
+                // message`, codex_live 2026-09-28): no turns.
+                Err(RpcError::Rpc { code, message })
+                    if code == INVALID_REQUEST && message.contains("not materialized yet") =>
+                {
+                    return Ok(Vec::new());
+                }
+                Err(e) => return Err(e),
+            };
             turns.extend(page["data"].as_array().cloned().unwrap_or_default());
             match page["nextCursor"].as_str() {
                 Some(next) => cursor = json!(next),
-                None => return Ok(turns),
+                None => {
+                    turns.reverse();
+                    return Ok(turns);
+                }
             }
         }
     }

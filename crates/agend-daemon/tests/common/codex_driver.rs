@@ -129,14 +129,22 @@ impl Backend {
         Ok(probe)
     }
 
-    /// Every turn of `thread`, through a separate client.
+    /// Every turn of `thread`, oldest first, through a separate client
+    /// (`thread/turns/list` answers newest first, like codex 0.158.0).
     pub fn turns(&self, thread: &str) -> Result<Vec<Value>, String> {
         let mut probe = self.probe()?;
-        let page = probe.call(
+        let page = match probe.call(
             "thread/turns/list",
             json!({"threadId": thread, "cursor": null, "limit": 1000}),
-        )?;
-        Ok(page["data"].as_array().cloned().unwrap_or_default())
+        ) {
+            Ok(page) => page,
+            // No user message yet (codex 0.158.0): no turns.
+            Err(e) if e.contains("not materialized yet") => return Ok(Vec::new()),
+            Err(e) => return Err(e),
+        };
+        let mut turns = page["data"].as_array().cloned().unwrap_or_default();
+        turns.reverse();
+        Ok(turns)
     }
 
     /// Waits until `thread` has `completed` ended turns and none running.
@@ -383,7 +391,7 @@ pub fn busy(lab: &crate::lab::Lab, tag: &str) -> Result<Vec<String>, String> {
         ));
     }
     out.push(format!(
-        "m-long-interrupt stays {}: A was interrupted before its user message (P5: never confirmed = stays sent)",
+        "m-long-interrupt {}: A's user message was in the thread before the interrupt (codex 0.158.0 shows it within ms after the first turn; one that never shows stays sent, P5)",
         fx.state("m-long-interrupt")?
     ));
     for msg in ["m-idle", "m-q", "m-s", "m-i"] {
