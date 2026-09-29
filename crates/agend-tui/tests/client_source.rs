@@ -383,9 +383,15 @@ fn the_terminal_is_live_and_throttled_and_draws_the_last_output() {
     daemon.push_terminal_bytes("g11-1", b"$ ");
     let text = wait_until(&mut app, |t| t.contains("│ $"));
     assert!(text.contains("│ counter=22"));
-    // Idle: no output, no fetching.
+    // Idle: no output, no fetching. Output that arrived just before the
+    // last fetch may still mark the screen stale once (P5): let that one
+    // refetch happen (the refresh interval, plus a tick), then count.
+    for _ in 0..40 {
+        app.tick();
+        std::thread::sleep(Duration::from_millis(10));
+    }
     let idle = fetches();
-    for _ in 0..30 {
+    for _ in 0..50 {
         app.tick();
         std::thread::sleep(Duration::from_millis(10));
     }
