@@ -163,7 +163,10 @@ impl HolderRuntime {
     /// The screen of `id`'s holder and its PTY chunks after it, through the
     /// daemon's link; `None` without a link.
     pub fn live_terminal(&self, id: &str) -> Option<tokio::sync::oneshot::Receiver<TerminalFeed>> {
-        self.inner.lock_links().get(id)?.terminal()
+        // Only registering under the links' lock; the write (which may wait
+        // for this link's write lock) happens after it is released.
+        let (rx, writer) = self.inner.lock_links().get(id)?.terminal_request();
+        link::send_snapshot(&writer).then_some(rx)
     }
 
     /// Sends the operator's bytes (base64) to `id`'s agent through the
@@ -395,5 +398,62 @@ impl Runtime for HolderRuntime {
 
     async fn recover_holders(&self) -> Result<Vec<HolderHandle>, RuntimeError> {
         self.recover()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::os::unix::net::UnixStream;
+
+    fn runtime() -> HolderRuntime {
+        HolderRuntime::new(
+            Path::new("/nonexistent-g11"),
+            Path::new("/nonexistent-g11/agend"),
+            Vec::new(),
+            Arc::new(|_| {}),
+        )
+    }
+
+    /// A holder that stops reading holds up only writes to itself: while
+    /// its input waits (up to `link::WRITE_WITHIN`) and a terminal request
+    /// to it queues behind that, input to another instance still goes at
+    /// once (round-3 verifier: it waited 4.79 s for the links table).
+    #[test]
+    fn a_stalled_holder_does_not_hold_up_other_instances() {
+        let runtime = runtime();
+        let (slow, _slow_peer) = UnixStream::pair().unwrap();
+        let mut filler = slow.try_clone().unwrap();
+        filler.set_nonblocking(true).unwrap();
+        while filler.write(&[b'x'; 4096]).is_ok() {}
+        filler.set_nonblocking(false).unwrap();
+        let (ok, ok_peer) = UnixStream::pair().unwrap();
+        let drain = std::thread::spawn(move || {
+            let _ = std::io::copy(&mut &ok_peer, &mut std::io::sink());
+        });
+        {
+            let mut links = runtime.inner.lock_links();
+            links.insert("g-slow".into(), link::Link::on_stream(slow));
+            links.insert("g-ok".into(), link::Link::on_stream(ok));
+        }
+        let (r1, r2) = (runtime.clone(), runtime.clone());
+        let stalled = std::thread::spawn(move || {
+            r1.terminal_input("g-slow", link::input_line("aGk=".into()))
+        });
+        std::thread::sleep(Duration::from_millis(100));
+        let subscribe = std::thread::spawn(move || r2.live_terminal("g-slow").is_some());
+        std::thread::sleep(Duration::from_millis(100));
+        let started = Instant::now();
+        assert!(runtime.terminal_input("g-ok", link::input_line("aGk=".into())));
+        let took = started.elapsed();
+        assert!(
+            took < Duration::from_millis(100),
+            "input to g-ok took {took:?}"
+        );
+        assert!(!stalled.join().unwrap(), "the stalled write gives up");
+        let _ = subscribe.join();
+        runtime.inner.lock_links().clear();
+        let _ = drain.join();
     }
 }

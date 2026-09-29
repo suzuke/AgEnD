@@ -48,7 +48,12 @@ fn the_real_daemon_meets_the_client_protocol_contract() {
     });
     println!("{report}");
     report.assert_passed();
-    assert_eq!(report.total(), REAL_RULES.len());
+    // One case per rule, except CLP-22's two (at the limit, one byte over).
+    let cases = client::cases::<clp::RealDaemon>()
+        .iter()
+        .filter(|c| REAL_RULES.contains(&c.rule))
+        .count();
+    assert_eq!(report.total(), cases);
 }
 
 #[test]

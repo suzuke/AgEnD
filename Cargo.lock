@@ -85,6 +85,7 @@ version = "0.0.0"
 dependencies = [
  "agend-core",
  "base64",
+ "libc",
  "serde_json",
  "tungstenite",
 ]

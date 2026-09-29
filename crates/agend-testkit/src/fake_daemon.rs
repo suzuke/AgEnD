@@ -453,7 +453,6 @@ impl FakeDaemon {
 impl Drop for FakeDaemon {
     fn drop(&mut self) {
         self.shared.stopping.store(true, Ordering::SeqCst);
-        let _ = UnixStream::connect(&self.socket_path);
         if let Some(accept) = self.accept.take() {
             let _ = accept.join();
         }
@@ -515,13 +514,33 @@ fn fleet(state: &State) -> FleetView {
     }
 }
 
+/// How often a stopping accept loop looks at its stop flag.
+pub(crate) const ACCEPT_POLL: Duration = Duration::from_millis(5);
+
+/// The next connection, polling `listener` (non-blocking) until one comes
+/// or `stopping` is set. Stopping needs no new descriptor, so it works when
+/// the process has none left (a `connect` to wake a blocked `accept`
+/// would fail then); failed accepts (out of descriptors) are retried.
+pub(crate) fn accept_or_stop(listener: &UnixListener, stopping: &AtomicBool) -> Option<UnixStream> {
+    let _ = listener.set_nonblocking(true);
+    loop {
+        if stopping.load(Ordering::SeqCst) {
+            return None;
+        }
+        match listener.accept() {
+            Ok((stream, _)) => {
+                // Accepted sockets inherit non-blocking mode on macOS.
+                let _ = stream.set_nonblocking(false);
+                return Some(stream);
+            }
+            Err(_) => std::thread::sleep(ACCEPT_POLL),
+        }
+    }
+}
+
 fn accept_loop(listener: UnixListener, shared: Arc<Shared>) {
     let mut accepted = 0u64;
-    for stream in listener.incoming() {
-        if shared.stopping.load(Ordering::SeqCst) {
-            break;
-        }
-        let Ok(stream) = stream else { continue };
+    while let Some(stream) = accept_or_stop(&listener, &shared.stopping) {
         let _ = stream.set_write_timeout(Some(WRITE_TIMEOUT));
         let (Ok(for_drop), Ok(for_close)) = (stream.try_clone(), stream.try_clone()) else {
             continue;
@@ -997,17 +1016,14 @@ fn handle(state: &mut State, request: ClientRequest, conn: &Connection) -> Vec<C
                 let message = operator_input_too_long(line);
                 return vec![error(None, error_code::INVALID_REQUEST, message)];
             }
-            match base64::engine::general_purpose::STANDARD.decode(&data.bytes_base64) {
-                Ok(bytes) => {
-                    state.inputs.push((id, bytes));
-                    Vec::new()
-                }
-                Err(e) => vec![error(
-                    None,
-                    error_code::INVALID_REQUEST,
-                    format!("bytes_base64: {e}"),
-                )],
+            // Like the daemon, which does not decode: an input that is not
+            // base64 is refused by the holder, which the daemon only logs.
+            // Nothing is written and nothing is answered.
+            if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&data.bytes_base64)
+            {
+                state.inputs.push((id, bytes));
             }
+            Vec::new()
         }
         ClientRequest::AnswerAsk { data } => {
             let Some(thread) = state.asks.get_mut(&data.ask_id) else {

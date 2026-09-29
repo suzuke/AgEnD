@@ -12,3 +12,7 @@ agend-core.workspace = true
 base64 = "0.22"
 serde_json = "1"
 tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
+
+[dev-dependencies]
+# Lowers the test process's own descriptor limit (tests/out_of_descriptors.rs).
+libc = "0.2"

@@ -169,7 +169,7 @@ fixture（`ClientProtocolFixture`）：`socket`、`emit`（讓至少一個新事
 | CLP-19 | 對沒有終端的 instance（不存在的 id）`subscribe_terminal` → `no_terminal`（不帶 request id），連線不斷；這條連線之前訂的終端**不再**送 `terminal_bytes`（失敗的重訂也取代舊的） | 第 11 施工關 P1、P5 | `ScreenForAnyInstance` |
 | CLP-20 | `terminal_input`：agent（`hello` 帶 `caller`）不管 instance 存不存在都是 `forbidden`（先查身分）；操作者對不存在的 instance → `no_terminal`；操作者對有終端的 instance → 不回任何東西，位元組原樣到終端，agent 送的沒有；錯誤都不帶 request id | 第 11 施工關 P6、D17 | `AnyoneMayType` |
 | CLP-21 | 操作者對 `failed` 的 instance（沒有活的終端）送 `terminal_input` → `no_terminal`（不帶 request id），連線不斷 | 第 11 施工關 P6（verifier） | `TypesIntoTheLiveOne` |
-| CLP-22 | 操作者送的 `terminal_input` 轉成 holder 的請求行後超過 holder 的上限（`protocol::holder::MAX_REQUEST_LINE`，1 MiB，含換行）→ `invalid_request`（不帶 request id，訊息寫明上限），什麼都沒寫；連線不斷，之後的輸入照常到終端 | 第 11 施工關 P6（verifier r2） | `ForwardsHugeInput` |
+| CLP-22 | 操作者送的 `terminal_input` 轉成 holder 的請求行（含換行）剛好是 holder 的上限（`protocol::holder::MAX_REQUEST_LINE`，1048576 bytes）→ 照常轉給 holder、不回任何東西；多 1 byte（1048577）→ `invalid_request`（不帶 request id，訊息寫明上限），什麼都沒轉；兩種之後連線都不斷、之後的輸入照常到終端 | 第 11 施工關 P6（verifier r2、r3） | `ForwardsHugeInput`、`RefusesAtTheLimit` |
 
 不釘：`status`、`send`、`inbox` 以外的 agent 命令（假 daemon 會處理，真 daemon 第 10 施工關前回 `not_supported`）；成功的 `daemon_restart`（CLI 測試對假、真 daemon 各跑一次）；codex instance 的 `terminal_input` 回 `not_supported`（fixture 沒有 codex instance；假 daemon 在 `tests/fake_daemon.rs`、真 daemon 在 `crates/agend/tests/tui_daemon.rs` 各測一次）。第 11 施工關 B 段起假 daemon 只對登記過的 instance 回畫面（改掉第 8 施工關 C2）。
 

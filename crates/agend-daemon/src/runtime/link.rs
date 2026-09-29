@@ -69,6 +69,17 @@ pub fn input_line(bytes_base64: String) -> Vec<u8> {
     line
 }
 
+/// Sends `Snapshot` (the second half of [`Link::terminal`]).
+pub fn send_snapshot(writer: &Writer) -> bool {
+    match serde_json::to_vec(&HolderRequest::Snapshot) {
+        Ok(mut line) => {
+            line.push(b'\n');
+            send(writer, &line)
+        }
+        Err(_) => false,
+    }
+}
+
 /// A write to the holder that makes no progress for this long gives up
 /// (the holder stopped reading; as `server::WRITE_TIMEOUT`).
 pub const WRITE_WITHIN: Duration = Duration::from_secs(5);
@@ -139,15 +150,38 @@ impl Link {
 
     /// Asks the holder for its screen on this connection; the answer is the
     /// screen and a receiver of the PTY chunks after it. `None` when the
-    /// request cannot be sent.
+    /// request cannot be sent. May wait for this link's write lock.
     pub fn terminal(&self) -> Option<oneshot::Receiver<TerminalFeed>> {
+        let (rx, writer) = self.terminal_request();
+        send_snapshot(&writer).then_some(rx)
+    }
+
+    /// The first, non-blocking half of [`Link::terminal`], for a caller that
+    /// holds a lock others need (the daemon's links table): registers the
+    /// waiting subscriber and returns where to send `Snapshot`
+    /// ([`send_snapshot`]) after that lock is released.
+    pub fn terminal_request(&self) -> (oneshot::Receiver<TerminalFeed>, Writer) {
         let (tx, rx) = oneshot::channel();
-        let mut line = serde_json::to_vec(&HolderRequest::Snapshot).ok()?;
-        line.push(b'\n');
         // The pending entry goes in before the request is sent, so the
         // reader thread finds it when the answer arrives.
         lock(&self.terminal).pending.push(tx);
-        send(&self.writer(), &line).then_some(rx)
+        (rx, self.writer())
+    }
+
+    /// A link on `stream` with no reader thread (tests of the callers).
+    #[cfg(test)]
+    pub(crate) fn on_stream(stream: UnixStream) -> Link {
+        Link {
+            stopping: Arc::new(AtomicBool::new(false)),
+            stream: Arc::new(Mutex::new(Some(stream))),
+            write: Arc::new(Mutex::new(())),
+            terminal: Arc::new(Mutex::new(Terminal {
+                pending: Vec::new(),
+                live: broadcast::channel(TERMINAL_CHUNKS).0,
+            })),
+            wake: None,
+            thread: None,
+        }
     }
 
     /// Where [`input`] writes: the caller can drop its lock on the links

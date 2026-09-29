@@ -180,8 +180,13 @@ pub fn cases<F: ClientProtocolFixture>() -> Vec<Case<F>> {
         },
         Case {
             rule: "CLP-22",
-            name: "input_over_the_holders_line_limit_is_refused",
-            check: |mut fx| input_over_the_holder_limit(&mut fx),
+            name: "input_making_a_holder_line_of_exactly_1_mib_is_forwarded",
+            check: |mut fx| input_at_the_holder_limit_is_forwarded(&mut fx),
+        },
+        Case {
+            rule: "CLP-22",
+            name: "input_making_a_holder_line_one_byte_over_1_mib_is_refused",
+            check: |mut fx| input_one_byte_over_the_holder_limit_is_refused(&mut fx),
         },
         Case {
             rule: "CLP-21",
@@ -1376,15 +1381,80 @@ fn typing_into_a_failed_instance<F: ClientProtocolFixture>(fx: &mut F) -> CaseRe
         .map_err(|e| format!("the connection did not stay usable: {e}"))
 }
 
-fn input_over_the_holder_limit<F: ClientProtocolFixture>(fx: &mut F) -> CaseResult {
-    use agend_core::protocol::holder::MAX_REQUEST_LINE;
+/// The holder request line of a `terminal_input` without its base64: the
+/// daemon's `operator_terminal_input` wrapper and the newline.
+pub fn holder_line_overhead() -> usize {
+    use agend_core::protocol::holder::{HolderRequest, OperatorTerminalInputData};
+    let empty = HolderRequest::OperatorTerminalInput {
+        data: OperatorTerminalInputData {
+            bytes_base64: String::new(),
+        },
+    };
+    serde_json::to_vec(&empty).map_or(0, |l| l.len()) + 1
+}
+
+/// A `terminal_input` whose holder request line is exactly `line` bytes,
+/// newline included. The base64 is `A`s, so its length need not be a whole
+/// group: the daemon forwards it (it does not decode), the holder refuses
+/// it as `bad_request`, which the daemon only logs; nothing is written.
+fn input_making_a_line_of(instance: &str, line: usize) -> ClientRequest {
+    ClientRequest::TerminalInput {
+        data: TerminalInputData {
+            instance_id: instance.into(),
+            bytes_base64: "A".repeat(line - holder_line_overhead()),
+        },
+    }
+}
+
+/// After an input at or over the limit, the terminal still takes input and
+/// received nothing of it.
+fn still_takes_input<F: ClientProtocolFixture>(fx: &mut F, op: &mut ProbeClient) -> CaseResult {
     const AFTER: &str = "clp-after-the-limit";
     let instance = fx.terminal_instance();
+    send(op, &terminal_input(&instance, AFTER.as_bytes()))?;
+    let quiet = collect(op, QUIET)?;
+    ensure(quiet.errors.is_empty() && !quiet.closed, || {
+        format!("then: errors {:?}, closed {}", quiet.errors, quiet.closed)
+    })?;
+    let typed = fx.typed(&instance, AFTER)?;
+    ensure(
+        typed.contains(AFTER) && !typed.contains("AAAAAAAAAAAAAAAA"),
+        || {
+            format!(
+                "{instance} received {} bytes, expected only {AFTER:?}",
+                typed.len()
+            )
+        },
+    )
+}
+
+fn input_at_the_holder_limit_is_forwarded<F: ClientProtocolFixture>(fx: &mut F) -> CaseResult {
+    use agend_core::protocol::holder::MAX_REQUEST_LINE;
+    let instance = fx.terminal_instance();
     let mut op = operator(fx)?;
-    // Base64 makes this about 1.33 MiB: over the holder's 1 MiB line.
     send(
         &mut op,
-        &terminal_input(&instance, &vec![b'a'; MAX_REQUEST_LINE]),
+        &input_making_a_line_of(&instance, MAX_REQUEST_LINE),
+    )?;
+    let quiet = collect(&mut op, QUIET)?;
+    ensure(quiet.errors.is_empty() && !quiet.closed, || {
+        format!(
+            "a {MAX_REQUEST_LINE}-byte holder line got errors {:?} (closed {}), expected no reply",
+            quiet.errors, quiet.closed
+        )
+    })?;
+    still_takes_input(fx, &mut op)
+}
+
+fn input_one_byte_over_the_holder_limit_is_refused<F: ClientProtocolFixture>(
+    fx: &mut F,
+) -> CaseResult {
+    use agend_core::protocol::holder::MAX_REQUEST_LINE;
+    let instance = fx.terminal_instance();
+    let mut op = operator(fx)?;
+    send(
+        &mut op,
+        &input_making_a_line_of(&instance, MAX_REQUEST_LINE + 1),
     )?;
     let mut skipped = Vec::new();
     let reply = until(
@@ -1402,29 +1472,12 @@ fn input_over_the_holder_limit<F: ClientProtocolFixture>(fx: &mut F) -> CaseResu
             && data.message.contains(&MAX_REQUEST_LINE.to_string()),
         || {
             format!(
-                "oversized terminal_input got {data:?}, expected invalid_request naming the limit"
+                "a {}-byte holder line got {data:?}, expected invalid_request naming the limit",
+                MAX_REQUEST_LINE + 1
             )
         },
     )?;
-    // Nothing was forwarded, and the terminal still takes input.
-    send(&mut op, &terminal_input(&instance, AFTER.as_bytes()))?;
-    let quiet = collect(&mut op, QUIET)?;
-    ensure(quiet.errors.is_empty() && !quiet.closed, || {
-        format!(
-            "after the refusal: errors {:?}, closed {}",
-            quiet.errors, quiet.closed
-        )
-    })?;
-    let typed = fx.typed(&instance, AFTER)?;
-    ensure(
-        typed.contains(AFTER) && !typed.contains("aaaaaaaaaaaaaaaa"),
-        || {
-            format!(
-                "{instance} received {} bytes, expected only {AFTER:?}",
-                typed.len()
-            )
-        },
-    )
+    still_takes_input(fx, &mut op)
 }
 
 // ---- the fake daemon as a fixture ----

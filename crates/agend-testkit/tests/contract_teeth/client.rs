@@ -462,6 +462,27 @@ pub fn mutants() -> Vec<Mutant> {
                 })
             },
         },
+        // CLP-22: the limit is `>=` instead of `>`: an input exactly at the
+        // holder's limit is refused too (seen as one byte more).
+        Mutant {
+            rule: "CLP-22",
+            name: "RefusesAtTheLimit",
+            run: |name| {
+                with("CLP-22", name, || {
+                    parsed(|_, direction, mut v| {
+                        let at_limit = agend_core::protocol::holder::MAX_REQUEST_LINE
+                            - client::holder_line_overhead();
+                        if direction == Direction::ToServer
+                            && v["type"] == "terminal_input"
+                            && v["data"]["bytes_base64"].as_str().map(str::len) == Some(at_limit)
+                        {
+                            v["data"]["bytes_base64"] = json!("A".repeat(at_limit + 1));
+                        }
+                        vec![v]
+                    })
+                })
+            },
+        },
         // CLP-21: typing into any instance goes to the live one.
         Mutant {
             rule: "CLP-21",
