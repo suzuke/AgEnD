@@ -446,6 +446,22 @@ pub fn mutants() -> Vec<Mutant> {
                 })
             },
         },
+        // CLP-22: the refusal of an oversized input never reaches the client
+        // (as if it had been forwarded to the holder).
+        Mutant {
+            rule: "CLP-22",
+            name: "ForwardsHugeInput",
+            run: |name| {
+                with("CLP-22", name, || {
+                    parsed(|_, direction, v| {
+                        if direction == Direction::ToClient && is_error(&v, "invalid_request") {
+                            return vec![];
+                        }
+                        vec![v]
+                    })
+                })
+            },
+        },
         // CLP-21: typing into any instance goes to the live one.
         Mutant {
             rule: "CLP-21",

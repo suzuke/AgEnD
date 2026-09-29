@@ -36,6 +36,7 @@ use agend_core::protocol::client::{
     AgentCommand, AgentState, ClientCommandResultData, ClientRequest, ClientResponse,
     CommandResult, ErrorData, FleetData, SelectedVersionData, TerminalSnapshotData, error_code,
 };
+use agend_core::protocol::holder::{MAX_REQUEST_LINE, operator_input_too_long};
 use tokio::sync::{broadcast, mpsc::UnboundedSender};
 
 use crate::driver::codex::CodexDriver;
@@ -251,7 +252,14 @@ fn terminal_input(
     if view.backend == agend_core::model::Backend::Codex.as_str() {
         return refuse(error_code::NOT_SUPPORTED, CODEX_INPUT.into());
     }
-    if !ctx.runtime.terminal_input(&instance_id, bytes_base64) {
+    let line = crate::runtime::link::input_line(bytes_base64);
+    if line.len() > MAX_REQUEST_LINE {
+        return refuse(
+            error_code::INVALID_REQUEST,
+            operator_input_too_long(line.len()),
+        );
+    }
+    if !ctx.runtime.terminal_input(&instance_id, line) {
         return refuse(
             error_code::NO_TERMINAL,
             format!("{instance_id} has no live terminal; nothing was written"),

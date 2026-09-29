@@ -18,8 +18,9 @@
 //!   (per-instance broadcast of [`TERMINAL_CHUNKS`]), nothing twice or lost.
 //! - Operator input (gate 11 B P6): [`input`] sends
 //!   `OperatorTerminalInput` on this connection. Writes (input, `Snapshot`)
-//!   happen outside the link's locks and give up after [`WRITE_WITHIN`]
-//!   without progress (a holder that stops reading). The holder answers only a
+//!   take the link's own write lock for one whole line (never the links
+//!   table's), and give up after [`WRITE_WITHIN`] without progress (a holder
+//!   that stops reading), closing the connection so the link reconnects. The holder answers only a
 //!   refusal (`pty_busy`, `agent_exited`, …); it is logged and dropped, not
 //!   passed back to the client (the protocol has no id to match it with).
 //!
@@ -52,15 +53,20 @@ const SPAWN_REPLY_WITHIN: Duration = Duration::from_secs(10);
 /// Writes the operator's bytes (base64) to the agent's PTY through the
 /// holder, on the link's connection (`Link::input_slot`); false when the
 /// request cannot be sent within [`WRITE_WITHIN`].
-pub fn input(slot: &Mutex<Option<UnixStream>>, bytes_base64: String) -> bool {
+pub fn input(writer: &Writer, bytes_base64: String) -> bool {
+    send(writer, &input_line(bytes_base64))
+}
+
+/// The holder request line (newline included) that carries `bytes_base64`;
+/// the daemon refuses input whose line is over the holder's
+/// `MAX_REQUEST_LINE` before sending it.
+pub fn input_line(bytes_base64: String) -> Vec<u8> {
     let request = HolderRequest::OperatorTerminalInput {
         data: OperatorTerminalInputData { bytes_base64 },
     };
-    let Ok(mut line) = serde_json::to_vec(&request) else {
-        return false;
-    };
+    let mut line = serde_json::to_vec(&request).unwrap_or_default();
     line.push(b'\n');
-    send(slot, &line)
+    line
 }
 
 /// A write to the holder that makes no progress for this long gives up
@@ -117,6 +123,8 @@ pub struct Attached {
 pub struct Link {
     stopping: Arc<AtomicBool>,
     stream: Arc<Mutex<Option<UnixStream>>>,
+    /// Held for the whole write of one request line.
+    write: Arc<Mutex<()>>,
     terminal: Arc<Mutex<Terminal>>,
     wake: Option<Sender<()>>,
     thread: Option<JoinHandle<()>>,
@@ -139,13 +147,16 @@ impl Link {
         // The pending entry goes in before the request is sent, so the
         // reader thread finds it when the answer arrives.
         lock(&self.terminal).pending.push(tx);
-        send(&self.stream, &line).then_some(rx)
+        send(&self.writer(), &line).then_some(rx)
     }
 
     /// Where [`input`] writes: the caller can drop its lock on the links
     /// before writing.
-    pub fn input_slot(&self) -> Arc<Mutex<Option<UnixStream>>> {
-        Arc::clone(&self.stream)
+    pub fn writer(&self) -> Writer {
+        Writer {
+            stream: Arc::clone(&self.stream),
+            write: Arc::clone(&self.write),
+        }
     }
 
     fn stop(&mut self) {
@@ -166,15 +177,40 @@ impl Drop for Link {
     }
 }
 
-/// Writes one request line on the link's connection, outside every lock:
-/// the connection is cloned under the slot's lock, and the write gives up
-/// after [`WRITE_WITHIN`] without progress. False when there is no
-/// connection or the write fails.
-fn send(slot: &Mutex<Option<UnixStream>>, line: &[u8]) -> bool {
-    let Some(mut stream) = lock(slot).as_ref().and_then(|s| s.try_clone().ok()) else {
+/// The writing side of a link: its current connection and its write lock.
+#[derive(Clone)]
+pub struct Writer {
+    stream: Arc<Mutex<Option<UnixStream>>>,
+    write: Arc<Mutex<()>>,
+}
+
+/// Writes one request line on the link's connection. The link's write lock
+/// is held for the whole line, so lines from several callers never
+/// interleave; the slot's lock (and the daemon's links table) is not held
+/// meanwhile, so a slow holder only holds up writes to itself. A write
+/// that makes no progress for [`WRITE_WITHIN`] gives up and shuts the
+/// connection down: part of the line may already be at the holder, so the
+/// connection cannot be used again; the link's reader thread reconnects
+/// (or reports the holder gone). False when there is no connection or the
+/// write fails.
+pub fn send_line(writer: &Writer, line: &[u8]) -> bool {
+    send(writer, line)
+}
+
+fn send(writer: &Writer, line: &[u8]) -> bool {
+    let _whole_line = lock(&writer.write);
+    let Some(mut stream) = lock(&writer.stream)
+        .as_ref()
+        .and_then(|s| s.try_clone().ok())
+    else {
         return false;
     };
-    stream.set_write_timeout(Some(WRITE_WITHIN)).is_ok() && stream.write_all(line).is_ok()
+    let sent =
+        stream.set_write_timeout(Some(WRITE_WITHIN)).is_ok() && stream.write_all(line).is_ok();
+    if !sent {
+        let _ = stream.shutdown(std::net::Shutdown::Both);
+    }
+    sent
 }
 
 struct Worker {
@@ -227,6 +263,7 @@ pub fn open(
     let link = Link {
         stopping,
         stream,
+        write: Arc::new(Mutex::new(())),
         terminal,
         wake: Some(wake_tx),
         thread: Some(thread),
@@ -392,6 +429,13 @@ impl Worker {
 mod tests {
     use super::*;
 
+    fn writer_on(stream: UnixStream) -> Writer {
+        Writer {
+            stream: Arc::new(Mutex::new(Some(stream))),
+            write: Arc::new(Mutex::new(())),
+        }
+    }
+
     /// A holder that stops reading must not stall the caller (a tokio
     /// worker, and whoever waits for the link's locks): with its socket
     /// buffer full, an input line gives up after [`WRITE_WITHIN`].
@@ -402,12 +446,12 @@ mod tests {
         filler.set_nonblocking(true).unwrap();
         while filler.write(&[b'x'; 4096]).is_ok() {}
         filler.set_nonblocking(false).unwrap();
-        let slot = Arc::new(Mutex::new(Some(ours)));
+        let writer = writer_on(ours);
         let (tx, rx) = mpsc::channel();
-        let writer = Arc::clone(&slot);
+        let w = writer.clone();
         let started = Instant::now();
         std::thread::spawn(move || {
-            let _ = tx.send(input(&writer, "aGVsbG8=".into()));
+            let _ = tx.send(input(&w, "aGVsbG8=".into()));
         });
         let sent = rx.recv_timeout(WRITE_WITHIN * 2);
         let took = started.elapsed();
@@ -416,7 +460,71 @@ mod tests {
             took >= WRITE_WITHIN - Duration::from_millis(100),
             "{took:?}"
         );
-        // The slot's lock is free while the write waits and after.
-        assert!(slot.try_lock().is_ok());
+        // The connection slot is free while the write waits and after.
+        assert!(writer.stream.try_lock().is_ok());
+    }
+
+    /// Lines written by several threads at once reach the holder whole
+    /// (round-2 verifier: 193 of 800 12 KB lines were interleaved).
+    #[test]
+    fn concurrent_writers_never_interleave_lines() {
+        use std::io::{BufRead, BufReader};
+        let (ours, peer) = UnixStream::pair().unwrap();
+        let writer = writer_on(ours);
+        let reader = std::thread::spawn(move || {
+            let (mut good, mut bad) = (0, 0);
+            for line in BufReader::new(peer).lines() {
+                match serde_json::from_str::<HolderRequest>(&line.unwrap()) {
+                    Ok(HolderRequest::OperatorTerminalInput { .. }) => good += 1,
+                    _ => bad += 1,
+                }
+            }
+            (good, bad)
+        });
+        let threads: Vec<_> = (0..4)
+            .map(|t| {
+                let w = writer.clone();
+                std::thread::spawn(move || {
+                    let payload = char::from(b'a' + t).to_string().repeat(12_000);
+                    for _ in 0..200 {
+                        assert!(input(&w, payload.clone()));
+                    }
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        if let Some(s) = lock(&writer.stream).take() {
+            let _ = s.shutdown(std::net::Shutdown::Write);
+        }
+        assert_eq!(reader.join().unwrap(), (800, 0));
+    }
+
+    /// A write that timed out may have left half a line on the holder's
+    /// side: the connection is closed (the link reconnects), and the next
+    /// request on the new connection arrives whole.
+    #[test]
+    fn a_timed_out_write_closes_the_connection_and_the_next_one_is_clean() {
+        use std::io::{BufRead, BufReader, Read};
+        let (ours, mut peer) = UnixStream::pair().unwrap();
+        let writer = writer_on(ours);
+        let payload = "p".repeat(4 << 20);
+        assert!(!input(&writer, payload), "the peer never reads");
+        // The old connection is closed: the peer reads what arrived, then EOF.
+        peer.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let mut rest = Vec::new();
+        peer.read_to_end(&mut rest).expect("EOF, not a timeout");
+        assert!(!rest.ends_with(b"\n"), "half a line was left behind");
+        // The link's reader thread reconnects and publishes a new one.
+        let (fresh, peer) = UnixStream::pair().unwrap();
+        *lock(&writer.stream) = Some(fresh);
+        assert!(input(&writer, "aGk=".into()));
+        let mut line = String::new();
+        BufReader::new(peer).read_line(&mut line).unwrap();
+        assert!(matches!(
+            serde_json::from_str::<HolderRequest>(&line),
+            Ok(HolderRequest::OperatorTerminalInput { .. })
+        ));
     }
 }

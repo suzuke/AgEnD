@@ -179,6 +179,11 @@ pub fn cases<F: ClientProtocolFixture>() -> Vec<Case<F>> {
             check: |mut fx| only_the_operator_types(&mut fx),
         },
         Case {
+            rule: "CLP-22",
+            name: "input_over_the_holders_line_limit_is_refused",
+            check: |mut fx| input_over_the_holder_limit(&mut fx),
+        },
+        Case {
             rule: "CLP-21",
             name: "typing_into_a_failed_instance_is_no_terminal",
             check: |mut fx| typing_into_a_failed_instance(&mut fx),
@@ -1369,6 +1374,57 @@ fn typing_into_a_failed_instance<F: ClientProtocolFixture>(fx: &mut F) -> CaseRe
     get_fleet(&mut op, "clp-21")
         .map(|_| ())
         .map_err(|e| format!("the connection did not stay usable: {e}"))
+}
+
+fn input_over_the_holder_limit<F: ClientProtocolFixture>(fx: &mut F) -> CaseResult {
+    use agend_core::protocol::holder::MAX_REQUEST_LINE;
+    const AFTER: &str = "clp-after-the-limit";
+    let instance = fx.terminal_instance();
+    let mut op = operator(fx)?;
+    // Base64 makes this about 1.33 MiB: over the holder's 1 MiB line.
+    send(
+        &mut op,
+        &terminal_input(&instance, &vec![b'a'; MAX_REQUEST_LINE]),
+    )?;
+    let mut skipped = Vec::new();
+    let reply = until(
+        &mut op,
+        WITHIN,
+        |r| matches!(r, ClientResponse::Error { .. }),
+        &mut skipped,
+    )?;
+    let ClientResponse::Error { data } = reply else {
+        unreachable!("filtered");
+    };
+    ensure(
+        data.code == error_code::INVALID_REQUEST
+            && data.request_id.is_none()
+            && data.message.contains(&MAX_REQUEST_LINE.to_string()),
+        || {
+            format!(
+                "oversized terminal_input got {data:?}, expected invalid_request naming the limit"
+            )
+        },
+    )?;
+    // Nothing was forwarded, and the terminal still takes input.
+    send(&mut op, &terminal_input(&instance, AFTER.as_bytes()))?;
+    let quiet = collect(&mut op, QUIET)?;
+    ensure(quiet.errors.is_empty() && !quiet.closed, || {
+        format!(
+            "after the refusal: errors {:?}, closed {}",
+            quiet.errors, quiet.closed
+        )
+    })?;
+    let typed = fx.typed(&instance, AFTER)?;
+    ensure(
+        typed.contains(AFTER) && !typed.contains("aaaaaaaaaaaaaaaa"),
+        || {
+            format!(
+                "{instance} received {} bytes, expected only {AFTER:?}",
+                typed.len()
+            )
+        },
+    )
 }
 
 // ---- the fake daemon as a fixture ----

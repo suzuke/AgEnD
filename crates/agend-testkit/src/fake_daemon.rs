@@ -60,7 +60,9 @@
 //! - `terminal_input` (gate 11 B P6), in this order: an agent caller gets
 //!   `forbidden`; an instance not in the fleet view, or `failed`,
 //!   `no_terminal`; a codex
-//!   instance `not_supported` (until U17); otherwise the bytes are recorded
+//!   instance `not_supported` (until U17); input whose holder request line
+//!   would be over `protocol::holder::MAX_REQUEST_LINE` `invalid_request`;
+//!   otherwise the bytes are recorded
 //!   ([`FakeDaemon::terminal_inputs`]) and nothing is answered. Errors carry
 //!   no request id.
 //! - `answer_ask`, for asks from the `ask` command or `FakeDaemon::open_ask`
@@ -91,6 +93,9 @@ use agend_core::protocol::client::{
     TaskChangedData, TaskCreatedData, TaskView, TeamView, TerminalBytesData, TerminalSnapshotData,
     error_code, is_uuid_v4, message_too_long, order_attention, uuid_v4,
 };
+use agend_core::protocol::holder::{
+    HolderRequest, MAX_REQUEST_LINE, OperatorTerminalInputData, operator_input_too_long,
+};
 use agend_core::protocol::{ProtocolVersion, negotiate};
 
 use crate::fakes::lock;
@@ -113,6 +118,7 @@ pub const TERMINAL_CHUNKS: usize = 256;
 type Writer = Arc<Mutex<UnixStream>>;
 
 struct Subscriber {
+    connection: u64,
     queue: SyncSender<EventData>,
     lagged: Arc<AtomicBool>,
 }
@@ -672,8 +678,12 @@ fn serve(stream: UnixStream, shared: &Shared) -> io::Result<()> {
         caller: None,
     };
     let served = serve_lines(stream, shared, &mut conn);
-    // Its terminal subscription ends with the connection.
-    lock(&shared.state).terminals.retain(|t| t.connection != id);
+    // Its subscriptions end with the connection (their forwarders hold its
+    // descriptor until their queue is dropped).
+    let mut state = lock(&shared.state);
+    state.terminals.retain(|t| t.connection != id);
+    state.subscribers.retain(|s| s.connection != id);
+    drop(state);
     served
 }
 
@@ -910,7 +920,11 @@ fn handle(state: &mut State, request: ClientRequest, conn: &Connection) -> Vec<C
                 .name("fake-daemon-events".into())
                 .spawn(move || forward(writer, receiver, flag));
             if started.is_ok() {
-                state.subscribers.push(Subscriber { queue, lagged });
+                state.subscribers.push(Subscriber {
+                    connection: conn.id,
+                    queue,
+                    lagged,
+                });
             }
             Vec::new()
         }
@@ -971,6 +985,17 @@ fn handle(state: &mut State, request: ClientRequest, conn: &Connection) -> Vec<C
             };
             if instance.backend == "codex" {
                 return vec![error(None, error_code::NOT_SUPPORTED, CODEX_INPUT.into())];
+            }
+            // What the daemon would send its holder, newline included.
+            let line = serde_json::to_vec(&HolderRequest::OperatorTerminalInput {
+                data: OperatorTerminalInputData {
+                    bytes_base64: data.bytes_base64.clone(),
+                },
+            })
+            .map_or(usize::MAX, |l| l.len() + 1);
+            if line > MAX_REQUEST_LINE {
+                let message = operator_input_too_long(line);
+                return vec![error(None, error_code::INVALID_REQUEST, message)];
             }
             match base64::engine::general_purpose::STANDARD.decode(&data.bytes_base64) {
                 Ok(bytes) => {

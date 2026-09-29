@@ -168,10 +168,10 @@ impl HolderRuntime {
 
     /// Sends the operator's bytes (base64) to `id`'s agent through the
     /// daemon's link (gate 11 B P6); false without a link.
-    pub fn terminal_input(&self, id: &str, bytes_base64: String) -> bool {
+    pub fn terminal_input(&self, id: &str, line: Vec<u8>) -> bool {
         // Not under the links' lock: the write may wait (bounded).
-        let slot = self.inner.lock_links().get(id).map(link::Link::input_slot);
-        slot.is_some_and(|slot| link::input(&slot, bytes_base64))
+        let writer = self.inner.lock_links().get(id).map(link::Link::writer);
+        writer.is_some_and(|writer| link::send_line(&writer, &line))
     }
 
     /// Whether the daemon has a link to `id`'s holder (a running instance).

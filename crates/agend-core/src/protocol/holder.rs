@@ -19,6 +19,20 @@ use super::{Hello, ProtocolVersion, VersionMismatch, negotiate};
 pub const V1: ProtocolVersion = ProtocolVersion::new(1, 0);
 pub const SUPPORTED_VERSIONS: [ProtocolVersion; 1] = [V1];
 
+/// Longest request line a holder reads, its newline included (1 MiB); a
+/// longer one gets `request_too_large` and the connection is closed. The
+/// daemon refuses client input that would make a longer line (gate 11 B).
+pub const MAX_REQUEST_LINE: usize = 1 << 20;
+
+/// What a client's `terminal_input` gets when it would make a holder
+/// request line of `line` bytes, over [`MAX_REQUEST_LINE`] (the daemon and
+/// the fake say the same).
+pub fn operator_input_too_long(line: usize) -> String {
+    alloc::format!(
+        "this input makes a {line}-byte holder request line; a holder reads at most {MAX_REQUEST_LINE} bytes per line (1 MiB); nothing was written"
+    )
+}
+
 /// A single control key the daemon may ask a holder to write to an agent PTY.
 /// Typing text into the PTY is not a supported delivery path in v2.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
