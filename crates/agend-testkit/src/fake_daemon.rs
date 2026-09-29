@@ -24,13 +24,28 @@
 //!   looked at); `unknown_attention` for an unknown id or an action the item
 //!   does not list; otherwise the item leaves the list, `attention_resolved`
 //!   is emitted and the reply is `accepted`.
-//! - `command`: `status`, `inbox`, `send`, `task_create`, `ask`, the other
-//!   agent commands (`accepted`), and the result commands (`done`, `result`,
-//!   `review_approve`, `review_changes`) with the event-identity rule: the
-//!   result must carry the `stage_id` and `attempt` of the current
-//!   assignment (`FakeDaemon::assign`), otherwise `stale_result` and nothing
-//!   changes; an accepted result consumes the assignment. (The real daemon
-//!   answers `not_supported` until gates 9 and 10.)
+//! - `command` (gate 9: agents only; the operator gets `forbidden`, as from
+//!   the real daemon): `status` (the caller's instance, or the assignment's
+//!   task and ticket identity), `send` and `inbox` like the real daemon
+//!   (a client message id must be a UUID v4; one message per id, the same id
+//!   with other content is `invalid_request`; `inbox` by order, `--after` an
+//!   id the caller has no message with is `unknown_message`), `task_create`,
+//!   `ask`, the other agent commands (`accepted`), and the result commands
+//!   (`done`, `result`, `review_approve`, `review_changes`) with the
+//!   event-identity rule: the result must carry the `stage_id` and `attempt`
+//!   of the current assignment (`FakeDaemon::assign`), otherwise
+//!   `stale_result` and nothing changes; an accepted result consumes the
+//!   assignment. (The real daemon answers `not_supported` for everything but
+//!   `status`, `send` and `inbox` until gate 10.)
+//! - `operator` (gate 9: the operator only; an agent gets `forbidden`):
+//!   `instance_add` / `instance_remove` change the fleet view
+//!   (`instance_exists`, `unknown_instance`); `daemon_restart` checks the
+//!   binary with `<binary> --version` (it must print `agend …`; otherwise
+//!   `preflight_failed` like the real one), answers `restarting`, then
+//!   closes every connection and starts a new boot (new `boot_id`, no
+//!   events); `task_cancel` is `not_supported`.
+//! - `hello` names the daemon: `agend <version> (fake daemon)`, this
+//!   process's pid, and the boot id (the event id base).
 //! - `subscribe_terminal`: one `terminal_snapshot`, for any instance id.
 //! - `terminal_input`: `not_supported` (gate 11's attach view).
 //! - `answer_ask`, for asks from the `ask` command or `FakeDaemon::open_ask`
@@ -53,12 +68,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use agend_core::protocol::ask::{AskEntry, AskThread, ContextRecap};
 use agend_core::protocol::client::{
-    AgentCommand, AskCreatedData, AttentionRequiredData, AttentionResolvedData,
+    AgentCommand, AgentState, AskCreatedData, AttentionRequiredData, AttentionResolvedData,
     ClientCommandResultData, ClientRequest, ClientResponse, CommandResult, DaemonEvent, ErrorData,
-    EventData, FleetData, FleetView, InboxMessage, InstanceChangedData, InstanceView, MessagesData,
-    RETAINED_EVENTS, ResultIdentity, SUPPORTED_VERSIONS, SelectedVersionData, StatusData,
+    EventData, FleetData, FleetView, InboxMessage, InstanceAddedData, InstanceChangedData,
+    InstanceView, MAX_MESSAGE_BYTES, MessageLevel, MessagesData, OperatorCommand, RETAINED_EVENTS,
+    RestartingData, ResultIdentity, SUPPORTED_VERSIONS, SelectedVersionData, StatusData,
     TaskChangedData, TaskCreatedData, TaskView, TeamView, TerminalSnapshotData, error_code,
-    order_attention,
+    is_uuid_v4, message_too_long, order_attention, uuid_v4,
 };
 use agend_core::protocol::{ProtocolVersion, negotiate};
 
@@ -70,8 +86,7 @@ pub const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// What `resolve_attention` from an agent gets (the real daemon says the
 /// same).
-pub const OPERATOR_ONLY: &str =
-    "only the operator can resolve needs-you items; ask the operator with agend ask";
+pub const OPERATOR_ONLY: &str = "only the operator can resolve needs-you items; ask the operator";
 
 type Writer = Arc<Mutex<UnixStream>>;
 
@@ -89,13 +104,29 @@ struct State {
     events: VecDeque<EventData>,
     subscribers: Vec<Subscriber>,
     assignments: BTreeMap<String, ResultIdentity>,
-    status_summary: String,
-    inbox: Vec<InboxMessage>,
+    /// Set with [`FakeDaemon::set_status`]; otherwise the summary is made
+    /// like the real daemon's.
+    status_summary: Option<String>,
+    /// Every message sent, in order (the real daemon's `seq`).
+    messages: Vec<FakeMessage>,
+    /// Where `instance_add` puts a workspace by default.
+    home: PathBuf,
     asks: BTreeMap<String, AskThread>,
     next_id: u64,
     instances: Vec<InstanceView>,
     tasks: Vec<TaskView>,
     attention: Vec<AttentionRequiredData>,
+}
+
+/// A message as the fake keeps it.
+#[derive(Clone)]
+struct FakeMessage {
+    id: String,
+    from: String,
+    to: String,
+    body: String,
+    level: MessageLevel,
+    created_at_unix_ms: u64,
 }
 
 struct Shared {
@@ -138,6 +169,12 @@ impl FakeDaemon {
         }
         let listener = UnixListener::bind(socket_path)?;
         let start = now_unix_ms() * 1000;
+        // `$AGEND_HOME/run/daemon.sock` → `$AGEND_HOME`.
+        let parent = socket_path.parent().unwrap_or(Path::new("/"));
+        let home = match parent.file_name() {
+            Some(name) if name == "run" => parent.parent().unwrap_or(parent),
+            _ => parent,
+        };
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
                 supported: SUPPORTED_VERSIONS.to_vec(),
@@ -147,8 +184,9 @@ impl FakeDaemon {
                 events: VecDeque::new(),
                 subscribers: Vec::new(),
                 assignments: BTreeMap::new(),
-                status_summary: "fake daemon: idle".into(),
-                inbox: Vec::new(),
+                status_summary: None,
+                messages: Vec::new(),
+                home: home.to_path_buf(),
                 asks: BTreeMap::new(),
                 next_id: 0,
                 instances: Vec::new(),
@@ -196,12 +234,20 @@ impl FakeDaemon {
         lock(&self.shared.state).assignments.get(task_id).cloned()
     }
 
+    /// The `status` summary from now on (default: made like the real
+    /// daemon's from the caller's instance).
     pub fn set_status(&self, summary: &str) {
-        lock(&self.shared.state).status_summary = summary.to_owned();
+        lock(&self.shared.state).status_summary = Some(summary.to_owned());
     }
 
-    pub fn push_inbox(&self, message: InboxMessage) {
-        lock(&self.shared.state).inbox.push(message);
+    /// The ids of the messages to `to`, in order (each id once).
+    pub fn message_ids_to(&self, to: &str) -> Vec<String> {
+        lock(&self.shared.state)
+            .messages
+            .iter()
+            .filter(|m| m.to == to)
+            .map(|m| m.id.clone())
+            .collect()
     }
 
     /// Appends an event to the log and sends it to every subscriber.
@@ -503,7 +549,15 @@ fn serve(stream: UnixStream, shared: &Shared) -> io::Result<()> {
                     conn.negotiated = true;
                     conn.caller = data.caller;
                     let reply = ClientResponse::Hello {
-                        data: SelectedVersionData { selected },
+                        data: SelectedVersionData {
+                            selected,
+                            daemon_version: Some(format!(
+                                "agend {} (fake daemon)",
+                                env!("CARGO_PKG_VERSION")
+                            )),
+                            daemon_pid: Some(std::process::id()),
+                            boot_id: Some(state.start),
+                        },
                     };
                     drop(state);
                     write_line(&stream, &reply)?;
@@ -516,6 +570,28 @@ fn serve(stream: UnixStream, shared: &Shared) -> io::Result<()> {
                 }
             }
         }
+        // `daemon_restart` checks its binary without holding the state.
+        if let ClientRequest::Operator { data } = &request
+            && conn.caller.is_none()
+            && let OperatorCommand::DaemonRestart { binary } = &data.command
+        {
+            drop(state);
+            let request_id = data.request_id.clone();
+            let reply = match preflight(binary.as_deref()) {
+                Ok(preflight) => {
+                    let result = CommandResult::Restarting {
+                        data: RestartingData { preflight },
+                    };
+                    write_line(&stream, &command_result(request_id, result))?;
+                    drop(stream);
+                    restart(shared);
+                    return Ok(());
+                }
+                Err(message) => error(Some(request_id), error_code::PREFLIGHT_FAILED, message),
+            };
+            write_line(&stream, &reply)?;
+            continue;
+        }
         let replies = handle(&mut state, request, &conn);
         drop(state);
         for reply in replies {
@@ -523,6 +599,69 @@ fn serve(stream: UnixStream, shared: &Shared) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// The fake's preflight: `<binary> --version` must print `agend …` (the
+/// real one runs `<binary> daemon preflight` on a copy of the database).
+fn preflight(binary: Option<&str>) -> Result<Vec<String>, String> {
+    let keeps = format!(
+        "the daemon keeps running agend {} (fake daemon)",
+        env!("CARGO_PKG_VERSION")
+    );
+    let Some(binary) = binary else {
+        return Ok(vec![
+            format!("agend {}", env!("CARGO_PKG_VERSION")),
+            "db copy: none (fake daemon)".into(),
+            "holder: none (fake daemon)".into(),
+        ]);
+    };
+    let out = std::process::Command::new(binary)
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|e| format!("cannot run {binary}: {e}; {keeps}"))?;
+    let version = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    if !out.status.success() {
+        let status = out
+            .status
+            .code()
+            .map_or("a signal".to_owned(), |c| format!("status {c}"));
+        return Err(format!(
+            "{binary} daemon preflight exited with {status}; {keeps}"
+        ));
+    }
+    if !version.starts_with("agend ") {
+        return Err(format!(
+            "{binary} daemon preflight exited 0 without reporting its steps (is it agend?); {keeps}"
+        ));
+    }
+    Ok(vec![
+        version,
+        "db copy: none (fake daemon)".into(),
+        "holder: none (fake daemon)".into(),
+    ])
+}
+
+/// A new boot on the same socket: every connection closes (clients read
+/// EOF), the event log starts again after a new, larger base (`boot_id`).
+fn restart(shared: &Shared) {
+    {
+        let mut state = lock(&shared.state);
+        let start = (now_unix_ms() * 1000).max(state.start + 1000);
+        state.start = start;
+        state.latest = start;
+        state.events.clear();
+        state.subscribers.clear();
+    }
+    for connection in lock(&shared.connections).drain(..) {
+        let _ = connection.shutdown(Shutdown::Both);
+    }
+}
+
+fn command_result(request_id: String, result: CommandResult) -> ClientResponse {
+    ClientResponse::CommandResult {
+        data: ClientCommandResultData { request_id, result },
+    }
 }
 
 fn accepted(request_id: String) -> ClientResponse {
@@ -543,10 +682,26 @@ fn handle(state: &mut State, request: ClientRequest, conn: &Connection) -> Vec<C
         )],
         ClientRequest::Command { data } => {
             let request_id = data.request_id;
-            match command(state, data.command) {
-                Ok(result) => vec![ClientResponse::CommandResult {
-                    data: ClientCommandResultData { request_id, result },
-                }],
+            let Some(caller) = conn.caller.as_deref() else {
+                let message = format!(
+                    "{} is an agent command; it runs inside an agent, where AGEND_INSTANCE is set",
+                    command_name(&data.command)
+                );
+                return vec![error(Some(request_id), error_code::FORBIDDEN, message)];
+            };
+            match command(state, caller, data.command) {
+                Ok(result) => vec![command_result(request_id, result)],
+                Err((code, message)) => vec![error(Some(request_id), code, message)],
+            }
+        }
+        ClientRequest::Operator { data } => {
+            let request_id = data.request_id;
+            if conn.caller.is_some() {
+                let message = operator_only(&data.command).to_owned();
+                return vec![error(Some(request_id), error_code::FORBIDDEN, message)];
+            }
+            match operator(state, data.command) {
+                Ok(result) => vec![command_result(request_id, result)],
                 Err((code, message)) => vec![error(Some(request_id), code, message)],
             }
         }
@@ -674,25 +829,290 @@ fn handle(state: &mut State, request: ClientRequest, conn: &Connection) -> Vec<C
 
 type CommandError = (&'static str, String);
 
-fn command(state: &mut State, command: AgentCommand) -> Result<CommandResult, CommandError> {
-    let result = match command {
-        AgentCommand::Status => CommandResult::Status {
-            data: StatusData {
-                task_id: None,
-                instance_id: None,
-                summary: state.status_summary.clone(),
-            },
-        },
-        AgentCommand::Inbox { after_message_id } => {
-            let start = after_message_id
-                .and_then(|id| state.inbox.iter().position(|m| m.message_id == id))
-                .map_or(0, |i| i + 1);
-            CommandResult::Messages {
-                data: MessagesData {
-                    messages: state.inbox[start..].to_vec(),
-                },
-            }
+/// `agend review approve` for `review_approve`, from the command's wire tag.
+fn command_name(command: &AgentCommand) -> String {
+    let tag = serde_json::to_value(command)
+        .ok()
+        .and_then(|v| v.get("command")?.as_str().map(str::to_owned))
+        .unwrap_or_else(|| "unknown".into());
+    format!("agend {}", tag.replace('_', " "))
+}
+
+/// What an agent gets for an operator request (the real daemon's words).
+fn operator_only(command: &OperatorCommand) -> &'static str {
+    match command {
+        OperatorCommand::InstanceAdd { .. } => {
+            "only the operator can add instances; ask the operator"
         }
+        OperatorCommand::InstanceRemove { .. } => {
+            "only the operator can remove instances; ask the operator"
+        }
+        OperatorCommand::DaemonRestart { .. } => {
+            "only the operator can restart the daemon; ask the operator"
+        }
+        OperatorCommand::TaskCancel { .. } => {
+            "only the operator can cancel tasks; ask the operator"
+        }
+        OperatorCommand::Unknown => {
+            "only the operator can send operator requests; ask the operator"
+        }
+    }
+}
+
+/// Messages `inbox` shows without a cursor (as the real daemon).
+const INBOX_LAST: usize = 20;
+
+fn not_an_instance(caller: &str) -> CommandError {
+    (
+        error_code::UNKNOWN_INSTANCE,
+        format!(
+            "no instance {caller}: AGEND_INSTANCE names no instance of this daemon (the operator sees them with agend instance list)"
+        ),
+    )
+}
+
+fn fresh_id(state: &mut State) -> String {
+    state.next_id += 1;
+    let mut bytes = [0u8; 16];
+    bytes[..8].copy_from_slice(&state.start.to_be_bytes());
+    bytes[8..].copy_from_slice(&state.next_id.to_be_bytes());
+    uuid_v4(bytes)
+}
+
+fn operator(state: &mut State, command: OperatorCommand) -> Result<CommandResult, CommandError> {
+    let invalid = |m: String| (error_code::INVALID_REQUEST, m);
+    match command {
+        OperatorCommand::InstanceAdd {
+            instance_id: id,
+            backend,
+            working_directory,
+            ..
+        } => {
+            let valid = !id.is_empty()
+                && id.len() <= 24
+                && id
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+            if !valid {
+                return Err(invalid(format!(
+                    "invalid name {id:?}: use 1-24 characters from a-z 0-9 - (e.g. dev-1)"
+                )));
+            }
+            if !["claude", "codex", "opencode"].contains(&backend.as_str()) {
+                return Err(invalid(format!(
+                    "unknown backend {backend:?}: use claude, codex or opencode"
+                )));
+            }
+            if state.instances.iter().any(|i| i.instance_id == id) {
+                return Err((
+                    error_code::INSTANCE_EXISTS,
+                    format!("name {id} is already used"),
+                ));
+            }
+            let working_directory = match working_directory {
+                Some(dir) if Path::new(&dir).is_dir() => dir,
+                Some(dir) => return Err(invalid(format!("no directory {dir} (it must exist)"))),
+                None => state.home.join("workspace").join(&id).display().to_string(),
+            };
+            let session_id = (backend == "claude").then(|| fresh_id(state));
+            let view = InstanceView {
+                instance_id: id.clone(),
+                team_id: agend_core::model::DEFAULT_TEAM.into(),
+                backend,
+                state: AgentState::Starting,
+                working_directory: Some(working_directory.clone()),
+            };
+            state.instances.push(view.clone());
+            emit(
+                state,
+                DaemonEvent::InstanceChanged {
+                    data: InstanceChangedData {
+                        instance_id: id.clone(),
+                        summary: "starting".into(),
+                        instance: Some(view),
+                    },
+                },
+            );
+            Ok(CommandResult::InstanceAdded {
+                data: InstanceAddedData {
+                    instance_id: id,
+                    session_id,
+                    working_directory,
+                },
+            })
+        }
+        OperatorCommand::InstanceRemove { instance_id: id } => {
+            let Some(index) = state.instances.iter().position(|i| i.instance_id == id) else {
+                return Err((
+                    error_code::UNKNOWN_INSTANCE,
+                    format!("no instance {id}; see agend instance list"),
+                ));
+            };
+            state.instances.remove(index);
+            emit(
+                state,
+                DaemonEvent::InstanceChanged {
+                    data: InstanceChangedData {
+                        instance_id: id,
+                        summary: "removed".into(),
+                        instance: None,
+                    },
+                },
+            );
+            Ok(CommandResult::Accepted)
+        }
+        OperatorCommand::TaskCancel { task_id } => Err((
+            error_code::NOT_SUPPORTED,
+            format!("agend task cancel arrives in gate 10; {task_id} is unchanged"),
+        )),
+        // Handled in `serve` (it closes connections).
+        OperatorCommand::DaemonRestart { .. } | OperatorCommand::Unknown => Err((
+            error_code::UNKNOWN_REQUEST,
+            "unknown operator command".into(),
+        )),
+    }
+}
+
+fn status(state: &State, caller: &str) -> Result<CommandResult, CommandError> {
+    let current = state.assignments.iter().next();
+    let summary = match (&state.status_summary, current) {
+        (Some(summary), _) => summary.clone(),
+        (None, Some((task, identity))) => format!(
+            "{caller}: {task} · {} (attempt {})",
+            identity.stage_id, identity.attempt
+        ),
+        (None, None) => {
+            let instance = state
+                .instances
+                .iter()
+                .find(|i| i.instance_id == caller)
+                .ok_or_else(|| not_an_instance(caller))?;
+            format!(
+                "{caller} ({}): no task\nnext: agend inbox | agend send <name> \"<message>\"",
+                instance.backend
+            )
+        }
+    };
+    Ok(CommandResult::Status {
+        data: StatusData {
+            task_id: current.map(|(task, _)| task.clone()),
+            instance_id: Some(caller.to_owned()),
+            summary,
+            identity: current.map(|(_, identity)| identity.clone()),
+        },
+    })
+}
+
+fn send_message(
+    state: &mut State,
+    caller: &str,
+    to: String,
+    body: String,
+    level: Option<MessageLevel>,
+    message_id: Option<String>,
+) -> Result<CommandResult, CommandError> {
+    if body.len() > MAX_MESSAGE_BYTES {
+        return Err((error_code::INVALID_REQUEST, message_too_long(body.len())));
+    }
+    let level = level.unwrap_or(MessageLevel::Queue);
+    if level == MessageLevel::Unknown {
+        return Err((
+            error_code::INVALID_REQUEST,
+            "unknown level; use queue, steer or interrupt".into(),
+        ));
+    }
+    let id = match message_id {
+        Some(id) if is_uuid_v4(&id) => id,
+        Some(id) => {
+            return Err((
+                error_code::INVALID_REQUEST,
+                format!("message id {id} is not a UUID v4"),
+            ));
+        }
+        None => fresh_id(state),
+    };
+    let known = |name: &str| state.instances.iter().any(|i| i.instance_id == name);
+    if !known(caller) {
+        return Err(not_an_instance(caller));
+    }
+    if !known(&to) {
+        return Err((
+            error_code::UNKNOWN_INSTANCE,
+            format!("no instance {to}; the names are in agend status"),
+        ));
+    }
+    if let Some(found) = state.messages.iter().find(|m| m.id == id) {
+        let same =
+            found.from == caller && found.to == to && found.body == body && found.level == level;
+        return if same {
+            Ok(CommandResult::Accepted)
+        } else {
+            Err((
+                error_code::INVALID_REQUEST,
+                format!("message id {id} is already used by another message"),
+            ))
+        };
+    }
+    state.messages.push(FakeMessage {
+        id,
+        from: caller.to_owned(),
+        to,
+        body,
+        level,
+        created_at_unix_ms: now_unix_ms(),
+    });
+    Ok(CommandResult::Accepted)
+}
+
+fn inbox(
+    state: &State,
+    caller: &str,
+    after: Option<String>,
+) -> Result<CommandResult, CommandError> {
+    let own: Vec<&FakeMessage> = state.messages.iter().filter(|m| m.to == caller).collect();
+    let shown: Vec<&FakeMessage> = match after {
+        None => own[own.len().saturating_sub(INBOX_LAST)..].to_vec(),
+        Some(after) => {
+            let Some(at) = own.iter().position(|m| m.id == after) else {
+                return Err((
+                    error_code::UNKNOWN_MESSAGE,
+                    format!(
+                        "you have no message {after} (unknown, older than 30 days, or not yours); run agend inbox without --after"
+                    ),
+                ));
+            };
+            own[at + 1..].to_vec()
+        }
+    };
+    Ok(CommandResult::Messages {
+        data: MessagesData {
+            messages: shown
+                .into_iter()
+                .map(|m| InboxMessage {
+                    message_id: m.id.clone(),
+                    from: m.from.clone(),
+                    body: m.body.clone(),
+                    created_at_unix_ms: m.created_at_unix_ms,
+                })
+                .collect(),
+        },
+    })
+}
+
+fn command(
+    state: &mut State,
+    caller: &str,
+    command: AgentCommand,
+) -> Result<CommandResult, CommandError> {
+    let result = match command {
+        AgentCommand::Status => status(state, caller)?,
+        AgentCommand::Inbox { after_message_id } => inbox(state, caller, after_message_id)?,
+        AgentCommand::Send {
+            to,
+            message,
+            level,
+            message_id,
+        } => send_message(state, caller, to, message, level, message_id)?,
         AgentCommand::TaskCreate { title, .. } => {
             state.next_id += 1;
             let task_id = format!("T-{}", state.next_id);
@@ -743,8 +1163,7 @@ fn command(state: &mut State, command: AgentCommand) -> Result<CommandResult, Co
         AgentCommand::Unknown => {
             return Err((error_code::UNKNOWN_REQUEST, "unknown command".into()));
         }
-        AgentCommand::Send { .. }
-        | AgentCommand::AskFollowUp { .. }
+        AgentCommand::AskFollowUp { .. }
         | AgentCommand::AskResolve { .. }
         | AgentCommand::Block { .. }
         | AgentCommand::Unblock { .. }

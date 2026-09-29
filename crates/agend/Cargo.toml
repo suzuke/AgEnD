@@ -17,12 +17,17 @@ agend-holder.workspace = true
 agend-shim.workspace = true
 agend-client.workspace = true
 agend-tui.workspace = true
+# CLI parsing (gate 9 P4): derive, no color, no suggestions; `--version`
+# is answered before clap runs so startup stays under 10 ms.
+clap = { version = "4.6.7", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
+# `agend doctor`: statvfs (free disk) and access (home writable).
+libc = "0.2"
+# `--json`: one JSON value of the core types (gate 9 P4).
+serde = "1"
+serde_json = "1"
 
 [dev-dependencies]
 agend-testkit.workspace = true
-libc = "0.2"
-# The shim tests write binding snapshots (JSON), like the daemon will.
-serde_json = "1"
 # Builds a schema-v3 `agend.db` with a gate 6 codex row (gate 7 legacy).
 rusqlite = { version = "0.37", features = ["bundled"] }
 # The daemon's server run in the test process for CLP-8 (gate 8).

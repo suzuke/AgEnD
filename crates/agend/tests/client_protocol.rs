@@ -35,9 +35,9 @@ fn assert_no_holders_left(lab: &lab::Lab) {
     assert_eq!(lab.running_holders(), vec![], "holders left running");
 }
 
-const REAL_RULES: [&str; 11] = [
+const REAL_RULES: [&str; 16] = [
     "CLP-1", "CLP-2", "CLP-3", "CLP-4", "CLP-5", "CLP-6", "CLP-7", "CLP-9", "CLP-10", "CLP-11",
-    "CLP-12",
+    "CLP-12", "CLP-13", "CLP-14", "CLP-15", "CLP-16", "CLP-17",
 ];
 
 #[test]
@@ -133,10 +133,11 @@ fn debug_needs_agend_home_and_valid_arguments() {
         .env_remove("AGEND_HOME")
         .output()
         .unwrap();
-    assert_eq!(out.status.code(), Some(1));
+    // Gate 9 P3: one message and exit 2 everywhere.
+    assert_eq!(out.status.code(), Some(2));
     assert_eq!(
         String::from_utf8_lossy(&out.stderr),
-        "agend: AGEND_HOME is not set\n"
+        "agend: AGEND_HOME is not set; choose a directory for AgEnD's data and run: export AGEND_HOME=<absolute path>\n"
     );
     for args in [
         &["debug"][..],

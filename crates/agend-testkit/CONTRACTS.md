@@ -1,7 +1,7 @@
 # 契約規則表
 
 > **TL;DR**
-> - 7 個 trait 與 client protocol 的契約規則，每條一個編號（`DRV-1`…`RUN-9` 共 57 條，5 條標「新增，已追認」；第 8 施工關加 `CLP-1`…`CLP-12`）；契約 suite 的每個 case 標著它驗的規則編號。
+> - 7 個 trait 與 client protocol 的契約規則，每條一個編號（`DRV-1`…`RUN-9` 共 57 條，5 條標「新增，已追認」；第 8 施工關加 `CLP-1`…`CLP-12`，第 9 施工關加 `CLP-13`…`CLP-17`）；契約 suite 的每個 case 標著它驗的規則編號。
 > - 記住：**每條規則至少一個 case、至少一個故意弄壞的實作（mutant）**；`tests/contract_teeth/` 的覆蓋測試讀這張表，缺一個就失敗。
 > - 下一步：加規則 = 這裡加一列（含 mutant 名）+ 標了編號的 case + 註冊 mutant。
 
@@ -142,7 +142,7 @@
 
 ## Client protocol（`CLP`，12 條，第 8 施工關）
 
-對象不是 trait，是一個講 client protocol 的 server：同一套 case 對 testkit 的 `FakeDaemon`（`tests/contract_fakes.rs`）與真的 `agend daemon`（`crates/agend/tests/client_protocol.rs`，暫存 home、真 binary）跑（[第 8 施工關 P9](../../docs/gates/gate-08-client.md#p9client-協定契約假-daemon-與真-daemon-跑同一套)）。驅動端是 `ProbeClient`，不是 `agend-client`。mutant 是「假 daemon 前面加一個改行的 proxy」（`contract::client::proxy`），假 daemon 本身沒有「故意弄壞」的開關。
+**第 9 施工關再加 5 條（`CLP-13`…`CLP-17`，共 17 條；標題留著第 8 施工關的字，因為名詞表連到這個錨點）**，fixture 多兩個方法：`agents`＝兩個能互傳訊息的 instance、`fresh_name`＝還沒人用的名字。對象不是 trait，是一個講 client protocol 的 server：同一套 case 對 testkit 的 `FakeDaemon`（`tests/contract_fakes.rs`）與真的 `agend daemon`（`crates/agend/tests/client_protocol.rs`，暫存 home、真 binary）跑（[第 8 施工關 P9](../../docs/gates/gate-08-client.md#p9client-協定契約假-daemon-與真-daemon-跑同一套)）。驅動端是 `ProbeClient`，不是 `agend-client`。mutant 是「假 daemon 前面加一個改行的 proxy」（`contract::client::proxy`），假 daemon 本身沒有「故意弄壞」的開關。
 
 fixture（`ClientProtocolFixture`）：`socket`、`emit`（讓至少一個新事件發生）、`burst(n)`、`restart`（同一個 socket 重啟 server）、`retry_item`（一個可以 `retry` 的「需要你」項目）、`terminal_instance`。真 daemon 的 `emit` 是對一個 `failed` 的 instance 送 `retry`（真的事件，不是假資料）。
 
@@ -160,8 +160,13 @@ fixture（`ClientProtocolFixture`）：`socket`、`emit`（讓至少一個新事
 | CLP-10 | `terminal_input` → `not_supported`、沒有這個請示的 `answer_ask` → `unknown_ask`（帶 request id）；都不發事件、全貌不變 | P6 | `AcceptsUnsupported` |
 | CLP-11 | agent（`hello` 帶 `caller`）送 `resolve_attention`：不管 id 存不存在都是 `forbidden`；操作者送不存在的 id、或不在 `actions` 裡的操作 → `unknown_attention`；列出的操作 → `accepted`、`attention_resolved` 事件、全貌裡不再有它 | P2、P5 | `AgentMayResolve`、`HidesResolvedEvent` |
 | CLP-12 | `subscribe_terminal` 先回那個 instance 的 `terminal_snapshot` | P6 | `DropsSnapshot` |
+| CLP-13 | 權限兩個方向（第 9 施工關 P1）：agent（`hello` 帶 `caller`）送 `operator` 的 `instance_add`／`instance_remove`／`daemon_restart`／`task_cancel` 一律 `forbidden`；操作者送 `command` 的 `status`／`send`／`done` 一律 `forbidden`；全貌不變 | 第 9 施工關 P1、D17 | `AgentsAreOperators` |
+| CLP-14 | 操作者 `instance_add` 新名字 → `instance_added`（名字、非空的 `working_directory`），全貌出現它且 `working_directory` 相同；同名再加 → `instance_exists`；不合規則的名字 → `invalid_request`；`instance_remove` → `accepted`、全貌不再有它；再刪 → `unknown_instance` | 第 9 施工關 P6 | `ReaddIsAccepted` |
+| CLP-15 | `daemon_restart { binary }` 的形狀：`binary` 是跑不起來的路徑 → `preflight_failed`；連線不斷、沒有事件、全貌不變 | 第 9 施工關 P6、P7 | `DropsRestartBinary` |
+| CLP-16 | 操作者 `task_cancel` → `not_supported`（帶 request id），沒有事件、全貌不變（handler 在第 10 施工關） | 第 9 施工關 P1 | `AcceptsTaskCancel` |
+| CLP-17 | `send` 同一個 `message_id`（UUID v4）再送一次仍 `accepted`、收件者的 `inbox` 只有一則；同 id 不同內容、不是 UUID v4 的 id、超過 1 MiB 的 body（第 9 施工關 L17）→ `invalid_request`；`inbox --after` 自己的一則 → 只回之後的；不存在的 id、別人的訊息 → `unknown_message` | 第 9 施工關 P2、P5；第 7 施工關 P5 | `NewIdOnResend`、`InboxIgnoresAfter`、`AcceptsHugeBody` |
 
-不釘：agent 命令（假 daemon 會處理，真 daemon 第 9 施工關前回 `not_supported`）；不存在的 instance 的 `subscribe_terminal`（假 daemon 對任何 id 都回畫面；真 daemon 回 `no_terminal`，在 `crates/agend/tests/client_protocol.rs` 另測）；`subscribe_terminal` 之後的 `terminal_bytes`（假 daemon 不串流）。
+不釘：`status`、`send`、`inbox` 以外的 agent 命令（假 daemon 會處理，真 daemon 第 10 施工關前回 `not_supported`）；成功的 `daemon_restart`（CLI 測試對假、真 daemon 各跑一次）；不存在的 instance 的 `subscribe_terminal`（假 daemon 對任何 id 都回畫面；真 daemon 回 `no_terminal`，在 `crates/agend/tests/client_protocol.rs` 另測）；`subscribe_terminal` 之後的 `terminal_bytes`（假 daemon 不串流）。
 
 **真 daemon 跑 CLP-8 的方式**：真的 `agend daemon` binary 沒辦法在測試裡產生 2000 個真事件（每個事件都要一個 instance 狀態改變），所以 CLP-8 的「真」是同一份 daemon server 程式碼（`agend_daemon::server` + `fleet`）在測試程序裡跑、直接發事件；其他 11 條對真 binary 跑（見第 8 施工關「待你追認」）。
 

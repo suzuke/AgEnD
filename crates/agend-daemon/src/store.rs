@@ -422,6 +422,31 @@ impl SqliteStore {
             .await
     }
 
+    /// Copies the database as it is now to `dest` (`VACUUM INTO`, 0600):
+    /// the restart preflight works on this copy (gate 9 P7).
+    pub async fn copy_to(&self, dest: &Path) -> Result<(), StoreError> {
+        let dest = dest.to_path_buf();
+        self.call(move |conn| snapshot::copy(conn, &dest)).await
+    }
+
+    /// `PRAGMA quick_check`: `ok`, or what it found.
+    pub async fn quick_check(&self) -> Result<String, StoreError> {
+        self.call(|conn| Ok(conn.query_row("PRAGMA quick_check", [], |r| r.get(0))?))
+            .await
+    }
+
+    /// Messages to `to` newer than the one with id `after` (by `seq`), or
+    /// `None` when `to` has no message `after` (gate 9 P2).
+    pub async fn messages_after(
+        &self,
+        to: &str,
+        after: &str,
+    ) -> Result<Option<Vec<Message>>, StoreError> {
+        let (to, after) = (to.to_owned(), after.to_owned());
+        self.call(move |conn| messages::to_instance_after(conn, &to, &after))
+            .await
+    }
+
     /// Runs `job` on the DB thread from a plain thread, blocking until it
     /// is done (the codex driver's link threads, gate 7). Must not be
     /// called from an async task.

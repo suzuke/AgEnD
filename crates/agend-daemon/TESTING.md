@@ -6,7 +6,8 @@
 > - 記住：每個領域模組都要能對 testkit 的假實作單獨測；每個 adapter 要跑契約測試。
 > - codex（第 7 施工關）：driver 對行程內的假 app-server ＋真 DB 在 `tests/codex_driver.rs`（DRV-1..9、三級忙碌、冪等、崩潰對帳、授權、四次開機跨 process），各段與 `codex_demo` 共用 `tests/common/codex_driver.rs`；真 daemon ＋真 holder ＋`sh` 包裝＋`fake_codex` 在 `crates/agend/tests/codex_process.rs`，共用 `tests/common/codex_process.rs`。
 > - client protocol（第 8 施工關）：`fleet` 的游標規則是單元測試；真 daemon 的 CLP 契約與 socket／`retry`／終端／重啟在 `crates/agend/tests/client_protocol.rs`，各段與 `client_demo` 共用 `tests/common/client_process.rs`。
-> - 下一步：`cargo test -p agend-daemon`；看 demo：`cargo xtask accept store`、`cargo xtask accept client`。
+> - CLI 的 daemon 端（第 9 施工關）：權限、`send`／`inbox`、`instance add|remove`、`daemon restart` 的預檢與 `exec`、繼承 holder 的收屍，都對真 `agend` binary 測：`crates/agend/tests/cli.rs`（CLI-n 表、重啟、預檢、里程碑）與 `client_protocol.rs`（CLP-13..17）。
+> - 下一步：`cargo test -p agend-daemon`；看 demo：`cargo xtask accept store`、`cargo xtask accept client`、`cargo xtask accept cli`。
 
 ## 怎麼跑
 
@@ -17,6 +18,7 @@ cargo test -p agend --test holder_runtime --test daemon_process   # 第 6 施工
 cargo test -p agend --test client_protocol                      # 第 8 施工關：真 daemon 的 client protocol
 cargo test -p agend-daemon --test codex_driver                  # 第 7 施工關：codex driver 對假 app-server
 cargo test -p agend --test codex_process                        # 第 7 施工關：真 daemon、真 holder、sh 包裝、fake_codex
+cargo test -p agend --test cli                                  # 第 9 施工關：CLI、重啟與預檢、里程碑
 AGEND_BLESS_GOLDEN=1 cargo test -p agend-daemon --test store   # 故意改 schema 後重寫 golden
 ```
 
@@ -45,6 +47,8 @@ AGEND_BLESS_GOLDEN=1 cargo test -p agend-daemon --test store   # 故意改 schem
 | `housekeeping::tests`（單元） | 假時鐘：daemon log 留 7 天、其他檔案不動；audit 每天輪替、留 14 份（13 份輪替＋今天的）；holder log 只在 holder 不在且 7 天沒動時刪（P8） |
 | `fleet::tests`（單元） | 第一個事件＝基準 + 1；還沒有事件時只有基準接得上；「最舊 − 1」到最新接得上，其他 `event_gap`；時鐘往回調：比新 daemon 最新的還大 → `event_gap`，落在新範圍內會被接受（已知風險，所以 1.1 client 重連一律重拿全貌）；沒變的 instance 不發事件；「需要你」加一次、解決一次（第 8 施工關 P4、P5） |
 | `supervisor::tests::a_failed_instance_is_a_needs_you_item_with_retry_unless_it_cannot_resume` | P5 的表：claude 一律有 `retry`；opencode 只有 session 沒建立過才有；codex（第 7 施工關）除了 `legacy_no_thread` 都有；沒有的 `actions` 空、「不處理的話」寫 `delete and re-add the instance (gate 9)` |
+| `crates/agend/tests/cli.rs`（第 9 施工關，真 daemon） | `handlers::agent`／`handlers::operator`、`supervisor` 的 add／remove、`preflight`、`reaper`、`daemon` 的 `exec`：見 [agend TESTING](../agend/TESTING.md)（CLI-n 表、重啟 pid 與 holder 不變、預檢失敗 DB 位元組不變、一次一個重啟、繼承的 holder 不留殘屍而自己的 holder 與預檢子程序的 exit status 沒被搶、里程碑） |
+| `crates/agend/tests/client_protocol.rs`（CLP-13..17） | 權限兩個方向、`instance_add`／`remove`、`daemon_restart` 的形狀、`task_cancel` 不改狀態、`send` 同 id 只收一次與 `inbox --after`，對真 daemon（同一套也對假 daemon，見 testkit） |
 | `store::instances::tests`、`log::tests`（單元） | instance id 只能 `[a-z0-9-]{1,24}`；session id 是 UUID v4；log 檔名與時間戳是 UTC |
 | `tests/store_process.rs` | 測試 binary 重新執行自己：四次開機四個 pid、開機 2 只打開、開機 3 重開前的舊版本 CAS 回 `Conflict` 且 task 不變、版本嚴格變大；反向：每次開機用新 DB 路徑必須在開機 3 失敗；硬殺（只對自己的 `Child`）後 ack 過的寫入都在、`integrity_check` ok；第二個程序開 DB 被拒、第一個照常寫入（P2、P6、P7） |
 
@@ -70,6 +74,8 @@ AGEND_BLESS_GOLDEN=1 cargo test -p agend-daemon --test store   # 故意改 schem
 - [ ] 送過一次的訊息，它的 turn 被中斷、user message 永遠沒出現：閒置後會再送一次；真 codex 不認得 `thread/queue/list` 時還在佇列裡的會再送（第 7 施工關 K9）
 - [x] protocol server（第 8 施工關：`crates/agend/tests/client_protocol.rs`）
 - [ ] 開機很慢（instance 很多、每個 holder 起不來要等 5 秒）時 CLI 的 10 秒會先放棄：本關量到開機 0.1 秒（1–7 個 instance），沒有測大量 instance
+- [ ] daemon 在預檢進行中收到 Ctrl-C：預檢子程序自己跑完，`/tmp/agend-pf-*` 會留下（第 9 施工關，沒有測）
+- [ ] `exec` 失敗（預檢之後 binary 被刪）：只印錯誤、exit 1，沒有測（第 9 施工關已知風險）
 - [ ] pipeline、git、runner、forge local、supervisor、reconcile（第 10 施工關）
 - [ ] claude／opencode driver、forge github、notifier（第 12 施工關）
 

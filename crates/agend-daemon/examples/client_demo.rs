@@ -20,7 +20,8 @@ use std::process::ExitCode;
 use agend_testkit::contract::Report;
 use agend_testkit::contract::client::{self, FakeDaemonFixture, fake_with_ids_from_one};
 
-const RULES: usize = 12;
+/// CLP-1..12 (gate 8) and CLP-13..17 (gate 9).
+const RULES: usize = 17;
 
 fn main() -> ExitCode {
     match demo() {

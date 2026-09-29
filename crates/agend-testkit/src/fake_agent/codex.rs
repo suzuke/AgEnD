@@ -113,6 +113,16 @@ impl Server {
         turn: Duration,
         state_dir: Option<PathBuf>,
     ) -> io::Result<Server> {
+        Server::bind_with(requested, turn, state_dir, true)
+    }
+
+    /// [`Server::bind`]; `duplex: false` is the stuck peer (see `Shared`).
+    pub fn bind_with(
+        requested: &Path,
+        turn: Duration,
+        state_dir: Option<PathBuf>,
+        duplex: bool,
+    ) -> io::Result<Server> {
         let bound = socket_path_for(requested);
         let _ = std::fs::remove_file(&bound);
         // An old symlink (a server that died) is replaced (U14: what the
@@ -132,6 +142,7 @@ impl Server {
         let shared = Arc::new(Shared {
             state: Mutex::new(state),
             turn,
+            duplex,
             closed: std::sync::atomic::AtomicBool::new(false),
             accepted: std::sync::atomic::AtomicU64::new(0),
         });
@@ -197,6 +208,11 @@ pub fn socket_path_for(requested: &Path) -> PathBuf {
 struct Shared {
     state: Mutex<State>,
     turn: Duration,
+    /// Reads while its writes wait, like the real app-server (tokio, a
+    /// reader and a writer per connection). `false` (`--disable
+    /// duplex-io`): a stuck peer that blocks on a full socket and stops
+    /// reading, for testing the daemon against one.
+    duplex: bool,
     /// Set when the [`Server`] is dropped: every connection ends.
     closed: std::sync::atomic::AtomicBool,
     /// Connections accepted so far.
@@ -971,6 +987,13 @@ fn serve(stream: UnixStream, shared: &Shared) -> tungstenite::Result<()> {
     socket
         .get_ref()
         .set_read_timeout(Some(Duration::from_millis(5)))?;
+    if shared.duplex {
+        // A write that cannot go out now waits in the WebSocket's buffer
+        // while this thread goes on reading.
+        socket
+            .get_ref()
+            .set_write_timeout(Some(Duration::from_millis(5)))?;
+    }
     let (tx, rx) = mpsc::channel();
     let connection = {
         let mut state = lock(&shared.state);
@@ -999,7 +1022,13 @@ fn pump(
             return Ok(());
         }
         while let Ok(message) = outgoing.try_recv() {
-            socket.send(Message::text(message.to_string()))?;
+            queue(socket, &message, shared.duplex)?;
+        }
+        if shared.duplex {
+            match socket.flush() {
+                Err(e) if !waits(&e) => return Err(e),
+                _ => {}
+            }
         }
         match socket.read() {
             Ok(Message::Text(text)) => {
@@ -1008,7 +1037,7 @@ fn pump(
                 };
                 // Messages for this connection, in order (the reply among them).
                 for reply in handle(&message, connection, outgoing, shared) {
-                    socket.send(Message::text(reply.to_string()))?;
+                    queue(socket, &reply, shared.duplex)?;
                 }
             }
             Ok(Message::Close(_)) => return Ok(()),
@@ -1023,6 +1052,29 @@ fn pump(
             }
             Err(e) => return Err(e),
         }
+    }
+}
+
+/// A write that could not finish now (the socket buffer is full).
+fn waits(e: &tungstenite::Error) -> bool {
+    matches!(e, tungstenite::Error::Io(e)
+        if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut))
+}
+
+/// Sends `message` in order: duplex, it may wait in the buffer (flushed on
+/// the next loop); otherwise the thread blocks until it is written.
+fn queue(
+    socket: &mut WebSocket<UnixStream>,
+    message: &Value,
+    duplex: bool,
+) -> tungstenite::Result<()> {
+    let frame = Message::text(message.to_string());
+    if !duplex {
+        return socket.send(frame);
+    }
+    match socket.write(frame) {
+        Err(e) if !waits(&e) => Err(e),
+        _ => Ok(()),
     }
 }
 

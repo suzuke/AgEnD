@@ -128,6 +128,14 @@ impl Args {
             .map(|(_, v)| v.as_str())
     }
 
+    /// Every value of a repeated flag, in order.
+    pub(crate) fn all<'a>(&'a self, flag: &'a str) -> impl Iterator<Item = &'a str> + 'a {
+        self.pairs
+            .iter()
+            .filter(move |(f, _)| f == flag)
+            .map(|(_, v)| v.as_str())
+    }
+
     pub(crate) fn turn_ms(&self) -> Result<u64, String> {
         self.get("--turn-ms").map_or(Ok(DEFAULT_TURN_MS), |v| {
             v.parse().map_err(|e| format!("--turn-ms: {e}"))

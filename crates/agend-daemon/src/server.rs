@@ -20,6 +20,9 @@
 //!   fills the socket buffer and is closed (it gets no `event_gap`).
 //! - [`Server::stop`]: stops accepting, removes the socket file, closes
 //!   every connection.
+//! - Gate 9: the `hello` reply names the daemon (version, pid, boot id);
+//!   an accepted restart is answered first and only then handed to the
+//!   supervisor.
 //!
 //! Must NOT: contain command logic (that is `handlers`).
 
@@ -32,8 +35,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use agend_core::protocol::client::{
-    ClientRequest, ClientResponse, EventData, SelectedVersionData, TerminalBytesData, error_code,
-    negotiate_version,
+    ClientRequest, ClientResponse, EventData, MAX_LINE_BYTES, MAX_MESSAGE_BYTES, TerminalBytesData,
+    error_code, negotiate_version,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::unix::OwnedWriteHalf;
@@ -125,6 +128,40 @@ async fn accept_loop(
     while connections.join_next().await.is_some() {}
 }
 
+enum Line {
+    Text(Vec<u8>),
+    /// Longer than [`MAX_LINE_BYTES`]: the rest is not read.
+    TooLong,
+    End,
+}
+
+/// The next line (without its newline), reading at most
+/// [`MAX_LINE_BYTES`] of it (gate 9 L17). Cancel safe: what was read of a
+/// line waits in `partial` for the next call.
+async fn read_line(
+    reader: &mut BufReader<tokio::net::unix::OwnedReadHalf>,
+    partial: &mut Vec<u8>,
+) -> io::Result<Line> {
+    loop {
+        let available = reader.fill_buf().await?;
+        if available.is_empty() {
+            return Ok(Line::End);
+        }
+        let (take, done) = match available.iter().position(|&b| b == b'\n') {
+            Some(end) => (end, true),
+            None => (available.len(), false),
+        };
+        if partial.len() + take > MAX_LINE_BYTES {
+            return Ok(Line::TooLong);
+        }
+        partial.extend_from_slice(&available[..take]);
+        reader.consume(if done { take + 1 } else { take });
+        if done {
+            return Ok(Line::Text(std::mem::take(partial)));
+        }
+    }
+}
+
 /// Next item of an optional receiver; never ready without one.
 async fn next<T: Clone>(
     receiver: &mut Option<broadcast::Receiver<T>>,
@@ -177,7 +214,8 @@ impl Client {
 
 async fn connection(stream: UnixStream, ctx: Arc<Context>, number: u64) {
     let (reader, writer) = stream.into_split();
-    let mut lines = BufReader::new(reader).lines();
+    let mut reader = BufReader::new(reader);
+    let mut partial = Vec::new();
     let mut client = Client {
         number,
         caller: None,
@@ -189,12 +227,26 @@ async fn connection(stream: UnixStream, ctx: Arc<Context>, number: u64) {
     let mut terminal_of = String::new();
     loop {
         tokio::select! {
-            line = lines.next_line() => {
-                let Ok(Some(line)) = line else { return };
-                if line.trim().is_empty() {
+            line = read_line(&mut reader, &mut partial) => {
+                let line = match line {
+                    Ok(Line::Text(line)) => line,
+                    Ok(Line::TooLong) => {
+                        log::line(&format!(
+                            "{}: a line longer than {MAX_LINE_BYTES} bytes; closed",
+                            client.name()
+                        ));
+                        let message = format!(
+                            "a protocol line is limited to {MAX_LINE_BYTES} bytes (a message body to {MAX_MESSAGE_BYTES}); the connection is closed"
+                        );
+                        client.send(&error(None, error_code::INVALID_REQUEST, message)).await;
+                        return;
+                    }
+                    Ok(Line::End) | Err(_) => return,
+                };
+                if line.iter().all(u8::is_ascii_whitespace) {
                     continue;
                 }
-                let request: ClientRequest = match serde_json::from_str(&line) {
+                let request: ClientRequest = match serde_json::from_slice(&line) {
                     Ok(request) => request,
                     Err(e) if !negotiated => {
                         let message = format!("the first message must be hello (invalid JSON line: {e})");
@@ -219,7 +271,7 @@ async fn connection(stream: UnixStream, ctx: Arc<Context>, number: u64) {
                         Ok(selected) => {
                             negotiated = true;
                             client.caller = data.caller;
-                            let reply = ClientResponse::Hello { data: SelectedVersionData { selected } };
+                            let reply = ClientResponse::Hello { data: ctx.hello(selected) };
                             if !client.send(&reply).await {
                                 return;
                             }
@@ -245,6 +297,13 @@ async fn connection(stream: UnixStream, ctx: Arc<Context>, number: u64) {
                             }
                         }
                         events = Some(subscription.live);
+                    }
+                    Outcome::Restart { reply, binary } => {
+                        // The reply first; then the supervisor stops the
+                        // daemon, which closes this connection (the CLI
+                        // waits for that EOF, gate 9 P7).
+                        client.send(&reply).await;
+                        let _ = ctx.supervisor.send(crate::supervisor::Event::Exec(binary));
                     }
                     Outcome::Terminal { snapshot, live } => {
                         if let ClientResponse::TerminalSnapshot { data } = &snapshot {

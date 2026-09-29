@@ -16,7 +16,7 @@ use serde_json::json;
 fn client_request_wire_shapes_are_stable_and_approval_does_not_supply_a_head() {
     assert_eq!(
         serde_json::to_value(ClientRequest::hello()).unwrap(),
-        json!({"type": "hello", "data": {"supported": [{"major": 1, "minor": 1}]}})
+        json!({"type": "hello", "data": {"supported": [{"major": 1, "minor": 2}]}})
     );
 
     let review = ClientRequest::Command {
@@ -561,7 +561,7 @@ fn a_1_0_peer_decodes_1_1_messages() {
         hello,
         v1_0::ClientRequest::Hello {
             data: v1_0::Hello {
-                supported: vec![v1_0::Version { major: 1, minor: 1 }]
+                supported: vec![v1_0::Version { major: 1, minor: 2 }]
             }
         }
     );
@@ -649,6 +649,7 @@ fn a_1_0_peer_decodes_1_1_messages() {
                 team_id: "general".into(),
                 backend: "claude".into(),
                 state: AgentState::Failed,
+                working_directory: None,
             }),
         },
     });
@@ -744,4 +745,283 @@ fn a_1_1_peer_decodes_1_0_messages() {
             }
         }
     );
+}
+
+/// Client protocol 1.1 as it shipped (gate 8), frozen: only the parts 1.2
+/// touches (the rest did not change).
+mod v1_1 {
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct Version {
+        pub major: u16,
+        pub minor: u16,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct SelectedVersionData {
+        pub selected: Version,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    pub enum ClientRequest {
+        Command {
+            data: CommandData,
+        },
+        #[serde(other)]
+        Unknown,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct CommandData {
+        pub request_id: String,
+        pub command: AgentCommand,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(tag = "command", rename_all = "snake_case")]
+    pub enum AgentCommand {
+        Status,
+        Send {
+            to: String,
+            message: String,
+        },
+        #[serde(other)]
+        Unknown,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    pub enum ClientResponse {
+        Hello {
+            data: SelectedVersionData,
+        },
+        CommandResult {
+            data: CommandResultData,
+        },
+        #[serde(other)]
+        Unknown,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct CommandResultData {
+        pub request_id: String,
+        pub result: CommandResult,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(tag = "result", rename_all = "snake_case")]
+    pub enum CommandResult {
+        Accepted,
+        Status {
+            data: StatusData,
+        },
+        #[serde(other)]
+        Unknown,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct StatusData {
+        pub task_id: Option<String>,
+        pub instance_id: Option<String>,
+        pub summary: String,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct InstanceView {
+        pub instance_id: String,
+        pub team_id: String,
+        pub backend: String,
+        pub state: String,
+    }
+}
+
+/// Gate 9 P6: a 1.1 peer decodes every 1.2 message: `operator` and the new
+/// results are `unknown`, the new fields are ignored.
+#[test]
+fn a_1_1_peer_decodes_1_2_messages() {
+    use agend_core::protocol::client::{
+        AgentState, InstanceAddedData, InstanceView, MessageLevel, OperatorCommand, OperatorData,
+        RestartingData, SelectedVersionData, StatusData, V1_1,
+    };
+    let hello = ClientResponse::Hello {
+        data: SelectedVersionData {
+            selected: V1_1,
+            daemon_version: Some("agend 0.0.0".into()),
+            daemon_pid: Some(5101),
+            boot_id: Some(1_790_000_000_000_000),
+        },
+    };
+    assert_eq!(
+        reencode::<_, v1_1::ClientResponse>(&hello),
+        v1_1::ClientResponse::Hello {
+            data: v1_1::SelectedVersionData {
+                selected: v1_1::Version { major: 1, minor: 1 }
+            }
+        }
+    );
+    for command in [
+        OperatorCommand::InstanceAdd {
+            instance_id: "g9-1".into(),
+            backend: "claude".into(),
+            working_directory: None,
+            program: Some("/bin/sh".into()),
+            args: vec!["-c".into(), "sleep 60".into()],
+        },
+        OperatorCommand::InstanceRemove {
+            instance_id: "g9-1".into(),
+        },
+        OperatorCommand::DaemonRestart { binary: None },
+        OperatorCommand::TaskCancel {
+            task_id: "t-1".into(),
+        },
+    ] {
+        let request = ClientRequest::Operator {
+            data: OperatorData {
+                request_id: "r-1".into(),
+                command,
+            },
+        };
+        assert_eq!(
+            reencode::<_, v1_1::ClientRequest>(&request),
+            v1_1::ClientRequest::Unknown
+        );
+    }
+    let send = ClientRequest::Command {
+        data: ClientCommandData {
+            request_id: "r-2".into(),
+            command: AgentCommand::Send {
+                to: "g9-2".into(),
+                message: "hi".into(),
+                level: Some(MessageLevel::Steer),
+                message_id: Some("5d0f7c2e-1b7a-4c3e-9f00-0123456789ab".into()),
+            },
+        },
+    };
+    assert_eq!(
+        reencode::<_, v1_1::ClientRequest>(&send),
+        v1_1::ClientRequest::Command {
+            data: v1_1::CommandData {
+                request_id: "r-2".into(),
+                command: v1_1::AgentCommand::Send {
+                    to: "g9-2".into(),
+                    message: "hi".into()
+                }
+            }
+        }
+    );
+    let result = |result| ClientResponse::CommandResult {
+        data: ClientCommandResultData {
+            request_id: "r-3".into(),
+            result,
+        },
+    };
+    let v1_1_result = |result| v1_1::ClientResponse::CommandResult {
+        data: v1_1::CommandResultData {
+            request_id: "r-3".into(),
+            result,
+        },
+    };
+    for new in [
+        CommandResult::InstanceAdded {
+            data: InstanceAddedData {
+                instance_id: "g9-1".into(),
+                session_id: None,
+                working_directory: "/tmp/w".into(),
+            },
+        },
+        CommandResult::Restarting {
+            data: RestartingData {
+                preflight: vec!["agend 0.0.0".into()],
+            },
+        },
+    ] {
+        assert_eq!(
+            reencode::<_, v1_1::ClientResponse>(&result(new)),
+            v1_1_result(v1_1::CommandResult::Unknown)
+        );
+    }
+    let status = CommandResult::Status {
+        data: StatusData {
+            task_id: Some("t-42".into()),
+            instance_id: Some("g9-1".into()),
+            summary: "review".into(),
+            identity: Some(ResultIdentity {
+                stage_id: "review".into(),
+                attempt: 2,
+            }),
+        },
+    };
+    assert_eq!(
+        reencode::<_, v1_1::ClientResponse>(&result(status)),
+        v1_1_result(v1_1::CommandResult::Status {
+            data: v1_1::StatusData {
+                task_id: Some("t-42".into()),
+                instance_id: Some("g9-1".into()),
+                summary: "review".into(),
+            }
+        })
+    );
+    let view = InstanceView {
+        instance_id: "g9-1".into(),
+        team_id: "general".into(),
+        backend: "codex".into(),
+        state: AgentState::Idle,
+        working_directory: Some("/tmp/w".into()),
+    };
+    assert_eq!(
+        reencode::<_, v1_1::InstanceView>(&view),
+        v1_1::InstanceView {
+            instance_id: "g9-1".into(),
+            team_id: "general".into(),
+            backend: "codex".into(),
+            state: "idle".into(),
+        }
+    );
+}
+
+/// Gate 9 P6: 1.2 decodes every 1.1 message; the 1.2 fields are absent.
+#[test]
+fn a_1_2_peer_decodes_1_1_messages() {
+    use agend_core::protocol::client::{InstanceView, SelectedVersionData, V1_1};
+    let hello: ClientResponse = reencode(&v1_1::ClientResponse::Hello {
+        data: v1_1::SelectedVersionData {
+            selected: v1_1::Version { major: 1, minor: 1 },
+        },
+    });
+    assert_eq!(
+        hello,
+        ClientResponse::Hello {
+            data: SelectedVersionData::new(V1_1)
+        }
+    );
+    let send: ClientRequest = reencode(&v1_1::ClientRequest::Command {
+        data: v1_1::CommandData {
+            request_id: "r-1".into(),
+            command: v1_1::AgentCommand::Send {
+                to: "g9-2".into(),
+                message: "hi".into(),
+            },
+        },
+    });
+    let ClientRequest::Command { data } = send else {
+        panic!("{send:?}");
+    };
+    assert_eq!(
+        data.command,
+        AgentCommand::Send {
+            to: "g9-2".into(),
+            message: "hi".into(),
+            level: None,
+            message_id: None
+        }
+    );
+    let view: InstanceView = reencode(&v1_1::InstanceView {
+        instance_id: "g9-1".into(),
+        team_id: "general".into(),
+        backend: "claude".into(),
+        state: "unknown".into(),
+    });
+    assert_eq!(view.working_directory, None);
 }

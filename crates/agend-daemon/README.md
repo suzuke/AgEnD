@@ -1,9 +1,9 @@
 # agend-daemon
 
 > **TL;DR**
-> - 唯一的大型 I/O 層：常駐、單一 tokio runtime、DB 專屬執行緒；`agend daemon` 起 holder、接回 holder、agent 死了用 `--resume` 接回；開機計畫做完才開 `run/daemon.sock` 講 client protocol 1.1（第 8 施工關）；codex 經 app-server 的 JSON-RPC 送達、自己建 thread、死了照樣 resume（第 7 施工關）。
+> - 唯一的大型 I/O 層：常駐、單一 tokio runtime、DB 專屬執行緒；`agend daemon` 起 holder、接回 holder、agent 死了用 `--resume` 接回；開機計畫做完才開 `run/daemon.sock` 講 client protocol 1.2（第 8、9 施工關）；codex 經 app-server 的 JSON-RPC 送達、自己建 thread、死了照樣 resume（第 7 施工關）；`agend send`／`inbox`、`agend instance add|remove`、`agend daemon restart`（預檢後原地 `exec`）在這裡處理（第 9 施工關）。
 > - 記住：**daemon 停掉時 holder 與 agent 照跑（D3）**；同一個 `AGEND_HOME` 只有一個 daemon（`agend.db` 的鎖）；`agend.db` 只有 daemon 開（`store`）；socket 連得上＝daemon 好了。
-> - 下一步：第 7 施工關（codex）draft PR：`cargo xtask accept codex`；還原 DB 快照的步驟見下方「store」。
+> - 下一步：第 9 施工關（CLI）draft PR：`cargo xtask accept cli`；還原 DB 快照的步驟見下方「store」。
 
 ## 負責
 
@@ -22,12 +22,14 @@
 
 | 模組 | 職責 |
 |---|---|
-| `daemon` | `agend daemon`：前景跑、開 DB（重試 10 秒）、開機順序、訊號（第 6 施工關） |
+| `daemon` | `agend daemon`：前景跑、開 DB（重試 10 秒）、開機順序、訊號（第 6 施工關）；重啟時收尾後 `exec` 新 binary（第 9 施工關） |
+| `preflight` | `agend daemon preflight <dir>`：新 binary 在暫存 home 對 DB 複本跑 migration＋`quick_check`、起一個自己的 holder（第 9 施工關 P7） |
+| `reaper` | `exec` 重啟後，只對開機時鎖檔裡的 pid `waitpid(pid, WNOHANG)`，收掉繼承來的 holder（第 9 施工關 P7） |
 | `boot` | `plan_boot`：開機時接回／啟動／孤兒，純函式 |
 | `housekeeping` | 開機與每小時：`prune`、DB 快照、daemon log、audit、holder log 的期限 |
 | `log` | daemon log：stderr ＋ `logs/daemon-YYYY-MM-DD.log` |
 | `server` | client protocol server：`run/daemon.sock`、JSON Lines、`hello`、寫入 5 秒逾時、落後就斷（第 8 施工關） |
-| `handlers` | 請求處理，與傳輸分離；依身分限權（`resolve_attention` 只收操作者） |
+| `handlers` | 請求處理，與傳輸分離；依身分限權（`command` 只收 agent、`operator`／`resolve_attention` 只收操作者）；`handlers::agent`（`status`、`send`、`inbox`）、`handlers::operator`（instance、restart 預檢） |
 | `fleet` | 全貌（instance、task、「需要你」）與事件記錄（最近 1024 筆、broadcast），同一把鎖（第 8 施工關） |
 | `ingest` | hook 與結構化事件接收、磁碟佇列補送 |
 | `pipeline` | 執行 core 狀態機、只由 daemon merge |
@@ -47,7 +49,7 @@
 
 | 項目 | 內容 |
 |---|---|
-| 啟動 | `agend daemon`，只在前景跑；沒設 `AGEND_HOME` → `AGEND_HOME is not set`、exit 1；有參數 → exit 2 |
+| 啟動 | `agend daemon`，只在前景跑；home 由 `agend` 的 `home::resolve` 給（第 9 施工關 P3：沒設 `AGEND_HOME` → `agend: AGEND_HOME is not set; choose a directory …`、exit 2；v1 home 拒絕、exit 1）；其他參數 → CLI 的用法錯誤、exit 2 |
 | 只有一個 | `agend.db` 被別的程序開著就每 200 ms 重試，10 秒後 `agend daemon: agend.db is in use by another process (is another agend daemon running?)`、exit 1；拿到 DB 前不寫 `logs/` |
 | 開機順序 | 開 DB → housekeeping（失敗只記錯）→ `bin/` 的 shim symlink（git、kill、killall、pkill → 目前的 binary）→ `plan_boot` → `agend daemon ready: instances=N recovered=R started=S orphans=O` |
 | `plan_boot` | DB 有、鎖被持有 → 接回（重送 `Spawn`，holder 回 `already_spawned`）；DB 有、沒鎖 → 啟動；DB 沒有、鎖被持有 → 孤兒，送 `Shutdown`；`failed` 的不動 |
@@ -59,7 +61,7 @@
 | Ctrl-C | SIGINT／SIGTERM：關 holder 連線、關 DB、exit 0；**不送 `Shutdown`**，holder 照跑 |
 | log | stderr ＋ `logs/daemon-YYYY-MM-DD.log`（UTC，0600），留 7 天；`audit/shim.jsonl` 每天輪替成 `shim-YYYY-MM-DD.jsonl`、留 14 天；`run/holders/<id>.log` 在 holder 不在、7 天沒動時刪 |
 
-手動加減 instance（daemon 停著時）：`cargo run -q -p agend-daemon --example daemon_probe -- add g6-1`、`remove g6-1`、`list`。
+加減 instance：`agend instance add|remove|list`（第 9 施工關，daemon 跑著時）。`daemon_probe add|remove|list` 只剩開發與舊驗收用（daemon 停著時直接改 DB）。
 
 ## codex（第 7 施工關）
 
@@ -70,7 +72,7 @@
 | shim | codex agent 的環境多一個 `ZDOTDIR=$AGEND_HOME/zsh`；每次開機重寫 `zsh/.zprofile`，在 `/etc/zprofile`（`path_helper`）之後把 PATH 還原成 agent 啟動時的樣子：`$AGEND_HOME/bin`，然後 daemon 的 PATH（去掉 `$AGEND_HOME/bin`）；不 source 使用者的 dotfile（K8） |
 | 啟動 | `Spawn` 前刪舊的 socket（連它指到的 `/private/tmp/codex-daemon-<uid>/` 檔）與 `$GO` → holder → 背景 `connect`：每 100 ms 試連、`initialize`，20 秒放棄；沒有 thread 就 `thread/start`、**先存進 `instances.session_id`**，有就 `thread/resume {excludeTurns:true}`（找不到而且從沒送過訊息 → 建新的，否則 `failed`）；各限 30 秒 → 寫 `$GO`（暫存檔再 rename）→ 對帳、送出 `queued` 的訊息 → 開長連線。失敗＝一次死亡（5 秒／3 次／`failed`） |
 | log | `<id>: app-server ready (… ms)`、`thread <T> created`／`thread <T> resumed (idle)`（或 `busy`）、`go (resume <T>)`、`<m> (<level>) → <方法> → sent (turn …)`、`<m> confirmed (turn …)`、`approval declined (gate 7 has no handler): …`、`app-server is gone (no connection for 20 s)`、`sweep of agent group <G> (…): already gone`（或 `SIGKILL sent (…)`） |
-| 長連線 | 每個 instance 一條 std thread：`thread/status/changed` → 忙／閒（不去抖動）；user message 的 `item/completed` → `confirmed`；授權請求一律回 `decline`；斷線每 100 ms 重連 20 秒（重連後 resume、對帳、補送），不行就是 app-server 死了 → 下一次重起先 `Shutdown` holder；turn 結束、閒置而 codex 佇列非空時送一次 `thread/queue/start`（中斷後 codex 不會自己開始，K16） |
+| 長連線 | 每個 instance 一條 std thread（寫入 10 秒沒進度＝斷線、走重連；關閉時先 shutdown socket、最多等 5 秒 thread：第 9 施工關）：`thread/status/changed` → 忙／閒（不去抖動）；user message 的 `item/completed` → `confirmed`；授權請求一律回 `decline`；斷線每 100 ms 重連 20 秒（重連後 resume、對帳、補送），不行就是 app-server 死了 → 下一次重起先 `Shutdown` holder；turn 結束、閒置而 codex 佇列非空時送一次 `thread/queue/start`（中斷後 codex 不會自己開始，K16） |
 | 清掃 | 發現 holder 死了（決定重起或 `failed` 之前）、起新 holder 之前、開機時 holder 已不在的 `failed`：`agent_pid` 有值才做；1 < pgid ≤ `i32::MAX`、group 還有程序、而且有程序的 argv 有一個元素完全等於 socket 路徑（或 `unix://` 加上它）或 `resume` 後面等於 thread id，才對 group 送一次 SIGKILL；之後清掉 `agent_pid` |
 | 送達 | `CodexDriver::deliver(instance, message, level)`：`messages` 表是唯一的冪等（同 id 同內容 → 目前狀態、不呼叫 codex；同 id 不同內容 → `invalid_request`）；閒置一律 `turn/start`；忙碌時 `Queue` → `thread/queue/add`（回覆時已閒置 → `thread/queue/start` 一次）、`Steer` → `turn/steer`（`-32600` → `turn/start`）、`Interrupt` → `turn/interrupt`、等 5 秒、`turn/start`。沒有連線、或 backend 還沒有 driver → 停在 `queued`；instance `failed` → `failed`。送過一次（`attempted_at`）還是 `queued` 的，重送前先對帳，thread 有 turn 在跑時等閒置再看；忙碌但還不知道 turn id 時 `Queue` 照樣 `thread/queue/add` |
 | 事件 | `CodexDriver::events(instance, cursor)`：`thread/turns/list` 展開（每個 turn：`BusyChanged{true}`、我們的 user message 各一個 `MessageConfirmed`、結束時 `TurnCompleted{狀態}`、`BusyChanged{false}`）；cursor＝`<turn id>:<slot>` |
@@ -84,12 +86,29 @@
 | 何時出現 | 開機計畫做完才 bind，接著印 `listening on …` 與 `agend daemon ready: …`；連得上的 client 一定看到完整的 instance 清單（不需要 `.ready`） |
 | 停止 | Ctrl-C／SIGTERM：停止接受、刪 socket 檔、關所有 client 連線，再照第 6 施工關結束 |
 | 身分 | `hello` 的 `caller`（CLI 在 agent 裡填 `AGEND_INSTANCE`）：有填＝agent，沒填＝操作者；不做 cookie |
-| 請求 | `hello`、`get_fleet`、`subscribe_events`、`subscribe_terminal`、`resolve_attention`（只收操作者，先查身分再找 id；handler 當場拿掉項目並回覆，`retry` 交給 supervisor 之後做）；`terminal_input`、agent 命令 → `not_supported`；`answer_ask` → `unknown_ask`；未知請求 → `unknown_request`、連線不斷 |
+| 請求 | `hello`、`get_fleet`、`subscribe_events`、`subscribe_terminal`、`resolve_attention`（只收操作者，先查身分再找 id；handler 當場拿掉項目並回覆，`retry` 交給 supervisor 之後做）；`terminal_input` → `not_supported`；`answer_ask` → `unknown_ask`；agent 命令與 `operator` 見「CLI 的 daemon 端」；未知請求 → `unknown_request`、連線不斷 |
 | 事件 id | 第一個＝開機時間（unix ms）× 1000 + 1；只放記憶體最近 1024 筆；游標規則見 `agend_core::protocol::client` |
 | 慢 client | 落後超過 1024 筆 → `event_gap` 後關連線；寫入 5 秒沒進度 → 關連線；都記一行 log（`client #N (…): …`） |
 | instance 狀態 | `starting`（啟動中、等重起）、`unknown`（在跑；忙碌／閒置要 driver）、`failed` |
 | 需要你 | `failed` 的 instance → `instance-failed:<id>`（等待時間＝這個 daemon 第一次看到它 `failed`）；`retry`：先 `Shutdown` 留著的 holder，session 建立過就 `running` + `--resume`（claude），沒建立過就 `new`（claude `--session-id`、codex／opencode 全新啟動）；codex／opencode 建立過 session 的沒有操作 |
 | 終端 | 在跑的 instance：先回 holder 當下畫面、再轉送之後的 `terminal_bytes`（經 daemon 的長連線，client 不直接連 holder）；`failed` 且 holder 還在：短連一次、只回最後畫面；其他 → `no_terminal` |
+
+## CLI 的 daemon 端（第 9 施工關）
+
+| 項目 | 內容 |
+|---|---|
+| 協定 | client protocol 1.2：`operator` 請求（`instance_add`、`instance_remove`、`daemon_restart`、`task_cancel`）與結果 `instance_added`、`restarting`；`send` 加 `level`、`message_id`；`status` 加 `identity`；`hello` 回 `daemon_version`、`daemon_pid`、`boot_id`（＝事件 id 起點，每次開機都變）；全貌的 instance 加 `working_directory` |
+| 權限 | `command`：操作者送 → `forbidden: agend done is an agent command; it runs inside an agent, where AGEND_INSTANCE is set`；`operator`：agent 送 → `forbidden: only the operator can add instances; ask the operator`（依請求換字） |
+| `status` | 呼叫者自己的 instance：`g9-1 (claude): no task` ＋ `next: …`；DB 沒有這個 instance → `unknown_instance` |
+| `send` | 收件者要存在（否則 `unknown_instance`）；`message_id` 要 UUID v4（否則 `invalid_request`），沒帶就由 daemon 產生；交給 `CodexDriver::deliver`（`messages` 表：同 id 同內容 → 照樣 `accepted`、不再送；同 id 不同內容 → `invalid_request: message id … is already used by another message`）；claude／opencode 收件者停在 `queued`；寫入 DB（codex 再加上交給長連線）之後才回 `accepted` |
+| 大小上限 | `send` 的 body 最多 1 MiB（`MAX_MESSAGE_BYTES`，超過 `invalid_request`，什麼都不存）；協定一行最多 8 MiB（`MAX_LINE_BYTES`，超過回 `invalid_request` 並關連線，不整行讀進記憶體）（第 9 施工關 L17） |
+| `inbox` | 寄給呼叫者的，依 `seq`：不帶 `--after` 最近 20 則；帶的話回那一則之後的全部；那一則不存在、過期或不是寄給呼叫者 → `unknown_message` |
+| 其他 agent 命令 | `done`、`result`、`review …`、`ask …`、`block`、`unblock`、`remind`、`task_create` → `not_supported: agend done arrives in gate 10; nothing changed` |
+| `instance_add` | supervisor 做：名字 `[a-z0-9-]{1,24}`、backend、DB 沒有同名、holder 鎖沒被持有（否則 `instance_exists`）；`--dir` 預設 `$AGEND_HOME/workspace/<name>`（0700，daemon 建），給的目錄要存在；program 預設 backend 名；claude 產生 session id；寫 `new` → 回覆 → 馬上啟動 |
+| `instance_remove` | 不再監看、關長連線、`Shutdown` holder（最多 5 秒；停不了照樣刪，下次開機巡查收掉）、codex 照清掃規則、刪列、從全貌拿掉（`instance_changed` 不帶 instance；它的「需要你」項目以 `attention_resolved`（`unknown`）離開）；workspace 不刪 |
+| `daemon_restart` | 一次一個（另一個進行中 → `invalid_request: a restart is already in progress`）；`mkdtemp` `/tmp/agend-pf-XXXXXX`、`VACUUM INTO` 當下的 DB 複本、跑 `<binary> daemon preflight <dir>`（60 秒）：要 exit 0 而且印出 `agend …`、`db copy: …`、`holder: hello ok, spawn ok, shutdown ok`；失敗 → `preflight_failed: <binary> daemon preflight exited with status 1[: 最後一行 stderr]; the daemon keeps running agend 0.0.0`；暫存 home 一律刪掉（daemon 在預檢中停止也一樣：Drop guard kill 並收屍子程序、`Shutdown` 暫存 home 裡的 holder），60 秒逾時不等子程序的 pipe；預檢結束時 binary 必須還是同一個檔案（device、inode、大小、mtime），`agend.db` 不動。通過 → 回 `restarting { preflight }`、照 Ctrl-C 的順序收尾（不送 `Shutdown`）、`exec <binary> daemon`（pid、終端、環境不變） |
+| 繼承的 holder | 新 image 開機時（還沒起任何 holder 前）對每個鎖檔裡的 pid `waitpid(pid, WNOHANG)` 一次；是自己的子程序而且還活著的每秒再查，收到或 `ECHILD` 就不再查；log `reaped inherited holder pid <pid> (exit 0)`；不用 `waitpid(-1)` |
+| `task_cancel` | `not_supported`（handler 在第 10 施工關） |
 
 ## store（第 5 施工關）
 
@@ -124,7 +143,7 @@
 
 - `agend_daemon::driver::codex::{CodexDriver, launch, sweep, socket_connect_path}`（`CodexDriver` 實作 `Driver` trait）
 - `agend_daemon::store::SqliteStore::open(home, now_unix_ms)`
-- `agend_daemon::daemon::run`（`agend daemon`）
+- `agend_daemon::daemon::run(home)`（`agend daemon`）、`preflight::run`（`agend daemon preflight <dir>`）
 - `agend_daemon::runtime::HolderRuntime`（`Runtime` trait）、`runtime::shutdown_holder`
 - `agend_daemon::server::{bind, Server}`、`handlers::Context`、`fleet::Fleet`（測試在同一個程序裡跑 daemon 的 server）
 
@@ -135,4 +154,5 @@ cargo test -p agend-daemon
 cargo xtask accept daemon-holder   # 第 6 施工關 demo：daemon_probe demo
 cargo xtask accept client          # 第 8 施工關 demo：client_demo
 cargo xtask accept codex           # 第 7 施工關 demo：codex_demo
+cargo xtask accept cli             # 第 9 施工關 demo：cli_demo（在 agend crate）
 ```

@@ -6,14 +6,17 @@
 //! runtime, read config or open the DB (plan §4.7).
 //!
 //! `agend holder <instance-id>` is split off next, before CLI parsing
-//! (gate 4 P1), and so is `agend daemon` (gate 6 P1), which builds its own
-//! runtime; the CLI path never does.
+//! (gate 4 P1), and so are `agend daemon` (gate 6 P1; its home from
+//! `home::resolve`, gate 9 P3), which builds its own runtime, and `agend
+//! daemon preflight <dir>` (gate 9 P7, run by a restarting daemon); the CLI
+//! path never builds one.
 //!
 //! Must NOT: do any work before the argv[0] dispatch.
 
 mod cli;
 mod debug;
 mod doctor;
+mod home;
 mod init;
 mod setup;
 
@@ -31,7 +34,15 @@ fn main() -> ExitCode {
         return agend_holder::run(args[1..].to_vec());
     }
     if args.first().is_some_and(|a| a == "daemon") {
-        return agend_daemon::daemon::run(args[1..].to_vec());
+        if args.len() == 1 {
+            return match home::resolve() {
+                Ok(home) => agend_daemon::daemon::run(home),
+                Err(failure) => failure.report(false),
+            };
+        }
+        if args[1] == "preflight" {
+            return agend_daemon::preflight::run(args[2..].to_vec());
+        }
     }
     cli::run(args)
 }

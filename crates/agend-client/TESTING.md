@@ -16,7 +16,7 @@
 | 測試 | 證明什麼 |
 |---|---|
 | `retry::tests` | 重試視窗 10 秒、每 100 ms 一次（規劃 §4.7、第 8 施工關 P7） |
-| `version::tests` | 協商到 1.0 回確切的「restart the daemon with this binary」訊息；1.1 以上可以 |
+| `version::tests` | 協商到 1.0、1.1 回確切的「stop the daemon (Ctrl-C) and start this binary」訊息；1.2 以上可以；以後要 1.3 的 CLI 遇到 1.2 的 daemon 說 `run: agend daemon restart`（第 9 施工關） |
 | `tests/client.rs::connect_retries_for_ten_seconds_then_says_what_to_do` | 沒有 daemon：10–11 秒後 `Unreachable`，訊息逐字比對 |
 | `connect_once_does_not_retry` | `connect_once` 1 秒內失敗 |
 | `connect_waits_for_a_daemon_that_comes_back` | 1.2 秒後才出現的假 daemon 連得上，`retried()` ≥ 1 秒 |
@@ -34,7 +34,7 @@
 ## 還沒測的
 
 - [ ] daemon 卡住但沒死（回應逾時 10 秒）：沒有測試；心跳不在本關（第 8 施工關「本關不做」）
-- [ ] 真 CLI 命令的 exit code 對應（第 9 施工關）
+- [x] 真 CLI 命令的 exit code 對應（第 9 施工關：`crates/agend/tests/cli.rs` 的 CLI-n 表）
 
 ## 下一步
 
