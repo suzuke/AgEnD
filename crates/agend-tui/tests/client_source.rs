@@ -630,3 +630,85 @@ fn a_tall_terminal_shows_its_newest_rows_until_scrolled_up() {
         "back at the end: follows\n{text}"
     );
 }
+
+/// P7/T6: while disconnected, one reconnect attempt every 500 ms, even
+/// though the loop ticks every 100 ms.
+#[test]
+fn reconnect_attempts_are_every_500_ms() {
+    let lab = Lab::new();
+    let (mut app, _) = lab.app(None);
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_millis(2000) {
+        app.tick();
+        std::thread::sleep(agend_tui::TICK);
+    }
+    let Connection::Disconnected { attempts, .. } = app.connection else {
+        panic!("{:?}", app.connection);
+    };
+    assert!((3..=5).contains(&attempts), "{attempts} attempts in 2 s");
+    // `r` still tries at once.
+    press(&mut app, &[ch('r')]);
+    let Connection::Disconnected {
+        attempts: after, ..
+    } = app.connection
+    else {
+        panic!();
+    };
+    assert_eq!(after, attempts + 1);
+}
+
+/// P7: after a reconnect, a selection that is gone goes to the first row
+/// of that screen, not a neighbour.
+#[test]
+fn a_selection_gone_after_reconnect_goes_to_the_first_row() {
+    use agend_tui::app::Target;
+    let lab = Lab::new();
+    let seed = |daemon: &FakeDaemon, ids: &[&str]| {
+        for (n, id) in ids.iter().enumerate() {
+            daemon.set_instance(instance(id, "claude", AgentState::Failed));
+            daemon.add_attention(AttentionRequiredData {
+                waiting_since_unix_ms: Some(n as u64 + 1),
+                ..failed_item(id)
+            });
+        }
+    };
+    let daemon = lab.daemon();
+    seed(&daemon, &["g-a", "g-b", "g-c", "g-d"]);
+    let (mut app, _) = lab.app(None);
+    wait_until(&mut app, |t| t.contains("Needs you · 4"));
+    press(&mut app, &[Down, Enter]);
+    assert_eq!(
+        app.view().selected,
+        Some(Target::Item("instance-failed:g-b".into()))
+    );
+    drop(daemon);
+    wait_until(&mut app, |t| t.contains("Daemon disconnected"));
+    let fresh = lab.daemon();
+    seed(&fresh, &["g-a", "g-c", "g-d"]);
+    wait_until(&mut app, |t| t.contains("Reconnected to the daemon."));
+    assert_eq!(
+        app.view().selected,
+        Some(Target::Item("instance-failed:g-a".into()))
+    );
+}
+
+/// Typing stops when the instance turns failed (its terminal is then the
+/// last screen), without waiting for a new screen.
+#[test]
+fn typing_stops_when_the_instance_fails() {
+    let lab = Lab::new();
+    let daemon = lab.daemon();
+    daemon.set_instance(instance("g11-1", "claude", AgentState::Unknown));
+    daemon.set_screen("g11-1", "$ ");
+    let (mut app, _) = lab.app(None);
+    wait_until(&mut app, |t| t.contains("general ─"));
+    open_terminal(&mut app, "g11-1");
+    press(&mut app, &[ch('i')]);
+    assert!(app.term.as_ref().unwrap().typing);
+    daemon.set_instance(instance("g11-1", "claude", AgentState::Failed));
+    let text = wait_until(&mut app, |t| t.contains("· last screen (stopped)"));
+    assert!(!app.term.as_ref().unwrap().typing, "{text}");
+    press(&mut app, &[ch('x')]);
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(daemon.terminal_inputs().is_empty(), "x was not typed");
+}

@@ -16,8 +16,10 @@
 //!   connection; the holder answers in order with the stream, so the
 //!   subscriber gets that screen and then every `PtyBytes` read after it
 //!   (per-instance broadcast of [`TERMINAL_CHUNKS`]), nothing twice or lost.
-//! - Operator input (gate 11 B P6): [`Link::input`] sends
-//!   `OperatorTerminalInput` on this connection. The holder answers only a
+//! - Operator input (gate 11 B P6): [`input`] sends
+//!   `OperatorTerminalInput` on this connection. Writes (input, `Snapshot`)
+//!   happen outside the link's locks and give up after [`WRITE_WITHIN`]
+//!   without progress (a holder that stops reading). The holder answers only a
 //!   refusal (`pty_busy`, `agent_exited`, …); it is logged and dropped, not
 //!   passed back to the client (the protocol has no id to match it with).
 //!
@@ -47,6 +49,23 @@ const CONNECT_EVERY: Duration = Duration::from_millis(50);
 /// Wait before connecting again after the connection ended (gate 6 P4).
 pub const RECONNECT_AFTER: Duration = Duration::from_secs(1);
 const SPAWN_REPLY_WITHIN: Duration = Duration::from_secs(10);
+/// Writes the operator's bytes (base64) to the agent's PTY through the
+/// holder, on the link's connection (`Link::input_slot`); false when the
+/// request cannot be sent within [`WRITE_WITHIN`].
+pub fn input(slot: &Mutex<Option<UnixStream>>, bytes_base64: String) -> bool {
+    let request = HolderRequest::OperatorTerminalInput {
+        data: OperatorTerminalInputData { bytes_base64 },
+    };
+    let Ok(mut line) = serde_json::to_vec(&request) else {
+        return false;
+    };
+    line.push(b'\n');
+    send(slot, &line)
+}
+
+/// A write to the holder that makes no progress for this long gives up
+/// (the holder stopped reading; as `server::WRITE_TIMEOUT`).
+pub const WRITE_WITHIN: Duration = Duration::from_secs(5);
 /// PTY chunks a terminal subscriber may fall behind before it is dropped.
 pub const TERMINAL_CHUNKS: usize = 256;
 
@@ -120,27 +139,13 @@ impl Link {
         // The pending entry goes in before the request is sent, so the
         // reader thread finds it when the answer arrives.
         lock(&self.terminal).pending.push(tx);
-        let stream = lock(&self.stream);
-        let mut stream = stream.as_ref()?;
-        stream.write_all(&line).ok()?;
-        Some(rx)
+        send(&self.stream, &line).then_some(rx)
     }
 
-    /// Writes the operator's bytes (base64) to the agent's PTY through the
-    /// holder; false when the request cannot be sent.
-    pub fn input(&self, bytes_base64: String) -> bool {
-        let request = HolderRequest::OperatorTerminalInput {
-            data: OperatorTerminalInputData { bytes_base64 },
-        };
-        let Ok(mut line) = serde_json::to_vec(&request) else {
-            return false;
-        };
-        line.push(b'\n');
-        let stream = lock(&self.stream);
-        let Some(mut stream) = stream.as_ref() else {
-            return false;
-        };
-        stream.write_all(&line).is_ok()
+    /// Where [`input`] writes: the caller can drop its lock on the links
+    /// before writing.
+    pub fn input_slot(&self) -> Arc<Mutex<Option<UnixStream>>> {
+        Arc::clone(&self.stream)
     }
 
     fn stop(&mut self) {
@@ -159,6 +164,17 @@ impl Drop for Link {
     fn drop(&mut self) {
         self.stop();
     }
+}
+
+/// Writes one request line on the link's connection, outside every lock:
+/// the connection is cloned under the slot's lock, and the write gives up
+/// after [`WRITE_WITHIN`] without progress. False when there is no
+/// connection or the write fails.
+fn send(slot: &Mutex<Option<UnixStream>>, line: &[u8]) -> bool {
+    let Some(mut stream) = lock(slot).as_ref().and_then(|s| s.try_clone().ok()) else {
+        return false;
+    };
+    stream.set_write_timeout(Some(WRITE_WITHIN)).is_ok() && stream.write_all(line).is_ok()
 }
 
 struct Worker {
@@ -369,5 +385,38 @@ impl Worker {
                 return Some(conn);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A holder that stops reading must not stall the caller (a tokio
+    /// worker, and whoever waits for the link's locks): with its socket
+    /// buffer full, an input line gives up after [`WRITE_WITHIN`].
+    #[test]
+    fn a_write_to_a_holder_that_does_not_read_gives_up() {
+        let (ours, _peer) = UnixStream::pair().unwrap();
+        let mut filler = ours.try_clone().unwrap();
+        filler.set_nonblocking(true).unwrap();
+        while filler.write(&[b'x'; 4096]).is_ok() {}
+        filler.set_nonblocking(false).unwrap();
+        let slot = Arc::new(Mutex::new(Some(ours)));
+        let (tx, rx) = mpsc::channel();
+        let writer = Arc::clone(&slot);
+        let started = Instant::now();
+        std::thread::spawn(move || {
+            let _ = tx.send(input(&writer, "aGVsbG8=".into()));
+        });
+        let sent = rx.recv_timeout(WRITE_WITHIN * 2);
+        let took = started.elapsed();
+        assert_eq!(sent, Ok(false), "the write never gave up");
+        assert!(
+            took >= WRITE_WITHIN - Duration::from_millis(100),
+            "{took:?}"
+        );
+        // The slot's lock is free while the write waits and after.
+        assert!(slot.try_lock().is_ok());
     }
 }

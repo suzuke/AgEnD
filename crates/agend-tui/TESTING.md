@@ -25,7 +25,7 @@
 | `tests/screens.rs` | 首頁、繁中在三種大小靠右對齊、team 三個 tab、Task Detail（repo 只在這裡）、Agent Detail、終端（即時、`i` 進輸入模式）、需要你展開（「不處理的話」、脈絡摘要、對話、選項、沒有操作的項目寫「沒有可用的操作」）、`/` 結果、選取反白不含邊框、底部說明只列有用的鍵、太小的終端與捲到底 |
 | `tests/navigation.rs` | 每種畫面 `→` 與 `Enter` 相同、`←` 還原選取、tab、`t`、`/`、`L`、已讀不等於已解決、回答、斷線與重連（腳本假來源） |
 | `tests/owner_steps.rs` | 第 11 施工關頁「你親自驗收」A2–A4 逐鍵照做（繁中） |
-| `tests/client_source.rs` | `ClientSource` 對假 daemon：全貌畫出首頁（`g11-2` 經 `instance_id` 算「需要你」）、demo 的需要你清單與腳本來源一樣；別的 client 送 `retry` 後 `attention_resolved` 拿掉項目；假 daemon 延後事件時 `accepted` 之後項目仍在（P4）；沒有操作的項目與 agent 的 `forbidden`；`event_gap`（proxy）與 daemon 停掉都進斷線畫面、重連重拿全貌並回到原畫面、沒有留下 reader thread；版本不合不自動重試、`r` 試一次；終端 500 ms 內換成新畫面、每秒最多約 5 次、最後一段輸出補畫、閒著不重拿；只有終端連線被關時只重連它、不進斷線畫面、輸入模式不恢復；開關終端 20 次後只剩事件 thread、假 daemon 只剩 2 條連線；停止的 agent 顯示最後畫面、`i` 不進輸入模式、又跑起來自動變即時；空畫面只給訊息；每個鍵都送出、只有 `Ctrl-5`／`Ctrl-]` 不送、斷線後回到唯讀；codex 的 `not_supported` 留在終端連線、不變成 `retry` 的回覆；agent 打字被 `forbidden`；太高的畫面跟著最後一列、往上捲就停、標題固定 |
+| `tests/client_source.rs` | `ClientSource` 對假 daemon：全貌畫出首頁（`g11-2` 經 `instance_id` 算「需要你」）、demo 的需要你清單與腳本來源一樣；別的 client 送 `retry` 後 `attention_resolved` 拿掉項目；假 daemon 延後事件時 `accepted` 之後項目仍在（P4）；沒有操作的項目與 agent 的 `forbidden`；`event_gap`（proxy）與 daemon 停掉都進斷線畫面、重連重拿全貌並回到原畫面、沒有留下 reader thread；版本不合不自動重試、`r` 試一次；終端 500 ms 內換成新畫面、每秒最多約 5 次、最後一段輸出補畫、閒著不重拿；只有終端連線被關時只重連它、不進斷線畫面、輸入模式不恢復；開關終端 20 次後只剩事件 thread、假 daemon 只剩 2 條連線；停止的 agent 顯示最後畫面、`i` 不進輸入模式、又跑起來自動變即時；空畫面只給訊息；每個鍵都送出、只有 `Ctrl-5`／`Ctrl-]` 不送、斷線後回到唯讀；codex 的 `not_supported` 留在終端連線、不變成 `retry` 的回覆；agent 打字被 `forbidden`；太高的畫面跟著最後一列、往上捲就停、標題固定；斷線時每 500 ms 才重連一次、`r` 立刻試；重連後選取的東西不在了就回到第一列；instance 變成 `failed` 時離開輸入模式、打的字不送出 |
 
 ## 用到的假實作
 

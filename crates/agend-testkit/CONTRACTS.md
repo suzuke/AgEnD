@@ -1,7 +1,7 @@
 # 契約規則表
 
 > **TL;DR**
-> - 7 個 trait 與 client protocol 的契約規則，每條一個編號（`DRV-1`…`RUN-9` 共 57 條，5 條標「新增，已追認」；第 8 施工關加 `CLP-1`…`CLP-12`，第 9 施工關加 `CLP-13`…`CLP-17`，第 11 施工關 B 段加 `CLP-18`…`CLP-20`）；契約 suite 的每個 case 標著它驗的規則編號。
+> - 7 個 trait 與 client protocol 的契約規則，每條一個編號（`DRV-1`…`RUN-9` 共 57 條，5 條標「新增，已追認」；第 8 施工關加 `CLP-1`…`CLP-12`，第 9 施工關加 `CLP-13`…`CLP-17`，第 11 施工關 B 段加 `CLP-18`…`CLP-21`）；契約 suite 的每個 case 標著它驗的規則編號。
 > - 記住：**每條規則至少一個 case、至少一個故意弄壞的實作（mutant）**；`tests/contract_teeth/` 的覆蓋測試讀這張表，缺一個就失敗。
 > - 下一步：加規則 = 這裡加一列（含 mutant 名）+ 標了編號的 case + 註冊 mutant。
 
@@ -142,7 +142,7 @@
 
 ## Client protocol（`CLP`，12 條，第 8 施工關）
 
-**第 9 施工關再加 5 條（`CLP-13`…`CLP-17`），第 11 施工關 B 段再加 3 條（`CLP-18`…`CLP-20`，終端與打字），共 20 條；標題留著第 8 施工關的字，因為名詞表連到這個錨點**。fixture 多四個方法：`agents`＝兩個能互傳訊息的 instance、`fresh_name`＝還沒人用的名字（第 9 施工關）；`make_output`＝讓終端印出新東西（假 daemon `push_terminal_bytes`，真 daemon 的計數器每秒自己印）、`typed`＝終端收到的輸入（假 daemon 記下的位元組；真 daemon 看畫面，PTY 會回顯）（第 11 施工關）。對象不是 trait，是一個講 client protocol 的 server：同一套 case 對 testkit 的 `FakeDaemon`（`tests/contract_fakes.rs`）與真的 `agend daemon`（`crates/agend/tests/client_protocol.rs`，暫存 home、真 binary）跑（[第 8 施工關 P9](../../docs/gates/gate-08-client.md#p9client-協定契約假-daemon-與真-daemon-跑同一套)）。驅動端是 `ProbeClient`，不是 `agend-client`。mutant 是「假 daemon 前面加一個改行的 proxy」（`contract::client::proxy`），假 daemon 本身沒有「故意弄壞」的開關。
+**第 9 施工關再加 5 條（`CLP-13`…`CLP-17`），第 11 施工關 B 段再加 4 條（`CLP-18`…`CLP-21`，終端與打字），共 21 條；標題留著第 8 施工關的字，因為名詞表連到這個錨點**。fixture 多五個方法：`agents`＝兩個能互傳訊息的 instance、`fresh_name`＝還沒人用的名字（第 9 施工關）；`make_output`＝讓終端印出新東西（假 daemon `push_terminal_bytes`，真 daemon 的計數器每秒自己印）、`typed`＝終端收到的輸入（假 daemon 記下的位元組；真 daemon 看畫面，PTY 會回顯）、`stopped_instance`＝一個 `failed` 的 instance（第 11 施工關）。對象不是 trait，是一個講 client protocol 的 server：同一套 case 對 testkit 的 `FakeDaemon`（`tests/contract_fakes.rs`）與真的 `agend daemon`（`crates/agend/tests/client_protocol.rs`，暫存 home、真 binary）跑（[第 8 施工關 P9](../../docs/gates/gate-08-client.md#p9client-協定契約假-daemon-與真-daemon-跑同一套)）。驅動端是 `ProbeClient`，不是 `agend-client`。mutant 是「假 daemon 前面加一個改行的 proxy」（`contract::client::proxy`），假 daemon 本身沒有「故意弄壞」的開關。
 
 fixture（`ClientProtocolFixture`）：`socket`、`emit`（讓至少一個新事件發生）、`burst(n)`、`restart`（同一個 socket 重啟 server）、`retry_item`（一個可以 `retry` 的「需要你」項目）、`terminal_instance`。真 daemon 的 `emit` 是對一個 `failed` 的 instance 送 `retry`（真的事件，不是假資料）。
 
@@ -168,6 +168,7 @@ fixture（`ClientProtocolFixture`）：`socket`、`emit`（讓至少一個新事
 | CLP-18 | `subscribe_terminal` 之後，終端印出新東西 → `terminal_bytes`；同一條連線再訂一次 → 新的畫面，而且看得到那段輸出 | 第 11 施工關 P5；第 8 施工關 C8 | `FreezesScreen` |
 | CLP-19 | 對沒有終端的 instance（不存在的 id）`subscribe_terminal` → `no_terminal`（不帶 request id），連線不斷；這條連線之前訂的終端**不再**送 `terminal_bytes`（失敗的重訂也取代舊的） | 第 11 施工關 P1、P5 | `ScreenForAnyInstance` |
 | CLP-20 | `terminal_input`：agent（`hello` 帶 `caller`）不管 instance 存不存在都是 `forbidden`（先查身分）；操作者對不存在的 instance → `no_terminal`；操作者對有終端的 instance → 不回任何東西，位元組原樣到終端，agent 送的沒有；錯誤都不帶 request id | 第 11 施工關 P6、D17 | `AnyoneMayType` |
+| CLP-21 | 操作者對 `failed` 的 instance（沒有活的終端）送 `terminal_input` → `no_terminal`（不帶 request id），連線不斷 | 第 11 施工關 P6（verifier） | `TypesIntoTheLiveOne` |
 
 不釘：`status`、`send`、`inbox` 以外的 agent 命令（假 daemon 會處理，真 daemon 第 10 施工關前回 `not_supported`）；成功的 `daemon_restart`（CLI 測試對假、真 daemon 各跑一次）；codex instance 的 `terminal_input` 回 `not_supported`（fixture 沒有 codex instance；假 daemon 在 `tests/fake_daemon.rs`、真 daemon 在 `crates/agend/tests/tui_daemon.rs` 各測一次）。第 11 施工關 B 段起假 daemon 只對登記過的 instance 回畫面（改掉第 8 施工關 C2）。
 

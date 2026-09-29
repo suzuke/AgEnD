@@ -352,3 +352,21 @@ fn answer_ask_reaches_the_daemon_and_unknown_asks_are_refused() {
         "{error:?}"
     );
 }
+
+/// Gate 9's 8 MiB `MAX_LINE_BYTES` bounds lines the daemon reads, not the
+/// ones it writes: a screen line longer than that still reaches the reader.
+#[test]
+fn a_screen_line_over_the_request_limit_is_read_whole() {
+    use agend_client::TerminalUpdate;
+    use agend_core::protocol::client::MAX_LINE_BYTES;
+    let daemon = FakeDaemon::start().unwrap();
+    daemon.set_instance(instance("g-1"));
+    let big = "x".repeat(MAX_LINE_BYTES + (1 << 20));
+    daemon.set_screen("g-1", &big);
+    let mut client = Client::connect_once(daemon.socket_path(), None).unwrap();
+    client.sender().unwrap().subscribe_terminal("g-1").unwrap();
+    match client.next_terminal().unwrap() {
+        TerminalUpdate::Screen { screen, .. } => assert_eq!(screen.len(), big.len()),
+        other => panic!("{other:?}"),
+    }
+}

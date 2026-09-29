@@ -213,6 +213,13 @@ impl ClientProtocolFixture for RealDaemon {
         Ok(())
     }
 
+    fn stopped_instance(&mut self) -> Result<String, String> {
+        self.failed
+            .first()
+            .cloned()
+            .ok_or("no failed instance".into())
+    }
+
     fn typed(&mut self, instance: &str, expect: &str) -> Result<String, String> {
         // The PTY echoes what is typed: wait until the screen shows it.
         let deadline = Instant::now() + Duration::from_secs(10);
@@ -370,6 +377,10 @@ impl ClientProtocolFixture for InProcess {
 
     fn make_output(&mut self, _instance: &str) -> Result<(), String> {
         Err("the in-process server has no holders".into())
+    }
+
+    fn stopped_instance(&mut self) -> Result<String, String> {
+        Err("the in-process server has no instances".into())
     }
 
     fn typed(&mut self, _instance: &str, _expect: &str) -> Result<String, String> {

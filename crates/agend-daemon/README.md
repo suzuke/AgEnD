@@ -92,7 +92,7 @@
 | instance 狀態 | `starting`（啟動中、等重起）、`unknown`（在跑；忙碌／閒置要 driver）、`failed` |
 | 需要你 | `failed` 的 instance → `instance-failed:<id>`（等待時間＝這個 daemon 第一次看到它 `failed`）；`retry`：先 `Shutdown` 留著的 holder，session 建立過就 `running` + `--resume`（claude），沒建立過就 `new`（claude `--session-id`、codex／opencode 全新啟動）；codex／opencode 建立過 session 的沒有操作 |
 | 終端 | 在跑的 instance：先回 holder 當下畫面、再轉送之後的 `terminal_bytes`（經 daemon 的長連線，client 不直接連 holder）；`failed` 且 holder 還在：短連一次、只回最後畫面；其他 → `no_terminal`。同一條連線再訂一次：先清掉舊的串流，失敗就沒有串流（第 11 施工關 B 段 P1） |
-| 打字 | `terminal_input`（第 11 施工關 B 段 P6）依序：agent → `forbidden: only the operator can type into an agent's terminal`；沒有活的終端（不存在、`failed`、沒有長連線）→ `no_terminal`；codex → `not_supported`（等 U17 驗證）；其他經長連線轉成 holder 的 `OperatorTerminalInput`，不回應。錯誤都不帶 `request_id`。holder 拒絕（`pty_busy`、`agent_exited`）只記 log：`<id>: operator input dropped: <code>` |
+| 打字 | `terminal_input`（第 11 施工關 B 段 P6）依序：agent → `forbidden: only the operator can type into an agent's terminal`；沒有活的終端（不存在、`failed`、沒有長連線）→ `no_terminal`；codex → `not_supported`（等 U17 驗證）；其他經長連線轉成 holder 的 `OperatorTerminalInput`，不回應。錯誤都不帶 `request_id`。holder 拒絕（`pty_busy`、`agent_exited`）只記 log：`<id>: operator input dropped: <code>`；寫給 holder 的請求在 link 的鎖外寫、5 秒沒進展就放棄（`link::WRITE_WITHIN`） |
 
 ## CLI 的 daemon 端（第 9 施工關）
 

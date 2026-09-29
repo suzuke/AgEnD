@@ -33,6 +33,8 @@ use crate::{agent_detail, attention, finder, home, task_detail, team, terminal};
 pub const REFRESH_EVERY: Duration = Duration::from_millis(200);
 /// How often an ended terminal is subscribed again (P5).
 pub const RETRY_EVERY: Duration = Duration::from_secs(1);
+/// How often a lost daemon is tried again (T6, P7); `r` tries at once.
+pub const RECONNECT_EVERY: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -162,6 +164,8 @@ pub struct App {
     pub quit: bool,
     /// The open terminal, while the top view is one.
     pub term: Option<Term>,
+    /// When the daemon was last tried (reconnects are [`RECONNECT_EVERY`]).
+    last_attempt: Instant,
     /// Body height of the last render, for scrolling.
     pub(crate) body_height: usize,
 }
@@ -187,6 +191,7 @@ impl App {
             message: None,
             quit: false,
             term: None,
+            last_attempt: Instant::now(),
             body_height: 20,
         };
         match app.source.connect() {
@@ -240,7 +245,8 @@ impl App {
         } else if matches!(
             self.connection,
             Connection::Disconnected { retry: true, .. }
-        ) {
+        ) && self.last_attempt.elapsed() >= RECONNECT_EVERY
+        {
             self.reconnect();
         }
         self.sync_terminal();
@@ -261,9 +267,14 @@ impl App {
     /// A new fleet view; the open terminal is subscribed again by
     /// `sync_terminal` (typing does not come back, P6).
     fn reconnect(&mut self) {
+        self.last_attempt = Instant::now();
         match self.source.connect() {
             Ok(snapshot) => {
                 self.fleet = Fleet::from_snapshot(snapshot);
+                // A selection that is gone goes to the first row (P7).
+                for view in &mut self.stack {
+                    view.index = 0;
+                }
                 self.connection = Connection::Connected;
                 self.message = Some(self.lang.tr(Text::Reconnected).to_owned());
                 self.pull();
@@ -302,6 +313,7 @@ impl App {
             last_error: None,
             retry,
         };
+        self.last_attempt = Instant::now();
         self.input = None;
         self.finder = None;
         if self.term.take().is_some() {
@@ -892,6 +904,21 @@ impl App {
                     term.mode = TermMode::Ended;
                     term.retried = Instant::now();
                 }
+            }
+        }
+        // An instance that failed shows its last screen: no typing.
+        let agent = self
+            .term
+            .as_ref()
+            .map(|t| t.agent.clone())
+            .unwrap_or_default();
+        let stopped = self.mode_for(&agent) == TermMode::Stopped;
+        if let Some(term) = self.term.as_mut() {
+            if stopped && term.mode == TermMode::Live {
+                term.mode = TermMode::Stopped;
+            }
+            if term.mode != TermMode::Live {
+                term.typing = false;
             }
         }
         let Some(term) = self.term.as_ref() else {

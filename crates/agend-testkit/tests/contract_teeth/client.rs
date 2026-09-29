@@ -446,6 +446,21 @@ pub fn mutants() -> Vec<Mutant> {
                 })
             },
         },
+        // CLP-21: typing into any instance goes to the live one.
+        Mutant {
+            rule: "CLP-21",
+            name: "TypesIntoTheLiveOne",
+            run: |name| {
+                with("CLP-21", name, || {
+                    parsed(|_, direction, mut v| {
+                        if direction == Direction::ToServer && v["type"] == "terminal_input" {
+                            v["data"]["instance_id"] = json!(client::FAKE_INSTANCE);
+                        }
+                        vec![v]
+                    })
+                })
+            },
+        },
         // CLP-20: the caller is dropped from hello, so agents type as the
         // operator.
         Mutant {

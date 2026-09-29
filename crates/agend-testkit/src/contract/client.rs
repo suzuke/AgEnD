@@ -72,6 +72,8 @@ pub trait ClientProtocolFixture {
     /// (or after [`WITHIN`]): the fake's recorded input, the real
     /// terminal's screen (the PTY echoes what is typed).
     fn typed(&mut self, instance: &str, expect: &str) -> Result<String, String>;
+    /// A `failed` instance (no live terminal).
+    fn stopped_instance(&mut self) -> Result<String, String>;
 }
 
 pub fn cases<F: ClientProtocolFixture>() -> Vec<Case<F>> {
@@ -175,6 +177,11 @@ pub fn cases<F: ClientProtocolFixture>() -> Vec<Case<F>> {
             rule: "CLP-20",
             name: "only_the_operator_types_and_only_into_a_terminal",
             check: |mut fx| only_the_operator_types(&mut fx),
+        },
+        Case {
+            rule: "CLP-21",
+            name: "typing_into_a_failed_instance_is_no_terminal",
+            check: |mut fx| typing_into_a_failed_instance(&mut fx),
         },
     ]
 }
@@ -1351,6 +1358,19 @@ fn only_the_operator_types<F: ClientProtocolFixture>(fx: &mut F) -> CaseResult {
     )
 }
 
+fn typing_into_a_failed_instance<F: ClientProtocolFixture>(fx: &mut F) -> CaseResult {
+    let stopped = fx.stopped_instance()?;
+    let mut op = operator(fx)?;
+    send(&mut op, &terminal_input(&stopped, b"x"))?;
+    let (code, id) = next_error(&mut op, WITHIN)?;
+    ensure(code == error_code::NO_TERMINAL && id.is_none(), || {
+        format!("typing into failed {stopped} got {code} ({id:?}), expected no_terminal")
+    })?;
+    get_fleet(&mut op, "clp-21")
+        .map(|_| ())
+        .map_err(|e| format!("the connection did not stay usable: {e}"))
+}
+
 // ---- the fake daemon as a fixture ----
 
 /// The testkit fake daemon behind the CLP contract: an instance with a
@@ -1368,6 +1388,8 @@ pub struct FakeDaemonFixture {
 pub const FAKE_INSTANCE: &str = "clp-1";
 /// The second instance of the fake (the other agent of CLP-13, CLP-17).
 pub const FAKE_PEER: &str = "clp-2";
+/// A `failed` instance of the fake (CLP-21).
+pub const FAKE_STOPPED: &str = "clp-3";
 
 impl FakeDaemonFixture {
     pub fn new() -> FakeDaemonFixture {
@@ -1400,6 +1422,13 @@ impl FakeDaemonFixture {
                 working_directory: Some(format!("/fake/workspace/{id}")),
             });
         }
+        daemon.set_instance(InstanceView {
+            instance_id: FAKE_STOPPED.into(),
+            team_id: "general".into(),
+            backend: "claude".into(),
+            state: AgentState::Failed,
+            working_directory: Some(format!("/fake/workspace/{FAKE_STOPPED}")),
+        });
         self.daemon = Some(daemon);
         Ok(())
     }
@@ -1498,6 +1527,10 @@ impl ClientProtocolFixture for FakeDaemonFixture {
             .collect();
         Ok(String::from_utf8_lossy(&typed).into_owned())
     }
+
+    fn stopped_instance(&mut self) -> Result<String, String> {
+        Ok(FAKE_STOPPED.into())
+    }
 }
 
 // ---- mutants: the fake behind a misbehaving proxy ----
@@ -1545,6 +1578,9 @@ impl<F: ClientProtocolFixture> ClientProtocolFixture for Proxied<F> {
     }
     fn typed(&mut self, instance: &str, expect: &str) -> Result<String, String> {
         self.inner.typed(instance, expect)
+    }
+    fn stopped_instance(&mut self) -> Result<String, String> {
+        self.inner.stopped_instance()
     }
 }
 

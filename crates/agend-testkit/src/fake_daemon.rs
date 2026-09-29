@@ -58,7 +58,8 @@
 //!   fails. A subscriber more than [`TERMINAL_CHUNKS`] chunks behind is
 //!   closed, like an event subscriber.
 //! - `terminal_input` (gate 11 B P6), in this order: an agent caller gets
-//!   `forbidden`; an instance not in the fleet view `no_terminal`; a codex
+//!   `forbidden`; an instance not in the fleet view, or `failed`,
+//!   `no_terminal`; a codex
 //!   instance `not_supported` (until U17); otherwise the bytes are recorded
 //!   ([`FakeDaemon::terminal_inputs`]) and nothing is answered. Errors carry
 //!   no request id.
@@ -87,8 +88,8 @@ use agend_core::protocol::client::{
     EventData, FleetData, FleetView, InboxMessage, InstanceAddedData, InstanceChangedData,
     InstanceView, MAX_MESSAGE_BYTES, MessageLevel, MessagesData, OperatorCommand, RETAINED_EVENTS,
     RestartingData, ResultIdentity, SUPPORTED_VERSIONS, SelectedVersionData, StatusData,
-    TaskChangedData, TaskCreatedData, TaskView, TeamView, TerminalBytesData, TerminalSnapshotData, error_code,
-    is_uuid_v4, message_too_long, order_attention, uuid_v4,
+    TaskChangedData, TaskCreatedData, TaskView, TeamView, TerminalBytesData, TerminalSnapshotData,
+    error_code, is_uuid_v4, message_too_long, order_attention, uuid_v4,
 };
 use agend_core::protocol::{ProtocolVersion, negotiate};
 
@@ -170,7 +171,8 @@ struct Shared {
     /// Connections being served now.
     open: std::sync::atomic::AtomicUsize,
     /// Every accepted connection, so drop can close them.
-    connections: Mutex<Vec<UnixStream>>,
+    /// (accept number, a clone), kept while the connection is served.
+    connections: Mutex<Vec<(u64, UnixStream)>>,
 }
 
 /// A running fake daemon. Drop stops accepting, closes every open
@@ -450,7 +452,7 @@ impl Drop for FakeDaemon {
             let _ = accept.join();
         }
         // The accept loop has exited, so no connection is added after this.
-        for connection in lock(&self.shared.connections).drain(..) {
+        for (_, connection) in lock(&self.shared.connections).drain(..) {
             let _ = connection.shutdown(Shutdown::Both);
         }
         {
@@ -508,6 +510,7 @@ fn fleet(state: &State) -> FleetView {
 }
 
 fn accept_loop(listener: UnixListener, shared: Arc<Shared>) {
+    let mut accepted = 0u64;
     for stream in listener.incoming() {
         if shared.stopping.load(Ordering::SeqCst) {
             break;
@@ -517,7 +520,9 @@ fn accept_loop(listener: UnixListener, shared: Arc<Shared>) {
         let (Ok(for_drop), Ok(for_close)) = (stream.try_clone(), stream.try_clone()) else {
             continue;
         };
-        lock(&shared.connections).push(for_drop);
+        accepted += 1;
+        let number = accepted;
+        lock(&shared.connections).push((number, for_drop));
         let shared = Arc::clone(&shared);
         shared.open.fetch_add(1, Ordering::SeqCst);
         let _ = std::thread::Builder::new()
@@ -525,9 +530,12 @@ fn accept_loop(listener: UnixListener, shared: Arc<Shared>) {
             .spawn(move || {
                 let _ = serve(stream, &shared);
                 shared.open.fetch_sub(1, Ordering::SeqCst);
-                // Other handles (the drop list, subscribers) keep the socket
-                // open; shut it down so the client reads EOF.
+                // Other handles (subscribers) keep the socket open; shut it
+                // down so the client reads EOF, and let go of its clone (a
+                // long-lived fake would otherwise hold a descriptor per
+                // connection it ever accepted).
                 let _ = for_close.shutdown(Shutdown::Both);
+                lock(&shared.connections).retain(|(n, _)| *n != number);
             });
     }
 }
@@ -820,7 +828,7 @@ fn restart(shared: &Shared) {
         state.subscribers.clear();
         state.terminals.clear();
     }
-    for connection in lock(&shared.connections).drain(..) {
+    for (_, connection) in lock(&shared.connections).drain(..) {
         let _ = connection.shutdown(Shutdown::Both);
     }
 }
@@ -952,8 +960,13 @@ fn handle(state: &mut State, request: ClientRequest, conn: &Connection) -> Vec<C
                 )];
             }
             let id = data.instance_id;
-            let Some(instance) = state.instances.iter().find(|i| i.instance_id == id) else {
-                let message = format!("no instance {id}; nothing was written");
+            // A `failed` instance has no live terminal (as on the daemon).
+            let Some(instance) = state
+                .instances
+                .iter()
+                .find(|i| i.instance_id == id && i.state != AgentState::Failed)
+            else {
+                let message = format!("{id} has no live terminal; nothing was written");
                 return vec![error(None, error_code::NO_TERMINAL, message)];
             };
             if instance.backend == "codex" {
