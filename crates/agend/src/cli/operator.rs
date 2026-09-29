@@ -228,7 +228,7 @@ fn remove(target: &Target, name: &str, yes: bool, json: bool) -> Result<Output, 
         if !confirm(&format!(
             "remove {name}? its agent is stopped; the workspace is kept"
         )) {
-            return Err(Failure::new("usage", format!("{name} was not removed")));
+            return Err(Failure::new("declined", format!("{name} was not removed")));
         }
     }
     let check = "agend instance list";

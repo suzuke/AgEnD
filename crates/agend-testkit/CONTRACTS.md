@@ -164,7 +164,7 @@ fixture（`ClientProtocolFixture`）：`socket`、`emit`（讓至少一個新事
 | CLP-14 | 操作者 `instance_add` 新名字 → `instance_added`（名字、非空的 `working_directory`），全貌出現它且 `working_directory` 相同；同名再加 → `instance_exists`；不合規則的名字 → `invalid_request`；`instance_remove` → `accepted`、全貌不再有它；再刪 → `unknown_instance` | 第 9 施工關 P6 | `ReaddIsAccepted` |
 | CLP-15 | `daemon_restart { binary }` 的形狀：`binary` 是跑不起來的路徑 → `preflight_failed`；連線不斷、沒有事件、全貌不變 | 第 9 施工關 P6、P7 | `DropsRestartBinary` |
 | CLP-16 | 操作者 `task_cancel` → `not_supported`（帶 request id），沒有事件、全貌不變（handler 在第 10 施工關） | 第 9 施工關 P1 | `AcceptsTaskCancel` |
-| CLP-17 | `send` 同一個 `message_id`（UUID v4）再送一次仍 `accepted`、收件者的 `inbox` 只有一則；同 id 不同內容、不是 UUID v4 的 id → `invalid_request`；`inbox --after` 自己的一則 → 只回之後的；不存在的 id、別人的訊息 → `unknown_message` | 第 9 施工關 P2、P5；第 7 施工關 P5 | `NewIdOnResend`、`InboxIgnoresAfter` |
+| CLP-17 | `send` 同一個 `message_id`（UUID v4）再送一次仍 `accepted`、收件者的 `inbox` 只有一則；同 id 不同內容、不是 UUID v4 的 id、超過 1 MiB 的 body（第 9 施工關 L17）→ `invalid_request`；`inbox --after` 自己的一則 → 只回之後的；不存在的 id、別人的訊息 → `unknown_message` | 第 9 施工關 P2、P5；第 7 施工關 P5 | `NewIdOnResend`、`InboxIgnoresAfter`、`AcceptsHugeBody` |
 | CLP-18 | `subscribe_terminal` 之後，終端印出新東西 → `terminal_bytes`；同一條連線再訂一次 → 新的畫面，而且看得到那段輸出 | 第 11 施工關 P5；第 8 施工關 C8 | `FreezesScreen` |
 | CLP-19 | 對沒有終端的 instance（不存在的 id）`subscribe_terminal` → `no_terminal`（不帶 request id），連線不斷；這條連線之前訂的終端**不再**送 `terminal_bytes`（失敗的重訂也取代舊的） | 第 11 施工關 P1、P5 | `ScreenForAnyInstance` |
 | CLP-20 | `terminal_input`：agent（`hello` 帶 `caller`）不管 instance 存不存在都是 `forbidden`（先查身分）；操作者對不存在的 instance → `no_terminal`；操作者對有終端的 instance → 不回任何東西，位元組原樣到終端，agent 送的沒有；錯誤都不帶 request id | 第 11 施工關 P6、D17 | `AnyoneMayType` |

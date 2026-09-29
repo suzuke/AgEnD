@@ -113,6 +113,16 @@ impl Server {
         turn: Duration,
         state_dir: Option<PathBuf>,
     ) -> io::Result<Server> {
+        Server::bind_with(requested, turn, state_dir, true)
+    }
+
+    /// [`Server::bind`]; `duplex: false` is the stuck peer (see `Shared`).
+    pub fn bind_with(
+        requested: &Path,
+        turn: Duration,
+        state_dir: Option<PathBuf>,
+        duplex: bool,
+    ) -> io::Result<Server> {
         let bound = socket_path_for(requested);
         let _ = std::fs::remove_file(&bound);
         // An old symlink (a server that died) is replaced (U14: what the
@@ -132,6 +142,7 @@ impl Server {
         let shared = Arc::new(Shared {
             state: Mutex::new(state),
             turn,
+            duplex,
             closed: std::sync::atomic::AtomicBool::new(false),
             accepted: std::sync::atomic::AtomicU64::new(0),
         });
@@ -197,6 +208,11 @@ pub fn socket_path_for(requested: &Path) -> PathBuf {
 struct Shared {
     state: Mutex<State>,
     turn: Duration,
+    /// Reads while its writes wait, like the real app-server (tokio, a
+    /// reader and a writer per connection). `false` (`--disable
+    /// duplex-io`): a stuck peer that blocks on a full socket and stops
+    /// reading, for testing the daemon against one.
+    duplex: bool,
     /// Set when the [`Server`] is dropped: every connection ends.
     closed: std::sync::atomic::AtomicBool,
     /// Connections accepted so far.
@@ -971,6 +987,13 @@ fn serve(stream: UnixStream, shared: &Shared) -> tungstenite::Result<()> {
     socket
         .get_ref()
         .set_read_timeout(Some(Duration::from_millis(5)))?;
+    if shared.duplex {
+        // A write that cannot go out now waits in the WebSocket's buffer
+        // while this thread goes on reading.
+        socket
+            .get_ref()
+            .set_write_timeout(Some(Duration::from_millis(5)))?;
+    }
     let (tx, rx) = mpsc::channel();
     let connection = {
         let mut state = lock(&shared.state);
@@ -999,7 +1022,13 @@ fn pump(
             return Ok(());
         }
         while let Ok(message) = outgoing.try_recv() {
-            socket.send(Message::text(message.to_string()))?;
+            queue(socket, &message, shared.duplex)?;
+        }
+        if shared.duplex {
+            match socket.flush() {
+                Err(e) if !waits(&e) => return Err(e),
+                _ => {}
+            }
         }
         match socket.read() {
             Ok(Message::Text(text)) => {
@@ -1007,8 +1036,8 @@ fn pump(
                     continue;
                 };
                 // Messages for this connection, in order (the reply among them).
-                for reply in handle(&message, connection, shared) {
-                    socket.send(Message::text(reply.to_string()))?;
+                for reply in handle(&message, connection, outgoing, shared) {
+                    queue(socket, &reply, shared.duplex)?;
                 }
             }
             Ok(Message::Close(_)) => return Ok(()),
@@ -1026,6 +1055,29 @@ fn pump(
     }
 }
 
+/// A write that could not finish now (the socket buffer is full).
+fn waits(e: &tungstenite::Error) -> bool {
+    matches!(e, tungstenite::Error::Io(e)
+        if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut))
+}
+
+/// Sends `message` in order: duplex, it may wait in the buffer (flushed on
+/// the next loop); otherwise the thread blocks until it is written.
+fn queue(
+    socket: &mut WebSocket<UnixStream>,
+    message: &Value,
+    duplex: bool,
+) -> tungstenite::Result<()> {
+    let frame = Message::text(message.to_string());
+    if !duplex {
+        return socket.send(frame);
+    }
+    match socket.write(frame) {
+        Err(e) if !waits(&e) => Err(e),
+        _ => Ok(()),
+    }
+}
+
 fn text_of(params: &Value) -> String {
     params["input"]
         .as_array()
@@ -1040,14 +1092,27 @@ fn text_of(params: &Value) -> String {
 }
 
 /// Handles one client message; returns what to send back on this
-/// connection before any queued notification: the response to a request,
-/// plus the notifications `thread/resume` sends around it.
-fn handle(message: &Value, connection: u64, shared: &Shared) -> Vec<Value> {
+/// connection before any notification queued later: first the messages
+/// already queued for it (`outgoing`), then the response to a request, plus
+/// the notifications `thread/resume` sends around it.
+///
+/// Every message is queued under the state lock, so draining `outgoing`
+/// under that lock takes exactly what the server emitted before handling
+/// this message: a reply must not overtake it (a first-turn user message
+/// that came due just before a `turn/interrupt` went out after the
+/// interrupt's reply, unlike interrupt.jsonl).
+fn handle(
+    message: &Value,
+    connection: u64,
+    outgoing: &Receiver<Value>,
+    shared: &Shared,
+) -> Vec<Value> {
     let mut state = lock(&shared.state);
+    let mut out: Vec<Value> = outgoing.try_iter().collect();
     let Some(method) = message["method"].as_str() else {
         // A response to one of our requests (approval decision).
         let Some(id) = message["id"].as_i64() else {
-            return Vec::new();
+            return out;
         };
         if let Some((thread_id, _)) = state.pending_approvals.remove(&(connection, id)) {
             let decision = message["result"]["decision"]
@@ -1056,10 +1121,10 @@ fn handle(message: &Value, connection: u64, shared: &Shared) -> Vec<Value> {
                 .to_owned();
             state.answer(&thread_id, id, &decision, shared.turn);
         }
-        return Vec::new();
+        return out;
     };
     let Some(id) = message.get("id").cloned() else {
-        return Vec::new();
+        return out;
     };
     let params = &message["params"];
     let thread_id = params["threadId"].as_str().unwrap_or_default().to_owned();
@@ -1358,9 +1423,10 @@ fn handle(message: &Value, connection: u64, shared: &Shared) -> Vec<Value> {
         Ok(result) => json!({"id": id, "result": result}),
         Err((code, message)) => json!({"id": id, "error": {"code": code, "message": message}}),
     };
-    before.push(reply);
-    before.extend(after);
-    before
+    out.extend(before);
+    out.push(reply);
+    out.extend(after);
+    out
 }
 
 /// Waits until a server accepts connections on `listen_path` (the socket

@@ -928,3 +928,508 @@ pub fn init_and_doctor(lab: &Lab) -> Result<Vec<String>, String> {
     out.extend(with_daemon.shown());
     Ok(out)
 }
+
+/// Whether a process with this pid is still there (and not a zombie):
+/// `ps -o stat= -p <pid>`.
+fn alive(pid: &str) -> bool {
+    let state = std::process::Command::new("ps")
+        .args(["-o", "stat=", "-p", pid.trim()])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+        .unwrap_or_default();
+    !state.is_empty() && !state.starts_with('Z')
+}
+
+/// `== stop during a preflight` (verifier F1): Ctrl-C while a preflight
+/// runs removes its home (a copy of agend.db) and ends its child.
+pub fn stop_during_preflight(lab: &Lab) -> Result<Vec<String>, String> {
+    let home = lab.home(10);
+    let mut daemon = start(lab, &home)?;
+    let cli = Cli::new(&lab.agend, &home);
+    let pid_file = lab.root.join("stopped-preflight.pid");
+    let slow = script(
+        lab,
+        "stopped-agend",
+        &format!("echo $$ > '{}'\nexec sleep 30", pid_file.display()),
+    )?;
+    let slow = slow.display().to_string();
+    let args = ["daemon", "restart", "--binary", slow.as_str()];
+    let (child, started) = cli.spawn(Some(&home), None, &args, &[])?;
+    let line = daemon.expect("preflight home /tmp/agend-pf-")?;
+    let pf = line.rsplit(' ').next().unwrap_or_default().to_owned();
+    wait_for(Duration::from_secs(10), "the preflight child", || {
+        pid_file.exists()
+    })?;
+    let pid = fs::read_to_string(&pid_file).map_err(|e| e.to_string())?;
+    daemon.interrupt()?;
+    let run = finish(
+        describe(None, &args),
+        child,
+        started,
+        Duration::from_secs(30),
+    );
+    let gone = wait_for(Duration::from_secs(5), "the preflight home to go", || {
+        !Path::new(&pf).exists()
+    });
+    let ended = wait_for(Duration::from_secs(5), "the preflight child to end", || {
+        !alive(&pid)
+    });
+    gone?;
+    ended?;
+    let stopped = daemon.expect(&format!("preflight pid {}: stopped", pid.trim()))?;
+    let mut out = run.shown();
+    out.push(crate::lab::untimed(&stopped).to_owned());
+    out.push(format!(
+        "Ctrl-C during the preflight: {pf} removed, preflight child pid {} ended",
+        pid.trim()
+    ));
+    Ok(out)
+}
+
+/// `== preflight deadline` (verifier F2): a child that exits but leaves a
+/// process holding its stdout is judged at once; one that never exits is
+/// stopped after 60 s; either way the next restart may run.
+pub fn preflight_deadline(lab: &Lab) -> Result<Vec<String>, String> {
+    let home = lab.home(11);
+    let mut daemon = start(lab, &home)?;
+    let cli = Cli::new(&lab.agend, &home);
+    let mut out = Vec::new();
+    // The process it leaves holds its stdout for 8 s: an answer before then
+    // did not wait for the pipe (with room for a loaded host).
+    let leaves = script(lab, "leaves-agend", "sleep 8 &\nexit 1")?;
+    let leaves = leaves.display().to_string();
+    let run = cli.run(None, &["daemon", "restart", "--binary", &leaves]);
+    expect_run(
+        &run,
+        1,
+        &["agend: preflight_failed: ", "exited with status 1"],
+    )?;
+    ensure(run.took < Duration::from_secs(8), || {
+        format!("waited for the pipe: {:?}", run.took)
+    })?;
+    out.extend(run.shown());
+    let pid_file = lab.root.join("hanging-preflight.pid");
+    let hangs = script(
+        lab,
+        "hanging-agend",
+        &format!("echo $$ > '{}'\nexec sleep 90", pid_file.display()),
+    )?;
+    let hangs = hangs.display().to_string();
+    let run = cli.run(None, &["daemon", "restart", "--binary", &hangs]);
+    expect_run(
+        &run,
+        1,
+        &[&format!(
+            "agend: preflight_failed: {hangs} daemon preflight did not finish within 60 s"
+        )],
+    )?;
+    let pf = crate::lab::untimed(&daemon.expect("preflight home /tmp/agend-pf-")?).to_owned();
+    let pid = fs::read_to_string(&pid_file).map_err(|e| e.to_string())?;
+    ensure(!alive(&pid), || {
+        format!("preflight child {} still runs", pid.trim())
+    })?;
+    ensure(preflight_left(&daemon).is_empty(), || {
+        format!("left: {:?}", preflight_left(&daemon))
+    })?;
+    out.extend(run.shown());
+    let next = cli.run(None, &["daemon", "restart", "--binary", "/usr/bin/false"]);
+    expect_run(&next, 1, &["exited with status 1"])?;
+    out.push(format!(
+        "the child (pid {}) was stopped; {pf}: every preflight home removed; the next restart ran",
+        pid.trim()
+    ));
+    daemon.interrupt()?;
+    Ok(out)
+}
+
+/// The preflight homes this daemon logged that still exist.
+fn preflight_left(daemon: &Daemon) -> Vec<String> {
+    daemon
+        .log
+        .iter()
+        .filter_map(|l| l.split("preflight home ").nth(1))
+        .map(str::to_owned)
+        .filter(|p| Path::new(p).exists())
+        .collect()
+}
+
+/// `== limits` (verifier F3, L17): a body over 1 MiB is refused before it
+/// is stored; a line over 8 MiB is refused and closed without being read;
+/// the daemon and the next messages carry on.
+pub fn limits(lab: &Lab) -> Result<Vec<String>, String> {
+    use agend_core::protocol::client::{
+        AgentCommand, ClientCommandData, MAX_LINE_BYTES, MAX_MESSAGE_BYTES,
+    };
+    let home = lab.home(12);
+    let mut daemon = start(lab, &home)?;
+    let cli = Cli::new(&lab.agend, &home);
+    add_sleeper(&cli, "g9-a")?;
+    add_sleeper(&cli, "g9-b")?;
+    let socket = home.join(DAEMON_SOCKET);
+    let send = |c: &mut ProbeClient, id: &str, body: String| {
+        c.request(&ClientRequest::Command {
+            data: ClientCommandData {
+                request_id: id.into(),
+                command: AgentCommand::Send {
+                    to: "g9-b".into(),
+                    message: body,
+                    level: None,
+                    message_id: None,
+                },
+            },
+        })
+        .map_err(|e| e.to_string())
+    };
+    let (mut c, _) = ProbeClient::hello(&socket, Some("g9-a")).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    let reply = send(&mut c, "l-1", "x".repeat(MAX_MESSAGE_BYTES + 1))?;
+    let ClientResponse::Error { data } = &reply else {
+        return Err(format!("a body of 1 MiB + 1 got {reply:?}"));
+    };
+    ensure(
+        data.code == "invalid_request"
+            && data.message
+                == format!(
+                    "the message is {} bytes; a message is limited to 1048576 bytes (1 MiB)",
+                    MAX_MESSAGE_BYTES + 1
+                ),
+        || format!("{data:?}"),
+    )?;
+    out.push(format!(
+        "send of {} bytes: {}: {}",
+        MAX_MESSAGE_BYTES + 1,
+        data.code,
+        data.message
+    ));
+    let reply = send(&mut c, "l-2", "y".repeat(MAX_MESSAGE_BYTES))?;
+    ensure(
+        matches!(&reply, ClientResponse::CommandResult { .. }),
+        || format!("a body of exactly 1 MiB got {reply:?}"),
+    )?;
+    out.push(format!("send of {MAX_MESSAGE_BYTES} bytes: accepted"));
+    let (mut long, _) = ProbeClient::hello(&socket, Some("g9-a")).map_err(|e| e.to_string())?;
+    let _ = long.send_raw(&"z".repeat(MAX_LINE_BYTES + 1024));
+    let answer = long.recv_within(Duration::from_secs(10));
+    let closed = matches!(long.recv_within(Duration::from_secs(10)), Ok(None) | Err(_));
+    let said = match &answer {
+        Ok(Some(ClientResponse::Error { data })) => format!("{}: {}", data.code, data.message),
+        other => format!("{other:?}"),
+    };
+    ensure(
+        said.starts_with("invalid_request: a protocol line is limited to 8388608 bytes") && closed,
+        || format!("a line over 8 MiB got {said}, closed {closed}"),
+    )?;
+    out.push(format!("a line over 8 MiB: {said}; closed"));
+    let after = cli.run(Some("g9-a"), &["send", "g9-b", "still fine"]);
+    expect_run(&after, 0, &["accepted: message "])?;
+    let inbox = cli.run(Some("g9-b"), &["inbox"]);
+    expect_run(&inbox, 0, &[" from g9-a: still fine"])?;
+    out.push(
+        "afterwards: agend send g9-b \"still fine\" → accepted, and it is in g9-b's inbox".into(),
+    );
+    ensure(daemon.log.iter().all(|l| !l.contains("panicked")), || {
+        "daemon panicked".into()
+    })?;
+    daemon.interrupt()?;
+    Ok(out)
+}
+
+/// Starts `send <to> <body>` from agent `from` on a raw connection and
+/// returns the connection and when it was sent; the reply is read later.
+fn raw_send(
+    home: &Path,
+    from: &str,
+    to: &str,
+    request_id: &str,
+    body: String,
+) -> Result<ProbeClient, String> {
+    use agend_core::protocol::client::{AgentCommand, ClientCommandData};
+    let (mut c, _) =
+        ProbeClient::hello(&home.join(DAEMON_SOCKET), Some(from)).map_err(|e| e.to_string())?;
+    c.send(&ClientRequest::Command {
+        data: ClientCommandData {
+            request_id: request_id.into(),
+            command: AgentCommand::Send {
+                to: to.into(),
+                message: body,
+                level: None,
+                message_id: None,
+            },
+        },
+    })
+    .map_err(|e| e.to_string())?;
+    Ok(c)
+}
+
+/// The reply to a `raw_send`, waiting at most `within`.
+fn raw_reply(c: &mut ProbeClient, within: Duration) -> Result<ClientResponse, String> {
+    let deadline = Instant::now() + within;
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(format!("no reply within {within:?}"));
+        }
+        match c.recv_within(left) {
+            Ok(Some(ClientResponse::Event { .. })) => {}
+            Ok(Some(reply)) => return Ok(reply),
+            Ok(None) => return Err("the daemon closed the connection".into()),
+            Err(_) => {}
+        }
+    }
+}
+
+/// A small first message to `to`, confirmed: the fake (like codex) shows a
+/// thread's first user message late and later ones at once, echoing the
+/// whole text, which is what makes the big messages overlap.
+fn warm_up(cli: &Cli, daemon: &mut Daemon, to: &str) -> Result<(), String> {
+    let run = cli.run(Some("g9-a"), &["send", to, "warm up"]);
+    expect_run(&run, 0, &["accepted"])?;
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !daemon
+        .log
+        .iter()
+        .any(|l| l.contains(&format!("{to}: ")) && l.contains(" confirmed (turn "))
+    {
+        ensure(Instant::now() < deadline, || {
+            format!("warm-up to {to} not confirmed")
+        })?;
+        let _ = daemon.expect_within("g9-test: no such line", Duration::from_millis(300));
+    }
+    Ok(())
+}
+
+fn add_codex(cli: &Cli, id: &str, extra: &[&str]) -> Result<(), String> {
+    let program = crate::codex::fake_codex()?.display().to_string();
+    let mut args = vec![
+        "instance",
+        "add",
+        id,
+        "codex",
+        "--program",
+        program.as_str(),
+        "--",
+        "--turn-ms",
+        "200",
+    ];
+    args.extend_from_slice(extra);
+    expect_run(&cli.run(None, &args), 0, &[&format!("added {id} (codex, ")])
+}
+
+/// `== large messages` (verifier r2 #1): three 512 KiB messages back to back
+/// to a codex agent are each delivered and `confirmed`, and the agent can
+/// still be removed. (512 KiB: larger than a unix socket's buffer on macOS
+/// and on Linux, so both sides of the connection must read while writing.)
+pub fn large_messages(lab: &Lab) -> Result<Vec<String>, String> {
+    let home = lab.home(13);
+    let _bound = [
+        crate::codex::BoundSocket::of(&home, "g9-a"),
+        crate::codex::BoundSocket::of(&home, "g9-b"),
+    ];
+    let mut daemon = start(lab, &home)?;
+    let cli = Cli::new(&lab.agend, &home);
+    add_codex(&cli, "g9-a", &[])?;
+    add_codex(&cli, "g9-b", &[])?;
+    for id in ["g9-a", "g9-b"] {
+        daemon.expect_within(&format!("{id}: go (resume "), Duration::from_secs(60))?;
+    }
+    warm_up(&cli, &mut daemon, "g9-b")?;
+    std::thread::sleep(Duration::from_secs(1));
+    let mut out = Vec::new();
+    let started = Instant::now();
+    // Back to back, like agents that do not wait for each other.
+    let mut pending = Vec::new();
+    for n in 1..=3 {
+        let body = format!("{n}").repeat(512 * 1024);
+        pending.push(raw_send(&home, "g9-a", "g9-b", &format!("big-{n}"), body)?);
+    }
+    for (n, c) in pending.iter_mut().enumerate() {
+        let reply = raw_reply(c, Duration::from_secs(90))?;
+        ensure(
+            matches!(&reply, ClientResponse::CommandResult { .. }),
+            || format!("512 KiB message {}: {reply:?}", n + 1),
+        )?;
+    }
+    out.push(format!(
+        "three 512 KiB messages sent back to back: all accepted within {:.1} s",
+        started.elapsed().as_secs_f64()
+    ));
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        // Reads more of the log (the needle never appears).
+        let _ = daemon.expect_within("g9-test: no such line", Duration::from_millis(500));
+        let confirmed = daemon
+            .log
+            .iter()
+            .filter(|l| l.contains("g9-b: ") && l.contains(" confirmed (turn "))
+            .count();
+        // The warm-up and the three.
+        if confirmed >= 4 {
+            out.push("all three confirmed in g9-b's thread".into());
+            break;
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "{}/3 confirmed within 60 s",
+                confirmed.saturating_sub(1)
+            ));
+        }
+    }
+    for id in ["g9-b", "g9-a"] {
+        let run = cli.run(None, &["instance", "remove", id, "--yes"]);
+        expect_run(&run, 0, &[&format!("removed {id}")])?;
+        // It never answered before the fix (the CLI gives up at 10 s).
+        expect_run(&run, 0, &[])?;
+    }
+    out.push("both agents removed".into());
+    daemon.interrupt()?;
+    Ok(out)
+}
+
+/// `== stuck peer` (verifier r2 #1): a codex app-server that stops reading
+/// while its own write waits (`fake_codex --disable duplex-io`) never wedges
+/// the daemon: the link's write times out, `instance remove` and Ctrl-C
+/// finish in seconds.
+pub fn stuck_peer(lab: &Lab) -> Result<Vec<String>, String> {
+    let home = lab.home(14);
+    let _bound = [
+        crate::codex::BoundSocket::of(&home, "g9-a"),
+        crate::codex::BoundSocket::of(&home, "g9-s"),
+        crate::codex::BoundSocket::of(&home, "g9-t"),
+    ];
+    let mut daemon = start(lab, &home)?;
+    let cli = Cli::new(&lab.agend, &home);
+    add_codex(&cli, "g9-a", &[])?;
+    for id in ["g9-s", "g9-t"] {
+        add_codex(&cli, id, &["--disable", "duplex-io"])?;
+    }
+    for id in ["g9-a", "g9-s", "g9-t"] {
+        daemon.expect_within(&format!("{id}: go (resume "), Duration::from_secs(60))?;
+    }
+    let mut out = Vec::new();
+    for to in ["g9-s", "g9-t"] {
+        warm_up(&cli, &mut daemon, to)?;
+    }
+    std::thread::sleep(Duration::from_secs(1));
+    // Three back to back: the app-server echoes the first while the link
+    // writes the next, and neither side reads (verifier r2 #1).
+    let mut pending = Vec::new();
+    for to in ["g9-s", "g9-t"] {
+        for n in 1..=3 {
+            let body = format!("{n}").repeat(512 * 1024);
+            pending.push(raw_send(
+                &home,
+                "g9-a",
+                to,
+                &format!("stuck-{to}-{n}"),
+                body,
+            )?);
+        }
+    }
+    std::thread::sleep(Duration::from_secs(3));
+    let run = cli.run(None, &["instance", "remove", "g9-s", "--yes"]);
+    out.extend(run.shown());
+    expect_run(&run, 0, &["removed g9-s"])?;
+    // Before the fix `remove` never answered (the CLI gave up at 10 s) and
+    // Ctrl-C did not stop the daemon (`interrupt` gives up at 10 s); the
+    // bound leaves room for a loaded host.
+    ensure(run.took < Duration::from_secs(20), || {
+        format!("remove took {:?}", run.took)
+    })?;
+    let took = daemon.interrupt()?;
+    out.push(format!(
+        "a stuck app-server (g9-s): removed in {:.1} s; with another one stuck (g9-t), Ctrl-C stopped the daemon in {:.1} s",
+        run.took.as_secs_f64(),
+        took.as_secs_f64()
+    ));
+    Ok(out)
+}
+
+/// `== swapped binary` (verifier r2 #3): a binary overwritten in place
+/// during its preflight, same size and its modification time put back, is
+/// still refused (its change time moved); the daemon does not exec it.
+pub fn swapped_binary(lab: &Lab) -> Result<Vec<String>, String> {
+    use std::io::{Seek, SeekFrom, Write};
+    let home = lab.home(15);
+    let mut daemon = start(lab, &home)?;
+    let cli = Cli::new(&lab.agend, &home);
+    let body = "sleep 2\necho 'agend 0.0.0'\necho 'db copy: fine'\necho 'holder: hello ok, spawn ok, shutdown ok'\n# a";
+    let path = script(lab, "swapped-agend", body)?;
+    let shown = path.display().to_string();
+    let args = ["daemon", "restart", "--binary", shown.as_str()];
+    let (child, started) = cli.spawn(Some(&home), None, &args, &[])?;
+    daemon.expect("preflight pid ")?;
+    let mtime = fs::metadata(&path)
+        .and_then(|m| m.modified())
+        .map_err(|e| e.to_string())?;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .map_err(|e| e.to_string())?;
+    // The same bytes but the last one, in place: same inode and size.
+    let len = fs::metadata(&path).map_err(|e| e.to_string())?.len();
+    file.seek(SeekFrom::Start(len - 1))
+        .map_err(|e| e.to_string())?;
+    file.write_all(b"b").map_err(|e| e.to_string())?;
+    file.set_modified(mtime).map_err(|e| e.to_string())?;
+    drop(file);
+    let run = finish(
+        describe(None, &args),
+        child,
+        started,
+        Duration::from_secs(60),
+    );
+    expect_run(
+        &run,
+        1,
+        &[&format!(
+            "agend: preflight_failed: {shown} changed while its preflight ran"
+        )],
+    )?;
+    let (pid, _) = hello(&home)?;
+    ensure(pid == Some(daemon.pid), || "the daemon was replaced".into())?;
+    let mut out = run.shown();
+    out.push(
+        "overwritten in place with the same size and mtime: refused; the daemon still runs".into(),
+    );
+    daemon.interrupt()?;
+    Ok(out)
+}
+
+/// `== Ctrl-C during a restart` (found rerunning verifier r2c): a stop
+/// signal that arrives after the preflight passed, while the daemon shuts
+/// down to `exec`, stops it instead of being lost in the old image (which
+/// left the new one running).
+pub fn ctrl_c_during_restart(lab: &Lab) -> Result<Vec<String>, String> {
+    let home = lab.home(16);
+    let mut daemon = start(lab, &home)?;
+    let cli = Cli::new(&lab.agend, &home);
+    let agend = lab.agend.display().to_string();
+    // Slow on purpose, so the signal lands in the hand-off; then the real
+    // agend (its preflight passes; the exec would run it as `daemon`).
+    let slow = script(
+        lab,
+        "slow-real-agend",
+        &format!("sleep 1\nexec '{agend}' \"$@\""),
+    )?;
+    let slow = slow.display().to_string();
+    let args = ["daemon", "restart", "--binary", slow.as_str()];
+    let (child, started) = cli.spawn(Some(&home), None, &args, &[])?;
+    daemon.expect("preflight passed; restarting with ")?;
+    let stopped = daemon.interrupt()?;
+    let run = finish(
+        describe(None, &args),
+        child,
+        started,
+        Duration::from_secs(60),
+    );
+    let execed = daemon.log.iter().any(|l| l.contains(" exec "));
+    ensure(!execed, || {
+        format!("the daemon exec'd after Ctrl-C:\n{}", daemon.log.join("\n"))
+    })?;
+    let mut out = run.shown();
+    out.push(format!(
+        "Ctrl-C right after `preflight passed`: the daemon stopped in {:.1} s and did not exec",
+        stopped.as_secs_f64()
+    ));
+    Ok(out)
+}

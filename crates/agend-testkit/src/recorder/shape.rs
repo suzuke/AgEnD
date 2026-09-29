@@ -22,7 +22,10 @@
 //!    in the fake's module docs).
 //! 5. Kinds in [`UNORDERED`] (bookkeeping the backend emits asynchronously)
 //!    are compared as a set: each kind must occur on both sides, with the
-//!    same shape merged over all its occurrences. Everything else keeps its
+//!    same shape merged over all its occurrences. So are the kinds in
+//!    [`TIMED`] in their scenario: replies whose place among the backend's
+//!    own-clock events is set by when the client sends the request (rule 1
+//!    inside one stream). Everything else keeps its
 //!    order and its count: a repeated lifecycle message (two
 //!    `turn/completed`) is a difference. Only kinds in [`COLLAPSED`]
 //!    (streaming deltas and polling, whose count is timing) have their runs
@@ -150,6 +153,27 @@ pub const UNORDERED: &[Rule] = &[
         "sse/backend",
         "message.updated",
         "message info updates (summary, completion) race the part events; turn state is read from session.status / session.idle and the parts",
+    ),
+];
+
+/// `(backend, scenario, stream, kind, why)`: in this scenario, compared as
+/// a set like [`UNORDERED`] (rule 5): a reply whose place among events the
+/// backend emits on its own clock depends only on when the client sent the
+/// request.
+pub const TIMED: &[(&str, &str, &str, &str, &str)] = &[
+    (
+        "codex",
+        "busy",
+        "ws/backend",
+        "result turn/steer",
+        "sent while the first turn's user message is pending; codex 0.158.0 shows that message on its own clock (2.6–3.9 s after turn/started: one_turn 2587 ms, busy 2990 ms, queue_idle 3880 ms), a steer does not bring it forward (busy: steered at 2.0 s, shown at 3.0 s; only an interrupt does, interrupt.jsonl), so the reply lands before it only because the recorder steers after 2 s",
+    ),
+    (
+        "codex",
+        "busy",
+        "ws/backend",
+        "result thread/queue/add",
+        "sent right after that steer, while the same user message is pending (busy: queue/changed at 2016 ms, user message at 2990 ms): same timing",
     ),
 ];
 
@@ -385,7 +409,8 @@ pub struct Item {
 pub struct Normal {
     /// Per stream, in order, runs of [`COLLAPSED`] kinds collapsed.
     pub ordered: BTreeMap<String, Vec<Item>>,
-    /// Per stream, the [`UNORDERED`] kinds with their merged shape.
+    /// Per stream, the [`UNORDERED`] and [`TIMED`] kinds with their merged
+    /// shape.
     pub unordered: BTreeMap<String, BTreeMap<String, Shape>>,
 }
 
@@ -429,8 +454,9 @@ fn listed(rules: &[Rule], backend: &str, stream: &str, kind: &str) -> bool {
         .any(|(b, s, k, _)| *b == backend && *s == stream && *k == kind)
 }
 
-/// Rules 1–5. `scenario` is `Some` for the real side (rule 4).
-pub fn normalise(backend: &str, scenario: Option<&str>, entries: &[Entry]) -> Normal {
+/// Rules 1–5 for `scenario` ([`TIMED`]); `real` is the recording's side
+/// ([`DELIBERATE`], rule 4).
+pub fn normalise(backend: &str, scenario: Option<&str>, real: bool, entries: &[Entry]) -> Normal {
     let mut reasoning = BTreeSet::new();
     let mut kept: Vec<(String, String, &Entry)> = kinds(entries)
         .into_iter()
@@ -441,7 +467,8 @@ pub fn normalise(backend: &str, scenario: Option<&str>, entries: &[Entry]) -> No
         .map(|((stream, kind), entry)| (stream, kind, entry))
         .collect();
     for (b, sc, stream, kind, _) in DELIBERATE {
-        if *b == backend
+        if real
+            && *b == backend
             && scenario == Some(*sc)
             && let Some(i) = kept.iter().rposition(|(s, k, _)| s == stream && k == kind)
         {
@@ -451,7 +478,10 @@ pub fn normalise(backend: &str, scenario: Option<&str>, entries: &[Entry]) -> No
     let mut out = Normal::default();
     for (stream, kind, entry) in kept {
         let shape = Shape::of(&without_reasoning(&entry.msg));
-        if listed(UNORDERED, backend, &stream, &kind) {
+        let timed = TIMED.iter().any(|(b, sc, s, k, _)| {
+            *b == backend && scenario == Some(*sc) && *s == stream && *k == kind
+        });
+        if timed || listed(UNORDERED, backend, &stream, &kind) {
             let kinds = out.unordered.entry(stream).or_default();
             let merged = match kinds.remove(&kind) {
                 Some(old) => old.merge(shape),
@@ -526,8 +556,8 @@ fn is_id(s: &str) -> bool {
 /// Every difference between the real recording of `scenario` and the fake
 /// run, as readable lines; empty when they have the same shape.
 pub fn compare(backend: &str, scenario: &str, real: &[Entry], fake: &[Entry]) -> Vec<String> {
-    let real = normalise(backend, Some(scenario), real);
-    let fake = normalise(backend, None, fake);
+    let real = normalise(backend, Some(scenario), true, real);
+    let fake = normalise(backend, Some(scenario), false, fake);
     let mut diffs = Vec::new();
     let names: BTreeSet<&String> = real.ordered.keys().chain(fake.ordered.keys()).collect();
     let empty = Vec::new();
@@ -726,7 +756,7 @@ mod tests {
             e(Side::Backend, "http", json!({"status": 200, "body": []})),
         ];
         assert_eq!(compare("x", "s", &real, &fake), Vec::<String>::new());
-        let items = normalise("x", None, &real);
+        let items = normalise("x", None, false, &real);
         assert_eq!(
             items.ordered["http/backend"][0].kind,
             "200 GET /session/:id/message"

@@ -35,7 +35,7 @@
 2. 訊息種類：JSON-RPC 的 `request`／`notify`／`result`／`error <method>`；HTTP 的 `方法 路徑`（id 段落 → `:id`）與回應 `狀態 請求`；SSE 的 `type`；hook 的事件名與回覆；按鍵；畫面標記。
 3. 兩邊都先丟掉：`IGNORED`（機器、帳號、計時器雜訊，各附原因）與模型自己決定的 reasoning（事件與訊息內容裡的 reasoning part／item）。
 4. `DELIBERATE`：假 agent 刻意和真 CLI 不同的地方，從真的那邊丟掉最後一則（目前只有 claude `busy`，見下表）。
-5. `UNORDERED`：非同步的簿記事件（opencode 的 `session.*`、`message.updated`，codex 的 `thread/queue/changed`）只比「有沒有」與合併後的形狀，不比順序。其餘保持順序**與則數**：重複的生命週期事件（兩個 `turn/completed`）就是差異。只有 `COLLAPSED` 列出的串流與輪詢種類（codex `item/agentMessage/delta`、opencode `message.part.delta`、`GET /permission` 與其回應；則數是時序）連續多則合併成一則，形狀取聯集。
+5. `UNORDERED`：非同步的簿記事件（opencode 的 `session.*`、`message.updated`，codex 的 `thread/queue/changed`）只比「有沒有」與合併後的形狀，不比順序。`TIMED` 列出的回覆在它那個情境也這樣比：請求送出的時間決定它排在 backend 自己計時發出的事件前或後（規則 1 的道理，只是落在同一流裡；目前只有 codex `busy` 的 `turn/steer`、`thread/queue/add` 回覆，和第一輪延遲出現的 user message 比先後，證據寫在規則裡）。其餘保持順序**與則數**：重複的生命週期事件（兩個 `turn/completed`）就是差異。只有 `COLLAPSED` 列出的串流與輪詢種類（codex `item/agentMessage/delta`、opencode `message.part.delta`、`GET /permission` 與其回應；則數是時序）連續多則合併成一則，形狀取聯集。
 6. 形狀：欄位名稱、巢狀、值的型別；值本身不比，只有 `type`、`status`、`role`、`kind`、`source`、`hook_event_name`、`decision`、`stop_hook_active`、`method` 保留值。
 7. 陣列比元素形狀的集合，空陣列和任何陣列相符；是 id 的物件 key 當成 `:id`。
 
@@ -102,7 +102,7 @@ target/debug/agend-record startup-check claude   # 在沙箱裡：只啟動、�
 
 1. 在 `src/recorder/` 加一個模組，實作 `recorder::Backend`：`name`、`program`（真 CLI）、`fake`（假 agent binary）、`scenarios`（支援的情境）、`run`（在 `<dir>/project` 啟動 agent、走傳輸、跑情境步驟、把每則訊息 `log.push` 進來、最後關掉）。同一段 `run` 要能跑真的與假的（看 `Agent::fake`）。
 2. 把它加進 `recorder::BACKENDS`。
-3. 需要時在 `recorder::shape` 的 `IGNORED`／`UNORDERED` 加規則（附原因）。
+3. 需要時在 `recorder::shape` 的 `IGNORED`／`UNORDERED`／`TIMED` 加規則（附原因）。
 4. `cargo xtask record <name> --sandbox <script>` 錄製，檢查遮蔽結果後 commit。`tests/conformance.rs` 不用改：`every_fake_matches_its_real_recordings` 逐一檢查 `BACKENDS` 裡的每個 backend（各一個 thread），錄製檔齊全與 secret scan 也一樣。
 
 ## 下一步

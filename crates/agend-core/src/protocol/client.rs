@@ -50,6 +50,24 @@ pub const SUPPORTED_VERSIONS: [ProtocolVersion; 1] = [V1_2];
 /// The daemon's socket, relative to the AgEnD home.
 pub const DAEMON_SOCKET: &str = "run/daemon.sock";
 
+/// Longest `send` body in bytes (1 MiB, gate 9 L17). Larger is
+/// `invalid_request` before anything is stored: the whole body goes into
+/// one backend call (codex: one WebSocket frame, at most 16 MiB).
+pub const MAX_MESSAGE_BYTES: usize = 1 << 20;
+/// Longest protocol line in bytes (8 MiB, gate 9 L17): room for a
+/// [`MAX_MESSAGE_BYTES`] body whose every byte JSON escapes to `\u00XX`.
+/// A longer line gets `invalid_request` and the connection is closed,
+/// before the line is read into memory.
+pub const MAX_LINE_BYTES: usize = 8 << 20;
+
+/// What a `send` whose body is `len` bytes gets (the daemon, the fake and
+/// the CLI say the same).
+pub fn message_too_long(len: usize) -> String {
+    alloc::format!(
+        "the message is {len} bytes; a message is limited to {MAX_MESSAGE_BYTES} bytes (1 MiB)"
+    )
+}
+
 /// How many events the daemon keeps for `subscribe_events`; a subscriber
 /// that falls further behind is disconnected (gate 8 P8).
 pub const RETAINED_EVENTS: usize = 1024;

@@ -101,6 +101,41 @@ fn milestone_two_codex_agents_across_a_restart() {
     run(sections::milestone);
 }
 
+#[test]
+fn ctrl_c_during_a_preflight_leaves_nothing() {
+    run(sections::stop_during_preflight);
+}
+
+#[test]
+fn the_preflight_deadline_holds() {
+    run(sections::preflight_deadline);
+}
+
+#[test]
+fn oversized_messages_and_lines_are_refused() {
+    run(sections::limits);
+}
+
+#[test]
+fn large_messages_to_codex_are_delivered() {
+    run(sections::large_messages);
+}
+
+#[test]
+fn a_stuck_codex_app_server_never_wedges_the_daemon() {
+    run(sections::stuck_peer);
+}
+
+#[test]
+fn a_binary_swapped_during_its_preflight_is_refused() {
+    run(sections::swapped_binary);
+}
+
+#[test]
+fn ctrl_c_during_a_restart_stops_the_daemon() {
+    run(sections::ctrl_c_during_restart);
+}
+
 /// P3: the daemon has no default home either.
 #[test]
 fn unreachable_daemon_after_ten_seconds() {
@@ -121,7 +156,11 @@ fn unreachable_daemon_after_ten_seconds() {
             .stderr
             .ends_with("Is it running? Start it with: agend daemon\n")
     );
-    assert!(human.took >= Duration::from_secs(10) && human.took < Duration::from_secs(13));
+    // It waited the retry window (the message names it); no upper bound on
+    // the wall clock: under load that measures the host, not agend (a hang
+    // is still caught by the 90 s limit of `cli::finish`).
+    assert!(human.took >= Duration::from_secs(10), "{:?}", human.took);
+    assert!(human.stderr.contains(" after 10 s ("), "{}", human.stderr);
     assert!(
         json.stdout
             .starts_with(r#"{"error":{"code":"daemon_unreachable","message":"cannot reach"#)
@@ -139,15 +178,25 @@ fn an_older_daemon_is_refused_at_once() {
         agend_testkit::fake_daemon::FakeDaemon::start_at(&home.join("run/daemon.sock")).unwrap();
     fake.set_supported_versions(&[agend_core::protocol::client::V1_1]);
     let cli = cli::Cli::new(Path::new(BIN), &home);
+    let hellos = || {
+        fake.requests()
+            .iter()
+            .filter(|r| matches!(r, agend_core::protocol::client::ClientRequest::Hello { .. }))
+            .count()
+    };
     let human = cli.run(None, &["status"]);
+    // Not retried: one connection, one hello (a retry says hello again).
+    // Counted at the daemon, not timed: a wall-clock bound measures the
+    // host under load.
+    assert_eq!(hellos(), 1, "not retried");
     let json = cli.run(None, &["instance", "list", "--json"]);
+    assert_eq!(hellos(), 2, "not retried");
     show(&human.shown());
     assert_eq!(human.code, Some(1));
     assert_eq!(
         human.stderr,
         "agend: the daemon speaks client protocol 1.1; this agend needs 1.2 — stop the daemon (Ctrl-C) and start this binary: agend daemon\n"
     );
-    assert!(human.took < Duration::from_secs(2), "not retried");
     assert!(
         json.stdout
             .starts_with(r#"{"error":{"code":"version_mismatch""#)

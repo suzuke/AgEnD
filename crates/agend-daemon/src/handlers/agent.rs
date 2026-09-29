@@ -20,7 +20,8 @@
 use agend_core::policy::busy::BusyLevel;
 use agend_core::protocol::client::{
     AgentCommand, ClientCommandData, ClientCommandResultData, ClientResponse, CommandResult,
-    InboxMessage, MessageLevel, MessagesData, StatusData, error_code, is_uuid_v4,
+    InboxMessage, MAX_MESSAGE_BYTES, MessageLevel, MessagesData, StatusData, error_code,
+    is_uuid_v4, message_too_long as too_long,
 };
 use agend_core::traits::{AgentMessage, Driver};
 
@@ -106,6 +107,9 @@ async fn send(
     level: Option<MessageLevel>,
     message_id: Option<String>,
 ) -> Result<CommandResult, Refusal> {
+    if body.len() > MAX_MESSAGE_BYTES {
+        return Err((error_code::INVALID_REQUEST, too_long(body.len())));
+    }
     let level = match level.unwrap_or(MessageLevel::Queue) {
         MessageLevel::Queue => BusyLevel::Queue,
         MessageLevel::Steer => BusyLevel::Steer,

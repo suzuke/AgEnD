@@ -359,6 +359,26 @@ pub fn mutants() -> Vec<Mutant> {
                 })
             },
         },
+        // CLP-17: a body over the limit reaches the daemon cut short, so it
+        // is accepted.
+        Mutant {
+            rule: "CLP-17",
+            name: "AcceptsHugeBody",
+            run: |name| {
+                with("CLP-17", name, || {
+                    parsed(|_, direction, mut v| {
+                        if direction == Direction::ToServer
+                            && v["data"]["command"]["message"]
+                                .as_str()
+                                .is_some_and(|m| m.len() > 1 << 20)
+                        {
+                            v["data"]["command"]["message"] = json!("cut short");
+                        }
+                        vec![v]
+                    })
+                })
+            },
+        },
         // CLP-17: `inbox` ignores its cursor.
         Mutant {
             rule: "CLP-17",

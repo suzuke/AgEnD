@@ -16,6 +16,10 @@
 //!   `turn/started` / `turn/completed` the running turn; `item/completed`
 //!   of a user message confirms it. Approval requests are answered
 //!   `decline` (P4: gate 7 has no one to ask).
+//! - A write that makes no progress for 10 s (`rpc::WRITE_WITHIN`: the
+//!   app-server stopped reading) ends the connection like any other error.
+//!   Closing the link shuts its socket down and waits at most 5 s for the
+//!   thread (gate 9, verifier r2).
 //! - The connection ends: reconnect every 100 ms (with `thread/resume`) for
 //!   [`launch::READY_WITHIN`]; then the app-server counts as dead
 //!   ([`CodexEvent::Gone`]) and the thread ends.
@@ -23,10 +27,11 @@
 //! Must NOT: send a message that is not `queued`, or type anything into a
 //! PTY.
 
+use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -61,19 +66,43 @@ pub(crate) enum Command {
     Turns(Sender<Result<Vec<Value>, String>>),
 }
 
+/// How long [`Link::close`] waits for the link thread; after that it is
+/// left to end on its own (logged), never waited for without end.
+const CLOSE_WITHIN: Duration = Duration::from_secs(5);
+
 /// Shared with the driver.
 #[derive(Default)]
 pub(crate) struct Shared {
     pub connected: AtomicBool,
     pub busy: AtomicBool,
     stopping: AtomicBool,
+    /// The current connection's socket: closing the link shuts it down, so
+    /// a thread blocked writing to a peer that does not read wakes up
+    /// (gate 9, verifier r2).
+    socket: Mutex<Option<UnixStream>>,
+}
+
+impl Shared {
+    fn set_socket(&self, conn: &Conn) {
+        let socket = conn.socket().ok();
+        *self.socket.lock().unwrap_or_else(|e| e.into_inner()) = socket;
+    }
+
+    fn shut_down(&self) {
+        if let Some(socket) = self.socket.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            let _ = socket.shutdown(std::net::Shutdown::Both);
+        }
+    }
 }
 
 /// The driver's handle on a link thread.
 pub(crate) struct Link {
+    id: String,
     commands: Option<Sender<Command>>,
     pub shared: Arc<Shared>,
     thread: Option<JoinHandle<()>>,
+    /// Signalled when the thread's `run` returns.
+    done: Option<Receiver<()>>,
 }
 
 /// An answer the link thread will give.
@@ -122,8 +151,24 @@ impl Link {
     fn stop(&mut self) {
         self.shared.stopping.store(true, Ordering::SeqCst);
         self.commands.take();
-        if let Some(thread) = self.thread.take() {
+        self.shared.shut_down();
+        let Some(thread) = self.thread.take() else {
+            return;
+        };
+        let ended = self.done.take().is_none_or(|done| {
+            !matches!(
+                done.recv_timeout(CLOSE_WITHIN),
+                Err(RecvTimeoutError::Timeout)
+            )
+        });
+        if ended {
             let _ = thread.join();
+        } else {
+            log::line(&format!(
+                "{}: the codex link thread did not end within {} s; left to end on its own",
+                self.id,
+                CLOSE_WITHIN.as_secs()
+            ));
         }
     }
 }
@@ -202,6 +247,8 @@ impl Worker {
         store: Arc<SqliteStore>,
     ) -> Result<Worker, RpcError> {
         let conn = Conn::open(&listen).map_err(|e| RpcError::Transport(e.to_string()))?;
+        let shared = Arc::new(Shared::default());
+        shared.set_socket(&conn);
         let mut worker = Worker {
             id: id.to_owned(),
             generation,
@@ -211,7 +258,7 @@ impl Worker {
             store,
             busy: false,
             active: None,
-            shared: Arc::new(Shared::default()),
+            shared,
             recheck: false,
             drain: false,
         };
@@ -276,14 +323,21 @@ impl Worker {
     /// Starts the link thread; `sink` hears when the app-server is gone.
     pub fn spawn(self, sink: CodexSink) -> std::io::Result<Link> {
         let shared = Arc::clone(&self.shared);
+        let id = self.id.clone();
         let (tx, rx) = mpsc::channel();
+        let (done_tx, done) = mpsc::channel();
         let thread = std::thread::Builder::new()
             .name(format!("codex-link-{}", self.id))
-            .spawn(move || self.run(&rx, &sink))?;
+            .spawn(move || {
+                self.run(&rx, &sink);
+                let _ = done_tx.send(());
+            })?;
         Ok(Link {
+            id,
             commands: Some(tx),
             shared,
             thread: Some(thread),
+            done: Some(done),
         })
     }
 
@@ -438,6 +492,10 @@ impl Worker {
             let Ok(conn) = Conn::open(&self.listen) else {
                 continue;
             };
+            self.shared.set_socket(&conn);
+            if self.stopping() {
+                return false;
+            }
             self.conn = conn;
             let thread = self.thread.clone();
             if self.initialize().is_ok() && self.resume(&thread).is_ok() {
