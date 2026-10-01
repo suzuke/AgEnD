@@ -75,6 +75,7 @@ cat docs/architecture/pipeline.md
 
 ## 進度紀錄
 
+- 2026-10-02 第十輪 verifier 的 unresolved-index 回歸失敗，其目錄數量斷言也包含重試中 staging；修正為檢查已發布 .patch。同時真 daemon 重現 nested untracked repo 取消後資料遺失，保存前拒絕 nested repo／gitlink／特殊檔案，no-index 錯誤不算成功；補原始資料保留與一般子目錄／空檔／symlink 還原回歸（draft PR #143）。待重新驗證，未 merge。
 - 2026-10-02 第九輪 verifier 另以真 daemon／shim 重現 `core.autocrlf=input` 取消後 CRLF 被封存為 LF；保存前檢查行尾轉換設定／attributes，無法保證原始 bytes 時保留 worktree／index 並回報 Failed，新增六個回歸（draft PR #143）。修正待全新 verifier 與 CI，未 merge。
 - 2026-10-02 第九輪 verifier 核對 `f34c782` 的 Ubuntu CI，一次通過、一次 binary archive 還原舊 bytes；取消已刪原 worktree，不能以重跑綠燈抵銷。封存改從 blob／mode 重建無 stat cache 的私有 index，新增確定性 racy-file 機制回歸；正在驗證修正（draft PR #143），未 merge。
 

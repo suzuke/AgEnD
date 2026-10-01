@@ -28,11 +28,16 @@ async fn append(
     file: &File,
     no_index: bool,
 ) -> Result<(), String> {
+    let before = file.metadata().map_err(|e| e.to_string())?.len();
     let out = git
         .output_to_file(repo, args, file.try_clone().map_err(|e| e.to_string())?)
         .await?;
     let accepted = out.exit_code == Some(0) || no_index && out.exit_code == Some(1);
-    if out.timed_out || !accepted {
+    let incomplete = no_index
+        && (!out.stderr.is_empty()
+            || out.exit_code == Some(1)
+                && file.metadata().map_err(|e| e.to_string())?.len() <= before);
+    if out.timed_out || !accepted || incomplete {
         return Err(format!(
             "cannot archive WIP: {}",
             String::from_utf8_lossy(&out.stderr)

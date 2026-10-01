@@ -1,6 +1,7 @@
 //! Preserve index and working-tree deltas separately; never discard unresolved index data.
 use super::{append, new_file};
 mod attributes;
+mod paths;
 use crate::git::Git;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
@@ -40,6 +41,7 @@ pub(super) async fn append_wip(
     let entries_path = staging.join("index-entries");
     let entries = new_file(&entries_path)?;
     append(git, wt, &["ls-files", "--stage", "-z"], &entries, false).await?;
+    paths::verify_index(&entries_path)?;
     let shadow = staging.join("inspection.index");
     let mut inspection = git.clone();
     inspection.runner.env.insert(
@@ -82,6 +84,7 @@ pub(super) async fn append_wip(
     let list_path = staging.join("untracked");
     let list = new_file(&list_path)?;
     append(git, wt, &["ls-files", "--others", "-z"], &list, false).await?;
+    paths::verify_worktree(wt, &names_path, &list_path)?;
     attributes::verify(git, wt, &names_path, &list_path, staging).await?;
     let index_path = staging.join("index.patch");
     let index = new_file(&index_path)?;

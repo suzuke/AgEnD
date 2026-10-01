@@ -107,8 +107,14 @@ fn an_unresolved_index_keeps_all_stages_and_the_original_worktree() {
         index
     );
     assert_eq!(std::fs::read(wt.join("conflict.txt")).unwrap(), working);
-    assert_eq!(
-        std::fs::read_dir(lab.home.join("archive")).unwrap().count(),
-        0
+    assert!(
+        std::fs::read_dir(lab.home.join("archive"))
+            .unwrap()
+            .all(|e| e
+                .unwrap()
+                .path()
+                .extension()
+                .is_none_or(|ext| ext != "patch")),
+        "incomplete archive was published"
     );
 }

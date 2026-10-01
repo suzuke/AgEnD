@@ -111,3 +111,5 @@ Failed 派工回歸：五種 fake queue 只用一個 dev，boot 派工失敗後�
 `pipeline_workflow` 證明抽象 core 可表示 count=2 human approval，但本 runtime 的 workflow check／apply／task create 均提早拒絕，拒絕後不能留下 task；內建 count=1 workflow 仍有效。
 
 `pipeline_archive_eol` 經真 daemon／shim 設定 core.autocrlf=input／true 與 text／text=auto／eol／legacy crlf attributes；取消時須回報 Failed，保留原 worktree、CRLF 的全部 bytes 與原 index，不發布會遺失 CR bytes 的 patch。
+
+`pipeline_archive_nested` 用真 Git 建 nested repo／staged gitlink，取消須保留內部資料、Git metadata 與原 index；一般未追蹤子目錄、空檔、symlink 則以真 git apply 還原。`pipeline_archive_index` 只檢查已發布的 .patch，避免每次 wake 的暫存 staging 造成競態。
