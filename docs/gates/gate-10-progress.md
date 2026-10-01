@@ -7,6 +7,7 @@
 
 ## 進度紀錄
 
+- 2026-10-02 `ea975c3` 的 macOS PR CI（job 110607655251）在 content-filter fixture 的準備斷言失敗；有效 stat cache 下普通 git add 沒套用新 filter。已確定性重現，改真 Git --renormalize 強制建立轉換後 blob，六個回歸與 clippy 通過；原 CI／101 log 保留，產品碼不變，待最新 CI（draft PR #143）。
 - 2026-10-02 文件 verifier r13 在 `ea975c3` 找到索引的 target／PATH 與人工驗收頁不一致（REFUTED）；統一 CARGO_TARGET_DIR 與 binary PATH，實際初始化選到 `agend 0.0.0`。其餘文件、證據與產品 tree 核對通過，產品碼不變；人工驗收及 merge 仍待使用者（draft PR #143）。
 - 2026-10-02 全新 verifier r12 CONFIRMED `dfe5bc6`：完整 workspace 771 passed／2 ignored、accept 713 passed／2 ignored與三組組合探測通過；原 PATH／等待 fixture 失敗保留。push／PR 共四個 Ubuntu／macOS CI job 成功。README、ROADMAP 與 Gate 10 驗收文件已同步／分頁，待人工驗收、未 merge（draft PR #143；[證據](gate-10-verification.md)）。
 - 2026-10-02 第十一輪 verifier 的六項本機 mandatory 通過（workspace 767 passed／2 ignored，accept 含四次開機），但 novel 以真 daemon／shim 重現強制 color 使 archive 無法 git apply、不完整 nested metadata 遺失 staged bytes，故仍 REFUTED；另重現 diff.noprefix 問題。封存／patch-id 固定無色 a/／b/ 全 repo diff，完整 filesystem 掃描 Git metadata；新增原 bytes 還原／保留回歸。修正待全新 verifier／CI，未 merge（draft PR #143）。

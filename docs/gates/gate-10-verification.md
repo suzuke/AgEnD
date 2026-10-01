@@ -54,7 +54,10 @@ accept 含兩個 crash failpoint 的四次開機、new-home negative、沙箱與
 
 收尾：verifier 產品碼未改、temporary source 已移除、HEAD／status 乾淨，自身程序已停止，成功 fixture 已清理。原失敗 fixture 與 holder lock 檢查見 `fixtures-manifest.json`／`retained-fixture-locks.json`；歷史反例沒有刪除。
 文件 verifier r13 核對 `ea975c3` 的非 Markdown tree 與產品 head 完全相同、證據／links／確認紀錄完整；但索引 PATH 與人工頁 target 不一致，故 REFUTED。已統一並實跑初始化選到 `agend 0.0.0`；原文件報告 `/private/tmp/g10-r13-docs-report.md` 保留。
-本頁及分頁整理屬文件修改；產品碼仍是上列 head，最後提交的 CI 與文件審查結果見 PR。
+文件 verifier r14 CONFIRMED `a476892` 的文件與舊產品證據，核對 122 個 links／anchors、原紀錄與全部 SHA；報告 `/private/tmp/g10-r14-docs-report.md`。此結論不包含該 head 當時尚未結束的 CI。
+
+後續 `ea975c3` 的 macOS PR job 110607655251 在 content-filter fixture 的準備斷言失敗：普通 git add 因有效 stat cache 未套用新 filter。保存原 log `/private/tmp/g10-ea-mac-filter-failure.log`；以穩定 stat cache 確定性重現原 producer exit 101（`/private/tmp/g10-filter-producer-before.log`），改真 Git --renormalize 後六個回歸／clippy 通過。相對產品 head，另有這一個測試準備修正；runtime／core／CLI／xtask／CI／Cargo 碼不變。
+最後提交的 CI 與完成版獨立審查結果見 PR；上述各報告只涵蓋自己的 frozen head。
 
 ## 尚未驗證與支援邊界
 

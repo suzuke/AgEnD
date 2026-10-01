@@ -197,6 +197,15 @@ fn display_diff_configuration_cannot_change_patch_identity() {
 #[test]
 fn a_content_filter_cannot_prove_a_worktree_safe_to_overwrite() {
     let lab = common::Lab::new(&["--hold"]).unwrap();
+    // Keep the source stat cache unambiguously valid before changing attributes.
+    std::fs::File::open(lab.repo().join("README.md"))
+        .unwrap()
+        .set_times(
+            std::fs::FileTimes::new()
+                .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1)),
+        )
+        .unwrap();
+    common::git(&lab.repo(), &["update-index", "--refresh"]).unwrap();
     std::fs::write(
         lab.repo().join(".gitattributes"),
         "README.md filter=normalize\n",
@@ -211,7 +220,8 @@ fn a_content_filter_cannot_prove_a_worktree_safe_to_overwrite() {
         ],
     )
     .unwrap();
-    common::git(&lab.repo(), &["add", ".gitattributes", "README.md"]).unwrap();
+    common::git(&lab.repo(), &["add", ".gitattributes"]).unwrap();
+    common::git(&lab.repo(), &["add", "--renormalize", "README.md"]).unwrap();
     common::git(&lab.repo(), &["commit", "-m", "Store normalized content"]).unwrap();
     std::fs::write(
         lab.repo().join("README.md"),
