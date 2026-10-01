@@ -1,5 +1,6 @@
 //! Preserve index and working-tree deltas separately; never discard unresolved index data.
 use super::{append, new_file};
+mod attributes;
 use crate::git::Git;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
@@ -63,26 +64,34 @@ pub(super) async fn append_wip(
         }
     }
     let git = &inspection;
+    let list_path = staging.join("untracked");
+    let list = new_file(&list_path)?;
+    append(git, wt, &["ls-files", "--others", "-z"], &list, false).await?;
+    attributes::verify(git, wt, &names_path, &list_path, staging).await?;
     let index_path = staging.join("index.patch");
     let index = new_file(&index_path)?;
     append(
         git,
         wt,
-        &["diff", "--binary", "--cached", "HEAD"],
+        &[
+            "diff",
+            "--binary",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--cached",
+            "HEAD",
+        ],
         &index,
         false,
     )
     .await?;
     let work_path = staging.join("worktree.patch");
     let work = new_file(&work_path)?;
-    append(git, wt, &["diff", "--binary"], &work, false).await?;
-    let list_path = staging.join("untracked");
-    let list = new_file(&list_path)?;
     append(
         git,
         wt,
-        &["ls-files", "--others", "--exclude-standard", "-z"],
-        &list,
+        &["diff", "--binary", "--no-ext-diff", "--no-textconv"],
+        &work,
         false,
     )
     .await?;
@@ -96,7 +105,16 @@ pub(super) async fn append_wip(
         append(
             git,
             wt,
-            &["diff", "--no-index", "--binary", "--", "/dev/null", name],
+            &[
+                "diff",
+                "--no-index",
+                "--binary",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--",
+                "/dev/null",
+                name,
+            ],
             &work,
             true,
         )

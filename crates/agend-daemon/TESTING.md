@@ -104,4 +104,6 @@ Failed 派工回歸：五種 fake queue 只用一個 dev，boot 派工失敗後�
 
 `pipeline_archive_flags` 經真 shim 設定 `skip-worktree`／`assume-unchanged`，驗取消後 patch 還原實際 bytes（含 split index）；另驗私有 index 檢查後保存失敗時，原 index bytes 與 WIP 都保留；canonical main 的隱藏修改會阻擋 merge，author 的隱藏修改在需要 rebase 時保留原 head 與 bytes。
 
+`pipeline_archive_diff` 經真 shim 設定 external diff／textconv，原 diff 為空仍須保留 staged bytes，取消後以 patch 還原 unstaged 與 untracked bytes；archive 與 patch-id 都停用顯示轉換；另驗 ignored local notes 還原、content filter 保存失敗時保留原始 WIP、patch-id 不受顯示設定影響，以及真 normalization fixture 的 raw bytes 修改不能通過 clean 檢查。
+
 `pipeline_workflow` 證明抽象 core 可表示 count=2 human approval，但本 runtime 的 workflow check／apply／task create 均提早拒絕，拒絕後不能留下 task；內建 count=1 workflow 仍有效。

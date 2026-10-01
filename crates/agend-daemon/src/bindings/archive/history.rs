@@ -50,6 +50,8 @@ pub(super) async fn append_branch(
                 &[
                     "diff",
                     "--binary",
+                    "--no-ext-diff",
+                    "--no-textconv",
                     "--full-index",
                     &format!("{commit}^1"),
                     &commit,
@@ -67,6 +69,8 @@ pub(super) async fn append_branch(
                     "-1",
                     "--stdout",
                     "--binary",
+                    "--no-ext-diff",
+                    "--no-textconv",
                     "--full-index",
                     &commit,
                 ],

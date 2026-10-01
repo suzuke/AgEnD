@@ -9,7 +9,7 @@
 
 ## 狀態
 
-**驗收中**（2026-10-02）：P1–P11 使用者已確認（P6 改成寫入沙箱；P3、P7、P8、P11 與決策或架構頁不同之處都已決定），提案 #130 已 merge；實作在 `feat/gate-10-pipeline` worktree，七輪 fresh-context verifier 已重跑並找到缺陷，正在修正；本機自動驗收通過，Ubuntu sandbox 回歸已通過，headless review 測試競爭已修正，`5a20fb0` 雙平台 CI 已通過，WIP 隱藏旗標修正後須重跑 CI；尚待最終 fresh-context verifier 和使用者人工驗收，未合併。執行細節見 [pipeline runtime](../architecture/pipeline-runtime.md)。前置施工關已完成並 merge：第 6 施工關 #125、第 7 施工關 #132、第 8 施工關 #131、第 9 施工關 #136（client protocol 1.2、CLI 語法、ticket、`operator` 請求）。本關使用下一個 minor 1.3；第 11 施工關 B 段也已 merge #140。分工見下方「範圍」。
+**驗收中**（2026-10-02）：P1–P11 使用者已確認（P6 改成寫入沙箱；P3、P7、P8、P11 與決策或架構頁不同之處都已決定），提案 #130 已 merge；實作在 `feat/gate-10-pipeline` worktree。多輪 fresh-context verifier 已找到並修正缺陷；最新 WIP 修正涵蓋完整 binary／merge／index、隱藏旗標、顯示轉換與 ignored 檔案。內容 filter 與未解 index 衝突先保留原資料回報 Failed；修正後正重跑最終獨立驗證與雙平台 CI，人工驗收尚待使用者完成，未合併。執行細節見 [pipeline runtime](../architecture/pipeline-runtime.md)。前置施工關已完成並 merge：第 6 施工關 #125、第 7 施工關 #132、第 8 施工關 #131、第 9 施工關 #136（client protocol 1.2、CLI 語法、ticket、`operator` 請求）。本關使用下一個 minor 1.3；第 11 施工關 B 段也已 merge #140。分工見下方「範圍」。
 
 ## 範圍
 
@@ -537,6 +537,8 @@ cd /Users/suzuke/AlphaCR-worktrees/AgEnD-v2-pipeline    # 本次實作 worktree
 |  |  |  |
 
 ## 進度紀錄
+
+- 2026-10-02 第八輪 verifier 中斷前，真 daemon/shim 在 `f29e667` 重現 external diff／textconv 讓 archive 為空、取消仍刪 WIP；封存與 patch-id 改明確停用顯示轉換，補 staged／unstaged／untracked 還原回歸，包含 ignored 資料；content filter 無法保證原始 bytes 時保留原 worktree 回報 Failed。該輪沒有完整通過結論；修正交由新的 fresh-context verifier（draft PR #143），未 merge。
 
 - 2026-10-02 第七輪 verifier REFUTED `a35b117`：真 shim 可設定 `skip-worktree`／`assume-unchanged`，diff 隱藏實際修改後取消會丟失 WIP；改以私有 index 副本清除旗標並封存，原 index 在失敗時完整保留。修正重新驗證中（draft PR #143），未 merge。
 

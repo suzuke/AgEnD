@@ -75,6 +75,8 @@ cat docs/architecture/pipeline.md
 
 ## 進度紀錄
 
+- 2026-10-02 第八輪 verifier 中斷前，真 daemon/shim 在 `f29e667` 重現 external diff／textconv 讓 archive 為空、取消仍刪 WIP；封存與 patch-id 改明確停用顯示轉換，補 staged／unstaged／untracked 還原回歸，包含 ignored 資料；content filter 無法保證原始 bytes 時保留原 worktree 回報 Failed。該輪沒有完整通過結論；修正交由新的 fresh-context verifier（draft PR #143），未 merge。
+
 - 2026-10-02 第七輪 verifier REFUTED `a35b117`：真 shim 可設定 `skip-worktree`／`assume-unchanged`，diff 隱藏實際修改後取消會丟失 WIP；改以私有 index 副本清除旗標並封存，原 index 在失敗時完整保留。修正重新驗證中（draft PR #143），未 merge。
 
 - 2026-10-02 第六輪 verifier REFUTED `5a20fb0`：真 shim 的 staged-only 檔案在工作目錄刪除後，取消時未存 archive；改分別保存 index／worktree patch，6 MiB bytes 與 AD 狀態還原通過，未解 index 衝突保留原資料；另拒絕單一 operator 無法完成的 human count≠1。前版雙平台 CI 全綠仍不視為驗收完成；修正重新驗證中（draft PR #143），未 merge。

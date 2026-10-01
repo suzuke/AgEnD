@@ -149,7 +149,7 @@ where
         let base = self.run(repo, &["merge-base", "main", head]).await?;
         let git = quote(&self.executable.to_string_lossy());
         let command = format!(
-            "{git} -c core.hooksPath=/dev/null -c core.fsmonitor=false diff --binary {} {} | {git} -c core.hooksPath=/dev/null -c core.fsmonitor=false patch-id --stable",
+            "{git} -c core.hooksPath=/dev/null -c core.fsmonitor=false diff --binary --no-ext-diff --no-textconv {} {} | {git} -c core.hooksPath=/dev/null -c core.fsmonitor=false patch-id --stable",
             quote(&base),
             quote(head)
         );
