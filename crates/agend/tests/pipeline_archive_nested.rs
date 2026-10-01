@@ -11,6 +11,8 @@ fn probe(staged_gitlink: bool) {
     let nested = wt.join("nested");
     std::fs::create_dir(&nested).unwrap();
     common::git(&nested, &["init", "-q"]).unwrap();
+    common::git(&nested, &["config", "user.name", "Gate 10 Fixture"]).unwrap();
+    common::git(&nested, &["config", "user.email", "gate10@example.invalid"]).unwrap();
     let bytes = b"UNIQUE_NESTED_RAW_WIP\n";
     std::fs::write(nested.join("notes"), bytes).unwrap();
     if staged_gitlink {
