@@ -251,6 +251,17 @@ fn tail(bytes: &[u8]) -> String {
 /// roles queue as no-role attention rather than preventing task creation.
 pub fn validate(workflow: Workflow) -> Result<ValidatedWorkflow, String> {
     for stage in &workflow.stages {
+        if let Stage::Approval {
+            by: Approver::Human,
+            count,
+            ..
+        } = &stage.stage
+            && *count != 1
+        {
+            return Err(
+                "human approval count must be 1; this daemon has one operator identity".into(),
+            );
+        }
         if matches!(stage.stage, Stage::Fanout { .. })
             || stage.on_timeout == Some(TimeoutAction::Reassign)
         {

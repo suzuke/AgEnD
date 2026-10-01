@@ -80,7 +80,7 @@ agend task cancel t-1 --reason "scope changed"
 ```
 
 workflow apply 新增版本，既有 task 不換版本；內建 workflow 不可覆寫。
-本關拒絕 fanout、reassign、command `on_timeout` 和非 local forge；不自動建立 ephemeral agent。
+本關只有一個 operator identity，human approval `count` 必須為 1；workflow check／apply／task create 都先拒絕多人的 human quorum，role reviewer quorum 照常支援。本關拒絕 fanout、reassign、command `on_timeout` 和非 local forge；不自動建立 ephemeral agent。
 `block/unblock` 的理由存在 task 與交易裡，不另外新增 attention；reminder 到期後先持久化固定訊息 id 再刪提醒。
 請示永久保存 Question → Answer → FollowUp → Answer → Resolution；回答固定 `ask:<id>/<turn>`；ask_turns 永久保存派送 receipt，重啟只補未送回答，訊息過期後不重送歷史答案。
 
