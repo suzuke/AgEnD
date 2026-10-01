@@ -33,6 +33,23 @@ impl Git {
             .await
             .map_err(|e| e.to_string())
     }
+    /// Feed a complete path list without shell interpolation or argv size limits.
+    pub async fn output_from_file(
+        &self,
+        repo: &Path,
+        args: &[&str],
+        input: &Path,
+    ) -> Result<CommandOutput, String> {
+        let command = format!(
+            "{} < {}",
+            self.command(args),
+            quote(&input.to_string_lossy())
+        );
+        self.runner
+            .run(&command, &repo.to_string_lossy(), 60_000)
+            .await
+            .map_err(|e| e.to_string())
+    }
     pub fn discover(home: &Path) -> Result<Self, String> {
         let daemon: BTreeMap<String, String> = std::env::vars().collect();
         let path = crate::runtime::env::launch_path(home, &daemon);
@@ -98,6 +115,25 @@ where
             ));
         }
         Ok(String::from_utf8_lossy(&out.stdout).trim().to_owned())
+    }
+    /// A concealed index entry cannot prove a worktree safe to overwrite.
+    pub async fn clean_worktree(&self, repo: &Path) -> Result<bool, String> {
+        let out = self.output(repo, &["ls-files", "-v", "-z"]).await?;
+        if out.timed_out
+            || out.exit_code != Some(0)
+            || out.stdout.len() > crate::runner::OUTPUT_LIMIT
+            || !out.stdout.is_empty() && out.stdout.last() != Some(&0)
+        {
+            return Err("cannot inspect worktree index flags".into());
+        }
+        if out.stdout.split(|b| *b == 0).any(|entry| {
+            entry
+                .first()
+                .is_some_and(|tag| *tag == b'S' || tag.is_ascii_lowercase())
+        }) {
+            return Ok(false);
+        }
+        Ok(self.run(repo, &["status", "--porcelain"]).await?.is_empty())
     }
     pub async fn ancestor(&self, repo: &Path, a: &str, b: &str) -> Result<bool, String> {
         let out = self

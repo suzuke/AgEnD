@@ -73,6 +73,13 @@ impl PipelineExecutor for LocalExecutor {
             .run(Path::new(repo), args)
             .await
     }
+    async fn clean_worktree(&self, repo: &str) -> Result<bool, String> {
+        self.git
+            .as_ref()
+            .ok_or("git unavailable")?
+            .clean_worktree(Path::new(repo))
+            .await
+    }
     async fn ancestor(&self, repo: &str, a: &str, b: &str) -> Result<bool, String> {
         self.git
             .as_ref()

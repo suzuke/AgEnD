@@ -190,15 +190,9 @@ where
                         path.display()
                     )));
                 }
-                if !self
-                    .git
-                    .run(&path, &["status", "--porcelain"])
-                    .await
-                    .map_err(fail)?
-                    .is_empty()
-                {
+                if !self.git.clean_worktree(&path).await.map_err(fail)? {
                     return Err(LocalError::Blocked(format!(
-                        "canonical checkout {} is dirty; commit or stash changes",
+                        "canonical checkout {} is dirty or has concealed index entries; commit or stash changes and clear index flags",
                         path.display()
                     )));
                 }

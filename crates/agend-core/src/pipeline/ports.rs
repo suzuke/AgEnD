@@ -165,6 +165,11 @@ pub trait PipelineExecutor: Clone + Send + Sync + 'static {
         repo: &'a str,
         args: &'a [&'a str],
     ) -> impl Future<Output = Result<String, String>> + Send + 'a;
+    /// Prove a worktree has no modifications or index flags concealing them.
+    fn clean_worktree<'a>(
+        &'a self,
+        repo: &'a str,
+    ) -> impl Future<Output = Result<bool, String>> + Send + 'a;
     fn ancestor<'a>(
         &'a self,
         repo: &'a str,

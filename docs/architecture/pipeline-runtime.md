@@ -60,7 +60,7 @@ checks 重啟用新目錄、同 attempt。work 訊息固定 `dispatch:<ticket>`�
 每日對帳只做投影、bindings 與清理，保留正在跑的 checks，不重新派所有 action。
 
 釋放順序：快照先 unbound → 保存未提交／untracked WIP（未 merge 也保存 commits）→ 卸 hook → 刪 worktree／branch → 刪 binding。
-patch 放 `archive/<task>-<unix-ms>.patch`，保留 30 天，task detail 顯示路徑。git binary patch 與 untracked 名稱清單直接串流至 daemon 建立的檔案，不經 5 MiB 診斷輸出 cap；完整檔案 sync 後原子發布，成功後才刪原 worktree。未 merge 的 commits 依 first-parent 順序保存：一般 commit 用完整 binary `format-patch`；merge commit 另保存 email metadata 與相對第一個 parent 的 binary diff，包含衝突解法，再接 HEAD→index 的 staged patch 與 index→worktree 的 unstaged patch。`# agend-wip: index`／`# agend-wip: worktree` 是可分割的區段邊界：staged-only bytes 可另以 `git apply --index` 還原，不會因工作目錄刪檔而丟失。若 index 還有未解衝突，回報保存失敗並保留原 worktree／index／binding，交由操作者處理後重試。archive 失敗保留 WIP／binding，每次 wake 重試。checks 孤兒只辨識 `t-<數字>-*` 與對應 `.tmp`，命名空間外 worktree／目錄保留。
+patch 放 `archive/<task>-<unix-ms>.patch`，保留 30 天，task detail 顯示路徑。git binary patch 與 untracked 名稱清單直接串流至 daemon 建立的檔案，不經 5 MiB 診斷輸出 cap；完整檔案 sync 後原子發布，成功後才刪原 worktree。未 merge 的 commits 依 first-parent 順序保存：一般 commit 用完整 binary `format-patch`；merge commit 另保存 email metadata 與相對第一個 parent 的 binary diff，包含衝突解法，再接 HEAD→index 的 staged patch 與 index→worktree 的 unstaged patch。`# agend-wip: index`／`# agend-wip: worktree` 是可分割的區段邊界：staged-only bytes 可另以 `git apply --index` 還原，不會因工作目錄刪檔而丟失。封存使用私有 index 副本，清除 `skip-worktree`／`assume-unchanged` 後讀取實際修改，避免旗標隱藏 WIP；原 index 不受檢查影響；rebase 與 canonical checkout 的 fast-forward 在 index 有隱藏旗標時拒絕寫入，須先由操作者清除旗標與處理修改。若 index 還有未解衝突，回報保存失敗並保留原 worktree／index／binding，交由操作者處理後重試。archive 失敗保留 WIP／binding，每次 wake 重試。checks 孤兒只辨識 `t-<數字>-*` 與對應 `.tmp`，命名空間外 worktree／目錄保留。
 
 ## 命令與協定
 

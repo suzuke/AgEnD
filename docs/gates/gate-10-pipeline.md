@@ -9,7 +9,7 @@
 
 ## 狀態
 
-**驗收中**（2026-10-02）：P1–P11 使用者已確認（P6 改成寫入沙箱；P3、P7、P8、P11 與決策或架構頁不同之處都已決定），提案 #130 已 merge；實作在 `feat/gate-10-pipeline` worktree，六輪 fresh-context verifier 已重跑並找到缺陷，正在修正；本機自動驗收通過，Ubuntu sandbox 回歸已通過，headless review 測試競爭已修正，`5a20fb0` 雙平台 CI 已通過，index WIP 修正後須重跑 CI；尚待最終 fresh-context verifier 和使用者人工驗收，未合併。執行細節見 [pipeline runtime](../architecture/pipeline-runtime.md)。前置施工關已完成並 merge：第 6 施工關 #125、第 7 施工關 #132、第 8 施工關 #131、第 9 施工關 #136（client protocol 1.2、CLI 語法、ticket、`operator` 請求）。本關使用下一個 minor 1.3；第 11 施工關 B 段也已 merge #140。分工見下方「範圍」。
+**驗收中**（2026-10-02）：P1–P11 使用者已確認（P6 改成寫入沙箱；P3、P7、P8、P11 與決策或架構頁不同之處都已決定），提案 #130 已 merge；實作在 `feat/gate-10-pipeline` worktree，七輪 fresh-context verifier 已重跑並找到缺陷，正在修正；本機自動驗收通過，Ubuntu sandbox 回歸已通過，headless review 測試競爭已修正，`5a20fb0` 雙平台 CI 已通過，WIP 隱藏旗標修正後須重跑 CI；尚待最終 fresh-context verifier 和使用者人工驗收，未合併。執行細節見 [pipeline runtime](../architecture/pipeline-runtime.md)。前置施工關已完成並 merge：第 6 施工關 #125、第 7 施工關 #132、第 8 施工關 #131、第 9 施工關 #136（client protocol 1.2、CLI 語法、ticket、`operator` 請求）。本關使用下一個 minor 1.3；第 11 施工關 B 段也已 merge #140。分工見下方「範圍」。
 
 ## 範圍
 
@@ -95,7 +95,7 @@
   - 審查（`approval(by = <角色>)`）：reviewer 拿到 detached 的審查 worktree `$AGEND_HOME/worktrees/<task>-review/`（在審的 head），binding kind `review`，一樣裝 hook（審查 binding 不能寫任何 branch）。核准或要求修改後就拆掉。`approval(by = "human")` 沒有 worktree，走「需要你」（P8）。
   - 釋放（task done、失敗、取消；或審查結束）：
     1. binding 快照先改成沒有 binding（shim 從這一刻起拒絕寫入）。
-    2. 分別讀取 staged、unstaged 修改與未追蹤檔（index 專有內容也須保存；未解衝突時保留原 worktree／index 並回報 Failed）→ 存成 `archive/<task>-<unix 秒>.patch`；task 沒 merge（失敗、取消）時，branch 的 first-parent commits 也存進同一個檔：一般 commit 用完整 binary `format-patch`；merge commit 保存 metadata 與對第一個 parent 的 diff（`format-patch` 會省略 merge，單用它會漏掉衝突解法）。保留 30 天（D31 的 WIP patch）。
+    2. 使用私有 index 副本清除隱藏旗標，分別讀取 staged、unstaged 修改與未追蹤檔（index 專有內容也須保存；未解衝突時保留原 worktree／index 並回報 Failed）→ 存成 `archive/<task>-<unix 秒>.patch`；task 沒 merge（失敗、取消）時，branch 的 first-parent commits 也存進同一個檔：一般 commit 用完整 binary `format-patch`；merge commit 保存 metadata 與對第一個 parent 的 diff（`format-patch` 會省略 merge，單用它會漏掉衝突解法）。保留 30 天（D31 的 WIP patch）。
     3. `agend hooks uninstall <worktree>` → `git worktree remove --force` → `git branch -D`。
     4. 刪掉 `bindings` 那一列；patch 路徑記在 task 事件，`agend status` 與 TUI 看得到。
 - 理由：hook 是 protected ref 的硬保證（第 3 施工關威脅模型），一定要在 agent 拿到 worktree **之前**裝好；經子命令呼叫，daemon 就不必連結 shim（第 6 施工關 P9 的依賴規則）。一個型別兩邊用，格式不會漂移（#1493）。審查者看的是固定的 head，不是持有者正在改的 worktree。
@@ -537,6 +537,8 @@ cd /Users/suzuke/AlphaCR-worktrees/AgEnD-v2-pipeline    # 本次實作 worktree
 |  |  |  |
 
 ## 進度紀錄
+
+- 2026-10-02 第七輪 verifier REFUTED `a35b117`：真 shim 可設定 `skip-worktree`／`assume-unchanged`，diff 隱藏實際修改後取消會丟失 WIP；改以私有 index 副本清除旗標並封存，原 index 在失敗時完整保留。修正重新驗證中（draft PR #143），未 merge。
 
 - 2026-10-02 第六輪 verifier REFUTED `5a20fb0`：真 shim 的 staged-only 檔案在工作目錄刪除後，取消時未存 archive；改分別保存 index／worktree patch，6 MiB bytes 與 AD 狀態還原通過，未解 index 衝突保留原資料；human count=2 會永久等待，runtime admission 改拒絕 count≠1。前版雙平台 CI 全綠仍不視為驗收完成；修正重新驗證中（draft PR #143），未 merge。
 

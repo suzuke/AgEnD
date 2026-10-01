@@ -75,6 +75,8 @@ cat docs/architecture/pipeline.md
 
 ## 進度紀錄
 
+- 2026-10-02 第七輪 verifier REFUTED `a35b117`：真 shim 可設定 `skip-worktree`／`assume-unchanged`，diff 隱藏實際修改後取消會丟失 WIP；改以私有 index 副本清除旗標並封存，原 index 在失敗時完整保留。修正重新驗證中（draft PR #143），未 merge。
+
 - 2026-10-02 第六輪 verifier REFUTED `5a20fb0`：真 shim 的 staged-only 檔案在工作目錄刪除後，取消時未存 archive；改分別保存 index／worktree patch，6 MiB bytes 與 AD 狀態還原通過，未解 index 衝突保留原資料；另拒絕單一 operator 無法完成的 human count≠1。前版雙平台 CI 全綠仍不視為驗收完成；修正重新驗證中（draft PR #143），未 merge。
 
 - 2026-10-02 第五輪 verifier REFUTED `660dd08`：format-patch 略過 merge commit，取消後遺失其獨有衝突解法；補 first-parent merge diff 保存與真 git apply round trip。Ubuntu CI 通過，macOS CI 的 CLP-14 重現 instance-add 回覆早於 fleet 投影，改先發布 Starting；修正重新驗證中（draft PR #143），未 merge。

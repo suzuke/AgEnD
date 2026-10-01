@@ -103,6 +103,20 @@ impl PipelineExecutor for FakePipelineExecutor {
         }
         Ok(String::from_utf8_lossy(&out.stdout).trim().into())
     }
+    async fn clean_worktree(&self, repo: &str) -> Result<bool, String> {
+        let flags = self.run(repo, &["ls-files", "-v", "-z"]).await?;
+        if !flags.is_empty() && !flags.ends_with('\0') {
+            return Err("cannot inspect worktree index flags".into());
+        }
+        if flags.as_bytes().split(|b| *b == 0).any(|entry| {
+            entry
+                .first()
+                .is_some_and(|tag| *tag == b'S' || tag.is_ascii_lowercase())
+        }) {
+            return Ok(false);
+        }
+        Ok(self.run(repo, &["status", "--porcelain"]).await?.is_empty())
+    }
     async fn ancestor(&self, _repo: &str, a: &str, b: &str) -> Result<bool, String> {
         let base = self.forge.base_head();
         Ok(self.forge.is_ancestor(

@@ -177,11 +177,7 @@ where
                             .find(|b| b.task == task.id && b.kind == "work")
                             .ok_or_else(|| invalid("missing work binding for rebase"))?;
                         let wt = binding.worktree.as_str();
-                        let clean = git
-                            .run(wt, &["status", "--porcelain"])
-                            .await
-                            .map_err(invalid)?
-                            .is_empty();
+                        let clean = git.clean_worktree(wt).await.map_err(invalid)?;
                         let conflict = !clean
                             || git
                                 .run(wt, &["rebase", "--no-autostash", "main"])

@@ -33,6 +33,36 @@ pub(super) async fn append_wip(
     if conflicts.metadata().map_err(|e| e.to_string())?.len() != 0 {
         return Err("unresolved index entries; original WIP retained".into());
     }
+    // Inspect a private copy: clearing concealment flags must never change the
+    // agent's original index, including when publication subsequently fails.
+    let original = git
+        .run(
+            wt,
+            &["rev-parse", "--path-format=absolute", "--git-path", "index"],
+        )
+        .await?;
+    let shadow = staging.join("inspection.index");
+    std::fs::copy(original, &shadow).map_err(|e| e.to_string())?;
+    let mut inspection = git.clone();
+    inspection.runner.env.insert(
+        "GIT_INDEX_FILE".into(),
+        shadow.to_string_lossy().into_owned(),
+    );
+    let names_path = staging.join("tracked");
+    let names = new_file(&names_path)?;
+    append(&inspection, wt, &["ls-files", "-z"], &names, false).await?;
+    for flag in ["--no-assume-unchanged", "--no-skip-worktree"] {
+        let out = inspection
+            .output_from_file(wt, &["update-index", flag, "-z", "--stdin"], &names_path)
+            .await?;
+        if out.timed_out || out.exit_code != Some(0) {
+            return Err(format!(
+                "cannot inspect concealed WIP: {}",
+                String::from_utf8_lossy(&out.stderr)
+            ));
+        }
+    }
+    let git = &inspection;
     let index_path = staging.join("index.patch");
     let index = new_file(&index_path)?;
     append(
