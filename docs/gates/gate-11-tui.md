@@ -1,19 +1,19 @@
 # 第 11 施工關：agend-tui（`tui`）
 
 > **TL;DR**
-> - attention-first TUI；畫面層提前做（你同意與第 3–10 施工關並行，放寬 D22），資料先接假來源，draft PR 不 merge。
+> - attention-first TUI；A 段畫面層提前做（你同意與第 3–10 施工關並行，放寬 D22），B 段接真 daemon，兩段都已合併。
 > - 記住：**畫面只讀 `Source`，不知道資料從哪來**；真的來源 `ClientSource` 只經 `agend-client`，TUI 裡沒有 socket 程式碼；權限只在 daemon 擋。
-> - 下一步：B 段完成（2026-09-29：T19–T35 已追認、你親自驗收 B 段 7 步通過），merge PR #140；C 段（完整模式）等第 10 施工關做完再提案。
+> - 下一步：A、B 段已完成並 merge（B 段 #140，2026-10-01）；C 段（完整模式）等第 10 施工關做完再提案。
 
 **先看這條**：B 段（接真 daemon）的步驟會用到 `agend`。每個新開的終端機分頁（包括第二個終端）都要先跑 B 段開頭的設定，否則會跑到舊的 Node 版 `agend` 1.24.0。A 段只用 `cargo`，不用 `agend`。
 
 ## 狀態
 
-**實作中：B 段完成（PR #140，branch `feat/gate-11-tui-impl`）；C 段（完整模式）未開始，等第 10 施工關做完再提案**。
+**實作中：A、B 段完成並已 merge（B 段 #140，2026-10-01，`462822a`）；C 段（完整模式）未開始，等第 10 施工關做完再提案**。
 
 - 畫面層（2026-09-26，已 merge #120）：A 段通過、T1–T18／G1–G4 已追認。
-- B 段提案（draft PR #133）：P1–P7 使用者已確認（2026-09-28）。
-- B 段實作（2026-09-28，draft PR）：`ClientSource`（經 `agend-client`）、`agend app`、全貌與事件、`retry`、即時終端、只有操作者能打字、重連；daemon 的 `terminal_input` 與重訂失敗清掉舊串流；假 daemon 的終端與打字；CLP-18..20。自動驗收都已通過（verifier 第 4 輪 CONFIRMED）；「待你追認」T19–T35 已追認（2026-09-29）；你親自驗收 B 段 7 步通過（2026-09-29）。
+- B 段提案（#133，2026-09-28 已 merge）：P1–P7 使用者已確認。
+- B 段實作（#140，2026-10-01 已 merge）：`ClientSource`（經 `agend-client`）、`agend app`、全貌與事件、`retry`、即時終端、只有操作者能打字、重連；daemon 的 `terminal_input` 與重訂失敗清掉舊串流；假 daemon 的終端與打字；CLP-18..20。自動驗收都已通過（verifier 第 4 輪 CONFIRMED）；「待你追認」T19–T35 已追認（2026-09-29）；你親自驗收 B 段 7 步通過（2026-09-29）。
 
 ## 範圍
 
@@ -557,6 +557,8 @@ unset AGEND_BIN               # 前幾關步驟留下的 export 可能指到已�
 ## 進度紀錄
 
 日期 + 一行 + commit／PR，新的在上面。
+
+- 2026-10-01 #140 squash merge（`462822a`）；最新 head `6fdbc61` 的 ubuntu／macOS CI 全過，B 段已驗收並整合到 `v2`；C 段尚未開始。
 
 - 2026-09-29 使用者親自驗收 B 段 7 步通過；狀態改成 B 段完成、C 段未開始。
 - 2026-09-29 fresh-context verifier 第 4 輪 CONFIRMED（517697c）；使用者追認 T19–T35（T19 的滑鼠滾動與完整重現 agent CLI 另開 C 段）。

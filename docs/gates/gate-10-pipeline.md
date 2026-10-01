@@ -3,13 +3,13 @@
 > **TL;DR**
 > - daemon 用 core 的狀態機把一個 task 從派工推到 merge：建 worktree 並裝 hook、跑 checks、agent 審查、你核准、在本機 repo merge；daemon 被硬殺後接著做，不重複 merge。
 > - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這個施工關才算完成。
-> - 下一步：P1–P11 使用者已確認（P6 改成 checks 在寫入沙箱裡跑）；merge 這份提案，等第 7–9 施工關完成再開工。
+> - 下一步：P1–P11 使用者已確認（P6 改成 checks 在寫入沙箱裡跑），提案 #130 已 merge；第 7–9 施工關已完成，可以從最新 `v2` 開工。
 
 **先看這條**：這頁的步驟會用到 `agend`。每個新開的終端機分頁（包括第二個終端）都要先跑「你親自驗收」開頭的設定，否則會跑到舊的 Node 版 `agend` 1.24.0。
 
 ## 狀態
 
-**提案中**（2026-09-26）：開工前提案 P1–P11 使用者已確認（P6 改成寫入沙箱；P3、P7、P8、P11 與決策或架構頁不同之處都已決定），等 merge 後、第 7–9 施工關完成再開工。依賴：第 6 施工關已 merge（#125）；第 8 施工關（client 協定 1.1、「需要你」）已 merge（#131）；第 7 施工關（送達、`messages` 表）提案已 merge（#126），實作中；第 9 施工關（CLI 語法、ticket、`operator` 請求）提案中。分工見下方「範圍」的最後一段。
+**提案中**（2026-10-01 核對）：P1–P11 使用者已確認（P6 改成寫入沙箱；P3、P7、P8、P11 與決策或架構頁不同之處都已決定），提案 #130 已 merge、實作尚未開始。前置施工關已完成並 merge：第 6 施工關 #125、第 7 施工關 #132、第 8 施工關 #131、第 9 施工關 #136（client protocol 1.2、CLI 語法、ticket、`operator` 請求）。本關使用下一個 minor 1.3；第 11 施工關 B 段也已 merge #140。分工見下方「範圍」。
 
 ## 範圍
 
@@ -529,6 +529,8 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-10-01 核對前置條件：第 7 施工關 #132、第 9 施工關 #136 已完成並 merge；第 11 施工關 B 段 #140 已 merge。本關提案 #130 已確認並 merge，可以開工；實作尚未開始。
+
 - 2026-09-26 沙箱第 3 輪 review（HIGH：經 symlink 連到 codex app-server）後改成預設拒絕：macOS `(deny network-outbound (remote unix-socket))`，只留 DNS 的 mDNSResponder（本機實測：socket 與 symlink 都被擋、HTTPS 200）；Linux 用 `--tmpfs` 藏 `/tmp`、`/run/user/<uid>`、`$AGEND_HOME/run`，其他看得到的 socket 列為已知風險；需要 unix socket 的 checks 列為已知限制；setsid 與測試的說法跟著改。
 - 2026-09-26 沙箱第 2 輪 review（1 MEDIUM、2 LOW）後修正：沙箱擋掉 `$AGEND_HOME/run/` 的 unix socket（macOS profile `deny network-outbound`、Linux `--tmpfs` 與 `--unshare-pid`），每次 check 後停掉整個 process group；標記檔只 `lstat`、被 check 刪掉算 checks 失敗；`agend doctor` 的沙箱一列改由本關加。
 - 2026-09-26 沙箱 review REFUTED（1 HIGH、1 MEDIUM、數個 LOW，在 macOS 重現）後修正：`.git/worktrees/<run>/` 與 `<worktree>/.git` 改成唯讀、daemon 碰 checks worktree 的 git 加 `-c core.fsmonitor=false`（擋逃逸）；拿掉跨 checks 的共用快取，全部放每次的暫存目錄（擋假綠，代價是慢）；macOS `mktemp` 與真實路徑、每次 check 的標記檔（沙箱自己失敗算 `sandbox-missing`）、CI 先裝 `bubblewrap`；範圍與分工表補上 `sandbox-missing` 與 `agend doctor`。
@@ -544,5 +546,5 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 ```bash
 cat docs/gates/gate-10-pipeline.md
-~/.cargo/bin/cargo xtask accept pipeline
+cat docs/architecture/pipeline.md
 ```

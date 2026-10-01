@@ -3,13 +3,13 @@
 > **TL;DR**
 > - claude、opencode driver、forge github、Telegram。
 > - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這個施工關才算完成。
-> - 下一步：等前一個施工關完成後開工；開工時把標「開工時細化」的步驟寫定。
+> - 下一步：A 段（claude）開工前提案在 [draft PR #138](https://github.com/suzuke/AgEnD/pull/138)，P1–P10 待使用者確認；提案尚未 merge、實作未開始。本頁驗收步驟仍是提案前的範圍，待提案確認後同步。
 
 **先看這條**：這頁的步驟會用到 `agend`。每個新開的終端機分頁（包括第二個終端）都要先跑「你親自驗收」開頭的設定，否則會跑到舊的 Node 版 `agend` 1.24.0。
 
 ## 狀態
 
-**未開始**（2026-09-24）
+**提案中**（2026-09-28，draft PR #138）：A 段（claude）P1–P10 待使用者確認，提案尚未 merge、實作未開始；B opencode、C forge github、D Telegram 尚未實作。
 
 ## 範圍
 
@@ -107,11 +107,10 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-28 A 段（claude）開工前提案 draft PR #138 寫定；P1–P10 待使用者確認，未 merge 或實作。
+
 - 2026-09-25 使用者決定：真 CLI 一致性檢查（錄製器 + `tests/conformance.rs`）列為必要完成條件（`feat/backend-recorder`）。
 
 ## 下一步
 
-```bash
-cat docs/gates/gate-12-adapters.md
-~/.cargo/bin/cargo xtask accept adapters
-```
+逐題確認 [A 段開工前提案 #138](https://github.com/suzuke/AgEnD/pull/138) 的 P1–P10；確認後再同步本頁的範圍與驗收步驟。

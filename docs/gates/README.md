@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 13 個施工關各有一頁：範圍、自動驗收、你親自驗收的步驟、驗收紀錄、進度紀錄。
 > - 記住：**一個施工關要等你跑完「你親自驗收」並填好「驗收紀錄」才算完成**。
-> - 下一步：第 1–6、8 施工關已完成；第 7 施工關開工前提案已確認、實作中（PR #132）；第 9、10 施工關開工前提案已確認、等前面的施工關完成後開工；第 11 施工關畫面層完成、B 段（接真 daemon）進行中。
+> - 下一步：第 1–9 施工關完成；第 11 施工關 A、B 段完成並已 merge，C 段未開始。接著開第 10 施工關；第 12 施工關 A 段 draft PR #138 待使用者確認。
 
 ## 索引
 
@@ -15,12 +15,12 @@
 | 4 | [`holder`](gate-04-holder.md) | agend-holder | 完成（2026-09-26） | `cargo xtask accept holder` |
 | 5 | [`store`](gate-05-store.md) | agend-daemon：store | 完成（2026-09-26） | `cargo xtask accept store` |
 | 6 | [`daemon-holder`](gate-06-daemon-holder.md) | daemon ↔ holder | 完成（2026-09-26） | `cargo xtask accept daemon-holder` |
-| 7 | [`codex`](gate-07-codex.md) | codex driver + 送達 | 實作中（2026-09-26；開工前提案 P1–P9 已確認，PR #132） | `cargo xtask accept codex` |
+| 7 | [`codex`](gate-07-codex.md) | codex driver + 送達 | 完成（2026-09-28；已 merge #132） | `cargo xtask accept codex` |
 | 8 | [`client`](gate-08-client.md) | agend-client + protocol server | 完成（2026-09-26） | `cargo xtask accept client` |
-| 9 | [`cli`](gate-09-cli.md) | agend CLI | 提案中（2026-09-26；開工前提案 P1–P10 已確認） | `cargo xtask accept cli` |
-| 10 | [`pipeline`](gate-10-pipeline.md) | 流水線 | 提案中（2026-09-26；開工前提案 P1–P11 已確認） | `cargo xtask accept pipeline` |
-| 11 | [`tui`](gate-11-tui.md) | agend-tui | 實作中（2026-09-26；畫面層完成，B 段接真 daemon 進行中，分支 `feat/gate-11-tui-daemon`） | `cargo xtask accept tui` |
-| 12 | [`adapters`](gate-12-adapters.md) | 其餘 adapter | 未開始 | `cargo xtask accept adapters` |
+| 9 | [`cli`](gate-09-cli.md) | agend CLI | 完成（2026-09-29；已 merge #136） | `cargo xtask accept cli` |
+| 10 | [`pipeline`](gate-10-pipeline.md) | 流水線 | 提案中（P1–P11 已確認、已 merge #130；前置完成，可開工） | `cargo xtask accept pipeline` |
+| 11 | [`tui`](gate-11-tui.md) | agend-tui | 實作中（A、B 段已驗收並 merge；C 段未開始） | `cargo xtask accept tui` |
+| 12 | [`adapters`](gate-12-adapters.md) | 其餘 adapter | 提案中（A 段 draft PR #138 待確認，未 merge 或實作） | `cargo xtask accept adapters` |
 | 13 | [`install`](gate-13-install.md) | 安裝與發布 | 未開始 | `cargo xtask accept install` |
 
 ## 每個終端機先做這一步
