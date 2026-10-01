@@ -75,6 +75,7 @@ cat docs/architecture/pipeline.md
 
 ## 進度紀錄
 
+- 2026-10-02 修正版 `360ca2d` 已 push 至 draft PR #143；完整 workspace 測試、clippy、check-deps（no_std 無跳過）通過，holder 回歸與 TUI 180 fd 限制通過；Gate 10 自動驗收與全新 verifier 待完成，merge 等使用者確認。
 - 2026-10-02 第 10 施工關初輪 verifier 對 `2b7d4a7` 判定 REFUTED；修正多人審查、planned 交接、boot 隔離與 core ports，補整條 queue 的五種 fake 測試；重新驗證中，未 merge。worktree 統一放 `/Users/suzuke/AlphaCR-worktrees/`（[draft PR #143](https://github.com/suzuke/AgEnD/pull/143)）。
 - 2026-10-01 在獨立 worktree 實作第 10 施工關：pipeline、冷 checks 沙箱、LocalForge recovery、team/workflow/agent 命令與 TUI attention；尚待 fresh-context verifier 和使用者驗收（[feat/gate-10-pipeline](https://github.com/suzuke/AgEnD/tree/feat/gate-10-pipeline)）。
 
