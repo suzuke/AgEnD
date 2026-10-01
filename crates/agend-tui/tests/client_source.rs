@@ -9,8 +9,8 @@ mod common;
 mod demo_daemon;
 
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use agend_core::protocol::client::{
@@ -28,12 +28,20 @@ use common::*;
 use ratatui::crossterm::event::KeyCode::{Down, Enter, Esc, Left, Right};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+// Each lab opens a listener, streams and reader/writer clones. Bound concurrent
+// labs so the suite runs under macOS's default 256-descriptor process limit.
+static LABS: (Mutex<usize>, Condvar) = (Mutex::new(0), Condvar::new());
 struct Lab {
     dir: TempDir,
 }
 
 impl Lab {
     fn new() -> Lab {
+        let mut count = LABS.0.lock().unwrap();
+        while *count >= 4 {
+            count = LABS.1.wait(count).unwrap();
+        }
+        *count += 1;
         Lab {
             dir: TempDir::new("g11-tui").unwrap(),
         }
@@ -61,6 +69,13 @@ impl Lab {
 
     fn app(&self, caller: Option<&str>) -> (App, Arc<AtomicUsize>) {
         self.app_on(self.socket(), caller, Language::En)
+    }
+}
+
+impl Drop for Lab {
+    fn drop(&mut self) {
+        *LABS.0.lock().unwrap() -= 1;
+        LABS.1.notify_one();
     }
 }
 

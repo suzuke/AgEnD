@@ -1,7 +1,16 @@
 use super::*;
 use agend_core::protocol::ask::ContextRecap;
 
-impl Engine {
+impl<S, D, E, C, V> Engine<S, D, E, C, V>
+where
+    S: PipelineStore + Send + 'static,
+    S::Error: std::fmt::Display,
+    D: Driver + Send + 'static,
+    D::Error: std::fmt::Display,
+    E: PipelineExecutor,
+    C: Clock + Send + Sync + 'static,
+    V: PipelineView,
+{
     pub(super) fn clear_task_attention(&self, task: &str) {
         for a in self.fleet.view().attention {
             if a.task_id.as_deref() == Some(task)
@@ -24,7 +33,9 @@ impl Engine {
             .progress(&task.id)
             .await
             .map_err(db)?
-            .map_or(log::now_unix_ms(), |p| p.data.stage_entered_at_unix_ms);
+            .map_or(self.clock.now_unix_ms(), |p| {
+                p.data.stage_entered_at_unix_ms
+            });
         self.fleet.raise(item(
             &id,
             &format!("{} needs role {role} in {}", task.id, task.team_id),
@@ -161,7 +172,7 @@ impl Engine {
                 task_id: task.id.clone(),
                 title: task.title.clone(),
                 team_id: task.team_id.clone(),
-                status: crate::store::task_row::status_text(task.status).into(),
+                status: task.status.as_str().into(),
                 assignee: task.assignee.clone(),
                 stages: state.map_or(Vec::new(), |s| {
                     s.workflow().stages.iter().map(|s| s.id.clone()).collect()

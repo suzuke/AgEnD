@@ -1,12 +1,20 @@
 use super::*;
-use crate::store::pipeline::AskRow;
-use agend_core::model::DeliveryState;
 use agend_core::pipeline::state::WorkProduct;
 use agend_core::pipeline::task::TaskOperation;
 use agend_core::pipeline::workflow::WorkOutput;
 use agend_core::protocol::ask::{AskEntry, AskThread};
+use agend_core::runtime_records::AskRow;
 
-impl Engine {
+impl<S, D, E, C, V> Engine<S, D, E, C, V>
+where
+    S: PipelineStore + Send + 'static,
+    S::Error: std::fmt::Display,
+    D: Driver + Send + 'static,
+    D::Error: std::fmt::Display,
+    E: PipelineExecutor,
+    C: Clock + Send + Sync + 'static,
+    V: PipelineView,
+{
     pub(super) async fn agent(&mut self, caller: Option<&str>, command: AgentCommand) -> Reply {
         let caller = caller.ok_or_else(|| {
             (
@@ -105,26 +113,16 @@ impl Engine {
                     .as_ref()
                     .ok_or_else(|| invalid("git unavailable"))?;
                 let head = git
-                    .run(
-                        Path::new(&repo),
-                        &["rev-parse", &format!("refs/heads/{branch}")],
-                    )
+                    .run(&repo, &["rev-parse", &format!("refs/heads/{branch}")])
                     .await
                     .map_err(invalid)?;
-                if git
-                    .ancestor(Path::new(&repo), &head, "main")
-                    .await
-                    .map_err(invalid)?
-                {
+                if git.ancestor(&repo, &head, "main").await.map_err(invalid)? {
                     return Err(invalid(format!(
                         "nothing to merge: {branch} has no commits beyond main; commit your work, then agend done {}",
                         ticket(&loaded.state)
                     )));
                 }
-                let patch_id = git
-                    .patch_id(Path::new(&repo), &head)
-                    .await
-                    .map_err(invalid)?;
+                let patch_id = git.patch_id(&repo, &head).await.map_err(invalid)?;
                 let stage_id = loaded
                     .state
                     .current_stage()
@@ -144,7 +142,6 @@ impl Engine {
                     },
                 )
                 .await?;
-                self.confirm_dispatch(&ticket(&loaded.state)).await?;
                 Ok(CommandResult::Accepted)
             }
             AgentCommand::Result {
@@ -180,7 +177,6 @@ impl Engine {
                     },
                 )
                 .await?;
-                self.confirm_dispatch(&ticket(&loaded.state)).await?;
                 Ok(CommandResult::Accepted)
             }
             AgentCommand::ReviewApprove { task_id, identity } => {
@@ -207,16 +203,14 @@ impl Engine {
                 self.owned(caller, &task_id).await?;
                 let due = delay_seconds
                     .checked_mul(1000)
-                    .and_then(|ms| log::now_unix_ms().checked_add(ms))
+                    .and_then(|ms| self.clock.now_unix_ms().checked_add(ms))
                     .filter(|v| *v <= i64::MAX as u64)
                     .ok_or_else(|| invalid("reminder delay is too large"))?;
                 self.store.add_reminder(&task_id, due).await.map_err(db)?;
                 let tx = self.tx.clone();
+                let delay = due.saturating_sub(self.clock.now_unix_ms());
                 tokio::spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_millis(
-                        due.saturating_sub(log::now_unix_ms()),
-                    ))
-                    .await;
+                    tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
                     let _ = tx.send(Input::Wake);
                 });
                 Ok(CommandResult::Accepted)
@@ -226,13 +220,10 @@ impl Engine {
                     return Err(invalid("ask question is empty"));
                 }
                 let task = self.store.held_task(caller).await.map_err(db)?;
-                let id = format!(
-                    "A-{}",
-                    crate::store::instances::new_session_id().map_err(db)?
-                );
+                let id = format!("A-{}", self.executor.new_id().map_err(db)?);
                 let row = AskRow {
                     instance: caller.into(),
-                    created: log::now_unix_ms(),
+                    created: self.clock.now_unix_ms(),
                     thread: AskThread {
                         ask_id: id.clone(),
                         task_id: task,
@@ -306,6 +297,15 @@ impl Engine {
         review: bool,
     ) -> Result<Loaded, Refusal> {
         let loaded = self.load(task).await?;
+        if matches!(
+            loaded.task.status,
+            TaskStatus::Done | TaskStatus::Failed | TaskStatus::Cancelled | TaskStatus::Superseded
+        ) {
+            return Err((
+                error_code::STALE_RESULT.into(),
+                "task is closed; ticket is no longer current".into(),
+            ));
+        }
         let expected = loaded.state.current_stage().map(|s| ResultIdentity {
             stage_id: s.id.clone(),
             attempt: loaded.state.attempt(),
@@ -398,19 +398,7 @@ impl Engine {
         if self.store.bindings().await.map_err(db)?.contains(&binding) {
             self.release(&binding, false).await?;
         }
-        self.confirm_dispatch(&ticket(&loaded.state)).await?;
         Ok(CommandResult::Accepted)
-    }
-    async fn confirm_dispatch(&self, ticket: &str) -> Result<(), Refusal> {
-        self.store
-            .advance_message(
-                &format!("dispatch:{ticket}"),
-                DeliveryState::Confirmed,
-                None,
-                log::now_unix_ms(),
-            )
-            .await
-            .map_err(db)
     }
     async fn block(&mut self, caller: &str, id: &str, reason: Option<String>) -> Reply {
         let loaded = self.owned(caller, id).await?;
@@ -432,8 +420,8 @@ impl Engine {
         let mut progress = loaded.progress.data.clone();
         progress.block_reason = reason.clone();
         let event = StoredEvent {
-            id: crate::store::instances::new_session_id().map_err(db)?,
-            occurred_at_unix_ms: log::now_unix_ms(),
+            id: self.executor.new_id().map_err(db)?,
+            occurred_at_unix_ms: self.clock.now_unix_ms(),
             kind: "block".into(),
             detail: reason.clone().unwrap_or_else(|| "unblocked".into()),
         };
@@ -497,10 +485,7 @@ impl Engine {
                 .as_ref()
                 .ok_or_else(|| invalid("real git not found"))?;
             let out = git
-                .run(
-                    Path::new(team.repo.as_deref().unwrap_or_default()),
-                    &["--version"],
-                )
+                .run(team.repo.as_deref().unwrap_or_default(), &["--version"])
                 .await
                 .map_err(invalid)?;
             if !agend_core::setup::parse_git_version(&out)
@@ -524,7 +509,7 @@ impl Engine {
             .create_pipeline_task(
                 &task,
                 &serde_json::to_string(&state.snapshot()).map_err(db)?,
-                log::now_unix_ms(),
+                self.clock.now_unix_ms(),
             )
             .await
             .map_err(db)?;
@@ -555,25 +540,21 @@ impl Engine {
                 repo,
                 workflow_id,
             } => {
-                crate::store::instances::validate_id(&team_id).map_err(invalid)?;
+                agend_core::runtime_records::validate_id(&team_id).map_err(invalid)?;
                 let id = workflow_id
                     .unwrap_or_else(|| if repo.is_some() { "code" } else { "research" }.into());
                 if self.store.latest_workflow(&id).await.map_err(db)?.is_none() {
                     return Err(invalid("unknown workflow"));
                 }
                 let repo = repo
-                    .map(|r| {
-                        PathBuf::from(r)
-                            .canonicalize()
-                            .map(|r| r.display().to_string())
-                    })
+                    .map(|r| self.executor.canonical_repo(&r))
                     .transpose()
                     .map_err(db)?;
                 if let Some(repo) = &repo {
                     self.git
                         .as_ref()
                         .ok_or_else(|| invalid("git unavailable"))?
-                        .run(Path::new(repo), &["rev-parse", "--verify", "main"])
+                        .run(repo, &["rev-parse", "--verify", "main"])
                         .await
                         .map_err(invalid)?;
                 }
@@ -611,7 +592,7 @@ impl Engine {
                 role,
             } => {
                 self.team(&team_id).await?;
-                crate::store::instances::validate_id(&role).map_err(invalid)?;
+                agend_core::runtime_records::validate_id(&role).map_err(invalid)?;
                 self.store
                     .join_team(&team_id, &instance_id, &role)
                     .await
@@ -661,7 +642,7 @@ impl Engine {
                 if ["code", "research", "planned", "epic"].contains(&workflow.id.as_str()) {
                     return Err(invalid("built-in workflows are read-only"));
                 }
-                crate::store::instances::validate_id(&workflow.id).map_err(invalid)?;
+                agend_core::runtime_records::validate_id(&workflow.id).map_err(invalid)?;
                 workflow.version = self
                     .store
                     .latest_workflow(&workflow.id)
@@ -760,7 +741,7 @@ impl Engine {
     }
     pub(super) async fn send_reminders(&self) -> Result<(), Refusal> {
         for (seq, task, due) in self.store.reminders().await.map_err(db)? {
-            if due > log::now_unix_ms() {
+            if due > self.clock.now_unix_ms() {
                 continue;
             }
             let row = self.store.load_task(&task).await.map_err(db)?;

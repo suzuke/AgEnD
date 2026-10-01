@@ -12,6 +12,8 @@
 
 假 worker 的 workspace 放 `.leave-wip` 會讓下一次 work 留下 untracked 檔案；移除檔案恢復正常。這只控制測試用的 agent 行為。
 
+Gate 10 的 `FakePipelineExecutor` 實作 core executor port，組合 FakeStore／FakeForge／FakeRunner 並記錄 bindings、投影與副作用；供 daemon 完整 queue 測試使用。FakeDriver／FakeClock clone 共享同一個測試狀態。
+
 ## 負責
 
 | 項目 | 模組 | 內容 |

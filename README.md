@@ -30,7 +30,7 @@
 - **Codex 與 CLI**：app-server driver、訊息送達與冪等、三級忙碌策略；`status`、`send`、`inbox`、instance 管理、`daemon restart`、`doctor`、`init`。兩個假 Codex agent 中途重啟仍不漏不重的里程碑已驗收，真 Codex 另有 smoke 驗收。
 - **TUI**：`agend app` 接真 daemon，顯示 fleet 全貌與「需要你」、即時終端、操作者輸入、斷線重連。Codex 終端輸入目前回 `not_supported`；完整重現 agent CLI 與滑鼠滾動列為第 11 施工關 C 段。
 
-**第 10 施工關驗收中**：本分支已接通本機 pipeline、task／review／workflow／team 操作與 checks 沙箱；自動驗收已通過；仍需 fresh-context verifier 與人工驗收，經使用者確認才能合併。執行方式見 [pipeline runtime](docs/architecture/pipeline-runtime.md)。Claude、OpenCode driver、GitHub forge、Telegram 在第 12 施工關，服務註冊與發布在第 13 施工關。完整狀態與驗收證據見 [ROADMAP](docs/ROADMAP.md)。
+**第 10 施工關驗收中（[draft PR #143](https://github.com/suzuke/AgEnD/pull/143)）**：本分支已接通本機 pipeline、task／review／workflow／team 操作與 checks 沙箱；初輪獨立驗證找到缺陷，修正與重新驗證中；仍需人工驗收，經使用者確認才能合併。執行方式見 [pipeline runtime](docs/architecture/pipeline-runtime.md)。Claude、OpenCode driver、GitHub forge、Telegram 在第 12 施工關，服務註冊與發布在第 13 施工關。完整狀態與驗收證據見 [ROADMAP](docs/ROADMAP.md)。
 
 ## 系統圖
 

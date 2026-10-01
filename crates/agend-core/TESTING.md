@@ -9,6 +9,8 @@
 
 快照 golden、舊 fixture 與竄改輸入在 `cargo test -p xtask --test pipeline_snapshot`；第一套 explorer 每步驗證 restore 與 outstanding action 的關卡／attempt 不變。
 
+第 10 施工關的新增 core ports 與 runtime records 同樣受 no_std／unsafe／依賴檢查；完整 queue 的 fake 測試在 daemon，FakeStore 與 SQLite 的 receipt/CAS 契約在 `pipeline_store_ports.rs`。
+
 ## 怎麼跑
 
 ```bash

@@ -5,11 +5,7 @@ use agend_core::traits::{CommandOutput, Runner};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug)]
-pub enum CheckError {
-    Sandbox(String),
-    Execution(String),
-}
+pub use agend_core::pipeline::ports::ExecutionError as CheckError;
 
 pub fn tool(home: &Path) -> Option<PathBuf> {
     #[cfg(debug_assertions)]
@@ -213,17 +209,16 @@ pub async fn run(
     let run = format!(
         "{}-{}",
         ticket.replace('/', "-"),
-        crate::store::instances::new_session_id()
-            .map_err(|e| CheckError::Execution(e.to_string()))?
+        crate::store::instances::new_session_id().map_err(|e| CheckError::Failed(e.to_string()))?
     );
     let root = home.join("checks");
-    std::fs::create_dir_all(&root).map_err(|e| CheckError::Execution(e.to_string()))?;
+    std::fs::create_dir_all(&root).map_err(|e| CheckError::Failed(e.to_string()))?;
     let root = root
         .canonicalize()
-        .map_err(|e| CheckError::Execution(e.to_string()))?;
+        .map_err(|e| CheckError::Failed(e.to_string()))?;
     let wt = root.join(&run);
     let tmp = root.join(format!("{run}.tmp"));
-    std::fs::create_dir_all(&tmp).map_err(|e| CheckError::Execution(e.to_string()))?;
+    std::fs::create_dir_all(&tmp).map_err(|e| CheckError::Failed(e.to_string()))?;
     if let Err(e) = git
         .run(
             repo,
@@ -232,11 +227,11 @@ pub async fn run(
         .await
     {
         let _ = std::fs::remove_dir_all(&tmp);
-        return Err(CheckError::Execution(e));
+        return Err(CheckError::Failed(e));
     }
     let repo = repo
         .canonicalize()
-        .map_err(|e| CheckError::Execution(e.to_string()))?;
+        .map_err(|e| CheckError::Failed(e.to_string()))?;
     let result = async {
         probe(home, &wt, &tmp).await.map_err(CheckError::Sandbox)?;
         let marked = format!(
@@ -249,7 +244,7 @@ pub async fn run(
         }
         .run(&sandbox, &wt.to_string_lossy(), timeout_ms)
         .await
-        .map_err(|e| CheckError::Execution(e.to_string()))?;
+        .map_err(|e| CheckError::Failed(e.to_string()))?;
         if !std::fs::symlink_metadata(tmp.join(".agend-sandbox-started"))
             .is_ok_and(|m| m.file_type().is_file())
         {
@@ -262,7 +257,7 @@ pub async fn run(
         let log = home
             .join("logs/checks")
             .join(ticket.split('/').next().unwrap_or("unknown"));
-        std::fs::create_dir_all(&log).map_err(|e| CheckError::Execution(e.to_string()))?;
+        std::fs::create_dir_all(&log).map_err(|e| CheckError::Failed(e.to_string()))?;
         let mut bytes = output.stdout.clone();
         bytes.extend_from_slice(&output.stderr);
         if bytes.len() > 10 * 1024 * 1024 {
@@ -276,7 +271,7 @@ pub async fn run(
             )),
             bytes,
         )
-        .map_err(|e| CheckError::Execution(e.to_string()))?;
+        .map_err(|e| CheckError::Failed(e.to_string()))?;
         Ok(output)
     }
     .await;

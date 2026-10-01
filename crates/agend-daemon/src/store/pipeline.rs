@@ -3,37 +3,7 @@ use super::{SqliteStore, StoreError};
 use agend_core::traits::TaskProgress;
 use rusqlite::{OptionalExtension, params};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Team {
-    pub id: String,
-    pub repo: Option<String>,
-    pub default_workflow: String,
-}
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Member {
-    pub id: String,
-    pub team: String,
-    pub role: String,
-    pub delivery: String,
-}
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BindingRow {
-    pub instance: String,
-    pub task: String,
-    pub kind: String,
-    pub worktree: String,
-    pub branch: Option<String>,
-    pub head: Option<String>,
-    pub ticket: String,
-    pub status: String,
-}
-#[derive(Debug, Clone)]
-pub struct Progress {
-    pub data: TaskProgress,
-    pub block_reason: Option<String>,
-    pub attention_reason: Option<String>,
-    pub acknowledged: bool,
-}
+pub use agend_core::runtime_records::{AskRow, BindingRow, Member, Progress, Team};
 
 impl SqliteStore {
     pub async fn advance_message(
@@ -189,12 +159,6 @@ impl SqliteStore {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct AskRow {
-    pub instance: String,
-    pub created: u64,
-    pub thread: agend_core::protocol::ask::AskThread,
-}
 impl SqliteStore {
     pub async fn asks(&self) -> Result<Vec<AskRow>, StoreError> {
         self.call(|c| {

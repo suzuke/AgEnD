@@ -211,6 +211,17 @@ impl Backend for Codex {
                 );
             }
             Scenario::ResumeEmpty => {
+                // Drain the initial notification before closing its producer connection.
+                log.wait(
+                    0,
+                    t,
+                    "thread/started before closing the initial connection",
+                    |e| {
+                        e.via == VIA
+                            && e.str("method") == Some("thread/started")
+                            && e.msg["params"]["thread"]["id"] == thread
+                    },
+                )?;
                 ws.close();
                 server.stop();
                 server = spawn(agent, &project, &socket)?;

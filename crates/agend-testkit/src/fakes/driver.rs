@@ -39,10 +39,10 @@ pub enum DriverCall {
 ///
 /// Cursors are one global zero-padded counter, so they are unique and
 /// ordered. Beyond the contract: an unknown cursor is an error.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FakeDriver {
     backend: Arc<Mutex<Backend>>,
-    state: Mutex<State>,
+    state: Arc<Mutex<State>>,
 }
 
 /// The backend of a [`FakeDriver`], standing in for the agents in their
@@ -110,11 +110,11 @@ impl FakeDriver {
     pub fn connect(backend: &FakeBackend) -> Self {
         Self {
             backend: Arc::clone(&backend.0),
-            state: Mutex::new(State {
+            state: Arc::new(Mutex::new(State {
                 receipts: VecDeque::new(),
                 calls: Vec::new(),
                 failures: Failures::new(OPERATIONS),
-            }),
+            })),
         }
     }
 

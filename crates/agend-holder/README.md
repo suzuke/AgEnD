@@ -9,6 +9,7 @@
 
 - 以 portable-pty 啟動 agent；環境**只有** `Spawn.env`（沒給 `TERM` 時補 `xterm-256color`）
 - 以 alacritty_terminal 維護畫面（50 列 × 200 欄，scrollback 1,000 列只在記憶體），提供純文字快照與輸出串流
+- PTY reader 先讀完已到達的輸出再關 holder 的 slave handle，避免 macOS 快速退出的 agent 留下空白畫面；關閉檢查不會 reap child。
 - 回報 exit code 或 signal；agent 結束後保留，每次連上都在快照後送 `Exited`
 - holder 協定 server：版本協商、同時一條連線、新的接手、落後 1 MiB 斷線
 - 脫離終端（`setsid`）、忽略 HUP／INT／QUIT／TERM、`run/holders/<id>.lock` 防重複

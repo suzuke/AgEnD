@@ -305,6 +305,39 @@ impl Fleet {
     }
 }
 
+impl agend_core::pipeline::ports::PipelineView for Fleet {
+    fn view(&self) -> FleetView {
+        Fleet::view(self)
+    }
+    fn set_teams(&self, teams: Vec<TeamView>) {
+        Fleet::set_teams(self, teams)
+    }
+    fn set_instance(&self, instance: InstanceView, summary: String) {
+        Fleet::set_instance(self, instance, summary)
+    }
+    fn sync_tasks(&self, tasks: Vec<TaskView>) {
+        Fleet::sync_tasks(self, tasks)
+    }
+    fn dismiss(&self, id: &str) {
+        Fleet::dismiss(self, id)
+    }
+    fn raise(&self, item: AttentionRequiredData) {
+        Fleet::raise(self, item)
+    }
+    fn upsert_attention(&self, item: AttentionRequiredData) {
+        Fleet::upsert_attention(self, item)
+    }
+    fn attention(&self, id: &str) -> Option<AttentionRequiredData> {
+        Fleet::attention(self, id)
+    }
+    fn resolve(&self, id: &str, action: AttentionAction) -> Option<AttentionRequiredData> {
+        Fleet::resolve(self, id, action)
+    }
+    fn publish(&self, event: DaemonEvent) -> u64 {
+        Fleet::publish(self, event)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

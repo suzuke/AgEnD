@@ -525,20 +525,8 @@ impl Store for SqliteStore {
         progress: &TaskProgress,
         event: &StoredEvent,
     ) -> Result<CasResult, StoreError> {
-        let task = task.clone();
-        let progress = progress.clone();
-        let event = event.clone();
-        self.call(move |conn| {
-            let tx = conn.transaction()?;
-            let result = task_row::compare_and_swap(&tx, &task, expected_version)?;
-            if matches!(result, CasResult::Written { .. }) {
-                tx.execute("UPDATE tasks SET pipeline=?1,stage_entered_at_unix_ms=?2,merge_intent=?3,block_reason=?5 WHERE id=?4",
-                    rusqlite::params![progress.pipeline,task_row::to_i64(progress.stage_entered_at_unix_ms,"stage entry")?,progress.merge_intent,task.id,progress.block_reason])?;
-                task_row::append_event(&tx, &task.id, &event)?;
-                tx.commit()?;
-            }
-            Ok(result)
-        }).await
+        self.advance_with_receipt(task, expected_version, progress, event, None)
+            .await
     }
 
     async fn load_workflow(
@@ -909,3 +897,44 @@ fn create_private_dir(dir: &Path) -> Result<(), StoreError> {
 
 #[cfg(test)]
 mod tests;
+
+mod pipeline_ports;
+
+impl SqliteStore {
+    async fn advance_with_receipt(
+        &self,
+        task: &Task,
+        expected_version: u64,
+        progress: &TaskProgress,
+        event: &StoredEvent,
+        confirmation: Option<&str>,
+    ) -> Result<CasResult, StoreError> {
+        let confirmation = confirmation.map(str::to_owned);
+        let task = task.clone();
+        let progress = progress.clone();
+        let event = event.clone();
+        self.call(move |conn| {
+            let tx = conn.transaction()?;
+            let result = task_row::compare_and_swap(&tx, &task, expected_version)?;
+            if matches!(result, CasResult::Written { .. }) {
+                tx.execute("UPDATE tasks SET pipeline=?1,stage_entered_at_unix_ms=?2,merge_intent=?3,block_reason=?5 WHERE id=?4",
+                    rusqlite::params![progress.pipeline,task_row::to_i64(progress.stage_entered_at_unix_ms,"stage entry")?,progress.merge_intent,task.id,progress.block_reason])?;
+                task_row::append_event(&tx, &task.id, &event)?;
+                if let Some(id) = confirmation
+                    && let Some(message) = messages::get(&tx, &id)? {
+                        if message.state == agend_core::model::DeliveryState::Failed {
+                        return Err(StoreError::Invalid("cannot confirm a failed dispatch".into()));
+                    }
+                    if message.state == agend_core::model::DeliveryState::Queued {
+                            messages::advance(&tx, &id, agend_core::model::DeliveryState::Sent, None, event.occurred_at_unix_ms)?;
+                        }
+                        if message.state != agend_core::model::DeliveryState::Confirmed {
+                            messages::advance(&tx, &id, agend_core::model::DeliveryState::Confirmed, None, event.occurred_at_unix_ms)?;
+                        }
+                }
+                tx.commit()?;
+            }
+            Ok(result)
+        }).await
+    }
+}

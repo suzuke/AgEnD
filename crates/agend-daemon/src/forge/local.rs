@@ -15,18 +15,7 @@ pub struct LocalForge<R = crate::runner::ProcessRunner, S = SqliteStore> {
     /// Base observed by the pipeline before checks/rebase reconciliation.
     pub expected_main: Option<String>,
 }
-#[derive(Debug)]
-pub enum LocalError {
-    Blocked(String),
-    Failed(String),
-}
-impl std::fmt::Display for LocalError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Blocked(s) | Self::Failed(s) => f.write_str(s),
-        }
-    }
-}
+pub use agend_core::pipeline::ports::ExecutionError as LocalError;
 fn fail(s: String) -> LocalError {
     LocalError::Failed(s)
 }

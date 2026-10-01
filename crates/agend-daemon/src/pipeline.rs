@@ -3,16 +3,10 @@ mod attention;
 mod commands;
 mod lifecycle;
 mod reconcile;
-mod transition;
+pub(crate) mod transition;
 
-use crate::driver::codex::CodexDriver;
-use crate::fleet::Fleet;
-use crate::git::Git;
 use crate::log;
-use crate::store::{
-    SqliteStore,
-    pipeline::{BindingRow, Progress, Team},
-};
+use agend_core::pipeline::ports::*;
 use agend_core::pipeline::state::{
     PipelineAction, PipelineEvent, PipelineSnapshot, PipelineState, PipelineStatus,
     outstanding_actions,
@@ -20,7 +14,9 @@ use agend_core::pipeline::state::{
 use agend_core::pipeline::task::{Task, TaskStatus};
 use agend_core::pipeline::workflow::{Approver, Stage, TimeoutAction, ValidatedWorkflow, Workflow};
 use agend_core::protocol::client::*;
-use agend_core::traits::{CasResult, Store, StoredEvent, TaskProgress};
+use agend_core::runtime_records::*;
+use agend_core::traits::{CasResult, StoredEvent, TaskProgress};
+use agend_core::traits::{Clock, Driver};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -50,7 +46,7 @@ pub(crate) enum Input {
         stage: String,
         attempt: u32,
         head: Option<String>,
-        result: Result<agend_core::traits::CommandOutput, crate::checks::CheckError>,
+        result: Result<agend_core::traits::CommandOutput, ExecutionError>,
     },
     Wake,
     Daily,
@@ -82,13 +78,14 @@ impl Handle {
         let _ = self.tx.send(Input::Daily);
     }
 }
-struct Engine {
+struct Engine<S, D, E, C, V> {
     home: PathBuf,
-    exe: PathBuf,
-    store: Arc<SqliteStore>,
-    fleet: Arc<Fleet>,
-    codex: CodexDriver,
-    git: Option<Git>,
+    store: Arc<S>,
+    fleet: Arc<V>,
+    codex: D,
+    git: Option<E>,
+    executor: E,
+    clock: C,
     tx: mpsc::UnboundedSender<Input>,
     running: BTreeSet<String>,
     timers: BTreeSet<String>,
@@ -103,29 +100,38 @@ struct Loaded {
 }
 
 /// Boot reconciliation completes before the protocol socket is bound.
-pub async fn start(
+pub use crate::pipeline_runtime::start;
+pub(crate) async fn start_with<S, D, E, C, V>(
     home: &Path,
-    exe: &Path,
-    store: Arc<SqliteStore>,
-    fleet: Arc<Fleet>,
-    codex: CodexDriver,
-) -> Result<(Handle, tokio::task::JoinHandle<()>), String> {
+    store: Arc<S>,
+    fleet: Arc<V>,
+    codex: D,
+    executor: E,
+    clock: C,
+) -> Result<(Handle, tokio::task::JoinHandle<()>), String>
+where
+    S: PipelineStore + Send + 'static,
+    S::Error: std::fmt::Display,
+    D: Driver + Send + 'static,
+    D::Error: std::fmt::Display,
+    E: PipelineExecutor,
+    C: Clock + Send + Sync + 'static,
+    V: PipelineView,
+{
     let (tx, mut queue) = mpsc::unbounded_channel();
     let mut engine = Engine {
-        home: home.canonicalize().map_err(|e| e.to_string())?,
-        exe: exe.into(),
+        home: home.into(),
         store,
         fleet,
         codex,
-        git: Git::checked(home)
-            .await
-            .map_err(|e| log::line(&format!("repo execution unavailable: {e}")))
-            .ok(),
+        git: executor.git_available().then(|| executor.clone()),
+        executor,
+        last_day: clock.now_unix_ms() / 86_400_000,
+        clock,
         tx: tx.clone(),
         running: BTreeSet::new(),
         timers: BTreeSet::new(),
         checks: Arc::new(Semaphore::new(1)),
-        last_day: log::now_unix_ms() / 86_400_000,
     };
     engine.boot().await.map_err(|(_, m)| m)?;
     let handle = Handle { tx };
@@ -167,7 +173,7 @@ pub async fn start(
                         continue;
                     }
                     match result {
-                        Err(crate::checks::CheckError::Sandbox(reason)) => {
+                        Err(ExecutionError::Sandbox(reason)) => {
                             let _ = engine
                                 .note(&task, Some(format!("sandbox-missing:{reason}")))
                                 .await;
@@ -207,7 +213,7 @@ pub async fn start(
                     let _ = engine.wake().await;
                 }
                 Input::Daily => {
-                    let day = log::now_unix_ms() / 86_400_000;
+                    let day = engine.clock.now_unix_ms() / 86_400_000;
                     if day != engine.last_day {
                         engine.last_day = day;
                         if let Err((_, e)) = engine.reconcile_bindings().await {
@@ -275,7 +281,16 @@ pub fn validate(workflow: Workflow) -> Result<ValidatedWorkflow, String> {
         .validated(&roles)
         .map_err(|e| format!("invalid workflow: {e:?}"))
 }
-impl Engine {
+impl<S, D, E, C, V> Engine<S, D, E, C, V>
+where
+    S: PipelineStore + Send + 'static,
+    S::Error: std::fmt::Display,
+    D: Driver + Send + 'static,
+    D::Error: std::fmt::Display,
+    E: PipelineExecutor,
+    C: Clock + Send + Sync + 'static,
+    V: PipelineView,
+{
     async fn load(&self, id: &str) -> Result<Loaded, Refusal> {
         let row = self
             .store
@@ -361,6 +376,21 @@ impl Engine {
         {
             return Err(invalid("task is blocked; unblock it first"));
         }
+        if matches!(
+            loaded.task.status,
+            TaskStatus::Done | TaskStatus::Failed | TaskStatus::Cancelled | TaskStatus::Superseded
+        ) {
+            return Err((
+                error_code::STALE_RESULT.into(),
+                "task is closed; ticket is no longer current".into(),
+            ));
+        }
+        if self.git.is_none()
+            && self.team(&loaded.task.team_id).await?.repo.is_some()
+            && !matches!(event, PipelineEvent::Cancel { .. })
+        {
+            return Err(invalid("repo execution unavailable; waiting for git"));
+        }
         // All result sources observe the actual branch before using their result.
         if !matches!(
             event,
@@ -373,7 +403,7 @@ impl Engine {
             && let Some(git) = self.git.clone()
             && let Some(repo) = self.team(&loaded.task.team_id).await?.repo
         {
-            let repo = Path::new(&repo);
+            let repo = repo.as_str();
             let head = git
                 .run(repo, &["rev-parse", &format!("refs/heads/{branch}")])
                 .await
@@ -417,30 +447,43 @@ impl Engine {
     ) -> Result<(), Refusal> {
         let (task, next, entered, actions) = transition::advance(
             self.store.as_ref(),
-            &transition::WallClock,
+            &self.clock,
             loaded,
             event,
             detail,
-            crate::store::instances::new_session_id().map_err(db)?,
+            self.executor.new_id().map_err(db)?,
         )
         .await?;
         self.note(&task.id, None).await?;
         self.clear_task_attention(&task.id);
-        // Drop obsolete review bindings before a new attempt is dispatched.
-        for binding in self
-            .store
-            .bindings()
-            .await
-            .map_err(db)?
-            .into_iter()
-            .filter(|b| b.task == task.id && b.kind == "review" && b.ticket != ticket(&next))
-        {
-            self.release(&binding, false).await?;
+        let result = async {
+            // Drop obsolete review bindings before a new attempt is dispatched.
+            for binding in self
+                .store
+                .bindings()
+                .await
+                .map_err(db)?
+                .into_iter()
+                .filter(|b| {
+                    b.task == task.id
+                        && b.kind == "review"
+                        && (b.ticket != ticket(&next)
+                            || next.approval_reviewers().contains(&b.instance))
+                })
+            {
+                self.release(&binding, false).await?;
+            }
+            for action in actions {
+                self.action(&task, &next, entered, action).await?;
+            }
+            Ok(())
         }
-        for action in actions {
-            self.action(&task, &next, entered, action).await?;
+        .await;
+        if let Err((_, reason)) = &result {
+            self.fail_restore(&task.id, &format!("execution failed: {reason}"))
+                .await?;
         }
-        Ok(())
+        result
     }
 }
 fn ticket(state: &PipelineState) -> String {
@@ -451,3 +494,6 @@ fn ticket(state: &PipelineState) -> String {
         state.attempt()
     )
 }
+
+#[cfg(test)]
+mod tests;

@@ -202,6 +202,20 @@ impl fmt::Display for TaskError {
 
 impl core::error::Error for TaskError {}
 
+impl TaskStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TaskStatus::Open => "open",
+            TaskStatus::Running => "running",
+            TaskStatus::Blocked => "blocked",
+            TaskStatus::Done => "done",
+            TaskStatus::Superseded => "superseded",
+            TaskStatus::Failed => "failed",
+            TaskStatus::Cancelled => "cancelled",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -7,6 +7,7 @@
 
 ## 第 10 施工關驗證
 
+`recorder_recovery.rs` 對真 fake producer 重複 ResumeEmpty 50 次，關閉連線前必須讀到該 thread 的 `thread/started`。Pipeline 的共享 fake／SQLite 契約另外驗 dispatch receipt 與 task CAS 同交易。
 STO-13 同時跑 FakeStore 與 SQLite；SplitAdvance mutant 故意在失敗時先寫 task，必須被契約推翻。`fake-worker` 由 `agend` 的 pipeline 程序測試與 `pipeline_probe demo` 啟動。
 
 ## 怎麼跑

@@ -1,8 +1,9 @@
 //! Durable binding creation, shim projections and WIP-preserving release.
 use crate::git::Git;
 use crate::runner::{ProcessRunner, quote};
-use crate::store::{SqliteStore, pipeline::BindingRow};
 use agend_core::binding::{Binding, SNAPSHOT_VERSION, Snapshot};
+use agend_core::pipeline::ports::PipelineStore;
+use agend_core::runtime_records::BindingRow;
 use agend_core::traits::Runner;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -64,14 +65,17 @@ async fn hooks(
     }
 }
 
-pub async fn ensure(
-    store: &SqliteStore,
+pub async fn ensure<S: PipelineStore>(
+    store: &S,
     git: &Git,
     home: &Path,
     exe: &Path,
     repo: &Path,
     b: &BindingRow,
-) -> Result<(), String> {
+) -> Result<(), String>
+where
+    S::Error: std::fmt::Display,
+{
     let wt = PathBuf::from(&b.worktree);
     if !wt.starts_with(home.join("worktrees")) {
         return Err("binding worktree escapes managed directory".into());
@@ -221,15 +225,18 @@ pub async fn archive(
     Ok(Some(path.display().to_string()))
 }
 
-pub async fn release(
-    store: &SqliteStore,
+pub async fn release<S: PipelineStore>(
+    store: &S,
     git: &Git,
     home: &Path,
     exe: &Path,
     repo: &Path,
     b: &BindingRow,
     merged: bool,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, String>
+where
+    S::Error: std::fmt::Display,
+{
     snapshot(home, &b.instance, Some(repo.display().to_string()), None)?;
     let wt = Path::new(&b.worktree);
     let patch = archive(

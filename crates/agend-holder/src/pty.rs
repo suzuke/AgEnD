@@ -12,6 +12,7 @@
 
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
+use std::os::fd::{AsRawFd, FromRawFd};
 use std::path::Path;
 use std::sync::mpsc::{SyncSender, TrySendError, sync_channel};
 
@@ -120,12 +121,21 @@ pub fn spawn(data: &SpawnData, rows: u16, columns: u16) -> Result<SpawnedAgent, 
         .ok_or_else(|| "spawned agent has no pid".to_string())?;
     // The holder reaps the agent itself with waitpid (see `exit`).
     drop(child);
-    // Close our copy of the slave so reading the master ends when the agent does.
-    drop(pair.slave);
-    let reader = pair
-        .master
-        .try_clone_reader()
-        .map_err(|e| format!("pty reader: {e}"))?;
+    // Keep our slave open until the reader drains an exited child's bytes.
+    // macOS can discard buffered output when the last slave closes first.
+    let fd = pair.master.as_raw_fd().ok_or("PTY has no Unix fd")?;
+    // SAFETY: duplicate a live master fd; File owns only the returned copy.
+    let copy = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 0) };
+    if copy < 0 {
+        return Err(format!("pty reader: {}", std::io::Error::last_os_error()));
+    }
+    // SAFETY: successful dup returned a fresh owned fd.
+    let file = unsafe { std::fs::File::from_raw_fd(copy) };
+    let reader = Box::new(DrainingReader {
+        file,
+        slave: Some(pair.slave),
+        pid,
+    });
     let writer = pair
         .master
         .take_writer()
@@ -138,10 +148,85 @@ pub fn spawn(data: &SpawnData, rows: u16, columns: u16) -> Result<SpawnedAgent, 
     })
 }
 
+/// Retains the slave while output is pending, then allows natural master EOF.
+struct DrainingReader {
+    file: std::fs::File,
+    slave: Option<Box<dyn portable_pty::SlavePty + Send>>,
+    pid: u32,
+}
+impl Read for DrainingReader {
+    fn read(&mut self, bytes: &mut [u8]) -> std::io::Result<usize> {
+        if bytes.is_empty() {
+            return Ok(0);
+        }
+        loop {
+            let mut poll = libc::pollfd {
+                fd: self.file.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            // SAFETY: one initialized pollfd backed by our owned file.
+            let rc = unsafe { libc::poll(&mut poll, 1, 100) };
+
+            if rc < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            if rc > 0 {
+                return match self.file.read(bytes) {
+                    // Linux reports EIO when all slave ends close.
+                    Err(e) if e.raw_os_error() == Some(libc::EIO) => Ok(0),
+                    result => result,
+                };
+            }
+            if self.slave.is_some() {
+                // SAFETY: inspect our child's exit without reaping it; the
+                // waiter still owns exit reporting and shutdown owns reaping.
+                let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+                let rc = unsafe {
+                    libc::waitid(
+                        libc::P_PID,
+                        self.pid as libc::id_t,
+                        &mut info,
+                        libc::WEXITED | libc::WNOWAIT | libc::WNOHANG,
+                    )
+                };
+                if (rc == 0 && info.si_code != 0)
+                    || (rc < 0
+                        && std::io::Error::last_os_error().raw_os_error() == Some(libc::ECHILD))
+                {
+                    self.slave.take();
+                    return Ok(0);
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::mpsc::{Receiver, channel};
+
+    #[test]
+    fn exited_child_output_survives_until_the_reader_starts() {
+        let data = SpawnData {
+            instance_id: "pty-drain".into(),
+            program: "/bin/sh".into(),
+            args: vec!["-c".into(), "printf 'quick-output-marker'".into()],
+            env: BTreeMap::new(),
+            working_directory: std::env::temp_dir().display().to_string(),
+        };
+        let mut agent = spawn(&data, 24, 80).unwrap();
+        // Exercise the last-slave-close race: defer consuming a quick command's
+        // output while retaining the slave, as a busy holder may do.
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let mut output = Vec::new();
+        agent.reader.read_to_end(&mut output).unwrap();
+        let exited = crate::exit::wait(agent.pid);
+        crate::exit::reap(agent.pid);
+        assert_eq!(exited.code, Some(0));
+        assert!(String::from_utf8_lossy(&output).contains("quick-output-marker"));
+    }
 
     #[test]
     fn control_keys_are_single_bytes() {

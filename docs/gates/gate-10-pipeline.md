@@ -71,7 +71,7 @@
 - 建議：
   - `teams` 表（`id`、`repo`＝canonical checkout 的絕對路徑、可空、`default_workflow`），保留期限「永久」；`instances` 加 `team_id`（預設 `general`）、`role`。設定用本關的 `agend team` 命令（P10）。
   - 分派用 core 的 `policy::assign::choose`：候選人＝同 team 裡**每一個**狀態 `running` 的 instance（不先過濾），`held_task` 照實填：`tasks.assignee` 的未結束 task，或正在做的審查；誰有空、返工回持有者（`Rework`）、審查排除作者，都由 core 判斷。daemon 先過濾會讓返工找不到持有者（變成接手或排隊）、`NoEligibleReviewer` 永遠不出現；人數上限先等於現有人數，所以**不開臨時 instance**（`SpawnEphemeral` 不會出現）。沒有人可用 → task 留在原地排隊，下一次有 instance 空出或加入時再試。team 裡沒有這個角色 → 同樣排隊，另外出現「需要你」`no-role`（P8）。
-  - task 持有者（D33）記在 `tasks.assignee`，到 task 結束才清掉；審查者持有的是那次審查，核准或要求修改後就空出來。
+  - task 持有者（D33）記在 `tasks.assignee`，等待 checks／審查／人工核准與真正返工都保留原持有者，到 task 結束才清掉。D34 的 `planned` 有明確向前交接：planner 的 Result 經人工核准後，前進到不同角色的 dev Work，先釋放 planner binding 並保存 WIP，再清 assignee、交由 core `NewTask` 選 dev；這不屬於 `ReturnToWork`，failed holder 的真正返工仍等 retry。審查者持有那次審查，核准或要求修改後就空出來。
   - supervisor（第 6 施工關）不動：instance `failed` 時它手上的 task **停著等**；第 8 施工關那個「需要你」項目的 `unblocks` 從 0 變成 1。你按 `retry` 讓 agent 回來後，它的 binding 還在，照原來的工作繼續。
   - 本關**不做改派**：額度用盡、逾時動作 `reassign` 都在之後的施工關；用到 `on_timeout = reassign` 的 task 在建立時被拒（訊息寫這個動作還不支援）。
   - **與 D33 第 3 點不同，使用者 2026-09-26 決定照這裡做**：D33 說「持有者被操作者刪除 → 立即改派」。本關改成拒絕刪除手上有未結束 task 的 instance（第 9 施工關的 `agend instance remove <name>` 收到的錯誤指出 task，並提示先 `task_cancel`，P10）。改派要交接 branch 與審查意見，是本關最大的一塊，本關先不做。
@@ -256,7 +256,7 @@
 - 建議：
   - **真的**：git（系統的 git，≥ 2.38）、暫存 repo（`/tmp/g10-…`）、forge local、runner（`sh`）、SQLite、holder、shim 與 hook、`agend daemon` binary、client 協定、CLI。
   - **假的**：agent 的腦袋。testkit 加一個假 agent 程式 `fake-worker`（放在 holder 裡跑，跟第 6 施工關的計數器一樣）：每秒跑一次 `agend inbox --after <上次最後一則的 id>`（游標存在自己 workspace 的檔案裡），收到派工就在 worktree 寫檔、經 shim `git commit`、`agend done <ticket>`；收到審查就 `agend review approve <ticket>`。旗標：`--fail-checks-once`（第一次故意不加檔案）、`--leave-wip`（done 前留一個未 commit 的檔）、`--changes-once`（reviewer 第一次要求修改）、`--hold`（收到派工後什麼都不做）。
-  - 送達：instance 加一欄 `delivery`（`push` 預設／`inbox`）。**與 [delivery](../architecture/delivery.md#送達模型)「推送一律帶完整內容、inbox 只作補查」不同，使用者 2026-09-26 決定照這裡做**：`inbox` 多了一條只靠拉取的路，只給沒有 driver 的程式（假 agent）用。`inbox` 的 instance daemon 不建立任何 driver；假 agent 的 backend 固定登記成 `claude`（第 12 施工關之前沒有 claude driver，`fake-worker` 忽略第 6 施工關加的 `--session-id`／`--resume` 參數），**不用 `codex`**（會帶出第 7 施工關的 driver 與啟動包裝）。`inbox` 的 instance daemon 不主動推：訊息寫進第 7 施工關的 `messages` 表就記 `sent`（已放到 agent 拿得到的地方）。**讀取不算確認**（第 9 施工關的 `inbox` 是唯讀游標）。確認的來源是 agent 用了它：派工訊息 `dispatch:<ticket>` 在 daemon 收到帶同一個 ticket 的結果命令（`done`、`result`、`review`）時標 `confirmed`；其他訊息沒有這種回應，就一直是 `sent`（照第 7 施工關「不能確認就誠實標未確認」）。等第 12 施工關有 claude driver，真的 claude 仍是 `push`，不受影響。
+  - 送達：instance 加一欄 `delivery`（`push` 預設／`inbox`）。**與 [delivery](../architecture/delivery.md#送達模型)「推送一律帶完整內容、inbox 只作補查」不同，使用者 2026-09-26 決定照這裡做**：`inbox` 多了一條只靠拉取的路，只給沒有 driver 的程式（假 agent）用。`inbox` 的 instance daemon 不建立任何 driver；假 agent 的 backend 固定登記成 `claude`（第 12 施工關之前沒有 claude driver，`fake-worker` 忽略第 6 施工關加的 `--session-id`／`--resume` 參數），**不用 `codex`**（會帶出第 7 施工關的 driver 與啟動包裝）。`inbox` 的 instance daemon 不主動推：訊息寫進第 7 施工關的 `messages` 表就記 `sent`（已放到 agent 拿得到的地方）。**讀取不算確認**（第 9 施工關的 `inbox` 是唯讀游標）。確認的來源是 agent 用了它：work 派工訊息用 `dispatch:<ticket>`；多人審查共用關卡 ticket，但每位 reviewer 的訊息用 `dispatch:<ticket>/<reviewer>`，避免全局 message id 衝突。daemon 接受同 ticket 且身分匹配的結果命令（`done`、`result`、`review`）時，在 task／snapshot／event 的同一個 CAS 交易中把該筆訊息標 `confirmed`；其他訊息沒有這種回應，就一直是 `sent`（照第 7 施工關「不能確認就誠實標未確認」）。等第 12 施工關有 claude driver，真的 claude 仍是 `push`，不受影響。
   - pipeline 迴圈的單元測試用 testkit 的假實作（`FakeStore`、`FakeForge`、`FakeRunner`、`FakeDriver`、`FakeClock`）；整合測試與 demo 用上面「真的」那一組。
   - 開發用 example `pipeline_probe`：
     - `setup`（daemon 停著時，直接開 DB；`AGEND_HOME` 沒設就拒絕，比照第 6 施工關 P1）：在 `$AGEND_HOME` 建 home、在 `$AGEND_HOME-repo` 建暫存 repo、team `g10`（`g10-dev` dev、`g10-rev` reviewer）與 team `g10h`（`g10-hold`，`--hold` 的假 agent）、`demo` 與 `slow` 兩個 workflow。
@@ -333,7 +333,7 @@
 **每個新開的終端機分頁都要先跑這段**（包括 daemon 在前景跑時開的第二個終端）。第 13 施工關之前沒有安裝程式，而你的 PATH 上有舊的 Node 版 `agend`（v1-ts 1.24.0）：
 
 ```bash
-cd /private/tmp/AgEnD-v2-pipeline    # 本次實作 worktree
+cd /Users/suzuke/AlphaCR-worktrees/AgEnD-v2-pipeline    # 本次實作 worktree
 ~/.cargo/bin/cargo build -p agend -p agend-testkit --bins && export PATH="$PWD/target/debug:$PATH" && agend --version
 ```
 
@@ -346,7 +346,7 @@ cd /private/tmp/AgEnD-v2-pipeline    # 本次實作 worktree
    **這步在驗什麼**：同一套流水線在真的 git、真的 daemon 上跑完每一段：順利、checks 失敗返工、reviewer 要求修改、main 前進、留下 WIP、hook、沙箱（寫外面被擋、寫裡面可以、沒有工具就不跑）、四次開機。錯了代表後面手動看到的都不可信。
 
    ```bash
-   cd /private/tmp/AgEnD-v2-pipeline
+   cd /Users/suzuke/AlphaCR-worktrees/AgEnD-v2-pipeline
    ~/.cargo/bin/cargo xtask accept pipeline
    ```
 
@@ -536,6 +536,7 @@ cd /private/tmp/AgEnD-v2-pipeline    # 本次實作 worktree
 
 ## 進度紀錄
 
+- 2026-10-02 初輪獨立驗證對 `2b7d4a7` 判定 REFUTED（2 High、3 Medium）；修正多人審查的 recipient id、planned 回報與角色交接、缺 git 與逐 task boot 失敗隔離，補 core ports 與五種 fake 的完整 queue 測試；修正 recorder 通知 drain、PTY 快速退出輸出，重新驗證中。實作與 verifier worktree 移至 `/Users/suzuke/AlphaCR-worktrees/`（[draft PR #143](https://github.com/suzuke/AgEnD/pull/143)）。
 - 2026-10-01 在獨立 worktree 接通 pipeline、LocalForge、沙箱、持久化快照與命令；新增真程序／adapter／snapshot 驗證。尚待 fresh-context verifier 與使用者親自驗收（`feat/gate-10-pipeline`）。
 
 日期 + 一行 + commit／PR，新的在上面。

@@ -12,73 +12,10 @@ use super::{PRIMARY_KEY, StoreError, is_constraint};
 /// Longest instance id: keeps `run/holders/<id>.sock` short (gate 6 P2).
 pub const MAX_ID: usize = 24;
 
-/// Where an instance stands.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InstanceStatus {
-    /// Never started: the first start is fresh.
-    New,
-    /// The daemon keeps it running; every start after the first resumes.
-    Running,
-    /// The daemon gave up (gate 6 P6); a human decides.
-    Failed,
-}
-
-impl InstanceStatus {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::New => "new",
-            Self::Running => "running",
-            Self::Failed => "failed",
-        }
-    }
-
-    pub fn parse(s: &str) -> Option<Self> {
-        [Self::New, Self::Running, Self::Failed]
-            .into_iter()
-            .find(|v| v.as_str() == s)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Instance {
-    pub id: String,
-    pub backend: Backend,
-    pub program: String,
-    /// The agent's base arguments; session arguments are added per start.
-    pub args: Vec<String>,
-    pub working_directory: String,
-    /// The backend session to resume: claude's session id, codex's thread
-    /// id (created by the daemon, gate 7 P3); `None` when there is none yet
-    /// (opencode until gate 12).
-    pub session_id: Option<String>,
-    pub status: InstanceStatus,
-    /// The backend session was created (the first `Spawn` was
-    /// acknowledged); set with `running` and never cleared (migration 0003).
-    pub session_started: bool,
-    /// The agent's pid (its own process group) from the last `Spawned`;
-    /// cleared by the codex sweep after its holder died (gate 7 P2).
-    pub agent_pid: Option<u32>,
-    /// A codex instance migration 0004 found without a thread id that may
-    /// hold a conversation: never started again, a human decides (gate 7 P3).
-    pub legacy_no_thread: bool,
-    pub delivery: String,
-}
+pub use agend_core::runtime_records::{Instance, InstanceStatus};
 
 /// `[a-z0-9-]{1,24}`: the id names files under `run/holders/`.
-pub fn validate_id(id: &str) -> Result<(), String> {
-    let ok = !id.is_empty()
-        && id.len() <= MAX_ID
-        && id
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
-    if ok {
-        Ok(())
-    } else {
-        Err(format!(
-            "invalid instance id {id:?}: use 1-{MAX_ID} characters from a-z 0-9 -"
-        ))
-    }
-}
+pub use agend_core::runtime_records::validate_id;
 
 /// A new random session id in UUID v4 form (claude's `--session-id` needs
 /// one), from `/dev/urandom`.

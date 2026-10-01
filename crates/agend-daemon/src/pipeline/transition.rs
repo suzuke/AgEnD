@@ -3,14 +3,14 @@ use super::*;
 use agend_core::pipeline::state::{TransitionError, step};
 use agend_core::traits::Clock;
 
-pub(super) struct WallClock;
+pub(crate) struct WallClock;
 impl Clock for WallClock {
     fn now_unix_ms(&self) -> u64 {
         log::now_unix_ms()
     }
 }
 
-pub(super) async fn advance<S: Store, C: Clock>(
+pub(super) async fn advance<S: PipelineStore, C: Clock>(
     store: &S,
     clock: &C,
     loaded: &Loaded,
@@ -21,6 +21,24 @@ pub(super) async fn advance<S: Store, C: Clock>(
 where
     S::Error: std::fmt::Display,
 {
+    let confirmation = match &event {
+        PipelineEvent::WorkCompleted { .. } => Some(format!("dispatch:{}", ticket(&loaded.state))),
+        PipelineEvent::ApprovalGranted { reviewer, .. }
+        | PipelineEvent::ChangesRequested { reviewer, .. }
+            if loaded.state.current_stage().is_some_and(|s| {
+                matches!(
+                    s.stage,
+                    Stage::Approval {
+                        by: Approver::Role(_),
+                        ..
+                    }
+                )
+            }) =>
+        {
+            Some(format!("dispatch:{}/{reviewer}", ticket(&loaded.state)))
+        }
+        _ => None,
+    };
     let (next, actions) = step(&loaded.state, event.clone()).map_err(|e| {
         let code = match e {
             TransitionError::MergeInFlight => "merge_in_flight",
@@ -62,7 +80,13 @@ where
     };
     if !matches!(
         store
-            .advance_task(&task, loaded.version, &progress, &record)
+            .advance_pipeline(
+                &task,
+                loaded.version,
+                &progress,
+                &record,
+                confirmation.as_deref()
+            )
             .await
             .map_err(db)?,
         CasResult::Written { .. }
@@ -79,6 +103,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agend_core::traits::Store;
     use agend_testkit::{
         block_on,
         fakes::{FakeClock, FakeStore},

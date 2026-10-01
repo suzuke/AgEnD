@@ -19,58 +19,7 @@ use rusqlite::{Connection, OptionalExtension, Row};
 
 use super::StoreError;
 
-/// A message to insert.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NewMessage {
-    pub id: String,
-    pub from_instance: String,
-    pub to_instance: String,
-    pub task_id: Option<String>,
-    pub body: String,
-    pub level: BusyLevel,
-}
-
-/// A stored message.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Message {
-    pub seq: i64,
-    pub id: String,
-    pub from_instance: String,
-    pub to_instance: String,
-    pub task_id: Option<String>,
-    pub body: String,
-    pub level: BusyLevel,
-    pub state: DeliveryState,
-    pub turn_id: Option<String>,
-    pub created_at_unix_ms: u64,
-    pub updated_at_unix_ms: u64,
-    /// Set just before the first RPC that sends it: a `queued` row with it
-    /// may have reached codex (the reply was lost, or the daemon stopped).
-    pub attempted_at_unix_ms: Option<u64>,
-}
-
-impl Message {
-    /// Same id, sender, target, task, body and level as `new`.
-    pub fn same_as(&self, new: &NewMessage) -> bool {
-        self.id == new.id
-            && self.from_instance == new.from_instance
-            && self.to_instance == new.to_instance
-            && self.task_id == new.task_id
-            && self.body == new.body
-            && self.level == new.level
-    }
-}
-
-/// What [`claim`] found.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Claim {
-    /// A new id: inserted as `queued`.
-    Inserted(Message),
-    /// The id exists with the same content: nothing changed.
-    Existing(Message),
-    /// The id exists with other content: nothing changed (`invalid_request`).
-    Different(Message),
-}
+pub use agend_core::runtime_records::{Claim, Message, NewMessage};
 
 pub fn level_text(level: BusyLevel) -> &'static str {
     match level {

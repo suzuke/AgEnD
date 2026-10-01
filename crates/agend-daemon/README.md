@@ -36,7 +36,8 @@
 | `handlers` | 請求處理，與傳輸分離；依身分限權（`command` 只收 agent、`operator`／`resolve_attention` 只收操作者）；`handlers::agent`（`status`、`send`、`inbox`）、`handlers::operator`（instance、restart 預檢） |
 | `fleet` | 全貌（instance、task、「需要你」）與事件記錄（最近 1024 筆、broadcast），同一把鎖（第 8 施工關） |
 | `ingest` | hook 與結構化事件接收、磁碟佇列補送 |
-| `pipeline` | 執行 core 狀態機、只由 daemon merge |
+| `pipeline` | 經 core ports 注入 Store／Driver／executor／Clock／view，單一 queue 執行 core 狀態機 |
+| `pipeline_runtime` | 組裝 SQLite、Codex、git、bindings 與 checks adapters；queue 不依賴 concrete adapter |
 | `delivery` | 送達模型：四個狀態各代表什麼（第 7 施工關 P5）、`render`（`From:`／`Task:` 標頭＋完整 body） |
 | `supervisor` | 讓 DB 裡的 instance 保持在跑：死了等 5 秒 `--resume`、10 分鐘 3 次仍死就 `failed`（變成「需要你」項目，操作者可 `retry`）；之後：卡住、額度、轉派、例外才找人 |
 | `scheduler` | timeout、cron |

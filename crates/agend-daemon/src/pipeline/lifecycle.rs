@@ -1,13 +1,22 @@
 use super::*;
-use crate::forge::local::{LocalError, LocalForge};
 use agend_core::model::{Backend, DeliveryState};
+use agend_core::pipeline::ports::ExecutionError;
 use agend_core::policy::{
     assign::{self, *},
     busy::BusyLevel,
 };
 use agend_core::traits::{AgentMessage, Driver, Forge, MergeRequest, MergeResult, Submission};
 
-impl Engine {
+impl<S, D, E, C, V> Engine<S, D, E, C, V>
+where
+    S: PipelineStore + Send + 'static,
+    S::Error: std::fmt::Display,
+    D: Driver + Send + 'static,
+    D::Error: std::fmt::Display,
+    E: PipelineExecutor,
+    C: Clock + Send + Sync + 'static,
+    V: PipelineView,
+{
     pub(super) async fn action(
         &mut self,
         task: &Task,
@@ -38,7 +47,7 @@ impl Engine {
                     let task = task.id.clone();
                     let delay = entered
                         .saturating_add(timeout_ms)
-                        .saturating_sub(log::now_unix_ms());
+                        .saturating_sub(self.clock.now_unix_ms());
                     tokio::spawn(async move {
                         tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
                         let _ = tx.send(Input::Event(
@@ -68,12 +77,11 @@ impl Engine {
                     .await?
                     .repo
                     .ok_or_else(|| invalid("submit requires repo"))?;
-                let forge = LocalForge {
-                    repo: repo.into(),
-                    git: self.git.clone().ok_or_else(|| invalid("git unavailable"))?,
-                    store: self.store.clone(),
-                    expected_main: None,
-                };
+                let forge = self
+                    .git
+                    .as_ref()
+                    .ok_or_else(|| invalid("git unavailable"))?
+                    .forge(&repo, None);
                 let submission = Submission {
                     task_id: task.id.clone(),
                     branch: state.branch().unwrap_or_default().into(),
@@ -113,26 +121,14 @@ impl Engine {
                     self.running.remove(&key);
                     return Err(invalid("checks require repo, head and git"));
                 };
-                let (tx, home, task, checks) = (
-                    self.tx.clone(),
-                    self.home.clone(),
-                    task.id.clone(),
-                    self.checks.clone(),
-                );
+                let (tx, task, checks) = (self.tx.clone(), task.id.clone(), self.checks.clone());
                 tokio::spawn(async move {
                     let Ok(_permit) = checks.acquire().await else {
                         return;
                     };
-                    let result = crate::checks::run(
-                        &git,
-                        &home,
-                        Path::new(&repo),
-                        &key,
-                        &head_sha,
-                        &command,
-                        timeout_ms,
-                    )
-                    .await;
+                    let result = git
+                        .check(&repo, &key, &head_sha, &command, timeout_ms)
+                        .await;
                     let _ = tx.send(Input::Check {
                         task,
                         stage: stage_id,
@@ -153,31 +149,25 @@ impl Engine {
                     .repo
                     .ok_or_else(|| invalid("merge requires repo"))?;
                 let git = self.git.clone().ok_or_else(|| invalid("git unavailable"))?;
-                let forge = LocalForge {
-                    repo: repo.clone().into(),
-                    git: git.clone(),
-                    store: self.store.clone(),
-                    expected_main: Some(
-                        git.run(Path::new(&repo), &["rev-parse", "main"])
+                let forge = git.forge(
+                    &repo,
+                    Some(
+                        git.run(&repo, &["rev-parse", "main"])
                             .await
                             .map_err(invalid)?,
                     ),
-                };
-                if forge
-                    .find_merge(&task.id, &head)
+                );
+                if git
+                    .find_merge(&repo, &task.id, &head)
                     .await
                     .map_err(invalid)?
                     .is_none()
                 {
                     let main = git
-                        .run(Path::new(&repo), &["rev-parse", "main"])
+                        .run(&repo, &["rev-parse", "main"])
                         .await
                         .map_err(invalid)?;
-                    if !git
-                        .ancestor(Path::new(&repo), &main, &head)
-                        .await
-                        .map_err(invalid)?
-                    {
+                    if !git.ancestor(&repo, &main, &head).await.map_err(invalid)? {
                         let binding = self
                             .store
                             .bindings()
@@ -186,7 +176,7 @@ impl Engine {
                             .into_iter()
                             .find(|b| b.task == task.id && b.kind == "work")
                             .ok_or_else(|| invalid("missing work binding for rebase"))?;
-                        let wt = Path::new(&binding.worktree);
+                        let wt = binding.worktree.as_str();
                         let clean = git
                             .run(wt, &["status", "--porcelain"])
                             .await
@@ -201,10 +191,7 @@ impl Engine {
                             let _ = git.run(wt, &["rebase", "--abort"]).await;
                         }
                         let rebased = git.run(wt, &["rev-parse", "HEAD"]).await.map_err(invalid)?;
-                        let patch_id = git
-                            .patch_id(Path::new(&repo), &rebased)
-                            .await
-                            .map_err(invalid)?;
+                        let patch_id = git.patch_id(&repo, &rebased).await.map_err(invalid)?;
                         log::line(&format!(
                             "{}: main advanced; rebased, {}",
                             task.id,
@@ -248,10 +235,7 @@ impl Engine {
                         merge_commit,
                     },
                     Ok(MergeResult::HeadChanged { actual_head }) => {
-                        let patch_id = git
-                            .patch_id(Path::new(&repo), &actual_head)
-                            .await
-                            .map_err(invalid)?;
+                        let patch_id = git.patch_id(&repo, &actual_head).await.map_err(invalid)?;
                         let _ = self.tx.send(Input::Event(
                             task.id.clone(),
                             PipelineEvent::CommitCreated {
@@ -266,7 +250,7 @@ impl Engine {
                             reason: "branch head moved".into(),
                         }
                     }
-                    Err(LocalError::Blocked(reason)) => {
+                    Err(ExecutionError::Blocked(reason)) => {
                         self.note(&task.id, Some(format!("merge-blocked:{reason}")))
                             .await?;
                         return Ok(());
@@ -327,6 +311,55 @@ impl Engine {
         review: bool,
     ) -> Result<(), Refusal> {
         let ticket = ticket(state);
+        let mut task = task.clone();
+        let members = self.store.members().await.map_err(db)?;
+        // A completed Result/Plan writer hands off to the next Work role.
+        // ReturnToWork always retains its original holder, including Failed.
+        if !review
+            && state.pending_work_reason().is_none()
+            && let Some(holder) = task.assignee.as_ref()
+            && members.iter().any(|m| m.id == *holder && m.role != role)
+        {
+            for binding in self
+                .store
+                .bindings()
+                .await
+                .map_err(db)?
+                .into_iter()
+                .filter(|b| b.task == task.id && b.kind == "work")
+            {
+                self.release(&binding, false).await?;
+            }
+            let row = self
+                .store
+                .load_task(&task.id)
+                .await
+                .map_err(db)?
+                .ok_or_else(|| invalid("task disappeared"))?;
+            task = row.task;
+            task.assignee = None;
+            let p = self
+                .store
+                .progress(&task.id)
+                .await
+                .map_err(db)?
+                .ok_or_else(|| invalid("pipeline missing"))?;
+            let event = StoredEvent {
+                id: format!("handoff:{ticket}"),
+                occurred_at_unix_ms: self.clock.now_unix_ms(),
+                kind: "role_handoff".into(),
+                detail: role.into(),
+            };
+            if !matches!(
+                self.store
+                    .advance_task(&task, row.version, &p.data, &event)
+                    .await
+                    .map_err(db)?,
+                CasResult::Written { .. }
+            ) {
+                return Err(invalid("handoff CAS conflict"));
+            }
+        }
         let bindings = self.store.bindings().await.map_err(db)?;
         let existing_reviewer = bindings
             .iter()
@@ -339,16 +372,15 @@ impl Engine {
                 .instance(holder)
                 .await
                 .map_err(db)?
-                .is_some_and(|i| i.status != crate::store::InstanceStatus::Running)
+                .is_some_and(|i| i.status != InstanceStatus::Running)
         {
             return Ok(());
         }
-        let members = self.store.members().await.map_err(db)?;
         let tasks = self.store.tasks().await.map_err(db)?;
         let instances = self.store.instances().await.map_err(db)?;
         let candidates = instances
             .iter()
-            .filter(|i| i.status == crate::store::InstanceStatus::Running)
+            .filter(|i| i.status == InstanceStatus::Running)
             .filter_map(|i| {
                 let m = members
                     .iter()
@@ -427,7 +459,7 @@ impl Engine {
             | AssignmentDecision::Queue {
                 reason: QueueReason::NoEligibleReviewer,
             } => {
-                self.no_role(task, state, role).await?;
+                self.no_role(&task, state, role).await?;
                 return Ok(());
             }
             _ => {
@@ -455,7 +487,7 @@ impl Engine {
                 .ok_or_else(|| invalid("pipeline missing"))?;
             let event = StoredEvent {
                 id: format!("assigned:{ticket}"),
-                occurred_at_unix_ms: log::now_unix_ms(),
+                occurred_at_unix_ms: self.clock.now_unix_ms(),
                 kind: "assigned".into(),
                 detail: instance.clone(),
             };
@@ -513,16 +545,7 @@ impl Engine {
                 .git
                 .as_ref()
                 .ok_or_else(|| invalid("real git unavailable"))?;
-            crate::bindings::ensure(
-                &self.store,
-                git,
-                &self.home,
-                &self.exe,
-                Path::new(&repo),
-                &b,
-            )
-            .await
-            .map_err(invalid)?;
+            git.ensure(&repo, &b).await.map_err(invalid)?;
         } else if review {
             let b = BindingRow {
                 instance: instance.clone(),
@@ -550,7 +573,13 @@ impl Engine {
             state.pending_work_reason().unwrap_or("initial assignment"),
             if review {
                 "review approve"
-            } else if state.workflow().requires_repo() {
+            } else if state.current_stage().is_some_and(|s| matches!(
+                s.stage,
+                Stage::Work {
+                    output: agend_core::pipeline::workflow::WorkOutput::Branch,
+                    ..
+                }
+            )) {
                 "done"
             } else {
                 "result"
@@ -558,7 +587,11 @@ impl Engine {
         );
         self.deliver(
             &instance,
-            &format!("dispatch:{ticket}"),
+            &if review {
+                format!("dispatch:{ticket}/{instance}")
+            } else {
+                format!("dispatch:{ticket}")
+            },
             Some(task.id.clone()),
             &body,
         )
@@ -581,28 +614,33 @@ impl Engine {
             .into_iter()
             .find(|m| m.id == to)
             .ok_or_else(|| invalid("unknown instance"))?;
-        if member.delivery == "inbox" {
-            let new = crate::store::NewMessage {
-                id: id.into(),
-                from_instance: "daemon".into(),
-                to_instance: to.into(),
-                task_id: task,
-                body: body.into(),
-                level: BusyLevel::Queue,
-            };
-            if matches!(
-                self.store
-                    .claim_message(&new, log::now_unix_ms())
-                    .await
-                    .map_err(db)?,
-                crate::store::Claim::Different(_)
-            ) {
-                return Err(invalid("message id already has different content"));
+        let new = NewMessage {
+            id: id.into(),
+            from_instance: "daemon".into(),
+            to_instance: to.into(),
+            task_id: task.clone(),
+            body: body.into(),
+            level: BusyLevel::Queue,
+        };
+        match self
+            .store
+            .claim_message(&new, self.clock.now_unix_ms())
+            .await
+            .map_err(db)?
+        {
+            Claim::Different(_) => return Err(invalid("message id already has different content")),
+            Claim::Existing(m)
+                if matches!(m.state, DeliveryState::Sent | DeliveryState::Confirmed) =>
+            {
+                return Ok(());
             }
-            self.store
-                .advance_message(id, DeliveryState::Sent, None, log::now_unix_ms())
-                .await
-                .map_err(db)?;
+            _ => {}
+        }
+        let receipt = if member.delivery == "inbox" {
+            agend_core::traits::DeliveryReceipt {
+                backend_message_id: None,
+                state: DeliveryState::Sent,
+            }
         } else {
             self.codex
                 .deliver(
@@ -616,8 +654,17 @@ impl Engine {
                     BusyLevel::Queue,
                 )
                 .await
-                .map_err(db)?;
-        }
+                .map_err(db)?
+        };
+        self.store
+            .advance_message(
+                id,
+                receipt.state,
+                receipt.backend_message_id,
+                self.clock.now_unix_ms(),
+            )
+            .await
+            .map_err(db)?;
         Ok(())
     }
     pub(super) async fn release(&self, b: &BindingRow, merged: bool) -> Result<(), Refusal> {
@@ -630,26 +677,20 @@ impl Engine {
             .task
             .team_id;
         if let Some(repo) = self.team(&team).await?.repo {
-            let patch = crate::bindings::release(
-                &self.store,
-                self.git
-                    .as_ref()
-                    .ok_or_else(|| invalid("git unavailable"))?,
-                &self.home,
-                &self.exe,
-                Path::new(&repo),
-                b,
-                merged,
-            )
-            .await
-            .map_err(invalid)?;
+            let patch = self
+                .git
+                .as_ref()
+                .ok_or_else(|| invalid("git unavailable"))?
+                .release(&repo, b, merged)
+                .await
+                .map_err(invalid)?;
             if let Some(patch) = patch {
                 self.store
                     .append_event(
                         &b.task,
                         &StoredEvent {
                             id: format!("wip:{patch}"),
-                            occurred_at_unix_ms: log::now_unix_ms(),
+                            occurred_at_unix_ms: self.clock.now_unix_ms(),
                             kind: "wip_archived".into(),
                             detail: patch.clone(),
                         },
@@ -666,6 +707,9 @@ impl Engine {
     pub(super) async fn wake(&mut self) -> Result<(), Refusal> {
         for task in self.store.tasks().await.map_err(db)? {
             if matches!(task.status, TaskStatus::Running | TaskStatus::Open) {
+                if self.git.is_none() && self.team(&task.team_id).await?.repo.is_some() {
+                    continue;
+                }
                 let loaded = self.load(&task.id).await?;
                 if loaded.progress.attention_reason.is_some() {
                     continue;
@@ -693,13 +737,19 @@ impl Engine {
                             let _ = id;
                             continue;
                         }
-                        self.action(
-                            &task,
-                            &loaded.state,
-                            loaded.progress.data.stage_entered_at_unix_ms,
-                            action,
-                        )
-                        .await?;
+                        if let Err((_, reason)) = self
+                            .action(
+                                &task,
+                                &loaded.state,
+                                loaded.progress.data.stage_entered_at_unix_ms,
+                                action,
+                            )
+                            .await
+                        {
+                            self.fail_restore(&task.id, &format!("dispatch failed: {reason}"))
+                                .await?;
+                            break;
+                        }
                     }
                 }
             }

@@ -174,6 +174,10 @@
 - 施工階段改叫「施工關」（gate）：保留「第 N 關」的讀法，加上「施工」就不會和關卡混淆；英文沿用 xtask 的 `gate`。檔名 `docs/gates/gate-NN-*.md` 不變。
 - 英文單寫 gate 只指施工關；merge gate（merge 門檻）與 hard gate 一律帶前綴。
 
+## Pipeline ports
+
+`PipelineStore`、`PipelineExecutor`、`PipelineView` 是 core 的 pipeline 執行邊界：分別提供持久化 records／receipt、git／binding／checks 副作用、fleet 投影；domain Engine 只使用這些 ports 加上 Driver／Clock，adapters 在 composition 層組裝。`FakePipelineExecutor` 是 testkit 的無 I/O executor，供完整 queue 測試。
+
 ## 下一步
 
 ```bash

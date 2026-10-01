@@ -9,6 +9,8 @@
 
 真 pipeline task 的 repo／kind／agent 與 action note 由 client protocol 提供；退回修改使用文字編輯器，空理由不送。Gate 10 的程序測試驗證 daemon 的核准／退回／retry／acknowledge 規則。
 
+`client_source` 的同時存活 labs 上限為 4，保留所有 socket／terminal 行為測試，避免 macOS 預設 256 fd 下的平行 fixture 資源耗盡；可在 `ulimit -n 180` 下重跑該 suite。
+
 ## 怎麼跑
 
 ```bash
