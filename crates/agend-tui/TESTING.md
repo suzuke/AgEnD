@@ -5,6 +5,10 @@
 > - 記住：**餵畫面的資料由真的 producer 產生**：腳本假來源與 testkit 假 daemon 發出的都是 client protocol 型別，沒有手寫 JSON（只有模擬 `event_gap` 的 proxy 送一行 daemon 的錯誤）。
 > - 下一步：`~/.cargo/bin/cargo test -p agend-tui`；真 daemon 那側在 `~/.cargo/bin/cargo test -p agend --test tui_daemon`。
 
+## 第 10 施工關驗證
+
+真 pipeline task 的 repo／kind／agent 與 action note 由 client protocol 提供；退回修改使用文字編輯器，空理由不送。Gate 10 的程序測試驗證 daemon 的核准／退回／retry／acknowledge 規則。
+
 ## 怎麼跑
 
 ```bash

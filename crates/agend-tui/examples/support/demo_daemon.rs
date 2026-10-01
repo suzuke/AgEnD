@@ -32,6 +32,7 @@ pub fn task_view(task: &TaskInfo) -> TaskView {
         assignee: task.holder.clone(),
         stages: task.stages.iter().map(|s| s.name.clone()).collect(),
         current_stage: task.current_stage().map(|i| task.stages[i].name.clone()),
+        pipeline: None,
     }
 }
 

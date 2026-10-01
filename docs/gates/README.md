@@ -18,7 +18,7 @@
 | 7 | [`codex`](gate-07-codex.md) | codex driver + 送達 | 完成（2026-09-28；已 merge #132） | `cargo xtask accept codex` |
 | 8 | [`client`](gate-08-client.md) | agend-client + protocol server | 完成（2026-09-26） | `cargo xtask accept client` |
 | 9 | [`cli`](gate-09-cli.md) | agend CLI | 完成（2026-09-29；已 merge #136） | `cargo xtask accept cli` |
-| 10 | [`pipeline`](gate-10-pipeline.md) | 流水線 | 提案中（P1–P11 已確認、已 merge #130；前置完成，可開工） | `cargo xtask accept pipeline` |
+| 10 | [`pipeline`](gate-10-pipeline.md) | 流水線 | 驗收中（2026-10-01；自動驗收通過，待獨立驗證與使用者） | `cargo xtask accept pipeline` |
 | 11 | [`tui`](gate-11-tui.md) | agend-tui | 實作中（A、B 段已驗收並 merge；C 段未開始） | `cargo xtask accept tui` |
 | 12 | [`adapters`](gate-12-adapters.md) | 其餘 adapter | 提案中（A 段 draft PR #138 待確認，未 merge 或實作） | `cargo xtask accept adapters` |
 | 13 | [`install`](gate-13-install.md) | 安裝與發布 | 未開始 | `cargo xtask accept install` |

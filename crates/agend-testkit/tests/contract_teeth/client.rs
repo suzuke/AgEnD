@@ -330,7 +330,7 @@ pub fn mutants() -> Vec<Mutant> {
             run: |name| {
                 with("CLP-16", name, || {
                     parsed(|_, direction, v| {
-                        if direction == Direction::ToClient && is_error(&v, "not_supported") {
+                        if direction == Direction::ToClient && is_error(&v, "invalid_request") {
                             return vec![accepted_for(&v)];
                         }
                         vec![v]

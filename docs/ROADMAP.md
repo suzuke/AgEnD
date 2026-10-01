@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - 依 crate 由下往上分 13 個施工關；每個施工關單獨驗收，使用者確認後才開下一個施工關（D22）。
-> - 目前狀態：**第 1–9 施工關完成並已合併**；第 11 施工關 A、B 段已驗收並合併（B 段 #140，2026-10-01），C 段未開始。第 10 施工關提案已確認、尚未實作；第 12 施工關 A 段提案 #138 待確認；第 13 施工關未開始。
-> - 下一步：從最新 `v2` 開第 10 施工關 pipeline；第 11 施工關 C 段等第 10 施工關完成後提案。第 12 施工關 A 段 P1–P10 在 #138，仍待使用者確認。
+> - 目前狀態：**第 1–9 施工關完成並已合併**；第 11 施工關 A、B 段已驗收並合併（B 段 #140，2026-10-01），C 段未開始。第 10 施工關實作與自動驗收已完成，待 fresh-context verifier 和人工驗收，尚未合併；第 12 施工關 A 段提案 #138 待確認；第 13 施工關未開始。
+> - 下一步：完成第 10 施工關 pipeline 的自動驗證、fresh-context verifier 與使用者驗收；第 11 施工關 C 段等第 10 施工關完成後提案。第 12 施工關 A 段 P1–P10 在 #138，仍待使用者確認。
 
 ## 13 個施工關
 
@@ -20,7 +20,7 @@
 | 7 `codex` | [完成（2026-09-28；已 merge #132）](gates/gate-07-codex.md) | codex driver + 送達模型、三級忙碌策略 | 假 app-server 與真 codex 0.158.0 驗收通過 |
 | 8 `client` | [完成（2026-09-26）](gates/gate-08-client.md) | 整合施工關：agend-client + protocol server | CLI 連得上；daemon 重啟時會重試 |
 | 9 `cli` | [完成（2026-09-29；已 merge #136）](gates/gate-09-cli.md) | agend CLI：agent 命令、操作者命令、status；安裝相關先做 `doctor`、`init`，服務註冊留第 13 施工關 | 對假／真 daemon 驗輸出與錯誤；兩個假 Codex agent 互傳訊息、中途重啟不漏不重 |
-| 10 `pipeline` | [提案中（P1–P11 已確認、已 merge #130；前置第 7–9 施工關已完成，可開工）](gates/gate-10-pipeline.md) | daemon：pipeline、git、runner、forge local、supervisor、reconcile | 假 driver + 暫存 repo：task 從派工走到 merge |
+| 10 `pipeline` | [驗收中（2026-10-01；自動驗收通過，待 fresh-context verifier 與使用者）](gates/gate-10-pipeline.md) | daemon：pipeline、git、runner、forge local、supervisor、reconcile | 假 driver + 暫存 repo：task 從派工走到 merge |
 | 11 `tui` | [實作中（A、B 段完成並已 merge；C 段未開始）](gates/gate-11-tui.md) | attention-first TUI：畫面層、接真 daemon；C 段完整重現 agent CLI 與滑鼠滾動 | A 段假事件、B 段真 daemon 驗收通過；C 段等第 10 施工關完成後提案 |
 | 12 `adapters` | [提案中（A 段 draft PR #138 待確認，尚未 merge 或實作）](gates/gate-12-adapters.md) | A claude、B opencode driver、C forge github、D Telegram | 先對假實作，再做真 backend smoke test |
 | 13 `install` | [未開始](gates/gate-13-install.md) | 安裝與發布（最後一個施工關）：服務註冊、`agend uninstall`、`agend telegram setup`（由 daemon 配對）、`xtask release`、brew、GitHub release、`cargo install` | CI 用全新 HOME + 假 agent，從安裝到第一個 task 完成 < 5 分鐘；每個 `doctor` 檢查都有「故意弄壞 → 看到修正指令」的測試 |
@@ -74,6 +74,8 @@ cat docs/architecture/pipeline.md
 ```
 
 ## 進度紀錄
+
+- 2026-10-01 在獨立 worktree 實作第 10 施工關：pipeline、冷 checks 沙箱、LocalForge recovery、team/workflow/agent 命令與 TUI attention；尚待 fresh-context verifier 和使用者驗收（[feat/gate-10-pipeline](https://github.com/suzuke/AgEnD/tree/feat/gate-10-pipeline)）。
 
 每完成一件事加一行（日期 + 一行 + commit／PR），新的在上面。
 

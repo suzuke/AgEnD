@@ -230,9 +230,9 @@ fn symlinked_and_spaced_paths_resolve_alike() {
             }
         };
         let mut snap = f.snapshot(true);
-        snap.source_repo = Some(spell(&f.repo, snap_alt));
+        snap.source_repo = Some(spell(&f.repo, snap_alt).display().to_string());
         if let Some(agend_shim::binding::Binding::Work { worktree, .. }) = snap.binding.as_mut() {
-            *worktree = spell(&f.worktree, snap_alt);
+            *worktree = spell(&f.worktree, snap_alt).display().to_string();
         }
         std::fs::write(
             snapshot_path(&f.home, INSTANCE),

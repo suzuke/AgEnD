@@ -1130,9 +1130,7 @@ fn operator_only(command: &OperatorCommand) -> &'static str {
         OperatorCommand::TaskCancel { .. } => {
             "only the operator can cancel tasks; ask the operator"
         }
-        OperatorCommand::Unknown => {
-            "only the operator can send operator requests; ask the operator"
-        }
+        _ => "only the operator can send operator requests; ask the operator",
     }
 }
 
@@ -1238,12 +1236,12 @@ fn operator(state: &mut State, command: OperatorCommand) -> Result<CommandResult
             );
             Ok(CommandResult::Accepted)
         }
-        OperatorCommand::TaskCancel { task_id } => Err((
-            error_code::NOT_SUPPORTED,
-            format!("agend task cancel arrives in gate 10; {task_id} is unchanged"),
+        OperatorCommand::TaskCancel { task_id, .. } => Err((
+            error_code::INVALID_REQUEST,
+            format!("unknown task {task_id}"),
         )),
         // Handled in `serve` (it closes connections).
-        OperatorCommand::DaemonRestart { .. } | OperatorCommand::Unknown => Err((
+        _ => Err((
             error_code::UNKNOWN_REQUEST,
             "unknown operator command".into(),
         )),

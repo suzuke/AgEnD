@@ -5,6 +5,10 @@
 > - 記住：Codex fixture 是 PTY 擷取；Claude fixture 是 spike 紀錄中的 prompt 文字，並非完整 holder 畫面擷取。
 > - 下一步：跑 `cargo xtask accept core`，比對實際狀態機 transcript。
 
+## 第 10 施工關驗證
+
+快照 golden、舊 fixture 與竄改輸入在 `cargo test -p xtask --test pipeline_snapshot`；第一套 explorer 每步驗證 restore 與 outstanding action 的關卡／attempt 不變。
+
 ## 怎麼跑
 
 ```bash

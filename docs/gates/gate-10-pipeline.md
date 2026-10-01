@@ -3,13 +3,13 @@
 > **TL;DR**
 > - daemon 用 core 的狀態機把一個 task 從派工推到 merge：建 worktree 並裝 hook、跑 checks、agent 審查、你核准、在本機 repo merge；daemon 被硬殺後接著做，不重複 merge。
 > - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這個施工關才算完成。
-> - 下一步：P1–P11 使用者已確認（P6 改成 checks 在寫入沙箱裡跑），提案 #130 已 merge；第 7–9 施工關已完成，可以從最新 `v2` 開工。
+> - 下一步：完成自動檢查、全新 context verifier，再逐步帶使用者親自驗收；使用者確認前不 merge。
 
 **先看這條**：這頁的步驟會用到 `agend`。每個新開的終端機分頁（包括第二個終端）都要先跑「你親自驗收」開頭的設定，否則會跑到舊的 Node 版 `agend` 1.24.0。
 
 ## 狀態
 
-**提案中**（2026-10-01 核對）：P1–P11 使用者已確認（P6 改成寫入沙箱；P3、P7、P8、P11 與決策或架構頁不同之處都已決定），提案 #130 已 merge、實作尚未開始。前置施工關已完成並 merge：第 6 施工關 #125、第 7 施工關 #132、第 8 施工關 #131、第 9 施工關 #136（client protocol 1.2、CLI 語法、ticket、`operator` 請求）。本關使用下一個 minor 1.3；第 11 施工關 B 段也已 merge #140。分工見下方「範圍」。
+**驗收中**（2026-10-01）：P1–P11 使用者已確認（P6 改成寫入沙箱；P3、P7、P8、P11 與決策或架構頁不同之處都已決定），提案 #130 已 merge；實作在 `feat/gate-10-pipeline` worktree，自動驗收已通過；尚待 fresh-context verifier 和使用者人工驗收，未合併。執行細節見 [pipeline runtime](../architecture/pipeline-runtime.md)。前置施工關已完成並 merge：第 6 施工關 #125、第 7 施工關 #132、第 8 施工關 #131、第 9 施工關 #136（client protocol 1.2、CLI 語法、ticket、`operator` 請求）。本關使用下一個 minor 1.3；第 11 施工關 B 段也已 merge #140。分工見下方「範圍」。
 
 ## 範圍
 
@@ -328,13 +328,13 @@
 
 ## 你親自驗收
 
-由 agent 帶著一步一步做（見 [AGENTS.md](../../AGENTS.md#帶使用者親自驗收)）。每一步：照抄指令 → 對照「應該看到」→ 對了就打勾。任何一步不符就停，記在「驗收紀錄」。標「開工時細化」的地方，開工時會改成確切指令與輸出；`<t-N>` 這類尖括號是會變的 id。
+由 agent 帶著一步一步做（見 [AGENTS.md](../../AGENTS.md#帶使用者親自驗收)）。每一步：照抄指令 → 對照「應該看到」→ 對了就打勾。任何一步不符就停，記在「驗收紀錄」。`<t-N>` 這類尖括號是會變的 id。
 
 **每個新開的終端機分頁都要先跑這段**（包括 daemon 在前景跑時開的第二個終端）。第 13 施工關之前沒有安裝程式，而你的 PATH 上有舊的 Node 版 `agend`（v1-ts 1.24.0）：
 
 ```bash
-cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
-~/.cargo/bin/cargo build -p agend && export PATH="$PWD/target/debug:$PATH" && agend --version
+cd /private/tmp/AgEnD-v2-pipeline    # 本次實作 worktree
+~/.cargo/bin/cargo build -p agend -p agend-testkit --bins && export PATH="$PWD/target/debug:$PATH" && agend --version
 ```
 
 應該看到 `agend 0.x.y`（目前是 `agend 0.0.0`）。如果印出 `1.24.0`，跑到的是舊的 Node CLI——在這個終端機重跑上面那段。
@@ -346,11 +346,11 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
    **這步在驗什麼**：同一套流水線在真的 git、真的 daemon 上跑完每一段：順利、checks 失敗返工、reviewer 要求修改、main 前進、留下 WIP、hook、沙箱（寫外面被擋、寫裡面可以、沒有工具就不跑）、四次開機。錯了代表後面手動看到的都不可信。
 
    ```bash
-   cd ~/Documents/Hack/AgEnD-v2
+   cd /private/tmp/AgEnD-v2-pipeline
    ~/.cargo/bin/cargo xtask accept pipeline
    ```
 
-   應該看到：依序 `== happy`、`== checks-fail`、`== changes`、`== main-advanced`、`== wip`、`== hooks`、`== sandbox`、`== restart`，倒數第二行 `pipeline demo: all sections passed`，最後一行 `gate 10 (pipeline): checks passed`（確切輸出開工時細化）。
+   應該看到：`== happy`、`== checks-fail`、`== changes`、`== wip`、`== main-advanced`、兩個 `== restart: …`、`== sandbox`、`== hooks`，倒數第二行 `pipeline demo: all sections passed`，最後一行 `gate 10 (pipeline): checks passed`。
 
    - [ ] 通過
 
@@ -358,22 +358,23 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
    **這步在驗什麼**：daemon 死在 checks 中間、死在「main 已經動了、還沒記下來」的那一刻，重開後 task 照樣走完，而且只 merge 一次（P2、P7、P9）。錯了的話 daemon 當掉一次，main 上就可能多一個重複的 merge，或 task 永遠卡住。
 
-   操作：同一次輸出，找 `== restart`。應該看到（開工時細化）：
+   操作：同一次輸出，找 `== restart`。應該看到：
 
    ```text
-   boot 1 daemon pid=<A> <t-1> work done; checks <t-1>/checks/1 running; killed -9 by test
-   boot 2 daemon pid=<B> (idle) <t-1>: re-running checks <t-1>/checks/1 after restart; passed; review approved; waiting for approve
-   boot 3 daemon pid=<C> approve <t-1>/approve/1; merge: main moved to <M>; aborted at failpoint after-main-moved
-   boot 4 daemon pid=<D> <t-1>: merge found on main by trailer (<M>); not merged again
-   check: merge commits for <t-1> on main = 1; branch gone; worktree gone; checks dirs gone; one dispatch per ticket
-   negative check (new AGEND_HOME each boot): boot 2 failed: <t-1> unknown
+   boot 1 daemon pid=<A>: <t-1>/checks/1 running; kill -9
+   boot 2 daemon pid=<B>: <t-1>: re-running checks; review approved; waiting for approve
+   boot 3 daemon pid=<C>: failpoint after-main-moved
+   boot 4 daemon pid=<D>: <t-1>: merge found on main; not merged again
+   <t-1>: four boots; after-main-moved; merge commits=1; no duplicate dispatch; cleanup complete
+   negative check (new AGEND_HOME): boot 2 failed: <t-1> unknown
    ```
 
    | 看什麼 | 意思 |
    |---|---|
-   | boot 2 的 `re-running checks` | 死在 checks 中間的 task 被接起來，不是永遠卡住 |
-   | boot 4 的 `not merged again` 與 `= 1` | merge 只做了一次 |
-   | 最後一行 `boot 2 failed` | 反向檢查：換新的 home 就接不起來，證明這套檢查真的跨重啟 |
+   | 四個不同 pid 與 boot 2 的 `re-running checks` | 真正重啟四個程序，checks 重新執行 |
+   | `not merged again`、`merge commits=1` | merge 只做一次 |
+   | `no duplicate dispatch; cleanup complete` | 每個 ticket 一次派送，worktree／branch／binding 清掉 |
+   | `negative check … unknown` | 換新 home 接不起前一個 task |
 
    - [ ] 通過
 
@@ -391,7 +392,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
    記下第一行印出的 `export AGEND_HOME=…`（之後的 `<home>` 就是它）。
 
-   應該看到：`setup` 印出 `repo=<home>-repo`、兩個 team 與三個 agent（name `g10-dev`、`g10-rev`、`g10-hold`）；daemon 最後一行 `agend daemon ready: instances=3 …`（確切字樣開工時細化）。daemon 留在前景。
+   應該看到：`setup` 印出 `repo=<home>-repo`、兩個 team 與三個 agent（name `g10-dev`、`g10-rev`、`g10-hold`）；daemon 最後一行 `agend daemon ready: instances=3 …`。daemon 留在前景。
 
    - [ ] 通過
 
@@ -413,7 +414,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
    agend task create --team g10 --role dev --workflow demo "hello"
    ```
 
-   應該看到：印出 task id `<t-N>`；watch 依序出現 `<t-N>` 的 `work` → `submit` → `checks` → `review`，最後 `attention_required approval:<t-N>/approve/1 … actions: approve, request_changes`，然後停住（確切字樣開工時細化）。
+   應該看到：印出 task id `<t-N>`；watch 依序出現 `<t-N>` 的 `work` → `submit` → `checks` → `review`，最後 `attention_required approval:<t-N>/approve/1 … actions: approve, request_changes`，然後停住。
 
    - [ ] 通過
 
@@ -443,7 +444,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
    cat "$AGEND_HOME/bindings/g10-dev.json"
    ```
 
-   應該看到：前兩個指令什麼都不印（daemon 開機時一定建好這兩個目錄，所以 `find` 不會報錯）；快照裡沒有 `binding`，只有 instance 與 repo。
+   應該看到：前兩個指令什麼都不印（daemon 開機時一定建好這兩個目錄，所以 `find` 不會報錯）；快照裡 `binding` 是 `null`，保留 instance 與 repo。
 
    - [ ] 通過
 
@@ -456,14 +457,14 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
    ```bash
    export AGEND_HOME=<home>    # 步驟 3 的那個；每個新分頁都要先設
    agend task create --team g10h --role dev --workflow demo "held"
-   git -C "$AGEND_HOME/worktrees/<t-M>" update-ref refs/heads/main HEAD; echo "exit=$?"
+   git -C "$AGEND_HOME/worktrees/<t-M>" commit --allow-empty -m "Hook probe"
+   git -C "$AGEND_HOME/worktrees/<t-M>" update-ref refs/heads/main HEAD
+   echo "exit=$?"
    git -C "$AGEND_HOME-repo" log --oneline -1 main
    agend task cancel <t-M>
    ```
 
-   （開工時第 9 施工關還沒有 `agend task cancel` 的話，最後一行改成 `~/.cargo/bin/cargo run -q -p agend-daemon --example pipeline_probe -- cancel <t-M>`。）
-
-   應該看到：第二行 `agend-shim: refused …` 並指出是 `(agend reference-transaction hook)`，`exit` 不是 0；main 還是步驟 5 那個 commit；`cancel` 之後 watch 出現 `<t-M> cancelled`，`worktrees/<t-M>` 不見了。
+   應該看到：更新 main 的指令印出 `agend-shim: refused …` 並指出是 `(agend reference-transaction hook)`，`exit` 不是 0；main 還是步驟 5 那個 commit；`cancel` 之後 watch 出現 `<t-M> cancelled`，`worktrees/<t-M>` 不見了。
 
    - [ ] 通過
 
@@ -471,14 +472,22 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
    **這步在驗什麼**：WIP 不會跟著 worktree 一起消失，而是先存成 patch（P4）。錯了的話 agent 沒 commit 的東西就永遠不見了。
 
-   操作（開工時細化）：`pipeline_probe` 讓 `g10-dev` 這次帶 `--leave-wip`，再 `agend task create --team g10 --role dev --workflow demo "wip"`，照步驟 5 核准，等它 done。
+   在第三個分頁先讓假 worker 留 WIP，再開 task；照步驟 5 核准，等它 done。
+
+   ```bash
+   export AGEND_HOME=<home>
+   touch "$AGEND_HOME/workspace/g10-dev/.leave-wip"
+   agend task create --team g10 --role dev --workflow demo "wip"
+   ```
 
    ```bash
    export AGEND_HOME=<home>    # 步驟 3 的那個；每個新分頁都要先設
    ls "$AGEND_HOME/archive/"
+   cat "$AGEND_HOME/archive/<t-K>-<unix-ms>.patch"
+   rm "$AGEND_HOME/workspace/g10-dev/.leave-wip"
    ```
 
-   應該看到：一個 `<t-K>-<秒>.patch`，打開看得到那個沒 commit 的檔；watch 裡那個 task 的 done 那行寫著 `archived WIP: archive/<t-K>-<秒>.patch`；worktree 照樣被刪。
+   應該看到：一個 `<t-K>-<unix-ms>.patch`，打開看得到那個沒 commit 的檔；task detail 帶 archive 路徑；daemon log 有 `archived WIP`；worktree 照樣被刪。
 
    - [ ] 通過
 
@@ -511,7 +520,7 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 
     **這步在驗什麼**：什麼都不留（第 6 施工關的孤兒巡查照舊）。
 
-    操作：各分頁 Ctrl-C，然後在設了 `AGEND_HOME` 的分頁 `~/.cargo/bin/cargo run -q -p agend-daemon --example pipeline_probe -- teardown`（開工時細化）。
+    操作：各分頁 Ctrl-C，然後在設了 `AGEND_HOME` 的分頁 `~/.cargo/bin/cargo run -q -p agend-daemon --example pipeline_probe -- teardown`。
 
     應該看到：`pgrep -fl "agend holder g10-"` 什麼都不印；`<home>` 與 `<home>-repo` 都不見了。
 
@@ -526,6 +535,8 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 |  |  |  |
 
 ## 進度紀錄
+
+- 2026-10-01 在獨立 worktree 接通 pipeline、LocalForge、沙箱、持久化快照與命令；新增真程序／adapter／snapshot 驗證。尚待 fresh-context verifier 與使用者親自驗收（`feat/gate-10-pipeline`）。
 
 日期 + 一行 + commit／PR，新的在上面。
 

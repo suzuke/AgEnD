@@ -1,0 +1,118 @@
+[
+  {
+    "type": "operator",
+    "data": {
+      "request_id": "g10",
+      "command": {
+        "command": "team_add",
+        "team_id": "web",
+        "repo": "/repo",
+        "workflow_id": "research"
+      }
+    }
+  },
+  {
+    "type": "operator",
+    "data": {
+      "request_id": "g10",
+      "command": {
+        "command": "team_list"
+      }
+    }
+  },
+  {
+    "type": "operator",
+    "data": {
+      "request_id": "g10",
+      "command": {
+        "command": "team_join",
+        "team_id": "web",
+        "instance_id": "dev-1",
+        "role": "researcher"
+      }
+    }
+  },
+  {
+    "type": "operator",
+    "data": {
+      "request_id": "g10",
+      "command": {
+        "command": "team_set_workflow",
+        "team_id": "web",
+        "workflow_id": "research"
+      }
+    }
+  },
+  {
+    "type": "operator",
+    "data": {
+      "request_id": "g10",
+      "command": {
+        "command": "workflow_list"
+      }
+    }
+  },
+  {
+    "type": "operator",
+    "data": {
+      "request_id": "g10",
+      "command": {
+        "command": "workflow_show",
+        "workflow_id": "research"
+      }
+    }
+  },
+  {
+    "type": "operator",
+    "data": {
+      "request_id": "g10",
+      "command": {
+        "command": "workflow_check",
+        "toml": "id = \"research\"\nversion = 1\nrequires = []\nallow_unreviewed = false\n\n[[stages]]\nid = \"work\"\n\n[stages.stage]\nkind = \"work\"\nrole = \"researcher\"\ninstructions = \"\"\noutput = \"result\"\n\n[[stages]]\nid = \"review\"\n\n[stages.stage]\nkind = \"approval\"\ncount = 1\nbind_head = false\n\n[stages.stage.by]\nrole = \"reviewer\"\n"
+      }
+    }
+  },
+  {
+    "type": "operator",
+    "data": {
+      "request_id": "g10",
+      "command": {
+        "command": "workflow_apply",
+        "toml": "id = \"research\"\nversion = 1\nrequires = []\nallow_unreviewed = false\n\n[[stages]]\nid = \"work\"\n\n[stages.stage]\nkind = \"work\"\nrole = \"researcher\"\ninstructions = \"\"\noutput = \"result\"\n\n[[stages]]\nid = \"review\"\n\n[stages.stage]\nkind = \"approval\"\ncount = 1\nbind_head = false\n\n[stages.stage.by]\nrole = \"reviewer\"\n"
+      }
+    }
+  },
+  {
+    "type": "operator",
+    "data": {
+      "request_id": "g10",
+      "command": {
+        "command": "task_create",
+        "title": "Research",
+        "role": "researcher",
+        "team_id": "web",
+        "workflow_id": null
+      }
+    }
+  },
+  {
+    "type": "operator",
+    "data": {
+      "request_id": "g10",
+      "command": {
+        "command": "task_cancel",
+        "task_id": "t-1",
+        "reason": "scope changed"
+      }
+    }
+  },
+  {
+    "type": "resolve_attention",
+    "data": {
+      "request_id": "changes",
+      "attention_id": "approval:t-1/approve/1",
+      "action": "request_changes",
+      "note": "Revise the result"
+    }
+  }
+]

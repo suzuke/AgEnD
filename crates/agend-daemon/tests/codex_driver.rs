@@ -271,7 +271,10 @@ fn an_uncertain_row_does_not_hold_back_an_interrupt() {
     let state = fx
         .deliver("m-stop", "stop that", BusyLevel::Interrupt)
         .unwrap();
-    assert_eq!(state, DeliveryState::Sent, "the interrupt was held back");
+    assert!(
+        matches!(state, DeliveryState::Sent | DeliveryState::Confirmed),
+        "the interrupt was held back: {state:?}"
+    );
     let all = fx.settle(2).unwrap();
     assert_eq!(
         codex::status_of(&all, &running).as_deref(),

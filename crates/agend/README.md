@@ -3,7 +3,11 @@
 > **TL;DR**
 > - 唯一 binary：CLI、daemon、holder、TUI、shim 都在裡面。
 > - 記住：**argv[0] 分派在 `main` 第一行**；以 `git`／`kill`／`killall`／`pkill` 名稱執行時就是 shim，以 git hook 名稱（`reference-transaction`、`pre-push`…，由 `$AGEND_HOME/hooks/` 的 symlink）執行時就是 agend 的 git hook。
-> - 下一步：第 9 施工關的 CLI（agent 命令、`instance add|remove|list`、`daemon restart`、`status`、`doctor`、`init`）draft PR：`cargo xtask accept cli`。每個命令都要 `AGEND_HOME`（沒有預設，第 13 施工關再定）。
+> - 下一步：第 10 施工關驗證：`cargo xtask accept pipeline`。每個命令都要 `AGEND_HOME`（沒有預設，第 13 施工關再定）。
+
+## 第 10 施工關（實作中，待驗收）
+
+`team add|list|join|set-workflow`、`workflow list|show|check|apply`、operator／agent task create、task cancel（選填 `--reason`）與 agent 流水線回報已接通；`doctor` 加入真 sandbox probe。操作見 [pipeline runtime](../../docs/architecture/pipeline-runtime.md)。
 
 ## 負責
 
@@ -46,7 +50,7 @@
 
 - `agend --version`、`agend --help`（每個子命令 `--help` 先列範例）
 - agent 命令（`AGEND_INSTANCE` 有設）：`status`、`send <to> "<message>" [--level queue|steer|interrupt]`、`inbox [--after <message-id>]`、`done <ticket>`、`result <ticket> "<summary>"`、`review approve|changes <ticket> …`、`ask "<question>" [--option …]`、`block "<reason>"`、`unblock`、`remind <90s|30m|2h>`、`task create --role <role> "<title>"`
-- 操作者命令：`status`、`instance add <name> <backend> [--dir <path>] [--program <path>] [-- <args>…]`、`instance remove <name> [--yes]`、`instance list`、`daemon restart [--binary <path>]`、`task cancel <task>`、`task create … --team <team>`（第 10 施工關前回 `not_supported`）、`doctor`、`init`
+- 操作者命令：`status`、`instance add <name> <backend> [--dir <path>] [--program <path>] [-- <args>…]`、`instance remove <name> [--yes]`、`instance list`、`daemon restart [--binary <path>]`、`task cancel <task>`、`task create … --team <team>`、`doctor`、`init`
 - `agend daemon`（前景；Ctrl-C 停 daemon，agent 繼續跑）；`agend daemon preflight <dir>`（重啟中的 daemon 自己跑，不是給人用的）
 - `agend debug ping`、`agend debug watch`（唯讀；需要 `AGEND_HOME`）
 - 以 `git` 名稱執行 → `agend_shim::run`

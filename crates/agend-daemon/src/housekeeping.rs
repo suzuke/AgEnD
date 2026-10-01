@@ -51,10 +51,11 @@ pub async fn run(store: &SqliteStore, home: &Path, now_unix_ms: u64) {
         Ok(_) => {}
         Err(e) => log::line(&format!("housekeeping: DB snapshot failed: {e}")),
     }
-    let steps: [(&str, FileStep); 3] = [
+    let steps: [(&str, FileStep); 4] = [
         ("daemon logs", daemon_logs),
         ("audit log", audit_log),
         ("holder logs", holder_logs),
+        ("pipeline files", pipeline_files),
     ];
     for (what, step) in steps {
         match step(home, now_unix_ms) {
@@ -64,6 +65,77 @@ pub async fn run(store: &SqliteStore, home: &Path, now_unix_ms: u64) {
             Ok(_) => {}
             Err(e) => log::line(&format!("housekeeping: {what} failed: {e}")),
         }
+    }
+}
+
+pub fn pipeline_files(home: &Path, now: u64) -> io::Result<Vec<String>> {
+    use crate::store::retention::{CHECK_LOGS, WIP_ARCHIVES};
+    let mut deleted = Vec::new();
+    for (dir, pattern, suffix, nested) in [
+        ("archive", WIP_ARCHIVES, ".patch", false),
+        ("logs/checks", CHECK_LOGS, ".log", true),
+    ] {
+        let keep_ms = keep(Target::IdleFiles { pattern })? as u64 * DAY_MS;
+        let Ok(entries) = fs::read_dir(home.join(dir)) else {
+            continue;
+        };
+        let mut paths = Vec::new();
+        for entry in entries {
+            let entry = entry?;
+            if nested && entry.file_type()?.is_dir() {
+                let name = entry.file_name();
+                if !task_directory(&name.to_string_lossy()) {
+                    continue;
+                }
+                paths.extend(
+                    fs::read_dir(entry.path())?
+                        .map(|e| e.map(|e| e.path()))
+                        .collect::<io::Result<Vec<_>>>()?,
+                );
+            } else if !nested {
+                paths.push(entry.path());
+            }
+        }
+        for path in paths {
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default();
+            if !name.ends_with(suffix)
+                || !pipeline_file_name(name, nested)
+                || !fs::symlink_metadata(&path)?.is_file()
+                || now.saturating_sub(modified_ms(&path)?) < keep_ms
+            {
+                continue;
+            }
+            fs::remove_file(&path)?;
+            deleted.push(format!("deleted {}", path.display()));
+        }
+    }
+    Ok(deleted)
+}
+
+fn task_directory(name: &str) -> bool {
+    name.strip_prefix("t-").is_some_and(decimal)
+}
+fn decimal(text: &str) -> bool {
+    !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit())
+}
+fn pipeline_file_name(name: &str, check: bool) -> bool {
+    if check {
+        name.strip_suffix(".log")
+            .and_then(|s| s.rsplit_once('-'))
+            .is_some_and(|(stage, attempt)| {
+                !stage.is_empty()
+                    && stage
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+                    && decimal(attempt)
+            })
+    } else {
+        name.strip_suffix(".patch")
+            .and_then(|s| s.rsplit_once('-'))
+            .is_some_and(|(task, stamp)| task_directory(task) && decimal(stamp))
     }
 }
 
@@ -233,6 +305,47 @@ mod tests {
             .unwrap()
             .set_modified(SystemTime::UNIX_EPOCH + Duration::from_millis(unix_ms))
             .unwrap();
+    }
+
+    #[test]
+    fn pipeline_retention_keeps_recent_unrelated_files_and_symlinks() {
+        use std::os::unix::fs::symlink;
+        let dir = TempDir::new("g10-retention").unwrap();
+        for folder in ["archive", "logs/checks/t-1", "logs/checks/custom"] {
+            fs::create_dir_all(dir.path().join(folder)).unwrap();
+        }
+        let old = ["archive/t-1-123.patch", "logs/checks/t-1/checks-1.log"];
+        let kept = [
+            "archive/t-1-124.patch",
+            "logs/checks/t-1/checks-2.log",
+            "archive/custom.patch",
+            "logs/checks/custom/checks-1.log",
+            "logs/checks/t-1/custom.log",
+        ];
+        for name in old.iter().chain(kept.iter()) {
+            let path = dir.path().join(name);
+            fs::write(&path, "x").unwrap();
+            set_mtime(&path, NOW - 40 * DAY_MS);
+        }
+        set_mtime(&dir.path().join(kept[0]), NOW - 29 * DAY_MS);
+        set_mtime(&dir.path().join(kept[1]), NOW - 13 * DAY_MS);
+        symlink(
+            dir.path().join("archive/custom.patch"),
+            dir.path().join("archive/t-9-999.patch"),
+        )
+        .unwrap();
+        assert_eq!(pipeline_files(dir.path(), NOW).unwrap().len(), 2);
+        for name in old {
+            assert!(!dir.path().join(name).exists());
+        }
+        for name in kept {
+            assert!(dir.path().join(name).exists(), "{name}");
+        }
+        assert!(
+            fs::symlink_metadata(dir.path().join("archive/t-9-999.patch"))
+                .unwrap()
+                .is_symlink()
+        );
     }
 
     fn names(dir: &Path) -> Vec<String> {

@@ -5,6 +5,10 @@
 > - 記住：假 agent 的測試啟動 `src/bin/` 的真 binary，走真的 socket／HTTP；不在行程內呼叫。
 > - 下一步：`~/.cargo/bin/cargo test -p agend-testkit`。
 
+## 第 10 施工關驗證
+
+STO-13 同時跑 FakeStore 與 SQLite；SplitAdvance mutant 故意在失敗時先寫 task，必須被契約推翻。`fake-worker` 由 `agend` 的 pipeline 程序測試與 `pipeline_probe demo` 啟動。
+
 ## 怎麼跑
 
 ```bash

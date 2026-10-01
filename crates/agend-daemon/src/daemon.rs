@@ -241,6 +241,19 @@ async fn serve(home: PathBuf, exe: PathBuf, store: SqliteStore) -> Result<Stoppe
             return Err(ExitCode::from(1));
         }
     };
+    let (pipeline, pipeline_worker) = crate::pipeline::start(
+        &home,
+        &exe,
+        Arc::clone(&store),
+        Arc::clone(&fleet),
+        codex.clone(),
+    )
+    .await
+    .map_err(|e| {
+        log::line(&format!("pipeline boot: {e}"));
+        ExitCode::from(1)
+    })?;
+    supervisor.set_pipeline(pipeline.clone());
     // Bound only now (P1): a client that connects sees the whole fleet.
     let listener = match server::bind(&socket) {
         Ok(listener) => listener,
@@ -253,6 +266,7 @@ async fn serve(home: PathBuf, exe: PathBuf, store: SqliteStore) -> Result<Stoppe
         }
     };
     let context = Arc::new(Context {
+        pipeline,
         fleet,
         runtime,
         supervisor: events.clone(),
@@ -291,6 +305,7 @@ async fn serve(home: PathBuf, exe: PathBuf, store: SqliteStore) -> Result<Stoppe
     server.stop().await;
     // Closes every holder connection (no Shutdown) and then the DB: the
     // server's tasks are gone, so this is the last handle on both.
+    pipeline_worker.abort();
     drop(context);
     drop(supervisor);
     log::line("agend daemon stopped");

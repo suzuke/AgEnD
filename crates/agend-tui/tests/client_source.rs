@@ -180,6 +180,7 @@ fn attention_resolved_from_the_daemon_removes_the_item() {
                 request_id: "r-1".into(),
                 attention_id: "instance-failed:g11-2".into(),
                 action: AttentionAction::Retry,
+                note: None,
             },
         })
         .unwrap();
@@ -311,6 +312,7 @@ fn a_daemon_restart_refetches_the_fleet_view_and_returns_to_the_screen() {
         assignee: None,
         stages: Vec::new(),
         current_stage: None,
+        pipeline: None,
     });
     let text = wait_until(&mut app, |t| t.contains("Reconnected to the daemon."));
     assert_eq!(first_line(&text), "AgEnD › archfix");
@@ -329,7 +331,7 @@ fn a_version_mismatch_is_shown_and_not_retried() {
     let (mut app, _) = lab.app(None);
     let text = render(&mut app);
     assert!(
-        text.contains("the daemon speaks client protocol 1.1; this agend needs 1.2"),
+        text.contains("the daemon speaks client protocol 1.1; this agend needs 1.3"),
         "{text}"
     );
     assert!(text.contains("Not retrying: the versions do not match."));

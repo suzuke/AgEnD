@@ -232,6 +232,7 @@ mod tests {
             session_started: false,
             agent_pid: None,
             legacy_no_thread: false,
+            delivery: "push".into(),
         }
     }
 

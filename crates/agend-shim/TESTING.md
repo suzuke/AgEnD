@@ -5,6 +5,10 @@
 > - 記住：真 repo 測試只用 `git init`／`git clone` 建的暫存 repo，hook 只裝在 fixture 自己的 worktree；測試的 git 不讀 `~/.gitconfig`（`GIT_CONFIG_GLOBAL=/dev/null`）、不帶 agent 的 `AGEND_*`；kill 測試只打假的 kill 記錄程式，絕不送出訊號。
 > - 下一步：testkit 的 `git_fixture` 有 repo builder 後，把 `crates/agend/tests/shim_common` 的 `Fixture` 換掉。
 
+## 第 10 施工關驗證
+
+共用 core binding 型別後仍跑既有 golden／真的 shim consumer 測試；`cargo test -p agend --test pipeline` 驗證 daemon 建 binding、裝 hook、取消後先 unbound、保存 WIP 再清理。
+
 ## 怎麼跑
 
 ```bash
@@ -59,7 +63,7 @@ cargo xtask accept shim                               # 以上 + demo
 - [ ] git 2.46+ 回報 symbolic-ref 更新給 `reference-transaction`（hook 不讀這種行；本機 2.39，CI 用 runner 的新版 git 跑同一組測試）
 - [ ] Linux 上的 `ps -o comm=`（CI 的 ubuntu 會跑到；本機只驗過 macOS）
 - [ ] 大型 working tree 的快照耗時；每次 merge／rebase／pull 都快照的累積
-- [ ] 真 daemon 呼叫 `install_hooks`／`uninstall_hooks`（第 6 施工關）與寫快照（第 10 施工關）
+- [x] 真 daemon 建立／釋放 binding 時經子命令安裝／卸除 hook、寫唯讀快照（第 10 施工關程序測試）
 
 ## 下一步
 

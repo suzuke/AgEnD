@@ -80,6 +80,7 @@
 | STO-9 | workflow 依 (id, 版本) 精確讀回；沒存過的版本是 `None`，不退回別的版本 | [GLOSSARY workflow](../../docs/GLOSSARY.md)：task 固定建立時的版本 | `FallsBackToOlderWorkflow` |
 | STO-10 | 同一個 task 的事件依附加順序保存 | `append_event` | `PrependsEvents` |
 | STO-11 | 事件依 task 分開，交錯附加也不混 | `append_event(task_id, …)` 簽章 | `SharedEventLog` |
+| STO-13 | `advance_task` 的 task、快照與事件同成同敗；CAS 衝突與無效快照不改任何資料 | 第 10 施工關 P1 | `SplitAdvance` |
 | STO-12 | 每次重新開啟（daemon 重啟）後 task、版本、workflow、事件都還在；保存的版本 CAS 可寫入 | [GLOSSARY store](../../docs/GLOSSARY.md)：SQLite、唯一真相來源（D8）；[pipeline](../../docs/architecture/pipeline.md#worktree-與-branch-生命週期)：先寫 DB，崩潰後開機接續 | `InMemoryOnly`、`TruncOnOpen`、`SharedMem`、`FrozenDatabase` |
 
 不釘：第一個版本號；對不存在的 task 附加事件。
@@ -163,7 +164,7 @@ fixture（`ClientProtocolFixture`）：`socket`、`emit`（讓至少一個新事
 | CLP-13 | 權限兩個方向（第 9 施工關 P1）：agent（`hello` 帶 `caller`）送 `operator` 的 `instance_add`／`instance_remove`／`daemon_restart`／`task_cancel` 一律 `forbidden`；操作者送 `command` 的 `status`／`send`／`done` 一律 `forbidden`；全貌不變 | 第 9 施工關 P1、D17 | `AgentsAreOperators` |
 | CLP-14 | 操作者 `instance_add` 新名字 → `instance_added`（名字、非空的 `working_directory`），全貌出現它且 `working_directory` 相同；同名再加 → `instance_exists`；不合規則的名字 → `invalid_request`；`instance_remove` → `accepted`、全貌不再有它；再刪 → `unknown_instance` | 第 9 施工關 P6 | `ReaddIsAccepted` |
 | CLP-15 | `daemon_restart { binary }` 的形狀：`binary` 是跑不起來的路徑 → `preflight_failed`；連線不斷、沒有事件、全貌不變 | 第 9 施工關 P6、P7 | `DropsRestartBinary` |
-| CLP-16 | 操作者 `task_cancel` → `not_supported`（帶 request id），沒有事件、全貌不變（handler 在第 10 施工關） | 第 9 施工關 P1 | `AcceptsTaskCancel` |
+| CLP-16 | 操作者取消未知 task → `invalid_request`（帶 request id），沒有事件、全貌不變 | 第 10 施工關 P10 | `AcceptsTaskCancel` |
 | CLP-17 | `send` 同一個 `message_id`（UUID v4）再送一次仍 `accepted`、收件者的 `inbox` 只有一則；同 id 不同內容、不是 UUID v4 的 id、超過 1 MiB 的 body（第 9 施工關 L17）→ `invalid_request`；`inbox --after` 自己的一則 → 只回之後的；不存在的 id、別人的訊息 → `unknown_message` | 第 9 施工關 P2、P5；第 7 施工關 P5 | `NewIdOnResend`、`InboxIgnoresAfter`、`AcceptsHugeBody` |
 | CLP-18 | `subscribe_terminal` 之後，終端印出新東西 → `terminal_bytes`；同一條連線再訂一次 → 新的畫面，而且看得到那段輸出 | 第 11 施工關 P5；第 8 施工關 C8 | `FreezesScreen` |
 | CLP-19 | 對沒有終端的 instance（不存在的 id）`subscribe_terminal` → `no_terminal`（不帶 request id），連線不斷；這條連線之前訂的終端**不再**送 `terminal_bytes`（失敗的重訂也取代舊的） | 第 11 施工關 P1、P5 | `ScreenForAnyInstance` |

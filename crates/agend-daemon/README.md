@@ -1,9 +1,13 @@
 # agend-daemon
 
 > **TL;DR**
-> - 唯一的大型 I/O 層：常駐、單一 tokio runtime、DB 專屬執行緒；`agend daemon` 起 holder、接回 holder、agent 死了用 `--resume` 接回；開機計畫做完才開 `run/daemon.sock` 講 client protocol 1.2（第 8、9 施工關）；codex 經 app-server 的 JSON-RPC 送達、自己建 thread、死了照樣 resume（第 7 施工關）；`agend send`／`inbox`、`agend instance add|remove`、`agend daemon restart`（預檢後原地 `exec`）在這裡處理（第 9 施工關）。
+> - 唯一的大型 I/O 層：常駐、單一 tokio runtime、DB 專屬執行緒；`agend daemon` 起 holder、接回 holder、agent 死了用 `--resume` 接回；開機計畫做完才開 `run/daemon.sock` 講 client protocol 1.3（第 8、9 施工關）；codex 經 app-server 的 JSON-RPC 送達、自己建 thread、死了照樣 resume（第 7 施工關）；`agend send`／`inbox`、`agend instance add|remove`、`agend daemon restart`（預檢後原地 `exec`）在這裡處理（第 9 施工關）。
 > - 記住：**daemon 停掉時 holder 與 agent 照跑（D3）**；同一個 `AGEND_HOME` 只有一個 daemon（`agend.db` 的鎖）；`agend.db` 只有 daemon 開（`store`）；socket 連得上＝daemon 好了。
-> - 下一步：第 9 施工關（CLI）draft PR：`cargo xtask accept cli`；還原 DB 快照的步驟見下方「store」。
+> - 下一步：第 10 施工關 pipeline 驗證：`cargo xtask accept pipeline`；還原 DB 快照的步驟見下方「store」。
+
+## 第 10 施工關（實作中，待驗收）
+
+單一 pipeline queue、SQLite schema v5、真 git／Runner／LocalForge、binding 與 hook 生命週期、checks 沙箱、重啟／每日對帳、team／workflow／task／請示／提醒已接通；執行規則見 [pipeline runtime](../../docs/architecture/pipeline-runtime.md)。
 
 ## 負責
 
@@ -104,12 +108,12 @@
 | `send` | 收件者要存在（否則 `unknown_instance`）；`message_id` 要 UUID v4（否則 `invalid_request`），沒帶就由 daemon 產生；交給 `CodexDriver::deliver`（`messages` 表：同 id 同內容 → 照樣 `accepted`、不再送；同 id 不同內容 → `invalid_request: message id … is already used by another message`）；claude／opencode 收件者停在 `queued`；寫入 DB（codex 再加上交給長連線）之後才回 `accepted` |
 | 大小上限 | `send` 的 body 最多 1 MiB（`MAX_MESSAGE_BYTES`，超過 `invalid_request`，什麼都不存）；協定一行最多 8 MiB（`MAX_LINE_BYTES`，超過回 `invalid_request` 並關連線，不整行讀進記憶體）（第 9 施工關 L17） |
 | `inbox` | 寄給呼叫者的，依 `seq`：不帶 `--after` 最近 20 則；帶的話回那一則之後的全部；那一則不存在、過期或不是寄給呼叫者 → `unknown_message` |
-| 其他 agent 命令 | `done`、`result`、`review …`、`ask …`、`block`、`unblock`、`remind`、`task_create` → `not_supported: agend done arrives in gate 10; nothing changed` |
+| Pipeline agent 命令 | `done`／`result`／`review` 必須帶目前 stage/attempt，由 task holder 或指定 reviewer 回報；`ask` 對話永久保存，`block`／`unblock`／`remind`／`task_create` 由 pipeline queue 處理 |
 | `instance_add` | supervisor 做：名字 `[a-z0-9-]{1,24}`、backend、DB 沒有同名、holder 鎖沒被持有（否則 `instance_exists`）；`--dir` 預設 `$AGEND_HOME/workspace/<name>`（0700，daemon 建），給的目錄要存在；program 預設 backend 名；claude 產生 session id；寫 `new` → 回覆 → 馬上啟動 |
 | `instance_remove` | 不再監看、關長連線、`Shutdown` holder（最多 5 秒；停不了照樣刪，下次開機巡查收掉）、codex 照清掃規則、刪列、從全貌拿掉（`instance_changed` 不帶 instance；它的「需要你」項目以 `attention_resolved`（`unknown`）離開）；workspace 不刪 |
 | `daemon_restart` | 一次一個（另一個進行中 → `invalid_request: a restart is already in progress`）；`mkdtemp` `/tmp/agend-pf-XXXXXX`、`VACUUM INTO` 當下的 DB 複本、跑 `<binary> daemon preflight <dir>`（60 秒）：要 exit 0 而且印出 `agend …`、`db copy: …`、`holder: hello ok, spawn ok, shutdown ok`；失敗 → `preflight_failed: <binary> daemon preflight exited with status 1[: 最後一行 stderr]; the daemon keeps running agend 0.0.0`；暫存 home 一律刪掉（daemon 在預檢中停止也一樣：Drop guard kill 並收屍子程序、`Shutdown` 暫存 home 裡的 holder），60 秒逾時不等子程序的 pipe；預檢結束時 binary 必須還是同一個檔案（device、inode、大小、mtime），`agend.db` 不動。通過 → 回 `restarting { preflight }`、照 Ctrl-C 的順序收尾（不送 `Shutdown`）、`exec <binary> daemon`（pid、終端、環境不變） |
 | 繼承的 holder | 新 image 開機時（還沒起任何 holder 前）對每個鎖檔裡的 pid `waitpid(pid, WNOHANG)` 一次；是自己的子程序而且還活著的每秒再查，收到或 `ECHILD` 就不再查；log `reaped inherited holder pid <pid> (exit 0)`；不用 `waitpid(-1)` |
-| `task_cancel` | `not_supported`（handler 在第 10 施工關） |
+| `task_cancel` | 可帶 reason；CAS 推進 Cancelled、保存 WIP 並釋放 binding；merge in-flight 拒絕取消 |
 
 ## store（第 5 施工關）
 

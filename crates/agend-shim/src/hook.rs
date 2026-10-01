@@ -264,7 +264,7 @@ pub fn stay_hint(binding: Option<&Binding>) -> String {
             branch, worktree, ..
         }) => format!(
             "stay on {branch} in {}. To read another branch without switching: git log <branch>, git show <branch>:<path>, git diff <branch>...HEAD. For other work: agend task create \"<title>\"",
-            worktree.display()
+            Path::new(worktree).display()
         ),
         Some(Binding::Review { head, .. }) => format!(
             "this is a review of {head}; inspect with git log / git show / git diff, then run: agend review approve  or  agend review changes \"<what to fix>\""
@@ -352,7 +352,7 @@ pub fn install_hooks(
     if git_dir == common {
         return Err(format!(
             "{} is a main checkout, not a linked agent worktree; agend hooks go only into agent worktrees",
-            worktree.display()
+            Path::new(worktree).display()
         ));
     }
     std::fs::create_dir_all(hooks_dir).map_err(|e| format!("{}: {e}", hooks_dir.display()))?;

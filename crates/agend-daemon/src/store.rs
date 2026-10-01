@@ -48,6 +48,7 @@
 pub mod instances;
 pub mod messages;
 mod migrate;
+pub mod pipeline;
 pub mod retention;
 pub mod snapshot;
 pub mod task_row;
@@ -62,7 +63,7 @@ use std::time::Duration;
 
 use agend_core::pipeline::task::Task;
 use agend_core::pipeline::workflow::Workflow;
-use agend_core::traits::{CasResult, Store, StoredEvent, VersionedTask};
+use agend_core::traits::{CasResult, Store, StoredEvent, TaskProgress, VersionedTask};
 use rusqlite::{Connection, ErrorCode, OpenFlags};
 use tokio::sync::{mpsc, oneshot};
 
@@ -465,7 +466,7 @@ impl SqliteStore {
     }
 
     /// Runs `job` on the DB thread and returns its result.
-    async fn call<T, F>(&self, job: F) -> Result<T, StoreError>
+    pub(crate) async fn call<T, F>(&self, job: F) -> Result<T, StoreError>
     where
         T: Send + 'static,
         F: FnOnce(&mut Connection) -> Result<T, StoreError> + Send + 'static,
@@ -512,6 +513,32 @@ impl Store for SqliteStore {
         let task = task.clone();
         self.call(move |conn| task_row::compare_and_swap(conn, &task, expected_version))
             .await
+    }
+
+    async fn load_task_progress(&self, id: &str) -> Result<Option<TaskProgress>, StoreError> {
+        Ok(self.progress(id).await?.map(|p| p.data))
+    }
+    async fn advance_task(
+        &self,
+        task: &Task,
+        expected_version: u64,
+        progress: &TaskProgress,
+        event: &StoredEvent,
+    ) -> Result<CasResult, StoreError> {
+        let task = task.clone();
+        let progress = progress.clone();
+        let event = event.clone();
+        self.call(move |conn| {
+            let tx = conn.transaction()?;
+            let result = task_row::compare_and_swap(&tx, &task, expected_version)?;
+            if matches!(result, CasResult::Written { .. }) {
+                tx.execute("UPDATE tasks SET pipeline=?1,stage_entered_at_unix_ms=?2,merge_intent=?3,block_reason=?5 WHERE id=?4",
+                    rusqlite::params![progress.pipeline,task_row::to_i64(progress.stage_entered_at_unix_ms,"stage entry")?,progress.merge_intent,task.id,progress.block_reason])?;
+                task_row::append_event(&tx, &task.id, &event)?;
+                tx.commit()?;
+            }
+            Ok(result)
+        }).await
     }
 
     async fn load_workflow(

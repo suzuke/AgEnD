@@ -232,7 +232,7 @@ pub fn rows() -> Vec<Row> {
             Both,
             ok(&[
                 "daemon: pid ",
-                "client protocol 1.2",
+                "client protocol 1.3",
                 "instances: 2 (g9-a ",
                 "needs you: 0",
             ]),
@@ -403,10 +403,7 @@ pub fn rows() -> Vec<Row> {
             Operator,
             &["task", "cancel", "t-1"],
             Both,
-            fails(
-                1,
-                &["agend: not_supported: agend task cancel arrives in gate 10; t-1 is unchanged"],
-            ),
+            fails(1, &["agend: invalid_request: unknown task t-1"]),
         ),
         row(
             "CLI-26",
@@ -431,12 +428,7 @@ pub fn rows() -> Vec<Row> {
                 "web",
             ],
             Nothing,
-            fails(
-                1,
-                &[
-                    "agend: not_supported: the operator's agend task create arrives in gate 10; nothing was sent",
-                ],
-            ),
+            fails(1, &["cannot reach the AgEnD daemon"]),
         ),
         row(
             "CLI-28",
@@ -479,7 +471,7 @@ pub fn rows() -> Vec<Row> {
                 "  db copy: ",
                 "restarting the daemon (pid ",
                 "the daemon is back: pid ",
-                ", client protocol 1.2, instances=2 (",
+                ", client protocol 1.3, instances=2 (",
             ]),
         ),
         row(
@@ -494,30 +486,21 @@ pub fn rows() -> Vec<Row> {
             A,
             &["done", "t-1/work/1"],
             Real,
-            fails(
-                1,
-                &["agend: not_supported: agend done arrives in gate 10; nothing changed"],
-            ),
+            fails(1, &["agend: invalid_request: unknown task t-1"]),
         ),
         row(
             "CLI-34",
             A,
             &["block", "waiting for the API key"],
             Real,
-            fails(
-                1,
-                &["agend: not_supported: agend block arrives in gate 10; nothing changed"],
-            ),
+            fails(1, &["agend: invalid_request: unknown task"]),
         ),
         row(
             "CLI-35",
             A,
             &["ask", "which database?"],
             Real,
-            fails(
-                1,
-                &["agend: not_supported: agend ask arrives in gate 10; nothing changed"],
-            ),
+            ok(&["asked A-"]),
         ),
     ];
     let fake_only: Vec<(Row, Option<Setup>)> = vec![

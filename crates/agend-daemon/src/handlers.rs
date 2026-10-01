@@ -58,6 +58,7 @@ const SNAPSHOT_WITHIN: Duration = Duration::from_secs(5);
 /// What the handlers work with.
 pub struct Context {
     pub fleet: Arc<Fleet>,
+    pub pipeline: crate::pipeline::Handle,
     pub runtime: HolderRuntime,
     /// The supervisor's queue (`resolve_attention`, `instance_add` and
     /// `instance_remove` act through it).
@@ -116,6 +117,15 @@ pub fn error(request_id: Option<String>, code: &str, message: impl Into<String>)
 }
 
 /// What the operator gets for an agent command.
+pub(crate) fn pipeline_reply(request_id: String, result: crate::pipeline::Reply) -> ClientResponse {
+    match result {
+        Ok(result) => ClientResponse::CommandResult {
+            data: ClientCommandResultData { request_id, result },
+        },
+        Err((code, message)) => error(Some(request_id), &code, message),
+    }
+}
+
 fn agent_only(command: &AgentCommand) -> String {
     format!(
         "{} is an agent command; it runs inside an agent, where AGEND_INSTANCE is set",
@@ -156,11 +166,18 @@ pub async fn handle(ctx: &Context, caller: Option<&str>, request: ClientRequest)
         ClientRequest::TerminalInput { data } => {
             return terminal_input(ctx, caller, data.instance_id, data.bytes_base64);
         }
-        ClientRequest::AnswerAsk { data } => error(
-            Some(data.request_id),
-            error_code::UNKNOWN_ASK,
-            format!("no open ask {} (asks arrive in gate 10)", data.ask_id),
-        ),
+        ClientRequest::AnswerAsk { data } => {
+            if caller.is_some() {
+                error(
+                    Some(data.request_id),
+                    error_code::FORBIDDEN,
+                    "only the operator can answer asks",
+                )
+            } else {
+                let id = data.request_id.clone();
+                pipeline_reply(id, ctx.pipeline.answer(data).await)
+            }
+        }
         ClientRequest::Command { data } => match caller {
             Some(caller) => agent::handle(ctx, caller, data).await,
             None => error(
@@ -187,6 +204,10 @@ pub async fn handle(ctx: &Context, caller: Option<&str>, request: ClientRequest)
                     error_code::FORBIDDEN,
                     OPERATOR_ONLY,
                 ));
+            }
+            if !data.attention_id.starts_with("instance-failed:") {
+                let id = data.request_id.clone();
+                return Outcome::Reply(pipeline_reply(id, ctx.pipeline.resolve(data).await));
             }
             // Checked and taken off the list here, so the reply never waits
             // for a busy supervisor (a retry can take 15 s, C6); the

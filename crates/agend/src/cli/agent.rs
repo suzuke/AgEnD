@@ -320,10 +320,15 @@ pub fn task_create(
                 "the operator's agend task create needs --team <team>\nexample: agend task create --role dev \"<title>\" --team web",
             ));
         }
-        return Err(Failure::coded(
-            "not_supported",
-            "the operator's agend task create arrives in gate 10; nothing was sent",
-        ));
+        return super::pipeline::request(
+            target,
+            agend_core::protocol::client::OperatorCommand::TaskCreate {
+                title,
+                role,
+                team_id: team.expect("checked team"),
+                workflow_id: workflow,
+            },
+        );
     }
     let command_ = AgentCommand::TaskCreate {
         title,

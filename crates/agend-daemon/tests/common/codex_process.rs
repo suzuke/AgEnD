@@ -92,6 +92,7 @@ pub fn add(home: &Path, id: &str, program: &Path, turn_ms: u64) -> Result<Instan
         session_started: false,
         agent_pid: None,
         legacy_no_thread: false,
+        delivery: "push".into(),
     };
     let store = SqliteStore::open(home, 0).map_err(|e| format!("open store: {e}"))?;
     block_on(store.add_instance(&instance)).map_err(|e| format!("add {id}: {e}"))?;
@@ -640,6 +641,7 @@ pub fn failed_holder_alive(lab: &Lab, tag: &str) -> Result<Vec<String>, String> 
             session_started: true,
             agent_pid: Some(agent),
             legacy_no_thread: false,
+            delivery: "push".into(),
         }))
         .map_err(|e| e.to_string())?;
     }

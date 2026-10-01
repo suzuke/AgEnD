@@ -363,6 +363,7 @@ fn task(id: &str, team: &str, title: &str, repo: Option<&str>, holder: &str) -> 
         holder: Some(holder.into()),
         stages: Vec::new(),
         status: "running".into(),
+        pipeline: None,
     }
 }
 

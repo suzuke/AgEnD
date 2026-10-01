@@ -195,7 +195,7 @@ fn an_older_daemon_is_refused_at_once() {
     assert_eq!(human.code, Some(1));
     assert_eq!(
         human.stderr,
-        "agend: the daemon speaks client protocol 1.1; this agend needs 1.2 — stop the daemon (Ctrl-C) and start this binary: agend daemon\n"
+        "agend: the daemon speaks client protocol 1.1; this agend needs 1.3 — stop the daemon (Ctrl-C) and start this binary: agend daemon\n"
     );
     assert!(
         json.stdout

@@ -283,6 +283,7 @@ pub struct Supervisor {
     store: Arc<SqliteStore>,
     runtime: HolderRuntime,
     codex: CodexDriver,
+    pipeline: Option<crate::pipeline::Handle>,
     events: UnboundedSender<Event>,
     watches: BTreeMap<String, Watch>,
     fleet: Arc<Fleet>,
@@ -318,6 +319,7 @@ impl Supervisor {
             store,
             runtime,
             codex,
+            pipeline: None,
             events,
             watches: BTreeMap::new(),
             fleet,
@@ -345,6 +347,10 @@ impl Supervisor {
             view.state = state;
             self.fleet.set_instance(view, summary);
         }
+    }
+
+    pub fn set_pipeline(&mut self, pipeline: crate::pipeline::Handle) {
+        self.pipeline = Some(pipeline);
     }
 
     pub fn store(&self) -> &SqliteStore {
@@ -389,7 +395,7 @@ impl Supervisor {
     /// background (up to 20 s + 30 s; the event loop and Ctrl-C do not
     /// wait). A failure is a death of this generation.
     fn connect_codex(&self, instance: &Instance, generation: u64) {
-        if instance.backend != Backend::Codex {
+        if instance.backend != Backend::Codex || instance.delivery == "inbox" {
             return;
         }
         let (codex, events, id) = (self.codex.clone(), self.events.clone(), instance.id.clone());
@@ -438,6 +444,7 @@ impl Supervisor {
                     assignee: t.assignee,
                     stages: Vec::new(),
                     current_stage: None,
+                    pipeline: None,
                 })
                 .collect(),
         );
@@ -852,6 +859,7 @@ impl Supervisor {
             session_started: false,
             agent_pid: None,
             legacy_no_thread: false,
+            delivery: "push".into(),
         };
         self.store
             .add_instance(&instance)
@@ -878,6 +886,12 @@ impl Supervisor {
                 format!("no instance {id}; see agend instance list"),
             ));
         };
+        if let Some(task) = self.store.held_task(id).await.map_err(read)? {
+            return Err((
+                error_code::INVALID_REQUEST,
+                format!("{id} holds {task}; run agend task cancel {task} first"),
+            ));
+        }
         self.watches.remove(id);
         self.codex.disconnect(id);
         self.runtime.detach(id);
@@ -938,6 +952,9 @@ impl Supervisor {
                 Event::Restart { id, generation } => self.restart(&id, generation).await,
                 Event::Housekeeping => {
                     crate::housekeeping::run(&self.store, &self.home, log::now_unix_ms()).await;
+                    if let Some(p) = &self.pipeline {
+                        p.daily();
+                    }
                 }
                 Event::Retry { item } => self.retry(*item).await,
                 Event::Add { request, reply } => self.add(request, reply).await,
@@ -947,6 +964,9 @@ impl Supervisor {
                 }
                 Event::Exec(binary) => return Stopped::Exec(binary),
                 Event::Stop(signal) => return Stopped::Signal(signal),
+            }
+            if let Some(p) = &self.pipeline {
+                p.wake();
             }
         }
         Stopped::Signal("channel closed")
@@ -971,6 +991,7 @@ mod tests {
             session_started: false,
             agent_pid: None,
             legacy_no_thread: false,
+            delivery: "push".into(),
         }
     }
 

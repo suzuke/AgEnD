@@ -60,9 +60,7 @@ pub fn forbidden(command: &OperatorCommand) -> &'static str {
         OperatorCommand::TaskCancel { .. } => {
             "only the operator can cancel tasks; ask the operator"
         }
-        OperatorCommand::Unknown => {
-            "only the operator can send operator requests; ask the operator"
-        }
+        _ => "only the operator can send operator requests; ask the operator",
     }
 }
 
@@ -123,16 +121,12 @@ pub async fn handle(ctx: &Context, data: OperatorData) -> Outcome {
             }
         }
         OperatorCommand::DaemonRestart { binary } => return restart(ctx, request_id, binary).await,
-        OperatorCommand::TaskCancel { task_id } => error(
-            Some(request_id),
-            error_code::NOT_SUPPORTED,
-            format!("agend task cancel arrives in gate 10; {task_id} is unchanged"),
-        ),
         OperatorCommand::Unknown => error(
             Some(request_id),
             error_code::UNKNOWN_REQUEST,
             "unknown operator command",
         ),
+        other => super::pipeline_reply(request_id, ctx.pipeline.operator(other).await),
     };
     Outcome::Reply(reply)
 }

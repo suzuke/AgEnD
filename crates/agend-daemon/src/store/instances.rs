@@ -61,6 +61,7 @@ pub struct Instance {
     /// A codex instance migration 0004 found without a thread id that may
     /// hold a conversation: never started again, a human decides (gate 7 P3).
     pub legacy_no_thread: bool,
+    pub delivery: String,
 }
 
 /// `[a-z0-9-]{1,24}`: the id names files under `run/holders/`.
@@ -109,6 +110,7 @@ fn from_row(row: &Row<'_>) -> rusqlite::Result<Result<Instance, StoreError>> {
     let session_started = row.get(7)?;
     let agent_pid: Option<i64> = row.get(8)?;
     let legacy_no_thread = row.get(9)?;
+    let delivery = row.get(10)?;
     Ok((|| {
         let invalid = |what: String| StoreError::Invalid(format!("instance {id}: {what}"));
         Ok(Instance {
@@ -125,13 +127,14 @@ fn from_row(row: &Row<'_>) -> rusqlite::Result<Result<Instance, StoreError>> {
                 .map(|p| u32::try_from(p).map_err(|_| invalid(format!("agent_pid {p}"))))
                 .transpose()?,
             legacy_no_thread,
+            delivery,
             id: id.clone(),
         })
     })())
 }
 
 const COLUMNS: &str = "id, backend, program, args, working_directory, session_id, status, \
-                       session_started, agent_pid, legacy_no_thread";
+                       session_started, agent_pid, legacy_no_thread, delivery";
 
 pub(super) fn list(conn: &Connection) -> Result<Vec<Instance>, StoreError> {
     let mut stmt = conn.prepare(&format!("SELECT {COLUMNS} FROM instances ORDER BY id"))?;
@@ -161,12 +164,13 @@ pub(super) fn insert(conn: &Connection, instance: &Instance) -> Result<(), Store
         session_started,
         agent_pid,
         legacy_no_thread,
+        delivery,
     } = instance;
     validate_id(id).map_err(StoreError::Invalid)?;
     let args = serde_json::to_string(args).map_err(|e| StoreError::Invalid(e.to_string()))?;
     let inserted = conn.execute(
         &format!(
-            "INSERT INTO instances ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)"
+            "INSERT INTO instances ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"
         ),
         rusqlite::params![
             id,
@@ -178,7 +182,8 @@ pub(super) fn insert(conn: &Connection, instance: &Instance) -> Result<(), Store
             status.as_str(),
             session_started,
             agent_pid,
-            legacy_no_thread
+            legacy_no_thread,
+            delivery
         ],
     );
     match inserted {

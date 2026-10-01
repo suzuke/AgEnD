@@ -21,6 +21,7 @@
 
 mod agent;
 mod operator;
+mod pipeline;
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -132,6 +133,12 @@ enum Command {
     /// Create or cancel tasks
     #[command(subcommand)]
     Task(Task),
+    /// Manage teams (operator)
+    #[command(subcommand)]
+    Team(pipeline::Team),
+    /// Validate and save workflow versions (operator)
+    #[command(subcommand)]
+    Workflow(pipeline::Workflow),
     /// Add, remove and list agents (operator)
     #[command(subcommand)]
     Instance(operator::Instance),
@@ -170,7 +177,11 @@ enum Task {
     },
     /// Cancel a task (operator)
     #[command(before_help = "Example: agend task cancel t-42")]
-    Cancel { task: String },
+    Cancel {
+        task: String,
+        #[arg(long)]
+        reason: Option<String>,
+    },
 }
 
 /// A failed command: its `--json` code, message and exit code.
@@ -437,7 +448,11 @@ fn dispatch(command: Command, json: bool) -> Result<Output, Failure> {
             team,
             workflow,
         }) => agent::task_create(&target, title, role, team, workflow),
-        Command::Task(Task::Cancel { task }) => operator::task_cancel(&target, task),
+        Command::Task(Task::Cancel { task, reason }) => {
+            operator::task_cancel(&target, task, reason)
+        }
+        Command::Team(command) => pipeline::team(&target, command),
+        Command::Workflow(command) => pipeline::workflow(&target, command),
         Command::Instance(instance) => operator::instance(&target, instance, json),
         Command::Daemon(daemon) => operator::daemon(&target, daemon, json),
         Command::App { lang } => app(target, &lang),

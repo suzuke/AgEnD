@@ -9,7 +9,7 @@ use agend_core::protocol::client::{
     AgentCommand, AgentState, AnswerAskData, AttentionAction, AttentionRequiredData,
     ClientCommandData, ClientRequest, ClientResponse, CommandResult, DaemonEvent, InstanceData,
     InstanceView, OperatorCommand, OperatorData, ResolveAttentionData, ResultIdentity,
-    STALE_RESULT, SubscribeEventsData, V1_2,
+    STALE_RESULT, SubscribeEventsData, V1_3,
 };
 use agend_testkit::contract::client::terminal_input;
 use agend_testkit::fake_daemon::{CODEX_INPUT, FakeDaemon, ProbeClient, TYPE_OPERATOR_ONLY};
@@ -22,7 +22,7 @@ fn connected(daemon: &FakeDaemon) -> ProbeClient {
         .request(&ClientRequest::hello_as(Some("fd-agent".into())))
         .unwrap()
     {
-        ClientResponse::Hello { data } => assert_eq!(data.selected, V1_2),
+        ClientResponse::Hello { data } => assert_eq!(data.selected, V1_3),
         other => panic!("expected hello, got {other:?}"),
     }
     client
@@ -99,7 +99,7 @@ fn incompatible_major_gets_a_clear_error_and_close() {
     assert_eq!(data.code, VERSION_MISMATCH);
     assert_eq!(
         data.message,
-        "client protocol version mismatch: local supports 2.0, remote supports 1.2"
+        "client protocol version mismatch: local supports 2.0, remote supports 1.3"
     );
     assert!(client.recv().unwrap().is_none());
 }
@@ -545,6 +545,7 @@ fn held_resolved_events_wait_for_release() {
                 request_id: "r-1".into(),
                 attention_id: "instance-failed:g-1".into(),
                 action: AttentionAction::Retry,
+                note: None,
             },
         })
         .unwrap();

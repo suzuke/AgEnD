@@ -6,6 +6,10 @@
 > - CLI（第 9 施工關）：`tests/cli.rs` 跑真的 `agend` binary，比對 stdout、stderr、exit code；下面的 `CLI-n` 表每列對假 daemon（`FakeDaemon::start_at($AGEND_HOME/run/daemon.sock)`）與真 `agend daemon` 各跑一次（第 10 施工關才有 handler 的只對假）；各段與 `cli_demo` 共用 `tests/common/`。
 > - holder 的跨程序測試（`tests/holder_process.rs`）與 daemon ↔ holder 的測試（`tests/holder_runtime.rs`、`tests/daemon_process.rs`，第 6 施工關）也在這裡，因為要用真的 binary。
 
+## 第 10 施工關驗證
+
+`cargo build -p agend -p agend-testkit --bins` 後跑 `cargo test -p agend --test pipeline`：happy、checks 返工、review 返工、WIP、main 前進、兩個 failpoint 的四次開機、沙箱、hook／cancel、問答／提醒、排隊與 no-role、sandbox retry、merge-blocked；完整 demo 用 `cargo xtask accept pipeline`。
+
 ## 怎麼跑
 
 ```bash
@@ -40,7 +44,7 @@ cargo test -p agend
 | `tests/cli.rs::a_stuck_codex_app_server_never_wedges_the_daemon` | 同上，但 app-server 是 `fake_codex --disable duplex-io`（寫的時候不讀）：`instance remove` 仍在幾秒內完成、Ctrl-C 仍停得掉 daemon（沒有修之前 remove 沒有回應、Ctrl-C 沒反應） |
 | `tests/cli.rs::a_binary_swapped_during_its_preflight_is_refused` | 第 2 輪 verifier #3：預檢跑的時候把 binary 原地改一個 byte（大小不變）、把修改時間設回去 → `changed while its preflight ran`、daemon 沒被換掉 |
 | `tests/cli.rs::ctrl_c_during_a_restart_stops_the_daemon` | 預檢通過（`preflight passed`）之後馬上 Ctrl-C：daemon 結束、沒有 `exec`（修之前 Ctrl-C 被舊的 image 吃掉、新的照樣跑） |
-| `tests/cli.rs::unreachable_daemon_after_ten_seconds`、`an_older_daemon_is_refused_at_once`、`version_starts_fast` | 沒有 daemon：至少等了 10 秒、訊息寫 `after 10 s`（`cannot reach … Start it with: agend daemon`）、exit 1（不設上限：機器忙時量到的是機器，不是 agend），`--json` 的 code 是 `daemon_unreachable`；說 1.1 的假 daemon：只說了一次 hello（沒有重試，在 daemon 那邊數，不量時間）、`this agend needs 1.2 — stop the daemon (Ctrl-C) and start this binary: agend daemon`、`version_mismatch`；`agend --version` 50 次的中位數 < 10 ms |
+| `tests/cli.rs::unreachable_daemon_after_ten_seconds`、`an_older_daemon_is_refused_at_once`、`version_starts_fast` | 沒有 daemon：至少等了 10 秒、訊息寫 `after 10 s`（`cannot reach … Start it with: agend daemon`）、exit 1（不設上限：機器忙時量到的是機器，不是 agend），`--json` 的 code 是 `daemon_unreachable`；說 1.1 的假 daemon：只說了一次 hello（沒有重試，在 daemon 那邊數，不量時間）、`this agend needs 1.3 — stop the daemon (Ctrl-C) and start this binary: agend daemon`、`version_mismatch`；`agend --version` 50 次的中位數 < 10 ms |
 | `tests/client_protocol.rs`（第 9 施工關部分） | CLP-13..17 對真 daemon（見 testkit CONTRACTS）；`debug` 沒設 `AGEND_HOME` 改成跟其他命令同一句、exit 2；終端那段裡操作者送 agent 命令 `status` 現在是 `forbidden` |
 | `tests/client_protocol.rs`（第 11 施工關 B 段部分） | CLP-18..20 對真 daemon：再訂一次終端拿到有新輸出的畫面、不存在的 instance `no_terminal` 且舊串流停止、`terminal_input` 先查身分、`no_terminal`、操作者的位元組到 PTY（畫面回顯）；CLP-10 改成對沒有終端的 instance 送 `terminal_input` → `no_terminal` |
 | `tests/terminal_line_limits.rs` | 第 11 施工關 B 段 × 第 9 施工關 L17：終端路徑上最長的行（holder 1000×1000 全是 4 bytes 字元的畫面 4 MB、預設 50×200 約 40 KB、8 KiB 的 PTY 塊、最長的按鍵 `terminal_input`）都小於 `MAX_LINE_BYTES`；client 送的只有很短的行，大的行是 daemon → client，不受 8 MiB 限制 |
@@ -49,7 +53,7 @@ cargo test -p agend
 
 ## CLI-n 表（第 9 施工關 P10）
 
-「兩者」＝假 daemon 與真 daemon 各跑一次、預期相同；「只對假」＝真 daemon 的 handler 在第 10 施工關（真 daemon 現在回 `not_supported`，見 CLI-33..35）；「—」＝不需要 daemon。`A`＝`AGEND_INSTANCE=g9-a`、`B`＝`g9-b`；兩邊都有 `g9-a`、`g9-b` 兩個 claude instance。完整的比對字串在 `tests/common/cli_table.rs`。
+「兩者」＝假 daemon 與真 daemon 各跑一次、預期相同；「只對假」＝沿用第 9 施工關的假 daemon 案例；第 10 施工關真 pipeline 由 `tests/pipeline.rs` 驗證；「—」＝不需要 daemon。`A`＝`AGEND_INSTANCE=g9-a`、`B`＝`g9-b`；兩邊都有 `g9-a`、`g9-b` 兩個 claude instance。完整的比對字串在 `tests/common/cli_table.rs`。
 
 | 列 | 誰 | 命令 | 預期 | 跑在 |
 |---|---|---|---|---|
@@ -60,7 +64,7 @@ cargo test -p agend
 | CLI-5 | 操作者 | `send g9-b` | clap 的訊息＋`example: agend send dev-2 …`、exit 2 | — |
 | CLI-6 | 操作者 | `send g9-b --json` | `{"error":{"code":"usage",…}}`、exit 2 | — |
 | CLI-7 | — | `--help` | 第一段是 `Examples:` | — |
-| CLI-8 | 操作者 | `status` | `daemon: pid …, client protocol 1.2`、`instances: 2 (…)`、`needs you: 0` | 兩者 |
+| CLI-8 | 操作者 | `status` | `daemon: pid …, client protocol 1.3`、`instances: 2 (…)`、`needs you: 0` | 兩者 |
 | CLI-9 | A | `status` | `g9-a (claude): no task`、`next: agend inbox \| …` | 兩者 |
 | CLI-10 | A | `instance add x claude` | `agend: forbidden: only the operator can add instances; ask the operator`、exit 1 | 兩者 |
 | CLI-11 | 操作者 | `done t-1/work/1` | `agend: forbidden: agend done is an agent command; it runs inside an agent, where AGEND_INSTANCE is set`、exit 1 | 兩者 |
@@ -75,13 +79,13 @@ cargo test -p agend
 | CLI-21 | 操作者 | `instance add Bad_Name claude` | `agend: invalid_request: invalid name "Bad_Name": …`、exit 1 | 兩者 |
 | CLI-22 | 操作者 | `instance remove g9-new`（stdin 不是終端） | `… needs --yes when not on a terminal`、exit 2 | — |
 | CLI-23、24 | 操作者 | `instance remove g9-new --yes` 兩次 | `removed g9-new; workspace kept at …`；第二次 `unknown_instance`、exit 1 | 兩者 |
-| CLI-25 | 操作者 | `task cancel t-1` | `agend: not_supported: agend task cancel arrives in gate 10; t-1 is unchanged`、exit 1 | 兩者 |
-| CLI-26、27 | 操作者 | `task create --role dev "login page"`（沒有／有 `--team web`） | `needs --team <team>`、exit 2；`not_supported: the operator's agend task create arrives in gate 10`、exit 1 | — |
+| CLI-25 | 操作者 | `task cancel t-1` | `agend: invalid_request: unknown task t-1`、exit 1 | 兩者 |
+| CLI-26、27 | 操作者 | `task create --role dev "login page"`（沒有／有 `--team web`） | `needs --team <team>`、exit 2；`invalid_request: unknown team web`、exit 1 | — |
 | CLI-28、29 | A | `done t-42`、`remind 1d` | `invalid ticket …`、`invalid delay …`、exit 2 | — |
 | CLI-30 | 操作者 | `daemon restart --binary /usr/bin/false` | `agend: preflight_failed: /usr/bin/false daemon preflight exited with status 1; the daemon keeps running agend 0.0.0…`、exit 1 | 兩者 |
-| CLI-31 | 操作者 | `daemon restart` | `preflight agend 0.0.0 (…):`、`  db copy: …`、`restarting the daemon (pid …) ...`、`the daemon is back: pid …, client protocol 1.2, instances=2 (… s)` | 兩者 |
+| CLI-31 | 操作者 | `daemon restart` | `preflight agend 0.0.0 (…):`、`  db copy: …`、`restarting the daemon (pid …) ...`、`the daemon is back: pid …, client protocol 1.3, instances=2 (… s)` | 兩者 |
 | CLI-32 | B | `inbox`（重啟之後） | 還是那兩則 | 兩者 |
-| CLI-33..35 | A | `done t-1/work/1`、`block …`、`ask …` | `agend: not_supported: agend done arrives in gate 10; nothing changed`（依命令換字）、exit 1 | 只對真 |
+| CLI-33..35 | A | `done t-1/work/1`、`block …`、`ask …` | `done`／`block` 對未知 task 回 `invalid_request`；`ask` 建立持久化對話、exit 1 | 只對真 |
 | CLI-36 | A | `status`（假 daemon `assign t-42 review 2`） | `t-42 · review (attempt 2) · ticket t-42/review/2` | 只對假（第 10 施工關） |
 | CLI-37、38 | A | `review approve t-42/review/2` 兩次 | `accepted`；第二次 `agend: stale_result: …`、exit 1 | 只對假（第 10 施工關） |
 | CLI-39..46 | A | `done`、`result`、`review changes`、`ask --option …`、`block`、`unblock`、`remind 30m`、`task create` | `accepted`／`asked A-…`／`created T-…` | 只對假（第 10 施工關） |

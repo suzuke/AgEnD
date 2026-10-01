@@ -155,7 +155,7 @@ pub fn cases<F: ClientProtocolFixture>() -> Vec<Case<F>> {
         },
         Case {
             rule: "CLP-16",
-            name: "task_cancel_is_not_supported_and_changes_nothing",
+            name: "unknown_task_cancel_changes_nothing",
             check: |fx| task_cancel_changes_nothing(&fx),
         },
         Case {
@@ -378,6 +378,7 @@ fn resolve(
                 request_id: request_id.into(),
                 attention_id: attention_id.into(),
                 action,
+                note: None,
             },
         },
     )?;
@@ -957,6 +958,7 @@ fn permissions_both_ways<F: ClientProtocolFixture>(fx: &mut F) -> CaseResult {
         },
         OperatorCommand::TaskCancel {
             task_id: "t-clp".into(),
+            reason: None,
         },
     ];
     for (n, command) in refused.into_iter().enumerate() {
@@ -1085,11 +1087,12 @@ fn task_cancel_changes_nothing<F: ClientProtocolFixture>(fx: &F) -> CaseResult {
     subscribe(&mut op, Some(before.as_of_event_id))?;
     let cancel = OperatorCommand::TaskCancel {
         task_id: "t-clp".into(),
+        reason: None,
     };
     let reply = ask(&mut op, "clp-16a", &operator_request("clp-16a", cancel))?;
     ensure(
-        error_code_of(&reply) == Some(error_code::NOT_SUPPORTED),
-        || format!("task_cancel got {reply:?}, expected not_supported (gate 10)"),
+        error_code_of(&reply) == Some(error_code::INVALID_REQUEST),
+        || format!("task_cancel got {reply:?}, expected invalid_request for an unknown task"),
     )?;
     let quiet = collect(&mut op, QUIET)?;
     ensure(quiet.events.is_empty(), || {

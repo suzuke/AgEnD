@@ -14,6 +14,8 @@ pub enum TaskStatus {
     Blocked,
     Done,
     Superseded,
+    Failed,
+    Cancelled,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,7 +67,13 @@ impl Task {
         let mut next = self.clone();
         match operation {
             TaskOperation::Reassign { assignee } => {
-                if matches!(self.status, TaskStatus::Done | TaskStatus::Superseded) {
+                if matches!(
+                    self.status,
+                    TaskStatus::Done
+                        | TaskStatus::Superseded
+                        | TaskStatus::Failed
+                        | TaskStatus::Cancelled
+                ) {
                     return Err(TaskError::Closed);
                 }
                 next.assignee = Some(assignee);
@@ -82,7 +90,13 @@ impl Task {
                 next.merge_commit = None;
             }
             TaskOperation::Block => {
-                if matches!(self.status, TaskStatus::Done | TaskStatus::Superseded) {
+                if matches!(
+                    self.status,
+                    TaskStatus::Done
+                        | TaskStatus::Superseded
+                        | TaskStatus::Failed
+                        | TaskStatus::Cancelled
+                ) {
                     return Err(TaskError::Closed);
                 }
                 next.status = TaskStatus::Blocked;
@@ -98,7 +112,13 @@ impl Task {
                 };
             }
             TaskOperation::Complete { merge_commit } => {
-                if matches!(self.status, TaskStatus::Done | TaskStatus::Superseded) {
+                if matches!(
+                    self.status,
+                    TaskStatus::Done
+                        | TaskStatus::Superseded
+                        | TaskStatus::Failed
+                        | TaskStatus::Cancelled
+                ) {
                     return Err(TaskError::Closed);
                 }
                 if self.requires_repo && merge_commit.is_none() {
@@ -108,7 +128,13 @@ impl Task {
                 next.merge_commit = merge_commit;
             }
             TaskOperation::Supersede { new_task_id } => {
-                if matches!(self.status, TaskStatus::Done | TaskStatus::Superseded) {
+                if matches!(
+                    self.status,
+                    TaskStatus::Done
+                        | TaskStatus::Superseded
+                        | TaskStatus::Failed
+                        | TaskStatus::Cancelled
+                ) {
                     return Err(TaskError::Closed);
                 }
                 if new_task_id == self.id {

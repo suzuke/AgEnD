@@ -198,6 +198,12 @@ pub fn stage_bar(task: &TaskInfo) -> String {
 /// Glyph and short status of a task: done, waiting for you, or running
 /// (its stage, or the daemon's status when it has no stages).
 pub fn task_status(fleet: &Fleet, lang: crate::i18n::Language, task: &TaskInfo) -> (char, String) {
+    match task.status.as_str() {
+        "failed" => return ('×', lang.tr(Text::StatusFailed).into()),
+        "cancelled" => return ('×', lang.tr(Text::StatusCancelled).into()),
+        "blocked" => return ('!', lang.tr(Text::Blocked).into()),
+        _ => {}
+    }
     if task.is_done() {
         return ('✓', lang.tr(Text::StatusDone).to_owned());
     }
