@@ -9,7 +9,7 @@
 
 ## 狀態
 
-**驗收中**（2026-10-02）：P1–P11 使用者已確認（P6 改成寫入沙箱；P3、P7、P8、P11 與決策或架構頁不同之處都已決定），提案 #130 已 merge；實作在 `feat/gate-10-pipeline` worktree，兩輪 fresh-context verifier 已重跑並找到缺陷，正在修正；本機自動驗收通過，Ubuntu CI 的 sandbox 回歸需修正重跑；尚待最終 fresh-context verifier 和使用者人工驗收，未合併。執行細節見 [pipeline runtime](../architecture/pipeline-runtime.md)。前置施工關已完成並 merge：第 6 施工關 #125、第 7 施工關 #132、第 8 施工關 #131、第 9 施工關 #136（client protocol 1.2、CLI 語法、ticket、`operator` 請求）。本關使用下一個 minor 1.3；第 11 施工關 B 段也已 merge #140。分工見下方「範圍」。
+**驗收中**（2026-10-02）：P1–P11 使用者已確認（P6 改成寫入沙箱；P3、P7、P8、P11 與決策或架構頁不同之處都已決定），提案 #130 已 merge；實作在 `feat/gate-10-pipeline` worktree，三輪 fresh-context verifier 已重跑並找到缺陷，正在修正；本機自動驗收通過，Ubuntu CI 的 sandbox 回歸需修正重跑；尚待最終 fresh-context verifier 和使用者人工驗收，未合併。執行細節見 [pipeline runtime](../architecture/pipeline-runtime.md)。前置施工關已完成並 merge：第 6 施工關 #125、第 7 施工關 #132、第 8 施工關 #131、第 9 施工關 #136（client protocol 1.2、CLI 語法、ticket、`operator` 請求）。本關使用下一個 minor 1.3；第 11 施工關 B 段也已 merge #140。分工見下方「範圍」。
 
 ## 範圍
 
@@ -457,14 +457,16 @@ cd /Users/suzuke/AlphaCR-worktrees/AgEnD-v2-pipeline    # 本次實作 worktree
    ```bash
    export AGEND_HOME=<home>    # 步驟 3 的那個；每個新分頁都要先設
    agend task create --team g10h --role dev --workflow demo "held"
-   git -C "$AGEND_HOME/worktrees/<t-M>" commit --allow-empty -m "Hook probe"
-   git -C "$AGEND_HOME/worktrees/<t-M>" update-ref refs/heads/main HEAD
+   AGEND_INSTANCE=g10-hold git -C "$AGEND_HOME/worktrees/<t-M>" commit --allow-empty -m "Hook probe"
+   AGEND_INSTANCE=g10-hold git -C "$AGEND_HOME/worktrees/<t-M>" update-ref refs/heads/main HEAD
    echo "exit=$?"
    git -C "$AGEND_HOME-repo" log --oneline -1 main
    agend task cancel <t-M>
    ```
 
-   應該看到：更新 main 的指令印出 `agend-shim: refused …` 並指出是 `(agend reference-transaction hook)`，`exit` 不是 0；main 還是步驟 5 那個 commit；`cancel` 之後 watch 出現 `<t-M> cancelled`，`worktrees/<t-M>` 不見了。
+   `AGEND_INSTANCE` 只套用到這兩次 git，讓 hook 用有效 binding 判斷；後續 cancel 仍用 operator 身分。
+
+   應該看到：空 commit 成功；更新 main 的指令印出 `agend-shim: refused …` 並指出是 `(agend reference-transaction hook)`，`exit` 不是 0；main 還是步驟 5 那個 commit；`cancel` 之後 watch 出現 `<t-M> cancelled`，`worktrees/<t-M>` 不見了。
 
    - [ ] 通過
 
@@ -535,6 +537,8 @@ cd /Users/suzuke/AlphaCR-worktrees/AgEnD-v2-pipeline    # 本次實作 worktree
 |  |  |  |
 
 ## 進度紀錄
+
+- 2026-10-02 第三輪 verifier REFUTED `5887643`：planned summary/output 未交人工核准與 dev、無 head role review 誤建 git worktree、main ref 損壞時 merge proof 中止整個 boot；已補成果內容、logical review 與逐 task 隔離，真程序回歸通過。Linux CI 的 tmpfs 父目錄另改唯讀；CLI Ctrl-C 精確注入重現 runtime→exec 訊號窗口，補 signal-context flag。完整最終驗證待完成，未 merge（draft PR #143）。
 
 - 2026-10-02 第二輪 verifier REFUTED：Failed 派工仍占 capacity、多 Branch 向前角色交接遺失 commits；補 terminal cleanup 每次 wake 重試與保留 branch 的 handoff，單 writer、真 FS 故障、雙作者跨排隊／重啟 merge 回歸通過。另修 Ubuntu CI 的 `/tmp` canonical repo 唯讀掛載；最終驗證與使用者驗收待完成，未 merge（draft PR #143）。
 

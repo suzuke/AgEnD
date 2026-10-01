@@ -168,6 +168,7 @@ where
             let state = loaded.as_ref().ok().map(|l| &l.state);
             let progress = self.store.progress(&task.id).await.map_err(db)?;
             let bindings = self.store.bindings().await.map_err(db)?;
+            let events = self.store.load_events(&task.id).await.map_err(db)?;
             let view = TaskView {
                 task_id: task.id.clone(),
                 title: task.title.clone(),
@@ -210,7 +211,21 @@ where
                                         .find(|b| b.task == task.id && b.kind == "review")
                                         .map(|b| b.instance.clone())
                                 } else if matches!(stage.stage, Stage::Work { .. }) {
-                                    task.assignee.clone()
+                                    events
+                                        .iter()
+                                        .rev()
+                                        .find_map(|event| {
+                                            let identity = event.id.strip_prefix("assigned:")?;
+                                            let mut parts = identity.split('/');
+                                            (parts.next() == Some(task.id.as_str())
+                                                && parts.next() == Some(stage.id.as_str()))
+                                            .then(|| event.detail.clone())
+                                        })
+                                        .or_else(|| {
+                                            (index == s.stage_index())
+                                                .then(|| task.assignee.clone())
+                                                .flatten()
+                                        })
                                 } else {
                                     s.approvals()
                                         .iter()
@@ -221,11 +236,7 @@ where
                             .collect()
                     }),
                     block_reason: progress.as_ref().and_then(|p| p.block_reason.clone()),
-                    archive_paths: self
-                        .store
-                        .load_events(&task.id)
-                        .await
-                        .map_err(db)?
+                    archive_paths: events
                         .into_iter()
                         .filter(|e| e.kind == "wip_archived")
                         .map(|e| e.detail)
@@ -294,9 +305,23 @@ where
                                 vec![AttentionAction::Approve, AttentionAction::RequestChanges],
                                 Some(ContextRecap {
                                     goal: task.title.clone(),
-                                    decisions: Vec::new(),
+                                    decisions: {
+                                        let product = super::context::work_product(state);
+                                        if product.is_empty() {
+                                            Vec::new()
+                                        } else {
+                                            vec![product]
+                                        }
+                                    },
                                     asking: asking.clone(),
-                                    next: if state.workflow().requires_repo() {
+                                    next: if state
+                                        .workflow()
+                                        .stages
+                                        .get(state.stage_index() + 1)
+                                        .is_some_and(|s| matches!(s.stage, Stage::Work { .. }))
+                                    {
+                                        "implement the approved work product"
+                                    } else if state.workflow().requires_repo() {
                                         "merge into main"
                                     } else {
                                         "complete task"

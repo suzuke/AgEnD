@@ -158,7 +158,7 @@ where
                     | TaskStatus::Cancelled
                     | TaskStatus::Superseded
             ) {
-                if let Err((_, e)) = self.release(&b, task.status == TaskStatus::Done).await {
+                if let Err((_, e)) = self.release(&b, task.merge_commit.is_some()).await {
                     log::line(&format!("{}: cleanup failed: {e}", b.task));
                 }
                 continue;
@@ -180,19 +180,32 @@ where
                         }
                         continue;
                     }
-                    if loaded.state.merge_in_flight()
-                        && git
+                    if b.kind == "review" && b.head.is_none() {
+                        continue;
+                    }
+                    if loaded.state.merge_in_flight() {
+                        match git
                             .find_merge(
                                 &repo,
                                 &task.id,
                                 loaded.state.current_head().unwrap_or_default(),
                             )
                             .await
-                            .map_err(invalid)?
-                            .is_some()
-                    {
-                        // The merge proof is sufficient even if cleanup already removed its worktree.
-                        continue;
+                        {
+                            Ok(Some(_)) => {
+                                // Proven merge survives worktree cleanup.
+                                continue;
+                            }
+                            Ok(None) => {}
+                            Err(reason) => {
+                                self.fail_restore(
+                                    &b.task,
+                                    &format!("merge recovery failed: {reason}"),
+                                )
+                                .await?;
+                                continue;
+                            }
+                        }
                     }
                 }
                 if let Err(e) = git.ensure(&repo, &b).await {

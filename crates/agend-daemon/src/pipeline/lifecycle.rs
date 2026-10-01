@@ -275,8 +275,7 @@ where
                     .into_iter()
                     .filter(|b| b.task == task.id)
                 {
-                    self.release(&b, state.status() == PipelineStatus::Done)
-                        .await?;
+                    self.release(&b, state.merge_commit().is_some()).await?;
                 }
                 let row = self
                     .store
@@ -516,7 +515,10 @@ where
             .join(&instance)
             .display()
             .to_string();
-        if let Some(repo) = team.repo {
+        if let Some(repo) = team
+            .repo
+            .filter(|_| !review || state.current_head().is_some())
+        {
             let branch = if review {
                 None
             } else {
@@ -575,9 +577,10 @@ where
             })
             .unwrap_or_default();
         let body = format!(
-            "dispatch {ticket}\nkind: {}\ntitle: {}\nworktree: {worktree}\n{instructions}\nreason: {}\nnext: agend {} {ticket}",
+            "dispatch {ticket}\nkind: {}\ntitle: {}\nworktree: {worktree}\n{instructions}\n{}\nreason: {}\nnext: agend {} {ticket}",
             if review { "review" } else { "work" },
             task.title,
+            super::context::work_product(state),
             state.pending_work_reason().unwrap_or("initial assignment"),
             if review {
                 "review approve"
@@ -700,7 +703,12 @@ where
             .ok_or_else(|| invalid("binding task missing"))?
             .task
             .team_id;
-        if let Some(repo) = self.team(&team).await?.repo {
+        if let Some(repo) = self
+            .team(&team)
+            .await?
+            .repo
+            .filter(|_| b.kind != "review" || b.head.is_some())
+        {
             let patch = self
                 .git
                 .as_ref()

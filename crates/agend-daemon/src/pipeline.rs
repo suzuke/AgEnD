@@ -1,6 +1,7 @@
 //! One serialized pipeline writer. Results return through the same queue.
 mod attention;
 mod commands;
+mod context;
 mod lifecycle;
 mod reconcile;
 mod terminal;

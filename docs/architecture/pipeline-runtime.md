@@ -19,7 +19,7 @@
 | approval(human) | `approval:<ticket>` 顯示目標、head 前七碼及下一步；退回修改須填理由 |
 | merge | rebase 前確認 worktree 乾淨；同 patch 保留核准、重跑 checks；不同 patch／conflict 回 work |
 
-一個 agent 同時只持有一個 task；等待 checks 或人工核准仍持有。返工回原持有者，failed holder 等 retry。`planned` 的 Result 經核准後向前交接給下一個 Work 角色：釋放舊 binding、保存 WIP、CAS 清 assignee，再由 core 選新角色；已有 Branch 的向前角色交接保留原 branch／head，未提交 WIP 保存 patch，下一角色沿用原 commits；真正 `ReturnToWork` 不改派。派工的 `done`／`result` 提示依當前 Work output 選擇。
+一個 agent 同時只持有一個 task；等待 checks 或人工核准仍持有。返工回原持有者，failed holder 等 retry。`planned` 的 Result 經核准後向前交接給下一個 Work 角色：釋放舊 binding、保存 WIP、CAS 清 assignee，再由 core 選新角色；已有 Branch 的向前角色交接保留原 branch／head，未提交 WIP 保存 patch，下一角色沿用原 commits；真正 `ReturnToWork` 不改派。派工的 `done`／`result` 提示依當前 Work output 選擇。當前 WorkProduct 的 summary／output／Plan items 會放入 durable 派工內容與人工 approval recap，重啟後照同一 snapshot 取得；role review 沒有 head 時用 workspace binding，不建立 detached review worktree。
 角色不存在／只有作者能審查顯示 `no-role:<team>/<role>`；只有忙碌時排隊，角色加入後自動重試。
 持有 task 的 instance 不可移除，先取消 task；merge 送出後不可取消。
 
@@ -35,7 +35,7 @@ Engine 透過 core `PipelineStore`、`PipelineExecutor`、`PipelineView`、`Driv
 | 工作目錄 | 每次新 detached worktree；不用 agent 的 worktree 或共用 build cache |
 | 環境 | 白名單、不帶 `AGEND_*`；PATH 排除 shim；TMPDIR、CARGO_HOME、CARGO_TARGET_DIR、XDG_CACHE_HOME 各次獨立 |
 | macOS | `sandbox-exec`：只有 checks worktree、該次 tmp 可寫；`.git` 不可寫；Unix sockets 只開 DNS 的 mDNSResponder |
-| Linux | `bwrap`：根目錄與 canonical repo 明確唯讀（含 `/tmp` 下的 repo），worktree／tmp 可寫，`.git` 唯讀，隔離 PID、隱藏已知 runtime socket 目錄 |
+| Linux | `bwrap`：根目錄與 canonical repo 明確唯讀（含 `/tmp` 下的 repo），worktree／tmp 可寫，`.git` 唯讀，隔離 PID、隱藏已知 runtime socket 目錄；遮蔽用的 `/tmp`／runtime tmpfs 最後設成唯讀，只有顯式掛載的 worktree／每次 tmp 可寫 |
 | 失敗處理 | boot 與執行前 probe；工具缺失／失效保持 checks，顯示 `sandbox-missing:<task>`，retry 重新 probe |
 | 啟動 marker | 先寫 regular file；只用 lstat 驗證，FIFO／symlink 不開啟；marker 異常再 probe，工具正常則算 checks 失敗 |
 | 輸出 | `logs/checks/<task>/<stage>-<attempt>.log`，最多 10 MiB、截斷有註記；event 留兩個 stream 的最後 20 行；保留 14 天 |
@@ -56,7 +56,7 @@ DB 丟失 intent 仍可從 trailer 找回；debug build 只有 `after-merge-inte
 
 開機在 socket bind 前驗證 active snapshots、修復 binding、重寫投影與清理自己的孤兒；以 `outstanding_actions` 重派原 ticket。
 checks 重啟用新目錄、同 attempt。work 訊息固定 `dispatch:<ticket>`；review 固定 `dispatch:<ticket>/<reviewer>`，多人審查保留同一關卡 ticket、每個 recipient 只存一列。接受結果與確認 dispatch 同 CAS 交易，副作用失敗仍保留已接受的結果。
-每個 task 的 boot／派工副作用失敗獨立記成 Failed，不阻止其他 task 和 socket 啟動；terminal task 拒絕晚到結果。標成 Failed 後立即清理 binding；清理失敗保留 WIP 與 durable binding，每次 wake 重試，成功後才 CAS 清 assignee、釋放 capacity。缺少 git 時暫停 repo tasks、記 log，no-repo team 照常服務。
+每個 task 的 boot／派工副作用（含 merge proof 查詢）失敗獨立記成 Failed，不阻止其他 task 和 socket 啟動；terminal task 拒絕晚到結果。標成 Failed 後立即清理 binding；清理失敗保留 WIP 與 durable binding，每次 wake 重試，成功後才 CAS 清 assignee、釋放 capacity。缺少 git 時暫停 repo tasks、記 log，no-repo team 照常服務。
 每日對帳只做投影、bindings 與清理，保留正在跑的 checks，不重新派所有 action。
 
 釋放順序：快照先 unbound → 保存未提交／untracked WIP（未 merge 也保存 commits）→ 卸 hook → 刪 worktree／branch → 刪 binding。

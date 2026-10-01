@@ -23,7 +23,7 @@
 ## 不負責
 
 - 在 argv[0] 分派前做任何事
-- CLI 路徑上建 tokio runtime、讀設定、開 DB
+- 一般 agent／operator CLI 路徑上建 tokio runtime、讀設定、開 DB；`doctor` 為 checks readiness 建短暫 runtime，`init`／preflight 的 DB 檢查也屬例外
 
 ## 模組
 

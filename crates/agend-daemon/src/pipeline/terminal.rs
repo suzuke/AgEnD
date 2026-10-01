@@ -20,7 +20,7 @@ where
         }
         for b in self.store.bindings().await.map_err(db)? {
             if b.task == task.id
-                && let Err((_, reason)) = self.release(&b, task.status == TaskStatus::Done).await
+                && let Err((_, reason)) = self.release(&b, task.merge_commit.is_some()).await
             {
                 // Retain the durable binding until WIP and unbinding succeed.
                 // A later wake retries without preventing unrelated dispatch.

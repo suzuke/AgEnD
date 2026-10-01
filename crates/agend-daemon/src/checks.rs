@@ -144,11 +144,15 @@ pub fn sandbox_command(
         let uid = unsafe { libc::getuid() };
         for dir in [PathBuf::from(format!("/run/user/{uid}")), home.join("run")] {
             if dir.is_dir() {
-                cmd.push_str(&format!(" --tmpfs {}", quote(&dir.to_string_lossy())));
+                cmd.push_str(&format!(
+                    " --tmpfs {} --remount-ro {}",
+                    quote(&dir.to_string_lossy()),
+                    quote(&dir.to_string_lossy())
+                ));
             }
         }
         cmd.push_str(&format!(
-            " --unshare-pid --die-with-parent -- /bin/sh -c {}",
+            " --remount-ro /tmp --unshare-pid --die-with-parent -- /bin/sh -c {}",
             quote(command)
         ));
         Ok(cmd)

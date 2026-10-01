@@ -10,6 +10,8 @@ publish.workspace = true
 agend-core.workspace = true
 # flock probes of holder lock files (gate 4 P3).
 libc = "0.2"
+# Stop flag stays observable during runtime shutdown and before exec.
+signal-hook-registry = "1.4"
 # SQLite compiled into the binary (gate 5 P1): one version on every platform,
 # with STRICT tables and VACUUM INTO.
 rusqlite = { version = "0.37", features = ["bundled"] }

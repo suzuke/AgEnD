@@ -298,9 +298,13 @@ impl Daemon {
             if Instant::now() >= deadline {
                 let _ = self.child.kill();
                 let _ = self.child.wait();
+                while let Ok(line) = self.lines.try_recv() {
+                    self.log.push(line);
+                }
                 return Err(format!(
-                    "daemon pid={} did not end within {limit:?}; killed",
-                    self.pid
+                    "daemon pid={} did not end within {limit:?}; killed\n{}",
+                    self.pid,
+                    self.log.join("\n")
                 ));
             }
             std::thread::sleep(Duration::from_millis(20));
