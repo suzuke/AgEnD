@@ -60,7 +60,7 @@ checks 重啟用新目錄、同 attempt。work 訊息固定 `dispatch:<ticket>`�
 每日對帳只做投影、bindings 與清理，保留正在跑的 checks，不重新派所有 action。
 
 釋放順序：快照先 unbound → 保存未提交／untracked WIP（未 merge 也保存 commits）→ 卸 hook → 刪 worktree／branch → 刪 binding。
-patch 放 `archive/<task>-<unix-ms>.patch`，保留 30 天，task detail 顯示路徑。git binary patch 與 untracked 名稱清單直接串流至 daemon 建立的檔案，不經 5 MiB 診斷輸出 cap；完整檔案 sync 後原子發布，成功後才刪原 worktree。archive 失敗保留 WIP／binding，每次 wake 重試。checks 孤兒只辨識 `t-<數字>-*` 與對應 `.tmp`，命名空間外 worktree／目錄保留。
+patch 放 `archive/<task>-<unix-ms>.patch`，保留 30 天，task detail 顯示路徑。git binary patch 與 untracked 名稱清單直接串流至 daemon 建立的檔案，不經 5 MiB 診斷輸出 cap；完整檔案 sync 後原子發布，成功後才刪原 worktree。未 merge 的 commits 依 first-parent 順序保存：一般 commit 用完整 binary `format-patch`；merge commit 另保存 email metadata 與相對第一個 parent 的 binary diff，包含衝突解法，再接 HEAD 上的 WIP。archive 失敗保留 WIP／binding，每次 wake 重試。checks 孤兒只辨識 `t-<數字>-*` 與對應 `.tmp`，命名空間外 worktree／目錄保留。
 
 ## 命令與協定
 

@@ -1,5 +1,6 @@
 //! Stream WIP artifacts without the diagnostic output cap; publish before removal.
 use crate::git::Git;
+mod history;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader};
 use std::os::unix::fs::OpenOptionsExt;
@@ -78,20 +79,7 @@ pub async fn archive(
             return Err("cannot inspect branch while archiving WIP".into());
         }
         if found.exit_code == Some(0) {
-            append(
-                git,
-                repo,
-                &[
-                    "format-patch",
-                    "--stdout",
-                    "--binary",
-                    "--full-index",
-                    &format!("main..{branch}"),
-                ],
-                &patch,
-                false,
-            )
-            .await?;
+            history::append_branch(git, repo, branch, &patch, &staging.0).await?;
         }
     }
     if wt.exists() {

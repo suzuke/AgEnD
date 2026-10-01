@@ -46,7 +46,7 @@
 //! Gate 9 (P6, P7):
 //! - `instance_add` ([`Event::Add`]): checks the name, the backend, that no
 //!   row and no running holder has the name; writes the row (`new`, claude
-//!   gets a session id), answers, then starts it like at boot.
+//!   gets a session id), publishes the starting view, answers, then starts it like at boot.
 //! - `instance_remove` ([`Event::Remove`]): stops watching, closes the
 //!   link, `Shutdown` to the holder (at most 5 s; an unreachable holder is
 //!   left to the next boot's orphan sweep), removes the row and takes it out
@@ -794,6 +794,8 @@ impl Supervisor {
             instance.program,
             instance.working_directory
         ));
+        // The accepted response guarantees the immediately following fleet read sees the row.
+        self.show(&instance, AgentState::Starting, "added; starting".into());
         let _ = reply.send(Ok(InstanceAddedData {
             instance_id: id,
             session_id: instance.session_id.clone(),
