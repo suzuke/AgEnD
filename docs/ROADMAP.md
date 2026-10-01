@@ -75,6 +75,8 @@ cat docs/architecture/pipeline.md
 
 ## 進度紀錄
 
+- 2026-10-02 第六輪 verifier REFUTED `5a20fb0`：真 shim 的 staged-only 檔案在工作目錄刪除後，取消時未存 archive；改分別保存 index／worktree patch，6 MiB bytes 與 AD 狀態還原通過，未解 index 衝突保留原資料。前版雙平台 CI 全綠仍不視為驗收完成；修正重新驗證中（draft PR #143），未 merge。
+
 - 2026-10-02 第五輪 verifier REFUTED `660dd08`：format-patch 略過 merge commit，取消後遺失其獨有衝突解法；補 first-parent merge diff 保存與真 git apply round trip。Ubuntu CI 通過，macOS CI 的 CLP-14 重現 instance-add 回覆早於 fleet 投影，改先發布 Starting；修正重新驗證中（draft PR #143），未 merge。
 
 - 2026-10-02 第四輪 verifier REFUTED `9851bda`：6 MiB binary WIP archive 經診斷輸出 cap 截斷後仍刪原檔、checks 孤兒清理越過名稱命名空間。改用檔案串流、完整同步後發布與嚴格 task 前綴；macOS CI 另重現 handoff 測試重複送 auto-reviewer receipt，改暫停 reviewer。新增 bytes round trip／I/O 故障／foreign worktree 回歸；修正驗證中（draft PR #143），未 merge。

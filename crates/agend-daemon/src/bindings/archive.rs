@@ -1,8 +1,8 @@
 //! Stream WIP artifacts without the diagnostic output cap; publish before removal.
 use crate::git::Git;
 mod history;
+mod worktree;
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
@@ -83,34 +83,7 @@ pub async fn archive(
         }
     }
     if wt.exists() {
-        append(git, wt, &["diff", "--binary", "HEAD"], &patch, false).await?;
-        let list_path = staging.0.join("untracked");
-        let list = new_file(&list_path)?;
-        append(
-            git,
-            wt,
-            &["ls-files", "--others", "--exclude-standard", "-z"],
-            &list,
-            false,
-        )
-        .await?;
-        // Names also bypass the output cap; reopen at offset zero and read one at a time.
-        let names = BufReader::new(File::open(&list_path).map_err(|e| e.to_string())?).split(0);
-        for name in names {
-            let name = name.map_err(|e| e.to_string())?;
-            if name.is_empty() {
-                continue;
-            }
-            let name = std::str::from_utf8(&name).map_err(|e| e.to_string())?;
-            append(
-                git,
-                wt,
-                &["diff", "--no-index", "--binary", "--", "/dev/null", name],
-                &patch,
-                true,
-            )
-            .await?;
-        }
+        worktree::append_wip(git, wt, &patch, &staging.0).await?;
     }
     if patch.metadata().map_err(|e| e.to_string())?.len() == 0 {
         return Ok(None);
