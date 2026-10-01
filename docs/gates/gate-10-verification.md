@@ -53,7 +53,8 @@ accept 含兩個 crash failpoint 的四次開機、new-home negative、沙箱與
 首次三組 probe exit 101：第 2／3 組通過，第 1 組在 TaskCreate 回應後太早讀 fleet；修正等待後同組 exit 0。原 source／log／exit／fixture 保留，未加第四組。
 
 收尾：verifier 產品碼未改、temporary source 已移除、HEAD／status 乾淨，自身程序已停止，成功 fixture 已清理。原失敗 fixture 與 holder lock 檢查見 `fixtures-manifest.json`／`retained-fixture-locks.json`；歷史反例沒有刪除。
-本頁及分頁整理屬文件修改；產品碼仍是上列 head，最後提交的 CI 狀態見 PR。
+文件 verifier r13 核對 `ea975c3` 的非 Markdown tree 與產品 head 完全相同、證據／links／確認紀錄完整；但索引 PATH 與人工頁 target 不一致，故 REFUTED。已統一並實跑初始化選到 `agend 0.0.0`；原文件報告 `/private/tmp/g10-r13-docs-report.md` 保留。
+本頁及分頁整理屬文件修改；產品碼仍是上列 head，最後提交的 CI 與文件審查結果見 PR。
 
 ## 尚未驗證與支援邊界
 

@@ -29,7 +29,10 @@
 
 ```bash
 cd /Users/suzuke/AlphaCR-worktrees/AgEnD-v2-pipeline    # 本次 Gate 10 驗收 worktree
-~/.cargo/bin/cargo build -p agend && export PATH="$PWD/target/debug:$PATH" && agend --version
+export CARGO_TARGET_DIR=/private/tmp/AgEnD-g10-fix-target
+~/.cargo/bin/cargo build -p agend -p agend-testkit --bins
+export PATH="$CARGO_TARGET_DIR/debug:$PATH"
+agend --version
 ```
 
 應該看到 `agend 0.x.y`（目前是 `agend 0.0.0`）。印出 `1.24.0` 就是跑到舊的 Node CLI，在這個終端機重跑上面那段。
