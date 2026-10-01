@@ -75,6 +75,7 @@ cat docs/architecture/pipeline.md
 
 ## 進度紀錄
 
+- 2026-10-02 第九輪 verifier 另以真 daemon／shim 重現 `core.autocrlf=input` 取消後 CRLF 被封存為 LF；保存前檢查行尾轉換設定／attributes，無法保證原始 bytes 時保留 worktree／index 並回報 Failed，新增六個回歸（draft PR #143）。修正待全新 verifier 與 CI，未 merge。
 - 2026-10-02 第九輪 verifier 核對 `f34c782` 的 Ubuntu CI，一次通過、一次 binary archive 還原舊 bytes；取消已刪原 worktree，不能以重跑綠燈抵銷。封存改從 blob／mode 重建無 stat cache 的私有 index，新增確定性 racy-file 機制回歸；正在驗證修正（draft PR #143），未 merge。
 
 - 2026-10-02 第八輪 verifier 中斷前，真 daemon/shim 在 `f29e667` 重現 external diff／textconv 讓 archive 為空、取消仍刪 WIP；封存與 patch-id 改明確停用顯示轉換，補 staged／unstaged／untracked 還原回歸，包含 ignored 資料；content filter 無法保證原始 bytes 時保留原 worktree 回報 Failed。該輪沒有完整通過結論；修正交由新的 fresh-context verifier（draft PR #143），未 merge。

@@ -11,6 +11,23 @@ pub(super) async fn verify(
     untracked: &Path,
     staging: &Path,
 ) -> Result<(), String> {
+    let autocrlf = git
+        .output(wt, &["config", "--get", "core.autocrlf"])
+        .await?;
+    if autocrlf.timed_out || !matches!(autocrlf.exit_code, Some(0 | 1)) {
+        return Err("cannot inspect WIP line ending configuration; original WIP retained".into());
+    }
+    if autocrlf.exit_code == Some(0) {
+        let value = String::from_utf8_lossy(&autocrlf.stdout);
+        if !matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "false" | "no" | "off" | "0"
+        ) {
+            return Err(
+                "WIP content conversion prevents raw-byte archive; original WIP retained".into(),
+            );
+        }
+    }
     let paths = staging.join("attribute-paths");
     let mut names = new_file(&paths)?;
     for path in [tracked, untracked] {
@@ -29,6 +46,9 @@ pub(super) async fn verify(
                 "filter",
                 "working-tree-encoding",
                 "ident",
+                "text",
+                "eol",
+                "crlf",
                 "--stdin",
             ],
             &paths,

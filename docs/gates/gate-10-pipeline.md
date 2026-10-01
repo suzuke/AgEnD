@@ -95,7 +95,7 @@
   - 審查（`approval(by = <角色>)`）：reviewer 拿到 detached 的審查 worktree `$AGEND_HOME/worktrees/<task>-review/`（在審的 head），binding kind `review`，一樣裝 hook（審查 binding 不能寫任何 branch）。核准或要求修改後就拆掉。`approval(by = "human")` 沒有 worktree，走「需要你」（P8）。
   - 釋放（task done、失敗、取消；或審查結束）：
     1. binding 快照先改成沒有 binding（shim 從這一刻起拒絕寫入）。
-    2. 從 blob／mode 重建沒有 stat cache 與隱藏旗標的私有 index，分別讀取 staged、unstaged 修改與未追蹤檔（index 專有內容也須保存；未解衝突時保留原 worktree／index 並回報 Failed）→ 存成 `archive/<task>-<unix-ms>.patch`；task 沒 merge（失敗、取消）時，branch 的 first-parent commits 也存進同一個檔：一般 commit 用完整 binary `format-patch`；merge commit 保存 metadata 與對第一個 parent 的 diff（`format-patch` 會省略 merge，單用它會漏掉衝突解法）。保留 30 天（D31 的 WIP patch）。
+    2. 從 blob／mode 重建沒有 stat cache 與隱藏旗標的私有 index，分別讀取 staged、unstaged 修改與未追蹤檔（index 專有內容也須保存；未解衝突時保留原 worktree／index 並回報 Failed）→ 存成 `archive/<task>-<unix-ms>.patch`；task 沒 merge（失敗、取消）時，branch 的 first-parent commits 也存進同一個檔：一般 commit 用完整 binary `format-patch`；merge commit 保存 metadata 與對第一個 parent 的 diff（`format-patch` 會省略 merge，單用它會漏掉衝突解法）。保留 30 天（D31 的 WIP patch）。 若有 content filter、working-tree-encoding、ident、text／eol／crlf attributes 或 core.autocrlf=true／input，先保留原 worktree／index 並回報 Failed，交由操作者處理轉換設定後重試。
     3. `agend hooks uninstall <worktree>` → `git worktree remove --force` → `git branch -D`。
     4. 刪掉 `bindings` 那一列；patch 路徑記在 task 事件，`agend status` 與 TUI 看得到。
 - 理由：hook 是 protected ref 的硬保證（第 3 施工關威脅模型），一定要在 agent 拿到 worktree **之前**裝好；經子命令呼叫，daemon 就不必連結 shim（第 6 施工關 P9 的依賴規則）。一個型別兩邊用，格式不會漂移（#1493）。審查者看的是固定的 head，不是持有者正在改的 worktree。
@@ -538,6 +538,7 @@ cd /Users/suzuke/AlphaCR-worktrees/AgEnD-v2-pipeline    # 本次實作 worktree
 
 ## 進度紀錄
 
+- 2026-10-02 第九輪 verifier 另以真 daemon／shim 重現 `core.autocrlf=input` 取消後 CRLF 被封存為 LF；保存前檢查行尾轉換設定／attributes，無法保證原始 bytes 時保留 worktree／index 並回報 Failed，新增六個回歸（draft PR #143）。修正待全新 verifier 與 CI，未 merge。
 - 2026-10-02 第九輪 verifier 核對 `f34c782` 的 Ubuntu CI，一次通過、一次 binary archive 還原舊 bytes；取消已刪原 worktree，不能以重跑綠燈抵銷。封存改從 blob／mode 重建無 stat cache 的私有 index，新增確定性 racy-file 機制回歸；正在驗證修正（draft PR #143），未 merge。
 
 - 2026-10-02 第八輪 verifier 中斷前，真 daemon/shim 在 `f29e667` 重現 external diff／textconv 讓 archive 為空、取消仍刪 WIP；封存與 patch-id 改明確停用顯示轉換，補 staged／unstaged／untracked 還原回歸，包含 ignored 資料；content filter 無法保證原始 bytes 時保留原 worktree 回報 Failed。該輪沒有完整通過結論；修正交由新的 fresh-context verifier（draft PR #143），未 merge。
