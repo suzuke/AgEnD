@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - 依 crate 由下往上分 13 個施工關；每個施工關單獨驗收，使用者確認後才開下一個施工關（D22）。
-> - 目前狀態：**第 1–6、8 施工關完成**（第 1、2 關 2026-09-25，第 3、4、5、6 關 2026-09-26 使用者親自驗收通過，第 6 關已 merge #125；第 8 關 2026-09-26 使用者親自驗收通過、C1–C14 已追認、已 merge #131）；第 7 施工關開工前提案已確認、實作中（PR #132）；第 9、10 施工關開工前提案已確認、等前面的施工關完成後開工；第 11 施工關畫面層完成（2026-09-26 已 merge、A 段驗收通過），B 段（接真 daemon）進行中。每個施工關狀態看下表，做了什麼看最下面的「進度紀錄」。
-> - 下一步：第 7 施工關實作中；第 9、10 施工關等前面的施工關完成後開工；第 11 施工關 B 段（接真 daemon）進行中。
+> - 目前狀態：**第 1–9 施工關完成並已合併**；第 11 施工關 A、B 段已驗收並合併（B 段 #140，2026-10-01），C 段未開始。第 10 施工關提案已確認、尚未實作；第 12 施工關 A 段提案 #138 待確認；第 13 施工關未開始。
+> - 下一步：從最新 `v2` 開第 10 施工關 pipeline；第 11 施工關 C 段等第 10 施工關完成後提案。第 12 施工關 A 段 P1–P10 在 #138，仍待使用者確認。
 
 ## 13 個施工關
 
@@ -17,12 +17,12 @@
 | 4 `holder` | [完成（2026-09-26）](gates/gate-04-holder.md) | PTY、畫面、holder 協定、活過 daemon（附屬程序移到第 7 施工關） | `agend holder` 包 bash + 小型探測 client：啟動器結束後 holder 還在、讀畫面、送鍵、中途斷線重連、四次開機，bash 存活 |
 | 5 `store` | [完成（2026-09-26）](gates/gate-05-store.md) | daemon store：SQLite schema、migration、保留期限、每日快照 | 真的 DB 檔（temp dir）、跨真的 process 驗；xtask 命令印出資料表 |
 | 6 `daemon-holder` | [完成（2026-09-26）](gates/gate-06-daemon-holder.md) | 整合施工關：agent runtime adapter | 真 daemon + 真 holder；重啟 daemon，agent 與畫面存活 |
-| 7 `codex` | [實作中（2026-09-26；開工前提案 P1–P9 已確認，PR #132）](gates/gate-07-codex.md) | codex driver + 送達模型、三級忙碌策略 | 對假 app-server；可選的真 codex smoke test |
+| 7 `codex` | [完成（2026-09-28；已 merge #132）](gates/gate-07-codex.md) | codex driver + 送達模型、三級忙碌策略 | 假 app-server 與真 codex 0.158.0 驗收通過 |
 | 8 `client` | [完成（2026-09-26）](gates/gate-08-client.md) | 整合施工關：agend-client + protocol server | CLI 連得上；daemon 重啟時會重試 |
-| 9 `cli` | [提案中（2026-09-26；開工前提案 P1–P10 已確認）](gates/gate-09-cli.md) | agend CLI：agent 命令、操作者命令、status；安裝相關只做 `doctor`、`init`（讓前面各施工關能在本機跑；`init` 的服務註冊步驟在第 13 施工關補上） | 對假 daemon 驗每個命令的輸出與錯誤；再對真 daemon |
-| 10 `pipeline` | [提案中（2026-09-26；開工前提案 P1–P11 已確認）](gates/gate-10-pipeline.md) | daemon：pipeline、git、runner、forge local、supervisor、reconcile | 假 driver + 暫存 repo：task 從派工走到 merge |
-| 11 `tui` | [實作中（2026-09-26；畫面層完成，B 段接真 daemon 進行中，分支 `feat/gate-11-tui-daemon`）](gates/gate-11-tui.md) | attention-first TUI（沿用 DEMO-01 原型的教訓：`github.com/suzuke/agend-attention-tui-demo`，private） | 先餵假事件，再接真 daemon |
-| 12 `adapters` | [未開始](gates/gate-12-adapters.md) | claude + opencode driver、forge github、telegram | 先對假實作，再做真 backend smoke test |
+| 9 `cli` | [完成（2026-09-29；已 merge #136）](gates/gate-09-cli.md) | agend CLI：agent 命令、操作者命令、status；安裝相關先做 `doctor`、`init`，服務註冊留第 13 施工關 | 對假／真 daemon 驗輸出與錯誤；兩個假 Codex agent 互傳訊息、中途重啟不漏不重 |
+| 10 `pipeline` | [提案中（P1–P11 已確認、已 merge #130；前置第 7–9 施工關已完成，可開工）](gates/gate-10-pipeline.md) | daemon：pipeline、git、runner、forge local、supervisor、reconcile | 假 driver + 暫存 repo：task 從派工走到 merge |
+| 11 `tui` | [實作中（A、B 段完成並已 merge；C 段未開始）](gates/gate-11-tui.md) | attention-first TUI：畫面層、接真 daemon；C 段完整重現 agent CLI 與滑鼠滾動 | A 段假事件、B 段真 daemon 驗收通過；C 段等第 10 施工關完成後提案 |
+| 12 `adapters` | [提案中（A 段 draft PR #138 待確認，尚未 merge 或實作）](gates/gate-12-adapters.md) | A claude、B opencode driver、C forge github、D Telegram | 先對假實作，再做真 backend smoke test |
 | 13 `install` | [未開始](gates/gate-13-install.md) | 安裝與發布（最後一個施工關）：服務註冊、`agend uninstall`、`agend telegram setup`（由 daemon 配對）、`xtask release`、brew、GitHub release、`cargo install` | CI 用全新 HOME + 假 agent，從安裝到第一個 task 完成 < 5 分鐘；每個 `doctor` 檢查都有「故意弄壞 → 看到修正指令」的測試 |
 
 ## 第 1 施工關：開工前先提案、經使用者確認才實作
@@ -40,7 +40,7 @@
 
 | 完成到 | 使用者看到 |
 |---|---|
-| 第 1–9 施工關 | 兩個 codex agent 互傳訊息；重啟 daemon 時不中斷、不遺失、不重複 |
+| 第 1–9 施工關 | 已驗收：兩個假 Codex agent 互傳訊息；中途重啟 daemon，每則剛好一次並到 `confirmed`；真 Codex 另有第 7 施工關 smoke 驗收 |
 | 第 10–11 施工關 | 本機 repo 從派工走到 merge，TUI 可看可操作 |
 | 第 12 施工關 | 三個 backend + GitHub + 手機（Telegram） |
 | 第 13 施工關 | 其他人可以自己安裝 |
@@ -69,13 +69,19 @@
 ## 下一步
 
 ```bash
-cat docs/gates/gate-01-core.md
-~/.cargo/bin/cargo xtask accept core
+cat docs/gates/gate-10-pipeline.md
+cat docs/architecture/pipeline.md
 ```
 
 ## 進度紀錄
 
 每完成一件事加一行（日期 + 一行 + commit／PR），新的在上面。
+
+- 2026-10-01 第 11 施工關 B 段 #140 squash merge（`462822a`）；最新 head 的 ubuntu／macOS CI 通過。2026-09-29 verifier 第 4 輪 CONFIRMED、T19–T35 已追認、使用者親自驗收 7 步通過；C 段（完整重現 agent CLI、滑鼠滾動）未開始，等第 10 施工關完成後提案。
+- 2026-09-29 第 9 施工關 #136 merge（`f5c32ec`）；L1–L21 已追認、使用者親自驗收 9 步通過；第 1–9 施工關里程碑（兩個假 Codex agent 互傳、重啟不漏不重）已達成，第 10 施工關前置條件已滿足。
+- 2026-09-29 第 13 施工關補版本漂移與 canary 規劃（#141，`15dd178`）；尚未開工。
+- 2026-09-28 第 12 施工關 A 段（claude）開工前提案 draft PR #138 寫定；P1–P10 待使用者確認，提案未 merge、實作未開始。
+- 2026-09-28 第 7 施工關 #132 merge（`7f326de`）；K1–K18 已追認、verifier CONFIRMED、使用者親自驗收 8 步通過（含授權 agent 跑真 codex 0.158.0）。第 11 施工關 B 段提案 #133 同日 merge（`2fbd53e`）。
 
 - 2026-09-26 第 10 施工關開工前提案（#130，`0faad17`）merge；P1–P11 使用者已確認（P6 改成 checks 在寫入沙箱裡跑）；狀態改為提案中，等第 7–9 施工關完成再開工。
 - 2026-09-26 第 9 施工關開工前提案（#129，`9178717`）merge；P1–P10 使用者已確認（P3 改成 `AGEND_HOME` 一律必須設、P6 對使用者叫 `name`、操作者也能 `task create`）；狀態改為提案中，等第 7、8 施工關都 merge 後開工。

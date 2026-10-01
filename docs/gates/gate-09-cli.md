@@ -3,13 +3,13 @@
 > **TL;DR**
 > - agent 命令、操作者命令（`instance add/remove/list`、`daemon restart`）、`status`、`doctor`、`init`；真 daemon 本關做 `status`、`send`、`inbox`（接第 7 施工關的送達，完成里程碑「兩個 codex agent 互傳訊息、重啟不漏不重」）與操作者命令，其他 agent 命令先對假 daemon 做完。
 > - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這個施工關才算完成。
-> - 下一步：已完成（2026-09-29：L1–L21 已追認、你親自驗收 9 步通過）；merge 後開第 10 施工關。
+> - 下一步：已完成並 merge #136（2026-09-29：L1–L21 已追認、你親自驗收 9 步通過）；接著開第 10 施工關。`agend app` 已由第 11 施工關 B 段 #140 接入。
 
 **先看這條**：這頁的步驟會用到 `agend`。每個新開的終端機分頁（包括第二個終端）都要先跑「你親自驗收」開頭的設定，否則會跑到舊的 Node 版 `agend` 1.24.0。
 
 ## 狀態
 
-**完成**（2026-09-29，PR #136，branch `feat/gate-09-cli`）：P1–P10 照使用者確認的版本實作完成，自動驗收都有證據（見「自動驗收」）；L1–L21 已追認；你親自驗收 9 步通過（見「驗收紀錄」）。依賴都已 merge：第 7 施工關（`deliver`、`messages` 表）、第 8 施工關（client protocol 1.1、`agend-client`）。client protocol 升到 **1.2**（本關先 merge，第 10 施工關拿 1.3）。
+**完成**（2026-09-29，已 merge #136，`f5c32ec`）：P1–P10 照使用者確認的版本實作完成，自動驗收都有證據（見「自動驗收」）；L1–L21 已追認；你親自驗收 9 步通過（見「驗收紀錄」）。依賴都已 merge：第 7 施工關（`deliver`、`messages` 表）、第 8 施工關（client protocol 1.1、`agend-client`）。client protocol 升到 **1.2**（本關先 merge，第 10 施工關拿 1.3）。
 
 ## 範圍
 
@@ -659,6 +659,9 @@ unset AGEND_BIN AGEND_HOME AGEND_INSTANCE   # 前幾關留下的 export 可能�
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-10-01 第 11 施工關 B 段 #140 merge（`462822a`）；`agend app [--lang en|zh-TW]` 接真 daemon，驗收見第 11 施工關頁。
+- 2026-09-29 #136 merge（`f5c32ec`）；本關完成，第 10 施工關前置條件已滿足。
+
 - 2026-09-29 使用者親自驗收步驟 1–9 通過（里程碑：兩個假 codex 互傳 20 則、中途重啟，各一次、全部 confirmed）；記下兩個不擋本關的已知問題（macOS `ulimit -n 256`、zsh glob 寫法）。狀態改成完成。
 - 2026-09-29 fresh-context verifier 第 3 輪 CONFIRMED（add6d10；第 1、2 輪 REFUTED 的項目全修：preflight 清理、60 秒期限、大小上限、binary 換檔檢查含 ctime、codex link 死鎖與寫入逾時、負載下的計時測試）；使用者追認 L1–L21。
 - 2026-09-28 第 2 輪 verifier REFUTED 後修正（每項先寫重現測試、確認在舊程式失敗）：#1 連續送 3 則大訊息給 codex agent 時 daemon 死鎖——根本原因兩邊都有：假 app-server 寫的時候不讀（不忠實；已改成讀寫交錯），daemon 的 **第 7 施工關 codex link**（在本 PR 修）寫入沒有逾時、`Link::close` 無限期 join → 寫入 10 秒逾時當斷線、關閉時 shutdown socket、最多等 5 秒（`large_messages_to_codex_are_delivered`、`a_stuck_codex_app_server_never_wedges_the_daemon`，後者用 `fake_codex --disable duplex-io` 做出不讀的 peer）；L17 的理由改寫；#2 兩個會被機器負載拖垮的時間上限改成量產品本身（hello 次數、訊息裡的 10 秒）；#3 binary 檢查加 change time（`a_binary_swapped_during_its_preflight_is_refused`）；#4 L18、L19 標「與 P6／P4 不同，請明確決定」。重跑 r2c（預檢中錯開時間送 SIGINT）時另外發現：預檢通過後、daemon 收尾準備 `exec` 的那一刻收到的 Ctrl-C 會被舊的 image 吃掉、新的照樣起來 → 收到停止訊號就不 `exec`、直接結束（`ctrl_c_during_a_restart_stops_the_daemon`，修之前 3／3 失敗）。
@@ -675,7 +678,7 @@ unset AGEND_BIN AGEND_HOME AGEND_INSTANCE   # 前幾關留下的 export 可能�
 ## 下一步
 
 ```bash
-~/.cargo/bin/cargo xtask accept cli    # 你親自驗收步驟 1
+cat docs/gates/gate-10-pipeline.md
 ```
 
-然後照「你親自驗收」步驟 2–9 跑、填「驗收紀錄」（「待你追認」L1–L21 已於 2026-09-29 追認）。
+本關已驗收並合併；接著開第 10 施工關。
