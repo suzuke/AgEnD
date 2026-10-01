@@ -9,7 +9,7 @@
 
 ## 狀態
 
-**驗收中**（2026-10-01）：P1–P11 使用者已確認（P6 改成寫入沙箱；P3、P7、P8、P11 與決策或架構頁不同之處都已決定），提案 #130 已 merge；實作在 `feat/gate-10-pipeline` worktree，自動驗收已通過；尚待 fresh-context verifier 和使用者人工驗收，未合併。執行細節見 [pipeline runtime](../architecture/pipeline-runtime.md)。前置施工關已完成並 merge：第 6 施工關 #125、第 7 施工關 #132、第 8 施工關 #131、第 9 施工關 #136（client protocol 1.2、CLI 語法、ticket、`operator` 請求）。本關使用下一個 minor 1.3；第 11 施工關 B 段也已 merge #140。分工見下方「範圍」。
+**驗收中**（2026-10-02）：P1–P11 使用者已確認（P6 改成寫入沙箱；P3、P7、P8、P11 與決策或架構頁不同之處都已決定），提案 #130 已 merge；實作在 `feat/gate-10-pipeline` worktree，兩輪 fresh-context verifier 已重跑並找到缺陷，正在修正；本機自動驗收通過，Ubuntu CI 的 sandbox 回歸需修正重跑；尚待最終 fresh-context verifier 和使用者人工驗收，未合併。執行細節見 [pipeline runtime](../architecture/pipeline-runtime.md)。前置施工關已完成並 merge：第 6 施工關 #125、第 7 施工關 #132、第 8 施工關 #131、第 9 施工關 #136（client protocol 1.2、CLI 語法、ticket、`operator` 請求）。本關使用下一個 minor 1.3；第 11 施工關 B 段也已 merge #140。分工見下方「範圍」。
 
 ## 範圍
 
@@ -535,6 +535,8 @@ cd /Users/suzuke/AlphaCR-worktrees/AgEnD-v2-pipeline    # 本次實作 worktree
 |  |  |  |
 
 ## 進度紀錄
+
+- 2026-10-02 第二輪 verifier REFUTED：Failed 派工仍占 capacity、多 Branch 向前角色交接遺失 commits；補 terminal cleanup 每次 wake 重試與保留 branch 的 handoff，單 writer、真 FS 故障、雙作者跨排隊／重啟 merge 回歸通過。另修 Ubuntu CI 的 `/tmp` canonical repo 唯讀掛載；最終驗證與使用者驗收待完成，未 merge（draft PR #143）。
 
 - 2026-10-02 初輪獨立驗證對 `2b7d4a7` 判定 REFUTED（2 High、3 Medium）；修正多人審查的 recipient id、planned 回報與角色交接、缺 git 與逐 task boot 失敗隔離，補 core ports 與五種 fake 的完整 queue 測試；修正 recorder 通知 drain、PTY 快速退出輸出，重新驗證中。實作與 verifier worktree 移至 `/Users/suzuke/AlphaCR-worktrees/`（[draft PR #143](https://github.com/suzuke/AgEnD/pull/143)）。
 - 2026-10-01 在獨立 worktree 接通 pipeline、LocalForge、沙箱、持久化快照與命令；新增真程序／adapter／snapshot 驗證。尚待 fresh-context verifier 與使用者親自驗收（`feat/gate-10-pipeline`）。

@@ -345,18 +345,6 @@ async fn check_failure_reworks_original_holder_and_rejects_old_attempt() {
 async fn one_failed_boot_dispatch_does_not_prevent_other_tasks_from_starting() {
     let lab = Lab::new().await;
     lab.worker.abort();
-    let mut second = lab.store.instance("writer").await.unwrap().unwrap();
-    second.id = "writer2".into();
-    lab.store.insert_instance(
-        second,
-        Member {
-            id: "writer2".into(),
-            team: "code-team".into(),
-            role: "dev".into(),
-            delivery: "push".into(),
-        },
-    );
-    lab.driver.add_instance("writer2");
     for id in ["t-1", "t-2"] {
         let task = Task::new(id, id, "code-team", "code", 1).set_requires_repo(true);
         let state = PipelineState::new(id, validate(Workflow::builtin_code()).unwrap());
@@ -407,5 +395,11 @@ async fn one_failed_boot_dispatch_does_not_prevent_other_tasks_from_starting() {
             .unwrap()
             .is_some()
     );
+    let failed = lab.store.load_task("t-1").await.unwrap().unwrap().task;
+    assert!(failed.assignee.is_none());
+    let bindings = lab.store.bindings().await.unwrap();
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(bindings[0].task, "t-2");
+    assert_eq!(bindings[0].instance, "writer");
     worker.abort();
 }

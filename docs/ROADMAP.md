@@ -75,6 +75,9 @@ cat docs/architecture/pipeline.md
 
 ## 進度紀錄
 
+- 2026-10-02 第二輪 verifier 另重現多 Branch 角色交接遺失前段 commits；以 core `BindingRelease::Handoff` 保留原 branch，真程序跨排隊／重啟的雙作者 merge 回歸通過，最終重新驗證待完成（draft PR #143）。
+- 2026-10-02 第二輪 verifier 重現 Failed 派工仍占用 agent；補即時清理與每次 wake 重試、單 writer 與真 FS 故障回歸。Ubuntu CI 重現 `/tmp` 下 canonical repo 可寫，補明確唯讀掛載；修正重新驗證中（draft PR #143），未 merge。
+
 - 2026-10-02 修正版 `360ca2d` 已 push 至 draft PR #143；完整 workspace 測試、clippy、check-deps（no_std 無跳過）通過，holder 回歸與 TUI 180 fd 限制通過；Gate 10 自動驗收與全新 verifier 待完成，merge 等使用者確認。
 - 2026-10-02 第 10 施工關初輪 verifier 對 `2b7d4a7` 判定 REFUTED；修正多人審查、planned 交接、boot 隔離與 core ports，補整條 queue 的五種 fake 測試；重新驗證中，未 merge。worktree 統一放 `/Users/suzuke/AlphaCR-worktrees/`（[draft PR #143](https://github.com/suzuke/AgEnD/pull/143)）。
 - 2026-10-01 在獨立 worktree 實作第 10 施工關：pipeline、冷 checks 沙箱、LocalForge recovery、team/workflow/agent 命令與 TUI attention；尚待 fresh-context verifier 和使用者驗收（[feat/gate-10-pipeline](https://github.com/suzuke/AgEnD/tree/feat/gate-10-pipeline)）。

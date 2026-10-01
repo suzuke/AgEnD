@@ -177,3 +177,41 @@ fn planned_implementation_goes_to_the_available_dev_role() {
         "planned workflow specifies dev, but planner still receives implementation"
     );
 }
+
+#[test]
+fn failed_dispatch_releases_capacity_after_filesystem_recovers_without_restart() {
+    let mut lab = common::Lab::new(&[]).unwrap();
+    lab.boot(None).unwrap();
+    let blocked = lab.home.join("bindings/.g10-hold.tmp");
+    std::fs::create_dir(&blocked).unwrap();
+    assert!(lab.create("g10h", "demo", "failed dispatch").is_err());
+    common::wait_until(&lab, || {
+        Ok(lab.fleet()?.tasks.iter().any(|t| t.status == "failed"))
+    })
+    .unwrap();
+    let failed = lab
+        .fleet()
+        .unwrap()
+        .tasks
+        .into_iter()
+        .find(|t| t.status == "failed")
+        .unwrap();
+    std::fs::remove_dir(blocked).unwrap();
+    let next = lab.create("g10h", "demo", "next task").unwrap();
+    common::wait_until(&lab, || {
+        let tasks = lab.fleet()?.tasks;
+        Ok(tasks
+            .iter()
+            .any(|t| t.task_id == next && t.assignee.as_deref() == Some("g10-hold"))
+            && tasks
+                .iter()
+                .any(|t| t.task_id == failed.task_id && t.assignee.is_none()))
+    })
+    .unwrap();
+    assert!(!lab.home.join("worktrees").join(&failed.task_id).exists());
+    lab.stop(false);
+    let store = SqliteStore::open(&lab.home, 0).unwrap();
+    let bindings = block_on(store.bindings()).unwrap();
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(bindings[0].task, next);
+}

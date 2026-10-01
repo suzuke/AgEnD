@@ -313,7 +313,7 @@ where
         let ticket = ticket(state);
         let mut task = task.clone();
         let members = self.store.members().await.map_err(db)?;
-        // A completed Result/Plan writer hands off to the next Work role.
+        // Forward Work role changes select a new holder; committed branches survive.
         // ReturnToWork always retains its original holder, including Failed.
         if !review
             && state.pending_work_reason().is_none()
@@ -328,7 +328,15 @@ where
                 .into_iter()
                 .filter(|b| b.task == task.id && b.kind == "work")
             {
-                self.release(&binding, false).await?;
+                self.release_mode(
+                    &binding,
+                    if state.branch().is_some() {
+                        agend_core::pipeline::ports::BindingRelease::Handoff
+                    } else {
+                        agend_core::pipeline::ports::BindingRelease::Abandoned
+                    },
+                )
+                .await?;
             }
             let row = self
                 .store
@@ -668,6 +676,22 @@ where
         Ok(())
     }
     pub(super) async fn release(&self, b: &BindingRow, merged: bool) -> Result<(), Refusal> {
+        use agend_core::pipeline::ports::BindingRelease;
+        self.release_mode(
+            b,
+            if merged {
+                BindingRelease::Merged
+            } else {
+                BindingRelease::Abandoned
+            },
+        )
+        .await
+    }
+    async fn release_mode(
+        &self,
+        b: &BindingRow,
+        mode: agend_core::pipeline::ports::BindingRelease,
+    ) -> Result<(), Refusal> {
         let team = self
             .store
             .load_task(&b.task)
@@ -681,7 +705,7 @@ where
                 .git
                 .as_ref()
                 .ok_or_else(|| invalid("git unavailable"))?
-                .release(&repo, b, merged)
+                .release(&repo, b, mode)
                 .await
                 .map_err(invalid)?;
             if let Some(patch) = patch {
@@ -705,6 +729,9 @@ where
         Ok(())
     }
     pub(super) async fn wake(&mut self) -> Result<(), Refusal> {
+        for task in self.store.tasks().await.map_err(db)? {
+            self.cleanup_terminal(&task).await?;
+        }
         for task in self.store.tasks().await.map_err(db)? {
             if matches!(task.status, TaskStatus::Running | TaskStatus::Open) {
                 if self.git.is_none() && self.team(&task.team_id).await?.repo.is_some() {

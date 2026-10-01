@@ -143,7 +143,7 @@ where
             return Err(invalid("restore failure CAS conflict"));
         }
         log::line(&format!("{id}: snapshot restore failed: {reason}"));
-        Ok(())
+        self.cleanup_terminal(&task).await
     }
     pub(super) async fn reconcile_bindings(&mut self) -> Result<(), Refusal> {
         let tasks = self.store.tasks().await.map_err(db)?;

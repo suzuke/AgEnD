@@ -145,6 +145,14 @@ impl core::fmt::Display for ExecutionError {
     }
 }
 
+/// How a writer relinquishes a binding without losing a task's branch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BindingRelease {
+    Abandoned,
+    Merged,
+    Handoff,
+}
+
 /// All filesystem/process effects, separate from assignment and state decisions.
 pub trait PipelineExecutor: Clone + Send + Sync + 'static {
     type Forge: Forge<Error = ExecutionError> + Send;
@@ -184,7 +192,7 @@ pub trait PipelineExecutor: Clone + Send + Sync + 'static {
         &'a self,
         repo: &'a str,
         binding: &'a BindingRow,
-        merged: bool,
+        mode: BindingRelease,
     ) -> impl Future<Output = Result<Option<String>, String>> + Send + 'a;
     fn projections<'a>(
         &'a self,

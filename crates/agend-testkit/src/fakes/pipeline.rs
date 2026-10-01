@@ -146,7 +146,7 @@ impl PipelineExecutor for FakePipelineExecutor {
         &self,
         _repo: &str,
         b: &BindingRow,
-        _merged: bool,
+        _mode: agend_core::pipeline::ports::BindingRelease,
     ) -> Result<Option<String>, String> {
         lock(&self.effects).push(format!("release:{}:{}", b.task, b.instance));
         lock(&self.projections).insert(b.instance.clone(), None);

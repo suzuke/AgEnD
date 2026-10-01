@@ -113,7 +113,7 @@ impl PipelineExecutor for LocalExecutor {
         &self,
         repo: &str,
         b: &BindingRow,
-        merged: bool,
+        mode: agend_core::pipeline::ports::BindingRelease,
     ) -> Result<Option<String>, String> {
         crate::bindings::release(
             self.store.as_ref(),
@@ -122,7 +122,7 @@ impl PipelineExecutor for LocalExecutor {
             &self.exe,
             Path::new(repo),
             b,
-            merged,
+            mode,
         )
         .await
     }

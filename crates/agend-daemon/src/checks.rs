@@ -115,9 +115,25 @@ pub fn sandbox_command(
     #[cfg(target_os = "linux")]
     {
         let _ = profile_path(worktree);
+        let dotgit = std::fs::read_to_string(worktree.join(".git")).map_err(|e| e.to_string())?;
+        let gitdir = PathBuf::from(
+            dotgit
+                .trim()
+                .strip_prefix("gitdir: ")
+                .ok_or("invalid linked worktree git file")?,
+        );
+        let common = gitdir
+            .parent()
+            .and_then(Path::parent)
+            .ok_or("invalid worktree metadata directory")?;
+        let canonical_repo = common.parent().ok_or("invalid canonical repository")?;
+        // Mount the whole canonical repository read-only before writable roots.
+        // Binding only .git after hiding /tmp creates a writable parent skeleton.
         let mut cmd = format!(
-            "exec {} --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp --bind {} {} --ro-bind {} {} --bind {} {}",
+            "exec {} --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp --ro-bind {} {} --bind {} {} --ro-bind {} {} --bind {} {}",
             quote(&tool.to_string_lossy()),
+            quote(&canonical_repo.to_string_lossy()),
+            quote(&canonical_repo.to_string_lossy()),
             quote(&worktree.to_string_lossy()),
             quote(&worktree.to_string_lossy()),
             quote(&worktree.join(".git").to_string_lossy()),
@@ -130,24 +146,6 @@ pub fn sandbox_command(
             if dir.is_dir() {
                 cmd.push_str(&format!(" --tmpfs {}", quote(&dir.to_string_lossy())));
             }
-        }
-        let dotgit = std::fs::read_to_string(worktree.join(".git")).map_err(|e| e.to_string())?;
-        let gitdir = PathBuf::from(
-            dotgit
-                .trim()
-                .strip_prefix("gitdir: ")
-                .ok_or("invalid linked worktree git file")?,
-        );
-        let common = gitdir
-            .parent()
-            .and_then(Path::parent)
-            .ok_or("invalid worktree metadata directory")?;
-        if common.starts_with("/tmp") {
-            cmd.push_str(&format!(
-                " --ro-bind {} {}",
-                quote(&common.to_string_lossy()),
-                quote(&common.to_string_lossy())
-            ));
         }
         cmd.push_str(&format!(
             " --unshare-pid --die-with-parent -- /bin/sh -c {}",

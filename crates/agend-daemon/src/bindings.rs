@@ -2,7 +2,7 @@
 use crate::git::Git;
 use crate::runner::{ProcessRunner, quote};
 use agend_core::binding::{Binding, SNAPSHOT_VERSION, Snapshot};
-use agend_core::pipeline::ports::PipelineStore;
+use agend_core::pipeline::ports::{BindingRelease, PipelineStore};
 use agend_core::runtime_records::BindingRow;
 use agend_core::traits::Runner;
 use std::os::unix::fs::PermissionsExt;
@@ -232,7 +232,7 @@ pub async fn release<S: PipelineStore>(
     exe: &Path,
     repo: &Path,
     b: &BindingRow,
-    merged: bool,
+    mode: BindingRelease,
 ) -> Result<Option<String>, String>
 where
     S::Error: std::fmt::Display,
@@ -250,7 +250,7 @@ where
         } else {
             None
         },
-        merged,
+        mode == BindingRelease::Merged,
     )
     .await?;
     if wt.exists() {
@@ -258,7 +258,8 @@ where
         git.run(repo, &["worktree", "remove", "--force", &b.worktree])
             .await?;
     }
-    if let Some(branch) = b.branch.as_deref()
+    if mode != BindingRelease::Handoff
+        && let Some(branch) = b.branch.as_deref()
         && agend_core::model::task_id_of_branch(branch) == Some(b.task.as_str())
         && git
             .run(

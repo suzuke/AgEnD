@@ -176,7 +176,7 @@
 
 ## Pipeline ports
 
-`PipelineStore`、`PipelineExecutor`、`PipelineView` 是 core 的 pipeline 執行邊界：分別提供持久化 records／receipt、git／binding／checks 副作用、fleet 投影；domain Engine 只使用這些 ports 加上 Driver／Clock，adapters 在 composition 層組裝。`FakePipelineExecutor` 是 testkit 的無 I/O executor，供完整 queue 測試。
+`PipelineStore`、`PipelineExecutor`、`PipelineView` 是 core 的 pipeline 執行邊界：分別提供持久化 records／receipt、git／binding／checks 副作用、fleet 投影；domain Engine 只使用這些 ports 加上 Driver／Clock，adapters 在 composition 層組裝。`FakePipelineExecutor` 是 testkit 的無 I/O executor，供完整 queue 測試。`BindingRelease` 區分已 merge、放棄與向前交接：交接會 unbind 舊持有者並保存 WIP，但保留既有 task branch 的 commits，供下一角色接手。
 
 ## 下一步
 

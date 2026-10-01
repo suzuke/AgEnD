@@ -3,6 +3,7 @@ mod attention;
 mod commands;
 mod lifecycle;
 mod reconcile;
+mod terminal;
 pub(crate) mod transition;
 
 use crate::log;
