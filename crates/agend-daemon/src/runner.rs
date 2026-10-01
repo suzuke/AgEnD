@@ -50,13 +50,13 @@ async fn drain(mut pipe: impl AsyncRead + Unpin) -> Vec<u8> {
     out
 }
 
-impl Runner for ProcessRunner {
-    type Error = io::Error;
-    async fn run(
+impl ProcessRunner {
+    async fn run_with_stdout(
         &self,
         command: &str,
         working_directory: &str,
         timeout_ms: u64,
+        destination: Stdio,
     ) -> io::Result<CommandOutput> {
         // Drop cannot run after SIGKILL. A child in this same process group
         // watches the owner; it kills only its own group when the owner dies.
@@ -71,7 +71,7 @@ impl Runner for ProcessRunner {
             .env_clear()
             .envs(&self.env)
             .stdin(Stdio::null())
-            .stdout(Stdio::piped())
+            .stdout(destination)
             .stderr(Stdio::piped())
             .process_group(0)
             .kill_on_drop(true)
@@ -81,7 +81,7 @@ impl Runner for ProcessRunner {
                 .id()
                 .ok_or_else(|| io::Error::other("child has no pid"))?,
         );
-        let stdout = tokio::spawn(drain(child.stdout.take().expect("piped stdout")));
+        let stdout = child.stdout.take().map(|pipe| tokio::spawn(drain(pipe)));
         let stderr = tokio::spawn(drain(child.stderr.take().expect("piped stderr")));
         let waited = tokio::time::timeout(Duration::from_millis(timeout_ms), child.wait()).await;
         let (exit_code, timed_out) = match waited {
@@ -102,12 +102,47 @@ impl Runner for ProcessRunner {
                 }
             }
         }
-        let (stdout, stderr) = tokio::join!(collect(stdout), collect(stderr));
+        let (stdout, stderr) = tokio::join!(
+            async {
+                match stdout {
+                    Some(task) => collect(task).await,
+                    None => Vec::new(),
+                }
+            },
+            collect(stderr)
+        );
         Ok(CommandOutput {
             exit_code,
             stdout,
             stderr,
             timed_out,
         })
+    }
+}
+
+impl ProcessRunner {
+    /// Stream complete artifact bytes to an owned file, retaining timeout and group cleanup.
+    pub async fn run_to_file(
+        &self,
+        command: &str,
+        working_directory: &str,
+        timeout_ms: u64,
+        file: std::fs::File,
+    ) -> io::Result<CommandOutput> {
+        self.run_with_stdout(command, working_directory, timeout_ms, Stdio::from(file))
+            .await
+    }
+}
+
+impl Runner for ProcessRunner {
+    type Error = io::Error;
+    async fn run(
+        &self,
+        command: &str,
+        working_directory: &str,
+        timeout_ms: u64,
+    ) -> io::Result<CommandOutput> {
+        self.run_with_stdout(command, working_directory, timeout_ms, Stdio::piped())
+            .await
     }
 }

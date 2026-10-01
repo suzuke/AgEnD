@@ -95,3 +95,5 @@ Failed 派工回歸：五種 fake queue 只用一個 dev，boot 派工失敗後�
 `pipeline_handoff` 使用真 daemon、git、SQLite 與 checks：前段 Branch 作者提交、交接排隊、重啟、後段作者接手，最後 merge 的 tree 必須含兩位作者的檔案，不能只留 archive。
 
 `pipeline_context` 驗 approved Result 的人工 recap／接手訊息與重啟、repo team 的 headless role review，以及 merge recovery 的 main ref 損壞不阻止整機啟動。`daemon::stop_flag` 以獨立子程序在 Tokio runtime 關閉後送真 SIGINT，確保 exec 前仍能看到停止；CLI 原回歸保留 10 秒條件，診斷延遲不留在產品碼。
+
+`pipeline_archive` 用三種各 6 MiB 的 binary（未 merge commit、tracked 修改、untracked）驗 archive 的 `git apply` round trip 與 bytes 相等；另驗 archive I/O 失敗保留原 WIP、下一次 wake 重試，以及 foreign checks worktree／tmp 保留、命名空間內孤兒仍清理。

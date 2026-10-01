@@ -209,7 +209,7 @@ impl PipelineExecutor for LocalExecutor {
                 let name = entry.file_name();
                 if name
                     .to_str()
-                    .is_some_and(|n| n.starts_with("t-") && n.ends_with(".tmp"))
+                    .is_some_and(|n| n.strip_suffix(".tmp").is_some_and(managed_check_name))
                     && !name.to_str().is_some_and(|n| {
                         running
                             .iter()
@@ -242,7 +242,11 @@ impl LocalExecutor {
                 continue;
             };
             let wt = Path::new(path);
-            let checks = wt.parent() == Some(self.home.join("checks").as_path());
+            let checks = wt.parent() == Some(self.home.join("checks").as_path())
+                && wt
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(managed_check_name);
             let managed = wt.parent() == Some(self.home.join("worktrees").as_path())
                 && wt.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
                     let id = n.strip_suffix("-review").unwrap_or(n);
@@ -264,9 +268,13 @@ impl LocalExecutor {
                 let task = branch
                     .and_then(agend_core::model::task_id_of_branch)
                     .or_else(|| {
-                        wt.file_name()
-                            .and_then(|n| n.to_str())
-                            .map(|n| n.strip_suffix("-review").unwrap_or(n))
+                        wt.file_name().and_then(|n| n.to_str()).and_then(|n| {
+                            if checks {
+                                managed_check_task(n)
+                            } else {
+                                Some(n.strip_suffix("-review").unwrap_or(n))
+                            }
+                        })
                     })
                     .unwrap_or("orphan");
                 crate::bindings::archive(git, &self.home, repo, wt, task, branch, false)
@@ -311,7 +319,7 @@ impl LocalExecutor {
                     Path::new("/nonexistent-agend-worktree"),
                     id,
                     Some(branch),
-                    task.is_some_and(|t| t.status == TaskStatus::Done),
+                    task.is_some_and(|t| t.merge_commit.is_some()),
                 )
                 .await
                 .map_err(|e| e.to_string())?;
@@ -322,4 +330,16 @@ impl LocalExecutor {
         }
         Ok(())
     }
+}
+
+/// P9 reserves checks/<numeric task id>-*; other names belong to their creator.
+fn managed_check_task(name: &str) -> Option<&str> {
+    let (id, run) = name.strip_prefix("t-")?.split_once('-')?;
+    if id.is_empty() || !id.bytes().all(|b| b.is_ascii_digit()) || run.is_empty() {
+        return None;
+    }
+    name.get(..2 + id.len())
+}
+fn managed_check_name(name: &str) -> bool {
+    managed_check_task(name).is_some()
 }

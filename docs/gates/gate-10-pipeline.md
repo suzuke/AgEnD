@@ -9,7 +9,7 @@
 
 ## 狀態
 
-**驗收中**（2026-10-02）：P1–P11 使用者已確認（P6 改成寫入沙箱；P3、P7、P8、P11 與決策或架構頁不同之處都已決定），提案 #130 已 merge；實作在 `feat/gate-10-pipeline` worktree，三輪 fresh-context verifier 已重跑並找到缺陷，正在修正；本機自動驗收通過，Ubuntu CI 的 sandbox 回歸需修正重跑；尚待最終 fresh-context verifier 和使用者人工驗收，未合併。執行細節見 [pipeline runtime](../architecture/pipeline-runtime.md)。前置施工關已完成並 merge：第 6 施工關 #125、第 7 施工關 #132、第 8 施工關 #131、第 9 施工關 #136（client protocol 1.2、CLI 語法、ticket、`operator` 請求）。本關使用下一個 minor 1.3；第 11 施工關 B 段也已 merge #140。分工見下方「範圍」。
+**驗收中**（2026-10-02）：P1–P11 使用者已確認（P6 改成寫入沙箱；P3、P7、P8、P11 與決策或架構頁不同之處都已決定），提案 #130 已 merge；實作在 `feat/gate-10-pipeline` worktree，四輪 fresh-context verifier 已重跑並找到缺陷，正在修正；本機自動驗收通過，Ubuntu sandbox 回歸已通過，headless review 測試競爭已修正，雙平台 CI 重跑中；尚待最終 fresh-context verifier 和使用者人工驗收，未合併。執行細節見 [pipeline runtime](../architecture/pipeline-runtime.md)。前置施工關已完成並 merge：第 6 施工關 #125、第 7 施工關 #132、第 8 施工關 #131、第 9 施工關 #136（client protocol 1.2、CLI 語法、ticket、`operator` 請求）。本關使用下一個 minor 1.3；第 11 施工關 B 段也已 merge #140。分工見下方「範圍」。
 
 ## 範圍
 
@@ -190,7 +190,7 @@
   - **id 的寫法**：請示照第 8 施工關 P5，直接用 ask id、不加前綴；其他是 `<種類>:<對象>`，跟第 8 施工關的 `instance-failed:<id>` 一樣用 `:` 分開種類；對象是 task 關卡時**就是第 9 施工關的 ticket**（`t-3/review/1`），所以同一串字會同時出現在 `agend status`、派工訊息與「需要你」裡。
   - `request_changes` 要帶理由：`resolve_attention` 加一個選填欄位 `note`；缺少時回 `invalid_request`。
   - `approval:` 的 id 帶 attempt：head 變了、開了新的 attempt，舊項目自動消失、新項目出現；拿舊 id 按會回 `unknown_attention`，不會核准到新的 head。
-  - `unblocks`：task 相關的是 1，`no-role` 是在排隊的 task 數；`waiting_since` 是 `tasks.stage_entered_at_unix_ms`（P2，重開機不重算；請示用 ask 建立的時間）；`task_id`、`instance_id`（持有者）照填。脈絡摘要（D37）本關只填最短的：目標＝task 標題、在問什麼＝「核准 `<branch>` 的 `<head 前 7 碼>`」、之後＝「merge 進 main」；完整內容是第 11 施工關的事。
+  - `unblocks`：task 相關的是 1，`no-role` 是在排隊的 task 數；`waiting_since` 是 `tasks.stage_entered_at_unix_ms`（P2，重開機不重算；請示用 ask 建立的時間）；`task_id`、`instance_id`（持有者）照填。脈絡摘要（D37）依當前 WorkProduct 顯示 Result summary／output、Plan items 或 Branch／head；下一步依 workflow 顯示接手 Work 或繼續後續關卡，核准 planned Result 時須能看到實際成果內容。
   - 協定新增（`note`、P10 的 `task_cancel` 與 team／workflow 請求）算一次 minor：client 協定用**實作時的下一個 minor**（第 8 施工關是 1.1；第 9 施工關先 merge 就拿 1.2，本關再下一個）。
   - **與 D18 字面不同，使用者 2026-09-26 決定照這裡做**：D18 寫「需要不存在的角色時轉成 ask」。這裡改成 `no-role` 項目，因為 ask 是 agent 與你的對話（D35），而這件事的解法是「加一個成員」，不是回答問題。
 - 理由：同一套「需要你」機制，TUI（第 11 施工關）與 Telegram（第 12 施工關）不必各做一次核准；只多一個選填欄位。
@@ -537,6 +537,8 @@ cd /Users/suzuke/AlphaCR-worktrees/AgEnD-v2-pipeline    # 本次實作 worktree
 |  |  |  |
 
 ## 進度紀錄
+
+- 2026-10-02 第四輪 verifier REFUTED `9851bda`：6 MiB binary WIP archive 經診斷輸出 cap 截斷後仍刪原檔、checks 孤兒清理越過名稱命名空間。改用檔案串流、完整同步後發布與嚴格 task 前綴，新增 bytes round trip／I/O 故障／foreign worktree 回歸；修正驗證中（draft PR #143），未 merge。
 
 - 2026-10-02 Ubuntu CI 確認 sandbox 逃逸回歸通過；headless review 測試因自動 reviewer 搶先完成而漏讀中間狀態，改由暫停的 reviewer 驗證等待、重啟與人工回報，三個 context 回歸通過；重新跑 CI 與第四輪 fresh-context verifier（draft PR #143），未 merge。
 

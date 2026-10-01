@@ -21,6 +21,18 @@ impl Git {
         }
         Ok(git)
     }
+    /// Artifact output bypasses the diagnostic cap and goes directly to an owned file.
+    pub async fn output_to_file(
+        &self,
+        repo: &Path,
+        args: &[&str],
+        file: std::fs::File,
+    ) -> Result<CommandOutput, String> {
+        self.runner
+            .run_to_file(&self.command(args), &repo.to_string_lossy(), 60_000, file)
+            .await
+            .map_err(|e| e.to_string())
+    }
     pub fn discover(home: &Path) -> Result<Self, String> {
         let daemon: BTreeMap<String, String> = std::env::vars().collect();
         let path = crate::runtime::env::launch_path(home, &daemon);
@@ -56,7 +68,7 @@ impl<R: Runner> Git<R>
 where
     R::Error: std::fmt::Display,
 {
-    pub async fn output(&self, repo: &Path, args: &[&str]) -> Result<CommandOutput, String> {
+    fn command(&self, args: &[&str]) -> String {
         let mut command = format!(
             "{} -c core.hooksPath=/dev/null -c core.fsmonitor=false",
             quote(&self.executable.to_string_lossy())
@@ -65,6 +77,11 @@ where
             command.push(' ');
             command.push_str(&quote(arg));
         }
+        command
+    }
+
+    pub async fn output(&self, repo: &Path, args: &[&str]) -> Result<CommandOutput, String> {
+        let command = self.command(args);
         self.runner
             .run(&command, &repo.to_string_lossy(), 60_000)
             .await

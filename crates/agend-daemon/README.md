@@ -114,7 +114,7 @@
 | `instance_remove` | 不再監看、關長連線、`Shutdown` holder（最多 5 秒；停不了照樣刪，下次開機巡查收掉）、codex 照清掃規則、刪列、從全貌拿掉（`instance_changed` 不帶 instance；它的「需要你」項目以 `attention_resolved`（`unknown`）離開）；workspace 不刪 |
 | `daemon_restart` | 一次一個（另一個進行中 → `invalid_request: a restart is already in progress`）；`mkdtemp` `/tmp/agend-pf-XXXXXX`、`VACUUM INTO` 當下的 DB 複本、跑 `<binary> daemon preflight <dir>`（60 秒）：要 exit 0 而且印出 `agend …`、`db copy: …`、`holder: hello ok, spawn ok, shutdown ok`；失敗 → `preflight_failed: <binary> daemon preflight exited with status 1[: 最後一行 stderr]; the daemon keeps running agend 0.0.0`；暫存 home 一律刪掉（daemon 在預檢中停止也一樣：Drop guard kill 並收屍子程序、`Shutdown` 暫存 home 裡的 holder），60 秒逾時不等子程序的 pipe；預檢結束時 binary 必須還是同一個檔案（device、inode、大小、mtime），`agend.db` 不動。通過 → 回 `restarting { preflight }`、照 Ctrl-C 的順序收尾（不送 `Shutdown`）、`exec <binary> daemon`（pid、終端、環境不變） |
 | 繼承的 holder | 新 image 開機時（還沒起任何 holder 前）對每個鎖檔裡的 pid `waitpid(pid, WNOHANG)` 一次；是自己的子程序而且還活著的每秒再查，收到或 `ECHILD` 就不再查；log `reaped inherited holder pid <pid> (exit 0)`；不用 `waitpid(-1)` |
-| `task_cancel` | 可帶 reason；CAS 推進 Cancelled、保存 WIP 並釋放 binding；merge in-flight 拒絕取消 |
+| `task_cancel` | 可帶 reason；CAS 推進 Cancelled、保存 WIP 並釋放 binding；archive 直接串流至檔案並同步後發布，不受程序診斷輸出上限影響；保存失敗保留原 worktree／binding 並回報 Failed；merge in-flight 拒絕取消 |
 
 ## store（第 5 施工關）
 

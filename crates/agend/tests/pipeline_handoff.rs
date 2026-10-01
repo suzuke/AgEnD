@@ -13,6 +13,20 @@ fn two_branch_authors_merge_both_contributions_after_a_queued_handoff_restart() 
         let store = SqliteStore::open(&lab.home, 0).unwrap();
         block_on(store.join_team("g10", "g10-dev", "alpha")).unwrap();
         block_on(store.join_team("g10", "g10-hold", "spare")).unwrap();
+        // The test, rather than the auto-worker, controls the final review receipt.
+        block_on(store.join_team("g10", "g10-rev", "idle")).unwrap();
+        let mut reviewer = block_on(store.instance("g10-hold")).unwrap().unwrap();
+        reviewer.id = "g10-manual-review".into();
+        reviewer.working_directory = lab
+            .home
+            .join("workspace/g10-manual-review")
+            .display()
+            .to_string();
+        reviewer.session_id = Some(agend_daemon::store::instances::new_session_id().unwrap());
+        std::fs::create_dir_all(&reviewer.working_directory).unwrap();
+        block_on(store.add_instance(&reviewer)).unwrap();
+        block_on(store.join_team("g10", "g10-manual-review", "reviewer")).unwrap();
+        block_on(store.set_inbox_delivery("g10-manual-review")).unwrap();
         let mut workflow = Workflow::builtin_planned();
         workflow.id = "branch-handoff".into();
         if let Stage::Work { role, output, .. } = &mut workflow.stages[0].stage {
@@ -110,7 +124,7 @@ fn two_branch_authors_merge_both_contributions_after_a_queued_handoff_restart() 
     .unwrap();
     lab.wait_stage(&task, "review").unwrap();
     lab.agent(
-        "g10-rev",
+        "g10-manual-review",
         AgentCommand::ReviewApprove {
             task_id: task.clone(),
             identity: Some(ResultIdentity {

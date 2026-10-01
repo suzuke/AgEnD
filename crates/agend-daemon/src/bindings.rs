@@ -7,6 +7,8 @@ use agend_core::runtime_records::BindingRow;
 use agend_core::traits::Runner;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+mod archive;
+pub use archive::archive;
 
 pub fn snapshot(
     home: &Path,
@@ -150,79 +152,6 @@ where
     let mut ready = b.clone();
     ready.status = "ready".into();
     store.put_binding(&ready).await.map_err(|e| e.to_string())
-}
-
-pub async fn archive(
-    git: &Git,
-    home: &Path,
-    repo: &Path,
-    wt: &Path,
-    task: &str,
-    branch: Option<&str>,
-    merged: bool,
-) -> Result<Option<String>, String> {
-    let mut patch = Vec::new();
-    if !merged
-        && let Some(branch) = branch
-        && git
-            .run(
-                repo,
-                &["rev-parse", "--verify", &format!("refs/heads/{branch}")],
-            )
-            .await
-            .is_ok()
-    {
-        let out = git
-            .output(
-                repo,
-                &["format-patch", "--stdout", &format!("main..{branch}")],
-            )
-            .await?;
-        if out.exit_code != Some(0) {
-            return Err("cannot archive branch commits".into());
-        }
-        patch.extend(out.stdout);
-    }
-    if wt.exists() {
-        for args in [&["diff", "--binary", "HEAD"][..]] {
-            let out = git.output(wt, args).await?;
-            if out.exit_code != Some(0) {
-                return Err("cannot archive WIP".into());
-            }
-            patch.extend(out.stdout);
-        }
-        let untracked = git
-            .output(wt, &["ls-files", "--others", "--exclude-standard", "-z"])
-            .await?;
-        if untracked.exit_code != Some(0) {
-            return Err("cannot list untracked WIP".into());
-        }
-        for name in untracked
-            .stdout
-            .split(|b| *b == 0)
-            .filter(|n| !n.is_empty())
-        {
-            let name = std::str::from_utf8(name).map_err(|e| e.to_string())?;
-            let out = git
-                .output(
-                    wt,
-                    &["diff", "--no-index", "--binary", "--", "/dev/null", name],
-                )
-                .await?;
-            if !matches!(out.exit_code, Some(0 | 1)) {
-                return Err("cannot archive untracked file".into());
-            }
-            patch.extend(out.stdout);
-        }
-    }
-    if patch.is_empty() {
-        return Ok(None);
-    }
-    let dir = home.join("archive");
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let path = dir.join(format!("{task}-{}.patch", crate::log::now_unix_ms()));
-    std::fs::write(&path, patch).map_err(|e| e.to_string())?;
-    Ok(Some(path.display().to_string()))
 }
 
 pub async fn release<S: PipelineStore>(

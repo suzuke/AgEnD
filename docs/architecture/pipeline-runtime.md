@@ -15,7 +15,7 @@
 | work | 同 team 的 running instances 交給 core 派工；先持久化 binding，再建 `agend/<task>/<slug>` 與 `$AGEND_HOME/worktrees/<task>`，裝 hook、寫唯讀快照 |
 | submit | LocalForge 讀取 branch head；本機 forge 沒有 change id |
 | command | 每次以固定 head 建新 detached worktree；一次最多一個 checks 程序；結果帶原 stage/attempt/head |
-| approval(role) | 排除作者、優先不同 backend；在 detached `<task>-review` 審查，結果綁審查 head |
+| approval(role) | 排除作者、優先不同 backend；有 head 時在 detached `<task>-review` 審查並綁 head；無 head 時用 logical workspace binding |
 | approval(human) | `approval:<ticket>` 顯示目標、head 前七碼及下一步；退回修改須填理由 |
 | merge | rebase 前確認 worktree 乾淨；同 patch 保留核准、重跑 checks；不同 patch／conflict 回 work |
 
@@ -60,7 +60,7 @@ checks 重啟用新目錄、同 attempt。work 訊息固定 `dispatch:<ticket>`�
 每日對帳只做投影、bindings 與清理，保留正在跑的 checks，不重新派所有 action。
 
 釋放順序：快照先 unbound → 保存未提交／untracked WIP（未 merge 也保存 commits）→ 卸 hook → 刪 worktree／branch → 刪 binding。
-patch 放 `archive/<task>-<unix-ms>.patch`，保留 30 天，task detail 顯示路徑。
+patch 放 `archive/<task>-<unix-ms>.patch`，保留 30 天，task detail 顯示路徑。git binary patch 與 untracked 名稱清單直接串流至 daemon 建立的檔案，不經 5 MiB 診斷輸出 cap；完整檔案 sync 後原子發布，成功後才刪原 worktree。archive 失敗保留 WIP／binding，每次 wake 重試。checks 孤兒只辨識 `t-<數字>-*` 與對應 `.tmp`，命名空間外 worktree／目錄保留。
 
 ## 命令與協定
 
