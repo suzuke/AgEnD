@@ -134,6 +134,9 @@ fn a_result_only_workflow_can_be_role_reviewed_in_a_team_that_has_a_repo() {
     let mut lab = common::Lab::new(&["--hold"]).unwrap();
     {
         let store = SqliteStore::open(&lab.home, 0).unwrap();
+        // Hold the reviewer so the test can observe review and reboot before approval.
+        block_on(store.join_team("g10", "g10-rev", "idle")).unwrap();
+        block_on(store.join_team("g10", "g10-hold", "reviewer")).unwrap();
         let w = Workflow {
             id: "result-role-review".into(),
             version: 1,
@@ -190,7 +193,7 @@ fn a_result_only_workflow_can_be_role_reviewed_in_a_team_that_has_a_repo() {
     lab.boot(None).unwrap();
     let CommandResult::Messages { data: inbox } = lab
         .agent(
-            "g10-rev",
+            "g10-hold",
             AgentCommand::Inbox {
                 after_message_id: None,
             },
@@ -206,7 +209,7 @@ fn a_result_only_workflow_can_be_role_reviewed_in_a_team_that_has_a_repo() {
             .any(|m| m.body.contains("Research concluded"))
     );
     lab.agent(
-        "g10-rev",
+        "g10-hold",
         AgentCommand::ReviewApprove {
             task_id: task.clone(),
             identity: Some(ResultIdentity {

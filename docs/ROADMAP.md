@@ -75,6 +75,8 @@ cat docs/architecture/pipeline.md
 
 ## 進度紀錄
 
+- 2026-10-02 Ubuntu CI 確認 sandbox 逃逸回歸通過；headless review 測試因自動 reviewer 搶先完成而漏讀中間狀態，改由暫停的 reviewer 驗證等待、重啟與人工回報，三個 context 回歸通過；重新跑 CI 與第四輪 fresh-context verifier（draft PR #143），未 merge。
+
 - 2026-10-02 第三輪 verifier REFUTED `5887643`：計畫內容未傳遞、無 head 的 role review 失敗、merge proof 錯誤阻止 boot；補真程序回歸通過。另補 Linux 遮蔽 tmpfs 唯讀、Work 作者歷史投影，並以精確注入重現及修正 runtime 停止到 exec 前遺失 Ctrl-C；最終驗證重跑中（draft PR #143），未 merge。
 
 - 2026-10-02 第二輪 verifier 另重現多 Branch 角色交接遺失前段 commits；以 core `BindingRelease::Handoff` 保留原 branch，真程序跨排隊／重啟的雙作者 merge 回歸通過，最終重新驗證待完成（draft PR #143）。

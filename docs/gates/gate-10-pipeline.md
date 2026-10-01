@@ -538,6 +538,8 @@ cd /Users/suzuke/AlphaCR-worktrees/AgEnD-v2-pipeline    # 本次實作 worktree
 
 ## 進度紀錄
 
+- 2026-10-02 Ubuntu CI 確認 sandbox 逃逸回歸通過；headless review 測試因自動 reviewer 搶先完成而漏讀中間狀態，改由暫停的 reviewer 驗證等待、重啟與人工回報，三個 context 回歸通過；重新跑 CI 與第四輪 fresh-context verifier（draft PR #143），未 merge。
+
 - 2026-10-02 第三輪 verifier REFUTED `5887643`：planned summary/output 未交人工核准與 dev、無 head role review 誤建 git worktree、main ref 損壞時 merge proof 中止整個 boot；已補成果內容、logical review 與逐 task 隔離，真程序回歸通過。Linux CI 的 tmpfs 父目錄另改唯讀；CLI Ctrl-C 精確注入重現 runtime→exec 訊號窗口，補 signal-context flag。完整最終驗證待完成，未 merge（draft PR #143）。
 
 - 2026-10-02 第二輪 verifier REFUTED：Failed 派工仍占 capacity、多 Branch 向前角色交接遺失 commits；補 terminal cleanup 每次 wake 重試與保留 branch 的 handoff，單 writer、真 FS 故障、雙作者跨排隊／重啟 merge 回歸通過。另修 Ubuntu CI 的 `/tmp` canonical repo 唯讀掛載；最終驗證與使用者驗收待完成，未 merge（draft PR #143）。
