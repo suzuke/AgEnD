@@ -22,6 +22,7 @@ pub(super) async fn append_wip(
     patch: &File,
     staging: &Path,
 ) -> Result<(), String> {
+    paths::verify_metadata(wt)?;
     let conflict_path = staging.join("unmerged");
     let conflicts = new_file(&conflict_path)?;
     append(
@@ -94,6 +95,10 @@ pub(super) async fn append_wip(
         &[
             "diff",
             "--binary",
+            "--no-color",
+            "--src-prefix=a/",
+            "--dst-prefix=b/",
+            "--no-relative",
             "--no-ext-diff",
             "--no-textconv",
             "--cached",
@@ -108,7 +113,16 @@ pub(super) async fn append_wip(
     append(
         git,
         wt,
-        &["diff", "--binary", "--no-ext-diff", "--no-textconv"],
+        &[
+            "diff",
+            "--binary",
+            "--no-color",
+            "--src-prefix=a/",
+            "--dst-prefix=b/",
+            "--no-relative",
+            "--no-ext-diff",
+            "--no-textconv",
+        ],
         &work,
         false,
     )
@@ -127,6 +141,10 @@ pub(super) async fn append_wip(
                 "diff",
                 "--no-index",
                 "--binary",
+                "--no-color",
+                "--src-prefix=a/",
+                "--dst-prefix=b/",
+                "--no-relative",
                 "--no-ext-diff",
                 "--no-textconv",
                 "--",

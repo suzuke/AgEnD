@@ -538,6 +538,7 @@ cd /Users/suzuke/AlphaCR-worktrees/AgEnD-v2-pipeline    # 本次實作 worktree
 
 ## 進度紀錄
 
+- 2026-10-02 第十一輪 verifier 的六項本機 mandatory 通過（workspace 767 passed／2 ignored，accept 含四次開機），但 novel 以真 daemon／shim 重現強制 color 使 archive 無法 git apply、不完整 nested metadata 遺失 staged bytes，故仍 REFUTED；另重現 diff.noprefix 問題。封存／patch-id 固定無色 a/／b/ 全 repo diff，完整 filesystem 掃描 Git metadata；新增原 bytes 還原／保留回歸。修正待全新 verifier／CI，未 merge（draft PR #143）。
 - 2026-10-02 `29fb454` 的 Ubuntu push／PR CI 在 nested repo fixture 建 commit 時因沒有 local Git identity 失敗；補 user.name／email 並以沒有全域 Git 設定的環境重跑。產品碼不變，原紅燈保留；修正仍待 CI／全新 verifier，未 merge（draft PR #143）。
 - 2026-10-02 第十輪 verifier 的 unresolved-index 回歸失敗，其目錄數量斷言也包含重試中 staging；修正為檢查已發布 .patch。同時真 daemon 重現 nested untracked repo 取消後資料遺失，保存前拒絕 nested repo／gitlink／特殊檔案，no-index 錯誤不算成功；補原始資料保留與一般子目錄／空檔／symlink 還原回歸（draft PR #143）。待重新驗證，未 merge。
 - 2026-10-02 第九輪 verifier 另以真 daemon／shim 重現 `core.autocrlf=input` 取消後 CRLF 被封存為 LF；保存前檢查行尾轉換設定／attributes，無法保證原始 bytes 時保留 worktree／index 並回報 Failed，新增六個回歸（draft PR #143）。修正待全新 verifier 與 CI，未 merge。

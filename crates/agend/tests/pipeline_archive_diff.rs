@@ -183,6 +183,13 @@ fn display_diff_configuration_cannot_change_patch_identity() {
         &["config", "diff.display.textconv", "/usr/bin/true"],
     )
     .unwrap();
+    for (key, value) in [
+        ("color.ui", "always"),
+        ("color.diff", "always"),
+        ("diff.noprefix", "true"),
+    ] {
+        common::git(&lab.repo(), &["config", key, value]).unwrap();
+    }
     let after = runtime.block_on(git.patch_id(&lab.repo(), "HEAD")).unwrap();
     assert_eq!(after, before);
 }

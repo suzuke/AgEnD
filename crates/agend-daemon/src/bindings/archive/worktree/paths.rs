@@ -40,3 +40,29 @@ pub(super) fn verify_worktree(wt: &Path, tracked: &Path, untracked: &Path) -> Re
     }
     Ok(())
 }
+
+// Git intentionally hides .git paths, even when partial metadata is no longer a repository.
+pub(super) fn verify_metadata(wt: &Path) -> Result<(), String> {
+    let mut directories = vec![wt.to_path_buf()];
+    while let Some(dir) = directories.pop() {
+        for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let kind = entry.file_type().map_err(|e| e.to_string())?;
+            if entry
+                .file_name()
+                .as_encoded_bytes()
+                .eq_ignore_ascii_case(b".git")
+            {
+                if dir == wt && kind.is_file() {
+                    continue;
+                }
+                return Err("nested Git metadata cannot be archived; original WIP retained".into());
+            }
+            // Do not follow symlinks: their target bytes are archived separately.
+            if kind.is_dir() {
+                directories.push(entry.path());
+            }
+        }
+    }
+    Ok(())
+}

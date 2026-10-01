@@ -39,7 +39,13 @@ pub(super) async fn append_branch(
             append(
                 git,
                 repo,
-                &["show", "--no-patch", "--format=email", &commit],
+                &[
+                    "show",
+                    "--no-patch",
+                    "--no-color",
+                    "--format=email",
+                    &commit,
+                ],
                 patch,
                 false,
             )
@@ -50,6 +56,10 @@ pub(super) async fn append_branch(
                 &[
                     "diff",
                     "--binary",
+                    "--no-color",
+                    "--src-prefix=a/",
+                    "--dst-prefix=b/",
+                    "--no-relative",
                     "--no-ext-diff",
                     "--no-textconv",
                     "--full-index",
@@ -69,6 +79,10 @@ pub(super) async fn append_branch(
                     "-1",
                     "--stdout",
                     "--binary",
+                    "--no-color",
+                    "--src-prefix=a/",
+                    "--dst-prefix=b/",
+                    "--no-relative",
                     "--no-ext-diff",
                     "--no-textconv",
                     "--full-index",
