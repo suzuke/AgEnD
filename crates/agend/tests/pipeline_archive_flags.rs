@@ -8,6 +8,7 @@ fn probe(flag: &str, split: bool, fail_archive: bool) {
     lab.boot(None).unwrap();
     let task = lab.create("g10h", "demo", "concealed WIP").unwrap();
     let wt = lab.home.join("worktrees").join(&task);
+    common::git(&wt, &["config", "--worktree", "core.ignoreStat", "true"]).unwrap();
     if split {
         common::git(&wt, &["update-index", "--split-index"]).unwrap();
     }

@@ -50,10 +50,13 @@ fn cancellation_archives_large_committed_tracked_and_untracked_binaries_lossless
         ("tracked.bin", tracked),
         ("untracked.bin", untracked),
     ] {
-        assert_eq!(
-            std::fs::read(lab.repo().join(name)).unwrap(),
-            bytes,
-            "archive changed {name}"
+        let restored = std::fs::read(lab.repo().join(name)).unwrap();
+        assert!(
+            restored == bytes,
+            "archive changed {name}: restored length {}, expected length {}, first mismatch {:?}",
+            restored.len(),
+            bytes.len(),
+            restored.iter().zip(&bytes).position(|(a, b)| a != b)
         );
     }
 }
