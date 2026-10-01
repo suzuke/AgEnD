@@ -53,7 +53,7 @@ pub const DEFAULT_IDLE_EXIT: Duration = Duration::from_secs(24 * 60 * 60);
 /// A client must complete `hello` within this time (total, not per read).
 const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 /// Longest request line; a longer one gets `request_too_large` and is closed.
-pub const MAX_REQUEST_LINE: usize = 1 << 20;
+pub const MAX_REQUEST_LINE: usize = agend_core::protocol::holder::MAX_REQUEST_LINE;
 /// Largest `Resize` accepted, in rows and in columns (`invalid_size` above).
 pub const MAX_SCREEN_SIDE: u16 = 1000;
 /// After the agent ends, how long to wait for its last output before `Exited`

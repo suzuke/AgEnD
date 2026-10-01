@@ -2,17 +2,18 @@
 
 > **TL;DR**
 > - attention-first TUI；畫面層提前做（你同意與第 3–10 施工關並行，放寬 D22），資料先接假來源，draft PR 不 merge。
-> - 記住：**畫面只讀 `Source`，不知道資料從哪來**；接真 daemon 要等第 8 施工關把 client protocol 定案。
-> - 下一步：A 段已驗收、T1–T18／G1–G4 已追認（2026-09-26）；第 8 施工關已 merge，B 段開工前提案 P1–P7 使用者已確認（2026-09-28，全部照建議；T1、T2、T12、T13、T18、第 8 施工關 C2、第 7 施工關 P1 的差異都照新做法）；merge 這份提案後開工。
+> - 記住：**畫面只讀 `Source`，不知道資料從哪來**；真的來源 `ClientSource` 只經 `agend-client`，TUI 裡沒有 socket 程式碼；權限只在 daemon 擋。
+> - 下一步：B 段完成（2026-09-29：T19–T35 已追認、你親自驗收 B 段 7 步通過），merge PR #140；C 段（完整模式）等第 10 施工關做完再提案。
 
 **先看這條**：B 段（接真 daemon）的步驟會用到 `agend`。每個新開的終端機分頁（包括第二個終端）都要先跑 B 段開頭的設定，否則會跑到舊的 Node 版 `agend` 1.24.0。A 段只用 `cargo`，不用 `agend`。
 
 ## 狀態
 
-**實作中：畫面層完成；B 段提案已確認、待 merge（PR #133，branch `feat/gate-11-tui-daemon`）**。
+**實作中：B 段完成（PR #140，branch `feat/gate-11-tui-impl`）；C 段（完整模式）未開始，等第 10 施工關做完再提案**。
 
-- 畫面層（2026-09-26，已 merge #120）：A 段通過、T1–T18／G1–G4 已追認；畫面、按鍵、斷線畫面已完成並有測試；資料來自腳本假來源與 testkit 假 daemon。
-- B 段（2026-09-27，draft PR #133）：接真 daemon 的 P1–P7 使用者已確認（2026-09-28），merge 後開工。
+- 畫面層（2026-09-26，已 merge #120）：A 段通過、T1–T18／G1–G4 已追認。
+- B 段提案（draft PR #133）：P1–P7 使用者已確認（2026-09-28）。
+- B 段實作（2026-09-28，draft PR）：`ClientSource`（經 `agend-client`）、`agend app`、全貌與事件、`retry`、即時終端、只有操作者能打字、重連；daemon 的 `terminal_input` 與重訂失敗清掉舊串流；假 daemon 的終端與打字；CLP-18..20。自動驗收都已通過（verifier 第 4 輪 CONFIRMED）；「待你追認」T19–T35 已追認（2026-09-29）；你親自驗收 B 段 7 步通過（2026-09-29）。
 
 ## 範圍
 
@@ -61,7 +62,7 @@
 - 理由：放 lib 才能在 `agend-tui` 裡對假 daemon 測真實作（畫面＋協定＋client 一起），`agend app` 只剩接線；刪掉手寫的第二份 socket client，demo 走的路就是產品的路（#1493）。
 - 替代方案：`ClientSource` 放 `crates/agend`（TUI lib 完全不碰 client；但 TUI 的測試要搬去 `agend`，或留兩份 client）；`agend-client` 加非阻塞的 `try_next_event`（一條連線就夠，但讀到一半的行遇到逾時要自己接回，改到 client 的讀取核心）。
 - 例子：`cargo test -p agend-tui` 的 `client_source_*` 對假 daemon：`get_fleet` 回 1 個 team、2 個 instance → 首頁畫出 `┏ general`；假 daemon 發 `attention_resolved` → 下一次 `poll` 後那一項消失。
-- [ ] 使用者確認
+- [x] 使用者確認（2026-09-28）
 
 ### P2：`agend app` 誰做、home 怎麼找
 
@@ -75,7 +76,7 @@
 - 理由：`agend app` 只是「找 socket → 建 `ClientSource` → `run`」的接線，跟 TUI 一起驗最自然；home 規則只有一份，不在 TUI 另寫。
 - 替代方案：交給第 9 施工關（要等它 merge，而且它不驗 TUI）；`agend app` 在 agent 裡直接拒絕（多一條 CLI 端規則，D17 說權限只在 daemon）；預設繁中（跟 A 段 demo 不一致）。
 - 例子：`env -u AGEND_HOME agend app` → `AGEND_HOME is not set…`、exit 2；`agend app --lang zh-TW` → 首頁。
-- [ ] 使用者確認
+- [x] 使用者確認（2026-09-28）
 
 ### P3：全貌與事件怎麼對到畫面
 
@@ -101,7 +102,7 @@
 - 理由：一個來源（全貌＋事件），不再有「catalog 說的」與「daemon 說的」兩份真相；缺的欄位空著，不在 TUI 推算（G1、T18 的原則）。留著 `Catalog` 讓十幾個畫面函式不用改。
 - 替代方案：畫面直接讀 core 的 `FleetView`（少一層轉換，但每個畫面模組都要改，而且 G5 的欄位 core 還沒有）；關卡種類由 TUI 從 stage id 猜（猜錯會分錯組）。
 - 例子：真 daemon、`g11-1` 正常、`g11-2` 放棄 → 首頁 `需要你 · 1`（`g11-2`），`┏ general` 標題右邊有「需要你 1」，general 區塊寫 `沒有進行中的目標`（沒有 task）。
-- [ ] 使用者確認
+- [x] 使用者確認（2026-09-28）
 
 ### P4：「需要你」的操作：`retry` 與沒有操作的項目
 
@@ -115,7 +116,7 @@
 - 理由：同一套「選一列 → 送出 → 等 daemon 的事件」，請示與非請示只差送哪個請求；本機先拿掉會在 daemon 放回來時閃一下、甚至說謊。
 - 替代方案：按 `retry` 先問一次「確定？」（`retry` 只是重起、可以再放棄，多一步沒好處）；送出後本機立刻拿掉（見理由）。
 - 例子：`Enter` 展開 `g11-2` → 列 `1 重試` → 按 `1` → 訊息 `已送出：重試 g11-2`、清單變 `需要你 · 0`；daemon log `g11-2: retry requested by the operator`。
-- [ ] 使用者確認
+- [x] 使用者確認（2026-09-28）
 
 ### P5：`t` 的終端怎麼即時更新
 
@@ -128,7 +129,7 @@
 - 理由：holder 已經有完整的終端模擬器（`alacritty_terminal`）；TUI 自己再跑一個，起點只有純文字快照、沒有游標與屬性，套上位元組會畫錯。讓 holder 算畫面，TUI 不用多一個重依賴。
 - 替代方案：TUI 內嵌 `alacritty_terminal` 套用位元組（有顏色、更即時；但起點畫面不對，要等 agent 整頁重畫才正確，而且多一個大依賴）；不管有沒有輸出，每 500 ms 重拿畫面（更簡單，但閒著也在拿、最多慢半秒）。
 - 例子：`g11-1`（每秒印 `counter=N` 的假 agent）開著 `t` → 不按任何鍵，`counter=17` 一秒後變 `counter=18`。
-- [ ] 使用者確認
+- [x] 使用者確認（2026-09-28）
 
 ### P6：打字：只有操作者、不會誤觸
 
@@ -147,7 +148,7 @@
 - 理由：權限只在 daemon（D17），TUI 與 Telegram 共用；「預設唯讀＋要按 `i`」擋掉誤觸（在首頁習慣按的 `q`、`h`、數字不會跑進 agent）；codex 的打字路徑沒驗過，先關著比送出一則沒人知道去哪的訊息安全。
 - 替代方案：終端畫面一開就能打字（v1 的方式，最容易誤觸）；逐行輸入、按 `Enter` 才送（安全，但 claude 這類全螢幕程式要的是原始按鍵，方向鍵、`Esc` 都送不進去）；codex 照第 7 施工關 P1 一起開放（U17 不成立時，打的字可能不進 thread 或讓 daemon 的忙閒判斷錯亂）。
 - 例子：操作者在 `g11-1` 按 `i`、打 `hello` → 畫面出現 `hello`（PTY 回顯）；`AGEND_INSTANCE=g11-1 agend app` 裡同樣操作 → 底下 `forbidden: only the operator can type into an agent's terminal`、畫面沒有 `hello`。
-- [ ] 使用者確認
+- [x] 使用者確認（2026-09-28）
 
 ### P7：斷線與重連（落實第 8 施工關 P4）
 
@@ -161,9 +162,11 @@
 - 理由：一條「斷了就重拿全貌」的路，daemon 重啟、TUI 落後、socket 被刪都走它（第 8 施工關 P4、P8）。這項不改已確認的東西，只是寫清楚 B 段怎麼做。
 - 替代方案：沿用舊游標訂閱（第 8 施工關 P4 已排除）；版本不合也一直重試（畫面一直跳訊息，沒有用）。
 - 例子：TUI 開在 `g11-1` 的終端 → 停 daemon → 斷線畫面、重試次數增加 → 起 daemon → `Reconnected to the daemon.`，回到 `g11-1` 的終端，`counter` 接著跑（同一個 holder）。
-- [ ] 使用者確認
+- [x] 使用者確認（2026-09-28）
 
 ### B 段不做（明確列出）
+
+- **C 段（完整模式，使用者 2026-09-29 決定另開）**：TUI 裡完整重現 agent CLI——按鍵進入後整個視窗交給 agent（只留一行狀態列）、agent 的 PTY 改成視窗大小（holder 已有 `Resize`，client protocol 要加操作者專用的請求、升一個 minor）、按鍵／滑鼠／貼上原樣轉給 agent、`Ctrl-]` 回來；同一個 agent 被不同大小的視窗打開時以最後打開的為準。滑鼠滾動也在這段。等第 10 施工關做完再寫提案，協定版本到時排定。
 
 - 把 TUI 視窗大小同步到 agent 的 PTY（resize）、滑鼠、bracketed paste、分割視窗。
 - 已讀同步（第 12 施工關）；真 daemon 的請示（第 10 施工關）；codex 打字（U17 之後，P6）。
@@ -178,6 +181,14 @@
 - 第 9 施工關與本段誰先 merge，決定 `agend app` 沒設 home 時的訊息字樣（P2）。
 - 第 7 施工關若先 merge 且 U17 已驗證，P6 的 codex 限制照你的決定開放。
 
+開工後的量測與處理（2026-09-28）：
+
+- 節流（P5）：假 daemon 上從送出位元組到畫面換掉 220 ms；每 50 ms 一塊、連送 21 塊（1.3 秒）只重拿 5 次畫面；最後一段輸出（提示符號）有補畫（`tui_accept` 的 `== terminal`）。真 daemon 上計數器每秒更新（`tui_real`）。
+- 第 9 施工關先開工（本 branch 以 #136 為底），所以 `agend app` 直接用 `home::resolve()`，沒設 home 的字樣是第 9 施工關那句。
+- 第 7 施工關已 merge（#132），codex 的 `terminal_input` 在真 daemon 上用 `fake_codex` 驗到 `not_supported`（`crates/agend/tests/tui_daemon.rs`）。U17 仍未驗證。
+- holder 的畫面是 50 列，比 TUI 的內容區（100×30 時 26 列）高：照 P5「從左上角畫、超出截掉」，計數器 26 秒後就跑出畫面、claude 的輸入框在最下面看不到。改成跟著最後一列（見 T19，請明確決定）。
+- `Ctrl-]` 在 macOS Terminal／iTerm2、非美式鍵盤上實際送出什麼：沒有在真的終端機實測（這個工作環境沒有互動終端）；自動測試只驗 crossterm 的三種回報（`Ctrl-]`、`Ctrl-5`、0x1D）。請在你親自驗收 B4 確認，按不出來就另訂離開鍵。
+
 ## 自動驗收（完成定義）
 
 - [x] `~/.cargo/bin/cargo test -p agend-tui` 單獨通過（畫面層，2026-09-25）
@@ -189,42 +200,26 @@
 
 B 段（P1–P7 確認後才開工；上面畫面層的項目在 B 段要重跑一次）：
 
-- [ ] `~/.cargo/bin/cargo test -p agend-tui`、`-p agend-client`、`-p agend-daemon`、`-p agend` 單獨通過，包括：`ClientSource` 對假 daemon（全貌 → 畫面、`attention_resolved` 拿掉項目、`event_gap` 與 EOF 進斷線畫面、重連重拿全貌並回到原畫面）；`retry` 只在收到事件後消失（假 daemon `hold_resolved_events` 延後事件時，`accepted` 之後項目仍在）（P4）；只有終端連線 EOF 時只重連它、不進斷線畫面，開關終端 20 次後沒有多出來的 thread 與連線，停止的終端按 `i` 不進輸入模式（P1、P5）；終端收到位元組後 300 ms 加一次來回內換成新畫面、節流上限、重拿之後才到的最後一段輸出也會補畫（P5）；`terminal_input` 只走終端連線、它的錯誤不會變成 `retry` 的回覆；agent 回 `forbidden`（先查身分）、沒有活的終端回 `no_terminal`、操作者的位元組原樣到 holder、codex 回 `not_supported`（P6）；輸入模式只有 `Ctrl-]` 不送、斷線自動離開（P6）；`agend app` 沒設 home exit 2、非終端 exit 2（P2）
-- [ ] `~/.cargo/bin/cargo test -p agend-testkit` 通過：假 daemon 的每個 instance 畫面、`terminal_bytes`、`terminal_input`（P1）；`CLP` 新列對假 daemon 與真 `agend daemon` 都通過，每列有 mutant
-- [ ] `~/.cargo/bin/cargo xtask accept tui` 多印一段真 daemon（`agend daemon` 在暫存 home、`App` 經 `agend-client`），並對應下面 B 段步驟 1
-- [ ] `cargo xtask check-deps` 最後一行照舊 `… no-std build ok)`（`agend-tui` 仍不依賴 SQLite、`agend-daemon`）
-- [ ] 測試不留殘留：`pgrep -fl "agend (holder|daemon)"` 沒有輸出、`/tmp/g11.*` 沒有留下（驗收用 `mktemp -d /tmp/g11.XXXX`，測試也用 `/tmp/g11.` 開頭）
-- [ ] fresh-context verifier 重跑 B 段並嘗試推翻
+- [x] `~/.cargo/bin/cargo test -p agend-tui`、`-p agend-client`、`-p agend-daemon`、`-p agend` 單獨通過（2026-09-28，`cargo xtask accept tui` 逐一跑），包括：`ClientSource` 對假 daemon（全貌 → 畫面、`attention_resolved` 拿掉項目、`event_gap` 與 EOF 進斷線畫面、重連重拿全貌並回到原畫面）；`retry` 只在收到事件後消失（假 daemon `hold_resolved_events` 延後事件時，`accepted` 之後項目仍在）（P4）；只有終端連線 EOF 時只重連它、不進斷線畫面，開關終端 20 次後沒有多出來的 thread 與連線，停止的終端按 `i` 不進輸入模式（P1、P5）；終端收到位元組後 300 ms 加一次來回內換成新畫面、節流上限、重拿之後才到的最後一段輸出也會補畫（P5）；`terminal_input` 只走終端連線、它的錯誤不會變成 `retry` 的回覆；agent 回 `forbidden`（先查身分）、沒有活的終端回 `no_terminal`、操作者的位元組原樣到 holder、codex 回 `not_supported`（P6）；輸入模式只有 `Ctrl-]` 不送、斷線自動離開（P6）；`agend app` 沒設 home exit 2、非終端 exit 2（P2）
+- [x] `~/.cargo/bin/cargo test -p agend-testkit` 通過：假 daemon 的每個 instance 畫面、`terminal_bytes`、`terminal_input`（P1）；`CLP` 新列（CLP-18..22，CLP-10 改寫）對假 daemon 22/22、真 `agend daemon` 21 條、22 個案例（CLP-8 照舊在程序內）都通過，每列有 mutant（`FreezesScreen`、`ScreenForAnyInstance`、`AnyoneMayType`、`TypesIntoTheLiveOne`、`ForwardsHugeInput`、`RefusesAtTheLimit`、`AcceptsRefused`）；先寫測試時假 daemon 4 條、真 daemon 3 條失敗（見進度紀錄）
+- [x] `~/.cargo/bin/cargo xtask accept tui` 多印一段真 daemon（`agend daemon` 在暫存 home、`App` 經 `agend-client`，`crates/agend/examples/tui_real.rs`），並對應下面 B 段步驟 1
+- [x] `cargo xtask check-deps` 最後一行照舊 `… no-std build ok)`（`agend-tui` 仍不依賴 SQLite、`agend-daemon`）
+- [x] 測試不留殘留：跑完 `/tmp/g11.*` 沒有留下；本 worktree 的 `agend` 沒有殘留的 daemon／holder（測試的 home 是 `/tmp/g11.t-<pid>-<n>`）
+- [x] fresh-context verifier 重跑 B 段並嘗試推翻（第 1–3 輪 REFUTED 全修；第 4 輪 2026-09-29 CONFIRMED `517697c`）
 
 ## 你親自驗收
 
 由 agent 帶著走：一次一步，你貼輸出，agent 逐項比對。每一步：照抄指令 → 對照「應該看到」→ 對了就打勾。任何一步不符就停，記在「驗收紀錄」。
 
-### A. 畫面層（假資料；步驟本身已追認，T14）
+### A. 畫面層（假資料；步驟本身已追認，T14；B 段改了 A1、A4、A5 的字樣，見 T20）
 
 在這個 PR 的 worktree（`~/Documents/Hack/AgEnD-v2-tui`）或 merge 後的 repo 根目錄跑。終端機至少 100×30。
 
 1. 跑 demo。
 
-   ```bash
-   ~/.cargo/bin/cargo xtask accept tui 2>&1 | grep -E '^(==|tui demo|gate 11)'
-   ```
+   B 段起這一步跟 B 段第 1 步是同一個指令（看 B1 的「應該看到」）：前四段 `== screens (fake daemon through agend-client, 100x30)`、`== navigate …`、`== resolve …`、`== disconnect …` 是 A 段的，現在經 `agend-client`（`ClientSource`）連假 daemon，不再經手寫的 socket client；team 順序照 daemon 的全貌（`general` 在最前）、Task Detail 寫 `repo none`（協定沒有 repo，G5）。想看畫面本身：拿掉 `| grep ...`，每個畫面以 `   | ` 開頭印出，英文與繁中各一次。
 
-   應該看到（第一次要編譯約 1 分鐘）：
-
-   ```text
-   == gate 11 (tui) == docs/gates/gate-11-tui.md
-   == screens (fake daemon over its socket, 100x30)
-   == navigate (scripted keys; each line: keys -> breadcrumb | selected row or first line)
-   == resolve (read is not resolved; answering removes the item)
-   == disconnect (stop the fake daemon while the TUI is open)
-   tui demo: screens, navigation, resolve and disconnect checks passed
-   gate 11 (tui): checks passed
-   ```
-
-   想看畫面本身：拿掉 `| grep ...`，每個畫面以 `   | ` 開頭印出，英文與繁中各一次。
-
-   **這步在驗什麼**：四個畫面、按鍵、回答請示、斷線，全部透過 testkit 假 daemon 的真 socket（client protocol v1）跑，而且每段都有自動檢查。壞了的話，畫面層和協定之間的接縫就沒有證據，之後接真 daemon 會一次冒出很多問題。
+   **這步在驗什麼**：四個畫面、按鍵、回答請示、斷線，全部透過 testkit 假 daemon 的真 socket（client protocol）跑，而且每段都有自動檢查。壞了的話，畫面層和協定之間的接縫就沒有證據，之後接真 daemon 會一次冒出很多問題。
 
    - [x] 通過
 
@@ -273,7 +268,7 @@ B 段（P1–P7 確認後才開工；上面畫面層的項目在 B 段要重跑�
 
    | 操作 | 應該看到 |
    |---|---|
-   | `h`，`↓` 移到 `● Fix lock-order inversion`，按 `t` | `dev-1 的終端 · 唯讀快照`，內容有 `cargo test --workspace` |
+   | `h`，`↓` 移到 `● Fix lock-order inversion`，按 `t` | `dev-1 的終端 · 即時`，內容有 `cargo test --workspace` |
    | `←` | 回首頁，選取還在同一列 |
    | `↑` 移到 `┏ archfix`，按 `→` | team 頁，第一行 `AgEnD › archfix`，`[1 目標]` |
    | `2`，`↓` 兩次到 `qa-1`，按 `t` | 底下訊息 `qa-1 沒有終端輸出。`，畫面不變 |
@@ -292,9 +287,9 @@ B 段（P1–P7 確認後才開工；上面畫面層的項目在 B 段要重跑�
    ~/.cargo/bin/cargo run -q -p agend-tui --example tui_fake -- --daemon
    ```
 
-   操作：`↓` 三次、`→`（進 archfix team 頁）→ `F2`（停掉假 daemon）
+   操作：`↓` 四次（`--daemon` 時 team 順序照 daemon：`general`、`archfix`、`research`）、`→`（進 archfix team 頁）→ `F2`（停掉假 daemon）
 
-   應該看到：`━━ Daemon disconnected`、`Lost the connection to the daemon: the daemon closed the connection`、`Reconnect attempt N failed: cannot connect to …`（N 會增加），沒有舊資料，程式沒有當掉。
+   應該看到：`━━ Daemon disconnected`、`Lost the connection to the daemon: the daemon closed the connection`、`Reconnect attempt N failed: cannot reach the AgEnD daemon at …`（N 會增加），沒有舊資料，程式沒有當掉。
 
    操作：`F2`（啟動新的假 daemon）
 
@@ -304,9 +299,9 @@ B 段（P1–P7 確認後才開工；上面畫面層的項目在 B 段要重跑�
 
    - [x] 通過
 
-### B. 接真 daemon（P1–P7 已確認；應該看到的字樣是設計，實作後改成實跑輸出）
+### B. 接真 daemon（P1–P7 已確認；「應該看到」是實作者 2026-09-28 在 macOS 照抄指令實跑的輸出）
 
-用三個終端機分頁：**第一個跑 daemon**，**第二個跑 `agend app`**，第三個只在步驟 5 用。步驟 2 起用同一個暫存 home。
+用三個終端機分頁：**第一個跑 daemon**，**第二個跑 `agend app`**，第三個只在步驟 5 用。步驟 2 起用同一個暫存 home。時間戳、pid、session id、暫存目錄名每次不同。
 
 **每個新開的終端機分頁都要先跑這段**。第 13 施工關之前沒有安裝程式，而你的 PATH 上有舊的 Node 版 `agend`（v1-ts 1.24.0）：
 
@@ -323,12 +318,34 @@ unset AGEND_BIN               # 前幾關步驟留下的 export 可能指到已�
    **這步在驗什麼**：真的 `Source`（`ClientSource`，P1）對假 daemon 與真 `agend daemon` 都畫出正確畫面；`retry`、終端即時更新、打字權限、重連這幾段有自動檢查。壞了的話，後面幾步你看到的問題分不出是 TUI 還是 daemon 的。
 
    ```bash
-   ~/.cargo/bin/cargo xtask accept tui 2>&1 | grep -E '^(==|tui demo|gate 11)'
+   ~/.cargo/bin/cargo xtask accept tui 2>&1 | grep -E '^(==|tui |gate 11)'
    ```
 
-   應該看到：A 段第 1 步那幾行，再多出 `== real daemon …`、`== retry …`、`== terminal …`、`== input …` 幾段（確切字樣開工時細化），最後 `gate 11 (tui): checks passed`。
+   應該看到（要跑幾分鐘：前面是 5 個 crate 的 fmt／clippy／測試，真 daemon 那段約 1 分鐘）：
 
-   - [ ] 通過
+   ```text
+   == gate 11 (tui) == docs/gates/gate-11-tui.md
+   == screens (fake daemon through agend-client, 100x30)
+   == navigate (scripted keys; each line: keys -> breadcrumb | selected row or first line)
+   == resolve (read is not resolved; answering removes the item)
+   == disconnect (stop the fake daemon while the TUI is open)
+   == retry (fake daemon holds attention_resolved: the item leaves only on the event)
+   == terminal (live: output marks the screen stale; the holder's screen is fetched again)
+   == input (i types; every key goes to the agent except Ctrl-])
+   tui demo: screens, navigation, resolve, disconnect, retry, terminal and input checks passed
+   == real daemon (agend daemon in a temp home; App through agend-client, 100x30)
+   == retry (real daemon: the item leaves on attention_resolved)
+   == terminal (real daemon: live, no key pressed)
+   == input (real daemon: i types, Ctrl-] stops, only the operator)
+   == reconnect (real daemon restarted while the terminal is open)
+   == agend app (the binary: exits before the full screen)
+   tui real-daemon demo: all sections passed
+   gate 11 (tui): checks passed
+   ```
+
+   關鍵：`== retry`、`== terminal`、`== input` 兩次（先假 daemon、再真 daemon），`tui demo: … passed`、`tui real-daemon demo: all sections passed`、最後 `gate 11 (tui): checks passed`。想看每段的檢查與畫面：拿掉 `| grep ...`。
+
+   - [x] 通過
 
 2. 起 daemon（一個正常、一個一起來就死的假 agent），開 `agend app`。
 
@@ -343,9 +360,24 @@ unset AGEND_BIN               # 前幾關步驟留下的 export 可能指到已�
    agend daemon
    ```
 
-   應該看到：`added g11-1 …`、`added g11-2 …`，然後 `listening on /tmp/g11.…/run/daemon.sock`、`agend daemon ready: instances=2 …`（daemon 留在前景）。
+   應該看到（daemon 留在前景；約 15 秒後 `g11-2` 放棄）：
 
-   第二個終端（先跑開頭那段、貼上 `export AGEND_HOME=…`）：
+   ```text
+   added g11-1: claude session 02bb5587-4785-42c4-96a8-dbc5ec7f73fe in /tmp/g11.a74uhl6m/workspace/g11-1
+   added g11-2: claude session a2db245b-a3f3-4584-8110-d00d32005f45 in /tmp/g11.a74uhl6m/workspace/g11-2
+   2026-09-28T13:58:48Z g11-1: start --session-id 02bb5587-4785-42c4-96a8-dbc5ec7f73fe
+   2026-09-28T13:58:48Z g11-2: start --session-id a2db245b-a3f3-4584-8110-d00d32005f45
+   2026-09-28T13:58:48Z listening on /tmp/g11.a74uhl6m/run/daemon.sock
+   2026-09-28T13:58:48Z agend daemon ready: instances=2 recovered=0 started=2 orphans=0
+   2026-09-28T13:58:53Z g11-2: restart 1/3 --resume a2db245b-a3f3-4584-8110-d00d32005f45
+   2026-09-28T13:58:58Z g11-2: restart 2/3 --resume a2db245b-a3f3-4584-8110-d00d32005f45
+   2026-09-28T13:59:03Z g11-2: restart 3/3 --resume a2db245b-a3f3-4584-8110-d00d32005f45
+   2026-09-28T13:59:03Z g11-2 failed: restarted 3 times in 10m and it still died; not restarting
+   ```
+
+   （中間還有 `holder pid=… started`、`agent g11-2 exited (code=1)` 等行，這裡省略。）
+
+   第二個終端（先跑開頭那段、貼上 `export AGEND_HOME=…`；**在 `g11-2 failed` 出現之前**開好 `agend app`，才看得到它自己出現）：
 
    ```bash
    env -u AGEND_HOME agend app; echo "exit=$?"
@@ -354,13 +386,13 @@ unset AGEND_BIN               # 前幾關步驟留下的 export 可能指到已�
 
    應該看到：
 
-   | 時間點 | 要找的 |
+   | 時間點 | 要找的（實跑） |
    |---|---|
-   | 第一行指令 | `AGEND_HOME is not set…`、`exit=2`（沒有進全螢幕） |
-   | 剛開 | 首頁、`┏ general` 區塊寫 `沒有進行中的目標` |
-   | 約 15 秒內（不要按鍵） | 最上面出現 `━━ 需要你 · 1 ━━`，那一項是 `g11-2`，右邊有 `新` |
+   | 第一行指令 | `agend: AGEND_HOME is not set; choose a directory for AgEnD's data and run: export AGEND_HOME=<absolute path>`、`exit=2`（沒有進全螢幕） |
+   | 剛開 | 首頁、`┏›general ───…─── ? 2 狀態不明`、`┃    沒有進行中的目標` |
+   | 約 15 秒內（不要按鍵） | 最上面 `━━ 需要你 · 1 ━━`，那一項 `▌›! g11-2 failed: restarted 3 times in 10m and it still died; not restarting    新  general · —` |
 
-   - [ ] 通過
+   - [x] 通過
 
 3. 處理「需要你」：看過不會消失，按 `重試` 才消失（接著第 2 步的畫面）。
 
@@ -368,29 +400,29 @@ unset AGEND_BIN               # 前幾關步驟留下的 export 可能指到已�
 
    操作：`Enter`（展開 `g11-2`）→ `h`（回首頁）
 
-   應該看到：展開時有 `不處理的話：g11-2 stays stopped` 與一列 `1 重試`；回首頁後還是 `需要你 · 1`，但 `新` 不見了（已讀）。
+   應該看到：展開時有 `┃    不處理的話：g11-2 stays stopped` 與一列 `┃    [1] 重試`；回首頁後還是 `需要你 · 1`，但那一列右邊的 `新` 不見了（已讀）。
 
    操作：`Enter` → `1`
 
-   應該看到：底下 `已送出：重試 g11-2`，清單變 `需要你 · 0`；第一個終端的 daemon 印 `g11-2: retry requested by the operator`、`g11-2: start …`。`--dies` 的 agent 還是會死：約 15 秒後它又回到「需要你」、又有 `新`，這是正常的。
+   應該看到：底下 `已送出：重試 g11-2`，清單變 `━━ 需要你 · 0 項待處理`；第一個終端的 daemon 印 `g11-2: retry requested by the operator`、`g11-2: start --resume …`。`--dies` 的 agent 還是會死：約 15 秒後它又回到「需要你」、又有 `新`，這是正常的。
 
-   - [ ] 通過
+   - [x] 通過
 
 4. `t` 看即時終端、`i` 打字、`Ctrl-]` 離開；導覽照舊。
 
    **這步在驗什麼**：`t` 看到的是真 agent 的即時畫面，不是快照（P5）；打字要先按 `i`，平常的鍵不會跑進 agent（P6）；接真 daemon 後 `←`、`/`、`L` 行為沒變。壞了的話，你照過期畫面做決定，或一個 `q` 就打進 agent 裡。
 
-   | 操作 | 應該看到 |
+   | 操作 | 應該看到（實跑） |
    |---|---|
-   | `/`，打 `g11-1`，`Enter` | `g11-1 的終端 · 即時`，內容有 `counter=…`；**不按鍵**，數字每秒加一 |
-   | `L` | 同一個畫面換成英文（`Terminal of g11-1 · live` 之類），畫面上沒有多出 `L`；再按一次換回來 |
-   | `i` | 標題變 `g11-1 的終端 · 輸入中（Ctrl-] 離開）`、外框換顏色 |
-   | 打 `hello`（**不要按 `Ctrl-C`**：會送進 agent、讓它結束再被重起） | 畫面上 `counter=…` 之間出現 `hello`（PTY 回顯） |
-   | `Ctrl-]` | 標題回到 `· 即時` |
+   | `/`，打 `g11-1`，`Enter` | 標題 `━━ g11-1 的終端 · 即時`，內容有 `│ counter=…`；**不按鍵**，最下面的數字每秒加一（畫面比視窗高時跟著最後一列，標題固定在上面，T19） |
+   | `L` | 同一個畫面換成英文：`━━ Terminal of g11-1 · live`，畫面上沒有多出 `L`；再按一次換回來 |
+   | `i` | 標題變 `━━ g11-1 的終端 · 輸入中（Ctrl-] 離開）`、外框換成黃色；底下說明只剩 `Ctrl-] 離開輸入 · 其他鍵都送給 agent` |
+   | 打 `hello`（**不要按 `Ctrl-C`**：會送進 agent、讓它結束再被重起） | 畫面上出現 `hello`（PTY 回顯；實跑是 `│ hellocounter=18` 這樣接在下一行 counter 前面） |
+   | `Ctrl-]`（按不出來請記下來，見「已知風險」） | 標題回到 `· 即時` |
    | `←` | 回到按 `/` 的地方 |
    | `q` | 離開，終端機恢復正常 |
 
-   - [ ] 通過
+   - [x] 通過
 
 5. 故意弄壞：假裝是 agent 來按。
 
@@ -402,13 +434,13 @@ unset AGEND_BIN               # 前幾關步驟留下的 export 可能指到已�
    AGEND_INSTANCE=g11-1 agend app --lang zh-TW
    ```
 
-   | 操作 | 應該看到 |
+   | 操作 | 應該看到（實跑） |
    |---|---|
-   | `/`，打 `g11-1`，`Enter`，`i`，打 `x` | 底下 `forbidden: only the operator can type into an agent's terminal`，回到唯讀，畫面沒有 `x` |
-   | `h`；如果 `g11-2` 在「需要你」：`Enter` → `1` | 底下 `forbidden: only the operator can resolve needs-you items; …`，項目還在 |
+   | `/`，打 `g11-1`，`Enter`，`i`，打 `x` | 底下 `daemon 拒絕：forbidden: only the operator can type into an agent's terminal`，回到唯讀（標題 `· 即時`），畫面沒有 `x` |
+   | `h`；如果 `g11-2` 在「需要你」：`Enter` → `1` | 底下 `daemon 拒絕：forbidden: only the operator can resolve needs-you items; ask the operator`（第 9 施工關 merge 後的字樣），項目還在 |
    | `q` | 離開 |
 
-   - [ ] 通過
+   - [x] 通過
 
 6. 故意弄壞：TUI 開著時重啟 daemon。
 
@@ -418,13 +450,21 @@ unset AGEND_BIN               # 前幾關步驟留下的 export 可能指到已�
 
    操作：第一個終端 Ctrl-C。
 
-   應該看到（第二個終端）：`━━ Daemon disconnected`、`Lost the connection to the daemon: the daemon closed the connection`、`Reconnect attempt N failed: …`（N 會增加），沒有舊資料，程式沒有當掉。
+   應該看到（第二個終端，實跑）：
+
+   ```text
+   ━━ Daemon disconnected
+   Lost the connection to the daemon: the daemon closed the connection
+   Reconnect attempt 1 failed: cannot reach the AgEnD daemon at /tmp/g11.…/run/daemon.sock…
+   ```
+
+   N 會增加（行尾的原因在 100 欄會被截成 `…`），沒有舊資料，程式沒有當掉。
 
    操作：第一個終端 `agend daemon`。
 
-   應該看到：一秒內 `Reconnected to the daemon.`，回到 `Terminal of g11-1 · live`，`counter` 接著原本的數字跑（同一個 holder）；`←` 回首頁，`g11-2` 那一項還在（它在 DB 裡是 `failed`，由全貌帶回來，不是重播）。`q` 離開。
+   應該看到：一秒內底下 `Reconnected to the daemon.`，回到 `━━ Terminal of g11-1 · live`，`counter` 接著原本的數字跑（實跑：重啟前 `counter=31`，重連後 `counter=32`，同一個 holder）；`←` 回首頁，`g11-2` 那一項還在（實跑：`▌›! g11-2 failed: it failed before this daemon started    new  general · —`，它在 DB 裡是 `failed`，由全貌帶回來，不是重播）。`q` 離開。
 
-   - [ ] 通過
+   - [x] 通過
 
 7. 收尾。
 
@@ -438,7 +478,16 @@ unset AGEND_BIN               # 前幾關步驟留下的 export 可能指到已�
    agend daemon
    ```
 
-   應該看到：`removed g11-1`、`removed g11-2`；daemon 印 `orphan g11-1: Shutdown sent`、`orphan g11-2: Shutdown sent`、`agend daemon ready: instances=0 … orphans=2`。
+   應該看到：
+
+   ```text
+   removed g11-1
+   removed g11-2
+   2026-09-28T13:59:10Z orphan g11-1: Shutdown sent
+   2026-09-28T13:59:10Z orphan g11-2: Shutdown sent
+   2026-09-28T13:59:10Z listening on /tmp/g11.a74uhl6m/run/daemon.sock
+   2026-09-28T13:59:10Z agend daemon ready: instances=0 recovered=0 started=0 orphans=2
+   ```
 
    第二個終端：
 
@@ -448,11 +497,11 @@ unset AGEND_BIN               # 前幾關步驟留下的 export 可能指到已�
 
    應該看到只有 `pgrep exit=1`。最後第一個終端 Ctrl-C，再 `rm -rf "$AGEND_HOME"`。
 
-   - [ ] 通過
+   - [x] 通過
 
 ## 待你追認
 
-畫面層提前時由實作者決定、可以反悔的事。每項：決定 · 理由 · 反悔的成本 · 追認結果。G 開頭的是給第 8 施工關的協定缺口（這個 PR 沒有改 core、沒有發明 wire 訊息）。
+畫面層提前時（T1–T18、G1–G4）與 B 段實作時（T19 起）由實作者決定、可以反悔的事。每項：決定 · 理由 · 反悔的成本 · 追認結果。G 開頭的是給第 8 施工關的協定缺口。B 段沒有改 core、沒有新的 wire 訊息或欄位（client protocol 仍是 1.2）。
 
 | # | 決定 | 理由 | 反悔成本 | 追認結果 |
 |---|---|---|---|---|
@@ -478,6 +527,23 @@ unset AGEND_BIN               # 前幾關步驟留下的 export 可能指到已�
 | G2 | 缺口：`attention_required` 沒有「解決後能放行多少工作」與「開始等待的時間」→ D36 排序時 unblocks 一律 0、用 event id 代替等待時間（最舊的在前） | 不在 TUI 自己推算 | 第 8 施工關：`AttentionRequiredData` 加兩個欄位（additive） | 已追認（2026-09-26） |
 | G3 | 缺口：不是請示的「需要你」（agent 卡住、用量上限）沒有操作，也沒有「已處理」事件 → 畫面寫明「client protocol v1 還沒有處理這一項的操作」，而且一直留在清單 | 不發明 wire 訊息 | 第 8 施工關：加操作（重試、暫停…）與清除事件 | 已追認（2026-09-26） |
 | G4 | 缺口：沒有已讀狀態 → 見 T4 | 同上 | 第 8 施工關：加已讀請求與事件，TUI 與 Telegram 共用 | 已追認（2026-09-26） |
+| T19 | **與 P5「畫面從左上角畫，超出就截掉」字面不同，請明確決定**：終端畫面去掉最後一列輸出之後的空白列、內容比視窗高時**跟著最後一列**（標題固定在上面）；`↑` 往回捲就停在那裡，捲回最底又開始跟；左邊照舊從第一欄畫、右邊截掉 | holder 的畫面固定 50 列（`agend-holder` `DEFAULT_ROWS`），100×30 的 TUI 只有 26 列內容：照字面畫，計數器 26 秒後跑出畫面、claude 的輸入框在最下面永遠看不到，B4「數字每秒加一」做不到 | 改回從第一列畫：`App::sync` 一行（拿掉 `follow`）＋`terminal::rows` 不去尾端空白 || 已追認（2026-09-29）：跟著最後一列、`↑` 往回捲；使用者要的滑鼠滾動與完整重現 agent CLI 移到 C 段 |
+| T20 | A 段 demo 與 `tui_fake --daemon` 改經 `ClientSource`，所以 A1 的輸出、A4 的終端標題（`· 即時`）、A5 的按鍵（`↓` 四次：daemon 的全貌把 `general` 排第一）與字樣（`cannot reach the AgEnD daemon at …`，`agend-client` 的訊息）跟著改；team 順序照 daemon 給的，TUI 不重排 | 刪掉手寫 socket client 後 demo 走產品的路（P1）；排序是 daemon 的事 | 在 TUI 依名稱或固定規則排 team：`home::rows` 一處，A 段步驟再改回來 || 已追認（2026-09-29） |
+| T21 | 依賴：`agend-client` 與 `agend-testkit` 一般依賴加 `base64 0.22`（holder 已經用同一版，`Cargo.lock` 沒有新 crate）；`agend` 的 dev 依賴加 `ratatui`（同 `agend-tui` 的設定，真 daemon 的 TUI 測試送按鍵） | core 寫明「base64 由 adapter 編碼」：`Sender::terminal_input(id, &[u8])` 在 client 裡編、`next_terminal` 在 client 裡解；假 daemon 要記下原樣位元組 | client 改收 base64 字串、TUI 自己編（多一個依賴在 TUI）；或手寫 20 行 base64 || 已追認（2026-09-29） |
+| T22 | agent 的「目前 task」由 task 的 `assignee` 反推：它持有、還沒完成的第一個 task（全貌的 instance 沒有 task 欄位）；task 事件進來時重算 | 協定只在 task 上寫持有者；Agent Detail、`/` 結果要顯示 | 協定在 `InstanceView` 加 task（1.3 以後）後改讀它：`source::client::agent_info` 一處 || 已追認（2026-09-29） |
+| T23 | 沒有關卡的 task（第 10 施工關前的真 daemon）：是否完成看 `status`（`done`、`superseded`）；狀態欄顯示 daemon 的 `status` 原字（`open`、`running`、`blocked`，不翻譯，跟其他 daemon 資料一樣）；沒有進度條（`[□□] 0/0` 不畫） | P3 只說沒有 `stages` 不畫進度條；否則沒有關卡的 task 一律被算成「已完成」 | `TaskInfo::is_done`、`ui::task_status` 各幾行 || 已追認（2026-09-29） |
+| T24 | `i` 只在即時的終端有用：已停止 → `這個 agent 已停止，不能輸入`（P6）；已結束、重試中 → `終端已結束，回來之後才能輸入`（P6 沒寫這種）。停止的 instance 又跑起來時先重訂，畫面回來前標題短暫是 `· 已結束，重試中` | 已結束時送出的字不會到任何地方；重訂可能要重試幾次（holder 還在起來） | 允許在已結束時進輸入模式：`App::start_typing` 一行 || 已追認（2026-09-29） |
+| T25 | 版本不合的斷線畫面把「正在自動重新連線…」換成 `版本不合，不自動重試；按 r 再試一次。`；`r` 只試一次，還是不合就維持不自動重試 | P7 說不自動重試、`r` 可手動重試，沒寫畫面字樣 | 改字：`i18n` 一行 || 已追認（2026-09-29） |
+| T26 | 英文字樣（P3–P6 只給繁中）：狀態 `starting`／`stopped`／`state unknown`；操作 `Retry`、`Sent: Retry g11-2`、`No actions available`；終端標題 `Terminal of X · live`／`· last screen (stopped)`／`· ended, retrying`／`· typing (Ctrl-] to leave)`；說明列 `i type`、`Ctrl-] stop typing · every other key goes to the agent`。繁中的「狀態不明」取代 A 段的「未知」 | 與繁中對應；`unknown` 在英文也要跟「不知道這個狀態」分開 | 改字：`i18n` || 已追認（2026-09-29） |
+| T27 | 開終端（`t`、`/`，以及 `reopen_terminal`：`←` 回到下面那層終端畫面、重連之後重訂開著的終端）時主 thread 等第一張畫面最多 10 秒（跟 P7 的請求一樣會凍結畫面）；`t` 失敗（`no_terminal`、空畫面）照 A 段只給一行訊息、不開畫面、連線收掉；在一個終端畫面上用 `/` 開另一個失敗時，原本那個重新訂閱 | `t` 要立刻知道有沒有畫面才能決定開不開新的一層（A 段的行為）；daemon 活著時是毫秒級 | 改成先開畫面再等：`App::open_terminal` 與畫面多一個「連線中」狀態 || 已追認（2026-09-29） |
+| T28 | 輸入模式的外框顏色是黃色（標題列的 `━` 與每列的 `│`） | P6 只說「外框換顏色」 | 改色：`ui::draw_row` 一處 || 已追認（2026-09-29） |
+| T29 | CLP-10 改寫：B 段起 `terminal_input` 不再一律 `not_supported`，所以 CLP-10 改測「對沒有終端的 instance（不存在的 id）送 `terminal_input` → `no_terminal`」＋原本的 `unknown_ask`；mutant 改名 `AcceptsRefused`（把這兩種錯誤改成 `accepted`） | 原規則在 B 段後不成立；「被拒的請求不改任何狀態」這條規則本身保留 | 刪掉 CLP-10 的 `terminal_input` 半條 || 已追認（2026-09-29） |
+| T30 | 假 daemon 多兩個 P1 沒列的方法：`open_connections()`（正在服務的連線數）、`drop_terminal_subscribers()`（像落後 256 塊那樣關掉有終端訂閱的連線）；`ClientSource::threads()`（reader thread 數）是公開 API | 驗「開關 20 次沒有多出來的 thread 與連線」、「只有終端連線 EOF 時只重連它」要看得到這兩個數，也要做得出只關終端連線 | 移除這三個方法與用到的兩個測試 || 已追認（2026-09-29） |
+| T32 | 假 daemon 對 `failed` 的 instance 送 `terminal_input` 回 `no_terminal`（跟真 daemon 一樣：`failed` 沒有活的終端），用 CLP-21 釘住兩邊（fixture 多 `stopped_instance`，mutant `TypesIntoTheLiveOne`）；TUI 在 instance 變成 `failed` 時就轉成「最後的畫面（已停止）」並離開輸入模式，不等新畫面 | verifier：假 daemon 會記下送進 `failed` instance 的字，真 daemon 回 `no_terminal`，兩邊不一致沒被釘住；TUI 在 `failed` 之後仍在輸入模式 | 刪 CLP-21 與假 daemon 的一行檢查；`App::pump_terminal` 幾行 || 已追認（2026-09-29） |
+| T33 | daemon 寫給 holder 的請求（打字、`Snapshot`）：每條 link 一把**寫入鎖**，只包住一整行的寫入（不是 links 表的鎖，慢的 holder 只擋住自己那個 instance；拿 links 表的鎖時只做不會等的事，例如 `Snapshot` 先登記、放掉表鎖後才寫）；5 秒沒有進展就放棄（`runtime/link.rs` 的 `WRITE_WITHIN`，同 client socket 的 `WRITE_TIMEOUT`），放棄時**關掉這條連線**，走既有的重連（holder 還在）或 holder 不在的路徑；那一筆輸入丟掉（`terminal_input` 回 `no_terminal`） | 第 3 輪 verifier：`live_terminal` 拿著 links 表的鎖等寫入鎖，卡住的 holder 讓別的 instance 的輸入等了 4.79 秒；verifier：原本在拿著 links 與 stream 的鎖時做沒有逾時的 `write_all`，會卡住 tokio worker；第 2 輪 verifier：只在鎖外寫會讓多條 thread 的行互相穿插（4 條 thread × 200 行 12 KB 壞了 193 行），而逾時時 holder 那邊可能留著半行，連線不能再用（原本寫「連線不關」，改掉） | 改秒數：一個常數；逾時不關連線：`send` 一行（會留下半行，不建議） || 已追認（2026-09-29） |
+| T34 | `terminal_input` 轉成 holder 的請求行（含換行）超過 holder 的上限（1 MiB，剛好 1048576 bytes 照常轉、1048577 起拒絕）→ daemon 先回 `invalid_request`（不帶 request id，訊息寫明上限），不轉給 holder；假 daemon 同一條規則，CLP-22 兩個邊界案例（mutant `ForwardsHugeInput`、`RefusesAtTheLimit`）釘住。daemon 不解 base64（holder 解，錯了只記 log）；假 daemon 對解不開的 base64 也照這樣：不回應、什麼都不寫（原本回 `invalid_request`）。上限常數搬到 core 的 `protocol::holder::MAX_REQUEST_LINE`（holder 用同一個），不是新的 wire 欄位 | 第 2 輪 verifier：daemon 收到 8 MiB 以內的輸入就轉，1–8 MiB 的會讓 holder 把 link 連線丟掉；TUI 每個按鍵一行，自己不會送這麼大 | 移除檢查與 CLP-22：`handlers::terminal_input` 幾行 || 已追認（2026-09-29） |
+| T35 | testkit：假 daemon 與 CLP proxy 的 accept thread 改成 non-blocking 輪詢（每 5 ms 看停止旗標），drop 不再靠 `connect` 叫醒；`contract_teeth` 的 mutant 最多同時跑 16 個（原本約 100 個一起跑） | 第 3 輪 verifier：`ulimit -n 256` 下 descriptor 用完時 `connect` 失敗、drop 永遠卡住（v2 上也會）；descriptor 用完的原因是約 100 個 mutant 同時跑、每個 client mutant 有假 daemon＋proxy＋幾條連線（每條約 10 個 descriptor）：量到只跑 mutant 那個測試就約 200 個，整個 binary 超過 256；限制 16 個後整個 binary 最多約 150 個，時間不變（約 35 秒） | 改回 `connect` 叫醒、不限並行：幾行 || 已追認（2026-09-29） |
+| T31 | 假 daemon 裡 demo 的非請示項目（reviewer-1 用量上限）`attention_id` 是 `usage-limit:T-88`、沒有操作 → 展開寫 `沒有可用的操作`（取代 G3 的暫時字樣）；demo 的請示沒有 `if_ignored`（`open_ask` 不收），經 socket 的 demo 展開時沒有「不處理的話」，腳本假來源照舊有 | 假 daemon 的 `open_ask` 形狀已追認（T8），不為 demo 改它 | `FakeDaemon::open_ask` 多收一個 `if_ignored` || 已追認（2026-09-29） |
 
 ## 驗收紀錄
 
@@ -486,11 +552,18 @@ unset AGEND_BIN               # 前幾關步驟留下的 export 可能指到已�
 | 日期 | 結果（通過／不通過） | 備註 |
 |---|---|---|
 | 2026-09-26 | A 段通過 | 在 `feat/gate-11-tui-screens`（merge 前）由 agent 帶著走 5 步（截圖比對）。步驟 2 第一次截圖前已按過鍵，重開後對上。步驟 3：展開過的變已讀、回答後消失、追問回來並看得到歷史；F3 按了兩次所以追問出現兩行（每按一次送一次，demo 行為）；追問後首頁的 `新` 沒有另外截圖（使用者選擇跳過）。步驟 4 全對。步驟 5：斷線畫面重試到第 39 次、F2 後 `Reconnected to the daemon.` 回到 `AgEnD › archfix`。B 段等第 8 施工關。 |
+| 2026-09-29 | B 段通過 | 在 `feat/gate-11-tui-impl`（be7a7c5）由 agent 帶著走 7 步。步驟 1 假、真 daemon 兩段全過（預設 `ulimit -n 256` 也能跑）。步驟 4 打 `hello` 時被假 agent 每秒的 `counter` 行切開，是假 agent 沒有輸入框的正常現象（真 claude 有輸入框）；`Ctrl-]` 在使用者的終端可以離開輸入。步驟 6 daemon 停著時 agent 的 counter 繼續數，重連後接著目前的數字（holder 沒被重啟，D3）。使用者另外要求 TUI 裡完整重現 agent CLI（含滑鼠滾動）→ C 段。 |
 
 ## 進度紀錄
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-29 使用者親自驗收 B 段 7 步通過；狀態改成 B 段完成、C 段未開始。
+- 2026-09-29 fresh-context verifier 第 4 輪 CONFIRMED（517697c）；使用者追認 T19–T35（T19 的滑鼠滾動與完整重現 agent CLI 另開 C 段）。
+- 2026-09-29 第 3 輪 verifier REFUTED（2 MEDIUM、1 LOW）後修正，每項先寫重現測試確認失敗：`live_terminal` 改成拿 links 表的鎖時只登記、放掉表鎖後才寫 `Snapshot`（卡住的 holder 在寫時，別的 instance 的輸入修前等 4.79 秒、修後 < 100 ms，`runtime::tests::a_stalled_holder_does_not_hold_up_other_instances`；runtime.rs 其他拿表鎖的地方都只做 `get`／`insert`／`remove`，close 在鎖外）（T33）；假 daemon 與 proxy 的 accept 改成輪詢、mutant 最多同時 16 個（`tests/out_of_descriptors.rs`：descriptor 用完時 drop 修前卡住、修後馬上結束）（T35）；CLP-22 改成兩個邊界案例，剛好 1048576 bytes 轉給 holder、1048577 拒絕，加 `RefusesAtTheLimit`（把 `>` 改成 `>=` 時真 daemon 的邊界案例失敗）（T34）。
+- 2026-09-29 第 2 輪 verifier REFUTED（1 MEDIUM、2 LOW）後修正，每項先寫重現測試確認失敗：link 寫入改成每條 link 一把寫入鎖包住一整行、逾時後關掉連線（並行 4×200 行 12 KB：修前壞 212 行、修後 800/0；逾時後舊連線讀到 EOF、新連線的下一行完整）（T33 改寫）；`terminal_input` 超過 holder 1 MiB 請求行 → `invalid_request`，假 daemon 同規則，CLP-22（修前假 daemon 逾時、真 daemon 回 `no_terminal`＝holder 丟了連線）（T34）；假 daemon 關掉的連線不再等下一個事件才放掉訂閱（100 次訂閱後關掉：修前 fd 5 → 105，修後不變，`tests/fake_daemon_fds.rs`）。CI 的 macOS 跑一次 `client_source::the_terminal_is_live_and_throttled_and_draws_the_last_output` 在「閒著不重拿」那段多了 1 次重拿（`10` vs `9`）：最後一段輸出剛好在一次重拿之前到，照 P5 會再標一次過期、再重拿一次，是正常行為；測試改成先等這一次做完再數。
+- 2026-09-29 merge `origin/v2`（第 9 施工關 squash 版 `f5c32ec`、v2 `15dd178`）：只屬於第 9 施工關的檔案一律用 v2 的，B 段的改動重新套在上面（`OPERATOR_ONLY` 與 CLP-17 照 v2）；`cargo metadata --locked` 成功。第 9 施工關的 8 MiB 行上限只限制 daemon **讀進來**的行：終端路徑上 client 送的是 `subscribe_terminal` 與每個按鍵一行 `terminal_input`（最長 101 bytes），大的行（畫面、PTY 位元組、全貌）都是 daemon → client，沒有上限；holder 最大 1000×1000 的畫面一行 4,002,088 bytes、預設 50×200 是 40,188 bytes，8 KiB 的 PTY 塊 11,017 bytes（`crates/agend/tests/terminal_line_limits.rs`；`agend-client` 讀得進 9 MiB 的畫面行）。修 fresh-context verifier（REFUTED，1 MEDIUM、4 LOW），每項先寫重現測試確認失敗：斷線時每 500 ms 才重連一次（原本每個 100 ms 的 tick 都重連，2 秒 20 次）；重連後選取的東西不在了就回到第一列（原本是隔壁那列）；instance 變成 `failed` 時離開輸入模式，假 daemon 對 `failed` 回 `no_terminal`、CLP-21（T32）；`reopen_terminal` 補進 T27；daemon 寫給 holder 的請求有 5 秒寫入逾時、在鎖外寫（T33）。在 macOS 預設的 `ulimit -n 256` 下 `cargo test --workspace` 681 passed、0 failed（第一次跑時 `contract_teeth` 因 `Too many open files` 失敗：假 daemon 留著每條接過的連線的複本直到整個 fake 結束，改成連線結束就放掉）；第 9 施工關的 `crates/agend/tests/cli.rs::restart_waits_for_eof_and_a_new_boot_id` 在 256 下偶爾失敗（`Resource temporarily unavailable` during hello），純 v2 也一樣，不是本段造成的。
+- 2026-09-28 B 段實作（draft PR，branch `feat/gate-11-tui-impl`，以 #133 與第 9 施工關 #136 為底）：先寫 CLP-18..20 與改寫的 CLP-10，對假 daemon 4 條、真 daemon 3 條失敗（`terminal_input got not_supported`、`terminal_bytes … still arrive after the failed subscription`、`subscribe_terminal clp-nobody answered TerminalSnapshot`），再實作到 20/20、19/19；`agend-client` 的 4 個 API（先寫測試、編不過）；`ClientSource`、`Source` 介面、`Fleet` 由全貌＋之後的事件重建、`retry`、即時終端（200 ms 節流、最後一段補畫）、輸入模式、重連與版本不合；`agend app`；daemon 的 `terminal_input` 與重訂失敗清掉舊串流、holder 拒絕輸入只記 log；假 daemon 的終端與打字；刪掉 `examples/support/daemon_source.rs`；`tui_accept` 加 `== retry`／`== terminal`／`== input`，`crates/agend/examples/tui_real.rs` 是真 daemon 那段；「你親自驗收」B 段貼上實跑輸出；「待你追認」T19–T31。fresh-context verifier 尚未跑。
 - 2026-09-28 使用者確認 B 段開工前提案 P1–P7，全部照建議；T1、T2（P1）、第 8 施工關 C2（P1）、T12、T13、T18（P3）、第 7 施工關 P1（P6，codex 打字先回 `not_supported`）的差異都照新做法。
 
 - 2026-09-27 第 3 輪 review REFUTED（1 MEDIUM、3 LOW）後修正：`Sender::close()`（`shutdown(Both)` 叫醒讀的 thread）與終端連線的開、關、重連步驟，`agend-client` 改成加 4 個 API；停止的終端不能按 `i`、instance 又跑起來時自動重訂；假 daemon 對沒登記的 instance 回 `no_terminal`、codex 檢查排在記錄位元組之前；重訂失敗時 daemon 清掉舊串流。

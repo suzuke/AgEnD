@@ -14,7 +14,7 @@
 - 第 13 施工關：服務註冊、`agend uninstall`、`agend telegram setup`（請 daemon 配對，本 crate 沒有 Telegram client）
 - `holder <instance-id>`：argv[0] 分派之後、CLI 解析之前就交給 `agend_holder::run`（第 4 施工關 P1）
 - `daemon`：同樣在 CLI 解析之前交給 `agend_daemon::daemon::run`，只在前景跑、要 `AGEND_HOME`（第 6 施工關 P1）；tokio runtime 在那裡面建，CLI 路徑不建
-- 之後：`app` 子命令
+- `app [--lang en|zh-TW]`（第 11 施工關 B 段）：`agend_tui::run` + `ClientSource`；home 與 caller 同 CLI（`home::resolve`、`AGEND_INSTANCE`）；stdout 不是終端機 → `agend app needs a terminal`、exit 2
 
 ## 不負責
 

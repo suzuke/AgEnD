@@ -2,24 +2,27 @@
 //!
 //! ```text
 //! cargo run -p agend-tui --example tui_fake                  # scripted, in memory
-//! cargo run -p agend-tui --example tui_fake -- --daemon      # testkit fake daemon over its socket
+//! cargo run -p agend-tui --example tui_fake -- --daemon      # testkit fake daemon, through agend-client
 //! cargo run -p agend-tui --example tui_fake -- --lang zh-TW
 //! ```
 //!
-//! Demo-only keys (handled here, not by the TUI): F2 stops the daemon, or
-//! starts it again; F3 (scripted only) makes dev-2 follow up on ask A-1.
+//! The loop is `agend_tui::run_with`, the same as `agend app`. Demo-only
+//! keys (handled here, not by the TUI): F2 stops the daemon, or starts it
+//! again; F3 (scripted only) makes dev-2 follow up on ask A-1.
 
-#[path = "support/daemon_source.rs"]
-mod daemon_source;
+#[path = "support/demo_daemon.rs"]
+mod demo_daemon;
 
 use std::io;
-use std::time::{Duration, Instant};
+use std::path::PathBuf;
 
 use agend_testkit::fake_daemon::FakeDaemon;
+use agend_testkit::tempdir::TempDir;
 use agend_tui::i18n::Language;
-use agend_tui::source::scripted::{ScriptHandle, ScriptedSource, demo_catalog};
-use agend_tui::{App, ui};
-use ratatui::crossterm::event::{self, Event, KeyCode};
+use agend_tui::source::Source;
+use agend_tui::source::client::ClientSource;
+use agend_tui::source::scripted::{ScriptHandle, ScriptedSource};
+use ratatui::crossterm::event::KeyCode;
 
 const USAGE: &str = "usage: tui_fake [--daemon] [--lang en|zh-TW]
 Scripted data only; nothing real runs. Keys: q quit, L language, F2 stop/start
@@ -32,30 +35,29 @@ enum Backing {
     },
     Daemon {
         daemon: Option<FakeDaemon>,
-        address: daemon_source::Address,
+        socket: PathBuf,
+        _dir: TempDir,
     },
 }
 
 impl Backing {
-    /// F2: stop the daemon, or start it again.
-    fn toggle(&mut self) -> io::Result<()> {
+    /// F2: stop the daemon, or start it again (on the same socket).
+    fn toggle(&mut self) {
         match self {
             Backing::Scripted { handle, online } => {
                 *online = !*online;
                 handle.set_online(*online);
             }
-            Backing::Daemon { daemon, address } => match daemon.take() {
+            Backing::Daemon { daemon, socket, .. } => match daemon.take() {
                 Some(running) => drop(running),
                 None => {
-                    let fresh = FakeDaemon::start()?;
-                    daemon_source::seed_demo(&fresh);
-                    *address.lock().unwrap_or_else(|e| e.into_inner()) =
-                        fresh.socket_path().to_path_buf();
-                    *daemon = Some(fresh);
+                    if let Ok(fresh) = FakeDaemon::start_at(socket) {
+                        demo_daemon::seed(&fresh);
+                        *daemon = Some(fresh);
+                    }
                 }
             },
         }
-        Ok(())
     }
 }
 
@@ -80,24 +82,24 @@ fn main() -> io::Result<()> {
         }
     }
 
-    let (app, mut backing) = if use_daemon {
-        let daemon = FakeDaemon::start()?;
-        daemon_source::seed_demo(&daemon);
-        let (source, address) =
-            daemon_source::DaemonSource::new(daemon.socket_path().to_path_buf(), demo_catalog());
-        let app = App::new(Box::new(source), lang);
+    let (source, mut backing): (Box<dyn Source>, Backing) = if use_daemon {
+        let dir = TempDir::new("tui-fake")?;
+        let socket = dir.path().join("daemon.sock");
+        let daemon = FakeDaemon::start_at(&socket)?;
+        demo_daemon::seed(&daemon);
+        let source = ClientSource::new(&socket, None);
         (
-            app,
+            Box::new(source),
             Backing::Daemon {
                 daemon: Some(daemon),
-                address,
+                socket,
+                _dir: dir,
             },
         )
     } else {
         let (source, handle) = ScriptedSource::demo();
-        let app = App::new(Box::new(source), lang);
         (
-            app,
+            Box::new(source),
             Backing::Scripted {
                 handle,
                 online: true,
@@ -105,43 +107,24 @@ fn main() -> io::Result<()> {
         )
     };
 
-    let mut terminal = ratatui::init();
-    let result = run(&mut terminal, app, &mut backing);
-    ratatui::restore();
+    let result = agend_tui::run_with(source, lang, |key| match key.code {
+        KeyCode::F(2) => {
+            backing.toggle();
+            true
+        }
+        KeyCode::F(3) => {
+            if let Backing::Scripted { handle, .. } = &backing {
+                handle.follow_up(
+                    "A-1",
+                    "dev-2",
+                    "Seed 42 hides the flake. Also run 20 times nightly?",
+                    &["yes", "no"],
+                );
+            }
+            true
+        }
+        _ => false,
+    });
     eprintln!("{USAGE}");
     result
-}
-
-fn run(
-    terminal: &mut ratatui::DefaultTerminal,
-    mut app: App,
-    backing: &mut Backing,
-) -> io::Result<()> {
-    let mut last_tick: Option<Instant> = None;
-    while !app.quit {
-        if last_tick.is_none_or(|t| t.elapsed() >= Duration::from_millis(500)) {
-            app.tick();
-            last_tick = Some(Instant::now());
-        }
-        terminal.draw(|frame| ui::render(frame, &mut app))?;
-        if event::poll(Duration::from_millis(250))?
-            && let Event::Key(key) = event::read()?
-        {
-            match key.code {
-                KeyCode::F(2) => backing.toggle()?,
-                KeyCode::F(3) => {
-                    if let Backing::Scripted { handle, .. } = backing {
-                        handle.follow_up(
-                            "A-1",
-                            "dev-2",
-                            "Seed 42 hides the flake. Also run 20 times nightly?",
-                            &["yes", "no"],
-                        );
-                    }
-                }
-                _ => app.key(key),
-            }
-        }
-    }
-    Ok(())
 }

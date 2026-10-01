@@ -10,10 +10,14 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use agend_core::protocol::ProtocolVersion;
+use agend_core::protocol::ask::{AnswerSource, AskReply};
 use agend_core::protocol::client::{
-    AttentionAction, ClientRequest, ClientResponse, CommandResult, EventData, FleetView,
-    RequestIdData, ResolveAttentionData, SelectedVersionData, SubscribeEventsData, error_code,
+    AnswerAskData, AttentionAction, ClientRequest, ClientResponse, CommandResult, EventData,
+    FleetView, InstanceData, RequestIdData, ResolveAttentionData, SelectedVersionData,
+    SubscribeEventsData, TerminalInputData, error_code,
 };
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
 
 use crate::retry::{RESTART_RETRY_WINDOW, RETRY_EVERY, Redo};
 use crate::{ClientError, version};
@@ -431,6 +435,81 @@ impl Client {
         }
     }
 
+    /// The operator's answer to a needs-you ask (never sent twice).
+    pub fn answer_ask(
+        &mut self,
+        ask_id: &str,
+        source: AnswerSource,
+        reply: AskReply,
+    ) -> Result<(), ClientError> {
+        let request = ClientRequest::AnswerAsk {
+            data: AnswerAskData {
+                request_id: self.next_request_id(),
+                ask_id: ask_id.to_owned(),
+                source,
+                reply,
+            },
+        };
+        match self.request(&request, Redo::Never)? {
+            ClientResponse::CommandResult { data } if data.result == CommandResult::Accepted => {
+                Ok(())
+            }
+            other => Err(unexpected(&other)),
+        }
+    }
+
+    /// A write-only handle on this connection (a clone of its socket), so
+    /// another thread can write while this one blocks in
+    /// [`Client::next_terminal`] (gate 11 B P1).
+    pub fn sender(&self) -> Result<Sender, ClientError> {
+        let stream = self
+            .writer
+            .try_clone()
+            .map_err(|e| ClientError::Disconnected(format!("cannot clone the connection: {e}")))?;
+        Ok(Sender { stream })
+    }
+
+    /// Blocks until the next screen or PTY chunk of a terminal subscription
+    /// (sent with [`Sender::subscribe_terminal`]). Any error line
+    /// (`no_terminal`, `forbidden`, `not_supported`, …) is
+    /// [`ClientError::Daemon`]; the end of the connection is
+    /// [`ClientError::Disconnected`].
+    pub fn next_terminal(&mut self) -> Result<TerminalUpdate, ClientError> {
+        let _ = self.reader.get_ref().set_read_timeout(None);
+        loop {
+            match read_response(&mut self.reader) {
+                Ok(Some(ClientResponse::TerminalSnapshot { data })) => {
+                    return Ok(TerminalUpdate::Screen {
+                        instance_id: data.instance_id,
+                        screen: data.screen,
+                    });
+                }
+                Ok(Some(ClientResponse::TerminalBytes { data })) => {
+                    let bytes = BASE64.decode(&data.bytes_base64).map_err(|e| {
+                        ClientError::Disconnected(format!("terminal_bytes is not base64: {e}"))
+                    })?;
+                    return Ok(TerminalUpdate::Bytes {
+                        instance_id: data.instance_id,
+                        bytes,
+                    });
+                }
+                Ok(Some(ClientResponse::Error { data })) => {
+                    return Err(ClientError::Daemon {
+                        code: data.code,
+                        message: data.message,
+                    });
+                }
+                Ok(Some(_)) => {}
+                Ok(None) => {
+                    return Err(ClientError::Disconnected(
+                        "the daemon closed the connection".into(),
+                    ));
+                }
+                Err(e) => return Err(ClientError::Disconnected(e.to_string())),
+            }
+        }
+    }
+
     /// Subscribes to events after `after_event_id` (a 1.1 client passes the
     /// fleet view's `as_of_event_id`). A refused cursor arrives as
     /// [`ClientError::Daemon`] `event_gap` from [`Client::next_event`].
@@ -469,6 +548,58 @@ impl Client {
                 Err(e) => return Err(ClientError::Disconnected(e.to_string())),
             }
         }
+    }
+}
+
+/// What a terminal subscription delivers ([`Client::next_terminal`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TerminalUpdate {
+    /// The holder's screen as text (first, and after every new subscription).
+    Screen { instance_id: String, screen: String },
+    /// PTY output after that screen, decoded.
+    Bytes { instance_id: String, bytes: Vec<u8> },
+}
+
+/// The write-only side of a connection ([`Client::sender`]): it sends lines
+/// and never reads, so it does not wait for replies (they reach whoever
+/// reads the [`Client`]).
+pub struct Sender {
+    stream: UnixStream,
+}
+
+impl Sender {
+    /// Subscribes to `instance_id`'s terminal; a new subscription replaces
+    /// the old one (gate 8 C8).
+    pub fn subscribe_terminal(&mut self, instance_id: &str) -> Result<(), ClientError> {
+        self.send(&ClientRequest::SubscribeTerminal {
+            data: InstanceData {
+                instance_id: instance_id.to_owned(),
+            },
+        })
+    }
+
+    /// Operator input for `instance_id`'s PTY. Not answered when accepted;
+    /// a refusal is an error line without a request id.
+    pub fn terminal_input(&mut self, instance_id: &str, bytes: &[u8]) -> Result<(), ClientError> {
+        self.send(&ClientRequest::TerminalInput {
+            data: TerminalInputData {
+                instance_id: instance_id.to_owned(),
+                bytes_base64: BASE64.encode(bytes),
+            },
+        })
+    }
+
+    /// Shuts the connection down both ways: a thread blocked reading the
+    /// [`Client`] reads the end of the stream at once. Dropping a `Sender`
+    /// only closes its own handle; the connection stays open.
+    pub fn close(&self) {
+        let _ = self.stream.shutdown(std::net::Shutdown::Both);
+    }
+
+    fn send(&mut self, request: &ClientRequest) -> Result<(), ClientError> {
+        self.stream
+            .write_all(&line_of(request))
+            .map_err(|e| ClientError::Disconnected(format!("cannot write to the daemon: {e}")))
     }
 }
 

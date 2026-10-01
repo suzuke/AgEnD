@@ -28,7 +28,12 @@ serde_json = "1"
 
 [dev-dependencies]
 agend-testkit.workspace = true
+# Encodes PTY bytes in the terminal line-limit test (gate 11 B).
+base64 = "0.22"
 # Builds a schema-v3 `agend.db` with a gate 6 codex row (gate 7 legacy).
 rusqlite = { version = "0.37", features = ["bundled"] }
+# Keys for the TUI driven against the real daemon (gate 11 B; the same
+# ratatui build as agend-tui).
+ratatui = { version = "0.30", default-features = false, features = ["crossterm", "std"] }
 # The daemon's server run in the test process for CLP-8 (gate 8).
 tokio = { version = "1", default-features = false, features = ["rt-multi-thread"] }

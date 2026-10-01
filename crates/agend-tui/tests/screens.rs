@@ -121,14 +121,18 @@ fn agent_detail_shows_reported_state_task_and_events() {
 }
 
 #[test]
-fn terminal_view_shows_the_snapshot_read_only() {
+fn terminal_view_is_live_and_read_only_until_i() {
     let (mut app, _) = demo(Language::En);
     press(&mut app, &[ch('t')]);
     let screen = render(&mut app);
     assert_eq!(first_line(&screen), "AgEnD › dev-2 Terminal");
-    assert!(screen.contains("━━ Terminal of dev-2 · read-only snapshot"));
+    assert!(screen.contains("━━ Terminal of dev-2 · live"));
     assert!(screen.contains("│ run 3: FAIL state_boundary::drop_order"));
-    assert!(screen.contains("↑↓ scroll · ←/Esc back"));
+    assert!(screen.contains("↑↓ scroll · i type · ←/Esc back"));
+    press(&mut app, &[ch('i')]);
+    let screen = render(&mut app);
+    assert!(screen.contains("━━ Terminal of dev-2 · typing (Ctrl-] to leave)"));
+    assert!(screen.contains("Ctrl-] stop typing · every other key goes to the agent"));
 }
 
 #[test]
@@ -152,13 +156,10 @@ fn needs_you_expands_the_selected_item_with_recap_thread_and_options() {
     // The item being viewed lost its "new" marker; the others keep it.
     assert!(line_with(&screen, "Regression suite").ends_with("   archfix · T-45"));
     assert!(line_with(&screen, "usage limit").ends_with("新  research · T-88"));
-    // A non-ask item says there is no action yet (protocol gap).
+    // A non-ask item without actions says so (gate 11 B P4).
     press(&mut app, &[Down, Down, Down]);
     let screen = render(&mut app);
-    assert!(
-        screen.contains("client protocol v1 還沒有處理這一項的操作（第 8 施工關）"),
-        "{screen}"
-    );
+    assert!(screen.contains("┃    沒有可用的操作"), "{screen}");
     assert!(screen.contains("┃    不處理的話：T-88 review stays stopped until reviewer-1"));
 }
 

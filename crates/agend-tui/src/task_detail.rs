@@ -48,12 +48,10 @@ pub fn rows(ctx: &Ctx, task_id: &str) -> Vec<Row> {
         rows.push(
             Row::item(
                 branch,
-                format!(
-                    "{glyph} {}. {} ({})",
-                    i + 1,
-                    stage.name,
-                    stage.kind.as_str()
-                ),
+                match stage.kind {
+                    Some(kind) => format!("{glyph} {}. {} ({})", i + 1, stage.name, kind.as_str()),
+                    None => format!("{glyph} {}. {}", i + 1, stage.name),
+                },
                 Target::Stage(task.id.clone(), i),
             )
             .right(format!("{state}  {}", agent.unwrap_or("")))

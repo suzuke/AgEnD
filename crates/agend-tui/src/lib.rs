@@ -5,11 +5,15 @@
 //!
 //! Screens read only a `source::Fleet` and act only through a
 //! `source::Source`, so they do not know whether the data comes from the
-//! scripted fake, the testkit fake daemon, or (gate 11 proper) the real
-//! daemon through `agend-client`.
+//! scripted fake or a daemon (the real one or the testkit fake) through
+//! `agend-client` (`source::client::ClientSource`, gate 11 B).
+//!
+//! [`run`] is the interactive loop (`agend app`, the `tui_fake` example):
+//! raw mode and the alternate screen, a tick every [`TICK`], the terminal
+//! restored on the way out. It builds no async runtime (D11).
 //!
 //! Must NOT: talk to the daemon except through a `Source`, or hold state the
-//! daemon does not also have, apart from what protocol v1 cannot carry yet
+//! daemon does not also have, apart from what the protocol cannot carry yet
 //! (read marks; listed in docs/gates/gate-11-tui.md).
 
 pub mod agent_detail;
@@ -25,6 +29,54 @@ pub mod terminal;
 pub mod ui;
 
 pub use app::App;
+
+use std::io;
+use std::time::{Duration, Instant};
+
+use ratatui::crossterm::event::{self, Event, KeyEvent};
+
+use crate::i18n::Language;
+use crate::source::Source;
+
+/// How often the interactive loop ticks (gate 11 B P5: with the 200 ms
+/// refresh, output reaches the screen within 300 ms plus a round trip).
+pub const TICK: Duration = Duration::from_millis(100);
+
+/// Runs the TUI on this terminal until `q`.
+pub fn run(source: Box<dyn Source>, lang: Language) -> io::Result<()> {
+    run_with(source, lang, |_| false)
+}
+
+/// [`run`], with `intercept` seeing each key first; it returns true for a
+/// key it handled (the demo's own keys).
+pub fn run_with(
+    source: Box<dyn Source>,
+    lang: Language,
+    mut intercept: impl FnMut(&KeyEvent) -> bool,
+) -> io::Result<()> {
+    let mut app = App::new(source, lang);
+    let mut terminal = ratatui::init();
+    let result = (|| -> io::Result<()> {
+        let mut next_tick = Instant::now();
+        while !app.quit {
+            if Instant::now() >= next_tick {
+                app.tick();
+                next_tick = Instant::now() + TICK;
+            }
+            terminal.draw(|frame| ui::render(frame, &mut app))?;
+            let wait = next_tick.saturating_duration_since(Instant::now());
+            if event::poll(wait)?
+                && let Event::Key(key) = event::read()?
+                && !intercept(&key)
+            {
+                app.key(key);
+            }
+        }
+        Ok(())
+    })();
+    ratatui::restore();
+    result
+}
 
 /// Render the app off-screen and return it as text, one line per row with
 /// trailing spaces trimmed. Used by tests and the acceptance demo.

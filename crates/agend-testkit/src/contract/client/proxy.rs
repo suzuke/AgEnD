@@ -94,11 +94,7 @@ impl Proxy {
             .name("clp-proxy-accept".into())
             .spawn(move || {
                 let next = AtomicU64::new(1);
-                for client in listener.incoming() {
-                    if stop.load(Ordering::SeqCst) {
-                        break;
-                    }
-                    let Ok(client) = client else { continue };
+                while let Some(client) = crate::fake_daemon::accept_or_stop(&listener, &stop) {
                     let number = next.fetch_add(1, Ordering::SeqCst);
                     let Ok(server) = UnixStream::connect(&upstream) else {
                         continue;
@@ -128,7 +124,6 @@ impl Proxy {
 impl Drop for Proxy {
     fn drop(&mut self) {
         self.stopping.store(true, Ordering::SeqCst);
-        let _ = UnixStream::connect(&self.path);
         if let Some(accept) = self.accept.take() {
             let _ = accept.join();
         }

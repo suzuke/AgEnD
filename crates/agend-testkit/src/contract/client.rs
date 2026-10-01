@@ -1,5 +1,5 @@
 //! Client protocol contract (rules CLP-1..12 in CONTRACTS.md, gate 8 P9;
-//! CLP-13..17, gate 9 P10):
+//! CLP-13..17, gate 9 P10; CLP-18..20, gate 11 B P1, P5, P6):
 //! what TUI and CLI tests rely on from the testkit fake daemon must hold for
 //! the real `agend daemon` too. The same cases run against [`FakeDaemonFixture`]
 //! and against the real daemon (`crates/agend/tests/client_protocol.rs`).
@@ -10,8 +10,9 @@
 //!
 //! Not pinned: agent commands other than `status`, `send` and `inbox` — the
 //! fake serves them, the real daemon answers `not_supported` until gate 10;
-//! `no_terminal` for an unknown instance (the fake answers a screen for any
-//! id); a successful `daemon_restart` (the CLI tests pin it against both).
+//! a successful `daemon_restart` (the CLI tests pin it against both); a
+//! codex instance's `terminal_input` (`not_supported` until U17; tested on
+//! each side, since the fixture has no codex instance).
 //!
 //! Must NOT: hand-write wire shapes except for the malformed lines the rules
 //! are about.
@@ -64,6 +65,15 @@ pub trait ClientProtocolFixture {
     fn agents(&self) -> (String, String);
     /// A name no instance has yet (a new one per call).
     fn fresh_name(&mut self) -> String;
+    /// Makes `instance`'s terminal print something new (the real daemon's
+    /// counter prints every second by itself).
+    fn make_output(&mut self, instance: &str) -> Result<(), String>;
+    /// What reached `instance`'s terminal as input, once `expect` shows up
+    /// (or after [`WITHIN`]): the fake's recorded input, the real
+    /// terminal's screen (the PTY echoes what is typed).
+    fn typed(&mut self, instance: &str, expect: &str) -> Result<String, String>;
+    /// A `failed` instance (no live terminal).
+    fn stopped_instance(&mut self) -> Result<String, String>;
 }
 
 pub fn cases<F: ClientProtocolFixture>() -> Vec<Case<F>> {
@@ -152,6 +162,36 @@ pub fn cases<F: ClientProtocolFixture>() -> Vec<Case<F>> {
             rule: "CLP-17",
             name: "one_message_per_id_and_inbox_after_an_own_message",
             check: |fx| one_message_per_id(&fx),
+        },
+        Case {
+            rule: "CLP-18",
+            name: "subscribing_again_after_new_output_shows_it",
+            check: |mut fx| subscribing_again_shows_new_output(&mut fx),
+        },
+        Case {
+            rule: "CLP-19",
+            name: "no_terminal_for_an_unknown_instance_ends_the_old_stream",
+            check: |mut fx| no_terminal_ends_the_old_stream(&mut fx),
+        },
+        Case {
+            rule: "CLP-20",
+            name: "only_the_operator_types_and_only_into_a_terminal",
+            check: |mut fx| only_the_operator_types(&mut fx),
+        },
+        Case {
+            rule: "CLP-22",
+            name: "input_making_a_holder_line_of_exactly_1_mib_is_forwarded",
+            check: |mut fx| input_at_the_holder_limit_is_forwarded(&mut fx),
+        },
+        Case {
+            rule: "CLP-22",
+            name: "input_making_a_holder_line_one_byte_over_1_mib_is_refused",
+            check: |mut fx| input_one_byte_over_the_holder_limit_is_refused(&mut fx),
+        },
+        Case {
+            rule: "CLP-21",
+            name: "typing_into_a_failed_instance_is_no_terminal",
+            check: |mut fx| typing_into_a_failed_instance(&mut fx),
         },
     ]
 }
@@ -715,18 +755,10 @@ fn refused_requests_change_nothing<F: ClientProtocolFixture>(fx: &F) -> CaseResu
     let mut c = operator(fx)?;
     let before = get_fleet(&mut c, "clp-10")?;
     subscribe(&mut c, Some(before.as_of_event_id))?;
-    send(
-        &mut c,
-        &ClientRequest::TerminalInput {
-            data: TerminalInputData {
-                instance_id: fx.terminal_instance(),
-                bytes_base64: "aGk=".into(),
-            },
-        },
-    )?;
+    send(&mut c, &terminal_input(NO_INSTANCE, b"hi"))?;
     let (code, _) = next_error(&mut c, WITHIN)?;
-    ensure(code == error_code::NOT_SUPPORTED, || {
-        format!("terminal_input got {code}, expected not_supported")
+    ensure(code == error_code::NO_TERMINAL, || {
+        format!("terminal_input for {NO_INSTANCE} got {code}, expected no_terminal")
     })?;
     send(
         &mut c,
@@ -1157,6 +1189,297 @@ fn one_message_per_id<F: ClientProtocolFixture>(fx: &F) -> CaseResult {
     Ok(())
 }
 
+// ---- gate 11 cases (terminal) ----
+
+/// An instance no server has (CLP-10, CLP-19, CLP-20).
+pub const NO_INSTANCE: &str = "clp-nobody";
+
+pub fn terminal_input(instance: &str, bytes: &[u8]) -> ClientRequest {
+    use base64::Engine;
+    ClientRequest::TerminalInput {
+        data: TerminalInputData {
+            instance_id: instance.into(),
+            bytes_base64: base64::engine::general_purpose::STANDARD.encode(bytes),
+        },
+    }
+}
+
+fn subscribe_terminal(c: &mut ProbeClient, instance: &str) -> Result<(), String> {
+    send(
+        c,
+        &ClientRequest::SubscribeTerminal {
+            data: InstanceData {
+                instance_id: instance.into(),
+            },
+        },
+    )
+}
+
+/// The next screen or error of a terminal subscription (bytes and events
+/// on the way are skipped).
+fn terminal_reply(c: &mut ProbeClient) -> Result<ClientResponse, String> {
+    let mut skipped = Vec::new();
+    until(
+        c,
+        WITHIN,
+        |r| {
+            matches!(
+                r,
+                ClientResponse::TerminalSnapshot { .. } | ClientResponse::Error { .. }
+            )
+        },
+        &mut skipped,
+    )
+}
+
+fn screen_of(reply: ClientResponse, instance: &str) -> Result<String, String> {
+    match reply {
+        ClientResponse::TerminalSnapshot { data } if data.instance_id == instance => {
+            Ok(data.screen)
+        }
+        other => Err(format!(
+            "subscribe_terminal {instance} answered {other:?}, expected its screen"
+        )),
+    }
+}
+
+/// The text of the next `terminal_bytes` of `instance` (within [`WITHIN`]).
+fn next_bytes(c: &mut ProbeClient, instance: &str) -> Result<String, String> {
+    use base64::Engine;
+    let mut skipped = Vec::new();
+    let reply = until(
+        c,
+        WITHIN,
+        |r| {
+            matches!(
+                r,
+                ClientResponse::TerminalBytes { .. } | ClientResponse::Error { .. }
+            )
+        },
+        &mut skipped,
+    )?;
+    let ClientResponse::TerminalBytes { data } = reply else {
+        return Err(format!(
+            "expected terminal_bytes of {instance}, got {reply:?}"
+        ));
+    };
+    ensure(data.instance_id == instance, || {
+        format!(
+            "terminal_bytes of {}, expected {instance}",
+            data.instance_id
+        )
+    })?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&data.bytes_base64)
+        .map_err(|e| format!("terminal_bytes is not base64: {e}"))?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+fn subscribing_again_shows_new_output<F: ClientProtocolFixture>(fx: &mut F) -> CaseResult {
+    let instance = fx.terminal_instance();
+    let mut c = operator(fx)?;
+    subscribe_terminal(&mut c, &instance)?;
+    let first = screen_of(terminal_reply(&mut c)?, &instance)?;
+    fx.make_output(&instance)?;
+    let output = next_bytes(&mut c, &instance)?;
+    let shown = output
+        .lines()
+        .map(|l| l.trim())
+        .rfind(|l| !l.is_empty())
+        .unwrap_or_default()
+        .to_owned();
+    subscribe_terminal(&mut c, &instance)?;
+    let again = screen_of(terminal_reply(&mut c)?, &instance)?;
+    ensure(again != first && again.contains(&shown), || {
+        format!(
+            "after terminal_bytes {output:?} the new screen does not show {shown:?}:\n  first {first:?}\n  again {again:?}"
+        )
+    })
+}
+
+fn no_terminal_ends_the_old_stream<F: ClientProtocolFixture>(fx: &mut F) -> CaseResult {
+    let instance = fx.terminal_instance();
+    let mut c = operator(fx)?;
+    subscribe_terminal(&mut c, &instance)?;
+    screen_of(terminal_reply(&mut c)?, &instance)?;
+    subscribe_terminal(&mut c, NO_INSTANCE)?;
+    let reply = terminal_reply(&mut c)?;
+    let ClientResponse::Error { data } = &reply else {
+        return Err(format!(
+            "subscribe_terminal {NO_INSTANCE} answered {reply:?}, expected no_terminal"
+        ));
+    };
+    ensure(
+        data.code == error_code::NO_TERMINAL && data.request_id.is_none(),
+        || format!("subscribe_terminal {NO_INSTANCE} answered {reply:?}, expected no_terminal"),
+    )?;
+    // The failed subscription replaced the old one: no more bytes of it.
+    fx.make_output(&instance)?;
+    let deadline = Instant::now() + Duration::from_millis(2500);
+    while let Some(left) = deadline.checked_duration_since(Instant::now()) {
+        match c.recv_within(left) {
+            Ok(Some(ClientResponse::TerminalBytes { data })) => {
+                return Err(format!(
+                    "terminal_bytes of {} still arrive after the failed subscription",
+                    data.instance_id
+                ));
+            }
+            Ok(Some(_)) => {}
+            Ok(None) => return Err("the server closed the connection".into()),
+            Err(e) if timed_out(&e) => break,
+            Err(e) => return Err(format!("read: {e}")),
+        }
+    }
+    get_fleet(&mut c, "clp-19")
+        .map(|_| ())
+        .map_err(|e| format!("the connection did not stay usable: {e}"))
+}
+
+fn only_the_operator_types<F: ClientProtocolFixture>(fx: &mut F) -> CaseResult {
+    const AGENT_TYPED: &str = "clp-agent-typed";
+    const TYPED: &str = "clp-operator-typed";
+    let instance = fx.terminal_instance();
+    let mut agent = agent_client(fx, "clp-agent")?;
+    for target in [instance.as_str(), NO_INSTANCE] {
+        send(&mut agent, &terminal_input(target, AGENT_TYPED.as_bytes()))?;
+        let (code, id) = next_error(&mut agent, WITHIN)?;
+        ensure(code == error_code::FORBIDDEN && id.is_none(), || {
+            format!("an agent typing into {target} got {code} ({id:?}), expected forbidden")
+        })?;
+    }
+    let mut op = operator(fx)?;
+    send(&mut op, &terminal_input(NO_INSTANCE, b"x"))?;
+    let (code, _) = next_error(&mut op, WITHIN)?;
+    ensure(code == error_code::NO_TERMINAL, || {
+        format!("typing into {NO_INSTANCE} got {code}, expected no_terminal")
+    })?;
+    send(&mut op, &terminal_input(&instance, TYPED.as_bytes()))?;
+    let quiet = collect(&mut op, QUIET)?;
+    ensure(quiet.errors.is_empty() && !quiet.closed, || {
+        format!(
+            "typing into {instance} got errors {:?} (closed {})",
+            quiet.errors, quiet.closed
+        )
+    })?;
+    let typed = fx.typed(&instance, TYPED)?;
+    ensure(
+        typed.contains(TYPED) && !typed.contains(AGENT_TYPED),
+        || format!("{instance} received {typed:?}, expected {TYPED:?} and nothing an agent typed"),
+    )
+}
+
+fn typing_into_a_failed_instance<F: ClientProtocolFixture>(fx: &mut F) -> CaseResult {
+    let stopped = fx.stopped_instance()?;
+    let mut op = operator(fx)?;
+    send(&mut op, &terminal_input(&stopped, b"x"))?;
+    let (code, id) = next_error(&mut op, WITHIN)?;
+    ensure(code == error_code::NO_TERMINAL && id.is_none(), || {
+        format!("typing into failed {stopped} got {code} ({id:?}), expected no_terminal")
+    })?;
+    get_fleet(&mut op, "clp-21")
+        .map(|_| ())
+        .map_err(|e| format!("the connection did not stay usable: {e}"))
+}
+
+/// The holder request line of a `terminal_input` without its base64: the
+/// daemon's `operator_terminal_input` wrapper and the newline.
+pub fn holder_line_overhead() -> usize {
+    use agend_core::protocol::holder::{HolderRequest, OperatorTerminalInputData};
+    let empty = HolderRequest::OperatorTerminalInput {
+        data: OperatorTerminalInputData {
+            bytes_base64: String::new(),
+        },
+    };
+    serde_json::to_vec(&empty).map_or(0, |l| l.len()) + 1
+}
+
+/// A `terminal_input` whose holder request line is exactly `line` bytes,
+/// newline included. The base64 is `A`s, so its length need not be a whole
+/// group: the daemon forwards it (it does not decode), the holder refuses
+/// it as `bad_request`, which the daemon only logs; nothing is written.
+fn input_making_a_line_of(instance: &str, line: usize) -> ClientRequest {
+    ClientRequest::TerminalInput {
+        data: TerminalInputData {
+            instance_id: instance.into(),
+            bytes_base64: "A".repeat(line - holder_line_overhead()),
+        },
+    }
+}
+
+/// After an input at or over the limit, the terminal still takes input and
+/// received nothing of it.
+fn still_takes_input<F: ClientProtocolFixture>(fx: &mut F, op: &mut ProbeClient) -> CaseResult {
+    const AFTER: &str = "clp-after-the-limit";
+    let instance = fx.terminal_instance();
+    send(op, &terminal_input(&instance, AFTER.as_bytes()))?;
+    let quiet = collect(op, QUIET)?;
+    ensure(quiet.errors.is_empty() && !quiet.closed, || {
+        format!("then: errors {:?}, closed {}", quiet.errors, quiet.closed)
+    })?;
+    let typed = fx.typed(&instance, AFTER)?;
+    ensure(
+        typed.contains(AFTER) && !typed.contains("AAAAAAAAAAAAAAAA"),
+        || {
+            format!(
+                "{instance} received {} bytes, expected only {AFTER:?}",
+                typed.len()
+            )
+        },
+    )
+}
+
+fn input_at_the_holder_limit_is_forwarded<F: ClientProtocolFixture>(fx: &mut F) -> CaseResult {
+    use agend_core::protocol::holder::MAX_REQUEST_LINE;
+    let instance = fx.terminal_instance();
+    let mut op = operator(fx)?;
+    send(
+        &mut op,
+        &input_making_a_line_of(&instance, MAX_REQUEST_LINE),
+    )?;
+    let quiet = collect(&mut op, QUIET)?;
+    ensure(quiet.errors.is_empty() && !quiet.closed, || {
+        format!(
+            "a {MAX_REQUEST_LINE}-byte holder line got errors {:?} (closed {}), expected no reply",
+            quiet.errors, quiet.closed
+        )
+    })?;
+    still_takes_input(fx, &mut op)
+}
+
+fn input_one_byte_over_the_holder_limit_is_refused<F: ClientProtocolFixture>(
+    fx: &mut F,
+) -> CaseResult {
+    use agend_core::protocol::holder::MAX_REQUEST_LINE;
+    let instance = fx.terminal_instance();
+    let mut op = operator(fx)?;
+    send(
+        &mut op,
+        &input_making_a_line_of(&instance, MAX_REQUEST_LINE + 1),
+    )?;
+    let mut skipped = Vec::new();
+    let reply = until(
+        &mut op,
+        WITHIN,
+        |r| matches!(r, ClientResponse::Error { .. }),
+        &mut skipped,
+    )?;
+    let ClientResponse::Error { data } = reply else {
+        unreachable!("filtered");
+    };
+    ensure(
+        data.code == error_code::INVALID_REQUEST
+            && data.request_id.is_none()
+            && data.message.contains(&MAX_REQUEST_LINE.to_string()),
+        || {
+            format!(
+                "a {}-byte holder line got {data:?}, expected invalid_request naming the limit",
+                MAX_REQUEST_LINE + 1
+            )
+        },
+    )?;
+    still_takes_input(fx, &mut op)
+}
+
 // ---- the fake daemon as a fixture ----
 
 /// The testkit fake daemon behind the CLP contract: an instance with a
@@ -1168,11 +1491,14 @@ pub struct FakeDaemonFixture {
     base: Arc<AtomicU64>,
     items: u64,
     names: u64,
+    outputs: u64,
 }
 
 pub const FAKE_INSTANCE: &str = "clp-1";
 /// The second instance of the fake (the other agent of CLP-13, CLP-17).
 pub const FAKE_PEER: &str = "clp-2";
+/// A `failed` instance of the fake (CLP-21).
+pub const FAKE_STOPPED: &str = "clp-3";
 
 impl FakeDaemonFixture {
     pub fn new() -> FakeDaemonFixture {
@@ -1183,6 +1509,7 @@ impl FakeDaemonFixture {
             base: Arc::new(AtomicU64::new(0)),
             items: 0,
             names: 0,
+            outputs: 0,
         };
         fx.boot().expect("fake daemon");
         fx
@@ -1204,6 +1531,13 @@ impl FakeDaemonFixture {
                 working_directory: Some(format!("/fake/workspace/{id}")),
             });
         }
+        daemon.set_instance(InstanceView {
+            instance_id: FAKE_STOPPED.into(),
+            team_id: "general".into(),
+            backend: "claude".into(),
+            state: AgentState::Failed,
+            working_directory: Some(format!("/fake/workspace/{FAKE_STOPPED}")),
+        });
         self.daemon = Some(daemon);
         Ok(())
     }
@@ -1284,6 +1618,28 @@ impl ClientProtocolFixture for FakeDaemonFixture {
         self.names += 1;
         format!("clp-n{}", self.names)
     }
+
+    fn make_output(&mut self, instance: &str) -> Result<(), String> {
+        self.outputs += 1;
+        let line = format!("clp-output-{}\r\n", self.outputs);
+        self.daemon().push_terminal_bytes(instance, line.as_bytes());
+        Ok(())
+    }
+
+    fn typed(&mut self, instance: &str, _expect: &str) -> Result<String, String> {
+        let typed: Vec<u8> = self
+            .daemon()
+            .terminal_inputs()
+            .into_iter()
+            .filter(|(id, _)| id == instance)
+            .flat_map(|(_, bytes)| bytes)
+            .collect();
+        Ok(String::from_utf8_lossy(&typed).into_owned())
+    }
+
+    fn stopped_instance(&mut self) -> Result<String, String> {
+        Ok(FAKE_STOPPED.into())
+    }
 }
 
 // ---- mutants: the fake behind a misbehaving proxy ----
@@ -1325,6 +1681,15 @@ impl<F: ClientProtocolFixture> ClientProtocolFixture for Proxied<F> {
     }
     fn fresh_name(&mut self) -> String {
         self.inner.fresh_name()
+    }
+    fn make_output(&mut self, instance: &str) -> Result<(), String> {
+        self.inner.make_output(instance)
+    }
+    fn typed(&mut self, instance: &str, expect: &str) -> Result<String, String> {
+        self.inner.typed(instance, expect)
+    }
+    fn stopped_instance(&mut self) -> Result<String, String> {
+        self.inner.stopped_instance()
     }
 }
 

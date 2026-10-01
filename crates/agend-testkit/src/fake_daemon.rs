@@ -23,7 +23,10 @@
 //! - `resolve_attention`: `forbidden` for an agent caller (before the id is
 //!   looked at); `unknown_attention` for an unknown id or an action the item
 //!   does not list; otherwise the item leaves the list, `attention_resolved`
-//!   is emitted and the reply is `accepted`.
+//!   is emitted and the reply is `accepted`. With
+//!   [`FakeDaemon::hold_resolved_events`] the event waits until
+//!   [`FakeDaemon::release_resolved_events`] (gate 11 B P4: a client must
+//!   drop an item on the event, not on `accepted`).
 //! - `command` (gate 9: agents only; the operator gets `forbidden`, as from
 //!   the real daemon): `status` (the caller's instance, or the assignment's
 //!   task and ticket identity), `send` and `inbox` like the real daemon
@@ -46,12 +49,26 @@
 //!   events); `task_cancel` is `not_supported`.
 //! - `hello` names the daemon: `agend <version> (fake daemon)`, this
 //!   process's pid, and the boot id (the event id base).
-//! - `subscribe_terminal`: one `terminal_snapshot`, for any instance id.
-//! - `terminal_input`: `not_supported` (gate 11's attach view).
+//! - `subscribe_terminal` (gate 11 B P1): an instance of the fleet view gets
+//!   its screen ([`FakeDaemon::set_screen`]; `fake screen of <id>` until
+//!   set), then every [`FakeDaemon::push_terminal_bytes`] as
+//!   `terminal_bytes`, which also appends the text to its screen (the next
+//!   subscription shows it). Any other id: `no_terminal`. A new
+//!   subscription on the same connection replaces the old one, also when it
+//!   fails. A subscriber more than [`TERMINAL_CHUNKS`] chunks behind is
+//!   closed, like an event subscriber.
+//! - `terminal_input` (gate 11 B P6), in this order: an agent caller gets
+//!   `forbidden`; an instance not in the fleet view, or `failed`,
+//!   `no_terminal`; a codex
+//!   instance `not_supported` (until U17); input whose holder request line
+//!   would be over `protocol::holder::MAX_REQUEST_LINE` `invalid_request`;
+//!   otherwise the bytes are recorded
+//!   ([`FakeDaemon::terminal_inputs`]) and nothing is answered. Errors carry
+//!   no request id.
 //! - `answer_ask`, for asks from the `ask` command or `FakeDaemon::open_ask`
 //!   (an ask with a task and a context recap, as a bound agent's would be).
 //!
-//! Not covered: terminal byte streaming, persistence.
+//! Not covered: a PTY (input is recorded, not echoed), persistence.
 //!
 //! Must NOT: share code paths with the real server beyond `agend_core::protocol`.
 
@@ -73,8 +90,11 @@ use agend_core::protocol::client::{
     EventData, FleetData, FleetView, InboxMessage, InstanceAddedData, InstanceChangedData,
     InstanceView, MAX_MESSAGE_BYTES, MessageLevel, MessagesData, OperatorCommand, RETAINED_EVENTS,
     RestartingData, ResultIdentity, SUPPORTED_VERSIONS, SelectedVersionData, StatusData,
-    TaskChangedData, TaskCreatedData, TaskView, TeamView, TerminalSnapshotData, error_code,
-    is_uuid_v4, message_too_long, order_attention, uuid_v4,
+    TaskChangedData, TaskCreatedData, TaskView, TeamView, TerminalBytesData, TerminalSnapshotData,
+    error_code, is_uuid_v4, message_too_long, order_attention, uuid_v4,
+};
+use agend_core::protocol::holder::{
+    HolderRequest, MAX_REQUEST_LINE, OperatorTerminalInputData, operator_input_too_long,
 };
 use agend_core::protocol::{ProtocolVersion, negotiate};
 
@@ -87,11 +107,27 @@ pub const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 /// What `resolve_attention` from an agent gets (the real daemon says the
 /// same).
 pub const OPERATOR_ONLY: &str = "only the operator can resolve needs-you items; ask the operator";
+/// What `terminal_input` from an agent gets (the real daemon says the same).
+pub const TYPE_OPERATOR_ONLY: &str = "only the operator can type into an agent's terminal";
+/// What `terminal_input` into a codex instance gets (gate 11 B P6).
+pub const CODEX_INPUT: &str =
+    "typing into a codex terminal waits until U17 is verified (gate 7 P1); nothing was written";
+/// PTY chunks a terminal subscriber may fall behind before it is closed.
+pub const TERMINAL_CHUNKS: usize = 256;
 
 type Writer = Arc<Mutex<UnixStream>>;
 
 struct Subscriber {
+    connection: u64,
     queue: SyncSender<EventData>,
+    lagged: Arc<AtomicBool>,
+}
+
+/// One connection's terminal subscription.
+struct TerminalSubscriber {
+    connection: u64,
+    instance: String,
+    queue: SyncSender<String>,
     lagged: Arc<AtomicBool>,
 }
 
@@ -116,6 +152,12 @@ struct State {
     instances: Vec<InstanceView>,
     tasks: Vec<TaskView>,
     attention: Vec<AttentionRequiredData>,
+    screens: BTreeMap<String, String>,
+    terminals: Vec<TerminalSubscriber>,
+    inputs: Vec<(String, Vec<u8>)>,
+    hold_resolved: bool,
+    held_resolved: Vec<DaemonEvent>,
+    next_connection: u64,
 }
 
 /// A message as the fake keeps it.
@@ -132,8 +174,11 @@ struct FakeMessage {
 struct Shared {
     state: Mutex<State>,
     stopping: AtomicBool,
+    /// Connections being served now.
+    open: std::sync::atomic::AtomicUsize,
     /// Every accepted connection, so drop can close them.
-    connections: Mutex<Vec<UnixStream>>,
+    /// (accept number, a clone), kept while the connection is served.
+    connections: Mutex<Vec<(u64, UnixStream)>>,
 }
 
 /// A running fake daemon. Drop stops accepting, closes every open
@@ -192,8 +237,15 @@ impl FakeDaemon {
                 instances: Vec::new(),
                 tasks: Vec::new(),
                 attention: Vec::new(),
+                screens: BTreeMap::new(),
+                terminals: Vec::new(),
+                inputs: Vec::new(),
+                hold_resolved: false,
+                held_resolved: Vec::new(),
+                next_connection: 0,
             }),
             stopping: AtomicBool::new(false),
+            open: std::sync::atomic::AtomicUsize::new(0),
             connections: Mutex::new(Vec::new()),
         });
         let accept_shared = Arc::clone(&shared);
@@ -319,6 +371,79 @@ impl FakeDaemon {
         fleet(&lock(&self.shared.state))
     }
 
+    /// The screen `subscribe_terminal` answers for `instance` from now on.
+    pub fn set_screen(&self, instance: &str, screen: &str) {
+        lock(&self.shared.state)
+            .screens
+            .insert(instance.to_owned(), screen.to_owned());
+    }
+
+    /// PTY output of `instance`: sent as `terminal_bytes` to its
+    /// subscribers and appended (as text, without `\r`) to its screen.
+    pub fn push_terminal_bytes(&self, instance: &str, bytes: &[u8]) {
+        use base64::Engine;
+        let mut state = lock(&self.shared.state);
+        let text = String::from_utf8_lossy(bytes).replace('\r', "");
+        let screen = state
+            .screens
+            .entry(instance.to_owned())
+            .or_insert_with(|| default_screen(instance));
+        screen.push_str(&text);
+        let chunk = base64::engine::general_purpose::STANDARD.encode(bytes);
+        state.terminals.retain(|t| {
+            if t.instance != instance {
+                return true;
+            }
+            match t.queue.try_send(chunk.clone()) {
+                Ok(()) => true,
+                Err(TrySendError::Full(_)) => {
+                    t.lagged.store(true, Ordering::SeqCst);
+                    false
+                }
+                Err(TrySendError::Disconnected(_)) => false,
+            }
+        });
+    }
+
+    /// Every accepted `terminal_input`: (instance, decoded bytes), in order.
+    pub fn terminal_inputs(&self) -> Vec<(String, Vec<u8>)> {
+        lock(&self.shared.state).inputs.clone()
+    }
+
+    /// Client connections open now (the TUI tests check none is left).
+    pub fn open_connections(&self) -> usize {
+        self.shared.open.load(Ordering::SeqCst)
+    }
+
+    /// Closes every connection with a terminal subscription, as the daemon
+    /// does to a subscriber that fell [`TERMINAL_CHUNKS`] behind (no error
+    /// line; the client reads the end of the connection).
+    pub fn drop_terminal_subscribers(&self) {
+        for t in lock(&self.shared.state).terminals.drain(..) {
+            t.lagged.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// Terminal subscriptions open now (one per connection at most).
+    pub fn terminal_subscribers(&self) -> usize {
+        lock(&self.shared.state).terminals.len()
+    }
+
+    /// While held, `resolve_attention` answers `accepted` and takes the item
+    /// off the list, but its `attention_resolved` waits for
+    /// [`FakeDaemon::release_resolved_events`].
+    pub fn hold_resolved_events(&self, hold: bool) {
+        lock(&self.shared.state).hold_resolved = hold;
+    }
+
+    /// Emits the held `attention_resolved` events, in order.
+    pub fn release_resolved_events(&self) {
+        let mut state = lock(&self.shared.state);
+        for event in std::mem::take(&mut state.held_resolved) {
+            emit(&mut state, event);
+        }
+    }
+
     /// Every request received, in order, from all connections.
     pub fn requests(&self) -> Vec<ClientRequest> {
         lock(&self.shared.state).requests.clone()
@@ -328,17 +453,24 @@ impl FakeDaemon {
 impl Drop for FakeDaemon {
     fn drop(&mut self) {
         self.shared.stopping.store(true, Ordering::SeqCst);
-        let _ = UnixStream::connect(&self.socket_path);
         if let Some(accept) = self.accept.take() {
             let _ = accept.join();
         }
         // The accept loop has exited, so no connection is added after this.
-        for connection in lock(&self.shared.connections).drain(..) {
+        for (_, connection) in lock(&self.shared.connections).drain(..) {
             let _ = connection.shutdown(Shutdown::Both);
         }
-        lock(&self.shared.state).subscribers.clear();
+        {
+            let mut state = lock(&self.shared.state);
+            state.subscribers.clear();
+            state.terminals.clear();
+        }
         let _ = std::fs::remove_file(&self.socket_path);
     }
+}
+
+fn default_screen(instance: &str) -> String {
+    format!("fake screen of {instance}")
 }
 
 fn ask_item(thread: AskThread, recap: Option<ContextRecap>) -> AttentionRequiredData {
@@ -382,25 +514,53 @@ fn fleet(state: &State) -> FleetView {
     }
 }
 
-fn accept_loop(listener: UnixListener, shared: Arc<Shared>) {
-    for stream in listener.incoming() {
-        if shared.stopping.load(Ordering::SeqCst) {
-            break;
+/// How often a stopping accept loop looks at its stop flag.
+pub(crate) const ACCEPT_POLL: Duration = Duration::from_millis(5);
+
+/// The next connection, polling `listener` (non-blocking) until one comes
+/// or `stopping` is set. Stopping needs no new descriptor, so it works when
+/// the process has none left (a `connect` to wake a blocked `accept`
+/// would fail then); failed accepts (out of descriptors) are retried.
+pub(crate) fn accept_or_stop(listener: &UnixListener, stopping: &AtomicBool) -> Option<UnixStream> {
+    let _ = listener.set_nonblocking(true);
+    loop {
+        if stopping.load(Ordering::SeqCst) {
+            return None;
         }
-        let Ok(stream) = stream else { continue };
+        match listener.accept() {
+            Ok((stream, _)) => {
+                // Accepted sockets inherit non-blocking mode on macOS.
+                let _ = stream.set_nonblocking(false);
+                return Some(stream);
+            }
+            Err(_) => std::thread::sleep(ACCEPT_POLL),
+        }
+    }
+}
+
+fn accept_loop(listener: UnixListener, shared: Arc<Shared>) {
+    let mut accepted = 0u64;
+    while let Some(stream) = accept_or_stop(&listener, &shared.stopping) {
         let _ = stream.set_write_timeout(Some(WRITE_TIMEOUT));
         let (Ok(for_drop), Ok(for_close)) = (stream.try_clone(), stream.try_clone()) else {
             continue;
         };
-        lock(&shared.connections).push(for_drop);
+        accepted += 1;
+        let number = accepted;
+        lock(&shared.connections).push((number, for_drop));
         let shared = Arc::clone(&shared);
+        shared.open.fetch_add(1, Ordering::SeqCst);
         let _ = std::thread::Builder::new()
             .name("fake-daemon-conn".into())
             .spawn(move || {
                 let _ = serve(stream, &shared);
-                // Other handles (the drop list, subscribers) keep the socket
-                // open; shut it down so the client reads EOF.
+                shared.open.fetch_sub(1, Ordering::SeqCst);
+                // Other handles (subscribers) keep the socket open; shut it
+                // down so the client reads EOF, and let go of its clone (a
+                // long-lived fake would otherwise hold a descriptor per
+                // connection it ever accepted).
                 let _ = for_close.shutdown(Shutdown::Both);
+                lock(&shared.connections).retain(|(n, _)| *n != number);
             });
     }
 }
@@ -475,6 +635,31 @@ fn forward(writer: Writer, queue: Receiver<EventData>, lagged: Arc<AtomicBool>) 
     }
 }
 
+/// Sends queued PTY chunks of `instance` to one terminal subscriber until
+/// its queue is dropped; a lagging one is closed (no `event_gap`).
+fn forward_terminal(
+    writer: Writer,
+    instance: String,
+    queue: Receiver<String>,
+    lagged: Arc<AtomicBool>,
+) {
+    for bytes_base64 in queue.iter() {
+        if lagged.load(Ordering::SeqCst) {
+            break;
+        }
+        let data = TerminalBytesData {
+            instance_id: instance.clone(),
+            bytes_base64,
+        };
+        if send(&writer, &ClientResponse::TerminalBytes { data }).is_err() {
+            return;
+        }
+    }
+    if lagged.load(Ordering::SeqCst) {
+        let _ = lock(&writer).shutdown(Shutdown::Both);
+    }
+}
+
 /// `Ok(())` when a subscription may continue after `after` (see the module
 /// docs), otherwise the `event_gap` message.
 fn check_cursor(state: &State, after: u64) -> Result<(), String> {
@@ -493,17 +678,35 @@ fn check_cursor(state: &State, after: u64) -> Result<(), String> {
 }
 
 struct Connection {
+    id: u64,
     writer: Writer,
     negotiated: bool,
     caller: Option<String>,
 }
 
 fn serve(stream: UnixStream, shared: &Shared) -> io::Result<()> {
+    let id = {
+        let mut state = lock(&shared.state);
+        state.next_connection += 1;
+        state.next_connection
+    };
     let mut conn = Connection {
+        id,
         writer: Arc::new(Mutex::new(stream.try_clone()?)),
         negotiated: false,
         caller: None,
     };
+    let served = serve_lines(stream, shared, &mut conn);
+    // Its subscriptions end with the connection (their forwarders hold its
+    // descriptor until their queue is dropped).
+    let mut state = lock(&shared.state);
+    state.terminals.retain(|t| t.connection != id);
+    state.subscribers.retain(|s| s.connection != id);
+    drop(state);
+    served
+}
+
+fn serve_lines(stream: UnixStream, shared: &Shared, conn: &mut Connection) -> io::Result<()> {
     for line in BufReader::new(stream).lines() {
         let line = line?;
         if line.trim().is_empty() {
@@ -592,7 +795,7 @@ fn serve(stream: UnixStream, shared: &Shared) -> io::Result<()> {
             write_line(&stream, &reply)?;
             continue;
         }
-        let replies = handle(&mut state, request, &conn);
+        let replies = handle(&mut state, request, conn);
         drop(state);
         for reply in replies {
             write_line(&stream, &reply)?;
@@ -652,8 +855,9 @@ fn restart(shared: &Shared) {
         state.latest = start;
         state.events.clear();
         state.subscribers.clear();
+        state.terminals.clear();
     }
-    for connection in lock(&shared.connections).drain(..) {
+    for (_, connection) in lock(&shared.connections).drain(..) {
         let _ = connection.shutdown(Shutdown::Both);
     }
 }
@@ -735,21 +939,92 @@ fn handle(state: &mut State, request: ClientRequest, conn: &Connection) -> Vec<C
                 .name("fake-daemon-events".into())
                 .spawn(move || forward(writer, receiver, flag));
             if started.is_ok() {
-                state.subscribers.push(Subscriber { queue, lagged });
+                state.subscribers.push(Subscriber {
+                    connection: conn.id,
+                    queue,
+                    lagged,
+                });
             }
             Vec::new()
         }
-        ClientRequest::SubscribeTerminal { data } => vec![ClientResponse::TerminalSnapshot {
-            data: TerminalSnapshotData {
-                screen: format!("fake screen of {}", data.instance_id),
-                instance_id: data.instance_id,
-            },
-        }],
-        ClientRequest::TerminalInput { .. } => vec![error(
-            None,
-            error_code::NOT_SUPPORTED,
-            "terminal input arrives with the attach view (gate 11); nothing was written".into(),
-        )],
+        ClientRequest::SubscribeTerminal { data } => {
+            // A new subscription replaces this connection's old one, also
+            // when it fails (dropping the queue ends its forwarder).
+            state.terminals.retain(|t| t.connection != conn.id);
+            let id = data.instance_id;
+            if !state.instances.iter().any(|i| i.instance_id == id) {
+                let message = format!("no instance {id}");
+                return vec![error(None, error_code::NO_TERMINAL, message)];
+            }
+            let screen = state
+                .screens
+                .get(&id)
+                .cloned()
+                .unwrap_or_else(|| default_screen(&id));
+            let (queue, receiver) = sync_channel(TERMINAL_CHUNKS);
+            let lagged = Arc::new(AtomicBool::new(false));
+            let (writer, flag, instance) =
+                (Arc::clone(&conn.writer), Arc::clone(&lagged), id.clone());
+            let started = std::thread::Builder::new()
+                .name("fake-daemon-terminal".into())
+                .spawn(move || forward_terminal(writer, instance, receiver, flag));
+            if started.is_ok() {
+                state.terminals.push(TerminalSubscriber {
+                    connection: conn.id,
+                    instance: id.clone(),
+                    queue,
+                    lagged,
+                });
+            }
+            vec![ClientResponse::TerminalSnapshot {
+                data: TerminalSnapshotData {
+                    instance_id: id,
+                    screen,
+                },
+            }]
+        }
+        ClientRequest::TerminalInput { data } => {
+            use base64::Engine;
+            if conn.caller.is_some() {
+                return vec![error(
+                    None,
+                    error_code::FORBIDDEN,
+                    TYPE_OPERATOR_ONLY.into(),
+                )];
+            }
+            let id = data.instance_id;
+            // A `failed` instance has no live terminal (as on the daemon).
+            let Some(instance) = state
+                .instances
+                .iter()
+                .find(|i| i.instance_id == id && i.state != AgentState::Failed)
+            else {
+                let message = format!("{id} has no live terminal; nothing was written");
+                return vec![error(None, error_code::NO_TERMINAL, message)];
+            };
+            if instance.backend == "codex" {
+                return vec![error(None, error_code::NOT_SUPPORTED, CODEX_INPUT.into())];
+            }
+            // What the daemon would send its holder, newline included.
+            let line = serde_json::to_vec(&HolderRequest::OperatorTerminalInput {
+                data: OperatorTerminalInputData {
+                    bytes_base64: data.bytes_base64.clone(),
+                },
+            })
+            .map_or(usize::MAX, |l| l.len() + 1);
+            if line > MAX_REQUEST_LINE {
+                let message = operator_input_too_long(line);
+                return vec![error(None, error_code::INVALID_REQUEST, message)];
+            }
+            // Like the daemon, which does not decode: an input that is not
+            // base64 is refused by the holder, which the daemon only logs.
+            // Nothing is written and nothing is answered.
+            if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&data.bytes_base64)
+            {
+                state.inputs.push((id, bytes));
+            }
+            Vec::new()
+        }
         ClientRequest::AnswerAsk { data } => {
             let Some(thread) = state.asks.get_mut(&data.ask_id) else {
                 let message = format!("no open ask {}", data.ask_id);
@@ -808,15 +1083,17 @@ fn handle(state: &mut State, request: ClientRequest, conn: &Connection) -> Vec<C
                 )];
             };
             state.attention.remove(index);
-            emit(
-                state,
-                DaemonEvent::AttentionResolved {
-                    data: AttentionResolvedData {
-                        attention_id: data.attention_id,
-                        action: data.action,
-                    },
+            let event = DaemonEvent::AttentionResolved {
+                data: AttentionResolvedData {
+                    attention_id: data.attention_id,
+                    action: data.action,
                 },
-            );
+            };
+            if state.hold_resolved {
+                state.held_resolved.push(event);
+            } else {
+                emit(state, event);
+            }
             vec![accepted(data.request_id)]
         }
         ClientRequest::Unknown => vec![error(

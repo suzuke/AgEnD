@@ -30,8 +30,12 @@
 //! agend-daemon, agend-testkit (CLP-13..17 against the fake, and their
 //! mutants) and agend (the CLI-n table, restart, milestone), check-deps, then
 //! `cli_demo` against the built `agend` and `fake_codex`.
-//! Gate 11 runs the per-crate checks, check-deps, then the TUI demo (screens,
-//! navigation, resolve, disconnect against the testkit fake daemon).
+//! Gate 11 runs the checks of agend-tui (the TUI through `ClientSource` on
+//! the fake daemon), agend-client (the terminal `Sender`), agend-daemon
+//! (`terminal_input`), agend-testkit (CLP-18..20 against the fake, and
+//! their mutants) and agend (the real-daemon CLP run, the TUI against the
+//! real daemon, `agend app`), check-deps, then the TUI demo on the fake
+//! daemon (`tui_accept`) and on the real one (`tui_real`, the built `agend`).
 //! Other gates use the per-crate checks until their acceptance flow is built.
 
 use crate::{cargo, check_deps, workspace_root};
@@ -118,7 +122,15 @@ pub const GATES: &[Gate] = &[
     Gate {
         number: 11,
         name: "tui",
-        crates: &["agend-tui"],
+        // B: `agend` holds the real-daemon tests (tui_daemon.rs, the CLP
+        // run); the others carry the terminal input, the fake and the client.
+        crates: &[
+            "agend-tui",
+            "agend-client",
+            "agend-daemon",
+            "agend-testkit",
+            "agend",
+        ],
     },
     Gate {
         number: 12,
@@ -294,6 +306,8 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
             "--example",
             "tui_accept",
         ])?;
+        step(&["build", "--quiet", "-p", "agend"])?;
+        step(&["run", "--quiet", "-p", "agend", "--example", "tui_real"])?;
         println!("gate 11 (tui): checks passed");
     } else {
         println!(

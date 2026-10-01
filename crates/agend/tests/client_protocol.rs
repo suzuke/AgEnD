@@ -35,9 +35,10 @@ fn assert_no_holders_left(lab: &lab::Lab) {
     assert_eq!(lab.running_holders(), vec![], "holders left running");
 }
 
-const REAL_RULES: [&str; 16] = [
+const REAL_RULES: [&str; 21] = [
     "CLP-1", "CLP-2", "CLP-3", "CLP-4", "CLP-5", "CLP-6", "CLP-7", "CLP-9", "CLP-10", "CLP-11",
-    "CLP-12", "CLP-13", "CLP-14", "CLP-15", "CLP-16", "CLP-17",
+    "CLP-12", "CLP-13", "CLP-14", "CLP-15", "CLP-16", "CLP-17", "CLP-18", "CLP-19", "CLP-20",
+    "CLP-21", "CLP-22",
 ];
 
 #[test]
@@ -47,7 +48,12 @@ fn the_real_daemon_meets_the_client_protocol_contract() {
     });
     println!("{report}");
     report.assert_passed();
-    assert_eq!(report.total(), REAL_RULES.len());
+    // One case per rule, except CLP-22's two (at the limit, one byte over).
+    let cases = client::cases::<clp::RealDaemon>()
+        .iter()
+        .filter(|c| REAL_RULES.contains(&c.rule))
+        .count();
+    assert_eq!(report.total(), cases);
 }
 
 #[test]

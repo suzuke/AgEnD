@@ -6,11 +6,14 @@ use agend_core::protocol::client::error_code::{
     HELLO_REQUIRED, INVALID_REQUEST, UNKNOWN_REQUEST, VERSION_MISMATCH,
 };
 use agend_core::protocol::client::{
-    AgentCommand, AnswerAskData, ClientCommandData, ClientRequest, ClientResponse, CommandResult,
-    DaemonEvent, InstanceData, OperatorCommand, OperatorData, ResultIdentity, STALE_RESULT,
-    SubscribeEventsData, V1_2,
+    AgentCommand, AgentState, AnswerAskData, AttentionAction, AttentionRequiredData,
+    ClientCommandData, ClientRequest, ClientResponse, CommandResult, DaemonEvent, InstanceData,
+    InstanceView, OperatorCommand, OperatorData, ResolveAttentionData, ResultIdentity,
+    STALE_RESULT, SubscribeEventsData, V1_2,
 };
-use agend_testkit::fake_daemon::{FakeDaemon, ProbeClient};
+use agend_testkit::contract::client::terminal_input;
+use agend_testkit::fake_daemon::{CODEX_INPUT, FakeDaemon, ProbeClient, TYPE_OPERATOR_ONLY};
+use std::time::Duration;
 
 /// An agent's connection (agent commands are for agents, gate 9).
 fn connected(daemon: &FakeDaemon) -> ProbeClient {
@@ -244,6 +247,7 @@ fn events_replay_the_backlog_then_stream_live() {
     assert!(
         matches!(updated, ClientResponse::Event { data } if matches!(data.event, DaemonEvent::AskUpdated { .. }))
     );
+    // dev-1 is not in the fleet view: no terminal (gate 11 B P1).
     viewer
         .send(&ClientRequest::SubscribeTerminal {
             data: InstanceData {
@@ -251,10 +255,7 @@ fn events_replay_the_backlog_then_stream_live() {
             },
         })
         .unwrap();
-    assert!(matches!(
-        viewer.recv().unwrap().unwrap(),
-        ClientResponse::TerminalSnapshot { .. }
-    ));
+    assert_eq!(error_code(viewer.recv().unwrap().unwrap()), "no_terminal");
     assert_eq!(daemon.requests().len(), 7);
 }
 
@@ -413,4 +414,152 @@ fn a_restart_closes_connections_and_changes_the_boot_id() {
         "the connection must close"
     );
     assert!(daemon.event_id_start() > before, "a new boot id");
+}
+
+fn instance(id: &str, backend: &str) -> InstanceView {
+    InstanceView {
+        instance_id: id.into(),
+        team_id: "general".into(),
+        backend: backend.into(),
+        state: AgentState::Unknown,
+        working_directory: None,
+    }
+}
+
+fn operator(daemon: &FakeDaemon) -> ProbeClient {
+    ProbeClient::hello(daemon.socket_path(), None).unwrap().0
+}
+
+fn subscribe_terminal(id: &str) -> ClientRequest {
+    ClientRequest::SubscribeTerminal {
+        data: InstanceData {
+            instance_id: id.into(),
+        },
+    }
+}
+
+#[test]
+fn each_instance_has_its_screen_and_bytes_update_it() {
+    let daemon = FakeDaemon::start().unwrap();
+    daemon.set_instance(instance("g-1", "claude"));
+    daemon.set_instance(instance("g-2", "claude"));
+    daemon.set_screen("g-1", "$ ls");
+    let mut c = operator(&daemon);
+    let reply = c.request(&subscribe_terminal("g-2")).unwrap();
+    assert!(
+        matches!(&reply, ClientResponse::TerminalSnapshot { data } if data.screen == "fake screen of g-2"),
+        "{reply:?}"
+    );
+    // Replaced by g-1: g-2's bytes no longer come.
+    let reply = c.request(&subscribe_terminal("g-1")).unwrap();
+    assert!(
+        matches!(&reply, ClientResponse::TerminalSnapshot { data } if data.screen == "$ ls"),
+        "{reply:?}"
+    );
+    daemon.push_terminal_bytes("g-2", b"two\r\n");
+    daemon.push_terminal_bytes("g-1", b"\r\nREADME\r\n");
+    let bytes = c.recv().unwrap().unwrap();
+    assert!(
+        matches!(&bytes, ClientResponse::TerminalBytes { data }
+            if data.instance_id == "g-1" && data.bytes_base64 == "DQpSRUFETUUNCg=="),
+        "{bytes:?}"
+    );
+    let reply = c.request(&subscribe_terminal("g-1")).unwrap();
+    assert!(
+        matches!(&reply, ClientResponse::TerminalSnapshot { data } if data.screen == "$ ls\nREADME\n"),
+        "{reply:?}"
+    );
+    assert_eq!(daemon.terminal_subscribers(), 1);
+    drop(c);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while daemon.terminal_subscribers() > 0 {
+        assert!(std::time::Instant::now() < deadline, "subscription kept");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn terminal_input_checks_identity_then_instance_then_backend() {
+    let daemon = FakeDaemon::start().unwrap();
+    daemon.set_instance(instance("g-1", "claude"));
+    daemon.set_instance(instance("g-x", "codex"));
+    let mut agent = connected(&daemon);
+    for id in ["g-1", "nobody"] {
+        agent.send(&terminal_input(id, b"a")).unwrap();
+        let ClientResponse::Error { data } = agent.recv().unwrap().unwrap() else {
+            panic!("expected an error");
+        };
+        assert_eq!(
+            (data.code.as_str(), data.message.as_str(), data.request_id),
+            ("forbidden", TYPE_OPERATOR_ONLY, None)
+        );
+    }
+    let mut op = operator(&daemon);
+    op.send(&terminal_input("nobody", b"a")).unwrap();
+    assert_eq!(error_code(op.recv().unwrap().unwrap()), "no_terminal");
+    op.send(&terminal_input("g-x", b"a")).unwrap();
+    let ClientResponse::Error { data } = op.recv().unwrap().unwrap() else {
+        panic!("expected an error");
+    };
+    assert_eq!(
+        (data.code.as_str(), data.message.as_str()),
+        ("not_supported", CODEX_INPUT)
+    );
+    op.send(&terminal_input("g-1", "é\r\x1b[A".as_bytes()))
+        .unwrap();
+    let quiet = op.recv_within(Duration::from_millis(300));
+    assert!(quiet.is_err(), "no reply to accepted input: {quiet:?}");
+    assert_eq!(
+        daemon.terminal_inputs(),
+        vec![("g-1".to_owned(), "é\r\x1b[A".as_bytes().to_vec())]
+    );
+}
+
+#[test]
+fn held_resolved_events_wait_for_release() {
+    let daemon = FakeDaemon::start().unwrap();
+    daemon.add_attention(AttentionRequiredData {
+        reason: "g-1 failed".into(),
+        task_id: None,
+        ask: None,
+        recap: None,
+        attention_id: Some("instance-failed:g-1".into()),
+        unblocks: Some(0),
+        waiting_since_unix_ms: Some(1),
+        if_ignored: None,
+        actions: vec![AttentionAction::Retry],
+        instance_id: Some("g-1".into()),
+    });
+    daemon.hold_resolved_events(true);
+    let mut op = operator(&daemon);
+    let as_of = daemon.fleet().as_of_event_id;
+    op.send(&ClientRequest::SubscribeEvents {
+        data: SubscribeEventsData {
+            after_event_id: Some(as_of),
+        },
+    })
+    .unwrap();
+    let reply = op
+        .request(&ClientRequest::ResolveAttention {
+            data: ResolveAttentionData {
+                request_id: "r-1".into(),
+                attention_id: "instance-failed:g-1".into(),
+                action: AttentionAction::Retry,
+            },
+        })
+        .unwrap();
+    assert!(
+        matches!(reply, ClientResponse::CommandResult { .. }),
+        "{reply:?}"
+    );
+    assert!(daemon.fleet().attention.is_empty());
+    let held = op.recv_within(Duration::from_millis(300));
+    assert!(held.is_err(), "the event is held: {held:?}");
+    daemon.release_resolved_events();
+    let released = op.recv().unwrap().unwrap();
+    assert!(
+        matches!(&released, ClientResponse::Event { data }
+            if matches!(data.event, DaemonEvent::AttentionResolved { .. })),
+        "{released:?}"
+    );
 }

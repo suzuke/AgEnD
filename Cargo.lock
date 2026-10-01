@@ -13,8 +13,10 @@ dependencies = [
  "agend-shim",
  "agend-testkit",
  "agend-tui",
+ "base64",
  "clap",
  "libc",
+ "ratatui",
  "rusqlite",
  "serde",
  "serde_json",
@@ -27,6 +29,7 @@ version = "0.0.0"
 dependencies = [
  "agend-core",
  "agend-testkit",
+ "base64",
  "serde_json",
 ]
 
@@ -81,6 +84,8 @@ name = "agend-testkit"
 version = "0.0.0"
 dependencies = [
  "agend-core",
+ "base64",
+ "libc",
  "serde_json",
  "tungstenite",
 ]
