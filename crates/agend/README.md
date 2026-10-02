@@ -9,6 +9,10 @@
 
 `team add|list|join|set-workflow`、`workflow list|show|check|apply`、operator／agent task create、task cancel（選填 `--reason`）與 agent 流水線回報已接通；`doctor` 加入真 sandbox probe。操作見 [pipeline runtime](../../docs/architecture/pipeline-runtime.md)。
 
+## 第 11 施工關 C 段（實作中）
+
+真 App 的完整畫面、鍵鼠／paste／歷史、多視窗、實際 resize、正常／unwind 還原與 20 次程序清理已有原生回歸。Codex U17 foundation 走真 holder／wrapper／driver／SQLite 與 fake app-server；完整 daemon／client／App U17 仍待完成，Codex 輸入仍 not_supported。[證據](../../docs/gates/gate-11c-u17-validation.md)。
+
 ## 負責
 
 - argv[0] 分派

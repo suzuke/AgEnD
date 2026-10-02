@@ -12,16 +12,14 @@ STO-13 同時跑 FakeStore 與 SQLite；SplitAdvance mutant 故意在失敗時�
 
 ## 第 11 施工關 C 段（實作中）
 
-真／假 daemon 的 1.3 能力邊界由 `agend/tests/terminal_capability.rs` 同跑；hello 現在能收到 client 提供的 1.4／1.3，major 不合的訊息依協定排序列出兩個版本。完整 frame producer、控制權與 C 段契約尚待完成。
-
-## 第 11 施工關 C 段（實作中）
-
 - `full_terminal`：共用 CLP-23–28 與 producer generation／failed instance；輸入由真 holder Screen 的 parser producer 提供。相同六條在 `agend/tests/full_terminal_contract.rs` 對真 daemon／holder／PTY 執行。
 - `full_terminal_pressure`：producer 操作阻塞時同 socket GetFleet 可回覆、新 grant 等原寫入；capture 中替換訂閱，完成後不能發舊 view。
 - `full_terminal_fds`：獨立程序 20 次檢視／取得控制／關閉，最後 socket fd 回 baseline；不代替 native daemon／TUI 的資源驗證。
 - `contract_teeth/terminal.rs`：六個 C wire mutant 都須被拒絕；規則表與 cases／mutants 從 `CONTRACTS.md` 及 `CLIENT-CONTRACTS.md` 機械核對。
 
 以上不認證 TUI／鍵鼠／貼上、300 ms 時效或 Codex U17。
+
+opt-in fake manual frontend 的原生驗證在 `agend/tests/codex_u17.rs`：真 PTY 輸入經實際 fake app-server，busy／user item／queue 由 producer 產生。既有 fake Codex 與錄製檔 conformance 仍照跑；這不是完整 App 或真 Codex smoke。[範圍](../../docs/gates/gate-11c-u17-validation.md)。
 
 ## 怎麼跑
 

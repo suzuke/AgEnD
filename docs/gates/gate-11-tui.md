@@ -581,6 +581,8 @@ unset AGEND_BIN               # 前幾關步驟留下的 export 可能指到已�
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-10-03 C 段 U17 foundation 已有原生回歸；人工文字誤認 receipt、Retry 舊快照與 draw 舊尺寸的反例修正通過。完整 U17／矩陣／最新 CI／獨立與人工驗收仍待完成（draft #145；[U17](gate-11c-u17-validation.md)、[反例](gate-11c-regression-validation.md)）。
+
 - 2026-10-01 #140 squash merge（`462822a`）；最新 head `6fdbc61` 的 ubuntu／macOS CI 全過，B 段已驗收並整合到 `v2`；C 段尚未開始。
 
 - 2026-09-29 使用者親自驗收 B 段 7 步通過；狀態改成 B 段完成、C 段未開始。

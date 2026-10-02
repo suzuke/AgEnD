@@ -13,6 +13,8 @@
 
 `protocol::terminal` 提供 no-std 的 cells／色彩／cursor／mode／viewport／frame 型別。holder 協定 1.1 新增 `GetTerminalFrame`、附 request id 的 `TerminalFrame` 與 `TerminalOperationError`；1.0 請求／純文字快照保持原 wire shape。holder 的 `TerminalControl` 提供 generation／owner 與實際 resize／input 完成回覆；client 1.4 新增檢視訂閱／viewport／控制、完成回覆與失去控制通知；Acquire 不接受 caller 自訂 attach id。client 提供 1.4／1.3，真 daemon 與注入 producer 的 fake 提供 1.4。`traits::TerminalProducer` 是同步畫面／完成控制／legacy input port，server 在背景排程；core 只有介面與協定型別。端到端基礎路徑與六項 fake／真 C 契約已建立，TUI／U17 與完整 C 驗收仍待完成。
 
+`PipelineView::replace_attention_if` 定義原子條件更新：捕捉值仍相同才 replace／publish，移除或已變更就拒絕；core 僅定義 port，Fleet 實作鎖。用於避免 Retry 與 failed-item enrichment 交錯時重建舊項目。
+
 ## 負責
 
 - 所有 crate 共用型別（`model`）：backend、team、task、送達狀態、branch 命名空間

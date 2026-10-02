@@ -20,6 +20,8 @@
 
 `tui_outer_pty` 在真外層 PTY 執行真正 `agend app`，經 crossterm capture 驗鍵鼠／paste、kernel resize、多視窗與歷史；正常／panic unwind 後核原 termios、alt／mouse／paste／focus／cursor／SGR 還原。20 次 App 程序退出回同一 fd 基準，holder pid 保留；共用 `tests/common/native_app.rs` 的 raw agent，不使用真 LLM。另有 12 次 burst 的端到端可見 deadline，每次 ≤300 ms、不加 holder round-trip 額度；800 ms 取樣 mutant 被同一斷言拒絕。[外層證據](../../docs/gates/gate-11c-outer-validation.md)。
 
+`codex_u17` 的兩個 foundation cases 用明確 opt-in raw fake frontend，驗同 thread 人工 turn、busy／queue／獨立 receipt、相同人工文字不能確認未嘗試送出的 row；component restart 保留 holder／thread，舊 attach 拒絕。它未經完整 daemon／client／App，也沒有真 Codex LLM；[範圍與反例](../../docs/gates/gate-11c-u17-validation.md)。
+
 ## 怎麼跑
 
 ```bash

@@ -1212,3 +1212,59 @@ fn native_cursor_shapes_visibility_and_readonly_crop_match_the_displayed_cells()
     );
     assert!(frame.cursor.visible);
 }
+
+#[test]
+fn drawing_the_backend_size_repairs_missing_and_stale_resize_events() {
+    let _permit = Permit::new();
+    let fake = parser::Fake::default();
+    let mut app = app(&fake, 31, 9);
+    // No Resize event arrives: the actual draw backend is already smaller.
+    agend_tui::render_buffer(&mut app, 20, 5);
+    acquire(&mut app);
+    let size = |app: &App| {
+        app.term
+            .as_ref()
+            .unwrap()
+            .full
+            .as_ref()
+            .unwrap()
+            .data
+            .as_ref()
+            .unwrap()
+            .frame
+            .size
+    };
+    assert_eq!(
+        size(&app),
+        TerminalSize {
+            rows: 4,
+            columns: 20
+        }
+    );
+    // A delayed native event must not override the current draw dimensions.
+    app.event(ratatui::crossterm::event::Event::Resize(31, 9));
+    agend_tui::render_buffer(&mut app, 20, 5);
+    key(&mut app, KeyCode::Char('x'));
+    assert!(
+        fake.parser.received().is_empty(),
+        "a key passed before the current physical size was confirmed"
+    );
+    wait(&mut app, |app| {
+        app.term.as_ref().is_some_and(|term| term.typing)
+            && size(app)
+                == (TerminalSize {
+                    rows: 4,
+                    columns: 20,
+                })
+    });
+    key(&mut app, KeyCode::Char('界'));
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while fake.parser.received().is_empty() {
+        assert!(
+            Instant::now() < deadline,
+            "confirmed physical size never enabled input"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(fake.parser.received(), "界");
+}

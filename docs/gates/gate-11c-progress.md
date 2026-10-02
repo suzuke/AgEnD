@@ -64,6 +64,12 @@
 
 本機原始輸出與 SHA256 在 `/private/tmp/g11c-implementation-logs`；失敗 log 保留，不算通過證據。原生 macOS 測試不代表 Linux 或實際終端字型／游標外觀已驗收，雙平台 CI 與人工驗收仍須核最新實作 head。
 
+## U17 foundation 與 CI 反例（2026-10-03）
+
+- 真 holder／wrapper／PTY、fake frontend／app-server、driver／SQLite 的兩個情境通過，抓到未嘗試送出的 queued row 被人工文字誤判 confirmed；history 修正與既有送達契約通過。[範圍與剩餘歧義](gate-11c-u17-validation.md)。
+- CLP-11 Retry 舊 attention 快照重建／覆蓋已受控重現；真 Fleet 原子條件更新後回歸及真 protocol suite 通過。最新 macOS 外層 PTY CI 又指出重新 Acquire 使用舊尺寸；draw 同步實際 backend area，新回歸拒絕缺同步 mutant。[證據](gate-11c-regression-validation.md)。
+- 完整 U17、其餘矩陣、最新 CI、獨立與人工驗收仍待完成；本批不代表整段完成。
+
 ## 尚待完成
 
 - 完成驗收矩陣其餘拒絕／壓力／時效與資源案例；六項控制／viewport／EOF 契約已同跑 fake／真 daemon，不能代替完整 C 矩陣。

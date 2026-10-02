@@ -231,6 +231,13 @@ pub trait PipelineView: Send + Sync + 'static {
     fn dismiss(&self, id: &str);
     fn raise(&self, item: AttentionRequiredData);
     fn upsert_attention(&self, item: AttentionRequiredData);
+    /// Replace only if the same item is still present, atomically with publishing.
+    /// A removed or changed item must remain untouched and return false.
+    fn replace_attention_if(
+        &self,
+        expected: &AttentionRequiredData,
+        item: AttentionRequiredData,
+    ) -> bool;
     fn attention(&self, id: &str) -> Option<AttentionRequiredData>;
     fn resolve(&self, id: &str, action: AttentionAction) -> Option<AttentionRequiredData>;
     fn publish(&self, event: DaemonEvent) -> u64;

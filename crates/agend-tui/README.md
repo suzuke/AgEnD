@@ -17,6 +17,8 @@ pipeline task detail 顯示 repo、關卡種類、agent、受阻理由與 WIP ar
 
 原生 renderer 已補五種底線、底線色與標準游標，typed commands 輸出後還原樣式及位置；互動期保留 agent 色彩，退出還原 NO_COLOR 對 crossterm 的設定。C 段尚未完成：實機外觀、其餘壓力／資源矩陣與 Codex U17 待驗；完整 verifier、CI 與人工驗收仍待完成。[App 局部驗證](../../docs/gates/gate-11c-app-validation.md)。
 
+native 與 off-screen draw 共用實際 frame area 更新 App 尺寸；延遲或缺 Resize event 不讓 Acquire 使用舊尺寸。相符最新 frame 前維持輸入關閉。[CI 反例與回歸](../../docs/gates/gate-11c-regression-validation.md)。
+
 ## 負責
 
 - 首頁：跨 team 的「需要你」＋每個 team 一個區塊（agent 狀態數量、進行中的目標、最近變更）

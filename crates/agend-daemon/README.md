@@ -13,6 +13,10 @@
 
 holder 1.1／runtime／client 1.4 已接通多視窗控制、resize、frame 與歷史；8 個原生程序 cases 通過。細節見 [完整終端入口](TERMINAL.md)。TUI、fake 全套 C 契約與 Codex U17 尚待完成。
 
+Codex history 對帳已拒絕外來 clientId 的文字 fallback；no-turn Queued 的舊 crash fallback 要有 attempted_at，未嘗試送出不算 receipt。[U17 基礎證據與仍存歧義](../../docs/gates/gate-11c-u17-validation.md)。
+
+pipeline 補 failed attention 的 unblocks 時，經 core port 原子比對捕捉值再更新；Retry 已移除或新失敗已替換的項目不被舊快照重建。[CI 反例](../../docs/gates/gate-11c-regression-validation.md)。
+
 ## 負責
 
 - 入口：protocol server、command handlers、hook／事件接收（含磁碟佇列補送）

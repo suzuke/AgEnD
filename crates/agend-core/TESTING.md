@@ -15,6 +15,8 @@
 
 第 10 施工關的新增 core ports 與 runtime records 同樣受 no_std／unsafe／依賴檢查；完整 queue 的 fake 測試在 daemon，FakeStore 與 SQLite 的 receipt/CAS 契約在 `pipeline_store_ports.rs`。
 
+`PipelineView::replace_attention_if` 的原子規則由 daemon 的真 Fleet／generic refresh 受控交錯回歸驗證；修改 port 後重跑 `accept core` 與實際 no-std。[反例](../../docs/gates/gate-11c-regression-validation.md)。
+
 ## 怎麼跑
 
 ```bash

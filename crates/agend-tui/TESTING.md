@@ -21,7 +21,7 @@ App 已選用此路徑；真 daemon／holder／PTY 的單次 Source 輸入與 th
 
 ## C 段 App 路徑（局部驗證）
 
-`tests/full_app.rs` 的 17 個 cases 由真 holder parser 產生畫面／modes，再經 fake daemon 的實際 socket 操作。涵蓋相符尺寸才開輸入、取得控制途中 resize／捲動、三種本機退出鍵、另一視窗交接、舊能力唯讀、cells 色彩／樣式／寬字、application cursor／keypad、paste 整段拒絕、SGR／legacy／UTF-8 mouse、狀態列及區外、Shift／tracking 分流、歷史固定／淘汰、唯讀 live grid 捲動、停止與重連不恢復控制。
+`tests/full_app.rs` 的 18 個 cases 由真 holder parser 產生畫面／modes，再經 fake daemon 的實際 socket 操作。涵蓋相符尺寸才開輸入、取得控制途中 resize／捲動、三種本機退出鍵、另一視窗交接、舊能力唯讀、cells 色彩／樣式／寬字、application cursor／keypad、paste 整段拒絕、SGR／legacy／UTF-8 mouse、狀態列及區外、Shift／tracking 分流、歷史固定／淘汰、唯讀 live grid 捲動、停止與重連不恢復控制。
 
 新增兩個 renderer cases 以真 holder parser frame 經 crossterm backend 輸出，再由第二個真 parser 讀回；核五種底線、色彩、六種標準游標、裁切／隱藏／finder 返回與閒置不重印。相同 glyph 的樣式切換可抓到 single-only mutant。
 
@@ -34,6 +34,8 @@ App 已選用此路徑；真 daemon／holder／PTY 的單次 Source 輸入與 th
 真 daemon／raw PTY 的完整 App 情境已在 `agend --test tui_native_app` 通過：鍵鼠／paste、實際 stty 尺寸、多視窗、歷史／淘汰、alt、重啟及 20 次 thread／fd 清理。這些 events 直接呼叫 App；[證據與重跑](../../docs/gates/gate-11c-native-app-validation.md)。
 
 `agend --test tui_outer_pty` 另在原生外層 PTY 執行真 App binary；events 由 crossterm capture，尺寸由 kernel resize 通知，輸出以第二個真 holder parser 讀回。正常／unwind 都核 termios 與 capture modes 還原，另驗 20 次程序退出後 fd 回基準。[證據](../../docs/gates/gate-11c-outer-validation.md)。
+
+新 draw-size case 省略 Resize event、再注入舊尺寸；以共用 native draw helper 的實際 backend area 核 20×4 grant，未確認不送鍵。移除同步的 mutant exit 101；[CI 反例與重跑](../../docs/gates/gate-11c-regression-validation.md)。
 
 ## 怎麼跑
 
