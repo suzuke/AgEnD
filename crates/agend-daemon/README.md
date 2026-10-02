@@ -9,6 +9,12 @@
 
 單一 pipeline queue、SQLite schema v5、真 git／Runner／LocalForge、binding 與 hook 生命週期、checks 沙箱、重啟／每日對帳、team／workflow／task／請示／提醒已接通；執行規則見 [pipeline runtime](../../docs/architecture/pipeline-runtime.md)。人工核准、attention_reason 清除與結果 receipt 在同一筆 store CAS transaction 完成後才發布真 action；失敗或衝突不改任何投影；通知型 timeout 留在同一核准 ticket 時不移除再重建 attention。
 
+## 第 11 施工關 C 段（實作中）
+
+`HolderRuntime::terminal_connection` 提供 holder 1.1 的 frame／control 能力與連線 epoch；背景 writer 依 request id 配對回覆，不阻塞呼叫者的畫面 thread。佇列／pending 各最多 64，holder 請求仍最多 1 MiB；讀取回覆最多 8 MiB（含換行）。舊 holder 明示需升級。
+
+斷線、agent 結束、取消在途控制請求或 15 秒未回覆會作廢憑證；取消控制或逾時關閉該 holder 連線，避免晚到 grant 留下可用控制權。唯讀查詢取消保留連線；背景操作不跟隨新連線或重送，重新取得的憑證保留同一 holder 的畫面 generation。daemon client 1.4／控制者管理、frame 節流與 TUI 串接仍待實作，Codex 輸入仍保持 `not_supported`。
+
 ## 負責
 
 - 入口：protocol server、command handlers、hook／事件接收（含磁碟佇列補送）

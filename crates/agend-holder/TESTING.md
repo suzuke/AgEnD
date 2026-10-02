@@ -11,7 +11,10 @@
 - `tests/server.rs`：真 holder/socket 的 frame request id、daemon 連線重開後 generation 不變、1.0 純文字路徑、新能力未協商拒絕、無效 viewport 與 oversized frame 整份拒絕後仍可讀。
 - `screen::tests::tracking_keeps_the_direct_parser_screen_modes_and_cursor`：同一段序列逐 byte 比對 direct alacritty，確認歷史追蹤不改畫面／mode／cursor。
 
-這些只驗 holder 基礎；尚未認證完整模式、實際 resize acknowledgement、多視窗控制與 Codex U17。
+- `tests/support/terminal_control.rs`（由 server tests 載入）：真 PTY 的實際 stty 尺寸、input completion、最後 Acquire 的 owner、舊 owner／generation／零尺寸／超大 frame 無副作用、legacy 拒絕與 release 後恢復、重連失效與尺寸保留、1.0 能力拒絕；raw PTY 不讀 stdin 的壓力測試驗 5 秒輸入失敗必須先於新 grant。
+- `pty::ordering_tests`：writer 在途中被 gate 阻擋時，控制 barrier 不可提前 ack；解除後 input completion 必須在新 grant 前。
+
+這些只驗 holder；尚未認證 daemon 的 caller／client 連線綁定、完整模式與 Codex U17。
 
 ## 怎麼跑
 

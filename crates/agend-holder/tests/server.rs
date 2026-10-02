@@ -724,3 +724,6 @@ fn oversized_frame_is_refused_whole_and_connection_still_reads_snapshots() {
         Some(HolderResponse::ScreenSnapshot { .. })
     ));
 }
+
+#[path = "support/terminal_control.rs"]
+mod terminal_control;

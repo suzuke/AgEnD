@@ -7,7 +7,7 @@
 
 ## 第 11 施工關 C 段（實作中）
 
-`protocol::terminal::tests` 拒絕零尺寸與超過 1000 的 PTY 尺寸；holder 協商測 1.1 與舊 1.0。frame producer／serde／真 socket 回歸在 holder 的 `terminal_frames.rs` 與 `server.rs`；新 client 能力與端到端控制契約尚待建立。
+`protocol::terminal::tests` 拒絕零尺寸與超過 1000 的 PTY 尺寸；holder 協商測 1.1 與舊 1.0。frame producer／serde／真 socket 回歸在 holder 的 `terminal_frames.rs` 與 `server.rs`；holder 控制型別提供 Acquire／Resize／Input／Release 與完成回覆；新 client 能力與端到端控制契約尚待建立。
 
 ## 第 10 施工關驗證
 

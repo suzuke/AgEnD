@@ -10,10 +10,8 @@ use alacritty_terminal::vte::ansi::{Color, CursorShape, NamedColor};
 use super::{FrameError, Screen};
 
 impl Screen {
-    /// Does not scroll the parser or change its classifier's visible screen.
-    /// The caller holds the screen lock while extracting the whole frame.
-    pub fn frame(&self, viewport: TerminalViewport) -> Result<TerminalFrame, FrameError> {
-        if viewport.rows == 0 || viewport.rows > self.rows {
+    pub fn validate_frame_size(size: TerminalSize) -> Result<(), FrameError> {
+        if !size.is_valid() {
             return Err(FrameError::InvalidSize);
         }
         // A conservative lower bound prevents allocating a million cells
@@ -34,9 +32,22 @@ impl Screen {
             .expect("terminal cell serializes")
             .len()
         });
-        if usize::from(viewport.rows) * usize::from(self.columns) * minimum > MAX_FRAME_LINE {
+        if usize::from(size.rows) * usize::from(size.columns) * minimum > MAX_FRAME_LINE {
             return Err(FrameError::TooLarge);
         }
+        Ok(())
+    }
+
+    /// Does not scroll the parser or change its classifier's visible screen.
+    /// The caller holds the screen lock while extracting the whole frame.
+    pub fn frame(&self, viewport: TerminalViewport) -> Result<TerminalFrame, FrameError> {
+        if viewport.rows == 0 || viewport.rows > self.rows {
+            return Err(FrameError::InvalidSize);
+        }
+        Self::validate_frame_size(TerminalSize {
+            rows: viewport.rows,
+            columns: self.columns,
+        })?;
         let grid = self.term.grid();
         let mode = *self.term.mode();
         let alternate_screen = mode.contains(TermMode::ALT_SCREEN);

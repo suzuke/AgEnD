@@ -33,6 +33,7 @@ pub mod env;
 pub mod files;
 pub mod link;
 pub mod shims;
+pub mod terminal;
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -175,6 +176,20 @@ impl HolderRuntime {
         // Not under the links' lock: the write may wait (bounded).
         let writer = self.inner.lock_links().get(id).map(link::Link::writer);
         writer.is_some_and(|writer| link::send_line(&writer, &line))
+    }
+
+    /// A capability-checked handle to the current holder connection. It cannot
+    /// send requests on a later connection after reconnecting.
+    pub fn terminal_connection(
+        &self,
+        id: &str,
+    ) -> Result<terminal::TerminalConnection, agend_core::protocol::terminal::TerminalOperationError>
+    {
+        self.inner
+            .lock_links()
+            .get(id)
+            .ok_or_else(|| terminal::failure("", "no_terminal", "there is no live holder link"))?
+            .terminal_connection()
     }
 
     /// Whether the daemon has a link to `id`'s holder (a running instance).

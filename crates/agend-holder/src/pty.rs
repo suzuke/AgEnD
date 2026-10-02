@@ -19,6 +19,8 @@ use std::sync::mpsc::{SyncSender, TrySendError, sync_channel};
 use agend_core::protocol::holder::{ControlKey, SpawnData};
 use portable_pty::{CommandBuilder, MasterPty, PtySize, native_pty_system};
 
+mod writer;
+
 /// Writes waiting for the PTY; one more may be in flight in the writer thread.
 pub const WRITE_QUEUE: usize = 64;
 pub const DEFAULT_TERM: &str = "xterm-256color";
@@ -49,28 +51,58 @@ pub enum QueueError {
     Closed,
 }
 
+type Operation = Box<dyn FnOnce(&mut dyn Write) + Send>;
+enum WriteJob {
+    Bytes(Vec<u8>),
+    Operation(Operation),
+}
+
+/// The one bounded PTY queue: bytes and control barriers share FIFO order.
+#[derive(Clone, Debug)]
+pub struct WriteQueue(SyncSender<WriteJob>);
+
+impl WriteQueue {
+    pub fn try_send(&self, bytes: Vec<u8>) -> Result<(), QueueError> {
+        self.submit(WriteJob::Bytes(bytes))
+    }
+    pub fn operation(
+        &self,
+        operation: impl FnOnce(&mut dyn Write) + Send + 'static,
+    ) -> Result<(), QueueError> {
+        self.submit(WriteJob::Operation(Box::new(operation)))
+    }
+    fn submit(&self, job: WriteJob) -> Result<(), QueueError> {
+        self.0.try_send(job).map_err(|e| match e {
+            TrySendError::Full(_) => QueueError::Busy,
+            TrySendError::Disconnected(_) => QueueError::Closed,
+        })
+    }
+}
+
 /// Starts the writer thread and returns its queue.
-pub fn start_writer(mut out: Box<dyn Write + Send>) -> SyncSender<Vec<u8>> {
-    let (tx, rx) = sync_channel::<Vec<u8>>(WRITE_QUEUE);
+pub fn start_writer(mut out: Box<dyn Write + Send>) -> WriteQueue {
+    let (tx, rx) = sync_channel::<WriteJob>(WRITE_QUEUE);
     std::thread::Builder::new()
         .name("pty-writer".into())
         .spawn(move || {
-            for bytes in rx {
-                if out.write_all(&bytes).and_then(|()| out.flush()).is_err() {
-                    break;
+            for job in rx {
+                match job {
+                    WriteJob::Bytes(bytes) => {
+                        if out.write_all(&bytes).and_then(|()| out.flush()).is_err() {
+                            break;
+                        }
+                    }
+                    WriteJob::Operation(operation) => operation(&mut *out),
                 }
             }
         })
         .expect("spawn pty-writer thread");
-    tx
+    WriteQueue(tx)
 }
 
 /// Queues bytes for the PTY without waiting.
-pub fn enqueue(queue: &SyncSender<Vec<u8>>, bytes: Vec<u8>) -> Result<(), QueueError> {
-    queue.try_send(bytes).map_err(|e| match e {
-        TrySendError::Full(_) => QueueError::Busy,
-        TrySendError::Disconnected(_) => QueueError::Closed,
-    })
+pub fn enqueue(queue: &WriteQueue, bytes: Vec<u8>) -> Result<(), QueueError> {
+    queue.try_send(bytes)
 }
 
 pub struct SpawnedAgent {
@@ -105,6 +137,24 @@ pub fn spawn(data: &SpawnData, rows: u16, columns: u16) -> Result<SpawnedAgent, 
             pixel_height: 0,
         })
         .map_err(|e| format!("openpty: {e}"))?;
+    // Prepare owned descriptors before creating a child: setup failures leave
+    // no running agent. All master duplicates share nonblocking status.
+    let fd = pair.master.as_raw_fd().ok_or("PTY has no Unix fd")?;
+    let reader_file = duplicate_file(fd)?;
+    let poll_file = duplicate_file(fd)?;
+    // SAFETY: inspect and update flags on the live master owned by pair.
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+        return Err(format!(
+            "nonblocking PTY: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    let writer = pair
+        .master
+        .take_writer()
+        .map_err(|e| format!("pty writer: {e}"))?;
+    let writer = Box::new(writer::DeadlinedWriter::new(writer, poll_file));
     let mut cmd = CommandBuilder::new(&data.program);
     cmd.args(&data.args);
     cmd.env_clear();
@@ -123,29 +173,27 @@ pub fn spawn(data: &SpawnData, rows: u16, columns: u16) -> Result<SpawnedAgent, 
     drop(child);
     // Keep our slave open until the reader drains an exited child's bytes.
     // macOS can discard buffered output when the last slave closes first.
-    let fd = pair.master.as_raw_fd().ok_or("PTY has no Unix fd")?;
-    // SAFETY: duplicate a live master fd; File owns only the returned copy.
-    let copy = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 0) };
-    if copy < 0 {
-        return Err(format!("pty reader: {}", std::io::Error::last_os_error()));
-    }
-    // SAFETY: successful dup returned a fresh owned fd.
-    let file = unsafe { std::fs::File::from_raw_fd(copy) };
     let reader = Box::new(DrainingReader {
-        file,
+        file: reader_file,
         slave: Some(pair.slave),
         pid,
     });
-    let writer = pair
-        .master
-        .take_writer()
-        .map_err(|e| format!("pty writer: {e}"))?;
     Ok(SpawnedAgent {
         pid,
         master: pair.master,
         reader,
         writer,
     })
+}
+
+fn duplicate_file(fd: std::os::fd::RawFd) -> Result<std::fs::File, String> {
+    // SAFETY: duplicate a live master fd; File owns only the returned copy.
+    let copy = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 0) };
+    if copy < 0 {
+        return Err(format!("pty fd: {}", std::io::Error::last_os_error()));
+    }
+    // SAFETY: successful dup returned a fresh owned fd.
+    Ok(unsafe { std::fs::File::from_raw_fd(copy) })
 }
 
 /// Retains the slave while output is pending, then allows natural master EOF.
@@ -169,14 +217,26 @@ impl Read for DrainingReader {
             let rc = unsafe { libc::poll(&mut poll, 1, 100) };
 
             if rc < 0 {
-                return Err(std::io::Error::last_os_error());
+                let error = std::io::Error::last_os_error();
+                if error.kind() == std::io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return Err(error);
             }
             if rc > 0 {
-                return match self.file.read(bytes) {
+                match self.file.read(bytes) {
                     // Linux reports EIO when all slave ends close.
-                    Err(e) if e.raw_os_error() == Some(libc::EIO) => Ok(0),
-                    result => result,
-                };
+                    Err(e) if e.raw_os_error() == Some(libc::EIO) => return Ok(0),
+                    Err(e)
+                        if matches!(
+                            e.kind(),
+                            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                        ) =>
+                    {
+                        continue;
+                    }
+                    result => return result,
+                }
             }
             if self.slave.is_some() {
                 // SAFETY: inspect our child's exit without reaping it; the
@@ -278,5 +338,75 @@ mod tests {
         assert_eq!(outcome, QueueError::Busy);
         assert!(accepted >= WRITE_QUEUE, "accepted only {accepted}");
         drop(release); // unblocks the writer; its thread then ends
+    }
+}
+
+#[cfg(test)]
+mod ordering_tests {
+    use super::*;
+    use std::sync::mpsc::{Receiver, Sender, channel};
+    use std::time::Duration;
+
+    struct Gated {
+        entered: Sender<()>,
+        release: Receiver<()>,
+        writes: Sender<Vec<u8>>,
+    }
+    impl Write for Gated {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.entered.send(()).map_err(std::io::Error::other)?;
+            self.release.recv().map_err(std::io::Error::other)?;
+            self.writes
+                .send(bytes.to_vec())
+                .map_err(std::io::Error::other)?;
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_control_barrier_cannot_acknowledge_before_an_inflight_write_finishes() {
+        let (entered, in_write) = channel();
+        let (release, wait) = channel();
+        let (writes, written) = channel();
+        let queue = start_writer(Box::new(Gated {
+            entered,
+            release: wait,
+            writes,
+        }));
+        let (done, replies) = channel();
+        let input_done = done.clone();
+        queue
+            .operation(move |out| {
+                out.write_all(b"old input").unwrap();
+                out.flush().unwrap();
+                input_done.send("input completed").unwrap();
+            })
+            .unwrap();
+        in_write.recv_timeout(Duration::from_secs(2)).unwrap();
+        queue
+            .operation(move |_| {
+                done.send("new controller").unwrap();
+            })
+            .unwrap();
+        assert!(matches!(
+            replies.recv_timeout(Duration::from_millis(100)),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+        ));
+        release.send(()).unwrap();
+        assert_eq!(
+            written.recv_timeout(Duration::from_secs(2)).unwrap(),
+            b"old input"
+        );
+        assert_eq!(
+            replies.recv_timeout(Duration::from_secs(2)).unwrap(),
+            "input completed"
+        );
+        assert_eq!(
+            replies.recv_timeout(Duration::from_secs(2)).unwrap(),
+            "new controller"
+        );
     }
 }

@@ -28,7 +28,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::{Sender, SyncSender, channel};
+use std::sync::mpsc::{Sender, channel};
 use std::time::{Duration, Instant};
 
 use agend_core::protocol::ProtocolVersion;
@@ -57,7 +57,7 @@ const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 /// Longest request line; a longer one gets `request_too_large` and is closed.
 pub const MAX_REQUEST_LINE: usize = agend_core::protocol::holder::MAX_REQUEST_LINE;
 /// Largest `Resize` accepted, in rows and in columns (`invalid_size` above).
-pub const MAX_SCREEN_SIDE: u16 = 1000;
+pub const MAX_SCREEN_SIDE: u16 = agend_core::protocol::terminal::MAX_SCREEN_SIDE;
 /// After the agent ends, how long to wait for its last output before `Exited`
 /// (only reached when a leftover child keeps the PTY open, or under heavy load).
 const OUTPUT_DRAIN: Duration = Duration::from_secs(2);
@@ -108,10 +108,13 @@ impl Conn {
 struct Agent {
     pid: u32,
     master: Box<dyn MasterPty + Send>,
-    input: SyncSender<Vec<u8>>,
+    input: pty::WriteQueue,
 }
 
+mod control;
+
 struct State {
+    control: Option<String>,
     screen: Screen,
     replies: ReplySink,
     conn: Option<Conn>,
@@ -160,6 +163,7 @@ pub fn serve(listener: UnixListener, config: Config) -> Stop {
         lag_limit: config.lag_limit,
         instance_id: config.instance_id.clone(),
         state: Mutex::new(State {
+            control: None,
             screen: Screen::new(DEFAULT_ROWS, DEFAULT_COLUMNS, replies.clone()),
             replies,
             conn: None,
@@ -258,12 +262,17 @@ fn spawn_thread(name: &str, f: impl FnOnce() + Send + 'static) {
 }
 
 fn frame(response: &HolderResponse) -> Vec<u8> {
-    if let HolderResponse::TerminalFrame { data } = response {
+    let frame_request = match response {
+        HolderResponse::TerminalFrame { data } => Some(&data.request_id),
+        HolderResponse::TerminalControl { data } if data.frame.is_some() => Some(&data.request_id),
+        _ => None,
+    };
+    if let Some(request_id) = frame_request {
         let mut bounded = FrameLine(Vec::new());
         if serde_json::to_writer(&mut bounded, response).is_err() {
             return frame(&HolderResponse::TerminalOperationError {
                 data: TerminalOperationError {
-                    request_id: data.request_id.clone(),
+                    request_id: request_id.clone(),
                     code: "frame_too_large".into(),
                     message: format!(
                         "terminal frame exceeds {MAX_FRAME_LINE} bytes; nothing was truncated"
@@ -335,6 +344,7 @@ fn push(holder: &Holder, state: &mut State, response: &HolderResponse) {
     }
     conn.close_output();
     state.conn = None;
+    state.control = None;
     state.last_seen = Instant::now();
     holder.changed.notify_all();
 }
@@ -443,6 +453,7 @@ fn connection(holder: &Arc<Holder>, stream: UnixStream) {
             old.close();
             holder.log("connection replaced by a new client");
         }
+        state.control = None;
         state.latest_conn = id;
         state.conn = Some(Conn {
             id,
@@ -515,6 +526,7 @@ fn connection(holder: &Arc<Holder>, stream: UnixStream) {
         // Dropping the queue lets the writer send what is left (for example
         // a final `Error`) and then close its side.
         state.conn = None;
+        state.control = None;
         state.last_seen = Instant::now();
         holder.changed.notify_all();
     }
@@ -548,7 +560,12 @@ fn handle(
                     format!("rows and columns must be 1 to {MAX_SCREEN_SIDE}"),
                 ));
             }
-            state.screen.resize(rows, columns);
+            if state.control.is_some() {
+                return Some(error(
+                    "control_lost",
+                    "legacy resize is refused while a terminal controller exists",
+                ));
+            }
             let resized = state.agent.as_ref().map(|agent| {
                 agent.master.resize(PtySize {
                     rows,
@@ -559,7 +576,10 @@ fn handle(
             });
             match resized {
                 Some(Err(e)) => Some(error("resize_failed", e.to_string())),
-                _ => None,
+                _ => {
+                    state.screen.resize(rows, columns);
+                    None
+                }
             }
         }
         HolderRequest::SendControlKey { data } => match pty::control_key_bytes(data.key) {
@@ -569,8 +589,9 @@ fn handle(
                 "not a control key this holder knows; nothing was written",
             )),
         },
+        HolderRequest::TerminalControl { data } => control::enqueue(holder, state, data),
         HolderRequest::OperatorTerminalInput { data } => match BASE64.decode(&data.bytes_base64) {
-            Ok(bytes) => write_pty(state, bytes),
+            Ok(bytes) => control::legacy_input(holder, state, bytes),
             Err(e) => Some(error("bad_request", format!("bytes_base64: {e}"))),
         },
         HolderRequest::GetTerminalFrame { data } => {

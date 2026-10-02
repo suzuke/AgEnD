@@ -14,7 +14,7 @@
 //! Must NOT: classify the screen (that is `agend_core::screen`).
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::SyncSender;
+
 use std::sync::{Arc, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -54,7 +54,7 @@ pub const DEFAULT_COLUMNS: u16 = 200;
 pub const SCROLLBACK_ROWS: usize = 1_000;
 
 /// Where terminal-query replies go: the PTY writer queue, once an agent exists.
-pub type ReplySink = Arc<OnceLock<SyncSender<Vec<u8>>>>;
+pub type ReplySink = Arc<OnceLock<crate::pty::WriteQueue>>;
 
 pub struct QueryReplies(ReplySink);
 
@@ -121,6 +121,10 @@ impl Screen {
         }
     }
 
+    pub fn generation(&self) -> &str {
+        &self.generation
+    }
+
     pub fn size(&self) -> (u16, u16) {
         (self.rows, self.columns)
     }
@@ -176,7 +180,18 @@ impl Screen {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::mpsc::sync_channel;
+    use std::sync::mpsc::{SyncSender, sync_channel};
+    use std::time::Duration;
+    struct Collect(SyncSender<Vec<u8>>);
+    impl std::io::Write for Collect {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.send(bytes.to_vec()).map_err(std::io::Error::other)?;
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
 
     fn screen() -> Screen {
         Screen::new(DEFAULT_ROWS, DEFAULT_COLUMNS, ReplySink::default())
@@ -241,10 +256,14 @@ mod tests {
     fn cursor_position_query_is_answered_through_the_writer_queue() {
         let sink = ReplySink::default();
         let (tx, rx) = sync_channel(4);
-        sink.set(tx).unwrap();
+        sink.set(crate::pty::start_writer(Box::new(Collect(tx))))
+            .unwrap();
         let mut s = Screen::new(DEFAULT_ROWS, DEFAULT_COLUMNS, sink);
         s.process(b"ab\x1b[6n");
-        assert_eq!(rx.try_recv().unwrap(), b"\x1b[1;3R");
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            b"\x1b[1;3R"
+        );
     }
 
     #[test]
@@ -254,10 +273,11 @@ mod tests {
 
         let sink = ReplySink::default();
         let (tx, rx) = sync_channel(1);
-        sink.set(tx).unwrap();
+        sink.set(crate::pty::start_writer(Box::new(Collect(tx))))
+            .unwrap();
         let mut s = Screen::new(DEFAULT_ROWS, DEFAULT_COLUMNS, sink);
-        s.process(b"\x1b[6n\x1b[6n");
-        assert!(rx.try_recv().is_ok());
-        assert!(rx.try_recv().is_err());
+        s.process(&b"\x1b[6n".repeat(crate::pty::WRITE_QUEUE + 4));
+        assert!(rx.recv_timeout(Duration::from_secs(1)).is_ok());
+        drop(rx);
     }
 }

@@ -7,9 +7,11 @@
 
 ## 第 11 施工關 C 段（實作中）
 
-完整終端畫面、resize、滑鼠／貼上與歷史的 [P1–P6 提案](../../docs/gates/gate-11c-proposal.md) 已確認（D39），提案 #144 已合併。holder 1.1 已提供結構化 frame、request id、generation／revision 及只讀歷史 viewport；新的控制／resize／input 與 daemon／TUI 路徑仍待完成，C 段尚未驗收。
+完整終端畫面、resize、滑鼠／貼上與歷史的 [P1–P6 提案](../../docs/gates/gate-11c-proposal.md) 已確認（D39），提案 #144 已合併。holder 1.1 已提供結構化 frame、request id、generation／revision 及只讀歷史 viewport；holder 的 `TerminalControl` 已用同一 FIFO 佇列完成實際 resize／input 回覆及交接；daemon／TUI 路徑仍待完成，C 段尚未驗收。
 
 `GetTerminalFrame` 的 viewport 不改 classifier 的 live screen。normal screen 以絕對 row id 保留 1,000 列歷史；淘汰時回覆 clamped，alternate screen 沒有歷史。resize／reflow 會重新編排 row id，舊 viewport 明確 clamped。序列化 frame（含換行）最多 8 MiB，超限整份拒絕；原 1 MiB 請求上限不變。
+
+`TerminalControl` 帶 request id／generation，提供 Acquire、Resize、Input、Release。Acquire／Resize 成功須附實際 PTY 尺寸的完整 frame；Input 完成實際 write／flush 才回覆；原生 PTY 為 nonblocking，整次寫入最多 5 秒，失敗明示可能已寫部分資料、不重送。每個操作在佇列執行時重新驗 owner；新 grant 等舊在途寫入完成，Release／重連保留尺寸。控制者存在時 legacy operator input／resize 被拒絕，舊的 queued input 也不能繞過新 grant。
 
 ## 負責
 
@@ -46,8 +48,8 @@
 |---|---|
 | `lib`（`run`） | 程序啟動：檢查、lock、`setsid`、訊號、stdio 導到 log、bind socket |
 | `paths` | run 目錄路徑、instance id 規則、lock 判斷存活 |
-| `server` | holder 協定 server、停止流程、安全網 |
-| `pty` | spawn agent、控制鍵位元組、唯一的 PTY 寫入 thread（佇列 64） |
+| `server` | holder 協定 server、停止流程、安全網；`server/control` 驗 generation／owner，實際操作後回覆 |
+| `pty` | spawn agent、控制鍵位元組、唯一的 PTY FIFO thread（bytes 與 operation 共用佇列 64） |
 | `screen` | alacritty 畫面、純文字快照、終端查詢回覆；`screen/frame` 取完整格子，`screen/history` 沿用同 parser 追蹤 row id |
 | `exit` | `waitpid` 與 signal 名稱 |
 | `client` | 同步的協定 client（探測 example 與測試用） |

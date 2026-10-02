@@ -13,6 +13,12 @@
 
 `cargo test -p agend-daemon --test pipeline_adapters` 跑真 Runner 的 RUN-1..9、LocalForge 的 FRG-1..10、metadata／cache／外部寫入／FIFO marker 反向測試、冷 cache、TCP 可連／daemon socket 不可連、父程序 SIGKILL 的子程序清理與真 cargo／npm 編譯測試；`tests/store.rs` 跑 STO-13、schema v5 與既有有資料的 migrations。 `pipeline_store_ports` 的 fake／SQLite 共享契約驗 attention 清除同 CAS transaction、ack 保留與 generic advance 語意；真 SQLite 拒絕 attention UPDATE 時，version／event／receipt／note 全部 rollback，移除故障後重試成功。
 
+## 第 11 施工關 C 段（實作中）
+
+`runtime::client::tests` 以真型別 serializer 產生邊界行，驗 8 MiB 包含換行、超限整份拒絕；`runtime::terminal::tests` 驗 1.0 holder 不送新請求、legacy write lock 阻擋時仍可逾時與停止。`agend/tests/terminal_runtime.rs` 走真 binary／holder／PTY：並行 viewport 配對、實際尺寸與輸入 ack、交接後舊 input 拒絕、取消 native blocked input 後舊憑證失效／重連不重送、grant 回覆已到但未接收的取消競態、取消唯讀查詢不打斷控制、尺寸及 holder 保留、超限輸入整份拒絕與重起 generation。
+
+這些驗證只到 runtime 長連線；daemon caller／client attach、完整模式、frame 節流與 Codex U17 尚未認證。
+
 ## 怎麼跑
 
 ```bash

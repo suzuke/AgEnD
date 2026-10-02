@@ -26,7 +26,7 @@
 
 ## C 段開工前提案
 
-[完整 P1–P6](gate-11c-proposal.md) 與 [驗收計畫](gate-11c-validation-plan.md)。本段尚未實作；新提案不改寫下方 B 段已確認的決策與驗收紀錄。
+[完整 P1–P6](gate-11c-proposal.md) 與 [驗收計畫](gate-11c-validation-plan.md)。C 段在 [draft PR #145](https://github.com/suzuke/AgEnD/pull/145) 實作中；holder／runtime 已接通，完整模式與 U17 尚未驗收。[目前進度](gate-11c-progress.md)。下方 B 段已確認的決策與驗收紀錄保留。
 
 ## B 段開工前提案
 
@@ -559,6 +559,9 @@ unset AGEND_BIN               # 前幾關步驟留下的 export 可能指到已�
 | 2026-09-29 | B 段通過 | 在 `feat/gate-11-tui-impl`（be7a7c5）由 agent 帶著走 7 步。步驟 1 假、真 daemon 兩段全過（預設 `ulimit -n 256` 也能跑）。步驟 4 打 `hello` 時被假 agent 每秒的 `counter` 行切開，是假 agent 沒有輸入框的正常現象（真 claude 有輸入框）；`Ctrl-]` 在使用者的終端可以離開輸入。步驟 6 daemon 停著時 agent 的 counter 繼續數，重連後接著目前的數字（holder 沒被重啟，D3）。使用者另外要求 TUI 裡完整重現 agent CLI（含滑鼠滾動）→ C 段。 |
 
 ## 進度紀錄
+
+- 2026-10-02 C 段 #145 增加 holder 實際 resize／input ack 與 FIFO 交接、runtime 背景配對與重連失效；holder 53 passed、完整 daemon crate 與 16 個真程序回歸通過，原取消／大行讀取失敗保留。完整終端、daemon／client 與 Codex U17 仍待完成；見 [實作進度](gate-11c-progress.md)。
+
 
 - 2026-10-02 C 段第一個實作提交 `a13d31c`（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：holder 1.1 的結構化 frame、request id、generation／revision、色彩／游標／mode、歷史 viewport 與 8 MiB 整份拒絕。holder 47 passed；accept core 含 workspace clippy／實際 no-std 通過，兩個既有 deep explorers ignored。完整 C 段與 U17 仍在實作，尚未獨立／人工驗收或 merge。
 

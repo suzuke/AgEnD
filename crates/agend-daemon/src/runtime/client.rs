@@ -11,15 +11,21 @@ use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use agend_core::protocol::holder::{HolderRequest, HolderResponse};
+use agend_core::protocol::ProtocolVersion;
+use agend_core::protocol::holder::{HolderRequest, HolderResponse, V1};
+use agend_core::protocol::terminal::MAX_FRAME_LINE;
+
+mod reader;
+use reader::SocketReader;
 
 /// Longest wait for each greeting line.
 const GREETING_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct Conn {
     writer: UnixStream,
-    reader: BufReader<UnixStream>,
+    reader: BufReader<SocketReader>,
     partial: Vec<u8>,
+    pub version: ProtocolVersion,
 }
 
 impl Conn {
@@ -29,12 +35,17 @@ impl Conn {
         let stream = UnixStream::connect(socket)?;
         let mut conn = Self {
             writer: stream.try_clone()?,
-            reader: BufReader::new(stream),
+            reader: BufReader::new(SocketReader::new(stream)),
             partial: Vec::new(),
+            version: V1,
         };
         conn.send(&HolderRequest::hello())?;
         match conn.recv_within(GREETING_TIMEOUT)? {
-            HolderResponse::Hello { .. } => {}
+            HolderResponse::Hello { data }
+                if data.selected.major == 1 && data.selected.minor <= 1 =>
+            {
+                conn.version = data.selected;
+            }
             other => return Err(unexpected(&other)),
         }
         match conn.recv_within(GREETING_TIMEOUT)? {
@@ -58,32 +69,38 @@ impl Conn {
     /// `Ok(None)` on timeout; end of stream is `UnexpectedEof`.
     pub fn recv(&mut self, timeout: Option<Duration>) -> io::Result<Option<HolderResponse>> {
         let deadline = timeout.map(|t| Instant::now() + t);
+        self.reader.get_mut().deadline = deadline;
         loop {
-            if let Some(end) = self.partial.iter().position(|&b| b == b'\n') {
-                let line: Vec<u8> = self.partial.drain(..=end).collect();
-                return serde_json::from_slice(&line)
-                    .map(Some)
-                    .map_err(io::Error::other);
+            if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                return Ok(None);
             }
-            let left = match deadline {
-                Some(deadline) => {
-                    let left = deadline.saturating_duration_since(Instant::now());
-                    if left.is_zero() {
-                        return Ok(None);
-                    }
-                    Some(left)
-                }
-                None => None,
-            };
-            self.reader.get_ref().set_read_timeout(left)?;
-            match self.reader.read_until(b'\n', &mut self.partial) {
-                Ok(0) => {
+            match self.reader.fill_buf() {
+                Ok([]) => {
                     return Err(io::Error::new(
                         io::ErrorKind::UnexpectedEof,
                         "holder closed the connection",
                     ));
                 }
-                Ok(_) => {}
+                Ok(chunk) => {
+                    // Search only the new chunk. Rescanning the accumulated
+                    // frame for each chunk makes an 8 MiB line quadratic.
+                    let end = chunk.iter().position(|&byte| byte == b'\n');
+                    let take = end.map_or(chunk.len(), |end| end + 1);
+                    if self.partial.len() + take > MAX_FRAME_LINE {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "holder response exceeds 8 MiB",
+                        ));
+                    }
+                    self.partial.extend_from_slice(&chunk[..take]);
+                    self.reader.consume(take);
+                    if end.is_some() {
+                        let line = std::mem::take(&mut self.partial);
+                        return serde_json::from_slice(&line)
+                            .map(Some)
+                            .map_err(io::Error::other);
+                    }
+                }
                 Err(e)
                     if matches!(
                         e.kind(),
@@ -107,4 +124,97 @@ impl Conn {
 
 fn unexpected(response: &HolderResponse) -> io::Error {
     io::Error::other(format!("unexpected holder response: {response:?}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agend_core::protocol::terminal::TerminalOperationError;
+
+    fn response_line(len: usize) -> Vec<u8> {
+        let response = HolderResponse::TerminalOperationError {
+            data: TerminalOperationError {
+                request_id: "boundary".into(),
+                code: "probe".into(),
+                message: String::new(),
+            },
+        };
+        let overhead = serde_json::to_vec(&response).unwrap().len() + 1;
+        let HolderResponse::TerminalOperationError { mut data } = response else {
+            unreachable!()
+        };
+        data.message = "x".repeat(len - overhead);
+        let mut line =
+            serde_json::to_vec(&HolderResponse::TerminalOperationError { data }).unwrap();
+        line.push(b'\n');
+        assert_eq!(line.len(), len);
+        line
+    }
+
+    fn receive(line: Vec<u8>) -> io::Result<Option<HolderResponse>> {
+        let (reader, mut peer) = UnixStream::pair().unwrap();
+        let mut conn = Conn {
+            writer: reader.try_clone().unwrap(),
+            reader: BufReader::new(SocketReader::new(reader)),
+            partial: Vec::new(),
+            version: V1,
+        };
+        let writer = std::thread::spawn(move || {
+            let _ = peer.write_all(&line);
+        });
+        let result = conn.recv(Some(Duration::from_secs(10)));
+        // A rejected overlong producer may still be writing; close the owned
+        // test connection before joining its producer.
+        drop(conn);
+        writer.join().unwrap();
+        result
+    }
+
+    #[test]
+    fn holder_response_limit_includes_the_newline_and_rejects_the_whole_line() {
+        let response = receive(response_line(MAX_FRAME_LINE)).unwrap().unwrap();
+        assert!(
+            matches!(response, HolderResponse::TerminalOperationError { data } if data.request_id == "boundary")
+        );
+        let error = receive(response_line(MAX_FRAME_LINE + 1)).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("exceeds 8 MiB"));
+    }
+    #[test]
+    fn a_timed_out_partial_line_is_preserved_and_eof_drains_its_remaining_bytes() {
+        let line = response_line(20_000);
+        let (reader, mut peer) = UnixStream::pair().unwrap();
+        let mut conn = Conn {
+            writer: reader.try_clone().unwrap(),
+            reader: BufReader::new(SocketReader::new(reader)),
+            partial: Vec::new(),
+            version: V1,
+        };
+        let (release, wait) = std::sync::mpsc::channel();
+        let writer = std::thread::spawn(move || {
+            peer.write_all(&line[..13_000]).unwrap();
+            wait.recv_timeout(Duration::from_secs(10)).unwrap();
+            peer.write_all(&line[13_000..]).unwrap();
+        });
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while conn.partial.len() < 13_000 {
+            assert!(
+                conn.recv(Some(Duration::from_millis(50)))
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(Instant::now() < deadline, "partial producer stalled");
+        }
+        assert_eq!(conn.partial.len(), 13_000);
+        release.send(()).unwrap();
+        let response = conn.recv(Some(Duration::from_secs(10))).unwrap().unwrap();
+        assert!(
+            matches!(response, HolderResponse::TerminalOperationError { data } if data.request_id == "boundary")
+        );
+        writer.join().unwrap();
+        assert_eq!(
+            conn.recv(Some(Duration::from_secs(1))).unwrap_err().kind(),
+            io::ErrorKind::UnexpectedEof
+        );
+    }
 }

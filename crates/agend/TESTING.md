@@ -10,6 +10,10 @@
 
 `cargo build -p agend -p agend-testkit --bins` 後跑 `cargo test -p agend --test pipeline`：happy、checks 返工、review 返工、WIP、main 前進、兩個 failpoint 的四次開機、沙箱、hook／cancel、問答／提醒、排隊與 no-role、sandbox retry、merge-blocked；完整 demo 用 `cargo xtask accept pipeline`。`pipeline_context` 以暫停 reviewer 驗 headless review 的等待／重啟／回報，避免自動 reviewer 搶先完成；`pipeline_archive*` 的九個 target 共 31 個回歸，涵蓋大 binary、merge-only 解法、staged-only bytes、隱藏 index 旗標與 stat cache、顯示設定、ignored 檔案，以及保存失敗不刪原 WIP／index。行尾／內容轉換、未解衝突與 nested Git metadata（含不完整狀態）須保留原資料；一般子目錄、空檔與 symlink 用真 git apply 還原。各組內容見 [daemon TESTING](../agend-daemon/TESTING.md)。 content-filter producer 先建立有效 stat cache，再用真 git add --renormalize 強制套用 attributes；不依賴檔案 timestamp 的競態碰巧觸發 clean filter。
 
+## 第 11 施工關 C 段（實作中）
+
+`cargo test -p agend --test terminal_runtime` 使用真 binary／holder／PTY 驗 runtime frame／control 配對、實際 resize、舊 owner 拒絕、取消 native blocked input 後憑證失效與 holder 重連、不重送、取消已到但未接收的 grant、唯讀查詢取消不打斷控制、整份超限拒絕及新 holder generation。這些尚不代表 daemon client 1.4／TUI／Codex U17 已完成。
+
 ## 怎麼跑
 
 ```bash

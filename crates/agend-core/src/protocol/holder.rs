@@ -14,7 +14,10 @@ use core::fmt;
 use serde::de::{self, Deserializer, Visitor};
 use serde::{Deserialize, Serialize};
 
-use super::terminal::{TerminalFrameData, TerminalFrameRequest, TerminalOperationError};
+use super::terminal::{
+    TerminalControlData, TerminalControlRequest, TerminalFrameData, TerminalFrameRequest,
+    TerminalOperationError,
+};
 use super::{Hello, ProtocolVersion, VersionMismatch, negotiate};
 
 pub const V1: ProtocolVersion = ProtocolVersion::new(1, 0);
@@ -125,6 +128,9 @@ pub enum HolderRequest {
     GetTerminalFrame {
         data: TerminalFrameRequest,
     },
+    TerminalControl {
+        data: TerminalControlRequest,
+    },
     Snapshot,
     Shutdown,
     #[serde(other)]
@@ -188,6 +194,9 @@ pub enum HolderResponse {
     },
     TerminalOperationError {
         data: TerminalOperationError,
+    },
+    TerminalControl {
+        data: TerminalControlData,
     },
     Error {
         data: ErrorData,

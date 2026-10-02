@@ -146,6 +146,57 @@ pub struct TerminalOperationError {
     pub message: String,
 }
 
+/// A holder operation on the one PTY queue. The daemon owns caller identity
+/// and connection-scoped attach IDs; the holder verifies its generation and
+/// owner again when the operation reaches the writer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalControlRequest {
+    pub request_id: String,
+    pub generation: String,
+    pub operation: TerminalControlOperation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "operation", rename_all = "snake_case")]
+pub enum TerminalControlOperation {
+    Acquire {
+        attach_id: String,
+        size: TerminalSize,
+    },
+    Resize {
+        attach_id: String,
+        size: TerminalSize,
+    },
+    Input {
+        attach_id: String,
+        bytes_base64: String,
+    },
+    Release {
+        attach_id: String,
+    },
+}
+
+impl TerminalControlOperation {
+    pub fn attach_id(&self) -> &str {
+        match self {
+            Self::Acquire { attach_id, .. }
+            | Self::Resize { attach_id, .. }
+            | Self::Input { attach_id, .. }
+            | Self::Release { attach_id } => attach_id,
+        }
+    }
+}
+
+/// Sent after the actual queue operation finishes, never just after enqueue.
+/// Acquire/Resize include the complete frame at the acknowledged PTY size.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalControlData {
+    pub request_id: String,
+    pub generation: String,
+    pub attach_id: Option<String>,
+    pub frame: Option<TerminalFrame>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

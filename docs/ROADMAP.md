@@ -72,6 +72,9 @@
 
 ## 進度紀錄
 
+- 2026-10-02 C 段控制／runtime（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：holder 實際 resize／input ack、FIFO 交接與 5 秒 native write；runtime 能力／連線 epoch、背景配對、取消 grant 失效、8 MiB bounded reader。holder 53 passed、完整 daemon crate 與 16 個真程序回歸通過；原失敗保留。daemon／client／TUI 與 U17 仍待完成，未獨立／人工驗收或 merge；[實作進度](gates/gate-11c-progress.md)。
+
+
 - 2026-10-02 C 段第一個實作提交 `a13d31c`（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：holder 1.1 的結構化 frame、request id、generation／revision、色彩／游標／mode、歷史 viewport 與 8 MiB 整份拒絕。holder 47 passed；accept core 含 workspace clippy／實際 no-std 通過，兩個既有 deep explorers ignored。完整 C 段與 U17 仍在實作，尚未獨立／人工驗收或 merge。
 
 - 2026-10-02 C 段提案 #144 已合併（`139fea5`）；在 `/Users/suzuke/AlphaCR-worktrees/AgEnD-v2-g11c-terminal`、`feat/gate-11c-terminal` 開始實作 P1–P6。基線 check-deps 含實際 no-std 通過；完整功能、U17、獨立驗證與人工驗收仍待完成。
