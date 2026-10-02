@@ -2,7 +2,7 @@
 
 > **TL;DR**
 > - 建議讓 `i` 進入完整 agent 畫面，只留一行 AgEnD 狀態列；色彩、游標、resize、滑鼠與貼上都經既有 client／daemon／holder 路徑。
-> - 本頁是待確認提案；P1–P6 均未授權實作，A／B 段的已驗收紀錄保持原版本。
+> - [Draft PR #144](https://github.com/suzuke/AgEnD/pull/144) 是待確認提案；P1–P6 均未授權實作，A／B 段的已驗收紀錄保持原版本。
 > - 下一步：確認 P1–P6，再開實作 worktree；合併仍須全新 verifier 與使用者驗收。
 
 ## 現況與依據
@@ -32,8 +32,8 @@
 
 - 問題：純文字不能還原色彩與游標；重連後從任意 PTY byte 開始解析，也缺少之前的終端模式。
 - 建議：沿用 holder 的 alacritty parser，新增結構化終端 frame：可視格子的文字／寬格佔位／組合字、前景／背景／字型屬性、游標位置與形狀／可見性、normal／alternate screen、輸入模式及 viewport／歷史範圍。TUI 經 `Source`／`agend-client` 畫 ratatui cells；不直接連 holder。
-- 每份 frame 帶 holder generation 與單調 revision，畫面、mode、歷史 metadata 在同一次 holder lock 下取出。holder 重起後換 generation；丟棄舊 generation／舊 revision。viewport 回覆另帶 request id，舊查詢不蓋新選取範圍；歷史讀取屬每個 client，不改 holder 的 live grid／螢幕分類視窗。先提供完整 viewport frames，不先做 cell delta。
-- 提案版本：client 1.4、holder 1.1；新增訂閱 frame／查歷史 viewport 與操作者控制請求。只有兩段協商都足夠才開完整模式；否則保留 B 段純文字唯讀並明示需要升級。既有 1.3／1.0 格式與讀取路徑不變。
+- 每份 frame 帶 holder generation 與單調 revision，畫面、mode、歷史 metadata 在同一次 holder lock 下取出。holder process generation 活過 daemon 重連，與 runtime link generation 分開；holder 重起後才換 frame generation；丟棄舊 generation／舊 revision。viewport 回覆另帶 request id，舊查詢不蓋新選取範圍；歷史讀取屬每個 client，不改 holder 的 live grid／螢幕分類視窗。先提供完整 viewport frames，不先做 cell delta。
+- 提案版本：client 1.4、holder 1.1；新增訂閱 frame／查歷史 viewport 與操作者控制請求。只有兩段協商都足夠才開完整模式；否則保留 B 段純文字唯讀並明示需要升級。一般 client 連線的 NEEDED 維持 1.3，新 API 各自檢查協商 1.4；既有 1.3／1.0 格式與讀取路徑不變。
 - 輸出變更只設 dirty；每個 instance 至多每 50 ms 取一份最新 frame，最後一段 dirty 必須送出。新 frame 序列化行上限 8 MiB，viewport 一次只傳所需列；無效尺寸或過大 frame 明確拒絕，不能截斷後當成功。保留既有 holder 1 MiB 請求行上限。
 - 理由：holder 是唯一終端狀態來源，重連不靠 byte replay；合併畫面更新可丟中間 frame，但不能丟最後的畫面。
 - 替代方案：TUI 自建第二個 parser（要設計完整 parser state checkpoint）；直接輸出原始 ANSI 到操作者終端（畫面與外層狀態列、控制序列互相干擾）。
@@ -45,7 +45,7 @@
 - 建議：完整模式建立連線範圍的 attach id；最後進入完整模式的視窗取得控制權，以其內容區尺寸 resize。**較先開的視窗轉唯讀**，保留畫面且明示另一視窗控制中；再次按 `i` 可取得控制權。這比原 C 段「最後開啟的尺寸為準」多了輸入控制，需本項明確確認。
 - daemon 先驗 caller，再驗活終端、attach id／generation／控制權及尺寸。resize 送既有 holder 長連線；新畫面回來後才確認可輸入。一般終端尺寸變更只由目前控制者送，status row 與零尺寸不能進 PTY。
 - Ctrl-]／關視窗／終端連線 EOF 釋放控制，保留最後 PTY 大小；不自動恢復舊視窗控制或預設 50×200。daemon／holder 重連後 attach id 作廢，須重新取得。
-- 控制／resize 的 I/O 在背景處理，主畫面不等最長 5 秒的 holder write；同一連線有 request id 對應回覆，權限拒絕或失效請求不影響 PTY。失去控制後的舊輸入一律拒絕、不重送。完整模式有控制者時，沒有 attach id 的舊版 terminal_input 亦拒絕，避免繞過控制權；沒有控制者時保留 B 段原行為。
+- 控制／resize 的 I/O 在背景處理，主畫面不等最長 5 秒的 holder write；同一連線有 request id 對應回覆，權限拒絕或失效請求不影響 PTY。每個 instance 的控制與 PTY 寫入按序處理，寫前核對 token；新控制者的成功回覆須等舊在途操作結束或作廢，才允許新輸入。失去控制後的舊輸入一律拒絕、不重送。完整模式有控制者時，沒有 attach id 的舊版 terminal_input 亦拒絕，避免繞過控制權；沒有控制者時保留 B 段原行為。
 - 理由：尺寸與輸入有同一個控制者，避免兩個視窗送互相矛盾的操作。
 - 替代方案：多視窗都能輸入、最後開啟者只管尺寸；保留原描述，但兩份不同大小的畫面可同時操作。
 - [ ] 使用者確認 P3
@@ -53,7 +53,7 @@
 ## P4：按鍵、貼上與滑鼠滾動
 
 - 問題：「原樣轉送」會受終端回報方式限制；滑鼠滾輪可能是 agent 的事件，也可能是看歷史。
-- 建議：轉送 crossterm 能觀察到的按鍵語義，依 holder mode 編碼 application cursor／keypad、UTF-8、Ctrl／Alt；無法區分的鍵不聲稱 byte-identical。滑鼠座標扣除狀態列，區外事件不送。
+- 建議：轉送 crossterm 能觀察到的按鍵語義，依 holder mode 編碼 application cursor／keypad、UTF-8、Ctrl／Alt；無法區分的鍵不聲稱 byte-identical。滑鼠座標換算成內容區的座標；底部狀態列與區外事件不送，不把內容列的 y 減一。
 - 外層開 mouse capture／bracketed paste，退出、錯誤與 unwind 時恢復。agent 開 mouse tracking 時，按其 mode 編碼支援的 xterm mouse 事件；未開時滾輪看本機 viewport 的 holder 歷史。Shift+滾輪固定看歷史，不送 agent；若終端不回報 Shift，以唯讀模式滾動作替代。
 - normal screen 歷史沿用 holder 1,000 列；以絕對列 id 定位，捲上去後新輸出不跳回底，超出已淘汰範圍明示並夾到最舊列。回到底部才跟隨；alternate screen 無獨立捏造歷史。
 - 貼上維持一個 Paste 事件；agent 開 bracketed paste 時加 `ESC[200~`／`ESC[201~`，否則送文字。沿用既有輸入行大小檢查；過大整次拒絕、不拆成可能半次成功的請求。貼上內容中的退出控制碼當資料，不作本機退出鍵。
