@@ -23,6 +23,8 @@
 
 ## 驗證紀錄
 
+- `5caa49b` 的 push／PR Ubuntu、macOS 四個 CI jobs 在 CLI-8／CLI-31 的版本期待失敗：真 daemon 已選 1.4，表格仍固定 1.3。修正為依 fixture 核對精確版本；真／假完整 CLI 表本機通過，原四份 CI log 保留，最新 CI 另核。
+
 - 2026-10-03 daemon 1.4：8 個 native `terminal_hub` cases 通過，涵蓋正式 client、控制交接、foreign view、EOF、尺寸保留、20 次開關、重啟、固定歷史、dirty 尾段、真 PTY 背壓及 entry service 停止。原生反例先失敗：write 失敗後 release 的 control_lost 誤清旁邊 view；abort actor 留下 completed grant。修正後相同 cases 通過。並行單 thread probe 的大寫入可與 server frame write 互卡，fixture 改依正式 client 併行讀寫；原 BrokenPipe log 保留。
 - 本機 holder 55、daemon 143、client 27、testkit 109、既有 TUI 58 passed；CLP 9／1.3 能力邊界 1／terminal_runtime 5 passed。accept core 156 passed／2 個既有 ignored，實際 no-std 通過。21a39ab 的 macOS PR CI 有 EOF fixture 失敗；已保存原 log，修正 EOF 起算並重跑 13 個 client cases 通過，最新 CI 另核。以上不是完整 C 段驗收。
 
