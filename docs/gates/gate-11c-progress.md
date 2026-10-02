@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - [draft PR #145](https://github.com/suzuke/AgEnD/pull/145) 持續實作完整終端；目前接通 holder／runtime／daemon／client 路徑，C 段尚未完成或驗收。
-> - 已接通 frame／歷史及實際 resize／input ack；client 1.4 型別／傳輸已加入；daemon 多視窗與六項 fake／真契約已加入；TUI App 已接完整模式、鍵鼠／貼上與歷史；原生底線／標準游標已有讀回證據；完整 fake U17 本機已通過；真 Codex live 與剩餘矩陣待完成。
-> - 下一步：完成剩餘契約矩陣與 TUI，再跑完整驗收、全新 verifier 與逐步人工驗收；merge 等使用者確認。
+> - 已接通 frame／歷史及實際 resize／input ack；client 1.4 型別／傳輸已加入；daemon 多視窗與六項 fake／真契約已加入；TUI App 已接完整模式、鍵鼠／貼上與歷史；原生底線／標準游標已有讀回證據；完整 fake U17 本機已通過；真 Codex 0.159.3 首次 U17 已通過；版本開放、獨立與人工驗收待完成。
+> - 下一步：全新 verifier 核原始證據，版本開放等使用者確認，再做逐步人工驗收；merge 仍另行確認。
 
 ## 已實作
 
@@ -22,6 +22,8 @@
 | 開發中能力邊界 | 真 daemon 選 1.4；fake 預設 1.3，注入 TerminalProducer 後選 1.4；一般 NEEDED 保留 1.3，舊 peer 仍可用 B 路徑 | native 全路徑＋1.3 真／假能力拒絕＋CLP |
 
 ## 驗證紀錄
+
+- 2026-10-03 使用者明確核准四回合真 Codex：0.159.3／gpt-6-luna／low 的 U17 首次通過，同 thread／holder、busy Queue、idle Send、重啟後 code word 與兩個獨立 durable receipts 有原始證據；第四回合只核 receipt，沒有最終回覆斷言。[live 證據](gate-11c-u17-live-validation.md)；版本開放、全新 verifier 與人工驗收仍待完成（draft PR #145）。
 
 - 2026-10-03 U17 live preflight：本機 Codex 0.159.3 自產 schema 的 turns/list 預設為 summary，診斷工具改明確要求 itemsView: full；client id 欄位形狀已核，未啟動 backend 或模型。真 live 仍等四回合 opt-in（draft PR #145）。
 
@@ -84,10 +86,10 @@
 
 - 自動矩陣已有逐列 source／證據索引，包含最後補齊的 App 延遲 frame／query／舊 generation 與真 producer golden；最新 head CI 及全新 verifier 仍須重跑，不把既有六項契約當整份認證。[矩陣對照](gate-11c-matrix-status.md)。
 - 原生底線／標準游標、mode-aware keys／mouse／paste、歷史、真外層 capture／restore 與資源清理已有自動證據；實際 Terminal／iTerm2／Linux 外觀與非美式鍵盤仍待人工驗收。
-- 完整 fake U17 已通過；明確 opt-in 的真 Codex live、實際版本／clientId／上下文證據尚未取得。
+- 完整 fake U17 與真 Codex 0.159.3 首次 U17 已通過；[live 證據與限制](gate-11c-u17-live-validation.md) 待全新 verifier 核對。
 - 真 smoke 通過並經使用者確認後，才開放已驗版本；目前正式 Codex 輸入仍 not_supported。
 - 最新完整 acceptance／雙平台 CI、全新無 context verifier、逐步人工驗收與 merge 確認。
 
 ## 下一步
 
-依 [矩陣執行狀態](gate-11c-matrix-status.md) 完成剩餘門檻，真 live 等既有 opt-in 回覆。此頁的局部通過不能代替 C 段完成驗收。
+依 [矩陣執行狀態](gate-11c-matrix-status.md) 完成剩餘門檻，首次真 U17 已有明確核准及通過紀錄，版本開放等使用者確認。此頁的局部通過不能代替 C 段完成驗收。

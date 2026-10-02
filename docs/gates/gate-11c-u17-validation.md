@@ -3,7 +3,7 @@
 > **TL;DR**
 > - fake Codex 已走真 App／client／daemon／holder／wrapper／PTY／driver／SQLite，驗人工 turn 和 daemon 訊息分開對帳。
 > - 六個測試通過（含一個 re-exec 入口）；已修正人工同文誤認 receipt 與 Queue receipt 缺 turn id。
-> - 下一步：使用已編譯的 opt-in 工具驗真 Codex；一般 daemon 仍 not_supported，尚未開放任何版本。
+> - 真 Codex 0.159.3 已有[首次 U17 證據](gate-11c-u17-live-validation.md)；下一步是全新 verifier 與版本確認，一般 daemon 仍 not_supported。
 
 ## 實際路徑與範圍
 
@@ -49,7 +49,7 @@ fixture 原先在另一 history socket idle 後立即假設 driver 已 idle；�
 | 原生 U17 suite | 6 passed／0 ignored；含 re-exec 入口 |
 | history 匹配 | 5 passed；嚴格 clientId 與舊相容行為分開核對 |
 | 既有 Codex driver 契約 | 15 passed；忙碌三級、lost reply、冪等與四次重啟 |
-| 真 Codex 工具 | 已編譯；未 opt-in guard exit 2，未跑 live |
+| 真 Codex 工具 | 0.159.3 首次四回合 U17 通過；第四回合只核 receipt；[原始範圍](gate-11c-u17-live-validation.md) |
 | 完整本機 workspace | 888 passed／2 個既有 ignored；在抽取共用 fixture 和新增互動 demo 前執行 |
 | accept core | 158 passed／2 個既有 ignored；demo、fmt／clippy、實際 thumb no-std 通過 |
 | accept tui | 594 passed／0 ignored；fake／真 daemon／完整 U17 三個 demos 通過；抽取共用 fixture 後執行 |
@@ -76,4 +76,4 @@ accept tui 已加入 codex_u17_probe，直接共用完整 App 情境與 fake pro
 
 ## 下一步
 
-真 Codex 工具已編譯，未 opt-in 時 exit 2；尚未執行。指令、四回合範圍見 [live 工具](gate-11c-u17-live.md)。接著核實際版本、最新完整 checks、全新 verifier 與人工驗收。C 段仍在 [draft PR #145](https://github.com/suzuke/AgEnD/pull/145)，未驗收或 merge。
+真 Codex 0.159.3 首次 U17 已通過；[原始範圍](gate-11c-u17-live-validation.md)、[工具](gate-11c-u17-live.md)。接著做全新 verifier、版本確認、最新 checks 與人工驗收。C 段仍在 [draft PR #145](https://github.com/suzuke/AgEnD/pull/145)，未驗收或 merge。

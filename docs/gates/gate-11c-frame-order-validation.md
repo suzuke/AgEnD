@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 三個 App 順序回歸由真 holder parser／FakeDaemon／ClientSource 產生資料，只延遲或重排既有 events。
 > - 三個正向通過；移除對應防護的三個 mutants 各 exit 101。真 PTY frame golden 與既有 frame suite 共 8 passed。
-> - 下一步：核完整 acceptance 與最新 CI，再接真 Codex live、全新 verifier 和人工驗收；尚未完成 C 段。
+> - 下一步：真 Codex 0.159.3 已有首次 U17 證據，接著核新 head CI、全新 verifier 和人工驗收；尚未完成 C 段。
 
 ## App consumer 的證據
 
