@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 原生輸出已保留單／雙／捲曲／點狀／虛線底線、底線色與標準游標；C 段仍在 draft PR #145 實作。
 > - 真 holder parser 產生 frame，經真 crossterm backend，再由另一個真 parser 讀回；尚未認證實機字型與外觀。
-> - 下一步：完成外層 capture／restore、其餘資源矩陣與 Codex U17，再做完整獨立及人工驗收。
+> - 下一步：完成其餘資源矩陣與 Codex U17，再做完整獨立及人工驗收。
 
 ## 行為
 
@@ -24,7 +24,7 @@ ratatui 的 `UNDERLINED` 無法區分五種底線。`terminal::native_render` �
 | guard | 原 `NO_COLOR` 設定在正常／error／unwind 後還原；實際 reset bytes 全數核對 |
 | holder 單欄 | 同 parser 的 normal live／history、inactive normal＋active alt、mode／generation／revision、新 CJK／combining、放大後新寬字；有五秒 watchdog |
 
-TUI 81 passed（`full_app` 17 cases），holder 57 passed；workspace clippy 與實際 thumb no-std check-deps 通過，沒有 allow-skip。完整 workspace 865 passed／2 個既有 ignored；完整 accept tui 572 passed／0 ignored，fake／真 daemon demos 均成功。fmt 與 72 個本批文件 links／anchors 通過。
+TUI 81 passed（`full_app` 17 cases），holder 57 passed；workspace clippy 與實際 thumb no-std check-deps 通過，沒有 allow-skip。完整 workspace 864 個主 suite passed／2 個既有 ignored，另有一個 filtered 子程序 probe 輸出（原總計 865）；完整 accept tui 572 passed／0 ignored，fake／真 daemon demos 均成功。fmt 與 72 個本批文件 links／anchors 通過。
 
 ## 原失敗與修正
 
@@ -36,7 +36,7 @@ holder 保持協定允許的實際單欄尺寸。放不下的寬字在 reflow �
 
 原 logs／stack／負面證據在 `/private/tmp/g11c-implementation-logs`。這些是 backend bytes 與 parser 證據，不等同於使用者實際 Terminal／iTerm2／Linux 終端驗收。
 
-真 PTY App 的 raw 收件、stty 尺寸與 20 次 thread／fd 清理已有[原生證據](gate-11c-native-app-validation.md)，外層 event capture／restore 與實機外觀仍待驗。
+真 PTY App 的 raw 收件、stty 尺寸與 20 次 thread／fd 清理已有[原生證據](gate-11c-native-app-validation.md)，後續 [真外層 PTY](gate-11c-outer-validation.md) 已補 event capture／restore；實機外觀仍待驗。
 
 ## 下一步
 

@@ -26,7 +26,7 @@
 
 ## C 段開工前提案
 
-[完整 P1–P6](gate-11c-proposal.md) 與 [驗收計畫](gate-11c-validation-plan.md)。C 段在 [draft PR #145](https://github.com/suzuke/AgEnD/pull/145) 實作中；holder／runtime 與 daemon／client 1.4 已接通，多視窗／EOF 有原生程序回歸；TUI App 的完整模式／鍵鼠／貼上與歷史已有局部證據；原生底線／標準游標已有讀回證據，實機外觀／完整矩陣與 U17 待完成。[目前進度](gate-11c-progress.md)。下方 B 段已確認的決策與驗收紀錄保留。
+[完整 P1–P6](gate-11c-proposal.md) 與 [驗收計畫](gate-11c-validation-plan.md)。C 段在 [draft PR #145](https://github.com/suzuke/AgEnD/pull/145) 實作中；holder／runtime 與 daemon／client 1.4 已接通，多視窗／EOF 有原生程序回歸；TUI App 的完整模式／鍵鼠／貼上與歷史已有局部證據；原生底線／標準游標及外層 PTY 的 capture／restore 已有讀回證據，實機外觀／完整矩陣與 U17 待完成。[目前進度](gate-11c-progress.md)。下方 B 段已確認的決策與驗收紀錄保留。
 
 ## B 段開工前提案
 
@@ -559,6 +559,8 @@ unset AGEND_BIN               # 前幾關步驟留下的 export 可能指到已�
 | 2026-09-29 | B 段通過 | 在 `feat/gate-11-tui-impl`（be7a7c5）由 agent 帶著走 7 步。步驟 1 假、真 daemon 兩段全過（預設 `ulimit -n 256` 也能跑）。步驟 4 打 `hello` 時被假 agent 每秒的 `counter` 行切開，是假 agent 沒有輸入框的正常現象（真 claude 有輸入框）；`Ctrl-]` 在使用者的終端可以離開輸入。步驟 6 daemon 停著時 agent 的 counter 繼續數，重連後接著目前的數字（holder 沒被重啟，D3）。使用者另外要求 TUI 裡完整重現 agent CLI（含滑鼠滾動）→ C 段。 |
 
 ## 進度紀錄
+
+- 2026-10-03 C 段真外層 PTY（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：真 App event capture／kernel resize、多視窗、鍵鼠／paste／歷史、正常與 unwind 還原及 20 次程序 fd 清理通過；完整 agend 214 passed／0 ignored，clippy／fmt／實際 no-std 通過。`50851e2` 四個 CI jobs 成功；主 suite 計數已排除 filtered 子程序 probe 重複輸出。其餘矩陣、U17 與完整驗收待完成；[證據](gate-11c-outer-validation.md)。
 
 - 2026-10-03 C 段 #145 新增兩個真 daemon／holder／raw PTY App 情境：逐 byte 輸入、stty 尺寸、多視窗、歷史／淘汰、alt、重啟與 20 次 thread／fd 回歸通過；外層 capture／restore、其餘矩陣與 U17 待完成。原失敗與反例見 [原生 App 證據](gate-11c-native-app-validation.md)。
 

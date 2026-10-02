@@ -43,6 +43,7 @@
 
 - 一般依賴：所有 `agend-*` library crate（除 testkit）；`clap`（derive，不開預設功能：沒有顏色、沒有建議）；`libc`（doctor 的 `statvfs`、`access`）；`serde`、`serde_json`（`--json`）
 - dev 依賴：`agend-testkit`；`libc`（測試只對自己的子程序或自己 lock 檔裡的 pid 送訊號）；`tokio`（第 8 施工關：CLP-8 在測試程序裡跑 daemon 的 server）；`rusqlite`（第 7 施工關：做一個 schema v3 的 `agend.db`，放第 6 施工關的 codex 列）
+- dev 依賴另含 `portable-pty`（與 holder 同為 0.9，沒有新增 package）：只用於真 `agend app` 的外層 PTY，讀 kernel termios、送 resize 與收實際輸出。
 - example `fake_codex`：只給測試用的 `codex` CLI 替身（`agend_testkit::fake_agent::codex_cli`），`cargo test -p agend` 會一起編到 `target/<profile>/examples/fake_codex`；不安裝
 - example `cli_demo`：第 9 施工關的 demo（`cargo xtask accept cli`），跟 `tests/cli.rs` 共用 `tests/common/`
 

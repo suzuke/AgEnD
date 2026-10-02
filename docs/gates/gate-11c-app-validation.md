@@ -41,7 +41,7 @@
 ## 尚待完成
 
 - 本批後已補原生五種底線與標準游標讀回；詳見 [原生驗證](gate-11c-native-validation.md)。實機外觀待驗，HollowBlock 使用 block fallback。
-- 真 PTY input consumer 的完整 App 已補[原生回歸](gate-11c-native-app-validation.md)；其餘拒絕／壓力／時效矩陣、外層 event capture／restore 與實機外觀待完成。
+- 真 PTY input consumer 的完整 App 已補[原生回歸](gate-11c-native-app-validation.md)；外層 event capture／restore 已補 [原生證據](gate-11c-outer-validation.md)；其餘拒絕／壓力／時效矩陣與實機外觀待完成。
 - fake Codex＋真 AgEnD U17、明確 opt-in live smoke、CLI 版本及使用者確認後才開放已驗版本；目前 Codex 仍拒絕輸入。
 - 完整 accept tui、雙平台最新 CI、全新無 context verifier、逐步人工驗收與 merge 確認。
 

@@ -23,6 +23,8 @@
 
 ## 驗證紀錄
 
+- 2026-10-03 C 段真外層 PTY（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：真 App event capture／kernel resize、多視窗、鍵鼠／paste／歷史、正常與 unwind 還原及 20 次程序 fd 清理通過；完整 agend 214 passed／0 ignored，clippy／fmt／實際 no-std 通過。`50851e2` 四個 CI jobs 成功；主 suite 計數已排除 filtered 子程序 probe 重複輸出。其餘矩陣、U17 與完整驗收待完成；[證據](gate-11c-outer-validation.md)。
+
 - 2026-10-03 真 PTY App：兩個完整情境＋agent 入口共 3 tests 通過，核 raw bytes、實際 stty size、多視窗／EOF、固定歷史／淘汰、alt 與 daemon 重啟；20 次 close 每次 thread 為 0、fd 回同一基準。application-cursor mutant 同一回歸 exit 101，還原後通過；初跑 snapshot 同步錯誤保留。完整 agend 209／TUI 81 passed、0 ignored，workspace clippy／fmt／實際 no-std 通過。[原生證據](gate-11c-native-app-validation.md)。
 
 - 2026-10-03 原生 renderer：五種底線形狀、色彩與六種標準游標經真 backend／第二個真 parser 讀回；TUI 81／holder 57 passed。單欄 resize 的寬字 reflow hang／新輸入越界已修正，相同負面回歸會失敗；原 stack／logs 保留。完整 workspace 865 passed／2 個既有 ignored、accept tui 572 passed／0 ignored，fake／真 demos、clippy／fmt／實際 no-std 通過；[本批證據與邊界](gate-11c-native-validation.md)。
@@ -64,7 +66,7 @@
 
 - 完成驗收矩陣其餘拒絕／壓力／時效與資源案例；六項控制／viewport／EOF 契約已同跑 fake／真 daemon，不能代替完整 C 矩陣。
 - 原生底線／標準游標已有讀回證據，實機外觀與完整 App 的拒絕／資源矩陣待驗；i／尺寸確認／失效的局部證據已取得。
-- mode-aware keys／mouse／paste、固定歷史與 guard 已有局部證據；真 PTY App 回歸已取得[原生證據](gate-11c-native-app-validation.md)，外層 event capture／restore 與實機驗收仍待完成。
+- mode-aware keys／mouse／paste、固定歷史與 guard 已有局部證據；真 PTY App 回歸已取得[原生證據](gate-11c-native-app-validation.md)，後續 [外層 PTY](gate-11c-outer-validation.md) 已驗 event capture／restore；實機驗收仍待完成。
 - fake Codex＋真 AgEnD U17；明確 opt-in live smoke、版本及使用者確認後才開放該版本，未驗仍 not_supported。
 - 完整 accept tui、workspace checks、雙平台 CI、全新無 context verifier、逐步人工驗收與 merge 確認。
 

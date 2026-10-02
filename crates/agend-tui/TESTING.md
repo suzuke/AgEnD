@@ -17,7 +17,7 @@
 
 `tests/full_source.rs` 使用真 holder parser 與 fake daemon 的實際 socket，驗控制交接／舊 owner 拒絕、viewport request id、舊 daemon 不啟用新能力、producer 阻塞時 UI seam 不等 ack，以及關閉後 queued input 不重送。控制回覆 mailbox 滿時明確關閉，不默默丟 ack；測試限制 producer 速率以隔離 server reply queue 與 UI mailbox。20 次 full stream 開關後，新增 reader／writer 全數退出，daemon connections 與 fd 回到基準。
 
-App 已選用此路徑；真 daemon／holder／PTY 的單次 Source 輸入與 thread join 在 `agend --test full_terminal_contract` 通過；完整 App 的局部證據見下節；尚未認證完整 native TUI 的 fd 清理。初次 fd 檢查早於背景 view 清理，原失敗 log 保留；改為期限內等實際 fd／connection 清理，沒有放寬基準斷言。
+App 已選用此路徑；真 daemon／holder／PTY 的單次 Source 輸入與 thread join 在 `agend --test full_terminal_contract` 通過；完整 App 與外層 PTY 的 20 次清理證據見下節。初次 fd 檢查早於背景 view 清理，原失敗 log 保留；改為期限內等實際 fd／connection 清理，沒有放寬基準斷言。
 
 ## C 段 App 路徑（局部驗證）
 
@@ -25,13 +25,15 @@ App 已選用此路徑；真 daemon／holder／PTY 的單次 Source 輸入與 th
 
 新增兩個 renderer cases 以真 holder parser frame 經 crossterm backend 輸出，再由第二個真 parser 讀回；核五種底線、色彩、六種標準游標、裁切／隱藏／finder 返回與閒置不重印。相同 glyph 的樣式切換可抓到 single-only mutant。
 
-同時存活的 App fixture 上限為 3，全部案例仍執行；原 macOS fd 耗盡 log 保留。`terminal::native` 注入 output error 及 unwind，檢查 mouse／paste／focus／cursor／SGR reset 與原色彩設定恢復。這是 writer 層證據，實際 Terminal／iTerm2 外觀與 unwind 的終端狀態仍要人工驗收。
+同時存活的 App fixture 上限為 3，全部案例仍執行；原 macOS fd 耗盡 log 保留。`terminal::native` 注入 output error 及 unwind，檢查 mouse／paste／focus／cursor／SGR reset 與原色彩設定恢復。這是 writer 層證據；後續外層 PTY 已核 unwind 後的 kernel termios／capture modes，實際 Terminal／iTerm2 外觀仍要人工驗收。
 
 `full_source` 的 overflow case 逐次等實際 producer 收件，送到 64-reply 邊界再等 worker 關閉，確認 explicit overflow；不靠五秒內送件數假設。原 `f999bbf` macOS CI 的 51／53 次送件失敗保留。
 
 原生 `agend --test tui_daemon`／`tui_real` 已改用 C 段唯讀與完整尺寸確認。fake `tui_accept` 的輸入段亦注入同一真 parser；一般舊協定 Source 的直接輸入／錯誤配對契約仍保留。詳見 [App 驗證紀錄](../../docs/gates/gate-11c-app-validation.md)。
 
-真 daemon／raw PTY 的完整 App 情境已在 `agend --test tui_native_app` 通過：鍵鼠／paste、實際 stty 尺寸、多視窗、歷史／淘汰、alt、重啟及 20 次 thread／fd 清理。這些 events 直接呼叫 App，外層終端 capture／restore 仍待驗；[證據與重跑](../../docs/gates/gate-11c-native-app-validation.md)。
+真 daemon／raw PTY 的完整 App 情境已在 `agend --test tui_native_app` 通過：鍵鼠／paste、實際 stty 尺寸、多視窗、歷史／淘汰、alt、重啟及 20 次 thread／fd 清理。這些 events 直接呼叫 App；[證據與重跑](../../docs/gates/gate-11c-native-app-validation.md)。
+
+`agend --test tui_outer_pty` 另在原生外層 PTY 執行真 App binary；events 由 crossterm capture，尺寸由 kernel resize 通知，輸出以第二個真 holder parser 讀回。正常／unwind 都核 termios 與 capture modes 還原，另驗 20 次程序退出後 fd 回基準。[證據](../../docs/gates/gate-11c-outer-validation.md)。
 
 ## 怎麼跑
 

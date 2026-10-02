@@ -16,6 +16,7 @@ dependencies = [
  "base64",
  "clap",
  "libc",
+ "portable-pty",
  "ratatui",
  "rusqlite",
  "serde",

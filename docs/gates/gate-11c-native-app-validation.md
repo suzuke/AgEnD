@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - App 的鍵鼠／貼上、resize、多視窗與歷史已經真 daemon／holder，到 raw PTY 程序驗證；C 段仍在 draft PR #145。
-> - 兩個完整情境逐 byte 比對實收輸入，20 次開關核 thread／fd；事件由測試呼叫 App，外層終端 capture 及實機外觀仍待驗。
-> - 下一步：完成外層終端、其餘壓力／時效矩陣與 Codex U17，再做全新獨立及人工驗收。
+> - 兩個完整情境逐 byte 比對實收輸入，20 次開關核 thread／fd；本批事件由測試呼叫 App；後續外層 PTY 已補 capture／restore 證據，實機外觀仍待驗。
+> - 下一步：完成其餘壓力／時效矩陣與 Codex U17，再做全新獨立及人工驗收。
 
 ## 如何取得證據
 
@@ -33,11 +33,11 @@
 
 暫時把 application-cursor 編碼改為一般 CSI，同一 raw-consumer 情境收到 `ESC [ A`，預期 `ESC O A`，cargo exit 101。production 檔在 finally 還原，原生 suite 再跑通過。
 
-原 logs 在 `/private/tmp/g11c-implementation-logs/native-app-*.log`；本批完成檢查時的 snapshot 為 `SHA256SUMS-native-app`。這些證據驗 App、正式 transport 與真 agent PTY；尚未驗真外層 PTY 的 crossterm event capture／restore，也不認證 Terminal／iTerm2／Linux 終端字型或非美式鍵盤。
+原 logs 在 `/private/tmp/g11c-implementation-logs/native-app-*.log`；本批完成檢查時的 snapshot 為 `SHA256SUMS-native-app`。這些證據驗 App、正式 transport 與真 agent PTY；本批未驗真外層 PTY；後續 [外層回歸](gate-11c-outer-validation.md) 已驗 crossterm event capture／restore。兩批都不認證 Terminal／iTerm2／Linux 終端字型或非美式鍵盤。
 
 ## 重連 CI 失敗
 
-`d804580` 的 Ubuntu push／PR 與 macOS PR jobs 通過（各 workspace 865 passed／2 個既有 ignored，實際 no-std 通過）。macOS push job `110994132303` 在既有 `reconnect_attempts_are_every_500_ms` 失敗：兩秒只觀察到 2 次，原 log 保留。
+`d804580` 的 Ubuntu push／PR 與 macOS PR jobs 通過（各 workspace 864 個主 suite passed／2 個既有 ignored，另有一個 filtered 子程序 probe 輸出；原總計為 865，實際 no-std 通過）。macOS push job `110994132303` 在既有 `reconnect_attempts_are_every_500_ms` 失敗：兩秒只觀察到 2 次，原 log 保留。
 
 舊 fixture 要求 host 兩秒內執行足夠多次 tick。原測試加入一次 2.1 秒受控停頓，即在未改產品碼下失敗；這證明該斷言對排程停頓敏感，CI 未記 tick 時間，無法核實那次 runner 的具體延遲。新 fixture 等三次實際重連，每次以 tick 起訖包住呼叫時間，檢查跨度不能小於 500 ms；有十秒 deadline，正常／受控停頓都跑，r 仍立即再試。暫改產品間隔為 100 ms 時，新斷言 exit 101；還原後整個 20-case suite 通過。沒有降低 500 ms 門檻或改產品的重連行為。
 
@@ -51,4 +51,4 @@ export CARGO_TARGET_DIR=/private/tmp/AgEnD-g11c-target
 
 ## 下一步
 
-補 [驗收矩陣](gate-11c-validation-plan.md) 的外層終端與其餘案例、Codex U17；完整 C 段 ready 後才派全新 verifier，merge 等使用者確認。
+補 [驗收矩陣](gate-11c-validation-plan.md) 的其餘案例、Codex U17；完整 C 段 ready 後才派全新 verifier，merge 等使用者確認。
