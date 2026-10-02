@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 pub mod ask;
 pub mod client;
 pub mod holder;
+pub mod terminal;
 
 /// Version advertised in a protocol `hello` message. Minor versions only add
 /// optional fields; unknown fields are ignored by serde's default behavior.

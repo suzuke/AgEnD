@@ -5,17 +5,19 @@
 > - 記住：**PTY 只收三種位元組**：列舉過的控制鍵、操作者輸入、終端查詢回覆；只有協定 `Shutdown` 停得掉 holder。
 > - 下一步：第 6 施工關起由 daemon 的 agent runtime（`agend_daemon::runtime`）啟動與接回 holder；daemon 不依賴本 crate，只經 holder 協定與 `agend holder` 子命令。
 
-## 第 11 施工關 C 段（提案中）
+## 第 11 施工關 C 段（實作中）
 
-完整終端畫面、resize、滑鼠／貼上與歷史的 [P1–P6 提案](../../docs/gates/gate-11c-proposal.md) 已於 2026-10-02 確認（D39），尚未實作；目前功能維持下方已交付範圍。
+完整終端畫面、resize、滑鼠／貼上與歷史的 [P1–P6 提案](../../docs/gates/gate-11c-proposal.md) 已確認（D39），提案 #144 已合併。holder 1.1 已提供結構化 frame、request id、generation／revision 及只讀歷史 viewport；新的控制／resize／input 與 daemon／TUI 路徑仍待完成，C 段尚未驗收。
+
+`GetTerminalFrame` 的 viewport 不改 classifier 的 live screen。normal screen 以絕對 row id 保留 1,000 列歷史；淘汰時回覆 clamped，alternate screen 沒有歷史。resize／reflow 會重新編排 row id，舊 viewport 明確 clamped。序列化 frame（含換行）最多 8 MiB，超限整份拒絕；原 1 MiB 請求上限不變。
 
 ## 負責
 
 - 以 portable-pty 啟動 agent；環境**只有** `Spawn.env`（沒給 `TERM` 時補 `xterm-256color`）
-- 以 alacritty_terminal 維護畫面（50 列 × 200 欄，scrollback 1,000 列只在記憶體），提供純文字快照與輸出串流
+- 以 alacritty_terminal 維護畫面（50 列 × 200 欄，scrollback 1,000 列），提供純文字快照、輸出串流及 1.1 結構化 viewport
 - PTY reader 先讀完已到達的輸出再關 holder 的 slave handle，避免 macOS 快速退出的 agent 留下空白畫面；關閉檢查不會 reap child。
 - 回報 exit code 或 signal；agent 結束後保留，每次連上都在快照後送 `Exited`
-- holder 協定 server：版本協商、同時一條連線、新的接手、落後 1 MiB 斷線
+- holder 協定 server：版本協商、同時一條連線、新的接手；純文字連線落後 1 MiB 斷線，取 frame 的連線多保留一份最大 frame 空間
 - 脫離終端（`setsid`）、忽略 HUP／INT／QUIT／TERM、`run/holders/<id>.lock` 防重複
 - 安全網：`AGEND_HOME` 被刪，或沒有 agent 在跑且連續 24 小時沒人連上 → 自行停止
 
@@ -46,7 +48,7 @@
 | `paths` | run 目錄路徑、instance id 規則、lock 判斷存活 |
 | `server` | holder 協定 server、停止流程、安全網 |
 | `pty` | spawn agent、控制鍵位元組、唯一的 PTY 寫入 thread（佇列 64） |
-| `screen` | alacritty 畫面、純文字快照、終端查詢回覆 |
+| `screen` | alacritty 畫面、純文字快照、終端查詢回覆；`screen/frame` 取完整格子，`screen/history` 沿用同 parser 追蹤 row id |
 | `exit` | `waitpid` 與 signal 名稱 |
 | `client` | 同步的協定 client（探測 example 與測試用） |
 | `sidecar` | 只有說明：不做附屬程序協定（第 7 施工關 P2 推翻第 4 施工關 P8 的 `SpawnSidecar`）；codex app-server 由 PTY 裡的 `sh` 包裝在背景起，跟 agent 同一個 process group |

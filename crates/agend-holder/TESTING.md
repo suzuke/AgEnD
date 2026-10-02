@@ -5,6 +5,14 @@
 > - 記住：每個 holder 一律用 `Shutdown` 停；測試不對自己沒起的 pid 送訊號。
 > - 下一步：RTM-1..9 對真的 agent runtime 已在第 6 施工關跑（`crates/agend/tests/holder_runtime.rs`）。
 
+## 第 11 施工關 C 段（實作中）
+
+- `tests/terminal_frames.rs`：真 PTY 的 16／256／RGB、屬性、CJK／combining、wide edge、mode／cursor、逐 byte 切片、編號行歷史淘汰與固定 viewport、normal／alt、generation／revision、resize row id。
+- `tests/server.rs`：真 holder/socket 的 frame request id、daemon 連線重開後 generation 不變、1.0 純文字路徑、新能力未協商拒絕、無效 viewport 與 oversized frame 整份拒絕後仍可讀。
+- `screen::tests::tracking_keeps_the_direct_parser_screen_modes_and_cursor`：同一段序列逐 byte 比對 direct alacritty，確認歷史追蹤不改畫面／mode／cursor。
+
+這些只驗 holder 基礎；尚未認證完整模式、實際 resize acknowledgement、多視窗控制與 Codex U17。
+
 ## 怎麼跑
 
 ```bash

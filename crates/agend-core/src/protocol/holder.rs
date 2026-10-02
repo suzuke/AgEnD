@@ -14,10 +14,12 @@ use core::fmt;
 use serde::de::{self, Deserializer, Visitor};
 use serde::{Deserialize, Serialize};
 
+use super::terminal::{TerminalFrameData, TerminalFrameRequest, TerminalOperationError};
 use super::{Hello, ProtocolVersion, VersionMismatch, negotiate};
 
 pub const V1: ProtocolVersion = ProtocolVersion::new(1, 0);
-pub const SUPPORTED_VERSIONS: [ProtocolVersion; 1] = [V1];
+pub const V1_1: ProtocolVersion = ProtocolVersion::new(1, 1);
+pub const SUPPORTED_VERSIONS: [ProtocolVersion; 1] = [V1_1];
 
 /// Longest request line a holder reads, its newline included (1 MiB); a
 /// longer one gets `request_too_large` and the connection is closed. The
@@ -119,6 +121,10 @@ pub enum HolderRequest {
     OperatorTerminalInput {
         data: OperatorTerminalInputData,
     },
+    /// 1.1: correlated, structured viewport from the authoritative screen.
+    GetTerminalFrame {
+        data: TerminalFrameRequest,
+    },
     Snapshot,
     Shutdown,
     #[serde(other)]
@@ -176,6 +182,12 @@ pub enum HolderResponse {
     },
     Exited {
         data: ExitedData,
+    },
+    TerminalFrame {
+        data: TerminalFrameData,
+    },
+    TerminalOperationError {
+        data: TerminalOperationError,
     },
     Error {
         data: ErrorData,
@@ -244,10 +256,15 @@ mod tests {
     }
 
     #[test]
-    fn holder_hello_advertises_v1() {
+    fn holder_negotiates_legacy_1_0_without_enabling_frames() {
+        assert_eq!(negotiate_version(&Hello::new(&[V1])), Ok(V1));
+    }
+
+    #[test]
+    fn holder_hello_advertises_v1_1() {
         let HolderRequest::Hello { data: hello } = HolderRequest::hello() else {
             unreachable!();
         };
-        assert_eq!(negotiate_version(&hello), Ok(V1));
+        assert_eq!(negotiate_version(&hello), Ok(V1_1));
     }
 }

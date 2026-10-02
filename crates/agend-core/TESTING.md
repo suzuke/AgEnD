@@ -5,6 +5,10 @@
 > - 記住：Codex fixture 是 PTY 擷取；Claude fixture 是 spike 紀錄中的 prompt 文字，並非完整 holder 畫面擷取。
 > - 下一步：跑 `cargo xtask accept core`，比對實際狀態機 transcript。
 
+## 第 11 施工關 C 段（實作中）
+
+`protocol::terminal::tests` 拒絕零尺寸與超過 1000 的 PTY 尺寸；holder 協商測 1.1 與舊 1.0。frame producer／serde／真 socket 回歸在 holder 的 `terminal_frames.rs` 與 `server.rs`；新 client 能力與端到端控制契約尚待建立。
+
 ## 第 10 施工關驗證
 
 快照 golden、舊 fixture 與竄改輸入在 `cargo test -p xtask --test pipeline_snapshot`；第一套 explorer 每步驗證 restore 與 outstanding action 的關卡／attempt 不變。

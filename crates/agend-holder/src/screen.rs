@@ -2,9 +2,10 @@
 //! A reconnecting daemon gets the current screen, never a byte replay (a
 //! replay can start in the middle of an escape sequence).
 //!
-//! The snapshot is plain text of the visible screen: each row with trailing
+//! The legacy snapshot is plain text of the visible screen: each row with trailing
 //! spaces removed, rows joined with `\n` (P5). Scrollback (1,000 rows) stays in
-//! memory and is not sent in gate 4.
+//! memory. Structured frames (holder 1.1) include cells, modes, cursor and a
+//! requested viewport, with process generation and monotonic revision.
 //!
 //! Terminal queries the agent prints (for example cursor position `ESC[6n`)
 //! produce replies from alacritty; they are handed to the PTY writer queue
@@ -12,8 +13,34 @@
 //!
 //! Must NOT: classify the screen (that is `agend_core::screen`).
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+mod frame;
+mod history;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrameError {
+    InvalidSize,
+    TooLarge,
+}
+
+impl FrameError {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::InvalidSize => "invalid_size",
+            Self::TooLarge => "frame_too_large",
+        }
+    }
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::InvalidSize => "viewport rows must be between 1 and the PTY height",
+            Self::TooLarge => "terminal frame exceeds 8 MiB; nothing was truncated",
+        }
+    }
+}
 
 use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::grid::Dimensions;
@@ -62,6 +89,9 @@ pub struct Screen {
     parser: Processor,
     rows: u16,
     columns: u16,
+    generation: String,
+    revision: u64,
+    history: history::History,
 }
 
 impl Screen {
@@ -70,7 +100,20 @@ impl Screen {
             scrolling_history: SCROLLBACK_ROWS,
             ..Config::default()
         };
+        static NEXT_SCREEN: AtomicU64 = AtomicU64::new(0);
+        let generation = format!(
+            "{}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos(),
+            NEXT_SCREEN.fetch_add(1, Ordering::Relaxed)
+        );
         Self {
+            generation,
+            revision: 0,
+            history: history::History::new(rows),
             term: Term::new(config, &Size { rows, columns }, QueryReplies(replies)),
             parser: Processor::new(),
             rows,
@@ -83,13 +126,25 @@ impl Screen {
     }
 
     pub fn process(&mut self, bytes: &[u8]) {
-        self.parser.advance(&mut self.term, bytes);
+        if !bytes.is_empty() {
+            let mut tracked = history::Tracked {
+                term: &mut self.term,
+                history: &mut self.history,
+            };
+            self.parser.advance(&mut tracked, bytes);
+            self.revision += 1;
+        }
     }
 
     pub fn resize(&mut self, rows: u16, columns: u16) {
+        if (rows, columns) == self.size() {
+            return;
+        }
         self.rows = rows;
         self.columns = columns;
         self.term.resize(Size { rows, columns });
+        self.history.resize(&self.term);
+        self.revision += 1;
     }
 
     /// Visible screen as plain text (P5).
@@ -125,6 +180,25 @@ mod tests {
 
     fn screen() -> Screen {
         Screen::new(DEFAULT_ROWS, DEFAULT_COLUMNS, ReplySink::default())
+    }
+
+    #[test]
+    fn tracking_keeps_the_direct_parser_screen_modes_and_cursor() {
+        use agend_core::protocol::terminal::TerminalViewport;
+        let mut tracked = Screen::new(4, 9, ReplySink::default());
+        let mut direct = Screen::new(4, 9, ReplySink::default());
+        let corpus = "abc漢é\r\n\x1b[31;1mred\x1b[0m\r\n0123456789\r\n\x1b[2;4r\x1b[4;1H\n\x1b[2S\x1b[r\x1b[2J\x1b[?1049hALT\x1b[?1049l\x1b[3J\x1b[?2004h\x1b[?1000h\x1b[6 q\x1bc";
+        for byte in corpus.as_bytes() {
+            tracked.process(&[*byte]);
+            direct.parser.advance(&mut direct.term, &[*byte]);
+            assert_eq!(tracked.text(), direct.text());
+            let viewport = TerminalViewport { top: None, rows: 4 };
+            let a = tracked.frame(viewport).unwrap();
+            let b = direct.frame(viewport).unwrap();
+            assert_eq!(a.cells, b.cells);
+            assert_eq!(a.cursor, b.cursor);
+            assert_eq!(a.modes, b.modes);
+        }
     }
 
     #[test]

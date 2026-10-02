@@ -31,10 +31,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Sender, SyncSender, channel};
 use std::time::{Duration, Instant};
 
+use agend_core::protocol::ProtocolVersion;
 use agend_core::protocol::holder::{
     ErrorData, ExitedData, HolderRequest, HolderResponse, PtyBytesData, ResizeData,
     ScreenSnapshotData, SelectedVersionData, SpawnData, SpawnedData, negotiate_version,
 };
+use agend_core::protocol::terminal::{MAX_FRAME_LINE, TerminalFrameData, TerminalOperationError};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use parking_lot::{Condvar, Mutex, MutexGuard};
@@ -82,6 +84,8 @@ pub enum Stop {
 
 struct Conn {
     id: u64,
+    version: ProtocolVersion,
+    structured: bool,
     frames: Sender<Vec<u8>>,
     pending: Arc<AtomicUsize>,
     stream: UnixStream,
@@ -254,9 +258,44 @@ fn spawn_thread(name: &str, f: impl FnOnce() + Send + 'static) {
 }
 
 fn frame(response: &HolderResponse) -> Vec<u8> {
+    if let HolderResponse::TerminalFrame { data } = response {
+        let mut bounded = FrameLine(Vec::new());
+        if serde_json::to_writer(&mut bounded, response).is_err() {
+            return frame(&HolderResponse::TerminalOperationError {
+                data: TerminalOperationError {
+                    request_id: data.request_id.clone(),
+                    code: "frame_too_large".into(),
+                    message: format!(
+                        "terminal frame exceeds {MAX_FRAME_LINE} bytes; nothing was truncated"
+                    ),
+                },
+            });
+        }
+        bounded.0.push(b'\n');
+        return bounded.0;
+    }
     let mut line = serde_json::to_vec(response).expect("holder response serializes");
     line.push(b'\n');
     line
+}
+
+/// Bounds serialization before it allocates an oversized JSON response.
+struct FrameLine(Vec<u8>);
+
+impl Write for FrameLine {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if self.0.len() + bytes.len() >= MAX_FRAME_LINE {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "frame exceeds 8 MiB",
+            ));
+        }
+        self.0.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 fn error(code: &str, message: impl Into<String>) -> HolderResponse {
@@ -275,7 +314,14 @@ fn push(holder: &Holder, state: &mut State, response: &HolderResponse) {
     };
     let line = frame(response);
     let len = line.len();
-    let lagging = conn.pending.load(Ordering::SeqCst) + len > holder.lag_limit;
+    // A structured connection gets room for one maximum frame plus the legacy
+    // byte-stream budget. Existing connections retain the 1 MiB lag rule.
+    let limit = if conn.structured {
+        holder.lag_limit + MAX_FRAME_LINE
+    } else {
+        holder.lag_limit
+    };
+    let lagging = conn.pending.load(Ordering::SeqCst) + len > limit;
     if !lagging {
         conn.pending.fetch_add(len, Ordering::SeqCst);
         if conn.frames.send(line).is_ok() {
@@ -400,6 +446,8 @@ fn connection(holder: &Arc<Holder>, stream: UnixStream) {
         state.latest_conn = id;
         state.conn = Some(Conn {
             id,
+            version,
+            structured: false,
             frames,
             pending,
             stream: control,
@@ -525,6 +573,37 @@ fn handle(
             Ok(bytes) => write_pty(state, bytes),
             Err(e) => Some(error("bad_request", format!("bytes_base64: {e}"))),
         },
+        HolderRequest::GetTerminalFrame { data } => {
+            let fail = |code: &str, message: &str| HolderResponse::TerminalOperationError {
+                data: TerminalOperationError {
+                    request_id: data.request_id.clone(),
+                    code: code.into(),
+                    message: message.into(),
+                },
+            };
+            if state
+                .conn
+                .as_ref()
+                .is_none_or(|conn| conn.version < agend_core::protocol::holder::V1_1)
+            {
+                return Some(fail(
+                    "not_supported",
+                    "structured frames require holder protocol 1.1",
+                ));
+            }
+            if let Some(conn) = &mut state.conn {
+                conn.structured = true;
+            }
+            Some(match state.screen.frame(data.viewport) {
+                Ok(frame) => HolderResponse::TerminalFrame {
+                    data: TerminalFrameData {
+                        request_id: data.request_id,
+                        frame,
+                    },
+                },
+                Err(error) => fail(error.code(), error.message()),
+            })
+        }
         HolderRequest::Snapshot => Some(snapshot(state)),
         HolderRequest::Shutdown => {
             holder.log("shutdown requested");
@@ -647,5 +726,35 @@ fn spawn_agent(holder: &Arc<Holder>, state: &mut State, data: &SpawnData) -> Hol
             instance_id: data.instance_id.clone(),
             process_id: Some(pid),
         },
+    }
+}
+
+#[cfg(test)]
+mod frame_tests {
+    use super::*;
+    use agend_core::protocol::terminal::TerminalViewport;
+
+    #[test]
+    fn combining_text_that_exceeds_the_wire_limit_is_replaced_by_a_correlated_error() {
+        let mut screen = Screen::new(1, 2, ReplySink::default());
+        screen.process(b"x");
+        let combining = "\u{0301}".repeat(MAX_FRAME_LINE / 2);
+        screen.process(combining.as_bytes());
+        let viewport = TerminalViewport { top: None, rows: 1 };
+        let response = HolderResponse::TerminalFrame {
+            data: TerminalFrameData {
+                request_id: "large-combining".into(),
+                frame: screen.frame(viewport).unwrap(),
+            },
+        };
+        let bytes = frame(&response);
+        assert!(bytes.len() < MAX_FRAME_LINE);
+        let HolderResponse::TerminalOperationError { data } =
+            serde_json::from_slice(&bytes).unwrap()
+        else {
+            panic!("oversized frame was truncated or accepted")
+        };
+        assert_eq!(data.request_id, "large-combining");
+        assert_eq!(data.code, "frame_too_large");
     }
 }
