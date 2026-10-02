@@ -92,7 +92,14 @@ macro_rules! forward {
 
 impl Handler for Tracked<'_> {
     fn input(&mut self, a0: char) {
-        self.apply(self.history.top == 0, None, |term| term.input(a0));
+        use unicode_width::UnicodeWidthChar;
+        // The parser otherwise writes a wide spacer outside a one-column grid.
+        let character = if self.term.columns() == 1 && a0.width().is_some_and(|width| width > 1) {
+            ' '
+        } else {
+            a0
+        };
+        self.apply(self.history.top == 0, None, |term| term.input(character));
     }
 
     fn put_tab(&mut self, a0: u16) {

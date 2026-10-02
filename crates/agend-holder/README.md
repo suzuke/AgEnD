@@ -9,7 +9,7 @@
 
 完整終端畫面、resize、滑鼠／貼上與歷史的 [P1–P6 提案](../../docs/gates/gate-11c-proposal.md) 已確認（D39），提案 #144 已合併。holder 1.1 已提供結構化 frame、request id、generation／revision 及只讀歷史 viewport；holder 的 `TerminalControl` 已用同一 FIFO 佇列完成實際 resize／input 回覆及交接；daemon／client 與 TUI App 已接通，C 段完整驗收與 Codex U17 仍待完成。
 
-`GetTerminalFrame` 依同一 parser 的 grid／palette／mode 共用 50 ms 取樣，再取每個 view 的所需列；輸出解析與 classifier 仍讀 live grid。無效 viewport 先拒絕，resize 使取樣失效，control ack 用當下完整畫面。viewport 不改 classifier 的 live screen。normal screen 以絕對 row id 保留 1,000 列歷史；小 viewport 也能固定目前 live grid 內的列，最後一列不得超出 grid；淘汰時回覆 clamped，alternate screen 沒有歷史。resize／reflow 會重新編排 row id，舊 viewport 明確 clamped。序列化 frame（含換行）最多 8 MiB，超限整份拒絕；原 1 MiB 請求上限不變。
+`GetTerminalFrame` 依同一 parser 的 grid／palette／mode 共用 50 ms 取樣，再取每個 view 的所需列；輸出解析與 classifier 仍讀 live grid。無效 viewport 先拒絕，resize 使取樣失效，control ack 用當下完整畫面。viewport 不改 classifier 的 live screen。normal screen 以絕對 row id 保留 1,000 列歷史；小 viewport 也能固定目前 live grid 內的列，最後一列不得超出 grid；淘汰時回覆 clamped，alternate screen 沒有歷史。resize／reflow 會重新編排 row id，舊 viewport 明確 clamped。單欄仍使用實際一欄尺寸；寬字放不下時顯示帶原樣式的空白，避免上游 reflow hang／spacer 越界，放大後的新寬字正常顯示。序列化 frame（含換行）最多 8 MiB，超限整份拒絕；原 1 MiB 請求上限不變。
 
 `TerminalControl` 帶 request id／generation，提供 Acquire、Resize、Input、Release。Acquire／Resize 成功須附實際 PTY 尺寸的完整 frame；Input 完成實際 write／flush 才回覆；原生 PTY 為 nonblocking，整次寫入最多 5 秒，失敗明示可能已寫部分資料、不重送。每個操作在佇列執行時重新驗 owner；新 grant 等舊在途寫入完成，Release／重連保留尺寸。控制者存在時 legacy operator input／resize 被拒絕，舊的 queued input 也不能繞過新 grant。
 
@@ -50,7 +50,7 @@
 | `paths` | run 目錄路徑、instance id 規則、lock 判斷存活 |
 | `server` | holder 協定 server、停止流程、安全網；`server/control` 驗 generation／owner，實際操作後回覆 |
 | `pty` | spawn agent、控制鍵位元組、唯一的 PTY FIFO thread（bytes 與 operation 共用佇列 64） |
-| `screen` | alacritty 畫面、純文字快照、終端查詢回覆；`screen/frame` 取完整格子，`screen/history` 沿用同 parser 追蹤 row id |
+| `screen` | alacritty 畫面、純文字快照、終端查詢回覆；`screen/frame` 取完整格子，`screen/history` 沿用同 parser 追蹤 row id；`screen/narrow` 處理單欄放不下的寬字 |
 | `exit` | `waitpid` 與 signal 名稱 |
 | `client` | 同步的協定 client（探測 example 與測試用） |
 | `sidecar` | 只有說明：不做附屬程序協定（第 7 施工關 P2 推翻第 4 施工關 P8 的 `SpawnSidecar`）；codex app-server 由 PTY 裡的 `sh` 包裝在背景起，跟 agent 同一個 process group |
@@ -63,7 +63,7 @@
 
 ## 依賴規則
 
-- 一般依賴：`agend-core`、`portable-pty`、`alacritty_terminal`（關掉預設的 `serde`）、`parking_lot`、`base64`、`serde_json`、`libc`
+- 一般依賴：`agend-core`、`portable-pty`、`alacritty_terminal`（關掉預設的 `serde`）、`parking_lot`、`base64`、`serde_json`、`libc`、`unicode-width`（parser 已有的依賴）
 - `cargo xtask check-deps`：不能依賴 async runtime、SQLite、`agend-daemon`
 - alacritty_terminal 的 `event_loop`（連帶 `polling`）無法用 feature 關掉；holder 不用它
 

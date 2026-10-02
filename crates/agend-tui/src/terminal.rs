@@ -11,6 +11,7 @@
 pub mod full;
 pub mod input;
 pub mod native;
+pub mod native_render;
 
 use agend_core::protocol::client::DaemonEvent;
 

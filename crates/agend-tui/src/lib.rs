@@ -60,19 +60,16 @@ pub fn run_with(
         let _outer_modes = crate::terminal::native::OuterModes::enter(io::stdout())?;
         let size = terminal.size()?;
         app.resize(size.width, size.height);
-        let mut cursor_style = ratatui::crossterm::cursor::SetCursorStyle::DefaultUserShape;
+        let mut native = crate::terminal::native_render::CellRenderer::default();
         let mut next_tick = Instant::now();
         while !app.quit {
             if Instant::now() >= next_tick {
                 app.tick();
                 next_tick = Instant::now() + TICK;
             }
-            terminal.draw(|frame| ui::render(frame, &mut app))?;
-            let selected_style = crate::terminal::full::cursor_style(&app);
-            if selected_style != cursor_style {
-                ratatui::crossterm::execute!(io::stdout(), selected_style)?;
-                cursor_style = selected_style;
-            }
+            let completed = terminal.draw(|frame| ui::render(frame, &mut app))?;
+            let paint = native.prepare(&app, completed.buffer);
+            paint.write(terminal.backend_mut())?;
             let wait = next_tick.saturating_duration_since(Instant::now());
             if event::poll(wait)? {
                 match event::read()? {

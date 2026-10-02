@@ -942,3 +942,273 @@ fn an_exit_with_a_failed_resubscribe_stays_readonly_and_retries_without_old_cont
     app.paste("FRESH");
     received(&fake, b"FRESH");
 }
+
+// Emit the same Ratatui diff and native extension as the interactive loop, then
+// let a second real holder parser consume the bytes as an outer terminal.
+fn native_frame(
+    app: &mut App,
+    previous: &mut ratatui::buffer::Buffer,
+    native: &mut agend_tui::terminal::native_render::CellRenderer,
+    consumer: &mut agend_holder::screen::Screen,
+    columns: u16,
+    rows: u16,
+) -> Vec<u8> {
+    use ratatui::backend::{Backend, CrosstermBackend};
+    // Configure this byte collector like OuterModes configures the native TUI;
+    // no environment mutation, and no concurrent color-disabled cases here.
+    static COLORS: std::sync::Once = std::sync::Once::new();
+    COLORS.call_once(|| ratatui::crossterm::style::force_color_output(true));
+    let (buffer, _) = agend_tui::render_buffer(app, columns, rows);
+    if previous.area != buffer.area {
+        *previous = ratatui::buffer::Buffer::empty(buffer.area);
+        consumer.resize(rows, columns);
+    }
+    let mut bytes = Vec::new();
+    {
+        let mut backend = CrosstermBackend::new(&mut bytes);
+        backend.draw(previous.diff(&buffer).into_iter()).unwrap();
+        if let Some(position) = agend_tui::terminal::full::cursor_position(app, buffer.area) {
+            backend.set_cursor_position(position).unwrap();
+            backend.show_cursor().unwrap();
+        } else {
+            backend.hide_cursor().unwrap();
+        }
+        native.prepare(app, &buffer).write(&mut backend).unwrap();
+    }
+    consumer.process(&bytes);
+    *previous = buffer;
+    bytes
+}
+fn update_frame(app: &mut App, parser: &parser::Parser, bytes: &[u8]) {
+    let revision = app
+        .term
+        .as_ref()
+        .unwrap()
+        .full
+        .as_ref()
+        .unwrap()
+        .data
+        .as_ref()
+        .unwrap()
+        .frame
+        .revision;
+    parser.feed(bytes);
+    wait(app, |app| {
+        app.term
+            .as_ref()
+            .unwrap()
+            .full
+            .as_ref()
+            .unwrap()
+            .data
+            .as_ref()
+            .unwrap()
+            .frame
+            .revision
+            > revision
+    });
+}
+#[test]
+fn native_underline_shapes_and_style_only_transitions_survive_the_real_backend() {
+    use agend_holder::screen::{ReplySink, Screen};
+    let _permit = Permit::new();
+    let fake = parser::Fake::default();
+    let mut app = app(&fake, 40, 12);
+    acquire(&mut app);
+    let mut native = agend_tui::terminal::native_render::CellRenderer::default();
+    let mut previous = ratatui::buffer::Buffer::empty(ratatui::layout::Rect::new(0, 0, 40, 12));
+    let mut consumer = Screen::new(12, 40, ReplySink::default());
+    // Each iteration overwrites exactly the same glyphs. Ratatui alone cannot
+    // distinguish any of these five underlined modifiers.
+    for underline in [2, 3, 4, 5, 1, 0, 3] {
+        let stimulus = format!(
+            "\x1b[H\x1b[0;1;2;3;7;8;9;38;2;12;34;56;48;5;42;58:2::90:80:70;4:{underline}m界e\u{301}\x1b[0m\x1b[2;7H\x1b[6 q"
+        );
+        update_frame(&mut app, &fake.parser, stimulus.as_bytes());
+        native_frame(&mut app, &mut previous, &mut native, &mut consumer, 40, 12);
+        let original = &app
+            .term
+            .as_ref()
+            .unwrap()
+            .full
+            .as_ref()
+            .unwrap()
+            .data
+            .as_ref()
+            .unwrap()
+            .frame;
+        let rendered = consumer
+            .frame(TerminalViewport {
+                top: None,
+                rows: 12,
+            })
+            .unwrap();
+        for column in 0..3 {
+            let actual = &rendered.cells[0][column];
+            let expected = &original.cells[0][column];
+            assert_eq!(
+                actual.text, expected.text,
+                "underline={underline}, column={column}"
+            );
+            assert_eq!(actual.width, expected.width);
+            // A spacer is occupied by its lead; no independent glyph/SGR is
+            // emitted for it. Its physical appearance belongs to the lead.
+            if expected.width == 0 {
+                continue;
+            }
+            assert_eq!(
+                actual.style, expected.style,
+                "underline={underline}, column={column}"
+            );
+            assert_eq!(actual.foreground, expected.foreground);
+            assert_eq!(actual.background, expected.background);
+            assert_eq!(actual.underline_color, expected.underline_color);
+        }
+        assert_eq!(rendered.cursor.row, 1);
+        assert_eq!(
+            rendered.cursor.column, 6,
+            "overlay moved the hardware cursor"
+        );
+        assert_eq!(rendered.cursor.shape, TerminalCursorShape::Beam);
+        assert!(!rendered.cursor.blinking);
+        assert!(rendered.cursor.visible);
+        // The native layer must not continually repaint an unchanged grid.
+        let idle = native_frame(&mut app, &mut previous, &mut native, &mut consumer, 40, 12);
+        assert!(
+            !String::from_utf8_lossy(&idle).contains("界"),
+            "idle overlay rewrote cells"
+        );
+    }
+    // Cursor-positioned wide text at the edge is clipped by the same buffer
+    // rules used by the adapter; its spacer is never independently printed.
+    update_frame(
+        &mut app,
+        &fake.parser,
+        "\x1b[H\x1b[4:5m界\x1b[0m".as_bytes(),
+    );
+    app.key(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::CONTROL));
+    wait(&mut app, |app| {
+        app.term.as_ref().unwrap().full.as_ref().unwrap().ready
+    });
+    let before_size = app
+        .term
+        .as_ref()
+        .unwrap()
+        .full
+        .as_ref()
+        .unwrap()
+        .data
+        .as_ref()
+        .unwrap()
+        .frame
+        .size;
+    native_frame(&mut app, &mut previous, &mut native, &mut consumer, 1, 4);
+    let rendered = consumer
+        .frame(TerminalViewport { top: None, rows: 4 })
+        .unwrap();
+    assert_eq!(rendered.cells[1][0].text, " ");
+    assert_eq!(
+        rendered.cells[1][0].style & style::DASHED_UNDERLINE,
+        style::DASHED_UNDERLINE
+    );
+    assert_eq!(
+        app.term
+            .as_ref()
+            .unwrap()
+            .full
+            .as_ref()
+            .unwrap()
+            .data
+            .as_ref()
+            .unwrap()
+            .frame
+            .size,
+        before_size,
+        "readonly crop resized the producer PTY"
+    );
+}
+#[test]
+fn native_cursor_shapes_visibility_and_readonly_crop_match_the_displayed_cells() {
+    use agend_holder::screen::{ReplySink, Screen};
+    let _permit = Permit::new();
+    let fake = parser::Fake::default();
+    let mut app = app(&fake, 30, 8);
+    acquire(&mut app);
+    let mut native = agend_tui::terminal::native_render::CellRenderer::default();
+    let mut previous = ratatui::buffer::Buffer::empty(ratatui::layout::Rect::new(0, 0, 30, 8));
+    let mut consumer = Screen::new(8, 30, ReplySink::default());
+    for (shape, expected, blinking) in [
+        (1, TerminalCursorShape::Block, true),
+        (2, TerminalCursorShape::Block, false),
+        (3, TerminalCursorShape::Underline, true),
+        (4, TerminalCursorShape::Underline, false),
+        (5, TerminalCursorShape::Beam, true),
+        (6, TerminalCursorShape::Beam, false),
+    ] {
+        update_frame(
+            &mut app,
+            &fake.parser,
+            format!("\x1b[H\x1b[4:3mX\x1b[0m\x1b[7;30H\x1b[{shape} q").as_bytes(),
+        );
+        native_frame(&mut app, &mut previous, &mut native, &mut consumer, 30, 8);
+        let frame = consumer
+            .frame(TerminalViewport { top: None, rows: 8 })
+            .unwrap();
+        assert_eq!((frame.cursor.row, frame.cursor.column), (6, 29));
+        assert_eq!(
+            (frame.cursor.shape, frame.cursor.blinking),
+            (expected, blinking)
+        );
+        assert!(frame.cursor.visible);
+    }
+    update_frame(&mut app, &fake.parser, b"\x1b[?25l\x1b[H\x1b[4:2mX\x1b[0m");
+    native_frame(&mut app, &mut previous, &mut native, &mut consumer, 30, 8);
+    assert!(
+        !consumer
+            .frame(TerminalViewport { top: None, rows: 8 })
+            .unwrap()
+            .cursor
+            .visible
+    );
+    update_frame(
+        &mut app,
+        &fake.parser,
+        b"\x1b[?25h\x1b[7;9H\x1b[4:4mY\x1b[0m",
+    );
+    app.key(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::CONTROL));
+    wait(&mut app, |app| {
+        app.term.as_ref().unwrap().full.as_ref().unwrap().ready
+    });
+    native_frame(&mut app, &mut previous, &mut native, &mut consumer, 30, 5);
+    let rendered = consumer
+        .frame(TerminalViewport { top: None, rows: 5 })
+        .unwrap();
+    assert_eq!((rendered.cursor.row, rendered.cursor.column), (3, 9));
+    assert!(rendered.cursor.visible);
+    assert_eq!(rendered.cells[3][8].text, "Y");
+    assert_eq!(
+        rendered.cells[3][8].style & style::DOTTED_UNDERLINE,
+        style::DOTTED_UNDERLINE
+    );
+    // A finder replaces terminal content and hides its cursor. Returning to the
+    // terminal must repaint the native extension even if source cells did not change.
+    key(&mut app, KeyCode::Char('/'));
+    native_frame(&mut app, &mut previous, &mut native, &mut consumer, 30, 5);
+    assert!(
+        !consumer
+            .frame(TerminalViewport { top: None, rows: 5 })
+            .unwrap()
+            .cursor
+            .visible
+    );
+    key(&mut app, KeyCode::Esc);
+    native_frame(&mut app, &mut previous, &mut native, &mut consumer, 30, 5);
+    let frame = consumer
+        .frame(TerminalViewport { top: None, rows: 5 })
+        .unwrap();
+    assert_eq!(
+        frame.cells[3][8].style & style::DOTTED_UNDERLINE,
+        style::DOTTED_UNDERLINE
+    );
+    assert!(frame.cursor.visible);
+}

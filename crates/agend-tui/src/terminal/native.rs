@@ -1,19 +1,27 @@
 //! Restore outer terminal input modes on normal exit, error and unwinding.
 use ratatui::crossterm::{
-    cursor::SetCursorStyle,
+    cursor::{SetCursorStyle, Show},
     event::{
         DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
         EnableFocusChange, EnableMouseCapture,
+    },
+    style::{
+        Attribute, Color, Colored, SetAttribute, SetBackgroundColor, SetForegroundColor,
+        SetUnderlineColor,
     },
 };
 use std::io::{self, Write};
 pub struct OuterModes<W: Write> {
     writer: W,
+    colors: ColorOutput,
 }
 impl<W: Write> OuterModes<W> {
     pub fn enter(writer: W) -> io::Result<Self> {
         // Construct first: partial setup errors still run the destructor.
-        let mut guard = Self { writer };
+        let mut guard = Self {
+            writer,
+            colors: ColorOutput::enter(),
+        };
         ratatui::crossterm::execute!(
             guard.writer,
             EnableMouseCapture,
@@ -31,6 +39,27 @@ impl<W: Write> Drop for OuterModes<W> {
         let _ = ratatui::crossterm::execute!(self.writer, DisableBracketedPaste);
         let _ = ratatui::crossterm::execute!(self.writer, DisableFocusChange);
         let _ = ratatui::crossterm::execute!(self.writer, SetCursorStyle::DefaultUserShape);
+        let _ = ratatui::crossterm::execute!(self.writer, Show);
+        let _ = ratatui::crossterm::execute!(self.writer, SetAttribute(Attribute::Reset));
+        let _ = ratatui::crossterm::execute!(self.writer, SetForegroundColor(Color::Reset));
+        let _ = ratatui::crossterm::execute!(self.writer, SetBackgroundColor(Color::Reset));
+        let _ = ratatui::crossterm::execute!(self.writer, SetUnderlineColor(Color::Reset));
+        // Restore the previous process setting after emitting real reset SGRs.
+        self.colors.restore();
+    }
+}
+/// A full terminal reproduces the agent's colors even when a launcher exports
+/// NO_COLOR for ordinary command output. Restore the previous library setting
+/// after the outer terminal resets, including partial setup failures.
+struct ColorOutput(bool);
+impl ColorOutput {
+    fn enter() -> Self {
+        let previous = Colored::ansi_color_disabled_memoized();
+        Colored::set_ansi_color_disabled(false);
+        Self(previous)
+    }
+    fn restore(&self) {
+        Colored::set_ansi_color_disabled(self.0);
     }
 }
 #[cfg(test)]
@@ -65,6 +94,11 @@ mod tests {
             "\x1b[?2004l",
             "\x1b[?1004l",
             "\x1b[0 q",
+            "\x1b[?25h",
+            "\x1b[0m",
+            "\x1b[39m",
+            "\x1b[49m",
+            "\x1b[59m",
         ] {
             assert!(
                 text.contains(reset),
@@ -74,12 +108,18 @@ mod tests {
     }
     #[test]
     fn modes_restore_after_normal_exit_setup_error_and_unwind() {
+        let previous_colors = Colored::ansi_color_disabled_memoized();
+        Colored::set_ansi_color_disabled(true);
         let writer = Writer::default();
-        drop(OuterModes::enter(writer.clone()).unwrap());
+        let guard = OuterModes::enter(writer.clone()).unwrap();
+        assert!(!Colored::ansi_color_disabled_memoized());
+        drop(guard);
+        assert!(Colored::ansi_color_disabled_memoized());
         restored(&writer);
         let writer = Writer::default();
         *writer.fail_next.lock().unwrap() = true;
         assert!(OuterModes::enter(writer.clone()).is_err());
+        assert!(Colored::ansi_color_disabled_memoized());
         restored(&writer);
         let writer = Writer::default();
         let result = std::panic::catch_unwind(|| {
@@ -87,6 +127,8 @@ mod tests {
             panic!("injected unwind");
         });
         assert!(result.is_err());
+        assert!(Colored::ansi_color_disabled_memoized());
         restored(&writer);
+        Colored::set_ansi_color_disabled(previous_colors);
     }
 }

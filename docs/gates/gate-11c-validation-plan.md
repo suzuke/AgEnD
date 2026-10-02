@@ -1,9 +1,13 @@
-# 第 11 施工關 C 段：驗收計畫（設計已確認，待實作）
+# 第 11 施工關 C 段：驗收計畫（設計已確認，實作中）
 
 > **TL;DR**
-> - 此頁定義 C 段實作後要證明的行為；目前只有提案，表內新測試／fixture／命令尚未建立。
+> - 此頁定義 C 段必須證明的行為；已有 holder／daemon／client／App 局部證據，整份矩陣仍未驗收。
 > - 測 consumer 必須餵真 producer：holder parser／協定型別、fake daemon 或真 AgEnD；不能手寫理想化 frame 當通過證據。
 > - 下一步：[P1–P6](gate-11c-proposal.md#使用者確認紀錄) 已於 2026-10-02 確認，接著實作並執行；本頁不是驗收通過紀錄。
+
+## 目前執行情況
+
+已建立的 suites／fixture 與原始證據見 [實作進度](gate-11c-progress.md)、[App 驗證](gate-11c-app-validation.md) 及 [原生 renderer](gate-11c-native-validation.md)。CLP-23–28 已同跑 fake／native，fake 注入真正 holder parser。這些結果涵蓋下表的一部分；真 PTY 完整 App／資源與時效矩陣、Codex U17、最新完整驗收、全新 verifier 及人工驗收仍須逐項取得證據。
 
 ## 自動驗證矩陣
 
@@ -50,10 +54,10 @@ agent 依 [AGENTS.md](../../AGENTS.md#帶使用者親自驗收) 先提供實際 
 
 macOS Terminal／iTerm2 與使用者實際 Linux 終端分開記錄；CI 的 headless 測試不認證實際字型、游標外觀或非美式鍵盤。至少一次故意拒絕與一次重連的原輸出必須保留。
 
-## 本次提案如何核對
+## 已確認提案如何核對
 
 ```bash
-cd /Users/suzuke/AlphaCR-worktrees/AgEnD-v2-tui-c-proposal
+cd /Users/suzuke/AlphaCR-worktrees/AgEnD-v2-g11c-terminal
 sed -n '1,150p' docs/gates/gate-11c-proposal.md
 ```
 
@@ -61,4 +65,4 @@ sed -n '1,150p' docs/gates/gate-11c-proposal.md
 
 ## 下一步
 
-提案合併後由 agent 開新實作 worktree，實作驗證矩陣；全部通過再派全新 verifier，提供逐步人工指令並等使用者 merge 確認。
+提案 #144 已合併；在專屬實作 worktree 完成剩餘驗證矩陣，全部通過再派全新 verifier，提供逐步人工指令並等使用者 merge 確認。

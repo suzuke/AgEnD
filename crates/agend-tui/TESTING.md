@@ -19,9 +19,11 @@ App 已選用此路徑；真 daemon／holder／PTY 的單次 Source 輸入與 th
 
 ## C 段 App 路徑（局部驗證）
 
-`tests/full_app.rs` 的 15 個 cases 由真 holder parser 產生畫面／modes，再經 fake daemon 的實際 socket 操作。涵蓋相符尺寸才開輸入、取得控制途中 resize／捲動、三種本機退出鍵、另一視窗交接、舊能力唯讀、cells 色彩／樣式／寬字、application cursor／keypad、paste 整段拒絕、SGR／legacy／UTF-8 mouse、狀態列及區外、Shift／tracking 分流、歷史固定／淘汰、唯讀 live grid 捲動、停止與重連不恢復控制。
+`tests/full_app.rs` 的 17 個 cases 由真 holder parser 產生畫面／modes，再經 fake daemon 的實際 socket 操作。涵蓋相符尺寸才開輸入、取得控制途中 resize／捲動、三種本機退出鍵、另一視窗交接、舊能力唯讀、cells 色彩／樣式／寬字、application cursor／keypad、paste 整段拒絕、SGR／legacy／UTF-8 mouse、狀態列及區外、Shift／tracking 分流、歷史固定／淘汰、唯讀 live grid 捲動、停止與重連不恢復控制。
 
-同時存活的 App fixture 上限為 3，全部案例仍執行；原 macOS fd 耗盡 log 保留。`terminal::native` 注入 output error 及 unwind，檢查 mouse／paste／focus／cursor reset。這是 writer 層證據，實際 Terminal／iTerm2 外觀與 unwind 的終端狀態仍要人工驗收。
+新增兩個 renderer cases 以真 holder parser frame 經 crossterm backend 輸出，再由第二個真 parser 讀回；核五種底線、色彩、六種標準游標、裁切／隱藏／finder 返回與閒置不重印。相同 glyph 的樣式切換可抓到 single-only mutant。
+
+同時存活的 App fixture 上限為 3，全部案例仍執行；原 macOS fd 耗盡 log 保留。`terminal::native` 注入 output error 及 unwind，檢查 mouse／paste／focus／cursor／SGR reset 與原色彩設定恢復。這是 writer 層證據，實際 Terminal／iTerm2 外觀與 unwind 的終端狀態仍要人工驗收。
 
 `full_source` 的 overflow case 逐次等實際 producer 收件，送到 64-reply 邊界再等 worker 關閉，確認 explicit overflow；不靠五秒內送件數假設。原 `f999bbf` macOS CI 的 51／53 次送件失敗保留。
 

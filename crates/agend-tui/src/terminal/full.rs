@@ -5,7 +5,7 @@ use ratatui::crossterm::cursor::SetCursorStyle;
 use ratatui::{
     Frame,
     buffer::{Buffer, CellDiffOption},
-    layout::Rect,
+    layout::{Position, Rect},
     style::{Color, Modifier, Style},
 };
 
@@ -23,13 +23,6 @@ pub fn render(frame: &mut Frame, app: &App) -> bool {
     if area.width == 0 || area.height == 0 {
         return true;
     }
-    let top = u16::from(!full.expanded);
-    let content = Rect::new(
-        area.x,
-        area.y + top,
-        area.width,
-        area.height.saturating_sub(top + 1),
-    );
     if !full.expanded {
         frame.buffer_mut().set_stringn(
             area.x,
@@ -39,26 +32,11 @@ pub fn render(frame: &mut Frame, app: &App) -> bool {
             Style::default().add_modifier(Modifier::BOLD),
         );
     }
-    if let Some(data) = &full.data {
-        let offset = if !full.expanded && full.follows_live() {
-            live_offset(&data.frame, content.height)
-        } else {
-            0
-        };
-        cells_from(frame.buffer_mut(), content, &data.frame, offset);
-        let mut cursor = data.frame.cursor;
-        let cursor_in_view = usize::from(cursor.row) >= offset;
-        cursor.row = cursor.row.saturating_sub(offset as u16);
-        if full.ready
-            && term.mode == TermMode::Live
-            && cursor.visible
-            && cursor_in_view
-            && cursor.shape != TerminalCursorShape::Hidden
-            && cursor.row < content.height
-            && cursor.column < content.width
-        {
-            frame.set_cursor_position((content.x + cursor.column, content.y + cursor.row));
-        }
+    if let Some((data, content, offset)) = view(app, area) {
+        cells_from(frame.buffer_mut(), content, data, offset);
+    }
+    if let Some(position) = cursor_position(app, area) {
+        frame.set_cursor_position(position);
     }
     let state = if term.mode == TermMode::Stopped {
         Text::StoppedNoInput
@@ -85,6 +63,48 @@ pub fn render(frame: &mut Frame, app: &App) -> bool {
         Style::default().add_modifier(Modifier::REVERSED),
     );
     true
+}
+/// The native adapter uses the same crop and coordinates as the buffer renderer.
+pub(super) fn view(app: &App, area: Rect) -> Option<(&TerminalFrame, Rect, usize)> {
+    if app.finder.is_some() || !app.is_connected() || area.is_empty() {
+        return None;
+    }
+    let full = app.term.as_ref()?.full.as_ref()?;
+    let frame = &full.data.as_ref()?.frame;
+    let top = u16::from(!full.expanded);
+    let content = Rect::new(
+        area.x,
+        area.y + top,
+        area.width,
+        area.height.saturating_sub(top + 1),
+    );
+    let offset = if !full.expanded && full.follows_live() {
+        live_offset(frame, content.height)
+    } else {
+        0
+    };
+    Some((frame, content, offset))
+}
+/// Hardware cursor positioning must follow exactly the visible, cropped grid.
+pub fn cursor_position(app: &App, area: Rect) -> Option<Position> {
+    let term = app.term.as_ref()?;
+    if term.mode != TermMode::Live || !term.full.as_ref()?.ready {
+        return None;
+    }
+    let (frame, content, offset) = view(app, area)?;
+    let cursor = frame.cursor;
+    let row = usize::from(cursor.row).checked_sub(offset)?;
+    if !cursor.visible
+        || cursor.shape == TerminalCursorShape::Hidden
+        || row >= usize::from(content.height)
+        || cursor.column >= content.width
+    {
+        return None;
+    }
+    Some(Position::new(
+        content.x + cursor.column,
+        content.y + row as u16,
+    ))
 }
 /// Read-only follow includes the cursor row and last output, preserving the
 /// complete grid's cell coordinates and leaving alternate screens at the top.

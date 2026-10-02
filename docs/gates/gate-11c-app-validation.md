@@ -40,7 +40,7 @@
 
 ## 尚待完成
 
-- native extended underline 的形狀與游標外觀；目前 buffer 保留 underline color，但不同 underline 形狀仍畫成單底線，HollowBlock 暫使用 block。
+- 本批後已補原生五種底線與標準游標讀回；詳見 [原生驗證](gate-11c-native-validation.md)。實機外觀待驗，HollowBlock 使用 block fallback。
 - 其餘拒絕／壓力／時效／資源矩陣與真 PTY input consumer 的完整 App 回歸。
 - fake Codex＋真 AgEnD U17、明確 opt-in live smoke、CLI 版本及使用者確認後才開放已驗版本；目前 Codex 仍拒絕輸入。
 - 完整 accept tui、雙平台最新 CI、全新無 context verifier、逐步人工驗收與 merge 確認。

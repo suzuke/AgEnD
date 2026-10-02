@@ -20,6 +20,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 mod frame;
 mod history;
+mod narrow;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameError {
@@ -149,6 +150,9 @@ impl Screen {
         self.sample = None;
         self.rows = rows;
         self.columns = columns;
+        if columns == 1 {
+            narrow::prepare(&mut self.term);
+        }
         self.term.resize(Size { rows, columns });
         self.history.resize(&self.term);
         self.revision += 1;
@@ -217,6 +221,74 @@ mod tests {
             assert_eq!(a.cursor, b.cursor);
             assert_eq!(a.modes, b.modes);
         }
+    }
+
+    #[test]
+    fn single_column_resize_handles_wide_live_history_and_inactive_normal_grid() {
+        use agend_core::protocol::terminal::{TerminalSize, TerminalViewport};
+        // This exact regression used to loop in upstream reflow. Keep a bounded
+        // watchdog so a regression fails the test process instead of hanging CI.
+        let (done, receive) = std::sync::mpsc::channel();
+        let watchdog = std::thread::spawn(move || {
+            if matches!(
+                receive.recv_timeout(Duration::from_secs(5)),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+            ) {
+                eprintln!("single-column parser resize did not complete");
+                std::process::abort();
+            }
+        });
+        for alternate in [false, true] {
+            let mut screen = Screen::new(6, 12, ReplySink::default());
+            screen.process(
+                "\x1b[31;4:3m界é\r\n界abc\r\n界def\r\n界ghi\r\n界jkl\r\n界mno\r\n界pqr\r\n"
+                    .as_bytes(),
+            );
+            if alternate {
+                screen.process("\x1b[?1049h\x1b[4:5m界Z\x1b[2;5H\x1b[?2004h".as_bytes());
+            }
+            let before = screen
+                .frame(TerminalViewport { top: None, rows: 6 })
+                .unwrap();
+            screen.resize(6, 1);
+            let after = screen
+                .frame(TerminalViewport { top: None, rows: 6 })
+                .unwrap();
+            assert_eq!(
+                after.size,
+                TerminalSize {
+                    rows: 6,
+                    columns: 1
+                }
+            );
+            assert_eq!(after.generation, before.generation);
+            assert!(after.revision > before.revision);
+            assert_eq!(after.alternate_screen, alternate);
+            assert_eq!(after.modes, before.modes);
+            assert_eq!(after.cursor.column, 0);
+            assert!(after.cells.iter().flatten().all(|cell| cell.width <= 1));
+            // New CJK and combining input must not index a nonexistent spacer.
+            screen.process("\x1b[H界é\r\nQ".as_bytes());
+            assert!(screen.text().contains('Q'));
+            if alternate {
+                screen.process(b"\x1b[?1049l");
+                let normal = screen
+                    .frame(TerminalViewport { top: None, rows: 6 })
+                    .unwrap();
+                assert!(!normal.alternate_screen);
+                assert!(normal.cells.iter().flatten().all(|cell| cell.width <= 1));
+                assert!(normal.history_oldest > before.live_top);
+            }
+            screen.resize(6, 12);
+            screen.process("\x1b[H界".as_bytes());
+            let restored = screen
+                .frame(TerminalViewport { top: None, rows: 6 })
+                .unwrap();
+            assert_eq!(restored.cells[0][0].text, "界");
+            assert_eq!(restored.cells[0][0].width, 2);
+        }
+        done.send(()).unwrap();
+        watchdog.join().unwrap();
     }
 
     #[test]

@@ -15,7 +15,7 @@ pipeline task detail 顯示 repo、關卡種類、agent、受阻理由與 WIP ar
 
 按鍵依 holder modes 編碼；滑鼠區外／狀態列不送，未開 tracking 或 Shift 滾輪看 holder 歷史。貼上維持一次操作，依 bracketed paste mode 包裹，超限整段拒絕；本機退出碼在貼上中是資料。外層 mouse／paste／focus modes 以 guard 恢復。
 
-C 段尚未完成：原生 extended underline／游標外觀、其餘壓力／資源矩陣與 Codex U17 待驗；完整 verifier、CI 與人工驗收仍待完成。[App 局部驗證](../../docs/gates/gate-11c-app-validation.md)。
+原生 renderer 已補五種底線、底線色與標準游標，typed commands 輸出後還原樣式及位置；互動期保留 agent 色彩，退出還原 NO_COLOR 對 crossterm 的設定。C 段尚未完成：實機外觀、其餘壓力／資源矩陣與 Codex U17 待驗；完整 verifier、CI 與人工驗收仍待完成。[App 局部驗證](../../docs/gates/gate-11c-app-validation.md)。
 
 ## 負責
 
@@ -49,6 +49,7 @@ C 段尚未完成：原生 extended underline／游標外觀、其餘壓力／�
 | `team` | team 頁 |
 | `task_detail` | task 細節（repo 只在這裡出現） |
 | `agent_detail` | agent 細節 |
+| `terminal::native_render` | 原生底線形狀與游標；沿用同一裁切座標，追蹤 protocol／buffer diff，閒置不重印 |
 | `terminal` | 終端畫面（標題：即時／最後的畫面（已停止）／已結束，重試中／輸入中）、事件的一行說明 |
 | `finder` | `/` 快速跳轉 |
 | `i18n` | `Language`、`Text` 字串表 |
