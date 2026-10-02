@@ -560,6 +560,8 @@ unset AGEND_BIN               # 前幾關步驟留下的 export 可能指到已�
 
 ## 進度紀錄
 
+- 2026-10-02 C 段第一個實作提交 `a13d31c`（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：holder 1.1 的結構化 frame、request id、generation／revision、色彩／游標／mode、歷史 viewport 與 8 MiB 整份拒絕。holder 47 passed；accept core 含 workspace clippy／實際 no-std 通過，兩個既有 deep explorers ignored。完整 C 段與 U17 仍在實作，尚未獨立／人工驗收或 merge。
+
 - 2026-10-02 提案 #144 已合併（`139fea5`）；在 `feat/gate-11c-terminal` 開始實作 P1–P6，基線 check-deps 含實際 no-std 通過。完整功能、Codex U17、fresh-context verifier 與人工驗收尚待完成。
 
 - 2026-10-02 使用者逐項確認 Gate 11 C 段 P1–P6，記為 [D39](../decisions/d39.md)，另明確授權合併 [#144](https://github.com/suzuke/AgEnD/pull/144)。本提交只記錄確認並同步狀態；最新 verifier／CI 通過後合併，C 段尚未實作或驗收。
