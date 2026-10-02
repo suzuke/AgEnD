@@ -1268,3 +1268,6 @@ fn drawing_the_backend_size_repairs_missing_and_stale_resize_events() {
     }
     assert_eq!(fake.parser.received(), "界");
 }
+
+#[path = "support/delayed_frames.rs"]
+mod delayed_frames;

@@ -73,10 +73,10 @@ opt-in fake manual frontend 的原生驗證在 `agend/tests/codex_u17.rs`：真 
 - [x] 假 agent 的欄位與事件順序對真 CLI 比對：`tests/conformance.rs` 對 `transcripts/`（2026-09-25 錄製；CLI 升版時重錄，見 [RECORDER.md](RECORDER.md)）
 - [ ] binding 快照 fixture（第 3 施工關需要時）
 
+C 段 CLP 拒絕案例同跑真 parser-backed fake 與真 daemon：agent caller 的 Acquire／Resize／Input／Release 全部 forbidden；之後核尺寸不變、原 owner 輸入仍可實收、拒絕 bytes 沒有進 consumer。
+
 ## 下一步
 
 ```bash
 ~/.cargo/bin/cargo test -p agend-testkit
 ```
-
-C 段 CLP 拒絕案例同跑真 parser-backed fake 與真 daemon：agent caller 的 Acquire／Resize／Input／Release 全部 forbidden；之後核尺寸不變、原 owner 輸入仍可實收、拒絕 bytes 沒有進 consumer。

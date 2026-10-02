@@ -116,10 +116,10 @@ cargo test -p agend
 
 `pipeline_attention_events` 經真 daemon／SQLite／Git 與 Rust CLI watch 驗 timeout 不重建核准項目、Approve／RequestChanges 真 action 各一次、新返工 attempt 才重新要求核准、stage 順序及 single merge。SQLite trigger 拒絕舊的 secondary note 寫入時，Approve／RequestChanges 仍各一次發布真 action、持久化決定並完成 single merge；不靠再重啟恢復。
 
+C 段 CLP 拒絕案例同跑真 parser-backed fake 與真 daemon：agent caller 的 Acquire／Resize／Input／Release 全部 forbidden；之後核尺寸不變、原 owner 輸入仍可實收、拒絕 bytes 沒有進 consumer。
+
 ## 下一步
 
 ```bash
 cargo test -p agend
 ```
-
-C 段 CLP 拒絕案例同跑真 parser-backed fake 與真 daemon：agent caller 的 Acquire／Resize／Input／Release 全部 forbidden；之後核尺寸不變、原 owner 輸入仍可實收、拒絕 bytes 沒有進 consumer。

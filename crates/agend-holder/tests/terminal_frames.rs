@@ -334,3 +334,59 @@ fn real_frame_serializer_is_additive_for_frozen_holder_1_0_readers() {
         OldRequest::Unknown
     );
 }
+
+#[test]
+fn real_pty_frame_has_a_frozen_holder_and_client_wire_shape() {
+    use agend_core::protocol::client::{ClientResponse, ClientTerminalFrameData};
+    use agend_core::protocol::holder::HolderResponse;
+    let bytes = output(
+        r"printf '\033[31;44;1;4;7mA\033[0m界é\033[38;2;12;34;56mZ\033[0m\033[?1h\033=\033[?2004h\033[?1000h\033[?1006h\033[6 q'",
+        2,
+        8,
+    );
+    let mut screen = Screen::new(2, 8, ReplySink::default());
+    screen.process(&bytes);
+    let frame = frame(&screen, None, 2);
+    let holder = HolderResponse::TerminalFrame {
+        data: TerminalFrameData {
+            request_id: "golden-frame".into(),
+            frame: frame.clone(),
+        },
+    };
+    let client = ClientResponse::TerminalFrame {
+        data: ClientTerminalFrameData {
+            request_id: "golden-frame".into(),
+            instance_id: "golden-instance".into(),
+            view_id: "golden-view".into(),
+            frame,
+        },
+    };
+    let holder_line = serde_json::to_string(&holder).unwrap();
+    let client_line = serde_json::to_string(&client).unwrap();
+    assert_eq!(
+        serde_json::from_str::<HolderResponse>(&holder_line).unwrap(),
+        holder
+    );
+    assert_eq!(
+        serde_json::from_str::<ClientResponse>(&client_line).unwrap(),
+        client
+    );
+    let mut actual = serde_json::json!({
+        "holder": serde_json::from_str::<serde_json::Value>(&holder_line).unwrap(),
+        "client": serde_json::from_str::<serde_json::Value>(&client_line).unwrap(),
+    });
+    // Process identity is deliberately nondeterministic; all frame fields and
+    // protocol envelopes otherwise stay exactly as the producer serialized them.
+    for peer in ["holder", "client"] {
+        actual[peer]["data"]["frame"]["generation"] = "<holder-generation>".into();
+    }
+    let expected: serde_json::Value =
+        serde_json::from_str(include_str!("golden/terminal-frame-1.4.json")).unwrap();
+    if actual != expected {
+        eprintln!(
+            "PRODUCER-GOLDEN:{}",
+            serde_json::to_string(&actual).unwrap()
+        );
+    }
+    assert_eq!(actual, expected, "full frame wire contract changed");
+}

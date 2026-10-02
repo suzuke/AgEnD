@@ -23,6 +23,10 @@
 
 ## 驗證紀錄
 
+- 2026-10-03 本批 accept tui exit 0：597 主 suite passed／0 ignored，fake／真 daemon／完整 fake U17 三個 demos 通過。執行在新增 golden 前已完成 holder 階段；golden 後另跑完整 terminal_frames 8 passed，沒有把它加進 597。fmt、workspace clippy／最後 TUI clippy、實際 thumb no-std 及 linkcheck 通過。56dbb71 四個 CI jobs 均成功，新提交 CI 另核。（draft PR #145）。
+
+- 2026-10-03 C 段矩陣收尾：三個真 producer App 延遲／倒序／舊 generation cases 通過，三個對應 mutants 各 exit 101，原 source 已逐 byte 還原。新增真 PTY holder／client frame golden，完整 frame suite 8 passed；[證據](gate-11c-frame-order-validation.md)、[矩陣對照](gate-11c-matrix-status.md)。完整 acceptance／新 head CI 另核，真 live／獨立／人工驗收仍待完成（draft PR #145）。
+
 - 2026-10-03 完整 fake U17 已納入 accept tui；594 主 suite passed／0 ignored，fake／真 daemon／U17 三個 demos 通過。新互動 demo 的兩個 App 共用 parser、尺寸交接／唯讀拒絕／重取控制與各自 termios 還原通過；[互動 demo](gate-11c-demo.md)。完整 workspace 888 passed／2 個既有 ignored 在抽取 fixture 前執行，真 Codex live 與完整驗收仍待完成（draft PR #145）。
 
 - 2026-10-03 完整 fake U17：六個 tests 本機通過，含 App／client／daemon 子程序、同 holder／thread 重啟與草稿、scope／caller 拒絕及 durable turn id。attempted crash-window 原反例 exit 101，input-enabled scope 改要求自己的 clientId；五個 history 與十五個舊 driver 契約通過。真工具已編譯、guard exit 2，沒有 live 認證。[U17 證據](gate-11c-u17-validation.md)、[live 工具](gate-11c-u17-live.md)（draft PR #145）。
@@ -76,12 +80,12 @@
 
 ## 尚待完成
 
-- 完成驗收矩陣其餘拒絕／壓力／時效與資源案例；六項控制／viewport／EOF 契約已同跑 fake／真 daemon，不能代替完整 C 矩陣。
-- 原生底線／標準游標已有讀回證據，實機外觀與完整 App 的拒絕／資源矩陣待驗；i／尺寸確認／失效的局部證據已取得。
-- mode-aware keys／mouse／paste、固定歷史與 guard 已有局部證據；真 PTY App 回歸已取得[原生證據](gate-11c-native-app-validation.md)，後續 [外層 PTY](gate-11c-outer-validation.md) 已驗 event capture／restore；實機驗收仍待完成。
-- fake Codex＋真 App／daemon／client／holder U17 本機已通過；明確 opt-in live smoke、版本及使用者確認後才開放該版本，未驗仍 not_supported。
-- 完整 accept tui、workspace checks、雙平台 CI、全新無 context verifier、逐步人工驗收與 merge 確認。
+- 自動矩陣已有逐列 source／證據索引，包含最後補齊的 App 延遲 frame／query／舊 generation 與真 producer golden；最新 head CI 及全新 verifier 仍須重跑，不把既有六項契約當整份認證。[矩陣對照](gate-11c-matrix-status.md)。
+- 原生底線／標準游標、mode-aware keys／mouse／paste、歷史、真外層 capture／restore 與資源清理已有自動證據；實際 Terminal／iTerm2／Linux 外觀與非美式鍵盤仍待人工驗收。
+- 完整 fake U17 已通過；明確 opt-in 的真 Codex live、實際版本／clientId／上下文證據尚未取得。
+- 真 smoke 通過並經使用者確認後，才開放已驗版本；目前正式 Codex 輸入仍 not_supported。
+- 最新完整 acceptance／雙平台 CI、全新無 context verifier、逐步人工驗收與 merge 確認。
 
 ## 下一步
 
-實作剩餘項目並依 [驗收矩陣](gate-11c-validation-plan.md) 逐項取得證據。此頁的局部通過不能代替 C 段完成驗收。
+依 [矩陣執行狀態](gate-11c-matrix-status.md) 完成剩餘門檻，真 live 等既有 opt-in 回覆。此頁的局部通過不能代替 C 段完成驗收。

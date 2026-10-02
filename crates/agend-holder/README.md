@@ -73,6 +73,8 @@
 - `agend_holder::server::serve`、`agend_holder::client::HolderClient`、`agend_holder::paths::is_running`
 - 探測工具：`cargo run -p agend-holder --example holder_probe -- <start|snapshot|key|shutdown|demo> …`
 
+真 PTY frame 的 holder／client wire golden 已固定，只正規化程序 generation；完整 serializer round-trip 與既有 terminal_frames 共 8 tests 通過。[證據](../../docs/gates/gate-11c-frame-order-validation.md)。
+
 ## 下一步
 
 ```bash

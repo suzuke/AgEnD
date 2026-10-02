@@ -7,6 +7,8 @@
 
 ## 目前執行情況
 
+逐列 source／證據與未通過門檻見 [矩陣執行狀態](gate-11c-matrix-status.md)；App 舊 frame／query 與 wire golden 已有 [直接回歸](gate-11c-frame-order-validation.md)。
+
 已建立的 suites／fixture 與原始證據見 [實作進度](gate-11c-progress.md)、[App 驗證](gate-11c-app-validation.md)、[原生 renderer](gate-11c-native-validation.md)、[真 PTY App](gate-11c-native-app-validation.md) 及 [真外層 PTY](gate-11c-outer-validation.md)。CLP-23–28 已同跑 fake／native，fake 注入真正 holder parser。這些結果涵蓋下表的一部分；其餘資源／時效矩陣、真 Codex U17 live、全新 verifier 及人工驗收仍須逐項取得證據；[完整 fake U17](gate-11c-u17-validation.md) 及本機 accept tui 已通過，但不能代替整份矩陣。正常本機最後 dirty 的端到端時效已有外層 PTY 證據，包含未加 round-trip 額度的 300 ms 正向及 800 ms mutant。
 
 ## 自動驗證矩陣
