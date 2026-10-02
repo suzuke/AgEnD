@@ -72,6 +72,8 @@
 
 ## 進度紀錄
 
+- 2026-10-03 C 段端到端時效（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：真 App 的 12 次最後 dirty burst 從通知 producer 前到外層可見皆 ≤300 ms，未加 holder round-trip 額度（最慢 215.302 ms）；800 ms 取樣 mutant 在 806.224 ms 被拒絕。還原後外層 6 passed／0 ignored，clippy／fmt／實際 no-std 通過；其餘矩陣與 U17 待完成。[證據](gates/gate-11c-outer-validation.md)。
+
 - 2026-10-03 C 段真外層 PTY（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：真 App event capture／kernel resize、多視窗、鍵鼠／paste／歷史、正常與 unwind 還原及 20 次程序 fd 清理通過；完整 agend 214 passed／0 ignored，clippy／fmt／實際 no-std 通過。`50851e2` 四個 CI jobs 成功；主 suite 計數已排除 filtered 子程序 probe 重複輸出。其餘矩陣、U17 與完整驗收待完成；[證據](gates/gate-11c-outer-validation.md)。
 
 - 2026-10-03 C 段真 PTY App（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：兩個完整情境經真 daemon／holder 到 raw consumer，逐 byte 核鍵鼠／paste、stty 核 resize；多視窗、歷史／淘汰、alt、同 holder 重啟及 20 次 thread／fd 清理通過。mode mutant 被同一回歸拒絕，原失敗保留；外層 capture／restore、其餘矩陣與 Codex U17 待完成；[證據](gates/gate-11c-native-app-validation.md)。

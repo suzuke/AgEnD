@@ -537,3 +537,33 @@ fn fd_count() -> usize {
     let directory = "/dev/fd";
     std::fs::read_dir(directory).unwrap().count()
 }
+
+#[test]
+fn actual_app_renders_each_final_dirty_burst_within_the_local_budget() {
+    let mut native = Native::new();
+    let mut outer = Outer::new(&native, 80, 24, false);
+    outer.open();
+    outer.acquire();
+    // Measure more conservatively than the contract: start before notifying
+    // the real producer, include file handoff/flush/render/outer parsing, and
+    // require 300 ms without adding any holder round-trip allowance.
+    for sequence in 0..12 {
+        let marker = format!("FINAL-DIRTY-{sequence:02}");
+        let mut burst = Vec::new();
+        for intermediate in 0..100 {
+            burst.extend_from_slice(format!("\x1b[Hintermediate-{intermediate:03}").as_bytes());
+        }
+        burst.extend_from_slice(format!("\x1b[2J\x1b[H{marker}").as_bytes());
+        let started = Instant::now();
+        native.output(&burst);
+        outer.wait(|frame| row(frame, 0).contains(&marker));
+        let elapsed = started.elapsed();
+        eprintln!("{marker}: producer trigger to outer visible = {elapsed:?}");
+        assert!(
+            elapsed <= Duration::from_millis(300),
+            "last dirty output exceeded the 300 ms local budget before any holder round-trip allowance: {elapsed:?}"
+        );
+    }
+    outer.quit();
+    assert!(native.received().is_empty());
+}

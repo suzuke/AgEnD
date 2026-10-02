@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - 真 `agend app` 已在原生外層 PTY 驗 event capture、resize、多視窗、歷史及正常／unwind 還原；C 段仍在 draft PR #145。
-> - 三個完整情境加兩個子程序入口，共 5 tests 通過；完整 agend 214 passed、0 ignored，clippy／fmt／實際 no-std 通過。
-> - 下一步：補其餘壓力／時效矩陣與 Codex U17，再做完整獨立及人工驗收。
+> - 四個完整情境加兩個子程序入口，共 6 tests 通過；前批完整 agend 214 passed、0 ignored，本批 clippy／fmt／實際 no-std 通過。
+> - 下一步：補其餘拒絕／壓力矩陣與 Codex U17，再做完整獨立及人工驗收。
 
 ## 證據路徑
 
@@ -11,7 +11,7 @@
 
 兩批 App suites 共用 `tests/common/native_app.rs`：只有 holder 的 instance 身分才進入 raw agent；ANSI 由 agent 寫入真 PTY，尺寸由 agent 的 `stty size` 讀 kernel。外層輸出再交給第二個真正 holder parser 讀回，不造理想化 frame。沒有啟動真 backend 或 LLM。
 
-## 三個完整情境
+## 四個完整情境
 
 | 情境 | 實際檢查 |
 |---|---|
@@ -23,6 +23,12 @@
 | 資源 | 20 個真正 App 程序逐次 open／acquire／quit／wait／join，每次父程序 fd 回同一基準；holder pid 保留，raw agent 無額外輸入，fixture 最後清理 |
 
 正常與 unwind 都以實際輸出核 capture modes 已關、游標可見，並核 1000／1002／1003／1006／2004／1004、cursor shape、SGR／三種 color 的 reset bytes。child exit 後仍持有 slave 讀 termios，之後關自己的 slave 讓 reader EOF，再 join。Drop 只 kill／wait 自己的 child。
+
+## 最後 dirty 的端到端時效
+
+新增情境每次送 100 段 intermediate ANSI，再送唯一 FINAL-DIRTY marker；真 producer 停止輸出後，等外層 parser 的實際可見 cell。12 次逐筆從通知 producer 前開始計時，包含檔案 handoff、flush、daemon／holder、App draw 與外層 parsing；每筆都要求 ≤300 ms，不加 holder round-trip 額度，比計畫的 300 ms 加一趟更嚴。最終 suite 的範圍 95.756–215.302 ms，原數值保留於 `latency-outer-final-suite.log`。
+
+暫改 daemon SAMPLE_EVERY 為 800 ms，同一 native 情境在 806.224 ms 的時效斷言失敗、exit 101；finally 還原產品碼。正向外層 suite 6 passed／0 ignored，workspace clippy／fmt／實際 no-std 通過。本批沒有重算尚未重跑的完整 agend 或 workspace；前批 214 是 `d8b65cc` 的結果。這是正常本機時效證據，不宣稱重載／停頓環境仍可守同一 wall-clock 上限。
 
 ## 原失敗與反例
 
@@ -36,7 +42,7 @@
 - 前 head `50851e2` 的 push／PR Ubuntu、macOS 四個 CI jobs 全數成功；各主 suite 共 867 passed／2 個既有 ignored。本批新 head CI 另核，前 head 結果不能代替新 head。
 - CI stdout 有時另含 re-exec 的 filtered `daemon::stop_flag::tests::child_probe` 成功摘要；它已由父測試覆蓋。計數只加 filtered out = 0 的主 suite，不再把子程序輸出重算。前 renderer 的原報告 865 = 864 主 suite + 1 probe 輸出；原 logs 保留，accept tui 572 的計數不受影響。
 
-原 logs／CI metadata：`/private/tmp/g11c-implementation-logs/outer-app-*.log`、`outer-app-baseline-50851e2-ci.json`；本批收尾 snapshot 為 `SHA256SUMS-outer-app`，原失敗與 mutant 也保存。
+原 logs／CI metadata：`/private/tmp/g11c-implementation-logs/outer-app-*.log`、`outer-app-baseline-50851e2-ci.json`；本批收尾 snapshot 為 `SHA256SUMS-outer-app`，原失敗與 mutant 也保存；後續時效證據為 `latency-outer-*.log`、`SHA256SUMS-latency`。
 
 ## 重跑
 
