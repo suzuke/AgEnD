@@ -23,6 +23,10 @@
 
 ## 驗證紀錄
 
+- `1134d51` CI：push Ubuntu 成功，PR Ubuntu 在原生背壓案例失敗（`grant raced ahead of the native blocked write`）；兩個 macOS job 最後核對仍在執行。舊 fixture 用 GetFleet 回覆當操作已開始的同步點，未證明 writer 真的收到；改由真 PTY consumer 讀第一 byte 後寫 marker，再關舊 scope。本機同一 8 個 cases 通過，仍須核新 CI，未把原失敗改算成功。
+
+- 2026-10-03 TUI Source：新增 daemon 1.4 的獨立 reader／writer、16 個寫入與 64 個控制回覆上限、合併最新 frame；實際寫入在背景，不等待 PTY ack。5 個真 parser／socket 測試通過，涵蓋交接、viewport、舊能力、阻塞、EOF 不重送、20 次 thread／fd 清理；原 fd 清理時序失敗保留。真 daemon／holder／原生 PTY 的 Source 輸入與 thread 清理也通過；完整 TUI crate 63 passed，fmt／workspace clippy／實際 no-std 通過。App 尚未選用此路徑，完整 renderer／輸入模式仍待接通。
+
 - 2026-10-03 本批收尾：testkit 全 crate 115 passed、fake／native 共 12 項 C 契約及 1.3 能力拒絕通過；fmt、workspace clippy、實際 no-std check-deps 與 229 個文件 links／anchors 通過。原始輸出與負面證據共 130 份 log／source 的 manifest 為 `SHA256SUMS-fake`；本批未做完整 TUI／U17 或 fresh-context verifier。
 
 - 2026-10-03 fake 生命週期：重啟先關閉所有 scope，保留 producer generation 與最後尺寸，舊 view／token 不恢復。3 個完整終端、1 個 fd、2 個操作／capture 壓力測試通過；移除訂閱替換保護後，相同 socket 測試抓到 `old capture leaked after replacement`，還原後通過。新增重啟測試的型別拼寫編譯失敗已修正，原 log 保留。

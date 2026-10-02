@@ -24,6 +24,9 @@
 //! reconnect (gate 8 P4), or drop a needs-you item before the daemon's
 //! `attention_resolved`.
 
+mod full_terminal;
+use full_terminal::FullConnection;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -39,8 +42,8 @@ use agend_core::protocol::client::{
 };
 
 use super::{
-    AgentInfo, AgentState, Catalog, Snapshot, Source, SourceError, StageInfo, StageState, TaskInfo,
-    TerminalEvent,
+    AgentInfo, AgentState, Catalog, FullTerminalEvent, Snapshot, Source, SourceError, StageInfo,
+    StageState, TaskInfo, TerminalEvent,
 };
 
 /// Longest wait for a terminal's first screen (as for any reply, gate 8 P7).
@@ -69,6 +72,7 @@ pub struct ClientSource {
     requests: Option<Client>,
     events: Option<Reader<Result<EventData, ClientError>>>,
     terminal: Option<Reader<TerminalEvent>>,
+    full_terminal: Option<FullConnection>,
     /// The instance of the open terminal view (kept while its connection
     /// is being reconnected).
     terminal_of: Option<String>,
@@ -85,6 +89,7 @@ impl ClientSource {
             requests: None,
             events: None,
             terminal: None,
+            full_terminal: None,
             terminal_of: None,
             threads: Arc::new(AtomicUsize::new(0)),
         }
@@ -168,6 +173,7 @@ impl ClientSource {
     }
 
     fn drop_terminal_connection(&mut self) {
+        self.full_terminal = None;
         if let Some(terminal) = self.terminal.take() {
             terminal.close();
         }
@@ -221,6 +227,66 @@ fn next_terminal(client: &mut Client) -> TerminalEvent {
 }
 
 impl Source for ClientSource {
+    fn poll_full_terminal(&mut self) -> Vec<FullTerminalEvent> {
+        if let Some(full) = &self.full_terminal {
+            let events = full.poll();
+            if events
+                .iter()
+                .any(|event| matches!(event, FullTerminalEvent::Closed(_)))
+            {
+                self.full_terminal = None;
+            }
+            return events;
+        }
+
+        Vec::new()
+    }
+
+    fn open_full_terminal(
+        &mut self,
+        instance: &str,
+        request_id: String,
+        viewport: agend_core::protocol::terminal::TerminalViewport,
+    ) -> Result<bool, SourceError> {
+        self.close_terminal();
+        let client = self.connect_once()?;
+        let selected = client.selected();
+        if selected.major != 1 || selected.minor < 4 {
+            return Ok(false);
+        }
+        let connection = FullConnection::start(client, self.threads.clone())?;
+        connection.send(
+            agend_core::protocol::client::ClientRequest::SubscribeTerminalFrames {
+                data: agend_core::protocol::client::TerminalSubscribeData {
+                    instance_id: instance.into(),
+                    request_id,
+                    viewport,
+                },
+            },
+        )?;
+        self.terminal_of = Some(instance.into());
+        self.full_terminal = Some(connection);
+        Ok(true)
+    }
+    fn terminal_control(
+        &mut self,
+        data: agend_core::protocol::client::ClientTerminalControlData,
+    ) -> Result<(), SourceError> {
+        self.full_terminal
+            .as_ref()
+            .ok_or_else(|| SourceError::Disconnected("no full terminal connection".into()))?
+            .send(agend_core::protocol::client::ClientRequest::TerminalControl { data })
+    }
+    fn terminal_viewport(
+        &mut self,
+        data: agend_core::protocol::client::TerminalViewportData,
+    ) -> Result<(), SourceError> {
+        self.full_terminal
+            .as_ref()
+            .ok_or_else(|| SourceError::Disconnected("no full terminal connection".into()))?
+            .send(agend_core::protocol::client::ClientRequest::SetTerminalViewport { data })
+    }
+
     fn connect(&mut self) -> Result<Snapshot, SourceError> {
         self.disconnect();
         let requests = self.connect_once()?;

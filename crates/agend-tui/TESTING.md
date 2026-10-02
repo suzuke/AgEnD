@@ -11,6 +11,12 @@
 
 `client_source` 的同時存活 labs 上限為 4，保留所有 socket／terminal 行為測試，避免 macOS 預設 256 fd 下的平行 fixture 資源耗盡；可在 `ulimit -n 180` 下重跑該 suite。
 
+## C 段 Source 路徑（局部驗證）
+
+`tests/full_source.rs` 使用真 holder parser 與 fake daemon 的實際 socket，驗控制交接／舊 owner 拒絕、viewport request id、舊 daemon 不啟用新能力、producer 阻塞時 UI seam 不等 ack，以及關閉後 queued input 不重送。控制回覆 mailbox 滿時明確關閉，不默默丟 ack；測試限制 producer 速率以隔離 server reply queue 與 UI mailbox。20 次 full stream 開關後，新增 reader／writer 全數退出，daemon connections 與 fd 回到基準。
+
+這條路徑尚未接到 App renderer；真 daemon／holder／PTY 的單次 Source 輸入與 thread join 在 `agend --test full_terminal_contract` 通過；沒有認證完整模式、鍵鼠／貼上或完整 native TUI 的 fd 清理。初次 fd 檢查早於背景 view 清理，原失敗 log 保留；改為期限內等實際 fd／connection 清理，沒有放寬基準斷言。
+
 ## 怎麼跑
 
 ```bash

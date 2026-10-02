@@ -11,7 +11,7 @@ pipeline task detail 顯示 repo、關卡種類、agent、受阻理由與 WIP ar
 
 ## 第 11 施工關 C 段（實作中）
 
-完整終端畫面、resize、滑鼠／貼上與歷史的 [P1–P6 提案](../../docs/gates/gate-11c-proposal.md) 已於 2026-10-02 確認（D39），holder／runtime 與 daemon／client 1.4 已接通；本 crate 的完整模式與鍵鼠／貼上仍待實作。目前 TUI 功能維持下方已交付範圍。
+完整終端畫面、resize、滑鼠／貼上與歷史的 [P1–P6 提案](../../docs/gates/gate-11c-proposal.md) 已於 2026-10-02 確認（D39），holder／runtime 與 daemon／client 1.4 已接通；本 crate 的 Source 已加入獨立 1.4 reader／writer、有界寫入／回覆與最新 frame mailbox；畫面層尚未選用此路徑，完整模式與鍵鼠／貼上仍待實作。目前 TUI 功能維持下方已交付範圍。
 
 ## 負責
 
@@ -36,8 +36,8 @@ pipeline task detail 顯示 repo、關卡種類、agent、受阻理由與 WIP ar
 
 | 模組 | 職責 |
 |---|---|
-| `source` | `Source` trait、`Snapshot`（連上時的 `Catalog` ＋需要你清單）、`Fleet`（快照＋之後的事件）、`TerminalEvent` |
-| `source::client` | `ClientSource`：三條連線（事件、請求、終端），每條阻塞讀的連線一條 thread；`FleetView` → `Catalog` 的轉換 |
+| `source` | `Source` trait、`Snapshot`（連上時的 `Catalog` ＋需要你清單）、`Fleet`（快照＋之後的事件）、`TerminalEvent`／`FullTerminalEvent` |
+| `source::client` | `ClientSource`：三條連線（事件、請求、終端），每條阻塞讀的連線一條 thread；新增完整終端路徑用獨立 reader／writer，控制操作只入有界佇列；`FleetView` → `Catalog` 的轉換 |
 | `source::scripted` | 記憶體裡的腳本假來源與 demo 資料（測試與 demo 用） |
 | `app` | `App`：導覽堆疊、按鍵、`tick`（拉事件、終端更新與重訂、斷線重連）、輸入模式、底部說明（只列目前有用的鍵） |
 | `ui` | `Row` 與畫面繪製、選取反白（不含邊框與框線）、寬字元寬度 |
@@ -71,7 +71,7 @@ pipeline task detail 顯示 repo、關卡種類、agent、受阻理由與 WIP ar
 ## 依賴規則
 
 - 一般依賴：`agend-core`、`agend-client`、`ratatui`（只開 `crossterm` + `std`）、`unicode-width`
-- dev 依賴：`agend-testkit`（假 daemon、proxy）、`serde_json`
+- dev 依賴：`agend-testkit`（假 daemon、proxy）、`agend-holder`（真 parser）、`base64`（共用 producer fixture）、`serde_json`
 - 不建 async runtime（D11）：阻塞讀交給 std thread，主 thread 經 channel 拿
 - 不可依賴 SQLite、`agend-daemon`（`cargo xtask check-deps`）
 

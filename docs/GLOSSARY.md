@@ -148,6 +148,7 @@
 | client 終端控制狀態 | client terminal control state | `protocol::client::TerminalControlState` | 完成回覆或失去控制通知中的唯讀／持有 attach id 狀態；只有實際 resize 與完整 frame 完成後才可 Controlled。 | 入列成功；agent busy 狀態 | D39／第 11 施工關 C 段 P3 |
 | 終端取樣 | terminal sample | `screen::frame::FrameSnapshot` | holder 在同一次鎖內複製既有 parser 的 grid／palette／cursor／mode／歷史 metadata，50 ms 內各檢視共用；resize 核准使用當下 live frame。 | 第二套 parser；client viewport | D39／第 11 施工關 C 段 P2 |
 | 終端輸出通知 | terminal notice | `protocol::terminal::TerminalNotice` | runtime 連線 epoch、是否仍連線與輸出序號的合併通知；daemon 用來標 dirty，不傳 PTY bytes 或建立另一套畫面。 | holder frame revision；操作者控制回覆 | D39／第 11 施工關 C 段 P2 |
+| 完整終端來源事件 | full-terminal source event | `agend_tui::source::FullTerminalEvent` | TUI Source 的結構化 frame、控制回覆／變更、拒絕與 EOF；保留 protocol 的 view／generation／request id，與 B 段純文字事件分開。 | PTY bytes；畫面已完成渲染 | D39 |
 | 終端 producer port | terminal producer port | `traits::TerminalProducer` | 提供真 parser frame 與完成後控制回覆的同步邊界；fake daemon 由測試注入真正 holder parser，伺服器自行排程與控權。 | 理想化手寫 frame；client reader | D39 |
 | 終端檢視管理 | terminal hub | `terminal_hub::TerminalHub` | daemon 為各 instance 維持有界操作 queue、連線範圍 view、控制 owner 與合併 frame 更新；傳輸 reader 不等待 holder I/O。 | pipeline task queue；holder PTY writer | D39／第 11 施工關 C 段 P2、P3 |
 | 終端控制權 | terminal control ownership | `protocol::terminal::TerminalControlRequest` | 最後進完整模式的操作者視窗取得 resize／input 控制；其餘視窗唯讀，連線／generation 改變即失效。holder／runtime 的控制操作已實作，daemon 多視窗已接通，TUI 完整模式仍待完成。 | task 持有者；agent caller 身分 | [C 段 P3](gates/gate-11c-proposal.md#p3resize-與多視窗控制) |

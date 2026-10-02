@@ -112,3 +112,109 @@ fn full_terminal_contracts_match_fake_and_native_daemon() {
     println!("{native}");
     native.assert_passed();
 }
+
+#[test]
+fn full_tui_source_controls_the_real_daemon_and_native_pty() {
+    use agend_core::protocol::terminal::{TerminalSize, TerminalViewport};
+    use agend_tui::source::{FullTerminalEvent as Event, Source, client::ClientSource};
+    use std::time::{Duration, Instant};
+    fn wait(source: &mut ClientSource, accept: impl Fn(&Event) -> bool) -> Event {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            for event in source.poll_full_terminal() {
+                assert!(
+                    !matches!(event, Event::Closed(_) | Event::Refused(_)),
+                    "{event:?}"
+                );
+                if accept(&event) {
+                    return event;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        panic!("native full Source timed out");
+    }
+    let native = Native::default();
+    let mut source = ClientSource::new(&native.socket(), None);
+    source.connect().unwrap();
+    let threads = source.threads();
+    assert!(
+        source
+            .open_full_terminal(
+                parser::ID,
+                "native-view".into(),
+                TerminalViewport {
+                    top: None,
+                    rows: 20
+                }
+            )
+            .unwrap()
+    );
+    let Event::Frame(frame) = wait(
+        &mut source,
+        |event| matches!(event, Event::Frame(data) if data.frame.cells.iter().flat_map(|row| row.iter()).map(|cell| cell.text.as_str()).collect::<String>().contains("READY")),
+    ) else {
+        unreachable!()
+    };
+    let data = |id: &str, operation| ClientTerminalControlData {
+        request_id: id.into(),
+        instance_id: parser::ID.into(),
+        view_id: frame.view_id.clone(),
+        generation: frame.frame.generation.clone(),
+        operation,
+    };
+    source
+        .terminal_control(data(
+            "native-grant",
+            ClientTerminalOperation::Acquire {
+                size: TerminalSize {
+                    rows: 12,
+                    columns: 40,
+                },
+            },
+        ))
+        .unwrap();
+    let Event::ControlAck(grant) = wait(
+        &mut source,
+        |event| matches!(event, Event::ControlAck(data) if data.request_id == "native-grant"),
+    ) else {
+        unreachable!()
+    };
+    assert_eq!(
+        grant.frame.as_ref().unwrap().size,
+        TerminalSize {
+            rows: 12,
+            columns: 40
+        }
+    );
+    let TerminalControlState::Controlled { attach_id } = grant.control else {
+        panic!("native owner grant missing")
+    };
+    let at = Instant::now();
+    source
+        .terminal_control(data(
+            "native-input",
+            agend_client::terminal::input_operation(&attach_id, b"SOURCE-PTY\n"),
+        ))
+        .unwrap();
+    assert!(
+        at.elapsed() < Duration::from_millis(100),
+        "Source waited for PTY ack"
+    );
+    wait(
+        &mut source,
+        |event| matches!(event, Event::ControlAck(data) if data.request_id == "native-input"),
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !native.received().contains("SOURCE-PTY") && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(
+        native.received().contains("SOURCE-PTY"),
+        "actual native PTY consumer did not receive input"
+    );
+    source.close_terminal();
+    assert_eq!(threads.load(std::sync::atomic::Ordering::SeqCst), 1);
+    drop(source);
+    assert_eq!(threads.load(std::sync::atomic::Ordering::SeqCst), 0);
+}

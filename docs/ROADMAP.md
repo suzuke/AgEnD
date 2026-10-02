@@ -72,6 +72,8 @@
 
 ## 進度紀錄
 
+- 2026-10-03 C 段 TUI Source（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：新增獨立 full-terminal reader／writer、有界 queue／回覆與 frame mailbox；5 個真 parser／socket 測試與真 daemon／native PTY Source 通過，TUI 63 passed；App 尚未接通。完整 renderer、鍵鼠／貼上／U17 與完整驗收仍待完成。
+
 - 2026-10-03 C 段 fake／真終端契約（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：新增 core TerminalProducer port，fake 注入真正 holder parser 後提供 1.4，CLP-23–28 同跑 fake／native daemon／holder／PTY；generation／停止、操作阻塞與 20 次 fd 清理有回歸。TUI／鍵鼠／貼上／U17、完整 verifier／人工驗收仍待完成。
 
 - 2026-10-03 C 段 daemon 多視窗（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：每個 instance 有界佇列、socket-scoped view／attach、最後 Acquire 控制、EOF／停止清理、舊版輸入防繞過、holder 共用 50 ms 畫面取樣及 dirty 通知已接通。真 daemon 選 1.4，fake 暫留 1.3；8 個 native 多視窗 cases 通過，原背壓清理／停止 owner 反例保留。TUI／fake 全套 C 契約／Codex U17 與完整驗收仍待完成。

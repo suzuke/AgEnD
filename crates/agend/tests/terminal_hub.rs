@@ -391,7 +391,9 @@ fn caller_generation_and_size_refusals_do_not_change_the_owner_or_pty() {
 
 #[test]
 fn blocked_native_input_keeps_socket_responsive_and_new_grant_waits_even_after_writer_eof() {
-    let lab = Lab::start("stty raw -echo; printf READY; exec sleep 600");
+    let lab = Lab::start(
+        "stty raw -echo; printf READY; IFS= read -r -n 1 byte; printf entered > write-started; exec sleep 600",
+    );
     let mut a = lab.window("a", 10);
     a.until_text("READY");
     let mut b = lab.window("b", 10);
@@ -407,6 +409,7 @@ fn blocked_native_input_keeps_socket_responsive_and_new_grant_waits_even_after_w
             bytes_base64: STANDARD.encode(vec![b'x'; 256 * 1024]),
         },
     );
+    let at = Instant::now();
     let sending = std::thread::spawn(move || {
         use std::io::Write;
         for request in [
@@ -427,7 +430,17 @@ fn blocked_native_input_keeps_socket_responsive_and_new_grant_waits_even_after_w
         ClientResponse::Fleet { .. }
     ));
     sending.join().unwrap();
-    let at = Instant::now();
+    // GetFleet proves reader responsiveness, not that the queued operation
+    // has reached the native writer. Require the actual PTY consumer to read
+    // the first byte before closing the old scope; otherwise EOF can legally
+    // discard work that never started and the next grant need not wait.
+    wait_for(|| {
+        lab.home
+            .join("workspace")
+            .join(ID)
+            .join("write-started")
+            .exists()
+    });
     b.client
         .send(&b.control_request(
             "b-i",

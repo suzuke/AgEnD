@@ -100,7 +100,9 @@ version = "0.0.0"
 dependencies = [
  "agend-client",
  "agend-core",
+ "agend-holder",
  "agend-testkit",
+ "base64",
  "ratatui",
  "serde_json",
  "unicode-width",
