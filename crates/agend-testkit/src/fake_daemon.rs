@@ -73,7 +73,7 @@
 //! Must NOT: share code paths with the real server beyond `agend_core::protocol`.
 
 use std::collections::{BTreeMap, VecDeque};
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::Shutdown;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
@@ -114,6 +114,8 @@ pub const CODEX_INPUT: &str =
     "typing into a codex terminal waits until U17 is verified (gate 7 P1); nothing was written";
 /// PTY chunks a terminal subscriber may fall behind before it is closed.
 pub const TERMINAL_CHUNKS: usize = 256;
+
+mod full_terminal;
 
 type Writer = Arc<Mutex<UnixStream>>;
 
@@ -158,6 +160,8 @@ struct State {
     hold_resolved: bool,
     held_resolved: Vec<DaemonEvent>,
     next_connection: u64,
+    full_terminals: BTreeMap<String, full_terminal::Endpoint>,
+    full_scopes: BTreeMap<u64, full_terminal::Scope>,
 }
 
 /// A message as the fake keeps it.
@@ -243,6 +247,8 @@ impl FakeDaemon {
                 hold_resolved: false,
                 held_resolved: Vec::new(),
                 next_connection: 0,
+                full_terminals: BTreeMap::new(),
+                full_scopes: BTreeMap::new(),
             }),
             stopping: AtomicBool::new(false),
             open: std::sync::atomic::AtomicUsize::new(0),
@@ -258,6 +264,21 @@ impl FakeDaemon {
             accept: Some(accept),
             _dir: None,
         })
+    }
+
+    /// Installs a real frame producer for C-path tests, without a parser
+    /// dependency in testkit. No idealized frame is synthesized by the fake.
+    pub fn set_terminal_producer(
+        &self,
+        instance: &str,
+        producer: impl agend_core::traits::TerminalProducer + 'static,
+    ) -> io::Result<()> {
+        let endpoint = full_terminal::Endpoint::start(instance, Box::new(producer))?;
+        lock(&self.shared.state)
+            .full_terminals
+            .insert(instance.into(), endpoint);
+        self.set_supported_versions(&[agend_core::protocol::client::V1_4]);
+        Ok(())
     }
 
     pub fn socket_path(&self) -> &Path {
@@ -311,6 +332,9 @@ impl FakeDaemon {
     /// `instance_changed` carrying it. Returns the event id.
     pub fn set_instance(&self, instance: InstanceView) -> u64 {
         let mut state = lock(&self.shared.state);
+        if let Some(endpoint) = state.full_terminals.get(&instance.instance_id) {
+            endpoint.set_live(instance.state != AgentState::Failed);
+        }
         state
             .instances
             .retain(|i| i.instance_id != instance.instance_id);
@@ -462,6 +486,10 @@ impl Drop for FakeDaemon {
         }
         {
             let mut state = lock(&self.shared.state);
+            for scope in state.full_scopes.values() {
+                scope.close();
+            }
+            state.full_scopes.clear();
             state.subscribers.clear();
             state.terminals.clear();
         }
@@ -573,6 +601,20 @@ fn send(writer: &Writer, response: &ClientResponse) -> io::Result<()> {
 fn write_line(mut stream: &UnixStream, response: &ClientResponse) -> io::Result<()> {
     let mut line = serde_json::to_string(response).map_err(io::Error::other)?;
     line.push('\n');
+    if matches!(
+        response,
+        ClientResponse::TerminalFrame { .. } | ClientResponse::TerminalControlAck { .. }
+    ) && line.len() > agend_core::protocol::terminal::MAX_FRAME_LINE
+    {
+        let rejected = error(
+            None,
+            error_code::FRAME_TOO_LARGE,
+            "complete terminal response exceeds 8 MiB".into(),
+        );
+        let _ = write_line(stream, &rejected);
+        let _ = stream.shutdown(Shutdown::Both);
+        return Err(io::Error::other("complete frame exceeds 8 MiB"));
+    }
     let written = stream.write_all(line.as_bytes());
     if written.is_err() {
         // A write timeout or a gone client: close the whole connection.
@@ -682,6 +724,8 @@ struct Connection {
     writer: Writer,
     negotiated: bool,
     caller: Option<String>,
+    selected: ProtocolVersion,
+    full_scope: full_terminal::Scope,
 }
 
 fn serve(stream: UnixStream, shared: &Shared) -> io::Result<()> {
@@ -690,16 +734,25 @@ fn serve(stream: UnixStream, shared: &Shared) -> io::Result<()> {
         state.next_connection += 1;
         state.next_connection
     };
+    let writer = Arc::new(Mutex::new(stream.try_clone()?));
+    let full_scope = full_terminal::Scope::start(id, Arc::clone(&writer))?;
     let mut conn = Connection {
         id,
-        writer: Arc::new(Mutex::new(stream.try_clone()?)),
+        writer,
         negotiated: false,
         caller: None,
+        selected: agend_core::protocol::client::V1,
+        full_scope,
     };
+    lock(&shared.state)
+        .full_scopes
+        .insert(id, conn.full_scope.clone());
     let served = serve_lines(stream, shared, &mut conn);
+    conn.full_scope.close();
     // Its subscriptions end with the connection (their forwarders hold its
     // descriptor until their queue is dropped).
     let mut state = lock(&shared.state);
+    state.full_scopes.remove(&id);
     state.terminals.retain(|t| t.connection != id);
     state.subscribers.retain(|s| s.connection != id);
     drop(state);
@@ -707,8 +760,26 @@ fn serve(stream: UnixStream, shared: &Shared) -> io::Result<()> {
 }
 
 fn serve_lines(stream: UnixStream, shared: &Shared, conn: &mut Connection) -> io::Result<()> {
-    for line in BufReader::new(stream).lines() {
-        let line = line?;
+    let mut reader = BufReader::new(stream);
+    loop {
+        let mut line = String::new();
+        let read = (&mut reader)
+            .take(agend_core::protocol::client::MAX_LINE_BYTES as u64 + 1)
+            .read_line(&mut line)?;
+        if read == 0 {
+            break;
+        }
+        if read > agend_core::protocol::client::MAX_LINE_BYTES {
+            send(
+                &conn.writer,
+                &error(
+                    None,
+                    error_code::INVALID_REQUEST,
+                    "client line exceeds 8 MiB".into(),
+                ),
+            )?;
+            return Ok(());
+        }
         if line.trim().is_empty() {
             continue;
         }
@@ -730,6 +801,10 @@ fn serve_lines(stream: UnixStream, shared: &Shared, conn: &mut Connection) -> io
                 continue;
             }
         };
+        if conn.negotiated && full_terminal::dispatch(shared, conn, &request, read)? {
+            lock(&shared.state).requests.push(request);
+            continue;
+        }
         // The writer is held until the replies are written, so an event this
         // request causes reaches this client after the reply, as from the
         // real server.
@@ -750,6 +825,7 @@ fn serve_lines(stream: UnixStream, shared: &Shared, conn: &mut Connection) -> io
             match negotiate("client", &state.supported, &data.supported) {
                 Ok(selected) => {
                     conn.negotiated = true;
+                    conn.selected = selected;
                     conn.caller = data.caller;
                     let reply = ClientResponse::Hello {
                         data: SelectedVersionData {
@@ -794,6 +870,9 @@ fn serve_lines(stream: UnixStream, shared: &Shared, conn: &mut Connection) -> io
             };
             write_line(&stream, &reply)?;
             continue;
+        }
+        if matches!(request, ClientRequest::SubscribeTerminal { .. }) {
+            conn.full_scope.replace_view();
         }
         let replies = handle(&mut state, request, conn);
         drop(state);
@@ -854,6 +933,10 @@ fn restart(shared: &Shared) {
         state.start = start;
         state.latest = start;
         state.events.clear();
+        for scope in state.full_scopes.values() {
+            scope.close();
+        }
+        state.full_scopes.clear();
         state.subscribers.clear();
         state.terminals.clear();
     }
@@ -1239,6 +1322,9 @@ fn operator(state: &mut State, command: OperatorCommand) -> Result<CommandResult
                 ));
             };
             state.instances.remove(index);
+            if let Some(endpoint) = state.full_terminals.get(&id) {
+                endpoint.set_live(false);
+            }
             emit(
                 state,
                 DaemonEvent::InstanceChanged {

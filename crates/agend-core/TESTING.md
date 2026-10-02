@@ -7,7 +7,7 @@
 
 ## 第 11 施工關 C 段（實作中）
 
-`protocol::terminal::tests` 拒絕零尺寸與超過 1000 的 PTY 尺寸；holder 協商測 1.1 與舊 1.0。frame producer／serde／真 socket 回歸在 holder 的 `terminal_frames.rs` 與 `server.rs`；holder 控制型別提供 Acquire／Resize／Input／Release 與完成回覆；client 1.4 additive 型別與能力列表已加入；xtask 的新 wire case 驗 Acquire shape 及舊 peer 解碼未知請求／回覆。frame consumer 使用真 holder parser 的測試在 client；端到端控制契約尚待建立。
+`protocol::terminal::tests` 拒絕零尺寸與超過 1000 的 PTY 尺寸；holder 協商測 1.1 與舊 1.0。frame producer／serde／真 socket 回歸在 holder 的 `terminal_frames.rs` 與 `server.rs`；holder 控制型別提供 Acquire／Resize／Input／Release 與完成回覆；client 1.4 additive 型別與能力列表已加入；xtask 的新 wire case 驗 Acquire shape 及舊 peer 解碼未知請求／回覆。frame consumer 使用真 holder parser 的測試在 client；六項端到端控制／viewport／EOF 契約在 testkit 的 `contract::terminal`，對注入真 holder Screen 的 fake 與真 daemon／holder／PTY 執行；`TerminalProducer` 介面受實際 no-std／依賴檢查。TUI／U17 仍待驗。
 
 ## 第 10 施工關驗證
 

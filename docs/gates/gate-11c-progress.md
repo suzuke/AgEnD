@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - [draft PR #145](https://github.com/suzuke/AgEnD/pull/145) 持續實作完整終端；目前接通 holder／runtime／daemon／client 路徑，C 段尚未完成或驗收。
-> - 已接通 frame／歷史及實際 resize／input ack；client 1.4 型別／傳輸已加入；daemon 多視窗已加入；TUI 完整模式、鍵鼠／貼上、Codex U17 仍待完成。
-> - 下一步：完成 daemon／client／fake 契約與 TUI，再跑完整驗收、全新 verifier 與逐步人工驗收；merge 等使用者確認。
+> - 已接通 frame／歷史及實際 resize／input ack；client 1.4 型別／傳輸已加入；daemon 多視窗與六項 fake／真契約已加入；TUI 完整模式、鍵鼠／貼上、Codex U17 仍待完成。
+> - 下一步：完成剩餘契約矩陣與 TUI，再跑完整驗收、全新 verifier 與逐步人工驗收；merge 等使用者確認。
 
 ## 已實作
 
@@ -19,9 +19,16 @@
 | client 1.4 傳輸 | 專用 reader／Sender，保留 request id；新行上限／完整請求拒絕／5 秒 write，失敗關閉、不重連重送；NEEDED 仍 1.3 | `full_terminal` 真 socket／holder parser；legacy client 回歸 |
 | daemon 多視窗 | view／attach 綁 socket；每 instance 64 個有序操作、最後 Acquire 控制、舊 token／foreign view 拒絕；EOF／停止清理，保留尺寸 | `terminal_hub` 的 8 個真 daemon／holder／PTY cases |
 | 畫面更新 | 同一 parser 的 grid／palette／mode 共用 50 ms 取樣，runtime dirty watch；各 view 的歷史選取獨立，最後 dirty 送出 | 真 parser 的精確 49／50 ms 邊界與 native 歷史／burst case |
-| 開發中能力邊界 | 真 daemon 選 1.4；fake 暫留 1.3；一般 NEEDED 保留 1.3，舊 peer 仍可用 B 路徑 | native 全路徑＋1.3 真／假能力拒絕＋CLP |
+| 開發中能力邊界 | 真 daemon 選 1.4；fake 預設 1.3，注入 TerminalProducer 後選 1.4；一般 NEEDED 保留 1.3，舊 peer 仍可用 B 路徑 | native 全路徑＋1.3 真／假能力拒絕＋CLP |
 
 ## 驗證紀錄
+
+- 2026-10-03 本批收尾：testkit 全 crate 115 passed、fake／native 共 12 項 C 契約及 1.3 能力拒絕通過；fmt、workspace clippy、實際 no-std check-deps 與 229 個文件 links／anchors 通過。原始輸出與負面證據共 130 份 log／source 的 manifest 為 `SHA256SUMS-fake`；本批未做完整 TUI／U17 或 fresh-context verifier。
+
+- 2026-10-03 fake 生命週期：重啟先關閉所有 scope，保留 producer generation 與最後尺寸，舊 view／token 不恢復。3 個完整終端、1 個 fd、2 個操作／capture 壓力測試通過；移除訂閱替換保護後，相同 socket 測試抓到 `old capture leaked after replacement`，還原後通過。新增重啟測試的型別拼寫編譯失敗已修正，原 log 保留。
+- `2ba1498` 的 push Ubuntu／macOS 與 PR Ubuntu CI 通過；PR macOS 在既有 CLP-11 retry attention 測試失敗，原因仍待核實。已補失敗時的 attention／events 診斷，本機同一 client protocol suite 通過；不能據此宣稱 CI 全綠。
+
+- 2026-10-03 fake 路徑：core TerminalProducer port 注入真 holder parser、1.4 有界 worker／回覆／合併 frame；CLP-23–28 同跑 fake／真程序共 12 cases 通過，六個 mutants 被拒絕。producer generation／failed、native socket 操作阻塞與 20 次 fd 清理回歸通過。原 fixture 編譯、誤將更新 frame 當控制 ack、未等 consumer 收件、未分類訂閱錯誤的失敗皆保留；仍未做 TUI／U17 或完整 C 驗收。
 
 - `5caa49b` 的 push／PR Ubuntu、macOS 四個 CI jobs 在 CLI-8／CLI-31 的版本期待失敗：真 daemon 已選 1.4，表格仍固定 1.3。修正為依 fixture 核對精確版本；真／假完整 CLI 表本機通過，原四份 CI log 保留，最新 CI 另核。
 
@@ -39,7 +46,7 @@
 
 ## 尚待完成
 
-- fake 加入完整終端路徑，將控制、viewport、EOF、錯誤與 frame 契約同跑 fake／真 daemon；真 daemon 原生 cases 已加入。
+- 完成驗收矩陣其餘拒絕／壓力／時效與資源案例；六項控制／viewport／EOF 契約已同跑 fake／真 daemon，不能代替完整 C 矩陣。
 - TUI 完整 renderer、明確 i 入口／退出、resize ack 前停輸入、斷線／控制權失效立即唯讀。
 - mode-aware keys／mouse／paste、固定歷史 viewport、外層 capture／paste 的錯誤與 unwind 恢復。
 - fake Codex＋真 AgEnD U17；明確 opt-in live smoke、版本及使用者確認後才開放該版本，未驗仍 not_supported。

@@ -21,7 +21,7 @@
 | 8 `client` | [完成（2026-09-26）](gates/gate-08-client.md) | 整合施工關：agend-client + protocol server | CLI 連得上；daemon 重啟時會重試 |
 | 9 `cli` | [完成（2026-09-29；已 merge #136）](gates/gate-09-cli.md) | agend CLI：agent 命令、操作者命令、status；安裝相關先做 `doctor`、`init`，服務註冊留第 13 施工關 | 對假／真 daemon 驗輸出與錯誤；兩個假 Codex agent 互傳訊息、中途重啟不漏不重 |
 | 10 `pipeline` | [完成（2026-10-02；#143 已確認合併）](gates/gate-10-pipeline.md) | daemon：pipeline、git、runner、forge local、supervisor、reconcile | 假 driver + 暫存 repo：task 從派工走到 merge |
-| 11 `tui` | [實作中（A、B 段已 merge；C 段提案 #144 已 merge，功能未驗收）](gates/gate-11-tui.md) | attention-first TUI：畫面層、接真 daemon；C 段完整重現 agent CLI 與滑鼠滾動 | A 段假事件、B 段真 daemon 驗收通過；C 段設計與驗收計畫已確認，runtime 與 Codex U17 仍待實作／驗證 |
+| 11 `tui` | [實作中（A、B 段已 merge；C 段提案 #144 已 merge，功能未驗收）](gates/gate-11-tui.md) | attention-first TUI：畫面層、接真 daemon；C 段完整重現 agent CLI 與滑鼠滾動 | A 段假事件、B 段真 daemon 驗收通過；C 段設計已確認，holder／runtime／daemon／client 與六項 fake／真契約已接通，TUI／Codex U17 與完整驗收仍待完成 |
 | 12 `adapters` | [提案中（A 段 draft PR #138 待確認，尚未 merge 或實作）](gates/gate-12-adapters.md) | A claude、B opencode driver、C forge github、D Telegram | 先對假實作，再做真 backend smoke test |
 | 13 `install` | [未開始](gates/gate-13-install.md) | 安裝與發布（最後一個施工關）：服務註冊、`agend uninstall`、`agend telegram setup`（由 daemon 配對）、`xtask release`、brew、GitHub release、`cargo install` | CI 用全新 HOME + 假 agent，從安裝到第一個 task 完成 < 5 分鐘；每個 `doctor` 檢查都有「故意弄壞 → 看到修正指令」的測試 |
 
@@ -71,6 +71,8 @@
 第 10 施工關已完成驗收，使用者於 2026-10-02 明確確認 merge（[PR #143](https://github.com/suzuke/AgEnD/pull/143)）。第 11 施工關 C 段 [P1–P6](gates/gate-11c-proposal.md#使用者確認紀錄) 已逐項確認，使用者另授權合併 #144；提案 #144 已合併，接著在專屬 worktree 實作；第 12 施工關 A 段 #138 的 P1–P10 仍待使用者確認。 人工主流程與事件補驗見 [人工紀錄](gates/gate-10-manual-record.md)。
 
 ## 進度紀錄
+
+- 2026-10-03 C 段 fake／真終端契約（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：新增 core TerminalProducer port，fake 注入真正 holder parser 後提供 1.4，CLP-23–28 同跑 fake／native daemon／holder／PTY；generation／停止、操作阻塞與 20 次 fd 清理有回歸。TUI／鍵鼠／貼上／U17、完整 verifier／人工驗收仍待完成。
 
 - 2026-10-03 C 段 daemon 多視窗（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：每個 instance 有界佇列、socket-scoped view／attach、最後 Acquire 控制、EOF／停止清理、舊版輸入防繞過、holder 共用 50 ms 畫面取樣及 dirty 通知已接通。真 daemon 選 1.4，fake 暫留 1.3；8 個 native 多視窗 cases 通過，原背壓清理／停止 owner 反例保留。TUI／fake 全套 C 契約／Codex U17 與完整驗收仍待完成。
 

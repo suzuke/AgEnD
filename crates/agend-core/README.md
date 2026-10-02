@@ -11,14 +11,14 @@
 
 ## 第 11 施工關 C 段（實作中）
 
-`protocol::terminal` 提供 no-std 的 cells／色彩／cursor／mode／viewport／frame 型別。holder 協定 1.1 新增 `GetTerminalFrame`、附 request id 的 `TerminalFrame` 與 `TerminalOperationError`；1.0 請求／純文字快照保持原 wire shape。holder 的 `TerminalControl` 提供 generation／owner 與實際 resize／input 完成回覆；client 1.4 新增檢視訂閱／viewport／控制、完成回覆與失去控制通知；Acquire 不接受 caller 自訂 attach id。client 提供 1.4／1.3，daemon 尚待接通而維持 1.3；端到端路徑與 C 段尚未驗收。
+`protocol::terminal` 提供 no-std 的 cells／色彩／cursor／mode／viewport／frame 型別。holder 協定 1.1 新增 `GetTerminalFrame`、附 request id 的 `TerminalFrame` 與 `TerminalOperationError`；1.0 請求／純文字快照保持原 wire shape。holder 的 `TerminalControl` 提供 generation／owner 與實際 resize／input 完成回覆；client 1.4 新增檢視訂閱／viewport／控制、完成回覆與失去控制通知；Acquire 不接受 caller 自訂 attach id。client 提供 1.4／1.3，真 daemon 與注入 producer 的 fake 提供 1.4。`traits::TerminalProducer` 是同步畫面／完成控制／legacy input port，server 在背景排程；core 只有介面與協定型別。端到端基礎路徑與六項 fake／真 C 契約已建立，TUI／U17 與完整 C 驗收仍待完成。
 
 ## 負責
 
 - 所有 crate 共用型別（`model`）：backend、team、task、送達狀態、branch 命名空間
 - 兩套有版本的協定定義：client（1.1：全貌、「需要你」的操作、`hello` 的 `caller`、錯誤碼 `client::error_code`、事件游標規則；1.2（第 9 施工關）：`operator` 請求、`send` 的 `level` 與 `message_id`、`status` 的 `identity`、`hello` 的 daemon 版本／pid／`boot_id`、instance 的 `working_directory`、ticket `<task>/<stage>/<attempt>`、UUID v4）與 holder；JSON Lines hello、版本協商、未知 variant 相容、PTY bytes 的 base64 欄位
 - pipeline 的 core ports：`PipelineStore`、`PipelineExecutor`、`PipelineView`，以及共用 `runtime_records`；Engine 可注入真 adapter 或 fake；executor 的 `clean_worktree` 必須同時檢查實際修改與會隱藏修改的 index 旗標。
-- 邊界 traits：`Driver`、`Forge`、`Store`、`Runtime`、`Runner`、`Notifier`、`Clock`
+- 邊界 traits：`Driver`、`Forge`、`Store`、`Runtime`、`Runner`、`Notifier`、`Clock`、`TerminalProducer`
 - 純函式 pipeline：六種關卡、task 關係與操作、workflow 存檔檢查、`{pr}`／`{head}`／`{branch}` 展開、`step(state, event)` 狀態機
 - 純函式 policy：busy、去抖動、檔案衝突、merge 門檻、分派與 team wait-cycle 偵測
 - 螢幕 hard-gate 分類器；規則資料須附版本化 prompt 證據，完整 holder 畫面逐 backend 補齊

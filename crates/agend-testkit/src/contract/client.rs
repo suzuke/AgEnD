@@ -853,7 +853,10 @@ fn only_the_operator_resolves_listed_actions<F: ClientProtocolFixture>(fx: &mut 
     })?;
     let after = get_fleet(&mut op, "clp-11d")?;
     ensure(!listed(&after), || {
-        format!("{item} is still listed after it was resolved")
+        format!(
+            "{item} is still listed after it was resolved; current items: {:?}; events: {:?}",
+            after.attention, events
+        )
     })
 }
 

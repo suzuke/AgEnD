@@ -53,8 +53,8 @@ pub const V1_3: ProtocolVersion = ProtocolVersion::new(1, 3);
 pub const V1_4: ProtocolVersion = ProtocolVersion::new(1, 4);
 /// Client-side offers; the daemon advertises 1.4 only when its path is ready.
 pub const OFFERED_VERSIONS: [ProtocolVersion; 2] = [V1_4, V1_3];
-/// Legacy/fake baseline until their full-terminal implementation is connected.
-/// The real daemon advertises 1.4 independently through its entry server.
+/// Legacy fixture baseline. The real server and parser-backed fake fixtures
+/// advertise 1.4 independently once a full-terminal producer is available.
 pub const SUPPORTED_VERSIONS: [ProtocolVersion; 1] = [V1_3];
 
 /// The daemon's socket, relative to the AgEnD home.

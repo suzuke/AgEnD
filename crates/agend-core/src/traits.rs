@@ -264,6 +264,30 @@ pub trait Runner: Sync {
     ) -> impl Future<Output = Result<CommandOutput, Self::Error>> + Send + 'a;
 }
 
+/// Synchronous terminal producer boundary. Implementations own the parser and
+/// the actual operations; adapters must complete writes/resizes before ack.
+/// A server schedules calls off its connection reader and serializes each PTY.
+pub trait TerminalProducer: Send {
+    fn legacy_input(
+        &mut self,
+        bytes_base64: String,
+    ) -> Result<(), crate::protocol::terminal::TerminalOperationError>;
+    fn frame(
+        &mut self,
+        request: crate::protocol::terminal::TerminalFrameRequest,
+    ) -> Result<
+        crate::protocol::terminal::TerminalFrameData,
+        crate::protocol::terminal::TerminalOperationError,
+    >;
+    fn control(
+        &mut self,
+        request: crate::protocol::terminal::TerminalControlRequest,
+    ) -> Result<
+        crate::protocol::terminal::TerminalControlData,
+        crate::protocol::terminal::TerminalOperationError,
+    >;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

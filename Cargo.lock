@@ -87,6 +87,7 @@ name = "agend-testkit"
 version = "0.0.0"
 dependencies = [
  "agend-core",
+ "agend-holder",
  "base64",
  "libc",
  "serde_json",
