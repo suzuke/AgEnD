@@ -259,6 +259,11 @@ impl Source for ClientSource {
     fn resolve(&mut self, attention_id: &str, action: AttentionAction) -> Result<(), SourceError> {
         self.request(|c| c.resolve_attention(attention_id, action))
     }
+    fn request_changes(&mut self, attention_id: &str, note: String) -> Result<(), SourceError> {
+        self.request(|c| {
+            c.resolve_attention_with_note(attention_id, AttentionAction::RequestChanges, Some(note))
+        })
+    }
 
     fn open_terminal(&mut self, instance_id: &str) -> Result<String, SourceError> {
         self.terminal_of = Some(instance_id.to_owned());
@@ -389,24 +394,36 @@ pub fn task_info(view: &TaskView) -> TaskInfo {
         .enumerate()
         .map(|(i, name)| StageInfo {
             name: name.clone(),
-            kind: None,
+            kind: view
+                .pipeline
+                .as_ref()
+                .and_then(|p| p.stage_kinds.get(i))
+                .and_then(|kind| agend_core::pipeline::stage::StageKind::parse(kind)),
             state: match current {
                 _ if done => StageState::Done,
                 Some(c) if i < c => StageState::Done,
+                Some(c) if i == c && view.status == "failed" => StageState::Failed,
+                Some(c) if i == c && view.status == "cancelled" => StageState::Cancelled,
                 Some(c) if i == c => StageState::Running,
                 _ => StageState::NotStarted,
             },
-            agent: None,
+            agent: view
+                .pipeline
+                .as_ref()
+                .and_then(|p| p.stage_agents.get(i))
+                .cloned()
+                .flatten(),
         })
         .collect();
     TaskInfo {
         id: view.task_id.clone(),
         team_id: view.team_id.clone(),
         title: view.title.clone(),
-        repo: None,
+        repo: view.pipeline.as_ref().and_then(|p| p.repo.clone()),
         holder: view.assignee.clone(),
         stages,
         status: view.status.clone(),
+        pipeline: view.pipeline.clone(),
     }
 }
 
@@ -459,6 +476,7 @@ mod tests {
             assignee: Some(holder.into()),
             stages: vec!["work".into(), "review".into(), "merge".into()],
             current_stage: current.map(Into::into),
+            pipeline: None,
         }
     }
 

@@ -5,10 +5,15 @@
 > - 記住：**`#![no_std]` + `alloc` + `forbid(unsafe_code)`；唯一直接依賴是停用預設功能的 `serde`（只開 `derive` + `alloc`；D32）**；時間只經 `Clock` trait。
 > - 下一步：跑 `cargo xtask accept core`，看純邏輯 demo 與 crate 邊界檢查。
 
+## 第 10 施工關（已驗收，2026-10-02）
+
+`PipelineSnapshot` 不含 workflow，只有驗證後的 `restore` 才能回到可執行狀態；`outstanding_actions` 重建原 ticket；`TaskStatus` 含 Failed／Cancelled。binding snapshot 型別共用於 core；Store 的 `advance_task` 同交易存 task、快照、受阻理由與 event。
+
 ## 負責
 
 - 所有 crate 共用型別（`model`）：backend、team、task、送達狀態、branch 命名空間
 - 兩套有版本的協定定義：client（1.1：全貌、「需要你」的操作、`hello` 的 `caller`、錯誤碼 `client::error_code`、事件游標規則；1.2（第 9 施工關）：`operator` 請求、`send` 的 `level` 與 `message_id`、`status` 的 `identity`、`hello` 的 daemon 版本／pid／`boot_id`、instance 的 `working_directory`、ticket `<task>/<stage>/<attempt>`、UUID v4）與 holder；JSON Lines hello、版本協商、未知 variant 相容、PTY bytes 的 base64 欄位
+- pipeline 的 core ports：`PipelineStore`、`PipelineExecutor`、`PipelineView`，以及共用 `runtime_records`；Engine 可注入真 adapter 或 fake；executor 的 `clean_worktree` 必須同時檢查實際修改與會隱藏修改的 index 旗標。
 - 邊界 traits：`Driver`、`Forge`、`Store`、`Runtime`、`Runner`、`Notifier`、`Clock`
 - 純函式 pipeline：六種關卡、task 關係與操作、workflow 存檔檢查、`{pr}`／`{head}`／`{branch}` 展開、`step(state, event)` 狀態機
 - 純函式 policy：busy、去抖動、檔案衝突、merge 門檻、分派與 team wait-cycle 偵測
@@ -45,7 +50,7 @@
 ## 依賴規則
 
 - `#![no_std]` + `alloc`；唯一依賴 `serde`，`default-features = false`，只開 `derive` + `alloc`（D32）
-- `serde` 只 derive protocol 與 workflow 定義型別（workflow 以 TOML 存 DB，D19）；`Task`、`PipelineState` 等執行期型別不 derive；不使用 `serde_json`、transport、clock、tokio runtime 或 agent runtime
+- `serde` derive protocol、workflow、binding／runtime records 與 `PipelineSnapshot` 的資料型別；workflow 以 TOML 存 DB（D19）。`Task`、`PipelineState` 本身不 derive serde；snapshot 必須經 `restore` 驗證後才可執行；不使用 `serde_json`、transport、clock、tokio runtime 或 agent runtime
 - 沒有 `[features]`、build script、unsafe；錯誤型別使用 `core::error::Error`
 - 時間只由 `Clock` 傳入；集合用 `BTreeMap`／`BTreeSet`
 

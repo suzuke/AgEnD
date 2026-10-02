@@ -696,6 +696,10 @@ impl App {
     /// `resolve_attention`; the item stays until the daemon's
     /// `attention_resolved` (P4).
     fn send_action(&mut self, key: &str, action: AttentionAction, who: &str) {
+        if action == AttentionAction::RequestChanges {
+            self.input = Some((key.to_owned(), String::new()));
+            return;
+        }
         match self.source.resolve(key, action) {
             Ok(()) => {
                 let label = self.lang.tr(action_text(action));
@@ -763,7 +767,18 @@ impl App {
                 let (key, text) = (key.clone(), text.clone());
                 if !text.trim().is_empty() {
                     self.input = None;
-                    self.send_answer(&key, AskReply::Text { text });
+                    if self
+                        .fleet
+                        .attention(&key)
+                        .is_some_and(|a| a.data.ask.is_none())
+                    {
+                        match self.source.request_changes(&key, text) {
+                            Ok(()) => self.pull(),
+                            Err(e) => self.lost(e),
+                        }
+                    } else {
+                        self.send_answer(&key, AskReply::Text { text });
+                    }
                 }
             }
             _ => {}
@@ -1059,6 +1074,9 @@ impl Term {
 fn action_text(action: AttentionAction) -> Text {
     match action {
         AttentionAction::Retry => Text::ActionRetry,
+        AttentionAction::Approve => Text::ActionApprove,
+        AttentionAction::RequestChanges => Text::ActionChanges,
+        AttentionAction::Acknowledge => Text::ActionAcknowledge,
         AttentionAction::Unknown => Text::ActionUnknown,
     }
 }

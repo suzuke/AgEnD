@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use agend_core::pipeline::task::Task;
 use agend_core::pipeline::workflow::Workflow;
-use agend_core::traits::{CasResult, Store, StoredEvent, VersionedTask};
+use agend_core::traits::{CasResult, Store, StoredEvent, TaskProgress, VersionedTask};
 
 use super::{Failures, FakeError, lock};
 
@@ -13,15 +13,37 @@ const OPERATIONS: &[&str] = &[
     "compare_and_swap_task",
     "load_workflow",
     "append_event",
+    "advance_task",
+    "load_task_progress",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StoreCall {
-    LoadTask { task_id: String },
+    LoadTask {
+        task_id: String,
+    },
+    LoadTaskProgress {
+        task_id: String,
+    },
+    AdvanceTask {
+        task: Task,
+        expected_version: u64,
+        progress: TaskProgress,
+        event: StoredEvent,
+    },
     CreateTask(Task),
-    CompareAndSwapTask { task: Task, expected_version: u64 },
-    LoadWorkflow { workflow_id: String, version: u64 },
-    AppendEvent { task_id: String, event: StoredEvent },
+    CompareAndSwapTask {
+        task: Task,
+        expected_version: u64,
+    },
+    LoadWorkflow {
+        workflow_id: String,
+        version: u64,
+    },
+    AppendEvent {
+        task_id: String,
+        event: StoredEvent,
+    },
 }
 
 /// In-memory store. Versions start at 1 and grow by 1 per successful
@@ -43,7 +65,10 @@ pub struct FakeStoreFile(Arc<Mutex<Data>>);
 /// What outlives a handle: everything a real store keeps on disk.
 #[derive(Debug, Default)]
 struct Data {
+    pipeline: pipeline::Data,
+
     tasks: BTreeMap<String, VersionedTask>,
+    progress: BTreeMap<String, TaskProgress>,
     workflows: BTreeMap<(String, u64), Workflow>,
     events: BTreeMap<String, Vec<StoredEvent>>,
 }
@@ -176,6 +201,26 @@ impl Store for FakeStore {
         })
     }
 
+    async fn load_task_progress(&self, id: &str) -> Result<Option<TaskProgress>, FakeError> {
+        let mut state = lock(&self.state);
+        state
+            .calls
+            .push(StoreCall::LoadTaskProgress { task_id: id.into() });
+        if let Some(e) = state.failures.take("load_task_progress") {
+            return Err(e);
+        }
+        Ok(lock(&self.data).progress.get(id).cloned())
+    }
+    async fn advance_task(
+        &self,
+        task: &Task,
+        expected_version: u64,
+        progress: &TaskProgress,
+        event: &StoredEvent,
+    ) -> Result<CasResult, FakeError> {
+        self.advance_with_receipt(task, expected_version, progress, event, None, false)
+    }
+
     async fn load_workflow(
         &self,
         workflow_id: &str,
@@ -258,5 +303,81 @@ mod tests {
             kind: "created".into(),
             detail: String::new(),
         }
+    }
+}
+
+mod pipeline;
+
+impl FakeStore {
+    fn advance_with_receipt(
+        &self,
+        task: &Task,
+        expected_version: u64,
+        progress: &TaskProgress,
+        event: &StoredEvent,
+        confirmation: Option<&str>,
+        clear_attention: bool,
+    ) -> Result<CasResult, FakeError> {
+        let mut state = lock(&self.state);
+        state.calls.push(StoreCall::AdvanceTask {
+            task: task.clone(),
+            expected_version,
+            progress: progress.clone(),
+            event: event.clone(),
+        });
+        if let Some(error) = state
+            .failures
+            .take("advance_task")
+            .or_else(|| state.failures.take("append_event"))
+        {
+            return Err(error);
+        }
+        let mut data = lock(&self.data);
+        if let Some(id) = confirmation
+            && data
+                .pipeline
+                .messages
+                .get(id)
+                .is_some_and(|m| m.state == agend_core::model::DeliveryState::Failed)
+        {
+            return Err(FakeError::new("advance_task", "failed dispatch"));
+        }
+        let Some(current) = data.tasks.get_mut(&task.id) else {
+            return Ok(CasResult::Conflict {
+                current_version: None,
+            });
+        };
+        if current.version != expected_version {
+            return Ok(CasResult::Conflict {
+                current_version: Some(current.version),
+            });
+        }
+        serde_json::from_str::<serde_json::Value>(&progress.pipeline)
+            .map_err(|e| FakeError::new("advance_task", e.to_string()))?;
+        let version = current
+            .version
+            .checked_add(1)
+            .ok_or_else(|| FakeError::new("advance_task", "version overflow"))?;
+        *current = VersionedTask {
+            version,
+            task: task.clone(),
+        };
+        data.progress.insert(task.id.clone(), progress.clone());
+        if clear_attention && let Some(note) = data.pipeline.notes.get_mut(&task.id) {
+            note.1 = None;
+        }
+        data.events
+            .entry(task.id.clone())
+            .or_default()
+            .push(event.clone());
+        if let Some(id) = confirmation
+            && let Some(m) = data.pipeline.messages.get_mut(id)
+        {
+            m.state = agend_core::model::DeliveryState::Confirmed;
+            m.updated_at_unix_ms = event.occurred_at_unix_ms;
+        }
+        Ok(CasResult::Written {
+            new_version: version,
+        })
     }
 }

@@ -61,7 +61,32 @@ pub fn checks(home: &Path) -> Vec<Check> {
     }
     out.push(holders(home, fleet.as_ref()));
     out.push(disk(home));
+    out.push(sandbox(home));
     out
+}
+
+fn sandbox(home: &Path) -> Check {
+    let result = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| e.to_string())
+        .and_then(|rt| rt.block_on(agend_daemon::checks::readiness(home)));
+    match result {
+        Ok(()) => ok("sandbox", "checks write sandbox probe passed".into()),
+        Err(reason) => check(
+            "sandbox",
+            CheckStatus::Fail,
+            reason,
+            Some(
+                if cfg!(target_os = "linux") {
+                    "sudo apt-get install bubblewrap; enable unprivileged user namespaces"
+                } else {
+                    "restore /usr/bin/sandbox-exec and run agend doctor"
+                }
+                .into(),
+            ),
+        ),
+    }
 }
 
 /// The lines people read, and exit 1 when a check failed.

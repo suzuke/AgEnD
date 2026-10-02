@@ -1,4 +1,4 @@
--- user_version = 4
+-- user_version = 5
 
 CREATE INDEX messages_by_target ON messages (to_instance, seq);
 
@@ -8,18 +8,47 @@ CREATE INDEX task_events_by_task ON task_events (task_id, seq);
 
 CREATE INDEX task_events_by_time ON task_events (occurred_at_unix_ms);
 
-CREATE TABLE instances (
-    id                TEXT NOT NULL PRIMARY KEY
-                      CHECK (length(id) BETWEEN 1 AND 24 AND id NOT GLOB '*[^a-z0-9-]*'),
-    backend           TEXT NOT NULL CHECK (backend IN ('claude', 'codex', 'opencode')),
-    program           TEXT NOT NULL,
-    args              TEXT NOT NULL CHECK (json_valid(args) AND json_type(args) = 'array'),
+CREATE TABLE ask_turns (
+    seq INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    ask_id TEXT NOT NULL REFERENCES asks(id),
+    turn TEXT NOT NULL CHECK(json_valid(turn)),
+    delivered INTEGER NOT NULL DEFAULT 0 CHECK(delivered IN (0,1))
+) STRICT;
+
+CREATE TABLE asks (
+    id TEXT NOT NULL PRIMARY KEY,
+    instance_id TEXT NOT NULL,
+    task_id TEXT,
+    thread TEXT NOT NULL CHECK(json_valid(thread)),
+    created_at_unix_ms INTEGER NOT NULL CHECK(created_at_unix_ms >= 0)
+) STRICT;
+
+CREATE TABLE bindings (
+    instance_id TEXT NOT NULL PRIMARY KEY REFERENCES instances(id),
+    task_id TEXT NOT NULL REFERENCES tasks(id),
+    kind TEXT NOT NULL CHECK(kind IN ('work','review')),
+    worktree TEXT NOT NULL UNIQUE,
+    branch TEXT,
+    head TEXT,
+    ticket TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('pending','ready'))
+) STRICT;
+
+CREATE TABLE "instances" (
+    id TEXT NOT NULL PRIMARY KEY CHECK (length(id) BETWEEN 1 AND 24 AND id NOT GLOB '*[^a-z0-9-]*'),
+    backend TEXT NOT NULL CHECK (backend IN ('claude','codex','opencode')),
+    program TEXT NOT NULL,
+    args TEXT NOT NULL CHECK (json_valid(args) AND json_type(args) = 'array'),
     working_directory TEXT NOT NULL,
-    session_id        TEXT,
-    status            TEXT NOT NULL CHECK (status IN ('new', 'running', 'failed'))
-, session_started INTEGER NOT NULL DEFAULT 0
-    CHECK (session_started IN (0, 1)), agent_pid INTEGER CHECK (agent_pid IS NULL OR agent_pid > 0), legacy_no_thread INTEGER NOT NULL DEFAULT 0
-    CHECK (legacy_no_thread IN (0, 1))) STRICT;
+    session_id TEXT,
+    status TEXT NOT NULL CHECK (status IN ('new','running','failed')),
+    session_started INTEGER NOT NULL DEFAULT 0 CHECK (session_started IN (0,1)),
+    agent_pid INTEGER CHECK (agent_pid IS NULL OR agent_pid > 0),
+    legacy_no_thread INTEGER NOT NULL DEFAULT 0 CHECK (legacy_no_thread IN (0,1)),
+    team_id TEXT NOT NULL DEFAULT 'general' REFERENCES teams(id),
+    role TEXT NOT NULL DEFAULT '',
+    delivery TEXT NOT NULL DEFAULT 'push' CHECK (delivery IN ('push','inbox'))
+) STRICT;
 
 CREATE TABLE messages (
     seq                INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
@@ -36,6 +65,12 @@ CREATE TABLE messages (
     updated_at_unix_ms INTEGER NOT NULL CHECK (updated_at_unix_ms >= 0)
 ) STRICT;
 
+CREATE TABLE reminders (
+    seq INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT NOT NULL REFERENCES tasks(id),
+    due_at_unix_ms INTEGER NOT NULL CHECK(due_at_unix_ms >= 0)
+) STRICT;
+
 CREATE TABLE sqlite_sequence(name,seq);
 
 CREATE TABLE task_events (
@@ -47,7 +82,7 @@ CREATE TABLE task_events (
     detail              TEXT    NOT NULL
 ) STRICT;
 
-CREATE TABLE tasks (
+CREATE TABLE "tasks" (
     id               TEXT    NOT NULL PRIMARY KEY,
     title            TEXT    NOT NULL,
     team_id          TEXT    NOT NULL,
@@ -57,10 +92,22 @@ CREATE TABLE tasks (
     depends_on       TEXT    NOT NULL CHECK (json_valid(depends_on) AND json_type(depends_on) = 'array'),
     superseded_by    TEXT,
     assignee         TEXT,
-    status           TEXT    NOT NULL CHECK (status IN ('open', 'running', 'blocked', 'done', 'superseded')),
+    status           TEXT    NOT NULL CHECK (status IN ('open', 'running', 'blocked', 'done', 'superseded', 'failed', 'cancelled')),
     requires_repo    INTEGER NOT NULL CHECK (requires_repo IN (0, 1)),
     merge_commit     TEXT,
-    version          INTEGER NOT NULL CHECK (version >= 1)
+    version          INTEGER NOT NULL CHECK (version >= 1),
+    pipeline TEXT CHECK (pipeline IS NULL OR json_valid(pipeline)),
+    stage_entered_at_unix_ms INTEGER NOT NULL DEFAULT 0 CHECK (stage_entered_at_unix_ms >= 0),
+    merge_intent TEXT,
+    block_reason TEXT,
+    attention_reason TEXT,
+    failure_acknowledged INTEGER NOT NULL DEFAULT 0 CHECK (failure_acknowledged IN (0,1))
+) STRICT;
+
+CREATE TABLE teams (
+    id TEXT NOT NULL PRIMARY KEY,
+    repo TEXT,
+    default_workflow TEXT NOT NULL
 ) STRICT;
 
 CREATE TABLE workflows (

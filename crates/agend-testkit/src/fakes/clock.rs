@@ -1,13 +1,14 @@
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use agend_core::traits::Clock;
 
 /// Manually advanced clock. Time never moves backwards: `set` to an earlier
 /// instant panics, which is the `Clock` contract's monotonicity rule.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FakeClock {
-    now_unix_ms: AtomicU64,
-    reads: AtomicU64,
+    now_unix_ms: Arc<AtomicU64>,
+    reads: Arc<AtomicU64>,
 }
 
 impl FakeClock {
@@ -16,8 +17,8 @@ impl FakeClock {
 
     pub fn new(start_unix_ms: u64) -> Self {
         Self {
-            now_unix_ms: AtomicU64::new(start_unix_ms),
-            reads: AtomicU64::new(0),
+            now_unix_ms: Arc::new(AtomicU64::new(start_unix_ms)),
+            reads: Arc::new(AtomicU64::new(0)),
         }
     }
 

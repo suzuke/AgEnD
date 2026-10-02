@@ -17,7 +17,7 @@
 
 | 測試 | 證明什麼 |
 |---|---|
-| `pty::tests` | 控制鍵位元組；agent 環境＝`Spawn.env` + 預設 `TERM`；寫入佇列滿了回 `Busy`、不卡住 |
+| `pty::tests` | 快速退出、延後開始讀取仍保留輸出；控制鍵位元組；agent 環境＝`Spawn.env` + 預設 `TERM`；寫入佇列滿了回 `Busy`、不卡住 |
 | `screen::tests` | 快照是純文字、去行尾空白、200 欄不換行、寬字完整；`ESC[6n` 的回覆進寫入佇列；佇列滿或沒有 agent 時丟掉 |
 | `exit::tests` | 真的子程序的 exit 7 與 SIGKILL 對應到 `code`／`signal` |
 | `paths::tests` | instance id 規則；socket 路徑超過 100 bytes 拒絕並印路徑與長度；lock 判斷存活 |

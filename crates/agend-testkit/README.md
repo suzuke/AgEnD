@@ -1,9 +1,18 @@
 # agend-testkit
 
 > **TL;DR**
-> - 共用測試基礎設施（只能當 dev-dependency）：7 個 trait 的假實作、契約測試（含 client protocol 的 CLP）、假 daemon（client protocol 1.2）、3 個假 agent 程式、真 backend 的錄製器。
+> - 共用測試基礎設施（只能當 dev-dependency）：7 個 trait 的假實作、契約測試（含 client protocol 的 CLP）、假 daemon（client protocol 1.3）、3 個假 agent 程式、真 backend 的錄製器。
 > - 記住：**假實作要跑和真實作同一套契約測試，假 agent 要和真 CLI 的錄製檔形狀一致**，才不會漂移（v1 #1483）。
 > - 下一步：`~/.cargo/bin/cargo xtask accept testkit`；契約規則看 [CONTRACTS.md](CONTRACTS.md)，錄製與一致性檢查看 [RECORDER.md](RECORDER.md)。
+
+## 第 10 施工關（已驗收，2026-10-02）
+
+新增 `fake-worker`：讀真 CLI inbox、在綁定 worktree commit、回報 done／review；可指定 `--fail-checks-once`、`--changes-once`、`--leave-wip`、`--hold`。只有 agent 決策是假，daemon、holder、SQLite、git、shim、checks 與 forge 都是真的。STO-13 與 SplitAdvance mutant 驗證原子推進；pipeline 共享 FakeStore／SQLite 契約驗 CAS 與 attention_reason 清除同交易，錯誤／衝突保留原註記與 acknowledgement，generic advance_task 保留原語意。
+
+
+假 worker 的 workspace 放 `.leave-wip` 會讓下一次 work 留下 untracked 檔案；移除檔案恢復正常。這只控制測試用的 agent 行為。
+
+Gate 10 的 `FakePipelineExecutor` 實作 core executor port，組合 FakeStore／FakeForge／FakeRunner 並記錄 bindings、投影與副作用；`clean_worktree` 透過 FakeRunner 的 index／status 回覆判斷，供 daemon 完整 queue 測試使用。FakeDriver／FakeClock clone 共享同一個測試狀態。
 
 ## 負責
 
@@ -11,7 +20,7 @@
 |---|---|---|
 | 假實作 | `fakes` | `FakeDriver`、`FakeForge`、`FakeStore`、`FakeRuntime`、`FakeNotifier`、`FakeClock`、`FakeRunner` |
 | 契約測試 | `contract` | 每個 trait 一個 suite：`contract::<trait>::run(實作名, 建 fixture 的函式)` 回傳 `Report`；規則編號見 [CONTRACTS.md](CONTRACTS.md) |
-| 假 daemon | `fake_daemon` | 行程內的 client protocol 1.2 server（unix socket + JSON Lines）與 `ProbeClient` |
+| 假 daemon | `fake_daemon` | 行程內的 client protocol 1.3 server（unix socket + JSON Lines）與 `ProbeClient` |
 | client protocol 契約 | `contract::client` | CLP-1..12：同一套 case 對假 daemon 與真 `agend daemon`；`proxy` 是 mutant 用的改行 proxy（第 8 施工關 P9） |
 | 假 agent | `fake_agent` + `src/bin/` | `fake-codex-app-server`、`fake-opencode-serve`、`fake-claude`；`fake-codex`（`codex` CLI 的替身，給第 7 施工關的 `sh` 包裝用：`app-server` 與假 TUI `resume`） |
 | 執行 future | `executor` | `block_on`：不用 async runtime 就能跑 trait 的 future |
@@ -105,8 +114,8 @@ daemon 重啟：`RuntimeFixture`、`DriverFixture`、`StoreFixture` 各有一個
 - 打字（P6）：`terminal_input` 依序 agent → `forbidden`、不存在或 `failed` 的 instance → `no_terminal`、codex → `not_supported`、轉成 holder 請求行超過 1 MiB（含換行）→ `invalid_request`；base64 解不開 → 不回應、不記（跟 daemon 一樣，它不解 base64）、codex → `not_supported`，都不帶 request id；其他記下（`terminal_inputs()`），不回應。訊息常數 `TYPE_OPERATOR_ONLY`、`CODEX_INPUT` 跟真 daemon 一字不差。
 - `open_connections()`：正在服務的連線數（TUI 測試查沒有留下連線）。
 - 事件身分：`assign(task, ResultIdentity)` 設定目前要的結果；`done`／`result`／`review_*` 沒帶或不符 → `stale_result`、什麼都不變；接受後這個 attempt 就用掉了。
-- 第 9 施工關：`hello` 回 `daemon_version`（`agend <版本> (fake daemon)`）、`daemon_pid`（測試程序）、`boot_id`（事件 id 起點）。`command` 只收 agent、`operator` 只收操作者（`forbidden` 的訊息跟真 daemon 一字不差）。`status`：`set_status` 設了就用它，否則照真 daemon 的格式（`g9-a (claude): no task` ＋ `next: …`；呼叫者不在 instance 裡 → `unknown_instance`），有 `assign` 時帶 task 與 `identity`。`send`／`inbox` 跟真 daemon 同規則（`message_id` 要 UUID v4、同 id 同內容再送照樣 `accepted` 只存一則、不同內容 `invalid_request`；收件者不存在 `unknown_instance`；`inbox` 最近 20 則或 `--after` 之後全部，沒有那一則 → `unknown_message`；`message_ids_to(name)` 給測試看）。`instance_add`／`instance_remove` 改全貌（`instance_exists`、`unknown_instance`、名字規則；`working_directory` 預設 `<home>/workspace/<name>`，home 是 `…/run/daemon.sock` 往上兩層）。`daemon_restart`：跑 `<binary> --version`，要印 `agend …` 才算過（否則 `preflight_failed`，訊息格式同真 daemon）；過了回 `restarting`、關掉所有連線、換新的 `boot_id`（事件清空）。`task_cancel` → `not_supported`。
-- 其他：`task_create`、`ask`、`answer_ask`、`block`／`unblock`／`remind`（真 daemon 第 10 施工關前回 `not_supported`，假 daemon 照舊處理）。
+- 第 9 施工關：`hello` 回 `daemon_version`（`agend <版本> (fake daemon)`）、`daemon_pid`（測試程序）、`boot_id`（事件 id 起點）。`command` 只收 agent、`operator` 只收操作者（`forbidden` 的訊息跟真 daemon 一字不差）。`status`：`set_status` 設了就用它，否則照真 daemon 的格式（`g9-a (claude): no task` ＋ `next: …`；呼叫者不在 instance 裡 → `unknown_instance`），有 `assign` 時帶 task 與 `identity`。`send`／`inbox` 跟真 daemon 同規則（`message_id` 要 UUID v4、同 id 同內容再送照樣 `accepted` 只存一則、不同內容 `invalid_request`；收件者不存在 `unknown_instance`；`inbox` 最近 20 則或 `--after` 之後全部，沒有那一則 → `unknown_message`；`message_ids_to(name)` 給測試看）。`instance_add`／`instance_remove` 改全貌（`instance_exists`、`unknown_instance`、名字規則；`working_directory` 預設 `<home>/workspace/<name>`，home 是 `…/run/daemon.sock` 往上兩層）。`daemon_restart`：跑 `<binary> --version`，要印 `agend …` 才算過（否則 `preflight_failed`，訊息格式同真 daemon）；過了回 `restarting`、關掉所有連線、換新的 `boot_id`（事件清空）。`task_cancel` 對不存在的 task 回 `invalid_request`。
+- 其他：`task_create`、`ask`、`answer_ask`、`block`／`unblock`／`remind`（真 daemon 已由 pipeline queue 處理，假 daemon 保留 client 契約所需的簡化狀態）。
 - `open_ask(thread, recap)`：像綁定 task 的 agent 跑 `agend ask` 那樣建立請示（帶 task 與脈絡摘要），可以 `answer_ask`，也列在全貌的「需要你」裡（`attention_id` = ask id）；`ask` 命令建立的請示沒有 task（TUI 的 demo 與測試用）。
 - `ProbeClient::hello(path, caller)`、`recv_within(timeout)`：契約的驅動端（逾時不丟掉讀到一半的行）。
 

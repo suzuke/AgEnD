@@ -178,12 +178,12 @@ impl Fixture {
         Snapshot {
             version: SNAPSHOT_VERSION,
             instance: INSTANCE.into(),
-            source_repo: Some(self.repo.clone()),
+            source_repo: Some(self.repo.display().to_string()),
             protected_refs: vec!["release".into()],
             binding: bound.then(|| Binding::Work {
                 task_id: "t-1".into(),
                 branch: self.branch.clone(),
-                worktree: self.worktree.clone(),
+                worktree: self.worktree.display().to_string(),
             }),
         }
     }

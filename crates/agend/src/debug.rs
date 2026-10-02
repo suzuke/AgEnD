@@ -212,7 +212,15 @@ pub fn event_line(event: &DaemonEvent) -> String {
             data.action.as_str()
         ),
         DaemonEvent::TaskChanged { data } => {
-            format!("task_changed {}: {}", data.task_id, data.summary)
+            let line = format!("task_changed {}: {}", data.task_id, data.summary);
+            match data
+                .task
+                .as_ref()
+                .and_then(|task| task.current_stage.as_deref())
+            {
+                Some(stage) => format!("{line} (stage: {stage})"),
+                None => line,
+            }
         }
         DaemonEvent::MessageReceived { data } => {
             format!("message_received {} from {}", data.message_id, data.from)

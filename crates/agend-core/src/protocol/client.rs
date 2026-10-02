@@ -45,7 +45,8 @@ pub const V1_1: ProtocolVersion = ProtocolVersion::new(1, 1);
 /// Gate 9: operator requests, send level and message id, daemon identity.
 /// `daemon_restart` exists since 1.2 and never changes shape (gate 9 P6).
 pub const V1_2: ProtocolVersion = ProtocolVersion::new(1, 2);
-pub const SUPPORTED_VERSIONS: [ProtocolVersion; 1] = [V1_2];
+pub const V1_3: ProtocolVersion = ProtocolVersion::new(1, 3);
+pub const SUPPORTED_VERSIONS: [ProtocolVersion; 1] = [V1_3];
 
 /// The daemon's socket, relative to the AgEnD home.
 pub const DAEMON_SOCKET: &str = "run/daemon.sock";
@@ -208,7 +209,9 @@ pub enum OperatorCommand {
         args: Vec<String>,
     },
     /// Stops the instance's holder and removes its row; the workspace stays.
-    InstanceRemove { instance_id: String },
+    InstanceRemove {
+        instance_id: String,
+    },
     /// Preflight `binary` (default: the daemon's own), then `exec` it
     /// (answered `restarting`). Its shape never changes (gate 9 P6).
     DaemonRestart {
@@ -216,7 +219,42 @@ pub enum OperatorCommand {
         binary: Option<String>,
     },
     /// Cancels a task (its handler arrives in gate 10).
-    TaskCancel { task_id: String },
+    TaskCancel {
+        task_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
+    TaskCreate {
+        title: String,
+        role: String,
+        team_id: String,
+        workflow_id: Option<String>,
+    },
+    TeamAdd {
+        team_id: String,
+        repo: Option<String>,
+        workflow_id: Option<String>,
+    },
+    TeamList,
+    TeamJoin {
+        team_id: String,
+        instance_id: String,
+        role: String,
+    },
+    TeamSetWorkflow {
+        team_id: String,
+        workflow_id: String,
+    },
+    WorkflowList,
+    WorkflowShow {
+        workflow_id: String,
+    },
+    WorkflowCheck {
+        toml: String,
+    },
+    WorkflowApply {
+        toml: String,
+    },
     #[serde(other)]
     Unknown,
 }
@@ -231,6 +269,8 @@ pub struct ResolveAttentionData {
     pub request_id: String,
     pub attention_id: String,
     pub action: AttentionAction,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 /// What the operator can do with a needs-you item that is not an ask.
@@ -239,6 +279,9 @@ pub struct ResolveAttentionData {
 pub enum AttentionAction {
     /// Start a `failed` instance again (gate 8 P5).
     Retry,
+    Approve,
+    RequestChanges,
+    Acknowledge,
     #[serde(other)]
     Unknown,
 }
@@ -247,6 +290,9 @@ impl AttentionAction {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Retry => "retry",
+            Self::Approve => "approve",
+            Self::RequestChanges => "request_changes",
+            Self::Acknowledge => "acknowledge",
             Self::Unknown => "unknown",
         }
     }
@@ -538,6 +584,17 @@ pub struct TaskView {
     pub stages: Vec<String>,
     #[serde(default)]
     pub current_stage: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pipeline: Option<TaskPipelineView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskPipelineView {
+    pub repo: Option<String>,
+    pub stage_kinds: Vec<String>,
+    pub stage_agents: Vec<Option<String>>,
+    pub block_reason: Option<String>,
+    pub archive_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -641,6 +698,9 @@ pub struct TerminalBytesData {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "result", rename_all = "snake_case")]
 pub enum CommandResult {
+    Text {
+        text: String,
+    },
     Accepted,
     Status {
         data: StatusData,
@@ -853,11 +913,11 @@ mod tests {
     }
 
     #[test]
-    fn client_hello_advertises_v1_2() {
+    fn client_hello_advertises_v1_3() {
         let ClientRequest::Hello { data: hello } = ClientRequest::hello() else {
             unreachable!();
         };
-        assert_eq!(negotiate_version(&hello), Ok(V1_2));
+        assert_eq!(negotiate_version(&hello), Ok(V1_3));
         assert_eq!(hello.caller, None);
     }
 

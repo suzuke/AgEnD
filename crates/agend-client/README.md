@@ -3,11 +3,15 @@
 > **TL;DR**
 > - 同步 I/O 連 daemon 的 `run/daemon.sock`、重試、協定版本檢查；CLI、TUI、未來 Rust GUI 共用（第 8 施工關）。
 > - 記住：**不建 async runtime、不讀環境變數與設定檔**；socket 路徑與呼叫者身分由呼叫端給。
-> - 下一步：第 9 施工關的 CLI 用 `Client::connect` + `request`（要 1.2）；第 11 施工關 B 段的 TUI（`ClientSource`）用 `connect_once`、`next_event`、`next_terminal` 與寫入端 `Sender`。
+> - 下一步：第 9 施工關的 CLI 用 `Client::connect` + `request`（要 1.3）；第 11 施工關 B 段的 TUI（`ClientSource`）用 `connect_once`、`next_event`、`next_terminal` 與寫入端 `Sender`。
+
+## 第 10 施工關（已驗收，2026-10-02）
+
+一般連線要求 client protocol 1.3；`resolve_attention_with_note` 可送退回修改理由。`agend daemon restart` 仍只要求 1.2，讓新 CLI 能重啟舊 daemon。
 
 ## 負責
 
-- unix socket 連線、`hello`（帶選填的 `caller`）、協定版本檢查（要 1.2；`agend daemon restart` 只要 1.2＝有 `daemon_restart` 的版本）
+- unix socket 連線、`hello`（帶選填的 `caller`）、協定版本檢查（要 1.3；`agend daemon restart` 只要 1.2＝有 `daemon_restart` 的版本）
 - daemon 重啟中重試：每 100 ms 一次、最多 10 秒，之後印出明確訊息
 - 請求依 `request_id` 等回應（預設 10 秒，`request_within` 可以更久）；送出後斷線只重送標明可重做的請求
 - 記住 daemon 的 `hello`（1.2：版本、pid、`boot_id`）；等連線被 daemon 關掉（`wait_closed`，重啟用）
@@ -47,7 +51,7 @@
 |---|---|---|
 | `Unreachable` | `connect` 10 秒內連不上 | `cannot reach the AgEnD daemon at <path> after 10 s (<原因>). Is it running? Start it with: agend daemon` |
 | `Connect` | `connect_once` 失敗，或重試也修不好（例如權限不足） | `cannot reach the AgEnD daemon at <path> (<原因>)` |
-| `Version` | daemon 協商到比 1.2 舊（立刻失敗、不重試），或 major 不合 | `the daemon speaks client protocol 1.1; this agend needs 1.2 — stop the daemon (Ctrl-C) and start this binary: agend daemon`（daemon 有 `daemon_restart`（1.2 以上）時改成 `— run: agend daemon restart`） |
+| `Version` | daemon 協商到比 1.3 舊（立刻失敗、不重試），或 major 不合 | `the daemon speaks client protocol 1.1; this agend needs 1.3 — stop the daemon (Ctrl-C) and start this binary: agend daemon`（daemon 有 `daemon_restart`（1.2 以上）時改成 `— run: agend daemon restart`） |
 | `Daemon { code, message }` | daemon 回的錯誤；`code` 是 core 的 `client::error_code` | `<code>: <message>`，例如 `forbidden: only the operator can resolve needs-you items; ask the operator` |
 | `Restarted` | `Redo::Never` 的請求送出後斷線 | `daemon restarted during the request; check with agend status` |
 | `Disconnected` | 讀事件時連線結束、10 秒沒有回應、收到不是協定的行 | `the daemon closed the connection` 等 |
@@ -60,7 +64,7 @@
 |---|---|
 | `connection` | `Client`：連線、`hello`、請求／回應、事件 |
 | `retry` | `RESTART_RETRY_WINDOW` = 10 秒、`RETRY_EVERY` = 100 ms、`Redo` |
-| `version` | 要 1.2（`NEEDED`）；`RESTART_SINCE` = 1.2；不合時的訊息 |
+| `version` | 要 1.3（`NEEDED`）；`RESTART_SINCE` = 1.2；不合時的訊息 |
 
 ## 依賴規則
 

@@ -55,7 +55,9 @@ pub fn plan(ctx: &Ctx, args: &[OsString]) -> Outcome {
     let absolute = |c: &String| Path::new(c).is_absolute();
     let unused = parsed.chdirs.first().is_some_and(absolute) || !classify::needs_location(&parsed);
     let Some(cwd) = ctx.cwd.clone().or_else(|| unused.then(PathBuf::new)) else {
-        let go = bound.map_or(Path::new("a directory that exists"), |b| b.worktree());
+        let go = bound.map_or(Path::new("a directory that exists"), |b| {
+            Path::new(b.worktree())
+        });
         let r = Refusal::new(
             "cwd_unreadable",
             "Unable to read current working directory (deleted, e.g. by `cargo clean` or `rm -rf`); git fails the same way, so the shim will not guess where to run",
@@ -64,12 +66,12 @@ pub fn plan(ctx: &Ctx, args: &[OsString]) -> Outcome {
         return refuse(ctx, &argv, r, &record);
     };
     let dir = parsed.chdirs.iter().fold(cwd, |d, c| d.join(c));
-    let source_repo = snap_ref.and_then(|s| s.source_repo.as_deref());
+    let source_repo = snap_ref.and_then(|s| s.source_repo.as_deref().map(Path::new));
     let names_git_dir = parsed.git_dir.is_some() || ctx.git_dir.is_some();
     let explicit = names_git_dir || parsed.work_tree.is_some() || ctx.git_env_names_repo();
     let anchors = RealAnchors {
         git: &real,
-        worktree: bound.and_then(|b| std::fs::canonicalize(b.worktree()).ok()),
+        worktree: bound.and_then(|b| std::fs::canonicalize(Path::new(b.worktree())).ok()),
         source_repo,
         source_repo_canonical: source_repo.and_then(|p| std::fs::canonicalize(p).ok()),
         worktree_dirs: OnceCell::new(),
@@ -95,8 +97,8 @@ pub fn plan(ctx: &Ctx, args: &[OsString]) -> Outcome {
     let probe = RealProbe {
         git: &real,
         bound: bound
-            .filter(|b| b.worktree().is_dir())
-            .map(|b| b.worktree().to_path_buf()),
+            .filter(|b| Path::new(b.worktree()).is_dir())
+            .map(|b| Path::new(b.worktree()).to_path_buf()),
         // In the bound worktree git already named its git dir.
         worktree_git_dir: resolved
             .as_ref()
@@ -131,7 +133,7 @@ pub fn plan(ctx: &Ctx, args: &[OsString]) -> Outcome {
         let instance = ctx.instance.as_deref().unwrap_or("unknown");
         let id = format!("{}-{}", audit::now(), std::process::id());
         let nested = resolved.as_ref().filter(|_| location == Location::Nested);
-        let dir = nested.map_or(b.worktree(), Resolved::root);
+        let dir = nested.map_or(Path::new(b.worktree()), Resolved::root);
         match snapshot::take(&real, dir, instance, &id) {
             Ok(saved) => {
                 let shown = argv[parsed.sub_index..].join(" ");

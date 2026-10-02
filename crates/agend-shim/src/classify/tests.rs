@@ -20,7 +20,7 @@ fn work() -> Snapshot {
             task_id: "t-1".into(),
             branch: work_branch("t-1", "fix"),
             // An existing directory, so `worktree_missing` does not fire.
-            worktree: std::env::temp_dir(),
+            worktree: std::env::temp_dir().display().to_string(),
         }),
     }
 }
@@ -30,7 +30,7 @@ fn review() -> Snapshot {
         binding: Some(Binding::Review {
             task_id: "t-2".into(),
             head: "abc123".into(),
-            worktree: std::env::temp_dir(),
+            worktree: std::env::temp_dir().display().to_string(),
         }),
         ..work()
     }
@@ -314,7 +314,7 @@ fn routing_keeps_the_callers_subdirectory() {
         binding: Some(Binding::Work {
             task_id: "t-1".into(),
             branch: work_branch("t-1", "fix"),
-            worktree: wt.clone(),
+            worktree: wt.display().to_string(),
         }),
         ..work()
     };
@@ -917,7 +917,7 @@ fn submodule_work_is_snapshotted_or_refused() {
         binding: Some(Binding::Work {
             task_id: "t-1".into(),
             branch: work_branch("t-1", "fix"),
-            worktree: wt.clone(),
+            worktree: wt.display().to_string(),
         }),
         ..work()
     };

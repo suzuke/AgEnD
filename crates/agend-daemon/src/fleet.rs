@@ -46,6 +46,7 @@ struct Inner {
     log: VecDeque<EventData>,
     instances: BTreeMap<String, InstanceView>,
     tasks: Vec<TaskView>,
+    teams: Vec<TeamView>,
     attention: BTreeMap<String, AttentionRequiredData>,
 }
 
@@ -67,6 +68,9 @@ impl Fleet {
                 log: VecDeque::new(),
                 instances: BTreeMap::new(),
                 tasks: Vec::new(),
+                teams: vec![TeamView {
+                    team_id: DEFAULT_TEAM.into(),
+                }],
                 attention: BTreeMap::new(),
             }),
             live,
@@ -105,8 +109,60 @@ impl Fleet {
 
     /// Sets the tasks of the view (read from the DB at boot; nothing
     /// changes them before gate 10).
+    pub fn set_teams(&self, teams: Vec<TeamView>) {
+        self.lock().teams = teams;
+    }
+    pub fn dismiss(&self, id: &str) {
+        let mut inner = self.lock();
+        if inner.attention.remove(id).is_some() {
+            self.push(
+                &mut inner,
+                DaemonEvent::AttentionResolved {
+                    data: AttentionResolvedData {
+                        attention_id: id.into(),
+                        action: AttentionAction::Unknown,
+                    },
+                },
+            );
+        }
+    }
+    pub fn upsert_attention(&self, item: AttentionRequiredData) {
+        let Some(id) = item.attention_id.clone() else {
+            return;
+        };
+        let mut inner = self.lock();
+        if inner.attention.get(&id) == Some(&item) {
+            return;
+        }
+        inner.attention.insert(id, item.clone());
+        self.push(&mut inner, DaemonEvent::AttentionRequired { data: item });
+    }
+
     pub fn set_tasks(&self, tasks: Vec<TaskView>) {
         self.lock().tasks = tasks;
+    }
+
+    pub fn sync_tasks(&self, tasks: Vec<TaskView>) {
+        use agend_core::protocol::client::TaskChangedData;
+        let mut inner = self.lock();
+        let changed = tasks
+            .iter()
+            .filter(|t| !inner.tasks.contains(t))
+            .cloned()
+            .collect::<Vec<_>>();
+        inner.tasks = tasks;
+        for task in changed {
+            self.push(
+                &mut inner,
+                DaemonEvent::TaskChanged {
+                    data: TaskChangedData {
+                        task_id: task.task_id.clone(),
+                        summary: format!("{}: {}", task.task_id, task.status),
+                        task: Some(task),
+                    },
+                },
+            );
+        }
     }
 
     /// Shows `instance`; publishes `instance_changed` (with `summary`) when
@@ -213,9 +269,7 @@ impl Fleet {
         order_attention(&mut attention);
         FleetView {
             as_of_event_id: inner.latest,
-            teams: vec![TeamView {
-                team_id: DEFAULT_TEAM.to_owned(),
-            }],
+            teams: inner.teams.clone(),
             tasks: inner.tasks.clone(),
             instances: inner.instances.values().cloned().collect(),
             attention,
@@ -248,6 +302,39 @@ impl Fleet {
                 .collect(),
             live: self.live.subscribe(),
         })
+    }
+}
+
+impl agend_core::pipeline::ports::PipelineView for Fleet {
+    fn view(&self) -> FleetView {
+        Fleet::view(self)
+    }
+    fn set_teams(&self, teams: Vec<TeamView>) {
+        Fleet::set_teams(self, teams)
+    }
+    fn set_instance(&self, instance: InstanceView, summary: String) {
+        Fleet::set_instance(self, instance, summary)
+    }
+    fn sync_tasks(&self, tasks: Vec<TaskView>) {
+        Fleet::sync_tasks(self, tasks)
+    }
+    fn dismiss(&self, id: &str) {
+        Fleet::dismiss(self, id)
+    }
+    fn raise(&self, item: AttentionRequiredData) {
+        Fleet::raise(self, item)
+    }
+    fn upsert_attention(&self, item: AttentionRequiredData) {
+        Fleet::upsert_attention(self, item)
+    }
+    fn attention(&self, id: &str) -> Option<AttentionRequiredData> {
+        Fleet::attention(self, id)
+    }
+    fn resolve(&self, id: &str, action: AttentionAction) -> Option<AttentionRequiredData> {
+        Fleet::resolve(self, id, action)
+    }
+    fn publish(&self, event: DaemonEvent) -> u64 {
+        Fleet::publish(self, event)
     }
 }
 

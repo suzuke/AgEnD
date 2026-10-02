@@ -1,0 +1,23 @@
+{
+  "task_id": "t-1",
+  "stage_index": 0,
+  "status": "Pending",
+  "branch": null,
+  "current_head": null,
+  "patch_id": null,
+  "change_id": null,
+  "work_product": null,
+  "approval_reviewers": [],
+  "pending_pick": null,
+  "attempts": [
+    0,
+    0
+  ],
+  "approvals": [],
+  "passed_checks": [],
+  "fanout_child_task_ids": [],
+  "selected_fanout_child": null,
+  "merge_commit": null,
+  "pending_head_changes": [],
+  "notified_timeout": null
+}

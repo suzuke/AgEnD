@@ -17,6 +17,7 @@ mod cli;
 mod debug;
 mod doctor;
 mod home;
+mod hooks;
 mod init;
 mod setup;
 
@@ -32,6 +33,9 @@ fn main() -> ExitCode {
     // it splits off right after the argv[0] dispatch (gate 4 P1).
     if args.first().is_some_and(|a| a == "holder") {
         return agend_holder::run(args[1..].to_vec());
+    }
+    if args.first().is_some_and(|a| a == "hooks") {
+        return hooks::run(&args[1..]);
     }
     if args.first().is_some_and(|a| a == "daemon") {
         if args.len() == 1 {

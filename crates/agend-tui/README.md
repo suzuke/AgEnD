@@ -5,13 +5,17 @@
 > - 記住：**畫面只讀 `source::Fleet`、只透過 `source::Source` 動作**；真的來源是 `source::client::ClientSource`，lib 裡沒有 socket 程式碼。
 > - 下一步：`~/.cargo/bin/cargo run -q -p agend-tui --example tui_fake` 自己操作；`~/.cargo/bin/cargo xtask accept tui` 看 demo。
 
+## 第 10 施工關（已驗收，2026-10-02）
+
+pipeline task detail 顯示 repo、關卡種類、agent、受阻理由與 WIP archive 路徑；人工核准可 approve／退回修改（先輸入理由），task failed 可 acknowledge。讀取資料與動作仍只經 Source 和 client protocol。
+
 ## 負責
 
 - 首頁：跨 team 的「需要你」＋每個 team 一個區塊（agent 狀態數量、進行中的目標、最近變更）
 - 「需要你」：展開項目看脈絡摘要（D37）與對話（D35），選選項或用自由文字回答；已讀與已解決分開，agent 追問後回到未讀
 - team 頁：目標、Agents、流水線三個 tab
 - Task Detail（repo 只在這裡）、Agent Detail、單一 agent 終端（`t`：即時畫面；`i` 進輸入模式、`Ctrl-]` 離開）
-- 「需要你」的非請示項目：`actions` 是可選的列（目前只有 `retry`），收到 daemon 的 `attention_resolved` 才消失
+- 「需要你」的非請示項目：`actions` 是可選的列（retry、approve、request_changes、acknowledge），收到 daemon 的 `attention_resolved` 才消失
 - `/` 快速跳轉；英文與繁中，執行中按 `L` 切換
 - daemon 斷線畫面與自動重連（重連一律重拿全貌；版本不合不自動重試）
 - 互動迴圈 `agend_tui::run`（`agend app` 與 `tui_fake` 共用）

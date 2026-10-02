@@ -91,6 +91,13 @@ pub fn run(home: PathBuf) -> ExitCode {
         "agend.db opened (waited {} ms for the lock)",
         waited.as_millis()
     ));
+    let _stop_flags = match stop_flag::install() {
+        Ok(guard) => guard,
+        Err(e) => {
+            eprintln!("agend daemon: cannot watch stop signals: {e}");
+            return ExitCode::from(1);
+        }
+    };
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -104,6 +111,9 @@ pub fn run(home: PathBuf) -> ExitCode {
     let stopped = runtime.block_on(serve(home, exe, store));
     // Pending restart timers and the like are dropped, not awaited.
     runtime.shutdown_timeout(Duration::from_secs(1));
+    if matches!(stopped, Ok(Stopped::Exec(_))) {
+        stop_flag::begin_exec_handoff();
+    }
     match stopped {
         Ok(Stopped::Signal(_)) => ExitCode::SUCCESS,
         Ok(Stopped::Exec(_)) if STOP_SIGNALLED.load(Ordering::SeqCst) => {
@@ -158,7 +168,8 @@ fn prepare_run_dir(home: &Path) -> std::io::Result<PathBuf> {
 /// A stop signal arrived. Also read after the supervisor has returned to
 /// `exec`: a Ctrl-C during that hand-off must stop the daemon, not be lost
 /// in the old image while the new one keeps running (gate 9).
-static STOP_SIGNALLED: AtomicBool = AtomicBool::new(false);
+mod stop_flag;
+use stop_flag::STOP_SIGNALLED;
 
 fn forward_signal(kind: SignalKind, name: &'static str, events: UnboundedSender<Event>) {
     match signal(kind) {
@@ -178,6 +189,9 @@ async fn serve(home: PathBuf, exe: PathBuf, store: SqliteStore) -> Result<Stoppe
     let (events, mut queue) = unbounded_channel();
     forward_signal(SignalKind::interrupt(), "SIGINT", events.clone());
     forward_signal(SignalKind::terminate(), "SIGTERM", events.clone());
+    if STOP_SIGNALLED.load(Ordering::SeqCst) {
+        return Ok(Stopped::Signal("stop during startup"));
+    }
 
     let socket = match prepare_run_dir(&home) {
         Ok(socket) => socket,
@@ -241,6 +255,19 @@ async fn serve(home: PathBuf, exe: PathBuf, store: SqliteStore) -> Result<Stoppe
             return Err(ExitCode::from(1));
         }
     };
+    let (pipeline, pipeline_worker) = crate::pipeline::start(
+        &home,
+        &exe,
+        Arc::clone(&store),
+        Arc::clone(&fleet),
+        codex.clone(),
+    )
+    .await
+    .map_err(|e| {
+        log::line(&format!("pipeline boot: {e}"));
+        ExitCode::from(1)
+    })?;
+    supervisor.set_pipeline(pipeline.clone());
     // Bound only now (P1): a client that connects sees the whole fleet.
     let listener = match server::bind(&socket) {
         Ok(listener) => listener,
@@ -253,6 +280,7 @@ async fn serve(home: PathBuf, exe: PathBuf, store: SqliteStore) -> Result<Stoppe
         }
     };
     let context = Arc::new(Context {
+        pipeline,
         fleet,
         runtime,
         supervisor: events.clone(),
@@ -291,6 +319,7 @@ async fn serve(home: PathBuf, exe: PathBuf, store: SqliteStore) -> Result<Stoppe
     server.stop().await;
     // Closes every holder connection (no Shutdown) and then the DB: the
     // server's tasks are gone, so this is the last handle on both.
+    pipeline_worker.abort();
     drop(context);
     drop(supervisor);
     log::line("agend daemon stopped");

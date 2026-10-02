@@ -80,6 +80,7 @@ pub fn add(home: &Path, id: &str, backend: Backend, script: &str) -> Result<Inst
         session_started: false,
         agent_pid: None,
         legacy_no_thread: false,
+        delivery: "push".into(),
     };
     let store = SqliteStore::open(home, 0).map_err(|e| format!("open store: {e}"))?;
     block_on(store.add_instance(&instance)).map_err(|e| format!("add {id}: {e}"))?;
@@ -101,6 +102,7 @@ pub fn resolve(socket: &Path, attention_id: &str) -> Result<(), String> {
                 request_id: "g8-resolve".into(),
                 attention_id: attention_id.into(),
                 action: AttentionAction::Retry,
+                note: None,
             },
         })
         .map_err(|e| format!("resolve: {e}"))?;
@@ -299,7 +301,18 @@ impl InProcess {
         // No supervisor: its queue is closed (`resolve_attention` answers
         // `not_supported`), and no holders.
         let (supervisor, _) = tokio::sync::mpsc::unbounded_channel();
+        let (pipeline, _worker) = self
+            .runtime
+            .block_on(agend_daemon::pipeline::start(
+                &self.root,
+                Path::new("/nonexistent/agend"),
+                Arc::clone(&self.store),
+                Arc::clone(&self.fleet),
+                CodexDriver::new(&self.root, Arc::clone(&self.store), Arc::new(|_| {})),
+            ))
+            .expect("pipeline");
         let context = Arc::new(Context {
+            pipeline,
             fleet: Arc::clone(&self.fleet),
             runtime: HolderRuntime::new(
                 &self.root,
@@ -459,7 +472,7 @@ pub fn version(lab: &Lab) -> Result<Vec<String>, String> {
     let (out, took) = agend(lab, &home, &["debug", "ping"], &[], Duration::from_secs(20))?;
     let said = text(&out.stderr);
     ensure(
-        out.status.code() == Some(1) && said.contains("needs 1.2") && took < Duration::from_secs(3),
+        out.status.code() == Some(1) && said.contains("needs 1.3") && took < Duration::from_secs(3),
         || {
             format!(
                 "ping against a 1.0 daemon: {} in {took:?}: {said}",

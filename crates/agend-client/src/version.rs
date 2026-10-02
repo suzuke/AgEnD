@@ -1,6 +1,5 @@
 //! Protocol version check against the daemon at connect time (gate 8 P3,
-//! gate 9 P4). This client needs 1.2 (operator requests, the daemon's
-//! identity in `hello`); a daemon that negotiates less is an old binary
+//! gate 9 P4). This client needs 1.3 (pipeline commands and action notes); a daemon that negotiates less is an old binary
 //! that must be restarted, so it fails at once without retrying. A daemon
 //! with `daemon_restart` (1.2 and later) is told to restart itself; an older
 //! one must be stopped and started by hand.
@@ -8,10 +7,10 @@
 //! Must NOT: silently continue on an incompatible version.
 
 use agend_core::protocol::ProtocolVersion;
-use agend_core::protocol::client::V1_2;
+use agend_core::protocol::client::{V1_2, V1_3};
 
 /// The oldest version this client works with.
-pub const NEEDED: ProtocolVersion = V1_2;
+pub const NEEDED: ProtocolVersion = V1_3;
 /// The first version with `daemon_restart` (its shape never changes).
 pub const RESTART_SINCE: ProtocolVersion = V1_2;
 
@@ -44,15 +43,15 @@ mod tests {
 
     #[test]
     fn an_older_daemon_is_refused_with_what_to_do() {
-        assert_eq!(check(V1_2), Ok(()));
+        assert_eq!(check(V1_3), Ok(()));
         assert_eq!(check(ProtocolVersion::new(1, 7)), Ok(()));
         assert_eq!(
             check(V1).unwrap_err(),
-            "the daemon speaks client protocol 1.0; this agend needs 1.2 — stop the daemon (Ctrl-C) and start this binary: agend daemon"
+            "the daemon speaks client protocol 1.0; this agend needs 1.3 — stop the daemon (Ctrl-C) and start this binary: agend daemon"
         );
         assert_eq!(
             check(V1_1).unwrap_err(),
-            "the daemon speaks client protocol 1.1; this agend needs 1.2 — stop the daemon (Ctrl-C) and start this binary: agend daemon"
+            "the daemon speaks client protocol 1.1; this agend needs 1.3 — stop the daemon (Ctrl-C) and start this binary: agend daemon"
         );
         // A later CLI that needs 1.3 tells a 1.2 daemon to restart itself.
         assert_eq!(

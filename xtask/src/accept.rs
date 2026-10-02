@@ -30,6 +30,9 @@
 //! agend-daemon, agend-testkit (CLP-13..17 against the fake, and their
 //! mutants) and agend (the CLI-n table, restart, milestone), check-deps, then
 //! `cli_demo` against the built `agend` and `fake_codex`.
+//! Gate 10 builds the real CLI and inbox worker before tests, runs pipeline
+//! checks across the affected crates and snapshot/protocol compatibility,
+//! then the real pipeline demo (only the agent brain is fake).
 //! Gate 11 runs the checks of agend-tui (the TUI through `ClientSource` on
 //! the fake daemon), agend-client (the terminal `Sender`), agend-daemon
 //! (`terminal_input`), agend-testkit (CLP-18..20 against the fake, and
@@ -117,7 +120,15 @@ pub const GATES: &[Gate] = &[
     Gate {
         number: 10,
         name: "pipeline",
-        crates: &["agend-daemon"],
+        crates: &[
+            "agend-core",
+            "agend-daemon",
+            "agend-testkit",
+            "agend-client",
+            "agend-shim",
+            "agend-tui",
+            "agend",
+        ],
     },
     Gate {
         number: 11,
@@ -167,6 +178,26 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
         gate.number, gate.name, gate.number, gate.name
     );
 
+    if gate.number == 10 {
+        step(&[
+            "build",
+            "--quiet",
+            "-p",
+            "agend",
+            "-p",
+            "agend-testkit",
+            "--bins",
+        ])?;
+        step(&[
+            "test",
+            "-p",
+            "xtask",
+            "--test",
+            "pipeline_snapshot",
+            "--test",
+            "protocol_compat",
+        ])?;
+    }
     if gate.number == 1 {
         step(&["fmt", "--all", "--", "--check"])?;
         step(&[
@@ -297,6 +328,27 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
         ])?;
         step(&["run", "--quiet", "-p", "agend", "--example", "cli_demo"])?;
         println!("gate 9 (cli): checks passed");
+    } else if gate.number == 10 {
+        step(&[
+            "build",
+            "--quiet",
+            "-p",
+            "agend",
+            "-p",
+            "agend-testkit",
+            "--bins",
+        ])?;
+        step(&[
+            "run",
+            "--quiet",
+            "-p",
+            "agend-daemon",
+            "--example",
+            "pipeline_probe",
+            "--",
+            "demo",
+        ])?;
+        println!("gate 10 (pipeline): checks passed");
     } else if gate.number == 11 {
         step(&[
             "run",

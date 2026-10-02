@@ -82,6 +82,9 @@ fn details(ctx: &Ctx, item: &Attention) -> Vec<Row> {
             };
             let label = match action {
                 AttentionAction::Retry => ctx.tr(Text::ActionRetry),
+                AttentionAction::Approve => ctx.tr(Text::ActionApprove),
+                AttentionAction::RequestChanges => ctx.tr(Text::ActionChanges),
+                AttentionAction::Acknowledge => ctx.tr(Text::ActionAcknowledge),
                 AttentionAction::Unknown => ctx.tr(Text::ActionUnknown),
             };
             rows.push(

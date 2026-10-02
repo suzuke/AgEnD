@@ -13,7 +13,7 @@ use agend_client::{Client, ClientError, Redo};
 use agend_core::protocol::ProtocolVersion;
 use agend_core::protocol::client::{
     AttentionAction, AttentionRequiredData, ClientRequest, ClientResponse, DaemonEvent,
-    RequestIdData, TaskChangedData, V1, V1_2,
+    RequestIdData, TaskChangedData, V1, V1_3,
 };
 use agend_testkit::contract::client::proxy::{Direction, Options, Proxy, Transform};
 use agend_testkit::fake_daemon::FakeDaemon;
@@ -93,7 +93,7 @@ fn connect_waits_for_a_daemon_that_comes_back() {
         "{:?}",
         client.retried()
     );
-    assert_eq!(client.selected(), V1_2);
+    assert_eq!(client.selected(), V1_3);
     client.get_fleet().unwrap();
 }
 
@@ -107,7 +107,7 @@ fn a_1_0_daemon_fails_at_once_with_what_to_do() {
     assert_eq!(
         error,
         ClientError::Version(
-            "the daemon speaks client protocol 1.0; this agend needs 1.2 — stop the daemon (Ctrl-C) and start this binary: agend daemon".into()
+            "the daemon speaks client protocol 1.0; this agend needs 1.3 — stop the daemon (Ctrl-C) and start this binary: agend daemon".into()
         )
     );
 }
@@ -121,7 +121,7 @@ fn a_version_mismatch_is_not_retried() {
     assert!(started.elapsed() < Duration::from_secs(1));
     assert_eq!(
         error.to_string(),
-        "client protocol version mismatch: local supports 2.0, remote supports 1.2"
+        "client protocol version mismatch: local supports 2.0, remote supports 1.3"
     );
 }
 

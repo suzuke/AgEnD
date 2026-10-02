@@ -5,6 +5,10 @@
 > - 記住：「送出後斷線」用 testkit 的 proxy 吞掉請求、再重啟假 daemon 做出來，不手寫 server。
 > - 下一步：`~/.cargo/bin/cargo test -p agend-client`（約 12 秒，其中 10 秒是「連不上」那個測試）。
 
+## 第 10 施工關驗證
+
+protocol 1.3 版本底線、action note 與新增命令的 wire golden 在 xtask；真 pipeline 和 TUI 操作在 `agend` 的 Gate 10 程序測試。
+
 ## 怎麼跑
 
 ```bash

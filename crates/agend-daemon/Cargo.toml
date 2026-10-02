@@ -10,6 +10,8 @@ publish.workspace = true
 agend-core.workspace = true
 # flock probes of holder lock files (gate 4 P3).
 libc = "0.2"
+# Stop flag stays observable during runtime shutdown and before exec.
+signal-hook-registry = "1.4"
 # SQLite compiled into the binary (gate 5 P1): one version on every platform,
 # with STRICT tables and VACUUM INTO.
 rusqlite = { version = "0.37", features = ["bundled"] }
@@ -17,7 +19,7 @@ serde_json = "1"
 # The daemon's one multi-thread runtime (gate 6): channels to the store
 # thread (gate 5 P1), spawn_blocking for holder protocol calls, timers,
 # SIGINT/SIGTERM; the client socket server (gate 8: net, io-util, macros).
-tokio = { version = "1", default-features = false, features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1", default-features = false, features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 toml = "1.1.6"
 # The codex driver's JSON-RPC over WebSocket to `codex app-server` (gate 7
 # P1): blocking I/O, one std thread per instance link.

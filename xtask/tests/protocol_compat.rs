@@ -16,7 +16,7 @@ use serde_json::json;
 fn client_request_wire_shapes_are_stable_and_approval_does_not_supply_a_head() {
     assert_eq!(
         serde_json::to_value(ClientRequest::hello()).unwrap(),
-        json!({"type": "hello", "data": {"supported": [{"major": 1, "minor": 2}]}})
+        json!({"type": "hello", "data": {"supported": [{"major": 1, "minor": 3}]}})
     );
 
     let review = ClientRequest::Command {
@@ -561,7 +561,7 @@ fn a_1_0_peer_decodes_1_1_messages() {
         hello,
         v1_0::ClientRequest::Hello {
             data: v1_0::Hello {
-                supported: vec![v1_0::Version { major: 1, minor: 2 }]
+                supported: vec![v1_0::Version { major: 1, minor: 3 }]
             }
         }
     );
@@ -575,6 +575,7 @@ fn a_1_0_peer_decodes_1_1_messages() {
             request_id: "r-2".into(),
             attention_id: "instance-failed:g8-2".into(),
             action: AttentionAction::Retry,
+            note: None,
         },
     };
     for request in [get_fleet, resolve] {
@@ -875,6 +876,7 @@ fn a_1_1_peer_decodes_1_2_messages() {
         OperatorCommand::DaemonRestart { binary: None },
         OperatorCommand::TaskCancel {
             task_id: "t-1".into(),
+            reason: None,
         },
     ] {
         let request = ClientRequest::Operator {
@@ -1024,4 +1026,81 @@ fn a_1_2_peer_decodes_1_1_messages() {
         state: "unknown".into(),
     });
     assert_eq!(view.working_directory, None);
+}
+
+#[test]
+fn gate_10_requests_have_stable_additive_wire_shapes() {
+    use agend_core::protocol::client::{
+        AttentionAction, OperatorCommand, OperatorData, ResolveAttentionData,
+    };
+    let workflow =
+        toml::to_string(&agend_core::pipeline::workflow::Workflow::builtin_research()).unwrap();
+    let commands = vec![
+        OperatorCommand::TeamAdd {
+            team_id: "web".into(),
+            repo: Some("/repo".into()),
+            workflow_id: Some("research".into()),
+        },
+        OperatorCommand::TeamList,
+        OperatorCommand::TeamJoin {
+            team_id: "web".into(),
+            instance_id: "dev-1".into(),
+            role: "researcher".into(),
+        },
+        OperatorCommand::TeamSetWorkflow {
+            team_id: "web".into(),
+            workflow_id: "research".into(),
+        },
+        OperatorCommand::WorkflowList,
+        OperatorCommand::WorkflowShow {
+            workflow_id: "research".into(),
+        },
+        OperatorCommand::WorkflowCheck {
+            toml: workflow.clone(),
+        },
+        OperatorCommand::WorkflowApply { toml: workflow },
+        OperatorCommand::TaskCreate {
+            title: "Research".into(),
+            role: "researcher".into(),
+            team_id: "web".into(),
+            workflow_id: None,
+        },
+        OperatorCommand::TaskCancel {
+            task_id: "t-1".into(),
+            reason: Some("scope changed".into()),
+        },
+    ];
+    let mut requests = commands
+        .into_iter()
+        .map(|command| ClientRequest::Operator {
+            data: OperatorData {
+                request_id: "g10".into(),
+                command,
+            },
+        })
+        .collect::<Vec<_>>();
+    requests.push(ClientRequest::ResolveAttention {
+        data: ResolveAttentionData {
+            request_id: "changes".into(),
+            attention_id: "approval:t-1/approve/1".into(),
+            action: AttentionAction::RequestChanges,
+            note: Some("Revise the result".into()),
+        },
+    });
+    let text = serde_json::to_string_pretty(&requests).unwrap() + "\n";
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/golden/pipeline-protocol-1.3.json");
+    if std::env::var_os("AGEND_BLESS_GOLDEN").is_some() {
+        std::fs::write(&path, &text).unwrap();
+    }
+    assert_eq!(std::fs::read_to_string(path).unwrap(), text);
+    assert_eq!(
+        serde_json::from_str::<Vec<ClientRequest>>(&text).unwrap(),
+        requests
+    );
+    for request in &requests[..9] {
+        let old: v1_0::ClientRequest =
+            serde_json::from_value(serde_json::to_value(request).unwrap()).unwrap();
+        assert_eq!(old, v1_0::ClientRequest::Unknown);
+    }
 }

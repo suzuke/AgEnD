@@ -33,12 +33,18 @@ const DEFAULT_PATH: &str = "/usr/bin:/bin";
 pub fn launch_path(home: &Path, daemon_env: &BTreeMap<String, String>) -> String {
     let bin = home.join(super::shims::BIN_DIR).display().to_string();
     let bin = bin.trim_end_matches('/');
+    let canonical_bin = std::path::Path::new(bin).canonicalize().ok();
     let rest: Vec<&str> = daemon_env
         .get("PATH")
         .map(String::as_str)
         .unwrap_or_default()
         .split(':')
         .filter(|p| !p.is_empty() && p.trim_end_matches('/') != bin)
+        .filter(|p| {
+            canonical_bin
+                .as_ref()
+                .is_none_or(|bin| std::path::Path::new(p).canonicalize().ok().as_ref() != Some(bin))
+        })
         .collect();
     if rest.is_empty() {
         DEFAULT_PATH.to_owned()

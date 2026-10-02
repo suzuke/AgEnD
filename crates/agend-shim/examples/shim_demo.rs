@@ -179,12 +179,12 @@ mod demo {
         let snapshot = Snapshot {
             version: SNAPSHOT_VERSION,
             instance: INSTANCE.into(),
-            source_repo: Some(repo.clone()),
+            source_repo: Some(repo.display().to_string()),
             protected_refs: Vec::new(),
             binding: Some(Binding::Work {
                 task_id: "t-1".into(),
                 branch: branch.clone(),
-                worktree: worktree.clone(),
+                worktree: worktree.display().to_string(),
             }),
         };
         let snap_path = snapshot_path(&home, INSTANCE);

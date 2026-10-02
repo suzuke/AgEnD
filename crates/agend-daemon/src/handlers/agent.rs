@@ -2,7 +2,7 @@
 //! themselves in `hello` (`AGEND_INSTANCE`); the operator gets `forbidden`
 //! with what to do instead.
 //!
-//! - `status`: the caller's instance; no task before gate 10.
+//! - `status`: the caller's instance and current work/review ticket.
 //! - `send`: `deliver` of the codex driver (gate 7), which claims the id in
 //!   the `messages` table first: a message id the client chose must be a
 //!   UUID v4; the same id with the same content is accepted again without a
@@ -12,20 +12,19 @@
 //!   `after_message_id` (`unknown_message` when the caller has no such
 //!   message).
 //! - Everything else (`done`, `result`, `review …`, `ask …`, `block`,
-//!   `unblock`, `remind`, `task create`): `not_supported` until gate 10;
-//!   nothing changes.
+//!   `unblock`, `remind`, `task create`): serialized by the pipeline writer.
 //!
 //! Must NOT: change anything for a refused command.
 
 use agend_core::policy::busy::BusyLevel;
 use agend_core::protocol::client::{
     AgentCommand, ClientCommandData, ClientCommandResultData, ClientResponse, CommandResult,
-    InboxMessage, MAX_MESSAGE_BYTES, MessageLevel, MessagesData, StatusData, error_code,
-    is_uuid_v4, message_too_long as too_long,
+    InboxMessage, MAX_MESSAGE_BYTES, MessageLevel, MessagesData, error_code, is_uuid_v4,
+    message_too_long as too_long,
 };
 use agend_core::traits::{AgentMessage, Driver};
 
-use super::{Context, command_name, error};
+use super::{Context, error};
 use crate::driver::codex::DriverError;
 use crate::store::Message;
 use crate::store::instances::new_session_id;
@@ -48,7 +47,14 @@ fn not_an_instance(caller: &str) -> Refusal {
 pub async fn handle(ctx: &Context, caller: &str, data: ClientCommandData) -> ClientResponse {
     let request_id = data.request_id;
     let result = match data.command {
-        AgentCommand::Status => status(ctx, caller).await,
+        AgentCommand::Status => {
+            return super::pipeline_reply(
+                request_id,
+                ctx.pipeline
+                    .agent(Some(caller.into()), AgentCommand::Status)
+                    .await,
+            );
+        }
         AgentCommand::Send {
             to,
             message,
@@ -57,13 +63,12 @@ pub async fn handle(ctx: &Context, caller: &str, data: ClientCommandData) -> Cli
         } => send(ctx, caller, to, message, level, message_id).await,
         AgentCommand::Inbox { after_message_id } => inbox(ctx, caller, after_message_id).await,
         AgentCommand::Unknown => Err((error_code::UNKNOWN_REQUEST, "unknown agent command".into())),
-        other => Err((
-            error_code::NOT_SUPPORTED,
-            format!(
-                "{} arrives in gate 10; nothing changed",
-                command_name(&other)
-            ),
-        )),
+        other => {
+            return super::pipeline_reply(
+                request_id,
+                ctx.pipeline.agent(Some(caller.into()), other).await,
+            );
+        }
     };
     match result {
         Ok(result) => ClientResponse::CommandResult {
@@ -71,32 +76,6 @@ pub async fn handle(ctx: &Context, caller: &str, data: ClientCommandData) -> Cli
         },
         Err((code, message)) => error(Some(request_id), code, message),
     }
-}
-
-async fn status(ctx: &Context, caller: &str) -> Result<CommandResult, Refusal> {
-    let instance = ctx
-        .store
-        .instance(caller)
-        .await
-        .map_err(|e| {
-            (
-                error_code::INVALID_REQUEST,
-                format!("cannot read {caller}: {e}"),
-            )
-        })?
-        .ok_or_else(|| not_an_instance(caller))?;
-    Ok(CommandResult::Status {
-        data: StatusData {
-            task_id: None,
-            instance_id: Some(instance.id.clone()),
-            summary: format!(
-                "{} ({}): no task\nnext: agend inbox | agend send <name> \"<message>\"",
-                instance.id,
-                instance.backend.as_str()
-            ),
-            identity: None,
-        },
-    })
 }
 
 async fn send(

@@ -48,6 +48,8 @@ pub enum StageState {
     Done,
     Running,
     NotStarted,
+    Failed,
+    Cancelled,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,6 +75,7 @@ pub struct TaskInfo {
     /// The daemon's status (`open`, `running`, `blocked`, `done`,
     /// `superseded`); what tells a task without stages done or not.
     pub status: String,
+    pub pipeline: Option<agend_core::protocol::client::TaskPipelineView>,
 }
 
 impl TaskInfo {
@@ -83,6 +86,9 @@ impl TaskInfo {
     }
 
     pub fn is_done(&self) -> bool {
+        if matches!(self.status.as_str(), "failed" | "cancelled") {
+            return true;
+        }
         if self.stages.is_empty() {
             matches!(self.status.as_str(), "done" | "superseded")
         } else {
@@ -181,6 +187,13 @@ pub trait Source {
     /// The operator acts on a needs-you item that is not an ask; the item
     /// leaves when `attention_resolved` arrives, not before (gate 11 B P4).
     fn resolve(&mut self, attention_id: &str, action: AttentionAction) -> Result<(), SourceError>;
+    fn request_changes(&mut self, attention_id: &str, note: String) -> Result<(), SourceError> {
+        let _ = (attention_id, note);
+        Err(SourceError::Rejected {
+            code: "not_supported".into(),
+            message: "source cannot request changes".into(),
+        })
+    }
     /// Opens `instance_id`'s terminal (replacing an open one) and waits for
     /// its first screen (empty: nothing to show).
     fn open_terminal(&mut self, instance_id: &str) -> Result<String, SourceError>;

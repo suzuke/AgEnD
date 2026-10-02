@@ -420,11 +420,21 @@ impl Client {
         attention_id: &str,
         action: AttentionAction,
     ) -> Result<(), ClientError> {
+        self.resolve_attention_with_note(attention_id, action, None)
+    }
+
+    pub fn resolve_attention_with_note(
+        &mut self,
+        attention_id: &str,
+        action: AttentionAction,
+        note: Option<String>,
+    ) -> Result<(), ClientError> {
         let request = ClientRequest::ResolveAttention {
             data: ResolveAttentionData {
                 request_id: self.next_request_id(),
                 attention_id: attention_id.to_owned(),
                 action,
+                note,
             },
         };
         match self.request(&request, Redo::Never)? {

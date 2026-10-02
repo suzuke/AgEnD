@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex, Weak};
 
 use agend_core::pipeline::task::Task;
 use agend_core::pipeline::workflow::Workflow;
-use agend_core::traits::{CasResult, Store, StoredEvent, VersionedTask};
+use agend_core::traits::{CasResult, Store, StoredEvent, TaskProgress, VersionedTask};
 use agend_testkit::block_on;
 use agend_testkit::contract::store::{self, StoreFixture};
 use agend_testkit::fakes::{FakeError, FakeStore, FakeStoreFile};
@@ -30,6 +30,7 @@ type Open = fn(&FakeStoreFile) -> FakeStore;
 /// A fake store with one operation replaced.
 pub struct M {
     store: FakeStore,
+    split_advance: bool,
     /// Events a mutant keeps itself: `(task id, event)`.
     log: Mutex<Vec<(String, StoredEvent)>>,
     load: Load,
@@ -57,6 +58,7 @@ impl M {
     fn new() -> Self {
         Self {
             store: FakeStore::new(),
+            split_advance: false,
             log: Mutex::new(Vec::new()),
             load: |m, id| m.real_load(id),
             create: |m, t| block_on(m.store.create_task(t)),
@@ -102,6 +104,27 @@ impl M {
 
 impl Store for M {
     type Error = FakeError;
+    async fn load_task_progress(&self, id: &str) -> Result<Option<TaskProgress>, FakeError> {
+        self.store.load_task_progress(id).await
+    }
+    async fn advance_task(
+        &self,
+        task: &Task,
+        v: u64,
+        progress: &TaskProgress,
+        event: &StoredEvent,
+    ) -> Result<CasResult, FakeError> {
+        if self.split_advance
+            && serde_json::from_str::<serde_json::Value>(&progress.pipeline).is_err()
+        {
+            self.store.compare_and_swap_task(task, v).await?;
+            return Err(FakeError {
+                operation: "advance_task",
+                message: "invalid pipeline".into(),
+            });
+        }
+        self.store.advance_task(task, v, progress, event).await
+    }
     async fn load_task(&self, id: &str) -> Result<Option<VersionedTask>, FakeError> {
         (self.load)(self, id)
     }
@@ -147,6 +170,7 @@ impl StoreFixture for M {
     fn boot((file, m): &Self::Persisted) -> Self {
         Self {
             store: (m.open)(file),
+            split_advance: false,
             log: Mutex::new(Vec::new()),
             load: m.load,
             create: m.create,
@@ -200,6 +224,24 @@ impl CounterStore {
 
 impl Store for CounterStore {
     type Error = String;
+    async fn load_task_progress(&self, id: &str) -> Result<Option<TaskProgress>, String> {
+        let _ = id;
+        Ok(None)
+    }
+    async fn advance_task(
+        &self,
+        task: &Task,
+        v: u64,
+        progress: &TaskProgress,
+        event: &StoredEvent,
+    ) -> Result<CasResult, String> {
+        let _ = progress;
+        let result = self.compare_and_swap_task(task, v).await?;
+        if matches!(result, CasResult::Written { .. }) {
+            self.append_event(&task.id, event).await?;
+        }
+        Ok(result)
+    }
     async fn load_task(&self, id: &str) -> Result<Option<VersionedTask>, String> {
         Ok(self.disk().tasks.get(id).cloned())
     }
@@ -328,6 +370,24 @@ impl TruncOnOpen {
 
 impl Store for TruncOnOpen {
     type Error = String;
+    async fn load_task_progress(&self, id: &str) -> Result<Option<TaskProgress>, String> {
+        let _ = id;
+        Ok(None)
+    }
+    async fn advance_task(
+        &self,
+        task: &Task,
+        v: u64,
+        progress: &TaskProgress,
+        event: &StoredEvent,
+    ) -> Result<CasResult, String> {
+        let _ = progress;
+        let result = self.compare_and_swap_task(task, v).await?;
+        if matches!(result, CasResult::Written { .. }) {
+            self.append_event(&task.id, event).await?;
+        }
+        Ok(result)
+    }
     async fn load_task(&self, id: &str) -> Result<Option<VersionedTask>, String> {
         Ok(self.mem().tasks.get(id).cloned())
     }
@@ -437,6 +497,18 @@ impl SharedMem {
 
 impl Store for SharedMem {
     type Error = FakeError;
+    async fn load_task_progress(&self, id: &str) -> Result<Option<TaskProgress>, FakeError> {
+        self.db.load_task_progress(id).await
+    }
+    async fn advance_task(
+        &self,
+        task: &Task,
+        v: u64,
+        progress: &TaskProgress,
+        event: &StoredEvent,
+    ) -> Result<CasResult, FakeError> {
+        self.db.advance_task(task, v, progress, event).await
+    }
     async fn load_task(&self, id: &str) -> Result<Option<VersionedTask>, FakeError> {
         self.db.load_task(id).await
     }
@@ -477,6 +549,16 @@ impl StoreFixture for SharedMem {
 
 pub fn mutants() -> Vec<Mutant> {
     vec![
+        Mutant {
+            rule: "STO-13",
+            name: "SplitAdvance",
+            run: |name| {
+                store::run(name, || M {
+                    split_advance: true,
+                    ..M::new()
+                })
+            },
+        },
         // STO-1: a field is lost on the way back (a column never read).
         Mutant {
             rule: "STO-1",

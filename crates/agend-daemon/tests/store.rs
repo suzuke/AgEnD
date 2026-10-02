@@ -1017,6 +1017,7 @@ fn a_database_with_only_instances_takes_its_daily_snapshot() {
         session_started: false,
         agent_pid: None,
         legacy_no_thread: false,
+        delivery: "push".into(),
     };
     block_on(store.add_instance(&instance)).unwrap();
     let report = block_on(store.snapshot(NOW)).unwrap();
@@ -1154,6 +1155,7 @@ fn session_started_is_set_with_running_and_checked() {
         session_started: false,
         agent_pid: None,
         legacy_no_thread: false,
+        delivery: "push".into(),
     };
     block_on(store.add_instance(&instance)).unwrap();
     let read = || block_on(store.instance("g8-1")).unwrap().unwrap();
@@ -1341,6 +1343,7 @@ fn message_order_survives_prune_snapshot_and_restore() {
         session_started: false,
         agent_pid: None,
         legacy_no_thread: false,
+        delivery: "push".into(),
     };
     block_on(store.add_instance(&instance)).unwrap();
     let old = NOW - 31 * DAY_MS;
@@ -1386,4 +1389,64 @@ fn message_seq_never_goes_back_after_the_table_is_emptied() {
     block_on(store.claim_message(&new_message("m-4", "x"), NOW)).unwrap();
     let seq = block_on(store.message("m-4")).unwrap().unwrap().seq;
     assert_eq!(seq, 4, "a pruned number was used again");
+}
+
+#[test]
+fn ask_answers_have_a_permanent_outbox_receipt_and_stable_turn_ids() {
+    use agend_core::protocol::ask::{AnswerSource, AskEntry, AskReply, AskThread};
+    use agend_daemon::store::pipeline::AskRow;
+    let dir = TempDir::new("store-ask-outbox").unwrap();
+    let home = dir.path().join("home");
+    let store = SqliteStore::open(&home, NOW).unwrap();
+    let mut row = AskRow {
+        instance: "dev".into(),
+        created: NOW,
+        thread: AskThread {
+            ask_id: "ask-1".into(),
+            task_id: None,
+            entries: vec![
+                AskEntry::Question {
+                    from: "dev".into(),
+                    text: "Which?".into(),
+                    options: vec![],
+                },
+                AskEntry::Answer {
+                    from: "operator".into(),
+                    source: AnswerSource::Cli,
+                    reply: AskReply::Text { text: "A".into() },
+                },
+            ],
+        },
+    };
+    block_on(store.save_ask(&row)).unwrap();
+    let pending = block_on(store.pending_answers()).unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].1, "ask:ask-1/2");
+    block_on(store.mark_answer_sent(pending[0].0)).unwrap();
+    drop(store);
+    let store = SqliteStore::open(&home, NOW + 40 * DAY_MS).unwrap();
+    block_on(store.prune(NOW + 40 * DAY_MS)).unwrap();
+    assert!(
+        block_on(store.pending_answers()).unwrap().is_empty(),
+        "a delivered historical answer must not replay after message retention"
+    );
+    row.thread.entries.push(AskEntry::FollowUp {
+        from: "dev".into(),
+        text: "Version?".into(),
+        options: vec![],
+    });
+    row.thread.entries.push(AskEntry::Answer {
+        from: "operator".into(),
+        source: AnswerSource::Cli,
+        reply: AskReply::Text { text: "2".into() },
+    });
+    block_on(store.save_ask(&row)).unwrap();
+    block_on(store.save_ask(&row)).unwrap();
+    let pending = block_on(store.pending_answers()).unwrap();
+    assert_eq!(
+        pending.len(),
+        1,
+        "resaving the thread must not duplicate the answer"
+    );
+    assert_eq!(pending[0].1, "ask:ask-1/4");
 }

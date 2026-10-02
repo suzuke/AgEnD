@@ -294,9 +294,16 @@ fn list(target: &Target) -> Result<Output, Failure> {
     Ok(Output::new(lines, to_json(&view.instances)))
 }
 
-pub fn task_cancel(target: &Target, task: String) -> Result<Output, Failure> {
+pub fn task_cancel(
+    target: &Target,
+    task: String,
+    reason: Option<String>,
+) -> Result<Output, Failure> {
     let mut client = target.connect("agend status")?;
-    let command = OperatorCommand::TaskCancel { task_id: task };
+    let command = OperatorCommand::TaskCancel {
+        task_id: task,
+        reason,
+    };
     let result = operator_request(
         &mut client,
         command,
