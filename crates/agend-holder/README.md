@@ -5,6 +5,10 @@
 > - 記住：**PTY 只收三種位元組**：列舉過的控制鍵、操作者輸入、終端查詢回覆；只有協定 `Shutdown` 停得掉 holder。
 > - 下一步：第 6 施工關起由 daemon 的 agent runtime（`agend_daemon::runtime`）啟動與接回 holder；daemon 不依賴本 crate，只經 holder 協定與 `agend holder` 子命令。
 
+## 第 11 施工關 C 段（提案中）
+
+完整終端畫面、resize、滑鼠／貼上與歷史的 [P1–P6 提案](../../docs/gates/gate-11c-proposal.md) 已於 2026-10-02 確認（D39），尚未實作；目前功能維持下方已交付範圍。
+
 ## 負責
 
 - 以 portable-pty 啟動 agent；環境**只有** `Spawn.env`（沒給 `TERM` 時補 `xterm-256color`）

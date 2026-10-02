@@ -3,13 +3,13 @@
 > **TL;DR**
 > - attention-first TUI；A 段畫面層提前做（你同意與第 3–10 施工關並行，放寬 D22），B 段接真 daemon，兩段都已合併。
 > - 記住：**畫面只讀 `Source`，不知道資料從哪來**；真的來源 `ClientSource` 只經 `agend-client`，TUI 裡沒有 socket 程式碼；權限只在 daemon 擋。
-> - 下一步：A、B 段已完成並 merge（B 段 #140，2026-10-01）；C 段（完整模式）等第 10 施工關做完再提案。
+> - 下一步：A、B 段已完成並 merge（B 段 #140，2026-10-01）；C 段（完整模式）[P1–P6 提案](gate-11c-proposal.md) 已確認（D39），待提案合併後實作；第 10 施工關已 merge #143。
 
 **先看這條**：B 段（接真 daemon）的步驟會用到 `agend`。每個新開的終端機分頁（包括第二個終端）都要先跑 B 段開頭的設定，否則會跑到舊的 Node 版 `agend` 1.24.0。A 段只用 `cargo`，不用 `agend`。
 
 ## 狀態
 
-**實作中：A、B 段完成並已 merge（B 段 #140，2026-10-01，`462822a`）；C 段（完整模式）未開始，等第 10 施工關做完再提案**。
+**提案中：A、B 段完成並已 merge（B 段 #140，2026-10-01，`462822a`）；C 段 P1–P6 已確認（D39），提案待合併，尚未實作**（2026-10-02）。第 10 施工關已 merge #143，前置條件已滿足。
 
 - 畫面層（2026-09-26，已 merge #120）：A 段通過、T1–T18／G1–G4 已追認。
 - B 段提案（#133，2026-09-28 已 merge）：P1–P7 使用者已確認。
@@ -23,6 +23,10 @@
 - 「需要你」：已讀與已解決分開；選項或自由文字回答（D35）
 - daemon 斷線畫面與自動重連
 - B 段（第 8 施工關後，見「B 段開工前提案」）：用 `agend-client` 實作 `Source`、`agend app` 子命令、全貌與事件接到畫面、「需要你」的 `retry`、終端即時更新與只有操作者能用的輸入
+
+## C 段開工前提案
+
+[完整 P1–P6](gate-11c-proposal.md) 與 [驗收計畫](gate-11c-validation-plan.md)。本段尚未實作；新提案不改寫下方 B 段已確認的決策與驗收紀錄。
 
 ## B 段開工前提案
 
@@ -556,6 +560,10 @@ unset AGEND_BIN               # 前幾關步驟留下的 export 可能指到已�
 
 ## 進度紀錄
 
+- 2026-10-02 使用者逐項確認 Gate 11 C 段 P1–P6，記為 [D39](../decisions/d39.md)，另明確授權合併 [#144](https://github.com/suzuke/AgEnD/pull/144)。本提交只記錄確認並同步狀態；最新 verifier／CI 通過後合併，C 段尚未實作或驗收。
+
+- 2026-10-02 依使用者「繼續往下推進」開 `docs/gate-11c-proposal` 專屬 worktree（[draft PR #144](https://github.com/suzuke/AgEnD/pull/144)），整理 C 段 P1–P6：完整畫面、holder frame／協商、控制／resize、mouse／paste／歷史、Codex U17 與驗收矩陣。只改文件，待全新 verifier、CI 與使用者確認；尚未實作或 merge。
+
 日期 + 一行 + commit／PR，新的在上面。
 
 - 2026-10-01 #140 squash merge（`462822a`）；最新 head `6fdbc61` 的 ubuntu／macOS CI 全過，B 段已驗收並整合到 `v2`；C 段尚未開始。
@@ -578,6 +586,4 @@ unset AGEND_BIN               # 前幾關步驟留下的 export 可能指到已�
 
 ## 下一步
 
-```bash
-~/.cargo/bin/cargo xtask accept tui
-```
+[C 段 P1–P6](gate-11c-proposal.md#使用者確認紀錄) 與 [驗收計畫](gate-11c-validation-plan.md) 已確認；最新 verifier／CI 通過後依使用者授權合併 #144，再開獨立 worktree 實作。實作 merge 仍等使用者確認。

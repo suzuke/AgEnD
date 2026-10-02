@@ -28,7 +28,7 @@
 
 - **Runtime 與持久化**：git／kill shim、PTY holder、SQLite store、daemon 與 client；daemon 重啟後 holder 與 agent 持續執行。
 - **Codex 與 CLI**：app-server driver、訊息送達與冪等、三級忙碌策略；`status`、`send`、`inbox`、instance 管理、`daemon restart`、`doctor`、`init`。兩個假 Codex agent 中途重啟仍不漏不重的里程碑已驗收，真 Codex 另有 smoke 驗收。
-- **TUI**：`agend app` 接真 daemon，顯示 fleet 全貌與「需要你」、即時終端、操作者輸入、斷線重連。Codex 終端輸入目前回 `not_supported`；完整重現 agent CLI 與滑鼠滾動列為第 11 施工關 C 段。
+- **TUI**：`agend app` 接真 daemon，顯示 fleet 全貌與「需要你」、即時終端、操作者輸入、斷線重連。Codex 終端輸入目前回 `not_supported`；完整重現 agent CLI 與滑鼠滾動的 [第 11 施工關 C 段提案](docs/gates/gate-11c-proposal.md) P1–P6 已於 2026-10-02 逐項確認（D39），尚未實作。
 
 **第 10 施工關完成（[PR #143](https://github.com/suzuke/AgEnD/pull/143)，2026-10-02）**：已接通本機 pipeline、task／review／workflow／team 操作與 checks 沙箱。事件收尾修正經全新 verifier r17、Ubuntu／macOS CI 與人工補驗通過，使用者已確認合併。驗證範圍、原始失敗與兩個未執行的 explorer 見 [驗證證據](docs/gates/gate-10-verification.md)。執行方式見 [pipeline runtime](docs/architecture/pipeline-runtime.md)。Claude、OpenCode driver、GitHub forge、Telegram 在第 12 施工關，服務註冊與發布在第 13 施工關。完整狀態與驗收證據見 [ROADMAP](docs/ROADMAP.md)。
 
