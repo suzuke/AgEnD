@@ -20,6 +20,8 @@
 
 工具記錄實際 codex-cli 版本；本機只查版本為 **0.159.3**，未改算舊 0.158.0 的 smoke。CLI／模型或 clientId 保存行為不符會失敗，不能放行。
 
+本機 0.159.3 的 experimental schema 由 CLI 自行產生，turn/start 支援 clientUserMessageId、queue/add 要求該欄位，userMessage 的 clientId 可為 null。thread/turns/list 預設 itemsView 是 summary；工具明確要求 full，核全部持久化 items 與上下文。這只是協定形狀，不證明 runtime 保存 id 或 U17 通過。原 schema 在 /private/tmp/g11c-codex-0.159.3-schema，摘要／SHA256 在 /private/tmp/g11c-implementation-logs/codex-schema-0.159.3-inspection.json。
+
 ## 準備與 guard
 
 ~~~bash
@@ -42,7 +44,7 @@ AGEND_REAL_CODEX=1 \
 
 成功必須有 CLI 版本、同 thread／holder、manual busy／idle、兩個自己的 clientId／turn receipt、上下文與 cleanup；最後印 U17 live: passed; version approval is still required。failed 或未執行保持一般 Codex 輸入 not_supported。
 
-目前只完成編譯與 guard。編譯失敗及修正輸出保留在 /private/tmp/g11c-implementation-logs/u17-live-tool-build*.log；不把編譯當 live 驗證。
+完整歷史讀取修正後，binary／live example 建置、agend all-targets clippy、fmt、實際 thumb no-std check-deps 與文件 linkcheck 通過；未 opt-in 的 guard 仍 exit 2。原輸出在 /private/tmp/g11c-implementation-logs/u17-live-full-history-*.log。這些檢查沒有啟動真 backend 或模型，不是 live 通過證據。先前編譯失敗及修正輸出保留在 u17-live-tool-build*.log。
 
 ## 下一步
 

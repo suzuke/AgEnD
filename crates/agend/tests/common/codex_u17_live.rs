@@ -65,7 +65,7 @@ fn turns(observer: &mut Probe, thread: &str) -> Result<Vec<Value>, String> {
     loop {
         let page = observer.call(
             "thread/turns/list",
-            json!({"threadId":thread, "cursor":cursor, "limit":100}),
+            json!({"threadId":thread, "cursor":cursor, "limit":100, "itemsView":"full"}),
         )?;
         result.extend(
             page["data"]

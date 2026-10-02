@@ -118,6 +118,8 @@ cargo test -p agend
 
 C 段 CLP 拒絕案例同跑真 parser-backed fake 與真 daemon：agent caller 的 Acquire／Resize／Input／Release 全部 forbidden；之後核尺寸不變、原 owner 輸入仍可實收、拒絕 bytes 沒有進 consumer。
 
+U17 live 工具明確以 itemsView: full 分頁取完整 items；0.159.3 schema 預設僅 summary。只完成協定檢查／編譯／guard，未跑真模型；[範圍](../../docs/gates/gate-11c-u17-live.md)。
+
 ## 下一步
 
 ```bash

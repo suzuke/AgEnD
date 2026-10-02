@@ -23,6 +23,8 @@
 
 ## 驗證紀錄
 
+- 2026-10-03 U17 live preflight：本機 Codex 0.159.3 自產 schema 的 turns/list 預設為 summary，診斷工具改明確要求 itemsView: full；client id 欄位形狀已核，未啟動 backend 或模型。真 live 仍等四回合 opt-in（draft PR #145）。
+
 - 2026-10-03 本批 accept tui exit 0：597 主 suite passed／0 ignored，fake／真 daemon／完整 fake U17 三個 demos 通過。執行在新增 golden 前已完成 holder 階段；golden 後另跑完整 terminal_frames 8 passed，沒有把它加進 597。fmt、workspace clippy／最後 TUI clippy、實際 thumb no-std 及 linkcheck 通過。56dbb71 四個 CI jobs 均成功，新提交 CI 另核。（draft PR #145）。
 
 - 2026-10-03 C 段矩陣收尾：三個真 producer App 延遲／倒序／舊 generation cases 通過，三個對應 mutants 各 exit 101，原 source 已逐 byte 還原。新增真 PTY holder／client frame golden，完整 frame suite 8 passed；[證據](gate-11c-frame-order-validation.md)、[矩陣對照](gate-11c-matrix-status.md)。完整 acceptance／新 head CI 另核，真 live／獨立／人工驗收仍待完成（draft PR #145）。
