@@ -83,6 +83,8 @@ AGEND_BLESS_GOLDEN=1 cargo test -p agend-daemon --test store   # 故意改 schem
 - [x] 第 10 施工關：FakeStore／FakeForge／FakeRunner／FakeDriver／FakeClock 的整條 queue 測試驗 merge、checks 返工、stale、store 失敗與逐 task boot 隔離；transition 驗 CAS conflict 不派 action；`pipeline_store_ports.rs` 對 fake 與 SQLite 同跑結果／receipt 原子提交與 rollback；真 git／Runner／LocalForge 契約、checks 的 metadata／cache／socket 防護、cargo/npm smoke；跨程序的重啟、merge intent/trailer 對帳、持久化請示與人工 attention（`pipeline_adapters.rs`、`agend/tests/pipeline.rs`、`pipeline_tui.rs`）
 - [ ] claude／opencode driver、forge github、notifier（第 12 施工關）
 
+`pipeline::tests::failed_human_approval_commit_keeps_attention_and_publishes_no_resolution` 對完整 queue／FakeStore 驗核准 CAS 失敗時保留原 attention，沒有 resolution 或 merge；真程序／CLI 回歸見 agend 的 pipeline_attention_events。
+
 ## 下一步
 
 ```bash

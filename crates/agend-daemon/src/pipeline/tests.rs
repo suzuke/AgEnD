@@ -403,3 +403,93 @@ async fn one_failed_boot_dispatch_does_not_prevent_other_tasks_from_starting() {
     assert_eq!(bindings[0].instance, "writer");
     worker.abort();
 }
+
+#[tokio::test]
+async fn failed_human_approval_commit_keeps_attention_and_publishes_no_resolution() {
+    use agend_core::pipeline::workflow::WorkflowStage;
+    let lab = Lab::new().await;
+    let mut workflow = Workflow::builtin_code();
+    workflow.id = "human-code".into();
+    workflow.stages.insert(
+        workflow.stages.len() - 1,
+        WorkflowStage::new(
+            "approve",
+            Stage::Approval {
+                by: Approver::Human,
+                count: 1,
+                bind_head: true,
+            },
+        ),
+    );
+    lab.store.save_workflow(&workflow).await.unwrap();
+    let CommandResult::TaskCreated { data } = lab
+        .handle
+        .operator(OperatorCommand::TaskCreate {
+            title: "atomic human approval".into(),
+            role: "dev".into(),
+            team_id: "code-team".into(),
+            workflow_id: Some("human-code".into()),
+        })
+        .await
+        .unwrap()
+    else {
+        panic!("not created")
+    };
+    let task = data.task_id;
+    let binding = lab
+        .store
+        .bindings()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|b| b.task == task)
+        .unwrap();
+    lab.executor.forge.push(binding.branch.as_deref().unwrap());
+    lab.done(&task, 1).await.unwrap();
+    lab.stage(&task, "review").await;
+    lab.handle
+        .agent(
+            Some("reviewer".into()),
+            AgentCommand::ReviewApprove {
+                task_id: task.clone(),
+                identity: Some(ResultIdentity {
+                    stage_id: "review".into(),
+                    attempt: 1,
+                }),
+            },
+        )
+        .await
+        .unwrap();
+    lab.stage(&task, "approve").await;
+    let id = format!("approval:{task}/approve/1");
+    let before = lab.fleet.attention(&id).unwrap();
+    let mut subscription = lab
+        .fleet
+        .subscribe(Some(lab.fleet.view().as_of_event_id))
+        .unwrap();
+    lab.store.fail_next("advance_task", "disk full");
+    assert!(
+        lab.handle
+            .resolve(ResolveAttentionData {
+                request_id: "failed-approval".into(),
+                attention_id: id.clone(),
+                action: AttentionAction::Approve,
+                note: None,
+            })
+            .await
+            .is_err()
+    );
+    // Drain the serialized queue before observing the resulting view/events.
+    lab.handle
+        .agent(Some("writer".into()), AgentCommand::Status)
+        .await
+        .unwrap();
+    assert_eq!(lab.fleet.attention(&id), Some(before));
+    while let Ok(event) = subscription.live.try_recv() {
+        assert!(!matches!(
+            event.event,
+            DaemonEvent::AttentionResolved { .. }
+        ));
+    }
+    assert!(lab.executor.forge.merges().is_empty());
+}

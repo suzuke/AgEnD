@@ -3,13 +3,13 @@
 > **TL;DR**
 > - daemon 用 core 的狀態機把一個 task 從派工推到 merge：建 worktree 並裝 hook、跑 checks、agent 審查、你核准、在本機 repo merge；daemon 被硬殺後接著做，不重複 merge。
 > - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這個施工關才算完成。
-> - 下一步：由 agent 逐步帶使用者親自驗收；使用者確認前不 merge。
+> - 下一步：完成事件收尾驗證後，由 agent 帶使用者補驗；使用者確認前不 merge。
 
 **先看這條**：這頁的步驟會用到 `agend`。每個新開的終端機分頁（包括第二個終端）都要先跑 [人工驗收頁開頭的設定](gate-10-manual-start.md#你親自驗收)，否則會跑到舊的 Node 版 `agend` 1.24.0。
 
 ## 狀態
 
-**驗收中**（2026-10-02）：P1–P11 使用者已確認，提案 #130 已 merge；實作在 `feat/gate-10-pipeline` worktree。完整自動驗收、全新 verifier r12 與雙平台 CI 通過，待使用者親自驗收及確認；[draft PR #143](https://github.com/suzuke/AgEnD/pull/143) 未合併。見 [驗證證據](gate-10-verification.md) 與 [pipeline runtime](../architecture/pipeline-runtime.md)。前置施工關 #125、#132、#131、#136 及第 11 施工關 B 段 #140 已完成並 merge；本關 client protocol 1.3。
+**驗收中**（2026-10-02）：P1–P11 使用者已確認，提案 #130 已 merge；實作在 `feat/gate-10-pipeline` worktree。原版本的完整自動驗收、全新 verifier r12／r15、雙平台 CI 與人工主流程通過；人工找到的 watch／核准事件問題正在收尾，修正後待驗證、事件補驗及使用者確認；[draft PR #143](https://github.com/suzuke/AgEnD/pull/143) 未合併。見 [驗證證據](gate-10-verification.md) 與 [pipeline runtime](../architecture/pipeline-runtime.md)。前置施工關 #125、#132、#131、#136 及第 11 施工關 B 段 #140 已完成並 merge；本關 client protocol 1.3。
 
 ## 範圍
 
@@ -124,11 +124,11 @@
 
 ## 驗收紀錄
 
-由你填寫。
+由 agent 依使用者貼出的輸出記錄；事件呈現的修正仍待補驗，不能視為 merge 授權。
 
 | 日期 | 結果（通過／不通過） | 備註 |
 |---|---|---|
-|  |  |  |
+| 2026-10-02 | 人工主流程通過；收尾待複驗 | `45e957e`；[完整人工紀錄](gate-10-manual-record.md)，11 步已操作；watch／核准事件與指令修正尚待驗證，未 merge。 |
 
 ## 進度紀錄
 
@@ -136,4 +136,4 @@ r12 CONFIRMED `dfe5bc6`；workspace 771 passed／2 ignored、完整 accept 713 p
 
 ## 下一步
 
-agent 帶使用者從 [人工驗收步驟 1](gate-10-manual-start.md) 開始。
+完成收尾修正的自動／全新獨立驗證後，由 agent 帶使用者補驗 watch 與核准事件，再等明確 merge 確認。

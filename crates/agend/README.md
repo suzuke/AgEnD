@@ -56,6 +56,8 @@
 - 以 `git` 名稱執行 → `agend_shim::run`
 - 以 git hook 名稱執行（git 從 `$AGEND_HOME/hooks/` 呼叫） → `agend_shim::run`（`Tool::Hook`）
 
+watch 的 task_changed 顯示事件 TaskView 的 current_stage；舊 peer 未帶該欄位時仍顯示原摘要。
+
 ## 下一步
 
 ```bash

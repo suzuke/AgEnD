@@ -458,6 +458,21 @@ where
         event: PipelineEvent,
         detail: Option<String>,
     ) -> Result<(), Refusal> {
+        let human_action = if matches!(
+            loaded.state.current_stage().map(|s| &s.stage),
+            Some(Stage::Approval {
+                by: Approver::Human,
+                ..
+            })
+        ) {
+            match &event {
+                PipelineEvent::ApprovalGranted { .. } => Some(AttentionAction::Approve),
+                PipelineEvent::ChangesRequested { .. } => Some(AttentionAction::RequestChanges),
+                _ => None,
+            }
+        } else {
+            None
+        };
         let (task, next, entered, actions) = transition::advance(
             self.store.as_ref(),
             &self.clock,
@@ -468,7 +483,9 @@ where
         )
         .await?;
         self.note(&task.id, None).await?;
-        self.clear_task_attention(&task.id);
+        let human_resolution =
+            human_action.map(|action| (format!("approval:{}", ticket(&loaded.state)), action));
+        self.clear_task_attention(&task.id, &next, human_resolution);
         let result = async {
             // Drop obsolete review bindings before a new attempt is dispatched.
             for binding in self

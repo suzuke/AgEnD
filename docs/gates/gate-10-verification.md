@@ -1,9 +1,9 @@
 # 第 10 施工關：驗證證據
 
 > **TL;DR**
-> - 本機 pipeline 已實作；產品碼固定在下列 head，雙平台 CI 通過。
-> - 全新 verifier r12 CONFIRMED；兩個 deep explorer 未執行，人工驗收尚未完成，PR 未合併。
-> - 下一步：由 agent 一次帶使用者驗收一步；確認後才能 merge。
+> - 本頁保留原產品 head 與雙平台 CI 證據；收尾修正的最新結果見 PR。
+> - r12／r15 與人工主流程通過；事件收尾仍待驗證及補驗，兩個 explorer 未執行，未 merge。
+> - 下一步：完成收尾的全新驗證後，一次帶使用者補驗事件；確認後才能 merge。
 
 ## 範圍與固定版本
 
@@ -59,13 +59,17 @@ accept 含兩個 crash failpoint 的四次開機、new-home negative、沙箱與
 後續 `ea975c3` 的 macOS PR job 110607655251 在 content-filter fixture 的準備斷言失敗：普通 git add 因有效 stat cache 未套用新 filter。保存原 log `/private/tmp/g10-ea-mac-filter-failure.log`；以穩定 stat cache 確定性重現原 producer exit 101（`/private/tmp/g10-filter-producer-before.log`），改真 Git --renormalize 後六個回歸／clippy 通過。相對產品 head，另有這一個測試準備修正；runtime／core／CLI／xtask／CI／Cargo 碼不變。
 最後提交的 CI 與完成版獨立審查結果見 PR；上述各報告只涵蓋自己的 frozen head。
 
+## 人工驗收後的收尾
+
+使用者完成 `45e957e` 的 11 步主流程，證據與缺陷見 [人工紀錄](gate-10-manual-record.md)。事件與指令修正的最新 head／CI／全新 verifier 結果見 PR；r12／r15 只認證自己的 frozen head，不能代替新產品碼驗證。
+
 ## 尚未驗證與支援邊界
 
 - 兩個既有 ignored deep explorer 未執行：`a4r3_dead_end_explorer`、`random_accepted_workflows_always_finish_deep`。
 - 此關用 fake worker 驅動真 daemon／Git／shim 與 local forge；其他 backend／GitHub forge 在第 12 施工關。
 - 行尾／內容轉換、nested Git metadata／gitlink、特殊檔案與未解 index 衝突先保留原資料、回報 Failed；操作者處理後重試。
-- 使用者尚未完成 [親自驗收](gate-10-pipeline.md#你親自驗收)，此頁不代表 merge 授權。
+- 使用者已完成舊 head 的人工主流程；新事件呈現仍待補驗，此頁不代表 merge 授權。
 
 ## 下一步
 
-agent 先帶使用者執行 `cargo xtask accept pipeline`，逐項比對輸出，再給下一步。
+agent 完成收尾驗證後一次帶一步補驗 watch 與核准事件，再等使用者明確確認。

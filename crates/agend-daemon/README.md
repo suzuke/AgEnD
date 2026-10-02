@@ -7,7 +7,7 @@
 
 ## 第 10 施工關（實作中，待驗收）
 
-單一 pipeline queue、SQLite schema v5、真 git／Runner／LocalForge、binding 與 hook 生命週期、checks 沙箱、重啟／每日對帳、team／workflow／task／請示／提醒已接通；執行規則見 [pipeline runtime](../../docs/architecture/pipeline-runtime.md)。
+單一 pipeline queue、SQLite schema v5、真 git／Runner／LocalForge、binding 與 hook 生命週期、checks 沙箱、重啟／每日對帳、team／workflow／task／請示／提醒已接通；執行規則見 [pipeline runtime](../../docs/architecture/pipeline-runtime.md)。人工核准事件在 store CAS 成功後發布真 action；通知型 timeout 留在同一核准 ticket 時不移除再重建 attention。
 
 ## 負責
 

@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - 依 crate 由下往上分 13 個施工關；每個施工關單獨驗收，使用者確認後才開下一個施工關（D22）。
-> - 目前狀態：**第 1–9 施工關完成並已合併**；第 11 施工關 A、B 段已驗收並合併（B 段 #140，2026-10-01），C 段未開始。第 10 施工關自動驗收、全新 verifier 與雙平台 CI 通過，待人工驗收，尚未合併；第 12 施工關 A 段提案 #138 待確認；第 13 施工關未開始。
-> - 下一步：由 agent 逐步帶使用者完成第 10 施工關 pipeline 人工驗收；第 11 施工關 C 段等第 10 施工關完成後提案。第 12 施工關 A 段 P1–P10 在 #138，仍待使用者確認。
+> - 目前狀態：**第 1–9 施工關完成並已合併**；第 11 施工關 A、B 段已驗收並合併（B 段 #140，2026-10-01），C 段未開始。第 10 施工關原版本自動／獨立／CI 與人工主流程通過，事件收尾修正待複驗，尚未合併；第 12 施工關 A 段提案 #138 待確認；第 13 施工關未開始。
+> - 下一步：完成第 10 施工關事件收尾的自動／獨立驗證，再帶使用者補驗事件顯示；第 11 施工關 C 段等第 10 施工關完成後提案。第 12 施工關 A 段 P1–P10 在 #138，仍待使用者確認。
 
 ## 13 個施工關
 
@@ -20,7 +20,7 @@
 | 7 `codex` | [完成（2026-09-28；已 merge #132）](gates/gate-07-codex.md) | codex driver + 送達模型、三級忙碌策略 | 假 app-server 與真 codex 0.158.0 驗收通過 |
 | 8 `client` | [完成（2026-09-26）](gates/gate-08-client.md) | 整合施工關：agend-client + protocol server | CLI 連得上；daemon 重啟時會重試 |
 | 9 `cli` | [完成（2026-09-29；已 merge #136）](gates/gate-09-cli.md) | agend CLI：agent 命令、操作者命令、status；安裝相關先做 `doctor`、`init`，服務註冊留第 13 施工關 | 對假／真 daemon 驗輸出與錯誤；兩個假 Codex agent 互傳訊息、中途重啟不漏不重 |
-| 10 `pipeline` | [驗收中（2026-10-02；自動與獨立驗證通過，待使用者）](gates/gate-10-pipeline.md) | daemon：pipeline、git、runner、forge local、supervisor、reconcile | 假 driver + 暫存 repo：task 從派工走到 merge |
+| 10 `pipeline` | [驗收中（2026-10-02；人工主流程通過，收尾修正待複驗）](gates/gate-10-pipeline.md) | daemon：pipeline、git、runner、forge local、supervisor、reconcile | 假 driver + 暫存 repo：task 從派工走到 merge |
 | 11 `tui` | [實作中（A、B 段完成並已 merge；C 段未開始）](gates/gate-11-tui.md) | attention-first TUI：畫面層、接真 daemon；C 段完整重現 agent CLI 與滑鼠滾動 | A 段假事件、B 段真 daemon 驗收通過；C 段等第 10 施工關完成後提案 |
 | 12 `adapters` | [提案中（A 段 draft PR #138 待確認，尚未 merge 或實作）](gates/gate-12-adapters.md) | A claude、B opencode driver、C forge github、D Telegram | 先對假實作，再做真 backend smoke test |
 | 13 `install` | [未開始](gates/gate-13-install.md) | 安裝與發布（最後一個施工關）：服務註冊、`agend uninstall`、`agend telegram setup`（由 daemon 配對）、`xtask release`、brew、GitHub release、`cargo install` | CI 用全新 HOME + 假 agent，從安裝到第一個 task 完成 < 5 分鐘；每個 `doctor` 檢查都有「故意弄壞 → 看到修正指令」的測試 |
@@ -68,9 +68,11 @@
 
 ## 下一步
 
-由 agent 從 [Gate 10 人工驗收步驟 1](gates/gate-10-manual-start.md) 帶使用者做起，一次只給一步、比對輸出後再繼續。
+人工主流程紀錄見 [Gate 10 人工驗收紀錄](gates/gate-10-manual-record.md)；agent 完成收尾修正的驗證後，一次帶一步補驗 watch 與核准事件，再等使用者確認。
 
 ## 進度紀錄
+
+- 2026-10-02 使用者完成 `45e957e` 的 11 步人工主流程；main 防護、WIP patch、checks 中重啟與沙箱拒絕通過，home／repo／原 holder 清理完成。發現 watch 缺 stage、timeout 核准項目重現與 resolved unknown；兩個真程序回歸已在原版本重現 exit 101，修正與新一輪驗證進行中，待補驗及確認，未 merge（#143；[人工紀錄](gates/gate-10-manual-record.md)）。
 
 - 2026-10-02 `ea975c3` 的 macOS PR CI（job 110607655251）在 content-filter fixture 的準備斷言失敗；有效 stat cache 下普通 git add 沒套用新 filter。已確定性重現，改真 Git --renormalize 強制建立轉換後 blob，六個回歸與 clippy 通過；原 CI／101 log 保留，產品碼不變，待最新 CI（draft PR #143）。
 - 2026-10-02 文件 verifier r13 在 `ea975c3` 找到索引的 target／PATH 與人工驗收頁不一致（REFUTED）；統一 CARGO_TARGET_DIR 與 binary PATH，實際初始化選到 `agend 0.0.0`。其餘文件、證據與產品 tree 核對通過，產品碼不變；人工驗收及 merge 仍待使用者（draft PR #143）。

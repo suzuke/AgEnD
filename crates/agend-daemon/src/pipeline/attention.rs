@@ -11,13 +11,36 @@ where
     C: Clock + Send + Sync + 'static,
     V: PipelineView,
 {
-    pub(super) fn clear_task_attention(&self, task: &str) {
+    pub(super) fn clear_task_attention(
+        &self,
+        task: &str,
+        next: &PipelineState,
+        human_resolution: Option<(String, AttentionAction)>,
+    ) {
+        // A notification or partial approval can leave the same human ticket pending.
+        let pending = (next.status() == PipelineStatus::Running
+            && matches!(
+                next.current_stage().map(|s| &s.stage),
+                Some(Stage::Approval {
+                    by: Approver::Human,
+                    ..
+                })
+            ))
+        .then(|| format!("approval:{}", ticket(next)));
         for a in self.fleet.view().attention {
             if a.task_id.as_deref() == Some(task)
                 && a.ask.is_none()
                 && let Some(id) = a.attention_id
             {
-                self.fleet.dismiss(&id);
+                if pending.as_deref() == Some(id.as_str()) {
+                    continue;
+                }
+                match &human_resolution {
+                    Some((resolved_id, action)) if resolved_id == &id => {
+                        self.fleet.resolve(&id, *action);
+                    }
+                    _ => self.fleet.dismiss(&id),
+                }
             }
         }
     }

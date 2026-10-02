@@ -87,6 +87,8 @@ workflow apply 新增版本，既有 task 不換版本；內建 workflow 不可�
 `delivery=inbox` 只給假 worker：沒有 backend driver，寫入 inbox 算 sent、讀取不算 confirmed；同 ticket 的結果才確認派工。
 正式 push 仍走已完成的 Codex driver；Claude／OpenCode 的正式 push 在第 12 施工關。
 
+人工核准的 attention_resolved 在 store CAS 成功後帶 approve／request_changes；同一 ticket 的通知型 timeout 不清掉再重建核准項目。debug watch 從事件 TaskView 顯示 current_stage；resolve 成功只表示核准提交，封存／worktree 檢查須等 task done。
+
 ## 下一步
 
 ```bash

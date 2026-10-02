@@ -102,6 +102,8 @@ cargo test -p agend
 - [ ] TTY 上 `instance remove` 的確認問題（測試的 stdin 不是終端；只驗了非 TTY 沒 `--yes` 回 exit 2）
 - [ ] doctor 的 `disk` fail／home 超過 20 GB、`home` 不能寫：規則是 `agend_core::setup` 的常數，沒有做出小磁碟或 20 GB 的 home（D24 的「每個 doctor 檢查都有故意弄壞的測試」在第 13 施工關補齊）
 
+`pipeline_attention_events` 經真 daemon／SQLite／Git 與 Rust CLI watch 驗 timeout 不重建核准項目、Approve／RequestChanges 真 action 各一次、新返工 attempt 才重新要求核准、stage 順序及 single merge。
+
 ## 下一步
 
 ```bash

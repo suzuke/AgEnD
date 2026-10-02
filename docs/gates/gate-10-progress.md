@@ -53,3 +53,5 @@
 ## 下一步
 
 回 [Gate 10 入口](gate-10-pipeline.md) 依目前狀態驗收。
+
+- 2026-10-02 使用者完成 `45e957e` 的 11 步人工主流程；main 防護、WIP patch、checks 中重啟與沙箱拒絕通過，home／repo／原 holder 清理完成。發現 watch 缺 stage、timeout 核准項目重現與 resolved unknown；兩個真程序回歸已在原版本重現 exit 101，修正與新一輪驗證進行中，待補驗及確認，未 merge（#143；[人工紀錄](gate-10-manual-record.md)）。

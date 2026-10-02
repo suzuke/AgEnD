@@ -2,7 +2,7 @@
 
 > **TL;DR**
 > - 由 agent 一次帶一步，先跑完整 demo，再觀察重啟與人工核准 merge。
-> - 狀態與驗證證據見 [Gate 10 入口](gate-10-pipeline.md)。
+> - 勾選記 `45e957e` 的人工主流程；修正後事件呈現仍待複驗，見 [人工紀錄](gate-10-manual-record.md)。
 > - 下一步：步驟 5 通過後，繼續 [步驟 6–11](gate-10-manual-finish.md)。
 
 ## 你親自驗收
@@ -35,7 +35,7 @@ agend --version
 
    應該看到：`== happy`、`== checks-fail`、`== changes`、`== wip`、`== main-advanced`、兩個 `== restart: …`、`== sandbox`、`== hooks`，倒數第二行 `pipeline demo: all sections passed`，最後一行 `gate 10 (pipeline): checks passed`。
 
-   - [ ] 通過
+   - [x] 人工主流程通過（45e957e；watch／核准事件另待複驗）
 
 2. 四次開機，兩次在危險的地方被中止。
 
@@ -59,7 +59,7 @@ agend --version
    | `no duplicate dispatch; cleanup complete` | 每個 ticket 一次派送，worktree／branch／binding 清掉 |
    | `negative check … unknown` | 換新 home 接不起前一個 task |
 
-   - [ ] 通過
+   - [x] 人工主流程通過（45e957e；watch／核准事件另待複驗）
 
 3. 你自己動手：建暫存 repo，前景啟動 daemon。
 
@@ -77,7 +77,7 @@ agend --version
 
    應該看到：`setup` 印出 `repo=<home>-repo`、兩個 team 與三個 agent（name `g10-dev`、`g10-rev`、`g10-hold`）；daemon 最後一行 `agend daemon ready: instances=3 …`。daemon 留在前景。
 
-   - [ ] 通過
+   - [x] 人工主流程通過（45e957e；watch／核准事件另待複驗）
 
 4. 派一個 task，看它一關一關走，停在等你核准。
 
@@ -97,9 +97,9 @@ agend --version
    agend task create --team g10 --role dev --workflow demo "hello"
    ```
 
-   應該看到：印出 task id `<t-N>`；watch 依序出現 `<t-N>` 的 `work` → `submit` → `checks` → `review`，最後 `attention_required approval:<t-N>/approve/1 … actions: approve, request_changes`，然後停住。
+   應該看到：印出 task id `<t-N>`；watch 的 `task_changed` 帶 `(stage: <stage>)`，依序顯示 `<t-N>` 的 `work` → `submit` → `checks` → `review`，最後 `attention_required approval:<t-N>/approve/1 … actions: approve, request_changes`，然後停住。
 
-   - [ ] 通過
+   - [x] 人工主流程通過（45e957e；watch／核准事件另待複驗）
 
 5. 按核准，看它 merge。
 
@@ -110,12 +110,17 @@ agend --version
    ```bash
    export AGEND_HOME=<home>    # 步驟 3 的那個；每個新分頁都要先設
    ~/.cargo/bin/cargo run -q -p agend-client --example client_probe -- resolve approval:<t-N>/approve/1 approve
-   git -C "$AGEND_HOME-repo" log -1 main
    ```
 
-   應該看到：`resolved`；watch 出現 `attention_resolved` 與 `<t-N> merge` → `done`；`git log` 的標題是 `Merge agend/<t-N>/hello: hello`，最後一行 `Agend-Task: <t-N>`。
+   **等 watch 出現 `<t-N>: done` 後**，才執行：
 
-   - [ ] 通過
+   ```bash
+   git --no-pager -C "$AGEND_HOME-repo" log -1 main
+   ```
+
+   應該看到：`resolved`；watch 出現 `attention_resolved approval:<t-N>/approve/1 approve` 與 `(stage: merge)`，最後 `<t-N>: done`；`git log` 的標題是 `Merge agend/<t-N>/hello: hello`，最後一行 `Agend-Task: <t-N>`。
+
+   - [x] 人工主流程通過（45e957e；watch／核准事件另待複驗）
 
 ## 下一步
 
