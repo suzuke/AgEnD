@@ -5,7 +5,7 @@
 > - 記住：**protected ref 由 hook 守**（git 自己回報要改哪些 ref，不猜）；shim 只做 hook 做不到的：導向、快照、擋離開 branch、kill 防護。只防好意但會犯錯的 agent（見「威脅模型」）。
 > - 下一步：`cargo xtask accept shim` 看 demo；行為規則看 [第 3 施工關頁](../../docs/gates/gate-03-shim.md)。
 
-## 第 10 施工關（實作中，待驗收）
+## 第 10 施工關（已驗收，2026-10-02）
 
 binding snapshot 型別移到 `agend_core::binding`，shim re-export，JSON 與版本 1 保持相容。daemon 經內部 `agend hooks install|uninstall` 子命令控制 hook；daemon 不依賴 shim crate。
 

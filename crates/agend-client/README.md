@@ -5,7 +5,7 @@
 > - 記住：**不建 async runtime、不讀環境變數與設定檔**；socket 路徑與呼叫者身分由呼叫端給。
 > - 下一步：第 9 施工關的 CLI 用 `Client::connect` + `request`（要 1.3）；第 11 施工關 B 段的 TUI（`ClientSource`）用 `connect_once`、`next_event`、`next_terminal` 與寫入端 `Sender`。
 
-## 第 10 施工關（實作中，待驗收）
+## 第 10 施工關（已驗收，2026-10-02）
 
 一般連線要求 client protocol 1.3；`resolve_attention_with_note` 可送退回修改理由。`agend daemon restart` 仍只要求 1.2，讓新 CLI 能重啟舊 daemon。
 

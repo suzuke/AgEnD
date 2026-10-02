@@ -5,7 +5,7 @@
 > - 記住：**`#![no_std]` + `alloc` + `forbid(unsafe_code)`；唯一直接依賴是停用預設功能的 `serde`（只開 `derive` + `alloc`；D32）**；時間只經 `Clock` trait。
 > - 下一步：跑 `cargo xtask accept core`，看純邏輯 demo 與 crate 邊界檢查。
 
-## 第 10 施工關（實作中，待驗收）
+## 第 10 施工關（已驗收，2026-10-02）
 
 `PipelineSnapshot` 不含 workflow，只有驗證後的 `restore` 才能回到可執行狀態；`outstanding_actions` 重建原 ticket；`TaskStatus` 含 Failed／Cancelled。binding snapshot 型別共用於 core；Store 的 `advance_task` 同交易存 task、快照、受阻理由與 event。
 

@@ -72,6 +72,8 @@
 
 ## 進度紀錄
 
+- 2026-10-02 文件 verifier r18 REFUTED `044f36e`：363 個非 Markdown entries 與 `430478d` 的 blob／mode 完全相同，但四份 crate README 與名詞表六列仍有未標歷史的「待驗收」舊狀態；已同步完成狀態，產品碼未改。最終文件驗證與 CI 見 #143，原報告 `/private/tmp/g10-r18-report.md` 保留。
+
 - 2026-10-02 第 10 施工關完成驗收，使用者確認 merge（#143）：`430478d` 全新 verifier r17 CONFIRMED，完整 accept 718 passed／2 ignored，實際 no-std 與四個 Ubuntu／macOS CI job 通過；人工事件補驗確認完整 stage、一次正確 Approve resolution、單次 Git merge 及 teardown。舊反例與 frozen-head 紀錄保留；收尾文件與最新 CI 結果見 PR。
 
 - 2026-10-02 verifier r16 REFUTED `eac09cf`：六項完整 baseline（workspace 774 passed／2 ignored、accept 716 passed／2 ignored）與四個 CI 全綠，但真 SQLite post-CAS note 故障留下 durable approval、resolved unknown 與停住的 merge，重啟才恢復一次。attention_reason 清除改與 CAS 同交易，fake／SQLite 契約及真程序反例回歸補齊；原失敗 log 保留，修正待全新驗證及人工補驗，未 merge（#143）。

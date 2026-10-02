@@ -5,7 +5,7 @@
 > - 記住：**畫面只讀 `source::Fleet`、只透過 `source::Source` 動作**；真的來源是 `source::client::ClientSource`，lib 裡沒有 socket 程式碼。
 > - 下一步：`~/.cargo/bin/cargo run -q -p agend-tui --example tui_fake` 自己操作；`~/.cargo/bin/cargo xtask accept tui` 看 demo。
 
-## 第 10 施工關（實作中，待驗收）
+## 第 10 施工關（已驗收，2026-10-02）
 
 pipeline task detail 顯示 repo、關卡種類、agent、受阻理由與 WIP archive 路徑；人工核准可 approve／退回修改（先輸入理由），task failed 可 acknowledge。讀取資料與動作仍只經 Source 和 client protocol。
 
