@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 沿用步驟 3 建立的 home，驗清理、防護、WIP、重啟與沙箱。
 > - 狀態與驗證證據見 [Gate 10 入口](gate-10-pipeline.md)。
-> - 勾選記 `45e957e` 的人工結果；事件收尾待複驗，見 [人工紀錄](gate-10-manual-record.md)。
+> - 勾選記 `45e957e` 的人工結果；`430478d` 的事件補驗已通過，見 [人工紀錄](gate-10-manual-record.md)。
 
 先完成 [步驟 1–5](gate-10-manual-start.md)。每個新終端先跑該頁的 CLI 設定。
 
@@ -104,4 +104,4 @@
 
 ## 下一步
 
-本次 [人工紀錄](gate-10-manual-record.md) 已保存；收尾修正經自動／全新 verifier 通過後，補驗 watch 與核准事件，再由使用者確認 merge。
+第 10 施工關已完成驗收，使用者於 2026-10-02 明確確認 merge（[PR #143](https://github.com/suzuke/AgEnD/pull/143)）。下一步為第 11 施工關 C 段提案；第 12 施工關 A 段 #138 的 P1–P10 仍待使用者確認。 本次 [人工紀錄](gate-10-manual-record.md) 已保存。

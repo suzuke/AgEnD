@@ -1,9 +1,24 @@
 # 第 10 施工關：驗證證據
 
 > **TL;DR**
-> - 本頁保留原產品 head 與雙平台 CI 證據；收尾修正的最新結果見 PR。
-> - r12／r15 與人工主流程通過；事件收尾仍待驗證及補驗，兩個 explorer 未執行，未 merge。
-> - 下一步：完成收尾的全新驗證後，一次帶使用者補驗事件；確認後才能 merge。
+> - 本頁分開保存各 frozen head 的證據；最終產品 `430478d` 經 r17、雙平台 CI 與人工補驗通過。
+> - 使用者已確認 merge；兩個 ignored explorer 未執行，舊失敗與修正紀錄保留。
+> - 下一步：最新文件核對與 CI 結果見 PR #143，依使用者確認合併。
+
+## 最終產品驗證：430478d（r17）
+
+Frozen product `430478d71f8918be16d3b74b9ef4407bdaf69d4e`；全新、無相關 context 的 verifier r17 **CONFIRMED**。build、fmt、workspace clippy、實際 thumb no-std check-deps 與完整 accept 全部 exit0；accept **718 passed／0 failed／2 ignored**，80 個 outer summaries，排除 signal child 重複計數。本輪未另跑本機完整 workspace tests；CI 有跑完整 workspace。
+
+唯一有限 native probe group（1 outer test，Approve／RequestChanges 兩流程）以真 SQLite trigger 在 CAS 內拒絕清 attention：task／event／receipt 全 snapshot 回滾、原 attention 保留、main 不動且無假 resolution；移除故障後 retry、舊 id 拒絕、返工 attempt2、watch 全關卡、單次 merge、WIP／binding／receipt 清理均通過。temporary-source formatting 準備錯誤另保留，不算產品反例。
+
+原報告 `/private/tmp/g10-r17-report.md`（SHA256 `61becacfc33606b5e66a0e10fdfcb005bd029ba2e21a0fb71b4e16c61489a276`）；47 份證據的 manifest `/private/tmp/g10-r17-logs/SHA256SUMS`（SHA256 `b9f2370024ecd9dc5fb296c57e50c487be2a654a865dba2482fed373fd93860c`）。自身程序與成功 fixture 已清理，worktree clean；原 r16 失敗證據保留。
+
+| Event | Run | Ubuntu job | macOS job |
+|---|---|---|---|
+| PR | [36961954901](https://github.com/suzuke/AgEnD/actions/runs/36961954901) | 110697361770 | 110697361915 |
+| push | [36961951762](https://github.com/suzuke/AgEnD/actions/runs/36961951762) | 110697350052 | 110697350240 |
+
+上述 exact-head 四個 job 成功；root 另核對 raw logs 有實際 no-std、無 SKIPPED／failed。人工 `430478d` 事件補驗與明確 merge 確認見 [人工紀錄](gate-10-manual-record.md)。最新收尾文件的核對與 CI 記在 [PR #143](https://github.com/suzuke/AgEnD/pull/143)，不改寫下方歷史 frozen-head 證據。
 
 ## 人工收尾的反例（r16）
 
@@ -74,8 +89,8 @@ accept 含兩個 crash failpoint 的四次開機、new-home negative、沙箱與
 - 兩個既有 ignored deep explorer 未執行：`a4r3_dead_end_explorer`、`random_accepted_workflows_always_finish_deep`。
 - 此關用 fake worker 驅動真 daemon／Git／shim 與 local forge；其他 backend／GitHub forge 在第 12 施工關。
 - 行尾／內容轉換、nested Git metadata／gitlink、特殊檔案與未解 index 衝突先保留原資料、回報 Failed；操作者處理後重試。
-- 使用者已完成舊 head 的人工主流程；新事件呈現仍待補驗，此頁不代表 merge 授權。
+- 人工主流程固定 `45e957e`，事件補驗固定 `430478d`，均已通過；merge 授權來自使用者 2026-10-02 的明確確認。
 
 ## 下一步
 
-agent 完成收尾驗證後一次帶一步補驗 watch 與核准事件，再等使用者明確確認。
+第 10 施工關已完成驗收，使用者於 2026-10-02 明確確認 merge（[PR #143](https://github.com/suzuke/AgEnD/pull/143)）。下一步為第 11 施工關 C 段提案；第 12 施工關 A 段 #138 的 P1–P10 仍待使用者確認。

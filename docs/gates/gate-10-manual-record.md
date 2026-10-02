@@ -2,13 +2,13 @@
 
 > **TL;DR**
 > - 使用者在 `45e957e` 完成 11 步操作；本機 pipeline 主流程、WIP、防護、重啟與清理通過。
-> - watch／核准事件與指令有問題；修正後的自動／全新獨立驗證及事件補驗仍待完成，未 merge。
-> - 下一步：agent 完成收尾驗證後，一次帶使用者補驗事件呈現，再等明確 merge 確認。
+> - watch／核准事件修正經 `430478d` 的全新 verifier r17、CI 與人工事件補驗通過；使用者已確認 merge。
+> - 下一步：依使用者明確確認合併 PR #143；最新收尾文件的獨立核對與 CI 結果見 PR。
 
 ## 環境與證據來源
 
 - 實作 branch／worktree：`feat/gate-10-pipeline`，`/Users/suzuke/AlphaCR-worktrees/AgEnD-v2-pipeline`。
-- 此紀錄限使用者實際執行的 `45e957e2b095366788ef4e5704600b356f175802`，Rust CLI `agend 0.0.0`；不認證後續提交。
+- 以下「逐步結果」限使用者實際執行的 `45e957e2b095366788ef4e5704600b356f175802`，Rust CLI `agend 0.0.0`；後續事件補驗另固定於下方版本，不把舊 11 步算成新版本重跑。
 - 使用者逐步貼出 CLI、watch、daemon、Git 與 JSON 輸出，agent 比對；未把未貼出的 stdout 當作有看到。
 - 暫存 home `/tmp/g10.UfYP`（canonical `/private/tmp/g10.UfYP`）、repo `/private/tmp/g10.UfYP-repo` 已 teardown。
 
@@ -39,6 +39,21 @@
 
 兩個新的真程序回歸已對原 product binary 重現上述 timeout 重現與 unknown action：exit101、0 passed／2 failed。原 log `/private/tmp/g10-manual-events-before.log` 保留；測試使用真 workflow／store／daemon／Git／CLI watch，不注入合成輸出。修正後上述兩個 native tests exit0／2 passed，另有一個完整 queue 的核准 CAS 失敗回歸 exit0；fmt／workspace clippy／實際 no-std 亦 exit0（logs `/private/tmp/g10-manual-fix-logs`）。收尾的完成版 head、最新 CI 與 verifier 結果由 [PR #143](https://github.com/suzuke/AgEnD/pull/143) 固定，未以舊綠燈代替新結果。
 
+## 事件補驗：430478d
+
+使用者實際執行 `430478d71f8918be16d3b74b9ef4407bdaf69d4e`，CLI `agend 0.0.0`；home `/tmp/g10e.iQ2o`（canonical `/private/tmp/g10e.iQ2o`），repo `/private/tmp/g10e.iQ2o-repo`。以下只認證這次人工 Approve／stage／merge／清理，RequestChanges、timeout 與 SQL rollback 由自動驗證覆蓋。
+
+| 步驟 | 使用者輸出與結果 |
+|---|---|
+| 啟動 | daemon 85564；holders 85570／85576／85603；ready instances=3、recovered=0、started=3。 |
+| watch／派工 | cold fleet tasks=0；建立 t-1「events」後依序 work → submit → checks → review → approve，等待 `approval:t-1/approve/1`。 |
+| 核准 | client_probe 回 resolved；watch 只出現一次 `attention_resolved approval:t-1/approve/1 approve`，再 running（stage: merge）→ done（stage: merge）。 |
+| Git | main `7cc868757943a861c792f396642fbc0e3855a9ad`；雙親 7c54646／2661af1、Merge agend/t-1/events: events、Agend-Task: t-1；實際貼出 merge 計數 1。 |
+| 完成／清理 | JSON attention=[]、t-1 done／assignee null／current_stage merge；worktree_removed_exit=0。 |
+| teardown | teardown_exit=0、home_removed_exit=0、repo_removed_exit=0；agent 唯讀 ps 補核上述四個 PID 均不存在，未把未貼出的 pgrep stdout 算成人工證據。 |
+
+2026-10-02 使用者完成補驗後明確回覆「merge」，授權合併 PR #143 進 v2。
+
 ## 下一步
 
-補驗修正後的 watch stage 與 Approve／RequestChanges／timeout 事件；其餘主流程依上述 frozen head 記錄。使用者確認前不 merge。
+第 10 施工關已完成驗收，使用者於 2026-10-02 明確確認 merge（[PR #143](https://github.com/suzuke/AgEnD/pull/143)）。下一步為第 11 施工關 C 段提案；第 12 施工關 A 段 #138 的 P1–P10 仍待使用者確認。
