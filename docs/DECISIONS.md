@@ -1,11 +1,11 @@
-# 決策索引（D1–D38）
+# 決策索引（D1–D39）
 
 > **TL;DR**
 > - 這裡是已確認的設計決策；每條都經使用者確認。
 > - 記住：**沒有新證據就不重開討論**；要推翻，先補證據再提新決策編號。
 > - 下一步：找到相關決策，點進細節檔看理由、被否決的方案與證據。
 
-來源：規劃 r4 §2（D1–D24）；D25 為使用者在設計討論中確認與 architecture 頁；D26–D32 是第 1 施工關開工前提案 P1–P7，使用者 2026-09-25 確認，細節在 [第 1 施工關頁面](gates/gate-01-core.md#開工前提案)；D33 是使用者 2026-09-25 對第 1 施工關待決定事項（分派容量與返工）的決定；D34–D37 是使用者 2026-09-25 對照「AI monotasking vs multitasking」最佳實踐後的決定（細節在 [d26-d37](decisions/d26-d37.md)）；D38 是第 10 施工關開工前提案 P2、P4，使用者 2026-09-26 確認，把 D32 延伸到 `PipelineState` 與 binding 快照（細節在 [d38](decisions/d38.md)）。「規劃 §x」指 [research/REWRITE-PLAN.md](research/REWRITE-PLAN.md)；原始證據索引在 [research/README.md](research/README.md)。規劃本文與後來的決策衝突時，以後來的決策為準（見本頁底部）。
+來源：規劃 r4 §2（D1–D24）；D25 為使用者在設計討論中確認與 architecture 頁；D26–D32 是第 1 施工關開工前提案 P1–P7，使用者 2026-09-25 確認，細節在 [第 1 施工關頁面](gates/gate-01-core.md#開工前提案)；D33 是使用者 2026-09-25 對第 1 施工關待決定事項（分派容量與返工）的決定；D34–D37 是使用者 2026-09-25 對照「AI monotasking vs multitasking」最佳實踐後的決定（細節在 [d26-d37](decisions/d26-d37.md)）；D38 是第 10 施工關開工前提案 P2、P4，使用者 2026-09-26 確認，把 D32 延伸到 `PipelineState` 與 binding 快照（細節在 [d38](decisions/d38.md)）。D39 是第 11 施工關 C 段 P1–P6，使用者 2026-10-02 逐項確認（細節在 [d39](decisions/d39.md)）。「規劃 §x」指 [research/REWRITE-PLAN.md](research/REWRITE-PLAN.md)；原始證據索引在 [research/README.md](research/README.md)。規劃本文與後來的決策衝突時，以後來的決策為準（見本頁底部）。
 
 ## 索引
 
@@ -49,6 +49,7 @@
 | D36 | needs-you 排序是 core 純函式 `policy::attention::order`：先看解決後能讓多少 task／agent 繼續，再看等最久，最後以 id 定序 | [d26-d37](decisions/d26-d37.md#d36) |
 | D37 | needs-you 附 context recap（功能目標、目前的決定、在問什麼、之後會發生什麼）；core 只定型別，內容由 daemon 產生（第 11 施工關） | [d26-d37](decisions/d26-d37.md#d37) |
 | D38 | D32 延伸到 `PipelineState`（存快照、`restore` 檢查）與 binding 快照型別（搬到 core，shim 與 daemon 共用）；golden JSON 測試鎖格式，只准加欄位 | [d38](decisions/d38.md#d38) |
+| D39 | 完整終端由 holder 提供 frame；明確進入、連線控制權、mode-aware 輸入與版本相容；Codex 經完整 AgEnD 驗證後才開已驗版本 | [d39](decisions/d39.md#d39) |
 
 ## 來源衝突與處理
 

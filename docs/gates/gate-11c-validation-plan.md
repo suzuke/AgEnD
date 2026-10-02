@@ -1,9 +1,9 @@
-# 第 11 施工關 C 段：驗收計畫（待確認）
+# 第 11 施工關 C 段：驗收計畫（設計已確認，待實作）
 
 > **TL;DR**
 > - 此頁定義 C 段實作後要證明的行為；目前只有提案，表內新測試／fixture／命令尚未建立。
 > - 測 consumer 必須餵真 producer：holder parser／協定型別、fake daemon 或真 AgEnD；不能手寫理想化 frame 當通過證據。
-> - 下一步：先確認 [P1–P6](gate-11c-proposal.md)，再實作並執行；本頁不是驗收通過紀錄。
+> - 下一步：[P1–P6](gate-11c-proposal.md#使用者確認紀錄) 已於 2026-10-02 確認，接著實作並執行；本頁不是驗收通過紀錄。
 
 ## 自動驗證矩陣
 
@@ -57,8 +57,8 @@ cd /Users/suzuke/AlphaCR-worktrees/AgEnD-v2-tui-c-proposal
 sed -n '1,150p' docs/gates/gate-11c-proposal.md
 ```
 
-檢查 P1–P6 的建議與替代方案；尤其 P3 的多視窗唯讀規則、P5 的 Codex 開放門檻。確認清單留白表示尚未確認，不是程式失敗。
+核對六個確認勾選與使用者回覆；尤其 P3 的多視窗唯讀規則、P5 的 Codex 開放門檻。勾選只表示設計已確認，不能算 runtime 或 Codex U17 驗收通過。
 
 ## 下一步
 
-確認提案後由 agent 開新實作 worktree，實作驗證矩陣；全部通過再派全新 verifier，提供逐步人工指令並等使用者 merge 確認。
+提案合併後由 agent 開新實作 worktree，實作驗證矩陣；全部通過再派全新 verifier，提供逐步人工指令並等使用者 merge 確認。

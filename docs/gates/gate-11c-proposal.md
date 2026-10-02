@@ -2,12 +2,12 @@
 
 > **TL;DR**
 > - 建議讓 `i` 進入完整 agent 畫面，只留一行 AgEnD 狀態列；色彩、游標、resize、滑鼠與貼上都經既有 client／daemon／holder 路徑。
-> - [Draft PR #144](https://github.com/suzuke/AgEnD/pull/144) 是待確認提案；P1–P6 均未授權實作，A／B 段的已驗收紀錄保持原版本。
-> - 下一步：確認 P1–P6，再開實作 worktree；合併仍須全新 verifier 與使用者驗收。
+> - 使用者於 2026-10-02 逐項確認 P1–P6，記為 [D39](../decisions/d39.md)；[PR #144](https://github.com/suzuke/AgEnD/pull/144) 只含提案，尚未實作。
+> - 下一步：提案通過最新 verifier／CI 後依使用者授權合併，再開實作 worktree；實作另經驗證與人工驗收後才 merge。
 
 ## 現況與依據
 
-基準 `v2`：`4bab1e7572e4838d28d1e6267f39f9326096233f`（Gate 10 #143）。[B 段 P5／P6](gate-11-tui.md#p5t-的終端怎麼即時更新) 只傳純文字畫面、固定 PTY 大小、200 ms 重拿、按鍵輸入；Codex 輸入回 `not_supported`。C 段目標已於 2026-09-29 另列，但以下設計尚待確認。
+基準 `v2`：`4bab1e7572e4838d28d1e6267f39f9326096233f`（Gate 10 #143）。[B 段 P5／P6](gate-11-tui.md#p5t-的終端怎麼即時更新) 只傳純文字畫面、固定 PTY 大小、200 ms 重拿、按鍵輸入；Codex 輸入回 `not_supported`。C 段目標已於 2026-09-29 另列，以下 P1–P6 已由使用者確認；現況表描述提案基準，不代表 C 段已實作。
 
 | 可核對來源 | 現況 |
 |---|---|
@@ -26,7 +26,7 @@
 - 理由：沿用已確認的明確輸入入口，完整模式裡 agent 能收到它自己的快捷鍵。
 - 替代方案：`t` 直接開可輸入畫面，少一次按鍵但改掉 B 段的唯讀預設。
 - 例子：首頁按 `q` 離開 AgEnD；進完整模式後按 `q` 是 agent 輸入，按 Ctrl-] 才回 AgEnD。
-- [ ] 使用者確認 P1
+- [x] 使用者確認 P1（2026-10-02，照建議）
 
 ## P2：畫面由 holder 提供，協定採加法
 
@@ -37,18 +37,18 @@
 - 輸出變更只設 dirty；每個 instance 至多每 50 ms 取一份最新 frame，最後一段 dirty 必須送出。新 frame 序列化行上限 8 MiB，viewport 一次只傳所需列；無效尺寸或過大 frame 明確拒絕，不能截斷後當成功。保留既有 holder 1 MiB 請求行上限。
 - 理由：holder 是唯一終端狀態來源，重連不靠 byte replay；合併畫面更新可丟中間 frame，但不能丟最後的畫面。
 - 替代方案：TUI 自建第二個 parser（要設計完整 parser state checkpoint）；直接輸出原始 ANSI 到操作者終端（畫面與外層狀態列、控制序列互相干擾）。
-- [ ] 使用者確認 P2
+- [x] 使用者確認 P2（2026-10-02，照建議）
 
 ## P3：resize 與多視窗控制
 
 - 問題：兩個視窗反覆 resize 同一 PTY，agent 會跳動，舊視窗也可能依過期 mode 編碼輸入。
-- 建議：完整模式建立連線範圍的 attach id；最後進入完整模式的視窗取得控制權，以其內容區尺寸 resize。**較先開的視窗轉唯讀**，保留畫面且明示另一視窗控制中；再次按 `i` 可取得控制權。這比原 C 段「最後開啟的尺寸為準」多了輸入控制，需本項明確確認。
+- 建議：完整模式建立連線範圍的 attach id；最後進入完整模式的視窗取得控制權，以其內容區尺寸 resize。**較先開的視窗轉唯讀**，保留畫面且明示另一視窗控制中；再次按 `i` 可取得控制權。這比原 C 段「最後開啟的尺寸為準」多了輸入控制，使用者已於 2026-10-02 明確確認本項。
 - daemon 先驗 caller，再驗活終端、attach id／generation／控制權及尺寸。resize 送既有 holder 長連線；新畫面回來後才確認可輸入。一般終端尺寸變更只由目前控制者送，status row 與零尺寸不能進 PTY。
 - Ctrl-]／關視窗／終端連線 EOF 釋放控制，保留最後 PTY 大小；不自動恢復舊視窗控制或預設 50×200。daemon／holder 重連後 attach id 作廢，須重新取得。
 - 控制／resize 的 I/O 在背景處理，主畫面不等最長 5 秒的 holder write；同一連線有 request id 對應回覆，權限拒絕或失效請求不影響 PTY。每個 instance 的控制與 PTY 寫入按序處理，寫前核對 token；新控制者的成功回覆須等舊在途操作結束或作廢，才允許新輸入。失去控制後的舊輸入一律拒絕、不重送。完整模式有控制者時，沒有 attach id 的舊版 terminal_input 亦拒絕，避免繞過控制權；沒有控制者時保留 B 段原行為。
 - 理由：尺寸與輸入有同一個控制者，避免兩個視窗送互相矛盾的操作。
 - 替代方案：多視窗都能輸入、最後開啟者只管尺寸；保留原描述，但兩份不同大小的畫面可同時操作。
-- [ ] 使用者確認 P3
+- [x] 使用者確認 P3（2026-10-02，照建議）
 
 ## P4：按鍵、貼上與滑鼠滾動
 
@@ -60,7 +60,7 @@
 - 理由：依 agent 已啟用的模式送事件，捲動不會誤變成按鍵或誤把貼上當逐鍵導航。
 - 替代方案：所有滾輪都轉成 Up／Down（容易打斷輸入），或所有滾輪都本機捲動（agent 滑鼠功能失效）。
 - 協定依據：[XTerm Control Sequences](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h2-Mouse-Tracking) 的 mouse modes 與 [bracketed paste](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h2-Bracketed-Paste-Mode)；本項的 UI 分流為 AgEnD 提案。
-- [ ] 使用者確認 P4
+- [x] 使用者確認 P4（2026-10-02，照建議）
 
 ## P5：Codex 輸入的開放條件
 
@@ -69,7 +69,7 @@
 - smoke 通過、使用者確認後才解除已驗版本範圍的 Codex 輸入拒絕；未通過或未驗版本仍回 `not_supported` 並說明原因。CI 只跑 fake／真 AgEnD 程序，不呼叫真 LLM、不花 token。
 - 理由：只放開已驗的手動輸入路徑；訊息送達仍走結構化 driver，沒有把 agent 送訊息改成 PTY 打字。
 - 替代方案：C 段一開始對所有 Codex 版本解除限制，會把未驗的 U17 當已成立。
-- [ ] 使用者確認 P5
+- [x] 使用者確認 P5（2026-10-02，照建議）
 
 ## P6：完成範圍與實作順序
 
@@ -81,8 +81,23 @@
 
 詳見 [C 段驗收計畫](gate-11c-validation-plan.md)。本 PR 只有提案，沒有新 runtime demo，亦未執行上述未新增的測試。
 
-- [ ] 使用者確認 P6
+- [x] 使用者確認 P6（2026-10-02，照建議）
+
+## 使用者確認紀錄
+
+2026-10-02 依使用者要求逐項說明、每項等回覆才繼續；六項均採建議。P1 另提供靜態示意，未把預覽算成 runtime 驗收。
+
+| 項目 | 使用者回覆 |
+|---|---|
+| P1 入口／退出 | `sounds good` |
+| P2 holder 畫面／相容 | `好` |
+| P3 多視窗控制 | `按你的建議` |
+| P4 mouse／paste／歷史 | `ok` |
+| P5 Codex 驗證門檻 | `ok` |
+| P6 範圍／順序 | `OK` |
+
+使用者另明確指示「#144合併」。該授權只用於此提案 PR；C 段 runtime／Codex U17 尚未驗收，實作 PR 的 merge 仍須另行確認。
 
 ## 下一步
 
-使用者確認 P1–P6 後，開 `feat/gate-11c-terminal` 與新的 worktree 實作；提案 merge 和實作 merge 各自等使用者明確確認。
+最新文件經全新 verifier 與 CI 通過後合併 #144；再開 `feat/gate-11c-terminal` 與新 worktree 實作。實作 merge 仍等使用者明確確認。
