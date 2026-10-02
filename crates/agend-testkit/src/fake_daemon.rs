@@ -1528,6 +1528,12 @@ impl ProbeClient {
         }
     }
 
+    /// A fixture writer for the same client connection. Keep its complete JSON
+    /// lines ordered, and drive the reader concurrently during large writes.
+    pub fn writer_clone(&self) -> io::Result<UnixStream> {
+        self.writer.try_clone()
+    }
+
     pub fn send(&mut self, request: &ClientRequest) -> io::Result<()> {
         let mut line = serde_json::to_string(request).map_err(io::Error::other)?;
         line.push('\n');

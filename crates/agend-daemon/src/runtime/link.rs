@@ -465,6 +465,7 @@ impl Worker {
                     }
                 }
                 Ok(Some(HolderResponse::PtyBytes { data })) => {
+                    self.structured.output_changed();
                     // No subscriber is not an error.
                     let _ = lock(&self.terminal).live.send(data.bytes_base64);
                 }

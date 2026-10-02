@@ -2,7 +2,7 @@
 
 > **TL;DR**
 > - 依 crate 由下往上分 13 個施工關；每個施工關單獨驗收，使用者確認後才開下一個施工關（D22）。
-> - 目前狀態：**第 1–9 施工關完成並已合併**；第 11 施工關 A、B 段已驗收並合併（B 段 #140，2026-10-01），C 段 P1–P6 已逐項確認（D39），提案 #144 已合併，實作中。第 10 施工關已完成自動／獨立／CI 與人工補驗，使用者已確認合併（#143，2026-10-02）；第 12 施工關 A 段提案 #138 待確認；第 13 施工關未開始。
+> - 目前狀態：**第 1–10 施工關完成並已合併**；第 11 施工關 A、B 段已驗收並合併（B 段 #140，2026-10-01），C 段 P1–P6 已逐項確認（D39），提案 #144 已合併，實作中。第 10 施工關已完成自動／獨立／CI 與人工補驗，使用者已確認合併（#143，2026-10-02）；第 12 施工關 A 段提案 #138 待確認；第 13 施工關未開始。
 > - 下一步：在 `feat/gate-11c-terminal` 專屬 worktree 實作已確認的 C 段 P1–P6（提案 #144 已合併）。第 12 施工關 A 段 P1–P10 在 #138，仍待使用者確認。
 
 ## 13 個施工關
@@ -71,6 +71,8 @@
 第 10 施工關已完成驗收，使用者於 2026-10-02 明確確認 merge（[PR #143](https://github.com/suzuke/AgEnD/pull/143)）。第 11 施工關 C 段 [P1–P6](gates/gate-11c-proposal.md#使用者確認紀錄) 已逐項確認，使用者另授權合併 #144；提案 #144 已合併，接著在專屬 worktree 實作；第 12 施工關 A 段 #138 的 P1–P10 仍待使用者確認。 人工主流程與事件補驗見 [人工紀錄](gates/gate-10-manual-record.md)。
 
 ## 進度紀錄
+
+- 2026-10-03 C 段 daemon 多視窗（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：每個 instance 有界佇列、socket-scoped view／attach、最後 Acquire 控制、EOF／停止清理、舊版輸入防繞過、holder 共用 50 ms 畫面取樣及 dirty 通知已接通。真 daemon 選 1.4，fake 暫留 1.3；8 個 native 多視窗 cases 通過，原背壓清理／停止 owner 反例保留。TUI／fake 全套 C 契約／Codex U17 與完整驗收仍待完成。
 
 - 2026-10-02 C 段 client 型別／傳輸（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：1.4 檢視／控制／完成回覆、request id、8 MiB bounded reader、1 MiB 整次拒絕、原生 socket write 期限與半關閉 EOF 修正；NEEDED 仍 1.3。daemon 完整路徑尚未接通，現階段只協商 1.3；TUI／U17、完整獨立與人工驗收仍待完成。
 

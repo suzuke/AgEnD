@@ -1,11 +1,14 @@
 //! Structured viewport extraction from the authoritative alacritty grid.
 
 use agend_core::protocol::terminal::*;
-use alacritty_terminal::grid::Dimensions;
+use alacritty_terminal::grid::{Dimensions, Grid};
 use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::term::TermMode;
 use alacritty_terminal::term::cell::{Cell, Flags};
+use alacritty_terminal::term::color::Colors;
+use alacritty_terminal::vte::ansi::CursorStyle;
 use alacritty_terminal::vte::ansi::{Color, CursorShape, NamedColor};
+use std::time::{Duration, Instant};
 
 use super::{FrameError, Screen};
 
@@ -38,9 +41,38 @@ impl Screen {
         Ok(())
     }
 
-    /// Does not scroll the parser or change its classifier's visible screen.
-    /// The caller holds the screen lock while extracting the whole frame.
     pub fn frame(&self, viewport: TerminalViewport) -> Result<TerminalFrame, FrameError> {
+        self.frame_source().frame(viewport)
+    }
+
+    fn frame_source(&self) -> FrameSource<'_> {
+        FrameSource {
+            grid: self.term.grid(),
+            colors: self.term.colors(),
+            mode: *self.term.mode(),
+            cursor_style: self.term.cursor_style(),
+            generation: &self.generation,
+            revision: self.revision,
+            rows: self.rows,
+            columns: self.columns,
+            live_top: self.history.live_top,
+        }
+    }
+
+    /// Every view samples the same authoritative grid for at least 50 ms.
+    /// Parsing and classification still use the live grid, never this clone.
+    pub fn sampled_frame(
+        &mut self,
+        viewport: TerminalViewport,
+    ) -> Result<TerminalFrame, FrameError> {
+        self.sampled_frame_at(viewport, Instant::now())
+    }
+
+    fn sampled_frame_at(
+        &mut self,
+        viewport: TerminalViewport,
+        now: Instant,
+    ) -> Result<TerminalFrame, FrameError> {
         if viewport.rows == 0 || viewport.rows > self.rows {
             return Err(FrameError::InvalidSize);
         }
@@ -48,14 +80,88 @@ impl Screen {
             rows: viewport.rows,
             columns: self.columns,
         })?;
-        let grid = self.term.grid();
-        let mode = *self.term.mode();
+        if self
+            .sample
+            .as_ref()
+            .is_none_or(|(at, _)| now.saturating_duration_since(*at) >= Duration::from_millis(50))
+        {
+            let source = self.frame_source();
+            self.sample = Some((
+                now,
+                FrameSnapshot {
+                    grid: source.grid.clone(),
+                    colors: *source.colors,
+                    mode: source.mode,
+                    cursor_style: source.cursor_style,
+                    generation: source.generation.into(),
+                    revision: source.revision,
+                    rows: source.rows,
+                    columns: source.columns,
+                    live_top: source.live_top,
+                },
+            ));
+        }
+        self.sample
+            .as_ref()
+            .expect("sample captured")
+            .1
+            .source()
+            .frame(viewport)
+    }
+}
+
+pub(super) struct FrameSnapshot {
+    grid: Grid<Cell>,
+    colors: Colors,
+    mode: TermMode,
+    cursor_style: CursorStyle,
+    generation: String,
+    revision: u64,
+    rows: u16,
+    columns: u16,
+    live_top: u64,
+}
+impl FrameSnapshot {
+    fn source(&self) -> FrameSource<'_> {
+        FrameSource {
+            grid: &self.grid,
+            colors: &self.colors,
+            mode: self.mode,
+            cursor_style: self.cursor_style,
+            generation: &self.generation,
+            revision: self.revision,
+            rows: self.rows,
+            columns: self.columns,
+            live_top: self.live_top,
+        }
+    }
+}
+struct FrameSource<'a> {
+    grid: &'a Grid<Cell>,
+    colors: &'a Colors,
+    mode: TermMode,
+    cursor_style: CursorStyle,
+    generation: &'a str,
+    revision: u64,
+    rows: u16,
+    columns: u16,
+    live_top: u64,
+}
+impl FrameSource<'_> {
+    /// Does not scroll the parser or change its classifier's visible screen.
+    /// The caller holds the screen lock while extracting the whole frame.
+    pub fn frame(&self, viewport: TerminalViewport) -> Result<TerminalFrame, FrameError> {
+        if viewport.rows == 0 || viewport.rows > self.rows {
+            return Err(FrameError::InvalidSize);
+        }
+        Screen::validate_frame_size(TerminalSize {
+            rows: viewport.rows,
+            columns: self.columns,
+        })?;
+        let grid = self.grid;
+        let mode = self.mode;
         let alternate_screen = mode.contains(TermMode::ALT_SCREEN);
-        let live_top = if alternate_screen {
-            0
-        } else {
-            self.history.live_top
-        };
+        let live_top = if alternate_screen { 0 } else { self.live_top };
         let history_oldest = live_top.saturating_sub(grid.history_size() as u64);
         let requested = viewport.top.unwrap_or(live_top);
         let viewport_top = if alternate_screen {
@@ -73,9 +179,9 @@ impl Screen {
             .collect();
         let cursor = grid.cursor.point;
         let cursor_row = cursor.line.0 - first;
-        let cursor_style = self.term.cursor_style();
+        let cursor_style = self.cursor_style;
         Ok(TerminalFrame {
-            generation: self.generation.clone(),
+            generation: self.generation.into(),
             revision: self.revision,
             size: TerminalSize {
                 rows: self.rows,
@@ -178,8 +284,8 @@ impl Screen {
     fn color(&self, color: Color) -> TerminalColor {
         let rgb = match color {
             Color::Spec(rgb) => Some(rgb),
-            Color::Indexed(index) => self.term.colors()[index as usize],
-            Color::Named(name) => self.term.colors()[name],
+            Color::Indexed(index) => self.colors[index as usize],
+            Color::Named(name) => self.colors[name],
         };
         if let Some(rgb) = rgb {
             return TerminalColor::Rgb {
@@ -200,5 +306,86 @@ impl Screen {
             },
             Color::Named(_) => TerminalColor::Foreground,
         }
+    }
+}
+
+#[cfg(test)]
+mod sample_tests {
+    use super::*;
+    use crate::screen::ReplySink;
+
+    #[test]
+    fn views_share_one_capture_until_the_exact_sampling_boundary() {
+        let mut screen = Screen::new(3, 8, ReplySink::default());
+        screen.process(b"one\r\ntwo\r\nthree\r\nfour");
+        let at = Instant::now();
+        let first = screen
+            .sampled_frame_at(TerminalViewport { top: None, rows: 3 }, at)
+            .unwrap();
+        screen.process(b"\x1b[?2004h\x1b]10;#123456\x07\r\nlast");
+        let pinned = screen
+            .sampled_frame_at(
+                TerminalViewport {
+                    top: Some(first.history_oldest),
+                    rows: 1,
+                },
+                at + Duration::from_millis(49),
+            )
+            .unwrap();
+        assert_eq!(pinned.revision, first.revision);
+        assert_eq!(pinned.modes, first.modes);
+        assert_eq!(pinned.live_top, first.live_top);
+        assert_eq!(pinned.history_oldest, first.history_oldest);
+        let live = screen
+            .frame(TerminalViewport { top: None, rows: 3 })
+            .unwrap();
+        assert!(live.revision > first.revision);
+        assert!(live.modes.bracketed_paste);
+        let last = screen
+            .sampled_frame_at(
+                TerminalViewport { top: None, rows: 3 },
+                at + Duration::from_millis(50),
+            )
+            .unwrap();
+        assert_eq!(last, live);
+        assert!(last.cells.iter().flatten().any(|cell| cell.foreground
+            == TerminalColor::Rgb {
+                r: 0x12,
+                g: 0x34,
+                b: 0x56
+            }));
+    }
+
+    #[test]
+    fn resize_invalidates_the_sample_but_invalid_requests_never_capture() {
+        let mut screen = Screen::new(3, 8, ReplySink::default());
+        let at = Instant::now();
+        assert!(
+            screen
+                .sampled_frame_at(TerminalViewport { top: None, rows: 0 }, at)
+                .is_err()
+        );
+        assert!(screen.sample.is_none());
+        let first = screen
+            .sampled_frame_at(TerminalViewport { top: None, rows: 3 }, at)
+            .unwrap();
+        screen.resize(4, 10);
+        let resized = screen
+            .sampled_frame_at(TerminalViewport { top: None, rows: 4 }, at)
+            .unwrap();
+        assert_eq!(
+            resized.size,
+            TerminalSize {
+                rows: 4,
+                columns: 10
+            }
+        );
+        assert!(resized.revision > first.revision);
+        assert_eq!(
+            resized,
+            screen
+                .frame(TerminalViewport { top: None, rows: 4 })
+                .unwrap()
+        );
     }
 }

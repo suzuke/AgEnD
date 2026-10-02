@@ -1,8 +1,8 @@
 # 第 11 施工關 C 段：實作進度
 
 > **TL;DR**
-> - [draft PR #145](https://github.com/suzuke/AgEnD/pull/145) 持續實作完整終端；目前完成 holder／runtime 基礎，C 段尚未完成或驗收。
-> - 已接通 frame／歷史及實際 resize／input ack；client 1.4 型別／傳輸已加入；daemon 串接、完整模式、鍵鼠／貼上、Codex U17 仍待完成。
+> - [draft PR #145](https://github.com/suzuke/AgEnD/pull/145) 持續實作完整終端；目前接通 holder／runtime／daemon／client 路徑，C 段尚未完成或驗收。
+> - 已接通 frame／歷史及實際 resize／input ack；client 1.4 型別／傳輸已加入；daemon 多視窗已加入；TUI 完整模式、鍵鼠／貼上、Codex U17 仍待完成。
 > - 下一步：完成 daemon／client／fake 契約與 TUI，再跑完整驗收、全新 verifier 與逐步人工驗收；merge 等使用者確認。
 
 ## 已實作
@@ -17,9 +17,14 @@
 | runtime 背景操作 | holder 能力／連線 epoch、request id 配對、有界佇列與 pending；失效請求不送新連線 | runtime unit、真 holder 的 `terminal_runtime` |
 | 取消競態 | 即使 grant 回覆已到、consumer 未接收就取消，也作廢連線；取消唯讀查詢則不打斷控制 | 真 holder 的 unconsumed-grant／readonly cancellation cases |
 | client 1.4 傳輸 | 專用 reader／Sender，保留 request id；新行上限／完整請求拒絕／5 秒 write，失敗關閉、不重連重送；NEEDED 仍 1.3 | `full_terminal` 真 socket／holder parser；legacy client 回歸 |
-| 開發中能力邊界 | client 提供 1.4／1.3；daemon 與 fake 在新路徑完成前仍只選 1.3，明示新 API 尚不支援 | `terminal_capability` 同驗真／假 daemon |
+| daemon 多視窗 | view／attach 綁 socket；每 instance 64 個有序操作、最後 Acquire 控制、舊 token／foreign view 拒絕；EOF／停止清理，保留尺寸 | `terminal_hub` 的 8 個真 daemon／holder／PTY cases |
+| 畫面更新 | 同一 parser 的 grid／palette／mode 共用 50 ms 取樣，runtime dirty watch；各 view 的歷史選取獨立，最後 dirty 送出 | 真 parser 的精確 49／50 ms 邊界與 native 歷史／burst case |
+| 開發中能力邊界 | 真 daemon 選 1.4；fake 暫留 1.3；一般 NEEDED 保留 1.3，舊 peer 仍可用 B 路徑 | native 全路徑＋1.3 真／假能力拒絕＋CLP |
 
 ## 驗證紀錄
+
+- 2026-10-03 daemon 1.4：8 個 native `terminal_hub` cases 通過，涵蓋正式 client、控制交接、foreign view、EOF、尺寸保留、20 次開關、重啟、固定歷史、dirty 尾段、真 PTY 背壓及 entry service 停止。原生反例先失敗：write 失敗後 release 的 control_lost 誤清旁邊 view；abort actor 留下 completed grant。修正後相同 cases 通過。並行單 thread probe 的大寫入可與 server frame write 互卡，fixture 改依正式 client 併行讀寫；原 BrokenPipe log 保留。
+- 本機 holder 55、daemon 143、client 27、testkit 109、既有 TUI 58 passed；CLP 9／1.3 能力邊界 1／terminal_runtime 5 passed。accept core 156 passed／2 個既有 ignored，實際 no-std 通過。21a39ab 的 macOS PR CI 有 EOF fixture 失敗；已保存原 log，修正 EOF 起算並重跑 13 個 client cases 通過，最新 CI 另核。以上不是完整 C 段驗收。
 
 - 2026-10-02 client 型別／傳輸：client 27 passed（13 個 native full-terminal cases）、testkit 109 passed、真程序 CLP 9／能力邊界 1／terminal_runtime 5 passed，既有 TUI 58 passed；accept core 156 passed／2 個既有 ignored，workspace clippy／實際 no-std 通過。macOS partial-EOF 在原 SHUT_RDWR 邏輯失敗，修正後同一回歸通過；能力列表排序及 fixture 編譯／clippy 的原失敗保留。這些仍是局部證據；daemon／TUI／U17 尚待接通。
 
@@ -32,8 +37,7 @@
 
 ## 尚待完成
 
-- daemon 接通 client 1.4，完成後才宣告能力；client 型別／傳輸／能力檢查已加入，NEEDED 保留 1.3。
-- daemon caller／attach 綁定、多視窗控制與 EOF release、每個 instance 的 50 ms dirty frame 更新；同套契約跑 fake／真 daemon。
+- fake 加入完整終端路徑，將控制、viewport、EOF、錯誤與 frame 契約同跑 fake／真 daemon；真 daemon 原生 cases 已加入。
 - TUI 完整 renderer、明確 i 入口／退出、resize ack 前停輸入、斷線／控制權失效立即唯讀。
 - mode-aware keys／mouse／paste、固定歷史 viewport、外層 capture／paste 的錯誤與 unwind 恢復。
 - fake Codex＋真 AgEnD U17；明確 opt-in live smoke、版本及使用者確認後才開放該版本，未驗仍 not_supported。

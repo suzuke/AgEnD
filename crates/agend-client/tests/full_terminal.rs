@@ -244,9 +244,20 @@ fn full_frame_line_limit_includes_newline_and_failure_closes_all_handles() {
         let mut bytes = serde_json::to_vec(&framed(expected.clone())).unwrap();
         bytes.resize(MAX_FRAME_LINE + extra - 1, b' ');
         bytes.push(b'\n');
+        let (closed, await_closed) = mpsc::sync_channel(1);
         let (_dir, mut client, worker) = peer(&[V1_4], move |mut reader, mut writer| {
-            // Rejected peers can close during the final chunk.
-            let _ = writer.write_all(&bytes);
+            // Rejected peers can close during the final chunk. A successful
+            // boundary case must actually deliver its entire serialized line.
+            let wrote = writer.write_all(&bytes);
+            assert!(
+                extra == 1 || wrote.is_ok(),
+                "exact boundary write failed: {wrote:?}"
+            );
+            // Start the 5 s EOF assertion after the consumer has invoked close,
+            // rather than while it is still decoding an 8 MiB line on busy CI.
+            await_closed
+                .recv_timeout(Duration::from_secs(10))
+                .expect("consumer never closed");
             assert!(read(&mut reader).is_none());
         });
         let mut sender = client.sender().unwrap();
@@ -261,6 +272,7 @@ fn full_frame_line_limit_includes_newline_and_failure_closes_all_handles() {
             assert!(result.unwrap_err().to_string().contains("exceeds 8 MiB"));
             assert!(sender.subscribe_terminal_frames(subscription()).is_err());
         }
+        closed.send(()).unwrap();
         worker.join().unwrap();
     }
 }

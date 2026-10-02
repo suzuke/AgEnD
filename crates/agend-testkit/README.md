@@ -14,6 +14,10 @@
 
 Gate 10 的 `FakePipelineExecutor` 實作 core executor port，組合 FakeStore／FakeForge／FakeRunner 並記錄 bindings、投影與副作用；`clean_worktree` 透過 FakeRunner 的 index／status 回覆判斷，供 daemon 完整 queue 測試使用。FakeDriver／FakeClock clone 共享同一個測試狀態。
 
+## 第 11 施工關 C 段（實作中）
+
+真 daemon 已接通 client 1.4，FakeDaemon 暫留 1.3；新請求在 fake 明示拒絕。CLP fixture 回報各自能力，既有 1.3 契約保留；完整 C 控制／viewport／EOF 共享契約待加入。`ProbeClient::writer_clone` 供大輸入 fixture 在同一條連線併行讀寫，完整 JSON Lines 由真正 core serializer 產生。
+
 ## 負責
 
 | 項目 | 模組 | 內容 |

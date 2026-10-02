@@ -1,4 +1,4 @@
-//! The real/fake server remains 1.3 until the complete daemon path is ready.
+//! An old 1.3 client cannot use the new API, against real or fake servers.
 //! New requests must fail explicitly without changing legacy subscriptions.
 #![cfg(unix)]
 #[path = "../../agend-daemon/tests/common/client_process.rs"]
@@ -13,7 +13,19 @@ use std::path::Path;
 
 fn unavailable(socket: &Path) {
     for caller in [None, Some("unknown-agent")] {
-        let (mut client, selected) = ProbeClient::hello(socket, caller).unwrap();
+        let mut client = ProbeClient::connect(socket).unwrap();
+        let ClientResponse::Hello { data } = client
+            .request(&ClientRequest::Hello {
+                data: ClientHello {
+                    supported: vec![V1_3],
+                    caller: caller.map(str::to_owned),
+                },
+            })
+            .unwrap()
+        else {
+            panic!("hello expected")
+        };
+        let selected = data.selected;
         assert_eq!(selected, V1_3);
         for (request, control) in [
             (
@@ -98,7 +110,7 @@ fn unavailable(socket: &Path) {
 }
 
 #[test]
-fn fake_and_real_1_3_servers_explicitly_refuse_the_unfinished_full_path() {
+fn fake_and_real_servers_refuse_full_requests_on_a_negotiated_1_3_connection() {
     let fake = FakeDaemon::start().unwrap();
     unavailable(fake.socket_path());
     let real = clp::RealDaemon::fixture(Path::new(env!("CARGO_BIN_EXE_agend")));

@@ -92,6 +92,7 @@ pub struct Screen {
     generation: String,
     revision: u64,
     history: history::History,
+    sample: Option<(std::time::Instant, frame::FrameSnapshot)>,
 }
 
 impl Screen {
@@ -114,6 +115,7 @@ impl Screen {
             generation,
             revision: 0,
             history: history::History::new(rows),
+            sample: None,
             term: Term::new(config, &Size { rows, columns }, QueryReplies(replies)),
             parser: Processor::new(),
             rows,
@@ -144,6 +146,7 @@ impl Screen {
         if (rows, columns) == self.size() {
             return;
         }
+        self.sample = None;
         self.rows = rows;
         self.columns = columns;
         self.term.resize(Size { rows, columns });

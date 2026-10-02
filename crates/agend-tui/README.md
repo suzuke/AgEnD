@@ -9,9 +9,9 @@
 
 pipeline task detail 顯示 repo、關卡種類、agent、受阻理由與 WIP archive 路徑；人工核准可 approve／退回修改（先輸入理由），task failed 可 acknowledge。讀取資料與動作仍只經 Source 和 client protocol。
 
-## 第 11 施工關 C 段（提案中）
+## 第 11 施工關 C 段（實作中）
 
-完整終端畫面、resize、滑鼠／貼上與歷史的 [P1–P6 提案](../../docs/gates/gate-11c-proposal.md) 已於 2026-10-02 確認（D39），尚未實作；目前功能維持下方已交付範圍。
+完整終端畫面、resize、滑鼠／貼上與歷史的 [P1–P6 提案](../../docs/gates/gate-11c-proposal.md) 已於 2026-10-02 確認（D39），holder／runtime 與 daemon／client 1.4 已接通；本 crate 的完整模式與鍵鼠／貼上仍待實作。目前 TUI 功能維持下方已交付範圍。
 
 ## 負責
 

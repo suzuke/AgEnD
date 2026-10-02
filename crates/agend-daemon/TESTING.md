@@ -17,9 +17,9 @@
 
 `runtime::client::tests` 以真型別 serializer 產生邊界行，驗 8 MiB 包含換行、超限整份拒絕；`runtime::terminal::tests` 驗 1.0 holder 不送新請求、legacy write lock 阻擋時仍可逾時與停止。`agend/tests/terminal_runtime.rs` 走真 binary／holder／PTY：並行 viewport 配對、實際尺寸與輸入 ack、交接後舊 input 拒絕、取消 native blocked input 後舊憑證失效／重連不重送、grant 回覆已到但未接收的取消競態、取消唯讀查詢不打斷控制、尺寸及 holder 保留、超限輸入整份拒絕與重起 generation。
 
-這些驗證只到 runtime 長連線；daemon caller／client attach、完整模式、frame 節流與 Codex U17 尚未認證。
+`agend/tests/terminal_hub.rs` 的 8 個 native cases 經真 daemon／holder／PTY 驗 caller、socket-scoped view／attach、控制交接、EOF／停止釋放、尺寸保留、dirty 尾段、歷史選取、20 次開關與正式 client。停止 actor 的 completed owner 原生反例先失敗後通過；runtime unit 另驗無終端的 20 個 instance actor 回收。TUI 完整模式／Codex U17 與 fake 完整 C 契約仍待完成。
 
-`agend/tests/terminal_capability.rs` 對真 binary 與 FakeDaemon 跑同樣的 client 1.4 請求：現階段只協商 1.3、新路徑明示能力不足，控制請求先拒 agent、錯誤保留 request id，拒絕後 get_fleet 仍正常。這是開發中能力邊界的驗證，不是完整終端控制驗收。
+`agend/tests/terminal_capability.rs` 對真 binary 與 FakeDaemon 跑同樣的 client 1.4 請求：以明確 1.3 hello 協商，明示能力不足，控制請求先拒 agent、錯誤保留 request id，拒絕後 get_fleet 仍正常。真 daemon 選 1.4 的控制路徑另跑 native cases；fake 暫留 1.3。兩者完整 C 共享契約仍待加入。
 
 ## 怎麼跑
 

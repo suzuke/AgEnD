@@ -53,6 +53,8 @@ pub const V1_3: ProtocolVersion = ProtocolVersion::new(1, 3);
 pub const V1_4: ProtocolVersion = ProtocolVersion::new(1, 4);
 /// Client-side offers; the daemon advertises 1.4 only when its path is ready.
 pub const OFFERED_VERSIONS: [ProtocolVersion; 2] = [V1_4, V1_3];
+/// Legacy/fake baseline until their full-terminal implementation is connected.
+/// The real daemon advertises 1.4 independently through its entry server.
 pub const SUPPORTED_VERSIONS: [ProtocolVersion; 1] = [V1_3];
 
 /// The daemon's socket, relative to the AgEnD home.
@@ -103,6 +105,15 @@ pub mod error_code {
     pub const FORBIDDEN: &str = "forbidden";
     /// The instance has no terminal to show.
     pub const NO_TERMINAL: &str = "no_terminal";
+    /// 1.4: the client view or holder connection/generation is no longer current.
+    pub const STALE_TERMINAL: &str = "stale_terminal";
+    /// 1.4: another view now owns the PTY.
+    pub const CONTROL_LOST: &str = "control_lost";
+    /// 1.4: legacy input has no attach while a full-terminal view owns the PTY.
+    pub const CONTROL_REQUIRED: &str = "control_required";
+    pub const INVALID_SIZE: &str = "invalid_size";
+    pub const FRAME_TOO_LARGE: &str = "frame_too_large";
+    pub const PTY_BUSY: &str = "pty_busy";
     /// No such needs-you item, or the action is not one of its `actions`.
     pub const UNKNOWN_ATTENTION: &str = "unknown_attention";
     /// 1.2: no instance with this name.

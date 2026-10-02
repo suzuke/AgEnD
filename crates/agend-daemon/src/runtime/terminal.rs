@@ -14,9 +14,9 @@ use agend_core::protocol::ProtocolVersion;
 use agend_core::protocol::holder::{HolderRequest, HolderResponse, MAX_REQUEST_LINE, V1_1};
 use agend_core::protocol::terminal::{
     TerminalControlData, TerminalControlOperation, TerminalControlRequest, TerminalFrame,
-    TerminalFrameRequest, TerminalOperationError, TerminalViewport,
+    TerminalFrameRequest, TerminalNotice, TerminalOperationError, TerminalViewport,
 };
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, watch};
 
 const PENDING: usize = 64;
 const RESPONSE_WITHIN: Duration = Duration::from_secs(15);
@@ -42,6 +42,7 @@ struct State {
     version: Option<ProtocolVersion>,
     next_id: u64,
     pending: BTreeMap<String, Waiting>,
+    output_sequence: u64,
 }
 struct Job {
     epoch: u64,
@@ -55,6 +56,7 @@ pub(super) struct Channel {
     state: Arc<Mutex<State>>,
     jobs: mpsc::SyncSender<Job>,
     stream: Stream,
+    notices: watch::Sender<TerminalNotice>,
 }
 
 fn lock<T>(value: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -72,6 +74,7 @@ impl Channel {
             state: Arc::new(Mutex::new(State::default())),
             jobs,
             stream,
+            notices: watch::channel(TerminalNotice::default()).0,
         };
         let worker = channel.clone();
         let thread = std::thread::Builder::new()
@@ -153,11 +156,13 @@ impl Channel {
         );
         state.epoch += 1;
         state.version = Some(version);
+        self.publish_notice(&state);
     }
 
     pub(super) fn disconnected(&self, message: &str) {
         let mut state = lock(&self.state);
         state.version = None;
+        self.publish_notice(&state);
         fail_pending(&mut state, "stale_terminal", message);
     }
 
@@ -181,6 +186,19 @@ impl Channel {
         }
     }
 
+    fn publish_notice(&self, state: &State) {
+        self.notices.send_replace(TerminalNotice {
+            connection_epoch: state.epoch,
+            output_sequence: state.output_sequence,
+            connected: state.version.is_some(),
+        });
+    }
+    pub(super) fn output_changed(&self) {
+        let mut state = lock(&self.state);
+        state.output_sequence = state.output_sequence.wrapping_add(1);
+        self.publish_notice(&state);
+    }
+
     pub(super) fn response(&self, response: HolderResponse) {
         let id = match &response {
             HolderResponse::TerminalFrame { data } => &data.request_id,
@@ -200,6 +218,7 @@ impl Channel {
             return;
         }
         state.version = None;
+        self.publish_notice(&state);
         fail_pending(&mut state, code, message);
         if let Some(stream) = stream.take() {
             let _ = stream.shutdown(std::net::Shutdown::Both);
@@ -247,6 +266,18 @@ pub struct TerminalConnection {
 }
 
 impl TerminalConnection {
+    /// Latest output/link state, without one event per PTY chunk.
+    pub fn notices(&self) -> watch::Receiver<TerminalNotice> {
+        self.channel.notices.subscribe()
+    }
+
+    /// Abandon a completed owner if its entry actor is destroyed. Closing only
+    /// this epoch releases the holder owner without stopping its agent/PTY.
+    pub fn invalidate(&self, reason: &str) {
+        self.channel
+            .close_epoch(self.epoch, "stale_terminal", reason);
+    }
+
     pub fn is_current(&self) -> bool {
         let state = lock(&self.channel.state);
         state.epoch == self.epoch && state.version.is_some()

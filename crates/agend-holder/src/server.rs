@@ -615,7 +615,7 @@ fn handle(
             if let Some(conn) = &mut state.conn {
                 conn.structured = true;
             }
-            Some(match state.screen.frame(data.viewport) {
+            Some(match state.screen.sampled_frame(data.viewport) {
                 Ok(frame) => HolderResponse::TerminalFrame {
                     data: TerminalFrameData {
                         request_id: data.request_id,

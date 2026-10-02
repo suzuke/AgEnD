@@ -211,3 +211,11 @@ mod tests {
         }
     }
 }
+
+/// Coalesced runtime link notice, separate from the holder's frame revision.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TerminalNotice {
+    pub connection_epoch: u64,
+    pub output_sequence: u64,
+    pub connected: bool,
+}

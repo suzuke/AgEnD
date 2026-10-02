@@ -53,3 +53,5 @@ legacy 9 MiB 純文字畫面的測試保留。`agend-holder` 只作 dev-dependen
 ```bash
 ~/.cargo/bin/cargo test -p agend-client
 ```
+
+`full_terminal` 的 8 MiB 邊界 case 在 consumer 呼叫 close 後才開始 peer 的 5 秒 EOF 檢查；正向邊界必須完整 write，負向仍需作廢所有 Sender clone。原 macOS PR CI 的 timeout log 保留。

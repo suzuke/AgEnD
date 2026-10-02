@@ -26,6 +26,8 @@ pub mod ingest;
 pub mod preflight;
 #[cfg(unix)]
 pub mod server;
+#[cfg(unix)]
+pub mod terminal_hub;
 
 // domain
 #[cfg(unix)]

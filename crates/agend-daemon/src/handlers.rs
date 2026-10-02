@@ -88,8 +88,13 @@ impl Context {
 /// What the server does with a request.
 pub enum Outcome {
     Reply(ClientResponse),
-    /// Nothing to answer (accepted `terminal_input`).
+    /// No immediate response to send.
     Nothing,
+    /// Validated legacy operator input; ordered in the terminal entry service.
+    TerminalInput {
+        instance_id: String,
+        line: Vec<u8>,
+    },
     /// Send the backlog, then forward live events.
     Events(Subscription),
     /// Send the screen, then forward the PTY chunks (`None`: the screen
@@ -289,13 +294,7 @@ fn terminal_input(
             operator_input_too_long(line.len()),
         );
     }
-    if !ctx.runtime.terminal_input(&instance_id, line) {
-        return refuse(
-            error_code::NO_TERMINAL,
-            format!("{instance_id} has no live terminal; nothing was written"),
-        );
-    }
-    Outcome::Nothing
+    Outcome::TerminalInput { instance_id, line }
 }
 
 /// `subscribe_terminal`: a running instance's screen and bytes through the

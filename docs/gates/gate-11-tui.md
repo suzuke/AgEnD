@@ -26,7 +26,7 @@
 
 ## C 段開工前提案
 
-[完整 P1–P6](gate-11c-proposal.md) 與 [驗收計畫](gate-11c-validation-plan.md)。C 段在 [draft PR #145](https://github.com/suzuke/AgEnD/pull/145) 實作中；holder／runtime 已接通，完整模式與 U17 尚未驗收。[目前進度](gate-11c-progress.md)。下方 B 段已確認的決策與驗收紀錄保留。
+[完整 P1–P6](gate-11c-proposal.md) 與 [驗收計畫](gate-11c-validation-plan.md)。C 段在 [draft PR #145](https://github.com/suzuke/AgEnD/pull/145) 實作中；holder／runtime 與 daemon／client 1.4 已接通，多視窗／EOF 有原生程序回歸；TUI 完整模式與 U17 仍待完成。[目前進度](gate-11c-progress.md)。下方 B 段已確認的決策與驗收紀錄保留。
 
 ## B 段開工前提案
 
