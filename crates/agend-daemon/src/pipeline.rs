@@ -482,7 +482,6 @@ where
             self.executor.new_id().map_err(db)?,
         )
         .await?;
-        self.note(&task.id, None).await?;
         let human_resolution =
             human_action.map(|action| (format!("approval:{}", ticket(&loaded.state)), action));
         self.clear_task_attention(&task.id, &next, human_resolution);

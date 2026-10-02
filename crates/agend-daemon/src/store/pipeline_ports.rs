@@ -13,7 +13,7 @@ impl agend_core::pipeline::ports::PipelineStore for SqliteStore {
         event: &StoredEvent,
         confirmation: Option<&str>,
     ) -> Result<CasResult, StoreError> {
-        self.advance_with_receipt(task, version, progress, event, confirmation)
+        self.advance_with_receipt(task, version, progress, event, confirmation, true)
             .await
     }
 

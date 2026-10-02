@@ -201,3 +201,89 @@ fn request_changes_reports_its_action_and_only_the_new_attempt_is_raised() {
     let log = common::git(&lab.repo(), &["log", "--format=%B", "main"]).unwrap();
     assert_eq!(log.matches(&format!("Agend-Task: {task}")).count(), 1);
 }
+
+#[test]
+fn legacy_note_failure_cannot_split_human_decision_from_its_action_or_merge() {
+    for action in [AttentionAction::Approve, AttentionAction::RequestChanges] {
+        let mut lab = lab();
+        let watch = Watch::start(&lab);
+        let task = lab
+            .create("g10", "attention-events", "atomic human decision")
+            .unwrap();
+        lab.wait_stage(&task, "approve").unwrap();
+        let id = format!("approval:{task}/approve/1");
+        wait_until(|| watch.text().contains(&format!("attention_required {id} ")));
+        let fleets = watch
+            .text()
+            .lines()
+            .filter(|l| l.starts_with("fleet:"))
+            .count();
+        lab.stop(false);
+        let connection = common::database(&lab).unwrap();
+        // Reject only the obsolete secondary note write, not the pipeline CAS.
+        connection.execute_batch("CREATE TRIGGER reject_secondary_note BEFORE UPDATE OF failure_acknowledged ON tasks BEGIN SELECT RAISE(ABORT, 'secondary note rejected'); END;").unwrap();
+        drop(connection);
+        lab.boot(None).unwrap();
+        wait_until(|| {
+            watch
+                .text()
+                .lines()
+                .filter(|l| l.starts_with("fleet:"))
+                .count()
+                > fleets
+        });
+        resolve(&lab, &id, action, Some("please revise"));
+        if action == AttentionAction::RequestChanges {
+            let new = format!("approval:{task}/approve/2");
+            wait_until(|| {
+                lab.fleet()
+                    .unwrap()
+                    .attention
+                    .iter()
+                    .any(|a| a.attention_id.as_deref() == Some(&new))
+            });
+            resolve(&lab, &new, AttentionAction::Approve, None);
+        }
+        lab.wait_stage(&task, "done").unwrap();
+        wait_until(|| {
+            watch
+                .text()
+                .contains(&format!("task_changed {task}: {task}: done"))
+        });
+        let text = watch.text();
+        assert_eq!(
+            text.matches(&format!("attention_resolved {id} {}", action.as_str()))
+                .count(),
+            1,
+            "{text}"
+        );
+        assert!(
+            !text.contains(&format!("attention_resolved {id} unknown")),
+            "{text}"
+        );
+        let log = common::git(&lab.repo(), &["log", "--format=%B", "main"]).unwrap();
+        assert_eq!(log.matches(&format!("Agend-Task: {task}")).count(), 1);
+        lab.stop(false);
+        let connection = common::database(&lab).unwrap();
+        let event = match action {
+            AttentionAction::Approve => "ApprovalGranted",
+            _ => "ChangesRequested",
+        };
+        let events: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM task_events WHERE task_id=?1 AND detail LIKE ?2",
+                rusqlite::params![task, format!("%{event}%operator%")],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(events, 1, "the human decision must be durable exactly once");
+        let note: Option<String> = connection
+            .query_row(
+                "SELECT attention_reason FROM tasks WHERE id=?1",
+                [&task],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(note.is_none());
+    }
+}

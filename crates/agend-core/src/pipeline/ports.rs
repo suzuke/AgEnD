@@ -7,7 +7,8 @@ use alloc::{string::String, vec::Vec};
 use core::future::Future;
 
 pub trait PipelineStore: Store {
-    /// One CAS transaction also confirms the dispatch whose result was accepted.
+    /// One CAS transaction clears the attention reason (preserving acknowledgement)
+    /// and confirms the dispatch whose result was accepted. Errors/conflicts change neither.
     fn advance_pipeline<'a>(
         &'a self,
         task: &'a Task,

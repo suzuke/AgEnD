@@ -525,7 +525,7 @@ impl Store for SqliteStore {
         progress: &TaskProgress,
         event: &StoredEvent,
     ) -> Result<CasResult, StoreError> {
-        self.advance_with_receipt(task, expected_version, progress, event, None)
+        self.advance_with_receipt(task, expected_version, progress, event, None, false)
             .await
     }
 
@@ -908,6 +908,7 @@ impl SqliteStore {
         progress: &TaskProgress,
         event: &StoredEvent,
         confirmation: Option<&str>,
+        clear_attention: bool,
     ) -> Result<CasResult, StoreError> {
         let confirmation = confirmation.map(str::to_owned);
         let task = task.clone();
@@ -919,6 +920,9 @@ impl SqliteStore {
             if matches!(result, CasResult::Written { .. }) {
                 tx.execute("UPDATE tasks SET pipeline=?1,stage_entered_at_unix_ms=?2,merge_intent=?3,block_reason=?5 WHERE id=?4",
                     rusqlite::params![progress.pipeline,task_row::to_i64(progress.stage_entered_at_unix_ms,"stage entry")?,progress.merge_intent,task.id,progress.block_reason])?;
+                if clear_attention {
+                    tx.execute("UPDATE tasks SET attention_reason=NULL WHERE id=?1", [&task.id])?;
+                }
                 task_row::append_event(&tx, &task.id, &event)?;
                 if let Some(id) = confirmation
                     && let Some(message) = messages::get(&tx, &id)? {

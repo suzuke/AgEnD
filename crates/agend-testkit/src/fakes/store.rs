@@ -218,7 +218,7 @@ impl Store for FakeStore {
         progress: &TaskProgress,
         event: &StoredEvent,
     ) -> Result<CasResult, FakeError> {
-        self.advance_with_receipt(task, expected_version, progress, event, None)
+        self.advance_with_receipt(task, expected_version, progress, event, None, false)
     }
 
     async fn load_workflow(
@@ -316,6 +316,7 @@ impl FakeStore {
         progress: &TaskProgress,
         event: &StoredEvent,
         confirmation: Option<&str>,
+        clear_attention: bool,
     ) -> Result<CasResult, FakeError> {
         let mut state = lock(&self.state);
         state.calls.push(StoreCall::AdvanceTask {
@@ -362,6 +363,9 @@ impl FakeStore {
             task: task.clone(),
         };
         data.progress.insert(task.id.clone(), progress.clone());
+        if clear_attention && let Some(note) = data.pipeline.notes.get_mut(&task.id) {
+            note.1 = None;
+        }
         data.events
             .entry(task.id.clone())
             .or_default()

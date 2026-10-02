@@ -7,7 +7,7 @@
 
 ## 第 10 施工關（實作中，待驗收）
 
-新增 `fake-worker`：讀真 CLI inbox、在綁定 worktree commit、回報 done／review；可指定 `--fail-checks-once`、`--changes-once`、`--leave-wip`、`--hold`。只有 agent 決策是假，daemon、holder、SQLite、git、shim、checks 與 forge 都是真的。STO-13 與 SplitAdvance mutant 驗證原子推進。
+新增 `fake-worker`：讀真 CLI inbox、在綁定 worktree commit、回報 done／review；可指定 `--fail-checks-once`、`--changes-once`、`--leave-wip`、`--hold`。只有 agent 決策是假，daemon、holder、SQLite、git、shim、checks 與 forge 都是真的。STO-13 與 SplitAdvance mutant 驗證原子推進；pipeline 共享 FakeStore／SQLite 契約驗 CAS 與 attention_reason 清除同交易，錯誤／衝突保留原註記與 acknowledgement，generic advance_task 保留原語意。
 
 
 假 worker 的 workspace 放 `.leave-wip` 會讓下一次 work 留下 untracked 檔案；移除檔案恢復正常。這只控制測試用的 agent 行為。

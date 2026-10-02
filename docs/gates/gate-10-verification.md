@@ -5,6 +5,12 @@
 > - r12／r15 與人工主流程通過；事件收尾仍待驗證及補驗，兩個 explorer 未執行，未 merge。
 > - 下一步：完成收尾的全新驗證後，一次帶使用者補驗事件；確認後才能 merge。
 
+## 人工收尾的反例（r16）
+
+`eac09cf` 的全新 verifier r16 六項 baseline 全通過：workspace 774 passed／2 ignored、完整 accept 716 passed／2 ignored；四個最新 Ubuntu／macOS CI job 亦成功。但兩組有限 native probe 中，post-CAS note 寫入故障留下 durable ApprovalGranted、client error、resolved unknown 與未執行的 merge；重啟才恢復 single merge，因此結論是 **REFUTED**，不能用 baseline／CI 綠燈抵銷。
+
+原始報告 `/private/tmp/g10-r16-report.md`、logs 與 SHA manifest `/private/tmp/g10-r16-logs/manifest.sha256` 保留。首輪 fixture 的 SQLite exclusive-lock 準備錯誤為 0 passed／3 failed，不算通過；修正準備後同命令 2 passed／1 failed，未擴第三組。CAS 與 attention 清除改為同交易，修正版的最新獨立結果見 [PR #143](https://github.com/suzuke/AgEnD/pull/143)；原人工紀錄仍只認證 `45e957e`。
+
 ## 範圍與固定版本
 
 - [Draft PR #143](https://github.com/suzuke/AgEnD/pull/143)，branch `feat/gate-10-pipeline`，base `v2`。

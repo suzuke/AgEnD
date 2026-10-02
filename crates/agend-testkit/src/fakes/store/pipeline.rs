@@ -7,7 +7,7 @@ pub(super) struct Data {
     members: BTreeMap<String, Member>,
     instances: BTreeMap<String, Instance>,
     bindings: BTreeMap<String, BindingRow>,
-    notes: BTreeMap<String, (Option<String>, Option<String>, bool)>,
+    pub(super) notes: BTreeMap<String, (Option<String>, Option<String>, bool)>,
     pub(super) messages: BTreeMap<String, Message>,
     asks: BTreeMap<String, AskRow>,
     answers: Vec<(u64, String, String, Option<String>, String, bool)>,
@@ -30,7 +30,7 @@ impl PipelineStore for FakeStore {
         event: &StoredEvent,
         confirmation: Option<&str>,
     ) -> Result<CasResult, FakeError> {
-        self.advance_with_receipt(task, version, progress, event, confirmation)
+        self.advance_with_receipt(task, version, progress, event, confirmation, true)
     }
 
     async fn tasks(&self) -> Result<Vec<Task>, FakeError> {

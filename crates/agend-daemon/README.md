@@ -7,7 +7,7 @@
 
 ## 第 10 施工關（實作中，待驗收）
 
-單一 pipeline queue、SQLite schema v5、真 git／Runner／LocalForge、binding 與 hook 生命週期、checks 沙箱、重啟／每日對帳、team／workflow／task／請示／提醒已接通；執行規則見 [pipeline runtime](../../docs/architecture/pipeline-runtime.md)。人工核准事件在 store CAS 成功後發布真 action；通知型 timeout 留在同一核准 ticket 時不移除再重建 attention。
+單一 pipeline queue、SQLite schema v5、真 git／Runner／LocalForge、binding 與 hook 生命週期、checks 沙箱、重啟／每日對帳、team／workflow／task／請示／提醒已接通；執行規則見 [pipeline runtime](../../docs/architecture/pipeline-runtime.md)。人工核准、attention_reason 清除與結果 receipt 在同一筆 store CAS transaction 完成後才發布真 action；失敗或衝突不改任何投影；通知型 timeout 留在同一核准 ticket 時不移除再重建 attention。
 
 ## 負責
 
@@ -91,7 +91,7 @@
 | 何時出現 | 開機計畫做完才 bind，接著印 `listening on …` 與 `agend daemon ready: …`；連得上的 client 一定看到完整的 instance 清單（不需要 `.ready`） |
 | 停止 | Ctrl-C／SIGTERM：停止接受、刪 socket 檔、關所有 client 連線，再照第 6 施工關結束 |
 | 身分 | `hello` 的 `caller`（CLI 在 agent 裡填 `AGEND_INSTANCE`）：有填＝agent，沒填＝操作者；不做 cookie |
-| 請求 | `hello`、`get_fleet`、`subscribe_events`、`subscribe_terminal`、`resolve_attention`（只收操作者，先查身分再找 id；handler 當場拿掉項目並回覆，`retry` 交給 supervisor 之後做）；`terminal_input`（第 11 施工關 B 段，見下）；`answer_ask` → `unknown_ask`；agent 命令與 `operator` 見「CLI 的 daemon 端」；未知請求 → `unknown_request`、連線不斷 |
+| 請求 | `hello`、`get_fleet`、`subscribe_events`、`subscribe_terminal`、`resolve_attention`（只收操作者，先查身分再找 id；pipeline 人工核准先提交 CAS，再解除項目並發布真 action；instance 的 `retry` 交給 supervisor）；`terminal_input`（第 11 施工關 B 段，見下）；`answer_ask` → `unknown_ask`；agent 命令與 `operator` 見「CLI 的 daemon 端」；未知請求 → `unknown_request`、連線不斷 |
 | 事件 id | 第一個＝開機時間（unix ms）× 1000 + 1；只放記憶體最近 1024 筆；游標規則見 `agend_core::protocol::client` |
 | 慢 client | 落後超過 1024 筆 → `event_gap` 後關連線；寫入 5 秒沒進度 → 關連線；都記一行 log（`client #N (…): …`） |
 | instance 狀態 | `starting`（啟動中、等重起）、`unknown`（在跑；忙碌／閒置要 driver）、`failed` |
@@ -128,7 +128,7 @@
 | 耐久 | WAL、`synchronous=FULL`、`foreign_keys=ON` |
 | 保留期限 | `store::retention::RETENTION`：task、workflow、instance、team、binding、請示／回答 receipt、reminder 永久（binding／reminder 按生命週期刪除）；事件與 checks log 14 天；WIP archive 與訊息 30 天（`created_at_unix_ms`）；`audit/shim.jsonl` 每日輪替留 14 天、daemon log 7 天、holder log 7 天（第 6 施工關 `housekeeping`） |
 | DB 快照 | `backups/agend-YYYY-MM-DD.db`（UTC；DB 沒有任何 task、事件與 instance 時不做），升級前 `agend-YYYY-MM-DD-pre-vN.db`；只留最新 7 份，其他檔案不動 |
-| pipeline | `PipelineSnapshot` 存 task 的 `pipeline` 欄，workflow 固定建立時版本；snapshot、task、事件與被接受結果的 dispatch confirmation 同一筆 CAS transaction，不重播事件；`0005` 加 team／role、binding、請示與提醒，詳見 [runtime](../../docs/architecture/pipeline-runtime.md) |
+| pipeline | `PipelineSnapshot` 存 task 的 `pipeline` 欄，workflow 固定建立時版本；snapshot、task、事件、attention_reason 清除與被接受結果的 dispatch confirmation 同一筆 CAS transaction，保留 failure acknowledgement，不重播事件；`0005` 加 team／role、binding、請示與提醒，詳見 [runtime](../../docs/architecture/pipeline-runtime.md) |
 
 ### 還原 DB 快照（手動）
 

@@ -132,7 +132,7 @@
 
 ## 進度紀錄
 
-r12 CONFIRMED `dfe5bc6`；workspace 771 passed／2 ignored、完整 accept 713 passed／2 ignored、三組探測及四個 CI job 通過。原失敗另保留；詳見 [驗證證據](gate-10-verification.md) 與 [完整進度紀錄](gate-10-progress.md)。
+r16 REFUTED `eac09cf`：baseline／CI 全綠，但 post-CAS note 故障使事件與決定不一致；修正待複驗。r12 CONFIRMED `dfe5bc6`；workspace 771 passed／2 ignored、完整 accept 713 passed／2 ignored、三組探測及四個 CI job 通過。原失敗另保留；詳見 [驗證證據](gate-10-verification.md) 與 [完整進度紀錄](gate-10-progress.md)。
 
 ## 下一步
 
