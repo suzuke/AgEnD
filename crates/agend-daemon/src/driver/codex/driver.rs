@@ -29,7 +29,7 @@ use agend_core::model::{Backend, DeliveryState};
 use agend_core::policy::busy::BusyLevel;
 use agend_core::traits::{AgentMessage, DeliveryReceipt, Driver, DriverEvent};
 
-use super::history::{after, expand, match_items, user_items};
+use super::history::{after, expand, match_identified_items, match_items, user_items};
 use super::launch;
 use super::link::{self, CodexSink, Link, Worker};
 use super::rpc::RpcError;
@@ -82,6 +82,7 @@ struct Inner {
     home: PathBuf,
     store: Arc<SqliteStore>,
     sink: CodexSink,
+    input_policy: agend_core::policy::codex_input::CodexInputPolicy,
     links: Mutex<BTreeMap<String, Link>>,
     /// The holder generation each instance's latest `connect` is for; an
     /// older connect still running gives up instead of storing a thread,
@@ -123,11 +124,20 @@ impl CodexDriver {
     /// A driver for the instances under `home`; `sink` hears when an
     /// instance's app-server is gone.
     pub fn new(home: &Path, store: Arc<SqliteStore>, sink: CodexSink) -> Self {
+        Self::with_input_policy(home, store, sink, Default::default())
+    }
+    pub fn with_input_policy(
+        home: &Path,
+        store: Arc<SqliteStore>,
+        sink: CodexSink,
+        input_policy: agend_core::policy::codex_input::CodexInputPolicy,
+    ) -> Self {
         Self {
             inner: Arc::new(Inner {
                 home: home.to_path_buf(),
                 store,
                 sink,
+                input_policy,
                 links: Mutex::new(BTreeMap::new()),
                 current: Mutex::new(BTreeMap::new()),
             }),
@@ -221,7 +231,13 @@ impl Inner {
             if !self.is_current(id, generation) {
                 return Ok(None);
             }
-            match Worker::open(id, generation, listen.clone(), Arc::clone(&self.store)) {
+            match Worker::open(
+                id,
+                generation,
+                listen.clone(),
+                Arc::clone(&self.store),
+                self.input_policy.allows_instance(id),
+            ) {
                 Ok(worker) => break worker,
                 Err(e) if started.elapsed() >= launch::READY_WITHIN => {
                     return Err(format!(
@@ -396,7 +412,12 @@ impl Inner {
         let turns = wait.wait(EVENTS_WITHIN).map_err(DriverError::Backend)?;
         let rows = link::messages_to(&self.store, id)?;
         let items = user_items(&turns);
-        let found = match_items(
+        let match_receipts = if self.input_policy.allows_instance(id) {
+            match_identified_items
+        } else {
+            match_items
+        };
+        let found = match_receipts(
             &items.iter().map(|(_, u)| u.clone()).collect::<Vec<_>>(),
             &rows,
         );

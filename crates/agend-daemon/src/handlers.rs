@@ -70,6 +70,8 @@ pub struct Context {
     pub exe: PathBuf,
     /// A restart preflight is running (only one at a time, gate 9 P7).
     pub restarting: AtomicBool,
+    /// Default denies all Codex input; diagnostic tools may scope U17 input.
+    pub codex_input: agend_core::policy::codex_input::CodexInputPolicy,
 }
 
 impl Context {
@@ -284,7 +286,9 @@ fn terminal_input(
             format!("{instance_id} has no live terminal; nothing was written"),
         );
     };
-    if view.backend == agend_core::model::Backend::Codex.as_str() {
+    if view.backend == agend_core::model::Backend::Codex.as_str()
+        && !ctx.codex_input.allows_instance(&instance_id)
+    {
         return refuse(error_code::NOT_SUPPORTED, CODEX_INPUT.into());
     }
     let line = crate::runtime::link::input_line(bytes_base64);

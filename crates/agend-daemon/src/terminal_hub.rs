@@ -32,6 +32,7 @@ pub struct TerminalHub(Arc<Inner>);
 struct Inner {
     runtime: HolderRuntime,
     fleet: Arc<Fleet>,
+    codex_input: agend_core::policy::codex_input::CodexInputPolicy,
     next: AtomicU64,
     nonce: String,
     actors: Mutex<BTreeMap<String, Handle>>,
@@ -141,6 +142,13 @@ impl Job {
 
 impl TerminalHub {
     pub fn new(runtime: HolderRuntime, fleet: Arc<Fleet>) -> Self {
+        Self::with_input_policy(runtime, fleet, Default::default())
+    }
+    pub fn with_input_policy(
+        runtime: HolderRuntime,
+        fleet: Arc<Fleet>,
+        codex_input: agend_core::policy::codex_input::CodexInputPolicy,
+    ) -> Self {
         static NEXT_HUB: AtomicU64 = AtomicU64::new(1);
         let nonce = format!(
             "{}-{}",
@@ -153,6 +161,7 @@ impl TerminalHub {
         Self(Arc::new(Inner {
             runtime,
             fleet,
+            codex_input,
             next: AtomicU64::new(1),
             nonce,
             actors: Mutex::new(BTreeMap::new()),
@@ -270,6 +279,7 @@ impl TerminalHub {
                 hub: Arc::downgrade(&self.0),
                 runtime: self.0.runtime.clone(),
                 fleet: self.0.fleet.clone(),
+                codex_input: self.0.codex_input.clone(),
                 jobs,
                 views: BTreeMap::new(),
                 owner: None,

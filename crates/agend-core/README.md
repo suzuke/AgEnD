@@ -15,6 +15,8 @@
 
 `PipelineView::replace_attention_if` 定義原子條件更新：捕捉值仍相同才 replace／publish，移除或已變更就拒絕；core 僅定義 port，Fleet 實作鎖。用於避免 Retry 與 failed-item enrichment 交錯時重建舊項目。
 
+policy::codex_input 預設拒絕所有 Codex 人工輸入；U17 診斷政策只允許一個明確 instance，沒有認證或持久化 CLI 版本。[證據](../../docs/gates/gate-11c-u17-validation.md)。
+
 ## 負責
 
 - 所有 crate 共用型別（`model`）：backend、team、task、送達狀態、branch 命名空間

@@ -328,6 +328,7 @@ impl InProcess {
             codex: CodexDriver::new(&self.root, Arc::clone(&self.store), Arc::new(|_| {})),
             exe: PathBuf::from("/nonexistent/agend"),
             restarting: AtomicBool::new(false),
+            codex_input: Default::default(),
         });
         let listener = server::bind(&self.socket).expect("bind");
         self.server = Some(Server::start(listener, self.socket.clone(), context));

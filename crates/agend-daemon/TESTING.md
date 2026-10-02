@@ -25,6 +25,8 @@
 
 Codex history 的四個匹配 cases 保留 lost-reply 對帳，新增 never-attempted／foreign clientId 拒絕；native U17 foundation 在 agend 的 `codex_u17`。[範圍](../../docs/gates/gate-11c-u17-validation.md)。
 
+Codex history 本批五個 cases 分開核嚴格 clientId 與舊 lost-reply 相容性；agend 的 codex_u17 六個 tests 核完整 App／daemon、scope／caller、預設拒絕與 attempted crash-window。live 工具只編譯與 guard，尚未執行。
+
 ## 怎麼跑
 
 ```bash

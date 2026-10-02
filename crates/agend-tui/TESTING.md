@@ -37,6 +37,8 @@ App 已選用此路徑；真 daemon／holder／PTY 的單次 Source 輸入與 th
 
 新 draw-size case 省略 Resize event、再注入舊尺寸；以共用 native draw helper 的實際 backend area 核 20×4 grant，未確認不送鍵。移除同步的 mutant exit 101；[CI 反例與重跑](../../docs/gates/gate-11c-regression-validation.md)。
 
+完整終端可用 tui_full 互動 demo；真 holder parser 經 FakeDaemon／ClientSource，支援兩個 client、鍵鼠、貼上、歷史與重連。沒有啟動真 agent；[指令與驗證範圍](../../docs/gates/gate-11c-demo.md)。
+
 ## 怎麼跑
 
 ```bash

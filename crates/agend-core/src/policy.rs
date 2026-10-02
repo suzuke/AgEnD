@@ -8,3 +8,5 @@ pub mod busy;
 pub mod conflict;
 pub mod debounce;
 pub mod merge_gate;
+
+pub mod codex_input;

@@ -29,6 +29,7 @@ impl Actor {
             .fleet
             .instance(&self.instance)
             .is_some_and(|v| v.backend == "codex")
+            && !self.codex_input.allows_instance(&self.instance)
         {
             scope.send(error(Some(id.clone()), "not_supported", CODEX_INPUT));
             return;

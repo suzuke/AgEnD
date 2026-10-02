@@ -2,7 +2,7 @@
 
 > **TL;DR**
 > - [draft PR #145](https://github.com/suzuke/AgEnD/pull/145) 持續實作完整終端；目前接通 holder／runtime／daemon／client 路徑，C 段尚未完成或驗收。
-> - 已接通 frame／歷史及實際 resize／input ack；client 1.4 型別／傳輸已加入；daemon 多視窗與六項 fake／真契約已加入；TUI App 已接完整模式、鍵鼠／貼上與歷史；原生底線／標準游標已有讀回證據；剩餘矩陣與 Codex U17 待完成。
+> - 已接通 frame／歷史及實際 resize／input ack；client 1.4 型別／傳輸已加入；daemon 多視窗與六項 fake／真契約已加入；TUI App 已接完整模式、鍵鼠／貼上與歷史；原生底線／標準游標已有讀回證據；完整 fake U17 本機已通過；真 Codex live 與剩餘矩陣待完成。
 > - 下一步：完成剩餘契約矩陣與 TUI，再跑完整驗收、全新 verifier 與逐步人工驗收；merge 等使用者確認。
 
 ## 已實作
@@ -22,6 +22,10 @@
 | 開發中能力邊界 | 真 daemon 選 1.4；fake 預設 1.3，注入 TerminalProducer 後選 1.4；一般 NEEDED 保留 1.3，舊 peer 仍可用 B 路徑 | native 全路徑＋1.3 真／假能力拒絕＋CLP |
 
 ## 驗證紀錄
+
+- 2026-10-03 完整 fake U17 已納入 accept tui；594 主 suite passed／0 ignored，fake／真 daemon／U17 三個 demos 通過。新互動 demo 的兩個 App 共用 parser、尺寸交接／唯讀拒絕／重取控制與各自 termios 還原通過；[互動 demo](gate-11c-demo.md)。完整 workspace 888 passed／2 個既有 ignored 在抽取 fixture 前執行，真 Codex live 與完整驗收仍待完成（draft PR #145）。
+
+- 2026-10-03 完整 fake U17：六個 tests 本機通過，含 App／client／daemon 子程序、同 holder／thread 重啟與草稿、scope／caller 拒絕及 durable turn id。attempted crash-window 原反例 exit 101，input-enabled scope 改要求自己的 clientId；五個 history 與十五個舊 driver 契約通過。真工具已編譯、guard exit 2，沒有 live 認證。[U17 證據](gate-11c-u17-validation.md)、[live 工具](gate-11c-u17-live.md)（draft PR #145）。
 
 - 2026-10-03 C 段端到端時效（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：真 App 的 12 次最後 dirty burst 從通知 producer 前到外層可見皆 ≤300 ms，未加 holder round-trip 額度（最慢 215.302 ms）；800 ms 取樣 mutant 在 806.224 ms 被拒絕。還原後外層 6 passed／0 ignored，clippy／fmt／實際 no-std 通過；其餘矩陣與 U17 待完成。[證據](gate-11c-outer-validation.md)。
 
@@ -75,7 +79,7 @@
 - 完成驗收矩陣其餘拒絕／壓力／時效與資源案例；六項控制／viewport／EOF 契約已同跑 fake／真 daemon，不能代替完整 C 矩陣。
 - 原生底線／標準游標已有讀回證據，實機外觀與完整 App 的拒絕／資源矩陣待驗；i／尺寸確認／失效的局部證據已取得。
 - mode-aware keys／mouse／paste、固定歷史與 guard 已有局部證據；真 PTY App 回歸已取得[原生證據](gate-11c-native-app-validation.md)，後續 [外層 PTY](gate-11c-outer-validation.md) 已驗 event capture／restore；實機驗收仍待完成。
-- fake Codex＋真 AgEnD U17；明確 opt-in live smoke、版本及使用者確認後才開放該版本，未驗仍 not_supported。
+- fake Codex＋真 App／daemon／client／holder U17 本機已通過；明確 opt-in live smoke、版本及使用者確認後才開放該版本，未驗仍 not_supported。
 - 完整 accept tui、workspace checks、雙平台 CI、全新無 context verifier、逐步人工驗收與 merge 確認。
 
 ## 下一步

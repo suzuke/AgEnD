@@ -11,7 +11,7 @@
 
 ## 第 11 施工關 C 段（實作中）
 
-真 App 的完整畫面、鍵鼠／paste／歷史、多視窗、實際 resize、正常／unwind 還原與 20 次程序清理已有原生回歸。Codex U17 foundation 走真 holder／wrapper／driver／SQLite 與 fake app-server；完整 daemon／client／App U17 仍待完成，Codex 輸入仍 not_supported。[證據](../../docs/gates/gate-11c-u17-validation.md)。
+真 App 的完整畫面、鍵鼠／paste／歷史、多視窗、實際 resize、正常／unwind 還原與 20 次程序清理已有原生回歸。Codex U17 foundation 走真 holder／wrapper／driver／SQLite 與 fake app-server；完整 fake daemon／client／App U17 本機已通過，真 Codex live 仍待完成，Codex 輸入仍 not_supported。[證據](../../docs/gates/gate-11c-u17-validation.md)。
 
 ## 負責
 

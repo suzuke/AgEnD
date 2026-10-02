@@ -60,11 +60,41 @@ pub const HOUSEKEEPING_EVERY: Duration = Duration::from_secs(60 * 60);
 
 /// Runs the daemon for `home` (absolute, checked by the caller).
 pub fn run(home: PathBuf) -> ExitCode {
+    run_with_policy(home, None, Default::default())
+}
+
+/// Runs the same daemon in a one-instance U17 diagnostic scope.
+/// Not exposed by the normal CLI; requires explicit AGEND_U17_PROBE=1.
+/// The caller supplies the real agend binary for holder/shim dispatch.
+pub fn run_u17_probe(home: PathBuf, agend: PathBuf, instance: String) -> ExitCode {
+    if std::env::var("AGEND_U17_PROBE").as_deref() != Ok("1")
+        || instance.is_empty()
+        || !home.is_absolute()
+        || !agend.is_absolute()
+        || !agend.is_file()
+    {
+        eprintln!(
+            "U17 diagnostic daemon requires AGEND_U17_PROBE=1, an instance, absolute home and agend binary"
+        );
+        return ExitCode::from(2);
+    }
+    run_with_policy(
+        home,
+        Some(agend),
+        agend_core::policy::codex_input::CodexInputPolicy::for_u17_verification(instance),
+    )
+}
+
+fn run_with_policy(
+    home: PathBuf,
+    agend: Option<PathBuf>,
+    codex_input: agend_core::policy::codex_input::CodexInputPolicy,
+) -> ExitCode {
     if let Err(e) = server::check_socket_len(&home.join(DAEMON_SOCKET)) {
         eprintln!("agend daemon: {e}");
         return ExitCode::from(1);
     }
-    let exe = match std::env::current_exe() {
+    let exe = match agend.map(Ok).unwrap_or_else(std::env::current_exe) {
         Ok(exe) => exe,
         Err(e) => {
             eprintln!("agend daemon: cannot find its own binary: {e}");
@@ -108,7 +138,7 @@ pub fn run(home: PathBuf) -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    let stopped = runtime.block_on(serve(home, exe, store));
+    let stopped = runtime.block_on(serve(home, exe, store, codex_input));
     // Pending restart timers and the like are dropped, not awaited.
     runtime.shutdown_timeout(Duration::from_secs(1));
     if matches!(stopped, Ok(Stopped::Exec(_))) {
@@ -185,7 +215,12 @@ fn forward_signal(kind: SignalKind, name: &'static str, events: UnboundedSender<
     }
 }
 
-async fn serve(home: PathBuf, exe: PathBuf, store: SqliteStore) -> Result<Stopped, ExitCode> {
+async fn serve(
+    home: PathBuf,
+    exe: PathBuf,
+    store: SqliteStore,
+    codex_input: agend_core::policy::codex_input::CodexInputPolicy,
+) -> Result<Stopped, ExitCode> {
     let (events, mut queue) = unbounded_channel();
     forward_signal(SignalKind::interrupt(), "SIGINT", events.clone());
     forward_signal(SignalKind::terminate(), "SIGTERM", events.clone());
@@ -239,7 +274,8 @@ async fn serve(home: PathBuf, exe: PathBuf, store: SqliteStore) -> Result<Stoppe
     let codex_sink: CodexSink = Arc::new(move |event| {
         let _ = codex_events.send(Event::Codex(event));
     });
-    let codex = CodexDriver::new(&home, Arc::clone(&store), codex_sink);
+    let codex =
+        CodexDriver::with_input_policy(&home, Arc::clone(&store), codex_sink, codex_input.clone());
     let mut supervisor = Supervisor::new(
         Arc::clone(&store),
         runtime.clone(),
@@ -288,6 +324,7 @@ async fn serve(home: PathBuf, exe: PathBuf, store: SqliteStore) -> Result<Stoppe
         codex,
         exe,
         restarting: AtomicBool::new(false),
+        codex_input,
     });
     let server = Server::start(listener, socket.clone(), Arc::clone(&context));
     log::line(&format!("listening on {}", socket.display()));

@@ -198,6 +198,21 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
             "protocol_compat",
         ])?;
     }
+    if gate.number == 11 {
+        // Build the actual fake producer before tests/demo consume its PTY.
+        step(&[
+            "build",
+            "--quiet",
+            "-p",
+            "agend",
+            "--bin",
+            "agend",
+            "--example",
+            "fake_codex",
+            "--example",
+            "codex_u17_probe",
+        ])?;
+    }
     if gate.number == 1 {
         step(&["fmt", "--all", "--", "--check"])?;
         step(&[
@@ -360,6 +375,14 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
         ])?;
         step(&["build", "--quiet", "-p", "agend"])?;
         step(&["run", "--quiet", "-p", "agend", "--example", "tui_real"])?;
+        step(&[
+            "run",
+            "--quiet",
+            "-p",
+            "agend",
+            "--example",
+            "codex_u17_probe",
+        ])?;
         println!("gate 11 (tui): checks passed");
     } else {
         println!(

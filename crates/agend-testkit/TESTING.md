@@ -19,7 +19,7 @@ STO-13 同時跑 FakeStore 與 SQLite；SplitAdvance mutant 故意在失敗時�
 
 以上不認證 TUI／鍵鼠／貼上、300 ms 時效或 Codex U17。
 
-opt-in fake manual frontend 的原生驗證在 `agend/tests/codex_u17.rs`：真 PTY 輸入經實際 fake app-server，busy／user item／queue 由 producer 產生。既有 fake Codex 與錄製檔 conformance 仍照跑；這不是完整 App 或真 Codex smoke。[範圍](../../docs/gates/gate-11c-u17-validation.md)。
+opt-in fake manual frontend 的原生驗證在 `agend/tests/codex_u17.rs`：真 PTY 輸入經實際 fake app-server，busy／user item／queue 由 producer 產生。既有 fake Codex 與錄製檔 conformance 仍照跑；本批另有共用完整 App／client／daemon 子程序情境，核 draft／重啟與 receipt；不代表真 Codex smoke。[範圍](../../docs/gates/gate-11c-u17-validation.md)。
 
 ## 怎麼跑
 
@@ -78,3 +78,5 @@ opt-in fake manual frontend 的原生驗證在 `agend/tests/codex_u17.rs`：真 
 ```bash
 ~/.cargo/bin/cargo test -p agend-testkit
 ```
+
+C 段 CLP 拒絕案例同跑真 parser-backed fake 與真 daemon：agent caller 的 Acquire／Resize／Input／Release 全部 forbidden；之後核尺寸不變、原 owner 輸入仍可實收、拒絕 bytes 沒有進 consumer。

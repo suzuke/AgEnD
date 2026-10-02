@@ -21,7 +21,7 @@
 | 8 `client` | [完成（2026-09-26）](gates/gate-08-client.md) | 整合施工關：agend-client + protocol server | CLI 連得上；daemon 重啟時會重試 |
 | 9 `cli` | [完成（2026-09-29；已 merge #136）](gates/gate-09-cli.md) | agend CLI：agent 命令、操作者命令、status；安裝相關先做 `doctor`、`init`，服務註冊留第 13 施工關 | 對假／真 daemon 驗輸出與錯誤；兩個假 Codex agent 互傳訊息、中途重啟不漏不重 |
 | 10 `pipeline` | [完成（2026-10-02；#143 已確認合併）](gates/gate-10-pipeline.md) | daemon：pipeline、git、runner、forge local、supervisor、reconcile | 假 driver + 暫存 repo：task 從派工走到 merge |
-| 11 `tui` | [實作中（A、B 段已 merge；C 段提案 #144 已 merge，功能未驗收）](gates/gate-11-tui.md) | attention-first TUI：畫面層、接真 daemon；C 段完整重現 agent CLI 與滑鼠滾動 | A 段假事件、B 段真 daemon 驗收通過；C 段設計已確認，holder／runtime／daemon／client 與六項 fake／真契約已接通，TUI App 已有局部證據，原生底線／標準游標已有讀回證據，Codex U17 與完整驗收待完成 |
+| 11 `tui` | [實作中（A、B 段已 merge；C 段提案 #144 已 merge，功能未驗收）](gates/gate-11-tui.md) | attention-first TUI：畫面層、接真 daemon；C 段完整重現 agent CLI 與滑鼠滾動 | A 段假事件、B 段真 daemon 驗收通過；C 段設計已確認，holder／runtime／daemon／client 與六項 fake／真契約已接通，TUI App 已有局部證據，原生底線／標準游標已有讀回證據，完整 fake U17 本機已通過；真 Codex live 與完整驗收待完成 |
 | 12 `adapters` | [提案中（A 段 draft PR #138 待確認，尚未 merge 或實作）](gates/gate-12-adapters.md) | A claude、B opencode driver、C forge github、D Telegram | 先對假實作，再做真 backend smoke test |
 | 13 `install` | [未開始](gates/gate-13-install.md) | 安裝與發布（最後一個施工關）：服務註冊、`agend uninstall`、`agend telegram setup`（由 daemon 配對）、`xtask release`、brew、GitHub release、`cargo install` | CI 用全新 HOME + 假 agent，從安裝到第一個 task 完成 < 5 分鐘；每個 `doctor` 檢查都有「故意弄壞 → 看到修正指令」的測試 |
 
@@ -71,6 +71,10 @@
 第 10 施工關已完成驗收，使用者於 2026-10-02 明確確認 merge（[PR #143](https://github.com/suzuke/AgEnD/pull/143)）。第 11 施工關 C 段 [P1–P6](gates/gate-11c-proposal.md#使用者確認紀錄) 已逐項確認，使用者另授權合併 #144；提案 #144 已合併，接著在專屬 worktree 實作；第 12 施工關 A 段 #138 的 P1–P10 仍待使用者確認。 人工主流程與事件補驗見 [人工紀錄](gates/gate-10-manual-record.md)。
 
 ## 進度紀錄
+
+- 2026-10-03 完整 fake U17 已納入 accept tui；594 主 suite passed／0 ignored，fake／真 daemon／U17 三個 demos 通過。新互動 demo 的兩個 App 共用 parser、尺寸交接／唯讀拒絕／重取控制與各自 termios 還原通過；[互動 demo](gates/gate-11c-demo.md)。完整 workspace 888 passed／2 個既有 ignored 在抽取 fixture 前執行，真 Codex live 與完整驗收仍待完成（draft PR #145）。
+
+- 2026-10-03 完整 fake U17：六個 tests 本機通過，含 App／client／daemon 子程序、同 holder／thread 重啟與草稿、scope／caller 拒絕及 durable turn id。attempted crash-window 原反例 exit 101，input-enabled scope 改要求自己的 clientId；五個 history 與十五個舊 driver 契約通過。真工具已編譯、guard exit 2，沒有 live 認證。[U17 證據](gates/gate-11c-u17-validation.md)、[live 工具](gates/gate-11c-u17-live.md)（draft PR #145）。
 
 - 2026-10-03 C 段 U17 foundation／CI 反例（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：真 holder／wrapper／PTY／driver／SQLite 的兩個 fake Codex 情境通過；原程式把未嘗試送出的 queued row 誤認人工 receipt，已修正，完整 daemon／client／App U17 仍待完成。Retry 舊快照重建／覆蓋已受控重現並以原子條件更新修正；draw 依實際 backend 尺寸同步，新回歸拒絕缺同步 mutant。最新 CI 另核；[U17 範圍](gates/gate-11c-u17-validation.md)、[反例證據](gates/gate-11c-regression-validation.md)。
 

@@ -1,5 +1,6 @@
 //! U17 foundation: real holder/wrapper/raw fake TUI/app-server/driver/SQLite.
-//! Client permission and full App integration are not certified by this suite.
+//! Foundation cases and a full diagnostic App/client/daemon path are distinct.
+//! The normal daemon's Codex policy remains denied; no real LLM is run.
 #![cfg(unix)]
 #[path = "../../agend-daemon/tests/common/codex_process.rs"]
 mod codex;
@@ -22,6 +23,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 const BIN: &str = env!("CARGO_BIN_EXE_agend");
 const ID: &str = "g11-codex";
+fn agend_bin() -> std::path::PathBuf {
+    Path::new(BIN).to_path_buf()
+}
+#[path = "common/codex_u17_fixture.rs"]
+mod fixture_support;
+use fixture_support::{fixture, probe, text};
 struct Boot {
     runtime: HolderRuntime,
     driver: CodexDriver,
@@ -29,6 +36,14 @@ struct Boot {
 }
 impl Boot {
     async fn start(home: &Path, instance: &Instance, previous: Option<u32>) -> Self {
+        Self::with_policy(home, instance, previous, Default::default()).await
+    }
+    async fn with_policy(
+        home: &Path,
+        instance: &Instance,
+        previous: Option<u32>,
+        policy: agend_core::policy::codex_input::CodexInputPolicy,
+    ) -> Self {
         let store = Arc::new(SqliteStore::open(home, 0).unwrap());
         let runtime = HolderRuntime::new(
             home,
@@ -47,7 +62,8 @@ impl Boot {
             Some(pid) => runtime.attach(&spawn, pid).await.unwrap(),
             None => runtime.start(&spawn).await.unwrap(),
         };
-        let driver = CodexDriver::new(home, Arc::clone(&store), Arc::new(|_| {}));
+        let driver =
+            CodexDriver::with_input_policy(home, Arc::clone(&store), Arc::new(|_| {}), policy);
         driver.connect(ID, started.generation).await.unwrap();
         let boot = Self {
             runtime,
@@ -134,14 +150,6 @@ impl Boot {
         }
     }
 }
-fn text(frame: &TerminalFrame) -> String {
-    frame
-        .cells
-        .iter()
-        .flat_map(|row| row.iter())
-        .map(|cell| cell.text.as_str())
-        .collect()
-}
 fn message(id: &str, body: &str) -> AgentMessage {
     AgentMessage {
         id: id.into(),
@@ -149,32 +157,6 @@ fn message(id: &str, body: &str) -> AgentMessage {
         task_id: None,
         body: body.into(),
     }
-}
-fn fixture(native: &lab::Lab, home: &Path) -> Instance {
-    let fake = codex::fake_codex().unwrap();
-    let script = native.root.join("manual-codex");
-    let fake = fake.display().to_string().replace('\'', "'\\''");
-    std::fs::write(
-        &script,
-        format!("#!/bin/sh\nexec '{fake}' -c agend_fake_manual_tui=true \"$@\"\n"),
-    )
-    .unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-    codex::add(home, ID, &script, 1500).unwrap()
-}
-fn probe(home: &Path, thread: &str) -> Probe {
-    let mut probe = Probe::connect(&launch::socket_path(home, ID)).unwrap();
-    probe
-        .call("initialize", json!({"clientInfo":{"name":"u17-observer"}}))
-        .unwrap();
-    probe
-        .call(
-            "thread/resume",
-            json!({"threadId":thread,"excludeTurns":true}),
-        )
-        .unwrap();
-    probe
 }
 fn turns(probe: &mut Probe, thread: &str) -> Vec<Value> {
     probe
@@ -259,6 +241,15 @@ fn native_manual_turn_is_observed_and_queue_delivery_waits_for_its_own_user_item
         let items = history::user_items(&all);
         assert_eq!(all.len(), 2);
         assert_eq!(items.len(), 2);
+        let row = boot.store.message("u17-queued").await.unwrap().unwrap();
+        assert_eq!(
+            row.turn_id.as_deref(),
+            items
+                .iter()
+                .find(|(_, item)| item.client_id.as_deref() == Some("u17-queued"))
+                .map(|(_, item)| item.turn_id.as_str()),
+            "confirmed queued message lost its actual turn"
+        );
         assert_eq!(
             items
                 .iter()
@@ -342,6 +333,104 @@ fn native_manual_text_cannot_confirm_an_unattempted_message_after_component_rest
         assert_eq!(queue["data"][0]["clientUserMessageId"], sent.id);
         println!(
             "same holder {holder}, generation and thread {thread}; unattempted text is not a receipt; old attach refused"
+        );
+    });
+}
+
+#[path = "common/codex_u17_app.rs"]
+mod app_path;
+#[test]
+fn native_u17_daemon() {
+    app_path::daemon();
+}
+#[test]
+fn full_u17_app_client_daemon_path_keeps_manual_and_daemon_turns_distinct() {
+    app_path::full_path();
+}
+#[test]
+fn normal_daemon_does_not_enable_codex_input_from_probe_environment() {
+    app_path::default_denied();
+}
+
+#[test]
+fn manual_text_cannot_confirm_an_attempted_row_in_the_u17_input_scope() {
+    let native = lab::Lab::with_prefix(Path::new(BIN), "g11u17id");
+    let home = native.home(1);
+    let instance = fixture(&native, &home);
+    let _socket = codex::BoundSocket::of(&home, ID);
+    run(async || {
+        let policy =
+            || agend_core::policy::codex_input::CodexInputPolicy::for_u17_verification(ID.into());
+        let boot = Boot::with_policy(&home, &instance, None, policy()).await;
+        let thread = boot.thread().await;
+        let holder = files::running(&home, ID).unwrap().unwrap();
+        let attach = boot.acquire().await;
+        boot.driver.disconnect(ID);
+        let sent = message("u17-attempted", "identical attempted text");
+        assert_eq!(
+            boot.driver
+                .deliver(ID, &sent, BusyLevel::Queue)
+                .await
+                .unwrap()
+                .state,
+            DeliveryState::Queued
+        );
+        // The durable crash window between recording an attempt and its RPC.
+        boot.store
+            .mark_message_attempted(&sent.id, 1)
+            .await
+            .unwrap();
+        let rendered = agend_daemon::delivery::render("operator", None, &sent.body);
+        boot.manual(&attach, &rendered).await;
+        let mut observer = probe(&home, &thread);
+        user_visible(&mut observer, &thread, &rendered).await;
+        drop(boot);
+        let boot = Boot::with_policy(&home, &instance, Some(holder), policy()).await;
+        let row = boot.store.message(&sent.id).await.unwrap().unwrap();
+        assert_ne!(
+            row.state,
+            DeliveryState::Confirmed,
+            "attempted row stole the human turn receipt"
+        );
+        assert!(
+            row.turn_id.is_none(),
+            "human turn was assigned to the daemon row"
+        );
+        let events = boot.driver.events(ID, None).await.unwrap();
+        assert!(!events.iter().any(|e| matches!(&e.kind,DriverEventKind::MessageConfirmed { message_id } if message_id==&sent.id)),
+            "history events invented a receipt for manual text");
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            let row = boot.store.message(&sent.id).await.unwrap().unwrap();
+            if row.state == DeliveryState::Confirmed {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "identified retry never confirmed after human turn ended"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        boot.busy(false).await;
+        let items = history::user_items(&turns(&mut observer, &thread));
+        assert_eq!(items.len(), 2);
+        let own: Vec<_> = items
+            .iter()
+            .filter(|(_, i)| i.client_id.as_deref() == Some(sent.id.as_str()))
+            .collect();
+        assert_eq!(own.len(), 1);
+        assert_eq!(
+            boot.store
+                .message(&sent.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .turn_id
+                .as_deref(),
+            Some(own[0].1.turn_id.as_str())
+        );
+        println!(
+            "U17 attempted crash row: manual matching text has no receipt; own identified retry confirms once"
         );
     });
 }

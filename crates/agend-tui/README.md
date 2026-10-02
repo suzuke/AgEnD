@@ -19,6 +19,8 @@ pipeline task detail 顯示 repo、關卡種類、agent、受阻理由與 WIP ar
 
 native 與 off-screen draw 共用實際 frame area 更新 App 尺寸；延遲或缺 Resize event 不讓 Acquire 使用舊尺寸。相符最新 frame 前維持輸入關閉。[CI 反例與回歸](../../docs/gates/gate-11c-regression-validation.md)。
 
+完整終端可用 tui_full 互動 demo；真 holder parser 經 FakeDaemon／ClientSource，支援兩個 client、鍵鼠、貼上、歷史與重連。沒有啟動真 agent；[指令與驗證範圍](../../docs/gates/gate-11c-demo.md)。
+
 ## 負責
 
 - 首頁：跨 team 的「需要你」＋每個 team 一個區塊（agent 狀態數量、進行中的目標、最近變更）

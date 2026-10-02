@@ -67,6 +67,15 @@ pub(super) fn run(thread: &str, remote: &Path) -> Result<(), String> {
             } else if escape == b"\x1b[201~" {
                 paste = false;
                 escape.clear();
+                // Echo the completed paste as frontend state, so native
+                // consumers can observe it before a daemon restart.
+                let display: String = String::from_utf8_lossy(&text)
+                    .chars()
+                    .filter(|c| !c.is_control())
+                    .collect();
+                write!(stdout, "\x1b[3;1H\x1b[2KFAKE-MANUAL-DRAFT {display}")
+                    .map_err(|e| e.to_string())?;
+                stdout.flush().map_err(|e| e.to_string())?;
             } else if !b"\x1b[200~".starts_with(&escape) && !b"\x1b[201~".starts_with(&escape) {
                 text.append(&mut escape);
                 if text.len() > 128 * 1024 {

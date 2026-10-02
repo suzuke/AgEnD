@@ -300,13 +300,36 @@ fn refusals(fx: Fixture) -> CaseResult {
     let mut a = Window::open(&*fx, None);
     let mut agent = Window::open(&*fx, Some("agent"));
     let attach = a.acquire("owner", size(8, 32));
-    denied(
-        agent.control(
-            "forbidden",
+    // Caller checks precede size, generation and attach validation. Exercise
+    // every control operation on both fake and native daemon fixtures.
+    for (id, operation) in [
+        (
+            "forbidden-acquire",
             ClientTerminalOperation::Acquire { size: size(0, 0) },
         ),
-        error_code::FORBIDDEN,
-    );
+        (
+            "forbidden-resize",
+            ClientTerminalOperation::Resize {
+                attach_id: attach.clone(),
+                size: size(4, 17),
+            },
+        ),
+        (
+            "forbidden-input",
+            ClientTerminalOperation::Input {
+                attach_id: attach.clone(),
+                bytes_base64: STANDARD.encode(b"DENIED-AGENT\n"),
+            },
+        ),
+        (
+            "forbidden-release",
+            ClientTerminalOperation::Release {
+                attach_id: attach.clone(),
+            },
+        ),
+    ] {
+        denied(agent.control(id, operation), error_code::FORBIDDEN);
+    }
     let mut stale = a.request(
         "stale",
         ClientTerminalOperation::Input {

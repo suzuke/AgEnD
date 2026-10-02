@@ -17,6 +17,8 @@ Codex history 對帳已拒絕外來 clientId 的文字 fallback；no-turn Queued
 
 pipeline 補 failed attention 的 unblocks 時，經 core port 原子比對捕捉值再更新；Retry 已移除或新失敗已替換的項目不被舊快照重建。[CI 反例](../../docs/gates/gate-11c-regression-validation.md)。
 
+允許人工輸入的診斷 instance 在 live notification／reconcile／events 都要求自己的 clientId；一般 daemon 不受環境變數放行，未驗版本仍拒絕。Queue 的 Confirmed row 保存實際 turn id。[U17 live 工具](../../docs/gates/gate-11c-u17-live.md)。
+
 ## 負責
 
 - 入口：protocol server、command handlers、hook／事件接收（含磁碟佇列補送）

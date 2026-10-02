@@ -7,6 +7,7 @@ pub(super) struct Actor {
     pub(super) hub: Weak<Inner>,
     pub(super) runtime: HolderRuntime,
     pub(super) fleet: Arc<Fleet>,
+    pub(super) codex_input: agend_core::policy::codex_input::CodexInputPolicy,
     pub(super) jobs: mpsc::Receiver<Job>,
     pub(super) views: BTreeMap<String, View>,
     pub(super) owner: Option<Owner>,

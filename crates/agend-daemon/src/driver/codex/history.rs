@@ -15,7 +15,9 @@
 //! id. An explicit foreign clientId never falls back to text. Without an id,
 //! the same turn id and text can match; a queued crash-window row with no
 //! turn id can match only once a send was actually attempted. Never-attempted
-//! queued text is not delivery evidence. Each row matches at most one item.
+//! queued text is not delivery evidence. Input-enabled instances require the
+//! daemon's own clientId and never use text fallback. Each row matches at most
+//! one item.
 //!
 //! Must NOT: do I/O.
 
@@ -66,6 +68,16 @@ pub fn text_of(row: &Message) -> String {
 /// For each item, the id of the row it is (see the module doc). `rows` is
 /// every row to the instance, in `seq` order; `failed` rows never match.
 pub fn match_items(items: &[UserItem], rows: &[Message]) -> Vec<Option<String>> {
+    match_with(items, rows, true)
+}
+
+/// Input-enabled instances require the daemon's own client id as evidence.
+/// Manual text cannot resolve a lost send reply, even after a recorded attempt.
+pub fn match_identified_items(items: &[UserItem], rows: &[Message]) -> Vec<Option<String>> {
+    match_with(items, rows, false)
+}
+
+fn match_with(items: &[UserItem], rows: &[Message], allow_text: bool) -> Vec<Option<String>> {
     let texts: Vec<String> = rows.iter().map(text_of).collect();
     let mut taken = vec![false; rows.len()];
     items
@@ -79,7 +91,7 @@ pub fn match_items(items: &[UserItem], rows: &[Message]) -> Vec<Option<String>> 
             let found = by_client.or_else(|| {
                 // Human/frontend client IDs are distinct from daemon IDs.
                 // Their text must not steal a daemon message attribution.
-                if item.client_id.is_some() {
+                if !allow_text || item.client_id.is_some() {
                     return None;
                 }
                 (0..rows.len()).find(|&i| {
@@ -263,6 +275,27 @@ mod tests {
         assert_eq!(match_items(&[manual], std::slice::from_ref(&sent)), [None]);
         let daemon = user("t-1", Some("daemon-id"), "server-rendered text");
         assert_eq!(match_items(&[daemon], &[sent]), [Some("daemon-id".into())]);
+    }
+
+    #[test]
+    fn input_scope_requires_own_client_ids_even_after_attempt_or_with_known_turn() {
+        let mut attempted = row("queued", DeliveryState::Queued, None, "same text");
+        attempted.attempted_at_unix_ms = Some(7);
+        let rows = [
+            attempted,
+            row("sent", DeliveryState::Sent, Some("t-1"), "same text"),
+        ];
+        let items = [
+            user("t-1", None, "same text"),
+            user("t-1", Some("foreign"), "same text"),
+            user("t-1", Some("queued"), "same text"),
+            user("t-1", Some("queued"), "same text"),
+            user("t-1", Some("sent"), "same text"),
+        ];
+        assert_eq!(
+            match_identified_items(&items, &rows),
+            [None, None, Some("queued".into()), None, Some("sent".into())]
+        );
     }
 
     /// Cursors are fixed by slot: matching a message later adds an event
