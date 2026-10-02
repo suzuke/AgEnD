@@ -19,6 +19,8 @@
 
 這些驗證只到 runtime 長連線；daemon caller／client attach、完整模式、frame 節流與 Codex U17 尚未認證。
 
+`agend/tests/terminal_capability.rs` 對真 binary 與 FakeDaemon 跑同樣的 client 1.4 請求：現階段只協商 1.3、新路徑明示能力不足，控制請求先拒 agent、錯誤保留 request id，拒絕後 get_fleet 仍正常。這是開發中能力邊界的驗證，不是完整終端控制驗收。
+
 ## 怎麼跑
 
 ```bash

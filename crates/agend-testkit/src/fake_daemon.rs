@@ -1096,6 +1096,21 @@ fn handle(state: &mut State, request: ClientRequest, conn: &Connection) -> Vec<C
             }
             vec![accepted(data.request_id)]
         }
+        ClientRequest::SubscribeTerminalFrames { data } => vec![terminal_version_error(
+            conn.caller.as_deref(),
+            data.request_id,
+            false,
+        )],
+        ClientRequest::SetTerminalViewport { data } => vec![terminal_version_error(
+            conn.caller.as_deref(),
+            data.request_id,
+            false,
+        )],
+        ClientRequest::TerminalControl { data } => vec![terminal_version_error(
+            conn.caller.as_deref(),
+            data.request_id,
+            true,
+        )],
         ClientRequest::Unknown => vec![error(
             None,
             error_code::UNKNOWN_REQUEST,
@@ -1562,4 +1577,23 @@ impl ProbeClient {
         self.recv()?
             .ok_or_else(|| io::Error::new(io::ErrorKind::UnexpectedEof, "connection closed"))
     }
+}
+
+fn terminal_version_error(
+    caller: Option<&str>,
+    request_id: String,
+    control: bool,
+) -> ClientResponse {
+    let (code, message) = if control && caller.is_some() {
+        (
+            error_code::FORBIDDEN,
+            "only the operator can control a terminal view",
+        )
+    } else {
+        (
+            error_code::NOT_SUPPORTED,
+            "full terminal requires client protocol 1.4; run: agend daemon restart",
+        )
+    };
+    error(Some(request_id), code, message.into())
 }

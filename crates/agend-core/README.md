@@ -11,7 +11,7 @@
 
 ## 第 11 施工關 C 段（實作中）
 
-`protocol::terminal` 提供 no-std 的 cells／色彩／cursor／mode／viewport／frame 型別。holder 協定 1.1 新增 `GetTerminalFrame`、附 request id 的 `TerminalFrame` 與 `TerminalOperationError`；1.0 請求／純文字快照保持原 wire shape。holder 的 `TerminalControl` 提供 generation／owner 與實際 resize／input 完成回覆；client 1.4 與端到端路徑仍待接上，C 段尚未驗收。
+`protocol::terminal` 提供 no-std 的 cells／色彩／cursor／mode／viewport／frame 型別。holder 協定 1.1 新增 `GetTerminalFrame`、附 request id 的 `TerminalFrame` 與 `TerminalOperationError`；1.0 請求／純文字快照保持原 wire shape。holder 的 `TerminalControl` 提供 generation／owner 與實際 resize／input 完成回覆；client 1.4 新增檢視訂閱／viewport／控制、完成回覆與失去控制通知；Acquire 不接受 caller 自訂 attach id。client 提供 1.4／1.3，daemon 尚待接通而維持 1.3；端到端路徑與 C 段尚未驗收。
 
 ## 負責
 

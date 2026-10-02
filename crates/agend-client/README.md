@@ -9,6 +9,15 @@
 
 一般連線要求 client protocol 1.3；`resolve_attention_with_note` 可送退回修改理由。`agend daemon restart` 仍只要求 1.2，讓新 CLI 能重啟舊 daemon。
 
+## 第 11 施工關 C 段（實作中）
+
+client 1.4 的型別與專用傳輸已加入；一般 `NEEDED` 維持 1.3。hello 提供 1.4／1.3，尚未完成新路徑的 daemon 仍只選 1.3；新 API 先檢查 1.4，不向舊 daemon 送操作。
+
+完整終端使用專用連線：背景 thread 以 `Sender::subscribe_terminal_frames`／`set_terminal_viewport`／`terminal_control` 寫一次，另一條 thread 用 `Client::next_full_terminal` 讀 `FullTerminalUpdate`。回覆與拒絕保留 request id／view id，caller 在 daemon 端驗；generic `request` 拒絕這些連線範圍請求，不能經 Redo 重連重送。
+
+新讀取行含換行最多 8 MiB；無效 frame／partial EOF／超限會關閉所有 clone 並永久作廢該完整終端 reader。macOS peer 已半關閉時，SHUT_RDWR 失敗改分別關閉寫／讀方向。新請求含換行最多 1 MiB，輸入 base64 與 resize 尺寸先驗，整次拒絕；所有 Sender clone 共用寫入鎖，完整終端一行從等待鎖到寫完最多 5 秒，失敗明示可能部分送出、不重送。
+
+daemon 的多視窗控制、frame 節流與 TUI 尚待串接；本段傳輸測試不代表 C 段已驗收。
 ## 負責
 
 - unix socket 連線、`hello`（帶選填的 `caller`）、協定版本檢查（要 1.3；`agend daemon restart` 只要 1.2＝有 `daemon_restart` 的版本）
@@ -64,12 +73,13 @@
 |---|---|
 | `connection` | `Client`：連線、`hello`、請求／回應、事件 |
 | `retry` | `RESTART_RETRY_WINDOW` = 10 秒、`RETRY_EVERY` = 100 ms、`Redo` |
+| `terminal` | client 1.4 專用傳輸、有限行與失敗關閉 |
 | `version` | 要 1.3（`NEEDED`）；`RESTART_SINCE` = 1.2；不合時的訊息 |
 
 ## 依賴規則
 
 - 一般依賴：`agend-core`、`serde_json`、`base64`（PTY 位元組在 wire 上是 base64，由 adapter 編碼；第 11 施工關 B 段）
-- dev 依賴：`agend-testkit`（假 daemon、proxy）
+- dev 依賴：`agend-testkit`（假 daemon、proxy）、`agend-holder`（真 parser frame producer）
 - 禁止：async runtime、SQLite、`agend-daemon`（`cargo xtask check-deps`）；反過來 `agend-daemon` 也不能依賴本 crate（server 與 client 各自編碼，契約才驗得到兩邊一致，第 8 施工關 P10）
 
 ## 入口

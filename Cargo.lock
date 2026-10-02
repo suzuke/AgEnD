@@ -28,6 +28,7 @@ name = "agend-client"
 version = "0.0.0"
 dependencies = [
  "agend-core",
+ "agend-holder",
  "agend-testkit",
  "base64",
  "serde_json",

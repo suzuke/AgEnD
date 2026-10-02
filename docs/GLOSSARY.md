@@ -143,6 +143,9 @@
 | 完整終端模式 | full terminal mode | —（C 段實作中，D39） | `i` 明確進入的 agent 終端操作畫面，只留一行 AgEnD 狀態列；Ctrl-] 回唯讀。已於 2026-10-02 確認，尚未實作。 | B 段純文字 attach 與輸入模式 | [C 段 P1](gates/gate-11c-proposal.md#p1完整模式的入口與退出) |
 | 終端連線憑證 | terminal connection | `runtime::terminal::TerminalConnection` | runtime 長連線的能力與 epoch；背景操作只送到取得憑證時的 holder 連線，斷線或取消在途控制操作即失效。 | holder process generation；client attach id | D39／第 11 施工關 C 段 P2、P3 |
 | 終端 frame | terminal frame | `protocol::terminal::TerminalFrame` | holder 同時取出的 viewport cells、樣式、游標、mode 與歷史定位資料，附 generation／revision。共用型別與 holder 基礎實作中，端到端尚未完成。 | 純文字 screen snapshot；PTY 原始位元組 | [C 段 P2](gates/gate-11c-proposal.md#p2畫面由-holder-提供協定採加法) |
+| 終端檢視憑證 | terminal view ID | `protocol::client::TerminalSubscribeData`、`ClientTerminalFrameData::view_id` | daemon 為一條 client 連線的終端訂閱建立的識別；歷史 viewport 與控制請求必須屬於此檢視，EOF 作廢。與每次重新取得的控制 attach id 分開。 | holder generation；控制 attach id | D39／第 11 施工關 C 段 P2、P3 |
+| client 終端控制操作 | client terminal operation | `protocol::client::ClientTerminalOperation` | client 1.4 的 Acquire／Resize／Input／Release；Acquire 不帶 caller 自訂 attach id，daemon 每次產生新憑證。回覆保留 request id，傳輸不重送。 | holder 的 `TerminalControlOperation` | D39／第 11 施工關 C 段 P3 |
+| client 終端控制狀態 | client terminal control state | `protocol::client::TerminalControlState` | 完成回覆或失去控制通知中的唯讀／持有 attach id 狀態；只有實際 resize 與完整 frame 完成後才可 Controlled。 | 入列成功；agent busy 狀態 | D39／第 11 施工關 C 段 P3 |
 | 終端控制權 | terminal control ownership | `protocol::terminal::TerminalControlRequest` | 最後進完整模式的操作者視窗取得 resize／input 控制；其餘視窗唯讀，連線／generation 改變即失效。holder／runtime 的控制操作已實作，daemon／TUI 的多視窗管理仍待完成。 | task 持有者；agent caller 身分 | [C 段 P3](gates/gate-11c-proposal.md#p3resize-與多視窗控制) |
 
 ## 施工

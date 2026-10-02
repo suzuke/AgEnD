@@ -119,6 +119,10 @@ daemon 重啟：`RuntimeFixture`、`DriverFixture`、`StoreFixture` 各有一個
 - `open_ask(thread, recap)`：像綁定 task 的 agent 跑 `agend ask` 那樣建立請示（帶 task 與脈絡摘要），可以 `answer_ask`，也列在全貌的「需要你」裡（`attention_id` = ask id）；`ask` 命令建立的請示沒有 task（TUI 的 demo 與測試用）。
 - `ProbeClient::hello(path, caller)`、`recv_within(timeout)`：契約的驅動端（逾時不丟掉讀到一半的行）。
 
+## 第 11 施工關 C 段（實作中）
+
+FakeDaemon 的預設能力與真 daemon 同為 1.3；新 frame／viewport／控制請求保留 request id 並明示尚未提供 1.4，控制操作先拒 agent caller。`set_supported_versions` 仍供版本測試注入；它不會建立完整終端 producer 或驗證控制權策略。C 段的 fake／真 daemon 完整契約仍待串接。
+
 ## 假 agent 程式
 
 假 codex app-server（`fake-codex-app-server`、`fake-codex app-server`）跟真的 codex 一樣一邊寫一邊讀：寫不出去的資料留在 WebSocket 的緩衝區，thread 繼續讀（第 9 施工關；原本寫的時候不讀，大訊息會跟 daemon 互相卡住）。`fake-codex app-server … --disable duplex-io` 保留舊行為，當「不讀的 peer」測 daemon 用。

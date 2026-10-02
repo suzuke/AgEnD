@@ -39,6 +39,9 @@ use super::ask::{AnswerSource, AskReply, AskThread, ContextRecap};
 use super::{ProtocolVersion, VersionMismatch, negotiate};
 use crate::policy::attention::AttentionItem;
 
+mod terminal;
+pub use terminal::*;
+
 pub const V1: ProtocolVersion = ProtocolVersion::new(1, 0);
 /// Gate 8: fleet view, needs-you actions, caller identity.
 pub const V1_1: ProtocolVersion = ProtocolVersion::new(1, 1);
@@ -46,6 +49,10 @@ pub const V1_1: ProtocolVersion = ProtocolVersion::new(1, 1);
 /// `daemon_restart` exists since 1.2 and never changes shape (gate 9 P6).
 pub const V1_2: ProtocolVersion = ProtocolVersion::new(1, 2);
 pub const V1_3: ProtocolVersion = ProtocolVersion::new(1, 3);
+/// Full terminal API capability. General clients still require only 1.3.
+pub const V1_4: ProtocolVersion = ProtocolVersion::new(1, 4);
+/// Client-side offers; the daemon advertises 1.4 only when its path is ready.
+pub const OFFERED_VERSIONS: [ProtocolVersion; 2] = [V1_4, V1_3];
 pub const SUPPORTED_VERSIONS: [ProtocolVersion; 1] = [V1_3];
 
 /// The daemon's socket, relative to the AgEnD home.
@@ -144,6 +151,18 @@ pub enum ClientRequest {
     TerminalInput {
         data: TerminalInputData,
     },
+    /// 1.4: one connection-scoped, structured terminal view.
+    SubscribeTerminalFrames {
+        data: TerminalSubscribeData,
+    },
+    /// 1.4: select this view's history without changing the live parser grid.
+    SetTerminalViewport {
+        data: TerminalViewportData,
+    },
+    /// 1.4: operator control; never replayed on another daemon connection.
+    TerminalControl {
+        data: ClientTerminalControlData,
+    },
     /// Operator answer to a needs-you ask, from the TUI, Telegram or CLI (D35).
     AnswerAsk {
         data: AnswerAskData,
@@ -176,7 +195,7 @@ impl ClientRequest {
     pub fn hello_as(caller: Option<String>) -> Self {
         Self::Hello {
             data: ClientHello {
-                supported: SUPPORTED_VERSIONS.to_vec(),
+                supported: OFFERED_VERSIONS.to_vec(),
                 caller,
             },
         }
@@ -538,6 +557,18 @@ pub enum ClientResponse {
     /// PTY output is base64 text in JSON Lines; the adapter owns encoding.
     TerminalBytes {
         data: TerminalBytesData,
+    },
+    /// 1.4: only the requested rows, with holder generation and revision.
+    TerminalFrame {
+        data: ClientTerminalFrameData,
+    },
+    /// 1.4: completed operation, with actual resized frame for Acquire/Resize.
+    TerminalControlAck {
+        data: ClientTerminalControlAck,
+    },
+    /// 1.4: a control change invalidates a former owner's queued input.
+    TerminalControlChanged {
+        data: TerminalControlChangedData,
     },
     /// 1.1: the answer to `get_fleet`.
     Fleet {
@@ -913,10 +944,11 @@ mod tests {
     }
 
     #[test]
-    fn client_hello_advertises_v1_3() {
+    fn client_hello_offers_v1_4_but_current_server_selects_v1_3() {
         let ClientRequest::Hello { data: hello } = ClientRequest::hello() else {
             unreachable!();
         };
+        assert_eq!(hello.supported, OFFERED_VERSIONS);
         assert_eq!(negotiate_version(&hello), Ok(V1_3));
         assert_eq!(hello.caller, None);
     }

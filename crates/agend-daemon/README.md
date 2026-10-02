@@ -13,7 +13,7 @@
 
 `HolderRuntime::terminal_connection` 提供 holder 1.1 的 frame／control 能力與連線 epoch；背景 writer 依 request id 配對回覆，不阻塞呼叫者的畫面 thread。佇列／pending 各最多 64，holder 請求仍最多 1 MiB；讀取回覆最多 8 MiB（含換行）。舊 holder 明示需升級。
 
-斷線、agent 結束、取消在途控制請求或 15 秒未回覆會作廢憑證；取消控制或逾時關閉該 holder 連線，避免晚到 grant 留下可用控制權。唯讀查詢取消保留連線；背景操作不跟隨新連線或重送，重新取得的憑證保留同一 holder 的畫面 generation。daemon client 1.4／控制者管理、frame 節流與 TUI 串接仍待實作，Codex 輸入仍保持 `not_supported`。
+斷線、agent 結束、取消在途控制請求或 15 秒未回覆會作廢憑證；取消控制或逾時關閉該 holder 連線，避免晚到 grant 留下可用控制權。唯讀查詢取消保留連線；背景操作不跟隨新連線或重送，重新取得的憑證保留同一 holder 的畫面 generation。client 1.4 型別與 client 傳輸已加入；daemon 控制者管理、frame 節流與 TUI 串接仍待實作。server 目前只協商 1.3，新終端請求明示 `not_supported` 並保留 request id；控制請求先拒 agent caller，唯讀查詢仍依版本拒絕。Codex 輸入仍保持 `not_supported`。
 
 ## 負責
 

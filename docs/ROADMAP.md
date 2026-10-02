@@ -72,6 +72,9 @@
 
 ## 進度紀錄
 
+- 2026-10-02 C 段 client 型別／傳輸（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：1.4 檢視／控制／完成回覆、request id、8 MiB bounded reader、1 MiB 整次拒絕、原生 socket write 期限與半關閉 EOF 修正；NEEDED 仍 1.3。daemon 完整路徑尚未接通，現階段只協商 1.3；TUI／U17、完整獨立與人工驗收仍待完成。
+
+
 - 2026-10-02 C 段控制／runtime（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：holder 實際 resize／input ack、FIFO 交接與 5 秒 native write；runtime 能力／連線 epoch、背景配對、取消 grant 失效、8 MiB bounded reader。holder 53 passed、完整 daemon crate 與 16 個真程序回歸通過；原失敗保留。daemon／client／TUI 與 U17 仍待完成，未獨立／人工驗收或 merge；[實作進度](gates/gate-11c-progress.md)。
 
 

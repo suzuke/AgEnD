@@ -10,6 +10,10 @@
 `recorder_recovery.rs` 對真 fake producer 重複 ResumeEmpty 50 次，關閉連線前必須讀到該 thread 的 `thread/started`。Pipeline 的共享 fake／SQLite 契約另外驗 dispatch receipt、task CAS 與 attention_reason 清除同交易：error／conflict 不改註記，success 保留 acknowledgement，generic advance_task 不清註記。真 SQLite attention UPDATE 故障須 rollback version／event／receipt，移除故障後可重試一次。
 STO-13 同時跑 FakeStore 與 SQLite；SplitAdvance mutant 故意在失敗時先寫 task，必須被契約推翻。`fake-worker` 由 `agend` 的 pipeline 程序測試與 `pipeline_probe demo` 啟動。
 
+## 第 11 施工關 C 段（實作中）
+
+真／假 daemon 的 1.3 能力邊界由 `agend/tests/terminal_capability.rs` 同跑；hello 現在能收到 client 提供的 1.4／1.3，major 不合的訊息依協定排序列出兩個版本。完整 frame producer、控制權與 C 段契約尚待完成。
+
 ## 怎麼跑
 
 ```bash

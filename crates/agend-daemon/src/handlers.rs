@@ -243,6 +243,15 @@ pub async fn handle(ctx: &Context, caller: Option<&str>, request: ClientRequest)
                 },
             }
         }
+        ClientRequest::SubscribeTerminalFrames { data } => {
+            terminal_version_error(caller, data.request_id, false)
+        }
+        ClientRequest::SetTerminalViewport { data } => {
+            terminal_version_error(caller, data.request_id, false)
+        }
+        ClientRequest::TerminalControl { data } => {
+            terminal_version_error(caller, data.request_id, true)
+        }
         ClientRequest::Unknown => error(None, error_code::UNKNOWN_REQUEST, "unknown request type"),
     };
     Outcome::Reply(reply)
@@ -326,5 +335,26 @@ async fn terminal(ctx: &Context, instance_id: String) -> Outcome {
             live: Some(live),
         },
         _ => no_terminal(format!("{instance_id}: its holder did not send its screen")),
+    }
+}
+
+// This server still negotiates 1.3; no full-terminal operation reaches a PTY.
+fn terminal_version_error(
+    caller: Option<&str>,
+    request_id: String,
+    control: bool,
+) -> ClientResponse {
+    if control && caller.is_some() {
+        error(
+            Some(request_id),
+            error_code::FORBIDDEN,
+            "only the operator can control a terminal view",
+        )
+    } else {
+        error(
+            Some(request_id),
+            error_code::NOT_SUPPORTED,
+            "full terminal requires client protocol 1.4; run: agend daemon restart",
+        )
     }
 }

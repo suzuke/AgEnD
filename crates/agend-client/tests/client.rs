@@ -121,7 +121,7 @@ fn a_version_mismatch_is_not_retried() {
     assert!(started.elapsed() < Duration::from_secs(1));
     assert_eq!(
         error.to_string(),
-        "client protocol version mismatch: local supports 2.0, remote supports 1.3"
+        "client protocol version mismatch: local supports 2.0, remote supports 1.3, 1.4"
     );
 }
 
