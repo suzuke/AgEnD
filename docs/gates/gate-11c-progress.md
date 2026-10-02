@@ -23,7 +23,11 @@
 
 ## 驗證紀錄
 
+- 2026-10-03 真 PTY App：兩個完整情境＋agent 入口共 3 tests 通過，核 raw bytes、實際 stty size、多視窗／EOF、固定歷史／淘汰、alt 與 daemon 重啟；20 次 close 每次 thread 為 0、fd 回同一基準。application-cursor mutant 同一回歸 exit 101，還原後通過；初跑 snapshot 同步錯誤保留。完整 agend 209／TUI 81 passed、0 ignored，workspace clippy／fmt／實際 no-std 通過。[原生證據](gate-11c-native-app-validation.md)。
+
 - 2026-10-03 原生 renderer：五種底線形狀、色彩與六種標準游標經真 backend／第二個真 parser 讀回；TUI 81／holder 57 passed。單欄 resize 的寬字 reflow hang／新輸入越界已修正，相同負面回歸會失敗；原 stack／logs 保留。完整 workspace 865 passed／2 個既有 ignored、accept tui 572 passed／0 ignored，fake／真 demos、clippy／fmt／實際 no-std 通過；[本批證據與邊界](gate-11c-native-validation.md)。
+- `d804580` 的 Ubuntu push／PR 及 macOS PR 三個 jobs 通過，各 workspace 865 passed／2 ignored、實際 no-std 通過；macOS push 在既有重連測試失敗（兩秒 2 次）。原 log 保留；受控 loop 停頓會讓原斷言失敗，新 fixture 改核實際進展／500 ms 時間下界並保留 r；100 ms mutant 被拒絕。具體 CI 停頓仍無 tick 紀錄可核，新 head CI 另核；[證據](gate-11c-native-app-validation.md)。
+
 - `5b49df9` 的 push／PR Ubuntu、macOS 四個 CI jobs 均成功；核對真 no-std 與完整 tests。原 macOS Source overflow 失敗 log 保留，最新 renderer head CI 另核。
 
 - 2026-10-03 App 接通：完整模式／尺寸確認／控制失效、模式按鍵／滑鼠／整段貼上與固定歷史，15 個真 parser＋socket App cases 通過。唯讀畫面跟隨最後輸出，holder 支援 live grid 小 viewport 定位。TUI 79、holder 56 passed；真 daemon TUI 2 cases／fake demo 通過。完整 workspace 861 passed／2 個既有 ignored（退出重訂修正前），修正後 TUI、clippy／實際 no-std 通過；198 個文件 links／anchors 有效。原 fd／編譯／fixture 失敗保留，詳細證據及未完成範圍見 [App 局部驗證](gate-11c-app-validation.md)。
@@ -60,7 +64,7 @@
 
 - 完成驗收矩陣其餘拒絕／壓力／時效與資源案例；六項控制／viewport／EOF 契約已同跑 fake／真 daemon，不能代替完整 C 矩陣。
 - 原生底線／標準游標已有讀回證據，實機外觀與完整 App 的拒絕／資源矩陣待驗；i／尺寸確認／失效的局部證據已取得。
-- mode-aware keys／mouse／paste、固定歷史與 guard 已有局部證據；真 PTY 完整 App 回歸及外層終端實機驗收仍待完成。
+- mode-aware keys／mouse／paste、固定歷史與 guard 已有局部證據；真 PTY App 回歸已取得[原生證據](gate-11c-native-app-validation.md)，外層 event capture／restore 與實機驗收仍待完成。
 - fake Codex＋真 AgEnD U17；明確 opt-in live smoke、版本及使用者確認後才開放該版本，未驗仍 not_supported。
 - 完整 accept tui、workspace checks、雙平台 CI、全新無 context verifier、逐步人工驗收與 merge 確認。
 

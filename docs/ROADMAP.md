@@ -72,6 +72,8 @@
 
 ## 進度紀錄
 
+- 2026-10-03 C 段真 PTY App（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：兩個完整情境經真 daemon／holder 到 raw consumer，逐 byte 核鍵鼠／paste、stty 核 resize；多視窗、歷史／淘汰、alt、同 holder 重啟及 20 次 thread／fd 清理通過。mode mutant 被同一回歸拒絕，原失敗保留；外層 capture／restore、其餘矩陣與 Codex U17 待完成；[證據](gates/gate-11c-native-app-validation.md)。
+
 - 2026-10-03 C 段原生 renderer（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：補五種底線／色彩與游標輸出；真 backend＋parser 讀回通過，單欄寬字 resize hang／輸入越界修正有負面回歸。TUI 81／holder 57、workspace 865 passed／2 個既有 ignored、accept tui 572 passed／0 ignored，clippy／fmt／實際 no-std 通過；前 head `5b49df9` 四個 CI jobs 成功，新 head 另核。其餘矩陣、Codex U17 與完整驗收待完成；[證據](gates/gate-11c-native-validation.md)。
 
 - 2026-10-03 C 段 App（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：接通完整模式、尺寸確認／控制失效、鍵鼠／貼上、固定歷史與唯讀 live-grid 跟隨；15 個真 parser App cases 通過，TUI 79／holder 56 passed，真 daemon TUI 2 cases 通過。原生 renderer 細節、其餘矩陣／U17 及完整驗收待完成；[局部證據](gates/gate-11c-app-validation.md)。

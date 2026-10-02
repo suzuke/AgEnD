@@ -11,6 +11,8 @@
 
 `client_source` 的同時存活 labs 上限為 4，保留所有 socket／terminal 行為測試，避免 macOS 預設 256 fd 下的平行 fixture 資源耗盡；可在 `ulimit -n 180` 下重跑該 suite。
 
+`reconnect_attempts_are_every_500_ms` 等三次實際重連，用 tick 起訖核 500 ms 時間下界，正常及受控排程停頓各跑一次，r 立即再試；100 ms mutant 被拒絕。原 d804580 macOS push「兩秒 2 次」失敗保留；新 fixture 不要求固定兩秒內的 host throughput。
+
 ## C 段 Source 路徑（局部驗證）
 
 `tests/full_source.rs` 使用真 holder parser 與 fake daemon 的實際 socket，驗控制交接／舊 owner 拒絕、viewport request id、舊 daemon 不啟用新能力、producer 阻塞時 UI seam 不等 ack，以及關閉後 queued input 不重送。控制回覆 mailbox 滿時明確關閉，不默默丟 ack；測試限制 producer 速率以隔離 server reply queue 與 UI mailbox。20 次 full stream 開關後，新增 reader／writer 全數退出，daemon connections 與 fd 回到基準。
@@ -28,6 +30,8 @@ App 已選用此路徑；真 daemon／holder／PTY 的單次 Source 輸入與 th
 `full_source` 的 overflow case 逐次等實際 producer 收件，送到 64-reply 邊界再等 worker 關閉，確認 explicit overflow；不靠五秒內送件數假設。原 `f999bbf` macOS CI 的 51／53 次送件失敗保留。
 
 原生 `agend --test tui_daemon`／`tui_real` 已改用 C 段唯讀與完整尺寸確認。fake `tui_accept` 的輸入段亦注入同一真 parser；一般舊協定 Source 的直接輸入／錯誤配對契約仍保留。詳見 [App 驗證紀錄](../../docs/gates/gate-11c-app-validation.md)。
+
+真 daemon／raw PTY 的完整 App 情境已在 `agend --test tui_native_app` 通過：鍵鼠／paste、實際 stty 尺寸、多視窗、歷史／淘汰、alt、重啟及 20 次 thread／fd 清理。這些 events 直接呼叫 App，外層終端 capture／restore 仍待驗；[證據與重跑](../../docs/gates/gate-11c-native-app-validation.md)。
 
 ## 怎麼跑
 

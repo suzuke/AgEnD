@@ -645,26 +645,56 @@ fn a_tall_terminal_shows_its_newest_rows_until_scrolled_up() {
 /// though the loop ticks every 100 ms.
 #[test]
 fn reconnect_attempts_are_every_500_ms() {
-    let lab = Lab::new();
-    let (mut app, _) = lab.app(None);
-    let started = Instant::now();
-    while started.elapsed() < Duration::from_millis(2000) {
-        app.tick();
-        std::thread::sleep(agend_tui::TICK);
+    // A descheduled UI can execute fewer ticks in two seconds. Check actual
+    // attempts and their time bounds, rather than requiring host throughput.
+    for pause in [Duration::ZERO, Duration::from_millis(2100)] {
+        let lab = Lab::new();
+        let mut previous_tick_start = Instant::now();
+        let (mut app, _) = lab.app(None);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut attempts = 0;
+        std::thread::sleep(pause);
+        while attempts < 3 {
+            let tick_start = Instant::now();
+            app.tick();
+            let tick_end = Instant::now();
+            let Connection::Disconnected {
+                attempts: after, ..
+            } = app.connection
+            else {
+                panic!("{:?}", app.connection);
+            };
+            if after != attempts {
+                assert_eq!(after, attempts + 1, "one tick made multiple attempts");
+                // Both reconnect calls lie within their tick's start/end
+                // bounds. A shorter span proves an early reconnect, while
+                // scheduler pauses can only make this span longer.
+                let span = tick_end.duration_since(previous_tick_start);
+                assert!(
+                    span >= Duration::from_millis(500),
+                    "reconnect {after} arrived early: span={span:?}, pause={pause:?}"
+                );
+                previous_tick_start = tick_start;
+                attempts = after;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "no reconnect progress: attempts={attempts}, pause={pause:?}"
+            );
+            if attempts < 3 {
+                std::thread::sleep(agend_tui::TICK);
+            }
+        }
+        // Explicit r still bypasses the interval immediately after an attempt.
+        press(&mut app, &[ch('r')]);
+        let Connection::Disconnected {
+            attempts: after, ..
+        } = app.connection
+        else {
+            panic!();
+        };
+        assert_eq!(after, attempts + 1);
     }
-    let Connection::Disconnected { attempts, .. } = app.connection else {
-        panic!("{:?}", app.connection);
-    };
-    assert!((3..=5).contains(&attempts), "{attempts} attempts in 2 s");
-    // `r` still tries at once.
-    press(&mut app, &[ch('r')]);
-    let Connection::Disconnected {
-        attempts: after, ..
-    } = app.connection
-    else {
-        panic!();
-    };
-    assert_eq!(after, attempts + 1);
 }
 
 /// P7: after a reconnect, a selection that is gone goes to the first row

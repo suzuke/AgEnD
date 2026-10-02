@@ -16,6 +16,8 @@
 
 `terminal_capability` 對真 daemon 與 fake 以明確 1.3 hello 同驗能力拒絕、request id 與 agent 控制權拒絕順序。`terminal_hub` 的 8 個原生 cases 經真 daemon／holder／PTY 驗多視窗、EOF／停止、尺寸、歷史、dirty 尾段、正式 client 與 20 次開關；六項 C 契約已同跑 fake／native；`tui_daemon` 已接 C App 唯讀／取得控制／重連流程，Codex 尚維持拒絕。完整矩陣與 U17 待完成。
 
+`tui_native_app` 的兩個情境經完整 App／真 daemon／holder 到 raw PTY 程序，逐 byte 核鍵鼠／paste 與超限拒絕，agent 內 stty size 核 resize，多視窗交接、>1,000 列歷史／clamp、alt 與 daemon 重啟不自動控制。20 次開關每次 thread／fd 回基準，實際外層 event capture／restore 仍待驗；[證據與重跑](../../docs/gates/gate-11c-native-app-validation.md)。
+
 ## 怎麼跑
 
 ```bash

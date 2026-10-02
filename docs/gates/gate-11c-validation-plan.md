@@ -7,7 +7,7 @@
 
 ## 目前執行情況
 
-已建立的 suites／fixture 與原始證據見 [實作進度](gate-11c-progress.md)、[App 驗證](gate-11c-app-validation.md) 及 [原生 renderer](gate-11c-native-validation.md)。CLP-23–28 已同跑 fake／native，fake 注入真正 holder parser。這些結果涵蓋下表的一部分；真 PTY 完整 App／資源與時效矩陣、Codex U17、最新完整驗收、全新 verifier 及人工驗收仍須逐項取得證據。
+已建立的 suites／fixture 與原始證據見 [實作進度](gate-11c-progress.md)、[App 驗證](gate-11c-app-validation.md)、[原生 renderer](gate-11c-native-validation.md) 及 [真 PTY App](gate-11c-native-app-validation.md)。CLP-23–28 已同跑 fake／native，fake 注入真正 holder parser。這些結果涵蓋下表的一部分；外層 event capture／restore 與其餘資源／時效矩陣、Codex U17、最新完整驗收、全新 verifier 及人工驗收仍須逐項取得證據。
 
 ## 自動驗證矩陣
 

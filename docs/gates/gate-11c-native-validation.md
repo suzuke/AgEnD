@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 原生輸出已保留單／雙／捲曲／點狀／虛線底線、底線色與標準游標；C 段仍在 draft PR #145 實作。
 > - 真 holder parser 產生 frame，經真 crossterm backend，再由另一個真 parser 讀回；尚未認證實機字型與外觀。
-> - 下一步：完成真 PTY App／資源矩陣與 Codex U17，再做完整獨立及人工驗收。
+> - 下一步：完成外層 capture／restore、其餘資源矩陣與 Codex U17，再做完整獨立及人工驗收。
 
 ## 行為
 
@@ -35,6 +35,8 @@ TUI 81 passed（`full_app` 17 cases），holder 57 passed；workspace clippy 與
 holder 保持協定允許的實際單欄尺寸。放不下的寬字在 reflow 前改為保留樣式的空白；normal history 同步處理，alt 透過公開 grid swap 保存其內容。單欄的新寬字輸入也顯示空白，避免寫不存在的 spacer。放大後的新寬字正常顯示；已裁掉的 glyph 不宣稱能還原。只增加已在依賴樹的 `unicode-width` 直接依賴，沒有新增 package。
 
 原 logs／stack／負面證據在 `/private/tmp/g11c-implementation-logs`。這些是 backend bytes 與 parser 證據，不等同於使用者實際 Terminal／iTerm2／Linux 終端驗收。
+
+真 PTY App 的 raw 收件、stty 尺寸與 20 次 thread／fd 清理已有[原生證據](gate-11c-native-app-validation.md)，外層 event capture／restore 與實機外觀仍待驗。
 
 ## 下一步
 
