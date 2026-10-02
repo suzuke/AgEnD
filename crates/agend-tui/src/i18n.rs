@@ -126,6 +126,14 @@ pub enum Text {
     CurrentTask,
     NoCurrentTask,
     ViewTerminal,
+    FullInputBusy,
+    FullPasteTooLarge,
+    FullWaiting,
+    FullControlLost,
+    FullUpgrade,
+    FullHistoryClamped,
+    FullReadOnly,
+    FullInput,
     TerminalLive,
     TerminalStopped,
     TerminalEnded,
@@ -243,6 +251,35 @@ fn strings(text: Text) -> (&'static str, &'static str) {
         CurrentTask => ("Current task: {} {}", "目前任務：{} {}"),
         NoCurrentTask => ("Current task: none", "目前任務：無"),
         ViewTerminal => ("[t] View terminal", "[t] 看終端"),
+        FullInputBusy => (
+            "Terminal input is busy; nothing was queued",
+            "終端輸入忙碌；本次未送出",
+        ),
+        FullPasteTooLarge => (
+            "Paste exceeds the input limit; nothing was sent",
+            "貼上超過輸入上限；整段未送出",
+        ),
+        FullWaiting => (
+            "Waiting for the terminal size and complete frame",
+            "等待終端尺寸與完整畫面確認",
+        ),
+        FullControlLost => (
+            "Read-only: another window controls this terminal; press i to acquire",
+            "唯讀：另一視窗控制中；按 i 重新取得控制權",
+        ),
+        FullUpgrade => (
+            "Read-only: full input requires client 1.4 and holder 1.1; upgrade agend",
+            "唯讀：完整輸入需要 client 1.4 與 holder 1.1；請升級 agend",
+        ),
+        FullHistoryClamped => (
+            "History expired; showing the oldest retained row",
+            "歷史已淘汰；已移到最舊保留列",
+        ),
+        FullReadOnly => (
+            "read-only · i control · PgUp/PgDn history · Esc back",
+            "唯讀 · i 取得控制 · PgUp/PgDn 歷史 · Esc 返回",
+        ),
+        FullInput => ("input · Ctrl-] back", "輸入中 · Ctrl-] 返回"),
         TerminalLive => ("Terminal of {} · live", "{} 的終端 · 即時"),
         TerminalStopped => (
             "Terminal of {} · last screen (stopped)",

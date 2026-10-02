@@ -11,7 +11,11 @@ pipeline task detail 顯示 repo、關卡種類、agent、受阻理由與 WIP ar
 
 ## 第 11 施工關 C 段（實作中）
 
-完整終端畫面、resize、滑鼠／貼上與歷史的 [P1–P6 提案](../../docs/gates/gate-11c-proposal.md) 已於 2026-10-02 確認（D39），holder／runtime 與 daemon／client 1.4 已接通；本 crate 的 Source 已加入獨立 1.4 reader／writer、有界寫入／回覆與最新 frame mailbox；畫面層尚未選用此路徑，完整模式與鍵鼠／貼上仍待實作。目前 TUI 功能維持下方已交付範圍。
+[P1–P6](../../docs/gates/gate-11c-proposal.md) 已確認（D39）；App 已選用 client 1.4 的結構化 Source，`i` 展開到整個視窗、只留底部一行。實際 resize 的相符完整 frame 回覆前不送輸入；失去控制、停止或斷線後回唯讀，重連不自動取得控制。client 1.3／holder 舊能力維持純文字唯讀並提示升級。
+
+按鍵依 holder modes 編碼；滑鼠區外／狀態列不送，未開 tracking 或 Shift 滾輪看 holder 歷史。貼上維持一次操作，依 bracketed paste mode 包裹，超限整段拒絕；本機退出碼在貼上中是資料。外層 mouse／paste／focus modes 以 guard 恢復。
+
+C 段尚未完成：原生 extended underline／游標外觀、其餘壓力／資源矩陣與 Codex U17 待驗；完整 verifier、CI 與人工驗收仍待完成。[App 局部驗證](../../docs/gates/gate-11c-app-validation.md)。
 
 ## 負責
 
@@ -29,8 +33,7 @@ pipeline task detail 顯示 repo、關卡種類、agent、受阻理由與 WIP ar
 - 直接連 holder 或 socket（lib 裡沒有 socket 程式碼；連線只經 `agend-client`）
 - 自己推算 agent 狀態或「需要你」是否解決（照 source 回報）
 - 決定誰能打字、誰能 `retry`（daemon 依 `hello` 的 `caller` 決定，D17）
-- 改 agent 的 PTY 大小、滑鼠、bracketed paste
-- 分割視窗（v2.0 不做）、滑鼠（見第 11 施工關頁「待你追認」T12）
+- 分割視窗（v2.0 不做）、圖形協定與外層 clipboard OSC
 
 ## 模組
 
@@ -58,7 +61,9 @@ pipeline task detail 顯示 repo、關卡種類、agent、受阻理由與 WIP ar
 | `→`／`Enter` | 完全相同：進下一層（或選這個選項） |
 | `←`／`Esc` | 回上一層（首頁不動作，不會離開） |
 | `t` | 開這一列的 agent 終端；沒有 agent 或沒有輸出就只顯示一行訊息 |
-| `i` | 終端畫面：進輸入模式（只有即時的終端） |
+| `i` | 即時完整終端：明確取得控制，確認尺寸後可輸入；舊協定提示升級 |
+| 滾輪／Shift＋滾輪 | 無 tracking 或唯讀時看歷史；Shift 固定本機歷史；完整模式 tracking 送 agent |
+| 貼上 | 完整模式的一次輸入；退出碼當資料，超限整段拒絕 |
 | `Ctrl-]`（或 `Ctrl-5`） | 輸入模式：離開；**其他每個鍵都送給 agent**（包括 `q`、`Esc`、`←`、`L`、`Ctrl-C`） |
 | `/` | 快速跳轉（agent → 終端、task → Task Detail、team → team 頁） |
 | `1` `2` `3`、`Tab`／`Shift-Tab` | team 頁切 tab |
@@ -70,7 +75,7 @@ pipeline task detail 顯示 repo、關卡種類、agent、受阻理由與 WIP ar
 
 ## 依賴規則
 
-- 一般依賴：`agend-core`、`agend-client`、`ratatui`（只開 `crossterm` + `std`）、`unicode-width`
+- 一般依賴：`agend-core`、`agend-client`、`ratatui`（開 `crossterm` + `std` + `underline-color`；未啟用其他 backend）、`unicode-width`
 - dev 依賴：`agend-testkit`（假 daemon、proxy）、`agend-holder`（真 parser）、`base64`（共用 producer fixture）、`serde_json`
 - 不建 async runtime（D11）：阻塞讀交給 std thread，主 thread 經 channel 拿
 - 不可依賴 SQLite、`agend-daemon`（`cargo xtask check-deps`）
@@ -79,7 +84,7 @@ pipeline task detail 顯示 repo、關卡種類、agent、受阻理由與 WIP ar
 
 - `agend_tui::run(Box<dyn Source>, Language)`：互動迴圈（raw mode、alternate screen、每 100 ms 一次 `tick`）；`run_with` 多一個先看按鍵的 hook（demo 鍵）
 - `agend_tui::source::client::ClientSource::new(socket, caller)`：`agend app` 用它
-- `agend_tui::App::new(Box<dyn Source>, Language)`、`App::key`、`App::tick`、`ui::render`
+- `agend_tui::App::new(Box<dyn Source>, Language)`、`App::key`／`event`／`resize`、`App::tick`、`ui::render`
 - `agend_tui::render_to_string`：畫到 `TestBackend`，給測試與 demo
 - 範例：`tui_fake`（互動，`--daemon` 改經 `ClientSource` 接 testkit 假 daemon，`--lang zh-TW`；`F2` 停／啟 daemon、`F3` 假 agent 追問）、`tui_accept`（`cargo xtask accept tui` 跑的假 daemon demo；真 daemon 那段是 `crates/agend/examples/tui_real.rs`）
 - `agend app [--lang en|zh-TW]`（`crates/agend`）

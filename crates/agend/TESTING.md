@@ -14,7 +14,7 @@
 
 `cargo test -p agend --test terminal_runtime` 使用真 binary／holder／PTY 驗 runtime frame／control 配對、實際 resize、舊 owner 拒絕、取消 native blocked input 後憑證失效與 holder 重連、不重送、取消已到但未接收的 grant、唯讀查詢取消不打斷控制、整份超限拒絕及新 holder generation。這些尚不代表 daemon client 1.4／TUI／Codex U17 已完成。
 
-`terminal_capability` 對真 daemon 與 fake 以明確 1.3 hello 同驗能力拒絕、request id 與 agent 控制權拒絕順序。`terminal_hub` 的 8 個原生 cases 經真 daemon／holder／PTY 驗多視窗、EOF／停止、尺寸、歷史、dirty 尾段、正式 client 與 20 次開關；fake 完整 C 契約／TUI／U17 仍待完成。
+`terminal_capability` 對真 daemon 與 fake 以明確 1.3 hello 同驗能力拒絕、request id 與 agent 控制權拒絕順序。`terminal_hub` 的 8 個原生 cases 經真 daemon／holder／PTY 驗多視窗、EOF／停止、尺寸、歷史、dirty 尾段、正式 client 與 20 次開關；六項 C 契約已同跑 fake／native；`tui_daemon` 已接 C App 唯讀／取得控制／重連流程，Codex 尚維持拒絕。完整矩陣與 U17 待完成。
 
 ## 怎麼跑
 

@@ -167,7 +167,12 @@ impl FrameSource<'_> {
         let viewport_top = if alternate_screen {
             0
         } else {
-            requested.clamp(history_oldest, live_top)
+            // A smaller read-only view can pin a row within the live grid as
+            // well as retained history. Its last row must remain in the grid.
+            requested.clamp(
+                history_oldest,
+                live_top + u64::from(self.rows - viewport.rows),
+            )
         };
         let first = (viewport_top as i128 - live_top as i128) as i32;
         let cells = (first..first + i32::from(viewport.rows))
@@ -313,6 +318,35 @@ impl FrameSource<'_> {
 mod sample_tests {
     use super::*;
     use crate::screen::ReplySink;
+
+    #[test]
+    fn a_small_view_can_pin_rows_inside_the_live_screen() {
+        let mut screen = Screen::new(6, 8, ReplySink::default());
+        screen.process(b"one\r\ntwo\r\nthree\r\nfour\r\nfive");
+        let live = screen
+            .frame(TerminalViewport { top: None, rows: 6 })
+            .unwrap();
+        let pinned = screen
+            .frame(TerminalViewport {
+                top: Some(live.live_top + 2),
+                rows: 3,
+            })
+            .unwrap();
+        assert_eq!(pinned.cells, live.cells[2..5]);
+        assert_eq!(pinned.viewport_top, live.live_top + 2);
+        assert!(!pinned.viewport_clamped);
+        assert_eq!(pinned.cursor.row, live.cursor.row - 2);
+        assert!(pinned.cursor.visible);
+        let edge = screen
+            .frame(TerminalViewport {
+                top: Some(u64::MAX),
+                rows: 3,
+            })
+            .unwrap();
+        assert_eq!(edge.cells, live.cells[3..6]);
+        assert_eq!(edge.viewport_top, live.live_top + 3);
+        assert!(edge.viewport_clamped);
+    }
 
     #[test]
     fn views_share_one_capture_until_the_exact_sampling_boundary() {

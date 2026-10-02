@@ -39,6 +39,11 @@ fn failure(id: &str, code: &str, message: &str) -> TerminalOperationError {
     }
 }
 impl Parser {
+    #[allow(dead_code)] // Real parser stimuli for TUI renderer and input-mode cases.
+    pub fn feed(&self, bytes: &[u8]) {
+        self.0.lock().unwrap().screen.process(bytes);
+    }
+
     #[allow(dead_code)] // Specific lifecycle regression, not all shared suites.
     pub fn restart(&self) {
         let mut state = self.0.lock().unwrap();
@@ -46,6 +51,10 @@ impl Parser {
         state.screen = Screen::new(rows, columns, ReplySink::default());
         state.screen.process(b"NEW-GENERATION\r\n");
         state.owner = None;
+    }
+    #[allow(dead_code)] // Binary mouse reports may not be valid UTF-8.
+    pub fn received_bytes(&self) -> Vec<u8> {
+        self.0.lock().unwrap().input.clone()
     }
     pub fn received(&self) -> String {
         String::from_utf8_lossy(&self.0.lock().unwrap().input).into_owned()

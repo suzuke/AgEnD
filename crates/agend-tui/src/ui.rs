@@ -232,6 +232,9 @@ pub fn goal_row(fleet: &Fleet, lang: crate::i18n::Language, border: &str, task: 
 }
 
 pub fn render(frame: &mut Frame, app: &mut App) {
+    if crate::terminal::full::render(frame, app) {
+        return;
+    }
     let area = frame.area();
     let buf = frame.buffer_mut();
     let lang = app.lang;

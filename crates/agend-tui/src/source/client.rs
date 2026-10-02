@@ -227,6 +227,9 @@ fn next_terminal(client: &mut Client) -> TerminalEvent {
 }
 
 impl Source for ClientSource {
+    fn legacy_terminal_is_read_only(&self) -> bool {
+        true
+    }
     fn poll_full_terminal(&mut self) -> Vec<FullTerminalEvent> {
         if let Some(full) = &self.full_terminal {
             let events = full.poll();

@@ -9,6 +9,10 @@
 
 #[path = "support/demo_daemon.rs"]
 mod demo_daemon;
+// The shared contract fixture includes lab helpers not used by this demo.
+#[allow(dead_code)]
+#[path = "../../agend-testkit/tests/common/terminal_parser.rs"]
+mod parser;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -477,69 +481,82 @@ fn subscriptions(daemon: &FakeDaemon) -> usize {
 }
 
 fn input() -> Check {
-    println!("== input (i types; every key goes to the agent except Ctrl-])");
+    println!("== full input (true parser, matching size/frame, local Ctrl-])");
     let lab = Lab::new()?;
     let daemon = lab.daemon()?;
     daemon.set_instance(instance("g11-1", AgentState::Unknown));
-    daemon.set_screen("g11-1", "$ ");
+    let parser = parser::Parser::default();
+    daemon
+        .set_terminal_producer("g11-1", parser.clone())
+        .map_err(|e| e.to_string())?;
     let mut app = lab.app(Language::ZhTw, None);
     wait(&mut app, |t| t.contains("general ─"))?;
     for c in "/g11-1".chars() {
         keys(&mut app, &[KeyCode::Char(c)]);
     }
-    keys(&mut app, &[KeyCode::Enter, KeyCode::Char('i')]);
-    let typing = render_to_string(&mut app, WIDTH, HEIGHT);
-    println!("   {}", line_with(&typing, "的終端"));
+    keys(&mut app, &[KeyCode::Enter]);
+    wait(&mut app, |t| t.contains("READY"))?;
+    keys(&mut app, &[KeyCode::Char('i')]);
+    let typing = wait(&mut app, |t| t.contains("輸入中 · Ctrl-] 返回"))?;
+    println!("   {}", line_with(&typing, "輸入中"));
+    let size = app
+        .term
+        .as_ref()
+        .unwrap()
+        .full
+        .as_ref()
+        .unwrap()
+        .data
+        .as_ref()
+        .unwrap()
+        .frame
+        .size;
     check(
-        typing.contains("g11-1 的終端 · 輸入中（Ctrl-] 離開）"),
-        "i: typing",
+        size.rows == HEIGHT - 1 && size.columns == WIDTH,
+        "complete requested frame enabled input",
     )?;
+    println!(
+        "   PTY size confirmed: {}x{} (status excluded)",
+        size.columns, size.rows
+    );
     for c in "hello".chars() {
         keys(&mut app, &[KeyCode::Char(c)]);
     }
     keys(&mut app, &[KeyCode::Char('q'), KeyCode::Esc, KeyCode::Left]);
     ctrl(&mut app, 'c');
+    let expected = b"helloq\x1b\x1b[D\x03";
+    wait(&mut app, |_| parser.received_bytes() == expected)?;
     ctrl(&mut app, ']');
-    let typed: Vec<u8> = inputs(&daemon);
-    println!("   the daemon got: {:?}", String::from_utf8_lossy(&typed));
+    let typed = parser.received_bytes();
+    println!(
+        "   the parser consumer got: {:?}",
+        String::from_utf8_lossy(&typed)
+    );
     check(
-        typed == b"helloq\x1b\x1b[D\x03",
-        "hello, q, Esc, ← and Ctrl-C reached the agent as bytes",
+        !app.full_mode() && !app.quit && !app.term.as_ref().unwrap().typing,
+        "Ctrl-] returned to read-only without quitting",
     )?;
-    let back = render_to_string(&mut app, WIDTH, HEIGHT);
-    check(
-        back.contains("g11-1 的終端 · 即時") && !app.quit,
-        "Ctrl-] left typing; q and Ctrl-C did not quit",
-    )?;
+    wait(&mut app, |t| {
+        t.contains("唯讀") && t.contains("READY") && !t.contains("等待終端")
+    })?;
 
     let mut agent = lab.app(Language::ZhTw, Some("g11-1"));
     wait(&mut agent, |t| t.contains("general ─"))?;
     for c in "/g11-1".chars() {
         keys(&mut agent, &[KeyCode::Char(c)]);
     }
-    keys(
-        &mut agent,
-        &[KeyCode::Enter, KeyCode::Char('i'), KeyCode::Char('x')],
-    );
+    keys(&mut agent, &[KeyCode::Enter]);
+    wait(&mut agent, |t| t.contains("READY"))?;
+    keys(&mut agent, &[KeyCode::Char('i')]);
     let refused = wait(&mut agent, |t| t.contains("forbidden"))?;
     println!("   as agent g11-1: {}", line_with(&refused, "forbidden"));
     check(
-        refused.contains("forbidden: only the operator can type into an agent's terminal")
-            && refused.contains("g11-1 的終端 · 即時"),
-        "an agent's typing is refused by the daemon and the view is read-only again",
+        refused.contains("forbidden: only the operator can") && !agent.full_mode(),
+        "agent control was refused",
     )?;
+    agent.paste("NO-AGENT-INPUT");
     check(
-        inputs(&daemon).len() == typed.len(),
-        "nothing the agent typed reached the terminal",
+        parser.received_bytes() == typed,
+        "agent paste did not reach PTY",
     )
-}
-
-/// The daemon's recorded input, once what was sent has arrived.
-fn inputs(daemon: &FakeDaemon) -> Vec<u8> {
-    std::thread::sleep(Duration::from_millis(300));
-    daemon
-        .terminal_inputs()
-        .into_iter()
-        .flat_map(|(_, bytes)| bytes)
-        .collect()
 }

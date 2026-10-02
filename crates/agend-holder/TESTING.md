@@ -14,7 +14,7 @@
 - `tests/support/terminal_control.rs`（由 server tests 載入）：真 PTY 的實際 stty 尺寸、input completion、最後 Acquire 的 owner、舊 owner／generation／零尺寸／超大 frame 無副作用、legacy 拒絕與 release 後恢復、重連失效與尺寸保留、1.0 能力拒絕；raw PTY 不讀 stdin 的壓力測試驗 5 秒輸入失敗必須先於新 grant。
 - `pty::ordering_tests`：writer 在途中被 gate 阻擋時，控制 barrier 不可提前 ack；解除後 input completion 必須在新 grant 前。
 
-`screen::frame::sample_tests` 用真的 parser 與指定 Instant 驗共用取樣的 49／50 ms 邊界、palette／mode／歷史同 revision、resize 立即失效及無效請求不取樣。daemon 多視窗的 native 驗證在 `agend/tests/terminal_hub.rs`；TUI 完整模式與 Codex U17 仍待完成。
+`screen::frame::sample_tests` 用真的 parser 與指定 Instant 驗共用取樣的 live grid 內的列固定／上界 clamp、49／50 ms 邊界、palette／mode／歷史同 revision、resize 立即失效及無效請求不取樣。daemon 多視窗的 native 驗證在 `agend/tests/terminal_hub.rs`；TUI App 的局部驗證見 [C 段 App 紀錄](../../docs/gates/gate-11c-app-validation.md)，完整矩陣與 Codex U17 仍待完成。
 
 ## 怎麼跑
 

@@ -207,11 +207,11 @@ fn sections(lab: &Lab, fleet: &mut Fleet, out: &mut Vec<String>) -> Result<(), S
     out.push("== terminal (real daemon: live, no key pressed)".into());
     keys(&mut op, &[KeyCode::Char('h')]);
     open_terminal(&mut op, &a);
-    let text = render(&mut op);
-    let title = line_with(&text, "的終端");
-    ensure(title.contains(&format!("{a} 的終端 · 即時")), || {
-        text.clone()
+    let text = wait(&mut op, Duration::from_secs(5), |text| {
+        counter(text).is_some()
     })?;
+    let title = line_with(&text, "唯讀");
+    ensure(title.contains(&format!("{a} · 唯讀")), || text.clone())?;
     out.push(format!("   {title}"));
     let first = counter(&text).ok_or_else(|| format!("no counter:\n{text}"))?;
     let text = wait(&mut op, Duration::from_secs(5), |t| {
@@ -223,8 +223,8 @@ fn sections(lab: &Lab, fleet: &mut Fleet, out: &mut Vec<String>) -> Result<(), S
     ));
     keys(&mut op, &[KeyCode::Char('L')]);
     let english = render(&mut op);
-    let title = line_with(&english, "Terminal of");
-    ensure(title.contains(&format!("Terminal of {a} · live")), || {
+    let title = line_with(&english, "read-only");
+    ensure(title.contains(&format!("{a} · read-only")), || {
         english.clone()
     })?;
     out.push(format!("   L: {title}"));
@@ -232,9 +232,11 @@ fn sections(lab: &Lab, fleet: &mut Fleet, out: &mut Vec<String>) -> Result<(), S
 
     out.push("== input (real daemon: i types, Ctrl-] stops, only the operator)".into());
     keys(&mut op, &[KeyCode::Char('i')]);
-    let typing = render(&mut op);
-    let title = line_with(&typing, "的終端");
-    ensure(title.contains("輸入中（Ctrl-] 離開）"), || {
+    let typing = wait(&mut op, Duration::from_secs(5), |text| {
+        text.contains("輸入中 · Ctrl-] 返回")
+    })?;
+    let title = line_with(&typing, "輸入中");
+    ensure(title.contains("輸入中 · Ctrl-] 返回"), || {
         typing.clone()
     })?;
     out.push(format!("   i: {title}"));
@@ -246,14 +248,15 @@ fn sections(lab: &Lab, fleet: &mut Fleet, out: &mut Vec<String>) -> Result<(), S
     ));
     ctrl(&mut op, ']');
     let back = render(&mut op);
-    ensure(back.contains(&format!("{a} 的終端 · 即時")), || {
-        back.clone()
-    })?;
-    out.push(format!("   Ctrl-]: {}", line_with(&back, "的終端")));
+    ensure(back.contains(&format!("{a} · 唯讀")), || back.clone())?;
+    out.push(format!("   Ctrl-]: {}", line_with(&back, "唯讀")));
     keys(&mut op, &[KeyCode::Left]);
 
     let mut agent = app(&socket, Some(&a), Language::ZhTw);
     open_terminal(&mut agent, &a);
+    wait(&mut agent, Duration::from_secs(5), |text| {
+        counter(text).is_some()
+    })?;
     keys(&mut agent, &[KeyCode::Char('i'), KeyCode::Char('x')]);
     let refused = wait(&mut agent, Duration::from_secs(5), |t| {
         t.contains("forbidden")
@@ -261,8 +264,7 @@ fn sections(lab: &Lab, fleet: &mut Fleet, out: &mut Vec<String>) -> Result<(), S
     std::thread::sleep(Duration::from_millis(1500));
     let later = wait(&mut agent, Duration::from_secs(1), |_| true)?;
     ensure(
-        refused.contains("forbidden: only the operator can type into an agent's terminal")
-            && !later.contains("xcounter"),
+        refused.contains("forbidden: only the operator can") && !later.contains("xcounter"),
         || format!("as agent {a}:\n{later}"),
     )?;
     out.push(format!(
@@ -291,7 +293,11 @@ fn sections(lab: &Lab, fleet: &mut Fleet, out: &mut Vec<String>) -> Result<(), S
     out.push("== reconnect (real daemon restarted while the terminal is open)".into());
     let mut op = app(&socket, None, Language::En);
     open_terminal(&mut op, &a);
-    let before = counter(&render(&mut op)).unwrap_or(0);
+    let before_frame = wait(&mut op, Duration::from_secs(5), |text| {
+        counter(text).is_some()
+    })?;
+    let before = counter(&before_frame)
+        .ok_or_else(|| format!("missing actual counter before restart:\n{before_frame}"))?;
     fleet.daemon.interrupt()?;
     let down = wait(&mut op, Duration::from_secs(10), |t| {
         t.contains("Reconnect attempt")
@@ -310,14 +316,25 @@ fn sections(lab: &Lab, fleet: &mut Fleet, out: &mut Vec<String>) -> Result<(), S
     fleet.daemon = Daemon::start(lab, &fleet.home, &[])?;
     fleet.daemon.ready()?;
     let back = wait(&mut op, Duration::from_secs(10), |t| {
-        t.contains("Reconnected to the daemon.") && t.contains("· live")
+        t.contains("Reconnected to the daemon.") && t.contains("· read-only")
     })?;
     let after = wait(&mut op, Duration::from_secs(5), |t| {
         counter(t).is_some_and(|n| n > before)
     })?;
+    ensure(
+        !op.full_mode()
+            && op.term.as_ref().is_some_and(|term| {
+                !term.typing
+                    && term
+                        .full
+                        .as_ref()
+                        .is_some_and(|full| full.ready && full.owner.is_none())
+            }),
+        || "reconnect restored terminal control without explicit i".into(),
+    )?;
     out.push(format!(
         "   {} | {}",
-        line_with(&back, "Terminal of").trim(),
+        line_with(&back, "read-only").trim(),
         line_with(&back, "Reconnected")
     ));
     out.push(format!(

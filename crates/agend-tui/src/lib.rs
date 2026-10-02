@@ -57,6 +57,10 @@ pub fn run_with(
     let mut app = App::new(source, lang);
     let mut terminal = ratatui::init();
     let result = (|| -> io::Result<()> {
+        let _outer_modes = crate::terminal::native::OuterModes::enter(io::stdout())?;
+        let size = terminal.size()?;
+        app.resize(size.width, size.height);
+        let mut cursor_style = ratatui::crossterm::cursor::SetCursorStyle::DefaultUserShape;
         let mut next_tick = Instant::now();
         while !app.quit {
             if Instant::now() >= next_tick {
@@ -64,12 +68,18 @@ pub fn run_with(
                 next_tick = Instant::now() + TICK;
             }
             terminal.draw(|frame| ui::render(frame, &mut app))?;
+            let selected_style = crate::terminal::full::cursor_style(&app);
+            if selected_style != cursor_style {
+                ratatui::crossterm::execute!(io::stdout(), selected_style)?;
+                cursor_style = selected_style;
+            }
             let wait = next_tick.saturating_duration_since(Instant::now());
-            if event::poll(wait)?
-                && let Event::Key(key) = event::read()?
-                && !intercept(&key)
-            {
-                app.key(key);
+            if event::poll(wait)? {
+                match event::read()? {
+                    Event::Key(key) if !intercept(&key) => app.key(key),
+                    Event::Key(_) => {}
+                    event => app.event(event),
+                }
             }
         }
         Ok(())
@@ -88,6 +98,7 @@ pub fn render_to_string(app: &mut App, width: u16, height: u16) -> String {
 pub fn render_buffer(app: &mut App, width: u16, height: u16) -> (ratatui::buffer::Buffer, String) {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+    app.resize(width, height);
     let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("test backend");
     terminal.draw(|frame| ui::render(frame, app)).expect("draw");
     let buffer = terminal.backend().buffer().clone();

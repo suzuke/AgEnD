@@ -2,7 +2,7 @@
 
 > **TL;DR**
 > - [draft PR #145](https://github.com/suzuke/AgEnD/pull/145) 持續實作完整終端；目前接通 holder／runtime／daemon／client 路徑，C 段尚未完成或驗收。
-> - 已接通 frame／歷史及實際 resize／input ack；client 1.4 型別／傳輸已加入；daemon 多視窗與六項 fake／真契約已加入；TUI 完整模式、鍵鼠／貼上、Codex U17 仍待完成。
+> - 已接通 frame／歷史及實際 resize／input ack；client 1.4 型別／傳輸已加入；daemon 多視窗與六項 fake／真契約已加入；TUI App 已接完整模式、鍵鼠／貼上與歷史；原生細節、剩餘矩陣與 Codex U17 待完成。
 > - 下一步：完成剩餘契約矩陣與 TUI，再跑完整驗收、全新 verifier 與逐步人工驗收；merge 等使用者確認。
 
 ## 已實作
@@ -22,6 +22,11 @@
 | 開發中能力邊界 | 真 daemon 選 1.4；fake 預設 1.3，注入 TerminalProducer 後選 1.4；一般 NEEDED 保留 1.3，舊 peer 仍可用 B 路徑 | native 全路徑＋1.3 真／假能力拒絕＋CLP |
 
 ## 驗證紀錄
+
+- 2026-10-03 App 接通：完整模式／尺寸確認／控制失效、模式按鍵／滑鼠／整段貼上與固定歷史，15 個真 parser＋socket App cases 通過。唯讀畫面跟隨最後輸出，holder 支援 live grid 小 viewport 定位。TUI 79、holder 56 passed；真 daemon TUI 2 cases／fake demo 通過。完整 workspace 861 passed／2 個既有 ignored（退出重訂修正前），修正後 TUI、clippy／實際 no-std 通過；198 個文件 links／anchors 有效。原 fd／編譯／fixture 失敗保留，詳細證據及未完成範圍見 [App 局部驗證](gate-11c-app-validation.md)。
+
+- `f999bbf` 的 Ubuntu push／PR CI 成功，macOS 兩個 jobs 在 Source overflow fixture 失敗（只送 53／51 次，尚未達 64 個上限）。改為真 consumer 收件同步、到 worker 關閉才 drain，本機同一 assertion 通過；原 CI log 保留，新 head CI 另核。
+
 
 - `1134d51` CI：push Ubuntu 成功，PR Ubuntu 在原生背壓案例失敗（`grant raced ahead of the native blocked write`）；兩個 macOS job 最後核對仍在執行。舊 fixture 用 GetFleet 回覆當操作已開始的同步點，未證明 writer 真的收到；改由真 PTY consumer 讀第一 byte 後寫 marker，再關舊 scope。本機同一 8 個 cases 通過，仍須核新 CI，未把原失敗改算成功。
 
@@ -51,8 +56,8 @@
 ## 尚待完成
 
 - 完成驗收矩陣其餘拒絕／壓力／時效與資源案例；六項控制／viewport／EOF 契約已同跑 fake／真 daemon，不能代替完整 C 矩陣。
-- TUI 完整 renderer、明確 i 入口／退出、resize ack 前停輸入、斷線／控制權失效立即唯讀。
-- mode-aware keys／mouse／paste、固定歷史 viewport、外層 capture／paste 的錯誤與 unwind 恢復。
+- 原生 renderer 的 extended underline 形狀／游標外觀，以及完整 App 的拒絕／資源矩陣；i／尺寸確認／失效的局部證據已取得。
+- mode-aware keys／mouse／paste、固定歷史與 guard 已有局部證據；真 PTY 完整 App 回歸及外層終端實機驗收仍待完成。
 - fake Codex＋真 AgEnD U17；明確 opt-in live smoke、版本及使用者確認後才開放該版本，未驗仍 not_supported。
 - 完整 accept tui、workspace checks、雙平台 CI、全新無 context verifier、逐步人工驗收與 merge 確認。
 

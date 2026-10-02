@@ -187,6 +187,12 @@ pub enum FullTerminalEvent {
 
 /// Where the screens' data comes from.
 pub trait Source {
+    /// Old protocol peers keep their plaintext view but cannot bypass full
+    /// control ownership by pretending that legacy input is a complete mode.
+    fn legacy_terminal_is_read_only(&self) -> bool {
+        false
+    }
+
     /// Drains structured updates without waiting for I/O.
     fn poll_full_terminal(&mut self) -> Vec<FullTerminalEvent> {
         Vec::new()

@@ -297,40 +297,63 @@ fn a_slow_ui_is_closed_when_ordered_replies_reach_the_bound() {
     let mut source = source(&fake);
     let frame = open(&mut source);
     let token = acquire(&mut source, &frame, "initial-grant");
-    let deadline = Instant::now() + Duration::from_secs(5);
     let mut sent = 0;
-    // Do not drain full replies: the actual parser acknowledges each input.
-    // A bounded transport must close explicitly rather than silently dropping
-    // a control reply or growing indefinitely behind a stalled renderer.
-    while Instant::now() < deadline {
-        match source.terminal_control(control(
-            &frame,
-            &format!("input-{sent}"),
-            agend_client::terminal::input_operation(&token, b"x"),
-        )) {
-            Ok(()) => {
-                sent += 1;
-                // Stay below the server reply-forwarder rate; this test
-                // isolates the UI mailbox bound, not slow socket eviction.
-                std::thread::sleep(Duration::from_millis(25));
+    // Reach the actual 64-reply boundary, rather than assuming a CI machine
+    // sends enough within five seconds. Do not drain the UI mailbox. Pace each
+    // operation from the actual consumer so the server's 8-reply queue is not
+    // the bound under test.
+    while sent < 80 {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match source.terminal_control(control(
+                &frame,
+                &format!("input-{sent}"),
+                agend_client::terminal::input_operation(&token, b"x"),
+            )) {
+                Ok(()) => {
+                    sent += 1;
+                    break;
+                }
+                Err(agend_tui::source::SourceError::Rejected { code, .. }) if code == "busy" => {
+                    assert!(
+                        Instant::now() < deadline,
+                        "writer queue did not drain; sent={sent}"
+                    );
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(agend_tui::source::SourceError::Disconnected(_)) => break,
+                other => panic!("unexpected queue result: {other:?}"),
             }
-            Err(agend_tui::source::SourceError::Rejected { code, .. }) if code == "busy" => {
-                std::thread::sleep(Duration::from_millis(5))
-            }
-            Err(agend_tui::source::SourceError::Disconnected(_)) => break,
-            other => panic!("unexpected queue result: {other:?}"),
         }
+        while fake.parser.received_bytes().len() < sent
+            && source.threads().load(std::sync::atomic::Ordering::SeqCst) > 1
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        if source.threads().load(std::sync::atomic::Ordering::SeqCst) == 1 {
+            break;
+        }
+        assert_eq!(
+            fake.parser.received_bytes().len(),
+            sent,
+            "input did not reach producer"
+        );
+        std::thread::sleep(Duration::from_millis(25));
     }
     let deadline = Instant::now() + Duration::from_secs(5);
-    let mut closed = None;
-    while closed.is_none() && Instant::now() < deadline {
-        for event in source.poll_full_terminal() {
-            if let Event::Closed(reason) = event {
-                closed = Some(reason);
-            }
-        }
+    while source.threads().load(std::sync::atomic::Ordering::SeqCst) > 1
+        && Instant::now() < deadline
+    {
         std::thread::sleep(Duration::from_millis(5));
     }
+    let closed = source.poll_full_terminal().into_iter().find_map(|event| {
+        if let Event::Closed(reason) = event {
+            Some(reason)
+        } else {
+            None
+        }
+    });
     assert!(
         closed
             .as_ref()
