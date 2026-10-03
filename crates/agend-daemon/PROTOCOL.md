@@ -2,10 +2,12 @@
 
 > **TL;DR**
 > - 真 daemon 現在協商 client 1.4；一般 client 的 NEEDED 仍為 1.3，以下第 8／11B 規則保留。
-> - 新終端畫面與控制在 [TERMINAL.md](TERMINAL.md)；fake 在完整 C 路徑加入前只協商 1.3。
+> - 新終端畫面與控制在 [TERMINAL.md](TERMINAL.md)；FakeDaemon 安裝真 TerminalProducer 後提供 1.4，未安裝的舊 fixture 保持 1.3。
 > - 下一步：protocol 回歸用 `cargo test -p agend --test client_protocol --test terminal_capability`。
 
 ## client protocol server（第 8 施工關）
+
+下表「終端」與「打字」保留第 11 B 段原規則，用來定位舊 wire 與限制。現行 C 路徑由 [TerminalHub](TERMINAL.md) 管理 view／控制、resize 與有序輸入；Codex 已依 [版本政策](../../docs/gates/gate-11c-codex-input.md) 只開放 0.159.3，不再一律拒絕。legacy input 也須經相同核准，有 C owner 時拒絕無 attach 的輸入。
 
 | 項目 | 內容 |
 |---|---|
@@ -19,7 +21,7 @@
 | instance 狀態 | `starting`（啟動中、等重起）、`unknown`（在跑；忙碌／閒置要 driver）、`failed` |
 | 需要你 | `failed` 的 instance → `instance-failed:<id>`（等待時間＝這個 daemon 第一次看到它 `failed`）；`retry`：先 `Shutdown` 留著的 holder，session 建立過就 `running` + `--resume`（claude），沒建立過就 `new`（claude `--session-id`、codex／opencode 全新啟動）；codex／opencode 建立過 session 的沒有操作 |
 | 終端 | 在跑的 instance：先回 holder 當下畫面、再轉送之後的 `terminal_bytes`（經 daemon 的長連線，client 不直接連 holder）；`failed` 且 holder 還在：短連一次、只回最後畫面；其他 → `no_terminal`。同一條連線再訂一次：先清掉舊的串流，失敗就沒有串流（第 11 施工關 B 段 P1） |
-| 打字 | `terminal_input`（第 11 施工關 B 段 P6）依序：agent → `forbidden: only the operator can type into an agent's terminal`；沒有活的終端（不存在、`failed`、沒有長連線）→ `no_terminal`；codex → `not_supported`（等 U17 驗證）；其他經長連線轉成 holder 的 `OperatorTerminalInput`，不回應。錯誤都不帶 `request_id`。holder 拒絕（`pty_busy`、`agent_exited`）只記 log：`<id>: operator input dropped: <code>`；寫給 holder 的請求：每條 link 一把寫入鎖包住一整行（不拿 links 表的鎖）、5 秒沒進展就放棄並關掉那條連線（`link::WRITE_WITHIN`，link 會重連）；轉成 holder 請求行超過 1 MiB（`protocol::holder::MAX_REQUEST_LINE`）的輸入先回 `invalid_request` |
+| 打字 | `terminal_input`（第 11 施工關 B 段 P6）依序：agent → `forbidden: only the operator can type into an agent's terminal`；沒有活的終端（不存在、`failed`、沒有長連線）→ `no_terminal`；當時 codex → `not_supported`（等 U17 驗證；現行版本核准見上方）；其他經長連線轉成 holder 的 `OperatorTerminalInput`，不回應。錯誤都不帶 `request_id`。holder 拒絕（`pty_busy`、`agent_exited`）只記 log：`<id>: operator input dropped: <code>`；寫給 holder 的請求：每條 link 一把寫入鎖包住一整行（不拿 links 表的鎖）、5 秒沒進展就放棄並關掉那條連線（`link::WRITE_WITHIN`，link 會重連）；轉成 holder 請求行超過 1 MiB（`protocol::holder::MAX_REQUEST_LINE`）的輸入先回 `invalid_request` |
 
 
 ## CLI 的 daemon 端（第 9 施工關）

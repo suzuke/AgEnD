@@ -25,7 +25,7 @@
 
 Codex history 的四個匹配 cases 保留 lost-reply 對帳，新增 never-attempted／foreign clientId 拒絕；native U17 foundation 在 agend 的 `codex_u17`。[範圍](../../docs/gates/gate-11c-u17-validation.md)。
 
-Codex history 五個 cases 核嚴格 clientId 與舊 lost-reply 相容性；codex_u17 11 個 native tests 核 App／daemon、caller、已驗版本開放、未驗版本拒絕、缺失／過期 holder 版本記錄、DB 拒寫與 attempted crash-window 跨拒絕重啟。driver unit 另驗歸屬讀取失敗在 resume 前拒絕；store unit 驗歸屬持久、冪等及永久保留。v1–v6 fixtures 升級比對 golden。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
+Codex history 五個 cases 核嚴格 clientId 與舊 lost-reply 相容性；codex_u17 12 個 native tests 核 App／daemon、caller、已驗版本開放、未驗版本拒絕、缺失／過期 holder 版本記錄、DB 拒寫與 attempted crash-window 跨拒絕重啟。driver unit 另驗歸屬讀取失敗在 resume 前拒絕；store unit 驗歸屬持久、冪等及永久保留。v1–v6 fixtures 升級比對 golden。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
 
 ## 怎麼跑
 

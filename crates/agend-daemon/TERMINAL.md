@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 真 daemon 的 client 1.4 路徑已接通；`TerminalHub` 綁定 socket 的 view／attach，最後 Acquire 的視窗控制 PTY。
 > - 控制與畫面 I/O 在背景，不阻塞 socket reader；EOF／失效不恢復舊 owner，重連後要重新訂閱與 Acquire。
-> - 下一步：`cargo test -p agend --test terminal_hub --test terminal_runtime`；TUI／fake 契約與 Codex U17 仍待完成。
+> - 下一步：`cargo test -p agend --test terminal_hub --test terminal_runtime`；完整 TUI／fake 契約與首次 Codex U17 已有證據，最新固定 head verifier／CI、自動驗證及清理見 [驗收收尾](../../docs/gates/gate-11c-closeout.md)。
 
 ## 控制與更新
 
@@ -20,8 +20,8 @@
 
 斷線、agent 結束、取消在途控制或 15 秒未回覆作廢憑證；取消控制或逾時關閉該 holder 連線，避免晚到 grant 留下控制權。唯讀查詢取消保留連線；操作不跟隨新連線或重送。重新取得憑證保留同一 holder 的畫面 generation。
 
-client 提供 1.4／1.3，真 daemon 選 1.4；fake 尚未接完整 C 路徑，暫留 1.3。1.3 連線的新請求明示 not_supported 並保留 request id；控制請求先拒 agent caller。Codex Acquire／輸入在 U17 認證前保持 not_supported。
+client 提供 1.4／1.3，真 daemon 選 1.4；FakeDaemon 安裝真 TerminalProducer 後提供 1.4，未安裝的舊 fixture 保持 1.3。1.3 連線的新請求明示 not_supported 並保留 request id；控制請求先拒 agent caller。production Codex Acquire／Input 與 legacy 輸入依 [版本與永久歸屬政策](../../docs/gates/gate-11c-codex-input.md) 核准，只開放已驗 0.159.3；FakeDaemon 沒有 live driver／durable 歸屬核准，Codex 輸入仍拒絕。
 
 ## 驗證範圍
 
-`agend/tests/terminal_hub.rs` 用真 daemon／holder／PTY 驗八項；`terminal_runtime` 驗 pinned 連線、取消與不重送。actor 回收另有 rejected subscription 的 20-instance unit case。這些證據尚未涵蓋 TUI 外觀／鍵鼠、fake 完整 C 契約或 Codex U17；完整矩陣在 [C 段驗收計畫](../../docs/gates/gate-11c-validation-plan.md)。
+`agend/tests/terminal_hub.rs` 用真 daemon／holder／PTY 驗八項；`terminal_runtime` 驗 pinned 連線、取消與不重送。actor 回收另有 rejected subscription 的 20-instance unit case。這兩個局部 suites 不代替 TUI 外觀／鍵鼠、fake 完整 C 契約或 Codex U17；後者已有各自證據，完整對照在 [C 段驗收計畫](../../docs/gates/gate-11c-validation-plan.md)。

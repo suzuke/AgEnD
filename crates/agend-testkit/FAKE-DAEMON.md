@@ -26,7 +26,7 @@
 
 每 instance 64 個有序工作；reader 不等 I/O，8 個有序 replies 加一份合併 frame。view／attach 綁 socket，每次 Acquire 新 token；最後 Acquire 控制，前 owner 唯讀。控制、viewport、EOF、generation、failed／removed instance 都核對；EOF 保留尺寸，不恢復舊 grant。producer 在實際執行點重驗 owner／generation，沒有在途重送。超限 client frame 整份拒絕並關閉，請求 1 MiB 整次拒絕。
 
-`ProbeClient::writer_clone` 供 native 大寫入 fixture 併行讀寫；JSON Lines 由 core serializer 產生。完整共用規則見 [CLIENT-CONTRACTS.md](CLIENT-CONTRACTS.md)。Codex Acquire／Input 仍 not_supported，等待 U17 與已驗版本確認。
+`ProbeClient::writer_clone` 供 native 大寫入 fixture 併行讀寫；JSON Lines 由 core serializer 產生。完整共用規則見 [CLIENT-CONTRACTS.md](CLIENT-CONTRACTS.md)。FakeDaemon 沒有 live driver 與 durable thread 歸屬核准，因此 Codex Acquire／Input 及 legacy 輸入仍 not_supported；不是 production 版本開放狀態。正常 daemon 已依 [版本政策](../../docs/gates/gate-11c-codex-input.md) 開放 0.159.3，U17 suites 使用真 daemon／holder 與 fake Codex producer，另與首次真模型證據分開核對。
 
 ## 下一步
 
