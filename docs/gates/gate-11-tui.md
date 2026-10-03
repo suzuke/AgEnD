@@ -3,13 +3,13 @@
 > **TL;DR**
 > - attention-first TUI；A 段畫面層提前做（你同意與第 3–10 施工關並行，放寬 D22），B 段接真 daemon，兩段都已合併。
 > - 記住：**畫面只讀 `Source`，不知道資料從哪來**；真的來源 `ClientSource` 只經 `agend-client`，TUI 裡沒有 socket 程式碼；權限只在 daemon 擋。
-> - 下一步：A、B 段已 merge；C 段 #145 已接通完整終端，實機紀錄及自動驗收收尾見 [收尾頁](gate-11c-closeout.md)。本批固定 head、全新 verifier、CI 與清理核實後等使用者 merge 確認。
+> - 下一步：A、B、C 段均已 merge；C 段 #145 於 2026-10-03 經使用者確認合併。完整驗收及限制見 [收尾頁](gate-11c-closeout.md)，第 12 施工關提案另等使用者確認。
 
 **先看這條**：B 段（接真 daemon）的步驟會用到 `agend`。每個新開的終端機分頁（包括第二個終端）都要先跑 B 段開頭的設定，否則會跑到舊的 Node 版 `agend` 1.24.0。A 段只用 `cargo`，不用 `agend`。
 
 ## 狀態
 
-**C 段驗收收尾；A、B 段已 merge，#145 實作未 merge**（2026-10-03）。固定 09a205d 的獨立／雙平台 CI 已通過，使用者已有實機操作紀錄並要求剩餘行為改由自動化驗證；本批提示修正的固定 head 結果與清理見 [收尾頁](gate-11c-closeout.md)。
+**完成：A、B、C 段已 merge**（2026-10-03）。C 段 #145 merge `b2152db`；最終 `cfee027` 經全新 r9 CONFIRMED，四個雙平台 CI jobs 各 900 passed／0 failed／2 既有 ignored，實際 no-std 通過。使用者已有實機紀錄並授權後續自動驗收，清理完成；[收尾頁](gate-11c-closeout.md)。
 
 - 畫面層（2026-09-26，已 merge #120）：A 段通過、T1–T18／G1–G4 已追認。
 - B 段提案（#133，2026-09-28 已 merge）：P1–P7 使用者已確認。
@@ -26,9 +26,11 @@
 
 ## C 段開工前提案
 
-[完整 P1–P6](gate-11c-proposal.md) 與 [驗收計畫](gate-11c-validation-plan.md)。C 段在 [draft PR #145](https://github.com/suzuke/AgEnD/pull/145) 實作中；holder／runtime 與 daemon／client 1.4 已接通，多視窗／EOF 有原生程序回歸；TUI App 的完整模式／鍵鼠／貼上與歷史已有局部證據；原生底線／標準游標及外層 PTY 的 capture／restore 已有讀回證據，完整 fake U17 本機已通過；App 延遲 frame／query／舊 generation 與真 producer golden 已補齊；真 Codex 0.159.3 首次 U17 已由獨立 verifier 核實，限四個已核准模型回合（第四只核 receipt）；使用者同意只開放該版本，並要求剩餘行為驗證自動化。最新固定 head 的 checks／CI、文件核對、清理與 merge 確認見 [驗收收尾](gate-11c-closeout.md)。[目前進度](gate-11c-progress.md)、[矩陣對照](gate-11c-matrix-status.md)。下方 B 段已確認的決策與驗收紀錄保留。
+[完整 P1–P6](gate-11c-proposal.md) 與 [驗收計畫](gate-11c-validation-plan.md) 已完成；[PR #145](https://github.com/suzuke/AgEnD/pull/145) 經使用者確認合併。holder／runtime、daemon／client 1.4、完整 TUI、resize、多視窗、鍵鼠／貼上、歷史與 Codex U17 的完成證據見 [收尾紀錄](gate-11c-closeout.md)、[矩陣對照](gate-11c-matrix-status.md)。Codex 僅開放已驗 0.159.3；真 U17 仍限原四個核准回合，第四只核 receipt。下方 B 段已確認的決策與驗收紀錄保留。
 
 ## B 段開工前提案
+
+以下保留 B 段開工時的提案與操作紀錄；當時的 Codex 一律拒絕及 C 段未開始描述不代表現在。現行 C 段能力與 0.159.3 版本許可依頁首及 D39。
 
 **使用者已確認**（2026-09-28）：P1–P7 全部照建議。每項：問題 · 建議 · 理由 · 替代方案 · 例子。
 
@@ -560,6 +562,10 @@ unset AGEND_BIN               # 前幾關步驟留下的 export 可能指到已�
 
 ## 進度紀錄
 
+以下是各批次**當時**的進度原紀錄；其中「draft」「待驗證」「尚未 merge」只描述該批次，不是目前狀態。目前以頁首完成狀態及最新合併紀錄為準。原失敗與驗證範圍不改寫成成功；歷史證據僅列封存檔名，不公布本機暫存位置。
+
+- 2026-10-03 使用者明確確認「確認合併145」，#145 已以 merge commit `b2152db` 合併進 `v2`。最終 head `cfee027` 經全新 r9 CONFIRMED；四個 PR／push Ubuntu／macOS CI jobs 各 900 passed／0 failed／2 既有 ignored，實際 no-std 通過。合併 tree 與已驗證 head 完全相同。C 段實作／驗收完成，原實機、反證、真 U17 限制及清理證據保留；[收尾紀錄](gate-11c-closeout.md)。
+
 - 2026-10-03 C 段實機驗收與收尾（#145）：完整模式、歷史固定／回底、mouse／Shift、alt／normal、含 0x1D 的多行貼上、超限拒絕、多視窗唯讀／重取與尺寸已有截圖及自行比對紀錄。使用者要求後續改採自動化並清理殘留；修正控制提示重複，原版 count=2 反例及正向保留。本批固定 head／fresh verifier／CI 以 PR 結果核實，未 merge；[紀錄](gate-11c-closeout.md)。
 
 - 2026-10-03 0.159.3 開放後的完整 acceptance 抓到兩個舊 U17 拒絕訊息斷言；真／fake 文案及 native／TUI consumer 已同步為已驗版本條件，保留 accept-r1／r2 原失敗。1bd0d6d 不列完整通過；修正新 head 待完整驗收、CI 與全新 verifier（draft PR #145）。
@@ -613,4 +619,4 @@ unset AGEND_BIN               # 前幾關步驟留下的 export 可能指到已�
 
 ## 下一步
 
-[C 段 P1–P6](gate-11c-proposal.md#使用者確認紀錄) 與 [驗收計畫](gate-11c-validation-plan.md) 已確認；提案 #144 已合併，在 `feat/gate-11c-terminal` 專屬 worktree 實作。實作 merge 仍等使用者確認。
+C 段 #145 已驗收並經使用者確認合併；下一關 [第 12 施工關 A 段提案](gate-12-adapters.md) 仍待逐項決定。

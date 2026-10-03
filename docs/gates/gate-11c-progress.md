@@ -1,9 +1,9 @@
 # 第 11 施工關 C 段：實作進度
 
 > **TL;DR**
-> - [draft PR #145](https://github.com/suzuke/AgEnD/pull/145) 已接通 C 段完整終端與已驗版本 Codex 輸入，正在驗收收尾，merge 待使用者確認。
-> - 固定 09a205d 經全新 verifier r3 與四個雙平台 CI jobs 各核 900 passed／2 既有 ignored、實際 no-std 通過；實機操作紀錄已取得，使用者要求剩餘行為自動化。
-> - 下一步：核本批提示修正的固定 head／全新 verifier／CI，清理本批殘留後報告；[實機與收尾紀錄](gate-11c-closeout.md)。
+> - [PR #145](https://github.com/suzuke/AgEnD/pull/145) 已於 2026-10-03 經使用者確認合併（`b2152db`），C 段完整終端與已驗版本 Codex 輸入完成。
+> - 最終 `cfee027` 經全新 r9 CONFIRMED；四個雙平台 CI jobs 各 900 passed／0 failed／2 既有 ignored、實際 no-std。實機及後續自動驗收、清理完成。
+> - 下一步：第 12 施工關提案另等逐項決定；[最終驗收、合併與限制](gate-11c-closeout.md)。下方逐批紀錄保留當時狀態。
 
 ## 已實作
 
@@ -22,6 +22,10 @@
 | 開發中能力邊界 | 真 daemon 選 1.4；fake 預設 1.3，注入 TerminalProducer 後選 1.4；一般 NEEDED 保留 1.3，舊 peer 仍可用 B 路徑 | native 全路徑＋1.3 真／假能力拒絕＋CLP |
 
 ## 驗證紀錄
+
+以下是各批次**當時**的進度原紀錄；其中「draft」「待驗證」「尚未 merge」只描述該批次，不是目前狀態。目前以頁首完成狀態及最新合併紀錄為準。原失敗與驗證範圍不改寫成成功；歷史證據僅列封存檔名，不公布本機暫存位置。
+
+- 2026-10-03 使用者明確確認「確認合併145」，#145 已以 merge commit `b2152db` 合併進 `v2`。最終 head `cfee027` 經全新 r9 CONFIRMED；四個 PR／push Ubuntu／macOS CI jobs 各 900 passed／0 failed／2 既有 ignored，實際 no-std 通過。合併 tree 與已驗證 head 完全相同。C 段實作／驗收完成，原實機、反證、真 U17 限制及清理證據保留；[收尾紀錄](gate-11c-closeout.md)。
 
 - 2026-10-03 C 段實機驗收與收尾（#145）：完整模式、歷史固定／回底、mouse／Shift、alt／normal、含 0x1D 的多行貼上、超限拒絕、多視窗唯讀／重取與尺寸已有截圖及自行比對紀錄。使用者要求後續改採自動化並清理殘留；修正控制提示重複，原版 count=2 反例及正向保留。本批固定 head／fresh verifier／CI 以 PR 結果核實，未 merge；[紀錄](gate-11c-closeout.md)。
 
@@ -84,7 +88,7 @@
 - 原取消邏輯在真 holder 回歸失敗：`an unconsumed grant survived cancellation`（exit 101）；修正後同一測試通過。
 - 大行讀取原失敗與 partial fixture 的小 socket buffer 死鎖保留；最新讀取採 chunk 線性掃描、deadline poll／recv，關閉後仍讀完資料。
 
-本機原始輸出與 SHA256 在 `/private/tmp/g11c-implementation-logs`；失敗 log 保留，不算通過證據。原生 macOS 測試不代表 Linux 或實際終端字型／游標外觀已驗收，雙平台 CI 與人工驗收仍須核最新實作 head。
+本機原始輸出與 SHA256 在 `g11c-implementation-logs`；失敗 log 保留，不算通過證據。原生 macOS 測試不代表 Linux 或實際終端字型／游標外觀已驗收，雙平台 CI 與人工驗收仍須核最新實作 head。
 
 ## U17 foundation 與 CI 反例（2026-10-03）
 

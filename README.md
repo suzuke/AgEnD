@@ -2,7 +2,7 @@
 
 > **TL;DR**
 > - 這是 AgEnD（Agent Engineering Daemon）v2：異質 agent 團隊的自主 merge 流水線。
-> - 狀態：**pre-alpha**。第 1–9 施工關已完成；第 11 施工關 A、B 段已驗收並合併（#140，2026-10-01）。第 10 施工關本機 pipeline 已完成驗收，使用者已確認合併（#143，2026-10-02）；其他 backend adapter 與安裝發布仍待完成。
+> - 狀態：**pre-alpha**。第 1–11 施工關已完成並合併；第 11 施工關 C 段 #145 於 2026-10-03 經使用者確認合併（`b2152db`）。其他 backend adapter 與安裝發布仍待完成。
 > - 下一步：先讀 [AGENTS.md](AGENTS.md)，再看 [docs/ROADMAP.md](docs/ROADMAP.md) 的目前狀態。
 
 ## 這是什麼
@@ -28,7 +28,7 @@
 
 - **Runtime 與持久化**：git／kill shim、PTY holder、SQLite store、daemon 與 client；daemon 重啟後 holder 與 agent 持續執行。
 - **Codex 與 CLI**：app-server driver、訊息送達與冪等、三級忙碌策略；`status`、`send`、`inbox`、instance 管理、`daemon restart`、`doctor`、`init`。兩個假 Codex agent 中途重啟仍不漏不重的里程碑已驗收，真 Codex 另有 smoke 驗收。
-- **TUI**：agend app 已接 fleet／需要你、完整終端、resize、多視窗控制、鍵鼠／貼上與 1,000 行歷史。真 holder／client／App 與外層 PTY 有自動矩陣；Codex 0.159.3 首次真 U17 已由全新 verifier 核實。使用者同意只開放這個版本；daemon 核 holder 啟動版本，未知或其他版本仍唯讀，曾允許人工輸入的 thread 永久只用自己的 clientId 對帳。[draft PR #145](https://github.com/suzuke/AgEnD/pull/145) 固定 09a205d 已由全新 verifier 與四個 CI jobs 核 900 passed／2 既有 ignored；實機操作紀錄已取得，使用者要求剩餘驗證改採自動化。本批提示修正、最終 checks 與清理見 [驗收收尾](docs/gates/gate-11c-closeout.md)，merge 仍待確認。[進度](docs/gates/gate-11c-progress.md) · [版本政策](docs/gates/gate-11c-codex-input.md)。
+- **TUI**：agend app 已接 fleet／需要你、完整終端、resize、多視窗控制、鍵鼠／貼上與 1,000 行歷史。[PR #145](https://github.com/suzuke/AgEnD/pull/145) 已合併；固定 `cfee027` 的全新 verifier CONFIRMED，四個雙平台 CI jobs 各 900 passed／0 failed／2 既有 ignored，實際 no-std 通過。使用者已有實機紀錄，並授權剩餘行為以真 producer／native／外層 PTY 自動驗收；清理已完成。Codex 僅開放已驗並獲同意的 0.159.3，其他／未知版本仍唯讀，人工輸入 thread 永久只用自己的 clientId 對帳。[驗收收尾](docs/gates/gate-11c-closeout.md) · [版本政策](docs/gates/gate-11c-codex-input.md)。
 
 **第 10 施工關完成（[PR #143](https://github.com/suzuke/AgEnD/pull/143)，2026-10-02）**：已接通本機 pipeline、task／review／workflow／team 操作與 checks 沙箱。事件收尾修正經全新 verifier r17、Ubuntu／macOS CI 與人工補驗通過，使用者已確認合併。驗證範圍、原始失敗與兩個未執行的 explorer 見 [驗證證據](docs/gates/gate-10-verification.md)。執行方式見 [pipeline runtime](docs/architecture/pipeline-runtime.md)。Claude、OpenCode driver、GitHub forge、Telegram 在第 12 施工關，服務註冊與發布在第 13 施工關。完整狀態與驗收證據見 [ROADMAP](docs/ROADMAP.md)。
 

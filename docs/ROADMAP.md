@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - 依 crate 由下往上分 13 個施工關；每個施工關單獨驗收，使用者確認後才開下一個施工關（D22）。
-> - 目前狀態：**第 1–10 施工關完成並已合併**；第 11 施工關 A、B 段已驗收並合併（B 段 #140，2026-10-01），C 段 P1–P6 已逐項確認（D39），提案 #144 已合併，C 段實作已接通、驗收收尾中（#145）。第 10 施工關已完成自動／獨立／CI 與人工補驗，使用者已確認合併（#143，2026-10-02）；第 12 施工關 A 段提案 #138 待確認；第 13 施工關未開始。
-> - 下一步：核 C 段 #145 提示修正的固定 head 自動／獨立／CI 與清理結果，依使用者確認再 merge。第 12 施工關 A 段 P1–P10 在 #138，仍待使用者確認。
+> - 目前狀態：**第 1–11 施工關完成並已合併**；第 11 施工關 C 段 #145 經全新 verifier、雙平台 CI、實機及後續自動驗收與清理，使用者於 2026-10-03 確認合併（`b2152db`）。第 12 施工關 A 段提案 #138 待確認；第 13 施工關未開始。
+> - 下一步：依序說明第 12 施工關 A 段 #138 的 P1–P10，等使用者逐項決定；尚未授權合併提案或開始實作。
 
 ## 13 個施工關
 
@@ -21,7 +21,7 @@
 | 8 `client` | [完成（2026-09-26）](gates/gate-08-client.md) | 整合施工關：agend-client + protocol server | CLI 連得上；daemon 重啟時會重試 |
 | 9 `cli` | [完成（2026-09-29；已 merge #136）](gates/gate-09-cli.md) | agend CLI：agent 命令、操作者命令、status；安裝相關先做 `doctor`、`init`，服務註冊留第 13 施工關 | 對假／真 daemon 驗輸出與錯誤；兩個假 Codex agent 互傳訊息、中途重啟不漏不重 |
 | 10 `pipeline` | [完成（2026-10-02；#143 已確認合併）](gates/gate-10-pipeline.md) | daemon：pipeline、git、runner、forge local、supervisor、reconcile | 假 driver + 暫存 repo：task 從派工走到 merge |
-| 11 `tui` | [C 段驗收收尾（A、B 已 merge；#145 待確認）](gates/gate-11-tui.md) | attention-first TUI、完整終端、resize、多視窗、鍵鼠／貼上與歷史 | 固定 09a205d 的獨立與四個雙平台 CI jobs 各 900 passed／2 既有 ignored；0.159.3 真 U17 已獨立核實。實機紀錄已取得，使用者要求剩餘行為自動驗證；本批提示修正的固定 head 結果與清理另核，merge 待確認 |
+| 11 `tui` | [完成（A、B、C 已 merge；C 段 #145）](gates/gate-11-tui.md) | attention-first TUI、完整終端、resize、多視窗、鍵鼠／貼上與歷史 | 最終 `cfee027` 全新 verifier CONFIRMED；四個雙平台 CI jobs 各 900 passed／0 failed／2 既有 ignored、實際 no-std；0.159.3 真 U17 已核實並獲版本許可。實機紀錄及後續自動驗收、清理完成，使用者確認 merge `b2152db` |
 | 12 `adapters` | [提案中（A 段 draft PR #138 待確認，尚未 merge 或實作）](gates/gate-12-adapters.md) | A claude、B opencode driver、C forge github、D Telegram | 先對假實作，再做真 backend smoke test |
 | 13 `install` | [未開始](gates/gate-13-install.md) | 安裝與發布（最後一個施工關）：服務註冊、`agend uninstall`、`agend telegram setup`（由 daemon 配對）、`xtask release`、brew、GitHub release、`cargo install` | CI 用全新 HOME + 假 agent，從安裝到第一個 task 完成 < 5 分鐘；每個 `doctor` 檢查都有「故意弄壞 → 看到修正指令」的測試 |
 
@@ -68,9 +68,13 @@
 
 ## 下一步
 
-第 10 施工關已完成驗收，使用者於 2026-10-02 明確確認 merge（[PR #143](https://github.com/suzuke/AgEnD/pull/143)）。第 11 施工關 C 段 [P1–P6](gates/gate-11c-proposal.md#使用者確認紀錄) 已逐項確認，使用者另授權合併 #144；提案 #144 已合併，接著在專屬 worktree 實作；第 12 施工關 A 段 #138 的 P1–P10 仍待使用者確認。 人工主流程與事件補驗見 [人工紀錄](gates/gate-10-manual-record.md)。
+第 1–11 施工關已完成並合併。第 11 施工關 C 段 #145 使用者於 2026-10-03 明確確認合併，原驗收範圍與限制見 [收尾紀錄](gates/gate-11c-closeout.md)。第 12 施工關 A 段 #138 的 P1–P10 仍待逐項說明與使用者確認；不由 #145 的授權推定同意下一關。
 
 ## 進度紀錄
+
+以下是各批次**當時**的進度原紀錄；其中「draft」「待驗證」「尚未 merge」只描述該批次，不是目前狀態。目前以頁首完成狀態及最新合併紀錄為準。原失敗與驗證範圍不改寫成成功；歷史證據僅列封存檔名，不公布本機暫存位置。
+
+- 2026-10-03 使用者明確確認「確認合併145」，#145 已以 merge commit `b2152db` 合併進 `v2`。最終 head `cfee027` 經全新 r9 CONFIRMED；四個 PR／push Ubuntu／macOS CI jobs 各 900 passed／0 failed／2 既有 ignored，實際 no-std 通過。合併 tree 與已驗證 head 完全相同。C 段實作／驗收完成，原實機、反證、真 U17 限制及清理證據保留；[收尾紀錄](gates/gate-11c-closeout.md)。
 
 - 2026-10-03 獨立文件覆核補同步 daemon／testkit 的目前終端許可、Codex 歸屬快照／保留規則及 U17 12-case 索引，D39 加使用者後續自動驗證方式；B 段舊 wire 規則明示歷史範圍。程式／測試不變，新固定 head 另核 verifier／CI，#145 merge 待確認。
 
@@ -124,13 +128,13 @@
 
 - 2026-10-02 C 段第一個實作提交 `a13d31c`（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：holder 1.1 的結構化 frame、request id、generation／revision、色彩／游標／mode、歷史 viewport 與 8 MiB 整份拒絕。holder 47 passed；accept core 含 workspace clippy／實際 no-std 通過，兩個既有 deep explorers ignored。完整 C 段與 U17 仍在實作，尚未獨立／人工驗收或 merge。
 
-- 2026-10-02 C 段提案 #144 已合併（`139fea5`）；在 `/Users/suzuke/AlphaCR-worktrees/AgEnD-v2-g11c-terminal`、`feat/gate-11c-terminal` 開始實作 P1–P6。基線 check-deps 含實際 no-std 通過；完整功能、U17、獨立驗證與人工驗收仍待完成。
+- 2026-10-02 C 段提案 #144 已合併（`139fea5`）；在 專屬實作 worktree、`feat/gate-11c-terminal` 開始實作 P1–P6。基線 check-deps 含實際 no-std 通過；完整功能、U17、獨立驗證與人工驗收仍待完成。
 
 - 2026-10-02 使用者逐項確認 Gate 11 C 段 P1–P6，記為 [D39](decisions/d39.md)，另明確授權合併 [#144](https://github.com/suzuke/AgEnD/pull/144)。本提交只記錄確認並同步狀態；最新 verifier／CI 通過後合併，C 段尚未實作或驗收。
 
 - 2026-10-02 依使用者「繼續往下推進」開 `docs/gate-11c-proposal` 專屬 worktree（[draft PR #144](https://github.com/suzuke/AgEnD/pull/144)），整理 C 段 P1–P6：完整畫面、holder frame／協商、控制／resize、mouse／paste／歷史、Codex U17 與驗收矩陣。只改文件，待全新 verifier、CI 與使用者確認；尚未實作或 merge。
 
-- 2026-10-02 文件 verifier r18 REFUTED `044f36e`：363 個非 Markdown entries 與 `430478d` 的 blob／mode 完全相同，但四份 crate README 與名詞表六列仍有未標歷史的「待驗收」舊狀態；已同步完成狀態，產品碼未改。最終文件驗證與 CI 見 #143，原報告 `/private/tmp/g10-r18-report.md` 保留。
+- 2026-10-02 文件 verifier r18 REFUTED `044f36e`：363 個非 Markdown entries 與 `430478d` 的 blob／mode 完全相同，但四份 crate README 與名詞表六列仍有未標歷史的「待驗收」舊狀態；已同步完成狀態，產品碼未改。最終文件驗證與 CI 見 #143，原報告 `g10-r18-report.md` 保留。
 
 - 2026-10-02 第 10 施工關完成驗收，使用者確認 merge（#143）：`430478d` 全新 verifier r17 CONFIRMED，完整 accept 718 passed／2 ignored，實際 no-std 與四個 Ubuntu／macOS CI job 通過；人工事件補驗確認完整 stage、一次正確 Approve resolution、單次 Git merge 及 teardown。舊反例與 frozen-head 紀錄保留；收尾文件與最新 CI 結果見 PR。
 
