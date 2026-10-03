@@ -210,7 +210,7 @@ B 段（P1–P7 確認後才開工；上面畫面層的項目在 B 段要重跑�
 - [x] `~/.cargo/bin/cargo test -p agend-testkit` 通過：假 daemon 的每個 instance 畫面、`terminal_bytes`、`terminal_input`（P1）；`CLP` 新列（CLP-18..22，CLP-10 改寫）對假 daemon 22/22、真 `agend daemon` 21 條、22 個案例（CLP-8 照舊在程序內）都通過，每列有 mutant（`FreezesScreen`、`ScreenForAnyInstance`、`AnyoneMayType`、`TypesIntoTheLiveOne`、`ForwardsHugeInput`、`RefusesAtTheLimit`、`AcceptsRefused`）；先寫測試時假 daemon 4 條、真 daemon 3 條失敗（見進度紀錄）
 - [x] `~/.cargo/bin/cargo xtask accept tui` 多印一段真 daemon（`agend daemon` 在暫存 home、`App` 經 `agend-client`，`crates/agend/examples/tui_real.rs`），並對應下面 B 段步驟 1
 - [x] `cargo xtask check-deps` 最後一行照舊 `… no-std build ok)`（`agend-tui` 仍不依賴 SQLite、`agend-daemon`）
-- [x] 測試不留殘留：跑完 `/tmp/g11.*` 沒有留下；本 worktree 的 `agend` 沒有殘留的 daemon／holder（測試的 home 是 `/tmp/g11.t-<pid>-<n>`）
+- [x] 測試不留殘留：跑完沒有留下本批獨立暫存 home；本 worktree 的 `agend` 沒有殘留的 daemon／holder（各測試使用自己的短路徑暫存 home）
 - [x] fresh-context verifier 重跑 B 段並嘗試推翻（第 1–3 輪 REFUTED 全修；第 4 輪 2026-09-29 CONFIRMED `517697c`）
 
 ## 你親自驗收
@@ -219,7 +219,7 @@ B 段（P1–P7 確認後才開工；上面畫面層的項目在 B 段要重跑�
 
 ### A. 畫面層（假資料；步驟本身已追認，T14；B 段改了 A1、A4、A5 的字樣，見 T20）
 
-在這個 PR 的 worktree（`~/Documents/Hack/AgEnD-v2-tui`）或 merge 後的 repo 根目錄跑。終端機至少 100×30。
+在自己的 AgEnD worktree 或 merge 後的 repo 根目錄跑。終端機至少 100×30。
 
 1. 跑 demo。
 
@@ -307,14 +307,18 @@ B 段（P1–P7 確認後才開工；上面畫面層的項目在 B 段要重跑�
 
 ### B. 接真 daemon（P1–P7 已確認；「應該看到」是實作者 2026-09-28 在 macOS 照抄指令實跑的輸出）
 
+以下保留 B 段當時操作與時間順序，公開範例的 session id／實際暫存目錄以代號或 `$AGEND_HOME` 去識別化，時間以該批啟動後的相對秒數表示；原始輸出保留於本機封存，不由此重新認證 C 段。
+
 用三個終端機分頁：**第一個跑 daemon**，**第二個跑 `agend app`**，第三個只在步驟 5 用。步驟 2 起用同一個暫存 home。時間戳、pid、session id、暫存目錄名每次不同。
 
 **每個新開的終端機分頁都要先跑這段**。第 13 施工關之前沒有安裝程式，而你的 PATH 上有舊的 Node 版 `agend`（v1-ts 1.24.0）：
 
 ```bash
-cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
+cd "<你的 AgEnD worktree>"
 unset AGEND_BIN               # 前幾關步驟留下的 export 可能指到已刪除的 worktree
-~/.cargo/bin/cargo build -p agend && export PATH="$PWD/target/debug:$PATH" && agend --version
+~/.cargo/bin/cargo build -p agend
+export PATH="${CARGO_TARGET_DIR:-$PWD/target}/debug:$PATH"
+agend --version
 ```
 
 應該看到 `agend 0.0.0`。如果印出 `1.24.0`，跑到的是舊的 Node CLI——在這個終端機重跑上面那段。第二、第三個分頁還要貼上步驟 2 印出的那行 `export AGEND_HOME=…`。
@@ -360,7 +364,7 @@ unset AGEND_BIN               # 前幾關步驟留下的 export 可能指到已�
    第一個終端：
 
    ```bash
-   export AGEND_HOME="$(mktemp -d /tmp/g11.XXXX)" && echo "export AGEND_HOME=$AGEND_HOME"
+   export AGEND_HOME="$(mktemp -d)" && echo "export AGEND_HOME=$AGEND_HOME"
    ~/.cargo/bin/cargo run -q -p agend-daemon --example daemon_probe -- add g11-1
    ~/.cargo/bin/cargo run -q -p agend-daemon --example daemon_probe -- add g11-2 --dies
    agend daemon
@@ -369,16 +373,16 @@ unset AGEND_BIN               # 前幾關步驟留下的 export 可能指到已�
    應該看到（daemon 留在前景；約 15 秒後 `g11-2` 放棄）：
 
    ```text
-   added g11-1: claude session 02bb5587-4785-42c4-96a8-dbc5ec7f73fe in /tmp/g11.a74uhl6m/workspace/g11-1
-   added g11-2: claude session a2db245b-a3f3-4584-8110-d00d32005f45 in /tmp/g11.a74uhl6m/workspace/g11-2
-   2026-09-28T13:58:48Z g11-1: start --session-id 02bb5587-4785-42c4-96a8-dbc5ec7f73fe
-   2026-09-28T13:58:48Z g11-2: start --session-id a2db245b-a3f3-4584-8110-d00d32005f45
-   2026-09-28T13:58:48Z listening on /tmp/g11.a74uhl6m/run/daemon.sock
-   2026-09-28T13:58:48Z agend daemon ready: instances=2 recovered=0 started=2 orphans=0
-   2026-09-28T13:58:53Z g11-2: restart 1/3 --resume a2db245b-a3f3-4584-8110-d00d32005f45
-   2026-09-28T13:58:58Z g11-2: restart 2/3 --resume a2db245b-a3f3-4584-8110-d00d32005f45
-   2026-09-28T13:59:03Z g11-2: restart 3/3 --resume a2db245b-a3f3-4584-8110-d00d32005f45
-   2026-09-28T13:59:03Z g11-2 failed: restarted 3 times in 10m and it still died; not restarting
+   added g11-1: claude session <session-g11-1> in $AGEND_HOME/workspace/g11-1
+   added g11-2: claude session <session-g11-2> in $AGEND_HOME/workspace/g11-2
+   <T+0s> g11-1: start --session-id <session-g11-1>
+   <T+0s> g11-2: start --session-id <session-g11-2>
+   <T+0s> listening on $AGEND_HOME/run/daemon.sock
+   <T+0s> agend daemon ready: instances=2 recovered=0 started=2 orphans=0
+   <T+5s> g11-2: restart 1/3 --resume <session-g11-2>
+   <T+10s> g11-2: restart 2/3 --resume <session-g11-2>
+   <T+15s> g11-2: restart 3/3 --resume <session-g11-2>
+   <T+15s> g11-2 failed: restarted 3 times in 10m and it still died; not restarting
    ```
 
    （中間還有 `holder pid=… started`、`agent g11-2 exited (code=1)` 等行，這裡省略。）
@@ -461,7 +465,7 @@ unset AGEND_BIN               # 前幾關步驟留下的 export 可能指到已�
    ```text
    ━━ Daemon disconnected
    Lost the connection to the daemon: the daemon closed the connection
-   Reconnect attempt 1 failed: cannot reach the AgEnD daemon at /tmp/g11.…/run/daemon.sock…
+   Reconnect attempt 1 failed: cannot reach the AgEnD daemon at $AGEND_HOME/run/daemon.sock…
    ```
 
    N 會增加（行尾的原因在 100 欄會被截成 `…`），沒有舊資料，程式沒有當掉。
@@ -489,10 +493,10 @@ unset AGEND_BIN               # 前幾關步驟留下的 export 可能指到已�
    ```text
    removed g11-1
    removed g11-2
-   2026-09-28T13:59:10Z orphan g11-1: Shutdown sent
-   2026-09-28T13:59:10Z orphan g11-2: Shutdown sent
-   2026-09-28T13:59:10Z listening on /tmp/g11.a74uhl6m/run/daemon.sock
-   2026-09-28T13:59:10Z agend daemon ready: instances=0 recovered=0 started=0 orphans=2
+   <T+22s> orphan g11-1: Shutdown sent
+   <T+22s> orphan g11-2: Shutdown sent
+   <T+22s> listening on $AGEND_HOME/run/daemon.sock
+   <T+22s> agend daemon ready: instances=0 recovered=0 started=0 orphans=2
    ```
 
    第二個終端：
@@ -611,7 +615,7 @@ unset AGEND_BIN               # 前幾關步驟留下的 export 可能指到已�
 
 - 2026-09-27 第 3 輪 review REFUTED（1 MEDIUM、3 LOW）後修正：`Sender::close()`（`shutdown(Both)` 叫醒讀的 thread）與終端連線的開、關、重連步驟，`agend-client` 改成加 4 個 API；停止的終端不能按 `i`、instance 又跑起來時自動重訂；假 daemon 對沒登記的 instance 回 `no_terminal`、codex 檢查排在記錄位元組之前；重訂失敗時 daemon 清掉舊串流。
 - 2026-09-27 第 2 輪 review REFUTED（1 HIGH、2 MEDIUM、3 LOW）後修正：終端連線的寫入改用 `Client::sender()`（try_clone 的寫入端，讀的 thread 阻塞時主 thread 照樣能寫），`agend-client` 改成加 3 個 API；延遲寫成「最多 300 ms 加一次來回」；假 daemon 加 `hold_resolved_events`；終端連線上錯誤碼的畫面規則、只有終端連線 EOF 時只重連它；標出與 T1、T18 不同之處。
-- 2026-09-27 fresh review REFUTED（1 HIGH、3 MEDIUM、4 LOW）後修正：`terminal_input` 改走終端連線（不帶 id 的錯誤不再變成 `retry` 的回覆）；節流加「有新輸出」記號補畫最後一段；本段加改 testkit 假 daemon 與 `CLP` 新列；標出與 T12、T13 不同之處、A 段 demo 保留 `ScriptedSource`、轉換放 `ClientSource`；holder 輸入錯誤接受靜靜丟掉並記 log；`Ctrl-]`／`Ctrl-5`；接受主 thread 最多凍結 10 秒；`/tmp/g11.` 路徑與 `agend app` exit 2。
+- 2026-09-27 fresh review REFUTED（1 HIGH、3 MEDIUM、4 LOW）後修正：`terminal_input` 改走終端連線（不帶 id 的錯誤不再變成 `retry` 的回覆）；節流加「有新輸出」記號補畫最後一段；本段加改 testkit 假 daemon 與 `CLP` 新列；標出與 T12、T13 不同之處、A 段 demo 保留 `ScriptedSource`、轉換放 `ClientSource`；holder 輸入錯誤接受靜靜丟掉並記 log；`Ctrl-]`／`Ctrl-5`；接受主 thread 最多凍結 10 秒；短路徑暫存 home與 `agend app` exit 2。
 - 2026-09-27 B 段開工前提案 P1–P7 寫定（draft PR，branch `feat/gate-11-tui-daemon`），待使用者確認：`ClientSource` 放 lib（與 T2 不同）、`agend app` 由本段做、`Catalog` 只由全貌與事件填（新缺口 G5 給第 10 施工關）、`retry` 等事件才消失、終端以位元組為訊號重拿 holder 畫面、`i` 進輸入模式且 codex 先不開放（與第 7 施工關 P1 的預期不同）、重連重拿全貌；「你親自驗收」B 段改成 7 步確切指令。
 - 2026-09-26 使用者親自驗收 A 段 5 步通過；T1–T18、G1–G4 使用者全部追認（看過畫面後一次追認）。
 - 2026-09-26 驗證報告 C-r1 修正：team 標題的 `─` 線不反白；底部說明只列有用的鍵；需要你展開加「不處理的話」（T16）；追問回到未讀（T17）；標題數量與 agent 的「需要你」跟著清單重算（T18）；B1–B5 補「這步在驗什麼」（`feat/gate-11-tui-screens`，PR #120）。

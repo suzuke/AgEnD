@@ -44,13 +44,13 @@
 - 前 head `50851e2` 的 push／PR Ubuntu、macOS 四個 CI jobs 全數成功；各主 suite 共 867 passed／2 個既有 ignored。本批新 head CI 另核，前 head 結果不能代替新 head。
 - CI stdout 有時另含 re-exec 的 filtered `daemon::stop_flag::tests::child_probe` 成功摘要；它已由父測試覆蓋。計數只加 filtered out = 0 的主 suite，不再把子程序輸出重算。前 renderer 的原報告 865 = 864 主 suite + 1 probe 輸出；原 logs 保留，accept tui 572 的計數不受影響。
 
-原 logs／CI metadata：`/private/tmp/g11c-implementation-logs/outer-app-*.log`、`outer-app-baseline-50851e2-ci.json`；本批收尾 snapshot 為 `SHA256SUMS-outer-app`，原失敗與 mutant 也保存；後續時效證據為 `latency-outer-*.log`、`SHA256SUMS-latency`。
+原 logs／CI metadata：`g11c-implementation-logs/outer-app-*.log`、`outer-app-baseline-50851e2-ci.json`；本批收尾 snapshot 為 `SHA256SUMS-outer-app`，原失敗與 mutant 也保存；後續時效證據為 `latency-outer-*.log`、`SHA256SUMS-latency`。
 
 ## 重跑
 
 ```bash
-cd /Users/suzuke/AlphaCR-worktrees/AgEnD-v2-g11c-terminal
-export CARGO_TARGET_DIR=/private/tmp/AgEnD-g11c-target
+cd "<你的 AgEnD worktree>"
+export CARGO_TARGET_DIR="$PWD/AgEnD-g11c-target"
 ~/.cargo/bin/cargo test -p agend --test tui_outer_pty -- --nocapture
 ```
 

@@ -35,7 +35,7 @@
 
 暫時把 application-cursor 編碼改為一般 CSI，同一 raw-consumer 情境收到 `ESC [ A`，預期 `ESC O A`，cargo exit 101。production 檔在 finally 還原，原生 suite 再跑通過。
 
-原 logs 在 `/private/tmp/g11c-implementation-logs/native-app-*.log`；本批完成檢查時的 snapshot 為 `SHA256SUMS-native-app`。這些證據驗 App、正式 transport 與真 agent PTY；本批未驗真外層 PTY；後續 [外層回歸](gate-11c-outer-validation.md) 已驗 crossterm event capture／restore。兩批都不認證 Terminal／iTerm2／Linux 終端字型或非美式鍵盤。
+原 logs 在 `g11c-implementation-logs/native-app-*.log`；本批完成檢查時的 snapshot 為 `SHA256SUMS-native-app`。這些證據驗 App、正式 transport 與真 agent PTY；本批未驗真外層 PTY；後續 [外層回歸](gate-11c-outer-validation.md) 已驗 crossterm event capture／restore。兩批都不認證 Terminal／iTerm2／Linux 終端字型或非美式鍵盤。
 
 ## 重連 CI 失敗
 
@@ -46,8 +46,8 @@
 ## 重跑
 
 ```bash
-cd /Users/suzuke/AlphaCR-worktrees/AgEnD-v2-g11c-terminal
-export CARGO_TARGET_DIR=/private/tmp/AgEnD-g11c-target
+cd "<你的 AgEnD worktree>"
+export CARGO_TARGET_DIR="$PWD/AgEnD-g11c-target"
 ~/.cargo/bin/cargo test -p agend --test tui_native_app -- --nocapture
 ```
 

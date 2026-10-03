@@ -33,7 +33,7 @@ core 的 `PipelineView::replace_attention_if` 規定 compare／replace／publish
 
 新 parser-backed App 回歸刻意省略 Resize event，再注入舊 Resize event；核 Acquire／Resize 最終 frame 為 20×4，未確認前的鍵不送，確認後繁中文字逐 byte 到達 producer。移除 draw-size 同步的 mutant 在同一情境失敗 exit 101，finally 還原；正向通過。這是受控缺通知的證據，不宣稱已還原 CI 當下的確切 signal 排序。
 
-原 CI log：`latency-ci-111018614790-failed.log`；本機：`resize-backend-positive/negative/tui/outer.log`。均在 `/private/tmp/g11c-implementation-logs`。
+原 CI log：`latency-ci-111018614790-failed.log`；本機：`resize-backend-positive/negative/tui/outer.log`。均在 `g11c-implementation-logs`。
 
 ## 修正後本機檢查
 
@@ -42,8 +42,8 @@ core 的 `PipelineView::replace_attention_if` 規定 compare／replace／publish
 ## 重跑
 
 ```bash
-cd /Users/suzuke/AlphaCR-worktrees/AgEnD-v2-g11c-terminal
-export CARGO_TARGET_DIR=/private/tmp/AgEnD-g11c-target
+cd "<你的 AgEnD worktree>"
+export CARGO_TARGET_DIR="$PWD/AgEnD-g11c-target"
 ~/.cargo/bin/cargo test -p agend-daemon --lib pipeline::attention::tests
 ~/.cargo/bin/cargo test -p agend --test client_protocol
 ~/.cargo/bin/cargo test -p agend-tui --test full_app
