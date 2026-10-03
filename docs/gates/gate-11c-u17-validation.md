@@ -56,13 +56,13 @@ fixture 原先在另一 history socket idle 後立即假設 driver 已 idle；�
 | accept core | 158 passed／2 個既有 ignored；demo、fmt／clippy、實際 thumb no-std 通過 |
 | accept tui | 594 passed／0 ignored；fake／真 daemon／完整 U17 三個 demos 通過；抽取共用 fixture 後執行 |
 
-原 logs 已封存於 `/private/tmp/g11c-final-review/historical-evidence.tar.gz` 的 `g11c-implementation-logs/u17-*.log`。完整 U17 正向為 u17-full-app-driver-idle.log；完整 workspace 與 accept core 的時點早於最後 demo；accept tui 重跑最新相關 crates，新互動 demo 另跑 clippy／build 及外層 PTY。02ab00c 的 Ubuntu／macOS push／PR 四個 CI jobs 已核全部 success，新改動另跑 CI。
+原 logs 已封存於 `g11c-final-review/historical-evidence.tar.gz` 的 `g11c-implementation-logs/u17-*.log`。完整 U17 正向為 u17-full-app-driver-idle.log；完整 workspace 與 accept core 的時點早於最後 demo；accept tui 重跑最新相關 crates，新互動 demo 另跑 clippy／build 及外層 PTY。02ab00c 的 Ubuntu／macOS push／PR 四個 CI jobs 已核全部 success，新改動另跑 CI。
 
 ## 重跑
 
 ~~~bash
-cd /Users/suzuke/AlphaCR-worktrees/AgEnD-v2-g11c-terminal
-export CARGO_TARGET_DIR=/private/tmp/AgEnD-g11c-target
+cd "<你的 AgEnD worktree>"
+export CARGO_TARGET_DIR="$PWD/AgEnD-g11c-target"
 ~/.cargo/bin/cargo build -p agend --example fake_codex
 ~/.cargo/bin/cargo test -p agend --test codex_u17 -- --nocapture
 ~/.cargo/bin/cargo test -p agend-daemon --test codex_driver
@@ -78,4 +78,4 @@ accept tui 已加入 codex_u17_probe，直接共用完整 App 情境與 fake pro
 
 ## 下一步
 
-首次真 Codex 0.159.3 U17 已有[獨立範圍紀錄](gate-11c-u17-live-validation.md)，版本開放已獲使用者同意；後續驗證已要求自動化，merge 仍待確認。核 [最新收尾](gate-11c-closeout.md) 與 [draft PR #145](https://github.com/suzuke/AgEnD/pull/145) 的固定 head 結果；本頁歷史六 case 不代替最終驗證。
+首次真 Codex 0.159.3 U17 已有[獨立範圍紀錄](gate-11c-u17-live-validation.md)，版本開放已獲使用者同意；後續自動驗收已完成，使用者已確認合併。核 [最新收尾](gate-11c-closeout.md) 與 [PR #145](https://github.com/suzuke/AgEnD/pull/145) 的固定 head 結果；本頁歷史六 case 不代替最終驗證。

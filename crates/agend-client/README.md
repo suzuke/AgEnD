@@ -9,7 +9,7 @@
 
 一般連線要求 client protocol 1.3；`resolve_attention_with_note` 可送退回修改理由。`agend daemon restart` 仍只要求 1.2，讓新 CLI 能重啟舊 daemon。
 
-## 第 11 施工關 C 段（實作中）
+## 第 11 施工關 C 段（已驗收並合併 #145）
 
 client 1.4 的型別與專用傳輸已加入；一般 `NEEDED` 維持 1.3。hello 提供 1.4／1.3，真 daemon 已協商 1.4，FakeDaemon 預設 1.3，注入真 producer 的 C fixture 提供 1.4；新 API 先檢查 1.4，不向舊 daemon 送操作。
 
@@ -17,7 +17,7 @@ client 1.4 的型別與專用傳輸已加入；一般 `NEEDED` 維持 1.3。hell
 
 新讀取行含換行最多 8 MiB；無效 frame／partial EOF／超限會關閉所有 clone 並永久作廢該完整終端 reader。macOS peer 已半關閉時，SHUT_RDWR 失敗改分別關閉寫／讀方向。新請求含換行最多 1 MiB，輸入 base64 與 resize 尺寸先驗，整次拒絕；所有 Sender clone 共用寫入鎖，完整終端一行從等待鎖到寫完最多 5 秒，失敗明示可能部分送出、不重送。
 
-daemon 多視窗／frame 更新與 TUI 已接通，六項 fake／真 C 契約及真 Source／App 回歸已建立；C 段驗收收尾與 merge 仍待確認，見 [驗收收尾](../../docs/gates/gate-11c-closeout.md)。
+daemon 多視窗／frame 更新與 TUI 已接通，六項 fake／真 C 契約及真 Source／App 回歸已建立；C 段已完成驗收並經使用者確認合併（2026-10-03），見 [驗收收尾](../../docs/gates/gate-11c-closeout.md)。
 ## 負責
 
 - unix socket 連線、`hello`（帶選填的 `caller`）、協定版本檢查（要 1.3；`agend daemon restart` 只要 1.2＝有 `daemon_restart` 的版本）

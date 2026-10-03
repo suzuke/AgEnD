@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 13 個施工關各有一頁：範圍、自動驗收、你親自驗收的步驟、驗收紀錄、進度紀錄。
 > - 記住：**一個施工關要等你跑完「你親自驗收」並填好「驗收紀錄」才算完成**。
-> - 下一步：第 1–9 施工關完成；第 11 施工關 A、B 段完成並已 merge，C 段 P1–P6 已確認（D39），提案 #144 已合併，實作在 draft PR #145。第 10 施工關完成驗收，使用者已確認合併 #143；第 12 施工關 A 段 draft PR #138 待使用者確認。
+> - 下一步：第 1–11 施工關已完成並合併；第 11 施工關 C 段 #145 經使用者於 2026-10-03 確認合併。第 12 施工關 A 段 draft PR #138 仍待逐項決定，未授權 merge 或實作。
 
 ## 索引
 
@@ -19,7 +19,7 @@
 | 8 | [`client`](gate-08-client.md) | agend-client + protocol server | 完成（2026-09-26） | `cargo xtask accept client` |
 | 9 | [`cli`](gate-09-cli.md) | agend CLI | 完成（2026-09-29；已 merge #136） | `cargo xtask accept cli` |
 | 10 | [`pipeline`](gate-10-pipeline.md) | 流水線 | 完成（2026-10-02；#143 已確認合併） | `cargo xtask accept pipeline` |
-| 11 | [`tui`](gate-11-tui.md) | agend-tui | 實作中（A、B 段已 merge；C 段提案 #144 已 merge，功能尚未驗收） | `cargo xtask accept tui` |
+| 11 | [`tui`](gate-11-tui.md) | agend-tui | 完成（A、B、C 已 merge；C 段 #145） | `cargo xtask accept tui` |
 | 12 | [`adapters`](gate-12-adapters.md) | 其餘 adapter | 提案中（A 段 draft PR #138 待確認，未 merge 或實作） | `cargo xtask accept adapters` |
 | 13 | [`install`](gate-13-install.md) | 安裝與發布 | 未開始 | `cargo xtask accept install` |
 
@@ -28,8 +28,8 @@
 第 6、8–12 施工關的步驟會用到 `agend`。第 13 施工關之前沒有安裝程式，而你的 PATH 上有舊的 Node 版 `agend`（`/opt/homebrew/bin/agend`，v1-ts 1.24.0）。所以**每個新開的終端機分頁都要先跑**（包括 daemon 在前景跑時開的第二個終端）：
 
 ```bash
-cd /Users/suzuke/AlphaCR-worktrees/AgEnD-v2-pipeline    # 本次 Gate 10 驗收 worktree
-export CARGO_TARGET_DIR=/private/tmp/AgEnD-g10-fix-target
+cd "<你的 AgEnD worktree>"
+export CARGO_TARGET_DIR="$PWD/AgEnD-g10-fix-target"
 ~/.cargo/bin/cargo build -p agend -p agend-testkit --bins
 export PATH="$CARGO_TARGET_DIR/debug:$PATH"
 agend --version

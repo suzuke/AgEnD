@@ -3,11 +3,21 @@
 > **TL;DR**
 > - 使用者已在 macOS 實機操作完整終端、resize、多視窗、鍵鼠／貼上、歷史與 alternate screen；截圖及自行比對結果分開記錄。
 > - 使用者於 2026-10-03 要求後續驗證改由自動化完成，並清理實作／驗證殘留；剩餘行為沿用真 producer、native PTY 及外層 PTY 的驗收矩陣。
-> - 下一步：核本批固定 head、全新無 context verifier 與雙平台 CI；實作 PR #145 的 merge 仍等使用者確認。
+> - 下一步：#145 已於 2026-10-03 經使用者確認合併（`b2152db`）；第 12 施工關 A 段提案另等逐項決定。
+
+## 最終驗收與合併
+
+使用者於 2026-10-03 明確回覆「確認合併145」。[PR #145](https://github.com/suzuke/AgEnD/pull/145) 已合併進 `v2`，merge commit `b2152db952c4713a5720e4f71cd0f669edd0a90e`；兩個 parent 分別是原 `v2` 的 `139fea5590f5286ef8fc6f20d1b7c7aa31876425` 及已驗證 head `cfee0276f40ded709b96002c5dcdcc7d6d49c745`，合併 tree `b8c3ce63bec2cc19fb8bba601d1a2b175da08fc8` 與該 head 相同。
+
+- 全新、無相關 context 的 r5 在 c834 程式版本跑 accept tui 605 passed、其餘 workspace 295 passed，以及三個 demo；提示重複、EOF 不釋放與意外 refusal 的反例被拒絕，延後真拒絕的正向通過。
+- c834 後僅 Markdown 變更。最終全新 r9 獨立核 417 個非 Markdown Git entries 相同、目前政策／文件／歷史證據一致；445 個 links／anchors、fmt、實際 no-std 通過，CONFIRMED。
+- 最終 head 的 [PR CI](https://github.com/suzuke/AgEnD/actions/runs/37106002634) 與 [push CI](https://github.com/suzuke/AgEnD/actions/runs/37105998997) 各兩個 Ubuntu／macOS jobs 成功；原始 logs 各 900 passed／0 failed／2 既有 ignored，實際 no-std 通過。這是合併前 checks，不冒充合併後新 CI 結果。
+- 使用者實機與後續 native／外層 PTY 行為驗收完成，範圍及環境限制仍依下表；零額外真模型回合，第四個原 U17 回合仍只核 user item／receipt。
+- 已移除 13 個完成 worktrees、13 個專用外部編譯目錄、WT target 與散落 fixtures；原始反證、實機／U17 證據及最終報告已集中封存，本機位置由交付的驗證報告列示。合併後已確認實作 worktree 乾淨，另以非 force 移除並刪除本機 feature branch；清理報告保留。
 
 ## 實機已驗範圍
 
-實機紀錄當時的測試執行檔為 `/private/tmp/AgEnD-g11c-target/debug/examples/tui_full`。這個 demo 使用真 holder parser、FakeDaemon 及正式 ClientSource，不啟動真 backend／LLM；PARSER SIZE 是 parser 尺寸，kernel 尺寸另由 native suites 的 stty 證明。終端 app 名稱與鍵盤配置未提供，不把這份紀錄當所有 macOS／Linux 終端的認證。
+實機紀錄當時使用 `tui_full` 測試執行檔；原編譯目錄已清理。這個 demo 使用真 holder parser、FakeDaemon 及正式 ClientSource，不啟動真 backend／LLM；PARSER SIZE 是 parser 尺寸，kernel 尺寸另由 native suites 的 stty 證明。終端 app 名稱與鍵盤配置未提供，不把這份紀錄當所有 macOS／Linux 終端的認證。
 
 | 行為 | 實際結果 | 證據形式 |
 |---|---|---|
@@ -23,7 +33,7 @@
 | 第二視窗 | 同 socket 接回原內容；第二 i 後第一唯讀，a 不送、第二 b [98] 可送 | 截圖＋自行比對 |
 | 多視窗 resize／重取 | 第一唯讀 resize 不改第二 27×102；第一明確 i 後取得控制，最新 26×102，第二唯讀 | 截圖 |
 
-原始圖片與逐步 JSON 已逐檔核 hash，封存於 `/private/tmp/g11c-final-review/historical-evidence.tar.gz` 的 `g11c-manual-r1/`；每份紀錄保留當時的驗證範圍。 早期文件中的原 `/private/tmp/g11c-*` 證據路徑保留作歷史定位，已完成批次的同名檔案／目錄可在封存包內查到；本批最終報告與清理清單集中於 `/private/tmp/g11c-final-review/`。首次簡單 paste 複製到 Markdown 符號，未算繁中通過；後續實際 UTF-8 packet 才通過。曾報告的不明重啟不算 daemon recovery 證據。
+原始圖片與逐步 JSON 已逐檔核 hash，封存於 `historical-evidence.tar.gz` 的 `g11c-manual-r1/`；每份紀錄保留當時的驗證範圍。 早期文件中的同名證據可在封存包內查到；公開頁只列證據檔名，本機位置由交付報告列示。首次簡單 paste 複製到 Markdown 符號，未算繁中通過；後續實際 UTF-8 packet 才通過。曾報告的不明重啟不算 daemon recovery 證據。
 
 ## 人工發現的修正
 
@@ -47,10 +57,10 @@
 
 ## 清理與確認
 
-驗證完成後移除本批的 fixture、測試程序、編譯目錄與完成的 verifier worktrees；最終報告／必要原證據及待 merge 的實作 worktree保留。清理前核所有權、worktree dirty 狀態與實際程序，不用名稱相似就刪除其他任務。
+驗證完成後移除本批的 fixture、測試程序、編譯目錄與完成的 verifier worktrees；最終報告與必要原證據保留；#145 合併後的實作 worktree 及本機 branch 已移除。清理前核所有權、worktree dirty 狀態與實際程序，不用名稱相似就刪除其他任務。
 
-最新 head 的自動檢查、獨立反證、CI 與清理結果由 PR 報告核實；本頁不把待執行檢查預算成通過。第 11 施工關完成與 merge 仍需使用者確認。
+最終 head 的自動檢查、獨立反證、CI 與清理已由 PR 報告核實；使用者已明確確認 #145 合併。合併後的文件收尾 PR 仍須另經驗證與使用者確認，不沿用實作 PR 的 merge 授權。
 
 ## 下一步
 
-閱讀 PR 的固定 head 驗證與清理結果，使用者確認後再合併。
+C 段已完成並合併；回 [ROADMAP](../ROADMAP.md) 檢視第 12 施工關待決定的提案。

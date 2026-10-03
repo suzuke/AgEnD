@@ -14,7 +14,7 @@
 
 Gate 10 的 `FakePipelineExecutor` 實作 core executor port，組合 FakeStore／FakeForge／FakeRunner 並記錄 bindings、投影與副作用；`clean_worktree` 透過 FakeRunner 的 index／status 回覆判斷，供 daemon 完整 queue 測試使用。FakeDriver／FakeClock clone 共享同一個測試狀態。
 
-## 第 11 施工關 C 段（實作中）
+## 第 11 施工關 C 段（已驗收並合併 #145）
 
 真 daemon 與安裝 producer 的 FakeDaemon 提供 client 1.4；六項 C 契約同跑 fake／真程序，producer 是 holder parser。控制 worker、generation／停止、fd 清理與完整 fake U17 都有回歸。真 Codex 證據另記於首次 U17，不以 fake 代替。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
 

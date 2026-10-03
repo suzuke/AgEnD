@@ -9,9 +9,9 @@
 
 `team add|list|join|set-workflow`、`workflow list|show|check|apply`、operator／agent task create、task cancel（選填 `--reason`）與 agent 流水線回報已接通；`doctor` 加入真 sandbox probe。操作見 [pipeline runtime](../../docs/architecture/pipeline-runtime.md)。
 
-## 第 11 施工關 C 段（實作中）
+## 第 11 施工關 C 段（已驗收並合併 #145）
 
-真 App 的完整畫面、鍵鼠／paste／歷史、多視窗、resize、正常／unwind 還原與 20 次程序清理已有原生回歸。完整 fake U17 與真 Codex 0.159.3 首次 U17 已由全新 verifier 核實；使用者同意只開放 0.159.3，使用者已有實機紀錄並要求剩餘行為自動驗證；最新 head verifier／CI、清理與 merge 確認見 [驗收收尾](../../docs/gates/gate-11c-closeout.md)。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
+真 App 的完整畫面、鍵鼠／paste／歷史、多視窗、resize、正常／unwind 還原與 20 次程序清理已有原生回歸。完整 fake U17 與真 Codex 0.159.3 首次 U17 已由全新 verifier 核實；使用者同意只開放 0.159.3，使用者已有實機紀錄並要求剩餘行為自動驗證；最終 head verifier／CI、清理與已確認合併紀錄見 [驗收收尾](../../docs/gates/gate-11c-closeout.md)。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
 
 ## 負責
 

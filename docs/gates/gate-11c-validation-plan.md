@@ -1,15 +1,15 @@
-# 第 11 施工關 C 段：驗收計畫（設計已確認，實作中）
+# 第 11 施工關 C 段：驗收計畫與完成證據
 
 > **TL;DR**
-> - 此頁定義 C 段必須證明的行為；已有 holder／daemon／client／App 局部證據，整份矩陣仍未驗收。
+> - 此頁保留 C 段必須證明的完整行為；#145 已完成驗收並經使用者確認合併，結果見 [收尾紀錄](gate-11c-closeout.md)。
 > - 測 consumer 必須餵真 producer：holder parser／協定型別、fake daemon 或真 AgEnD；不能手寫理想化 frame 當通過證據。
-> - 下一步：[P1–P6](gate-11c-proposal.md#使用者確認紀錄) 已於 2026-10-02 確認，接著實作並執行；本頁不是驗收通過紀錄。
+> - 下一步：第 12 施工關提案另等逐項決定；以下原矩陣與環境限制保留，不以合併代替 runtime 證據。
 
 ## 目前執行情況
 
-逐列 source／證據與未通過門檻見 [矩陣執行狀態](gate-11c-matrix-status.md)；App 舊 frame／query 與 wire golden 已有 [直接回歸](gate-11c-frame-order-validation.md)。
+逐列 source／證據與限制見 [矩陣執行狀態](gate-11c-matrix-status.md)；App 舊 frame／query 與 wire golden 已有 [直接回歸](gate-11c-frame-order-validation.md)。
 
-已建立的 suites／fixture 與原始證據見 [實作進度](gate-11c-progress.md)、[App 驗證](gate-11c-app-validation.md)、[原生 renderer](gate-11c-native-validation.md)、[真 PTY App](gate-11c-native-app-validation.md) 及 [真外層 PTY](gate-11c-outer-validation.md)。CLP-23–28 已同跑 fake／native，fake 注入真正 holder parser。這些結果涵蓋下表的一部分；首次真 Codex 0.159.3 U17 已有[原始證據](gate-11c-u17-live-validation.md)，其餘完成門檻依下方執行方式更新，由全新 verifier 與自動驗證逐項核對；[完整 fake U17](gate-11c-u17-validation.md) 及本機 accept tui 已通過，但不能代替整份矩陣。正常本機最後 dirty 的端到端時效已有外層 PTY 證據，包含未加 round-trip 額度的 300 ms 正向及 800 ms mutant。
+已建立的 suites／fixture 與原始證據見 [實作進度](gate-11c-progress.md)、[App 驗證](gate-11c-app-validation.md)、[原生 renderer](gate-11c-native-validation.md)、[真 PTY App](gate-11c-native-app-validation.md) 及 [真外層 PTY](gate-11c-outer-validation.md)。CLP-23–28 已同跑 fake／native，fake 注入真正 holder parser。下表按真 producer、native／外層 PTY 的原斷言與原實機紀錄完成核對，最終固定 head 的獨立覆核、雙平台 CI、清理與使用者合併確認見 [收尾紀錄](gate-11c-closeout.md)。首次真 Codex 0.159.3 U17 的[原始證據](gate-11c-u17-live-validation.md) 與[完整 fake U17](gate-11c-u17-validation.md) 仍分列，不互相代替；實機環境限制仍保留。正常本機最後 dirty 的端到端時效已有外層 PTY 證據，包含未加 round-trip 額度的 300 ms 正向及 800 ms mutant。
 
 ## 自動驗證矩陣
 
@@ -45,7 +45,7 @@
 
 ### 2026-10-03 執行方式更新
 
-使用者已操作下表中的實機畫面／鍵鼠／貼上／歷史／多視窗，並要求後續驗證由 agent 自動化完成。剩餘行為以真 producer、native PTY、外層 PTY 與相同斷言核實；已取得實機紀錄與自行比對分開保留於 [收尾頁](gate-11c-closeout.md)。此指示改變操作方式，沒有刪除下表或自動矩陣的驗證要求；merge 仍須使用者確認。
+使用者已操作下表中的實機畫面／鍵鼠／貼上／歷史／多視窗，並要求後續驗證由 agent 自動化完成。剩餘行為以真 producer、native PTY、外層 PTY 與相同斷言核實；已取得實機紀錄與自行比對分開保留於 [收尾頁](gate-11c-closeout.md)。此指示改變操作方式，沒有刪除下表或自動矩陣的驗證要求；#145 的合併確認已於後續取得；其他 PR 仍須另行確認。
 
 以下保留原人工操作清單，用來對照已取得實機紀錄與剩餘自動化斷言；不再要求使用者重做每一步。測試仍在專屬 worktree、獨立 CARGO_TARGET_DIR 與測試 home 執行，完成後提供可重跑的驗證指令。清單不是本次提案已做完的勾選。
 
@@ -63,7 +63,7 @@ macOS Terminal／iTerm2 與使用者實際 Linux 終端分開記錄；CI 的 hea
 ## 已確認提案如何核對
 
 ```bash
-cd /Users/suzuke/AlphaCR-worktrees/AgEnD-v2-g11c-terminal
+cd "<你的 AgEnD worktree>"
 sed -n '1,150p' docs/gates/gate-11c-proposal.md
 ```
 
@@ -71,4 +71,4 @@ sed -n '1,150p' docs/gates/gate-11c-proposal.md
 
 ## 下一步
 
-提案 #144 已合併；在專屬 worktree 自動完成剩餘驗證矩陣，核固定 head 的全新 verifier／CI，清理殘留並提供結果與重跑指令，等使用者 merge 確認。
+提案 #144 與實作 #145 均已合併；最終固定 head、獨立反證、CI、原實機／自動驗收與清理見 [收尾紀錄](gate-11c-closeout.md)。下一關提案另等使用者確認。

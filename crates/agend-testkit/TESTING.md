@@ -10,7 +10,7 @@
 `recorder_recovery.rs` 對真 fake producer 重複 ResumeEmpty 50 次，關閉連線前必須讀到該 thread 的 `thread/started`。Pipeline 的共享 fake／SQLite 契約另外驗 dispatch receipt、task CAS 與 attention_reason 清除同交易：error／conflict 不改註記，success 保留 acknowledgement，generic advance_task 不清註記。真 SQLite attention UPDATE 故障須 rollback version／event／receipt，移除故障後可重試一次。
 STO-13 同時跑 FakeStore 與 SQLite；SplitAdvance mutant 故意在失敗時先寫 task，必須被契約推翻。`fake-worker` 由 `agend` 的 pipeline 程序測試與 `pipeline_probe demo` 啟動。
 
-## 第 11 施工關 C 段（實作中）
+## 第 11 施工關 C 段（已驗收並合併 #145）
 
 - `full_terminal`：共用 CLP-23–28 與 producer generation／failed instance；輸入由真 holder Screen 的 parser producer 提供。相同六條在 `agend/tests/full_terminal_contract.rs` 對真 daemon／holder／PTY 執行。
 - `full_terminal_pressure`：producer 操作阻塞時同 socket GetFleet 可回覆、新 grant 等原寫入；capture 中替換訂閱，完成後不能發舊 view。

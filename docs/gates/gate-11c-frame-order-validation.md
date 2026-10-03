@@ -29,7 +29,7 @@
 | 不檢查目前 query id | late query changed the selected history；exit 101 |
 | 不檢查目前 view id | old view revoked the current owner；exit 101 |
 
-原 logs／mutant source 保留在 /private/tmp/g11c-implementation-logs/frame-order-*-mutant.*；正向原輸出為 frame-order-first.log。這是 App 邊界受控重排，不宣稱 wire 上的 TCP／Unix stream 會自己倒序。
+原 logs／mutant source 保留在 g11c-implementation-logs/frame-order-*-mutant.*；正向原輸出為 frame-order-first.log。這是 App 邊界受控重排，不宣稱 wire 上的 TCP／Unix stream 會自己倒序。
 
 ## Frame golden
 
@@ -46,8 +46,8 @@ frame-golden-suite.log：8 passed／0 ignored，包含新 golden 與原有真 PT
 ## 重跑
 
 ~~~bash
-cd /Users/suzuke/AlphaCR-worktrees/AgEnD-v2-g11c-terminal
-export CARGO_TARGET_DIR=/private/tmp/AgEnD-g11c-target
+cd "<你的 AgEnD worktree>"
+export CARGO_TARGET_DIR="$PWD/AgEnD-g11c-target"
 ~/.cargo/bin/cargo test -p agend-tui --test full_app
 ~/.cargo/bin/cargo test -p agend-holder --test terminal_frames
 ~/.cargo/bin/cargo xtask accept tui

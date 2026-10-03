@@ -1,9 +1,9 @@
 # 第 11 施工關 C 段：實作進度
 
 > **TL;DR**
-> - [draft PR #145](https://github.com/suzuke/AgEnD/pull/145) 已接通 C 段完整終端與已驗版本 Codex 輸入，正在驗收收尾，merge 待使用者確認。
-> - 固定 09a205d 經全新 verifier r3 與四個雙平台 CI jobs 各核 900 passed／2 既有 ignored、實際 no-std 通過；實機操作紀錄已取得，使用者要求剩餘行為自動化。
-> - 下一步：核本批提示修正的固定 head／全新 verifier／CI，清理本批殘留後報告；[實機與收尾紀錄](gate-11c-closeout.md)。
+> - [PR #145](https://github.com/suzuke/AgEnD/pull/145) 已於 2026-10-03 經使用者確認合併（`b2152db`），C 段完整終端與已驗版本 Codex 輸入完成。
+> - 最終 `cfee027` 經全新 r9 CONFIRMED；四個雙平台 CI jobs 各 900 passed／0 failed／2 既有 ignored、實際 no-std。實機及後續自動驗收、清理完成。
+> - 下一步：第 12 施工關提案另等逐項決定；[最終驗收、合併與限制](gate-11c-closeout.md)。下方逐批紀錄保留當時狀態。
 
 ## 已實作
 
@@ -19,9 +19,13 @@
 | client 1.4 傳輸 | 專用 reader／Sender，保留 request id；新行上限／完整請求拒絕／5 秒 write，失敗關閉、不重連重送；NEEDED 仍 1.3 | `full_terminal` 真 socket／holder parser；legacy client 回歸 |
 | daemon 多視窗 | view／attach 綁 socket；每 instance 64 個有序操作、最後 Acquire 控制、舊 token／foreign view 拒絕；EOF／停止清理，保留尺寸 | `terminal_hub` 的 8 個真 daemon／holder／PTY cases |
 | 畫面更新 | 同一 parser 的 grid／palette／mode 共用 50 ms 取樣，runtime dirty watch；各 view 的歷史選取獨立，最後 dirty 送出 | 真 parser 的精確 49／50 ms 邊界與 native 歷史／burst case |
-| 開發中能力邊界 | 真 daemon 選 1.4；fake 預設 1.3，注入 TerminalProducer 後選 1.4；一般 NEEDED 保留 1.3，舊 peer 仍可用 B 路徑 | native 全路徑＋1.3 真／假能力拒絕＋CLP |
+| 能力協商邊界 | 真 daemon 選 1.4；fake 預設 1.3，注入 TerminalProducer 後選 1.4；一般 NEEDED 保留 1.3，舊 peer 仍可用 B 路徑 | native 全路徑＋1.3 真／假能力拒絕＋CLP |
 
 ## 驗證紀錄
+
+以下是各批次**當時**的進度原紀錄；其中「draft」「待驗證」「尚未 merge」只描述該批次，不是目前狀態。目前以頁首完成狀態及最新合併紀錄為準。原失敗與驗證範圍不改寫成成功；歷史證據僅列封存檔名，不公布本機暫存位置。
+
+- 2026-10-03 使用者明確確認「確認合併145」，#145 已以 merge commit `b2152db` 合併進 `v2`。最終 head `cfee027` 經全新 r9 CONFIRMED；四個 PR／push Ubuntu／macOS CI jobs 各 900 passed／0 failed／2 既有 ignored，實際 no-std 通過。合併 tree 與已驗證 head 完全相同。C 段實作／驗收完成，原實機、反證、真 U17 限制及清理證據保留；[收尾紀錄](gate-11c-closeout.md)。
 
 - 2026-10-03 C 段實機驗收與收尾（#145）：完整模式、歷史固定／回底、mouse／Shift、alt／normal、含 0x1D 的多行貼上、超限拒絕、多視窗唯讀／重取與尺寸已有截圖及自行比對紀錄。使用者要求後續改採自動化並清理殘留；修正控制提示重複，原版 count=2 反例及正向保留。本批固定 head／fresh verifier／CI 以 PR 結果核實，未 merge；[紀錄](gate-11c-closeout.md)。
 
@@ -84,7 +88,7 @@
 - 原取消邏輯在真 holder 回歸失敗：`an unconsumed grant survived cancellation`（exit 101）；修正後同一測試通過。
 - 大行讀取原失敗與 partial fixture 的小 socket buffer 死鎖保留；最新讀取採 chunk 線性掃描、deadline poll／recv，關閉後仍讀完資料。
 
-本機原始輸出與 SHA256 在 `/private/tmp/g11c-implementation-logs`；失敗 log 保留，不算通過證據。原生 macOS 測試不代表 Linux 或實際終端字型／游標外觀已驗收，雙平台 CI 與人工驗收仍須核最新實作 head。
+本機原始輸出與 SHA256 在 `g11c-implementation-logs`；失敗 log 保留，不算通過證據。原生 macOS 測試不代表 Linux 或實際終端字型／游標外觀已驗收，雙平台 CI 與人工驗收仍須核最新實作 head。
 
 ## U17 foundation 與 CI 反例（2026-10-03）
 
@@ -92,14 +96,14 @@
 - CLP-11 Retry 舊 attention 快照重建／覆蓋已受控重現；真 Fleet 原子條件更新後回歸及真 protocol suite 通過。最新 macOS 外層 PTY CI 又指出重新 Acquire 使用舊尺寸；draw 同步實際 backend area，新回歸拒絕缺同步 mutant。[證據](gate-11c-regression-validation.md)。
 - 完整 U17、其餘矩陣、最新 CI、獨立與人工驗收仍待完成；本批不代表整段完成。
 
-## 尚待完成
+## 最終確認與保留限制
 
-- 核本批提示／EOF 契約補修的固定 head、全新 verifier 與最新雙平台 CI，完整結果見 [驗收收尾](gate-11c-closeout.md) 與 PR；既有局部契約不當整份認證。
+- 本批提示／EOF 契約補修的最終固定 head、全新 verifier 與雙平台 CI 已核實，完整結果見 [驗收收尾](gate-11c-closeout.md) 與 PR；既有局部契約不當整份認證。
 - 實機操作紀錄已取得，使用者要求剩餘行為驗證由自動化完成；原生與外層 PTY 證據不認證所有實體終端、字型或鍵盤配置。
 - 首次真 Codex 0.159.3 U17 已由獨立 verifier 核實，四個核准模型回合已用完；[live 證據與限制](gate-11c-u17-live-validation.md) 保留原範圍，本批不新增真模型呼叫。
 - 版本開放已獲使用者同意；[版本政策](gate-11c-codex-input.md) 只允許 0.159.3，未知或其他版本仍唯讀。
-- 清理本批實作／驗證殘留後，提供最終報告與重跑指令，merge 等使用者確認。
+- 本批殘留清理、最終報告與重跑指令已交付；使用者已確認 #145 merge，合併後實作 worktree／本機 branch 已移除。
 
 ## 下一步
 
-依 [矩陣執行狀態](gate-11c-matrix-status.md) 完成剩餘門檻，首次真 U17 已有明確核准及通過紀錄，版本開放已獲同意；新 head 仍須驗證。此頁的局部通過不能代替 C 段完成驗收。
+C 段已完成並合併；[矩陣狀態](gate-11c-matrix-status.md) 與 [收尾紀錄](gate-11c-closeout.md) 列最終證據及限制，下一關提案另等使用者確認。

@@ -9,9 +9,9 @@
 
 單一 pipeline queue、SQLite schema v5、真 git／Runner／LocalForge、binding 與 hook 生命週期、checks 沙箱、重啟／每日對帳、team／workflow／task／請示／提醒已接通；執行規則見 [pipeline runtime](../../docs/architecture/pipeline-runtime.md)。人工核准、attention_reason 清除與結果 receipt 在同一筆 store CAS transaction 完成後才發布真 action；失敗或衝突不改任何投影；通知型 timeout 留在同一核准 ticket 時不移除再重建 attention。
 
-## 第 11 施工關 C 段（實作中）
+## 第 11 施工關 C 段（已驗收並合併 #145）
 
-holder 1.1／runtime／client 1.4 已接通完整 frame、歷史、多視窗控制、resize 及 TUI；fake C 契約與完整 U17 已通過。真 Codex 0.159.3 首次 U17 有獨立核對，使用者要求剩餘行為自動驗證；最新 head verifier／CI、清理與 merge 確認見 [驗收收尾](../../docs/gates/gate-11c-closeout.md)。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
+holder 1.1／runtime／client 1.4 已接通完整 frame、歷史、多視窗控制、resize 及 TUI；fake C 契約與完整 U17 已通過。真 Codex 0.159.3 首次 U17 有獨立核對，使用者要求剩餘行為自動驗證；最終 head verifier／CI、清理與已確認合併紀錄見 [驗收收尾](../../docs/gates/gate-11c-closeout.md)。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
 
 Codex history 對帳已拒絕外來 clientId 的文字 fallback；no-turn Queued 的舊 crash fallback 要有 attempted_at，未嘗試送出不算 receipt。[U17 基礎證據與仍存歧義](../../docs/gates/gate-11c-u17-validation.md)。
 
@@ -86,7 +86,7 @@ pipeline 補 failed attention 的 unblocks 時，經 core port 原子比對捕�
 | 程序 | holder 的 PTY 子程序是固定的 `sh` 包裝（`driver::codex::launch::WRAPPER`，`$0`＝`agend-codex`）：背景起 `codex -c … app-server --listen unix://$AGEND_HOME/run/holders/<id>.codex.sock <instance 的 args>`（輸出接到 holder log），等交接檔 `run/holders/<id>.codex-go`（最多 60 秒，否則 exit 1），再 `exec codex -c … resume <thread> --remote unix://<解析後的 socket>`；兩個程序同一個 process group。holder 協定不變 |
 | 設定 | 每次啟動的 `-c`：trust `projects={"<realpath 工作目錄>"={trust_level="trusted"}}`、`check_for_update_on_startup=false`；app-server 另有 `approval_policy="never"`、`sandbox_mode="danger-full-access"`（`thread/start` 也帶）。不設 `CODEX_HOME`，**不寫 `~/.codex`** |
 | shim | codex agent 的環境多一個 `ZDOTDIR=$AGEND_HOME/zsh`；每次開機重寫 `zsh/.zprofile`，在 `/etc/zprofile`（`path_helper`）之後把 PATH 還原成 agent 啟動時的樣子：`$AGEND_HOME/bin`，然後 daemon 的 PATH（去掉 `$AGEND_HOME/bin`）；不 source 使用者的 dotfile（K8） |
-| 啟動 | `Spawn` 前刪舊的 socket（連它指到的 `/private/tmp/codex-daemon-<uid>/` 檔）與 `$GO` → holder → 背景 `connect`：每 100 ms 試連、`initialize`，20 秒放棄；沒有 thread 就 `thread/start`、**先存進 `instances.session_id`**，有就 `thread/resume {excludeTurns:true}`（找不到而且從沒送過訊息 → 建新的，否則 `failed`）；各限 30 秒 → 寫 `$GO`（暫存檔再 rename）→ 對帳、送出 `queued` 的訊息 → 開長連線。失敗＝一次死亡（5 秒／3 次／`failed`） |
+| 啟動 | `Spawn` 前刪舊的 socket（連它指到的 `codex-daemon-<uid>/` 檔）與 `$GO` → holder → 背景 `connect`：每 100 ms 試連、`initialize`，20 秒放棄；沒有 thread 就 `thread/start`、**先存進 `instances.session_id`**，有就 `thread/resume {excludeTurns:true}`（找不到而且從沒送過訊息 → 建新的，否則 `failed`）；各限 30 秒 → 寫 `$GO`（暫存檔再 rename）→ 對帳、送出 `queued` 的訊息 → 開長連線。失敗＝一次死亡（5 秒／3 次／`failed`） |
 | log | `<id>: app-server ready (… ms)`、`thread <T> created`／`thread <T> resumed (idle)`（或 `busy`）、`go (resume <T>)`、`<m> (<level>) → <方法> → sent (turn …)`、`<m> confirmed (turn …)`、`approval declined (gate 7 has no handler): …`、`app-server is gone (no connection for 20 s)`、`sweep of agent group <G> (…): already gone`（或 `SIGKILL sent (…)`） |
 | 長連線 | 每個 instance 一條 std thread（寫入 10 秒沒進度＝斷線、走重連；關閉時先 shutdown socket、最多等 5 秒 thread：第 9 施工關）：`thread/status/changed` → 忙／閒（不去抖動）；user message 的 `item/completed` → `confirmed`；授權請求一律回 `decline`；斷線每 100 ms 重連 20 秒（重連後 resume、對帳、補送），不行就是 app-server 死了 → 下一次重起先 `Shutdown` holder；turn 結束、閒置而 codex 佇列非空時送一次 `thread/queue/start`（中斷後 codex 不會自己開始，K16） |
 | 清掃 | 發現 holder 死了（決定重起或 `failed` 之前）、起新 holder 之前、開機時 holder 已不在的 `failed`：`agent_pid` 有值才做；1 < pgid ≤ `i32::MAX`、group 還有程序、而且有程序的 argv 有一個元素完全等於 socket 路徑（或 `unix://` 加上它）或 `resume` 後面等於 thread id，才對 group 送一次 SIGKILL；之後清掉 `agent_pid` |

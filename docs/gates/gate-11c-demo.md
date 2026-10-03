@@ -8,8 +8,8 @@
 ## 開啟
 
 ~~~bash
-cd /Users/suzuke/AlphaCR-worktrees/AgEnD-v2-g11c-terminal
-export CARGO_TARGET_DIR=/private/tmp/AgEnD-g11c-target
+cd "<你的 AgEnD worktree>"
+export CARGO_TARGET_DIR="$PWD/AgEnD-g11c-target"
 ~/.cargo/bin/cargo run --quiet -p agend-tui --example tui_full
 ~~~
 
@@ -28,6 +28,8 @@ export CARGO_TARGET_DIR=/private/tmp/AgEnD-g11c-target
 第二視窗連第一個 F1 顯示的完整 socket；路徑換行時先拉寬視窗再按 F1：
 
 ~~~bash
+cd "<你的 AgEnD worktree>"
+export CARGO_TARGET_DIR="$PWD/AgEnD-g11c-target"
 ~/.cargo/bin/cargo run --quiet -p agend-tui --example tui_full -- \
   --socket "<第一個視窗顯示的絕對 socket>"
 ~~~
@@ -44,4 +46,4 @@ INPUT BYTES 是實收 bytes 再經真 Screen 輸出，沒有手寫格子。PARSE
 
 ## 下一步
 
-依 [驗收計畫](gate-11c-validation-plan.md) 的更新方式自動驗證剩餘行為；核最新固定 head verifier／CI 與清理結果後報告，merge 等使用者確認。
+C 段 #145 已完成驗收並經使用者確認合併；完整固定 head 證據、原實機與後續自動驗證、清理及環境限制見 [驗收收尾](gate-11c-closeout.md)。上方命令供另開自己的 worktree 操作 fake demo；不啟動真 backend 或模型。
