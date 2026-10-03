@@ -25,6 +25,10 @@
 | [competitors.md](competitors.md) | 17 個同類工具的市場調查 | 定位、D5、D20 |
 | [v1-architecture-rfc.md](v1-architecture-rfc.md) | v1 未合併的架構簡化 RFC：被推翻的前提與方法論教訓 | D10、方法論（先證據後解法） |
 
+## 第 12A Claude 實測
+
+[2026-09-28 F1–F10](gate-12a-claude-2026-09-28.md)：#138 原提案的歷史實測，2.1.283、5 個短回合與 8 次不送 prompt 的啟動；不是新版驗證或新真測授權。
+
 ## 下一步
 
 ```bash

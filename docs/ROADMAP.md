@@ -74,6 +74,8 @@
 
 以下是各批次**當時**的進度原紀錄；其中「draft」「待驗證」「尚未 merge」只描述該批次，不是目前狀態。目前以頁首完成狀態及最新合併紀錄為準。原失敗與驗證範圍不改寫成成功；歷史證據僅列封存檔名，不公布本機暫存位置。
 
+- 2026-10-03 使用者授權整理第 12A 提案 #138：對齊 #146 合併後 v2、P1 協定版本與 P7 migration 現況，拆分 P1–P10、歷史 F1–F10 與驗收計畫；全部決策仍待確認，未授權提案 merge 或實作。
+
 - 2026-10-03 使用者明確確認「確認合併145」，#145 已以 merge commit `b2152db` 合併進 `v2`。最終 head `cfee027` 經全新 r9 CONFIRMED；四個 PR／push Ubuntu／macOS CI jobs 各 900 passed／0 failed／2 既有 ignored，實際 no-std 通過。合併 tree 與已驗證 head 完全相同。C 段實作／驗收完成，原實機、反證、真 U17 限制及清理證據保留；[收尾紀錄](gates/gate-11c-closeout.md)。
 
 - 2026-10-03 獨立文件覆核補同步 daemon／testkit 的目前終端許可、Codex 歸屬快照／保留規則及 U17 12-case 索引，D39 加使用者後續自動驗證方式；B 段舊 wire 規則明示歷史範圍。程式／測試不變，新固定 head 另核 verifier／CI，#145 merge 待確認。
