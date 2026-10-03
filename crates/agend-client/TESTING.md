@@ -9,11 +9,11 @@
 
 protocol 1.3 版本底線、action note 與新增命令的 wire golden 在 xtask；真 pipeline 和 TUI 操作在 `agend` 的 Gate 10 程序測試。
 
-## 第 11 施工關 C 段（實作中）
+## 第 11 施工關 C 段（已驗收並合併 #145）
 
 `tests/full_terminal.rs` 的 native socket peer 用 core serializer 與真 holder `Screen` parser 產生 frame，驗新 reader／Sender；它不是 daemon 控制權策略的假替代。涵蓋能力不足先拒絕、generic retry 不送 attach 請求、viewport／控制／拒絕的 request id、CJK／組合字／mode、含換行的 8 MiB 邊界、錯誤 frame 永久失效、partial EOF、整次貼上拒絕、替換 socket 不重連，以及真 socket 背壓的 5 秒寫入期限。peer 半關閉後 EOF release 的回歸曾在原 SHUT_RDWR 邏輯失敗，修正後通過；原 log 保留。
 
-legacy 9 MiB 純文字畫面的測試保留。`agend-holder` 只作 dev-dependency，讓 consumer 讀到真 parser 產物；一般 client 依賴仍不含 holder 或 async runtime。端到端／最新 head verifier／CI、使用者實機紀錄與後續自動驗證方式見 [驗收收尾](../../docs/gates/gate-11c-closeout.md)；merge 仍待確認。
+legacy 9 MiB 純文字畫面的測試保留。`agend-holder` 只作 dev-dependency，讓 consumer 讀到真 parser 產物；一般 client 依賴仍不含 holder 或 async runtime。端到端／最新 head verifier／CI、使用者實機紀錄與後續自動驗證方式見 [驗收收尾](../../docs/gates/gate-11c-closeout.md)；使用者已明確確認 #145 合併。
 ## 怎麼跑
 
 ```bash

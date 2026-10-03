@@ -19,7 +19,7 @@
 | 鍵／paste | [full App](../../crates/agend-tui/tests/full_app.rs)、[真 PTY](gate-11c-native-app-validation.md)、[外層 capture](gate-11c-outer-validation.md)：本機退出碼、mode-aware keys、整次 paste／raw／base64／envelope 拒絕 | 非美式鍵盤與實際終端回報須人工核 |
 | mouse | 同上：tracking／SGR／UTF-8、press／release／motion、status／區外、Shift／唯讀歷史 | 終端不回報 Shift 時以唯讀捲動替代 |
 | 斷線／壓力 | [client bounds](../../crates/agend-client/tests/full_terminal.rs)、[Source pressure](../../crates/agend-tui/tests/full_source.rs)、[真 hub](../../crates/agend/tests/terminal_hub.rs)、[原生外層](gate-11c-outer-validation.md)：有界 queue、慢 peer／EOF、不重送、20 次 thread／fd／程序清理 | 最終 head 的完整 checks 已核資源；不認證所有 host throughput |
-| Codex U17 | [完整 fake](gate-11c-u17-validation.md)：真 App／client／daemon／holder，同 thread、人工 busy／idle、正式 Queue／idle Send、重啟／草稿、兩個自己的 receipt／turn | [真 U17](gate-11c-u17-live-validation.md) 0.159.3 首次通過；第四回合只核自己的 receipt；原證據已獨立核實，版本開放獲同意；新實作仍需另驗 |
+| Codex U17 | [完整 fake](gate-11c-u17-validation.md)：真 App／client／daemon／holder，同 thread、人工 busy／idle、正式 Queue／idle Send、重啟／草稿、兩個自己的 receipt／turn | [真 U17](gate-11c-u17-live-validation.md) 0.159.3 首次通過；第四回合只核自己的 receipt；原證據已獨立核實，版本開放獲同意；本次最終 head 已驗；後續新改仍需另驗 |
 
 ## 最終確認與限制
 
