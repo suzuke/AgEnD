@@ -29,7 +29,7 @@
 
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -39,7 +39,7 @@ use agend_core::model::DeliveryState;
 use agend_core::policy::busy::BusyLevel;
 use serde_json::{Value, json};
 
-use super::history::{UserItem, match_items, text_of, user_items};
+use super::history::{UserItem, match_identified_items, match_items, text_of, user_items};
 use super::launch;
 use super::rpc::{Conn, INVALID_REQUEST, Incoming, RpcError};
 use super::send::{self, Rpc};
@@ -75,6 +75,8 @@ const CLOSE_WITHIN: Duration = Duration::from_secs(5);
 pub(crate) struct Shared {
     pub connected: AtomicBool,
     pub busy: AtomicBool,
+    pub input_allowed: AtomicBool,
+    pub holder_pid: AtomicU32,
     stopping: AtomicBool,
     /// The current connection's socket: closing the link shuts it down, so
     /// a thread blocked writing to a peer that does not read wakes up
@@ -149,6 +151,8 @@ impl Link {
     }
 
     fn stop(&mut self) {
+        self.shared.input_allowed.store(false, Ordering::SeqCst);
+        self.shared.connected.store(false, Ordering::SeqCst);
         self.shared.stopping.store(true, Ordering::SeqCst);
         self.commands.take();
         self.shared.shut_down();
@@ -199,7 +203,7 @@ pub(crate) fn confirm(
             DeliveryState::Sent => {}
             _ => return Ok(None),
         }
-        messages::advance(conn, &row, DeliveryState::Confirmed, None, now)?;
+        messages::advance(conn, &row, DeliveryState::Confirmed, Some(&turn), now)?;
         Ok(Some(found.state))
     })
 }
@@ -236,6 +240,7 @@ pub(crate) struct Worker {
     /// A turn ended: when the thread is idle, start what codex still has
     /// queued (K16: after an interrupt codex does not start it itself).
     drain: bool,
+    identified_receipts: bool,
 }
 
 impl Worker {
@@ -245,6 +250,7 @@ impl Worker {
         generation: u64,
         listen: PathBuf,
         store: Arc<SqliteStore>,
+        identified_receipts: bool,
     ) -> Result<Worker, RpcError> {
         let conn = Conn::open(&listen).map_err(|e| RpcError::Transport(e.to_string()))?;
         let shared = Arc::new(Shared::default());
@@ -261,9 +267,17 @@ impl Worker {
             shared,
             recheck: false,
             drain: false,
+            identified_receipts,
         };
         worker.initialize()?;
         Ok(worker)
+    }
+
+    /// Set only after the selected thread's persistent attribution is committed.
+    pub fn set_input_policy(&mut self, identified: bool, admitted: bool, holder_pid: u32) {
+        self.identified_receipts = identified;
+        self.shared.holder_pid.store(holder_pid, Ordering::SeqCst);
+        self.shared.input_allowed.store(admitted, Ordering::SeqCst);
     }
 
     fn initialize(&mut self) -> Result<(), RpcError> {
@@ -402,6 +416,10 @@ impl Worker {
                 return;
             }
             self.shared.connected.store(false, Ordering::SeqCst);
+            // A new RPC peer cannot inherit the previous peer's input admission.
+            // Receipt attribution remains strict; a fresh supervisor connect can
+            // establish admission again from the current holder launch record.
+            self.shared.input_allowed.store(false, Ordering::SeqCst);
             if self.stopping() {
                 return;
             }
@@ -561,11 +579,25 @@ impl Worker {
             "turn/started" => {
                 self.active = params["turn"]["id"].as_str().map(str::to_owned);
                 self.set_busy(true);
+                if self.identified_receipts {
+                    log::line(&format!(
+                        "{}: U17 turn {} busy",
+                        self.id,
+                        self.active.as_deref().unwrap_or_default()
+                    ));
+                }
             }
             "turn/completed" => {
                 if self.active.as_deref() == params["turn"]["id"].as_str() {
                     self.active = None;
                     self.set_busy(false);
+                    if self.identified_receipts {
+                        log::line(&format!(
+                            "{}: U17 turn {} idle",
+                            self.id,
+                            params["turn"]["id"].as_str().unwrap_or_default()
+                        ));
+                    }
                 }
                 self.drain = true;
             }
@@ -579,6 +611,14 @@ impl Worker {
         }
     }
 
+    fn match_receipts(&self, items: &[UserItem], rows: &[Message]) -> Vec<Option<String>> {
+        if self.identified_receipts {
+            match_identified_items(items, rows)
+        } else {
+            match_items(items, rows)
+        }
+    }
+
     /// A user message just completed: confirms the `queued`/`sent` row it is.
     fn confirm_live(&mut self, item: &UserItem) {
         let rows = match messages_to(&self.store, &self.id) {
@@ -589,7 +629,7 @@ impl Worker {
             .into_iter()
             .filter(|r| matches!(r.state, DeliveryState::Queued | DeliveryState::Sent))
             .collect();
-        if let Some(Some(row)) = match_items(std::slice::from_ref(item), &open).pop() {
+        if let Some(Some(row)) = self.match_receipts(std::slice::from_ref(item), &open).pop() {
             self.confirm_logged(&row, &item.turn_id, "");
         }
     }
@@ -663,7 +703,7 @@ impl Worker {
         }
         let rows = messages_to(&self.store, &self.id).map_err(store_error)?;
         let items = user_items(&turns);
-        let found = match_items(
+        let found = self.match_receipts(
             &items.iter().map(|(_, u)| u.clone()).collect::<Vec<_>>(),
             &rows,
         );

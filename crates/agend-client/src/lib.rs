@@ -24,6 +24,7 @@
 
 pub mod connection;
 pub mod retry;
+pub mod terminal;
 pub mod version;
 
 use std::fmt;
@@ -31,6 +32,7 @@ use std::path::PathBuf;
 
 pub use connection::{Client, Sender, TerminalUpdate};
 pub use retry::{RESTART_RETRY_WINDOW, Redo};
+pub use terminal::FullTerminalUpdate;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClientError {

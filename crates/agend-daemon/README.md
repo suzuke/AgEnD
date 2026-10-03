@@ -1,13 +1,23 @@
 # agend-daemon
 
 > **TL;DR**
-> - 唯一的大型 I/O 層：常駐、單一 tokio runtime、DB 專屬執行緒；`agend daemon` 起 holder、接回 holder、agent 死了用 `--resume` 接回；開機計畫做完才開 `run/daemon.sock` 講 client protocol 1.3（第 8、9 施工關）；codex 經 app-server 的 JSON-RPC 送達、自己建 thread、死了照樣 resume（第 7 施工關）；`agend send`／`inbox`、`agend instance add|remove`、`agend daemon restart`（預檢後原地 `exec`）在這裡處理（第 9 施工關）。
+> - 唯一的大型 I/O 層：常駐、單一 tokio runtime、DB 專屬執行緒；`agend daemon` 起 holder、接回 holder、agent 死了用 `--resume` 接回；開機計畫做完才開 `run/daemon.sock` 講 client protocol 1.4（一般 client 仍只需 1.3）；codex 經 app-server 的 JSON-RPC 送達、自己建 thread、死了照樣 resume（第 7 施工關）；`agend send`／`inbox`、`agend instance add|remove`、`agend daemon restart`（預檢後原地 `exec`）在這裡處理（第 9 施工關）。
 > - 記住：**daemon 停掉時 holder 與 agent 照跑（D3）**；同一個 `AGEND_HOME` 只有一個 daemon（`agend.db` 的鎖）；`agend.db` 只有 daemon 開（`store`）；socket 連得上＝daemon 好了。
 > - 下一步：第 10 施工關 pipeline 驗證：`cargo xtask accept pipeline`；還原 DB 快照的步驟見下方「store」。
 
 ## 第 10 施工關（已驗收，2026-10-02）
 
 單一 pipeline queue、SQLite schema v5、真 git／Runner／LocalForge、binding 與 hook 生命週期、checks 沙箱、重啟／每日對帳、team／workflow／task／請示／提醒已接通；執行規則見 [pipeline runtime](../../docs/architecture/pipeline-runtime.md)。人工核准、attention_reason 清除與結果 receipt 在同一筆 store CAS transaction 完成後才發布真 action；失敗或衝突不改任何投影；通知型 timeout 留在同一核准 ticket 時不移除再重建 attention。
+
+## 第 11 施工關 C 段（實作中）
+
+holder 1.1／runtime／client 1.4 已接通完整 frame、歷史、多視窗控制、resize 及 TUI；fake C 契約與完整 U17 已通過。真 Codex 0.159.3 首次 U17 有獨立核對，使用者要求剩餘行為自動驗證；最新 head verifier／CI、清理與 merge 確認見 [驗收收尾](../../docs/gates/gate-11c-closeout.md)。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
+
+Codex history 對帳已拒絕外來 clientId 的文字 fallback；no-turn Queued 的舊 crash fallback 要有 attempted_at，未嘗試送出不算 receipt。[U17 基礎證據與仍存歧義](../../docs/gates/gate-11c-u17-validation.md)。
+
+pipeline 補 failed attention 的 unblocks 時，經 core port 原子比對捕捉值再更新；Retry 已移除或新失敗已替換的項目不被舊快照重建。[CI 反例](../../docs/gates/gate-11c-regression-validation.md)。
+
+一般 daemon 只允許 holder 啟動時辨識為 codex-cli 0.159.3 的人工輸入；未知、其他版本、舊 holder 缺版本記錄及未連線均拒絕。曾允許輸入的 thread 以 migration 0006 永久記錄，live／reconcile／events 都只接受自己的 clientId；版本降級或 daemon 重啟不回到文字匹配。Queue 的 Confirmed row 保存實際 turn id。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
 
 ## 負責
 
@@ -33,6 +43,7 @@
 | `housekeeping` | 開機與每小時：`prune`、DB 快照、daemon log、audit、holder log 的期限 |
 | `log` | daemon log：stderr ＋ `logs/daemon-YYYY-MM-DD.log` |
 | `server` | client protocol server：`run/daemon.sock`、JSON Lines、`hello`、寫入 5 秒逾時、落後就斷（第 8 施工關） |
+| `terminal_hub` | 入口服務：每 instance 有界操作、socket-scoped view／owner、dirty frame 與 EOF 清理（C 段） |
 | `handlers` | 請求處理，與傳輸分離；依身分限權（`command` 只收 agent、`operator`／`resolve_attention` 只收操作者）；`handlers::agent`（`status`、`send`、`inbox`）、`handlers::operator`（instance、restart 預檢） |
 | `fleet` | 全貌（instance、task、「需要你」）與事件記錄（最近 1024 筆、broadcast），同一把鎖（第 8 施工關） |
 | `ingest` | hook 與結構化事件接收、磁碟佇列補送 |
@@ -85,49 +96,24 @@
 
 ## client protocol server（第 8 施工關）
 
-| 項目 | 內容 |
-|---|---|
-| socket | `$AGEND_HOME/run/daemon.sock`：`run/` 0700、socket 0600；路徑超過 100 bytes 開機就拒絕（`socket path too long: … (… bytes, max 100 bytes); use a shorter AGEND_HOME`，exit 1，不碰 `agend.db`）；拿到 DB 鎖後刪掉舊的 socket 檔 |
-| 何時出現 | 開機計畫做完才 bind，接著印 `listening on …` 與 `agend daemon ready: …`；連得上的 client 一定看到完整的 instance 清單（不需要 `.ready`） |
-| 停止 | Ctrl-C／SIGTERM：停止接受、刪 socket 檔、關所有 client 連線，再照第 6 施工關結束 |
-| 身分 | `hello` 的 `caller`（CLI 在 agent 裡填 `AGEND_INSTANCE`）：有填＝agent，沒填＝操作者；不做 cookie |
-| 請求 | `hello`、`get_fleet`、`subscribe_events`、`subscribe_terminal`、`resolve_attention`（只收操作者，先查身分再找 id；pipeline 人工核准先提交 CAS，再解除項目並發布真 action；instance 的 `retry` 交給 supervisor）；`terminal_input`（第 11 施工關 B 段，見下）；`answer_ask` → `unknown_ask`；agent 命令與 `operator` 見「CLI 的 daemon 端」；未知請求 → `unknown_request`、連線不斷 |
-| 事件 id | 第一個＝開機時間（unix ms）× 1000 + 1；只放記憶體最近 1024 筆；游標規則見 `agend_core::protocol::client` |
-| 慢 client | 落後超過 1024 筆 → `event_gap` 後關連線；寫入 5 秒沒進度 → 關連線；都記一行 log（`client #N (…): …`） |
-| instance 狀態 | `starting`（啟動中、等重起）、`unknown`（在跑；忙碌／閒置要 driver）、`failed` |
-| 需要你 | `failed` 的 instance → `instance-failed:<id>`（等待時間＝這個 daemon 第一次看到它 `failed`）；`retry`：先 `Shutdown` 留著的 holder，session 建立過就 `running` + `--resume`（claude），沒建立過就 `new`（claude `--session-id`、codex／opencode 全新啟動）；codex／opencode 建立過 session 的沒有操作 |
-| 終端 | 在跑的 instance：先回 holder 當下畫面、再轉送之後的 `terminal_bytes`（經 daemon 的長連線，client 不直接連 holder）；`failed` 且 holder 還在：短連一次、只回最後畫面；其他 → `no_terminal`。同一條連線再訂一次：先清掉舊的串流，失敗就沒有串流（第 11 施工關 B 段 P1） |
-| 打字 | `terminal_input`（第 11 施工關 B 段 P6）依序：agent → `forbidden: only the operator can type into an agent's terminal`；沒有活的終端（不存在、`failed`、沒有長連線）→ `no_terminal`；codex → `not_supported`（等 U17 驗證）；其他經長連線轉成 holder 的 `OperatorTerminalInput`，不回應。錯誤都不帶 `request_id`。holder 拒絕（`pty_busy`、`agent_exited`）只記 log：`<id>: operator input dropped: <code>`；寫給 holder 的請求：每條 link 一把寫入鎖包住一整行（不拿 links 表的鎖）、5 秒沒進展就放棄並關掉那條連線（`link::WRITE_WITHIN`，link 會重連）；轉成 holder 請求行超過 1 MiB（`protocol::holder::MAX_REQUEST_LINE`）的輸入先回 `invalid_request` |
+socket、身分、事件與舊版終端規則見 [protocol server](PROTOCOL.md)；1.4 新終端路徑見 [完整終端入口](TERMINAL.md)。
 
 ## CLI 的 daemon 端（第 9 施工關）
 
-| 項目 | 內容 |
-|---|---|
-| 協定 | client protocol 1.2：`operator` 請求（`instance_add`、`instance_remove`、`daemon_restart`、`task_cancel`）與結果 `instance_added`、`restarting`；`send` 加 `level`、`message_id`；`status` 加 `identity`；`hello` 回 `daemon_version`、`daemon_pid`、`boot_id`（＝事件 id 起點，每次開機都變）；全貌的 instance 加 `working_directory` |
-| 權限 | `command`：操作者送 → `forbidden: agend done is an agent command; it runs inside an agent, where AGEND_INSTANCE is set`；`operator`：agent 送 → `forbidden: only the operator can add instances; ask the operator`（依請求換字） |
-| `status` | 呼叫者自己的 instance：`g9-1 (claude): no task` ＋ `next: …`；DB 沒有這個 instance → `unknown_instance` |
-| `send` | 收件者要存在（否則 `unknown_instance`）；`message_id` 要 UUID v4（否則 `invalid_request`），沒帶就由 daemon 產生；交給 `CodexDriver::deliver`（`messages` 表：同 id 同內容 → 照樣 `accepted`、不再送；同 id 不同內容 → `invalid_request: message id … is already used by another message`）；claude／opencode 收件者停在 `queued`；寫入 DB（codex 再加上交給長連線）之後才回 `accepted` |
-| 大小上限 | `send` 的 body 最多 1 MiB（`MAX_MESSAGE_BYTES`，超過 `invalid_request`，什麼都不存）；協定一行最多 8 MiB（`MAX_LINE_BYTES`，超過回 `invalid_request` 並關連線，不整行讀進記憶體）（第 9 施工關 L17） |
-| `inbox` | 寄給呼叫者的，依 `seq`：不帶 `--after` 最近 20 則；帶的話回那一則之後的全部；那一則不存在、過期或不是寄給呼叫者 → `unknown_message` |
-| Pipeline agent 命令 | `done`／`result`／`review` 必須帶目前 stage/attempt，由 task holder 或指定 reviewer 回報；`ask` 對話永久保存，`block`／`unblock`／`remind`／`task_create` 由 pipeline queue 處理 |
-| `instance_add` | supervisor 做：名字 `[a-z0-9-]{1,24}`、backend、DB 沒有同名、holder 鎖沒被持有（否則 `instance_exists`）；`--dir` 預設 `$AGEND_HOME/workspace/<name>`（0700，daemon 建），給的目錄要存在；program 預設 backend 名；claude 產生 session id；寫 `new` → 先投影 fleet `Starting` → 回覆 → 馬上啟動；成功回覆後立即 get_fleet 就可見 |
-| `instance_remove` | 不再監看、關長連線、`Shutdown` holder（最多 5 秒；停不了照樣刪，下次開機巡查收掉）、codex 照清掃規則、刪列、從全貌拿掉（`instance_changed` 不帶 instance；它的「需要你」項目以 `attention_resolved`（`unknown`）離開）；workspace 不刪 |
-| `daemon_restart` | 一次一個（另一個進行中 → `invalid_request: a restart is already in progress`）；`mkdtemp` `/tmp/agend-pf-XXXXXX`、`VACUUM INTO` 當下的 DB 複本、跑 `<binary> daemon preflight <dir>`（60 秒）：要 exit 0 而且印出 `agend …`、`db copy: …`、`holder: hello ok, spawn ok, shutdown ok`；失敗 → `preflight_failed: <binary> daemon preflight exited with status 1[: 最後一行 stderr]; the daemon keeps running agend 0.0.0`；暫存 home 一律刪掉（daemon 在預檢中停止也一樣：Drop guard kill 並收屍子程序、`Shutdown` 暫存 home 裡的 holder），60 秒逾時不等子程序的 pipe；預檢結束時 binary 必須還是同一個檔案（device、inode、大小、mtime），`agend.db` 不動。通過 → 回 `restarting { preflight }`、照 Ctrl-C 的順序收尾（不送 `Shutdown`）、`exec <binary> daemon`（pid、終端、環境不變） |
-| 繼承的 holder | 新 image 開機時（還沒起任何 holder 前）對每個鎖檔裡的 pid `waitpid(pid, WNOHANG)` 一次；是自己的子程序而且還活著的每秒再查，收到或 `ECHILD` 就不再查；log `reaped inherited holder pid <pid> (exit 0)`；不用 `waitpid(-1)` |
-| `task_cancel` | 可帶 reason；CAS 推進 Cancelled、保存 WIP 並釋放 binding；archive 直接串流至檔案並同步後發布，不受程序診斷輸出上限影響；保存失敗保留原 worktree／binding 並回報 Failed；merge in-flight 拒絕取消 |
+權限、status／send／inbox、instance 管理、restart 預檢與 stop 協定見 [protocol server](PROTOCOL.md#cli-的-daemon-端第-9-施工關)。
 
 ## store（第 5 施工關）
 
 | 項目 | 內容 |
 |---|---|
 | 檔案 | `$AGEND_HOME/agend.db`（建立時 0600；home、home 不存在的上層目錄、`backups/` 建立時 0700，已存在的目錄不改）；home 由呼叫端傳入 |
-| 建立 | 只有 `agend.db` 不存在時才建新 DB：先在 `.agend.db.new` 建好、所有 migration commit 後才 hard link（檔案系統不支援 hard link 時改 rename）成 `agend.db`；上次建到一半留下的 `.agend.db.new` 刪掉重建。`agend.db` 比 SQLite 檔頭（100 bytes）短、schema 版本 0、或缺它那個版本的表 → 拒絕開啟、檔案不動：`agend.db exists but is empty (0 bytes); refusing to start with an empty database — restore a snapshot from <home>/backups (see README)`，照下方步驟還原；指向不存在檔案的 symlink 或不是一般檔案 → `refusing to use <path>: …`。**刪掉 `agend.db` 等於從空 DB 重新開始**；空 DB 不做每日快照，但寫進第一個 task 後每天的快照照常輪替、一天擠掉一份舊的好快照：要還原請在那之前照下方步驟做 |
+| 建立 | 只有 `agend.db` 不存在時才建新 DB：先在 `.agend.db.new` 建好、所有 migration commit 後才 hard link（檔案系統不支援 hard link 時改 rename）成 `agend.db`；上次建到一半留下的 `.agend.db.new` 刪掉重建。`agend.db` 比 SQLite 檔頭（100 bytes）短、schema 版本 0、或缺它那個版本的表 → 拒絕開啟、檔案不動：`agend.db exists but is empty (0 bytes); refusing to start with an empty database — restore a snapshot from <home>/backups (see README)`，照下方步驟還原；指向不存在檔案的 symlink 或不是一般檔案 → `refusing to use <path>: …`。**刪掉 `agend.db` 等於從空 DB 重新開始**；空 DB 不做每日快照；instance 或 Codex thread 歸屬資料也算非空。但寫進第一個 task 後每天的快照照常輪替、一天擠掉一份舊的好快照：要還原請在那之前照下方步驟做 |
 | 執行緒 | 一條 `agend-db` 執行緒持有唯一連線；async 方法經 channel（256）送 closure；該執行緒 panic 後每個呼叫回 `store thread stopped` |
 | 同時開 | `locking_mode=EXCLUSIVE`，第二個程序：`agend.db is in use by another process (is another agend daemon running?)` |
-| 表 | `tasks`、`workflows`、`task_events`、`instances`、`messages`、`teams`、`bindings`、`asks`、`ask_turns`、`reminders`（STRICT）；schema 版本在 `PRAGMA user_version`（目前 5），migration 在 `src/store/migrations/`；`0003` 在 `instances` 加 `session_started`（0／1，第一次 `Spawn` 被確認、寫 `running` 的同一個 statement 設 1；既有的 `running` 與 `failed` 的 codex／opencode 設 1）；`0004`（第 7 施工關）加 `messages`（`seq INTEGER PRIMARY KEY AUTOINCREMENT`（清空後也不重用號碼）、`attempted_at_unix_ms`（送出前寫入）、`id` UNIQUE、`from_instance`、`to_instance`、`task_id`、`body`、`level`、`state`、`turn_id`、時間）與 `instances.agent_pid`、`instances.legacy_no_thread`（那一刻 `codex`、沒有 thread、`running`／`failed` 而且 `session_started = 1` 的列設 1 並標 `failed`） |
+| 表 | `tasks`、`workflows`、`task_events`、`instances`、`messages`、`teams`、`bindings`、`asks`、`ask_turns`、`reminders`、`codex_input_threads`（STRICT）；schema 版本在 `PRAGMA user_version`（目前 6），migration 在 `src/store/migrations/`；`0003` 在 `instances` 加 `session_started`（0／1，第一次 `Spawn` 被確認、寫 `running` 的同一個 statement 設 1；既有的 `running` 與 `failed` 的 codex／opencode 設 1）；`0004`（第 7 施工關）加 `messages`（`seq INTEGER PRIMARY KEY AUTOINCREMENT`（清空後也不重用號碼）、`attempted_at_unix_ms`（送出前寫入）、`id` UNIQUE、`from_instance`、`to_instance`、`task_id`、`body`、`level`、`state`、`turn_id`、時間）與 `instances.agent_pid`、`instances.legacy_no_thread`（那一刻 `codex`、沒有 thread、`running`／`failed` 而且 `session_started = 1` 的列設 1 並標 `failed`） |
 | 耐久 | WAL、`synchronous=FULL`、`foreign_keys=ON` |
-| 保留期限 | `store::retention::RETENTION`：task、workflow、instance、team、binding、請示／回答 receipt、reminder 永久（binding／reminder 按生命週期刪除）；事件與 checks log 14 天；WIP archive 與訊息 30 天（`created_at_unix_ms`）；`audit/shim.jsonl` 每日輪替留 14 天、daemon log 7 天、holder log 7 天（第 6 施工關 `housekeeping`） |
-| DB 快照 | `backups/agend-YYYY-MM-DD.db`（UTC；DB 沒有任何 task、事件與 instance 時不做），升級前 `agend-YYYY-MM-DD-pre-vN.db`；只留最新 7 份，其他檔案不動 |
+| 保留期限 | `store::retention::RETENTION`：task、workflow、instance、team、binding、請示／回答 receipt、reminder 與 Codex thread 輸入歸屬永久（binding／reminder 按生命週期刪除）；事件與 checks log 14 天；WIP archive 與訊息 30 天（`created_at_unix_ms`）；`audit/shim.jsonl` 每日輪替留 14 天、daemon log 7 天、holder log 7 天（第 6 施工關 `housekeeping`） |
+| DB 快照 | `backups/agend-YYYY-MM-DD.db`（UTC；DB 沒有任何 task、事件、instance 與 Codex thread 輸入歸屬時不做），升級前 `agend-YYYY-MM-DD-pre-vN.db`；只留最新 7 份，其他檔案不動 |
 | pipeline | `PipelineSnapshot` 存 task 的 `pipeline` 欄，workflow 固定建立時版本；snapshot、task、事件、attention_reason 清除與被接受結果的 dispatch confirmation 同一筆 CAS transaction，保留 failure acknowledgement，不重播事件；`0005` 加 team／role、binding、請示與提醒，詳見 [runtime](../../docs/architecture/pipeline-runtime.md) |
 
 ### 還原 DB 快照（手動）

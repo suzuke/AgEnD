@@ -166,6 +166,9 @@ impl Drop for RealDaemon {
 }
 
 impl ClientProtocolFixture for RealDaemon {
+    fn supported_versions(&self) -> Vec<agend_core::protocol::ProtocolVersion> {
+        vec![agend_core::protocol::client::V1_4]
+    }
     fn socket(&self) -> PathBuf {
         socket_of(&self.home)
     }
@@ -325,6 +328,7 @@ impl InProcess {
             codex: CodexDriver::new(&self.root, Arc::clone(&self.store), Arc::new(|_| {})),
             exe: PathBuf::from("/nonexistent/agend"),
             restarting: AtomicBool::new(false),
+            codex_input: Default::default(),
         });
         let listener = server::bind(&self.socket).expect("bind");
         self.server = Some(Server::start(listener, self.socket.clone(), context));
@@ -341,6 +345,9 @@ impl Drop for InProcess {
 }
 
 impl ClientProtocolFixture for InProcess {
+    fn supported_versions(&self) -> Vec<agend_core::protocol::ProtocolVersion> {
+        vec![agend_core::protocol::client::V1_4]
+    }
     fn socket(&self) -> PathBuf {
         self.socket.clone()
     }

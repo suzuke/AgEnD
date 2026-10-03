@@ -99,7 +99,7 @@ fn incompatible_major_gets_a_clear_error_and_close() {
     assert_eq!(data.code, VERSION_MISMATCH);
     assert_eq!(
         data.message,
-        "client protocol version mismatch: local supports 2.0, remote supports 1.3"
+        "client protocol version mismatch: local supports 2.0, remote supports 1.3, 1.4"
     );
     assert!(client.recv().unwrap().is_none());
 }

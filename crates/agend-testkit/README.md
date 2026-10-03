@@ -1,7 +1,7 @@
 # agend-testkit
 
 > **TL;DR**
-> - 共用測試基礎設施（只能當 dev-dependency）：7 個 trait 的假實作、契約測試（含 client protocol 的 CLP）、假 daemon（client protocol 1.3）、3 個假 agent 程式、真 backend 的錄製器。
+> - 共用測試基礎設施（只能當 dev-dependency）：7 個 trait 的假實作、契約測試（含 client protocol 的 CLP）、假 daemon（預設 1.3，注入 producer 後 1.4）、3 個假 agent 程式、真 backend 的錄製器。
 > - 記住：**假實作要跑和真實作同一套契約測試，假 agent 要和真 CLI 的錄製檔形狀一致**，才不會漂移（v1 #1483）。
 > - 下一步：`~/.cargo/bin/cargo xtask accept testkit`；契約規則看 [CONTRACTS.md](CONTRACTS.md)，錄製與一致性檢查看 [RECORDER.md](RECORDER.md)。
 
@@ -14,14 +14,20 @@
 
 Gate 10 的 `FakePipelineExecutor` 實作 core executor port，組合 FakeStore／FakeForge／FakeRunner 並記錄 bindings、投影與副作用；`clean_worktree` 透過 FakeRunner 的 index／status 回覆判斷，供 daemon 完整 queue 測試使用。FakeDriver／FakeClock clone 共享同一個測試狀態。
 
+## 第 11 施工關 C 段（實作中）
+
+真 daemon 與安裝 producer 的 FakeDaemon 提供 client 1.4；六項 C 契約同跑 fake／真程序，producer 是 holder parser。控制 worker、generation／停止、fd 清理與完整 fake U17 都有回歸。真 Codex 證據另記於首次 U17，不以 fake 代替。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
+
+fake Codex 的 `-c agend_fake_manual_tui=true` 明確啟用 raw PTY frontend：bracketed paste／Enter 經 remote app-server 送人工 turn，不帶 daemon clientId；預設 frontend 保持原行為。paste 結束會經真 PTY 輸出 draft 標記，完整 App 用畫面確認 draft 已收到再重啟 daemon。這是 U17 fixture，不代表真 Codex CLI 已驗證。fake-only `agendFake/replayUserOnNextResume` 預設關閉；明確指定 thread 後，只重播已存入 thread history 的原人工 user item，供 resume 回覆前的永久歸屬回歸使用，`agendFake/resumeReplayCount` 可核實際次數。[完整 fake 證據](../../docs/gates/gate-11c-u17-validation.md)。
+
 ## 負責
 
 | 項目 | 模組 | 內容 |
 |---|---|---|
 | 假實作 | `fakes` | `FakeDriver`、`FakeForge`、`FakeStore`、`FakeRuntime`、`FakeNotifier`、`FakeClock`、`FakeRunner` |
 | 契約測試 | `contract` | 每個 trait 一個 suite：`contract::<trait>::run(實作名, 建 fixture 的函式)` 回傳 `Report`；規則編號見 [CONTRACTS.md](CONTRACTS.md) |
-| 假 daemon | `fake_daemon` | 行程內的 client protocol 1.3 server（unix socket + JSON Lines）與 `ProbeClient` |
-| client protocol 契約 | `contract::client` | CLP-1..12：同一套 case 對假 daemon 與真 `agend daemon`；`proxy` 是 mutant 用的改行 proxy（第 8 施工關 P9） |
+| 假 daemon | `fake_daemon` | 行程內的 client protocol server（unix socket + JSON Lines）與 `ProbeClient` |
+| client protocol 契約 | `contract::{client, terminal}` | CLP-1..28：同一套 case 對假 daemon 與真 `agend daemon`；`proxy` 是 mutant 用的改行 proxy（第 8 施工關 P9） |
 | 假 agent | `fake_agent` + `src/bin/` | `fake-codex-app-server`、`fake-opencode-serve`、`fake-claude`；`fake-codex`（`codex` CLI 的替身，給第 7 施工關的 `sh` 包裝用：`app-server` 與假 TUI `resume`） |
 | 執行 future | `executor` | `block_on`：不用 async runtime 就能跑 trait 的 future |
 | 暫存目錄 | `tempdir` | `TempDir`：唯一目錄，drop 時刪除 |
@@ -71,7 +77,7 @@ Gate 10 的 `FakePipelineExecutor` 實作 core executor port，組合 FakeStore�
 | Notifier | `NTF-1`–`4` | 欄位原樣、3,000 字多位元組 body 不截斷、不修剪空白、順序不變 |
 | Clock | `CLK-1`–`4` | unix 毫秒、UTC（對照 `utc_now_unix_ms()`）、不倒退、不凍結 |
 | Runner | `RUN-1`–`9` | 輸出逐位元組、256 KiB 不卡；逾時 2 秒內回報，`sh` 與它啟動的子程序都停掉（標記檔判斷）；在指定目錄跑 |
-| ClientProtocol | `CLP-1`–`17` | 不是 trait，是 server（第 9 施工關加權限兩個方向、`instance_add`／`remove`、`daemon_restart` 的形狀、`task_cancel` 不改狀態、`send` 同 id 只收一次與 `inbox --after`）：`hello` 在前、版本協商、全貌之後的事件連號、舊／未來游標 `event_gap`、不帶游標重播、未知請求不斷線、兩個 client 同序、慢 client 被關、重啟後 id 變大、拒絕的請求不改狀態、只有操作者能 `resolve_attention`、終端先畫面；fixture 是 `ClientProtocolFixture`（`FakeDaemonFixture`；真 daemon 的在 `agend-daemon/tests/common/client_process.rs`） |
+| ClientProtocol | `CLP-1`–`28` | 不是 trait，是 server（第 9 施工關加權限兩個方向、`instance_add`／`remove`、`daemon_restart` 的形狀、`task_cancel` 不改狀態、`send` 同 id 只收一次與 `inbox --after`）：`hello` 在前、版本協商、全貌之後的事件連號、舊／未來游標 `event_gap`、不帶游標重播、未知請求不斷線、兩個 client 同序、慢 client 被關、重啟後 id 變大、拒絕的請求不改狀態、只有操作者能 `resolve_attention`、終端先畫面；fixture 是 `ClientProtocolFixture`（`FakeDaemonFixture`；真 daemon 的在 `agend-daemon/tests/common/client_process.rs`） |
 
 每條規則至少有一個故意弄壞的實作（mutant），列在 CONTRACTS.md 那一列；`tests/contract_teeth/` 跑全部 mutant，並檢查規則表、case、mutant 三者互相對得上（見 [TESTING.md](TESTING.md)）。接真實作時 fixture 多實作的方法：`ForgeFixture::base_head`、`ForgeFixture::base_contains`（例如 `git merge-base --is-ancestor`）、`RuntimeFixture::is_running`（只拿持久狀態）、`ClockFixture::utc_now_unix_ms`；`DriverFixture::turn_timeout` 可選（預設 10 秒）。
 
@@ -81,43 +87,11 @@ daemon 重啟：`RuntimeFixture`、`DriverFixture`、`StoreFixture` 各有一個
 
 ## git fixture
 
-`GitFixture::new(label)` 在 `<tmp>/agend-test-git-<label>-*` 建出（`label` 含 `:` 或 `;`、或暫存目錄含 `:`（Windows 是 `;`）時回 `InvalidInput`，什麼都不建：git 拿這個字元切 `GIT_CEILING_DIRECTORIES`，路徑含了就等於沒有 ceiling）：
-
-| 路徑 | 內容 |
-|---|---|
-| `canonical()` | repo，`main` 上有一個初始 commit，`origin` 指向下面的 bare repo，`main` 已 push |
-| `origin()` | bare 的 team origin（`origin.git`） |
-| `add_worktree(name, branch, from)` | `worktrees/<name>`：canonical 的 linked worktree，在新 branch 上；`name` 是 `.git`（不分大小寫）就 panic，不建任何東西 |
-
-其他：`branch(name, from)`、`commit(dir, file, message)`（回新的 head）、`rev_parse`、`is_ancestor`、`git(dir, args)`（失敗就 panic 並印 stderr）、`command(program, dir)`（給要自己跑程式的測試，例如第 3 施工關的 shim）。drop 時整個目錄刪掉。
-
-威脅模型：fixture 防的是**善意但會出錯**的測試程式碼：路徑寫錯或是空的、`cd` 失敗、繼承到外面的環境變數。它**不是沙箱**，不防故意改 git 內部檔案來逃出去的測試程式碼（例如透過 `command` 自己寫 `.git/commondir` 或 `core.worktree`）；這不在範圍內。理由跟第 3 施工關的 shim 一樣：要擋的是會發生的失誤，不是對抗性的程式碼；每補一個洞就冒出下一個，擋不完，只會讓 fixture 越來越複雜。只支援 unix（專案的平台）；Windows 的檔名規則（結尾的 `.`、8.3 短檔名）不處理。
-
-衛生規則（每個 command 都套用）：
-
-- **只在自己建的 repo 裡跑**：`dir` 必須是絕對路徑，解析後落在 `canonical()`、`origin()` 或 `add_worktree` 建的 worktree（含子目錄）裡，否則 panic；解析後任何一段是 `.git`（不分大小寫，例如 `canonical/.git`、`canonical/.git/worktrees/<w>`）也 panic，在那裡跑 git 或寫檔等於改 repo 自己的 metadata。`root()`、`root/worktrees` 與 `root()` 下其他目錄都拒絕：它們不是 repo，git 從那裡找 repo 會往上走，所以 discovery 一律從 fixture 的 repo 開始。`GIT_CEILING_DIRECTORIES=<root>` 是第二道防線（repo 的 `.git` 被刪掉時擋住往上找）。
-- `git(dir, args)` 的第一個參數必須是子指令；`-C`、`--git-dir`、`--work-tree`、`--namespace`、`-c` 等全域選項一律 panic（repo 用 `dir` 指定）。
-- `commit` 的 `dir` 只能是 canonical 或 linked worktree（不收 bare origin）；檔名只能是單純的相對路徑，任何一段是 `.git`（不分大小寫）或 symlink 就 panic，檔案已存在且 hard link 數大於 1 也 panic（unix），寫檔前確認上層目錄解析後仍在 work tree 裡；所有檢查都在寫檔之前，被拒絕的呼叫不留下任何檔案。
-- **不檢查的**：子指令後面的路徑參數（例如 `worktree add <path>`），以及 `command(program, dir)` 除了 `dir` 以外的參數；測試要自己只傳 fixture 裡的路徑。
-- 一律 `Command::current_dir(<絕對路徑>)`，不用 process 的 cwd；`root()` 已解析 symlink（macOS 的 `/var` → `/private/var`）。
-- `GIT_CONFIG_GLOBAL=/dev/null`、`GIT_CONFIG_NOSYSTEM=1`、`GIT_CEILING_DIRECTORIES=<root>`；固定 author／committer 與日期，所以同樣的內容、parent、訊息得到同樣的 commit id（不同 commit 請用不同訊息）。
-- 移除繼承來的 `GIT_*`、`AGEND_*`（含 `GIT_DIR`、`GIT_WORK_TREE`、`AGEND_HOME`）。這是 `command()` 當下的快照；之後才在父程序設定的變數，只有固定清單（`GIT_DIR`、`GIT_WORK_TREE`、`GIT_INDEX_FILE`、`GIT_COMMON_DIR`、`GIT_OBJECT_DIRECTORY`、`GIT_ALTERNATE_OBJECT_DIRECTORIES`、`GIT_NAMESPACE`、`GIT_CONFIG`、`GIT_CONFIG_PARAMETERS`、`GIT_CONFIG_COUNT`、`GIT_CONFIG_SYSTEM`、`GIT_DISCOVERY_ACROSS_FILESYSTEM`、`AGEND_HOME`）會被移除，其他的仍會傳給 git。
+`GitFixture` 的目錄布局、指令與環境衛生規則見 [GIT-FIXTURE.md](GIT-FIXTURE.md)。原 `README.md#git-fixture` 入口保留。
 
 ## 假 daemon
 
-- `FakeDaemon::start()`：`<tmp>/agend-test-fd-*/daemon.sock`；`FakeDaemon::start_at(path)`：指定路徑（在同一個路徑「重啟」）。drop 時停止接受連線、關閉所有已開的連線（client 讀到 EOF）、刪除 socket。
-- 第一行必須是 `hello`；其他請求或無效 JSON 都回 `hello_required` 並關閉；hello 之後的無效 JSON 回 `invalid_request`，連線不關；major 不合回 `version_mismatch` 並關閉；`hello` 帶 `caller` 就是 agent 的連線。錯誤碼一律用 core 的 `client::error_code`。
-- 全貌：`get_fleet` 回 `set_instance`、`set_task`、`add_attention`、請示組成的全貌（team 至少有 `general`），`as_of_event_id` 是最新的事件 id；`fleet()` 給測試看同一份。
-- 事件：id 從「啟動時間 unix ms × 1000」+ 1 開始（`event_id_start()`），留最近 1024 筆；游標規則與真 daemon 相同（不帶游標重播全部、「最舊 − 1」到最新接得上、其他 `event_gap`）；落後超過 1024 筆 → `event_gap` 後關連線；寫入 5 秒沒進度 → 關連線。一個請求造成的事件在它的回應之後才送出（跟真 daemon 一樣）。
-- `resolve_attention`：agent → `forbidden`（先於 id）；沒有這個 id 或操作不在 `actions` → `unknown_attention`；成功 → 項目消失、`attention_resolved`、`accepted`。`hold_resolved_events(true)` 時事件等 `release_resolved_events()` 才發（第 11 施工關 B 段 P4：測「收到事件才消失」）。
-- 終端（第 11 施工關 B 段 P1）：`subscribe_terminal` 只對全貌裡的 instance 回畫面（`set_screen`；沒設是 `fake screen of <id>`），之後每次 `push_terminal_bytes(id, bytes)` 送 `terminal_bytes` 並把文字接到畫面後面（下次訂閱看得到）；不存在的 id → `no_terminal`（改掉第 8 施工關 C2）。同一條連線再訂一次取代舊的，失敗也一樣。落後 256 塊就關連線；`drop_terminal_subscribers()` 直接這樣關（測只重連終端）。
-- 打字（P6）：`terminal_input` 依序 agent → `forbidden`、不存在或 `failed` 的 instance → `no_terminal`、codex → `not_supported`、轉成 holder 請求行超過 1 MiB（含換行）→ `invalid_request`；base64 解不開 → 不回應、不記（跟 daemon 一樣，它不解 base64）、codex → `not_supported`，都不帶 request id；其他記下（`terminal_inputs()`），不回應。訊息常數 `TYPE_OPERATOR_ONLY`、`CODEX_INPUT` 跟真 daemon 一字不差。
-- `open_connections()`：正在服務的連線數（TUI 測試查沒有留下連線）。
-- 事件身分：`assign(task, ResultIdentity)` 設定目前要的結果；`done`／`result`／`review_*` 沒帶或不符 → `stale_result`、什麼都不變；接受後這個 attempt 就用掉了。
-- 第 9 施工關：`hello` 回 `daemon_version`（`agend <版本> (fake daemon)`）、`daemon_pid`（測試程序）、`boot_id`（事件 id 起點）。`command` 只收 agent、`operator` 只收操作者（`forbidden` 的訊息跟真 daemon 一字不差）。`status`：`set_status` 設了就用它，否則照真 daemon 的格式（`g9-a (claude): no task` ＋ `next: …`；呼叫者不在 instance 裡 → `unknown_instance`），有 `assign` 時帶 task 與 `identity`。`send`／`inbox` 跟真 daemon 同規則（`message_id` 要 UUID v4、同 id 同內容再送照樣 `accepted` 只存一則、不同內容 `invalid_request`；收件者不存在 `unknown_instance`；`inbox` 最近 20 則或 `--after` 之後全部，沒有那一則 → `unknown_message`；`message_ids_to(name)` 給測試看）。`instance_add`／`instance_remove` 改全貌（`instance_exists`、`unknown_instance`、名字規則；`working_directory` 預設 `<home>/workspace/<name>`，home 是 `…/run/daemon.sock` 往上兩層）。`daemon_restart`：跑 `<binary> --version`，要印 `agend …` 才算過（否則 `preflight_failed`，訊息格式同真 daemon）；過了回 `restarting`、關掉所有連線、換新的 `boot_id`（事件清空）。`task_cancel` 對不存在的 task 回 `invalid_request`。
-- 其他：`task_create`、`ask`、`answer_ask`、`block`／`unblock`／`remind`（真 daemon 已由 pipeline queue 處理，假 daemon 保留 client 契約所需的簡化狀態）。
-- `open_ask(thread, recap)`：像綁定 task 的 agent 跑 `agend ask` 那樣建立請示（帶 task 與脈絡摘要），可以 `answer_ask`，也列在全貌的「需要你」裡（`attention_id` = ask id）；`ask` 命令建立的請示沒有 task（TUI 的 demo 與測試用）。
-- `ProbeClient::hello(path, caller)`、`recv_within(timeout)`：契約的驅動端（逾時不丟掉讀到一半的行）。
+預設 1.3；安裝 `TerminalProducer` 後提供 1.4 的真 parser frame 與控制路徑。完整協商、事件、命令與訂閱行為見 [FAKE-DAEMON.md](FAKE-DAEMON.md)。
 
 ## 假 agent 程式
 

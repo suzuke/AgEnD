@@ -10,6 +10,20 @@
 
 `cargo build -p agend -p agend-testkit --bins` 後跑 `cargo test -p agend --test pipeline`：happy、checks 返工、review 返工、WIP、main 前進、兩個 failpoint 的四次開機、沙箱、hook／cancel、問答／提醒、排隊與 no-role、sandbox retry、merge-blocked；完整 demo 用 `cargo xtask accept pipeline`。`pipeline_context` 以暫停 reviewer 驗 headless review 的等待／重啟／回報，避免自動 reviewer 搶先完成；`pipeline_archive*` 的九個 target 共 31 個回歸，涵蓋大 binary、merge-only 解法、staged-only bytes、隱藏 index 旗標與 stat cache、顯示設定、ignored 檔案，以及保存失敗不刪原 WIP／index。行尾／內容轉換、未解衝突與 nested Git metadata（含不完整狀態）須保留原資料；一般子目錄、空檔與 symlink 用真 git apply 還原。各組內容見 [daemon TESTING](../agend-daemon/TESTING.md)。 content-filter producer 先建立有效 stat cache，再用真 git add --renormalize 強制套用 attributes；不依賴檔案 timestamp 的競態碰巧觸發 clean filter。
 
+## 第 11 施工關 C 段（實作中）
+
+`cargo test -p agend --test terminal_runtime` 使用真 binary／holder／PTY 驗 runtime frame／control 配對、實際 resize、舊 owner 拒絕、取消 native blocked input 後憑證失效與 holder 重連、不重送、取消已到但未接收的 grant、唯讀查詢取消不打斷控制、整份超限拒絕及新 holder generation。這些尚不代表 daemon client 1.4／TUI／Codex U17 已完成。
+
+terminal_capability 與 terminal_hub 驗能力／權限、控制／尺寸／歷史、EOF 與資源清理；六項 C 契約同跑 fake／native，完整 App 與 U17 已通過。版本許可與 resume 歸屬的 12 個 native cases 只用 fake backend，真模型不在 CI 執行。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
+
+`tui_native_app` 的兩個情境經完整 App／真 daemon／holder 到 raw PTY 程序，逐 byte 核鍵鼠／paste 與超限拒絕，agent 內 stty size 核 resize，多視窗交接、>1,000 列歷史／clamp、alt 與 daemon 重啟不自動控制。20 次開關每次 thread／fd 回基準；[證據與重跑](../../docs/gates/gate-11c-native-app-validation.md)。
+
+`tui_outer_pty` 在真外層 PTY 執行真正 `agend app`，經 crossterm capture 驗鍵鼠／paste、kernel resize、多視窗與歷史；正常／panic unwind 後核原 termios、alt／mouse／paste／focus／cursor／SGR 還原。20 次 App 程序退出回同一 fd 基準，holder pid 保留；共用 `tests/common/native_app.rs` 的 raw agent，不使用真 LLM。另有 12 次 burst 的端到端可見 deadline，每次 ≤300 ms、不加 holder round-trip 額度；800 ms 取樣 mutant 被同一斷言拒絕。[外層證據](../../docs/gates/gate-11c-outer-validation.md)。
+
+`codex_u17` 的兩個 foundation cases 用明確 opt-in raw fake frontend，驗同 thread 人工 turn、busy／queue／獨立 receipt、相同人工文字不能確認未嘗試送出的 row；component restart 保留 holder／thread，舊 attach 拒絕。本批另加入完整 daemon 子程序／client／App 的重啟、草稿、scope／caller 與 durable turn id，以及 attempted crash-window 人工同文拒絕。12 個 tests 含一個 re-exec 入口，沒有真 Codex LLM；[範圍與反例](../../docs/gates/gate-11c-u17-validation.md)。
+
+新增 `resume_notification_requires_persistent_attribution_before_the_rpc_reply`：真 holder／wrapper／raw fake frontend 先產生並保存 clientId=null 的人工同文 turn，再以預設關閉的 fake-only `agendFake/replayUserOnNextResume` 在下一次 resume response 前重播原 item/completed。測試核 producer item／turn 身分、實際 replay count=1 與一次性關閉；重接到拒絕版本仍不得取人工 receipt。沒有合成人工 item／frame，不呼叫真模型。
+
 ## 怎麼跑
 
 ```bash
@@ -48,7 +62,7 @@ cargo test -p agend
 | `tests/client_protocol.rs`（第 9 施工關部分） | CLP-13..17 對真 daemon（見 testkit CONTRACTS）；`debug` 沒設 `AGEND_HOME` 改成跟其他命令同一句、exit 2；終端那段裡操作者送 agent 命令 `status` 現在是 `forbidden` |
 | `tests/client_protocol.rs`（第 11 施工關 B 段部分） | CLP-18..20 對真 daemon：再訂一次終端拿到有新輸出的畫面、不存在的 instance `no_terminal` 且舊串流停止、`terminal_input` 先查身分、`no_terminal`、操作者的位元組到 PTY（畫面回顯）；CLP-10 改成對沒有終端的 instance 送 `terminal_input` → `no_terminal` |
 | `tests/terminal_line_limits.rs` | 第 11 施工關 B 段 × 第 9 施工關 L17：終端路徑上最長的行（holder 1000×1000 全是 4 bytes 字元的畫面 4 MB、預設 50×200 約 40 KB、8 KiB 的 PTY 塊、最長的按鍵 `terminal_input`）都小於 `MAX_LINE_BYTES`；client 送的只有很短的行，大的行是 daemon → client，不受 8 MiB 限制 |
-| `tests/tui_daemon.rs` | 第 11 施工關 B 段：`App` 經 `ClientSource` 接真 `agend daemon`（home `/tmp/g11.t-<pid>-<n>`，一個計數的 agent、一個一起來就死的）：首頁 `沒有進行中的目標`、約 15 秒後不按鍵自己出現 `需要你 · 1`（帶 `新`）；展開有「不處理的話」與 `[1] 重試`，看過不消失、`1` → `已送出：重試 …`、`需要你 · 0`、daemon log `retry requested by the operator`；終端 `即時`、不按鍵計數器增加、`L` 換英文；`i` 輸入、`hello` 回顯、`Ctrl-]` 回到即時；`AGEND_INSTANCE` 的 app 打字與 `retry` 都 `forbidden`；daemon 重啟時斷線畫面、重連回到終端、計數器接著跑、首頁項目由全貌帶回；`agend app` 沒設 home 與非終端都 exit 2。codex instance（`fake_codex`）的 `terminal_input` → `not_supported`（等 U17）。各段與 `examples/tui_real.rs` 共用（`tests/common/tui_process.rs`） |
+| `tests/tui_daemon.rs` | 第 11 施工關 B 段：`App` 經 `ClientSource` 接真 `agend daemon`（home `/tmp/g11.t-<pid>-<n>`，一個計數的 agent、一個一起來就死的）：首頁 `沒有進行中的目標`、約 15 秒後不按鍵自己出現 `需要你 · 1`（帶 `新`）；展開有「不處理的話」與 `[1] 重試`，看過不消失、`1` → `已送出：重試 …`、`需要你 · 0`、daemon log `retry requested by the operator`；終端 `即時`、不按鍵計數器增加、`L` 換英文；`i` 輸入、`hello` 回顯、`Ctrl-]` 回到即時；`AGEND_INSTANCE` 的 app 打字與 `retry` 都 `forbidden`；daemon 重啟時斷線畫面、重連回到終端、計數器接著跑、首頁項目由全貌帶回；`agend app` 沒設 home 與非終端都 exit 2。codex instance（`fake_codex`）的 `terminal_input` → `not_supported`（fake 預設 0.158.0 未獲開放）。各段與 `examples/tui_real.rs` 共用（`tests/common/tui_process.rs`） |
 | `tests/holder_process.rs` | `agend holder`：啟動器結束後 holder 還在、四次獨立開機看到同一個 holder、重複啟動 exit 1、agent 的 TERM／HUP／INT／QUIT 無效、安全網、路徑太長拒絕（細節見 [agend-holder TESTING](../agend-holder/TESTING.md)） |
 
 ## CLI-n 表（第 9 施工關 P10）
@@ -103,6 +117,10 @@ cargo test -p agend
 - [ ] doctor 的 `disk` fail／home 超過 20 GB、`home` 不能寫：規則是 `agend_core::setup` 的常數，沒有做出小磁碟或 20 GB 的 home（D24 的「每個 doctor 檢查都有故意弄壞的測試」在第 13 施工關補齊）
 
 `pipeline_attention_events` 經真 daemon／SQLite／Git 與 Rust CLI watch 驗 timeout 不重建核准項目、Approve／RequestChanges 真 action 各一次、新返工 attempt 才重新要求核准、stage 順序及 single merge。SQLite trigger 拒絕舊的 secondary note 寫入時，Approve／RequestChanges 仍各一次發布真 action、持久化決定並完成 single merge；不靠再重啟恢復。
+
+C 段 CLP 拒絕案例同跑真 parser-backed fake 與真 daemon：agent caller 的 Acquire／Resize／Input／Release 全部 forbidden；之後核尺寸不變、原 owner 輸入仍可實收、拒絕 bytes 沒有進 consumer。
+
+U17 live 工具以 itemsView: full 分頁取完整 items。0.159.3 首次四回合已由獨立 verifier 核實，第四回合只核 receipt；使用者同意只開放 0.159.3。這次開放不增授權模型或 merge。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
 
 ## 下一步
 

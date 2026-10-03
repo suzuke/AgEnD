@@ -408,16 +408,19 @@ where
             self.fleet.upsert_attention(new);
         }
         // Failed agents now report the tasks that wait for them.
-        for mut failed in self.fleet.view().attention.into_iter().filter(|a| {
+        for failed in self.fleet.view().attention.into_iter().filter(|a| {
             a.attention_id
                 .as_ref()
                 .is_some_and(|id| id.starts_with("instance-failed:"))
         }) {
             if let Some(instance) = failed.instance_id.as_deref() {
-                failed.unblocks = Some(u32::from(
+                let mut enriched = failed.clone();
+                enriched.unblocks = Some(u32::from(
                     self.store.held_task(instance).await.map_err(db)?.is_some(),
                 ));
-                self.fleet.upsert_attention(failed);
+                // Retry or a fresh failure may have changed this item while
+                // the store lookup was pending. Never recreate that snapshot.
+                self.fleet.replace_attention_if(&failed, enriched);
             }
         }
         Ok(())
@@ -446,3 +449,6 @@ fn item(
         instance_id: task.and_then(|t| t.assignee.clone()),
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -18,6 +18,9 @@ libc = "0.2"
 parking_lot = "0.12"
 portable-pty = "0.9"
 serde_json = "1"
+# Already used by the parser; detect glyphs that cannot fit a one-column PTY.
+unicode-width = "0.2"
 
 [dev-dependencies]
+serde = { version = "1", features = ["derive"] }
 agend-testkit.workspace = true

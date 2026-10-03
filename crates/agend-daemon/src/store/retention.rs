@@ -59,6 +59,14 @@ pub struct Rule {
 /// The retention table.
 pub const RETENTION: &[Rule] = &[
     Rule {
+        target: Target::Table {
+            name: "codex_input_threads",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "gate 11 C: resumed threads must never lose strict receipt attribution",
+    },
+    Rule {
         target: Target::IdleFiles {
             pattern: CHECK_LOGS,
         },

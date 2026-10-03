@@ -42,6 +42,7 @@ use tokio::sync::{broadcast, oneshot};
 
 use super::client::Conn;
 use super::files;
+use super::terminal::{Channel, TerminalConnection};
 use crate::log;
 
 /// How long the first connection is retried (gate 6 P3).
@@ -137,6 +138,8 @@ pub struct Link {
     /// Held for the whole write of one request line.
     write: Arc<Mutex<()>>,
     terminal: Arc<Mutex<Terminal>>,
+    structured: Channel,
+    operations: Option<JoinHandle<()>>,
     wake: Option<Sender<()>>,
     thread: Option<JoinHandle<()>>,
 }
@@ -168,13 +171,29 @@ impl Link {
         (rx, self.writer())
     }
 
+    pub fn terminal_connection(
+        &self,
+    ) -> Result<TerminalConnection, agend_core::protocol::terminal::TerminalOperationError> {
+        self.structured.connection()
+    }
+
     /// A link on `stream` with no reader thread (tests of the callers).
     #[cfg(test)]
     pub(crate) fn on_stream(stream: UnixStream) -> Link {
+        let stopping = Arc::new(AtomicBool::new(false));
+        let stream = Arc::new(Mutex::new(Some(stream)));
+        let write = Arc::new(Mutex::new(()));
+        let (structured, operations) = Channel::start(
+            Arc::clone(&stream),
+            Arc::clone(&write),
+            Arc::clone(&stopping),
+        );
         Link {
-            stopping: Arc::new(AtomicBool::new(false)),
-            stream: Arc::new(Mutex::new(Some(stream))),
-            write: Arc::new(Mutex::new(())),
+            stopping,
+            stream,
+            write,
+            structured,
+            operations: Some(operations),
             terminal: Arc::new(Mutex::new(Terminal {
                 pending: Vec::new(),
                 live: broadcast::channel(TERMINAL_CHUNKS).0,
@@ -198,7 +217,11 @@ impl Link {
         if let Some(stream) = self.stream.lock().unwrap_or_else(|e| e.into_inner()).take() {
             let _ = stream.shutdown(std::net::Shutdown::Both);
         }
+        self.structured.disconnected("the holder link closed");
         self.wake.take();
+        if let Some(thread) = self.operations.take() {
+            let _ = thread.join();
+        }
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
@@ -255,6 +278,7 @@ struct Worker {
     stopping: Arc<AtomicBool>,
     stream: Arc<Mutex<Option<UnixStream>>>,
     terminal: Arc<Mutex<Terminal>>,
+    structured: Channel,
     wake: Receiver<()>,
 }
 
@@ -274,6 +298,12 @@ pub fn open(
 ) -> Result<(Link, Attached), String> {
     let stopping = Arc::new(AtomicBool::new(false));
     let stream = Arc::new(Mutex::new(None));
+    let write = Arc::new(Mutex::new(()));
+    let (structured, operations) = Channel::start(
+        Arc::clone(&stream),
+        Arc::clone(&write),
+        Arc::clone(&stopping),
+    );
     let terminal = Arc::new(Mutex::new(Terminal {
         pending: Vec::new(),
         live: broadcast::channel(TERMINAL_CHUNKS).0,
@@ -288,17 +318,27 @@ pub fn open(
         stopping: Arc::clone(&stopping),
         stream: Arc::clone(&stream),
         terminal: Arc::clone(&terminal),
+        structured: structured.clone(),
         wake,
     };
     let thread = std::thread::Builder::new()
         .name(format!("holder-link-{id}"))
-        .spawn(move || worker.run(spawn, first_tx))
-        .map_err(|e| format!("cannot start the link thread: {e}"))?;
+        .spawn(move || worker.run(spawn, first_tx));
+    let thread = match thread {
+        Ok(thread) => thread,
+        Err(error) => {
+            stopping.store(true, Ordering::SeqCst);
+            let _ = operations.join();
+            return Err(format!("cannot start the link thread: {error}"));
+        }
+    };
     let link = Link {
         stopping,
         stream,
-        write: Arc::new(Mutex::new(())),
+        write,
         terminal,
+        structured,
+        operations: Some(operations),
         wake: Some(wake_tx),
         thread: Some(thread),
     };
@@ -325,6 +365,7 @@ impl Worker {
             return false;
         }
         *slot = conn.stream().ok();
+        self.structured.connected(conn.version);
         true
     }
 
@@ -365,6 +406,10 @@ impl Worker {
         }
         loop {
             self.read_until_closed(&mut conn);
+            self.structured
+                .disconnected("the holder connection ended; acquire control again");
+            lock(&self.terminal).pending.clear();
+            lock(&self.stream).take();
             match self.reconnect(&socket) {
                 Some(next) => conn = next,
                 None => return,
@@ -398,6 +443,8 @@ impl Worker {
     }
 
     fn exited(&self, exited: ExitedData) {
+        self.structured
+            .disconnected("the agent exited; terminal input is disabled");
         if !self.stopping.load(Ordering::SeqCst) {
             (self.sink)(HolderEvent::AgentExited {
                 id: self.id.clone(),
@@ -418,9 +465,15 @@ impl Worker {
                     }
                 }
                 Ok(Some(HolderResponse::PtyBytes { data })) => {
+                    self.structured.output_changed();
                     // No subscriber is not an error.
                     let _ = lock(&self.terminal).live.send(data.bytes_base64);
                 }
+                Ok(Some(
+                    response @ (HolderResponse::TerminalFrame { .. }
+                    | HolderResponse::TerminalControl { .. }
+                    | HolderResponse::TerminalOperationError { .. }),
+                )) => self.structured.response(response),
                 // The daemon sends nothing else on this connection that
                 // can be refused (gate 11 B P6: logged, not passed back).
                 Ok(Some(HolderResponse::Error { data })) => log::line(&format!(

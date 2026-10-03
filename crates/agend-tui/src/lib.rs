@@ -57,19 +57,26 @@ pub fn run_with(
     let mut app = App::new(source, lang);
     let mut terminal = ratatui::init();
     let result = (|| -> io::Result<()> {
+        let _outer_modes = crate::terminal::native::OuterModes::enter(io::stdout())?;
+        let size = terminal.size()?;
+        app.resize(size.width, size.height);
+        let mut native = crate::terminal::native_render::CellRenderer::default();
         let mut next_tick = Instant::now();
         while !app.quit {
             if Instant::now() >= next_tick {
                 app.tick();
                 next_tick = Instant::now() + TICK;
             }
-            terminal.draw(|frame| ui::render(frame, &mut app))?;
+            let completed = terminal.draw(|frame| render_frame(frame, &mut app))?;
+            let paint = native.prepare(&app, completed.buffer);
+            paint.write(terminal.backend_mut())?;
             let wait = next_tick.saturating_duration_since(Instant::now());
-            if event::poll(wait)?
-                && let Event::Key(key) = event::read()?
-                && !intercept(&key)
-            {
-                app.key(key);
+            if event::poll(wait)? {
+                match event::read()? {
+                    Event::Key(key) if !intercept(&key) => app.key(key),
+                    Event::Key(_) => {}
+                    event => app.event(event),
+                }
             }
         }
         Ok(())
@@ -89,10 +96,20 @@ pub fn render_buffer(app: &mut App, width: u16, height: u16) -> (ratatui::buffer
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("test backend");
-    terminal.draw(|frame| ui::render(frame, app)).expect("draw");
+    terminal
+        .draw(|frame| render_frame(frame, app))
+        .expect("draw");
     let buffer = terminal.backend().buffer().clone();
     let text = buffer_text(&buffer);
     (buffer, text)
+}
+
+fn render_frame(frame: &mut ratatui::Frame<'_>, app: &mut App) {
+    // Native resize notifications can be delayed/coalesced. Ratatui reads the
+    // current backend size before drawing; use that same size for control.
+    let area = frame.area();
+    app.resize(area.width, area.height);
+    ui::render(frame, app);
 }
 
 pub fn buffer_text(buffer: &ratatui::buffer::Buffer) -> String {

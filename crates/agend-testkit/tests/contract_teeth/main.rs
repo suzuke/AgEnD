@@ -21,6 +21,8 @@ mod real_runner;
 mod runner;
 mod runtime;
 mod store;
+#[cfg(unix)]
+mod terminal;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -46,6 +48,8 @@ fn all_mutants() -> Vec<Mutant> {
         runner::mutants(),
         #[cfg(unix)]
         client::mutants(),
+        #[cfg(unix)]
+        terminal::mutants(),
     ]
     .into_iter()
     .flatten()
@@ -64,7 +68,11 @@ const PREFIXES: [(&str, &str); 8] = [
     ("ClientProtocol", "CLP"),
 ];
 
-const CONTRACTS_MD: &str = include_str!("../../CONTRACTS.md");
+const CONTRACTS_MD: &str = concat!(
+    include_str!("../../CONTRACTS.md"),
+    "\n",
+    include_str!("../../CLIENT-CONTRACTS.md")
+);
 
 /// `(rule id, mutant names)` for every rule row of CONTRACTS.md: a table
 /// row whose first cell is an id like `DRV-1`; the mutants are the

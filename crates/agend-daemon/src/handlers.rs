@@ -9,10 +9,10 @@
 //! P2; identity is checked before the item is looked up). `answer_ask`
 //! answers `unknown_ask` (no asks before gate 10) and changes nothing.
 //!
-//! Gate 11 B (P6): `terminal_input` is the operator's only: an agent gets
+//! Gate 11 C (P6): `terminal_input` is the operator's only: an agent gets
 //! `forbidden` (identity first), an instance without a live terminal
-//! `no_terminal`, a codex instance `not_supported` (until U17 is verified,
-//! gate 7 P1); otherwise the bytes go to the holder and nothing is
+//! `no_terminal`, an unapproved or disconnected codex peer `not_supported`;
+//! otherwise the bytes go to the holder and nothing is
 //! answered. Its errors carry no request id.
 //!
 //! Gate 9 (P1): permissions are checked here only. `command` (agent
@@ -50,8 +50,7 @@ pub const OPERATOR_ONLY: &str = "only the operator can resolve needs-you items; 
 /// What an agent gets for `terminal_input`.
 pub const TYPE_OPERATOR_ONLY: &str = "only the operator can type into an agent's terminal";
 /// What `terminal_input` into a codex instance gets.
-pub const CODEX_INPUT: &str =
-    "typing into a codex terminal waits until U17 is verified (gate 7 P1); nothing was written";
+pub const CODEX_INPUT: &str = "Codex terminal input requires the approved CLI 0.159.3 and a connected link with durable own-clientId receipts; nothing was written";
 /// Longest wait for a holder's answer to `Snapshot`.
 const SNAPSHOT_WITHIN: Duration = Duration::from_secs(5);
 
@@ -70,6 +69,8 @@ pub struct Context {
     pub exe: PathBuf,
     /// A restart preflight is running (only one at a time, gate 9 P7).
     pub restarting: AtomicBool,
+    /// Admission policy used when the driver connects; the live driver gates input.
+    pub codex_input: agend_core::policy::codex_input::CodexInputPolicy,
 }
 
 impl Context {
@@ -88,8 +89,13 @@ impl Context {
 /// What the server does with a request.
 pub enum Outcome {
     Reply(ClientResponse),
-    /// Nothing to answer (accepted `terminal_input`).
+    /// No immediate response to send.
     Nothing,
+    /// Validated legacy operator input; ordered in the terminal entry service.
+    TerminalInput {
+        instance_id: String,
+        line: Vec<u8>,
+    },
     /// Send the backlog, then forward live events.
     Events(Subscription),
     /// Send the screen, then forward the PTY chunks (`None`: the screen
@@ -243,6 +249,15 @@ pub async fn handle(ctx: &Context, caller: Option<&str>, request: ClientRequest)
                 },
             }
         }
+        ClientRequest::SubscribeTerminalFrames { data } => {
+            terminal_version_error(caller, data.request_id, false)
+        }
+        ClientRequest::SetTerminalViewport { data } => {
+            terminal_version_error(caller, data.request_id, false)
+        }
+        ClientRequest::TerminalControl { data } => {
+            terminal_version_error(caller, data.request_id, true)
+        }
         ClientRequest::Unknown => error(None, error_code::UNKNOWN_REQUEST, "unknown request type"),
     };
     Outcome::Reply(reply)
@@ -270,7 +285,9 @@ fn terminal_input(
             format!("{instance_id} has no live terminal; nothing was written"),
         );
     };
-    if view.backend == agend_core::model::Backend::Codex.as_str() {
+    if view.backend == agend_core::model::Backend::Codex.as_str()
+        && !ctx.codex.can_input(&instance_id)
+    {
         return refuse(error_code::NOT_SUPPORTED, CODEX_INPUT.into());
     }
     let line = crate::runtime::link::input_line(bytes_base64);
@@ -280,13 +297,7 @@ fn terminal_input(
             operator_input_too_long(line.len()),
         );
     }
-    if !ctx.runtime.terminal_input(&instance_id, line) {
-        return refuse(
-            error_code::NO_TERMINAL,
-            format!("{instance_id} has no live terminal; nothing was written"),
-        );
-    }
-    Outcome::Nothing
+    Outcome::TerminalInput { instance_id, line }
 }
 
 /// `subscribe_terminal`: a running instance's screen and bytes through the
@@ -326,5 +337,26 @@ async fn terminal(ctx: &Context, instance_id: String) -> Outcome {
             live: Some(live),
         },
         _ => no_terminal(format!("{instance_id}: its holder did not send its screen")),
+    }
+}
+
+// This server still negotiates 1.3; no full-terminal operation reaches a PTY.
+fn terminal_version_error(
+    caller: Option<&str>,
+    request_id: String,
+    control: bool,
+) -> ClientResponse {
+    if control && caller.is_some() {
+        error(
+            Some(request_id),
+            error_code::FORBIDDEN,
+            "only the operator can control a terminal view",
+        )
+    } else {
+        error(
+            Some(request_id),
+            error_code::NOT_SUPPORTED,
+            "full terminal requires client protocol 1.4; run: agend daemon restart",
+        )
     }
 }

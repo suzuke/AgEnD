@@ -29,6 +29,8 @@
 - 其他 `accept <施工關>`：對該施工關的 crate 跑 fmt、clippy、test，再跑 check-deps；demo 隨各施工關加入
 - `record <backend> [情境…] --sandbox <腳本>`：build `agend-record`（agend-testkit），在 `<腳本>`（寫入沙箱）裡對**真的** CLI 錄製到 `mktemp -d /private/tmp/agend-rec-out-XXXX`，再在沙箱外把成功的錄製檔複製進 `crates/agend-testkit/transcripts/<backend>/`（見 [RECORDER.md](../crates/agend-testkit/RECORDER.md)）。沒有 `--sandbox` 就不跑
 
+第 11 施工關 accept tui 先建置真 agend、fake_codex 與 codex_u17_probe，再跑原 checks／fake 與真 daemon TUI demos，最後跑共用 integration test 情境的完整 U17 fake demo。真 codex_u17_live 不在 acceptance 或 CI 執行，必須明確 opt-in。
+
 ## 不負責
 
 - 擋刻意繞過（例如改 xtask、加長 allowlist）：靠 code review

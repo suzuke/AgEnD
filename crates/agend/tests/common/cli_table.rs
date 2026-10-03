@@ -14,7 +14,8 @@ use std::fs;
 use std::path::Path;
 use std::time::Duration;
 
-use agend_core::protocol::client::{AgentState, InstanceView, ResultIdentity};
+use agend_core::protocol::ProtocolVersion;
+use agend_core::protocol::client::{AgentState, InstanceView, ResultIdentity, V1_3, V1_4};
 use agend_testkit::fake_daemon::FakeDaemon;
 
 use crate::cli::{Cli, Run};
@@ -630,12 +631,21 @@ pub struct Verdict {
 }
 
 pub fn check(expect: &Expect, run: &Run) -> Option<String> {
+    check_version(expect, run, V1_3)
+}
+
+fn check_version(expect: &Expect, run: &Run, selected: ProtocolVersion) -> Option<String> {
     let mut problems = Vec::new();
     if run.code != Some(expect.code) {
         problems.push(format!("exit {:?}, expected {}", run.code, expect.code));
     }
     for needle in expect.stdout {
-        if !run.stdout.contains(needle) {
+        // Status/restart must report the actual negotiated capability.
+        let needle = needle.replace(
+            "client protocol 1.3",
+            &format!("client protocol {}.{}", selected.major, selected.minor),
+        );
+        if !run.stdout.contains(&needle) {
             problems.push(format!("stdout lacks {needle:?}"));
         }
     }
@@ -666,7 +676,7 @@ fn caller(who: Who) -> Option<&'static str> {
     }
 }
 
-fn run_row(cli: &Cli, row: &Row) -> Verdict {
+fn run_row(cli: &Cli, row: &Row, selected: ProtocolVersion) -> Verdict {
     let mut run = match row.home {
         Home::Set => cli.run(caller(row.who), row.args),
         Home::Unset => cli.run_home(None, caller(row.who), row.args),
@@ -685,7 +695,7 @@ fn run_row(cli: &Cli, row: &Row) -> Verdict {
         Home::V1 => "AGEND_HOME=<a home with fleet.yaml> ",
     };
     run.command = run.command.replacen("$ ", &format!("$ {home}"), 1);
-    let problem = check(&row.expect, &run);
+    let problem = check_version(&row.expect, &run, selected);
     Verdict { run, problem }
 }
 
@@ -699,7 +709,7 @@ pub fn run_table(
     // No daemon.
     let none = Cli::new(bin, &lab.home(90));
     for r in rows.iter().filter(|r| r.on == On::Nothing) {
-        out.push((r.id, "once", run_row(&none, r)));
+        out.push((r.id, "once", run_row(&none, r, V1_3)));
     }
     // The fake daemon at $AGEND_HOME/run/daemon.sock.
     let home = lab.home(91);
@@ -722,7 +732,7 @@ pub fn run_table(
         if let Some(setup) = r.setup {
             setup(&fake);
         }
-        out.push((r.id, "fake", run_row(&cli, r)));
+        out.push((r.id, "fake", run_row(&cli, r, V1_3)));
     }
     drop(fake);
     // The real daemon.
@@ -750,7 +760,7 @@ pub fn run_table(
         }
     }
     for r in rows.iter().filter(|r| matches!(r.on, On::Both | On::Real)) {
-        out.push((r.id, "real", run_row(&cli, r)));
+        out.push((r.id, "real", run_row(&cli, r, V1_4)));
     }
     daemon.interrupt()?;
     Ok(out)

@@ -5,6 +5,19 @@
 > - 記住：每個 holder 一律用 `Shutdown` 停；測試不對自己沒起的 pid 送訊號。
 > - 下一步：RTM-1..9 對真的 agent runtime 已在第 6 施工關跑（`crates/agend/tests/holder_runtime.rs`）。
 
+## 第 11 施工關 C 段（實作中）
+
+- `tests/terminal_frames.rs`：真 PTY 的 16／256／RGB、屬性、CJK／combining、wide edge、mode／cursor、逐 byte 切片、編號行歷史淘汰與固定 viewport、normal／alt、generation／revision、resize row id。
+- `tests/server.rs`：真 holder/socket 的 frame request id、daemon 連線重開後 generation 不變、1.0 純文字路徑、新能力未協商拒絕、無效 viewport 與 oversized frame 整份拒絕後仍可讀。
+- `screen::tests::tracking_keeps_the_direct_parser_screen_modes_and_cursor`：同一段序列逐 byte 比對 direct alacritty，確認歷史追蹤不改畫面／mode／cursor。
+
+- `tests/support/terminal_control.rs`（由 server tests 載入）：真 PTY 的實際 stty 尺寸、input completion、最後 Acquire 的 owner、舊 owner／generation／零尺寸／超大 frame 無副作用、legacy 拒絕與 release 後恢復、重連失效與尺寸保留、1.0 能力拒絕；raw PTY 不讀 stdin 的壓力測試驗 5 秒輸入失敗必須先於新 grant。
+- `pty::ordering_tests`：writer 在途中被 gate 阻擋時，控制 barrier 不可提前 ack；解除後 input completion 必須在新 grant 前。
+
+`screen::frame::sample_tests` 用真的 parser 與指定 Instant 驗共用取樣的 live grid 內的列固定／上界 clamp、49／50 ms 邊界、palette／mode／歷史同 revision、resize 立即失效及無效請求不取樣。daemon 多視窗的 native 驗證在 `agend/tests/terminal_hub.rs`；TUI App 的局部驗證見 [C 段 App 紀錄](../../docs/gates/gate-11c-app-validation.md)，完整自動矩陣與 fake U17 已建立，真 Codex 0.159.3 首次 U17 另有 [獨立紀錄](../../docs/gates/gate-11c-u17-live-validation.md)；本 crate 測試不代替真模型證據，C 段驗收收尾與 merge 仍待確認。
+
+`screen::tests::single_column_resize_handles_wide_live_history_and_inactive_normal_grid`：normal／歷史與 active alt／inactive normal 含寬字時縮到一欄，核 modes、generation／revision、新 CJK／combining 輸入及放大後新寬字；五秒 watchdog 防止 reflow 回歸卡住 CI。移除修正後同一回歸會 SIGABRT／cargo exit 101，原 stack／logs 保留。
+
 ## 怎麼跑
 
 ```bash
@@ -53,6 +66,8 @@
 - [ ] 螢幕分類器 fixture 用 holder 畫面產生（需要真 backend 的原始 PTY 位元組錄製，見第 4 施工關頁「待你追認」）
 - [ ] Linux 上的行為（CI 的 ubuntu 會跑同一組測試）
 - [x] 對真的 agent runtime 跑 RTM-1..9（第 6 施工關：`crates/agend/tests/holder_runtime.rs`）
+
+真 PTY frame 的 holder／client wire golden 已固定，只正規化程序 generation；完整 serializer round-trip 與既有 terminal_frames 共 8 tests 通過。[證據](../../docs/gates/gate-11c-frame-order-validation.md)。
 
 ## 下一步
 

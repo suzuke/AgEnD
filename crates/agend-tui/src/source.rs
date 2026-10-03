@@ -175,8 +175,61 @@ pub enum TerminalEvent {
     Closed(String),
 }
 
+/// Updates on the full-terminal stream; identity and correlation are kept.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FullTerminalEvent {
+    Frame(Box<agend_core::protocol::client::ClientTerminalFrameData>),
+    ControlAck(Box<agend_core::protocol::client::ClientTerminalControlAck>),
+    ControlChanged(agend_core::protocol::client::TerminalControlChangedData),
+    Refused(agend_core::protocol::client::ErrorData),
+    Closed(String),
+}
+
 /// Where the screens' data comes from.
 pub trait Source {
+    /// Old protocol peers keep their plaintext view but cannot bypass full
+    /// control ownership by pretending that legacy input is a complete mode.
+    fn legacy_terminal_is_read_only(&self) -> bool {
+        false
+    }
+
+    /// Drains structured updates without waiting for I/O.
+    fn poll_full_terminal(&mut self) -> Vec<FullTerminalEvent> {
+        Vec::new()
+    }
+    /// Opens a dedicated full stream if the daemon negotiates 1.4. A false
+    /// result leaves the legacy path available, without claiming capability.
+    fn open_full_terminal(
+        &mut self,
+        instance: &str,
+        request_id: String,
+        viewport: agend_core::protocol::terminal::TerminalViewport,
+    ) -> Result<bool, SourceError> {
+        let _ = (instance, request_id, viewport);
+        Ok(false)
+    }
+    /// Enqueues a full-terminal operation, never waits for its acknowledgement.
+    fn terminal_control(
+        &mut self,
+        data: agend_core::protocol::client::ClientTerminalControlData,
+    ) -> Result<(), SourceError> {
+        let _ = data;
+        Err(SourceError::Rejected {
+            code: "not_supported".into(),
+            message: "source has no full terminal stream".into(),
+        })
+    }
+    fn terminal_viewport(
+        &mut self,
+        data: agend_core::protocol::client::TerminalViewportData,
+    ) -> Result<(), SourceError> {
+        let _ = data;
+        Err(SourceError::Rejected {
+            code: "not_supported".into(),
+            message: "source has no full terminal stream".into(),
+        })
+    }
+
     /// (Re)connects and hands over the catalog and needs-you list now;
     /// `poll` then gives only what happens after it.
     fn connect(&mut self) -> Result<Snapshot, SourceError>;

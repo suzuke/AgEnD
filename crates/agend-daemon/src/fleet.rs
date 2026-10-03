@@ -138,6 +138,30 @@ impl Fleet {
         self.push(&mut inner, DaemonEvent::AttentionRequired { data: item });
     }
 
+    /// Enrich a captured item only if it has not been resolved or replaced.
+    /// Compare, replace and publish share the same lock.
+    pub fn replace_attention_if(
+        &self,
+        expected: &AttentionRequiredData,
+        item: AttentionRequiredData,
+    ) -> bool {
+        let Some(id) = expected.attention_id.as_deref() else {
+            return false;
+        };
+        if item.attention_id.as_deref() != Some(id) {
+            return false;
+        }
+        let mut inner = self.lock();
+        if inner.attention.get(id) != Some(expected) {
+            return false;
+        }
+        if expected != &item {
+            inner.attention.insert(id.into(), item.clone());
+            self.push(&mut inner, DaemonEvent::AttentionRequired { data: item });
+        }
+        true
+    }
+
     pub fn set_tasks(&self, tasks: Vec<TaskView>) {
         self.lock().tasks = tasks;
     }
@@ -326,6 +350,13 @@ impl agend_core::pipeline::ports::PipelineView for Fleet {
     }
     fn upsert_attention(&self, item: AttentionRequiredData) {
         Fleet::upsert_attention(self, item)
+    }
+    fn replace_attention_if(
+        &self,
+        expected: &AttentionRequiredData,
+        item: AttentionRequiredData,
+    ) -> bool {
+        Fleet::replace_attention_if(self, expected, item)
     }
     fn attention(&self, id: &str) -> Option<AttentionRequiredData> {
         Fleet::attention(self, id)

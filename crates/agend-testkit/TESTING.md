@@ -10,6 +10,21 @@
 `recorder_recovery.rs` 對真 fake producer 重複 ResumeEmpty 50 次，關閉連線前必須讀到該 thread 的 `thread/started`。Pipeline 的共享 fake／SQLite 契約另外驗 dispatch receipt、task CAS 與 attention_reason 清除同交易：error／conflict 不改註記，success 保留 acknowledgement，generic advance_task 不清註記。真 SQLite attention UPDATE 故障須 rollback version／event／receipt，移除故障後可重試一次。
 STO-13 同時跑 FakeStore 與 SQLite；SplitAdvance mutant 故意在失敗時先寫 task，必須被契約推翻。`fake-worker` 由 `agend` 的 pipeline 程序測試與 `pipeline_probe demo` 啟動。
 
+## 第 11 施工關 C 段（實作中）
+
+- `full_terminal`：共用 CLP-23–28 與 producer generation／failed instance；輸入由真 holder Screen 的 parser producer 提供。相同六條在 `agend/tests/full_terminal_contract.rs` 對真 daemon／holder／PTY 執行。
+- `full_terminal_pressure`：producer 操作阻塞時同 socket GetFleet 可回覆、新 grant 等原寫入；capture 中替換訂閱，完成後不能發舊 view。
+- `full_terminal_fds`：獨立程序 20 次檢視／取得控制／關閉，最後 socket fd 回 baseline；不代替 native daemon／TUI 的資源驗證。
+- `contract_teeth/terminal.rs`：六個 C wire mutant 都須被拒絕；規則表與 cases／mutants 從 `CONTRACTS.md` 及 `CLIENT-CONTRACTS.md` 機械核對。
+
+以上不認證 TUI／鍵鼠／貼上、300 ms 時效或 Codex U17。
+
+opt-in fake manual frontend 的原生驗證在 `agend/tests/codex_u17.rs`：真 PTY 輸入經實際 fake app-server，busy／user item／queue 由 producer 產生。既有 fake Codex 與錄製檔 conformance 仍照跑；本批另有共用完整 App／client／daemon 子程序情境，核 draft／重啟與 receipt；不代表真 Codex smoke。[範圍](../../docs/gates/gate-11c-u17-validation.md)。
+
+新增 `resume_notification_requires_persistent_attribution_before_the_rpc_reply`：真 holder／wrapper／raw fake frontend 先產生並保存 clientId=null 的人工同文 turn，再以預設關閉的 fake-only `agendFake/replayUserOnNextResume` 在下一次 resume response 前重播原 item/completed。測試核 producer item／turn 身分、實際 replay count=1 與一次性關閉；重接到拒絕版本仍不得取人工 receipt。沒有合成人工 item／frame，不呼叫真模型。
+
+CLP-26 的 EOF release 判定以獨立 PTY consumer 紀錄為準；`GetFleet` 回覆不是背景 legacy input 的完成 fence。原 macOS CI 的 `AFTER-EOF` 失敗 log 保留，收尾以修正後固定 head 重驗。
+
 ## 怎麼跑
 
 ```bash
@@ -34,7 +49,7 @@ STO-13 同時跑 FakeStore 與 SQLite；SplitAdvance mutant 故意在失敗時�
 | `tests/fake_daemon_fds.rs` | 關掉的連線（有事件訂閱也一樣）馬上放掉 fd，不等下一個事件（100 次訂閱後關掉，fd 數不變） |
 | `tests/contract_fakes.rs::client_protocol_*` | 假 daemon 通過 CLP-1..22；反向檢查：事件 id 改回從 1 開始（proxy 重新編號）時 CLP-4 必須失敗（第 8 施工關 P9） |
 | `tests/contract_teeth/client.rs` | CLP 的 mutant（第 11 施工關 B 段加 `FreezesScreen`、`ScreenForAnyInstance`、`AnyoneMayType`，CLP-10 的改成 `AcceptsRefused`）（假 daemon 前面加改行的 proxy），每個只跑自己那條規則的 case，都必須失敗 |
-| `tests/fake_codex.rs` | 第 7 施工關：`clientUserMessageId` 回成 `clientId`、`thread/turns/list` 分頁且進行中的 turn 在最後、`thread/queue/list`、忙碌時 `thread/queue/start` 回 `-32600 … active or pending turn`、`thread/resume` 找不到回 `thread not found`、`excludeTurns` 不帶 turn、舊的 listen symlink 被換掉、`fake-codex` 的 `app-server` 在 stdin 結束後照跑（`agendFake/exit` 才結束，thread 存在 socket 旁）與假 TUI 印參數、`q` 結束。原本的：turn 完成事件帶回 threadId／turnId 與回覆；steer（錯的 turn id 被拒；在同一輪另成一則回覆）、queue 自動出列成新 turn、interrupt；approval 等待決定；只有 resume 過的 thread 才推事件；長路徑與短路徑都是 symlink 指到 temp dir 裡的短 socket（不留目錄） |
+| `tests/fake_codex.rs` | 第 7 施工關：`clientUserMessageId` 回成 `clientId`、`thread/turns/list` 分頁且進行中的 turn 在最後、`thread/queue/list`、忙碌時 `thread/queue/start` 回 `-32600 … active or pending turn`、`thread/resume` 找不到回 `thread not found`、`excludeTurns` 不帶 turn、舊的 listen symlink 被換掉、fake-codex --version 固定印未獲開放的 codex-cli 0.158.0，`fake-codex` 的 `app-server` 在 stdin 結束後照跑（`agendFake/exit` 才結束，thread 存在 socket 旁）與假 TUI 印參數、`q` 結束。原本的：turn 完成事件帶回 threadId／turnId 與回覆；steer（錯的 turn id 被拒；在同一輪另成一則回覆）、queue 自動出列成新 turn、interrupt；approval 等待決定；只有 resume 過的 thread 才推事件；長路徑與短路徑都是 symlink 指到 temp dir 裡的短 socket（不留目錄） |
 | `tests/fake_opencode.rs` | SSE 事件順序（照 `transcripts/opencode/one_turn.jsonl`）、同步 prompt 回覆、忙碌排隊、abort 標 `MessageAbortedError`、REST 補歷史、status |
 | `tests/fake_claude.rs` | Stop hook block 多一輪（`stop_hook_active` false → true）、Esc 中斷不觸發 Stop、hook payload、channel 包裝、未知 channel server 的錯誤、transcript 在專案目錄內 |
 | `tests/conformance.rs` | 一致性檢查：用錄製器的同一套情境（`one_turn`、`interrupt`、`approval`、`busy`、`resume`）驅動 `recorder::BACKENDS` 的每個假 agent（新增 backend 不用加測試），和 `transcripts/<backend>/` 的真 CLI 錄製檔按形狀比對（比對規則只在 `recorder::shape`，見 [RECORDER.md](RECORDER.md)）；突變檢查：錄製檔裡的 `turn/completed` 多一則要比出差異、串流 delta 多一則不算；每個 backend 支援的情境剛好各有一個錄製檔（第 7 施工關的 codex 情境 `turns_list`、`queue_idle`、`resume_empty` 在使用者錄之前可以沒有，印 `not recorded yet … skipped`）；錄製檔通過 secret scan（含本機 denylist）；`gate_7_codex_scenarios_run_against_the_fake`：這三個情境對假 app-server 跑得完，而且送出了它們要問的方法。`AGEND_CONFORMANCE_DUMP=<dir>` 另外把假 agent 的流量寫成錄製檔以便對照 |
@@ -61,6 +76,8 @@ STO-13 同時跑 FakeStore 與 SQLite；SplitAdvance mutant 故意在失敗時�
 - [ ] 契約 suite 對真實作（各施工關接上：Store 第 5、agent runtime 第 6、Driver 第 7／12、Runner 與 Forge local 第 10、Notifier 與 Forge github 第 12）
 - [x] 假 agent 的欄位與事件順序對真 CLI 比對：`tests/conformance.rs` 對 `transcripts/`（2026-09-25 錄製；CLI 升版時重錄，見 [RECORDER.md](RECORDER.md)）
 - [ ] binding 快照 fixture（第 3 施工關需要時）
+
+C 段 CLP 拒絕案例同跑真 parser-backed fake 與真 daemon：agent caller 的 Acquire／Resize／Input／Release 全部 forbidden；之後核尺寸不變、原 owner 輸入仍可實收、拒絕 bytes 沒有進 consumer。
 
 ## 下一步
 

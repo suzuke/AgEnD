@@ -17,6 +17,10 @@
 //! through the source and the daemon's events, or decide who may type
 //! (the daemon does, D17).
 
+pub mod full_terminal;
+use agend_core::protocol::terminal::TerminalSize;
+use full_terminal::FullView;
+
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
@@ -130,6 +134,8 @@ pub enum TermMode {
 /// The open terminal view's state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Term {
+    pub full: Option<FullView>,
+    pub upgrade_required: bool,
     pub agent: String,
     pub mode: TermMode,
     /// Input mode: keys go to the agent (P6).
@@ -168,6 +174,7 @@ pub struct App {
     last_attempt: Instant,
     /// Body height of the last render, for scrolling.
     pub(crate) body_height: usize,
+    outer_size: TerminalSize,
 }
 
 impl App {
@@ -193,6 +200,10 @@ impl App {
             term: None,
             last_attempt: Instant::now(),
             body_height: 20,
+            outer_size: TerminalSize {
+                rows: 24,
+                columns: 80,
+            },
         };
         match app.source.connect() {
             Ok(snapshot) => {
@@ -394,6 +405,17 @@ impl App {
     }
 
     pub fn key(&mut self, key: KeyEvent) {
+        if self.is_connected() {
+            self.pull();
+            self.pump_terminal();
+        }
+        if self.full_mode() && self.is_connected() {
+            if key.kind != KeyEventKind::Release {
+                self.full_key(key);
+            }
+            return;
+        }
+
         if key.kind == KeyEventKind::Release {
             return;
         }
@@ -432,6 +454,19 @@ impl App {
     }
 
     fn screen_key(&mut self, code: KeyCode) {
+        if self.term.as_ref().is_some_and(|term| term.full.is_some()) {
+            match code {
+                KeyCode::PageUp => {
+                    self.scroll_terminal(-5);
+                    return;
+                }
+                KeyCode::PageDown => {
+                    self.scroll_terminal(5);
+                    return;
+                }
+                _ => {}
+            }
+        }
         match code {
             KeyCode::Char('q') => self.quit = true,
             KeyCode::Char('L') => self.lang = self.lang.toggled(),
@@ -804,6 +839,24 @@ impl App {
 
     fn open_terminal(&mut self, agent: &str) {
         let mode = self.mode_for(agent);
+        match self.new_full_term(agent, mode) {
+            Ok(Some(term)) => {
+                self.push(
+                    Screen::Terminal {
+                        agent: agent.into(),
+                        screen: String::new(),
+                    },
+                    None,
+                );
+                self.term = Some(term);
+                return;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                self.message = Some(error_text(&error));
+                return;
+            }
+        }
         match self.source.open_terminal(agent) {
             Ok(screen) if !screen.trim().is_empty() => {
                 self.push(
@@ -813,7 +866,9 @@ impl App {
                     },
                     None,
                 );
-                self.term = Some(Term::new(agent, mode));
+                let mut term = Term::new(agent, mode);
+                term.upgrade_required = self.source.legacy_terminal_is_read_only();
+                self.term = Some(term);
                 return;
             }
             Ok(_) => self.message = Some(self.lang.fmt(Text::NoOutputFor, &[agent])),
@@ -845,7 +900,35 @@ impl App {
     /// screen as ended and keeps trying.
     fn reopen_terminal(&mut self, agent: &str) {
         let mode = self.mode_for(agent);
+        let old_data = self
+            .term
+            .as_ref()
+            .and_then(|term| term.full.as_ref())
+            .and_then(|full| full.data.clone());
+        match self.new_full_term(agent, mode) {
+            Ok(Some(mut term)) => {
+                term.full.as_mut().unwrap().data = old_data;
+                self.term = Some(term);
+                return;
+            }
+            Ok(None) => {}
+            Err(_) => {
+                // The previous scope was closed even when the new handshake
+                // failed. Retire its owner/expanded mode and rate-limit retry.
+                let term = self
+                    .term
+                    .get_or_insert_with(|| Term::new(agent, TermMode::Ended));
+                term.typing = false;
+                if let Some(full) = &mut term.full {
+                    full.revoke();
+                }
+                term.mode = TermMode::Ended;
+                term.retried = Instant::now();
+                return;
+            }
+        }
         let mut term = Term::new(agent, mode);
+        term.upgrade_required = self.source.legacy_terminal_is_read_only();
         match self.source.open_terminal(agent) {
             Ok(screen) => self.set_screen(screen),
             Err(_) => term.mode = TermMode::Ended,
@@ -885,6 +968,24 @@ impl App {
     /// Applies what the terminal delivered and refreshes or resubscribes it
     /// when due (P5).
     fn pump_terminal(&mut self) {
+        self.pump_full_terminal();
+        if self.term.as_ref().is_some_and(|term| term.full.is_some()) {
+            let agent = self.term.as_ref().unwrap().agent.clone();
+            let stopped = self.mode_for(&agent) == TermMode::Stopped;
+            let term = self.term.as_mut().unwrap();
+            if stopped {
+                term.typing = false;
+                term.full.as_mut().unwrap().revoke();
+                term.mode = TermMode::Stopped;
+                self.source.close_terminal();
+            }
+            let retry = (term.mode == TermMode::Ended && term.retried.elapsed() >= RETRY_EVERY)
+                || (term.mode == TermMode::Stopped && !stopped);
+            if retry {
+                self.reopen_terminal(&agent);
+            }
+            return;
+        }
         if self.term.is_none() {
             return;
         }
@@ -964,6 +1065,28 @@ impl App {
 
     /// `i` in a live terminal: keys go to the agent (P6).
     fn start_typing(&mut self) {
+        if let Some(term) = &self.term
+            && term.mode != TermMode::Live
+        {
+            self.message = Some(
+                self.lang
+                    .tr(if term.mode == TermMode::Stopped {
+                        Text::StoppedNoInput
+                    } else {
+                        Text::EndedNoInput
+                    })
+                    .into(),
+            );
+            return;
+        }
+        if self.term.as_ref().is_some_and(|term| term.full.is_some()) {
+            self.begin_full();
+            return;
+        }
+        if self.term.as_ref().is_some_and(|term| term.upgrade_required) {
+            self.message = Some(self.lang.tr(Text::FullUpgrade).into());
+            return;
+        }
         let Some(term) = self.term.as_mut() else {
             return;
         };
@@ -1064,6 +1187,8 @@ impl Term {
             agent: agent.to_owned(),
             mode,
             typing: false,
+            full: None,
+            upgrade_required: false,
             stale: false,
             fetched: now,
             retried: now,

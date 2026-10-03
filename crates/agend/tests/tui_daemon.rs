@@ -1,7 +1,7 @@
 //! The TUI against the real `agend daemon` (gate 11 B): the scenario in
 //! `common/tui_process.rs` (fleet view, `retry`, live terminal, typing,
 //! reconnect, `agend app` exits), and a codex instance's terminal refusing
-//! input until U17 is verified (P6). Real binary, temp homes under
+//! input for the unapproved fake CLI version (P6). Real binary, temp homes under
 //! `/tmp/g11.t-<pid>-<n>`, `fake_codex` for codex; see the modules for the
 //! safety rules.
 #![cfg(unix)]
@@ -39,7 +39,7 @@ fn the_tui_reads_and_acts_on_the_real_daemon() {
 }
 
 #[test]
-fn typing_into_a_codex_terminal_is_not_supported_until_u17() {
+fn typing_into_an_unapproved_codex_cli_terminal_remains_not_supported() {
     let lab = tui::lab(Path::new(BIN));
     let home = lab.home(2);
     let id = format!("g11-{}x", clp::tag());
@@ -61,7 +61,7 @@ fn typing_into_a_codex_terminal_is_not_supported_until_u17() {
     assert_eq!(data.code, error_code::NOT_SUPPORTED);
     assert_eq!(
         data.message,
-        "typing into a codex terminal waits until U17 is verified (gate 7 P1); nothing was written"
+        "Codex terminal input requires the approved CLI 0.159.3 and a connected link with durable own-clientId receipts; nothing was written"
     );
     assert_eq!(data.request_id, None);
     daemon.interrupt().unwrap();

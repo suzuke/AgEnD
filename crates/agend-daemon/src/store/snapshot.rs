@@ -213,7 +213,7 @@ pub(super) fn daily(
     let path = backups.join(&name);
     let empty: bool = conn.query_row(
         "SELECT NOT EXISTS (SELECT 1 FROM tasks) AND NOT EXISTS (SELECT 1 FROM task_events) \
-         AND NOT EXISTS (SELECT 1 FROM instances)",
+         AND NOT EXISTS (SELECT 1 FROM instances) AND NOT EXISTS (SELECT 1 FROM codex_input_threads)",
         [],
         |r| r.get(0),
     )?;

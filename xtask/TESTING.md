@@ -36,6 +36,8 @@ cargo test -p xtask
 | `cargo xtask accept holder` | agend-holder 與 agend 的 fmt/clippy/test、check-deps，再跑 `holder_probe demo` |
 | `cargo xtask accept tui` | agend-tui fmt/clippy/test、check-deps，並以子程序執行 `tui_accept` example（demo 自己檢查每段，失敗就非 0 結束） |
 
+第 11 施工關 accept tui 先建置真 agend、fake_codex 與 codex_u17_probe，再跑原 checks／fake 與真 daemon TUI demos，最後跑共用 integration test 情境的完整 U17 fake demo。真 codex_u17_live 不在 acceptance 或 CI 執行，必須明確 opt-in。
+
 ## 用到的假實作
 
 - 無。

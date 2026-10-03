@@ -24,6 +24,8 @@
 //! | `thread/resume {threadId, excludeTurns?}` | `deprecationNotice` (no `excludeTurns`), `thread/status/changed` idle, the settings with the full `thread` (all turns; none with `excludeTurns: true`), `thread/tokenUsage/updated`, `thread/goal/cleared`; an unknown thread (or one never on disk) → error -32600 `no rollout found for thread id <id>` (U1) |
 //! | restart | with `AGEND_FAKE_STATE_DIR` set, threads persist in `$AGEND_FAKE_STATE_DIR/fake-codex/threads.json` (the real server keeps rollouts under `CODEX_HOME`), so a restarted fake resumes by id (spike S4); without it nothing persists |
 //! | `--listen` path | like codex: the socket always lives at a short path (`<tmp>/fake-codex-<hash>.sock`, codex: `/private/tmp/codex-daemon-<uid>/<sha256>`) and the requested path is a symlink to it (pitfall 1); an old symlink at the requested path is replaced |
+//! | `agendFake/replayUserOnNextResume {threadId}` | fake only, off by default: arm one replay of the latest persisted manual user item already stored in that thread; the next resume emits item/completed before its response |
+//! | `agendFake/resumeReplayCount {threadId}` | fake only: number of armed item/completed replays actually emitted for that thread |
 //! | `agendFake/exit` | fake only: the server process exits at once (a test stand-in for an app-server that dies) |
 //!
 //! Agent replies stream: `item/started` and a first delta when the input's
@@ -232,6 +234,9 @@ struct State {
     /// While `Some((connection, held))`: notifications for that connection
     /// are held back to go out before the reply of the request it is making.
     hold: Option<(u64, Vec<Value>)>,
+    /// Explicit fake-only replay seam; populated solely by a test RPC.
+    resume_user_replay: BTreeMap<String, (String, Value)>,
+    resume_user_replay_count: BTreeMap<String, u64>,
 }
 
 struct ThreadState {
@@ -1161,6 +1166,16 @@ fn handle(
             Ok(result)
         }
         "thread/resume" if known => {
+            if let Some((turn, item)) = state.resume_user_replay.remove(&thread_id) {
+                before.push(state.notification(
+                    "item/completed",
+                    json!({"threadId": thread_id, "turnId": turn, "item": item}),
+                ));
+                *state
+                    .resume_user_replay_count
+                    .entry(thread_id.clone())
+                    .or_default() += 1;
+            }
             if let Some(t) = state.threads.get_mut(&thread_id) {
                 t.subscribers.insert(connection);
             }
@@ -1416,6 +1431,38 @@ fn handle(
                 Ok(json!({}))
             }
         }
+        "agendFake/replayUserOnNextResume" if known => {
+            // Copy only an actual persisted turn's manual user item.
+            // Tests cannot supply an ideal item or turn id to this seam.
+            let manual = state.threads[&thread_id]
+                .turns
+                .iter()
+                .rev()
+                .find_map(|turn| {
+                    turn["items"].as_array()?.iter().rev().find_map(|item| {
+                        if item["type"] != "userMessage" || !item["clientId"].is_null() {
+                            return None;
+                        }
+                        Some((turn["id"].as_str()?.to_owned(), item.clone()))
+                    })
+                });
+            match manual {
+                Some((turn, item)) => {
+                    let result = json!({"turnId": turn, "itemId": item["id"]});
+                    state
+                        .resume_user_replay
+                        .insert(thread_id.clone(), (turn, item));
+                    Ok(result)
+                }
+                None => Err((
+                    INVALID_REQUEST,
+                    "no saved completed manual user item".into(),
+                )),
+            }
+        }
+        "agendFake/resumeReplayCount" if known => Ok(
+            json!({"replayed": state.resume_user_replay_count.get(&thread_id).copied().unwrap_or(0)}),
+        ),
         "agendFake/exit" => std::process::exit(0),
         other => Err((METHOD_NOT_FOUND, format!("method not found: {other}"))),
     };

@@ -1,4 +1,4 @@
--- user_version = 5
+-- user_version = 6
 
 CREATE INDEX messages_by_target ON messages (to_instance, seq);
 
@@ -32,6 +32,10 @@ CREATE TABLE bindings (
     head TEXT,
     ticket TEXT NOT NULL,
     status TEXT NOT NULL CHECK(status IN ('pending','ready'))
+) STRICT;
+
+CREATE TABLE codex_input_threads (
+    thread_id TEXT PRIMARY KEY NOT NULL CHECK (length(thread_id) > 0)
 ) STRICT;
 
 CREATE TABLE "instances" (

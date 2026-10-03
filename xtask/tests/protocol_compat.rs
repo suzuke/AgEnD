@@ -16,7 +16,7 @@ use serde_json::json;
 fn client_request_wire_shapes_are_stable_and_approval_does_not_supply_a_head() {
     assert_eq!(
         serde_json::to_value(ClientRequest::hello()).unwrap(),
-        json!({"type": "hello", "data": {"supported": [{"major": 1, "minor": 3}]}})
+        json!({"type": "hello", "data": {"supported": [{"major": 1, "minor": 4}, {"major": 1, "minor": 3}]}})
     );
 
     let review = ClientRequest::Command {
@@ -561,7 +561,10 @@ fn a_1_0_peer_decodes_1_1_messages() {
         hello,
         v1_0::ClientRequest::Hello {
             data: v1_0::Hello {
-                supported: vec![v1_0::Version { major: 1, minor: 3 }]
+                supported: vec![
+                    v1_0::Version { major: 1, minor: 4 },
+                    v1_0::Version { major: 1, minor: 3 }
+                ]
             }
         }
     );
@@ -1102,5 +1105,108 @@ fn gate_10_requests_have_stable_additive_wire_shapes() {
         let old: v1_0::ClientRequest =
             serde_json::from_value(serde_json::to_value(request).unwrap()).unwrap();
         assert_eq!(old, v1_0::ClientRequest::Unknown);
+    }
+}
+
+#[test]
+fn full_terminal_requests_are_additive_and_acquire_cannot_choose_an_attach_id() {
+    use agend_core::protocol::client::*;
+    use agend_core::protocol::terminal::{TerminalSize, TerminalViewport};
+    let requests = [
+        ClientRequest::SubscribeTerminalFrames {
+            data: TerminalSubscribeData {
+                request_id: "s-1".into(),
+                instance_id: "i-1".into(),
+                viewport: TerminalViewport {
+                    top: None,
+                    rows: 24,
+                },
+            },
+        },
+        ClientRequest::SetTerminalViewport {
+            data: TerminalViewportData {
+                request_id: "v-2".into(),
+                instance_id: "i-1".into(),
+                view_id: "view-1".into(),
+                generation: "holder-1".into(),
+                viewport: TerminalViewport {
+                    top: Some(100),
+                    rows: 24,
+                },
+            },
+        },
+        ClientRequest::TerminalControl {
+            data: ClientTerminalControlData {
+                request_id: "a-3".into(),
+                instance_id: "i-1".into(),
+                view_id: "view-1".into(),
+                generation: "holder-1".into(),
+                operation: ClientTerminalOperation::Acquire {
+                    size: TerminalSize {
+                        rows: 24,
+                        columns: 80,
+                    },
+                },
+            },
+        },
+    ];
+    for request in &requests {
+        let line = serde_json::to_string(request).unwrap();
+        assert_eq!(
+            serde_json::from_str::<ClientRequest>(&line).unwrap(),
+            *request
+        );
+        assert_eq!(
+            serde_json::from_str::<v1_0::ClientRequest>(&line).unwrap(),
+            v1_0::ClientRequest::Unknown
+        );
+        assert_eq!(
+            serde_json::from_str::<v1_1::ClientRequest>(&line).unwrap(),
+            v1_1::ClientRequest::Unknown
+        );
+    }
+    assert_eq!(
+        serde_json::to_value(&requests[2]).unwrap(),
+        json!({
+            "type": "terminal_control", "data": {
+                "request_id": "a-3", "instance_id": "i-1", "view_id": "view-1", "generation": "holder-1",
+                "operation": {"operation": "acquire", "size": {"rows": 24, "columns": 80}}
+            }
+        })
+    );
+    for response in [
+        ClientResponse::TerminalControlAck {
+            data: ClientTerminalControlAck {
+                request_id: "a-3".into(),
+                instance_id: "i-1".into(),
+                view_id: "view-1".into(),
+                generation: "holder-1".into(),
+                control: TerminalControlState::ReadOnly,
+                frame: None,
+            },
+        },
+        ClientResponse::TerminalControlChanged {
+            data: TerminalControlChangedData {
+                instance_id: "i-1".into(),
+                view_id: "view-1".into(),
+                generation: "holder-1".into(),
+                control: TerminalControlState::ReadOnly,
+                reason: "connection closed".into(),
+            },
+        },
+    ] {
+        let line = serde_json::to_string(&response).unwrap();
+        assert_eq!(
+            serde_json::from_str::<ClientResponse>(&line).unwrap(),
+            response
+        );
+        assert_eq!(
+            serde_json::from_str::<v1_0::ClientResponse>(&line).unwrap(),
+            v1_0::ClientResponse::Unknown
+        );
+        assert_eq!(
+            serde_json::from_str::<v1_1::ClientResponse>(&line).unwrap(),
+            v1_1::ClientResponse::Unknown
+        );
     }
 }

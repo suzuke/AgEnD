@@ -7,6 +7,7 @@ use std::collections::VecDeque;
 use std::io::{self, BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use agend_core::protocol::ProtocolVersion;
@@ -29,7 +30,7 @@ pub const REPLY_WITHIN: Duration = Duration::from_secs(10);
 pub struct Client {
     socket: PathBuf,
     caller: Option<String>,
-    reader: BufReader<UnixStream>,
+    pub(crate) reader: BufReader<UnixStream>,
     writer: UnixStream,
     /// The daemon's `hello` reply (selected version, 1.2: who it is).
     hello: SelectedVersionData,
@@ -39,6 +40,8 @@ pub struct Client {
     events: VecDeque<EventData>,
     next_request: u64,
     retried: Duration,
+    terminal_write_lock: Arc<Mutex<()>>,
+    pub(crate) terminal_failed: bool,
 }
 
 /// Why one attempt failed.
@@ -249,6 +252,8 @@ impl Client {
             events: VecDeque::new(),
             next_request: 0,
             retried: Duration::ZERO,
+            terminal_write_lock: Arc::new(Mutex::new(())),
+            terminal_failed: false,
         }
     }
 
@@ -277,6 +282,7 @@ impl Client {
     fn reconnect(&mut self) -> Result<(), ClientError> {
         let started = Instant::now();
         let ((reader, writer, hello), _) = open_retrying(&self.socket, &self.caller, self.needed)?;
+        self.terminal_write_lock = Arc::new(Mutex::new(()));
         self.reader = reader;
         self.writer = writer;
         self.hello = hello;
@@ -333,6 +339,14 @@ impl Client {
         redo: Redo,
         within: Duration,
     ) -> Result<ClientResponse, ClientError> {
+        if crate::terminal::is_terminal_request(request) {
+            version::check_at_least(self.selected(), agend_core::protocol::client::V1_4)
+                .map_err(ClientError::Version)?;
+            return Err(ClientError::Daemon {
+                code: error_code::INVALID_REQUEST.into(),
+                message: "use Sender::send_terminal and Client::next_full_terminal; terminal operations never reconnect or replay".into(),
+            });
+        }
         let id = request_id(request).map(str::to_owned);
         let line = line_of(request);
         loop {
@@ -476,7 +490,11 @@ impl Client {
             .writer
             .try_clone()
             .map_err(|e| ClientError::Disconnected(format!("cannot clone the connection: {e}")))?;
-        Ok(Sender { stream })
+        Ok(Sender {
+            stream,
+            selected: self.selected(),
+            terminal_write_lock: Arc::clone(&self.terminal_write_lock),
+        })
     }
 
     /// Blocks until the next screen or PTY chunk of a terminal subscription
@@ -574,7 +592,9 @@ pub enum TerminalUpdate {
 /// and never reads, so it does not wait for replies (they reach whoever
 /// reads the [`Client`]).
 pub struct Sender {
-    stream: UnixStream,
+    pub(crate) stream: UnixStream,
+    pub(crate) selected: ProtocolVersion,
+    pub(crate) terminal_write_lock: Arc<Mutex<()>>,
 }
 
 impl Sender {
@@ -603,10 +623,14 @@ impl Sender {
     /// [`Client`] reads the end of the stream at once. Dropping a `Sender`
     /// only closes its own handle; the connection stays open.
     pub fn close(&self) {
-        let _ = self.stream.shutdown(std::net::Shutdown::Both);
+        shutdown(&self.stream);
     }
 
     fn send(&mut self, request: &ClientRequest) -> Result<(), ClientError> {
+        let _guard = self
+            .terminal_write_lock
+            .lock()
+            .map_err(|_| ClientError::Disconnected("terminal writer lock is poisoned".into()))?;
         self.stream
             .write_all(&line_of(request))
             .map_err(|e| ClientError::Disconnected(format!("cannot write to the daemon: {e}")))
@@ -628,4 +652,13 @@ fn no_reply(within: Duration) -> ClientError {
 
 fn unexpected(reply: &ClientResponse) -> ClientError {
     ClientError::Disconnected(format!("unexpected reply: {reply:?}"))
+}
+
+/// macOS can reject SHUT_RDWR after peer write EOF while our write half is
+/// still open. Close each direction as a fallback so the peer sees release.
+pub(crate) fn shutdown(stream: &UnixStream) {
+    if stream.shutdown(std::net::Shutdown::Both).is_err() {
+        let _ = stream.shutdown(std::net::Shutdown::Write);
+        let _ = stream.shutdown(std::net::Shutdown::Read);
+    }
 }

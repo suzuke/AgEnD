@@ -48,6 +48,10 @@ const QUIET: Duration = Duration::from_millis(700);
 pub trait ClientProtocolFixture {
     /// The server's socket.
     fn socket(&self) -> PathBuf;
+    /// Actual advertised server capability; fake stays 1.3 until its C path exists.
+    fn supported_versions(&self) -> Vec<ProtocolVersion> {
+        SUPPORTED_VERSIONS.to_vec()
+    }
     /// Makes at least one new event happen; returns once it is published.
     fn emit(&mut self) -> Result<(), String>;
     /// Publishes `n` events at once; `Err` when this server cannot (the real
@@ -469,13 +473,14 @@ fn versions_are_negotiated<F: ClientProtocolFixture>(fx: &F) -> CaseResult {
     let (_, reply) = hello_with(
         fx.socket(),
         ClientHello {
-            supported: SUPPORTED_VERSIONS.to_vec(),
+            supported: fx.supported_versions(),
             caller: Some("clp-agent".into()),
         },
     )?;
-    ensure(selected(&reply) == Some(SUPPORTED_VERSIONS[0]), || {
-        format!("a 1.1 hello with a caller got {reply:?}")
-    })
+    ensure(
+        selected(&reply) == fx.supported_versions().into_iter().max(),
+        || format!("a 1.1 hello with a caller got {reply:?}"),
+    )
 }
 
 fn fleet_then_events_after_as_of<F: ClientProtocolFixture>(fx: &mut F) -> CaseResult {
@@ -848,7 +853,10 @@ fn only_the_operator_resolves_listed_actions<F: ClientProtocolFixture>(fx: &mut 
     })?;
     let after = get_fleet(&mut op, "clp-11d")?;
     ensure(!listed(&after), || {
-        format!("{item} is still listed after it was resolved")
+        format!(
+            "{item} is still listed after it was resolved; current items: {:?}; events: {:?}",
+            after.attention, events
+        )
     })
 }
 

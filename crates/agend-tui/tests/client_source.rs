@@ -24,9 +24,10 @@ use agend_tui::App;
 use agend_tui::app::{Connection, TermMode};
 use agend_tui::i18n::Language;
 use agend_tui::source::client::ClientSource;
+use agend_tui::source::{Source, TerminalEvent};
 use common::*;
-use ratatui::crossterm::event::KeyCode::{Down, Enter, Esc, Left, Right};
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::KeyCode;
+use ratatui::crossterm::event::KeyCode::{Down, Enter, Left, Right};
 
 // Each lab opens a listener, streams and reader/writer clones. Bound concurrent
 // labs so the suite runs under macOS's default 256-descriptor process limit.
@@ -129,10 +130,6 @@ fn open_terminal(app: &mut App, id: &str) {
     press(app, &[ch('/')]);
     type_str(app, id);
     press(app, &[Enter]);
-}
-
-fn ctrl(app: &mut App, c: char) {
-    app.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL));
 }
 
 #[test]
@@ -425,7 +422,10 @@ fn only_the_terminal_reconnects_when_its_connection_ends() {
     wait_until(&mut app, |t| t.contains("general ─"));
     open_terminal(&mut app, "g11-1");
     press(&mut app, &[ch('i')]);
-    assert!(app.term.as_ref().unwrap().typing);
+    assert!(
+        !app.term.as_ref().unwrap().typing,
+        "old protocol stays read-only"
+    );
     daemon.drop_terminal_subscribers();
     let text = wait_until(&mut app, |t| t.contains("· ended, retrying"));
     assert!(app.is_connected(), "no disconnected screen: {text}");
@@ -513,7 +513,7 @@ fn an_empty_screen_is_a_message_and_the_view_stays() {
 }
 
 #[test]
-fn typing_sends_every_key_but_ctrl_bracket_and_a_disconnect_stops_it() {
+fn old_peer_stays_read_only_and_a_disconnect_never_enables_input() {
     let lab = Lab::new();
     let daemon = lab.daemon();
     daemon.set_instance(instance("g11-1", "claude", AgentState::Unknown));
@@ -522,30 +522,9 @@ fn typing_sends_every_key_but_ctrl_bracket_and_a_disconnect_stops_it() {
     wait_until(&mut app, |t| t.contains("general ─"));
     open_terminal(&mut app, "g11-1");
     press(&mut app, &[ch('i')]);
-    type_str(&mut app, "hi");
-    press(
-        &mut app,
-        &[
-            ch('q'),
-            ch('L'),
-            ch('h'),
-            Esc,
-            Left,
-            Enter,
-            KeyCode::Backspace,
-        ],
-    );
-    ctrl(&mut app, 'c');
-    ctrl(&mut app, '5'); // how some terminals report Ctrl-]
     assert!(!app.term.as_ref().unwrap().typing);
-    assert!(!app.quit);
-    std::thread::sleep(Duration::from_millis(300));
-    let typed: Vec<u8> = daemon
-        .terminal_inputs()
-        .into_iter()
-        .flat_map(|(_, b)| b)
-        .collect();
-    assert_eq!(typed, b"hiqLh\x1b\x1b[D\r\x7f\x03");
+    assert!(render(&mut app).contains("requires client 1.4"));
+    assert!(daemon.terminal_inputs().is_empty());
     // A disconnect ends typing; after reconnecting it is read-only.
     press(&mut app, &[ch('i')]);
     drop(daemon);
@@ -562,56 +541,64 @@ fn typing_sends_every_key_but_ctrl_bracket_and_a_disconnect_stops_it() {
 }
 
 #[test]
-fn terminal_errors_stay_on_the_terminal_and_do_not_answer_a_retry() {
+fn legacy_terminal_errors_stay_on_their_source_and_do_not_answer_a_retry() {
     let lab = Lab::new();
     let daemon = lab.daemon();
     daemon.set_instance(instance("g11-x", "codex", AgentState::Unknown));
     daemon.set_instance(instance("g11-2", "claude", AgentState::Failed));
     daemon.add_attention(failed_item("g11-2"));
-    let (mut app, _) = lab.app(None);
-    wait_until(&mut app, |t| t.contains("Needs you · 1"));
-    open_terminal(&mut app, "g11-x");
-    press(&mut app, &[ch('i'), ch('x')]);
-    // The id-less not_supported is in flight on the terminal connection
-    // while the retry waits for its reply on the request connection.
-    ctrl(&mut app, ']');
-    press(&mut app, &[ch('h'), Enter, ch('1')]);
-    let text = render(&mut app);
-    assert!(text.contains("Sent: Retry g11-2"), "{text}");
+    let mut source = ClientSource::new(&lab.socket(), None);
+    source.connect().unwrap();
+    source.open_terminal("g11-x").unwrap();
+    source.terminal_input(b"x").unwrap();
+    source
+        .resolve("instance-failed:g11-2", AttentionAction::Retry)
+        .unwrap();
     assert!(
         daemon.fleet().attention.is_empty(),
-        "the retry reached the daemon"
+        "retry reached the request connection"
     );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut refusal = None;
+    while refusal.is_none() && Instant::now() < deadline {
+        for event in source.poll_terminal() {
+            if let TerminalEvent::Error { code, message } = event {
+                refusal = Some((code, message));
+            }
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let (code, message) = refusal.expect("legacy refusal stayed on terminal connection");
+    assert_eq!(code, "not_supported");
+    assert!(message.contains("approved CLI 0.159.3"));
     assert!(daemon.terminal_inputs().is_empty());
-    // Back in the terminal the error is shown there.
-    open_terminal(&mut app, "g11-x");
-    press(&mut app, &[ch('i'), ch('x')]);
-    let text = wait_until(&mut app, |t| t.contains("not_supported"));
-    assert!(
-        text.contains("not_supported: typing into a codex terminal waits until U17 is verified"),
-        "{text}"
-    );
-    assert!(!app.term.as_ref().unwrap().typing, "back to read-only");
-    assert!(text.contains("━━ Terminal of g11-x · live"), "{text}");
+    source.poll().unwrap();
 }
 
 #[test]
-fn an_agent_cannot_type_the_daemon_says_so() {
+fn the_legacy_source_still_reports_the_daemons_agent_input_refusal() {
     let lab = Lab::new();
     let daemon = lab.daemon();
     daemon.set_instance(instance("g11-1", "claude", AgentState::Unknown));
-    let (mut app, _) = lab.app(Some("g11-1"));
-    wait_until(&mut app, |t| t.contains("general ─"));
-    open_terminal(&mut app, "g11-1");
-    press(&mut app, &[ch('i'), ch('x')]);
-    let text = wait_until(&mut app, |t| t.contains("forbidden"));
-    assert!(
-        text.contains("forbidden: only the operator can type into an agent's terminal"),
-        "{text}"
-    );
-    assert!(!app.term.as_ref().unwrap().typing);
+    let mut source = ClientSource::new(&lab.socket(), Some("g11-1".into()));
+    source.connect().unwrap();
+    source.open_terminal("g11-1").unwrap();
+    source.terminal_input(b"x").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut refusal = None;
+    while refusal.is_none() && Instant::now() < deadline {
+        for event in source.poll_terminal() {
+            if let TerminalEvent::Error { code, message } = event {
+                refusal = Some((code, message));
+            }
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let (code, message) = refusal.expect("operator guard refusal");
+    assert_eq!(code, "forbidden");
+    assert!(message.contains("only the operator can type"));
     assert!(daemon.terminal_inputs().is_empty());
-    assert!(matches!(app.connection, Connection::Connected));
+    source.poll().unwrap();
 }
 
 #[test]
@@ -658,26 +645,56 @@ fn a_tall_terminal_shows_its_newest_rows_until_scrolled_up() {
 /// though the loop ticks every 100 ms.
 #[test]
 fn reconnect_attempts_are_every_500_ms() {
-    let lab = Lab::new();
-    let (mut app, _) = lab.app(None);
-    let started = Instant::now();
-    while started.elapsed() < Duration::from_millis(2000) {
-        app.tick();
-        std::thread::sleep(agend_tui::TICK);
+    // A descheduled UI can execute fewer ticks in two seconds. Check actual
+    // attempts and their time bounds, rather than requiring host throughput.
+    for pause in [Duration::ZERO, Duration::from_millis(2100)] {
+        let lab = Lab::new();
+        let mut previous_tick_start = Instant::now();
+        let (mut app, _) = lab.app(None);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut attempts = 0;
+        std::thread::sleep(pause);
+        while attempts < 3 {
+            let tick_start = Instant::now();
+            app.tick();
+            let tick_end = Instant::now();
+            let Connection::Disconnected {
+                attempts: after, ..
+            } = app.connection
+            else {
+                panic!("{:?}", app.connection);
+            };
+            if after != attempts {
+                assert_eq!(after, attempts + 1, "one tick made multiple attempts");
+                // Both reconnect calls lie within their tick's start/end
+                // bounds. A shorter span proves an early reconnect, while
+                // scheduler pauses can only make this span longer.
+                let span = tick_end.duration_since(previous_tick_start);
+                assert!(
+                    span >= Duration::from_millis(500),
+                    "reconnect {after} arrived early: span={span:?}, pause={pause:?}"
+                );
+                previous_tick_start = tick_start;
+                attempts = after;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "no reconnect progress: attempts={attempts}, pause={pause:?}"
+            );
+            if attempts < 3 {
+                std::thread::sleep(agend_tui::TICK);
+            }
+        }
+        // Explicit r still bypasses the interval immediately after an attempt.
+        press(&mut app, &[ch('r')]);
+        let Connection::Disconnected {
+            attempts: after, ..
+        } = app.connection
+        else {
+            panic!();
+        };
+        assert_eq!(after, attempts + 1);
     }
-    let Connection::Disconnected { attempts, .. } = app.connection else {
-        panic!("{:?}", app.connection);
-    };
-    assert!((3..=5).contains(&attempts), "{attempts} attempts in 2 s");
-    // `r` still tries at once.
-    press(&mut app, &[ch('r')]);
-    let Connection::Disconnected {
-        attempts: after, ..
-    } = app.connection
-    else {
-        panic!();
-    };
-    assert_eq!(after, attempts + 1);
 }
 
 /// P7: after a reconnect, a selection that is gone goes to the first row
@@ -727,7 +744,10 @@ fn typing_stops_when_the_instance_fails() {
     wait_until(&mut app, |t| t.contains("general ─"));
     open_terminal(&mut app, "g11-1");
     press(&mut app, &[ch('i')]);
-    assert!(app.term.as_ref().unwrap().typing);
+    assert!(
+        !app.term.as_ref().unwrap().typing,
+        "old protocol stays read-only"
+    );
     daemon.set_instance(instance("g11-1", "claude", AgentState::Failed));
     let text = wait_until(&mut app, |t| t.contains("· last screen (stopped)"));
     assert!(!app.term.as_ref().unwrap().typing, "{text}");
