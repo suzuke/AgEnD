@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - 依 crate 由下往上分 13 個施工關；每個施工關單獨驗收，使用者確認後才開下一個施工關（D22）。
-> - 目前狀態：**第 1–10 施工關完成並已合併**；第 11 施工關 A、B 段已驗收並合併（B 段 #140，2026-10-01），C 段 P1–P6 已逐項確認（D39），提案 #144 已合併，實作中。第 10 施工關已完成自動／獨立／CI 與人工補驗，使用者已確認合併（#143，2026-10-02）；第 12 施工關 A 段提案 #138 待確認；第 13 施工關未開始。
-> - 下一步：在 `feat/gate-11c-terminal` 專屬 worktree 實作已確認的 C 段 P1–P6（提案 #144 已合併）。第 12 施工關 A 段 P1–P10 在 #138，仍待使用者確認。
+> - 目前狀態：**第 1–10 施工關完成並已合併**；第 11 施工關 A、B 段已驗收並合併（B 段 #140，2026-10-01），C 段 P1–P6 已逐項確認（D39），提案 #144 已合併，C 段實作已接通、驗收收尾中（#145）。第 10 施工關已完成自動／獨立／CI 與人工補驗，使用者已確認合併（#143，2026-10-02）；第 12 施工關 A 段提案 #138 待確認；第 13 施工關未開始。
+> - 下一步：核 C 段 #145 提示修正的固定 head 自動／獨立／CI 與清理結果，依使用者確認再 merge。第 12 施工關 A 段 P1–P10 在 #138，仍待使用者確認。
 
 ## 13 個施工關
 
@@ -21,7 +21,7 @@
 | 8 `client` | [完成（2026-09-26）](gates/gate-08-client.md) | 整合施工關：agend-client + protocol server | CLI 連得上；daemon 重啟時會重試 |
 | 9 `cli` | [完成（2026-09-29；已 merge #136）](gates/gate-09-cli.md) | agend CLI：agent 命令、操作者命令、status；安裝相關先做 `doctor`、`init`，服務註冊留第 13 施工關 | 對假／真 daemon 驗輸出與錯誤；兩個假 Codex agent 互傳訊息、中途重啟不漏不重 |
 | 10 `pipeline` | [完成（2026-10-02；#143 已確認合併）](gates/gate-10-pipeline.md) | daemon：pipeline、git、runner、forge local、supervisor、reconcile | 假 driver + 暫存 repo：task 從派工走到 merge |
-| 11 `tui` | [實作中（A、B 段已 merge；C 段提案 #144 已 merge，功能未驗收）](gates/gate-11-tui.md) | attention-first TUI：畫面層、接真 daemon；C 段完整重現 agent CLI 與滑鼠滾動 | A 段假事件、B 段真 daemon 驗收通過；C 段設計已確認，holder／runtime／daemon／client 與六項 fake／真契約已接通，TUI App 已有局部證據，原生底線／標準游標已有讀回證據，完整 fake U17 本機已通過；真 Codex 0.159.3 首次 U17 通過，0.159.3 開放已獲同意，新 head 獨立及人工驗收待完成 |
+| 11 `tui` | [C 段驗收收尾（A、B 已 merge；#145 待確認）](gates/gate-11-tui.md) | attention-first TUI、完整終端、resize、多視窗、鍵鼠／貼上與歷史 | 固定 09a205d 的獨立與四個雙平台 CI jobs 各 900 passed／2 既有 ignored；0.159.3 真 U17 已獨立核實。實機紀錄已取得，使用者要求剩餘行為自動驗證；本批提示修正的固定 head 結果與清理另核，merge 待確認 |
 | 12 `adapters` | [提案中（A 段 draft PR #138 待確認，尚未 merge 或實作）](gates/gate-12-adapters.md) | A claude、B opencode driver、C forge github、D Telegram | 先對假實作，再做真 backend smoke test |
 | 13 `install` | [未開始](gates/gate-13-install.md) | 安裝與發布（最後一個施工關）：服務註冊、`agend uninstall`、`agend telegram setup`（由 daemon 配對）、`xtask release`、brew、GitHub release、`cargo install` | CI 用全新 HOME + 假 agent，從安裝到第一個 task 完成 < 5 分鐘；每個 `doctor` 檢查都有「故意弄壞 → 看到修正指令」的測試 |
 
@@ -71,6 +71,8 @@
 第 10 施工關已完成驗收，使用者於 2026-10-02 明確確認 merge（[PR #143](https://github.com/suzuke/AgEnD/pull/143)）。第 11 施工關 C 段 [P1–P6](gates/gate-11c-proposal.md#使用者確認紀錄) 已逐項確認，使用者另授權合併 #144；提案 #144 已合併，接著在專屬 worktree 實作；第 12 施工關 A 段 #138 的 P1–P10 仍待使用者確認。 人工主流程與事件補驗見 [人工紀錄](gates/gate-10-manual-record.md)。
 
 ## 進度紀錄
+
+- 2026-10-03 C 段實機驗收與收尾（#145）：完整模式、歷史固定／回底、mouse／Shift、alt／normal、含 0x1D 的多行貼上、超限拒絕、多視窗唯讀／重取與尺寸已有截圖及自行比對紀錄。使用者要求後續改採自動化並清理殘留；修正控制提示重複，原版 count=2 反例及正向保留。本批固定 head／fresh verifier／CI 以 PR 結果核實，未 merge；[紀錄](gates/gate-11c-closeout.md)。
 
 - 2026-10-03 全新 verifier r2 找到 resume 前歸屬讀取的測試缺口：舊回歸未拒絕 preread mutant。新增預設關閉的 fake producer replay 與真人工 item 回歸（21d68c9）：固定 runtime 通過、移除先讀永久歸屬則錯領人工 turn 並 exit 101；U17 12／testkit 115 passed。原失敗保留，最終新 head 另派全新 verifier／CI，尚未人工驗收或 merge（draft PR #145）。
 

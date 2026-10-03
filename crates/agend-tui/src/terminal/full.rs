@@ -51,9 +51,10 @@ pub fn render(frame: &mut Frame, app: &App) -> bool {
     } else {
         Text::FullReadOnly
     };
-    let status = match &app.message {
-        Some(message) => format!("{} · {} · {message}", term.agent, app.lang.tr(state)),
-        None => format!("{} · {}", term.agent, app.lang.tr(state)),
+    let label = app.lang.tr(state);
+    let status = match app.message.as_deref() {
+        Some(message) if message != label => format!("{} · {label} · {message}", term.agent),
+        _ => format!("{} · {label}", term.agent),
     };
     frame.buffer_mut().set_stringn(
         area.x,

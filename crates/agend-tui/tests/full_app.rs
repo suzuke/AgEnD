@@ -289,9 +289,10 @@ fn another_window_revokes_input_and_only_an_explicit_i_restores_it() {
     }
     assert!(!a.full_mode());
     assert!(!a.term.as_ref().unwrap().typing);
+    let rendered = agend_tui::render_to_string(&mut a, 200, 24);
+    assert_eq!(rendered.matches("another window").count(), 1);
     key(&mut a, KeyCode::Char('x'));
     assert!(fake.parser.received().is_empty());
-    assert!(agend_tui::render_to_string(&mut a, 80, 24).contains("another window"));
     acquire(&mut a);
     key(&mut a, KeyCode::Char('y'));
     let deadline = Instant::now() + Duration::from_secs(3);

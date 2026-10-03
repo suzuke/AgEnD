@@ -3,13 +3,13 @@
 > **TL;DR**
 > - attention-first TUI；A 段畫面層提前做（你同意與第 3–10 施工關並行，放寬 D22），B 段接真 daemon，兩段都已合併。
 > - 記住：**畫面只讀 `Source`，不知道資料從哪來**；真的來源 `ClientSource` 只經 `agend-client`，TUI 裡沒有 socket 程式碼；權限只在 daemon 擋。
-> - 下一步：A、B 段已完成並 merge（B 段 #140，2026-10-01）；C 段（完整模式）[P1–P6 提案](gate-11c-proposal.md) 已確認（D39），提案 #144 已合併，實作中；第 10 施工關已 merge #143。
+> - 下一步：A、B 段已 merge；C 段 #145 已接通完整終端，實機紀錄及自動驗收收尾見 [收尾頁](gate-11c-closeout.md)。本批固定 head、全新 verifier、CI 與清理核實後等使用者 merge 確認。
 
 **先看這條**：B 段（接真 daemon）的步驟會用到 `agend`。每個新開的終端機分頁（包括第二個終端）都要先跑 B 段開頭的設定，否則會跑到舊的 Node 版 `agend` 1.24.0。A 段只用 `cargo`，不用 `agend`。
 
 ## 狀態
 
-**實作中：A、B 段完成並已 merge（B 段 #140，2026-10-01，`462822a`）；C 段提案 #144 已 merge（`139fea5`），功能尚未驗收**（2026-10-02）。第 10 施工關已 merge #143，前置條件已滿足。
+**C 段驗收收尾；A、B 段已 merge，#145 實作未 merge**（2026-10-03）。固定 09a205d 的獨立／雙平台 CI 已通過，使用者已有實機操作紀錄並要求剩餘行為改由自動化驗證；本批提示修正的固定 head 結果與清理見 [收尾頁](gate-11c-closeout.md)。
 
 - 畫面層（2026-09-26，已 merge #120）：A 段通過、T1–T18／G1–G4 已追認。
 - B 段提案（#133，2026-09-28 已 merge）：P1–P7 使用者已確認。
@@ -559,6 +559,8 @@ unset AGEND_BIN               # 前幾關步驟留下的 export 可能指到已�
 | 2026-09-29 | B 段通過 | 在 `feat/gate-11-tui-impl`（be7a7c5）由 agent 帶著走 7 步。步驟 1 假、真 daemon 兩段全過（預設 `ulimit -n 256` 也能跑）。步驟 4 打 `hello` 時被假 agent 每秒的 `counter` 行切開，是假 agent 沒有輸入框的正常現象（真 claude 有輸入框）；`Ctrl-]` 在使用者的終端可以離開輸入。步驟 6 daemon 停著時 agent 的 counter 繼續數，重連後接著目前的數字（holder 沒被重啟，D3）。使用者另外要求 TUI 裡完整重現 agent CLI（含滑鼠滾動）→ C 段。 |
 
 ## 進度紀錄
+
+- 2026-10-03 C 段實機驗收與收尾（#145）：完整模式、歷史固定／回底、mouse／Shift、alt／normal、含 0x1D 的多行貼上、超限拒絕、多視窗唯讀／重取與尺寸已有截圖及自行比對紀錄。使用者要求後續改採自動化並清理殘留；修正控制提示重複，原版 count=2 反例及正向保留。本批固定 head／fresh verifier／CI 以 PR 結果核實，未 merge；[紀錄](gate-11c-closeout.md)。
 
 - 2026-10-03 0.159.3 開放後的完整 acceptance 抓到兩個舊 U17 拒絕訊息斷言；真／fake 文案及 native／TUI consumer 已同步為已驗版本條件，保留 accept-r1／r2 原失敗。1bd0d6d 不列完整通過；修正新 head 待完整驗收、CI 與全新 verifier（draft PR #145）。
 

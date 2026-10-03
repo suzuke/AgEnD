@@ -43,6 +43,10 @@
 
 ## 你親自驗收（實作後，一次帶一步）
 
+### 2026-10-03 執行方式更新
+
+使用者已操作下表中的實機畫面／鍵鼠／貼上／歷史／多視窗，並要求後續驗證由 agent 自動化完成。剩餘行為以真 producer、native PTY、外層 PTY 與相同斷言核實；已取得實機紀錄與自行比對分開保留於 [收尾頁](gate-11c-closeout.md)。此指示改變操作方式，沒有刪除下表或自動矩陣的驗證要求；merge 仍須使用者確認。
+
 agent 依 [AGENTS.md](../../AGENTS.md#帶使用者親自驗收) 先提供實際 worktree、獨立 CARGO_TARGET_DIR、Rust binary PATH 與測試 home，等每步輸出才繼續。以下是要驗的操作，不是本次提案已做完的勾選。
 
 1. 確認 Rust CLI 與固定 head，跑完整 `accept tui`；假、真 daemon demo 均成功。

@@ -21,6 +21,8 @@ App 已選用此路徑；真 daemon／holder／PTY 的單次 Source 輸入與 th
 
 ## C 段 App 路徑（局部驗證）
 
+多視窗回歸另核交接當下控制提示只出現一次；檢查位於按鍵清除 message 之前。原 renderer 會重複 label／message，同一 producer 情境失敗 count=2，修正版通過。實機與自動收尾範圍見 [收尾頁](../../docs/gates/gate-11c-closeout.md)。
+
 `tests/full_app.rs` 的 21 個 cases 由真 holder parser 產生畫面／modes，再經 fake daemon 的實際 socket 操作。涵蓋相符尺寸才開輸入、取得控制途中 resize／捲動、三種本機退出鍵、另一視窗交接、舊能力唯讀、cells 色彩／樣式／寬字、application cursor／keypad、paste 整段拒絕、SGR／legacy／UTF-8 mouse、狀態列及區外、Shift／tracking 分流、歷史固定／淘汰、唯讀 live grid 捲動、停止與重連不恢復控制。
 
 新增兩個 renderer cases 以真 holder parser frame 經 crossterm backend 輸出，再由第二個真 parser 讀回；核五種底線、色彩、六種標準游標、裁切／隱藏／finder 返回與閒置不重印。相同 glyph 的樣式切換可抓到 single-only mutant。

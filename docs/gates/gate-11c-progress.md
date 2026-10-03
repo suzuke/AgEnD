@@ -1,9 +1,9 @@
 # 第 11 施工關 C 段：實作進度
 
 > **TL;DR**
-> - [draft PR #145](https://github.com/suzuke/AgEnD/pull/145) 持續實作完整終端；目前接通 holder／runtime／daemon／client 路徑，C 段尚未完成或驗收。
-> - 已接通 frame／歷史及實際 resize／input ack；client 1.4 型別／傳輸已加入；daemon 多視窗與六項 fake／真契約已加入；TUI App 已接完整模式、鍵鼠／貼上與歷史；原生底線／標準游標已有讀回證據；完整 fake U17 本機已通過；真 Codex 0.159.3 首次 U17 已通過；0.159.3 開放已獲同意，新 head 獨立及人工驗收待完成。
-> - 下一步：全新 verifier 核版本開放新 head，再逐步人工驗收；merge 仍另行確認。
+> - [draft PR #145](https://github.com/suzuke/AgEnD/pull/145) 已接通 C 段完整終端與已驗版本 Codex 輸入，正在驗收收尾，merge 待使用者確認。
+> - 固定 09a205d 經全新 verifier r3 與四個雙平台 CI jobs 各核 900 passed／2 既有 ignored、實際 no-std 通過；實機操作紀錄已取得，使用者要求剩餘行為自動化。
+> - 下一步：核本批提示修正的固定 head／全新 verifier／CI，清理本批殘留後報告；[實機與收尾紀錄](gate-11c-closeout.md)。
 
 ## 已實作
 
@@ -22,6 +22,8 @@
 | 開發中能力邊界 | 真 daemon 選 1.4；fake 預設 1.3，注入 TerminalProducer 後選 1.4；一般 NEEDED 保留 1.3，舊 peer 仍可用 B 路徑 | native 全路徑＋1.3 真／假能力拒絕＋CLP |
 
 ## 驗證紀錄
+
+- 2026-10-03 C 段實機驗收與收尾（#145）：完整模式、歷史固定／回底、mouse／Shift、alt／normal、含 0x1D 的多行貼上、超限拒絕、多視窗唯讀／重取與尺寸已有截圖及自行比對紀錄。使用者要求後續改採自動化並清理殘留；修正控制提示重複，原版 count=2 反例及正向保留。本批固定 head／fresh verifier／CI 以 PR 結果核實，未 merge；[紀錄](gate-11c-closeout.md)。
 
 - 2026-10-03 全新 verifier r2 找到 resume 前歸屬讀取的測試缺口：舊回歸未拒絕 preread mutant。新增預設關閉的 fake producer replay 與真人工 item 回歸（21d68c9）：固定 runtime 通過、移除先讀永久歸屬則錯領人工 turn 並 exit 101；U17 12／testkit 115 passed。原失敗保留，最終新 head 另派全新 verifier／CI，尚未人工驗收或 merge（draft PR #145）。
 
