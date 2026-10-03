@@ -26,7 +26,7 @@
 
 ~~~bash
 cd "<你的 AgEnD worktree>"
-export CARGO_TARGET_DIR=AgEnD-g11c-target
+export CARGO_TARGET_DIR="$PWD/AgEnD-g11c-target"
 ~/.cargo/bin/cargo build -p agend --bin agend --example codex_u17_live
 env -u AGEND_REAL_CODEX "$CARGO_TARGET_DIR/debug/examples/codex_u17_live"
 ~~~

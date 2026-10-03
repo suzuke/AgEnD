@@ -62,7 +62,7 @@ fixture 原先在另一 history socket idle 後立即假設 driver 已 idle；�
 
 ~~~bash
 cd "<你的 AgEnD worktree>"
-export CARGO_TARGET_DIR=AgEnD-g11c-target
+export CARGO_TARGET_DIR="$PWD/AgEnD-g11c-target"
 ~/.cargo/bin/cargo build -p agend --example fake_codex
 ~/.cargo/bin/cargo test -p agend --test codex_u17 -- --nocapture
 ~/.cargo/bin/cargo test -p agend-daemon --test codex_driver

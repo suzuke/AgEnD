@@ -29,7 +29,7 @@
 
 ```bash
 cd "<你的 AgEnD worktree>"
-export CARGO_TARGET_DIR=AgEnD-g10-fix-target
+export CARGO_TARGET_DIR="$PWD/AgEnD-g10-fix-target"
 ~/.cargo/bin/cargo build -p agend -p agend-testkit --bins
 export PATH="$CARGO_TARGET_DIR/debug:$PATH"
 agend --version
