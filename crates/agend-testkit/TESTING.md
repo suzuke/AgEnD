@@ -23,6 +23,8 @@ opt-in fake manual frontend 的原生驗證在 `agend/tests/codex_u17.rs`：真 
 
 新增 `resume_notification_requires_persistent_attribution_before_the_rpc_reply`：真 holder／wrapper／raw fake frontend 先產生並保存 clientId=null 的人工同文 turn，再以預設關閉的 fake-only `agendFake/replayUserOnNextResume` 在下一次 resume response 前重播原 item/completed。測試核 producer item／turn 身分、實際 replay count=1 與一次性關閉；重接到拒絕版本仍不得取人工 receipt。沒有合成人工 item／frame，不呼叫真模型。
 
+CLP-26 的 EOF release 判定以獨立 PTY consumer 紀錄為準；`GetFleet` 回覆不是背景 legacy input 的完成 fence。原 macOS CI 的 `AFTER-EOF` 失敗 log 保留，收尾以修正後固定 head 重驗。
+
 ## 怎麼跑
 
 ```bash

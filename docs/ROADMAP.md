@@ -139,3 +139,5 @@
 - 2026-10-02 全新 verifier r12 CONFIRMED `dfe5bc6`：完整 workspace 771 passed／2 ignored、accept 713 passed／2 ignored與三組組合探測通過；原 PATH／等待 fixture 失敗保留。push／PR 共四個 Ubuntu／macOS CI job 成功。README、ROADMAP 與 Gate 10 驗收文件已同步／分頁，待人工驗收、未 merge（draft PR #143；[證據](gates/gate-10-verification.md)）。
 
 完整紀錄見 [施工路線圖進度紀錄](roadmap-progress.md)。
+
+- 2026-10-03：C 收尾 verifier 指出名詞表／core／client 狀態殘留，已同步；74fc554 的 macOS CI 抓到 CLP-26 將 GetFleet 誤當輸入完成 fence，契約改以獨立 PTY consumer 判定 EOF release，保留原失敗 log 並重驗（draft PR #145；未 merge）。

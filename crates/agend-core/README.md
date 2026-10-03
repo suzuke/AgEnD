@@ -15,7 +15,7 @@
 
 `PipelineView::replace_attention_if` 定義原子條件更新：捕捉值仍相同才 replace／publish，移除或已變更就拒絕；core 僅定義 port，Fleet 實作鎖。用於避免 Retry 與 failed-item enrichment 交錯時重建舊項目。
 
-policy::codex_input 預設拒絕所有 Codex 人工輸入；U17 診斷政策只允許一個明確 instance，沒有認證或持久化 CLI 版本。[證據](../../docs/gates/gate-11c-u17-validation.md)。
+`policy::codex_input` 的 `approved()` 只允許精確 `codex-cli 0.159.3`；未知或其他版本拒絕人工輸入。daemon 核 holder 啟動紀錄與 thread 身分，曾允許人工輸入的 thread 永久只用自己的 clientId 對帳。診斷政策另限一個明確 instance，不改正式許可。見 [版本政策](../../docs/gates/gate-11c-codex-input.md) 與 [U17 證據](../../docs/gates/gate-11c-u17-validation.md)。
 
 ## 負責
 

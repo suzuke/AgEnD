@@ -205,16 +205,6 @@ impl Window {
             },
         )
     }
-    fn fleet(&mut self, id: &str) {
-        self.client
-            .send(&ClientRequest::GetFleet {
-                data: RequestIdData {
-                    request_id: id.into(),
-                },
-            })
-            .unwrap();
-        assert!(matches!(self.response(id), ClientResponse::Fleet { .. }));
-    }
 }
 fn size(rows: u16, columns: u16) -> TerminalSize {
     TerminalSize { rows, columns }
@@ -416,10 +406,19 @@ fn eof(fx: Fixture) -> CaseResult {
                 },
             })
             .unwrap();
-        if matches!(a.response("eof-check"), ClientResponse::Fleet { .. }) {
+        // GetFleet is not an input/release fence: native legacy input runs
+        // on the terminal actor and can be refused after Fleet has arrived.
+        // Drain this request's replies, then use the independent PTY consumer
+        // record to decide whether EOF actually released control.
+        loop {
+            match a.response("eof-check") {
+                ClientResponse::Fleet { .. } => break,
+                response => denied(response, error_code::CONTROL_REQUIRED),
+            }
+        }
+        if fx.received().contains("AFTER-EOF") {
             break;
         }
-        a.fleet("drain");
         assert!(Instant::now() < deadline, "EOF did not release control");
         std::thread::sleep(Duration::from_millis(10));
     }
