@@ -570,7 +570,7 @@ fn legacy_terminal_errors_stay_on_their_source_and_do_not_answer_a_retry() {
     }
     let (code, message) = refusal.expect("legacy refusal stayed on terminal connection");
     assert_eq!(code, "not_supported");
-    assert!(message.contains("U17 is verified"));
+    assert!(message.contains("approved CLI 0.159.3"));
     assert!(daemon.terminal_inputs().is_empty());
     source.poll().unwrap();
 }

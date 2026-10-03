@@ -32,7 +32,7 @@ migration 0006 新增 codex_input_threads(thread_id)，沒有 instance 外鍵，
 - DB 拒寫不產生 GO／輸入許可；歸屬讀取失敗在 resume 前拒絕。
 - store 歸屬跨重開、重複插入與 prune 保存；只有歸屬資料的 DB 也會做 snapshot；v1–v6 fixtures 前向升級到 SQLite-produced golden。
 
-本批 targeted 回歸：codex_u17 11、daemon lib 79、既有 Driver 契約 15、store 40 passed。初跑的測試封裝錯誤、fixture 外鍵順序與缺 retention 反例保留於 /private/tmp/g11c-implementation-logs/version-input-*；修正後 regressions-r3 全部通過。完整 acceptance／新 head CI／獨立報告另核。
+本批 targeted 回歸：codex_u17 11、daemon lib 79、既有 Driver 契約 15、store 40 passed。初跑的測試封裝錯誤、fixture 外鍵順序與缺 retention 反例保留於 /private/tmp/g11c-implementation-logs/version-input-*；修正後 regressions-r3 全部通過。完整 acceptance 初跑另抓到兩個舊拒絕訊息 consumer：tui_daemon 的逐字斷言與 client_source 的 U17 字串斷言；版本拒絕 code／路由保護保持有效，訊息斷言同步為 approved CLI 0.159.3。原失敗保留於 accept-r1／r2；完整 acceptance／新 head CI／獨立報告另核。
 
 ## 原證據與同意
 

@@ -9,10 +9,10 @@
 //! P2; identity is checked before the item is looked up). `answer_ask`
 //! answers `unknown_ask` (no asks before gate 10) and changes nothing.
 //!
-//! Gate 11 B (P6): `terminal_input` is the operator's only: an agent gets
+//! Gate 11 C (P6): `terminal_input` is the operator's only: an agent gets
 //! `forbidden` (identity first), an instance without a live terminal
-//! `no_terminal`, a codex instance `not_supported` (until U17 is verified,
-//! gate 7 P1); otherwise the bytes go to the holder and nothing is
+//! `no_terminal`, an unapproved or disconnected codex peer `not_supported`;
+//! otherwise the bytes go to the holder and nothing is
 //! answered. Its errors carry no request id.
 //!
 //! Gate 9 (P1): permissions are checked here only. `command` (agent
