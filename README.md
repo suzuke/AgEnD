@@ -2,16 +2,18 @@
 
 > **TL;DR**
 > - 這是 AgEnD（Agent Engineering Daemon）v2：異質 agent 團隊的自主 merge 流水線。
-> - 狀態：**pre-alpha**。第 1 施工關 `agend-core` 已完成（#105，2026-09-25 驗收通過）；其他 crate 還是骨架，沒有可用功能。
+> - 狀態：**pre-alpha**。第 1–11 施工關已完成並合併；第 11 施工關 C 段 #145 於 2026-10-03 經使用者確認合併（`b2152db`）。其他 backend adapter 與安裝發布仍待完成。
 > - 下一步：先讀 [AGENTS.md](AGENTS.md)，再看 [docs/ROADMAP.md](docs/ROADMAP.md) 的目前狀態。
 
 ## 這是什麼
 
-一個常駐的 daemon，讓 claude、codex、opencode 組成的 agent 團隊自己完成「派工 → 開發 → checks → 互審 → merge」。
+目標是讓一個常駐的 daemon 協調 claude、codex、opencode，讓 agent 團隊自己完成「派工 → 開發 → checks → 互審 → merge」。
 
 人只處理例外：請示、門檻卡住、agent 卡住。
 
 不拼終端多工器、不拼支援的 agent 數量、不拼手機 App。
+
+以下是設計目標；已交付的功能見「目前可用範圍」。
 
 | 差異化 | 怎麼做 |
 |---|---|
@@ -21,6 +23,14 @@
 | git 防護內建 | shim 只進 agent 的 PATH，擋 agent 自建 branch/worktree 與改 main |
 
 第一版範圍：macOS + Linux；backend 為 claude / codex / opencode。
+
+## 目前可用範圍
+
+- **Runtime 與持久化**：git／kill shim、PTY holder、SQLite store、daemon 與 client；daemon 重啟後 holder 與 agent 持續執行。
+- **Codex 與 CLI**：app-server driver、訊息送達與冪等、三級忙碌策略；`status`、`send`、`inbox`、instance 管理、`daemon restart`、`doctor`、`init`。兩個假 Codex agent 中途重啟仍不漏不重的里程碑已驗收，真 Codex 另有 smoke 驗收。
+- **TUI**：agend app 已接 fleet／需要你、完整終端、resize、多視窗控制、鍵鼠／貼上與 1,000 行歷史。[PR #145](https://github.com/suzuke/AgEnD/pull/145) 已合併；固定 `cfee027` 的全新 verifier CONFIRMED，四個雙平台 CI jobs 各 900 passed／0 failed／2 既有 ignored，實際 no-std 通過。使用者已有實機紀錄，並授權剩餘行為以真 producer／native／外層 PTY 自動驗收；清理已完成。Codex 僅開放已驗並獲同意的 0.159.3，其他／未知版本仍唯讀，人工輸入 thread 永久只用自己的 clientId 對帳。[驗收收尾](docs/gates/gate-11c-closeout.md) · [版本政策](docs/gates/gate-11c-codex-input.md)。
+
+**第 10 施工關完成（[PR #143](https://github.com/suzuke/AgEnD/pull/143)，2026-10-02）**：已接通本機 pipeline、task／review／workflow／team 操作與 checks 沙箱。事件收尾修正經全新 verifier r17、Ubuntu／macOS CI 與人工補驗通過，使用者已確認合併。驗證範圍、原始失敗與兩個未執行的 explorer 見 [驗證證據](docs/gates/gate-10-verification.md)。執行方式見 [pipeline runtime](docs/architecture/pipeline-runtime.md)。Claude、OpenCode driver、GitHub forge、Telegram 在第 12 施工關，服務註冊與發布在第 13 施工關。完整狀態與驗收證據見 [ROADMAP](docs/ROADMAP.md)。
 
 ## 系統圖
 

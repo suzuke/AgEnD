@@ -16,7 +16,7 @@ use std::fmt::Debug;
 
 use agend_core::pipeline::task::{Task, TaskStatus};
 use agend_core::pipeline::workflow::Workflow;
-use agend_core::traits::{CasResult, Store, StoredEvent};
+use agend_core::traits::{CasResult, Store, StoredEvent, TaskProgress};
 
 use super::{Boot, Case, CaseResult, Report, daemon_lifecycle, ensure, ok, run_suite};
 use crate::block_on;
@@ -52,6 +52,11 @@ pub trait StoreFixture: Sized {
 
 pub fn cases<F: StoreFixture>() -> Vec<Case<F>> {
     vec![
+        Case {
+            rule: "STO-13",
+            name: "snapshot_task_and_event_are_atomic",
+            check: |fx| atomic_advance(&fx),
+        },
         Case {
             rule: "STO-1",
             name: "created_task_round_trips",
@@ -526,4 +531,78 @@ fn data_survives_every_reopen<F: StoreFixture>(fx: F) -> CaseResult {
         appended.push(event);
         Ok(())
     })
+}
+
+fn atomic_advance<F: StoreFixture>(fx: &F) -> CaseResult {
+    let task = full_task("T-atomic");
+    ok("create", block_on(fx.store().create_task(&task)))?;
+    let original = ok("load", block_on(fx.store().load_task(&task.id)))?.ok_or("task missing")?;
+    let mut next = task.clone();
+    next.title = "advanced".into();
+    let progress = TaskProgress {
+        pipeline: "{}".into(),
+        stage_entered_at_unix_ms: 42,
+        merge_intent: Some("intent".into()),
+        block_reason: None,
+    };
+    let event = StoredEvent {
+        id: "atomic-event".into(),
+        occurred_at_unix_ms: 42,
+        kind: "advanced".into(),
+        detail: "snapshot persisted".into(),
+    };
+    let result = ok(
+        "advance",
+        block_on(
+            fx.store()
+                .advance_task(&next, original.version, &progress, &event),
+        ),
+    )?;
+    let CasResult::Written { new_version } = result else {
+        return Err("atomic advance conflicted".into());
+    };
+    ensure(fx.events(&task.id) == vec![event.clone()], || {
+        "advance omitted its event".into()
+    })?;
+    ensure(
+        ok(
+            "progress",
+            block_on(fx.store().load_task_progress(&task.id)),
+        )? == Some(progress.clone()),
+        || "advance omitted its snapshot".into(),
+    )?;
+    let conflict = ok(
+        "stale advance",
+        block_on(
+            fx.store()
+                .advance_task(&task, original.version, &progress, &event),
+        ),
+    )?;
+    ensure(
+        matches!(conflict, CasResult::Conflict { .. })
+            && fx.events(&task.id) == vec![event.clone()],
+        || "conflict appended an event".into(),
+    )?;
+    let mut invalid = progress.clone();
+    invalid.pipeline = "not json".into();
+    ensure(
+        block_on(
+            fx.store()
+                .advance_task(&task, new_version, &invalid, &event),
+        )
+        .is_err(),
+        || "invalid snapshot accepted".into(),
+    )?;
+    let saved = ok("load", block_on(fx.store().load_task(&task.id)))?.ok_or("task missing")?;
+    ensure(
+        saved.task == next && saved.version == new_version && fx.events(&task.id) == vec![event],
+        || "failed advance changed task, version or events".into(),
+    )?;
+    ensure(
+        ok(
+            "progress",
+            block_on(fx.store().load_task_progress(&task.id)),
+        )? == Some(progress),
+        || "failed advance changed snapshot".into(),
+    )
 }

@@ -45,6 +45,8 @@ pub const AUDIT_LOG: &str = "audit/shim.jsonl";
 pub const DAEMON_LOG: &str = "logs/daemon.log";
 /// Holder logs (gate 4 P3).
 pub const HOLDER_LOGS: &str = "run/holders/<id>.log";
+pub const CHECK_LOGS: &str = "logs/checks/<task>/<stage>-<attempt>.log";
+pub const WIP_ARCHIVES: &str = "archive/<task>-<unix-ms>.patch";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rule {
@@ -56,6 +58,68 @@ pub struct Rule {
 
 /// The retention table.
 pub const RETENTION: &[Rule] = &[
+    Rule {
+        target: Target::Table {
+            name: "codex_input_threads",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "gate 11 C: resumed threads must never lose strict receipt attribution",
+    },
+    Rule {
+        target: Target::IdleFiles {
+            pattern: CHECK_LOGS,
+        },
+        keep: Keep::Days(14),
+        why: "gate 10 P6: bounded check output, 14 days",
+    },
+    Rule {
+        target: Target::IdleFiles {
+            pattern: WIP_ARCHIVES,
+        },
+        keep: Keep::Days(30),
+        why: "gate 10 P4: preserved WIP, 30 days",
+    },
+    Rule {
+        target: Target::Table {
+            name: "teams",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "gate 10: operator-managed teams",
+    },
+    Rule {
+        target: Target::Table {
+            name: "bindings",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "gate 10: deleted only on release",
+    },
+    Rule {
+        target: Target::Table {
+            name: "asks",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "gate 10: D35 dialogue history",
+    },
+    Rule {
+        target: Target::Table {
+            name: "ask_turns",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "gate 10: D35 dialogue history",
+    },
+    Rule {
+        target: Target::Table {
+            name: "reminders",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "gate 10: deleted only after delivery",
+    },
     Rule {
         target: Target::Table {
             name: "tasks",

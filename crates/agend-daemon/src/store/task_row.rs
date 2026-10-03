@@ -33,6 +33,8 @@ pub fn status_text(status: TaskStatus) -> &'static str {
         TaskStatus::Blocked => "blocked",
         TaskStatus::Done => "done",
         TaskStatus::Superseded => "superseded",
+        TaskStatus::Failed => "failed",
+        TaskStatus::Cancelled => "cancelled",
     }
 }
 
@@ -43,6 +45,8 @@ fn parse_status(text: &str) -> Result<TaskStatus, StoreError> {
         "blocked" => TaskStatus::Blocked,
         "done" => TaskStatus::Done,
         "superseded" => TaskStatus::Superseded,
+        "failed" => TaskStatus::Failed,
+        "cancelled" => TaskStatus::Cancelled,
         other => return Err(StoreError::Invalid(format!("task status {other:?}"))),
     })
 }

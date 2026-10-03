@@ -122,3 +122,6 @@ mod tests {
         Failures::new(&["merge_if_head_is"]).push("merge", "typo");
     }
 }
+
+mod pipeline;
+pub use pipeline::FakePipelineExecutor;

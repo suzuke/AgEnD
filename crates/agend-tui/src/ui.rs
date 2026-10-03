@@ -9,7 +9,7 @@
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::{App, Connection, Screen, Target};
@@ -40,6 +40,8 @@ pub struct Row {
     pub target: Option<Target>,
     /// Whose terminal `t` opens on this row.
     pub agent: Option<String>,
+    /// Highlighted frame (a terminal taking input).
+    pub accent: bool,
 }
 
 impl Row {
@@ -105,6 +107,11 @@ impl Row {
         self
     }
 
+    pub fn accent(mut self, accent: bool) -> Row {
+        self.accent = accent;
+        self
+    }
+
     /// The row as plain text of exactly `width` columns (wide characters
     /// count twice), split into (border, rest).
     pub fn layout(&self, width: usize, selected: bool) -> (String, String) {
@@ -155,17 +162,23 @@ pub fn truncate(s: &str, max: usize) -> String {
 /// Agent state as glyph + word (never color only).
 pub fn state_label(lang: crate::i18n::Language, state: AgentState) -> String {
     let (glyph, text) = match state {
+        AgentState::Starting => ("◌", Text::Starting),
         AgentState::Working => ("●", Text::Working),
         AgentState::Idle => ("○", Text::Idle),
         AgentState::NeedsYou => ("!", Text::NeedsYouState),
         AgentState::Stuck => ("⚠", Text::Stuck),
+        AgentState::Failed => ("✗", Text::Failed),
         AgentState::Unknown => ("?", Text::Unknown),
     };
     format!("{glyph} {}", lang.tr(text))
 }
 
-/// `[■■□□□] 2/5`: derived from stage states, never stored.
+/// `[■■□□□] 2/5`: derived from stage states, never stored; empty for a task
+/// without stages (the daemon's before gate 10).
 pub fn stage_bar(task: &TaskInfo) -> String {
+    if task.stages.is_empty() {
+        return String::new();
+    }
     let done = task.stages_done();
     let total = task.stages.len();
     let bar: String = task
@@ -182,14 +195,24 @@ pub fn stage_bar(task: &TaskInfo) -> String {
     format!("[{bar}] {done}/{total}")
 }
 
-/// Glyph and short status of a task: done, waiting for you, or running.
+/// Glyph and short status of a task: done, waiting for you, or running
+/// (its stage, or the daemon's status when it has no stages).
 pub fn task_status(fleet: &Fleet, lang: crate::i18n::Language, task: &TaskInfo) -> (char, String) {
+    match task.status.as_str() {
+        "failed" => return ('×', lang.tr(Text::StatusFailed).into()),
+        "cancelled" => return ('×', lang.tr(Text::StatusCancelled).into()),
+        "blocked" => return ('!', lang.tr(Text::Blocked).into()),
+        _ => {}
+    }
+    if task.is_done() {
+        return ('✓', lang.tr(Text::StatusDone).to_owned());
+    }
+    if fleet.needs_you_for_task(&task.id).is_some() {
+        return ('!', lang.tr(Text::StatusWaitingYou).to_owned());
+    }
     match task.current_stage() {
-        None => ('✓', lang.tr(Text::StatusDone).to_owned()),
-        Some(_) if fleet.needs_you_for_task(&task.id).is_some() => {
-            ('!', lang.tr(Text::StatusWaitingYou).to_owned())
-        }
         Some(i) => ('●', lang.fmt(Text::StatusRunning, &[&task.stages[i].name])),
+        None => ('●', task.status.clone()),
     }
 }
 
@@ -201,11 +224,17 @@ pub fn goal_row(fleet: &Fleet, lang: crate::i18n::Language, border: &str, task: 
         format!("{glyph} {}", task.title),
         Target::Task(task.id.clone()),
     )
-    .right(format!("{:<12} {status}  {}", stage_bar(task), task.id))
+    .right(match stage_bar(task) {
+        bar if bar.is_empty() => format!("{status}  {}", task.id),
+        bar => format!("{bar:<12} {status}  {}", task.id),
+    })
     .agent(task.holder.as_deref())
 }
 
 pub fn render(frame: &mut Frame, app: &mut App) {
+    if crate::terminal::full::render(frame, app) {
+        return;
+    }
     let area = frame.area();
     let buf = frame.buffer_mut();
     let lang = app.lang;
@@ -237,17 +266,24 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     );
 
     let lang_key = lang.tr(Text::LangKey);
+    let mut pinned = 0;
     let (rows, selected, offset, help) = if let Connection::Disconnected {
         reason,
         attempts,
         last_error,
+        retry,
     } = &app.connection
     {
+        let retrying = if *retry {
+            Text::DiscRetrying
+        } else {
+            Text::DiscNoRetry
+        };
         let mut rows = vec![
             Row::rule(lang.tr(Text::Disconnected)),
             Row::blank(),
             Row::line("", lang.fmt(Text::DiscReason, &[reason])).bold(true),
-            Row::line("", lang.tr(Text::DiscRetrying)),
+            Row::line("", lang.tr(retrying)),
         ];
         if let Some(error) = last_error {
             rows.push(Row::line(
@@ -286,16 +322,22 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         (rows, selected, offset, lang.tr(Text::HelpFinder).to_owned())
     } else {
         let view = app.view();
+        pinned = app.pinned_rows().min(body_height);
         (app.rows(), view.selected.clone(), view.offset, app.help())
     };
 
-    let offset = offset.min(rows.len().saturating_sub(body_height));
-    for (line, row) in rows.iter().skip(offset).take(body_height).enumerate() {
+    let scrolled = body_height - pinned;
+    let offset = offset.min(rows.len().saturating_sub(pinned + scrolled));
+    let shown = rows
+        .iter()
+        .take(pinned)
+        .chain(rows.iter().skip(pinned + offset).take(scrolled));
+    for (line, row) in shown.enumerate() {
         let is_selected = row.target.is_some() && row.target == selected;
         draw_row(buf, body_top + line as u16, area.width, row, is_selected);
     }
 
-    let below = rows.len().saturating_sub(offset + body_height);
+    let below = rows.len().saturating_sub(pinned + offset + scrolled);
     let message = match (&app.input, &app.message) {
         (Some((key, text)), _) => lang.fmt(Text::AnswerPrompt, &[key, text]),
         (None, Some(message)) => message.clone(),
@@ -338,13 +380,22 @@ fn draw_row(buf: &mut Buffer, y: u16, width: u16, row: &Row, selected: bool) {
     // A `─`/`━` padding run is part of the frame (a team header's top
     // border), so it keeps the unselected style like the border itself.
     let pad_style = if FRAME_FILL.contains(&row.fill) {
-        style
+        if row.accent {
+            style.fg(Color::Yellow)
+        } else {
+            style
+        }
     } else {
         content
     };
+    let border_style = if row.accent {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default()
+    };
     let mut x = 0u16;
     for (text, style) in [
-        (border, Style::default()),
+        (border, border_style),
         (head, content),
         (pad, pad_style),
         (right, content),

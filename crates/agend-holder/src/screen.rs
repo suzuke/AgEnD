@@ -2,9 +2,10 @@
 //! A reconnecting daemon gets the current screen, never a byte replay (a
 //! replay can start in the middle of an escape sequence).
 //!
-//! The snapshot is plain text of the visible screen: each row with trailing
+//! The legacy snapshot is plain text of the visible screen: each row with trailing
 //! spaces removed, rows joined with `\n` (P5). Scrollback (1,000 rows) stays in
-//! memory and is not sent in gate 4.
+//! memory. Structured frames (holder 1.1) include cells, modes, cursor and a
+//! requested viewport, with process generation and monotonic revision.
 //!
 //! Terminal queries the agent prints (for example cursor position `ESC[6n`)
 //! produce replies from alacritty; they are handed to the PTY writer queue
@@ -12,8 +13,35 @@
 //!
 //! Must NOT: classify the screen (that is `agend_core::screen`).
 
-use std::sync::mpsc::SyncSender;
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use std::sync::{Arc, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+mod frame;
+mod history;
+mod narrow;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrameError {
+    InvalidSize,
+    TooLarge,
+}
+
+impl FrameError {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::InvalidSize => "invalid_size",
+            Self::TooLarge => "frame_too_large",
+        }
+    }
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::InvalidSize => "viewport rows must be between 1 and the PTY height",
+            Self::TooLarge => "terminal frame exceeds 8 MiB; nothing was truncated",
+        }
+    }
+}
 
 use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::grid::Dimensions;
@@ -27,7 +55,7 @@ pub const DEFAULT_COLUMNS: u16 = 200;
 pub const SCROLLBACK_ROWS: usize = 1_000;
 
 /// Where terminal-query replies go: the PTY writer queue, once an agent exists.
-pub type ReplySink = Arc<OnceLock<SyncSender<Vec<u8>>>>;
+pub type ReplySink = Arc<OnceLock<crate::pty::WriteQueue>>;
 
 pub struct QueryReplies(ReplySink);
 
@@ -62,6 +90,10 @@ pub struct Screen {
     parser: Processor,
     rows: u16,
     columns: u16,
+    generation: String,
+    revision: u64,
+    history: history::History,
+    sample: Option<(std::time::Instant, frame::FrameSnapshot)>,
 }
 
 impl Screen {
@@ -70,7 +102,21 @@ impl Screen {
             scrolling_history: SCROLLBACK_ROWS,
             ..Config::default()
         };
+        static NEXT_SCREEN: AtomicU64 = AtomicU64::new(0);
+        let generation = format!(
+            "{}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos(),
+            NEXT_SCREEN.fetch_add(1, Ordering::Relaxed)
+        );
         Self {
+            generation,
+            revision: 0,
+            history: history::History::new(rows),
+            sample: None,
             term: Term::new(config, &Size { rows, columns }, QueryReplies(replies)),
             parser: Processor::new(),
             rows,
@@ -78,18 +124,38 @@ impl Screen {
         }
     }
 
+    pub fn generation(&self) -> &str {
+        &self.generation
+    }
+
     pub fn size(&self) -> (u16, u16) {
         (self.rows, self.columns)
     }
 
     pub fn process(&mut self, bytes: &[u8]) {
-        self.parser.advance(&mut self.term, bytes);
+        if !bytes.is_empty() {
+            let mut tracked = history::Tracked {
+                term: &mut self.term,
+                history: &mut self.history,
+            };
+            self.parser.advance(&mut tracked, bytes);
+            self.revision += 1;
+        }
     }
 
     pub fn resize(&mut self, rows: u16, columns: u16) {
+        if (rows, columns) == self.size() {
+            return;
+        }
+        self.sample = None;
         self.rows = rows;
         self.columns = columns;
+        if columns == 1 {
+            narrow::prepare(&mut self.term);
+        }
         self.term.resize(Size { rows, columns });
+        self.history.resize(&self.term);
+        self.revision += 1;
     }
 
     /// Visible screen as plain text (P5).
@@ -121,10 +187,108 @@ impl Screen {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::mpsc::sync_channel;
+    use std::sync::mpsc::{SyncSender, sync_channel};
+    use std::time::Duration;
+    struct Collect(SyncSender<Vec<u8>>);
+    impl std::io::Write for Collect {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.send(bytes.to_vec()).map_err(std::io::Error::other)?;
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
 
     fn screen() -> Screen {
         Screen::new(DEFAULT_ROWS, DEFAULT_COLUMNS, ReplySink::default())
+    }
+
+    #[test]
+    fn tracking_keeps_the_direct_parser_screen_modes_and_cursor() {
+        use agend_core::protocol::terminal::TerminalViewport;
+        let mut tracked = Screen::new(4, 9, ReplySink::default());
+        let mut direct = Screen::new(4, 9, ReplySink::default());
+        let corpus = "abc漢é\r\n\x1b[31;1mred\x1b[0m\r\n0123456789\r\n\x1b[2;4r\x1b[4;1H\n\x1b[2S\x1b[r\x1b[2J\x1b[?1049hALT\x1b[?1049l\x1b[3J\x1b[?2004h\x1b[?1000h\x1b[6 q\x1bc";
+        for byte in corpus.as_bytes() {
+            tracked.process(&[*byte]);
+            direct.parser.advance(&mut direct.term, &[*byte]);
+            assert_eq!(tracked.text(), direct.text());
+            let viewport = TerminalViewport { top: None, rows: 4 };
+            let a = tracked.frame(viewport).unwrap();
+            let b = direct.frame(viewport).unwrap();
+            assert_eq!(a.cells, b.cells);
+            assert_eq!(a.cursor, b.cursor);
+            assert_eq!(a.modes, b.modes);
+        }
+    }
+
+    #[test]
+    fn single_column_resize_handles_wide_live_history_and_inactive_normal_grid() {
+        use agend_core::protocol::terminal::{TerminalSize, TerminalViewport};
+        // This exact regression used to loop in upstream reflow. Keep a bounded
+        // watchdog so a regression fails the test process instead of hanging CI.
+        let (done, receive) = std::sync::mpsc::channel();
+        let watchdog = std::thread::spawn(move || {
+            if matches!(
+                receive.recv_timeout(Duration::from_secs(5)),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+            ) {
+                eprintln!("single-column parser resize did not complete");
+                std::process::abort();
+            }
+        });
+        for alternate in [false, true] {
+            let mut screen = Screen::new(6, 12, ReplySink::default());
+            screen.process(
+                "\x1b[31;4:3m界é\r\n界abc\r\n界def\r\n界ghi\r\n界jkl\r\n界mno\r\n界pqr\r\n"
+                    .as_bytes(),
+            );
+            if alternate {
+                screen.process("\x1b[?1049h\x1b[4:5m界Z\x1b[2;5H\x1b[?2004h".as_bytes());
+            }
+            let before = screen
+                .frame(TerminalViewport { top: None, rows: 6 })
+                .unwrap();
+            screen.resize(6, 1);
+            let after = screen
+                .frame(TerminalViewport { top: None, rows: 6 })
+                .unwrap();
+            assert_eq!(
+                after.size,
+                TerminalSize {
+                    rows: 6,
+                    columns: 1
+                }
+            );
+            assert_eq!(after.generation, before.generation);
+            assert!(after.revision > before.revision);
+            assert_eq!(after.alternate_screen, alternate);
+            assert_eq!(after.modes, before.modes);
+            assert_eq!(after.cursor.column, 0);
+            assert!(after.cells.iter().flatten().all(|cell| cell.width <= 1));
+            // New CJK and combining input must not index a nonexistent spacer.
+            screen.process("\x1b[H界é\r\nQ".as_bytes());
+            assert!(screen.text().contains('Q'));
+            if alternate {
+                screen.process(b"\x1b[?1049l");
+                let normal = screen
+                    .frame(TerminalViewport { top: None, rows: 6 })
+                    .unwrap();
+                assert!(!normal.alternate_screen);
+                assert!(normal.cells.iter().flatten().all(|cell| cell.width <= 1));
+                assert!(normal.history_oldest > before.live_top);
+            }
+            screen.resize(6, 12);
+            screen.process("\x1b[H界".as_bytes());
+            let restored = screen
+                .frame(TerminalViewport { top: None, rows: 6 })
+                .unwrap();
+            assert_eq!(restored.cells[0][0].text, "界");
+            assert_eq!(restored.cells[0][0].width, 2);
+        }
+        done.send(()).unwrap();
+        watchdog.join().unwrap();
     }
 
     #[test]
@@ -167,10 +331,14 @@ mod tests {
     fn cursor_position_query_is_answered_through_the_writer_queue() {
         let sink = ReplySink::default();
         let (tx, rx) = sync_channel(4);
-        sink.set(tx).unwrap();
+        sink.set(crate::pty::start_writer(Box::new(Collect(tx))))
+            .unwrap();
         let mut s = Screen::new(DEFAULT_ROWS, DEFAULT_COLUMNS, sink);
         s.process(b"ab\x1b[6n");
-        assert_eq!(rx.try_recv().unwrap(), b"\x1b[1;3R");
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            b"\x1b[1;3R"
+        );
     }
 
     #[test]
@@ -180,10 +348,11 @@ mod tests {
 
         let sink = ReplySink::default();
         let (tx, rx) = sync_channel(1);
-        sink.set(tx).unwrap();
+        sink.set(crate::pty::start_writer(Box::new(Collect(tx))))
+            .unwrap();
         let mut s = Screen::new(DEFAULT_ROWS, DEFAULT_COLUMNS, sink);
-        s.process(b"\x1b[6n\x1b[6n");
-        assert!(rx.try_recv().is_ok());
-        assert!(rx.try_recv().is_err());
+        s.process(&b"\x1b[6n".repeat(crate::pty::WRITE_QUEUE + 4));
+        assert!(rx.recv_timeout(Duration::from_secs(1)).is_ok());
+        drop(rx);
     }
 }

@@ -1,7 +1,7 @@
 # 契約規則表
 
 > **TL;DR**
-> - 7 個 trait 與 client protocol 的契約規則，每條一個編號（`DRV-1`…`RUN-9` 共 57 條，5 條標「新增，已追認」；第 8 施工關加 `CLP-1`…`CLP-12`）；契約 suite 的每個 case 標著它驗的規則編號。
+> - 7 個 trait 與 client protocol 的契約規則，每條一個編號（`DRV-1`…`RUN-9` 共 57 條，5 條標「新增，已追認」；第 8 施工關加 `CLP-1`…`CLP-12`，第 9 施工關加 `CLP-13`…`CLP-17`，第 11 施工關 B 段加 `CLP-18`…`CLP-22`，C 段加 `CLP-23`…`CLP-28`（[完整表](CLIENT-CONTRACTS.md)））；契約 suite 的每個 case 標著它驗的規則編號。
 > - 記住：**每條規則至少一個 case、至少一個故意弄壞的實作（mutant）**；`tests/contract_teeth/` 的覆蓋測試讀這張表，缺一個就失敗。
 > - 下一步：加規則 = 這裡加一列（含 mutant 名）+ 標了編號的 case + 註冊 mutant。
 
@@ -80,6 +80,7 @@
 | STO-9 | workflow 依 (id, 版本) 精確讀回；沒存過的版本是 `None`，不退回別的版本 | [GLOSSARY workflow](../../docs/GLOSSARY.md)：task 固定建立時的版本 | `FallsBackToOlderWorkflow` |
 | STO-10 | 同一個 task 的事件依附加順序保存 | `append_event` | `PrependsEvents` |
 | STO-11 | 事件依 task 分開，交錯附加也不混 | `append_event(task_id, …)` 簽章 | `SharedEventLog` |
+| STO-13 | `advance_task` 的 task、快照與事件同成同敗；CAS 衝突與無效快照不改任何資料 | 第 10 施工關 P1 | `SplitAdvance` |
 | STO-12 | 每次重新開啟（daemon 重啟）後 task、版本、workflow、事件都還在；保存的版本 CAS 可寫入 | [GLOSSARY store](../../docs/GLOSSARY.md)：SQLite、唯一真相來源（D8）；[pipeline](../../docs/architecture/pipeline.md#worktree-與-branch-生命週期)：先寫 DB，崩潰後開機接續 | `InMemoryOnly`、`TruncOnOpen`、`SharedMem`、`FrozenDatabase` |
 
 不釘：第一個版本號；對不存在的 task 附加事件。
@@ -142,28 +143,7 @@
 
 ## Client protocol（`CLP`，12 條，第 8 施工關）
 
-對象不是 trait，是一個講 client protocol 的 server：同一套 case 對 testkit 的 `FakeDaemon`（`tests/contract_fakes.rs`）與真的 `agend daemon`（`crates/agend/tests/client_protocol.rs`，暫存 home、真 binary）跑（[第 8 施工關 P9](../../docs/gates/gate-08-client.md#p9client-協定契約假-daemon-與真-daemon-跑同一套)）。驅動端是 `ProbeClient`，不是 `agend-client`。mutant 是「假 daemon 前面加一個改行的 proxy」（`contract::client::proxy`），假 daemon 本身沒有「故意弄壞」的開關。
-
-fixture（`ClientProtocolFixture`）：`socket`、`emit`（讓至少一個新事件發生）、`burst(n)`、`restart`（同一個 socket 重啟 server）、`retry_item`（一個可以 `retry` 的「需要你」項目）、`terminal_instance`。真 daemon 的 `emit` 是對一個 `failed` 的 instance 送 `retry`（真的事件，不是假資料）。
-
-| ID | 規則 | 來源 | mutant |
-|---|---|---|---|
-| CLP-1 | 第一行不是 `hello`（別的請求、不是 JSON）→ `error hello_required`，然後關連線 | P3、D26 | `NoHelloRequired` |
-| CLP-2 | `hello` 沒有共同的 major → `version_mismatch` 並關閉；1.0 的 client 拿到 1.0；帶 `caller` 的 1.1 `hello` 拿到 1.1 | P2、P3、D26 | `AcceptsAnyMajor` |
-| CLP-3 | `get_fleet` 回 `fleet`（有 `general` team）；用它的 `as_of_event_id` 訂閱，拿到的事件 id 從 `as_of + 1` 開始連號，包括 `get_fleet` 與訂閱之間發生的 | P4 | `SkipsFirstEventAfterAsOf` |
-| CLP-4 | 重啟前的游標、比最新的 id 還大的游標 → 只有 `event_gap`，沒有事件 | P4 | `IdsFromOne`（反向檢查：事件 id 改回從 1 開始）、`HidesEventGap` |
-| CLP-5 | 不帶游標訂閱 → 重播留著的事件（1.0 的意思）；重播從最舊的一筆開始（「最舊 − 1」接得上，再前一個是 `event_gap`） | P4、D26 | `NoneBecomesZero` |
-| CLP-6 | 未知的請求 → `unknown_request`、不是 JSON 的行 → `invalid_request`，連線不斷、之後的請求照常回 | P3 | `GoesSilentOnUnknown` |
-| CLP-7 | 兩個 client 用同一個游標訂閱，收到的事件相同、順序相同 | P8 | `ReordersForSecondClient` |
-| CLP-8 | 2000 個事件：一直讀的 client 全部收到且順序正確；每 10 ms 讀一行的收到 `event_gap` 後被關；完全不讀的在 5 秒寫入逾時後被關、收不到 `event_gap` | P8 | `NeverDropsLaggers` |
-| CLP-9 | server 重啟：舊連線被關；新連線的全貌 `as_of_event_id` 比重啟前看過的每個 id 都大 | P1、P4 | `KeepsOldConnection` |
-| CLP-10 | `terminal_input` → `not_supported`、沒有這個請示的 `answer_ask` → `unknown_ask`（帶 request id）；都不發事件、全貌不變 | P6 | `AcceptsUnsupported` |
-| CLP-11 | agent（`hello` 帶 `caller`）送 `resolve_attention`：不管 id 存不存在都是 `forbidden`；操作者送不存在的 id、或不在 `actions` 裡的操作 → `unknown_attention`；列出的操作 → `accepted`、`attention_resolved` 事件、全貌裡不再有它 | P2、P5 | `AgentMayResolve`、`HidesResolvedEvent` |
-| CLP-12 | `subscribe_terminal` 先回那個 instance 的 `terminal_snapshot` | P6 | `DropsSnapshot` |
-
-不釘：agent 命令（假 daemon 會處理，真 daemon 第 9 施工關前回 `not_supported`）；不存在的 instance 的 `subscribe_terminal`（假 daemon 對任何 id 都回畫面；真 daemon 回 `no_terminal`，在 `crates/agend/tests/client_protocol.rs` 另測）；`subscribe_terminal` 之後的 `terminal_bytes`（假 daemon 不串流）。
-
-**真 daemon 跑 CLP-8 的方式**：真的 `agend daemon` binary 沒辦法在測試裡產生 2000 個真事件（每個事件都要一個 instance 狀態改變），所以 CLP-8 的「真」是同一份 daemon server 程式碼（`agend_daemon::server` + `fleet`）在測試程序裡跑、直接發事件；其他 11 條對真 binary 跑（見第 8 施工關「待你追認」）。
+第 8 施工關的原始 12 條已擴充至 CLP-28；完整規則、fake／真 fixture 與 mutant 清單移至 [CLIENT-CONTRACTS.md](CLIENT-CONTRACTS.md)。
 
 ## 下一步
 

@@ -40,7 +40,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use agend_core::pipeline::stage::{FanoutJoin, StageKind};
 use agend_core::pipeline::state::{
-    PipelineAction, PipelineEvent, PipelineState, PipelineStatus, WorkProduct, step,
+    PipelineAction, PipelineEvent, PipelineState, PipelineStatus, WorkProduct, outstanding_actions,
+    step,
 };
 use agend_core::pipeline::workflow::{
     Approver, FanoutSource, Stage, TimeoutAction, ValidatedWorkflow, WorkOutput, Workflow,
@@ -1204,6 +1205,43 @@ fn run_sequence(
         let Ok((next, actions)) = result else {
             continue;
         };
+        let restored = PipelineState::restore(next.snapshot(), validated.clone())
+            .map_err(|e| format!("{name} seed {seed:#x}: restore: {e}; trace {trace:#?}"))?;
+        if restored != next || outstanding_actions(&restored) != outstanding_actions(&next) {
+            return Err(format!(
+                "{name} seed {seed:#x}: restore changed state/actions; trace {trace:#?}"
+            ));
+        }
+        for action in outstanding_actions(&restored) {
+            match &action {
+                PipelineAction::AssignWork {
+                    stage_id, attempt, ..
+                }
+                | PipelineAction::ReturnToWork {
+                    stage_id, attempt, ..
+                }
+                | PipelineAction::RunCommand {
+                    stage_id, attempt, ..
+                }
+                | PipelineAction::Submit {
+                    stage_id, attempt, ..
+                }
+                | PipelineAction::RequestApproval {
+                    stage_id, attempt, ..
+                }
+                | PipelineAction::Merge {
+                    stage_id, attempt, ..
+                }
+                | PipelineAction::ScheduleTimeout {
+                    stage_id, attempt, ..
+                } if Some(stage_id.as_str()) != restored.current_stage().map(|s| s.id.as_str())
+                    || *attempt != restored.attempt() =>
+                {
+                    return Err(format!("outstanding action changed identity: {action:?}"));
+                }
+                _ => {}
+            }
+        }
         stats.accepted += 1;
         if result_identity(&event).is_some() {
             generator.accepted.push(event.clone());

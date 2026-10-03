@@ -1,7 +1,9 @@
 //! "Needs you" items. "Read" and "resolved" are separate: viewing only drops
 //! the bold; choosing an option (or answering in free text) sends the answer
 //! to the daemon, and the item leaves the list when the daemon's
-//! `ask_updated` event shows the question answered.
+//! `ask_updated` event shows the question answered. An item that is not an
+//! ask lists its actions (`retry`) the same way; it leaves only on the
+//! daemon's `attention_resolved` (gate 11 B P4).
 //!
 //! The selected item expands to show who asks about which task, what happens
 //! if it is left alone (DEMO-01 §4B), the context recap (D37), the
@@ -10,11 +12,12 @@
 //! Must NOT: resolve an item just because it was viewed.
 
 use agend_core::protocol::ask::{AnswerSource, AskEntry, AskReply};
+use agend_core::protocol::client::AttentionAction;
 
 use crate::app::{Ctx, Target};
-use crate::home::{needs_you_row, team_of};
+use crate::home::needs_you_row;
 use crate::i18n::Text;
-use crate::source::Attention;
+use crate::source::{Attention, Choice};
 use crate::ui::Row;
 
 const BAR: &str = "┃ ";
@@ -47,14 +50,17 @@ pub fn rows(ctx: &Ctx) -> Vec<Row> {
 
 fn details(ctx: &Ctx, item: &Attention) -> Vec<Row> {
     let key = item.key();
-    let agent = ctx.fleet.asker_or_holder(item);
+    let agent = ctx.fleet.item_agent(item);
     let from = agent.clone().unwrap_or_else(|| "—".into());
     let task = item.task_id().unwrap_or("—");
-    let team = team_of(ctx.fleet, item).unwrap_or_else(|| ctx.tr(Text::NoTeam).into());
+    let team = ctx
+        .fleet
+        .item_team(item)
+        .unwrap_or_else(|| ctx.tr(Text::NoTeam).into());
     let line = |text: String| Row::line(BAR, format!("  {text}"));
     let mut rows = vec![line(ctx.fmt(Text::AskFrom, &[&from, task, &team])).dim()];
-    if let Some(text) = ctx.fleet.catalog.if_ignored.get(task) {
-        rows.push(line(ctx.fmt(Text::IfIgnored, &[text])));
+    if let Some(text) = ctx.fleet.if_ignored(item) {
+        rows.push(line(ctx.fmt(Text::IfIgnored, &[&text])));
     }
     if let Some(recap) = &item.data.recap {
         rows.push(line(ctx.fmt(Text::RecapGoal, &[&recap.goal])));
@@ -66,7 +72,30 @@ fn details(ctx: &Ctx, item: &Attention) -> Vec<Row> {
         rows.push(line(ctx.fmt(Text::RecapNext, &[&recap.next])));
     }
     let Some(ask) = &item.data.ask else {
-        rows.push(line(ctx.tr(Text::NoAction).into()).dim());
+        let choices = item.choices();
+        if choices.is_empty() {
+            rows.push(line(ctx.tr(Text::NoActions).into()).dim());
+        }
+        for (n, choice) in choices.iter().enumerate() {
+            let Choice::Action(action) = choice else {
+                continue;
+            };
+            let label = match action {
+                AttentionAction::Retry => ctx.tr(Text::ActionRetry),
+                AttentionAction::Approve => ctx.tr(Text::ActionApprove),
+                AttentionAction::RequestChanges => ctx.tr(Text::ActionChanges),
+                AttentionAction::Acknowledge => ctx.tr(Text::ActionAcknowledge),
+                AttentionAction::Unknown => ctx.tr(Text::ActionUnknown),
+            };
+            rows.push(
+                Row::item(
+                    BAR,
+                    format!("  [{}] {label}", n + 1),
+                    Target::Choice(key.clone(), n),
+                )
+                .agent(agent.as_deref()),
+            );
+        }
         return rows;
     };
     for entry in &ask.entries {

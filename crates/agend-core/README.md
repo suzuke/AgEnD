@@ -5,11 +5,24 @@
 > - 記住：**`#![no_std]` + `alloc` + `forbid(unsafe_code)`；唯一直接依賴是停用預設功能的 `serde`（只開 `derive` + `alloc`；D32）**；時間只經 `Clock` trait。
 > - 下一步：跑 `cargo xtask accept core`，看純邏輯 demo 與 crate 邊界檢查。
 
+## 第 10 施工關（已驗收，2026-10-02）
+
+`PipelineSnapshot` 不含 workflow，只有驗證後的 `restore` 才能回到可執行狀態；`outstanding_actions` 重建原 ticket；`TaskStatus` 含 Failed／Cancelled。binding snapshot 型別共用於 core；Store 的 `advance_task` 同交易存 task、快照、受阻理由與 event。
+
+## 第 11 施工關 C 段（已驗收並合併 #145）
+
+`protocol::terminal` 提供 no-std 的 cells／色彩／cursor／mode／viewport／frame 型別。holder 協定 1.1 新增 `GetTerminalFrame`、附 request id 的 `TerminalFrame` 與 `TerminalOperationError`；1.0 請求／純文字快照保持原 wire shape。holder 的 `TerminalControl` 提供 generation／owner 與實際 resize／input 完成回覆；client 1.4 新增檢視訂閱／viewport／控制、完成回覆與失去控制通知；Acquire 不接受 caller 自訂 attach id。client 提供 1.4／1.3，真 daemon 與注入 producer 的 fake 提供 1.4。`traits::TerminalProducer` 是同步畫面／完成控制／legacy input port，server 在背景排程；core 只有介面與協定型別。端到端基礎路徑與六項 fake／真 C 契約已建立，TUI 與完整 fake U17 已有回歸，真 Codex 0.159.3 首次 U17 已核實；完整 C 段已驗收並經使用者確認合併（#145，2026-10-03）。CodexInputPolicy::approved() 只辨識 codex-cli 0.159.3；holder 身分與 thread 歸屬由 daemon 核對。
+
+`PipelineView::replace_attention_if` 定義原子條件更新：捕捉值仍相同才 replace／publish，移除或已變更就拒絕；core 僅定義 port，Fleet 實作鎖。用於避免 Retry 與 failed-item enrichment 交錯時重建舊項目。
+
+`policy::codex_input` 的 `approved()` 只允許精確 `codex-cli 0.159.3`；未知或其他版本拒絕人工輸入。daemon 核 holder 啟動紀錄與 thread 身分，曾允許人工輸入的 thread 永久只用自己的 clientId 對帳。診斷政策另限一個明確 instance，不改正式許可。見 [版本政策](../../docs/gates/gate-11c-codex-input.md) 與 [U17 證據](../../docs/gates/gate-11c-u17-validation.md)。
+
 ## 負責
 
 - 所有 crate 共用型別（`model`）：backend、team、task、送達狀態、branch 命名空間
-- 兩套有版本的協定定義：client（1.1：全貌、「需要你」的操作、`hello` 的 `caller`、錯誤碼 `client::error_code`、事件游標規則）與 holder；JSON Lines hello、版本協商、未知 variant 相容、PTY bytes 的 base64 欄位
-- 邊界 traits：`Driver`、`Forge`、`Store`、`Runtime`、`Runner`、`Notifier`、`Clock`
+- 兩套有版本的協定定義：client（1.1：全貌、「需要你」的操作、`hello` 的 `caller`、錯誤碼 `client::error_code`、事件游標規則；1.2（第 9 施工關）：`operator` 請求、`send` 的 `level` 與 `message_id`、`status` 的 `identity`、`hello` 的 daemon 版本／pid／`boot_id`、instance 的 `working_directory`、ticket `<task>/<stage>/<attempt>`、UUID v4）與 holder；JSON Lines hello、版本協商、未知 variant 相容、PTY bytes 的 base64 欄位
+- pipeline 的 core ports：`PipelineStore`、`PipelineExecutor`、`PipelineView`，以及共用 `runtime_records`；Engine 可注入真 adapter 或 fake；executor 的 `clean_worktree` 必須同時檢查實際修改與會隱藏修改的 index 旗標。
+- 邊界 traits：`Driver`、`Forge`、`Store`、`Runtime`、`Runner`、`Notifier`、`Clock`、`TerminalProducer`
 - 純函式 pipeline：六種關卡、task 關係與操作、workflow 存檔檢查、`{pr}`／`{head}`／`{branch}` 展開、`step(state, event)` 狀態機
 - 純函式 policy：busy、去抖動、檔案衝突、merge 門檻、分派與 team wait-cycle 偵測
 - 螢幕 hard-gate 分類器；規則資料須附版本化 prompt 證據，完整 holder 畫面逐 backend 補齊
@@ -45,7 +58,7 @@
 ## 依賴規則
 
 - `#![no_std]` + `alloc`；唯一依賴 `serde`，`default-features = false`，只開 `derive` + `alloc`（D32）
-- `serde` 只 derive protocol 與 workflow 定義型別（workflow 以 TOML 存 DB，D19）；`Task`、`PipelineState` 等執行期型別不 derive；不使用 `serde_json`、transport、clock、tokio runtime 或 agent runtime
+- `serde` derive protocol、workflow、binding／runtime records 與 `PipelineSnapshot` 的資料型別；workflow 以 TOML 存 DB（D19）。`Task`、`PipelineState` 本身不 derive serde；snapshot 必須經 `restore` 驗證後才可執行；不使用 `serde_json`、transport、clock、tokio runtime 或 agent runtime
 - 沒有 `[features]`、build script、unsafe；錯誤型別使用 `core::error::Error`
 - 時間只由 `Clock` 傳入；集合用 `BTreeMap`／`BTreeSet`
 

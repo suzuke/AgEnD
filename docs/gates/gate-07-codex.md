@@ -3,13 +3,13 @@
 > **TL;DR**
 > - codex driver、送達模型、三級忙碌策略；codex 第一次有 thread id 可以 resume（補上第 6 施工關 H2 的缺口）。
 > - 記住：**自動驗收全綠還不夠**；你親自跑完「你親自驗收」並填「驗收紀錄」，這個施工關才算完成。
-> - 下一步：實作在 draft PR #132（branch `feat/gate-07-codex`）；K1–K13 已追認（2026-09-27）；2026-09-28 agent 經你授權跑了真 codex（重錄 8 個情境、`codex_live` 通過），K14–K18 已追認、K7 結案（2026-09-28）；8 個情境都進了一致性檢查。
+> - 下一步：本關已完成並 merge #132（2026-09-28）；後續接第 10 施工關。K1–K18 已追認、K7 結案，8 個真 codex 情境已納入一致性檢查。
 
 **先看這條**：這頁的步驟會用到 `agend`。每個新開的終端機分頁都要先跑「你親自驗收」開頭的設定，否則會跑到舊的 Node 版 `agend` 1.24.0。
 
 ## 狀態
 
-**已驗收，等 merge**（2026-09-28，draft PR #132）：P1–P9 使用者已確認（P4 選 A）；K1–K18 使用者已追認（K7 結案）；fresh-context verifier 多輪 CONFIRMED；使用者親自驗收 8 步通過，步驟 7、8 用真 codex 0.158.0（使用者授權 agent 在沙箱裡跑）。
+**完成**（2026-09-28，已 merge #132，`7f326de`）：P1–P9 使用者已確認（P4 選 A）；K1–K18 使用者已追認（K7 結案）；fresh-context verifier 多輪 CONFIRMED；使用者親自驗收 8 步通過，步驟 7、8 用真 codex 0.158.0（使用者授權 agent 在沙箱裡跑）。
 
 ## 範圍
 
@@ -645,6 +645,8 @@ unset AGEND_BIN
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-09-28 #132 merge（`7f326de`）；驗收與追認完成，狀態改為完成。
+
 - 2026-09-28 使用者親自驗收 8 步通過（步驟 7、8 由使用者授權 agent 跑真 codex），等 merge。
 - 2026-09-28 使用者追認 K14–K18、K7 結案；`queue_idle` 修競態：錄製器等長回覆開始串流才 `queue/add`＋`turn/interrupt`，只重錄 `queue_idle`（真 codex，3 個短 turn，一次成功），從 `transcripts-pending/` 移進 `transcripts/`；假 app-server 的回覆改成串流（`item/completed` 晚一點、串流中被中斷沒有 `item/completed`）；一致性檢查 8 個情境全比對、5 passed。
 - 2026-09-28 verifier（真 codex 那兩個 commit 之後）MEDIUM：人中斷後 codex 的佇列不會自己開始（U11）；driver 改成 turn 結束、閒置、佇列非空時 `thread/queue/start` 一次（連上後的對帳也做），附測試（daemon 跑著與重啟後）。K18 改寫：developer note 每輪多幾個 input token、inject 與存 DB 之間當掉會留一個沒人用的 rollout；假 app-server 的 `queue/start` 先看佇列，對齊真的 `queue is empty`。
@@ -670,9 +672,8 @@ unset AGEND_BIN
 
 ## 下一步
 
-```bash
-cd ~/Documents/Hack/AgEnD-v2    # checkout feat/gate-07-codex
-~/.cargo/bin/cargo xtask accept codex 2>/dev/null | tail -3
-```
+本關已完成；接著讀第 10 施工關提案。
 
-然後照「你親自驗收」步驟 6、7、8（要跑真 codex）；把「貼回來」列的輸出貼給 agent。
+```bash
+cat docs/gates/gate-10-pipeline.md
+```

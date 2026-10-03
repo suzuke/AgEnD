@@ -24,6 +24,8 @@
 //! | `thread/resume {threadId, excludeTurns?}` | `deprecationNotice` (no `excludeTurns`), `thread/status/changed` idle, the settings with the full `thread` (all turns; none with `excludeTurns: true`), `thread/tokenUsage/updated`, `thread/goal/cleared`; an unknown thread (or one never on disk) → error -32600 `no rollout found for thread id <id>` (U1) |
 //! | restart | with `AGEND_FAKE_STATE_DIR` set, threads persist in `$AGEND_FAKE_STATE_DIR/fake-codex/threads.json` (the real server keeps rollouts under `CODEX_HOME`), so a restarted fake resumes by id (spike S4); without it nothing persists |
 //! | `--listen` path | like codex: the socket always lives at a short path (`<tmp>/fake-codex-<hash>.sock`, codex: `/private/tmp/codex-daemon-<uid>/<sha256>`) and the requested path is a symlink to it (pitfall 1); an old symlink at the requested path is replaced |
+//! | `agendFake/replayUserOnNextResume {threadId}` | fake only, off by default: arm one replay of the latest persisted manual user item already stored in that thread; the next resume emits item/completed before its response |
+//! | `agendFake/resumeReplayCount {threadId}` | fake only: number of armed item/completed replays actually emitted for that thread |
 //! | `agendFake/exit` | fake only: the server process exits at once (a test stand-in for an app-server that dies) |
 //!
 //! Agent replies stream: `item/started` and a first delta when the input's
@@ -113,6 +115,16 @@ impl Server {
         turn: Duration,
         state_dir: Option<PathBuf>,
     ) -> io::Result<Server> {
+        Server::bind_with(requested, turn, state_dir, true)
+    }
+
+    /// [`Server::bind`]; `duplex: false` is the stuck peer (see `Shared`).
+    pub fn bind_with(
+        requested: &Path,
+        turn: Duration,
+        state_dir: Option<PathBuf>,
+        duplex: bool,
+    ) -> io::Result<Server> {
         let bound = socket_path_for(requested);
         let _ = std::fs::remove_file(&bound);
         // An old symlink (a server that died) is replaced (U14: what the
@@ -132,6 +144,7 @@ impl Server {
         let shared = Arc::new(Shared {
             state: Mutex::new(state),
             turn,
+            duplex,
             closed: std::sync::atomic::AtomicBool::new(false),
             accepted: std::sync::atomic::AtomicU64::new(0),
         });
@@ -197,6 +210,11 @@ pub fn socket_path_for(requested: &Path) -> PathBuf {
 struct Shared {
     state: Mutex<State>,
     turn: Duration,
+    /// Reads while its writes wait, like the real app-server (tokio, a
+    /// reader and a writer per connection). `false` (`--disable
+    /// duplex-io`): a stuck peer that blocks on a full socket and stops
+    /// reading, for testing the daemon against one.
+    duplex: bool,
     /// Set when the [`Server`] is dropped: every connection ends.
     closed: std::sync::atomic::AtomicBool,
     /// Connections accepted so far.
@@ -216,6 +234,9 @@ struct State {
     /// While `Some((connection, held))`: notifications for that connection
     /// are held back to go out before the reply of the request it is making.
     hold: Option<(u64, Vec<Value>)>,
+    /// Explicit fake-only replay seam; populated solely by a test RPC.
+    resume_user_replay: BTreeMap<String, (String, Value)>,
+    resume_user_replay_count: BTreeMap<String, u64>,
 }
 
 struct ThreadState {
@@ -971,6 +992,13 @@ fn serve(stream: UnixStream, shared: &Shared) -> tungstenite::Result<()> {
     socket
         .get_ref()
         .set_read_timeout(Some(Duration::from_millis(5)))?;
+    if shared.duplex {
+        // A write that cannot go out now waits in the WebSocket's buffer
+        // while this thread goes on reading.
+        socket
+            .get_ref()
+            .set_write_timeout(Some(Duration::from_millis(5)))?;
+    }
     let (tx, rx) = mpsc::channel();
     let connection = {
         let mut state = lock(&shared.state);
@@ -999,7 +1027,13 @@ fn pump(
             return Ok(());
         }
         while let Ok(message) = outgoing.try_recv() {
-            socket.send(Message::text(message.to_string()))?;
+            queue(socket, &message, shared.duplex)?;
+        }
+        if shared.duplex {
+            match socket.flush() {
+                Err(e) if !waits(&e) => return Err(e),
+                _ => {}
+            }
         }
         match socket.read() {
             Ok(Message::Text(text)) => {
@@ -1007,8 +1041,8 @@ fn pump(
                     continue;
                 };
                 // Messages for this connection, in order (the reply among them).
-                for reply in handle(&message, connection, shared) {
-                    socket.send(Message::text(reply.to_string()))?;
+                for reply in handle(&message, connection, outgoing, shared) {
+                    queue(socket, &reply, shared.duplex)?;
                 }
             }
             Ok(Message::Close(_)) => return Ok(()),
@@ -1026,6 +1060,29 @@ fn pump(
     }
 }
 
+/// A write that could not finish now (the socket buffer is full).
+fn waits(e: &tungstenite::Error) -> bool {
+    matches!(e, tungstenite::Error::Io(e)
+        if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut))
+}
+
+/// Sends `message` in order: duplex, it may wait in the buffer (flushed on
+/// the next loop); otherwise the thread blocks until it is written.
+fn queue(
+    socket: &mut WebSocket<UnixStream>,
+    message: &Value,
+    duplex: bool,
+) -> tungstenite::Result<()> {
+    let frame = Message::text(message.to_string());
+    if !duplex {
+        return socket.send(frame);
+    }
+    match socket.write(frame) {
+        Err(e) if !waits(&e) => Err(e),
+        _ => Ok(()),
+    }
+}
+
 fn text_of(params: &Value) -> String {
     params["input"]
         .as_array()
@@ -1040,14 +1097,27 @@ fn text_of(params: &Value) -> String {
 }
 
 /// Handles one client message; returns what to send back on this
-/// connection before any queued notification: the response to a request,
-/// plus the notifications `thread/resume` sends around it.
-fn handle(message: &Value, connection: u64, shared: &Shared) -> Vec<Value> {
+/// connection before any notification queued later: first the messages
+/// already queued for it (`outgoing`), then the response to a request, plus
+/// the notifications `thread/resume` sends around it.
+///
+/// Every message is queued under the state lock, so draining `outgoing`
+/// under that lock takes exactly what the server emitted before handling
+/// this message: a reply must not overtake it (a first-turn user message
+/// that came due just before a `turn/interrupt` went out after the
+/// interrupt's reply, unlike interrupt.jsonl).
+fn handle(
+    message: &Value,
+    connection: u64,
+    outgoing: &Receiver<Value>,
+    shared: &Shared,
+) -> Vec<Value> {
     let mut state = lock(&shared.state);
+    let mut out: Vec<Value> = outgoing.try_iter().collect();
     let Some(method) = message["method"].as_str() else {
         // A response to one of our requests (approval decision).
         let Some(id) = message["id"].as_i64() else {
-            return Vec::new();
+            return out;
         };
         if let Some((thread_id, _)) = state.pending_approvals.remove(&(connection, id)) {
             let decision = message["result"]["decision"]
@@ -1056,10 +1126,10 @@ fn handle(message: &Value, connection: u64, shared: &Shared) -> Vec<Value> {
                 .to_owned();
             state.answer(&thread_id, id, &decision, shared.turn);
         }
-        return Vec::new();
+        return out;
     };
     let Some(id) = message.get("id").cloned() else {
-        return Vec::new();
+        return out;
     };
     let params = &message["params"];
     let thread_id = params["threadId"].as_str().unwrap_or_default().to_owned();
@@ -1096,6 +1166,16 @@ fn handle(message: &Value, connection: u64, shared: &Shared) -> Vec<Value> {
             Ok(result)
         }
         "thread/resume" if known => {
+            if let Some((turn, item)) = state.resume_user_replay.remove(&thread_id) {
+                before.push(state.notification(
+                    "item/completed",
+                    json!({"threadId": thread_id, "turnId": turn, "item": item}),
+                ));
+                *state
+                    .resume_user_replay_count
+                    .entry(thread_id.clone())
+                    .or_default() += 1;
+            }
             if let Some(t) = state.threads.get_mut(&thread_id) {
                 t.subscribers.insert(connection);
             }
@@ -1351,6 +1431,38 @@ fn handle(message: &Value, connection: u64, shared: &Shared) -> Vec<Value> {
                 Ok(json!({}))
             }
         }
+        "agendFake/replayUserOnNextResume" if known => {
+            // Copy only an actual persisted turn's manual user item.
+            // Tests cannot supply an ideal item or turn id to this seam.
+            let manual = state.threads[&thread_id]
+                .turns
+                .iter()
+                .rev()
+                .find_map(|turn| {
+                    turn["items"].as_array()?.iter().rev().find_map(|item| {
+                        if item["type"] != "userMessage" || !item["clientId"].is_null() {
+                            return None;
+                        }
+                        Some((turn["id"].as_str()?.to_owned(), item.clone()))
+                    })
+                });
+            match manual {
+                Some((turn, item)) => {
+                    let result = json!({"turnId": turn, "itemId": item["id"]});
+                    state
+                        .resume_user_replay
+                        .insert(thread_id.clone(), (turn, item));
+                    Ok(result)
+                }
+                None => Err((
+                    INVALID_REQUEST,
+                    "no saved completed manual user item".into(),
+                )),
+            }
+        }
+        "agendFake/resumeReplayCount" if known => Ok(
+            json!({"replayed": state.resume_user_replay_count.get(&thread_id).copied().unwrap_or(0)}),
+        ),
         "agendFake/exit" => std::process::exit(0),
         other => Err((METHOD_NOT_FOUND, format!("method not found: {other}"))),
     };
@@ -1358,9 +1470,10 @@ fn handle(message: &Value, connection: u64, shared: &Shared) -> Vec<Value> {
         Ok(result) => json!({"id": id, "result": result}),
         Err((code, message)) => json!({"id": id, "error": {"code": code, "message": message}}),
     };
-    before.push(reply);
-    before.extend(after);
-    before
+    out.extend(before);
+    out.push(reply);
+    out.extend(after);
+    out
 }
 
 /// Waits until a server accepts connections on `listen_path` (the socket

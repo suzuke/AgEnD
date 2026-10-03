@@ -22,7 +22,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use agend_core::model::Backend;
@@ -30,6 +30,7 @@ use agend_core::protocol::client::{
     AttentionAction, ClientRequest, ClientResponse, CommandResult, DAEMON_SOCKET, DaemonEvent,
     InstanceData, RequestIdData, ResolveAttentionData, TaskChangedData, error_code,
 };
+use agend_daemon::driver::codex::CodexDriver;
 use agend_daemon::fleet::Fleet;
 use agend_daemon::handlers::Context;
 use agend_daemon::runtime::{HolderRuntime, files};
@@ -79,6 +80,7 @@ pub fn add(home: &Path, id: &str, backend: Backend, script: &str) -> Result<Inst
         session_started: false,
         agent_pid: None,
         legacy_no_thread: false,
+        delivery: "push".into(),
     };
     let store = SqliteStore::open(home, 0).map_err(|e| format!("open store: {e}"))?;
     block_on(store.add_instance(&instance)).map_err(|e| format!("add {id}: {e}"))?;
@@ -100,6 +102,7 @@ pub fn resolve(socket: &Path, attention_id: &str) -> Result<(), String> {
                 request_id: "g8-resolve".into(),
                 attention_id: attention_id.into(),
                 action: AttentionAction::Retry,
+                note: None,
             },
         })
         .map_err(|e| format!("resolve: {e}"))?;
@@ -163,6 +166,9 @@ impl Drop for RealDaemon {
 }
 
 impl ClientProtocolFixture for RealDaemon {
+    fn supported_versions(&self) -> Vec<agend_core::protocol::ProtocolVersion> {
+        vec![agend_core::protocol::client::V1_4]
+    }
     fn socket(&self) -> PathBuf {
         socket_of(&self.home)
     }
@@ -197,6 +203,57 @@ impl ClientProtocolFixture for RealDaemon {
     fn terminal_instance(&self) -> String {
         self.running.clone()
     }
+
+    fn agents(&self) -> (String, String) {
+        let peer = self.failed.first().cloned().unwrap_or_default();
+        (self.running.clone(), peer)
+    }
+
+    fn fresh_name(&mut self) -> String {
+        format!("g8-{}", tag())
+    }
+
+    fn make_output(&mut self, _instance: &str) -> Result<(), String> {
+        // The counter prints a line every second.
+        Ok(())
+    }
+
+    fn stopped_instance(&mut self) -> Result<String, String> {
+        self.failed
+            .first()
+            .cloned()
+            .ok_or("no failed instance".into())
+    }
+
+    fn typed(&mut self, instance: &str, expect: &str) -> Result<String, String> {
+        // The PTY echoes what is typed: wait until the screen shows it.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let screen = terminal_screen(&self.socket(), instance)?;
+            if screen.contains(expect) || Instant::now() >= deadline {
+                return Ok(screen);
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+    }
+}
+
+/// The screen `subscribe_terminal` answers for `instance` (as the operator).
+pub fn terminal_screen(socket: &Path, instance: &str) -> Result<String, String> {
+    let (mut c, _) = ProbeClient::hello(socket, None).map_err(|e| format!("hello: {e}"))?;
+    c.send(&ClientRequest::SubscribeTerminal {
+        data: InstanceData {
+            instance_id: instance.into(),
+        },
+    })
+    .map_err(|e| e.to_string())?;
+    match c
+        .recv_within(Duration::from_secs(10))
+        .map_err(|e| e.to_string())?
+    {
+        Some(ClientResponse::TerminalSnapshot { data }) => Ok(data.screen),
+        other => Err(format!("subscribe_terminal {instance}: {other:?}")),
+    }
 }
 
 /// The daemon's server and fleet in this process, fed events directly: the
@@ -204,6 +261,7 @@ impl ClientProtocolFixture for RealDaemon {
 pub struct InProcess {
     runtime: tokio::runtime::Runtime,
     fleet: Arc<Fleet>,
+    store: Arc<SqliteStore>,
     server: Option<Server>,
     root: PathBuf,
     socket: PathBuf,
@@ -228,9 +286,11 @@ impl InProcess {
             .build()
             .expect("runtime");
         let socket = socket_of(&root);
+        let store = Arc::new(SqliteStore::open(&root, now_ms()).expect("in-process store"));
         let mut fx = InProcess {
             runtime,
             fleet: Arc::new(Fleet::new(now_ms())),
+            store,
             server: None,
             root,
             socket,
@@ -244,7 +304,18 @@ impl InProcess {
         // No supervisor: its queue is closed (`resolve_attention` answers
         // `not_supported`), and no holders.
         let (supervisor, _) = tokio::sync::mpsc::unbounded_channel();
+        let (pipeline, _worker) = self
+            .runtime
+            .block_on(agend_daemon::pipeline::start(
+                &self.root,
+                Path::new("/nonexistent/agend"),
+                Arc::clone(&self.store),
+                Arc::clone(&self.fleet),
+                CodexDriver::new(&self.root, Arc::clone(&self.store), Arc::new(|_| {})),
+            ))
+            .expect("pipeline");
         let context = Arc::new(Context {
+            pipeline,
             fleet: Arc::clone(&self.fleet),
             runtime: HolderRuntime::new(
                 &self.root,
@@ -253,6 +324,11 @@ impl InProcess {
                 Arc::new(|_| {}),
             ),
             supervisor,
+            store: Arc::clone(&self.store),
+            codex: CodexDriver::new(&self.root, Arc::clone(&self.store), Arc::new(|_| {})),
+            exe: PathBuf::from("/nonexistent/agend"),
+            restarting: AtomicBool::new(false),
+            codex_input: Default::default(),
         });
         let listener = server::bind(&self.socket).expect("bind");
         self.server = Some(Server::start(listener, self.socket.clone(), context));
@@ -269,6 +345,9 @@ impl Drop for InProcess {
 }
 
 impl ClientProtocolFixture for InProcess {
+    fn supported_versions(&self) -> Vec<agend_core::protocol::ProtocolVersion> {
+        vec![agend_core::protocol::client::V1_4]
+    }
     fn socket(&self) -> PathBuf {
         self.socket.clone()
     }
@@ -306,6 +385,26 @@ impl ClientProtocolFixture for InProcess {
 
     fn terminal_instance(&self) -> String {
         "none".into()
+    }
+
+    fn agents(&self) -> (String, String) {
+        ("none".into(), "none".into())
+    }
+
+    fn fresh_name(&mut self) -> String {
+        "none".into()
+    }
+
+    fn make_output(&mut self, _instance: &str) -> Result<(), String> {
+        Err("the in-process server has no holders".into())
+    }
+
+    fn stopped_instance(&mut self) -> Result<String, String> {
+        Err("the in-process server has no instances".into())
+    }
+
+    fn typed(&mut self, _instance: &str, _expect: &str) -> Result<String, String> {
+        Err("the in-process server has no holders".into())
     }
 }
 
@@ -380,7 +479,7 @@ pub fn version(lab: &Lab) -> Result<Vec<String>, String> {
     let (out, took) = agend(lab, &home, &["debug", "ping"], &[], Duration::from_secs(20))?;
     let said = text(&out.stderr);
     ensure(
-        out.status.code() == Some(1) && said.contains("needs 1.1") && took < Duration::from_secs(3),
+        out.status.code() == Some(1) && said.contains("needs 1.3") && took < Duration::from_secs(3),
         || {
             format!(
                 "ping against a 1.0 daemon: {} in {took:?}: {said}",
@@ -795,13 +894,16 @@ pub fn terminal(lab: &Lab) -> Result<Vec<String>, String> {
             },
         })
         .map_err(|e| e.to_string())?;
-    let Some(("not_supported", message)) = (match &reply {
+    // Gate 9: agent commands are for agents; the operator is refused.
+    let Some(("forbidden", message)) = (match &reply {
         ClientResponse::Error { data } => Some((data.code.as_str(), data.message.clone())),
         _ => None,
     }) else {
         return Err(format!("command status: {reply:?}"));
     };
-    out.push(format!("command status: error not_supported: {message}"));
+    out.push(format!(
+        "command status (operator): error forbidden: {message}"
+    ));
     daemon.interrupt()?;
     Ok(out)
 }

@@ -43,6 +43,17 @@
 //!   SIGKILL to the old agent's group when it is still this instance's
 //!   (`driver::codex::sweep`), then `agent_pid` is cleared.
 //!
+//! Gate 9 (P6, P7):
+//! - `instance_add` ([`Event::Add`]): checks the name, the backend, that no
+//!   row and no running holder has the name; writes the row (`new`, claude
+//!   gets a session id), publishes the starting view, answers, then starts it like at boot.
+//! - `instance_remove` ([`Event::Remove`]): stops watching, closes the
+//!   link, `Shutdown` to the holder (at most 5 s; an unreachable holder is
+//!   left to the next boot's orphan sweep), removes the row and takes it out
+//!   of the fleet view. The workspace stays.
+//! - [`Event::Exec`] (a restart whose preflight passed): [`Supervisor::run`]
+//!   returns [`Stopped::Exec`]; the daemon stops as on SIGINT, then `exec`s.
+//!
 //! Must NOT: kill or respawn holders on daemon shutdown; start an agent
 //! fresh once it has run.
 
@@ -55,10 +66,12 @@ use agend_core::model::{Backend, DEFAULT_TEAM};
 use agend_core::protocol::client::{
     AgentState, AttentionAction, AttentionRequiredData, InstanceView, TaskView,
 };
+use agend_core::protocol::client::{InstanceAddedData, error_code};
 use agend_core::protocol::holder::ExitedData;
 use agend_core::traits::HolderLaunch;
 use std::path::Path;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::oneshot;
 
 use crate::boot::{BootAction, plan_boot};
 use crate::driver::codex::sweep::{self, Markers};
@@ -66,7 +79,32 @@ use crate::driver::codex::{CodexDriver, CodexEvent, launch as codex_launch};
 use crate::fleet::{Fleet, failed_attention_id};
 use crate::log;
 use crate::runtime::{HolderEvent, HolderRuntime, SpawnOutcome, Started, files};
+use crate::store::instances::{new_session_id, validate_id};
 use crate::store::{Instance, InstanceStatus, SqliteStore, task_row};
+
+/// How long `instance_remove` waits for the holder to go (gate 9 P6).
+pub const REMOVE_WITHIN: Duration = Duration::from_secs(5);
+
+/// A refused operator request: error code and message.
+pub type Refusal = (&'static str, String);
+
+/// `instance_add` as the handler passed it on.
+#[derive(Debug)]
+pub struct AddRequest {
+    pub id: String,
+    pub backend: String,
+    pub working_directory: Option<String>,
+    pub program: Option<String>,
+    pub args: Vec<String>,
+}
+
+/// Why [`Supervisor::run`] returned.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Stopped {
+    Signal(&'static str),
+    /// `agend daemon restart`: stop, then `exec` this binary.
+    Exec(PathBuf),
+}
 
 /// Wait between a death and the restart.
 pub const RESTART_DELAY: Duration = Duration::from_secs(5);
@@ -165,6 +203,18 @@ pub enum Event {
     Retry {
         item: Box<AttentionRequiredData>,
     },
+    /// The operator adds an instance (gate 9).
+    Add {
+        request: AddRequest,
+        reply: oneshot::Sender<Result<InstanceAddedData, Refusal>>,
+    },
+    /// The operator removes an instance (gate 9).
+    Remove {
+        id: String,
+        reply: oneshot::Sender<Result<(), Refusal>>,
+    },
+    /// The restart preflight passed: stop and `exec` this binary.
+    Exec(PathBuf),
     Stop(&'static str),
 }
 
@@ -233,6 +283,7 @@ pub struct Supervisor {
     store: Arc<SqliteStore>,
     runtime: HolderRuntime,
     codex: CodexDriver,
+    pipeline: Option<crate::pipeline::Handle>,
     events: UnboundedSender<Event>,
     watches: BTreeMap<String, Watch>,
     fleet: Arc<Fleet>,
@@ -268,6 +319,7 @@ impl Supervisor {
             store,
             runtime,
             codex,
+            pipeline: None,
             events,
             watches: BTreeMap::new(),
             fleet,
@@ -283,6 +335,7 @@ impl Supervisor {
                 team_id: DEFAULT_TEAM.into(),
                 backend: instance.backend.as_str().into(),
                 state,
+                working_directory: Some(instance.working_directory.clone()),
             },
             summary,
         );
@@ -294,6 +347,10 @@ impl Supervisor {
             view.state = state;
             self.fleet.set_instance(view, summary);
         }
+    }
+
+    pub fn set_pipeline(&mut self, pipeline: crate::pipeline::Handle) {
+        self.pipeline = Some(pipeline);
     }
 
     pub fn store(&self) -> &SqliteStore {
@@ -338,7 +395,7 @@ impl Supervisor {
     /// background (up to 20 s + 30 s; the event loop and Ctrl-C do not
     /// wait). A failure is a death of this generation.
     fn connect_codex(&self, instance: &Instance, generation: u64) {
-        if instance.backend != Backend::Codex {
+        if instance.backend != Backend::Codex || instance.delivery == "inbox" {
             return;
         }
         let (codex, events, id) = (self.codex.clone(), self.events.clone(), instance.id.clone());
@@ -387,6 +444,7 @@ impl Supervisor {
                     assignee: t.assignee,
                     stages: Vec::new(),
                     current_stage: None,
+                    pipeline: None,
                 })
                 .collect(),
         );
@@ -715,8 +773,158 @@ impl Supervisor {
         }
     }
 
-    /// Handles events until a stop signal. Returns the signal's name.
-    pub async fn run(&mut self, events: &mut UnboundedReceiver<Event>) -> &'static str {
+    /// `instance_add` (gate 9 P6): the row, then the start. Answers before
+    /// the start, which is seen in the fleet view like any other.
+    async fn add(
+        &mut self,
+        request: AddRequest,
+        reply: oneshot::Sender<Result<InstanceAddedData, Refusal>>,
+    ) {
+        let instance = match self.new_instance(request).await {
+            Ok(instance) => instance,
+            Err(refusal) => {
+                let _ = reply.send(Err(refusal));
+                return;
+            }
+        };
+        let id = instance.id.clone();
+        log::line(&format!(
+            "{id}: added ({}, {}, {})",
+            instance.backend.as_str(),
+            instance.program,
+            instance.working_directory
+        ));
+        // The accepted response guarantees the immediately following fleet read sees the row.
+        self.show(&instance, AgentState::Starting, "added; starting".into());
+        let _ = reply.send(Ok(InstanceAddedData {
+            instance_id: id,
+            session_id: instance.session_id.clone(),
+            working_directory: instance.working_directory.clone(),
+        }));
+        self.start(&instance, false, None).await;
+    }
+
+    async fn new_instance(&self, request: AddRequest) -> Result<Instance, Refusal> {
+        let invalid = |message: String| (error_code::INVALID_REQUEST, message);
+        let id = request.id;
+        validate_id(&id).map_err(|_| {
+            invalid(format!(
+                "invalid name {id:?}: use 1-24 characters from a-z 0-9 - (e.g. dev-1)"
+            ))
+        })?;
+        let backend = Backend::parse(&request.backend).ok_or_else(|| {
+            invalid(format!(
+                "unknown backend {:?}: use claude, codex or opencode",
+                request.backend
+            ))
+        })?;
+        let exists = |message: String| (error_code::INSTANCE_EXISTS, message);
+        let read = |e| invalid(format!("cannot read instances: {e}"));
+        if self.store.instance(&id).await.map_err(read)?.is_some() {
+            return Err(exists(format!("name {id} is already used")));
+        }
+        if let Ok(Some(pid)) = files::running(&self.home, &id) {
+            return Err(exists(format!(
+                "name {id} is already used: its holder is still running (run/holders/{id}.lock, pid {pid}); wait a few seconds or restart the daemon to sweep it"
+            )));
+        }
+        let working_directory = match request.working_directory {
+            Some(dir) if Path::new(&dir).is_absolute() && Path::new(&dir).is_dir() => dir,
+            Some(dir) => return Err(invalid(format!("no directory {dir} (it must exist)"))),
+            None => {
+                let dir = self.home.join("workspace").join(&id);
+                std::os::unix::fs::DirBuilderExt::mode(
+                    std::fs::DirBuilder::new().recursive(true),
+                    0o700,
+                )
+                .create(&dir)
+                .map_err(|e| invalid(format!("cannot create {}: {e}", dir.display())))?;
+                dir.display().to_string()
+            }
+        };
+        let session_id = match backend {
+            Backend::Claude => Some(
+                new_session_id().map_err(|e| invalid(format!("cannot make a session id: {e}")))?,
+            ),
+            Backend::Codex | Backend::Opencode => None,
+        };
+        let instance = Instance {
+            id: id.clone(),
+            backend,
+            program: request
+                .program
+                .unwrap_or_else(|| backend.as_str().to_owned()),
+            args: request.args,
+            working_directory,
+            session_id,
+            status: InstanceStatus::New,
+            session_started: false,
+            agent_pid: None,
+            legacy_no_thread: false,
+            delivery: "push".into(),
+        };
+        self.store
+            .add_instance(&instance)
+            .await
+            .map_err(|e| match e {
+                crate::store::StoreError::Exists(_) => exists(format!("name {id} is already used")),
+                e => invalid(format!("cannot add {id}: {e}")),
+            })?;
+        Ok(instance)
+    }
+
+    /// `instance_remove` (gate 9 P6): stop it, remove the row, keep the
+    /// workspace.
+    async fn remove(&mut self, id: &str) -> Result<(), Refusal> {
+        let read = |e| {
+            (
+                error_code::INVALID_REQUEST,
+                format!("cannot read {id}: {e}"),
+            )
+        };
+        let Some(instance) = self.store.instance(id).await.map_err(read)? else {
+            return Err((
+                error_code::UNKNOWN_INSTANCE,
+                format!("no instance {id}; see agend instance list"),
+            ));
+        };
+        if let Some(task) = self.store.held_task(id).await.map_err(read)? {
+            return Err((
+                error_code::INVALID_REQUEST,
+                format!("{id} holds {task}; run agend task cancel {task} first"),
+            ));
+        }
+        self.watches.remove(id);
+        self.codex.disconnect(id);
+        self.runtime.detach(id);
+        let (home, holder) = (self.home.clone(), id.to_owned());
+        let stopped = tokio::task::spawn_blocking(move || {
+            crate::runtime::shutdown_holder_within(&home, &holder, REMOVE_WITHIN)
+        })
+        .await
+        .unwrap_or_else(|e| Err(format!("panicked: {e}")));
+        if let Err(e) = stopped {
+            log::line(&format!(
+                "{id}: its holder did not stop ({e}); the next boot sweeps it"
+            ));
+        }
+        self.sweep(&instance, "removed").await;
+        self.store.remove_instance(id).await.map_err(|e| {
+            (
+                error_code::INVALID_REQUEST,
+                format!("cannot remove {id}: {e}"),
+            )
+        })?;
+        self.fleet.remove_instance(id);
+        log::line(&format!(
+            "{id}: removed (workspace kept at {})",
+            instance.working_directory
+        ));
+        Ok(())
+    }
+
+    /// Handles events until a stop signal or a restart.
+    pub async fn run(&mut self, events: &mut UnboundedReceiver<Event>) -> Stopped {
         while let Some(event) = events.recv().await {
             match event {
                 Event::Holder(HolderEvent::AgentExited {
@@ -746,12 +954,24 @@ impl Supervisor {
                 Event::Restart { id, generation } => self.restart(&id, generation).await,
                 Event::Housekeeping => {
                     crate::housekeeping::run(&self.store, &self.home, log::now_unix_ms()).await;
+                    if let Some(p) = &self.pipeline {
+                        p.daily();
+                    }
                 }
                 Event::Retry { item } => self.retry(*item).await,
-                Event::Stop(signal) => return signal,
+                Event::Add { request, reply } => self.add(request, reply).await,
+                Event::Remove { id, reply } => {
+                    let removed = self.remove(&id).await;
+                    let _ = reply.send(removed);
+                }
+                Event::Exec(binary) => return Stopped::Exec(binary),
+                Event::Stop(signal) => return Stopped::Signal(signal),
+            }
+            if let Some(p) = &self.pipeline {
+                p.wake();
             }
         }
-        "channel closed"
+        Stopped::Signal("channel closed")
     }
 }
 
@@ -773,6 +993,7 @@ mod tests {
             session_started: false,
             agent_pid: None,
             legacy_no_thread: false,
+            delivery: "push".into(),
         }
     }
 

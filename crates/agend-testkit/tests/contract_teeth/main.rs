@@ -21,6 +21,8 @@ mod real_runner;
 mod runner;
 mod runtime;
 mod store;
+#[cfg(unix)]
+mod terminal;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -46,6 +48,8 @@ fn all_mutants() -> Vec<Mutant> {
         runner::mutants(),
         #[cfg(unix)]
         client::mutants(),
+        #[cfg(unix)]
+        terminal::mutants(),
     ]
     .into_iter()
     .flatten()
@@ -64,7 +68,11 @@ const PREFIXES: [(&str, &str); 8] = [
     ("ClientProtocol", "CLP"),
 ];
 
-const CONTRACTS_MD: &str = include_str!("../../CONTRACTS.md");
+const CONTRACTS_MD: &str = concat!(
+    include_str!("../../CONTRACTS.md"),
+    "\n",
+    include_str!("../../CLIENT-CONTRACTS.md")
+);
 
 /// `(rule id, mutant names)` for every rule row of CONTRACTS.md: a table
 /// row whose first cell is an id like `DRV-1`; the mutants are the
@@ -192,12 +200,19 @@ fn every_rule_has_a_case_and_a_mutant_and_nothing_else_exists() {
 #[test]
 fn every_mutant_fails_a_case_of_its_rule() {
     let mutants = all_mutants();
-    // In parallel: runner mutants wait seconds for timed-out commands.
-    let reports: Vec<Report> = std::thread::scope(|scope| {
-        let handles: Vec<_> = mutants
-            .iter()
-            .map(|m| {
-                scope.spawn(move || {
+    // In parallel (runner mutants wait seconds for timed-out commands), but
+    // at most PARALLEL at a time: every client mutant holds a fake daemon, a
+    // proxy and a few connections (about ten descriptors each), and all ~100
+    // at once went past macOS's default `ulimit -n 256`.
+    const PARALLEL: usize = 16;
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let results = std::sync::Mutex::new(vec![None; mutants.len()]);
+    std::thread::scope(|scope| {
+        for _ in 0..PARALLEL {
+            scope.spawn(|| {
+                loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let Some(m) = mutants.get(i) else { break };
                     let started = std::time::Instant::now();
                     let report = (m.run)(m.name);
                     println!(
@@ -207,15 +222,17 @@ fn every_mutant_fails_a_case_of_its_rule() {
                         report.failing_rules(),
                         started.elapsed().as_millis()
                     );
-                    report
-                })
-            })
-            .collect();
-        handles
-            .into_iter()
-            .map(|h| h.join().expect("mutant run panicked outside a case"))
-            .collect()
+                    results.lock().unwrap()[i] = Some(report);
+                }
+            });
+        }
     });
+    let reports: Vec<Report> = results
+        .into_inner()
+        .unwrap()
+        .into_iter()
+        .map(|r| r.expect("mutant run panicked outside a case"))
+        .collect();
     let escaped: Vec<String> = mutants
         .iter()
         .zip(&reports)

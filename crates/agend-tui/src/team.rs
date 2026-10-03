@@ -92,7 +92,8 @@ fn agents(ctx: &Ctx, team: &str, rows: &mut Vec<Row>) {
 }
 
 /// Tasks grouped by the kind of their current stage, in workflow order,
-/// then finished tasks.
+/// then finished tasks. Without stage kinds (the daemon's before gate 10,
+/// gap G5) a plain list: active tasks, then finished ones.
 fn pipeline(ctx: &Ctx, team: &str, rows: &mut Vec<Row>) {
     let order = [
         StageKind::Work,
@@ -107,10 +108,29 @@ fn pipeline(ctx: &Ctx, team: &str, rows: &mut Vec<Row>) {
         rows.push(Row::line("", ctx.tr(Text::TeamNoGoals)));
         return;
     }
+    let row = |task: &crate::source::TaskInfo, agent: Option<&str>| {
+        Row::item(
+            "",
+            format!("  {} {}", task.id, task.title),
+            Target::Task(task.id.clone()),
+        )
+        .right(agent.unwrap_or("—"))
+        .agent(agent)
+    };
+    let kinds_known = tasks
+        .iter()
+        .all(|t| !t.stages.is_empty() && t.stages.iter().all(|s| s.kind.is_some()));
+    if !kinds_known {
+        let (active, done): (Vec<_>, Vec<_>) = tasks.iter().partition(|t| !t.is_done());
+        for task in active.into_iter().chain(done) {
+            rows.push(row(task, task.holder.as_deref()));
+        }
+        return;
+    }
     let column = |kind: Option<StageKind>| -> Vec<_> {
         tasks
             .iter()
-            .filter(|t| t.current_stage().map(|i| t.stages[i].kind) == kind)
+            .filter(|t| t.current_stage().and_then(|i| t.stages[i].kind) == kind)
             .collect()
     };
     let columns = order
@@ -127,15 +147,7 @@ fn pipeline(ctx: &Ctx, team: &str, rows: &mut Vec<Row>) {
                 .current_stage()
                 .and_then(|i| task.stages[i].agent.as_deref())
                 .or(task.holder.as_deref());
-            rows.push(
-                Row::item(
-                    "",
-                    format!("  {} {}", task.id, task.title),
-                    Target::Task(task.id.clone()),
-                )
-                .right(agent.unwrap_or("—"))
-                .agent(agent),
-            );
+            rows.push(row(task, agent));
         }
     }
 }

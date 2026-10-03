@@ -37,23 +37,34 @@ pub fn rows(ctx: &Ctx, task_id: &str) -> Vec<Row> {
         Row::rule(ctx.tr(Text::Stages)),
     ];
     let last = task.stages.len().saturating_sub(1);
+    if let Some(detail) = &task.pipeline {
+        if let Some(reason) = &detail.block_reason {
+            rows.push(Row::line(
+                "",
+                format!("{}: {reason}", ctx.tr(Text::Blocked)),
+            ));
+        }
+        for path in &detail.archive_paths {
+            rows.push(Row::line("", format!("WIP: {path}")));
+        }
+    }
     for (i, stage) in task.stages.iter().enumerate() {
         let (glyph, state) = match stage.state {
             StageState::Done => ("✓", ctx.tr(Text::StageDone)),
             StageState::Running => ("●", ctx.tr(Text::StageRunning)),
             StageState::NotStarted => ("·", ctx.tr(Text::StageNotStarted)),
+            StageState::Failed => ("×", ctx.tr(Text::StatusFailed)),
+            StageState::Cancelled => ("×", ctx.tr(Text::StatusCancelled)),
         };
         let branch = if i == last { "  └─" } else { "  ├─" };
         let agent = stage.agent.as_deref();
         rows.push(
             Row::item(
                 branch,
-                format!(
-                    "{glyph} {}. {} ({})",
-                    i + 1,
-                    stage.name,
-                    stage.kind.as_str()
-                ),
+                match stage.kind {
+                    Some(kind) => format!("{glyph} {}. {} ({})", i + 1, stage.name, kind.as_str()),
+                    None => format!("{glyph} {}. {}", i + 1, stage.name),
+                },
                 Target::Stage(task.id.clone(), i),
             )
             .right(format!("{state}  {}", agent.unwrap_or("")))

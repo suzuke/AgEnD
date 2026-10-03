@@ -359,6 +359,12 @@ fn disconnect_shows_a_clear_message_and_reconnect_restores_the_view() {
         "no stale data while disconnected"
     );
     app.tick();
+    assert!(
+        matches!(app.connection, Connection::Disconnected { attempts: 0, .. }),
+        "no attempt before 500 ms"
+    );
+    std::thread::sleep(agend_tui::app::RECONNECT_EVERY);
+    app.tick();
     let text = render(&mut app);
     assert!(
         text.contains("Reconnect attempt 1 failed: daemon is not running (connection refused)")
@@ -370,6 +376,7 @@ fn disconnect_shows_a_clear_message_and_reconnect_restores_the_view() {
     press(&mut app, &[ch('L')]);
 
     handle.set_online(true);
+    std::thread::sleep(agend_tui::app::RECONNECT_EVERY);
     app.tick();
     assert!(app.is_connected());
     let text = render(&mut app);
@@ -395,6 +402,7 @@ fn starting_without_a_daemon_shows_the_disconnected_state() {
     );
     assert!(text.contains("r 立即重試"));
     handle.set_online(true);
+    std::thread::sleep(agend_tui::app::RECONNECT_EVERY);
     app.tick();
     assert!(render(&mut app).contains("需要你 · 3"));
 }

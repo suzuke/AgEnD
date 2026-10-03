@@ -6,7 +6,26 @@
 > - 記住：每個領域模組都要能對 testkit 的假實作單獨測；每個 adapter 要跑契約測試。
 > - codex（第 7 施工關）：driver 對行程內的假 app-server ＋真 DB 在 `tests/codex_driver.rs`（DRV-1..9、三級忙碌、冪等、崩潰對帳、授權、四次開機跨 process），各段與 `codex_demo` 共用 `tests/common/codex_driver.rs`；真 daemon ＋真 holder ＋`sh` 包裝＋`fake_codex` 在 `crates/agend/tests/codex_process.rs`，共用 `tests/common/codex_process.rs`。
 > - client protocol（第 8 施工關）：`fleet` 的游標規則是單元測試；真 daemon 的 CLP 契約與 socket／`retry`／終端／重啟在 `crates/agend/tests/client_protocol.rs`，各段與 `client_demo` 共用 `tests/common/client_process.rs`。
-> - 下一步：`cargo test -p agend-daemon`；看 demo：`cargo xtask accept store`、`cargo xtask accept client`。
+> - CLI 的 daemon 端（第 9 施工關）：權限、`send`／`inbox`、`instance add|remove`、`daemon restart` 的預檢與 `exec`、繼承 holder 的收屍，都對真 `agend` binary 測：`crates/agend/tests/cli.rs`（CLI-n 表、重啟、預檢、里程碑）與 `client_protocol.rs`（CLP-13..17）。
+> - 下一步：`cargo test -p agend-daemon`；看 demo：`cargo xtask accept store`、`cargo xtask accept client`、`cargo xtask accept cli`。
+
+## 第 10 施工關驗證
+
+`cargo test -p agend-daemon --test pipeline_adapters` 跑真 Runner 的 RUN-1..9、LocalForge 的 FRG-1..10、metadata／cache／外部寫入／FIFO marker 反向測試、冷 cache、TCP 可連／daemon socket 不可連、父程序 SIGKILL 的子程序清理與真 cargo／npm 編譯測試；`tests/store.rs` 跑 STO-13、schema v5 與既有有資料的 migrations。 `pipeline_store_ports` 的 fake／SQLite 共享契約驗 attention 清除同 CAS transaction、ack 保留與 generic advance 語意；真 SQLite 拒絕 attention UPDATE 時，version／event／receipt／note 全部 rollback，移除故障後重試成功。
+
+## 第 11 施工關 C 段（已驗收並合併 #145）
+
+`runtime::client::tests` 以真型別 serializer 產生邊界行，驗 8 MiB 包含換行、超限整份拒絕；`runtime::terminal::tests` 驗 1.0 holder 不送新請求、legacy write lock 阻擋時仍可逾時與停止。`agend/tests/terminal_runtime.rs` 走真 binary／holder／PTY：並行 viewport 配對、實際尺寸與輸入 ack、交接後舊 input 拒絕、取消 native blocked input 後舊憑證失效／重連不重送、grant 回覆已到但未接收的取消競態、取消唯讀查詢不打斷控制、尺寸及 holder 保留、超限輸入整份拒絕與重起 generation。
+
+8 個 terminal_hub native cases 驗 caller、socket-scoped view／attach、控制交接、EOF／停止、尺寸、dirty 尾段、歷史、20 次開關與正式 client。完整 TUI、fake C 契約與 U17 已有原生回歸；使用者要求剩餘行為自動驗證；最新 head verifier／CI、清理與 merge 確認見 [驗收收尾](../../docs/gates/gate-11c-closeout.md)。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
+
+`agend/tests/terminal_capability.rs` 對真 binary 與 FakeDaemon 跑同樣的 client 1.4 請求：以明確 1.3 hello 協商，明示能力不足，控制請求先拒 agent、錯誤保留 request id，拒絕後 get_fleet 仍正常。真 daemon 選 1.4 的控制路徑另跑 native cases；這組案例刻意協商舊能力 1.3；完整 C 共享契約已在 `agend/tests/full_terminal_contract.rs` 對 fake／native 同跑 CLP-23–28。
+
+`pipeline::attention::tests` 注入真 Fleet 快照與 Retry 的受控交錯：原程式重建已移除項目、覆蓋新失敗，兩個反例 exit 101；條件更新後皆通過，另核正常 enrichment／no-op／錯 id。真 client protocol CLP-11 另跑；[證據](../../docs/gates/gate-11c-regression-validation.md)。
+
+Codex history 的四個匹配 cases 保留 lost-reply 對帳，新增 never-attempted／foreign clientId 拒絕；native U17 foundation 在 agend 的 `codex_u17`。[範圍](../../docs/gates/gate-11c-u17-validation.md)。
+
+Codex history 五個 cases 核嚴格 clientId 與舊 lost-reply 相容性；codex_u17 12 個 native tests 核 App／daemon、caller、已驗版本開放、未驗版本拒絕、缺失／過期 holder 版本記錄、DB 拒寫與 attempted crash-window 跨拒絕重啟。driver unit 另驗歸屬讀取失敗在 resume 前拒絕；store unit 驗歸屬持久、冪等及永久保留。v1–v6 fixtures 升級比對 golden。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
 
 ## 怎麼跑
 
@@ -17,6 +36,7 @@ cargo test -p agend --test holder_runtime --test daemon_process   # 第 6 施工
 cargo test -p agend --test client_protocol                      # 第 8 施工關：真 daemon 的 client protocol
 cargo test -p agend-daemon --test codex_driver                  # 第 7 施工關：codex driver 對假 app-server
 cargo test -p agend --test codex_process                        # 第 7 施工關：真 daemon、真 holder、sh 包裝、fake_codex
+cargo test -p agend --test cli                                  # 第 9 施工關：CLI、重啟與預檢、里程碑
 AGEND_BLESS_GOLDEN=1 cargo test -p agend-daemon --test store   # 故意改 schema 後重寫 golden
 ```
 
@@ -45,6 +65,8 @@ AGEND_BLESS_GOLDEN=1 cargo test -p agend-daemon --test store   # 故意改 schem
 | `housekeeping::tests`（單元） | 假時鐘：daemon log 留 7 天、其他檔案不動；audit 每天輪替、留 14 份（13 份輪替＋今天的）；holder log 只在 holder 不在且 7 天沒動時刪（P8） |
 | `fleet::tests`（單元） | 第一個事件＝基準 + 1；還沒有事件時只有基準接得上；「最舊 − 1」到最新接得上，其他 `event_gap`；時鐘往回調：比新 daemon 最新的還大 → `event_gap`，落在新範圍內會被接受（已知風險，所以 1.1 client 重連一律重拿全貌）；沒變的 instance 不發事件；「需要你」加一次、解決一次（第 8 施工關 P4、P5） |
 | `supervisor::tests::a_failed_instance_is_a_needs_you_item_with_retry_unless_it_cannot_resume` | P5 的表：claude 一律有 `retry`；opencode 只有 session 沒建立過才有；codex（第 7 施工關）除了 `legacy_no_thread` 都有；沒有的 `actions` 空、「不處理的話」寫 `delete and re-add the instance (gate 9)` |
+| `crates/agend/tests/cli.rs`（第 9 施工關，真 daemon） | `handlers::agent`／`handlers::operator`、`supervisor` 的 add／remove、`preflight`、`reaper`、`daemon` 的 `exec`：見 [agend TESTING](../agend/TESTING.md)（CLI-n 表、重啟 pid 與 holder 不變、預檢失敗 DB 位元組不變、一次一個重啟、繼承的 holder 不留殘屍而自己的 holder 與預檢子程序的 exit status 沒被搶、里程碑） |
+| `crates/agend/tests/client_protocol.rs`（CLP-13..17） | 權限兩個方向、`instance_add`／`remove`、`daemon_restart` 的形狀、`task_cancel` 不改狀態、`send` 同 id 只收一次與 `inbox --after`，對真 daemon（同一套也對假 daemon，見 testkit） |
 | `store::instances::tests`、`log::tests`（單元） | instance id 只能 `[a-z0-9-]{1,24}`；session id 是 UUID v4；log 檔名與時間戳是 UTC |
 | `tests/store_process.rs` | 測試 binary 重新執行自己：四次開機四個 pid、開機 2 只打開、開機 3 重開前的舊版本 CAS 回 `Conflict` 且 task 不變、版本嚴格變大；反向：每次開機用新 DB 路徑必須在開機 3 失敗；硬殺（只對自己的 `Child`）後 ack 過的寫入都在、`integrity_check` ok；第二個程序開 DB 被拒、第一個照常寫入（P2、P6、P7） |
 
@@ -70,8 +92,12 @@ AGEND_BLESS_GOLDEN=1 cargo test -p agend-daemon --test store   # 故意改 schem
 - [ ] 送過一次的訊息，它的 turn 被中斷、user message 永遠沒出現：閒置後會再送一次；真 codex 不認得 `thread/queue/list` 時還在佇列裡的會再送（第 7 施工關 K9）
 - [x] protocol server（第 8 施工關：`crates/agend/tests/client_protocol.rs`）
 - [ ] 開機很慢（instance 很多、每個 holder 起不來要等 5 秒）時 CLI 的 10 秒會先放棄：本關量到開機 0.1 秒（1–7 個 instance），沒有測大量 instance
-- [ ] pipeline、git、runner、forge local、supervisor、reconcile（第 10 施工關）
+- [ ] daemon 在預檢進行中收到 Ctrl-C：預檢子程序自己跑完，`/tmp/agend-pf-*` 會留下（第 9 施工關，沒有測）
+- [ ] `exec` 失敗（預檢之後 binary 被刪）：只印錯誤、exit 1，沒有測（第 9 施工關已知風險）
+- [x] 第 10 施工關：FakeStore／FakeForge／FakeRunner／FakeDriver／FakeClock 的整條 queue 測試驗 merge、checks 返工、stale、store 失敗與逐 task boot 隔離；transition 驗 CAS conflict 不派 action；`pipeline_store_ports.rs` 對 fake 與 SQLite 同跑結果／receipt 原子提交與 rollback；真 git／Runner／LocalForge 契約、checks 的 metadata／cache／socket 防護、cargo/npm smoke；跨程序的重啟、merge intent/trailer 對帳、持久化請示與人工 attention（`pipeline_adapters.rs`、`agend/tests/pipeline.rs`、`pipeline_tui.rs`）
 - [ ] claude／opencode driver、forge github、notifier（第 12 施工關）
+
+`pipeline::tests::failed_human_approval_commit_keeps_attention_and_publishes_no_resolution` 對完整 queue／FakeStore 驗核准 CAS 失敗時保留原 attention，沒有 resolution 或 merge；真程序／CLI 回歸見 agend 的 pipeline_attention_events。
 
 ## 下一步
 
@@ -79,3 +105,29 @@ AGEND_BLESS_GOLDEN=1 cargo test -p agend-daemon --test store   # 故意改 schem
 cargo test -p agend-daemon
 cargo xtask accept daemon-holder
 ```
+
+Failed 派工回歸：五種 fake queue 只用一個 dev，boot 派工失敗後仍可派下一個 task；真程序 `pipeline_review` 以 bindings 暫存路徑故障，恢復後不用 restart 即釋放 terminal binding、worktree 與 assignee。Linux CI 的 canonical repo 寫入回歸涵蓋 `/tmp` 遮蔽後的明確唯讀掛載。
+
+`pipeline_handoff` 使用真 daemon、git、SQLite 與 checks：前段 Branch 作者提交、交接排隊、重啟、後段作者接手，最後 merge 的 tree 必須含兩位作者的檔案，不能只留 archive。
+
+`pipeline_context` 驗 approved Result 的人工 recap／接手訊息與重啟、repo team 的 headless role review，以及 merge recovery 的 main ref 損壞不阻止整機啟動。`daemon::stop_flag` 以獨立子程序在 Tokio runtime 關閉後送真 SIGINT，確保 exec 前仍能看到停止；CLI 原回歸保留 10 秒條件，診斷延遲不留在產品碼。
+
+`pipeline_archive` 用三種各 6 MiB 的 binary（未 merge commit、tracked 修改、untracked）驗 archive 的 `git apply` round trip 與 bytes 相等；另驗 archive I/O 失敗保留原 WIP、下一次 wake 重試，以及 foreign checks worktree／tmp 保留、命名空間內孤兒仍清理。
+
+`pipeline_archive_history` 以真 merge 衝突建立只在 merge commit 出現的解法，再加未 commit 修改；取消後 `git apply` 必須還原最終 bytes。CLP-14 仍要求 instance-add 成功後立即 get_fleet 就可見，supervisor 先投影 Starting 再回覆成功。
+
+`pipeline_archive_index` 經真 shim stage 6 MiB binary、刪除工作目錄檔案；取消後從 archive 分出 index／worktree patch，還原相同 AD 狀態與全部 bytes。另驗 unresolved index 保存失敗時仍保留各 stage 與原 worktree，不能發布假完整 archive。
+
+`pipeline_archive_flags` 經真 shim 設定 `skip-worktree`／`assume-unchanged`，驗取消後 patch 還原實際 bytes（含 split index）；另驗私有 index 檢查後保存失敗時，原 index bytes 與 WIP 都保留；canonical main 的隱藏修改會阻擋 merge，author 的隱藏修改在需要 rebase 時保留原 head 與 bytes。
+
+`pipeline_archive_diff` 經真 shim 設定 external diff／textconv，原 diff 為空仍須保留 staged bytes，取消後以 patch 還原 unstaged 與 untracked bytes；archive 與 patch-id 都停用顯示轉換；另驗 ignored local notes 還原、content filter 保存失敗時保留原始 WIP、patch-id 不受顯示設定影響，以及真 normalization fixture 的 raw bytes 修改不能通過 clean 檢查。
+
+`pipeline_archive_racy` 使用真 Git 產生 cached stat，再以 minimal stat／忽略 ctime／相同長度與 mtime 產生 WIP；確認 fresh-mtime 的 index 副本會隱藏修改，但取消封存仍還原實際 bytes。新 index 由 stage entries 重建，不帶 stat cache 或隱藏旗標；旗標回歸另含 core.ignoreStat 設定。
+
+`pipeline_workflow` 證明抽象 core 可表示 count=2 human approval，但本 runtime 的 workflow check／apply／task create 均提早拒絕，拒絕後不能留下 task；內建 count=1 workflow 仍有效。
+
+`pipeline_archive_eol` 經真 daemon／shim 設定 core.autocrlf=input／true 與 text／text=auto／eol／legacy crlf attributes；取消時須回報 Failed，保留原 worktree、CRLF 的全部 bytes 與原 index，不發布會遺失 CR bytes 的 patch。
+
+`pipeline_archive_nested` 用真 Git 建 nested repo／staged gitlink，取消須保留內部資料、Git metadata 與原 index；一般未追蹤子目錄、空檔、symlink 則以真 git apply 還原。`pipeline_archive_index` 只檢查已發布的 .patch，避免每次 wake 的暫存 staging 造成競態。
+
+`pipeline_archive_display` 以真 daemon／shim 設 color.ui／color.diff=always 與 shared diff.noprefix，取消後須用預設 git apply 還原 commit／index／worktree 與原資料內 ESC bytes；patch-id 也不受顏色／prefix 影響。`pipeline_archive_nested` 另移除 inner HEAD、留下只有 Git objects／index 保存的 staged binary，Git 看不到其 metadata 時仍須保留全部資料。

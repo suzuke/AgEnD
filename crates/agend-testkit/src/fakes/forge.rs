@@ -85,6 +85,14 @@ impl FakeForge {
         }
     }
 
+    pub fn create_branch(&self, branch: &str) {
+        let mut state = lock(&self.state);
+        let base = state.base.clone();
+        state.branches.entry(branch.into()).or_insert(base);
+    }
+    pub fn is_ancestor(&self, a: &str, b: &str) -> bool {
+        lock(&self.state).is_ancestor(a, b)
+    }
     /// Adds a new commit on `branch` (creating it from the base) and returns
     /// the new head.
     pub fn push(&self, branch: &str) -> String {

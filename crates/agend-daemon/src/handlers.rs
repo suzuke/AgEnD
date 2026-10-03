@@ -6,44 +6,96 @@
 //! Gate 8 serves the client protocol requests that have real data (P6):
 //! `get_fleet`, `subscribe_events`, `subscribe_terminal` and
 //! `resolve_attention` (operator only: any `caller` in `hello` is an agent,
-//! P2; identity is checked before the item is looked up). `terminal_input`
-//! and agent commands answer `not_supported`, `answer_ask` answers
-//! `unknown_ask` (no asks before gates 9 and 10); none of them changes
-//! anything.
+//! P2; identity is checked before the item is looked up). `answer_ask`
+//! answers `unknown_ask` (no asks before gate 10) and changes nothing.
+//!
+//! Gate 11 C (P6): `terminal_input` is the operator's only: an agent gets
+//! `forbidden` (identity first), an instance without a live terminal
+//! `no_terminal`, an unapproved or disconnected codex peer `not_supported`;
+//! otherwise the bytes go to the holder and nothing is
+//! answered. Its errors carry no request id.
+//!
+//! Gate 9 (P1): permissions are checked here only. `command` (agent
+//! commands, [`agent`]) is for agents: the operator gets `forbidden`;
+//! `operator` ([`operator`]) is for the operator: an agent gets
+//! `forbidden`. Read-only requests are open to both.
 //!
 //! Must NOT: read the caller's cwd to infer context, or know which transport
 //! (socket, future MCP adapter) carried the call.
 
+pub mod agent;
+pub mod operator;
+
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
+use agend_core::protocol::ProtocolVersion;
 use agend_core::protocol::client::{
     AgentCommand, AgentState, ClientCommandResultData, ClientRequest, ClientResponse,
-    CommandResult, ErrorData, FleetData, TerminalSnapshotData, error_code,
+    CommandResult, ErrorData, FleetData, SelectedVersionData, TerminalSnapshotData, error_code,
 };
+use agend_core::protocol::holder::{MAX_REQUEST_LINE, operator_input_too_long};
 use tokio::sync::{broadcast, mpsc::UnboundedSender};
 
+use crate::driver::codex::CodexDriver;
 use crate::fleet::{Fleet, Subscription};
 use crate::runtime::HolderRuntime;
+use crate::store::SqliteStore;
 use crate::supervisor::Event;
 
 /// What an agent gets for `resolve_attention`.
-pub const OPERATOR_ONLY: &str =
-    "only the operator can resolve needs-you items; ask the operator with agend ask";
+pub const OPERATOR_ONLY: &str = "only the operator can resolve needs-you items; ask the operator";
+/// What an agent gets for `terminal_input`.
+pub const TYPE_OPERATOR_ONLY: &str = "only the operator can type into an agent's terminal";
+/// What `terminal_input` into a codex instance gets.
+pub const CODEX_INPUT: &str = "Codex terminal input requires the approved CLI 0.159.3 and a connected link with durable own-clientId receipts; nothing was written";
 /// Longest wait for a holder's answer to `Snapshot`.
 const SNAPSHOT_WITHIN: Duration = Duration::from_secs(5);
 
 /// What the handlers work with.
 pub struct Context {
     pub fleet: Arc<Fleet>,
+    pub pipeline: crate::pipeline::Handle,
     pub runtime: HolderRuntime,
-    /// The supervisor's queue (`resolve_attention` acts through it).
+    /// The supervisor's queue (`resolve_attention`, `instance_add` and
+    /// `instance_remove` act through it).
     pub supervisor: UnboundedSender<Event>,
+    pub store: Arc<SqliteStore>,
+    /// `send` delivers through it (gate 7's `deliver`).
+    pub codex: CodexDriver,
+    /// This daemon's own binary (`daemon_restart` without a binary).
+    pub exe: PathBuf,
+    /// A restart preflight is running (only one at a time, gate 9 P7).
+    pub restarting: AtomicBool,
+    /// Admission policy used when the driver connects; the live driver gates input.
+    pub codex_input: agend_core::policy::codex_input::CodexInputPolicy,
+}
+
+impl Context {
+    /// The `hello` reply for `selected`: with the daemon's version, pid
+    /// and boot id (gate 9 P6, P7).
+    pub fn hello(&self, selected: ProtocolVersion) -> SelectedVersionData {
+        SelectedVersionData {
+            selected,
+            daemon_version: Some(format!("agend {}", env!("CARGO_PKG_VERSION"))),
+            daemon_pid: Some(std::process::id()),
+            boot_id: Some(self.fleet.base()),
+        }
+    }
 }
 
 /// What the server does with a request.
 pub enum Outcome {
     Reply(ClientResponse),
+    /// No immediate response to send.
+    Nothing,
+    /// Validated legacy operator input; ordered in the terminal entry service.
+    TerminalInput {
+        instance_id: String,
+        line: Vec<u8>,
+    },
     /// Send the backlog, then forward live events.
     Events(Subscription),
     /// Send the screen, then forward the PTY chunks (`None`: the screen
@@ -51,6 +103,12 @@ pub enum Outcome {
     Terminal {
         snapshot: ClientResponse,
         live: Option<broadcast::Receiver<String>>,
+    },
+    /// Send `reply` (`restarting`), then hand `binary` to the supervisor,
+    /// which stops the daemon so it can `exec` it.
+    Restart {
+        reply: ClientResponse,
+        binary: PathBuf,
     },
 }
 
@@ -62,6 +120,23 @@ pub fn error(request_id: Option<String>, code: &str, message: impl Into<String>)
             message: message.into(),
         },
     }
+}
+
+/// What the operator gets for an agent command.
+pub(crate) fn pipeline_reply(request_id: String, result: crate::pipeline::Reply) -> ClientResponse {
+    match result {
+        Ok(result) => ClientResponse::CommandResult {
+            data: ClientCommandResultData { request_id, result },
+        },
+        Err((code, message)) => error(Some(request_id), &code, message),
+    }
+}
+
+fn agent_only(command: &AgentCommand) -> String {
+    format!(
+        "{} is an agent command; it runs inside an agent, where AGEND_INSTANCE is set",
+        command_name(command)
+    )
 }
 
 /// `agend review approve` for `review_approve`, from the command's wire tag.
@@ -94,27 +169,40 @@ pub async fn handle(ctx: &Context, caller: Option<&str>, request: ClientRequest)
         ClientRequest::SubscribeTerminal { data } => {
             return terminal(ctx, data.instance_id).await;
         }
-        ClientRequest::TerminalInput { .. } => error(
-            None,
-            error_code::NOT_SUPPORTED,
-            "terminal input arrives with the attach view (gate 11); nothing was written",
-        ),
-        ClientRequest::AnswerAsk { data } => error(
-            Some(data.request_id),
-            error_code::UNKNOWN_ASK,
-            format!(
-                "no open ask {} (asks arrive in gates 9 and 10)",
-                data.ask_id
+        ClientRequest::TerminalInput { data } => {
+            return terminal_input(ctx, caller, data.instance_id, data.bytes_base64);
+        }
+        ClientRequest::AnswerAsk { data } => {
+            if caller.is_some() {
+                error(
+                    Some(data.request_id),
+                    error_code::FORBIDDEN,
+                    "only the operator can answer asks",
+                )
+            } else {
+                let id = data.request_id.clone();
+                pipeline_reply(id, ctx.pipeline.answer(data).await)
+            }
+        }
+        ClientRequest::Command { data } => match caller {
+            Some(caller) => agent::handle(ctx, caller, data).await,
+            None => error(
+                Some(data.request_id),
+                error_code::FORBIDDEN,
+                agent_only(&data.command),
             ),
-        ),
-        ClientRequest::Command { data } => error(
-            Some(data.request_id),
-            error_code::NOT_SUPPORTED,
-            format!(
-                "agent commands arrive in gate 9 ({})",
-                command_name(&data.command)
-            ),
-        ),
+        },
+        ClientRequest::Operator { data } => {
+            if caller.is_some() {
+                let message = operator::forbidden(&data.command);
+                return Outcome::Reply(error(
+                    Some(data.request_id),
+                    error_code::FORBIDDEN,
+                    message,
+                ));
+            }
+            return operator::handle(ctx, data).await;
+        }
         ClientRequest::ResolveAttention { data } => {
             if caller.is_some() {
                 return Outcome::Reply(error(
@@ -122,6 +210,10 @@ pub async fn handle(ctx: &Context, caller: Option<&str>, request: ClientRequest)
                     error_code::FORBIDDEN,
                     OPERATOR_ONLY,
                 ));
+            }
+            if !data.attention_id.starts_with("instance-failed:") {
+                let id = data.request_id.clone();
+                return Outcome::Reply(pipeline_reply(id, ctx.pipeline.resolve(data).await));
             }
             // Checked and taken off the list here, so the reply never waits
             // for a busy supervisor (a retry can take 15 s, C6); the
@@ -157,9 +249,55 @@ pub async fn handle(ctx: &Context, caller: Option<&str>, request: ClientRequest)
                 },
             }
         }
+        ClientRequest::SubscribeTerminalFrames { data } => {
+            terminal_version_error(caller, data.request_id, false)
+        }
+        ClientRequest::SetTerminalViewport { data } => {
+            terminal_version_error(caller, data.request_id, false)
+        }
+        ClientRequest::TerminalControl { data } => {
+            terminal_version_error(caller, data.request_id, true)
+        }
         ClientRequest::Unknown => error(None, error_code::UNKNOWN_REQUEST, "unknown request type"),
     };
     Outcome::Reply(reply)
+}
+
+/// `terminal_input` (gate 11 B P6): identity, then a live terminal, then the
+/// backend; accepted input is not answered.
+fn terminal_input(
+    ctx: &Context,
+    caller: Option<&str>,
+    instance_id: String,
+    bytes_base64: String,
+) -> Outcome {
+    let refuse = |code: &str, message: String| Outcome::Reply(error(None, code, message));
+    if caller.is_some() {
+        return refuse(error_code::FORBIDDEN, TYPE_OPERATOR_ONLY.into());
+    }
+    let live = ctx
+        .fleet
+        .instance(&instance_id)
+        .filter(|view| view.state != AgentState::Failed && ctx.runtime.has_link(&instance_id));
+    let Some(view) = live else {
+        return refuse(
+            error_code::NO_TERMINAL,
+            format!("{instance_id} has no live terminal; nothing was written"),
+        );
+    };
+    if view.backend == agend_core::model::Backend::Codex.as_str()
+        && !ctx.codex.can_input(&instance_id)
+    {
+        return refuse(error_code::NOT_SUPPORTED, CODEX_INPUT.into());
+    }
+    let line = crate::runtime::link::input_line(bytes_base64);
+    if line.len() > MAX_REQUEST_LINE {
+        return refuse(
+            error_code::INVALID_REQUEST,
+            operator_input_too_long(line.len()),
+        );
+    }
+    Outcome::TerminalInput { instance_id, line }
 }
 
 /// `subscribe_terminal`: a running instance's screen and bytes through the
@@ -199,5 +337,26 @@ async fn terminal(ctx: &Context, instance_id: String) -> Outcome {
             live: Some(live),
         },
         _ => no_terminal(format!("{instance_id}: its holder did not send its screen")),
+    }
+}
+
+// This server still negotiates 1.3; no full-terminal operation reaches a PTY.
+fn terminal_version_error(
+    caller: Option<&str>,
+    request_id: String,
+    control: bool,
+) -> ClientResponse {
+    if control && caller.is_some() {
+        error(
+            Some(request_id),
+            error_code::FORBIDDEN,
+            "only the operator can control a terminal view",
+        )
+    } else {
+        error(
+            Some(request_id),
+            error_code::NOT_SUPPORTED,
+            "full terminal requires client protocol 1.4; run: agend daemon restart",
+        )
     }
 }

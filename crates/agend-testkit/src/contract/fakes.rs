@@ -258,6 +258,8 @@ pub fn case_rules() -> Vec<(&'static str, &'static str, &'static str)> {
         cases.iter().map(|c| (contract, c.rule, c.name)).collect()
     }
     [
+        #[cfg(unix)]
+        tag("ClientProtocol", super::terminal::cases()),
         tag("Driver", driver::cases::<FakeDriverFixture>()),
         tag("Forge", forge::cases::<FakeForge>()),
         tag("Store", store::cases::<FakeStore>()),

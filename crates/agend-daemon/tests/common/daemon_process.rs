@@ -136,6 +136,7 @@ pub fn add(home: &Path, id: &str, script: &str) -> Result<Instance, String> {
         session_started: false,
         agent_pid: None,
         legacy_no_thread: false,
+        delivery: "push".into(),
     };
     let store = SqliteStore::open(home, 0).map_err(|e| format!("open store: {e}"))?;
     block_on(store.add_instance(&instance)).map_err(|e| format!("add {id}: {e}"))?;
@@ -297,9 +298,13 @@ impl Daemon {
             if Instant::now() >= deadline {
                 let _ = self.child.kill();
                 let _ = self.child.wait();
+                while let Ok(line) = self.lines.try_recv() {
+                    self.log.push(line);
+                }
                 return Err(format!(
-                    "daemon pid={} did not end within {limit:?}; killed",
-                    self.pid
+                    "daemon pid={} did not end within {limit:?}; killed\n{}",
+                    self.pid,
+                    self.log.join("\n")
                 ));
             }
             std::thread::sleep(Duration::from_millis(20));

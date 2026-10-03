@@ -16,7 +16,7 @@ use serde_json::json;
 fn client_request_wire_shapes_are_stable_and_approval_does_not_supply_a_head() {
     assert_eq!(
         serde_json::to_value(ClientRequest::hello()).unwrap(),
-        json!({"type": "hello", "data": {"supported": [{"major": 1, "minor": 1}]}})
+        json!({"type": "hello", "data": {"supported": [{"major": 1, "minor": 4}, {"major": 1, "minor": 3}]}})
     );
 
     let review = ClientRequest::Command {
@@ -561,7 +561,10 @@ fn a_1_0_peer_decodes_1_1_messages() {
         hello,
         v1_0::ClientRequest::Hello {
             data: v1_0::Hello {
-                supported: vec![v1_0::Version { major: 1, minor: 1 }]
+                supported: vec![
+                    v1_0::Version { major: 1, minor: 4 },
+                    v1_0::Version { major: 1, minor: 3 }
+                ]
             }
         }
     );
@@ -575,6 +578,7 @@ fn a_1_0_peer_decodes_1_1_messages() {
             request_id: "r-2".into(),
             attention_id: "instance-failed:g8-2".into(),
             action: AttentionAction::Retry,
+            note: None,
         },
     };
     for request in [get_fleet, resolve] {
@@ -649,6 +653,7 @@ fn a_1_0_peer_decodes_1_1_messages() {
                 team_id: "general".into(),
                 backend: "claude".into(),
                 state: AgentState::Failed,
+                working_directory: None,
             }),
         },
     });
@@ -744,4 +749,464 @@ fn a_1_1_peer_decodes_1_0_messages() {
             }
         }
     );
+}
+
+/// Client protocol 1.1 as it shipped (gate 8), frozen: only the parts 1.2
+/// touches (the rest did not change).
+mod v1_1 {
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct Version {
+        pub major: u16,
+        pub minor: u16,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct SelectedVersionData {
+        pub selected: Version,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    pub enum ClientRequest {
+        Command {
+            data: CommandData,
+        },
+        #[serde(other)]
+        Unknown,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct CommandData {
+        pub request_id: String,
+        pub command: AgentCommand,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(tag = "command", rename_all = "snake_case")]
+    pub enum AgentCommand {
+        Status,
+        Send {
+            to: String,
+            message: String,
+        },
+        #[serde(other)]
+        Unknown,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    pub enum ClientResponse {
+        Hello {
+            data: SelectedVersionData,
+        },
+        CommandResult {
+            data: CommandResultData,
+        },
+        #[serde(other)]
+        Unknown,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct CommandResultData {
+        pub request_id: String,
+        pub result: CommandResult,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(tag = "result", rename_all = "snake_case")]
+    pub enum CommandResult {
+        Accepted,
+        Status {
+            data: StatusData,
+        },
+        #[serde(other)]
+        Unknown,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct StatusData {
+        pub task_id: Option<String>,
+        pub instance_id: Option<String>,
+        pub summary: String,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct InstanceView {
+        pub instance_id: String,
+        pub team_id: String,
+        pub backend: String,
+        pub state: String,
+    }
+}
+
+/// Gate 9 P6: a 1.1 peer decodes every 1.2 message: `operator` and the new
+/// results are `unknown`, the new fields are ignored.
+#[test]
+fn a_1_1_peer_decodes_1_2_messages() {
+    use agend_core::protocol::client::{
+        AgentState, InstanceAddedData, InstanceView, MessageLevel, OperatorCommand, OperatorData,
+        RestartingData, SelectedVersionData, StatusData, V1_1,
+    };
+    let hello = ClientResponse::Hello {
+        data: SelectedVersionData {
+            selected: V1_1,
+            daemon_version: Some("agend 0.0.0".into()),
+            daemon_pid: Some(5101),
+            boot_id: Some(1_790_000_000_000_000),
+        },
+    };
+    assert_eq!(
+        reencode::<_, v1_1::ClientResponse>(&hello),
+        v1_1::ClientResponse::Hello {
+            data: v1_1::SelectedVersionData {
+                selected: v1_1::Version { major: 1, minor: 1 }
+            }
+        }
+    );
+    for command in [
+        OperatorCommand::InstanceAdd {
+            instance_id: "g9-1".into(),
+            backend: "claude".into(),
+            working_directory: None,
+            program: Some("/bin/sh".into()),
+            args: vec!["-c".into(), "sleep 60".into()],
+        },
+        OperatorCommand::InstanceRemove {
+            instance_id: "g9-1".into(),
+        },
+        OperatorCommand::DaemonRestart { binary: None },
+        OperatorCommand::TaskCancel {
+            task_id: "t-1".into(),
+            reason: None,
+        },
+    ] {
+        let request = ClientRequest::Operator {
+            data: OperatorData {
+                request_id: "r-1".into(),
+                command,
+            },
+        };
+        assert_eq!(
+            reencode::<_, v1_1::ClientRequest>(&request),
+            v1_1::ClientRequest::Unknown
+        );
+    }
+    let send = ClientRequest::Command {
+        data: ClientCommandData {
+            request_id: "r-2".into(),
+            command: AgentCommand::Send {
+                to: "g9-2".into(),
+                message: "hi".into(),
+                level: Some(MessageLevel::Steer),
+                message_id: Some("5d0f7c2e-1b7a-4c3e-9f00-0123456789ab".into()),
+            },
+        },
+    };
+    assert_eq!(
+        reencode::<_, v1_1::ClientRequest>(&send),
+        v1_1::ClientRequest::Command {
+            data: v1_1::CommandData {
+                request_id: "r-2".into(),
+                command: v1_1::AgentCommand::Send {
+                    to: "g9-2".into(),
+                    message: "hi".into()
+                }
+            }
+        }
+    );
+    let result = |result| ClientResponse::CommandResult {
+        data: ClientCommandResultData {
+            request_id: "r-3".into(),
+            result,
+        },
+    };
+    let v1_1_result = |result| v1_1::ClientResponse::CommandResult {
+        data: v1_1::CommandResultData {
+            request_id: "r-3".into(),
+            result,
+        },
+    };
+    for new in [
+        CommandResult::InstanceAdded {
+            data: InstanceAddedData {
+                instance_id: "g9-1".into(),
+                session_id: None,
+                working_directory: "/tmp/w".into(),
+            },
+        },
+        CommandResult::Restarting {
+            data: RestartingData {
+                preflight: vec!["agend 0.0.0".into()],
+            },
+        },
+    ] {
+        assert_eq!(
+            reencode::<_, v1_1::ClientResponse>(&result(new)),
+            v1_1_result(v1_1::CommandResult::Unknown)
+        );
+    }
+    let status = CommandResult::Status {
+        data: StatusData {
+            task_id: Some("t-42".into()),
+            instance_id: Some("g9-1".into()),
+            summary: "review".into(),
+            identity: Some(ResultIdentity {
+                stage_id: "review".into(),
+                attempt: 2,
+            }),
+        },
+    };
+    assert_eq!(
+        reencode::<_, v1_1::ClientResponse>(&result(status)),
+        v1_1_result(v1_1::CommandResult::Status {
+            data: v1_1::StatusData {
+                task_id: Some("t-42".into()),
+                instance_id: Some("g9-1".into()),
+                summary: "review".into(),
+            }
+        })
+    );
+    let view = InstanceView {
+        instance_id: "g9-1".into(),
+        team_id: "general".into(),
+        backend: "codex".into(),
+        state: AgentState::Idle,
+        working_directory: Some("/tmp/w".into()),
+    };
+    assert_eq!(
+        reencode::<_, v1_1::InstanceView>(&view),
+        v1_1::InstanceView {
+            instance_id: "g9-1".into(),
+            team_id: "general".into(),
+            backend: "codex".into(),
+            state: "idle".into(),
+        }
+    );
+}
+
+/// Gate 9 P6: 1.2 decodes every 1.1 message; the 1.2 fields are absent.
+#[test]
+fn a_1_2_peer_decodes_1_1_messages() {
+    use agend_core::protocol::client::{InstanceView, SelectedVersionData, V1_1};
+    let hello: ClientResponse = reencode(&v1_1::ClientResponse::Hello {
+        data: v1_1::SelectedVersionData {
+            selected: v1_1::Version { major: 1, minor: 1 },
+        },
+    });
+    assert_eq!(
+        hello,
+        ClientResponse::Hello {
+            data: SelectedVersionData::new(V1_1)
+        }
+    );
+    let send: ClientRequest = reencode(&v1_1::ClientRequest::Command {
+        data: v1_1::CommandData {
+            request_id: "r-1".into(),
+            command: v1_1::AgentCommand::Send {
+                to: "g9-2".into(),
+                message: "hi".into(),
+            },
+        },
+    });
+    let ClientRequest::Command { data } = send else {
+        panic!("{send:?}");
+    };
+    assert_eq!(
+        data.command,
+        AgentCommand::Send {
+            to: "g9-2".into(),
+            message: "hi".into(),
+            level: None,
+            message_id: None
+        }
+    );
+    let view: InstanceView = reencode(&v1_1::InstanceView {
+        instance_id: "g9-1".into(),
+        team_id: "general".into(),
+        backend: "claude".into(),
+        state: "unknown".into(),
+    });
+    assert_eq!(view.working_directory, None);
+}
+
+#[test]
+fn gate_10_requests_have_stable_additive_wire_shapes() {
+    use agend_core::protocol::client::{
+        AttentionAction, OperatorCommand, OperatorData, ResolveAttentionData,
+    };
+    let workflow =
+        toml::to_string(&agend_core::pipeline::workflow::Workflow::builtin_research()).unwrap();
+    let commands = vec![
+        OperatorCommand::TeamAdd {
+            team_id: "web".into(),
+            repo: Some("/repo".into()),
+            workflow_id: Some("research".into()),
+        },
+        OperatorCommand::TeamList,
+        OperatorCommand::TeamJoin {
+            team_id: "web".into(),
+            instance_id: "dev-1".into(),
+            role: "researcher".into(),
+        },
+        OperatorCommand::TeamSetWorkflow {
+            team_id: "web".into(),
+            workflow_id: "research".into(),
+        },
+        OperatorCommand::WorkflowList,
+        OperatorCommand::WorkflowShow {
+            workflow_id: "research".into(),
+        },
+        OperatorCommand::WorkflowCheck {
+            toml: workflow.clone(),
+        },
+        OperatorCommand::WorkflowApply { toml: workflow },
+        OperatorCommand::TaskCreate {
+            title: "Research".into(),
+            role: "researcher".into(),
+            team_id: "web".into(),
+            workflow_id: None,
+        },
+        OperatorCommand::TaskCancel {
+            task_id: "t-1".into(),
+            reason: Some("scope changed".into()),
+        },
+    ];
+    let mut requests = commands
+        .into_iter()
+        .map(|command| ClientRequest::Operator {
+            data: OperatorData {
+                request_id: "g10".into(),
+                command,
+            },
+        })
+        .collect::<Vec<_>>();
+    requests.push(ClientRequest::ResolveAttention {
+        data: ResolveAttentionData {
+            request_id: "changes".into(),
+            attention_id: "approval:t-1/approve/1".into(),
+            action: AttentionAction::RequestChanges,
+            note: Some("Revise the result".into()),
+        },
+    });
+    let text = serde_json::to_string_pretty(&requests).unwrap() + "\n";
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/golden/pipeline-protocol-1.3.json");
+    if std::env::var_os("AGEND_BLESS_GOLDEN").is_some() {
+        std::fs::write(&path, &text).unwrap();
+    }
+    assert_eq!(std::fs::read_to_string(path).unwrap(), text);
+    assert_eq!(
+        serde_json::from_str::<Vec<ClientRequest>>(&text).unwrap(),
+        requests
+    );
+    for request in &requests[..9] {
+        let old: v1_0::ClientRequest =
+            serde_json::from_value(serde_json::to_value(request).unwrap()).unwrap();
+        assert_eq!(old, v1_0::ClientRequest::Unknown);
+    }
+}
+
+#[test]
+fn full_terminal_requests_are_additive_and_acquire_cannot_choose_an_attach_id() {
+    use agend_core::protocol::client::*;
+    use agend_core::protocol::terminal::{TerminalSize, TerminalViewport};
+    let requests = [
+        ClientRequest::SubscribeTerminalFrames {
+            data: TerminalSubscribeData {
+                request_id: "s-1".into(),
+                instance_id: "i-1".into(),
+                viewport: TerminalViewport {
+                    top: None,
+                    rows: 24,
+                },
+            },
+        },
+        ClientRequest::SetTerminalViewport {
+            data: TerminalViewportData {
+                request_id: "v-2".into(),
+                instance_id: "i-1".into(),
+                view_id: "view-1".into(),
+                generation: "holder-1".into(),
+                viewport: TerminalViewport {
+                    top: Some(100),
+                    rows: 24,
+                },
+            },
+        },
+        ClientRequest::TerminalControl {
+            data: ClientTerminalControlData {
+                request_id: "a-3".into(),
+                instance_id: "i-1".into(),
+                view_id: "view-1".into(),
+                generation: "holder-1".into(),
+                operation: ClientTerminalOperation::Acquire {
+                    size: TerminalSize {
+                        rows: 24,
+                        columns: 80,
+                    },
+                },
+            },
+        },
+    ];
+    for request in &requests {
+        let line = serde_json::to_string(request).unwrap();
+        assert_eq!(
+            serde_json::from_str::<ClientRequest>(&line).unwrap(),
+            *request
+        );
+        assert_eq!(
+            serde_json::from_str::<v1_0::ClientRequest>(&line).unwrap(),
+            v1_0::ClientRequest::Unknown
+        );
+        assert_eq!(
+            serde_json::from_str::<v1_1::ClientRequest>(&line).unwrap(),
+            v1_1::ClientRequest::Unknown
+        );
+    }
+    assert_eq!(
+        serde_json::to_value(&requests[2]).unwrap(),
+        json!({
+            "type": "terminal_control", "data": {
+                "request_id": "a-3", "instance_id": "i-1", "view_id": "view-1", "generation": "holder-1",
+                "operation": {"operation": "acquire", "size": {"rows": 24, "columns": 80}}
+            }
+        })
+    );
+    for response in [
+        ClientResponse::TerminalControlAck {
+            data: ClientTerminalControlAck {
+                request_id: "a-3".into(),
+                instance_id: "i-1".into(),
+                view_id: "view-1".into(),
+                generation: "holder-1".into(),
+                control: TerminalControlState::ReadOnly,
+                frame: None,
+            },
+        },
+        ClientResponse::TerminalControlChanged {
+            data: TerminalControlChangedData {
+                instance_id: "i-1".into(),
+                view_id: "view-1".into(),
+                generation: "holder-1".into(),
+                control: TerminalControlState::ReadOnly,
+                reason: "connection closed".into(),
+            },
+        },
+    ] {
+        let line = serde_json::to_string(&response).unwrap();
+        assert_eq!(
+            serde_json::from_str::<ClientResponse>(&line).unwrap(),
+            response
+        );
+        assert_eq!(
+            serde_json::from_str::<v1_0::ClientResponse>(&line).unwrap(),
+            v1_0::ClientResponse::Unknown
+        );
+        assert_eq!(
+            serde_json::from_str::<v1_1::ClientResponse>(&line).unwrap(),
+            v1_1::ClientResponse::Unknown
+        );
+    }
 }

@@ -5,7 +5,9 @@
 //!
 //! [`Conn::open`] resolves the `--listen` path first (codex binds elsewhere
 //! and leaves a symlink, pitfall 1). Reads time out after [`POLL`], so one
-//! thread can both read and act on requests from others.
+//! thread can both read and act on requests from others. A write that makes
+//! no progress for [`WRITE_WITHIN`] fails (the peer stopped reading): the
+//! link treats it as a broken connection (gate 9, verifier r2).
 //!
 //! Must NOT: retry or reconnect (the link decides).
 
@@ -21,6 +23,10 @@ use super::socket_connect_path;
 
 /// How long one read waits before the caller gets control back.
 pub const POLL: Duration = Duration::from_millis(20);
+/// A write with no progress for this long fails the connection.
+pub const WRITE_WITHIN: Duration = Duration::from_secs(10);
+/// The close frame of a connection being dropped gets at most this long.
+const CLOSE_WITHIN: Duration = Duration::from_millis(100);
 /// JSON-RPC "invalid request": codex's answer when a turn is not in the
 /// state the request expects (spike S3, pitfall 2).
 pub const INVALID_REQUEST: i64 = -32600;
@@ -117,7 +123,14 @@ impl Conn {
         let (ws, _) = tungstenite::client::client("ws://localhost/", stream)
             .map_err(|e| io::Error::other(format!("websocket handshake: {e}")))?;
         ws.get_ref().set_read_timeout(Some(POLL))?;
+        ws.get_ref().set_write_timeout(Some(WRITE_WITHIN))?;
         Ok(Conn { ws, next_id: 1 })
+    }
+
+    /// Another handle on the socket, so [`UnixStream::shutdown`] can end a
+    /// read or write the connection's thread is blocked in.
+    pub fn socket(&self) -> io::Result<UnixStream> {
+        self.ws.get_ref().try_clone()
     }
 
     pub fn send(&mut self, message: &Value) -> Result<(), RpcError> {
@@ -164,8 +177,12 @@ impl Conn {
 
 impl Drop for Conn {
     fn drop(&mut self) {
+        // A peer that does not read must not hold the drop for a whole
+        // write timeout.
+        let _ = self.ws.get_ref().set_write_timeout(Some(CLOSE_WITHIN));
         let _ = self.ws.close(None);
         let _ = self.ws.flush();
+        let _ = self.ws.get_ref().shutdown(std::net::Shutdown::Both);
     }
 }
 

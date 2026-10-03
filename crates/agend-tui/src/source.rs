@@ -1,18 +1,21 @@
 //! The data-source seam. Screens read a [`Fleet`], which is built only from
 //! what a [`Source`] delivers, and act only through `Source`; they never know
-//! which source they have. Events, asks and replies are client protocol v1
+//! which source they have. Events, asks and replies are client protocol
 //! types (`agend_core::protocol`).
 //!
-//! Protocol v1 has no request that lists teams, tasks or agents, and no
-//! structured agent state or task stages, so a source hands over a
-//! [`Catalog`] when it connects. The catalog types are TUI-local until gate 8
-//! adds them to the protocol (see docs/gates/gate-11-tui.md, "待你追認").
-//! The one derived value is an agent's "needs you", which follows the
-//! current needs-you list ([`Fleet::agent_state`], T18).
+//! A source hands over a [`Snapshot`] when it connects: the [`Catalog`]
+//! (teams, tasks, agents; a TUI-local shape the screens were built on) and
+//! the needs-you list at that moment. [`client::ClientSource`] fills it from
+//! the daemon's fleet view and keeps it current from `instance_changed` /
+//! `task_changed` (gate 11 B P1, P3: one source of truth, no replay);
+//! [`scripted::ScriptedSource`] hands over a fixed demo catalog. The one
+//! derived value is an agent's "needs you", which follows the current
+//! needs-you list ([`Fleet::agent_state`], T18).
 //!
-//! Must NOT: talk to a socket (gate 11 proper implements `Source` on
-//! `agend-client`), or invent state the source did not report.
+//! Must NOT: talk to a socket (only `agend-client` does, through
+//! [`client::ClientSource`]), or invent state the source did not report.
 
+pub mod client;
 pub mod scripted;
 
 use std::collections::BTreeMap;
@@ -21,16 +24,22 @@ use agend_core::model::Backend;
 use agend_core::pipeline::stage::StageKind;
 use agend_core::policy::attention::{AttentionItem, order};
 use agend_core::protocol::ask::{AskEntry, AskReply};
-use agend_core::protocol::client::{AttentionRequiredData, DaemonEvent, EventData};
+use agend_core::protocol::client::{
+    AttentionAction, AttentionRequiredData, DaemonEvent, EventData,
+};
 
 /// Agent state as the source reports it; [`Fleet::agent_state`] adjusts
-/// "needs you" to the current needs-you list.
+/// "needs you" to the current needs-you list. `Starting` and `Failed` come
+/// from the daemon (gate 11 B P3); `NeedsYou` only from the scripted
+/// catalog (the protocol derives it from the needs-you list).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentState {
+    Starting,
     Working,
     Idle,
     NeedsYou,
     Stuck,
+    Failed,
     Unknown,
 }
 
@@ -39,12 +48,15 @@ pub enum StageState {
     Done,
     Running,
     NotStarted,
+    Failed,
+    Cancelled,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StageInfo {
     pub name: String,
-    pub kind: StageKind,
+    /// `None` from the daemon until gate 10 adds stage kinds (gap G5).
+    pub kind: Option<StageKind>,
     pub state: StageState,
     /// The agent working on this stage, if any.
     pub agent: Option<String>,
@@ -60,16 +72,28 @@ pub struct TaskInfo {
     /// The task holder.
     pub holder: Option<String>,
     pub stages: Vec<StageInfo>,
+    /// The daemon's status (`open`, `running`, `blocked`, `done`,
+    /// `superseded`); what tells a task without stages done or not.
+    pub status: String,
+    pub pipeline: Option<agend_core::protocol::client::TaskPipelineView>,
 }
 
 impl TaskInfo {
-    /// Index of the first stage that is not done; `None` when all are done.
+    /// Index of the first stage that is not done; `None` when all are done
+    /// or the task has no stages.
     pub fn current_stage(&self) -> Option<usize> {
         self.stages.iter().position(|s| s.state != StageState::Done)
     }
 
     pub fn is_done(&self) -> bool {
-        self.current_stage().is_none()
+        if matches!(self.status.as_str(), "failed" | "cancelled") {
+            return true;
+        }
+        if self.stages.is_empty() {
+            matches!(self.status.as_str(), "done" | "superseded")
+        } else {
+            self.current_stage().is_none()
+        }
     }
 
     pub fn stages_done(&self) -> usize {
@@ -89,16 +113,29 @@ pub struct AgentInfo {
     pub task_id: Option<String>,
 }
 
-/// Teams, tasks and agents: what protocol v1 cannot list yet (gap for gate 8).
+/// Teams, tasks and agents as the screens show them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Catalog {
     pub teams: Vec<String>,
     pub tasks: Vec<TaskInfo>,
     pub agents: Vec<AgentInfo>,
     /// Task id → what happens to that task if its needs-you item is left
-    /// alone (DEMO-01 §4B). `attention_required` has no such field, so the
-    /// demo catalog carries fixed text (gap G1 for gate 8).
+    /// alone (DEMO-01 §4B), for items without the protocol's `if_ignored`
+    /// (the scripted demo's fixed text).
     pub if_ignored: BTreeMap<String, String>,
+}
+
+/// What a source hands over when it connects.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Snapshot {
+    pub catalog: Catalog,
+    /// The needs-you list now (the fleet view's; empty for a source that
+    /// replays its events instead).
+    pub attention: Vec<AttentionRequiredData>,
+    /// Events carry the structured instance and task (client protocol 1.1),
+    /// so the catalog follows them: an `instance_changed` without one is a
+    /// removed instance.
+    pub follows_events: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,6 +143,9 @@ pub enum SourceError {
     /// The daemon cannot be reached; the TUI shows the disconnected state
     /// and keeps trying to connect.
     Disconnected(String),
+    /// The daemon speaks an incompatible protocol version: shown like a
+    /// disconnect, but not retried automatically (gate 11 B P7).
+    Version(String),
     /// The daemon answered with an error frame; the connection stays up.
     Rejected { code: String, message: String },
 }
@@ -114,22 +154,121 @@ impl std::fmt::Display for SourceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SourceError::Disconnected(reason) => write!(f, "disconnected: {reason}"),
+            SourceError::Version(message) => f.write_str(message),
             SourceError::Rejected { code, message } => write!(f, "{code}: {message}"),
         }
     }
 }
 
+/// What an open terminal delivers ([`Source::poll_terminal`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TerminalEvent {
+    /// A new screen (after a subscription or a refresh).
+    Screen(String),
+    /// The agent printed something: the screen is out of date (gate 11 B
+    /// P5: bytes are only a signal).
+    Output,
+    /// An error on the terminal connection (`no_terminal`, `forbidden`,
+    /// `not_supported`, …).
+    Error { code: String, message: String },
+    /// The terminal connection ended (its events connection may be fine).
+    Closed(String),
+}
+
+/// Updates on the full-terminal stream; identity and correlation are kept.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FullTerminalEvent {
+    Frame(Box<agend_core::protocol::client::ClientTerminalFrameData>),
+    ControlAck(Box<agend_core::protocol::client::ClientTerminalControlAck>),
+    ControlChanged(agend_core::protocol::client::TerminalControlChangedData),
+    Refused(agend_core::protocol::client::ErrorData),
+    Closed(String),
+}
+
 /// Where the screens' data comes from.
 pub trait Source {
-    /// (Re)connects. After success, `poll` replays every event from the
-    /// beginning, so the caller starts a fresh [`Fleet`] from the catalog.
-    fn connect(&mut self) -> Result<Catalog, SourceError>;
-    /// Events that arrived since the last call; never blocks for long.
+    /// Old protocol peers keep their plaintext view but cannot bypass full
+    /// control ownership by pretending that legacy input is a complete mode.
+    fn legacy_terminal_is_read_only(&self) -> bool {
+        false
+    }
+
+    /// Drains structured updates without waiting for I/O.
+    fn poll_full_terminal(&mut self) -> Vec<FullTerminalEvent> {
+        Vec::new()
+    }
+    /// Opens a dedicated full stream if the daemon negotiates 1.4. A false
+    /// result leaves the legacy path available, without claiming capability.
+    fn open_full_terminal(
+        &mut self,
+        instance: &str,
+        request_id: String,
+        viewport: agend_core::protocol::terminal::TerminalViewport,
+    ) -> Result<bool, SourceError> {
+        let _ = (instance, request_id, viewport);
+        Ok(false)
+    }
+    /// Enqueues a full-terminal operation, never waits for its acknowledgement.
+    fn terminal_control(
+        &mut self,
+        data: agend_core::protocol::client::ClientTerminalControlData,
+    ) -> Result<(), SourceError> {
+        let _ = data;
+        Err(SourceError::Rejected {
+            code: "not_supported".into(),
+            message: "source has no full terminal stream".into(),
+        })
+    }
+    fn terminal_viewport(
+        &mut self,
+        data: agend_core::protocol::client::TerminalViewportData,
+    ) -> Result<(), SourceError> {
+        let _ = data;
+        Err(SourceError::Rejected {
+            code: "not_supported".into(),
+            message: "source has no full terminal stream".into(),
+        })
+    }
+
+    /// (Re)connects and hands over the catalog and needs-you list now;
+    /// `poll` then gives only what happens after it.
+    fn connect(&mut self) -> Result<Snapshot, SourceError>;
+    /// Events that arrived since the last call; never blocks.
     fn poll(&mut self) -> Result<Vec<EventData>, SourceError>;
-    /// A snapshot of one agent's terminal screen (empty: nothing to show).
-    fn terminal(&mut self, instance_id: &str) -> Result<String, SourceError>;
     /// The operator's reply to a needs-you ask (D35).
     fn answer(&mut self, ask_id: &str, reply: AskReply) -> Result<(), SourceError>;
+    /// The operator acts on a needs-you item that is not an ask; the item
+    /// leaves when `attention_resolved` arrives, not before (gate 11 B P4).
+    fn resolve(&mut self, attention_id: &str, action: AttentionAction) -> Result<(), SourceError>;
+    fn request_changes(&mut self, attention_id: &str, note: String) -> Result<(), SourceError> {
+        let _ = (attention_id, note);
+        Err(SourceError::Rejected {
+            code: "not_supported".into(),
+            message: "source cannot request changes".into(),
+        })
+    }
+    /// Opens `instance_id`'s terminal (replacing an open one) and waits for
+    /// its first screen (empty: nothing to show).
+    fn open_terminal(&mut self, instance_id: &str) -> Result<String, SourceError>;
+    /// Asks for the open terminal's screen again (it arrives through
+    /// `poll_terminal`); reconnects the terminal when its connection ended.
+    fn refresh_terminal(&mut self) -> Result<(), SourceError>;
+    /// What the open terminal delivered since the last call; never blocks.
+    fn poll_terminal(&mut self) -> Vec<TerminalEvent>;
+    /// Operator input for the open terminal; refusals arrive as
+    /// [`TerminalEvent::Error`].
+    fn terminal_input(&mut self, bytes: &[u8]) -> Result<(), SourceError>;
+    /// Closes the terminal; nothing of it is left running.
+    fn close_terminal(&mut self);
+}
+
+/// What the operator can pick in an expanded needs-you item.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Choice {
+    /// An option of an ask (`answer_ask`).
+    Option(String),
+    /// An action of an item that is not an ask (`resolve_attention`).
+    Action(AttentionAction),
 }
 
 /// One `attention_required` event and the latest state of its ask thread.
@@ -140,8 +279,12 @@ pub struct Attention {
 }
 
 impl Attention {
-    /// Stable id: the ask id, or the event id for items that are not asks.
+    /// Stable id: the protocol's `attention_id`, else the ask id, else the
+    /// event id.
     pub fn key(&self) -> String {
+        if let Some(id) = &self.data.attention_id {
+            return id.clone();
+        }
         match &self.data.ask {
             Some(ask) => ask.ask_id.clone(),
             None => format!("event-{}", self.event_id),
@@ -162,8 +305,8 @@ impl Attention {
 
     /// Whether the item still needs the operator. An ask needs you while a
     /// question waits for an answer; once answered (or resolved) it leaves
-    /// "needs you" until the agent follows up. Protocol v1 has no event that
-    /// clears a non-ask item, so those stay.
+    /// "needs you" until the agent follows up. An item that is not an ask
+    /// stays until its `attention_resolved` removes it from the fleet.
     pub fn waiting(&self) -> bool {
         match &self.data.ask {
             None => true,
@@ -191,6 +334,27 @@ impl Attention {
         open.unwrap_or((&self.data.reason, &[]))
     }
 
+    /// What the operator can pick: an ask's options, or the actions of an
+    /// item that is not an ask (only the ones this TUI knows).
+    pub fn choices(&self) -> Vec<Choice> {
+        if self.data.ask.is_some() {
+            return self
+                .question()
+                .1
+                .iter()
+                .cloned()
+                .map(Choice::Option)
+                .collect();
+        }
+        self.data
+            .actions
+            .iter()
+            .copied()
+            .filter(|a| *a != AttentionAction::Unknown)
+            .map(Choice::Action)
+            .collect()
+    }
+
     /// Who asked: the author of the first question.
     pub fn asker(&self) -> Option<&str> {
         self.data
@@ -212,12 +376,13 @@ impl Attention {
     }
 }
 
-/// Everything the screens show, rebuilt from a catalog plus the event log.
+/// Everything the screens show: a snapshot plus the events after it.
 #[derive(Debug, Clone, Default)]
 pub struct Fleet {
     pub catalog: Catalog,
     attention: Vec<Attention>,
     events: Vec<EventData>,
+    follows_events: bool,
 }
 
 impl Fleet {
@@ -228,12 +393,32 @@ impl Fleet {
         }
     }
 
+    pub fn from_snapshot(snapshot: Snapshot) -> Fleet {
+        Fleet {
+            catalog: snapshot.catalog,
+            attention: snapshot
+                .attention
+                .into_iter()
+                .map(|data| Attention { event_id: 0, data })
+                .collect(),
+            events: Vec::new(),
+            follows_events: snapshot.follows_events,
+        }
+    }
+
     pub fn apply(&mut self, event: EventData) {
         match &event.event {
-            DaemonEvent::AttentionRequired { data } => self.attention.push(Attention {
-                event_id: event.event_id,
-                data: data.clone(),
-            }),
+            DaemonEvent::AttentionRequired { data } => {
+                let item = Attention {
+                    event_id: event.event_id,
+                    data: data.clone(),
+                };
+                let key = item.key();
+                match self.attention.iter_mut().find(|a| a.key() == key) {
+                    Some(existing) => *existing = item,
+                    None => self.attention.push(item),
+                }
+            }
             DaemonEvent::AskUpdated { data } => {
                 for item in &mut self.attention {
                     if let Some(ask) = &mut item.data.ask
@@ -243,15 +428,34 @@ impl Fleet {
                     }
                 }
             }
+            DaemonEvent::AttentionResolved { data } => {
+                self.attention.retain(|a| a.key() != data.attention_id);
+            }
+            DaemonEvent::InstanceChanged { data } if self.follows_events => {
+                let agents = &mut self.catalog.agents;
+                agents.retain(|a| a.id != data.instance_id);
+                if let Some(view) = &data.instance {
+                    agents.push(client::agent_info(view, &self.catalog.tasks));
+                }
+            }
+            DaemonEvent::TaskChanged { data } if self.follows_events => {
+                if let Some(view) = &data.task {
+                    let task = client::task_info(view);
+                    match self.catalog.tasks.iter_mut().find(|t| t.id == task.id) {
+                        Some(existing) => *existing = task,
+                        None => self.catalog.tasks.push(task),
+                    }
+                    client::link_tasks(&mut self.catalog);
+                }
+            }
             _ => {}
         }
         self.events.push(event);
     }
 
-    /// Items that need the operator, in the D36 order. Protocol v1 carries
-    /// neither how much work an item unblocks nor when it started waiting,
-    /// so every item counts as unblocking nothing and the event id stands in
-    /// for the waiting time (oldest first); gap for gate 8.
+    /// Items that need the operator, in the D36 order: the protocol's
+    /// `unblocks` and `waiting_since_unix_ms`; a source without them (the
+    /// scripted demo) counts 0 and the event id instead (oldest first).
     pub fn needs_you(&self) -> Vec<&Attention> {
         let mut items: Vec<AttentionItem> = self
             .attention
@@ -259,8 +463,8 @@ impl Fleet {
             .filter(|a| a.waiting())
             .map(|a| AttentionItem {
                 id: a.key(),
-                unblocks: 0,
-                waiting_since_unix_ms: a.event_id,
+                unblocks: a.data.unblocks.unwrap_or(0),
+                waiting_since_unix_ms: a.data.waiting_since_unix_ms.unwrap_or(a.event_id),
             })
             .collect();
         order(&mut items);
@@ -298,24 +502,42 @@ impl Fleet {
     }
 
     /// The agent a needs-you item waits on (and `t` opens): who asked, else
-    /// the task holder.
-    pub fn asker_or_holder(&self, item: &Attention) -> Option<String> {
+    /// the item's instance, else the task holder (gate 11 B P3, P5).
+    pub fn item_agent(&self, item: &Attention) -> Option<String> {
         item.asker()
             .map(str::to_owned)
+            .or_else(|| item.data.instance_id.clone())
             .or_else(|| self.task(item.task_id()?)?.holder.clone())
     }
 
+    /// The team an item belongs to: its task's, else its agent's.
+    pub fn item_team(&self, item: &Attention) -> Option<String> {
+        if let Some(task) = item.task_id().and_then(|id| self.task(id)) {
+            return Some(task.team_id.clone());
+        }
+        let agent = self.item_agent(item)?;
+        Some(self.agent(&agent)?.team_id.clone())
+    }
+
+    /// What happens if the item is left alone: the protocol's `if_ignored`,
+    /// else the catalog's text for its task.
+    pub fn if_ignored(&self, item: &Attention) -> Option<String> {
+        item.data
+            .if_ignored
+            .clone()
+            .or_else(|| self.catalog.if_ignored.get(item.task_id()?).cloned())
+    }
+
     /// An agent's state as shown. "Needs you" follows the current needs-you
-    /// list: an agent some waiting item points at needs you. Protocol v1
-    /// reports no agent state (gap G1), so otherwise the catalog's state
-    /// stands, except a catalog "needs you" with nothing waiting any more,
-    /// which becomes working while the agent holds an unfinished task and
-    /// idle otherwise.
+    /// list: an agent some waiting item points at needs you. Otherwise the
+    /// source's state stands, except a scripted "needs you" with nothing
+    /// waiting any more, which becomes working while the agent holds an
+    /// unfinished task and idle otherwise.
     pub fn agent_state(&self, agent: &AgentInfo) -> AgentState {
         let waiting = self
             .needs_you()
             .iter()
-            .any(|item| self.asker_or_holder(item).as_deref() == Some(agent.id.as_str()));
+            .any(|item| self.item_agent(item).as_deref() == Some(agent.id.as_str()));
         match agent.state {
             _ if waiting => AgentState::NeedsYou,
             AgentState::NeedsYou => {
@@ -429,5 +651,104 @@ mod tests {
         fleet.apply(ask_event(3, "A-early"));
         let keys: Vec<String> = fleet.needs_you().iter().map(|a| a.key()).collect();
         assert_eq!(keys, ["A-early", "A-late"]);
+    }
+
+    fn failed(id: &str, since: u64) -> EventData {
+        EventData {
+            event_id: 100 - since,
+            event: DaemonEvent::AttentionRequired {
+                data: AttentionRequiredData {
+                    reason: format!("{id} failed"),
+                    task_id: None,
+                    ask: None,
+                    recap: None,
+                    attention_id: Some(format!("instance-failed:{id}")),
+                    unblocks: Some(0),
+                    waiting_since_unix_ms: Some(since),
+                    if_ignored: Some(format!("{id} stays stopped")),
+                    actions: vec![AttentionAction::Retry],
+                    instance_id: Some(id.into()),
+                },
+            },
+        }
+    }
+
+    fn view(id: &str, state: agend_core::protocol::client::AgentState) -> EventData {
+        EventData {
+            event_id: 50,
+            event: DaemonEvent::InstanceChanged {
+                data: agend_core::protocol::client::InstanceChangedData {
+                    instance_id: id.into(),
+                    summary: state.as_str().into(),
+                    instance: Some(agend_core::protocol::client::InstanceView {
+                        instance_id: id.into(),
+                        team_id: "general".into(),
+                        backend: "claude".into(),
+                        state,
+                        working_directory: None,
+                    }),
+                },
+            },
+        }
+    }
+
+    #[test]
+    fn items_leave_on_attention_resolved_and_order_by_waiting_time() {
+        let mut fleet = Fleet::from_snapshot(Snapshot {
+            follows_events: true,
+            ..Snapshot::default()
+        });
+        fleet.apply(failed("g-late", 20));
+        fleet.apply(failed("g-early", 10));
+        fleet.apply(failed("g-early", 10)); // raised again: still one item
+        let keys: Vec<String> = fleet.needs_you().iter().map(|a| a.key()).collect();
+        assert_eq!(keys, ["instance-failed:g-early", "instance-failed:g-late"]);
+        let item = fleet.attention("instance-failed:g-early").unwrap();
+        assert_eq!(fleet.item_agent(item).as_deref(), Some("g-early"));
+        assert_eq!(
+            fleet.if_ignored(item).as_deref(),
+            Some("g-early stays stopped")
+        );
+        assert_eq!(item.choices(), [Choice::Action(AttentionAction::Retry)]);
+        fleet.apply(EventData {
+            event_id: 200,
+            event: DaemonEvent::AttentionResolved {
+                data: agend_core::protocol::client::AttentionResolvedData {
+                    attention_id: "instance-failed:g-early".into(),
+                    action: AttentionAction::Retry,
+                },
+            },
+        });
+        assert_eq!(fleet.needs_you().len(), 1);
+    }
+
+    #[test]
+    fn a_following_catalog_takes_instance_changes_and_removals() {
+        use agend_core::protocol::client::AgentState as Wire;
+        let mut fleet = Fleet::from_snapshot(Snapshot {
+            follows_events: true,
+            ..Snapshot::default()
+        });
+        fleet.apply(view("g-1", Wire::Starting));
+        fleet.apply(view("g-1", Wire::Failed));
+        fleet.apply(failed("g-1", 1));
+        let agent = fleet.agent("g-1").unwrap().clone();
+        assert_eq!(fleet.catalog.agents.len(), 1);
+        assert_eq!(fleet.agent_state(&agent), AgentState::NeedsYou);
+        fleet.apply(EventData {
+            event_id: 60,
+            event: DaemonEvent::InstanceChanged {
+                data: agend_core::protocol::client::InstanceChangedData {
+                    instance_id: "g-1".into(),
+                    summary: "removed".into(),
+                    instance: None,
+                },
+            },
+        });
+        assert!(fleet.agent("g-1").is_none());
+        // A replaying source's events carry no structure: nothing changes.
+        let mut scripted = Fleet::default();
+        scripted.apply(view("g-1", Wire::Failed));
+        assert!(scripted.agent("g-1").is_none());
     }
 }

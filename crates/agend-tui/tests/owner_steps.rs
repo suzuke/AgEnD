@@ -64,7 +64,7 @@ fn owner_steps_a2_to_a4_in_traditional_chinese() {
     }
     press(&mut app, &[ch('t')]);
     let term = render(&mut app);
-    assert!(term.contains("dev-1 的終端 · 唯讀快照") && term.contains("cargo test --workspace"));
+    assert!(term.contains("dev-1 的終端 · 即時") && term.contains("cargo test --workspace"));
     press(&mut app, &[Left]);
     assert!(
         render(&mut app)

@@ -146,6 +146,7 @@ fn run() -> Result<(), String> {
             session_started: false,
             agent_pid: None,
             legacy_no_thread: false,
+            delivery: "push".into(),
         }))
         .map_err(|e| e.to_string())?;
     }

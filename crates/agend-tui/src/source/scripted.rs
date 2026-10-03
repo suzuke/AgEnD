@@ -4,7 +4,9 @@
 //! answer), so the screens see exactly what a daemon would send.
 //!
 //! A [`ScriptHandle`] drives it from outside: emit events, open asks, follow
-//! up, take the "daemon" offline and back.
+//! up, add items with actions, print into a terminal, take the "daemon"
+//! offline and back. Unlike the daemon it replays its whole log after every
+//! connect (its catalog is fixed, so events are the only history).
 //!
 //! Must NOT: be used outside tests, examples and demos.
 
@@ -15,10 +17,14 @@ use agend_core::model::Backend;
 use agend_core::pipeline::stage::StageKind;
 use agend_core::protocol::ask::{AnswerSource, AskEntry, AskReply, AskThread, ContextRecap};
 use agend_core::protocol::client::{
-    AttentionRequiredData, DaemonEvent, EventData, InstanceChangedData, TaskChangedData,
+    AttentionAction, AttentionRequiredData, AttentionResolvedData, DaemonEvent, EventData,
+    InstanceChangedData, TaskChangedData, error_code,
 };
 
-use super::{AgentInfo, AgentState, Catalog, Source, SourceError, StageInfo, StageState, TaskInfo};
+use super::{
+    AgentInfo, AgentState, Catalog, Snapshot, Source, SourceError, StageInfo, StageState, TaskInfo,
+    TerminalEvent,
+};
 
 #[derive(Default)]
 struct Script {
@@ -28,6 +34,11 @@ struct Script {
     terminals: BTreeMap<String, String>,
     offline: bool,
     answers: Vec<(String, AskReply)>,
+    resolved: Vec<(String, AttentionAction)>,
+    /// The open terminal and what it delivered since the last poll.
+    open: Option<String>,
+    terminal_events: Vec<TerminalEvent>,
+    typed: Vec<u8>,
 }
 
 fn lock(script: &Mutex<Script>) -> MutexGuard<'_, Script> {
@@ -84,7 +95,7 @@ impl ScriptedSource {
 }
 
 impl Source for ScriptedSource {
-    fn connect(&mut self) -> Result<Catalog, SourceError> {
+    fn connect(&mut self) -> Result<Snapshot, SourceError> {
         let script = lock(&self.script);
         if script.offline {
             return Err(SourceError::Disconnected(
@@ -95,7 +106,11 @@ impl Source for ScriptedSource {
         drop(script);
         self.delivered = 0;
         self.connected = true;
-        Ok(catalog)
+        Ok(Snapshot {
+            catalog,
+            attention: Vec::new(),
+            follows_events: false,
+        })
     }
 
     fn poll(&mut self) -> Result<Vec<EventData>, SourceError> {
@@ -104,15 +119,6 @@ impl Source for ScriptedSource {
         let new = result.inspect_err(|_| self.connected = false)?;
         self.delivered += new.len();
         Ok(new)
-    }
-
-    fn terminal(&mut self, instance_id: &str) -> Result<String, SourceError> {
-        let script = self.online()?;
-        Ok(script
-            .terminals
-            .get(instance_id)
-            .cloned()
-            .unwrap_or_default())
     }
 
     fn answer(&mut self, ask_id: &str, reply: AskReply) -> Result<(), SourceError> {
@@ -138,6 +144,77 @@ impl Source for ScriptedSource {
         script.answers.push((ask_id.to_owned(), reply));
         emit(&mut script, DaemonEvent::AskUpdated { data: thread });
         Ok(())
+    }
+
+    /// Like the daemon: an item listed with the action leaves with
+    /// `attention_resolved`.
+    fn resolve(&mut self, attention_id: &str, action: AttentionAction) -> Result<(), SourceError> {
+        let mut script = self.online()?;
+        let listed = script.log.iter().any(|e| {
+            matches!(&e.event, DaemonEvent::AttentionRequired { data }
+                if data.attention_id.as_deref() == Some(attention_id) && data.actions.contains(&action))
+        });
+        let resolved = script.resolved.iter().any(|(id, _)| id == attention_id);
+        if !listed || resolved {
+            return Err(SourceError::Rejected {
+                code: error_code::UNKNOWN_ATTENTION.into(),
+                message: format!(
+                    "no needs-you item {attention_id} with action {}",
+                    action.as_str()
+                ),
+            });
+        }
+        script.resolved.push((attention_id.to_owned(), action));
+        emit(
+            &mut script,
+            DaemonEvent::AttentionResolved {
+                data: AttentionResolvedData {
+                    attention_id: attention_id.to_owned(),
+                    action,
+                },
+            },
+        );
+        Ok(())
+    }
+
+    fn open_terminal(&mut self, instance_id: &str) -> Result<String, SourceError> {
+        let mut script = self.online()?;
+        script.open = Some(instance_id.to_owned());
+        script.terminal_events.clear();
+        Ok(script
+            .terminals
+            .get(instance_id)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    fn refresh_terminal(&mut self) -> Result<(), SourceError> {
+        let mut script = self.online()?;
+        let Some(open) = script.open.clone() else {
+            return Err(SourceError::Disconnected("no terminal is open".into()));
+        };
+        let screen = script.terminals.get(&open).cloned().unwrap_or_default();
+        script.terminal_events.push(TerminalEvent::Screen(screen));
+        Ok(())
+    }
+
+    fn poll_terminal(&mut self) -> Vec<TerminalEvent> {
+        std::mem::take(&mut lock(&self.script).terminal_events)
+    }
+
+    fn terminal_input(&mut self, bytes: &[u8]) -> Result<(), SourceError> {
+        let mut script = self.online()?;
+        if script.open.is_none() {
+            return Err(SourceError::Disconnected("no terminal is open".into()));
+        }
+        script.typed.extend_from_slice(bytes);
+        Ok(())
+    }
+
+    fn close_terminal(&mut self) {
+        let mut script = lock(&self.script);
+        script.open = None;
+        script.terminal_events.clear();
     }
 }
 
@@ -200,9 +277,52 @@ impl ScriptHandle {
     pub fn answers(&self) -> Vec<(String, AskReply)> {
         lock(&self.0).answers.clone()
     }
+
+    /// Adds a needs-you item (not an ask) and emits `attention_required`;
+    /// `resolve` with one of its `actions` takes it off.
+    pub fn add_attention(&self, item: AttentionRequiredData) -> u64 {
+        emit(
+            &mut lock(&self.0),
+            DaemonEvent::AttentionRequired { data: item },
+        )
+    }
+
+    /// Every accepted `resolve`, in order.
+    pub fn resolved(&self) -> Vec<(String, AttentionAction)> {
+        lock(&self.0).resolved.clone()
+    }
+
+    /// `instance_id` prints `text`: its screen grows, and an open terminal
+    /// of it gets [`TerminalEvent::Output`].
+    pub fn print(&self, instance_id: &str, text: &str) {
+        let mut script = lock(&self.0);
+        script
+            .terminals
+            .entry(instance_id.to_owned())
+            .or_default()
+            .push_str(text);
+        if script.open.as_deref() == Some(instance_id) {
+            script.terminal_events.push(TerminalEvent::Output);
+        }
+    }
+
+    /// The open terminal gets `event` next (an error, or its end).
+    pub fn terminal_event(&self, event: TerminalEvent) {
+        lock(&self.0).terminal_events.push(event);
+    }
+
+    /// The instance whose terminal is open, if any.
+    pub fn open_terminal(&self) -> Option<String> {
+        lock(&self.0).open.clone()
+    }
+
+    /// Every byte typed into a terminal, in order.
+    pub fn typed(&self) -> Vec<u8> {
+        lock(&self.0).typed.clone()
+    }
 }
 
-fn stage(name: &str, kind: StageKind, state: StageState, agent: Option<&str>) -> StageInfo {
+fn stage(name: &str, kind: Option<StageKind>, state: StageState, agent: Option<&str>) -> StageInfo {
     StageInfo {
         name: name.into(),
         kind,
@@ -229,7 +349,7 @@ fn code_stages(done: usize, holder: &str, reviewer: &str) -> Vec<StageInfo> {
                 std::cmp::Ordering::Equal => StageState::Running,
                 std::cmp::Ordering::Greater => StageState::NotStarted,
             };
-            stage(name, *kind, state, *agent)
+            stage(name, Some(*kind), state, *agent)
         })
         .collect()
 }
@@ -242,6 +362,8 @@ fn task(id: &str, team: &str, title: &str, repo: Option<&str>, holder: &str) -> 
         repo: repo.map(Into::into),
         holder: Some(holder.into()),
         stages: Vec::new(),
+        status: "running".into(),
+        pipeline: None,
     }
 }
 

@@ -222,7 +222,7 @@ fn write(input: &Input, sub: &str, rest: &[String]) -> Decision {
     let Some(binding) = snapshot.binding.as_ref() else {
         return refuse(refuse_unbound(sub, input.location, input.dir));
     };
-    let wt = binding.worktree();
+    let wt = Path::new(binding.worktree());
     if !wt.is_dir() {
         return refuse(Refusal::new(
             "worktree_missing",
@@ -328,7 +328,7 @@ fn route_read(input: &Input, binding: Option<&Binding>) -> Decision {
         return PASS;
     };
     let outside = matches!(input.location, Location::Canonical | Location::Workspace);
-    if !outside || input.env.retargets || !binding.worktree().is_dir() {
+    if !outside || input.env.retargets || !Path::new(binding.worktree()).is_dir() {
         return PASS;
     }
     let sub = input.args.sub.as_deref().unwrap_or("");
@@ -352,7 +352,7 @@ fn route_read(input: &Input, binding: Option<&Binding>) -> Decision {
 /// repo (the agent is in the wrong directory; acting on its own worktree
 /// would surprise it), and a directory the bound worktree does not have.
 fn route_dir(sub: &str, input: &Input, binding: &Binding) -> Result<PathBuf, Refusal> {
-    let wt = binding.worktree();
+    let wt = Path::new(binding.worktree());
     let prefix = input.resolved.map_or(Path::new(""), |r| r.prefix.as_path());
     // Joined by component: `Path::join("")` would add a trailing slash.
     let target = prefix.components().fold(wt.to_path_buf(), |p, c| p.join(c));
@@ -419,7 +419,7 @@ fn foreign(input: &Input, sub: &str, rest: &[String]) -> Decision {
     let next = match binding {
         Some(b) => format!(
             "change the team repo only from your bound worktree: cd {} and run it there",
-            b.worktree().display()
+            Path::new(b.worktree()).display()
         ),
         None => {
             "run `agend status`; the daemon gives you a worktree when it assigns a task".to_string()
@@ -490,7 +490,7 @@ fn check_hooks_kept(sub: &str, rest: &[String], input: &Input) -> Result<(), Ref
 /// write drops the caller's `--git-dir` / `--work-tree`, so naming one that
 /// resolves elsewhere is refused rather than silently rewritten.
 fn check_work_tree(sub: &str, input: &Input, binding: &Binding) -> Result<(), Refusal> {
-    let wt = binding.worktree();
+    let wt = Path::new(binding.worktree());
     let refuse = |reason: String| {
         Refusal::new(
             "work_tree_retarget",
@@ -736,7 +736,7 @@ fn unsnapshotted(sub: &str, rest: &[String], input: &Input, b: &Binding) -> Opti
         let set = |v: &String| v.to_ascii_lowercase().contains(key);
         listed("reset checkout restore switch", sub)
             && destructive(sub, rest).is_some()
-            && b.worktree().join(".gitmodules").is_file()
+            && Path::new(b.worktree()).join(".gitmodules").is_file()
             && (flag("--recurse-submodules")
                 || !flag("--no-recurse-submodules")
                     && (input.args.config.iter().any(set) || config_true(input.probe, key)))
@@ -914,7 +914,7 @@ fn refuse_worktree(rest: &[String], binding: Option<&Binding>) -> Refusal {
     let next = match binding {
         Some(b) => format!(
             "work in your bound worktree: cd {}; for separate work create a task: agend task create \"<title>\"",
-            b.worktree().display()
+            Path::new(b.worktree()).display()
         ),
         None => "run `agend status`; the daemon creates your worktree when it assigns you a task"
             .to_string(),

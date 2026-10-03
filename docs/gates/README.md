@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 13 個施工關各有一頁：範圍、自動驗收、你親自驗收的步驟、驗收紀錄、進度紀錄。
 > - 記住：**一個施工關要等你跑完「你親自驗收」並填好「驗收紀錄」才算完成**。
-> - 下一步：第 1–6、8 施工關已完成；第 7 施工關開工前提案已確認、實作中（PR #132）；第 9、10 施工關開工前提案已確認、等前面的施工關完成後開工；第 11 施工關畫面層完成、B 段（接真 daemon）進行中。
+> - 下一步：第 1–11 施工關已完成並合併；第 11 施工關 C 段 #145 經使用者於 2026-10-03 確認合併。第 12 施工關 A 段 draft PR #138 仍待逐項決定，未授權 merge 或實作。
 
 ## 索引
 
@@ -15,12 +15,12 @@
 | 4 | [`holder`](gate-04-holder.md) | agend-holder | 完成（2026-09-26） | `cargo xtask accept holder` |
 | 5 | [`store`](gate-05-store.md) | agend-daemon：store | 完成（2026-09-26） | `cargo xtask accept store` |
 | 6 | [`daemon-holder`](gate-06-daemon-holder.md) | daemon ↔ holder | 完成（2026-09-26） | `cargo xtask accept daemon-holder` |
-| 7 | [`codex`](gate-07-codex.md) | codex driver + 送達 | 實作中（2026-09-26；開工前提案 P1–P9 已確認，PR #132） | `cargo xtask accept codex` |
+| 7 | [`codex`](gate-07-codex.md) | codex driver + 送達 | 完成（2026-09-28；已 merge #132） | `cargo xtask accept codex` |
 | 8 | [`client`](gate-08-client.md) | agend-client + protocol server | 完成（2026-09-26） | `cargo xtask accept client` |
-| 9 | [`cli`](gate-09-cli.md) | agend CLI | 提案中（2026-09-26；開工前提案 P1–P10 已確認） | `cargo xtask accept cli` |
-| 10 | [`pipeline`](gate-10-pipeline.md) | 流水線 | 提案中（2026-09-26；開工前提案 P1–P11 已確認） | `cargo xtask accept pipeline` |
-| 11 | [`tui`](gate-11-tui.md) | agend-tui | 實作中（2026-09-26；畫面層完成，B 段接真 daemon 進行中，分支 `feat/gate-11-tui-daemon`） | `cargo xtask accept tui` |
-| 12 | [`adapters`](gate-12-adapters.md) | 其餘 adapter | 未開始 | `cargo xtask accept adapters` |
+| 9 | [`cli`](gate-09-cli.md) | agend CLI | 完成（2026-09-29；已 merge #136） | `cargo xtask accept cli` |
+| 10 | [`pipeline`](gate-10-pipeline.md) | 流水線 | 完成（2026-10-02；#143 已確認合併） | `cargo xtask accept pipeline` |
+| 11 | [`tui`](gate-11-tui.md) | agend-tui | 完成（A、B、C 已 merge；C 段 #145） | `cargo xtask accept tui` |
+| 12 | [`adapters`](gate-12-adapters.md) | 其餘 adapter | 提案整理中（A 段 #138 對齊 v2；P1–P10 待確認，未 merge 或實作） | `cargo xtask accept adapters` |
 | 13 | [`install`](gate-13-install.md) | 安裝與發布 | 未開始 | `cargo xtask accept install` |
 
 ## 每個終端機先做這一步
@@ -28,8 +28,11 @@
 第 6、8–12 施工關的步驟會用到 `agend`。第 13 施工關之前沒有安裝程式，而你的 PATH 上有舊的 Node 版 `agend`（`/opt/homebrew/bin/agend`，v1-ts 1.24.0）。所以**每個新開的終端機分頁都要先跑**（包括 daemon 在前景跑時開的第二個終端）：
 
 ```bash
-cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
-~/.cargo/bin/cargo build -p agend && export PATH="$PWD/target/debug:$PATH" && agend --version
+cd "<你的 AgEnD worktree>"
+export CARGO_TARGET_DIR="$PWD/AgEnD-g10-fix-target"
+~/.cargo/bin/cargo build -p agend -p agend-testkit --bins
+export PATH="$CARGO_TARGET_DIR/debug:$PATH"
+agend --version
 ```
 
 應該看到 `agend 0.x.y`（目前是 `agend 0.0.0`）。印出 `1.24.0` 就是跑到舊的 Node CLI，在這個終端機重跑上面那段。
@@ -60,3 +63,5 @@ cd ~/Documents/Hack/AgEnD-v2    # 你的 AgEnD-v2 路徑
 ```bash
 cat docs/gates/gate-01-core.md
 ```
+
+第 11 施工關 C 段：[Codex 0.159.3 版本開放與永久 thread 歸屬](gate-11c-codex-input.md)。

@@ -40,6 +40,14 @@ fn is_error(v: &Value, code: &str) -> bool {
     v["type"] == "error" && v["data"]["code"] == code
 }
 
+/// `accepted` for the request an error line answered.
+fn accepted_for(error: &Value) -> Value {
+    json!({
+        "type": "command_result",
+        "data": {"request_id": error["data"]["request_id"], "result": {"result": "accepted"}}
+    })
+}
+
 pub fn mutants() -> Vec<Mutant> {
     vec![
         // CLP-1: the proxy says hello for the client, so any first line works.
@@ -210,18 +218,17 @@ pub fn mutants() -> Vec<Mutant> {
                 })
             },
         },
-        // CLP-10: a request that is not supported is answered as accepted.
+        // CLP-10: refused requests are answered as accepted.
         Mutant {
             rule: "CLP-10",
-            name: "AcceptsUnsupported",
+            name: "AcceptsRefused",
             run: |name| {
                 with("CLP-10", name, || {
                     parsed(|_, direction, v| {
-                        if direction == Direction::ToClient && is_error(&v, "not_supported") {
-                            return vec![json!({
-                                "type": "command_result",
-                                "data": {"request_id": "clp", "result": {"result": "accepted"}}
-                            })];
+                        if direction == Direction::ToClient
+                            && (is_error(&v, "no_terminal") || is_error(&v, "unknown_ask"))
+                        {
+                            return vec![accepted_for(&v)];
                         }
                         vec![v]
                     })
@@ -263,6 +270,132 @@ pub fn mutants() -> Vec<Mutant> {
                 })
             },
         },
+        // CLP-13: the caller is dropped from hello, so an agent's operator
+        // requests are the operator's.
+        Mutant {
+            rule: "CLP-13",
+            name: "AgentsAreOperators",
+            run: |name| {
+                with("CLP-13", name, || {
+                    parsed(|_, direction, mut v| {
+                        if direction == Direction::ToServer
+                            && v["type"] == "hello"
+                            && let Some(data) = v["data"].as_object_mut()
+                        {
+                            data.remove("caller");
+                        }
+                        vec![v]
+                    })
+                })
+            },
+        },
+        // CLP-14: adding a name again looks accepted.
+        Mutant {
+            rule: "CLP-14",
+            name: "ReaddIsAccepted",
+            run: |name| {
+                with("CLP-14", name, || {
+                    parsed(|_, direction, v| {
+                        if direction == Direction::ToClient && is_error(&v, "instance_exists") {
+                            return vec![accepted_for(&v)];
+                        }
+                        vec![v]
+                    })
+                })
+            },
+        },
+        // CLP-15: the binary of `daemon_restart` is dropped, so the daemon
+        // restarts to itself.
+        Mutant {
+            rule: "CLP-15",
+            name: "DropsRestartBinary",
+            run: |name| {
+                with("CLP-15", name, || {
+                    parsed(|_, direction, mut v| {
+                        if direction == Direction::ToServer
+                            && v["data"]["command"]["command"] == "daemon_restart"
+                            && let Some(command) = v["data"]["command"].as_object_mut()
+                        {
+                            command.remove("binary");
+                        }
+                        vec![v]
+                    })
+                })
+            },
+        },
+        // CLP-16: `task_cancel` is answered as accepted.
+        Mutant {
+            rule: "CLP-16",
+            name: "AcceptsTaskCancel",
+            run: |name| {
+                with("CLP-16", name, || {
+                    parsed(|_, direction, v| {
+                        if direction == Direction::ToClient && is_error(&v, "invalid_request") {
+                            return vec![accepted_for(&v)];
+                        }
+                        vec![v]
+                    })
+                })
+            },
+        },
+        // CLP-17: a resent message gets a new id, so it is kept twice.
+        Mutant {
+            rule: "CLP-17",
+            name: "NewIdOnResend",
+            run: |name| {
+                with("CLP-17", name, || {
+                    parsed(|state, direction, mut v| {
+                        if direction == Direction::ToServer
+                            && v["data"]["command"]["command"] == "send"
+                        {
+                            state.counter += 1;
+                            if state.counter == 2 {
+                                v["data"]["command"]["message_id"] =
+                                    json!("3f4a0b9d-6e4a-4b5d-8f7e-8091a2b3c4d5");
+                            }
+                        }
+                        vec![v]
+                    })
+                })
+            },
+        },
+        // CLP-17: a body over the limit reaches the daemon cut short, so it
+        // is accepted.
+        Mutant {
+            rule: "CLP-17",
+            name: "AcceptsHugeBody",
+            run: |name| {
+                with("CLP-17", name, || {
+                    parsed(|_, direction, mut v| {
+                        if direction == Direction::ToServer
+                            && v["data"]["command"]["message"]
+                                .as_str()
+                                .is_some_and(|m| m.len() > 1 << 20)
+                        {
+                            v["data"]["command"]["message"] = json!("cut short");
+                        }
+                        vec![v]
+                    })
+                })
+            },
+        },
+        // CLP-17: `inbox` ignores its cursor.
+        Mutant {
+            rule: "CLP-17",
+            name: "InboxIgnoresAfter",
+            run: |name| {
+                with("CLP-17", name, || {
+                    parsed(|_, direction, mut v| {
+                        if direction == Direction::ToServer
+                            && v["data"]["command"]["command"] == "inbox"
+                        {
+                            v["data"]["command"]["after_message_id"] = Value::Null;
+                        }
+                        vec![v]
+                    })
+                })
+            },
+        },
         // CLP-12: the screen is dropped; the terminal starts with bytes.
         Mutant {
             rule: "CLP-12",
@@ -272,6 +405,112 @@ pub fn mutants() -> Vec<Mutant> {
                     parsed(|_, direction, v| {
                         if direction == Direction::ToClient && v["type"] == "terminal_snapshot" {
                             return vec![];
+                        }
+                        vec![v]
+                    })
+                })
+            },
+        },
+        // CLP-18: every later screen is the first one seen on the connection.
+        Mutant {
+            rule: "CLP-18",
+            name: "FreezesScreen",
+            run: |name| {
+                with("CLP-18", name, || {
+                    parsed(|state, direction, mut v| {
+                        if direction == Direction::ToClient && v["type"] == "terminal_snapshot" {
+                            match &state.held {
+                                Some(first) => v["data"]["screen"] = json!(first),
+                                None => {
+                                    state.held = v["data"]["screen"].as_str().map(str::to_owned)
+                                }
+                            }
+                        }
+                        vec![v]
+                    })
+                })
+            },
+        },
+        // CLP-19: any id gets the fixture's terminal (gate 8's C2 fake).
+        Mutant {
+            rule: "CLP-19",
+            name: "ScreenForAnyInstance",
+            run: |name| {
+                with("CLP-19", name, || {
+                    parsed(|_, direction, mut v| {
+                        if direction == Direction::ToServer && v["type"] == "subscribe_terminal" {
+                            v["data"]["instance_id"] = json!(client::FAKE_INSTANCE);
+                        }
+                        vec![v]
+                    })
+                })
+            },
+        },
+        // CLP-22: the refusal of an oversized input never reaches the client
+        // (as if it had been forwarded to the holder).
+        Mutant {
+            rule: "CLP-22",
+            name: "ForwardsHugeInput",
+            run: |name| {
+                with("CLP-22", name, || {
+                    parsed(|_, direction, v| {
+                        if direction == Direction::ToClient && is_error(&v, "invalid_request") {
+                            return vec![];
+                        }
+                        vec![v]
+                    })
+                })
+            },
+        },
+        // CLP-22: the limit is `>=` instead of `>`: an input exactly at the
+        // holder's limit is refused too (seen as one byte more).
+        Mutant {
+            rule: "CLP-22",
+            name: "RefusesAtTheLimit",
+            run: |name| {
+                with("CLP-22", name, || {
+                    parsed(|_, direction, mut v| {
+                        let at_limit = agend_core::protocol::holder::MAX_REQUEST_LINE
+                            - client::holder_line_overhead();
+                        if direction == Direction::ToServer
+                            && v["type"] == "terminal_input"
+                            && v["data"]["bytes_base64"].as_str().map(str::len) == Some(at_limit)
+                        {
+                            v["data"]["bytes_base64"] = json!("A".repeat(at_limit + 1));
+                        }
+                        vec![v]
+                    })
+                })
+            },
+        },
+        // CLP-21: typing into any instance goes to the live one.
+        Mutant {
+            rule: "CLP-21",
+            name: "TypesIntoTheLiveOne",
+            run: |name| {
+                with("CLP-21", name, || {
+                    parsed(|_, direction, mut v| {
+                        if direction == Direction::ToServer && v["type"] == "terminal_input" {
+                            v["data"]["instance_id"] = json!(client::FAKE_INSTANCE);
+                        }
+                        vec![v]
+                    })
+                })
+            },
+        },
+        // CLP-20: the caller is dropped from hello, so agents type as the
+        // operator.
+        Mutant {
+            rule: "CLP-20",
+            name: "AnyoneMayType",
+            run: |name| {
+                with("CLP-20", name, || {
+                    parsed(|_, direction, mut v| {
+                        if direction == Direction::ToServer
+                            && v["type"] == "hello"
+                            && let Some(data) = v["data"].as_object_mut()
+                        {
+                            data.remove("caller");
                         }
                         vec![v]
                     })

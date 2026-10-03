@@ -69,13 +69,15 @@ CI（`.github/workflows/ci.yml`）在 ubuntu 與 macOS 跑同一組檢查。
 - 整合 branch：**`v2`**（`main` 目前是舊版 TypeScript；切換後整合 branch 改為 `main`，規則不變）。
 - 禁止：在 `v2` 或 `main` 上直接 commit、push、`--force`；在別人的 worktree 裡改東西。
 - 一律用 PR 合併；合併方式與時機由使用者決定，agent 不自行 merge。
+- 本機所有新 task／verifier worktree 都放 `/Users/suzuke/AlphaCR-worktrees/`（使用者 2026-10-02 指定）；禁止在整合 worktree 實作。
+- 使用者已允許 push feature branch、建立 draft PR 與跑 CI，不另行請示；merge 仍須先提供全新、無相關 context 的 subagent 驗證結果與人工驗收指令，等使用者確認。
 
 開工：
 
 ```bash
 git fetch origin
-git worktree add ../AgEnD-<主題> -b <類型>/<主題> origin/v2   # 類型：feat／fix／docs／test／build
-cd ../AgEnD-<主題>
+git worktree add /Users/suzuke/AlphaCR-worktrees/AgEnD-<主題> -b <類型>/<主題> origin/v2   # 類型：feat／fix／docs／test／build
+cd /Users/suzuke/AlphaCR-worktrees/AgEnD-<主題>
 ```
 
 收工：
@@ -84,7 +86,7 @@ cd ../AgEnD-<主題>
 git push -u origin <類型>/<主題>
 gh pr create --base v2
 # PR 合併後
-git worktree remove ../AgEnD-<主題> && git branch -d <類型>/<主題>
+git worktree remove /Users/suzuke/AlphaCR-worktrees/AgEnD-<主題> && git branch -d <類型>/<主題>
 ```
 
 ## 指令
@@ -142,7 +144,7 @@ cargo xtask accept <施工關>                                # 1–13 或名稱
 
 ## 決策在哪
 
-- 已確認的決策：[docs/DECISIONS.md](docs/DECISIONS.md)（D1–D37）。
+- 已確認的決策：[docs/DECISIONS.md](docs/DECISIONS.md)（D1–D39）。
 - 沒有新證據不要重開討論。要推翻：先補證據，再提新的決策編號，由使用者確認。
 - 文件間衝突時：後來的決策優先於規劃本文。
 

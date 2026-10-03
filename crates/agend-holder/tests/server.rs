@@ -257,7 +257,7 @@ fn reconnect_gets_snapshot_then_live_bytes_without_gap_or_duplicate() {
     drop(first);
 
     let (mut client, greeting) = holder.connect();
-    assert_eq!(greeting.version, ProtocolVersion::new(1, 0));
+    assert_eq!(greeting.version, ProtocolVersion::new(1, 1));
     assert_eq!(greeting.exited, None);
     let last_row = greeting
         .screen
@@ -401,7 +401,7 @@ fn version_mismatch_is_refused_and_the_holder_keeps_serving() {
     assert_eq!(wait_error(&mut client), "version_mismatch");
     assert!(client.wait_closed(LONG));
     let (_, greeting) = holder.connect();
-    assert_eq!(greeting.version, ProtocolVersion::new(1, 0));
+    assert_eq!(greeting.version, ProtocolVersion::new(1, 1));
 }
 
 #[test]
@@ -596,3 +596,134 @@ fn deleting_agend_home_stops_the_holder_and_its_agent() {
     assert_eq!(holder.join(), Stop::HomeDeleted);
     assert!(processes_in_group(pid).is_empty());
 }
+
+fn request_frame(client: &mut HolderClient, request_id: &str, top: Option<u64>, rows: u16) {
+    client
+        .send(&HolderRequest::GetTerminalFrame {
+            data: agend_core::protocol::terminal::TerminalFrameRequest {
+                request_id: request_id.into(),
+                viewport: agend_core::protocol::terminal::TerminalViewport { top, rows },
+            },
+        })
+        .unwrap();
+}
+
+fn frame_reply(client: &mut HolderClient) -> HolderResponse {
+    let deadline = Instant::now() + LONG;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        assert!(!remaining.is_zero(), "frame reply missed its deadline");
+        match client.recv(remaining).unwrap() {
+            Some(
+                reply @ (HolderResponse::TerminalFrame { .. }
+                | HolderResponse::TerminalOperationError { .. }),
+            ) => return reply,
+            Some(HolderResponse::PtyBytes { .. } | HolderResponse::Exited { .. }) => (),
+            other => panic!("unexpected frame response: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn structured_frames_are_correlated_and_keep_holder_generation_on_reconnect() {
+    let holder = TestHolder::start(Duration::from_secs(100));
+    let (mut client, _) = holder.spawn_bash(r"printf '\033[31mFRAME_READY\033[0m'; read -r reply");
+    wait_screen(&mut client, |screen| screen.contains("FRAME_READY"));
+    request_frame(&mut client, "one", None, 2);
+    request_frame(&mut client, "two", Some(0), 1);
+    let HolderResponse::TerminalFrame { data: first } = frame_reply(&mut client) else {
+        panic!("missing first frame")
+    };
+    let HolderResponse::TerminalFrame { data: second } = frame_reply(&mut client) else {
+        panic!("missing second frame")
+    };
+    assert_eq!(first.request_id, "one");
+    assert_eq!(second.request_id, "two");
+    assert_eq!(first.frame.cells.len(), 2);
+    assert_eq!(second.frame.cells.len(), 1);
+    assert_eq!(first.frame.generation, second.frame.generation);
+    assert_eq!(first.frame.revision, second.frame.revision);
+    assert_eq!(
+        first.frame.cells[0][0].foreground,
+        agend_core::protocol::terminal::TerminalColor::Indexed { index: 1 }
+    );
+    drop(client);
+    let (mut reconnect, _) = holder.connect();
+    request_frame(&mut reconnect, "after-reconnect", None, 2);
+    let HolderResponse::TerminalFrame { data: reconnected } = frame_reply(&mut reconnect) else {
+        panic!("missing reconnected frame")
+    };
+    assert_eq!(reconnected.frame.generation, first.frame.generation);
+    assert_eq!(reconnected.frame.cells, first.frame.cells);
+    request_frame(&mut reconnect, "invalid", None, 0);
+    let HolderResponse::TerminalOperationError { data } = frame_reply(&mut reconnect) else {
+        panic!("zero viewport accepted")
+    };
+    assert_eq!(data.request_id, "invalid");
+    assert_eq!(data.code, "invalid_size");
+}
+
+#[test]
+fn legacy_1_0_snapshot_stays_unchanged_and_new_frame_request_is_refused() {
+    let holder = TestHolder::start(Duration::from_secs(100));
+    let mut client = HolderClient::connect_with(
+        &holder.socket,
+        &HolderRequest::Hello {
+            data: Hello::new(&[agend_core::protocol::holder::V1]),
+        },
+    )
+    .unwrap();
+    assert!(
+        matches!(client.recv(LONG).unwrap(), Some(HolderResponse::Hello {data}) if data.selected == agend_core::protocol::holder::V1)
+    );
+    assert!(matches!(
+        client.recv(LONG).unwrap(),
+        Some(HolderResponse::ScreenSnapshot { .. })
+    ));
+    request_frame(&mut client, "old-peer", None, 2);
+    let HolderResponse::TerminalOperationError { data } = frame_reply(&mut client) else {
+        panic!("unnegotiated capability accepted")
+    };
+    assert_eq!(data.request_id, "old-peer");
+    assert_eq!(data.code, "not_supported");
+    client.send(&HolderRequest::Snapshot).unwrap();
+    assert!(matches!(
+        client.recv(LONG).unwrap(),
+        Some(HolderResponse::ScreenSnapshot { .. })
+    ));
+}
+
+#[test]
+fn oversized_frame_is_refused_whole_and_connection_still_reads_snapshots() {
+    let holder = TestHolder::start(Duration::from_secs(100));
+    let (mut client, _) = holder.connect();
+    client
+        .send(&HolderRequest::Resize {
+            data: agend_core::protocol::holder::ResizeData {
+                rows: 1000,
+                columns: 1000,
+            },
+        })
+        .unwrap();
+    request_frame(&mut client, "oversized", None, 1000);
+    let HolderResponse::TerminalOperationError { data } = frame_reply(&mut client) else {
+        panic!("oversized frame was accepted")
+    };
+    assert_eq!(data.request_id, "oversized");
+    assert_eq!(data.code, "frame_too_large");
+    request_frame(&mut client, "small", None, 1);
+    let HolderResponse::TerminalFrame { data } = frame_reply(&mut client) else {
+        panic!("connection cannot read valid frame after refusal")
+    };
+    assert_eq!(data.request_id, "small");
+    assert_eq!(data.frame.cells.len(), 1);
+    assert_eq!(data.frame.cells[0].len(), 1000);
+    client.send(&HolderRequest::Snapshot).unwrap();
+    assert!(matches!(
+        client.recv(LONG).unwrap(),
+        Some(HolderResponse::ScreenSnapshot { .. })
+    ));
+}
+
+#[path = "support/terminal_control.rs"]
+mod terminal_control;

@@ -120,6 +120,23 @@ pub fn running_holders(home: &Path) -> io::Result<Vec<(String, u32)>> {
     Ok(out)
 }
 
+/// The pid written in every `*.lock` file under `run/holders/`, held or
+/// not (the reaper's list after an `exec` restart, gate 9 P7).
+pub fn lock_pids(home: &Path) -> Vec<u32> {
+    let Ok(entries) = fs::read_dir(holders_dir(home)) else {
+        return Vec::new();
+    };
+    let mut pids: Vec<u32> = entries
+        .flatten()
+        .filter(|e| e.file_name().to_str().is_some_and(|n| n.ends_with(".lock")))
+        .filter_map(|e| read_pid(&e.path()))
+        .filter(|&pid| pid > 1)
+        .collect();
+    pids.sort_unstable();
+    pids.dedup();
+    pids
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

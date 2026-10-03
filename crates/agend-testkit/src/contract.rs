@@ -30,6 +30,8 @@ pub mod notifier;
 pub mod runner;
 pub mod runtime;
 pub mod store;
+#[cfg(unix)]
+pub mod terminal;
 
 pub use fakes::run_all_fakes;
 

@@ -69,14 +69,23 @@ pub struct Proxy {
     stopping: Arc<AtomicBool>,
     accept: Option<JoinHandle<()>>,
     connections: Arc<Mutex<Vec<UnixStream>>>,
-    _dir: TempDir,
+    _dir: Option<TempDir>,
 }
 
 impl Proxy {
     /// Listens on a new socket and forwards to `upstream`.
     pub fn start(upstream: PathBuf, options: Options) -> io::Result<Proxy> {
         let dir = TempDir::new("px")?;
-        let path = dir.path().join("proxy.sock");
+        let mut proxy = Proxy::start_at(&dir.path().join("proxy.sock"), upstream, options)?;
+        proxy._dir = Some(dir);
+        Ok(proxy)
+    }
+
+    /// Listens on `path` (for example `$AGEND_HOME/run/daemon.sock`, where
+    /// the CLI looks) and forwards to `upstream`. A client whose upstream
+    /// cannot be reached is closed at once (a daemon that is away).
+    pub fn start_at(path: &Path, upstream: PathBuf, options: Options) -> io::Result<Proxy> {
+        let path = path.to_path_buf();
         let listener = UnixListener::bind(&path)?;
         let stopping = Arc::new(AtomicBool::new(false));
         let connections = Arc::new(Mutex::new(Vec::new()));
@@ -85,11 +94,7 @@ impl Proxy {
             .name("clp-proxy-accept".into())
             .spawn(move || {
                 let next = AtomicU64::new(1);
-                for client in listener.incoming() {
-                    if stop.load(Ordering::SeqCst) {
-                        break;
-                    }
-                    let Ok(client) = client else { continue };
+                while let Some(client) = crate::fake_daemon::accept_or_stop(&listener, &stop) {
                     let number = next.fetch_add(1, Ordering::SeqCst);
                     let Ok(server) = UnixStream::connect(&upstream) else {
                         continue;
@@ -107,7 +112,7 @@ impl Proxy {
             stopping,
             accept: Some(accept),
             connections,
-            _dir: dir,
+            _dir: None,
         })
     }
 
@@ -119,12 +124,14 @@ impl Proxy {
 impl Drop for Proxy {
     fn drop(&mut self) {
         self.stopping.store(true, Ordering::SeqCst);
-        let _ = UnixStream::connect(&self.path);
         if let Some(accept) = self.accept.take() {
             let _ = accept.join();
         }
         for s in lock(&self.connections).drain(..) {
             let _ = s.shutdown(Shutdown::Both);
+        }
+        if self._dir.is_none() {
+            let _ = std::fs::remove_file(&self.path);
         }
     }
 }

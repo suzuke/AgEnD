@@ -1,13 +1,15 @@
 //! `fake-codex`: a stand-in for the `codex` CLI the way the daemon's gate 7
 //! wrapper runs it inside a holder (gate 7 P2, P8). Global `-c key=value`
-//! options come first and are ignored, like the settings they carry.
+//! options come first; most are ignored. The explicit test-only setting
+//! `agend_fake_manual_tui=true` connects the native stdin frontend to the server.
 //!
 //! | Command | Behaviour |
 //! |---|---|
-//! | `app-server --listen unix://<path> [--turn-ms <ms>]` | the fake app-server of [`super::codex`], running until a signal ends it or a client sends `agendFake/exit` (the wrapper starts it in the background, so its stdin is `/dev/null`: it does not stop at end of file like `fake-codex-app-server`). Threads persist under `$AGEND_FAKE_STATE_DIR`, or else `<path>.fake-state/` (the agent's environment is a whitelist without that variable) |
+//! | `app-server --listen unix://<path> [--turn-ms <ms>] [--disable duplex-io]` | the fake app-server of [`super::codex`] (`duplex-io` off: a peer that stops reading while a write waits, for testing the daemon against one), running until a signal ends it or a client sends `agendFake/exit` (the wrapper starts it in the background, so its stdin is `/dev/null`: it does not stop at end of file like `fake-codex-app-server`). Threads persist under `$AGEND_FAKE_STATE_DIR`, or else `<path>.fake-state/` (the agent's environment is a whitelist without that variable) |
 //! | `resume <thread id> --remote unix://<path>` | the fake TUI: prints `agent args: resume <id> --remote <url>` and `agent config: <-c values>`, then waits; a line `q` (or end of input) ends it. It never connects to the app-server (the daemon does not depend on the TUI) |
 //!
-//! Must NOT: call a model, or read anything but its arguments and stdin.
+//! Must NOT: call a model. The opt-in manual frontend connects only to the
+//! supplied fake app-server; the default gate 7 TUI remains unchanged.
 
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -16,6 +18,8 @@ use std::time::Duration;
 
 use super::Args;
 use super::codex::Server;
+
+mod manual;
 
 pub fn main(args: impl IntoIterator<Item = String>) -> ExitCode {
     let mut args = args.into_iter().peekable();
@@ -27,6 +31,10 @@ pub fn main(args: impl IntoIterator<Item = String>) -> ExitCode {
         }
     }
     match args.next().as_deref() {
+        Some("--version") => {
+            println!("codex-cli 0.158.0");
+            ExitCode::SUCCESS
+        }
         Some("app-server") => app_server(args.collect()),
         Some("resume") => tui(args.collect(), &config),
         _ => usage("expected app-server or resume"),
@@ -50,7 +58,7 @@ pub fn state_dir_for(listen: &Path) -> PathBuf {
 }
 
 fn app_server(args: Vec<String>) -> ExitCode {
-    let args = match Args::parse(args, &["--listen", "--turn-ms"], &[], &[]) {
+    let args = match Args::parse(args, &["--listen", "--turn-ms", "--disable"], &[], &[]) {
         Ok(args) => args,
         Err(e) => return usage(&e),
     };
@@ -63,7 +71,10 @@ fn app_server(args: Vec<String>) -> ExitCode {
     };
     let path = Path::new(path);
     let state = state_dir_for(path);
-    let _server = match Server::bind(path, Duration::from_millis(turn_ms), Some(state)) {
+    // `--disable duplex-io`: the stuck peer (the fake's own switch).
+    let duplex = !args.all("--disable").any(|f| f == "duplex-io");
+    let turn = Duration::from_millis(turn_ms);
+    let _server = match Server::bind_with(path, turn, Some(state), duplex) {
         Ok(server) => server,
         Err(e) => {
             eprintln!(
@@ -93,6 +104,18 @@ fn tui(args: Vec<String>, config: &[String]) -> ExitCode {
     let _ = writeln!(out, "agent args: resume {thread} --remote {remote}");
     let _ = writeln!(out, "agent config: {}", config.join(" | "));
     let _ = out.flush();
+    if config
+        .iter()
+        .any(|value| value == "agend_fake_manual_tui=true")
+    {
+        return match manual::run(thread, Path::new(remote.strip_prefix("unix://").unwrap())) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("fake-codex manual TUI: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     for line in std::io::stdin().lock().lines() {
         match line {
             Ok(line) if line.trim() == "q" => break,

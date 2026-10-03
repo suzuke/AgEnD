@@ -16,6 +16,10 @@
 //!   `turn/started` / `turn/completed` the running turn; `item/completed`
 //!   of a user message confirms it. Approval requests are answered
 //!   `decline` (P4: gate 7 has no one to ask).
+//! - A write that makes no progress for 10 s (`rpc::WRITE_WITHIN`: the
+//!   app-server stopped reading) ends the connection like any other error.
+//!   Closing the link shuts its socket down and waits at most 5 s for the
+//!   thread (gate 9, verifier r2).
 //! - The connection ends: reconnect every 100 ms (with `thread/resume`) for
 //!   [`launch::READY_WITHIN`]; then the app-server counts as dead
 //!   ([`CodexEvent::Gone`]) and the thread ends.
@@ -23,10 +27,11 @@
 //! Must NOT: send a message that is not `queued`, or type anything into a
 //! PTY.
 
+use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -34,7 +39,7 @@ use agend_core::model::DeliveryState;
 use agend_core::policy::busy::BusyLevel;
 use serde_json::{Value, json};
 
-use super::history::{UserItem, match_items, text_of, user_items};
+use super::history::{UserItem, match_identified_items, match_items, text_of, user_items};
 use super::launch;
 use super::rpc::{Conn, INVALID_REQUEST, Incoming, RpcError};
 use super::send::{self, Rpc};
@@ -61,19 +66,45 @@ pub(crate) enum Command {
     Turns(Sender<Result<Vec<Value>, String>>),
 }
 
+/// How long [`Link::close`] waits for the link thread; after that it is
+/// left to end on its own (logged), never waited for without end.
+const CLOSE_WITHIN: Duration = Duration::from_secs(5);
+
 /// Shared with the driver.
 #[derive(Default)]
 pub(crate) struct Shared {
     pub connected: AtomicBool,
     pub busy: AtomicBool,
+    pub input_allowed: AtomicBool,
+    pub holder_pid: AtomicU32,
     stopping: AtomicBool,
+    /// The current connection's socket: closing the link shuts it down, so
+    /// a thread blocked writing to a peer that does not read wakes up
+    /// (gate 9, verifier r2).
+    socket: Mutex<Option<UnixStream>>,
+}
+
+impl Shared {
+    fn set_socket(&self, conn: &Conn) {
+        let socket = conn.socket().ok();
+        *self.socket.lock().unwrap_or_else(|e| e.into_inner()) = socket;
+    }
+
+    fn shut_down(&self) {
+        if let Some(socket) = self.socket.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            let _ = socket.shutdown(std::net::Shutdown::Both);
+        }
+    }
 }
 
 /// The driver's handle on a link thread.
 pub(crate) struct Link {
+    id: String,
     commands: Option<Sender<Command>>,
     pub shared: Arc<Shared>,
     thread: Option<JoinHandle<()>>,
+    /// Signalled when the thread's `run` returns.
+    done: Option<Receiver<()>>,
 }
 
 /// An answer the link thread will give.
@@ -120,10 +151,28 @@ impl Link {
     }
 
     fn stop(&mut self) {
+        self.shared.input_allowed.store(false, Ordering::SeqCst);
+        self.shared.connected.store(false, Ordering::SeqCst);
         self.shared.stopping.store(true, Ordering::SeqCst);
         self.commands.take();
-        if let Some(thread) = self.thread.take() {
+        self.shared.shut_down();
+        let Some(thread) = self.thread.take() else {
+            return;
+        };
+        let ended = self.done.take().is_none_or(|done| {
+            !matches!(
+                done.recv_timeout(CLOSE_WITHIN),
+                Err(RecvTimeoutError::Timeout)
+            )
+        });
+        if ended {
             let _ = thread.join();
+        } else {
+            log::line(&format!(
+                "{}: the codex link thread did not end within {} s; left to end on its own",
+                self.id,
+                CLOSE_WITHIN.as_secs()
+            ));
         }
     }
 }
@@ -154,7 +203,7 @@ pub(crate) fn confirm(
             DeliveryState::Sent => {}
             _ => return Ok(None),
         }
-        messages::advance(conn, &row, DeliveryState::Confirmed, None, now)?;
+        messages::advance(conn, &row, DeliveryState::Confirmed, Some(&turn), now)?;
         Ok(Some(found.state))
     })
 }
@@ -191,6 +240,7 @@ pub(crate) struct Worker {
     /// A turn ended: when the thread is idle, start what codex still has
     /// queued (K16: after an interrupt codex does not start it itself).
     drain: bool,
+    identified_receipts: bool,
 }
 
 impl Worker {
@@ -200,8 +250,11 @@ impl Worker {
         generation: u64,
         listen: PathBuf,
         store: Arc<SqliteStore>,
+        identified_receipts: bool,
     ) -> Result<Worker, RpcError> {
         let conn = Conn::open(&listen).map_err(|e| RpcError::Transport(e.to_string()))?;
+        let shared = Arc::new(Shared::default());
+        shared.set_socket(&conn);
         let mut worker = Worker {
             id: id.to_owned(),
             generation,
@@ -211,12 +264,20 @@ impl Worker {
             store,
             busy: false,
             active: None,
-            shared: Arc::new(Shared::default()),
+            shared,
             recheck: false,
             drain: false,
+            identified_receipts,
         };
         worker.initialize()?;
         Ok(worker)
+    }
+
+    /// Set only after the selected thread's persistent attribution is committed.
+    pub fn set_input_policy(&mut self, identified: bool, admitted: bool, holder_pid: u32) {
+        self.identified_receipts = identified;
+        self.shared.holder_pid.store(holder_pid, Ordering::SeqCst);
+        self.shared.input_allowed.store(admitted, Ordering::SeqCst);
     }
 
     fn initialize(&mut self) -> Result<(), RpcError> {
@@ -276,14 +337,21 @@ impl Worker {
     /// Starts the link thread; `sink` hears when the app-server is gone.
     pub fn spawn(self, sink: CodexSink) -> std::io::Result<Link> {
         let shared = Arc::clone(&self.shared);
+        let id = self.id.clone();
         let (tx, rx) = mpsc::channel();
+        let (done_tx, done) = mpsc::channel();
         let thread = std::thread::Builder::new()
             .name(format!("codex-link-{}", self.id))
-            .spawn(move || self.run(&rx, &sink))?;
+            .spawn(move || {
+                self.run(&rx, &sink);
+                let _ = done_tx.send(());
+            })?;
         Ok(Link {
+            id,
             commands: Some(tx),
             shared,
             thread: Some(thread),
+            done: Some(done),
         })
     }
 
@@ -348,6 +416,10 @@ impl Worker {
                 return;
             }
             self.shared.connected.store(false, Ordering::SeqCst);
+            // A new RPC peer cannot inherit the previous peer's input admission.
+            // Receipt attribution remains strict; a fresh supervisor connect can
+            // establish admission again from the current holder launch record.
+            self.shared.input_allowed.store(false, Ordering::SeqCst);
             if self.stopping() {
                 return;
             }
@@ -438,6 +510,10 @@ impl Worker {
             let Ok(conn) = Conn::open(&self.listen) else {
                 continue;
             };
+            self.shared.set_socket(&conn);
+            if self.stopping() {
+                return false;
+            }
             self.conn = conn;
             let thread = self.thread.clone();
             if self.initialize().is_ok() && self.resume(&thread).is_ok() {
@@ -503,11 +579,25 @@ impl Worker {
             "turn/started" => {
                 self.active = params["turn"]["id"].as_str().map(str::to_owned);
                 self.set_busy(true);
+                if self.identified_receipts {
+                    log::line(&format!(
+                        "{}: U17 turn {} busy",
+                        self.id,
+                        self.active.as_deref().unwrap_or_default()
+                    ));
+                }
             }
             "turn/completed" => {
                 if self.active.as_deref() == params["turn"]["id"].as_str() {
                     self.active = None;
                     self.set_busy(false);
+                    if self.identified_receipts {
+                        log::line(&format!(
+                            "{}: U17 turn {} idle",
+                            self.id,
+                            params["turn"]["id"].as_str().unwrap_or_default()
+                        ));
+                    }
                 }
                 self.drain = true;
             }
@@ -521,6 +611,14 @@ impl Worker {
         }
     }
 
+    fn match_receipts(&self, items: &[UserItem], rows: &[Message]) -> Vec<Option<String>> {
+        if self.identified_receipts {
+            match_identified_items(items, rows)
+        } else {
+            match_items(items, rows)
+        }
+    }
+
     /// A user message just completed: confirms the `queued`/`sent` row it is.
     fn confirm_live(&mut self, item: &UserItem) {
         let rows = match messages_to(&self.store, &self.id) {
@@ -531,7 +629,7 @@ impl Worker {
             .into_iter()
             .filter(|r| matches!(r.state, DeliveryState::Queued | DeliveryState::Sent))
             .collect();
-        if let Some(Some(row)) = match_items(std::slice::from_ref(item), &open).pop() {
+        if let Some(Some(row)) = self.match_receipts(std::slice::from_ref(item), &open).pop() {
             self.confirm_logged(&row, &item.turn_id, "");
         }
     }
@@ -605,7 +703,7 @@ impl Worker {
         }
         let rows = messages_to(&self.store, &self.id).map_err(store_error)?;
         let items = user_items(&turns);
-        let found = match_items(
+        let found = self.match_receipts(
             &items.iter().map(|(_, u)| u.clone()).collect::<Vec<_>>(),
             &rows,
         );

@@ -10,6 +10,7 @@
 //!   script, never in the environment): `$1` codex, `$2` the socket
 //!   `$AGEND_HOME/run/holders/<id>.codex.sock`, `$3` `$GO`
 //!   (`…/<id>.codex-go`), `$4` the holder log, `$5` the trust `-c` value;
+//!   $6 is the holder-bound version record;
 //!   the instance's own arguments follow and go to `app-server`. `$0` is
 //!   [`WRAPPER_NAME`] (the same for every instance: only for `ps`).
 //! - Settings are per-launch `-c` options before the subcommand; the daemon
@@ -45,8 +46,12 @@ pub const SHELL: &str = "/bin/sh";
 pub const WRAPPER_NAME: &str = "agend-codex";
 
 /// The fixed wrapper script (gate 7 P2).
-pub const WRAPPER: &str = r#"c=$1 s=$2 g=$3 l=$4 t=$5
-shift 5
+pub const WRAPPER: &str = r#"c=$1 s=$2 g=$3 l=$4 t=$5 v=$6
+shift 6
+hp=$PPID
+if cv=$("$c" --version 2>>"$l"); then
+  (umask 077; printf '%s\n%s\n' "$hp" "$cv" >"$v.tmp" && mv "$v.tmp" "$v")
+fi
 "$c" -c "$t" -c check_for_update_on_startup=false -c 'approval_policy="never"' -c 'sandbox_mode="danger-full-access"' app-server --listen "unix://$s" "$@" >>"$l" 2>&1 &
 i=0
 while [ ! -s "$g" ]; do
@@ -92,6 +97,30 @@ pub fn go_path(home: &Path, id: &str) -> PathBuf {
     files::holders_dir(home).join(format!("{id}.codex-go"))
 }
 
+/// Version of the executable launched by this holder, retained across daemon restart.
+pub fn version_path(home: &Path, id: &str) -> PathBuf {
+    files::holders_dir(home).join(format!("{id}.codex-version"))
+}
+
+/// Missing, oversized or stale records deny admission. Do not probe a replacement
+/// executable during daemon restart: the holder may still run the previous one.
+pub fn launched_version(home: &Path, id: &str) -> Option<String> {
+    launched_record(home, id).map(|(_, version)| version)
+}
+pub(crate) fn launched_record(home: &Path, id: &str) -> Option<(u32, String)> {
+    let path = version_path(home, id);
+    if fs::metadata(&path).ok()?.len() > 1024 {
+        return None;
+    }
+    let text = fs::read_to_string(path).ok()?;
+    let (pid, version) = text.split_once('\n')?;
+    let pid = pid.parse::<u32>().ok()?;
+    if Some(pid) != files::running(home, id).ok()? {
+        return None;
+    }
+    Some((pid, version.to_owned()))
+}
+
 /// A TOML basic string.
 fn toml_string(s: &str) -> String {
     let mut out = String::from("\"");
@@ -135,6 +164,7 @@ pub fn wrapper_args(home: &Path, instance: &Instance) -> Result<Vec<String>, Str
         go_path(home, id).display().to_string(),
         files::log_path(home, id).display().to_string(),
         trust_value(&real_workdir(instance)?),
+        version_path(home, id).display().to_string(),
     ];
     args.extend(instance.args.iter().cloned());
     Ok(args)
@@ -171,6 +201,11 @@ pub fn prepare(home: &Path, id: &str) -> io::Result<Vec<String>> {
     }
     remove(&socket, &mut removed)?;
     remove(&go_path(home, id), &mut removed)?;
+    remove(&version_path(home, id), &mut removed)?;
+    remove(
+        &version_path(home, id).with_extension("codex-version.tmp"),
+        &mut removed,
+    )?;
     Ok(removed)
 }
 
@@ -232,6 +267,7 @@ mod tests {
             session_started: false,
             agent_pid: None,
             legacy_no_thread: false,
+            delivery: "push".into(),
         }
     }
 
@@ -266,6 +302,7 @@ mod tests {
                 "/h o\"me/run/holders/g7-1.codex-go".into(),
                 "/h o\"me/run/holders/g7-1.log".into(),
                 trust_value(&real.display().to_string()),
+                "/h o\"me/run/holders/g7-1.codex-version".into(),
                 "--turn-ms".into(),
                 "5".into(),
             ]
@@ -307,6 +344,7 @@ mod tests {
             .arg(&go)
             .arg(&log)
             .arg("projects={\"/w\"={trust_level=\"trusted\"}}")
+            .arg(dir.path().join("version"))
             .args(["--turn-ms", "5"])
             .output()
             .unwrap();

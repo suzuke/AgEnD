@@ -39,6 +39,14 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0004_messages",
         sql: include_str!("migrations/0004_messages.sql"),
     },
+    Migration {
+        name: "0005_pipeline",
+        sql: include_str!("migrations/0005_pipeline.sql"),
+    },
+    Migration {
+        name: "0006_codex_input_threads",
+        sql: include_str!("migrations/0006_codex_input_threads.sql"),
+    },
 ];
 
 /// The schema version this binary creates and supports.

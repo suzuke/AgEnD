@@ -26,8 +26,19 @@
 //! (the CLP contract against the fake, and its mutants), agend-core and
 //! agend (the CLP contract against the real daemon), check-deps, then
 //! `client_demo` against the built `agend`.
-//! Gate 11 runs the per-crate checks, check-deps, then the TUI demo (screens,
-//! navigation, resolve, disconnect against the testkit fake daemon).
+//! Gate 9 runs the checks of agend-core (protocol 1.2), agend-client,
+//! agend-daemon, agend-testkit (CLP-13..17 against the fake, and their
+//! mutants) and agend (the CLI-n table, restart, milestone), check-deps, then
+//! `cli_demo` against the built `agend` and `fake_codex`.
+//! Gate 10 builds the real CLI and inbox worker before tests, runs pipeline
+//! checks across the affected crates and snapshot/protocol compatibility,
+//! then the real pipeline demo (only the agent brain is fake).
+//! Gate 11 runs the checks of agend-tui (the TUI through `ClientSource` on
+//! the fake daemon), agend-client (the terminal `Sender`), agend-daemon
+//! (`terminal_input`), agend-testkit (CLP-18..20 against the fake, and
+//! their mutants) and agend (the real-daemon CLP run, the TUI against the
+//! real daemon, `agend app`), check-deps, then the TUI demo on the fake
+//! daemon (`tui_accept`) and on the real one (`tui_real`, the built `agend`).
 //! Other gates use the per-crate checks until their acceptance flow is built.
 
 use crate::{cargo, check_deps, workspace_root};
@@ -96,17 +107,41 @@ pub const GATES: &[Gate] = &[
     Gate {
         number: 9,
         name: "cli",
-        crates: &["agend"],
+        // `agend` holds the CLI tests with the real binary (cli.rs) and the
+        // real-daemon CLP run; the others carry protocol 1.2 and the fake.
+        crates: &[
+            "agend-core",
+            "agend-client",
+            "agend-daemon",
+            "agend-testkit",
+            "agend",
+        ],
     },
     Gate {
         number: 10,
         name: "pipeline",
-        crates: &["agend-daemon"],
+        crates: &[
+            "agend-core",
+            "agend-daemon",
+            "agend-testkit",
+            "agend-client",
+            "agend-shim",
+            "agend-tui",
+            "agend",
+        ],
     },
     Gate {
         number: 11,
         name: "tui",
-        crates: &["agend-tui"],
+        // B: `agend` holds the real-daemon tests (tui_daemon.rs, the CLP
+        // run); the others carry the terminal input, the fake and the client.
+        crates: &[
+            "agend-tui",
+            "agend-client",
+            "agend-daemon",
+            "agend-testkit",
+            "agend",
+        ],
     },
     Gate {
         number: 12,
@@ -143,6 +178,41 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
         gate.number, gate.name, gate.number, gate.name
     );
 
+    if gate.number == 10 {
+        step(&[
+            "build",
+            "--quiet",
+            "-p",
+            "agend",
+            "-p",
+            "agend-testkit",
+            "--bins",
+        ])?;
+        step(&[
+            "test",
+            "-p",
+            "xtask",
+            "--test",
+            "pipeline_snapshot",
+            "--test",
+            "protocol_compat",
+        ])?;
+    }
+    if gate.number == 11 {
+        // Build the actual fake producer before tests/demo consume its PTY.
+        step(&[
+            "build",
+            "--quiet",
+            "-p",
+            "agend",
+            "--bin",
+            "agend",
+            "--example",
+            "fake_codex",
+            "--example",
+            "codex_u17_probe",
+        ])?;
+    }
     if gate.number == 1 {
         step(&["fmt", "--all", "--", "--check"])?;
         step(&[
@@ -260,6 +330,40 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
             "client_demo",
         ])?;
         println!("gate 8 (client): checks passed");
+    } else if gate.number == 9 {
+        step(&[
+            "build",
+            "--quiet",
+            "-p",
+            "agend",
+            "--bin",
+            "agend",
+            "--example",
+            "fake_codex",
+        ])?;
+        step(&["run", "--quiet", "-p", "agend", "--example", "cli_demo"])?;
+        println!("gate 9 (cli): checks passed");
+    } else if gate.number == 10 {
+        step(&[
+            "build",
+            "--quiet",
+            "-p",
+            "agend",
+            "-p",
+            "agend-testkit",
+            "--bins",
+        ])?;
+        step(&[
+            "run",
+            "--quiet",
+            "-p",
+            "agend-daemon",
+            "--example",
+            "pipeline_probe",
+            "--",
+            "demo",
+        ])?;
+        println!("gate 10 (pipeline): checks passed");
     } else if gate.number == 11 {
         step(&[
             "run",
@@ -268,6 +372,16 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
             "agend-tui",
             "--example",
             "tui_accept",
+        ])?;
+        step(&["build", "--quiet", "-p", "agend"])?;
+        step(&["run", "--quiet", "-p", "agend", "--example", "tui_real"])?;
+        step(&[
+            "run",
+            "--quiet",
+            "-p",
+            "agend",
+            "--example",
+            "codex_u17_probe",
         ])?;
         println!("gate 11 (tui): checks passed");
     } else {

@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - 依 crate 由下往上分 13 個施工關；每個施工關單獨驗收，使用者確認後才開下一個施工關（D22）。
-> - 目前狀態：**第 1–6、8 施工關完成**（第 1、2 關 2026-09-25，第 3、4、5、6 關 2026-09-26 使用者親自驗收通過，第 6 關已 merge #125；第 8 關 2026-09-26 使用者親自驗收通過、C1–C14 已追認、已 merge #131）；第 7 施工關開工前提案已確認、實作中（PR #132）；第 9、10 施工關開工前提案已確認、等前面的施工關完成後開工；第 11 施工關畫面層完成（2026-09-26 已 merge、A 段驗收通過），B 段（接真 daemon）進行中。每個施工關狀態看下表，做了什麼看最下面的「進度紀錄」。
-> - 下一步：第 7 施工關實作中；第 9、10 施工關等前面的施工關完成後開工；第 11 施工關 B 段（接真 daemon）進行中。
+> - 目前狀態：**第 1–11 施工關完成並已合併**；第 11 施工關 C 段 #145 經全新 verifier、雙平台 CI、實機及後續自動驗收與清理，使用者於 2026-10-03 確認合併（`b2152db`）。第 12 施工關 A 段提案 #138 待確認；第 13 施工關未開始。
+> - 下一步：依序說明第 12 施工關 A 段 #138 的 P1–P10，等使用者逐項決定；尚未授權合併提案或開始實作。
 
 ## 13 個施工關
 
@@ -17,12 +17,12 @@
 | 4 `holder` | [完成（2026-09-26）](gates/gate-04-holder.md) | PTY、畫面、holder 協定、活過 daemon（附屬程序移到第 7 施工關） | `agend holder` 包 bash + 小型探測 client：啟動器結束後 holder 還在、讀畫面、送鍵、中途斷線重連、四次開機，bash 存活 |
 | 5 `store` | [完成（2026-09-26）](gates/gate-05-store.md) | daemon store：SQLite schema、migration、保留期限、每日快照 | 真的 DB 檔（temp dir）、跨真的 process 驗；xtask 命令印出資料表 |
 | 6 `daemon-holder` | [完成（2026-09-26）](gates/gate-06-daemon-holder.md) | 整合施工關：agent runtime adapter | 真 daemon + 真 holder；重啟 daemon，agent 與畫面存活 |
-| 7 `codex` | [實作中（2026-09-26；開工前提案 P1–P9 已確認，PR #132）](gates/gate-07-codex.md) | codex driver + 送達模型、三級忙碌策略 | 對假 app-server；可選的真 codex smoke test |
+| 7 `codex` | [完成（2026-09-28；已 merge #132）](gates/gate-07-codex.md) | codex driver + 送達模型、三級忙碌策略 | 假 app-server 與真 codex 0.158.0 驗收通過 |
 | 8 `client` | [完成（2026-09-26）](gates/gate-08-client.md) | 整合施工關：agend-client + protocol server | CLI 連得上；daemon 重啟時會重試 |
-| 9 `cli` | [提案中（2026-09-26；開工前提案 P1–P10 已確認）](gates/gate-09-cli.md) | agend CLI：agent 命令、操作者命令、status；安裝相關只做 `doctor`、`init`（讓前面各施工關能在本機跑；`init` 的服務註冊步驟在第 13 施工關補上） | 對假 daemon 驗每個命令的輸出與錯誤；再對真 daemon |
-| 10 `pipeline` | [提案中（2026-09-26；開工前提案 P1–P11 已確認）](gates/gate-10-pipeline.md) | daemon：pipeline、git、runner、forge local、supervisor、reconcile | 假 driver + 暫存 repo：task 從派工走到 merge |
-| 11 `tui` | [實作中（2026-09-26；畫面層完成，B 段接真 daemon 進行中，分支 `feat/gate-11-tui-daemon`）](gates/gate-11-tui.md) | attention-first TUI（沿用 DEMO-01 原型的教訓：`github.com/suzuke/agend-attention-tui-demo`，private） | 先餵假事件，再接真 daemon |
-| 12 `adapters` | [未開始](gates/gate-12-adapters.md) | claude + opencode driver、forge github、telegram | 先對假實作，再做真 backend smoke test |
+| 9 `cli` | [完成（2026-09-29；已 merge #136）](gates/gate-09-cli.md) | agend CLI：agent 命令、操作者命令、status；安裝相關先做 `doctor`、`init`，服務註冊留第 13 施工關 | 對假／真 daemon 驗輸出與錯誤；兩個假 Codex agent 互傳訊息、中途重啟不漏不重 |
+| 10 `pipeline` | [完成（2026-10-02；#143 已確認合併）](gates/gate-10-pipeline.md) | daemon：pipeline、git、runner、forge local、supervisor、reconcile | 假 driver + 暫存 repo：task 從派工走到 merge |
+| 11 `tui` | [完成（A、B、C 已 merge；C 段 #145）](gates/gate-11-tui.md) | attention-first TUI、完整終端、resize、多視窗、鍵鼠／貼上與歷史 | 最終 `cfee027` 全新 verifier CONFIRMED；四個雙平台 CI jobs 各 900 passed／0 failed／2 既有 ignored、實際 no-std；0.159.3 真 U17 已核實並獲版本許可。實機紀錄及後續自動驗收、清理完成，使用者確認 merge `b2152db` |
+| 12 `adapters` | [提案中（A 段 draft PR #138 待確認，尚未 merge 或實作）](gates/gate-12-adapters.md) | A claude、B opencode driver、C forge github、D Telegram | 先對假實作，再做真 backend smoke test |
 | 13 `install` | [未開始](gates/gate-13-install.md) | 安裝與發布（最後一個施工關）：服務註冊、`agend uninstall`、`agend telegram setup`（由 daemon 配對）、`xtask release`、brew、GitHub release、`cargo install` | CI 用全新 HOME + 假 agent，從安裝到第一個 task 完成 < 5 分鐘；每個 `doctor` 檢查都有「故意弄壞 → 看到修正指令」的測試 |
 
 ## 第 1 施工關：開工前先提案、經使用者確認才實作
@@ -40,7 +40,7 @@
 
 | 完成到 | 使用者看到 |
 |---|---|
-| 第 1–9 施工關 | 兩個 codex agent 互傳訊息；重啟 daemon 時不中斷、不遺失、不重複 |
+| 第 1–9 施工關 | 已驗收：兩個假 Codex agent 互傳訊息；中途重啟 daemon，每則剛好一次並到 `confirmed`；真 Codex 另有第 7 施工關 smoke 驗收 |
 | 第 10–11 施工關 | 本機 repo 從派工走到 merge，TUI 可看可操作 |
 | 第 12 施工關 | 三個 backend + GitHub + 手機（Telegram） |
 | 第 13 施工關 | 其他人可以自己安裝 |
@@ -68,51 +68,90 @@
 
 ## 下一步
 
-```bash
-cat docs/gates/gate-01-core.md
-~/.cargo/bin/cargo xtask accept core
-```
+第 1–11 施工關已完成並合併。第 11 施工關 C 段 #145 使用者於 2026-10-03 明確確認合併，原驗收範圍與限制見 [收尾紀錄](gates/gate-11c-closeout.md)。第 12 施工關 A 段 #138 的 P1–P10 仍待逐項說明與使用者確認；不由 #145 的授權推定同意下一關。
 
 ## 進度紀錄
 
-每完成一件事加一行（日期 + 一行 + commit／PR），新的在上面。
+以下是各批次**當時**的進度原紀錄；其中「draft」「待驗證」「尚未 merge」只描述該批次，不是目前狀態。目前以頁首完成狀態及最新合併紀錄為準。原失敗與驗證範圍不改寫成成功；歷史證據僅列封存檔名，不公布本機暫存位置。
 
-- 2026-09-26 第 10 施工關開工前提案（#130，`0faad17`）merge；P1–P11 使用者已確認（P6 改成 checks 在寫入沙箱裡跑）；狀態改為提案中，等第 7–9 施工關完成再開工。
-- 2026-09-26 第 9 施工關開工前提案（#129，`9178717`）merge；P1–P10 使用者已確認（P3 改成 `AGEND_HOME` 一律必須設、P6 對使用者叫 `name`、操作者也能 `task create`）；狀態改為提案中，等第 7、8 施工關都 merge 後開工。
-- 2026-09-26 第 8 施工關 client（draft PR #131，`5470ba1`）merge；C1–C14 使用者已追認、使用者親自驗收 7 步通過、fresh-context verifier r1 CONFIRMED；狀態改為完成。
-- 2026-09-26 第 7 施工關開工前提案（#126，`bf1415f`）merge；P1–P9 使用者已逐題確認（P2 推翻第 4 施工關 P8 的 `SpawnSidecar`、P4 選 A `ZDOTDIR` 並修改第 6 施工關 H3 白名單）；狀態改為實作中（開工於此提案之後）。
-- 2026-09-26 第 11 施工關畫面層提前（#120，`d677f35`）merge；A 段（腳本假來源＋假 daemon）使用者親自驗收 5 步通過，T1–T18／G1–G4 使用者全部追認；狀態維持實作中（畫面層完成），B 段（接真 daemon）留給第 8 施工關之後。
-- 2026-09-26 第 6 施工關 daemon-holder（#125，`3e28e06`）merge；P1–P9 使用者已確認、H1–H16 使用者已追認、fresh-context verifier r2 CONFIRMED；使用者親自驗收 9 步通過，狀態改為完成。
-- 2026-09-26 第 6 施工關開工前提案（#119，`9955309`）merge；P1–P9（含 P3 夜間更正：daemon 起 holder 不能設 `process_group(0)`）使用者全部確認或追認；狀態改為實作中（branch `feat/gate-06-daemon`）。
-- 2026-09-26 第 5 施工關 store（#122，`599a882`）merge；P1–P9 使用者已確認、S1–S23 使用者已追認、fresh-context verifier CONFIRMED；使用者親自驗收 10 步通過，狀態改為完成。
-- 2026-09-26 第 4 施工關 holder（#118，`a467b54`）merge；P1–P9 使用者已確認、G1–G11 使用者已追認；使用者親自驗收 10 步通過，狀態改為完成。
-- 2026-09-26 第 3 施工關 merge（#107，`6ead942`），verifier r13 CONFIRMED；使用者親自驗收通過，狀態改為完成。
-- 2026-09-25 第 5 施工關開工前提案 P1–P9 使用者逐題確認；狀態改為提案中（等第 4 施工關完成後開工）。
-- 2026-09-25 第 4 施工關開工前提案 P1–P9 使用者逐題確認；狀態改為提案中（等第 3 施工關完成後開工）。
-- 2026-09-25 錄製器 + 真 CLI 一致性檢查（使用者決定）：錄下 claude、codex、opencode 各 5 個情境，假 agent 照錄製檔修正；第 7、12 施工關把一致性檢查列為必要完成條件（`feat/backend-recorder`，見 [RECORDER.md](../crates/agend-testkit/RECORDER.md)）。
-- 2026-09-25 第 2 施工關使用者親自驗收通過，狀態改為完成。
-- 2026-09-25 第 2 施工關 merge（#108，`6d7b540`）；verifier r6 CONFIRMED（規則表 56 條、80 個故意弄壞的實作、四次啟動的重啟生命週期）；狀態改為驗收中。
-- 2026-09-25 第 1 施工關使用者親自驗收通過，狀態改為完成。
-- 2026-09-25 第 1 施工關 merge（#105，`90794d4`）；verifier r6 CONFIRMED；狀態改為驗收中，等使用者親自驗收。後續 #106。
-- 2026-09-25 第 1 施工關 verifier r5 推翻（dc2d6db）後修正：目前關卡的結果被作廢或換人產出就開新的 attempt 並重發要求；merge 送出中 branch 被重設時丟棄待處理的變更。
-- 2026-09-25 第 1 施工關 verifier r4 推翻（02aca89）後改成結構性的事件身分：結果事件帶 stage、attempt、head，身分不符一律 `StaleResult`；merge 送出中只接受它的結果與 head 變更；pick 人數湊齊才定下。
-- 2026-09-25 第 1 施工關 verifier r3 推翻（3e8b3a3）後修正：沒有 merge 的 workflow 也不允許最後的 branch work 之後再有 work；pick fanout 重跑要重新挑（4b05a60）。
-- 2026-09-25 第 1 施工關 verifier r2 推翻（843a235）後改成結構性解法：存檔檢查以 `step` 做可完成證明、pick fanout 與 branch work 文法收斂、隨機 workflow 產生器成為常駐測試（ba30886）。
-- 2026-09-25 第 1 施工關 verifier r1 推翻（832a4dc）後修正：merge／command／綁 head 的 approval 前面必須有產出 branch 的 work 且需要 repo；merge 送出後的 head 變更等 forge 結果（`MergeFailed`）（f458545、ebdac60）。
-- 2026-09-25 rebase 到 v2（#104），第 1 施工關文件改用名詞表的詞（832a4dc）。
-- 2026-09-25 使用者決定 D34–D37（`planned` workflow、對話式請示、請示排序、context recap），並核准 D32 擴充到 workflow 定義型別（以 golden TOML 測試鎖格式）；實作（7468ba0、d91865a）。
-- 2026-09-25 第 1 施工關 fresh-context verifier 推翻幾個窄點，已修：merge 須為最後關卡、綁 head 的關卡須在最後的 branch work 之後、`on_fail` 只能指向 work、merge 送出後不可取消、`PipelineState` 不可偽造、第二個探索器（13c0dbc、6ae6364）。
-- 2026-09-25 使用者決定第 1 施工關 Q1，記為 D33（一個 agent 一個 task、返工回 task 持有者）；`policy::assign` 照此改寫（ba1fe59）。
-- 2026-09-25 使用者確認第 1 施工關提案 P1–P7，記為 D26–D32。
-- 2026-09-25 第 1 施工關第 2 輪 review 修正：head 變更不跳過關卡、返工不遺失、要求修改退回 task 持有者、merge 門檻逐個關卡檢查、取消獨立狀態、佔位符存檔檢查、reviewer 同 backend fallback；新增狀態機探索器（2a6e29b、4f78b31、e867d52）。
-- 2026-09-25 草稿原樣匯入 `feat/gate-01-core`（80c4de9）；草稿作者未經確認的 P1–P7 勾選先更正為未確認（b480311）。
-- 2026-09-25 （草稿作者）review 修正 pipeline、assignment、protocol 相容與 check-deps 自我檢查；workspace tests（66 core tests、5 protocol compatibility tests）、clippy、check-deps、accept core 通過；待 fresh-context verifier 與使用者親自驗收（工作樹，尚未提交）。
-- 2026-09-25 新增名詞表 docs/GLOSSARY.md；施工階段統一稱「施工關」、workflow 步驟稱「關卡」（#104）
-- 2026-09-24 `agend-core` 草稿初次自動驗收通過：workspace fmt/clippy、49 core tests、no-std check 與 demo；草稿作者自行對照 P1–P7（不是使用者確認），P6 由第 5 施工關 Store 落地（工作樹，尚未提交）。
-- 2026-09-24 在 P1–P7 確認前開始 `agend-core` 實作草稿（codex/gate-01-core 工作樹，尚未提交）。
-- 2026-09-24 AGENTS.md 加入必守的 Git 工作流程：branch + worktree、只經 PR 合併（#103）
-- 2026-09-24 第 1 施工關提案中（#102）
-- 2026-09-24 README 系統圖改為 SVG（#101, e893877）
-- 2026-09-24 CI 首次通過（ubuntu + macOS，8a5b0fd，[run 35979128418](https://github.com/suzuke/AgEnD/actions/runs/35979128418)）
-- 2026-09-24 骨架與文件 push 到 v2（8a5b0fd）
-- 2026-09-24 spike 完成（codex／claude／opencode + claude 追加；紀錄在 [research/](research/README.md)：[spike-codex](research/spike-codex.md)、[spike-claude](research/spike-claude.md)、[spike-claude-f](research/spike-claude-f.md)、[spike-opencode](research/spike-opencode.md)、[runtime-spike](research/runtime-spike.md)）
+- 2026-10-03 使用者授權整理第 12A 提案 #138：對齊 #146 合併後 v2、P1 協定版本與 P7 migration 現況，拆分 P1–P10、歷史 F1–F10 與驗收計畫；全部決策仍待確認，未授權提案 merge 或實作。
+
+- 2026-10-03 使用者明確確認「確認合併145」，#145 已以 merge commit `b2152db` 合併進 `v2`。最終 head `cfee027` 經全新 r9 CONFIRMED；四個 PR／push Ubuntu／macOS CI jobs 各 900 passed／0 failed／2 既有 ignored，實際 no-std 通過。合併 tree 與已驗證 head 完全相同。C 段實作／驗收完成，原實機、反證、真 U17 限制及清理證據保留；[收尾紀錄](gates/gate-11c-closeout.md)。
+
+- 2026-10-03 獨立文件覆核補同步 daemon／testkit 的目前終端許可、Codex 歸屬快照／保留規則及 U17 12-case 索引，D39 加使用者後續自動驗證方式；B 段舊 wire 規則明示歷史範圍。程式／測試不變，新固定 head 另核 verifier／CI，#145 merge 待確認。
+
+- 2026-10-03 全新文件 verifier 找到輸入政策、驗收計畫、demo 與 crate 入口仍要求逐步人工驗收；同步使用者已授權的剩餘自動驗證方式，歷史批次加範圍標示，保留實機限制及原失敗；程式／測試不變，最新 head 獨立覆核與 CI 另核（draft PR #145，merge 待確認）。
+
+- 2026-10-03 C 段實機驗收與收尾（#145）：完整模式、歷史固定／回底、mouse／Shift、alt／normal、含 0x1D 的多行貼上、超限拒絕、多視窗唯讀／重取與尺寸已有截圖及自行比對紀錄。使用者要求後續改採自動化並清理殘留；修正控制提示重複，原版 count=2 反例及正向保留。本批固定 head／fresh verifier／CI 以 PR 結果核實，未 merge；[紀錄](gates/gate-11c-closeout.md)。
+
+- 2026-10-03 全新 verifier r2 找到 resume 前歸屬讀取的測試缺口：舊回歸未拒絕 preread mutant。新增預設關閉的 fake producer replay 與真人工 item 回歸（21d68c9）：固定 runtime 通過、移除先讀永久歸屬則錯領人工 turn 並 exit 101；U17 12／testkit 115 passed。原失敗保留，最終新 head 另派全新 verifier／CI，尚未人工驗收或 merge（draft PR #145）。
+
+- 2026-10-03 0.159.3 開放後的完整 acceptance 抓到兩個舊 U17 拒絕訊息斷言；真／fake 文案及 native／TUI consumer 已同步為已驗版本條件，保留 accept-r1／r2 原失敗。1bd0d6d 不列完整通過；修正新 head 待完整驗收、CI 與全新 verifier（draft PR #145）。
+
+
+- 2026-10-03 使用者「同意」只開放 Codex CLI 0.159.3：實作 holder 啟動版本辨識與 migration 0006 的永久 thread 歸屬，未知／其他版本仍拒絕；live／reconcile／events 不因版本降級退回文字匹配。原 head 68e15c0 經全新 verifier 核實 892 passed／2 既有 ignored；新實作另驗，不增加真模型或 merge 授權（draft PR #145；[版本政策](gates/gate-11c-codex-input.md)）。
+
+
+- 2026-10-03 使用者明確核准四回合真 Codex：0.159.3／gpt-6-luna／low 的 U17 首次通過，同 thread／holder、busy Queue、idle Send、重啟後 code word 與兩個獨立 durable receipts 有原始證據；第四回合只核 receipt，沒有最終回覆斷言。[live 證據](gates/gate-11c-u17-live-validation.md)；版本開放、全新 verifier 與人工驗收仍待完成（draft PR #145）。
+
+- 2026-10-03 U17 live preflight：本機 Codex 0.159.3 自產 schema 的 turns/list 預設為 summary，診斷工具改明確要求 itemsView: full；client id 欄位形狀已核，未啟動 backend 或模型。真 live 仍等四回合 opt-in（draft PR #145）。
+
+- 2026-10-03 本批 accept tui exit 0：597 主 suite passed／0 ignored，fake／真 daemon／完整 fake U17 三個 demos 通過。執行在新增 golden 前已完成 holder 階段；golden 後另跑完整 terminal_frames 8 passed，沒有把它加進 597。fmt、workspace clippy／最後 TUI clippy、實際 thumb no-std 及 linkcheck 通過。56dbb71 四個 CI jobs 均成功，新提交 CI 另核。（draft PR #145）。
+
+- 2026-10-03 C 段矩陣收尾：三個真 producer App 延遲／倒序／舊 generation cases 通過，三個對應 mutants 各 exit 101，原 source 已逐 byte 還原。新增真 PTY holder／client frame golden，完整 frame suite 8 passed；[證據](gates/gate-11c-frame-order-validation.md)、[矩陣對照](gates/gate-11c-matrix-status.md)。完整 acceptance／新 head CI 另核，真 live／獨立／人工驗收仍待完成（draft PR #145）。
+
+- 2026-10-03 完整 fake U17 已納入 accept tui；594 主 suite passed／0 ignored，fake／真 daemon／U17 三個 demos 通過。新互動 demo 的兩個 App 共用 parser、尺寸交接／唯讀拒絕／重取控制與各自 termios 還原通過；[互動 demo](gates/gate-11c-demo.md)。完整 workspace 888 passed／2 個既有 ignored 在抽取 fixture 前執行，真 Codex live 與完整驗收仍待完成（draft PR #145）。
+
+- 2026-10-03 完整 fake U17：六個 tests 本機通過，含 App／client／daemon 子程序、同 holder／thread 重啟與草稿、scope／caller 拒絕及 durable turn id。attempted crash-window 原反例 exit 101，input-enabled scope 改要求自己的 clientId；五個 history 與十五個舊 driver 契約通過。真工具已編譯、guard exit 2，沒有 live 認證。[U17 證據](gates/gate-11c-u17-validation.md)、[live 工具](gates/gate-11c-u17-live.md)（draft PR #145）。
+
+- 2026-10-03 C 段 U17 foundation／CI 反例（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：真 holder／wrapper／PTY／driver／SQLite 的兩個 fake Codex 情境通過；原程式把未嘗試送出的 queued row 誤認人工 receipt，已修正，完整 daemon／client／App U17 仍待完成。Retry 舊快照重建／覆蓋已受控重現並以原子條件更新修正；draw 依實際 backend 尺寸同步，新回歸拒絕缺同步 mutant。最新 CI 另核；[U17 範圍](gates/gate-11c-u17-validation.md)、[反例證據](gates/gate-11c-regression-validation.md)。
+
+- 2026-10-03 C 段端到端時效（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：真 App 的 12 次最後 dirty burst 從通知 producer 前到外層可見皆 ≤300 ms，未加 holder round-trip 額度（最慢 215.302 ms）；800 ms 取樣 mutant 在 806.224 ms 被拒絕。還原後外層 6 passed／0 ignored，clippy／fmt／實際 no-std 通過；其餘矩陣與 U17 待完成。[證據](gates/gate-11c-outer-validation.md)。
+
+- 2026-10-03 C 段真外層 PTY（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：真 App event capture／kernel resize、多視窗、鍵鼠／paste／歷史、正常與 unwind 還原及 20 次程序 fd 清理通過；完整 agend 214 passed／0 ignored，clippy／fmt／實際 no-std 通過。`50851e2` 四個 CI jobs 成功；主 suite 計數已排除 filtered 子程序 probe 重複輸出。其餘矩陣、U17 與完整驗收待完成；[證據](gates/gate-11c-outer-validation.md)。
+
+- 2026-10-03 C 段真 PTY App（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：兩個完整情境經真 daemon／holder 到 raw consumer，逐 byte 核鍵鼠／paste、stty 核 resize；多視窗、歷史／淘汰、alt、同 holder 重啟及 20 次 thread／fd 清理通過。mode mutant 被同一回歸拒絕，原失敗保留；外層 capture／restore、其餘矩陣與 Codex U17 待完成；[證據](gates/gate-11c-native-app-validation.md)。
+
+- 2026-10-03 C 段原生 renderer（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：補五種底線／色彩與游標輸出；真 backend＋parser 讀回通過，單欄寬字 resize hang／輸入越界修正有負面回歸。TUI 81／holder 57、workspace 865 passed／2 個既有 ignored、accept tui 572 passed／0 ignored，clippy／fmt／實際 no-std 通過；前 head `5b49df9` 四個 CI jobs 成功，新 head 另核。其餘矩陣、Codex U17 與完整驗收待完成；[證據](gates/gate-11c-native-validation.md)。
+
+- 2026-10-03 C 段 App（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：接通完整模式、尺寸確認／控制失效、鍵鼠／貼上、固定歷史與唯讀 live-grid 跟隨；15 個真 parser App cases 通過，TUI 79／holder 56 passed，真 daemon TUI 2 cases 通過。原生 renderer 細節、其餘矩陣／U17 及完整驗收待完成；[局部證據](gates/gate-11c-app-validation.md)。
+
+- 2026-10-03 C 段 TUI Source（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：新增獨立 full-terminal reader／writer、有界 queue／回覆與 frame mailbox；5 個真 parser／socket 測試與真 daemon／native PTY Source 通過，TUI 63 passed；App 尚未接通。完整 renderer、鍵鼠／貼上／U17 與完整驗收仍待完成。
+
+- 2026-10-03 C 段 fake／真終端契約（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：新增 core TerminalProducer port，fake 注入真正 holder parser 後提供 1.4，CLP-23–28 同跑 fake／native daemon／holder／PTY；generation／停止、操作阻塞與 20 次 fd 清理有回歸。TUI／鍵鼠／貼上／U17、完整 verifier／人工驗收仍待完成。
+
+- 2026-10-03 C 段 daemon 多視窗（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：每個 instance 有界佇列、socket-scoped view／attach、最後 Acquire 控制、EOF／停止清理、舊版輸入防繞過、holder 共用 50 ms 畫面取樣及 dirty 通知已接通。真 daemon 選 1.4，fake 暫留 1.3；8 個 native 多視窗 cases 通過，原背壓清理／停止 owner 反例保留。TUI／fake 全套 C 契約／Codex U17 與完整驗收仍待完成。
+
+- 2026-10-02 C 段 client 型別／傳輸（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：1.4 檢視／控制／完成回覆、request id、8 MiB bounded reader、1 MiB 整次拒絕、原生 socket write 期限與半關閉 EOF 修正；NEEDED 仍 1.3。daemon 完整路徑尚未接通，現階段只協商 1.3；TUI／U17、完整獨立與人工驗收仍待完成。
+
+
+- 2026-10-02 C 段控制／runtime（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：holder 實際 resize／input ack、FIFO 交接與 5 秒 native write；runtime 能力／連線 epoch、背景配對、取消 grant 失效、8 MiB bounded reader。holder 53 passed、完整 daemon crate 與 16 個真程序回歸通過；原失敗保留。daemon／client／TUI 與 U17 仍待完成，未獨立／人工驗收或 merge；[實作進度](gates/gate-11c-progress.md)。
+
+
+- 2026-10-02 C 段第一個實作提交 `a13d31c`（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：holder 1.1 的結構化 frame、request id、generation／revision、色彩／游標／mode、歷史 viewport 與 8 MiB 整份拒絕。holder 47 passed；accept core 含 workspace clippy／實際 no-std 通過，兩個既有 deep explorers ignored。完整 C 段與 U17 仍在實作，尚未獨立／人工驗收或 merge。
+
+- 2026-10-02 C 段提案 #144 已合併（`139fea5`）；在 專屬實作 worktree、`feat/gate-11c-terminal` 開始實作 P1–P6。基線 check-deps 含實際 no-std 通過；完整功能、U17、獨立驗證與人工驗收仍待完成。
+
+- 2026-10-02 使用者逐項確認 Gate 11 C 段 P1–P6，記為 [D39](decisions/d39.md)，另明確授權合併 [#144](https://github.com/suzuke/AgEnD/pull/144)。本提交只記錄確認並同步狀態；最新 verifier／CI 通過後合併，C 段尚未實作或驗收。
+
+- 2026-10-02 依使用者「繼續往下推進」開 `docs/gate-11c-proposal` 專屬 worktree（[draft PR #144](https://github.com/suzuke/AgEnD/pull/144)），整理 C 段 P1–P6：完整畫面、holder frame／協商、控制／resize、mouse／paste／歷史、Codex U17 與驗收矩陣。只改文件，待全新 verifier、CI 與使用者確認；尚未實作或 merge。
+
+- 2026-10-02 文件 verifier r18 REFUTED `044f36e`：363 個非 Markdown entries 與 `430478d` 的 blob／mode 完全相同，但四份 crate README 與名詞表六列仍有未標歷史的「待驗收」舊狀態；已同步完成狀態，產品碼未改。最終文件驗證與 CI 見 #143，原報告 `g10-r18-report.md` 保留。
+
+- 2026-10-02 第 10 施工關完成驗收，使用者確認 merge（#143）：`430478d` 全新 verifier r17 CONFIRMED，完整 accept 718 passed／2 ignored，實際 no-std 與四個 Ubuntu／macOS CI job 通過；人工事件補驗確認完整 stage、一次正確 Approve resolution、單次 Git merge 及 teardown。舊反例與 frozen-head 紀錄保留；收尾文件與最新 CI 結果見 PR。
+
+- 2026-10-02 verifier r16 REFUTED `eac09cf`：六項完整 baseline（workspace 774 passed／2 ignored、accept 716 passed／2 ignored）與四個 CI 全綠，但真 SQLite post-CAS note 故障留下 durable approval、resolved unknown 與停住的 merge，重啟才恢復一次。attention_reason 清除改與 CAS 同交易，fake／SQLite 契約及真程序反例回歸補齊；原失敗 log 保留，修正待全新驗證及人工補驗，未 merge（#143）。
+
+- 2026-10-02 使用者完成 `45e957e` 的 11 步人工主流程；main 防護、WIP patch、checks 中重啟與沙箱拒絕通過，home／repo／原 holder 清理完成。發現 watch 缺 stage、timeout 核准項目重現與 resolved unknown；兩個真程序回歸已在原版本重現 exit 101，修正與新一輪驗證進行中，待補驗及確認，未 merge（#143；[人工紀錄](gates/gate-10-manual-record.md)）。
+
+- 2026-10-02 `ea975c3` 的 macOS PR CI（job 110607655251）在 content-filter fixture 的準備斷言失敗；有效 stat cache 下普通 git add 沒套用新 filter。已確定性重現，改真 Git --renormalize 強制建立轉換後 blob，六個回歸與 clippy 通過；原 CI／101 log 保留，產品碼不變，待最新 CI（draft PR #143）。
+- 2026-10-02 文件 verifier r13 在 `ea975c3` 找到索引的 target／PATH 與人工驗收頁不一致（REFUTED）；統一 CARGO_TARGET_DIR 與 binary PATH，實際初始化選到 `agend 0.0.0`。其餘文件、證據與產品 tree 核對通過，產品碼不變；人工驗收及 merge 仍待使用者（draft PR #143）。
+- 2026-10-02 全新 verifier r12 CONFIRMED `dfe5bc6`：完整 workspace 771 passed／2 ignored、accept 713 passed／2 ignored與三組組合探測通過；原 PATH／等待 fixture 失敗保留。push／PR 共四個 Ubuntu／macOS CI job 成功。README、ROADMAP 與 Gate 10 驗收文件已同步／分頁，待人工驗收、未 merge（draft PR #143；[證據](gates/gate-10-verification.md)）。
+
+完整紀錄見 [施工路線圖進度紀錄](roadmap-progress.md)。
+
+- 2026-10-03：C 收尾 verifier 指出名詞表／core／client 狀態殘留，已同步；74fc554 的 macOS CI 抓到 CLP-26 將 GetFleet 誤當輸入完成 fence，契約改以獨立 PTY consumer 判定 EOF release，保留原失敗 log 並重驗（draft PR #145；未 merge）。
+
+- 2026-10-03：C 收尾補同步 holder README／TESTING 的首次 U17 狀態，實機證據路徑改指向已核 hash 的封存包；本批只改文件，沿用 c834bfc 的獨立實作驗證並核最後提交 CI（draft PR #145；merge 待使用者確認）。
+
+- 2026-10-03：全新文件覆核指出早期 U17／App 驗證頁混用歷史與現況，已保留原批次失敗及數字並標明當時範圍，施工關／progress 現況對齊已核首次 U17、0.159.3 許可與自動化收尾；本批只改文件（draft PR #145；merge 待確認）。

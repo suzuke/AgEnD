@@ -13,7 +13,7 @@ use agend_client::{Client, ClientError, Redo};
 use agend_core::protocol::ProtocolVersion;
 use agend_core::protocol::client::{
     AttentionAction, AttentionRequiredData, ClientRequest, ClientResponse, DaemonEvent,
-    RequestIdData, TaskChangedData, V1, V1_1,
+    RequestIdData, TaskChangedData, V1, V1_3,
 };
 use agend_testkit::contract::client::proxy::{Direction, Options, Proxy, Transform};
 use agend_testkit::fake_daemon::FakeDaemon;
@@ -93,7 +93,7 @@ fn connect_waits_for_a_daemon_that_comes_back() {
         "{:?}",
         client.retried()
     );
-    assert_eq!(client.selected(), V1_1);
+    assert_eq!(client.selected(), V1_3);
     client.get_fleet().unwrap();
 }
 
@@ -107,7 +107,7 @@ fn a_1_0_daemon_fails_at_once_with_what_to_do() {
     assert_eq!(
         error,
         ClientError::Version(
-            "the daemon speaks client protocol 1.0; this agend needs 1.1 — restart the daemon with this binary".into()
+            "the daemon speaks client protocol 1.0; this agend needs 1.3 — stop the daemon (Ctrl-C) and start this binary: agend daemon".into()
         )
     );
 }
@@ -121,7 +121,7 @@ fn a_version_mismatch_is_not_retried() {
     assert!(started.elapsed() < Duration::from_secs(1));
     assert_eq!(
         error.to_string(),
-        "client protocol version mismatch: local supports 2.0, remote supports 1.1"
+        "client protocol version mismatch: local supports 2.0, remote supports 1.3, 1.4"
     );
 }
 
@@ -198,7 +198,7 @@ fn daemon_errors_keep_their_code_and_only_the_operator_resolves() {
         .unwrap_err();
     assert_eq!(
         error.to_string(),
-        "forbidden: only the operator can resolve needs-you items; ask the operator with agend ask"
+        "forbidden: only the operator can resolve needs-you items; ask the operator"
     );
     let mut operator = Client::connect(daemon.socket_path(), None).unwrap();
     let error = operator
@@ -251,4 +251,122 @@ fn events_follow_the_fleet_view_and_a_bad_cursor_is_a_gap() {
         client.next_event().unwrap_err(),
         ClientError::Disconnected("the daemon closed the connection".into())
     );
+}
+
+fn instance(id: &str) -> agend_core::protocol::client::InstanceView {
+    agend_core::protocol::client::InstanceView {
+        instance_id: id.into(),
+        team_id: "general".into(),
+        backend: "claude".into(),
+        state: agend_core::protocol::client::AgentState::Unknown,
+        working_directory: None,
+    }
+}
+
+/// Gate 11 B P1: one thread blocks in `next_terminal` while another writes
+/// through the `Sender`; `close` wakes the reader, which ends.
+#[test]
+fn a_terminal_reader_blocks_while_the_sender_writes_and_close_ends_it() {
+    use agend_client::TerminalUpdate;
+    let daemon = FakeDaemon::start().unwrap();
+    daemon.set_instance(instance("g-1"));
+    daemon.set_screen("g-1", "$ ");
+    let mut client = Client::connect_once(daemon.socket_path(), None).unwrap();
+    let mut sender = client.sender().unwrap();
+    let (tx, updates) = std::sync::mpsc::channel();
+    let reader = std::thread::spawn(move || {
+        loop {
+            let update = client.next_terminal();
+            let end = matches!(update, Err(ClientError::Disconnected(_)));
+            tx.send(update).unwrap();
+            if end {
+                return;
+            }
+        }
+    });
+    let next = || updates.recv_timeout(Duration::from_secs(5)).unwrap();
+    sender.subscribe_terminal("g-1").unwrap();
+    assert_eq!(
+        next(),
+        Ok(TerminalUpdate::Screen {
+            instance_id: "g-1".into(),
+            screen: "$ ".into()
+        })
+    );
+    daemon.push_terminal_bytes("g-1", b"hello\r\n");
+    assert_eq!(
+        next(),
+        Ok(TerminalUpdate::Bytes {
+            instance_id: "g-1".into(),
+            bytes: b"hello\r\n".to_vec()
+        })
+    );
+    sender.terminal_input("g-1", "é\x1b[A".as_bytes()).unwrap();
+    // Errors without a request id reach the reader.
+    sender.terminal_input("nobody", b"x").unwrap();
+    let error = next().unwrap_err();
+    assert!(
+        matches!(&error, ClientError::Daemon { code, .. } if code == "no_terminal"),
+        "{error:?}"
+    );
+    assert_eq!(
+        daemon.terminal_inputs(),
+        vec![("g-1".to_owned(), "é\x1b[A".as_bytes().to_vec())]
+    );
+    // The reader is still blocked; close wakes it.
+    sender.close();
+    let started = Instant::now();
+    let end = updates.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(matches!(end, Err(ClientError::Disconnected(_))), "{end:?}");
+    assert!(started.elapsed() < Duration::from_secs(1));
+    reader.join().unwrap();
+    assert!(sender.subscribe_terminal("g-1").is_err(), "closed");
+}
+
+#[test]
+fn answer_ask_reaches_the_daemon_and_unknown_asks_are_refused() {
+    use agend_core::protocol::ask::{AnswerSource, AskEntry, AskReply, AskThread};
+    let daemon = FakeDaemon::start().unwrap();
+    daemon.open_ask(
+        AskThread {
+            ask_id: "A-1".into(),
+            task_id: None,
+            entries: vec![AskEntry::Question {
+                from: "dev-1".into(),
+                text: "which?".into(),
+                options: vec!["x".into()],
+            }],
+        },
+        None,
+    );
+    let mut client = Client::connect(daemon.socket_path(), None).unwrap();
+    let reply = AskReply::Choice { option: "x".into() };
+    client
+        .answer_ask("A-1", AnswerSource::Tui, reply.clone())
+        .unwrap();
+    let error = client
+        .answer_ask("A-9", AnswerSource::Tui, reply)
+        .unwrap_err();
+    assert!(
+        matches!(&error, ClientError::Daemon { code, .. } if code == "unknown_ask"),
+        "{error:?}"
+    );
+}
+
+/// Gate 9's 8 MiB `MAX_LINE_BYTES` bounds lines the daemon reads, not the
+/// ones it writes: a screen line longer than that still reaches the reader.
+#[test]
+fn a_screen_line_over_the_request_limit_is_read_whole() {
+    use agend_client::TerminalUpdate;
+    use agend_core::protocol::client::MAX_LINE_BYTES;
+    let daemon = FakeDaemon::start().unwrap();
+    daemon.set_instance(instance("g-1"));
+    let big = "x".repeat(MAX_LINE_BYTES + (1 << 20));
+    daemon.set_screen("g-1", &big);
+    let mut client = Client::connect_once(daemon.socket_path(), None).unwrap();
+    client.sender().unwrap().subscribe_terminal("g-1").unwrap();
+    match client.next_terminal().unwrap() {
+        TerminalUpdate::Screen { screen, .. } => assert_eq!(screen.len(), big.len()),
+        other => panic!("{other:?}"),
+    }
 }

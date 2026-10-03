@@ -13,6 +13,7 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt;
+use serde::{Deserialize, Serialize};
 
 use super::stage::{FanoutJoin, StageKind};
 use super::workflow::{
@@ -24,7 +25,7 @@ use crate::policy::merge_gate::{
     approval_satisfied, evaluate,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PipelineStatus {
     Pending,
     Running,
@@ -42,7 +43,7 @@ impl PipelineStatus {
 
 /// A command stage that exited 0 for `head` (`None` when the task has no
 /// branch head, as in a workflow without repo stages).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PassedCheck {
     pub stage_id: String,
     pub head: Option<String>,
@@ -51,7 +52,7 @@ pub struct PassedCheck {
 /// A completed approval stage. `head` and `patch_id` are set only for a
 /// head-bound stage: the head it was given for (moved by a clean same-patch
 /// rebase, D14) and that head's patch-id.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ApprovalRecord {
     pub stage_id: String,
     pub head: Option<String>,
@@ -59,7 +60,7 @@ pub struct ApprovalRecord {
     pub reviewers: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WorkProduct {
     Branch {
         branch: String,
@@ -78,6 +79,7 @@ pub enum WorkProduct {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PipelineState {
     task_id: String,
+    pending_work_reason: Option<String>,
     workflow: Workflow,
     stage_index: usize,
     status: PipelineStatus,
@@ -110,11 +112,264 @@ pub struct PipelineState {
     notified_timeout: Option<(usize, u32)>,
 }
 
+/// Serialized execution data, without the separately versioned workflow.
+/// Deserializing this value grants no access to `step`; call `restore` first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PipelineSnapshot {
+    task_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pending_work_reason: Option<String>,
+    stage_index: usize,
+    status: PipelineStatus,
+    branch: Option<String>,
+    current_head: Option<String>,
+    patch_id: Option<String>,
+    /// Change id returned by the last submit (for example a pull request
+    /// number); expands `{pr}` in command stages.
+    change_id: Option<String>,
+    work_product: Option<WorkProduct>,
+    /// Reviewers who approved the current approval stage so far (below its
+    /// count).
+    approval_reviewers: Vec<String>,
+    /// For a pick approval below its count: the winner those reviewers
+    /// chose. It becomes `selected_fanout_child` only when the count is met.
+    pending_pick: Option<String>,
+    /// Per stage: how many times the task entered it (1 for the first time).
+    /// Results must echo the current stage's attempt.
+    attempts: Vec<u32>,
+    approvals: Vec<ApprovalRecord>,
+    passed_checks: Vec<PassedCheck>,
+    fanout_child_task_ids: Vec<String>,
+    selected_fanout_child: Option<String>,
+    merge_commit: Option<String>,
+    /// Head changes seen while the merge was in flight, in order; applied
+    /// only if the forge reports the merge failed.
+    pending_head_changes: Vec<PendingHeadChange>,
+    /// The stage attempt whose timeout was already reported (notify action),
+    /// so a repeated report of the same timeout is stale.
+    notified_timeout: Option<(usize, u32)>,
+}
+
+impl PipelineState {
+    pub fn snapshot(&self) -> PipelineSnapshot {
+        PipelineSnapshot {
+            task_id: self.task_id.clone(),
+            pending_work_reason: self.pending_work_reason.clone(),
+            stage_index: self.stage_index,
+            status: self.status,
+            branch: self.branch.clone(),
+            current_head: self.current_head.clone(),
+            patch_id: self.patch_id.clone(),
+            change_id: self.change_id.clone(),
+            work_product: self.work_product.clone(),
+            approval_reviewers: self.approval_reviewers.clone(),
+            pending_pick: self.pending_pick.clone(),
+            attempts: self.attempts.clone(),
+            approvals: self.approvals.clone(),
+            passed_checks: self.passed_checks.clone(),
+            fanout_child_task_ids: self.fanout_child_task_ids.clone(),
+            selected_fanout_child: self.selected_fanout_child.clone(),
+            merge_commit: self.merge_commit.clone(),
+            pending_head_changes: self.pending_head_changes.clone(),
+            notified_timeout: self.notified_timeout,
+        }
+    }
+
+    /// Validate restored data before any action can be dispatched.
+    pub fn restore(
+        snapshot: PipelineSnapshot,
+        workflow: ValidatedWorkflow,
+    ) -> Result<Self, String> {
+        let state = Self {
+            workflow: workflow.into_inner(),
+            task_id: snapshot.task_id,
+            pending_work_reason: snapshot.pending_work_reason,
+            stage_index: snapshot.stage_index,
+            status: snapshot.status,
+            branch: snapshot.branch,
+            current_head: snapshot.current_head,
+            patch_id: snapshot.patch_id,
+            change_id: snapshot.change_id,
+            work_product: snapshot.work_product,
+            approval_reviewers: snapshot.approval_reviewers,
+            pending_pick: snapshot.pending_pick,
+            attempts: snapshot.attempts,
+            approvals: snapshot.approvals,
+            passed_checks: snapshot.passed_checks,
+            fanout_child_task_ids: snapshot.fanout_child_task_ids,
+            selected_fanout_child: snapshot.selected_fanout_child,
+            merge_commit: snapshot.merge_commit,
+            pending_head_changes: snapshot.pending_head_changes,
+            notified_timeout: snapshot.notified_timeout,
+        };
+        let len = state.workflow.stages.len();
+        if state.task_id.is_empty() || state.task_id.contains('/') || state.task_id.contains('\0') {
+            return Err("invalid task id in snapshot".into());
+        }
+        if state.attempts.len() != len
+            || state.attempts.contains(&u32::MAX)
+            || state.stage_index > len
+            || (state.stage_index == len && state.status != PipelineStatus::Done)
+            || (state.status == PipelineStatus::Running && state.attempt() == 0)
+            || (state.status == PipelineStatus::Pending
+                && (state.stage_index != 0 || state.attempts.iter().any(|a| *a != 0)))
+        {
+            return Err("invalid stage position or attempts in snapshot".into());
+        }
+        for check in &state.passed_checks {
+            if !state
+                .workflow
+                .stages
+                .iter()
+                .any(|s| s.id == check.stage_id && s.stage.kind() == StageKind::Command)
+            {
+                return Err("unknown check stage in snapshot".into());
+            }
+        }
+        if state.passed_checks.iter().enumerate().any(|(i, c)| {
+            state.passed_checks[..i]
+                .iter()
+                .any(|old| old.stage_id == c.stage_id)
+        }) || state.approvals.iter().enumerate().any(|(i, a)| {
+            state.approvals[..i]
+                .iter()
+                .any(|old| old.stage_id == a.stage_id)
+        }) {
+            return Err("duplicate execution record in snapshot".into());
+        }
+        for approval in &state.approvals {
+            let Some(stage) = state
+                .workflow
+                .stages
+                .iter()
+                .find(|s| s.id == approval.stage_id)
+            else {
+                return Err("unknown approval stage in snapshot".into());
+            };
+            let Stage::Approval {
+                count, bind_head, ..
+            } = stage.stage
+            else {
+                return Err("approval recorded for a non-approval stage".into());
+            };
+            if approval.reviewers.len() != usize::from(count)
+                || approval
+                    .reviewers
+                    .iter()
+                    .enumerate()
+                    .any(|(i, r)| r.is_empty() || approval.reviewers[..i].contains(r))
+                || (bind_head && (approval.head.is_none() || approval.patch_id.is_none()))
+                || (!bind_head && (approval.head.is_some() || approval.patch_id.is_some()))
+            {
+                return Err("invalid approval record in snapshot".into());
+            }
+        }
+        if state
+            .approval_reviewers
+            .iter()
+            .enumerate()
+            .any(|(i, r)| r.is_empty() || state.approval_reviewers[..i].contains(r))
+            || (state.current_head.is_some() != state.patch_id.is_some())
+            || (!state.pending_head_changes.is_empty() && !state.merge_in_flight())
+        {
+            return Err("inconsistent execution records in snapshot".into());
+        }
+        if state.status == PipelineStatus::Running && !state.approval_reviewers.is_empty()
+            && !state.current_stage().is_some_and(|s| matches!(s.stage, Stage::Approval { count, .. } if state.approval_reviewers.len() < usize::from(count)))
+        {
+            return Err("partial reviewers do not belong to the current approval".into());
+        }
+        if state.pending_work_reason.is_some()
+            && !state
+                .current_stage()
+                .is_some_and(|s| s.stage.kind() == StageKind::Work)
+        {
+            return Err("rework reason outside a work stage".into());
+        }
+        if state.status == PipelineStatus::Pending
+            && (state.branch.is_some()
+                || state.current_head.is_some()
+                || state.pending_work_reason.is_some()
+                || state.selected_fanout_child.is_some()
+                || state.work_product.is_some()
+                || !state.approvals.is_empty()
+                || !state.passed_checks.is_empty()
+                || !state.approval_reviewers.is_empty()
+                || state.change_id.is_some()
+                || state.merge_commit.is_some()
+                || state.pending_pick.is_some()
+                || !state.fanout_child_task_ids.is_empty())
+        {
+            return Err("pending snapshot contains execution records".into());
+        }
+        if let Some((index, attempt)) = state.notified_timeout
+            && (index >= len || attempt == 0 || state.attempts[index] < attempt)
+        {
+            return Err("invalid timeout identity in snapshot".into());
+        }
+        if state.merge_in_flight() && !state.merge_gate(state.stage_index).allowed {
+            return Err("restored merge gate is closed".into());
+        }
+        if state.status == PipelineStatus::Done {
+            done_invariants(&state)?;
+            if state
+                .workflow
+                .stages
+                .iter()
+                .any(|s| s.stage.kind() == StageKind::Merge)
+                && state.merge_commit.is_none()
+            {
+                return Err("done snapshot has no merge record".into());
+            }
+        }
+        Ok(state)
+    }
+}
+
+/// Reconstruct unanswered requests without incrementing attempts or mutating state.
+pub fn outstanding_actions(state: &PipelineState) -> Vec<PipelineAction> {
+    if state.status != PipelineStatus::Running {
+        return Vec::new();
+    }
+    let Some(stage) = state.current_stage() else {
+        return Vec::new();
+    };
+    let mut copy = state.clone();
+    // Re-enter only a copy; restore the current attempt in every request.
+    copy.attempts[state.stage_index] -= 1;
+    copy.approvals.retain(|a| a.stage_id != stage.id);
+    let mut actions = Vec::new();
+    if enter_stage(&mut copy, state.stage_index, &mut actions).is_err() {
+        return Vec::new();
+    }
+    if state.notified_timeout == Some((state.stage_index, state.attempt())) {
+        actions.retain(|a| !matches!(a, PipelineAction::ScheduleTimeout { .. }));
+    }
+    if let Some(reason) = &state.pending_work_reason {
+        for action in &mut actions {
+            if let PipelineAction::AssignWork {
+                stage_id,
+                attempt,
+                role,
+            } = action.clone()
+            {
+                *action = PipelineAction::ReturnToWork {
+                    stage_id,
+                    attempt,
+                    role,
+                    reason: reason.clone(),
+                };
+            }
+        }
+    }
+    actions
+}
+
 /// A head change observed after the `Merge` action went out. The task stays
 /// in the merge stage until the forge reports the result: on `MergeCompleted`
 /// these are dropped (the sent head was merged), on `MergeFailed` they are
 /// applied in order with the usual rules (D14).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PendingHeadChange {
     CommitCreated {
         head: String,
@@ -137,6 +392,7 @@ impl PipelineState {
     fn unchecked(task_id: impl Into<String>, workflow: Workflow) -> Self {
         Self {
             task_id: task_id.into(),
+            pending_work_reason: None,
             attempts: alloc::vec![0; workflow.stages.len()],
             workflow,
             stage_index: 0,
@@ -234,6 +490,10 @@ impl PipelineState {
 
     pub fn pending_head_changes(&self) -> &[PendingHeadChange] {
         &self.pending_head_changes
+    }
+
+    pub fn pending_work_reason(&self) -> Option<&str> {
+        self.pending_work_reason.as_deref()
     }
 
     /// This state with no pending head changes: compares two states that may
@@ -1694,6 +1954,7 @@ fn return_to_work(
         clear_fanout(state);
     }
     state.work_product = None;
+    state.pending_work_reason = Some(reason.clone());
     let stage = state
         .workflow
         .stages
@@ -1778,6 +2039,7 @@ fn enter_stage(
             return Ok(());
         };
         state.stage_index = index;
+        state.pending_work_reason = None;
         state.approval_reviewers.clear();
         state.pending_pick = None;
 

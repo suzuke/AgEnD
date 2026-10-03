@@ -25,9 +25,11 @@
 - `accept holder`：對 agend-holder 與 agend 跑 fmt、clippy、test（含跨程序的 `holder_process`），再跑 check-deps，然後 build `agend`、執行 `holder_probe demo`（`== detach` 到 `== shutdown` 各段）。
 - `accept codex`：對 agend-daemon、agend-testkit、agend 跑 fmt、clippy、test（含 DRV-1..9 對 codex driver、四次開機、真 daemon 與 `sh` 包裝），再跑 check-deps，然後 build `agend` 與 example `fake_codex`、執行 `agend-daemon` 的 `codex_demo` example（`== busy`／`== idempotent`／`== crash-window`／`== approval`／`== restart`（含反向檢查）／`== resume`／`== sweep`／`== give-up`／`== app-server-dies`／`== first-start-interrupted`／`== legacy`／`== cleanup`），最後一行 `gate 7 (codex): checks passed`。不跑真 codex（`codex_live` 只有使用者手動跑）。
 - `accept client`：對 agend-client、agend-daemon、agend-testkit、agend-core、agend 跑 fmt、clippy、test（含 CLP 契約對假 daemon 與真 `agend daemon`、mutant），再跑 check-deps，然後 build `agend`、執行 `agend-daemon` 的 `client_demo` example（`== contract` 每條 `CLP-n` 印 `fake`／`real` 兩行與反向檢查，之後 `== version`／`== slow-client`／`== socket`／`== retry`／`== terminal`／`== restart`／`== cleanup`），最後一行 `gate 8 (client): checks passed`。
-- `accept tui`：對 agend-tui 跑 fmt、clippy、test，再跑 check-deps，然後執行 `tui_accept` example（`== screens`／`== navigate`／`== resolve`／`== disconnect`，接 testkit 假 daemon 的 socket，每段有檢查），最後一行 `gate 11 (tui): checks passed`。
+- `accept tui`：對 agend-tui、agend-client、agend-daemon、agend-testkit、agend 跑 fmt、clippy、test（含 CLP-18..20 對假、真 daemon 與 mutant、TUI 對真 daemon），再跑 check-deps，然後執行 `tui_accept` example（假 daemon 經 `agend-client`：`== screens`／`== navigate`／`== resolve`／`== disconnect`／`== retry`／`== terminal`／`== input`，每段有檢查），再 build `agend`、執行 `agend` 的 `tui_real` example（真 `agend daemon`：`== real daemon`／`== retry`／`== terminal`／`== input`／`== reconnect`／`== agend app`），最後一行 `gate 11 (tui): checks passed`。
 - 其他 `accept <施工關>`：對該施工關的 crate 跑 fmt、clippy、test，再跑 check-deps；demo 隨各施工關加入
 - `record <backend> [情境…] --sandbox <腳本>`：build `agend-record`（agend-testkit），在 `<腳本>`（寫入沙箱）裡對**真的** CLI 錄製到 `mktemp -d /private/tmp/agend-rec-out-XXXX`，再在沙箱外把成功的錄製檔複製進 `crates/agend-testkit/transcripts/<backend>/`（見 [RECORDER.md](../crates/agend-testkit/RECORDER.md)）。沒有 `--sandbox` 就不跑
+
+第 11 施工關 accept tui 先建置真 agend、fake_codex 與 codex_u17_probe，再跑原 checks／fake 與真 daemon TUI demos，最後跑共用 integration test 情境的完整 U17 fake demo。真 codex_u17_live 不在 acceptance 或 CI 執行，必須明確 opt-in。
 
 ## 不負責
 
