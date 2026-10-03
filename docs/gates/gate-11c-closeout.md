@@ -7,7 +7,7 @@
 
 ## 實機已驗範圍
 
-測試執行檔為 `/private/tmp/AgEnD-g11c-target/debug/examples/tui_full`。這個 demo 使用真 holder parser、FakeDaemon 及正式 ClientSource，不啟動真 backend／LLM；PARSER SIZE 是 parser 尺寸，kernel 尺寸另由 native suites 的 stty 證明。終端 app 名稱與鍵盤配置未提供，不把這份紀錄當所有 macOS／Linux 終端的認證。
+實機紀錄當時的測試執行檔為 `/private/tmp/AgEnD-g11c-target/debug/examples/tui_full`。這個 demo 使用真 holder parser、FakeDaemon 及正式 ClientSource，不啟動真 backend／LLM；PARSER SIZE 是 parser 尺寸，kernel 尺寸另由 native suites 的 stty 證明。終端 app 名稱與鍵盤配置未提供，不把這份紀錄當所有 macOS／Linux 終端的認證。
 
 | 行為 | 實際結果 | 證據形式 |
 |---|---|---|
@@ -23,7 +23,7 @@
 | 第二視窗 | 同 socket 接回原內容；第二 i 後第一唯讀，a 不送、第二 b [98] 可送 | 截圖＋自行比對 |
 | 多視窗 resize／重取 | 第一唯讀 resize 不改第二 27×102；第一明確 i 後取得控制，最新 26×102，第二唯讀 | 截圖 |
 
-原始圖片與逐步 JSON 在 `/private/tmp/g11c-manual-r1`；每份紀錄保留當時的驗證範圍。首次簡單 paste 複製到 Markdown 符號，未算繁中通過；後續實際 UTF-8 packet 才通過。曾報告的不明重啟不算 daemon recovery 證據。
+原始圖片與逐步 JSON 已逐檔核 hash，封存於 `/private/tmp/g11c-final-review/historical-evidence.tar.gz` 的 `g11c-manual-r1/`；每份紀錄保留當時的驗證範圍。首次簡單 paste 複製到 Markdown 符號，未算繁中通過；後續實際 UTF-8 packet 才通過。曾報告的不明重啟不算 daemon recovery 證據。
 
 ## 人工發現的修正
 

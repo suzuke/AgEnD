@@ -7,7 +7,7 @@
 
 ## 第 11 施工關 C 段（實作中）
 
-完整終端畫面、resize、滑鼠／貼上與歷史的 [P1–P6 提案](../../docs/gates/gate-11c-proposal.md) 已確認（D39），提案 #144 已合併。holder 1.1 已提供結構化 frame、request id、generation／revision 及只讀歷史 viewport；holder 的 `TerminalControl` 已用同一 FIFO 佇列完成實際 resize／input 回覆及交接；daemon／client 與 TUI App 已接通，C 段完整驗收與 Codex U17 仍待完成。
+完整終端畫面、resize、滑鼠／貼上與歷史的 [P1–P6 提案](../../docs/gates/gate-11c-proposal.md) 已確認（D39），提案 #144 已合併。holder 1.1 已提供結構化 frame、request id、generation／revision 及只讀歷史 viewport；holder 的 `TerminalControl` 已用同一 FIFO 佇列完成實際 resize／input 回覆及交接；daemon／client 與 TUI App 已接通；fake U17 與真 Codex 0.159.3 首次 U17 已核實，後者限四個已核准模型回合。C 段驗收收尾與 merge 仍待確認，見 [驗收收尾](../../docs/gates/gate-11c-closeout.md)。
 
 `GetTerminalFrame` 依同一 parser 的 grid／palette／mode 共用 50 ms 取樣，再取每個 view 的所需列；輸出解析與 classifier 仍讀 live grid。無效 viewport 先拒絕，resize 使取樣失效，control ack 用當下完整畫面。viewport 不改 classifier 的 live screen。normal screen 以絕對 row id 保留 1,000 列歷史；小 viewport 也能固定目前 live grid 內的列，最後一列不得超出 grid；淘汰時回覆 clamped，alternate screen 沒有歷史。resize／reflow 會重新編排 row id，舊 viewport 明確 clamped。單欄仍使用實際一欄尺寸；寬字放不下時顯示帶原樣式的空白，避免上游 reflow hang／spacer 越界，放大後的新寬字正常顯示。序列化 frame（含換行）最多 8 MiB，超限整份拒絕；原 1 MiB 請求上限不變。
 

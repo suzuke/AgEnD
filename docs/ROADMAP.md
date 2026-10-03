@@ -141,3 +141,5 @@
 完整紀錄見 [施工路線圖進度紀錄](roadmap-progress.md)。
 
 - 2026-10-03：C 收尾 verifier 指出名詞表／core／client 狀態殘留，已同步；74fc554 的 macOS CI 抓到 CLP-26 將 GetFleet 誤當輸入完成 fence，契約改以獨立 PTY consumer 判定 EOF release，保留原失敗 log 並重驗（draft PR #145；未 merge）。
+
+- 2026-10-03：C 收尾補同步 holder README／TESTING 的首次 U17 狀態，實機證據路徑改指向已核 hash 的封存包；本批只改文件，沿用 c834bfc 的獨立實作驗證並核最後提交 CI（draft PR #145；merge 待使用者確認）。
