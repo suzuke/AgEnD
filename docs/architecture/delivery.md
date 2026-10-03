@@ -5,7 +5,7 @@
 > - 記住：**只有一套冪等（訊息 id）**；不能確認送達的路徑標為未確認，不假裝成功。
 > - 下一步：各 backend 的實測對應看 [../BACKEND-BEHAVIORS.md](../BACKEND-BEHAVIORS.md)。
 
-來源：規劃 r4 §4.3–§4.4、D16、injection.md。
+來源：規劃 r4 §4.3–§4.4、D16、injection.md；第 12A 最新設計以 [D40](../decisions/d40.md) 為準，尚未實作 Claude 接入。
 
 ## 送達模型
 
@@ -33,6 +33,14 @@ daemon 依訊息緊急程度選一級，再對應到 backend 能力。
 - 中斷 = `Esc` 後立即經 channel 送；`Esc` 不會觸發 Stop，不做等待。
 - 專案 CLAUDE.md 必須說明 agend channel 訊息來自使用者自己的團隊（無說明 0/3、有說明 3/3、opus 2/2）。
 - 訊息內可另加 `from`／`task`／`request` 標頭。
+
+### 第 12A 補充（D40，尚未實作）
+
+- channel／Stop 寫出成功只到 sent；Claude 先用 `agend_ack` 明確回報，daemon 核對訊息 id、投遞識別碼與 session、入庫才 confirmed。普通 hook／active Stop 不能代確認。
+- 投遞前持久化 attempt；已開始但結果不明停止自動重送，即使 DB 尚為 queued 也保留關聯並顯示原因。有效 ACK 可補 sent 再 confirmed；不新增 DeliveryState，不承諾 exactly-once。
+- hook／ACK 先存 pending，入庫後才刪；離線 Stop 回 `{}`。14 天事件表與收件狀態分開；未終結 Claude 訊息及必要投遞資料不按 30 天刪，既有 Codex retention 實作未變。
+- Interrupt 只在可中斷工作狀態且 holder 允許時送 Esc，再經 channel；有人工 owner 不搶權，拒絕時保留訊息。成功寫鍵不是收件證據。
+- PromptSubmit 轉 busy；未續行 Stop 轉 idle、帶 queue 續行維持 busy；工具事件不切換。恢復的歷史 hook 不能證明當下 idle，須核 session／畫面。
 
 ## 狀態偵測（三層）
 

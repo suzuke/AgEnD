@@ -2,59 +2,62 @@
 
 > **TL;DR**
 > - 三級忙碌、送達確認、PATH 與孤兒清掃。
-> - 都是待確認的 Claude 接入方案；現有 Codex 行為維持已驗範圍。
-> - 下一步：依序確認 P6–P9。
+> - P6–P9 已確認；P7 採明確 ACK 與保守恢復，既有 Codex 行為維持已驗範圍。
+> - 下一步：依 D40 寫實作與反例；目前尚未接入 Claude。
 
 ## P6：claude 的三級忙碌與忙／閒
 
-- 問題：queue、steer、interrupt 怎麼落到 claude？daemon 怎麼知道它忙不忙？ctrl+enter 要不要用？
-- 建議：照 D16 原文。忙：`UserPromptSubmit`。閒：`Stop`（沒被 block）、`SessionStart`；daemon 自己送 `Esc` 之後。閒置：經 channel 送。`Queue`（忙）：放 daemon 的佇列，下一個 Stop（`stop_hook_active: false`）全部取出、合成一個 reason 回 `block`。`Steer` → core 改成 `Interrupt`。`Interrupt`：holder 送單一 `Esc` → 立刻經 channel 送。`PreToolUse`、`PostToolUse` 只記成事件，不改忙閒。ctrl+enter 不用：官方文件說它送的是「你在 TUI 打字排隊的訊息」（[interactive mode](https://code.claude.com/docs/en/interactive-mode)，`chat:sendNow`），channel 的訊息算不算沒寫（U2）；替代的 `Ctrl+X Ctrl+S` 是兩個鍵。
-- 理由：D16 有 spike 證據（忙碌時經 channel 送，模型可能不做，spike C1；Stop hook 3/3）；不加新規則。
-- 替代方案：忙碌時也經 channel 送（推翻 D16）；用 ctrl+enter 強送（U2 查證後才能提）。
-- 例子：agent 在忙，`agend send --level queue g12-c "m-q"` → `queued`；這輪結束時 Stop hook 回 `block` → 下一個 Stop 帶 `stop_hook_active: true` → `m-q confirmed`。F8：背景工具結束時多一輪（`UserPromptSubmit` 的 prompt 是 `<task-notification>`），照同一套規則是忙→閒，不會誤判。
-- 關係：D16 照做。你在 TUI 自己按 `Esc` 的限制見「A 段不做」。
-- [ ] 使用者確認
+- 問題：Queue、Steer、Interrupt 怎麼落到 Claude，daemon 怎麼判斷忙閒？
+- 已確認：忙＝UserPromptSubmit；閒＝沒有要求續行的 Stop、SessionStart 且啟動完成；Stop 回 queue 要求續行則維持 busy。Pre／PostToolUse 只記事件，沿用 D30 去抖動及 hard gate 優先；舊 hook 不建立當下 idle，恢復核目前 session／畫面。
+- 閒置走 channel；busy Queue 留 daemon，下一個可取 queue 的 Stop（stop_hook_active: false）將完整內容合成 reason 回 block。交出內容前持久化投遞紀錄，取出的批次不能只存在記憶體；續行時不再 block 形成迴圈。
+- Steer 經既有 effective_level 改 Interrupt；只在可中斷工作狀態、holder 允許控制時送單一 Esc，成功後立即 channel、不等 Stop。有人工 owner 不搶權，拒絕／斷線保留訊息並回報。Esc 可能關閉對話框，不能只憑寫鍵成功宣稱工作已停或訊息 confirmed。
+- 不用 Ctrl+Enter／Ctrl+X Ctrl+S；官方說明的是 TUI queued input，不能假定適用 channel（[interactive mode](https://code.claude.com/docs/en/interactive-mode)）。
+- 理由：沿用 D16 的 idle channel／busy Stop 歷史證據與現有 core 等級對應；補上第 11C owner 限制。
+- 未採用：busy 直接走 channel；尚未查證的 Ctrl+Enter 強送。
+- 例子：busy Queue→queued；Stop 回 block 並成功寫出→sent；有效 agend_ack→confirmed。下一個 active Stop 或背景 task hook 不能代確認。F8 是背景工具另起一輪的歷史證據，新版仍須驗。
+- [x] 使用者確認（忙閒與等級分別同意；[確認紀錄](gate-12a-confirmations.md)）
 
 ## P7：claude 的送達確認與事件
 
-- 問題：`sent`、`confirmed` 各在什麼時候成立？daemon 不在時的事件（DRV-6）從哪補？
-- 建議：`sent`＝bridge 寫進 claude，或 Stop hook 的 block 已回出去。`confirmed`＝channel 送的看 `UserPromptSubmit` 的 prompt 有 `delivery_id="<訊息 id>"`（錄製檔 `one_turn`）；Stop hook 送的看下一個 `stop_hook_active: true` 的 Stop（錄製檔 `busy`）。冪等照第 7 施工關 P5，當掉後不重送。事件：新表 `driver_events`（hook 事件照到達順序存，`seq` 當 cursor），保留 14 天（同事件，D31）；migration 取開工時的下一個空號；本次 baseline 已有 `0005_pipeline`、`0006_codex_input_threads`，下一個可用號是 `0007`，尚未建立或核准。
-- 理由：hook 是 claude 唯一的結構化事件；第 7 施工關的 `messages` 表與 DRV 契約照用，只多一張存 hook 的表。
-- 替代方案：讀 claude 的 transcript 檔當事件日誌（綁它的檔案格式）；開機重送（可能重複一輪，違反 DRV-9）。
-- 例子：daemon 停著時 Stop 回 `{}`，hook 事件存 spool；開機補事件與狀態後，仍未送出的 queue 要等符合 P6 的送達時機。不能把補事件本身當成 `confirmed`。
-- 關係：第 7 施工關 P5、P7；D31。
-- [ ] 使用者確認
+- 問題：sent／confirmed 的證據、daemon 離線及投遞途中崩潰如何處理？
+- 已確認：queued＝已保存且尚未送出；sent＝channel 通知或 Stop 續行回應成功寫出；confirmed＝有效 agend_ack。兩條路徑推完整內容、訊息 id 與投遞識別碼，Claude 收到先 ACK 再工作，可按批確認；daemon 核對訊息 id、投遞所屬 session／識別碼。不把 ACK 當 task 完成，漏 ACK 留未確認。
+- ACK：bridge 先持久化；daemon 離線回「已保存、待同步」，不宣稱 confirmed。恢復只補 ACK、不重送內容；daemon 同交易核對、保存收件與狀態後才回成功，待送檔才刪。重複 ACK 冪等，本機保存失敗回錯誤。
+- crash：開始前保存投遞紀錄。確定未開始可送；成功寫出未 ACK 留 sent；已開始但缺結果標「投遞結果不明」，等待證據或人處理，不自動重送內容。實際未送到的訊息也可能暫停，不承諾 exactly-once。
+- 狀態：沿用四個 DeliveryState；結果不明另存持久化投遞 metadata／顯示原因，不能誤走 queued 重送路徑。有效 ACK 可補 sent 再 confirmed，詳見 [D40](../decisions/d40.md#收件與恢復的邊界)。
+- 事件：新增 daemon 管理的 driver_events，依入庫 seq 作 cursor，留 14 天。訊息／收件狀態獨立保存，不依賴重播日誌；未同步 hook／ACK 等入庫才刪；未終結 Claude 訊息與必要投遞資料不按 30 天刪，直到 confirmed 或人明確放棄，之後依原 30 天規則。這是 D31 的本次接入例外，尚未改既有 retention 程式。
+- migration：開工時取下一空號；baseline 已有 0005、0006，下一號是 0007，尚未建立。
+- 理由：channel 寫 transport 成功沒有 backend ACK；stdout 與 DB 不能同交易；保留待同步資料，明確顯示不確定性。
+- 未採用：UserPromptSubmit 或下一個 active Stop 代 ACK、transcript 格式當唯一恢復來源、結果不明開機盲目重送。
+- 例子：daemon 停著時 Stop 回 {}、hook 留 spool；恢復只補事件並核目前狀態，不因此 confirmed。有效 ACK 待送檔入庫後才確認並刪除。
+- [x] 使用者確認（定義、ACK、crash、ACK 離線、事件與訊息保留逐項同意；[確認紀錄](gate-12a-confirmations.md)）
 
-## P8：claude 不需要 `ZDOTDIR`
+## P8：claude 不需要 ZDOTDIR
 
-- 問題：第 7 施工關為 codex 加了 `ZDOTDIR`，因為 macOS login zsh 會把系統路徑排到 shim 前面。claude 要不要也加？
-- 建議：**不加**。2026-09-28／2.1.283 的 F6：claude 的 Bash 工具是 `/bin/zsh -c source <snapshot>`（不是 login shell），snapshot 最後把 PATH 設回 claude 啟動時的樣子，shim 在第一個；`pkill` 是 claude 的 shell function，最後也呼叫 PATH 上的 shim。`claude_live` 每次都檢查 `command -v git pkill killall`，哪天 claude 改了就會看到。
-- 理由：實測不需要；不改第 6 施工關的環境白名單。
-- 替代方案：先加再說（多一個變數、要改第 6 施工關 H3）。
-- 例子：F6 的輸出：`/private/tmp/agend-rec-g12-e2/bin/git`、`/private/tmp/agend-rec-g12-e2/bin/killall`、`pkill is a shell function …`。
-- 關係：跟第 7 施工關 K8「`ZDOTDIR` 只給 codex」一致。
-- [ ] 使用者確認
+- 問題：第 7 關 Codex 需要 ZDOTDIR，Claude 是否也加？
+- 已確認：**不加**。F6 是 2026-09-28／2.1.283 的非 login shell 與 shim 優先歷史實測；選定版本須驗 git、kill、pkill、killall 及新增 gh 的實際 shim 路徑，function 也驗最終解析。不由歷史證據宣稱新版通過；失敗則根據證據調整啟動方式。
+- 理由：沿用目前 ZDOTDIR 只給 Codex 的規則，不預先擴大環境白名單。
+- 未採用：沒有新版失敗證據就先加 ZDOTDIR。
+- [x] 使用者確認（「好」；[確認紀錄](gate-12a-confirmations.md)）
 
 ## P9：holder 死掉後清掃 claude
 
-- 問題：第 7 施工關的清掃只認得 codex 的標記；holder 被 `kill -9` 後 claude 或它的 MCP server、背景工具可能留著。要不要排在 A 段？
-- 建議：排在 A 段，完全照第 7 施工關 P2 的條件與時機，只加 claude 的標記：argv 裡 `--session-id`／`--resume` 後面那個元素，或 `agend channel --instance <id>` 的 `<id>`，都要完全相等。
-- 理由：同一個機制，只換標記。
-- 替代方案：另開一個施工關（claude 死掉可能留孤兒）。
-- 例子：`kill -9` holder → log `sweep of agent group 5231 (holder died): SIGKILL sent (claude --resume 3f2a…)` 或 `already gone`。
-- 關係：第 7 施工關 P2 與「已知風險」（當時問排在哪）。
-- [ ] 使用者確認
+- 問題：holder 死後 Claude、channel／背景工具可能留在舊 process group。
+- 已確認：納入 A 段，沿用第 7 關 P2 清掃條件、時機及已接受 race；只補 Claude 的 argv marker。--session-id／--resume 後的元素須與記錄 session 完全相等；或 agend channel 子命令的 --instance 值與記錄 instance 完全相等，不用子字串。
+- pgid 範圍、holder 已死、group 仍有程序及精確身分都符合才 killpg；無 marker 不殺，保留診斷，不保證所有脫離 group 的程序可清掉。涵蓋 daemon 在線死亡、停機後開機、failed 且 holder 已死及 retry 前的既有清掃時機。
+- 理由：沿用已驗機制，避免把存活的其他 instance 或 pid 重用者誤殺。
+- 未採用：另開施工關才補清掃；只憑程序名稱批次 pkill。
+- [x] 使用者確認（剩餘依建議；[確認紀錄](gate-12a-confirmations.md)）
 
 ## 送達仍須補證據
 
-P7 的 Stop 續行確認要能對應本次取出的訊息 id，普通 Stop、其他 prompt 或背景 task 的 Stop 都不能代確認。斷線發生在「持久化／stdout 寫出 block／收到下一個 Stop」的各個位置時，須證明不漏、不重與未確認狀態；詳細時序要在 P1、P7 說明及實作提案確認前寫定，不由本次文件整理默認一種做法。
+在 intent、完整寫出、ACK 本機落地、daemon 入庫、刪待送檔各點斷線；驗去重、結果不明停送、延遲 ACK、錯 session／識別碼、批次部分 ACK 與 14／30 天保留邊界。這些尚未執行，不把 fake 計數當真 Claude 收件。
 
 ## 既有整合要保持
 
-- P6 的 daemon 單鍵中斷與第 11C 的人工 PTY owner 同時存在，控制權與拒絕行為須有回歸；不能照搬 Codex clientId 規則來宣稱 Claude 訊息已確認。
-- `pipeline_runtime.rs` 目前組裝的是 `CodexDriver`；Claude 接入後要驗 task dispatch／review 的 Driver 路徑，不能只測單獨 `send`。
-- P9 沿用 codex sweep 的 pgid／身分條件與時機，只加 Claude 的 exact argv marker；已有其他 backend 程序或 pid 重用時要拒絕誤殺。
+- 第 11C 多視窗 owner、resize、斷線與人工輸入須回歸，Codex 的 clientId 對帳不能代 Claude ACK。
+- pipeline_runtime.rs 目前組裝 CodexDriver；Claude 接入須驗 task dispatch／review，不只單獨 send。
+- P9 精確 marker 與 pgid 條件須含其他 backend／pid 重用的拒絕反例。
 
 ## 下一步
 
-回到[施工關入口](gate-12-adapters.md)，依序解釋 P6–P9，等使用者決定。
+回[施工關入口](gate-12-adapters.md)，依 [D40](../decisions/d40.md)整理送達與清掃實作稿。

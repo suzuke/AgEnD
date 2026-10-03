@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 13 個施工關各有一頁：範圍、自動驗收、你親自驗收的步驟、驗收紀錄、進度紀錄。
 > - 記住：**一個施工關要等你跑完「你親自驗收」並填好「驗收紀錄」才算完成**。
-> - 下一步：第 1–11 施工關已完成並合併；第 11 施工關 C 段 #145 經使用者於 2026-10-03 確認合併。第 12 施工關 A 段 draft PR #138 仍待逐項決定，未授權 merge 或實作。
+> - 下一步：第 1–11 施工關已完成並合併；第 11 施工關 C 段 #145 經使用者於 2026-10-03 確認合併。第 12A #138 P1–P10 已確認為 [D40](../decisions/d40.md)，尚未 merge 或實作。
 
 ## 索引
 
@@ -20,7 +20,7 @@
 | 9 | [`cli`](gate-09-cli.md) | agend CLI | 完成（2026-09-29；已 merge #136） | `cargo xtask accept cli` |
 | 10 | [`pipeline`](gate-10-pipeline.md) | 流水線 | 完成（2026-10-02；#143 已確認合併） | `cargo xtask accept pipeline` |
 | 11 | [`tui`](gate-11-tui.md) | agend-tui | 完成（A、B、C 已 merge；C 段 #145） | `cargo xtask accept tui` |
-| 12 | [`adapters`](gate-12-adapters.md) | 其餘 adapter | 提案整理中（A 段 #138 對齊 v2；P1–P10 待確認，未 merge 或實作） | `cargo xtask accept adapters` |
+| 12 | [`adapters`](gate-12-adapters.md) | 其餘 adapter | 提案中（A 段 #138 設計已確認；未 merge 或實作） | `cargo xtask accept adapters` |
 | 13 | [`install`](gate-13-install.md) | 安裝與發布 | 未開始 | `cargo xtask accept install` |
 
 ## 每個終端機先做這一步

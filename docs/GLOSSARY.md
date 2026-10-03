@@ -74,6 +74,18 @@
 | Stop hook decision | Stop hook decision | — | claude Stop hook 的輸出 `{"decision": "block", "reason": …}`：turn 結束時把排隊的訊息當成下一個 turn 送進去。 | **決策**；**請示** | D16、[delivery](architecture/delivery.md#claude-特別規則d16)、[spike-claude-f](research/spike-claude-f.md)（`reason`） |
 | 來源說明 | source framing | — | 讓 claude 處理 agend channel 訊息的說明：專案 CLAUDE.md 寫明訊息來自使用者自己的團隊，訊息內可另加 from／task／request 標頭。 | 本 repo 的 AGENTS.md（給開發 AgEnD 的人和 agent） | D16、[spike-claude-f](research/spike-claude-f.md) |
 
+## 第 12A 新設計名詞（尚未實作）
+
+| 名詞 | 設計識別字 | 定義與邊界 |
+|---|---|---|
+| 明確收件回報 | `agend_ack` | Claude 收到 channel／Stop 內容後先呼叫的 MCP 工具；核對訊息、投遞識別碼與 session，daemon 入庫才 confirmed；不是 task 完成回報。 |
+| 投遞識別碼 | 待協定 1.5 schema 寫定 | 某訊息某次投遞的關聯資料；訊息 id 仍是唯一冪等身分，不另建內容去重機制。 |
+| 待同步佇列 | pending spool | bridge 本機持久化的 hook／ACK；daemon 確認入庫才刪，未同步檔不因到期清掉；不讓 helper 存取 agend.db。 |
+| 投遞結果不明 | 投遞 metadata；不是新 DeliveryState | 投遞已開始但缺寫出結果；即使 DB 仍 queued，也停止自動重送，等證據或人處理。 |
+| driver 事件紀錄 | `driver_events`（待新增表） | daemon 入庫 seq 排序、保留 14 天；不是訊息與 ACK 的唯一恢復來源。 |
+
+來源：[D40](decisions/d40.md)。目前 `messages` 的 30 天保留實作未變；D40 為新增 Claude 接入設計未終結訊息與必要投遞資料的例外，直到確認或人明確放棄後才按原規則清理。
+
 ## 執行環境
 
 | 名詞（中文） | English | 程式識別字 | 定義 | 不要跟…混淆 | 出處 |
