@@ -23,6 +23,8 @@
 
 ## 驗證紀錄
 
+- 2026-10-03 全新 verifier r2 找到 resume 前歸屬讀取的測試缺口：舊回歸未拒絕 preread mutant。新增預設關閉的 fake producer replay 與真人工 item 回歸（21d68c9）：固定 runtime 通過、移除先讀永久歸屬則錯領人工 turn 並 exit 101；U17 12／testkit 115 passed。原失敗保留，最終新 head 另派全新 verifier／CI，尚未人工驗收或 merge（draft PR #145）。
+
 - 2026-10-03 0.159.3 開放後的完整 acceptance 抓到兩個舊 U17 拒絕訊息斷言；真／fake 文案及 native／TUI consumer 已同步為已驗版本條件，保留 accept-r1／r2 原失敗。1bd0d6d 不列完整通過；修正新 head 待完整驗收、CI 與全新 verifier（draft PR #145）。
 
 

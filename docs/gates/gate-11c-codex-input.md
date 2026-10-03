@@ -29,10 +29,13 @@ migration 0006 新增 codex_input_threads(thread_id)，沒有 instance 外鍵，
 - holder 存活期間修改 executable 的 --version 輸出為 0.159.4，重啟 daemon 仍以原啟動的 0.159.3 辨識。
 - 0.158.0／0.159.4／未知輸出保持唯讀；缺失或過期 holder PID 記錄也拒絕。
 - 人工 producer 產生 clientId=null 的相同文字，attempted Queued row 重啟後仍不誤確認；新的 own-clientId turn 才能確認。
+- thread/resume 回覆前重播實際落盤的人工 item/completed：重播 count 核為 1，人工 turn 不會被 daemon row 錯領；下次 resume 不再重播。
 - DB 拒寫不產生 GO／輸入許可；歸屬讀取失敗在 resume 前拒絕。
 - store 歸屬跨重開、重複插入與 prune 保存；只有歸屬資料的 DB 也會做 snapshot；v1–v6 fixtures 前向升級到 SQLite-produced golden。
 
 本批 targeted 回歸：codex_u17 11、daemon lib 79、既有 Driver 契約 15、store 40 passed。初跑的測試封裝錯誤、fixture 外鍵順序與缺 retention 反例保留於 /private/tmp/g11c-implementation-logs/version-input-*；修正後 regressions-r3 全部通過。完整 acceptance 初跑另抓到兩個舊拒絕訊息 consumer：tui_daemon 的逐字斷言與 client_source 的 U17 字串斷言；版本拒絕 code／路由保護保持有效，訊息斷言同步為 approved CLI 0.159.3。原失敗保留於 accept-r1／r2；完整 acceptance／新 head CI／獨立報告另核。
+
+全新 verifier r2 的 preread mutant 最初仍通過舊回歸，確認原 fixture 沒有在 resume RPC 期間發通知。新增 replay seam 只接受 threadId，從 producer 已保存的人工 UserMessage 取原 item／turn，不能由測試手寫 receipt；預設關閉、一次後解除。固定 runtime 正向通過，移除 resume 前讀取永久歸屬則錯領人工 turn、exit 101。新增後 U17 12／testkit 115 passed；原 mutant 存活與新正負 logs 在 /private/tmp/g11c-codex-input-verifier-r2/。這份測試由 r2 補上，最終 head 另派全新 verifier，不把自驗算成新 head 認證。
 
 ## 原證據與同意
 
