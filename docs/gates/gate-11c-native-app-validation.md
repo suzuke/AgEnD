@@ -5,6 +5,8 @@
 > - 兩個完整情境逐 byte 比對實收輸入，20 次開關核 thread／fd；本批事件由測試呼叫 App；後續外層 PTY 已補 capture／restore 證據，實機外觀仍待驗。
 > - 下一步：完成其餘壓力／時效矩陣與 Codex U17，再做全新獨立及人工驗收。
 
+本頁保存該批次的歷史結果與當時下一步，不能作為目前待辦清單。最新版本許可見 [輸入政策](gate-11c-codex-input.md)；使用者已要求剩餘行為自動驗證，固定 head 結果、實機限制與清理見 [驗收收尾](gate-11c-closeout.md)。
+
 ## 如何取得證據
 
 `crates/agend/tests/tui_native_app.rs` 在自己的短路徑 home 啟動真 `agend daemon`。holder 執行重啟的測試 binary；只有 holder 的 instance 身分會進 raw-mode 收件迴圈，未啟動真 backend 或 LLM。agent 印出的 ANSI 經 PTY 與正式 holder parser 變成 frame，再經 daemon／ClientSource 交給 App。

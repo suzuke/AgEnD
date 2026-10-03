@@ -11,7 +11,7 @@
 
 ## 第 11 施工關 C 段（實作中）
 
-真 App 的完整畫面、鍵鼠／paste／歷史、多視窗、resize、正常／unwind 還原與 20 次程序清理已有原生回歸。完整 fake U17 與真 Codex 0.159.3 首次 U17 已由全新 verifier 核實；使用者同意只開放 0.159.3，新實作仍待新 head 驗證與人工驗收。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
+真 App 的完整畫面、鍵鼠／paste／歷史、多視窗、resize、正常／unwind 還原與 20 次程序清理已有原生回歸。完整 fake U17 與真 Codex 0.159.3 首次 U17 已由全新 verifier 核實；使用者同意只開放 0.159.3，使用者已有實機紀錄並要求剩餘行為自動驗證；最新 head verifier／CI、清理與 merge 確認見 [驗收收尾](../../docs/gates/gate-11c-closeout.md)。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
 
 ## 負責
 

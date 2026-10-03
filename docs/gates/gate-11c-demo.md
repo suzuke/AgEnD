@@ -3,7 +3,7 @@
 > **TL;DR**
 > - tui_full 用真 holder parser、FakeDaemon 和正式 ClientSource；不啟動真 agent 或模型。
 > - 可操作色彩／繁中／游標、resize、鍵鼠／貼上、長歷史、alt screen、兩視窗與重連。
-> - 下一步：在實際終端執行；不代替真 daemon／Codex／人工完整驗收。
+> - 下一步：可用下方命令操作 demo；已取得實機紀錄與後續自動驗證見 [驗收收尾](gate-11c-closeout.md)，demo 不代替真 daemon／Codex 證據。
 
 ## 開啟
 
@@ -44,4 +44,4 @@ INPUT BYTES 是實收 bytes 再經真 Screen 輸出，沒有手寫格子。PARSE
 
 ## 下一步
 
-全新 verifier 與完整 checks 通過後，依 [驗收計畫](gate-11c-validation-plan.md) 一次帶一個人工步驟。
+依 [驗收計畫](gate-11c-validation-plan.md) 的更新方式自動驗證剩餘行為；核最新固定 head verifier／CI 與清理結果後報告，merge 等使用者確認。

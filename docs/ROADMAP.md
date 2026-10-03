@@ -72,6 +72,8 @@
 
 ## 進度紀錄
 
+- 2026-10-03 全新文件 verifier 找到輸入政策、驗收計畫、demo 與 crate 入口仍要求逐步人工驗收；同步使用者已授權的剩餘自動驗證方式，歷史批次加範圍標示，保留實機限制及原失敗；程式／測試不變，最新 head 獨立覆核與 CI 另核（draft PR #145，merge 待確認）。
+
 - 2026-10-03 C 段實機驗收與收尾（#145）：完整模式、歷史固定／回底、mouse／Shift、alt／normal、含 0x1D 的多行貼上、超限拒絕、多視窗唯讀／重取與尺寸已有截圖及自行比對紀錄。使用者要求後續改採自動化並清理殘留；修正控制提示重複，原版 count=2 反例及正向保留。本批固定 head／fresh verifier／CI 以 PR 結果核實，未 merge；[紀錄](gates/gate-11c-closeout.md)。
 
 - 2026-10-03 全新 verifier r2 找到 resume 前歸屬讀取的測試缺口：舊回歸未拒絕 preread mutant。新增預設關閉的 fake producer replay 與真人工 item 回歸（21d68c9）：固定 runtime 通過、移除先讀永久歸屬則錯領人工 turn 並 exit 101；U17 12／testkit 115 passed。原失敗保留，最終新 head 另派全新 verifier／CI，尚未人工驗收或 merge（draft PR #145）。

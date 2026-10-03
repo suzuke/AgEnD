@@ -5,6 +5,8 @@
 > - 三個正向通過；移除對應防護的三個 mutants 各 exit 101。真 PTY frame golden 與既有 frame suite 共 8 passed。
 > - 下一步：真 Codex 0.159.3 已有首次 U17 證據，接著核新 head CI、全新 verifier 和人工驗收；尚未完成 C 段。
 
+本頁保存該批次的歷史結果與當時下一步，不能作為目前待辦清單。最新版本許可見 [輸入政策](gate-11c-codex-input.md)；使用者已要求剩餘行為自動驗證，固定 head 結果、實機限制與清理見 [驗收收尾](gate-11c-closeout.md)。
+
 ## App consumer 的證據
 
 [測試與排程 seam](../../crates/agend-tui/tests/support/delayed_frames.rs) 由 full_app 載入，沿用同時最多三個 labs 的限制。Source 的連線、控制、輸入與關閉都委派正式 ClientSource；排程 seam 只保留真正收到的 frame 或重新送出其 clone，沒有手寫 cells／generation／revision／request id。

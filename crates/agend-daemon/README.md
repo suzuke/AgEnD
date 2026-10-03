@@ -11,7 +11,7 @@
 
 ## 第 11 施工關 C 段（實作中）
 
-holder 1.1／runtime／client 1.4 已接通完整 frame、歷史、多視窗控制、resize 及 TUI；fake C 契約與完整 U17 已通過。真 Codex 0.159.3 首次 U17 有獨立核對，C 段仍待新 head verifier／CI 與人工驗收。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
+holder 1.1／runtime／client 1.4 已接通完整 frame、歷史、多視窗控制、resize 及 TUI；fake C 契約與完整 U17 已通過。真 Codex 0.159.3 首次 U17 有獨立核對，使用者要求剩餘行為自動驗證；最新 head verifier／CI、清理與 merge 確認見 [驗收收尾](../../docs/gates/gate-11c-closeout.md)。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
 
 Codex history 對帳已拒絕外來 clientId 的文字 fallback；no-turn Queued 的舊 crash fallback 要有 attempted_at，未嘗試送出不算 receipt。[U17 基礎證據與仍存歧義](../../docs/gates/gate-11c-u17-validation.md)。
 

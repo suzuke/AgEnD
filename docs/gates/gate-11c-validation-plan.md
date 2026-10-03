@@ -9,7 +9,7 @@
 
 逐列 source／證據與未通過門檻見 [矩陣執行狀態](gate-11c-matrix-status.md)；App 舊 frame／query 與 wire golden 已有 [直接回歸](gate-11c-frame-order-validation.md)。
 
-已建立的 suites／fixture 與原始證據見 [實作進度](gate-11c-progress.md)、[App 驗證](gate-11c-app-validation.md)、[原生 renderer](gate-11c-native-validation.md)、[真 PTY App](gate-11c-native-app-validation.md) 及 [真外層 PTY](gate-11c-outer-validation.md)。CLP-23–28 已同跑 fake／native，fake 注入真正 holder parser。這些結果涵蓋下表的一部分；首次真 Codex 0.159.3 U17 已有[原始證據](gate-11c-u17-live-validation.md)，其餘完成門檻仍須全新 verifier 與人工驗收逐項核對；[完整 fake U17](gate-11c-u17-validation.md) 及本機 accept tui 已通過，但不能代替整份矩陣。正常本機最後 dirty 的端到端時效已有外層 PTY 證據，包含未加 round-trip 額度的 300 ms 正向及 800 ms mutant。
+已建立的 suites／fixture 與原始證據見 [實作進度](gate-11c-progress.md)、[App 驗證](gate-11c-app-validation.md)、[原生 renderer](gate-11c-native-validation.md)、[真 PTY App](gate-11c-native-app-validation.md) 及 [真外層 PTY](gate-11c-outer-validation.md)。CLP-23–28 已同跑 fake／native，fake 注入真正 holder parser。這些結果涵蓋下表的一部分；首次真 Codex 0.159.3 U17 已有[原始證據](gate-11c-u17-live-validation.md)，其餘完成門檻依下方執行方式更新，由全新 verifier 與自動驗證逐項核對；[完整 fake U17](gate-11c-u17-validation.md) 及本機 accept tui 已通過，但不能代替整份矩陣。正常本機最後 dirty 的端到端時效已有外層 PTY 證據，包含未加 round-trip 額度的 300 ms 正向及 800 ms mutant。
 
 ## 自動驗證矩陣
 
@@ -47,7 +47,7 @@
 
 使用者已操作下表中的實機畫面／鍵鼠／貼上／歷史／多視窗，並要求後續驗證由 agent 自動化完成。剩餘行為以真 producer、native PTY、外層 PTY 與相同斷言核實；已取得實機紀錄與自行比對分開保留於 [收尾頁](gate-11c-closeout.md)。此指示改變操作方式，沒有刪除下表或自動矩陣的驗證要求；merge 仍須使用者確認。
 
-agent 依 [AGENTS.md](../../AGENTS.md#帶使用者親自驗收) 先提供實際 worktree、獨立 CARGO_TARGET_DIR、Rust binary PATH 與測試 home，等每步輸出才繼續。以下是要驗的操作，不是本次提案已做完的勾選。
+以下保留原人工操作清單，用來對照已取得實機紀錄與剩餘自動化斷言；不再要求使用者重做每一步。測試仍在專屬 worktree、獨立 CARGO_TARGET_DIR 與測試 home 執行，完成後提供可重跑的驗證指令。清單不是本次提案已做完的勾選。
 
 1. 確認 Rust CLI 與固定 head，跑完整 `accept tui`；假、真 daemon demo 均成功。
 2. 啟動有輸入框／色彩／游標與長歷史的測試 agent，`agend app` → `t` 唯讀 → `i` 完整模式；只留一行狀態列，輸入／退出鍵各到正確地方。
@@ -55,7 +55,7 @@ agent 依 [AGENTS.md](../../AGENTS.md#帶使用者親自驗收) 先提供實際 
 4. 滾輪看歷史、持續新輸出、回到底部；agent 開啟 mouse mode 時點選／滾輪到 agent，Shift 滾輪或唯讀方式看歷史。
 5. 貼多行繁中與含 Ctrl-] 的文字；agent 看到一次貼上、AgEnD 不誤退出；故意送超限 paste，拒絕且不出現半段資料。
 6. 用 agent caller 故意要求 resize／input，應 forbidden、尺寸與內容不動。中斷 daemon，holder 持續；重連畫面完整且唯讀，須再按 i 才輸入。
-7. 真 Codex opt-in smoke 另記 CLI 版本、thread／turn／messages／忙閒與重啟證據；未跑或失敗就記未驗／失敗，保持 not_supported。
+7. 首次真 Codex opt-in smoke 另記 CLI 版本、thread／turn／messages／忙閒與重啟證據；未驗或未獲核准的版本保持 not_supported。已核准的 0.159.3 不因額外診斷 run 未執行或失敗而自動撤銷；額外真模型回合須另獲授權。
 8. Ctrl-] 後確認外層快捷鍵正常；結束測試 daemon／holders、刪自己成功 fixture，核 fd／程序無殘留。
 
 macOS Terminal／iTerm2 與使用者實際 Linux 終端分開記錄；CI 的 headless 測試不認證實際字型、游標外觀或非美式鍵盤。至少一次故意拒絕與一次重連的原輸出必須保留。
@@ -71,4 +71,4 @@ sed -n '1,150p' docs/gates/gate-11c-proposal.md
 
 ## 下一步
 
-提案 #144 已合併；在專屬實作 worktree 完成剩餘驗證矩陣，全部通過再派全新 verifier，提供逐步人工指令並等使用者 merge 確認。
+提案 #144 已合併；在專屬 worktree 自動完成剩餘驗證矩陣，核固定 head 的全新 verifier／CI，清理殘留並提供結果與重跑指令，等使用者 merge 確認。

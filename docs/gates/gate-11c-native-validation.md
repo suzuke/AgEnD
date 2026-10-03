@@ -5,6 +5,8 @@
 > - 真 holder parser 產生 frame，經真 crossterm backend，再由另一個真 parser 讀回；尚未認證實機字型與外觀。
 > - 下一步：完成其餘資源矩陣與 Codex U17，再做完整獨立及人工驗收。
 
+本頁保存該批次的歷史結果與當時下一步，不能作為目前待辦清單。最新版本許可見 [輸入政策](gate-11c-codex-input.md)；使用者已要求剩餘行為自動驗證，固定 head 結果、實機限制與清理見 [驗收收尾](gate-11c-closeout.md)。
+
 ## 行為
 
 ratatui 的 `UNDERLINED` 無法區分五種底線。`terminal::native_render` 對已繪製的 buffer 補 typed commands，依 protocol cell 與真 buffer diff 判斷重畫；同字不同底線也會更新。它沿用 buffer 的寬字裁切，不印 spacer，不回放 agent ANSI。閒置畫面不重印底線文字；輸出後恢復 SGR 與已裁切的游標座標。

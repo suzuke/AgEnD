@@ -17,9 +17,9 @@
 
 `runtime::client::tests` 以真型別 serializer 產生邊界行，驗 8 MiB 包含換行、超限整份拒絕；`runtime::terminal::tests` 驗 1.0 holder 不送新請求、legacy write lock 阻擋時仍可逾時與停止。`agend/tests/terminal_runtime.rs` 走真 binary／holder／PTY：並行 viewport 配對、實際尺寸與輸入 ack、交接後舊 input 拒絕、取消 native blocked input 後舊憑證失效／重連不重送、grant 回覆已到但未接收的取消競態、取消唯讀查詢不打斷控制、尺寸及 holder 保留、超限輸入整份拒絕與重起 generation。
 
-8 個 terminal_hub native cases 驗 caller、socket-scoped view／attach、控制交接、EOF／停止、尺寸、dirty 尾段、歷史、20 次開關與正式 client。完整 TUI、fake C 契約與 U17 已有原生回歸；最新 head 與人工驗收仍待完成。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
+8 個 terminal_hub native cases 驗 caller、socket-scoped view／attach、控制交接、EOF／停止、尺寸、dirty 尾段、歷史、20 次開關與正式 client。完整 TUI、fake C 契約與 U17 已有原生回歸；使用者要求剩餘行為自動驗證；最新 head verifier／CI、清理與 merge 確認見 [驗收收尾](../../docs/gates/gate-11c-closeout.md)。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
 
-`agend/tests/terminal_capability.rs` 對真 binary 與 FakeDaemon 跑同樣的 client 1.4 請求：以明確 1.3 hello 協商，明示能力不足，控制請求先拒 agent、錯誤保留 request id，拒絕後 get_fleet 仍正常。真 daemon 選 1.4 的控制路徑另跑 native cases；fake 暫留 1.3。兩者完整 C 共享契約仍待加入。
+`agend/tests/terminal_capability.rs` 對真 binary 與 FakeDaemon 跑同樣的 client 1.4 請求：以明確 1.3 hello 協商，明示能力不足，控制請求先拒 agent、錯誤保留 request id，拒絕後 get_fleet 仍正常。真 daemon 選 1.4 的控制路徑另跑 native cases；這組案例刻意協商舊能力 1.3；完整 C 共享契約已在 `agend/tests/full_terminal_contract.rs` 對 fake／native 同跑 CLP-23–28。
 
 `pipeline::attention::tests` 注入真 Fleet 快照與 Retry 的受控交錯：原程式重建已移除項目、覆蓋新失敗，兩個反例 exit 101；條件更新後皆通過，另核正常 enrichment／no-op／錯 id。真 client protocol CLP-11 另跑；[證據](../../docs/gates/gate-11c-regression-validation.md)。
 

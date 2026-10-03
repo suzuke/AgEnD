@@ -5,6 +5,8 @@
 > - 四個完整情境加兩個子程序入口，共 6 tests 通過；前批完整 agend 214 passed、0 ignored，本批 clippy／fmt／實際 no-std 通過。
 > - 下一步：補其餘拒絕／壓力矩陣與 Codex U17，再做完整獨立及人工驗收。
 
+本頁保存該批次的歷史結果與當時下一步，不能作為目前待辦清單。最新版本許可見 [輸入政策](gate-11c-codex-input.md)；使用者已要求剩餘行為自動驗證，固定 head 結果、實機限制與清理見 [驗收收尾](gate-11c-closeout.md)。
+
 ## 證據路徑
 
 `crates/agend/tests/tui_outer_pty.rs` 用 `portable-pty` 啟動真正 `agend app`。輸入 bytes 由外層 PTY 寫入，經 crossterm event capture、App、ClientSource、真 daemon／holder 到 raw agent；測試不直接呼叫 App events。唯一例外是 panic 子程序：執行同一個 `run_with`，只在攔截 hook 注入 panic，讓 unwind 確實走 native guard。

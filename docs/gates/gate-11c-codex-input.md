@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 真 U17 原始證據經全新 verifier 核實後，使用者同意只開放 Codex CLI 0.159.3；未知或其他版本仍唯讀。
 > - 版本許可綁 holder 的實際啟動記錄；thread 曾允許人工輸入後永久只用自己的 clientId 對帳。
-> - 下一步：核本批新 head 的完整 checks／CI 與全新 verifier，再逐步人工驗收；merge 與額外真模型另行確認。
+> - 下一步：核本批新 head 的完整 checks／CI 與全新 verifier，依使用者指示自動驗證剩餘行為並清理；merge 與額外真模型另行確認。
 
 ## 當下輸入許可
 
@@ -41,8 +41,8 @@ migration 0006 新增 codex_input_threads(thread_id)，沒有 instance 外鍵，
 
 首次真 U17 使用四個已核准的 gpt-6-luna／low 回合，前三個有最終回覆，第四個只核自己的 receipt。[原範圍](gate-11c-u17-live-validation.md) 與四回合授權不擴大；固定 68e15c0 的 verifier report 在 /private/tmp/g11c-u17-live-verifier-r1/report.md，不冒充這次版本開放的新 head 認證。
 
-使用者於 2026-10-03 明確「同意」只開放 Codex CLI 0.159.3。[D39](../decisions/d39.md) 保存確認；#145 仍為 draft，人工驗收與 merge 等另行確認。
+使用者於 2026-10-03 明確「同意」只開放 Codex CLI 0.159.3。[D39](../decisions/d39.md) 保存確認；#145 仍為 draft。使用者後續要求剩餘行為改採自動驗證，實機紀錄與限制見 [驗收收尾](gate-11c-closeout.md)；merge 仍待確認。
 
 ## 下一步
 
-全新 verifier 在自己的固定 head worktree 重跑、嘗試推翻版本與永久歸屬；通過後一次一步提供人工驗收指令。
+全新 verifier 在自己的固定 head worktree 重跑、嘗試推翻版本與永久歸屬；核最新 CI、完成清理後報告結果與可重跑的驗證指令，等使用者確認 merge。

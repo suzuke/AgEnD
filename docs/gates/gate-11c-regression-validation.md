@@ -5,6 +5,8 @@
 > - attention 的受控交錯已重現原錯誤並修正；draw 尺寸同步的缺失 mutant 被新回歸拒絕。
 > - 下一步：核修正後的原生 App 與最新雙平台 CI；這些局部證據不代表 C 段完成。
 
+本頁保存該批次的歷史結果與當時下一步，不能作為目前待辦清單。最新版本許可見 [輸入政策](gate-11c-codex-input.md)；使用者已要求剩餘行為自動驗證，固定 head 結果、實機限制與清理見 [驗收收尾](gate-11c-closeout.md)。
+
 ## Retry 後重建失敗項目
 
 `d8b65cc` 的 macOS PR CI（job 111016591768）在 CLP-11 失敗。raw events 顯示 Retry 已發 AttentionResolved，接著同一個「daemon 開始前失敗」的 reason／waiting_since 又被 AttentionRequired 加回，之後 instance 已啟動。

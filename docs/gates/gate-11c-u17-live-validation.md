@@ -3,7 +3,9 @@
 > **TL;DR**
 > - 使用者明確核准後，以 Codex CLI 0.159.3／gpt-6-luna／low 執行四個模型回合，U17 工具通過。
 > - 同 thread／holder、忙碌 Queue、idle Send、重啟後上下文與兩個自己的 receipt 均有原始證據；此 run 的正式輸入仍未開放；後續已同意只開放 0.159.3。
-> - 下一步：原 run 已由全新 verifier 核實，使用者同意只開放 0.159.3；C 段仍待人工驗收與 merge。
+> - 下一步：原 run 已由全新 verifier 核實，使用者同意只開放 0.159.3；後續行為驗證已改採自動化，merge 仍待確認。
+
+本頁保存首次四回合的歷史 run；原始結果與限制不改作新 head 認證。後續版本開放見 [輸入政策](gate-11c-codex-input.md)，使用者實機紀錄與自動驗證方式見 [驗收收尾](gate-11c-closeout.md)。
 
 ## 固定範圍
 
@@ -46,4 +48,4 @@
 
 ## 下一步
 
-核版本開放新 head verifier／CI，再逐步人工驗收；#145 merge 另行確認。
+核 [驗收收尾](gate-11c-closeout.md) 的固定 head verifier／CI、自動驗證與清理結果；#145 merge 仍等使用者確認。
