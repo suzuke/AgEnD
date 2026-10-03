@@ -358,13 +358,17 @@ fn normal_daemon_does_not_enable_codex_input_from_probe_environment() {
 
 #[test]
 fn manual_text_cannot_confirm_an_attempted_row_in_the_u17_input_scope() {
-    attempted_receipts_after_restart(false);
+    attempted_receipts_after_restart(false, false);
 }
 #[test]
 fn strict_receipts_survive_restart_when_the_current_cli_is_denied() {
-    attempted_receipts_after_restart(true);
+    attempted_receipts_after_restart(true, false);
 }
-fn attempted_receipts_after_restart(deny_after_restart: bool) {
+#[test]
+fn resume_notification_requires_persistent_attribution_before_the_rpc_reply() {
+    attempted_receipts_after_restart(true, true);
+}
+fn attempted_receipts_after_restart(deny_after_restart: bool, replay_during_resume: bool) {
     let native = lab::Lab::with_prefix(Path::new(BIN), "g11u17id");
     let home = native.home(1);
     let instance = fixture(&native, &home);
@@ -402,6 +406,53 @@ fn attempted_receipts_after_restart(deny_after_restart: bool) {
                 .any(|(_, item)| item.text == rendered && item.client_id.is_none()),
             "the real fake frontend must produce a manual item without clientId"
         );
+        let replay = if replay_during_resume {
+            // Wait for the producer to persist the actual manual turn. An idle
+            // reconnect may legitimately retry the daemon row; only the human
+            // turn's receipt must remain unavailable to it.
+            let deadline = Instant::now() + Duration::from_secs(15);
+            let saved = loop {
+                let completed = turns(&mut observer, &thread).into_iter().find(|turn| {
+                    turn["status"] != "inProgress"
+                        && turn["items"].as_array().is_some_and(|items| {
+                            items.iter().any(|item| {
+                                item["type"] == "userMessage"
+                                    && item["clientId"].is_null()
+                                    && item["content"][0]["text"] == rendered
+                            })
+                        })
+                });
+                if let Some(turn) = completed {
+                    break turn;
+                }
+                assert!(Instant::now() < deadline, "manual turn was not persisted");
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            };
+            let item = saved["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|item| item["type"] == "userMessage" && item["clientId"].is_null())
+                .unwrap();
+            let count = observer
+                .call("agendFake/resumeReplayCount", json!({"threadId":thread}))
+                .unwrap();
+            assert_eq!(count["replayed"], 0, "replay must be disabled by default");
+            let armed = observer
+                .call(
+                    "agendFake/replayUserOnNextResume",
+                    json!({"threadId":thread}),
+                )
+                .unwrap();
+            assert_eq!(armed["turnId"], saved["id"]);
+            assert_eq!(
+                armed["itemId"], item["id"],
+                "replay must use the real producer item"
+            );
+            Some(saved["id"].as_str().unwrap().to_owned())
+        } else {
+            None
+        };
         drop(boot);
         let boot = Boot::with_policy(
             &home,
@@ -421,18 +472,36 @@ fn attempted_receipts_after_restart(deny_after_restart: bool) {
             );
         }
         let row = boot.store.message(&sent.id).await.unwrap().unwrap();
-        assert_ne!(
-            row.state,
-            DeliveryState::Confirmed,
-            "attempted row stole the human turn receipt"
-        );
-        assert!(
-            row.turn_id.is_none(),
-            "human turn was assigned to the daemon row"
-        );
-        let events = boot.driver.events(ID, None).await.unwrap();
-        assert!(!events.iter().any(|e| matches!(&e.kind,DriverEventKind::MessageConfirmed { message_id } if message_id==&sent.id)),
-            "history events invented a receipt for manual text");
+        if let Some(manual_turn) = &replay {
+            let count = observer
+                .call("agendFake/resumeReplayCount", json!({"threadId":thread}))
+                .unwrap();
+            assert_eq!(
+                count["replayed"], 1,
+                "resume must actually emit the armed notification"
+            );
+            assert_ne!(
+                row.turn_id.as_deref(),
+                Some(manual_turn.as_str()),
+                "resume notification stole the human receipt before persistent attribution was loaded"
+            );
+            println!(
+                "U17 resume replay: one actual producer item/completed emitted before RPC reply; human turn {manual_turn} is not a daemon receipt"
+            );
+        } else {
+            assert_ne!(
+                row.state,
+                DeliveryState::Confirmed,
+                "attempted row stole the human turn receipt"
+            );
+            assert!(
+                row.turn_id.is_none(),
+                "human turn was assigned to the daemon row"
+            );
+            let events = boot.driver.events(ID, None).await.unwrap();
+            assert!(!events.iter().any(|e| matches!(&e.kind,DriverEventKind::MessageConfirmed { message_id } if message_id==&sent.id)),
+                "history events invented a receipt for manual text");
+        }
         let deadline = Instant::now() + Duration::from_secs(15);
         loop {
             let row = boot.store.message(&sent.id).await.unwrap().unwrap();
@@ -448,6 +517,21 @@ fn attempted_receipts_after_restart(deny_after_restart: bool) {
         boot.busy(false).await;
         let items = history::user_items(&turns(&mut observer, &thread));
         assert_eq!(items.len(), 2);
+        if replay.is_some() {
+            observer
+                .call(
+                    "thread/resume",
+                    json!({"threadId":thread,"excludeTurns":true}),
+                )
+                .unwrap();
+            let count = observer
+                .call("agendFake/resumeReplayCount", json!({"threadId":thread}))
+                .unwrap();
+            assert_eq!(
+                count["replayed"], 1,
+                "the replay seam must disarm after one resume"
+            );
+        }
         let own: Vec<_> = items
             .iter()
             .filter(|(_, i)| i.client_id.as_deref() == Some(sent.id.as_str()))

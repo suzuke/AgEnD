@@ -14,13 +14,15 @@
 
 `cargo test -p agend --test terminal_runtime` 使用真 binary／holder／PTY 驗 runtime frame／control 配對、實際 resize、舊 owner 拒絕、取消 native blocked input 後憑證失效與 holder 重連、不重送、取消已到但未接收的 grant、唯讀查詢取消不打斷控制、整份超限拒絕及新 holder generation。這些尚不代表 daemon client 1.4／TUI／Codex U17 已完成。
 
-terminal_capability 與 terminal_hub 驗能力／權限、控制／尺寸／歷史、EOF 與資源清理；六項 C 契約同跑 fake／native，完整 App 與 U17 已通過。版本許可的 11 個 native cases 只用 fake backend，真模型不在 CI 執行。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
+terminal_capability 與 terminal_hub 驗能力／權限、控制／尺寸／歷史、EOF 與資源清理；六項 C 契約同跑 fake／native，完整 App 與 U17 已通過。版本許可與 resume 歸屬的 12 個 native cases 只用 fake backend，真模型不在 CI 執行。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
 
 `tui_native_app` 的兩個情境經完整 App／真 daemon／holder 到 raw PTY 程序，逐 byte 核鍵鼠／paste 與超限拒絕，agent 內 stty size 核 resize，多視窗交接、>1,000 列歷史／clamp、alt 與 daemon 重啟不自動控制。20 次開關每次 thread／fd 回基準；[證據與重跑](../../docs/gates/gate-11c-native-app-validation.md)。
 
 `tui_outer_pty` 在真外層 PTY 執行真正 `agend app`，經 crossterm capture 驗鍵鼠／paste、kernel resize、多視窗與歷史；正常／panic unwind 後核原 termios、alt／mouse／paste／focus／cursor／SGR 還原。20 次 App 程序退出回同一 fd 基準，holder pid 保留；共用 `tests/common/native_app.rs` 的 raw agent，不使用真 LLM。另有 12 次 burst 的端到端可見 deadline，每次 ≤300 ms、不加 holder round-trip 額度；800 ms 取樣 mutant 被同一斷言拒絕。[外層證據](../../docs/gates/gate-11c-outer-validation.md)。
 
-`codex_u17` 的兩個 foundation cases 用明確 opt-in raw fake frontend，驗同 thread 人工 turn、busy／queue／獨立 receipt、相同人工文字不能確認未嘗試送出的 row；component restart 保留 holder／thread，舊 attach 拒絕。本批另加入完整 daemon 子程序／client／App 的重啟、草稿、scope／caller 與 durable turn id，以及 attempted crash-window 人工同文拒絕。六個 tests 含一個 re-exec 入口，沒有真 Codex LLM；[範圍與反例](../../docs/gates/gate-11c-u17-validation.md)。
+`codex_u17` 的兩個 foundation cases 用明確 opt-in raw fake frontend，驗同 thread 人工 turn、busy／queue／獨立 receipt、相同人工文字不能確認未嘗試送出的 row；component restart 保留 holder／thread，舊 attach 拒絕。本批另加入完整 daemon 子程序／client／App 的重啟、草稿、scope／caller 與 durable turn id，以及 attempted crash-window 人工同文拒絕。12 個 tests 含一個 re-exec 入口，沒有真 Codex LLM；[範圍與反例](../../docs/gates/gate-11c-u17-validation.md)。
+
+新增 `resume_notification_requires_persistent_attribution_before_the_rpc_reply`：真 holder／wrapper／raw fake frontend 先產生並保存 clientId=null 的人工同文 turn，再以預設關閉的 fake-only `agendFake/replayUserOnNextResume` 在下一次 resume response 前重播原 item/completed。測試核 producer item／turn 身分、實際 replay count=1 與一次性關閉；重接到拒絕版本仍不得取人工 receipt。沒有合成人工 item／frame，不呼叫真模型。
 
 ## 怎麼跑
 

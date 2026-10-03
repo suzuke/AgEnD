@@ -21,6 +21,8 @@ STO-13 同時跑 FakeStore 與 SQLite；SplitAdvance mutant 故意在失敗時�
 
 opt-in fake manual frontend 的原生驗證在 `agend/tests/codex_u17.rs`：真 PTY 輸入經實際 fake app-server，busy／user item／queue 由 producer 產生。既有 fake Codex 與錄製檔 conformance 仍照跑；本批另有共用完整 App／client／daemon 子程序情境，核 draft／重啟與 receipt；不代表真 Codex smoke。[範圍](../../docs/gates/gate-11c-u17-validation.md)。
 
+新增 `resume_notification_requires_persistent_attribution_before_the_rpc_reply`：真 holder／wrapper／raw fake frontend 先產生並保存 clientId=null 的人工同文 turn，再以預設關閉的 fake-only `agendFake/replayUserOnNextResume` 在下一次 resume response 前重播原 item/completed。測試核 producer item／turn 身分、實際 replay count=1 與一次性關閉；重接到拒絕版本仍不得取人工 receipt。沒有合成人工 item／frame，不呼叫真模型。
+
 ## 怎麼跑
 
 ```bash
