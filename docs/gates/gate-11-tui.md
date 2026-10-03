@@ -26,7 +26,7 @@
 
 ## C 段開工前提案
 
-[完整 P1–P6](gate-11c-proposal.md) 與 [驗收計畫](gate-11c-validation-plan.md)。C 段在 [draft PR #145](https://github.com/suzuke/AgEnD/pull/145) 實作中；holder／runtime 與 daemon／client 1.4 已接通，多視窗／EOF 有原生程序回歸；TUI App 的完整模式／鍵鼠／貼上與歷史已有局部證據；原生底線／標準游標及外層 PTY 的 capture／restore 已有讀回證據，完整 fake U17 本機已通過；App 延遲 frame／query／舊 generation 與真 producer golden 已補齊；真 Codex live、最新 checks／CI、獨立及人工驗收仍待完成。[目前進度](gate-11c-progress.md)、[矩陣對照](gate-11c-matrix-status.md)。下方 B 段已確認的決策與驗收紀錄保留。
+[完整 P1–P6](gate-11c-proposal.md) 與 [驗收計畫](gate-11c-validation-plan.md)。C 段在 [draft PR #145](https://github.com/suzuke/AgEnD/pull/145) 實作中；holder／runtime 與 daemon／client 1.4 已接通，多視窗／EOF 有原生程序回歸；TUI App 的完整模式／鍵鼠／貼上與歷史已有局部證據；原生底線／標準游標及外層 PTY 的 capture／restore 已有讀回證據，完整 fake U17 本機已通過；App 延遲 frame／query／舊 generation 與真 producer golden 已補齊；真 Codex 0.159.3 首次 U17 已由獨立 verifier 核實，限四個已核准模型回合（第四只核 receipt）；使用者同意只開放該版本，並要求剩餘行為驗證自動化。最新固定 head 的 checks／CI、文件核對、清理與 merge 確認見 [驗收收尾](gate-11c-closeout.md)。[目前進度](gate-11c-progress.md)、[矩陣對照](gate-11c-matrix-status.md)。下方 B 段已確認的決策與驗收紀錄保留。
 
 ## B 段開工前提案
 

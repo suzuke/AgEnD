@@ -3,7 +3,7 @@
 > **TL;DR**
 > - App 已接結構化 Source：完整模式、尺寸確認、多視窗失效、鍵鼠／貼上與固定歷史；C 段仍在 [draft PR #145](https://github.com/suzuke/AgEnD/pull/145) 實作。
 > - 此頁只記錄本批證據，不能代替完整 C 段、Codex U17、fresh-context verifier 或人工驗收。
-> - 下一步：完成其餘 renderer／壓力矩陣與 U17，再做完整驗收。
+> - 本頁是 App 局部批次的歷史紀錄；下一步與最新完整矩陣／版本政策見 [驗收收尾](gate-11c-closeout.md)。
 
 ## 本批行為與證據
 
@@ -36,15 +36,17 @@
 - App cases 從 11 增至 13 時在 macOS 256 fd 下耗盡 descriptor；限制同時存活 fixture 為 3，保留全部 cases，再跑通過。Source 的 20 次 fd baseline 檢查沒有放寬。
 - 編譯／clippy、重連 fixture TempDir 提前清掉 socket parent，以及唯讀小視窗捲動的初次失敗均保留；修正後重跑。
 
-原 logs 在 `/private/tmp/g11c-implementation-logs`。TestBackend 及 writer 證據尚未認證外層終端字型／外觀或完整 native TUI 資源清理。
+原 logs 已封存於 `/private/tmp/g11c-final-review/historical-evidence.tar.gz` 的 `g11c-implementation-logs/`。TestBackend 及 writer 證據尚未認證外層終端字型／外觀或完整 native TUI 資源清理。
 
 ## 尚待完成
 
+以下是這個局部批次當時的剩餘範圍，不代表現行狀態。後續已接通完整矩陣並核首次真 U17；使用者同意只開放 0.159.3，並要求剩餘驗證自動化。現況見 [矩陣狀態](gate-11c-matrix-status.md)、[Codex 版本政策](gate-11c-codex-input.md) 與 [驗收收尾](gate-11c-closeout.md)。
+
 - 本批後已補原生五種底線與標準游標讀回；詳見 [原生驗證](gate-11c-native-validation.md)。實機外觀待驗，HollowBlock 使用 block fallback。
 - 真 PTY input consumer 的完整 App 已補[原生回歸](gate-11c-native-app-validation.md)；外層 event capture／restore 已補 [原生證據](gate-11c-outer-validation.md)；其餘拒絕／壓力／時效矩陣與實機外觀待完成。
-- fake Codex＋真 AgEnD U17、明確 opt-in live smoke、CLI 版本及使用者確認後才開放已驗版本；目前 Codex 仍拒絕輸入。
+- fake Codex＋真 AgEnD U17、明確 opt-in live smoke、CLI 版本及使用者確認後才開放已驗版本；該批當時 Codex 仍拒絕輸入。
 - 完整 accept tui、雙平台最新 CI、全新無 context verifier、逐步人工驗收與 merge 確認。
 
 ## 下一步
 
-照 [驗收矩陣](gate-11c-validation-plan.md) 完成剩餘證據；完整 C 段 ready 後才派全新 verifier。
+核 [驗收收尾](gate-11c-closeout.md) 與 PR 的最後固定 head／獨立驗證／CI 結果；本頁只證明當時局部批次。

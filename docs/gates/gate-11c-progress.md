@@ -94,11 +94,11 @@
 
 ## 尚待完成
 
-- 自動矩陣已有逐列 source／證據索引，包含最後補齊的 App 延遲 frame／query／舊 generation 與真 producer golden；最新 head CI 及全新 verifier 仍須重跑，不把既有六項契約當整份認證。[矩陣對照](gate-11c-matrix-status.md)。
-- 原生底線／標準游標、mode-aware keys／mouse／paste、歷史、真外層 capture／restore 與資源清理已有自動證據；實際 Terminal／iTerm2／Linux 外觀與非美式鍵盤仍待人工驗收。
-- 完整 fake U17 與真 Codex 0.159.3 首次 U17 已通過；[live 證據與限制](gate-11c-u17-live-validation.md) 待全新 verifier 核對。
-- 使用者同意只開放 0.159.3；[版本政策](gate-11c-codex-input.md) 新實作待新 head verifier／CI。
-- 最新完整 acceptance／雙平台 CI、全新無 context verifier、逐步人工驗收與 merge 確認。
+- 核本批提示／EOF 契約補修的固定 head、全新 verifier 與最新雙平台 CI，完整結果見 [驗收收尾](gate-11c-closeout.md) 與 PR；既有局部契約不當整份認證。
+- 實機操作紀錄已取得，使用者要求剩餘行為驗證由自動化完成；原生與外層 PTY 證據不認證所有實體終端、字型或鍵盤配置。
+- 首次真 Codex 0.159.3 U17 已由獨立 verifier 核實，四個核准模型回合已用完；[live 證據與限制](gate-11c-u17-live-validation.md) 保留原範圍，本批不新增真模型呼叫。
+- 版本開放已獲使用者同意；[版本政策](gate-11c-codex-input.md) 只允許 0.159.3，未知或其他版本仍唯讀。
+- 清理本批實作／驗證殘留後，提供最終報告與重跑指令，merge 等使用者確認。
 
 ## 下一步
 

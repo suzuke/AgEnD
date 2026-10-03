@@ -23,7 +23,7 @@
 | 第二視窗 | 同 socket 接回原內容；第二 i 後第一唯讀，a 不送、第二 b [98] 可送 | 截圖＋自行比對 |
 | 多視窗 resize／重取 | 第一唯讀 resize 不改第二 27×102；第一明確 i 後取得控制，最新 26×102，第二唯讀 | 截圖 |
 
-原始圖片與逐步 JSON 已逐檔核 hash，封存於 `/private/tmp/g11c-final-review/historical-evidence.tar.gz` 的 `g11c-manual-r1/`；每份紀錄保留當時的驗證範圍。首次簡單 paste 複製到 Markdown 符號，未算繁中通過；後續實際 UTF-8 packet 才通過。曾報告的不明重啟不算 daemon recovery 證據。
+原始圖片與逐步 JSON 已逐檔核 hash，封存於 `/private/tmp/g11c-final-review/historical-evidence.tar.gz` 的 `g11c-manual-r1/`；每份紀錄保留當時的驗證範圍。 早期文件中的原 `/private/tmp/g11c-*` 證據路徑保留作歷史定位，已完成批次的同名檔案／目錄可在封存包內查到；本批最終報告與清理清單集中於 `/private/tmp/g11c-final-review/`。首次簡單 paste 複製到 Markdown 符號，未算繁中通過；後續實際 UTF-8 packet 才通過。曾報告的不明重啟不算 daemon recovery 證據。
 
 ## 人工發現的修正
 
