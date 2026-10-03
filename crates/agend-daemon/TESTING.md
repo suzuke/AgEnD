@@ -17,7 +17,7 @@
 
 `runtime::client::tests` 以真型別 serializer 產生邊界行，驗 8 MiB 包含換行、超限整份拒絕；`runtime::terminal::tests` 驗 1.0 holder 不送新請求、legacy write lock 阻擋時仍可逾時與停止。`agend/tests/terminal_runtime.rs` 走真 binary／holder／PTY：並行 viewport 配對、實際尺寸與輸入 ack、交接後舊 input 拒絕、取消 native blocked input 後舊憑證失效／重連不重送、grant 回覆已到但未接收的取消競態、取消唯讀查詢不打斷控制、尺寸及 holder 保留、超限輸入整份拒絕與重起 generation。
 
-`agend/tests/terminal_hub.rs` 的 8 個 native cases 經真 daemon／holder／PTY 驗 caller、socket-scoped view／attach、控制交接、EOF／停止釋放、尺寸保留、dirty 尾段、歷史選取、20 次開關與正式 client。停止 actor 的 completed owner 原生反例先失敗後通過；runtime unit 另驗無終端的 20 個 instance actor 回收。TUI 完整模式／Codex U17 與 fake 完整 C 契約仍待完成。
+8 個 terminal_hub native cases 驗 caller、socket-scoped view／attach、控制交接、EOF／停止、尺寸、dirty 尾段、歷史、20 次開關與正式 client。完整 TUI、fake C 契約與 U17 已有原生回歸；最新 head 與人工驗收仍待完成。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
 
 `agend/tests/terminal_capability.rs` 對真 binary 與 FakeDaemon 跑同樣的 client 1.4 請求：以明確 1.3 hello 協商，明示能力不足，控制請求先拒 agent、錯誤保留 request id，拒絕後 get_fleet 仍正常。真 daemon 選 1.4 的控制路徑另跑 native cases；fake 暫留 1.3。兩者完整 C 共享契約仍待加入。
 
@@ -25,7 +25,7 @@
 
 Codex history 的四個匹配 cases 保留 lost-reply 對帳，新增 never-attempted／foreign clientId 拒絕；native U17 foundation 在 agend 的 `codex_u17`。[範圍](../../docs/gates/gate-11c-u17-validation.md)。
 
-Codex history 本批五個 cases 分開核嚴格 clientId 與舊 lost-reply 相容性；agend 的 codex_u17 六個 tests 核完整 App／daemon、scope／caller、預設拒絕與 attempted crash-window。live 工具的 Codex 0.159.3 首次四回合 U17 已通過；版本開放仍待確認，[範圍與限制](../../docs/gates/gate-11c-u17-live-validation.md)。
+Codex history 五個 cases 核嚴格 clientId 與舊 lost-reply 相容性；codex_u17 11 個 native tests 核 App／daemon、caller、已驗版本開放、未驗版本拒絕、缺失／過期 holder 版本記錄、DB 拒寫與 attempted crash-window 跨拒絕重啟。driver unit 另驗歸屬讀取失敗在 resume 前拒絕；store unit 驗歸屬持久、冪等及永久保留。v1–v6 fixtures 升級比對 golden。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
 
 ## 怎麼跑
 

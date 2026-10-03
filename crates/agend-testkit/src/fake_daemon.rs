@@ -110,8 +110,7 @@ pub const OPERATOR_ONLY: &str = "only the operator can resolve needs-you items; 
 /// What `terminal_input` from an agent gets (the real daemon says the same).
 pub const TYPE_OPERATOR_ONLY: &str = "only the operator can type into an agent's terminal";
 /// What `terminal_input` into a codex instance gets (gate 11 B P6).
-pub const CODEX_INPUT: &str =
-    "typing into a codex terminal waits until U17 is verified (gate 7 P1); nothing was written";
+pub const CODEX_INPUT: &str = "Codex terminal input requires the approved CLI 0.159.3 and a connected link with durable own-clientId receipts; nothing was written";
 /// PTY chunks a terminal subscriber may fall behind before it is closed.
 pub const TERMINAL_CHUNKS: usize = 256;
 

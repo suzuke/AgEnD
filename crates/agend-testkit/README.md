@@ -16,7 +16,7 @@ Gate 10 的 `FakePipelineExecutor` 實作 core executor port，組合 FakeStore�
 
 ## 第 11 施工關 C 段（實作中）
 
-真 daemon 與安裝 producer 的 FakeDaemon 提供 client 1.4；六項 C 共用契約對 fake／真程序 fixture 執行，producer 是真正 holder parser。控制 worker、generation／停止與 fd 清理有回歸；TUI／Codex U17 仍待完成。詳見 [FAKE-DAEMON.md](FAKE-DAEMON.md) 與 [CLIENT-CONTRACTS.md](CLIENT-CONTRACTS.md)。
+真 daemon 與安裝 producer 的 FakeDaemon 提供 client 1.4；六項 C 契約同跑 fake／真程序，producer 是 holder parser。控制 worker、generation／停止、fd 清理與完整 fake U17 都有回歸。真 Codex 證據另記於首次 U17，不以 fake 代替。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
 
 fake Codex 的 `-c agend_fake_manual_tui=true` 明確啟用 raw PTY frontend：bracketed paste／Enter 經 remote app-server 送人工 turn，不帶 daemon clientId；預設 frontend 保持原行為。paste 結束會經真 PTY 輸出 draft 標記，完整 App 用畫面確認 draft 已收到再重啟 daemon。這是 U17 fixture，不代表真 Codex CLI 已驗證。[完整 fake 證據](../../docs/gates/gate-11c-u17-validation.md)。
 

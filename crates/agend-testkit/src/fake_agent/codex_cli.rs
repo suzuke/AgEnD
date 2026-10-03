@@ -31,6 +31,10 @@ pub fn main(args: impl IntoIterator<Item = String>) -> ExitCode {
         }
     }
     match args.next().as_deref() {
+        Some("--version") => {
+            println!("codex-cli 0.158.0");
+            ExitCode::SUCCESS
+        }
         Some("app-server") => app_server(args.collect()),
         Some("resume") => tui(args.collect(), &config),
         _ => usage("expected app-server or resume"),

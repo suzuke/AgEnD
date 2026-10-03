@@ -169,6 +169,18 @@ impl CodexDriver {
             .is_some_and(|l| l.shared.connected.load(Ordering::SeqCst))
     }
 
+    /// Only a connected, version-approved peer with committed strict attribution.
+    pub fn can_input(&self, id: &str) -> bool {
+        self.inner.lock_links().get(id).is_some_and(|link| {
+            link.shared.connected.load(Ordering::SeqCst)
+                && link.shared.input_allowed.load(Ordering::SeqCst)
+                && crate::runtime::files::running(&self.inner.home, id)
+                    .ok()
+                    .flatten()
+                    == Some(link.shared.holder_pid.load(Ordering::SeqCst))
+        })
+    }
+
     /// Busy as the link of `id` sees it (not debounced); `None` without a link.
     pub fn busy(&self, id: &str) -> Option<bool> {
         self.inner
@@ -225,6 +237,14 @@ impl Inner {
         if instance.legacy_no_thread {
             return Err("a codex instance from before gate 7; a human decides".into());
         }
+        let previous_thread = instance.session_id.clone();
+        let identified = self
+            .store
+            .call_blocking(move |conn| match previous_thread {
+                Some(thread) => crate::store::codex_input::requires_identified(conn, &thread),
+                None => Ok(false),
+            })
+            .map_err(|e| format!("cannot read thread receipt attribution: {e}"))?;
         let listen = launch::socket_path(&self.home, id);
         let started = Instant::now();
         let mut worker = loop {
@@ -236,7 +256,7 @@ impl Inner {
                 generation,
                 listen.clone(),
                 Arc::clone(&self.store),
-                self.input_policy.allows_instance(id),
+                identified,
             ) {
                 Ok(worker) => break worker,
                 Err(e) if started.elapsed() >= launch::READY_WITHIN => {
@@ -300,6 +320,37 @@ impl Inner {
         if !self.is_current(id, generation) {
             return Ok(None);
         }
+        let holder_pid = crate::runtime::files::running(&self.home, id)
+            .map_err(|e| format!("cannot read holder identity: {e}"))?
+            .unwrap_or(0);
+        let admitted = holder_pid != 0
+            && (self.input_policy.allows_instance(id)
+                || launch::launched_record(&self.home, id).is_some_and(|(pid, version)| {
+                    pid == holder_pid && self.input_policy.allows_version(&version)
+                }));
+        let receipt_thread = thread.clone();
+        let identified = self
+            .store
+            .call_blocking(move |conn| {
+                if admitted {
+                    crate::store::codex_input::enable_identified(conn, &receipt_thread)?;
+                }
+                crate::store::codex_input::requires_identified(conn, &receipt_thread)
+            })
+            .map_err(|e| format!("cannot establish thread receipt attribution: {e}"))?;
+        if !self.is_current(id, generation) {
+            return Ok(None);
+        }
+        worker.set_input_policy(identified, admitted, holder_pid);
+        lines.push(format!(
+            "operator input {}; receipts {}",
+            if admitted { "enabled" } else { "denied" },
+            if identified {
+                "own clientId only"
+            } else {
+                "legacy"
+            }
+        ));
         match launch::write_go(&self.home, id, &thread, &real) {
             Ok(true) => lines.push(format!("go (resume {thread})")),
             Ok(false) => {}
@@ -402,7 +453,8 @@ impl Inner {
     }
 
     fn events(&self, id: &str, cursor: Option<&str>) -> Result<Vec<DriverEvent>, DriverError> {
-        self.instance(id)?
+        let instance = self
+            .instance(id)?
             .ok_or_else(|| DriverError::UnknownInstance(id.to_owned()))?;
         let wait = self
             .lock_links()
@@ -412,7 +464,13 @@ impl Inner {
         let turns = wait.wait(EVENTS_WITHIN).map_err(DriverError::Backend)?;
         let rows = link::messages_to(&self.store, id)?;
         let items = user_items(&turns);
-        let match_receipts = if self.input_policy.allows_instance(id) {
+        let thread = instance
+            .session_id
+            .ok_or_else(|| DriverError::Backend("no thread id".into()))?;
+        let identified = self.store.call_blocking(move |conn| {
+            crate::store::codex_input::requires_identified(conn, &thread)
+        })?;
+        let match_receipts = if identified {
             match_identified_items
         } else {
             match_items
@@ -463,5 +521,49 @@ impl Driver for CodexDriver {
         let id = instance_id.to_owned();
         let cursor = after_cursor.map(str::to_owned);
         blocking(move || inner.events(&id, cursor.as_deref())).await
+    }
+}
+
+#[cfg(test)]
+mod input_tests {
+    use super::*;
+    use agend_testkit::{block_on, tempdir::TempDir};
+    #[test]
+    fn unreadable_attribution_denies_connect_before_resume_or_input() {
+        let dir = TempDir::new("codex-input-read-failure").unwrap();
+        let store = Arc::new(SqliteStore::open(dir.path(), 0).unwrap());
+        let instance = Instance {
+            id: "codex".into(),
+            backend: Backend::Codex,
+            program: "/unused-codex".into(),
+            args: vec![],
+            working_directory: dir.path().display().to_string(),
+            session_id: Some("previously-enabled-thread".into()),
+            status: InstanceStatus::New,
+            session_started: false,
+            agent_pid: None,
+            legacy_no_thread: false,
+            delivery: "push".into(),
+        };
+        block_on(store.add_instance(&instance)).unwrap();
+        store
+            .call_blocking(|conn| {
+                conn.execute_batch("DROP TABLE codex_input_threads")?;
+                Ok(())
+            })
+            .unwrap();
+        let driver = CodexDriver::with_input_policy(
+            dir.path(),
+            store,
+            Arc::new(|_| {}),
+            agend_core::policy::codex_input::CodexInputPolicy::approved(),
+        );
+        let error = block_on(driver.connect("codex", 1)).unwrap_err();
+        assert!(
+            error.contains("cannot read thread receipt attribution"),
+            "{error}"
+        );
+        assert!(!driver.can_input("codex"));
+        assert!(!launch::go_path(dir.path(), "codex").exists());
     }
 }

@@ -60,7 +60,11 @@ pub const HOUSEKEEPING_EVERY: Duration = Duration::from_secs(60 * 60);
 
 /// Runs the daemon for `home` (absolute, checked by the caller).
 pub fn run(home: PathBuf) -> ExitCode {
-    run_with_policy(home, None, Default::default())
+    run_with_policy(
+        home,
+        None,
+        agend_core::policy::codex_input::CodexInputPolicy::approved(),
+    )
 }
 
 /// Runs the same daemon in a one-instance U17 diagnostic scope.

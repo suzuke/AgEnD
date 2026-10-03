@@ -1,5 +1,5 @@
 //! Full App/client/daemon/holder path with the same fake remote Codex thread.
-use super::{ID, agend_bin, codex, fixture, history, lab, probe};
+use super::{ID, agend_bin, codex, history, lab, probe};
 use agend_client::{Client, Redo};
 use agend_core::protocol::client::*;
 use agend_core::protocol::terminal::TerminalSize;
@@ -124,6 +124,9 @@ fn send(home: &Path, id: &str, body: &str) {
         CommandResult::Accepted
     );
 }
+fn launch_version(home: &Path) -> String {
+    agend_daemon::driver::codex::launch::launched_version(home, ID).unwrap()
+}
 fn stored(home: &Path) -> Vec<agend_daemon::store::Message> {
     // The daemon owns SQLite exclusively. Inspect durable rows only after
     // that child has exited; live checks use the actual client inbox.
@@ -157,17 +160,38 @@ pub fn daemon() {
     );
 }
 pub fn full_path() {
+    full_path_with_version(false);
+}
+pub fn approved_full_path() {
+    full_path_with_version(true);
+}
+fn full_path_with_version(approved: bool) {
     let mut lab = lab::Lab::with_prefix(&agend_bin(), "g11u17app");
     let home = lab.home(1);
-    let instance = fixture(&lab, &home);
+    let instance = if approved {
+        super::fixture_support::fixture_version(&lab, &home, Some("codex-cli 0.159.3"))
+    } else {
+        super::fixture(&lab, &home)
+    };
     // A second Codex instance uses the same real profile but is outside the
     // explicit verification scope.
-    codex::add(&home, "g11-codex-other", Path::new(&instance.program), 1500).unwrap();
+    let other = if approved {
+        codex::fake_codex().unwrap()
+    } else {
+        Path::new(&instance.program).to_path_buf()
+    };
+    codex::add(&home, "g11-codex-other", &other, 1500).unwrap();
     let _socket = codex::BoundSocket::of(&home, ID);
     let _other_socket = codex::BoundSocket::of(&home, "g11-codex-other");
-    diagnostic(&mut lab);
-    let flags = [("AGEND_U17_TEST_DAEMON", "1"), ("AGEND_U17_PROBE", "1")];
-    let mut daemon = lab::Daemon::start(&lab, &home, &flags).unwrap();
+    if !approved {
+        diagnostic(&mut lab);
+    }
+    let flags: &[(&str, &str)] = if approved {
+        &[]
+    } else {
+        &[("AGEND_U17_TEST_DAEMON", "1"), ("AGEND_U17_PROBE", "1")]
+    };
+    let mut daemon = lab::Daemon::start(&lab, &home, flags).unwrap();
     daemon.ready().unwrap();
     let line = daemon.expect(&format!("{ID}: go (resume ")).unwrap();
     let thread = line
@@ -219,6 +243,11 @@ pub fn full_path() {
         1
     );
     assert_eq!(count(&home), 1);
+    if approved {
+        // A replaced executable must not change the version of the surviving holder.
+        std::fs::write(lab.root.join("advertised-version"), "codex-cli 0.159.4\n").unwrap();
+        assert_eq!(launch_version(&home).trim(), "codex-cli 0.159.3");
+    }
     // A partially entered frontend prompt belongs to the holder, not daemon.
     app.paste("draft survives restart ");
     wait(&mut app, |a| {
@@ -240,7 +269,7 @@ pub fn full_path() {
     assert!(app.term.as_ref().is_none_or(|term| !term.typing));
     app.paste("DISCONNECTED-MUST-NOT-ARRIVE");
     assert_eq!(files::running(&home, ID).unwrap(), Some(holder));
-    let mut daemon = lab::Daemon::start(&lab, &home, &flags).unwrap();
+    let mut daemon = lab::Daemon::start(&lab, &home, flags).unwrap();
     daemon.ready().unwrap();
     daemon
         .expect(&format!("{ID}: thread {thread} resumed"))
@@ -362,9 +391,12 @@ pub fn full_path() {
     );
 }
 pub fn default_denied() {
+    denied_version(None);
+}
+pub fn denied_version(version: Option<&str>) {
     let lab = lab::Lab::with_prefix(&agend_bin(), "g11u17deny");
     let home = lab.home(1);
-    fixture(&lab, &home);
+    super::fixture_support::fixture_version(&lab, &home, version);
     let _socket = codex::BoundSocket::of(&home, ID);
     // Even an exported diagnostic variable cannot opt the normal binary in.
     let mut daemon = lab::Daemon::start(&lab, &home, &[("AGEND_U17_PROBE", "1")]).unwrap();

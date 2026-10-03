@@ -15,7 +15,7 @@ pipeline task detail 顯示 repo、關卡種類、agent、受阻理由與 WIP ar
 
 按鍵依 holder modes 編碼；滑鼠區外／狀態列不送，未開 tracking 或 Shift 滾輪看 holder 歷史。貼上維持一次操作，依 bracketed paste mode 包裹，超限整段拒絕；本機退出碼在貼上中是資料。外層 mouse／paste／focus modes 以 guard 恢復。
 
-原生 renderer 已補五種底線、底線色與標準游標，typed commands 輸出後還原樣式及位置；互動期保留 agent 色彩，退出還原 NO_COLOR 對 crossterm 的設定。C 段尚未完成：實機外觀、其餘壓力／資源矩陣與 Codex U17 待驗；完整 verifier、CI 與人工驗收仍待完成。[App 局部驗證](../../docs/gates/gate-11c-app-validation.md)。
+原生 renderer 已補五種底線、底線色與標準游標，輸出後還原樣式及位置；互動期保留 agent 色彩，退出還原 NO_COLOR。完整 fake U17、壓力／資源矩陣與真 Codex 0.159.3 首次 U17 已有證據；新版本開放實作仍待全新 verifier／CI 與實機人工驗收，C 段尚未完成。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
 
 native 與 off-screen draw 共用實際 frame area 更新 App 尺寸；延遲或缺 Resize event 不讓 Acquire 使用舊尺寸。相符最新 frame 前維持輸入關閉。[CI 反例與回歸](../../docs/gates/gate-11c-regression-validation.md)。
 

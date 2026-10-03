@@ -33,6 +33,7 @@ struct Inner {
     runtime: HolderRuntime,
     fleet: Arc<Fleet>,
     codex_input: agend_core::policy::codex_input::CodexInputPolicy,
+    codex: Option<crate::driver::codex::CodexDriver>,
     next: AtomicU64,
     nonce: String,
     actors: Mutex<BTreeMap<String, Handle>>,
@@ -162,10 +163,22 @@ impl TerminalHub {
             runtime,
             fleet,
             codex_input,
+            codex: None,
             next: AtomicU64::new(1),
             nonce,
             actors: Mutex::new(BTreeMap::new()),
         }))
+    }
+
+    /// Production server admission uses the live driver, not an instance-only policy.
+    pub fn with_codex_driver(
+        runtime: HolderRuntime,
+        fleet: Arc<Fleet>,
+        codex: crate::driver::codex::CodexDriver,
+    ) -> Self {
+        let mut hub = Self::new(runtime, fleet);
+        Arc::get_mut(&mut hub.0).unwrap().codex = Some(codex);
+        hub
     }
 
     pub fn subscribe(
@@ -280,6 +293,7 @@ impl TerminalHub {
                 runtime: self.0.runtime.clone(),
                 fleet: self.0.fleet.clone(),
                 codex_input: self.0.codex_input.clone(),
+                codex: self.0.codex.clone(),
                 jobs,
                 views: BTreeMap::new(),
                 owner: None,

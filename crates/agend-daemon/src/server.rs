@@ -113,11 +113,8 @@ async fn accept_loop(
     ctx: Arc<Context>,
     mut stopped: watch::Receiver<bool>,
 ) {
-    let hub = TerminalHub::with_input_policy(
-        ctx.runtime.clone(),
-        ctx.fleet.clone(),
-        ctx.codex_input.clone(),
-    );
+    let hub =
+        TerminalHub::with_codex_driver(ctx.runtime.clone(), ctx.fleet.clone(), ctx.codex.clone());
     let mut connections = JoinSet::new();
     let next = AtomicU64::new(1);
     loop {

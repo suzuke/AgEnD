@@ -1,6 +1,6 @@
 //! U17 foundation: real holder/wrapper/raw fake TUI/app-server/driver/SQLite.
 //! Foundation cases and a full diagnostic App/client/daemon path are distinct.
-//! The normal daemon's Codex policy remains denied; no real LLM is run.
+//! The normal daemon admits only the approved CLI version; no real LLM is run.
 #![cfg(unix)]
 #[path = "../../agend-daemon/tests/common/codex_process.rs"]
 mod codex;
@@ -348,12 +348,23 @@ fn full_u17_app_client_daemon_path_keeps_manual_and_daemon_turns_distinct() {
     app_path::full_path();
 }
 #[test]
+fn approved_cli_version_uses_the_normal_daemon_and_survives_restart() {
+    app_path::approved_full_path();
+}
+#[test]
 fn normal_daemon_does_not_enable_codex_input_from_probe_environment() {
     app_path::default_denied();
 }
 
 #[test]
 fn manual_text_cannot_confirm_an_attempted_row_in_the_u17_input_scope() {
+    attempted_receipts_after_restart(false);
+}
+#[test]
+fn strict_receipts_survive_restart_when_the_current_cli_is_denied() {
+    attempted_receipts_after_restart(true);
+}
+fn attempted_receipts_after_restart(deny_after_restart: bool) {
     let native = lab::Lab::with_prefix(Path::new(BIN), "g11u17id");
     let home = native.home(1);
     let instance = fixture(&native, &home);
@@ -384,8 +395,31 @@ fn manual_text_cannot_confirm_an_attempted_row_in_the_u17_input_scope() {
         boot.manual(&attach, &rendered).await;
         let mut observer = probe(&home, &thread);
         user_visible(&mut observer, &thread, &rendered).await;
+        let items = history::user_items(&turns(&mut observer, &thread));
+        assert!(
+            items
+                .iter()
+                .any(|(_, item)| item.text == rendered && item.client_id.is_none()),
+            "the real fake frontend must produce a manual item without clientId"
+        );
         drop(boot);
-        let boot = Boot::with_policy(&home, &instance, Some(holder), policy()).await;
+        let boot = Boot::with_policy(
+            &home,
+            &instance,
+            Some(holder),
+            if deny_after_restart {
+                agend_core::policy::codex_input::CodexInputPolicy::approved()
+            } else {
+                policy()
+            },
+        )
+        .await;
+        if deny_after_restart {
+            assert!(
+                !boot.driver.can_input(ID),
+                "unapproved 0.158.0 CLI admitted input"
+            );
+        }
         let row = boot.store.message(&sent.id).await.unwrap().unwrap();
         assert_ne!(
             row.state,
@@ -432,5 +466,92 @@ fn manual_text_cannot_confirm_an_attempted_row_in_the_u17_input_scope() {
         println!(
             "U17 attempted crash row: manual matching text has no receipt; own identified retry confirms once"
         );
+    });
+}
+
+#[test]
+fn failed_attribution_commit_never_starts_the_frontend_or_admits_input() {
+    let native = lab::Lab::with_prefix(Path::new(BIN), "g11u17db");
+    let home = native.home(1);
+    let instance = fixture_support::fixture_version(&native, &home, Some("codex-cli 0.159.3"));
+    let _socket = codex::BoundSocket::of(&home, ID);
+    run(async || {
+        {
+            let conn = rusqlite::Connection::open(home.join("agend.db")).unwrap();
+            conn.execute_batch("CREATE TRIGGER refuse_codex_input BEFORE INSERT ON codex_input_threads BEGIN SELECT RAISE(ABORT, 'test attribution failure'); END;").unwrap();
+        }
+        let store = Arc::new(SqliteStore::open(&home, 0).unwrap());
+        let runtime = HolderRuntime::new(
+            &home,
+            Path::new(BIN),
+            std::env::vars().collect(),
+            Arc::new(|_| {}),
+        );
+        let spawn = HolderLaunch {
+            instance_id: ID.into(),
+            backend: instance.backend,
+            executable: launch::SHELL.into(),
+            args: launch::wrapper_args(&home, &instance).unwrap(),
+            working_directory: instance.working_directory.clone(),
+        };
+        let started = runtime.start(&spawn).await.unwrap();
+        let driver = CodexDriver::with_input_policy(
+            &home,
+            store,
+            Arc::new(|_| {}),
+            agend_core::policy::codex_input::CodexInputPolicy::approved(),
+        );
+        let error = driver.connect(ID, started.generation).await.unwrap_err();
+        assert!(
+            error.contains("cannot establish thread receipt attribution"),
+            "{error}"
+        );
+        assert!(!driver.can_input(ID));
+        assert!(
+            !launch::go_path(&home, ID).exists(),
+            "frontend started before attribution commit"
+        );
+        assert_eq!(
+            launch::launched_version(&home, ID).unwrap().trim(),
+            "codex-cli 0.159.3"
+        );
+    });
+}
+
+#[test]
+fn newer_and_unknown_cli_versions_remain_read_only_in_the_normal_app() {
+    app_path::denied_version(Some("codex-cli 0.159.4"));
+    app_path::denied_version(Some(""));
+}
+
+#[test]
+fn missing_or_stale_launch_record_denies_input_after_reconnect() {
+    let native = lab::Lab::with_prefix(Path::new(BIN), "g11u17ver");
+    let home = native.home(1);
+    let instance = fixture_support::fixture_version(&native, &home, Some("codex-cli 0.159.3"));
+    let _socket = codex::BoundSocket::of(&home, ID);
+    run(async || {
+        let policy = agend_core::policy::codex_input::CodexInputPolicy::approved;
+        let boot = Boot::with_policy(&home, &instance, None, policy()).await;
+        assert!(boot.driver.can_input(ID));
+        let holder = files::running(&home, ID).unwrap().unwrap();
+        let thread = boot.thread().await;
+        let path = launch::version_path(&home, ID);
+        let original = std::fs::read_to_string(&path).unwrap();
+        // Corrupt an actual producer record, rather than inventing a positive frame.
+        std::fs::write(&path, original.replacen(&holder.to_string(), "0", 1)).unwrap();
+        assert!(launch::launched_version(&home, ID).is_none());
+        drop(boot);
+        let boot = Boot::with_policy(&home, &instance, Some(holder), policy()).await;
+        assert!(!boot.driver.can_input(ID));
+        assert_eq!(boot.thread().await, thread);
+        std::fs::remove_file(&path).unwrap();
+        drop(boot);
+        let boot = Boot::with_policy(&home, &instance, Some(holder), policy()).await;
+        assert!(!boot.driver.can_input(ID));
+        assert_eq!(boot.thread().await, thread);
+        drop(boot);
+        let conn = rusqlite::Connection::open(home.join("agend.db")).unwrap();
+        assert!(agend_daemon::store::codex_input::requires_identified(&conn, &thread).unwrap());
     });
 }

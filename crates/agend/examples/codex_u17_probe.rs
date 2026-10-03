@@ -33,5 +33,9 @@ fn main() {
     println!("== U17: full App/client/daemon/holder with fake Codex ==");
     app_path::default_denied();
     app_path::full_path();
-    println!("U17 fake full-path demo: all sections passed; live Codex remains unverified");
+    println!("== approved CLI: normal daemon and durable attribution ==");
+    app_path::approved_full_path();
+    println!(
+        "U17 fake full-path demo: all sections passed; real U17 evidence is recorded separately"
+    );
 }

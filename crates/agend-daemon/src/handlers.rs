@@ -50,8 +50,7 @@ pub const OPERATOR_ONLY: &str = "only the operator can resolve needs-you items; 
 /// What an agent gets for `terminal_input`.
 pub const TYPE_OPERATOR_ONLY: &str = "only the operator can type into an agent's terminal";
 /// What `terminal_input` into a codex instance gets.
-pub const CODEX_INPUT: &str =
-    "typing into a codex terminal waits until U17 is verified (gate 7 P1); nothing was written";
+pub const CODEX_INPUT: &str = "Codex terminal input requires the approved CLI 0.159.3 and a connected link with durable own-clientId receipts; nothing was written";
 /// Longest wait for a holder's answer to `Snapshot`.
 const SNAPSHOT_WITHIN: Duration = Duration::from_secs(5);
 
@@ -70,7 +69,7 @@ pub struct Context {
     pub exe: PathBuf,
     /// A restart preflight is running (only one at a time, gate 9 P7).
     pub restarting: AtomicBool,
-    /// Default denies all Codex input; diagnostic tools may scope U17 input.
+    /// Admission policy used when the driver connects; the live driver gates input.
     pub codex_input: agend_core::policy::codex_input::CodexInputPolicy,
 }
 
@@ -287,7 +286,7 @@ fn terminal_input(
         );
     };
     if view.backend == agend_core::model::Backend::Codex.as_str()
-        && !ctx.codex_input.allows_instance(&instance_id)
+        && !ctx.codex.can_input(&instance_id)
     {
         return refuse(error_code::NOT_SUPPORTED, CODEX_INPUT.into());
     }

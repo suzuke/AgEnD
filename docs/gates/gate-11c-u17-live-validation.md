@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - 使用者明確核准後，以 Codex CLI 0.159.3／gpt-6-luna／low 執行四個模型回合，U17 工具通過。
-> - 同 thread／holder、忙碌 Queue、idle Send、重啟後上下文與兩個自己的 receipt 均有原始證據；正式輸入仍未開放。
-> - 下一步：全新 verifier 核對，再由使用者確認是否只開放已驗版本；C 段仍待人工驗收與 merge。
+> - 同 thread／holder、忙碌 Queue、idle Send、重啟後上下文與兩個自己的 receipt 均有原始證據；此 run 的正式輸入仍未開放；後續已同意只開放 0.159.3。
+> - 下一步：原 run 已由全新 verifier 核實，使用者同意只開放 0.159.3；C 段仍待人工驗收與 merge。
 
 ## 固定範圍
 
@@ -32,7 +32,7 @@
 - 原 log 的 thread/queue/start 回 queue is empty：Codex 已自動消耗 queued item，隨後自己的 identified turn 確認；沒有追加重送或第二個 row。保留原錯誤行，供 verifier 核對競態。
 - record-sandbox.sh 內再啟 checks 的 sandbox-exec 被拒絕，兩次 boot 都印 checks unavailable。這次沒有跑 pipeline checks，不把 U17 通過算成 runner 沙箱通過。
 - App 事件由工具送入；實體鍵盤、Terminal／iTerm2／Linux 外觀與非美式鍵盤仍由人工驗收。
-- 正常 daemon 仍使用 CodexInputPolicy::default()，回 not_supported；這次只有指定 instance 的診斷 daemon 可以輸入。使用者核准四回合，不等於核准版本開放或 merge。
+- 此 run 的正常 daemon 使用 CodexInputPolicy::default()，回 not_supported；這次只有指定 instance 的診斷 daemon 可以輸入。使用者核准四回合，不等於核准版本開放或 merge。
 
 ## 可核對原始檔
 
@@ -40,6 +40,10 @@
 
 實作 head 7b9082d 的 push／PR Ubuntu／macOS 四個 CI jobs 均成功，各 892 passed／2 個既有 ignored，實際 no-std 通過；SHA256SUMS-ci-7b9082d 七 entries 保存原 logs／metadata／案例核對。新文件 head 的 CI 另核。
 
+## 後續確認
+
+固定 68e15c0 已由全新 verifier 核實：accept tui 597 passed／0 ignored，其餘 workspace 295 passed／2 既有 ignored，fmt／clippy／實際 thumb no-std 通過；文字 receipt mutant 被拒絕。四個 CI jobs 均成功。使用者同意只開放 0.159.3；[新實作](gate-11c-codex-input.md) 需另驗。
+
 ## 下一步
 
-派全新無相關 context verifier，核原 logs／session／source 與適用回歸。通過後提供結果及版本開放的具體範圍，再等使用者確認；人工驗收與 #145 merge 另行確認。
+核版本開放新 head verifier／CI，再逐步人工驗收；#145 merge 另行確認。

@@ -29,7 +29,7 @@
 
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -75,6 +75,8 @@ const CLOSE_WITHIN: Duration = Duration::from_secs(5);
 pub(crate) struct Shared {
     pub connected: AtomicBool,
     pub busy: AtomicBool,
+    pub input_allowed: AtomicBool,
+    pub holder_pid: AtomicU32,
     stopping: AtomicBool,
     /// The current connection's socket: closing the link shuts it down, so
     /// a thread blocked writing to a peer that does not read wakes up
@@ -149,6 +151,8 @@ impl Link {
     }
 
     fn stop(&mut self) {
+        self.shared.input_allowed.store(false, Ordering::SeqCst);
+        self.shared.connected.store(false, Ordering::SeqCst);
         self.shared.stopping.store(true, Ordering::SeqCst);
         self.commands.take();
         self.shared.shut_down();
@@ -267,6 +271,13 @@ impl Worker {
         };
         worker.initialize()?;
         Ok(worker)
+    }
+
+    /// Set only after the selected thread's persistent attribution is committed.
+    pub fn set_input_policy(&mut self, identified: bool, admitted: bool, holder_pid: u32) {
+        self.identified_receipts = identified;
+        self.shared.holder_pid.store(holder_pid, Ordering::SeqCst);
+        self.shared.input_allowed.store(admitted, Ordering::SeqCst);
     }
 
     fn initialize(&mut self) -> Result<(), RpcError> {
@@ -405,6 +416,10 @@ impl Worker {
                 return;
             }
             self.shared.connected.store(false, Ordering::SeqCst);
+            // A new RPC peer cannot inherit the previous peer's input admission.
+            // Receipt attribution remains strict; a fresh supervisor connect can
+            // establish admission again from the current holder launch record.
+            self.shared.input_allowed.store(false, Ordering::SeqCst);
             if self.stopping() {
                 return;
             }

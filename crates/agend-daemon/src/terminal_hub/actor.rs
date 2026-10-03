@@ -8,6 +8,7 @@ pub(super) struct Actor {
     pub(super) runtime: HolderRuntime,
     pub(super) fleet: Arc<Fleet>,
     pub(super) codex_input: agend_core::policy::codex_input::CodexInputPolicy,
+    pub(super) codex: Option<crate::driver::codex::CodexDriver>,
     pub(super) jobs: mpsc::Receiver<Job>,
     pub(super) views: BTreeMap<String, View>,
     pub(super) owner: Option<Owner>,
@@ -25,6 +26,12 @@ async fn notice(
     }
 }
 impl Actor {
+    pub(super) fn codex_input_allowed(&self) -> bool {
+        self.codex.as_ref().map_or_else(
+            || self.codex_input.allows_instance(&self.instance),
+            |driver| driver.can_input(&self.instance),
+        )
+    }
     pub(super) async fn run(mut self) {
         let mut tick = tokio::time::interval(Duration::from_millis(10));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -262,6 +269,15 @@ impl Actor {
             }
             Job::Control { scope, data } => self.control(scope, data).await,
             Job::Legacy { scope, line } => {
+                if self
+                    .fleet
+                    .instance(&self.instance)
+                    .is_some_and(|v| v.backend == "codex")
+                    && !self.codex_input_allowed()
+                {
+                    scope.send(error(None, "not_supported", CODEX_INPUT));
+                    return;
+                }
                 if self.owner.is_some() {
                     scope.send(error(None, "control_required", "another full-terminal view controls this PTY; acquire control before typing"));
                     return;

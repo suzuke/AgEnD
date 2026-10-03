@@ -63,3 +63,5 @@ agend --version
 ```bash
 cat docs/gates/gate-01-core.md
 ```
+
+第 11 施工關 C 段：[Codex 0.159.3 版本開放與永久 thread 歸屬](gate-11c-codex-input.md)。

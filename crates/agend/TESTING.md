@@ -14,7 +14,7 @@
 
 `cargo test -p agend --test terminal_runtime` 使用真 binary／holder／PTY 驗 runtime frame／control 配對、實際 resize、舊 owner 拒絕、取消 native blocked input 後憑證失效與 holder 重連、不重送、取消已到但未接收的 grant、唯讀查詢取消不打斷控制、整份超限拒絕及新 holder generation。這些尚不代表 daemon client 1.4／TUI／Codex U17 已完成。
 
-`terminal_capability` 對真 daemon 與 fake 以明確 1.3 hello 同驗能力拒絕、request id 與 agent 控制權拒絕順序。`terminal_hub` 的 8 個原生 cases 經真 daemon／holder／PTY 驗多視窗、EOF／停止、尺寸、歷史、dirty 尾段、正式 client 與 20 次開關；六項 C 契約已同跑 fake／native；`tui_daemon` 已接 C App 唯讀／取得控制／重連流程，Codex 尚維持拒絕。完整矩陣與 U17 待完成。
+terminal_capability 與 terminal_hub 驗能力／權限、控制／尺寸／歷史、EOF 與資源清理；六項 C 契約同跑 fake／native，完整 App 與 U17 已通過。版本許可的 11 個 native cases 只用 fake backend，真模型不在 CI 執行。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
 
 `tui_native_app` 的兩個情境經完整 App／真 daemon／holder 到 raw PTY 程序，逐 byte 核鍵鼠／paste 與超限拒絕，agent 內 stty size 核 resize，多視窗交接、>1,000 列歷史／clamp、alt 與 daemon 重啟不自動控制。20 次開關每次 thread／fd 回基準；[證據與重跑](../../docs/gates/gate-11c-native-app-validation.md)。
 
@@ -60,7 +60,7 @@ cargo test -p agend
 | `tests/client_protocol.rs`（第 9 施工關部分） | CLP-13..17 對真 daemon（見 testkit CONTRACTS）；`debug` 沒設 `AGEND_HOME` 改成跟其他命令同一句、exit 2；終端那段裡操作者送 agent 命令 `status` 現在是 `forbidden` |
 | `tests/client_protocol.rs`（第 11 施工關 B 段部分） | CLP-18..20 對真 daemon：再訂一次終端拿到有新輸出的畫面、不存在的 instance `no_terminal` 且舊串流停止、`terminal_input` 先查身分、`no_terminal`、操作者的位元組到 PTY（畫面回顯）；CLP-10 改成對沒有終端的 instance 送 `terminal_input` → `no_terminal` |
 | `tests/terminal_line_limits.rs` | 第 11 施工關 B 段 × 第 9 施工關 L17：終端路徑上最長的行（holder 1000×1000 全是 4 bytes 字元的畫面 4 MB、預設 50×200 約 40 KB、8 KiB 的 PTY 塊、最長的按鍵 `terminal_input`）都小於 `MAX_LINE_BYTES`；client 送的只有很短的行，大的行是 daemon → client，不受 8 MiB 限制 |
-| `tests/tui_daemon.rs` | 第 11 施工關 B 段：`App` 經 `ClientSource` 接真 `agend daemon`（home `/tmp/g11.t-<pid>-<n>`，一個計數的 agent、一個一起來就死的）：首頁 `沒有進行中的目標`、約 15 秒後不按鍵自己出現 `需要你 · 1`（帶 `新`）；展開有「不處理的話」與 `[1] 重試`，看過不消失、`1` → `已送出：重試 …`、`需要你 · 0`、daemon log `retry requested by the operator`；終端 `即時`、不按鍵計數器增加、`L` 換英文；`i` 輸入、`hello` 回顯、`Ctrl-]` 回到即時；`AGEND_INSTANCE` 的 app 打字與 `retry` 都 `forbidden`；daemon 重啟時斷線畫面、重連回到終端、計數器接著跑、首頁項目由全貌帶回；`agend app` 沒設 home 與非終端都 exit 2。codex instance（`fake_codex`）的 `terminal_input` → `not_supported`（等 U17）。各段與 `examples/tui_real.rs` 共用（`tests/common/tui_process.rs`） |
+| `tests/tui_daemon.rs` | 第 11 施工關 B 段：`App` 經 `ClientSource` 接真 `agend daemon`（home `/tmp/g11.t-<pid>-<n>`，一個計數的 agent、一個一起來就死的）：首頁 `沒有進行中的目標`、約 15 秒後不按鍵自己出現 `需要你 · 1`（帶 `新`）；展開有「不處理的話」與 `[1] 重試`，看過不消失、`1` → `已送出：重試 …`、`需要你 · 0`、daemon log `retry requested by the operator`；終端 `即時`、不按鍵計數器增加、`L` 換英文；`i` 輸入、`hello` 回顯、`Ctrl-]` 回到即時；`AGEND_INSTANCE` 的 app 打字與 `retry` 都 `forbidden`；daemon 重啟時斷線畫面、重連回到終端、計數器接著跑、首頁項目由全貌帶回；`agend app` 沒設 home 與非終端都 exit 2。codex instance（`fake_codex`）的 `terminal_input` → `not_supported`（fake 預設 0.158.0 未獲開放）。各段與 `examples/tui_real.rs` 共用（`tests/common/tui_process.rs`） |
 | `tests/holder_process.rs` | `agend holder`：啟動器結束後 holder 還在、四次獨立開機看到同一個 holder、重複啟動 exit 1、agent 的 TERM／HUP／INT／QUIT 無效、安全網、路徑太長拒絕（細節見 [agend-holder TESTING](../agend-holder/TESTING.md)） |
 
 ## CLI-n 表（第 9 施工關 P10）
@@ -118,7 +118,7 @@ cargo test -p agend
 
 C 段 CLP 拒絕案例同跑真 parser-backed fake 與真 daemon：agent caller 的 Acquire／Resize／Input／Release 全部 forbidden；之後核尺寸不變、原 owner 輸入仍可實收、拒絕 bytes 沒有進 consumer。
 
-U17 live 工具明確以 itemsView: full 分頁取完整 items；0.159.3 schema 預設僅 summary。0.159.3 首次四回合 U17 已通過；第四回合只核 receipt，版本開放仍待確認；[範圍](../../docs/gates/gate-11c-u17-live-validation.md)。
+U17 live 工具以 itemsView: full 分頁取完整 items。0.159.3 首次四回合已由獨立 verifier 核實，第四回合只核 receipt；使用者同意只開放 0.159.3。這次開放不增授權模型或 merge。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
 
 ## 下一步
 
