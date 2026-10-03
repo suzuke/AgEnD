@@ -50,7 +50,6 @@
 | D37 | needs-you 附 context recap（功能目標、目前的決定、在問什麼、之後會發生什麼）；core 只定型別，內容由 daemon 產生（第 11 施工關） | [d26-d37](decisions/d26-d37.md#d37) |
 | D38 | D32 延伸到 `PipelineState`（存快照、`restore` 檢查）與 binding 快照型別（搬到 core，shim 與 daemon 共用）；golden JSON 測試鎖格式，只准加欄位 | [d38](decisions/d38.md#d38) |
 | D39 | 完整終端由 holder 提供 frame；明確進入、連線控制權、mode-aware 輸入與版本相容；Codex 經完整 AgEnD 驗證後才開已驗版本 | [d39](decisions/d39.md#d39) |
-
 | D40 | 第 12A Claude 接入：閒置 channel／忙碌 Stop、P3／P4／P5＝A、明確 agend_ack、投遞不明停送及未終結保留；P9／P10 採建議 | [d40](decisions/d40.md#d40) |
 
 ## 來源衝突與處理
