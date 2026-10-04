@@ -34,6 +34,9 @@ pub fn settings_path(home: &Path, id: &str) -> PathBuf {
 pub fn args(home: &Path, instance: &Instance) -> Result<Vec<String>, String> {
     crate::store::instances::validate_id(&instance.id)?;
     let reserved = [
+        // User arguments precede the owned flags; an options terminator
+        // would put those flags in the positional argument tail.
+        "--",
         "--settings",
         "--setting-sources",
         "--permission-mode",
@@ -472,5 +475,28 @@ mod tests {
             assert!(args(dir.path(), &inst).unwrap_err().contains(arg));
         }
         assert_eq!(quote("/a 'b/agend"), "'/a '\\''b/agend'");
+    }
+
+    #[tokio::test]
+    async fn an_options_terminator_refuses_push_before_publishing_configuration() {
+        for supplied in [vec!["--"], vec!["--model", "haiku", "--"]] {
+            let dir = TempDir::new("g12-launch-terminator").unwrap();
+            let store = SqliteStore::open(dir.path(), 1).unwrap();
+            let mut inst = instance(dir.path());
+            inst.args = supplied.iter().map(|s| (*s).into()).collect();
+            assert!(args(dir.path(), &inst).is_err(), "{supplied:?}");
+            assert!(crate::supervisor::launch(dir.path(), &inst, false).is_err());
+            assert!(crate::supervisor::launch(dir.path(), &inst, true).is_err());
+            assert!(prepare_test(&store, dir.path(), &inst).await.is_err());
+            assert!(!settings_path(dir.path(), &inst.id).exists());
+            assert!(!dir.path().join("CLAUDE.md").exists());
+            assert!(!dir.path().join(".mcp.json").exists());
+
+            inst.delivery = "inbox".into();
+            prepare_test(&store, dir.path(), &inst).await.unwrap();
+            let launched = crate::supervisor::launch(dir.path(), &inst, false).unwrap();
+            assert_eq!(launched.args[..inst.args.len()], inst.args);
+            assert!(!settings_path(dir.path(), &inst.id).exists());
+        }
     }
 }

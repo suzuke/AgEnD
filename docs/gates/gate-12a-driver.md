@@ -13,7 +13,7 @@
 |---|---|---|
 | Driver | Claude push 的訊息 claim、重複 id 檢查、持久化事件游標；agent send 與 pipeline dispatch 經 backend router | 真 Claude 的收件與工作回報驗收 |
 | 啟動設定 | D40 旗標、六種 native hooks、channel MCP、ACK 說明；三個設定檔以 SHA-256 記 ownership，拒絕覆寫外來或已變更內容 | 選定真 CLI 版本驗收 |
-| 持久化 | 未發布的 0008 保存設定檔 ownership；schema fixture／snapshot／retention 同步；ACK 事件使用獨立 id，避免與 hook id 撞號 | 全工作區檢查與最後驗證 |
+| 持久化 | 未發布的 0008 保存設定檔 ownership；schema fixture／snapshot／retention 同步；ACK 事件使用獨立 id，避免與 hook id 撞號 | 最後獨立驗證 |
 | 忙碌中斷 | holder 1.2 的單鍵控制；Steer／Interrupt 發單一 Esc，再走 channel；人工 owner 拒絕時保留訊息 | 選定真 CLI 的 Esc／channel 行為 |
 | 人工終結 | 結果不明顯示 `claude-delivery:<message-id>`；`abandon` 限人操作，保存理由並改 failed；晚到有效 ACK 與放棄在 DB thread 核對 | fresh verifier 與人工驗收 |
 | 忙閒 | hooks 的 busy／idle 候選、五秒穩定與 live screen gate | SessionStart 必須與啟動完成共同判定；版本化提示 fixtures 與 Down／Enter |
@@ -27,12 +27,13 @@
 
 | 命令 | 結果與邊界 |
 |---|---|
-| `cargo test -p agend-daemon --lib driver::claude` | 16 cases 通過：7 個設定檔、6 個 Driver／SQLite、3 個清掃案例 |
+| `cargo test -p agend-daemon --lib driver::claude` | 修正後 17 cases 通過：8 個設定檔、6 個 Driver／SQLite、3 個清掃案例 |
 | `cargo test -p agend --test claude_process` | 3 cases 通過：在線／下次開機清掃、存活 holder 保護、設定衝突的三次重試及 failed |
 | `cargo test -p agend --test claude_bridge` | 全檔 26 個測試入口通過：25 個回歸及 1 個子程序入口；共用 DRV-1–9 另有十個案例，沒有將子程序入口算成獨立證據 |
 | `cargo xtask demo adapters` | 通過；共用上述 16 個 Driver 單元、3 個 native process 與 26 個 bridge 測試入口；不執行真 CLI／模型 |
 | `cargo test -p xtask` | 通過；含 additive protocol 與 workflow wire format 回歸 |
-| `cargo test --workspace` | 尚在執行；不以已完成的局部結果代替整體通過 |
+| `cargo test --workspace` | 檢查點 `afe5188` 全部測試結果通過：992 個測試函式、0 failed、2 個既有 deep explorer ignored；包含子程序入口，不等於 992 個獨立行為案例 |
+| `cargo test -p agend-daemon` | options terminator 修正後 exit 0；整個改動 crate 重跑通過 |
 | `cargo xtask accept core` | 通過：core、protocol 相容性與實際 no-std；原本兩項 deep explorer ignored 不算通過 |
 | `cargo fmt --all -- --check` | 通過 |
 | `cargo clippy --workspace --all-targets -- -D warnings` | 通過 |
@@ -48,7 +49,9 @@ pipeline 的 `dispatch:<ticket>`／reviewer 派工 id 保留原值，ACK 接受�
 
 遺失 Esc 回覆案例讓真 holder／PTY 收到一次 Esc，再丟掉其原生 completion；四次開機保持同一投遞識別碼與結果不明，沒有寫 content、沒有第二次 Esc。測試代理會還原 socket，holder／helper／home 都由 fixture 清理。
 
-上述檢查尚未取代 [完整驗收計畫](gate-12a-validation.md)，也尚未交由全新無相關 context 的 verifier 重跑。
+全新無相關 context 的 checkpoint verifier 對 `afe5188` 重跑 native demo／實際 no-std 通過，但找出 instance args 中的 `--` 能把 daemon-owned 旗標移到 options terminator 後方；原 head 判有缺陷。作者先重現回歸 exit 101，再拒絕 `--`，驗證 fresh／resume 均拒絕、拒絕時不建立三個設定檔；inbox 保持原路徑。修正後 17 個 Driver 單元、整個 daemon crate、workspace clippy 與實際 no-std 通過。必要反例與最新成功 log 保存於 `/Users/suzuke/Documents/Hack/AgEnD-ops/g12a-native-checkpoint-20261005/`；修正版獨立驗證及 CI 另核。
+
+上述檢查尚未取代 [完整驗收計畫](gate-12a-validation.md)。Draft [#151](https://github.com/suzuke/AgEnD/pull/151) 仍在施工，完整 12A 完成後須再交全新 verifier。
 
 ## 開發重驗
 

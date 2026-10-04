@@ -127,3 +127,7 @@
 - 2026-10-05：實際 Claude Driver 的 agent send／native channel／ACK 回歸通過；四個 daemon 程序不重送，另用新 HOME 證明獨立送達。accept core（含 protocol 相容性及實際 no-std）通過；workspace 首次在 retry 舊啟動參數斷言失敗，納入完整 D40 旗標後單例通過，完整重跑中（同工作分支，未提交／未 merge）。
 
 - 2026-10-05：Driver 施工補通 pipeline 原 dispatch id 的 native ACK，通用回條只觀察、task 完成不代確認。完整 Git task／review／人工核准／single merge 經四個 daemon 通過；共用 DRV-1–9 十個案例經獨立 composition processes 通過，新 HOME 反向在 boot 2 失敗；真 Esc completion 遺失的四次開機不重送。最新 workspace 回歸收尾中；啟動提示與真 CLI 仍待授權及驗收（同工作分支，未提交／未 merge）。
+
+- 2026-10-05：native Driver 檢查點 `afe5188` 已推送並建立 draft #151；統一 `demo adapters` 通過，workspace 結果為 992 個測試函式通過／0 failed／2 既有 ignored（子程序入口不算獨立行為證據）。實際 no-std、clippy、fmt 通過；全新 verifier 及 Ubuntu／macOS CI 進行中。12A 啟動提示、真 CLI 版本／PATH／ACK 驗收仍待完成，尚不可 merge。
+
+- 2026-10-05：#151 的全新 checkpoint verifier 找出 `--` options terminator 使 owned 旗標落入 positional tail；原反例保留。拒絕 terminator 後，17 Driver 單元、整個 daemon crate、workspace clippy／fmt／實際 no-std 通過；修正版獨立驗證與 CI 待核。必要作者證據移至 AgEnD-ops，5 份被最新結果取代的成功 log 刪除，native fixture 目錄查無殘留；施工 target／worktree 保留，完整 12A 未完成。
