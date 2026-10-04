@@ -40,7 +40,7 @@ legacy 9 MiB 純文字畫面的測試保留。`agend-holder` 只作 dev-dependen
 
 ## 第 12A client 基礎
 
-第 12A 的 `tests/once.rs` 使用 FakeDaemon 的真正 protocol producer，經 native Unix socket／Proxy 驗成功、舊版本拒絕、無 daemon／過期期限立即失敗、hello 與 reply 共用期限、回覆遺失只送一次、逐 byte 慢 hello 不延長期限、超限回覆提早拒絕，以及無 request id 請求先拒絕。`once::tests` 用真 Unix socket pair 與小 send buffer 驗已寫前綴後逾時，沒有補寫或重送。
+第 12A 的 `tests/once.rs` 使用 FakeDaemon 的真正 protocol producer，經 native Unix socket／Proxy 驗成功、舊版本拒絕、無 daemon／過期期限立即失敗、hello 與 reply 共用期限、回覆遺失只送一次、逐 byte 慢 hello 不延長期限、超限回覆提早拒絕，以及無 request id 請求先拒絕。`once::tests` 用真 Unix socket pair 與小 send buffer 驗已寫前綴後逾時，沒有補寫或重送。另以 32 MiB 的 send／ask／workflow／request id／caller 驗本機提早拒絕，控制字元大量 escaping 驗編碼期限，不連線或送出前綴。原 verifier 的預編碼超時反例保留；修正版另驗。
 
 ```bash
 cargo test -p agend-client --test once --lib

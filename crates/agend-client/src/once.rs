@@ -14,6 +14,8 @@ use socket2::{Domain, SockAddr, Socket, Type};
 
 use crate::{ClientError, connection::request_id, version};
 
+mod prepare;
+
 fn remaining(deadline: Instant) -> io::Result<std::time::Duration> {
     let left = deadline.saturating_duration_since(Instant::now());
     if left.is_zero() {
@@ -25,15 +27,41 @@ fn remaining(deadline: Instant) -> io::Result<std::time::Duration> {
     Ok(left)
 }
 
-fn write(stream: &mut UnixStream, request: &ClientRequest, deadline: Instant) -> io::Result<()> {
-    let mut line = serde_json::to_vec(request).expect("protocol types serialize");
-    line.push(b'\n');
-    if line.len() > MAX_LINE_BYTES {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "request exceeds protocol line limit",
-        ));
+struct Encoding {
+    line: Vec<u8>,
+    deadline: Instant,
+}
+
+impl Write for Encoding {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        remaining(self.deadline)?;
+        if bytes.len() > MAX_LINE_BYTES.saturating_sub(self.line.len()) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "request exceeds protocol line limit",
+            ));
+        }
+        self.line.extend_from_slice(bytes);
+        Ok(bytes.len())
     }
+    fn flush(&mut self) -> io::Result<()> {
+        remaining(self.deadline).map(|_| ())
+    }
+}
+
+fn encode(request: &ClientRequest, deadline: Instant) -> io::Result<Vec<u8>> {
+    prepare::check(request, deadline)?;
+    let mut encoding = Encoding {
+        line: Vec::new(),
+        deadline,
+    };
+    serde_json::to_writer(&mut encoding, request)
+        .map_err(|e| io::Error::new(e.io_error_kind().unwrap_or(io::ErrorKind::InvalidData), e))?;
+    encoding.write_all(b"\n")?;
+    Ok(encoding.line)
+}
+
+fn write(stream: &mut UnixStream, line: &[u8], deadline: Instant) -> io::Result<()> {
     let mut sent = 0;
     while sent < line.len() {
         stream.set_write_timeout(Some(remaining(deadline)?))?;
@@ -75,8 +103,10 @@ fn read(reader: &mut BufReader<UnixStream>, deadline: Instant) -> io::Result<Cli
                 line.clear();
                 continue;
             }
-            return serde_json::from_slice(&line)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e));
+            let response = serde_json::from_slice(&line)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            remaining(deadline)?;
+            return Ok(response);
         }
     }
 }
@@ -110,6 +140,15 @@ pub fn exchange_once(
         code: error_code::INVALID_REQUEST.into(),
         message: "one-shot exchange requires a correlated RPC".into(),
     })?;
+    let preparation_error = |e: io::Error| {
+        ClientError::Disconnected(format!(
+            "one-shot preparation failed; request was not sent: {e}"
+        ))
+    };
+    // Prepare bounded lines before opening a socket. Oversized strings
+    // cannot spend the deadline scanning JSON or allocate an unbounded Vec.
+    let line = encode(request, deadline).map_err(preparation_error)?;
+    let hello = encode(&ClientRequest::hello_as(caller), deadline).map_err(preparation_error)?;
     let connect_error = |e: io::Error| ClientError::Connect {
         socket: socket.to_owned(),
         cause: e.to_string(),
@@ -127,7 +166,7 @@ pub fn exchange_once(
     .map_err(connect_error)?;
     let mut stream = UnixStream::from(std::os::fd::OwnedFd::from(conn));
     let mut reader = BufReader::new(stream.try_clone().map_err(connect_error)?);
-    write(&mut stream, &ClientRequest::hello_as(caller), deadline).map_err(connect_error)?;
+    write(&mut stream, &hello, deadline).map_err(connect_error)?;
     match read(&mut reader, deadline).map_err(connect_error)? {
         ClientResponse::Hello { data } => {
             version::check_at_least(data.selected, needed).map_err(ClientError::Version)?;
@@ -141,7 +180,7 @@ pub fn exchange_once(
             }));
         }
     }
-    write(&mut stream, request, deadline).map_err(transport_error)?;
+    write(&mut stream, &line, deadline).map_err(transport_error)?;
     loop {
         let response = read(&mut reader, deadline).map_err(transport_error)?;
         let matches = match &response {
@@ -183,8 +222,9 @@ mod tests {
         socket2::SockRef::from(&stream)
             .set_send_buffer_size(4096)
             .unwrap();
+        let encoded = encode(&request, Instant::now() + Duration::from_secs(2)).unwrap();
         let start = Instant::now();
-        let error = write(&mut stream, &request, start + Duration::from_millis(100)).unwrap_err();
+        let error = write(&mut stream, &encoded, start + Duration::from_millis(100)).unwrap_err();
         assert!(
             matches!(
                 error.kind(),
@@ -196,7 +236,6 @@ mod tests {
         peer.set_nonblocking(true).unwrap();
         let mut bytes = Vec::new();
         let _ = std::io::Read::read_to_end(&mut peer, &mut bytes);
-        let encoded = serde_json::to_vec(&request).unwrap();
         assert!(!bytes.is_empty());
         assert!(bytes.len() < encoded.len());
         assert_eq!(bytes, encoded[..bytes.len()]);

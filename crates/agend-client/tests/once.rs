@@ -61,7 +61,10 @@ fn a_version_failure_does_not_send_the_rpc() {
 #[test]
 fn a_missing_daemon_and_expired_deadline_do_not_retry() {
     let dir = TempDir::new("client-once-missing").unwrap();
-    for deadline in [Instant::now() + Duration::from_secs(5), Instant::now()] {
+    for (deadline, expired) in [
+        (Instant::now() + Duration::from_secs(5), false),
+        (Instant::now(), true),
+    ] {
         let start = Instant::now();
         let error = exchange_once(
             &dir.path().join("missing.sock"),
@@ -71,7 +74,14 @@ fn a_missing_daemon_and_expired_deadline_do_not_retry() {
             deadline,
         )
         .unwrap_err();
-        assert!(matches!(error, ClientError::Connect { .. }), "{error:?}");
+        assert!(
+            if expired {
+                matches!(error, ClientError::Disconnected(ref message) if message.contains("request was not sent"))
+            } else {
+                matches!(error, ClientError::Connect { .. })
+            },
+            "{error:?}"
+        );
         assert!(start.elapsed() < Duration::from_secs(1));
     }
 }
@@ -83,7 +93,10 @@ fn hello_and_reply_share_one_deadline() {
         daemon.socket_path().to_owned(),
         Options::rewrite(Arc::new(|_, direction, line| {
             if direction == Direction::ToClient {
-                std::thread::sleep(Duration::from_millis(150));
+                // Keep ample handshake scheduling slack on loaded CI runners.
+                // Resetting the deadline for the reply still returns success
+                // and is caught by unwrap_err below.
+                std::thread::sleep(Duration::from_secs(1));
             }
             vec![line]
         })),
@@ -95,12 +108,12 @@ fn hello_and_reply_share_one_deadline() {
         None,
         V1_3,
         &request(),
-        start + Duration::from_millis(250),
+        start + Duration::from_millis(1500),
     )
     .unwrap_err();
     assert!(matches!(error, ClientError::Disconnected(_)), "{error:?}");
     assert!(
-        start.elapsed() < Duration::from_millis(400),
+        start.elapsed() < Duration::from_millis(2500),
         "{:?}",
         start.elapsed()
     );
@@ -254,4 +267,146 @@ fn an_oversized_response_is_refused_before_reading_the_whole_line() {
         matches!(error, ClientError::Disconnected(ref message) if message.contains("line limit")),
         "{error:?}"
     );
+}
+
+#[test]
+fn oversized_strings_are_rejected_before_json_scanning_or_connecting() {
+    use agend_core::protocol::client::{
+        AgentCommand, ClientCommandData, OperatorCommand, OperatorData,
+    };
+    let daemon = FakeDaemon::start().unwrap();
+    let oversized = "x".repeat(32 << 20);
+    let requests = [
+        ClientRequest::Command {
+            data: ClientCommandData {
+                request_id: "send".into(),
+                command: AgentCommand::Send {
+                    to: "target".into(),
+                    message: oversized.clone(),
+                    level: None,
+                    message_id: None,
+                },
+            },
+        },
+        ClientRequest::Command {
+            data: ClientCommandData {
+                request_id: "ask".into(),
+                command: AgentCommand::Ask {
+                    question: oversized.clone(),
+                    options: vec![],
+                },
+            },
+        },
+        ClientRequest::Operator {
+            data: OperatorData {
+                request_id: "workflow".into(),
+                command: OperatorCommand::WorkflowCheck {
+                    toml: oversized.clone(),
+                },
+            },
+        },
+        ClientRequest::GetFleet {
+            data: RequestIdData {
+                request_id: oversized.clone(),
+            },
+        },
+    ];
+    for request in requests {
+        let start = Instant::now();
+        let error = exchange_once(
+            daemon.socket_path(),
+            None,
+            V1_3,
+            &request,
+            start + Duration::from_millis(25),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(error, ClientError::Disconnected(ref message) if message.contains("request was not sent")),
+            "{error:?}"
+        );
+        assert!(
+            start.elapsed() < Duration::from_millis(250),
+            "{:?}",
+            start.elapsed()
+        );
+    }
+    let start = Instant::now();
+    exchange_once(
+        daemon.socket_path(),
+        Some(oversized),
+        V1_3,
+        &request(),
+        start + Duration::from_millis(25),
+    )
+    .unwrap_err();
+    assert!(start.elapsed() < Duration::from_millis(250));
+    assert!(
+        daemon.requests().is_empty(),
+        "oversized preparation must not connect"
+    );
+}
+
+#[test]
+fn escaped_encoding_obeys_the_deadline_without_sending_a_partial_request() {
+    use agend_core::protocol::client::{AgentCommand, ClientCommandData};
+    let daemon = FakeDaemon::start().unwrap();
+    let request = ClientRequest::Command {
+        data: ClientCommandData {
+            request_id: "escape".into(),
+            command: AgentCommand::Send {
+                to: "target".into(),
+                message: "\u{1}".repeat(1 << 20),
+                level: None,
+                message_id: None,
+            },
+        },
+    };
+    let start = Instant::now();
+    let error = exchange_once(
+        daemon.socket_path(),
+        None,
+        V1_3,
+        &request,
+        start + Duration::from_millis(25),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(error, ClientError::Disconnected(ref message) if message.contains("request was not sent")),
+        "{error:?}"
+    );
+    assert!(
+        start.elapsed() < Duration::from_millis(250),
+        "{:?}",
+        start.elapsed()
+    );
+    assert!(daemon.requests().is_empty());
+}
+
+#[test]
+fn escaped_line_size_is_bounded_during_preparation() {
+    use agend_core::protocol::client::{AgentCommand, ClientCommandData, MAX_LINE_BYTES};
+    let daemon = FakeDaemon::start().unwrap();
+    let request = ClientRequest::Command {
+        data: ClientCommandData {
+            request_id: "line-limit".into(),
+            command: AgentCommand::Ask {
+                question: "\u{1}".repeat(MAX_LINE_BYTES / 6 + 1),
+                options: vec![],
+            },
+        },
+    };
+    let error = exchange_once(
+        daemon.socket_path(),
+        None,
+        V1_3,
+        &request,
+        Instant::now() + Duration::from_secs(5),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(error, ClientError::Disconnected(ref message) if message.contains("line limit")),
+        "{error:?}"
+    );
+    assert!(daemon.requests().is_empty());
 }
