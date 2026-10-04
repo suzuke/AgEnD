@@ -26,11 +26,11 @@ B／C／D 仍未實作；四段原提案的歷史參考保留在 `74ced40`，不
 |---|---|---|
 | 第 9、10 關尚未實作，11 尚未完成 | 第 1–11 關已完成 | 使用現有 CLI、pipeline、完整終端契約 |
 | Claude 請求預定放 protocol 1.4 | 1.4 已是完整終端 capability，一般請求仍只需 1.3 | P1 已採下一 minor 1.5；保留 1.3／1.4 相容性，精確 schema 待實作稿 |
-| 下一個 migration 可能是 0005 | 已有 0005 pipeline 與 0006 Codex 人工輸入 thread | P7 開工時取下一空號；目前為 0007，尚未新增 |
+| 下一個 migration 可能是 0005 | 已有 0005 pipeline 與 0006 Codex 人工輸入 thread | P7 已新增 0007 的事件／投遞表與 store API；runtime 尚未串接 |
 | ingest 的 spool 已經寫好 | `ingest.rs` 與 `driver/claude.rs` 都只有模組說明 | bridge、hooks、spool 與 Claude Driver 接入仍須實作 |
 | 手動逐步驗收大部分 fake 行為 | 使用者要求可自動化的驗證由 agent 執行，完成後清理 | fresh verifier 重跑，提供可重驗指令；真 CLI／模型回合另需授權 |
 
-此表對齊目前程式與已確認設計；1.5 尚未實作，0007 尚未建立，不能視為功能驗收通過。
+此表對齊目前程式與已確認設計；0007 與 store API 已實作，尚待本批驗證與 merge；1.5／runtime 尚未接入，不能視為 A 段功能驗收通過。
 
 ## P1–P10 決策入口
 

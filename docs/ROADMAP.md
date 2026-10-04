@@ -106,3 +106,5 @@
 - 2026-10-04：`6193ea4` 全新 verifier REFUTED：event-only DB 快照被誤判空資料庫；保留失敗 log，修正 daily snapshot 判斷並保持原回歸，補 instance 移除／500 天後快照還原 ACK；daemon 162 passed／0 ignored、workspace clippy／fmt／實際 no-std 通過，另一位全新 verifier／CI 重驗（#148；未 merge）。
 
 - 2026-10-04：`2af0473` 全新 verifier REFUTED：README 誤稱一般 messages 單表也算快照非空；獨立 native probe 核 Codex push／Claude inbox 皆不符。保留反例，修正文件並明示既有行為不變，第三位全新 verifier／固定 head CI 另核（#148；未 merge）。
+
+- 2026-10-04：`4c5e76b` 全新 verifier REFUTED：名詞表仍稱事件表待新增與保留實作未變；保留反例，同步名詞表、0007／schema 入口與完整接入計畫，明示 store 已實作、runtime 尚待接入，修正版另由全新 verifier／CI 覆核（#148；未 merge）。

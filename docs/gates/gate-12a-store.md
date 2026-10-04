@@ -31,7 +31,7 @@ legacy Claude push 訊息若已有 attempted_at 卻無投遞 tuple，視為結�
 
 ## 事件與保留
 
-同 event id 的原 instance／session／kind／payload bytes／source time 不變則回原 seq；replayed 是傳输 metadata，重送時可不同，第一次保存值不變。不同內容拒絕。讀取依 seq、limit 1–1024；事件去重只在 14 天紀錄存在期間成立，不能替代未同步 spool 或 ACK 資料。
+同 event id 的原 instance／session／kind／payload bytes／source time 不變則回原 seq；replayed 是傳輸 metadata，重送時可不同，第一次保存值不變。不同內容拒絕。讀取依 seq、limit 1–1024；事件去重只在 14 天紀錄存在期間成立，不能替代未同步 spool 或 ACK 資料。
 
 | 資料 | 保留規則 |
 |---|---|
