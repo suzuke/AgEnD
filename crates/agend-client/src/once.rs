@@ -390,6 +390,115 @@ mod tests {
     }
 
     #[test]
+    fn nested_ask_options_do_not_leave_an_unchecked_content_conversion() {
+        use agend_core::protocol::{ask::*, client::RequestIdData};
+        use agend_testkit::fake_daemon::{FakeDaemon, ProbeClient};
+        let daemon = FakeDaemon::start().unwrap();
+        daemon.open_ask(
+            AskThread {
+                ask_id: "large-options".into(),
+                task_id: None,
+                entries: vec![AskEntry::Question {
+                    from: "dev".into(),
+                    text: "options".into(),
+                    options: vec![String::new(); 2_785_000],
+                }],
+            },
+            None,
+        );
+        let (mut source, _) = ProbeClient::hello(daemon.socket_path(), None).unwrap();
+        let response = source
+            .request(&ClientRequest::GetFleet {
+                data: RequestIdData {
+                    request_id: "nested".into(),
+                },
+            })
+            .unwrap();
+        let bytes = serde_json::to_vec(&serde_json::to_value(&response).unwrap()).unwrap();
+        assert!(bytes.len() < MAX_LINE_BYTES);
+        drop(response);
+        drop(source);
+        drop(daemon);
+        for budget in [875, 890, 900, 925] {
+            let start = Instant::now();
+            let result = decode::response(&bytes, start + Duration::from_millis(budget));
+            assert!(
+                start.elapsed() < Duration::from_millis(budget + 100),
+                "budget={budget}, elapsed={:?}",
+                start.elapsed()
+            );
+            drop(result);
+        }
+    }
+
+    #[test]
+    fn staged_nested_ask_decoder_matches_the_real_producer() {
+        use agend_core::protocol::{ask::*, client::RequestIdData};
+        use agend_testkit::fake_daemon::{FakeDaemon, ProbeClient};
+        let daemon = FakeDaemon::start().unwrap();
+        daemon.open_ask(
+            AskThread {
+                ask_id: "conversation".into(),
+                task_id: Some("task".into()),
+                entries: vec![
+                    AskEntry::Question {
+                        from: "dev".into(),
+                        text: "繁中é".into(),
+                        options: vec!["choice".into()],
+                    },
+                    AskEntry::Answer {
+                        from: "operator".into(),
+                        source: AnswerSource::Cli,
+                        reply: AskReply::Choice {
+                            option: "choice".into(),
+                        },
+                    },
+                    AskEntry::FollowUp {
+                        from: "dev".into(),
+                        text: "follow up".into(),
+                        options: vec![],
+                    },
+                    AskEntry::Answer {
+                        from: "operator".into(),
+                        source: AnswerSource::Tui,
+                        reply: AskReply::Text {
+                            text: "答覆".into(),
+                        },
+                    },
+                    AskEntry::Answer {
+                        from: "operator".into(),
+                        source: AnswerSource::Unknown,
+                        reply: AskReply::Unknown,
+                    },
+                    AskEntry::Resolution {
+                        from: "dev".into(),
+                        summary: "resolved".into(),
+                    },
+                    AskEntry::Unknown,
+                ],
+            },
+            None,
+        );
+        let (mut source, _) = ProbeClient::hello(daemon.socket_path(), None).unwrap();
+        let response = source
+            .request(&ClientRequest::GetFleet {
+                data: RequestIdData {
+                    request_id: "ask".into(),
+                },
+            })
+            .unwrap();
+        for bytes in [
+            serde_json::to_vec(&response).unwrap(),
+            serde_json::to_vec(&serde_json::to_value(&response).unwrap()).unwrap(),
+        ] {
+            assert_eq!(
+                decode::response(&bytes, Instant::now() + Duration::from_secs(2)).unwrap(),
+                response
+            );
+        }
+    }
+
+    #[test]
     fn a_partial_write_stops_at_the_deadline() {
         let (mut stream, mut peer) = UnixStream::pair().unwrap();
         let request = ClientRequest::Command {

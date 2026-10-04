@@ -8,6 +8,8 @@ use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::value::RawValue;
 use std::{io, time::Instant};
 
+mod fleet;
+
 #[derive(Deserialize)]
 struct Envelope {
     #[serde(rename = "type")]
@@ -86,7 +88,7 @@ pub(super) fn response(bytes: &[u8], deadline: Instant) -> io::Result<ClientResp
             data: data(envelope.data, deadline)?,
         },
         "fleet" => ClientResponse::Fleet {
-            data: data(envelope.data, deadline)?,
+            data: fleet::decode(envelope.data, deadline)?,
         },
         "error" => ClientResponse::Error {
             data: data(envelope.data, deadline)?,
