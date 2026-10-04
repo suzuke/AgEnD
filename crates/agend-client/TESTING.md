@@ -38,6 +38,16 @@ legacy 9 MiB 純文字畫面的測試保留。`agend-holder` 只作 dev-dependen
 | `answer_ask_reaches_the_daemon_and_unknown_asks_are_refused` | `answer_ask` 被接受；沒有的請示 → `unknown_ask` |
 | `events_follow_the_fleet_view_and_a_bad_cursor_is_a_gap` | 全貌之後的事件連號；等回應時讀到的事件留給 `next_event`；壞游標 → `event_gap`；daemon 關掉 → `Disconnected` |
 
+## 第 12A client 基礎
+
+第 12A 的 `tests/once.rs` 使用 FakeDaemon 的真正 protocol producer，經 native Unix socket／Proxy 驗成功、舊版本拒絕、無 daemon／過期期限立即失敗、hello 與 reply 共用期限、回覆遺失只送一次、逐 byte 慢 hello 不延長期限、超限回覆提早拒絕，以及無 request id 請求先拒絕。`once::tests` 用真 Unix socket pair 與小 send buffer 驗已寫前綴後逾時，沒有補寫或重送。
+
+```bash
+cargo test -p agend-client --test once --lib
+```
+
+這些測試只驗新 client 基礎，尚未證明 Claude channel／Stop／ACK 或第 12A 完成。
+
 ## 用到的假實作
 
 - `agend_testkit::fake_daemon::FakeDaemon`（`start_at` 在同一個路徑重啟）

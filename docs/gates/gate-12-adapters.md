@@ -1,19 +1,19 @@
 # 第 12 施工關：其餘 adapter（`adapters`）
 
 > **TL;DR**
-> - A claude、B opencode、C GitHub forge、D Telegram；目前只有 A 段開工前提案 P1–P10。
-> - 第 1–11 施工關已完成並合併；#138 整理自目前 v2，P1–P10 已確認，記為 D40；功能尚未實作。
-> - 下一步：驗證決策文件、提供重驗指令；提案 merge 與 A 段實作另行安排。
+> - A claude、B opencode、C GitHub forge、D Telegram；A 段已開始實作，接入尚未完成。
+> - 第 1–11 施工關已完成並合併；A 段設計 D40 已於 #138 合併（`4390633`）。
+> - 下一步：先完成單次 client 請求基礎，再串接持久化、channel／Stop 與明確 ACK。
 
 ## 狀態
 
-**提案中**（A 段 P1–P10 設計已確認，2026-10-04，[draft PR #138](https://github.com/suzuke/AgEnD/pull/138)）。使用者已逐項確認並指示剩餘依建議；設計見 [D40](../decisions/d40.md)，來源見[確認紀錄](gate-12a-confirmations.md)。本次只記錄設計、push 與 CI；Claude driver 尚未實作，merge 仍待明確確認。第 11C #145 已 merge，本次 baseline 是文件 #146 合併後的 `d21d344`。
+**實作中**（2026-10-04）。使用者「merge後開工」已執行：[PR #138](https://github.com/suzuke/AgEnD/pull/138) 設計文件合併為 `4390633`，實作在 `feat/gate-12a-claude` 的獨立 worktree 進行。設計見 [D40](../decisions/d40.md)，來源見[確認紀錄](gate-12a-confirmations.md)。首批建立不重送的 client 請求基礎；Claude driver、channel／Stop／ACK 與 A 段驗收尚待完成。implementation merge 仍等使用者確認。
 
 ## 四段範圍
 
 | 段 | 範圍 | 目前進度 |
 |---|---|---|
-| A claude | channel、hooks、啟動設定、權限、忙碌策略、送達、清掃 | P1–P10 設計已確認，待實作與驗收 |
+| A claude | channel、hooks、啟動設定、權限、忙碌策略、送達、清掃 | 設計已 merge；client 基礎實作中，Claude 接入與驗收未完成 |
 | B opencode | `opencode serve`、session、送達與權限；三個 backend 互傳訊息 | A 段完成後另寫細案，尚未確認 |
 | C GitHub forge | push、PR、checks、head 對帳、merge 與收尾 | 第 10 關依賴已完成，細案尚未確認 |
 | D Telegram | notifier、allowlist、token、手機處理需要你、G4 已讀狀態 | 第 10 關依賴已完成，細案尚未確認 |
@@ -69,6 +69,7 @@ A 段尚未實作，目前沒有可執行的功能驗收指令。[驗收計畫](
 
 ## 進度紀錄
 
+- 2026-10-04：使用者確認 merge 後開工，#138 合併為 `4390633`；在 `feat/gate-12a-claude` 建立單次 client 請求基礎，Claude 接入與驗收未完成。
 - 2026-10-04 P1–P10 設計確認寫定為 [D40](../decisions/d40.md)，保留 P3／P4／P5＝A，P9／P10 及剩餘參數採建議；#138 本批只改文件，fresh verifier／固定 head CI 另核，尚未 merge 或實作。以下保留各批次當時狀態。
 
 - 2026-10-03 使用者授權先整理 #138；對齊第 1–11 關已完成的 v2、拆頁並保留 F1–F10 原範圍。P1–P10 仍待決定，不包含提案 merge 或實作授權。
@@ -77,4 +78,4 @@ A 段尚未實作，目前沒有可執行的功能驗收指令。[驗收計畫](
 
 ## 下一步
 
-核對 [D40](../decisions/d40.md) 與確認紀錄，完成全新 verifier 與固定 head CI，提供文件重驗指令；merge 等使用者確認。
+依已合併 [D40](../decisions/d40.md) 實作 Claude 接入；首批先建立 client 單次請求基礎，接著串接持久化、channel／Stop 與明確 ACK。完成後提供全新 verifier 與可重驗指令，implementation merge 等使用者確認。

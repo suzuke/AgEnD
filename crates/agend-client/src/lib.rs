@@ -23,6 +23,7 @@
 //! 0.014 ms, plan §4.7).
 
 pub mod connection;
+mod once;
 pub mod retry;
 pub mod terminal;
 pub mod version;
@@ -31,6 +32,7 @@ use std::fmt;
 use std::path::PathBuf;
 
 pub use connection::{Client, Sender, TerminalUpdate};
+pub use once::exchange_once;
 pub use retry::{RESTART_RETRY_WINDOW, Redo};
 pub use terminal::FullTerminalUpdate;
 
