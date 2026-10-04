@@ -1,11 +1,11 @@
-# 決策索引（D1–D39）
+# 決策索引（D1–D40）
 
 > **TL;DR**
 > - 這裡是已確認的設計決策；每條都經使用者確認。
 > - 記住：**沒有新證據就不重開討論**；要推翻，先補證據再提新決策編號。
 > - 下一步：找到相關決策，點進細節檔看理由、被否決的方案與證據。
 
-來源：規劃 r4 §2（D1–D24）；D25 為使用者在設計討論中確認與 architecture 頁；D26–D32 是第 1 施工關開工前提案 P1–P7，使用者 2026-09-25 確認，細節在 [第 1 施工關頁面](gates/gate-01-core.md#開工前提案)；D33 是使用者 2026-09-25 對第 1 施工關待決定事項（分派容量與返工）的決定；D34–D37 是使用者 2026-09-25 對照「AI monotasking vs multitasking」最佳實踐後的決定（細節在 [d26-d37](decisions/d26-d37.md)）；D38 是第 10 施工關開工前提案 P2、P4，使用者 2026-09-26 確認，把 D32 延伸到 `PipelineState` 與 binding 快照（細節在 [d38](decisions/d38.md)）。D39 是第 11 施工關 C 段 P1–P6，使用者 2026-10-02 逐項確認（細節在 [d39](decisions/d39.md)）。「規劃 §x」指 [research/REWRITE-PLAN.md](research/REWRITE-PLAN.md)；原始證據索引在 [research/README.md](research/README.md)。規劃本文與後來的決策衝突時，以後來的決策為準（見本頁底部）。
+來源：規劃 r4 §2（D1–D24）；D25 為使用者在設計討論中確認與 architecture 頁；D26–D32 是第 1 施工關開工前提案 P1–P7，使用者 2026-09-25 確認，細節在 [第 1 施工關頁面](gates/gate-01-core.md#開工前提案)；D33 是使用者 2026-09-25 對第 1 施工關待決定事項（分派容量與返工）的決定；D34–D37 是使用者 2026-09-25 對照「AI monotasking vs multitasking」最佳實踐後的決定（細節在 [d26-d37](decisions/d26-d37.md)）；D38 是第 10 施工關開工前提案 P2、P4，使用者 2026-09-26 確認，把 D32 延伸到 `PipelineState` 與 binding 快照（細節在 [d38](decisions/d38.md)）。D39 是第 11 施工關 C 段 P1–P6，使用者 2026-10-02 逐項確認（細節在 [d39](decisions/d39.md)）。D40 是第 12A P1–P10 的逐項確認與最後採建議指示，涵蓋明確 ACK、恢復與保留例外（[d40](decisions/d40.md)、[確認紀錄](gates/gate-12a-confirmations.md)）。「規劃 §x」指 [research/REWRITE-PLAN.md](research/REWRITE-PLAN.md)；原始證據索引在 [research/README.md](research/README.md)。規劃本文與後來的決策衝突時，以後來的決策為準（見本頁底部）。
 
 ## 索引
 
@@ -50,6 +50,7 @@
 | D37 | needs-you 附 context recap（功能目標、目前的決定、在問什麼、之後會發生什麼）；core 只定型別，內容由 daemon 產生（第 11 施工關） | [d26-d37](decisions/d26-d37.md#d37) |
 | D38 | D32 延伸到 `PipelineState`（存快照、`restore` 檢查）與 binding 快照型別（搬到 core，shim 與 daemon 共用）；golden JSON 測試鎖格式，只准加欄位 | [d38](decisions/d38.md#d38) |
 | D39 | 完整終端由 holder 提供 frame；明確進入、連線控制權、mode-aware 輸入與版本相容；Codex 經完整 AgEnD 驗證後才開已驗版本 | [d39](decisions/d39.md#d39) |
+| D40 | 第 12A Claude 接入：閒置 channel／忙碌 Stop、P3／P4／P5＝A、明確 agend_ack、投遞不明停送及未終結保留；P9／P10 採建議 | [d40](decisions/d40.md#d40) |
 
 ## 來源衝突與處理
 
@@ -62,6 +63,7 @@
 | runtime spike 建議用 herdr | D3 選自有 holder（見 D3 細節） |
 | 規劃 §6 的功能階段 | D22 改為分成施工關；功能階段只當里程碑 |
 | D22 原文寫 12 個施工關 | D24 加上第 13 施工關；以 ROADMAP 的 13 個施工關為準 |
+| 舊第 12A P7 的 hook 即確認、籠統崩潰不重送；D31 30 天訊息保留 | D40：兩條路徑明確 agend_ack；結果不明停送；新增 Claude 未終結保留例外，既有 Codex 實作未變 |
 | D18「超過上限排隊」「等待 fanout 的父 task 不佔名額」與每個 instance 的 task 數 | D33 取代：一個 agent 一個 task，父 task 照樣佔名額；上限指角色人數上限 |
 
 ## 下一步
