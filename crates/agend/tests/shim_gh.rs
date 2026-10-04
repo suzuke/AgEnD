@@ -241,7 +241,7 @@ fn every_backend_holder_uses_the_shared_gh_guard_and_cleanup_leaves_no_holders()
         fs::create_dir(&cwd).unwrap();
         let launch = HolderLaunch {
             instance_id: id.into(), backend, executable: "/bin/sh".into(),
-            args: vec!["-c".into(), "command -v gh > located; gh pr merge 42; printf '%s' \"$?\" > refused; gh pr view 42; printf '%s' \"$?\" > allowed; exec sleep 600".into()],
+            args: vec!["-c".into(), "command -v gh > located; gh pr merge 42; printf '%s' \"$?\" > refused; gh pr view 42; printf '%s' \"$?\" > allowed.tmp; mv allowed.tmp allowed; exec sleep 600".into()],
             working_directory: cwd.display().to_string(),
         };
         block_on(runtime.start(&launch)).unwrap();
@@ -273,4 +273,70 @@ fn every_backend_holder_uses_the_shared_gh_guard_and_cleanup_leaves_no_holders()
     for id in ["g12-gh-c", "g12-gh-x", "g12-gh-o"] {
         runtime.detach(id);
     }
+}
+
+#[test]
+fn graphql_lexical_boundaries_and_repeated_approve_flags_match_native_arguments() {
+    let refused = [
+        "query=mutation { # a comment\r mergePullRequest(input:{pullRequestId:\"PR_fixture\"}){clientMutationId} }",
+        r#"query=mutation($body:String="""Quote: " """){ mergePullRequest(input:{pullRequestId:"PR_fixture",commitBody:$body}){clientMutationId}}"#,
+        r#"query=mutation($body:String="""Escaped: \""" more"""){ mergePullRequest(input:{pullRequestId:"PR_fixture",commitBody:$body}){clientMutationId}}"#,
+    ];
+    for query in refused {
+        let f = Fixture::new();
+        let out = f.run(&["api", "graphql", "-f", query]);
+        assert_eq!(out.status.code(), Some(1), "{query}: {out:?}");
+        assert!(f.received().is_empty());
+        assert!(out.stdout.is_empty());
+    }
+    let allowed = [
+        vec![
+            "api",
+            "graphql",
+            "-f",
+            r#"query={repository(owner:"o",name:"""a " mergePullRequest " b"""){id}}"#,
+        ],
+        vec![
+            "api",
+            "graphql",
+            "-f",
+            r#"query={repository(owner:"o",name:"""Escaped: \""" mergePullRequest"""){id}}"#,
+        ],
+        vec![
+            "pr",
+            "review",
+            "42",
+            "--approve",
+            "--approve=false",
+            "-c",
+            "-b",
+            "notes",
+        ],
+        vec![
+            "pr",
+            "review",
+            "42",
+            "-a",
+            "--approve=false",
+            "-c",
+            "-b",
+            "notes",
+        ],
+    ];
+    for args in allowed {
+        let f = Fixture::new();
+        let out = f.run(&args);
+        assert_eq!(out.status.code(), Some(23), "{args:?}: {out:?}");
+        let expected: Vec<u8> = args.iter().flat_map(|a| a.bytes().chain([0])).collect();
+        assert_eq!(f.received(), expected);
+        assert!(audit::read(f.dir.path()).is_empty());
+    }
+    let f = Fixture::new();
+    assert_eq!(
+        f.run(&["pr", "review", "--approve=false", "-a"])
+            .status
+            .code(),
+        Some(1)
+    );
+    assert!(f.received().is_empty());
 }

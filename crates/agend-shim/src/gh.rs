@@ -119,10 +119,14 @@ impl<'a> Parsed<'a> {
         match self.operands.as_slice() {
             ["pr", "merge", ..] => Err(refuse("gh_merge", "merges go through the agend pipeline")),
             ["pr", "review", ..]
-                if self.options.iter().any(|(name, value)| {
-                    matches!(*name, "a" | "approve")
-                        && !matches!(*value, Some("0" | "f" | "F" | "false" | "False" | "FALSE"))
-                }) =>
+                if self
+                    .options
+                    .iter()
+                    .rev()
+                    .find(|(name, _)| matches!(*name, "a" | "approve"))
+                    .is_some_and(|(_, value)| {
+                        !matches!(*value, Some("0" | "f" | "F" | "false" | "False" | "FALSE"))
+                    }) =>
             {
                 Err(refuse(
                     "gh_approve",
@@ -246,44 +250,67 @@ fn decode_path(path: &str) -> String {
     String::from_utf8_lossy(&out).to_ascii_lowercase()
 }
 
-// Recognize identifiers, skipping comments and quoted strings. This is not
-// a GraphQL validator; aliases do not hide the underlying mutation name.
+// GraphQL lexical tokens: CR and LF end comments; block strings allow quotes
+// and only escape a triple quote. This is not a schema or query validator.
+// Aliases do not hide the underlying mutation name.
 fn guarded_graphql(query: &str) -> bool {
-    let mut chars = query.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '#' {
-            for ch in chars.by_ref() {
-                if ch == '\n' {
-                    break;
+    let bytes = query.as_bytes();
+    let mut pos = 0;
+    while pos < bytes.len() {
+        match bytes[pos] {
+            b'#' => {
+                pos += 1;
+                while pos < bytes.len() && !matches!(bytes[pos], b'\r' | b'\n') {
+                    pos += 1;
                 }
             }
-        } else if ch == '"' {
-            while let Some(ch) = chars.next() {
-                if ch == '\\' {
-                    chars.next();
-                } else if ch == '"' {
-                    break;
+            b'"' if bytes[pos..].starts_with(b"\"\"\"") => {
+                pos += 3;
+                while pos < bytes.len() {
+                    if bytes[pos..].starts_with(b"\\\"\"\"") {
+                        pos += 4;
+                    } else if bytes[pos..].starts_with(b"\"\"\"") {
+                        pos += 3;
+                        break;
+                    } else {
+                        pos += 1;
+                    }
                 }
             }
-        } else if ch == '_' || ch.is_ascii_alphabetic() {
-            let mut name = String::from(ch);
-            while chars
-                .peek()
-                .is_some_and(|c| *c == '_' || c.is_ascii_alphanumeric())
-            {
-                name.push(chars.next().unwrap());
+            b'"' => {
+                pos += 1;
+                while pos < bytes.len() {
+                    match bytes[pos] {
+                        b'\\' => pos = (pos + 2).min(bytes.len()),
+                        b'"' => {
+                            pos += 1;
+                            break;
+                        }
+                        _ => pos += 1,
+                    }
+                }
             }
-            if matches!(
-                name.as_str(),
-                "mergePullRequest"
-                    | "enablePullRequestAutoMerge"
-                    | "enqueuePullRequest"
-                    | "mergeBranch"
-                    | "addPullRequestReview"
-                    | "submitPullRequestReview"
-            ) {
-                return true;
+            b'_' | b'a'..=b'z' | b'A'..=b'Z' => {
+                let start = pos;
+                pos += 1;
+                while pos < bytes.len()
+                    && (bytes[pos] == b'_' || bytes[pos].is_ascii_alphanumeric())
+                {
+                    pos += 1;
+                }
+                if matches!(
+                    &query[start..pos],
+                    "mergePullRequest"
+                        | "enablePullRequestAutoMerge"
+                        | "enqueuePullRequest"
+                        | "mergeBranch"
+                        | "addPullRequestReview"
+                        | "submitPullRequestReview"
+                ) {
+                    return true;
+                }
             }
+            _ => pos += 1,
         }
     }
     false

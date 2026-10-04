@@ -117,3 +117,5 @@
 - 2026-10-04：[draft PR #149](https://github.com/suzuke/AgEnD/pull/149)（首個提交 `999203e`）接通 protocol 1.5、channel／Stop helpers 與 hook／ACK spool；13 native cases、accept core（fmt／workspace clippy／protocol／實際 no-std）通過。完整 workspace、全新 verifier／固定 head CI 收尾中；未 merge，完整 Claude Driver 與真 CLI 驗收仍待完成。
 
 - 2026-10-04：#149 原 head `b4c6b46` 被全新 verifier r1 判定 REFUTED（hook 發布／live RPC 解鎖空窗）；修正單次 flock、歷史 busy 撤銷 idle 與 holder 查詢 revision 核對，新增三個 native 回歸，16 cases／accept core 通過；完整 workspace、全新 r2 與 CI 收尾中。
+
+- 2026-10-04：#150 gh shim fresh r1 `e281b19` **REFUTED**（GraphQL CR／block string 漏判、重複 approve 值與 fixture 完成競態）；修正與 native regression 已補，待全新 r2 及固定 head CI，未合併。

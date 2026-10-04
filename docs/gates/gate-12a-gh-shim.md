@@ -16,13 +16,15 @@ daemon 每次 boot 維護 `$AGEND_HOME/bin/{git,gh,kill,killall,pkill}` symlink�
 | 呼叫 | 行為 |
 |---|---|
 | `gh pr merge`，含 `--auto` | 拒絕，merge 經 agend pipeline |
-| `gh pr review --approve`／`-a` | 拒絕；short flag 組合亦檢查；明確 `--approve=false` 不視為批准 |
+| `gh pr review --approve`／`-a` | 拒絕；short flag 組合亦檢查；依最後一次 approve 值；明確 `--approve=false` 不視為批准 |
 | `gh auth token` | 拒絕，避免印出登入 token |
 | `gh api repos/<owner>/<repo>/pulls/<id>/merge`／`reviews[/…]` | 拒絕所有方法，含讀取；需要讀 PR 時使用 `gh pr view` |
 | `gh api repos/<owner>/<repo>/merges` | 拒絕直接合併 branch |
 | `gh api graphql` inline query | 拒絕 `mergePullRequest`、`enablePullRequestAutoMerge`、`enqueuePullRequest`、`mergeBranch`、`addPullRequestReview`、`submitPullRequestReview` 識別字；alias 不隱藏原 mutation 名稱 |
 | GraphQL `--input` 或 `-F query=@…` | 拒絕：不讀檔案／stdin，不能在執行前核對操作；改用可核對的 inline query 或請操作者處理 |
 | 其他呼叫 | 原樣交真正 gh；例如 `pr view`／`create`／`checks`、明確 comment／changes review、issue comments、一般 REST 與 inline GraphQL read query |
+
+GraphQL 按 [lexical 規範](https://spec.graphql.org/September2025/#sec-String-Value) 略過普通字串、block string（含 escaped triple quote）與 CR／LF 註解，避免內容字詞誤拒或隱藏後續 mutation。
 
 解析保留 `-R`／`--repo` 與選項值，`--body '--approve'` 不算批准。API 可在 endpoint 前帶 `-XPUT`、`-f`／`-F`／`-H`；處理 URL、enterprise `/api/v3` prefix、query 與 percent-encoded path。沒有安裝真正 gh 時，禁用命令仍回拒絕；放行命令回 cannot find／exit 127。PATH 內指回 agend 的 symlink／hard link 不算真工具。
 
@@ -38,9 +40,9 @@ native holder probe 使用 shell 替身驗 runtime 的 PATH，不代替 D40 P8 �
 
 ## 自動驗證與清理
 
-`gh::tests` 三個 unit tests 驗常見 argv、選項值、REST 與 GraphQL 正反例。`agend/tests/shim_gh.rs` 五個 native cases 驗真正 binary 的 argv[0] 分派、拒絕時工具零次執行、audit 不存敏感輸入、原始 bytes／cwd／exit、操作者與明確 bypass、缺工具／PATH loop，以及三種 backend 的真 holder PATH。
+`gh::tests` 四個 unit tests 驗常見 argv、選項值、REST 與 GraphQL 正反例。`agend/tests/shim_gh.rs` 六個 native cases 驗真正 binary 的 argv[0] 分派、拒絕時工具零次執行、audit 不存敏感輸入、原始 bytes／cwd／exit、操作者與明確 bypass、缺工具／PATH loop，以及三種 backend 的真 holder PATH。
 
-真正 gh 由只記錄 argv、固定 exit 23 的 fixture 替身提供，沒有 GitHub 網路。holder probe 結束時送 Shutdown，確認 own locks 全部釋放；TempDir／Lab 清掉自己的檔案與 home。
+真正 gh 由只記錄 argv、固定 exit 23 的 fixture 替身提供，沒有 GitHub 網路。holder probe 用 atomic rename 發布完整結果，等待 deadline 維持 10 秒；結束時送 Shutdown，確認 own locks 全部釋放；TempDir／Lab 清掉自己的檔案與 home。
 
 ```bash
 # 在本批 checkout 內；所有 build artifacts 都放自己的暫存 target。
@@ -60,6 +62,8 @@ native holder probe 使用 shell 替身驗 runtime 的 PATH，不代替 D40 P8 �
 ## 進度紀錄
 
 - 2026-10-04：共用 gh 防護及三 backend 真 holder probe 已實作；首輪 3 unit／5 native cases 通過，workspace clippy 通過；完整驗證另核，尚未合併（#150）。
+
+- 2026-10-04：fresh verifier r1 對 `e281b19` 判 **REFUTED**：CR comment／block string 使 merge mutation 漏判，read block string 與重複 approve=false 誤拒；holder native test 有完成訊號競態。原報告／反例保留於 `/private/tmp/g12a-gh-review/verifier-r1/`。本批修正 lexer、最後 approve 值與 atomic 結果發布，新增 native regression；修正版待另一位全新 verifier 及 CI（#150）。
 
 ## 下一步
 

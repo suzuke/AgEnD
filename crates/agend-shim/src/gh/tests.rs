@@ -16,6 +16,7 @@ fn merge_approval_and_token_forms_are_refused_without_confusing_option_values() 
         vec!["pr", "review", "--approve=true"],
         vec!["pr", "review", "-a=1"],
         vec!["pr", "review", "-bnotes", "-a"],
+        vec!["pr", "review", "--approve=false", "-a"],
         vec!["auth", "--hostname=example.test", "token"],
     ] {
         assert!(check(&args).is_err(), "{args:?}");
@@ -27,6 +28,8 @@ fn merge_approval_and_token_forms_are_refused_without_confusing_option_values() 
         vec!["pr", "review", "-r", "-Fapprove"],
         vec!["pr", "review", "--approve=false", "--comment"],
         vec!["pr", "review", "-a=false", "-c"],
+        vec!["pr", "review", "-a", "--approve=false", "-c"],
+        vec!["pr", "review", "--approve", "-a=0", "-c"],
         vec!["auth", "status"],
         vec!["--version"],
         vec!["pr", "create", "--body", "merge"],
@@ -104,4 +107,29 @@ fn graphql_guards_mutations_and_opaque_queries_but_allows_read_queries() {
             "{query}"
         );
     }
+}
+
+#[test]
+fn graphql_comments_and_block_strings_do_not_hide_following_mutations() {
+    for newline in ["\r", "\n", "\r\n"] {
+        let query = format!(
+            "mutation {{ # comment{newline} mergePullRequest(input:{{}}){{clientMutationId}} }}"
+        );
+        assert!(guarded_graphql(&query));
+    }
+    assert!(guarded_graphql(
+        r#"mutation($b:String="""Quote: " """){mergePullRequest(input:{commitBody:$b}){clientMutationId}}"#
+    ));
+    assert!(guarded_graphql(
+        r#"mutation($b:String="""Escape: \""" more"""){mergePullRequest(input:{commitBody:$b}){clientMutationId}}"#
+    ));
+    assert!(!guarded_graphql(
+        r#"{repository(name:"""a " mergePullRequest " b"""){id}}"#
+    ));
+    assert!(!guarded_graphql(
+        r#"{repository(name:"""a \""" mergePullRequest b"""){id}}"#
+    ));
+    assert!(!guarded_graphql(
+        r#"{repository(name:"a \" mergePullRequest"){id}}"#
+    ));
 }
