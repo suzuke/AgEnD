@@ -24,8 +24,8 @@
 - ACK：bridge 先持久化；daemon 離線回「已保存、待同步」，不宣稱 confirmed。恢復只補 ACK、不重送內容；daemon 同交易核對、保存收件與狀態後才回成功，待送檔才刪。重複 ACK 冪等，本機保存失敗回錯誤。
 - crash：開始前保存投遞紀錄。確定未開始可送；成功寫出未 ACK 留 sent；已開始但缺結果標「投遞結果不明」，等待證據或人處理，不自動重送內容。實際未送到的訊息也可能暫停，不承諾 exactly-once。
 - 狀態：沿用四個 DeliveryState；結果不明另存持久化投遞 metadata／顯示原因，不能誤走 queued 重送路徑。有效 ACK 可補 sent 再 confirmed，詳見 [D40](../decisions/d40.md#收件與恢復的邊界)。
-- 事件：新增 daemon 管理的 driver_events，依入庫 seq 作 cursor，留 14 天。訊息／收件狀態獨立保存，不依賴重播日誌；未同步 hook／ACK 等入庫才刪；未終結 Claude 訊息與必要投遞資料不按 30 天刪，直到 confirmed 或人明確放棄，之後依原 30 天規則。這是 D31 的本次接入例外，尚未改既有 retention 程式。
-- migration：開工時取下一空號；baseline 已有 0005、0006，下一號是 0007，尚未建立。
+- 事件：新增 daemon 管理的 driver_events，依入庫 seq 作 cursor，留 14 天。訊息／收件狀態獨立保存，不依賴重播日誌；未同步 hook／ACK 等入庫才刪；未終結 Claude 訊息與必要投遞資料不按 30 天刪，直到 confirmed 或人明確放棄，之後依原 30 天規則。這是 D31 的本次 Claude 接入例外；[store 基礎](gate-12a-store.md) 已實作，Codex／Claude inbox 的既有 retention 不變。
+- migration：開工時取下一空號；本批已在既有 0005、0006 後新增 0007，未改已發布 migration。
 - 理由：channel 寫 transport 成功沒有 backend ACK；stdout 與 DB 不能同交易；保留待同步資料，明確顯示不確定性。
 - 未採用：UserPromptSubmit 或下一個 active Stop 代 ACK、transcript 格式當唯一恢復來源、結果不明開機盲目重送。
 - 例子：daemon 停著時 Stop 回 {}、hook 留 spool；恢復只補事件並核目前狀態，不因此 confirmed。有效 ACK 待送檔入庫後才確認並刪除。

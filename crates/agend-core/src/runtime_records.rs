@@ -1,4 +1,7 @@
 //! Runtime records crossing domain/adapters; no IO or runtime dependencies.
+pub mod claude;
+pub use claude::*;
+
 use crate::model::{Backend, DeliveryState};
 use crate::policy::busy::BusyLevel;
 use alloc::{string::String, vec::Vec};

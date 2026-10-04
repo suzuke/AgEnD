@@ -397,6 +397,37 @@ fn every_schema_version_fixture_upgrades_to_golden_and_keeps_its_samples() {
         assert_eq!(events.len(), 2);
         let workflow = block_on(store.load_workflow("code", 1)).unwrap();
         assert_eq!(workflow, Some(Workflow::builtin_code()));
+        if version >= 4 {
+            let record = block_on(store.claude_delivery("m-fixture"))
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                record.instance_id, "fixture-1",
+                "legacy Claude push backfilled"
+            );
+            if version == 7 {
+                let pending = block_on(store.claude_delivery("m-claude-fixture"))
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(
+                    pending.attempt.as_ref().unwrap().route,
+                    agend_core::runtime_records::ClaudeRoute::Stop
+                );
+                assert!(
+                    pending.outcome_unknown(
+                        &block_on(store.message("m-claude-fixture"))
+                            .unwrap()
+                            .unwrap()
+                    )
+                );
+                let driver_events = block_on(store.driver_events_after(0, 10)).unwrap();
+                assert_eq!(driver_events.len(), 1);
+                assert!(driver_events[0].event.replayed);
+                assert_eq!(driver_events[0].ingested_at_unix_ms, 2);
+            } else {
+                assert!(record.attempt.is_none());
+            }
+        }
         drop(store);
         assert_eq!(schema_dump(&db), expected, "fixture v{version} upgraded");
         let pre = home

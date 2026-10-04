@@ -17,6 +17,9 @@
 | 名詞（中文） | English | 程式識別字 | 定義 | 不要跟…混淆 | 出處 |
 |---|---|---|---|---|---|
 | 單次請求 | one-shot request | `agend_client::exchange_once` | 在同一期限內連線、協商、送一次請求及等回覆；部分寫入、斷線或逾時都不自動重送。 | 一般 client 的安全重試；投遞結果不明不等於確定未送出 | D40 P1／P7 |
+| 投遞紀錄 | delivery record | `ClaudeDelivery`／`ClaudeAttempt` | 附於既有訊息的投遞與 session 關聯；開始紀錄先 commit，重複取得不授權再送。 | 訊息 id 的唯一冪等層；driver event log | D40 P7 |
+| 投遞結果不明 | unknown delivery outcome | `ClaudeDelivery::outcome_unknown` | 投遞已開始但未保存寫出結果或有效 ACK；保留 queued 與 metadata，禁止自動重送。 | 確定尚未送出；第五種 DeliveryState | D40 P7 |
+| driver 事件紀錄 | driver event log | `DriverEvent` | 依入庫 seq 排序、按入庫時間保留 14 天；不作為未終結訊息或 ACK 的唯一恢復來源。 | 訊息投遞紀錄；即時 busy／idle 證據 | D40 P6／P7 |
 
 ## 組織
 
@@ -73,24 +76,24 @@
 | 名詞（中文） | English | 程式識別字 | 定義 | 不要跟…混淆 | 出處 |
 |---|---|---|---|---|---|
 | 訊息 | message | `traits::AgentMessage`、`client::InboxMessage` | 送給 agent 的內容：一律完整內容、走 backend 的結構化 API；每則有 id，以 id 冪等。 | PTY 控制鍵（holder 只送單一按鍵）；Telegram 通知 | [delivery](architecture/delivery.md#送達模型) |
-| `messages` 表 | `messages` table | `messages`（DB，migration `0004`） | 存每則送給 agent 的訊息（`seq` 明確排序、`id` 冪等、`to_instance`／`from_instance`／`task_id`／`body`／`level`／`state`／`turn_id`），保留 30 天（`store/retention.rs`）；codex 用它去重、對帳崩潰窗口、展開事件游標。第 7 施工關已實作（`store/migrations/0004_messages.sql`）。 | 訊息（型別）；事件游標（讀事件的位置，跟這張表的 `seq` 不是同一件事） | [第 7 施工關 P5](gates/gate-07-codex.md#p5送達模型狀態代表什麼冪等放哪當掉怎麼辦)、D31 |
+| `messages` 表 | `messages` table | `messages`（DB，migration `0004`） | 存每則送給 agent 的訊息（`seq` 明確排序、`id` 冪等、`to_instance`／`from_instance`／`task_id`／`body`／`level`／`state`／`turn_id`），一般訊息從建立起留 30 天；Claude push 未終結持續保留、confirmed／failed 從 terminal update 起留 30 天（`store/retention.rs`）；codex 用它去重、對帳崩潰窗口、展開事件游標。第 7 施工關已實作（`store/migrations/0004_messages.sql`）。 | 訊息（型別）；事件游標（讀事件的位置，跟這張表的 `seq` 不是同一件事） | [第 7 施工關 P5](gates/gate-07-codex.md#p5送達模型狀態代表什麼冪等放哪當掉怎麼辦)、D31 |
 | 送達狀態 | delivery state | `model::DeliveryState` | 訊息狀態 `queued → sent → confirmed／failed`；確認不了就標未確認，不假裝成功。 | 忙碌等級的「排隊」（`queued` 是送達狀態） | [delivery](architecture/delivery.md#送達模型) |
 | `delivery`（`push`／`inbox`） | delivery mode | — | instance 的一欄：`push`（daemon 主動推，預設）或 `inbox`（不建 driver、只能被拉取，只給沒有真 driver 的假 agent 用）。第 10 施工關已實作並驗收。 | 送達狀態（`queued→sent→confirmed`，訊息本身的狀態，不是 instance 走哪條路） | [第 10 施工關 P11](gates/gate-10-pipeline.md#p11什麼是假的什麼是真的) |
 | 忙碌等級：排隊／插入／中斷 | busy level: queue／steer／interrupt | `policy::busy::BusyLevel`、`effective_level` | agent 忙碌時的三種送法：turn 結束後送、插入不中斷、中斷後立即處理；只有 codex 能插入，其他改用中斷。 | 去抖動（判斷 busy／idle 何時生效） | [delivery](architecture/delivery.md#忙碌策略三級)、D16 |
 | Stop hook decision | Stop hook decision | — | claude Stop hook 的輸出 `{"decision": "block", "reason": …}`：turn 結束時把排隊的訊息當成下一個 turn 送進去。 | **決策**；**請示** | D16、[delivery](architecture/delivery.md#claude-特別規則d16)、[spike-claude-f](research/spike-claude-f.md)（`reason`） |
 | 來源說明 | source framing | — | 讓 claude 處理 agend channel 訊息的說明：專案 CLAUDE.md 寫明訊息來自使用者自己的團隊，訊息內可另加 from／task／request 標頭。 | 本 repo 的 AGENTS.md（給開發 AgEnD 的人和 agent） | D16、[spike-claude-f](research/spike-claude-f.md) |
 
-## 第 12A 新設計名詞（尚未實作）
+## 第 12A 接入名詞與實作範圍
 
-| 名詞 | 設計識別字 | 定義與邊界 |
+| 名詞 | 識別字／狀態 | 定義與邊界 |
 |---|---|---|
-| 明確收件回報 | `agend_ack` | Claude 收到 channel／Stop 內容後先呼叫的 MCP 工具；核對訊息、投遞識別碼與 session，daemon 入庫才 confirmed；不是 task 完成回報。 |
-| 投遞識別碼 | 待協定 1.5 schema 寫定 | 某訊息某次投遞的關聯資料；訊息 id 仍是唯一冪等身分，不另建內容去重機制。 |
-| 待同步佇列 | pending spool | bridge 本機持久化的 hook／ACK；daemon 確認入庫才刪，未同步檔不因到期清掉；不讓 helper 存取 agend.db。 |
-| 投遞結果不明 | 投遞 metadata；不是新 DeliveryState | 投遞已開始但缺寫出結果；即使 DB 仍 queued，也停止自動重送，等證據或人處理。 |
-| driver 事件紀錄 | `driver_events`（待新增表） | daemon 入庫 seq 排序、保留 14 天；不是訊息與 ACK 的唯一恢復來源。 |
+| 明確收件回報 | `agend_ack`（工具尚未接入） | Claude 收到 channel／Stop 內容後先呼叫的 MCP 工具；核對訊息、投遞識別碼與 session，daemon 入庫才 confirmed；不是 task 完成回報。 |
+| 投遞識別碼 | `ClaudeAttempt::delivery_id`（store 已實作；協定 1.5 待接） | 某訊息某次投遞的關聯資料；訊息 id 仍是唯一冪等身分，不另建內容去重機制。 |
+| 待同步佇列 | pending spool（尚未實作） | bridge 本機持久化的 hook／ACK；daemon 確認入庫才刪，未同步檔不因到期清掉；不讓 helper 存取 agend.db。 |
+| 投遞結果不明 | `ClaudeDelivery::outcome_unknown`（store 已實作） | 投遞已開始但缺寫出結果；即使 DB 仍 queued，也停止自動重送，等證據或人處理。 |
+| driver 事件紀錄 | `driver_events`（migration `0007`／store 已實作） | daemon 入庫 seq 排序、保留 14 天；不是訊息與 ACK 的唯一恢復來源。 |
 
-來源：[D40](decisions/d40.md)。目前 `messages` 的 30 天保留實作未變；D40 為新增 Claude 接入設計未終結訊息與必要投遞資料的例外，直到確認或人明確放棄後才按原規則清理。
+來源：[D40](decisions/d40.md)、[store 基礎](gates/gate-12a-store.md)。本批已實作 Claude push 未終結保留例外及 terminal 起 30 天清理；Codex／Claude inbox 等一般訊息的 created_at 30 天規則不變。完整 Claude runtime、helper 與 protocol 1.5 尚未接入。
 
 ## 執行環境
 

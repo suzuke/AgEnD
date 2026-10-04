@@ -19,6 +19,10 @@ policy::codex_input::tests 核預設全部拒絕、診斷只允許一個非空 i
 
 `PipelineView::replace_attention_if` 的原子規則由 daemon 的真 Fleet／generic refresh 受控交錯回歸驗證；修改 port 後重跑 `accept core` 與實際 no-std。[反例](../../docs/gates/gate-11c-regression-validation.md)。
 
+## 第 12A 持久化基礎
+
+core 共用紀錄經 daemon 的真 SQLite producer 驗並行預約／結果不明、ACK tuple、legacy attempted 與狀態投影；新增 core 型別後重跑 `accept core`（含 workspace clippy、protocol/golden 與實際 no-std）。完整 Claude adapter 驗收尚未完成。
+
 ## 怎麼跑
 
 ```bash

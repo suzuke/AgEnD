@@ -1,0 +1,119 @@
+//! Bounded driver event history. This log is not delivery recovery state.
+use super::{SqliteStore, StoreError, claude::ms};
+use agend_core::protocol::client::is_uuid_v4;
+use agend_core::runtime_records::{DriverEvent, DriverEventAppend, NewDriverEvent};
+use rusqlite::{Connection, OptionalExtension, Row};
+
+fn row(r: &Row<'_>) -> rusqlite::Result<DriverEvent> {
+    Ok(DriverEvent {
+        seq: r.get(0)?,
+        event: NewDriverEvent {
+            id: r.get(1)?,
+            instance_id: r.get(2)?,
+            session_id: r.get(3)?,
+            kind: r.get(4)?,
+            payload: r.get(5)?,
+            occurred_at_unix_ms: r.get(6)?,
+            replayed: r.get(8)?,
+        },
+        ingested_at_unix_ms: r.get(7)?,
+    })
+}
+const COLUMNS: &str = "seq, id, instance_id, session_id, kind, payload, occurred_at_unix_ms, ingested_at_unix_ms, replayed";
+fn append(
+    conn: &Connection,
+    event: &NewDriverEvent,
+    now: u64,
+) -> Result<DriverEventAppend, StoreError> {
+    let invalid = |reason: &str| StoreError::Invalid(format!("driver event: {reason}"));
+    if !is_uuid_v4(&event.id) || !is_uuid_v4(&event.session_id) {
+        return Err(invalid("event and session ids must be UUID v4"));
+    }
+    super::instances::validate_id(&event.instance_id).map_err(StoreError::Invalid)?;
+    if event.kind.is_empty()
+        || event.kind.len() > 64
+        || !event
+            .kind
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+    {
+        return Err(invalid("invalid event kind"));
+    }
+    if event.payload.len() > 1024 * 1024 {
+        return Err(invalid("payload exceeds 1 MiB"));
+    }
+    let object: bool = conn.query_row(
+        "SELECT CASE WHEN json_valid(?1) THEN json_type(?1) = 'object' ELSE 0 END",
+        [&event.payload],
+        |r| r.get(0),
+    )?;
+    if !object {
+        return Err(invalid("payload must be a JSON object"));
+    }
+    ms(event.occurred_at_unix_ms)?;
+    ms(now)?;
+    let old = conn
+        .query_row(
+            &format!("SELECT {COLUMNS} FROM driver_events WHERE id = ?1"),
+            [&event.id],
+            row,
+        )
+        .optional()?;
+    if let Some(old) = old {
+        let mut comparable = event.clone();
+        // Replay is transport metadata. A lost commit reply may change it.
+        comparable.replayed = old.event.replayed;
+        if comparable != old.event {
+            return Err(invalid("event id already has different content"));
+        }
+        return Ok(DriverEventAppend {
+            event: old,
+            inserted: false,
+        });
+    }
+    conn.execute("INSERT INTO driver_events(id, instance_id, session_id, kind, payload, \
+        occurred_at_unix_ms, ingested_at_unix_ms, replayed) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        rusqlite::params![event.id, event.instance_id, event.session_id, event.kind, event.payload,
+            ms(event.occurred_at_unix_ms)?, ms(now)?, event.replayed])?;
+    let event = conn.query_row(
+        &format!("SELECT {COLUMNS} FROM driver_events WHERE id = ?1"),
+        [&event.id],
+        row,
+    )?;
+    Ok(DriverEventAppend {
+        event,
+        inserted: true,
+    })
+}
+impl SqliteStore {
+    /// A duplicate retained event returns its original seq without another insertion.
+    /// Event deduplication expires with the 14-day log; it never confirms a message.
+    pub async fn append_driver_event(
+        &self,
+        event: NewDriverEvent,
+        now: u64,
+    ) -> Result<DriverEventAppend, StoreError> {
+        self.call(move |conn| append(conn, &event, now)).await
+    }
+    pub async fn driver_events_after(
+        &self,
+        seq: i64,
+        limit: u32,
+    ) -> Result<Vec<DriverEvent>, StoreError> {
+        if seq < 0 || !(1..=1024).contains(&limit) {
+            return Err(StoreError::Invalid(
+                "invalid driver event cursor or limit".into(),
+            ));
+        }
+        self.call(move |conn| {
+            let mut query = conn.prepare(&format!(
+                "SELECT {COLUMNS} FROM driver_events WHERE seq > ?1 ORDER BY seq LIMIT ?2"
+            ))?;
+            query
+                .query_map(rusqlite::params![seq, limit], row)?
+                .map(|r| r.map_err(StoreError::from))
+                .collect()
+        })
+        .await
+    }
+}
