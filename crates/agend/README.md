@@ -2,7 +2,7 @@
 
 > **TL;DR**
 > - 唯一 binary：CLI、daemon、holder、TUI、shim 都在裡面。
-> - 記住：**argv[0] 分派在 `main` 第一行**；以 `git`／`kill`／`killall`／`pkill` 名稱執行時就是 shim，以 git hook 名稱（`reference-transaction`、`pre-push`…，由 `$AGEND_HOME/hooks/` 的 symlink）執行時就是 agend 的 git hook。
+> - 記住：**argv[0] 分派在 `main` 第一行**；以 `git`／`gh`／`kill`／`killall`／`pkill` 名稱執行時就是 shim，以 git hook 名稱（`reference-transaction`、`pre-push`…，由 `$AGEND_HOME/hooks/` 的 symlink）執行時就是 agend 的 git hook。
 > - 下一步：第 10 施工關驗證：`cargo xtask accept pipeline`。每個命令都要 `AGEND_HOME`（沒有預設，第 13 施工關再定）。
 
 ## 第 10 施工關（已驗收，2026-10-02）

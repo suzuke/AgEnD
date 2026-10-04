@@ -1,7 +1,7 @@
 # agend-shim
 
 > **TL;DR**
-> - agent PATH 上的 `git`、`kill`、`killall`、`pkill` 防護，加上只裝在 agent worktree 的 git hooks；都由 `agend` binary 依 argv[0] 分派進來。
+> - agent PATH 上的 `git`、`gh`、`kill`、`killall`、`pkill` 防護，加上只裝在 agent worktree 的 git hooks；都由 `agend` binary 依 argv[0] 分派進來。
 > - 記住：**protected ref 由 hook 守**（git 自己回報要改哪些 ref，不猜）；shim 只做 hook 做不到的：導向、快照、擋離開 branch、kill 防護。只防好意但會犯錯的 agent（見「威脅模型」）。
 > - 下一步：`cargo xtask accept shim` 看 demo；行為規則看 [第 3 施工關頁](../../docs/gates/gate-03-shim.md)。
 
@@ -33,6 +33,7 @@ binding snapshot 型別移到 `agend_core::binding`，shim re-export，JSON 與�
   - 擋會跳過 hook 的：`-c`／`--config-env`／`GIT_CONFIG_*` 設 `core.hooksPath`、`push --no-verify`；綁定的 worktree 沒裝 hook 時拒絕寫入
   - 破壞性操作前快照（v1 agentic-git 的範圍；`refs/agend/snapshots/<instance>/<id>`）並印出還原命令；快照救不回的拒絕：`stash` 寫入與 autostash（`pull`／`rebase`／`merge` 的 `--autostash`、`-c rebase|merge.autoStash`，或 config 檔設了而沒帶 `--no-autostash`；都改用 `git commit -m "wip: …"`）、`clean -x|-X`、`clean -ff`（刪巢狀 repo）、有 `.gitmodules` 時會 recurse 的破壞性 `reset`／`checkout`／`restore`／`switch`、`submodule foreach`（快照裡 submodule 與巢狀 repo 只有 gitlink）；綁定 worktree 裡的 submodule／巢狀 repo 在它自己快照
   - 沒有 hook 的 repo：team 的本機 remote 與 team repo 的 clone 不能寫、不能從別的 repo push 到 team repo（T5）
+- gh 防護：D40 P4，所有 backend 共用；拒絕 merge／明確 approve／merge 與 reviews API／auth token，其他命令原樣執行；不讀設定／request body／stdin，限制與 GraphQL 規則見 [本批範圍](../../docs/gates/gate-12a-gh-shim.md)。
 - kill 防護、audit 記錄（`$AGEND_HOME/audit/shim.jsonl`；hook 的拒絕也記）
 
 ## hook 安裝在哪
@@ -61,7 +62,7 @@ daemon 在綁定 worktree 時呼叫 `install_hooks`、釋放時呼叫 `uninstall
 |---|---|
 | `AGEND_HOME`、`AGEND_INSTANCE` | 找 binding 快照 `$AGEND_HOME/bindings/<instance>.json`；shim 與 hook 都讀（git 把環境傳給 hook）。缺一個就當成不是 agent：shim 拒絕寫入，hook 拒絕 branch 與 protected ref |
 | binding 快照 | `source_repo`、`protected_refs`、`binding`（work：task、branch、worktree；review：task、head、worktree） |
-| `AGEND_SHIM_BYPASS=1` | shim 不檢查，直接執行真的工具（記 audit）；hook 照常 |
+| `AGEND_SHIM_BYPASS=1` | shim 不檢查，直接執行真的工具（記 audit；gh 只記命令類型，不保存 headers／payload）；hook 照常 |
 | `GIT_DIR`、`GIT_WORK_TREE`、`GIT_COMMON_DIR`、`GIT_INDEX_FILE`、`-C`、`--git-dir`、`--work-tree` | 原樣交給 `git rev-parse`，由 git 回答實際作用在哪個 repo、哪個 work tree |
 | `GIT_CEILING_DIRECTORIES` | 問位置時保留；從 `$AGEND_HOME` 裡面跑時再加上 `$AGEND_HOME` |
 | `-c`、`--config-env`、`GIT_CONFIG_KEY_<n>`、`GIT_CONFIG_PARAMETERS` | 只檢查有沒有設 `core.hooksPath` |
@@ -94,6 +95,7 @@ daemon 在綁定 worktree 時呼叫 `install_hooks`、釋放時呼叫 `uninstall
 | `snapshot` | 快照與還原命令 |
 | `git` | 串起上面各步：問 git 位置、真的 `Probe`，產生要執行的命令 |
 | `kill_guard` | kill 類防護 |
+| `gh` | GitHub merge／approve／API／token 防誤操作；[規則](../../docs/gates/gate-12a-gh-shim.md) |
 | `audit` | audit 記錄 |
 
 ## 依賴規則

@@ -118,7 +118,7 @@ pub fn classify(
             }
             Ok(())
         }
-        Tool::Git | Tool::Hook(_) => Ok(()),
+        Tool::Git | Tool::Gh | Tool::Hook(_) => Ok(()),
     }
 }
 

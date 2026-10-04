@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - 依 crate 由下往上分 13 個施工關；每個施工關單獨驗收，使用者確認後才開下一個施工關（D22）。
-> - 目前狀態：**第 1–11 施工關完成並已合併**；第 11 施工關 C 段 #145 經全新 verifier、雙平台 CI、實機及後續自動驗收與清理，使用者於 2026-10-03 確認合併（`b2152db`）。第 12 施工關 A 段設計 #138 已 merge，client 基礎 #147 已 merge，持久化 #148 已 merge，protocol 1.5／channel／Stop／ACK spool 基礎待驗證與確認，完整 Claude 接入未完成；第 13 施工關未開始。
-> - 下一步：依第 12A [D40](decisions/d40.md) 驗證 [bridge 基礎](gates/gate-12a-bridge.md)，再接 Claude Driver／啟動設定與控制；每批以全新 verifier、可重驗指令及使用者確認收尾。
+> - 目前狀態：**第 1–11 施工關完成並已合併**；第 11 施工關 C 段 #145 經全新 verifier、雙平台 CI、實機及後續自動驗收與清理，使用者於 2026-10-03 確認合併（`b2152db`）。第 12 施工關 A 段設計 #138 已 merge，client 基礎 #147 已 merge，持久化 #148 已 merge，protocol 1.5／channel／Stop／ACK spool 基礎 #149 已 merge，共用 gh 防護待驗證／確認，完整 Claude 接入未完成；第 13 施工關未開始。
+> - 下一步：依第 12A [D40](decisions/d40.md) 驗證 [共用 gh 防護](gates/gate-12a-gh-shim.md)，再接 Claude Driver／啟動設定與控制；每批以全新 verifier、可重驗指令及使用者確認收尾。
 
 ## 13 個施工關
 
@@ -71,6 +71,9 @@
 第 1–11 施工關已完成並合併。第 11 施工關 C 段 #145 使用者於 2026-10-03 明確確認合併，原驗收範圍與限制見 [收尾紀錄](gates/gate-11c-closeout.md)。第 12A #138 的 P1–P10 已依本輪使用者確認寫定為 [D40](decisions/d40.md)，剩餘採建議；設計文件已依使用者「merge後開工」合併（#138、`4390633`）；第 12A 在獨立 worktree 實作中，Claude 接入尚未完成。
 
 ## 進度紀錄
+
+- 2026-10-04：使用者確認 #149，`c7e398c` 全新 verifier r2 CONFIRMED、push／PR 雙平台 CI 通過，合併為 `6dd552e`；使用者另重驗 16 native cases 全過。已清理 feature／verifier worktree、branches、targets；另移除已合併且乾淨的舊 `docs/gate-12-proposal` worktree／branch。有未提交變更的舊 worktree 保留。
+- 2026-10-04：下一批在 `feat/gate-12a-gh-shim` 完成 D40 P4 的 [共用 gh 防護](gates/gate-12a-gh-shim.md)，首輪 3 unit／5 native cases 與 workspace clippy 通過；完整驗證、fresh verifier 與 CI 另核，未 merge，完整 A 段仍未完成。
 
 - 2026-10-04：使用者確認 #147，合併為 `8dfccf8`；`5a4047c` 全新 verifier CONFIRMED、46 client tests 通過，push／PR 雙平台 CI 通過。PR macOS 首次未改動的 TUI 時序測試超過 300 ms，原失敗保留，重跑通過且門檻未改。舊 worktree／branch 已清理；在 `feat/gate-12a-claude-store` 開始 [投遞／ACK／retention 基礎](gates/gate-12a-store.md)，Claude 接入尚未完成。
 

@@ -26,13 +26,13 @@
 
 ## 目前可用範圍
 
-- **Runtime 與持久化**：git／kill shim、PTY holder、SQLite store、daemon 與 client；daemon 重啟後 holder 與 agent 持續執行。
+- **Runtime 與持久化**：git／kill／gh shim、PTY holder、SQLite store、daemon 與 client；daemon 重啟後 holder 與 agent 持續執行。
 - **Codex 與 CLI**：app-server driver、訊息送達與冪等、三級忙碌策略；`status`、`send`、`inbox`、instance 管理、`daemon restart`、`doctor`、`init`。兩個假 Codex agent 中途重啟仍不漏不重的里程碑已驗收，真 Codex 另有 smoke 驗收。
 - **TUI**：agend app 已接 fleet／需要你、完整終端、resize、多視窗控制、鍵鼠／貼上與 1,000 行歷史。[PR #145](https://github.com/suzuke/AgEnD/pull/145) 已合併；固定 `cfee027` 的全新 verifier CONFIRMED，四個雙平台 CI jobs 各 900 passed／0 failed／2 既有 ignored，實際 no-std 通過。使用者已有實機紀錄，並授權剩餘行為以真 producer／native／外層 PTY 自動驗收；清理已完成。Codex 僅開放已驗並獲同意的 0.159.3，其他／未知版本仍唯讀，人工輸入 thread 永久只用自己的 clientId 對帳。[驗收收尾](docs/gates/gate-11c-closeout.md) · [版本政策](docs/gates/gate-11c-codex-input.md)。
 
 **第 10 施工關完成（[PR #143](https://github.com/suzuke/AgEnD/pull/143)，2026-10-02）**：已接通本機 pipeline、task／review／workflow／team 操作與 checks 沙箱。事件收尾修正經全新 verifier r17、Ubuntu／macOS CI 與人工補驗通過，使用者已確認合併。驗證範圍、原始失敗與兩個未執行的 explorer 見 [驗證證據](docs/gates/gate-10-verification.md)。執行方式見 [pipeline runtime](docs/architecture/pipeline-runtime.md)。Claude、OpenCode driver、GitHub forge、Telegram 在第 12 施工關，服務註冊與發布在第 13 施工關。完整狀態與驗收證據見 [ROADMAP](docs/ROADMAP.md)。
 
-第 12A Claude 的 P1–P10 設計已確認，記為 [D40](docs/decisions/d40.md)：閒置走 channel、忙碌排隊走 Stop hook，兩者均用明確 `agend_ack`；P3／P4／P5 選 A。設計文件已於 [PR #138](https://github.com/suzuke/AgEnD/pull/138) 合併（`4390633`）；第 12A 的不自動重送 client 基礎已於 [#147](https://github.com/suzuke/AgEnD/pull/147) 合併（`8dfccf8`）；[Claude 持久化基礎 #148](docs/gates/gate-12a-store.md) 已經使用者確認合併（`7877dbe`）；目前 [protocol 1.5／channel／Stop／ACK spool 基礎](docs/gates/gate-12a-bridge.md) 已實作，待全新驗證與使用者確認。完整 Claude Driver、啟動設定、Interrupt、gh 防護及真 CLI 版本驗收仍未完成。
+第 12A Claude 的 P1–P10 設計已確認，記為 [D40](docs/decisions/d40.md)：閒置走 channel、忙碌排隊走 Stop hook，兩者均用明確 `agend_ack`；P3／P4／P5 選 A。設計文件已於 [PR #138](https://github.com/suzuke/AgEnD/pull/138) 合併（`4390633`）；第 12A 的不自動重送 client 基礎已於 [#147](https://github.com/suzuke/AgEnD/pull/147) 合併（`8dfccf8`）；[Claude 持久化基礎 #148](docs/gates/gate-12a-store.md) 已經使用者確認合併（`7877dbe`）；[protocol 1.5／channel／Stop／ACK spool 基礎 #149](docs/gates/gate-12a-bridge.md) 已合併（`6dd552e`），使用者重驗 16 native cases 通過並清理。下一批 [共用 gh 防護](docs/gates/gate-12a-gh-shim.md) 已實作，待全新驗證／CI 及使用者確認合併；完整 Claude Driver、啟動設定、Interrupt 與真 CLI 版本驗收仍未完成。
 
 ## 系統圖
 
@@ -53,7 +53,7 @@ agent 側沒有任何 daemon 子程序；agent 與附屬程序都由 holder 持�
 | `crates/agend-core` | 純邏輯：型別、protocol、trait、流水線狀態機、policy、螢幕分類器 |
 | `crates/agend-daemon` | 唯一的大型 I/O 層：入口、領域、adapter |
 | `crates/agend-holder` | 每個 instance 一個：PTY、畫面、附屬程序 |
-| `crates/agend-shim` | git 與 kill 防護；只讀 binding 快照 |
+| `crates/agend-shim` | git／kill／gh 防護；只讀 binding 快照 |
 | `crates/agend-client` | 同步 I/O 連 daemon、重試、版本檢查 |
 | `crates/agend-tui` | attention-first TUI |
 | `crates/agend` | 唯一 binary：argv[0] 分派、CLI |

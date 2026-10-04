@@ -1,4 +1,4 @@
-//! AgEnD shim: the `git` and `kill`/`killall`/`pkill` guards that sit on an
+//! AgEnD shim: the `git`, `gh` and `kill`/`killall`/`pkill` guards that sit on an
 //! agent's PATH, and the git hooks installed in agent worktrees (D5). The
 //! `agend` binary dispatches here when invoked under one of those names
 //! (argv[0]).
@@ -19,6 +19,7 @@ pub mod audit;
 pub mod binding;
 pub mod classify;
 pub mod ctx;
+pub mod gh;
 pub mod git;
 pub mod hook;
 pub mod kill_guard;
@@ -42,6 +43,7 @@ pub const NOT_FOUND_EXIT: u8 = 127;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tool {
     Git,
+    Gh,
     Kill,
     Killall,
     Pkill,
@@ -53,6 +55,7 @@ impl Tool {
     pub fn as_str(self) -> &'static str {
         match self {
             Tool::Git => "git",
+            Tool::Gh => "gh",
             Tool::Kill => "kill",
             Tool::Killall => "killall",
             Tool::Pkill => "pkill",
@@ -66,6 +69,7 @@ impl Tool {
         let name = Path::new(argv0).file_name()?;
         match name.to_str()? {
             "git" => Some(Tool::Git),
+            "gh" => Some(Tool::Gh),
             "kill" => Some(Tool::Kill),
             "killall" => Some(Tool::Killall),
             "pkill" => Some(Tool::Pkill),
@@ -153,6 +157,7 @@ impl Outcome {
 pub fn plan(ctx: &ctx::Ctx, tool: Tool, args: &[OsString]) -> Outcome {
     match tool {
         Tool::Git => git::plan(ctx, args),
+        Tool::Gh => gh::plan(ctx, args),
         _ => kill_guard::plan(ctx, tool, args),
     }
 }

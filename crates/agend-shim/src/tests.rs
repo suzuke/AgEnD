@@ -10,6 +10,10 @@ fn dispatches_on_basename() {
         Some(Tool::Git)
     );
     assert_eq!(Tool::from_argv0(OsStr::new("kill")), Some(Tool::Kill));
+    assert_eq!(
+        Tool::from_argv0(OsStr::new("/home/u/.agend/bin/gh")),
+        Some(Tool::Gh)
+    );
     assert_eq!(Tool::from_argv0(OsStr::new("killall")), Some(Tool::Killall));
     assert_eq!(Tool::from_argv0(OsStr::new("./pkill")), Some(Tool::Pkill));
     assert_eq!(
