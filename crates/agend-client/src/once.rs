@@ -15,6 +15,7 @@ use socket2::{Domain, SockAddr, Socket, Type};
 use crate::{ClientError, connection::request_id, version};
 
 mod prepare;
+mod sliced_json;
 
 fn remaining(deadline: Instant) -> io::Result<std::time::Duration> {
     let left = deadline.saturating_duration_since(Instant::now());
@@ -55,7 +56,7 @@ fn encode(request: &ClientRequest, deadline: Instant) -> io::Result<Vec<u8>> {
         line: Vec::new(),
         deadline,
     };
-    serde_json::to_writer(&mut encoding, request)
+    serde_json::to_writer(&mut encoding, &sliced_json::Checked(request))
         .map_err(|e| io::Error::new(e.io_error_kind().unwrap_or(io::ErrorKind::InvalidData), e))?;
     encoding.write_all(b"\n")?;
     Ok(encoding.line)
@@ -103,8 +104,12 @@ fn read(reader: &mut BufReader<UnixStream>, deadline: Instant) -> io::Result<Cli
                 line.clear();
                 continue;
             }
-            let response = serde_json::from_slice(&line)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            let response = serde_json::from_reader(sliced_json::Decoding {
+                bytes: &line,
+                deadline,
+                until_check: 0,
+            })
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
             remaining(deadline)?;
             return Ok(response);
         }
@@ -202,6 +207,71 @@ mod tests {
     use super::*;
     use agend_core::protocol::client::{AgentCommand, ClientCommandData};
     use std::time::Duration;
+
+    #[test]
+    fn sliced_strings_keep_the_native_json_wire_format() {
+        let text = format!("{}繁中é\"\\\n\u{1}{}", "a".repeat(4095), "界".repeat(5000));
+        let requests = [
+            ClientRequest::hello_as(Some(text.clone())),
+            ClientRequest::Command {
+                data: ClientCommandData {
+                    request_id: "unicode".into(),
+                    command: AgentCommand::Ask {
+                        question: text.clone(),
+                        options: vec![text, String::new()],
+                    },
+                },
+            },
+        ];
+        for request in requests {
+            let mut native = serde_json::to_vec(&request).unwrap();
+            native.push(b'\n');
+            let actual = encode(&request, Instant::now() + Duration::from_secs(2)).unwrap();
+            assert_eq!(actual, native);
+        }
+    }
+
+    #[test]
+    fn parsing_a_large_real_producer_response_checks_the_deadline() {
+        use agend_core::protocol::client::RequestIdData;
+        use agend_testkit::fake_daemon::{FakeDaemon, ProbeClient};
+        use std::io::Read;
+        let daemon = FakeDaemon::start().unwrap();
+        let (mut source, _) = ProbeClient::hello(daemon.socket_path(), None).unwrap();
+        let mut response = source
+            .request(&ClientRequest::GetFleet {
+                data: RequestIdData {
+                    request_id: "parse".into(),
+                },
+            })
+            .unwrap();
+        if let ClientResponse::Fleet { data } = &mut response {
+            data.fleet.teams = vec![data.fleet.teams[0].clone(); 340_000];
+        } else {
+            panic!("producer did not return fleet");
+        }
+        let mut line = serde_json::to_vec(&response).unwrap();
+        line.push(b'\n');
+        assert!(line.len() < MAX_LINE_BYTES);
+        let (stream, mut peer) = UnixStream::pair().unwrap();
+        peer.set_write_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let writer = std::thread::spawn(move || {
+            let _ = peer.write_all(&line);
+            let _ = peer.read(&mut [0]);
+        });
+        let start = Instant::now();
+        let mut reader = BufReader::new(stream);
+        let error = read(&mut reader, start + Duration::from_millis(80)).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(
+            start.elapsed() < Duration::from_millis(180),
+            "{:?}",
+            start.elapsed()
+        );
+        drop(reader);
+        writer.join().unwrap();
+    }
 
     #[test]
     fn a_partial_write_stops_at_the_deadline() {

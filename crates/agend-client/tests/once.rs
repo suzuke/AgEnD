@@ -384,6 +384,39 @@ fn escaped_encoding_obeys_the_deadline_without_sending_a_partial_request() {
 }
 
 #[test]
+fn plain_string_encoding_checks_the_deadline_during_the_scan() {
+    use agend_core::protocol::client::{MAX_LINE_BYTES, OperatorCommand, OperatorData};
+    let daemon = FakeDaemon::start().unwrap();
+    let request = ClientRequest::Operator {
+        data: OperatorData {
+            request_id: "plain".into(),
+            command: OperatorCommand::WorkflowCheck {
+                toml: "x".repeat(MAX_LINE_BYTES - 1024),
+            },
+        },
+    };
+    let start = Instant::now();
+    let error = exchange_once(
+        daemon.socket_path(),
+        None,
+        V1_3,
+        &request,
+        start + Duration::from_millis(20),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(error, ClientError::Disconnected(ref message) if message.contains("deadline elapsed")),
+        "{error:?}"
+    );
+    assert!(
+        start.elapsed() < Duration::from_millis(120),
+        "{:?}",
+        start.elapsed()
+    );
+    assert!(daemon.requests().is_empty());
+}
+
+#[test]
 fn escaped_line_size_is_bounded_during_preparation() {
     use agend_core::protocol::client::{AgentCommand, ClientCommandData, MAX_LINE_BYTES};
     let daemon = FakeDaemon::start().unwrap();
