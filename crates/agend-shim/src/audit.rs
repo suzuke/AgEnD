@@ -14,7 +14,7 @@ pub struct Record {
     /// Unix time in seconds.
     pub ts: u64,
     pub instance: Option<String>,
-    /// `git`, `kill`, `killall` or `pkill`.
+    /// `git`, `gh`, `kill`, `killall` or `pkill`.
     pub tool: String,
     /// `refuse`, `bypass` or `snapshot`.
     pub event: String,

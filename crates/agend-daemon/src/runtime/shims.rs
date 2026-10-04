@@ -1,10 +1,10 @@
-//! The shim symlinks (gate 6 P3): `$AGEND_HOME/bin/{git,kill,killall,pkill}`
+//! The shim symlinks (gate 6 P3 / D40 P4): `$AGEND_HOME/bin/{git,gh,kill,killall,pkill}`
 //! point at the running `agend` binary, which acts as the shim when started
 //! under those names (D5). Checked at every daemon boot; a missing link or
 //! one pointing anywhere else is replaced, so an upgraded binary takes over
 //! at the next daemon start.
 //!
-//! Must NOT: touch anything in `bin/` except these four names.
+//! Must NOT: touch anything in `bin/` except these five names.
 
 use std::fs;
 use std::io;
@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 /// The shim directory inside the AgEnD home; first on every agent's `PATH`.
 pub const BIN_DIR: &str = "bin";
 /// Names the shim answers to (`agend_shim::Tool`).
-pub const NAMES: [&str; 4] = ["git", "kill", "killall", "pkill"];
+pub const NAMES: [&str; 5] = ["git", "gh", "kill", "killall", "pkill"];
 
 /// Makes every shim link in `<home>/bin` point at `exe`; returns the names it
 /// (re)created.
@@ -72,6 +72,6 @@ mod tests {
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
         names.sort();
-        assert_eq!(names, ["git", "kill", "killall", "mine", "pkill"]);
+        assert_eq!(names, ["gh", "git", "kill", "killall", "mine", "pkill"]);
     }
 }

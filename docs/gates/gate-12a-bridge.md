@@ -3,18 +3,18 @@
 > **TL;DR**
 > - #148 store 已合併；本批接真 daemon／holder／helper，提供完整內容投遞與明確收件回報。
 > - 先存投遞意圖再寫出；已開始但結果不明不重送；離線只補事件／ACK。
-> - 下一步：全新 verifier／CI／使用者確認後合併，再接完整 Claude Driver。
+> - 下一步：#149 已合併並完成使用者重驗；接 gh 防護，再接完整 Claude Driver。
 
 ## 狀態與範圍
 
-2026-10-04，`feat/gate-12a-claude-bridge`，基線 #148 merge `7877dbe`。[draft PR #149](https://github.com/suzuke/AgEnD/pull/149)，首個提交 `999203e`。原 head `b4c6b46` 被全新 verifier r1 判定 REFUTED：hook 發布與首次 live RPC 之間的解鎖空窗讓 ingest 搶先重播 busy 事件。修正後 16 native cases 與 accept core（含實際 no-std）通過；完整 workspace、全新驗證與固定 head CI 收尾中，merge 等使用者確認；本批不是完整第 12A 驗收。真 Claude、模型回合與錄製均未執行。
+2026-10-04，[#149](https://github.com/suzuke/AgEnD/pull/149) 已經使用者確認合併為 `6dd552e`；head `c7e398c` 全新 verifier r2 CONFIRMED，push／PR 雙平台 CI 通過，merge tree 與驗證 head 相同。使用者另重驗 16 native cases 全過，自己的暫存 target／驗證 worktree 已清理；原 feature worktree／branch 亦已刪除。原 head `b4c6b46` 的 r1 REFUTED 與 race 證據仍保留；本批不是完整第 12A 驗收。真 Claude、模型回合與錄製均未執行。
 
 | 本批已有 | 尚未完成 |
 |---|---|
 | client 1.5、同步 one-shot helpers | 完整 Claude Driver trait、pipeline／fleet busy 事件整合 |
 | MCP stdio channel、Stop block／防迴圈、agend_ack | 自動產生 settings／.mcp.json／來源說明及檔案 ownership hash |
 | 真 SQLite 預約／Written／ACK、原子 spool 與 daemon 自動 ingest | Interrupt／Steer 的 holder Esc 與人工控制權；目前 Stop 只取 Queue |
-| live hook／五秒 idle／目前 holder 畫面分類器 | 新版本啟動提示 fixture／自動接受、gh shim、Claude orphan sweep |
+| live hook／五秒 idle／目前 holder 畫面分類器 | 新版本啟動提示 fixture／自動接受、[gh shim 待驗證](gate-12a-gh-shim.md)、Claude orphan sweep |
 | native 自動驗證及四次 daemon 開機 | 新版本 FakeClaude 主動 ACK、完整 DRV-6／9、真 CLI 版本一致性／smoke |
 
 helper 可直接供已配置的 Claude push instance 使用，但本批不會自動把 Claude 設定接上。一般 CLI 及 Claude inbox fixture 的既有路徑不變。
@@ -73,25 +73,17 @@ helper 不開 agend.db／SQLite／Tokio；daemon 是唯一 DB owner。channel EO
 
 四次開機 case 以 native service 已提交回覆模擬 helper 尚未寫出即死亡；另有實際 Stop helper 的 unread pipe 逾時，驗部分 stdout 後 intent 仍 unknown 且下一 Stop 不重送。這不代替真 Claude 已讀或完整 Driver 的四次開機契約。
 
-初輪 workspace 抓到測試在 stdout 到達後先停 daemon、Written 尚未提交的 race；改以 MCP ping 完成 barrier，保留原失敗。第二輪 CLI 表仍期待 real daemon 1.4；只更新 real producer 版本參數為 1.5，fake 1.3 保留。最終結果於全新 verifier／CI 核對後記錄。
+初輪 workspace 抓到測試在 stdout 到達後先停 daemon、Written 尚未提交的 race；改以 MCP ping 完成 barrier，保留原失敗。第二輪 CLI 表仍期待 real daemon 1.4；只更新 real producer 版本參數為 1.5，fake 1.3 保留。最終 head 的 r2 CONFIRMED／CI 通過與使用者重驗紀錄見頁首；原失敗不改寫成成功。
 
 ## 可重驗指令
 
 ```bash
-cd /Users/suzuke/AlphaCR-worktrees/AgEnD-v2-claude-bridge
-(
-  set -e
-  gate12_bridge_target=$(mktemp -d /tmp/agend-g12a-bridge-check.XXXXXX)
-  export CARGO_TARGET_DIR="$gate12_bridge_target"
-  trap '~/.cargo/bin/cargo clean; rmdir "$gate12_bridge_target"' EXIT
-  ~/.cargo/bin/cargo test -p agend --test claude_bridge
-  ~/.cargo/bin/cargo test -p agend-client --test once
-  ~/.cargo/bin/cargo test -p xtask --test protocol_compat
-)
+# 固定已驗 head，自行建立／清理驗證 worktree 與 target。
+bash /private/tmp/g12a-bridge-review/reverify.sh
 ```
 
 fixture 會停自己的 daemon／holders 並刪 home；trap 清掉自己的 target。正式驗證另跑 workspace tests、fmt／clippy、accept core 與實際 no-std；本批未呼叫真 Claude／Codex／OpenCode。
 
 ## 下一步
 
-完成固定 head 的全新驗證與 CI，提供重驗結果，等使用者確認 merge；接續完整 Claude Driver／啟動設定與 Interrupt。真 CLI 版本檢查／重錄／模型回合另取明確授權。
+#149 已合併；接續 [共用 gh 防護](gate-12a-gh-shim.md)、完整 Claude Driver／啟動設定與 Interrupt。真 CLI 版本檢查／重錄／模型回合另取明確授權。

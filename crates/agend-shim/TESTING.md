@@ -32,6 +32,7 @@ cargo xtask accept shim                               # 以上 + demo
 | `location::tests::*` | git 的答案怎麼分類（含綁定 worktree 裡的 submodule／巢狀 repo、canonical 與別的 worktree 的 submodule、team git dir 配 worktree 裡的 work tree）；`rev-parse` 輸出（bare、相對的 common dir、`--show-prefix`；路徑建在自己的暫存目錄） |
 | `team::tests::*` | URL 正規化、insteadOf；本機路徑照 git 補 `.git`；`file://<host>/` 不看主機名 |
 | `protected_ref::tests::*` | 內建與設定的 protected ref、glob |
+| `gh::tests::*`／`agend/tests/shim_gh.rs` | D40 P4：選項值與短旗標、REST／GraphQL、拒絕不執行、argv／exit 原樣傳遞、audit 不存敏感內容；三個 backend 的真 holder 都先找到 gh shim，結束時清掉 holders 與 fixtures。 |
 | `kill_guard::tests::*` | pkill／killall 拒絕、kill 拒絕 agend 程序、`0`／負數／名字／job spec；pid 正規化；超過 `i32::MAX` 或 10 位數拒絕（純函式，不送訊號） |
 | `ctx::tests::*`、`audit::tests::*`、`snapshot::tests::*` | 找真 git 時跳過指向 shim 的連結；audit 寫讀；還原命令的格式 |
 
