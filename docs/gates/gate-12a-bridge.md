@@ -7,7 +7,7 @@
 
 ## 狀態與範圍
 
-2026-10-04，`feat/gate-12a-claude-bridge`，基線 #148 merge `7877dbe`。已實作，待全新驗證、CI 與使用者確認；本批不是完整第 12A 驗收。真 Claude、模型回合與錄製均未執行。
+2026-10-04，`feat/gate-12a-claude-bridge`，基線 #148 merge `7877dbe`。[draft PR #149](https://github.com/suzuke/AgEnD/pull/149)，首個提交 `999203e`。13 native cases 與 accept core（含實際 no-std）通過；完整 workspace、全新驗證與固定 head CI 收尾中，merge 等使用者確認；本批不是完整第 12A 驗收。真 Claude、模型回合與錄製均未執行。
 
 | 本批已有 | 尚未完成 |
 |---|---|

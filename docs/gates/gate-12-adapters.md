@@ -94,3 +94,5 @@ Claude 接入／A 段功能驗收尚未完成，bridge 基礎可用 [自動 nati
 依已合併 [D40](../decisions/d40.md) 實作 Claude 接入；client 單次請求基礎已合併；store 已合併；目前驗證 bridge 基礎，再串完整 Driver／啟動設定。完成後提供全新 verifier 與可重驗指令，implementation merge 等使用者確認。
 
 - 2026-10-04：#148 全新 verifier CONFIRMED、雙平台 CI 通過，經使用者確認合併為 `7877dbe`；protocol 1.5／channel／Stop／ACK spool 在新 worktree 實作，範圍與限制見 [bridge 基礎](gate-12a-bridge.md)。
+
+- 2026-10-04：[draft PR #149](https://github.com/suzuke/AgEnD/pull/149)（首個提交 `999203e`）接通 protocol 1.5、channel／Stop helpers 與 hook／ACK spool；13 native cases、accept core（fmt／workspace clippy／protocol／實際 no-std）通過。完整 workspace、全新 verifier／固定 head CI 收尾中；未 merge，完整 Claude Driver 與真 CLI 驗收仍待完成。

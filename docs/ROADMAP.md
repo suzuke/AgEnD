@@ -110,3 +110,5 @@
 - 2026-10-04：`4c5e76b` 全新 verifier REFUTED：名詞表仍稱事件表待新增與保留實作未變；保留反例，同步名詞表、0007／schema 入口與完整接入計畫，明示 store 已實作、runtime 尚待接入，修正版另由全新 verifier／CI 覆核（#148；未 merge）。
 
 - 2026-10-04：使用者確認 #148，`8998f58` 經全新 verifier CONFIRMED、雙平台 push／PR CI 通過，合併為 `7877dbe`；merge tree 與驗證 head 相同，舊 worktree／branch 與編譯 target 已清理。接續在 `feat/gate-12a-claude-bridge` 實作 protocol 1.5、native channel／Stop helper 及 ACK spool；完整第 12A 未完成，見 [本批範圍](gates/gate-12a-bridge.md)。
+
+- 2026-10-04：[draft PR #149](https://github.com/suzuke/AgEnD/pull/149)（首個提交 `999203e`）接通 protocol 1.5、channel／Stop helpers 與 hook／ACK spool；13 native cases、accept core（fmt／workspace clippy／protocol／實際 no-std）通過。完整 workspace、全新 verifier／固定 head CI 收尾中；未 merge，完整 Claude Driver 與真 CLI 驗收仍待完成。
