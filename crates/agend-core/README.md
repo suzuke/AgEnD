@@ -17,6 +17,10 @@
 
 `policy::codex_input` 的 `approved()` 只允許精確 `codex-cli 0.159.3`；未知或其他版本拒絕人工輸入。daemon 核 holder 啟動紀錄與 thread 身分，曾允許人工輸入的 thread 永久只用自己的 clientId 對帳。診斷政策另限一個明確 instance，不改正式許可。見 [版本政策](../../docs/gates/gate-11c-codex-input.md) 與 [U17 證據](../../docs/gates/gate-11c-u17-validation.md)。
 
+## 第 12A 持久化基礎（實作中）
+
+`runtime_records::claude` 定義 `ClaudeDelivery`、`ClaudeAttempt`、`ClaudeAck`、`ClaudeReservation` 與 `DriverEvent` 等共用資料；`may_start`／`outcome_unknown` 保留既有四種 DeliveryState。只有新的 `Started` 可開始 transport，`Existing` 不授權重送；core 不讀時鐘或 DB。見 [store 範圍](../../docs/gates/gate-12a-store.md)。
+
 ## 負責
 
 - 所有 crate 共用型別（`model`）：backend、team、task、送達狀態、branch 命名空間

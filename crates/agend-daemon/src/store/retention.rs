@@ -19,6 +19,8 @@ pub const DAY_MS: u64 = 24 * 60 * 60 * 1000;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Keep {
     Forever,
+    /// Deleted only by the owning message's retention cascade.
+    WithMessage,
     Days(u64),
 }
 
@@ -58,6 +60,22 @@ pub struct Rule {
 
 /// The retention table.
 pub const RETENTION: &[Rule] = &[
+    Rule {
+        target: Target::Table {
+            name: "driver_events",
+            time_column: Some("ingested_at_unix_ms"),
+        },
+        keep: Keep::Days(14),
+        why: "D40: driver history 14 days from ingestion, not the historical source time",
+    },
+    Rule {
+        target: Target::Table {
+            name: "claude_deliveries",
+            time_column: None,
+        },
+        keep: Keep::WithMessage,
+        why: "D40: unresolved Claude messages retain ACK attribution; terminal messages cascade",
+    },
     Rule {
         target: Target::Table {
             name: "codex_input_threads",
@@ -158,7 +176,7 @@ pub const RETENTION: &[Rule] = &[
             time_column: Some("created_at_unix_ms"),
         },
         keep: Keep::Days(30),
-        why: "D31: messages 30 days; the only idempotency layer (gate 7 P5)",
+        why: "D31: messages 30 days; D40 Claude push unresolved retained, terminal 30 days from update",
     },
     Rule {
         target: Target::DailyRotatedFile { path: AUDIT_LOG },
@@ -186,7 +204,7 @@ pub fn file_keep_days(target: Target) -> Option<u64> {
         .find(|rule| rule.target == target)
         .and_then(|rule| match rule.keep {
             Keep::Days(days) => Some(days),
-            Keep::Forever => None,
+            Keep::Forever | Keep::WithMessage => None,
         })
 }
 
@@ -232,23 +250,36 @@ pub(super) fn counts(conn: &Connection) -> Result<Vec<(&'static str, u64)>, Stor
 
 pub(super) fn prune(conn: &mut Connection, now_unix_ms: u64) -> Result<PruneReport, StoreError> {
     let tx = conn.transaction()?;
-    let mut tables = Vec::new();
+    // Capture every count before parent deletes can cascade to children.
+    let mut tables: Vec<TablePrune> = table_rules()
+        .map(|(name, _, _)| {
+            Ok(TablePrune {
+                table: name,
+                before: count(&tx, name)?,
+                after: 0,
+            })
+        })
+        .collect::<Result<_, StoreError>>()?;
     for (name, time_column, keep) in table_rules() {
-        let before = count(&tx, name)?;
         if let Keep::Days(days) = keep {
             let column = time_column.ok_or_else(|| {
                 StoreError::Invalid(format!("retention rule for {name} has no time column"))
             })?;
             let cutoff = now_unix_ms.saturating_sub(days.saturating_mul(DAY_MS));
             let cutoff = i64::try_from(cutoff).unwrap_or(i64::MAX);
-            tx.execute(&format!("DELETE FROM {name} WHERE {column} < ?1"), [cutoff])?;
+            if name == "messages" {
+                tx.execute("DELETE FROM messages WHERE \
+                    (NOT EXISTS (SELECT 1 FROM claude_deliveries d WHERE d.message_id = messages.id) \
+                        AND created_at_unix_ms < ?1) OR \
+                    (EXISTS (SELECT 1 FROM claude_deliveries d WHERE d.message_id = messages.id) \
+                        AND state IN ('confirmed', 'failed') AND updated_at_unix_ms < ?1)", [cutoff])?;
+            } else {
+                tx.execute(&format!("DELETE FROM {name} WHERE {column} < ?1"), [cutoff])?;
+            }
         }
-        let after = count(&tx, name)?;
-        tables.push(TablePrune {
-            table: name,
-            before,
-            after,
-        });
+    }
+    for table in &mut tables {
+        table.after = count(&tx, table.table)?;
     }
     tx.commit()?;
     Ok(PruneReport {

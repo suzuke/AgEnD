@@ -18,6 +18,10 @@
 |---|---|---|---|---|---|
 | 單次請求 | one-shot request | `agend_client::exchange_once` | 在同一期限內連線、協商、送一次請求及等回覆；部分寫入、斷線或逾時都不自動重送。 | 一般 client 的安全重試；投遞結果不明不等於確定未送出 | D40 P1／P7 |
 
+| 投遞紀錄 | delivery record | `ClaudeDelivery`／`ClaudeAttempt` | 附於既有訊息的投遞與 session 關聯；開始紀錄先 commit，重複取得不授權再送。 | 訊息 id 的唯一冪等層；driver event log | D40 P7 |
+| 投遞結果不明 | unknown delivery outcome | `ClaudeDelivery::outcome_unknown` | 投遞已開始但未保存寫出結果或有效 ACK；保留 queued 與 metadata，禁止自動重送。 | 確定尚未送出；第五種 DeliveryState | D40 P7 |
+| driver 事件紀錄 | driver event log | `DriverEvent` | 依入庫 seq 排序、按入庫時間保留 14 天；不作為未終結訊息或 ACK 的唯一恢復來源。 | 訊息投遞紀錄；即時 busy／idle 證據 | D40 P6／P7 |
+
 ## 組織
 
 | 名詞（中文） | English | 程式識別字 | 定義 | 不要跟…混淆 | 出處 |

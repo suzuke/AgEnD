@@ -8,7 +8,8 @@
 //!   `VACUUM INTO` snapshots and restores).
 //! - States move only as `agend_core::model::DeliveryState::can_transition_to`
 //!   allows ([`advance`]).
-//! - Retention: 30 days by `created_at_unix_ms` (D31).
+//! - Retention: 30 days by creation (D31); D40 retains unresolved Claude push
+//!   messages and starts terminal retention at the final state update.
 //!
 //! Must NOT: change a row's id, sender, target, task, body or level after
 //! it was inserted.
@@ -172,6 +173,22 @@ pub(crate) fn claim(conn: &Connection, new: &NewMessage, now: u64) -> Result<Cla
 /// Returns the row after the change, or `None` when nothing changed (no
 /// such message, or the move is not allowed).
 pub(crate) fn advance(
+    conn: &Connection,
+    id: &str,
+    next: DeliveryState,
+    turn_id: Option<&str>,
+    now: u64,
+) -> Result<Option<Message>, StoreError> {
+    if super::claude::get(conn, id)?.is_some() {
+        return Err(StoreError::Invalid(
+            "Claude push requires an explicit delivery or ACK transaction".into(),
+        ));
+    }
+    advance_claude(conn, id, next, turn_id, now)
+}
+
+/// Shared forward transitions used within the Claude attribution transaction.
+pub(super) fn advance_claude(
     conn: &Connection,
     id: &str,
     next: DeliveryState,

@@ -27,6 +27,10 @@ Codex history 的四個匹配 cases 保留 lost-reply 對帳，新增 never-atte
 
 Codex history 五個 cases 核嚴格 clientId 與舊 lost-reply 相容性；codex_u17 12 個 native tests 核 App／daemon、caller、已驗版本開放、未驗版本拒絕、缺失／過期 holder 版本記錄、DB 拒寫與 attempted crash-window 跨拒絕重啟。driver unit 另驗歸屬讀取失敗在 resume 前拒絕；store unit 驗歸屬持久、冪等及永久保留。v1–v6 fixtures 升級比對 golden。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
 
+## 第 12A store 基礎
+
+`cargo test -p agend-daemon --test claude_store` 跑真 SQLite 並行預約、ACK tuple／重複與延遲、channel／Stop route、14／30 天邊界、instance 移除後保留、快照及四個真程序開機（首個在 commit 後硬殺）與新 home 負面對照。這是 store-only，未代替完整 DRV-6／9。`store::claude::tests` 注入交易故障，驗預約／寫出／ACK／人工放棄全部 rollback，且一般 receipt 不能替 Claude push 確認收件。`store` schema fixtures v1–v7 升級並核 v7 投遞／事件樣本。
+
 ## 怎麼跑
 
 ```bash
