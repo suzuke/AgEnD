@@ -249,6 +249,12 @@ mod tests {
         let mut line = serde_json::to_vec(&response).unwrap();
         line.push(b'\n');
         assert!(line.len() < MAX_LINE_BYTES);
+        // Exercise the CPU deadline without depending on socket scheduling.
+        let start = Instant::now();
+        let error = decode::response(&line, start + Duration::from_millis(80)).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("one-shot deadline elapsed"));
+        assert!(start.elapsed() < Duration::from_millis(180));
         let (stream, mut peer) = UnixStream::pair().unwrap();
         peer.set_write_timeout(Some(Duration::from_secs(2)))
             .unwrap();
@@ -259,7 +265,14 @@ mod tests {
         let start = Instant::now();
         let mut reader = BufReader::new(stream);
         let error = read(&mut reader, start + Duration::from_millis(80)).unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        // Native I/O may expire before parsing starts; both paths must stop.
+        assert!(matches!(
+            error.kind(),
+            io::ErrorKind::InvalidData | io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+        ));
+        if error.kind() == io::ErrorKind::InvalidData {
+            assert!(error.to_string().contains("one-shot deadline elapsed"));
+        }
         assert!(
             start.elapsed() < Duration::from_millis(180),
             "{:?}",

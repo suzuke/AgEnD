@@ -165,3 +165,4 @@
 - 2026-10-04：第二位 fresh verifier 對 `e068e59` 給 REFUTED：合法上限內的 plain 字串編碼與大型回覆解析仍有 CPU 逾時；保留失敗斷言，改為分段原生 JSON 編碼及解析期間檢查期限，修正版另驗（#147）。
 - 2026-10-04：第三位 fresh verifier 對 `2d754bb` 給 REFUTED：internally-tagged 回覆讀完後轉換中間樹，公開 native API 兩次超過期限 100 ms 餘裕；保留原反例，改成 RawValue envelope + core 資料分段解析，合法欄位順序亦驗，修正版另核（#147）。
 - 2026-10-04：`b5629be` 的覆核仍 REFUTED：Fleet 中 AskEntry 的大量 options 轉換尾段六次超過同一 100 ms 餘裕；改為巢狀 ask／entry／reply 分段解碼並補真 producer 回歸。另一次平台中斷記未完成，原證據保留，修正版另驗（#147）。
+- 2026-10-04：`8594cba` fresh verifier CONFIRMED，46 client tests／10 獨立 native tests 通過，使用者重跑 46 tests 通過並清掉 754 MiB。PR CI 雙平台通過；push macOS 因 socket 先逾時而未回 InvalidData 的測試斷言失敗，拆出直接 CPU 解析檢查、接受 native I/O 逾時，原 80＋100 ms 不變，修正版另驗（#147；未 merge）。
