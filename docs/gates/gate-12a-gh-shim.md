@@ -7,7 +7,7 @@
 
 ## 狀態與範圍
 
-2026-10-04，`feat/gate-12a-gh-shim`，基線 #149 merge `6dd552e`。這批只實作 [D40 P4](../decisions/d40.md) 的共用防護，沒有啟動真 Claude／Codex／OpenCode、讀取憑證或呼叫 GitHub 的寫入 API。第 12A 仍未完成。
+2026-10-04，`feat/gate-12a-gh-shim`，基線 #149 merge `6dd552e`，[draft PR #150](https://github.com/suzuke/AgEnD/pull/150)，首個實作提交 `d4853ad`。這批只實作 [D40 P4](../decisions/d40.md) 的共用防護，沒有啟動真 Claude／Codex／OpenCode、讀取憑證或呼叫 GitHub 的寫入 API。第 12A 仍未完成。
 
 daemon 每次 boot 維護 `$AGEND_HOME/bin/{git,gh,kill,killall,pkill}` symlink，指向當前 agend binary；所有 backend 的 holder 都先找到此目錄。一般操作者的 PATH 不加 shim。既有 `AGEND_SHIM_BYPASS=1` 保留，bypass 寫 audit；daemon 的 agent 環境白名單不傳入此變數。
 
@@ -59,7 +59,7 @@ native holder probe 使用 shell 替身驗 runtime 的 PATH，不代替 D40 P8 �
 
 ## 進度紀錄
 
-- 2026-10-04：共用 gh 防護及三 backend 真 holder probe 已實作；首輪 3 unit／5 native cases 通過，workspace clippy 通過；完整驗證另核，尚未合併。
+- 2026-10-04：共用 gh 防護及三 backend 真 holder probe 已實作；首輪 3 unit／5 native cases 通過，workspace clippy 通過；完整驗證另核，尚未合併（#150）。
 
 ## 下一步
 

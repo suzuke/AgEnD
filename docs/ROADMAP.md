@@ -73,7 +73,7 @@
 ## 進度紀錄
 
 - 2026-10-04：使用者確認 #149，`c7e398c` 全新 verifier r2 CONFIRMED、push／PR 雙平台 CI 通過，合併為 `6dd552e`；使用者另重驗 16 native cases 全過。已清理 feature／verifier worktree、branches、targets；另移除已合併且乾淨的舊 `docs/gate-12-proposal` worktree／branch。有未提交變更的舊 worktree 保留。
-- 2026-10-04：下一批在 `feat/gate-12a-gh-shim` 完成 D40 P4 的 [共用 gh 防護](gates/gate-12a-gh-shim.md)，首輪 3 unit／5 native cases 與 workspace clippy 通過；完整驗證、fresh verifier 與 CI 另核，未 merge，完整 A 段仍未完成。
+- 2026-10-04：下一批在 `feat/gate-12a-gh-shim` 完成 D40 P4 的 [共用 gh 防護](gates/gate-12a-gh-shim.md)，首輪 3 unit／5 native cases 與 workspace clippy 通過；完整驗證、fresh verifier 與 CI 另核，未 merge（`d4853ad`／[draft PR #150](https://github.com/suzuke/AgEnD/pull/150)），完整 A 段仍未完成。
 
 - 2026-10-04：使用者確認 #147，合併為 `8dfccf8`；`5a4047c` 全新 verifier CONFIRMED、46 client tests 通過，push／PR 雙平台 CI 通過。PR macOS 首次未改動的 TUI 時序測試超過 300 ms，原失敗保留，重跑通過且門檻未改。舊 worktree／branch 已清理；在 `feat/gate-12a-claude-store` 開始 [投遞／ACK／retention 基礎](gates/gate-12a-store.md)，Claude 接入尚未完成。
 

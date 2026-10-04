@@ -69,7 +69,7 @@ Claude 接入／A 段功能驗收尚未完成，bridge 基礎可用 [自動 nati
 
 ## 進度紀錄
 
-- 2026-10-04：#149 經使用者確認合併為 `6dd552e`；全新 verifier r2 CONFIRMED、四個 CI jobs 通過，使用者另重驗 16 native cases 並清理。共用 gh 防護下一批已實作，待全新驗證／CI 及使用者確認合併。
+- 2026-10-04：#149 經使用者確認合併為 `6dd552e`；全新 verifier r2 CONFIRMED、四個 CI jobs 通過，使用者另重驗 16 native cases 並清理。共用 gh 防護下一批已實作（`d4853ad`／[draft PR #150](https://github.com/suzuke/AgEnD/pull/150)），待全新驗證／CI 及使用者確認合併。
 
 - 2026-10-04：`6193ea4` fresh verifier REFUTED：event-only DB 的每日快照未納入新表而被跳過；保留原失敗與反例，修正 snapshot empty 判斷，另派全新 verifier 重驗（#148；未 merge）。
 
