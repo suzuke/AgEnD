@@ -32,7 +32,9 @@ dependencies = [
  "agend-holder",
  "agend-testkit",
  "base64",
+ "serde",
  "serde_json",
+ "socket2",
 ]
 
 [[package]]

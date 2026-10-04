@@ -189,7 +189,7 @@ fn open_retrying(
 }
 
 /// The request id a reply to `request` carries.
-fn request_id(request: &ClientRequest) -> Option<&str> {
+pub(crate) fn request_id(request: &ClientRequest) -> Option<&str> {
     match request {
         ClientRequest::Command { data } => Some(&data.request_id),
         ClientRequest::AnswerAsk { data } => Some(&data.request_id),
@@ -318,8 +318,9 @@ impl Client {
 
     /// Sends `request` and waits (10 s) for the reply carrying its request
     /// id; events read meanwhile are kept for [`Client::next_event`]. A
-    /// request that could not be written is sent again after reconnecting
-    /// (it never reached the daemon). If the connection ends after it was
+    /// request whose write fails is sent again after reconnecting (a prefix
+    /// may have reached the daemon). Use [`crate::exchange_once`] when even
+    /// a partial write must not be replayed. If the connection ends after it was
     /// sent, only a [`Redo::Safe`] request is sent again; otherwise
     /// [`ClientError::Restarted`]. The subscription does not survive a
     /// reconnect.

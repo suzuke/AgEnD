@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - 依 crate 由下往上分 13 個施工關；每個施工關單獨驗收，使用者確認後才開下一個施工關（D22）。
-> - 目前狀態：**第 1–11 施工關完成並已合併**；第 11 施工關 C 段 #145 經全新 verifier、雙平台 CI、實機及後續自動驗收與清理，使用者於 2026-10-03 確認合併（`b2152db`）。第 12 施工關 A 段 #138 設計已確認，功能尚未實作；第 13 施工關未開始。
-> - 下一步：核對第 12A [D40](decisions/d40.md) 文件、全新 verifier 與固定 head CI；提案 merge 等使用者確認，實作另行安排。
+> - 目前狀態：**第 1–11 施工關完成並已合併**；第 11 施工關 C 段 #145 經全新 verifier、雙平台 CI、實機及後續自動驗收與清理，使用者於 2026-10-03 確認合併（`b2152db`）。第 12 施工關 A 段設計 #138 已 merge，client 基礎實作中、Claude 接入未完成；第 13 施工關未開始。
+> - 下一步：依第 12A [D40](decisions/d40.md) 實作不重送的通訊、持久化、channel／Stop 與明確 ACK；完成後由全新 verifier 與使用者驗收。
 
 ## 13 個施工關
 
@@ -22,7 +22,7 @@
 | 9 `cli` | [完成（2026-09-29；已 merge #136）](gates/gate-09-cli.md) | agend CLI：agent 命令、操作者命令、status；安裝相關先做 `doctor`、`init`，服務註冊留第 13 施工關 | 對假／真 daemon 驗輸出與錯誤；兩個假 Codex agent 互傳訊息、中途重啟不漏不重 |
 | 10 `pipeline` | [完成（2026-10-02；#143 已確認合併）](gates/gate-10-pipeline.md) | daemon：pipeline、git、runner、forge local、supervisor、reconcile | 假 driver + 暫存 repo：task 從派工走到 merge |
 | 11 `tui` | [完成（A、B、C 已 merge；C 段 #145）](gates/gate-11-tui.md) | attention-first TUI、完整終端、resize、多視窗、鍵鼠／貼上與歷史 | 最終 `cfee027` 全新 verifier CONFIRMED；四個雙平台 CI jobs 各 900 passed／0 failed／2 既有 ignored、實際 no-std；0.159.3 真 U17 已核實並獲版本許可。實機紀錄及後續自動驗收、清理完成，使用者確認 merge `b2152db` |
-| 12 `adapters` | [提案中（A 段 #138 設計已確認，尚未 merge 或實作）](gates/gate-12-adapters.md) | A claude、B opencode driver、C forge github、D Telegram | 先對假實作，再做真 backend smoke test |
+| 12 `adapters` | [實作中（A 段 #138 設計已 merge；Claude 接入尚未完成）](gates/gate-12-adapters.md) | A claude、B opencode driver、C forge github、D Telegram | 先對假實作，再做真 backend smoke test |
 | 13 `install` | [未開始](gates/gate-13-install.md) | 安裝與發布（最後一個施工關）：服務註冊、`agend uninstall`、`agend telegram setup`（由 daemon 配對）、`xtask release`、brew、GitHub release、`cargo install` | CI 用全新 HOME + 假 agent，從安裝到第一個 task 完成 < 5 分鐘；每個 `doctor` 檢查都有「故意弄壞 → 看到修正指令」的測試 |
 
 ## 第 1 施工關：開工前先提案、經使用者確認才實作
@@ -68,7 +68,7 @@
 
 ## 下一步
 
-第 1–11 施工關已完成並合併。第 11 施工關 C 段 #145 使用者於 2026-10-03 明確確認合併，原驗收範圍與限制見 [收尾紀錄](gates/gate-11c-closeout.md)。第 12A #138 的 P1–P10 已依本輪使用者確認寫定為 [D40](decisions/d40.md)，剩餘採建議；Claude 接入尚未實作，提案 merge 等明確確認。
+第 1–11 施工關已完成並合併。第 11 施工關 C 段 #145 使用者於 2026-10-03 明確確認合併，原驗收範圍與限制見 [收尾紀錄](gates/gate-11c-closeout.md)。第 12A #138 的 P1–P10 已依本輪使用者確認寫定為 [D40](decisions/d40.md)，剩餘採建議；設計文件已依使用者「merge後開工」合併（#138、`4390633`）；第 12A 在獨立 worktree 實作中，Claude 接入尚未完成。
 
 ## 進度紀錄
 
@@ -157,3 +157,12 @@
 - 2026-10-03：C 收尾補同步 holder README／TESTING 的首次 U17 狀態，實機證據路徑改指向已核 hash 的封存包；本批只改文件，沿用 c834bfc 的獨立實作驗證並核最後提交 CI（draft PR #145；merge 待使用者確認）。
 
 - 2026-10-03：全新文件覆核指出早期 U17／App 驗證頁混用歷史與現況，已保留原批次失敗及數字並標明當時範圍，施工關／progress 現況對齊已核首次 U17、0.159.3 許可與自動化收尾；本批只改文件（draft PR #145；merge 待確認）。
+
+- 2026-10-04：依使用者確認合併 #138（`4390633`），於 `feat/gate-12a-claude` 開工；首批加入 client 單次請求 API 與 native socket 回歸，Claude 接入及第 12A 驗收尚未完成。
+
+- 2026-10-04：首批 `7b1baeb` fresh verifier REFUTED：大請求預編碼超出 deadline，且狀態入口未同步；保留反例與原結果，補編碼大小／期限限制及入口狀態。修正版另驗（draft PR #147）。
+- 2026-10-04：`7b1baeb` CI：Ubuntu 通過，macOS 的共用期限測試在 hello 階段提前逾時；放寬握手排程餘裕並保留「重設期限會錯誤成功」的反例檢查，修正版重新跑 CI（#147）。
+- 2026-10-04：第二位 fresh verifier 對 `e068e59` 給 REFUTED：合法上限內的 plain 字串編碼與大型回覆解析仍有 CPU 逾時；保留失敗斷言，改為分段原生 JSON 編碼及解析期間檢查期限，修正版另驗（#147）。
+- 2026-10-04：第三位 fresh verifier 對 `2d754bb` 給 REFUTED：internally-tagged 回覆讀完後轉換中間樹，公開 native API 兩次超過期限 100 ms 餘裕；保留原反例，改成 RawValue envelope + core 資料分段解析，合法欄位順序亦驗，修正版另核（#147）。
+- 2026-10-04：`b5629be` 的覆核仍 REFUTED：Fleet 中 AskEntry 的大量 options 轉換尾段六次超過同一 100 ms 餘裕；改為巢狀 ask／entry／reply 分段解碼並補真 producer 回歸。另一次平台中斷記未完成，原證據保留，修正版另驗（#147）。
+- 2026-10-04：`8594cba` fresh verifier CONFIRMED，46 client tests／10 獨立 native tests 通過，使用者重跑 46 tests 通過並清掉 754 MiB。PR CI 雙平台通過；push macOS 因 socket 先逾時而未回 InvalidData 的測試斷言失敗，拆出直接 CPU 解析檢查、接受 native I/O 逾時，原 80＋100 ms 不變，修正版另驗（#147；未 merge）。

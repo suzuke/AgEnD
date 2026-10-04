@@ -38,6 +38,20 @@ legacy 9 MiB 純文字畫面的測試保留。`agend-holder` 只作 dev-dependen
 | `answer_ask_reaches_the_daemon_and_unknown_asks_are_refused` | `answer_ask` 被接受；沒有的請示 → `unknown_ask` |
 | `events_follow_the_fleet_view_and_a_bad_cursor_is_a_gap` | 全貌之後的事件連號；等回應時讀到的事件留給 `next_event`；壞游標 → `event_gap`；daemon 關掉 → `Disconnected` |
 
+## 第 12A client 基礎
+
+第 12A 的 `tests/once.rs` 使用 FakeDaemon 的真正 protocol producer，經 native Unix socket／Proxy 驗成功、舊版本拒絕、無 daemon／過期期限立即失敗、hello 與 reply 共用期限、回覆遺失只送一次、逐 byte 慢 hello 不延長期限、超限回覆提早拒絕，以及無 request id 請求先拒絕。`once::tests` 用真 Unix socket pair 與小 send buffer 驗已寫前綴後逾時，沒有補寫或重送。另以 32 MiB 的 send／ask／workflow／request id／caller 驗本機提早拒絕。
+
+四批 fresh verifier 的 CPU 逾時反例均保留；另一次平台中斷只記未完成。回歸包含大量 escaping、接近 8 MiB 的 plain 字串、由真正 producer 的 Fleet 擴增成大型回覆，以及跨 4 KiB 邊界的 UTF-8／控制字元與原生 JSON byte 等價。另用真正 producer 的 2,790,000 個空 stages、合法 data-before-type 順序及 native socket 驗最後一次讀取後的 CPU 尾段；巢狀提問用 2,785,000 個空 options 重驗原反例窗口。分段 decoder 與 producer 的多種 command result、ask 各 entry／reply 型別比對兩種欄位順序。壁鐘斷言包含 100 ms 餘裕；不宣稱作業系統硬即時保證，配置／釋放記憶體仍須完成才能返回。
+
+大型回覆的 CPU 期限另直接解析真 producer JSON，斷言解析時逾時；native socket 路徑接受先發生的讀取逾時（macOS WouldBlock／TimedOut）或解析逾時。兩路都維持 80 ms 期限與 100 ms 餘裕，避免把排程先後誤當協定錯誤。原 macOS push CI 的錯誤型別斷言失敗 log 保留。
+
+```bash
+cargo test -p agend-client --test once --lib
+```
+
+這些測試只驗新 client 基礎，尚未證明 Claude channel／Stop／ACK 或第 12A 完成。
+
 ## 用到的假實作
 
 - `agend_testkit::fake_daemon::FakeDaemon`（`start_at` 在同一個路徑重啟）
