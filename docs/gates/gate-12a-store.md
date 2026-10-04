@@ -41,7 +41,7 @@ legacy Claude push 訊息若已有 attempted_at 卻無投遞 tuple，視為結�
 | claude_deliveries | 隨 messages FK cascade；prune report 同時呈現 child 被刪數量 |
 | Codex／Claude inbox 等原有訊息 | 原 created_at 起 30 天不變 |
 
-事件刪除不阻止已保存的投遞核對延遲 ACK。快照計數包含兩張新表；SQLite seq 與 tuple 經 VACUUM INTO 還原不變。
+事件刪除不阻止已保存的投遞核對延遲 ACK。快照非空判斷包含兩張新表；SQLite seq 與 tuple 經 VACUUM INTO 還原不變。既有 Codex／Claude inbox 等一般 messages 單表資料仍視為空，本批未擴張其快照行為。
 
 ## 驗證
 

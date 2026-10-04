@@ -104,3 +104,5 @@
 - 2026-10-04：第 12A store 基礎加入 migration 0007、投遞前原子預約、四欄 ACK、結果不明與人工放棄、driver_events 14 天及未終結訊息保留。首輪真 SQLite／schema v1–v7、daemon 回歸及 accept core 通過；完整 workspace／全新 verifier／固定 head CI 另核，未 merge（`6193ea4`、[draft PR #148](https://github.com/suzuke/AgEnD/pull/148)）。
 
 - 2026-10-04：`6193ea4` 全新 verifier REFUTED：event-only DB 快照被誤判空資料庫；保留失敗 log，修正 daily snapshot 判斷並保持原回歸，補 instance 移除／500 天後快照還原 ACK；daemon 162 passed／0 ignored、workspace clippy／fmt／實際 no-std 通過，另一位全新 verifier／CI 重驗（#148；未 merge）。
+
+- 2026-10-04：`2af0473` 全新 verifier REFUTED：README 誤稱一般 messages 單表也算快照非空；獨立 native probe 核 Codex push／Claude inbox 皆不符。保留反例，修正文件並明示既有行為不變，第三位全新 verifier／固定 head CI 另核（#148；未 merge）。
