@@ -131,6 +131,11 @@ impl Spool {
         result
     }
     pub fn publish(&self, request: ClaudeRequestData) -> io::Result<PathBuf> {
+        self.locked(|| self.publish_locked(request))
+    }
+    /// The caller must hold the home-wide lock through publication and its
+    /// first live attempt, so an ingester cannot steal a fresh busy hook.
+    pub fn publish_locked(&self, request: ClaudeRequestData) -> io::Result<PathBuf> {
         let pending = Pending {
             version: 1,
             request,
@@ -139,23 +144,21 @@ impl Spool {
         if bytes.len() > MAX_LINE_BYTES {
             return Err(io::Error::other("spool payload exceeds line limit"));
         }
-        self.locked(|| {
-            let counter = self.dir.join("counter");
-            let seq = match load(&counter) {
-                Ok(bytes) => std::str::from_utf8(&bytes)
-                    .ok()
-                    .and_then(|v| v.parse::<u64>().ok())
-                    .ok_or_else(|| io::Error::other("invalid spool counter"))?,
-                Err(e) if e.kind() == io::ErrorKind::NotFound => 0,
-                Err(e) => return Err(e),
-            }
-            .checked_add(1)
-            .ok_or_else(|| io::Error::other("spool counter exhausted"))?;
-            self.atomic(&counter, seq.to_string().as_bytes())?;
-            let path = self.dir.join(format!("{seq:020}-{}.json", super::uuid()?));
-            self.atomic(&path, &bytes)?;
-            Ok(path)
-        })
+        let counter = self.dir.join("counter");
+        let seq = match load(&counter) {
+            Ok(bytes) => std::str::from_utf8(&bytes)
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .ok_or_else(|| io::Error::other("invalid spool counter"))?,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => 0,
+            Err(e) => return Err(e),
+        }
+        .checked_add(1)
+        .ok_or_else(|| io::Error::other("spool counter exhausted"))?;
+        self.atomic(&counter, seq.to_string().as_bytes())?;
+        let path = self.dir.join(format!("{seq:020}-{}.json", super::uuid()?));
+        self.atomic(&path, &bytes)?;
+        Ok(path)
     }
     pub fn list(&self) -> io::Result<Vec<PathBuf>> {
         let mut paths = vec![];

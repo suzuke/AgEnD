@@ -94,22 +94,21 @@ pub(super) fn run(home: &Path, args: &[OsString]) -> io::Result<()> {
         },
     )?;
     let spool = Spool::open(home, "hooks", deadline)?;
-    let path = spool.publish(data.clone())?;
     let mut messages = vec![];
-    let received = spool.locked(|| {
-        // Another bridge may already have committed this event as historical.
-        // Never execute it live a second time, even when its file is gone.
-        if !path.exists() {
-            return Ok(None);
-        }
-        let reply = exchange(home, &data, deadline - Duration::from_millis(200))?;
-        if reply.committed {
-            spool.remove(&path)?;
-        }
-        Ok(Some(reply))
-    });
+    let received: io::Result<ClaudeReplyData> = spool.locked(|| {
+        // No unlock between durable publication and the first live RPC.
+        // Publication failure propagates; only transport failure is offline.
+        let path = spool.publish_locked(data.clone())?;
+        Ok((|| {
+            let reply = exchange(home, &data, deadline - Duration::from_millis(200))?;
+            if reply.committed {
+                spool.remove(&path)?;
+            }
+            Ok(reply)
+        })())
+    })?;
     match received {
-        Ok(Some(reply)) if reply.committed => {
+        Ok(reply) if reply.committed => {
             messages = reply.messages;
         }
         Ok(_) => eprintln!("agend hook: event remains pending; no commit receipt"),

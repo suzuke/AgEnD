@@ -104,10 +104,13 @@ impl Fixture {
         SqliteStore::open(&self.home, 0).unwrap()
     }
     fn hook(&self, event: &str, extra: Value) -> Value {
-        let payload = hook_payload(&self.home, SESSION, event, extra);
+        Self::native_hook(&self.home, event, extra)
+    }
+    fn native_hook(home: &Path, event: &str, extra: Value) -> Value {
+        let payload = hook_payload(home, SESSION, event, extra);
         let mut child = Command::new(BIN)
             .args(["hook", event])
-            .env("AGEND_HOME", &self.home)
+            .env("AGEND_HOME", home)
             .env("AGEND_INSTANCE", "claude")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -793,5 +796,206 @@ fn delayed_live_session_start_cannot_undo_a_newer_busy_hook() {
         })
         .messages
         .is_empty()
+    );
+}
+
+#[test]
+fn hook_publication_and_live_rpc_hold_one_lock_so_ingest_cannot_steal_busy() {
+    use agend_testkit::contract::client::proxy::{Direction, Options, Proxy};
+    use std::os::fd::AsRawFd;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    let mut f = Fixture::new(1);
+    f.start();
+    f.hook("SessionStart", json!({"source":"startup"}));
+    std::thread::sleep(Duration::from_millis(5100));
+    let socket = f.home.join(DAEMON_SOCKET);
+    let upstream = f.home.join("run/upstream.sock");
+    fs::rename(&socket, &upstream).unwrap();
+    let waiting = Arc::new(AtomicBool::new(false));
+    let release = Arc::new(AtomicBool::new(false));
+    let (seen, resume) = (waiting.clone(), release.clone());
+    let proxy = Proxy::start_at(&socket, upstream.clone(), Options::rewrite(Arc::new(move |_, direction, line| {
+        if direction == Direction::ToServer && matches!(serde_json::from_str::<ClientRequest>(&line),
+            Ok(ClientRequest::Claude { data: ClaudeRequestData { operation: ClaudeOperation::Hook { ref event, .. }, .. } }) if event == "UserPromptSubmit") {
+            seen.store(true, Ordering::SeqCst);
+            let end = Instant::now() + Duration::from_secs(6);
+            while !resume.load(Ordering::SeqCst) && Instant::now() < end {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        }
+        vec![line]
+    }))).unwrap();
+    std::thread::scope(|scope| {
+        let home = f.home.clone();
+        let helper = scope.spawn(move || {
+            Fixture::native_hook(&home, "UserPromptSubmit", json!({"prompt":"busy"}))
+        });
+        let end = Instant::now() + Duration::from_secs(5);
+        while !waiting.load(Ordering::SeqCst) {
+            assert!(Instant::now() < end, "native Hook RPC did not reach proxy");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let lock = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(f.home.join("spool/lock"))
+            .unwrap();
+        let held = unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0;
+        std::thread::sleep(Duration::from_millis(1250));
+        let retained = pending(&f.home, "hooks");
+        release.store(true, Ordering::SeqCst);
+        assert_eq!(helper.join().unwrap(), json!({}));
+        assert!(held, "helper released publication lock before live RPC");
+        assert_eq!(retained, 1, "daemon stole fresh hook as historical");
+    });
+    drop(proxy);
+    fs::rename(upstream, socket).unwrap();
+    assert!(
+        f.rpc(ClaudeOperation::Poll {
+            session_id: SESSION.into()
+        })
+        .messages
+        .is_empty()
+    );
+}
+
+#[test]
+fn newer_published_historical_busy_invalidates_cached_idle_without_dispatch() {
+    let mut f = Fixture::new(1);
+    f.start();
+    f.hook("SessionStart", json!({"source":"startup"}));
+    std::thread::sleep(Duration::from_millis(5100));
+    // The real disk envelope models a helper that died after publication.
+    let payload = hook_payload(
+        &f.home,
+        SESSION,
+        "UserPromptSubmit",
+        json!({"prompt":"busy"}),
+    );
+    let record = ClaudePendingRecord {
+        version: 1,
+        request: ClaudeRequestData {
+            request_id: id(),
+            instance_id: "claude".into(),
+            operation: ClaudeOperation::Hook {
+                event_id: id(),
+                session_id: SESSION.into(),
+                event: "UserPromptSubmit".into(),
+                payload: payload.to_string(),
+                occurred_at_unix_ms: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64,
+                replayed: false,
+            },
+        },
+    };
+    let path = f
+        .home
+        .join("spool/hooks")
+        .join(format!("00000000000000000002-{}.json", id()));
+    let mut file = fs::File::create(path).unwrap();
+    file.write_all(&serde_json::to_vec(&record).unwrap())
+        .unwrap();
+    file.sync_all().unwrap();
+    wait_empty(&f.home, "hooks");
+    assert!(
+        f.rpc(ClaudeOperation::Poll {
+            session_id: SESSION.into()
+        })
+        .messages
+        .is_empty()
+    );
+}
+
+#[test]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn first_native_hook_unlock_occurs_after_busy_is_committed_live() {
+    let mut f = Fixture::new(1);
+    f.start();
+    f.hook("SessionStart", json!({"source":"startup"}));
+    std::thread::sleep(Duration::from_millis(5100));
+    let library = f.home.join("unlock-probe.so");
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude_unlock_probe.c");
+    let mut compiler = Command::new("cc");
+    #[cfg(target_os = "macos")]
+    compiler.arg("-dynamiclib");
+    #[cfg(target_os = "linux")]
+    compiler.args(["-shared", "-fPIC"]);
+    compiler.arg(source).arg("-o").arg(&library);
+    #[cfg(target_os = "linux")]
+    compiler.arg("-ldl");
+    assert!(
+        compiler.status().unwrap().success(),
+        "native unlock probe compilation"
+    );
+    let marker = f.home.join("unlocked");
+    let mut command = Command::new(BIN);
+    command
+        .args(["hook", "UserPromptSubmit"])
+        .env("AGEND_HOME", &f.home)
+        .env("AGEND_INSTANCE", "claude")
+        .env("AGEND_PROBE_UNLOCK_PATH", &marker)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(target_os = "macos")]
+    command.env("DYLD_INSERT_LIBRARIES", &library);
+    #[cfg(target_os = "linux")]
+    command.env("LD_PRELOAD", &library);
+    let mut child = command.spawn().unwrap();
+    let payload = hook_payload(
+        &f.home,
+        SESSION,
+        "UserPromptSubmit",
+        json!({"prompt":"busy"}),
+    );
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(payload.to_string().as_bytes())
+        .unwrap();
+    let end = Instant::now() + Duration::from_secs(5);
+    while !marker.exists() {
+        if Instant::now() >= end || child.try_wait().unwrap().is_some() {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("native first-unlock interposition did not pause helper");
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // SIGSTOP happens only after the real syscall released flock. An old
+    // two-acquisition helper now lets the real ingester steal its publication.
+    std::thread::sleep(Duration::from_millis(1250));
+    let poll = f.rpc(ClaudeOperation::Poll {
+        session_id: SESSION.into(),
+    });
+    unsafe {
+        libc::kill(child.id() as i32, libc::SIGCONT);
+    }
+    let result = child.wait_with_output().unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(
+        poll.messages.is_empty(),
+        "cached idle delivered after native busy hook"
+    );
+    f.stop();
+    let s = f.store();
+    let events = block_on(s.driver_events_after(0, 32)).unwrap();
+    let busy = events
+        .iter()
+        .find(|e| e.event.kind == "UserPromptSubmit")
+        .unwrap();
+    assert!(
+        !busy.event.replayed,
+        "fresh busy hook was stolen by historical ingest"
     );
 }

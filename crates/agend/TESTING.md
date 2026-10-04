@@ -130,4 +130,4 @@ cargo test -p agend
 
 ## 第 12A Claude helpers
 
-`cargo test -p agend --test claude_bridge` 是本批可自動重驗入口，共 13 個 native cases。包含 MCP parse／schema 錯誤後下一請求仍可處理；ACK 磁碟保存失敗回工具錯誤；通知收到後以 MCP ping 做 Written 完成 barrier，不能把 stdout 到達當成 SQLite commit。Fixture 停自己 daemon／holders 並刪 home；scope 與指令見 [bridge 基礎](../../docs/gates/gate-12a-bridge.md)。
+`cargo test -p agend --test claude_bridge` 是本批可自動重驗入口，共 16 個 native cases。包含 MCP parse／schema 錯誤後下一請求仍可處理；ACK 磁碟保存失敗回工具錯誤；通知收到後以 MCP ping 做 Written 完成 barrier，不能把 stdout 到達當成 SQLite commit。Fixture 停自己 daemon／holders 並刪 home；scope 與指令見 [bridge 基礎](../../docs/gates/gate-12a-bridge.md)。

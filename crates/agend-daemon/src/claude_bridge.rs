@@ -26,6 +26,7 @@ struct State {
     session: String,
     idle: Option<Instant>,
     last_route_hook: u64,
+    revision: u64,
 }
 #[derive(Default)]
 pub(crate) struct ClaudeBridge {
@@ -145,6 +146,25 @@ impl ClaudeBridge {
                 // Historical hooks are saved even when their instance is gone.
                 // Duplicate/replayed/old hooks can never take a queue or make idle.
                 if *replayed || !added.inserted || now.abs_diff(*occurred_at_unix_ms) > 5000 {
+                    // A helper may die after publishing but before the live
+                    // RPC. A newer historical routing observation can only
+                    // invalidate cached idle, never create idle or dispatch.
+                    if added.inserted
+                        && matches!(
+                            event.as_str(),
+                            "SessionStart" | "UserPromptSubmit" | "SessionEnd" | "Stop"
+                        )
+                    {
+                        let mut states = self.states.lock().await;
+                        if let Some(state) = states.get_mut(&data.instance_id)
+                            && state.session == *session_id
+                            && *occurred_at_unix_ms >= state.last_route_hook
+                        {
+                            state.idle = None;
+                            state.last_route_hook = *occurred_at_unix_ms;
+                            state.revision = state.revision.wrapping_add(1);
+                        }
+                    }
                     return Ok(reply);
                 }
             }
@@ -176,6 +196,7 @@ impl ClaudeBridge {
                 session: session.clone(),
                 idle: None,
                 last_route_hook: 0,
+                revision: 0,
             };
         }
         let route = match data.operation {
@@ -215,6 +236,7 @@ impl ClaudeBridge {
                         return Ok(reply);
                     }
                     state.last_route_hook = occurred_at_unix_ms;
+                    state.revision = state.revision.wrapping_add(1);
                 }
                 match event.as_str() {
                     "UserPromptSubmit" | "SessionEnd" => {
@@ -229,6 +251,7 @@ impl ClaudeBridge {
                         let native: serde_json::Value = serde_json::from_str(&payload)
                             .map_err(|_| invalid("invalid hook payload"))?;
                         if native.get("stop_hook_active").and_then(|v| v.as_bool()) != Some(false) {
+                            state.idle = None;
                             return Ok(reply);
                         }
                         state.idle = Some(Instant::now());
@@ -239,6 +262,10 @@ impl ClaudeBridge {
             }
             _ => return Err(invalid("unknown Claude operation")),
         };
+        let revision = state.revision;
+        // Busy hooks must not wait behind a two-second holder snapshot. Check
+        // the same state revision again before committing any delivery intent.
+        drop(states);
         // Live holder screen is required after restart too. Never reconnect
         // a second screen reader over the daemon's current holder link.
         let Some(feed) = ctx.runtime.live_terminal(&data.instance_id) else {
@@ -250,9 +277,24 @@ impl ClaudeBridge {
         if classify(Backend::Claude, &screen, SCREEN_RULES).is_some() {
             return Ok(reply);
         }
+        let mut states = self.states.lock().await;
+        let Some(state) = states.get_mut(&data.instance_id) else {
+            return Ok(reply);
+        };
+        if state.session != session
+            || state.revision != revision
+            || state.idle.is_none()
+            || (route == ClaudeRoute::Channel
+                && state
+                    .idle
+                    .is_some_and(|t| t.elapsed() < Duration::from_secs(5)))
+        {
+            return Ok(reply);
+        }
         reply.messages = reserve(&ctx.store, &data.instance_id, &session, route, now).await?;
         if !reply.messages.is_empty() {
             state.idle = None;
+            state.revision = state.revision.wrapping_add(1);
         }
         Ok(reply)
     }

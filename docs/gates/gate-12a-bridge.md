@@ -7,7 +7,7 @@
 
 ## 狀態與範圍
 
-2026-10-04，`feat/gate-12a-claude-bridge`，基線 #148 merge `7877dbe`。[draft PR #149](https://github.com/suzuke/AgEnD/pull/149)，首個提交 `999203e`。13 native cases 與 accept core（含實際 no-std）通過；完整 workspace、全新驗證與固定 head CI 收尾中，merge 等使用者確認；本批不是完整第 12A 驗收。真 Claude、模型回合與錄製均未執行。
+2026-10-04，`feat/gate-12a-claude-bridge`，基線 #148 merge `7877dbe`。[draft PR #149](https://github.com/suzuke/AgEnD/pull/149)，首個提交 `999203e`。原 head `b4c6b46` 被全新 verifier r1 判定 REFUTED：hook 發布與首次 live RPC 之間的解鎖空窗讓 ingest 搶先重播 busy 事件。修正後 16 native cases 與 accept core（含實際 no-std）通過；完整 workspace、全新驗證與固定 head CI 收尾中，merge 等使用者確認；本批不是完整第 12A 驗收。真 Claude、模型回合與錄製均未執行。
 
 | 本批已有 | 尚未完成 |
 |---|---|
@@ -44,7 +44,7 @@ Unix socket／owned home 沿用同 UID、0600／0700 的信任邊界，caller �
 - SessionStart 建立初始 idle；UserPromptSubmit／SessionEnd 即時撤銷 idle；Pre／PostToolUse 只保存事件。
 - Stop 只有明確 `stop_hook_active=false` 可取 Queue；有內容回 `decision=block`／完整 reason 並保持 busy；active 或缺欄位不續行、不 ACK。
 - idle channel 至少穩定五秒。daemon 必須取得目前 live holder 畫面，既有 classifier 命中提示就暫停內容投遞；重啟後不以歷史事件建立 idle。
-- duplicate／replayed／來源時間與入庫時間相差超過五秒的 hook 只保存，不取 queue。延遲的 live 路由事件也不能覆蓋較新 source time 的 busy／idle；重啟要有新的 live hook 才能恢復 idle。
+- duplicate／replayed／來源時間與入庫時間相差超過五秒的 hook 不取 queue、不建立 idle；新補入且較新的同 session 路由事件會撤銷舊 idle。延遲的 live 路由事件也不能覆蓋較新 source time 的 busy／idle；重啟要有新的 live hook 才能恢復 idle。holder 畫面查詢不持有路由鎖；查詢後必須核 session 與 revision 未變，才預約內容。
 - 單次回覆最多 32 則、約 1 MiB（含標頭餘裕）；合法 1 MiB 單則可整份送出，沒有截斷。
 - reservation commit 先於 reply／stdout；只有新 Started 可寫出。stdout 完整寫完後另送 Written；若 reply／stdout／Written 遺失，保留原 intent 或 Sent，等待 ACK／人處理，不自動重送。
 
@@ -54,7 +54,7 @@ Unix socket／owned home 沿用同 UID、0600／0700 的信任邊界，caller �
 
 `agend_ack` 收 receipts，先保存接受的整批，再嘗試 daemon。離線回「已保存、待同步」；拒絕 tuple 或本機保存失敗回工具錯誤；只有 daemon 入庫才宣稱 confirmed。模型可能漏呼叫 ACK，這時仍未確認；ACK 不代表 task 完成。
 
-`agend hook <event>` 支援 SessionStart／UserPromptSubmit／Stop／PreToolUse／PostToolUse／SessionEnd；stdin 是 testkit／Claude native hook JSON，讀到 EOF，整體期限十秒。先落磁碟，再嘗試 live RPC；離線 Stop 回 `{}`。RPC 保留 stdout 回空決定的時間；磁碟／OS 排程不是硬即時保證。
+`agend hook <event>` 支援 SessionStart／UserPromptSubmit／Stop／PreToolUse／PostToolUse／SessionEnd；stdin 是 testkit／Claude native hook JSON，讀到 EOF，整體期限十秒。在同一次 flock 持有期間先落磁碟，再嘗試首次 live RPC，避免 ingest 搶先把新事件當歷史；離線 Stop 回 `{}`。RPC 保留 stdout 回空決定的時間；磁碟／OS 排程不是硬即時保證。
 
 | 持久資料 | 行為 |
 |---|---|
@@ -69,7 +69,7 @@ helper 不開 agend.db／SQLite／Tokio；daemon 是唯一 DB owner。channel EO
 
 ## 自動驗證
 
-`agend/tests/claude_bridge.rs` 共 13 個 cases：native helper／真 daemon／holder／SQLite，MCP initialize／ACK 與 hook payload 使用 testkit producer。包含 Sent／Confirmed 分界、Stop 防迴圈、離線 spool、helper 退出後 ingest、四次開機與延遲 ACK、拒絕身分／版本／session、保存失敗、壞檔前綴及真 stdout 背壓。
+`agend/tests/claude_bridge.rs` 共 16 個 cases：native helper／真 daemon／holder／SQLite，MCP initialize／ACK 與 hook payload 使用 testkit producer。包含 Sent／Confirmed 分界、Stop 防迴圈、離線 spool、helper 退出後 ingest、四次開機與延遲 ACK、拒絕身分／版本／session、保存失敗、壞檔前綴及真 stdout 背壓。另用 native flock interposition 在首次解鎖後停止真 helper，驗 busy 事件先 live 入庫；helper 發布後死亡的歷史事件也只能撤銷舊 idle。
 
 四次開機 case 以 native service 已提交回覆模擬 helper 尚未寫出即死亡；另有實際 Stop helper 的 unread pipe 逾時，驗部分 stdout 後 intent 仍 unknown 且下一 Stop 不重送。這不代替真 Claude 已讀或完整 Driver 的四次開機契約。
 
