@@ -201,8 +201,9 @@ structure!(SerializeStruct);
 structure!(SerializeStructVariant);
 
 /// serde_json's reader parser consults Read while scanning strings and
-/// containers. Checking every 4 KiB bounds the uninterrupted parse work;
-/// a check only after from_slice finishes would allow a large CPU overrun.
+/// containers. Byte traversal checks every 4 KiB. The staged decoder also
+/// avoids a whole internally-tagged Content tree conversion after the last
+/// Read; checking this reader alone cannot bound that separate CPU tail.
 pub(super) struct Decoding<'a> {
     pub bytes: &'a [u8],
     pub deadline: Instant,

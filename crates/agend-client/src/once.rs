@@ -14,6 +14,7 @@ use socket2::{Domain, SockAddr, Socket, Type};
 
 use crate::{ClientError, connection::request_id, version};
 
+mod decode;
 mod prepare;
 mod sliced_json;
 
@@ -104,12 +105,7 @@ fn read(reader: &mut BufReader<UnixStream>, deadline: Instant) -> io::Result<Cli
                 line.clear();
                 continue;
             }
-            let response = serde_json::from_reader(sliced_json::Decoding {
-                bytes: &line,
-                deadline,
-                until_check: 0,
-            })
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            let response = decode::response(&line, deadline)?;
             remaining(deadline)?;
             return Ok(response);
         }
@@ -271,6 +267,126 @@ mod tests {
         );
         drop(reader);
         writer.join().unwrap();
+    }
+
+    #[test]
+    fn data_before_type_does_not_leave_an_unchecked_content_conversion() {
+        use agend_core::protocol::client::{RequestIdData, TaskView};
+        use agend_testkit::fake_daemon::{FakeDaemon, ProbeClient};
+        let daemon = FakeDaemon::start().unwrap();
+        daemon.set_task(TaskView {
+            task_id: "max".into(),
+            title: "max".into(),
+            team_id: "general".into(),
+            status: "open".into(),
+            assignee: None,
+            stages: vec![String::new(); 2_790_000],
+            current_stage: None,
+            pipeline: None,
+        });
+        let (mut source, _) = ProbeClient::hello(daemon.socket_path(), None).unwrap();
+        let response = source
+            .request(&ClientRequest::GetFleet {
+                data: RequestIdData {
+                    request_id: "max-stage-tail".into(),
+                },
+            })
+            .unwrap();
+        // The real producer's response, reordered by serde_json's native map
+        // serializer. JSON field order must not select a slower unchecked path.
+        let mut line = serde_json::to_vec(&serde_json::to_value(&response).unwrap()).unwrap();
+        line.push(b'\n');
+        assert!(line.len() < MAX_LINE_BYTES);
+        drop(source);
+        drop(daemon);
+        drop(response);
+        for budget in [650, 665, 680] {
+            let (stream, mut peer) = UnixStream::pair().unwrap();
+            peer.set_write_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let bytes = line.clone();
+            let writer = std::thread::spawn(move || {
+                let _ = peer.write_all(&bytes);
+                std::thread::sleep(Duration::from_millis(100));
+            });
+            let start = Instant::now();
+            let mut reader = BufReader::new(stream);
+            let _ = read(&mut reader, start + Duration::from_millis(budget));
+            assert!(
+                start.elapsed() < Duration::from_millis(budget + 100),
+                "budget={budget}, elapsed={:?}",
+                start.elapsed()
+            );
+            drop(reader);
+            writer.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn staged_decoder_matches_native_producer_replies_in_either_field_order() {
+        use agend_core::protocol::client::{InstanceView, RequestIdData};
+        use agend_testkit::fake_daemon::{FakeDaemon, ProbeClient};
+        let daemon = FakeDaemon::start().unwrap();
+        daemon.set_instance(InstanceView {
+            instance_id: "g-1".into(),
+            team_id: "general".into(),
+            backend: "claude".into(),
+            state: agend_core::protocol::client::AgentState::Idle,
+            working_directory: None,
+        });
+        let (mut source, _) = ProbeClient::hello(daemon.socket_path(), Some("g-1")).unwrap();
+        let mut responses = Vec::new();
+        for command in [
+            AgentCommand::Status,
+            AgentCommand::Inbox {
+                after_message_id: None,
+            },
+            AgentCommand::TaskCreate {
+                title: "繁中é".into(),
+                role: "dev".into(),
+                team_id: None,
+                workflow_id: None,
+            },
+            AgentCommand::Ask {
+                question: "q\"\\\n繁中é".into(),
+                options: vec!["a".into()],
+            },
+            AgentCommand::Block {
+                task_id: "t-1".into(),
+                reason: "blocked".into(),
+            },
+            AgentCommand::Unknown,
+        ] {
+            responses.push(
+                source
+                    .request(&ClientRequest::Command {
+                        data: ClientCommandData {
+                            request_id: "decode".into(),
+                            command,
+                        },
+                    })
+                    .unwrap(),
+            );
+        }
+        responses.push(
+            source
+                .request(&ClientRequest::GetFleet {
+                    data: RequestIdData {
+                        request_id: "fleet".into(),
+                    },
+                })
+                .unwrap(),
+        );
+        for response in responses {
+            for bytes in [
+                serde_json::to_vec(&response).unwrap(),
+                serde_json::to_vec(&serde_json::to_value(&response).unwrap()).unwrap(),
+            ] {
+                let actual =
+                    decode::response(&bytes, Instant::now() + Duration::from_secs(2)).unwrap();
+                assert_eq!(actual, response);
+            }
+        }
     }
 
     #[test]

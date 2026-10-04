@@ -42,7 +42,7 @@ legacy 9 MiB 純文字畫面的測試保留。`agend-holder` 只作 dev-dependen
 
 第 12A 的 `tests/once.rs` 使用 FakeDaemon 的真正 protocol producer，經 native Unix socket／Proxy 驗成功、舊版本拒絕、無 daemon／過期期限立即失敗、hello 與 reply 共用期限、回覆遺失只送一次、逐 byte 慢 hello 不延長期限、超限回覆提早拒絕，以及無 request id 請求先拒絕。`once::tests` 用真 Unix socket pair 與小 send buffer 驗已寫前綴後逾時，沒有補寫或重送。另以 32 MiB 的 send／ask／workflow／request id／caller 驗本機提早拒絕。
 
-兩批 fresh verifier 的 CPU 逾時反例均保留。回歸包含大量 escaping、接近 8 MiB 的 plain 字串、由真正 producer 的 Fleet 擴增成大型回覆，以及跨 4 KiB 邊界的 UTF-8／控制字元與原生 JSON byte 等價；檢查編碼與解析期間的期限，而非僅在完成後拒絕晚到結果。壁鐘斷言包含 100 ms 排程餘裕；不宣稱作業系統硬即時保證。
+三批 fresh verifier 的 CPU 逾時反例均保留。回歸包含大量 escaping、接近 8 MiB 的 plain 字串、由真正 producer 的 Fleet 擴增成大型回覆，以及跨 4 KiB 邊界的 UTF-8／控制字元與原生 JSON byte 等價。另用真正 producer 的 2,790,000 個空 stages、合法 data-before-type 順序及 native socket 驗最後一次讀取後的 CPU 尾段；分段 decoder 與 producer 的多種 command result 比對兩種欄位順序。壁鐘斷言包含 100 ms 餘裕；不宣稱作業系統硬即時保證，配置／釋放記憶體仍須完成才能返回。
 
 ```bash
 cargo test -p agend-client --test once --lib

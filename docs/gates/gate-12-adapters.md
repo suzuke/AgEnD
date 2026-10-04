@@ -72,6 +72,7 @@ Claude 接入／A 段功能驗收尚未完成，目前沒有可執行的功能�
 - 2026-10-04：首批 `7b1baeb` 獨立覆核 REFUTED，發現預編碼大輸入超出 deadline 與狀態入口殘留；修正後另驗，原反例保留（draft PR #147）。
 - 2026-10-04：首批 CI Ubuntu 通過、macOS 共用期限測試失敗；調整測試握手排程餘裕，修正版 CI 另核（#147）。
 - 2026-10-04：`e068e59` 第二位 fresh verifier 仍 REFUTED：上限內字串編碼與回覆解析越過 CPU deadline；補分段編碼／解析檢查及原反例回歸，待全新 verifier 另驗（#147）。
+- 2026-10-04：`2d754bb` 第三位 fresh verifier REFUTED：serde 中間樹轉換 CPU 尾段在 native API 仍超過 100 ms 餘裕；改成 RawValue envelope 分派正式 core 資料型別，保留反例及各版結果，待全新 verifier（#147）。
 
 - 2026-10-04：使用者確認 merge 後開工，#138 合併為 `4390633`；在 `feat/gate-12a-claude` 建立單次 client 請求基礎，Claude 接入與驗收未完成。
 - 2026-10-04 P1–P10 設計確認寫定為 [D40](../decisions/d40.md)，保留 P3／P4／P5＝A，P9／P10 及剩餘參數採建議；#138 本批只改文件，fresh verifier／固定 head CI 另核，尚未 merge 或實作。以下保留各批次當時狀態。
