@@ -157,4 +157,4 @@ cargo xtask accept cli             # 第 9 施工關 demo：cli_demo（在 agend
 
 ## 第 12A bridge 基礎
 
-`claude_bridge` 提供 client 1.5 的 Attach／Poll／Hook／Written／Ack。先原子預約才回完整內容；新 live hook 與目前 holder 畫面控制 routing，歷史 hook 只入庫。`ingest` 每秒補送 home 的 hooks／acks；只收到入庫 commit 才刪檔，不重送訊息內容。完整 API、同 UID 信任邊界與未完成項目見 [bridge 基礎](../../docs/gates/gate-12a-bridge.md)。
+`claude_bridge` 提供 client 1.5 的 Attach／Poll／Hook／Written／Ack。先原子預約才回完整內容；新 live hook 與目前 holder 畫面控制 routing，歷史 hook 不建立 idle／不投遞；較新的同 session 路由觀測會撤銷舊 idle。`ingest` 每秒補送 home 的 hooks／acks；只收到入庫 commit 才刪檔，不重送訊息內容。完整 API、同 UID 信任邊界與未完成項目見 [bridge 基礎](../../docs/gates/gate-12a-bridge.md)。

@@ -1,5 +1,6 @@
-//! Client 1.5 service. Only fresh hooks affect routing; durable reservations
-//! precede the reply, and a lost reply never grants permission to resend.
+//! Client 1.5 service. Fresh hooks allow routing; newer historical routing
+//! observations only revoke idle. Durable reservations precede the reply,
+//! and a lost reply never grants permission to resend.
 use crate::{
     handlers::{Context, error},
     log::now_unix_ms,
