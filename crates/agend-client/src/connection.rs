@@ -191,6 +191,7 @@ fn open_retrying(
 /// The request id a reply to `request` carries.
 pub(crate) fn request_id(request: &ClientRequest) -> Option<&str> {
     match request {
+        ClientRequest::Claude { data } => Some(&data.request_id),
         ClientRequest::Command { data } => Some(&data.request_id),
         ClientRequest::AnswerAsk { data } => Some(&data.request_id),
         ClientRequest::GetFleet { data } => Some(&data.request_id),
@@ -346,6 +347,12 @@ impl Client {
             return Err(ClientError::Daemon {
                 code: error_code::INVALID_REQUEST.into(),
                 message: "use Sender::send_terminal and Client::next_full_terminal; terminal operations never reconnect or replay".into(),
+            });
+        }
+        if matches!(request, ClientRequest::Claude { .. }) {
+            return Err(ClientError::Daemon {
+                code: error_code::INVALID_REQUEST.into(),
+                message: "Claude RPCs require exchange_once; never replay them".into(),
             });
         }
         let id = request_id(request).map(str::to_owned);

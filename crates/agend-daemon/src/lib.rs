@@ -16,6 +16,8 @@
 //! Must NOT: own agent processes or their side processes (holders do), infer
 //! task context from an agent's cwd, or type message text into a PTY.
 
+mod claude_bridge;
+
 // entry
 #[cfg(unix)]
 pub mod daemon;

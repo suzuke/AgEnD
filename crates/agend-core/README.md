@@ -11,7 +11,7 @@
 
 ## 第 11 施工關 C 段（已驗收並合併 #145）
 
-`protocol::terminal` 提供 no-std 的 cells／色彩／cursor／mode／viewport／frame 型別。holder 協定 1.1 新增 `GetTerminalFrame`、附 request id 的 `TerminalFrame` 與 `TerminalOperationError`；1.0 請求／純文字快照保持原 wire shape。holder 的 `TerminalControl` 提供 generation／owner 與實際 resize／input 完成回覆；client 1.4 新增檢視訂閱／viewport／控制、完成回覆與失去控制通知；Acquire 不接受 caller 自訂 attach id。client 提供 1.4／1.3，真 daemon 與注入 producer 的 fake 提供 1.4。`traits::TerminalProducer` 是同步畫面／完成控制／legacy input port，server 在背景排程；core 只有介面與協定型別。端到端基礎路徑與六項 fake／真 C 契約已建立，TUI 與完整 fake U17 已有回歸，真 Codex 0.159.3 首次 U17 已核實；完整 C 段已驗收並經使用者確認合併（#145，2026-10-03）。CodexInputPolicy::approved() 只辨識 codex-cli 0.159.3；holder 身分與 thread 歸屬由 daemon 核對。
+`protocol::terminal` 提供 no-std 的 cells／色彩／cursor／mode／viewport／frame 型別。holder 協定 1.1 新增 `GetTerminalFrame`、附 request id 的 `TerminalFrame` 與 `TerminalOperationError`；1.0 請求／純文字快照保持原 wire shape。holder 的 `TerminalControl` 提供 generation／owner 與實際 resize／input 完成回覆；client 1.4 新增檢視訂閱／viewport／控制、完成回覆與失去控制通知；Acquire 不接受 caller 自訂 attach id。第 11C 當時 client 提供 1.4／1.3；第 12A 已增加 1.5。注入 terminal producer 的 fake 保持 1.4。`traits::TerminalProducer` 是同步畫面／完成控制／legacy input port，server 在背景排程；core 只有介面與協定型別。端到端基礎路徑與六項 fake／真 C 契約已建立，TUI 與完整 fake U17 已有回歸，真 Codex 0.159.3 首次 U17 已核實；完整 C 段已驗收並經使用者確認合併（#145，2026-10-03）。CodexInputPolicy::approved() 只辨識 codex-cli 0.159.3；holder 身分與 thread 歸屬由 daemon 核對。
 
 `PipelineView::replace_attention_if` 定義原子條件更新：捕捉值仍相同才 replace／publish，移除或已變更就拒絕；core 僅定義 port，Fleet 實作鎖。用於避免 Retry 與 failed-item enrichment 交錯時重建舊項目。
 
@@ -86,3 +86,7 @@
 cargo test -p agend-core
 cargo xtask accept core
 ```
+
+## 第 12A protocol 1.5
+
+`protocol::client::claude` 提供 `ClaudeRequestData`／`ClaudeOperation`、plain `ClaudeReplyData`、`ClaudeReceipt` 及 `ClaudePendingRecord`；只有資料、無 I/O 或新依賴。一般 client 1.3、完整終端 1.4 保持能力底線。精確欄位與本批限制見 [bridge 基礎](../../docs/gates/gate-12a-bridge.md)。

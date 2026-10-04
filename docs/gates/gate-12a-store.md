@@ -3,11 +3,11 @@
 > **TL;DR**
 > - #147 client 已合併；本批提供 DB-thread 的事件、投遞、ACK 與人工放棄 API。
 > - 訊息 id 是唯一訊息冪等層；投遞已開始但缺結果時保留 queued 與 metadata，不自動重送。
-> - 下一步：本批驗證與使用者確認後，接 protocol 1.5、channel／Stop helper 與 Claude driver。
+> - 下一步：本批 #148 已確認合併；接 [protocol 1.5／channel／Stop／ACK spool](gate-12a-bridge.md)，再接完整 Claude Driver。
 
 ## 狀態與範圍
 
-實作中（2026-10-04），分支 `feat/gate-12a-claude-store`；以 #147 merge `8dfccf8` 為基線。本批 API 可直接對真 SQLite 使用；尚無新的 socket 請求、MCP 工具或 operator CLI，不能用本批宣稱 Claude 接入／完整第 12A 完成。通訊路徑仍提供既有 1.3／1.4。
+已合併（2026-10-04）：#148 merge `7877dbe`，驗證 head `8998f58`，merge tree 相同；舊 worktree／branch 已清理。以 #147 merge `8dfccf8` 為基線。本批 API 可直接對真 SQLite 使用；尚無新的 socket 請求、MCP 工具或 operator CLI，不能用本批宣稱 Claude 接入／完整第 12A 完成。通訊路徑仍提供既有 1.3／1.4。
 
 ## Schema 與原子邊界
 
@@ -45,12 +45,12 @@ legacy Claude push 訊息若已有 attempted_at 卻無投遞 tuple，視為結�
 
 ## 驗證
 
-本機首輪 store integration 7／schema 40 tests 通過，daemon crate 回歸通過；`accept core` 通過，含 fmt／workspace clippy／實際 no-std（兩個既有 explorer ignored）。後續補事件單表快照／seq 回歸；`6193ea4` fresh verifier REFUTED：事件單表 DB 被快照的舊 empty SQL 誤判，新增回歸失敗；補入 driver_events／claude_deliveries，保留原 log。修正版 daemon 162 passed／0 ignored（其中 store integration 9、schema 40、交易單元 2）；workspace clippy／fmt／實際 no-std 通過。完整 workspace、另一位全新 verifier 與固定 head CI 另核，結果以 PR #148 為準。本批不執行真 Claude、模型回合或錄製。首個 crash probe 在 store commit 後硬殺自己的 child；四次獨立程序重用同 home，另驗新 home 必須失敗。這是持久化探測，未代替完整 Claude DRV-6／9。
+本機首輪 store integration 7／schema 40 tests 通過，daemon crate 回歸通過；`accept core` 通過，含 fmt／workspace clippy／實際 no-std（兩個既有 explorer ignored）。後續補事件單表快照／seq 回歸；`6193ea4` fresh verifier REFUTED：事件單表 DB 被快照的舊 empty SQL 誤判，新增回歸失敗；補入 driver_events／claude_deliveries，保留原 log。修正版 daemon 162 passed／0 ignored（其中 store integration 9、schema 40、交易單元 2）；workspace clippy／fmt／實際 no-std 通過。最終 `8998f58` 全新 verifier CONFIRMED，workspace／accept core／實際 no-std 與雙平台 push／PR CI 通過，使用者已確認 #148 合併；各輪 REFUTED 原紀錄保留。本批不執行真 Claude、模型回合或錄製。首個 crash probe 在 store commit 後硬殺自己的 child；四次獨立程序重用同 home，另驗新 home 必須失敗。這是持久化探測，未代替完整 Claude DRV-6／9。
 
 可重驗（暫存編譯目錄在離開 shell 時清掉）：
 
 ```bash
-cd /Users/suzuke/AlphaCR-worktrees/AgEnD-v2-claude-store
+cd /Users/suzuke/AlphaCR-worktrees/AgEnD-v2-claude-bridge
 (
   set -e
   gate12_store_target=$(mktemp -d /tmp/agend-g12a-store-check.XXXXXX)
@@ -64,4 +64,4 @@ cd /Users/suzuke/AlphaCR-worktrees/AgEnD-v2-claude-store
 
 ## 下一步
 
-完成本批 fresh verifier／CI 並報告可重驗指令，merge 等使用者確認。後續 helper 使用本批 API，在內容寫出前取得新預約，在 ACK 入庫 commit 後才刪待同步檔；忙閒與控制權、spool 原子發布、protocol 身分與真 CLI 版本驗收另接。
+本批已確認合併。後續 [bridge 基礎](gate-12a-bridge.md) 使用本批 API，在內容寫出前取得新預約，在 ACK 入庫 commit 後才刪待同步檔；忙閒與控制權、spool 原子發布、protocol 身分與真 CLI 版本驗收另接。

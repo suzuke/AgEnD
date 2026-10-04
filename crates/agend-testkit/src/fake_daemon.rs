@@ -961,6 +961,11 @@ fn accepted(request_id: String) -> ClientResponse {
 
 fn handle(state: &mut State, request: ClientRequest, conn: &Connection) -> Vec<ClientResponse> {
     match request {
+        ClientRequest::Claude { data } => vec![error(
+            Some(data.request_id),
+            error_code::NOT_SUPPORTED,
+            "fake daemon has no Claude bridge; use the native server".into(),
+        )],
         ClientRequest::Hello { .. } => vec![error(
             None,
             error_code::INVALID_REQUEST,

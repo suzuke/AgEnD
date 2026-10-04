@@ -68,3 +68,7 @@ watch 的 task_changed 顯示事件 TaskView 的 current_stage；舊 peer 未帶
 ```bash
 cargo run -p agend -- --version
 ```
+
+## 第 12A Claude helpers
+
+同一 binary 的 `agend channel --instance <id>` 與 `agend hook <event>` 在一般 clap 前分派；需要 AGEND_HOME／AGEND_INSTANCE，只經同步 client 1.5，沒有 SQLite 或 Tokio runtime。channel 是 MCP JSON-RPC stdio，提供 agend_ack；hook 先保存事件，Stop 離線回 `{}`。owned spool 原子發布／fsync，入庫才刪。`agend hooks` 的 git hook 管理維持原入口。自動注入 Claude 設定及完整 Driver 尚未接入，詳見 [bridge 基礎](../../docs/gates/gate-12a-bridge.md)。

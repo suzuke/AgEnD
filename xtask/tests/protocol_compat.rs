@@ -16,7 +16,7 @@ use serde_json::json;
 fn client_request_wire_shapes_are_stable_and_approval_does_not_supply_a_head() {
     assert_eq!(
         serde_json::to_value(ClientRequest::hello()).unwrap(),
-        json!({"type": "hello", "data": {"supported": [{"major": 1, "minor": 4}, {"major": 1, "minor": 3}]}})
+        json!({"type": "hello", "data": {"supported": [{"major": 1, "minor": 5}, {"major": 1, "minor": 4}, {"major": 1, "minor": 3}]}})
     );
 
     let review = ClientRequest::Command {
@@ -562,6 +562,7 @@ fn a_1_0_peer_decodes_1_1_messages() {
         v1_0::ClientRequest::Hello {
             data: v1_0::Hello {
                 supported: vec![
+                    v1_0::Version { major: 1, minor: 5 },
                     v1_0::Version { major: 1, minor: 4 },
                     v1_0::Version { major: 1, minor: 3 }
                 ]
@@ -1209,4 +1210,68 @@ fn full_terminal_requests_are_additive_and_acquire_cannot_choose_an_attach_id() 
             v1_1::ClientResponse::Unknown
         );
     }
+}
+
+#[test]
+fn claude_1_5_envelopes_are_additive_and_receipts_keep_native_attribution() {
+    use agend_core::protocol::client::*;
+    let receipt = ClaudeReceipt {
+        message_id: "11111111-1111-4111-8111-111111111111".into(),
+        delivery_id: "22222222-2222-4222-8222-222222222222".into(),
+        session_id: "33333333-3333-4333-8333-333333333333".into(),
+    };
+    let request = ClientRequest::Claude {
+        data: ClaudeRequestData {
+            request_id: "r-1".into(),
+            instance_id: "claude".into(),
+            operation: ClaudeOperation::Ack {
+                receipts: vec![receipt.clone()],
+            },
+        },
+    };
+    let line = serde_json::to_string(&request).unwrap();
+    assert_eq!(
+        serde_json::from_str::<ClientRequest>(&line).unwrap(),
+        request
+    );
+    assert_eq!(
+        serde_json::to_value(&request).unwrap(),
+        json!({"type":"claude","data":{
+            "request_id":"r-1", "instance_id":"claude", "operation":{"operation":"ack", "receipts":[{
+                "message_id":receipt.message_id, "delivery_id":receipt.delivery_id, "session_id":receipt.session_id
+            }]}
+        }})
+    );
+    assert_eq!(
+        serde_json::from_str::<v1_0::ClientRequest>(&line).unwrap(),
+        v1_0::ClientRequest::Unknown
+    );
+    assert_eq!(
+        serde_json::from_str::<v1_1::ClientRequest>(&line).unwrap(),
+        v1_1::ClientRequest::Unknown
+    );
+    let response = ClientResponse::Claude {
+        data: ClaudeReplyData {
+            request_id: "r-1".into(),
+            session_id: Some(receipt.session_id.clone()),
+            messages: vec![ClaudePush {
+                receipt,
+                content: "From: operator\n\n完整 é".into(),
+            }],
+            committed: true,
+        },
+    };
+    let line = serde_json::to_string(&response).unwrap();
+    assert_eq!(
+        serde_json::from_str::<ClientResponse>(&line).unwrap(),
+        response
+    );
+    assert_eq!(
+        serde_json::from_str::<v1_0::ClientResponse>(&line).unwrap(),
+        v1_0::ClientResponse::Unknown
+    );
+    assert_eq!(
+        serde_json::from_str::<v1_1::ClientResponse>(&line).unwrap(),
+        v1_1::ClientResponse::Unknown
+    );
 }

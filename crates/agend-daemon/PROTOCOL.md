@@ -1,7 +1,7 @@
 # Daemon protocol server
 
 > **TL;DR**
-> - 真 daemon 現在協商 client 1.4；一般 client 的 NEEDED 仍為 1.3，以下第 8／11B 規則保留。
+> - 真 daemon 現在協商 client 1.5；一般 client 的 NEEDED 仍為 1.3，以下第 8／11B 規則保留。
 > - 新終端畫面與控制在 [TERMINAL.md](TERMINAL.md)；FakeDaemon 安裝真 TerminalProducer 後提供 1.4，未安裝的舊 fixture 保持 1.3。
 > - 下一步：protocol 回歸用 `cargo test -p agend --test client_protocol --test terminal_capability`。
 
@@ -41,3 +41,6 @@
 | 繼承的 holder | 新 image 開機時（還沒起任何 holder 前）對每個鎖檔裡的 pid `waitpid(pid, WNOHANG)` 一次；是自己的子程序而且還活著的每秒再查，收到或 `ECHILD` 就不再查；log `reaped inherited holder pid <pid> (exit 0)`；不用 `waitpid(-1)` |
 | `task_cancel` | 可帶 reason；CAS 推進 Cancelled、保存 WIP 並釋放 binding；archive 直接串流至檔案並同步後發布，不受程序診斷輸出上限影響；保存失敗保留原 worktree／binding 並回報 Failed；merge in-flight 拒絕取消 |
 
+## 第 12A client 1.5
+
+新 Claude envelope 的 request／reply、one-shot 規則、限額及錯誤見 [bridge 基礎](../../docs/gates/gate-12a-bridge.md)。一般 client 底線 1.3、完整終端 1.4 不變；沒有選到 1.5 的連線收到 Claude 操作回 not_supported。

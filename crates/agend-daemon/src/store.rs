@@ -406,6 +406,16 @@ impl SqliteStore {
             .await
     }
 
+    pub async fn pending_claude_messages(
+        &self,
+        to: &str,
+        queue_only: bool,
+    ) -> Result<Vec<Message>, StoreError> {
+        let to = to.to_owned();
+        self.call(move |conn| messages::pending_claude(conn, &to, queue_only))
+            .await
+    }
+
     /// Row counts of every table in the retention table, in its order.
     pub async fn counts(&self) -> Result<Vec<(&'static str, u64)>, StoreError> {
         self.call(|conn| retention::counts(conn)).await

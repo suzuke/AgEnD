@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - 依 crate 由下往上分 13 個施工關；每個施工關單獨驗收，使用者確認後才開下一個施工關（D22）。
-> - 目前狀態：**第 1–11 施工關完成並已合併**；第 11 施工關 C 段 #145 經全新 verifier、雙平台 CI、實機及後續自動驗收與清理，使用者於 2026-10-03 確認合併（`b2152db`）。第 12 施工關 A 段設計 #138 已 merge，client 基礎 #147 已 merge，持久化實作中、Claude 接入未完成；第 13 施工關未開始。
-> - 下一步：依第 12A [D40](decisions/d40.md) 實作不重送的通訊、持久化、channel／Stop 與明確 ACK；完成後由全新 verifier 與使用者驗收。
+> - 目前狀態：**第 1–11 施工關完成並已合併**；第 11 施工關 C 段 #145 經全新 verifier、雙平台 CI、實機及後續自動驗收與清理，使用者於 2026-10-03 確認合併（`b2152db`）。第 12 施工關 A 段設計 #138 已 merge，client 基礎 #147 已 merge，持久化 #148 已 merge，protocol 1.5／channel／Stop／ACK spool 基礎待驗證與確認，完整 Claude 接入未完成；第 13 施工關未開始。
+> - 下一步：依第 12A [D40](decisions/d40.md) 驗證 [bridge 基礎](gates/gate-12a-bridge.md)，再接 Claude Driver／啟動設定與控制；每批以全新 verifier、可重驗指令及使用者確認收尾。
 
 ## 13 個施工關
 
@@ -108,3 +108,9 @@
 - 2026-10-04：`2af0473` 全新 verifier REFUTED：README 誤稱一般 messages 單表也算快照非空；獨立 native probe 核 Codex push／Claude inbox 皆不符。保留反例，修正文件並明示既有行為不變，第三位全新 verifier／固定 head CI 另核（#148；未 merge）。
 
 - 2026-10-04：`4c5e76b` 全新 verifier REFUTED：名詞表仍稱事件表待新增與保留實作未變；保留反例，同步名詞表、0007／schema 入口與完整接入計畫，明示 store 已實作、runtime 尚待接入，修正版另由全新 verifier／CI 覆核（#148；未 merge）。
+
+- 2026-10-04：使用者確認 #148，`8998f58` 經全新 verifier CONFIRMED、雙平台 push／PR CI 通過，合併為 `7877dbe`；merge tree 與驗證 head 相同，舊 worktree／branch 與編譯 target 已清理。接續在 `feat/gate-12a-claude-bridge` 實作 protocol 1.5、native channel／Stop helper 及 ACK spool；完整第 12A 未完成，見 [本批範圍](gates/gate-12a-bridge.md)。
+
+- 2026-10-04：[draft PR #149](https://github.com/suzuke/AgEnD/pull/149)（首個提交 `999203e`）接通 protocol 1.5、channel／Stop helpers 與 hook／ACK spool；13 native cases、accept core（fmt／workspace clippy／protocol／實際 no-std）通過。完整 workspace、全新 verifier／固定 head CI 收尾中；未 merge，完整 Claude Driver 與真 CLI 驗收仍待完成。
+
+- 2026-10-04：#149 原 head `b4c6b46` 被全新 verifier r1 判定 REFUTED（hook 發布／live RPC 解鎖空窗）；修正單次 flock、歷史 busy 撤銷 idle 與 holder 查詢 revision 核對，新增三個 native 回歸，16 cases／accept core 通過；完整 workspace、全新 r2 與 CI 收尾中。

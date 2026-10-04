@@ -443,3 +443,68 @@ fn escaped_line_size_is_bounded_during_preparation() {
     );
     assert!(daemon.requests().is_empty());
 }
+
+#[test]
+fn claude_operations_require_1_5_and_cannot_enter_the_generic_retry_path() {
+    use agend_client::{Client, Redo};
+    use agend_core::protocol::client::{ClaudeOperation, ClaudeRequestData, V1_5};
+    let daemon = FakeDaemon::start().unwrap();
+    let req = ClientRequest::Claude {
+        data: ClaudeRequestData {
+            request_id: "claude-once".into(),
+            instance_id: "claude".into(),
+            operation: ClaudeOperation::Attach,
+        },
+    };
+    let error = exchange_once(
+        daemon.socket_path(),
+        Some("claude".into()),
+        V1_5,
+        &req,
+        Instant::now() + Duration::from_secs(2),
+    )
+    .unwrap_err();
+    assert!(matches!(error, ClientError::Version(_)));
+    let mut client = Client::connect_once(daemon.socket_path(), Some("claude".into())).unwrap();
+    for redo in [Redo::Safe, Redo::Never] {
+        let error = client.request(&req, redo).unwrap_err();
+        assert!(matches!(error, ClientError::Daemon { ref code, .. } if code == "invalid_request"));
+    }
+    assert!(
+        !daemon
+            .requests()
+            .iter()
+            .any(|r| matches!(r, ClientRequest::Claude { .. }))
+    );
+}
+
+#[test]
+fn oversized_claude_hook_is_refused_before_connecting() {
+    use agend_core::protocol::client::{ClaudeOperation, ClaudeRequestData, V1_5};
+    let daemon = FakeDaemon::start().unwrap();
+    let req = ClientRequest::Claude {
+        data: ClaudeRequestData {
+            request_id: "oversized-hook".into(),
+            instance_id: "claude".into(),
+            operation: ClaudeOperation::Hook {
+                event_id: "event".into(),
+                session_id: "session".into(),
+                event: "Stop".into(),
+                payload: "x".repeat(32 << 20),
+                occurred_at_unix_ms: 0,
+                replayed: false,
+            },
+        },
+    };
+    let start = Instant::now();
+    exchange_once(
+        daemon.socket_path(),
+        Some("claude".into()),
+        V1_5,
+        &req,
+        start + Duration::from_millis(25),
+    )
+    .unwrap_err();
+    assert!(start.elapsed() < Duration::from_millis(250));
+    assert!(daemon.requests().is_empty());
+}

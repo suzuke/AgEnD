@@ -151,6 +151,11 @@ fn command_name(command: &AgentCommand) -> String {
 /// Handles one request after `hello`; `caller` is the hello's.
 pub async fn handle(ctx: &Context, caller: Option<&str>, request: ClientRequest) -> Outcome {
     let reply = match request {
+        ClientRequest::Claude { data } => error(
+            Some(data.request_id),
+            error_code::NOT_SUPPORTED,
+            "Claude helpers require the protocol 1.5 server",
+        ),
         ClientRequest::Hello { .. } => error(
             None,
             error_code::INVALID_REQUEST,

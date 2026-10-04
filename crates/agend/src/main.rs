@@ -13,6 +13,7 @@
 //!
 //! Must NOT: do any work before the argv[0] dispatch.
 
+mod claude;
 mod cli;
 mod debug;
 mod doctor;
@@ -31,6 +32,9 @@ fn main() -> ExitCode {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     // The holder runs for days and must not parse config or start a runtime:
     // it splits off right after the argv[0] dispatch (gate 4 P1).
+    if args.first().is_some_and(|a| a == "channel" || a == "hook") {
+        return ExitCode::from(claude::run(&args[1..], args[0] == "channel") as u8);
+    }
     if args.first().is_some_and(|a| a == "holder") {
         return agend_holder::run(args[1..].to_vec());
     }

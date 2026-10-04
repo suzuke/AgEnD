@@ -87,13 +87,13 @@
 
 | 名詞 | 識別字／狀態 | 定義與邊界 |
 |---|---|---|
-| 明確收件回報 | `agend_ack`（工具尚未接入） | Claude 收到 channel／Stop 內容後先呼叫的 MCP 工具；核對訊息、投遞識別碼與 session，daemon 入庫才 confirmed；不是 task 完成回報。 |
-| 投遞識別碼 | `ClaudeAttempt::delivery_id`（store 已實作；協定 1.5 待接） | 某訊息某次投遞的關聯資料；訊息 id 仍是唯一冪等身分，不另建內容去重機制。 |
-| 待同步佇列 | pending spool（尚未實作） | bridge 本機持久化的 hook／ACK；daemon 確認入庫才刪，未同步檔不因到期清掉；不讓 helper 存取 agend.db。 |
+| 明確收件回報 | `agend_ack`（native bridge 已實作） | Claude 收到 channel／Stop 內容後先呼叫的 MCP 工具；核對訊息、投遞識別碼與 session，daemon 入庫才 confirmed；不是 task 完成回報。 |
+| 投遞識別碼 | `ClaudeAttempt::delivery_id`（store／協定 1.5 已實作） | 某訊息某次投遞的關聯資料；訊息 id 仍是唯一冪等身分，不另建內容去重機制。 |
+| 待同步佇列 | `ClaudePendingRecord`／pending spool（已實作） | bridge 本機持久化的 hook／ACK；daemon 確認入庫才刪，未同步檔不因到期清掉；不讓 helper 存取 agend.db。 |
 | 投遞結果不明 | `ClaudeDelivery::outcome_unknown`（store 已實作） | 投遞已開始但缺寫出結果；即使 DB 仍 queued，也停止自動重送，等證據或人處理。 |
 | driver 事件紀錄 | `driver_events`（migration `0007`／store 已實作） | daemon 入庫 seq 排序、保留 14 天；不是訊息與 ACK 的唯一恢復來源。 |
 
-來源：[D40](decisions/d40.md)、[store 基礎](gates/gate-12a-store.md)。本批已實作 Claude push 未終結保留例外及 terminal 起 30 天清理；Codex／Claude inbox 等一般訊息的 created_at 30 天規則不變。完整 Claude runtime、helper 與 protocol 1.5 尚未接入。
+來源：[D40](decisions/d40.md)、[store 基礎](gates/gate-12a-store.md)。本批已實作 Claude push 未終結保留例外及 terminal 起 30 天清理；Codex／Claude inbox 等一般訊息的 created_at 30 天規則不變。protocol 1.5、channel／Stop helper 與 ACK spool 已實作，見 [bridge 基礎](gates/gate-12a-bridge.md)；完整 Claude Driver／啟動設定與真 CLI 驗收仍未完成。
 
 ## 執行環境
 

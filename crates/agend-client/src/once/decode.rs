@@ -84,6 +84,9 @@ fn command(bytes: &[u8], deadline: Instant) -> io::Result<ClientCommandResultDat
 pub(super) fn response(bytes: &[u8], deadline: Instant) -> io::Result<ClientResponse> {
     let envelope: Envelope = parse(bytes, deadline)?;
     let response = match envelope.kind.as_str() {
+        "claude" => ClientResponse::Claude {
+            data: data(envelope.data, deadline)?,
+        },
         "hello" => ClientResponse::Hello {
             data: data(envelope.data, deadline)?,
         },

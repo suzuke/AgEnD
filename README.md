@@ -32,7 +32,7 @@
 
 **第 10 施工關完成（[PR #143](https://github.com/suzuke/AgEnD/pull/143)，2026-10-02）**：已接通本機 pipeline、task／review／workflow／team 操作與 checks 沙箱。事件收尾修正經全新 verifier r17、Ubuntu／macOS CI 與人工補驗通過，使用者已確認合併。驗證範圍、原始失敗與兩個未執行的 explorer 見 [驗證證據](docs/gates/gate-10-verification.md)。執行方式見 [pipeline runtime](docs/architecture/pipeline-runtime.md)。Claude、OpenCode driver、GitHub forge、Telegram 在第 12 施工關，服務註冊與發布在第 13 施工關。完整狀態與驗收證據見 [ROADMAP](docs/ROADMAP.md)。
 
-第 12A Claude 的 P1–P10 設計已確認，記為 [D40](docs/decisions/d40.md)：閒置走 channel、忙碌排隊走 Stop hook，兩者均用明確 `agend_ack`；P3／P4／P5 選 A。設計文件已於 [PR #138](https://github.com/suzuke/AgEnD/pull/138) 合併（`4390633`）；第 12A 的不自動重送 client 基礎已於 [#147](https://github.com/suzuke/AgEnD/pull/147) 合併（`8dfccf8`）；目前實作 [Claude 持久化基礎](docs/gates/gate-12a-store.md)。Claude driver／channel／Stop／ACK 與真測尚待完成。
+第 12A Claude 的 P1–P10 設計已確認，記為 [D40](docs/decisions/d40.md)：閒置走 channel、忙碌排隊走 Stop hook，兩者均用明確 `agend_ack`；P3／P4／P5 選 A。設計文件已於 [PR #138](https://github.com/suzuke/AgEnD/pull/138) 合併（`4390633`）；第 12A 的不自動重送 client 基礎已於 [#147](https://github.com/suzuke/AgEnD/pull/147) 合併（`8dfccf8`）；[Claude 持久化基礎 #148](docs/gates/gate-12a-store.md) 已經使用者確認合併（`7877dbe`）；目前 [protocol 1.5／channel／Stop／ACK spool 基礎](docs/gates/gate-12a-bridge.md) 已實作，待全新驗證與使用者確認。完整 Claude Driver、啟動設定、Interrupt、gh 防護及真 CLI 版本驗收仍未完成。
 
 ## 系統圖
 
