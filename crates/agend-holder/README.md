@@ -13,6 +13,10 @@
 
 `TerminalControl` 帶 request id／generation，提供 Acquire、Resize、Input、Release。Acquire／Resize 成功須附實際 PTY 尺寸的完整 frame；Input 完成實際 write／flush 才回覆；原生 PTY 為 nonblocking，整次寫入最多 5 秒，失敗明示可能已寫部分資料、不重送。每個操作在佇列執行時重新驗 owner；新 grant 等舊在途寫入完成，Release／重連保留尺寸。控制者存在時 legacy operator input／resize 被拒絕，舊的 queued input 也不能繞過新 grant。
 
+## 第 12A 單鍵控制（施工中）
+
+holder 1.2 新增 `DaemonKey`，daemon 必須帶目前 generation／screen revision；控制鍵在既有 PTY FIFO 實際執行時再次核對連線、畫面與人工 owner。只在沒有人工 owner 且畫面仍相同時寫單鍵，完成 write／flush 才回覆。它不取得人工控制權，不能輸入訊息內容；1.1／1.0 peer 拒絕此能力。Claude 的中斷流程見 [Driver 施工紀錄](../../docs/gates/gate-12a-driver.md)。
+
 ## 負責
 
 - 以 portable-pty 啟動 agent；環境**只有** `Spawn.env`（沒給 `TERM` 時補 `xterm-256color`）

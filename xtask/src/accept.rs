@@ -384,6 +384,11 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
             "codex_u17_probe",
         ])?;
         println!("gate 11 (tui): checks passed");
+    } else if gate.number == 12 {
+        crate::adapters_demo::run()?;
+        println!(
+            "gate 12 (adapters): native Claude checks passed; true CLI/startup and other adapters remain pending"
+        );
     } else {
         println!(
             "gate {} ({}): checks passed; demo not implemented yet (it is added when this gate is built)",
@@ -393,7 +398,7 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
     Ok(())
 }
 
-fn step(args: &[&str]) -> Result<(), String> {
+pub(crate) fn step(args: &[&str]) -> Result<(), String> {
     println!("-- cargo {}", args.join(" "));
     let status = Command::new(cargo())
         .current_dir(workspace_root())

@@ -28,6 +28,8 @@ struct State {
     idle: Option<Instant>,
     last_route_hook: u64,
     revision: u64,
+    busy: bool,
+    reported_busy: Option<bool>,
 }
 #[derive(Default)]
 pub(crate) struct ClaudeBridge {
@@ -120,6 +122,17 @@ impl ClaudeBridge {
                 occurred_at_unix_ms,
                 replayed,
             } => {
+                if !matches!(
+                    event.as_str(),
+                    "SessionStart"
+                        | "UserPromptSubmit"
+                        | "PreToolUse"
+                        | "PostToolUse"
+                        | "Stop"
+                        | "SessionEnd"
+                ) {
+                    return Err(invalid("unsupported native Claude hook"));
+                }
                 let native: serde_json::Value =
                     serde_json::from_str(payload).map_err(|_| invalid("invalid hook payload"))?;
                 if native.get("session_id").and_then(|v| v.as_str()) != Some(session_id.as_str())
@@ -162,6 +175,8 @@ impl ClaudeBridge {
                             && *occurred_at_unix_ms >= state.last_route_hook
                         {
                             state.idle = None;
+                            state.busy = false;
+                            state.reported_busy = None;
                             state.last_route_hook = *occurred_at_unix_ms;
                             state.revision = state.revision.wrapping_add(1);
                         }
@@ -198,6 +213,8 @@ impl ClaudeBridge {
                 idle: None,
                 last_route_hook: 0,
                 revision: 0,
+                busy: false,
+                reported_busy: None,
             };
         }
         let route = match data.operation {
@@ -208,6 +225,14 @@ impl ClaudeBridge {
             ClaudeOperation::Poll { session_id } => {
                 if session_id != session {
                     return Err(invalid("channel belongs to a different session"));
+                }
+                if state.busy {
+                    let revision = state.revision;
+                    drop(states);
+                    reply.messages = self
+                        .interrupt(ctx, &data.instance_id, &session, revision, now)
+                        .await?;
+                    return Ok(reply);
                 }
                 if state
                     .idle
@@ -240,11 +265,20 @@ impl ClaudeBridge {
                     state.revision = state.revision.wrapping_add(1);
                 }
                 match event.as_str() {
-                    "UserPromptSubmit" | "SessionEnd" => {
+                    "UserPromptSubmit" => {
                         state.idle = None;
+                        state.busy = true;
+                        report_state(ctx, &data.instance_id, state, true, now).await?;
+                        return Ok(reply);
+                    }
+                    "SessionEnd" => {
+                        state.idle = None;
+                        state.busy = false;
+                        state.reported_busy = None;
                         return Ok(reply);
                     }
                     "SessionStart" => {
+                        state.busy = false;
                         state.idle = Some(Instant::now());
                         return Ok(reply);
                     }
@@ -253,8 +287,11 @@ impl ClaudeBridge {
                             .map_err(|_| invalid("invalid hook payload"))?;
                         if native.get("stop_hook_active").and_then(|v| v.as_bool()) != Some(false) {
                             state.idle = None;
+                            state.busy = true;
+                            report_state(ctx, &data.instance_id, state, true, now).await?;
                             return Ok(reply);
                         }
+                        state.busy = false;
                         state.idle = Some(Instant::now());
                         ClaudeRoute::Stop
                     }
@@ -292,13 +329,186 @@ impl ClaudeBridge {
         {
             return Ok(reply);
         }
-        reply.messages = reserve(&ctx.store, &data.instance_id, &session, route, now).await?;
+        reply.messages =
+            reserve(&ctx.store, &data.instance_id, &session, route, now, false).await?;
         if !reply.messages.is_empty() {
             state.idle = None;
+            state.busy = true;
             state.revision = state.revision.wrapping_add(1);
+            report_state(ctx, &data.instance_id, state, true, now).await?;
+        } else if route == ClaudeRoute::Channel {
+            report_state(ctx, &data.instance_id, state, false, now).await?;
         }
         Ok(reply)
     }
+
+    async fn interrupt(
+        &self,
+        ctx: &Context,
+        instance: &str,
+        session: &str,
+        revision: u64,
+        now: u64,
+    ) -> Result<Vec<ClaudePush>, StoreError> {
+        use agend_core::protocol::{
+            holder::ControlKey,
+            terminal::{TerminalControlOperation, TerminalViewport},
+        };
+        if ctx
+            .store
+            .pending_claude_interrupts(instance)
+            .await?
+            .is_empty()
+        {
+            return Ok(vec![]);
+        }
+        let Ok(connection) = ctx.runtime.terminal_connection(instance) else {
+            return Ok(vec![]);
+        };
+        let Ok(Ok(frame)) = tokio::time::timeout(Duration::from_secs(2), async {
+            // Viewport rows may not exceed the actual PTY height. Read
+            // its dimensions before requesting the complete live grid.
+            let header = connection
+                .frame(TerminalViewport { top: None, rows: 1 })
+                .await?;
+            connection
+                .frame(TerminalViewport {
+                    top: None,
+                    rows: header.size.rows,
+                })
+                .await
+        })
+        .await
+        else {
+            return Ok(vec![]);
+        };
+        let screen = frame
+            .cells
+            .iter()
+            .map(|row| row.iter().map(|c| c.text.as_str()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n");
+        if classify(Backend::Claude, &screen, SCREEN_RULES).is_some() {
+            return Ok(vec![]);
+        }
+        let mut states = self.states.lock().await;
+        let Some(state) = states.get_mut(instance) else {
+            return Ok(vec![]);
+        };
+        if state.session != session || state.revision != revision || !state.busy {
+            return Ok(vec![]);
+        }
+        // One intent protects BOTH the single Esc and the following channel
+        // reply. A lost key completion or channel reply can never replay it.
+        let pushes = reserve(
+            &ctx.store,
+            instance,
+            session,
+            ClaudeRoute::Channel,
+            now,
+            true,
+        )
+        .await?;
+        if pushes.is_empty() {
+            return Ok(pushes);
+        }
+        state.revision = state.revision.wrapping_add(1);
+        let reserved_revision = state.revision;
+        drop(states);
+        let key = tokio::time::timeout(
+            Duration::from_secs(2),
+            connection.control(
+                frame.generation,
+                TerminalControlOperation::DaemonKey {
+                    key: ControlKey::Esc,
+                    expected_revision: frame.revision,
+                },
+            ),
+        )
+        .await;
+        if let Ok(Err(error)) = &key
+            && matches!(
+                error.code.as_str(),
+                "control_lost"
+                    | "stale_screen"
+                    | "unknown_control_key"
+                    | "not_supported"
+                    | "invalid_request"
+                    | "pty_busy"
+            )
+        {
+            ctx.store
+                .release_refused_claude_key(
+                    &pushes[0].receipt.message_id,
+                    &pushes[0].receipt.delivery_id,
+                )
+                .await?;
+            crate::log::line(&format!(
+                "{instance}: interrupt refused ({}); message remains queued: {}",
+                error.code, pushes[0].receipt.message_id
+            ));
+            return Ok(vec![]);
+        }
+        if !matches!(key, Ok(Ok(_))) {
+            crate::log::line(&format!(
+                "{instance}: interrupt completion unknown; no key or content replay: {}",
+                pushes[0].receipt.message_id
+            ));
+            return Ok(vec![]);
+        }
+        let states = self.states.lock().await;
+        if states
+            .get(instance)
+            .is_none_or(|s| s.session != session || s.revision != reserved_revision)
+        {
+            // A newer hook superseded the work state while the key ran. Keep
+            // the intent unresolved rather than sending into another turn.
+            return Ok(vec![]);
+        }
+        Ok(pushes)
+    }
+}
+
+async fn report_state(
+    ctx: &Context,
+    instance: &str,
+    state: &mut State,
+    busy: bool,
+    now: u64,
+) -> Result<(), StoreError> {
+    if state.reported_busy == Some(busy) {
+        return Ok(());
+    }
+    ctx.store
+        .append_driver_event(
+            NewDriverEvent {
+                id: crate::store::instances::new_session_id()
+                    .map_err(|e| StoreError::Invalid(e.to_string()))?,
+                instance_id: instance.into(),
+                session_id: state.session.clone(),
+                kind: "AgendState".into(),
+                payload: serde_json::json!({"busy":busy}).to_string(),
+                occurred_at_unix_ms: now,
+                replayed: false,
+            },
+            now,
+        )
+        .await?;
+    state.reported_busy = Some(busy);
+    if let Some(mut view) = ctx.fleet.instance(instance)
+        && !matches!(view.state, AgentState::Failed | AgentState::Stuck)
+    {
+        view.state = if busy {
+            AgentState::Working
+        } else {
+            AgentState::Idle
+        };
+        ctx.fleet.set_instance(
+            view,
+            format!("{instance}: {}", if busy { "working" } else { "idle" }),
+        );
+    }
+    Ok(())
 }
 
 async fn reserve(
@@ -307,14 +517,19 @@ async fn reserve(
     session: &str,
     route: ClaudeRoute,
     now: u64,
+    interrupt_only: bool,
 ) -> Result<Vec<ClaudePush>, StoreError> {
     let mut pushes = vec![];
     let mut bytes = 0;
-    for m in store
-        .pending_claude_messages(instance, route == ClaudeRoute::Stop)
-        .await?
-    {
-        // Busy Steer/Interrupt need the future holder-control driver; never
+    let messages = if interrupt_only {
+        store.pending_claude_interrupts(instance).await?
+    } else {
+        store
+            .pending_claude_messages(instance, route == ClaudeRoute::Stop)
+            .await?
+    };
+    for m in messages {
+        // Busy Steer/Interrupt use the correlated holder key path; never
         // silently turn them into a Stop Queue operation.
         if route == ClaudeRoute::Stop && m.level != agend_core::policy::busy::BusyLevel::Queue {
             continue;
@@ -360,6 +575,9 @@ async fn reserve(
                 },
                 content,
             });
+            if interrupt_only {
+                break;
+            }
         }
     }
     Ok(pushes)

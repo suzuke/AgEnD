@@ -56,11 +56,14 @@ fn ack(home: &Path, instance: &str, args: &Value) -> io::Result<bool> {
     if receipts.is_empty()
         || receipts.len() > CLAUDE_BATCH_COUNT
         || receipts.iter().any(|r| {
-            !is_uuid_v4(&r.message_id) || !is_uuid_v4(&r.delivery_id) || !is_uuid_v4(&r.session_id)
+            r.message_id.is_empty()
+                || r.message_id.len() > MAX_MESSAGE_BYTES
+                || !is_uuid_v4(&r.delivery_id)
+                || !is_uuid_v4(&r.session_id)
         })
     {
         return Err(io::Error::other(
-            "ACK requires 1..32 complete UUID v4 receipts",
+            "ACK requires 1..32 nonempty message ids and UUID v4 delivery/session ids",
         ));
     }
     let deadline = Instant::now() + WITHIN;

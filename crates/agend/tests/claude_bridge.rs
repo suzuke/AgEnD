@@ -1,5 +1,11 @@
 //! Native daemon/holder/helper processes. No real Claude or model calls.
 #![cfg(unix)]
+#[path = "common/claude_contract.rs"]
+mod claude_contract;
+#[path = "common/claude_control_loss.rs"]
+mod claude_control_loss;
+#[path = "common/claude_pipeline.rs"]
+mod claude_pipeline;
 #[path = "../../agend-daemon/tests/common/daemon_process.rs"]
 mod lab;
 use agend_core::{
@@ -28,6 +34,364 @@ const OTHER: &str = "22222222-2222-4222-8222-222222222222";
 fn id() -> String {
     agend_daemon::store::instances::new_session_id().unwrap()
 }
+
+fn operator_request(home: &Path, caller: Option<&str>, request: ClientRequest) -> ClientResponse {
+    use agend_testkit::fake_daemon::ProbeClient;
+    let (mut client, _) = ProbeClient::hello(&home.join(DAEMON_SOCKET), caller).unwrap();
+    client.request(&request).unwrap()
+}
+fn unknown_items(home: &Path) -> Vec<AttentionRequiredData> {
+    let response = operator_request(
+        home,
+        None,
+        ClientRequest::GetFleet {
+            data: RequestIdData { request_id: id() },
+        },
+    );
+    let ClientResponse::Fleet { data } = response else {
+        panic!("{response:?}")
+    };
+    data.fleet
+        .attention
+        .into_iter()
+        .filter(|a| {
+            a.attention_id
+                .as_deref()
+                .is_some_and(|s| s.starts_with("claude-delivery:"))
+        })
+        .collect()
+}
+fn wait_unknown(home: &Path, count: usize) -> Vec<AttentionRequiredData> {
+    let end = Instant::now() + Duration::from_secs(8);
+    loop {
+        let items = unknown_items(home);
+        if items.len() == count {
+            return items;
+        }
+        assert!(
+            Instant::now() < end,
+            "expected {count} unknown deliveries, got {}",
+            items.len()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+fn resolve_unknown(
+    home: &Path,
+    message: &str,
+    caller: Option<&str>,
+    action: AttentionAction,
+) -> ClientResponse {
+    operator_request(
+        home,
+        caller,
+        ClientRequest::ResolveAttention {
+            data: ResolveAttentionData {
+                request_id: id(),
+                attention_id: format!("claude-delivery:{message}"),
+                action,
+                note: Some("operator chooses to end this unknown delivery".into()),
+            },
+        },
+    )
+}
+
+fn native_driver_send(home: &Path, message: &str, body: &str, to: &str) -> ClientResponse {
+    operator_request(
+        home,
+        Some("claude"),
+        ClientRequest::Command {
+            data: ClientCommandData {
+                request_id: id(),
+                command: AgentCommand::Send {
+                    to: to.into(),
+                    message: body.into(),
+                    level: Some(MessageLevel::Queue),
+                    message_id: Some(message.into()),
+                },
+            },
+        },
+    )
+}
+fn first_native_driver_write(f: &Fixture, message: &str, body: &str) -> ClaudeReceipt {
+    f.hook("SessionStart", json!({"source":"startup"}));
+    std::thread::sleep(Duration::from_millis(5100));
+    // Report live stable idle before delivery; the real Driver must observe
+    // the helper's actual Written transaction, not a synthetic store writer.
+    assert!(
+        f.rpc(ClaudeOperation::Poll {
+            session_id: SESSION.into()
+        })
+        .messages
+        .is_empty()
+    );
+    let mut channel = Channel::new(&f.home);
+    let home = f.home.clone();
+    let message_id = message.to_owned();
+    let content = body.to_owned();
+    let sender =
+        std::thread::spawn(move || native_driver_send(&home, &message_id, &content, "claude"));
+    let notification = loop {
+        let v = channel.recv();
+        if v["method"] == "notifications/claude/channel" {
+            break v;
+        }
+    };
+    assert_eq!(
+        notification["params"]["content"],
+        format!("From: claude\n\n{body}")
+    );
+    let receipt = Channel::receipt(&notification);
+    assert_eq!(receipt.message_id, message);
+    channel.written_barrier();
+    assert!(
+        matches!(sender.join().unwrap(), ClientResponse::CommandResult {data} if data.result == CommandResult::Accepted)
+    );
+    channel.close();
+    receipt
+}
+
+#[test]
+fn actual_driver_routes_native_content_once_across_four_daemons_and_new_home_is_independent() {
+    use agend_core::traits::{Driver, DriverEventKind};
+    use agend_daemon::driver::claude::ClaudeDriver;
+    use std::sync::Arc;
+    let message = id();
+    let body = "Driver native body: 繁中 é\nsecond line";
+    let mut f = Fixture::new(0);
+    f.start();
+    let receipt = first_native_driver_write(&f, &message, body);
+    f.stop();
+    {
+        let store = f.store();
+        assert_eq!(
+            block_on(store.message(&message)).unwrap().unwrap().state,
+            DeliveryState::Sent
+        );
+        assert_eq!(block_on(store.messages_to("claude")).unwrap().len(), 1);
+        assert!(
+            block_on(store.claude_delivery(&message))
+                .unwrap()
+                .unwrap()
+                .attempt
+                .unwrap()
+                .confirmed_at_unix_ms
+                .is_none()
+        );
+    }
+    for boot in 2..=4 {
+        f.start();
+        assert!(
+            matches!(native_driver_send(&f.home, &message, body, "claude"), ClientResponse::CommandResult {data} if data.result == CommandResult::Accepted)
+        );
+        assert!(
+            matches!(native_driver_send(&f.home, &message, "different content", "claude"), ClientResponse::Error {data} if data.code == error_code::INVALID_REQUEST)
+        );
+        assert!(
+            matches!(native_driver_send(&f.home, &id(), body, "missing"), ClientResponse::Error {data} if data.code == error_code::UNKNOWN_INSTANCE)
+        );
+        assert!(
+            f.rpc(ClaudeOperation::Poll {
+                session_id: SESSION.into()
+            })
+            .messages
+            .is_empty()
+        );
+        if boot == 2 {
+            let mut channel = Channel::new(&f.home);
+            assert_ne!(
+                channel.ack(std::slice::from_ref(&receipt))["result"]["isError"],
+                true
+            );
+            channel.close();
+            assert_eq!(f.hook("Stop", json!({"stop_hook_active":false})), json!({}));
+        }
+        f.stop();
+        let store = Arc::new(f.store());
+        let driver = ClaudeDriver::new(store.clone());
+        let events = block_on(driver.events("claude", None)).unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| matches!(e.kind, DriverEventKind::MessageConfirmed { .. }))
+                .count(),
+            1
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| matches!(e.kind, DriverEventKind::TurnCompleted { .. }))
+                .count(),
+            1
+        );
+        for (index, event) in events.iter().enumerate() {
+            assert_eq!(
+                block_on(driver.events("claude", Some(&event.cursor))).unwrap(),
+                events[index + 1..]
+            );
+        }
+        let attempt = block_on(store.claude_delivery(&message))
+            .unwrap()
+            .unwrap()
+            .attempt
+            .unwrap();
+        assert_eq!(attempt.delivery_id, receipt.delivery_id);
+        assert_eq!(block_on(store.messages_to("claude")).unwrap().len(), 1);
+    }
+    let mut control = Fixture::new(0);
+    control.start();
+    let independent = first_native_driver_write(&control, &message, body);
+    assert_ne!(independent.delivery_id, receipt.delivery_id);
+    control.stop();
+    assert_eq!(
+        block_on(control.store().message(&message))
+            .unwrap()
+            .unwrap()
+            .state,
+        DeliveryState::Sent
+    );
+}
+
+#[test]
+fn native_ack_accepts_the_original_opaque_pipeline_dispatch_identity() {
+    let mut f = Fixture::new(0);
+    let message = "dispatch:t-1/work/1";
+    block_on(f.store().claim_message(
+        &NewMessage {
+            id: message.into(),
+            from_instance: "daemon".into(),
+            to_instance: "claude".into(),
+            task_id: None,
+            body: "Work ticket t-1/work/1".into(),
+            level: BusyLevel::Queue,
+        },
+        0,
+    ))
+    .unwrap();
+    f.start();
+    f.hook("SessionStart", json!({"source":"startup"}));
+    let mut channel = Channel::new(&f.home);
+    let notification = loop {
+        let v = channel.recv();
+        if v["method"] == "notifications/claude/channel" {
+            break v;
+        }
+    };
+    let receipt = Channel::receipt(&notification);
+    assert_eq!(receipt.message_id, message);
+    channel.written_barrier();
+    let ack = channel.ack(std::slice::from_ref(&receipt));
+    assert!(ack["error"].is_null(), "opaque dispatch id rejected: {ack}");
+    assert_ne!(ack["result"]["isError"], true);
+    channel.close();
+    f.stop();
+    assert_eq!(
+        block_on(f.store().message(message)).unwrap().unwrap().state,
+        DeliveryState::Confirmed
+    );
+}
+
+#[test]
+fn unknown_delivery_attention_pages_retains_and_only_operator_abandonment_terminates() {
+    let mut f = Fixture::new(43);
+    let old = agend_daemon::log::now_unix_ms() - 30_000;
+    let mut receipts = Vec::new();
+    {
+        let s = f.store();
+        block_on(s.set_instance_status("claude", InstanceStatus::Running)).unwrap();
+        // Unattempted prefix/suffix rows must not consume the bounded page.
+        for message in &f.ids[1..41] {
+            let receipt = ClaudeReceipt {
+                message_id: message.clone(),
+                delivery_id: id(),
+                session_id: SESSION.into(),
+            };
+            block_on(s.reserve_claude_delivery(
+                NewClaudeDelivery {
+                    message_id: message.clone(),
+                    delivery_id: receipt.delivery_id.clone(),
+                    instance_id: "claude".into(),
+                    session_id: SESSION.into(),
+                    route: ClaudeRoute::Channel,
+                },
+                old,
+            ))
+            .unwrap();
+            receipts.push(receipt);
+        }
+    }
+    f.start();
+    let items = wait_unknown(&f.home, 40);
+    assert!(
+        items.iter().all(
+            |a| a.actions == [AttentionAction::Abandon] && a.waiting_since_unix_ms == Some(old)
+        )
+    );
+    let refused = resolve_unknown(&f.home, &f.ids[1], Some("claude"), AttentionAction::Abandon);
+    assert!(matches!(refused, ClientResponse::Error {data} if data.code == error_code::FORBIDDEN));
+    let refused = resolve_unknown(&f.home, &f.ids[1], None, AttentionAction::Retry);
+    assert!(
+        matches!(refused, ClientResponse::Error {data} if data.code == error_code::UNKNOWN_ATTENTION)
+    );
+    wait_unknown(&f.home, 40);
+    let accepted = resolve_unknown(&f.home, &f.ids[1], None, AttentionAction::Abandon);
+    assert!(
+        matches!(accepted, ClientResponse::CommandResult {data} if data.result == CommandResult::Accepted)
+    );
+    // A valid late ACK wins over a stale attention snapshot. It must never
+    // become failed even if the operator resolves before the next refresh.
+    f.rpc(ClaudeOperation::Ack {
+        receipts: vec![receipts[1].clone()],
+    });
+    assert!(matches!(
+        resolve_unknown(&f.home, &f.ids[2], None, AttentionAction::Abandon),
+        ClientResponse::Error { .. }
+    ));
+    wait_unknown(&f.home, 38);
+    f.stop();
+    for _ in 0..3 {
+        f.start();
+        wait_unknown(&f.home, 38);
+        f.stop();
+    }
+    let s = f.store();
+    let ended = block_on(s.claude_delivery(&f.ids[1])).unwrap().unwrap();
+    assert_eq!(
+        ended.abandonment_reason.as_deref(),
+        Some("operator chooses to end this unknown delivery")
+    );
+    assert_eq!(
+        block_on(s.message(&f.ids[1])).unwrap().unwrap().state,
+        DeliveryState::Failed
+    );
+    assert_eq!(
+        block_on(s.message(&f.ids[2])).unwrap().unwrap().state,
+        DeliveryState::Confirmed
+    );
+    for receipt in &receipts[2..] {
+        let m = block_on(s.message(&receipt.message_id)).unwrap().unwrap();
+        let d = block_on(s.claude_delivery(&receipt.message_id))
+            .unwrap()
+            .unwrap();
+        assert!(d.outcome_unknown(&m));
+        assert_eq!(d.attempt.unwrap().delivery_id, receipt.delivery_id);
+    }
+    assert!(
+        block_on(s.message(&f.ids[0]))
+            .unwrap()
+            .unwrap()
+            .attempted_at_unix_ms
+            .is_none()
+    );
+    assert!(
+        block_on(s.message(&f.ids[42]))
+            .unwrap()
+            .unwrap()
+            .attempted_at_unix_ms
+            .is_none()
+    );
+}
+
 struct Fixture {
     daemon: Option<lab::Daemon>,
     lab: lab::Lab,
@@ -39,18 +403,22 @@ impl Fixture {
         Self::with_body(messages, None)
     }
     fn with_body(messages: usize, body: Option<&str>) -> Self {
+        Self::with_script(
+            messages,
+            body,
+            "/bin/sh",
+            "printf 'native ready\\n'; exec sleep 600",
+        )
+    }
+    fn with_script(messages: usize, body: Option<&str>, program: &str, script: &str) -> Self {
         let lab = lab::Lab::with_prefix(Path::new(BIN), "g12b");
         let home = lab.home(0);
         let store = SqliteStore::open(&home, 0).unwrap();
         block_on(store.add_instance(&Instance {
             id: "claude".into(),
             backend: Backend::Claude,
-            program: "/bin/sh".into(),
-            args: vec![
-                "-c".into(),
-                "printf 'native ready\\n'; exec sleep 600".into(),
-                "fake-claude".into(),
-            ],
+            program: program.into(),
+            args: vec!["-c".into(), script.into(), "fake-claude".into()],
             working_directory: home.display().to_string(),
             session_id: Some(SESSION.into()),
             status: InstanceStatus::New,
@@ -87,6 +455,14 @@ impl Fixture {
     fn start(&mut self) {
         let mut daemon = lab::Daemon::start(&self.lab, &self.home, &[]).unwrap();
         daemon.ready().unwrap();
+        assert!(
+            daemon
+                .log
+                .iter()
+                .any(|line| line.contains("holder pid=") || line.contains("reconnected to holder")),
+            "Claude fixture never started: {}",
+            daemon.log.join("\n")
+        );
         self.daemon = Some(daemon);
     }
     fn stop(&mut self) {
@@ -107,11 +483,14 @@ impl Fixture {
         Self::native_hook(&self.home, event, extra)
     }
     fn native_hook(home: &Path, event: &str, extra: Value) -> Value {
-        let payload = hook_payload(home, SESSION, event, extra);
+        Self::hook_as(home, "claude", SESSION, event, extra)
+    }
+    fn hook_as(home: &Path, instance: &str, session: &str, event: &str, extra: Value) -> Value {
+        let payload = hook_payload(home, session, event, extra);
         let mut child = Command::new(BIN)
             .args(["hook", event])
             .env("AGEND_HOME", home)
-            .env("AGEND_INSTANCE", "claude")
+            .env("AGEND_INSTANCE", instance)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -167,10 +546,13 @@ struct Channel {
 }
 impl Channel {
     fn new(home: &Path) -> Self {
+        Self::for_instance(home, "claude")
+    }
+    fn for_instance(home: &Path, instance: &str) -> Self {
         let mut child = Command::new(BIN)
-            .args(["channel", "--instance", "claude"])
+            .args(["channel", "--instance", instance])
             .env("AGEND_HOME", home)
-            .env("AGEND_INSTANCE", "claude")
+            .env("AGEND_INSTANCE", instance)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -271,6 +653,234 @@ fn wait_empty(home: &Path, kind: &str) {
         assert!(Instant::now() < end, "pending {kind} not committed");
         std::thread::sleep(Duration::from_millis(30));
     }
+}
+
+#[test]
+fn busy_steer_writes_one_esc_then_channels_without_stop_or_ack_and_skips_queue_prefix() {
+    let mut f = Fixture::with_script(
+        40,
+        None,
+        "/bin/bash",
+        r#"stty raw min 1 time 0 -echo; printf 'native ready\r\n'; while IFS= read -r -n 1 byte; do printf '%d\n' "'$byte" >> "$AGEND_HOME/keys.log"; done"#,
+    );
+    let interrupt = id();
+    let store = f.store();
+    block_on(store.claim_message(
+        &NewMessage {
+            id: interrupt.clone(),
+            from_instance: "operator".into(),
+            to_instance: "claude".into(),
+            task_id: None,
+            body: "steer after interrupt: 完整內容 é".into(),
+            level: BusyLevel::Steer,
+        },
+        1,
+    ))
+    .unwrap();
+    drop(store);
+    f.start();
+    assert_eq!(
+        f.hook("UserPromptSubmit", json!({"prompt":"busy native turn"})),
+        json!({})
+    );
+    let before = Instant::now();
+    let mut channel = Channel::new(&f.home);
+    let delivered = channel.recv();
+    assert!(
+        before.elapsed() < Duration::from_secs(4),
+        "busy interrupt waited for idle or Stop"
+    );
+    let receipt = Channel::receipt(&delivered);
+    assert_eq!(receipt.message_id, interrupt);
+    assert_eq!(
+        delivered["params"]["content"],
+        "From: operator\n\nsteer after interrupt: 完整內容 é"
+    );
+    channel.written_barrier();
+    assert!(
+        channel
+            .output
+            .recv_timeout(Duration::from_millis(700))
+            .is_err(),
+        "busy Queue was sent or interrupt replayed"
+    );
+    channel.close();
+    f.stop();
+    assert_eq!(fs::read_to_string(f.home.join("keys.log")).unwrap(), "27\n");
+    let store = f.store();
+    assert_eq!(
+        block_on(store.message(&interrupt)).unwrap().unwrap().state,
+        DeliveryState::Sent
+    );
+    assert!(
+        block_on(store.claude_delivery(&interrupt))
+            .unwrap()
+            .unwrap()
+            .attempt
+            .unwrap()
+            .confirmed_at_unix_ms
+            .is_none()
+    );
+    for queued in &f.ids {
+        assert_eq!(
+            block_on(store.message(queued)).unwrap().unwrap().state,
+            DeliveryState::Queued
+        );
+        assert!(
+            block_on(store.claude_delivery(queued))
+                .unwrap()
+                .unwrap()
+                .attempt
+                .is_none()
+        );
+    }
+    assert!(
+        !block_on(store.driver_events_after(0, 1024))
+            .unwrap()
+            .iter()
+            .any(|e| e.event.kind == "Stop")
+    );
+}
+
+#[test]
+fn busy_interrupt_keeps_queued_without_writing_or_stealing_operator_control() {
+    use agend_core::protocol::terminal::{TerminalSize, TerminalViewport};
+    use agend_testkit::fake_daemon::ProbeClient;
+    let mut f = Fixture::with_script(
+        0,
+        None,
+        "/bin/bash",
+        r#"stty raw min 1 time 0 -echo; printf 'native ready\r\n'; while IFS= read -r -n 1 byte; do printf '%d\n' "'$byte" >> "$AGEND_HOME/keys.log"; done"#,
+    );
+    let message = id();
+    let store = f.store();
+    block_on(store.claim_message(
+        &NewMessage {
+            id: message.clone(),
+            from_instance: "operator".into(),
+            to_instance: "claude".into(),
+            task_id: None,
+            body: "interrupt".into(),
+            level: BusyLevel::Interrupt,
+        },
+        0,
+    ))
+    .unwrap();
+    drop(store);
+    f.start();
+    f.hook("UserPromptSubmit", json!({"prompt":"busy"}));
+    let (mut owner, version) = ProbeClient::hello(&f.home.join(DAEMON_SOCKET), None).unwrap();
+    assert_eq!(version, V1_5);
+    owner
+        .send(&ClientRequest::SubscribeTerminalFrames {
+            data: TerminalSubscribeData {
+                request_id: "owner-view".into(),
+                instance_id: "claude".into(),
+                viewport: TerminalViewport { top: None, rows: 1 },
+            },
+        })
+        .unwrap();
+    let Some(ClientResponse::TerminalFrame { data: frame }) =
+        owner.recv_within(Duration::from_secs(5)).unwrap()
+    else {
+        panic!("owner frame")
+    };
+    owner
+        .send(&ClientRequest::TerminalControl {
+            data: ClientTerminalControlData {
+                request_id: "take".into(),
+                instance_id: "claude".into(),
+                view_id: frame.view_id.clone(),
+                generation: frame.frame.generation.clone(),
+                operation: ClientTerminalOperation::Acquire {
+                    size: TerminalSize {
+                        rows: 24,
+                        columns: 80,
+                    },
+                },
+            },
+        })
+        .unwrap();
+    let end = Instant::now() + Duration::from_secs(5);
+    let attach = loop {
+        assert!(Instant::now() < end, "owner grant deadline");
+        if let Some(ClientResponse::TerminalControlAck { data }) = owner
+            .recv_within(end.saturating_duration_since(Instant::now()))
+            .unwrap()
+        {
+            assert_eq!(data.request_id, "take");
+            let TerminalControlState::Controlled { attach_id } = data.control else {
+                panic!("owner refused")
+            };
+            break attach_id;
+        }
+    };
+    for _ in 0..3 {
+        assert!(
+            f.rpc(ClaudeOperation::Poll {
+                session_id: SESSION.into()
+            })
+            .messages
+            .is_empty()
+        );
+    }
+    assert!(
+        !f.home.join("keys.log").exists(),
+        "daemon wrote a key under human ownership"
+    );
+    // The original human's token still writes through the native PTY.
+    owner
+        .send(&ClientRequest::TerminalControl {
+            data: ClientTerminalControlData {
+                request_id: "human-marker".into(),
+                instance_id: "claude".into(),
+                view_id: frame.view_id,
+                generation: frame.frame.generation,
+                operation: ClientTerminalOperation::Input {
+                    attach_id: attach,
+                    bytes_base64: "eQ==".into(),
+                },
+            },
+        })
+        .unwrap();
+    let end = Instant::now() + Duration::from_secs(5);
+    loop {
+        assert!(Instant::now() < end, "human marker response deadline");
+        match owner
+            .recv_within(end.saturating_duration_since(Instant::now()))
+            .unwrap()
+        {
+            Some(ClientResponse::TerminalControlAck { data })
+                if data.request_id == "human-marker" =>
+            {
+                break;
+            }
+            Some(ClientResponse::Error { data }) => panic!("human marker refused: {data:?}"),
+            _ => (),
+        }
+    }
+    let end = Instant::now() + Duration::from_secs(5);
+    while !f.home.join("keys.log").exists() {
+        assert!(Instant::now() < end, "human owner lost control");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(
+        fs::read_to_string(f.home.join("keys.log")).unwrap(),
+        "121\n"
+    );
+    drop(owner);
+    f.stop();
+    let store = f.store();
+    let m = block_on(store.message(&message)).unwrap().unwrap();
+    assert_eq!(m.state, DeliveryState::Queued);
+    assert!(m.attempted_at_unix_ms.is_none());
+    assert!(
+        block_on(store.claude_delivery(&message))
+            .unwrap()
+            .unwrap()
+            .attempt
+            .is_none()
+    );
 }
 
 #[test]

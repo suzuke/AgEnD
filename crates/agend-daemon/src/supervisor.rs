@@ -43,6 +43,10 @@
 //!   SIGKILL to the old agent's group when it is still this instance's
 //!   (`driver::codex::sweep`), then `agent_pid` is cleared.
 //!
+//! Gate 12A extends these sweep points to Claude: require a gone holder
+//! and exact session argv or this daemon's channel executable/instance pair.
+//! A live holder or failed holder inspection never authorizes a signal.
+//!
 //! Gate 9 (P6, P7):
 //! - `instance_add` ([`Event::Add`]): checks the name, the backend, that no
 //!   row and no running holder has the name; writes the row (`new`, claude
@@ -169,7 +173,11 @@ pub fn launch(home: &Path, instance: &Instance, resume: bool) -> Result<HolderLa
             codex_launch::wrapper_args(home, instance)?,
         )
     } else {
-        let mut args = instance.args.clone();
+        let mut args = if crate::driver::claude::launch::applies(instance) {
+            crate::driver::claude::launch::args(home, instance)?
+        } else {
+            instance.args.clone()
+        };
         args.extend(session_args(instance, resume)?);
         (instance.program.clone(), args)
     };
@@ -357,21 +365,51 @@ impl Supervisor {
         &self.store
     }
 
-    /// The sweep (gate 7 P2) of a codex instance whose holder is gone, or
+    /// The sweep (gate 7 P2 / D40 P9) of an instance whose holder is gone, or
     /// before its new holder starts: only while `agent_pid` is set; clears
     /// it afterwards.
     async fn sweep(&self, instance: &Instance, why: &str) {
-        let (Backend::Codex, Some(pgid)) = (instance.backend, instance.agent_pid) else {
+        let Some(pgid) = instance.agent_pid else {
             return;
         };
         let id = &instance.id;
-        let markers = Markers {
-            socket: codex_launch::socket_path(&self.home, id)
-                .display()
-                .to_string(),
-            thread: instance.session_id.clone(),
+        if instance.backend == Backend::Claude {
+            match files::running(self.runtime.home(), id) {
+                Ok(None) => {}
+                Ok(Some(pid)) => {
+                    log::line(&format!(
+                        "{id}: sweep refused; holder pid={pid} is still running"
+                    ));
+                    return;
+                }
+                Err(error) => {
+                    log::line(&format!(
+                        "{id}: sweep refused; cannot establish holder death: {error}"
+                    ));
+                    return;
+                }
+            }
+        }
+        let swept = match instance.backend {
+            Backend::Codex => sweep::sweep(
+                pgid,
+                &Markers {
+                    socket: codex_launch::socket_path(&self.home, id)
+                        .display()
+                        .to_string(),
+                    thread: instance.session_id.clone(),
+                },
+            ),
+            Backend::Claude => crate::driver::claude::sweep::sweep(
+                pgid,
+                &crate::driver::claude::sweep::Markers {
+                    session: instance.session_id.as_deref(),
+                    instance: id,
+                    agend: self.runtime.executable(),
+                },
+            ),
+            _ => return,
         };
-        let swept = sweep::sweep(pgid, &markers);
         log::line(&format!(
             "{id}: sweep of agent group {pgid} ({why}): {swept}"
         ));
@@ -503,6 +541,9 @@ impl Supervisor {
     /// so their holder can only lack an agent if the agent never ran).
     async fn reconnect(&mut self, instance: &Instance, pid: u32) {
         let id = instance.id.clone();
+        if !self.prepare_claude(instance).await {
+            return;
+        }
         let resume = instance.status == InstanceStatus::Running;
         let launch = match launch(&self.home, instance, resume)
             .or_else(|_| launch(&self.home, instance, false))
@@ -548,12 +589,15 @@ impl Supervisor {
     /// the n-th restart, for the log.
     async fn start(&mut self, instance: &Instance, resume: bool, restart: Option<usize>) {
         let id = instance.id.clone();
+        if !self.prepare_claude(instance).await {
+            return;
+        }
         let launch = match launch(&self.home, instance, resume) {
             Ok(launch) => launch,
             Err(e) => return self.fail(&id, &e).await,
         };
+        self.sweep(instance, "before a new holder").await;
         if instance.backend == Backend::Codex {
-            self.sweep(instance, "before a new holder").await;
             match codex_launch::prepare(&self.home, &id) {
                 Ok(removed) if !removed.is_empty() => {
                     log::line(&format!("{id}: removed {}", removed.join(", ")))
@@ -610,6 +654,36 @@ impl Supervisor {
             .await
         {
             log::line(&format!("{id}: cannot record running: {e}"));
+        }
+    }
+
+    /// Configuration conflicts follow the same restart budget as Spawn errors.
+    async fn prepare_claude(&mut self, instance: &Instance) -> bool {
+        match crate::driver::claude::launch::prepare(
+            &self.store,
+            &self.home,
+            self.runtime.executable(),
+            instance,
+        )
+        .await
+        {
+            Ok(()) => true,
+            Err(error) => {
+                let id = instance.id.clone();
+                let generation = self.watches.get(&id).map_or(0, |w| w.generation);
+                self.show(
+                    instance,
+                    AgentState::Starting,
+                    format!("Claude configuration: {error}"),
+                );
+                self.watch(&id, generation);
+                let _ = self.events.send(Event::StartFailed {
+                    id,
+                    generation,
+                    error,
+                });
+                false
+            }
         }
     }
 
@@ -1026,7 +1100,8 @@ mod tests {
 
     #[test]
     fn claude_starts_fresh_once_then_only_resumes() {
-        let claude = instance(Backend::Claude, Some("s-abc"));
+        let mut claude = instance(Backend::Claude, Some("s-abc"));
+        claude.delivery = "inbox".into();
         let fresh = launch(Path::new("/h"), &claude, false).unwrap();
         assert_eq!(fresh.args[3..], ["--session-id", "s-abc"]);
         let resumed = launch(Path::new("/h"), &claude, true).unwrap();

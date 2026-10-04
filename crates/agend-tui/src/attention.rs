@@ -85,6 +85,7 @@ fn details(ctx: &Ctx, item: &Attention) -> Vec<Row> {
                 AttentionAction::Approve => ctx.tr(Text::ActionApprove),
                 AttentionAction::RequestChanges => ctx.tr(Text::ActionChanges),
                 AttentionAction::Acknowledge => ctx.tr(Text::ActionAcknowledge),
+                AttentionAction::Abandon => ctx.tr(Text::ActionAbandon),
                 AttentionAction::Unknown => ctx.tr(Text::ActionUnknown),
             };
             rows.push(

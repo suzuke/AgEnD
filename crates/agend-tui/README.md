@@ -27,7 +27,7 @@ native 與 off-screen draw 共用實際 frame area 更新 App 尺寸；延遲或
 - 「需要你」：展開項目看脈絡摘要（D37）與對話（D35），選選項或用自由文字回答；已讀與已解決分開，agent 追問後回到未讀
 - team 頁：目標、Agents、流水線三個 tab
 - Task Detail（repo 只在這裡）、Agent Detail、單一 agent 終端（`t`：即時畫面；`i` 進輸入模式、`Ctrl-]` 離開）
-- 「需要你」的非請示項目：`actions` 是可選的列（retry、approve、request_changes、acknowledge），收到 daemon 的 `attention_resolved` 才消失
+- 「需要你」的非請示項目：`actions` 是可選的列（retry、approve、request_changes、acknowledge、abandon），收到 daemon 的 `attention_resolved` 才消失
 - `/` 快速跳轉；英文與繁中，執行中按 `L` 切換
 - daemon 斷線畫面與自動重連（重連一律重拿全貌；版本不合不自動重試）
 - 互動迴圈 `agend_tui::run`（`agend app` 與 `tui_fake` 共用）

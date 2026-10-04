@@ -2,7 +2,7 @@
 
 > **TL;DR**
 > - P10、真 CLI 待查項、A 段限制與未來驗收案例。
-> - 本頁是完整接入計畫；client 已 merge、store 已實作待驗證，A 段尚未完成。
+> - 本頁是完整接入計畫；client、store、bridge 與 gh 防護已 merge；Driver／控制施工中，A 段尚未完成。
 > - 下一步：依已確認 D40 寫定實作與驗收指令；真 CLI／模型回合另外確認版本與預算。
 
 ## P10：什麼是假的、什麼是真的
@@ -37,7 +37,7 @@
 
 ## 自動驗收計畫
 
-下列是完整 A 段接入案例；client #147 已 merge，[store 基礎](gate-12a-store.md) 已實作並跑本批持久化回歸，未代替 bridge／runtime 或 DRV 驗收。現在 `cargo xtask accept adapters` 只跑 daemon 檢查，印 `demo not implemented yet`，不代表第 12 關完成。
+下列是完整 A 段接入案例；client #147 已 merge，[store 基礎](gate-12a-store.md) 已合併並跑持久化回歸，未代替 bridge／runtime 或 DRV 驗收。`cargo xtask demo adapters` 共用 native Claude 回歸；`accept adapters` 跑 daemon 檢查及 check-deps 後同跑 demo，明示真 CLI／啟動提示與其他 adapter 仍待完成。此 native demo 不代表第 12 關或 12A 已驗收。
 
 - [ ] core：P1 協定新增／舊 peer、P5 選定規則與真 fixture；`cargo test -p agend-core`、check-deps、`cargo xtask accept core`（D22）
 - [ ] bridge／hooks：instance 歸屬、version negotiation、write receipt、timeout；spool 有序補送、重複事件去重、daemon 不在時 Stop 回 `{}`

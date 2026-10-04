@@ -195,6 +195,15 @@ pub(crate) fn acknowledge(
         confirmed_at_unix_ms = ?2 WHERE message_id = ?1",
         rusqlite::params![ack.message_id, ms(now)?],
     )?;
+    // A delivery id and a native hook event id inhabit different domains.
+    // ACK idempotency is the transaction's confirmed_at guard, not reusing
+    // a delivery UUID as an event UUID (which can collide with a saved hook).
+    super::driver_events::append(&tx, &agend_core::runtime_records::NewDriverEvent {
+        id: instances::new_session_id().map_err(|e| invalid(&format!("cannot allocate ACK event id: {e}")))?,
+        instance_id: ack.instance_id.clone(), session_id: ack.session_id.clone(),
+        kind: "AgendAck".into(), payload: serde_json::json!({"message_id":ack.message_id,"delivery_id":ack.delivery_id,"session_id":ack.session_id}).to_string(),
+        occurred_at_unix_ms: now, replayed: false,
+    }, now)?;
     tx.commit()?;
     Ok(ClaudeAckResult::Confirmed)
 }
@@ -231,6 +240,77 @@ pub(crate) fn abandon(
 }
 
 impl SqliteStore {
+    pub(crate) async fn unknown_claude_after(
+        &self,
+        after: i64,
+        before: u64,
+    ) -> Result<Vec<agend_core::runtime_records::Message>, StoreError> {
+        self.call(move |conn| messages::unknown_claude_after(conn, after, before))
+            .await
+    }
+    pub(crate) async fn claude_outcome_unknown(&self, id: &str) -> Result<bool, StoreError> {
+        let id = id.to_owned();
+        self.call(move |conn| {
+            Ok(match (get(conn, &id)?, messages::get(conn, &id)?) {
+                (Some(d), Some(m)) => d.outcome_unknown(&m),
+                _ => false,
+            })
+        })
+        .await
+    }
+    /// Recheck on the serialized DB thread before explicit abandonment, so
+    /// a concurrent valid Written/ACK receipt cannot be changed to Failed.
+    pub(crate) async fn abandon_unknown_claude(
+        &self,
+        id: &str,
+        reason: &str,
+        now: u64,
+    ) -> Result<(), StoreError> {
+        let (id, reason) = (id.to_owned(), reason.to_owned());
+        self.call(move |conn| {
+            let d = required(conn, &id)?;
+            let m = messages::get(conn, &id)?.ok_or_else(|| invalid("missing message"))?;
+            if !d.outcome_unknown(&m) {
+                return Err(invalid(
+                    "delivery no longer has an unknown outcome; nothing changed",
+                ));
+            }
+            abandon(conn, &id, &reason, now)?;
+            Ok(())
+        })
+        .await
+    }
+    pub(crate) async fn pending_claude_interrupts(
+        &self,
+        instance: &str,
+    ) -> Result<Vec<agend_core::runtime_records::Message>, StoreError> {
+        let instance = instance.to_owned();
+        self.call(move |conn| messages::pending_claude_filtered(conn, &instance, 2))
+            .await
+    }
+    /// Undo only a reservation whose daemon key was definitively refused
+    /// before any PTY write. Timeouts, lost responses and write failures MUST
+    /// retain the intent. This is not permission to retry a content writer.
+    pub(crate) async fn release_refused_claude_key(
+        &self,
+        message: &str,
+        delivery: &str,
+    ) -> Result<(), StoreError> {
+        let message = message.to_owned();
+        let delivery = delivery.to_owned();
+        self.call(move |conn| {
+            let tx = conn.transaction()?;
+            let d = required(&tx, &message)?;
+            let m = messages::get(&tx, &message)?.ok_or_else(|| invalid("missing message"))?;
+            if d.abandoned_at_unix_ms.is_some() || m.state != DeliveryState::Queued || !d.attempt.as_ref().is_some_and(|a| a.delivery_id == delivery && a.sent_at_unix_ms.is_none() && a.confirmed_at_unix_ms.is_none()) {
+                return Err(invalid("key reservation can no longer be released"));
+            }
+            tx.execute("UPDATE claude_deliveries SET delivery_id=NULL, session_id=NULL, route=NULL, started_at_unix_ms=NULL WHERE message_id=?1", [&message])?;
+            tx.execute("UPDATE messages SET attempted_at_unix_ms=NULL WHERE id=?1", [&message])?;
+            tx.commit()?;
+            Ok(())
+        }).await
+    }
     pub async fn claude_delivery(&self, id: &str) -> Result<Option<ClaudeDelivery>, StoreError> {
         let id = id.to_owned();
         self.call(move |conn| get(conn, &id)).await

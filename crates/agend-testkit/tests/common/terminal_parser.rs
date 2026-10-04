@@ -128,6 +128,13 @@ impl TerminalProducer for Parser {
             frame: None,
         };
         match request.operation {
+            TerminalControlOperation::DaemonKey { .. } => {
+                return Err(failure(
+                    &id,
+                    "not_supported",
+                    "operator fixture has no daemon key transport",
+                ));
+            }
             TerminalControlOperation::Acquire { attach_id, size }
             | TerminalControlOperation::Resize { attach_id, size } => {
                 Screen::validate_frame_size(size)

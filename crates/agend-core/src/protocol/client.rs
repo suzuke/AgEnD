@@ -319,6 +319,8 @@ pub enum AttentionAction {
     Approve,
     RequestChanges,
     Acknowledge,
+    /// Explicitly terminate an unknown Claude delivery; never confirm receipt.
+    Abandon,
     #[serde(other)]
     Unknown,
 }
@@ -330,6 +332,7 @@ impl AttentionAction {
             Self::Approve => "approve",
             Self::RequestChanges => "request_changes",
             Self::Acknowledge => "acknowledge",
+            Self::Abandon => "abandon",
             Self::Unknown => "unknown",
         }
     }

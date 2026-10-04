@@ -34,11 +34,12 @@ pub async fn start(
             .map_err(|e| crate::log::line(&format!("repo execution unavailable: {e}")))
             .ok(),
     };
+    let driver = crate::driver::dispatch::BackendDriver::new(codex, store.clone());
     pipeline::start_with(
         &executor.home.clone(),
         store,
         fleet,
-        codex,
+        driver,
         executor,
         pipeline::transition::WallClock,
     )

@@ -15,6 +15,7 @@
 //! packaging.
 
 mod accept;
+mod adapters_demo;
 mod check_core;
 mod check_deps;
 mod core_demo;
@@ -32,6 +33,7 @@ Commands:
                    no-std target is not installed; still prints SKIPPED)
   accept <gate>    Run the acceptance checks of a build gate (1-13 or its name);
                    each gate is described in docs/gates/gate-NN-<name>.md
+  demo adapters   Run the native Claude adapter demo (no real CLI or models)
   record <backend> [scenario...] --sandbox <script>
                    Record the REAL backend CLI (codex, opencode, claude) under a
                    write sandbox into crates/agend-testkit/transcripts/
@@ -42,6 +44,9 @@ fn main() -> ExitCode {
     let result = match args.first().map(String::as_str) {
         Some("check-deps") => check_deps::run(args.iter().any(|a| a == "--allow-skip")),
         Some("accept") => accept::run(args.get(1).map(String::as_str)),
+        Some("demo") if args.get(1).map(String::as_str) == Some("adapters") && args.len() == 2 => {
+            adapters_demo::run()
+        }
         Some("record") => record::run(&args[1..]),
         _ => {
             eprint!("{USAGE}");

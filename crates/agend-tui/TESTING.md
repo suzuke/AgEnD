@@ -84,3 +84,7 @@ App 已選用此路徑；真 daemon／holder／PTY 的單次 Source 輸入與 th
 ```bash
 ~/.cargo/bin/cargo test -p agend-tui
 ```
+
+## 第 12A 人工終結（施工中）
+
+client protocol 的 `abandon` 在需要你顯示「放棄此投遞」。daemon 原生 `agend --test claude_bridge` 驗 agent 禁止、未提供的 action 拒絕、保存理由及 ACK 競爭；TUI 仍經既有 Source 動作，不自行改 DB。完整第 12A 尚未驗收。

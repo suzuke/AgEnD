@@ -18,6 +18,10 @@
 
 `screen::tests::single_column_resize_handles_wide_live_history_and_inactive_normal_grid`：normal／歷史與 active alt／inactive normal 含寬字時縮到一欄，核 modes、generation／revision、新 CJK／combining 輸入及放大後新寬字；五秒 watchdog 防止 reflow 回歸卡住 CI。移除修正後同一回歸會 SIGABRT／cargo exit 101，原 stack／logs 保留。
 
+## 第 12A 單鍵控制（施工中）
+
+`tests/support/terminal_control.rs` 新增 native PTY 案例：單一 Esc 寫出一次；過期 revision 與未知鍵不寫入；queued key 和後續 Acquire 依 FIFO 執行；有人工 owner 時拒絕，Release 後恢復；1.1 peer 拒絕新能力且 PTY 不變。完整 Claude Driver 驗收仍見 [施工紀錄](../../docs/gates/gate-12a-driver.md)。
+
 ## 怎麼跑
 
 ```bash

@@ -22,7 +22,8 @@ use super::{Hello, ProtocolVersion, VersionMismatch, negotiate};
 
 pub const V1: ProtocolVersion = ProtocolVersion::new(1, 0);
 pub const V1_1: ProtocolVersion = ProtocolVersion::new(1, 1);
-pub const SUPPORTED_VERSIONS: [ProtocolVersion; 1] = [V1_1];
+pub const V1_2: ProtocolVersion = ProtocolVersion::new(1, 2);
+pub const SUPPORTED_VERSIONS: [ProtocolVersion; 2] = [V1_2, V1_1];
 
 /// Longest request line a holder reads, its newline included (1 MiB); a
 /// longer one gets `request_too_large` and the connection is closed. The
@@ -270,10 +271,11 @@ mod tests {
     }
 
     #[test]
-    fn holder_hello_advertises_v1_1() {
+    fn holder_hello_advertises_v1_2_and_keeps_v1_1() {
         let HolderRequest::Hello { data: hello } = HolderRequest::hello() else {
             unreachable!();
         };
-        assert_eq!(negotiate_version(&hello), Ok(V1_1));
+        assert_eq!(negotiate_version(&hello), Ok(V1_2));
+        assert_eq!(negotiate_version(&Hello::new(&[V1_1])), Ok(V1_1));
     }
 }

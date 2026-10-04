@@ -42,7 +42,8 @@ impl Conn {
         conn.send(&HolderRequest::hello())?;
         match conn.recv_within(GREETING_TIMEOUT)? {
             HolderResponse::Hello { data }
-                if data.selected.major == 1 && data.selected.minor <= 1 =>
+                if data.selected.major == 1
+                    && data.selected <= agend_core::protocol::holder::V1_2 =>
             {
                 conn.version = data.selected;
             }

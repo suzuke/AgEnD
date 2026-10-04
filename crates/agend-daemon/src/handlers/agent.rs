@@ -130,7 +130,8 @@ async fn send(
         task_id: None,
         body,
     };
-    match ctx.codex.deliver(&to, &message, level).await {
+    let driver = crate::driver::dispatch::BackendDriver::new(ctx.codex.clone(), ctx.store.clone());
+    match driver.deliver(&to, &message, level).await {
         Ok(_) => Ok(CommandResult::Accepted),
         Err(DriverError::UnknownInstance(_)) => Err((
             error_code::UNKNOWN_INSTANCE,

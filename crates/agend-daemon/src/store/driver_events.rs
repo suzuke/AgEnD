@@ -20,7 +20,7 @@ fn row(r: &Row<'_>) -> rusqlite::Result<DriverEvent> {
     })
 }
 const COLUMNS: &str = "seq, id, instance_id, session_id, kind, payload, occurred_at_unix_ms, ingested_at_unix_ms, replayed";
-fn append(
+pub(super) fn append(
     conn: &Connection,
     event: &NewDriverEvent,
     now: u64,
@@ -86,6 +86,42 @@ fn append(
     })
 }
 impl SqliteStore {
+    /// Receipt waiting may follow the latest daemon-derived state, but this
+    /// observation never grants permission to write content or replay an intent.
+    pub(crate) async fn claude_reported_idle(
+        &self,
+        instance: &str,
+        session: &str,
+    ) -> Result<bool, StoreError> {
+        let (instance, session) = (instance.to_owned(), session.to_owned());
+        self.call(move |conn| {
+            Ok(conn
+                .query_row(
+                    "SELECT json_extract(payload, '$.busy') = 0 FROM driver_events \
+                 WHERE instance_id=?1 AND session_id=?2 AND kind='AgendState' \
+                 AND replayed=0 ORDER BY seq DESC LIMIT 1",
+                    rusqlite::params![instance, session],
+                    |r| r.get::<_, bool>(0),
+                )
+                .optional()?
+                .unwrap_or(false))
+        })
+        .await
+    }
+    /// Filter before LIMIT so another instance or raw hook traffic cannot
+    /// starve the adapter's cursor. Only daemon-derived state and durable ACKs
+    /// are Driver events; historical hooks are observations, not current state.
+    pub(crate) async fn claude_adapter_events(
+        &self,
+        instance: &str,
+        seq: i64,
+    ) -> Result<Vec<DriverEvent>, StoreError> {
+        let instance = instance.to_owned();
+        self.call(move |conn| {
+            let mut query = conn.prepare(&format!("SELECT {COLUMNS} FROM driver_events WHERE instance_id = ?1 AND seq > ?2 AND (kind IN ('AgendState','AgendAck') OR (kind = 'Stop' AND json_extract(payload, '$.stop_hook_active') = 0)) ORDER BY seq LIMIT 1024"))?;
+            query.query_map(rusqlite::params![instance,seq], row)?.map(|r| r.map_err(StoreError::from)).collect()
+        }).await
+    }
     /// A duplicate retained event returns its original seq without another insertion.
     /// Event deduplication expires with the 14-day log; it never confirms a message.
     pub async fn append_driver_event(

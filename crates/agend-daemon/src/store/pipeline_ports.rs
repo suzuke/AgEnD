@@ -24,6 +24,35 @@ impl agend_core::pipeline::ports::PipelineStore for SqliteStore {
         turn_id: Option<String>,
         now: u64,
     ) -> Result<(), StoreError> {
+        let message_id = id.to_owned();
+        let has_turn = turn_id.is_some();
+        let observed = self
+            .call(move |conn| {
+                use agend_core::model::DeliveryState::*;
+                if super::claude::get(conn, &message_id)?.is_none() {
+                    return Ok(false);
+                }
+                let message = super::messages::get(conn, &message_id)?
+                    .ok_or_else(|| StoreError::Invalid("missing Claude dispatch".into()))?;
+                // The Driver/helper already owns the transaction. The pipeline
+                // may observe that state (or a receipt overtaken by ACK), but
+                // cannot invent Sent/Confirmed or record a generic backend turn.
+                let recorded = next == message.state
+                    || matches!(
+                        (next, message.state),
+                        (Queued, Sent | Confirmed | Failed) | (Sent, Confirmed | Failed)
+                    );
+                if has_turn || !recorded {
+                    return Err(StoreError::Invalid(
+                        "Claude dispatch receipt is not recorded by its Driver/helper".into(),
+                    ));
+                }
+                Ok(true)
+            })
+            .await?;
+        if observed {
+            return Ok(());
+        }
         SqliteStore::advance_message(self, id, next, turn_id, now).await
     }
     async fn teams(&self) -> Result<Vec<Team>, StoreError> {

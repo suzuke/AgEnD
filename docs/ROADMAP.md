@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - 依 crate 由下往上分 13 個施工關；每個施工關單獨驗收，使用者確認後才開下一個施工關（D22）。
-> - 目前狀態：**第 1–11 施工關完成並已合併**；第 11 施工關 C 段 #145 經全新 verifier、雙平台 CI、實機及後續自動驗收與清理，使用者於 2026-10-03 確認合併（`b2152db`）。第 12 施工關 A 段設計 #138 已 merge，client 基礎 #147 已 merge，持久化 #148 已 merge，protocol 1.5／channel／Stop／ACK spool 基礎 #149 已 merge，共用 gh 防護待驗證／確認，完整 Claude 接入未完成；第 13 施工關未開始。
-> - 下一步：依第 12A [D40](decisions/d40.md) 驗證 [共用 gh 防護](gates/gate-12a-gh-shim.md)，再接 Claude Driver／啟動設定與控制；每批以全新 verifier、可重驗指令及使用者確認收尾。
+> - 目前狀態：**第 1–11 施工關完成並已合併**；第 11 施工關 C 段 #145 經全新 verifier、雙平台 CI、實機及後續自動驗收與清理，使用者於 2026-10-03 確認合併（`b2152db`）。第 12 施工關 A 段設計 #138 已 merge，client 基礎 #147 已 merge，持久化 #148 已 merge，protocol 1.5／channel／Stop／ACK spool 基礎 #149 已 merge，共用 gh 防護 #150 已 merge，完整 Claude Driver／啟動設定與 Interrupt 實作中，Claude 接入未完成；第 13 施工關未開始。
+> - 下一步：依第 12A [D40](decisions/d40.md) 完成 [Claude Driver／啟動設定與控制](gates/gate-12a-driver.md)；每批以全新 verifier、可重驗指令及使用者確認收尾。
 
 ## 13 個施工關
 
@@ -119,3 +119,11 @@
 - 2026-10-04：#149 原 head `b4c6b46` 被全新 verifier r1 判定 REFUTED（hook 發布／live RPC 解鎖空窗）；修正單次 flock、歷史 busy 撤銷 idle 與 holder 查詢 revision 核對，新增三個 native 回歸，16 cases／accept core 通過；完整 workspace、全新 r2 與 CI 收尾中。
 
 - 2026-10-04：#150 gh shim fresh r1 `e281b19` **REFUTED**（GraphQL CR／block string 漏判、重複 approve 值與 fixture 完成競態）；修正與 native regression 已補，待全新 r2 及固定 head CI，未合併。
+
+- 2026-10-05：#150 已依使用者確認合併為 `572dd73`（原 head `689aeeb`）；在 `feat/gate-12a-claude-driver` 接 Driver／設定 ownership／holder 1.2 單鍵控制。18 native bridge cases、10 Claude Driver／啟動設定 tests、workspace clippy／fmt／實際 no-std 通過；原自動放棄未送訊息反例已修正。完整 DRV 四次開機、啟動提示、清掃、真 CLI、全新 verifier 與 CI 仍待完成，未 merge，見[本批進度](gates/gate-12a-driver.md)。
+
+- 2026-10-05：Driver 施工加入實際 Written 回條等待、Claude 精確 argv 孤兒清掃、結果不明的 `abandon` 人工入口及 ACK 事件 id 撞號修正。16 Claude 單元／19 native bridge／3 native process cases、daemon／holder 回歸通過；實際 no-std 通過。完整 DRV、啟動提示與真 CLI 尚未完成，workspace 及 fresh verifier 另核（`feat/gate-12a-claude-driver`，未提交／未 merge）。
+
+- 2026-10-05：實際 Claude Driver 的 agent send／native channel／ACK 回歸通過；四個 daemon 程序不重送，另用新 HOME 證明獨立送達。accept core（含 protocol 相容性及實際 no-std）通過；workspace 首次在 retry 舊啟動參數斷言失敗，納入完整 D40 旗標後單例通過，完整重跑中（同工作分支，未提交／未 merge）。
+
+- 2026-10-05：Driver 施工補通 pipeline 原 dispatch id 的 native ACK，通用回條只觀察、task 完成不代確認。完整 Git task／review／人工核准／single merge 經四個 daemon 通過；共用 DRV-1–9 十個案例經獨立 composition processes 通過，新 HOME 反向在 boot 2 失敗；真 Esc completion 遺失的四次開機不重送。最新 workspace 回歸收尾中；啟動提示與真 CLI 仍待授權及驗收（同工作分支，未提交／未 merge）。

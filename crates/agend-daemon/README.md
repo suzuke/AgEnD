@@ -53,7 +53,7 @@ pipeline 補 failed attention 的 unblocks 時，經 core port 原子比對捕�
 | `supervisor` | 讓 DB 裡的 instance 保持在跑：死了等 5 秒 `--resume`、10 分鐘 3 次仍死就 `failed`（變成「需要你」項目，操作者可 `retry`）；之後：卡住、額度、轉派、例外才找人 |
 | `scheduler` | timeout、cron |
 | `reconcile` | 開機與每日 DB ↔ git 對帳 |
-| `driver::{codex,claude,opencode}` | backend 結構化 API；codex 見下方「codex（第 7 施工關）」；claude、opencode 還只有說明（第 12 施工關） |
+| `driver::{codex,claude,opencode}` | backend 結構化 API；codex 見下方「codex（第 7 施工關）」；Claude push 接入施工中，見[本批進度](../../docs/gates/gate-12a-driver.md)；opencode 留第 12B |
 | `runtime` | `HolderRuntime`：起 holder、holder 協定 client、每個 holder 一條長連線（轉出 `PtyBytes` 給終端訂閱者）、agent 環境白名單、shim symlink |
 | `forge::{local,github}` | 提交與 merge |
 | `git` | 建立／移除 worktree 與 branch（先記錄再建立） |

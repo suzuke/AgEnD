@@ -159,6 +159,12 @@ pub struct TerminalControlRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum TerminalControlOperation {
+    /// Daemon-only single key, with no owner acquisition. Holder 1.2 rechecks
+    /// the live revision and absence of an operator owner at execution.
+    DaemonKey {
+        key: super::holder::ControlKey,
+        expected_revision: u64,
+    },
     Acquire {
         attach_id: String,
         size: TerminalSize,
@@ -179,6 +185,7 @@ pub enum TerminalControlOperation {
 impl TerminalControlOperation {
     pub fn attach_id(&self) -> &str {
         match self {
+            Self::DaemonKey { .. } => "",
             Self::Acquire { attach_id, .. }
             | Self::Resize { attach_id, .. }
             | Self::Input { attach_id, .. }
