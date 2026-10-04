@@ -73,7 +73,11 @@ pub struct Window {
 impl Window {
     pub fn open(fx: &dyn FullTerminalFixture, caller: Option<&str>) -> Self {
         let (mut client, version) = ProbeClient::hello(&fx.socket(), caller).unwrap();
-        assert_eq!(version, V1_4);
+        assert_eq!(version.major, V1_4.major);
+        assert!(
+            version.minor >= V1_4.minor,
+            "full terminal requires client 1.4 capability"
+        );
         client
             .send(&ClientRequest::SubscribeTerminalFrames {
                 data: TerminalSubscribeData {

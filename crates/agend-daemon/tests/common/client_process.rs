@@ -167,7 +167,7 @@ impl Drop for RealDaemon {
 
 impl ClientProtocolFixture for RealDaemon {
     fn supported_versions(&self) -> Vec<agend_core::protocol::ProtocolVersion> {
-        vec![agend_core::protocol::client::V1_4]
+        vec![agend_core::protocol::client::V1_5]
     }
     fn socket(&self) -> PathBuf {
         socket_of(&self.home)
@@ -346,7 +346,7 @@ impl Drop for InProcess {
 
 impl ClientProtocolFixture for InProcess {
     fn supported_versions(&self) -> Vec<agend_core::protocol::ProtocolVersion> {
-        vec![agend_core::protocol::client::V1_4]
+        vec![agend_core::protocol::client::V1_5]
     }
     fn socket(&self) -> PathBuf {
         self.socket.clone()

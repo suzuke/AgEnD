@@ -43,7 +43,7 @@ use std::time::Duration;
 use crate::terminal_hub::{ReplyScope, TerminalHub, ViewStream, reject};
 use agend_core::protocol::client::{
     ClientRequest, ClientResponse, ErrorData, EventData, MAX_LINE_BYTES, MAX_MESSAGE_BYTES,
-    TerminalBytesData, V1_4, error_code,
+    TerminalBytesData, V1_4, V1_5, error_code,
 };
 use agend_core::protocol::terminal::MAX_FRAME_LINE;
 use agend_core::protocol::{ProtocolVersion, negotiate};
@@ -115,6 +115,12 @@ async fn accept_loop(
 ) {
     let hub =
         TerminalHub::with_codex_driver(ctx.runtime.clone(), ctx.fleet.clone(), ctx.codex.clone());
+    let claude = Arc::new(crate::claude_bridge::ClaudeBridge::default());
+    let ingest = tokio::spawn(crate::ingest::run(
+        ctx.store.home().to_owned(),
+        ctx.clone(),
+        claude.clone(),
+    ));
     let mut connections = JoinSet::new();
     let next = AtomicU64::new(1);
     loop {
@@ -123,7 +129,7 @@ async fn accept_loop(
             accepted = listener.accept() => match accepted {
                 Ok((stream, _)) => {
                     let number = next.fetch_add(1, Ordering::Relaxed);
-                    connections.spawn(connection(stream, Arc::clone(&ctx), hub.clone(), number));
+                    connections.spawn(connection(stream, Arc::clone(&ctx), hub.clone(), number, claude.clone()));
                 }
                 Err(e) => {
                     log::line(&format!("client socket: accept failed: {e}"));
@@ -133,6 +139,8 @@ async fn accept_loop(
             Some(_) = connections.join_next(), if !connections.is_empty() => {}
         }
     }
+    ingest.abort();
+    let _ = ingest.await;
     drop(listener);
     let _ = fs::remove_file(&socket);
     connections.abort_all();
@@ -247,7 +255,13 @@ impl Client {
     }
 }
 
-async fn connection(stream: UnixStream, ctx: Arc<Context>, hub: TerminalHub, number: u64) {
+async fn connection(
+    stream: UnixStream,
+    ctx: Arc<Context>,
+    hub: TerminalHub,
+    number: u64,
+    claude: Arc<crate::claude_bridge::ClaudeBridge>,
+) {
     let (reader, writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
     let mut partial = Vec::new();
@@ -313,7 +327,7 @@ async fn connection(stream: UnixStream, ctx: Arc<Context>, hub: TerminalHub, num
                         client.send(&reply).await;
                         return;
                     };
-                    match negotiate("client", &[V1_4], &data.supported) {
+                    match negotiate("client", &[V1_5], &data.supported) {
                         Ok(selected) => {
                             negotiated = true;
                             selected_version = selected;
@@ -341,6 +355,11 @@ async fn connection(stream: UnixStream, ctx: Arc<Context>, hub: TerminalHub, num
                 }
                 if let Some(result) = full_request(&hub, &scope, &mut full, client.caller.as_deref(), selected_version, request.clone(), line.len() + 1) {
                     if let Err(data) = result && !client.send(&ClientResponse::Error { data }).await { return; }
+                    continue;
+                }
+                if let ClientRequest::Claude { data } = request {
+                    let reply = claude.handle(&ctx, client.caller.as_deref(), selected_version, data).await;
+                    if !client.send(&reply).await { return; }
                     continue;
                 }
                 match handlers::handle(&ctx, client.caller.as_deref(), request).await {

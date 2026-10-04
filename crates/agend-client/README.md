@@ -11,7 +11,7 @@
 
 ## 第 11 施工關 C 段（已驗收並合併 #145）
 
-client 1.4 的型別與專用傳輸已加入；一般 `NEEDED` 維持 1.3。hello 提供 1.4／1.3，真 daemon 已協商 1.4，FakeDaemon 預設 1.3，注入真 producer 的 C fixture 提供 1.4；新 API 先檢查 1.4，不向舊 daemon 送操作。
+client 1.4 的型別與專用傳輸已加入；一般 `NEEDED` 維持 1.3。hello 提供 1.5／1.4／1.3，真 daemon 現在協商 1.5，FakeDaemon 預設 1.3，注入真 producer 的 C fixture 提供 1.4；新 API 先檢查 1.4，不向舊 daemon 送操作。
 
 完整終端使用專用連線：背景 thread 以 `Sender::subscribe_terminal_frames`／`set_terminal_viewport`／`terminal_control` 寫一次，另一條 thread 用 `Client::next_full_terminal` 讀 `FullTerminalUpdate`。回覆與拒絕保留 request id／view id，caller 在 daemon 端驗；generic `request` 拒絕這些連線範圍請求，不能經 Redo 重連重送。
 
@@ -22,7 +22,7 @@ daemon 多視窗／frame 更新與 TUI 已接通，六項 fake／真 C 契約及
 
 - unix socket 連線、`hello`（帶選填的 `caller`）、協定版本檢查（要 1.3；`agend daemon restart` 只要 1.2＝有 `daemon_restart` 的版本）
 - daemon 重啟中重試：每 100 ms 一次、最多 10 秒，之後印出明確訊息
-- 第 12A 基礎：`exchange_once` 共用一個期限完成 JSON 準備、connect／hello／write／reply，不自動重連重送；borrowed 長度先驗，字串每 4 KiB 分段交給原生 serde_json escaping。回覆先讀 type／result 與 RawValue，Fleet 內的 ask／entry／reply 也分段解析後組成 core 型別；JSON 讀取每 4 KiB 檢查期限，避免中間樹轉換的 CPU 尾段。完成準備才開 socket；wire／send body 沿用 8／1 MiB 上限，Claude bridge 尚待接入
+- 第 12A 基礎：`exchange_once` 共用一個期限完成 JSON 準備、connect／hello／write／reply，不自動重連重送；borrowed 長度先驗，字串每 4 KiB 分段交給原生 serde_json escaping。回覆先讀 type／result 與 RawValue，Fleet 內的 ask／entry／reply 也分段解析後組成 core 型別；JSON 讀取每 4 KiB 檢查期限，避免中間樹轉換的 CPU 尾段。完成準備才開 socket；wire／send body 沿用 8／1 MiB 上限，Claude bridge 經 1.5 單次 API 接入，generic request 拒絕 Claude 操作
 - 請求依 `request_id` 等回應（預設 10 秒，`request_within` 可以更久）；送出後斷線只重送標明可重做的請求
 - 記住 daemon 的 `hello`（1.2：版本、pid、`boot_id`）；等連線被 daemon 關掉（`wait_closed`，重啟用）
 - 事件：`subscribe_events` 之後的 `next_event`

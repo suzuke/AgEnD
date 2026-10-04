@@ -105,3 +105,7 @@ PTY bytes 在 protocol 型別中使用 `bytes_base64` 欄位；base64 實際編�
 ```bash
 cargo xtask accept core
 ```
+
+## 第 12A protocol 1.5
+
+xtask 的 `claude_1_5_envelopes_are_additive_and_receipts_keep_native_attribution` 用 core serializer 驗 request／reply wire shape、完整 UTF-8 內容及 frozen 舊 peer 解為 Unknown。`accept core` 重驗 no-std、fmt／clippy 及舊 protocol；native 消費端在 [bridge 測試](../../docs/gates/gate-12a-bridge.md)。

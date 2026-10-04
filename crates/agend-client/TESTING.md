@@ -69,3 +69,7 @@ cargo test -p agend-client --test once --lib
 ```
 
 `full_terminal` 的 8 MiB 邊界 case 在 consumer 呼叫 close 後才開始 peer 的 5 秒 EOF 檢查；正向邊界必須完整 write，負向仍需作廢所有 Sender clone。原 macOS PR CI 的 timeout log 保留。
+
+## 第 12A Claude bridge
+
+`tests/once.rs` 加驗 1.5 操作遇舊 daemon 在 hello 後先拒絕、不送 RPC；generic `request` 的 Safe／Never 都不能送 Claude 操作；32 MiB hook 在 connect 前拒絕。新 reply decoder 與完整 native daemon producer 配對的 channel／Stop／ACK 測試見 [bridge 基礎](../../docs/gates/gate-12a-bridge.md)。

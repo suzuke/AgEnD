@@ -39,7 +39,9 @@ use super::ask::{AnswerSource, AskReply, AskThread, ContextRecap};
 use super::{ProtocolVersion, VersionMismatch, negotiate};
 use crate::policy::attention::AttentionItem;
 
+mod claude;
 mod terminal;
+pub use claude::*;
 pub use terminal::*;
 
 pub const V1: ProtocolVersion = ProtocolVersion::new(1, 0);
@@ -51,8 +53,9 @@ pub const V1_2: ProtocolVersion = ProtocolVersion::new(1, 2);
 pub const V1_3: ProtocolVersion = ProtocolVersion::new(1, 3);
 /// Full terminal API capability. General clients still require only 1.3.
 pub const V1_4: ProtocolVersion = ProtocolVersion::new(1, 4);
-/// Client-side offers; the daemon advertises 1.4 only when its path is ready.
-pub const OFFERED_VERSIONS: [ProtocolVersion; 2] = [V1_4, V1_3];
+/// Client-side offers; the daemon advertises 1.5 after its helper service is ready.
+pub const V1_5: ProtocolVersion = ProtocolVersion { major: 1, minor: 5 };
+pub const OFFERED_VERSIONS: [ProtocolVersion; 3] = [V1_5, V1_4, V1_3];
 /// Legacy fixture baseline. The real server and parser-backed fake fixtures
 /// advertise 1.4 independently once a full-terminal producer is available.
 pub const SUPPORTED_VERSIONS: [ProtocolVersion; 1] = [V1_3];
@@ -145,6 +148,10 @@ pub struct ClientHello {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientRequest {
+    /// 1.5: Claude helpers; mutations must never use automatic RPC replay.
+    Claude {
+        data: ClaudeRequestData,
+    },
     Hello {
         data: ClientHello,
     },
@@ -550,6 +557,9 @@ impl core::fmt::Display for Ticket {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientResponse {
+    Claude {
+        data: ClaudeReplyData,
+    },
     Hello {
         data: SelectedVersionData,
     },

@@ -135,3 +135,7 @@ Failed 派工回歸：五種 fake queue 只用一個 dev，boot 派工失敗後�
 `pipeline_archive_nested` 用真 Git 建 nested repo／staged gitlink，取消須保留內部資料、Git metadata 與原 index；一般未追蹤子目錄、空檔、symlink 則以真 git apply 還原。`pipeline_archive_index` 只檢查已發布的 .patch，避免每次 wake 的暫存 staging 造成競態。
 
 `pipeline_archive_display` 以真 daemon／shim 設 color.ui／color.diff=always 與 shared diff.noprefix，取消後須用預設 git apply 還原 commit／index／worktree 與原資料內 ESC bytes；patch-id 也不受顏色／prefix 影響。`pipeline_archive_nested` 另移除 inner HEAD、留下只有 Git objects／index 保存的 staged binary，Git 看不到其 metadata 時仍須保留全部資料。
+
+## 第 12A bridge 基礎
+
+`agend/tests/claude_bridge.rs` 執行真 daemon／holder／helper 與 SQLite，驗 idle channel、busy Stop、防迴圈、Sent／明確 ACK、四次開機、離線 helper 退出後自動 ingest、caller／版本／session 拒絕、壞 spool 不阻擋後方 ACK，以及真 Stop stdout 背壓後 unknown 不重送。native MCP 輸入使用 testkit producer；無真 Claude／模型。[重驗與限制](../../docs/gates/gate-12a-bridge.md)。

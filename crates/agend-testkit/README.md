@@ -16,7 +16,7 @@ Gate 10 的 `FakePipelineExecutor` 實作 core executor port，組合 FakeStore�
 
 ## 第 11 施工關 C 段（已驗收並合併 #145）
 
-真 daemon 與安裝 producer 的 FakeDaemon 提供 client 1.4；六項 C 契約同跑 fake／真程序，producer 是 holder parser。控制 worker、generation／停止、fd 清理與完整 fake U17 都有回歸。真 Codex 證據另記於首次 U17，不以 fake 代替。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
+第 11C 當時兩者提供 client 1.4；第 12A 真 daemon 提升為 1.5，安裝 terminal producer 的 FakeDaemon 保持 1.4；六項 C 契約同跑 fake／真程序，producer 是 holder parser。控制 worker、generation／停止、fd 清理與完整 fake U17 都有回歸。真 Codex 證據另記於首次 U17，不以 fake 代替。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
 
 fake Codex 的 `-c agend_fake_manual_tui=true` 明確啟用 raw PTY frontend：bracketed paste／Enter 經 remote app-server 送人工 turn，不帶 daemon clientId；預設 frontend 保持原行為。paste 結束會經真 PTY 輸出 draft 標記，完整 App 用畫面確認 draft 已收到再重啟 daemon。這是 U17 fixture，不代表真 Codex CLI 已驗證。fake-only `agendFake/replayUserOnNextResume` 預設關閉；明確指定 thread 後，只重播已存入 thread history 的原人工 user item，供 resume 回覆前的永久歸屬回歸使用，`agendFake/resumeReplayCount` 可核實際次數。[完整 fake 證據](../../docs/gates/gate-11c-u17-validation.md)。
 
@@ -141,3 +141,7 @@ daemon 重啟：`RuntimeFixture`、`DriverFixture`、`StoreFixture` 各有一個
 ~/.cargo/bin/cargo test -p agend-testkit
 ~/.cargo/bin/cargo xtask accept testkit
 ```
+
+## 第 12A bridge producer
+
+`fake_agent::claude::{hook_payload, initialize_request}` 抽出既有 fake producer，讓 native helper consumer 使用相同形狀。`ack_request` 產生本次新增 agend_ack 契約。FakeClaude 仍沿用既有錄製檔，不自動呼叫新 ACK；完整新版本真 CLI conformance 尚未通過，不以 native bridge 代替。

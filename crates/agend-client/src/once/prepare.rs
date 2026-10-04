@@ -3,7 +3,8 @@
 
 use agend_core::protocol::ask::AskReply;
 use agend_core::protocol::client::{
-    AgentCommand, ClientRequest, MAX_LINE_BYTES, MAX_MESSAGE_BYTES, OperatorCommand, ResultIdentity,
+    AgentCommand, CLAUDE_BATCH_COUNT, ClaudeOperation, ClientRequest, MAX_LINE_BYTES,
+    MAX_MESSAGE_BYTES, OperatorCommand, ResultIdentity,
 };
 use std::io;
 use std::time::Instant;
@@ -171,6 +172,40 @@ impl Budget {
 pub(super) fn check(request: &ClientRequest, deadline: Instant) -> io::Result<()> {
     let mut budget = Budget { bytes: 0, deadline };
     match request {
+        ClientRequest::Claude { data } => {
+            budget.strings([data.request_id.as_str(), &data.instance_id])?;
+            match &data.operation {
+                ClaudeOperation::Attach | ClaudeOperation::Unknown => Ok(()),
+                ClaudeOperation::Poll { session_id } => budget.add(session_id),
+                ClaudeOperation::Written { receipts } | ClaudeOperation::Ack { receipts } => {
+                    if receipts.len() > CLAUDE_BATCH_COUNT {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            "too many Claude receipts",
+                        ));
+                    }
+                    for r in receipts {
+                        budget.strings([r.message_id.as_str(), &r.delivery_id, &r.session_id])?;
+                    }
+                    Ok(())
+                }
+                ClaudeOperation::Hook {
+                    event_id,
+                    session_id,
+                    event,
+                    payload,
+                    ..
+                } => {
+                    if payload.len() > MAX_MESSAGE_BYTES {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            "hook payload exceeds message limit",
+                        ));
+                    }
+                    budget.strings([event_id.as_str(), session_id, event, payload])
+                }
+            }
+        }
         ClientRequest::Command { data } => {
             budget.add(&data.request_id)?;
             budget.agent(&data.command)

@@ -112,6 +112,23 @@ pub(crate) fn to_instance(conn: &Connection, to: &str) -> Result<Vec<Message>, S
     rows.map(|row| row?).collect()
 }
 
+/// Bounded unattempted Claude messages; retained history is never loaded
+/// just to find the next dispatch batch.
+pub(crate) fn pending_claude(
+    conn: &Connection,
+    to: &str,
+    queue_only: bool,
+) -> Result<Vec<Message>, StoreError> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLUMNS} FROM messages WHERE to_instance = ?1 AND state = 'queued' \
+         AND (?2 = 0 OR level = 'queue') AND attempted_at_unix_ms IS NULL AND id IN \
+         (SELECT message_id FROM claude_deliveries WHERE instance_id = ?1 \
+         AND delivery_id IS NULL AND abandoned_at_unix_ms IS NULL) ORDER BY seq LIMIT 32"
+    ))?;
+    let rows = stmt.query_map(rusqlite::params![to, queue_only], from_row)?;
+    rows.map(|row| row?).collect()
+}
+
 /// The messages to `to` after its message `after` (by `seq`); `None` when
 /// `to` has no message with id `after` (unknown, pruned, or someone else's).
 pub(crate) fn to_instance_after(

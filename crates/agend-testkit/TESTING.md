@@ -84,3 +84,7 @@ C 段 CLP 拒絕案例同跑真 parser-backed fake 與真 daemon：agent caller 
 ```bash
 ~/.cargo/bin/cargo test -p agend-testkit
 ```
+
+## 第 12A bridge producer
+
+抽出的 hook_payload／initialize_request 仍由 FakeClaude 與原 conformance 使用；新的 ack_request 用 shared core ClaudeReceipt 產生 MCP 工具請求。真正 consumer 的跨 process 回歸在 `agend/tests/claude_bridge.rs`，對真 helper／daemon 跑；未新增真 CLI 錄製或模型回合。

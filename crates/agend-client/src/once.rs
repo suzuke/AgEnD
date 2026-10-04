@@ -185,6 +185,7 @@ pub fn exchange_once(
     loop {
         let response = read(&mut reader, deadline).map_err(transport_error)?;
         let matches = match &response {
+            ClientResponse::Claude { data } => data.request_id == id,
             ClientResponse::CommandResult { data } => data.request_id == id,
             ClientResponse::Fleet { data } => data.request_id == id,
             ClientResponse::Error { data } => {

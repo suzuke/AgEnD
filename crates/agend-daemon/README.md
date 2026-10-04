@@ -1,7 +1,7 @@
 # agend-daemon
 
 > **TL;DR**
-> - 唯一的大型 I/O 層：常駐、單一 tokio runtime、DB 專屬執行緒；`agend daemon` 起 holder、接回 holder、agent 死了用 `--resume` 接回；開機計畫做完才開 `run/daemon.sock` 講 client protocol 1.4（一般 client 仍只需 1.3）；codex 經 app-server 的 JSON-RPC 送達、自己建 thread、死了照樣 resume（第 7 施工關）；`agend send`／`inbox`、`agend instance add|remove`、`agend daemon restart`（預檢後原地 `exec`）在這裡處理（第 9 施工關）。
+> - 唯一的大型 I/O 層：常駐、單一 tokio runtime、DB 專屬執行緒；`agend daemon` 起 holder、接回 holder、agent 死了用 `--resume` 接回；開機計畫做完才開 `run/daemon.sock` 講 client protocol 1.5（一般 client 仍只需 1.3）；codex 經 app-server 的 JSON-RPC 送達、自己建 thread、死了照樣 resume（第 7 施工關）；`agend send`／`inbox`、`agend instance add|remove`、`agend daemon restart`（預檢後原地 `exec`）在這裡處理（第 9 施工關）。
 > - 記住：**daemon 停掉時 holder 與 agent 照跑（D3）**；同一個 `AGEND_HOME` 只有一個 daemon（`agend.db` 的鎖）；`agend.db` 只有 daemon 開（`store`）；socket 連得上＝daemon 好了。
 > - 下一步：第 10 施工關 pipeline 驗證：`cargo xtask accept pipeline`；還原 DB 快照的步驟見下方「store」。
 
@@ -104,7 +104,7 @@ socket、身分、事件與舊版終端規則見 [protocol server](PROTOCOL.md)�
 
 ## 第 12A Claude store 基礎（實作中）
 
-migration `0007` 及 DB-thread API 保存投遞開始／寫出／ACK／人工放棄；訊息 id 仍是唯一訊息冪等層。完整 runtime、helper 與 protocol 1.5 尚未接上。API、retention 與重驗指令見 [Claude store](../../docs/gates/gate-12a-store.md)。
+migration `0007` 及 DB-thread API 保存投遞開始／寫出／ACK／人工放棄；訊息 id 仍是唯一訊息冪等層。protocol 1.5／helper／spool 已接入本批 native bridge；完整 Claude Driver／啟動配置仍待完成。API、retention 與重驗指令見 [Claude store](../../docs/gates/gate-12a-store.md)。
 
 ## store（第 5 施工關）
 
@@ -154,3 +154,7 @@ cargo xtask accept cli             # 第 9 施工關 demo：cli_demo（在 agend
 ```
 
 停止訊號直接記在 signal-context atomic flag，Tokio 關閉後到 exec 前仍可讀，避免 restart handoff 遺失 Ctrl-C；完成連線／runtime 清理後，最後 check 到 exec 的窗口由 signal handler 直接成功退出，避免訊號與 exec 競賽；async signal stream 負責把停止事件送進 supervisor。
+
+## 第 12A bridge 基礎
+
+`claude_bridge` 提供 client 1.5 的 Attach／Poll／Hook／Written／Ack。先原子預約才回完整內容；新 live hook 與目前 holder 畫面控制 routing，歷史 hook 只入庫。`ingest` 每秒補送 home 的 hooks／acks；只收到入庫 commit 才刪檔，不重送訊息內容。完整 API、同 UID 信任邊界與未完成項目見 [bridge 基礎](../../docs/gates/gate-12a-bridge.md)。

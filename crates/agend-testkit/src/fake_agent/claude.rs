@@ -363,17 +363,7 @@ impl Claude {
 
     /// Runs every hook for `event`; returns the JSON each one printed.
     fn hook(&self, event: &str, extra: Value) -> Vec<Value> {
-        let scratchpad = self.cwd.join(SCRATCHPAD_DIR).join(&self.session_id);
-        let mut payload = json!({
-            "session_id": self.session_id,
-            "transcript_path": self.transcript,
-            "cwd": self.cwd,
-            "hook_event_name": event,
-            "scratchpad_dir": scratchpad,
-        });
-        if let (Some(payload), Value::Object(extra)) = (payload.as_object_mut(), extra) {
-            payload.extend(extra);
-        }
+        let payload = hook_payload(&self.cwd, &self.session_id, event, extra);
         let input = payload.to_string();
         self.hooks
             .iter()
@@ -481,14 +471,7 @@ fn start_channel(cwd: &Path, name: &str, tx: Sender<Event>) -> Result<(Child, Ch
         .map_err(|e| format!("start channel server {name}: {e}"))?;
     let mut stdin = child.stdin.take().expect("piped stdin");
     let mut stdout = BufReader::new(child.stdout.take().expect("piped stdout"));
-    let initialize = json!({
-        "jsonrpc": "2.0", "id": 0, "method": "initialize",
-        "params": {"protocolVersion": "2025-11-25",
-                   "capabilities": {"elicitation": {}, "roots": {"listChanged": true}},
-                   "clientInfo": {"name": "fake-claude", "title": "fake-claude", "version": "2.1.282-fake",
-                                  "description": "agend-testkit fake of Claude Code",
-                                  "websiteUrl": "https://github.com/suzuke/AgEnD"}}
-    });
+    let initialize = initialize_request();
     writeln!(stdin, "{initialize}").map_err(|e| format!("channel initialize: {e}"))?;
     let mut line = String::new();
     stdout
@@ -526,4 +509,31 @@ fn start_channel(cwd: &Path, name: &str, tx: Sender<Event>) -> Result<(Child, Ch
         }
     });
     Ok((child, stdin))
+}
+
+/// The same native producer used by fake-claude and helper consumer tests.
+pub fn hook_payload(cwd: &Path, session: &str, event: &str, extra: Value) -> Value {
+    let mut payload = json!({
+        "session_id": session,
+        "transcript_path": cwd.join(TRANSCRIPT_DIR).join(format!("{session}.jsonl")),
+        "cwd": cwd,
+        "hook_event_name": event,
+        "scratchpad_dir": cwd.join(SCRATCHPAD_DIR).join(session),
+    });
+    if let (Some(payload), Value::Object(extra)) = (payload.as_object_mut(), extra) {
+        payload.extend(extra);
+    }
+    payload
+}
+/// MCP initialize shape from the recorded fake Claude producer.
+pub fn initialize_request() -> Value {
+    json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{
+        "protocolVersion":"2025-11-25","capabilities":{"elicitation":{},"roots":{"listChanged":true}},
+        "clientInfo":{"name":"fake-claude","title":"fake-claude","version":"2.1.282-fake",
+        "description":"agend-testkit fake of Claude Code","websiteUrl":"https://github.com/suzuke/AgEnD"}}})
+}
+/// Explicit receipt producer for the new ACK contract, distinct from the
+/// historical fake's unconfirmed channel behaviour. It never calls a model.
+pub fn ack_request(id: u64, receipts: &[agend_core::protocol::client::ClaudeReceipt]) -> Value {
+    json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":"agend_ack","arguments":{"receipts":receipts}}})
 }
