@@ -69,7 +69,9 @@ Claude 接入／A 段功能驗收尚未完成，目前沒有可執行的功能�
 
 ## 進度紀錄
 
-- 2026-10-04：持久化批次建立 schema v7／投遞／ACK／人工終結與 retention API；首輪真 SQLite、舊 fixtures 與 accept core 通過。完整 workspace／fresh verifier／CI 另核，完整 Claude 接入未完成、此批未 merge（`feat/gate-12a-claude-store`；[範圍](gate-12a-store.md)）。
+- 2026-10-04：`6193ea4` fresh verifier REFUTED：event-only DB 的每日快照未納入新表而被跳過；保留原失敗與反例，修正 snapshot empty 判斷，另派全新 verifier 重驗（#148；未 merge）。
+
+- 2026-10-04：持久化批次建立 schema v7／投遞／ACK／人工終結與 retention API；首輪真 SQLite、舊 fixtures 與 accept core 通過。完整 workspace／fresh verifier／CI 另核，完整 Claude 接入未完成、此批未 merge（`6193ea4`／#148；[範圍](gate-12a-store.md)）。
 
 - 2026-10-04：#147 經使用者確認合併為 `8dfccf8`，最新全新 verifier CONFIRMED，push／PR 雙平台 CI 通過；第一次 PR macOS TUI 時序超時原 log 保留，重跑通過且未改 300 ms 門檻。舊 worktree 清理；下一批 [Claude 持久化](gate-12a-store.md) 開工，完整 A 段尚未完成。
 

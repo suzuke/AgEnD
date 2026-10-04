@@ -45,16 +45,17 @@ legacy Claude push 訊息若已有 attempted_at 卻無投遞 tuple，視為結�
 
 ## 驗證
 
-本機首輪 store integration 7／schema 40 tests 通過，daemon crate 回歸通過；`accept core` 通過，含 fmt／workspace clippy／實際 no-std（兩個既有 explorer ignored）。後續補事件單表快照／seq 回歸；完整 workspace、全新 verifier 與固定 head CI 另核，結果以 PR 為準。本批不執行真 Claude、模型回合或錄製。首個 crash probe 在 store commit 後硬殺自己的 child；四次獨立程序重用同 home，另驗新 home 必須失敗。這是持久化探測，未代替完整 Claude DRV-6／9。
+本機首輪 store integration 7／schema 40 tests 通過，daemon crate 回歸通過；`accept core` 通過，含 fmt／workspace clippy／實際 no-std（兩個既有 explorer ignored）。後續補事件單表快照／seq 回歸；`6193ea4` fresh verifier REFUTED：事件單表 DB 被快照的舊 empty SQL 誤判，新增回歸失敗；補入 driver_events／claude_deliveries，保留原 log。修正版 daemon 162 passed／0 ignored（其中 store integration 9、schema 40、交易單元 2）；workspace clippy／fmt／實際 no-std 通過。完整 workspace、另一位全新 verifier 與固定 head CI 另核，結果以 PR #148 為準。本批不執行真 Claude、模型回合或錄製。首個 crash probe 在 store commit 後硬殺自己的 child；四次獨立程序重用同 home，另驗新 home 必須失敗。這是持久化探測，未代替完整 Claude DRV-6／9。
 
 可重驗（暫存編譯目錄在離開 shell 時清掉）：
 
 ```bash
 cd /Users/suzuke/AlphaCR-worktrees/AgEnD-v2-claude-store
 (
+  set -e
   gate12_store_target=$(mktemp -d /tmp/agend-g12a-store-check.XXXXXX)
   export CARGO_TARGET_DIR="$gate12_store_target"
-  trap '~/.cargo/bin/cargo clean; rmdir "$gate12_store_target"' EXIT
+  trap '~/.cargo/bin/cargo clean' EXIT
   ~/.cargo/bin/cargo test -p agend-daemon --test claude_store
   ~/.cargo/bin/cargo test -p agend-daemon store::claude::tests
   ~/.cargo/bin/cargo test -p agend-daemon --test store

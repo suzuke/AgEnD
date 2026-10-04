@@ -462,3 +462,29 @@ fn event_only_database_is_nonempty_and_seq_is_never_reused_after_prune() {
         vec![next]
     );
 }
+
+#[test]
+fn pending_claude_data_alone_is_snapshotted_after_instance_removal() {
+    let home = TempDir::new("claude-pending-only").unwrap();
+    let store = SqliteStore::open(home.path(), 0).unwrap();
+    seed(&store, "m", 0);
+    block_on(store.reserve_claude_delivery(reservation("m"), 1)).unwrap();
+    block_on(store.remove_instance("claude")).unwrap();
+    block_on(store.prune(500 * DAY_MS)).unwrap();
+    let snapshot = block_on(store.snapshot(500 * DAY_MS)).unwrap();
+    assert!(snapshot.taken && !snapshot.empty);
+    let saved = TempDir::new("claude-pending-restored").unwrap();
+    std::fs::copy(snapshot.path, saved.path().join(DB_FILE)).unwrap();
+    let restored = SqliteStore::open(saved.path(), 500 * DAY_MS + 1).unwrap();
+    assert!(block_on(restored.instance("claude")).unwrap().is_none());
+    assert!(
+        block_on(restored.claude_delivery("m"))
+            .unwrap()
+            .unwrap()
+            .outcome_unknown(&block_on(restored.message("m")).unwrap().unwrap())
+    );
+    assert_eq!(
+        block_on(restored.acknowledge_claude(ack("m"), 500 * DAY_MS + 2)).unwrap(),
+        ClaudeAckResult::Confirmed
+    );
+}
