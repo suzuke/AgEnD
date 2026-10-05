@@ -58,6 +58,17 @@ holder 的 50ms 共用 sample 尚未更新，terminal hub 卻清掉 dirty。REFU
 `eda202c` 的 Ubuntu CI 在 100×24 仍記錄 300.808 ms，單次查詢不足以認證時效；
 完整終端的 App tick 改為 50ms，及時讀取至多 20Hz 的完整 frame。首頁及舊終端維持
 100ms tick，舊終端重拿仍 200ms；原 CI 超限證據及 300ms 斷言均保留。
+`bd85766` macOS CI 仍記錄 300.315／330.091ms。未知畫面不授權鍵或 idle，
+因此相同 session／link notice 的未知畫面不再每 100ms 重做完整序列化；輸出或連線
+變動立即重查，無 PTY 輸出的 resize 仍由最多一秒的重查捕捉。已知選單與 Ready
+維持原取樣。terminal hub 從第一筆 dirty notice 等 50ms 共用 sample 過期才取 frame，
+後續 notice 不延長等待，持續輸出不會餓死；首次訂閱／控制 frame 仍即時回覆。
+原 300ms 回歸與 CI 失敗證據保留，新獨立驗證待核。
+
+原生 CLP 測試連線另被第三、四位 verifier 重現雙向 buffer 阻塞；僅對 >64KiB 請求
+並行不足，4KiB buffer 下合法 24KiB 分行 input 同樣失敗。testkit 每份控制請求
+都使用同連線 writer thread 並持續讀取真 parser frame；超限拒絕與合法小於原門檻的
+兩個原生回歸，核 PTY consumer、後續輸入及清理，原負例保留。
 
 ## Fixture 與驗證邊界
 

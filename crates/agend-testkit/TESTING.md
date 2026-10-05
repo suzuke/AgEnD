@@ -25,7 +25,7 @@ opt-in fake manual frontend 的原生驗證在 `agend/tests/codex_u17.rs`：真 
 
 CLP-26 的 EOF release 判定以獨立 PTY consumer 紀錄為準；`GetFleet` 回覆不是背景 legacy input 的完成 fence。原 macOS CI 的 `AFTER-EOF` 失敗 log 保留，收尾以修正後固定 head 重驗。
 
-CLP-25 的大型請求必須同時讀取同 socket 的 parser frame；testkit 對超過 64 KiB 的完整 JSON 行使用 bounded writer thread，原 reader 持續處理關聯回覆，不重送。native `small_socket_buffers_reject_large_input_and_keep_native_consumer_live` 把自有 socket 收送 buffer 降至 4 KiB，核 pending 真 frame、超限拒絕、後續同連線輸入與 PTY consumer 未收到被拒位元組。原同步 fixture 在相同條件 BrokenPipe，並行 fixture 通過；原 macOS CI 失敗保留。
+CLP-25 控制請求寫入時必須同時讀取同 socket 的 parser frame；testkit 的每份完整 JSON 行都使用有 socket timeout 的 writer thread，原 reader 持續處理關聯回覆，不重送。native `small_socket_buffers_reject_large_input_and_keep_native_consumer_live` 把自有 socket 收送 buffer 降至 4 KiB，核 pending 真 frame、超限拒絕、後續同連線輸入與 PTY consumer 未收到被拒位元組。原同步 fixture 在相同條件 BrokenPipe；只對 >64KiB 並行的版本也被全新 verifier 以合法 24KiB input 推翻，原負例保留。`small_socket_buffers_accept_valid_input_below_the_previous_duplex_threshold` 另核編碼後 <64KiB 的合法分行輸入，真 PTY consumer 精確收到 24KiB 與後續 sentinel。不能用固定請求大小推斷它會否超過 socket buffer。
 
 ## 怎麼跑
 

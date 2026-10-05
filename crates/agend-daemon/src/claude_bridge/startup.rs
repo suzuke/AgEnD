@@ -4,7 +4,9 @@ use super::ClaudeBridge;
 use crate::{handlers::Context, runtime::terminal::TerminalConnection};
 use agend_core::{
     model::Backend,
-    protocol::terminal::{TerminalControlOperation, TerminalFrame, TerminalViewport},
+    protocol::terminal::{
+        TerminalControlOperation, TerminalFrame, TerminalNotice, TerminalViewport,
+    },
     runtime_records::{ClaudeStartupKey, InstanceStatus},
     screen::claude_startup::{self, Prompt},
 };
@@ -66,12 +68,18 @@ pub(crate) async fn run(ctx: Arc<Context>, bridge: Arc<ClaudeBridge>) {
     // This observation cache is never key recovery state. Reconnecting starts
     // a fresh stability window; SQLite alone decides whether a key can run.
     let mut stable = BTreeMap::<String, (String, String, u64, Prompt, Instant)>::new();
+    // Unknown screens never authorize a key or idle. Avoid serializing the
+    // same unrecognized grid repeatedly while an operator is viewing it.
+    // Output/link changes trigger the next observation; a one-second refresh
+    // also catches changes without PTY output, such as an operator resize.
+    let mut unknown = BTreeMap::<String, (String, TerminalNotice, Instant)>::new();
     loop {
         tokio::time::sleep(Duration::from_millis(100)).await;
         let Ok(instances) = ctx.store.instances().await else {
             continue;
         };
         stable.retain(|id, _| instances.iter().any(|i| &i.id == id));
+        unknown.retain(|id, _| instances.iter().any(|i| &i.id == id));
         for instance in instances {
             if instance.backend != Backend::Claude
                 || instance.delivery != "push"
@@ -99,16 +107,34 @@ pub(crate) async fn run(ctx: Arc<Context>, bridge: Arc<ClaudeBridge>) {
                 .filter(|s| s.session == session && !s.halted);
             if startup.is_none() && initial.is_none() {
                 stable.remove(&instance.id);
+                unknown.remove(&instance.id);
                 continue;
             }
             let connection = ctx.runtime.terminal_connection(&instance.id).ok();
-            let frame = match &connection {
-                Some(c) => frame(c).await,
-                None => None,
+            let observation = connection
+                .as_ref()
+                .map(|c| (*c.notices().borrow(), Instant::now()));
+            let refresh = observation.is_none_or(|(notice, _)| {
+                unknown
+                    .get(&instance.id)
+                    .is_none_or(|(old_session, old, at)| {
+                        old_session != session
+                            || old != &notice
+                            || at.elapsed() >= Duration::from_secs(1)
+                    })
+            });
+            let frame = match (&connection, refresh) {
+                (Some(c), true) => frame(c).await,
+                _ => None,
             };
             let known = frame
                 .as_ref()
                 .and_then(|f| prompt(f, &instance.working_directory));
+            if known.is_some() {
+                unknown.remove(&instance.id);
+            } else if refresh && let Some((notice, at)) = observation {
+                unknown.insert(instance.id.clone(), (session.into(), notice, at));
+            }
             if let Some(revision) = initial {
                 let mut states = bridge.states.lock().await;
                 if let Some(state) = states.get_mut(&instance.id)

@@ -17,6 +17,7 @@ pub(super) struct Actor {
     pub(super) dirty: bool,
     pub(super) last_sample: Option<Instant>,
     pub(super) last_notice: Option<Instant>,
+    pub(super) dirty_since: Option<Instant>,
 }
 async fn notice(
     receiver: &mut Option<watch::Receiver<TerminalNotice>>,
@@ -48,12 +49,16 @@ impl Actor {
                 _ = notice(&mut self.notices) => {
                     self.dirty = true;
                     self.last_notice = Some(Instant::now());
+                    self.dirty_since.get_or_insert_with(Instant::now);
                 },
                 _ = tick.tick() => {},
             }
             self.cleanup().await;
             if self.dirty
                 && !self.views.is_empty()
+                && self
+                    .dirty_since
+                    .is_none_or(|at| at.elapsed() >= SAMPLE_EVERY)
                 && self
                     .last_sample
                     .is_none_or(|at| at.elapsed() >= SAMPLE_EVERY)
@@ -137,6 +142,7 @@ impl Actor {
         self.connection = None;
         self.notices = None;
         self.last_notice = None;
+        self.dirty_since = None;
         self.dirty = true;
     }
     pub(super) async fn release(&mut self) {
@@ -305,6 +311,9 @@ impl Actor {
         }
     }
     async fn capture(&mut self) {
+        // Wait one shared-cache interval from the first dirty notice, rather
+        // than serializing a predictably stale frame and fetching it again.
+        // Later notices do not extend that wait, so continuous output streams.
         // Other readers (including startup) share the holder's 50 ms
         // sample. A sample requested too soon after output can still be old.
         // Preserve dirty until a follow-up starts after that cache expires;
@@ -358,6 +367,7 @@ impl Actor {
             }
         }
         self.last_sample = Some(Instant::now());
+        self.dirty_since = None;
         self.dirty =
             !settled || self.notices.as_ref().map(|n| n.borrow().output_sequence) != sequence;
     }
