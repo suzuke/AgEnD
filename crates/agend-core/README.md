@@ -7,6 +7,11 @@
 
 正式 P5 啟動按鍵與 P6 初始 idle 的實作、schema v9 與 native 驗證邊界見 [啟動處理](../../docs/gates/gate-12a-startup-runtime.md)。
 
+2026-10-06 的只讀真診斷補 `100x24-3` 完整 Ready fixture，涵蓋已錄製的 create-util 提示。
+只增加完整 literal，不接受其他未錄製提示；[來源與 SHA](tests/fixtures/screens/README.md)。
+原 classifier 四份皆 None；只替舊提示才 Ready，native P6 重播此真 frame 驗穩定五秒與不加鍵。
+診斷 CAPTURED 不代表完整模型 smoke 通過。
+
 ## 第 10 施工關（已驗收，2026-10-02）
 
 `PipelineSnapshot` 不含 workflow，只有驗證後的 `restore` 才能回到可執行狀態；`outstanding_actions` 重建原 ticket；`TaskStatus` 含 Failed／Cancelled。binding snapshot 型別共用於 core；Store 的 `advance_task` 同交易存 task、快照、受阻理由與 event。

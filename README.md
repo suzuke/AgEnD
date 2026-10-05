@@ -5,7 +5,7 @@
 > - 狀態：**pre-alpha**。第 1–11 施工關已完成並合併；第 11 施工關 C 段 #145 於 2026-10-03 經使用者確認合併（`b2152db`）。其他 backend adapter 與安裝發布仍待完成。
 > - 下一步：先讀 [AGENTS.md](AGENTS.md)，再看 [docs/ROADMAP.md](docs/ROADMAP.md) 的目前狀態。
 
-第 12A 的 Driver #151 與正式啟動 #152 已合併；[完整真模型 smoke](docs/gates/gate-12a-live-smoke.md)首次執行停於初始 idle 逾時，訊息階段未開始，完整 adapter 尚未驗收。
+第 12A 的 Driver #151 與正式啟動 #152 已合併；[完整真模型 smoke](docs/gates/gate-12a-live-smoke.md)首次執行停於初始 idle 逾時，訊息階段未開始；後續只讀診斷取得 Ready 提示變體，補完整 fixture 與 native 回歸，完整 adapter 尚未驗收。
 
 ## 這是什麼
 

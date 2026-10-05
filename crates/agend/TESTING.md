@@ -138,3 +138,8 @@ DRV fixture 的 actor readiness hint 不代替 daemon idle：送達前讀實際 
 ## 真模型 smoke（預設不執行）
 
 使用者要求完整真模型通訊 smoke 為必要驗收；固定版本、七則訊息計畫、執行 opt-in 與清理見[真模型 smoke](../../docs/gates/gate-12a-live-smoke.md)。`claude_live_cleanup` example 只停止 nonce-owned holders 與精確身分的孤兒群組；不啟動 backend。CI 仍不執行真模型。
+
+2026-10-06 啟動診斷取得四份相同真 frame，結果 CAPTURED、零工作訊息。
+新增完整 Ready 提示 fixture 的 native P6 回歸只跑 shell producer／真 daemon／holder，
+核 SessionStart 先到、三鍵完成後穩定五秒、Ready 不加鍵及 halted=1；不啟動真 Claude。
+完整模型 smoke 首次 FAILED，下一次真 CLI 仍需固定計畫另行授權。

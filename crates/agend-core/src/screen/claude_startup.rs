@@ -67,6 +67,7 @@ const RULES: &[Rule] = &[
     rule!(100, Ready, "claude-2.1.284-main-100x24-0.txt"),
     rule!(100, Ready, "claude-2.1.284-main-100x24-1.txt"),
     rule!(100, Ready, "claude-2.1.284-main-100x24-2.txt"),
+    rule!(100, Ready, "claude-2.1.284-main-100x24-3.txt"),
     rule!(140, Ready, "claude-2.1.284-main-140x24-0.txt"),
     rule!(140, Ready, "claude-2.1.284-main-140x24-1.txt"),
 ];

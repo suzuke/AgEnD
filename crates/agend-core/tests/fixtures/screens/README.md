@@ -1,5 +1,22 @@
 # Screen fixtures
 
+## Claude 2.1.284 啟動診斷（2026-10-06）
+
+`claude-2.1.284-main-100x24-3.txt` 來自使用者另行授權的一次 production 啟動診斷；
+固定計畫 SHA-256 `4cda8e7e23b249dc8cac0aacf9b0edf3b947e9d0f87da251a79e5b068c993360`。
+一個 instance、90 秒期限、四份只讀 frame、零工作訊息；正式啟動寫三個已知鍵，沒有人工鍵。
+四份原始 frame 文字相同；採第一份 revision 25、100×24、normal live viewport，
+來源 JSON SHA-256 `d29cf2380e7aea4336723b12eb5b59ecef55142fa61b911b7a4ca010066b0a8a`。
+逐列串接非 leading spacer 的 cell text，只遮自有 canonical workspace；保留 24 列、空白與 NBSP。
+fixture SHA-256 `e91471a74104aaff892c0e37d42cfc65effbf41fe5b03db32f1f8b1444b2f165`。
+
+此完整畫面相對既有 `100x24-2` 的 token 差異只有 `Try "create a util logging.py that..."`。
+全新 verifier 在原 classifier 核四份皆 None，只替提示為舊值才 Ready；footer 已由舊 fixture 涵蓋。
+新增的是一份完整 literal，沒有把 Try 提示或未知內容放寬成 wildcard；其他未錄製提示仍拒絕。
+結果是 **CAPTURED，非 smoke PASS**；沒有 transcript／usage 的留存證據，不能推斷 API 次數。
+必要 raw frames、export manifest、執行前授權紀錄及獨立覆核保存於
+`/Users/suzuke/Documents/Hack/AgEnD-ops/g12a-live-smoke-20261006/`。
+
 ## Claude 2.1.284 主畫面（既有授權蒐證，2026-10-05）
 
 `claude-2.1.284-main-100x24-{0,1,2}.txt` 是 JSONL line 18／19／20 的原 `text`，revision 22／24／25；

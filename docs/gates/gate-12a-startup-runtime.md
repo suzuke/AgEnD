@@ -103,3 +103,5 @@ cargo xtask check-deps
 完整第 12A 驗收等尚未完成範圍見 [Driver 進度](gate-12a-driver.md)。
 
 - 2026-10-06：固定 `be98eb1` 的全新 verifier、push／PR 雙平台 CI 及使用者 14 步重驗通過（兩個反向 mutant 預期 exit 101）。使用者確認合併 #152 為 `e7a8987`；合併 tree 不變，原 worktree 已移除。沒有新增真模型執行。
+
+- 2026-10-06：#153 的一次已授權只讀真診斷補 100×24 Ready 提示變體 `100x24-3`，只增加完整 literal；native 重播核 P6 初始 idle 與不加鍵。診斷 CAPTURED，完整 smoke 尚未通過；[來源與限制](gate-12a-live-smoke.md)。

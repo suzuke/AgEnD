@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 使用者 2026-10-06 要求完整模型 smoke 必做；#151／#152 已合併；首次真執行停於初始 idle 逾時，訊息階段未開始。
 > - 固定 Claude 2.1.284，兩個 Haiku 4.5 instance、七則工作訊息；首個失敗停止，不重跑。
-> - 下一步：保留失敗證據，修 audit／清理及原始畫面蒐證；新真 CLI 計畫依 D40 另取授權。
+> - 下一步：已取得四份只讀診斷 frame，補已錄製 Ready 提示變體並驗 native P6；新完整 smoke 計畫依 D40 另取授權。
 
 ## 範圍與證據
 
@@ -82,6 +82,25 @@ runner 補核 Ready 的正常 `halted=1` 及三鍵 written；清理按 native Se
 新 fresh verifier 在 `08ff4c7` 推翻 namespace freshness：啟動前已有 regular sentinel 時，原清理仍刪除它（私有 copy 保留）。修正為所有 instance namespace `lexists` 檢查及 shared scratch parent 型別／owner 檢查，均在第一個版本查詢前；反例與重驗另留。
 
 
+使用者另行授權固定 `91bb2bc` 的診斷計畫 v2 後，真 Claude 2.1.284 **執行一次，CAPTURED**：
+一個 A、四份只讀 100×24 frame、四次 unknown status、一個 live SessionStart、三鍵 written，零工作訊息。
+四份畫面相同；相對既有 `100x24-2` 的 token 差異只有 `Try "create a util logging.py that..."`，
+footer 已涵蓋。原完整 classifier 四份皆 None，只替舊提示即 Ready；這解釋本次診斷的 unknown，
+不能倒推未保存原始 frame 的首次完整 smoke。
+
+新 `100x24-3` fixture 逐列匯出真 frame，只遮自有 workspace；只新增完整 literal Ready 規則，
+不放寬未知提示。native 回歸沿用真 daemon／holder／PTY，核 SessionStart 先到、三鍵完成後
+重等五秒才可首次 poll、Ready 不加鍵且正常 halted=1。完整模型訊息階段仍未驗。
+
+本次授權 metadata 在首個版本查詢前保存；全新 verifier 核計畫六份固定 bytes、命令數、raw frames、
+native 身分及十種證據 mutation。自有 daemon／holder／backend、home、scratch namespace、
+精確 personal session 路徑及本次 trust key 已清理，必要私有證據與未合併 author worktree 保留。
+未保留 transcript／usage，不能宣稱模型或 API 呼叫數；目前 absence 是當下精確路徑的核對。
+
+
+`91bb2bc` push CI 雙平台通過；PR macOS 的既有終端尾段延遲為 301.540459ms，
+超過 300ms，原失敗保留。新 head 仍須 native 終端回歸與 CI，不放寬門檻。
+
 ## 下一步
 
-補只讀原始 frame 蒐證及 audit／scratch 清理的 native 回歸，再由全新 verifier 核固定診斷計畫；新真 CLI 需另取授權，禁止自動重跑成成功。新改動的 merge 仍等使用者確認。
+完成 Ready 變體的 native／全新 verifier 覆核與 CI，再提供下一份固定完整 smoke 計畫；真 CLI 需另取授權，禁止自動重跑成成功。#153 merge 仍等使用者確認。

@@ -39,6 +39,14 @@ fn recorded(width: u16) -> Vec<&'static str> {
     }
 }
 fn producer(width: u16, mutate: impl Fn(&mut Vec<String>), stuck: bool) -> Fixture {
+    producer_with_ready(width, mutate, stuck, None)
+}
+fn producer_with_ready(
+    width: u16,
+    mutate: impl Fn(&mut Vec<String>),
+    stuck: bool,
+    ready: Option<&'static str>,
+) -> Fixture {
     let f = Fixture::with_script(
         1,
         None,
@@ -46,7 +54,11 @@ fn producer(width: u16, mutate: impl Fn(&mut Vec<String>), stuck: bool) -> Fixtu
         "exec python3 -u \"$AGEND_HOME/startup.py\"",
     );
     let own = f.home.canonicalize().unwrap().display().to_string();
-    let mut frames = recorded(width)
+    let mut source = recorded(width);
+    if let Some(ready) = ready {
+        source[3] = ready;
+    }
+    let mut frames = source
         .into_iter()
         .map(|s| {
             s.trim_end()
@@ -210,8 +222,15 @@ fn startup_native_menus_use_three_keys_at_both_recorded_widths_then_require_sess
     }
 }
 #[test]
-fn startup_session_start_before_ready_waits_for_completion_and_stable_idle() {
-    let mut f = producer(100, |_| {}, false);
+fn startup_captured_ready_hint_waits_for_completion_and_stable_idle() {
+    let mut f = producer_with_ready(
+        100,
+        |_| {},
+        false,
+        Some(include_str!(
+            "../../../agend-core/tests/fixtures/screens/claude-2.1.284-main-100x24-3.txt"
+        )),
+    );
     f.start();
     f.hook("SessionStart", json!({"source":"startup"}));
     std::thread::sleep(Duration::from_millis(5200));
@@ -240,7 +259,12 @@ fn startup_session_start_before_ready_waits_for_completion_and_stable_idle() {
         .len(),
         1
     );
+    assert_eq!(keys(&f), b"\x1b[B\r\r", "Ready must not send another key");
     f.stop();
+    let state = block_on(f.store().claude_startup("claude"))
+        .unwrap()
+        .unwrap();
+    assert!(state.halted, "captured Ready ends automatic startup");
 }
 #[test]
 fn startup_unknown_conflicting_or_foreign_frames_never_authorize_a_key() {

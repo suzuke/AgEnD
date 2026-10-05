@@ -180,3 +180,7 @@
 - 2026-10-06：draft #153 固定 `3ac1b5d` 的 push／PR 雙平台四個 CI jobs 通過；取得完整計畫授權後真 Claude 2.1.284 執行一次，兩個 instance 各三個 production startup key 寫出及 SessionStart，仍無初始 idle，180 秒等待逾時停機，零測試 send／訊息／ACK，完整 smoke **FAILED**。另一位全新 verifier 核固定原始證據；發現漏 scratchpad 與 Ready `halted=1` audit 誤拒絕，補清後獨立核 49 paths／兩 trust keys／PID／PGID absent；未留 raw frames／transcripts／usage，不能推斷失敗畫面或精確 API 次數。
 
 - 2026-10-06：#153 補只讀 startup frame 診斷（單 instance／90 秒／零工作訊息，真 CLI 尚未執行），修 smoke Ready audit 及 scratch namespace 清理。native producer 已驗 Unknown／Ready 原始 frame、只有三個 production keys、正常 Ready `halted=1`，以及含額外 bootstrap UUID 的 namespace 清除並私有保留內容；新計畫待全新 verifier 及另行授權，完整 smoke 未通過。
+
+- 2026-10-06：#153 的固定診斷 v2 另行授權後執行一次：一個 instance、四份相同 raw frame、三鍵 written 與 live SessionStart、零工作訊息，結果 CAPTURED。全新 verifier 核原 classifier 因已錄製的 Try 提示變體而拒絕，footer 已涵蓋；補完整 `100x24-3` literal 與 native P6 回歸，不放寬未知畫面。本次自有程序、home、scratch、session 暫存與 trust key 已清理；完整 smoke 仍 FAILED，禁止自動重跑，未 merge。
+
+- 2026-10-06：#153 的 `91bb2bc` push 雙平台 CI 通過，但 PR macOS 的既有終端尾段測試測得 301.540459ms，超 300ms；原失敗保存，不放寬門檻。Ready literal 修正與完整 native bridge／outer 回歸、全新 verifier 及新 head CI 待核。

@@ -72,3 +72,8 @@ cargo run -p agend -- --version
 ## 第 12A Claude helpers
 
 同一 binary 的 `agend channel --instance <id>` 與 `agend hook <event>` 在一般 clap 前分派；需要 AGEND_HOME／AGEND_INSTANCE，只經同步 client 1.5，沒有 SQLite 或 Tokio runtime。channel 是 MCP JSON-RPC stdio，提供 agend_ack；hook 先保存事件，Stop 離線回 `{}`。owned spool 原子發布／fsync，入庫才刪。`agend hooks` 的 git hook 管理維持原入口。Claude push 啟動設定、Driver 及 task／review 已接入施工分支；inbox 路徑不套設定。ACK 保留 pipeline 的原 dispatch id，delivery／session 核對 UUID v4；task 完成不代替 ACK。啟動提示與選定真 CLI 尚待驗收，見 [Driver 進度](../../docs/gates/gate-12a-driver.md)。
+
+2026-10-06 啟動診斷取得四份相同真 frame，結果 CAPTURED、零工作訊息。
+新增完整 Ready 提示 fixture 的 native P6 回歸只跑 shell producer／真 daemon／holder，
+核 SessionStart 先到、三鍵完成後穩定五秒、Ready 不加鍵及 halted=1；不啟動真 Claude。
+完整模型 smoke 首次 FAILED，下一次真 CLI 仍需固定計畫另行授權。
