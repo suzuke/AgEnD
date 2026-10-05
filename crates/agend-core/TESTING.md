@@ -116,3 +116,9 @@ xtask 的 `claude_1_5_envelopes_are_additive_and_receipts_keep_native_attributio
 以真 daemon／holder 的 100×24、140×24 信任畫面核對既有分類器；只回 StartupMenu，
 沒有 suggested key。舊 spike 片段保留；新檔來源與 SHA-256 見
 [fixture 紀錄](tests/fixtures/screens/README.md)。未認證自動按鍵、初始 idle 或完整 12A。
+
+受控蒐證另保存兩寬選到 Yes 與 development channels 的真 frame；
+`claude_2_1_284_selected_trust_and_development_channels_remain_hard_gates` 核四個真 fixture
+都為 Claude StartupMenu，其他 backend 不匹配、沒有 suggested key。
+原規則對 development channels 回 None 的反例已保存，新規則補上已觀察標頭。
+授權只完成 workspace 信任，沒有確認 development channels，不宣稱 P5／P6 完成。

@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - 開發用 `claude_startup_capture` 預設被動保存畫面；額外 opt-in 只做受控 trust 蒐證，不送模型 prompt 或團隊訊息。
-> - 真 Claude 2.1.284 已核版本並保存兩種寬度的信任畫面；P5 自動處理提示與 P6 啟動完成仍未驗收。
-> - 下一步：以真 fixture 補啟動處理；本次授權不含按鍵、訊息投遞或模型回合。
+> - 真 Claude 2.1.284 已核版本並保存兩寬信任與 development channels 畫面；P5／P6 仍未驗收。
+> - 下一步：以真 fixture 補正式啟動處理；後續真確認與模型回合另取授權。
 
 ## 範圍
 
@@ -53,7 +53,7 @@ AGEND_REAL_CLAUDE_STARTUP=1 AGEND_BIN=<本批 agend 絕對路徑>   cargo run -p
 最後完整 frame 的文字已匯出為 [兩個真 fixture](../../crates/agend-core/tests/fixtures/screens/README.md)。
 自有 daemon／holder／home／workspace 已清理；未送鍵、未接受信任提示，後續提示與初始 idle 仍缺證據。
 
-## 受控 trust 蒐證（工具已實作；真執行另取授權）
+## 受控 trust 蒐證（已另獲授權執行，2026-10-05）
 
 `--workspace-trust-control accept` 額外要求 `AGEND_REAL_CLAUDE_STARTUP_TRUST=1`；
 預設仍是零輸入。模式只接受另查版本的 2.1.284 標籤、100×24／140×24，
@@ -77,7 +77,12 @@ P5 的原子畫面檢查或人工 owner 拒絕。`production_daemon_key_path_tes
 
 原生替身重播真 No 文字；選到 Yes／後續畫面為 synthetic producer，不能當成真 fixture。
 10 個 native 案例覆蓋預設被動、兩寬受控輸入、未知／外來／初始 Yes、No 未切換、
-版本／尺寸 preflight，以及原有 hash／遮蔽／清理回歸。真兩寬受控蒐證尚未授權執行。
+版本／尺寸 preflight，以及原有 hash／遮蔽／清理回歸。使用者另行「授權」後，兩寬受控蒐證均成功：100 欄 8 frames、140 欄 7 frames，
+各完成 Down／Enter 一次，共 4 次輸入；未確認後續提示、未送模型 prompt／訊息。
+真實選到 Yes 與 development channels 的文字已匯入四個版本化 fixture。
+兩次最後均停在 development channels 選單，`startup=not_assessed`，不是初始 idle 證據。
+程序與暫存已清理；另只移除本次兩個 canonical workspace 的個人信任設定條目，
+其他個人設定值核對不變。執行與清理 manifest 保存於 AgEnD-ops。
 
 ## 獨立核對
 
@@ -86,7 +91,9 @@ P5 的原子畫面檢查或人工 owner 拒絕。`production_daemon_key_path_tes
 固定 `b0d8074` 的全新 verifier 用真 daemon／holder 找到兩個誤確認反例：外部路徑以自有
 workspace 開頭、或錯誤 workspace 畫面在別處提及自有路徑，皆收到 Down／Enter。
 原 REFUTED 證據保留；作者改成唯一標頭與完整路徑相等，補兩寬原生拒絕回歸，
-修正版獨立核對待完成。這份核對不認證正式 P5／P6。
+修正 `7abb646` 獲同一驗證者局部 CONFIRMED，六個兩寬路徑反例零輸入；
+回條故障不重送，整個 daemon／clippy／fmt／實際 no-std 通過並清理。
+固定 head 的 push／PR 雙平台 CI 均成功。這份核對不認證正式 P5／P6。
 
 ## 下一步
 

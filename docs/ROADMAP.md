@@ -147,3 +147,5 @@
 - 2026-10-05：為後續 P5/P6 真 fixture 準備受控 trust 蒐證模式，預設被動不變；兩寬及未知／外來／未切換選項的原生正反例通過。這是 operator 輸入蒐證，正式 daemon-key、後續提示與初始 idle 未認證，真按鍵待另行授權（#151）。
 
 - 2026-10-05：受控 trust 工具 `b0d8074` 的全新 verifier 重現路徑前綴／畫面別處提及自有路徑會誤送 Down、Enter，原 REFUTED 證據保留。改成唯一 workspace 標頭下完整路徑相等並補兩寬原生拒絕回歸；修正版獨立核對待完成，未執行真按鍵，完整 12A 未完成（#151）。
+
+- 2026-10-05：`7abb646` 路徑修正獲 fresh verifier 局部 CONFIRMED，push／PR 雙平台 CI 均通過。另獲授權後，Claude 2.1.284 兩寬受控 trust 蒐證各完成 Down／Enter，保存選到 Yes 與 development channels 真 fixture；未確認後續提示、0 模型／訊息，自有程序／暫存與兩筆個人 trust 條目已清理。原分類器漏掉 development channels 的反例已重現，補 StartupMenu 規則；本批 core／fresh 重驗待核，P5／P6 仍未完成（#151）。
