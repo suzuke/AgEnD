@@ -135,3 +135,5 @@
 - 2026-10-05：#151 的 `441d658` terminator 修正獲全新局部 verifier CONFIRMED；CI fixture 修正改等真 Driver idle 與同一 fleet view 的 approval attention。提早 hint 回歸與反向、17 Driver／3 process／27 bridge 入口、15 pipeline cases、clippy／fmt／實際 no-std 通過；新版 CI／fresh verifier 待核，完整 12A 仍未完成（[範圍](gates/gate-12a-driver.md)）。
 
 - 2026-10-05：#151 固定 `cb0212c` 的全新 verifier 對 CI fixture 修正局部 CONFIRMED；native demo、15 pipeline、clippy／fmt／真 no-std 全過，idle／attention 空窗正反對照成立。自己的 verifier worktree／branch／target／程序／fixtures 已清理；雙平台 CI 仍執行中，P5／真 CLI 未完成，未 merge（[範圍](gates/gate-12a-driver.md)）。
+
+- 2026-10-05：#151 的 `50e0e83` push／PR CI 均在 Ubuntu、macOS 通過；補[被動啟動畫面蒐證工具](gates/gate-12a-startup-capture.md)，用 native producer 驗兩種 PTY 寬度、零輸入與清理。真 CLI／P5／P6 仍待授權與完成，未 merge。

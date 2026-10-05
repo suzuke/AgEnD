@@ -153,3 +153,5 @@ Failed 派工回歸：五種 fake queue 只用一個 dev，boot 派工失敗後�
 `pipeline_store_ports` 另驗 Claude 回條只觀察 Driver/helper 狀態、task CAS 不冒充 ACK、晚到 ACK 與舊回條不倒退 confirmed；公開通用訊息狀態 API 仍拒絕 Claude 假確認。`claude_control_loss` 在真 PTY 消費 Esc 後丟原 holder 回覆，四次開機不重送鍵或內容；共用 DRV 的 restart 案例包括一個 seed 及四個獨立 composition child，新 HOME 的反向在 boot 2 因游標歷史遺失而失敗。
 
 第 12A CI 前提修正：`tests/common/pipeline_process.rs` 的 approve helper 等同一真 FleetView 中的階段與 attention，避免讀到分次發布空窗；產品核准流程及 60 秒測試期限維持原值。Claude launch terminator 拒絕的單元斷言核真正 instance workspace 的 CLAUDE.md／.mcp.json，不只核 HOME。
+
+`tests/claude_startup_capture.rs` 用自己的 shell producer 經真 daemon／holder 核兩種寬度、繁中字元、正式 argv、零輸入與成功／拒絕畫面後的清理；hash 不合與既有證據拒絕時不啟動 producer。這是蒐證工具回歸，不是真 Claude／P5 通過；[工具範圍與指令](../../docs/gates/gate-12a-startup-capture.md)。
