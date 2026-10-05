@@ -28,10 +28,23 @@ impl Progress {
             .collect::<Vec<_>>()
             .join("\n");
         let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let lines = text.lines().map(str::trim).collect::<Vec<_>>();
+        let nonempty = lines
+            .iter()
+            .copied()
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>();
+        let workspace = workspace.display().to_string();
         // This is a newly created, private workspace. Never accept another path
-        // merely because the prompt contains the same trust sentence.
-        if !normalized.contains(&workspace.display().to_string())
-            || !normalized.contains("Accessing workspace:")
+        // by a prefix match or by mentioning our path elsewhere on the screen.
+        if nonempty
+            .iter()
+            .filter(|line| **line == "Accessing workspace:")
+            .count()
+            != 1
+            || !nonempty
+                .windows(2)
+                .any(|pair| pair == ["Accessing workspace:", workspace.as_str()])
             || !normalized
                 .contains("Quick safety check: Is this a project you created or one you trust?")
             || !normalized.contains("Claude Code'll be able to read, edit, and execute files here.")
@@ -39,7 +52,6 @@ impl Progress {
         {
             return Ok(None);
         }
-        let lines = text.lines().map(str::trim).collect::<Vec<_>>();
         let no = lines.contains(&"❯ No, exit") && lines.contains(&"Yes, I trust this folder");
         let yes = lines.contains(&"No, exit") && lines.contains(&"❯ Yes, I trust this folder");
         match (self.started, no, yes) {

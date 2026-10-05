@@ -85,6 +85,13 @@ mode = (root / 'mode').read_text()
 text = (root / 'no-screen.txt').read_text().replace('<rec>/h1/workspace/g12-startup-capture', str(pathlib.Path.cwd().resolve()))
 if mode == 'wrong-path':
     text = text.replace(str(pathlib.Path.cwd().resolve()), '/tmp/not-this-workspace')
+if mode == 'prefix-path':
+    text = text.replace(str(pathlib.Path.cwd().resolve()), str(pathlib.Path.cwd().resolve()) + '-foreign')
+if mode == 'path-elsewhere':
+    text = text.replace(str(pathlib.Path.cwd().resolve()), '/tmp/not-this-workspace')
+    text = text.rstrip('\n') + '\n' + str(pathlib.Path.cwd().resolve()) + '\n'
+if mode == 'duplicate-path-header':
+    text = text.rstrip('\n') + '\nAccessing workspace:\n/tmp/not-this-workspace\n'
 if mode == 'unknown':
     text = 'SYNTHETIC UNKNOWN STARTUP PROMPT\n'
 yes = text.replace('❯ No, exit\n   Yes, I trust this folder', '  No, exit\n ❯ Yes, I trust this folder')
@@ -164,6 +171,35 @@ fn unknown_or_foreign_or_preselected_trust_sends_nothing() {
             )
             .exists()
         );
+    }
+}
+
+#[test]
+fn trust_path_must_be_bound_exactly_to_one_workspace_header_at_both_widths() {
+    for width in [100, 140] {
+        for mode in ["prefix-path", "path-elsewhere", "duplicate-path-header"] {
+            let root = TempDir::new("g12-trust-path-binding").unwrap();
+            let program = trust_worker(root.path(), width, mode);
+            let out = root.path().join("evidence");
+            assert!(capture::run(&controlled_options(&program, &out, width), &agend()).is_err());
+            assert!(
+                !root.path().join("input-received").exists(),
+                "{width}: {mode}"
+            );
+            let result: Value =
+                serde_json::from_str(&fs::read_to_string(out.join("result.json")).unwrap())
+                    .unwrap();
+            assert_eq!(result["input_sent"], false, "{width}: {mode}");
+            assert_eq!(result["terminal_input_operations_started"], 0);
+            assert!(
+                !Path::new(
+                    fs::read_to_string(root.path().join("workspace"))
+                        .unwrap()
+                        .trim()
+                )
+                .exists()
+            );
+        }
     }
 }
 

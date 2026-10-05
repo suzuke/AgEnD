@@ -60,7 +60,9 @@ AGEND_REAL_CLAUDE_STARTUP=1 AGEND_BIN=<本批 agend 絕對路徑>   cargo run -p
 並核 executable SHA-256；標籤本身不是版本查詢或 attestation。
 
 工具持有本次私人 instance 的 operator attach，僅在畫面包含完整信任敘述、確認 footer
-及本次 workspace 路徑時，對預設 No 送一次 Down；新畫面選到 Yes 才送一次 Enter。
+及唯一 `Accessing workspace:` 標頭的下一個非空行完整等於本次 canonical workspace 時，
+對預設 No 送一次 Down；新畫面選到 Yes 才送一次 Enter。路徑前綴、出現在別處的自有路徑
+及重複標頭均拒絕。
 只有一個已完成的 Down 才可開始 Enter。初始已選 Yes、未知畫面或錯誤路徑不送鍵；
 No 未改變則停在一個 Down，不重送。Enter 後只記畫面，沒有後續按鍵或訊息。
 
@@ -74,12 +76,17 @@ P5 的原子畫面檢查或人工 owner 拒絕。`production_daemon_key_path_tes
 `startup=not_assessed` 保留此邊界；沒有 development channels 自動確認或初始 idle 推論。
 
 原生替身重播真 No 文字；選到 Yes／後續畫面為 synthetic producer，不能當成真 fixture。
-9 個 native 案例覆蓋預設被動、兩寬受控輸入、未知／外來／初始 Yes、No 未切換、
+10 個 native 案例覆蓋預設被動、兩寬受控輸入、未知／外來／初始 Yes、No 未切換、
 版本／尺寸 preflight，以及原有 hash／遮蔽／清理回歸。真兩寬受控蒐證尚未授權執行。
 
 ## 獨立核對
 
 固定 `356fbef` 獲全新無相關 context verifier 局部 CONFIRMED。原 `4511e21` 的真 holder 跨列 synthetic Bearer 反例會寫入且回成功；修正後同一 producer 重播回失敗並在寫入前拒絕。另核 20／100／140／200 欄與 5／24／100 列的 native 寬字 spacer、多列電郵、零 stdin 與清理；5 個工具回歸、workspace clippy／fmt／實際 no-std 通過。這份結果只驗工具，不證明真 Claude 的版本、提示或 startup complete。
+
+固定 `b0d8074` 的全新 verifier 用真 daemon／holder 找到兩個誤確認反例：外部路徑以自有
+workspace 開頭、或錯誤 workspace 畫面在別處提及自有路徑，皆收到 Down／Enter。
+原 REFUTED 證據保留；作者改成唯一標頭與完整路徑相等，補兩寬原生拒絕回歸，
+修正版獨立核對待完成。這份核對不認證正式 P5／P6。
 
 ## 下一步
 

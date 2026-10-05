@@ -160,5 +160,7 @@ Failed 派工回歸：五種 fake queue 只用一個 dev，boot 派工失敗後�
 
 受控 trust 蒐證另有 native producer：只對本次 workspace 的 No→Yes 送一次 Down／Enter；
 未知、外來路徑、初始 Yes、No 未切換及未驗版本／尺寸的正反例核輸入 bytes 與清理。
+兩寬另核外部路徑共用自有前綴、自有路徑出現在錯誤標頭以外的位置及重複標頭均零輸入；
+workspace 必須是唯一 `Accessing workspace:` 標頭的下一個非空完整行。
 選到 Yes／後續畫面是替身生成，不是真 CLI fixture；正式 P5 daemon-key／revision CAS、
 development channels 與 P6 初始 idle 仍缺真證據。預設被動模式保持 0 輸入。
