@@ -548,7 +548,15 @@ fn fd_count() -> usize {
 
 #[test]
 fn actual_app_renders_each_final_dirty_burst_within_the_local_budget() {
-    let mut native = Native::new();
+    final_dirty_budget(Native::new());
+}
+
+#[test]
+fn actual_app_with_background_startup_sampling_keeps_final_dirty_output_within_budget() {
+    final_dirty_budget(Native::with_startup_sampling(true));
+}
+
+fn final_dirty_budget(mut native: Native) {
     let mut outer = Outer::new(&native, 80, 24, false);
     outer.open();
     outer.acquire();

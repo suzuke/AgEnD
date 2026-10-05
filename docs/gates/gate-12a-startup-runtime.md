@@ -50,7 +50,7 @@ Stop 的既有忙閒／續行／ACK 邊界維持 D40，不把按鍵成功當成�
 第二位全新 verifier 在 `d81a7f3` 重現 P5 背景取樣與人工 TUI 共存時漏掉最後 modes：
 holder 的 50ms 共用 sample 尚未更新，terminal hub 卻清掉 dirty。REFUTED 與只保留 dirty
 便成功的因果對照均保留。修正後若抓 frame 的起點距最新 notice 不足 50ms，保留 dirty
-到下一輪取樣；不延後首 frame，也不持續空轉。新增自動取樣下 history／focus／20 次 App 清理回歸。
+到下一輪取樣；不延後首 frame，也不持續空轉。新增自動取樣下 history／focus／20 次 App 清理與尾段輸出 300ms 預算回歸。
 
 ## Fixture 與驗證邊界
 
