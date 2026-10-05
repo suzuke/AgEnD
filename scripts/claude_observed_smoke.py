@@ -11,7 +11,7 @@ import time
 
 from claude_live_smoke import IDS, Smoke, digest, plan, require, write_json
 
-CAPTURE = {"phase": "initial idle only", "instances": IDS, "rows": 24,
+CAPTURE = {"phase": "initial idle only", "instances": list(IDS), "rows": 24,
            "interval_seconds": 15, "max_batches": 14, "max_frames": 28,
            "timeout_seconds_per_frame": 5,
            "operations": "hello and subscribe_terminal_frames only; no acquire, resize or input"}

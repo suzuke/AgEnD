@@ -186,3 +186,5 @@
 - 2026-10-06：#153 的 `91bb2bc` push 雙平台 CI 通過，但 PR macOS 的既有終端尾段測試測得 301.540459ms，超 300ms；原失敗保存，不放寬門檻。Ready literal 修正與完整 native bridge／outer 回歸、全新 verifier 及新 head CI 待核。
 
 - 2026-10-06：#153 準備下一份完整 smoke 的 observed runner：首次 idle 等待最多 28 份只讀 A／B frame，工作前重核 idle；後續工作不擷取。原七則訊息／900 秒／零重跑與 audit／cleanup 不變；固定新計畫待獨立核對及另行授權，沒有再次真 CLI 執行。
+
+- 2026-10-06：#153 的完整 native bridge34／outer8及 accept core 通過；全新 verifier 核 Ready fixture byte 匯出、原 None→舊提示 Ready 反例、startup7／outer8及真 no-std通過。新增 observed 計畫的 tuple→JSON list scope mismatch 在任何 CLI 前被 verifier 推翻，保留原計畫與反例，修正為一致 list 後重新產生固定計畫；沒有再執行真 Claude。
