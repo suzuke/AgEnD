@@ -141,3 +141,5 @@
 - 2026-10-05：蒐證工具的 fresh verifier 在 `4511e21` 用真 holder 重現跨 soft-wrap Bearer 前綴繞過 scan；依 native wrap 標記合併 logical line後補拒絕與電郵遮蔽回歸，修正後再交獨立核對。完整12A仍未完成（#151）。
 
 - 2026-10-05：`356fbef` 的全新無相關 context verifier 局部 CONFIRMED 被動蒐證工具修正；原同一 native Bearer wrap 反例改為寫入前拒絕，5 cases、四種尺寸／寬字 spacer、零 stdin、成功／失敗清理、clippy／fmt／實際 no-std 通過。`4511e21` 的原 REFUTED 證據保留；只認證工具，真 CLI／P5／P6 未完成（#151）。
+
+- 2026-10-05：另獲使用者授權，固定真 Claude 2.1.284 查版本及兩寬被動蒐證成功，0 模型回合／按鍵／訊息；保存完整信任 frame 為版本化 fixture，自有程序與暫存已清理。P5 自動按鍵、P6 初始 idle、後續真驗仍未完成；本批回歸與 fresh verifier 待核（#151）。

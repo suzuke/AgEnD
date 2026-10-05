@@ -2,7 +2,7 @@
 
 > **TL;DR**
 > - 測純函式、no-std 型別與 workflow 狀態機；狀態機另有固定種子的事件序列探索器（property test，不加依賴）；protocol wire shape 在 xtask integration tests 驗證。
-> - 記住：Codex fixture 是 PTY 擷取；Claude fixture 是 spike 紀錄中的 prompt 文字，並非完整 holder 畫面擷取。
+> - 記住：舊 Claude fixture 是 spike prompt 片段；2.1.284 信任 fixture 是真 holder 的 100／140 欄完整 frame 文字。
 > - 下一步：跑 `cargo xtask accept core`，比對實際狀態機 transcript。
 
 ## 第 11 施工關 C 段（已驗收並合併 #145）
@@ -52,7 +52,7 @@ cargo xtask accept core
 | `policy::conflict::tests` | pairwise 重疊檔案排序與去重 |
 | `policy::attention::tests` | 請示排序：放行最多工作的在前，同樣時等最久的在前，全同時以 id 決定（D36） |
 | `policy::merge_gate::tests` | merge 門檻唯一實作：每個 command 關卡對目前 head 通過、每個 approval 關卡都覆蓋目前 head（不綁 head 的只需存在）、`allow_unreviewed` 只免除「至少一個綁 head 的核准」；rebase 以 patch-id 判斷保留 |
-| `screen::tests` | backend-specific startup prompt 片段比對，不分類一般畫面；Claude 的片段不是完整 holder 擷取 |
+| `screen::tests` | backend-specific startup prompt 比對，不分類一般畫面；舊 Claude 是片段，2.1.284 信任 frame 來自真 holder 的兩種寬度 |
 
 ## 可完成證明（存檔檢查裡）
 
@@ -98,7 +98,7 @@ PTY bytes 在 protocol 型別中使用 `bytes_base64` 欄位；base64 實際編�
 
 - `cargo xtask check-deps` 以 no-std target 編譯 core，檢查 `unsafe-code` 與依賴 allowlist。
 - core 沒有 testkit 依賴。所有單元測試都在純資料與純函式上執行。
-- screen fixture 來源與證據等級見 `tests/fixtures/screens/README.md`。除 Codex 外，Claude 目前只有 spike prompt 片段；新規則需附 holder 真實畫面與 backend 版本證據。
+- screen fixture 來源與證據等級見 `tests/fixtures/screens/README.md`。Claude 2.1.284 已補兩寬信任 frame，其他 Claude fixture 仍是 spike 片段；新規則需附 holder 真實畫面與 backend 版本證據。
 
 ## 下一步
 
@@ -109,3 +109,10 @@ cargo xtask accept core
 ## 第 12A protocol 1.5
 
 xtask 的 `claude_1_5_envelopes_are_additive_and_receipts_keep_native_attribution` 用 core serializer 驗 request／reply wire shape、完整 UTF-8 內容及 frozen 舊 peer 解為 Unknown。`accept core` 重驗 no-std、fmt／clippy 及舊 protocol；native 消費端在 [bridge 測試](../../docs/gates/gate-12a-bridge.md)。
+
+## Claude 2.1.284 啟動畫面證據
+
+`screen::tests::claude_2_1_284_holder_trust_frames_remain_hard_gates_at_both_widths`
+以真 daemon／holder 的 100×24、140×24 信任畫面核對既有分類器；只回 StartupMenu，
+沒有 suggested key。舊 spike 片段保留；新檔來源與 SHA-256 見
+[fixture 紀錄](tests/fixtures/screens/README.md)。未認證自動按鍵、初始 idle 或完整 12A。

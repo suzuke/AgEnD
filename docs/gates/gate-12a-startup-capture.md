@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - 開發用 `claude_startup_capture` 經實際 daemon／holder 保存指定寬度的啟動畫面；不送 prompt、按鍵或團隊訊息。
-> - 原生替身測試驗證工具本身；真 Claude 版本、P5 自動處理提示與 P6 啟動完成仍未驗收。
-> - 下一步：另外取得選定真 CLI 的版本查詢與啟動蒐證授權，再使用本工具。
+> - 真 Claude 2.1.284 已核版本並保存兩種寬度的信任畫面；P5 自動處理提示與 P6 啟動完成仍未驗收。
+> - 下一步：以真 fixture 補啟動處理；本次授權不含按鍵、訊息投遞或模型回合。
 
 ## 範圍
 
@@ -37,15 +37,21 @@ export CARGO_TARGET_DIR=/private/tmp/agend-g12a-driver-target
 
 測試用自己的 shell producer 經正式 daemon／holder，核對 100／140 欄的實際 PTY 尺寸、繁中／é、正式 argv、未收到輸入、成功與畫面拒絕後的程序／workspace 清理；另核 soft-wrap 電郵仍遮蔽、跨 wrap 的 Bearer 前綴在寫入前拒絕，以及 hash 不合與既有 output 都不啟動 producer。測試產物隨 fixture 結束清理。
 
-## 真 CLI 蒐證（待授權，尚未執行）
+## 真 CLI 蒐證（已授權執行，2026-10-05）
 
-完整啟動須指定 `AGEND_REAL_CLAUDE_STARTUP=1`。以下只描述命令格式，不代表已取得執行授權：
+完整啟動須指定 `AGEND_REAL_CLAUDE_STARTUP=1`。本次使用者明確「授權」查版本及以下兩種寬度的被動蒐證；命令格式如下：
 
 ```text
 AGEND_REAL_CLAUDE_STARTUP=1 AGEND_BIN=<本批 agend 絕對路徑>   cargo run -p agend-daemon --example claude_startup_capture --   --program <核准的 CLI 絕對路徑> --sha256 <核准的 SHA-256>   --version-label <另行查詢的版本> --columns 100 --rows 24   --seconds 20 --out <全新證據目錄的絕對路徑>
 ```
 
-另以 140 欄與另一個 output 蒐證；兩次各用新 session／workspace。仍須先核准版本／完整命令／回合預算。工具不送模型 prompt，卻會真正啟動指定 CLI，不能從 native 測試授權推定可以啟動真 Claude。
+另以 140 欄與另一個 output 蒐證；兩次各用新 session／workspace。本次預算為 0 模型回合、0 按鍵與 0 訊息投遞。工具不送模型 prompt，卻會真正啟動指定 CLI，不能從 native 測試授權推定可以啟動真 Claude。
+
+兩次均成功（100 欄 3 frames、140 欄 2 frames），最後停在預設 `No, exit` 的信任提示；
+`startup=not_assessed` 保留原值。固定 executable SHA-256 與另行查詢的版本已核對，
+完整命令及遮蔽原始畫面保存於 `AgEnD-ops/g12a-native-checkpoint-20261005/`。
+最後完整 frame 的文字已匯出為 [兩個真 fixture](../../crates/agend-core/tests/fixtures/screens/README.md)。
+自有 daemon／holder／home／workspace 已清理；未送鍵、未接受信任提示，後續提示與初始 idle 仍缺證據。
 
 ## 獨立核對
 
