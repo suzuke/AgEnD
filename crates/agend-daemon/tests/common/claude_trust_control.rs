@@ -1,5 +1,6 @@
 //! Bounded operator probe, not production startup automation. It only moves
 //! from the captured No selection to Yes, then confirms that exact selection.
+//! A separate opt-in can confirm the recorded local agend channel warning once.
 use super::*;
 
 #[derive(Default)]
@@ -12,8 +13,9 @@ impl Progress {
         &mut self,
         frame: &TerminalFrame,
         workspace: &Path,
+        accept_development_channels: bool,
     ) -> Result<Option<(&'static str, &'static str)>, String> {
-        if self.started == 2 {
+        if self.started == 3 || self.started == 2 && !accept_development_channels {
             return Ok(None);
         }
         let text = frame
@@ -34,6 +36,25 @@ impl Progress {
             .copied()
             .filter(|line| !line.is_empty())
             .collect::<Vec<_>>();
+        if self.started == 2 {
+            // A third input needs its own explicit opt-in AND both completed
+            // trust inputs in this generation. Never confirm other servers.
+            if self.completed == 2
+                && nonempty.iter().filter(|line| **line == "WARNING: Loading development channels").count() == 1
+                && nonempty.iter().filter(|line| line.starts_with("Channels:")).count() == 1
+                && lines.contains(&"Channels: server:agend")
+                && lines.contains(&"❯ 1. I am using this for local development")
+                && lines.contains(&"2. Exit")
+                && lines.contains(&"Enter to confirm · Esc to cancel")
+                && !lines.contains(&"Accessing workspace:")
+                && normalized.contains("--dangerously-load-development-channels is for local channel development only. Do not use this option to run channels you have downloaded off the internet.")
+                && normalized.contains("Please use --channels to run a list of approved channels.")
+            {
+                self.started = 3;
+                return Ok(Some(("development-enter", "DQ==")));
+            }
+            return Ok(None);
+        }
         let workspace = workspace.display().to_string();
         // This is a newly created, private workspace. Never accept another path
         // by a prefix match or by mentioning our path elsewhere on the screen.

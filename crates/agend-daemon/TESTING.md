@@ -164,3 +164,8 @@ Failed 派工回歸：五種 fake queue 只用一個 dev，boot 派工失敗後�
 workspace 必須是唯一 `Accessing workspace:` 標頭的下一個非空完整行。
 選到 Yes／後續畫面是替身生成，不是真 CLI fixture；正式 P5 daemon-key／revision CAS、
 development channels 與 P6 初始 idle 仍缺真證據。預設被動模式保持 0 輸入。
+
+Development channels 蒐證用真提示文字經 native producer 重播，兩寬核三次輸入
+`ESC[B CR CR`；外來前綴／額外 server、重複 Channels、Exit、缺完整 warning
+及未完成 trust 前出現選單都不確認。預設只送兩鍵，缺 trust opt-in 在啟動前拒絕；
+第三鍵後提示仍在也不重送。確認後畫面為 synthetic，不認證真 startup complete。

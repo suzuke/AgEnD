@@ -1,5 +1,5 @@
 //! Startup evidence through the actual daemon and holder. Passive by default;
-//! an explicit bounded operator probe can select workspace trust. No model
+//! explicit bounded probes can select workspace trust and local channels. No model
 //! prompt or message delivery is issued; readiness is never inferred.
 #[path = "daemon_process.rs"]
 mod lab;
@@ -26,7 +26,7 @@ use std::{
 };
 
 const ID: &str = "g12-startup-capture";
-pub const USAGE: &str = "claude_startup_capture --program <absolute-path> --sha256 <hex> --version-label <label> --columns <20..200> --rows <5..100> --seconds <1..60> --out <new-directory> [--workspace-trust-control accept]";
+pub const USAGE: &str = "claude_startup_capture --program <absolute-path> --sha256 <hex> --version-label <label> --columns <20..200> --rows <5..100> --seconds <1..60> --out <new-directory> [--workspace-trust-control accept [--development-channel-control accept]]";
 
 pub struct Options {
     pub program: PathBuf,
@@ -36,6 +36,7 @@ pub struct Options {
     pub seconds: u64,
     pub out: PathBuf,
     pub accept_workspace_trust: bool,
+    pub accept_development_channels: bool,
 }
 impl Options {
     pub fn parse(args: &[String]) -> Result<Self, String> {
@@ -51,6 +52,7 @@ impl Options {
                     "--seconds",
                     "--out",
                     "--workspace-trust-control",
+                    "--development-channel-control",
                 ]
                 .contains(&pair[0].as_str())
             {
@@ -71,6 +73,12 @@ impl Options {
                 Some("accept") => true,
                 _ => return Err("workspace trust control must be accept".into()),
             },
+            accept_development_channels: match values.get("--development-channel-control").copied()
+            {
+                None => false,
+                Some("accept") => true,
+                _ => return Err("development channel control must be accept".into()),
+            },
             size: TerminalSize {
                 rows: get("--rows")?.parse().map_err(|_| USAGE.to_owned())?,
                 columns: get("--columns")?.parse().map_err(|_| USAGE.to_owned())?,
@@ -81,6 +89,12 @@ impl Options {
         Ok(options)
     }
     fn validate(&self) -> Result<(), String> {
+        if self.accept_development_channels && !self.accept_workspace_trust {
+            return Err(
+                "development channel control requires workspace trust control; no process started"
+                    .into(),
+            );
+        }
         if !self.program.is_absolute()
             || !self.out.is_absolute()
             || self.sha256.len() != 64
@@ -108,6 +122,15 @@ impl Options {
             );
         }
         Ok(())
+    }
+    pub fn input_limit(&self) -> usize {
+        if self.accept_development_channels {
+            3
+        } else if self.accept_workspace_trust {
+            2
+        } else {
+            0
+        }
     }
 }
 
@@ -202,7 +225,8 @@ fn capture(
         _ => return Err("capture subscription refused".into()),
     };
     // This view belongs to the probe's freshly created instance. Acquire is
-    // only for real PTY dimensions; never send Input or any daemon key.
+    // for real PTY dimensions. Later Input requires its explicit bounded mode;
+    // this diagnostic path never sends a daemon key.
     client
         .send(&ClientRequest::TerminalControl {
             data: ClientTerminalControlData {
@@ -250,7 +274,8 @@ fn capture(
     while Instant::now() < deadline {
         if options.accept_workspace_trust
             && let Some(frame) = observed.take()
-            && let Some((key, bytes)) = progress.decide(&frame, &workspace)?
+            && let Some((key, bytes)) =
+                progress.decide(&frame, &workspace, options.accept_development_channels)?
         {
             write_line(
                 file,
@@ -311,8 +336,8 @@ fn capture(
             _ => {}
         }
     }
-    if options.accept_workspace_trust && progress.completed != 2 {
-        return Err("workspace trust control incomplete; no input replay".into());
+    if options.accept_workspace_trust && progress.completed != options.input_limit() {
+        return Err("startup control incomplete; no input replay".into());
     }
     Ok(count)
 }
@@ -366,9 +391,14 @@ pub fn run(options: &Options, agend: &Path) -> Result<usize, String> {
     // It comes from the pinned file, not backend output or account metadata.
     header["program_sha256"] = options.sha256.clone().into();
     if options.accept_workspace_trust {
-        header["capture_mode"] = "workspace-trust-control".into();
+        header["capture_mode"] = if options.accept_development_channels {
+            "development-channel-control"
+        } else {
+            "workspace-trust-control"
+        }
+        .into();
         header["terminal_input_operations"] = Value::Null;
-        header["terminal_input_operation_limit"] = 2.into();
+        header["terminal_input_operation_limit"] = options.input_limit().into();
         header["production_daemon_key_path_tested"] = false.into();
     }
     let mut file = OpenOptions::new()

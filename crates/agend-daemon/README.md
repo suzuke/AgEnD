@@ -160,3 +160,8 @@ cargo xtask accept cli             # 第 9 施工關 demo：cli_demo（在 agend
 `claude_bridge` 提供 client 1.5 的 Attach／Poll／Hook／Written／Ack。先原子預約才回完整內容；新 live hook 與目前 holder 畫面控制 routing，歷史 hook 不建立 idle／不投遞；較新的同 session 路由觀測會撤銷舊 idle。`ingest` 每秒補送 home 的 hooks／acks；只收到入庫 commit 才刪檔，不重送訊息內容。完整 API、同 UID 信任邊界與未完成項目見 [bridge 基礎](../../docs/gates/gate-12a-bridge.md)。
 
 第 12A 開發用 [被動啟動畫面蒐證](../../docs/gates/gate-12a-startup-capture.md)：`claude_startup_capture` example 預設經真 daemon／holder 被動保存尺寸與文字。額外 opt-in 的 trust 蒐證模式最多兩次 operator Input，先核唯一標頭下的完整 workspace 路徑與選項；不代表正式 P5 daemon-key／revision CAS。兩種模式都不送模型 prompt／團隊訊息、不推論啟動完成；真執行依指定模式另取授權。
+
+啟動畫面蒐證的 `--development-channel-control accept` 另取 opt-in，
+在兩個 trust 回條後僅對完整、唯一 `server:agend` 的已錄製選單增加一次 Enter。
+上限三次 operator Input；預設被動／兩鍵模式維持原值，未推論 startup complete。
+真執行尚未授權，詳見[蒐證頁](../../docs/gates/gate-12a-startup-capture.md)。

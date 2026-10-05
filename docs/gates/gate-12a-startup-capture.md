@@ -1,13 +1,13 @@
 # 第 12A：被動保存啟動畫面
 
 > **TL;DR**
-> - 開發用 `claude_startup_capture` 預設被動保存畫面；額外 opt-in 只做受控 trust 蒐證，不送模型 prompt 或團隊訊息。
+> - 開發用 `claude_startup_capture` 預設被動保存畫面；額外 opt-in 做受控 trust／development channels 蒐證，不送模型 prompt 或團隊訊息。
 > - 真 Claude 2.1.284 已核版本並保存兩寬信任與 development channels 畫面；P5／P6 仍未驗收。
 > - 下一步：以真 fixture 補正式啟動處理；後續真確認與模型回合另取授權。
 
 ## 範圍
 
-工具建立自己的 `AGEND_HOME`、workspace、Claude push instance 與 session，沿用正式 supervisor 的啟動旗標、三個設定檔和登入環境。它訂閱真 holder frame，取得自己新建 instance 的控制權只為設定 PTY 尺寸，不發送 `Input` 或 daemon key。沒有人為製造 busy／idle 或 ACK。
+工具建立自己的 `AGEND_HOME`、workspace、Claude push instance 與 session，沿用正式 supervisor 的啟動旗標、三個設定檔和登入環境。它訂閱真 holder frame，取得自己新建 instance 的控制權設定 PTY 尺寸；預設不發送 `Input`。額外 opt-in 的輸入限制見下方模式，不使用 daemon key。沒有人為製造 busy／idle 或 ACK。
 
 初始尺寸設定完成後保存 1–60 秒、最多 512 個有變化的 frame。畫面來自 holder 的字元 cell，依 native cell 的 soft-wrap 標記合併同一邏輯行、跳過寬字元的 leading spacer，再保存遮蔽後文字、soft-wrap 列標記、尺寸、cursor、revision、generation 與 alternate screen 狀態；這份 JSONL 是蒐證格式，尚非 classifier／conformance fixture。寬度範圍 20–200，列數 5–100。
 
@@ -23,7 +23,7 @@
 | 拒絕 | hash 不合、secret scan、失去終端／控制、generation／尺寸改變等均回失敗；部分檔案保留供核對，不宣稱成功 |
 | 清理 | 成功或畫面拒絕後，經 production instance remove 停 holder，再停 daemon；fixture 移除自己的 home／workspace，保留指定 output |
 
-secret scan 通過後的真畫面仍需人工檢視再入 Git。只有 native 測試替身的版本標籤不能當成真 CLI fixture；預設模式不按 Down／Enter；兩種模式都不更新 `SCREEN_RULES`。
+secret scan 通過後的真畫面仍需人工檢視再入 Git。只有 native 測試替身的版本標籤不能當成真 CLI fixture；預設模式不按 Down／Enter；蒐證工具本身不更新 `SCREEN_RULES`。
 
 ## 原生重驗（不執行 Claude）
 
@@ -84,6 +84,24 @@ P5 的原子畫面檢查或人工 owner 拒絕。`production_daemon_key_path_tes
 程序與暫存已清理；另只移除本次兩個 canonical workspace 的個人信任設定條目，
 其他個人設定值核對不變。執行與清理 manifest 保存於 AgEnD-ops。
 
+## Development channels 蒐證模式（真執行尚未授權）
+
+新增 `--development-channel-control accept`，須同時指定 workspace trust 模式，
+另設 `AGEND_REAL_CLAUDE_STARTUP_CHANNELS=1`；既有被動與兩鍵模式不自動增加輸入。
+只在本次 generation 的 Down／trust Enter 都已有完整回條後，
+對已錄製的完整 development warning、唯一 `Channels: server:agend`、
+選到 `1. I am using this for local development` 及確認 footer 送一次 Enter。
+其他 server、同名前綴、重複 Channels 標頭、選到 Exit、缺警告或過早出現都不送第三鍵。
+
+模式最多三次 operator Input，不確認後續畫面。即使提示未消失，也不再送 Enter；
+`startup=not_assessed`、無 revision CAS、非正式 P5 DaemonKey 的邊界維持。
+受控動作結果不明、被拒絕或期限到都失敗並保留證據，不重送。
+原生 producer 重播真 development frame；確認後的畫面是 synthetic，未當成真 fixture。
+13 個 native cases 包含既有 10 個回歸及三鍵正例、六種拒絕、預設不增加權限／不重送。
+13 個 native cases、整個 daemon／fmt／workspace clippy／實際 no-std 通過，
+example 缺任一 opt-in 都在 producer／output 建立前拒絕；全新 verifier 待核。
+這是下一份待審執行計畫的工具；本次已完成的兩鍵真授權不涵蓋此模式。
+
 ## 獨立核對
 
 固定 `356fbef` 獲全新無相關 context verifier 局部 CONFIRMED。原 `4511e21` 的真 holder 跨列 synthetic Bearer 反例會寫入且回成功；修正後同一 producer 重播回失敗並在寫入前拒絕。另核 20／100／140／200 欄與 5／24／100 列的 native 寬字 spacer、多列電郵、零 stdin 與清理；5 個工具回歸、workspace clippy／fmt／實際 no-std 通過。這份結果只驗工具，不證明真 Claude 的版本、提示或 startup complete。
@@ -94,6 +112,11 @@ workspace 開頭、或錯誤 workspace 畫面在別處提及自有路徑，皆�
 修正 `7abb646` 獲同一驗證者局部 CONFIRMED，六個兩寬路徑反例零輸入；
 回條故障不重送，整個 daemon／clippy／fmt／實際 no-std 通過並清理。
 固定 head 的 push／PR 雙平台 CI 均成功。這份核對不認證正式 P5／P6。
+
+固定 `386d083` 的全新 verifier 局部 CONFIRMED：四個 fixture 逐 byte 對齊來源；
+四種 classifier mutation 均被抓到；core／fmt／clippy／實際 no-std、獨立 agend
+及 10 個 native capture tests 通過。自有 worktree／branch／target 與程序已清理。
+140 欄的 live DB identity 觀察缺口仍保留；不認證正式 P5／P6 或完整 12A。
 
 ## 下一步
 

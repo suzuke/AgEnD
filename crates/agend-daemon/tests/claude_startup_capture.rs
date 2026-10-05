@@ -121,6 +121,157 @@ fn controlled_options(program: &Path, out: &Path, columns: u16) -> capture::Opti
     options
 }
 
+fn development_worker(root: &Path, width: u16, mode: &str) -> PathBuf {
+    let program = trust_worker(root, width, "normal");
+    let mut screen = if width == 100 {
+        include_str!(
+            "../../agend-core/tests/fixtures/screens/claude-2.1.284-development-channels-100x24.txt"
+        )
+    } else {
+        include_str!(
+            "../../agend-core/tests/fixtures/screens/claude-2.1.284-development-channels-140x24.txt"
+        )
+    }
+    .to_owned();
+    match mode {
+        "foreign-prefix" => {
+            screen = screen.replace("Channels: server:agend", "Channels: server:agend-other")
+        }
+        "foreign-extra" => {
+            screen = screen.replace(
+                "Channels: server:agend",
+                "Channels: server:agend, server:other",
+            )
+        }
+        "duplicate-header" => screen = format!("{}\nChannels: server:other\n", screen.trim_end()),
+        "selected-exit" => {
+            screen = screen.replace(
+                "❯ 1. I am using this for local development\n    2. Exit",
+                "  1. I am using this for local development\n  ❯ 2. Exit",
+            )
+        }
+        "missing-warning" => {
+            screen = screen.replace("Do not use this", "Synthetic altered warning")
+        }
+        "normal" | "premature" | "unchanged" => {}
+        _ => panic!("unknown native development producer mode"),
+    }
+    fs::write(root.join("development-screen.txt"), screen).unwrap();
+    let script = fs::read_to_string(&program).unwrap();
+    let initial = if mode == "premature" {
+        "draw((root / 'development-screen.txt').read_text())"
+    } else {
+        "draw(yes if mode == 'preselected-yes' else text)"
+    };
+    let after = if mode == "unchanged" {
+        "draw((root / 'development-screen.txt').read_text())"
+    } else {
+        "draw((root / 'development-screen.txt').read_text() if pending.count(b'\\r') == 1 else 'SYNTHETIC AFTER CHANNEL CONFIRM; NO MORE INPUT\\n')"
+    };
+    let script = script
+        .replace("draw(yes if mode == 'preselected-yes' else text)", initial)
+        .replace("draw('SYNTHETIC AFTER TRUST; NO FURTHER KEYS\\n')", after);
+    fs::write(&program, script).unwrap();
+    program
+}
+
+#[test]
+fn separate_development_opt_in_sends_exactly_three_inputs_at_both_widths() {
+    for width in [100, 140] {
+        let root = TempDir::new("g12-development-control").unwrap();
+        let program = development_worker(root.path(), width, "normal");
+        let out = root.path().join("evidence");
+        let mut opts = controlled_options(&program, &out, width);
+        opts.accept_development_channels = true;
+        capture::run(&opts, &agend()).unwrap();
+        assert_eq!(
+            fs::read(root.path().join("input-received")).unwrap(),
+            b"\x1b[B\r\r"
+        );
+        let result: Value =
+            serde_json::from_str(&fs::read_to_string(out.join("result.json")).unwrap()).unwrap();
+        assert_eq!(result["terminal_input_operations_started"], 3);
+        assert_eq!(result["terminal_input_operations_completed"], 3);
+        assert_eq!(result["startup"], "not_assessed");
+        let recorded = fs::read_to_string(out.join("screens.jsonl")).unwrap();
+        assert!(recorded.contains("SYNTHETIC AFTER CHANNEL CONFIRM"));
+        assert!(recorded.contains("development-enter"));
+        assert!(
+            !Path::new(
+                fs::read_to_string(root.path().join("workspace"))
+                    .unwrap()
+                    .trim()
+            )
+            .exists()
+        );
+    }
+}
+
+#[test]
+fn development_confirmation_rejects_other_servers_selection_and_incomplete_warning() {
+    for mode in [
+        "foreign-prefix",
+        "foreign-extra",
+        "duplicate-header",
+        "selected-exit",
+        "missing-warning",
+        "premature",
+    ] {
+        let root = TempDir::new("g12-development-refuse").unwrap();
+        let program = development_worker(root.path(), 100, mode);
+        let out = root.path().join("evidence");
+        let mut opts = controlled_options(&program, &out, 100);
+        opts.accept_development_channels = true;
+        assert!(capture::run(&opts, &agend()).is_err(), "{mode}");
+        let input = fs::read(root.path().join("input-received")).unwrap_or_default();
+        assert_eq!(
+            input,
+            if mode == "premature" {
+                b"".as_slice()
+            } else {
+                b"\x1b[B\r".as_slice()
+            },
+            "{mode}"
+        );
+        assert!(
+            !Path::new(
+                fs::read_to_string(root.path().join("workspace"))
+                    .unwrap()
+                    .trim()
+            )
+            .exists()
+        );
+    }
+}
+
+#[test]
+fn development_confirmation_has_no_default_grant_or_replay() {
+    let root = TempDir::new("g12-development-default").unwrap();
+    let program = development_worker(root.path(), 100, "normal");
+    let out = root.path().join("default-evidence");
+    capture::run(&controlled_options(&program, &out, 100), &agend()).unwrap();
+    assert_eq!(
+        fs::read(root.path().join("input-received")).unwrap(),
+        b"\x1b[B\r"
+    );
+    fs::remove_file(root.path().join("input-received")).unwrap();
+    let mut opts = controlled_options(&program, &root.path().join("bad-preflight"), 100);
+    opts.accept_development_channels = true;
+    opts.accept_workspace_trust = false;
+    assert!(capture::run(&opts, &agend()).is_err());
+    assert!(!opts.out.exists());
+    assert!(!root.path().join("input-received").exists());
+
+    let program = development_worker(root.path(), 100, "unchanged");
+    let mut opts = controlled_options(&program, &root.path().join("unchanged-evidence"), 100);
+    opts.accept_development_channels = true;
+    capture::run(&opts, &agend()).unwrap();
+    assert_eq!(
+        fs::read(root.path().join("input-received")).unwrap(),
+        b"\x1b[B\r\r"
+    );
+}
+
 #[test]
 fn trust_probe_sends_only_down_and_confirmed_yes_enter_at_both_widths() {
     for width in [100, 140] {

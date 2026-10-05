@@ -149,3 +149,5 @@
 - 2026-10-05：受控 trust 工具 `b0d8074` 的全新 verifier 重現路徑前綴／畫面別處提及自有路徑會誤送 Down、Enter，原 REFUTED 證據保留。改成唯一 workspace 標頭下完整路徑相等並補兩寬原生拒絕回歸；修正版獨立核對待完成，未執行真按鍵，完整 12A 未完成（#151）。
 
 - 2026-10-05：`7abb646` 路徑修正獲 fresh verifier 局部 CONFIRMED，push／PR 雙平台 CI 均通過。另獲授權後，Claude 2.1.284 兩寬受控 trust 蒐證各完成 Down／Enter，保存選到 Yes 與 development channels 真 fixture；未確認後續提示、0 模型／訊息，自有程序／暫存與兩筆個人 trust 條目已清理。原分類器漏掉 development channels 的反例已重現，補 StartupMenu 規則；本批 core／fresh 重驗待核，P5／P6 仍未完成（#151）。
+
+- 2026-10-05：為取得 channels 確認後的真畫面，準備第三個獨立 opt-in 的受控蒐證模式；只在兩個 trust 回條後，對完整且唯一 `server:agend` 選單送一次 Enter，最多三次 operator Input。13 個 native cases、整個 daemon／fmt／clippy／實際 no-std 通過；全新 verifier 待核，真三鍵執行尚未授權，P5／P6 未完成（#151）。
