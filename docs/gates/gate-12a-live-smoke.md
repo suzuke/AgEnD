@@ -1,9 +1,9 @@
 # 第 12A：完整真模型通訊 smoke
 
 > **TL;DR**
-> - 使用者 2026-10-06 要求完整模型 smoke 必做；#151／#152 已合併，真模型尚未執行。
+> - 使用者 2026-10-06 要求完整模型 smoke 必做；#151／#152 已合併；首次真執行停於初始 idle 逾時，訊息階段未開始。
 > - 固定 Claude 2.1.284，兩個 Haiku 4.5 instance、七則工作訊息；首個失敗停止，不重跑。
-> - 下一步：全新 verifier 核固定腳本與計畫後，依 D40 確認版本／完整命令／預算才執行。
+> - 下一步：保留失敗證據，修 audit／清理及原始畫面蒐證；新真 CLI 計畫依 D40 另取授權。
 
 ## 範圍與證據
 
@@ -54,10 +54,32 @@ SQLite 在 daemon 停機後才讀取；禁止用 immutable bypass 或複製變�
 `cleanup.json` 的 `trust_cleanup_pending` 要在最後清理證據中核為不存在，不能由 smoke PASS 宣稱清理完成。
 失敗紀錄同樣要保留，未知身分／仍有程序／symlink 的路徑保留並報告；不得強制刪除。
 
+## 失敗後的只讀診斷
+
+`scripts/claude_startup_diagnostic.py --plan` 固定一個 A instance、90 秒、零工作訊息、四份只讀 native frame；它使用 production 啟動處理，仍可能寫三個已知 startup keys。每份 frame 最多等 5 秒，不取得控制權、不 resize、不送人工鍵；未知提示或失敗即停止。首次 frame 在 status 檢查之前留存，避免 attention 造成證據遺失。成功只記 `CAPTURED`，不宣稱模型通訊 smoke 或 12A 通過；真 CLI 版本查詢及啟動仍須取得這份新計畫授權。
+
+```bash
+~/.cargo/bin/cargo build -p agend-client --example startup_frame
+python3 -B scripts/claude_startup_diagnostic.py \
+  --plan <全新 diagnosis-plan.json> --out <全新私有證據目錄> \
+  --agend "$CARGO_TARGET_DIR/debug/agend" \
+  --cleanup "$CARGO_TARGET_DIR/debug/examples/claude_live_cleanup" \
+  --snapshot "$CARGO_TARGET_DIR/debug/examples/startup_frame"
+```
+
+runner 補核 Ready 的正常 `halted=1` 及三鍵 written；清理按 native SessionStart 的 session／cwd／scratch 路徑，檢查 uid／型別／連結後保留私有證據並刪整個自有 nonce namespace，含 bootstrap UUID。foreign／symlink／hardlink 不刪。global trust keys 仍由執行者精確清理，不能由 runner 宣稱已完成。
+
 ## 目前紀錄
 
-真模型尚未執行。native／腳本與固定計畫驗證進行中，沒有新增模型或訊息費用。全新 verifier 在 `1256c99` 以 native producer 推翻清理順序及漏額外 holder，並重現 HOME 漂移與版本查詢失敗留下空 lab；原證據保留。修正為先全面驗身分／namespace、綁固定環境、無 DB 且無 holder 才可清空 lab，重驗待核。`2b6084d` 另被 native holder 反例推翻：同名 lock／socket 符號連結可誤停另一 home；補所有控制路徑型態預核。`fb4801f` 另被硬連結控制檔案的同類反例推翻，追加檔案／socket 必須單一 link 的 ownership 核對；原反例保留，修正版另驗。
+固定 `3ac1b5d` 的計畫 `plan-v5.json` 經全新 verifier 核原生清理與授權防護，四個 CI jobs 通過；先前 foreign workspace、漏 holder、HOME、symlink／hardlink 的反例與修正重驗保留。
+
+取得使用者授權後執行一次，結果 **FAILED：`timed out: both idle; no retry`**。一次版本查詢為 2.1.284，兩個 instance 各一個 live SessionStart、三個已知 production startup key states=written；695 次 status 未見兩者同時 idle，七則工作訊息全部未開始，零測試 send／訊息／ACK。沒有自動重跑。
+
+另一位全新 verifier 覆核失敗證據，推翻原 cleanup 完整性：兩個自有 scratchpad namespace 曾殘留，補清後獨立核 49 個精確路徑、兩個 trust keys、記錄 PID／PGID absent。亦發現正常 Ready 設 `halted=1`，原 audit 卻要求為 0；本次尚未走到該 audit 判斷。
+
+原始 terminal frames／transcripts／usage 沒有留存，不能認定失敗畫面或精確模型／API 次數。授權 metadata 是執行開始後 22,520ms 寫檔，使用者授權先於執行是 root 對話順序聲明，不把寫檔時間當授權事件時間。原證據與限制保留。
+
 
 ## 下一步
 
-核對全新 verifier 的結果及固定計畫，取得真模型預算授權後執行一次；完成再核證據與殘留，提供使用者可重驗命令。新改動的 merge 仍等使用者確認。
+補只讀原始 frame 蒐證及 audit／scratch 清理的 native 回歸，再由全新 verifier 核固定診斷計畫；新真 CLI 需另取授權，禁止自動重跑成成功。新改動的 merge 仍等使用者確認。

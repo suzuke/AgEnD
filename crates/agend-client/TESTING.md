@@ -73,3 +73,7 @@ cargo test -p agend-client --test once --lib
 ## 第 12A Claude bridge
 
 `tests/once.rs` 加驗 1.5 操作遇舊 daemon 在 hello 後先拒絕、不送 RPC；generic `request` 的 Safe／Never 都不能送 Claude 操作；32 MiB hook 在 connect 前拒絕。新 reply decoder 與完整 native daemon producer 配對的 channel／Stop／ACK 測試見 [bridge 基礎](../../docs/gates/gate-12a-bridge.md)。
+
+## 真 CLI 啟動畫面診斷
+
+`startup_frame` example 經 native daemon／holder 取得 frame，保存原始 cells、尺寸、revision 與 startup classifier 結果；只發 terminal subscribe，沒有控制權或輸入請求。native fixture 回歸觀察 Unknown → 三個 production keys → Ready，核 reader 未增加按鍵；它不是新的真 Claude 驗收。只讀範圍及新真 CLI 計畫另依 [D40](../../docs/decisions/d40.md) 授權。

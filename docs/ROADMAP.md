@@ -177,3 +177,6 @@
 - 2026-10-06：完整真模型 smoke 腳本 `1256c99` 經全新 verifier 找出 native cleanup 的 foreign workspace 先停止、漏額外 holder、HOME 漂移及早期無 DB 殘留；已保留原負例，改為全面預核及環境綁定後重驗。仍未啟動真 Claude／模型。
 - 2026-10-06：`2b6084d` 的全新 verifier 以兩個自有 native holder 重現控制 lock／socket 符號連結會誤停另一 home，原 REFUTED 保留；清理 helper 在讀 lock／連 socket 前全面核對控制路徑型態，模型命令改釘完整 Haiku ID，修正版重驗中，真模型尚未執行。
 - 2026-10-06：`fb4801f` 全新 verifier 證明控制檔案硬連結仍能重導 Shutdown 到另一自有 native lab，原 REFUTED 保留；檔案／socket 追加單一 link ownership 核對，修正版重驗，零真模型執行。
+- 2026-10-06：draft #153 固定 `3ac1b5d` 的 push／PR 雙平台四個 CI jobs 通過；取得完整計畫授權後真 Claude 2.1.284 執行一次，兩個 instance 各三個 production startup key 寫出及 SessionStart，仍無初始 idle，180 秒等待逾時停機，零測試 send／訊息／ACK，完整 smoke **FAILED**。另一位全新 verifier 核固定原始證據；發現漏 scratchpad 與 Ready `halted=1` audit 誤拒絕，補清後獨立核 49 paths／兩 trust keys／PID／PGID absent；未留 raw frames／transcripts／usage，不能推斷失敗畫面或精確 API 次數。
+
+- 2026-10-06：#153 補只讀 startup frame 診斷（單 instance／90 秒／零工作訊息，真 CLI 尚未執行），修 smoke Ready audit 及 scratch namespace 清理。native producer 已驗 Unknown／Ready 原始 frame、只有三個 production keys、正常 Ready `halted=1`，以及含額外 bootstrap UUID 的 namespace 清除並私有保留內容；新計畫待全新 verifier 及另行授權，完整 smoke 未通過。

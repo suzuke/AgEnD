@@ -14,6 +14,7 @@ import shlex
 import shutil
 import signal
 import sqlite3
+import stat
 import subprocess
 import sys
 import threading
@@ -39,6 +40,15 @@ def require(ok, message):
 def digest(path):
     with Path(path).open("rb") as file:
         return hashlib.file_digest(file, "sha256").hexdigest()
+
+
+def completed_startup(row):
+    # Production marks the startup key loop halted when Ready is recognized.
+    # Halted alone also covers refusal/manual paths; require our three writes.
+    keys = json.loads(row["keys"])
+    return (row["halted"] == 1 and row["manual"] == 0 and row["generation"]
+            and set(keys) == {"trust_no", "trust_yes", "development"}
+            and all(v.get("state") == "written" for v in keys.values()))
 
 
 def write_json(path, value):
@@ -132,7 +142,7 @@ class Smoke:
         self.initialized = False
 
     def left(self):
-        require(time.monotonic() < self.end, "900 second execution budget exhausted")
+        require(time.monotonic() < self.end, "execution budget exhausted")
         if self.daemon:
             require(self.daemon.poll() is None, "daemon exited; no restart permitted")
         return self.end - time.monotonic()
@@ -153,7 +163,7 @@ class Smoke:
         require(not data["attention"], "unexpected attention; stop without pressing keys")
         require(all(i["state"] != "failed" for i in data["instances"]), "instance failed")
         if self.initialized:
-            require({i["instance_id"] for i in data["instances"]} == set(IDS), "instance membership changed")
+            require({i["instance_id"] for i in data["instances"]} == set(self.p.get("instances", IDS)), "instance membership changed")
             require(all(i["state"] != "starting" for i in data["instances"]), "instance restarting; no retry permitted")
         log = self.out / "daemon.log"
         if log.exists():
@@ -181,7 +191,7 @@ class Smoke:
     def send(self, name, level="queue"):
         self.run([self.p["agend"], "send", IDS[0], self.p["prompts"][name], "--level", level], seconds=75, sender=IDS[1])
 
-    def execute(self):
+    def start(self):
         self.out.mkdir(mode=0o700)
         self.home.parent.mkdir(mode=0o700)
         self.home.mkdir(mode=0o700)
@@ -193,7 +203,7 @@ class Smoke:
                                         lambda: os.kill(os.getpid(), signal.SIGTERM))
         self.watchdog.daemon = True
         self.watchdog.start()
-        for instance in IDS:
+        for instance in self.p.get("instances", IDS):
             slug = re.sub(r"[^a-zA-Z0-9]", "-", str(self.home / "workspace" / instance))
             require(not (PERSONAL / "projects" / slug).exists(), "foreign personal project exists; preserved")
         version = self.run(self.p["version_argv"])
@@ -208,6 +218,9 @@ class Smoke:
             match = re.search(r"session ([0-9a-f-]{36})", output)
             require(match is not None, "add reply has no session identity")
             self.sessions[argv[3]] = match.group(1)
+
+    def execute(self):
+        self.start()
         self.idle()
         self.initialized = True
         self.send("initial")
@@ -297,7 +310,7 @@ class Smoke:
                 states = [e for e in events if e["kind"] == "AgendState" and e["session_id"] == row["session_id"] and e["occurred_at_unix_ms"] <= row["started_at_unix_ms"]]
                 require(states and json.loads(states[-1]["payload"])["busy"], "interrupt was not reserved while busy")
         for row in startup:
-            require(not row["halted"] and not row["manual"], "production startup was halted or manual")
+            require(completed_startup(row), "production startup lacks completed nonmanual key sequence")
         require(len(self.sessions) == 2, "session identities missing")
         for instance, sid in self.sessions.items():
             starts = [e for e in events if e["instance_id"] == instance and e["session_id"] == sid and e["kind"] == "SessionStart"]
@@ -338,6 +351,32 @@ class Smoke:
         # checking concurrent CLI activity. This runner never renames account
         # settings over another writer or claims those entries are removed.
         residues = []
+        # The native SessionStart supplies the CLI's exact scratch path. A
+        # project can contain another bootstrap UUID; own the nonce namespace,
+        # not just the session leaf. Validate every node before any deletion.
+        scratch_roots = set()
+        if (self.home / "agend.db").exists():
+            with sqlite3.connect(f"file:{self.home / 'agend.db'}?mode=ro", uri=True, timeout=0) as db:
+                for instance, sid, payload in db.execute("SELECT instance_id,session_id,payload FROM driver_events WHERE kind='SessionStart' AND replayed=0"):
+                    require(self.sessions.get(instance) == sid, "foreign scratch session; preserved")
+                    event = json.loads(payload)
+                    workspace = self.home / "workspace" / instance
+                    require(event.get("cwd") == str(workspace) and event.get("session_id") == sid,
+                            "scratch event identity mismatch; preserved")
+                    scratch = event.get("scratchpad_dir")
+                    if scratch is None:
+                        continue  # Native fixtures need not produce CLI scratch.
+                    slug = re.sub(r"[^a-zA-Z0-9]", "-", str(workspace))
+                    root = Path(f"/private/tmp/claude-{os.getuid()}") / slug
+                    require(Path(scratch) == root / sid / "scratchpad", "foreign scratch path; preserved")
+                    if root.exists() or root.is_symlink():
+                        scratch_roots.add(root)
+        for root in scratch_roots:
+            for directory in (root.parent, root):
+                info = directory.lstat()
+                require(stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid()
+                        and not directory.is_symlink(), "scratch namespace identity changed; preserved")
+            residues.append(str(root))
         for instance, sid in self.sessions.items():
             slug = re.sub(r"[^a-zA-Z0-9]", "-", str(self.home / "workspace" / instance))
             for candidate in [PERSONAL / "projects" / slug, PERSONAL / "debug" / f"{sid}.txt",
@@ -350,6 +389,11 @@ class Smoke:
         for item in residues:
             path = Path(item)
             require(not path.is_symlink(), "session artifact symlink; preserved")
+            for entry in [path, *(path.rglob("*") if path.is_dir() else [])]:
+                info = entry.lstat()
+                require(info.st_uid == os.getuid() and (stat.S_ISDIR(info.st_mode)
+                        or (stat.S_ISREG(info.st_mode) and info.st_nlink == 1)),
+                        "artifact type, owner or hardlink mismatch; preserved")
             if path.is_dir():
                 require(not any(p.is_symlink() for p in path.rglob("*")), "nested artifact symlink; preserved")
         # Retain own failure records privately before deleting session scratch.

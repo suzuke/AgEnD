@@ -13,7 +13,7 @@
 
 | 段 | 範圍 | 目前進度 |
 |---|---|---|
-| A claude | channel、hooks、啟動設定、權限、忙碌策略、送達、清掃 | 設計已 merge；client 基礎 #147 已 merge；持久化 #148 已 merge；bridge #149 已 merge；共用 gh 防護 #150 已 merge；Driver #151 與正式啟動 #152 已 merge；完整真模型 smoke 為必要驗收，尚未執行 |
+| A claude | channel、hooks、啟動設定、權限、忙碌策略、送達、清掃 | 設計已 merge；client 基礎 #147 已 merge；持久化 #148 已 merge；bridge #149 已 merge；共用 gh 防護 #150 已 merge；Driver #151 與正式啟動 #152 已 merge；完整真模型 smoke 為必要驗收，首次執行停於初始 idle 逾時，訊息階段未開始 |
 | B opencode | `opencode serve`、session、送達與權限；三個 backend 互傳訊息 | A 段完成後另寫細案，尚未確認 |
 | C GitHub forge | push、PR、checks、head 對帳、merge 與收尾 | 第 10 關依賴已完成，細案尚未確認 |
 | D Telegram | notifier、allowlist、token、手機處理需要你、G4 已讀狀態 | 第 10 關依賴已完成，細案尚未確認 |

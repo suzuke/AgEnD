@@ -5,7 +5,7 @@
 > - 狀態：**pre-alpha**。第 1–11 施工關已完成並合併；第 11 施工關 C 段 #145 於 2026-10-03 經使用者確認合併（`b2152db`）。其他 backend adapter 與安裝發布仍待完成。
 > - 下一步：先讀 [AGENTS.md](AGENTS.md)，再看 [docs/ROADMAP.md](docs/ROADMAP.md) 的目前狀態。
 
-第 12A 正進行 [正式啟動提示與初始 idle](docs/gates/gate-12a-startup-runtime.md)；draft #151 與本批尚未合併，完整 adapter 尚未驗收。
+第 12A 的 Driver #151 與正式啟動 #152 已合併；[完整真模型 smoke](docs/gates/gate-12a-live-smoke.md)首次執行停於初始 idle 逾時，訊息階段未開始，完整 adapter 尚未驗收。
 
 ## 這是什麼
 
@@ -34,7 +34,7 @@
 
 **第 10 施工關完成（[PR #143](https://github.com/suzuke/AgEnD/pull/143)，2026-10-02）**：已接通本機 pipeline、task／review／workflow／team 操作與 checks 沙箱。事件收尾修正經全新 verifier r17、Ubuntu／macOS CI 與人工補驗通過，使用者已確認合併。驗證範圍、原始失敗與兩個未執行的 explorer 見 [驗證證據](docs/gates/gate-10-verification.md)。執行方式見 [pipeline runtime](docs/architecture/pipeline-runtime.md)。Claude、OpenCode driver、GitHub forge、Telegram 在第 12 施工關，服務註冊與發布在第 13 施工關。完整狀態與驗收證據見 [ROADMAP](docs/ROADMAP.md)。
 
-第 12A Claude 的 P1–P10 設計已確認，記為 [D40](docs/decisions/d40.md)：閒置走 channel、忙碌排隊走 Stop hook，兩者均用明確 `agend_ack`；P3／P4／P5 選 A。設計文件已於 [PR #138](https://github.com/suzuke/AgEnD/pull/138) 合併（`4390633`）；第 12A 的不自動重送 client 基礎已於 [#147](https://github.com/suzuke/AgEnD/pull/147) 合併（`8dfccf8`）；[Claude 持久化基礎 #148](docs/gates/gate-12a-store.md) 已經使用者確認合併（`7877dbe`）；[protocol 1.5／channel／Stop／ACK spool 基礎 #149](docs/gates/gate-12a-bridge.md) 已合併（`6dd552e`），使用者重驗 16 native cases 通過並清理。[共用 gh 防護 #150](docs/gates/gate-12a-gh-shim.md) 已於 2026-10-04 經使用者確認合併（`572dd73`）。[Claude Driver、啟動設定與 Interrupt](docs/gates/gate-12a-driver.md) #151 與[正式 P5／P6 啟動處理](docs/gates/gate-12a-startup-runtime.md) #152 已於 2026-10-06 經使用者確認合併（`cac2226`／`e7a8987`）。native／全新 verifier／雙平台 CI 與使用者重驗通過；兩個原 worktree 已清理。使用者要求[完整真模型 smoke](docs/gates/gate-12a-live-smoke.md)列為必要驗收，目前準備固定版本、命令及預算計畫；完整 12A 尚未驗收。
+第 12A Claude 的 P1–P10 設計已確認，記為 [D40](docs/decisions/d40.md)：閒置走 channel、忙碌排隊走 Stop hook，兩者均用明確 `agend_ack`；P3／P4／P5 選 A。設計文件已於 [PR #138](https://github.com/suzuke/AgEnD/pull/138) 合併（`4390633`）；第 12A 的不自動重送 client 基礎已於 [#147](https://github.com/suzuke/AgEnD/pull/147) 合併（`8dfccf8`）；[Claude 持久化基礎 #148](docs/gates/gate-12a-store.md) 已經使用者確認合併（`7877dbe`）；[protocol 1.5／channel／Stop／ACK spool 基礎 #149](docs/gates/gate-12a-bridge.md) 已合併（`6dd552e`），使用者重驗 16 native cases 通過並清理。[共用 gh 防護 #150](docs/gates/gate-12a-gh-shim.md) 已於 2026-10-04 經使用者確認合併（`572dd73`）。[Claude Driver、啟動設定與 Interrupt](docs/gates/gate-12a-driver.md) #151 與[正式 P5／P6 啟動處理](docs/gates/gate-12a-startup-runtime.md) #152 已於 2026-10-06 經使用者確認合併（`cac2226`／`e7a8987`）。native／全新 verifier／雙平台 CI 與使用者重驗通過；兩個原 worktree 已清理。使用者要求[完整真模型 smoke](docs/gates/gate-12a-live-smoke.md)列為必要驗收，已授權的固定計畫首次執行停於初始 idle 逾時，零測試訊息，失敗及清理經全新 verifier 覆核；完整 12A 尚未驗收。
 
 ## 系統圖
 
