@@ -184,3 +184,5 @@
 - 2026-10-06：#153 的固定診斷 v2 另行授權後執行一次：一個 instance、四份相同 raw frame、三鍵 written 與 live SessionStart、零工作訊息，結果 CAPTURED。全新 verifier 核原 classifier 因已錄製的 Try 提示變體而拒絕，footer 已涵蓋；補完整 `100x24-3` literal 與 native P6 回歸，不放寬未知畫面。本次自有程序、home、scratch、session 暫存與 trust key 已清理；完整 smoke 仍 FAILED，禁止自動重跑，未 merge。
 
 - 2026-10-06：#153 的 `91bb2bc` push 雙平台 CI 通過，但 PR macOS 的既有終端尾段測試測得 301.540459ms，超 300ms；原失敗保存，不放寬門檻。Ready literal 修正與完整 native bridge／outer 回歸、全新 verifier 及新 head CI 待核。
+
+- 2026-10-06：#153 準備下一份完整 smoke 的 observed runner：首次 idle 等待最多 28 份只讀 A／B frame，工作前重核 idle；後續工作不擷取。原七則訊息／900 秒／零重跑與 audit／cleanup 不變；固定新計畫待獨立核對及另行授權，沒有再次真 CLI 執行。

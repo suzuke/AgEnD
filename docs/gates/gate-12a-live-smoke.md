@@ -54,6 +54,27 @@ SQLite 在 daemon 停機後才讀取；禁止用 immutable bypass 或複製變�
 `cleanup.json` 的 `trust_cleanup_pending` 要在最後清理證據中核為不存在，不能由 smoke PASS 宣稱清理完成。
 失敗紀錄同樣要保留，未知身分／仍有程序／symlink 的路徑保留並報告；不得強制刪除。
 
+## 下一次完整 smoke 的畫面證據
+
+`scripts/claude_observed_smoke.py` 沿用原七則工作訊息／900 秒／不重送／native audit 與清理，
+另在首次 initial idle 等待擷取兩個 instance 的只讀原始 frame；15 秒間隔，每份最多 5 秒，
+最多 14 批／28 份。首次投遞前另留 Ready frame 並重核兩者仍 idle；後續工作階段不再擷取。
+helper 只 hello／subscribe，不 acquire／resize／input；捕捉失敗或身分錯誤就停止，不繼續訊息。
+新計畫固定新 runner、原 smoke runner、agend、cleanup、snapshot、Claude 六份 SHA；
+舊失敗及診斷 runner bytes 不改，已執行計畫不重用。這份新完整 smoke 尚未取得授權或執行。
+
+```bash
+python3 -B scripts/claude_observed_smoke.py \
+  --plan <全新 observed-plan.json> --out <全新私有證據目錄> \
+  --agend "$CARGO_TARGET_DIR/debug/agend" \
+  --cleanup "$CARGO_TARGET_DIR/debug/examples/claude_live_cleanup" \
+  --snapshot "$CARGO_TARGET_DIR/debug/examples/startup_frame"
+```
+
+取得該固定計畫授權後，用同一新 runner 的 `--execute`／`--approved-plan-sha256` 與
+`AGEND_REAL_CLAUDE_LIVE=1` 執行；不是沿用已消耗的第一次 smoke 或零訊息診斷授權。
+未錄製的 Ready 提示仍 unknown，可能在訊息前停止；native 通過不保證真模型 smoke 通過。
+
 ## 失敗後的只讀診斷
 
 `scripts/claude_startup_diagnostic.py --plan` 固定一個 A instance、90 秒、零工作訊息、四份只讀 native frame；它使用 production 啟動處理，仍可能寫三個已知 startup keys。每份 frame 最多等 5 秒，不取得控制權、不 resize、不送人工鍵；未知提示或失敗即停止。首次 frame 在 status 檢查之前留存，避免 attention 造成證據遺失。成功只記 `CAPTURED`，不宣稱模型通訊 smoke 或 12A 通過；真 CLI 版本查詢及啟動仍須取得這份新計畫授權。
