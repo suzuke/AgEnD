@@ -41,6 +41,9 @@ use crate::source::Source;
 /// How often the interactive loop ticks (gate 11 B P5: with the 200 ms
 /// refresh, output reaches the screen within 300 ms plus a round trip).
 pub const TICK: Duration = Duration::from_millis(100);
+// Full frames already arrive at up to 20 Hz. Drain their mailbox at the same
+// cadence so shared holder sampling and a UI tick do not add two slow waits.
+const FULL_TERMINAL_TICK: Duration = Duration::from_millis(50);
 
 /// Runs the TUI on this terminal until `q`.
 pub fn run(source: Box<dyn Source>, lang: Language) -> io::Result<()> {
@@ -65,7 +68,12 @@ pub fn run_with(
         while !app.quit {
             if Instant::now() >= next_tick {
                 app.tick();
-                next_tick = Instant::now() + TICK;
+                let interval = if app.term.as_ref().is_some_and(|term| term.full.is_some()) {
+                    FULL_TERMINAL_TICK
+                } else {
+                    TICK
+                };
+                next_tick = Instant::now() + interval;
             }
             let completed = terminal.draw(|frame| render_frame(frame, &mut app))?;
             let paint = native.prepare(&app, completed.buffer);

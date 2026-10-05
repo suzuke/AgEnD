@@ -55,6 +55,9 @@ holder 的 50ms 共用 sample 尚未更新，terminal hub 卻清掉 dirty。REFU
 到下一輪取樣；不延後首 frame，也不持續空轉。新增自動取樣下 history／focus／20 次 App 清理與尾段輸出 300ms 預算回歸。
 `26de55a` 的 macOS CI 另記錄一次 309.403 ms；原失敗保留。後續移除 P5 的重複 frame
 查詢，尾段回歸同時核 80×23 的人工 viewport 與仍會完整取樣的 100×24，維持每筆 300ms。
+`eda202c` 的 Ubuntu CI 在 100×24 仍記錄 300.808 ms，單次查詢不足以認證時效；
+完整終端的 App tick 改為 50ms，及時讀取至多 20Hz 的完整 frame。首頁及舊終端維持
+100ms tick，舊終端重拿仍 200ms；原 CI 超限證據及 300ms 斷言均保留。
 
 ## Fixture 與驗證邊界
 

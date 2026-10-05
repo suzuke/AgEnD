@@ -37,6 +37,8 @@ App 已選用此路徑；真 daemon／holder／PTY 的單次 Source 輸入與 th
 
 `agend --test tui_outer_pty` 另在原生外層 PTY 執行真 App binary；events 由 crossterm capture，尺寸由 kernel resize 通知，輸出以第二個真 holder parser 讀回。正常／unwind 都核 termios 與 capture modes 還原，另驗 20 次程序退出後 fd 回基準。[證據](../../docs/gates/gate-11c-outer-validation.md)。
 
+第 12A 的背景啟動取樣下，auto 尾段時效另核 80×23 及 100×24 的實際 agent viewport，各 12 筆仍要求 ≤300ms。`eda202c` CI 在 100×24 記錄 300.808ms，原失敗保留；完整終端改每 50ms 讀取 frame mailbox，首頁及舊終端保留 100ms tick、舊畫面重拿 200ms。沒有放寬預算或關掉啟動取樣。
+
 新 draw-size case 省略 Resize event、再注入舊尺寸；以共用 native draw helper 的實際 backend area 核 20×4 grant，未確認不送鍵。移除同步的 mutant exit 101；[CI 反例與重跑](../../docs/gates/gate-11c-regression-validation.md)。
 
 完整終端可用 tui_full 互動 demo；真 holder parser 經 FakeDaemon／ClientSource，支援兩個 client、鍵鼠、貼上、歷史與重連。沒有啟動真 agent；[指令與驗證範圍](../../docs/gates/gate-11c-demo.md)。

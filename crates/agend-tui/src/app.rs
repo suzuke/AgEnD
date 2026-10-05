@@ -248,7 +248,8 @@ impl App {
 
     /// Pull new events and keep the open terminal current, or try to
     /// reconnect when disconnected (not after a version mismatch). Call it
-    /// regularly (the interactive loop does every 100 ms).
+    /// regularly (the interactive loop does every 100 ms, or 50 ms with a
+    /// full terminal open).
     pub fn tick(&mut self) {
         if self.is_connected() {
             self.pull();
