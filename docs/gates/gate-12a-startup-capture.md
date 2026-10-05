@@ -97,7 +97,7 @@ P5 的原子畫面檢查或人工 owner 拒絕。`production_daemon_key_path_tes
 `startup=not_assessed`、無 revision CAS、非正式 P5 DaemonKey 的邊界維持。
 受控動作結果不明、被拒絕或期限到都失敗並保留證據，不重送。
 原生 producer 重播真 development frame；確認後的畫面是 synthetic，未當成真 fixture。
-16 個 native cases 包含既有 10 個回歸、三鍵正例、六種拒絕、兩寬矛盾／重複選單拒絕、兩寬外來 frame identity、resize 等待中的不一致 frame 拒絕及預設不增加權限／不重送。
+17 個 native cases 包含既有 10 個回歸、三鍵正例、六種拒絕、兩寬矛盾／重複選單拒絕、兩寬外來 frame identity、resize 等待中的不一致 frame 拒絕及預設不增加權限／不重送。
 原 13 個 native cases、整個 daemon／fmt／workspace clippy／實際 no-std 通過；
 第 14 個回歸在原規則失敗，修正後 14 cases／整個 daemon／fmt／clippy／實際 no-std 通過。
 example 缺任一 opt-in 都在 producer／output 建立前拒絕；全新 verifier 待核。
@@ -132,6 +132,9 @@ trust 回條後的 native frame 改成外來 instance／view 仍送第三鍵。�
 固定 `01f438e` 的全新 verifier 又重現 resize 等待迴圈略過不一致 frame 後仍送三鍵；
 原 REFUTED 保留。新增兩寬 instance／view／generation／size 回歸先核原 consumer 失敗；
 resize ACK 前只接受本次身分，以及原始或目標尺寸兩種合法過渡。修正後 16 native cases／整個 daemon／fmt／clippy／實際 no-std 通過；新全新 verifier 待核，真三鍵未執行。
+
+固定 `433d2a8` 的全新 verifier 另重現 trust 選單追加 selected Exit 仍確認，原 REFUTED 保留。
+trust 改為完整已錄製 No／Yes fixture，只替換本次 canonical path；新回歸先核原 consumer 失敗；17 native cases／整個 daemon／fmt／clippy／實際 no-std 通過，新全新 verifier 待核。
 
 ## 下一步
 

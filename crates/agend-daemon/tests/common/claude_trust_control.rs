@@ -75,8 +75,33 @@ impl Progress {
         {
             return Ok(None);
         }
-        let no = lines.contains(&"❯ No, exit") && lines.contains(&"Yes, I trust this folder");
-        let yes = lines.contains(&"No, exit") && lines.contains(&"❯ Yes, I trust this folder");
+        // Require a complete recorded menu; a second selection or extra text
+        // must not authorize either trust key. Only our exact workspace varies.
+        let (recorded_no, recorded_yes) = match frame.size.columns {
+            100 => (
+                include_str!(
+                    "../../../agend-core/tests/fixtures/screens/claude-2.1.284-workspace-trust-100x24.txt"
+                ),
+                include_str!(
+                    "../../../agend-core/tests/fixtures/screens/claude-2.1.284-workspace-trust-selected-yes-100x24.txt"
+                ),
+            ),
+            140 => (
+                include_str!(
+                    "../../../agend-core/tests/fixtures/screens/claude-2.1.284-workspace-trust-140x24.txt"
+                ),
+                include_str!(
+                    "../../../agend-core/tests/fixtures/screens/claude-2.1.284-workspace-trust-selected-yes-140x24.txt"
+                ),
+            ),
+            _ => return Ok(None),
+        };
+        let matches = |recorded: &str| {
+            let bound = recorded.replace("<rec>/h1/workspace/g12-startup-capture", &workspace);
+            normalized == bound.split_whitespace().collect::<Vec<_>>().join(" ")
+        };
+        let no = matches(recorded_no);
+        let yes = matches(recorded_yes);
         match (self.started, no, yes) {
             (0, true, false) => {
                 self.started = 1;

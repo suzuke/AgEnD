@@ -43,6 +43,8 @@ Development channels 蒐證用真提示文字經 native producer 重播，兩寬
 
 `inconsistent_frame_before_resize_ack_stops_without_input` 用同一 native proxy，在真 resize ACK 前傳遞真 server 畫面的欄位不一致版本；兩寬 instance／view／generation／size 都必須失敗且零 Input。正常 resize 的原始與目標尺寸仍可過渡。
 
+`trust_confirmation_rejects_extra_or_repeated_selections_at_both_widths` 以真 No fixture 經 native holder 產生兩寬畫面；No／Yes 各追加 selected Exit 或重複選項，須拒絕當次下一鍵且清理。trust 完整 fixture 只替換本次 canonical workspace，其他額外內容均 unknown。
+
 ## 下一步
 
 ```bash

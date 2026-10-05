@@ -99,3 +99,4 @@ export CARGO_TARGET_DIR=/private/tmp/agend-g12a-driver-target
 - 2026-10-05：`8d605bf` 的新 fresh verifier 找到 trust 回條後外來 frame instance／view 仍可觸發第三鍵，原 REFUTED 保留。補 subscribe／acquire／outer frame 身分核對與兩寬 native proxy 回歸；新回歸先核原 consumer 失敗，15 native cases／整個 daemon／fmt／clippy／實際 no-std 通過，新全新 verifier 待核，真三鍵未執行（#151）。
 
 - 2026-10-05：`01f438e` 的全新 verifier 重現 resize ACK 等待略過不一致 native frame 後仍送三鍵；原 REFUTED 保留。補兩寬 instance／view／generation／size 零 Input 回歸，原始與目標尺寸仍接受；新回歸先核原 consumer 失敗，修正後 16 native cases／整個 daemon／fmt／clippy／實際 no-std 通過，新全新 verifier 待核，真三鍵未執行（#151）。
+- 2026-10-05：`433d2a8` 全新 verifier 確認 resize 身分回歸成立，但 trust 選單追加第二個 selected Exit 仍確認，原 REFUTED 保留。trust 改為兩寬完整真 No／Yes fixture 僅替換本次 canonical path 後比對，新增兩階段 extra／duplicate selection 拒絕回歸；17 native cases／整個 daemon／fmt／clippy／實際 no-std 通過，新全新 verifier 待核，真三鍵未執行（#151）。

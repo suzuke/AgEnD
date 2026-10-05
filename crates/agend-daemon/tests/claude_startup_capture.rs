@@ -67,9 +67,15 @@ fn trust_worker(root: &Path, columns: u16, mode: &str) -> PathBuf {
     fs::write(root.join("mode"), mode).unwrap();
     fs::write(
         root.join("no-screen.txt"),
-        include_str!(
-            "../../agend-core/tests/fixtures/screens/claude-2.1.284-workspace-trust-100x24.txt"
-        ),
+        if columns == 100 {
+            include_str!(
+                "../../agend-core/tests/fixtures/screens/claude-2.1.284-workspace-trust-100x24.txt"
+            )
+        } else {
+            include_str!(
+                "../../agend-core/tests/fixtures/screens/claude-2.1.284-workspace-trust-140x24.txt"
+            )
+        },
     )
     .unwrap();
     let path = root.join("native-trust-worker");
@@ -95,6 +101,10 @@ if mode == 'duplicate-path-header':
 if mode == 'unknown':
     text = 'SYNTHETIC UNKNOWN STARTUP PROMPT\n'
 yes = text.replace('❯ No, exit\n   Yes, I trust this folder', '  No, exit\n ❯ Yes, I trust this folder')
+if mode.startswith('no-extra-'):
+    text = text.rstrip('\n') + '\n' + ('❯ 2. Exit' if mode.endswith('exit') else '❯ No, exit') + '\n'
+if mode.startswith('yes-extra-'):
+    yes = yes.rstrip('\n') + '\n' + ('❯ 2. Exit' if mode.endswith('exit') else '❯ Yes, I trust this folder') + '\n'
 def draw(value):
     os.write(1, ('\x1b[2J\x1b[H\x1b[?25l' + value.rstrip('\n').replace('\n', '\r\n')).encode())
 draw(yes if mode == 'preselected-yes' else text)
@@ -509,6 +519,51 @@ fn trust_path_must_be_bound_exactly_to_one_workspace_header_at_both_widths() {
                     .unwrap();
             assert_eq!(result["input_sent"], false, "{width}: {mode}");
             assert_eq!(result["terminal_input_operations_started"], 0);
+            assert!(
+                !Path::new(
+                    fs::read_to_string(root.path().join("workspace"))
+                        .unwrap()
+                        .trim()
+                )
+                .exists()
+            );
+        }
+    }
+}
+
+#[test]
+fn trust_confirmation_rejects_extra_or_repeated_selections_at_both_widths() {
+    for width in [100, 140] {
+        for mode in [
+            "no-extra-exit",
+            "no-extra-duplicate",
+            "yes-extra-exit",
+            "yes-extra-duplicate",
+        ] {
+            let root = TempDir::new("g12-trust-complete-menu").unwrap();
+            let program = trust_worker(root.path(), width, mode);
+            let out = root.path().join("evidence");
+            assert!(
+                capture::run(&controlled_options(&program, &out, width), &agend()).is_err(),
+                "{width}: {mode}"
+            );
+            let expected = if mode.starts_with("no-") {
+                b"".as_slice()
+            } else {
+                b"\x1b[B".as_slice()
+            };
+            assert_eq!(
+                fs::read(root.path().join("input-received")).unwrap_or_default(),
+                expected,
+                "{width}: {mode}"
+            );
+            let result: Value =
+                serde_json::from_str(&fs::read_to_string(out.join("result.json")).unwrap())
+                    .unwrap();
+            assert_eq!(
+                result["terminal_input_operations_started"],
+                if expected.is_empty() { 0 } else { 1 }
+            );
             assert!(
                 !Path::new(
                     fs::read_to_string(root.path().join("workspace"))
