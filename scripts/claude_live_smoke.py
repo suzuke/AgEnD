@@ -192,6 +192,17 @@ class Smoke:
         self.run([self.p["agend"], "send", IDS[0], self.p["prompts"][name], "--level", level], seconds=75, sender=IDS[1])
 
     def start(self):
+        # A nonce alone does not prove ownership of a pre-existing artifact.
+        # Check every instance before any version query or backend startup.
+        scratch_parent = Path(f"/private/tmp/claude-{os.getuid()}")
+        if os.path.lexists(scratch_parent):
+            info = scratch_parent.lstat()
+            require(stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid()
+                    and not scratch_parent.is_symlink(), "foreign scratch parent; preserved")
+        for instance in self.p.get("instances", IDS):
+            slug = re.sub(r"[^a-zA-Z0-9]", "-", str(self.home / "workspace" / instance))
+            for candidate in (PERSONAL / "projects" / slug, scratch_parent / slug):
+                require(not os.path.lexists(candidate), "pre-existing personal namespace; preserved")
         self.out.mkdir(mode=0o700)
         self.home.parent.mkdir(mode=0o700)
         self.home.mkdir(mode=0o700)
@@ -203,9 +214,6 @@ class Smoke:
                                         lambda: os.kill(os.getpid(), signal.SIGTERM))
         self.watchdog.daemon = True
         self.watchdog.start()
-        for instance in self.p.get("instances", IDS):
-            slug = re.sub(r"[^a-zA-Z0-9]", "-", str(self.home / "workspace" / instance))
-            require(not (PERSONAL / "projects" / slug).exists(), "foreign personal project exists; preserved")
         version = self.run(self.p["version_argv"])
         require(re.fullmatch(r"2\.1\.284(?: \(Claude Code\))?\s*", version) is not None, "queried version mismatch")
         log = (self.out / "daemon.log").open("wb")

@@ -67,7 +67,7 @@ python3 -B scripts/claude_startup_diagnostic.py \
   --snapshot "$CARGO_TARGET_DIR/debug/examples/startup_frame"
 ```
 
-runner 補核 Ready 的正常 `halted=1` 及三鍵 written；清理按 native SessionStart 的 session／cwd／scratch 路徑，檢查 uid／型別／連結後保留私有證據並刪整個自有 nonce namespace，含 bootstrap UUID。foreign／symlink／hardlink 不刪。global trust keys 仍由執行者精確清理，不能由 runner 宣稱已完成。
+runner 補核 Ready 的正常 `halted=1` 及三鍵 written；清理按 native SessionStart 的 session／cwd／scratch 路徑，檢查 uid／型別／連結後保留私有證據並刪整個自有 nonce namespace，含 bootstrap UUID。foreign／symlink／hardlink 不刪；所有 instance 的 personal project 與 scratch namespace 在第一個版本查詢前必須不存在，否則停止並保留。global trust keys 仍由執行者精確清理，不能由 runner 宣稱已完成。
 
 ## 目前紀錄
 
@@ -78,6 +78,8 @@ runner 補核 Ready 的正常 `halted=1` 及三鍵 written；清理按 native Se
 另一位全新 verifier 覆核失敗證據，推翻原 cleanup 完整性：兩個自有 scratchpad namespace 曾殘留，補清後獨立核 49 個精確路徑、兩個 trust keys、記錄 PID／PGID absent。亦發現正常 Ready 設 `halted=1`，原 audit 卻要求為 0；本次尚未走到該 audit 判斷。
 
 原始 terminal frames／transcripts／usage 沒有留存，不能認定失敗畫面或精確模型／API 次數。授權 metadata 是執行開始後 22,520ms 寫檔，使用者授權先於執行是 root 對話順序聲明，不把寫檔時間當授權事件時間。原證據與限制保留。
+
+新 fresh verifier 在 `08ff4c7` 推翻 namespace freshness：啟動前已有 regular sentinel 時，原清理仍刪除它（私有 copy 保留）。修正為所有 instance namespace `lexists` 檢查及 shared scratch parent 型別／owner 檢查，均在第一個版本查詢前；反例與重驗另留。
 
 
 ## 下一步
