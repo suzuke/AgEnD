@@ -6,6 +6,8 @@
 use crate::model::Backend;
 use crate::protocol::holder::ControlKey;
 
+pub mod claude_startup;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HardGateKind {
     UsageLimit,

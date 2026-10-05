@@ -613,7 +613,20 @@ impl Supervisor {
         };
         log::line(&format!("{id}: {}", what.trim_end()));
         self.show(instance, AgentState::Starting, what.trim_end().to_owned());
-        match self.runtime.start(&launch).await {
+        let started = if instance.backend == Backend::Claude && instance.delivery == "push" {
+            let Some(session) = instance.session_id.as_deref() else {
+                return self.fail(&id, "missing Claude session").await;
+            };
+            if let Err(e) = self.store.begin_claude_startup(&id, session).await {
+                return self
+                    .fail(&id, &format!("cannot persist Claude startup: {e}"))
+                    .await;
+            }
+            self.runtime.start_claude(&launch).await
+        } else {
+            self.runtime.start(&launch).await
+        };
+        match started {
             Ok(Started {
                 handle,
                 generation,

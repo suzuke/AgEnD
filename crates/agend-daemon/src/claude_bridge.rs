@@ -21,6 +21,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::Mutex;
+pub(crate) mod startup;
 
 #[derive(Default)]
 struct State {
@@ -30,6 +31,8 @@ struct State {
     revision: u64,
     busy: bool,
     reported_busy: Option<bool>,
+    initial: bool,
+    ready_generation: Option<String>,
 }
 #[derive(Default)]
 pub(crate) struct ClaudeBridge {
@@ -158,6 +161,13 @@ impl ClaudeBridge {
                     .await?;
                 reply.committed = true;
                 // Historical hooks are saved even when their instance is gone.
+                if added.inserted
+                    && matches!(event.as_str(), "UserPromptSubmit" | "SessionEnd" | "Stop")
+                {
+                    ctx.store
+                        .halt_claude_startup(&data.instance_id, session_id)
+                        .await?;
+                }
                 // Duplicate/replayed/old hooks can never take a queue or make idle.
                 if *replayed || !added.inserted || now.abs_diff(*occurred_at_unix_ms) > 5000 {
                     // A helper may die after publishing but before the live
@@ -175,6 +185,8 @@ impl ClaudeBridge {
                             && *occurred_at_unix_ms >= state.last_route_hook
                         {
                             state.idle = None;
+                            state.initial = false;
+                            state.ready_generation = None;
                             state.busy = false;
                             state.reported_busy = None;
                             state.last_route_hook = *occurred_at_unix_ms;
@@ -215,6 +227,8 @@ impl ClaudeBridge {
                 revision: 0,
                 busy: false,
                 reported_busy: None,
+                initial: false,
+                ready_generation: None,
             };
         }
         let route = match data.operation {
@@ -266,12 +280,14 @@ impl ClaudeBridge {
                 }
                 match event.as_str() {
                     "UserPromptSubmit" => {
+                        state.initial = false;
                         state.idle = None;
                         state.busy = true;
                         report_state(ctx, &data.instance_id, state, true, now).await?;
                         return Ok(reply);
                     }
                     "SessionEnd" => {
+                        state.initial = false;
                         state.idle = None;
                         state.busy = false;
                         state.reported_busy = None;
@@ -279,10 +295,13 @@ impl ClaudeBridge {
                     }
                     "SessionStart" => {
                         state.busy = false;
-                        state.idle = Some(Instant::now());
+                        state.initial = true;
+                        state.idle = None;
+                        state.ready_generation = None;
                         return Ok(reply);
                     }
                     "Stop" => {
+                        state.initial = false;
                         let native: serde_json::Value = serde_json::from_str(&payload)
                             .map_err(|_| invalid("invalid hook payload"))?;
                         if native.get("stop_hook_active").and_then(|v| v.as_bool()) != Some(false) {
@@ -301,9 +320,30 @@ impl ClaudeBridge {
             _ => return Err(invalid("unknown Claude operation")),
         };
         let revision = state.revision;
+        let initial = state.initial;
+        let ready_generation = state.ready_generation.clone();
         // Busy hooks must not wait behind a two-second holder snapshot. Check
         // the same state revision again before committing any delivery intent.
         drop(states);
+        if initial {
+            let ready = startup::live_frame(ctx, &data.instance_id)
+                .await
+                .filter(|f| ready_generation.as_deref() == Some(f.generation.as_str()))
+                .is_some_and(|f| {
+                    startup::prompt(&f, &instance.working_directory)
+                        == Some(agend_core::screen::claude_startup::Prompt::Ready)
+                });
+            if !ready {
+                let mut states = self.states.lock().await;
+                if let Some(state) = states.get_mut(&data.instance_id)
+                    && state.revision == revision
+                {
+                    state.idle = None;
+                    state.ready_generation = None;
+                }
+                return Ok(reply);
+            }
+        }
         // Live holder screen is required after restart too. Never reconnect
         // a second screen reader over the daemon's current holder link.
         let Some(feed) = ctx.runtime.live_terminal(&data.instance_id) else {

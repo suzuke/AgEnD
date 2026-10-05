@@ -161,3 +161,5 @@
 - 2026-10-05：`dabb35e` fresh verifier／使用者 native 重驗及 push／PR 雙平台 CI 全通過。另獲三鍵蒐證授權後，固定 Claude 2.1.284 的 100 欄只完成一個 Down，畫面仍為 No；按計畫停於首個失敗，未重送／Enter／140 欄。0 模型／訊息，native 暫存已清理；真原因與 session 觀察缺口保留。補完整提示穩定等待與私有清理身分，native 延遲 receiver 原 consumer 失敗，19 native cases／整個 daemon／fmt／workspace clippy／實際 no-std 通過，新全新 verifier 待核（#151）。
 
 - 2026-10-05：`e0cedfb` 的提示穩定等待與私有清理身分獲全新 verifier 局部 CONFIRMED，19 native capture／199 daemon 測試、獨立 32 native cases、fmt／workspace clippy／實際 no-std 及 push／PR 雙平台 CI 通過。其後新核准 ready 計畫的真 Claude 2.1.284 兩寬蒐證各完成 Down／trust Enter／development Enter，100／140 欄保存 13／11 frames 與主介面，0 模型 prompt／團隊訊息。另一位全新 verifier 核保留證據一致性與指定殘留目前不存在，有限範圍 CONFIRMED；7 個記憶體 mutation 均拒絕。原始失敗證據與清理歷史證明缺口保留，正式 P5／P6、先前 Down 原因及完整 12A 未認證（draft #151）。
+
+- 2026-10-05：接在 `53f4ea6` 開 `feat/gate-12a-startup-gate`，實作[正式 P5／P6 啟動處理](gates/gate-12a-startup-runtime.md)：完整真 fixture、單鍵 revision CAS、schema v9 按鍵 intent 及 SessionStart＋Ready 初始 idle。每次開 worktree 前先核前批已結束資源清理，規則加入 AGENTS.md；native／core 重驗、fresh verifier 與 CI 待核，未 merge。

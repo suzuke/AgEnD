@@ -55,6 +55,10 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0008_claude_owned_files",
         sql: include_str!("migrations/0008_claude_owned_files.sql"),
     },
+    Migration {
+        name: "0009_claude_startup",
+        sql: include_str!("migrations/0009_claude_startup.sql"),
+    },
 ];
 
 /// The schema version this binary creates and supports.

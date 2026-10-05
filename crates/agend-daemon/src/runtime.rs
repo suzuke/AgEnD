@@ -128,7 +128,23 @@ impl HolderRuntime {
     pub async fn start(&self, launch: &HolderLaunch) -> Result<Started, RuntimeError> {
         let inner = Arc::clone(&self.inner);
         let launch = launch.clone();
-        blocking(move || inner.start(&launch)).await
+        blocking(move || inner.start(&launch, None)).await
+    }
+
+    /// Sets a recorded startup geometry before Spawn, only for a new holder.
+    pub async fn start_claude(&self, launch: &HolderLaunch) -> Result<Started, RuntimeError> {
+        let inner = Arc::clone(&self.inner);
+        let launch = launch.clone();
+        blocking(move || {
+            inner.start(
+                &launch,
+                Some(agend_core::protocol::terminal::TerminalSize {
+                    rows: 24,
+                    columns: 100,
+                }),
+            )
+        })
+        .await
     }
 
     /// Connects to the running holder of `launch.instance_id` and re-sends
@@ -138,7 +154,7 @@ impl HolderRuntime {
         let inner = Arc::clone(&self.inner);
         let launch = launch.clone();
         blocking(move || {
-            let (attached, generation) = inner.attach(&launch)?;
+            let (attached, generation) = inner.attach(&launch, None)?;
             Ok(Started {
                 handle: inner.handle(&launch.instance_id, pid),
                 attached,
@@ -260,7 +276,11 @@ impl Inner {
         }
     }
 
-    fn start(&self, launch: &HolderLaunch) -> Result<Started, RuntimeError> {
+    fn start(
+        &self,
+        launch: &HolderLaunch,
+        initial_size: Option<agend_core::protocol::terminal::TerminalSize>,
+    ) -> Result<Started, RuntimeError> {
         let id = &launch.instance_id;
         validate_id(id).map_err(err)?;
         if let Ok(Some(pid)) = files::running(&self.home, id) {
@@ -309,7 +329,7 @@ impl Inner {
         if let Err(e) = reaper {
             return Err(err(format!("cannot start the reaper thread: {e}")));
         }
-        let (attached, generation) = self.attach(launch)?;
+        let (attached, generation) = self.attach(launch, initial_size)?;
         Ok(Started {
             handle: self.handle(id, pid),
             attached,
@@ -317,7 +337,11 @@ impl Inner {
         })
     }
 
-    fn attach(&self, launch: &HolderLaunch) -> Result<(Attached, u64), RuntimeError> {
+    fn attach(
+        &self,
+        launch: &HolderLaunch,
+        initial_size: Option<agend_core::protocol::terminal::TerminalSize>,
+    ) -> Result<(Attached, u64), RuntimeError> {
         let id = launch.instance_id.clone();
         // The old link first: a new connection takes over the old one, which
         // would then reconnect and take it back.
@@ -338,6 +362,7 @@ impl Inner {
             id.clone(),
             generation,
             Some(spawn),
+            initial_size,
             Arc::clone(&self.sink),
         )
         .map_err(|e| err(format!("holder {id}: {e}")))?;

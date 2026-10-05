@@ -294,6 +294,7 @@ pub fn open(
     id: String,
     generation: u64,
     spawn: Option<SpawnData>,
+    initial_size: Option<agend_core::protocol::terminal::TerminalSize>,
     sink: EventSink,
 ) -> Result<(Link, Attached), String> {
     let stopping = Arc::new(AtomicBool::new(false));
@@ -323,7 +324,7 @@ pub fn open(
     };
     let thread = std::thread::Builder::new()
         .name(format!("holder-link-{id}"))
-        .spawn(move || worker.run(spawn, first_tx));
+        .spawn(move || worker.run(spawn, initial_size, first_tx));
     let thread = match thread {
         Ok(thread) => thread,
         Err(error) => {
@@ -369,7 +370,12 @@ impl Worker {
         true
     }
 
-    fn run(self, spawn: Option<SpawnData>, first: mpsc::SyncSender<Result<Attached, String>>) {
+    fn run(
+        self,
+        spawn: Option<SpawnData>,
+        initial_size: Option<agend_core::protocol::terminal::TerminalSize>,
+        first: mpsc::SyncSender<Result<Attached, String>>,
+    ) {
         let socket = files::socket_path(&self.home, &self.id);
         let deadline = Instant::now() + CONNECT_WITHIN;
         let (mut conn, screen) = loop {
@@ -393,6 +399,17 @@ impl Worker {
         };
         if !self.publish(&conn) {
             let _ = first.send(Err("closed".into()));
+            return;
+        }
+        if let Some(size) = initial_size
+            && let Err(e) = conn.send(&HolderRequest::Resize {
+                data: agend_core::protocol::holder::ResizeData {
+                    rows: size.rows,
+                    columns: size.columns,
+                },
+            })
+        {
+            let _ = first.send(Err(format!("set initial terminal size: {e}")));
             return;
         }
         let outcome = match spawn {
