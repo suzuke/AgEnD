@@ -21,6 +21,8 @@ core 新增完整 frame 規則資料與啟動嘗試型別，沒有新增 pipelin
 
 支持錄製的 100／140 欄、24 列。新 Claude push holder 在 Spawn 前設 100×24；
 一般 runtime、Claude inbox 及接回既有 holder 不強制 resize。
+啟動辨識直接讀一份 24 列完整 frame，再核尺寸與 live generation；不先讀一列再重讀。
+小於 24 列的人工 viewport 在 holder 拒絕取樣，其他未錄製尺寸仍不授權啟動鍵或初始 idle。
 private startup capture 在啟動 daemon 前登記 `manual`：停用 P5 自動鍵及初始 resize，
 所有輸入由已授權的蒐證工具處理，維持被動蒐證的零按鍵邊界。raw PTY 測試也明確登記此模式。
 自動鍵不 Acquire 人工 owner；holder 在實際 PTY write 比對 generation 與 revision。
@@ -51,6 +53,8 @@ Stop 的既有忙閒／續行／ACK 邊界維持 D40，不把按鍵成功當成�
 holder 的 50ms 共用 sample 尚未更新，terminal hub 卻清掉 dirty。REFUTED 與只保留 dirty
 便成功的因果對照均保留。修正後若抓 frame 的起點距最新 notice 不足 50ms，保留 dirty
 到下一輪取樣；不延後首 frame，也不持續空轉。新增自動取樣下 history／focus／20 次 App 清理與尾段輸出 300ms 預算回歸。
+`26de55a` 的 macOS CI 另記錄一次 309.403 ms；原失敗保留。後續移除 P5 的重複 frame
+查詢，尾段回歸同時核 80×23 的人工 viewport 與仍會完整取樣的 100×24，維持每筆 300ms。
 
 ## Fixture 與驗證邊界
 

@@ -166,3 +166,4 @@
 - 2026-10-05：draft #152 接在 #151 後；`1beb03a` 的全新 verifier 重現五秒到期至首次 poll 間漏看未知畫面的誤投遞，REFUTED 證據保留。改為首次 poll 成立前持續採樣，納入原 native 反例與恢復後穩定五秒才可投遞的正向；重新獨立驗證與 CI 待核，未 merge。
 - 2026-10-05：正式 P5 與 private startup capture 隔離：啟動前持久登記 manual，停用自動鍵與初始 resize，raw PTY fixture 同樣明確登記；原失敗證據保留。既有 TUI 六例與兩寬已知 trust 被動零鍵回歸通過；另修正人工按鍵測試的空檔案競態，完整重驗與新 fresh verifier 待核（#152）。
 - 2026-10-05：`d81a7f3` 第二位全新 verifier 重現 P5 背景取樣令人工 TUI 漏掉尾段 modes，兩次反例與單獨 dirty 因果正對照保留為 REFUTED。terminal hub 改在 frame request 起點核 sample 是否已跨 notice 50ms，未跨則保留 dirty 到下一輪；新增 auto sampler 原生回歸先核舊版失敗，修正後 outer PTY 七例及額外 auto 尾段輸出 300ms 回歸通過，獨立重驗待核（#152）。
+- 2026-10-05：`26de55a` 本機完整 workspace／實際 no-std 及 Ubuntu CI 通過；macOS CI 分別失敗於 CLP-25 BrokenPipe 與 auto 尾段 309.403ms。第三位全新 verifier 用 4KiB socket buffer 重現原測試工具雙向阻塞；大型請求改為並行讀寫，同連線超限拒絕及後續真 PTY 輸入通過。P5 改一次完整 24 列查詢，人工及已錄製尺寸各 12 筆仍核 300ms；原失敗保留，新 head 獨立驗證與 CI 待核（#152）。

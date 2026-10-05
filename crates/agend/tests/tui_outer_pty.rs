@@ -548,16 +548,19 @@ fn fd_count() -> usize {
 
 #[test]
 fn actual_app_renders_each_final_dirty_burst_within_the_local_budget() {
-    final_dirty_budget(Native::new());
+    final_dirty_budget(Native::new(), 80, 24);
 }
 
 #[test]
 fn actual_app_with_background_startup_sampling_keeps_final_dirty_output_within_budget() {
-    final_dirty_budget(Native::with_startup_sampling(true));
+    // Exercise both a shorter operator viewport and the recorded startup
+    // dimensions, where P5 still reads the shared complete 24-row grid.
+    final_dirty_budget(Native::with_startup_sampling(true), 80, 24);
+    final_dirty_budget(Native::with_startup_sampling(true), 100, 25);
 }
 
-fn final_dirty_budget(mut native: Native) {
-    let mut outer = Outer::new(&native, 80, 24, false);
+fn final_dirty_budget(mut native: Native, columns: u16, rows: u16) {
+    let mut outer = Outer::new(&native, columns, rows, false);
     outer.open();
     outer.acquire();
     // Measure more conservatively than the contract: start before notifying

@@ -16,19 +16,18 @@ use std::{
 
 pub(crate) async fn frame(connection: &TerminalConnection) -> Option<TerminalFrame> {
     tokio::time::timeout(Duration::from_secs(2), async {
-        let header = connection
-            .frame(TerminalViewport { top: None, rows: 1 })
-            .await
-            .ok()?;
+        // Every recorded startup rule has exactly 24 rows. Request that
+        // complete frame once, rather than sampling the shared grid twice.
+        // A shorter operator viewport is refused without capturing the grid.
         let frame = connection
             .frame(TerminalViewport {
                 top: None,
-                rows: header.size.rows,
+                rows: 24,
             })
             .await
             .ok()?;
-        (header.generation == frame.generation
-            && header.size == frame.size
+        (frame.size.rows == 24
+            && matches!(frame.size.columns, 100 | 140)
             && !frame.alternate_screen
             && frame.viewport_top == frame.live_top
             && !frame.viewport_clamped

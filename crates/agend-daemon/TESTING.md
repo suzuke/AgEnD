@@ -12,6 +12,7 @@
 正式 P5 啟動按鍵與 P6 初始 idle 的實作、schema v9 與 native 驗證邊界見 [啟動處理](../../docs/gates/gate-12a-startup-runtime.md)。
 private startup capture 明確登記 manual 模式，保留原初始尺寸、停用 daemon 自動鍵；SQLite 重啟仍保留。capture 的 native 回歸與 raw PTY 測試不受正式 P5 介入。
 `agend/tests/tui_outer_pty.rs` 另保留自動 P5 與人工 TUI 共存的真 outer PTY 回歸，核最後 modes、focus、history 與 20 次 App 關閉；terminal hub 在共用 sample 到期後再確認尾段，不用 manual 模式取代此項。
+自動 P5 的尾段時效在 80×23 與 100×24 的實際 agent viewport 各驗 12 筆，保留每筆 300ms 預算。啟動辨識只查一份完整 24 列 frame；未知尺寸不建立初始 idle。
 
 ## 第 10 施工關驗證
 

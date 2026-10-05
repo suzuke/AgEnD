@@ -218,3 +218,76 @@ fn full_tui_source_controls_the_real_daemon_and_native_pty() {
     drop(source);
     assert_eq!(threads.load(std::sync::atomic::Ordering::SeqCst), 0);
 }
+
+#[test]
+fn small_socket_buffers_reject_large_input_and_keep_native_consumer_live() {
+    use agend_core::protocol::terminal::{TerminalSize, TerminalViewport};
+    use agend_testkit::contract::terminal::Window;
+    use std::os::fd::AsRawFd;
+    use std::time::{Duration, Instant};
+    let native = Native::default();
+    let mut window = Window::open(&native, None);
+    let attach = window.acquire(
+        "duplex-owner",
+        TerminalSize {
+            rows: 8,
+            columns: 32,
+        },
+    );
+    let socket = window.client.writer_clone().unwrap();
+    let buffer: libc::c_int = 4096;
+    for option in [libc::SO_SNDBUF, libc::SO_RCVBUF] {
+        assert_eq!(
+            unsafe {
+                libc::setsockopt(
+                    socket.as_raw_fd(),
+                    libc::SOL_SOCKET,
+                    option,
+                    (&buffer as *const libc::c_int).cast(),
+                    std::mem::size_of_val(&buffer) as libc::socklen_t,
+                )
+            },
+            0
+        );
+    }
+    // Keep the native server's actual parser frame pending while the large
+    // request is sent. This recreates the duplex buffering pressure in CI.
+    window
+        .client
+        .send(&ClientRequest::SetTerminalViewport {
+            data: TerminalViewportData {
+                request_id: "duplex-pending-frame".into(),
+                instance_id: window.frame.instance_id.clone(),
+                view_id: window.frame.view_id.clone(),
+                generation: window.frame.frame.generation.clone(),
+                viewport: TerminalViewport { top: None, rows: 8 },
+            },
+        })
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(100));
+    assert!(
+        matches!(window.input("duplex-oversized",&attach,&vec![b'x';agend_core::protocol::holder::MAX_REQUEST_LINE]),ClientResponse::Error {data} if data.code==error_code::INVALID_REQUEST)
+    );
+    assert!(matches!(
+        window.input("duplex-valid-after", &attach, b"DUPLEX-NATIVE-AFTER\n"),
+        ClientResponse::TerminalControlAck { .. }
+    ));
+    assert_eq!(window.frame.request_id, "duplex-pending-frame");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !native.received().contains("DUPLEX-NATIVE-AFTER") {
+        assert!(
+            Instant::now() < deadline,
+            "valid subsequent input did not reach native consumer"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(
+        native.received().trim(),
+        "DUPLEX-NATIVE-AFTER",
+        "oversized input reached native PTY consumer"
+    );
+    drop(window);
+    let root = native._lab.root.clone();
+    drop(native);
+    assert!(!root.exists(), "own native duplex lab leaked");
+}
