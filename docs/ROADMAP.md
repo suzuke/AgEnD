@@ -155,3 +155,5 @@
 - 2026-10-05：第三鍵蒐證工具 `28d6341` 的全新 verifier 重現三種矛盾／重複選單會誤確認，原 REFUTED 證據保留。改成整份已錄製畫面只忽略空白後相等，補兩寬拒絕回歸；14 native cases／整個 daemon／fmt／clippy／實際 no-std 通過，新全新 verifier 待核，真三鍵蒐證未執行（#151）。
 
 - 2026-10-05：`8d605bf` 的新 fresh verifier 找到 trust 回條後外來 frame instance／view 仍可觸發第三鍵，原 REFUTED 保留。補 subscribe／acquire／outer frame 身分核對與兩寬 native proxy 回歸；新回歸先核原 consumer 失敗，15 native cases／整個 daemon／fmt／clippy／實際 no-std 通過，新全新 verifier 待核，真三鍵未執行（#151）。
+
+- 2026-10-05：`01f438e` 的全新 verifier 重現 resize ACK 等待略過不一致 native frame 後仍送三鍵；原 REFUTED 保留。補兩寬 instance／view／generation／size 零 Input 回歸，原始與目標尺寸仍接受；新回歸先核原 consumer 失敗，修正後 16 native cases／整個 daemon／fmt／clippy／實際 no-std 通過，新全新 verifier 待核，真三鍵未執行（#151）。

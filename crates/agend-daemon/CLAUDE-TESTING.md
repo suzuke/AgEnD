@@ -41,6 +41,8 @@ Development channels 蒐證用真提示文字經 native producer 重播，兩寬
 
 `foreign_frame_after_trust_completion_never_authorizes_development_input` 經自有 proxy 轉送真 daemon wire；確認 trust ACK 已轉送後才改 native frame 的 instance／view。兩寬均拒絕第三鍵並清理，proxy 不手造 frame。
 
+`inconsistent_frame_before_resize_ack_stops_without_input` 用同一 native proxy，在真 resize ACK 前傳遞真 server 畫面的欄位不一致版本；兩寬 instance／view／generation／size 都必須失敗且零 Input。正常 resize 的原始與目標尺寸仍可過渡。
+
 ## 下一步
 
 ```bash

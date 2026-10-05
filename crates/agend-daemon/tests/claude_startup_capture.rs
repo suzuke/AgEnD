@@ -304,7 +304,8 @@ fn foreign_frame_after_trust_completion_never_authorizes_development_input() {
             let proxy = root.path().join("native-identity-proxy");
             let script = include_str!("common/claude_capture_identity_proxy.py")
                 .replace("__REAL__", &serde_json::to_string(&agend()).unwrap())
-                .replace("__FIELD__", &serde_json::to_string(field).unwrap());
+                .replace("__FIELD__", &serde_json::to_string(field).unwrap())
+                .replace("__PHASE__", "\"outer\"");
             fs::write(&proxy, format!("#!/usr/bin/env python3\n{script}")).unwrap();
             fs::set_permissions(&proxy, fs::Permissions::from_mode(0o700)).unwrap();
             let out = root.path().join("evidence");
@@ -345,6 +346,62 @@ fn foreign_frame_after_trust_completion_never_authorizes_development_input() {
             assert!(
                 !Path::new(
                     fs::read_to_string(root.path().join("workspace"))
+                        .unwrap()
+                        .trim()
+                )
+                .exists()
+            );
+        }
+    }
+}
+
+#[test]
+fn inconsistent_frame_before_resize_ack_stops_without_input() {
+    for width in [100, 140] {
+        for field in ["instance_id", "view_id", "generation", "size"] {
+            let root = TempDir::new("g12-capture-resize-identity").unwrap();
+            let program = development_worker(root.path(), width, "normal");
+            let proxy = root.path().join("native-identity-proxy");
+            let script = include_str!("common/claude_capture_identity_proxy.py")
+                .replace("__REAL__", &serde_json::to_string(&agend()).unwrap())
+                .replace("__FIELD__", &serde_json::to_string(field).unwrap())
+                .replace("__PHASE__", "\"resize\"");
+            fs::write(&proxy, format!("#!/usr/bin/env python3\n{script}")).unwrap();
+            fs::set_permissions(&proxy, fs::Permissions::from_mode(0o700)).unwrap();
+            let out = root.path().join("evidence");
+            let mut opts = controlled_options(&program, &out, width);
+            opts.accept_development_channels = true;
+            assert!(capture::run(&opts, &proxy).is_err(), "{width}: {field}");
+            assert!(
+                fs::read(root.path().join("input-received"))
+                    .unwrap_or_default()
+                    .is_empty()
+            );
+            let result: Value =
+                serde_json::from_str(&fs::read_to_string(out.join("result.json")).unwrap())
+                    .unwrap();
+            assert_eq!(result["terminal_input_operations_started"], 0);
+            assert_eq!(result["terminal_input_operations_completed"], 0);
+            assert_eq!(result["input_sent"], false);
+            let events: Vec<Value> = fs::read_to_string(root.path().join("identity-wire-events"))
+                .unwrap()
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+            assert!(
+                events
+                    .iter()
+                    .any(|event| event["phase"] == "frame_injected")
+            );
+            assert!(events.iter().all(|event| {
+                !event["request_id"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .starts_with("capture-trust-")
+            }));
+            assert!(
+                !Path::new(
+                    fs::read_to_string(root.path().join("identity-native-home"))
                         .unwrap()
                         .trim()
                 )

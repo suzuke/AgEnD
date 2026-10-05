@@ -2,9 +2,11 @@
 import json, os, pathlib, signal, socket, subprocess, sys, threading, time
 REAL = __REAL__
 FIELD = __FIELD__
+PHASE = __PHASE__
 ROOT = pathlib.Path(__file__).resolve().parent
 if sys.argv[1:] != ["daemon"]:
     os.execv(REAL, [REAL] + sys.argv[1:])
+(ROOT / "identity-native-home").write_text(os.environ["AGEND_HOME"])
 child = subprocess.Popen([REAL, "daemon"], stderr=subprocess.PIPE)
 signal.signal(signal.SIGINT, lambda sig, frame: child.send_signal(sig))
 signal.signal(signal.SIGTERM, lambda sig, frame: child.send_signal(sig))
@@ -31,22 +33,33 @@ def serve(down, upstream):
     threading.Thread(target=requests, daemon=True).start()
     trust_done = False
     held = []
+    last_native_frame = None
     def inject(message):
         data = message["data"]
-        trace({"phase": "frame_injected", "field": FIELD, "native_value": data[FIELD]})
-        data[FIELD] = "foreign-native-envelope"
+        identity = data["frame"] if FIELD in ["generation", "size"] else data
+        trace({"phase": "frame_injected", "field": FIELD, "native_value": identity[FIELD]})
+        if FIELD == "size":
+            identity["size"]["rows"] += 1
+        else:
+            identity[FIELD] = "inconsistent-native-envelope"
         down.sendall((json.dumps(message) + "\n").encode())
     try:
         for line in up.makefile("rb"):
             message = json.loads(line)
             if message.get("type") == "terminal_frame":
+                last_native_frame = json.loads(json.dumps(message))
                 text = "\n".join("".join(cell["text"] for cell in row) for row in message["data"]["frame"]["cells"])
-                if "WARNING: Loading development channels" in text:
+                if PHASE == "outer" and "WARNING: Loading development channels" in text:
                     if trust_done:
                         inject(message)
                     else:
                         held.append(message)
                     continue
+            if PHASE == "resize" and message.get("type") == "terminal_control_ack" and message.get("data", {}).get("request_id") == "capture-size":
+                assert last_native_frame is not None
+                inject(json.loads(json.dumps(last_native_frame)))
+                time.sleep(.05)
+                trace({"phase": "size_ack_forwarded"})
             down.sendall(line)
             if message.get("type") == "terminal_control_ack" and message.get("data", {}).get("request_id") == "capture-trust-enter":
                 trust_done = True

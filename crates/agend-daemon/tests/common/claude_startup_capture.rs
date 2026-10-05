@@ -247,6 +247,17 @@ fn capture(
             ClientResponse::TerminalControlAck { data } if data.request_id == "capture-size" => {
                 break data;
             }
+            ClientResponse::TerminalFrame { data } => {
+                // Resizing can publish either the old or requested dimensions
+                // before its ACK. All frames must still belong to this view.
+                if data.instance_id != ID
+                    || data.view_id != first.view_id
+                    || data.frame.generation != first.frame.generation
+                    || data.frame.size != first.frame.size && data.frame.size != options.size
+                {
+                    return Err("capture resize frame identity or size changed".into());
+                }
+            }
             ClientResponse::Error { .. } => return Err("capture resize refused".into()),
             _ => {
                 if Instant::now() >= deadline {
