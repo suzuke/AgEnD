@@ -50,7 +50,7 @@ pipeline 的 `dispatch:<ticket>`／reviewer 派工 id 保留原值，ACK 接受�
 
 遺失 Esc 回覆案例讓真 holder／PTY 收到一次 Esc，再丟掉其原生 completion；四次開機保持同一投遞識別碼與結果不明，沒有寫 content、沒有第二次 Esc。測試代理會還原 socket，holder／helper／home 都由 fixture 清理。
 
-全新無相關 context 的 checkpoint verifier 對 `afe5188` 重跑 native demo／實際 no-std 通過，但找出 instance args 中的 `--` 能把 daemon-owned 旗標移到 options terminator 後方；原 head 判有缺陷。作者先重現回歸 exit 101，再拒絕 `--`，驗證 fresh／resume 均拒絕、拒絕時不建立三個設定檔；inbox 保持原路徑。修正後 17 個 Driver 單元、整個 daemon crate、workspace clippy 與實際 no-std 通過。修正版 `441d658` 的第二位全新 verifier 針對 terminator 修正判定 CONFIRMED，另以真 workspace 矩陣與 native supervisor 核拒絕不產生設定檔；作者單元的路徑斷言已改成真正 workspace。這份局部結果不認證完整 12A。必要反例與最新成功 log 保存於 `/Users/suzuke/Documents/Hack/AgEnD-ops/g12a-native-checkpoint-20261005/`；新 fixture 修正的獨立驗證及 CI 另核。
+全新無相關 context 的 checkpoint verifier 對 `afe5188` 重跑 native demo／實際 no-std 通過，但找出 instance args 中的 `--` 能把 daemon-owned 旗標移到 options terminator 後方；原 head 判有缺陷。作者先重現回歸 exit 101，再拒絕 `--`，驗證 fresh／resume 均拒絕、拒絕時不建立三個設定檔；inbox 保持原路徑。修正後 17 個 Driver 單元、整個 daemon crate、workspace clippy 與實際 no-std 通過。修正版 `441d658` 的第二位全新 verifier 針對 terminator 修正判定 CONFIRMED，另以真 workspace 矩陣與 native supervisor 核拒絕不產生設定檔；作者單元的路徑斷言已改成真正 workspace。這份局部結果不認證完整 12A。必要反例與最新成功 log 保存於 `/Users/suzuke/Documents/Hack/AgEnD-ops/g12a-native-checkpoint-20261005/`；`cb0212c` 的全新 fixture verifier 已局部 CONFIRMED，固定 head CI 另核。
 
 CI 在 `441d658` 暴露兩個測試前提空窗：macOS 的 DRV-4 在 actor 等待 5.3 秒後送達，daemon 尚未保存 idle，正確回 queued；Ubuntu 的 pipeline 看到 approve 階段後，approval attention 尚未發布。DRV fixture 現在等實際 Driver 的最新 BusyChanged idle 事件；刻意提早 readiness hint 的回歸通過，暫時忽略真 idle 紀錄的反向仍以 queued 失敗（exit 101）。pipeline fixture 在原 60 秒期限內等同一 fleet view 具備階段與 attention；15 cases 通過。產品逾時、Sent／Confirmed 斷言與核准行為未改。最新 native demo／clippy／fmt／實際 no-std 通過，固定新 head CI 及 fresh verifier 待核，原 CI 失敗 log 保留。
 
@@ -73,3 +73,5 @@ export CARGO_TARGET_DIR=/private/tmp/agend-g12a-driver-target
 補完表中的未完成工作，執行完整 adapters demo、文件與依賴檢查，交 fresh verifier 驗證；push／draft PR／CI 依既有授權進行，merge 等使用者驗收及明確確認。驗證結束移除本批暫存與程序，待 merge 的實作 worktree 保留供驗收。
 
 - 2026-10-05：`441d658` 的 options terminator 修正獲第二位全新 verifier 局部 CONFIRMED；CI 揭露 DRV idle 與 pipeline approval attention 的 fixture 前提空窗，補真實狀態 barrier 與提早 hint 反向。17 Driver／3 process／27 bridge 測試入口、15 pipeline cases、clippy／fmt／實際 no-std 通過；fixture 修正版獨立驗證及新版 CI 待核，完整 12A 未完成（#151）。
+
+- 2026-10-05：`cb0212c` 全新無相關 context verifier 判局部 CONFIRMED：native demo／15 pipeline cases／clippy／fmt／實際 no-std 通過；忽略 idle 的反向 cargo 101。注入一次消費端 FleetView attention 空窗時，新 helper 等下一個真 view 後 single merge，原 helper 以 missing attention 失敗；這是消費端故障注入，不宣稱控制 daemon 原生發布順序。已還原 mutations、清理該 verifier 的 worktree／branch／target／程序／fixtures；固定 head 雙平台 CI 尚待完成，完整 12A 未認證（#151）。
