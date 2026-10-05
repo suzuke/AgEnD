@@ -150,6 +150,21 @@ fn development_worker(root: &Path, width: u16, mode: &str) -> PathBuf {
                 "  1. I am using this for local development\n  ❯ 2. Exit",
             )
         }
+        "selected-exit-plus-decoy" => {
+            screen = screen.replace(
+                "❯ 1. I am using this for local development\n    2. Exit",
+                "  1. I am using this for local development\n  ❯ 2. Exit\n\n  ❯ 1. I am using this for local development\n    2. Exit",
+            );
+        }
+        "duplicate-selected-local" => {
+            screen = format!(
+                "{}\n  ❯ 1. I am using this for local development\n",
+                screen.trim_end()
+            );
+        }
+        "duplicate-selected-exit" => {
+            screen = format!("{}\n  ❯ 2. Exit\n", screen.trim_end());
+        }
         "missing-warning" => {
             screen = screen.replace("Do not use this", "Synthetic altered warning")
         }
@@ -241,6 +256,42 @@ fn development_confirmation_rejects_other_servers_selection_and_incomplete_warni
             )
             .exists()
         );
+    }
+}
+
+#[test]
+fn development_confirmation_rejects_contradictory_or_repeated_menu() {
+    for width in [100, 140] {
+        for mode in [
+            "selected-exit-plus-decoy",
+            "duplicate-selected-local",
+            "duplicate-selected-exit",
+        ] {
+            let root = TempDir::new("g12-development-conflicting").unwrap();
+            let program = development_worker(root.path(), width, mode);
+            let out = root.path().join("evidence");
+            let mut opts = controlled_options(&program, &out, width);
+            opts.accept_development_channels = true;
+            assert!(capture::run(&opts, &agend()).is_err(), "{width}: {mode}");
+            assert_eq!(
+                fs::read(root.path().join("input-received")).unwrap(),
+                b"\x1b[B\r",
+                "{width}: {mode}"
+            );
+            let result: Value =
+                serde_json::from_str(&fs::read_to_string(out.join("result.json")).unwrap())
+                    .unwrap();
+            assert_eq!(result["terminal_input_operations_started"], 2);
+            assert_eq!(result["terminal_input_operations_completed"], 2);
+            assert!(
+                !Path::new(
+                    fs::read_to_string(root.path().join("workspace"))
+                        .unwrap()
+                        .trim()
+                )
+                .exists()
+            );
+        }
     }
 }
 

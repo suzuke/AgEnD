@@ -93,3 +93,5 @@ export CARGO_TARGET_DIR=/private/tmp/agend-g12a-driver-target
 - 2026-10-05：為取得 channels 確認後的真畫面，準備第三個獨立 opt-in 的受控蒐證模式；只在兩個 trust 回條後，對完整且唯一 `server:agend` 選單送一次 Enter，最多三次 operator Input。13 個 native cases、整個 daemon／fmt／clippy／實際 no-std 通過；全新 verifier 待核，真三鍵執行尚未授權，P5／P6 未完成（#151）。
 
 - 2026-10-05：固定 `386d083` 的全新 verifier 對 fixture／分類規則局部 CONFIRMED；獨立 core／fmt／clippy／no-std／agend／10 native capture tests 與四種 mutation 通過，自有驗證資源已清理。140 欄 identity 觀察缺口與完整 P5／P6 待驗範圍保留。
+
+- 2026-10-05：第三鍵蒐證工具 `28d6341` 的全新 verifier 重現三種矛盾／重複選單會誤確認，原 REFUTED 證據保留。改成整份已錄製畫面只忽略空白後相等，補兩寬拒絕回歸；14 native cases／整個 daemon／fmt／clippy／實際 no-std 通過，新全新 verifier 待核，真三鍵蒐證未執行（#151）。

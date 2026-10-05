@@ -89,16 +89,17 @@ P5 的原子畫面檢查或人工 owner 拒絕。`production_daemon_key_path_tes
 新增 `--development-channel-control accept`，須同時指定 workspace trust 模式，
 另設 `AGEND_REAL_CLAUDE_STARTUP_CHANNELS=1`；既有被動與兩鍵模式不自動增加輸入。
 只在本次 generation 的 Down／trust Enter 都已有完整回條後，
-對已錄製的完整 development warning、唯一 `Channels: server:agend`、
-選到 `1. I am using this for local development` 及確認 footer 送一次 Enter。
+完整畫面與該寬度已錄製的 development frame 只忽略空白後逐字相等，才送一次 Enter；
+包含完整 warning、唯一 `Channels: server:agend`、local development 選項與 footer。
 其他 server、同名前綴、重複 Channels 標頭、選到 Exit、缺警告或過早出現都不送第三鍵。
 
 模式最多三次 operator Input，不確認後續畫面。即使提示未消失，也不再送 Enter；
 `startup=not_assessed`、無 revision CAS、非正式 P5 DaemonKey 的邊界維持。
 受控動作結果不明、被拒絕或期限到都失敗並保留證據，不重送。
 原生 producer 重播真 development frame；確認後的畫面是 synthetic，未當成真 fixture。
-13 個 native cases 包含既有 10 個回歸及三鍵正例、六種拒絕、預設不增加權限／不重送。
-13 個 native cases、整個 daemon／fmt／workspace clippy／實際 no-std 通過，
+14 個 native cases 包含既有 10 個回歸、三鍵正例、六種拒絕、兩寬矛盾／重複選單拒絕及預設不增加權限／不重送。
+原 13 個 native cases、整個 daemon／fmt／workspace clippy／實際 no-std 通過；
+第 14 個回歸在原規則失敗，修正後 14 cases／整個 daemon／fmt／clippy／實際 no-std 通過。
 example 缺任一 opt-in 都在 producer／output 建立前拒絕；全新 verifier 待核。
 這是下一份待審執行計畫的工具；本次已完成的兩鍵真授權不涵蓋此模式。
 
@@ -117,6 +118,11 @@ workspace 開頭、或錯誤 workspace 畫面在別處提及自有路徑，皆�
 四種 classifier mutation 均被抓到；core／fmt／clippy／實際 no-std、獨立 agend
 及 10 個 native capture tests 通過。自有 worktree／branch／target 與程序已清理。
 140 欄的 live DB identity 觀察缺口仍保留；不認證正式 P5／P6 或完整 12A。
+
+固定 `28d6341` 的全新 verifier 找到三個原生反例：selected Exit 加 local decoy、
+重複 selected local、或追加 selected Exit，原工具均送第三鍵並成功。原 REFUTED 證據保留；
+改為整份版本化畫面只忽略空白後相等，新增兩寬拒絕回歸；修正獨立核對待完成。
+未執行真三鍵蒐證。
 
 ## 下一步
 

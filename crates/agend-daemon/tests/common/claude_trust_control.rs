@@ -37,18 +37,20 @@ impl Progress {
             .filter(|line| !line.is_empty())
             .collect::<Vec<_>>();
         if self.started == 2 {
-            // A third input needs its own explicit opt-in AND both completed
-            // trust inputs in this generation. Never confirm other servers.
+            // Match the complete recorded menu, ignoring only whitespace.
+            // Presence of a selected-local line cannot disambiguate a second
+            // selection or a decoy menu. Any extra content remains unknown.
+            let recorded = match frame.size.columns {
+                100 => include_str!(
+                    "../../../agend-core/tests/fixtures/screens/claude-2.1.284-development-channels-100x24.txt"
+                ),
+                140 => include_str!(
+                    "../../../agend-core/tests/fixtures/screens/claude-2.1.284-development-channels-140x24.txt"
+                ),
+                _ => return Ok(None),
+            };
             if self.completed == 2
-                && nonempty.iter().filter(|line| **line == "WARNING: Loading development channels").count() == 1
-                && nonempty.iter().filter(|line| line.starts_with("Channels:")).count() == 1
-                && lines.contains(&"Channels: server:agend")
-                && lines.contains(&"❯ 1. I am using this for local development")
-                && lines.contains(&"2. Exit")
-                && lines.contains(&"Enter to confirm · Esc to cancel")
-                && !lines.contains(&"Accessing workspace:")
-                && normalized.contains("--dangerously-load-development-channels is for local channel development only. Do not use this option to run channels you have downloaded off the internet.")
-                && normalized.contains("Please use --channels to run a list of approved channels.")
+                && normalized == recorded.split_whitespace().collect::<Vec<_>>().join(" ")
             {
                 self.started = 3;
                 return Ok(Some(("development-enter", "DQ==")));
