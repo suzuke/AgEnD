@@ -5,15 +5,30 @@ use agend_core::runtime_records::{ClaudeStartup, ClaudeStartupKey};
 use rusqlite::OptionalExtension;
 
 impl SqliteStore {
-    pub async fn begin_claude_startup(&self, id: &str, session: &str) -> Result<(), StoreError> {
+    pub async fn begin_claude_startup(&self, id: &str, session: &str) -> Result<bool, StoreError> {
         let id = id.to_owned();
         let session = session.to_owned();
         let launch = super::instances::new_session_id().map_err(StoreError::Io)?;
         self.call(move |conn| {
             conn.execute("INSERT INTO claude_startup (instance_id,session_id,launch_id,generation,halted,keys) \
                 VALUES (?1,?2,?3,NULL,0,'{}') ON CONFLICT(instance_id) DO UPDATE SET \
-                session_id=excluded.session_id, launch_id=excluded.launch_id, generation=NULL, halted=0, keys='{}'", 
+                session_id=excluded.session_id, launch_id=excluded.launch_id, generation=NULL, halted=claude_startup.manual, keys='{}'",
                 rusqlite::params![id,session,launch])?;
+            Ok(conn.query_row("SELECT manual=0 FROM claude_startup WHERE instance_id=?1", [&id], |r| r.get(0))?)
+        }).await
+    }
+
+    /// Diagnostic captures own all startup input. Register before starting
+    /// their private daemon; ordinary holder starts never clear this policy.
+    pub async fn manual_claude_startup(&self, id: &str, session: &str) -> Result<(), StoreError> {
+        let id = id.to_owned();
+        let session = session.to_owned();
+        let launch = super::instances::new_session_id().map_err(StoreError::Io)?;
+        self.call(move |conn| {
+            let changed = conn.execute("INSERT INTO claude_startup (instance_id,session_id,launch_id,generation,halted,manual,keys) \
+                SELECT ?1,?2,?3,NULL,1,1,'{}' WHERE EXISTS (SELECT 1 FROM instances WHERE id=?1 AND session_id=?2 AND backend='claude') \
+                ON CONFLICT(instance_id) DO UPDATE SET manual=1,halted=1", rusqlite::params![id,session,launch])?;
+            if changed != 1 { return Err(StoreError::Invalid("diagnostic Claude session does not match".into())); }
             Ok(())
         }).await
     }

@@ -617,12 +617,15 @@ impl Supervisor {
             let Some(session) = instance.session_id.as_deref() else {
                 return self.fail(&id, "missing Claude session").await;
             };
-            if let Err(e) = self.store.begin_claude_startup(&id, session).await {
-                return self
-                    .fail(&id, &format!("cannot persist Claude startup: {e}"))
-                    .await;
+            match self.store.begin_claude_startup(&id, session).await {
+                Ok(true) => self.runtime.start_claude(&launch).await,
+                Ok(false) => self.runtime.start(&launch).await,
+                Err(e) => {
+                    return self
+                        .fail(&id, &format!("cannot persist Claude startup: {e}"))
+                        .await;
+                }
             }
-            self.runtime.start_claude(&launch).await
         } else {
             self.runtime.start(&launch).await
         };

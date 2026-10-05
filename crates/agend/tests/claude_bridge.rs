@@ -873,7 +873,12 @@ fn busy_interrupt_keeps_queued_without_writing_or_stealing_operator_control() {
         }
     }
     let end = Instant::now() + Duration::from_secs(5);
-    while !f.home.join("keys.log").exists() {
+    // Creating the file precedes writing the native receipt; wait for the
+    // actual sentinel rather than racing a newly created empty file.
+    while fs::read_to_string(f.home.join("keys.log"))
+        .unwrap_or_default()
+        .is_empty()
+    {
         assert!(Instant::now() < end, "human owner lost control");
         std::thread::sleep(Duration::from_millis(10));
     }

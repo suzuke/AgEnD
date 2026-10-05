@@ -88,12 +88,7 @@ pub(crate) async fn run(ctx: Arc<Context>, bridge: Arc<ClaudeBridge>) {
                 let states = bridge.states.lock().await;
                 states
                     .get(&instance.id)
-                    .filter(|s| {
-                        s.session == session
-                            && s.initial
-                            && !s.busy
-                            && s.idle.is_none_or(|t| t.elapsed() < Duration::from_secs(5))
-                    })
+                    .filter(|s| s.session == session && s.initial && !s.busy)
                     .map(|s| s.revision)
             };
             let startup = ctx

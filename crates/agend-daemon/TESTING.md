@@ -10,6 +10,7 @@
 > - 下一步：`cargo test -p agend-daemon`；看 demo：`cargo xtask accept store`、`cargo xtask accept client`、`cargo xtask accept cli`。
 
 正式 P5 啟動按鍵與 P6 初始 idle 的實作、schema v9 與 native 驗證邊界見 [啟動處理](../../docs/gates/gate-12a-startup-runtime.md)。
+private startup capture 明確登記 manual 模式，保留原初始尺寸、停用 daemon 自動鍵；SQLite 重啟仍保留。capture 的 native 回歸與 raw PTY 測試不受正式 P5 介入。
 
 ## 第 10 施工關驗證
 

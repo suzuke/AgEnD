@@ -326,3 +326,81 @@ fn startup_lost_native_key_completion_never_replays_across_four_daemon_boots() {
     assert_eq!(proxy.dropped.load(Ordering::SeqCst), 1);
     drop(proxy);
 }
+
+// Fresh verifier counterexamples: keep the actual producer/PTY/daemon path.
+#[test]
+fn verifier_ready_with_extra_unknown_content_never_becomes_initial_idle() {
+    let mut f = producer(
+        100,
+        |frames| frames[3].push_str("\n❯ Unknown startup confirmation"),
+        false,
+    );
+    f.start();
+    f.hook("SessionStart", json!({"source":"startup"}));
+    fs::write(f.home.join("show"), b"").unwrap();
+    wait_keys(&f, b"\x1b[B\r\r");
+    std::thread::sleep(Duration::from_millis(5500));
+    assert!(
+        f.rpc(ClaudeOperation::Poll {
+            session_id: SESSION.into()
+        })
+        .messages
+        .is_empty(),
+        "unknown content cannot authorize initial idle"
+    );
+    f.stop();
+}
+
+#[test]
+fn verifier_ready_after_post_five_second_unknown_requires_new_stability_window() {
+    let mut f = producer(100, |_| {}, false);
+    let path = f.home.join("startup.py");
+    let script = fs::read_to_string(&path).unwrap();
+    let script = script.replace(
+        "while True:\n    count=",
+        r#"import threading
+def transition():
+    while index != 3: time.sleep(0.02)
+    time.sleep(5.8)
+    sys.stdout.write('\x1b[2J\x1b[HUNKNOWN STARTUP CONFIRMATION\r\n');sys.stdout.flush()
+    time.sleep(1.0)
+    show()
+    open(home+'/ready-restored','w').write('ready')
+threading.Thread(target=transition,daemon=True).start()
+while True:
+    count="#,
+    );
+    fs::write(path, script).unwrap();
+    f.start();
+    f.hook("SessionStart", json!({"source":"startup"}));
+    fs::write(f.home.join("show"), b"").unwrap();
+    wait_keys(&f, b"\x1b[B\r\r");
+    let until = Instant::now() + Duration::from_secs(12);
+    while !f.home.join("ready-restored").exists() {
+        assert!(
+            Instant::now() < until,
+            "native producer did not restore ready"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    std::thread::sleep(Duration::from_millis(200));
+    let reply = f.rpc(ClaudeOperation::Poll {
+        session_id: SESSION.into(),
+    });
+    assert!(
+        reply.messages.is_empty(),
+        "restored Ready has been stable only 200ms; native delivery was reserved: {:?}",
+        reply.messages
+    );
+    std::thread::sleep(Duration::from_millis(5300));
+    assert_eq!(
+        f.rpc(ClaudeOperation::Poll {
+            session_id: SESSION.into()
+        })
+        .messages
+        .len(),
+        1,
+        "restored known Ready eventually satisfies a fresh stability window"
+    );
+    f.stop();
+}

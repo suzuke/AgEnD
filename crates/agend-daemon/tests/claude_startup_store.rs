@@ -63,6 +63,21 @@ fn uncertain_startup_key_survives_reopen_retention_and_blocks_all_following_keys
     assert!(block_on(store.reserve_claude_startup_key(current.clone())).unwrap());
     block_on(store.finish_claude_startup_key(key, false)).unwrap();
     assert!(!block_on(store.reserve_claude_startup_key(current)).unwrap());
+    assert!(block_on(store.manual_claude_startup("claude", "foreign")).is_err());
+    block_on(store.manual_claude_startup("claude", session)).unwrap();
+    assert!(!block_on(store.begin_claude_startup("claude", session)).unwrap());
+    let manual = block_on(store.claude_startup("claude")).unwrap().unwrap();
+    assert!(manual.halted);
+    let manual_key = ClaudeStartupKey {
+        startup: manual,
+        generation: "holder-2".into(),
+        prompt: "trust_no".into(),
+        attempt: "manual-attempt".into(),
+    };
+    assert!(!block_on(store.reserve_claude_startup_key(manual_key)).unwrap());
+    drop(store);
+    let store = SqliteStore::open(dir.path(), 0).unwrap();
+    assert!(!block_on(store.begin_claude_startup("claude", session)).unwrap());
     block_on(store.remove_instance("claude")).unwrap();
     assert!(block_on(store.claude_startup("claude")).unwrap().is_none());
 }

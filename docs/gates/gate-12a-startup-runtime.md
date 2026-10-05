@@ -21,13 +21,15 @@ core 新增完整 frame 規則資料與啟動嘗試型別，沒有新增 pipelin
 
 支持錄製的 100／140 欄、24 列。新 Claude push holder 在 Spawn 前設 100×24；
 一般 runtime、Claude inbox 及接回既有 holder 不強制 resize。
+private startup capture 在啟動 daemon 前登記 `manual`：停用 P5 自動鍵及初始 resize，
+所有輸入由已授權的蒐證工具處理，維持被動蒐證的零按鍵邊界。raw PTY 測試也明確登記此模式。
 自動鍵不 Acquire 人工 owner；holder 在實際 PTY write 比對 generation 與 revision。
 unknown UI 仍可由操作者開啟終端處理，不能把一句「ready」當成啟動完成。
 
 ## 持久化與恢復
 
 migration `0009`／schema v9 的 `claude_startup` 每 instance 一筆：session、launch、
-物理 holder generation、halted 與三種 key 的 intent／written。
+物理 holder generation、halted、diagnostic `manual` 與三種 key 的 intent／written。
 真正新建 holder 前建立新 launch；daemon 接回既有 holder 不建立新 launch。
 缺啟動紀錄的舊 holder 不自動按鍵。
 
@@ -41,6 +43,9 @@ SessionStart 可以先於 Ready，也可以晚於 Ready；只配對 fresh live h
 historical／duplicate hook 不建立初始 idle。初始 idle 候選失去已知畫面或 generation 變動即撤銷。
 busy hook 不等待背景畫面查詢；初始投遞前再次核 live frame、session 與路由 revision。
 Stop 的既有忙閒／續行／ACK 邊界維持 D40，不把按鍵成功當成訊息收件。
+首次投遞 poll 完成前持續核畫面，不能在五秒到期後停止；首次 poll 成立才退出啟動採樣。
+全新 verifier 在 `1beb03a` 重現「Ready 五秒→未知一秒→Ready 200ms」誤投遞；
+原 REFUTED 保留，已移除提前停採樣條件，新增恢復後重等五秒及最終可投遞的 native 回歸。
 
 ## Fixture 與驗證邊界
 

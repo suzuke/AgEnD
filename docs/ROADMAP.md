@@ -163,3 +163,5 @@
 - 2026-10-05：`e0cedfb` 的提示穩定等待與私有清理身分獲全新 verifier 局部 CONFIRMED，19 native capture／199 daemon 測試、獨立 32 native cases、fmt／workspace clippy／實際 no-std 及 push／PR 雙平台 CI 通過。其後新核准 ready 計畫的真 Claude 2.1.284 兩寬蒐證各完成 Down／trust Enter／development Enter，100／140 欄保存 13／11 frames 與主介面，0 模型 prompt／團隊訊息。另一位全新 verifier 核保留證據一致性與指定殘留目前不存在，有限範圍 CONFIRMED；7 個記憶體 mutation 均拒絕。原始失敗證據與清理歷史證明缺口保留，正式 P5／P6、先前 Down 原因及完整 12A 未認證（draft #151）。
 
 - 2026-10-05：接在 `53f4ea6` 開 `feat/gate-12a-startup-gate`，實作[正式 P5／P6 啟動處理](gates/gate-12a-startup-runtime.md)：完整真 fixture、單鍵 revision CAS、schema v9 按鍵 intent 及 SessionStart＋Ready 初始 idle。每次開 worktree 前先核前批已結束資源清理，規則加入 AGENTS.md；native／core 重驗、fresh verifier 與 CI 待核，未 merge。
+- 2026-10-05：draft #152 接在 #151 後；`1beb03a` 的全新 verifier 重現五秒到期至首次 poll 間漏看未知畫面的誤投遞，REFUTED 證據保留。改為首次 poll 成立前持續採樣，納入原 native 反例與恢復後穩定五秒才可投遞的正向；重新獨立驗證與 CI 待核，未 merge。
+- 2026-10-05：正式 P5 與 private startup capture 隔離：啟動前持久登記 manual，停用自動鍵與初始 resize，raw PTY fixture 同樣明確登記；原失敗證據保留。既有 TUI 六例與兩寬已知 trust 被動零鍵回歸通過；另修正人工按鍵測試的空檔案競態，完整重驗與新 fresh verifier 待核（#152）。

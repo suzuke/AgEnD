@@ -93,7 +93,7 @@
 | 待同步佇列 | `ClaudePendingRecord`／pending spool（已實作） | bridge 本機持久化的 hook／ACK；daemon 確認入庫才刪，未同步檔不因到期清掉；不讓 helper 存取 agend.db。 |
 | 投遞結果不明 | `ClaudeDelivery::outcome_unknown`（store 已實作） | 投遞已開始但缺寫出結果；即使 DB 仍 queued，也停止自動重送，等證據或人處理。 |
 | driver 事件紀錄 | `driver_events`（migration `0007`／store 已實作） | daemon 入庫 seq 排序、保留 14 天；不是訊息與 ACK 的唯一恢復來源。 |
-| 啟動嘗試 | `ClaudeStartup`／`claude_startup` | 每次新 holder 啟動的 session 與 launch 身分；綁定物理 PTY generation，保存各已知提示的按鍵 intent／完成。接回既有 holder 不重設，結果不明不重送；每 instance 最多一筆。 |
+| 啟動嘗試 | `ClaudeStartup`／`claude_startup` | 每次新 holder 啟動的 session 與 launch 身分；綁定物理 PTY generation，保存各已知提示的按鍵 intent／完成。接回既有 holder 不重設，結果不明不重送；每 instance 最多一筆。diagnostic `manual` 模式保留人工啟動權，重新 start 不開啟自動鍵。 |
 
 來源：[D40](decisions/d40.md)、[store 基礎](gates/gate-12a-store.md)。本批已實作 Claude push 未終結保留例外及 terminal 起 30 天清理；Codex／Claude inbox 等一般訊息的 created_at 30 天規則不變。protocol 1.5、channel／Stop helper 與 ACK spool 已實作，見 [bridge 基礎](gates/gate-12a-bridge.md)；完整 Claude Driver／啟動設定與真 CLI 驗收仍未完成。
 

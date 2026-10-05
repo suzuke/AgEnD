@@ -5,5 +5,6 @@ CREATE TABLE claude_startup (
     launch_id TEXT NOT NULL,
     generation TEXT,
     halted INTEGER NOT NULL CHECK (halted IN (0, 1)),
+    manual INTEGER NOT NULL DEFAULT 0 CHECK (manual IN (0, 1)),
     keys TEXT NOT NULL CHECK (json_valid(keys) AND json_type(keys) = 'object')
 ) STRICT;
