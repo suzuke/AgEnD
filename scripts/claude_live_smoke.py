@@ -211,12 +211,13 @@ class Smoke:
         self.idle()
         self.initialized = True
         self.send("initial")
-        self.wait(lambda: self.status().get(IDS[0]) == "idle", "A idle before peer reply")
+        work = self.home / "workspace" / IDS[0]
+        self.wait(lambda: (work / "shim-paths.txt").is_file() and (work / "gh-exit.txt").is_file()
+                  and self.status().get(IDS[0]) == "idle", "A finished initial work before peer reply")
         (self.home / "workspace" / IDS[1] / "a-ready").write_text(self.nonce)
         self.wait(lambda: self.marker("peer-complete"), "model peer round trip")
         paths = (self.home / "workspace" / IDS[0] / "shim-paths.txt").read_text().splitlines()
         require(paths == [str(self.home / "bin" / t) for t in ("git", "kill", "pkill", "killall", "gh")], "Bash PATH bypasses a shim")
-        work = self.home / "workspace" / IDS[0]
         require((work / "gh-exit.txt").read_text() == "1" and "refused" in (work / "gh-guard.txt").read_text(), "gh guard was not observed")
         self.idle()
         self.send("busy")
@@ -281,6 +282,11 @@ class Smoke:
                         and (name != "peer_return" or "agend send" not in command)):
                     work_events.append(event)
             require(work_events and min(e["seq"] for e in work_events) > ack[0]["seq"], "work began before ACK or native Bash evidence missing")
+            if name in ("initial", "peer"):
+                recipient, prompt = ((IDS[1], "peer") if name == "initial" else (IDS[0], "peer_return"))
+                native_send = f"agend send {recipient} {shlex.quote(self.p['prompts'][prompt])}"
+                require(any(native_send in json.loads(e["payload"])["tool_input"]["command"]
+                            for e in work_events), "model peer send lacks exact native Bash command evidence")
             if name == "queued":
                 states = [e for e in events if e["kind"] == "AgendState" and e["session_id"] == row["session_id"] and e["occurred_at_unix_ms"] <= row["created_at_unix_ms"]]
                 require(states and json.loads(states[-1]["payload"])["busy"], "queue was not inserted while busy")

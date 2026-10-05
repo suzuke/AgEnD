@@ -29,7 +29,7 @@ JSON 計畫包含 version、完整 backend／operator／cleanup argv、每則 pr
 
 預算：五次 harness send（以 B 的 agent caller 身分）＋兩次模型 peer send＝七則工作訊息，工作期限 900 秒，另留停止與清理時間。
 這是工作訊息數，**不是 API 呼叫次數或費用硬上限**；ACK／Bash 工具可能產生額外模型續行。
-模型 haiku／low，事後核 transcript 的實際 model 為 `claude-haiku-4-5-20251001` 並保存 usage，拒絕 fallback；模型 alias 會更新，以[官方模型設定](https://code.claude.com/docs/en/model-config)及實收紀錄為準。runner 不自動 retry，監測到 daemon 內建 backend restart 即停止並拒絕通過；沒有主動 daemon restart、追加 prompt、手動 terminal input 或版本替換。
+模型以完整 ID `claude-haiku-4-5-20251001`／low 啟動，事後再核 transcript 的實際 model 並保存 usage，拒絕 fallback；完整 ID 固定方式見[官方模型設定](https://code.claude.com/docs/en/model-config)。runner 不自動 retry，監測到 daemon 內建 backend restart 即停止並拒絕通過；沒有主動 daemon restart、追加 prompt、手動 terminal input 或版本替換。
 模型額外送訊息、未 ACK、未知提示、路徑／版本差異或逾時都記失敗，不修補成成功。
 
 ```bash
