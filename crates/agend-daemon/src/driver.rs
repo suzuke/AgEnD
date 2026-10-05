@@ -6,4 +6,5 @@
 pub mod claude;
 #[cfg(unix)]
 pub mod codex;
+pub mod dispatch;
 pub mod opencode;

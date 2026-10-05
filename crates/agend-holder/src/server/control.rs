@@ -38,6 +38,25 @@ fn validate(
             "the holder generation changed; acquire control again",
         ));
     }
+    if let TerminalControlOperation::DaemonKey {
+        key,
+        expected_revision,
+    } = &request.operation
+    {
+        if state.control.is_some() {
+            return Err((
+                "control_lost",
+                "an operator owns this terminal; daemon key refused",
+            ));
+        }
+        if *expected_revision != state.screen.revision() {
+            return Err(("stale_screen", "the screen changed; daemon key refused"));
+        }
+        if pty::control_key_bytes(*key).is_none() {
+            return Err(("unknown_control_key", "unknown daemon control key"));
+        }
+        return Ok(());
+    }
     let attach = request.operation.attach_id();
     if attach.is_empty() || attach.len() > 128 {
         return Err(("invalid_request", "attach id must have 1 to 128 bytes"));
@@ -82,6 +101,17 @@ pub(super) fn enqueue(
         ));
     }
     let conn_id = conn.id;
+    if matches!(
+        request.operation,
+        TerminalControlOperation::DaemonKey { .. }
+    ) && conn.version < agend_core::protocol::holder::V1_2
+    {
+        return Some(failed(
+            &request.request_id,
+            "not_supported",
+            "daemon key completion requires holder protocol 1.2",
+        ));
+    }
     // Resize/Input/Release are validated at execution: an earlier Acquire on
     // the same queue may not yet have completed. Generation/size/live checks
     // are repeated there, and no operation can write before owner validation.
@@ -105,6 +135,9 @@ pub(super) fn enqueue(
         ));
     }
     let bytes = match &request.operation {
+        TerminalControlOperation::DaemonKey { key, .. } => {
+            pty::control_key_bytes(*key).map(Vec::from)
+        }
         TerminalControlOperation::Input { bytes_base64, .. } => match BASE64.decode(bytes_base64) {
             Ok(bytes) => Some(bytes),
             Err(error) => {
@@ -227,7 +260,13 @@ fn execute(
             state.control = Some(attach_id);
             push(holder, &mut state, &response);
         }
-        TerminalControlOperation::Input { .. } => {
+        TerminalControlOperation::Input { .. } | TerminalControlOperation::DaemonKey { .. } => {
+            if matches!(
+                request.operation,
+                TerminalControlOperation::DaemonKey { .. }
+            ) {
+                reply.attach_id = None;
+            }
             drop(state);
             // The same queue cannot execute a new grant until this completes.
             let result = out

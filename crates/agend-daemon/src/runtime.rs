@@ -120,6 +120,10 @@ impl HolderRuntime {
         &self.inner.home
     }
 
+    pub fn executable(&self) -> &Path {
+        &self.inner.agend
+    }
+
     /// Starts a holder for `launch` and its agent.
     pub async fn start(&self, launch: &HolderLaunch) -> Result<Started, RuntimeError> {
         let inner = Arc::clone(&self.inner);

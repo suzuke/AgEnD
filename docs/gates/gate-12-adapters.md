@@ -3,17 +3,17 @@
 > **TL;DR**
 > - A claude、B opencode、C GitHub forge、D Telegram；A 段已開始實作，接入尚未完成。
 > - 第 1–11 施工關已完成並合併；A 段設計 D40 已於 #138 合併（`4390633`）。
-> - 下一步：單次 client 請求基礎 #147 已 merge；持久化 #148 已 merge；bridge #149 已 merge；驗證共用 gh 防護，再接完整 Driver。
+> - 下一步：單次 client 請求基礎 #147 已 merge；持久化 #148 已 merge；bridge #149 已 merge；共用 gh 防護 #150 已 merge；完成 [Claude Driver／啟動設定與控制](gate-12a-driver.md)。
 
 ## 狀態
 
-**實作中**（2026-10-04）。設計 #138（`4390633`）、client #147（`8dfccf8`）、store #148（`7877dbe`）及 [bridge #149](gate-12a-bridge.md)（`6dd552e`）已合併。#149 經全新 verifier r2、雙平台 push／PR CI 與使用者 16 native cases 重驗通過，已清理本批 worktree／branch／target。下一批 [共用 gh 防護](gate-12a-gh-shim.md) 在獨立 `feat/gate-12a-gh-shim` worktree 實作，待驗證及確認 merge；完整 Claude Driver、啟動設定與 A 段功能驗收仍未完成。設計見 [D40](../decisions/d40.md)，來源見[確認紀錄](gate-12a-confirmations.md)。
+**實作中**（2026-10-05）。設計 #138（`4390633`）、client #147（`8dfccf8`）、store #148（`7877dbe`）及 [bridge #149](gate-12a-bridge.md)（`6dd552e`）已合併。#149 經全新 verifier r2、雙平台 push／PR CI 與使用者 16 native cases 重驗通過，已清理本批 worktree／branch／target。[共用 gh 防護 #150](gate-12a-gh-shim.md) 已依使用者確認合併為 `572dd73`；[Claude Driver／啟動設定與控制](gate-12a-driver.md) 在 `feat/gate-12a-claude-driver` 實作中；完整 Claude Driver、啟動設定與 A 段功能驗收仍未完成。設計見 [D40](../decisions/d40.md)，來源見[確認紀錄](gate-12a-confirmations.md)。
 
 ## 四段範圍
 
 | 段 | 範圍 | 目前進度 |
 |---|---|---|
-| A claude | channel、hooks、啟動設定、權限、忙碌策略、送達、清掃 | 設計已 merge；client 基礎 #147 已 merge；持久化 #148 已 merge；bridge #149 已 merge；共用 gh 防護待驗證／確認，完整接入未完成 |
+| A claude | channel、hooks、啟動設定、權限、忙碌策略、送達、清掃 | 設計已 merge；client 基礎 #147 已 merge；持久化 #148 已 merge；bridge #149 已 merge；共用 gh 防護 #150 已 merge；Driver／啟動設定與控制實作中，完整接入未完成 |
 | B opencode | `opencode serve`、session、送達與權限；三個 backend 互傳訊息 | A 段完成後另寫細案，尚未確認 |
 | C GitHub forge | push、PR、checks、head 對帳、merge 與收尾 | 第 10 關依賴已完成，細案尚未確認 |
 | D Telegram | notifier、allowlist、token、手機處理需要你、G4 已讀狀態 | 第 10 關依賴已完成，細案尚未確認 |
@@ -26,7 +26,7 @@ B／C／D 仍未實作；四段原提案的歷史參考保留在 `74ced40`，不
 |---|---|---|
 | 第 9、10 關尚未實作，11 尚未完成 | 第 1–11 關已完成 | 使用現有 CLI、pipeline、完整終端契約 |
 | Claude 請求預定放 protocol 1.4 | 1.4 已是完整終端 capability，一般請求仍只需 1.3 | P1 已採下一 minor 1.5；保留 1.3／1.4 相容性，精確 schema 見 [bridge 基礎](gate-12a-bridge.md) |
-| 下一個 migration 可能是 0005 | 已有 0005 pipeline 與 0006 Codex 人工輸入 thread | P7 已新增 0007 的事件／投遞表與 store API；runtime 尚未串接 |
+| 下一個 migration 可能是 0005 | 已有 0005 pipeline 與 0006 Codex 人工輸入 thread | P7 的 0007 已合併；Driver／runtime 正串接，完整驗收未完成 |
 | ingest 的 spool 已經寫好 | 原 baseline 兩者只有說明；本批 ingest 已有 hook／ACK replay，driver/claude 仍待接 | bridge／hooks／spool 已 merge；Claude Driver 與啟動配置仍須接入 |
 | 手動逐步驗收大部分 fake 行為 | 使用者要求可自動化的驗證由 agent 執行，完成後清理 | fresh verifier 重跑，提供可重驗指令；真 CLI／模型回合另需授權 |
 
@@ -93,7 +93,7 @@ Claude 接入／A 段功能驗收尚未完成，bridge 基礎可用 [自動 nati
 
 ## 下一步
 
-依已合併 [D40](../decisions/d40.md) 實作 Claude 接入；client 單次請求基礎已合併；store 已合併；bridge #149 已 merge；目前驗證共用 gh 防護，再串完整 Driver／啟動設定。完成後提供全新 verifier 與可重驗指令，implementation merge 等使用者確認。
+依已合併 [D40](../decisions/d40.md) 實作 Claude 接入；client 單次請求基礎已合併；store 已合併；bridge #149 已 merge；共用 gh 防護 #150 已合併，目前正進行 [Driver／啟動設定與控制](gate-12a-driver.md) 的實作及驗證。完成後提供全新 verifier 與可重驗指令，implementation merge 等使用者確認。
 
 - 2026-10-04：#148 全新 verifier CONFIRMED、雙平台 CI 通過，經使用者確認合併為 `7877dbe`；protocol 1.5／channel／Stop／ACK spool 在新 worktree 實作，範圍與限制見 [bridge 基礎](gate-12a-bridge.md)。
 

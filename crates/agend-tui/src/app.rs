@@ -1202,6 +1202,7 @@ fn action_text(action: AttentionAction) -> Text {
         AttentionAction::Approve => Text::ActionApprove,
         AttentionAction::RequestChanges => Text::ActionChanges,
         AttentionAction::Acknowledge => Text::ActionAcknowledge,
+        AttentionAction::Abandon => Text::ActionAbandon,
         AttentionAction::Unknown => Text::ActionUnknown,
     }
 }

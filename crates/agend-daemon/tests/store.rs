@@ -405,7 +405,7 @@ fn every_schema_version_fixture_upgrades_to_golden_and_keeps_its_samples() {
                 record.instance_id, "fixture-1",
                 "legacy Claude push backfilled"
             );
-            if version == 7 {
+            if version >= 7 {
                 let pending = block_on(store.claude_delivery("m-claude-fixture"))
                     .unwrap()
                     .unwrap();

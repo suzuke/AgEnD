@@ -540,8 +540,13 @@ pub fn give_up(lab: &Lab, tag: &str) -> Result<Vec<String>, String> {
     let args = fs::read_to_string(Path::new(&instance.working_directory).join("args.log"))
         .map_err(|e| format!("args.log: {e}"))?;
     let args: Vec<&str> = args.lines().collect();
-    let expected: Vec<String> = std::iter::once(format!("--session-id {session}"))
-        .chain((0..3).map(|_| format!("--resume {session}")))
+    let options = format!(
+        "--setting-sources project,local --settings {}/claude/{id}/settings.json \
+         --permission-mode bypassPermissions --dangerously-load-development-channels server:agend",
+        home.display()
+    );
+    let expected: Vec<String> = std::iter::once(format!("{options} --session-id {session}"))
+        .chain((0..3).map(|_| format!("{options} --resume {session}")))
         .collect();
     ensure(args == expected, || {
         format!("the agent was started with {args:?}")
@@ -771,10 +776,14 @@ pub fn crash_before_spawn(lab: &Lab, tag: &str) -> Result<Vec<String>, String> {
         };
         d.interrupt()?;
         let first = args.lines().next().unwrap_or_default().to_owned();
-        ensure(first == format!("--session-id {session}"), || {
-            format!(
-                "after the crash the agent was started with {args:?}, expected --session-id {session}"
-            )
+        let expected = format!(
+            "--setting-sources project,local --settings {}/claude/{id}/settings.json \
+             --permission-mode bypassPermissions --dangerously-load-development-channels server:agend \
+             --session-id {session}",
+            home.display()
+        );
+        ensure(first == expected, || {
+            format!("after the crash the agent was started with {args:?}, expected {expected}")
         })?;
         ensure(!args.contains("--resume"), || {
             format!("resumed a session never created: {args:?}")

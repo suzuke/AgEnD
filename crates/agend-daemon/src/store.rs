@@ -942,12 +942,17 @@ impl SqliteStore {
                         if message.state == agend_core::model::DeliveryState::Failed {
                         return Err(StoreError::Invalid("cannot confirm a failed dispatch".into()));
                     }
-                    if message.state == agend_core::model::DeliveryState::Queued {
+                    // A task result is independent of explicit Claude ACK.
+                    // Retain its delivery state/attribution until the helper
+                    // commits that ACK, even when the task advances here.
+                    if claude::get(&tx, &id)?.is_none() {
+                        if message.state == agend_core::model::DeliveryState::Queued {
                             messages::advance(&tx, &id, agend_core::model::DeliveryState::Sent, None, event.occurred_at_unix_ms)?;
                         }
                         if message.state != agend_core::model::DeliveryState::Confirmed {
                             messages::advance(&tx, &id, agend_core::model::DeliveryState::Confirmed, None, event.occurred_at_unix_ms)?;
                         }
+                    }
                 }
                 tx.commit()?;
             }

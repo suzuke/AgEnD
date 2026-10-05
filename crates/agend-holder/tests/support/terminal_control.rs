@@ -57,6 +57,157 @@ fn refused(client: &mut HolderClient, id: &str, code: &str) {
     assert_eq!(data.code, code);
 }
 
+fn live_frame(client: &mut HolderClient) -> agend_core::protocol::terminal::TerminalFrame {
+    request_frame(client, "live-key-frame", None, 24);
+    let HolderResponse::TerminalFrame { data } = frame_reply(client) else {
+        panic!("missing key frame")
+    };
+    data.frame
+}
+
+const BYTE_READER: &str = r#"stty raw min 1 time 0 -echo; printf 'READY\r\n'; while IFS= read -r -n 1 byte; do printf 'BYTE:%d\r\n' "'$byte"; done"#;
+
+#[test]
+fn daemon_key_writes_one_byte_and_checks_owner_and_revision_at_execution() {
+    use agend_core::protocol::holder::ControlKey;
+    let holder = TestHolder::start(Duration::from_secs(100));
+    let (mut client, _) = holder.spawn_bash(BYTE_READER);
+    wait_screen(&mut client, |s| s.contains("READY"));
+    let first = live_frame(&mut client);
+    submit(
+        &mut client,
+        "esc",
+        &first.generation,
+        Op::DaemonKey {
+            key: ControlKey::Esc,
+            expected_revision: first.revision,
+        },
+    );
+    assert_eq!(accepted(&mut client, "esc").attach_id, None);
+    wait_screen(&mut client, |s| s.contains("BYTE:27"));
+    submit(
+        &mut client,
+        "stale",
+        &first.generation,
+        Op::DaemonKey {
+            key: ControlKey::Esc,
+            expected_revision: first.revision,
+        },
+    );
+    refused(&mut client, "stale", "stale_screen");
+    let current = live_frame(&mut client);
+    submit(
+        &mut client,
+        "unknown",
+        &current.generation,
+        Op::DaemonKey {
+            key: ControlKey::Unknown,
+            expected_revision: current.revision,
+        },
+    );
+    refused(&mut client, "unknown", "unknown_control_key");
+    // The key is enqueued behind an Acquire that has not yet acknowledged.
+    // Execution must see its new owner rather than the earlier free state.
+    submit(
+        &mut client,
+        "owner",
+        &current.generation,
+        Op::Acquire {
+            attach_id: "human".into(),
+            size: TerminalSize {
+                rows: 24,
+                columns: 80,
+            },
+        },
+    );
+    submit(
+        &mut client,
+        "owned-key",
+        &current.generation,
+        Op::DaemonKey {
+            key: ControlKey::Esc,
+            expected_revision: current.revision,
+        },
+    );
+    accepted(&mut client, "owner");
+    refused(&mut client, "owned-key", "control_lost");
+    submit(
+        &mut client,
+        "release",
+        &current.generation,
+        Op::Release {
+            attach_id: "human".into(),
+        },
+    );
+    accepted(&mut client, "release");
+    let current = live_frame(&mut client);
+    submit(
+        &mut client,
+        "marker",
+        &current.generation,
+        Op::DaemonKey {
+            key: ControlKey::Y,
+            expected_revision: current.revision,
+        },
+    );
+    accepted(&mut client, "marker");
+    let screen = wait_screen(&mut client, |s| s.contains("BYTE:121"));
+    assert_eq!(
+        screen.matches("BYTE:27").count(),
+        1,
+        "refused Esc wrote to PTY"
+    );
+}
+
+#[test]
+fn holder_1_1_refuses_daemon_key_and_keeps_the_live_pty_unchanged() {
+    use agend_core::protocol::holder::{ControlKey, V1_1};
+    let holder = TestHolder::start(Duration::from_secs(100));
+    let (mut first, _) = holder.spawn_bash(BYTE_READER);
+    wait_screen(&mut first, |s| s.contains("READY"));
+    drop(first);
+    let mut old = HolderClient::connect_with(
+        &holder.socket,
+        &HolderRequest::Hello {
+            data: Hello::new(&[V1_1]),
+        },
+    )
+    .unwrap();
+    assert!(
+        matches!(old.recv(LONG).unwrap(),Some(HolderResponse::Hello {data}) if data.selected==V1_1)
+    );
+    assert!(matches!(
+        old.recv(LONG).unwrap(),
+        Some(HolderResponse::ScreenSnapshot { .. })
+    ));
+    let frame = live_frame(&mut old);
+    submit(
+        &mut old,
+        "old-key",
+        &frame.generation,
+        Op::DaemonKey {
+            key: ControlKey::Esc,
+            expected_revision: frame.revision,
+        },
+    );
+    refused(&mut old, "old-key", "not_supported");
+    drop(old);
+    let (mut current, _) = holder.connect();
+    let frame = live_frame(&mut current);
+    submit(
+        &mut current,
+        "marker",
+        &frame.generation,
+        Op::DaemonKey {
+            key: ControlKey::Y,
+            expected_revision: frame.revision,
+        },
+    );
+    accepted(&mut current, "marker");
+    let screen = wait_screen(&mut current, |s| s.contains("BYTE:121"));
+    assert!(!screen.contains("BYTE:27"));
+}
+
 #[test]
 fn actual_resize_and_input_acknowledgements_follow_fifo_and_last_acquire_wins() {
     let holder = TestHolder::start(Duration::from_secs(100));

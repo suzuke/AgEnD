@@ -1,4 +1,4 @@
--- user_version = 7
+-- user_version = 8
 
 CREATE INDEX driver_events_by_time ON driver_events (ingested_at_unix_ms);
 
@@ -53,6 +53,12 @@ CREATE TABLE claude_deliveries (
     CHECK (confirmed_at_unix_ms IS NULL OR sent_at_unix_ms IS NOT NULL),
     CHECK (confirmed_at_unix_ms IS NULL OR abandoned_at_unix_ms IS NULL),
     CHECK ((abandoned_at_unix_ms IS NULL) = (abandonment_reason IS NULL))
+) STRICT;
+
+CREATE TABLE claude_owned_files (
+    path TEXT NOT NULL PRIMARY KEY,
+    instance_id TEXT NOT NULL,
+    sha256 TEXT NOT NULL CHECK (length(sha256) = 64)
 ) STRICT;
 
 CREATE TABLE codex_input_threads (

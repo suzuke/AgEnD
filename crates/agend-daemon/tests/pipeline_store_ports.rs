@@ -13,6 +13,121 @@ use agend_core::{
 };
 use agend_testkit::{block_on, fakes::FakeStore, tempdir::TempDir};
 
+#[test]
+fn claude_pipeline_receipts_observe_driver_state_and_task_results_never_replace_ack() {
+    use agend_core::{model::Backend, runtime_records::*};
+    use agend_daemon::store::SqliteStore;
+    const SESSION: &str = "11111111-1111-4111-8111-111111111111";
+    const DELIVERY: &str = "22222222-2222-4222-8222-222222222222";
+    let dir = TempDir::new("g12-pipeline-ack").unwrap();
+    let s = SqliteStore::open(dir.path(), 0).unwrap();
+    block_on(async {
+        s.add_instance(&Instance {
+            id: "writer".into(),
+            backend: Backend::Claude,
+            program: "claude".into(),
+            args: vec![],
+            working_directory: dir.path().display().to_string(),
+            session_id: Some(SESSION.into()),
+            status: InstanceStatus::Running,
+            session_started: true,
+            agent_pid: None,
+            legacy_no_thread: false,
+            delivery: "push".into(),
+        })
+        .await
+        .unwrap();
+        let (task, progress, event) = prepare(&s).await;
+        let message = "dispatch:t-1/work/1";
+        s.claim_message(
+            &NewMessage {
+                id: message.into(),
+                from_instance: "daemon".into(),
+                to_instance: "writer".into(),
+                task_id: Some(task.id.clone()),
+                body: "native dispatch".into(),
+                level: BusyLevel::Queue,
+            },
+            100,
+        )
+        .await
+        .unwrap();
+        PipelineStore::advance_message(&s, message, DeliveryState::Queued, None, 101)
+            .await
+            .unwrap();
+        assert!(
+            PipelineStore::advance_message(&s, message, DeliveryState::Sent, None, 102)
+                .await
+                .is_err()
+        );
+        s.reserve_claude_delivery(
+            NewClaudeDelivery {
+                message_id: message.into(),
+                delivery_id: DELIVERY.into(),
+                instance_id: "writer".into(),
+                session_id: SESSION.into(),
+                route: ClaudeRoute::Channel,
+            },
+            103,
+        )
+        .await
+        .unwrap();
+        s.claude_delivery_written(message, DELIVERY, 104)
+            .await
+            .unwrap();
+        PipelineStore::advance_message(&s, message, DeliveryState::Sent, None, 105)
+            .await
+            .unwrap();
+        assert!(
+            PipelineStore::advance_message(&s, message, DeliveryState::Confirmed, None, 106)
+                .await
+                .is_err()
+        );
+        s.advance_pipeline(&task, 1, &progress, &event, Some(message))
+            .await
+            .unwrap();
+        assert_eq!(
+            s.message(message).await.unwrap().unwrap().state,
+            DeliveryState::Sent
+        );
+        assert!(
+            s.claude_delivery(message)
+                .await
+                .unwrap()
+                .unwrap()
+                .attempt
+                .unwrap()
+                .confirmed_at_unix_ms
+                .is_none()
+        );
+        s.acknowledge_claude(
+            ClaudeAck {
+                message_id: message.into(),
+                delivery_id: DELIVERY.into(),
+                instance_id: "writer".into(),
+                session_id: SESSION.into(),
+            },
+            107,
+        )
+        .await
+        .unwrap();
+        // A Written receipt racing with ACK is an observation of an older
+        // state, not permission to regress the stored confirmation.
+        PipelineStore::advance_message(&s, message, DeliveryState::Sent, None, 108)
+            .await
+            .unwrap();
+        assert_eq!(
+            s.message(message).await.unwrap().unwrap().state,
+            DeliveryState::Confirmed
+        );
+        assert!(
+            s.advance_message(message, DeliveryState::Confirmed, None, 109)
+                .await
+                .is_err()
+        );
+    });
+}
+
 async fn prepare<S: PipelineStore>(store: &S) -> (Task, TaskProgress, StoredEvent)
 where
     S::Error: std::fmt::Debug,

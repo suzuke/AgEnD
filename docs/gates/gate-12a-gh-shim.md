@@ -3,9 +3,11 @@
 > **TL;DR**
 > - D40 P4 選 A：agent 的 PATH 加入 gh shim，避免自行 merge、批准 PR 或印出 token。
 > - 拒絕在真正 gh 執行前完成；其餘命令保留原 argv、cwd 與 exit status。
-> - 下一步：本批待全新 verifier／固定 head CI 與使用者確認合併，之後接完整 Claude Driver。
+> - 下一步：本批 #150 已依使用者確認合併，接 [Claude Driver／啟動設定與控制](gate-12a-driver.md)。
 
 ## 狀態與範圍
+
+**已合併**（2026-10-04）：#150 原 head `689aeebeab1516cdeb06eae89f8fdf1901d96f2d`，merge `572dd7395f94b34628bfa8f4a123941d919f7ca8`。使用者重驗六個 native cases 與 check-deps 通過並清理 target／驗證 worktree，再明確確認 merge；原實作 worktree／branch 已清理。以下保留實作及驗證過程。
 
 2026-10-04，`feat/gate-12a-gh-shim`，基線 #149 merge `6dd552e`，[draft PR #150](https://github.com/suzuke/AgEnD/pull/150)，首個實作提交 `d4853ad`。這批只實作 [D40 P4](../decisions/d40.md) 的共用防護，沒有啟動真 Claude／Codex／OpenCode、讀取憑證或呼叫 GitHub 的寫入 API。第 12A 仍未完成。
 
@@ -67,4 +69,4 @@ native holder probe 使用 shell 替身驗 runtime 的 PATH，不代替 D40 P8 �
 
 ## 下一步
 
-固定本批 head，完成全新驗證與 CI，提供可重驗指令並等使用者確認；合併後刪除本批 worktree／branch，接 Claude Driver 與啟動設定。
+完成 [Claude Driver 與啟動設定](gate-12a-driver.md)；完整 12A 合併仍須全新 verifier 與使用者確認。

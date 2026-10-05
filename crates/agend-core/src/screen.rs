@@ -55,6 +55,12 @@ pub const SCREEN_RULES: &[ScreenRule] = &[
         pattern: "Use this and all future MCP servers in this project",
         suggested_key: None,
     },
+    ScreenRule {
+        backend: Backend::Claude,
+        kind: HardGateKind::StartupMenu,
+        pattern: "WARNING: Loading development channels",
+        suggested_key: None,
+    },
 ];
 
 /// Match only rules for the current backend. ASCII case is ignored because
@@ -120,11 +126,48 @@ mod tests {
     }
 
     #[test]
+    fn claude_2_1_284_holder_trust_frames_remain_hard_gates_at_both_widths() {
+        for screen in [
+            include_str!("../tests/fixtures/screens/claude-2.1.284-workspace-trust-100x24.txt"),
+            include_str!("../tests/fixtures/screens/claude-2.1.284-workspace-trust-140x24.txt"),
+        ] {
+            let found = classify(Backend::Claude, screen, SCREEN_RULES).unwrap();
+            assert_eq!(found.kind, HardGateKind::StartupMenu);
+            assert_eq!(found.suggested_key, None);
+            assert_eq!(classify(Backend::Codex, screen, SCREEN_RULES), None);
+        }
+    }
+
+    #[test]
     fn unrelated_screen_is_not_classified() {
         assert_eq!(
             classify(Backend::Claude, "Ready for input", SCREEN_RULES),
             None
         );
+    }
+
+    #[test]
+    fn claude_2_1_284_selected_trust_and_development_channels_remain_hard_gates() {
+        for screen in [
+            include_str!(
+                "../tests/fixtures/screens/claude-2.1.284-workspace-trust-selected-yes-100x24.txt"
+            ),
+            include_str!(
+                "../tests/fixtures/screens/claude-2.1.284-workspace-trust-selected-yes-140x24.txt"
+            ),
+            include_str!(
+                "../tests/fixtures/screens/claude-2.1.284-development-channels-100x24.txt"
+            ),
+            include_str!(
+                "../tests/fixtures/screens/claude-2.1.284-development-channels-140x24.txt"
+            ),
+        ] {
+            let found = classify(Backend::Claude, screen, SCREEN_RULES).unwrap();
+            assert_eq!(found.kind, HardGateKind::StartupMenu);
+            assert_eq!(found.suggested_key, None);
+            assert_eq!(classify(Backend::Codex, screen, SCREEN_RULES), None);
+            assert_eq!(classify(Backend::Opencode, screen, SCREEN_RULES), None);
+        }
     }
 
     #[test]

@@ -32,6 +32,9 @@ where
                 && a.ask.is_none()
                 && let Some(id) = a.attention_id
             {
+                if id.starts_with(crate::handlers::claude_attention::PREFIX) {
+                    continue;
+                }
                 if pending.as_deref() == Some(id.as_str()) {
                     continue;
                 }
@@ -162,7 +165,9 @@ where
                     .await?;
                 }
             }
-            AttentionAction::Unknown => return Err(invalid("unknown action")),
+            AttentionAction::Abandon | AttentionAction::Unknown => {
+                return Err(invalid("action is not a pipeline action"));
+            }
         }
         self.fleet.resolve(&data.attention_id, data.action);
         Ok(CommandResult::Accepted)
@@ -399,6 +404,7 @@ where
         for old in before.attention {
             if let Some(id) = old.attention_id
                 && !id.starts_with("instance-failed:")
+                && !id.starts_with(crate::handlers::claude_attention::PREFIX)
                 && !expected.contains_key(&id)
             {
                 self.fleet.dismiss(&id);

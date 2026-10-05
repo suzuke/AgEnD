@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - 依 crate 由下往上分 13 個施工關；每個施工關單獨驗收，使用者確認後才開下一個施工關（D22）。
-> - 目前狀態：**第 1–11 施工關完成並已合併**；第 11 施工關 C 段 #145 經全新 verifier、雙平台 CI、實機及後續自動驗收與清理，使用者於 2026-10-03 確認合併（`b2152db`）。第 12 施工關 A 段設計 #138 已 merge，client 基礎 #147 已 merge，持久化 #148 已 merge，protocol 1.5／channel／Stop／ACK spool 基礎 #149 已 merge，共用 gh 防護待驗證／確認，完整 Claude 接入未完成；第 13 施工關未開始。
-> - 下一步：依第 12A [D40](decisions/d40.md) 驗證 [共用 gh 防護](gates/gate-12a-gh-shim.md)，再接 Claude Driver／啟動設定與控制；每批以全新 verifier、可重驗指令及使用者確認收尾。
+> - 目前狀態：**第 1–11 施工關完成並已合併**；第 11 施工關 C 段 #145 經全新 verifier、雙平台 CI、實機及後續自動驗收與清理，使用者於 2026-10-03 確認合併（`b2152db`）。第 12 施工關 A 段設計 #138 已 merge，client 基礎 #147 已 merge，持久化 #148 已 merge，protocol 1.5／channel／Stop／ACK spool 基礎 #149 已 merge，共用 gh 防護 #150 已 merge，完整 Claude Driver／啟動設定與 Interrupt 實作中，Claude 接入未完成；第 13 施工關未開始。
+> - 下一步：依第 12A [D40](decisions/d40.md) 完成 [Claude Driver／啟動設定與控制](gates/gate-12a-driver.md)；每批以全新 verifier、可重驗指令及使用者確認收尾。
 
 ## 13 個施工關
 
@@ -119,3 +119,45 @@
 - 2026-10-04：#149 原 head `b4c6b46` 被全新 verifier r1 判定 REFUTED（hook 發布／live RPC 解鎖空窗）；修正單次 flock、歷史 busy 撤銷 idle 與 holder 查詢 revision 核對，新增三個 native 回歸，16 cases／accept core 通過；完整 workspace、全新 r2 與 CI 收尾中。
 
 - 2026-10-04：#150 gh shim fresh r1 `e281b19` **REFUTED**（GraphQL CR／block string 漏判、重複 approve 值與 fixture 完成競態）；修正與 native regression 已補，待全新 r2 及固定 head CI，未合併。
+
+- 2026-10-05：#150 已依使用者確認合併為 `572dd73`（原 head `689aeeb`）；在 `feat/gate-12a-claude-driver` 接 Driver／設定 ownership／holder 1.2 單鍵控制。18 native bridge cases、10 Claude Driver／啟動設定 tests、workspace clippy／fmt／實際 no-std 通過；原自動放棄未送訊息反例已修正。完整 DRV 四次開機、啟動提示、清掃、真 CLI、全新 verifier 與 CI 仍待完成，未 merge，見[本批進度](gates/gate-12a-driver.md)。
+
+- 2026-10-05：Driver 施工加入實際 Written 回條等待、Claude 精確 argv 孤兒清掃、結果不明的 `abandon` 人工入口及 ACK 事件 id 撞號修正。16 Claude 單元／19 native bridge／3 native process cases、daemon／holder 回歸通過；實際 no-std 通過。完整 DRV、啟動提示與真 CLI 尚未完成，workspace 及 fresh verifier 另核（`feat/gate-12a-claude-driver`，未提交／未 merge）。
+
+- 2026-10-05：實際 Claude Driver 的 agent send／native channel／ACK 回歸通過；四個 daemon 程序不重送，另用新 HOME 證明獨立送達。accept core（含 protocol 相容性及實際 no-std）通過；workspace 首次在 retry 舊啟動參數斷言失敗，納入完整 D40 旗標後單例通過，完整重跑中（同工作分支，未提交／未 merge）。
+
+- 2026-10-05：Driver 施工補通 pipeline 原 dispatch id 的 native ACK，通用回條只觀察、task 完成不代確認。完整 Git task／review／人工核准／single merge 經四個 daemon 通過；共用 DRV-1–9 十個案例經獨立 composition processes 通過，新 HOME 反向在 boot 2 失敗；真 Esc completion 遺失的四次開機不重送。最新 workspace 回歸收尾中；啟動提示與真 CLI 仍待授權及驗收（同工作分支，未提交／未 merge）。
+
+- 2026-10-05：native Driver 檢查點 `afe5188` 已推送並建立 draft #151；統一 `demo adapters` 通過，workspace 結果為 992 個測試函式通過／0 failed／2 既有 ignored（子程序入口不算獨立行為證據）。實際 no-std、clippy、fmt 通過；全新 verifier 及 Ubuntu／macOS CI 進行中。12A 啟動提示、真 CLI 版本／PATH／ACK 驗收仍待完成，尚不可 merge。
+
+- 2026-10-05：#151 的全新 checkpoint verifier 找出 `--` options terminator 使 owned 旗標落入 positional tail；原反例保留。拒絕 terminator 後，17 Driver 單元、整個 daemon crate、workspace clippy／fmt／實際 no-std 通過；修正版獨立驗證與 CI 待核。必要作者證據移至 AgEnD-ops，5 份被最新結果取代的成功 log 刪除，native fixture 目錄查無殘留；施工 target／worktree 保留，完整 12A 未完成。
+
+- 2026-10-05：#151 的 `441d658` terminator 修正獲全新局部 verifier CONFIRMED；CI fixture 修正改等真 Driver idle 與同一 fleet view 的 approval attention。提早 hint 回歸與反向、17 Driver／3 process／27 bridge 入口、15 pipeline cases、clippy／fmt／實際 no-std 通過；新版 CI／fresh verifier 待核，完整 12A 仍未完成（[範圍](gates/gate-12a-driver.md)）。
+
+- 2026-10-05：#151 固定 `cb0212c` 的全新 verifier 對 CI fixture 修正局部 CONFIRMED；native demo、15 pipeline、clippy／fmt／真 no-std 全過，idle／attention 空窗正反對照成立。自己的 verifier worktree／branch／target／程序／fixtures 已清理；雙平台 CI 仍執行中，P5／真 CLI 未完成，未 merge（[範圍](gates/gate-12a-driver.md)）。
+
+- 2026-10-05：#151 的 `50e0e83` push／PR CI 均在 Ubuntu、macOS 通過；補[被動啟動畫面蒐證工具](gates/gate-12a-startup-capture.md)，用 native producer 驗兩種 PTY 寬度、零輸入與清理。真 CLI／P5／P6 仍待授權與完成，未 merge。
+
+- 2026-10-05：蒐證工具的 fresh verifier 在 `4511e21` 用真 holder 重現跨 soft-wrap Bearer 前綴繞過 scan；依 native wrap 標記合併 logical line後補拒絕與電郵遮蔽回歸，修正後再交獨立核對。完整12A仍未完成（#151）。
+
+- 2026-10-05：`356fbef` 的全新無相關 context verifier 局部 CONFIRMED 被動蒐證工具修正；原同一 native Bearer wrap 反例改為寫入前拒絕，5 cases、四種尺寸／寬字 spacer、零 stdin、成功／失敗清理、clippy／fmt／實際 no-std 通過。`4511e21` 的原 REFUTED 證據保留；只認證工具，真 CLI／P5／P6 未完成（#151）。
+
+- 2026-10-05：另獲使用者授權，固定真 Claude 2.1.284 查版本及兩寬被動蒐證成功，0 模型回合／按鍵／訊息；保存完整信任 frame 為版本化 fixture，自有程序與暫存已清理。P5 自動按鍵、P6 初始 idle、後續真驗仍未完成；本批回歸與 fresh verifier 待核（#151）。
+
+- 2026-10-05：為後續 P5/P6 真 fixture 準備受控 trust 蒐證模式，預設被動不變；兩寬及未知／外來／未切換選項的原生正反例通過。這是 operator 輸入蒐證，正式 daemon-key、後續提示與初始 idle 未認證，真按鍵待另行授權（#151）。
+
+- 2026-10-05：受控 trust 工具 `b0d8074` 的全新 verifier 重現路徑前綴／畫面別處提及自有路徑會誤送 Down、Enter，原 REFUTED 證據保留。改成唯一 workspace 標頭下完整路徑相等並補兩寬原生拒絕回歸；修正版獨立核對待完成，未執行真按鍵，完整 12A 未完成（#151）。
+
+- 2026-10-05：`7abb646` 路徑修正獲 fresh verifier 局部 CONFIRMED，push／PR 雙平台 CI 均通過。另獲授權後，Claude 2.1.284 兩寬受控 trust 蒐證各完成 Down／Enter，保存選到 Yes 與 development channels 真 fixture；未確認後續提示、0 模型／訊息，自有程序／暫存與兩筆個人 trust 條目已清理。原分類器漏掉 development channels 的反例已重現，補 StartupMenu 規則；本批 core／fresh 重驗待核，P5／P6 仍未完成（#151）。
+
+- 2026-10-05：為取得 channels 確認後的真畫面，準備第三個獨立 opt-in 的受控蒐證模式；只在兩個 trust 回條後，對完整且唯一 `server:agend` 選單送一次 Enter，最多三次 operator Input。13 個 native cases、整個 daemon／fmt／clippy／實際 no-std 通過；全新 verifier 待核，真三鍵執行尚未授權，P5／P6 未完成（#151）。
+
+- 2026-10-05：第三鍵蒐證工具 `28d6341` 的全新 verifier 重現三種矛盾／重複選單會誤確認，原 REFUTED 證據保留。改成整份已錄製畫面只忽略空白後相等，補兩寬拒絕回歸；14 native cases／整個 daemon／fmt／clippy／實際 no-std 通過，新全新 verifier 待核，真三鍵蒐證未執行（#151）。
+
+- 2026-10-05：`8d605bf` 的新 fresh verifier 找到 trust 回條後外來 frame instance／view 仍可觸發第三鍵，原 REFUTED 保留。補 subscribe／acquire／outer frame 身分核對與兩寬 native proxy 回歸；新回歸先核原 consumer 失敗，15 native cases／整個 daemon／fmt／clippy／實際 no-std 通過，新全新 verifier 待核，真三鍵未執行（#151）。
+
+- 2026-10-05：`01f438e` 的全新 verifier 重現 resize ACK 等待略過不一致 native frame 後仍送三鍵；原 REFUTED 保留。補兩寬 instance／view／generation／size 零 Input 回歸，原始與目標尺寸仍接受；新回歸先核原 consumer 失敗，修正後 16 native cases／整個 daemon／fmt／clippy／實際 no-std 通過，新全新 verifier 待核，真三鍵未執行（#151）。
+- 2026-10-05：`433d2a8` 全新 verifier 確認 resize 身分回歸成立，但 trust 選單追加第二個 selected Exit 仍確認，原 REFUTED 保留。trust 改為兩寬完整真 No／Yes fixture 僅替換本次 canonical path 後比對，新增兩階段 extra／duplicate selection 拒絕回歸；17 native cases／整個 daemon／fmt／clippy／實際 no-std 通過，新全新 verifier 待核，真三鍵未執行（#151）。
+- 2026-10-05：`dabb35e` fresh verifier／使用者 native 重驗及 push／PR 雙平台 CI 全通過。另獲三鍵蒐證授權後，固定 Claude 2.1.284 的 100 欄只完成一個 Down，畫面仍為 No；按計畫停於首個失敗，未重送／Enter／140 欄。0 模型／訊息，native 暫存已清理；真原因與 session 觀察缺口保留。補完整提示穩定等待與私有清理身分，native 延遲 receiver 原 consumer 失敗，19 native cases／整個 daemon／fmt／workspace clippy／實際 no-std 通過，新全新 verifier 待核（#151）。
+
+- 2026-10-05：`e0cedfb` 的提示穩定等待與私有清理身分獲全新 verifier 局部 CONFIRMED，19 native capture／199 daemon 測試、獨立 32 native cases、fmt／workspace clippy／實際 no-std 及 push／PR 雙平台 CI 通過。其後新核准 ready 計畫的真 Claude 2.1.284 兩寬蒐證各完成 Down／trust Enter／development Enter，100／140 欄保存 13／11 frames 與主介面，0 模型 prompt／團隊訊息。另一位全新 verifier 核保留證據一致性與指定殘留目前不存在，有限範圍 CONFIRMED；7 個記憶體 mutation 均拒絕。原始失敗證據與清理歷史證明缺口保留，正式 P5／P6、先前 Down 原因及完整 12A 未認證（draft #151）。

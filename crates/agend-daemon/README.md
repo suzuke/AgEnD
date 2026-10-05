@@ -53,7 +53,7 @@ pipeline 補 failed attention 的 unblocks 時，經 core port 原子比對捕�
 | `supervisor` | 讓 DB 裡的 instance 保持在跑：死了等 5 秒 `--resume`、10 分鐘 3 次仍死就 `failed`（變成「需要你」項目，操作者可 `retry`）；之後：卡住、額度、轉派、例外才找人 |
 | `scheduler` | timeout、cron |
 | `reconcile` | 開機與每日 DB ↔ git 對帳 |
-| `driver::{codex,claude,opencode}` | backend 結構化 API；codex 見下方「codex（第 7 施工關）」；claude、opencode 還只有說明（第 12 施工關） |
+| `driver::{codex,claude,opencode}` | backend 結構化 API；codex 見下方「codex（第 7 施工關）」；Claude push 接入施工中，見[本批進度](../../docs/gates/gate-12a-driver.md)；opencode 留第 12B |
 | `runtime` | `HolderRuntime`：起 holder、holder 協定 client、每個 holder 一條長連線（轉出 `PtyBytes` 給終端訂閱者）、agent 環境白名單、shim symlink |
 | `forge::{local,github}` | 提交與 merge |
 | `git` | 建立／移除 worktree 與 branch（先記錄再建立） |
@@ -143,6 +143,15 @@ migration `0007` 及 DB-thread API 保存投遞開始／寫出／ACK／人工放
 - `agend_daemon::runtime::HolderRuntime`（`Runtime` trait）、`runtime::shutdown_holder`
 - `agend_daemon::server::{bind, Server}`、`handlers::Context`、`fleet::Fleet`（測試在同一個程序裡跑 daemon 的 server）
 
+
+停止訊號直接記在 signal-context atomic flag，Tokio 關閉後到 exec 前仍可讀，避免 restart handoff 遺失 Ctrl-C；完成連線／runtime 清理後，最後 check 到 exec 的窗口由 signal handler 直接成功退出，避免訊號與 exec 競賽；async signal stream 負責把停止事件送進 supervisor。
+
+## 第 12A Claude
+
+`claude_bridge` 提供 client 1.5 Attach／Poll／Hook／Written／Ack；先預約才回完整內容，歷史 hook 不建立 idle。`ingest` 補送 hooks／acks，入庫才刪，不重送內容。[bridge 範圍](../../docs/gates/gate-12a-bridge.md) · [Claude 測試](CLAUDE-TESTING.md)。
+
+[Startup capture](../../docs/gates/gate-12a-startup-capture.md) 預設被動保存真 holder 畫面；額外 opt-in 的 trust／development 模式最多兩鍵／三鍵，只核本次 workspace 與完整已錄製選單，任何 frame 必須符合本次 instance／view／generation。這是無 revision CAS 的 operator 蒐證工具，`startup=not_assessed`，不送模型 prompt／團隊訊息；首次真三鍵執行已按首個失敗停止；新核准 ready 計畫的兩寬蒐證各完成三鍵並保存真主介面，經全新 verifier 有限範圍 CONFIRMED。受控 startup capture 對完整已知選單加一秒穩定等待，仍核控制身分與 completion，不重送；私有 `cleanup-identity.json` 提供本次 session／canonical workspace 的清理歸屬。自有 lab、trust 條目與 session 暫存已清理；保留證據支持目前指定殘留不存在，不能重演已刪除的原始清理身分。真蒐證失敗仍停下，成功也不代表正式 P5／P6 啟動完成。
+
 ## 下一步
 
 ```bash
@@ -152,9 +161,3 @@ cargo xtask accept client          # 第 8 施工關 demo：client_demo
 cargo xtask accept codex           # 第 7 施工關 demo：codex_demo
 cargo xtask accept cli             # 第 9 施工關 demo：cli_demo（在 agend crate）
 ```
-
-停止訊號直接記在 signal-context atomic flag，Tokio 關閉後到 exec 前仍可讀，避免 restart handoff 遺失 Ctrl-C；完成連線／runtime 清理後，最後 check 到 exec 的窗口由 signal handler 直接成功退出，避免訊號與 exec 競賽；async signal stream 負責把停止事件送進 supervisor。
-
-## 第 12A bridge 基礎
-
-`claude_bridge` 提供 client 1.5 的 Attach／Poll／Hook／Written／Ack。先原子預約才回完整內容；新 live hook 與目前 holder 畫面控制 routing，歷史 hook 不建立 idle／不投遞；較新的同 session 路由觀測會撤銷舊 idle。`ingest` 每秒補送 home 的 hooks／acks；只收到入庫 commit 才刪檔，不重送訊息內容。完整 API、同 UID 信任邊界與未完成項目見 [bridge 基礎](../../docs/gates/gate-12a-bridge.md)。

@@ -119,14 +119,46 @@ pub(crate) fn pending_claude(
     to: &str,
     queue_only: bool,
 ) -> Result<Vec<Message>, StoreError> {
+    pending_claude_filtered(conn, to, u8::from(queue_only))
+}
+pub(crate) fn pending_claude_filtered(
+    conn: &Connection,
+    to: &str,
+    filter: u8,
+) -> Result<Vec<Message>, StoreError> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {COLUMNS} FROM messages WHERE to_instance = ?1 AND state = 'queued' \
-         AND (?2 = 0 OR level = 'queue') AND attempted_at_unix_ms IS NULL AND id IN \
+         AND (?2 = 0 OR (?2 = 1 AND level = 'queue') OR (?2 = 2 AND level != 'queue')) AND attempted_at_unix_ms IS NULL AND id IN \
          (SELECT message_id FROM claude_deliveries WHERE instance_id = ?1 \
          AND delivery_id IS NULL AND abandoned_at_unix_ms IS NULL) ORDER BY seq LIMIT 32"
     ))?;
-    let rows = stmt.query_map(rusqlite::params![to, queue_only], from_row)?;
+    let rows = stmt.query_map(rusqlite::params![to, filter], from_row)?;
     rows.map(|row| row?).collect()
+}
+
+/// Page only unresolved attempts, before LIMIT; unrelated message history
+/// must not hide an unknown result. The caller wraps the sequence cursor.
+pub(crate) fn unknown_claude_after(
+    conn: &Connection,
+    after: i64,
+    before: u64,
+) -> Result<Vec<Message>, StoreError> {
+    let columns = COLUMNS
+        .split(", ")
+        .map(|s| format!("m.{s}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut query = conn.prepare(&format!(
+        "SELECT {columns} FROM messages m JOIN claude_deliveries d ON d.message_id=m.id \
+         WHERE m.seq>?1 AND m.state='queued' AND m.attempted_at_unix_ms IS NOT NULL \
+         AND m.attempted_at_unix_ms<=?2 AND d.abandoned_at_unix_ms IS NULL \
+         AND d.sent_at_unix_ms IS NULL AND d.confirmed_at_unix_ms IS NULL \
+         ORDER BY m.seq LIMIT 32"
+    ))?;
+    query
+        .query_map(rusqlite::params![after, ms(before)?], from_row)?
+        .map(|r| r?)
+        .collect()
 }
 
 /// The messages to `to` after its message `after` (by `seq`); `None` when

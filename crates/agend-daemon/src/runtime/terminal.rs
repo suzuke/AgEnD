@@ -314,6 +314,17 @@ impl TerminalConnection {
         generation: String,
         operation: TerminalControlOperation,
     ) -> Result<TerminalControlData> {
+        if matches!(operation, TerminalControlOperation::DaemonKey { .. })
+            && lock(&self.channel.state)
+                .version
+                .is_none_or(|v| v < agend_core::protocol::holder::V1_2)
+        {
+            return Err(failure(
+                "",
+                "not_supported",
+                "daemon key completion requires holder protocol 1.2",
+            ));
+        }
         match self
             .request(|id| HolderRequest::TerminalControl {
                 data: TerminalControlRequest {

@@ -6,3 +6,11 @@
 //! come from the user's own team.
 //!
 //! Must NOT: wait for a Stop hook after `Esc`.
+
+mod driver;
+pub mod launch;
+pub(crate) mod sweep;
+pub use driver::ClaudeDriver;
+
+#[cfg(test)]
+mod tests;

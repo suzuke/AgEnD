@@ -128,6 +128,10 @@ impl Screen {
         &self.generation
     }
 
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
     pub fn size(&self) -> (u16, u16) {
         (self.rows, self.columns)
     }

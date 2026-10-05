@@ -80,6 +80,11 @@ pub fn in_range(pgid: u32) -> bool {
 
 /// Sweeps process group `pgid` for `markers`' instance.
 pub fn sweep(pgid: u32, markers: &Markers) -> Swept {
+    sweep_matching(pgid, |argv| markers.matches(argv))
+}
+
+/// Shared process-group checks; a backend supplies its exact argv attribution.
+pub(crate) fn sweep_matching(pgid: u32, matches: impl Fn(&[String]) -> bool) -> Swept {
     if !in_range(pgid) {
         return Swept::OutOfRange;
     }
@@ -91,7 +96,7 @@ pub fn sweep(pgid: u32, markers: &Markers) -> Swept {
         .iter()
         .map(|&pid| (pid, argv(pid).unwrap_or_default()))
         .collect();
-    if !procs.iter().any(|(_, a)| markers.matches(a)) {
+    if !procs.iter().any(|(_, a)| matches(a)) {
         return Swept::NoMatch(procs.len());
     }
     // SAFETY: killpg on a positive pgid in (1, i32::MAX] checked above.

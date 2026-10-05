@@ -131,4 +131,6 @@ cargo test -p agend
 
 ## 第 12A Claude helpers
 
-`cargo test -p agend --test claude_bridge` 是本批可自動重驗入口，共 16 個 native cases。包含 MCP parse／schema 錯誤後下一請求仍可處理；ACK 磁碟保存失敗回工具錯誤；通知收到後以 MCP ping 做 Written 完成 barrier，不能把 stdout 到達當成 SQLite commit。Fixture 停自己 daemon／holders 並刪 home；scope 與指令見 [bridge 基礎](../../docs/gates/gate-12a-bridge.md)。
+`cargo test -p agend --test claude_bridge` 是本批可自動重驗入口。原 21 個 bridge 回歸另接完整 DRV 十個案例、新 HOME 反向、Git task／review 與遺失 Esc completion；`boot_child` 只作重新執行的 child 入口，不是獨立通過證據。包含 MCP parse／schema 錯誤後下一請求仍可處理；ACK 磁碟保存失敗回工具錯誤；通知收到後以 MCP ping 做 Written 完成 barrier，不能把 stdout 到達當成 SQLite commit。Fixture 停自己 daemon／holders 並刪 home；scope 與指令見 [bridge 基礎](../../docs/gates/gate-12a-bridge.md)。
+
+DRV fixture 的 actor readiness hint 不代替 daemon idle：送達前讀實際 Driver BusyChanged 紀錄。新增 100 ms 提早 hint，沿用 DRV-4 的 Sent／Confirmed 斷言；忽略 idle 紀錄的反向以 queued 失敗。bridge 全檔目前 27 個入口，其中 `boot_child` 不算獨立回歸。既有 pipeline fixture 只在同一 native FleetView 同時包含 approve 階段與 approval attention 時核准，沿用 60 秒等待期限，不把階段可見當成 attention 已發布。

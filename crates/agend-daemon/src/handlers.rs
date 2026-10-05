@@ -24,6 +24,7 @@
 //! (socket, future MCP adapter) carried the call.
 
 pub mod agent;
+pub(crate) mod claude_attention;
 pub mod operator;
 
 use std::path::PathBuf;
@@ -215,6 +216,9 @@ pub async fn handle(ctx: &Context, caller: Option<&str>, request: ClientRequest)
                     error_code::FORBIDDEN,
                     OPERATOR_ONLY,
                 ));
+            }
+            if data.attention_id.starts_with(claude_attention::PREFIX) {
+                return Outcome::Reply(claude_attention::resolve(ctx, data).await);
             }
             if !data.attention_id.starts_with("instance-failed:") {
                 let id = data.request_id.clone();

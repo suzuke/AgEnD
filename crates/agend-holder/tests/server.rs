@@ -257,7 +257,7 @@ fn reconnect_gets_snapshot_then_live_bytes_without_gap_or_duplicate() {
     drop(first);
 
     let (mut client, greeting) = holder.connect();
-    assert_eq!(greeting.version, ProtocolVersion::new(1, 1));
+    assert_eq!(greeting.version, ProtocolVersion::new(1, 2));
     assert_eq!(greeting.exited, None);
     let last_row = greeting
         .screen
@@ -401,7 +401,7 @@ fn version_mismatch_is_refused_and_the_holder_keeps_serving() {
     assert_eq!(wait_error(&mut client), "version_mismatch");
     assert!(client.wait_closed(LONG));
     let (_, greeting) = holder.connect();
-    assert_eq!(greeting.version, ProtocolVersion::new(1, 1));
+    assert_eq!(greeting.version, ProtocolVersion::new(1, 2));
 }
 
 #[test]

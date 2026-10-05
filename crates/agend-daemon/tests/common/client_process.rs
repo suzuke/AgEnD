@@ -793,11 +793,16 @@ pub fn retry(lab: &Lab) -> Result<Vec<String>, String> {
         || format!("starts after retry: {starts:#?}"),
     )?;
     let cr_args = args(&claude_ran)?;
+    let claude_options = format!(
+        "--setting-sources project,local --settings {}/claude/{cr}/settings.json \
+         --permission-mode bypassPermissions --dangerously-load-development-channels server:agend",
+        home.display()
+    );
     ensure(
         cr_args
             == [
-                format!("--session-id {cr_session}"),
-                format!("--resume {cr_session}"),
+                format!("{claude_options} --session-id {cr_session}"),
+                format!("{claude_options} --resume {cr_session}"),
             ],
         || format!("{cr} was started with {cr_args:?}"),
     )?;

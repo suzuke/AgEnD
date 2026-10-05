@@ -215,7 +215,8 @@ pub(super) fn daily(
         "SELECT NOT EXISTS (SELECT 1 FROM tasks) AND NOT EXISTS (SELECT 1 FROM task_events) \
          AND NOT EXISTS (SELECT 1 FROM instances) AND NOT EXISTS (SELECT 1 FROM codex_input_threads) \
          AND NOT EXISTS (SELECT 1 FROM driver_events) \
-         AND NOT EXISTS (SELECT 1 FROM claude_deliveries)",
+         AND NOT EXISTS (SELECT 1 FROM claude_deliveries)
+         AND NOT EXISTS (SELECT 1 FROM claude_owned_files)",
         [],
         |r| r.get(0),
     )?;

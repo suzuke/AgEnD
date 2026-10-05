@@ -62,6 +62,14 @@ pub struct Rule {
 pub const RETENTION: &[Rule] = &[
     Rule {
         target: Target::Table {
+            name: "claude_owned_files",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "D40 P2: ownership remains while removed instance workspaces are kept",
+    },
+    Rule {
+        target: Target::Table {
             name: "driver_events",
             time_column: Some("ingested_at_unix_ms"),
         },
