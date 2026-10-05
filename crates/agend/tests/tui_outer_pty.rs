@@ -456,7 +456,15 @@ fn actual_app_unwind_restores_raw_and_outer_capture_modes() {
 
 #[test]
 fn actual_app_wheels_select_real_history_and_twenty_process_closes_leave_no_fds() {
-    let mut native = Native::new();
+    wheels_history_and_cleanup(Native::new());
+}
+
+#[test]
+fn actual_app_with_background_startup_sampling_keeps_final_modes_and_history() {
+    wheels_history_and_cleanup(Native::with_startup_sampling(true));
+}
+
+fn wheels_history_and_cleanup(mut native: Native) {
     let mut app = Outer::new(&native, 80, 24, false);
     app.open();
     app.acquire();

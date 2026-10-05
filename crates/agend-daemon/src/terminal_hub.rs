@@ -301,6 +301,7 @@ impl TerminalHub {
                 notices: None,
                 dirty: true,
                 last_sample: None,
+                last_notice: None,
             };
             Handle {
                 identity,

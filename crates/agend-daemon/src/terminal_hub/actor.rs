@@ -16,6 +16,7 @@ pub(super) struct Actor {
     pub(super) notices: Option<watch::Receiver<TerminalNotice>>,
     pub(super) dirty: bool,
     pub(super) last_sample: Option<Instant>,
+    pub(super) last_notice: Option<Instant>,
 }
 async fn notice(
     receiver: &mut Option<watch::Receiver<TerminalNotice>>,
@@ -44,7 +45,10 @@ impl Actor {
                     },
                     None => break,
                 },
-                _ = notice(&mut self.notices) => { self.dirty = true; },
+                _ = notice(&mut self.notices) => {
+                    self.dirty = true;
+                    self.last_notice = Some(Instant::now());
+                },
                 _ = tick.tick() => {},
             }
             self.cleanup().await;
@@ -132,6 +136,7 @@ impl Actor {
         self.views.clear();
         self.connection = None;
         self.notices = None;
+        self.last_notice = None;
         self.dirty = true;
     }
     pub(super) async fn release(&mut self) {
@@ -300,6 +305,13 @@ impl Actor {
         }
     }
     async fn capture(&mut self) {
+        // Other readers (including startup) share the holder's 50 ms
+        // sample. A sample requested too soon after output can still be old.
+        // Preserve dirty until a follow-up starts after that cache expires;
+        // compare at request start, not after slow frame IO completes.
+        let settled = self
+            .last_notice
+            .is_none_or(|at| at.elapsed() >= SAMPLE_EVERY);
         let sequence = self.notices.as_ref().map(|n| n.borrow().output_sequence);
         let ids: Vec<_> = self.views.keys().cloned().collect();
         for id in ids {
@@ -346,7 +358,8 @@ impl Actor {
             }
         }
         self.last_sample = Some(Instant::now());
-        self.dirty = self.notices.as_ref().map(|n| n.borrow().output_sequence) != sequence;
+        self.dirty =
+            !settled || self.notices.as_ref().map(|n| n.borrow().output_sequence) != sequence;
     }
 }
 

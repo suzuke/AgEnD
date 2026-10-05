@@ -76,6 +76,9 @@ pub struct Native {
 }
 impl Native {
     pub fn new() -> Self {
+        Self::with_startup_sampling(false)
+    }
+    pub fn with_startup_sampling(automatic: bool) -> Self {
         let permit = LAB.lock().unwrap_or_else(|error| error.into_inner());
         let lab = lab::Lab::with_prefix(Path::new(env!("CARGO_BIN_EXE_agend")), "g11app");
         let home = lab.home(1);
@@ -93,12 +96,14 @@ impl Native {
         .unwrap();
         // This raw PTY consumer has no Claude startup protocol. Keep its
         // terminal test independent of automatic backend initialization.
-        let store = agend_daemon::store::SqliteStore::open(&home, 0).unwrap();
-        agend_testkit::block_on(
-            store.manual_claude_startup(ID, instance.session_id.as_deref().unwrap()),
-        )
-        .unwrap();
-        drop(store);
+        if !automatic {
+            let store = agend_daemon::store::SqliteStore::open(&home, 0).unwrap();
+            agend_testkit::block_on(
+                store.manual_claude_startup(ID, instance.session_id.as_deref().unwrap()),
+            )
+            .unwrap();
+            drop(store);
+        }
         let mut daemon = lab::Daemon::start(&lab, &home, &[]).unwrap();
         daemon.ready().unwrap();
         let native = Self {
