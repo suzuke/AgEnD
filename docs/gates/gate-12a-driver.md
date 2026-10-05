@@ -79,3 +79,5 @@ export CARGO_TARGET_DIR=/private/tmp/agend-g12a-driver-target
 - 2026-10-05：`50e0e83` push／PR CI 均在 Ubuntu、macOS 通過；新增[被動蒐證工具](gate-12a-startup-capture.md)供後續真啟動畫面核對，native 替身驗工具，不宣稱 P5／P6 或真 CLI 通過（#151）。
 
 - 2026-10-05：蒐證工具 `4511e21` 的 fresh verifier 找到跨 soft-wrap 的 synthetic Bearer 前綴會寫入且回成功；修正採 native cell.wrap／leading_spacer 還原 logical line，再做遮蔽與 scan。原電郵反例是拒絕、未寫出；另補 Bearer 拒絕回歸，修正 head 獨立驗證待核。這些只驗工具，不是真 Claude fixture。
+
+- 2026-10-05：`356fbef` 的全新無相關 context verifier 局部 CONFIRMED 被動蒐證工具修正；原同一 native Bearer wrap 反例改為寫入前拒絕，5 cases、四種尺寸／寬字 spacer、零 stdin、成功／失敗清理、clippy／fmt／實際 no-std 通過。`4511e21` 的原 REFUTED 證據保留；只認證工具，真 CLI／P5／P6 未完成（#151）。

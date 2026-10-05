@@ -47,6 +47,10 @@ AGEND_REAL_CLAUDE_STARTUP=1 AGEND_BIN=<本批 agend 絕對路徑>   cargo run -p
 
 另以 140 欄與另一個 output 蒐證；兩次各用新 session／workspace。仍須先核准版本／完整命令／回合預算。工具不送模型 prompt，卻會真正啟動指定 CLI，不能從 native 測試授權推定可以啟動真 Claude。
 
+## 獨立核對
+
+固定 `356fbef` 獲全新無相關 context verifier 局部 CONFIRMED。原 `4511e21` 的真 holder 跨列 synthetic Bearer 反例會寫入且回成功；修正後同一 producer 重播回失敗並在寫入前拒絕。另核 20／100／140／200 欄與 5／24／100 列的 native 寬字 spacer、多列電郵、零 stdin 與清理；5 個工具回歸、workspace clippy／fmt／實際 no-std 通過。這份結果只驗工具，不證明真 Claude 的版本、提示或 startup complete。
+
 ## 下一步
 
 完成真版本查詢及啟動蒐證後，核對兩種寬度的真畫面，再實作 D40 P5 的已知提示自動處理及 P6 的初始 idle gate；未知提示保留人工入口。其他真 ACK／PATH／conformance 驗收見 [12A 驗收計畫](gate-12a-validation.md)。
