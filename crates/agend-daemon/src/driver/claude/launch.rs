@@ -489,14 +489,17 @@ mod tests {
             assert!(crate::supervisor::launch(dir.path(), &inst, true).is_err());
             assert!(prepare_test(&store, dir.path(), &inst).await.is_err());
             assert!(!settings_path(dir.path(), &inst.id).exists());
-            assert!(!dir.path().join("CLAUDE.md").exists());
-            assert!(!dir.path().join(".mcp.json").exists());
+            let workspace = Path::new(&inst.working_directory);
+            assert!(!workspace.join("CLAUDE.md").exists());
+            assert!(!workspace.join(".mcp.json").exists());
 
             inst.delivery = "inbox".into();
             prepare_test(&store, dir.path(), &inst).await.unwrap();
             let launched = crate::supervisor::launch(dir.path(), &inst, false).unwrap();
             assert_eq!(launched.args[..inst.args.len()], inst.args);
             assert!(!settings_path(dir.path(), &inst.id).exists());
+            assert!(!workspace.join("CLAUDE.md").exists());
+            assert!(!workspace.join(".mcp.json").exists());
         }
     }
 }

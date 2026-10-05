@@ -385,30 +385,49 @@ impl Lab {
             r => Err(format!("unexpected {r:?}")),
         }
     }
-    pub fn wait_stage(&self, task: &str, stage: &str) -> Result<FleetView, String> {
+    fn wait_view(
+        &self,
+        expected: &str,
+        ready: impl Fn(&FleetView) -> bool,
+    ) -> Result<FleetView, String> {
         let until = Instant::now() + Duration::from_secs(60);
         while Instant::now() < until {
-            let v = self.fleet()?;
-            if v.tasks.iter().any(|t| {
-                t.task_id == task
-                    && (t.current_stage.as_deref() == Some(stage) || t.status == stage)
-            }) {
-                return Ok(v);
+            let view = self.fleet()?;
+            if ready(&view) {
+                return Ok(view);
             }
             std::thread::sleep(Duration::from_millis(100));
         }
-        Err(format!("{task} never reached {stage}: {}", self.logs()))
+        Err(format!("never observed {expected}: {}", self.logs()))
+    }
+    pub fn wait_stage(&self, task: &str, stage: &str) -> Result<FleetView, String> {
+        self.wait_view(&format!("{task} at {stage}"), |view| {
+            view.tasks.iter().any(|t| {
+                t.task_id == task
+                    && (t.current_stage.as_deref() == Some(stage) || t.status == stage)
+            })
+        })
     }
     pub fn approve(&self, task: &str) -> Result<(), String> {
-        let v = self.wait_stage(task, "approve")?;
-        let id = v
-            .attention
-            .iter()
-            .find(|a| {
-                a.task_id.as_deref() == Some(task) && a.actions.contains(&AttentionAction::Approve)
-            })
-            .and_then(|a| a.attention_id.clone())
-            .ok_or("approval attention missing")?;
+        // A stage transition can be visible before its attention is published.
+        // Resolve only after one native FleetView contains both prerequisites.
+        let approval = |view: &FleetView| {
+            view.attention
+                .iter()
+                .find(|a| {
+                    a.task_id.as_deref() == Some(task)
+                        && a.actions.contains(&AttentionAction::Approve)
+                        && a.attention_id.is_some()
+                })
+                .and_then(|a| a.attention_id.clone())
+        };
+        let view = self.wait_view(&format!("{task} approval attention"), |view| {
+            view.tasks
+                .iter()
+                .any(|t| t.task_id == task && t.current_stage.as_deref() == Some("approve"))
+                && approval(view).is_some()
+        })?;
+        let id = approval(&view).ok_or("approval attention missing")?;
         self.request(
             None,
             ClientRequest::ResolveAttention {

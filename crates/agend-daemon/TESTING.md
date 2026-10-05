@@ -151,3 +151,5 @@ Failed 派工回歸：五種 fake queue 只用一個 dev，boot 派工失敗後�
 `actual_driver_routes_native_content_once_across_four_daemons_and_new_home_is_independent` 經真正的 agent send handler → BackendDriver → ClaudeDriver、native channel 與 ACK，核四次程序開機只一個投遞識別碼、sent 不代 confirmed、新 HOME 不共用冪等狀態。這是實際組合回歸，不宣稱完整 DRV-1–9 已執行。
 
 `pipeline_store_ports` 另驗 Claude 回條只觀察 Driver/helper 狀態、task CAS 不冒充 ACK、晚到 ACK 與舊回條不倒退 confirmed；公開通用訊息狀態 API 仍拒絕 Claude 假確認。`claude_control_loss` 在真 PTY 消費 Esc 後丟原 holder 回覆，四次開機不重送鍵或內容；共用 DRV 的 restart 案例包括一個 seed 及四個獨立 composition child，新 HOME 的反向在 boot 2 因游標歷史遺失而失敗。
+
+第 12A CI 前提修正：`tests/common/pipeline_process.rs` 的 approve helper 等同一真 FleetView 中的階段與 attention，避免讀到分次發布空窗；產品核准流程及 60 秒測試期限維持原值。Claude launch terminator 拒絕的單元斷言核真正 instance workspace 的 CLAUDE.md／.mcp.json，不只核 HOME。

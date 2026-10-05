@@ -218,7 +218,7 @@ struct Actor {
     thread: Option<std::thread::JoinHandle<()>>,
 }
 impl Actor {
-    fn start(home: PathBuf, idle: Arc<AtomicBool>) -> Self {
+    fn start(home: PathBuf, idle: Arc<AtomicBool>, idle_hint_after: Duration) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let stopped = stop.clone();
         let thread = std::thread::spawn(move || {
@@ -250,9 +250,9 @@ impl Actor {
                     Fixture::native_hook(&home, "Stop", json!({"stop_hook_active":false})),
                     json!({})
                 );
-                // The fixture's next delivery must start while actually idle.
-                // Let native polling observe the same five-second gate as production.
-                let until = Instant::now() + Duration::from_millis(5300);
+                // This is only the actor's readiness hint. The Proxy also
+                // checks the daemon's real idle record before invoking Driver.
+                let until = Instant::now() + idle_hint_after;
                 while Instant::now() < until && !stopped.load(Ordering::SeqCst) {
                     std::thread::sleep(Duration::from_millis(20));
                 }
@@ -286,6 +286,7 @@ pub struct Backend {
     idle: Arc<AtomicBool>,
     pids: Mutex<BTreeSet<u32>>,
     fresh_home_on_boot: bool,
+    idle_hint_after: Duration,
 }
 impl Backend {
     fn new() -> std::rc::Rc<Self> {
@@ -301,6 +302,7 @@ impl Backend {
             idle: Arc::new(AtomicBool::new(false)),
             pids: Mutex::new(BTreeSet::new()),
             fresh_home_on_boot,
+            idle_hint_after: Duration::from_millis(5300),
         })
     }
 }
@@ -338,9 +340,24 @@ impl Driver for Proxy {
     ) -> Result<DeliveryReceipt, String> {
         if instance_id == "claude" {
             let until = Instant::now() + Duration::from_secs(12);
-            while !self.idle.load(Ordering::SeqCst) {
+            loop {
+                if self.idle.load(Ordering::SeqCst) {
+                    let reported_idle = self
+                        .events(instance_id, None)
+                        .await?
+                        .iter()
+                        .rev()
+                        .find_map(|event| match event.kind {
+                            DriverEventKind::BusyChanged { busy } => Some(!busy),
+                            _ => None,
+                        })
+                        .unwrap_or(false);
+                    if reported_idle {
+                        break;
+                    }
+                }
                 if Instant::now() >= until {
-                    return Err("fake actor never became idle".into());
+                    return Err("native daemon never reported the actor idle".into());
                 }
                 std::thread::sleep(Duration::from_millis(20));
             }
@@ -448,7 +465,11 @@ impl ContractFixture {
         Fixture::native_hook(home, "SessionStart", json!({"source":"resume"}));
         std::thread::sleep(Duration::from_millis(5300));
         if backend.actor.lock().unwrap().is_none() {
-            *backend.actor.lock().unwrap() = Some(Actor::start(home.clone(), backend.idle.clone()));
+            *backend.actor.lock().unwrap() = Some(Actor::start(
+                home.clone(),
+                backend.idle.clone(),
+                backend.idle_hint_after,
+            ));
         }
         // Fresh native Poll establishes actual idle before the contract starts.
         let request = ClientRequest::Claude {
@@ -485,6 +506,31 @@ fn changing_home_between_drv_boots_fails_at_the_second_boot() {
         .expect_err("a replacement HOME must lose backfill");
     assert!(error.contains("boot 2"), "{error}");
     println!("negative new HOME check: {error}");
+}
+
+#[test]
+fn native_idle_record_not_actor_timer_defines_the_contract_precondition() {
+    let mut backend = Backend::new();
+    // A deliberately early actor hint reproduces the scheduling gap: the
+    // production five-second idle gate has not yet reported idle to Driver.
+    std::rc::Rc::get_mut(&mut backend).unwrap().idle_hint_after = Duration::from_millis(100);
+    let case = contract::cases::<ContractFixture>()
+        .into_iter()
+        .find(|case| case.name == "cursors_are_unique")
+        .unwrap();
+    let result = (case.check)(ContractFixture::boot(&backend));
+    assert!(
+        result.is_ok(),
+        "early actor hint must not start an idle contract while busy: {result:?}"
+    );
+    assert_eq!(backend.pids.lock().unwrap().len(), 1);
+    assert_eq!(
+        fs::read_to_string(backend.fixture.home.join("received.log"))
+            .unwrap()
+            .lines()
+            .count(),
+        2
+    );
 }
 impl contract::DriverFixture for ContractFixture {
     type Driver = Proxy;
