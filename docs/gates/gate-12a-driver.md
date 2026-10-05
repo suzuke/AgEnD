@@ -52,7 +52,7 @@ pipeline 的 `dispatch:<ticket>`／reviewer 派工 id 保留原值，ACK 接受�
 
 全新無相關 context 的 checkpoint verifier 對 `afe5188` 重跑 native demo／實際 no-std 通過，但找出 instance args 中的 `--` 能把 daemon-owned 旗標移到 options terminator 後方；原 head 判有缺陷。作者先重現回歸 exit 101，再拒絕 `--`，驗證 fresh／resume 均拒絕、拒絕時不建立三個設定檔；inbox 保持原路徑。修正後 17 個 Driver 單元、整個 daemon crate、workspace clippy 與實際 no-std 通過。修正版 `441d658` 的第二位全新 verifier 針對 terminator 修正判定 CONFIRMED，另以真 workspace 矩陣與 native supervisor 核拒絕不產生設定檔；作者單元的路徑斷言已改成真正 workspace。這份局部結果不認證完整 12A。必要反例與最新成功 log 保存於 `/Users/suzuke/Documents/Hack/AgEnD-ops/g12a-native-checkpoint-20261005/`；`cb0212c` 的全新 fixture verifier 已局部 CONFIRMED，固定 head CI 另核。
 
-CI 在 `441d658` 暴露兩個測試前提空窗：macOS 的 DRV-4 在 actor 等待 5.3 秒後送達，daemon 尚未保存 idle，正確回 queued；Ubuntu 的 pipeline 看到 approve 階段後，approval attention 尚未發布。DRV fixture 現在等實際 Driver 的最新 BusyChanged idle 事件；刻意提早 readiness hint 的回歸通過，暫時忽略真 idle 紀錄的反向仍以 queued 失敗（exit 101）。pipeline fixture 在原 60 秒期限內等同一 fleet view 具備階段與 attention；15 cases 通過。產品逾時、Sent／Confirmed 斷言與核准行為未改。最新 native demo／clippy／fmt／實際 no-std 通過，固定新 head CI 及 fresh verifier 待核，原 CI 失敗 log 保留。
+CI 在 `441d658` 暴露兩個測試前提空窗：macOS 的 DRV-4 在 actor 等待 5.3 秒後送達，daemon 尚未保存 idle，正確回 queued；Ubuntu 的 pipeline 看到 approve 階段後，approval attention 尚未發布。DRV fixture 現在等實際 Driver 的最新 BusyChanged idle 事件；刻意提早 readiness hint 的回歸通過，暫時忽略真 idle 紀錄的反向仍以 queued 失敗（exit 101）。pipeline fixture 在原 60 秒期限內等同一 fleet view 具備階段與 attention；15 cases 通過。產品逾時、Sent／Confirmed 斷言與核准行為未改。最新 native demo／clippy／fmt／實際 no-std 通過，固定 `cb0212c` 的 fresh verifier 已局部 CONFIRMED，CI 另核，原 CI 失敗 log 保留。
 
 上述檢查尚未取代 [完整驗收計畫](gate-12a-validation.md)。Draft [#151](https://github.com/suzuke/AgEnD/pull/151) 仍在施工，完整 12A 完成後須再交全新 verifier。
 
