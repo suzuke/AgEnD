@@ -13,7 +13,7 @@
 
 | 段 | 範圍 | 目前進度 |
 |---|---|---|
-| A claude | channel、hooks、啟動設定、權限、忙碌策略、送達、清掃 | 設計已 merge；client 基礎 #147 已 merge；持久化 #148 已 merge；bridge #149 已 merge；共用 gh 防護 #150 已 merge；Driver／啟動設定與控制實作中，完整接入未完成 |
+| A claude | channel、hooks、啟動設定、權限、忙碌策略、送達、清掃 | 設計已 merge；client 基礎 #147 已 merge；持久化 #148 已 merge；bridge #149 已 merge；共用 gh 防護 #150 已 merge；Driver #151 與正式啟動 #152 已 merge；完整真模型 smoke 為必要驗收，尚未執行 |
 | B opencode | `opencode serve`、session、送達與權限；三個 backend 互傳訊息 | A 段完成後另寫細案，尚未確認 |
 | C GitHub forge | push、PR、checks、head 對帳、merge 與收尾 | 第 10 關依賴已完成，細案尚未確認 |
 | D Telegram | notifier、allowlist、token、手機處理需要你、G4 已讀狀態 | 第 10 關依賴已完成，細案尚未確認 |
@@ -98,3 +98,5 @@ Claude 接入／A 段功能驗收尚未完成，bridge 基礎可用 [自動 nati
 - 2026-10-04：#148 全新 verifier CONFIRMED、雙平台 CI 通過，經使用者確認合併為 `7877dbe`；protocol 1.5／channel／Stop／ACK spool 在新 worktree 實作，範圍與限制見 [bridge 基礎](gate-12a-bridge.md)。
 
 - 2026-10-04：[draft PR #149](https://github.com/suzuke/AgEnD/pull/149)（首個提交 `999203e`）接通 protocol 1.5、channel／Stop helpers 與 hook／ACK spool；13 native cases、accept core（fmt／workspace clippy／protocol／實際 no-std）通過。完整 workspace、全新 verifier／固定 head CI 收尾中；未 merge，完整 Claude Driver 與真 CLI 驗收仍待完成。
+
+- 2026-10-06：#151／#152 經使用者確認合併；依最新指示將完整真模型 smoke 列為必要驗收，見[固定計畫](gate-12a-live-smoke.md)。

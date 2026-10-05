@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - 依 crate 由下往上分 13 個施工關；每個施工關單獨驗收，使用者確認後才開下一個施工關（D22）。
-> - 目前狀態：**第 1–11 施工關完成並已合併**；第 11 施工關 C 段 #145 經全新 verifier、雙平台 CI、實機及後續自動驗收與清理，使用者於 2026-10-03 確認合併（`b2152db`）。第 12 施工關 A 段設計 #138 已 merge，client 基礎 #147 已 merge，持久化 #148 已 merge，protocol 1.5／channel／Stop／ACK spool 基礎 #149 已 merge，共用 gh 防護 #150 已 merge，完整 Claude Driver／啟動設定與 Interrupt 實作中，Claude 接入未完成；第 13 施工關未開始。
-> - 下一步：依第 12A [D40](decisions/d40.md) 完成 [Claude Driver／啟動設定與控制](gates/gate-12a-driver.md)；每批以全新 verifier、可重驗指令及使用者確認收尾。
+> - 目前狀態：**第 1–11 施工關完成並已合併**；第 11 施工關 C 段 #145 經全新 verifier、雙平台 CI、實機及後續自動驗收與清理，使用者於 2026-10-03 確認合併（`b2152db`）。第 12 施工關 A 段設計 #138 已 merge，client 基礎 #147 已 merge，持久化 #148 已 merge，protocol 1.5／channel／Stop／ACK spool 基礎 #149 已 merge，共用 gh 防護 #150 已 merge，Claude Driver #151 與正式啟動／初始 idle #152 已合併，完整真模型 smoke 改為必要驗收，Claude 接入尚未驗收；第 13 施工關未開始。
+> - 下一步：依第 12A [D40](decisions/d40.md) 完成 [完整真模型 smoke](gates/gate-12a-live-smoke.md)；每批以全新 verifier、可重驗指令及使用者確認收尾。
 
 ## 13 個施工關
 
@@ -171,3 +171,5 @@
 - 2026-10-05：第四位全新 verifier 用 4KiB socket buffer 與合法 24KiB 分行 input 推翻 `eda202c` 的 >64KiB 並行門檻，固定 head 記為 REFUTED。testkit 改每份控制請求都並行讀寫，新增原生 consumer 精確收齊 24KiB 及後續 sentinel 回歸；原負例保留，最終 head 重驗與 CI 待核，未 merge（#152）。
 - 2026-10-05：`bd85766` macOS CI 仍記錄 300.315／330.091ms，未認證時效。未知且 notice 未變的畫面減少無授權作用的完整取樣，輸出／link 變動立即重查、靜默 resize 最多一秒重查；terminal hub 從首筆 dirty 等 50ms 避開過期共用 frame，後續 notice 不延長等待。原 300ms 門檻不變，新 native／daemon／fresh／CI 待核（#152）。
 - 2026-10-05：`1727c17` 的全新 verifier 本機 startup7／native4／outer8與36筆原300ms輸出通過，CI另在舊取消測試 first poll 必為Pending的假設失敗；真holder可以先回覆。測試改先核自有PID及已停止狀態，取消後RAII恢復，避免搶monitor退出回條；不改runtime，原CI證據保留，新head驗證待核（#152）。
+
+- 2026-10-06：使用者確認 #151／#152 合併，分別為 `cac2226`／`e7a8987`；兩個合併 tree 與原驗證 head 相同，原 worktree／branch 已移除，編譯暫存僅保留約 51MiB 的兩個歷史稽核必要 binary。使用者要求完整模型 smoke 為必要驗收；本批在清理核對後建立獨立 worktree，真模型計畫準備中，尚未執行。

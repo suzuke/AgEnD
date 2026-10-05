@@ -68,3 +68,7 @@ cargo test -p agend-daemon --test claude_startup_capture
 cargo test -p agend-daemon
 cargo xtask check-deps
 ```
+
+## 真模型 smoke（預設不執行）
+
+使用者要求完整真模型通訊 smoke 為必要驗收；固定版本、七則訊息計畫、執行 opt-in 與清理見[真模型 smoke](../../docs/gates/gate-12a-live-smoke.md)。`claude_live_cleanup` example 只停止 nonce-owned holders 與精確身分的孤兒群組；不啟動 backend。CI 仍不執行真模型。

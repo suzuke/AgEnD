@@ -1,21 +1,21 @@
 # 第 12A：Claude Driver、啟動設定與控制
 
 > **TL;DR**
-> - 這批接續已合併的 client #147、store #148、bridge #149 與 gh 防護 #150；目前施工中，native 實作提交為檢查點，尚未合併。
+> - 這批接續已合併的 client #147、store #148、bridge #149 與 gh 防護 #150；已於 2026-10-06 經使用者確認合併 #151（`cac2226`）。
 > - 已接入訊息保存、事件讀取、設定檔 ownership 與單鍵中斷；以下結果只證明列出的回歸案例。
-> - 下一步：完成啟動提示、真 CLI 驗收與最後清理，再交 fresh verifier。
+> - 下一步：依[真模型 smoke](gate-12a-live-smoke.md)完成剩餘真 backend 驗收。
 
-接續批次：[正式啟動提示與初始 idle](gate-12a-startup-runtime.md)；原 draft #151 與其固定蒐證重驗資料保留，未合併。
+接續批次：[正式啟動提示與初始 idle](gate-12a-startup-runtime.md)；原 #151 的固定蒐證重驗資料保留，#152 已合併（`e7a8987`）。
 
 ## 狀態
 
-依 [D40](../decisions/d40.md) 實作，完整第 12A 尚未完成。工作分支是 `feat/gate-12a-claude-driver`；worktree 位於 `/Users/suzuke/AlphaCR-worktrees/AgEnD-g12a-claude-driver`。本頁不把局部回歸當成完整 adapters 驗收。
+依 [D40](../decisions/d40.md) 實作，完整第 12A 尚未完成。原工作分支與 worktree 已在合併後移除。本頁不把局部回歸當成完整 adapters 驗收。
 
 | 範圍 | 已實作 | 尚待完成 |
 |---|---|---|
 | Driver | Claude push 的訊息 claim、重複 id 檢查、持久化事件游標；agent send 與 pipeline dispatch 經 backend router | 真 Claude 的收件與工作回報驗收 |
 | 啟動設定 | D40 旗標、六種 native hooks、channel MCP、ACK 說明；三個設定檔以 SHA-256 記 ownership，拒絕覆寫外來或已變更內容 | 選定真 CLI 版本驗收 |
-| 持久化 | 未發布的 0008 保存設定檔 ownership；schema fixture／snapshot／retention 同步；ACK 事件使用獨立 id，避免與 hook id 撞號 | 最後獨立驗證 |
+| 持久化 | 已合併的 0008 保存設定檔 ownership；schema fixture／snapshot／retention 同步；ACK 事件使用獨立 id，避免與 hook id 撞號 | 最後獨立驗證 |
 | 忙碌中斷 | holder 1.2 的單鍵控制；Steer／Interrupt 發單一 Esc，再走 channel；人工 owner 拒絕時保留訊息 | 選定真 CLI 的 Esc／channel 行為 |
 | 人工終結 | 結果不明顯示 `claude-delivery:<message-id>`；`abandon` 限人操作，保存理由並改 failed；晚到有效 ACK 與放棄在 DB thread 核對 | fresh verifier 與人工驗收 |
 | 忙閒 | hooks 的 busy／idle 候選、五秒穩定與 live screen gate | SessionStart 必須與啟動完成共同判定；版本化提示 fixtures 與 Down／Enter |
@@ -105,3 +105,5 @@ export CARGO_TARGET_DIR=/private/tmp/agend-g12a-driver-target
 - 2026-10-05：`dabb35e` fresh verifier／使用者 native 重驗及 push／PR 雙平台 CI 全通過。另獲三鍵蒐證授權後，固定 Claude 2.1.284 的 100 欄只完成一個 Down，畫面仍為 No；按計畫停於首個失敗，未重送／Enter／140 欄。0 模型／訊息，native 暫存已清理；真原因與 session 觀察缺口保留。補完整提示穩定等待與私有清理身分，native 延遲 receiver 原 consumer 失敗，19 native cases／整個 daemon／fmt／workspace clippy／實際 no-std 通過，新全新 verifier 待核（#151）。
 
 - 2026-10-05：`e0cedfb` 的提示穩定等待與私有清理身分獲全新 verifier 局部 CONFIRMED，19 native capture／199 daemon 測試、獨立 32 native cases、fmt／workspace clippy／實際 no-std 及 push／PR 雙平台 CI 通過。其後新核准 ready 計畫的真 Claude 2.1.284 兩寬蒐證各完成 Down／trust Enter／development Enter，100／140 欄保存 13／11 frames 與主介面，0 模型 prompt／團隊訊息。另一位全新 verifier 核保留證據一致性與指定殘留目前不存在，有限範圍 CONFIRMED；7 個記憶體 mutation 均拒絕。原始失敗證據與清理歷史證明缺口保留，正式 P5／P6、先前 Down 原因及完整 12A 未認證（draft #151）。
+
+- 2026-10-06：#151／#152 已合併，原 worktree／branch 與無用編譯暫存已清理；完整真模型 smoke 改為必要驗收，尚未執行。歷史局部驗證與失敗紀錄保留。
