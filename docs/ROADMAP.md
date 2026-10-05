@@ -176,3 +176,4 @@
 
 - 2026-10-06：完整真模型 smoke 腳本 `1256c99` 經全新 verifier 找出 native cleanup 的 foreign workspace 先停止、漏額外 holder、HOME 漂移及早期無 DB 殘留；已保留原負例，改為全面預核及環境綁定後重驗。仍未啟動真 Claude／模型。
 - 2026-10-06：`2b6084d` 的全新 verifier 以兩個自有 native holder 重現控制 lock／socket 符號連結會誤停另一 home，原 REFUTED 保留；清理 helper 在讀 lock／連 socket 前全面核對控制路徑型態，模型命令改釘完整 Haiku ID，修正版重驗中，真模型尚未執行。
+- 2026-10-06：`fb4801f` 全新 verifier 證明控制檔案硬連結仍能重導 Shutdown 到另一自有 native lab，原 REFUTED 保留；檔案／socket 追加單一 link ownership 核對，修正版重驗，零真模型執行。

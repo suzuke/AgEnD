@@ -3,7 +3,7 @@
 
 use agend_daemon::runtime::{files, shutdown_holder};
 use rusqlite::OptionalExtension;
-use std::os::unix::fs::FileTypeExt;
+use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::path::Path;
 
 const IDS: [&str; 2] = ["g12live-a", "g12live-b"];
@@ -39,7 +39,7 @@ fn validate_path(path: &Path, kind: &str, required: bool) -> Result<(), String> 
         "socket" => file_type.is_socket(),
         _ => false,
     };
-    if !correct || file_type.is_symlink() {
+    if !correct || file_type.is_symlink() || (kind != "directory" && metadata.nlink() != 1) {
         return Err(format!(
             "unexpected control path type: {}; preserved",
             path.display()
