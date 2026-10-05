@@ -150,7 +150,7 @@ migration `0007` 及 DB-thread API 保存投遞開始／寫出／ACK／人工放
 
 `claude_bridge` 提供 client 1.5 Attach／Poll／Hook／Written／Ack；先預約才回完整內容，歷史 hook 不建立 idle。`ingest` 補送 hooks／acks，入庫才刪，不重送內容。[bridge 範圍](../../docs/gates/gate-12a-bridge.md) · [Claude 測試](CLAUDE-TESTING.md)。
 
-[Startup capture](../../docs/gates/gate-12a-startup-capture.md) 預設被動保存真 holder 畫面；額外 opt-in 的 trust／development 模式最多兩鍵／三鍵，只核本次 workspace 與完整已錄製選單，任何 frame 必須符合本次 instance／view／generation。這是無 revision CAS 的 operator 蒐證工具，`startup=not_assessed`，不送模型 prompt／團隊訊息；首次真三鍵執行已按首個失敗停止。 受控 startup capture 對完整已知選單加一秒穩定等待，仍核控制身分與 completion，不重送；私有 `cleanup-identity.json` 提供本次 session／canonical workspace 的清理歸屬。真蒐證失敗仍停下，不代表啟動完成。
+[Startup capture](../../docs/gates/gate-12a-startup-capture.md) 預設被動保存真 holder 畫面；額外 opt-in 的 trust／development 模式最多兩鍵／三鍵，只核本次 workspace 與完整已錄製選單，任何 frame 必須符合本次 instance／view／generation。這是無 revision CAS 的 operator 蒐證工具，`startup=not_assessed`，不送模型 prompt／團隊訊息；首次真三鍵執行已按首個失敗停止；新核准 ready 計畫的兩寬蒐證各完成三鍵並保存真主介面，經全新 verifier 有限範圍 CONFIRMED。受控 startup capture 對完整已知選單加一秒穩定等待，仍核控制身分與 completion，不重送；私有 `cleanup-identity.json` 提供本次 session／canonical workspace 的清理歸屬。自有 lab、trust 條目與 session 暫存已清理；保留證據支持目前指定殘留不存在，不能重演已刪除的原始清理身分。真蒐證失敗仍停下，成功也不代表正式 P5／P6 啟動完成。
 
 ## 下一步
 

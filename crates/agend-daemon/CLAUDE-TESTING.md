@@ -32,7 +32,7 @@
 兩寬另核外部路徑共用自有前綴、自有路徑出現在錯誤標頭以外的位置及重複標頭均零輸入；
 workspace 必須是唯一 `Accessing workspace:` 標頭的下一個非空完整行。
 選到 Yes／後續畫面是替身生成，不是真 CLI fixture；正式 P5 daemon-key／revision CAS、
-development channels 與 P6 初始 idle 仍缺真證據。預設被動模式保持 0 輸入。
+P6 初始 idle 仍未認證。預設被動模式保持 0 輸入。
 
 Development channels 蒐證用真提示文字經 native producer 重播，兩寬核三次輸入
 `ESC[B CR CR`；外來前綴／額外 server、重複 Channels、Exit、缺完整 warning
@@ -48,6 +48,16 @@ Development channels 蒐證用真提示文字經 native producer 重播，兩寬
 完整提示穩定一秒後才送下一鍵，期間持續讀 frame／control；未知提示清除候選，不重送。
 `prompt_stability_survives_delayed_receiver_and_resets_for_unknown` 用真 holder／兩寬 fixture，在畫面出現後 750ms 才啟用 raw receiver；原 consumer 先失敗，新 consumer 核恰好兩鍵；中途未知提示後，真 producer 核第一鍵仍等恢復 No 超過 900ms。
 `private_cleanup_identity_matches_native_session_and_removed_workspace` 以 native argv 的 session 核私有 `cleanup-identity.json`，限定欄位與 0600，原生 workspace／home 已移除。
+
+## 已核准的真蒐證重核（唯讀）
+
+固定 `e0cedfb` 的 100×24／140×24 各完成三次 operator Input，保存 13／11 個真 frames 與主介面；另行版本查詢為 2.1.284。全新 verifier 只核保留證據一致性與指定殘留目前不存在，7 個記憶體 mutation 均拒絕；未啟動 backend 或模型。正式 P5／P6、歷史原始清理重演與首次 Down 無效原因未認證。完整限制見 [獨立核對](../../docs/gates/gate-12a-startup-capture-review.md)。
+
+```bash
+python3 -B /Users/suzuke/Documents/Hack/AgEnD-ops/g12a-native-checkpoint-20261005/true-ready-capture-fresh-verifier/audit.py --self-test
+```
+
+此指令不寫檔或送鍵，讀固定 git object、binary 與必要證據；缺檔或 hash 改變即拒絕。
 
 ## 下一步
 

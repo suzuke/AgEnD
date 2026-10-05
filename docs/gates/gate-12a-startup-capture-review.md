@@ -40,6 +40,16 @@ trust 改為完整已錄製 No／Yes fixture，只替換本次 canonical path；
 
 固定 `dabb35e` 的全新 verifier 局部 CONFIRMED：17 native cases、整個 daemon、fmt、workspace clippy、實際 no-std，以及獨立 38 個選單／30 個回條故障案例通過。使用者以固定提交重驗相同範圍通過；push／PR 的 macOS、Ubuntu CI 均成功。自有 worktree、branch、target、程序與重複暫存已清理。此結果不認證真 CLI、正式 P5／P6 或完整 12A。
 
+## 穩定等待與真兩寬 ready capture
+
+固定 `e0cedfb` 的全新 verifier 局部 CONFIRMED：19 個 capture／199 個 daemon 測試、獨立 32 native cases、fmt／workspace clippy／實際 no-std 通過；push／PR 雙平台 CI 通過。自有 worktree／branch／target／runtime 均清理。
+
+另獲 ready 計畫授權後，固定 Claude 2.1.284 的 100×24／140×24 各完成 Down、trust Enter、development Enter，保存 13／11 個真 frames 與主介面；沒有模型 prompt／團隊訊息或追加鍵。另一位全新 verifier 只讀審核授權、來源／binary hash、完整選單、intent／completed／result 一致性與指定殘留目前不存在，有限範圍 CONFIRMED。7 個記憶體 mutation（追加輸入、缺 completion、改 generation／尺寸、未知選單、P5 過度宣稱、secret）均拒絕。自有 verifier worktree／branch／cache 已移除，沒有重跑真 CLI。
+
+原始 ACK wire 與 monotonic dwell 時戳未保留，不能重演完整身分核對或一秒等待；raw cleanup identity 已按計畫刪除，hash 不能還原 SID／canonical path 綁定或歷史 atomic config rewrite。保留 manifest 與現場 absence 支持有限結論，不認證正式 P5／P6、完整 12A、初始 idle 或先前 Down 無效原因。兩寬均有更新已安裝 banner；固定 executable hash 未變，共用更新未擅自清除。
+
+必要證據與唯讀 `audit.py --self-test` 留在 `AgEnD-ops/g12a-native-checkpoint-20261005/true-ready-capture-fresh-verifier/`；[重核指令](../../crates/agend-daemon/CLAUDE-TESTING.md#已核准的真蒐證重核唯讀)不啟動 backend／模型、不寫檔／送鍵。
+
 ## 下一步
 
 目前工具與真執行限制見 [startup capture](gate-12a-startup-capture.md)，失敗後的修正見 [輸入時機](gate-12a-startup-input-timing.md)。

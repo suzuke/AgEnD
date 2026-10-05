@@ -2,7 +2,7 @@
 
 > **TL;DR**
 > - 開發用 `claude_startup_capture` 預設被動保存畫面；額外 opt-in 做受控 trust／development channels 蒐證，不送模型 prompt 或團隊訊息。
-> - 真 Claude 2.1.284 已核版本並保存兩寬信任與 development channels 畫面；P5／P6 仍未驗收。
+> - 真 Claude 2.1.284 已核版本並保存兩寬信任、development channels 與確認後主介面；P5／P6 仍未驗收。
 > - 下一步：以真 fixture 補正式啟動處理；後續真確認與模型回合另取授權。
 
 ## 範圍
@@ -85,7 +85,7 @@ P5 的原子畫面檢查或人工 owner 拒絕。`production_daemon_key_path_tes
 程序與暫存已清理；另只移除本次兩個 canonical workspace 的個人信任設定條目，
 其他個人設定值核對不變。執行與清理 manifest 保存於 AgEnD-ops。
 
-## Development channels 蒐證模式（首次真執行已停止）
+## Development channels 蒐證模式（兩寬真蒐證已完成）
 
 新增 `--development-channel-control accept`，須同時指定 workspace trust 模式，
 另設 `AGEND_REAL_CLAUDE_STARTUP_CHANNELS=1`；既有被動與兩鍵模式不自動增加輸入。
@@ -98,13 +98,15 @@ P5 的原子畫面檢查或人工 owner 拒絕。`production_daemon_key_path_tes
 `startup=not_assessed`、無 revision CAS、非正式 P5 DaemonKey 的邊界維持。
 受控動作結果不明、被拒絕或期限到都失敗並保留證據，不重送。
 原生 producer 重播真 development frame；確認後的畫面是 synthetic，未當成真 fixture。
-19 個 native cases 包含三鍵正例、完整選單拒絕、frame／resize 身分核對、不重送，以及提示穩定等待與清理身分。整個 daemon、fmt、workspace clippy 與實際 no-std 通過；新全新 verifier 待核。首次真三鍵計畫已按首個失敗停止，後續不能由原授權推定可重試。
+19 個 native cases 包含三鍵正例、完整選單拒絕、frame／resize 身分核對、不重送，以及提示穩定等待與清理身分。整個 daemon、fmt、workspace clippy 與實際 no-std 通過；固定 `e0cedfb` 的全新 verifier 另核 32 個 native cases，局部 CONFIRMED，push／PR 雙平台 CI 通過。首次真三鍵計畫已按首個失敗停止，後續沒有續用該計畫。
 
 ## 獨立核對與首個真失敗
 
 固定 `dabb35e` 的全新 verifier、使用者 native 重驗及雙平台 CI 通過。歷次反例與修正保留於 [獨立核對紀錄](gate-12a-startup-capture-review.md)。
 
-之後獲授權的三鍵真蒐證在 100 欄只完成 Down，未觀察到 Yes，已按計畫停止。新增提示穩定等待與私有清理身分，詳見 [輸入時機與清理](gate-12a-startup-input-timing.md)；新工具的真執行須新計畫授權。
+之後獲授權的三鍵真蒐證在 100 欄只完成 Down，未觀察到 Yes，已按計畫停止。新增提示穩定等待與私有清理身分，詳見 [輸入時機與清理](gate-12a-startup-input-timing.md)；新核准 ready 計畫的兩寬均成功：100／140 欄各保存 13／11 個真 frames，各三次 operator Input 完成，後續捕捉主介面；0 模型 prompt／團隊訊息。另行版本查詢成功，capture 仍記 `version_was_queried=false`、`startup=not_assessed`、`production_daemon_key_path_tested=false`。
+
+另一位全新 verifier 核保留證據一致性與指定殘留目前不存在，有限範圍 CONFIRMED；原始 ACK wire、單秒等待時間戳及已刪除的 raw lifecycle 不在保留證據中，不宣稱可重演完整身分／等待／歷史清理。兩寬最後都有更新已安裝 banner；固定 executable hash 未變，共用更新未擅自刪除。必要證據留在 AgEnD-ops，自有 lab、兩筆 trust 條目與 session 暫存已清理。
 
 ## 下一步
 
