@@ -12,7 +12,7 @@
 
 ## 第 11 施工關 C 段（已驗收並合併 #145）
 
-`cargo test -p agend --test terminal_runtime` 使用真 binary／holder／PTY 驗 runtime frame／control 配對、實際 resize、舊 owner 拒絕、取消 native blocked input 後憑證失效與 holder 重連、不重送、取消已到但未接收的 grant、唯讀查詢取消不打斷控制、整份超限拒絕及新 holder generation。這些尚不代表 daemon client 1.4／TUI／Codex U17 已完成。
+`cargo test -p agend --test terminal_runtime` 使用真 binary／holder／PTY 驗 runtime frame／control 配對、實際 resize、舊 owner 拒絕、取消 native blocked input 後憑證失效與 holder 重連、不重送、取消已到但未接收的 grant、唯讀查詢取消不打斷控制、整份超限拒絕及新 holder generation。取消案例先以自有 holder lock 核 PID，SIGSTOP 後以 `ps` 核已停止，保證第一次 poll 為 Pending；RAII 在正常與 panic 路徑 SIGCONT，不與 runtime monitor 搶 child exit receipt。真 native 查詢／grant 才會進取消路徑，不依賴真 holder 回覆速度。這些尚不代表 daemon client 1.4／TUI／Codex U17 已完成。
 
 terminal_capability 與 terminal_hub 驗能力／權限、控制／尺寸／歷史、EOF 與資源清理；六項 C 契約同跑 fake／native，完整 App 與 U17 已通過。版本許可與 resume 歸屬的 12 個 native cases 只用 fake backend，真模型不在 CI 執行。 [版本政策](../../docs/gates/gate-11c-codex-input.md)。
 

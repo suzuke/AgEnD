@@ -170,3 +170,4 @@
 - 2026-10-05：`eda202c` Ubuntu CI 在新增 100×24 情境記錄 300.808ms，原證據保留；完整終端改每 50ms 讀取 frame mailbox，首頁及舊終端仍 100ms、舊重拿仍 200ms。真 outer PTY 八例、完整 TUI、workspace clippy／fmt／實際 no-std 通過，36 筆最後 dirty 更新皆 ≤300ms；新無 context verifier 與 CI 待核，未 merge（#152）。
 - 2026-10-05：第四位全新 verifier 用 4KiB socket buffer 與合法 24KiB 分行 input 推翻 `eda202c` 的 >64KiB 並行門檻，固定 head 記為 REFUTED。testkit 改每份控制請求都並行讀寫，新增原生 consumer 精確收齊 24KiB 及後續 sentinel 回歸；原負例保留，最終 head 重驗與 CI 待核，未 merge（#152）。
 - 2026-10-05：`bd85766` macOS CI 仍記錄 300.315／330.091ms，未認證時效。未知且 notice 未變的畫面減少無授權作用的完整取樣，輸出／link 變動立即重查、靜默 resize 最多一秒重查；terminal hub 從首筆 dirty 等 50ms 避開過期共用 frame，後續 notice 不延長等待。原 300ms 門檻不變，新 native／daemon／fresh／CI 待核（#152）。
+- 2026-10-05：`1727c17` 的全新 verifier 本機 startup7／native4／outer8與36筆原300ms輸出通過，CI另在舊取消測試 first poll 必為Pending的假設失敗；真holder可以先回覆。測試改先核自有PID及已停止狀態，取消後RAII恢復，避免搶monitor退出回條；不改runtime，原CI證據保留，新head驗證待核（#152）。
