@@ -56,7 +56,7 @@ SQLite 在 daemon 停機後才讀取；禁止用 immutable bypass 或複製變�
 
 ## 目前紀錄
 
-真模型尚未執行。native／腳本與固定計畫驗證進行中，沒有新增模型或訊息費用。全新 verifier 在 `1256c99` 以 native producer 推翻清理順序及漏額外 holder，並重現 HOME 漂移與版本查詢失敗留下空 lab；原證據保留。修正為先全面驗身分／namespace、綁固定環境、無 DB 且無 holder 才可清空 lab，重驗待核。
+真模型尚未執行。native／腳本與固定計畫驗證進行中，沒有新增模型或訊息費用。全新 verifier 在 `1256c99` 以 native producer 推翻清理順序及漏額外 holder，並重現 HOME 漂移與版本查詢失敗留下空 lab；原證據保留。修正為先全面驗身分／namespace、綁固定環境、無 DB 且無 holder 才可清空 lab，重驗待核。`2b6084d` 另被 native holder 反例推翻：同名 lock／socket 符號連結可誤停另一 home；補所有控制路徑型態預核，原反例保留，修正版另驗。
 
 ## 下一步
 

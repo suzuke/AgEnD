@@ -3,6 +3,7 @@
 
 use agend_daemon::runtime::{files, shutdown_holder};
 use rusqlite::OptionalExtension;
+use std::os::unix::fs::FileTypeExt;
 use std::path::Path;
 
 const IDS: [&str; 2] = ["g12live-a", "g12live-b"];
@@ -20,6 +21,33 @@ mod driver {
 #[path = "../src/driver/claude/sweep.rs"]
 mod sweep;
 
+fn validate_path(path: &Path, kind: &str, required: bool) -> Result<(), String> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound && !required => return Ok(()),
+        Err(error) => {
+            return Err(format!(
+                "cannot inspect {}: {error}; preserved",
+                path.display()
+            ));
+        }
+    };
+    let file_type = metadata.file_type();
+    let correct = match kind {
+        "directory" => file_type.is_dir(),
+        "file" => file_type.is_file(),
+        "socket" => file_type.is_socket(),
+        _ => false,
+    };
+    if !correct || file_type.is_symlink() {
+        return Err(format!(
+            "unexpected control path type: {}; preserved",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
 fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() != 4 {
@@ -31,6 +59,25 @@ fn run() -> Result<(), String> {
     }
     let home = Path::new(&args[1]);
     let expected = format!("/private/tmp/g12live-{nonce}/home");
+    // Check every control path before reading a lock or connecting a socket.
+    // A known filename alone does not establish ownership when it is a link.
+    validate_path(home, "directory", true)?;
+    validate_path(&home.join(".smoke-owner"), "file", true)?;
+    validate_path(&home.join("run"), "directory", false)?;
+    validate_path(&files::holders_dir(home), "directory", false)?;
+    validate_path(&home.join("agend.db"), "file", false)?;
+    for id in IDS {
+        validate_path(
+            &files::holders_dir(home).join(format!("{id}.lock")),
+            "file",
+            false,
+        )?;
+        validate_path(
+            &files::holders_dir(home).join(format!("{id}.sock")),
+            "socket",
+            false,
+        )?;
+    }
     if home != Path::new(&expected)
         || home.canonicalize().map_err(|e| e.to_string())? != home
         || std::fs::read_to_string(home.join(".smoke-owner")).map_err(|e| e.to_string())? != *nonce

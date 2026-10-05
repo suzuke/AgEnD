@@ -79,7 +79,7 @@ def plan(agend, cleanup, output):
     require(not output.exists(), "evidence directory already exists")
     nonce = uuid.uuid4().hex
     home = Path(f"/private/tmp/g12live-{nonce}/home")
-    args = ["--model", "haiku", "--effort", "low"]
+    args = ["--model", "claude-haiku-4-5-20251001", "--effort", "low"]
     require(digest(CLAUDE) == CLAUDE_SHA, "Claude fingerprint differs; no execution")
     cli = str(agend)
     return {
