@@ -62,6 +62,14 @@ pub struct Rule {
 pub const RETENTION: &[Rule] = &[
     Rule {
         target: Target::Table {
+            name: "claude_startup",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "D40 P5: one current startup per instance, deleted by instance cascade; unknown keys never expire into replay",
+    },
+    Rule {
+        target: Target::Table {
             name: "claude_owned_files",
             time_column: None,
         },

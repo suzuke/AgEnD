@@ -6,6 +6,8 @@ mod claude_contract;
 mod claude_control_loss;
 #[path = "common/claude_pipeline.rs"]
 mod claude_pipeline;
+#[path = "common/claude_startup.rs"]
+mod claude_startup;
 #[path = "../../agend-daemon/tests/common/daemon_process.rs"]
 mod lab;
 use agend_core::{
@@ -407,10 +409,21 @@ impl Fixture {
             messages,
             body,
             "/bin/sh",
-            "printf 'native ready\\n'; exec sleep 600",
+            "printf 'native ready\\r\\n'; exec sleep 600",
         )
     }
     fn with_script(messages: usize, body: Option<&str>, program: &str, script: &str) -> Self {
+        // Actual holder/parser producer renders the recorded main UI, scoped
+        // to this fixture's canonical cwd. Synthetic 'ready' is no evidence.
+        let ready = include_str!(
+            "../../agend-core/tests/fixtures/screens/claude-2.1.284-main-100x24-0.txt"
+        )
+        .trim_end()
+        .replace("<rec>/h1/workspace/g12-startup-capture", "$PWD");
+        let producer = format!(
+            "cat <<AGEND_READY_FRAME | awk '{{printf \"%s\\r\\n\",$0}}'\n{ready}\nAGEND_READY_FRAME\n"
+        );
+        let script = script.replace("printf 'native ready\\r\\n';", &producer);
         let lab = lab::Lab::with_prefix(Path::new(BIN), "g12b");
         let home = lab.home(0);
         let store = SqliteStore::open(&home, 0).unwrap();
@@ -418,7 +431,7 @@ impl Fixture {
             id: "claude".into(),
             backend: Backend::Claude,
             program: program.into(),
-            args: vec!["-c".into(), script.into(), "fake-claude".into()],
+            args: vec!["-c".into(), script, "fake-claude".into()],
             working_directory: home.display().to_string(),
             session_id: Some(SESSION.into()),
             status: InstanceStatus::New,
@@ -860,7 +873,12 @@ fn busy_interrupt_keeps_queued_without_writing_or_stealing_operator_control() {
         }
     }
     let end = Instant::now() + Duration::from_secs(5);
-    while !f.home.join("keys.log").exists() {
+    // Creating the file precedes writing the native receipt; wait for the
+    // actual sentinel rather than racing a newly created empty file.
+    while fs::read_to_string(f.home.join("keys.log"))
+        .unwrap_or_default()
+        .is_empty()
+    {
         assert!(Instant::now() < end, "human owner lost control");
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -1039,13 +1057,23 @@ fn committed_intent_lost_before_stdout_is_not_replayed_across_four_boots() {
     std::thread::sleep(Duration::from_millis(5100));
     // Native service commits the intent. Simulate a dead helper before it
     // writes a channel notification or records a write; save only its tuple.
-    let push = f
-        .rpc(ClaudeOperation::Poll {
-            session_id: SESSION.into(),
-        })
-        .messages
-        .pop()
-        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(8);
+    let push = loop {
+        if let Some(push) = f
+            .rpc(ClaudeOperation::Poll {
+                session_id: SESSION.into(),
+            })
+            .messages
+            .pop()
+        {
+            break push;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no native startup-gated delivery intent"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    };
     f.kill9();
     f.start();
     f.hook("SessionStart", json!({"source":"resume"}));

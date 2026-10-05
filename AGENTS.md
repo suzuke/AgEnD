@@ -70,6 +70,7 @@ CI（`.github/workflows/ci.yml`）在 ubuntu 與 macOS 跑同一組檢查。
 - 禁止：在 `v2` 或 `main` 上直接 commit、push、`--force`；在別人的 worktree 裡改東西。
 - 一律用 PR 合併；合併方式與時機由使用者決定，agent 不自行 merge。
 - 本機所有新 task／verifier worktree 都放 `/Users/suzuke/AlphaCR-worktrees/`（使用者 2026-10-02 指定）；禁止在整合 worktree 實作。
+- 每次建立 task／verifier worktree 前，先核對前一批已結束任務的自有程序、暫存、編譯目錄與 worktree／branch 已清理；保留必要證據及尚未合併、仍供驗收的工作目錄，記錄保留原因。不得用強制刪除處理外來或有未提交修改的 worktree。
 - 使用者已允許 push feature branch、建立 draft PR 與跑 CI，不另行請示；merge 仍須先提供全新、無相關 context 的 subagent 驗證結果與人工驗收指令，等使用者確認。
 
 開工：

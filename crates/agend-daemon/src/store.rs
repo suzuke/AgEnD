@@ -46,6 +46,7 @@
 //! does not match the DB snapshot name pattern.
 
 pub mod claude;
+pub mod claude_startup;
 pub mod codex_input;
 pub mod driver_events;
 pub mod instances;

@@ -155,8 +155,21 @@ impl Window {
         }
     }
     pub fn control(&mut self, id: &str, operation: ClientTerminalOperation) -> ClientResponse {
-        self.client.send(&self.request(id, operation)).unwrap();
-        self.response(id)
+        use std::io::Write;
+        let request = self.request(id, operation);
+        let mut line = serde_json::to_vec(&request).unwrap();
+        // The native server streams parser frames on this same connection.
+        // Drain them during every write: socket buffers can be smaller than
+        // any chosen request-size threshold.
+        line.push(b'\n');
+        let mut writer = self.client.writer_clone().unwrap();
+        writer.set_write_timeout(Some(WITHIN)).unwrap();
+        std::thread::scope(|scope| {
+            let writing = scope.spawn(move || writer.write_all(&line));
+            let response = self.response(id);
+            writing.join().unwrap().unwrap();
+            response
+        })
     }
     pub fn acquire(&mut self, id: &str, size: TerminalSize) -> String {
         let ClientResponse::TerminalControlAck { data } =

@@ -116,6 +116,10 @@ async fn accept_loop(
     let hub =
         TerminalHub::with_codex_driver(ctx.runtime.clone(), ctx.fleet.clone(), ctx.codex.clone());
     let claude = Arc::new(crate::claude_bridge::ClaudeBridge::default());
+    let startup = tokio::spawn(crate::claude_bridge::startup::run(
+        ctx.clone(),
+        claude.clone(),
+    ));
     let ingest = tokio::spawn(crate::ingest::run(
         ctx.store.home().to_owned(),
         ctx.clone(),
@@ -140,6 +144,8 @@ async fn accept_loop(
         }
     }
     ingest.abort();
+    startup.abort();
+    let _ = startup.await;
     let _ = ingest.await;
     drop(listener);
     let _ = fs::remove_file(&socket);

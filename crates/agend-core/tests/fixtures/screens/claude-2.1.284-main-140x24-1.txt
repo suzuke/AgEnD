@@ -1,0 +1,24 @@
+ ▐▛███▛█   Claude Code v2.1.284
+▝▜██████▀  Haiku 4.5 · Claude Max
+ ▝▝   ▝▝   <rec>/h1/workspace/g12-startup-capture
+
+▎ Channels (experimental) messages from server:agend inject directly in this session · restart without
+▎ --dangerously-load-development-channels to stop
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ Try "write a test for <filepath>"
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent                                         ✔ Update installed · Restart to update
+
+
+
+
+
+
+
+
+
+
+
+
+

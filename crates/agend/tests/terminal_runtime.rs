@@ -83,6 +83,51 @@ fn size(rows: u16, columns: u16) -> TerminalSize {
     TerminalSize { rows, columns }
 }
 
+// A fixture may pause only its freshly started native holder. Observing ps
+// state does not consume the runtime monitor's Child::wait exit receipt.
+struct PausedHolder(libc::pid_t);
+impl PausedHolder {
+    fn new(home: &Path, pid: u32) -> Self {
+        assert_eq!(
+            agend_daemon::runtime::files::running(home, ID).unwrap(),
+            Some(pid)
+        );
+        let pid = libc::pid_t::try_from(pid).unwrap();
+        assert!(pid > 1);
+        assert_eq!(unsafe { libc::kill(pid, libc::SIGSTOP) }, 0);
+        let paused = Self(pid);
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            // The runtime's Child::wait worker owns the exit receipt. Read
+            // stopped state without consuming any child status ourselves.
+            let status = std::process::Command::new("/bin/ps")
+                .args(["-o", "stat=", "-p", &pid.to_string()])
+                .output()
+                .unwrap();
+            assert!(
+                status.status.success(),
+                "own holder disappeared before stop"
+            );
+            if String::from_utf8(status.stdout)
+                .unwrap()
+                .trim()
+                .starts_with('T')
+            {
+                break;
+            }
+            assert!(Instant::now() < deadline, "own holder stop timed out");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        paused
+    }
+}
+impl Drop for PausedHolder {
+    fn drop(&mut self) {
+        // Resume on panic too, so Lab can use normal holder shutdown.
+        unsafe { libc::kill(self.0, libc::SIGCONT) };
+    }
+}
+
 #[test]
 fn native_frames_controls_and_input_replies_are_correlated_on_the_runtime_link() {
     run(async {
@@ -362,11 +407,13 @@ fn cancelling_an_acquire_after_its_native_reply_arrived_cannot_leave_a_live_gran
         let lab = lab::Lab::with_prefix(Path::new(BIN), "g11r");
         let home = lab.home(1);
         let rt = runtime(&home);
-        rt.start(&launch(&home, "printf READY; exec sleep 60"))
+        let started = rt
+            .start(&launch(&home, "printf READY; exec sleep 60"))
             .await
             .unwrap();
         let connection = rt.terminal_connection(ID).unwrap();
         let initial = screen(&connection, "READY", 50).await;
+        let paused = PausedHolder::new(&home, started.handle.process_id.unwrap());
         let mut grant = Box::pin(connection.control(
             initial.generation.clone(),
             Op::Acquire {
@@ -378,6 +425,7 @@ fn cancelling_an_acquire_after_its_native_reply_arrived_cannot_leave_a_live_gran
             grant.as_mut().poll(&mut Context::from_waker(Waker::noop())),
             Poll::Pending
         ));
+        drop(paused);
         // Do not poll the grant consumer. A frame at the new size comes after
         // the native Acquire ack on the same holder response stream, proving
         // the reply is queued while the consumer has not accepted it.
@@ -434,12 +482,13 @@ fn cancelling_a_readonly_frame_keeps_the_native_controller_and_connection() {
         let lab = lab::Lab::with_prefix(Path::new(BIN), "g11r");
         let home = lab.home(1);
         let rt = runtime(&home);
-        rt.start(&launch(
-            &home,
-            r#"stty -echo; printf READY; while read -r line; do printf '%s\r\n' "$line"; done"#,
-        ))
-        .await
-        .unwrap();
+        let started = rt
+            .start(&launch(
+                &home,
+                r#"stty -echo; printf READY; while read -r line; do printf '%s\r\n' "$line"; done"#,
+            ))
+            .await
+            .unwrap();
         let connection = rt.terminal_connection(ID).unwrap();
         let initial = screen(&connection, "READY", 50).await;
         connection
@@ -452,12 +501,17 @@ fn cancelling_a_readonly_frame_keeps_the_native_controller_and_connection() {
             )
             .await
             .unwrap();
+        // A fast native reply can complete during the very first poll. Prove
+        // this readonly query is pending by stopping only our freshly started
+        // child holder; never infer pending from scheduler timing.
+        let paused = PausedHolder::new(&home, started.handle.process_id.unwrap());
         let mut query = Box::pin(connection.frame(TerminalViewport { top: None, rows: 1 }));
         assert!(matches!(
             query.as_mut().poll(&mut Context::from_waker(Waker::noop())),
             Poll::Pending
         ));
         drop(query);
+        drop(paused);
         assert!(
             connection.is_current(),
             "a cancelled history lookup interrupted control"

@@ -9,6 +9,11 @@
 > - CLI 的 daemon 端（第 9 施工關）：權限、`send`／`inbox`、`instance add|remove`、`daemon restart` 的預檢與 `exec`、繼承 holder 的收屍，都對真 `agend` binary 測：`crates/agend/tests/cli.rs`（CLI-n 表、重啟、預檢、里程碑）與 `client_protocol.rs`（CLP-13..17）。
 > - 下一步：`cargo test -p agend-daemon`；看 demo：`cargo xtask accept store`、`cargo xtask accept client`、`cargo xtask accept cli`。
 
+正式 P5 啟動按鍵與 P6 初始 idle 的實作、schema v9 與 native 驗證邊界見 [啟動處理](../../docs/gates/gate-12a-startup-runtime.md)。
+private startup capture 明確登記 manual 模式，保留原初始尺寸、停用 daemon 自動鍵；SQLite 重啟仍保留。capture 的 native 回歸與 raw PTY 測試不受正式 P5 介入。
+`agend/tests/tui_outer_pty.rs` 另保留自動 P5 與人工 TUI 共存的真 outer PTY 回歸，核最後 modes、focus、history 與 20 次 App 關閉；terminal hub 在共用 sample 到期後再確認尾段，不用 manual 模式取代此項。
+自動 P5 的尾段時效在 80×23 與 100×24 的實際 agent viewport 各驗 12 筆，保留每筆 300ms 預算。啟動辨識只查一份完整 24 列 frame；未知尺寸不建立初始 idle。未知且 session／notice 未變時最多一秒重查，輸出／link 變動仍立即取樣；已知選單與 Ready 維持原檢查。首筆 dirty 等 50ms 共用 sample 過期，持續輸出的後續 notice 不延長等待。
+
 ## 第 10 施工關驗證
 
 `cargo test -p agend-daemon --test pipeline_adapters` 跑真 Runner 的 RUN-1..9、LocalForge 的 FRG-1..10、metadata／cache／外部寫入／FIFO marker 反向測試、冷 cache、TCP 可連／daemon socket 不可連、父程序 SIGKILL 的子程序清理與真 cargo／npm 編譯測試；`tests/store.rs` 跑 STO-13、schema v7 與既有有資料的 migrations。 `pipeline_store_ports` 的 fake／SQLite 共享契約驗 attention 清除同 CAS transaction、ack 保留與 generic advance 語意；真 SQLite 拒絕 attention UPDATE 時，version／event／receipt／note 全部 rollback，移除故障後重試成功。

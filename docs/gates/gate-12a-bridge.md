@@ -41,7 +41,7 @@ Unix socket／owned home 沿用同 UID、0600／0700 的信任邊界，caller �
 
 ## 路由與寫出
 
-- SessionStart 建立初始 idle；UserPromptSubmit／SessionEnd 即時撤銷 idle；Pre／PostToolUse 只保存事件。
+- SessionStart 配對完整已知啟動主畫面才建立初始 idle 候選；[正式啟動處理](gate-12a-startup-runtime.md)接入五秒穩定門檻。UserPromptSubmit／SessionEnd 即時撤銷 idle；Pre／PostToolUse 只保存事件。
 - Stop 只有明確 `stop_hook_active=false` 可取 Queue；有內容回 `decision=block`／完整 reason 並保持 busy；active 或缺欄位不續行、不 ACK。
 - idle channel 至少穩定五秒。daemon 必須取得目前 live holder 畫面，既有 classifier 命中提示就暫停內容投遞；重啟後不以歷史事件建立 idle。
 - duplicate／replayed／來源時間與入庫時間相差超過五秒的 hook 不取 queue、不建立 idle；新補入且較新的同 session 路由事件會撤銷舊 idle。延遲的 live 路由事件也不能覆蓋較新 source time 的 busy／idle；重啟要有新的 live hook 才能恢復 idle。holder 畫面查詢不持有路由鎖；查詢後必須核 session 與 revision 未變，才預約內容。

@@ -5,6 +5,8 @@
 > - 已接入訊息保存、事件讀取、設定檔 ownership 與單鍵中斷；以下結果只證明列出的回歸案例。
 > - 下一步：完成啟動提示、真 CLI 驗收與最後清理，再交 fresh verifier。
 
+接續批次：[正式啟動提示與初始 idle](gate-12a-startup-runtime.md)；原 draft #151 與其固定蒐證重驗資料保留，未合併。
+
 ## 狀態
 
 依 [D40](../decisions/d40.md) 實作，完整第 12A 尚未完成。工作分支是 `feat/gate-12a-claude-driver`；worktree 位於 `/Users/suzuke/AlphaCR-worktrees/AgEnD-g12a-claude-driver`。本頁不把局部回歸當成完整 adapters 驗收。

@@ -407,6 +407,8 @@ pub fn run(options: &Options, agend: &Path) -> Result<usize, String> {
     {
         let store = SqliteStore::open(&home, 0).map_err(|e| e.to_string())?;
         block_on(store.add_instance(&instance)).map_err(|e| e.to_string())?;
+        block_on(store.manual_claude_startup(ID, instance.session_id.as_deref().unwrap()))
+            .map_err(|e| e.to_string())?;
     }
     let launch = agend_daemon::supervisor::launch(&home, &instance, false)?;
     let redactor = redact::Redactor::new(&native.root.canonicalize().map_err(|e| e.to_string())?);

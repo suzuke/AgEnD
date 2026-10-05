@@ -215,6 +215,24 @@ fn development_worker(root: &Path, width: u16, mode: &str) -> PathBuf {
 }
 
 #[test]
+fn passive_known_trust_sends_no_startup_keys_at_both_widths() {
+    for width in [100, 140] {
+        let root = TempDir::new("g12-passive-known-trust").unwrap();
+        let program = trust_worker(root.path(), width, "normal");
+        let out = root.path().join("evidence");
+        let opts = options(&program, &out, width);
+        capture::run(&opts, &agend()).unwrap();
+        assert!(!root.path().join("input-received").exists());
+        let recorded = fs::read_to_string(out.join("screens.jsonl")).unwrap();
+        assert!(recorded.contains("No, exit"));
+        let result: Value =
+            serde_json::from_str(&fs::read_to_string(out.join("result.json")).unwrap()).unwrap();
+        assert_eq!(result["input_sent"], false);
+        assert_eq!(result["terminal_input_operations_started"], 0);
+    }
+}
+
+#[test]
 fn separate_development_opt_in_sends_exactly_three_inputs_at_both_widths() {
     for width in [100, 140] {
         let root = TempDir::new("g12-development-control").unwrap();

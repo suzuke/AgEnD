@@ -1,5 +1,15 @@
 # Screen fixtures
 
+## Claude 2.1.284 主畫面（既有授權蒐證，2026-10-05）
+
+`claude-2.1.284-main-100x24-{0,1,2}.txt` 是 JSONL line 18／19／20 的原 `text`，revision 22／24／25；
+來源 SHA-256 `9e1cd43f943704ea99ef3aca66fe1391881d65fb7151e48896c976bbc9975178`。
+`claude-2.1.284-main-140x24-{0,1}.txt` 是 line 17／18，revision 25／26；
+來源 SHA-256 `0b47ca7d77a94c93f33b9e26e911d33788115bdf05b60c2790a6af74ddc9ca3e`。
+五份直接匯出、不改寫畫面；兩次各三個 operator key，零模型 prompt／團隊訊息。
+正式啟動 classifier 比對完整 token、獨立核 canonical workspace；規則與驗證邊界見
+[正式啟動處理](../../../../../docs/gates/gate-12a-startup-runtime.md)。本批沒有新增真 CLI 執行。
+
 舊 Claude 檔案僅含版本化 spike 的 prompt 片段；Codex 檔案來自 holder PTY。
 新增的 Claude 2.1.284 檔案來自實際 daemon／holder 保存的完整 24 列 frame 文字，
 保留兩種寬度的換行與空白；路徑經蒐證工具遮蔽。

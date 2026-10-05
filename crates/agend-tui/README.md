@@ -87,7 +87,7 @@ native 與 off-screen draw 共用實際 frame area 更新 App 尺寸；延遲或
 
 ## 入口
 
-- `agend_tui::run(Box<dyn Source>, Language)`：互動迴圈（raw mode、alternate screen、每 100 ms 一次 `tick`）；`run_with` 多一個先看按鍵的 hook（demo 鍵）
+- `agend_tui::run(Box<dyn Source>, Language)`：互動迴圈（raw mode、alternate screen、首頁及舊終端每 100 ms 一次 `tick`，完整終端每 50 ms）；`run_with` 多一個先看按鍵的 hook（demo 鍵）。完整 frame 的 holder 取樣仍至多每 50 ms 一次，舊終端重拿仍每 200 ms。
 - `agend_tui::source::client::ClientSource::new(socket, caller)`：`agend app` 用它
 - `agend_tui::App::new(Box<dyn Source>, Language)`、`App::key`／`event`／`resize`、`App::tick`、`ui::render`
 - `agend_tui::render_to_string`：畫到 `TestBackend`，給測試與 demo

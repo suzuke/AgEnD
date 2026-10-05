@@ -1,6 +1,8 @@
 //! Runtime records crossing domain/adapters; no IO or runtime dependencies.
 pub mod claude;
 pub use claude::*;
+pub mod claude_startup;
+pub use claude_startup::*;
 
 use crate::model::{Backend, DeliveryState};
 use crate::policy::busy::BusyLevel;

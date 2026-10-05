@@ -5,6 +5,8 @@
 > - 記住：舊 Claude fixture 是 spike prompt 片段；2.1.284 信任 fixture 是真 holder 的 100／140 欄完整 frame 文字。
 > - 下一步：跑 `cargo xtask accept core`，比對實際狀態機 transcript。
 
+正式 P5 啟動按鍵與 P6 初始 idle 的實作、schema v9 與 native 驗證邊界見 [啟動處理](../../docs/gates/gate-12a-startup-runtime.md)。
+
 ## 第 11 施工關 C 段（已驗收並合併 #145）
 
 `protocol::terminal::tests` 拒絕零尺寸與超過 1000 的 PTY 尺寸；holder 協商測 1.1 與舊 1.0。frame producer／serde／真 socket 回歸在 holder 的 `terminal_frames.rs` 與 `server.rs`；holder 控制型別提供 Acquire／Resize／Input／Release 與完成回覆；client 1.4 additive 型別與能力列表已加入；xtask 的新 wire case 驗 Acquire shape 及舊 peer 解碼未知請求／回覆。frame consumer 使用真 holder parser 的測試在 client；六項端到端控制／viewport／EOF 契約在 testkit 的 `contract::terminal`，對注入真 holder Screen 的 fake 與真 daemon／holder／PTY 執行；`TerminalProducer` 介面受實際 no-std／依賴檢查。TUI／fake U17 已有原生回歸；codex_input::tests 核精確 codex-cli 0.159.3 許可，其他／未知版本拒絕，診斷 scope 不外洩。

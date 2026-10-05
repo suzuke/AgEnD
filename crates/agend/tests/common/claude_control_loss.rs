@@ -14,16 +14,16 @@ use std::{
     },
 };
 
-struct LostKeyReply {
+pub(super) struct LostKeyReply {
     socket: PathBuf,
     upstream: PathBuf,
     stop: Arc<AtomicBool>,
     sockets: Arc<Mutex<Vec<UnixStream>>>,
-    dropped: Arc<AtomicUsize>,
+    pub(super) dropped: Arc<AtomicUsize>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 impl LostKeyReply {
-    fn start(home: &Path) -> Self {
+    pub(super) fn start(home: &Path) -> Self {
         let socket = agend_daemon::runtime::files::socket_path(home, "claude");
         let upstream = socket.with_extension("native");
         fs::rename(&socket, &upstream).unwrap();

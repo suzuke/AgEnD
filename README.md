@@ -5,6 +5,8 @@
 > - 狀態：**pre-alpha**。第 1–11 施工關已完成並合併；第 11 施工關 C 段 #145 於 2026-10-03 經使用者確認合併（`b2152db`）。其他 backend adapter 與安裝發布仍待完成。
 > - 下一步：先讀 [AGENTS.md](AGENTS.md)，再看 [docs/ROADMAP.md](docs/ROADMAP.md) 的目前狀態。
 
+第 12A 正進行 [正式啟動提示與初始 idle](docs/gates/gate-12a-startup-runtime.md)；draft #151 與本批尚未合併，完整 adapter 尚未驗收。
+
 ## 這是什麼
 
 目標是讓一個常駐的 daemon 協調 claude、codex、opencode，讓 agent 團隊自己完成「派工 → 開發 → checks → 互審 → merge」。
