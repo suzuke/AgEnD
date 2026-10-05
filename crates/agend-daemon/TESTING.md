@@ -155,3 +155,5 @@ Failed 派工回歸：五種 fake queue 只用一個 dev，boot 派工失敗後�
 第 12A CI 前提修正：`tests/common/pipeline_process.rs` 的 approve helper 等同一真 FleetView 中的階段與 attention，避免讀到分次發布空窗；產品核准流程及 60 秒測試期限維持原值。Claude launch terminator 拒絕的單元斷言核真正 instance workspace 的 CLAUDE.md／.mcp.json，不只核 HOME。
 
 `tests/claude_startup_capture.rs` 用自己的 shell producer 經真 daemon／holder 核兩種寬度、繁中字元、正式 argv、零輸入與成功／拒絕畫面後的清理；hash 不合與既有證據拒絕時不啟動 producer。這是蒐證工具回歸，不是真 Claude／P5 通過；[工具範圍與指令](../../docs/gates/gate-12a-startup-capture.md)。
+
+啟動畫面蒐證另驗 native soft-wrap：電郵完整遮蔽、跨列 Bearer 前綴拒絕且清理。原逐列插 newline 的反例由 fresh verifier 用真 holder 重現；工具現依 cell.wrap／leading_spacer 還原 logical line 後才掃描，不把 physical row 邊界當作資料分隔。

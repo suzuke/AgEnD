@@ -118,21 +118,26 @@ fn record(
     redactor: &redact::Redactor,
     frame: &TerminalFrame,
 ) -> Result<(), String> {
-    let text = frame
-        .cells
-        .iter()
-        .map(|row| {
-            row.iter()
-                .filter(|cell| cell.width != 0)
-                .map(|cell| cell.text.as_str())
-                .collect::<String>()
-                .trim_end()
-                .to_owned()
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+    let mut text = String::new();
+    let mut soft_wraps = Vec::new();
+    for row in &frame.cells {
+        let wrapped = row.iter().any(|cell| cell.wrap);
+        soft_wraps.push(wrapped);
+        let line = row
+            .iter()
+            .filter(|cell| cell.width != 0 && !cell.leading_spacer)
+            .map(|cell| cell.text.as_str())
+            .collect::<String>();
+        // Soft wrapping splits one logical identifier across physical rows.
+        // Preserve its complete bytes for redaction, including real spaces;
+        // only a hard line boundary inserts a newline.
+        text.push_str(if wrapped { &line } else { line.trim_end() });
+        if !wrapped {
+            text.push('\n');
+        }
+    }
     // Redact whole rendered text, not individual cells: identifiers can span cells.
-    let entries = redactor.entries(&[Entry { from: Side::Backend, via: "screen".into(), msg: json!({"text":text, "size":frame.size, "cursor":frame.cursor, "revision":frame.revision, "generation":frame.generation, "alternate_screen":frame.alternate_screen}) }]);
+    let entries = redactor.entries(&[Entry { from: Side::Backend, via: "screen".into(), msg: json!({"text":text, "soft_wraps":soft_wraps, "size":frame.size, "cursor":frame.cursor, "revision":frame.revision, "generation":frame.generation, "alternate_screen":frame.alternate_screen}) }]);
     if !redact::scan(&json!({}), &entries).is_empty() {
         return Err("startup screen failed the secret scan; not written".into());
     }

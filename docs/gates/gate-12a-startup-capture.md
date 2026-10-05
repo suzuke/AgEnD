@@ -9,7 +9,7 @@
 
 工具建立自己的 `AGEND_HOME`、workspace、Claude push instance 與 session，沿用正式 supervisor 的啟動旗標、三個設定檔和登入環境。它訂閱真 holder frame，取得自己新建 instance 的控制權只為設定 PTY 尺寸，不發送 `Input` 或 daemon key。沒有人為製造 busy／idle 或 ACK。
 
-初始尺寸設定完成後保存 1–60 秒、最多 512 個有變化的 frame。畫面來自 holder 的字元 cell，保存文字、尺寸、cursor、revision、generation 與 alternate screen 狀態；這份 JSONL 是蒐證格式，尚非 classifier／conformance fixture。寬度範圍 20–200，列數 5–100。
+初始尺寸設定完成後保存 1–60 秒、最多 512 個有變化的 frame。畫面來自 holder 的字元 cell，依 native cell 的 soft-wrap 標記合併同一邏輯行、跳過寬字元的 leading spacer，再保存遮蔽後文字、soft-wrap 列標記、尺寸、cursor、revision、generation 與 alternate screen 狀態；這份 JSONL 是蒐證格式，尚非 classifier／conformance fixture。寬度範圍 20–200，列數 5–100。
 
 ## 產物與拒絕條件
 
@@ -35,7 +35,7 @@ export CARGO_TARGET_DIR=/private/tmp/agend-g12a-driver-target
 ~/.cargo/bin/cargo run -p agend-daemon --example claude_startup_capture -- --help
 ```
 
-測試用自己的 shell producer 經正式 daemon／holder，核對 100／140 欄的實際 PTY 尺寸、繁中／é、正式 argv、未收到輸入、成功與畫面拒絕後的程序／workspace 清理；另核 hash 不合與既有 output 都不啟動 producer。測試產物隨 fixture 結束清理。
+測試用自己的 shell producer 經正式 daemon／holder，核對 100／140 欄的實際 PTY 尺寸、繁中／é、正式 argv、未收到輸入、成功與畫面拒絕後的程序／workspace 清理；另核 soft-wrap 電郵仍遮蔽、跨 wrap 的 Bearer 前綴在寫入前拒絕，以及 hash 不合與既有 output 都不啟動 producer。測試產物隨 fixture 結束清理。
 
 ## 真 CLI 蒐證（待授權，尚未執行）
 

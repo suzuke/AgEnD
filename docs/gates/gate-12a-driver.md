@@ -77,3 +77,5 @@ export CARGO_TARGET_DIR=/private/tmp/agend-g12a-driver-target
 - 2026-10-05：`cb0212c` 全新無相關 context verifier 判局部 CONFIRMED：native demo／15 pipeline cases／clippy／fmt／實際 no-std 通過；忽略 idle 的反向 cargo 101。注入一次消費端 FleetView attention 空窗時，新 helper 等下一個真 view 後 single merge，原 helper 以 missing attention 失敗；這是消費端故障注入，不宣稱控制 daemon 原生發布順序。已還原 mutations、清理該 verifier 的 worktree／branch／target／程序／fixtures；固定 head 雙平台 CI 尚待完成，完整 12A 未認證（#151）。
 
 - 2026-10-05：`50e0e83` push／PR CI 均在 Ubuntu、macOS 通過；新增[被動蒐證工具](gate-12a-startup-capture.md)供後續真啟動畫面核對，native 替身驗工具，不宣稱 P5／P6 或真 CLI 通過（#151）。
+
+- 2026-10-05：蒐證工具 `4511e21` 的 fresh verifier 找到跨 soft-wrap 的 synthetic Bearer 前綴會寫入且回成功；修正採 native cell.wrap／leading_spacer 還原 logical line，再做遮蔽與 scan。原電郵反例是拒絕、未寫出；另補 Bearer 拒絕回歸，修正 head 獨立驗證待核。這些只驗工具，不是真 Claude fixture。

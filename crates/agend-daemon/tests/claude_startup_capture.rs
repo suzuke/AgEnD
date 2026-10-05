@@ -186,3 +186,46 @@ fn a_rejected_screen_is_not_written_and_failure_still_cleans_the_holder() {
         .unwrap();
     assert!(!String::from_utf8_lossy(&ps.stdout).contains(program.to_str().unwrap()));
 }
+
+#[test]
+fn soft_wrapped_identifiers_are_redacted_as_a_complete_native_line() {
+    let root = TempDir::new("g12-startup-soft-wrap").unwrap();
+    let program = worker(root.path());
+    let source = fs::read_to_string(&program).unwrap().replace(
+        "trap 'printf",
+        "emit_wrapped() {\n    size=$(stty size)\n    cols=${size#* }\n    padding=$((cols - 14))\n    printf \"%${padding}s%s\\r\\n\" '' 'captureprivate@example.invalid'\n}\nemit_wrapped\ntrap 'emit_wrapped; printf",
+    );
+    fs::write(&program, source).unwrap();
+    let out = root.path().join("evidence");
+    capture::run(&options(&program, &out, 100), &agend()).unwrap();
+    let stored = fs::read_to_string(out.join("screens.jsonl")).unwrap();
+    assert!(
+        !stored.contains("captureprivate"),
+        "wrapped identifier leaked"
+    );
+    assert!(
+        stored.contains("<email>"),
+        "native wrapped email was not redacted"
+    );
+}
+
+#[test]
+fn a_soft_wrapped_bearer_prefix_is_refused_before_writing_the_frame() {
+    let root = TempDir::new("g12-startup-wrapped-refusal").unwrap();
+    let program = worker(root.path());
+    let source = fs::read_to_string(&program).unwrap().replace(
+        "trap 'printf",
+        "emit_wrapped() {\n    size=$(stty size)\n    cols=${size#* }\n    padding=$((cols - 3))\n    printf \"%${padding}s%s\\r\\n\" '' 'Bearer synthetic-wrap-only'\n}\nwhile [ \"$(stty size)\" != \"24 100\" ]; do sleep .02; done\nemit_wrapped\ntrap 'emit_wrapped; printf",
+    );
+    fs::write(&program, source).unwrap();
+    let out = root.path().join("evidence");
+    let error = capture::run(&options(&program, &out, 100), &agend()).unwrap_err();
+    assert!(error.contains("secret scan"), "{error}");
+    let stored = fs::read_to_string(out.join("screens.jsonl")).unwrap();
+    assert!(!stored.contains("synthetic-wrap-only"));
+    let result: Value =
+        serde_json::from_str(&fs::read_to_string(out.join("result.json")).unwrap()).unwrap();
+    assert_eq!(result["ok"], false);
+    let workspace = fs::read_to_string(root.path().join("workspace")).unwrap();
+    assert!(!Path::new(workspace.trim()).exists());
+}
