@@ -2,7 +2,7 @@
 
 > **TL;DR**
 > - 使用者 2026-10-06 要求完整模型 smoke 必做；#151／#152 已合併，真模型尚未執行。
-> - 固定 Claude 2.1.284，兩個 Haiku instance、七則工作訊息；首個失敗停止，不重跑。
+> - 固定 Claude 2.1.284，兩個 Haiku 4.5 instance、七則工作訊息；首個失敗停止，不重跑。
 > - 下一步：全新 verifier 核固定腳本與計畫後，依 D40 確認版本／完整命令／預算才執行。
 
 ## 範圍與證據
@@ -29,7 +29,7 @@ JSON 計畫包含 version、完整 backend／operator／cleanup argv、每則 pr
 
 預算：五次 harness send（以 B 的 agent caller 身分）＋兩次模型 peer send＝七則工作訊息，工作期限 900 秒，另留停止與清理時間。
 這是工作訊息數，**不是 API 呼叫次數或費用硬上限**；ACK／Bash 工具可能產生額外模型續行。
-模型 Haiku／low；沒有自動 retry、daemon restart、追加 prompt、手動 terminal input 或版本替換。
+模型 haiku／low，事後核 transcript 的實際 model 為 `claude-haiku-4-5-20251001` 並保存 usage，拒絕 fallback；模型 alias 會更新，以[官方模型設定](https://code.claude.com/docs/en/model-config)及實收紀錄為準。runner 不自動 retry，監測到 daemon 內建 backend restart 即停止並拒絕通過；沒有主動 daemon restart、追加 prompt、手動 terminal input 或版本替換。
 模型額外送訊息、未 ACK、未知提示、路徑／版本差異或逾時都記失敗，不修補成成功。
 
 ```bash
@@ -56,7 +56,7 @@ SQLite 在 daemon 停機後才讀取；禁止用 immutable bypass 或複製變�
 
 ## 目前紀錄
 
-真模型尚未執行。native／腳本與固定計畫驗證進行中，沒有新增模型或訊息費用。
+真模型尚未執行。native／腳本與固定計畫驗證進行中，沒有新增模型或訊息費用。全新 verifier 在 `1256c99` 以 native producer 推翻清理順序及漏額外 holder，並重現 HOME 漂移與版本查詢失敗留下空 lab；原證據保留。修正為先全面驗身分／namespace、綁固定環境、無 DB 且無 holder 才可清空 lab，重驗待核。
 
 ## 下一步
 

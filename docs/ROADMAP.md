@@ -173,3 +173,5 @@
 - 2026-10-05：`1727c17` 的全新 verifier 本機 startup7／native4／outer8與36筆原300ms輸出通過，CI另在舊取消測試 first poll 必為Pending的假設失敗；真holder可以先回覆。測試改先核自有PID及已停止狀態，取消後RAII恢復，避免搶monitor退出回條；不改runtime，原CI證據保留，新head驗證待核（#152）。
 
 - 2026-10-06：使用者確認 #151／#152 合併，分別為 `cac2226`／`e7a8987`；兩個合併 tree 與原驗證 head 相同，原 worktree／branch 已移除，編譯暫存僅保留約 51MiB 的兩個歷史稽核必要 binary。使用者要求完整模型 smoke 為必要驗收；本批在清理核對後建立獨立 worktree，真模型計畫準備中，尚未執行。
+
+- 2026-10-06：完整真模型 smoke 腳本 `1256c99` 經全新 verifier 找出 native cleanup 的 foreign workspace 先停止、漏額外 holder、HOME 漂移及早期無 DB 殘留；已保留原負例，改為全面預核及環境綁定後重驗。仍未啟動真 Claude／模型。

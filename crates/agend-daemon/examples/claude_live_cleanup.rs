@@ -2,7 +2,10 @@
 //! This does not start a daemon, backend, channel, or model turn.
 
 use agend_daemon::runtime::{files, shutdown_holder};
+use rusqlite::OptionalExtension;
 use std::path::Path;
+
+const IDS: [&str; 2] = ["g12live-a", "g12live-b"];
 
 #[path = "../src/driver/codex/sweep.rs"]
 #[allow(dead_code)]
@@ -34,6 +37,30 @@ fn run() -> Result<(), String> {
     {
         return Err("home ownership mismatch; preserved".into());
     }
+    // Inventory the entire namespace BEFORE stopping any holder. Unknown or
+    // unreadable locks remain evidence, never an excuse to delete the home.
+    let holders = files::holders_dir(home);
+    if holders.exists() {
+        for entry in std::fs::read_dir(&holders).map_err(|e| e.to_string())? {
+            let name = entry.map_err(|e| e.to_string())?.file_name();
+            if let Some(id) = name.to_str().and_then(|s| s.strip_suffix(".lock"))
+                && !IDS.contains(&id)
+            {
+                return Err("foreign holder namespace; preserved".into());
+            }
+        }
+    }
+    let live = IDS.map(|id| files::running(home, id));
+    for state in &live {
+        state.as_ref().map_err(|e| e.to_string())?;
+    }
+    if !home.join("agend.db").exists() {
+        if live.iter().all(|s| matches!(s, Ok(None))) {
+            println!("no database or holders; backend was not started");
+            return Ok(());
+        }
+        return Err("holders without database identity; preserved".into());
+    }
     // Caller stops its child daemon first. Connecting to these holder sockets
     // while a daemon owns them would take over its runtime connection.
     let conn = rusqlite::Connection::open_with_flags(
@@ -46,7 +73,31 @@ fn run() -> Result<(), String> {
     // The production daemon holds SQLite EXCLUSIVE for its entire life.
     conn.query_row("SELECT count(*) FROM instances", [], |r| r.get::<_, u64>(0))
         .map_err(|e| format!("database unavailable; stop daemon first: {e}"))?;
-    for id in ["g12live-a", "g12live-b"] {
+    let foreign: u64 = conn.query_row("SELECT count(*) FROM instances WHERE id NOT IN ('g12live-a','g12live-b') OR backend!='claude'", [], |r| r.get(0)).map_err(|e| e.to_string())?;
+    if foreign != 0 {
+        return Err("foreign database instance; preserved".into());
+    }
+    let mut identities = Vec::new();
+    for (index, id) in IDS.iter().enumerate() {
+        let identity = conn.query_row("SELECT session_id,agent_pid,working_directory FROM instances WHERE id=?1 AND backend='claude'", [id], |r| Ok((r.get::<_,Option<String>>(0)?,r.get::<_,Option<u32>>(1)?,r.get::<_,String>(2)?))).optional().map_err(|e| e.to_string())?;
+        if let Some((session, pgid, workspace)) = identity.as_ref() {
+            if Path::new(workspace) != home.join("workspace").join(id)
+                || !session
+                    .as_deref()
+                    .is_some_and(agend_core::protocol::client::is_uuid_v4)
+                || (live[index].as_ref().is_ok_and(|s| s.is_some()) && pgid.is_none())
+            {
+                return Err(
+                    "foreign workspace or incomplete session/group identity; preserved".into(),
+                );
+            }
+        } else if live[index].as_ref().is_ok_and(|s| s.is_some()) {
+            return Err("holder without database identity; preserved".into());
+        }
+        identities.push(identity);
+    }
+    // Every candidate was validated before the first side effect.
+    for (id, identity) in IDS.into_iter().zip(identities) {
         if files::running(home, id)
             .map_err(|e| e.to_string())?
             .is_some()
@@ -59,12 +110,7 @@ fn run() -> Result<(), String> {
         {
             return Err(format!("holder {id} still running; preserved"));
         }
-        use rusqlite::OptionalExtension;
-        let identity = conn.query_row("SELECT session_id,agent_pid,working_directory FROM instances WHERE id=?1 AND backend='claude'", [id], |r| Ok((r.get::<_,Option<String>>(0)?,r.get::<_,Option<u32>>(1)?,r.get::<_,String>(2)?))).optional().map_err(|e| e.to_string())?;
-        if let Some((session, Some(pgid), workspace)) = identity {
-            if Path::new(&workspace) != home.join("workspace").join(id) {
-                return Err("foreign workspace; preserved".into());
-            }
+        if let Some((session, Some(pgid), _workspace)) = identity {
             let result = sweep::sweep(
                 pgid,
                 &sweep::Markers {

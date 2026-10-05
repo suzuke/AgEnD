@@ -24,6 +24,11 @@ IDS = ("g12live-a", "g12live-b")
 CLAUDE = Path("/Users/suzuke/.local/share/claude/versions/2.1.284")
 CLAUDE_SHA = "50a14c2f50f56668380fdda490167f1d3630d5cc18fb8aed3073c2c7ea7314fe"
 PERSONAL = Path.home() / ".claude"
+PASS_ENV = ("HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR", "TZ")
+
+
+def pass_environment():
+    return {k: os.environ[k] for k in PASS_ENV if k in os.environ}
 
 
 def require(ok, message):
@@ -104,6 +109,8 @@ def plan(agend, cleanup, output):
         "environment": {"AGEND_HOME": str(home), "HOME": str(Path.home()),
                         "PATH": str(agend.parent) + ":" + os.environ.get("PATH", "/usr/bin:/bin"),
                         "AGEND_INSTANCE": "unset for operator", "CLAUDE_CONFIG_DIR": "unset"},
+        "passthrough_environment": pass_environment(),
+        "expected_resolved_model": "claude-haiku-4-5-20251001",
         "failure": "Stop at first failure. No manual terminal input, daemon restart, automatic rerun, version substitution, or prompt repair.",
         "cleanup_policy": "Stop only the child daemon; native shutdown/sweep only nonce-owned holders. Remove own home and exact fresh session/project artifacts once processes are absent. Preserve foreign data and report leftovers. Keep private evidence outside Git.",
     }
@@ -118,9 +125,11 @@ class Smoke:
         self.daemon = None
         self.sessions = {}
         self.trace = []
-        self.env = {k: v for k, v in os.environ.items()
-                    if k in ("HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR", "TZ")}
+        require(pass_environment() == spec["passthrough_environment"], "planned environment changed; no execution")
+        require(str(Path.home()) == spec["environment"]["HOME"], "planned HOME changed; no execution")
+        self.env = dict(spec["passthrough_environment"])
         self.env.update(AGEND_HOME=str(self.home), PATH=spec["environment"]["PATH"])
+        self.initialized = False
 
     def left(self):
         require(time.monotonic() < self.end, "900 second execution budget exhausted")
@@ -143,6 +152,13 @@ class Smoke:
         data = json.loads(self.run(self.p["status_argv"]))
         require(not data["attention"], "unexpected attention; stop without pressing keys")
         require(all(i["state"] != "failed" for i in data["instances"]), "instance failed")
+        if self.initialized:
+            require({i["instance_id"] for i in data["instances"]} == set(IDS), "instance membership changed")
+            require(all(i["state"] != "starting" for i in data["instances"]), "instance restarting; no retry permitted")
+        log = self.out / "daemon.log"
+        if log.exists():
+            text = log.read_text(errors="replace")
+            require(not re.search(r"g12live-[ab]: (?:restart |.*--resume )", text), "backend restart observed; stop")
         return {i["instance_id"]: i["state"] for i in data["instances"]}
 
     def wait(self, condition, name, seconds=180):
@@ -193,6 +209,7 @@ class Smoke:
             require(match is not None, "add reply has no session identity")
             self.sessions[argv[3]] = match.group(1)
         self.idle()
+        self.initialized = True
         self.send("initial")
         self.wait(lambda: self.status().get(IDS[0]) == "idle", "A idle before peer reply")
         (self.home / "workspace" / IDS[1] / "a-ready").write_text(self.nonce)
@@ -233,11 +250,12 @@ class Smoke:
         with sqlite3.connect(f"file:{self.home / 'agend.db'}?mode=ro", uri=True, timeout=0) as db:
             db.row_factory = sqlite3.Row
             rows = [dict(r) for r in db.execute("SELECT m.*,d.delivery_id,d.session_id,d.route,d.started_at_unix_ms,d.sent_at_unix_ms,d.confirmed_at_unix_ms FROM messages m JOIN claude_deliveries d ON d.message_id=m.id ORDER BY m.seq")]
+            all_messages = [dict(r) for r in db.execute("SELECT * FROM messages ORDER BY seq")]
             events = [dict(r) for r in db.execute("SELECT * FROM driver_events ORDER BY seq")]
             startup = [dict(r) for r in db.execute("SELECT * FROM claude_startup ORDER BY instance_id")]
             identities = [dict(r) for r in db.execute("SELECT id,session_id,agent_pid,status FROM instances ORDER BY id")]
-            write_json(self.out / "native-evidence.json", dict(messages=rows, events=events, startup=startup, instances=identities))
-        require(len(rows) == 7 and len(startup) == 2, "unexpected message/startup count")
+            write_json(self.out / "native-evidence.json", dict(messages=rows, all_messages=all_messages, events=events, startup=startup, instances=identities))
+        require(len(rows) == len(all_messages) == 7 and len(startup) == 2, "unexpected message/startup count")
         require({r["body"] for r in rows} == set(self.p["prompts"].values()), "message bodies differ or duplicate work")
         ack_events = [r for r in events if r["kind"] == "AgendAck" and not r["replayed"]]
         for row in rows:
@@ -275,6 +293,10 @@ class Smoke:
         for row in startup:
             require(not row["halted"] and not row["manual"], "production startup was halted or manual")
         require(len(self.sessions) == 2, "session identities missing")
+        for instance, sid in self.sessions.items():
+            starts = [e for e in events if e["instance_id"] == instance and e["session_id"] == sid and e["kind"] == "SessionStart"]
+            require(len(starts) == 1 and not starts[0]["replayed"], "session restarted or startup event missing")
+        usage = {}
         # Header is taken from true CLI's own session record, never a label supplied by the harness.
         for instance, sid in self.sessions.items():
             workspace = self.home / "workspace" / instance
@@ -285,9 +307,13 @@ class Smoke:
             versions = {r["version"] for r in records if "version" in r}
             require(versions == {self.p["version"]}, "true transcript version differs")
             require(any(r.get("type") == "assistant" for r in records), "no true assistant record")
+            assistants = [r["message"] for r in records if r.get("type") == "assistant" and isinstance(r.get("message"), dict)]
+            models = {r.get("model") for r in assistants if r.get("model") not in (None, "<synthetic>")}
+            require(models == {self.p["expected_resolved_model"]}, "actual model differs; no fallback accepted")
+            usage[instance] = [{"id": m.get("id"), "model": m.get("model"), "usage": m.get("usage")} for m in assistants]
             shutil.copyfile(transcript, self.out / f"{instance}-transcript.jsonl")
         return {"verdict": "PASS", "confirmed_messages": len(rows), "routes": {"channel": 6, "stop": 1},
-                "true_cli_version": self.p["version"], "new_model_work_requests": 7,
+                "true_cli_version": self.p["version"], "new_model_work_requests": 7, "observed_assistant_usage": usage,
                 "limitations": "True-backend smoke; native fault matrix remains separately verified. No exact API-call or monetary hard cap."}
 
     def cleanup(self):
@@ -311,8 +337,15 @@ class Smoke:
             for candidate in [PERSONAL / "projects" / slug, PERSONAL / "debug" / f"{sid}.txt",
                               PERSONAL / "session-env" / sid, PERSONAL / "tasks" / sid,
                               PERSONAL / "todos" / f"{sid}-agent-{sid}.json"]:
-                if candidate.exists():
+                if candidate.exists() or candidate.is_symlink():
                     residues.append(str(candidate))
+        # Validate EVERY path before deleting ANY. copytree follows symlinks by
+        # default, so reject nested links too; foreign data remains untouched.
+        for item in residues:
+            path = Path(item)
+            require(not path.is_symlink(), "session artifact symlink; preserved")
+            if path.is_dir():
+                require(not any(p.is_symlink() for p in path.rglob("*")), "nested artifact symlink; preserved")
         # Retain own failure records privately before deleting session scratch.
         for item in residues:
             path = Path(item)
