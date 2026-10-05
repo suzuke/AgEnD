@@ -296,6 +296,65 @@ fn development_confirmation_rejects_contradictory_or_repeated_menu() {
 }
 
 #[test]
+fn foreign_frame_after_trust_completion_never_authorizes_development_input() {
+    for width in [100, 140] {
+        for field in ["instance_id", "view_id"] {
+            let root = TempDir::new("g12-capture-identity").unwrap();
+            let program = development_worker(root.path(), width, "normal");
+            let proxy = root.path().join("native-identity-proxy");
+            let script = include_str!("common/claude_capture_identity_proxy.py")
+                .replace("__REAL__", &serde_json::to_string(&agend()).unwrap())
+                .replace("__FIELD__", &serde_json::to_string(field).unwrap());
+            fs::write(&proxy, format!("#!/usr/bin/env python3\n{script}")).unwrap();
+            fs::set_permissions(&proxy, fs::Permissions::from_mode(0o700)).unwrap();
+            let out = root.path().join("evidence");
+            let mut opts = controlled_options(&program, &out, width);
+            opts.accept_development_channels = true;
+            assert!(capture::run(&opts, &proxy).is_err(), "{width}: {field}");
+            assert_eq!(
+                fs::read(root.path().join("input-received")).unwrap(),
+                b"\x1b[B\r"
+            );
+            let result: Value =
+                serde_json::from_str(&fs::read_to_string(out.join("result.json")).unwrap())
+                    .unwrap();
+            assert_eq!(result["terminal_input_operations_started"], 2);
+            assert_eq!(result["terminal_input_operations_completed"], 2);
+            let events: Vec<Value> = fs::read_to_string(root.path().join("identity-wire-events"))
+                .unwrap()
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+            let ack = events
+                .iter()
+                .position(|event| event["phase"] == "trust_ack_forwarded")
+                .unwrap();
+            let injected = events
+                .iter()
+                .position(|event| event["phase"] == "frame_injected")
+                .unwrap();
+            assert!(
+                ack < injected,
+                "must test the outer loop after the native trust ACK"
+            );
+            assert!(
+                events
+                    .iter()
+                    .all(|event| event["request_id"] != "capture-trust-development-enter")
+            );
+            assert!(
+                !Path::new(
+                    fs::read_to_string(root.path().join("workspace"))
+                        .unwrap()
+                        .trim()
+                )
+                .exists()
+            );
+        }
+    }
+}
+
+#[test]
 fn development_confirmation_has_no_default_grant_or_replay() {
     let root = TempDir::new("g12-development-default").unwrap();
     let program = development_worker(root.path(), 100, "normal");

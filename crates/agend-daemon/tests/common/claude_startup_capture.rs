@@ -224,6 +224,9 @@ fn capture(
         ClientResponse::TerminalFrame { data } => data,
         _ => return Err("capture subscription refused".into()),
     };
+    if first.instance_id != ID || first.view_id.is_empty() || first.frame.generation.is_empty() {
+        return Err("capture subscription identity changed".into());
+    }
     // This view belongs to the probe's freshly created instance. Acquire is
     // for real PTY dimensions. Later Input requires its explicit bounded mode;
     // this diagnostic path never sends a daemon key.
@@ -233,7 +236,7 @@ fn capture(
                 request_id: "capture-size".into(),
                 instance_id: ID.into(),
                 view_id: first.view_id.clone(),
-                generation: first.frame.generation,
+                generation: first.frame.generation.clone(),
                 operation: ClientTerminalOperation::Acquire { size: options.size },
             },
         })
@@ -252,12 +255,18 @@ fn capture(
             }
         }
     };
+    if acquired.instance_id != ID
+        || acquired.view_id != first.view_id
+        || acquired.generation != first.frame.generation
+    {
+        return Err("capture resize identity changed".into());
+    }
     let attach_id = match acquired.control {
-        TerminalControlState::Controlled { attach_id } => attach_id,
+        TerminalControlState::Controlled { attach_id } if !attach_id.is_empty() => attach_id,
         _ => return Err("capture did not acquire its terminal".into()),
     };
     let acquired = acquired.frame.ok_or("capture resize has no frame")?;
-    if acquired.size != options.size {
+    if acquired.size != options.size || acquired.generation != first.frame.generation {
         return Err("capture size mismatch".into());
     }
     record(file, redactor, &acquired)?;
@@ -310,7 +319,11 @@ fn capture(
                 .min(Duration::from_millis(250)),
         ) {
             Ok(Some(ClientResponse::TerminalFrame { data })) => {
-                if data.frame.generation != generation || data.frame.size != options.size {
+                if data.instance_id != ID
+                    || data.view_id != first.view_id
+                    || data.frame.generation != generation
+                    || data.frame.size != options.size
+                {
                     return Err("capture terminal identity or size changed".into());
                 }
                 if data.frame.revision != revision {

@@ -143,6 +143,15 @@ migration `0007` 及 DB-thread API 保存投遞開始／寫出／ACK／人工放
 - `agend_daemon::runtime::HolderRuntime`（`Runtime` trait）、`runtime::shutdown_holder`
 - `agend_daemon::server::{bind, Server}`、`handlers::Context`、`fleet::Fleet`（測試在同一個程序裡跑 daemon 的 server）
 
+
+停止訊號直接記在 signal-context atomic flag，Tokio 關閉後到 exec 前仍可讀，避免 restart handoff 遺失 Ctrl-C；完成連線／runtime 清理後，最後 check 到 exec 的窗口由 signal handler 直接成功退出，避免訊號與 exec 競賽；async signal stream 負責把停止事件送進 supervisor。
+
+## 第 12A Claude
+
+`claude_bridge` 提供 client 1.5 Attach／Poll／Hook／Written／Ack；先預約才回完整內容，歷史 hook 不建立 idle。`ingest` 補送 hooks／acks，入庫才刪，不重送內容。[bridge 範圍](../../docs/gates/gate-12a-bridge.md) · [Claude 測試](CLAUDE-TESTING.md)。
+
+[Startup capture](../../docs/gates/gate-12a-startup-capture.md) 預設被動保存真 holder 畫面；額外 opt-in 的 trust／development 模式最多兩鍵／三鍵，只核本次 workspace 與完整已錄製選單，任何 frame 必須符合本次 instance／view／generation。這是無 revision CAS 的 operator 蒐證工具，`startup=not_assessed`，不送模型 prompt／團隊訊息；真三鍵執行仍待另行授權。
+
 ## 下一步
 
 ```bash
@@ -152,16 +161,3 @@ cargo xtask accept client          # 第 8 施工關 demo：client_demo
 cargo xtask accept codex           # 第 7 施工關 demo：codex_demo
 cargo xtask accept cli             # 第 9 施工關 demo：cli_demo（在 agend crate）
 ```
-
-停止訊號直接記在 signal-context atomic flag，Tokio 關閉後到 exec 前仍可讀，避免 restart handoff 遺失 Ctrl-C；完成連線／runtime 清理後，最後 check 到 exec 的窗口由 signal handler 直接成功退出，避免訊號與 exec 競賽；async signal stream 負責把停止事件送進 supervisor。
-
-## 第 12A bridge 基礎
-
-`claude_bridge` 提供 client 1.5 的 Attach／Poll／Hook／Written／Ack。先原子預約才回完整內容；新 live hook 與目前 holder 畫面控制 routing，歷史 hook 不建立 idle／不投遞；較新的同 session 路由觀測會撤銷舊 idle。`ingest` 每秒補送 home 的 hooks／acks；只收到入庫 commit 才刪檔，不重送訊息內容。完整 API、同 UID 信任邊界與未完成項目見 [bridge 基礎](../../docs/gates/gate-12a-bridge.md)。
-
-第 12A 開發用 [被動啟動畫面蒐證](../../docs/gates/gate-12a-startup-capture.md)：`claude_startup_capture` example 預設經真 daemon／holder 被動保存尺寸與文字。額外 opt-in 的 trust 蒐證模式最多兩次 operator Input，先核唯一標頭下的完整 workspace 路徑與選項；不代表正式 P5 daemon-key／revision CAS。兩種模式都不送模型 prompt／團隊訊息、不推論啟動完成；真執行依指定模式另取授權。
-
-啟動畫面蒐證的 `--development-channel-control accept` 另取 opt-in，
-在兩個 trust 回條後僅對完整、唯一 `server:agend` 的已錄製選單增加一次 Enter。
-上限三次 operator Input；預設被動／兩鍵模式維持原值，未推論 startup complete。
-真執行尚未授權，詳見[蒐證頁](../../docs/gates/gate-12a-startup-capture.md)。

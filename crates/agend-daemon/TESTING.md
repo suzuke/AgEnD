@@ -136,36 +136,6 @@ Failed 派工回歸：五種 fake queue 只用一個 dev，boot 派工失敗後�
 
 `pipeline_archive_display` 以真 daemon／shim 設 color.ui／color.diff=always 與 shared diff.noprefix，取消後須用預設 git apply 還原 commit／index／worktree 與原資料內 ESC bytes；patch-id 也不受顏色／prefix 影響。`pipeline_archive_nested` 另移除 inner HEAD、留下只有 Git objects／index 保存的 staged binary，Git 看不到其 metadata 時仍須保留全部資料。
 
-## 第 12A bridge 基礎
+## 第 12A Claude
 
-`agend/tests/claude_bridge.rs` 執行真 daemon／holder／helper 與 SQLite，驗 idle channel、busy Stop、防迴圈、Sent／明確 ACK、四次開機、離線 helper 退出後自動 ingest、caller／版本／session 拒絕、壞 spool 不阻擋後方 ACK，以及真 Stop stdout 背壓後 unknown 不重送。native MCP 輸入使用 testkit producer；無真 Claude／模型。[重驗與限制](../../docs/gates/gate-12a-bridge.md)。
-
-## 第 12A Driver 與設定（施工中）
-
-`driver::claude::launch::tests` 驗原生 settings／MCP JSON、六種 hooks、ACK 指示、inbox 不寫檔或加旗標、外來與修改檔保留、SHA256 ownership 重開及發佈後 DB 失敗的拒絕恢復。`driver::claude::tests` 對真 SQLite 驗 failed instance 不自動放棄未送訊息、重開後仍可預約、未知結果只由明確 ACK 修復，以及超過 1024 筆不相關 hook／其他 instance 事件不遮蔽後續 Stop。原回歸先在修正前驗出 Failed／Queued 差異。
-
-`agend/tests/claude_bridge.rs` 已接入完整 DRV 十個共用案例及 native Git pipeline 回歸，包含 busy Steer 的單一 Esc／立即 channel／不假造 ACK，以及人工 holder owner 保留控制、訊息仍 queued。結果不明的 40 則分頁、人的明確放棄、ACK 競爭及四次原生開機已通過；DRV 與 task／review 已分別通過；啟動提示及真 CLI 版本一致性仍未完成；詳見[本批進度](../../docs/gates/gate-12a-driver.md)。
-
-`agend/tests/claude_process.rs` 對 native daemon／holder 驗 Claude 孤兒 group 的在線與下次開機清掃、failed 且 holder 存活時保護，以及外來 CLAUDE.md 的三次重試後 failed。shell agents 不呼叫模型，精確 argv 的正反例另在 `driver/claude/sweep.rs`。Driver 的 receipt 回歸核實實際 Written 才 sent、忙碌／其他 session 不等待，舊 idle 逾時仍 queued 且不開始投遞。
-
-`actual_driver_routes_native_content_once_across_four_daemons_and_new_home_is_independent` 經真正的 agent send handler → BackendDriver → ClaudeDriver、native channel 與 ACK，核四次程序開機只一個投遞識別碼、sent 不代 confirmed、新 HOME 不共用冪等狀態。這是實際組合回歸，不宣稱完整 DRV-1–9 已執行。
-
-`pipeline_store_ports` 另驗 Claude 回條只觀察 Driver/helper 狀態、task CAS 不冒充 ACK、晚到 ACK 與舊回條不倒退 confirmed；公開通用訊息狀態 API 仍拒絕 Claude 假確認。`claude_control_loss` 在真 PTY 消費 Esc 後丟原 holder 回覆，四次開機不重送鍵或內容；共用 DRV 的 restart 案例包括一個 seed 及四個獨立 composition child，新 HOME 的反向在 boot 2 因游標歷史遺失而失敗。
-
-第 12A CI 前提修正：`tests/common/pipeline_process.rs` 的 approve helper 等同一真 FleetView 中的階段與 attention，避免讀到分次發布空窗；產品核准流程及 60 秒測試期限維持原值。Claude launch terminator 拒絕的單元斷言核真正 instance workspace 的 CLAUDE.md／.mcp.json，不只核 HOME。
-
-`tests/claude_startup_capture.rs` 用自己的 shell producer 經真 daemon／holder 核兩種寬度、繁中字元、正式 argv、零輸入與成功／拒絕畫面後的清理；hash 不合與既有證據拒絕時不啟動 producer。這是蒐證工具回歸，不是真 Claude／P5 通過；[工具範圍與指令](../../docs/gates/gate-12a-startup-capture.md)。
-
-啟動畫面蒐證另驗 native soft-wrap：電郵完整遮蔽、跨列 Bearer 前綴拒絕且清理。原逐列插 newline 的反例由 fresh verifier 用真 holder 重現；工具現依 cell.wrap／leading_spacer 還原 logical line 後才掃描，不把 physical row 邊界當作資料分隔。
-
-受控 trust 蒐證另有 native producer：只對本次 workspace 的 No→Yes 送一次 Down／Enter；
-未知、外來路徑、初始 Yes、No 未切換及未驗版本／尺寸的正反例核輸入 bytes 與清理。
-兩寬另核外部路徑共用自有前綴、自有路徑出現在錯誤標頭以外的位置及重複標頭均零輸入；
-workspace 必須是唯一 `Accessing workspace:` 標頭的下一個非空完整行。
-選到 Yes／後續畫面是替身生成，不是真 CLI fixture；正式 P5 daemon-key／revision CAS、
-development channels 與 P6 初始 idle 仍缺真證據。預設被動模式保持 0 輸入。
-
-Development channels 蒐證用真提示文字經 native producer 重播，兩寬核三次輸入
-`ESC[B CR CR`；外來前綴／額外 server、重複 Channels、Exit、缺完整 warning
-及未完成 trust 前出現選單都不確認。預設只送兩鍵，缺 trust opt-in 在啟動前拒絕；
-第三鍵後提示仍在也不重送。確認後畫面為 synthetic，不認證真 startup complete。
+Claude bridge／Driver／native startup capture 的案例、限制與重驗指令見 [Claude 測試](CLAUDE-TESTING.md)。
