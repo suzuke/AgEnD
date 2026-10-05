@@ -371,6 +371,9 @@ impl ClaudeBridge {
         }
         reply.messages =
             reserve(&ctx.store, &data.instance_id, &session, route, now, false).await?;
+        // Startup is complete after the five-second candidate and this live
+        // check. Normal idle polls keep the existing hard-gate screen check.
+        state.initial = false;
         if !reply.messages.is_empty() {
             state.idle = None;
             state.busy = true;
