@@ -83,3 +83,5 @@ export CARGO_TARGET_DIR=/private/tmp/agend-g12a-driver-target
 - 2026-10-05：`356fbef` 的全新無相關 context verifier 局部 CONFIRMED 被動蒐證工具修正；原同一 native Bearer wrap 反例改為寫入前拒絕，5 cases、四種尺寸／寬字 spacer、零 stdin、成功／失敗清理、clippy／fmt／實際 no-std 通過。`4511e21` 的原 REFUTED 證據保留；只認證工具，真 CLI／P5／P6 未完成（#151）。
 
 - 2026-10-05：使用者另行授權後，固定真 Claude 2.1.284 查版本與 100／140 欄被動蒐證均成功；0 模型回合、0 按鍵、0 訊息。完整 trust frame 匯入版本化 fixture，既有 hard gate 分類回歸待核；未接受預設 No 選項，development channels／P5 按鍵／P6 初始 idle 與完整 12A 仍未完成（#151）。
+
+- 2026-10-05：準備額外 opt-in 的受控 trust 蒐證工具，最多兩次 operator Input，native producer 正反例通過；只為取得後續真提示，不認證正式 P5 daemon-key／revision CAS 或 P6。真按鍵尚未授權；完整 crate／fresh verifier 待核（#151）。

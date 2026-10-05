@@ -143,3 +143,5 @@
 - 2026-10-05：`356fbef` 的全新無相關 context verifier 局部 CONFIRMED 被動蒐證工具修正；原同一 native Bearer wrap 反例改為寫入前拒絕，5 cases、四種尺寸／寬字 spacer、零 stdin、成功／失敗清理、clippy／fmt／實際 no-std 通過。`4511e21` 的原 REFUTED 證據保留；只認證工具，真 CLI／P5／P6 未完成（#151）。
 
 - 2026-10-05：另獲使用者授權，固定真 Claude 2.1.284 查版本及兩寬被動蒐證成功，0 模型回合／按鍵／訊息；保存完整信任 frame 為版本化 fixture，自有程序與暫存已清理。P5 自動按鍵、P6 初始 idle、後續真驗仍未完成；本批回歸與 fresh verifier 待核（#151）。
+
+- 2026-10-05：為後續 P5/P6 真 fixture 準備受控 trust 蒐證模式，預設被動不變；兩寬及未知／外來／未切換選項的原生正反例通過。這是 operator 輸入蒐證，正式 daemon-key、後續提示與初始 idle 未認證，真按鍵待另行授權（#151）。

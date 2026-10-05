@@ -59,6 +59,149 @@ fn options(program: &Path, out: &Path, columns: u16) -> capture::Options {
     ])
     .unwrap()
 }
+
+// This native producer re-renders the real No fixture through the holder.
+// Its selected-Yes/after-trust output is synthetic, never a true CLI fixture.
+fn trust_worker(root: &Path, columns: u16, mode: &str) -> PathBuf {
+    fs::write(root.join("columns"), columns.to_string()).unwrap();
+    fs::write(root.join("mode"), mode).unwrap();
+    fs::write(
+        root.join("no-screen.txt"),
+        include_str!(
+            "../../agend-core/tests/fixtures/screens/claude-2.1.284-workspace-trust-100x24.txt"
+        ),
+    )
+    .unwrap();
+    let path = root.join("native-trust-worker");
+    fs::write(&path, r#"#!/usr/bin/env python3
+import fcntl, os, pathlib, struct, termios, time, tty
+root = pathlib.Path(__file__).resolve().parent
+(root / 'workspace').write_text(os.getcwd())
+tty.setraw(0)
+columns = int((root / 'columns').read_text())
+while struct.unpack('HHHH', fcntl.ioctl(0, termios.TIOCGWINSZ, b'\0' * 8))[:2] != (24, columns):
+    time.sleep(.01)
+mode = (root / 'mode').read_text()
+text = (root / 'no-screen.txt').read_text().replace('<rec>/h1/workspace/g12-startup-capture', str(pathlib.Path.cwd().resolve()))
+if mode == 'wrong-path':
+    text = text.replace(str(pathlib.Path.cwd().resolve()), '/tmp/not-this-workspace')
+if mode == 'unknown':
+    text = 'SYNTHETIC UNKNOWN STARTUP PROMPT\n'
+yes = text.replace('❯ No, exit\n   Yes, I trust this folder', '  No, exit\n ❯ Yes, I trust this folder')
+def draw(value):
+    os.write(1, ('\x1b[2J\x1b[H\x1b[?25l' + value.rstrip('\n').replace('\n', '\r\n')).encode())
+draw(yes if mode == 'preselected-yes' else text)
+pending = b''
+while True:
+    chunk = os.read(0, 64)
+    with (root / 'input-received').open('ab') as file:
+        file.write(chunk)
+    pending += chunk
+    if b'\x1b[B' in pending:
+        draw(text if mode == 'stuck-no' else yes)
+    if b'\r' in pending:
+        draw('SYNTHETIC AFTER TRUST; NO FURTHER KEYS\n')
+"#).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    path.canonicalize().unwrap()
+}
+
+fn controlled_options(program: &Path, out: &Path, columns: u16) -> capture::Options {
+    let mut options = options(program, out, columns);
+    options.version_label = "2.1.284".into();
+    options.accept_workspace_trust = true;
+    options.seconds = 4;
+    options
+}
+
+#[test]
+fn trust_probe_sends_only_down_and_confirmed_yes_enter_at_both_widths() {
+    for width in [100, 140] {
+        let root = TempDir::new("g12-trust-controls").unwrap();
+        let program = trust_worker(root.path(), width, "normal");
+        let out = root.path().join("evidence");
+        capture::run(&controlled_options(&program, &out, width), &agend()).unwrap();
+        assert_eq!(
+            fs::read(root.path().join("input-received")).unwrap(),
+            b"\x1b[B\r"
+        );
+        let result: Value =
+            serde_json::from_str(&fs::read_to_string(out.join("result.json")).unwrap()).unwrap();
+        assert_eq!(result["terminal_input_operations_started"], 2);
+        assert_eq!(result["terminal_input_operations_completed"], 2);
+        assert_eq!(result["production_daemon_key_path_tested"], false);
+        assert_eq!(result["startup"], "not_assessed");
+        let recorded = fs::read_to_string(out.join("screens.jsonl")).unwrap();
+        assert!(recorded.contains("SYNTHETIC AFTER TRUST"));
+        assert!(recorded.contains("workspace-trust-control"));
+        assert!(
+            !Path::new(
+                fs::read_to_string(root.path().join("workspace"))
+                    .unwrap()
+                    .trim()
+            )
+            .exists()
+        );
+    }
+}
+
+#[test]
+fn unknown_or_foreign_or_preselected_trust_sends_nothing() {
+    for mode in ["unknown", "wrong-path", "preselected-yes"] {
+        let root = TempDir::new("g12-trust-refuse").unwrap();
+        let program = trust_worker(root.path(), 100, mode);
+        let out = root.path().join("evidence");
+        assert!(capture::run(&controlled_options(&program, &out, 100), &agend()).is_err());
+        assert!(!root.path().join("input-received").exists(), "{mode}");
+        let result: Value =
+            serde_json::from_str(&fs::read_to_string(out.join("result.json")).unwrap()).unwrap();
+        assert_eq!(result["input_sent"], false);
+        assert!(
+            !Path::new(
+                fs::read_to_string(root.path().join("workspace"))
+                    .unwrap()
+                    .trim()
+            )
+            .exists()
+        );
+    }
+}
+
+#[test]
+fn unchanged_no_selection_never_replays_down_or_sends_enter() {
+    let root = TempDir::new("g12-trust-stuck").unwrap();
+    let program = trust_worker(root.path(), 100, "stuck-no");
+    let out = root.path().join("evidence");
+    assert!(capture::run(&controlled_options(&program, &out, 100), &agend()).is_err());
+    assert_eq!(
+        fs::read(root.path().join("input-received")).unwrap(),
+        b"\x1b[B"
+    );
+    let result: Value =
+        serde_json::from_str(&fs::read_to_string(out.join("result.json")).unwrap()).unwrap();
+    assert_eq!(result["terminal_input_operations_started"], 1);
+    assert_eq!(result["terminal_input_operations_completed"], 1);
+}
+
+#[test]
+fn trust_control_requires_the_recorded_version_and_dimensions_before_launch() {
+    let root = TempDir::new("g12-trust-preflight").unwrap();
+    let program = trust_worker(root.path(), 100, "normal");
+    for (version, columns, rows) in [
+        ("unknown", 100, 24),
+        ("2.1.284", 80, 24),
+        ("2.1.284", 100, 25),
+    ] {
+        let out = root.path().join("evidence");
+        let mut opts = controlled_options(&program, &out, 100);
+        opts.version_label = version.into();
+        opts.size.columns = columns;
+        opts.size.rows = rows;
+        assert!(capture::run(&opts, &agend()).is_err());
+        assert!(!out.exists());
+        assert!(!root.path().join("workspace").exists());
+    }
+}
 #[test]
 fn real_holder_captures_two_widths_without_any_input_and_cleans_up() {
     let root = TempDir::new("g12-startup-native").unwrap();

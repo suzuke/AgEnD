@@ -1,7 +1,10 @@
-//! Passive startup evidence through the actual daemon and holder. No prompt,
-//! delivery, or terminal input operation is issued; readiness is not inferred.
+//! Startup evidence through the actual daemon and holder. Passive by default;
+//! an explicit bounded operator probe can select workspace trust. No model
+//! prompt or message delivery is issued; readiness is never inferred.
 #[path = "daemon_process.rs"]
 mod lab;
+#[path = "claude_trust_control.rs"]
+mod trust;
 use agend_core::{
     model::Backend,
     protocol::{client::*, terminal::*},
@@ -23,7 +26,7 @@ use std::{
 };
 
 const ID: &str = "g12-startup-capture";
-pub const USAGE: &str = "claude_startup_capture --program <absolute-path> --sha256 <hex> --version-label <label> --columns <20..200> --rows <5..100> --seconds <1..60> --out <new-directory>";
+pub const USAGE: &str = "claude_startup_capture --program <absolute-path> --sha256 <hex> --version-label <label> --columns <20..200> --rows <5..100> --seconds <1..60> --out <new-directory> [--workspace-trust-control accept]";
 
 pub struct Options {
     pub program: PathBuf,
@@ -32,6 +35,7 @@ pub struct Options {
     pub size: TerminalSize,
     pub seconds: u64,
     pub out: PathBuf,
+    pub accept_workspace_trust: bool,
 }
 impl Options {
     pub fn parse(args: &[String]) -> Result<Self, String> {
@@ -46,6 +50,7 @@ impl Options {
                     "--rows",
                     "--seconds",
                     "--out",
+                    "--workspace-trust-control",
                 ]
                 .contains(&pair[0].as_str())
             {
@@ -61,6 +66,11 @@ impl Options {
             sha256: get("--sha256")?.into(),
             version_label: get("--version-label")?.into(),
             out: get("--out")?.into(),
+            accept_workspace_trust: match values.get("--workspace-trust-control").copied() {
+                None => false,
+                Some("accept") => true,
+                _ => return Err("workspace trust control must be accept".into()),
+            },
             size: TerminalSize {
                 rows: get("--rows")?.parse().map_err(|_| USAGE.to_owned())?,
                 columns: get("--columns")?.parse().map_err(|_| USAGE.to_owned())?,
@@ -86,6 +96,16 @@ impl Options {
             || !(1..=60).contains(&self.seconds)
         {
             return Err("invalid capture options; no process started".into());
+        }
+        if self.accept_workspace_trust
+            && (self.version_label != "2.1.284"
+                || self.size.columns != 100 && self.size.columns != 140
+                || self.size.rows != 24)
+        {
+            return Err(
+                "trust control requires recorded 2.1.284 and 100x24 or 140x24; no process started"
+                    .into(),
+            );
         }
         Ok(())
     }
@@ -157,6 +177,7 @@ fn capture(
     options: &Options,
     file: &mut File,
     redactor: &redact::Redactor,
+    progress: &mut trust::Progress,
 ) -> Result<usize, String> {
     let (mut client, version) =
         ProbeClient::hello(&home.join(DAEMON_SOCKET), None).map_err(|e| e.to_string())?;
@@ -187,7 +208,7 @@ fn capture(
             data: ClientTerminalControlData {
                 request_id: "capture-size".into(),
                 instance_id: ID.into(),
-                view_id: first.view_id,
+                view_id: first.view_id.clone(),
                 generation: first.frame.generation,
                 operation: ClientTerminalOperation::Acquire { size: options.size },
             },
@@ -197,7 +218,7 @@ fn capture(
     let acquired = loop {
         match next(&mut client, deadline)? {
             ClientResponse::TerminalControlAck { data } if data.request_id == "capture-size" => {
-                break data.frame.ok_or("capture resize has no frame")?;
+                break data;
             }
             ClientResponse::Error { .. } => return Err("capture resize refused".into()),
             _ => {
@@ -207,15 +228,57 @@ fn capture(
             }
         }
     };
+    let attach_id = match acquired.control {
+        TerminalControlState::Controlled { attach_id } => attach_id,
+        _ => return Err("capture did not acquire its terminal".into()),
+    };
+    let acquired = acquired.frame.ok_or("capture resize has no frame")?;
     if acquired.size != options.size {
         return Err("capture size mismatch".into());
     }
     record(file, redactor, &acquired)?;
     count += 1;
-    let generation = acquired.generation;
+    let generation = acquired.generation.clone();
     let mut revision = acquired.revision;
     let deadline = Instant::now() + Duration::from_secs(options.seconds);
+    let workspace = home
+        .join("workspace")
+        .join(ID)
+        .canonicalize()
+        .map_err(|e| e.to_string())?;
+    let mut observed = Some(acquired);
     while Instant::now() < deadline {
+        if options.accept_workspace_trust
+            && let Some(frame) = observed.take()
+            && let Some((key, bytes)) = progress.decide(&frame, &workspace)?
+        {
+            write_line(
+                file,
+                &json!({"from":"probe", "via":"operator-control", "msg":{"key":key, "phase":"intent", "generation":frame.generation, "revision":frame.revision}}),
+            )?;
+            file.sync_data().map_err(|e| e.to_string())?;
+            let frames = trust::Grant {
+                instance: ID,
+                view: &first.view_id,
+                attach: &attach_id,
+            }
+            .send(&mut client, &frame, key, bytes, deadline)?;
+            observed = frames.last().cloned();
+            progress.completed += 1;
+            write_line(
+                file,
+                &json!({"from":"probe", "via":"operator-control", "msg":{"key":key, "phase":"completed"}}),
+            )?;
+            for frame in frames {
+                if count >= 512 {
+                    return Err("capture frame limit reached".into());
+                }
+                record(file, redactor, &frame)?;
+                count += 1;
+                revision = frame.revision;
+            }
+            continue;
+        }
         match client.recv_within(
             deadline
                 .saturating_duration_since(Instant::now())
@@ -232,6 +295,7 @@ fn capture(
                     record(file, redactor, &data.frame)?;
                     count += 1;
                     revision = data.frame.revision;
+                    observed = Some(data.frame);
                 }
             }
             Ok(Some(
@@ -246,6 +310,9 @@ fn capture(
             Err(e) => return Err(e.to_string()),
             _ => {}
         }
+    }
+    if options.accept_workspace_trust && progress.completed != 2 {
+        return Err("workspace trust control incomplete; no input replay".into());
     }
     Ok(count)
 }
@@ -298,6 +365,12 @@ pub fn run(options: &Options, agend: &Path) -> Result<usize, String> {
     // The only unredacted identifier is the validated executable fingerprint.
     // It comes from the pinned file, not backend output or account metadata.
     header["program_sha256"] = options.sha256.clone().into();
+    if options.accept_workspace_trust {
+        header["capture_mode"] = "workspace-trust-control".into();
+        header["terminal_input_operations"] = Value::Null;
+        header["terminal_input_operation_limit"] = 2.into();
+        header["production_daemon_key_path_tested"] = false.into();
+    }
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -305,10 +378,11 @@ pub fn run(options: &Options, agend: &Path) -> Result<usize, String> {
         .open(options.out.join("screens.jsonl"))
         .map_err(|e| e.to_string())?;
     write_line(&mut file, &header)?;
+    let mut progress = trust::Progress::default();
     let mut daemon = lab::Daemon::start(&native, &home, &[])?;
     let result = daemon
         .ready()
-        .and_then(|_| capture(&home, options, &mut file, &redactor));
+        .and_then(|_| capture(&home, options, &mut file, &redactor, &mut progress));
     // Remove while the daemon is live: production removal stops the holder,
     // sweeps this instance, and cannot schedule a replacement holder.
     let cleanup = (|| {
@@ -345,7 +419,7 @@ pub fn run(options: &Options, agend: &Path) -> Result<usize, String> {
         unchanged?;
         Ok(count)
     });
-    let status = json!({"ok":final_result.is_ok(), "frames":final_result.as_ref().ok(), "startup":"not_assessed", "input_sent":false, "version_was_queried":false});
+    let status = json!({"ok":final_result.is_ok(), "frames":final_result.as_ref().ok(), "startup":"not_assessed", "input_sent":if progress.started == 0 { Some(false) } else if progress.completed == progress.started { Some(true) } else { None }, "terminal_input_operations_started":progress.started, "terminal_input_operations_completed":progress.completed, "production_daemon_key_path_tested":false, "version_was_queried":false});
     let mut status_file = OpenOptions::new()
         .write(true)
         .create_new(true)

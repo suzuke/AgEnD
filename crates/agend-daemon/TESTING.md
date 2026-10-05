@@ -157,3 +157,8 @@ Failed 派工回歸：五種 fake queue 只用一個 dev，boot 派工失敗後�
 `tests/claude_startup_capture.rs` 用自己的 shell producer 經真 daemon／holder 核兩種寬度、繁中字元、正式 argv、零輸入與成功／拒絕畫面後的清理；hash 不合與既有證據拒絕時不啟動 producer。這是蒐證工具回歸，不是真 Claude／P5 通過；[工具範圍與指令](../../docs/gates/gate-12a-startup-capture.md)。
 
 啟動畫面蒐證另驗 native soft-wrap：電郵完整遮蔽、跨列 Bearer 前綴拒絕且清理。原逐列插 newline 的反例由 fresh verifier 用真 holder 重現；工具現依 cell.wrap／leading_spacer 還原 logical line 後才掃描，不把 physical row 邊界當作資料分隔。
+
+受控 trust 蒐證另有 native producer：只對本次 workspace 的 No→Yes 送一次 Down／Enter；
+未知、外來路徑、初始 Yes、No 未切換及未驗版本／尺寸的正反例核輸入 bytes 與清理。
+選到 Yes／後續畫面是替身生成，不是真 CLI fixture；正式 P5 daemon-key／revision CAS、
+development channels 與 P6 初始 idle 仍缺真證據。預設被動模式保持 0 輸入。

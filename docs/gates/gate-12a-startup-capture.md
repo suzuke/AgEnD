@@ -1,7 +1,7 @@
 # 第 12A：被動保存啟動畫面
 
 > **TL;DR**
-> - 開發用 `claude_startup_capture` 經實際 daemon／holder 保存指定寬度的啟動畫面；不送 prompt、按鍵或團隊訊息。
+> - 開發用 `claude_startup_capture` 預設被動保存畫面；額外 opt-in 只做受控 trust 蒐證，不送模型 prompt 或團隊訊息。
 > - 真 Claude 2.1.284 已核版本並保存兩種寬度的信任畫面；P5 自動處理提示與 P6 啟動完成仍未驗收。
 > - 下一步：以真 fixture 補啟動處理；本次授權不含按鍵、訊息投遞或模型回合。
 
@@ -23,7 +23,7 @@
 | 拒絕 | hash 不合、secret scan、失去終端／控制、generation／尺寸改變等均回失敗；部分檔案保留供核對，不宣稱成功 |
 | 清理 | 成功或畫面拒絕後，經 production instance remove 停 holder，再停 daemon；fixture 移除自己的 home／workspace，保留指定 output |
 
-secret scan 通過後的真畫面仍需人工檢視再入 Git。只有 native 測試替身的版本標籤不能當成真 CLI fixture；本工具不按 Down／Enter，也不更新 `SCREEN_RULES`。
+secret scan 通過後的真畫面仍需人工檢視再入 Git。只有 native 測試替身的版本標籤不能當成真 CLI fixture；預設模式不按 Down／Enter；兩種模式都不更新 `SCREEN_RULES`。
 
 ## 原生重驗（不執行 Claude）
 
@@ -52,6 +52,30 @@ AGEND_REAL_CLAUDE_STARTUP=1 AGEND_BIN=<本批 agend 絕對路徑>   cargo run -p
 完整命令及遮蔽原始畫面保存於 `AgEnD-ops/g12a-native-checkpoint-20261005/`。
 最後完整 frame 的文字已匯出為 [兩個真 fixture](../../crates/agend-core/tests/fixtures/screens/README.md)。
 自有 daemon／holder／home／workspace 已清理；未送鍵、未接受信任提示，後續提示與初始 idle 仍缺證據。
+
+## 受控 trust 蒐證（工具已實作；真執行另取授權）
+
+`--workspace-trust-control accept` 額外要求 `AGEND_REAL_CLAUDE_STARTUP_TRUST=1`；
+預設仍是零輸入。模式只接受另查版本的 2.1.284 標籤、100×24／140×24，
+並核 executable SHA-256；標籤本身不是版本查詢或 attestation。
+
+工具持有本次私人 instance 的 operator attach，僅在畫面包含完整信任敘述、確認 footer
+及本次 workspace 路徑時，對預設 No 送一次 Down；新畫面選到 Yes 才送一次 Enter。
+只有一個已完成的 Down 才可開始 Enter。初始已選 Yes、未知畫面或錯誤路徑不送鍵；
+No 未改變則停在一個 Down，不重送。Enter 後只記畫面，沒有後續按鍵或訊息。
+
+每次送出前將固定 key、frame generation/revision 與 intent 落檔並 sync；完成回條核對
+instance／view／generation／attach。失去控制、失去回覆或期限到即失敗，不重送；
+`result.json` 記 started／completed，未完成的輸入結果用 null 表示。
+
+這是額外授權的 operator `Input` 蒐證路徑，不是正式 P5 的 `DaemonKey`／revision CAS。
+記錄的 revision 是觀測值，operator Input 不帶 expected_revision；不由此認證正式
+P5 的原子畫面檢查或人工 owner 拒絕。`production_daemon_key_path_tested=false`、
+`startup=not_assessed` 保留此邊界；沒有 development channels 自動確認或初始 idle 推論。
+
+原生替身重播真 No 文字；選到 Yes／後續畫面為 synthetic producer，不能當成真 fixture。
+9 個 native 案例覆蓋預設被動、兩寬受控輸入、未知／外來／初始 Yes、No 未切換、
+版本／尺寸 preflight，以及原有 hash／遮蔽／清理回歸。真兩寬受控蒐證尚未授權執行。
 
 ## 獨立核對
 
