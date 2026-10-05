@@ -292,38 +292,6 @@ fn capture(
         .map_err(|e| e.to_string())?;
     let mut observed = Some(acquired);
     while Instant::now() < deadline {
-        if options.accept_workspace_trust
-            && let Some(frame) = observed.take()
-            && let Some((key, bytes)) =
-                progress.decide(&frame, &workspace, options.accept_development_channels)?
-        {
-            write_line(
-                file,
-                &json!({"from":"probe", "via":"operator-control", "msg":{"key":key, "phase":"intent", "generation":frame.generation, "revision":frame.revision}}),
-            )?;
-            file.sync_data().map_err(|e| e.to_string())?;
-            let frames = trust::Grant {
-                instance: ID,
-                view: &first.view_id,
-                attach: &attach_id,
-            }
-            .send(&mut client, &frame, key, bytes, deadline)?;
-            observed = frames.last().cloned();
-            progress.completed += 1;
-            write_line(
-                file,
-                &json!({"from":"probe", "via":"operator-control", "msg":{"key":key, "phase":"completed"}}),
-            )?;
-            for frame in frames {
-                if count >= 512 {
-                    return Err("capture frame limit reached".into());
-                }
-                record(file, redactor, &frame)?;
-                count += 1;
-                revision = frame.revision;
-            }
-            continue;
-        }
         match client.recv_within(
             deadline
                 .saturating_duration_since(Instant::now())
@@ -358,6 +326,41 @@ fn capture(
                 ) => {}
             Err(e) => return Err(e.to_string()),
             _ => {}
+        }
+        if Instant::now() >= deadline {
+            break;
+        }
+        if options.accept_workspace_trust
+            && let Some(frame) = observed.as_ref()
+            && let Some((key, bytes)) =
+                progress.decide(frame, &workspace, options.accept_development_channels)?
+        {
+            write_line(
+                file,
+                &json!({"from":"probe", "via":"operator-control", "msg":{"key":key, "phase":"intent", "generation":frame.generation, "revision":frame.revision}}),
+            )?;
+            file.sync_data().map_err(|e| e.to_string())?;
+            let frames = trust::Grant {
+                instance: ID,
+                view: &first.view_id,
+                attach: &attach_id,
+            }
+            .send(&mut client, frame, key, bytes, deadline)?;
+            observed = frames.last().cloned();
+            progress.completed += 1;
+            write_line(
+                file,
+                &json!({"from":"probe", "via":"operator-control", "msg":{"key":key, "phase":"completed"}}),
+            )?;
+            for frame in frames {
+                if count >= 512 {
+                    return Err("capture frame limit reached".into());
+                }
+                record(file, redactor, &frame)?;
+                count += 1;
+                revision = frame.revision;
+            }
+            continue;
         }
     }
     if options.accept_workspace_trust && progress.completed != options.input_limit() {
@@ -432,6 +435,24 @@ pub fn run(options: &Options, agend: &Path) -> Result<usize, String> {
         .open(options.out.join("screens.jsonl"))
         .map_err(|e| e.to_string())?;
     write_line(&mut file, &header)?;
+    // Private lifecycle identifiers are kept separately from the redacted
+    // transcript so cleanup does not race an external SQLite observer.
+    let mut lifecycle = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(options.out.join("cleanup-identity.json"))
+        .map_err(|e| e.to_string())?;
+    write_line(
+        &mut lifecycle,
+        &json!({
+            "format": "startup-cleanup-v1", "instance_id": ID,
+            "session_id": instance.session_id,
+            "home": home.canonicalize().map_err(|e| e.to_string())?,
+            "workspace": workspace.canonicalize().map_err(|e| e.to_string())?
+        }),
+    )?;
+    lifecycle.sync_all().map_err(|e| e.to_string())?;
     let mut progress = trust::Progress::default();
     let mut daemon = lab::Daemon::start(&native, &home, &[])?;
     let result = daemon

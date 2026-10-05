@@ -100,3 +100,4 @@ export CARGO_TARGET_DIR=/private/tmp/agend-g12a-driver-target
 
 - 2026-10-05：`01f438e` 的全新 verifier 重現 resize ACK 等待略過不一致 native frame 後仍送三鍵；原 REFUTED 保留。補兩寬 instance／view／generation／size 零 Input 回歸，原始與目標尺寸仍接受；新回歸先核原 consumer 失敗，修正後 16 native cases／整個 daemon／fmt／clippy／實際 no-std 通過，新全新 verifier 待核，真三鍵未執行（#151）。
 - 2026-10-05：`433d2a8` 全新 verifier 確認 resize 身分回歸成立，但 trust 選單追加第二個 selected Exit 仍確認，原 REFUTED 保留。trust 改為兩寬完整真 No／Yes fixture 僅替換本次 canonical path 後比對，新增兩階段 extra／duplicate selection 拒絕回歸；17 native cases／整個 daemon／fmt／clippy／實際 no-std 通過，新全新 verifier 待核，真三鍵未執行（#151）。
+- 2026-10-05：`dabb35e` fresh verifier／使用者 native 重驗及 push／PR 雙平台 CI 全通過。另獲三鍵蒐證授權後，固定 Claude 2.1.284 的 100 欄只完成一個 Down，畫面仍為 No；按計畫停於首個失敗，未重送／Enter／140 欄。0 模型／訊息，native 暫存已清理；真原因與 session 觀察缺口保留。補完整提示穩定等待與私有清理身分，native 延遲 receiver 原 consumer 失敗，19 native cases／整個 daemon／fmt／workspace clippy／實際 no-std 通過，新全新 verifier 待核（#151）。

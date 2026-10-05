@@ -83,7 +83,9 @@ fn trust_worker(root: &Path, columns: u16, mode: &str) -> PathBuf {
 import fcntl, os, pathlib, struct, termios, time, tty
 root = pathlib.Path(__file__).resolve().parent
 (root / 'workspace').write_text(os.getcwd())
-tty.setraw(0)
+mode = (root / 'mode').read_text()
+if mode != 'delayed-input':
+    tty.setraw(0)
 columns = int((root / 'columns').read_text())
 while struct.unpack('HHHH', fcntl.ioctl(0, termios.TIOCGWINSZ, b'\0' * 8))[:2] != (24, columns):
     time.sleep(.01)
@@ -108,9 +110,20 @@ if mode.startswith('yes-extra-'):
 def draw(value):
     os.write(1, ('\x1b[2J\x1b[H\x1b[?25l' + value.rstrip('\n').replace('\n', '\r\n')).encode())
 draw(yes if mode == 'preselected-yes' else text)
+if mode == 'delayed-input':
+    time.sleep(.75)
+    tty.setraw(0)
+if mode == 'transient-unknown':
+    time.sleep(.4)
+    draw('SYNTHETIC UNKNOWN DURING SETTLE\n')
+    time.sleep(.8)
+    draw(text)
+    stable_at = time.monotonic()
 pending = b''
 while True:
     chunk = os.read(0, 64)
+    if mode == 'transient-unknown' and not (root / 'first-input-after-stable').exists():
+        (root / 'first-input-after-stable').write_text(str(time.monotonic() - stable_at))
     with (root / 'input-received').open('ab') as file:
         file.write(chunk)
     pending += chunk
@@ -127,7 +140,8 @@ fn controlled_options(program: &Path, out: &Path, columns: u16) -> capture::Opti
     let mut options = options(program, out, columns);
     options.version_label = "2.1.284".into();
     options.accept_workspace_trust = true;
-    options.seconds = 4;
+    // Three stable prompts plus native frame publication need more than four seconds.
+    options.seconds = 6;
     options
 }
 
@@ -574,6 +588,70 @@ fn trust_confirmation_rejects_extra_or_repeated_selections_at_both_widths() {
             );
         }
     }
+}
+
+#[test]
+fn prompt_stability_survives_delayed_receiver_and_resets_for_unknown() {
+    for width in [100, 140] {
+        for mode in ["delayed-input", "transient-unknown"] {
+            let root = TempDir::new("g12-trust-delayed-input").unwrap();
+            let program = trust_worker(root.path(), width, mode);
+            let out = root.path().join("evidence");
+            capture::run(&controlled_options(&program, &out, width), &agend()).unwrap();
+            assert_eq!(
+                fs::read(root.path().join("input-received")).unwrap(),
+                b"\x1b[B\r"
+            );
+            if mode == "transient-unknown" {
+                let elapsed: f64 = fs::read_to_string(root.path().join("first-input-after-stable"))
+                    .unwrap()
+                    .parse()
+                    .unwrap();
+                assert!(
+                    elapsed >= 0.9,
+                    "unknown frame must restart dwell: {elapsed}"
+                );
+            }
+            let result: Value =
+                serde_json::from_str(&fs::read_to_string(out.join("result.json")).unwrap())
+                    .unwrap();
+            assert_eq!(result["terminal_input_operations_completed"], 2);
+            assert!(
+                !Path::new(
+                    fs::read_to_string(root.path().join("workspace"))
+                        .unwrap()
+                        .trim()
+                )
+                .exists()
+            );
+        }
+    }
+}
+
+#[test]
+fn private_cleanup_identity_matches_native_session_and_removed_workspace() {
+    let root = TempDir::new("g12-cleanup-identity").unwrap();
+    let program = worker(root.path());
+    let out = root.path().join("evidence");
+    capture::run(&options(&program, &out, 100), &agend()).unwrap();
+    let path = out.join("cleanup-identity.json");
+    let identity: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(identity["format"], "startup-cleanup-v1");
+    assert_eq!(identity["instance_id"], "g12-startup-capture");
+    let argv = fs::read_to_string(root.path().join("argv")).unwrap();
+    let args: Vec<_> = argv.lines().collect();
+    let session = args
+        .windows(2)
+        .find(|pair| pair[0] == "--session-id")
+        .unwrap()[1];
+    assert_eq!(identity["session_id"], session);
+    assert!(!Path::new(identity["home"].as_str().unwrap()).exists());
+    assert!(!Path::new(identity["workspace"].as_str().unwrap()).exists());
+    assert_eq!(
+        fs::metadata(path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert_eq!(identity.as_object().unwrap().len(), 5);
 }
 
 #[test]

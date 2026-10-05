@@ -45,6 +45,10 @@ Development channels 蒐證用真提示文字經 native producer 重播，兩寬
 
 `trust_confirmation_rejects_extra_or_repeated_selections_at_both_widths` 以真 No fixture 經 native holder 產生兩寬畫面；No／Yes 各追加 selected Exit 或重複選項，須拒絕當次下一鍵且清理。trust 完整 fixture 只替換本次 canonical workspace，其他額外內容均 unknown。
 
+完整提示穩定一秒後才送下一鍵，期間持續讀 frame／control；未知提示清除候選，不重送。
+`prompt_stability_survives_delayed_receiver_and_resets_for_unknown` 用真 holder／兩寬 fixture，在畫面出現後 750ms 才啟用 raw receiver；原 consumer 先失敗，新 consumer 核恰好兩鍵；中途未知提示後，真 producer 核第一鍵仍等恢復 No 超過 900ms。
+`private_cleanup_identity_matches_native_session_and_removed_workspace` 以 native argv 的 session 核私有 `cleanup-identity.json`，限定欄位與 0600，原生 workspace／home 已移除。
+
 ## 下一步
 
 ```bash

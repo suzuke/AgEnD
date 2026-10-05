@@ -18,6 +18,7 @@
 | executable | 必須是絕對路徑；啟動前及結束後比對指定 SHA-256，不執行 `--version` |
 | version label | 由呼叫者提供；`version_was_queried = false`，不認證版本一致性 |
 | `screens.jsonl` | 首行是啟動 metadata，其餘是真 frame 的文字；識別碼、路徑與帳號內容經既有 redactor／secret scan。已核對的 executable SHA-256 保留原值 |
+| `cleanup-identity.json` | 啟動前保存私有 home／workspace／session，0600；只供精確清理，與遮蔽畫面分離 |
 | `result.json` | 保存成功與否和 frame 數；`startup = not_assessed`，不把空畫面或已捕捉畫面當成啟動完成 |
 | output | 只建立全新目錄（0700），檔案 0600；拒絕覆寫既有證據 |
 | 拒絕 | hash 不合、secret scan、失去終端／控制、generation／尺寸改變等均回失敗；部分檔案保留供核對，不宣稱成功 |
@@ -84,7 +85,7 @@ P5 的原子畫面檢查或人工 owner 拒絕。`production_daemon_key_path_tes
 程序與暫存已清理；另只移除本次兩個 canonical workspace 的個人信任設定條目，
 其他個人設定值核對不變。執行與清理 manifest 保存於 AgEnD-ops。
 
-## Development channels 蒐證模式（真執行尚未授權）
+## Development channels 蒐證模式（首次真執行已停止）
 
 新增 `--development-channel-control accept`，須同時指定 workspace trust 模式，
 另設 `AGEND_REAL_CLAUDE_STARTUP_CHANNELS=1`；既有被動與兩鍵模式不自動增加輸入。
@@ -97,44 +98,13 @@ P5 的原子畫面檢查或人工 owner 拒絕。`production_daemon_key_path_tes
 `startup=not_assessed`、無 revision CAS、非正式 P5 DaemonKey 的邊界維持。
 受控動作結果不明、被拒絕或期限到都失敗並保留證據，不重送。
 原生 producer 重播真 development frame；確認後的畫面是 synthetic，未當成真 fixture。
-17 個 native cases 包含既有 10 個回歸、三鍵正例、六種拒絕、兩寬矛盾／重複選單拒絕、兩寬外來 frame identity、resize 等待中的不一致 frame 拒絕及預設不增加權限／不重送。
-原 13 個 native cases、整個 daemon／fmt／workspace clippy／實際 no-std 通過；
-第 14 個回歸在原規則失敗，修正後 14 cases／整個 daemon／fmt／clippy／實際 no-std 通過。
-example 缺任一 opt-in 都在 producer／output 建立前拒絕；全新 verifier 待核。
-這是下一份待審執行計畫的工具；本次已完成的兩鍵真授權不涵蓋此模式。
+19 個 native cases 包含三鍵正例、完整選單拒絕、frame／resize 身分核對、不重送，以及提示穩定等待與清理身分。整個 daemon、fmt、workspace clippy 與實際 no-std 通過；新全新 verifier 待核。首次真三鍵計畫已按首個失敗停止，後續不能由原授權推定可重試。
 
-## 獨立核對
+## 獨立核對與首個真失敗
 
-固定 `356fbef` 獲全新無相關 context verifier 局部 CONFIRMED。原 `4511e21` 的真 holder 跨列 synthetic Bearer 反例會寫入且回成功；修正後同一 producer 重播回失敗並在寫入前拒絕。另核 20／100／140／200 欄與 5／24／100 列的 native 寬字 spacer、多列電郵、零 stdin 與清理；5 個工具回歸、workspace clippy／fmt／實際 no-std 通過。這份結果只驗工具，不證明真 Claude 的版本、提示或 startup complete。
+固定 `dabb35e` 的全新 verifier、使用者 native 重驗及雙平台 CI 通過。歷次反例與修正保留於 [獨立核對紀錄](gate-12a-startup-capture-review.md)。
 
-固定 `b0d8074` 的全新 verifier 用真 daemon／holder 找到兩個誤確認反例：外部路徑以自有
-workspace 開頭、或錯誤 workspace 畫面在別處提及自有路徑，皆收到 Down／Enter。
-原 REFUTED 證據保留；作者改成唯一標頭與完整路徑相等，補兩寬原生拒絕回歸，
-修正 `7abb646` 獲同一驗證者局部 CONFIRMED，六個兩寬路徑反例零輸入；
-回條故障不重送，整個 daemon／clippy／fmt／實際 no-std 通過並清理。
-固定 head 的 push／PR 雙平台 CI 均成功。這份核對不認證正式 P5／P6。
-
-固定 `386d083` 的全新 verifier 局部 CONFIRMED：四個 fixture 逐 byte 對齊來源；
-四種 classifier mutation 均被抓到；core／fmt／clippy／實際 no-std、獨立 agend
-及 10 個 native capture tests 通過。自有 worktree／branch／target 與程序已清理。
-140 欄的 live DB identity 觀察缺口仍保留；不認證正式 P5／P6 或完整 12A。
-
-固定 `28d6341` 的全新 verifier 找到三個原生反例：selected Exit 加 local decoy、
-重複 selected local、或追加 selected Exit，原工具均送第三鍵並成功。原 REFUTED 證據保留；
-改為整份版本化畫面只忽略空白後相等，新增兩寬拒絕回歸；修正獨立核對待完成。
-未執行真三鍵蒐證。
-
-固定 `8d605bf` 的另一位全新 verifier 找到 outer loop 的身分缺口：
-trust 回條後的 native frame 改成外來 instance／view 仍送第三鍵。原 REFUTED 證據保留；
-新回歸在原 consumer 失敗，補 subscribe／acquire／outer frame 的 instance／view／generation 核對。
-修正後 15 native cases／整個 daemon／fmt／clippy／實際 no-std 通過，新獨立驗證待完成，真三鍵未執行。
-
-固定 `01f438e` 的全新 verifier 又重現 resize 等待迴圈略過不一致 frame 後仍送三鍵；
-原 REFUTED 保留。新增兩寬 instance／view／generation／size 回歸先核原 consumer 失敗；
-resize ACK 前只接受本次身分，以及原始或目標尺寸兩種合法過渡。修正後 16 native cases／整個 daemon／fmt／clippy／實際 no-std 通過；新全新 verifier 待核，真三鍵未執行。
-
-固定 `433d2a8` 的全新 verifier 另重現 trust 選單追加 selected Exit 仍確認，原 REFUTED 保留。
-trust 改為完整已錄製 No／Yes fixture，只替換本次 canonical path；新回歸先核原 consumer 失敗；17 native cases／整個 daemon／fmt／clippy／實際 no-std 通過，新全新 verifier 待核。
+之後獲授權的三鍵真蒐證在 100 欄只完成 Down，未觀察到 Yes，已按計畫停止。新增提示穩定等待與私有清理身分，詳見 [輸入時機與清理](gate-12a-startup-input-timing.md)；新工具的真執行須新計畫授權。
 
 ## 下一步
 

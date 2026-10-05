@@ -7,10 +7,41 @@ use super::*;
 pub struct Progress {
     pub started: usize,
     pub completed: usize,
+    visible_candidate: Option<(&'static str, Instant)>,
 }
 impl Progress {
     pub fn decide(
         &mut self,
+        frame: &TerminalFrame,
+        workspace: &Path,
+        accept_development_channels: bool,
+    ) -> Result<Option<(&'static str, &'static str)>, String> {
+        let Some((key, bytes)) = self.propose(frame, workspace, accept_development_channels)?
+        else {
+            self.visible_candidate = None;
+            return Ok(None);
+        };
+        let now = Instant::now();
+        match self.visible_candidate {
+            Some((visible, since)) if visible == key => {
+                if now.duration_since(since) < Duration::from_secs(1) {
+                    return Ok(None);
+                }
+                self.visible_candidate = None;
+                self.started += 1;
+                Ok(Some((key, bytes)))
+            }
+            _ => {
+                // A complete render is not proof that the CLI input handler is
+                // ready. Keep reading control/frames during this bounded dwell;
+                // unknown or changed menus clear the candidate. Never replay.
+                self.visible_candidate = Some((key, now));
+                Ok(None)
+            }
+        }
+    }
+    fn propose(
+        &self,
         frame: &TerminalFrame,
         workspace: &Path,
         accept_development_channels: bool,
@@ -52,7 +83,6 @@ impl Progress {
             if self.completed == 2
                 && normalized == recorded.split_whitespace().collect::<Vec<_>>().join(" ")
             {
-                self.started = 3;
                 return Ok(Some(("development-enter", "DQ==")));
             }
             return Ok(None);
@@ -103,14 +133,8 @@ impl Progress {
         let no = matches(recorded_no);
         let yes = matches(recorded_yes);
         match (self.started, no, yes) {
-            (0, true, false) => {
-                self.started = 1;
-                Ok(Some(("down", "G1tC")))
-            }
-            (1, false, true) if self.completed == 1 => {
-                self.started = 2;
-                Ok(Some(("enter", "DQ==")))
-            }
+            (0, true, false) => Ok(Some(("down", "G1tC"))),
+            (1, false, true) if self.completed == 1 => Ok(Some(("enter", "DQ=="))),
             (0, false, true) => Err("unexpected initial trust selection; no input sent".into()),
             _ => Ok(None),
         }
