@@ -188,3 +188,7 @@
 - 2026-10-06：#153 準備下一份完整 smoke 的 observed runner：首次 idle 等待最多 28 份只讀 A／B frame，工作前重核 idle；後續工作不擷取。原七則訊息／900 秒／零重跑與 audit／cleanup 不變；固定新計畫待獨立核對及另行授權，沒有再次真 CLI 執行。
 
 - 2026-10-06：#153 的完整 native bridge34／outer8及 accept core 通過；全新 verifier 核 Ready fixture byte 匯出、原 None→舊提示 Ready 反例、startup7／outer8及真 no-std通過。新增 observed 計畫的 tuple→JSON list scope mismatch 在任何 CLI 前被 verifier 推翻，保留原計畫與反例，修正為一致 list 後重新產生固定計畫；沒有再執行真 Claude。
+
+- 2026-10-06：#153 固定 `990bead` observed v2 另行授權後執行一次，A idle／B unknown，初始 idle 逾時 FAILED；24 份 frame、683 次 status、零工作訊息。自有程序、13 精確路徑、兩 trust keys 已清理；補已錄製 how-does 完整 Ready literal 與 native P6 回歸。990 push CI 雙平台通過，PR macOS 尾段 301.612416ms>300ms 失敗保留；[本次紀錄](gates/gate-12a-observed-smoke-v2.md)，完整 12A 未驗收。
+
+- 2026-10-06：#153 第二次完整 smoke 的全新 verifier 核固定990 A Ready／B None 與單換提示反例、11語意 mutations／5 native 負例、13paths／PID／PGID／兩trustkeys absent。how-does 新 literal 修正前 native P6 exit101，修正後 accept core、startup8及前後實際 check-deps 通過；編譯 target 清除，新改動待另一全新 verifier，未再次啟動真 CLI。

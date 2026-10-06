@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 使用者 2026-10-06 要求完整模型 smoke 必做；#151／#152 已合併；首次真執行停於初始 idle 逾時，訊息階段未開始。
 > - 固定 Claude 2.1.284，兩個 Haiku 4.5 instance、七則工作訊息；首個失敗停止，不重跑。
-> - 下一步：已取得四份只讀診斷 frame，補已錄製 Ready 提示變體並驗 native P6；新完整 smoke 計畫依 D40 另取授權。
+> - 下一步：[第二次完整 smoke](gate-12a-observed-smoke-v2.md)取得 24 份 frame，但 B 的新提示未識別；補完整 literal 與原生回歸後，任何新真執行依 D40 另取授權。
 
 ## 範圍與證據
 
@@ -61,7 +61,7 @@ SQLite 在 daemon 停機後才讀取；禁止用 immutable bypass 或複製變�
 最多 14 批／28 份。首次投遞前另留 Ready frame 並重核兩者仍 idle；後續工作階段不再擷取。
 helper 只 hello／subscribe，不 acquire／resize／input；捕捉失敗或身分錯誤就停止，不繼續訊息。
 新計畫固定新 runner、原 smoke runner、agend、cleanup、snapshot、Claude 六份 SHA；
-舊失敗及診斷 runner bytes 不改，已執行計畫不重用。這份新完整 smoke 尚未取得授權或執行。
+舊失敗及診斷 runner bytes 不改，已執行計畫不重用。固定 observed v2 已另行授權並執行一次；結果 FAILED、零工作訊息，見[本次紀錄](gate-12a-observed-smoke-v2.md)。
 
 ```bash
 python3 -B scripts/claude_observed_smoke.py \
@@ -124,4 +124,4 @@ native 身分及十種證據 mutation。自有 daemon／holder／backend、home�
 
 ## 下一步
 
-完成 Ready 變體的 native／全新 verifier 覆核與 CI，再提供下一份固定完整 smoke 計畫；真 CLI 需另取授權，禁止自動重跑成成功。#153 merge 仍等使用者確認。
+本次 B 的已錄製 Ready 提示變體補完整 literal，完成 native／全新 verifier 覆核；990 的 PR macOS CI 尾段延遲另待修復，不放寬 300ms。任何新真 CLI 計畫另取授權，禁止自動重跑成成功；#153 merge 仍等使用者確認。

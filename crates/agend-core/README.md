@@ -10,7 +10,8 @@
 2026-10-06 的只讀真診斷補 `100x24-3` 完整 Ready fixture，涵蓋已錄製的 create-util 提示。
 只增加完整 literal，不接受其他未錄製提示；[來源與 SHA](tests/fixtures/screens/README.md)。
 原 classifier 四份皆 None；只替舊提示才 Ready，native P6 重播此真 frame 驗穩定五秒與不加鍵。
-診斷 CAPTURED 不代表完整模型 smoke 通過。
+第二次完整 smoke 的 B frame 補 `100x24-4` how-does 完整 literal；同樣只遮 workspace、未知內容仍拒絕。
+[本次 FAILED 紀錄](../../docs/gates/gate-12a-observed-smoke-v2.md)與診斷 CAPTURED 均不代表完整模型 smoke 通過。
 
 ## 第 10 施工關（已驗收，2026-10-02）
 

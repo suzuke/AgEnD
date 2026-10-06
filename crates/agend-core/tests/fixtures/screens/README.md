@@ -1,5 +1,17 @@
 # Screen fixtures
 
+## Claude 2.1.284 第二次完整 smoke（2026-10-06）
+
+`claude-2.1.284-main-100x24-4.txt` 直接匯出已授權 observed v2 的 B 第二份只讀 frame。
+計畫 SHA-256 `6c23f0e2bc70f45186e107fc5bbd2248de52bca4d2a1fad7bcb3b5c434a4eae7`；
+來源 JSON SHA-256 `7d7278ffa47fc2ee20a0bfbec5cde751bda62dabe0165ef42cd40ac4b9938e10`，revision 27、100×24。
+逐列串接非 leading spacer 的 cell text、24 列 LF，只遮 canonical workspace；保留其他 bytes。
+fixture SHA-256 `0134b86f1966aece86ecb7bade6b978cb59bc60a13e9c6e219fa03d8c140500f`。
+相對 `100x24-2` token 差異只有 `Try "how does <filepath> work?"`；footer 相同。
+source990 對 B 的 11 份非空 frame 皆 None，A 的 11 份皆 Ready；首批兩份為空白。
+本次 24 份 frame、零工作訊息，結果 **FAILED**；沒有 transcript／usage，不能推斷 API 次數。
+新增完整 literal，不接受未知提示；[執行與限制](../../../../../docs/gates/gate-12a-observed-smoke-v2.md)。
+
 ## Claude 2.1.284 啟動診斷（2026-10-06）
 
 `claude-2.1.284-main-100x24-3.txt` 來自使用者另行授權的一次 production 啟動診斷；

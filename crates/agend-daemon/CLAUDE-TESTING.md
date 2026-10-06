@@ -76,4 +76,6 @@ cargo xtask check-deps
 2026-10-06 啟動診斷取得四份相同真 frame，結果 CAPTURED、零工作訊息。
 新增完整 Ready 提示 fixture 的 native P6 回歸只跑 shell producer／真 daemon／holder，
 核 SessionStart 先到、三鍵完成後穩定五秒、Ready 不加鍵及 halted=1；不啟動真 Claude。
-完整模型 smoke 首次 FAILED，下一次真 CLI 仍需固定計畫另行授權。
+[第二次完整 smoke](../../docs/gates/gate-12a-observed-smoke-v2.md)亦在 initial idle 逾時：A idle、B unknown，24 份 frame、零工作訊息。
+新增已錄製的 how-does 完整 Ready literal 與同一 native P6 回歸；未知提示仍拒絕。
+新真 CLI 計畫仍需另行授權；native 通過不等於模型通訊通過。

@@ -223,14 +223,18 @@ fn startup_native_menus_use_three_keys_at_both_recorded_widths_then_require_sess
 }
 #[test]
 fn startup_captured_ready_hint_waits_for_completion_and_stable_idle() {
-    let mut f = producer_with_ready(
-        100,
-        |_| {},
-        false,
-        Some(include_str!(
-            "../../../agend-core/tests/fixtures/screens/claude-2.1.284-main-100x24-3.txt"
-        )),
-    );
+    captured_ready_waits_for_stable_idle(include_str!(
+        "../../../agend-core/tests/fixtures/screens/claude-2.1.284-main-100x24-3.txt"
+    ));
+}
+#[test]
+fn startup_captured_how_does_hint_waits_for_completion_and_stable_idle() {
+    captured_ready_waits_for_stable_idle(include_str!(
+        "../../../agend-core/tests/fixtures/screens/claude-2.1.284-main-100x24-4.txt"
+    ));
+}
+fn captured_ready_waits_for_stable_idle(ready: &'static str) {
+    let mut f = producer_with_ready(100, |_| {}, false, Some(ready));
     f.start();
     f.hook("SessionStart", json!({"source":"startup"}));
     std::thread::sleep(Duration::from_millis(5200));
