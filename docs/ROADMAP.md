@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - 依 crate 由下往上分 13 個施工關；每個施工關單獨驗收，使用者確認後才開下一個施工關（D22）。
-> - 目前狀態：**第 1–11 施工關完成並已合併**；第 11 施工關 C 段 #145 經全新 verifier、雙平台 CI、實機及後續自動驗收與清理，使用者於 2026-10-03 確認合併（`b2152db`）。第 12 施工關 A 段設計 #138 已 merge，client 基礎 #147 已 merge，持久化 #148 已 merge，protocol 1.5／channel／Stop／ACK spool 基礎 #149 已 merge，共用 gh 防護 #150 已 merge，完整 Claude Driver／啟動設定與 Interrupt 實作中，Claude 接入未完成；第 13 施工關未開始。
-> - 下一步：依第 12A [D40](decisions/d40.md) 完成 [Claude Driver／啟動設定與控制](gates/gate-12a-driver.md)；每批以全新 verifier、可重驗指令及使用者確認收尾。
+> - 目前狀態：**第 1–11 施工關完成並已合併**；第 11 施工關 C 段 #145 經全新 verifier、雙平台 CI、實機及後續自動驗收與清理，使用者於 2026-10-03 確認合併（`b2152db`）。第 12 施工關 A 段設計 #138 已 merge，client 基礎 #147 已 merge，持久化 #148 已 merge，protocol 1.5／channel／Stop／ACK spool 基礎 #149 已 merge，共用 gh 防護 #150 已 merge，Claude Driver #151 與正式啟動／初始 idle #152 已合併，完整真模型 smoke 改為必要驗收，Claude 接入尚未驗收；第 13 施工關未開始。
+> - 下一步：依第 12A [D40](decisions/d40.md) 完成 [完整真模型 smoke](gates/gate-12a-live-smoke.md)；每批以全新 verifier、可重驗指令及使用者確認收尾。
 
 ## 13 個施工關
 
@@ -171,3 +171,36 @@
 - 2026-10-05：第四位全新 verifier 用 4KiB socket buffer 與合法 24KiB 分行 input 推翻 `eda202c` 的 >64KiB 並行門檻，固定 head 記為 REFUTED。testkit 改每份控制請求都並行讀寫，新增原生 consumer 精確收齊 24KiB 及後續 sentinel 回歸；原負例保留，最終 head 重驗與 CI 待核，未 merge（#152）。
 - 2026-10-05：`bd85766` macOS CI 仍記錄 300.315／330.091ms，未認證時效。未知且 notice 未變的畫面減少無授權作用的完整取樣，輸出／link 變動立即重查、靜默 resize 最多一秒重查；terminal hub 從首筆 dirty 等 50ms 避開過期共用 frame，後續 notice 不延長等待。原 300ms 門檻不變，新 native／daemon／fresh／CI 待核（#152）。
 - 2026-10-05：`1727c17` 的全新 verifier 本機 startup7／native4／outer8與36筆原300ms輸出通過，CI另在舊取消測試 first poll 必為Pending的假設失敗；真holder可以先回覆。測試改先核自有PID及已停止狀態，取消後RAII恢復，避免搶monitor退出回條；不改runtime，原CI證據保留，新head驗證待核（#152）。
+
+- 2026-10-06：使用者確認 #151／#152 合併，分別為 `cac2226`／`e7a8987`；兩個合併 tree 與原驗證 head 相同，原 worktree／branch 已移除，編譯暫存僅保留約 51MiB 的兩個歷史稽核必要 binary。使用者要求完整模型 smoke 為必要驗收；本批在清理核對後建立獨立 worktree，真模型計畫準備中，尚未執行。
+
+- 2026-10-06：完整真模型 smoke 腳本 `1256c99` 經全新 verifier 找出 native cleanup 的 foreign workspace 先停止、漏額外 holder、HOME 漂移及早期無 DB 殘留；已保留原負例，改為全面預核及環境綁定後重驗。仍未啟動真 Claude／模型。
+- 2026-10-06：`2b6084d` 的全新 verifier 以兩個自有 native holder 重現控制 lock／socket 符號連結會誤停另一 home，原 REFUTED 保留；清理 helper 在讀 lock／連 socket 前全面核對控制路徑型態，模型命令改釘完整 Haiku ID，修正版重驗中，真模型尚未執行。
+- 2026-10-06：`fb4801f` 全新 verifier 證明控制檔案硬連結仍能重導 Shutdown 到另一自有 native lab，原 REFUTED 保留；檔案／socket 追加單一 link ownership 核對，修正版重驗，零真模型執行。
+- 2026-10-06：draft #153 固定 `3ac1b5d` 的 push／PR 雙平台四個 CI jobs 通過；取得完整計畫授權後真 Claude 2.1.284 執行一次，兩個 instance 各三個 production startup key 寫出及 SessionStart，仍無初始 idle，180 秒等待逾時停機，零測試 send／訊息／ACK，完整 smoke **FAILED**。另一位全新 verifier 核固定原始證據；發現漏 scratchpad 與 Ready `halted=1` audit 誤拒絕，補清後獨立核 49 paths／兩 trust keys／PID／PGID absent；未留 raw frames／transcripts／usage，不能推斷失敗畫面或精確 API 次數。
+
+- 2026-10-06：#153 補只讀 startup frame 診斷（單 instance／90 秒／零工作訊息，真 CLI 尚未執行），修 smoke Ready audit 及 scratch namespace 清理。native producer 已驗 Unknown／Ready 原始 frame、只有三個 production keys、正常 Ready `halted=1`，以及含額外 bootstrap UUID 的 namespace 清除並私有保留內容；新計畫待全新 verifier 及另行授權，完整 smoke 未通過。
+
+- 2026-10-06：#153 的固定診斷 v2 另行授權後執行一次：一個 instance、四份相同 raw frame、三鍵 written 與 live SessionStart、零工作訊息，結果 CAPTURED。全新 verifier 核原 classifier 因已錄製的 Try 提示變體而拒絕，footer 已涵蓋；補完整 `100x24-3` literal 與 native P6 回歸，不放寬未知畫面。本次自有程序、home、scratch、session 暫存與 trust key 已清理；完整 smoke 仍 FAILED，禁止自動重跑，未 merge。
+
+- 2026-10-06：#153 的 `91bb2bc` push 雙平台 CI 通過，但 PR macOS 的既有終端尾段測試測得 301.540459ms，超 300ms；原失敗保存，不放寬門檻。Ready literal 修正與完整 native bridge／outer 回歸、全新 verifier 及新 head CI 待核。
+
+- 2026-10-06：#153 準備下一份完整 smoke 的 observed runner：首次 idle 等待最多 28 份只讀 A／B frame，工作前重核 idle；後續工作不擷取。原七則訊息／900 秒／零重跑與 audit／cleanup 不變；固定新計畫待獨立核對及另行授權，沒有再次真 CLI 執行。
+
+- 2026-10-06：#153 的完整 native bridge34／outer8及 accept core 通過；全新 verifier 核 Ready fixture byte 匯出、原 None→舊提示 Ready 反例、startup7／outer8及真 no-std通過。新增 observed 計畫的 tuple→JSON list scope mismatch 在任何 CLI 前被 verifier 推翻，保留原計畫與反例，修正為一致 list 後重新產生固定計畫；沒有再執行真 Claude。
+
+- 2026-10-06：#153 固定 `990bead` observed v2 另行授權後執行一次，A idle／B unknown，初始 idle 逾時 FAILED；24 份 frame、683 次 status、零工作訊息。自有程序、13 精確路徑、兩 trust keys 已清理；補已錄製 how-does 完整 Ready literal 與 native P6 回歸。990 push CI 雙平台通過，PR macOS 尾段 301.612416ms>300ms 失敗保留；[本次紀錄](gates/gate-12a-observed-smoke-v2.md)，完整 12A 未驗收。
+
+- 2026-10-06：#153 第二次完整 smoke 的全新 verifier 核固定990 A Ready／B None 與單換提示反例、11語意 mutations／5 native 負例、13paths／PID／PGID／兩trustkeys absent。how-does 新 literal 修正前 native P6 exit101，修正後 accept core、startup8及前後實際 check-deps 通過；編譯 target 清除，新改動待另一全新 verifier，未再次啟動真 CLI。
+
+- 2026-10-06：#153 固定6a666ba的 observed v3 另行授權後執行一次，B terminal 未註冊使只讀 helper 回 no_terminal，約一秒內停止；僅 A 空白 frame、零 startup keys／SessionStart／工作訊息，完整 smoke FAILED。補清兩個早期 scratch namespaces，13 paths／5 PID／兩 trust keys absent。新增獨立 runner 有界等候首次註冊，其他錯誤及後續 terminal 消失立即停止；native daemon／shell 先重現舊 runner 拒絕，再核修正版兩 frame 與早期 scratch 清理，不啟動真 Claude。6a PR 雙平台通過，push macOS 306.841042ms 超過300ms，原 log 保留。
+
+- 2026-10-06：#153 固定c7b756b／observed v5 已另行授權執行一次：24次只讀frame皆成功、707次status無idle、兩個live SessionStart與各三個production keys written；新fix-typecheck／fix-lint Try文字令Ready None，180秒初始idle逾時FAILED、零工作訊息。只改建議文字即可與既有Ready其餘tokens吻合；未放寬正式classifier、未重跑。自有13路徑／8PID／5PGID／兩trustkeys核absent，c7 push／PR雙平台四job通過；完整12A仍未驗收，下一步先確認Ready建議列是否可變，[紀錄](gates/gate-12a-observed-smoke-v5.md)。
+
+- 2026-10-06：使用者確認「視為可變」，記 [D41](decisions/d41.md)：只放寬 Ready 唯一完整單行 Try 建議內容，其他完整畫面／版本／路徑／尺寸／位置、P5 選單及 P6 初始 idle 門檻不變；v5 原始失敗保留，修正與原生驗證中，#153 尚未 merge、完整12A未驗收。
+
+- 2026-10-06：D41 作者修正完成，core 146 passed／2 既有 ignored、原生啟動10 passed、accept core／workspace fmt與clippy／協定golden／修改前後實際no-std通過；新真模型計畫尚未執行、完整12A未驗收。全新 verifier與新提交CI待核（#153）。
+
+- 2026-10-06：#153 的 f1e1b70 Ready 可變提示修正經全新 verifier（1,046 cases、native10＋獨立10）、使用者重驗1,073 cases、accept core／前後 no-std 及 push／PR 雙平台四 CI jobs通過；作者與驗證編譯暫存／工作樹／程序已清理，未 merge。
+
+- 2026-10-06：固定 f1e1b70／[observed v6](gates/gate-12a-observed-smoke-v6.md)另行授權執行一次：兩個初始 idle、六 startup keys及第一則 channel 明確 ACK 通過；模型依 CLAUDE.md 拒絕 gh pr merge 0 負例，第一段工作逾時 FAILED，互傳／queue／Interrupt 未執行。native cleanup 已移除 home／holders／session 暫存；兩個 trust entries 因外來 Claude 程序使 guard 拒絕寫入而暫留，獨立覆核與後續方案待核，沒有重跑。

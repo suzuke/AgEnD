@@ -5,7 +5,7 @@
 > - 狀態：**pre-alpha**。第 1–11 施工關已完成並合併；第 11 施工關 C 段 #145 於 2026-10-03 經使用者確認合併（`b2152db`）。其他 backend adapter 與安裝發布仍待完成。
 > - 下一步：先讀 [AGENTS.md](AGENTS.md)，再看 [docs/ROADMAP.md](docs/ROADMAP.md) 的目前狀態。
 
-第 12A 正進行 [正式啟動提示與初始 idle](docs/gates/gate-12a-startup-runtime.md)；draft #151 與本批尚未合併，完整 adapter 尚未驗收。
+第 12A 的 Driver #151 與正式啟動 #152 已合併；[完整真模型 smoke](docs/gates/gate-12a-live-smoke.md)首次執行停於初始 idle 逾時，訊息階段未開始；後續只讀診斷補 Ready 提示變體；[第二次完整 smoke](docs/gates/gate-12a-observed-smoke-v2.md)仍在初始 idle 逾時，保留 24 份 frame、零工作訊息，完整 adapter 尚未驗收。
 
 ## 這是什麼
 
@@ -34,7 +34,7 @@
 
 **第 10 施工關完成（[PR #143](https://github.com/suzuke/AgEnD/pull/143)，2026-10-02）**：已接通本機 pipeline、task／review／workflow／team 操作與 checks 沙箱。事件收尾修正經全新 verifier r17、Ubuntu／macOS CI 與人工補驗通過，使用者已確認合併。驗證範圍、原始失敗與兩個未執行的 explorer 見 [驗證證據](docs/gates/gate-10-verification.md)。執行方式見 [pipeline runtime](docs/architecture/pipeline-runtime.md)。Claude、OpenCode driver、GitHub forge、Telegram 在第 12 施工關，服務註冊與發布在第 13 施工關。完整狀態與驗收證據見 [ROADMAP](docs/ROADMAP.md)。
 
-第 12A Claude 的 P1–P10 設計已確認，記為 [D40](docs/decisions/d40.md)：閒置走 channel、忙碌排隊走 Stop hook，兩者均用明確 `agend_ack`；P3／P4／P5 選 A。設計文件已於 [PR #138](https://github.com/suzuke/AgEnD/pull/138) 合併（`4390633`）；第 12A 的不自動重送 client 基礎已於 [#147](https://github.com/suzuke/AgEnD/pull/147) 合併（`8dfccf8`）；[Claude 持久化基礎 #148](docs/gates/gate-12a-store.md) 已經使用者確認合併（`7877dbe`）；[protocol 1.5／channel／Stop／ACK spool 基礎 #149](docs/gates/gate-12a-bridge.md) 已合併（`6dd552e`），使用者重驗 16 native cases 通過並清理。[共用 gh 防護 #150](docs/gates/gate-12a-gh-shim.md) 已於 2026-10-04 經使用者確認合併（`572dd73`）。[Claude Driver、啟動設定與 Interrupt](docs/gates/gate-12a-driver.md) 正在獨立 worktree 實作（draft #151）。固定 Claude 2.1.284 的 100／140 欄受控 startup 蒐證各完成三次輸入並保存主介面，經全新 verifier 有限範圍 CONFIRMED，自有暫存已清理；正式 P5／P6、真收件／工作回報與完整 12A 驗收仍未完成。
+第 12A Claude 的 P1–P10 設計已確認，記為 [D40](docs/decisions/d40.md)：閒置走 channel、忙碌排隊走 Stop hook，兩者均用明確 `agend_ack`；P3／P4／P5 選 A。設計文件已於 [PR #138](https://github.com/suzuke/AgEnD/pull/138) 合併（`4390633`）；第 12A 的不自動重送 client 基礎已於 [#147](https://github.com/suzuke/AgEnD/pull/147) 合併（`8dfccf8`）；[Claude 持久化基礎 #148](docs/gates/gate-12a-store.md) 已經使用者確認合併（`7877dbe`）；[protocol 1.5／channel／Stop／ACK spool 基礎 #149](docs/gates/gate-12a-bridge.md) 已合併（`6dd552e`），使用者重驗 16 native cases 通過並清理。[共用 gh 防護 #150](docs/gates/gate-12a-gh-shim.md) 已於 2026-10-04 經使用者確認合併（`572dd73`）。[Claude Driver、啟動設定與 Interrupt](docs/gates/gate-12a-driver.md) #151 與[正式 P5／P6 啟動處理](docs/gates/gate-12a-startup-runtime.md) #152 已於 2026-10-06 經使用者確認合併（`cac2226`／`e7a8987`）。native／全新 verifier／雙平台 CI 與使用者重驗通過；兩個原 worktree 已清理。使用者要求[完整真模型 smoke](docs/gates/gate-12a-live-smoke.md)列為必要驗收，已授權的固定計畫首次執行停於初始 idle 逾時，零測試訊息，失敗及清理經全新 verifier 覆核；完整 12A 尚未驗收。
 
 ## 系統圖
 
@@ -99,3 +99,9 @@ Apache-2.0，見 [LICENSE](LICENSE) 與 [NOTICE](NOTICE)。
 cat AGENTS.md
 cargo test --workspace && cargo xtask check-deps
 ```
+
+最新 observed v3 在 B terminal 尚未註冊時，首份只讀 frame 遭拒，立即停止；零工作訊息，完整 smoke 仍未通過。首次註冊等待及早期 scratch 清理修正、原生反例與清理紀錄見[第三次 smoke](docs/gates/gate-12a-observed-smoke-v3.md)。
+
+固定 observed v5 已授權執行一次，兩個 terminal 皆可讀，但兩個新的 Try 建議文字使完整 Ready literal 比對失敗；180秒初始 idle 逾時、24份frame、零工作訊息。已清理自有資源；[執行紀錄與後續決策](docs/gates/gate-12a-observed-smoke-v5.md)。
+
+使用者已確認 [D41](docs/decisions/d41.md)：Ready 唯一完整單行的 Try 建議文字可變，其他畫面與 idle 條件不變。修正通過全新覆核、使用者 1,073 組案例重驗與雙平台 CI。[固定 v6](docs/gates/gate-12a-observed-smoke-v6.md)另行授權後通過初始 idle 及第一則 ACK，但模型依 CLAUDE.md 拒絕 gh 防護負例；第一段工作逾時 FAILED，互傳／queue／Interrupt 未執行，完整 12A 尚未驗收。

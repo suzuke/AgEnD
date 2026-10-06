@@ -144,3 +144,8 @@ Failed 派工回歸：五種 fake queue 只用一個 dev，boot 派工失敗後�
 ## 第 12A Claude
 
 Claude bridge／Driver／native startup capture 的案例、限制與重驗指令見 [Claude 測試](CLAUDE-TESTING.md)。
+
+2026-10-06 [D41](../../docs/decisions/d41.md) 允許 Ready 建議內容可變，其他完整畫面／版本／路徑／尺寸不變。
+`claude_startup::startup_variable_ready_suggestions_replay_actual_v5_and_both_widths` 經真 daemon／holder／PTY 重播 v5 兩份捕獲及 140 欄變體，核五秒初始 idle 與 Ready 不加鍵；
+`startup_variable_ready_rejects_unknown_footer_and_split_hint_without_idle_or_more_keys` 拒絕未知 footer／分行建議。
+既有無 SessionStart、人工控制、結果不明與四次開機回歸維持；這些測試不啟動真 Claude、不送模型訊息。

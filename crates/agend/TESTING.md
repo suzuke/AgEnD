@@ -134,3 +134,19 @@ cargo test -p agend
 `cargo test -p agend --test claude_bridge` 是本批可自動重驗入口。原 21 個 bridge 回歸另接完整 DRV 十個案例、新 HOME 反向、Git task／review 與遺失 Esc completion；`boot_child` 只作重新執行的 child 入口，不是獨立通過證據。包含 MCP parse／schema 錯誤後下一請求仍可處理；ACK 磁碟保存失敗回工具錯誤；通知收到後以 MCP ping 做 Written 完成 barrier，不能把 stdout 到達當成 SQLite commit。Fixture 停自己 daemon／holders 並刪 home；scope 與指令見 [bridge 基礎](../../docs/gates/gate-12a-bridge.md)。
 
 DRV fixture 的 actor readiness hint 不代替 daemon idle：送達前讀實際 Driver BusyChanged 紀錄。新增 100 ms 提早 hint，沿用 DRV-4 的 Sent／Confirmed 斷言；忽略 idle 紀錄的反向以 queued 失敗。bridge 全檔目前 27 個入口，其中 `boot_child` 不算獨立回歸。既有 pipeline fixture 只在同一 native FleetView 同時包含 approve 階段與 approval attention 時核准，沿用 60 秒等待期限，不把階段可見當成 attention 已發布。
+
+## 真模型 smoke（預設不執行）
+
+使用者要求完整真模型通訊 smoke 為必要驗收；固定版本、七則訊息計畫、執行 opt-in 與清理見[真模型 smoke](../../docs/gates/gate-12a-live-smoke.md)。`claude_live_cleanup` example 只停止 nonce-owned holders 與精確身分的孤兒群組；不啟動 backend。CI 仍不執行真模型。
+
+2026-10-06 啟動診斷取得四份相同真 frame，結果 CAPTURED、零工作訊息。
+新增完整 Ready 提示 fixture 的 native P6 回歸只跑 shell producer／真 daemon／holder，
+核 SessionStart 先到、三鍵完成後穩定五秒、Ready 不加鍵及 halted=1；不啟動真 Claude。
+[第二次完整 smoke](../../docs/gates/gate-12a-observed-smoke-v2.md)亦在 initial idle 逾時：A idle、B unknown，24 份 frame、零工作訊息。
+新增已錄製的 how-does 完整 Ready literal 與同一 native P6 回歸；未知提示仍拒絕。
+新真 CLI 計畫仍需另行授權；native 通過不等於模型通訊通過。
+
+2026-10-06 [D41](../../docs/decisions/d41.md) 允許 Ready 建議內容可變，其他完整畫面／版本／路徑／尺寸不變。
+`claude_startup::startup_variable_ready_suggestions_replay_actual_v5_and_both_widths` 經真 daemon／holder／PTY 重播 v5 兩份捕獲及 140 欄變體，核五秒初始 idle 與 Ready 不加鍵；
+`startup_variable_ready_rejects_unknown_footer_and_split_hint_without_idle_or_more_keys` 拒絕未知 footer／分行建議。
+既有無 SessionStart、人工控制、結果不明與四次開機回歸維持；這些測試不啟動真 Claude、不送模型訊息。

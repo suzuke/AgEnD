@@ -1,4 +1,4 @@
-# 決策索引（D1–D40）
+# 決策索引（D1–D41）
 
 > **TL;DR**
 > - 這裡是已確認的設計決策；每條都經使用者確認。
@@ -51,6 +51,7 @@
 | D38 | D32 延伸到 `PipelineState`（存快照、`restore` 檢查）與 binding 快照型別（搬到 core，shim 與 daemon 共用）；golden JSON 測試鎖格式，只准加欄位 | [d38](decisions/d38.md#d38) |
 | D39 | 完整終端由 holder 提供 frame；明確進入、連線控制權、mode-aware 輸入與版本相容；Codex 經完整 AgEnD 驗證後才開已驗版本 | [d39](decisions/d39.md#d39) |
 | D40 | 第 12A Claude 接入：閒置 channel／忙碌 Stop、P3／P4／P5＝A、明確 agend_ack、投遞不明停送及未終結保留；P9／P10 採建議 | [d40](decisions/d40.md#d40) |
+| D41 | Ready 唯一完整單行的 Try 建議文字可變；其餘完整畫面、版本／路徑／尺寸、選單與 idle 門檻不變 | [d41](decisions/d41.md#d41) |
 
 ## 來源衝突與處理
 

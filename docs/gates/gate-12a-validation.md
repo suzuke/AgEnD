@@ -2,20 +2,20 @@
 
 > **TL;DR**
 > - P10、真 CLI 待查項、A 段限制與未來驗收案例。
-> - 本頁是完整接入計畫；client、store、bridge 與 gh 防護已 merge；Driver／控制施工中，A 段尚未完成。
+> - 本頁是完整接入計畫；client、store、bridge 與 gh 防護已 merge；Driver #151 與正式啟動 #152 已 merge，A 段尚未完成。
 > - 下一步：依已確認 D40 寫定實作與驗收指令；真 CLI／模型回合另外確認版本與預算。
 
 ## P10：什麼是假的、什麼是真的
 
 - 問題：CI 不跑真的 Claude；fake、錄製一致性與真 CLI 各負責什麼？
-- 已採用：CI 對現有 `fake-claude` 補 bridge、spool、設定與 DRV 契約，包含 DRV-6／DRV-9 四次開機。真 CLI 一致性是必要完成條件，使用者或另獲授權的 agent 檢查 `claude --version` 與 transcript header；版本不同，重錄後修 fake，再跑 conformance。完整 `claude_live` smoke 原提案約 3 個短回合、選做，驗收紀錄註明有無執行；不以 fake 結果代認證真 backend。
+- 已採用：CI 對現有 `fake-claude` 補 bridge、spool、設定與 DRV 契約，包含 DRV-6／DRV-9 四次開機。真 CLI 一致性是必要完成條件，使用者或另獲授權的 agent 檢查 `claude --version` 與 transcript header；版本不同，重錄後修 fake，再跑 conformance。完整 `claude_live` smoke 原為選做，依使用者 2026-10-06「完整模型 smoke要做」改為必要驗收，固定計畫見[真模型 smoke](gate-12a-live-smoke.md)；不以 fake 結果代認證真 backend。
 - 理由：CI 驗邏輯；只有真 CLI 能驗啟動旗標、hook 形狀、PATH 與選定版本真的接受訊息。
 - 替代方案：CI 跑真 Claude，需登入、花費與外部服務，不作預設。
 - 例子：未來 demo 要列每個 DRV case 與真正的結果，不承諾目前不存在的 `9/9 pass` 字樣。
 - 關係：D9、第 7 關的真測授權方式，以及 2026-09-25 使用者要求的版本一致性。
 - [x] 使用者確認（剩餘依建議；[確認紀錄](gate-12a-confirmations.md)）
 
-原錄製檔 2.1.282、2026-09-28 實測 2.1.283。這次只讀文件與程式，沒有執行真 Claude、重錄或新增模型回合；當時 5 回合的授權不延伸至新測試。將來如選做真 smoke，須先報版本、完整命令與預算，另獲授權。
+原錄製檔 2.1.282、2026-09-28 實測 2.1.283。這次只讀文件與程式，沒有執行真 Claude、重錄或新增模型回合；當時 5 回合的授權不延伸至新測試。執行新的真 smoke，須先報版本、完整命令與預算，另獲授權。
 
 ## U1–U4 待查
 
@@ -52,7 +52,7 @@
 
 ## 真測與使用者可重驗
 
-原提案的驗收目標保留：版本一致性、可選的約 3 回合 `claude_live`、兩個真 Claude 的閒置與忙碌送達、既有 CLAUDE.md 不覆蓋、最後無 holder／channel 孤兒。兩個真 instance 的回合數在寫定腳本後報完整預算；不是由此計畫預先核准。
+原提案的驗收目標保留：版本一致性、必要的完整 `claude_live`、兩個真 Claude 的閒置與忙碌送達、既有 CLAUDE.md 不覆蓋、最後無 holder／channel 孤兒。兩個真 instance 的回合數在寫定腳本後報完整預算；不是由此計畫預先核准。
 
 依使用者要求，可自動化的 fake／native／多視窗行為由 agent 與 fresh verifier 執行，附可複製的重驗命令及預期結果。真測命令等選定版本、完整命令與預算另獲授權後再提供；每個終端都用自己的 worktree、絕對 `CARGO_TARGET_DIR`／`AGEND_BIN`，避免舊 Node CLI。
 

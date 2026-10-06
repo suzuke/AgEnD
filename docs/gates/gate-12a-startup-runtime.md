@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 已知完整信任／development channels 畫面經 holder 單鍵 Down／Enter；未知畫面留給人。
 > - SQLite 先存按鍵 intent；結果不明停送，接回 holder 不重設。初始 idle 要 live SessionStart＋已知主畫面，穩定五秒。
-> - 下一步：本批 native 驗證與全新 verifier；不宣稱新增真 CLI 執行或完整 12A 驗收。
+> - 下一步：#152 已經 native／全新 verifier／使用者重驗確認合併，接[真模型 smoke](gate-12a-live-smoke.md)；完整 12A 尚未驗收。
 
 ## 範圍
 
@@ -101,3 +101,11 @@ cargo xtask check-deps
 
 完成本批獨立驗證、CI 與人工重驗後等待使用者確認 merge；P8 真 CLI shim 路徑、
 完整第 12A 驗收等尚未完成範圍見 [Driver 進度](gate-12a-driver.md)。
+
+- 2026-10-06：固定 `be98eb1` 的全新 verifier、push／PR 雙平台 CI 及使用者 14 步重驗通過（兩個反向 mutant 預期 exit 101）。使用者確認合併 #152 為 `e7a8987`；合併 tree 不變，原 worktree 已移除。沒有新增真模型執行。
+
+- 2026-10-06：#153 的一次已授權只讀真診斷補 100×24 Ready 提示變體 `100x24-3`，只增加完整 literal；native 重播核 P6 初始 idle 與不加鍵。診斷 CAPTURED，完整 smoke 尚未通過；[來源與限制](gate-12a-live-smoke.md)。
+
+- 2026-10-06：#153 第二次完整 smoke：A idle、B 新 how-does 提示 unknown，初始 idle 逾時，24 份 frame／零工作訊息；補已錄製的 `100x24-4` 完整 Ready literal 與 native P6 回歸，[證據及限制](gate-12a-observed-smoke-v2.md)。
+
+- 2026-10-06：使用者確認 [D41](../decisions/d41.md)，只讓唯一完整單行 Ready 建議內容可變；其他完整 tokens／版本／路徑／尺寸／建議列位置、P5 三鍵及 P6 五秒門檻不變。v5 捕獲重播與兩寬反例列入原生回歸；新真模型計畫另取授權。

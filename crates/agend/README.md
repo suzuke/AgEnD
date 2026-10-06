@@ -72,3 +72,15 @@ cargo run -p agend -- --version
 ## 第 12A Claude helpers
 
 同一 binary 的 `agend channel --instance <id>` 與 `agend hook <event>` 在一般 clap 前分派；需要 AGEND_HOME／AGEND_INSTANCE，只經同步 client 1.5，沒有 SQLite 或 Tokio runtime。channel 是 MCP JSON-RPC stdio，提供 agend_ack；hook 先保存事件，Stop 離線回 `{}`。owned spool 原子發布／fsync，入庫才刪。`agend hooks` 的 git hook 管理維持原入口。Claude push 啟動設定、Driver 及 task／review 已接入施工分支；inbox 路徑不套設定。ACK 保留 pipeline 的原 dispatch id，delivery／session 核對 UUID v4；task 完成不代替 ACK。啟動提示與選定真 CLI 尚待驗收，見 [Driver 進度](../../docs/gates/gate-12a-driver.md)。
+
+2026-10-06 啟動診斷取得四份相同真 frame，結果 CAPTURED、零工作訊息。
+新增完整 Ready 提示 fixture 的 native P6 回歸只跑 shell producer／真 daemon／holder，
+核 SessionStart 先到、三鍵完成後穩定五秒、Ready 不加鍵及 halted=1；不啟動真 Claude。
+[第二次完整 smoke](../../docs/gates/gate-12a-observed-smoke-v2.md)亦在 initial idle 逾時：A idle、B unknown，24 份 frame、零工作訊息。
+新增已錄製的 how-does 完整 Ready literal 與同一 native P6 回歸；未知提示仍拒絕。
+新真 CLI 計畫仍需另行授權；native 通過不等於模型通訊通過。
+
+2026-10-06 [D41](../../docs/decisions/d41.md) 允許 Ready 建議內容可變，其他完整畫面／版本／路徑／尺寸不變。
+`claude_startup::startup_variable_ready_suggestions_replay_actual_v5_and_both_widths` 經真 daemon／holder／PTY 重播 v5 兩份捕獲及 140 欄變體，核五秒初始 idle 與 Ready 不加鍵；
+`startup_variable_ready_rejects_unknown_footer_and_split_hint_without_idle_or_more_keys` 拒絕未知 footer／分行建議。
+既有無 SessionStart、人工控制、結果不明與四次開機回歸維持；這些測試不啟動真 Claude、不送模型訊息。

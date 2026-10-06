@@ -1,4 +1,4 @@
-//! Complete recorded 2.1.284 frames, not fragment-based key authorization.
+//! Complete recorded 2.1.284 frames, with only the Ready suggestion variable.
 //! This only identifies startup screens; hooks and runtime decide busy/idle.
 use crate::protocol::holder::ControlKey;
 
@@ -67,12 +67,14 @@ const RULES: &[Rule] = &[
     rule!(100, Ready, "claude-2.1.284-main-100x24-0.txt"),
     rule!(100, Ready, "claude-2.1.284-main-100x24-1.txt"),
     rule!(100, Ready, "claude-2.1.284-main-100x24-2.txt"),
+    rule!(100, Ready, "claude-2.1.284-main-100x24-3.txt"),
+    rule!(100, Ready, "claude-2.1.284-main-100x24-4.txt"),
     rule!(140, Ready, "claude-2.1.284-main-140x24-0.txt"),
     rule!(140, Ready, "claude-2.1.284-main-140x24-1.txt"),
 ];
 
-/// Unknown dimensions/content stay manual. Whitespace normalization permits
-/// PTY wrapping but never weakens the separately checked canonical path.
+/// Unknown dimensions/content stay manual. Only the text inside one complete
+/// single-row Ready suggestion may vary; its position and the rest must match.
 pub fn classify(screen: &str, workspace: &str, columns: u16, rows: u16) -> Option<Prompt> {
     if rows != 24 || !workspace.starts_with('/') || workspace.chars().any(char::is_control) {
         return None;
@@ -104,14 +106,150 @@ pub fn classify(screen: &str, workspace: &str, columns: u16, rows: u16) -> Optio
             Prompt::Development => true,
         };
         let expected = rule.frame.replace(PATH, workspace);
-        (own_path && screen.split_whitespace().eq(expected.split_whitespace()))
-            .then_some(rule.prompt)
+        let matches = if rule.prompt == Prompt::Ready {
+            ready_matches(screen, &expected, columns)
+        } else {
+            screen.split_whitespace().eq(expected.split_whitespace())
+        };
+        (own_path && matches).then_some(rule.prompt)
     })
+}
+
+fn ready_matches(screen: &str, expected: &str, columns: u16) -> bool {
+    let Some((before, after, row)) = ready_parts(screen, columns) else {
+        return false;
+    };
+    let Some((expected_before, expected_after, expected_row)) = ready_parts(expected, columns)
+    else {
+        return false;
+    };
+    row == expected_row
+        && before
+            .split_whitespace()
+            .eq(expected_before.split_whitespace())
+        && after
+            .split_whitespace()
+            .eq(expected_after.split_whitespace())
+}
+
+// Keep the variable field inside one bounded, complete input-placeholder row.
+// No menu classifier or startup key authorization uses this normalization.
+fn ready_parts(screen: &str, columns: u16) -> Option<(&str, &str, usize)> {
+    if screen.match_indices("Try \"").count() != 1 {
+        return None;
+    }
+    let mut offset = 0;
+    for (row, part) in screen.split_inclusive('\n').enumerate() {
+        let line = part.strip_suffix('\n').unwrap_or(part);
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix('❯') {
+            if !rest.starts_with([' ', '\u{a0}']) {
+                return None;
+            }
+            let rest = rest.trim_start_matches([' ', '\u{a0}']);
+            let hint = rest.strip_prefix("Try \"")?.strip_suffix('"')?;
+            if line.chars().any(char::is_control)
+                || trimmed.chars().count() > usize::from(columns)
+                || hint.trim().is_empty()
+                || hint.contains('"')
+                || hint.contains(['\u{2028}', '\u{2029}'])
+            {
+                return None;
+            }
+            return Some((&screen[..offset], &screen[offset + part.len()..], row));
+        }
+        offset += part.len();
+    }
+    None
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::{format, string::String, vec, vec::Vec};
+
+    #[test]
+    fn ready_suggestion_alone_varies_at_both_widths_without_authorizing_a_key() {
+        for rule in RULES.iter().filter(|r| r.prompt == Prompt::Ready) {
+            let screen = rule.frame.replace(PATH, "/private/work space");
+            let suggestion = screen
+                .lines()
+                .find(|l| l.contains("Try \""))
+                .unwrap()
+                .trim();
+            for content in ["fix typecheck errors", "fix lint errors", "新的建議 é", "a"] {
+                let changed = screen.replace(suggestion, &format!("❯\u{a0}Try \"{content}\""));
+                let prompt = classify(&changed, "/private/work space", rule.columns, 24);
+                assert_eq!(prompt, Some(Prompt::Ready));
+                assert_eq!(prompt.unwrap().key(), None);
+            }
+        }
+        for screen in [
+            include_str!(
+                "../../tests/fixtures/screens/claude-2.1.284-main-100x24-v5-typecheck.txt"
+            ),
+            include_str!("../../tests/fixtures/screens/claude-2.1.284-main-100x24-v5-lint.txt"),
+        ] {
+            assert_eq!(
+                classify(&screen.replace(PATH, "/workspace"), "/workspace", 100, 24),
+                Some(Prompt::Ready)
+            );
+        }
+    }
+
+    #[test]
+    fn variable_ready_rejects_malformed_rows_and_every_other_content_change() {
+        for rule in RULES.iter().filter(|r| r.prompt == Prompt::Ready) {
+            let screen = rule.frame.replace(PATH, "/workspace");
+            let suggestion = screen
+                .lines()
+                .find(|l| l.contains("Try \""))
+                .unwrap()
+                .trim();
+            let mut changes: Vec<String> = vec![
+                screen.replace("2.1.284", "2.1.999"),
+                screen.replace("/workspace", "/foreign"),
+                screen.replace("server:agend", "server:foreign"),
+                screen.replace("Claude Code", "Unknown Code"),
+                screen.replace("bypass permissions", "confirm permissions"),
+                screen.clone() + "\n❯ Extra menu",
+            ];
+            for malformed in [
+                "❯ Try \"\"",
+                "❯ Try \"   \"",
+                "❯ Try \"unfinished",
+                "❯ Try \"a\" extra",
+                "❯ Try \"a\"b\"",
+                "❯ Try \"a\nb\"",
+                "❯ Try \"a\rb\"",
+                "❯ Try \"a\tb\"",
+                "❯ Try \"a\u{1b}b\"",
+                "❯ Try \"a\u{2028}b\"",
+                "❯ Try \"a\u{2029}b\"",
+                "❯Try \"a\"",
+                "❯\tTry \"a\"",
+                "Try \"a\"",
+                "❯ Try \"a\"\n❯ Try \"b\"",
+            ] {
+                changes.push(screen.replace(suggestion, malformed));
+            }
+            changes.push(screen.replace(
+                suggestion,
+                &format!("❯ Try \"{}\"", "a".repeat(usize::from(rule.columns))),
+            ));
+            changes.push(screen.replace(suggestion, &format!("\n{suggestion}")));
+            for changed in changes {
+                assert_eq!(
+                    classify(&changed, "/workspace", rule.columns, 24),
+                    None,
+                    "{changed}"
+                );
+            }
+            assert_eq!(classify(&screen, "/workspace", rule.columns, 23), None);
+            assert_eq!(classify(&screen, "/workspace", 120, 24), None);
+            assert_eq!(classify(suggestion, "/workspace", rule.columns, 24), None);
+        }
+    }
     #[test]
     fn complete_recorded_frames_only_authorize_their_own_startup_action() {
         for rule in RULES {

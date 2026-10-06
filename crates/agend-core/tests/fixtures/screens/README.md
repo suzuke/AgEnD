@@ -1,5 +1,34 @@
 # Screen fixtures
 
+## Claude 2.1.284 第二次完整 smoke（2026-10-06）
+
+`claude-2.1.284-main-100x24-4.txt` 直接匯出已授權 observed v2 的 B 第二份只讀 frame。
+計畫 SHA-256 `6c23f0e2bc70f45186e107fc5bbd2248de52bca4d2a1fad7bcb3b5c434a4eae7`；
+來源 JSON SHA-256 `7d7278ffa47fc2ee20a0bfbec5cde751bda62dabe0165ef42cd40ac4b9938e10`，revision 27、100×24。
+逐列串接非 leading spacer 的 cell text、24 列 LF，只遮 canonical workspace；保留其他 bytes。
+fixture SHA-256 `0134b86f1966aece86ecb7bade6b978cb59bc60a13e9c6e219fa03d8c140500f`。
+相對 `100x24-2` token 差異只有 `Try "how does <filepath> work?"`；footer 相同。
+source990 對 B 的 11 份非空 frame 皆 None，A 的 11 份皆 Ready；首批兩份為空白。
+本次 24 份 frame、零工作訊息，結果 **FAILED**；沒有 transcript／usage，不能推斷 API 次數。
+新增完整 literal，不接受未知提示；[執行與限制](../../../../../docs/gates/gate-12a-observed-smoke-v2.md)。
+
+## Claude 2.1.284 啟動診斷（2026-10-06）
+
+`claude-2.1.284-main-100x24-3.txt` 來自使用者另行授權的一次 production 啟動診斷；
+固定計畫 SHA-256 `4cda8e7e23b249dc8cac0aacf9b0edf3b947e9d0f87da251a79e5b068c993360`。
+一個 instance、90 秒期限、四份只讀 frame、零工作訊息；正式啟動寫三個已知鍵，沒有人工鍵。
+四份原始 frame 文字相同；採第一份 revision 25、100×24、normal live viewport，
+來源 JSON SHA-256 `d29cf2380e7aea4336723b12eb5b59ecef55142fa61b911b7a4ca010066b0a8a`。
+逐列串接非 leading spacer 的 cell text，只遮自有 canonical workspace；保留 24 列、空白與 NBSP。
+fixture SHA-256 `e91471a74104aaff892c0e37d42cfc65effbf41fe5b03db32f1f8b1444b2f165`。
+
+此完整畫面相對既有 `100x24-2` 的 token 差異只有 `Try "create a util logging.py that..."`。
+全新 verifier 在原 classifier 核四份皆 None，只替提示為舊值才 Ready；footer 已由舊 fixture 涵蓋。
+新增的是一份完整 literal，沒有把 Try 提示或未知內容放寬成 wildcard；其他未錄製提示仍拒絕。
+結果是 **CAPTURED，非 smoke PASS**；沒有 transcript／usage 的留存證據，不能推斷 API 次數。
+必要 raw frames、export manifest、執行前授權紀錄及獨立覆核保存於
+`/Users/suzuke/Documents/Hack/AgEnD-ops/g12a-live-smoke-20261006/`。
+
 ## Claude 2.1.284 主畫面（既有授權蒐證，2026-10-05）
 
 `claude-2.1.284-main-100x24-{0,1,2}.txt` 是 JSONL line 18／19／20 的原 `text`，revision 22／24／25；
@@ -62,3 +91,19 @@ JSONL 的 `version_was_queried=false` 保留原值。兩次各 20 秒、0 模型
 必要 JSONL、命令、版本／清理及匯出 manifest 保存於上述 AgEnD-ops。
 
 下一步：見 [蒐證頁](../../../../../docs/gates/gate-12a-startup-capture.md)。
+
+## Claude 2.1.284 v5 Ready 建議文字（2026-10-06）
+
+使用者確認 [D41](../../../../../docs/decisions/d41.md) 後，從已授權、已失敗的 v5 原始 structured frame 匯出下列兩份測試 fixture。
+每列連接非 leading-spacer cell 的 `text`，列間一個 LF；只替換精確 workspace 為既有 `<rec>/h1/workspace/g12-startup-capture`。
+header／channel／footer 與建議原字均保留，未增加真 CLI 執行或模型訊息。
+新檔不加入逐字 RULES；用來驗唯一完整單行建議的可變欄位，其他 tokens 仍比對既有完整 Ready fixture。
+
+| Fixture | 原始 frame SHA-256 | 匯出 SHA-256 |
+|---|---|---|
+| `claude-2.1.284-main-100x24-v5-typecheck.txt` | `fc93aa2415ee21a9fca02baf3d18e686da5a635bf71b5ce868a6fe6ce0be0b59` | `9796e5a8fad8ee028f01c826b7c0814e97aa89add5a6e285ed051e7bc54cea95` |
+| `claude-2.1.284-main-100x24-v5-lint.txt` | `0488692dcd6ffd604b243e9c5c4a69df391c7c6f1dc570135fd61bcc2fe9f62f` | `c6e794e037d7e14c55ea287b27a24d0766ee4ef8660d3175e1e00d277e5ff2c8` |
+
+兩個原始來源是 `observed-smoke-evidence-v5/initial-frame-2-g12live-a.json`／`initial-frame-2-g12live-b.json`，均 100×24、revision25。
+原始 JSON／逐 byte 匯出 manifest 留在 `/Users/suzuke/Documents/Hack/AgEnD-ops/g12a-live-smoke-20261006/`。
+歷史 Ready literal 增補紀錄不改寫；本次 core／native 回歸不是完整真模型 smoke 通過證明。
