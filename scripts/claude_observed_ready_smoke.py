@@ -24,6 +24,22 @@ CAPTURE = {"phase": "initial idle only", "instances": list(IDS), "rows": 24,
 
 
 class ObservedSmoke(Smoke):
+    def status(self, seconds=15):
+        data = json.loads(self.run(self.p["status_argv"], seconds=seconds))
+        require(not data["attention"], "unexpected attention; stop without pressing keys")
+        require(all(i["state"] != "failed" for i in data["instances"]), "instance failed")
+        if self.initialized:
+            require({i["instance_id"] for i in data["instances"]} == set(self.p.get("instances", IDS)),
+                    "instance membership changed")
+            require(all(i["state"] != "starting" for i in data["instances"]),
+                    "instance restarting; no retry permitted")
+        log = self.out / "daemon.log"
+        if log.exists():
+            require(not re.search(r"g12live-[ab]: (?:restart |.*--resume )",
+                                  log.read_text(errors="replace")),
+                    "backend restart observed; stop")
+        return {i["instance_id"]: i["state"] for i in data["instances"]}
+
     def capture(self, batch):
         require(1 <= batch <= CAPTURE["max_batches"], "capture budget exhausted")
         for instance in IDS:
@@ -34,7 +50,9 @@ class ObservedSmoke(Smoke):
             deadline = min(self.end, time.monotonic() + 10)
             attempt = 0
             while True:
-                self.status()  # Refuse attention, failed instances and restarts.
+                remaining = deadline - time.monotonic()
+                require(remaining > 0, "initial terminal registration timed out; no work sent")
+                self.status(seconds=remaining)
                 remaining = deadline - time.monotonic()
                 require(remaining > 0, "initial terminal registration timed out; no work sent")
                 attempt += 1

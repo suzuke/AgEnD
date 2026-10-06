@@ -30,7 +30,7 @@ def boundaries():
         run = object.__new__(fixed.ObservedSmoke)
         run.p = {"snapshot": "must-not-execute"};run.home = Path("/");run.out = Path("/")
         run.nonce = "0" * 32;run.env = {};run.trace = [];run.end = 900
-        run.left = lambda: 900;run.status = lambda: {}
+        run.left = lambda: 900;run.status = lambda **_kwargs: {}
         now = [0.0]
         reply = subprocess.CompletedProcess([], code, stdout, stderr)
         with patch.object(fixed.subprocess, "run", return_value=reply) as helper, \
@@ -44,7 +44,7 @@ def boundaries():
                 raise AssertionError("failure unexpectedly accepted: " + label)
             assert helper.call_count == expected, (label, helper.call_count)
         cases.append({"case": label, "reads": expected})
-    run.status = lambda: {}
+    run.status = lambda **_kwargs: {}
     now = [0.0]
     def slow_read(*_args, **_kwargs):
         now[0] += 4
@@ -60,7 +60,7 @@ def boundaries():
             raise AssertionError("expired registration deadline accepted")
         assert helper.call_count == 3
     cases.append({"case": "deadline-exhaustion", "reads": 3})
-    run.status = lambda: {}
+    run.status = lambda **_kwargs: {}
     run.end = time.monotonic() + 900
     with patch.object(fixed.subprocess, "run", side_effect=subprocess.TimeoutExpired("helper", 5)) as helper:
         try:
@@ -71,7 +71,7 @@ def boundaries():
             raise AssertionError("helper timeout accepted")
         assert helper.call_count == 1
     cases.append({"case": "helper-timeout-no-replay", "reads": 1})
-    run.status = lambda: base.require(False, "unexpected attention")
+    run.status = lambda **_kwargs: base.require(False, "unexpected attention")
     with patch.object(fixed.subprocess, "run", side_effect=AssertionError("read after attention")):
         try:
             run.capture(1)

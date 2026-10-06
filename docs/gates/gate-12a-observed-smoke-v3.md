@@ -22,6 +22,8 @@ B trace 的 evidence_file 只是預定名稱，實際沒有 B frame；不能當�
 no_terminal stderr 才能繼續觀察。每次先核 status，attention／failed／restart 立即停止。
 其他拒絕、timeout、後續 batch 的 terminal 消失均不重讀；每次 helper 最多5秒，
 成功 frames最多28份，含首次未就緒觀察的 helper reads最多66次。
+全新 verifier 曾以12秒 status 揭露原10秒註冊期限沒有涵蓋前置 status；
+修正 status timeout 也使用註冊剩餘時間，保留原反例，不把期限改稱 helper-only。
 這是首次畫面觀察，不重啟 instance，也不重送任何工作訊息；原七則工作訊息／900秒不變。
 
 `verify_observed_ready_smoke.py` 使用真 daemon／holder／shell：先只新增 A，
