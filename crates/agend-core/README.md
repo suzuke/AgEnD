@@ -7,11 +7,11 @@
 
 正式 P5 啟動按鍵與 P6 初始 idle 的實作、schema v9 與 native 驗證邊界見 [啟動處理](../../docs/gates/gate-12a-startup-runtime.md)。
 
-2026-10-06 的只讀真診斷補 `100x24-3` 完整 Ready fixture，涵蓋已錄製的 create-util 提示。
-只增加完整 literal，不接受其他未錄製提示；[來源與 SHA](tests/fixtures/screens/README.md)。
-原 classifier 四份皆 None；只替舊提示才 Ready，native P6 重播此真 frame 驗穩定五秒與不加鍵。
-第二次完整 smoke 的 B frame 補 `100x24-4` how-does 完整 literal；同樣只遮 workspace、未知內容仍拒絕。
-[本次 FAILED 紀錄](../../docs/gates/gate-12a-observed-smoke-v2.md)與診斷 CAPTURED 均不代表完整模型 smoke 通過。
+2026-10-06 使用者確認 [D41](../../docs/decisions/d41.md)：Ready 唯一完整單行的 `Try "…"` 建議文字可變。
+其餘完整畫面 tokens、Claude 2.1.284、100／140×24、建議列位置與 canonical workspace 仍核對；
+空白／重複／未閉合／控制字元／換行／超長建議拒絕；TrustNo／TrustYes／Development 不放寬。
+兩份 v5 真捕獲只遮 workspace，供 core 與 native 回歸；[來源與 SHA](tests/fixtures/screens/README.md)。
+歷史 literal 補錄與 v5 FAILED 仍保留；原生通過不等於完整真模型 smoke 通過。
 
 ## 第 10 施工關（已驗收，2026-10-02）
 

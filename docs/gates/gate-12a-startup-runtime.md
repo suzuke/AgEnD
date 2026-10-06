@@ -107,3 +107,5 @@ cargo xtask check-deps
 - 2026-10-06：#153 的一次已授權只讀真診斷補 100×24 Ready 提示變體 `100x24-3`，只增加完整 literal；native 重播核 P6 初始 idle 與不加鍵。診斷 CAPTURED，完整 smoke 尚未通過；[來源與限制](gate-12a-live-smoke.md)。
 
 - 2026-10-06：#153 第二次完整 smoke：A idle、B 新 how-does 提示 unknown，初始 idle 逾時，24 份 frame／零工作訊息；補已錄製的 `100x24-4` 完整 Ready literal 與 native P6 回歸，[證據及限制](gate-12a-observed-smoke-v2.md)。
+
+- 2026-10-06：使用者確認 [D41](../decisions/d41.md)，只讓唯一完整單行 Ready 建議內容可變；其他完整 tokens／版本／路徑／尺寸／建議列位置、P5 三鍵及 P6 五秒門檻不變。v5 捕獲重播與兩寬反例列入原生回歸；新真模型計畫另取授權。

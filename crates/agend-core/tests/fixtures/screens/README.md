@@ -91,3 +91,19 @@ JSONL 的 `version_was_queried=false` 保留原值。兩次各 20 秒、0 模型
 必要 JSONL、命令、版本／清理及匯出 manifest 保存於上述 AgEnD-ops。
 
 下一步：見 [蒐證頁](../../../../../docs/gates/gate-12a-startup-capture.md)。
+
+## Claude 2.1.284 v5 Ready 建議文字（2026-10-06）
+
+使用者確認 [D41](../../../../../docs/decisions/d41.md) 後，從已授權、已失敗的 v5 原始 structured frame 匯出下列兩份測試 fixture。
+每列連接非 leading-spacer cell 的 `text`，列間一個 LF；只替換精確 workspace 為既有 `<rec>/h1/workspace/g12-startup-capture`。
+header／channel／footer 與建議原字均保留，未增加真 CLI 執行或模型訊息。
+新檔不加入逐字 RULES；用來驗唯一完整單行建議的可變欄位，其他 tokens 仍比對既有完整 Ready fixture。
+
+| Fixture | 原始 frame SHA-256 | 匯出 SHA-256 |
+|---|---|---|
+| `claude-2.1.284-main-100x24-v5-typecheck.txt` | `fc93aa2415ee21a9fca02baf3d18e686da5a635bf71b5ce868a6fe6ce0be0b59` | `9796e5a8fad8ee028f01c826b7c0814e97aa89add5a6e285ed051e7bc54cea95` |
+| `claude-2.1.284-main-100x24-v5-lint.txt` | `0488692dcd6ffd604b243e9c5c4a69df391c7c6f1dc570135fd61bcc2fe9f62f` | `c6e794e037d7e14c55ea287b27a24d0766ee4ef8660d3175e1e00d277e5ff2c8` |
+
+兩個原始來源是 `observed-smoke-evidence-v5/initial-frame-2-g12live-a.json`／`initial-frame-2-g12live-b.json`，均 100×24、revision25。
+原始 JSON／逐 byte 匯出 manifest 留在 `/Users/suzuke/Documents/Hack/AgEnD-ops/g12a-live-smoke-20261006/`。
+歷史 Ready literal 增補紀錄不改寫；本次 core／native 回歸不是完整真模型 smoke 通過證明。

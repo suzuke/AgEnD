@@ -3,7 +3,7 @@
 > **TL;DR**
 > - c7b756b／v5 經另行授權執行一次，180秒初始 idle 逾時 FAILED；零工作訊息、沒有重跑。
 > - 兩個 terminal 皆可讀，24份原始frame；兩個新的 Try 建議文字使完整 Ready literal 比對失敗。
-> - 下一步：先確認 Ready 建議列是否可變；未改正式 classifier，新真 CLI 計畫仍需另取授權，#153 未 merge。
+> - 下一步：使用者已確認 [D41](../decisions/d41.md) 的 Ready 建議文字可變；修正驗證中，新真 CLI 計畫仍需另取授權，#153 未 merge。
 
 ## 固定計畫與結果
 
@@ -28,7 +28,7 @@ TrustNo／TrustYes／Development 各 written，manual=0，startup halted=0。
 這是離線比對，不代表當次 producer 已認出 Ready，也不能將 main UI 的 model header
 視為實際 assistant model／API次數或費用證明；沒有 assistant transcript／usage。
 
-## 辨識策略待決
+## 執行當時的辨識策略與後續決策
 
 目前 TrustNo、TrustYes、Development 及 Ready 都使用完整版本化 literal。
 連續執行已觀察到 create-util、how-does、fix-typecheck、fix-lint 等建議變體；
@@ -59,3 +59,5 @@ c7b756b 的push／PR兩平台四個CI jobs皆通過；較早同代碼macOS 306.8
 
 完成全新獨立覆核後提供只讀重驗指令；完整模型通訊尚未通過。
 新辨識策略先確認，新真CLI計畫依 [D40](../decisions/d40.md) 另取授權；merge等使用者確認。
+
+2026-10-06 使用者在說明建議文字變體後確認「視為可變」；後續修正依 [D41](../decisions/d41.md)，不改本次 v5 執行結論與歷史 pins。
