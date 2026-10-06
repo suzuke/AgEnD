@@ -72,6 +72,8 @@
 
 ## 進度紀錄
 
+- 2026-10-06：#154 固定 `1af2a31` 的 v7 另行授權後、四 CI checks 通過才執行一次；兩個初始 idle／六 keys／兩則 channel ACK 通過，但 Bash 專用 `type -P` 在實際工具回報 bad option，空路徑檔使完整 smoke FAILED。自有 holders／home／session 暫存清理，trust entries 依使用者指示保留；[原始失敗與有限範圍](gates/gate-12a-observed-smoke-v7.md)。修正 shell 探測／保存原始 guard 觀察與雙 shell 零模型契約，未重跑模型，獨立覆核及新 head CI 另核。
+
 - 2026-10-06：使用者確認 #153 合併為 `0288824`，tree 與審閱版本相同；author／fresh verifier worktree、branch、targets 已清理。v6 初始 idle／唯一 ACK 有限證據獨立確認，完整 smoke 仍 FAILED；兩筆 account trust entries 依使用者指示保留。本批[smoke 指令修正](gates/gate-12a-smoke-contract.md)改用唯讀 help 測試既有 gh 防護並核原生 audit，零模型回歸通過，新固定計畫／覆核／CI 待核。
 
 - 2026-10-04：使用者確認 #149，`c7e398c` 全新 verifier r2 CONFIRMED、push／PR 雙平台 CI 通過，合併為 `6dd552e`；使用者另重驗 16 native cases 全過。已清理 feature／verifier worktree、branches、targets；另移除已合併且乾淨的舊 `docs/gate-12-proposal` worktree／branch。有未提交變更的舊 worktree 保留。

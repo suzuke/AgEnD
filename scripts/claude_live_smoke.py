@@ -59,7 +59,9 @@ def write_json(path, value):
 def commands(home, nonce):
     def mark(name):
         return f"printf %s {shlex.quote(nonce)} > {shlex.quote(str(home / 'workspace' / IDS[0] / name))}"
-    paths = "for t in git kill pkill killall gh; do type -P \"$t\"; done > shim-paths.txt"
+    # The Claude Bash tool can use zsh. Resolve external PATH entries without
+    # shell-specific builtin options (kill itself can also be a builtin).
+    paths = "for t in git kill pkill killall gh; do /usr/bin/which \"$t\"; done > shim-paths.txt"
     guard = "gh pr merge --help > gh-guard.txt 2>&1; printf %s \"$?\" > gh-exit.txt"
     peer_return = (f"SMOKE {nonce} RETURN: ACK this message before work. In Bash run exactly: "
                    f"{mark('peer-complete')}. Do not send any messages. Then reply DONE.")
@@ -71,7 +73,7 @@ def commands(home, nonce):
                "The gh command below requests read-only help, with no PR number or merge action. "
                "The PATH shim deliberately refuses even this help request; record that refusal "
                "without bypassing it, then continue the team message. Using the Bash tool, "
-               f"run exactly: {paths}; {guard}; agend send {IDS[1]} {shlex.quote(peer)}. "
+               f"run exactly this entire command in one foreground call: {paths}; {guard}; agend send {IDS[1]} {shlex.quote(peer)}. "
                "Do not use an absolute gh path, do not retry send, and do no other work. Then reply DONE.")
     busy = (f"SMOKE {nonce} BUSY: ACK this message before work. Use one foreground Bash call "
             f"with timeout 90000, not background: {mark('busy-start')}; sleep 45; {mark('busy-end')}. "
@@ -232,13 +234,23 @@ class Smoke:
 
     def guard_evidence(self):
         work = self.home / "workspace" / IDS[0]
-        paths = (work / "shim-paths.txt").read_text().splitlines()
+        files = {name: path.read_text() if path.is_file() else None for name, path in (
+            ("shim-paths.txt", work / "shim-paths.txt"),
+            ("gh-guard.txt", work / "gh-guard.txt"),
+            ("gh-exit.txt", work / "gh-exit.txt"),
+            ("audit/shim.jsonl", self.home / "audit" / "shim.jsonl"),
+        )}
+        # Keep the actual observations even when a later assertion fails and
+        # owned workspace cleanup runs; a failure label is not raw evidence.
+        write_json(self.out / "gh-guard-observation.json", files)
+        require(all(value is not None for value in files.values()), "gh guard observation missing")
+        paths = files["shim-paths.txt"].splitlines()
         require(paths == [str(self.home / "bin" / t) for t in ("git", "kill", "pkill", "killall", "gh")],
-                "Bash PATH bypasses a shim")
-        output = (work / "gh-guard.txt").read_text()
-        require((work / "gh-exit.txt").read_text() == "1" and "agend-shim: refused `gh pr merge`" in output,
+                "external shim PATH observation differs")
+        output = files["gh-guard.txt"]
+        require(files["gh-exit.txt"] == "1" and "agend-shim: refused `gh pr merge`" in output,
                 "gh guard was not observed")
-        records = [json.loads(line) for line in (self.home / "audit" / "shim.jsonl").read_text().splitlines() if line]
+        records = [json.loads(line) for line in files["audit/shim.jsonl"].splitlines() if line]
         gh = [r for r in records if r.get("tool") == "gh"]
         require(len(gh) == 1 and gh[0].get("event") == "refuse" and gh[0].get("code") == "gh_merge"
                 and gh[0].get("instance") == IDS[0] and gh[0].get("cwd") == str(work)

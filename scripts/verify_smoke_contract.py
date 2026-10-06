@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run generated initial Bash against native shims, without Claude or a daemon."""
+"""Run generated work in Bash and zsh against native shims, without Claude."""
 import argparse
 import copy
 import json
@@ -12,7 +12,7 @@ import tempfile
 import claude_live_smoke as smoke
 
 
-def verify(binary):
+def verify(binary, shell_executable):
     binary = binary.resolve(strict=True)
     with tempfile.TemporaryDirectory(prefix="agend-g12a-contract-") as directory:
         home = Path(directory).resolve()
@@ -38,11 +38,11 @@ def verify(binary):
         initial = prompts["initial"]
         assert "gh pr merge --help" in initial and "gh pr merge 0" not in initial
         assert "read-only help, with no PR number or merge action" in initial
-        shell = initial.split("Using the Bash tool, run exactly: ", 1)[1].rsplit(
+        shell = initial.split("run exactly this entire command in one foreground call: ", 1)[1].rsplit(
             ". Do not use an absolute gh path", 1)[0]
         environment = {"PATH": f"{home / 'bin'}:{real}:/usr/bin:/bin",
                        "AGEND_HOME": str(home), "AGEND_INSTANCE": smoke.IDS[0]}
-        result = subprocess.run(["/bin/bash", "-c", shell], cwd=work, env=environment,
+        result = subprocess.run([shell_executable, "-c", shell], cwd=work, env=environment,
                                 capture_output=True, text=True, timeout=10)
         assert result.returncode == 0, result.stderr
         assert not (home / "real-gh-called").exists(), "refused call executed real gh"
@@ -89,7 +89,20 @@ def verify(binary):
             rejected.append("wrong-shim-path")
         else:
             raise AssertionError("accepted PATH bypass")
-        # Bash parses every generated work request, including the nested peer
+        observation = json.loads((out / "gh-guard-observation.json").read_text())
+        assert observation["shim-paths.txt"] == "/usr/bin/gh\n", "failed path observation was lost"
+        assert observation["audit/shim.jsonl"] == native, "failed guard audit was lost"
+        (work / "shim-paths.txt").write_text("\n".join(evidence["shim_paths"]) + "\n")
+        (work / "gh-guard.txt").unlink()
+        try:
+            run.guard_evidence()
+        except RuntimeError:
+            rejected.append("missing-guard-observation")
+        else:
+            raise AssertionError("accepted missing guard output")
+        observation = json.loads((out / "gh-guard-observation.json").read_text())
+        assert observation["gh-guard.txt"] is None and observation["audit/shim.jsonl"] == native
+        # Each shell parses every generated work request, including the nested peer
         # command; syntax checks execute no body and do not sleep or send.
         for name, prompt in prompts.items():
             if name == "initial":
@@ -104,12 +117,13 @@ def verify(binary):
                 command = prompt.split("not background: ", 1)[1].split(". Do not shorten", 1)[0]
             else:
                 command = prompt.split("Use Bash: ", 1)[1].split(". Do not send", 1)[0]
-            parsed = subprocess.run(["/bin/bash", "-n", "-c", command], capture_output=True, text=True, timeout=5)
+            parsed = subprocess.run([shell_executable, "-n", "-c", command], capture_output=True, text=True, timeout=5)
             assert parsed.returncode == 0, (name, parsed.stderr)
-        report = {"verdict": "PASS", "native_binary": str(binary), "native_binary_sha256": smoke.digest(binary),
+        report = {"verdict": "PASS", "shell": shell_executable, "native_binary": str(binary), "native_binary_sha256": smoke.digest(binary),
                   "generated_initial_shell_executed": True, "native_gh_refusal": record,
                   "exact_peer_prompt_preserved": True, "seven_shell_commands_parse": True,
-                  "mutations_rejected": rejected, "Claude_executions": 0, "daemon_executions": 0,
+                  "mutations_rejected": rejected, "failed_observation_preserved": True,
+                  "Claude_executions": 0, "daemon_executions": 0,
                   "message_operations": 0, "shared_account_writes": 0,
                   "scope": "Native shim and shell contract only; model behavior remains unverified."}
     assert not home.exists(), "native contract fixture residue"
@@ -122,4 +136,5 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--agend", type=Path, required=True)
     args = parser.parse_args()
-    print(json.dumps(verify(args.agend), indent=2))
+    print(json.dumps({"verdict": "PASS", "shells": [verify(args.agend, shell)
+                     for shell in ("/bin/bash", "/bin/zsh")]}, indent=2))

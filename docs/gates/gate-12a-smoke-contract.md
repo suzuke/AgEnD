@@ -3,7 +3,7 @@
 > **TL;DR**
 > - v6 的 `gh pr merge 0` 與生成的 CLAUDE.md 禁止直接 merge 衝突；改用唯讀 `gh pr merge --help`。
 > - 既有 shim 仍拒絕整個 `pr merge` 家族；新增原生 audit 身分核對，不修改 driver、啟動處理或防護政策。
-> - 下一步：新固定計畫與獨立覆核完成後另取真模型授權；完整 12A 仍未通過。
+> - 下一步：v7 已授權執行一次，shell 探測失敗；修正版雙 shell 覆核與新固定計畫另核，完整 12A 仍未通過。
 
 ## 改動
 
@@ -22,6 +22,8 @@ python3 -B scripts/verify_smoke_contract.py --agend <固定 agend binary>
 ```
 
 這個 verifier 在自有暫存目錄，用生成的 INITIAL shell 呼叫真 agend `gh` shim，peer send 由本地 sentinel 接收，不啟動 daemon／Claude、不投遞訊息。核真 gh 不執行、完整 peer prompt 經 shell quoting 後不變、七段工作命令可被 Bash 解析；錯誤 code／event／instance／cwd／argv、重複／缺少 native audit、exit 與 PATH 反例均拒絕。結束刪自有 fixture。
+
+[v7](gate-12a-observed-smoke-v7.md) 於固定 `1af2a31` 執行一次後 FAILED：實際工具不接受 Bash 專用 `type -P`，不能據此宣稱 PATH 繞過。修正版改用 `/usr/bin/which`，Bash／zsh 各跑原生契約及十個反例，七段 command 各檢語法；INITIAL 明說整段一次 foreground call。原 guard 觀察先保存再斷言，既有五個路徑及原生 audit 身分／次數門檻不變。Ubuntu CI 補 zsh，Rust runtime 不改；新真模型計畫仍須另取授權。
 
 本批只改 scripts／文件；使用的歷史 native binaries 釘 SHA，與本批 Rust source tree 比對，不能宣稱重新編譯，也不能認證真模型行為。全新覆核與 CI 完成後填入紀錄。
 
