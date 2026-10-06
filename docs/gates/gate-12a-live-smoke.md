@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 使用者 2026-10-06 要求完整模型 smoke 必做；#151／#152 已合併；首次真執行停於初始 idle 逾時，訊息階段未開始。
 > - 固定 Claude 2.1.284，兩個 Haiku 4.5 instance、七則工作訊息；首個失敗停止，不重跑。
-> - 下一步：[固定 observed v6](gate-12a-observed-smoke-v6.md)通過初始 idle／首則 ACK，但模型拒絕 gh 防護負例；完成清理覆核並釐清測試指示衝突，完整 smoke 尚未通過。
+> - 下一步：[固定 observed v6](gate-12a-observed-smoke-v6.md)通過初始 idle／首則 ACK，但模型拒絕 gh 防護負例；完整 smoke 尚未通過；下一份計畫見[smoke 指令修正](gate-12a-smoke-contract.md)。
 
 ## 範圍與證據
 
@@ -14,9 +14,9 @@
 | 明確 ACK | 每則原生 AgendAck tuple 與訊息／delivery／session 一致；ACK 在相應 Bash 工作前 |
 | 忙碌 queue | A 前景 sleep 45 秒中加入訊息；訊息保留到後續 Stop，route=stop，再由模型 ACK 與工作 |
 | Interrupt | A 前景 sleep 120 秒中發 Interrupt；由正式單鍵路徑中斷並 channel 送達，90 秒內完成新工作，舊命令未完成 |
-| Bash PATH | 真模型的 Bash 確認 git／kill／pkill／killall／gh 五個外部命令在自有 bin；gh pr merge 0 被 shim 拒絕 |
+| Bash PATH | 真模型的 Bash 確認 git／kill／pkill／killall／gh 五個外部命令在自有 bin；唯讀 `gh pr merge --help` 被既有 shim 拒絕，核原生 gh_merge audit 與模型 Bash hook |
 | 版本 | 固定 executable SHA、另查 --version，真 CLI 自有 transcript header 同為 2.1.284 |
-| 清理 | 停自己的 daemon／holders、以既有精確 session／pgid sweep 清掉孤兒；保留必要私有證據，刪自有暫存與 session 檔，精確清掉本次 trust 條目 |
+| 清理 | 停自己的 daemon／holders、以既有精確 session／pgid sweep 清掉孤兒；保留必要私有證據，刪自有暫存與 session 檔，依使用者最新指示保留 trust 條目、不寫共用 account、不停止外來 Claude |
 
 這是完整真模型**通訊 smoke**；崩潰、四次開機、部分 ACK、人工控制、檔案 ownership 與 pipeline 的故障矩陣沿用已驗的 native 證據，不逐項消耗真模型重跑，也不因此宣稱第 12 施工關 B／C／D 完成。
 
@@ -50,8 +50,8 @@ AGEND_REAL_CLAUDE_LIVE=1 python3 -B scripts/claude_live_smoke.py \
 ```
 
 SQLite 在 daemon 停機後才讀取；禁止用 immutable bypass 或複製變動中的 WAL。
-腳本只刪唯一 session／workspace 暫存；全域個人 trust JSON 由執行者在核無同時寫入程序後精確清理，保留其他 parsed values，不以整份舊檔覆蓋。
-`cleanup.json` 的 `trust_cleanup_pending` 要在最後清理證據中核為不存在，不能由 smoke PASS 宣稱清理完成。
+腳本只刪唯一 session／workspace 暫存。使用者 2026-10-06 指示不清 `~/.claude.json` trust entries；新 runner 以 `trust_entries_retained` 列出刻意保留的 keys，`shared_account_writes=0`，不要求其他 Claude session 退出。
+舊計畫的 `trust_cleanup_pending` 是當時紀錄，原始 JSON 保留；這些 keys 現在依使用者指示保留，不是新執行的清理失敗條件。
 失敗紀錄同樣要保留，未知身分／仍有程序／symlink 的路徑保留並報告；不得強制刪除。
 
 ## 下一次完整 smoke 的畫面證據
@@ -88,7 +88,7 @@ python3 -B scripts/claude_startup_diagnostic.py \
   --snapshot "$CARGO_TARGET_DIR/debug/examples/startup_frame"
 ```
 
-runner 補核 Ready 的正常 `halted=1` 及三鍵 written；清理按 native SessionStart 的 session／cwd／scratch 路徑，檢查 uid／型別／連結後保留私有證據並刪整個自有 nonce namespace，含 bootstrap UUID。foreign／symlink／hardlink 不刪；所有 instance 的 personal project 與 scratch namespace 在第一個版本查詢前必須不存在，否則停止並保留。global trust keys 仍由執行者精確清理，不能由 runner 宣稱已完成。
+runner 補核 Ready 的正常 `halted=1` 及三鍵 written；清理按 native SessionStart 的 session／cwd／scratch 路徑，檢查 uid／型別／連結後保留私有證據並刪整個自有 nonce namespace，含 bootstrap UUID。foreign／symlink／hardlink 不刪；所有 instance 的 personal project 與 scratch namespace 在第一個版本查詢前必須不存在，否則停止並保留。新執行的 global trust keys 依使用者最新指示保留，不能宣稱已刪除。
 
 ## 目前紀錄
 
@@ -124,7 +124,7 @@ native 身分及十種證據 mutation。自有 daemon／holder／backend、home�
 
 ## 下一步
 
-本次 B 的已錄製 Ready 提示變體補完整 literal，完成 native／全新 verifier 覆核；990 的 PR macOS CI 尾段延遲另待修復，不放寬 300ms。任何新真 CLI 計畫另取授權，禁止自動重跑成成功；#153 merge 仍等使用者確認。
+Ready 可變建議已依 D41 修正；#153 經使用者確認合併為 `0288824`，雙平台 CI 通過，作者與驗證 worktree 已刪除。下一次執行先核[smoke 指令修正與固定計畫](gate-12a-smoke-contract.md)；任何新真 CLI 計畫另取授權，禁止自動重跑成成功。歷史 300ms 失敗紀錄保留.
 
 ## 第三次執行與首次註冊等待
 

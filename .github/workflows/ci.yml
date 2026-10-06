@@ -26,5 +26,6 @@ jobs:
           sudo apt-get install -y bubblewrap
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: cargo build -p agend -p agend-testkit --bins
+      - run: python3 -B scripts/verify_smoke_contract.py --agend target/debug/agend
       - run: cargo test --workspace
       - run: cargo xtask check-deps
