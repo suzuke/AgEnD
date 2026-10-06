@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 使用者 2026-10-06 要求完整模型 smoke 必做；#151／#152 已合併；首次真執行停於初始 idle 逾時，訊息階段未開始。
 > - 固定 Claude 2.1.284，兩個 Haiku 4.5 instance、七則工作訊息；首個失敗停止，不重跑。
-> - 下一步：[固定 observed v5](gate-12a-observed-smoke-v5.md)再次因新 Try 建議列停在初始 idle；先確認 Ready 辨識策略，完整 smoke 尚未通過。
+> - 下一步：[固定 observed v6](gate-12a-observed-smoke-v6.md)通過初始 idle／首則 ACK，但模型拒絕 gh 防護負例；完成清理覆核並釐清測試指示衝突，完整 smoke 尚未通過。
 
 ## 範圍與證據
 
@@ -73,7 +73,7 @@ python3 -B scripts/claude_observed_ready_smoke.py \
 
 取得該固定計畫授權後，用同一新 runner 的 `--execute`／`--approved-plan-sha256` 與
 `AGEND_REAL_CLAUDE_LIVE=1` 執行；不是沿用已消耗的第一次 smoke 或零訊息診斷授權。
-未錄製的 Ready 提示仍 unknown，可能在訊息前停止；native 通過不保證真模型 smoke 通過。
+[D41](../decisions/d41.md)只讓完整單列 Ready 建議內容可變，其餘未知畫面仍 unknown；native 通過不保證真模型 smoke 通過。
 
 ## 失敗後的只讀診斷
 
@@ -133,3 +133,5 @@ native 身分及十種證據 mutation。自有 daemon／holder／backend、home�
 工作訊息與模型零自動重跑；新計畫仍須全新覆核及 D40 另行授權。
 
 固定 v5 在首次註冊等待修正後另行授權執行一次，24份frame皆成功，仍因兩個新的 Try 建議列而無初始 idle；[本次結果與待決範圍](gate-12a-observed-smoke-v5.md)。
+
+2026-10-06：D41 修正經全新覆核、使用者重驗及雙平台 CI 通過。固定 v6 另行授權後收到第一則原生 channel ACK，但模型拒絕 gh 負例，工作逾時；[本次證據、清理狀態與限制](gate-12a-observed-smoke-v6.md)。

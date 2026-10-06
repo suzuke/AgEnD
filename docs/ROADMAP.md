@@ -200,3 +200,7 @@
 - 2026-10-06：使用者確認「視為可變」，記 [D41](decisions/d41.md)：只放寬 Ready 唯一完整單行 Try 建議內容，其他完整畫面／版本／路徑／尺寸／位置、P5 選單及 P6 初始 idle 門檻不變；v5 原始失敗保留，修正與原生驗證中，#153 尚未 merge、完整12A未驗收。
 
 - 2026-10-06：D41 作者修正完成，core 146 passed／2 既有 ignored、原生啟動10 passed、accept core／workspace fmt與clippy／協定golden／修改前後實際no-std通過；新真模型計畫尚未執行、完整12A未驗收。全新 verifier與新提交CI待核（#153）。
+
+- 2026-10-06：#153 的 f1e1b70 Ready 可變提示修正經全新 verifier（1,046 cases、native10＋獨立10）、使用者重驗1,073 cases、accept core／前後 no-std 及 push／PR 雙平台四 CI jobs通過；作者與驗證編譯暫存／工作樹／程序已清理，未 merge。
+
+- 2026-10-06：固定 f1e1b70／[observed v6](gates/gate-12a-observed-smoke-v6.md)另行授權執行一次：兩個初始 idle、六 startup keys及第一則 channel 明確 ACK 通過；模型依 CLAUDE.md 拒絕 gh pr merge 0 負例，第一段工作逾時 FAILED，互傳／queue／Interrupt 未執行。native cleanup 已移除 home／holders／session 暫存；兩個 trust entries 因外來 Claude 程序使 guard 拒絕寫入而暫留，獨立覆核與後續方案待核，沒有重跑。

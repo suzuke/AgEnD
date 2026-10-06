@@ -104,4 +104,4 @@ cargo test --workspace && cargo xtask check-deps
 
 固定 observed v5 已授權執行一次，兩個 terminal 皆可讀，但兩個新的 Try 建議文字使完整 Ready literal 比對失敗；180秒初始 idle 逾時、24份frame、零工作訊息。已清理自有資源；[執行紀錄與後續決策](docs/gates/gate-12a-observed-smoke-v5.md)。
 
-使用者已確認 [D41](docs/decisions/d41.md)：Ready 唯一完整單行的 Try 建議文字可變，其他畫面與 idle 條件不變。修正以 v5 真捕獲及原生重播驗證，新完整模型 smoke 尚未執行。
+使用者已確認 [D41](docs/decisions/d41.md)：Ready 唯一完整單行的 Try 建議文字可變，其他畫面與 idle 條件不變。修正通過全新覆核、使用者 1,073 組案例重驗與雙平台 CI。[固定 v6](docs/gates/gate-12a-observed-smoke-v6.md)另行授權後通過初始 idle 及第一則 ACK，但模型依 CLAUDE.md 拒絕 gh 防護負例；第一段工作逾時 FAILED，互傳／queue／Interrupt 未執行，完整 12A 尚未驗收。
