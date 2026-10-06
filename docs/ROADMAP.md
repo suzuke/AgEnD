@@ -194,3 +194,5 @@
 - 2026-10-06：#153 第二次完整 smoke 的全新 verifier 核固定990 A Ready／B None 與單換提示反例、11語意 mutations／5 native 負例、13paths／PID／PGID／兩trustkeys absent。how-does 新 literal 修正前 native P6 exit101，修正後 accept core、startup8及前後實際 check-deps 通過；編譯 target 清除，新改動待另一全新 verifier，未再次啟動真 CLI。
 
 - 2026-10-06：#153 固定6a666ba的 observed v3 另行授權後執行一次，B terminal 未註冊使只讀 helper 回 no_terminal，約一秒內停止；僅 A 空白 frame、零 startup keys／SessionStart／工作訊息，完整 smoke FAILED。補清兩個早期 scratch namespaces，13 paths／5 PID／兩 trust keys absent。新增獨立 runner 有界等候首次註冊，其他錯誤及後續 terminal 消失立即停止；native daemon／shell 先重現舊 runner 拒絕，再核修正版兩 frame 與早期 scratch 清理，不啟動真 Claude。6a PR 雙平台通過，push macOS 306.841042ms 超過300ms，原 log 保留。
+
+- 2026-10-06：#153 固定c7b756b／observed v5 已另行授權執行一次：24次只讀frame皆成功、707次status無idle、兩個live SessionStart與各三個production keys written；新fix-typecheck／fix-lint Try文字令Ready None，180秒初始idle逾時FAILED、零工作訊息。只改建議文字即可與既有Ready其餘tokens吻合；未放寬正式classifier、未重跑。自有13路徑／8PID／5PGID／兩trustkeys核absent，c7 push／PR雙平台四job通過；完整12A仍未驗收，下一步先確認Ready建議列是否可變，[紀錄](gates/gate-12a-observed-smoke-v5.md)。

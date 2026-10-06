@@ -101,3 +101,5 @@ cargo test --workspace && cargo xtask check-deps
 ```
 
 最新 observed v3 在 B terminal 尚未註冊時，首份只讀 frame 遭拒，立即停止；零工作訊息，完整 smoke 仍未通過。首次註冊等待及早期 scratch 清理修正、原生反例與清理紀錄見[第三次 smoke](docs/gates/gate-12a-observed-smoke-v3.md)。
+
+固定 observed v5 已授權執行一次，兩個 terminal 皆可讀，但兩個新的 Try 建議文字使完整 Ready literal 比對失敗；180秒初始 idle 逾時、24份frame、零工作訊息。已清理自有資源；[執行紀錄與辨識策略待決](docs/gates/gate-12a-observed-smoke-v5.md)。

@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 使用者 2026-10-06 要求完整模型 smoke 必做；#151／#152 已合併；首次真執行停於初始 idle 逾時，訊息階段未開始。
 > - 固定 Claude 2.1.284，兩個 Haiku 4.5 instance、七則工作訊息；首個失敗停止，不重跑。
-> - 下一步：[第二次完整 smoke](gate-12a-observed-smoke-v2.md)取得 24 份 frame，但 B 的新提示未識別；補完整 literal 與原生回歸後，任何新真執行依 D40 另取授權。
+> - 下一步：[固定 observed v5](gate-12a-observed-smoke-v5.md)再次因新 Try 建議列停在初始 idle；先確認 Ready 辨識策略，完整 smoke 尚未通過。
 
 ## 範圍與證據
 
@@ -131,3 +131,5 @@ native 身分及十種證據 mutation。自有 daemon／holder／backend、home�
 固定 observed v3 已授權執行一次，但在 B terminal 尚未建立時停止；零工作訊息，詳見[執行與修正紀錄](gate-12a-observed-smoke-v3.md)。
 新 `claude_observed_ready_smoke.py` 保留已執行 runner bytes，首次每 instance 最多20次只讀觀察／10秒，全部 helper 呼叫最多66次、成功 frames最多28份；只等精確 no_terminal，其他錯誤／後續消失立即停止。
 工作訊息與模型零自動重跑；新計畫仍須全新覆核及 D40 另行授權。
+
+固定 v5 在首次註冊等待修正後另行授權執行一次，24份frame皆成功，仍因兩個新的 Try 建議列而無初始 idle；[本次結果與待決範圍](gate-12a-observed-smoke-v5.md)。
