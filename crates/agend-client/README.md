@@ -89,6 +89,8 @@ daemon 多視窗／frame 更新與 TUI 已接通，六項 fake／真 C 契約及
 - `agend_client::{Client, ClientError, Redo, RESTART_RETRY_WINDOW}`
 - `examples/client_probe.rs`：`client_probe resolve <attention-id> <action>`（第 9 施工關有命令前給「你親自驗收」用）
 
+首次 startup frame 訂閱可能回 no_terminal：instance add 回覆不保證 terminal 已註冊。新的 smoke observer 對首次讀取做有界等候，client 不自動重連或重送控制／輸入，見[驗證紀錄](../../docs/gates/gate-12a-observed-smoke-v3.md)。
+
 ## 下一步
 
 ```bash

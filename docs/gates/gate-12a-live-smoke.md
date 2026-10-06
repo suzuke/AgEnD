@@ -64,7 +64,7 @@ helper 只 hello／subscribe，不 acquire／resize／input；捕捉失敗或身
 舊失敗及診斷 runner bytes 不改，已執行計畫不重用。固定 observed v2 已另行授權並執行一次；結果 FAILED、零工作訊息，見[本次紀錄](gate-12a-observed-smoke-v2.md)。
 
 ```bash
-python3 -B scripts/claude_observed_smoke.py \
+python3 -B scripts/claude_observed_ready_smoke.py \
   --plan <全新 observed-plan.json> --out <全新私有證據目錄> \
   --agend "$CARGO_TARGET_DIR/debug/agend" \
   --cleanup "$CARGO_TARGET_DIR/debug/examples/claude_live_cleanup" \
@@ -125,3 +125,9 @@ native 身分及十種證據 mutation。自有 daemon／holder／backend、home�
 ## 下一步
 
 本次 B 的已錄製 Ready 提示變體補完整 literal，完成 native／全新 verifier 覆核；990 的 PR macOS CI 尾段延遲另待修復，不放寬 300ms。任何新真 CLI 計畫另取授權，禁止自動重跑成成功；#153 merge 仍等使用者確認。
+
+## 第三次執行與首次註冊等待
+
+固定 observed v3 已授權執行一次，但在 B terminal 尚未建立時停止；零工作訊息，詳見[執行與修正紀錄](gate-12a-observed-smoke-v3.md)。
+新 `claude_observed_ready_smoke.py` 保留已執行 runner bytes，首次每 instance 最多20次只讀觀察／10秒，全部 helper 呼叫最多66次、成功 frames最多28份；只等精確 no_terminal，其他錯誤／後續消失立即停止。
+工作訊息與模型零自動重跑；新計畫仍須全新覆核及 D40 另行授權。

@@ -99,3 +99,5 @@ Apache-2.0，見 [LICENSE](LICENSE) 與 [NOTICE](NOTICE)。
 cat AGENTS.md
 cargo test --workspace && cargo xtask check-deps
 ```
+
+最新 observed v3 在 B terminal 尚未註冊時，首份只讀 frame 遭拒，立即停止；零工作訊息，完整 smoke 仍未通過。首次註冊等待及早期 scratch 清理修正、原生反例與清理紀錄見[第三次 smoke](docs/gates/gate-12a-observed-smoke-v3.md)。
