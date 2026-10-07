@@ -183,3 +183,5 @@ OpenCode `oversized_total_history_does_not_block_old_receipts_or_new_delivery` �
 12C `forge::github::submission` 以真捕獲 GitHub 回覆注入 task marker 與遺失回覆，配原生 SQLite 重開驗單次 create、unknown 不重送及外來 PR 拒絕。`forge::github::push` 執行真 Git／bare repo，測成功後遺失回覆與 lease 競爭失敗，重開 DB 後不重送。這些尚非正式 daemon pipeline 驗收。
 
 `github_workflow_selects_its_forge_for_submit_checks_and_merge` 經 whole-queue fakes 核 github 選擇，不允許退回 local；實際 local FRG 1–10、runner／sandbox regression 由 `pipeline_adapters` 覆蓋。GitHub API replay 另核 repo 重建與 PUT 後外來 marker 不可提供 merge 收據。尚無完整 GitHub 原生 FRG 認證。
+
+12C `cargo test -p agend-daemon --test github_forge` 跑正式 GithubForge 的 FRG 1–10、遺失 create／merge 回覆與跨 SQLite 重開、dirty main 保留及只讀恢復。獨立程序使用真捕獲形狀與真 bare Git 產生 object／parent；不代表 live GitHub policy 或 daemon 端到端已驗收。

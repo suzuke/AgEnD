@@ -25,3 +25,5 @@ API：[GitHub pull requests](https://docs.github.com/en/rest/pulls/pulls)。合�
 - `merge-commit.json`：`5b5026d8d506f66f75a6a766414f4544d7f6537dfed0c8464d82e740dc5cb8e2`
 
 `repository.json`：2026-10-07 以 gh 2.102.0 唯讀 GET `repos/suzuke/AgEnD` 捕獲，只保留 id／full_name／html_url；SHA-256 `d6b2539370d52264ee3d42790357e2c173258120ca9a2a9302f6234350c5ef8a`。提交測試沿用原 PR 捕獲，明確注入任務 marker／遺失回覆，不宣稱真 GitHub 建立 PR。
+
+`tests/common/github/gh.py` 是離線 producer，沿用本目錄捕獲的 repo／PR／HTTP 形狀，動態 branch／head／merge tree／parents 由自有 bare Git 產生。`git.py` 只把固定 fixture URL 映射到該 bare repo。用於正式 GithubForge FRG 與故障測試，不聲稱真 GitHub server 行為或分支保護驗證。

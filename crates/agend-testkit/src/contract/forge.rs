@@ -105,13 +105,17 @@ pub fn run<F: ForgeFixture>(implementation: &str, make: impl FnMut() -> F) -> Re
     run_suite("Forge", implementation, &cases::<F>(), make)
 }
 
+// Distinct changes belong to distinct tasks; one task retains one PR identity.
+// The behavioral assertions are identical for local and remote forges.
 fn branch(slug: &str) -> String {
-    work_branch("T-contract", slug)
+    work_branch(&format!("T-contract-{slug}"), slug)
 }
 
 fn submission(branch: &str) -> Submission {
     Submission {
-        task_id: "T-contract".into(),
+        task_id: agend_core::model::task_id_of_branch(branch)
+            .expect("contract branch has task identity")
+            .into(),
         branch: branch.into(),
         title: "contract change".into(),
         body: "opened by the Forge contract suite".into(),

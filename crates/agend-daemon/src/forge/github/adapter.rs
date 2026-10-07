@@ -232,6 +232,28 @@ impl Forge for GithubForge {
         })
     }
     async fn head(&self, branch: &str) -> Result<String, ExecutionError> {
+        let task = task_id_of_branch(branch)
+            .ok_or_else(|| blocked("GitHub branch has no task identity"))?;
+        if self
+            .store
+            .github_change(task)
+            .await
+            .map_err(|e| blocked(e.to_string()))?
+            .is_none()
+        {
+            return self
+                .git
+                .run(
+                    &self.repo,
+                    &[
+                        "rev-parse",
+                        "--verify",
+                        &format!("refs/heads/{branch}^{{commit}}"),
+                    ],
+                )
+                .await
+                .map_err(blocked);
+        }
         let record = self.owned(branch).await?;
         let repository = self.repository().await?;
         if repository.name != record.change.identity.repository

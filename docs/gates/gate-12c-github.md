@@ -21,7 +21,7 @@ API client 合併前先 GET 原 PR；head 不符直接回報 HeadChanged，已 m
 
 ## 尚未完成
 
-- 正式 GitHubForge 的完整原生 FRG 契約、daemon 重啟與遠端清理驗證。
+- 正式 daemon 重啟與遠端清理驗證；GitHubForge 的離線原生 FRG 契約已通過。
 - 已接入的遠端 main fast-forward／rebase／重新 push 和 checks，尚需完整故障驗證。
 - 單次提交／回覆遺失／重啟的原生測試、完整 FRG 契約與真 repo 流水線。
 - 全新 verifier、CI、合併與清理；本頁不宣稱第 12C 完成。
@@ -45,3 +45,11 @@ GitHub main 只在乾淨 main checkout 且可 fast-forward 時同步；不重設
 ### 待決策的遠端 base 競爭
 
 GitHub merge API 只接受 approved head，沒有 expected-base CAS。已向使用者提出：要求目標分支嚴格 up-to-date 保護（建議），或接受 main 在最後查核與 merge 間前進的空窗。尚未收到決定；相關完整 merge 認證及外部寫入驗證暫不進行，其餘接線／測試持續。
+
+## 原生 Forge 契約（離線）
+
+`cargo test -p agend-daemon --test github_forge` 直接呼叫正式 GithubForge，搭配原生 Git／bare repo、SQLite 及獨立程序 producer。API 形狀沿用真捕獲 fixture；commit／merge tree／parents 由 Git 產生。fixture 僅將固定 GitHub URL 映射到自有 bare repo，沒有外部網路寫入。
+
+FRG 1–10 全通過；另驗 create／merge 回覆遺失、SQLite 重開後同一 PR／merge 收據且只有一次 mutation。本機 main 有 WIP 時拒絕同步，內容保留，排除 fixture WIP 後只讀收據完成同步，不重送 merge。
+
+契約的不同 branch 現各帶不同 task ID，符合一個 task 固定一個 PR 的正式 namespace；所有原斷言保留。local FRG 與全部 contract mutant 反例仍通過。真 GitHub 分支保護、正式 daemon 端到端與遠端收尾仍不在這批通過範圍。

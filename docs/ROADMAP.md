@@ -273,3 +273,5 @@
 - 2026-10-07：12C 增加持久單次 PR create／marker 對帳與精確 lease push；捕獲回覆＋SQLite 重開驗 PR 不重建，真 Git／bare repo 驗遺失回覆與競爭 writer 保護。正式 Forge／pipeline 尚未接入，未執行外部 GitHub mutation。
 
 - 2026-10-07：12C SelectedForge／GithubForge 接 submit、checks、merge 與重啟查核；whole-queue 選擇測試及真 local pipeline adapter 10 案通過。GitHub 完整原生流水線／清理待補；已提出遠端 base 競爭的分支保護取捨，尚待答覆，未做外部 GitHub mutation。
+
+- 2026-10-07：12C 正式 GithubForge 離線原生 FRG 1–10 通過（真 Git／SQLite＋捕獲形狀獨立 producer），另驗遺失 create／merge 回覆、重開不重送與 dirty main 保留；local FRG 和 contract mutants 仍通過。正式 daemon 端到端、遠端清理與 live policy 尚待完成。

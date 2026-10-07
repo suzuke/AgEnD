@@ -94,3 +94,5 @@ C 段 CLP 拒絕案例同跑真 parser-backed fake 與真 daemon：agent caller 
 `fake-opencode-cli` 為 12B holder 整合提供 version／serve／attach，API 沿用錄製對照的原生 producer，health 固定 1.18.34，資料只寫自有 AGEND_HOME/opencode 內的 XDG_DATA_HOME。舊 fake-opencode-serve 與 1.18.31 conformance 固定不變；此 CLI fixture 不驗真 TUI 畫面、不啟動模型。
 
 12C whole-queue 測試從 executor effects 核 `forge:github`／`prepare-main:github`／`find-merge:github`，搭配真 API／Git 測試使用，不能獨立證明遠端 GitHub 合併。
+
+Forge 契約的不同 branch 使用不同 task ID，Submission.task_id 由 work_branch 的正式 parser 取回；保留所有 head／merge／多 PR 斷言。local 與 GitHub 原生 adapter 均跑同套，`contract_teeth` 繼續驗每個故障 mutant 會被抓出。
