@@ -291,3 +291,5 @@
 - 2026-10-07：12D 補正式 supervisor／holder 的本機 mobile Retry 成功、重啟不再啟動，以及 Stop 先排時 Retry 取消不誤報 Accepted。workspace 另發現 testkit protocol mismatch golden 漏 1.6，已修正（PR #156）。
 
 - 2026-10-07：第 12 關原生驗收入口由 Claude 擴充至已整合的 OpenCode／Telegram 與 G4；先建置 consumer 使用的正式 binary／假 producer，仍明示 GitHub forge／剩餘真測未認證（PR #156）。
+
+- 2026-10-07：PR #156 補自由文字 reply 受控探針，本機正式 daemon→ask／單筆 inbox 通過並確認 holder 清空；Telegram 真回覆待使用者操作。另保留 native capture 偶發空白與 macOS outer PTY 320 ms 超過 300 ms 的失敗證據，未宣称修復或整體通過。
