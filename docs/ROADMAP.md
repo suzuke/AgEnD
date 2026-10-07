@@ -101,6 +101,8 @@
 
 - 2026-10-07：12B 真 OpenCode 1.18.34 兩則權限蒐證通過，REST 無 SSE 取得請求、once 完成與 reject 拒絕；原始輸出納入回歸，自有程序／port／暫存已清，共享 auth 不變。尚未代表完整 12B 驗收。
 
+- 2026-10-07：12B 三真 backend v1 因完整 workspace 被 CLI 截短而在送件前停止，零工作訊息且自有資源已清；獨立靜態覆核另找到 permission 驗證 GET 失敗會提前耗用 claim 的 P2，接續修正，未合併。
+
 歷史紀錄見 [2026-10-02–03](roadmap-progress-20261002-03.md) 與 [較早紀錄](roadmap-progress.md)。
 
 - 2026-10-04：依使用者確認合併 #138（`4390633`），於 `feat/gate-12a-claude` 開工；首批加入 client 單次請求 API 與 native socket 回歸，Claude 接入及第 12A 驗收尚未完成。

@@ -58,3 +58,7 @@ worker 每輪讀最新 16 筆及一頁更早歷史，超限頁以更小 limit �
 完成 holder 原生整合、權限請求與恢復測試，再進行受控真測與 fresh verifier。
 
 2026-10-07 真權限 API 蒐證：固定 1.18.34／gpt-6-luna，兩則 prompt 分別要求一次 printf；REST 在沒有 SSE subscriber 時取得原始 permission，once 工具 completed、reject 工具 error，回覆後 pending 消失。原始請求與 history 已納入 parser 回歸；這不替代 daemon attention／重啟真測。ops `permission-capture-v1` 記錄兩則訊息與清理，自有程序、port、root 均消失，共享 auth 未變。
+
+2026-10-07 三真 backend 互傳 v1 在啟動等待階段停止，零工作訊息。Claude 真畫面把過長 workspace 縮成 `/…/tmp/…`，完整路徑 Ready 規則正確拒絕；Codex app-server thread／handoff 已成立，但 fleet 保持 unknown，v1 未取得原生 thread idle 證據。下一版需縮短測試 namespace 並以原 thread 唯讀狀態同步，不放寬 Ready 判定。自有三 instance、程序、root 已清理，Claude trust entries 保留；原始 frames、零訊息 DB、診斷與清理見 ops `three-backend-smoke-v1`。
+
+全新獨立靜態覆核 `ee024f7` 發現一項 P2：permission claim 在唯讀驗證 GET 前持久化，若 GET 失敗而未 POST，請求仍永久 unknown。需將完整 snapshot 驗證置於 claim 前，保留單次 POST 與不明結果不重送；修正及反例尚待完成。此覆核沒有執行測試，不替代最終驗收。
