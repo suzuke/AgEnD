@@ -289,3 +289,5 @@
 - 2026-10-07：12D 補正式 daemon serve 的雙程序 active shutdown／restart：扣住 HTTP 回覆後 SIGINT 等待收據，重啟僅續剩餘段；零真 API／模型。Retry 與真 forum 等剩餘範圍不變（PR #156）。
 
 - 2026-10-07：12D 補正式 supervisor／holder 的本機 mobile Retry 成功、重啟不再啟動，以及 Stop 先排時 Retry 取消不誤報 Accepted。workspace 另發現 testkit protocol mismatch golden 漏 1.6，已修正（PR #156）。
+
+- 2026-10-07：第 12 關原生驗收入口由 Claude 擴充至已整合的 OpenCode／Telegram 與 G4；先建置 consumer 使用的正式 binary／假 producer，仍明示 GitHub forge／剩餘真測未認證（PR #156）。

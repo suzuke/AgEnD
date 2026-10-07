@@ -26,7 +26,7 @@
 - `accept codex`：對 agend-daemon、agend-testkit、agend 跑 fmt、clippy、test（含 DRV-1..9 對 codex driver、四次開機、真 daemon 與 `sh` 包裝），再跑 check-deps，然後 build `agend` 與 example `fake_codex`、執行 `agend-daemon` 的 `codex_demo` example（`== busy`／`== idempotent`／`== crash-window`／`== approval`／`== restart`（含反向檢查）／`== resume`／`== sweep`／`== give-up`／`== app-server-dies`／`== first-start-interrupted`／`== legacy`／`== cleanup`），最後一行 `gate 7 (codex): checks passed`。不跑真 codex（`codex_live` 只有使用者手動跑）。
 - `accept client`：對 agend-client、agend-daemon、agend-testkit、agend-core、agend 跑 fmt、clippy、test（含 CLP 契約對假 daemon 與真 `agend daemon`、mutant），再跑 check-deps，然後 build `agend`、執行 `agend-daemon` 的 `client_demo` example（`== contract` 每條 `CLP-n` 印 `fake`／`real` 兩行與反向檢查，之後 `== version`／`== slow-client`／`== socket`／`== retry`／`== terminal`／`== restart`／`== cleanup`），最後一行 `gate 8 (client): checks passed`。
 - `accept tui`：對 agend-tui、agend-client、agend-daemon、agend-testkit、agend 跑 fmt、clippy、test（含 CLP-18..20 對假、真 daemon 與 mutant、TUI 對真 daemon），再跑 check-deps，然後執行 `tui_accept` example（假 daemon 經 `agend-client`：`== screens`／`== navigate`／`== resolve`／`== disconnect`／`== retry`／`== terminal`／`== input`，每段有檢查），再 build `agend`、執行 `agend` 的 `tui_real` example（真 `agend daemon`：`== real daemon`／`== retry`／`== terminal`／`== input`／`== reconnect`／`== agend app`），最後一行 `gate 11 (tui): checks passed`。
-- `demo adapters`：共用真 SQLite／native helper／holder／daemon／Git 回歸；印出 DRV 十個案例與不同 child pid、新 HOME 反向、single merge、Esc completion 遺失。只驗 native Claude，真 CLI／啟動提示與其他 adapter 未完成；`accept adapters` 跑原 daemon 檢查及 check-deps 後同跑本 demo。
+- `demo adapters`：先建置正式 agend 與假 producer，執行 Claude driver／bridge／holder、OpenCode driver／bridge、Telegram transport／inbound／topic、daemon 關機與 Retry、G4 共用已讀、未知通知處置及 doctor 原生案例。沒有真模型或外部 API 呼叫；真測紀錄另驗。`accept adapters` 對 core／daemon／client／tui／testkit／agend 跑 checks 及 no-std，再執行 demo；GitHub forge 尚未合入，本入口不宣稱完整第 12 關通過。
 - 其他 `accept <施工關>`：對該施工關的 crate 跑 fmt、clippy、test，再跑 check-deps；demo 隨各施工關加入
 - `record <backend> [情境…] --sandbox <腳本>`：build `agend-record`（agend-testkit），在 `<腳本>`（寫入沙箱）裡對**真的** CLI 錄製到 `mktemp -d /private/tmp/agend-rec-out-XXXX`，再在沙箱外把成功的錄製檔複製進 `crates/agend-testkit/transcripts/<backend>/`（見 [RECORDER.md](../crates/agend-testkit/RECORDER.md)）。沒有 `--sandbox` 就不跑
 
@@ -46,7 +46,7 @@
 | `check_core` | agend-core 的結構檢查：`cargo metadata` 規則與無 std 編譯 |
 | `accept` | 13 個施工關的 crate 對照與執行 |
 | `core_demo`、`shim_demo` | 第 1、3 施工關的 demo（子程序執行 example） |
-| `adapters_demo` | 共用 native Claude integration test 情境；不跑真 CLI／模型 |
+| `adapters_demo` | 共用 Claude／OpenCode／Telegram 原生案例；不跑真模型／外部 API |
 | `record` | 在寫入沙箱裡跑 `agend-record`，複製錄製檔 |
 
 ## 依賴規則

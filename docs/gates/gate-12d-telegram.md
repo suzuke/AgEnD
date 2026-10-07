@@ -82,3 +82,5 @@ Abandon 保存明確理由與原始 payload／收據前綴；保留 in_flight �
 Active shutdown checkpoint：兩個獨立子程序執行正式 daemon `serve`。本機 HTTP producer 扣住第一段回覆；SIGINT 移除 socket 後程序仍存活，收據放行後正常退出，SQLite 保存 receipt 500 且無未知意圖。第二次 boot 僅送原第二段，保存 receipt 501，全文與兩次請求逐段一致。測試不使用真 Telegram，也不涵蓋 pending Retry 取消；該項仍待補。
 
 Retry lifecycle checkpoint：正式 daemon serve／poll／supervisor／holder 啟動本機 inbox 測試程序一次，停後 SQLite 為 Running、session_started 與 accepted；第二次 boot 重新連線而沒有第二次 launch 或 Accepted。排隊取消案例用 cfg(test) 消費屏障固定 Stop → RetryConfirmed 順序，正式 shutdown 丟棄 queue，保存 refused、原 Failed 保留、不產生測試程序。這不是 Telegram 真 Retry 或 Claude push／模型驗證。測試自有 holder 以 Shutdown 停止，確認鎖已釋放才刪 home。
+
+驗收入口：`cargo xtask demo adapters` 已加入 Telegram notifier、daemon lifecycle、shared_read、telegram_unknown 與 doctor 原生案例；`cargo xtask accept 12` 包含 G4 跨 crate checks。兩者均不呼叫真 Telegram／模型，不能取代真 forum／自由文字回覆驗收。

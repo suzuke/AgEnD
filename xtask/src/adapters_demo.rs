@@ -1,9 +1,24 @@
-//! Native Claude adapter scenarios share the integration tests' assertions.
+//! Native adapter scenarios share the integration tests' assertions.
 use crate::accept::step;
 
+pub fn prepare() -> Result<(), String> {
+    step(&[
+        "build",
+        "--quiet",
+        "-p",
+        "agend",
+        "-p",
+        "agend-testkit",
+        "--bins",
+    ])?;
+    step(&["build", "--quiet", "-p", "agend", "--example", "fake_codex"])
+}
+
 pub fn run() -> Result<(), String> {
-    println!("== Claude native adapter demo ==");
-    println!("No real Claude CLI or models. Startup/version acceptance remains pending.");
+    prepare()?;
+    println!("== Native adapter demo: Claude, OpenCode, Telegram ==");
+    println!("No real model or external API calls. Live acceptance is recorded separately.");
+    println!("== Claude ==");
     println!("== Driver, launch ownership, sweep ==");
     step(&[
         "test",
@@ -38,8 +53,76 @@ pub fn run() -> Result<(), String> {
         "--",
         "--nocapture",
     ])?;
+    println!("== OpenCode driver, durable delivery, permissions and native bridge ==");
+    step(&[
+        "test",
+        "--quiet",
+        "-p",
+        "agend-daemon",
+        "--lib",
+        "driver::opencode",
+        "--",
+        "--nocapture",
+    ])?;
+    step(&[
+        "test",
+        "--quiet",
+        "-p",
+        "agend",
+        "--test",
+        "opencode_bridge",
+        "--",
+        "--nocapture",
+    ])?;
+    println!("== Telegram transport, routing, inbound guards and durable receipts ==");
+    step(&[
+        "test",
+        "--quiet",
+        "-p",
+        "agend-daemon",
+        "--lib",
+        "notifier::",
+        "--",
+        "--nocapture",
+    ])?;
+    println!("== Telegram daemon shutdown, remaining parts and supervisor Retry ==");
+    println!("The ignored child entry is executed by its parent lifecycle scenarios.");
+    step(&[
+        "test",
+        "--quiet",
+        "-p",
+        "agend-daemon",
+        "--lib",
+        "daemon::telegram_tests::",
+        "--",
+        "--nocapture",
+    ])?;
+    println!("== Shared read state and operator disposition after restart ==");
+    step(&[
+        "test",
+        "--quiet",
+        "-p",
+        "agend",
+        "--test",
+        "shared_read",
+        "--test",
+        "telegram_unknown",
+        "--",
+        "--nocapture",
+    ])?;
+    step(&[
+        "test",
+        "--quiet",
+        "-p",
+        "agend",
+        "--bin",
+        "agend",
+        "doctor::telegram_tests",
+        "--",
+        "--nocapture",
+    ])?;
     println!(
-        "Claude native adapter demo passed; Gate 12A true CLI/startup acceptance remains pending."
+        "Native Claude, OpenCode and Telegram scenarios passed; GitHub forge and remaining live gate acceptance are not certified by this demo."
     );
     Ok(())
 }
