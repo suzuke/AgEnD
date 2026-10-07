@@ -1,9 +1,9 @@
 # 第 12D：Telegram
 
 > **TL;DR**
-> - 已實作通知完整分段、持久 outbox 與逐段收據；已接 daemon outbound worker，inbound 操作尚未完成。
+> - 已實作通知完整分段、持久 outbox 與逐段收據；已接 daemon worker 與 inbound 操作防護，完整端到端與手機驗收尚未完成。
 > - 專用 bot 已做 getMe 與三則限額文字真測，三則均已刪除；token 設定檔未改動。
-> - 下一步：完整通知分段、持久 outbox／inbound 去重、allowlist、topic、手機操作與 G4 共用已讀。
+> - 下一步：原生 inbound 端到端、受控手機操作、topic 路由與 G4 共用已讀。
 
 ## 設定與憑證
 
@@ -27,7 +27,13 @@ Telegram `sendMessage` 長度有限，通知全文需完整分段保留，不能
 
 worker 每秒觀察「需要你」，以持久 source id 對帳，不用 boot-local 事件游標或等待時間辨識通知。相同內容保留原 delivery；內容改變、或已觀察到解除後再出現，建立新 delivery。解除／替換時取消未完成舊通知的後續段落，未知段落仍保留意圖。snapshot 對帳與 outbox 建立同一 SQLite transaction，重啟不會把同一事項當新通知。
 
-worker 將完整 recap、請示對話與可用動作送到 needs-you topic；HTTP 在 blocking pool 執行，不佔用主 engine。每次只送一段，下一段前重新對帳；停止時只等待當前有限期限呼叫與收據完成，再釋放 DB。HTTP 結果未知只記安全錯誤，不自動再送。team topic 路由、互動按鈕與操作員處置仍待實作。
+worker 將完整 recap、請示對話與可用動作送到 needs-you topic；HTTP 在 blocking pool 執行，不佔用主 engine。每次只送一段，下一段前重新對帳；停止時只等待當前有限期限呼叫與收據完成，再釋放 DB。HTTP 結果未知只記安全錯誤，不自動再送。最後一段附上由已保存選項產生的互動按鈕；team topic 路由與未知通知的操作員處置仍待完成。
+
+## 手機操作 checkpoint
+
+`dc9ded8`：update 在執行前保存指紋與意圖；只有 allowlist 使用者回覆本 bot 已確認完整送達且仍有效的通知，才可進入 operator 路徑。按鈕帶通知 id 與選项編號，動作由 DB 保存的 snapshot 取回。每份通知只能 claim 一次實際操作，未知結果不重放；要求修改先提示回覆原因，收到文字後才操作。
+
+Task 通知另保存 CAS version／attention revision；CLI 或 TUI 清除再開相同原因仍增加 revision，pipeline 排隊執行時重新比對。Instance failure episode 保存 reason 與單調時間，boot 沿用；Retry 由 supervisor 檢查並完成處理後回報，停機丟棄 queue 不會誤回成功。Inbound 與 outbound 各自執行，避免多段送出延後手機操作。
 
 ## 驗證與限制
 
@@ -35,10 +41,10 @@ worker 將完整 recap、請示對話與可用動作送到 needs-you topic；HTT
 
 getMe 與 Message fixture 來自 2026-10-07 真 Telegram，僅替換識別資料。三則 sendMessage 各搭配一次 deleteMessage，三次刪除均確認；未重試 mutation。計畫及必要證據保留於 AgEnD-ops。
 
-尚未完成 inbound 操作／去重、doctor、topics 實際路由、TUI／Telegram 共用已讀、受控手機操作真測、整體全新覆核／CI／合併。這批不是第 12D 完成認證。
+尚未完成原生 inbound 端到端驗證、doctor、topics 實際路由、TUI／Telegram 共用已讀、受控手機操作真測、整體全新覆核／CI／合併。這批不是第 12D 完成認證。
 
 ## 下一步
 
-實作通知與持久投遞，再接手機操作。所有真測僅使用已提供的專用 bot／chat，先固定命令、預算與清理範圍；不修改共享帳戶或 Claude trust entries。
+先驗原生 inbound 的操作與關機邊界，再做受控手機 callback 真測。所有真測僅使用已提供的專用 bot／chat，先固定命令、預算與清理範圍；不修改共享帳戶或 Claude trust entries。
 
 Schema v14 是新的 forward migration；已提交的 v13 保持原樣，舊 outbox 可直接升級。扣住第一段回覆的測試涵蓋停機、事項解除與替換，確認不開始舊通知第二段。
