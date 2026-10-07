@@ -79,3 +79,5 @@ cargo xtask check-deps
 [第二次完整 smoke](../../docs/gates/gate-12a-observed-smoke-v2.md)亦在 initial idle 逾時：A idle、B unknown，24 份 frame、零工作訊息。
 新增已錄製的 how-does 完整 Ready literal 與同一 native P6 回歸；未知提示仍拒絕。
 新真 CLI 計畫仍需另行授權；native 通過不等於模型通訊通過。
+
+2026-10-07 active Stop 回歸：真 daemon／holder／hook／channel 先完成 Stop batch，再以 `stop_hook_active=true` 結束續行；核不再次 block、至少五秒後後續訊息走 channel、沒有 hook 冒充 ACK。新的 UserPromptSubmit、缺少／非布林 active 值皆撤銷 idle 候選。舊 runtime 在同一正向 case 以 channel output timeout 失敗。

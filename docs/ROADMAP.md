@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 依 crate 由下往上分 13 個施工關；每個施工關單獨驗收，使用者確認後才開下一個施工關（D22）。
 > - 目前狀態：**第 1–11 施工關完成並已合併**；第 11 施工關 C 段 #145 經全新 verifier、雙平台 CI、實機及後續自動驗收與清理，使用者於 2026-10-03 確認合併（`b2152db`）。第 12 施工關 A 段設計 #138 已 merge，client 基礎 #147 已 merge，持久化 #148 已 merge，protocol 1.5／channel／Stop／ACK spool 基礎 #149 已 merge，共用 gh 防護 #150 已 merge，Claude Driver #151 與正式啟動／初始 idle #152 已合併，完整真模型 smoke 改為必要驗收，Claude 接入尚未驗收；第 13 施工關未開始。
-> - 下一步：依第 12A [D40](decisions/d40.md) 完成 [完整真模型 smoke](gates/gate-12a-live-smoke.md)；每批以全新 verifier、可重驗指令及使用者確認收尾。
+> - 下一步：第 12A [完整模型 smoke 已回報 PASS](gates/gate-12a-complete-smoke.md)，完成獨立覆核／CI 收尾後，依持續授權推進 B–D。
 
 ## 13 個施工關
 
@@ -22,7 +22,7 @@
 | 9 `cli` | [完成（2026-09-29；已 merge #136）](gates/gate-09-cli.md) | agend CLI：agent 命令、操作者命令、status；安裝相關先做 `doctor`、`init`，服務註冊留第 13 施工關 | 對假／真 daemon 驗輸出與錯誤；兩個假 Codex agent 互傳訊息、中途重啟不漏不重 |
 | 10 `pipeline` | [完成（2026-10-02；#143 已確認合併）](gates/gate-10-pipeline.md) | daemon：pipeline、git、runner、forge local、supervisor、reconcile | 假 driver + 暫存 repo：task 從派工走到 merge |
 | 11 `tui` | [完成（A、B、C 已 merge；C 段 #145）](gates/gate-11-tui.md) | attention-first TUI、完整終端、resize、多視窗、鍵鼠／貼上與歷史 | 最終 `cfee027` 全新 verifier CONFIRMED；四個雙平台 CI jobs 各 900 passed／0 failed／2 既有 ignored、實際 no-std；0.159.3 真 U17 已核實並獲版本許可。實機紀錄及後續自動驗收、清理完成，使用者確認 merge `b2152db` |
-| 12 `adapters` | [實作中（A 段 #138 設計已 merge；Claude 接入尚未完成）](gates/gate-12-adapters.md) | A claude、B opencode driver、C forge github、D Telegram | 先對假實作，再做真 backend smoke test |
+| 12 `adapters` | [實作中（A 段完整 smoke PASS，覆核／合併收尾中；B–D 待實作）](gates/gate-12-adapters.md) | A claude、B opencode driver、C forge github、D Telegram | 先對假實作，再做真 backend smoke test |
 | 13 `install` | [未開始](gates/gate-13-install.md) | 安裝與發布（最後一個施工關）：服務註冊、`agend uninstall`、`agend telegram setup`（由 daemon 配對）、`xtask release`、brew、GitHub release、`cargo install` | CI 用全新 HOME + 假 agent，從安裝到第一個 task 完成 < 5 分鐘；每個 `doctor` 檢查都有「故意弄壞 → 看到修正指令」的測試 |
 
 ## 第 1 施工關：開工前先提案、經使用者確認才實作
@@ -71,6 +71,10 @@
 第 1–11 施工關已完成並合併。第 11 施工關 C 段 #145 使用者於 2026-10-03 明確確認合併，原驗收範圍與限制見 [收尾紀錄](gates/gate-11c-closeout.md)。第 12A #138 的 P1–P10 已依本輪使用者確認寫定為 [D40](decisions/d40.md)，剩餘採建議；設計文件已依使用者「merge後開工」合併（#138、`4390633`）；第 12A 在獨立 worktree 實作中，Claude 接入尚未完成。
 
 ## 進度紀錄
+
+- 2026-10-06：#154 固定 `1af2a31` 的 v7 另行授權後、四 CI checks 通過才執行一次；兩個初始 idle／六 keys／兩則 channel ACK 通過，但 Bash 專用 `type -P` 在實際工具回報 bad option，空路徑檔使完整 smoke FAILED。自有 holders／home／session 暫存清理，trust entries 依使用者指示保留；[原始失敗與有限範圍](gates/gate-12a-observed-smoke-v7.md)。修正 shell 探測／保存原始 guard 觀察與雙 shell 零模型契約，未重跑模型，獨立覆核及新 head CI 另核。
+
+- 2026-10-06：使用者確認 #153 合併為 `0288824`，tree 與審閱版本相同；author／fresh verifier worktree、branch、targets 已清理。v6 初始 idle／唯一 ACK 有限證據獨立確認，完整 smoke 仍 FAILED；兩筆 account trust entries 依使用者指示保留。本批[smoke 指令修正](gates/gate-12a-smoke-contract.md)改用唯讀 help 測試既有 gh 防護並核原生 audit，零模型回歸通過，新固定計畫／覆核／CI 待核。
 
 - 2026-10-04：使用者確認 #149，`c7e398c` 全新 verifier r2 CONFIRMED、push／PR 雙平台 CI 通過，合併為 `6dd552e`；使用者另重驗 16 native cases 全過。已清理 feature／verifier worktree、branches、targets；另移除已合併且乾淨的舊 `docs/gate-12-proposal` worktree／branch。有未提交變更的舊 worktree 保留。
 - 2026-10-04：下一批在 `feat/gate-12a-gh-shim` 完成 D40 P4 的 [共用 gh 防護](gates/gate-12a-gh-shim.md)，首輪 3 unit／5 native cases 與 workspace clippy 通過；完整驗證、fresh verifier 與 CI 另核，未 merge（`d4853ad`／[draft PR #150](https://github.com/suzuke/AgEnD/pull/150)），完整 A 段仍未完成。
@@ -204,3 +208,13 @@
 - 2026-10-06：#153 的 f1e1b70 Ready 可變提示修正經全新 verifier（1,046 cases、native10＋獨立10）、使用者重驗1,073 cases、accept core／前後 no-std 及 push／PR 雙平台四 CI jobs通過；作者與驗證編譯暫存／工作樹／程序已清理，未 merge。
 
 - 2026-10-06：固定 f1e1b70／[observed v6](gates/gate-12a-observed-smoke-v6.md)另行授權執行一次：兩個初始 idle、六 startup keys及第一則 channel 明確 ACK 通過；模型依 CLAUDE.md 拒絕 gh pr merge 0 負例，第一段工作逾時 FAILED，互傳／queue／Interrupt 未執行。native cleanup 已移除 home／holders／session 暫存；兩個 trust entries 因外來 Claude 程序使 guard 拒絕寫入而暫留，獨立覆核與後續方案待核，沒有重跑。
+
+- 2026-10-07：#154 固定 `81804dc`／[observed v8](gates/gate-12a-observed-smoke-v8.md) 經四個 CI checks 全通及另行授權單次執行；INITIAL confirmed、模型 peer sent，完整 smoke 因 startup gh token refusals 誤算進工作 audit 次數而 FAILED。自有 runtime／home／session 已清理、trust entries 保留；修 scripts 的 pre-INITIAL append-only prefix 邊界與原生雙 shell 反例，未改 Rust／防護政策，未重跑模型、未 merge。
+
+- 2026-10-07：#154 的 `a85a91a`／未執行 v9 經全新 verifier 判 REFUTED：audit 文字讀取正規化 CRLF，漏掉 prefix bytes 改寫。原失敗保留，改逐 byte 保存／比對與 base64 失敗證據，雙 shell 各二十三個反例通過；沒有新增真模型執行，新固定計畫與獨立覆核待核。
+
+- 2026-10-07：使用者授權持續完成第 12 施工關 A–D，保留獨立覆核、合併 CI 與每批清理。#154 固定 ab5a296 的 v10 單次真測已有五則 confirmed（四 channel、一 Stop），queue 後 active Stop 被設成 busy 而 idle 逾時，Interrupt 未驗；原證據與獨立 FAILED 覆核保留。補原生反例及 idle 修正，完整 12A 仍待真測。
+
+- 2026-10-07：#154 的 v11 完成啟動與 INITIAL ACK，但模型將命令後說明送入 Bash，peer send exit 2；提前停止自有 runner 並清理，未進入 queue／Interrupt。命令改用獨立區塊，Bash／zsh 原生參數檢查通過；完整 12A 仍未完成，詳見 [Stop idle](gates/gate-12a-stop-idle.md)。
+
+- 2026-10-07：#154 固定 `0f4b8e0` 的 v12 完整真模型 smoke 單次 PASS：七則 confirmed（六 channel／一 Stop）、模型互傳、queue 後恢復 idle、Interrupt 完成，自有清理成功且保留 trust。全新 outcome／CI 收尾中；[完整紀錄](gates/gate-12a-complete-smoke.md)。使用者表示 Telegram 測試憑證稍後提供，先推進其餘工作。

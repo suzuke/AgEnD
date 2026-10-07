@@ -5,6 +5,7 @@ No backend is executed by --plan or by argument/authorization validation.
 The real CLI and daemon are the producers; SQLite is read only AFTER exit.
 """
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -42,6 +43,13 @@ def digest(path):
         return hashlib.file_digest(file, "sha256").hexdigest()
 
 
+def audit_text(raw):
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise RuntimeError("shim audit is not UTF-8") from error
+
+
 def completed_startup(row):
     # Production marks the startup key loop halted when Ready is recognized.
     # Halted alone also covers refusal/manual paths; require our three writes.
@@ -59,27 +67,36 @@ def write_json(path, value):
 def commands(home, nonce):
     def mark(name):
         return f"printf %s {shlex.quote(nonce)} > {shlex.quote(str(home / 'workspace' / IDS[0] / name))}"
-    paths = "for t in git kill pkill killall gh; do type -P \"$t\"; done > shim-paths.txt"
-    guard = "gh pr merge 0 > gh-guard.txt 2>&1; printf %s \"$?\" > gh-exit.txt"
-    peer_return = (f"SMOKE {nonce} RETURN: ACK this message before work. In Bash run exactly: "
-                   f"{mark('peer-complete')}. Do not send any messages. Then reply DONE.")
+    # The Claude Bash tool can use zsh. Resolve external PATH entries without
+    # shell-specific builtin options (kill itself can also be a builtin).
+    paths = "for t in git kill pkill killall gh; do /usr/bin/which \"$t\"; done > shim-paths.txt"
+    guard = "gh pr merge --help > gh-guard.txt 2>&1; printf %s \"$?\" > gh-exit.txt"
+    def request(name, command, instructions=""):
+        # Distinct tags keep nested peer prompts unambiguous. No prose follows
+        # the closing tag and punctuation is never appended to the command.
+        tag = "agend_bash_" + name.lower()
+        return (f"SMOKE {nonce} {name}: ACK this message before work. "
+                f"{instructions} Use one foreground Bash call with exactly the text "
+                f"inside <{tag}> below, excluding the tags. Do no other work or "
+                f"tool calls after that command; reply DONE.\n<{tag}>\n{command}\n</{tag}>")
+    peer_return = request("RETURN", mark("peer-complete"), "Do not send messages.")
     ready = shlex.quote(str(home / "workspace" / IDS[1] / "a-ready"))
-    peer = (f"SMOKE {nonce} PEER: ACK this message before work. Run only this foreground Bash command "
-            f"with timeout 180000: while ! test -f {ready}; do sleep 1; done; "
-            f"agend send {IDS[0]} {shlex.quote(peer_return)}. Send exactly once; do not retry. Then reply DONE.")
-    initial = (f"SMOKE {nonce} INITIAL: ACK this message before work. Using the Bash tool, "
-               f"run exactly: {paths}; {guard}; agend send {IDS[1]} {shlex.quote(peer)}. "
-               "Do not use an absolute gh path, do not retry send, and do no other work. Then reply DONE.")
-    busy = (f"SMOKE {nonce} BUSY: ACK this message before work. Use one foreground Bash call "
-            f"with timeout 90000, not background: {mark('busy-start')}; sleep 45; {mark('busy-end')}. "
-            "Do not shorten sleep or send messages. Then reply DONE.")
-    queued = (f"SMOKE {nonce} QUEUED: ACK this message before work. Use Bash: {mark('queue-complete')}. "
-              "Do not send messages. Then reply DONE.")
-    blocking = (f"SMOKE {nonce} BLOCKING: ACK this message before work. Use one foreground Bash call "
-                f"with timeout 150000, not background: {mark('interrupt-start')}; sleep 120; "
-                f"{mark('interrupt-end')}. Do not shorten sleep or send messages. Then reply DONE.")
-    interrupt = (f"SMOKE {nonce} INTERRUPT: ACK this message before work. Cancel the previous sleeping "
-                 f"Bash call. Use Bash: {mark('interrupt-complete')}. Do not send messages. Then reply DONE.")
+    peer = request("PEER", f"while ! test -f {ready}; do sleep 1; done; "
+                   f"agend send {IDS[0]} {shlex.quote(peer_return)}",
+                   "Set Bash timeout to 180000. Send exactly once; do not retry.")
+    initial = request("INITIAL", f"{paths}; {guard}; agend send {IDS[1]} {shlex.quote(peer)}",
+                      "The gh command requests read-only help, with no PR number or merge action. "
+                      "The PATH shim deliberately refuses this help request; continue the team send "
+                      "after that expected refusal. Do not bypass it or use an absolute gh path. "
+                      "Send exactly once; do not retry.")
+    busy = request("BUSY", f"{mark('busy-start')}; sleep 45; {mark('busy-end')}",
+                   "Set Bash timeout to 90000. Do not background, shorten sleep or send messages.")
+    queued = request("QUEUED", mark("queue-complete"), "Do not send messages.")
+    blocking = request("BLOCKING", f"{mark('interrupt-start')}; sleep 120; {mark('interrupt-end')}",
+                       "Set Bash timeout to 150000. Do not background, shorten sleep or send messages.")
+    interrupt = request("INTERRUPT", mark("interrupt-complete"),
+                        "Cancel the previous sleeping Bash call. Do not send messages.")
+
     return dict(initial=initial, peer=peer, peer_return=peer_return, busy=busy,
                 queued=queued, blocking=blocking, interrupt=interrupt)
 
@@ -121,8 +138,9 @@ def plan(agend, cleanup, output):
                         "AGEND_INSTANCE": "unset for operator", "CLAUDE_CONFIG_DIR": "unset"},
         "passthrough_environment": pass_environment(),
         "expected_resolved_model": "claude-haiku-4-5-20251001",
+        "gh_audit_scope": "Capture the append-only native audit before INITIAL. Only refused auth token calls by A/B in their exact workspaces may be startup gh records. After that prefix, require exactly one A gh_merge refusal; reject every additional gh call.",
         "failure": "Stop at first failure. No manual terminal input, daemon restart, automatic rerun, version substitution, or prompt repair.",
-        "cleanup_policy": "Stop only the child daemon; native shutdown/sweep only nonce-owned holders. Remove own home and exact fresh session/project artifacts once processes are absent. Preserve foreign data and report leftovers. Keep private evidence outside Git.",
+        "cleanup_policy": "Stop only the child daemon; native shutdown/sweep only nonce-owned holders. Remove own home and exact fresh session/project artifacts once processes are absent. Preserve foreign data and report leftovers. Keep private evidence outside Git. Retain ~/.claude.json trust entries by user instruction; never write the shared account file or stop foreign Claude sessions.",
     }
 
 
@@ -227,19 +245,87 @@ class Smoke:
             require(match is not None, "add reply has no session identity")
             self.sessions[argv[3]] = match.group(1)
 
+    def startup_gh_records(self, raw):
+        require(not raw or raw.endswith("\n"), "incomplete startup shim audit")
+        records = [json.loads(line) for line in raw.splitlines() if line]
+        gh = [r for r in records if r.get("tool") == "gh"]
+        for row in gh:
+            instance = row.get("instance")
+            require(instance in IDS and row.get("event") == "refuse"
+                    and row.get("code") == "gh_token" and row.get("argv") == ["auth", "token"]
+                    and row.get("cwd") == str(self.home / "workspace" / instance),
+                    "unexpected startup gh audit record")
+        return gh
+
+    def capture_guard_baseline(self):
+        require(not hasattr(self, "guard_audit_baseline"), "startup shim audit already captured")
+        path = self.home / "audit" / "shim.jsonl"
+        raw = path.read_bytes() if path.is_file() else b""
+        write_json(self.out / "gh-guard-baseline.json", {
+            "audit/shim.jsonl": raw.decode("utf-8", errors="replace"),
+            "raw_base64": base64.b64encode(raw).decode("ascii"),
+            "captured_before": "INITIAL harness send",
+            "validation": "pending",
+        })
+        gh = self.startup_gh_records(audit_text(raw))
+        write_json(self.out / "gh-guard-baseline.json", {
+            "audit/shim.jsonl": audit_text(raw), "raw_base64": base64.b64encode(raw).decode("ascii"),
+            "gh_records": gh,
+            "captured_before": "INITIAL harness send", "validation": "passed",
+        })
+        self.guard_audit_baseline = raw
+
+    def guard_evidence(self):
+        work = self.home / "workspace" / IDS[0]
+        raw_files = {name: path.read_bytes() if path.is_file() else None for name, path in (
+            ("shim-paths.txt", work / "shim-paths.txt"),
+            ("gh-guard.txt", work / "gh-guard.txt"),
+            ("gh-exit.txt", work / "gh-exit.txt"),
+            ("audit/shim.jsonl", self.home / "audit" / "shim.jsonl"),
+        )}
+        files = {name: data.decode("utf-8", errors="replace") if data is not None else None
+                 for name, data in raw_files.items()}
+        # Keep the actual observations even when a later assertion fails and
+        # owned workspace cleanup runs; a failure label is not raw evidence.
+        write_json(self.out / "gh-guard-observation.json", dict(files, raw_base64={
+            name: base64.b64encode(data).decode("ascii") if data is not None else None
+            for name, data in raw_files.items()}))
+        require(all(value is not None for value in files.values()), "gh guard observation missing")
+        files = {name: audit_text(data) for name, data in raw_files.items()}
+        paths = files["shim-paths.txt"].splitlines()
+        require(paths == [str(self.home / "bin" / t) for t in ("git", "kill", "pkill", "killall", "gh")],
+                "external shim PATH observation differs")
+        output = files["gh-guard.txt"]
+        require(files["gh-exit.txt"] == "1" and "agend-shim: refused `gh pr merge`" in output,
+                "gh guard was not observed")
+        require(hasattr(self, "guard_audit_baseline"), "startup shim audit baseline missing")
+        prefix = self.guard_audit_baseline
+        startup_gh = self.startup_gh_records(audit_text(prefix))
+        require(raw_files["audit/shim.jsonl"].startswith(prefix), "startup shim audit prefix changed")
+        suffix = audit_text(raw_files["audit/shim.jsonl"][len(prefix):])
+        records = [json.loads(line) for line in suffix.splitlines() if line]
+        gh = [r for r in records if r.get("tool") == "gh"]
+        require(len(gh) == 1 and gh[0].get("event") == "refuse" and gh[0].get("code") == "gh_merge"
+                and gh[0].get("instance") == IDS[0] and gh[0].get("cwd") == str(work)
+                and gh[0].get("argv") == ["pr", "merge"], "native gh refusal identity/count differs")
+        evidence = {"requested_argv": ["gh", "pr", "merge", "--help"], "shim_paths": paths,
+                    "exit": 1, "output": output, "native_records": gh,
+                    "startup_gh_refusals": startup_gh}
+        write_json(self.out / "gh-guard-evidence.json", evidence)
+        return evidence
+
     def execute(self):
         self.start()
         self.idle()
+        self.capture_guard_baseline()
         self.initialized = True
         self.send("initial")
         work = self.home / "workspace" / IDS[0]
         self.wait(lambda: (work / "shim-paths.txt").is_file() and (work / "gh-exit.txt").is_file()
                   and self.status().get(IDS[0]) == "idle", "A finished initial work before peer reply")
+        self.guard_evidence()
         (self.home / "workspace" / IDS[1] / "a-ready").write_text(self.nonce)
         self.wait(lambda: self.marker("peer-complete"), "model peer round trip")
-        paths = (self.home / "workspace" / IDS[0] / "shim-paths.txt").read_text().splitlines()
-        require(paths == [str(self.home / "bin" / t) for t in ("git", "kill", "pkill", "killall", "gh")], "Bash PATH bypasses a shim")
-        require((work / "gh-exit.txt").read_text() == "1" and "refused" in (work / "gh-guard.txt").read_text(), "gh guard was not observed")
         self.idle()
         self.send("busy")
         self.wait(lambda: self.marker("busy-start") and self.status().get(IDS[0]) == "working", "busy foreground command")
@@ -279,6 +365,7 @@ class Smoke:
             write_json(self.out / "native-evidence.json", dict(messages=rows, all_messages=all_messages, events=events, startup=startup, instances=identities))
         require(len(rows) == len(all_messages) == 7 and len(startup) == 2, "unexpected message/startup count")
         require({r["body"] for r in rows} == set(self.p["prompts"].values()), "message bodies differ or duplicate work")
+        guard = self.guard_evidence()
         ack_events = [r for r in events if r["kind"] == "AgendAck" and not r["replayed"]]
         for row in rows:
             require(row["state"] == "confirmed" and row["confirmed_at_unix_ms"] is not None, "message lacks native explicit ACK")
@@ -308,6 +395,9 @@ class Smoke:
                 native_send = f"agend send {recipient} {shlex.quote(self.p['prompts'][prompt])}"
                 require(any(native_send in json.loads(e["payload"])["tool_input"]["command"]
                             for e in work_events), "model peer send lacks exact native Bash command evidence")
+            if name == "initial":
+                require(any("gh pr merge --help > gh-guard.txt 2>&1" in json.loads(e["payload"])["tool_input"]["command"]
+                            for e in work_events), "read-only gh help lacks native Bash command evidence")
             if name == "queued":
                 states = [e for e in events if e["kind"] == "AgendState" and e["session_id"] == row["session_id"] and e["occurred_at_unix_ms"] <= row["created_at_unix_ms"]]
                 require(states and json.loads(states[-1]["payload"])["busy"], "queue was not inserted while busy")
@@ -341,6 +431,7 @@ class Smoke:
             shutil.copyfile(transcript, self.out / f"{instance}-transcript.jsonl")
         return {"verdict": "PASS", "confirmed_messages": len(rows), "routes": {"channel": 6, "stop": 1},
                 "true_cli_version": self.p["version"], "new_model_work_requests": 7, "observed_assistant_usage": usage,
+                "gh_guard": guard,
                 "limitations": "True-backend smoke; native fault matrix remains separately verified. No exact API-call or monetary hard cap."}
 
     def cleanup(self):
@@ -355,9 +446,8 @@ class Smoke:
                     self.sessions[instance] = sid
         result = subprocess.run(self.p["cleanup_argv"], capture_output=True, text=True, timeout=45)
         require(result.returncode == 0, "native cleanup failed; preserve home and report leftovers")
-        # Global trust entries are handled separately by the executor after
-        # checking concurrent CLI activity. This runner never renames account
-        # settings over another writer or claims those entries are removed.
+        # The user explicitly retains global trust entries. Never write shared
+        # account settings or ask foreign CLI sessions to exit for cleanup.
         residues = []
         # The native SessionStart supplies the CLI's exact scratch path. A
         # project can contain another bootstrap UUID; own the nonce namespace,
@@ -420,7 +510,9 @@ class Smoke:
         require((self.home / ".smoke-owner").read_text() == self.nonce, "home owner changed; preserved")
         shutil.rmtree(self.home.parent)
         return {"home_absent": not self.home.parent.exists(), "native_cleanup": result.stdout,
-                "personal_session_residues": residues, "trust_cleanup_pending": [str(self.home / "workspace" / i) for i in self.sessions]}
+                "personal_session_residues": residues,
+                "trust_entries_retained": [str(self.home / "workspace" / i) for i in self.sessions],
+                "shared_account_writes": 0}
 
 
 def main():

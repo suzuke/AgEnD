@@ -7,18 +7,18 @@
 
 ## 狀態
 
-**實作中**（2026-10-05）。設計 #138（`4390633`）、client #147（`8dfccf8`）、store #148（`7877dbe`）及 [bridge #149](gate-12a-bridge.md)（`6dd552e`）已合併。#149 經全新 verifier r2、雙平台 push／PR CI 與使用者 16 native cases 重驗通過，已清理本批 worktree／branch／target。[共用 gh 防護 #150](gate-12a-gh-shim.md) 已依使用者確認合併為 `572dd73`；[Claude Driver／啟動設定與控制](gate-12a-driver.md) 在 `feat/gate-12a-claude-driver` 實作中；完整 Claude Driver、啟動設定與 A 段功能驗收仍未完成。設計見 [D40](../decisions/d40.md)，來源見[確認紀錄](gate-12a-confirmations.md)。
+**實作中**（2026-10-07）。A 段基礎 #147–#153 已合併；#154 修正 active Stop idle 與 smoke 工具，[v12 完整真模型 smoke](gate-12a-complete-smoke.md)已回報 PASS，獨立 outcome／CI 收尾中。使用者已持續授權推進至第 12 關完成，包含必要受控真測及驗證後合併，見 AGENTS.md。以下舊提案與進度條目保留歷史語境。
 
 ## 四段範圍
 
 | 段 | 範圍 | 目前進度 |
 |---|---|---|
-| A claude | channel、hooks、啟動設定、權限、忙碌策略、送達、清掃 | 設計已 merge；client 基礎 #147 已 merge；持久化 #148 已 merge；bridge #149 已 merge；共用 gh 防護 #150 已 merge；Driver #151 與正式啟動 #152 已 merge；完整真模型 smoke 為必要驗收，首次執行停於初始 idle 逾時，訊息階段未開始 |
-| B opencode | `opencode serve`、session、送達與權限；三個 backend 互傳訊息 | A 段完成後另寫細案，尚未確認 |
-| C GitHub forge | push、PR、checks、head 對帳、merge 與收尾 | 第 10 關依賴已完成，細案尚未確認 |
-| D Telegram | notifier、allowlist、token、手機處理需要你、G4 已讀狀態 | 第 10 關依賴已完成，細案尚未確認 |
+| A Claude | channel、hooks、啟動、忙碌策略、送達與清掃 | v12 七則完整 smoke PASS；#154 覆核／CI／合併收尾 |
+| B OpenCode | serve、session、送達、權限；三個 backend 互傳 | 尚未實作；已無模型讀取 1.18.34 本機 OpenAPI，隔離 server 已清理 |
+| C GitHub forge | push、PR、checks、head 對帳、merge 與收尾 | 尚未實作 |
+| D Telegram | notifier、allowlist、token、手機操作、G4 已讀 | 尚未實作；使用者稍後提供專用 bot 設定路徑／chat ID，先完成其餘部分 |
 
-B／C／D 仍未實作；四段原提案的歷史參考保留在 `74ced40`，不視為已確認設計。
+B–D 依現有決策與持續授權具體化；遇新的重大取捨才再請使用者決定。第 13 關安裝／發布不在此次範圍。
 
 ## 本次對齊的現況
 
