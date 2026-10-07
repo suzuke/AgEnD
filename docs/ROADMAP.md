@@ -99,6 +99,8 @@
 
 - 2026-10-07：12B 補已套用 POST／回覆遺失故障注入，三次 SQLite 重開不重送；chunked 超限統一分頁縮小。OpenCode 18 tests、clippy 與 check-deps 通過；這是 native producer 自動測試，非真模型網路故障驗證。
 
+- 2026-10-07：12B 真 OpenCode 1.18.34 兩則權限蒐證通過，REST 無 SSE 取得請求、once 完成與 reject 拒絕；原始輸出納入回歸，自有程序／port／暫存已清，共享 auth 不變。尚未代表完整 12B 驗收。
+
 歷史紀錄見 [2026-10-02–03](roadmap-progress-20261002-03.md) 與 [較早紀錄](roadmap-progress.md)。
 
 - 2026-10-04：依使用者確認合併 #138（`4390633`），於 `feat/gate-12a-claude` 開工；首批加入 client 單次請求 API 與 native socket 回歸，Claude 接入及第 12A 驗收尚未完成。

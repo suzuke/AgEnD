@@ -1,0 +1,111 @@
+[
+  {
+    "info": {
+      "id": "msg4fb846b9bb5b46fbf51c245326397047c8779599ecb5b428bee80ba7e3c995f7",
+      "sessionID": "ses_eeab177ffffebsfoN6FcqOb7Bx",
+      "role": "user",
+      "time": {
+        "created": 1791358830595
+      },
+      "summary": {
+        "diffs": []
+      },
+      "agent": "build",
+      "model": {
+        "providerID": "opencode-go",
+        "modelID": "gpt-6-luna"
+      }
+    },
+    "parts": [
+      {
+        "id": "prt_1154e8804001rGRxDbfrE3vgaV",
+        "sessionID": "ses_eeab177ffffebsfoN6FcqOb7Bx",
+        "messageID": "msg4fb846b9bb5b46fbf51c245326397047c8779599ecb5b428bee80ba7e3c995f7",
+        "type": "text",
+        "text": "Use the bash tool exactly once to run this exact command: printf AGEND_G12B_REJECT. Do not use other tools or change the command. If permission is denied, do not retry; reply DENIED. Otherwise reply DONE."
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_1154e8808001Fsz8gaLTdNNFbG",
+      "sessionID": "ses_eeab177ffffebsfoN6FcqOb7Bx",
+      "role": "assistant",
+      "time": {
+        "created": 1791358830600,
+        "completed": 1791358832279
+      },
+      "parentID": "msg4fb846b9bb5b46fbf51c245326397047c8779599ecb5b428bee80ba7e3c995f7",
+      "modelID": "gpt-6-luna",
+      "providerID": "opencode-go",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/private/tmp/agend-g12b-permission-166kjocw/workspace",
+        "root": "/"
+      },
+      "cost": 0.00069855,
+      "tokens": {
+        "total": 5514,
+        "input": 3,
+        "output": 25,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 5486
+        }
+      },
+      "finish": "tool-calls"
+    },
+    "parts": [
+      {
+        "id": "prt_1154e8df2001xquUKFNkHRwR7u",
+        "sessionID": "ses_eeab177ffffebsfoN6FcqOb7Bx",
+        "messageID": "msg_1154e8808001Fsz8gaLTdNNFbG",
+        "type": "step-start"
+      },
+      {
+        "id": "prt_1154e8df40011nupMNloXTPTAF",
+        "sessionID": "ses_eeab177ffffebsfoN6FcqOb7Bx",
+        "messageID": "msg_1154e8808001Fsz8gaLTdNNFbG",
+        "type": "tool",
+        "callID": "call_nrpUCtdDAS8aFCvOzn3wDOhL",
+        "tool": "bash",
+        "state": {
+          "status": "error",
+          "input": {
+            "command": "printf AGEND_G12B_REJECT"
+          },
+          "error": "The user rejected permission to use this specific tool call.",
+          "time": {
+            "start": 1791358832230,
+            "end": 1791358832276
+          }
+        },
+        "metadata": {
+          "openai": {
+            "itemId": "fc_0bde32f9fc30646a016ac5f76ff4b887d2abc9caeafb0262cd"
+          }
+        }
+      },
+      {
+        "id": "prt_1154e8e950014s60fSv7EYRpgZ",
+        "sessionID": "ses_eeab177ffffebsfoN6FcqOb7Bx",
+        "messageID": "msg_1154e8808001Fsz8gaLTdNNFbG",
+        "type": "step-finish",
+        "reason": "tool-calls",
+        "cost": 0.00069855,
+        "tokens": {
+          "total": 5514,
+          "input": 3,
+          "output": 25,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 5486
+          }
+        }
+      }
+    ]
+  }
+]

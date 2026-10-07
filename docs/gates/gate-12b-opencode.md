@@ -56,3 +56,5 @@ worker 每輪讀最新 16 筆及一頁更早歷史，超限頁以更小 limit �
 ## 下一步
 
 完成 holder 原生整合、權限請求與恢復測試，再進行受控真測與 fresh verifier。
+
+2026-10-07 真權限 API 蒐證：固定 1.18.34／gpt-6-luna，兩則 prompt 分別要求一次 printf；REST 在沒有 SSE subscriber 時取得原始 permission，once 工具 completed、reject 工具 error，回覆後 pending 消失。原始請求與 history 已納入 parser 回歸；這不替代 daemon attention／重啟真測。ops `permission-capture-v1` 記錄兩則訊息與清理，自有程序、port、root 均消失，共享 auth 未變。

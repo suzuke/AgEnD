@@ -17,3 +17,5 @@
 `1.18.34-busy-history.json` 來自相同固定 binary／模型的 busy smoke v2：三筆 user 皆 Confirmed，第一輪 aborted，最後 interrupt 回覆完成；原生紀錄只有兩筆 terminal assistant，不能把 queued user 宣稱為另一個已完成回合。`busy-smoke-v1` 在第一筆 POST 後尚未 busy 就過早斷言而停止；v2 明確等 busy 後送第二、三筆，無重送。計畫／checkpoints／結果／清理在 ops `busy-smoke-v2`。
 
 `1.18.34-pages.json` 是零模型、無帳戶的四筆 noReply 捕獲，兩頁各兩筆；保存原生 session／opaque cursor／single message。計畫與清理在 ops `pagination-capture-v2`；測試僅重播捕獲，不重新執行 CLI。
+
+`1.18.34-permission-{once,reject}-{pending,history}.json` 來自相同固定 binary／模型的兩則權限真測；沒有 SSE subscriber，REST 取得原始請求、核准一次的 printf 完成、拒絕一次的工具為 error。只證明後端 API 與工具結果，不宣稱 daemon attention／重啟端到端真測。ops `permission-capture-v1` 保存固定計畫與清理；共享 auth 雜湊未變，自有 root、程序及 port 均清除。
