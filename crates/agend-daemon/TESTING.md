@@ -197,3 +197,5 @@ Telegram unknown 測試核 active claim 不提早發布、HTTP 收據遺失／�
 12D `cargo test -p agend-daemon --lib daemon::telegram_tests::active_shutdown` 用兩個獨立子程序執行正式 daemon `serve`，本機 HTTP producer 扣住第一段回覆。SIGINT 後 socket 已移除但程序仍等收據；放行後 SQLite 保存第一段，重啟只送第二段並完成。僅測試編譯可注入 loopback API，正式 origin 不變；ignored `child` 是父測試啟動的子程序入口。這驗 auxiliary outbox active shutdown，不涵蓋 Retry 排隊關機。
 
 12D `cargo build -p agend -p agend-testkit --bins` 後，`cargo test -p agend-daemon --lib daemon::telegram_tests` 跑三個本機 HTTP／獨立 daemon 子程序案例（另有一個由父測試啟動的 ignored child 入口）。Retry 用正式 supervisor／holder 啟動 `/bin/bash` inbox 測試程序，保存 Running／session_started／accepted；第二次 boot 沒有再次啟動或再次 Accepted。排隊案例只在測試編譯延遲 supervisor 消費事件，先排 SIGINT Stop、再讓真 poll 排 RetryConfirmed；正式 run／drop queue／worker.stop 保存 refused、保留 Failed、不啟動 holder。全部不啟動真模型、不用真 Telegram。
+
+Terminal frame 解碼：借用完整 RawValue payload 再直接轉型，避免整張 grid 經 internally-tagged Content 中間樹；wire 格式、行長限制與身分檢查不變。`decode_contract` 用 holder 真 parser 的 producer golden 驗兩種欄位順序，以及重複 type／data／request_id、同列尾隨 JSON、截斷 JSON 拒絕；非 frame response 沿用既有 decoder。

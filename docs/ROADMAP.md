@@ -295,3 +295,5 @@
 - 2026-10-07：PR #156 補自由文字 reply 受控探針，本機正式 daemon→ask／單筆 inbox 通過並確認 holder 清空；Telegram 真回覆待使用者操作。另保留 native capture 偶發空白與 macOS outer PTY 320 ms 超過 300 ms 的失敗證據，未宣称修復或整體通過。
 
 - 2026-10-07：PR #156 終端延遲補外層 parser 首次可見時間戳，保留 trigger 前起點與 300 ms；daemon capture cadence 改以開始時間計算，移除 RPC 後額外等待。外層 8 項本機通過，尚不宣稱已定位 CI 320 ms 根因。
+
+- 2026-10-07：12D 整體驗收仍重現 terminal 300 ms 超標；分段紀錄及 CPU 取樣顯示大 frame 的 Content 中間樹成本，改 holder response／client frame 直接解碼。原生兩尺寸 24 bursts 初測通過，尚待反例、全新覆核、完整驗收及新 head CI，不以先前 CI 成功覆蓋本機失敗。

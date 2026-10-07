@@ -97,9 +97,7 @@ impl Conn {
                     self.reader.consume(take);
                     if end.is_some() {
                         let line = std::mem::take(&mut self.partial);
-                        return serde_json::from_slice(&line)
-                            .map(Some)
-                            .map_err(io::Error::other);
+                        return decode_response(&line).map(Some).map_err(io::Error::other);
                     }
                 }
                 Err(e)
@@ -125,6 +123,25 @@ impl Conn {
 
 fn unexpected(response: &HolderResponse) -> io::Error {
     io::Error::other(format!("unexpected holder response: {response:?}"))
+}
+
+// Avoid materializing every cell into Serde's internally-tagged Content tree.
+// Borrow the complete payload; direct typed decoding also accepts data before type.
+fn decode_response(line: &[u8]) -> serde_json::Result<HolderResponse> {
+    #[derive(serde::Deserialize)]
+    struct Envelope<'a> {
+        #[serde(rename = "type")]
+        kind: String,
+        #[serde(borrow)]
+        data: Option<&'a serde_json::value::RawValue>,
+    }
+    if let Ok(envelope) = serde_json::from_slice::<Envelope<'_>>(line)
+        && envelope.kind == "terminal_frame"
+        && let Some(data) = envelope.data
+    {
+        return serde_json::from_str(data.get()).map(|data| HolderResponse::TerminalFrame { data });
+    }
+    serde_json::from_slice(line)
 }
 
 #[cfg(test)]
@@ -217,5 +234,40 @@ mod tests {
             conn.recv(Some(Duration::from_secs(1))).unwrap_err().kind(),
             io::ErrorKind::UnexpectedEof
         );
+    }
+}
+
+#[cfg(test)]
+mod decode_contract {
+    use super::decode_response;
+    #[test]
+    fn producer_golden_accepts_both_orders_and_rejects_ambiguous_frames() {
+        // This golden is generated and checked by the real holder parser test.
+        let golden: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../agend-holder/tests/golden/terminal-frame-1.4.json"
+        ))
+        .unwrap();
+        let native = serde_json::to_string(&golden["holder"]).unwrap();
+        let expected = decode_response(native.as_bytes()).unwrap();
+        let data = serde_json::to_string(&golden["holder"]["data"]).unwrap();
+        let first = format!(r#"{{"type":"terminal_frame","data":{data}}}"#);
+        assert_eq!(decode_response(first.as_bytes()).unwrap(), expected);
+        let cases = [
+            format!(r#"{{"type":"terminal_frame","type":"terminal_frame","data":{data}}}"#),
+            format!(r#"{{"type":"terminal_frame","data":{data},"data":{data}}}"#),
+            format!("{first} {{}}"),
+            first.replacen(
+                r#""request_id":"#,
+                r#""request_id":"duplicate","request_id":"#,
+                1,
+            ),
+            first[..first.len() - 1].to_string(),
+        ];
+        for (index, line) in cases.iter().enumerate() {
+            assert!(
+                decode_response(line.as_bytes()).is_err(),
+                "accepted adversary {index}"
+            );
+        }
     }
 }

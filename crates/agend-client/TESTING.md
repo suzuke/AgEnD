@@ -81,3 +81,5 @@ cargo test -p agend-client --test once --lib
 第三次 observed smoke 證實 instance add 可早於 terminal 註冊；consumer 的 no_terminal 拒絕正確。新的首次觀察 runner 以真 daemon／holder／shell 重現原拒絕，再驗有界等候，沒有修改 client API，見[紀錄](../../docs/gates/gate-12a-observed-smoke-v3.md)。
 
 共用已讀：`cargo test -p agend --test shared_read` 以兩個真 TUI client／daemon 程序驗同步與重啟保留；daemon `mobile_read_` 驗 native HTTP 按鈕不消耗原動作，`a_followup_remains_unread` 驗舊 read key 拒絕，store `read_receipts_` 驗 DB 重開。TUI `a_disconnected_source_` 驗斷線不能宣稱保存成功。上述不含真 Telegram 手機操作。
+
+Terminal frame 解碼：借用完整 RawValue payload 再直接轉型，避免整張 grid 經 internally-tagged Content 中間樹；wire 格式、行長限制與身分檢查不變。`decode_contract` 用 holder 真 parser 的 producer golden 驗兩種欄位順序，以及重複 type／data／request_id、同列尾隨 JSON、截斷 JSON 拒絕；非 frame response 沿用既有 decoder。

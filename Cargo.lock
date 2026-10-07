@@ -53,6 +53,7 @@ dependencies = [
  "base64 0.22.1",
  "libc",
  "rusqlite",
+ "serde",
  "serde_json",
  "sha2",
  "signal-hook-registry",
