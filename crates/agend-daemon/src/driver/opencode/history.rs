@@ -148,6 +148,27 @@ mod tests {
     use std::time::Duration;
 
     #[test]
+    fn real_11834_busy_capture_keeps_three_receipts_and_two_terminal_records() {
+        let history: Value =
+            serde_json::from_str(include_str!("fixtures/1.18.34-busy-history.json")).unwrap();
+        let session = history[0]["info"]["sessionID"].as_str().unwrap();
+        let users = users(session, &history).unwrap();
+        assert_eq!(users.len(), 3);
+        for (user, id) in users.iter().zip([
+            "a548f813-6847-4f3c-977b-9403baf911f2",
+            "346da80f-adc4-40d9-9f8e-a78ae4c4fc2d",
+            "d1d3dd6a-4272-4632-aae2-ca38e971c9de",
+        ]) {
+            assert!(confirmed(session, id, &user.text, &history).unwrap());
+        }
+        let turns = completed(session, &history).unwrap();
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[0].1, None);
+        assert_eq!(turns[1].1.as_deref(), Some("AGEND_G12B_INTERRUPT_OK"));
+        assert!(turns.iter().all(|t| !t.2));
+    }
+
+    #[test]
     fn real_11834_model_capture_confirms_delivery_and_one_terminal_turn() {
         let history: Value =
             serde_json::from_str(include_str!("fixtures/1.18.34-model-history.json")).unwrap();

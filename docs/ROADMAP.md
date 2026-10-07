@@ -237,3 +237,5 @@
 - 2026-10-07：12B 固定 OpenCode 1.18.34／gpt-6-luna 正式 daemon 真模型單則 smoke 通過，原生歷史與 DB 確認單次投遞及完成；自有程序／port／目錄已清，共享 auth 不變。busy／跨 backend 與 fresh verifier 仍待完成。
 
 - 2026-10-07：12B busy queue→interrupt 原生反例重現並修正：abort 回覆成功後單次提交，不等待可能不存在的 idle 空窗；新增 steer／interrupt 兩條路徑的完整歷史與無重送檢查。
+
+- 2026-10-07：12B 真 OpenCode 1.18.34 busy smoke v2 通過三筆 Confirmed／首輪中斷／緊急回覆；保留 v1 過早 busy 斷言與 v2 精確範圍，原生歷史加入回歸，自有程序與暫存已清。

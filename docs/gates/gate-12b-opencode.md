@@ -41,7 +41,7 @@ Driver 事件已補 REST terminal assistant 回填（中途 tool-calls 不算回
 
 OpenCode 同樣使用 daemon 的 `ZDOTDIR`，避免 login zsh 的系統 profile 把 shim PATH 移到後方。沿用共享 `.zprofile`，不改使用者 shell 設定。
 
-原生 busy queue→steer／interrupt 反例先重現失敗：abort 後 backend 立即開始既有排隊工作，等待 idle 五秒會把新訊息留成 unknown。修正為 abort 成功回覆後單次提交，不要求可觀察的 idle 空窗；測試核三筆完整 user message、只有首輪被中斷、各筆 Confirmed 與後續 tick 無重送。此為既有原生 producer 邊界證據；1.18.34 真 busy 行為仍須另驗。
+原生 busy queue→steer／interrupt 反例先重現失敗：abort 後 backend 立即開始既有排隊工作，等待 idle 五秒會把新訊息留成 unknown。修正為 abort 成功回覆後單次提交，不要求可觀察的 idle 空窗；測試核三筆完整 user message、只有首輪被中斷、各筆 Confirmed 與後續 tick 無重送。此為既有原生 producer 邊界證據；1.18.34 真 busy smoke v2 已核三筆 Confirmed、首輪 aborted 與最後 interrupt 回覆，程序及暫存已清，共享 auth 不變；queued user 沒有獨立 assistant 完成，不把收件與回合完成混為一談。v1 在 busy 尚未發布時過早斷言停止，未重送；兩份結果均保留。
 
 ## 下一步
 

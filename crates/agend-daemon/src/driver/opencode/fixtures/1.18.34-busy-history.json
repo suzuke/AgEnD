@@ -1,0 +1,209 @@
+[
+  {
+    "info": {
+      "id": "msg587677b494b3626a680ac5ef31749e2a6d672f22bbe2c34749f09c56b2a26a35",
+      "sessionID": "ses_eeacb84e5ffeT3whEGTkIYuRGB",
+      "role": "user",
+      "time": {
+        "created": 1791357123796
+      },
+      "summary": {
+        "diffs": []
+      },
+      "agent": "build",
+      "model": {
+        "providerID": "opencode-go",
+        "modelID": "gpt-6-luna"
+      }
+    },
+    "parts": [
+      {
+        "id": "prt_115347cd7001PT95SZfxGw0c3f",
+        "sessionID": "ses_eeacb84e5ffeT3whEGTkIYuRGB",
+        "messageID": "msg587677b494b3626a680ac5ef31749e2a6d672f22bbe2c34749f09c56b2a26a35",
+        "type": "text",
+        "text": "From: open\n\nWrite a 2000 word plain text essay about sorting algorithms. Do not use tools or commands."
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_115347db9001RdLcPA8iBjDtXi",
+      "sessionID": "ses_eeacb84e5ffeT3whEGTkIYuRGB",
+      "role": "assistant",
+      "time": {
+        "created": 1791357124025,
+        "completed": 1791357124977
+      },
+      "error": {
+        "name": "MessageAbortedError",
+        "data": {
+          "message": "Aborted"
+        }
+      },
+      "parentID": "msg587677b494b3626a680ac5ef31749e2a6d672f22bbe2c34749f09c56b2a26a35",
+      "modelID": "gpt-6-luna",
+      "providerID": "opencode-go",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/private/tmp/agend-g12b-busy-lwxw6hgn/agend/workspace/open",
+        "root": "/"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      }
+    },
+    "parts": []
+  },
+  {
+    "info": {
+      "id": "msg82de5910d270c329ef483e605fc6cc02ac139ff12f756d7bcb33b838f9c06364",
+      "sessionID": "ses_eeacb84e5ffeT3whEGTkIYuRGB",
+      "role": "user",
+      "time": {
+        "created": 1791357124681
+      },
+      "agent": "build",
+      "model": {
+        "providerID": "opencode-go",
+        "modelID": "gpt-6-luna"
+      }
+    },
+    "parts": [
+      {
+        "id": "prt_115348049001CNsVlOakrKfi9L",
+        "sessionID": "ses_eeacb84e5ffeT3whEGTkIYuRGB",
+        "messageID": "msg82de5910d270c329ef483e605fc6cc02ac139ff12f756d7bcb33b838f9c06364",
+        "type": "text",
+        "text": "From: open\n\nReply with exactly AGEND_G12B_QUEUE_OK. Do not use tools or commands."
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg6e7542c237bd7176d7e9e745d520d1fd4312ebf0dd2641c3636a97ed75b8803f",
+      "sessionID": "ses_eeacb84e5ffeT3whEGTkIYuRGB",
+      "role": "user",
+      "time": {
+        "created": 1791357124987
+      },
+      "summary": {
+        "diffs": []
+      },
+      "agent": "build",
+      "model": {
+        "providerID": "opencode-go",
+        "modelID": "gpt-6-luna"
+      }
+    },
+    "parts": [
+      {
+        "id": "prt_11534817c001Gmit1C4fQ14LtB",
+        "sessionID": "ses_eeacb84e5ffeT3whEGTkIYuRGB",
+        "messageID": "msg6e7542c237bd7176d7e9e745d520d1fd4312ebf0dd2641c3636a97ed75b8803f",
+        "type": "text",
+        "text": "From: open\n\nStop the essay and reply with exactly AGEND_G12B_INTERRUPT_OK. Do not use tools or commands."
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_11534817f001QsCkYuanhP9lZL",
+      "sessionID": "ses_eeacb84e5ffeT3whEGTkIYuRGB",
+      "role": "assistant",
+      "time": {
+        "created": 1791357124991,
+        "completed": 1791357127876
+      },
+      "parentID": "msg6e7542c237bd7176d7e9e745d520d1fd4312ebf0dd2641c3636a97ed75b8803f",
+      "modelID": "gpt-6-luna",
+      "providerID": "opencode-go",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/private/tmp/agend-g12b-busy-lwxw6hgn/agend/workspace/open",
+        "root": "/"
+      },
+      "cost": 0.0007058,
+      "tokens": {
+        "total": 5575,
+        "input": 3,
+        "output": 13,
+        "reasoning": 11,
+        "cache": {
+          "read": 0,
+          "write": 5548
+        }
+      },
+      "finish": "stop"
+    },
+    "parts": [
+      {
+        "id": "prt_1153489170013slstkn6zbfYSJ",
+        "sessionID": "ses_eeacb84e5ffeT3whEGTkIYuRGB",
+        "messageID": "msg_11534817f001QsCkYuanhP9lZL",
+        "type": "step-start"
+      },
+      {
+        "id": "prt_115348918001ZTFpccsx9OrsQA",
+        "sessionID": "ses_eeacb84e5ffeT3whEGTkIYuRGB",
+        "messageID": "msg_11534817f001QsCkYuanhP9lZL",
+        "type": "reasoning",
+        "text": "",
+        "metadata": {
+          "openai": {
+            "itemId": "rs_0e43e9ee2c9fec18016ac5f0c6bddc87d28a3daecfc6959521",
+            "reasoningEncryptedContent": "gAAAAABqxfDH7kUCCAAeNCWucnKDtXkLJlQAX19IMX4iNShG16YMn6zFrF_YCCmK7yJ0xdoQBcYjrEDWtEU64NnIYOnk0WjHAFsKSmKce44zrP1ndjEpld1XtDvKr-tSkMdBg-g6TL8oTRUeZbcKmSqt_wlXHM6B3Brdq3QfT9kav7Vz7_RDixp77hbU41Jv1jMC95OIBM7rsDSufo9pRh83ZWpfw4ZnXTO6fTWlNuh_SZMurgzH0Z4jQsTTGvCQdZkAZq2SzqAcBcQeSqAQJKQhSGaym19KQvhT-VQPlznLLt-cpgJ4S7zBMQL3t8bdzvxo7IaoCpuWouW6SOujS0ZevMPcOh8ct0Yz4ZFoqD-QYwGRsB6kWVlYnfaN8faYooVCrsi21IV6si0H4xssGcZaPMl-_HKGtmnzEHSiyflBQgK4I94sWIeeDS14TSzkb5YjLtm8s2ND2Y3HeGXwo4cP_CgiqFA16okSzQpw5tMjUjbFT4FUwIPHiY5gt5azgxGCfnYy3FS_oakTBgCp5A3VHz4Ajyk6HWlQl8O3JSDIIbPWjP3Vta50lxHdbJ4C-Gn9QSeGmOpCWV73Xk7JeA4h9iS6oaZQ2adF4agOB-NTP-TRV3-8CYhXxd2pB7THkUIvAVSPxwoKuYLv295BgqeLV6IdFDoYbnchC0jTPdFPTBGqUK29WbpLu9W1aJB0cOzBK1w5DvHnM2YDa0irgwbK9PI04JEsdsW_xFOZYdIJPuRQ7MtHehMUWBgOLRcbGC9tcFZeh2umIb8BlcmC-7Gr7hDG3MVbgDkIv_ovrvePqwri-hoKDrzujYUpkjpzPejQ282kBJGol7WYw9IhXqF5XQgbkINK5awRikqtj2y-q7-pfVNafbJyqUy95WTwS4yCCDOobmguRSijyuBXORftID4mzu2UmqI-nMccAPMagYUv0csDqZtEf-HuDqjpcQEhrKDyjKvO3_LHGzPmgw7PKEUwYbuntwsn-x6_K7jms_wn9lPfTyXL-5f8sfMbiJVlgcO_UgFh4c9IgKACtE47n5m4H-3bl6oRqOC56W8xZyO2l1LK-L4daz-KDl_XXGHduzOnDJ9eMuhSZdEjxM0uzcLIovVCScvHfD_wx-SYDE59Vq9N78K_Wmi8ISbLYZFsep82goJA9abk5PdlY8dGgSuyshXirOGanpzqdbeFNO-PdLcbsfSVAnZFMbuyccMhPOwWRgHfyOv1E_0jQzSZB06dat2KGqE_t8F6nte66n1-nHQ6Tic="
+          }
+        },
+        "time": {
+          "start": 1791357126937,
+          "end": 1791357127505
+        }
+      },
+      {
+        "id": "prt_115348b5b001lU60piyXq7fjI2",
+        "sessionID": "ses_eeacb84e5ffeT3whEGTkIYuRGB",
+        "messageID": "msg_11534817f001QsCkYuanhP9lZL",
+        "type": "text",
+        "text": "AGEND_G12B_INTERRUPT_OK",
+        "time": {
+          "start": 1791357127515,
+          "end": 1791357127837
+        },
+        "metadata": {
+          "openai": {
+            "itemId": "msg_0e43e9ee2c9fec18016ac5f0c76d5c87d2af3ba8abc1e9db9e",
+            "phase": "final_answer"
+          }
+        }
+      },
+      {
+        "id": "prt_115348cc2001P2Ukzg2gW7yqXt",
+        "sessionID": "ses_eeacb84e5ffeT3whEGTkIYuRGB",
+        "messageID": "msg_11534817f001QsCkYuanhP9lZL",
+        "type": "step-finish",
+        "reason": "stop",
+        "cost": 0.0007058,
+        "tokens": {
+          "total": 5575,
+          "input": 3,
+          "output": 13,
+          "reasoning": 11,
+          "cache": {
+            "read": 0,
+            "write": 5548
+          }
+        }
+      }
+    ]
+  }
+]
