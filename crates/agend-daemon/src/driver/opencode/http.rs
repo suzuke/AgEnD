@@ -78,6 +78,43 @@ impl Http {
         decode(response)
     }
 
+    /// Follow only the opaque cursor, never a server-provided Link URL.
+    pub fn page(
+        &self,
+        path: &str,
+        limit: usize,
+        before: Option<&str>,
+    ) -> Result<(Value, Option<String>), Error> {
+        if !(1..=64).contains(&limit) || before.is_some_and(|c| !valid_cursor(c)) {
+            return Err(Error::InvalidRequest);
+        }
+        let mut request = self
+            .agent
+            .get(self.url(path)?)
+            .query("directory", &self.directory)
+            .query("limit", limit.to_string())
+            .header("Authorization", &self.authorization);
+        if let Some(cursor) = before {
+            request = request.query("before", cursor);
+        }
+        let response = request
+            .call()
+            .map_err(|e| Error::Transport(e.to_string()))?;
+        let next = response
+            .headers()
+            .get("x-next-cursor")
+            .map(|h| h.to_str().map(str::to_owned))
+            .transpose()
+            .map_err(|_| Error::InvalidJson)?;
+        if next
+            .as_deref()
+            .is_some_and(|c| !valid_cursor(c) || Some(c) == before)
+        {
+            return Err(Error::InvalidJson);
+        }
+        Ok((decode(response)?, next))
+    }
+
     pub fn post(&self, path: &str, body: &Value) -> Result<Value, Error> {
         let url = self.url(path)?;
         let encoded = serde_json::to_vec(body).map_err(|_| Error::InvalidRequest)?;
@@ -94,6 +131,14 @@ impl Http {
             .map_err(|error| Error::Transport(error.to_string()))?;
         decode(response)
     }
+}
+
+fn valid_cursor(cursor: &str) -> bool {
+    !cursor.is_empty()
+        && cursor.len() <= 1024
+        && cursor
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"_-=".contains(&b))
 }
 
 fn decode(mut response: ureq::http::Response<ureq::Body>) -> Result<Value, Error> {

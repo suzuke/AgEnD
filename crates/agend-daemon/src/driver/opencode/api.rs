@@ -61,6 +61,42 @@ impl Session {
         Ok(value)
     }
 
+    /// A bounded native history page. The cursor is opaque and endpoint-bound.
+    pub fn history_page(
+        &self,
+        limit: usize,
+        before: Option<&str>,
+    ) -> Result<(Value, Option<String>), String> {
+        self.verify()?;
+        let (rows, next) = self
+            .http
+            .page(&self.path("/message"), limit, before)
+            .map_err(|e| e.to_string())?;
+        history::users(&self.id, &rows)?;
+        if rows.as_array().expect("validated").len() > limit {
+            return Err("OpenCode page exceeds requested limit".into());
+        }
+        Ok((rows, next))
+    }
+
+    /// Lookup an old attempt without downloading the complete session.
+    pub fn message(&self, id: &str) -> Result<Option<Value>, String> {
+        if !history::valid_id(id, "msg") {
+            return Err("invalid OpenCode message id".into());
+        }
+        self.verify()?;
+        let row = match self.http.get(&self.path(&format!("/message/{id}"))) {
+            Ok(row) => row,
+            Err(super::http::Error::Status(404)) => return Ok(None),
+            Err(e) => return Err(e.to_string()),
+        };
+        if row["info"]["id"] != id {
+            return Err("OpenCode returned a different message".into());
+        }
+        history::users(&self.id, &Value::Array(vec![row.clone()]))?;
+        Ok(Some(row))
+    }
+
     /// An absent entry means idle only after this session has been found.
     pub fn busy(&self) -> Result<bool, String> {
         self.verify()?;
@@ -327,5 +363,75 @@ mod tests {
         assert!(resumed.busy().unwrap());
         resumed.abort().unwrap();
         assert!(!resumed.busy().unwrap());
+    }
+}
+
+#[cfg(test)]
+mod pagination_capture_tests {
+    use super::*;
+    use std::{
+        io::{BufRead, BufReader, Write},
+        net::TcpListener,
+    };
+
+    #[test]
+    fn captured_native_pages_and_old_message_use_only_the_original_endpoint() {
+        let captured: Value =
+            serde_json::from_str(include_str!("fixtures/1.18.34-pages.json")).unwrap();
+        let sid = captured["session"]["id"].as_str().unwrap().to_owned();
+        let fixture = captured.clone();
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let producer = std::thread::spawn(move || {
+            let mut page = 0;
+            for _ in 0..7 {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                    .unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut request = String::new();
+                reader.read_line(&mut request).unwrap();
+                loop {
+                    let mut h = String::new();
+                    reader.read_line(&mut h).unwrap();
+                    if h == "\r\n" {
+                        break;
+                    }
+                }
+                let (body, next) = if request.contains("/message?") {
+                    assert!(request.contains("limit=2"));
+                    let p = &fixture["pages"][page];
+                    if page == 1 {
+                        assert!(request.contains(p["before"].as_str().unwrap()));
+                    }
+                    page += 1;
+                    (p["rows"].to_string(), p["next"].as_str().map(str::to_owned))
+                } else if request.contains("/message/") {
+                    assert!(request.contains(fixture["single"]["info"]["id"].as_str().unwrap()));
+                    (fixture["single"].to_string(), None)
+                } else {
+                    (fixture["session"].to_string(), None)
+                };
+                let cursor = next
+                    .map(|c| format!("X-Next-Cursor: {c}\r\n"))
+                    .unwrap_or_default();
+                write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\nLink: <http://127.0.0.1:1/foreign>; rel=\"next\"\r\n{cursor}\r\n{body}",body.len()).unwrap();
+            }
+            assert_eq!(page, 2);
+        });
+        let session =
+            Session::resume(Http::new(port, "fixture", "/fixture").unwrap(), &sid).unwrap();
+        let (first, next) = session.history_page(2, None).unwrap();
+        assert_eq!(first, captured["pages"][0]["rows"]);
+        let (second, end) = session.history_page(2, next.as_deref()).unwrap();
+        assert_eq!(second, captured["pages"][1]["rows"]);
+        assert!(end.is_none());
+        let old = session
+            .message(captured["single"]["info"]["id"].as_str().unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(old, captured["single"]);
+        producer.join().unwrap();
     }
 }

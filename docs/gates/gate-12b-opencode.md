@@ -49,6 +49,8 @@ OpenCode 同樣使用 daemon 的 `ZDOTDIR`，避免 login zsh 的系統 profile 
 
 OpenCode 投遞超過 10 秒仍未經完整歷史確認時，發布 `opencode-delivery:<id>` attention，只提供 operator 的 Abandon。重啟重新建提示，後到的有效 receipt 可正常消除提示；Abandon 經 DB thread 再核未終結狀態，原子記 Failed 與原因事件，晚到確認不復活。native daemon／holder 測試核兩次重啟、agent Forbidden、operator 終結及 backend 零 user message，確認未知 attempt 沒有重送。
 
+真 1.18.34 零模型分頁捕獲已完成：四筆 `noReply` user，`limit=2` 分兩頁，`X-Next-Cursor` 作不透明游標，舊 message 單筆查詢與原頁相同。新 API 封装僅在固定 loopback endpoint 附加 query，不跟隨 Link URL；captured producer 測試放入外來 Link，仍只使用原 endpoint。自有 server／目錄已清。這批先建立實測分頁接點，worker 尚未改為分頁，16 MiB 長歷史缺陷尚未宣稱修完。
+
 ## 下一步
 
 完成 holder 原生整合、權限請求與恢復測試，再進行受控真測與 fresh verifier。
