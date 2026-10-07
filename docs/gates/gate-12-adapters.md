@@ -1,13 +1,13 @@
 # 第 12 施工關：其餘 adapter（`adapters`）
 
 > **TL;DR**
-> - A claude、B opencode、C GitHub forge、D Telegram；A／B／D 已合併完成，C 整合驗證中。
+> - A claude、B opencode、C GitHub forge、D Telegram；A／B／D 已合併完成，C 由 #157 交付。
 > - 第 1–11 施工關已完成並合併；A 段設計 D40 已於 #138 合併（`4390633`）。
-> - 下一步：完成 C migration 整合、最終覆核／CI 與合併。
+> - 下一步：完成 #157 最終驗收／CI、合併及清理；第 13 關另行確認。
 
 ## 狀態
 
-**實作中**（2026-10-07）。A 段基礎 #147–#153 已合併；#154 修正 active Stop idle 與 smoke 工具，[v12 完整真模型 smoke](gate-12a-complete-smoke.md)已回報 PASS，獨立覆核與 CI 通過，#154 已合併為 `a6cdb4c`。使用者已持續授權推進至第 12 關完成，包含必要受控真測及驗證後合併，見 AGENTS.md。以下舊提案與進度條目保留歷史語境。
+**交付 #157**（2026-10-08）：第 12 關完成狀態於此 PR 完整驗收、CI 通過並合併後生效。A 段基礎 #147–#153 已合併；#154 修正 active Stop idle 與 smoke 工具，[v12 完整真模型 smoke](gate-12a-complete-smoke.md)已回報 PASS，獨立覆核與 CI 通過，#154 已合併為 `a6cdb4c`。使用者已持續授權推進至第 12 關完成，包含必要受控真測及驗證後合併，見 AGENTS.md。以下舊提案與進度條目保留歷史語境。
 
 ## 四段範圍
 
@@ -15,7 +15,7 @@
 |---|---|---|
 | A Claude | channel、hooks、啟動、忙碌策略、送達與清掃 | v12 七則完整 smoke PASS；#154 已合併 `a6cdb4c` |
 | B OpenCode | serve、session、送達、權限；三個 backend 互傳 | 正式 Driver／holder／權限與 DRV 10/10；基本／busy interrupt／permission 真測及三 backend 六方向互傳通過，全新 verifier：1,062 passed、fmt／clippy／no-std 通過；#155 已合併 `2a02fda`，自有 worktree／target 已清理 |
-| C GitHub forge | push、PR、checks、head 對帳、merge 與收尾 | 正式 pipeline、durable intent 與嚴格保護已接入；原生／production Forge 真測及獨立覆核通過，migration 17 整合與最終 acceptance／CI／合併中 |
+| C GitHub forge | push、PR、checks、head 對帳、merge 與收尾 | 正式 pipeline、durable intent 與嚴格保護已接入；原生／production Forge 真測及獨立覆核通過，migration 17 保留已發布 Telegram 資料，最終整合驗收／CI 與合併由 #157 把關 |
 | D Telegram | notifier、allowlist、token、手機操作、G4 已讀 | 持久分段通知、inbound 防護與 G4 共用已讀已實作；私訊已讀／確認、多行回覆與真 forum 分流／重啟真測通過，原生 accept 12 與固定程式碼 CI 全綠，已於 #156 合併（9dbfac7），自有 worktree／target 已清。見 [12D](gate-12d-telegram.md) |
 
 B–D 依現有決策與持續授權具體化；遇新的重大取捨才再請使用者決定。第 13 關安裝／發布不在此次範圍。
@@ -104,3 +104,9 @@ A 段原限制：不加新的 core 事件或未知提示／忙閒判斷機制。
 - 2026-10-07：12D 手機 inbound checkpoint：已確認通知收據綁 allowlist／選項，SQLite update 與單通知操作 claim 阻止重播；重試等待 supervisor 處理、修改原因以回覆輸入，pipeline 執行前核任務與注意事項版本。跨入口同原因再開、失敗事件重啟與 unknown 重開納入回歸；真手機 callback／G4、全新端到端驗證及 CI 尚未完成。
 
 2026-10-08：D #156 已合併並清理；C 嚴格保護／native pipeline／production Forge 真 GitHub smoke 均通過獨立覆核，合併 Telegram migration 13–16 後使用 GitHub migration 17。完整整合 acceptance／CI 尚待通過，施工關 12 未標完成。
+
+## 最終交付與重驗（2026-10-08）
+
+A #154、B #155、D #156 已合併並清理；C #157 包含正式 GitHub Forge、嚴格分支保護與 migration 17。原生／真測範圍、未知結果與歷史失敗分別保留於各段頁面；GitHub 真測是 production Forge 子程序，daemon 流水線另由原生案例覆蓋。使用者已實際完成 Telegram 私訊按鈕／多行回覆與群組設定；其他可自動化驗收依持續授權執行。
+
+完整離線重驗：`~/.cargo/bin/cargo xtask accept 12`。該入口涵蓋 Claude／OpenCode／GitHub／Telegram，真模型與外部 API 不會由此入口啟動。#157 必須通過最終驗收、全新覆核與雙平台 CI 才能合併；合併後刪除自有 C worktree／branch／target，保留必要證據及 Claude trust entries。第 13 關不在本次授權內。

@@ -1,9 +1,9 @@
 # 第 12C：GitHub forge
 
 > **TL;DR**
-> - 正式 GithubForge、pipeline 接線與持久化遠端收尾已實作；尚未驗收完成。
+> - 正式 GithubForge、pipeline 接線與持久化遠端收尾由 #157 交付。
 > - 離線原生 FRG 1–10 與真正 daemon 程序的重啟、main 前進、取消／WIP 收尾已通過。
-> - 下一步：完成 migration 17 整合驗收、最終覆核、CI 與合併。
+> - 下一步：#157 完整驗收與 CI 通過後合併並清理；完成狀態於合併後生效。
 
 ## 正式接線
 
@@ -63,3 +63,5 @@ GitHub merge API 只有 approved-head CAS，沒有 expected-base CAS。使用者
 2026-10-08 整合覆核：固定 2acd36a 的 migration／fixture 1–16 與已發布版本逐位元相同；獨立 SQLite 反例確認 linked unknown Telegram outbox／notice／update 與共用已讀資料通過 v17 後不變，外鍵與 schema 一致。production Forge 與真測版本未變。
 
 同一版完整 accept 12 及 push／PR 雙平台 CI 都揭露既有 archive IO 回歸：終結 action 誤用背景 cleanup，吞掉本機 release 錯誤。修正為終結 action 傳回原 Refusal，背景 wake 維持延後恢復；不改 WIP 測試斷言，也不改遠端收尾待辦語義。原失敗與修正後結果分別保存；最終 CI／整合驗收以 PR #157 為準。
+
+修正後的全新 verifier 已獨立重跑既有 archive suite 3/3 與 remote cleanup unit 1/1，確認本機拒絕／WIP 保留／稍後恢復及遠端失敗釋放容量皆通過；沒有改測試門檻。完整最終結果由 #157 的固定 head CI 與 ops `integrated-accept12-fixed.log` 記錄。
