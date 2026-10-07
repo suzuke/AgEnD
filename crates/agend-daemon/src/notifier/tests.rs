@@ -25,10 +25,16 @@ struct Server {
     origin: String,
     received: Arc<Mutex<Vec<String>>>,
     stop: Arc<AtomicBool>,
+    pause: Arc<AtomicBool>,
     thread: Option<thread::JoinHandle<()>>,
 }
 impl Server {
     fn new(lose_reply_at: Option<usize>, corrupt_at: Option<usize>) -> Self {
+        Self::with_pause(lose_reply_at, corrupt_at, false)
+    }
+    fn with_pause(lose_reply_at: Option<usize>, corrupt_at: Option<usize>, paused: bool) -> Self {
+        let pause = Arc::new(AtomicBool::new(paused));
+        let held = pause.clone();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let origin = format!("http://{}", listener.local_addr().unwrap());
@@ -93,6 +99,11 @@ impl Server {
                     out.push(text.to_owned());
                     out.len()
                 };
+                if index == 1 {
+                    while held.load(Ordering::SeqCst) {
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                }
                 if lose_reply_at == Some(index) {
                     continue;
                 }
@@ -120,6 +131,7 @@ impl Server {
         });
         Self {
             origin,
+            pause,
             received,
             stop,
             thread: Some(thread),
@@ -134,6 +146,7 @@ impl Server {
 }
 impl Drop for Server {
     fn drop(&mut self) {
+        self.pause.store(false, Ordering::SeqCst);
         self.stop.store(true, Ordering::SeqCst);
         let result = self.thread.take().unwrap().join();
         if !std::thread::panicking() {
@@ -340,4 +353,163 @@ async fn separate_notifiers_competing_for_one_delivery_publish_only_once() {
     first.resume("same").await.unwrap();
     second.resume("same").await.unwrap();
     assert_eq!(server.received.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn native_worker_observes_fleet_and_finishes_receipt_before_shutdown() {
+    use agend_core::protocol::client::{AttentionAction, AttentionRequiredData};
+    let dir = TempDir::new("telegram-worker").unwrap();
+    let server = Server::new(None, None);
+    let store = Arc::new(SqliteStore::open(dir.path(), 0).unwrap());
+    let fleet = Arc::new(crate::fleet::Fleet::new(1));
+    let item = AttentionRequiredData {
+        reason: "Approve 繁中 🧑‍🔧".into(),
+        task_id: Some("t-1".into()),
+        ask: None,
+        recap: None,
+        attention_id: Some("approval:t-1/approve/1".into()),
+        unblocks: Some(1),
+        waiting_since_unix_ms: Some(1),
+        if_ignored: Some("Task waits".into()),
+        actions: vec![AttentionAction::Approve, AttentionAction::RequestChanges],
+        instance_id: None,
+    };
+    fleet.upsert_attention(item.clone());
+    let config = agend_core::config::TelegramConfig {
+        token: agend_core::config::SecretRef::Env("NOT_USED".into()),
+        chat_id: 42,
+        allow_user_ids: vec![],
+        needs_you_topic: None,
+        team_topics: Default::default(),
+    };
+    let worker = super::worker::start_with_api(config, server.api(), store.clone(), fleet);
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if server.received.lock().unwrap().len() == 1 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    worker.stop().await;
+    let mut rebooted = item;
+    rebooted.waiting_since_unix_ms = Some(9999);
+    let notice = super::worker::notice(&rebooted).unwrap();
+    let rows = store
+        .observe_telegram(&[notice], &destination(), 2)
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].complete());
+    assert!(
+        rows[0]
+            .notification
+            .body
+            .contains("approve, request_changes")
+    );
+    assert_eq!(server.received.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn stop_and_resolved_attention_never_start_another_part_after_active_receipt() {
+    use agend_core::protocol::client::AttentionRequiredData;
+    for mode in 0..3 {
+        let stopping = mode == 0;
+        let dir = TempDir::new("telegram-stop-part").unwrap();
+        let server = Server::with_pause(None, None, true);
+        let store = Arc::new(SqliteStore::open(dir.path(), 0).unwrap());
+        let fleet = Arc::new(crate::fleet::Fleet::new(1));
+        let item = AttentionRequiredData {
+            reason: "繁中 🧑‍🔧 ".repeat(2000),
+            task_id: None,
+            ask: None,
+            recap: None,
+            attention_id: Some("held".into()),
+            unblocks: None,
+            waiting_since_unix_ms: Some(1),
+            if_ignored: None,
+            actions: vec![],
+            instance_id: None,
+        };
+        fleet.upsert_attention(item.clone());
+        let initial = store
+            .observe_telegram(&[super::worker::notice(&item).unwrap()], &destination(), 1)
+            .await
+            .unwrap()
+            .remove(0);
+        let config = agend_core::config::TelegramConfig {
+            token: agend_core::config::SecretRef::Env("NOT_USED".into()),
+            chat_id: 42,
+            allow_user_ids: vec![],
+            needs_you_topic: None,
+            team_topics: Default::default(),
+        };
+        let worker =
+            super::worker::start_with_api(config, server.api(), store.clone(), fleet.clone());
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while server.received.lock().unwrap().is_empty() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        if stopping {
+            worker.request_stop();
+        } else if mode == 1 {
+            fleet.dismiss("held");
+        } else {
+            let mut updated = item;
+            updated.reason.push_str("\nChanged question");
+            fleet.upsert_attention(updated);
+        }
+        server.pause.store(false, Ordering::SeqCst);
+        if !stopping {
+            tokio::time::timeout(Duration::from_secs(3), async {
+                loop {
+                    if store
+                        .telegram_delivery(&initial.id)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .abandoned
+                    {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap();
+        }
+        worker.stop().await;
+        let row = store.telegram_delivery(&initial.id).await.unwrap().unwrap();
+        assert_eq!(row.next_part, 1);
+        assert!(!row.in_flight);
+        assert_eq!(row.abandoned, !stopping);
+        if mode == 2 {
+            let sent = server.received.lock().unwrap();
+            assert!(sent.len() <= 2);
+            assert!(
+                sent.iter().all(|part| part.starts_with("AgEnD · 1/")),
+                "old continuation was sent"
+            );
+        } else {
+            assert_eq!(server.received.lock().unwrap().len(), 1);
+        }
+        if stopping {
+            let notifier = TelegramNotifier::new(server.api(), store.clone(), destination());
+            notifier.resume(&initial.id).await.unwrap();
+            assert!(
+                store
+                    .telegram_delivery(&initial.id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .complete()
+            );
+            assert_eq!(server.received.lock().unwrap().len(), row.parts.len());
+        }
+    }
 }

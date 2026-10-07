@@ -15,6 +15,20 @@ pub fn parse(text: &str) -> Result<Config, String> {
     Ok(config)
 }
 
+/// Missing configuration disables Telegram. Invalid present configuration fails boot.
+pub fn load(home: &Path) -> Result<Option<(agend_core::config::TelegramConfig, Token)>, String> {
+    let text = match std::fs::read_to_string(home.join("config.toml")) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err("cannot read config.toml".into()),
+    };
+    let Some(config) = parse(&text)?.telegram else {
+        return Ok(None);
+    };
+    let token = resolve(&config.token)?;
+    Ok(Some((config, token)))
+}
+
 /// Deliberately no Debug or Display, including on errors.
 pub struct Token(String);
 impl Token {

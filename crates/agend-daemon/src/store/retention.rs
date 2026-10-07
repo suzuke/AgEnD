@@ -62,6 +62,14 @@ pub struct Rule {
 pub const RETENTION: &[Rule] = &[
     Rule {
         target: Target::Table {
+            name: "telegram_notices",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "gate 12D: durable exception identity prevents duplicate notifications after restart",
+    },
+    Rule {
+        target: Target::Table {
             name: "telegram_outbox",
             time_column: None,
         },

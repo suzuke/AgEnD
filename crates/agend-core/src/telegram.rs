@@ -98,8 +98,22 @@ pub fn render(note: &Notification) -> Vec<String> {
         .collect()
 }
 
+/// A current needs-you item. Identity is stable across daemon restarts;
+/// content changes or a resolved-and-reopened item start a new delivery.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TelegramNotice {
+    pub key: String,
+    pub notification: Notification,
+}
+
 pub trait TelegramStore: Sync {
     type Error: Send;
+    fn observe_telegram<'a>(
+        &'a self,
+        notices: &'a [TelegramNotice],
+        destination: &'a TelegramDestination,
+        now: u64,
+    ) -> impl Future<Output = Result<Vec<TelegramDelivery>, Self::Error>> + Send + 'a;
     fn enqueue_telegram<'a>(
         &'a self,
         delivery: &'a TelegramDelivery,

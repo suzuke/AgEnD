@@ -41,7 +41,7 @@ where
             .enqueue_telegram(&initial)
             .await
             .map_err(|e| e.to_string())?;
-        self.send_pending(row).await
+        self.send_pending(row, false, None).await
     }
     /// Resume confirmed-prefix deliveries. An in-flight part is unknown, not pending.
     pub async fn resume(&self, id: &str) -> Result<(), String> {
@@ -52,9 +52,28 @@ where
             .await
             .map_err(|e| e.to_string())?
             .ok_or("unknown Telegram delivery")?;
-        self.send_pending(row).await
+        self.send_pending(row, false, None).await
     }
-    async fn send_pending(&self, mut row: TelegramDelivery) -> Result<(), String> {
+    pub(super) async fn resume_one(
+        &self,
+        id: &str,
+        stop: &tokio::sync::watch::Receiver<bool>,
+    ) -> Result<(), String> {
+        let _serial = self.serial.lock().await;
+        let row = self
+            .store
+            .telegram_delivery(id)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or("unknown Telegram delivery")?;
+        self.send_pending(row, true, Some(stop)).await
+    }
+    async fn send_pending(
+        &self,
+        mut row: TelegramDelivery,
+        one: bool,
+        stop: Option<&tokio::sync::watch::Receiver<bool>>,
+    ) -> Result<(), String> {
         if row.destination != self.destination {
             return Err("Telegram destination or bot identity changed; no send permitted".into());
         }
@@ -64,7 +83,7 @@ where
         if row.in_flight {
             return Err("Telegram send outcome unknown; no automatic replay permitted".into());
         }
-        if row.complete() {
+        if row.complete() || stop.is_some_and(|s| *s.borrow()) {
             return Ok(());
         }
         // Pin this immutable API/token to the intended bot before any mutation.
@@ -89,6 +108,9 @@ where
             return Err("Telegram token belongs to a different bot; nothing sent".into());
         }
         while !row.complete() {
+            if stop.is_some_and(|s| *s.borrow()) {
+                return Ok(());
+            }
             let part = row.next_part;
             if !self
                 .store
@@ -134,6 +156,9 @@ where
             }
             row.next_part += 1;
             row.message_ids.push(id);
+            if one {
+                break;
+            }
         }
         Ok(())
     }

@@ -98,6 +98,13 @@ fn run_with_policy(
         eprintln!("agend daemon: {e}");
         return ExitCode::from(1);
     }
+    let telegram = match crate::notifier::config::load(&home) {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("agend daemon: {error}");
+            return ExitCode::from(1);
+        }
+    };
     let exe = match agend.map(Ok).unwrap_or_else(std::env::current_exe) {
         Ok(exe) => exe,
         Err(e) => {
@@ -142,7 +149,7 @@ fn run_with_policy(
             return ExitCode::from(1);
         }
     };
-    let stopped = runtime.block_on(serve(home, exe, store, codex_input));
+    let stopped = runtime.block_on(serve(home, exe, store, codex_input, telegram));
     // Pending restart timers and the like are dropped, not awaited.
     runtime.shutdown_timeout(Duration::from_secs(1));
     if matches!(stopped, Ok(Stopped::Exec(_))) {
@@ -224,6 +231,10 @@ async fn serve(
     exe: PathBuf,
     store: SqliteStore,
     codex_input: agend_core::policy::codex_input::CodexInputPolicy,
+    telegram: Option<(
+        agend_core::config::TelegramConfig,
+        crate::notifier::config::Token,
+    )>,
 ) -> Result<Stopped, ExitCode> {
     let (events, mut queue) = unbounded_channel();
     forward_signal(SignalKind::interrupt(), "SIGINT", events.clone());
@@ -330,6 +341,9 @@ async fn serve(
         restarting: AtomicBool::new(false),
         codex_input,
     });
+    let telegram_worker = telegram.map(|(config, token)| {
+        crate::notifier::worker::start(config, token, context.store.clone(), context.fleet.clone())
+    });
     let server = Server::start(listener, socket.clone(), Arc::clone(&context));
     log::line(&format!("listening on {}", socket.display()));
     log::line(&format!(
@@ -358,6 +372,9 @@ async fn serve(
         "agend daemon stopping ({why}); holders keep running"
     ));
     server.stop().await;
+    if let Some(worker) = telegram_worker {
+        worker.stop().await;
+    }
     // Closes every holder connection (no Shutdown) and then the DB: the
     // server's tasks are gone, so this is the last handle on both.
     pipeline_worker.abort();

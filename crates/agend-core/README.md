@@ -112,6 +112,6 @@ cargo xtask accept core
 原規則對 development channels 回 None 的反例已保存，新規則補上已觀察標頭。
 授權只完成 workspace 信任，沒有確認 development channels，不宣稱 P5／P6 完成。
 
-12D `config` 定義 Telegram 的 secret reference、chat／sender allowlist 與 topic；pure core 只驗值，不讀檔或持有 token。尚未接 daemon 啟動。
+12D `config` 定義 Telegram 的 secret reference、chat／sender allowlist 與 topic；pure core 只驗值，不讀檔或持有 token。daemon 啟動讀取設定，錯誤設定在啟動 holder 前拒絕。
 
 12D `telegram` 定義 immutable delivery、逐段 claim／receipt 邊界與完整文字分段；所有 I/O 由 daemon 實作。

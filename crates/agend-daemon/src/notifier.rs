@@ -8,6 +8,7 @@
 pub mod config;
 pub mod delivery;
 pub mod http;
+pub mod worker;
 
 #[cfg(test)]
 mod tests;

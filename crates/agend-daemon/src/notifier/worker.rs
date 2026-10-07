@@ -1,0 +1,204 @@
+//! Observe the live needs-you view, persist identities, and deliver off-engine.
+use super::{
+    config::Token,
+    delivery::TelegramNotifier,
+    http::{Api, Method},
+};
+use crate::{fleet::Fleet, store::SqliteStore};
+use agend_core::{
+    config::TelegramConfig,
+    protocol::{
+        ask::{AskEntry, AskReply},
+        client::AttentionRequiredData,
+    },
+    telegram::{TelegramDestination, TelegramNotice, TelegramStore},
+    traits::{Notification, NotificationSeverity},
+};
+use std::{collections::BTreeSet, sync::Arc, time::Duration};
+use tokio::sync::watch;
+
+pub struct Worker {
+    stop: watch::Sender<bool>,
+    task: tokio::task::JoinHandle<()>,
+}
+impl Worker {
+    /// Finish the current bounded HTTP call before releasing the DB for restart.
+    pub fn request_stop(&self) {
+        let _ = self.stop.send(true);
+    }
+    pub async fn stop(self) {
+        self.request_stop();
+        let _ = self.task.await;
+    }
+}
+
+pub fn start(
+    config: TelegramConfig,
+    token: Token,
+    store: Arc<SqliteStore>,
+    fleet: Arc<Fleet>,
+) -> Worker {
+    start_with_api(config, Arc::new(Api::new(token)), store, fleet)
+}
+
+pub(super) fn start_with_api(
+    config: TelegramConfig,
+    api: Arc<Api>,
+    store: Arc<SqliteStore>,
+    fleet: Arc<Fleet>,
+) -> Worker {
+    let (stop, mut stopped) = watch::channel(false);
+    let task = tokio::spawn(async move {
+        let mut reported = false;
+        let bot_id = loop {
+            if *stopped.borrow() {
+                return;
+            }
+            let transport = api.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                transport.call(Method::GetMe, &serde_json::json!({}))
+            })
+            .await;
+            if let Ok(Ok(me)) = result
+                && me["is_bot"].as_bool() == Some(true)
+                && let Some(id) = me["id"].as_u64().filter(|id| *id > 0 && *id < (1 << 52))
+            {
+                break id;
+            }
+            if !reported {
+                crate::log::line("Telegram identity unavailable; notifications remain pending");
+                reported = true;
+            }
+            tokio::select! {
+                _ = stopped.changed() => return,
+                _ = tokio::time::sleep(Duration::from_secs(5)) => {},
+            }
+        };
+        let destination = TelegramDestination {
+            bot_id,
+            chat_id: config.chat_id,
+            topic_id: config.needs_you_topic,
+        };
+        let notifier = TelegramNotifier::new(api, store.clone(), destination.clone());
+        let mut failures = BTreeSet::new();
+        loop {
+            if *stopped.borrow() {
+                return;
+            }
+            let notices: Vec<_> = fleet.view().attention.iter().filter_map(notice).collect();
+            match store
+                .observe_telegram(&notices, &destination, crate::log::now_unix_ms())
+                .await
+            {
+                Ok(rows) => {
+                    for row in rows {
+                        if *stopped.borrow() {
+                            return;
+                        }
+                        if row.complete() {
+                            continue;
+                        }
+                        // Reconcile again after any previous HTTP await. Only a
+                        // still-current delivery may start its next part.
+                        let current: Vec<_> =
+                            fleet.view().attention.iter().filter_map(notice).collect();
+                        let current = match store
+                            .observe_telegram(&current, &destination, crate::log::now_unix_ms())
+                            .await
+                        {
+                            Ok(rows) => rows,
+                            Err(_) => {
+                                crate::log::line(
+                                    "Telegram outbox unavailable; no notification sent",
+                                );
+                                break;
+                            }
+                        };
+                        if !current.iter().any(|n| n.id == row.id) {
+                            continue;
+                        }
+                        if let Err(error) = notifier.resume_one(&row.id, &stopped).await
+                            && failures.insert(row.id.clone())
+                        {
+                            crate::log::line(&format!("Telegram delivery {}: {error}", row.id));
+                        }
+                    }
+                }
+                Err(_) => {
+                    if failures.insert("store".into()) {
+                        crate::log::line("Telegram outbox unavailable; no notification sent");
+                    }
+                }
+            }
+            tokio::select! {
+                _ = stopped.changed() => return,
+                _ = tokio::time::sleep(Duration::from_secs(1)) => {},
+            }
+        }
+    });
+    Worker { stop, task }
+}
+
+/// No boot-local wait timestamp: restarting does not change notification content.
+pub(super) fn notice(item: &AttentionRequiredData) -> Option<TelegramNotice> {
+    let key = item.attention_id.clone()?;
+    let mut body = item.reason.clone();
+    if let Some(recap) = &item.recap {
+        body.push_str(&format!(
+            "\n\nGoal: {}\nDecisions:\n{}\nAsking: {}\nNext: {}",
+            recap.goal,
+            recap.decisions.join("\n"),
+            recap.asking,
+            recap.next
+        ));
+    }
+    if let Some(ask) = &item.ask {
+        for entry in &ask.entries {
+            match entry {
+                AskEntry::Question {
+                    from,
+                    text,
+                    options,
+                }
+                | AskEntry::FollowUp {
+                    from,
+                    text,
+                    options,
+                } => {
+                    body.push_str(&format!("\n\n{from}: {text}"));
+                    for option in options {
+                        body.push_str(&format!("\n- {option}"));
+                    }
+                }
+                AskEntry::Answer { from, reply, .. } => {
+                    if let AskReply::Choice { option: text } | AskReply::Text { text } = reply {
+                        body.push_str(&format!("\n\n{from}: {text}"));
+                    }
+                }
+                AskEntry::Resolution { from, summary } => {
+                    body.push_str(&format!("\n\n{from}: {summary}"))
+                }
+                AskEntry::Unknown => {}
+            }
+        }
+    }
+    if let Some(ignored) = &item.if_ignored {
+        body.push_str(&format!("\n\nIf ignored: {ignored}"));
+    }
+    if let Some(unblocks) = item.unblocks {
+        body.push_str(&format!("\nUnblocks: {unblocks}"));
+    }
+    if !item.actions.is_empty() {
+        let actions: Vec<_> = item.actions.iter().map(|a| a.as_str()).collect();
+        body.push_str(&format!("\nActions: {}", actions.join(", ")));
+    }
+    Some(TelegramNotice {
+        key,
+        notification: Notification {
+            severity: NotificationSeverity::Attention,
+            title: "Needs you".into(),
+            body,
+            task_id: item.task_id.clone(),
+        },
+    })
+}
