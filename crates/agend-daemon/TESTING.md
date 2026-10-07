@@ -173,3 +173,5 @@ OpenCode `real_11834_model_capture_confirms_delivery_and_one_terminal_turn` 使�
 OpenCode `oversized_total_history_does_not_block_old_receipts_or_new_delivery` 建立超過 16 MiB 的 native REST history，先核全量讀取失敗，再核分頁／縮小頁數、舊 attempt 定點確認、新訊息送達與早期完成去重。單筆本身超限仍明確拒絕。
 
 `chunked_oversized_json_reports_the_same_limit_as_content_length` 核對無 Content-Length 的 chunked 超限回覆也可觸發分頁縮小，避免長歷史卡住。
+
+權限 native API 測試注入 session／permission GET 503：原版本會耗用尚未送出的 POST attempt，修正版保留 operator 答覆機會；另注入已套用 permission POST 後丟回覆，重開資料庫必須保持 unknown 且不能再 POST。

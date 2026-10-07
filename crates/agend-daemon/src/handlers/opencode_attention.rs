@@ -1,5 +1,5 @@
 //! OpenCode permissions use the operator-only ask channel. Decisions are
-//! claimed durably before HTTP and are never replayed after an unknown result.
+//! claimed durably after read-only validation and before POST and are never replayed after an unknown result.
 use super::{Context, error};
 use crate::{
     driver::opencode::{api::Session, http::Http, launch::Layout},
@@ -133,14 +133,28 @@ pub(crate) fn send_decision(
     allow: bool,
     session: &Session,
 ) -> Result<(), String> {
-    let claim_id = id.to_owned();
-    let Some((_, permission)) = store
-        .call_blocking(move |c| permissions::claim(c, &claim_id, allow, crate::log::now_unix_ms()))
+    let permission = store
+        .call_blocking(|c| permissions::pending(c))
         .map_err(|e| e.to_string())?
-    else {
-        return Err("permission decision already claimed or stale".into());
-    };
-    session.reply_permission(&permission, allow)?;
+        .into_iter()
+        .find(|p| p.id == id && !p.unknown)
+        .ok_or("permission decision already claimed or stale")?
+        .permission;
+    session.reply_permission(&permission, allow, || {
+        let claim_id = id.to_owned();
+        let Some((_, claimed)) = store
+            .call_blocking(move |c| {
+                permissions::claim(c, &claim_id, allow, crate::log::now_unix_ms())
+            })
+            .map_err(|e| e.to_string())?
+        else {
+            return Err("permission decision already claimed or stale".into());
+        };
+        if claimed != permission {
+            return Err("permission snapshot changed before reply".into());
+        }
+        Ok(())
+    })?;
     let id = id.to_owned();
     store
         .call_blocking(move |c| permissions::resolved(c, &id))

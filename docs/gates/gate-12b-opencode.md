@@ -62,3 +62,5 @@ worker 每輪讀最新 16 筆及一頁更早歷史，超限頁以更小 limit �
 2026-10-07 三真 backend 互傳 v1 在啟動等待階段停止，零工作訊息。Claude 真畫面把過長 workspace 縮成 `/…/tmp/…`，完整路徑 Ready 規則正確拒絕；Codex app-server thread／handoff 已成立，但 fleet 保持 unknown，v1 未取得原生 thread idle 證據。下一版需縮短測試 namespace 並以原 thread 唯讀狀態同步，不放寬 Ready 判定。自有三 instance、程序、root 已清理，Claude trust entries 保留；原始 frames、零訊息 DB、診斷與清理見 ops `three-backend-smoke-v1`。
 
 全新獨立靜態覆核 `ee024f7` 發現一項 P2：permission claim 在唯讀驗證 GET 前持久化，若 GET 失敗而未 POST，請求仍永久 unknown。需將完整 snapshot 驗證置於 claim 前，保留單次 POST 與不明結果不重送；修正及反例尚待完成。此覆核沒有執行測試，不替代最終驗收。
+
+2026-10-07 permission P2 已先以真 producer 的單次 GET 503 重現原版本失敗，再將 read-only snapshot 核對移到持久 claim 前，claim 成功後直接單次 POST。回歸同時覆蓋 session／permission GET 失敗均保留 pending、operator 重試，以及已套用 POST 丟回覆後重開 SQLite 仍 unknown／不重送。19 項 OpenCode tests 通過。新增唯讀 `three_backend_status` example，僅對 nonce 所有的原 Codex thread 執行 initialize／thread/read，供三真 backend 測試同步；不送 prompt 或 terminal input。上一輪早停漏清的專用 Codex rollout 已核原 thread／cwd 後移入必要證據並刪除，其他 sessions 不動。

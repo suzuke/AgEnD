@@ -121,6 +121,7 @@ impl Server {
             turn,
             version,
             lost_reply: Mutex::new(None),
+            failed_get: Mutex::new(None),
             posts: Mutex::new(Vec::new()),
         });
         let ticker = Arc::clone(&shared);
@@ -147,6 +148,11 @@ impl Server {
         *lock(&self.shared.lost_reply) = Some(path.to_owned());
     }
 
+    /// Fail one read before routing it; no backend mutation occurs.
+    pub fn fail_next_get(&self, path: &str) {
+        *lock(&self.shared.failed_get) = Some(path.to_owned());
+    }
+
     pub fn post_count(&self, path: &str) -> usize {
         lock(&self.shared.posts)
             .iter()
@@ -164,6 +170,7 @@ struct Shared {
     turn: Duration,
     version: &'static str,
     lost_reply: Mutex<Option<String>>,
+    failed_get: Mutex<Option<String>>,
     posts: Mutex<Vec<String>>,
 }
 
@@ -653,6 +660,13 @@ fn text_of(body: &[u8]) -> Option<(String, Value)> {
 
 fn serve(stream: TcpStream, shared: &Shared) -> io::Result<()> {
     let request = http::read_request(&stream)?;
+    if request.method == "GET" {
+        let mut failed = lock(&shared.failed_get);
+        if failed.as_deref() == Some(request.path.as_str()) {
+            *failed = None;
+            return http::respond(&stream, 503, None);
+        }
+    }
     if request.method == "GET" && request.path == "/event" {
         http::start_event_stream(&stream)?;
         let mut state = lock(&shared.state);

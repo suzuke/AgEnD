@@ -154,16 +154,18 @@ impl Session {
         )
     }
 
-    /// The caller must persist an operator decision and single-attempt claim
-    /// before invoking this method. Never automatically repeat a lost reply.
+    /// Validate with read-only IO before claiming the one POST attempt.
+    /// The callback must durably claim this exact snapshot or refuse the write.
     pub fn reply_permission(
         &self,
         expected: &super::permission::Permission,
         allow_once: bool,
+        claim: impl FnOnce() -> Result<(), String>,
     ) -> Result<(), String> {
         if expected.session != self.id || !self.permissions()?.iter().any(|p| p == expected) {
             return Err("OpenCode permission is stale or belongs to another session".into());
         }
+        claim()?;
         let result = self
             .http
             .post(
@@ -269,16 +271,26 @@ mod tests {
             })
             .unwrap();
         assert!(foreign.permissions().unwrap().is_empty());
-        assert!(foreign.reply_permission(&permission, true).is_err());
+        assert!(
+            foreign
+                .reply_permission(&permission, true, || Ok(()))
+                .is_err()
+        );
         let mut changed = permission.clone();
         changed.native["metadata"]["command"] = json!("different command");
-        assert!(session.reply_permission(&changed, true).is_err());
+        assert!(session.reply_permission(&changed, true, || Ok(())).is_err());
         assert_eq!(session.permissions().unwrap(), vec![permission.clone()]);
         let duplicate = json!([permission.native.clone(), permission.native.clone()]);
         assert!(super::super::permission::parse(session.id(), duplicate).is_err());
-        session.reply_permission(&permission, false).unwrap();
+        session
+            .reply_permission(&permission, false, || Ok(()))
+            .unwrap();
         assert!(session.permissions().unwrap().is_empty());
-        assert!(session.reply_permission(&permission, true).is_err());
+        assert!(
+            session
+                .reply_permission(&permission, true, || Ok(()))
+                .is_err()
+        );
         assert!(!session.busy().unwrap());
         session
             .submit("permission-handler", "run: echo handler", None)
@@ -303,6 +315,27 @@ mod tests {
                 )
             })
             .unwrap();
+        // Read-only validation failures have not attempted the reply. The
+        // operator must still be able to answer after the endpoint recovers.
+        for path in [format!("/session/{}", session.id()), "/permission".into()] {
+            server.fail_next_get(&path);
+            assert!(
+                crate::handlers::opencode_attention::send_decision(&store, &key, false, &session)
+                    .is_err()
+            );
+            let pending = store
+                .call_blocking(|c| crate::store::opencode_permissions::pending(c))
+                .unwrap();
+            assert_eq!(pending.len(), 1);
+            assert!(
+                !pending[0].unknown,
+                "GET failure must not consume a POST attempt"
+            );
+            assert_eq!(
+                server.post_count(&format!("/permission/{}/reply", pending[0].permission.id)),
+                0
+            );
+        }
         crate::handlers::opencode_attention::send_decision(&store, &key, false, &session).unwrap();
         assert!(session.permissions().unwrap().is_empty());
         assert!(
@@ -314,6 +347,57 @@ mod tests {
                 .call_blocking(|c| crate::store::opencode_permissions::pending(c))
                 .unwrap()
                 .is_empty()
+        );
+
+        session
+            .submit("lost-permission-reply", "run: echo lost", None)
+            .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let permission = loop {
+            if let Some(p) = session.permissions().unwrap().into_iter().next() {
+                break p;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        let reply_path = format!("/permission/{}/reply", permission.id);
+        let key = crate::store::opencode_permissions::identity("open-permission", &permission);
+        store
+            .call_blocking(move |c| {
+                crate::store::opencode_permissions::observe(
+                    c,
+                    "open-permission",
+                    &permission.session,
+                    std::slice::from_ref(&permission),
+                    7,
+                )
+            })
+            .unwrap();
+        server.lose_next_post_reply(&reply_path);
+        assert!(
+            crate::handlers::opencode_attention::send_decision(&store, &key, false, &session)
+                .is_err()
+        );
+        assert_eq!(server.post_count(&reply_path), 1);
+        assert!(
+            session.permissions().unwrap().is_empty(),
+            "backend applied the reply"
+        );
+        drop(store);
+        let store = crate::store::SqliteStore::open(dir.path(), 8).unwrap();
+        let pending = store
+            .call_blocking(|c| crate::store::opencode_permissions::pending(c))
+            .unwrap();
+        assert_eq!(pending.len(), 1);
+        assert!(pending[0].unknown);
+        assert!(
+            crate::handlers::opencode_attention::send_decision(&store, &key, true, &session)
+                .is_err()
+        );
+        assert_eq!(
+            server.post_count(&reply_path),
+            1,
+            "lost POST response must not grant another attempt"
         );
     }
 
