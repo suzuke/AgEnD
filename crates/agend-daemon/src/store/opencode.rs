@@ -5,6 +5,56 @@ use agend_core::model::DeliveryState;
 use rusqlite::{Connection, params};
 
 impl super::SqliteStore {
+    pub(crate) async fn unknown_opencode_after(
+        &self,
+        after: i64,
+        before: u64,
+    ) -> Result<Vec<Message>, StoreError> {
+        self.call(move |c| {
+            let before = i64::try_from(before).unwrap_or(i64::MAX);
+            let mut q = c.prepare("SELECT m.id FROM messages m JOIN opencode_attempts a ON a.message_id=m.id WHERE m.seq>?1 AND m.state IN ('queued','sent') AND m.attempted_at_unix_ms<=?2 ORDER BY m.seq LIMIT 32")?;
+            let ids = q.query_map(params![after,before], |r| r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
+            ids.into_iter().map(|id| messages::get(c,&id)?.ok_or_else(|| StoreError::Invalid("missing OpenCode message".into()))).collect()
+        }).await
+    }
+    pub(crate) async fn opencode_outcome_unknown(&self, id: &str) -> Result<bool, StoreError> {
+        let id = id.to_owned();
+        self.call(move |c| unknown(c, &id)).await
+    }
+    pub(crate) async fn abandon_unknown_opencode(
+        &self,
+        id: &str,
+        reason: &str,
+        now: u64,
+    ) -> Result<(), StoreError> {
+        let (id, reason) = (id.to_owned(), reason.to_owned());
+        self.call(move |c| {
+            let tx = c.transaction()?;
+            if !unknown(&tx, &id)? {
+                return Err(StoreError::Invalid(
+                    "delivery no longer has an unknown outcome; nothing changed".into(),
+                ));
+            }
+            let row = messages::advance(&tx, &id, DeliveryState::Failed, None, now)?
+                .ok_or_else(|| StoreError::Invalid("missing OpenCode message".into()))?;
+            let session: String = tx.query_row(
+                "SELECT session_id FROM opencode_attempts WHERE message_id=?1",
+                [&id],
+                |r| r.get(0),
+            )?;
+            event(
+                &tx,
+                &row.to_instance,
+                &session,
+                "OpenCodeAbandoned",
+                serde_json::json!({"message_id":id,"reason":reason}),
+                now,
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+    }
     pub async fn opencode_events(
         &self,
         instance: &str,
@@ -58,6 +108,10 @@ impl super::SqliteStore {
         self.call(move |conn| confirm(conn, &id, &session, &backend_id, now))
             .await
     }
+}
+
+fn unknown(c: &Connection, id: &str) -> Result<bool, StoreError> {
+    Ok(c.query_row("SELECT EXISTS(SELECT 1 FROM messages m JOIN opencode_attempts a ON a.message_id=m.id WHERE m.id=?1 AND m.state IN ('queued','sent') AND m.attempted_at_unix_ms IS NOT NULL)",[id],|r|r.get(0))?)
 }
 
 pub fn reference(session: &str, message: &str) -> String {

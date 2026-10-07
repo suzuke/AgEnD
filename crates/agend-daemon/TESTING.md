@@ -167,3 +167,5 @@ OpenCode worker 原生 producer 案例含 140 筆結果不明前綴、獨立新�
 OpenCode `real_11834_model_capture_confirms_delivery_and_one_terminal_turn` 使用正式 daemon 的真模型 history，檢查完整訊息確認、terminal 完成、未完成排除與外來 part 拒絕；一般測試不呼叫模型。`runtime::env::tests` 同時核 OpenCode／Codex 的 `ZDOTDIR` 與 env 白名單，沿用真 login zsh 的 shim-first 測試。
 
 `cargo test -p agend --test claude_bridge three_backend_delivery` 以同一正式 daemon 啟動三種 backend 的 native producers，檢查六方向 sender／Unicode／newline 與 Confirmed；Claude 透過正式 channel helper 明確 ACK，再發 native Stop。需先 build agend-testkit bins，不呼叫模型。
+
+`opencode_bridge::unknown_delivery_survives_restart_and_only_operator_can_abandon_it` 透過正式 socket／daemon 驗證結果不明提示跨重啟、agent Forbidden、operator Abandon、晚到確認不復活及 native history 未被重送；沒有真模型呼叫。

@@ -263,3 +263,135 @@ fn run(crash: bool) {
     });
     drop(store);
 }
+
+#[test]
+fn unknown_delivery_survives_restart_and_only_operator_can_abandon_it() {
+    let lab = lab::Lab::with_prefix(Path::new(BIN), "g12unknown");
+    let home = lab.home(0);
+    let fake = Path::new(BIN).parent().unwrap().join("fake-opencode-cli");
+    let workspace = home.join("workspace/open");
+    fs::create_dir_all(&workspace).unwrap();
+    {
+        let store = SqliteStore::open(&home, 0).unwrap();
+        block_on(store.add_instance(&Instance {
+            id: "open".into(),
+            backend: Backend::Opencode,
+            program: fake.display().to_string(),
+            args: vec![],
+            working_directory: workspace.display().to_string(),
+            session_id: None,
+            status: InstanceStatus::New,
+            session_started: false,
+            agent_pid: None,
+            legacy_no_thread: false,
+            delivery: "push".into(),
+        }))
+        .unwrap();
+    }
+    let mut daemon = lab::Daemon::start(&lab, &home, &[]).unwrap();
+    daemon.ready().unwrap();
+    let go = wait(&home, || {
+        fs::read_to_string(home.join("opencode/open/go")).ok()
+    });
+    let session = go.lines().next().unwrap().to_owned();
+    daemon.interrupt().unwrap();
+    {
+        let store = SqliteStore::open(&home, 0).unwrap();
+        block_on(store.claim_message(
+            &NewMessage {
+                id: "unknown-native".into(),
+                from_instance: "operator".into(),
+                to_instance: "open".into(),
+                task_id: None,
+                body: "must never be replayed".into(),
+                level: BusyLevel::Queue,
+            },
+            1,
+        ))
+        .unwrap();
+        assert!(
+            block_on(store.begin_opencode_attempt(
+                "unknown-native",
+                "open",
+                &session,
+                &agend_daemon::driver::opencode::history::message_id("unknown-native"),
+                1
+            ))
+            .unwrap()
+        );
+    }
+    let attention = "opencode-delivery:unknown-native";
+    for boot in 0..2 {
+        let mut daemon = lab::Daemon::start(&lab, &home, &[]).unwrap();
+        daemon.ready().unwrap();
+        let item = wait(&home, || {
+            fleet(&home)
+                .attention
+                .into_iter()
+                .find(|a| a.attention_id.as_deref() == Some(attention))
+        });
+        assert_eq!(item.actions, vec![AttentionAction::Abandon]);
+        let resolve = || ClientRequest::ResolveAttention {
+            data: ResolveAttentionData {
+                request_id: "resolve-open".into(),
+                attention_id: attention.into(),
+                action: AttentionAction::Abandon,
+                note: Some("native operator ends unknown delivery".into()),
+            },
+        };
+        assert!(
+            matches!(request(&home,Some("open"),resolve()),ClientResponse::Error {data} if data.code==error_code::FORBIDDEN)
+        );
+        if boot == 1 {
+            assert!(matches!(
+                request(&home, None, resolve()),
+                ClientResponse::CommandResult { .. }
+            ));
+            wait(&home, || {
+                (!fleet(&home)
+                    .attention
+                    .iter()
+                    .any(|a| a.attention_id.as_deref() == Some(attention)))
+                .then_some(())
+            });
+        }
+        daemon.interrupt().unwrap();
+    }
+    {
+        let store = SqliteStore::open(&home, 0).unwrap();
+        assert_eq!(
+            block_on(store.message("unknown-native"))
+                .unwrap()
+                .unwrap()
+                .state,
+            DeliveryState::Failed
+        );
+        assert!(
+            block_on(store.confirm_opencode_attempt(
+                "unknown-native",
+                &session,
+                &agend_daemon::driver::opencode::history::message_id("unknown-native"),
+                10
+            ))
+            .unwrap()
+            .is_none()
+        );
+    }
+    let layout = agend_daemon::driver::opencode::launch::Layout::new(&home, "open").unwrap();
+    let holder = agend_daemon::runtime::files::running(&home, "open")
+        .unwrap()
+        .unwrap();
+    let (port, _) = layout.endpoint(holder).unwrap();
+    let http = agend_daemon::driver::opencode::http::Http::new(
+        port,
+        &layout.password().unwrap(),
+        workspace.to_str().unwrap(),
+    )
+    .unwrap();
+    let native = agend_daemon::driver::opencode::api::Session::resume(http, &session).unwrap();
+    assert!(
+        native.history().unwrap().as_array().unwrap().is_empty(),
+        "unknown attempt must never reach backend"
+    );
+    lab.stop_all_holders();
+}

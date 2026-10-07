@@ -243,3 +243,5 @@
 - 2026-10-07：12B 三 backend 六方向正式 daemon 路由驗證通過，六則均 Confirmed、內容完整且每 receiver 恰兩筆；Claude 使用實際 helper ACK／Stop。此為零模型 fixture 驗證，真模型互傳與完整覆核仍待完成。
 
 - 2026-10-07：12B 獨立缺口覆核找出 unknown retention、全量歷史上限與人工終結三項不足；先補 schema 0012 投遞歸屬及未終結保留，未宣稱完整通過。
+
+- 2026-10-07：12B unknown delivery attention／operator-only Abandon 已接線；原生兩次重啟、agent 拒絕、人工終結、晚到確認與零重送驗證通過。長 REST 歷史分頁仍待修正。

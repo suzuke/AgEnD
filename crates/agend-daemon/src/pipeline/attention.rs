@@ -34,6 +34,7 @@ where
             {
                 if id.starts_with(crate::handlers::claude_attention::PREFIX)
                     || id.starts_with(crate::handlers::opencode_attention::PREFIX)
+                    || id.starts_with(crate::handlers::opencode_delivery_attention::PREFIX)
                 {
                     continue;
                 }
@@ -408,6 +409,7 @@ where
                 && !id.starts_with("instance-failed:")
                 && !id.starts_with(crate::handlers::claude_attention::PREFIX)
                 && !id.starts_with(crate::handlers::opencode_attention::PREFIX)
+                && !id.starts_with(crate::handlers::opencode_delivery_attention::PREFIX)
                 && !expected.contains_key(&id)
             {
                 self.fleet.dismiss(&id);

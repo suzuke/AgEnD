@@ -26,6 +26,7 @@
 pub mod agent;
 pub(crate) mod claude_attention;
 pub(crate) mod opencode_attention;
+pub(crate) mod opencode_delivery_attention;
 pub mod operator;
 
 use std::path::PathBuf;
@@ -223,6 +224,12 @@ pub async fn handle(ctx: &Context, caller: Option<&str>, request: ClientRequest)
             }
             if data.attention_id.starts_with(claude_attention::PREFIX) {
                 return Outcome::Reply(claude_attention::resolve(ctx, data).await);
+            }
+            if data
+                .attention_id
+                .starts_with(opencode_delivery_attention::PREFIX)
+            {
+                return Outcome::Reply(opencode_delivery_attention::resolve(ctx, data).await);
             }
             if !data.attention_id.starts_with("instance-failed:") {
                 let id = data.request_id.clone();
