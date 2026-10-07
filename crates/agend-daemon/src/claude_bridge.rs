@@ -304,11 +304,21 @@ impl ClaudeBridge {
                         state.initial = false;
                         let native: serde_json::Value = serde_json::from_str(&payload)
                             .map_err(|_| invalid("invalid hook payload"))?;
-                        if native.get("stop_hook_active").and_then(|v| v.as_bool()) != Some(false) {
-                            state.idle = None;
-                            state.busy = true;
-                            report_state(ctx, &data.instance_id, state, true, now).await?;
-                            return Ok(reply);
+                        match native.get("stop_hook_active").and_then(|v| v.as_bool()) {
+                            Some(true) => {
+                                // The queued continuation has finished. Do not block it
+                                // again, but allow ordinary debounced idle polling.
+                                state.busy = false;
+                                state.idle = Some(Instant::now());
+                                return Ok(reply);
+                            }
+                            None => {
+                                state.idle = None;
+                                state.busy = true;
+                                report_state(ctx, &data.instance_id, state, true, now).await?;
+                                return Ok(reply);
+                            }
+                            Some(false) => {}
                         }
                         state.busy = false;
                         state.idle = Some(Instant::now());

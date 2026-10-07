@@ -986,6 +986,93 @@ fn busy_stop_blocks_one_complete_batch_active_stop_never_blocks_or_confirms() {
 }
 
 #[test]
+fn active_stop_finishes_queue_work_then_restores_debounced_channel_delivery() {
+    let mut f = Fixture::new(1);
+    f.start();
+    f.hook("UserPromptSubmit", json!({"prompt":"work"}));
+    let blocked = f.hook("Stop", json!({"stop_hook_active":false}));
+    assert_eq!(blocked["decision"], "block");
+    assert!(blocked["reason"].as_str().unwrap().contains(&f.ids[0]));
+
+    let next = id();
+    assert!(matches!(
+        native_driver_send(&f.home, &next, "after queued work", "claude"),
+        ClientResponse::CommandResult { data } if data.result == CommandResult::Accepted
+    ));
+    let before = Instant::now();
+    // Claude's continuation ends with an active Stop, not another inactive Stop.
+    assert_eq!(f.hook("Stop", json!({"stop_hook_active":true})), json!({}));
+    assert!(
+        f.rpc(ClaudeOperation::Poll {
+            session_id: SESSION.into()
+        })
+        .messages
+        .is_empty()
+    );
+    let mut channel = Channel::new(&f.home);
+    let notification = channel.recv();
+    assert!(before.elapsed() >= Duration::from_secs(5));
+    assert_eq!(Channel::receipt(&notification).message_id, next);
+    assert_eq!(
+        notification["params"]["content"],
+        "From: claude\n\nafter queued work"
+    );
+    channel.written_barrier();
+    channel.close();
+    f.stop();
+    let store = f.store();
+    for (message, route) in [
+        (&f.ids[0], ClaudeRoute::Stop),
+        (&next, ClaudeRoute::Channel),
+    ] {
+        assert_eq!(
+            block_on(store.message(message)).unwrap().unwrap().state,
+            DeliveryState::Sent
+        );
+        assert_eq!(
+            block_on(store.claude_delivery(message))
+                .unwrap()
+                .unwrap()
+                .attempt
+                .unwrap()
+                .route,
+            route
+        );
+    }
+}
+
+#[test]
+fn newer_work_or_unknown_stop_revokes_the_active_stop_idle_candidate() {
+    for (event, payload) in [
+        ("UserPromptSubmit", json!({"prompt":"new work"})),
+        ("Stop", json!({})),
+        ("Stop", json!({"stop_hook_active":"false"})),
+    ] {
+        let mut f = Fixture::new(1);
+        f.start();
+        f.hook("UserPromptSubmit", json!({"prompt":"work"}));
+        assert_eq!(f.hook("Stop", json!({"stop_hook_active":true})), json!({}));
+        assert_eq!(f.hook(event, payload), json!({}));
+        std::thread::sleep(Duration::from_millis(5100));
+        assert!(
+            f.rpc(ClaudeOperation::Poll {
+                session_id: SESSION.into()
+            })
+            .messages
+            .is_empty()
+        );
+        f.stop();
+        assert_eq!(
+            block_on(f.store().message(&f.ids[0]))
+                .unwrap()
+                .unwrap()
+                .state,
+            DeliveryState::Queued
+        );
+    }
+}
+
+#[test]
 fn offline_stop_spool_replays_after_helper_exits_without_claiming_queue_or_idle() {
     let mut f = Fixture::new(1);
     assert_eq!(f.hook("Stop", json!({"stop_hook_active":false})), json!({}));

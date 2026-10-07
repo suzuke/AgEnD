@@ -90,6 +90,12 @@ gh pr create --base v2
 git worktree remove /Users/suzuke/AlphaCR-worktrees/AgEnD-<主題> && git branch -d <類型>/<主題>
 ```
 
+## 第 12 施工關持續授權（2026-10-07）
+
+使用者指示：「我授權你持續的推進到完成12」。此授權涵蓋 A–D 實作、必要的受控真測與驗證通過後的 PR 交付／合併，不再逐批要求相同授權。每批仍須全新 verifier 與可重驗指令，合併前完整 CI 通過；真測前固定版本、命令、有限預算與清理範圍，失敗先查原因，不盲目重跑。只在缺憑證或出現新的重大取捨時請使用者決定。第 13 施工關不在此授權內。
+
+沿用 `/Users/suzuke/AlphaCR-worktrees/` 與每批清理規則；保留必要證據、未合併工作樹和 `~/.claude.json` trust entries，不改共享帳戶、不停止外來 sessions。
+
 ## 指令
 
 ```bash
