@@ -28,9 +28,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("explicit home and matching task branch required".into());
     }
     let store = Arc::new(SqliteStore::open(&home, 0)?);
+    let mut git = Git::discover(&home)?;
+    // This probe only uses its owned repository's explicit local config.
+    git.runner
+        .env
+        .insert("GIT_CONFIG_GLOBAL".into(), "/dev/null".into());
+    git.runner
+        .env
+        .insert("GIT_CONFIG_NOSYSTEM".into(), "1".into());
+    if let Ok(expected) = std::env::var("AGEND_LIVE_GIT")
+        && git.executable != PathBuf::from(expected).canonicalize()?
+    {
+        return Err("probe resolved a different git executable".into());
+    }
+    let api = Api::discover(&home, &repo)?;
+    if let Ok(expected) = std::env::var("AGEND_LIVE_GH")
+        && api.executable != PathBuf::from(expected).canonicalize()?
+    {
+        return Err("probe resolved a different gh executable".into());
+    }
     let forge = GithubForge {
-        api: Api::discover(&home, &repo)?,
-        git: Git::discover(&home)?,
+        api,
+        git,
         repo,
         store: store.clone(),
     };
@@ -89,7 +108,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         "cleanup" => {
             forge.cleanup(task, true).await?;
-            println!("{}", serde_json::json!({"cleaned":task}));
+            let complete = store
+                .github_change(task)
+                .await?
+                .ok_or("missing cleanup ledger")?
+                .change
+                .cleanup
+                .complete;
+            println!(
+                "{}",
+                serde_json::json!({"cleaned":task,"complete":complete})
+            );
         }
         _ => return Err("unknown operation".into()),
     }
