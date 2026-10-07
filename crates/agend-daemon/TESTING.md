@@ -156,11 +156,11 @@ Claude bridge／Driver／native startup capture 的案例、限制與重驗指�
 
 OpenCode worker 原生 producer 案例含 140 筆結果不明前綴、獨立新投遞批次與一次確認事件；另以 `lost_native_mutation_replies_are_not_replayed_after_store_reopen` 注入 producer 已套用 POST 後直接斷線：prompt 由 history 確認、abort 結果不明不補送 prompt，跨三次 SQLite 重開均不重送。supervisor 測試另覆蓋保存 session 的 wrapper resume、缺 session 拒絕與不支援的參數拒絕。
 
-12B permission 原生 producer 測試核對完整請求、session／request identity 與拒絕後失效；SQLite reopen 後決策 attempt 不可重取。schema v10 及 v1–v10 fixture 升級保存既有資料；permission 歷史保留至明確移除 instance，透過 FK cascade 刪除。尚未涵蓋 TUI／handler 端到端權限回覆。
+12B permission 原生 producer 測試核對完整請求、session／request identity 與拒絕後失效；SQLite reopen 後決策 attempt 不可重取。schema v10 及 v1–v10 fixture 升級保存既有資料；permission 歷史保留至明確移除 instance，透過 FK cascade 刪除。handler／正式 socket／holder 的權限回覆與重啟由 `opencode_bridge` 覆蓋；真模型權限證據是 REST API 捕獲，沒有宣稱真模型 TUI 權限端到端驗收。
 
-`handlers::opencode_attention` 回歸驗證 agent 不能 AnswerAsk、operator free text 不會取得 permission attempt。API 原生 producer 案例使用同一 `send_decision` 路徑驗拒絕、重複回覆不送與待處理紀錄消失；完整 socket／holder 端到端測試仍待補齊。
+`handlers::opencode_attention` 回歸驗證 agent 不能 AnswerAsk、operator free text 不會取得 permission attempt。API 原生 producer 案例使用同一 `send_decision` 路徑驗拒絕、重複回覆不送與待處理紀錄消失；正式 socket／holder 端到端案例已納入 `opencode_bridge`。
 
-12B schema v11 保存 REST 回合事件去重；`driver::opencode` 驗正常 terminal assistant／abort、外來 assistant part、刪除 driver_events 後歷史不重新發布同一回合。`store` 40 項含 v1–v11 升級／golden／retention。完整 DRV suite 與真 usage-limit 證據仍待驗。
+12B schema v11 保存 REST 回合事件去重；`driver::opencode` 驗正常 terminal assistant／abort、外來 assistant part、刪除 driver_events 後歷史不重新發布同一回合。schema v12 另保存 attempt 歸屬與未終結保留例外，store fixtures 核各版升級／golden／retention。完整 DRV 10/10 已通過；429 只有原生 producer 契約覆蓋，未蒐集真服務限額回覆。
 
 `driver::opencode::contract_tests` 直接使用未改動的 DRV 10 個案例，production Driver／Worker、原生 REST producer 與 SQLite。boot 結束會停 worker／關 DB，重新 boot 回填後服務游標；停機時直接經原生 API 讓 backend 完成回合。這是 Driver 契約層，真 daemon／holder 的兩條恢復路徑另由 `agend --test opencode_bridge` 驗。
 

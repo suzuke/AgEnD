@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 依第 12 關持續授權實作；沿用 D16：queue 用 prompt_async，steer 視為 interrupt，abort 後送新工作。
 > - holder 持有 serve 與 attach；daemon 經有密碼的 loopback API 管理既有 session，不用 PTY 輸入工作。
-> - 下一步：完成傳輸／歷史核對、啟動與恢復、權限、三 backend 互傳及固定版本真測。
+> - 下一步：#155 完成文件覆核及固定 head 雙平台 CI 後合併、清理；12C／12D 接續實作。
 
 帳戶準備見 [私人帳戶設定](gate-12b-account-setup.md)。
 
@@ -17,13 +17,23 @@
 - daemon 重啟只重新連線；holder 死亡先清自有程序，保留原 session 恢復。未知或遺失 session 不偷偷建立替代上下文。
 - 不改共享 OpenCode 設定／帳戶檔、不停止外來 serve；驗證只清自己的 namespace、程序、target、worktree。
 
-## 實作中
+## 目前驗證範圍
+
+正式 Driver／holder、恢復、權限與分頁歷史核對已實作；固定 `e96f429` 的全新 verifier 回報 **CONFIRMED_SCOPED_SUCCESS**：workspace 1,062 passed／0 failed／2 既有 ignored，fmt、workspace clippy 及實際 no-std 通過。包含 OpenCode 19 cases、bridge 3 cases 與六方向原生互傳。固定版本基本／busy interrupt／permission REST 真測及三 backend 六方向模型互傳亦經獨立證據核對；尚未合併，最終 CI 另核。
+
+證據限制：真 busy 測試沒有證明 queued user 的獨立 assistant 完成；真權限捕獲走 REST，daemon 權限回覆／重啟由原生案例覆蓋。六方向真測中 Claude／Codex 保留實際工具 transcript，OpenCode 未保留該次工具 transcript，其兩筆傳送由固定 seed-only runner、DB 身分／完整內容及接收端 nonce 回條交叉核對。429 僅有原生 producer 契約覆蓋，未蒐集真限額回覆。12C／D 與整個第 12 關驗收不在本次通過範圍。
+
+本機獨立報告：`AgEnD-ops/g12b-api-20261007/final-fresh-verifier/{REPORT.md,verdict.json,evidence-audit.json,reproduce.sh}`。
+
+## 實作與驗收歷程
+
+以下按施工順序保留各批次當時的待辦與失敗；目前狀態以本頁上方為準。
 
 傳輸層以 ureq 3.4 的有界 HTTP client 實作，固定五秒整體期限及 16 MiB JSON 上限；只接受自行組裝的 API path，拒絕 redirect、proxy 與路徑跳脫。歷史核對要求 session、user message id 與每個 part 歸屬一致，重複 id 或外來 part 拒絕。這兩部分已接原生假 OpenCode producer 測試，已接 supervisor／正式 Driver 的初版；尚未完成 holder 整合與權限驗收，不宣稱 12B 完成。
 
 2026-10-07 真 1.18.34 隔離 `noReply` 捕獲證明 client 指定 messageID、中文與換行完整保留；零 assistant message，自有程序及目錄已清。捕獲輸出納入 parser 回歸；相同文字但不同 id、不符內容、外來 session、synthetic／ignored／額外 part 均不得誤認為確認。session API 已區分 POST 接受與歷史確認，resume 遺失 session 回錯，不建立新對話，也不因 status map 缺少 entry 就把遺失 session 視為 idle。
 
-## 驗收
+### 原生整合與真測紀錄
 
 啟動封裝已具備 holder 綁定版本／endpoint、原子 session handoff、私人目錄與不進 argv 的密碼；新 holder 輪替密碼，避免舊請求打到重用 port，daemon 單純重連則讀原紀錄。SQLite 在既有 messages 表以原子條件更新取得一次投遞資格，保存 session／message 綁定；關閉再開後，結果不明的 attempt 仍禁止重送。這些基礎通過八個相關測試；supervisor 與正式 Driver 已串接初版；權限與完整恢復流程尚待驗證。
 
@@ -55,10 +65,6 @@ OpenCode 投遞超過 10 秒仍未經完整歷史確認時，發布 `opencode-de
 
 worker 每輪讀最新 16 筆及一頁更早歷史，超限頁以更小 limit 重讀；最多 8 個舊 attempt 用單筆 endpoint 對帳，新投遞獨立取批次。游標只在該輪完成事件已入庫後前移，重啟可重掃且依 durable observed 去重。原生 21 MiB 以上歷史回歸先確認全量 API 超限，再核舊 receipt、新投遞与早期完成回填均成功。單筆記錄本身超過 16 MiB 仍拒絕，沒有移除傳輸安全上限；本修正處理 session 多筆累積超限。
 
-## 下一步
-
-完成 holder 原生整合、權限請求與恢復測試，再進行受控真測與 fresh verifier。
-
 2026-10-07 真權限 API 蒐證：固定 1.18.34／gpt-6-luna，兩則 prompt 分別要求一次 printf；REST 在沒有 SSE subscriber 時取得原始 permission，once 工具 completed、reject 工具 error，回覆後 pending 消失。原始請求與 history 已納入 parser 回歸；這不替代 daemon attention／重啟真測。ops `permission-capture-v1` 記錄兩則訊息與清理，自有程序、port、root 均消失，共享 auth 未變。
 
 2026-10-07 三真 backend 互傳 v1 在啟動等待階段停止，零工作訊息。Claude 真畫面把過長 workspace 縮成 `/…/tmp/…`，完整路徑 Ready 規則正確拒絕；Codex app-server thread／handoff 已成立，但 fleet 保持 unknown，v1 未取得原生 thread idle 證據。下一版需縮短測試 namespace 並以原 thread 唯讀狀態同步，不放寬 Ready 判定。自有三 instance、程序、root 已清理，Claude trust entries 保留；原始 frames、零訊息 DB、診斷與清理見 ops `three-backend-smoke-v1`。
@@ -70,3 +76,23 @@ worker 每輪讀最新 16 筆及一頁更早歷史，超限頁以更小 limit �
 2026-10-07 三真 backend v2 PASS：固定 Claude 2.1.284／Haiku 4.5、Codex 0.159.3／gpt-6-astra low、OpenCode 1.18.34／opencode-go/gpt-6-luna。六個方向各由來源模型執行一次 `agend send`、接收模型寫專用 nonce 回條；六則 harness seeds 加六則模型訊息共 12 筆，全數 Confirmed，逐一核 body、from／to 身分且無額外訊息。短 workspace 通過既有 Ready 核對；Codex 以原 thread 唯讀狀態同步。證據在 ops `three-backend-smoke-v2`：固定計畫、trace、messages／events、六回條、PASS 與 cleanup。三 instance／程序／root 已清，共享 OpenCode auth 未變；自有 Claude／Codex session 證據移出暫存，Claude trust entries 保留。完整 CI 與最終全新覆核仍待完成，尚未合併。
 
 `d79e53e` 的獨立局部跟進覆核判定 permission P2 已解決，沒有發現該修正的新缺陷；此為 read-only code review，未重跑測試，不替代最終 gate 覆核。
+
+2026-10-07 最終清理覆核發現早期 `model-smoke-v1` 留有 holder／wrapper／attach，原清理報告的 root_removed 不足以證明程序退出。依固定計畫 root、holder 開啟檔案及父子／process group 歸屬補清，確認 PID 78699／78701／78731、兩個 process groups 及 root 均不存在；更正保存於 `model-smoke-v1/cleanup-correction.json`，原紀錄保留。共享帳戶與 Claude trust entries 未動。
+
+## 可重驗指令
+
+在本 PR worktree 執行以下原生案例，不會啟動真模型；build 產物留在指定 target，驗收結束後以同一 target 執行 `cargo clean`。
+
+```sh
+export CARGO_TARGET_DIR="$(mktemp -d /private/tmp/agend-g12b-recheck.XXXXXX)"
+~/.cargo/bin/cargo build -p agend -p agend-testkit --bins
+~/.cargo/bin/cargo test -p agend-daemon --lib driver::opencode
+~/.cargo/bin/cargo test -p agend --test opencode_bridge
+~/.cargo/bin/cargo test -p agend --test claude_bridge three_backend_delivery
+~/.cargo/bin/cargo xtask check-deps
+~/.cargo/bin/cargo clean
+```
+
+## 下一步
+
+文件差異交獨立 verifier 覆核，固定最終 head 雙平台 CI 通過後依持續授權合併 #155，清理本批 worktree／target，再推進 12C／12D。
