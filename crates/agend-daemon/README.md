@@ -119,7 +119,7 @@ migration `0007` 及 DB-thread API 保存投遞開始／寫出／ACK／人工放
 | 建立 | 只有 `agend.db` 不存在時才建新 DB：先在 `.agend.db.new` 建好、所有 migration commit 後才 hard link（檔案系統不支援 hard link 時改 rename）成 `agend.db`；上次建到一半留下的 `.agend.db.new` 刪掉重建。`agend.db` 比 SQLite 檔頭（100 bytes）短、schema 版本 0、或缺它那個版本的表 → 拒絕開啟、檔案不動：`agend.db exists but is empty (0 bytes); refusing to start with an empty database — restore a snapshot from <home>/backups (see README)`，照下方步驟還原；指向不存在檔案的 symlink 或不是一般檔案 → `refusing to use <path>: …`。**刪掉 `agend.db` 等於從空 DB 重新開始**；空 DB 不做每日快照；instance 或 Codex thread 歸屬資料也算非空。但寫進第一個 task 後每天的快照照常輪替、一天擠掉一份舊的好快照：要還原請在那之前照下方步驟做 |
 | 執行緒 | 一條 `agend-db` 執行緒持有唯一連線；async 方法經 channel（256）送 closure；該執行緒 panic 後每個呼叫回 `store thread stopped` |
 | 同時開 | `locking_mode=EXCLUSIVE`，第二個程序：`agend.db is in use by another process (is another agend daemon running?)` |
-| 表 | `tasks`、`workflows`、`task_events`、`instances`、`messages`、`teams`、`bindings`、`asks`、`ask_turns`、`reminders`、`codex_input_threads`、`driver_events`、`claude_deliveries`、`claude_owned_files`、`claude_startup`（STRICT）；schema 版本在 `PRAGMA user_version`（目前 13；另含 `opencode_permissions`、`opencode_observed`、`opencode_attempts`、`github_changes`），migration 在 `src/store/migrations/`；`0003` 在 `instances` 加 `session_started`（0／1，第一次 `Spawn` 被確認、寫 `running` 的同一個 statement 設 1；既有的 `running` 與 `failed` 的 codex／opencode 設 1）；`0004`（第 7 施工關）加 `messages`（`seq INTEGER PRIMARY KEY AUTOINCREMENT`（清空後也不重用號碼）、`attempted_at_unix_ms`（送出前寫入）、`id` UNIQUE、`from_instance`、`to_instance`、`task_id`、`body`、`level`、`state`、`turn_id`、時間）與 `instances.agent_pid`、`instances.legacy_no_thread`（那一刻 `codex`、沒有 thread、`running`／`failed` 而且 `session_started = 1` 的列設 1 並標 `failed`） |
+| 表 | `tasks`、`workflows`、`task_events`、`instances`、`messages`、`teams`、`bindings`、`asks`、`ask_turns`、`reminders`、`codex_input_threads`、`driver_events`、`claude_deliveries`、`claude_owned_files`、`claude_startup`（STRICT）；schema 版本在 `PRAGMA user_version`（目前 12；另含 `opencode_permissions`、`opencode_observed`、`opencode_attempts`），migration 在 `src/store/migrations/`；`0003` 在 `instances` 加 `session_started`（0／1，第一次 `Spawn` 被確認、寫 `running` 的同一個 statement 設 1；既有的 `running` 與 `failed` 的 codex／opencode 設 1）；`0004`（第 7 施工關）加 `messages`（`seq INTEGER PRIMARY KEY AUTOINCREMENT`（清空後也不重用號碼）、`attempted_at_unix_ms`（送出前寫入）、`id` UNIQUE、`from_instance`、`to_instance`、`task_id`、`body`、`level`、`state`、`turn_id`、時間）與 `instances.agent_pid`、`instances.legacy_no_thread`（那一刻 `codex`、沒有 thread、`running`／`failed` 而且 `session_started = 1` 的列設 1 並標 `failed`） |
 | 耐久 | WAL、`synchronous=FULL`、`foreign_keys=ON` |
 | 保留期限 | `store::retention::RETENTION`：task、workflow、instance、team、binding、請示／回答 receipt、reminder 與 Codex thread 輸入歸屬永久（binding／reminder 按生命週期刪除）；事件與 checks log 14 天；WIP archive 與一般訊息 30 天（`created_at_unix_ms`）；Claude push／OpenCode attempts 未終結訊息與投遞歸屬持續保留，confirmed／failed 由 terminal update 起留 30 天、driver_events 從入庫時間留 14 天；`audit/shim.jsonl` 每日輪替留 14 天、daemon log 7 天、holder log 7 天（第 6 施工關 `housekeeping`） |
 | DB 快照 | `backups/agend-YYYY-MM-DD.db`（UTC；DB 沒有任何 task、task event、instance、driver event、Claude 投遞／啟動／自有檔案、OpenCode 權限／歷史去重／attempts 與 Codex thread 輸入歸屬時不做；只剩一般 messages 的既有行為不變，仍視為空），升級前 `agend-YYYY-MM-DD-pre-vN.db`；只留最新 7 份，其他檔案不動 |
@@ -174,6 +174,16 @@ cargo xtask accept cli             # 第 9 施工關 demo：cli_demo（在 agend
 
 12B OpenCode push 以 supervisor worker 接 loopback REST：claim 與傳輸分離，先持久化 attempt 再送一次，REST 歷史確認收件。原 session 經私人 holder wrapper handoff 恢復；權限由 operator 回覆，unknown 投遞提供 Abandon。原生恢復／權限／DRV 及固定版本模型真測已通過，最終覆核與 CI 以 [12B 紀錄](../../docs/gates/gate-12b-opencode.md) 為準。
 
-第 12C 正式 GithubForge／pipeline 已接入 submit、checks、merge、重啟對帳與持久化 remote cleanup。schema 0013 固定 task／repo ID／branch／nonce／PR；unknown mutation 只對帳、不重送。remote cleanup 受阻仍保存本機 WIP 並釋放 agent，等 operator Retry。原生離線 Forge／daemon 測試已通過；base 競爭政策與真 GitHub 驗收仍待完成，見 [GitHub forge](../../docs/gates/gate-12c-github.md)。
+12D 設定 parser、private token reference 與固定 Telegram HTTPS API 已建立；通知全文分段與持久逐段收據已接 Notifier 契約；daemon worker 已觀察 needs-you 並持久去重，手機操作已接 guarded pipeline，完整驗收尚未完成。進度見 [Telegram](../../docs/gates/gate-12d-telegram.md)。
+
+Telegram 手機操作先保存 update 與通知消耗意圖，再進入 operator 路徑；未知結果不重送。通知保存任務 CAS 版本與注意事項版本，pipeline 在執行時重新比對。Instance retry 在 supervisor queue 內檢查失敗事件並完成處理後回報；要求修改先提示回覆原因。Inbound polling 與 outbound 分段送出各自執行，停機等待有限 HTTP 呼叫收束。完整第 12D 驗收仍以施工關頁為準。
+
+Protocol 1.6 新增共用已讀收據：`mark_attention_read`、`attention_read` 事件與 fleet `read_keys`。識別沿用事項 ID＋問題次數；後續追問重新未讀。daemon 保存 SQLite，TUI 與 Telegram 共用；已讀不等於回答、核准或解除。舊 daemon 仍使用 TUI 本機已讀。
+
+Telegram team topic 保存目前任務摘要（任務、狀態與階段）；needs-you topic 保留完整請示與操作按鈕。摘要按內容對帳，重啟不重送；未 claim 的輔助通知可恢復，in-flight 未知結果不重送。既有通知綁定原 destination，改 topic 不會自動搬移舊通知。
+
+Telegram delivery 區分 in_flight 與 outcome_unknown，後者供本機 `telegram-delivery:<id>` 處置。操作員 Abandon 保存理由、原文及未知收據前綴，不確認送達、不重送；一般 agent 不可操作。daemon 開機在取得 DB 後恢復未確認意圖，本機處置不依賴 token；此類通知不經 Telegram 再投遞。
+
+第 12C 正式 GithubForge／pipeline 已接入 submit、checks、merge、重啟對帳與持久化 remote cleanup。schema 0017 固定 task／repo ID／branch／nonce／PR；unknown mutation 只對帳、不重送。remote cleanup 受阻仍保存本機 WIP 並釋放 agent，等 operator Retry。原生離線 Forge／daemon 測試已通過；base 競爭政策與真 GitHub 驗收仍待完成，見 [GitHub forge](../../docs/gates/gate-12c-github.md)。
 
 GitHub merge 前要求可讀的 classic branch protection：strict、非空 required checks、enforce_admins 且未要求 linear history；設定不足先受阻，daemon 不代改共享 repo。已 merge 的收據對帳維持只讀。[政策與限制](../../docs/gates/gate-12c-github.md)。

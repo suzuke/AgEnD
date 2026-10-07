@@ -117,3 +117,13 @@ cargo xtask accept core
 `github` 提供 `GithubIdentity`、`GithubChange` 與 `GithubStore` 邊界。純狀態規則禁止更换 repository／PR、覆蓋未確認 push intent 或清除 create／cleanup attempt；完成 cleanup 後 ledger 不可改動。正式 Forge 已接線，12C 尚待真測驗收。
 
 Workflow submit 只接受 local／github，且同一 workflow 不可混用；`forge_kind()` 供 pipeline 的後續 checks／merge／恢復選擇。
+
+12D `config` 定義 Telegram 的 secret reference、chat／sender allowlist 與 topic；pure core 只驗值，不讀檔或持有 token。daemon 啟動讀取設定，錯誤設定在啟動 holder 前拒絕。
+
+12D `telegram` 定義 immutable delivery、逐段 claim／receipt 邊界與完整文字分段；所有 I/O 由 daemon 實作。
+
+Protocol 1.6 新增共用已讀收據：`mark_attention_read`、`attention_read` 事件與 fleet `read_keys`。識別沿用事項 ID＋問題次數；後續追問重新未讀。daemon 保存 SQLite，TUI 與 Telegram 共用；已讀不等於回答、核准或解除。舊 daemon 仍使用 TUI 本機已讀。
+
+Telegram team topic 保存目前任務摘要（任務、狀態與階段）；needs-you topic 保留完整請示與操作按鈕。摘要按內容對帳，重啟不重送；未 claim 的輔助通知可恢復，in-flight 未知結果不重送。既有通知綁定原 destination，改 topic 不會自動搬移舊通知。
+
+Telegram delivery 區分 in_flight 與 outcome_unknown，後者供本機 `telegram-delivery:<id>` 處置。操作員 Abandon 保存理由、原文及未知收據前綴，不確認送達、不重送；一般 agent 不可操作。daemon 開機在取得 DB 後恢復未確認意圖，本機處置不依賴 token；此類通知不經 Telegram 再投遞。

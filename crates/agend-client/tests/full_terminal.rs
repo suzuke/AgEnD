@@ -620,3 +620,33 @@ fn cloned_senders_keep_each_operation_a_complete_json_line() {
     close.close();
     worker.join().unwrap();
 }
+
+#[test]
+fn native_frames_decode_when_payload_precedes_discriminator() {
+    let expected = frame();
+    let producer = expected.clone();
+    let (_dir, mut client, worker) = peer(&[V1_4], move |mut reader, mut writer| {
+        assert!(matches!(
+            read(&mut reader),
+            Some(ClientRequest::SubscribeTerminalFrames { .. })
+        ));
+        // BTree-backed Value emits data before type, using the real producer's fields.
+        let value = serde_json::to_value(framed(producer)).unwrap();
+        let mut line = serde_json::to_vec(&value).unwrap();
+        assert!(line.starts_with(b"{\"data\":"));
+        line.push(b'\n');
+        writer.write_all(&line).unwrap();
+        assert!(read(&mut reader).is_none());
+    });
+    client
+        .sender()
+        .unwrap()
+        .subscribe_terminal_frames(subscription())
+        .unwrap();
+    let FullTerminalUpdate::Frame(data) = client.next_full_terminal().unwrap() else {
+        panic!("expected frame")
+    };
+    assert_eq!(data.frame, expected);
+    drop(client);
+    worker.join().unwrap();
+}

@@ -161,7 +161,7 @@ pub struct App {
     pub connection: Connection,
     /// Needs-you questions the operator has viewed (`Attention::read_key`):
     /// a follow-up is new again. Viewing only drops the bold; it never
-    /// resolves (protocol v1 has no read state: TUI-local).
+    /// resolves. Protocol 1.6 shares receipts; older peers remain TUI-local.
     pub read: BTreeSet<String>,
     pub finder: Option<Finder>,
     /// Free-text answer being typed: (ask id, text).
@@ -207,6 +207,7 @@ impl App {
         };
         match app.source.connect() {
             Ok(snapshot) => {
+                app.read.extend(snapshot.read_keys.iter().cloned());
                 app.fleet = Fleet::from_snapshot(snapshot);
                 app.connection = Connection::Connected;
                 app.pull();
@@ -269,6 +270,11 @@ impl App {
         match self.source.poll() {
             Ok(events) => {
                 for event in events {
+                    if let agend_core::protocol::client::DaemonEvent::AttentionRead { data } =
+                        &event.event
+                    {
+                        self.read.insert(data.read_key.clone());
+                    }
                     self.fleet.apply(event);
                 }
             }
@@ -282,6 +288,7 @@ impl App {
         self.last_attempt = Instant::now();
         match self.source.connect() {
             Ok(snapshot) => {
+                self.read.extend(snapshot.read_keys.iter().cloned());
                 self.fleet = Fleet::from_snapshot(snapshot);
                 // A selection that is gone goes to the first row (P7).
                 for view in &mut self.stack {
@@ -401,7 +408,15 @@ impl App {
             && let Some(Target::Item(key) | Target::Choice(key, _)) = &selected
             && let Some(item) = self.fleet.attention(key)
         {
-            self.read.insert(item.read_key());
+            let key = item.read_key();
+            if !self.read.contains(&key) {
+                match self.source.mark_read(&item.data) {
+                    Ok(()) => {
+                        self.read.insert(key);
+                    }
+                    Err(error) => self.message = Some(error.to_string()),
+                }
+            }
         }
     }
 

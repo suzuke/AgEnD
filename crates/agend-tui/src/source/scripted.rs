@@ -107,6 +107,7 @@ impl Source for ScriptedSource {
         self.delivered = 0;
         self.connected = true;
         Ok(Snapshot {
+            read_keys: Vec::new(),
             catalog,
             attention: Vec::new(),
             follows_events: false,

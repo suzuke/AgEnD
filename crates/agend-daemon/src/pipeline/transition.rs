@@ -114,6 +114,7 @@ mod tests {
         block_on(store.create_task(&task)).unwrap();
         let state = PipelineState::new("t-1", validate(Workflow::builtin_research()).unwrap());
         let progress = Progress {
+            attention_revision: 0,
             data: TaskProgress {
                 pipeline: serde_json::to_string(&state.snapshot()).unwrap(),
                 stage_entered_at_unix_ms: 123,

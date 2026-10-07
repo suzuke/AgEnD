@@ -18,7 +18,7 @@ terminal_capability 與 terminal_hub 驗能力／權限、控制／尺寸／歷�
 
 `tui_native_app` 的兩個情境經完整 App／真 daemon／holder 到 raw PTY 程序，逐 byte 核鍵鼠／paste 與超限拒絕，agent 內 stty size 核 resize，多視窗交接、>1,000 列歷史／clamp、alt 與 daemon 重啟不自動控制。20 次開關每次 thread／fd 回基準；[證據與重跑](../../docs/gates/gate-11c-native-app-validation.md)。
 
-`tui_outer_pty` 在真外層 PTY 執行真正 `agend app`，經 crossterm capture 驗鍵鼠／paste、kernel resize、多視窗與歷史；正常／panic unwind 後核原 termios、alt／mouse／paste／focus／cursor／SGR 還原。20 次 App 程序退出回同一 fd 基準，holder pid 保留；共用 `tests/common/native_app.rs` 的 raw agent，不使用真 LLM。另有 12 次 burst 的端到端可見 deadline，每次 ≤300 ms、不加 holder round-trip 額度；800 ms 取樣 mutant 被同一斷言拒絕。[外層證據](../../docs/gates/gate-11c-outer-validation.md)。
+`tui_outer_pty` 在真外層 PTY 執行真正 `agend app`，經 crossterm capture 驗鍵鼠／paste、kernel resize、多視窗與歷史；正常／panic unwind 後核原 termios、alt／mouse／paste／focus／cursor／SGR 還原。20 次 App 程序退出回同一 fd 基準，holder pid 保留；共用 `tests/common/native_app.rs` 的 raw agent，不使用真 LLM。另有 12 次 burst 的端到端可見 deadline，每次 ≤300 ms、不加 holder round-trip 額度；起點在 producer trigger 前，終點由外層 parser 首次解析出目標文字時記錄，另列 producer acknowledgment 與觀察迴圈返回時間，避免把輸出後 stty／檔案回報成本誤當顯示延遲；800 ms 取樣 mutant 被同一斷言拒絕。[外層證據](../../docs/gates/gate-11c-outer-validation.md)。
 
 `codex_u17` 的兩個 foundation cases 用明確 opt-in raw fake frontend，驗同 thread 人工 turn、busy／queue／獨立 receipt、相同人工文字不能確認未嘗試送出的 row；component restart 保留 holder／thread，舊 attach 拒絕。本批另加入完整 daemon 子程序／client／App 的重啟、草稿、scope／caller 與 durable turn id，以及 attempted crash-window 人工同文拒絕。12 個 tests 含一個 re-exec 入口，沒有真 Codex LLM；[範圍與反例](../../docs/gates/gate-11c-u17-validation.md)。
 
@@ -156,3 +156,7 @@ DRV fixture 的 actor readiness hint 不代替 daemon idle：送達前讀實際 
 ## 第 12B 原生 OpenCode bridge
 
 先 `cargo build -p agend -p agend-testkit --bins`，再 `cargo test -p agend --test opencode_bridge`。兩個案例使用真 daemon／holder／shell wrapper 和原生 fake OpenCode CLI：保存一筆權限工作，daemon 重啟保留 holder／ask，拒絕後重複回覆失敗，再分別正常停止與 SIGKILL 自有 holder；新 holder 恢復原 session、歷史只有一筆 user message，最後確認 server port 關閉。Fixture 僅清自己的 lab；panic 路徑停止自有 holders，依 marker sweep 舊 group。零模型呼叫；不替代真 1.18.34 驗收。
+
+12D `cargo test -p agend --bin agend doctor::telegram_tests` 驗 Telegram 未設定、空 allowlist 回報 fail、允許 user、公開 token 檔拒絕及 malformed 設定不洩漏 secret；doctor 只讀本機，不呼叫 Telegram。既有 `--test cli init_and_doctor` 仍驗正式 binary 輸出。
+
+12D 手機探針 `telegram_mobile_probe` 與 `examples/support/telegram_mobile.py`：`--local` 使用自有 daemon／SQLite／Client／TUI App 狀態模型，驗已讀不關閉、確認後關閉、重啟與清理，不呼叫 Telegram。真測使用 `--credentials` 專用私人 env 檔，在 300 秒內由人先點 Mark read 再 acknowledge；要求持久 update outcome 為 read、accepted，兩個 daemon boot 正常退出並刪除自有通知／home。此探針不渲染 TUI 終端畫面，亦不代替所有手機動作或真 forum 驗收。見 [12D 手機紀錄](../../docs/gates/gate-12d-telegram.md#手機-callback-驗收2026-10-07)。

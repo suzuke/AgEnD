@@ -97,9 +97,7 @@ impl Conn {
                     self.reader.consume(take);
                     if end.is_some() {
                         let line = std::mem::take(&mut self.partial);
-                        return serde_json::from_slice(&line)
-                            .map(Some)
-                            .map_err(io::Error::other);
+                        return decode_response(&line).map(Some).map_err(io::Error::other);
                     }
                 }
                 Err(e)
@@ -125,6 +123,10 @@ impl Conn {
 
 fn unexpected(response: &HolderResponse) -> io::Error {
     io::Error::other(format!("unexpected holder response: {response:?}"))
+}
+
+fn decode_response(line: &[u8]) -> serde_json::Result<HolderResponse> {
+    serde_json::from_slice(line)
 }
 
 #[cfg(test)]
@@ -216,6 +218,78 @@ mod tests {
         assert_eq!(
             conn.recv(Some(Duration::from_secs(1))).unwrap_err().kind(),
             io::ErrorKind::UnexpectedEof
+        );
+    }
+}
+
+#[cfg(test)]
+mod decode_contract {
+    use super::decode_response;
+    #[test]
+    fn producer_golden_accepts_both_orders_and_rejects_ambiguous_frames() {
+        // This golden is generated and checked by the real holder parser test.
+        let golden: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../agend-holder/tests/golden/terminal-frame-1.4.json"
+        ))
+        .unwrap();
+        let native = serde_json::to_string(&golden["holder"]).unwrap();
+        let expected = decode_response(native.as_bytes()).unwrap();
+        let data = serde_json::to_string(&golden["holder"]["data"]).unwrap();
+        let first = format!(r#"{{"type":"terminal_frame","data":{data}}}"#);
+        assert_eq!(decode_response(first.as_bytes()).unwrap(), expected);
+        let cases = [
+            format!(r#"{{"type":"terminal_frame","type":"terminal_frame","data":{data}}}"#),
+            format!(r#"{{"type":"terminal_frame","data":{data},"data":{data}}}"#),
+            format!("{first} {{}}"),
+            first.replacen(
+                r#""request_id":"#,
+                r#""request_id":"duplicate","request_id":"#,
+                1,
+            ),
+            first[..first.len() - 1].to_string(),
+        ];
+        for (index, line) in cases.iter().enumerate() {
+            assert!(
+                decode_response(line.as_bytes()).is_err(),
+                "accepted adversary {index}"
+            );
+        }
+    }
+    #[test]
+    fn unknown_values_keep_the_original_string_number_and_depth_validation() {
+        let golden: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../agend-holder/tests/golden/terminal-frame-1.4.json"
+        ))
+        .unwrap();
+        let native = serde_json::to_string(&golden["holder"]).unwrap();
+        for value in [
+            r#""\ud800""#.to_owned(),
+            "1e999".to_owned(),
+            format!("{}null{}", "[".repeat(200), "]".repeat(200)),
+        ] {
+            for place in ["envelope", "data", "frame"] {
+                let line = if place == "envelope" {
+                    format!(
+                        "{},\"fresh_unknown\":{value}}}",
+                        &native[..native.len() - 1]
+                    )
+                } else {
+                    let marker = format!("\"{place}\":{{");
+                    native.replacen(&marker, &format!("{marker}\"fresh_unknown\":{value},"), 1)
+                };
+                assert!(
+                    decode_response(line.as_bytes()).is_err(),
+                    "accepted invalid unknown at {place}: {value}"
+                );
+            }
+        }
+        let extension = format!(
+            "{},\"fresh_unknown\":\"valid extension\"}}",
+            &native[..native.len() - 1]
+        );
+        assert_eq!(
+            decode_response(extension.as_bytes()).unwrap(),
+            decode_response(native.as_bytes()).unwrap()
         );
     }
 }

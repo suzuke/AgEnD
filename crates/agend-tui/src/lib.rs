@@ -41,9 +41,12 @@ use crate::source::Source;
 /// How often the interactive loop ticks (gate 11 B P5: with the 200 ms
 /// refresh, output reaches the screen within 300 ms plus a round trip).
 pub const TICK: Duration = Duration::from_millis(100);
-// Full frames already arrive at up to 20 Hz. Drain their mailbox at the same
-// cadence so shared holder sampling and a UI tick do not add two slow waits.
+// Keep full-terminal fleet and lifecycle maintenance at 20 Hz. Already
+// received terminal updates are drained independently between these ticks.
 const FULL_TERMINAL_TICK: Duration = Duration::from_millis(50);
+// Reading an already decoded frame does not request another holder sample.
+// Check the local mailbox between fleet ticks without redrawing empty polls.
+const FULL_MAILBOX_POLL: Duration = Duration::from_millis(10);
 
 /// Runs the TUI on this terminal until `q`.
 pub fn run(source: Box<dyn Source>, lang: Language) -> io::Result<()> {
@@ -65,6 +68,7 @@ pub fn run_with(
         app.resize(size.width, size.height);
         let mut native = crate::terminal::native_render::CellRenderer::default();
         let mut next_tick = Instant::now();
+        let mut redraw = true;
         while !app.quit {
             if Instant::now() >= next_tick {
                 app.tick();
@@ -74,17 +78,29 @@ pub fn run_with(
                     TICK
                 };
                 next_tick = Instant::now() + interval;
+                redraw = true;
+            } else if app.is_connected()
+                && app.term.as_ref().is_some_and(|term| term.full.is_some())
+            {
+                redraw |= app.pump_full_terminal_ready();
             }
-            let completed = terminal.draw(|frame| render_frame(frame, &mut app))?;
-            let paint = native.prepare(&app, completed.buffer);
-            paint.write(terminal.backend_mut())?;
-            let wait = next_tick.saturating_duration_since(Instant::now());
+            if redraw {
+                let completed = terminal.draw(|frame| render_frame(frame, &mut app))?;
+                let paint = native.prepare(&app, completed.buffer);
+                paint.write(terminal.backend_mut())?;
+                redraw = false;
+            }
+            let mut wait = next_tick.saturating_duration_since(Instant::now());
+            if app.term.as_ref().is_some_and(|term| term.full.is_some()) {
+                wait = wait.min(FULL_MAILBOX_POLL);
+            }
             if event::poll(wait)? {
                 match event::read()? {
                     Event::Key(key) if !intercept(&key) => app.key(key),
                     Event::Key(_) => {}
                     event => app.event(event),
                 }
+                redraw = true;
             }
         }
         Ok(())

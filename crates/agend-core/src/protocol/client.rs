@@ -53,9 +53,11 @@ pub const V1_2: ProtocolVersion = ProtocolVersion::new(1, 2);
 pub const V1_3: ProtocolVersion = ProtocolVersion::new(1, 3);
 /// Full terminal API capability. General clients still require only 1.3.
 pub const V1_4: ProtocolVersion = ProtocolVersion::new(1, 4);
-/// Client-side offers; the daemon advertises 1.5 after its helper service is ready.
+/// Claude helper service capability.
 pub const V1_5: ProtocolVersion = ProtocolVersion { major: 1, minor: 5 };
-pub const OFFERED_VERSIONS: [ProtocolVersion; 3] = [V1_5, V1_4, V1_3];
+/// Shared operator read receipts (G4); delivery does not imply read.
+pub const V1_6: ProtocolVersion = ProtocolVersion { major: 1, minor: 6 };
+pub const OFFERED_VERSIONS: [ProtocolVersion; 4] = [V1_6, V1_5, V1_4, V1_3];
 /// Legacy fixture baseline. The real server and parser-backed fake fixtures
 /// advertise 1.4 independently once a full-terminal producer is available.
 pub const SUPPORTED_VERSIONS: [ProtocolVersion; 1] = [V1_3];
@@ -148,6 +150,10 @@ pub struct ClientHello {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientRequest {
+    /// 1.6: operator viewed this question, without resolving it.
+    MarkAttentionRead {
+        data: MarkAttentionReadData,
+    },
     /// 1.5: Claude helpers; mutations must never use automatic RPC replay.
     Claude {
         data: ClaudeRequestData,
@@ -612,6 +618,8 @@ pub struct FleetData {
 /// Subscribing after `as_of_event_id` gives every later change.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FleetView {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub read_keys: Vec<String>,
     pub as_of_event_id: u64,
     pub teams: Vec<TeamView>,
     pub tasks: Vec<TaskView>,
@@ -834,6 +842,9 @@ pub struct InboxMessage {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum DaemonEvent {
+    AttentionRead {
+        data: AttentionReadData,
+    },
     AttentionRequired {
         data: AttentionRequiredData,
     },
@@ -856,6 +867,17 @@ pub enum DaemonEvent {
     },
     #[serde(other)]
     Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarkAttentionReadData {
+    pub request_id: String,
+    pub attention_id: String,
+    pub read_key: String,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttentionReadData {
+    pub read_key: String,
 }
 
 /// A needs-you item. The fields after `recap` are 1.1 additions, optional
@@ -891,6 +913,27 @@ pub struct AttentionRequiredData {
 }
 
 impl AttentionRequiredData {
+    /// Shared G4 identity: a follow-up is a new unread question (T17).
+    pub fn read_key(&self) -> Option<String> {
+        let id = self
+            .attention_id
+            .as_deref()
+            .or_else(|| self.ask.as_ref().map(|a| a.ask_id.as_str()))?;
+        let questions = self.ask.as_ref().map_or(0, |ask| {
+            ask.entries
+                .iter()
+                .filter(|entry| {
+                    matches!(
+                        entry,
+                        crate::protocol::ask::AskEntry::Question { .. }
+                            | crate::protocol::ask::AskEntry::FollowUp { .. }
+                    )
+                })
+                .count()
+        });
+        Some(alloc::format!("{id}#{questions}"))
+    }
+
     /// The item as D36 orders it: `None` without an `attention_id`; a
     /// missing `unblocks` counts 0 and a missing wait start as the newest.
     pub fn order_item(&self) -> Option<AttentionItem> {

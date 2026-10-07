@@ -1481,3 +1481,90 @@ fn ask_answers_have_a_permanent_outbox_receipt_and_stable_turn_ids() {
     );
     assert_eq!(pending[0].1, "ask:ask-1/4");
 }
+
+#[test]
+fn failure_episode_survives_boot_and_rejects_identical_recurrence() {
+    use agend_core::protocol::client::AttentionAction;
+    use agend_daemon::{fleet::Fleet, supervisor::failed_item};
+    let dir = TempDir::new("store-failure-episode").unwrap();
+    let store = SqliteStore::open(dir.path(), NOW).unwrap();
+    let instance = Instance {
+        id: "g6-1".into(),
+        backend: Backend::Claude,
+        program: "/bin/bash".into(),
+        args: vec!["-c".into(), "exit 0".into()],
+        working_directory: "/tmp".into(),
+        session_id: Some("s-1".into()),
+        status: InstanceStatus::New,
+        session_started: false,
+        agent_pid: None,
+        legacy_no_thread: false,
+        delivery: "push".into(),
+    };
+    block_on(store.add_instance(&instance)).unwrap();
+    let first = block_on(store.instance_failure(&instance.id, "failed", 50, true)).unwrap();
+    let old = failed_item(&instance, &first.0, first.1);
+    drop(store);
+    let store = SqliteStore::open(dir.path(), NOW).unwrap();
+    assert_eq!(
+        block_on(store.instance_failure(&instance.id, "boot fallback", 100, false)).unwrap(),
+        first
+    );
+    let next = block_on(store.instance_failure(&instance.id, "failed", 50, true)).unwrap();
+    assert!(next.1 > first.1);
+    let current = failed_item(&instance, &next.0, next.1);
+    let fleet = Fleet::new(NOW);
+    fleet.raise(old.clone());
+    assert!(
+        fleet
+            .resolve_if_current(&old, AttentionAction::Retry)
+            .is_some()
+    );
+    fleet.raise(current.clone());
+    assert!(
+        fleet
+            .resolve_if_current(&old, AttentionAction::Retry)
+            .is_none()
+    );
+    assert_eq!(
+        fleet.attention(old.attention_id.as_ref().unwrap()),
+        Some(current)
+    );
+}
+
+#[test]
+fn github_upgrade_preserves_published_telegram_reads() {
+    let dir = TempDir::new("g12c-upgrade-v16").unwrap();
+    let db = dir.path().join(DB_FILE);
+    let conn = Connection::open(&db).unwrap();
+    conn.execute_batch(include_str!("../src/store/fixtures/schema-v16.sql"))
+        .unwrap();
+    conn.execute(
+        "INSERT INTO attention_reads(read_key,read_at_unix_ms) VALUES (?1,?2)",
+        ("published-telegram-read", 42),
+    )
+    .unwrap();
+    drop(conn);
+    let store = SqliteStore::open(dir.path(), NOW).unwrap();
+    drop(store);
+    let conn = Connection::open(&db).unwrap();
+    let read: i64 = conn
+        .query_row(
+            "SELECT read_at_unix_ms FROM attention_reads WHERE read_key=?1",
+            ["published-telegram-read"],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(read, 42);
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM github_changes", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        17
+    );
+}

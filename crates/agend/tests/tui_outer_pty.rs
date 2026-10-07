@@ -39,6 +39,7 @@ struct Capture {
     rows: u16,
     bytes: Vec<u8>,
     error: Option<String>,
+    visible_marker: Option<(String, Option<Instant>)>,
 }
 struct Outer {
     master: Box<dyn MasterPty + Send>,
@@ -60,6 +61,7 @@ impl Outer {
             rows,
             bytes: Vec::new(),
             error: None,
+            visible_marker: None,
         }));
         let mut input = pair.master.try_clone_reader().unwrap();
         let output = Arc::clone(&capture);
@@ -76,6 +78,18 @@ impl Outer {
                         }
                         state.bytes.extend_from_slice(&bytes[..count]);
                         state.screen.process(&bytes[..count]);
+                        if let Some((marker, None)) = &state.visible_marker {
+                            let frame = state
+                                .screen
+                                .frame(TerminalViewport {
+                                    top: None,
+                                    rows: state.rows,
+                                })
+                                .unwrap();
+                            if row(&frame, 0).contains(marker) {
+                                state.visible_marker.as_mut().unwrap().1 = Some(Instant::now());
+                            }
+                        }
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
                     // Unix PTY reads may report EIO after the last slave closes.
@@ -573,11 +587,27 @@ fn final_dirty_budget(mut native: Native, columns: u16, rows: u16) {
             burst.extend_from_slice(format!("\x1b[Hintermediate-{intermediate:03}").as_bytes());
         }
         burst.extend_from_slice(format!("\x1b[2J\x1b[H{marker}").as_bytes());
+        outer.capture.lock().unwrap().visible_marker = Some((marker.clone(), None));
         let started = Instant::now();
         native.output(&burst);
+        let producer_ack = started.elapsed();
         outer.wait(|frame| row(frame, 0).contains(&marker));
-        let elapsed = started.elapsed();
-        eprintln!("{marker}: producer trigger to outer visible = {elapsed:?}");
+        // Timestamp the actual outer parser observation, independently of the
+        // producer's subsequent stty/size-file acknowledgment and wait polling.
+        let visible_at = outer
+            .capture
+            .lock()
+            .unwrap()
+            .visible_marker
+            .take()
+            .unwrap()
+            .1
+            .expect("outer parser did not record the visible marker");
+        let elapsed = visible_at.duration_since(started);
+        eprintln!(
+            "{marker}: trigger to outer visible = {elapsed:?}; producer acknowledgment = {producer_ack:?}; observer return = {:?}",
+            started.elapsed()
+        );
         assert!(
             elapsed <= Duration::from_millis(300),
             "last dirty output exceeded the 300 ms local budget before any holder round-trip allowance: {elapsed:?}"

@@ -260,15 +260,14 @@ INSERT INTO opencode_attempts(message_id,session_id,backend_message_id)
 SELECT id,substr(turn_id,1,instr(turn_id,'|')-1),substr(turn_id,instr(turn_id,'|')+1)
 FROM messages WHERE attempted_at_unix_ms IS NOT NULL AND turn_id GLOB 'ses*|msg*';
 
--- Durable remote ownership must outlive transient failures and restarts.
-CREATE TABLE github_changes (
-    task_id TEXT NOT NULL PRIMARY KEY REFERENCES tasks(id),
-    repository_id INTEGER NOT NULL CHECK(repository_id > 0),
-    branch TEXT NOT NULL,
-    revision INTEGER NOT NULL CHECK(revision >= 1),
-    identity TEXT NOT NULL CHECK(json_valid(identity)),
-    change TEXT NOT NULL CHECK(json_valid(change)),
-    UNIQUE(repository_id, branch)
+PRAGMA user_version=12;
+
+-- A claimed part has an unknown remote outcome until its exact receipt commits.
+-- Do not age unknown attempts out into a fresh send.
+CREATE TABLE telegram_outbox (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE,
+    delivery TEXT NOT NULL CHECK(json_valid(delivery))
 ) STRICT;
 
 PRAGMA user_version=13;

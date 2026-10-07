@@ -72,8 +72,24 @@ pub const MIGRATIONS: &[Migration] = &[
         sql: include_str!("migrations/0012_opencode_attempts.sql"),
     },
     Migration {
-        name: "0013_github_changes",
-        sql: include_str!("migrations/0013_github_changes.sql"),
+        name: "0013_telegram_outbox",
+        sql: include_str!("migrations/0013_telegram_outbox.sql"),
+    },
+    Migration {
+        name: "0014_telegram_notices",
+        sql: include_str!("migrations/0014_telegram_notices.sql"),
+    },
+    Migration {
+        name: "0015_telegram_updates",
+        sql: include_str!("migrations/0015_telegram_updates.sql"),
+    },
+    Migration {
+        name: "0016_attention_reads",
+        sql: include_str!("migrations/0016_attention_reads.sql"),
+    },
+    Migration {
+        name: "0017_github_changes",
+        sql: include_str!("migrations/0017_github_changes.sql"),
     },
 ];
 

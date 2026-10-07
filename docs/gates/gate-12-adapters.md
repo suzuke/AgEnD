@@ -1,9 +1,9 @@
 # 第 12 施工關：其餘 adapter（`adapters`）
 
 > **TL;DR**
-> - A claude、B opencode、C GitHub forge、D Telegram；A／B 已合併完成，C 實作中，D 待開工。
+> - A claude、B opencode、C GitHub forge、D Telegram；A／B／D 已合併完成，C 整合驗證中。
 > - 第 1–11 施工關已完成並合併；A 段設計 D40 已於 #138 合併（`4390633`）。
-> - 下一步：完成 [12C GitHub forge](gate-12c-github.md) 的正式 pipeline 接線與驗證，再推進 D。
+> - 下一步：完成 C migration 整合、最終覆核／CI 與合併。
 
 ## 狀態
 
@@ -14,9 +14,9 @@
 | 段 | 範圍 | 目前進度 |
 |---|---|---|
 | A Claude | channel、hooks、啟動、忙碌策略、送達與清掃 | v12 七則完整 smoke PASS；#154 已合併 `a6cdb4c` |
-| B OpenCode | serve、session、送達、權限；三個 backend 互傳 | 正式 Driver／holder／權限與 DRV 10/10；基本／busy interrupt／permission 真測及三 backend 六方向互傳通過，全新 verifier：1,062 passed、fmt／clippy／no-std 通過；#155 已合併 `2a02fda`，最終四個 CI jobs 通過，自有 worktree／branch／target 已清 |
-| C GitHub forge | push、PR、checks、head 對帳、merge 與收尾 | [正式 Forge／pipeline 已接入、施工中](gate-12c-github.md)；完整原生／真測與收尾未完成 |
-| D Telegram | notifier、allowlist、token、手機操作、G4 已讀 | 尚未實作；專用 bot 設定與測試 chat 已備妥，憑證只留本機 |
+| B OpenCode | serve、session、送達、權限；三個 backend 互傳 | 正式 Driver／holder／權限與 DRV 10/10；基本／busy interrupt／permission 真測及三 backend 六方向互傳通過，全新 verifier：1,062 passed、fmt／clippy／no-std 通過；#155 已合併 `2a02fda`，自有 worktree／target 已清理 |
+| C GitHub forge | push、PR、checks、head 對帳、merge 與收尾 | 正式 pipeline、durable intent 與嚴格保護已接入；原生／production Forge 真測及獨立覆核通過，migration 17 整合與最終 acceptance／CI／合併中 |
+| D Telegram | notifier、allowlist、token、手機操作、G4 已讀 | 持久分段通知、inbound 防護與 G4 共用已讀已實作；私訊已讀／確認、多行回覆與真 forum 分流／重啟真測通過，原生 accept 12 與固定程式碼 CI 全綠，已於 #156 合併（9dbfac7），自有 worktree／target 已清。見 [12D](gate-12d-telegram.md) |
 
 B–D 依現有決策與持續授權具體化；遇新的重大取捨才再請使用者決定。第 13 關安裝／發布不在此次範圍。
 
@@ -100,3 +100,7 @@ A 段原限制：不加新的 core 事件或未知提示／忙閒判斷機制。
 - 2026-10-04：[draft PR #149](https://github.com/suzuke/AgEnD/pull/149)（首個提交 `999203e`）接通 protocol 1.5、channel／Stop helpers 與 hook／ACK spool；13 native cases、accept core（fmt／workspace clippy／protocol／實際 no-std）通過。完整 workspace、全新 verifier／固定 head CI 收尾中；未 merge，完整 Claude Driver 與真 CLI 驗收仍待完成。
 
 - 2026-10-06：#151／#152 經使用者確認合併；依最新指示將完整真模型 smoke 列為必要驗收，見[固定計畫](gate-12a-live-smoke.md)。
+
+- 2026-10-07：12D 手機 inbound checkpoint：已確認通知收據綁 allowlist／選項，SQLite update 與單通知操作 claim 阻止重播；重試等待 supervisor 處理、修改原因以回覆輸入，pipeline 執行前核任務與注意事項版本。跨入口同原因再開、失敗事件重啟與 unknown 重開納入回歸；真手機 callback／G4、全新端到端驗證及 CI 尚未完成。
+
+2026-10-08：D #156 已合併並清理；C 嚴格保護／native pipeline／production Forge 真 GitHub smoke 均通過獨立覆核，合併 Telegram migration 13–16 後使用 GitHub migration 17。完整整合 acceptance／CI 尚待通過，施工關 12 未標完成。

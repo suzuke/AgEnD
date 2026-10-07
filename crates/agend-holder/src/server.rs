@@ -269,7 +269,14 @@ fn frame(response: &HolderResponse) -> Vec<u8> {
     };
     if let Some(request_id) = frame_request {
         let mut bounded = FrameLine(Vec::new());
-        if serde_json::to_writer(&mut bounded, response).is_err() {
+        // Buffer tiny serializer writes while retaining the bounded sink.
+        // A flush failure rejects the whole frame before socket publication.
+        let encoded = {
+            let mut writer = std::io::BufWriter::with_capacity(8192, &mut bounded);
+            serde_json::to_writer(&mut writer, response).is_ok()
+                && std::io::Write::flush(&mut writer).is_ok()
+        };
+        if !encoded {
             return frame(&HolderResponse::TerminalOperationError {
                 data: TerminalOperationError {
                     request_id: request_id.clone(),
@@ -777,5 +784,43 @@ mod frame_tests {
         };
         assert_eq!(data.request_id, "large-combining");
         assert_eq!(data.code, "frame_too_large");
+    }
+    #[test]
+    fn buffered_frame_flush_preserves_exact_line_limit() {
+        for extra in [0usize, 1] {
+            let mut screen = Screen::new(1, 2, ReplySink::default());
+            screen.process(b"x");
+            let viewport = TerminalViewport { top: None, rows: 1 };
+            let mut response = HolderResponse::TerminalFrame {
+                data: TerminalFrameData {
+                    request_id: "boundary".into(),
+                    frame: screen.frame(viewport).unwrap(),
+                },
+            };
+            let initial = serde_json::to_vec(&response).unwrap().len() + 1;
+            let padding = MAX_FRAME_LINE + extra - initial;
+            // Combining marks grow one actual parser cell without wrapping.
+            screen.process("\u{0301}".repeat(padding / 2).as_bytes());
+            if let HolderResponse::TerminalFrame { data } = &mut response {
+                data.frame = screen.frame(viewport).unwrap();
+                if !padding.is_multiple_of(2) {
+                    data.request_id.push('x');
+                }
+            }
+            let mut expected = serde_json::to_vec(&response).unwrap();
+            expected.push(b'\n');
+            assert_eq!(expected.len(), MAX_FRAME_LINE + extra);
+            let encoded = frame(&response);
+            if extra == 0 {
+                assert_eq!(encoded, expected);
+            } else {
+                let HolderResponse::TerminalOperationError { data } =
+                    serde_json::from_slice(&encoded).unwrap()
+                else {
+                    panic!("partial or oversized frame published")
+                };
+                assert_eq!(data.code, "frame_too_large");
+            }
+        }
     }
 }

@@ -78,3 +78,5 @@
 ```bash
 ~/.cargo/bin/cargo test -p agend-holder
 ```
+
+Structured frame JSON 在既有 FrameLine 大小受限 sink 外加 8 KiB BufWriter；必須明確 flush 成功才發布完整 response，失敗保持原 frame-too-large 路徑。原 wire producer golden、精確行界線與超限拒絕仍為驗證依據。

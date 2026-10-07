@@ -128,6 +128,7 @@ pub struct Catalog {
 /// What a source hands over when it connects.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Snapshot {
+    pub read_keys: Vec<String>,
     pub catalog: Catalog,
     /// The needs-you list now (the fleet view's; empty for a source that
     /// replays its events instead).
@@ -187,6 +188,11 @@ pub enum FullTerminalEvent {
 
 /// Where the screens' data comes from.
 pub trait Source {
+    /// Legacy sources keep local read state; protocol 1.6 sources persist it.
+    fn mark_read(&mut self, _item: &AttentionRequiredData) -> Result<(), SourceError> {
+        Ok(())
+    }
+
     /// Old protocol peers keep their plaintext view but cannot bypass full
     /// control ownership by pretending that legacy input is a complete mode.
     fn legacy_terminal_is_read_only(&self) -> bool {
@@ -294,13 +300,9 @@ impl Attention {
     /// What "read" is recorded against: the key plus how many questions the
     /// thread has, so a follow-up counts as new again.
     pub fn read_key(&self) -> String {
-        let questions = self.data.ask.as_ref().map_or(0, |ask| {
-            ask.entries
-                .iter()
-                .filter(|e| matches!(e, AskEntry::Question { .. } | AskEntry::FollowUp { .. }))
-                .count()
-        });
-        format!("{}#{questions}", self.key())
+        self.data
+            .read_key()
+            .unwrap_or_else(|| format!("{}#0", self.key()))
     }
 
     /// Whether the item still needs the operator. An ask needs you while a

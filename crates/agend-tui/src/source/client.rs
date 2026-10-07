@@ -321,6 +321,30 @@ impl Source for ClientSource {
         Err(SourceError::Disconnected(lost))
     }
 
+    fn mark_read(
+        &mut self,
+        item: &agend_core::protocol::client::AttentionRequiredData,
+    ) -> Result<(), SourceError> {
+        let client = self
+            .requests
+            .as_ref()
+            .ok_or_else(|| SourceError::Disconnected("not connected".into()))?;
+        if client.daemon().selected.minor < 6 {
+            return Ok(());
+        }
+        let Some(key) = item.read_key() else {
+            return Ok(());
+        };
+        let Some(id) = item
+            .attention_id
+            .as_deref()
+            .or_else(|| item.ask.as_ref().map(|a| a.ask_id.as_str()))
+        else {
+            return Ok(());
+        };
+        self.request(|c| c.mark_attention_read(id, &key))
+    }
+
     fn answer(&mut self, ask_id: &str, reply: AskReply) -> Result<(), SourceError> {
         self.request(|c| c.answer_ask(ask_id, AnswerSource::Tui, reply))
     }
@@ -442,6 +466,7 @@ pub fn snapshot(fleet: FleetView) -> Snapshot {
         .map(|view| agent_info(view, &catalog.tasks))
         .collect();
     Snapshot {
+        read_keys: fleet.read_keys,
         catalog,
         attention: fleet.attention,
         follows_events: true,
@@ -552,6 +577,7 @@ mod tests {
     #[test]
     fn the_fleet_view_becomes_the_catalog() {
         let view = FleetView {
+            read_keys: Vec::new(),
             as_of_event_id: 7,
             teams: vec![TeamView {
                 team_id: "general".into(),

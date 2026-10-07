@@ -109,8 +109,15 @@ pub(crate) async fn run(home: PathBuf, ctx: Arc<Context>, bridge: Arc<ClaudeBrid
     let mut cursors = std::collections::BTreeMap::new();
     let mut unknown_after = 0;
     let mut open_unknown_after = 0;
+    let mut telegram_unknown_after = String::new();
     loop {
         tick.tick().await;
+        match crate::handlers::telegram_attention::refresh(&ctx, &telegram_unknown_after).await {
+            Ok(after) => telegram_unknown_after = after,
+            Err(error) => crate::log::line(&format!(
+                "Telegram delivery attention refresh failed: {error}"
+            )),
+        }
         match crate::handlers::claude_attention::refresh(&ctx, unknown_after).await {
             Ok(after) => unknown_after = after,
             Err(e) => crate::log::line(&format!("Claude delivery attention refresh failed: {e}")),

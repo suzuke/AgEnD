@@ -96,3 +96,5 @@ daemon 多視窗／frame 更新與 TUI 已接通，六項 fake／真 C 契約及
 ```bash
 ~/.cargo/bin/cargo test -p agend-client
 ```
+
+Protocol 1.6 新增共用已讀收據：`mark_attention_read`、`attention_read` 事件與 fleet `read_keys`。識別沿用事項 ID＋問題次數；後續追問重新未讀。daemon 保存 SQLite，TUI 與 Telegram 共用；已讀不等於回答、核准或解除。舊 daemon 仍使用 TUI 本機已讀。

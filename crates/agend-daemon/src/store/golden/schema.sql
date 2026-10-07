@@ -1,4 +1,4 @@
--- user_version = 13
+-- user_version = 17
 
 CREATE INDEX driver_events_by_time ON driver_events (ingested_at_unix_ms);
 
@@ -26,6 +26,8 @@ CREATE TABLE asks (
     thread TEXT NOT NULL CHECK(json_valid(thread)),
     created_at_unix_ms INTEGER NOT NULL CHECK(created_at_unix_ms >= 0)
 ) STRICT;
+
+CREATE TABLE attention_reads (read_key TEXT PRIMARY KEY, read_at_unix_ms INTEGER NOT NULL CHECK(read_at_unix_ms >= 0)) STRICT;
 
 CREATE TABLE bindings (
     instance_id TEXT NOT NULL PRIMARY KEY REFERENCES instances(id),
@@ -97,6 +99,12 @@ CREATE TABLE github_changes (
     identity TEXT NOT NULL CHECK(json_valid(identity)),
     change TEXT NOT NULL CHECK(json_valid(change)),
     UNIQUE(repository_id, branch)
+) STRICT;
+
+CREATE TABLE instance_failures (
+    instance_id TEXT PRIMARY KEY REFERENCES instances(id) ON DELETE CASCADE,
+    reason TEXT NOT NULL,
+    since_ms INTEGER NOT NULL CHECK(since_ms >= 0)
 ) STRICT;
 
 CREATE TABLE "instances" (
@@ -193,12 +201,33 @@ CREATE TABLE "tasks" (
     block_reason TEXT,
     attention_reason TEXT,
     failure_acknowledged INTEGER NOT NULL DEFAULT 0 CHECK (failure_acknowledged IN (0,1))
-) STRICT;
+, attention_revision INTEGER NOT NULL DEFAULT 0 CHECK(attention_revision >= 0)) STRICT;
 
 CREATE TABLE teams (
     id TEXT NOT NULL PRIMARY KEY,
     repo TEXT,
     default_workflow TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE telegram_notices (
+    source_id TEXT PRIMARY KEY NOT NULL,
+    delivery_id TEXT NOT NULL REFERENCES telegram_outbox(id),
+    active INTEGER NOT NULL CHECK(active IN (0,1))
+) STRICT;
+
+CREATE TABLE telegram_outbox (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE,
+    delivery TEXT NOT NULL CHECK(json_valid(delivery))
+) STRICT;
+
+CREATE TABLE telegram_updates (
+    bot_id INTEGER NOT NULL CHECK(bot_id > 0),
+    update_id INTEGER NOT NULL CHECK(update_id >= 0),
+    fingerprint TEXT NOT NULL,
+    outcome TEXT,
+    delivery_id TEXT UNIQUE REFERENCES telegram_outbox(id),
+    PRIMARY KEY(bot_id,update_id)
 ) STRICT;
 
 CREATE TABLE workflows (

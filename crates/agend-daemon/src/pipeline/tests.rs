@@ -495,6 +495,61 @@ async fn failed_human_approval_commit_keeps_attention_and_publishes_no_resolutio
 }
 
 #[tokio::test]
+async fn mobile_guard_rejects_identical_note_reopened_through_another_entrypoint() {
+    let lab = Lab::new().await;
+    let task = lab.create().await;
+    let reason = Some("merge-blocked:same conflict".to_owned());
+    lab.store
+        .task_note(&task, None, reason.clone(), false)
+        .await
+        .unwrap();
+    lab.handle.wake();
+    let id = format!("merge-blocked:{task}");
+    let expected = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if let Some(item) = lab.fleet.attention(&id) {
+                break item;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let version = lab.store.load_task(&task).await.unwrap().unwrap().version;
+    let revision = lab
+        .store
+        .progress(&task)
+        .await
+        .unwrap()
+        .unwrap()
+        .attention_revision;
+    // The ordinary retry path clears the note and a failed effect raises it
+    // again. No Telegram observer sees the temporary absence.
+    lab.store.task_note(&task, None, None, false).await.unwrap();
+    lab.store
+        .task_note(&task, None, reason, false)
+        .await
+        .unwrap();
+    assert_eq!(lab.fleet.attention(&id), Some(expected.clone()));
+    let before = lab.driver.calls().len();
+    let request = ClientRequest::ResolveAttention {
+        data: ResolveAttentionData {
+            request_id: "mobile-old".into(),
+            attention_id: id,
+            action: AttentionAction::Retry,
+            note: None,
+        },
+    };
+    let error = lab
+        .handle
+        .guarded(expected, Some((version, revision)), request)
+        .await
+        .unwrap_err();
+    assert!(error.1.contains("stale"));
+    assert_eq!(lab.driver.calls().len(), before);
+}
+
+#[tokio::test]
 async fn github_workflow_selects_its_forge_for_submit_checks_and_merge() {
     let lab = Lab::new().await;
     let mut workflow = Workflow::builtin_code();
