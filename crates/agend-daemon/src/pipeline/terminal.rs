@@ -12,6 +12,18 @@ where
     V: PipelineView,
 {
     pub(super) async fn cleanup_terminal(&self, task: &Task) -> Result<(), Refusal> {
+        self.cleanup_terminal_mode(task, false).await
+    }
+
+    pub(super) async fn cleanup_terminal_action(&self, task: &Task) -> Result<(), Refusal> {
+        self.cleanup_terminal_mode(task, true).await
+    }
+
+    async fn cleanup_terminal_mode(
+        &self,
+        task: &Task,
+        report_local_failure: bool,
+    ) -> Result<(), Refusal> {
         if !matches!(
             task.status,
             TaskStatus::Done | TaskStatus::Failed | TaskStatus::Cancelled | TaskStatus::Superseded
@@ -39,8 +51,14 @@ where
         }
         for b in self.store.bindings().await.map_err(db)? {
             if b.task == task.id
-                && let Err((_, reason)) = self.release(&b, task.merge_commit.is_some()).await
+                && let Err(refusal) = self.release(&b, task.merge_commit.is_some()).await
             {
+                // Immediate terminal actions must preserve their error contract;
+                // only background cleanup may defer a local archival failure.
+                if report_local_failure {
+                    return Err(refusal);
+                }
+                let (_, reason) = refusal;
                 // Retain the durable binding until WIP and unbinding succeed.
                 // A later wake retries without preventing unrelated dispatch.
                 log::line(&format!("{}: cleanup deferred: {reason}", task.id));

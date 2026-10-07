@@ -38,7 +38,7 @@ remote 失敗會產生 `cleanup-remote` attention，仍繼續本機 WIP 存檔�
 | pipeline 受阻收尾 | 遠端失敗仍釋放本機容量；wake 不重送，operator Retry 可完成 |
 | 契約反例 | local FRG 與 contract mutant 仍通過；不同 branch 使用不同 task ID，原斷言保留 |
 
-原生測試的獨立 API 程序沿用真捕獲形狀，Git 自己產生 object／tree／parents；固定 GitHub URL 只映射到自有 bare repo。沒有外部 GitHub mutation，也不認證 GitHub 分支保護政策。測試結束移除自有 daemon／holder、repo 與 home。
+原生測試的獨立 API 程序沿用真捕獲形狀，Git 自己產生 object／tree／parents；固定 GitHub URL 只映射到自有 bare repo。原生案例不呼叫外部 GitHub；嚴格保護另以本文下方受控真測驗證。測試結束移除自有 daemon／holder、repo 與 home。
 
 2026-10-07 全新覆核曾以真 daemon 重現 unknown merge 重啟會重送（e55d3df，REFUTED）；已補 durable merge attempt 與真 daemon regression，等待修正後獨立重驗。成功後遺失回覆與未確認仍 open 分別測試，不互相代替。後續獨立反例又確認 ecde512 在 unknown＋main 前進時先 rebase，令原 head 的晚到收據無法恢復；已補對帳前阻擋與正式 daemon regression，原生 Forge 六案與 pipeline 五案通過；獨立重驗確認原核准 head 保持不變、晚到收據跨重啟完成、PUT 一次且 cleanup.complete=true，自有 fixture／程序已清。此結果不涵蓋 GitHub 真測、base policy 或後續 migration 整合。
 
@@ -59,3 +59,7 @@ GitHub merge API 只有 approved-head CAS，沒有 expected-base CAS。使用者
 `github_live_probe` 是人工有界計畫使用的 production Forge probe：明確 HOME、repo、task、branch，分別 submit／merge／recover／cleanup。它不啟動模型、不代表真 daemon 自動流水線已完成；真測前固定 binary／runner 雜湊與自有 repo 範圍。
 
 2026-10-08 production Forge 真測（固定 12e7553）：自有 GitHub repo 的兩條 sibling 各建立 PR／required status，第一條合併及新程序讀回收據同為 0deae23218ea457ad48f213fd0c0f124326e6234；第二條因 main 前進回 HTTP 405，main／head 不變，重開後 durable guard 禁止重送。第一條 cleanup.complete 與遠端 branch 404；最終 repo DELETE→404、本機 lab 移除。全新 verifier 核 44 份命令紀錄與雜湊 CONFIRMED，零模型；這是正式 Forge 子程序真測，daemon／holder 流水線另由原生測試覆蓋。原始證據保留於 AgEnD-ops/g12c-fresh-review-20261007/live-forge-v1。
+
+2026-10-08 整合覆核：固定 2acd36a 的 migration／fixture 1–16 與已發布版本逐位元相同；獨立 SQLite 反例確認 linked unknown Telegram outbox／notice／update 與共用已讀資料通過 v17 後不變，外鍵與 schema 一致。production Forge 與真測版本未變。
+
+同一版完整 accept 12 及 push／PR 雙平台 CI 都揭露既有 archive IO 回歸：終結 action 誤用背景 cleanup，吞掉本機 release 錯誤。修正為終結 action 傳回原 Refusal，背景 wake 維持延後恢復；不改 WIP 測試斷言，也不改遠端收尾待辦語義。原失敗與修正後結果分別保存；最終 CI／整合驗收以 PR #157 為準。

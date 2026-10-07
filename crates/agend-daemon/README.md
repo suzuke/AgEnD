@@ -184,6 +184,8 @@ Telegram team topic 保存目前任務摘要（任務、狀態與階段）；nee
 
 Telegram delivery 區分 in_flight 與 outcome_unknown，後者供本機 `telegram-delivery:<id>` 處置。操作員 Abandon 保存理由、原文及未知收據前綴，不確認送達、不重送；一般 agent 不可操作。daemon 開機在取得 DB 後恢復未確認意圖，本機處置不依賴 token；此類通知不經 Telegram 再投遞。
 
-第 12C 正式 GithubForge／pipeline 已接入 submit、checks、merge、重啟對帳與持久化 remote cleanup。schema 0017 固定 task／repo ID／branch／nonce／PR；unknown mutation 只對帳、不重送。remote cleanup 受阻仍保存本機 WIP 並釋放 agent，等 operator Retry。原生離線 Forge／daemon 測試已通過；base 競爭政策與真 GitHub 驗收仍待完成，見 [GitHub forge](../../docs/gates/gate-12c-github.md)。
+第 12C 正式 GithubForge／pipeline 已接入 submit、checks、merge、重啟對帳與持久化 remote cleanup。schema 0017 固定 task／repo ID／branch／nonce／PR；unknown mutation 只對帳、不重送。remote cleanup 受阻仍保存本機 WIP 並釋放 agent，等 operator Retry。原生離線 Forge／daemon 測試、嚴格 base 政策及 production Forge 受控真 GitHub 測試已通過；最終整合驗收與 CI 以 #157 為準，見 [GitHub forge](../../docs/gates/gate-12c-github.md)。
 
 GitHub merge 前要求可讀的 classic branch protection：strict、非空 required checks、enforce_admins 且未要求 linear history；設定不足先受阻，daemon 不代改共享 repo。已 merge 的收據對帳維持只讀。[政策與限制](../../docs/gates/gate-12c-github.md)。
+
+本機 WIP 存檔失敗時，取消／完成當下仍回報原錯誤並保留 binding；背景 wake 可稍後重試。遠端收尾失敗另記 cleanup-remote attention，不吞掉本機存檔錯誤。

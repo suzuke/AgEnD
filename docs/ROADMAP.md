@@ -68,7 +68,7 @@
 
 ## 下一步
 
-第 1–11 施工關及 12A／12B 已完成並合併。#155 已合併為 `2a02fda`，自有 worktree／暫存已清理；12C／12D 實作與驗證中。使用者已授權持續完成第 12 施工關，範圍見 [AGENTS.md](../AGENTS.md#第-12-施工關持續授權2026-10-07)。
+第 1–11 施工關及 12A／12B／12D 已完成並合併；已合併批次的自有 worktree／暫存已清理。12C 由 #157 完成最後整合驗收與 CI，通過後依持續授權合併。使用者已授權持續完成第 12 施工關，範圍見 [AGENTS.md](../AGENTS.md#第-12-施工關持續授權2026-10-07)。
 
 ## 進度紀錄
 
@@ -311,3 +311,5 @@
 - 2026-10-07：PR #156 固定 `8c0538b` 的原生 accept 12 exit 0、四個雙平台 CI jobs 全綠；使用者多行 Telegram 回覆逐字一致且單次投遞，真 forum 的 Needs you／team 摘要分流與第二次 boot 收據不變通過。自有訊息、程序及 home 已清理；保留首次回覆內容不完整與歷史延遲失敗，等待最終覆核／合併。12C 使用者已選定嚴格 up-to-date 分支保護，後續實作不得以 head CAS 代替 base 保護。
 
 2026-10-08：12D #156 四個最終 CI jobs 通過後合併為 9dbfac7；自有 worktree、branch、target 已刪除，保留必要證據。12C 嚴格 base protection、production Forge 真 GitHub submit／merge／重開收據／405 拒絕／cleanup 已通過獨立覆核；暫存遠端 repo 與 local lab 已刪。正整合已發布 Telegram v13–16，GitHub migration 改為 v17，再跑整合驗收／CI。第 12 關尚未標完成。
+
+- 2026-10-08：#157 整合 migration 17 的獨立覆核通過；完整 accept 12／四個 CI jobs 揭露終結 action 吞掉本機 WIP 存檔錯誤，修正恢復原 Refusal，保留背景 wake 及遠端收尾行為。原始失敗保留，修正後獨立回歸與完整驗收另核。

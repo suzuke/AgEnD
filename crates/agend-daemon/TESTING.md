@@ -223,3 +223,5 @@ Terminal frame 解碼維持原 internally-tagged serde 路徑；RawValue 優化�
 `claude_startup_capture` 的二十個 native cases 共用僅限此 test binary 的 mutex，從 fixture 建立持有至清理。測試目的是內容、遮罩、拒絕與清理，不是二十組程序同時啟動的容量測試；2 秒觀察窗與原斷言不變。原並行測試空白 frame 失敗保留，隔離不宣稱已分辨 producer 啟動與畫面管線延遲，也不代替 outer 300 ms 契約。
 
 GitHub migration 17 接在已發布 Telegram 13–16 後；`github_upgrade_preserves_published_telegram_reads` 從 v16 fixture 升級，核已讀保留、GitHub ledger 初始空及 schema=17。
+
+12C 整合回歸保留 `agend/tests/pipeline_archive.rs` 的取消錯誤契約：archive 路徑故障必須回報拒絕、保留原 WIP／binding，修復後由 wake 完成；remote cleanup 失敗仍獨立釋放本機容量並等 Retry。

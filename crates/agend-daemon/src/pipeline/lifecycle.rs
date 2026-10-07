@@ -315,7 +315,7 @@ where
             PipelineAction::TaskDone { .. }
             | PipelineAction::TaskCancelled { .. }
             | PipelineAction::TaskFailed { .. } => {
-                self.cleanup_terminal(task).await?;
+                self.cleanup_terminal_action(task).await?;
             }
             PipelineAction::NotifyTimeout { stage_id } => {
                 log::line(&format!("{}: {stage_id} timed out (notification)", task.id))
