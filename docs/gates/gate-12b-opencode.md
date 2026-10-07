@@ -23,6 +23,8 @@
 
 ## 驗收
 
+啟動封裝已具備 holder 綁定版本／endpoint、原子 session handoff、私人目錄與不進 argv 的密碼；新 holder 輪替密碼，避免舊請求打到重用 port，daemon 單純重連則讀原紀錄。SQLite 在既有 messages 表以原子條件更新取得一次投遞資格，保存 session／message 綁定；關閉再開後，結果不明的 attempt 仍禁止重送。這些基礎通過八個相關測試；supervisor、正式 Driver、權限與完整恢復流程尚待串接。
+
 完成後須涵蓋：一次寫入與斷線對帳、人工訊息不能誤認、busy queue／interrupt、遺失 session、daemon／holder 重啟、permission 漏事件與過期回覆、跨 backend 互傳、全新 verifier、雙平台 CI。真測使用固定版本／模型／有限訊息與時間預算；舊結果不替代真測。
 
 ## 下一步

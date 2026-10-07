@@ -8,3 +8,4 @@
 pub mod api;
 pub mod history;
 pub mod http;
+pub mod launch;
