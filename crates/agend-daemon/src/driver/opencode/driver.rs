@@ -32,7 +32,7 @@ impl Driver for OpenCodeDriver {
                 "not an OpenCode push instance".into(),
             ));
         }
-        let row = match self
+        let mut row = match self
             .store
             .claim_message(
                 &NewMessage {
@@ -54,6 +54,27 @@ impl Driver for OpenCodeDriver {
             }
             Claim::Inserted(row) | Claim::Existing(row) => row,
         };
+        if row.state == agend_core::model::DeliveryState::Queued
+            && row.attempted_at_unix_ms.is_none()
+            && instance.status == crate::store::InstanceStatus::Running
+            && let Some(session) = instance.session_id.as_deref()
+            && self.store.opencode_reported_idle(id, session).await?
+        {
+            let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while row.state == agend_core::model::DeliveryState::Queued
+                && std::time::Instant::now() < until
+            {
+                if tokio::runtime::Handle::try_current().is_ok() {
+                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                } else {
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                }
+                row =
+                    self.store.message(&message.id).await?.ok_or_else(|| {
+                        DriverError::Backend("OpenCode message disappeared".into())
+                    })?;
+            }
+        }
         Ok(DeliveryReceipt {
             state: row.state,
             backend_message_id: row

@@ -159,3 +159,5 @@ OpenCode worker 原生 producer 案例含 140 筆結果不明前綴、獨立新�
 12B permission 原生 producer 測試核對完整請求、session／request identity 與拒絕後失效；SQLite reopen 後決策 attempt 不可重取。schema v10 及 v1–v10 fixture 升級保存既有資料；permission 歷史保留至明確移除 instance，透過 FK cascade 刪除。尚未涵蓋 TUI／handler 端到端權限回覆。
 
 `handlers::opencode_attention` 回歸驗證 agent 不能 AnswerAsk、operator free text 不會取得 permission attempt。API 原生 producer 案例使用同一 `send_decision` 路徑驗拒絕、重複回覆不送與待處理紀錄消失；完整 socket／holder 端到端測試仍待補齊。
+
+12B schema v11 保存 REST 回合事件去重；`driver::opencode` 驗正常 terminal assistant／abort、外來 assistant part、刪除 driver_events 後歷史不重新發布同一回合。`store` 40 項含 v1–v11 升級／golden／retention。完整 DRV suite 與真 usage-limit 證據仍待驗。

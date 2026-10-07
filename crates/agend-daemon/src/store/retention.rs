@@ -62,6 +62,14 @@ pub struct Rule {
 pub const RETENTION: &[Rule] = &[
     Rule {
         target: Target::Table {
+            name: "opencode_observed",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "gate 12B: REST backfill deduplication survives event retention, removed with its instance",
+    },
+    Rule {
+        target: Target::Table {
             name: "opencode_permissions",
             time_column: None,
         },

@@ -278,6 +278,36 @@ mod tests {
     }
 
     #[test]
+    fn native_finished_turns_backfill_and_reject_foreign_assistant_parts() {
+        let server = Server::start(0, Duration::from_millis(10), None).unwrap();
+        let session =
+            Session::create(Http::new(server.port(), "fixture", "/fixture").unwrap()).unwrap();
+        session.submit("complete-test", "one word", None).unwrap();
+        let end = std::time::Instant::now() + Duration::from_secs(2);
+        while session.busy().unwrap() {
+            assert!(std::time::Instant::now() < end);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let mut history = session.history().unwrap();
+        let finished = super::super::history::completed(session.id(), &history).unwrap();
+        assert_eq!(finished.len(), 1);
+        assert!(
+            finished[0]
+                .1
+                .as_deref()
+                .is_some_and(|s| s.contains("one word"))
+        );
+        let assistant = history
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|r| r["info"]["role"] == "assistant")
+            .unwrap();
+        assistant["parts"][0]["sessionID"] = json!("ses_foreign");
+        assert!(super::super::history::completed(session.id(), &history).is_err());
+    }
+
+    #[test]
     fn native_session_missing_context_is_not_idle_or_replaced() {
         let server = Server::start(0, Duration::from_secs(60), None).unwrap();
         let http = || Http::new(server.port(), "fixture", "/fixture").unwrap();

@@ -12,7 +12,7 @@ impl super::SqliteStore {
     ) -> Result<Vec<agend_core::traits::DriverEvent>, StoreError> {
         let instance = instance.to_owned();
         self.call(move |conn| {
-            let mut q = conn.prepare("SELECT seq,kind,payload FROM driver_events WHERE instance_id=?1 AND seq>?2 AND kind IN ('OpenCodeConfirmed','OpenCodeState') ORDER BY seq LIMIT 1024")?;
+            let mut q = conn.prepare("SELECT seq,kind,payload FROM driver_events WHERE instance_id=?1 AND seq>?2 AND kind IN ('OpenCodeConfirmed','OpenCodeState','OpenCodeCompleted','OpenCodeUsage') ORDER BY seq LIMIT 1024")?;
             let rows = q.query_map(params![instance,after], |r| Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)))?;
             rows.map(|row| {
                 let (seq, kind, payload) = row?;
@@ -20,9 +20,25 @@ impl super::SqliteStore {
                 let invalid = || StoreError::Invalid("invalid stored OpenCode event".into());
                 let kind = if kind == "OpenCodeConfirmed" {
                     agend_core::traits::DriverEventKind::MessageConfirmed { message_id:v["message_id"].as_str().ok_or_else(invalid)?.into() }
+                } else if kind == "OpenCodeCompleted" {
+                    agend_core::traits::DriverEventKind::TurnCompleted {summary:v["summary"].as_str().map(str::to_owned)}
+                } else if kind == "OpenCodeUsage" {
+                    agend_core::traits::DriverEventKind::UsageLimit {reset_at_unix_ms:None}
                 } else { agend_core::traits::DriverEventKind::BusyChanged { busy:v["busy"].as_bool().ok_or_else(invalid)? } };
                 Ok(agend_core::traits::DriverEvent {cursor:format!("opencode:{seq}"),kind})
             }).collect()
+        }).await
+    }
+    pub async fn opencode_reported_idle(
+        &self,
+        instance: &str,
+        session: &str,
+    ) -> Result<bool, StoreError> {
+        let (instance, session) = (instance.to_owned(), session.to_owned());
+        self.call(move |c| {
+            use rusqlite::OptionalExtension;
+            let value:Option<String>=c.query_row("SELECT payload FROM driver_events WHERE instance_id=?1 AND session_id=?2 AND kind='OpenCodeState' ORDER BY seq DESC LIMIT 1",params![instance,session],|r|r.get(0)).optional()?;
+            Ok(value.and_then(|v|serde_json::from_str::<serde_json::Value>(&v).ok()).is_some_and(|v|v["busy"]==false))
         }).await
     }
     pub async fn begin_opencode_attempt(
@@ -134,6 +150,83 @@ pub(crate) fn confirm(
     }
     tx.commit()?;
     Ok(Some(row))
+}
+
+/// Event insertion and durable REST deduplication commit together.
+pub fn completed(
+    conn: &Connection,
+    instance: &str,
+    session: &str,
+    rows: &[(String, Option<String>, bool)],
+    now: u64,
+) -> Result<(), StoreError> {
+    let tx = conn.unchecked_transaction()?;
+    let current:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM instances WHERE id=?1 AND session_id=?2 AND backend='opencode' AND delivery='push' AND status='running')",params![instance,session],|r|r.get(0))?;
+    if !current {
+        return Err(StoreError::Invalid(
+            "OpenCode completion session changed".into(),
+        ));
+    }
+    for (id, summary, limited) in rows {
+        if tx.execute("INSERT OR IGNORE INTO opencode_observed(instance_id,session_id,message_id) VALUES(?1,?2,?3)",params![instance,session,id])?==0 {continue;}
+        if *limited {
+            event(
+                &tx,
+                instance,
+                session,
+                "OpenCodeUsage",
+                serde_json::json!({}),
+                now,
+            )?;
+        }
+        event(
+            &tx,
+            instance,
+            session,
+            "OpenCodeCompleted",
+            serde_json::json!({"summary":summary}),
+            now,
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn state(
+    conn: &Connection,
+    instance: &str,
+    session: &str,
+    busy: bool,
+    now: u64,
+) -> Result<(), StoreError> {
+    use rusqlite::OptionalExtension;
+    let last:Option<String>=conn.query_row("SELECT payload FROM driver_events WHERE instance_id=?1 AND session_id=?2 AND kind='OpenCodeState' ORDER BY seq DESC LIMIT 1",params![instance,session],|r|r.get(0)).optional()?;
+    let payload = serde_json::json!({"busy":busy});
+    if last.as_deref() != Some(&payload.to_string()) {
+        event(conn, instance, session, "OpenCodeState", payload, now)?;
+    }
+    Ok(())
+}
+
+/// HTTP 204 proves acceptance, not model completion. A lost reply never calls this.
+pub fn accepted(
+    conn: &Connection,
+    id: &str,
+    session: &str,
+    backend: &str,
+    now: u64,
+) -> Result<(), StoreError> {
+    let Some(row) = messages::get(conn, id)? else {
+        return Err(StoreError::Invalid("OpenCode message disappeared".into()));
+    };
+    let expected = reference(session, backend);
+    if row.state == DeliveryState::Queued
+        && row.attempted_at_unix_ms.is_some()
+        && row.turn_id.as_deref() == Some(&expected)
+    {
+        messages::advance(conn, id, DeliveryState::Sent, Some(&expected), now)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

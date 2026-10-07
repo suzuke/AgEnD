@@ -229,3 +229,5 @@
 - 2026-10-07：12B permission attention 與 operator-only AnswerAsk 接線，完整 snapshot 再核對、持久單次回覆，pipeline refresh 保留 backend 權限提示；holder／真測尚未完成（feat/g12b-opencode）。
 
 - 2026-10-07：12B 原生 daemon／holder 兩種恢復路徑（正常停止／SIGKILL）、permission 回覆與單次投遞整合通過；自有 lab 清除，真 CLI／模型及三 backend 驗收待完成（feat/g12b-opencode）。
+
+- 2026-10-07：12B terminal event 回填、schema v11 去重與真 HTTP acceptance→Sent 接線；10 原生 OpenCode 案例／兩個 holder 恢復案例通過，完整 DRV／模型驗收未完成（feat/g12b-opencode）。

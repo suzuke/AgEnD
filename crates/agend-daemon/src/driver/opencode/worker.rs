@@ -88,6 +88,19 @@ impl Worker {
         } else {
             rows.last().unwrap().seq
         });
+        let completed = history::completed(self.session.id(), &history)?;
+        let (instance, session) = (self.instance.clone(), self.session.id().to_owned());
+        self.store
+            .call_blocking(move |c| {
+                opencode::completed(
+                    c,
+                    &instance,
+                    &session,
+                    &completed,
+                    crate::log::now_unix_ms(),
+                )
+            })
+            .map_err(|e| e.to_string())?;
         let mut busy = self.session.busy()?;
         let id = self.instance.clone();
         let rows = self
@@ -145,6 +158,16 @@ impl Worker {
                 &text,
                 self.model.as_ref().map(|(p, m)| (p.as_str(), m.as_str())),
             )?;
+            let (id, session, backend) = (
+                row.id.clone(),
+                self.session.id().to_owned(),
+                history::message_id(&row.id),
+            );
+            self.store
+                .call_blocking(move |c| {
+                    opencode::accepted(c, &id, &session, &backend, crate::log::now_unix_ms())
+                })
+                .map_err(|e| e.to_string())?;
             busy = true;
         }
         Ok(busy)
@@ -231,11 +254,10 @@ mod tests {
             DeliveryState::Queued
         );
         worker.tick().unwrap();
-        // The post-acceptance/pre-reconciliation window leaves the row queued,
-        // while the real producer has already accepted the native request.
+        // HTTP acceptance is Sent; only later exact history confirms receipt.
         assert_eq!(
             block_on(store.message("request-1")).unwrap().unwrap().state,
-            DeliveryState::Queued
+            DeliveryState::Sent
         );
         worker.tick().unwrap();
         worker.tick().unwrap();
@@ -260,5 +282,35 @@ mod tests {
                 .is_empty()
         );
         worker.session.abort().unwrap();
+        worker.tick().unwrap();
+        let events = block_on(driver.events("open-1", None)).unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| matches!(
+                    e.kind,
+                    agend_core::traits::DriverEventKind::TurnCompleted { .. }
+                ))
+                .count(),
+            1
+        );
+        let cursor = events.last().unwrap().cursor.clone();
+        worker.tick().unwrap();
+        assert!(
+            block_on(driver.events("open-1", Some(&cursor)))
+                .unwrap()
+                .is_empty()
+        );
+        store
+            .call_blocking(|c| {
+                c.execute("DELETE FROM driver_events", [])?;
+                Ok(())
+            })
+            .unwrap();
+        worker.tick().unwrap();
+        assert!(
+            block_on(driver.events("open-1", None)).unwrap().is_empty(),
+            "retention must not cause REST to re-emit old completions"
+        );
     }
 }

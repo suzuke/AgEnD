@@ -93,6 +93,52 @@ pub fn confirmed(
     Ok(false)
 }
 
+/// Native terminal assistant records, including work completed while daemon
+/// was down. Tool-call intermediate messages are not completed turns.
+pub fn completed(
+    session: &str,
+    history: &Value,
+) -> Result<Vec<(String, Option<String>, bool)>, String> {
+    users(session, history)?;
+    let mut result = Vec::new();
+    for row in history.as_array().expect("validated") {
+        let info = &row["info"];
+        if info["role"] != "assistant" || !info["time"]["completed"].is_u64() {
+            continue;
+        }
+        let error = &info["error"];
+        if error.is_null()
+            && !matches!(
+                info["finish"].as_str(),
+                Some("stop" | "length" | "content-filter")
+            )
+        {
+            continue;
+        }
+        let id = info["id"].as_str().expect("validated");
+        let parts = row["parts"]
+            .as_array()
+            .ok_or("invalid completed OpenCode parts")?;
+        let mut text = Vec::new();
+        for part in parts {
+            if part["sessionID"] != session || part["messageID"] != id {
+                return Err("completed OpenCode part identity mismatch".into());
+            }
+            if part["type"] == "text" {
+                text.push(
+                    part["text"]
+                        .as_str()
+                        .ok_or("invalid completed OpenCode text")?,
+                );
+            }
+        }
+        let summary = (!text.is_empty()).then(|| text.join("\n"));
+        let limited = error["name"] == "APIError" && error["data"]["statusCode"] == 429;
+        result.push((id.into(), summary, limited));
+    }
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::http::Http;

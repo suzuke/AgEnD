@@ -173,6 +173,18 @@ fn run(
                 let publish = busy
                     || idle_since.is_some_and(|since| since.elapsed() >= Duration::from_secs(5));
                 if publish && reported != Some(busy) {
+                    let (instance, session) = (id.clone(), worker.session.id().to_owned());
+                    store
+                        .call_blocking(move |c| {
+                            crate::store::opencode::state(
+                                c,
+                                &instance,
+                                &session,
+                                busy,
+                                crate::log::now_unix_ms(),
+                            )
+                        })
+                        .map_err(|e| e.to_string())?;
                     sink(Notice::State(Some(busy)));
                     reported = Some(busy);
                 }
