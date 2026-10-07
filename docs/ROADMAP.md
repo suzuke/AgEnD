@@ -287,3 +287,5 @@
 - 2026-10-07：PR #156 整體覆核修正 doctor 空 Telegram allowlist 未回報 fail，以及真 daemon CLI 表仍預期 protocol 1.5 的兩列；本機設定測試與完整 CLI 表重驗通過。
 
 - 2026-10-07：12D 補正式 daemon serve 的雙程序 active shutdown／restart：扣住 HTTP 回覆後 SIGINT 等待收據，重啟僅續剩餘段；零真 API／模型。Retry 與真 forum 等剩餘範圍不變（PR #156）。
+
+- 2026-10-07：12D 補正式 supervisor／holder 的本機 mobile Retry 成功、重啟不再啟動，以及 Stop 先排時 Retry 取消不誤報 Accepted。workspace 另發現 testkit protocol mismatch golden 漏 1.6，已修正（PR #156）。

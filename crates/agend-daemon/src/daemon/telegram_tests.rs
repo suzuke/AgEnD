@@ -43,11 +43,14 @@ fn child() {
     let stopped = runtime
         .block_on(serve(
             home,
-            std::env::current_exe().unwrap(),
+            std::env::var_os("AGEND_TELEGRAM_TEST_EXE")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| std::env::current_exe().unwrap()),
             store,
             agend_core::policy::codex_input::CodexInputPolicy::approved(),
             Some((config, token)),
             Some(api),
+            std::env::var("AGEND_TELEGRAM_TEST_QUEUE_STOP").as_deref() == Ok("1"),
         ))
         .unwrap();
     assert!(matches!(stopped, Stopped::Signal("SIGINT")));
@@ -57,9 +60,30 @@ fn child() {
 struct Process(Child);
 impl Process {
     fn start(home: &Path, origin: &str, boot: usize) -> Self {
+        Self::start_using(home, origin, boot, None)
+    }
+    fn start_using(home: &Path, origin: &str, boot: usize, exe: Option<&Path>) -> Self {
+        Self::start_controlled(home, origin, boot, exe, false)
+    }
+    fn start_controlled(
+        home: &Path,
+        origin: &str,
+        boot: usize,
+        exe: Option<&Path>,
+        hold: bool,
+    ) -> Self {
         let log = fs::File::create(home.join(format!("boot-{boot}.log"))).unwrap();
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command.env_remove("AGEND_TELEGRAM_TEST_EXE");
+        command.env(
+            "AGEND_TELEGRAM_TEST_QUEUE_STOP",
+            if hold { "1" } else { "0" },
+        );
+        if let Some(exe) = exe {
+            command.env("AGEND_TELEGRAM_TEST_EXE", exe);
+        }
         Self(
-            Command::new(std::env::current_exe().unwrap())
+            command
                 .args([
                     "--exact",
                     "daemon::telegram_tests::child",
@@ -104,9 +128,16 @@ impl Drop for Process {
     }
 }
 
+#[derive(Default)]
+struct Mobile {
+    updates: Vec<Value>,
+    answers: Vec<Value>,
+    receipts: Vec<Value>,
+}
 struct Native {
     origin: String,
     sent: Arc<Mutex<Vec<Value>>>,
+    mobile: Arc<Mutex<Mobile>>,
     release: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
     worker: Option<thread::JoinHandle<()>>,
@@ -117,6 +148,8 @@ impl Native {
         listener.set_nonblocking(true).unwrap();
         let origin = format!("http://{}", listener.local_addr().unwrap());
         let sent = Arc::new(Mutex::new(Vec::new()));
+        let mobile = Arc::new(Mutex::new(Mobile::default()));
+        let inbox = mobile.clone();
         let release = Arc::new(AtomicBool::new(false));
         let stop = Arc::new(AtomicBool::new(false));
         let (record, barrier, ending) = (sent.clone(), release.clone(), stop.clone());
@@ -127,8 +160,9 @@ impl Native {
                     Ok((stream, _)) => {
                         let (record, barrier, ending) =
                             (record.clone(), barrier.clone(), ending.clone());
+                        let inbox = inbox.clone();
                         clients.push(thread::spawn(move || {
-                            respond(stream, record, barrier, ending)
+                            respond(stream, record, barrier, ending, inbox)
                         }));
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -144,6 +178,7 @@ impl Native {
         Self {
             origin,
             sent,
+            mobile,
             release,
             stop,
             worker: Some(worker),
@@ -169,6 +204,7 @@ fn respond(
     sent: Arc<Mutex<Vec<Value>>>,
     release: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
+    mobile: Arc<Mutex<Mobile>>,
 ) {
     stream.set_nonblocking(false).unwrap();
     stream
@@ -213,7 +249,20 @@ fn respond(
                 .unwrap()["result"]
                 .clone()
         }
-        "getUpdates" => json!([]),
+        "getUpdates" => Value::Array(
+            mobile
+                .lock()
+                .unwrap()
+                .updates
+                .iter()
+                .filter(|u| u["update_id"].as_i64().unwrap() >= request["offset"].as_i64().unwrap())
+                .cloned()
+                .collect(),
+        ),
+        "answerCallbackQuery" => {
+            mobile.lock().unwrap().answers.push(request.clone());
+            json!(true)
+        }
         "sendMessage" => {
             let index = {
                 let mut rows = sent.lock().unwrap();
@@ -234,6 +283,8 @@ fn respond(
                 .clone();
             receipt["message_id"] = json!(499 + index);
             receipt["text"] = request["text"].clone();
+            receipt["reply_markup"] = request["reply_markup"].clone();
+            mobile.lock().unwrap().receipts.push(receipt.clone());
             receipt
         }
         _ => panic!("unexpected method {method}"),
@@ -305,4 +356,245 @@ fn active_shutdown_saves_the_receipt_and_restart_only_sends_the_remaining_part()
     for (request, expected) in sent.iter().zip(&row.parts) {
         assert_eq!(request["text"].as_str(), Some(expected.as_str()));
     }
+}
+
+static NEXT_HOME: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+struct ShortHome(PathBuf);
+impl ShortHome {
+    fn new() -> Self {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let serial = NEXT_HOME.fetch_add(1, Ordering::Relaxed);
+        let path = PathBuf::from(format!(
+            "/tmp/g12d-retry-{}-{nonce}-{serial}",
+            std::process::id()
+        ));
+        fs::DirBuilder::new().mode(0o700).create(&path).unwrap();
+        Self(path)
+    }
+}
+impl Drop for ShortHome {
+    fn drop(&mut self) {
+        if matches!(crate::runtime::files::running_holders(&self.0), Ok(holders) if holders.is_empty())
+        {
+            let _ = fs::remove_dir_all(&self.0);
+        } else {
+            eprintln!(
+                "retaining owned home {}: holder cleanup unconfirmed",
+                self.0.display()
+            );
+        }
+    }
+}
+struct OwnedHolder(PathBuf);
+impl OwnedHolder {
+    fn stop(&self) -> Result<(), String> {
+        if crate::runtime::files::running(&self.0, "retry-agent")
+            .map_err(|e| e.to_string())?
+            .is_some()
+        {
+            crate::runtime::shutdown_holder_within(&self.0, "retry-agent", Duration::from_secs(3))?;
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while crate::runtime::files::running(&self.0, "retry-agent")
+            .map_err(|e| e.to_string())?
+            .is_some()
+        {
+            if Instant::now() >= deadline {
+                return Err("owned holder did not exit".into());
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        Ok(())
+    }
+}
+impl Drop for OwnedHolder {
+    fn drop(&mut self) {
+        if let Err(error) = self.stop() {
+            eprintln!("owned holder cleanup: {error}");
+        }
+    }
+}
+
+#[test]
+fn mobile_retry_reaches_the_real_supervisor_once_and_survives_restart() {
+    run_mobile_retry(false);
+}
+#[test]
+fn queued_mobile_retry_is_cancelled_by_daemon_shutdown_without_false_acceptance() {
+    run_mobile_retry(true);
+}
+fn run_mobile_retry(stop_before_retry: bool) {
+    use agend_core::{
+        model::Backend,
+        runtime_records::{Instance, InstanceStatus},
+    };
+    let exe = agend_testkit::fake_agent::locate("agend").unwrap();
+    let dir = ShortHome::new();
+    let home = dir.0.as_path();
+    let holder = OwnedHolder(home.to_path_buf());
+    let store = SqliteStore::open(home, 0).unwrap();
+    let instance = Instance {
+        id: "retry-agent".into(),
+        backend: Backend::Claude,
+        program: "/bin/bash".into(),
+        args: vec![
+            "-c".into(),
+            "echo launched >> launches; exec sleep 600".into(),
+            "fixture".into(),
+        ],
+        working_directory: home.display().to_string(),
+        session_id: Some("test-session".into()),
+        status: InstanceStatus::Failed,
+        session_started: false,
+        agent_pid: None,
+        legacy_no_thread: false,
+        delivery: "inbox".into(),
+    };
+    block_on(store.add_instance(&instance)).unwrap();
+    drop(store);
+    let native = Native::start();
+    native.release.store(true, Ordering::SeqCst);
+    let mut first =
+        Process::start_controlled(home, &native.origin, 1, Some(&exe), stop_before_retry);
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let receipt = loop {
+        let receipt = native.mobile.lock().unwrap().receipts.first().cloned();
+        if let Some(receipt) = receipt {
+            break receipt;
+        }
+        assert!(Instant::now() < deadline, "failure notification missing");
+        thread::sleep(Duration::from_millis(10));
+    };
+    let button = receipt["reply_markup"]["inline_keyboard"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|row| row.as_array().unwrap())
+        .find(|button| button["text"] == "retry")
+        .unwrap()
+        .clone();
+    if stop_before_retry {
+        first.interrupt();
+        while !home.join("stop-queued").exists() {
+            assert!(Instant::now() < deadline, "Stop was not queued");
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+    native
+        .mobile
+        .lock()
+        .unwrap()
+        .updates
+        .push(json!({"update_id":1,"callback_query":{
+            "id":"real-retry", "from":{"id":7,"is_bot":false}, "message":receipt,
+            "data":button["callback_data"]
+        }}));
+    if stop_before_retry {
+        let wait = Instant::now() + Duration::from_secs(5);
+        while !home.join("retry-queued").exists() {
+            assert!(
+                Instant::now() < wait,
+                "retry not queued; answers={:?}; log={}",
+                native.mobile.lock().unwrap().answers,
+                fs::read_to_string(home.join("boot-1.log")).unwrap_or_default()
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+        first.finish();
+        let store = SqliteStore::open(home, 0).unwrap();
+        let saved = block_on(store.instance("retry-agent")).unwrap().unwrap();
+        assert_eq!(saved.status, InstanceStatus::Failed);
+        assert!(!saved.session_started);
+        drop(store);
+        assert!(!home.join("launches").exists());
+        assert!(
+            !native
+                .mobile
+                .lock()
+                .unwrap()
+                .answers
+                .iter()
+                .any(|v| v["text"] == "Accepted")
+        );
+        let conn = rusqlite::Connection::open(home.join("agend.db")).unwrap();
+        let outcome: String = conn
+            .query_row(
+                "SELECT outcome FROM telegram_updates WHERE update_id=1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(outcome, "refused");
+        drop(conn);
+        holder.stop().unwrap();
+        return;
+    }
+    loop {
+        let accepted = native
+            .mobile
+            .lock()
+            .unwrap()
+            .answers
+            .iter()
+            .any(|v| v["text"] == "Accepted");
+        if accepted && home.join("launches").exists() {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "retry did not launch the owned instance: {}",
+            fs::read_to_string(home.join("boot-1.log")).unwrap_or_default()
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    first.interrupt();
+    first.finish();
+    let store = SqliteStore::open(home, 0).unwrap();
+    let saved = block_on(store.instance("retry-agent")).unwrap().unwrap();
+    assert_eq!(saved.status, InstanceStatus::Running);
+    assert!(saved.session_started);
+    drop(store);
+    let mut second = Process::start_using(home, &native.origin, 2, Some(&exe));
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < deadline {
+        assert!(second.0.try_wait().unwrap().is_none());
+        assert_eq!(
+            fs::read_to_string(home.join("launches")).unwrap(),
+            "launched\n"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+    second.interrupt();
+    second.finish();
+    assert_eq!(
+        native
+            .mobile
+            .lock()
+            .unwrap()
+            .answers
+            .iter()
+            .filter(|v| v["text"] == "Accepted")
+            .count(),
+        1
+    );
+    let conn = rusqlite::Connection::open(home.join("agend.db")).unwrap();
+    let outcomes: Vec<String> = conn
+        .prepare("SELECT outcome FROM telegram_updates ORDER BY update_id")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(outcomes, vec!["accepted"]);
+    drop(conn);
+    holder.stop().unwrap();
+    assert!(
+        crate::runtime::files::running_holders(home)
+            .unwrap()
+            .is_empty()
+    );
 }

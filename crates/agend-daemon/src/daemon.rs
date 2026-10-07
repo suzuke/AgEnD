@@ -157,6 +157,8 @@ fn run_with_policy(
         telegram,
         #[cfg(test)]
         None,
+        #[cfg(test)]
+        false,
     ));
     // Pending restart timers and the like are dropped, not awaited.
     runtime.shutdown_timeout(Duration::from_secs(1));
@@ -244,6 +246,7 @@ async fn serve(
         crate::notifier::config::Token,
     )>,
     #[cfg(test)] telegram_api: Option<Arc<crate::notifier::http::Api>>,
+    #[cfg(test)] hold_supervisor_for_stop: bool,
 ) -> Result<Stopped, ExitCode> {
     if let Err(error) = store.recover_telegram_attempts().await {
         log::line(&format!(
@@ -387,6 +390,26 @@ async fn serve(
         }
     });
 
+    #[cfg(test)]
+    if hold_supervisor_for_stop {
+        // Force Stop ahead of a real inbound RetryConfirmed without replacing
+        // the production receiver, dispatcher or shutdown path.
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            if STOP_SIGNALLED.load(Ordering::SeqCst) && !queue.is_empty() {
+                fs::write(home.join("stop-queued"), []).unwrap();
+                if queue.len() >= 2 {
+                    fs::write(home.join("retry-queued"), []).unwrap();
+                    break;
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "Stop/Retry test ordering not reached"
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
     let stopped = supervisor.run(&mut queue).await;
     // Reject new operations and release pending completion waiters before workers stop.
     drop(queue);
