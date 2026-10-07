@@ -77,7 +77,7 @@ impl Session {
             }
         };
         history::users(&self.id, &rows)?;
-        if rows.as_array().expect("validated").len() > limit {
+        if rows.as_array().expect("validated").len() > size {
             return Err("OpenCode page exceeds requested limit".into());
         }
         Ok((rows, next))

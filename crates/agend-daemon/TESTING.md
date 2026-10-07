@@ -154,7 +154,7 @@ Claude bridge／Driver／native startup capture 的案例、限制與重驗指�
 `startup_variable_ready_rejects_unknown_footer_and_split_hint_without_idle_or_more_keys` 拒絕未知 footer／分行建議。
 既有無 SessionStart、人工控制、結果不明與四次開機回歸維持；這些測試不啟動真 Claude、不送模型訊息。
 
-OpenCode worker 原生 producer 案例含 140 筆結果不明前綴、獨立新投遞批次與一次確認事件；這是 REST 對帳窗口測試，尚非網路遺失回覆故障注入。supervisor 測試另覆蓋保存 session 的 wrapper resume、缺 session 拒絕與不支援的參數拒絕。
+OpenCode worker 原生 producer 案例含 140 筆結果不明前綴、獨立新投遞批次與一次確認事件；另以 `lost_native_mutation_replies_are_not_replayed_after_store_reopen` 注入 producer 已套用 POST 後直接斷線：prompt 由 history 確認、abort 結果不明不補送 prompt，跨三次 SQLite 重開均不重送。supervisor 測試另覆蓋保存 session 的 wrapper resume、缺 session 拒絕與不支援的參數拒絕。
 
 12B permission 原生 producer 測試核對完整請求、session／request identity 與拒絕後失效；SQLite reopen 後決策 attempt 不可重取。schema v10 及 v1–v10 fixture 升級保存既有資料；permission 歷史保留至明確移除 instance，透過 FK cascade 刪除。尚未涵蓋 TUI／handler 端到端權限回覆。
 
@@ -171,3 +171,5 @@ OpenCode `real_11834_model_capture_confirms_delivery_and_one_terminal_turn` 使�
 `opencode_bridge::unknown_delivery_survives_restart_and_only_operator_can_abandon_it` 透過正式 socket／daemon 驗證結果不明提示跨重啟、agent Forbidden、operator Abandon、晚到確認不復活及 native history 未被重送；沒有真模型呼叫。
 
 OpenCode `oversized_total_history_does_not_block_old_receipts_or_new_delivery` 建立超過 16 MiB 的 native REST history，先核全量讀取失敗，再核分頁／縮小頁數、舊 attempt 定點確認、新訊息送達與早期完成去重。單筆本身超限仍明確拒絕。
+
+`chunked_oversized_json_reports_the_same_limit_as_content_length` 核對無 Content-Length 的 chunked 超限回覆也可觸發分頁縮小，避免長歷史卡住。

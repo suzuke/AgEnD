@@ -163,7 +163,10 @@ fn decode(mut response: ureq::http::Response<ureq::Body>) -> Result<Value, Error
         .with_config()
         .limit(MAX_JSON_BYTES)
         .read_to_vec()
-        .map_err(|error| Error::Transport(error.to_string()))?;
+        .map_err(|error| match error {
+            ureq::Error::BodyExceedsLimit(_) => Error::TooLarge,
+            other => Error::Transport(other.to_string()),
+        })?;
     if status == 204 && bytes.is_empty() {
         return Ok(Value::Null);
     }
@@ -175,6 +178,38 @@ mod tests {
     use super::*;
     use agend_testkit::fake_agent::opencode::Server;
     use serde_json::json;
+
+    #[test]
+    fn chunked_oversized_json_reports_the_same_limit_as_content_length() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let producer = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            socket
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut headers = Vec::new();
+            let mut byte = [0];
+            while !headers.ends_with(b"\r\n\r\n") {
+                socket.read_exact(&mut byte).unwrap();
+                headers.push(byte[0]);
+            }
+            let body = serde_json::to_vec(&"x".repeat(MAX_JSON_BYTES as usize)).unwrap();
+            write!(socket, "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n{:x}\r\n", body.len()).unwrap();
+            // The bounded reader may close before the producer finishes.
+            let _ = socket.write_all(&body);
+            let _ = socket.write_all(b"\r\n0\r\n\r\n");
+        });
+        let result = Http::new(port, "fixture", "/fixture")
+            .unwrap()
+            .get("/global/health");
+        producer.join().unwrap();
+        assert!(matches!(result, Err(Error::TooLarge)), "{result:?}");
+    }
 
     #[test]
     fn native_producer_supports_session_prompt_history_and_abort() {

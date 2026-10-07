@@ -89,6 +89,7 @@ fn usage(error: &str) -> ExitCode {
 
 pub struct Server {
     port: u16,
+    shared: Arc<Shared>,
 }
 
 impl Server {
@@ -119,6 +120,8 @@ impl Server {
             state: Mutex::new(initial),
             turn,
             version,
+            lost_reply: Mutex::new(None),
+            posts: Mutex::new(Vec::new()),
         });
         let ticker = Arc::clone(&shared);
         std::thread::spawn(move || {
@@ -127,15 +130,28 @@ impl Server {
                 lock(&ticker.state).finish_due_turns(ticker.turn);
             }
         });
+        let serving = Arc::clone(&shared);
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
-                let shared = Arc::clone(&shared);
+                let shared = Arc::clone(&serving);
                 std::thread::spawn(move || {
                     let _ = serve(stream, &shared);
                 });
             }
         });
-        Ok(Server { port })
+        Ok(Server { port, shared })
+    }
+
+    /// Commit the next matching POST normally, then close without its reply.
+    pub fn lose_next_post_reply(&self, path: &str) {
+        *lock(&self.shared.lost_reply) = Some(path.to_owned());
+    }
+
+    pub fn post_count(&self, path: &str) -> usize {
+        lock(&self.shared.posts)
+            .iter()
+            .filter(|p| p.as_str() == path)
+            .count()
     }
 
     pub fn port(&self) -> u16 {
@@ -147,6 +163,8 @@ struct Shared {
     state: Mutex<State>,
     turn: Duration,
     version: &'static str,
+    lost_reply: Mutex<Option<String>>,
+    posts: Mutex<Vec<String>>,
 }
 
 #[derive(Default)]
@@ -691,7 +709,17 @@ fn serve(stream: TcpStream, shared: &Shared) -> io::Result<()> {
             }
         }
     }
+    if request.method == "POST" {
+        lock(&shared.posts).push(request.path.clone());
+    }
     let (status, body) = route(&request, shared);
+    if request.method == "POST" {
+        let mut lost = lock(&shared.lost_reply);
+        if lost.as_deref() == Some(request.path.as_str()) {
+            *lost = None;
+            return Ok(());
+        }
+    }
     http::respond(&stream, status, body.as_deref())
 }
 

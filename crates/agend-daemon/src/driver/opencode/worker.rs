@@ -210,6 +210,126 @@ mod tests {
     use std::time::Duration;
 
     #[test]
+    fn lost_native_mutation_replies_are_not_replayed_after_store_reopen() {
+        for lost_abort in [false, true] {
+            let dir = TempDir::new("opencode-lost-reply").unwrap();
+            let server = Server::start(0, Duration::from_secs(600), None).unwrap();
+            let session =
+                Session::create(Http::new(server.port(), "fixture", "/fixture").unwrap()).unwrap();
+            let sid = session.id().to_owned();
+            let store = Arc::new(SqliteStore::open(dir.path(), 0).unwrap());
+            block_on(store.add_instance(&Instance {
+                id: "open-1".into(),
+                backend: Backend::Opencode,
+                program: "unused".into(),
+                args: vec![],
+                working_directory: dir.path().display().to_string(),
+                session_id: Some(sid.clone()),
+                status: InstanceStatus::Running,
+                session_started: true,
+                agent_pid: None,
+                legacy_no_thread: false,
+                delivery: "push".into(),
+            }))
+            .unwrap();
+            if lost_abort {
+                session.submit("prior", "prior turn", None).unwrap();
+            }
+            let path = format!(
+                "/session/{sid}/{}",
+                if lost_abort { "abort" } else { "prompt_async" }
+            );
+            server.lose_next_post_reply(&path);
+            block_on(store.claim_message(
+                &crate::store::NewMessage {
+                    id: "ambiguous".into(),
+                    from_instance: "sender".into(),
+                    to_instance: "open-1".into(),
+                    task_id: None,
+                    body: "unique ambiguous payload".into(),
+                    level: BusyLevel::Interrupt,
+                },
+                1,
+            ))
+            .unwrap();
+            let worker = Worker {
+                store: store.clone(),
+                instance: "open-1".into(),
+                session,
+                cancelled: Arc::new(AtomicBool::new(false)),
+                model: None,
+                history_before: std::cell::RefCell::new(None),
+                reconcile_after: std::cell::Cell::new(0),
+            };
+            assert!(worker.tick().is_err(), "the committed POST reply was lost");
+            assert!(
+                block_on(store.message("ambiguous"))
+                    .unwrap()
+                    .unwrap()
+                    .attempted_at_unix_ms
+                    .is_some()
+            );
+            drop(worker);
+            drop(store);
+            for _boot in 0..3 {
+                let store = Arc::new(SqliteStore::open(dir.path(), 0).unwrap());
+                let worker = Worker {
+                    store: store.clone(),
+                    instance: "open-1".into(),
+                    session: Session::resume(
+                        Http::new(server.port(), "fixture", "/fixture").unwrap(),
+                        &sid,
+                    )
+                    .unwrap(),
+                    cancelled: Arc::new(AtomicBool::new(false)),
+                    model: None,
+                    history_before: std::cell::RefCell::new(None),
+                    reconcile_after: std::cell::Cell::new(0),
+                };
+                for _ in 0..3 {
+                    worker.tick().unwrap();
+                }
+                let message = block_on(store.message("ambiguous")).unwrap().unwrap();
+                assert_eq!(
+                    message.state,
+                    if lost_abort {
+                        DeliveryState::Queued
+                    } else {
+                        DeliveryState::Confirmed
+                    }
+                );
+                assert_eq!(
+                    server.post_count(&path),
+                    1,
+                    "mutation must never be replayed"
+                );
+                let rows = worker.session.history().unwrap();
+                let users = history::users(&sid, &rows).unwrap();
+                assert_eq!(users.len(), 1);
+                assert_eq!(
+                    server.post_count(&format!("/session/{sid}/prompt_async")),
+                    1
+                );
+                if lost_abort {
+                    assert!(
+                        !history::confirmed(
+                            &sid,
+                            "ambiguous",
+                            "From: sender\n\nunique ambiguous payload",
+                            &rows
+                        )
+                        .unwrap()
+                    );
+                    assert!(
+                        !worker.session.busy().unwrap(),
+                        "the original abort was applied"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn oversized_total_history_does_not_block_old_receipts_or_new_delivery() {
         let dir = TempDir::new("opencode-large-history").unwrap();
         let store = Arc::new(SqliteStore::open(dir.path(), 0).unwrap());
