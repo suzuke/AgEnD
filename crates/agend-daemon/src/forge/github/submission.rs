@@ -293,6 +293,7 @@ mod tests {
             pushed_head: None,
             push_intent: None,
             create_attempted: false,
+            merge_head: None,
             cleanup: Default::default(),
         };
         store.save_github_change(None, &change).await.unwrap();

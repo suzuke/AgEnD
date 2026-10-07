@@ -75,8 +75,9 @@ impl GithubForge {
             if merged {
                 let approved = record
                     .change
-                    .pushed_head
+                    .merge_head
                     .as_deref()
+                    .or(record.change.pushed_head.as_deref())
                     .ok_or("GitHub cleanup has no confirmed head")?;
                 repository
                     .receipt(&pull, approved)
@@ -85,6 +86,11 @@ impl GithubForge {
             } else if pull.merged {
                 return Err(
                     "GitHub PR merged outside task completion; inspect before cleanup".into(),
+                );
+            } else if record.change.merge_head.is_some() {
+                return Err(
+                    "GitHub merge outcome unresolved; preserve PR and branch for reconciliation"
+                        .into(),
                 );
             } else if !pull.closed {
                 if record.change.pushed_head.as_deref() != Some(&pull.head)

@@ -19,7 +19,7 @@ schema 0013 保存固定 task／本機 repo／GitHub repo ID／branch／nonce、
 
 push 前保存 intent，以完整舊 SHA 的 force-with-lease 更新單一 ref；未確認 intent 先核遠端 head，不覆蓋外來更新。PR create 前保存 attempt；回覆遺失只搜尋固定 branch／base 與 task nonce，不重送 create，不認領外來 PR。
 
-merge 前後核 repo ID 與 ownership marker。PUT 帶 approved SHA；已 merged 或回覆遺失時只讀原 PR，核 merge commit 的兩個 parents 與 approved head，沒有完整收據就受阻。API 的 head CAS 見[官方端點](https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request)。
+merge 前後核 repo ID 與 ownership marker。PUT 前持久保存綁定 approved SHA 的 attempt；unknown 結果即使重啟或 operator Retry 也只讀回對帳，不重送、不再 push 或刪除遠端分支。PUT 帶 approved SHA；已 merged 或回覆遺失時只讀原 PR，核 merge commit 的兩個 parents 與 approved head，沒有完整收據就受阻。API 的 head CAS 見[官方端點](https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request)。
 
 ## 遠端收尾
 
@@ -39,6 +39,8 @@ remote 失敗會產生 `cleanup-remote` attention，仍繼續本機 WIP 存檔�
 | 契約反例 | local FRG 與 contract mutant 仍通過；不同 branch 使用不同 task ID，原斷言保留 |
 
 原生測試的獨立 API 程序沿用真捕獲形狀，Git 自己產生 object／tree／parents；固定 GitHub URL 只映射到自有 bare repo。沒有外部 GitHub mutation，也不認證 GitHub 分支保護政策。測試結束移除自有 daemon／holder、repo 與 home。
+
+2026-10-07 全新覆核曾以真 daemon 重現 unknown merge 重啟會重送（e55d3df，REFUTED）；已補 durable merge attempt 與真 daemon regression，等待修正後獨立重驗。成功後遺失回覆與未確認仍 open 分別測試，不互相代替。
 
 ## 待決策與剩餘工作
 

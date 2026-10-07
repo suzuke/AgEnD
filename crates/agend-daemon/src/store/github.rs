@@ -80,6 +80,7 @@ mod tests {
             pushed_head: None,
             push_intent: None,
             create_attempted: false,
+            merge_head: None,
             cleanup: Default::default(),
         }
     }
@@ -133,6 +134,15 @@ mod tests {
                 .change,
             change
         );
+        let mut merged = change.clone();
+        merged.merge_head = merged.pushed_head.clone();
+        assert!(merged.follows(Some(&change)));
+        invalid = merged.clone();
+        invalid.merge_head = None;
+        assert!(!invalid.follows(Some(&merged)));
+        invalid = merged.clone();
+        invalid.push_intent = Some("b".repeat(40));
+        assert!(!invalid.follows(Some(&merged)));
         change.cleanup.close_attempted = true;
         assert!(block_on(store.save_github_change(Some(5), &change)).unwrap());
         change.cleanup.delete_attempted = true;

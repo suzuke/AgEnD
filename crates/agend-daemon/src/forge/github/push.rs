@@ -81,8 +81,8 @@ where
     R::Error: std::fmt::Display,
     S::Error: std::fmt::Display,
 {
-    if record.change.cleanup != Default::default() {
-        return Err("GitHub cleanup has begun; no new push permitted".into());
+    if record.change.cleanup != Default::default() || record.change.merge_head.is_some() {
+        return Err("GitHub merge or cleanup has begun; no new push permitted".into());
     }
     let repo_path = record.change.identity.local_repo.clone();
     let repo = Path::new(&repo_path);
@@ -253,6 +253,7 @@ mod tests {
                     pushed_head: None,
                     push_intent: None,
                     create_attempted: false,
+                    merge_head: None,
                     cleanup: Default::default(),
                 };
                 store.save_github_change(None, &change).await.unwrap();

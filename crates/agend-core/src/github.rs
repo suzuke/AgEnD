@@ -32,6 +32,9 @@ pub struct GithubChange {
     pub push_intent: Option<String>,
     /// Persisted before a PR create attempt. Never cleared to authorize replay.
     pub create_attempted: bool,
+    /// Claimed before PUT; unresolved merges can only be reconciled by reads.
+    #[serde(default)]
+    pub merge_head: Option<String>,
     #[serde(default)]
     pub cleanup: GithubCleanup,
 }
@@ -52,6 +55,7 @@ impl GithubChange {
                 .pushed_head
                 .iter()
                 .chain(self.push_intent.iter())
+                .chain(self.merge_head.iter())
                 .any(|s| !full_sha(s))
             || (self.pull_number.is_some() && !self.create_attempted)
         {
@@ -62,9 +66,20 @@ impl GithubChange {
                 && self.pushed_head.is_none()
                 && self.push_intent.is_none()
                 && !self.create_attempted
+                && self.merge_head.is_none()
                 && self.cleanup == GithubCleanup::default();
         };
-        if (old.cleanup.complete && self != old)
+        if old
+            .merge_head
+            .as_ref()
+            .is_some_and(|head| self.merge_head.as_ref() != Some(head))
+            || (self.merge_head.is_some() && self.pull_number.is_none())
+            || (old.merge_head.is_none()
+                && self.merge_head.is_some()
+                && (old.cleanup != GithubCleanup::default() || old.push_intent.is_some()))
+            || (old.merge_head.is_some()
+                && (self.push_intent != old.push_intent || self.pushed_head != old.pushed_head))
+            || (old.cleanup.complete && self != old)
             || (old.cleanup.close_attempted && !self.cleanup.close_attempted)
             || (old.cleanup.delete_attempted && !self.cleanup.delete_attempted)
             || i != &old.identity

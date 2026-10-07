@@ -73,6 +73,8 @@ elif endpoint == prefix + f'/pulls/{number}' and method == 'PATCH':
     fault = 'lose-close-reply'
 elif endpoint == prefix + f'/pulls/{number}/merge' and method == 'PUT':
     assert state and not state['merged'], 'duplicate merge'
+    if (root / 'unknown-merge').exists():
+        sys.exit(1)
     head = git('rev-parse', f'refs/heads/{state["branch"]}')
     base = git('rev-parse', f'refs/heads/{state["base"]}')
     if fields['sha'] != head:

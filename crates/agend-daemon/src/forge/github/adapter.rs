@@ -185,6 +185,7 @@ impl Forge for GithubForge {
                 pushed_head: None,
                 push_intent: None,
                 create_attempted: false,
+                merge_head: None,
                 cleanup: Default::default(),
             };
             // A concurrent claimant wins; load and validate that identity below.
@@ -274,15 +275,51 @@ impl Forge for GithubForge {
         &self,
         request: &MergeRequest,
     ) -> Result<MergeResult, ExecutionError> {
-        let record = self.owned(&request.branch).await?;
+        let mut record = self.owned(&request.branch).await?;
         if record.change.push_intent.is_some() {
             return Err(blocked("GitHub push has an unresolved outcome"));
         }
-        let result = self
-            .repository()
-            .await?
-            .merge_owned(&record.change, &request.expected_head)
-            .await?;
+        let repository = self.repository().await?;
+        if repository.name != record.change.identity.repository
+            || repository.repository_id().await? != record.change.identity.repository_id
+        {
+            return Err(blocked("GitHub merge repository differs from ownership"));
+        }
+        let number = record
+            .change
+            .pull_number
+            .ok_or_else(|| blocked("GitHub merge has no owned PR"))?;
+        let before = repository.pull(number, &request.branch).await?;
+        repository.owned_pull(&record.change, &before)?;
+        if before.head != request.expected_head {
+            return Ok(MergeResult::HeadChanged {
+                actual_head: before.head,
+            });
+        }
+        let result = if before.merged {
+            repository.receipt(&before, &request.expected_head).await?
+        } else {
+            if before.closed {
+                return Err(blocked("GitHub PR closed without merging"));
+            }
+            if record.change.merge_head.is_some() {
+                return Err(blocked(
+                    "GitHub merge outcome unresolved; inspect the original PR; no repeat merge permitted",
+                ));
+            }
+            record.change.merge_head = Some(request.expected_head.clone());
+            if !self
+                .store
+                .save_github_change(Some(record.revision), &record.change)
+                .await
+                .map_err(|e| blocked(e.to_string()))?
+            {
+                return Err(blocked("GitHub merge ownership revision changed"));
+            }
+            repository
+                .merge_owned(&record.change, &request.expected_head)
+                .await?
+        };
         if matches!(result, MergeResult::Merged { .. }) {
             self.sync_main().await.map_err(blocked)?;
         }

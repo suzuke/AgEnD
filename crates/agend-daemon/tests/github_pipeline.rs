@@ -242,3 +242,67 @@ fn real_daemon_cancellation_closes_owned_pr_and_archives_wip() {
                 .contains("uncommitted work"))
     );
 }
+
+#[test]
+fn unresolved_merge_never_replays_after_restart_or_operator_retry() {
+    use agend_core::protocol::client::{AttentionAction, ClientRequest, ResolveAttentionData};
+    let mut lab = pipeline::Lab::new(&[]).unwrap();
+    fixture(&mut lab);
+    std::fs::write(lab.home.join("github-fixture/unknown-merge"), "").unwrap();
+    lab.boot(None).unwrap();
+    let task = lab.create("g10", "github", "unknown").unwrap();
+    lab.approve(&task).unwrap();
+    let blocked = || -> Result<bool, String> {
+        Ok(lab.fleet()?.attention.iter().any(|a| {
+            a.task_id.as_deref() == Some(&task) && a.actions.contains(&AttentionAction::Retry)
+        }))
+    };
+    pipeline::wait_until(&lab, blocked).unwrap();
+    assert_eq!(mutations(&lab, "PUT"), 1);
+    lab.stop(true);
+    lab.boot(None).unwrap();
+    pipeline::wait_until(&lab, || {
+        Ok(lab.fleet()?.attention.iter().any(|a| {
+            a.task_id.as_deref() == Some(&task) && a.actions.contains(&AttentionAction::Retry)
+        }))
+    })
+    .unwrap();
+    assert_eq!(mutations(&lab, "PUT"), 1);
+    let id = lab
+        .fleet()
+        .unwrap()
+        .attention
+        .into_iter()
+        .find(|a| {
+            a.task_id.as_deref() == Some(&task) && a.actions.contains(&AttentionAction::Retry)
+        })
+        .unwrap()
+        .attention_id
+        .unwrap();
+    lab.request(
+        None,
+        ClientRequest::ResolveAttention {
+            data: ResolveAttentionData {
+                request_id: "retry-unknown".into(),
+                attention_id: id,
+                action: AttentionAction::Retry,
+                note: None,
+            },
+        },
+    )
+    .unwrap();
+    pipeline::wait_until(&lab, || {
+        Ok(lab.fleet()?.attention.iter().any(|a| {
+            a.task_id.as_deref() == Some(&task) && a.actions.contains(&AttentionAction::Retry)
+        }))
+    })
+    .unwrap();
+    assert_eq!(mutations(&lab, "PUT"), 1);
+    assert!(
+        lab.fleet()
+            .unwrap()
+            .tasks
+            .iter()
+            .any(|t| t.task_id == task && t.status == "running")
+    );
+}

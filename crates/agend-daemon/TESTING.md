@@ -189,3 +189,5 @@ OpenCode `oversized_total_history_does_not_block_old_receipts_or_new_delivery` �
 `github_forge` 另核 close／delete 遺失回覆、同 SHA 重建分支不重刪、外來 head 不關 PR。`github_pipeline` 使用真 daemon／holder／fake-worker：重啟恢復與單次 merge、main 前進後 checks attempt 2、取消關閉 PR 及 WIP／remote 清理。先 build agend／agend-testkit bins。GitHub API 是獨立離線 producer，不代表 live GitHub 保護政策。
 
 `remote_cleanup_failure_releases_local_capacity_and_waits_for_operator_retry` 核遠端收尾失敗仍解除本機 binding，wake 不重送，operator Retry 才重新對帳。store 測試跨 DB 重開核 cleanup attempt 不可清除、complete 後不可重新 push。
+
+`unresolved_merge_never_replays_after_restart_or_operator_retry` 令獨立 API producer 收到 PUT 後無收據且 PR 仍 open，核強制重啟與 operator Retry 均維持 PUT 次數 1。此案例與立即可見的成功遺失回覆分開，防止假陽性。
