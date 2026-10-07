@@ -283,3 +283,5 @@
 - 2026-10-07：12D 增補 native human approval／request_changes：原因提示不提前執行、空白拒絕、多行保留與舊按鈕拒絕；無 repo research 範圍，非 Git merge 或真 Telegram 核准認證。
 
 - 2026-10-07：12D 未知通知已接本機需要你／operator-only Abandon；正常傳輸不誤報，重啟恢復未知，不自動重送、不偽造收據。core／daemon 399 tests 通過（2 項既有 ignored）；正式 daemon 三次 boot 驗無 token 仍可處置、拒絕 agent、持久保留原文與未知證據。完整 12D 仍未完成。
+
+- 2026-10-07：PR #156 整體覆核修正 doctor 空 Telegram allowlist 未回報 fail，以及真 daemon CLI 表仍預期 protocol 1.5 的兩列；本機設定測試與完整 CLI 表重驗通過。

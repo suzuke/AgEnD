@@ -38,7 +38,7 @@
 | `cli::agent` | agent 命令：`status`、`send`（UUID v4 訊息 id、`--level`、斷線用同一個 id 重送）、`inbox [--after]`、`done`／`result`／`review` 帶 ticket、`ask`、`block`／`unblock`／`remind`（先問 `status` 拿 task）、`task create` |
 | `cli::operator` | 操作者命令：`status`（全貌）、`instance add|remove|list`、`daemon restart`（預檢結果、等舊連線 EOF、等新的 `boot_id`）、`task cancel` |
 | `home` | `AGEND_HOME` 的解析（見上） |
-| `doctor` | `agend doctor`：home、daemon、git、claude／codex／opencode、holders、disk；非 ok 一定附 `fix:`；有 fail 就 exit 1 |
+| `doctor` | `agend doctor`：home、daemon、git、claude／codex／opencode、holders、disk、Telegram 本機設定（空 allowlist 為 fail）；非 ok 一定附 `fix:`；有 fail 就 exit 1 |
 | `init` | `agend init`：建 home（0700，已存在不動）→ doctor → 下一步 |
 | `debug` | `agend debug ping [--count N --interval MS]`（協定版本與 instance 數；daemon 重啟中重試 10 秒）、`agend debug watch`（全貌摘要＋之後的事件；斷線每 500 ms 重連、重拿全貌）；socket 由 `AGEND_HOME` 算，身分取 `AGEND_INSTANCE` |
 | `setup` | 執行 `agend_core::setup` 的規則：在 `PATH` 上找程式（跳過 `$AGEND_HOME/bin`）、跑 `--version`（5 秒）、`statvfs`、home 大小；第 13 施工關加寫 unit 檔、註冊服務、安裝／移除 shim |

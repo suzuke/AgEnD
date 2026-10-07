@@ -335,7 +335,7 @@ fn telegram(home: &Path) -> Check {
     match agend_daemon::notifier::config::load(home) {
         Ok(None) => ok("telegram", "not configured".into()),
         Ok(Some((config, _token))) if config.allow_user_ids.is_empty() => check(
-            "telegram", CheckStatus::Warn,
+            "telegram", CheckStatus::Fail,
             "notifications configured; inbound control disabled because allow_user_ids is empty".into(),
             Some("set telegram.allow_user_ids in $AGEND_HOME/config.toml to the permitted human user IDs".into()),
         ),
@@ -351,7 +351,7 @@ fn telegram(home: &Path) -> Check {
 mod telegram_tests {
     use super::*;
     #[test]
-    fn empty_allowlist_is_visible_and_secret_failures_do_not_echo_configuration() {
+    fn empty_allowlist_fails_and_secret_failures_do_not_echo_configuration() {
         let dir = agend_testkit::tempdir::TempDir::new("telegram-doctor").unwrap();
         assert_eq!(telegram(dir.path()).status, CheckStatus::Ok);
         let token = dir.path().join("token");
@@ -363,7 +363,7 @@ mod telegram_tests {
         );
         std::fs::write(dir.path().join("config.toml"), &config).unwrap();
         let check = telegram(dir.path());
-        assert_eq!(check.status, CheckStatus::Warn);
+        assert_eq!(check.status, CheckStatus::Fail);
         assert!(check.detail.contains("allow_user_ids is empty"));
         std::fs::write(
             dir.path().join("config.toml"),
