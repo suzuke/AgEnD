@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 依 crate 由下往上分 13 個施工關；每個施工關單獨驗收，使用者確認後才開下一個施工關（D22）。
 > - 目前狀態：**第 1–11 施工關完成並已合併**；第 11 施工關 C 段 #145 經全新 verifier、雙平台 CI、實機及後續自動驗收與清理，使用者於 2026-10-03 確認合併（`b2152db`）。第 12 施工關 A 段設計 #138 已 merge，client 基礎 #147 已 merge，持久化 #148 已 merge，protocol 1.5／channel／Stop／ACK spool 基礎 #149 已 merge，共用 gh 防護 #150 已 merge，Claude Driver #151 與正式啟動／初始 idle #152 已合併，完整真模型 smoke 改為必要驗收，Claude 接入尚未驗收；第 13 施工關未開始。
-> - 下一步：依第 12A [D40](decisions/d40.md) 完成 [完整真模型 smoke](gates/gate-12a-live-smoke.md)；每批以全新 verifier、可重驗指令及使用者確認收尾。
+> - 下一步：第 12A [完整模型 smoke 已回報 PASS](gates/gate-12a-complete-smoke.md)，完成獨立覆核／CI 收尾後，依持續授權推進 B–D。
 
 ## 13 個施工關
 
@@ -22,7 +22,7 @@
 | 9 `cli` | [完成（2026-09-29；已 merge #136）](gates/gate-09-cli.md) | agend CLI：agent 命令、操作者命令、status；安裝相關先做 `doctor`、`init`，服務註冊留第 13 施工關 | 對假／真 daemon 驗輸出與錯誤；兩個假 Codex agent 互傳訊息、中途重啟不漏不重 |
 | 10 `pipeline` | [完成（2026-10-02；#143 已確認合併）](gates/gate-10-pipeline.md) | daemon：pipeline、git、runner、forge local、supervisor、reconcile | 假 driver + 暫存 repo：task 從派工走到 merge |
 | 11 `tui` | [完成（A、B、C 已 merge；C 段 #145）](gates/gate-11-tui.md) | attention-first TUI、完整終端、resize、多視窗、鍵鼠／貼上與歷史 | 最終 `cfee027` 全新 verifier CONFIRMED；四個雙平台 CI jobs 各 900 passed／0 failed／2 既有 ignored、實際 no-std；0.159.3 真 U17 已核實並獲版本許可。實機紀錄及後續自動驗收、清理完成，使用者確認 merge `b2152db` |
-| 12 `adapters` | [實作中（A 段 #138 設計已 merge；Claude 接入尚未完成）](gates/gate-12-adapters.md) | A claude、B opencode driver、C forge github、D Telegram | 先對假實作，再做真 backend smoke test |
+| 12 `adapters` | [實作中（A 段完整 smoke PASS，覆核／合併收尾中；B–D 待實作）](gates/gate-12-adapters.md) | A claude、B opencode driver、C forge github、D Telegram | 先對假實作，再做真 backend smoke test |
 | 13 `install` | [未開始](gates/gate-13-install.md) | 安裝與發布（最後一個施工關）：服務註冊、`agend uninstall`、`agend telegram setup`（由 daemon 配對）、`xtask release`、brew、GitHub release、`cargo install` | CI 用全新 HOME + 假 agent，從安裝到第一個 task 完成 < 5 分鐘；每個 `doctor` 檢查都有「故意弄壞 → 看到修正指令」的測試 |
 
 ## 第 1 施工關：開工前先提案、經使用者確認才實作
@@ -216,3 +216,5 @@
 - 2026-10-07：使用者授權持續完成第 12 施工關 A–D，保留獨立覆核、合併 CI 與每批清理。#154 固定 ab5a296 的 v10 單次真測已有五則 confirmed（四 channel、一 Stop），queue 後 active Stop 被設成 busy 而 idle 逾時，Interrupt 未驗；原證據與獨立 FAILED 覆核保留。補原生反例及 idle 修正，完整 12A 仍待真測。
 
 - 2026-10-07：#154 的 v11 完成啟動與 INITIAL ACK，但模型將命令後說明送入 Bash，peer send exit 2；提前停止自有 runner 並清理，未進入 queue／Interrupt。命令改用獨立區塊，Bash／zsh 原生參數檢查通過；完整 12A 仍未完成，詳見 [Stop idle](gates/gate-12a-stop-idle.md)。
+
+- 2026-10-07：#154 固定 `0f4b8e0` 的 v12 完整真模型 smoke 單次 PASS：七則 confirmed（六 channel／一 Stop）、模型互傳、queue 後恢復 idle、Interrupt 完成，自有清理成功且保留 trust。全新 outcome／CI 收尾中；[完整紀錄](gates/gate-12a-complete-smoke.md)。使用者表示 Telegram 測試憑證稍後提供，先推進其餘工作。
