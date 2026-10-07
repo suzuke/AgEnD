@@ -95,6 +95,17 @@ impl Server {
     /// Listens on `127.0.0.1:<port>` (0 picks a free port). With `state`,
     /// sessions are loaded from and saved to that file.
     pub fn start(port: u16, turn: Duration, state: Option<PathBuf>) -> io::Result<Server> {
+        Self::start_version(port, turn, state, VERSION)
+    }
+
+    /// CLI launch fixture uses the recorded 1.18.34 health version while the
+    /// legacy conformance producer remains pinned to its 1.18.31 recordings.
+    pub fn start_version(
+        port: u16,
+        turn: Duration,
+        state: Option<PathBuf>,
+        version: &'static str,
+    ) -> io::Result<Server> {
         let listener = TcpListener::bind(("127.0.0.1", port))?;
         let port = listener.local_addr()?.port();
         let mut initial = State {
@@ -107,6 +118,7 @@ impl Server {
         let shared = Arc::new(Shared {
             state: Mutex::new(initial),
             turn,
+            version,
         });
         let ticker = Arc::clone(&shared);
         std::thread::spawn(move || {
@@ -134,6 +146,7 @@ impl Server {
 struct Shared {
     state: Mutex<State>,
     turn: Duration,
+    version: &'static str,
 }
 
 #[derive(Default)]
@@ -640,7 +653,7 @@ fn route(request: &Request, shared: &Shared) -> (u16, Option<String>) {
     let segments: Vec<&str> = request.path.trim_matches('/').split('/').collect();
     let mut state = lock(&shared.state);
     match (request.method.as_str(), segments.as_slice()) {
-        ("GET", ["global", "health"]) => ok(json!({"healthy": true, "version": VERSION})),
+        ("GET", ["global", "health"]) => ok(json!({"healthy": true, "version": shared.version})),
         ("GET", ["permission"]) => ok(Value::Array(
             state.permissions.values().map(|(_, ask)| ask.clone()).collect(),
         )),

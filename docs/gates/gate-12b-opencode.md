@@ -31,6 +31,8 @@
 
 權限 API 已依本機 1.18.34 `/doc` 接上新版 reply route；回覆前比對 session 與完整原始請求，只支持 once／reject。migration 0010 保存觀察、決策與單次 HTTP attempt；重開 SQLite 再觀察同一請求不重設 attempt。原生 producer 測試覆蓋外來 session、內容變更、重複 id、過期回覆與重啟後不能再 claim。worker 已輪詢保存；「需要你」發布與 operator-only AnswerAsk 已接線。只接受明確選項，free text 拒絕；回覆不明時保留無重送動作的提示。完整 holder／協定端到端真測尚未完成。
 
+原生 `opencode_bridge` 兩個整合案例已通過：真 daemon／holder／wrapper／socket，daemon 重啟保留 holder 與 permission ask；operator 拒絕一次、重複拒絕失敗；正常停止或 SIGKILL 自有 holder 後，以原 session 恢復且歷史僅一筆 user message。結束確認 server port 關閉，lab 目錄已清。未知 process group 不清除 attribution、不覆寫 runtime 檔案；attach 以完整 URL＋session 辨識。這些是零模型 fixture 證據，尚未完成真 OpenCode／三 backend 互傳驗收。
+
 ## 下一步
 
 完成 holder 原生整合、權限請求與恢復測試，再進行受控真測與 fresh verifier。

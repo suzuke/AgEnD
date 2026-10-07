@@ -436,6 +436,11 @@ impl Supervisor {
         log::line(&format!(
             "{id}: sweep of agent group {pgid} ({why}): {swept}"
         ));
+        if instance.backend == Backend::Opencode
+            && !matches!(swept, sweep::Swept::Gone | sweep::Swept::Killed(_))
+        {
+            return; // Preserve attribution; do not replace files while cleanup is unproven.
+        }
         if let Err(e) = self.store.set_agent_pid(id, None).await {
             log::line(&format!("{id}: cannot clear agent_pid: {e}"));
         }
@@ -648,6 +653,17 @@ impl Supervisor {
         self.sweep(instance, "before a new holder").await;
         if instance.backend == Backend::Opencode && instance.delivery == "push" {
             self.opencode.disconnect(&id);
+            match self.store.instance(&id).await {
+                Ok(Some(current)) if current.agent_pid.is_none() => {}
+                _ => {
+                    return self
+                        .fail(
+                            &id,
+                            "OpenCode orphan cleanup is unproven; runtime files preserved",
+                        )
+                        .await;
+                }
+            }
             match crate::runtime::files::running(&self.home, &id) {
                 Ok(None) => {}
                 Ok(Some(_)) => {

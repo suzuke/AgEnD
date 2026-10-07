@@ -309,10 +309,32 @@ impl Layout {
             .and_then(|b| String::from_utf8(b).ok())
             .and_then(|s| s.trim().parse::<u16>().ok())
             .filter(|p| *p != 0);
+        let attached = read_private(&self.root.join("go"), 1024)
+            .ok()
+            .and_then(|b| String::from_utf8(b).ok())
+            .and_then(|text| {
+                let mut lines = text.lines();
+                let session = lines.next()?.to_owned();
+                let url = lines.next()?.to_owned();
+                if !super::history::valid_id(&session, "ses")
+                    || lines.next().is_some()
+                    || port.is_none_or(|p| url != format!("http://127.0.0.1:{p}"))
+                {
+                    return None;
+                }
+                Some((session, url))
+            });
         let root = self.root.display().to_string();
         crate::driver::codex::sweep::sweep_matching(pgid, |argv| {
             argv.windows(4)
                 .any(|w| w[0] == WRAPPER && w[1] == WRAPPER_NAME && w[2] == program && w[3] == root)
+                || (argv.first().is_some_and(|a| a == program)
+                    && attached.as_ref().is_some_and(|(session, url)| {
+                        argv.windows(2).any(|w| w[0] == "attach" && w[1] == *url)
+                            && argv
+                                .windows(2)
+                                .any(|w| w[0] == "--session" && w[1] == *session)
+                    }))
                 || (argv.first().is_some_and(|a| a == program)
                     && argv.iter().any(|a| a == "serve")
                     && argv
