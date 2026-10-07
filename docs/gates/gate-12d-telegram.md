@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 已實作通知完整分段、持久 outbox 與逐段收據；已接 daemon worker 與 inbound 操作防護，手機已讀／確認已驗收；其餘端到端與整體驗收尚未完成。
 > - 專用 bot 已做 getMe 與三則限額文字真測，三則均已刪除；token 設定檔未改動。
-> - 下一步：剩餘 inbound 操作、真 forum topic、真 daemon 停機端到端與整體覆核。
+> - 下一步：剩餘 inbound 操作、真 forum topic、真 daemon Retry 關機組合與整體覆核。
 
 ## 設定與憑證
 
@@ -41,7 +41,7 @@ Task 通知另保存 CAS version／attention revision；CLI 或 TUI 清除再開
 
 getMe 與 Message fixture 來自 2026-10-07 真 Telegram，僅替換識別資料。三則 sendMessage 各搭配一次 deleteMessage，三次刪除均確認；未重試 mutation。計畫及必要證據保留於 AgEnD-ops。
 
-尚未完成真 daemon 程序的 inbound／停機端到端驗證、真 forum topic、整體全新覆核／CI／合併。這批不是第 12D 完成認證。
+尚未完成真 daemon 程序的 Retry／排隊停機端到端驗證、真 forum topic、整體全新覆核／CI／合併。這批不是第 12D 完成認證。
 
 ## 下一步
 
@@ -78,3 +78,5 @@ Abandon 保存明確理由與原始 payload／收據前綴；保留 in_flight �
 正常 Worker::stop 等候有限期限 HTTP 與收據，不 abort future。若直接取消公開 notifier future，或傳輸後保存 unknown 的 DB 寫入本身失敗，當次程序可能只有 in_flight、防重送但尚無 attention；重啟時恢復。此限制不被當作已確認送達。
 
 原生三次開機驗證通過：無 Telegram 設定／token 仍發布未知通知，agent 被 Forbidden 拒絕、operator Abandon 持久化；最後一次開機持續觀察三秒未復活，DB 保留原 payload、空 receipt 與處置理由，不可重新 claim。core／daemon 共 399 passed、2 項既有 ignored；直接取消公開 notifier future 的限制仍依上段記錄。
+
+Active shutdown checkpoint：兩個獨立子程序執行正式 daemon `serve`。本機 HTTP producer 扣住第一段回覆；SIGINT 移除 socket 後程序仍存活，收據放行後正常退出，SQLite 保存 receipt 500 且無未知意圖。第二次 boot 僅送原第二段，保存 receipt 501，全文與兩次請求逐段一致。測試不使用真 Telegram，也不涵蓋 pending Retry 取消；該項仍待補。

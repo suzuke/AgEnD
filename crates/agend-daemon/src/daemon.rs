@@ -149,7 +149,15 @@ fn run_with_policy(
             return ExitCode::from(1);
         }
     };
-    let stopped = runtime.block_on(serve(home, exe, store, codex_input, telegram));
+    let stopped = runtime.block_on(serve(
+        home,
+        exe,
+        store,
+        codex_input,
+        telegram,
+        #[cfg(test)]
+        None,
+    ));
     // Pending restart timers and the like are dropped, not awaited.
     runtime.shutdown_timeout(Duration::from_secs(1));
     if matches!(stopped, Ok(Stopped::Exec(_))) {
@@ -235,6 +243,7 @@ async fn serve(
         agend_core::config::TelegramConfig,
         crate::notifier::config::Token,
     )>,
+    #[cfg(test)] telegram_api: Option<Arc<crate::notifier::http::Api>>,
 ) -> Result<Stopped, ExitCode> {
     if let Err(error) = store.recover_telegram_attempts().await {
         log::line(&format!(
@@ -352,8 +361,13 @@ async fn serve(
         restarting: AtomicBool::new(false),
         codex_input,
     });
-    let telegram_worker = telegram
-        .map(|(config, token)| crate::notifier::worker::start(config, token, context.clone()));
+    let telegram_worker = telegram.map(|(config, token)| {
+        #[cfg(test)]
+        if let Some(api) = telegram_api {
+            return crate::notifier::worker::start_with_context(config, api, context.clone());
+        }
+        crate::notifier::worker::start(config, token, context.clone())
+    });
     let server = Server::start(listener, socket.clone(), Arc::clone(&context));
     log::line(&format!("listening on {}", socket.display()));
     log::line(&format!(
@@ -395,3 +409,6 @@ async fn serve(
     log::line("agend daemon stopped");
     Ok(stopped)
 }
+
+#[cfg(test)]
+mod telegram_tests;

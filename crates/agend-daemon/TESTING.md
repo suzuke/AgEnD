@@ -193,3 +193,5 @@ OpenCode `oversized_total_history_does_not_block_old_receipts_or_new_delivery` �
 `native_mobile_approval_and_changes_require_current_receipt_and_explicit_reason` 以 core state machine 產生已交付的 research 結果，在正式 serialized pipeline 等 human approval，經本機 HTTP 收據／callback 核 approve 完成；request_changes 先提示、不執行，空白拒絕、多行理由完整保存後回 work。完成後新 update ID 重用舊按鈕不改 pipeline。此例 bind_head=false，不代替 Git head／merge 驗收。
 
 Telegram unknown 測試核 active claim 不提早發布、HTTP 收據遺失／毀損標 unknown、agent／Retry 拒絕、operator Abandon 不造收據、不重送，DB 重開保留處置與原文。`agend --test telegram_unknown` 另以正式 daemon 三次開機、無 token／設定核啟動恢復、操作員 socket 權限及持久處置。
+
+12D `cargo test -p agend-daemon --lib daemon::telegram_tests::active_shutdown` 用兩個獨立子程序執行正式 daemon `serve`，本機 HTTP producer 扣住第一段回覆。SIGINT 後 socket 已移除但程序仍等收據；放行後 SQLite 保存第一段，重啟只送第二段並完成。僅測試編譯可注入 loopback API，正式 origin 不變；ignored `child` 是父測試啟動的子程序入口。這驗 auxiliary outbox active shutdown，不涵蓋 Retry 排隊關機。

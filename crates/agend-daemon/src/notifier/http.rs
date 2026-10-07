@@ -62,6 +62,11 @@ impl Api {
             token,
         }
     }
+    #[cfg(test)]
+    pub(crate) fn local_test(token: Token, base: String) -> Self {
+        assert!(base.starts_with("http://127.0.0.1:"));
+        Self::with_origin(token, base)
+    }
     /// The worker runs blocking I/O off the async engine. Callers own durable
     /// attempt/cursor semantics; transport never retries a failed mutation.
     pub fn call(&self, method: Method, request: &Value) -> Result<Value, Error> {

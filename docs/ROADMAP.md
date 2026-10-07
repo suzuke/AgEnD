@@ -285,3 +285,5 @@
 - 2026-10-07：12D 未知通知已接本機需要你／operator-only Abandon；正常傳輸不誤報，重啟恢復未知，不自動重送、不偽造收據。core／daemon 399 tests 通過（2 項既有 ignored）；正式 daemon 三次 boot 驗無 token 仍可處置、拒絕 agent、持久保留原文與未知證據。完整 12D 仍未完成。
 
 - 2026-10-07：PR #156 整體覆核修正 doctor 空 Telegram allowlist 未回報 fail，以及真 daemon CLI 表仍預期 protocol 1.5 的兩列；本機設定測試與完整 CLI 表重驗通過。
+
+- 2026-10-07：12D 補正式 daemon serve 的雙程序 active shutdown／restart：扣住 HTTP 回覆後 SIGINT 等待收據，重啟僅續剩餘段；零真 API／模型。Retry 與真 forum 等剩餘範圍不變（PR #156）。

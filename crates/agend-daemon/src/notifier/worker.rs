@@ -59,6 +59,14 @@ pub(super) fn start_with_api(
 ) -> Worker {
     run(config, api, store, fleet, None)
 }
+#[cfg(test)]
+pub(crate) fn start_with_context(
+    config: TelegramConfig,
+    api: Arc<Api>,
+    ctx: Arc<crate::handlers::Context>,
+) -> Worker {
+    run(config, api, ctx.store.clone(), ctx.fleet.clone(), Some(ctx))
+}
 fn run(
     config: TelegramConfig,
     api: Arc<Api>,
