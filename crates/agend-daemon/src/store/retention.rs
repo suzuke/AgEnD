@@ -62,6 +62,14 @@ pub struct Rule {
 pub const RETENTION: &[Rule] = &[
     Rule {
         target: Target::Table {
+            name: "attention_reads",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "G4: read receipts survive restart independently of resolution",
+    },
+    Rule {
+        target: Target::Table {
             name: "instance_failures",
             time_column: None,
         },

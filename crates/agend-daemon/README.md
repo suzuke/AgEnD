@@ -177,3 +177,5 @@ cargo xtask accept cli             # 第 9 施工關 demo：cli_demo（在 agend
 12D 設定 parser、private token reference 與固定 Telegram HTTPS API 已建立；通知全文分段與持久逐段收據已接 Notifier 契約；daemon worker 已觀察 needs-you 並持久去重，手機操作尚未接入。進度見 [Telegram](../../docs/gates/gate-12d-telegram.md)。
 
 Telegram 手機操作先保存 update 與通知消耗意圖，再進入 operator 路徑；未知結果不重送。通知保存任務 CAS 版本與注意事項版本，pipeline 在執行時重新比對。Instance retry 在 supervisor queue 內檢查失敗事件並完成處理後回報；要求修改先提示回覆原因。Inbound polling 與 outbound 分段送出各自執行，停機等待有限 HTTP 呼叫收束。完整第 12D 驗收仍以施工關頁為準。
+
+Protocol 1.6 新增共用已讀收據：`mark_attention_read`、`attention_read` 事件與 fleet `read_keys`。識別沿用事項 ID＋問題次數；後續追問重新未讀。daemon 保存 SQLite，TUI 與 Telegram 共用；已讀不等於回答、核准或解除。舊 daemon 仍使用 TUI 本機已讀。

@@ -3,7 +3,10 @@ use agend_core::{
     config::TelegramConfig,
     protocol::{
         ask::{AnswerSource, AskEntry, AskReply},
-        client::{AnswerAskData, AttentionRequiredData, ClientRequest, ResolveAttentionData},
+        client::{
+            AnswerAskData, AttentionRequiredData, ClientRequest, MarkAttentionReadData,
+            ResolveAttentionData,
+        },
     },
     telegram::{TelegramDelivery, TelegramInboundStore},
 };
@@ -37,6 +40,11 @@ pub fn keyboard(row: &TelegramDelivery) -> Option<Value> {
                 json!({"text":action.as_str(),"callback_data":format!("a:{}:{index}",row.id)}),
             ]);
         }
+    }
+    if item.read_key().is_some() {
+        buttons.push(vec![
+            json!({"text":"Mark read","callback_data":format!("r:{}:0",row.id)}),
+        ]);
     }
     if buttons.is_empty() {
         None
@@ -157,6 +165,16 @@ where
             return Err("invalid callback fields".into());
         }
         match kind {
+            "r" if index == 0 => ClientRequest::MarkAttentionRead {
+                data: MarkAttentionReadData {
+                    request_id,
+                    attention_id: expected
+                        .attention_id
+                        .clone()
+                        .ok_or("missing attention identity")?,
+                    read_key: expected.read_key().ok_or("missing read identity")?,
+                },
+            },
             "a" if expected.ask.is_none() => {
                 let action = *expected.actions.get(index).ok_or("action not offered")?;
                 ClientRequest::ResolveAttention {
@@ -259,6 +277,9 @@ pub async fn dispatch(ctx: &crate::handlers::Context, admitted: Admitted) -> Res
         .ok_or("notification has been resolved")?;
     if !agend_core::telegram::same_attention(&current, &admitted.expected) {
         return Err("notification is stale; open the current needs-you item".into());
+    }
+    if let ClientRequest::MarkAttentionRead { data } = &admitted.request {
+        return handlers::mark_attention_read(ctx, &data.attention_id, &data.read_key).await;
     }
     if id.starts_with("instance-failed:") {
         let ClientRequest::ResolveAttention { data } = admitted.request else {

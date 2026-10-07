@@ -226,6 +226,7 @@ pub fn event_line(event: &DaemonEvent) -> String {
             format!("message_received {} from {}", data.message_id, data.from)
         }
         DaemonEvent::AskUpdated { data } => format!("ask_updated {}", data.ask_id),
+        DaemonEvent::AttentionRead { data } => format!("attention read: {}", data.read_key),
         DaemonEvent::Unknown => "unknown event (a newer daemon?)".into(),
     }
 }

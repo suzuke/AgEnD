@@ -43,7 +43,7 @@ use std::time::Duration;
 use crate::terminal_hub::{ReplyScope, TerminalHub, ViewStream, reject};
 use agend_core::protocol::client::{
     ClientRequest, ClientResponse, ErrorData, EventData, MAX_LINE_BYTES, MAX_MESSAGE_BYTES,
-    TerminalBytesData, V1_4, V1_5, error_code,
+    TerminalBytesData, V1_4, V1_6, error_code,
 };
 use agend_core::protocol::terminal::MAX_FRAME_LINE;
 use agend_core::protocol::{ProtocolVersion, negotiate};
@@ -333,7 +333,7 @@ async fn connection(
                         client.send(&reply).await;
                         return;
                     };
-                    match negotiate("client", &[V1_5], &data.supported) {
+                    match negotiate("client", &[V1_6], &data.supported) {
                         Ok(selected) => {
                             negotiated = true;
                             selected_version = selected;

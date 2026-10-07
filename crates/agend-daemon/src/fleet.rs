@@ -18,7 +18,7 @@
 //!
 //! Must NOT: hold the lock across an await, or do I/O.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Mutex, MutexGuard};
 
 use agend_core::model::DEFAULT_TEAM;
@@ -42,6 +42,7 @@ pub struct Fleet {
 }
 
 struct Inner {
+    read_keys: BTreeSet<String>,
     latest: u64,
     log: VecDeque<EventData>,
     instances: BTreeMap<String, InstanceView>,
@@ -64,6 +65,7 @@ impl Fleet {
         Self {
             base: boot_unix_ms.saturating_mul(1000),
             inner: Mutex::new(Inner {
+                read_keys: BTreeSet::new(),
                 latest: boot_unix_ms.saturating_mul(1000),
                 log: VecDeque::new(),
                 instances: BTreeMap::new(),
@@ -312,13 +314,33 @@ impl Fleet {
         Some(item)
     }
 
-    /// The fleet view now; subscribing after its `as_of_event_id` gives every
-    /// later change.
+    /// Restore durable receipts before serving clients at boot.
+    pub fn restore_read_keys(&self, keys: Vec<String>) {
+        self.lock().read_keys = keys.into_iter().collect();
+    }
+    pub fn mark_read(&self, key: String) {
+        let mut inner = self.lock();
+        if inner.read_keys.insert(key.clone()) {
+            self.push(
+                &mut inner,
+                DaemonEvent::AttentionRead {
+                    data: agend_core::protocol::client::AttentionReadData { read_key: key },
+                },
+            );
+        }
+    }
+
+    /// The fleet view now; subscribing after its cursor gives every later change.
     pub fn view(&self) -> FleetView {
         let inner = self.lock();
         let mut attention: Vec<AttentionRequiredData> = inner.attention.values().cloned().collect();
         order_attention(&mut attention);
         FleetView {
+            read_keys: attention
+                .iter()
+                .filter_map(AttentionRequiredData::read_key)
+                .filter(|key| inner.read_keys.contains(key))
+                .collect(),
             as_of_event_id: inner.latest,
             teams: inner.teams.clone(),
             tasks: inner.tasks.clone(),

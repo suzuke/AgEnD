@@ -437,3 +437,170 @@ async fn shutdown_cancels_a_queued_retry_without_removing_the_item_or_reporting_
     );
     assert_eq!(lab.ctx.store.telegram_offset(123456789).await.unwrap(), 2);
 }
+
+#[tokio::test]
+async fn mobile_read_is_shared_without_consuming_the_operator_action() {
+    use agend_core::attention_read::AttentionReadStore;
+    let lab = Lab::new().await;
+    let native = Native::new();
+    let item = lab.failed_task().await;
+    use agend_core::traits::Store;
+    let mut notice = worker::notice(&item).unwrap();
+    notice.task_version = Some((
+        lab.ctx
+            .store
+            .load_task("t-1")
+            .await
+            .unwrap()
+            .unwrap()
+            .version,
+        lab.ctx
+            .store
+            .progress("t-1")
+            .await
+            .unwrap()
+            .unwrap()
+            .attention_revision,
+    ));
+    let row = lab
+        .ctx
+        .store
+        .observe_telegram(&[notice], &lab.destination, 1)
+        .await
+        .unwrap()
+        .remove(0);
+    super::delivery::TelegramNotifier::new(
+        native.api.clone(),
+        lab.ctx.store.clone(),
+        lab.destination.clone(),
+    )
+    .resume(&row.id)
+    .await
+    .unwrap();
+    let markup = inbound::keyboard(&row).unwrap();
+    let buttons = markup["inline_keyboard"].as_array().unwrap();
+    let receipt =
+        serde_json::from_str::<Value>(include_str!("../../tests/fixtures/telegram/message.json"))
+            .unwrap()["result"]
+            .clone();
+    let mut update = json!({"update_id":1,"callback_query":{"id":"read","from":{"id":7,"is_bot":false},"message":receipt,"data":buttons.last().unwrap()[0]["callback_data"]}});
+    let before = lab.ctx.fleet.view().as_of_event_id;
+    let (_stop, stopped) = tokio::sync::watch::channel(false);
+    for id in [1, 2] {
+        update["update_id"] = json!(id);
+        native.updates.lock().unwrap().push(update.clone());
+        poll::once(
+            &lab.ctx,
+            &lab.config,
+            native.api.clone(),
+            &lab.destination,
+            &stopped,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            lab.ctx.fleet.attention(item.attention_id.as_ref().unwrap()),
+            Some(item.clone())
+        );
+        assert!(
+            !lab.ctx
+                .store
+                .progress("t-1")
+                .await
+                .unwrap()
+                .unwrap()
+                .acknowledged
+        );
+    }
+    let key = item.read_key().unwrap();
+    assert_eq!(lab.ctx.fleet.view().read_keys, vec![key.clone()]);
+    assert_eq!(lab.ctx.fleet.subscribe(Some(before)).unwrap().backlog.iter().filter(|event| matches!(&event.event, agend_core::protocol::client::DaemonEvent::AttentionRead { data } if data.read_key == key)).count(), 1);
+    assert_eq!(
+        lab.ctx.store.attention_read_keys().await.unwrap(),
+        vec![key]
+    );
+    update["update_id"] = json!(3);
+    update["callback_query"]["data"] = markup["inline_keyboard"][0][0]["callback_data"].clone();
+    native.updates.lock().unwrap().push(update);
+    poll::once(
+        &lab.ctx,
+        &lab.config,
+        native.api.clone(),
+        &lab.destination,
+        &stopped,
+    )
+    .await
+    .unwrap();
+    assert!(
+        lab.ctx
+            .store
+            .progress("t-1")
+            .await
+            .unwrap()
+            .unwrap()
+            .acknowledged
+    );
+    assert_eq!(
+        native
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(m, v)| m == "answerCallbackQuery"
+                && v["text"] == "Marked read; item remains open")
+            .count(),
+        2
+    );
+}
+
+#[tokio::test]
+async fn a_followup_remains_unread_and_an_old_read_key_cannot_mark_it() {
+    use agend_core::protocol::ask::{AskEntry, AskThread};
+    let lab = Lab::new().await;
+    let mut item = lab.failed_task().await;
+    item.attention_id = Some("ask-1".into());
+    item.ask = Some(AskThread {
+        ask_id: "ask-1".into(),
+        task_id: None,
+        entries: vec![AskEntry::Question {
+            from: "agent".into(),
+            text: "First?".into(),
+            options: vec![],
+        }],
+    });
+    lab.ctx.fleet.upsert_attention(item.clone());
+    let key = item.read_key().unwrap();
+    crate::handlers::mark_attention_read(&lab.ctx, "ask-1", &key)
+        .await
+        .unwrap();
+    assert!(lab.ctx.fleet.view().read_keys.contains(&key));
+    item.ask.as_mut().unwrap().entries.push(AskEntry::FollowUp {
+        from: "agent".into(),
+        text: "Next?".into(),
+        options: vec![],
+    });
+    lab.ctx.fleet.upsert_attention(item.clone());
+    assert!(
+        !lab.ctx
+            .fleet
+            .view()
+            .read_keys
+            .contains(&item.read_key().unwrap())
+    );
+    assert!(
+        crate::handlers::mark_attention_read(&lab.ctx, "ask-1", &key)
+            .await
+            .is_err()
+    );
+    assert_eq!(lab.ctx.fleet.attention("ask-1"), Some(item.clone()));
+    crate::handlers::mark_attention_read(&lab.ctx, "ask-1", &item.read_key().unwrap())
+        .await
+        .unwrap();
+    assert!(
+        lab.ctx
+            .fleet
+            .view()
+            .read_keys
+            .contains(&item.read_key().unwrap())
+    );
+}

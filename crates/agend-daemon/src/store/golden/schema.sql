@@ -1,4 +1,4 @@
--- user_version = 15
+-- user_version = 16
 
 CREATE INDEX driver_events_by_time ON driver_events (ingested_at_unix_ms);
 
@@ -26,6 +26,8 @@ CREATE TABLE asks (
     thread TEXT NOT NULL CHECK(json_valid(thread)),
     created_at_unix_ms INTEGER NOT NULL CHECK(created_at_unix_ms >= 0)
 ) STRICT;
+
+CREATE TABLE attention_reads (read_key TEXT PRIMARY KEY, read_at_unix_ms INTEGER NOT NULL CHECK(read_at_unix_ms >= 0)) STRICT;
 
 CREATE TABLE bindings (
     instance_id TEXT NOT NULL PRIMARY KEY REFERENCES instances(id),

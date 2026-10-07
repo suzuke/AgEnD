@@ -45,6 +45,7 @@
 //! open a second connection to `agend.db`; delete a file in `backups/` that
 //! does not match the DB snapshot name pattern.
 
+pub mod attention_read;
 pub mod claude;
 pub mod claude_startup;
 pub mod codex_input;

@@ -164,6 +164,24 @@ pub async fn handle(ctx: &Context, caller: Option<&str>, request: ClientRequest)
             error_code::INVALID_REQUEST,
             "hello was already negotiated",
         ),
+        ClientRequest::MarkAttentionRead { data } => {
+            if caller.is_some() {
+                return Outcome::Reply(error(
+                    Some(data.request_id),
+                    error_code::FORBIDDEN,
+                    OPERATOR_ONLY,
+                ));
+            }
+            match mark_attention_read(ctx, &data.attention_id, &data.read_key).await {
+                Ok(()) => ClientResponse::CommandResult {
+                    data: ClientCommandResultData {
+                        request_id: data.request_id,
+                        result: CommandResult::Accepted,
+                    },
+                },
+                Err(message) => error(Some(data.request_id), error_code::INVALID_REQUEST, message),
+            }
+        }
         ClientRequest::GetFleet { data } => ClientResponse::Fleet {
             data: FleetData {
                 request_id: data.request_id,
@@ -379,4 +397,21 @@ fn terminal_version_error(
             "full terminal requires client protocol 1.4; run: agend daemon restart",
         )
     }
+}
+
+pub async fn mark_attention_read(ctx: &Context, id: &str, key: &str) -> Result<(), String> {
+    use agend_core::attention_read::AttentionReadStore;
+    let current = ctx
+        .fleet
+        .attention(id)
+        .ok_or("attention is no longer current")?;
+    if current.read_key().as_deref() != Some(key) {
+        return Err("question changed; open the current item".into());
+    }
+    ctx.store
+        .mark_attention_read(key, crate::log::now_unix_ms())
+        .await
+        .map_err(|e| e.to_string())?;
+    ctx.fleet.mark_read(key.to_owned());
+    Ok(())
 }

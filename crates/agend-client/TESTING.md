@@ -79,3 +79,5 @@ cargo test -p agend-client --test once --lib
 `startup_frame` example 經 native daemon／holder 取得 frame，保存原始 cells、尺寸、revision 與 startup classifier 結果；只發 terminal subscribe，沒有控制權或輸入請求。native fixture 回歸觀察 Unknown → 三個 production keys → Ready，核 reader 未增加按鍵；它不是新的真 Claude 驗收。只讀範圍及新真 CLI 計畫另依 [D40](../../docs/decisions/d40.md) 授權。
 
 第三次 observed smoke 證實 instance add 可早於 terminal 註冊；consumer 的 no_terminal 拒絕正確。新的首次觀察 runner 以真 daemon／holder／shell 重現原拒絕，再驗有界等候，沒有修改 client API，見[紀錄](../../docs/gates/gate-12a-observed-smoke-v3.md)。
+
+共用已讀：`cargo test -p agend --test shared_read` 以兩個真 TUI client／daemon 程序驗同步與重啟保留；daemon `mobile_read_` 驗 native HTTP 按鈕不消耗原動作，`a_followup_remains_unread` 驗舊 read key 拒絕，store `read_receipts_` 驗 DB 重開。TUI `a_disconnected_source_` 驗斷線不能宣稱保存成功。上述不含真 Telegram 手機操作。

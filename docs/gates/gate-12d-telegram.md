@@ -41,7 +41,7 @@ Task 通知另保存 CAS version／attention revision；CLI 或 TUI 清除再開
 
 getMe 與 Message fixture 來自 2026-10-07 真 Telegram，僅替換識別資料。三則 sendMessage 各搭配一次 deleteMessage，三次刪除均確認；未重試 mutation。計畫及必要證據保留於 AgEnD-ops。
 
-尚未完成真 daemon 程序的 inbound／停機端到端驗證、topics 實際路由、TUI／Telegram 共用已讀、受控手機操作真測、整體全新覆核／CI／合併。這批不是第 12D 完成認證。
+尚未完成真 daemon 程序的 inbound／停機端到端驗證、topics 實際路由、共用已讀完整覆核、受控手機操作真測、整體全新覆核／CI／合併。這批不是第 12D 完成認證。
 
 ## 下一步
 
@@ -50,3 +50,5 @@ getMe 與 Message fixture 來自 2026-10-07 真 Telegram，僅替換識別資料
 Schema v14 是新的 forward migration；已提交的 v13 保持原樣，舊 outbox 可直接升級。扣住第一段回覆的測試涵蓋停機、事項解除與替換，確認不開始舊通知第二段。
 
 原生 inbound checkpoint：真 HTTP transport → SQLite → production pipeline 已驗未授權使用者拒絕、task-failed 確認、不同 update ID 重用舊通知拒絕與合法失效按鈕回饋。關機反例以丟棄 supervisor queue／待回覆事件驗重試不誤報成功，未將它當作實際 daemon 程序重啟證據。doctor 已加入本機設定／token reference 檢查，空 allowlist 明示 inbound 停用；不呼叫網路。
+
+共用已讀 checkpoint：schema v16 保存 read key，protocol 1.6 以 fleet／事件同步兩個 TUI；Telegram 最後一段提供 Mark read。已讀不 claim 通知動作、不關閉事項，後續核准／確認仍可使用。真 daemon 的雙 TUI 與重啟測試通過；native HTTP 驗收與跨 crate 回歸另列檢查紀錄。沿用 T17 的 ID＋問題次數：非問答同 ID 重現不產生新的已讀識別；此批未改成 episode 語意。

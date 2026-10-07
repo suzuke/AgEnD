@@ -755,3 +755,25 @@ fn typing_stops_when_the_instance_fails() {
     std::thread::sleep(Duration::from_millis(200));
     assert!(daemon.terminal_inputs().is_empty(), "x was not typed");
 }
+
+#[test]
+fn a_disconnected_source_cannot_claim_a_shared_read_was_saved() {
+    let lab = Lab::new();
+    let mut source = ClientSource::new(&lab.socket(), None);
+    let item = AttentionRequiredData {
+        reason: "Read while offline".into(),
+        task_id: None,
+        ask: None,
+        recap: None,
+        attention_id: Some("offline".into()),
+        unblocks: None,
+        waiting_since_unix_ms: None,
+        if_ignored: None,
+        actions: vec![],
+        instance_id: None,
+    };
+    assert!(matches!(
+        source.mark_read(&item),
+        Err(agend_tui::source::SourceError::Disconnected(_))
+    ));
+}

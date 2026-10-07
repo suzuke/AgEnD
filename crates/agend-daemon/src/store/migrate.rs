@@ -83,6 +83,10 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0015_telegram_updates",
         sql: include_str!("migrations/0015_telegram_updates.sql"),
     },
+    Migration {
+        name: "0016_attention_reads",
+        sql: include_str!("migrations/0016_attention_reads.sql"),
+    },
 ];
 
 /// The schema version this binary creates and supports.

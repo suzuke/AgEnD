@@ -96,3 +96,5 @@ App 已選用此路徑；真 daemon／holder／PTY 的單次 Source 輸入與 th
 ## 第 12A 人工終結（施工中）
 
 client protocol 的 `abandon` 在需要你顯示「放棄此投遞」。daemon 原生 `agend --test claude_bridge` 驗 agent 禁止、未提供的 action 拒絕、保存理由及 ACK 競爭；TUI 仍經既有 Source 動作，不自行改 DB。完整第 12A 尚未驗收。
+
+共用已讀：`cargo test -p agend --test shared_read` 以兩個真 TUI client／daemon 程序驗同步與重啟保留；daemon `mobile_read_` 驗 native HTTP 按鈕不消耗原動作，`a_followup_remains_unread` 驗舊 read key 拒絕，store `read_receipts_` 驗 DB 重開。TUI `a_disconnected_source_` 驗斷線不能宣稱保存成功。上述不含真 Telegram 手機操作。

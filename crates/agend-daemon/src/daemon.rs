@@ -284,6 +284,11 @@ async fn serve(
     let inherited = crate::reaper::inherited(&home);
     let runtime = HolderRuntime::new(&home, &exe, daemon_env, sink);
     let fleet = Arc::new(Fleet::new(log::now_unix_ms()));
+    use agend_core::attention_read::AttentionReadStore;
+    fleet.restore_read_keys(store.attention_read_keys().await.map_err(|e| {
+        log::line(&format!("read receipts: {e}"));
+        ExitCode::from(1)
+    })?);
     let store = Arc::new(store);
     let codex_events = events.clone();
     let codex_sink: CodexSink = Arc::new(move |event| {

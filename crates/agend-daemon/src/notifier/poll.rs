@@ -55,8 +55,15 @@ pub async fn once(
         let callback_id = inbound::callback_feedback(config, bot, update);
         let authorized = admitted.is_ok();
         let needs_reason = admitted.as_ref().is_ok_and(inbound::needs_reason);
+        let marking_read = admitted.as_ref().is_ok_and(|action| {
+            matches!(
+                &action.request,
+                agend_core::protocol::client::ClientRequest::MarkAttentionRead { .. }
+            )
+        });
         let outcome = match admitted {
             Ok(_) if needs_reason => Ok(()),
+            Ok(action) if marking_read => inbound::dispatch(ctx, action).await,
             Ok(action) => {
                 if ctx
                     .store
@@ -73,6 +80,7 @@ pub async fn once(
         };
         let status = match &outcome {
             Ok(()) if needs_reason => "reason_required",
+            Ok(()) if marking_read => "read",
             Ok(()) => "accepted",
             Err(_) => "refused",
         };
@@ -91,6 +99,8 @@ pub async fn once(
             let transport = api.clone();
             let text = if needs_reason {
                 "Reply to the notification with the requested changes. Nothing applied yet."
+            } else if marking_read && outcome.is_ok() {
+                "Marked read; item remains open"
             } else if outcome.is_ok() {
                 "Accepted"
             } else {

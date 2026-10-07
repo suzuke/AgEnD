@@ -15,6 +15,8 @@ struct Reply {
 
 #[derive(Deserialize)]
 struct View {
+    #[serde(default)]
+    read_keys: Vec<String>,
     as_of_event_id: u64,
     teams: Vec<TeamView>,
     tasks: Vec<TaskView>,
@@ -177,6 +179,7 @@ pub(super) fn decode(value: Option<Box<RawValue>>, deadline: Instant) -> io::Res
     Ok(FleetData {
         request_id: value.request_id,
         fleet: FleetView {
+            read_keys: value.fleet.read_keys,
             as_of_event_id: value.fleet.as_of_event_id,
             teams: value.fleet.teams,
             tasks: value.fleet.tasks,

@@ -195,6 +195,7 @@ pub(crate) fn request_id(request: &ClientRequest) -> Option<&str> {
         ClientRequest::Command { data } => Some(&data.request_id),
         ClientRequest::AnswerAsk { data } => Some(&data.request_id),
         ClientRequest::GetFleet { data } => Some(&data.request_id),
+        ClientRequest::MarkAttentionRead { data } => Some(&data.request_id),
         ClientRequest::ResolveAttention { data } => Some(&data.request_id),
         ClientRequest::Operator { data } => Some(&data.request_id),
         _ => None,
@@ -432,6 +433,26 @@ impl Client {
         };
         match self.request(&request, Redo::Safe)? {
             ClientResponse::Fleet { data } => Ok(data.fleet),
+            other => Err(unexpected(&other)),
+        }
+    }
+
+    pub fn mark_attention_read(
+        &mut self,
+        attention_id: &str,
+        read_key: &str,
+    ) -> Result<(), ClientError> {
+        let request = ClientRequest::MarkAttentionRead {
+            data: agend_core::protocol::client::MarkAttentionReadData {
+                request_id: self.next_request_id(),
+                attention_id: attention_id.into(),
+                read_key: read_key.into(),
+            },
+        };
+        match self.request(&request, Redo::Never)? {
+            ClientResponse::CommandResult { data } if data.result == CommandResult::Accepted => {
+                Ok(())
+            }
             other => Err(unexpected(&other)),
         }
     }

@@ -100,3 +100,5 @@ native 與 off-screen draw 共用實際 frame area 更新 App 尺寸；延遲或
 ~/.cargo/bin/cargo run -q -p agend-tui --example tui_fake -- --lang zh-TW
 ~/.cargo/bin/cargo xtask accept tui
 ```
+
+Protocol 1.6 新增共用已讀收據：`mark_attention_read`、`attention_read` 事件與 fleet `read_keys`。識別沿用事項 ID＋問題次數；後續追問重新未讀。daemon 保存 SQLite，TUI 與 Telegram 共用；已讀不等於回答、核准或解除。舊 daemon 仍使用 TUI 本機已讀。

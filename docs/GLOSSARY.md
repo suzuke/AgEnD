@@ -223,3 +223,5 @@ gh 防護由 `agend_shim::gh` 在執行工具前拒絕 merge、明確 PR approve
 ```bash
 grep -rnE "第 [0-9–、]+ 關|[每這本該]關|<關>" README.md AGENTS.md docs --exclude-dir=research --exclude=GLOSSARY.md   # 應該沒有輸出：施工階段要寫「施工關」
 ```
+
+- **共用已讀收據（shared read receipt）**：daemon 保存操作員已查看的事項 ID＋問題次數，供 TUI 與 Telegram 同步。後續追問使用新 key；單純送達不算已讀，已讀不解除待辦。非問答事項沿用同一 ID 的既定 T17 行為。
