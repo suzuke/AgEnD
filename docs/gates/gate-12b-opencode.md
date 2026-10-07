@@ -45,6 +45,8 @@ OpenCode 同樣使用 daemon 的 `ZDOTDIR`，避免 login zsh 的系統 profile 
 
 正式 daemon 的六方向互傳原生測試已通過：Claude／Codex／OpenCode 每對雙向共六則，Unicode 與換行保留，各 receiver 只有兩筆且均 Confirmed。Claude 經真 helper 的 Written／ACK／Stop，Codex 與 OpenCode 經 native producer 及正式 Driver 對帳；這是零模型路由證據，不代表三個真模型都已互傳。測試初版漏 Stop 導致下一次 Claude 收件逾時，補齊 producer 生命週期後通過，沒有更改產品的忙閒規則。
 
+全新 context 缺口覆核（`1fd948d`）指出：unknown 投遞會被 30 天清理、全量 REST history 超 16 MiB 會卡住，以及 unknown 缺人工終結出口；因此不合併。schema 0012 正新增獨立 attempt 歸屬（instance 移除也不丟失），未終結 queued／sent 不清理，Confirmed／Failed 按最後更新滿 30 天才連同歸屬清理。45 天 fake-clock 回歸涵蓋 queued、sent、terminal cascade。REST 分頁與 attention 仍待修正，完整覆核另跑。
+
 ## 下一步
 
 完成 holder 原生整合、權限請求與恢復測試，再進行受控真測與 fresh verifier。

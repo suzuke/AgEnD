@@ -91,13 +91,19 @@ pub(crate) fn begin(
 ) -> Result<bool, StoreError> {
     let now =
         i64::try_from(now).map_err(|_| StoreError::Invalid("attempt time out of range".into()))?;
-    Ok(conn.execute(
+    let tx = conn.unchecked_transaction()?;
+    let changed = tx.execute(
         "UPDATE messages SET attempted_at_unix_ms=?5, turn_id=?4, updated_at_unix_ms=?5 \
          WHERE id=?1 AND to_instance=?2 AND state='queued' AND attempted_at_unix_ms IS NULL \
          AND EXISTS (SELECT 1 FROM instances WHERE id=?2 AND backend='opencode' \
          AND delivery='push' AND session_id=?3 AND status='running')",
         params![id, instance, session, reference(session, backend_id), now],
-    )? == 1)
+    )? == 1;
+    if changed {
+        tx.execute("INSERT INTO opencode_attempts(message_id,session_id,backend_message_id) VALUES(?1,?2,?3)", params![id,session,backend_id])?;
+    }
+    tx.commit()?;
+    Ok(changed)
 }
 
 /// Call only after exact REST identity/body verification. The transaction
@@ -287,6 +293,23 @@ mod tests {
                 .unwrap();
         }
         let store = SqliteStore::open(dir.path(), 5).unwrap();
+        let later = 45 * 24 * 60 * 60 * 1000;
+        block_on(store.prune(later)).unwrap();
+        assert_eq!(
+            block_on(store.message("message-1")).unwrap().unwrap().state,
+            DeliveryState::Queued
+        );
+        store
+            .call_blocking(|c| {
+                accepted(c, "message-1", "ses_native", "msg_native", 4)?;
+                Ok(())
+            })
+            .unwrap();
+        block_on(store.prune(later)).unwrap();
+        assert_eq!(
+            block_on(store.message("message-1")).unwrap().unwrap().state,
+            DeliveryState::Sent
+        );
         store
             .call_blocking(|conn| {
                 assert!(!begin(
@@ -303,6 +326,18 @@ mod tests {
                 assert_eq!(row.state, DeliveryState::Confirmed);
                 assert_eq!(row.attempted_at_unix_ms, Some(3));
                 assert_eq!(row.body, "preserve me");
+                Ok(())
+            })
+            .unwrap();
+        block_on(store.prune(later)).unwrap();
+        assert!(block_on(store.message("message-1")).unwrap().is_none());
+        store
+            .call_blocking(|c| {
+                assert_eq!(
+                    c.query_row("SELECT count(*) FROM opencode_attempts", [], |r| r
+                        .get::<_, i64>(0))?,
+                    0
+                );
                 Ok(())
             })
             .unwrap();

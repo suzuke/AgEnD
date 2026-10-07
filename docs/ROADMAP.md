@@ -241,3 +241,5 @@
 - 2026-10-07：12B 真 OpenCode 1.18.34 busy smoke v2 通過三筆 Confirmed／首輪中斷／緊急回覆；保留 v1 過早 busy 斷言與 v2 精確範圍，原生歷史加入回歸，自有程序與暫存已清。
 
 - 2026-10-07：12B 三 backend 六方向正式 daemon 路由驗證通過，六則均 Confirmed、內容完整且每 receiver 恰兩筆；Claude 使用實際 helper ACK／Stop。此為零模型 fixture 驗證，真模型互傳與完整覆核仍待完成。
+
+- 2026-10-07：12B 獨立缺口覆核找出 unknown retention、全量歷史上限與人工終結三項不足；先補 schema 0012 投遞歸屬及未終結保留，未宣稱完整通過。

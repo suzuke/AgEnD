@@ -67,6 +67,10 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0011_opencode_history",
         sql: include_str!("migrations/0011_opencode_history.sql"),
     },
+    Migration {
+        name: "0012_opencode_attempts",
+        sql: include_str!("migrations/0012_opencode_attempts.sql"),
+    },
 ];
 
 /// The schema version this binary creates and supports.
