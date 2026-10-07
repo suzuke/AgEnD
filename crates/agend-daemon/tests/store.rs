@@ -1531,3 +1531,40 @@ fn failure_episode_survives_boot_and_rejects_identical_recurrence() {
         Some(current)
     );
 }
+
+#[test]
+fn github_upgrade_preserves_published_telegram_reads() {
+    let dir = TempDir::new("g12c-upgrade-v16").unwrap();
+    let db = dir.path().join(DB_FILE);
+    let conn = Connection::open(&db).unwrap();
+    conn.execute_batch(include_str!("../src/store/fixtures/schema-v16.sql"))
+        .unwrap();
+    conn.execute(
+        "INSERT INTO attention_reads(read_key,read_at_unix_ms) VALUES (?1,?2)",
+        ("published-telegram-read", 42),
+    )
+    .unwrap();
+    drop(conn);
+    let store = SqliteStore::open(dir.path(), NOW).unwrap();
+    drop(store);
+    let conn = Connection::open(&db).unwrap();
+    let read: i64 = conn
+        .query_row(
+            "SELECT read_at_unix_ms FROM attention_reads WHERE read_key=?1",
+            ["published-telegram-read"],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(read, 42);
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM github_changes", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        17
+    );
+}

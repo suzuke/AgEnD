@@ -44,6 +44,9 @@ where
             }
         }
         self.reconcile_bindings().await?;
+        for task in self.store.tasks().await.map_err(db)? {
+            self.cleanup_terminal(&task).await?;
+        }
         self.deliver_answers().await?;
         for task in self.store.tasks().await.map_err(db)? {
             if !matches!(task.status, TaskStatus::Running | TaskStatus::Open) {
@@ -158,9 +161,7 @@ where
                     | TaskStatus::Cancelled
                     | TaskStatus::Superseded
             ) {
-                if let Err((_, e)) = self.release(&b, task.merge_commit.is_some()).await {
-                    log::line(&format!("{}: cleanup failed: {e}", b.task));
-                }
+                self.cleanup_terminal(task).await?;
                 continue;
             }
             if let Some(repo) = self.team(&task.team_id).await?.repo
@@ -187,6 +188,7 @@ where
                         match git
                             .find_merge(
                                 &repo,
+                                loaded.state.workflow().forge_kind(),
                                 &task.id,
                                 loaded.state.current_head().unwrap_or_default(),
                             )
@@ -197,6 +199,11 @@ where
                                 continue;
                             }
                             Ok(None) => {}
+                            Err(reason) if loaded.state.workflow().forge_kind() == "github" => {
+                                self.note(&b.task, Some(format!("merge-blocked:{reason}")))
+                                    .await?;
+                                continue;
+                            }
                             Err(reason) => {
                                 self.fail_restore(
                                     &b.task,

@@ -24,6 +24,7 @@ extern crate alloc;
 extern crate std;
 
 pub mod config;
+pub mod github;
 pub mod model;
 pub mod pipeline;
 pub mod policy;

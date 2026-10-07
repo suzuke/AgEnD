@@ -21,6 +21,7 @@ pub struct FakePipelineExecutor {
     effects: Arc<Mutex<Vec<String>>>,
     projections: Arc<Mutex<BTreeMap<String, Option<BindingRow>>>>,
     ids: Arc<AtomicU64>,
+    remote_cleanup_failure: Arc<Mutex<Option<String>>>,
 }
 impl FakePipelineExecutor {
     pub fn new(store: Arc<FakeStore>) -> Self {
@@ -31,7 +32,11 @@ impl FakePipelineExecutor {
             effects: Arc::default(),
             projections: Arc::default(),
             ids: Arc::default(),
+            remote_cleanup_failure: Arc::default(),
         }
+    }
+    pub fn set_remote_cleanup_failure(&self, reason: Option<String>) {
+        *lock(&self.remote_cleanup_failure) = reason;
     }
     pub fn effects(&self) -> Vec<String> {
         lock(&self.effects).clone()
@@ -76,8 +81,13 @@ impl PipelineExecutor for FakePipelineExecutor {
     fn canonical_repo(&self, repo: &str) -> Result<String, String> {
         Ok(repo.into())
     }
-    fn forge(&self, _repo: &str, _expected: Option<String>) -> Self::Forge {
+    fn forge(&self, _repo: &str, kind: &str, _expected: Option<String>) -> Self::Forge {
+        lock(&self.effects).push(format!("forge:{kind}"));
         PipelineFakeForge(self.forge.clone())
+    }
+    async fn prepare_main(&self, repo: &str, kind: &str) -> Result<String, String> {
+        lock(&self.effects).push(format!("prepare-main:{kind}"));
+        self.run(repo, &["rev-parse", "main"]).await
     }
     async fn run(&self, repo: &str, args: &[&str]) -> Result<String, String> {
         lock(&self.effects).push(format!("git:{repo}:{}", args.join(" ")));
@@ -130,13 +140,22 @@ impl PipelineExecutor for FakePipelineExecutor {
     async fn find_merge(
         &self,
         _repo: &str,
+        kind: &str,
         _task: &str,
         head: &str,
     ) -> Result<Option<(String, bool)>, String> {
+        lock(&self.effects).push(format!("find-merge:{kind}"));
         Ok(self
             .forge
             .base_contains(head)
             .then(|| (self.forge.base_head(), true)))
+    }
+    async fn cleanup_remote(&self, _repo: &str, task: &str, merged: bool) -> Result<(), String> {
+        lock(&self.effects).push(format!("cleanup-remote:{task}:{merged}"));
+        match lock(&self.remote_cleanup_failure).clone() {
+            Some(reason) => Err(reason),
+            None => Ok(()),
+        }
     }
     async fn readiness(&self) -> Result<(), String> {
         lock(&self.effects).push("readiness".into());

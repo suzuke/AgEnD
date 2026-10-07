@@ -249,6 +249,16 @@ pub struct Workflow {
 }
 
 impl Workflow {
+    pub fn forge_kind(&self) -> &str {
+        self.stages
+            .iter()
+            .find_map(|stage| match &stage.stage {
+                Stage::Submit { forge } => Some(forge.as_str()),
+                _ => None,
+            })
+            .unwrap_or("local")
+    }
+
     pub fn requires_repo(&self) -> bool {
         self.requires.contains(&WorkflowRequirement::Repo)
     }
@@ -289,6 +299,15 @@ impl Workflow {
             }
 
             match &stage.stage {
+                Stage::Submit { forge }
+                    if !matches!(forge.as_str(), "local" | "github")
+                        || forge != self.forge_kind() =>
+                {
+                    errors.push(WorkflowError::InvalidForge {
+                        stage_id: stage.id.clone(),
+                        forge: forge.clone(),
+                    });
+                }
                 Stage::Work { role, .. } => {
                     if !team_roles.iter().any(|candidate| candidate == role) {
                         errors.push(WorkflowError::UnknownRole {
@@ -791,6 +810,10 @@ pub enum WorkflowError {
         stage_id: String,
     },
     SubmitWithoutBranchWork,
+    InvalidForge {
+        stage_id: String,
+        forge: String,
+    },
     RepoRequired,
     MergeWithoutBoundApproval {
         stage_id: String,
@@ -871,6 +894,7 @@ impl fmt::Display for WorkflowError {
                 f,
                 "stage `{stage_id}` needs an earlier work stage to return to when it fails or changes are requested"
             ),
+            Self::InvalidForge { stage_id, forge } => write!(f, "stage `{stage_id}` has unsupported or conflicting forge `{forge}`; use one local or github forge per workflow"),
             Self::SubmitWithoutBranchWork => {
                 f.write_str("submit requires an earlier work stage that produces a branch")
             }
@@ -930,6 +954,43 @@ mod tests {
             .into_iter()
             .map(ToString::to_string)
             .collect()
+    }
+
+    #[test]
+    fn forge_choice_rejects_unknown_names_and_mixed_ownership() {
+        let mut workflow = Workflow::builtin_code();
+        assert_eq!(workflow.forge_kind(), "local");
+        workflow.stages[1].stage = Stage::Submit {
+            forge: "github".into(),
+        };
+        assert_eq!(workflow.forge_kind(), "github");
+        assert!(workflow.validate(&roles()).is_ok());
+        workflow.stages[1].stage = Stage::Submit {
+            forge: "typo".into(),
+        };
+        assert!(
+            workflow
+                .validate(&roles())
+                .unwrap_err()
+                .iter()
+                .any(|e| matches!(e, WorkflowError::InvalidForge { .. }))
+        );
+        workflow.stages[1].stage = Stage::Submit {
+            forge: "github".into(),
+        };
+        let mut extra = workflow.stages[1].clone();
+        extra.id = "other-submit".into();
+        extra.stage = Stage::Submit {
+            forge: "local".into(),
+        };
+        workflow.stages.insert(2, extra);
+        assert!(
+            workflow
+                .validate(&roles())
+                .unwrap_err()
+                .iter()
+                .any(|e| matches!(e, WorkflowError::InvalidForge { .. }))
+        );
     }
 
     #[test]

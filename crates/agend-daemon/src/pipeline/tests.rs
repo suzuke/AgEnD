@@ -548,3 +548,135 @@ async fn mobile_guard_rejects_identical_note_reopened_through_another_entrypoint
     assert!(error.1.contains("stale"));
     assert_eq!(lab.driver.calls().len(), before);
 }
+
+#[tokio::test]
+async fn github_workflow_selects_its_forge_for_submit_checks_and_merge() {
+    let lab = Lab::new().await;
+    let mut workflow = Workflow::builtin_code();
+    workflow.version = 2;
+    for stage in &mut workflow.stages {
+        if let Stage::Submit { forge } = &mut stage.stage {
+            *forge = "github".into();
+        }
+    }
+    lab.store.save_workflow(&workflow).await.unwrap();
+    let task = lab.create().await;
+    let binding = lab
+        .store
+        .bindings()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|b| b.task == task)
+        .unwrap();
+    lab.executor.forge.push(binding.branch.as_deref().unwrap());
+    lab.done(&task, 1).await.unwrap();
+    lab.stage(&task, "review").await;
+    lab.handle
+        .agent(
+            Some("reviewer".into()),
+            AgentCommand::ReviewApprove {
+                task_id: task.clone(),
+                identity: Some(ResultIdentity {
+                    stage_id: "review".into(),
+                    attempt: 1,
+                }),
+            },
+        )
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while lab
+            .store
+            .load_task(&task)
+            .await
+            .unwrap()
+            .unwrap()
+            .task
+            .status
+            != TaskStatus::Done
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let effects = lab.executor.effects();
+    assert!(effects.contains(&"find-merge:github".into()));
+    assert!(effects.contains(&"prepare-main:github".into()));
+    assert!(effects.iter().filter(|s| *s == "forge:github").count() >= 3);
+    assert!(!effects.iter().any(|s| s == "forge:local"));
+    assert_eq!(lab.executor.forge.merges().len(), 1);
+}
+
+#[tokio::test]
+async fn remote_cleanup_failure_releases_local_capacity_and_waits_for_operator_retry() {
+    let lab = Lab::new().await;
+    let task = lab.create().await;
+    lab.executor
+        .set_remote_cleanup_failure(Some("remote unavailable".into()));
+    lab.handle
+        .operator(OperatorCommand::TaskCancel {
+            task_id: task.clone(),
+            reason: None,
+        })
+        .await
+        .unwrap();
+    let row = lab.store.load_task(&task).await.unwrap().unwrap();
+    assert_eq!(row.task.status, TaskStatus::Cancelled);
+    assert!(row.task.assignee.is_none());
+    assert!(lab.store.bindings().await.unwrap().is_empty());
+    assert!(lab.executor.projection("writer").is_none());
+    let id = format!("cleanup-remote:{task}");
+    assert!(
+        lab.fleet
+            .view()
+            .attention
+            .iter()
+            .any(|a| a.attention_id.as_deref() == Some(id.as_str()))
+    );
+    let before = lab
+        .executor
+        .effects()
+        .iter()
+        .filter(|s| s.starts_with("cleanup-remote:"))
+        .count();
+    lab.handle.tx.send(Input::Wake).unwrap();
+    lab.handle
+        .agent(Some("writer".into()), AgentCommand::Status)
+        .await
+        .unwrap();
+    assert_eq!(
+        lab.executor
+            .effects()
+            .iter()
+            .filter(|s| s.starts_with("cleanup-remote:"))
+            .count(),
+        before
+    );
+    lab.executor.set_remote_cleanup_failure(None);
+    lab.handle
+        .resolve(ResolveAttentionData {
+            attention_id: id.clone(),
+            action: AttentionAction::Retry,
+            request_id: "cleanup-retry".into(),
+            note: None,
+        })
+        .await
+        .unwrap();
+    assert!(
+        !lab.fleet
+            .view()
+            .attention
+            .iter()
+            .any(|a| a.attention_id.as_deref() == Some(id.as_str()))
+    );
+    assert!(
+        lab.executor
+            .effects()
+            .iter()
+            .filter(|s| s.starts_with("cleanup-remote:"))
+            .count()
+            > before
+    );
+}

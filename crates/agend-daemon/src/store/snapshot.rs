@@ -216,7 +216,7 @@ pub(super) fn daily(
          AND NOT EXISTS (SELECT 1 FROM instances) AND NOT EXISTS (SELECT 1 FROM codex_input_threads) \
          AND NOT EXISTS (SELECT 1 FROM driver_events) \
          AND NOT EXISTS (SELECT 1 FROM claude_deliveries)
-         AND NOT EXISTS (SELECT 1 FROM claude_owned_files) AND NOT EXISTS (SELECT 1 FROM claude_startup) AND NOT EXISTS (SELECT 1 FROM opencode_permissions) AND NOT EXISTS (SELECT 1 FROM opencode_observed) AND NOT EXISTS (SELECT 1 FROM opencode_attempts) AND NOT EXISTS (SELECT 1 FROM attention_reads) AND NOT EXISTS (SELECT 1 FROM telegram_updates) AND NOT EXISTS (SELECT 1 FROM telegram_outbox)",
+         AND NOT EXISTS (SELECT 1 FROM claude_owned_files) AND NOT EXISTS (SELECT 1 FROM claude_startup) AND NOT EXISTS (SELECT 1 FROM opencode_permissions) AND NOT EXISTS (SELECT 1 FROM opencode_observed) AND NOT EXISTS (SELECT 1 FROM opencode_attempts) AND NOT EXISTS (SELECT 1 FROM attention_reads) AND NOT EXISTS (SELECT 1 FROM telegram_updates) AND NOT EXISTS (SELECT 1 FROM telegram_outbox) AND NOT EXISTS (SELECT 1 FROM github_changes)",
         [],
         |r| r.get(0),
     )?;

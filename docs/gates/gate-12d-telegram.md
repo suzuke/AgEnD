@@ -1,9 +1,9 @@
 # 第 12D：Telegram
 
 > **TL;DR**
-> - 已實作通知完整分段、持久 outbox 與逐段收據；已接 daemon worker 與 inbound 操作防護，手機已讀／確認、多行回覆及真 forum 分流／重啟已驗收；等待最終覆核與合併。
+> - 已實作通知完整分段、持久 outbox 與逐段收據；已接 daemon worker 與 inbound 操作防護，手機已讀／確認、多行回覆及真 forum 分流／重啟已驗收；已於 #156 合併（9dbfac7）。
 > - 專用 bot 已做 getMe 與三則限額文字真測，三則均已刪除；token 設定檔未改動。
-> - 下一步：核對最終覆核與同一 head 的 CI，依第 12 關持續授權合併及清理。
+> - 下一步：12D 已完成並清理；繼續 12C 整合及第 12 關收尾。
 
 ## 設定與憑證
 
@@ -99,3 +99,5 @@ Retry lifecycle checkpoint：正式 daemon serve／poll／supervisor／holder �
 真 forum 測試使用兩個已由使用者建立的 topic。正式 daemon 將 Needs you 與 Team general 各送到指定 topic，Telegram 回覆的 bot／chat／topic／全文經正式 transport 驗證後保存收據；第二次 boot 的兩份 delivery 與 message IDs 完全不變，沒有重送（`forum-live-v1`）。兩次正常退出，兩則通知刪除確認，home 已移除，零模型程序。這輪停用 inbound，證明 topic 路由與重啟去重；手機操作證據是先前私訊的 callback 與自由文字回覆，不把它寫成 forum 按鈕驗收。
 
 必要原始證據位於 `AgEnD-ops/g12d-telegram-20261007/`：`accept12-8c0538b-result.json`、`ci-8c0538b.json`、`reply-live-v2/result.json`、`forum-live-v1/`。forum 探針經全新只讀覆核，固定腳本與 binary 雜湊後才執行。未合併 worktree 與供收尾驗證的 debug target 暫留，合併後清理；Claude trust entries 未動。
+
+2026-10-08：最終文件 head 16b7085 的四個 Ubuntu／macOS CI jobs 全部成功；#156 合併為 9dbfac7，自有 worktree、local／remote branch 與 target 已移除，必要證據保留。第 12D 交付完成；第 12C 整合與整關收尾繼續。

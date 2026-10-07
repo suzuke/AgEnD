@@ -16,7 +16,7 @@ pub fn prepare() -> Result<(), String> {
 
 pub fn run() -> Result<(), String> {
     prepare()?;
-    println!("== Native adapter demo: Claude, OpenCode, Telegram ==");
+    println!("== Native adapter demo: Claude, OpenCode, GitHub, Telegram ==");
     println!("No real model or external API calls. Live acceptance is recorded separately.");
     println!("== Claude ==");
     println!("== Driver, launch ownership, sweep ==");
@@ -74,6 +74,20 @@ pub fn run() -> Result<(), String> {
         "--",
         "--nocapture",
     ])?;
+    println!("== GitHub production forge, strict base policy and native daemon recovery ==");
+    step(&[
+        "test",
+        "--quiet",
+        "-p",
+        "agend-daemon",
+        "--test",
+        "github_forge",
+        "--test",
+        "github_pipeline",
+        "--",
+        "--test-threads=1",
+        "--nocapture",
+    ])?;
     println!("== Telegram transport, routing, inbound guards and durable receipts ==");
     step(&[
         "test",
@@ -122,7 +136,7 @@ pub fn run() -> Result<(), String> {
         "--nocapture",
     ])?;
     println!(
-        "Native Claude, OpenCode and Telegram scenarios passed; GitHub forge and remaining live gate acceptance are not certified by this demo."
+        "Native Claude, OpenCode, GitHub and Telegram scenarios passed; live acceptance is recorded separately."
     );
     Ok(())
 }

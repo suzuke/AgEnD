@@ -159,6 +159,7 @@ where
             AttentionAction::Retry => {
                 self.note(&task, None).await?;
                 let loaded = self.load(&task).await?;
+                self.cleanup_terminal(&loaded.task).await?;
                 for action in outstanding_actions(&loaded.state) {
                     self.action(
                         &loaded.task,

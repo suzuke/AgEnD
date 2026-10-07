@@ -70,7 +70,9 @@ where
                 }
             }
             PipelineAction::Submit {
-                stage_id, attempt, ..
+                stage_id,
+                attempt,
+                forge: kind,
             } => {
                 let repo = self
                     .team(&task.team_id)
@@ -81,7 +83,7 @@ where
                     .git
                     .as_ref()
                     .ok_or_else(|| invalid("git unavailable"))?
-                    .forge(&repo, None);
+                    .forge(&repo, &kind, None);
                 let submission = Submission {
                     task_id: task.id.clone(),
                     branch: state.branch().unwrap_or_default().into(),
@@ -94,6 +96,11 @@ where
                         attempt,
                         change_id: c.id,
                     },
+                    Err(ExecutionError::Blocked(reason)) => {
+                        self.note(&task.id, Some(format!("submit-blocked:{reason}")))
+                            .await?;
+                        return Ok(());
+                    }
                     Err(e) => PipelineEvent::StageFailed {
                         stage_id,
                         attempt,
@@ -121,14 +128,55 @@ where
                     self.running.remove(&key);
                     return Err(invalid("checks require repo, head and git"));
                 };
+                let kind = state.workflow().forge_kind().to_owned();
+                let branch = state.branch().unwrap_or_default().to_owned();
+                if kind == "github" {
+                    let result = git
+                        .forge(&repo, &kind, None)
+                        .submit(&Submission {
+                            task_id: task.id.clone(),
+                            branch: branch.clone(),
+                            title: task.title.clone(),
+                            body: String::new(),
+                        })
+                        .await;
+                    if !result
+                        .as_ref()
+                        .is_ok_and(|submitted| submitted.head == head_sha)
+                    {
+                        self.running.remove(&key);
+                        let reason = result
+                            .err()
+                            .map(|e| e.to_string())
+                            .unwrap_or_else(|| "GitHub check head changed".into());
+                        self.note(&task.id, Some(format!("checks-blocked:{reason}")))
+                            .await?;
+                        return Ok(());
+                    }
+                }
                 let (tx, task, checks) = (self.tx.clone(), task.id.clone(), self.checks.clone());
                 tokio::spawn(async move {
                     let Ok(_permit) = checks.acquire().await else {
                         return;
                     };
-                    let result = git
-                        .check(&repo, &key, &head_sha, &command, timeout_ms)
-                        .await;
+                    let result = async {
+                        let forge = git.forge(&repo, &kind, None);
+                        if kind == "github" && forge.head(&branch).await? != head_sha {
+                            return Err(ExecutionError::Blocked(
+                                "GitHub head changed before checks".into(),
+                            ));
+                        }
+                        let output = git
+                            .check(&repo, &key, &head_sha, &command, timeout_ms)
+                            .await?;
+                        if kind == "github" && forge.head(&branch).await? != head_sha {
+                            return Err(ExecutionError::Blocked(
+                                "GitHub head changed during checks".into(),
+                            ));
+                        }
+                        Ok(output)
+                    }
+                    .await;
                     let _ = tx.send(Input::Check {
                         task,
                         stage: stage_id,
@@ -149,73 +197,73 @@ where
                     .repo
                     .ok_or_else(|| invalid("merge requires repo"))?;
                 let git = self.git.clone().ok_or_else(|| invalid("git unavailable"))?;
-                let forge = git.forge(
-                    &repo,
-                    Some(
-                        git.run(&repo, &["rev-parse", "main"])
-                            .await
-                            .map_err(invalid)?,
-                    ),
-                );
-                if git
-                    .find_merge(&repo, &task.id, &head)
-                    .await
-                    .map_err(invalid)?
-                    .is_none()
-                {
-                    let main = git
-                        .run(&repo, &["rev-parse", "main"])
-                        .await
-                        .map_err(invalid)?;
-                    if !git.ancestor(&repo, &main, &head).await.map_err(invalid)? {
-                        let binding = self
-                            .store
-                            .bindings()
-                            .await
-                            .map_err(db)?
-                            .into_iter()
-                            .find(|b| b.task == task.id && b.kind == "work")
-                            .ok_or_else(|| invalid("missing work binding for rebase"))?;
-                        let wt = binding.worktree.as_str();
-                        let clean = git.clean_worktree(wt).await.map_err(invalid)?;
-                        let conflict = !clean
-                            || git
-                                .run(wt, &["rebase", "--no-autostash", "main"])
-                                .await
-                                .is_err();
-                        if conflict && clean {
-                            let _ = git.run(wt, &["rebase", "--abort"]).await;
-                        }
-                        let rebased = git.run(wt, &["rev-parse", "HEAD"]).await.map_err(invalid)?;
-                        let patch_id = git.patch_id(&repo, &rebased).await.map_err(invalid)?;
-                        log::line(&format!(
-                            "{}: main advanced; rebased, {}",
-                            task.id,
-                            if !conflict && state.patch_id() == Some(&patch_id) {
-                                "approvals kept, checks run again"
-                            } else {
-                                "back to work"
-                            }
-                        ));
-                        let _ = self.tx.send(Input::Event(
-                            task.id.clone(),
-                            PipelineEvent::MainAdvanced {
-                                rebased_head: rebased,
-                                patch_id,
-                                conflict,
-                            },
-                        ));
-                        let _ = self.tx.send(Input::Event(
-                            task.id.clone(),
-                            PipelineEvent::MergeFailed {
-                                stage_id,
-                                attempt,
-                                head,
-                                reason: "main advanced".into(),
-                            },
-                        ));
+                let kind = state.workflow().forge_kind();
+                let recovered = match git.find_merge(&repo, kind, &task.id, &head).await {
+                    Ok(value) => value.is_some(),
+                    Err(reason) if kind == "github" => {
+                        self.note(&task.id, Some(format!("merge-blocked:{reason}")))
+                            .await?;
                         return Ok(());
                     }
+                    Err(reason) => return Err(invalid(reason)),
+                };
+                let main = match git.prepare_main(&repo, kind).await {
+                    Ok(value) => value,
+                    Err(reason) => {
+                        self.note(&task.id, Some(format!("merge-blocked:{reason}")))
+                            .await?;
+                        return Ok(());
+                    }
+                };
+                let forge = git.forge(&repo, kind, Some(main.clone()));
+                if !recovered && !git.ancestor(&repo, &main, &head).await.map_err(invalid)? {
+                    let binding = self
+                        .store
+                        .bindings()
+                        .await
+                        .map_err(db)?
+                        .into_iter()
+                        .find(|b| b.task == task.id && b.kind == "work")
+                        .ok_or_else(|| invalid("missing work binding for rebase"))?;
+                    let wt = binding.worktree.as_str();
+                    let clean = git.clean_worktree(wt).await.map_err(invalid)?;
+                    let conflict = !clean
+                        || git
+                            .run(wt, &["rebase", "--no-autostash", "main"])
+                            .await
+                            .is_err();
+                    if conflict && clean {
+                        let _ = git.run(wt, &["rebase", "--abort"]).await;
+                    }
+                    let rebased = git.run(wt, &["rev-parse", "HEAD"]).await.map_err(invalid)?;
+                    let patch_id = git.patch_id(&repo, &rebased).await.map_err(invalid)?;
+                    log::line(&format!(
+                        "{}: main advanced; rebased, {}",
+                        task.id,
+                        if !conflict && state.patch_id() == Some(&patch_id) {
+                            "approvals kept, checks run again"
+                        } else {
+                            "back to work"
+                        }
+                    ));
+                    let _ = self.tx.send(Input::Event(
+                        task.id.clone(),
+                        PipelineEvent::MainAdvanced {
+                            rebased_head: rebased,
+                            patch_id,
+                            conflict,
+                        },
+                    ));
+                    let _ = self.tx.send(Input::Event(
+                        task.id.clone(),
+                        PipelineEvent::MergeFailed {
+                            stage_id,
+                            attempt,
+                            head,
+                            reason: "main advanced".into(),
+                        },
+                    ));
+                    return Ok(());
                 }
                 let event = match forge
                     .merge_if_head_is(&MergeRequest {
@@ -231,6 +279,10 @@ where
                         merge_commit,
                     },
                     Ok(MergeResult::HeadChanged { actual_head }) => {
+                        if kind == "github" {
+                            self.note(&task.id, Some(format!("merge-blocked:remote head moved to {actual_head}; reconcile the task branch before retrying"))).await?;
+                            return Ok(());
+                        }
                         let patch_id = git.patch_id(&repo, &actual_head).await.map_err(invalid)?;
                         let _ = self.tx.send(Input::Event(
                             task.id.clone(),
@@ -263,33 +315,7 @@ where
             PipelineAction::TaskDone { .. }
             | PipelineAction::TaskCancelled { .. }
             | PipelineAction::TaskFailed { .. } => {
-                for b in self
-                    .store
-                    .bindings()
-                    .await
-                    .map_err(db)?
-                    .into_iter()
-                    .filter(|b| b.task == task.id)
-                {
-                    self.release(&b, state.merge_commit().is_some()).await?;
-                }
-                let row = self
-                    .store
-                    .load_task(&task.id)
-                    .await
-                    .map_err(db)?
-                    .ok_or_else(|| invalid("task disappeared"))?;
-                let mut free = row.task;
-                free.assignee = None;
-                if !matches!(
-                    self.store
-                        .compare_and_swap_task(&free, row.version)
-                        .await
-                        .map_err(db)?,
-                    CasResult::Written { .. }
-                ) {
-                    return Err(invalid("cleanup CAS conflict"));
-                }
+                self.cleanup_terminal_action(task).await?;
             }
             PipelineAction::NotifyTimeout { stage_id } => {
                 log::line(&format!("{}: {stage_id} timed out (notification)", task.id))

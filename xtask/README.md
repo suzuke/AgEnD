@@ -106,3 +106,5 @@ shim／client 檢查 normal 與 build 依賴，不檢查 dev 依賴。`network`�
 ~/.cargo/bin/cargo xtask check-deps   # rustup 的 cargo；Homebrew cargo 會 SKIPPED
 cargo xtask accept core
 ```
+
+第 12C 整合後 `demo adapters`／`accept 12` 包含正式 GitHub Forge／strict base policy／原生 daemon 重啟與清理案例。這些全為離線原生測試；真 GitHub 驗收另記 gate-12c，不在 CI 呼叫外部 API。

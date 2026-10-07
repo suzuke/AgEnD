@@ -112,6 +112,12 @@ cargo xtask accept core
 原規則對 development channels 回 None 的反例已保存，新規則補上已觀察標頭。
 授權只完成 workspace 信任，沒有確認 development channels，不宣稱 P5／P6 完成。
 
+## GitHub 遠端身分
+
+`github` 提供 `GithubIdentity`、`GithubChange` 與 `GithubStore` 邊界。純狀態規則禁止更换 repository／PR、覆蓋未確認 push intent 或清除 create／cleanup attempt；完成 cleanup 後 ledger 不可改動。正式 Forge 已接線，12C 尚待真測驗收。
+
+Workflow submit 只接受 local／github，且同一 workflow 不可混用；`forge_kind()` 供 pipeline 的後續 checks／merge／恢復選擇。
+
 12D `config` 定義 Telegram 的 secret reference、chat／sender allowlist 與 topic；pure core 只驗值，不讀檔或持有 token。daemon 啟動讀取設定，錯誤設定在啟動 holder 前拒絕。
 
 12D `telegram` 定義 immutable delivery、逐段 claim／receipt 邊界與完整文字分段；所有 I/O 由 daemon 實作。

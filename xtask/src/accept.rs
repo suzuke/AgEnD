@@ -397,7 +397,7 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
     } else if gate.number == 12 {
         crate::adapters_demo::run()?;
         println!(
-            "gate 12 (adapters): native Claude, OpenCode and Telegram checks passed; GitHub forge and remaining live acceptance are pending"
+            "gate 12 (adapters): native Claude, OpenCode, GitHub and Telegram checks passed; live acceptance is recorded separately"
         );
     } else {
         println!(

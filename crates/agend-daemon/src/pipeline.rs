@@ -244,6 +244,11 @@ where
                         continue;
                     }
                     match result {
+                        Err(ExecutionError::Blocked(reason)) => {
+                            let _ = engine
+                                .note(&task, Some(format!("checks-blocked:{reason}")))
+                                .await;
+                        }
                         Err(ExecutionError::Sandbox(reason)) => {
                             let _ = engine
                                 .note(&task, Some(format!("sandbox-missing:{reason}")))
@@ -340,11 +345,6 @@ pub fn validate(workflow: Workflow) -> Result<ValidatedWorkflow, String> {
             return Err(
                 "command on_timeout is not supported; runner controls command timeouts".into(),
             );
-        }
-        if let Stage::Submit { forge } = &stage.stage
-            && forge != "local"
-        {
-            return Err("only forge local is supported".into());
         }
     }
     let roles = workflow

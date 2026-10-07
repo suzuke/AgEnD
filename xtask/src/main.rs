@@ -33,7 +33,7 @@ Commands:
                    no-std target is not installed; still prints SKIPPED)
   accept <gate>    Run the acceptance checks of a build gate (1-13 or its name);
                    each gate is described in docs/gates/gate-NN-<name>.md
-  demo adapters   Run native Claude/OpenCode/Telegram scenarios (no live models/APIs)
+  demo adapters   Run native Claude/OpenCode/GitHub/Telegram scenarios (no live models/APIs)
   record <backend> [scenario...] --sandbox <script>
                    Record the REAL backend CLI (codex, opencode, claude) under a
                    write sandbox into crates/agend-testkit/transcripts/

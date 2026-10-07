@@ -62,6 +62,14 @@ pub struct Rule {
 pub const RETENTION: &[Rule] = &[
     Rule {
         target: Target::Table {
+            name: "github_changes",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "gate 12C: remote ownership and unknown attempts must not expire into replay",
+    },
+    Rule {
+        target: Target::Table {
             name: "attention_reads",
             time_column: None,
         },

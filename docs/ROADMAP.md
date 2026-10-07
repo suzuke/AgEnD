@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - 依 crate 由下往上分 13 個施工關；每個施工關單獨驗收，使用者確認後才開下一個施工關（D22）。
-> - 目前狀態：**第 1–11 施工關完成並已合併**；第 12A Claude 完整真模型 smoke、獨立覆核及 CI 通過，#154 已合併。12B OpenCode #155 已合併並清理；12C GitHub forge 原生 pipeline 已實作，嚴格 base 保護策略已選定待接入；12D Telegram 手機操作、G4、真 forum 分流及原生驗收通過，覆核／合併收尾中，第 13 施工關未開始。
-> - 下一步：依持續授權完成 [12D Telegram](gates/gate-12d-telegram.md) 合併收尾，再整合 12C 嚴格分支保護與真測。
+> - 目前狀態：第 1–11 施工關已完成；第 12A／B／D 已合併，12C 由 [#157](https://github.com/suzuke/AgEnD/pull/157) 收尾。第 12 關完成狀態於 #157 完整驗收、CI 通過並合併後生效。
+> - 下一步：完成 #157 合併與自有 worktree／target 清理；第 13 施工關尚未開始，須另行確認。
 
 ## 13 個施工關
 
@@ -22,7 +22,7 @@
 | 9 `cli` | [完成（2026-09-29；已 merge #136）](gates/gate-09-cli.md) | agend CLI：agent 命令、操作者命令、status；安裝相關先做 `doctor`、`init`，服務註冊留第 13 施工關 | 對假／真 daemon 驗輸出與錯誤；兩個假 Codex agent 互傳訊息、中途重啟不漏不重 |
 | 10 `pipeline` | [完成（2026-10-02；#143 已確認合併）](gates/gate-10-pipeline.md) | daemon：pipeline、git、runner、forge local、supervisor、reconcile | 假 driver + 暫存 repo：task 從派工走到 merge |
 | 11 `tui` | [完成（A、B、C 已 merge；C 段 #145）](gates/gate-11-tui.md) | attention-first TUI、完整終端、resize、多視窗、鍵鼠／貼上與歷史 | 最終 `cfee027` 全新 verifier CONFIRMED；四個雙平台 CI jobs 各 900 passed／0 failed／2 既有 ignored、實際 no-std；0.159.3 真 U17 已核實並獲版本許可。實機紀錄及後續自動驗收、清理完成，使用者確認 merge `b2152db` |
-| 12 `adapters` | [實作中（A／B 已合併；C／D 實作與驗證中）](gates/gate-12-adapters.md) | A claude、B opencode driver、C forge github、D Telegram | 先對假實作，再做真 backend smoke test |
+| 12 `adapters` | [交付 #157（驗收／CI 通過並合併後完成）](gates/gate-12-adapters.md) | A claude、B opencode driver、C forge github、D Telegram | 先對假實作，再做真 backend smoke test |
 | 13 `install` | [未開始](gates/gate-13-install.md) | 安裝與發布（最後一個施工關）：服務註冊、`agend uninstall`、`agend telegram setup`（由 daemon 配對）、`xtask release`、brew、GitHub release、`cargo install` | CI 用全新 HOME + 假 agent，從安裝到第一個 task 完成 < 5 分鐘；每個 `doctor` 檢查都有「故意弄壞 → 看到修正指令」的測試 |
 
 ## 第 1 施工關：開工前先提案、經使用者確認才實作
@@ -68,7 +68,7 @@
 
 ## 下一步
 
-第 1–11 施工關及 12A／12B 已完成並合併。#155 已合併為 `2a02fda`，自有 worktree／暫存已清理；12C／12D 實作與驗證中。使用者已授權持續完成第 12 施工關，範圍見 [AGENTS.md](../AGENTS.md#第-12-施工關持續授權2026-10-07)。
+第 1–11 施工關及 12A／12B／12D 已完成並合併；已合併批次的自有 worktree／暫存已清理。12C 由 #157 完成最後整合驗收與 CI，通過後依持續授權合併。使用者已授權持續完成第 12 施工關，範圍見 [AGENTS.md](../AGENTS.md#第-12-施工關持續授權2026-10-07)。
 
 ## 進度紀錄
 
@@ -309,3 +309,7 @@
 - 2026-10-07：TUI mailbox 候選的 89 tests 通過，包括三個真 parser／Source spy 反例；debug outer 7／8，100×24 背景啟動取樣仍有 389.290 ms。相同原生 final_dirty 測試另以 release 診斷，36 筆為 62.769–118.094 ms、2 tests 通過；不以此取代 debug 驗收，原 300 ms 斷言與失敗證據保留，完整 12D 待最終覆核／CI及真測。
 
 - 2026-10-07：PR #156 固定 `8c0538b` 的原生 accept 12 exit 0、四個雙平台 CI jobs 全綠；使用者多行 Telegram 回覆逐字一致且單次投遞，真 forum 的 Needs you／team 摘要分流與第二次 boot 收據不變通過。自有訊息、程序及 home 已清理；保留首次回覆內容不完整與歷史延遲失敗，等待最終覆核／合併。12C 使用者已選定嚴格 up-to-date 分支保護，後續實作不得以 head CAS 代替 base 保護。
+
+2026-10-08：12D #156 四個最終 CI jobs 通過後合併為 9dbfac7；自有 worktree、branch、target 已刪除，保留必要證據。12C 嚴格 base protection、production Forge 真 GitHub submit／merge／重開收據／405 拒絕／cleanup 已通過獨立覆核；暫存遠端 repo 與 local lab 已刪。正整合已發布 Telegram v13–16，GitHub migration 改為 v17，再跑整合驗收／CI。第 12 關尚未標完成。
+
+- 2026-10-08：#157 整合 migration 17 的獨立覆核通過；完整 accept 12／四個 CI jobs 揭露終結 action 吞掉本機 WIP 存檔錯誤，修正恢復原 Refusal，保留背景 wake 及遠端收尾行為。原始失敗保留，修正後獨立回歸與完整驗收另核。

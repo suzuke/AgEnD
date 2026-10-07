@@ -1,0 +1,27 @@
+{
+  "number": 154,
+  "state": "closed",
+  "merged": true,
+  "merge_commit_sha": "a6cdb4c64b244ca86a23de0a2139a4eee29e5d54",
+  "html_url": "https://github.com/suzuke/AgEnD/pull/154",
+  "head": {
+    "ref": "test/g12a-smoke-contract",
+    "sha": "c82be62011184834dac963add1a468d45036910c",
+    "label": "suzuke:test/g12a-smoke-contract",
+    "repo": {
+      "id": 1187782676,
+      "full_name": "suzuke/AgEnD",
+      "html_url": "https://github.com/suzuke/AgEnD"
+    }
+  },
+  "base": {
+    "ref": "v2",
+    "sha": "02888244e9af29aa61ffea84d53ac5664ff7f06e",
+    "label": "suzuke:v2",
+    "repo": {
+      "id": 1187782676,
+      "full_name": "suzuke/AgEnD",
+      "html_url": "https://github.com/suzuke/AgEnD"
+    }
+  }
+}

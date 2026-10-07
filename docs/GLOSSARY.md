@@ -224,6 +224,10 @@ gh 防護由 `agend_shim::gh` 在執行工具前拒絕 merge、明確 PR approve
 grep -rnE "第 [0-9–、]+ 關|[每這本該]關|<關>" README.md AGENTS.md docs --exclude-dir=research --exclude=GLOSSARY.md   # 應該沒有輸出：施工階段要寫「施工關」
 ```
 
+### GitHub ownership ledger（GitHub 所有權紀錄）
+
+SQLite 中每個 task 的固定 repository ID、branch、nonce 與 PR number；同時保留 push intent 與 create attempt，讓重啟從原遠端物件對帳，不因回覆遺失另建 PR。
+
 - **共用已讀收據（shared read receipt）**：daemon 保存操作員已查看的事項 ID＋問題次數，供 TUI 與 Telegram 同步。後續追問使用新 key；單純送達不算已讀，已讀不解除待辦。非問答事項沿用同一 ID 的既定 T17 行為。
 
 - **Telegram 未知通知**：送出意圖已保存但沒有完整確認收據的通知；不自動重送。`telegram-delivery:<id>` 由本機操作員 Abandon 結束後續投遞，仍保留未知證據，不表示已送達。

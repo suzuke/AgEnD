@@ -176,6 +176,26 @@ OpenCode `oversized_total_history_does_not_block_old_receipts_or_new_delivery` �
 
 權限 native API 測試注入 session／permission GET 503：原版本會耗用尚未送出的 POST attempt，修正版保留 operator 答覆機會；另注入已套用 permission POST 後丟回覆，重開資料庫必須保持 unknown 且不能再 POST。
 
+第 12C `cargo test -p agend-daemon --lib forge::github` 目前涵蓋 11 個基礎案例：gh 真唯讀捕獲解析、身份／head／merge parent 負例、實際 shell argv 與 token 不入 argv、錄製回覆下 stale head 零 PUT／已 merged 零寫入／PUT 回覆遺失後原 PR 對帳。這不是完整 FRG／pipeline 整合或真遠端 merge 驗收。
+
+12C `cargo test -p agend-daemon --lib store::github` 使用原生 SQLite 跨重開驗 pending push／create、stale revision、PR／repo 身分不可換綁及同 remote branch 不能分配兩個 task。schema 0017 另由 store migration／golden／retention 契約覆蓋。
+
+12C `forge::github::submission` 以真捕獲 GitHub 回覆注入 task marker 與遺失回覆，配原生 SQLite 重開驗單次 create、unknown 不重送及外來 PR 拒絕。`forge::github::push` 執行真 Git／bare repo，測成功後遺失回覆與 lease 競爭失敗，重開 DB 後不重送。這些尚非正式 daemon pipeline 驗收。
+
+`github_workflow_selects_its_forge_for_submit_checks_and_merge` 經 whole-queue fakes 核 github 選擇，不允許退回 local；實際 local FRG 1–10、runner／sandbox regression 由 `pipeline_adapters` 覆蓋。GitHub API replay 另核 repo 重建與 PUT 後外來 marker 不可提供 merge 收據。正式 GitHub 原生 FRG 見下列整合測試。
+
+12C `cargo test -p agend-daemon --test github_forge` 跑正式 GithubForge 的 FRG 1–10、遺失 create／merge 回覆與跨 SQLite 重開、dirty main 保留及只讀恢復。獨立程序使用真捕獲形狀與真 bare Git 產生 object／parent；不代表 live GitHub policy 或 daemon 端到端已驗收。
+
+`github_forge` 另核 close／delete 遺失回覆、同 SHA 重建分支不重刪、外來 head 不關 PR。`github_pipeline` 使用真 daemon／holder／fake-worker：重啟恢復與單次 merge、main 前進後 checks attempt 2、取消關閉 PR 及 WIP／remote 清理。先 build agend／agend-testkit bins。GitHub API 是獨立離線 producer，不代表 live GitHub 保護政策。
+
+`remote_cleanup_failure_releases_local_capacity_and_waits_for_operator_retry` 核遠端收尾失敗仍解除本機 binding，wake 不重送，operator Retry 才重新對帳。store 測試跨 DB 重開核 cleanup attempt 不可清除、complete 後不可重新 push。
+
+`unresolved_merge_never_replays_after_restart_or_operator_retry` 令獨立 API producer 收到 PUT 後無收據且 PR 仍 open，核強制重啟與 operator Retry 均維持 PUT 次數 1。此案例與立即可見的成功遺失回覆分開，防止假陽性。
+
+`github_pipeline::unknown_merge_preserves_approved_head_until_late_receipt_after_main_advances` 驗 unknown PUT 後遠端 main 前進與 operator Retry：分支保留原核准 head、不得 rebase；原 head 的雙 parent merge 收據晚到，再硬重啟可完成，PUT 仍一次，fixture 程序及目錄清空。
+
+GitHub policy 測試沿用真 branch protection 捕獲，核 strict／enforce_admins／非空 checks，拒絕弱保護、404 與缺回覆。`github_forge` 核第一次政策拒絕不保存 intent、不 PUT；修正後可合併，完成後政策改變仍可讀回收據。離線測試不認證 GitHub server 的 strict enforcement。
+
 12D `cargo test -p agend-daemon --lib notifier::` 驗 config allowlist、拒 inline secret、private file／symlink 邊界，以及 native HTTP 的真 getMe fixture／redirect／malformed response／429 安全錯誤。同組測試亦跑全套 NTF、長 Unicode 通知、失去或損壞第二段收據後 DB 重開不重送。`cargo test -p agend-daemon --lib store::telegram` 驗持久 CAS；`cargo test -p agend-daemon --test store` 驗 schema migration／golden。尚非手機操作完成認證。
 
 12D outbound worker 測試以真 Fleet／SQLite／native HTTP 驗通知、停機收據與等待時間改變不重送；store observer 驗 DB 重開保持 delivery id、重複 source rollback、內容更新／解除／再開建立新通知。
@@ -201,3 +221,7 @@ Telegram unknown 測試核 active claim 不提早發布、HTTP 收據遺失／�
 Terminal frame 解碼維持原 internally-tagged serde 路徑；RawValue 優化因未知值拒絕域退化及微測無優勢而撤回。wire 格式、行長限制與身分檢查不變。`decode_contract` 用 holder 真 parser 的 producer golden 驗兩種欄位順序，以及重複 type／data／request_id、同列尾隨 JSON、截斷 JSON 拒絕；非 frame response 沿用既有 decoder。
 
 `claude_startup_capture` 的二十個 native cases 共用僅限此 test binary 的 mutex，從 fixture 建立持有至清理。測試目的是內容、遮罩、拒絕與清理，不是二十組程序同時啟動的容量測試；2 秒觀察窗與原斷言不變。原並行測試空白 frame 失敗保留，隔離不宣稱已分辨 producer 啟動與畫面管線延遲，也不代替 outer 300 ms 契約。
+
+GitHub migration 17 接在已發布 Telegram 13–16 後；`github_upgrade_preserves_published_telegram_reads` 從 v16 fixture 升級，核已讀保留、GitHub ledger 初始空及 schema=17。
+
+12C 整合回歸保留 `agend/tests/pipeline_archive.rs` 的取消錯誤契約：archive 路徑故障必須回報拒絕、保留原 WIP／binding，修復後由 wake 完成；remote cleanup 失敗仍獨立釋放本機容量並等 Retry。

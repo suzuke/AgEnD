@@ -46,7 +46,7 @@ pub async fn start(
     .await
 }
 impl PipelineExecutor for LocalExecutor {
-    type Forge = crate::forge::local::LocalForge;
+    type Forge = crate::forge::selected::SelectedForge;
     fn git_available(&self) -> bool {
         self.git.is_some()
     }
@@ -59,12 +59,38 @@ impl PipelineExecutor for LocalExecutor {
             .map(|p| p.display().to_string())
             .map_err(|e| e.to_string())
     }
-    fn forge(&self, repo: &str, expected_main: Option<String>) -> Self::Forge {
-        crate::forge::local::LocalForge {
-            repo: repo.into(),
-            git: self.git.clone().expect("git availability checked"),
-            store: self.store.clone(),
-            expected_main,
+    fn forge(&self, repo: &str, kind: &str, expected_main: Option<String>) -> Self::Forge {
+        use crate::forge::selected::SelectedForge;
+        let Some(git) = self.git.clone() else {
+            return SelectedForge::Unavailable("git unavailable".into());
+        };
+        match kind {
+            "local" => SelectedForge::Local(crate::forge::local::LocalForge {
+                repo: repo.into(),
+                git,
+                store: self.store.clone(),
+                expected_main,
+            }),
+            "github" => match crate::forge::github::api::Api::discover(&self.home, Path::new(repo))
+            {
+                Ok(api) => SelectedForge::Github(crate::forge::github::GithubForge {
+                    api,
+                    repo: repo.into(),
+                    git,
+                    store: self.store.clone(),
+                }),
+                Err(reason) => SelectedForge::Unavailable(reason),
+            },
+            _ => SelectedForge::Unavailable(format!("unknown forge: {kind}")),
+        }
+    }
+    async fn prepare_main(&self, repo: &str, kind: &str) -> Result<String, String> {
+        match self.forge(repo, kind, None) {
+            crate::forge::selected::SelectedForge::Github(forge) => forge.sync_main().await,
+            crate::forge::selected::SelectedForge::Local(_) => {
+                self.run(repo, &["rev-parse", "main"]).await
+            }
+            crate::forge::selected::SelectedForge::Unavailable(reason) => Err(reason),
         }
     }
     async fn run(&self, repo: &str, args: &[&str]) -> Result<String, String> {
@@ -98,10 +124,32 @@ impl PipelineExecutor for LocalExecutor {
     async fn find_merge(
         &self,
         repo: &str,
+        kind: &str,
         task: &str,
         head: &str,
     ) -> Result<Option<(String, bool)>, String> {
-        self.forge(repo, None).find_merge(task, head).await
+        self.forge(repo, kind, None).find_merge(task, head).await
+    }
+    async fn cleanup_remote(&self, repo: &str, task: &str, merged: bool) -> Result<(), String> {
+        use agend_core::github::GithubStore;
+        let Some(record) = self
+            .store
+            .github_change(task)
+            .await
+            .map_err(|e| e.to_string())?
+        else {
+            return Ok(());
+        };
+        if record.change.cleanup.complete {
+            return Ok(());
+        }
+        match self.forge(repo, "github", None) {
+            crate::forge::selected::SelectedForge::Github(forge) => {
+                forge.cleanup(task, merged).await
+            }
+            crate::forge::selected::SelectedForge::Unavailable(reason) => Err(reason),
+            _ => Err("GitHub cleanup forge unavailable".into()),
+        }
     }
     async fn readiness(&self) -> Result<(), String> {
         crate::checks::readiness(&self.home).await
