@@ -2,10 +2,10 @@
 
 > **TL;DR**
 > - 這是 AgEnD（Agent Engineering Daemon）v2：異質 agent 團隊的自主 merge 流水線。
-> - 狀態：**pre-alpha**。第 1–11 施工關已完成並合併；第 11 施工關 C 段 #145 於 2026-10-03 經使用者確認合併（`b2152db`）。其他 backend adapter 與安裝發布仍待完成。
+> - 狀態：**pre-alpha**。第 1–12 施工關已完成並合併；第 12C #157 收尾於 `3f406f5`。第 13 施工關安裝與發布準備已開始，尚未完成。
 > - 下一步：先讀 [AGENTS.md](AGENTS.md)，再看 [docs/ROADMAP.md](docs/ROADMAP.md) 的目前狀態。
 
-第 12A Claude 已合併完成；[完整模型 smoke v12](docs/gates/gate-12a-complete-smoke.md)確認七則訊息、互傳、排隊與中斷。12B OpenCode 已通過原生契約、受控真測及三 backend 六方向模型互傳，#155 最終覆核／CI 中；GitHub forge、Telegram 仍待完成。
+第 12A Claude 已合併完成；[完整模型 smoke v12](docs/gates/gate-12a-complete-smoke.md)確認七則訊息、互傳、排隊與中斷。12B OpenCode #155、12C GitHub Forge #157、12D Telegram #156 均已合併；原生／真測範圍與限制見各施工關頁面。
 
 ## 這是什麼
 

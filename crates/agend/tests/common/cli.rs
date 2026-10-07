@@ -116,6 +116,10 @@ impl Cli {
                 cmd.env(key, value);
             }
         }
+        // A missing-home test must not fall back to the test runner's real home.
+        if home.is_none() {
+            cmd.env_remove("HOME");
+        }
         if let Some(home) = home {
             cmd.env("AGEND_HOME", home);
         }

@@ -146,3 +146,9 @@ xtask 的 `claude_1_5_envelopes_are_additive_and_receipts_keep_native_attributio
 共用已讀：`cargo test -p agend --test shared_read` 以兩個真 TUI client／daemon 程序驗同步與重啟保留；daemon `mobile_read_` 驗 native HTTP 按鈕不消耗原動作，`a_followup_remains_unread` 驗舊 read key 拒絕，store `read_receipts_` 驗 DB 重開。TUI `a_disconnected_source_` 驗斷線不能宣稱保存成功。上述不含真 Telegram 手機操作。
 
 `cargo test -p agend-daemon --lib notifier::` 包含 native HTTP 的 needs-you／雙 team topics、任務狀態更新、DB 重開不重送摘要，以及輔助 outbox pending 恢復、unknown／foreign bot 不送出。這些不宣稱真 Telegram forum 驗收。
+
+## 第 13A home／初始設定
+
+`cargo xtask accept core` 核對 no-std 與依賴界線。初始設定交給真 daemon 設定 parser 的契約、home 選擇與檔案權限由 `agend/tests/install_home.rs` 驗證；不在 core 模擬檔案系統。
+
+`setup::service` 測 unit／XML 特殊字元跳脫、拒絕 directive 注入與保留 holder 的設定；原生 parser 驗證由 `agend/tests/install_service.rs` 完成。

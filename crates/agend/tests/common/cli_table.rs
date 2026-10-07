@@ -161,7 +161,7 @@ pub fn rows() -> Vec<Row> {
                 fails(
                     2,
                     &[
-                        "agend: AGEND_HOME is not set; choose a directory for AgEnD's data and run: export AGEND_HOME=<absolute path>",
+                        "agend: AGEND_HOME is not set and HOME is not an absolute path; run: export AGEND_HOME=<absolute path>",
                     ],
                 ),
             )

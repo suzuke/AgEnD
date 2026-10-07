@@ -1,4 +1,4 @@
-//! Daemon-level `config.toml`: home path, Telegram connection settings, and
+//! Daemon-level `config.toml`: Telegram connection settings and
 //! references (env var name or file path) to secrets.
 //!
 //! This is the only human-written config file. The daemon reads it and never

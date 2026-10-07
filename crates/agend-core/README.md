@@ -29,6 +29,10 @@
 
 `runtime_records::claude` 定義 `ClaudeDelivery`、`ClaudeAttempt`、`ClaudeAck`、`ClaudeReservation` 與 `DriverEvent` 等共用資料；`may_start`／`outcome_unknown` 保留既有四種 DeliveryState。只有新的 `Started` 可開始 transport，`Existing` 不授權重送；core 不讀時鐘或 DB。見 [store 範圍](../../docs/gates/gate-12a-store.md)。
 
+## 第 13A home／初始設定
+
+`setup::DEFAULT_HOME_DIRECTORY` 與 `INITIAL_CONFIG` 定義操作員預設目錄名稱和不含秘密的初始設定。環境變數解析、私有目錄建立與原子發布都由 `agend` 執行；core 不讀寫檔案。`setup::service::ServiceSpec` 產生 launchd／systemd 定義並拒絕控制字元與非絕對路徑，服務執行環境只列 HOME、AGEND_HOME 與 PATH。
+
 ## 負責
 
 - 所有 crate 共用型別（`model`）：backend、team、task、送達狀態、branch 命名空間

@@ -47,7 +47,7 @@ Examples:
 const MORE: &str = "\
 Also: agend daemon (run the daemon in the foreground; Ctrl-C stops it, the
 agents keep running), agend holder <name> (started by the daemon), agend
-debug ping|watch, agend --version. Every command needs AGEND_HOME; --json
+debug ping|watch, agend --version. Operator home defaults to $HOME/.agend; AGEND_HOME overrides it. --json
 prints one JSON value.";
 
 #[derive(Parser)]
@@ -155,9 +155,22 @@ enum Command {
     /// Check the setup; exit 1 when a check fails
     #[command(before_help = "Example: agend doctor")]
     Doctor,
-    /// Create AGEND_HOME (0700), run doctor, print the next steps
-    #[command(before_help = "Example: export AGEND_HOME=$HOME/agend-home && agend init")]
+    /// Create the home (0700) and initial config, run doctor, print next steps
+    #[command(before_help = "Example: agend init   (or: AGEND_HOME=/absolute/path agend init)")]
     Init,
+    /// Preview user-service installation
+    #[command(subcommand)]
+    Service(Service),
+}
+
+#[derive(Subcommand)]
+enum Service {
+    /// Print the service definition without writing files or registering it
+    Plan {
+        /// Service manager (defaults to the current platform)
+        #[arg(long, value_parser = ["launchd", "systemd"])]
+        manager: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -420,6 +433,9 @@ fn dispatch(command: Command, json: bool) -> Result<Output, Failure> {
     match command {
         Command::Doctor => return crate::doctor::run(),
         Command::Init => return crate::init::run(),
+        Command::Service(Service::Plan { manager }) => {
+            return crate::service::plan(manager.as_deref());
+        }
         _ => {}
     }
     let target = Target::from_env()?;
@@ -456,7 +472,7 @@ fn dispatch(command: Command, json: bool) -> Result<Output, Failure> {
         Command::Instance(instance) => operator::instance(&target, instance, json),
         Command::Daemon(daemon) => operator::daemon(&target, daemon, json),
         Command::App { lang } => app(target, &lang),
-        Command::Doctor | Command::Init => unreachable!("handled above"),
+        Command::Doctor | Command::Init | Command::Service(_) => unreachable!("handled above"),
     }
 }
 

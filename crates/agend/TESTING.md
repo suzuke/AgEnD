@@ -73,7 +73,7 @@ cargo test -p agend
 | 列 | 誰 | 命令 | 預期 | 跑在 |
 |---|---|---|---|---|
 | CLI-1 | — | `--version` | `agend 0.0.0`、exit 0 | — |
-| CLI-2 | — | `status`（沒設 `AGEND_HOME`） | `agend: AGEND_HOME is not set; … export AGEND_HOME=<absolute path>`、exit 2 | — |
+| CLI-2 | — | `status`（`AGEND_HOME` 與 `HOME` 都未設） | `agend: AGEND_HOME is not set and HOME is not an absolute path; … export AGEND_HOME=<absolute path>`、exit 2 | — |
 | CLI-3 | — | `status`（`AGEND_HOME=g9-relative`） | `AGEND_HOME must be an absolute path`、exit 2 | — |
 | CLI-4 | — | `status`（home 有 `fleet.yaml`） | `looks like an AgEnD v1 home (fleet.yaml); set AGEND_HOME to another directory`、exit 1 | — |
 | CLI-5 | 操作者 | `send g9-b` | clap 的訊息＋`example: agend send dev-2 …`、exit 2 | — |
@@ -160,3 +160,7 @@ DRV fixture 的 actor readiness hint 不代替 daemon idle：送達前讀實際 
 12D `cargo test -p agend --bin agend doctor::telegram_tests` 驗 Telegram 未設定、空 allowlist 回報 fail、允許 user、公開 token 檔拒絕及 malformed 設定不洩漏 secret；doctor 只讀本機，不呼叫 Telegram。既有 `--test cli init_and_doctor` 仍驗正式 binary 輸出。
 
 12D 手機探針 `telegram_mobile_probe` 與 `examples/support/telegram_mobile.py`：`--local` 使用自有 daemon／SQLite／Client／TUI App 狀態模型，驗已讀不關閉、確認後關閉、重啟與清理，不呼叫 Telegram。真測使用 `--credentials` 專用私人 env 檔，在 300 秒內由人先點 Mark read 再 acknowledge；要求持久 update outcome 為 read、accepted，兩個 daemon boot 正常退出並刪除自有通知／home。此探針不渲染 TUI 終端畫面，亦不代替所有手機動作或真 forum 驗收。見 [12D 手機紀錄](../../docs/gates/gate-12d-telegram.md#手機-callback-驗收2026-10-07)。
+
+第 13A 的 `tests/install_home.rs` 以隔離 HOME 執行正式 CLI：預設 socket 對真協定 producer、明確覆寫、agent 不可退回預設、init 權限／重跑保存編輯、v1 與 symlink 拒絕。所有路徑由 TempDir 擁有並清理；既有 missing-home 案例同時移除 HOME，避免碰測試執行者的真實 home。
+
+第 13B `cargo test -p agend --test install_service` 驗真 CLI 的唯讀 service plan、特殊字元與環境拒絕；macOS 使用 plutil、Linux 使用 systemd-analyze verify 解析實際產物。測試僅寫隔離 fixture，不註冊服務，不能代替 holder 存活的真服務驗收。

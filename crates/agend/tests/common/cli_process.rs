@@ -778,7 +778,7 @@ pub fn init_and_doctor(lab: &Lab) -> Result<Vec<String>, String> {
         &unset,
         2,
         &[
-            "agend: AGEND_HOME is not set; choose a directory for AgEnD's data and run: export AGEND_HOME=<absolute path>",
+            "agend: AGEND_HOME is not set and HOME is not an absolute path; run: export AGEND_HOME=<absolute path>",
         ],
     )?;
     ensure(!home.exists(), || {

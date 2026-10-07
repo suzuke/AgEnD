@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 唯一 binary：CLI、daemon、holder、TUI、shim 都在裡面。
 > - 記住：**argv[0] 分派在 `main` 第一行**；以 `git`／`gh`／`kill`／`killall`／`pkill` 名稱執行時就是 shim，以 git hook 名稱（`reference-transaction`、`pre-push`…，由 `$AGEND_HOME/hooks/` 的 symlink）執行時就是 agend 的 git hook。
-> - 下一步：第 10 施工關驗證：`cargo xtask accept pipeline`。每個命令都要 `AGEND_HOME`（沒有預設，第 13 施工關再定）。
+> - 下一步：第 10 施工關驗證：`cargo xtask accept pipeline`。操作員 home 預設 `$HOME/.agend`，可用 `AGEND_HOME` 覆寫；agent 必須有明確 home。
 
 ## 第 10 施工關（已驗收，2026-10-02）
 
@@ -18,10 +18,10 @@
 - argv[0] 分派
 - CLI：agent 命令與操作者命令（D17）
 - `doctor`、`init`（第 9 施工關）、debug
-- `home::resolve`：`AGEND_HOME` 一律必須設、要絕對路徑、有 `fleet.yaml`（v1）就拒絕；CLI、`agend daemon`、`doctor`、`init`、`debug` 共用（第 9 施工關 P3）
+- `home::resolve`：操作員可預設 `$HOME/.agend`，明確 `AGEND_HOME` 必須為非空絕對路徑、有 `fleet.yaml`（v1）就拒絕；CLI、`agend daemon`、`doctor`、`init`、`debug` 共用（第 9 施工關 P3）
 - 第 13 施工關：服務註冊、`agend uninstall`、`agend telegram setup`（請 daemon 配對，本 crate 沒有 Telegram client）
 - `holder <instance-id>`：argv[0] 分派之後、CLI 解析之前就交給 `agend_holder::run`（第 4 施工關 P1）
-- `daemon`：同樣在 CLI 解析之前交給 `agend_daemon::daemon::run`，只在前景跑、要 `AGEND_HOME`（第 6 施工關 P1）；tokio runtime 在那裡面建，CLI 路徑不建
+- `daemon`：同樣在 CLI 解析之前交給 `agend_daemon::daemon::run`，只在前景跑、共用 `home::resolve`（第 6 施工關 P1）；tokio runtime 在那裡面建，CLI 路徑不建
 - `app [--lang en|zh-TW]`（第 11 施工關 B 段）：`agend_tui::run` + `ClientSource`；home 與 caller 同 CLI（`home::resolve`、`AGEND_INSTANCE`）；stdout 不是終端機 → `agend app needs a terminal`、exit 2
 
 ## 不負責
@@ -39,8 +39,8 @@
 | `cli::operator` | 操作者命令：`status`（全貌）、`instance add|remove|list`、`daemon restart`（預檢結果、等舊連線 EOF、等新的 `boot_id`）、`task cancel` |
 | `home` | `AGEND_HOME` 的解析（見上） |
 | `doctor` | `agend doctor`：home、daemon、git、claude／codex／opencode、holders、disk、Telegram 本機設定（空 allowlist 為 fail）；非 ok 一定附 `fix:`；有 fail 就 exit 1 |
-| `init` | `agend init`：建 home（0700，已存在不動）→ doctor → 下一步 |
-| `debug` | `agend debug ping [--count N --interval MS]`（協定版本與 instance 數；daemon 重啟中重試 10 秒）、`agend debug watch`（全貌摘要＋之後的事件；斷線每 500 ms 重連、重拿全貌）；socket 由 `AGEND_HOME` 算，身分取 `AGEND_INSTANCE` |
+| `init` | `agend init`：建 home（0700，已存在不動）與完整 config.toml（0600、不覆寫既有檔案、拒絕 symlink）→ doctor → 下一步 |
+| `debug` | `agend debug ping [--count N --interval MS]`（協定版本與 instance 數；daemon 重啟中重試 10 秒）、`agend debug watch`（全貌摘要＋之後的事件；斷線每 500 ms 重連、重拿全貌）；socket 由解析後的 home 算，身分取 `AGEND_INSTANCE` |
 | `setup` | 執行 `agend_core::setup` 的規則：在 `PATH` 上找程式（跳過 `$AGEND_HOME/bin`）、跑 `--version`（5 秒）、`statvfs`、home 大小；第 13 施工關加寫 unit 檔、註冊服務、安裝／移除 shim |
 
 ## 依賴規則
@@ -57,11 +57,15 @@
 - agent 命令（`AGEND_INSTANCE` 有設）：`status`、`send <to> "<message>" [--level queue|steer|interrupt]`、`inbox [--after <message-id>]`、`done <ticket>`、`result <ticket> "<summary>"`、`review approve|changes <ticket> …`、`ask "<question>" [--option …]`、`block "<reason>"`、`unblock`、`remind <90s|30m|2h>`、`task create --role <role> "<title>"`
 - 操作者命令：`status`、`instance add <name> <backend> [--dir <path>] [--program <path>] [-- <args>…]`、`instance remove <name> [--yes]`、`instance list`、`daemon restart [--binary <path>]`、`task cancel <task>`、`task create … --team <team>`、`doctor`、`init`
 - `agend daemon`（前景；Ctrl-C 停 daemon，agent 繼續跑）；`agend daemon preflight <dir>`（重啟中的 daemon 自己跑，不是給人用的）
-- `agend debug ping`、`agend debug watch`（唯讀；需要 `AGEND_HOME`）
+- `agend debug ping`、`agend debug watch`（唯讀；共用操作員預設 home）
 - 以 `git` 名稱執行 → `agend_shim::run`
 - 以 git hook 名稱執行（git 從 `$AGEND_HOME/hooks/` 呼叫） → `agend_shim::run`（`Tool::Hook`）
 
 watch 的 task_changed 顯示事件 TaskView 的 current_stage；舊 peer 未帶該欄位時仍顯示原摘要。
+
+## 第 13B 服務預覽（施工中）
+
+`agend service plan [--manager launchd|systemd] [--json]` 產生可審閱的 user-service 定義與目的路徑；不寫檔、不呼叫服務管理器。daemon 執行檔規劃保存於 home 的 `service/agend`，避免綁定施工用 target。launchd 保留 process group，systemd 用 `KillMode=process`；自動註冊、所有權對帳與 uninstall 尚在施工。
 
 ## 下一步
 

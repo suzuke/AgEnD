@@ -20,6 +20,7 @@ mod doctor;
 mod home;
 mod hooks;
 mod init;
+mod service;
 mod setup;
 
 use std::process::ExitCode;
