@@ -62,6 +62,7 @@ pub fn checks(home: &Path) -> Vec<Check> {
     out.push(holders(home, fleet.as_ref()));
     out.push(disk(home));
     out.push(sandbox(home));
+    out.push(telegram(home));
     out
 }
 
@@ -327,4 +328,58 @@ fn disk(home: &Path) -> Check {
         );
     }
     ok("disk", detail)
+}
+
+/// Local configuration only: doctor never consumes updates or sends a message.
+fn telegram(home: &Path) -> Check {
+    match agend_daemon::notifier::config::load(home) {
+        Ok(None) => ok("telegram", "not configured".into()),
+        Ok(Some((config, _token))) if config.allow_user_ids.is_empty() => check(
+            "telegram", CheckStatus::Warn,
+            "notifications configured; inbound control disabled because allow_user_ids is empty".into(),
+            Some("set telegram.allow_user_ids in $AGEND_HOME/config.toml to the permitted human user IDs".into()),
+        ),
+        Ok(Some((config, _token))) => ok("telegram", format!(
+            "local configuration valid; {} allowed human user(s); network delivery not probed",
+            config.allow_user_ids.len())),
+        Err(reason) => check("telegram", CheckStatus::Fail, reason,
+            Some("check the Telegram token reference and private token file permissions in $AGEND_HOME/config.toml".into())),
+    }
+}
+
+#[cfg(test)]
+mod telegram_tests {
+    use super::*;
+    #[test]
+    fn empty_allowlist_is_visible_and_secret_failures_do_not_echo_configuration() {
+        let dir = agend_testkit::tempdir::TempDir::new("telegram-doctor").unwrap();
+        assert_eq!(telegram(dir.path()).status, CheckStatus::Ok);
+        let token = dir.path().join("token");
+        std::fs::write(&token, "123:abcdefghijklmnopqrstuvwxyz_123456789").unwrap();
+        std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let config = format!(
+            "[telegram]\nchat_id=42\ntoken={{kind='file',value='{}'}}\n",
+            token.display()
+        );
+        std::fs::write(dir.path().join("config.toml"), &config).unwrap();
+        let check = telegram(dir.path());
+        assert_eq!(check.status, CheckStatus::Warn);
+        assert!(check.detail.contains("allow_user_ids is empty"));
+        std::fs::write(
+            dir.path().join("config.toml"),
+            format!("{config}allow_user_ids=[7]\n"),
+        )
+        .unwrap();
+        assert_eq!(telegram(dir.path()).status, CheckStatus::Ok);
+        std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(telegram(dir.path()).status, CheckStatus::Fail);
+        std::fs::write(
+            dir.path().join("config.toml"),
+            "[telegram]\ntoken='TOP-SECRET'\n",
+        )
+        .unwrap();
+        let check = telegram(dir.path());
+        assert_eq!(check.status, CheckStatus::Fail);
+        assert!(!format!("{check:?}").contains("TOP-SECRET"));
+    }
 }

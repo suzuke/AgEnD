@@ -14,3 +14,6 @@ pub mod worker;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod poll_tests;

@@ -14,7 +14,6 @@ pub struct Admitted {
     pub task_version: Option<(u64, u64)>,
     pub request: ClientRequest,
     pub expected: AttentionRequiredData,
-    pub callback_id: Option<String>,
 }
 
 /// Callback payloads select an action from the stored snapshot; they never
@@ -44,6 +43,26 @@ pub fn keyboard(row: &TelegramDelivery) -> Option<Value> {
     } else {
         Some(json!({"inline_keyboard":buttons}))
     }
+}
+
+/// Expired buttons still receive a generic answer, but only in the configured
+/// chat from an allowed human and on this bot's message.
+pub fn callback_feedback(config: &TelegramConfig, bot: u64, update: &Value) -> Option<String> {
+    let query = update.get("callback_query")?;
+    let message = &query["message"];
+    if !config.allows(
+        message["chat"]["id"].as_i64()?,
+        query["from"]["id"].as_u64()?,
+        query["from"]["is_bot"].as_bool().unwrap_or(true),
+    ) || message["from"]["id"].as_u64() != Some(bot)
+        || message["from"]["is_bot"].as_bool() != Some(true)
+    {
+        return None;
+    }
+    query["id"]
+        .as_str()
+        .filter(|id| !id.is_empty() && id.len() <= 256)
+        .map(str::to_owned)
 }
 
 pub async fn admit<S: TelegramInboundStore>(
@@ -117,15 +136,9 @@ where
         .attention
         .ok_or("notification has no actionable snapshot")?;
     let request_id = format!("telegram:{bot}:{update_id}");
-    let callback_id = callback
-        .map(|q| {
-            q["id"]
-                .as_str()
-                .filter(|s| !s.is_empty())
-                .map(str::to_owned)
-                .ok_or("missing callback identity")
-        })
-        .transpose()?;
+    if callback.is_some() && callback_feedback(config, bot, update).is_none() {
+        return Err("invalid callback identity".into());
+    }
     let request = if let Some(query) = callback {
         let data = query["data"]
             .as_str()
@@ -220,7 +233,6 @@ where
         task_version: row.task_version,
         request,
         expected,
-        callback_id,
     })
 }
 

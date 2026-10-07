@@ -269,3 +269,5 @@
 - 2026-10-07：12D 接上 daemon config 與 outbound worker；持久 needs-you source 對帳避免 boot 游標重建造成重送，內容更新／解除／再開另立 delivery。手機 inbound、互動操作、G4 與整體驗收尚未完成。
 
 - 2026-10-07：12D 手機 inbound checkpoint：已確認通知收據綁 allowlist／選項，SQLite update 與單通知操作 claim 阻止重播；重試等待 supervisor 處理、修改原因以回覆輸入，pipeline 執行前核任務與注意事項版本。跨入口同原因再開、失敗事件重啟與 unknown 重開納入回歸；真手機 callback／G4、全新端到端驗證及 CI 尚未完成。
+
+- 2026-10-07：12D 補 native HTTP／SQLite／production pipeline 的一次操作與失效按鈕回饋，另驗取消待處理重試不誤回成功；doctor 提示空 allowlist 並安全檢查 token reference。全新覆核 focused 14＋3＋1 通過，範圍不含真 daemon 停機程序／真手機／G4，完整 D 仍待完成。

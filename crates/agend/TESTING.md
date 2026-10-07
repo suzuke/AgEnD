@@ -156,3 +156,5 @@ DRV fixture 的 actor readiness hint 不代替 daemon idle：送達前讀實際 
 ## 第 12B 原生 OpenCode bridge
 
 先 `cargo build -p agend -p agend-testkit --bins`，再 `cargo test -p agend --test opencode_bridge`。兩個案例使用真 daemon／holder／shell wrapper 和原生 fake OpenCode CLI：保存一筆權限工作，daemon 重啟保留 holder／ask，拒絕後重複回覆失敗，再分別正常停止與 SIGKILL 自有 holder；新 holder 恢復原 session、歷史只有一筆 user message，最後確認 server port 關閉。Fixture 僅清自己的 lab；panic 路徑停止自有 holders，依 marker sweep 舊 group。零模型呼叫；不替代真 1.18.34 驗收。
+
+12D `cargo test -p agend --bin agend doctor::telegram_tests` 驗 Telegram 未設定、空 allowlist、允許 user、公開 token 檔拒絕及 malformed 設定不洩漏 secret；doctor 只讀本機，不呼叫 Telegram。既有 `--test cli init_and_doctor` 仍驗正式 binary 輸出。

@@ -52,7 +52,7 @@ pub async fn once(
         }
         // Only a durably claimed update may pass into the operator handlers.
         let admitted = inbound::admit(ctx.store.as_ref(), config, bot, update).await;
-        let callback_id = admitted.as_ref().ok().and_then(|a| a.callback_id.clone());
+        let callback_id = inbound::callback_feedback(config, bot, update);
         let authorized = admitted.is_ok();
         let needs_reason = admitted.as_ref().is_ok_and(inbound::needs_reason);
         let outcome = match admitted {
