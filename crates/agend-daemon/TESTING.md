@@ -12,7 +12,7 @@
 正式 P5 啟動按鍵與 P6 初始 idle 的實作、schema v9 與 native 驗證邊界見 [啟動處理](../../docs/gates/gate-12a-startup-runtime.md)。
 private startup capture 明確登記 manual 模式，保留原初始尺寸、停用 daemon 自動鍵；SQLite 重啟仍保留。capture 的 native 回歸與 raw PTY 測試不受正式 P5 介入。
 `agend/tests/tui_outer_pty.rs` 另保留自動 P5 與人工 TUI 共存的真 outer PTY 回歸，核最後 modes、focus、history 與 20 次 App 關閉；terminal hub 在共用 sample 到期後再確認尾段，不用 manual 模式取代此項。
-自動 P5 的尾段時效在 80×23 與 100×24 的實際 agent viewport 各驗 12 筆，保留每筆 300ms 預算。啟動辨識只查一份完整 24 列 frame；未知尺寸不建立初始 idle。未知且 session／notice 未變時最多一秒重查，輸出／link 變動仍立即取樣；已知選單與 Ready 維持原檢查。首筆 dirty 等 50ms 共用 sample 過期，持續輸出的後續 notice 不延長等待。
+自動 P5 的尾段時效在 80×23 與 100×24 的實際 agent viewport 各驗 12 筆，保留每筆 300ms 預算。啟動辨識只查一份完整 24 列 frame；未知尺寸不建立初始 idle。未知且 session／notice 未變時最多一秒重查，輸出／link 變動仍立即取樣；已知選單與 Ready 維持原檢查。首筆 dirty 等 50ms 共用 sample 過期，持續輸出的後續 notice 不延長等待。後續 capture cycle 以開始時間計算至少 50ms 間隔，frame RPC 成本不再額外加上一整段等待；settled／output_sequence 判斷不變。
 
 ## 第 10 施工關驗證
 
@@ -175,3 +175,29 @@ OpenCode `oversized_total_history_does_not_block_old_receipts_or_new_delivery` �
 `chunked_oversized_json_reports_the_same_limit_as_content_length` 核對無 Content-Length 的 chunked 超限回覆也可觸發分頁縮小，避免長歷史卡住。
 
 權限 native API 測試注入 session／permission GET 503：原版本會耗用尚未送出的 POST attempt，修正版保留 operator 答覆機會；另注入已套用 permission POST 後丟回覆，重開資料庫必須保持 unknown 且不能再 POST。
+
+12D `cargo test -p agend-daemon --lib notifier::` 驗 config allowlist、拒 inline secret、private file／symlink 邊界，以及 native HTTP 的真 getMe fixture／redirect／malformed response／429 安全錯誤。同組測試亦跑全套 NTF、長 Unicode 通知、失去或損壞第二段收據後 DB 重開不重送。`cargo test -p agend-daemon --lib store::telegram` 驗持久 CAS；`cargo test -p agend-daemon --test store` 驗 schema migration／golden。尚非手機操作完成認證。
+
+12D outbound worker 測試以真 Fleet／SQLite／native HTTP 驗通知、停機收據與等待時間改變不重送；store observer 驗 DB 重開保持 delivery id、重複 source rollback、內容更新／解除／再開建立新通知。
+
+12D inbound 的 `notifier::inbound` 測試以已捕獲的真 Message 收據和正式 keyboard producer 驗身分／allowlist／選項／修改原因、未確認或已消耗通知拒絕、不同 update ID 與重開不重播。Callback envelope 目前是 schema adversary，不是真手機 callback 證據。`pipeline_store_ports` 核注意事項版本持久化；`pipeline::tests::mobile_guard` 核 CLI／TUI 清除再開同原因後舊版本不得操作。`store` 核 instance failure episode 跨 boot 穩定、再次失敗更新，以及 schema 15 的舊版升級。
+
+`notifier::poll_tests` 使用 native HTTP 與 recorded Message schema，實際執行 SQLite claim、production pipeline acknowledgment，檢查未授權拒絕、一次作用與 stale callback 回覆。另一案例在 RetryConfirmed 等待中丟棄 receiver／event，驗 cancellation 不移除事項、不回 Accepted；它是 queue 邊界測試，並未啟動真 daemon 程序。
+
+共用已讀：`cargo test -p agend --test shared_read` 以兩個真 TUI client／daemon 程序驗同步與重啟保留；daemon `mobile_read_` 驗 native HTTP 按鈕不消耗原動作，`a_followup_remains_unread` 驗舊 read key 拒絕，store `read_receipts_` 驗 DB 重開。TUI `a_disconnected_source_` 驗斷線不能宣稱保存成功。上述不含真 Telegram 手機操作。
+
+`cargo test -p agend-daemon --lib notifier::` 包含 native HTTP 的 needs-you／雙 team topics、任務狀態更新、DB 重開不重送摘要，以及輔助 outbox pending 恢復、unknown／foreign bot 不送出。這些不宣稱真 Telegram forum 驗收。
+
+`notifier::poll_tests::native_mobile_choice_and_free_reply_reach_the_asking_agent_once` 以真 pipeline 建立問答及追問、原生 HTTP producer 收據與不同 message ID，驗選項／多行自由文字經 Telegram source 保存且各入 inbox 一次；重複輪詢／舊通知不回答新追問。沒有啟動 backend 模型。
+
+`native_mobile_approval_and_changes_require_current_receipt_and_explicit_reason` 以 core state machine 產生已交付的 research 結果，在正式 serialized pipeline 等 human approval，經本機 HTTP 收據／callback 核 approve 完成；request_changes 先提示、不執行，空白拒絕、多行理由完整保存後回 work。完成後新 update ID 重用舊按鈕不改 pipeline。此例 bind_head=false，不代替 Git head／merge 驗收。
+
+Telegram unknown 測試核 active claim 不提早發布、HTTP 收據遺失／毀損標 unknown、agent／Retry 拒絕、operator Abandon 不造收據、不重送，DB 重開保留處置與原文。`agend --test telegram_unknown` 另以正式 daemon 三次開機、無 token／設定核啟動恢復、操作員 socket 權限及持久處置。
+
+12D `cargo test -p agend-daemon --lib daemon::telegram_tests::active_shutdown` 用兩個獨立子程序執行正式 daemon `serve`，本機 HTTP producer 扣住第一段回覆。SIGINT 後 socket 已移除但程序仍等收據；放行後 SQLite 保存第一段，重啟只送第二段並完成。僅測試編譯可注入 loopback API，正式 origin 不變；ignored `child` 是父測試啟動的子程序入口。這驗 auxiliary outbox active shutdown，不涵蓋 Retry 排隊關機。
+
+12D `cargo build -p agend -p agend-testkit --bins` 後，`cargo test -p agend-daemon --lib daemon::telegram_tests` 跑三個本機 HTTP／獨立 daemon 子程序案例（另有一個由父測試啟動的 ignored child 入口）。Retry 用正式 supervisor／holder 啟動 `/bin/bash` inbox 測試程序，保存 Running／session_started／accepted；第二次 boot 沒有再次啟動或再次 Accepted。排隊案例只在測試編譯延遲 supervisor 消費事件，先排 SIGINT Stop、再讓真 poll 排 RetryConfirmed；正式 run／drop queue／worker.stop 保存 refused、保留 Failed、不啟動 holder。全部不啟動真模型、不用真 Telegram。
+
+Terminal frame 解碼維持原 internally-tagged serde 路徑；RawValue 優化因未知值拒絕域退化及微測無優勢而撤回。wire 格式、行長限制與身分檢查不變。`decode_contract` 用 holder 真 parser 的 producer golden 驗兩種欄位順序，以及重複 type／data／request_id、同列尾隨 JSON、截斷 JSON 拒絕；非 frame response 沿用既有 decoder。
+
+`claude_startup_capture` 的二十個 native cases 共用僅限此 test binary 的 mutex，從 fixture 建立持有至清理。測試目的是內容、遮罩、拒絕與清理，不是二十組程序同時啟動的容量測試；2 秒觀察窗與原斷言不變。原並行測試空白 frame 失敗保留，隔離不宣稱已分辨 producer 啟動與畫面管線延遲，也不代替 outer 300 ms 契約。

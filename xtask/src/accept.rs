@@ -146,7 +146,14 @@ pub const GATES: &[Gate] = &[
     Gate {
         number: 12,
         name: "adapters",
-        crates: &["agend-daemon"],
+        crates: &[
+            "agend-core",
+            "agend-daemon",
+            "agend-client",
+            "agend-tui",
+            "agend-testkit",
+            "agend",
+        ],
     },
     Gate {
         number: 13,
@@ -178,6 +185,9 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
         gate.number, gate.name, gate.number, gate.name
     );
 
+    if gate.number == 12 {
+        crate::adapters_demo::prepare()?;
+    }
     if gate.number == 10 {
         step(&[
             "build",
@@ -387,7 +397,7 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
     } else if gate.number == 12 {
         crate::adapters_demo::run()?;
         println!(
-            "gate 12 (adapters): native Claude checks passed; true CLI/startup and other adapters remain pending"
+            "gate 12 (adapters): native Claude, OpenCode and Telegram checks passed; GitHub forge and remaining live acceptance are pending"
         );
     } else {
         println!(

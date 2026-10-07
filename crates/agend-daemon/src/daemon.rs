@@ -98,6 +98,13 @@ fn run_with_policy(
         eprintln!("agend daemon: {e}");
         return ExitCode::from(1);
     }
+    let telegram = match crate::notifier::config::load(&home) {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("agend daemon: {error}");
+            return ExitCode::from(1);
+        }
+    };
     let exe = match agend.map(Ok).unwrap_or_else(std::env::current_exe) {
         Ok(exe) => exe,
         Err(e) => {
@@ -142,7 +149,17 @@ fn run_with_policy(
             return ExitCode::from(1);
         }
     };
-    let stopped = runtime.block_on(serve(home, exe, store, codex_input));
+    let stopped = runtime.block_on(serve(
+        home,
+        exe,
+        store,
+        codex_input,
+        telegram,
+        #[cfg(test)]
+        None,
+        #[cfg(test)]
+        false,
+    ));
     // Pending restart timers and the like are dropped, not awaited.
     runtime.shutdown_timeout(Duration::from_secs(1));
     if matches!(stopped, Ok(Stopped::Exec(_))) {
@@ -224,7 +241,19 @@ async fn serve(
     exe: PathBuf,
     store: SqliteStore,
     codex_input: agend_core::policy::codex_input::CodexInputPolicy,
+    telegram: Option<(
+        agend_core::config::TelegramConfig,
+        crate::notifier::config::Token,
+    )>,
+    #[cfg(test)] telegram_api: Option<Arc<crate::notifier::http::Api>>,
+    #[cfg(test)] hold_supervisor_for_stop: bool,
 ) -> Result<Stopped, ExitCode> {
+    if let Err(error) = store.recover_telegram_attempts().await {
+        log::line(&format!(
+            "agend daemon: cannot recover Telegram attempts: {error}"
+        ));
+        return Err(ExitCode::from(1));
+    }
     let (events, mut queue) = unbounded_channel();
     forward_signal(SignalKind::interrupt(), "SIGINT", events.clone());
     forward_signal(SignalKind::terminate(), "SIGTERM", events.clone());
@@ -273,6 +302,11 @@ async fn serve(
     let inherited = crate::reaper::inherited(&home);
     let runtime = HolderRuntime::new(&home, &exe, daemon_env, sink);
     let fleet = Arc::new(Fleet::new(log::now_unix_ms()));
+    use agend_core::attention_read::AttentionReadStore;
+    fleet.restore_read_keys(store.attention_read_keys().await.map_err(|e| {
+        log::line(&format!("read receipts: {e}"));
+        ExitCode::from(1)
+    })?);
     let store = Arc::new(store);
     let codex_events = events.clone();
     let codex_sink: CodexSink = Arc::new(move |event| {
@@ -330,6 +364,13 @@ async fn serve(
         restarting: AtomicBool::new(false),
         codex_input,
     });
+    let telegram_worker = telegram.map(|(config, token)| {
+        #[cfg(test)]
+        if let Some(api) = telegram_api {
+            return crate::notifier::worker::start_with_context(config, api, context.clone());
+        }
+        crate::notifier::worker::start(config, token, context.clone())
+    });
     let server = Server::start(listener, socket.clone(), Arc::clone(&context));
     log::line(&format!("listening on {}", socket.display()));
     log::line(&format!(
@@ -349,7 +390,29 @@ async fn serve(
         }
     });
 
+    #[cfg(test)]
+    if hold_supervisor_for_stop {
+        // Force Stop ahead of a real inbound RetryConfirmed without replacing
+        // the production receiver, dispatcher or shutdown path.
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            if STOP_SIGNALLED.load(Ordering::SeqCst) && !queue.is_empty() {
+                fs::write(home.join("stop-queued"), []).unwrap();
+                if queue.len() >= 2 {
+                    fs::write(home.join("retry-queued"), []).unwrap();
+                    break;
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "Stop/Retry test ordering not reached"
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
     let stopped = supervisor.run(&mut queue).await;
+    // Reject new operations and release pending completion waiters before workers stop.
+    drop(queue);
     let why = match &stopped {
         Stopped::Signal(signal) => (*signal).to_owned(),
         Stopped::Exec(binary) => format!("restart with {}", binary.display()),
@@ -358,6 +421,9 @@ async fn serve(
         "agend daemon stopping ({why}); holders keep running"
     ));
     server.stop().await;
+    if let Some(worker) = telegram_worker {
+        worker.stop().await;
+    }
     // Closes every holder connection (no Shutdown) and then the DB: the
     // server's tasks are gone, so this is the last handle on both.
     pipeline_worker.abort();
@@ -366,3 +432,6 @@ async fn serve(
     log::line("agend daemon stopped");
     Ok(stopped)
 }
+
+#[cfg(test)]
+mod telegram_tests;

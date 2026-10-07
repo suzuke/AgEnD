@@ -215,6 +215,9 @@ pub(super) fn check(request: &ClientRequest, deadline: Instant) -> io::Result<()
             budget.operator(&data.command)
         }
         ClientRequest::GetFleet { data } => budget.add(&data.request_id),
+        ClientRequest::MarkAttentionRead { data } => {
+            budget.strings([data.request_id.as_str(), &data.attention_id, &data.read_key])
+        }
         ClientRequest::ResolveAttention { data } => {
             budget.strings([data.request_id.as_str(), &data.attention_id])?;
             budget.strings(data.note.as_deref())

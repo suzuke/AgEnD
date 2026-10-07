@@ -222,6 +222,11 @@ pub enum Event {
     Retry {
         item: Box<AttentionRequiredData>,
     },
+    /// Resolve and execute a mobile retry inside the supervisor queue.
+    RetryConfirmed {
+        expected: Box<AttentionRequiredData>,
+        reply: oneshot::Sender<Result<(), String>>,
+    },
     /// The operator adds an instance (gate 9).
     Add {
         request: AddRequest,
@@ -550,7 +555,12 @@ impl Supervisor {
                 } else {
                     "it failed before this daemon started"
                 };
-                self.fleet.raise(failed_item(instance, reason, now));
+                let (reason, since) = self
+                    .store
+                    .instance_failure(&instance.id, reason, now, false)
+                    .await
+                    .map_err(|e| format!("restore failure episode: {e}"))?;
+                self.fleet.raise(failed_item(instance, &reason, since));
                 // Its holder is left alone while it runs (gate 6 H8).
                 if !running_ids.contains(&instance.id) {
                     self.sweep(instance, "failed, holder gone").await;
@@ -812,19 +822,22 @@ impl Supervisor {
         self.codex.disconnect(id);
         self.opencode.disconnect(id);
         self.runtime.detach(id);
-        if let Err(e) = self
+        let since = match self
             .store
-            .set_instance_status(id, InstanceStatus::Failed)
+            .instance_failure(id, reason, log::now_unix_ms(), true)
             .await
         {
-            log::line(&format!("{id}: cannot record failed: {e}"));
-        }
+            Ok((_, since)) => since,
+            Err(e) => {
+                log::line(&format!("{id}: cannot record failed: {e}"));
+                return;
+            }
+        };
         log::line(&format!("{id} failed: {reason}"));
         self.set_state(id, AgentState::Failed, reason.to_owned());
         match self.store.instance(id).await {
             Ok(Some(instance)) => {
-                self.fleet
-                    .raise(failed_item(&instance, reason, log::now_unix_ms()));
+                self.fleet.raise(failed_item(&instance, reason, since));
             }
             Ok(None) => {}
             Err(e) => log::line(&format!("{id}: cannot read the instance: {e}")),
@@ -1167,6 +1180,18 @@ impl Supervisor {
                     }
                 }
                 Event::Retry { item } => self.retry(*item).await,
+                Event::RetryConfirmed { expected, reply } => {
+                    let result = if let Some(item) = self
+                        .fleet
+                        .resolve_if_current(&expected, AttentionAction::Retry)
+                    {
+                        self.retry(item).await;
+                        Ok(())
+                    } else {
+                        Err("notification changed; retry was not applied".into())
+                    };
+                    let _ = reply.send(result);
+                }
                 Event::Add { request, reply } => self.add(request, reply).await,
                 Event::Remove { id, reply } => {
                     let removed = self.remove(&id).await;

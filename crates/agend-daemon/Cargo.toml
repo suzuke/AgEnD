@@ -25,8 +25,8 @@ toml = "1.1.6"
 # The codex driver's JSON-RPC over WebSocket to `codex app-server` (gate 7
 # P1): blocking I/O, one std thread per instance link.
 tungstenite = { version = "0.30.0", default-features = false, features = ["handshake"] }
-# Loopback HTTP for the holder-owned OpenCode server. No ambient proxy or TLS.
-ureq = { version = "3.4.2", default-features = false }
+# Loopback OpenCode and certificate-verified HTTPS Telegram transport.
+ureq = { version = "3.4.2", default-features = false, features = ["rustls"] }
 base64 = "0.22"
 
 [dev-dependencies]

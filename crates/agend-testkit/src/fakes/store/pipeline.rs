@@ -7,6 +7,7 @@ pub(super) struct Data {
     members: BTreeMap<String, Member>,
     instances: BTreeMap<String, Instance>,
     bindings: BTreeMap<String, BindingRow>,
+    pub(super) attention_revisions: BTreeMap<String, u64>,
     pub(super) notes: BTreeMap<String, (Option<String>, Option<String>, bool)>,
     pub(super) messages: BTreeMap<String, Message>,
     asks: BTreeMap<String, AskRow>,
@@ -102,6 +103,7 @@ impl PipelineStore for FakeStore {
         Ok(d.progress.get(id).map(|data| {
             let note = d.pipeline.notes.get(id).cloned().unwrap_or_default();
             Progress {
+                attention_revision: d.pipeline.attention_revisions.get(id).copied().unwrap_or(0),
                 data: data.clone(),
                 block_reason: data.block_reason.clone(),
                 attention_reason: note.1,
@@ -119,6 +121,11 @@ impl PipelineStore for FakeStore {
         let mut d = lock(&self.data);
         if let Some(p) = d.progress.get_mut(id) {
             p.block_reason = block.clone();
+        }
+        if d.pipeline.notes.get(id).cloned().unwrap_or_default()
+            != (block.clone(), attention.clone(), ack)
+        {
+            *d.pipeline.attention_revisions.entry(id.into()).or_default() += 1;
         }
         d.pipeline.notes.insert(id.into(), (block, attention, ack));
         Ok(())

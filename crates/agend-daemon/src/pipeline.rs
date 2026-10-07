@@ -40,6 +40,12 @@ pub struct Handle {
 pub(crate) enum Input {
     Agent(Option<String>, AgentCommand, oneshot::Sender<Reply>),
     Operator(OperatorCommand, oneshot::Sender<Reply>),
+    Guarded(
+        Box<AttentionRequiredData>,
+        Option<(u64, u64)>,
+        Box<ClientRequest>,
+        oneshot::Sender<Reply>,
+    ),
     Resolve(ResolveAttentionData, oneshot::Sender<Reply>),
     Answer(AnswerAskData, oneshot::Sender<Reply>),
     Event(String, PipelineEvent),
@@ -66,6 +72,15 @@ impl Handle {
     }
     pub async fn operator(&self, command: OperatorCommand) -> Reply {
         self.request(|r| Input::Operator(command, r)).await
+    }
+    pub async fn guarded(
+        &self,
+        expected: AttentionRequiredData,
+        task_version: Option<(u64, u64)>,
+        request: ClientRequest,
+    ) -> Reply {
+        self.request(|r| Input::Guarded(Box::new(expected), task_version, Box::new(request), r))
+            .await
     }
     pub async fn resolve(&self, data: ResolveAttentionData) -> Reply {
         self.request(|r| Input::Resolve(data, r)).await
@@ -145,6 +160,60 @@ where
                 }
                 Input::Operator(command, reply) => {
                     let _ = reply.send(engine.operator(command).await);
+                }
+                Input::Guarded(expected, task_version, request, reply) => {
+                    let version_matches = match (&expected.task_id, task_version) {
+                        (Some(id), Some((version, revision))) => {
+                            engine
+                                .store
+                                .load_task(id)
+                                .await
+                                .ok()
+                                .flatten()
+                                .is_some_and(|t| t.version == version)
+                                && engine
+                                    .store
+                                    .progress(id)
+                                    .await
+                                    .ok()
+                                    .flatten()
+                                    .is_some_and(|p| p.attention_revision == revision)
+                        }
+                        (Some(_), None) => false,
+                        (None, None) => true,
+                        (None, Some(_)) => false,
+                    };
+                    let current = expected
+                        .attention_id
+                        .as_deref()
+                        .and_then(|id| engine.fleet.attention(id));
+                    let result = if !version_matches
+                        || !current
+                            .as_ref()
+                            .is_some_and(|c| agend_core::telegram::same_attention(c, &expected))
+                    {
+                        Err(invalid(
+                            "notification is stale; open the current needs-you item",
+                        ))
+                    } else {
+                        match *request {
+                            ClientRequest::ResolveAttention { data }
+                                if Some(&data.attention_id) == expected.attention_id.as_ref() =>
+                            {
+                                engine.resolve(data).await
+                            }
+                            ClientRequest::AnswerAsk { data }
+                                if expected
+                                    .ask
+                                    .as_ref()
+                                    .is_some_and(|a| a.ask_id == data.ask_id) =>
+                            {
+                                engine.answer(data).await
+                            }
+                            _ => Err(invalid("request does not match notification")),
+                        }
+                    };
+                    let _ = reply.send(result);
                 }
                 Input::Resolve(data, reply) => {
                     let _ = reply.send(engine.resolve(data).await);

@@ -99,7 +99,7 @@ impl SqliteStore {
     pub async fn progress(&self, task: &str) -> Result<Option<Progress>, StoreError> {
         let t = task.to_owned();
         self.call(move |c| {
-            Ok(c.query_row("SELECT pipeline,stage_entered_at_unix_ms,merge_intent,block_reason,attention_reason,failure_acknowledged FROM tasks WHERE id=?1 AND pipeline IS NOT NULL",[t],|r| Ok(Progress { data:TaskProgress { pipeline:r.get(0)?,stage_entered_at_unix_ms:r.get::<_,u64>(1)?,merge_intent:r.get(2)?,block_reason:r.get(3)? },block_reason:r.get(3)?,attention_reason:r.get(4)?,acknowledged:r.get(5)? })).optional()?)
+            Ok(c.query_row("SELECT pipeline,stage_entered_at_unix_ms,merge_intent,block_reason,attention_reason,failure_acknowledged,attention_revision FROM tasks WHERE id=?1 AND pipeline IS NOT NULL",[t],|r| Ok(Progress { attention_revision:r.get(6)?, data:TaskProgress { pipeline:r.get(0)?,stage_entered_at_unix_ms:r.get::<_,u64>(1)?,merge_intent:r.get(2)?,block_reason:r.get(3)? },block_reason:r.get(3)?,attention_reason:r.get(4)?,acknowledged:r.get(5)? })).optional()?)
         }).await
     }
     pub async fn task_note(
@@ -110,7 +110,7 @@ impl SqliteStore {
         ack: bool,
     ) -> Result<(), StoreError> {
         let t = task.to_owned();
-        self.call(move |c| { c.execute("UPDATE tasks SET block_reason=?1,attention_reason=?2,failure_acknowledged=?3 WHERE id=?4",params![block,attention,ack,t])?; Ok(()) }).await
+        self.call(move |c| { c.execute("UPDATE tasks SET attention_revision=attention_revision+CASE WHEN block_reason IS NOT ?1 OR attention_reason IS NOT ?2 OR failure_acknowledged IS NOT ?3 THEN 1 ELSE 0 END,block_reason=?1,attention_reason=?2,failure_acknowledged=?3 WHERE id=?4",params![block,attention,ack,t])?; Ok(()) }).await
     }
     pub async fn bindings(&self) -> Result<Vec<BindingRow>, StoreError> {
         self.call(|c| { let mut s=c.prepare("SELECT instance_id,task_id,kind,worktree,branch,head,ticket,status FROM bindings ORDER BY instance_id")?;

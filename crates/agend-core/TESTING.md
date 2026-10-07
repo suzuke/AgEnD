@@ -130,3 +130,11 @@ xtask 的 `claude_1_5_envelopes_are_additive_and_receipts_keep_native_attributio
 都為 Claude StartupMenu，其他 backend 不匹配、沒有 suggested key。
 原規則對 development channels 回 None 的反例已保存，新規則補上已觀察標頭。
 授權只完成 workspace 信任，沒有確認 development channels，不宣稱 P5／P6 完成。
+
+12D config consumer 測試位於 daemon `notifier::config`：TOML parser 驗 secret reference 與 allowlist，core 不增加 I/O 相依。
+
+12D 分段與 delivery 狀態由 daemon 原生 NTF／SQLite 測試驗證，包含 Unicode／空白全文及重啟後未知結果不重送。
+
+共用已讀：`cargo test -p agend --test shared_read` 以兩個真 TUI client／daemon 程序驗同步與重啟保留；daemon `mobile_read_` 驗 native HTTP 按鈕不消耗原動作，`a_followup_remains_unread` 驗舊 read key 拒絕，store `read_receipts_` 驗 DB 重開。TUI `a_disconnected_source_` 驗斷線不能宣稱保存成功。上述不含真 Telegram 手機操作。
+
+`cargo test -p agend-daemon --lib notifier::` 包含 native HTTP 的 needs-you／雙 team topics、任務狀態更新、DB 重開不重送摘要，以及輔助 outbox pending 恢復、unknown／foreign bot 不送出。這些不宣稱真 Telegram forum 驗收。

@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - 依 crate 由下往上分 13 個施工關；每個施工關單獨驗收，使用者確認後才開下一個施工關（D22）。
-> - 目前狀態：**第 1–11 施工關完成並已合併**；第 12A Claude 完整真模型 smoke、獨立覆核及 CI 通過，#154 已合併。12B OpenCode 原生契約、受控真測與六方向模型互傳通過，#155 正在最終覆核／CI；12C GitHub forge 與 12D Telegram 待實作，第 13 施工關未開始。
-> - 下一步：完成 [12B OpenCode](gates/gate-12b-opencode.md) 的合併與清理，再依持續授權推進 12C／12D。
+> - 目前狀態：**第 1–11 施工關完成並已合併**；第 12A Claude 完整真模型 smoke、獨立覆核及 CI 通過，#154 已合併。12B OpenCode #155 已合併並清理；12C GitHub forge 原生 pipeline 已實作，嚴格 base 保護策略已選定待接入；12D Telegram 手機操作、G4、真 forum 分流及原生驗收通過，覆核／合併收尾中，第 13 施工關未開始。
+> - 下一步：依持續授權完成 [12D Telegram](gates/gate-12d-telegram.md) 合併收尾，再整合 12C 嚴格分支保護與真測。
 
 ## 13 個施工關
 
@@ -22,7 +22,7 @@
 | 9 `cli` | [完成（2026-09-29；已 merge #136）](gates/gate-09-cli.md) | agend CLI：agent 命令、操作者命令、status；安裝相關先做 `doctor`、`init`，服務註冊留第 13 施工關 | 對假／真 daemon 驗輸出與錯誤；兩個假 Codex agent 互傳訊息、中途重啟不漏不重 |
 | 10 `pipeline` | [完成（2026-10-02；#143 已確認合併）](gates/gate-10-pipeline.md) | daemon：pipeline、git、runner、forge local、supervisor、reconcile | 假 driver + 暫存 repo：task 從派工走到 merge |
 | 11 `tui` | [完成（A、B、C 已 merge；C 段 #145）](gates/gate-11-tui.md) | attention-first TUI、完整終端、resize、多視窗、鍵鼠／貼上與歷史 | 最終 `cfee027` 全新 verifier CONFIRMED；四個雙平台 CI jobs 各 900 passed／0 failed／2 既有 ignored、實際 no-std；0.159.3 真 U17 已核實並獲版本許可。實機紀錄及後續自動驗收、清理完成，使用者確認 merge `b2152db` |
-| 12 `adapters` | [實作中（A 已合併；B 最終覆核／CI；C／D 待實作）](gates/gate-12-adapters.md) | A claude、B opencode driver、C forge github、D Telegram | 先對假實作，再做真 backend smoke test |
+| 12 `adapters` | [實作中（A／B 已合併；C／D 實作與驗證中）](gates/gate-12-adapters.md) | A claude、B opencode driver、C forge github、D Telegram | 先對假實作，再做真 backend smoke test |
 | 13 `install` | [未開始](gates/gate-13-install.md) | 安裝與發布（最後一個施工關）：服務註冊、`agend uninstall`、`agend telegram setup`（由 daemon 配對）、`xtask release`、brew、GitHub release、`cargo install` | CI 用全新 HOME + 假 agent，從安裝到第一個 task 完成 < 5 分鐘；每個 `doctor` 檢查都有「故意弄壞 → 看到修正指令」的測試 |
 
 ## 第 1 施工關：開工前先提案、經使用者確認才實作
@@ -68,7 +68,7 @@
 
 ## 下一步
 
-第 1–11 施工關及 12A 已完成並合併。12B 於 #155 收尾，合併前完成全新 verifier 與雙平台 CI；清理自有 worktree／暫存後進入 12C／12D。使用者已授權持續完成第 12 施工關，範圍見 [AGENTS.md](../AGENTS.md#第-12-施工關持續授權2026-10-07)。
+第 1–11 施工關及 12A／12B 已完成並合併。#155 已合併為 `2a02fda`，自有 worktree／暫存已清理；12C／12D 實作與驗證中。使用者已授權持續完成第 12 施工關，範圍見 [AGENTS.md](../AGENTS.md#第-12-施工關持續授權2026-10-07)。
 
 ## 進度紀錄
 
@@ -261,3 +261,51 @@
 - 2026-10-07：12B worker 已接最新頁／歷史回填與舊 attempt 定點查詢；超過 16 MiB 原生歷史回歸核舊收件、新派工與早期完成只發布一次，沒有提高傳輸上限。
 
 - 2026-10-07：#155 固定 `e96f429` 全新 verifier CONFIRMED_SCOPED_SUCCESS：workspace 1,062 passed／0 failed／2 既有 ignored、fmt／clippy／實際 no-std；獨立核對六方向真模型 12 筆 Confirmed。補清早期 model-smoke-v1 自有 holder／attach，原清理誤判及更正保留；目前狀態文件更新，最終 CI／合併仍待完成。
+
+- 2026-10-07：12D 開始 secret-reference／allowlist 設定與 HTTPS 傳輸；getMe 唯讀一次、零訊息，基礎測試通過；正式 notifier、手機操作與 G4 仍待實作。12C 未合併工作樹保留供覆核，開 D 前已確認完成的 12B 與本輪 C 測試暫存清理。
+
+- 2026-10-07：12D 通知完整分段與 SQLite 逐段送出意圖／收據通過 NTF、長 Unicode 及未知結果重開不重送測試。真 Telegram 三則文字探測均已刪除；發現裸文字會 trim，改用首尾標記保留完整內容。daemon worker、手機操作及 G4 尚未完成。
+
+- 2026-10-07：12D 接上 daemon config 與 outbound worker；持久 needs-you source 對帳避免 boot 游標重建造成重送，內容更新／解除／再開另立 delivery。手機 inbound、互動操作、G4 與整體驗收尚未完成。
+
+- 2026-10-07：12D 手機 inbound checkpoint：已確認通知收據綁 allowlist／選項，SQLite update 與單通知操作 claim 阻止重播；重試等待 supervisor 處理、修改原因以回覆輸入，pipeline 執行前核任務與注意事項版本。跨入口同原因再開、失敗事件重啟與 unknown 重開納入回歸；真手機 callback／G4、全新端到端驗證及 CI 尚未完成。
+
+- 2026-10-07：12D 補 native HTTP／SQLite／production pipeline 的一次操作與失效按鈕回饋，另驗取消待處理重試不誤回成功；doctor 提示空 allowlist 並安全檢查 token reference。全新覆核 focused 14＋3＋1 通過，範圍不含真 daemon 停機程序／真手機／G4，完整 D 仍待完成。
+
+- 2026-10-07：12D G4 共用已讀：SQLite v16／protocol 1.6 同步 TUI 與 Telegram；雙 TUI 真 daemon 重啟、native HTTP 保留動作、舊追問拒絕及斷線反例已補測，全新 focused 覆核通過。完整 D 真手機／topic／CI 尚未完成（feat/g12d-telegram 本次 checkpoint）。
+
+- 2026-10-07：12D 接上 team topic 任務摘要與輔助 outbox 恢復；native HTTP／SQLite 驗雙 topic、內容更新、重啟不重送及 unknown／foreign 排除。真手機／forum 與完整端到端驗收仍待完成（feat/g12d-telegram 本次 checkpoint）。
+
+- 2026-10-07：12D 專用 Telegram 私訊真測完成 Mark read → 正式 TUI 同步且待辦保持開啟 → acknowledge 關閉；SQLite 核 read／accepted，通知與自有程序／home 已清理。完整 12D 尚未完成；見 gate-12d-telegram 手機驗收。
+
+- 2026-10-07：12D 補原生問答／追問流程：選項與完整多行自由文字經 HTTP、SQLite、正式 pipeline 各投 inbox 一次，重複輪詢與舊通知拒絕；真 Telegram 問答與其餘操作仍另驗。
+
+- 2026-10-07：12D 增補 native human approval／request_changes：原因提示不提前執行、空白拒絕、多行保留與舊按鈕拒絕；無 repo research 範圍，非 Git merge 或真 Telegram 核准認證。
+
+- 2026-10-07：12D 未知通知已接本機需要你／operator-only Abandon；正常傳輸不誤報，重啟恢復未知，不自動重送、不偽造收據。core／daemon 399 tests 通過（2 項既有 ignored）；正式 daemon 三次 boot 驗無 token 仍可處置、拒絕 agent、持久保留原文與未知證據。完整 12D 仍未完成。
+
+- 2026-10-07：PR #156 整體覆核修正 doctor 空 Telegram allowlist 未回報 fail，以及真 daemon CLI 表仍預期 protocol 1.5 的兩列；本機設定測試與完整 CLI 表重驗通過。
+
+- 2026-10-07：12D 補正式 daemon serve 的雙程序 active shutdown／restart：扣住 HTTP 回覆後 SIGINT 等待收據，重啟僅續剩餘段；零真 API／模型。Retry 與真 forum 等剩餘範圍不變（PR #156）。
+
+- 2026-10-07：12D 補正式 supervisor／holder 的本機 mobile Retry 成功、重啟不再啟動，以及 Stop 先排時 Retry 取消不誤報 Accepted。workspace 另發現 testkit protocol mismatch golden 漏 1.6，已修正（PR #156）。
+
+- 2026-10-07：第 12 關原生驗收入口由 Claude 擴充至已整合的 OpenCode／Telegram 與 G4；先建置 consumer 使用的正式 binary／假 producer，仍明示 GitHub forge／剩餘真測未認證（PR #156）。
+
+- 2026-10-07：PR #156 補自由文字 reply 受控探針，本機正式 daemon→ask／單筆 inbox 通過並確認 holder 清空；Telegram 真回覆待使用者操作。另保留 native capture 偶發空白與 macOS outer PTY 320 ms 超過 300 ms 的失敗證據，未宣称修復或整體通過。
+
+- 2026-10-07：PR #156 終端延遲補外層 parser 首次可見時間戳，保留 trigger 前起點與 300 ms；daemon capture cadence 改以開始時間計算，移除 RPC 後額外等待。外層 8 項本機通過，尚不宣稱已定位 CI 320 ms 根因。
+
+- 2026-10-07：12D 整體驗收仍重現 terminal 300 ms 超標；分段紀錄及 CPU 取樣顯示大 frame 的 Content 中間樹成本，改 holder response／client frame 直接解碼。原生兩尺寸 24 bursts 初測通過，尚待反例、全新覆核、完整驗收及新 head CI，不以先前 CI 成功覆蓋本機失敗。
+
+- 2026-10-07：`a69ac49` 全新解碼覆核實跑發現十八例未知欄位拒絕退化（surrogate／數值溢位／深度），目前不可合併；正式整體驗收另在 startup capture 二十案中的兩案僅收到空白 frame 而停止。增加僅限該測試檔的 native fixture 隔離，保留期限、斷言與失敗證據，修正後驗證待完成。
+
+- 2026-10-07：獨立真 Screen 100×24 微測不支持 RawValue decoder 優化，已回復原解析規則並加入十八個未知值拒絕反例；轉向 holder／daemon bounded writer 外包 8 KiB BufWriter，任何 serialization／flush 失敗仍整段拒絕。微測 byte equality 與界線通過，正式原生／整體驗收待完成。
+
+- 2026-10-07：holder 完整 61 tests 與嚴格解碼四項回歸通過；外層 PTY 仍有背景啟動取樣 315.887 ms 超過 300 ms，完整 12D 未通過。曾試將 frame 編碼移出 holder mutex，未解決超標，已撤回該候選；保留原界線與失敗證據，不擴大控制／回覆交錯範圍。
+
+- 2026-10-07：固定 `e0da767` binary 的 startup capture 隔離重驗 20／20 通過（329.79 秒），過程未替換 binary。TUI 正試將已解碼 frame mailbox 的檢查與 50 ms tick 分離，空輪不繪圖或發維護請求；原 300 ms 時效與控制權契約仍待驗，完整 12D 尚未完成。
+
+- 2026-10-07：TUI mailbox 候選的 89 tests 通過，包括三個真 parser／Source spy 反例；debug outer 7／8，100×24 背景啟動取樣仍有 389.290 ms。相同原生 final_dirty 測試另以 release 診斷，36 筆為 62.769–118.094 ms、2 tests 通過；不以此取代 debug 驗收，原 300 ms 斷言與失敗證據保留，完整 12D 待最終覆核／CI及真測。
+
+- 2026-10-07：PR #156 固定 `8c0538b` 的原生 accept 12 exit 0、四個雙平台 CI jobs 全綠；使用者多行 Telegram 回覆逐字一致且單次投遞，真 forum 的 Needs you／team 摘要分流與第二次 boot 收據不變通過。自有訊息、程序及 home 已清理；保留首次回覆內容不完整與歷史延遲失敗，等待最終覆核／合併。12C 使用者已選定嚴格 up-to-date 分支保護，後續實作不得以 head CAS 代替 base 保護。

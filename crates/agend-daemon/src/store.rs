@@ -45,6 +45,7 @@
 //! open a second connection to `agend.db`; delete a file in `backups/` that
 //! does not match the DB snapshot name pattern.
 
+pub mod attention_read;
 pub mod claude;
 pub mod claude_startup;
 pub mod codex_input;
@@ -58,6 +59,8 @@ pub mod pipeline;
 pub mod retention;
 pub mod snapshot;
 pub mod task_row;
+pub mod telegram;
+pub mod telegram_inbound;
 
 use std::fmt;
 use std::fs::{self, DirBuilder, File, OpenOptions};
@@ -348,6 +351,18 @@ impl SqliteStore {
     pub async fn remove_instance(&self, id: &str) -> Result<bool, StoreError> {
         let id = id.to_owned();
         self.call(move |conn| instances::remove(conn, &id)).await
+    }
+
+    pub async fn instance_failure(
+        &self,
+        id: &str,
+        reason: &str,
+        now: u64,
+        new_episode: bool,
+    ) -> Result<(String, u64), StoreError> {
+        let (id, reason) = (id.to_owned(), reason.to_owned());
+        self.call(move |conn| instances::failure(conn, &id, &reason, now, new_episode))
+            .await
     }
 
     pub async fn set_instance_status(

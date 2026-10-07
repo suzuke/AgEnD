@@ -58,6 +58,7 @@ pub fn describe(event: &DaemonEvent) -> String {
         DaemonEvent::AttentionResolved { data } => {
             format!("{} resolved: {}", data.attention_id, data.action.as_str())
         }
+        DaemonEvent::AttentionRead { data } => format!("attention read: {}", data.read_key),
         DaemonEvent::Unknown => "unknown event".into(),
     }
 }

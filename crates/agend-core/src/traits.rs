@@ -217,7 +217,7 @@ pub trait Runtime: Sync {
     ) -> impl Future<Output = Result<Vec<HolderHandle>, Self::Error>> + Send + '_;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Notification {
     pub severity: NotificationSeverity,
     pub title: String,
@@ -225,7 +225,7 @@ pub struct Notification {
     pub task_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum NotificationSeverity {
     Info,
     Attention,

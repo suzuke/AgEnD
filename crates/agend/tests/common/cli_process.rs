@@ -831,7 +831,7 @@ pub fn init_and_doctor(lab: &Lab) -> Result<Vec<String>, String> {
         names
             == [
                 "home", "daemon", "git", "claude", "codex", "opencode", "holders", "disk",
-                "sandbox",
+                "sandbox", "telegram",
             ],
         || format!("doctor --json checks: {names:?}"),
     )?;

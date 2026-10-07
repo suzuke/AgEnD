@@ -1,0 +1,21 @@
+{
+  "ok": true,
+  "result": {
+    "chat": {
+      "first_name": "Fixture",
+      "id": 42,
+      "last_name": "Fixture",
+      "type": "private",
+      "username": "Fixture"
+    },
+    "date": 1791367350,
+    "from": {
+      "first_name": "Fixture",
+      "id": 123456789,
+      "is_bot": true,
+      "username": "Fixture"
+    },
+    "message_id": 499,
+    "text": "AgEnD\n\n  AgEnD 12D 測試：空白與繁中 é ✅\n最後一行  \n\n\n——"
+  }
+}

@@ -43,7 +43,7 @@ use std::time::Duration;
 use crate::terminal_hub::{ReplyScope, TerminalHub, ViewStream, reject};
 use agend_core::protocol::client::{
     ClientRequest, ClientResponse, ErrorData, EventData, MAX_LINE_BYTES, MAX_MESSAGE_BYTES,
-    TerminalBytesData, V1_4, V1_5, error_code,
+    TerminalBytesData, V1_4, V1_6, error_code,
 };
 use agend_core::protocol::terminal::MAX_FRAME_LINE;
 use agend_core::protocol::{ProtocolVersion, negotiate};
@@ -223,7 +223,14 @@ impl Client {
         let mut rejected = false;
         let mut line = if let Some(id) = full_id {
             let mut bounded = FrameLine(Vec::new());
-            if serde_json::to_writer(&mut bounded, response).is_err() {
+            // Buffer tiny serializer writes while retaining the bounded sink.
+            // A flush failure rejects the whole frame before socket publication.
+            let encoded = {
+                let mut writer = std::io::BufWriter::with_capacity(8192, &mut bounded);
+                serde_json::to_writer(&mut writer, response).is_ok()
+                    && std::io::Write::flush(&mut writer).is_ok()
+            };
+            if !encoded {
                 // The client envelope also counts. Send no partial frame or
                 // grant; EOF invalidates the view and releases any real owner.
                 rejected = true;
@@ -333,7 +340,7 @@ async fn connection(
                         client.send(&reply).await;
                         return;
                     };
-                    match negotiate("client", &[V1_5], &data.supported) {
+                    match negotiate("client", &[V1_6], &data.supported) {
                         Ok(selected) => {
                             negotiated = true;
                             selected_version = selected;

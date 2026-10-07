@@ -1,9 +1,9 @@
 # 第 12 施工關：其餘 adapter（`adapters`）
 
 > **TL;DR**
-> - A claude、B opencode、C GitHub forge、D Telegram；A 已合併完成，B 正在實作與驗證，C／D 待開工。
+> - A claude、B opencode、C GitHub forge、D Telegram；A／B 已合併完成，C／D 實作與驗證中。
 > - 第 1–11 施工關已完成並合併；A 段設計 D40 已於 #138 合併（`4390633`）。
-> - 下一步：完成 [12B OpenCode](gate-12b-opencode.md) 的最終 CI／文件覆核與合併清理，再推進 C／D。
+> - 下一步：完成 D 最終覆核／合併，再接 C 的嚴格分支保護與真測。
 
 ## 狀態
 
@@ -14,9 +14,9 @@
 | 段 | 範圍 | 目前進度 |
 |---|---|---|
 | A Claude | channel、hooks、啟動、忙碌策略、送達與清掃 | v12 七則完整 smoke PASS；#154 已合併 `a6cdb4c` |
-| B OpenCode | serve、session、送達、權限；三個 backend 互傳 | 正式 Driver／holder／權限與 DRV 10/10；基本／busy interrupt／permission 真測及三 backend 六方向互傳通過，全新 verifier：1,062 passed、fmt／clippy／no-std 通過；#155 文件覆核與最終 CI 中 |
-| C GitHub forge | push、PR、checks、head 對帳、merge 與收尾 | 尚未實作 |
-| D Telegram | notifier、allowlist、token、手機操作、G4 已讀 | 尚未實作；專用 bot 設定與測試 chat 已備妥，憑證只留本機 |
+| B OpenCode | serve、session、送達、權限；三個 backend 互傳 | 正式 Driver／holder／權限與 DRV 10/10；基本／busy interrupt／permission 真測及三 backend 六方向互傳通過，全新 verifier：1,062 passed、fmt／clippy／no-std 通過；#155 已合併 `2a02fda`，自有 worktree／target 已清理 |
+| C GitHub forge | push、PR、checks、head 對帳、merge 與收尾 | `feat/g12c-github` 的 `49aade9` 已接原生 pipeline 與 durable merge intent，未知 merge 保留原核准 head；使用者已選嚴格分支保護，政策接入／真測與合併待完成 |
+| D Telegram | notifier、allowlist、token、手機操作、G4 已讀 | 持久分段通知、inbound 防護與 G4 共用已讀已實作；私訊已讀／確認、多行回覆與真 forum 分流／重啟真測通過，原生 accept 12 與固定程式碼 CI 全綠，最終覆核／合併收尾中。見 [12D](gate-12d-telegram.md) |
 
 B–D 依現有決策與持續授權具體化；遇新的重大取捨才再請使用者決定。第 13 關安裝／發布不在此次範圍。
 
@@ -100,3 +100,5 @@ A 段原限制：不加新的 core 事件或未知提示／忙閒判斷機制。
 - 2026-10-04：[draft PR #149](https://github.com/suzuke/AgEnD/pull/149)（首個提交 `999203e`）接通 protocol 1.5、channel／Stop helpers 與 hook／ACK spool；13 native cases、accept core（fmt／workspace clippy／protocol／實際 no-std）通過。完整 workspace、全新 verifier／固定 head CI 收尾中；未 merge，完整 Claude Driver 與真 CLI 驗收仍待完成。
 
 - 2026-10-06：#151／#152 經使用者確認合併；依最新指示將完整真模型 smoke 列為必要驗收，見[固定計畫](gate-12a-live-smoke.md)。
+
+- 2026-10-07：12D 手機 inbound checkpoint：已確認通知收據綁 allowlist／選項，SQLite update 與單通知操作 claim 阻止重播；重試等待 supervisor 處理、修改原因以回覆輸入，pipeline 執行前核任務與注意事項版本。跨入口同原因再開、失敗事件重啟與 unknown 重開納入回歸；真手機 callback／G4、全新端到端驗證及 CI 尚未完成。

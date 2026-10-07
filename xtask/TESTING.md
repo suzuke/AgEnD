@@ -38,7 +38,7 @@ cargo test -p xtask
 
 第 11 施工關 accept tui 先建置真 agend、fake_codex 與 codex_u17_probe，再跑原 checks／fake 與真 daemon TUI demos，最後跑共用 integration test 情境的完整 U17 fake demo。真 codex_u17_live 不在 acceptance 或 CI 執行，必須明確 opt-in。
 
-`cargo xtask demo adapters` 共用 Claude Driver 十個 DRV 契約案例、四次獨立 child 開機與新 HOME 反向、真 native helpers／holder／daemon、Git task／review、單一 merge、Esc completion 遺失與 fixture 清理。任何 cargo 子程序非 0 都使 demo 失敗；最後明示真 CLI／啟動提示未驗收，不代替施工關完成。
+`cargo xtask demo adapters` 先 build agend／testkit binaries 與 fake_codex，再共用 Claude driver／bridge、OpenCode driver／bridge、Telegram notifier／lifecycle／shared-read／unknown／doctor 原生測試。任何 cargo 子程序非 0 都使 demo 失敗；最後明示 GitHub forge 與剩餘真測不在本 demo 認證範圍。`accept adapters` 的 crate 清單包含 G4 跨越的 core／daemon／client／tui／testkit／agend；child 測試入口仍由父測試執行。
 
 ## 用到的假實作
 

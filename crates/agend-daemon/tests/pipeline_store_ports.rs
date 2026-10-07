@@ -345,3 +345,47 @@ fn sqlite_attention_clear_failure_rolls_back_version_event_receipt_and_note() {
     );
     assert_eq!(block_on(store.load_events(&task.id)).unwrap(), vec![event]);
 }
+
+#[test]
+fn identical_attention_recurrence_has_a_durable_revision_without_changing_task_cas() {
+    use agend_daemon::store::SqliteStore;
+    let dir = TempDir::new("telegram-task-revision").unwrap();
+    let store = SqliteStore::open(dir.path(), 0).unwrap();
+    let (task, _, _) = block_on(prepare(&store));
+    let version = block_on(store.load_task(&task.id))
+        .unwrap()
+        .unwrap()
+        .version;
+    let reason = Some("merge-blocked:same conflict".to_owned());
+    block_on(store.task_note(&task.id, None, reason.clone(), false)).unwrap();
+    let first = block_on(store.progress(&task.id))
+        .unwrap()
+        .unwrap()
+        .attention_revision;
+    block_on(store.task_note(&task.id, None, reason.clone(), false)).unwrap();
+    assert_eq!(
+        block_on(store.progress(&task.id))
+            .unwrap()
+            .unwrap()
+            .attention_revision,
+        first
+    );
+    block_on(store.task_note(&task.id, None, None, false)).unwrap();
+    block_on(store.task_note(&task.id, None, reason, false)).unwrap();
+    drop(store);
+    let store = SqliteStore::open(dir.path(), 0).unwrap();
+    assert!(
+        block_on(store.progress(&task.id))
+            .unwrap()
+            .unwrap()
+            .attention_revision
+            > first
+    );
+    assert_eq!(
+        block_on(store.load_task(&task.id))
+            .unwrap()
+            .unwrap()
+            .version,
+        version
+    );
+}

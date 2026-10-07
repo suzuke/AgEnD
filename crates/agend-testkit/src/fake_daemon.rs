@@ -530,6 +530,7 @@ fn fleet(state: &State) -> FleetView {
     let mut attention = state.attention.clone();
     order_attention(&mut attention);
     FleetView {
+        read_keys: Vec::new(),
         as_of_event_id: state.latest,
         teams: teams
             .into_iter()
@@ -1197,6 +1198,11 @@ fn handle(state: &mut State, request: ClientRequest, conn: &Connection) -> Vec<C
             conn.caller.as_deref(),
             data.request_id,
             true,
+        )],
+        ClientRequest::MarkAttentionRead { data } => vec![error(
+            Some(data.request_id),
+            error_code::NOT_SUPPORTED,
+            "shared read receipts require protocol 1.6".into(),
         )],
         ClientRequest::Unknown => vec![error(
             None,

@@ -62,6 +62,46 @@ pub struct Rule {
 pub const RETENTION: &[Rule] = &[
     Rule {
         target: Target::Table {
+            name: "attention_reads",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "G4: read receipts survive restart independently of resolution",
+    },
+    Rule {
+        target: Target::Table {
+            name: "instance_failures",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "gate 12D: failure episode identity survives restart; owning instance removal cascades",
+    },
+    Rule {
+        target: Target::Table {
+            name: "telegram_updates",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "gate 12D: inbound claims and outcomes prevent replay after restart",
+    },
+    Rule {
+        target: Target::Table {
+            name: "telegram_notices",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "gate 12D: durable exception identity prevents duplicate notifications after restart",
+    },
+    Rule {
+        target: Target::Table {
+            name: "telegram_outbox",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "gate 12D: receipts and unknown send claims prevent replay; explicit archival policy follows worker integration",
+    },
+    Rule {
+        target: Target::Table {
             name: "opencode_observed",
             time_column: None,
         },

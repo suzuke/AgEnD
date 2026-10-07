@@ -8,6 +8,9 @@ use agend_core::protocol::client::{
 };
 use agend_core::protocol::terminal::{TerminalSize, TerminalViewport};
 
+#[cfg(test)]
+mod ready_tests;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Pending {
     id: String,
@@ -299,7 +302,17 @@ impl App {
         }
     }
     pub(super) fn pump_full_terminal(&mut self) {
-        for event in self.source.poll_full_terminal() {
+        if !self.pump_full_terminal_ready() {
+            self.resize_full();
+        }
+    }
+    /// Drain received updates between ticks; an empty mailbox has no effects.
+    pub(crate) fn pump_full_terminal_ready(&mut self) -> bool {
+        let events = self.source.poll_full_terminal();
+        if events.is_empty() {
+            return false;
+        }
+        for event in events {
             let size = self.full_size();
             let readonly_rows = self.full_rows(false);
             let Some(term) = self.term.as_mut() else {
@@ -504,6 +517,7 @@ impl App {
             }
         }
         self.resize_full();
+        true
     }
     pub(super) fn full_key(&mut self, key: KeyEvent) {
         if stops_typing(&key) {

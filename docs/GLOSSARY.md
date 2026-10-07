@@ -118,6 +118,7 @@
 | store | store | `traits::Store`、daemon `store` 模組 | daemon 的 SQLite 資料層，是唯一真相來源（instance、team、repo、workflow）。 | `config.toml`（人寫、daemon 只讀） | D8、[ARCHITECTURE](ARCHITECTURE.md#daemon-分層) |
 | DB 快照 | DB snapshot | `store::snapshot`（每日 `VACUUM INTO`） | daemon 每天對 `agend.db` 做一次的完整備份，存在 `backups/`，保留 7 份（D31）；migration 前也會多做一次。 | **畫面快照**（holder 的 PTY／畫面）；**shim 快照**（讀唯讀 binding 快照的用法）；**binding 快照**（daemon 寫給 shim 的唯讀檔） | D31、[第 5 施工關 P9](gates/gate-05-store.md) |
 | schema 版本 | schema version | SQLite `PRAGMA user_version` | DB 目前套用到第幾版 migration；daemon 開機時比對，太新的 DB 拒絕開。 | workflow／task 的版本欄位（各自獨立計數） | [第 5 施工關 P5](gates/gate-05-store.md) |
+| 通知投遞紀錄 | Telegram delivery | `telegram::TelegramDelivery` | 一則通知的全文、目的地與逐段送出意圖／收據；未知段落不自動重送。 | agent 訊息的 confirmed；已讀 | [12D](gates/gate-12d-telegram.md) |
 | notifier | notifier | `traits::Notifier`、daemon `notifier` 模組 | 對外通知的 adapter（Telegram）；`agend telegram setup` 的配對也由它做（CLI 只請 daemon 配對）。 | 訊息送達（給 agent 的走 driver） | [README](../README.md#系統圖)、D13、[tui-and-setup](architecture/tui-and-setup.md#安裝與設定)、[第 13 施工關](gates/gate-13-install.md#範圍) |
 | shim | tool shim | crate `agend-shim` | 只放在 agent PATH 上的 git／kill／gh 防護：導向 worktree、擋離開 branch 與自建 worktree、破壞性操作前快照；讀唯讀 binding 快照。protected ref 由 agend hook 守。 | 使用者自己的 git（shim 不改它） | D5、D6 |
 | agend hook | agend git hook | `agend_shim::hook`、`install_hooks`、`$AGEND_HOME/hooks` | 只裝在 agent worktree（該 worktree 的 `config.worktree`）的 git hook：`reference-transaction` 與 `pre-push` 依 git 回報的 ref 拒絕 protected ref 與別人的 branch，其他 hook 串接專案原本的 hook。 | 專案自己的 hook；Stop hook（claude） | [第 3 施工關](gates/gate-03-shim.md#待你追認) T21 |
@@ -222,3 +223,7 @@ gh 防護由 `agend_shim::gh` 在執行工具前拒絕 merge、明確 PR approve
 ```bash
 grep -rnE "第 [0-9–、]+ 關|[每這本該]關|<關>" README.md AGENTS.md docs --exclude-dir=research --exclude=GLOSSARY.md   # 應該沒有輸出：施工階段要寫「施工關」
 ```
+
+- **共用已讀收據（shared read receipt）**：daemon 保存操作員已查看的事項 ID＋問題次數，供 TUI 與 Telegram 同步。後續追問使用新 key；單純送達不算已讀，已讀不解除待辦。非問答事項沿用同一 ID 的既定 T17 行為。
+
+- **Telegram 未知通知**：送出意圖已保存但沒有完整確認收據的通知；不自動重送。`telegram-delivery:<id>` 由本機操作員 Abandon 結束後續投遞，仍保留未知證據，不表示已送達。
