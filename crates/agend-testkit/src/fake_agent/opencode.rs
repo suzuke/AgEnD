@@ -289,12 +289,22 @@ impl State {
     }
 
     /// Adds the user message (sent at once) and starts its turn, or queues it.
-    fn prompt(&mut self, session_id: &str, text: String, model: &Value, turn: Duration) {
+    fn prompt(
+        &mut self,
+        session_id: &str,
+        text: String,
+        model: &Value,
+        turn: Duration,
+        given: Option<&str>,
+    ) {
         let (provider, model_id) = (
             model["providerID"].as_str().unwrap_or("fake").to_owned(),
             model["modelID"].as_str().unwrap_or("fake-model").to_owned(),
         );
-        let id = self.id("msg");
+        // Client-selected ids are also captured from native 1.18.34 with
+        // noReply in agend-daemon's OpenCode history fixture. Legacy recorded
+        // calls omit this field and retain their original generated ids.
+        let id = given.map(str::to_owned).unwrap_or_else(|| self.id("msg"));
         let part_id = self.id("prt");
         let created = self.now();
         let user = json!({
@@ -657,7 +667,10 @@ fn route(request: &Request, shared: &Shared) -> (u16, Option<String>) {
         ("GET", ["session", id, "message"]) => ok(Value::Array(state.sessions[*id].messages.clone())),
         ("POST", ["session", id, "prompt_async"]) => match text_of(&request.body) {
             Some((text, model)) => {
-                state.prompt(id, text, &model, shared.turn);
+                let body: Value = serde_json::from_slice(&request.body).unwrap_or_default();
+                let given = body["messageID"].as_str();
+                if given.is_some_and(|id| !id.starts_with("msg")) { return bad_body(); }
+                state.prompt(id, text, &model, shared.turn, given);
                 (204, None)
             }
             None => bad_body(),
@@ -683,7 +696,7 @@ fn route(request: &Request, shared: &Shared) -> (u16, Option<String>) {
             };
             let id = (*id).to_owned();
             let before = state.sessions[&id].messages.len();
-            state.prompt(&id, text, &model, shared.turn);
+            state.prompt(&id, text, &model, shared.turn, None);
             drop(state);
             wait_for_reply(shared, &id, before)
         }

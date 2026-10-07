@@ -171,3 +171,5 @@ cargo xtask accept cli             # 第 9 施工關 demo：cli_demo（在 agend
 `claude_startup::startup_variable_ready_suggestions_replay_actual_v5_and_both_widths` 經真 daemon／holder／PTY 重播 v5 兩份捕獲及 140 欄變體，核五秒初始 idle 與 Ready 不加鍵；
 `startup_variable_ready_rejects_unknown_footer_and_split_hint_without_idle_or_more_keys` 拒絕未知 footer／分行建議。
 既有無 SessionStart、人工控制、結果不明與四次開機回歸維持；這些測試不啟動真 Claude、不送模型訊息。
+
+12B OpenCode push 的初版以 supervisor worker 接 loopback REST：claim 與傳輸分離，先持久化 attempt，再送一次；REST 對帳發布確認事件。既有 session 經私人 holder wrapper handoff 恢復。權限與完整 holder／模型驗收尚未完成，施工關仍在進行中。

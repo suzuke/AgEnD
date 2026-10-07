@@ -17,16 +17,18 @@
 
 ## 實作中
 
-傳輸層以 ureq 3.4 的有界 HTTP client 實作，固定五秒整體期限及 16 MiB JSON 上限；只接受自行組裝的 API path，拒絕 redirect、proxy 與路徑跳脫。歷史核對要求 session、user message id 與每個 part 歸屬一致，重複 id 或外來 part 拒絕。這兩部分已接原生假 OpenCode producer 測試，尚未接 supervisor／正式 Driver，不宣稱 12B 完成。
+傳輸層以 ureq 3.4 的有界 HTTP client 實作，固定五秒整體期限及 16 MiB JSON 上限；只接受自行組裝的 API path，拒絕 redirect、proxy 與路徑跳脫。歷史核對要求 session、user message id 與每個 part 歸屬一致，重複 id 或外來 part 拒絕。這兩部分已接原生假 OpenCode producer 測試，已接 supervisor／正式 Driver 的初版；尚未完成 holder 整合與權限驗收，不宣稱 12B 完成。
 
 2026-10-07 真 1.18.34 隔離 `noReply` 捕獲證明 client 指定 messageID、中文與換行完整保留；零 assistant message，自有程序及目錄已清。捕獲輸出納入 parser 回歸；相同文字但不同 id、不符內容、外來 session、synthetic／ignored／額外 part 均不得誤認為確認。session API 已區分 POST 接受與歷史確認，resume 遺失 session 回錯，不建立新對話，也不因 status map 缺少 entry 就把遺失 session 視為 idle。
 
 ## 驗收
 
-啟動封裝已具備 holder 綁定版本／endpoint、原子 session handoff、私人目錄與不進 argv 的密碼；新 holder 輪替密碼，避免舊請求打到重用 port，daemon 單純重連則讀原紀錄。SQLite 在既有 messages 表以原子條件更新取得一次投遞資格，保存 session／message 綁定；關閉再開後，結果不明的 attempt 仍禁止重送。這些基礎通過八個相關測試；supervisor、正式 Driver、權限與完整恢復流程尚待串接。
+啟動封裝已具備 holder 綁定版本／endpoint、原子 session handoff、私人目錄與不進 argv 的密碼；新 holder 輪替密碼，避免舊請求打到重用 port，daemon 單純重連則讀原紀錄。SQLite 在既有 messages 表以原子條件更新取得一次投遞資格，保存 session／message 綁定；關閉再開後，結果不明的 attempt 仍禁止重送。這些基礎通過八個相關測試；supervisor 與正式 Driver 已串接初版；權限與完整恢復流程尚待驗證。
 
 完成後須涵蓋：一次寫入與斷線對帳、人工訊息不能誤認、busy queue／interrupt、遺失 session、daemon／holder 重啟、permission 漏事件與過期回覆、跨 backend 互傳、全新 verifier、雙平台 CI。真測使用固定版本／模型／有限訊息與時間預算；舊結果不替代真測。
 
+2026-10-07 daemon worker 已保存原 session、先記 attempt 再 POST，以 REST 原生歷史確認後發布持久事件；斷線不重送。舊 attempt 採每頁 128 筆循環核對，新工作獨立取 32 筆，140 筆 unknown 前綴不阻塞新工作。REST 錯誤立即轉 unknown；idle 需持續五秒。啟動前拒絕改寫仍存活 holder 的私人檔案；缺 session 不允許 resume。daemon 單元測試 108 項通過；這不等於 holder／真模型完整驗收。
+
 ## 下一步
 
-串接 holder 啟動、session 持久化與 Driver；先以原生 producer 驗證，再進行受控真測。
+完成 holder 原生整合、權限請求與恢復測試，再進行受控真測與 fresh verifier。

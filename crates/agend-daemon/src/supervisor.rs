@@ -139,12 +139,13 @@ impl RestartBudget {
 /// The session arguments a start adds to the instance's base arguments:
 /// claude gets `--session-id <id>` on its first start and `--resume <id>`
 /// after that; codex gets none (its TUI always resumes the thread the
-/// daemon created, through `$GO`, gate 7 P3); opencode has no session id
-/// before gate 12, so it can start fresh once and never resume.
+/// daemon created, through `$GO`, gate 7 P3). OpenCode push resumes only
+/// a saved session through its private wrapper handoff.
 pub fn session_args(instance: &Instance, resume: bool) -> Result<Vec<String>, String> {
     match (instance.backend, &instance.session_id, resume) {
         (Backend::Claude, Some(id), false) => Ok(vec!["--session-id".into(), id.clone()]),
         (Backend::Claude, Some(id), true) => Ok(vec!["--resume".into(), id.clone()]),
+        (Backend::Opencode, Some(_), true) if instance.delivery == "push" => Ok(Vec::new()),
         (Backend::Codex, _, _) | (_, _, false) => Ok(Vec::new()),
         (backend, _, true) => Err(format!(
             "no session id to resume ({} cannot resume yet)",
@@ -172,6 +173,11 @@ pub fn launch(home: &Path, instance: &Instance, resume: bool) -> Result<HolderLa
             codex_launch::SHELL.to_owned(),
             codex_launch::wrapper_args(home, instance)?,
         )
+    } else if instance.backend == Backend::Opencode && instance.delivery == "push" {
+        session_args(instance, resume)?;
+        crate::driver::opencode::launch::model(&instance.args)?;
+        let layout = crate::driver::opencode::launch::Layout::new(home, &instance.id)?;
+        ("/bin/sh".into(), layout.args(instance))
     } else {
         let mut args = if crate::driver::claude::launch::applies(instance) {
             crate::driver::claude::launch::args(home, instance)?
@@ -204,6 +210,11 @@ pub enum Event {
     },
     /// An instance's codex app-server is gone (gate 7).
     Codex(CodexEvent),
+    OpenCodeState {
+        id: String,
+        generation: u64,
+        busy: Option<bool>,
+    },
     Housekeeping,
     /// The operator chose `retry` for this needs-you item of a `failed`
     /// instance; it is already off the list. When the retry cannot be done
@@ -239,7 +250,10 @@ pub fn failed_item(instance: &Instance, reason: &str, since_unix_ms: u64) -> Att
     let retry = match instance.backend {
         Backend::Claude => true,
         Backend::Codex => !instance.legacy_no_thread,
-        Backend::Opencode => !instance.session_started,
+        Backend::Opencode => {
+            !instance.session_started
+                || (instance.delivery == "push" && instance.session_id.is_some())
+        }
     };
     AttentionRequiredData {
         reason: format!("{id} failed: {reason}"),
@@ -291,6 +305,7 @@ pub struct Supervisor {
     store: Arc<SqliteStore>,
     runtime: HolderRuntime,
     codex: CodexDriver,
+    opencode: crate::driver::opencode::runtime::Runtime,
     pipeline: Option<crate::pipeline::Handle>,
     events: UnboundedSender<Event>,
     watches: BTreeMap<String, Watch>,
@@ -324,6 +339,7 @@ impl Supervisor {
     ) -> Self {
         Self {
             home: runtime.home().to_path_buf(),
+            opencode: crate::driver::opencode::runtime::Runtime::new(store.clone()),
             store,
             runtime,
             codex,
@@ -373,7 +389,7 @@ impl Supervisor {
             return;
         };
         let id = &instance.id;
-        if instance.backend == Backend::Claude {
+        if matches!(instance.backend, Backend::Claude | Backend::Opencode) {
             match files::running(self.runtime.home(), id) {
                 Ok(None) => {}
                 Ok(Some(pid)) => {
@@ -408,7 +424,14 @@ impl Supervisor {
                     agend: self.runtime.executable(),
                 },
             ),
-            _ => return,
+            Backend::Opencode => match crate::driver::opencode::launch::Layout::new(&self.home, id)
+            {
+                Ok(layout) => layout.sweep(pgid, &instance.program),
+                Err(e) => {
+                    log::line(&format!("{id}: sweep refused: {e}"));
+                    return;
+                }
+            },
         };
         log::line(&format!(
             "{id}: sweep of agent group {pgid} ({why}): {swept}"
@@ -433,6 +456,32 @@ impl Supervisor {
     /// background (up to 20 s + 30 s; the event loop and Ctrl-C do not
     /// wait). A failure is a death of this generation.
     fn connect_codex(&self, instance: &Instance, generation: u64) {
+        if instance.backend == Backend::Opencode && instance.delivery == "push" {
+            let (id, events) = (instance.id.clone(), self.events.clone());
+            self.opencode.start(
+                &instance.id,
+                Arc::new(move |notice| {
+                    let event = match notice {
+                        crate::driver::opencode::runtime::Notice::State(busy) => {
+                            Event::OpenCodeState {
+                                id: id.clone(),
+                                generation,
+                                busy,
+                            }
+                        }
+                        crate::driver::opencode::runtime::Notice::Failed(error) => {
+                            Event::StartFailed {
+                                id: id.clone(),
+                                generation,
+                                error,
+                            }
+                        }
+                    };
+                    let _ = events.send(event);
+                }),
+            );
+            return;
+        }
         if instance.backend != Backend::Codex || instance.delivery == "inbox" {
             return;
         }
@@ -597,6 +646,30 @@ impl Supervisor {
             Err(e) => return self.fail(&id, &e).await,
         };
         self.sweep(instance, "before a new holder").await;
+        if instance.backend == Backend::Opencode && instance.delivery == "push" {
+            self.opencode.disconnect(&id);
+            match crate::runtime::files::running(&self.home, &id) {
+                Ok(None) => {}
+                Ok(Some(_)) => {
+                    return self
+                        .fail(
+                            &id,
+                            "old OpenCode holder still runs; runtime files preserved",
+                        )
+                        .await;
+                }
+                Err(e) => {
+                    return self
+                        .fail(&id, &format!("cannot verify old OpenCode holder: {e}"))
+                        .await;
+                }
+            }
+            let prepared = crate::driver::opencode::launch::Layout::new(&self.home, &id)
+                .and_then(|layout| layout.prepare().map_err(|e| e.to_string()));
+            if let Err(e) = prepared {
+                return self.fail(&id, &e).await;
+            }
+        }
         if instance.backend == Backend::Codex {
             match codex_launch::prepare(&self.home, &id) {
                 Ok(removed) if !removed.is_empty() => {
@@ -721,6 +794,7 @@ impl Supervisor {
             watch.state = State::Failed;
         }
         self.codex.disconnect(id);
+        self.opencode.disconnect(id);
         self.runtime.detach(id);
         if let Err(e) = self
             .store
@@ -803,6 +877,7 @@ impl Supervisor {
         // The old link would otherwise reconnect to the next app-server on
         // the same socket path while it retries.
         self.codex.disconnect(id);
+        self.opencode.disconnect(id);
         if holder_gone {
             self.sweep(&instance, "holder died").await;
         }
@@ -986,6 +1061,7 @@ impl Supervisor {
         }
         self.watches.remove(id);
         self.codex.disconnect(id);
+        self.opencode.disconnect(id);
         self.runtime.detach(id);
         let (home, holder) = (self.home.clone(), id.to_owned());
         let stopped = tokio::task::spawn_blocking(move || {
@@ -1040,6 +1116,32 @@ impl Supervisor {
                 Event::Codex(CodexEvent::Gone { id, generation }) => {
                     let what = format!("{id}: its app-server is gone");
                     self.died(&id, generation, what, false).await;
+                }
+                Event::OpenCodeState {
+                    id,
+                    generation,
+                    busy,
+                } => {
+                    if self.watches.get(&id).is_some_and(|watch| {
+                        watch.generation == generation && watch.state == State::Up
+                    }) {
+                        self.set_state(
+                            &id,
+                            match busy {
+                                Some(true) => AgentState::Working,
+                                Some(false) => AgentState::Idle,
+                                None => AgentState::Unknown,
+                            },
+                            format!(
+                                "{id}: {}",
+                                match busy {
+                                    Some(true) => "working",
+                                    Some(false) => "idle",
+                                    None => "OpenCode status unavailable",
+                                }
+                            ),
+                        );
+                    }
                 }
                 Event::Restart { id, generation } => self.restart(&id, generation).await,
                 Event::Housekeeping => {
@@ -1166,12 +1268,25 @@ mod tests {
     #[test]
     fn without_a_session_id_there_is_no_resume_only_failed() {
         let h = Path::new("/h");
-        let inst = instance(Backend::Opencode, None);
-        assert_eq!(launch(h, &inst, false).unwrap().args, inst.args);
+        let mut inst = instance(Backend::Opencode, None);
+        inst.args.clear();
+        assert_eq!(launch(h, &inst, false).unwrap().executable, "/bin/sh");
         let error = launch(h, &inst, true).unwrap_err();
         assert!(error.starts_with("no session id to resume"), "{error}");
         let error = launch(h, &instance(Backend::Claude, None), true).unwrap_err();
         assert!(error.starts_with("no session id to resume"), "{error}");
+    }
+
+    #[test]
+    fn opencode_resumes_the_saved_session_through_the_private_wrapper() {
+        let mut inst = instance(Backend::Opencode, Some("ses_saved"));
+        inst.args = vec!["--model".into(), "provider/model".into()];
+        assert_eq!(
+            launch(Path::new("/h"), &inst, true).unwrap().executable,
+            "/bin/sh"
+        );
+        inst.args = vec!["--unknown".into()];
+        assert!(launch(Path::new("/h"), &inst, true).is_err());
     }
 
     /// Gate 7 P2, P3: codex always runs the wrapper, with or without a

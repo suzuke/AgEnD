@@ -5,6 +5,26 @@ use agend_core::model::DeliveryState;
 use rusqlite::{Connection, params};
 
 impl super::SqliteStore {
+    pub async fn opencode_events(
+        &self,
+        instance: &str,
+        after: i64,
+    ) -> Result<Vec<agend_core::traits::DriverEvent>, StoreError> {
+        let instance = instance.to_owned();
+        self.call(move |conn| {
+            let mut q = conn.prepare("SELECT seq,kind,payload FROM driver_events WHERE instance_id=?1 AND seq>?2 AND kind IN ('OpenCodeConfirmed','OpenCodeState') ORDER BY seq LIMIT 1024")?;
+            let rows = q.query_map(params![instance,after], |r| Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)))?;
+            rows.map(|row| {
+                let (seq, kind, payload) = row?;
+                let v: serde_json::Value = serde_json::from_str(&payload).map_err(|e| StoreError::Invalid(e.to_string()))?;
+                let invalid = || StoreError::Invalid("invalid stored OpenCode event".into());
+                let kind = if kind == "OpenCodeConfirmed" {
+                    agend_core::traits::DriverEventKind::MessageConfirmed { message_id:v["message_id"].as_str().ok_or_else(invalid)?.into() }
+                } else { agend_core::traits::DriverEventKind::BusyChanged { busy:v["busy"].as_bool().ok_or_else(invalid)? } };
+                Ok(agend_core::traits::DriverEvent {cursor:format!("opencode:{seq}"),kind})
+            }).collect()
+        }).await
+    }
     pub async fn begin_opencode_attempt(
         &self,
         id: &str,
@@ -38,6 +58,21 @@ impl super::SqliteStore {
 
 pub fn reference(session: &str, message: &str) -> String {
     format!("{session}|{message}")
+}
+
+fn event(
+    conn: &Connection,
+    instance: &str,
+    session: &str,
+    kind: &str,
+    payload: serde_json::Value,
+    now: u64,
+) -> Result<(), StoreError> {
+    let id = super::instances::new_session_id().map_err(|e| StoreError::Invalid(e.to_string()))?;
+    let now =
+        i64::try_from(now).map_err(|_| StoreError::Invalid("event time out of range".into()))?;
+    conn.execute("INSERT INTO driver_events(id,instance_id,session_id,kind,payload,occurred_at_unix_ms,ingested_at_unix_ms,replayed) VALUES(?1,?2,?3,?4,?5,?6,?6,0)",params![id,instance,session,kind,payload.to_string(),now])?;
+    Ok(())
 }
 
 /// Only the first caller can authorize a write. A daemon crash after this
@@ -88,6 +123,14 @@ pub(crate) fn confirm(
     if row.state == DeliveryState::Sent {
         row = messages::advance(&tx, id, DeliveryState::Confirmed, Some(&reference), now)?
             .ok_or_else(|| StoreError::Invalid("OpenCode sent message disappeared".into()))?;
+        event(
+            &tx,
+            &row.to_instance,
+            session,
+            "OpenCodeConfirmed",
+            serde_json::json!({"message_id":id}),
+            now,
+        )?;
     }
     tx.commit()?;
     Ok(Some(row))

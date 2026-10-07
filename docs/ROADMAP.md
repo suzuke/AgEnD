@@ -221,3 +221,5 @@
 - 2026-10-07：依持續完成第 12 關授權，12B 在 `feat/g12b-opencode` 開始傳輸／session／歷史核對；daemon lib 102 tests、clippy 與前後實際 no-std 通過。真 OpenCode 1.18.34 的 noReply 身分捕獲已納入回歸，程序與隔離目錄已清；正式 Driver／holder／恢復／真模型測試仍待接，尚未 merge。12D Telegram 專用 bot 與 chat 資料由使用者稍後提供，不阻擋其他實作。
 
 - 2026-10-07：12A 完整真測、全新覆核及固定 head 雙平台四 CI jobs 通過，#154 合併為 `a6cdb4c`；12A worktree／本機 branch 已刪。12B 已 rebase 至合併後版本，Telegram 專用測試設定已備齊（私有設定不入 repo），12B–D 持續實作。
+
+- 2026-10-07：12B OpenCode 初版 Driver／supervisor worker 接線，持久 attempt、分頁 REST 核對與 unknown 狀態；108 個 daemon 單元測試通過，holder／permission／真測尚未完成（feat/g12b-opencode）。

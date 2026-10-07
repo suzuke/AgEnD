@@ -8,9 +8,30 @@ use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
 pub const WRAPPER_NAME: &str = "agend-opencode";
+
+/// Model selection belongs in the session API, never in `serve` or `attach`.
+/// Other options need an explicit mapping before they can be accepted.
+pub fn model(args: &[String]) -> Result<Option<(String, String)>, String> {
+    let value = match args {
+        [] => return Ok(None),
+        [flag, value] if flag == "--model" || flag == "-m" => value.as_str(),
+        [arg] if arg.starts_with("--model=") => &arg[8..],
+        _ => {
+            return Err(
+                "OpenCode push supports only --model provider/model in instance args".into(),
+            );
+        }
+    };
+    let (provider, model) = value
+        .split_once('/')
+        .filter(|(p, m)| !p.is_empty() && !m.is_empty())
+        .ok_or("OpenCode model must be provider/model")?;
+    Ok(Some((provider.into(), model.into())))
+}
 pub const WRAPPER: &str = r#"set -eu
 c=$1 d=$2
 IFS= read -r OPENCODE_SERVER_PASSWORD <"$d/password"
+IFS= read -r port <"$d/port"
 export OPENCODE_SERVER_PASSWORD OPENCODE_SERVER_USERNAME=agend
 export XDG_DATA_HOME="$d/data" XDG_CONFIG_HOME="$d/config"
 export XDG_CACHE_HOME="$d/cache" XDG_STATE_HOME="$d/state"
@@ -20,7 +41,7 @@ v=$("$c" --version)
 printf '%s\n%s\n' "$PPID" "$v" >"$d/version.tmp"
 mv "$d/version.tmp" "$d/version"
 exec 3<&0
-"$c" serve --pure --hostname 127.0.0.1 --port 0 >"$d/server.log" 2>&1 &
+"$c" serve --pure --hostname 127.0.0.1 --port "$port" >"$d/server.log" 2>&1 &
 s=$! t=
 cleanup() {
   if [ -n "$t" ]; then kill -TERM "$t" 2>/dev/null || :; fi
@@ -145,6 +166,21 @@ impl Layout {
         })();
         let _ = fs::remove_file(temp);
         result?;
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0))?;
+        let port = listener.local_addr()?.port();
+        drop(listener);
+        let port_path = self.root.join("port");
+        if port_path.try_exists()? {
+            read_private(&port_path, 16)?;
+            fs::remove_file(&port_path)?;
+        }
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(port_path)?;
+        writeln!(file, "{port}")?;
+        file.sync_all()?;
         for name in ["go", "version", "version.tmp", "server.log"] {
             let path = self.root.join(name);
             match fs::symlink_metadata(&path) {
@@ -264,6 +300,29 @@ impl Layout {
             instance.program.clone(),
             self.root.display().to_string(),
         ]
+    }
+
+    /// Called only after holder death is established by the supervisor.
+    pub fn sweep(&self, pgid: u32, program: &str) -> crate::driver::codex::sweep::Swept {
+        let port = read_private(&self.root.join("port"), 16)
+            .ok()
+            .and_then(|b| String::from_utf8(b).ok())
+            .and_then(|s| s.trim().parse::<u16>().ok())
+            .filter(|p| *p != 0);
+        let root = self.root.display().to_string();
+        crate::driver::codex::sweep::sweep_matching(pgid, |argv| {
+            argv.windows(4)
+                .any(|w| w[0] == WRAPPER && w[1] == WRAPPER_NAME && w[2] == program && w[3] == root)
+                || (argv.first().is_some_and(|a| a == program)
+                    && argv.iter().any(|a| a == "serve")
+                    && argv
+                        .windows(2)
+                        .any(|w| w[0] == "--hostname" && w[1] == "127.0.0.1")
+                    && port.is_some_and(|port| {
+                        argv.windows(2)
+                            .any(|w| w[0] == "--port" && w[1] == port.to_string())
+                    }))
+        })
     }
 }
 
