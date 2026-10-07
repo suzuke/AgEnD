@@ -311,6 +311,9 @@ impl Actor {
         }
     }
     async fn capture(&mut self) {
+        // Pace request starts, not completions: frame RPC/encoding time already
+        // consumes this interval and must not add another full wait afterward.
+        let sample_started = Instant::now();
         // Wait one shared-cache interval from the first dirty notice, rather
         // than serializing a predictably stale frame and fetching it again.
         // Later notices do not extend that wait, so continuous output streams.
@@ -366,7 +369,7 @@ impl Actor {
                 }
             }
         }
-        self.last_sample = Some(Instant::now());
+        self.last_sample = Some(sample_started);
         self.dirty_since = None;
         self.dirty =
             !settled || self.notices.as_ref().map(|n| n.borrow().output_sequence) != sequence;
