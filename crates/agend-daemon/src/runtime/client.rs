@@ -125,22 +125,7 @@ fn unexpected(response: &HolderResponse) -> io::Error {
     io::Error::other(format!("unexpected holder response: {response:?}"))
 }
 
-// Avoid materializing every cell into Serde's internally-tagged Content tree.
-// Borrow the complete payload; direct typed decoding also accepts data before type.
 fn decode_response(line: &[u8]) -> serde_json::Result<HolderResponse> {
-    #[derive(serde::Deserialize)]
-    struct Envelope<'a> {
-        #[serde(rename = "type")]
-        kind: String,
-        #[serde(borrow)]
-        data: Option<&'a serde_json::value::RawValue>,
-    }
-    if let Ok(envelope) = serde_json::from_slice::<Envelope<'_>>(line)
-        && envelope.kind == "terminal_frame"
-        && let Some(data) = envelope.data
-    {
-        return serde_json::from_str(data.get()).map(|data| HolderResponse::TerminalFrame { data });
-    }
     serde_json::from_slice(line)
 }
 
@@ -269,5 +254,42 @@ mod decode_contract {
                 "accepted adversary {index}"
             );
         }
+    }
+    #[test]
+    fn unknown_values_keep_the_original_string_number_and_depth_validation() {
+        let golden: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../agend-holder/tests/golden/terminal-frame-1.4.json"
+        ))
+        .unwrap();
+        let native = serde_json::to_string(&golden["holder"]).unwrap();
+        for value in [
+            r#""\ud800""#.to_owned(),
+            "1e999".to_owned(),
+            format!("{}null{}", "[".repeat(200), "]".repeat(200)),
+        ] {
+            for place in ["envelope", "data", "frame"] {
+                let line = if place == "envelope" {
+                    format!(
+                        "{},\"fresh_unknown\":{value}}}",
+                        &native[..native.len() - 1]
+                    )
+                } else {
+                    let marker = format!("\"{place}\":{{");
+                    native.replacen(&marker, &format!("{marker}\"fresh_unknown\":{value},"), 1)
+                };
+                assert!(
+                    decode_response(line.as_bytes()).is_err(),
+                    "accepted invalid unknown at {place}: {value}"
+                );
+            }
+        }
+        let extension = format!(
+            "{},\"fresh_unknown\":\"valid extension\"}}",
+            &native[..native.len() - 1]
+        );
+        assert_eq!(
+            decode_response(extension.as_bytes()).unwrap(),
+            decode_response(native.as_bytes()).unwrap()
+        );
     }
 }

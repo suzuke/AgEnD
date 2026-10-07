@@ -198,4 +198,6 @@ Telegram unknown 測試核 active claim 不提早發布、HTTP 收據遺失／�
 
 12D `cargo build -p agend -p agend-testkit --bins` 後，`cargo test -p agend-daemon --lib daemon::telegram_tests` 跑三個本機 HTTP／獨立 daemon 子程序案例（另有一個由父測試啟動的 ignored child 入口）。Retry 用正式 supervisor／holder 啟動 `/bin/bash` inbox 測試程序，保存 Running／session_started／accepted；第二次 boot 沒有再次啟動或再次 Accepted。排隊案例只在測試編譯延遲 supervisor 消費事件，先排 SIGINT Stop、再讓真 poll 排 RetryConfirmed；正式 run／drop queue／worker.stop 保存 refused、保留 Failed、不啟動 holder。全部不啟動真模型、不用真 Telegram。
 
-Terminal frame 解碼：借用完整 RawValue payload 再直接轉型，避免整張 grid 經 internally-tagged Content 中間樹；wire 格式、行長限制與身分檢查不變。`decode_contract` 用 holder 真 parser 的 producer golden 驗兩種欄位順序，以及重複 type／data／request_id、同列尾隨 JSON、截斷 JSON 拒絕；非 frame response 沿用既有 decoder。
+Terminal frame 解碼維持原 internally-tagged serde 路徑；RawValue 優化因未知值拒絕域退化及微測無優勢而撤回。wire 格式、行長限制與身分檢查不變。`decode_contract` 用 holder 真 parser 的 producer golden 驗兩種欄位順序，以及重複 type／data／request_id、同列尾隨 JSON、截斷 JSON 拒絕；非 frame response 沿用既有 decoder。
+
+`claude_startup_capture` 的二十個 native cases 共用僅限此 test binary 的 mutex，從 fixture 建立持有至清理。測試目的是內容、遮罩、拒絕與清理，不是二十組程序同時啟動的容量測試；2 秒觀察窗與原斷言不變。原並行測試空白 frame 失敗保留，隔離不宣稱已分辨 producer 啟動與畫面管線延遲，也不代替 outer 300 ms 契約。

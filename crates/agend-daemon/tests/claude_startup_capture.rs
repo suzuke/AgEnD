@@ -9,6 +9,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
+// These cases verify producer content and cleanup within a fixed observation
+// window, not concurrent startup capacity. Isolate this binary's native labs
+// through teardown; do not extend capture deadlines or retry failed cases.
+static NATIVE_LAB: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn agend() -> PathBuf {
     let exe = std::env::current_exe().unwrap();
     let path = std::env::var_os("AGEND_BIN")
@@ -216,6 +221,7 @@ fn development_worker(root: &Path, width: u16, mode: &str) -> PathBuf {
 
 #[test]
 fn passive_known_trust_sends_no_startup_keys_at_both_widths() {
+    let _lab = NATIVE_LAB.lock().unwrap_or_else(|error| error.into_inner());
     for width in [100, 140] {
         let root = TempDir::new("g12-passive-known-trust").unwrap();
         let program = trust_worker(root.path(), width, "normal");
@@ -237,6 +243,7 @@ fn passive_known_trust_sends_no_startup_keys_at_both_widths() {
 
 #[test]
 fn separate_development_opt_in_sends_exactly_three_inputs_at_both_widths() {
+    let _lab = NATIVE_LAB.lock().unwrap_or_else(|error| error.into_inner());
     for width in [100, 140] {
         let root = TempDir::new("g12-development-control").unwrap();
         let program = development_worker(root.path(), width, "normal");
@@ -269,6 +276,7 @@ fn separate_development_opt_in_sends_exactly_three_inputs_at_both_widths() {
 
 #[test]
 fn development_confirmation_rejects_other_servers_selection_and_incomplete_warning() {
+    let _lab = NATIVE_LAB.lock().unwrap_or_else(|error| error.into_inner());
     for mode in [
         "foreign-prefix",
         "foreign-extra",
@@ -306,6 +314,7 @@ fn development_confirmation_rejects_other_servers_selection_and_incomplete_warni
 
 #[test]
 fn development_confirmation_rejects_contradictory_or_repeated_menu() {
+    let _lab = NATIVE_LAB.lock().unwrap_or_else(|error| error.into_inner());
     for width in [100, 140] {
         for mode in [
             "selected-exit-plus-decoy",
@@ -342,6 +351,7 @@ fn development_confirmation_rejects_contradictory_or_repeated_menu() {
 
 #[test]
 fn foreign_frame_after_trust_completion_never_authorizes_development_input() {
+    let _lab = NATIVE_LAB.lock().unwrap_or_else(|error| error.into_inner());
     for width in [100, 140] {
         for field in ["instance_id", "view_id"] {
             let root = TempDir::new("g12-capture-identity").unwrap();
@@ -402,6 +412,7 @@ fn foreign_frame_after_trust_completion_never_authorizes_development_input() {
 
 #[test]
 fn inconsistent_frame_before_resize_ack_stops_without_input() {
+    let _lab = NATIVE_LAB.lock().unwrap_or_else(|error| error.into_inner());
     for width in [100, 140] {
         for field in ["instance_id", "view_id", "generation", "size"] {
             let root = TempDir::new("g12-capture-resize-identity").unwrap();
@@ -458,6 +469,7 @@ fn inconsistent_frame_before_resize_ack_stops_without_input() {
 
 #[test]
 fn development_confirmation_has_no_default_grant_or_replay() {
+    let _lab = NATIVE_LAB.lock().unwrap_or_else(|error| error.into_inner());
     let root = TempDir::new("g12-development-default").unwrap();
     let program = development_worker(root.path(), 100, "normal");
     let out = root.path().join("default-evidence");
@@ -486,6 +498,7 @@ fn development_confirmation_has_no_default_grant_or_replay() {
 
 #[test]
 fn trust_probe_sends_only_down_and_confirmed_yes_enter_at_both_widths() {
+    let _lab = NATIVE_LAB.lock().unwrap_or_else(|error| error.into_inner());
     for width in [100, 140] {
         let root = TempDir::new("g12-trust-controls").unwrap();
         let program = trust_worker(root.path(), width, "normal");
@@ -517,6 +530,7 @@ fn trust_probe_sends_only_down_and_confirmed_yes_enter_at_both_widths() {
 
 #[test]
 fn unknown_or_foreign_or_preselected_trust_sends_nothing() {
+    let _lab = NATIVE_LAB.lock().unwrap_or_else(|error| error.into_inner());
     for mode in ["unknown", "wrong-path", "preselected-yes"] {
         let root = TempDir::new("g12-trust-refuse").unwrap();
         let program = trust_worker(root.path(), 100, mode);
@@ -539,6 +553,7 @@ fn unknown_or_foreign_or_preselected_trust_sends_nothing() {
 
 #[test]
 fn trust_path_must_be_bound_exactly_to_one_workspace_header_at_both_widths() {
+    let _lab = NATIVE_LAB.lock().unwrap_or_else(|error| error.into_inner());
     for width in [100, 140] {
         for mode in ["prefix-path", "path-elsewhere", "duplicate-path-header"] {
             let root = TempDir::new("g12-trust-path-binding").unwrap();
@@ -568,6 +583,7 @@ fn trust_path_must_be_bound_exactly_to_one_workspace_header_at_both_widths() {
 
 #[test]
 fn trust_confirmation_rejects_extra_or_repeated_selections_at_both_widths() {
+    let _lab = NATIVE_LAB.lock().unwrap_or_else(|error| error.into_inner());
     for width in [100, 140] {
         for mode in [
             "no-extra-exit",
@@ -613,6 +629,7 @@ fn trust_confirmation_rejects_extra_or_repeated_selections_at_both_widths() {
 
 #[test]
 fn prompt_stability_survives_delayed_receiver_and_resets_for_unknown() {
+    let _lab = NATIVE_LAB.lock().unwrap_or_else(|error| error.into_inner());
     for width in [100, 140] {
         for mode in ["delayed-input", "transient-unknown"] {
             let root = TempDir::new("g12-trust-delayed-input").unwrap();
@@ -651,6 +668,7 @@ fn prompt_stability_survives_delayed_receiver_and_resets_for_unknown() {
 
 #[test]
 fn private_cleanup_identity_matches_native_session_and_removed_workspace() {
+    let _lab = NATIVE_LAB.lock().unwrap_or_else(|error| error.into_inner());
     let root = TempDir::new("g12-cleanup-identity").unwrap();
     let program = worker(root.path());
     let out = root.path().join("evidence");
@@ -677,6 +695,7 @@ fn private_cleanup_identity_matches_native_session_and_removed_workspace() {
 
 #[test]
 fn unchanged_no_selection_never_replays_down_or_sends_enter() {
+    let _lab = NATIVE_LAB.lock().unwrap_or_else(|error| error.into_inner());
     let root = TempDir::new("g12-trust-stuck").unwrap();
     let program = trust_worker(root.path(), 100, "stuck-no");
     let out = root.path().join("evidence");
@@ -693,6 +712,7 @@ fn unchanged_no_selection_never_replays_down_or_sends_enter() {
 
 #[test]
 fn trust_control_requires_the_recorded_version_and_dimensions_before_launch() {
+    let _lab = NATIVE_LAB.lock().unwrap_or_else(|error| error.into_inner());
     let root = TempDir::new("g12-trust-preflight").unwrap();
     let program = trust_worker(root.path(), 100, "normal");
     for (version, columns, rows) in [
@@ -712,6 +732,7 @@ fn trust_control_requires_the_recorded_version_and_dimensions_before_launch() {
 }
 #[test]
 fn real_holder_captures_two_widths_without_any_input_and_cleans_up() {
+    let _lab = NATIVE_LAB.lock().unwrap_or_else(|error| error.into_inner());
     let root = TempDir::new("g12-startup-native").unwrap();
     let program = worker(root.path());
     let daemon = agend();
@@ -796,6 +817,7 @@ fn real_holder_captures_two_widths_without_any_input_and_cleans_up() {
 }
 #[test]
 fn wrong_program_hash_and_existing_evidence_never_start_the_program() {
+    let _lab = NATIVE_LAB.lock().unwrap_or_else(|error| error.into_inner());
     let root = TempDir::new("g12-startup-preflight").unwrap();
     let program = worker(root.path());
     let out = root.path().join("evidence");
@@ -818,6 +840,7 @@ fn wrong_program_hash_and_existing_evidence_never_start_the_program() {
 
 #[test]
 fn a_rejected_screen_is_not_written_and_failure_still_cleans_the_holder() {
+    let _lab = NATIVE_LAB.lock().unwrap_or_else(|error| error.into_inner());
     let root = TempDir::new("g12-startup-screen-refusal").unwrap();
     let program = worker(root.path());
     let source = fs::read_to_string(&program)
@@ -843,6 +866,7 @@ fn a_rejected_screen_is_not_written_and_failure_still_cleans_the_holder() {
 
 #[test]
 fn soft_wrapped_identifiers_are_redacted_as_a_complete_native_line() {
+    let _lab = NATIVE_LAB.lock().unwrap_or_else(|error| error.into_inner());
     let root = TempDir::new("g12-startup-soft-wrap").unwrap();
     let program = worker(root.path());
     let source = fs::read_to_string(&program).unwrap().replace(
@@ -865,6 +889,7 @@ fn soft_wrapped_identifiers_are_redacted_as_a_complete_native_line() {
 
 #[test]
 fn a_soft_wrapped_bearer_prefix_is_refused_before_writing_the_frame() {
+    let _lab = NATIVE_LAB.lock().unwrap_or_else(|error| error.into_inner());
     let root = TempDir::new("g12-startup-wrapped-refusal").unwrap();
     let program = worker(root.path());
     let source = fs::read_to_string(&program).unwrap().replace(

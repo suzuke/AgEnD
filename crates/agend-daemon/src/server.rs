@@ -223,7 +223,14 @@ impl Client {
         let mut rejected = false;
         let mut line = if let Some(id) = full_id {
             let mut bounded = FrameLine(Vec::new());
-            if serde_json::to_writer(&mut bounded, response).is_err() {
+            // Buffer tiny serializer writes while retaining the bounded sink.
+            // A flush failure rejects the whole frame before socket publication.
+            let encoded = {
+                let mut writer = std::io::BufWriter::with_capacity(8192, &mut bounded);
+                serde_json::to_writer(&mut writer, response).is_ok()
+                    && std::io::Write::flush(&mut writer).is_ok()
+            };
+            if !encoded {
                 // The client envelope also counts. Send no partial frame or
                 // grant; EOF invalidates the view and releases any real owner.
                 rejected = true;

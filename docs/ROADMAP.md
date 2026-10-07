@@ -297,3 +297,9 @@
 - 2026-10-07：PR #156 終端延遲補外層 parser 首次可見時間戳，保留 trigger 前起點與 300 ms；daemon capture cadence 改以開始時間計算，移除 RPC 後額外等待。外層 8 項本機通過，尚不宣稱已定位 CI 320 ms 根因。
 
 - 2026-10-07：12D 整體驗收仍重現 terminal 300 ms 超標；分段紀錄及 CPU 取樣顯示大 frame 的 Content 中間樹成本，改 holder response／client frame 直接解碼。原生兩尺寸 24 bursts 初測通過，尚待反例、全新覆核、完整驗收及新 head CI，不以先前 CI 成功覆蓋本機失敗。
+
+- 2026-10-07：`a69ac49` 全新解碼覆核實跑發現十八例未知欄位拒絕退化（surrogate／數值溢位／深度），目前不可合併；正式整體驗收另在 startup capture 二十案中的兩案僅收到空白 frame 而停止。增加僅限該測試檔的 native fixture 隔離，保留期限、斷言與失敗證據，修正後驗證待完成。
+
+- 2026-10-07：獨立真 Screen 100×24 微測不支持 RawValue decoder 優化，已回復原解析規則並加入十八個未知值拒絕反例；轉向 holder／daemon bounded writer 外包 8 KiB BufWriter，任何 serialization／flush 失敗仍整段拒絕。微測 byte equality 與界線通過，正式原生／整體驗收待完成。
+
+- 2026-10-07：holder 完整 61 tests 與嚴格解碼四項回歸通過；外層 PTY 仍有背景啟動取樣 315.887 ms 超過 300 ms，完整 12D 未通過。曾試將 frame 編碼移出 holder mutex，未解決超標，已撤回該候選；保留原界線與失敗證據，不擴大控制／回覆交錯範圍。
