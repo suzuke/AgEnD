@@ -177,3 +177,5 @@ OpenCode `oversized_total_history_does_not_block_old_receipts_or_new_delivery` �
 權限 native API 測試注入 session／permission GET 503：原版本會耗用尚未送出的 POST attempt，修正版保留 operator 答覆機會；另注入已套用 permission POST 後丟回覆，重開資料庫必須保持 unknown 且不能再 POST。
 
 第 12C `cargo test -p agend-daemon --lib forge::github` 目前涵蓋 11 個基礎案例：gh 真唯讀捕獲解析、身份／head／merge parent 負例、實際 shell argv 與 token 不入 argv、錄製回覆下 stale head 零 PUT／已 merged 零寫入／PUT 回覆遺失後原 PR 對帳。這不是完整 FRG／pipeline 整合或真遠端 merge 驗收。
+
+12C `cargo test -p agend-daemon --lib store::github` 使用原生 SQLite 跨重開驗 pending push／create、stale revision、PR／repo 身分不可換綁及同 remote branch 不能分配兩個 task。schema 0013 另由 store migration／golden／retention 契約覆蓋。

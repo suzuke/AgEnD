@@ -111,3 +111,7 @@ cargo xtask accept core
 都為 Claude StartupMenu，其他 backend 不匹配、沒有 suggested key。
 原規則對 development channels 回 None 的反例已保存，新規則補上已觀察標頭。
 授權只完成 workspace 信任，沒有確認 development channels，不宣稱 P5／P6 完成。
+
+## GitHub 遠端身分
+
+`github` 提供 `GithubIdentity`、`GithubChange` 與 `GithubStore` 邊界。純狀態規則禁止更换 repository／PR、覆蓋未確認 push intent 或清除 create attempt；正式 Forge 接線仍在 12C 施工。

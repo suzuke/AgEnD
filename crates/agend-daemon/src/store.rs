@@ -49,6 +49,7 @@ pub mod claude;
 pub mod claude_startup;
 pub mod codex_input;
 pub mod driver_events;
+pub mod github;
 pub mod instances;
 pub mod messages;
 mod migrate;

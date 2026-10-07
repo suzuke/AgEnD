@@ -25,3 +25,7 @@ API client 合併前先 GET 原 PR；head 不符直接回報 HeadChanged，已 m
 - 正式 workflow forge 選擇、遠端 main 前進與 rebase、head 變更時重新 checks／核准。
 - 單次提交／回覆遺失／重啟的原生測試、完整 FRG 契約與真 repo 流水線。
 - 全新 verifier、CI、合併與清理；本頁不宣稱第 12C 完成。
+
+## 身分持久化基礎
+
+schema 0013 保存固定 task／repo ID／branch／nonce 與 PR number，禁止 stale revision、改綁及兩個 task 佔用同一 repo ID／branch。未確認 push 必須先對帳相同 head；PR create attempt 一旦保存不能清回未嘗試。原生 SQLite 跨重開測試通過；正式 remote 操作尚未使用這個 ledger，不宣稱已完成重啟流水線。

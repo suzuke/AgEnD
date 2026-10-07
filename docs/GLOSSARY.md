@@ -222,3 +222,7 @@ gh 防護由 `agend_shim::gh` 在執行工具前拒絕 merge、明確 PR approve
 ```bash
 grep -rnE "第 [0-9–、]+ 關|[每這本該]關|<關>" README.md AGENTS.md docs --exclude-dir=research --exclude=GLOSSARY.md   # 應該沒有輸出：施工階段要寫「施工關」
 ```
+
+### GitHub ownership ledger（GitHub 所有權紀錄）
+
+SQLite 中每個 task 的固定 repository ID、branch、nonce 與 PR number；同時保留 push intent 與 create attempt，讓重啟從原遠端物件對帳，不因回覆遺失另建 PR。

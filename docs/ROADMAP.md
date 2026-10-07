@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - 依 crate 由下往上分 13 個施工關；每個施工關單獨驗收，使用者確認後才開下一個施工關（D22）。
-> - 目前狀態：**第 1–11 施工關完成並已合併**；第 12A Claude 完整真模型 smoke、獨立覆核及 CI 通過，#154 已合併。12B OpenCode 原生契約、受控真測與六方向模型互傳通過，#155 正在最終覆核／CI；12C GitHub forge 與 12D Telegram 待實作，第 13 施工關未開始。
-> - 下一步：完成 [12B OpenCode](gates/gate-12b-opencode.md) 的合併與清理，再依持續授權推進 12C／12D。
+> - 目前狀態：**第 1–11 施工關完成並已合併**；第 12A Claude 完整真模型 smoke、獨立覆核及 CI 通過，#154 已合併。12B OpenCode 已經全新覆核及雙平台 CI 通過，#155 已合併；12C GitHub forge 實作中，12D Telegram 待實作，第 13 施工關未開始。
+> - 下一步：依持續授權完成 [12C GitHub forge](gates/gate-12c-github.md)，再推進 12D。
 
 ## 13 個施工關
 
@@ -22,7 +22,7 @@
 | 9 `cli` | [完成（2026-09-29；已 merge #136）](gates/gate-09-cli.md) | agend CLI：agent 命令、操作者命令、status；安裝相關先做 `doctor`、`init`，服務註冊留第 13 施工關 | 對假／真 daemon 驗輸出與錯誤；兩個假 Codex agent 互傳訊息、中途重啟不漏不重 |
 | 10 `pipeline` | [完成（2026-10-02；#143 已確認合併）](gates/gate-10-pipeline.md) | daemon：pipeline、git、runner、forge local、supervisor、reconcile | 假 driver + 暫存 repo：task 從派工走到 merge |
 | 11 `tui` | [完成（A、B、C 已 merge；C 段 #145）](gates/gate-11-tui.md) | attention-first TUI、完整終端、resize、多視窗、鍵鼠／貼上與歷史 | 最終 `cfee027` 全新 verifier CONFIRMED；四個雙平台 CI jobs 各 900 passed／0 failed／2 既有 ignored、實際 no-std；0.159.3 真 U17 已核實並獲版本許可。實機紀錄及後續自動驗收、清理完成，使用者確認 merge `b2152db` |
-| 12 `adapters` | [實作中（A 已合併；B 最終覆核／CI；C／D 待實作）](gates/gate-12-adapters.md) | A claude、B opencode driver、C forge github、D Telegram | 先對假實作，再做真 backend smoke test |
+| 12 `adapters` | [實作中（A／B 已合併；C 實作中；D 待實作）](gates/gate-12-adapters.md) | A claude、B opencode driver、C forge github、D Telegram | 先對假實作，再做真 backend smoke test |
 | 13 `install` | [未開始](gates/gate-13-install.md) | 安裝與發布（最後一個施工關）：服務註冊、`agend uninstall`、`agend telegram setup`（由 daemon 配對）、`xtask release`、brew、GitHub release、`cargo install` | CI 用全新 HOME + 假 agent，從安裝到第一個 task 完成 < 5 分鐘；每個 `doctor` 檢查都有「故意弄壞 → 看到修正指令」的測試 |
 
 ## 第 1 施工關：開工前先提案、經使用者確認才實作
@@ -265,3 +265,7 @@
 - 2026-10-07：12B 最終 docs-only `0be0ef1` 已 push，CI 期間開工 12C；開 worktree 前核 12A 已清、12B 早期遺留 holder 已補清，未合併 B worktree／target 暫留供核驗。GitHub gh 傳輸與真 CLI 唯讀回覆捕獲開始；正式 Forge／pipeline 尚未接入。
 
 - 2026-10-07：12C gh API、原 PR 身分／head 與 merge parent 收據基礎完成；11 個針對測試、daemon lib/tests clippy、fmt 與前後實際 no-std 通過。只有真 GitHub 唯讀捕獲，未發出遠端寫入；正式 Forge／pipeline 及完整驗收仍待完成。
+
+- 2026-10-07：12B #155 最終 head `0be0ef1` 四個雙平台 CI jobs 全通過，合併為 `2a02fda`；自有 worktree／本機與遠端 branch／target 已清，必要證據保留、Claude trust 不動。12C 已 rebase 到合併後版本。
+
+- 2026-10-07：12C schema 0013／GithubStore 邊界保存固定遠端身分及未確認嘗試，原生 SQLite 重開與 40 個 store 契約通過；fmt、core／daemon clippy、前後實際 no-std 通過。正式 Forge／pipeline 仍待接線，未宣稱完整驗收。

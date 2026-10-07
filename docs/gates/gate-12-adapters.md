@@ -1,9 +1,9 @@
 # 第 12 施工關：其餘 adapter（`adapters`）
 
 > **TL;DR**
-> - A claude、B opencode、C GitHub forge、D Telegram；A 已合併完成，B 正在實作與驗證，C／D 待開工。
+> - A claude、B opencode、C GitHub forge、D Telegram；A／B 已合併完成，C 實作中，D 待開工。
 > - 第 1–11 施工關已完成並合併；A 段設計 D40 已於 #138 合併（`4390633`）。
-> - 下一步：完成 [12B OpenCode](gate-12b-opencode.md) 的最終 CI／文件覆核與合併清理，再推進 C／D。
+> - 下一步：完成 [12C GitHub forge](gate-12c-github.md) 的正式 pipeline 接線與驗證，再推進 D。
 
 ## 狀態
 
@@ -14,7 +14,7 @@
 | 段 | 範圍 | 目前進度 |
 |---|---|---|
 | A Claude | channel、hooks、啟動、忙碌策略、送達與清掃 | v12 七則完整 smoke PASS；#154 已合併 `a6cdb4c` |
-| B OpenCode | serve、session、送達、權限；三個 backend 互傳 | 正式 Driver／holder／權限與 DRV 10/10；基本／busy interrupt／permission 真測及三 backend 六方向互傳通過，全新 verifier：1,062 passed、fmt／clippy／no-std 通過；#155 文件覆核與最終 CI 中 |
+| B OpenCode | serve、session、送達、權限；三個 backend 互傳 | 正式 Driver／holder／權限與 DRV 10/10；基本／busy interrupt／permission 真測及三 backend 六方向互傳通過，全新 verifier：1,062 passed、fmt／clippy／no-std 通過；#155 已合併 `2a02fda`，最終四個 CI jobs 通過，自有 worktree／branch／target 已清 |
 | C GitHub forge | push、PR、checks、head 對帳、merge 與收尾 | [API／收據基礎施工中](gate-12c-github.md)；Forge／pipeline 未接入 |
 | D Telegram | notifier、allowlist、token、手機操作、G4 已讀 | 尚未實作；專用 bot 設定與測試 chat 已備妥，憑證只留本機 |
 

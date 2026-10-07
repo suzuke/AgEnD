@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 依第 12 關持續授權實作；沿用 D16：queue 用 prompt_async，steer 視為 interrupt，abort 後送新工作。
 > - holder 持有 serve 與 attach；daemon 經有密碼的 loopback API 管理既有 session，不用 PTY 輸入工作。
-> - 下一步：#155 完成文件覆核及固定 head 雙平台 CI 後合併、清理；12C／12D 接續實作。
+> - 狀態：#155 已合併 `2a02fda`，全新覆核／固定 head 四個雙平台 CI jobs 通過，自有 worktree／branch／target 已清；接續 12C／12D。
 
 帳戶準備見 [私人帳戶設定](gate-12b-account-setup.md)。
 
@@ -96,3 +96,7 @@ export CARGO_TARGET_DIR="$(mktemp -d /private/tmp/agend-g12b-recheck.XXXXXX)"
 ## 下一步
 
 文件差異交獨立 verifier 覆核，固定最終 head 雙平台 CI 通過後依持續授權合併 #155，清理本批 worktree／target，再推進 12C／12D。
+
+## 合併與清理（2026-10-07）
+
+#155 最終 `0be0ef1` 的 push／PR 雙平台四個 CI jobs 全部通過，合併為 `2a02fdafed919a17de9ffcb6fc588d56de37cecd`。自有 worktree、本機／遠端 branch 及 target 已刪，必要證據保留在 ops 的 `merge-cleanup.json`；Claude trust entries 未改。
