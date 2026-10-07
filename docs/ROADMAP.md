@@ -218,3 +218,4 @@
 - 2026-10-07：#154 的 v11 完成啟動與 INITIAL ACK，但模型將命令後說明送入 Bash，peer send exit 2；提前停止自有 runner 並清理，未進入 queue／Interrupt。命令改用獨立區塊，Bash／zsh 原生參數檢查通過；完整 12A 仍未完成，詳見 [Stop idle](gates/gate-12a-stop-idle.md)。
 
 - 2026-10-07：#154 固定 `0f4b8e0` 的 v12 完整真模型 smoke 單次 PASS：七則 confirmed（六 channel／一 Stop）、模型互傳、queue 後恢復 idle、Interrupt 完成，自有清理成功且保留 trust。全新 outcome／CI 收尾中；[完整紀錄](gates/gate-12a-complete-smoke.md)。使用者表示 Telegram 測試憑證稍後提供，先推進其餘工作。
+- 2026-10-07：依持續完成第 12 關授權，12B 在 `feat/g12b-opencode` 開始傳輸／session／歷史核對；daemon lib 102 tests、clippy 與前後實際 no-std 通過。真 OpenCode 1.18.34 的 noReply 身分捕獲已納入回歸，程序與隔離目錄已清；正式 Driver／holder／恢復／真模型測試仍待接，尚未 merge。12D Telegram 專用 bot 與 chat 資料由使用者稍後提供，不阻擋其他實作。

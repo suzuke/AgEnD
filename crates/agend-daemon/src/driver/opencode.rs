@@ -4,3 +4,7 @@
 //! Permission requests: poll `GET /permission` as the source of truth.
 //!
 //! Must NOT: treat SSE as the only source of permission requests.
+
+pub mod api;
+pub mod history;
+pub mod http;

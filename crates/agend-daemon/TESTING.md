@@ -141,6 +141,10 @@ Failed 派工回歸：五種 fake queue 只用一個 dev，boot 派工失敗後�
 
 `pipeline_archive_display` 以真 daemon／shim 設 color.ui／color.diff=always 與 shared diff.noprefix，取消後須用預設 git apply 還原 commit／index／worktree 與原資料內 ESC bytes；patch-id 也不受顏色／prefix 影響。`pipeline_archive_nested` 另移除 inner HEAD、留下只有 Git objects／index 保存的 staged binary，Git 看不到其 metadata 時仍須保留全部資料。
 
+## 第 12B OpenCode
+
+第 12B 的傳輸／session／歷史核對以 `cargo test -p agend-daemon driver::opencode --lib` 驗證。原生假 producer 覆蓋 create／resume／busy／abort／history；1.18.34 真 `noReply` 捕獲覆蓋指定訊息 ID、中文／換行與防止誤認。這些案例不啟動模型，尚不代表正式 Driver／holder 恢復或完整 12B 驗收。
+
 ## 第 12A Claude
 
 Claude bridge／Driver／native startup capture 的案例、限制與重驗指令見 [Claude 測試](CLAUDE-TESTING.md)。
