@@ -794,3 +794,224 @@ async fn native_mobile_choice_and_free_reply_reach_the_asking_agent_once() {
         }
     }
 }
+
+#[tokio::test]
+async fn native_mobile_approval_and_changes_require_current_receipt_and_explicit_reason() {
+    use agend_core::{
+        pipeline::{
+            state::{PipelineEvent, WorkProduct, step},
+            workflow::{Approver, Stage},
+        },
+        traits::Store,
+    };
+    for changes in [false, true] {
+        let lab = Lab::new().await;
+        let native = Native::new();
+        let mut workflow = Workflow::builtin_research();
+        workflow.id = "human-mobile".into();
+        workflow.stages[1].stage = Stage::Approval {
+            by: Approver::Human,
+            count: 1,
+            bind_head: false,
+        };
+        lab.ctx.store.save_workflow(&workflow).await.unwrap();
+        let mut state = PipelineState::new("t-human", crate::pipeline::validate(workflow).unwrap());
+        state = step(&state, PipelineEvent::Start).unwrap().0;
+        state = step(
+            &state,
+            PipelineEvent::WorkCompleted {
+                stage_id: "work".into(),
+                attempt: 1,
+                product: WorkProduct::Result {
+                    summary: "Prepared result".into(),
+                    output: None,
+                },
+            },
+        )
+        .unwrap()
+        .0;
+        let mut task = Task::new("t-human", "mobile approval", "general", "human-mobile", 1);
+        task.status = TaskStatus::Running;
+        lab.ctx
+            .store
+            .create_pipeline_task(&task, &serde_json::to_string(&state.snapshot()).unwrap(), 1)
+            .await
+            .unwrap();
+        lab.ctx.pipeline.wake();
+        let item = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if let Some(item) = lab.ctx.fleet.attention("approval:t-human/review/1") {
+                    break item;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let mut notice = worker::notice(&item).unwrap();
+        notice.task_version = Some((
+            lab.ctx
+                .store
+                .load_task("t-human")
+                .await
+                .unwrap()
+                .unwrap()
+                .version,
+            lab.ctx
+                .store
+                .progress("t-human")
+                .await
+                .unwrap()
+                .unwrap()
+                .attention_revision,
+        ));
+        let row = lab
+            .ctx
+            .store
+            .observe_telegram(&[notice], &lab.destination, 1)
+            .await
+            .unwrap()
+            .remove(0);
+        super::delivery::TelegramNotifier::new(
+            native.api.clone(),
+            lab.ctx.store.clone(),
+            lab.destination.clone(),
+        )
+        .resume(&row.id)
+        .await
+        .unwrap();
+        let receipt = native.receipts.lock().unwrap().last().unwrap().clone();
+        let button = if changes { 1 } else { 0 };
+        let callback = json!({"update_id":1,"callback_query":{"id":"human","from":{"id":7,"is_bot":false},"message":receipt,"data":receipt["reply_markup"]["inline_keyboard"][button][0]["callback_data"]}});
+        native.updates.lock().unwrap().push(callback.clone());
+        let (_stop, stopped) = tokio::sync::watch::channel(false);
+        poll::once(
+            &lab.ctx,
+            &lab.config,
+            native.api.clone(),
+            &lab.destination,
+            &stopped,
+        )
+        .await
+        .unwrap();
+        if changes {
+            assert_eq!(
+                lab.ctx.fleet.attention("approval:t-human/review/1"),
+                Some(item)
+            );
+            assert_eq!(
+                lab.ctx
+                    .store
+                    .progress("t-human")
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .data
+                    .pipeline,
+                serde_json::to_string(&state.snapshot()).unwrap()
+            );
+            assert!(native.calls.lock().unwrap().iter().any(|(m,v)| m=="answerCallbackQuery" && v["text"]=="Reply to the notification with the requested changes. Nothing applied yet."));
+            let empty = json!({"update_id":2,"message":{"from":{"id":7,"is_bot":false},"chat":{"id":42},"reply_to_message":receipt,"text":" \n "}});
+            native.updates.lock().unwrap().push(empty);
+            poll::once(
+                &lab.ctx,
+                &lab.config,
+                native.api.clone(),
+                &lab.destination,
+                &stopped,
+            )
+            .await
+            .unwrap();
+            assert!(
+                lab.ctx
+                    .fleet
+                    .attention("approval:t-human/review/1")
+                    .is_some()
+            );
+            assert_eq!(
+                lab.ctx
+                    .store
+                    .progress("t-human")
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .data
+                    .pipeline,
+                serde_json::to_string(&state.snapshot()).unwrap()
+            );
+            let reply = json!({"update_id":3,"message":{"from":{"id":7,"is_bot":false},"chat":{"id":42},"reply_to_message":receipt,"text":"Please preserve\n完整內容"}});
+            native.updates.lock().unwrap().push(reply);
+            poll::once(
+                &lab.ctx,
+                &lab.config,
+                native.api.clone(),
+                &lab.destination,
+                &stopped,
+            )
+            .await
+            .unwrap();
+        }
+        assert!(
+            lab.ctx
+                .fleet
+                .attention("approval:t-human/review/1")
+                .is_none()
+        );
+        let progress = lab.ctx.store.progress("t-human").await.unwrap().unwrap();
+        let persisted: Value = serde_json::from_str(&progress.data.pipeline).unwrap();
+        if changes {
+            assert_eq!(persisted["stage_index"], 0);
+            assert_eq!(
+                persisted["pending_work_reason"],
+                "changes requested by operator: Please preserve\n完整內容"
+            );
+        } else {
+            assert_eq!(
+                lab.ctx
+                    .store
+                    .load_task("t-human")
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .task
+                    .status,
+                TaskStatus::Done
+            );
+        }
+        let mut repeated = callback;
+        repeated["update_id"] = json!(4);
+        native.updates.lock().unwrap().push(repeated);
+        poll::once(
+            &lab.ctx,
+            &lab.config,
+            native.api.clone(),
+            &lab.destination,
+            &stopped,
+        )
+        .await
+        .unwrap();
+        assert!(
+            native
+                .calls
+                .lock()
+                .unwrap()
+                .iter()
+                .rev()
+                .find(|(method, _)| method == "answerCallbackQuery")
+                .is_some_and(
+                    |(_, value)| value["text"] == "Not applied; open the current needs-you item"
+                )
+        );
+        assert_eq!(
+            lab.ctx
+                .store
+                .progress("t-human")
+                .await
+                .unwrap()
+                .unwrap()
+                .data
+                .pipeline,
+            progress.data.pipeline
+        );
+    }
+}

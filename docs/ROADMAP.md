@@ -279,3 +279,5 @@
 - 2026-10-07：12D 專用 Telegram 私訊真測完成 Mark read → 正式 TUI 同步且待辦保持開啟 → acknowledge 關閉；SQLite 核 read／accepted，通知與自有程序／home 已清理。完整 12D 尚未完成；見 gate-12d-telegram 手機驗收。
 
 - 2026-10-07：12D 補原生問答／追問流程：選項與完整多行自由文字經 HTTP、SQLite、正式 pipeline 各投 inbox 一次，重複輪詢與舊通知拒絕；真 Telegram 問答與其餘操作仍另驗。
+
+- 2026-10-07：12D 增補 native human approval／request_changes：原因提示不提前執行、空白拒絕、多行保留與舊按鈕拒絕；無 repo research 範圍，非 Git merge 或真 Telegram 核准認證。

@@ -66,3 +66,5 @@ Topic checkpoint：每個已設定 team topic 保存任務 ID、完整標題、s
 本機零網路重驗：先 build `agend` binary 與 `telegram_mobile_probe` example，再執行 `python3 -B crates/agend/examples/support/telegram_mobile.py --target "$CARGO_TARGET_DIR" --out <新的證據目錄> --local`。真測改用 `--credentials <私人 env 檔>`，僅供專用私訊 bot／chat；一次通知，先已讀再確認，結束刪除自有通知。
 
 原生問答補驗：正式 pipeline 建立 Ask 與 FollowUp，經本機 HTTP Bot API producer → poll → SQLite → guarded pipeline，分別選第二個選項與回覆完整多行自由文字；核 AnswerSource::Telegram 與提問者 inbox 每輪各一筆。每次 sendMessage 回不同 message ID，重複輪詢不再投遞，舊通知不能回答新追問。此例使用 inbox，未啟動模型，也不是 Telegram 真問答操作證據。
+
+原生 human approval 補驗：無 repo 的 research 結果交付後，HTTP 通知按鈕經正式 pipeline 核准完成。要求修改須再回覆非空理由，提示按鈕與空白回覆不提前改 state；完整多行理由保存並退回 work。舊 callback 不重做動作。這是 bind_head=false 的原生路徑，不代替真 Telegram 核准或 Git head／merge 驗收。
