@@ -160,7 +160,12 @@ pub trait PipelineExecutor: Clone + Send + Sync + 'static {
     fn git_available(&self) -> bool;
     fn new_id(&self) -> Result<String, String>;
     fn canonical_repo(&self, repo: &str) -> Result<String, String>;
-    fn forge(&self, repo: &str, expected_main: Option<String>) -> Self::Forge;
+    fn forge(&self, repo: &str, kind: &str, expected_main: Option<String>) -> Self::Forge;
+    fn prepare_main<'a>(
+        &'a self,
+        repo: &'a str,
+        kind: &'a str,
+    ) -> impl Future<Output = Result<String, String>> + Send + 'a;
     fn run<'a>(
         &'a self,
         repo: &'a str,
@@ -185,6 +190,7 @@ pub trait PipelineExecutor: Clone + Send + Sync + 'static {
     fn find_merge<'a>(
         &'a self,
         repo: &'a str,
+        kind: &'a str,
         task: &'a str,
         head: &'a str,
     ) -> impl Future<Output = Result<Option<(String, bool)>, String>> + Send + 'a;

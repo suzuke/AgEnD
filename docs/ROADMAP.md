@@ -271,3 +271,5 @@
 - 2026-10-07：12C schema 0013／GithubStore 邊界保存固定遠端身分及未確認嘗試，原生 SQLite 重開與 40 個 store 契約通過；fmt、core／daemon clippy、前後實際 no-std 通過。正式 Forge／pipeline 仍待接線，未宣稱完整驗收。
 
 - 2026-10-07：12C 增加持久單次 PR create／marker 對帳與精確 lease push；捕獲回覆＋SQLite 重開驗 PR 不重建，真 Git／bare repo 驗遺失回覆與競爭 writer 保護。正式 Forge／pipeline 尚未接入，未執行外部 GitHub mutation。
+
+- 2026-10-07：12C SelectedForge／GithubForge 接 submit、checks、merge 與重啟查核；whole-queue 選擇測試及真 local pipeline adapter 10 案通過。GitHub 完整原生流水線／清理待補；已提出遠端 base 競爭的分支保護取捨，尚待答覆，未做外部 GitHub mutation。

@@ -43,7 +43,11 @@ where
             .ok_or_else(|| blocked("GitHub repository identity missing"))
     }
 
-    fn owned_pull(&self, change: &GithubChange, pull: &Pull) -> Result<(), ExecutionError> {
+    pub(super) fn owned_pull(
+        &self,
+        change: &GithubChange,
+        pull: &Pull,
+    ) -> Result<(), ExecutionError> {
         if pull.repository_id != change.identity.repository_id
             || !pull
                 .body

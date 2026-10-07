@@ -92,3 +92,5 @@ C 段 CLP 拒絕案例同跑真 parser-backed fake 與真 daemon：agent caller 
 抽出的 hook_payload／initialize_request 仍由 FakeClaude 與原 conformance 使用；新的 ack_request 用 shared core ClaudeReceipt 產生 MCP 工具請求。真正 consumer 的跨 process 回歸在 `agend/tests/claude_bridge.rs`，對真 helper／daemon 跑；未新增真 CLI 錄製或模型回合。
 
 `fake-opencode-cli` 為 12B holder 整合提供 version／serve／attach，API 沿用錄製對照的原生 producer，health 固定 1.18.34，資料只寫自有 AGEND_HOME/opencode 內的 XDG_DATA_HOME。舊 fake-opencode-serve 與 1.18.31 conformance 固定不變；此 CLI fixture 不驗真 TUI 畫面、不啟動模型。
+
+12C whole-queue 測試從 executor effects 核 `forge:github`／`prepare-main:github`／`find-merge:github`，搭配真 API／Git 測試使用，不能獨立證明遠端 GitHub 合併。

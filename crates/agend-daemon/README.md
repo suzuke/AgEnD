@@ -179,3 +179,5 @@ cargo xtask accept cli             # 第 9 施工關 demo：cli_demo（在 agend
 12C schema 0013 保存 task 的 GitHub repo ID／branch／nonce、PR number、push intent 與 create attempt；CAS 更新禁止改綁，unknown attempt 不因 retention 過期。此批僅接 store 邊界，正式 Forge 仍施工中。
 
 12C 提交操作已有 single-attempt PR create／固定 nonce 查回，以及 persist-before-push、精確 force-with-lease 與遠端 head 核對；正式 Forge 選擇和 pipeline 接線仍未完成。
+
+12C 正式 SelectedForge／GithubForge 已接入 submit、checks、merge 及重啟對帳。GitHub checks 前後核 head；main 僅乾淨 fast-forward，remote head 外來變動時保留受阻任務。尚待完整原生流水線、遠端清理及 base 競爭政策確認，不宣稱 12C 完成。

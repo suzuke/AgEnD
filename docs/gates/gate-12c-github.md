@@ -2,12 +2,12 @@
 
 > **TL;DR**
 > - 依 D4／D29 接提交與合併；GitHub checks 使用 command 關卡。
-> - 目前已建立 gh API 傳輸與原 PR 的 head／merge 收據核對，尚未接入正式流水線。
+> - 正式 Forge／workflow 選擇與 checks head 核對已接入；完整原生流水線與受控 GitHub 真測尚未完成。
 > - 下一步：push／PR 身分與恢復、核准 head 合併、pipeline 與原生契約，再做受控真測。
 
 ## 接線缺口
 
-既有 workflow 的 submit 含 `forge`，但 daemon 執行時仍一律建立 LocalForge。12C 必須讓 submit、merge 與重啟對帳使用 task 固定 workflow 指定的 forge；不能只有一個未使用的 GitHub adapter。
+本批已讓 submit、checks、merge 與重啟對帳使用 task 固定 workflow 指定的 forge；未知或混用 forge 在 workflow 驗證時拒絕。GitHub 操作受阻保留任務與 binding，供 operator Retry，不因暫時網路錯誤直接清理 task。
 
 GitHub checks 沿用 D29：`command` 的 `{pr}`／`{head}`／`{branch}` 展開與既有 head／attempt 規則。合併呼叫必須帶完整 approved head，並核 API 回傳的 merge 結果；網路回覆遺失不能直接宣稱成功。GitHub API 的 `sha` 不符回 409，見[官方端點](https://docs.github.com/en/rest/pulls/pulls#merge-a-pull-request)。
 
@@ -21,8 +21,8 @@ API client 合併前先 GET 原 PR；head 不符直接回報 HeadChanged，已 m
 
 ## 尚未完成
 
-- GitHubForge 的 submit／head／merge，以及 task／PR 身分持久對帳。
-- 正式 workflow forge 選擇、遠端 main 前進與 rebase、head 變更時重新 checks／核准。
+- 正式 GitHubForge 的完整原生 FRG 契約、daemon 重啟與遠端清理驗證。
+- 已接入的遠端 main fast-forward／rebase／重新 push 和 checks，尚需完整故障驗證。
 - 單次提交／回覆遺失／重啟的原生測試、完整 FRG 契約與真 repo 流水線。
 - 全新 verifier、CI、合併與清理；本頁不宣稱第 12C 完成。
 
@@ -35,3 +35,13 @@ schema 0013 保存固定 task／repo ID／branch／nonce 與 PR number，禁止 
 `submit_pull` 先核 repo ID，PR 建立前持久 claim；回覆遺失只搜尋固定 branch／base 與 task nonce，unknown attempt 不重送，外來 PR 不認領。`push_owned` 核固定 origin，持久 push intent，再以完整舊 SHA 的 force-with-lease 更新單一 ref；回覆遺失核遠端 head，重啟未確認時不覆蓋新 head。
 
 新增兩個捕獲回覆＋原生 SQLite 重開案例，以及一個真 Git／bare repo 的成功遺失回覆、競爭 writer、重啟不重送案例。測試沒有外部 GitHub mutation；正式 Forge 選擇、pipeline 與完整 FRG 仍待完成。
+
+## 正式接線（施工中）
+
+`SelectedForge` 依固定 workflow 選 local／github；GitHubForge 使用 durable ownership 執行 submit／head／merge，merge 前後都核 repo ID 與 PR marker，已合併時只讀原收據。checks 前重新確認已推送 head，command 前後再 GET PR head；遠端 head 變動會保留受阻狀態，不套用過期 checks。
+
+GitHub main 只在乾淨 main checkout 且可 fast-forward 時同步；不重設使用者提交。rebase 後的 checks 會先更新同一個 PR。已加 whole-queue fake 測試證明所有階段選 github，既有真 local Forge FRG 1–10 仍通過。這不是正式 GitHub daemon 真測。
+
+### 待決策的遠端 base 競爭
+
+GitHub merge API 只接受 approved head，沒有 expected-base CAS。已向使用者提出：要求目標分支嚴格 up-to-date 保護（建議），或接受 main 在最後查核與 merge 間前進的空窗。尚未收到決定；相關完整 merge 認證及外部寫入驗證暫不進行，其餘接線／測試持續。

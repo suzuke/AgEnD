@@ -115,3 +115,5 @@ cargo xtask accept core
 ## GitHub 遠端身分
 
 `github` 提供 `GithubIdentity`、`GithubChange` 與 `GithubStore` 邊界。純狀態規則禁止更换 repository／PR、覆蓋未確認 push intent 或清除 create attempt；正式 Forge 接線仍在 12C 施工。
+
+Workflow submit 只接受 local／github，且同一 workflow 不可混用；`forge_kind()` 供 pipeline 的後續 checks／merge／恢復選擇。

@@ -15,7 +15,7 @@
 |---|---|---|
 | A Claude | channel、hooks、啟動、忙碌策略、送達與清掃 | v12 七則完整 smoke PASS；#154 已合併 `a6cdb4c` |
 | B OpenCode | serve、session、送達、權限；三個 backend 互傳 | 正式 Driver／holder／權限與 DRV 10/10；基本／busy interrupt／permission 真測及三 backend 六方向互傳通過，全新 verifier：1,062 passed、fmt／clippy／no-std 通過；#155 已合併 `2a02fda`，最終四個 CI jobs 通過，自有 worktree／branch／target 已清 |
-| C GitHub forge | push、PR、checks、head 對帳、merge 與收尾 | [API／收據基礎施工中](gate-12c-github.md)；Forge／pipeline 未接入 |
+| C GitHub forge | push、PR、checks、head 對帳、merge 與收尾 | [正式 Forge／pipeline 已接入、施工中](gate-12c-github.md)；完整原生／真測與收尾未完成 |
 | D Telegram | notifier、allowlist、token、手機操作、G4 已讀 | 尚未實作；專用 bot 設定與測試 chat 已備妥，憑證只留本機 |
 
 B–D 依現有決策與持續授權具體化；遇新的重大取捨才再請使用者決定。第 13 關安裝／發布不在此次範圍。

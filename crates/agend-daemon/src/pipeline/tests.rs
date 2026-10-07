@@ -493,3 +493,63 @@ async fn failed_human_approval_commit_keeps_attention_and_publishes_no_resolutio
     }
     assert!(lab.executor.forge.merges().is_empty());
 }
+
+#[tokio::test]
+async fn github_workflow_selects_its_forge_for_submit_checks_and_merge() {
+    let lab = Lab::new().await;
+    let mut workflow = Workflow::builtin_code();
+    workflow.version = 2;
+    for stage in &mut workflow.stages {
+        if let Stage::Submit { forge } = &mut stage.stage {
+            *forge = "github".into();
+        }
+    }
+    lab.store.save_workflow(&workflow).await.unwrap();
+    let task = lab.create().await;
+    let binding = lab
+        .store
+        .bindings()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|b| b.task == task)
+        .unwrap();
+    lab.executor.forge.push(binding.branch.as_deref().unwrap());
+    lab.done(&task, 1).await.unwrap();
+    lab.stage(&task, "review").await;
+    lab.handle
+        .agent(
+            Some("reviewer".into()),
+            AgentCommand::ReviewApprove {
+                task_id: task.clone(),
+                identity: Some(ResultIdentity {
+                    stage_id: "review".into(),
+                    attempt: 1,
+                }),
+            },
+        )
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while lab
+            .store
+            .load_task(&task)
+            .await
+            .unwrap()
+            .unwrap()
+            .task
+            .status
+            != TaskStatus::Done
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let effects = lab.executor.effects();
+    assert!(effects.contains(&"find-merge:github".into()));
+    assert!(effects.contains(&"prepare-main:github".into()));
+    assert!(effects.iter().filter(|s| *s == "forge:github").count() >= 3);
+    assert!(!effects.iter().any(|s| s == "forge:local"));
+    assert_eq!(lab.executor.forge.merges().len(), 1);
+}

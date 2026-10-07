@@ -187,6 +187,7 @@ where
                         match git
                             .find_merge(
                                 &repo,
+                                loaded.state.workflow().forge_kind(),
                                 &task.id,
                                 loaded.state.current_head().unwrap_or_default(),
                             )
@@ -197,6 +198,11 @@ where
                                 continue;
                             }
                             Ok(None) => {}
+                            Err(reason) if loaded.state.workflow().forge_kind() == "github" => {
+                                self.note(&b.task, Some(format!("merge-blocked:{reason}")))
+                                    .await?;
+                                continue;
+                            }
                             Err(reason) => {
                                 self.fail_restore(
                                     &b.task,

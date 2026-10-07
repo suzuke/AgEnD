@@ -43,7 +43,11 @@ where
         Pull::parse(&reply.value, &self.name, number, branch, &self.base).map_err(blocked)
     }
 
-    async fn receipt(&self, pull: &Pull, approved: &str) -> Result<MergeResult, ExecutionError> {
+    pub(super) async fn receipt(
+        &self,
+        pull: &Pull,
+        approved: &str,
+    ) -> Result<MergeResult, ExecutionError> {
         let sha = pull
             .receipt_for(approved)
             .map_err(blocked)?
@@ -75,7 +79,38 @@ where
         branch: &str,
         approved: &str,
     ) -> Result<MergeResult, ExecutionError> {
+        self.merge_checked(number, branch, approved, None).await
+    }
+
+    pub async fn merge_owned(
+        &self,
+        change: &agend_core::github::GithubChange,
+        approved: &str,
+    ) -> Result<MergeResult, ExecutionError> {
+        if self.name != change.identity.repository
+            || self.base != change.identity.base
+            || self.repository_id().await? != change.identity.repository_id
+        {
+            return Err(blocked("GitHub merge repository differs from ownership"));
+        }
+        let number = change
+            .pull_number
+            .ok_or_else(|| blocked("GitHub merge has no owned PR"))?;
+        self.merge_checked(number, &change.identity.branch, approved, Some(change))
+            .await
+    }
+
+    async fn merge_checked(
+        &self,
+        number: u64,
+        branch: &str,
+        approved: &str,
+        ownership: Option<&agend_core::github::GithubChange>,
+    ) -> Result<MergeResult, ExecutionError> {
         let before = self.pull(number, branch).await?;
+        if let Some(change) = ownership {
+            self.owned_pull(change, &before)?;
+        }
         if before.head != approved || !super::pull::full_sha(approved) {
             return Ok(MergeResult::HeadChanged {
                 actual_head: before.head,
@@ -99,6 +134,9 @@ where
         // Even a lost or refused response can race a successful remote merge.
         // Reconcile only the same PR/head and prove the returned commit's parents.
         let after = self.pull(number, branch).await?;
+        if let Some(change) = ownership {
+            self.owned_pull(change, &after)?;
+        }
         if after.head != approved {
             return Ok(MergeResult::HeadChanged {
                 actual_head: after.head,
@@ -253,5 +291,95 @@ mod tests {
             1
         );
         assert!(commands[1].contains(&format!("'sha={}'", pull["head"]["sha"].as_str().unwrap())));
+    }
+    #[test]
+    fn owned_merge_refuses_a_recreated_repository_before_writing() {
+        use agend_core::github::{GithubChange, GithubIdentity};
+        let (mut pull, _) = recorded();
+        pull["body"] = serde_json::json!("<!-- agend:t-1:nonce -->");
+        let id = pull["head"]["repo"]["id"].as_u64().unwrap();
+        let change = GithubChange {
+            identity: GithubIdentity {
+                task_id: "t-1".into(),
+                local_repo: "/repo".into(),
+                repository: "suzuke/AgEnD".into(),
+                repository_id: id,
+                base: "v2".into(),
+                branch: "test/g12a-smoke-contract".into(),
+                nonce: "nonce".into(),
+            },
+            pull_number: Some(154),
+            pushed_head: Some(pull["head"]["sha"].as_str().unwrap().into()),
+            push_intent: None,
+            create_attempted: true,
+        };
+        let mut repo: Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/github/repository.json"
+        ))
+        .unwrap();
+        repo["id"] = serde_json::json!(id + 1);
+        let repository = repository(vec![response(&repo)]);
+        assert!(
+            agend_testkit::block_on(
+                repository.merge_owned(&change, change.pushed_head.as_deref().unwrap())
+            )
+            .is_err()
+        );
+        assert_eq!(repository.api.runner.commands.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn an_owned_merge_cannot_accept_a_foreign_receipt_after_the_put() {
+        use agend_core::github::{GithubChange, GithubIdentity};
+        let (mut pull, _) = recorded();
+        pull["body"] = serde_json::json!("<!-- agend:t-1:nonce -->");
+        let change = GithubChange {
+            identity: GithubIdentity {
+                task_id: "t-1".into(),
+                local_repo: "/repo".into(),
+                repository: "suzuke/AgEnD".into(),
+                repository_id: pull["head"]["repo"]["id"].as_u64().unwrap(),
+                base: "v2".into(),
+                branch: "test/g12a-smoke-contract".into(),
+                nonce: "nonce".into(),
+            },
+            pull_number: Some(154),
+            pushed_head: Some(pull["head"]["sha"].as_str().unwrap().into()),
+            push_intent: None,
+            create_attempted: true,
+        };
+        let repo: Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/github/repository.json"
+        ))
+        .unwrap();
+        let mut pending = pull.clone();
+        pending["merged"] = Value::Bool(false);
+        pending["state"] = serde_json::json!("open");
+        pending["merge_commit_sha"] = Value::Null;
+        pull["body"] = serde_json::json!("foreign receipt");
+        let repository = repository(vec![
+            response(&repo),
+            response(&pending),
+            vec![],
+            response(&pull),
+        ]);
+        assert!(
+            agend_testkit::block_on(
+                repository.merge_owned(&change, change.pushed_head.as_deref().unwrap())
+            )
+            .is_err()
+        );
+        assert_eq!(
+            repository
+                .api
+                .runner
+                .commands
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|s| s.contains("'--method' 'PUT'"))
+                .count(),
+            1
+        );
     }
 }

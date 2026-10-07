@@ -181,3 +181,5 @@ OpenCode `oversized_total_history_does_not_block_old_receipts_or_new_delivery` �
 12C `cargo test -p agend-daemon --lib store::github` 使用原生 SQLite 跨重開驗 pending push／create、stale revision、PR／repo 身分不可換綁及同 remote branch 不能分配兩個 task。schema 0013 另由 store migration／golden／retention 契約覆蓋。
 
 12C `forge::github::submission` 以真捕獲 GitHub 回覆注入 task marker 與遺失回覆，配原生 SQLite 重開驗單次 create、unknown 不重送及外來 PR 拒絕。`forge::github::push` 執行真 Git／bare repo，測成功後遺失回覆與 lease 競爭失敗，重開 DB 後不重送。這些尚非正式 daemon pipeline 驗收。
+
+`github_workflow_selects_its_forge_for_submit_checks_and_merge` 經 whole-queue fakes 核 github 選擇，不允許退回 local；實際 local FRG 1–10、runner／sandbox regression 由 `pipeline_adapters` 覆蓋。GitHub API replay 另核 repo 重建與 PUT 後外來 marker 不可提供 merge 收據。尚無完整 GitHub 原生 FRG 認證。

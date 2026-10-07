@@ -145,3 +145,5 @@ daemon 重啟：`RuntimeFixture`、`DriverFixture`、`StoreFixture` 各有一個
 ## 第 12A bridge producer
 
 `fake_agent::claude::{hook_payload, initialize_request}` 抽出既有 fake producer，讓 native helper consumer 使用相同形狀。`ack_request` 產生本次新增 agend_ack 契約。FakeClaude 仍沿用既有錄製檔，不自動呼叫新 ACK；完整新版本真 CLI conformance 尚未通過，不以 native bridge 代替。
+
+FakePipelineExecutor 記錄 forge 選擇、base refresh 與 merge recovery 的 kind，供 pipeline 接線測試核對；不是 GitHub API 的行為替代證據。
