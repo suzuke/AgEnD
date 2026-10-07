@@ -14,3 +14,6 @@ pub mod permission;
 pub mod runtime;
 pub mod worker;
 pub use driver::OpenCodeDriver;
+
+#[cfg(test)]
+mod contract_tests;

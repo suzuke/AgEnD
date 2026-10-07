@@ -57,8 +57,7 @@ impl Driver for OpenCodeDriver {
         if row.state == agend_core::model::DeliveryState::Queued
             && row.attempted_at_unix_ms.is_none()
             && instance.status == crate::store::InstanceStatus::Running
-            && let Some(session) = instance.session_id.as_deref()
-            && self.store.opencode_reported_idle(id, session).await?
+            && instance.session_id.is_some()
         {
             let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
             while row.state == agend_core::model::DeliveryState::Queued

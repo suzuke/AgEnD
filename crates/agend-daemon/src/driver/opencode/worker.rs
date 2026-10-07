@@ -219,15 +219,16 @@ mod tests {
         // consume the write batch nor hide a later accepted message forever.
         for n in 0..140 {
             let id = format!("unknown-{n}");
-            block_on(driver.deliver(
-                "open-1",
-                &AgentMessage {
+            block_on(store.claim_message(
+                &crate::store::NewMessage {
                     id: id.clone(),
-                    from: "sender".into(),
+                    from_instance: "sender".into(),
+                    to_instance: "open-1".into(),
                     task_id: None,
                     body: "unknown result".into(),
+                    level: BusyLevel::Queue,
                 },
-                BusyLevel::Queue,
+                1,
             ))
             .unwrap();
             assert!(

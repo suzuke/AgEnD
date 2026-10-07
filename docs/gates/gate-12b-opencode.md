@@ -33,7 +33,9 @@
 
 原生 `opencode_bridge` 兩個整合案例已通過：真 daemon／holder／wrapper／socket，daemon 重啟保留 holder 與 permission ask；operator 拒絕一次、重複拒絕失敗；正常停止或 SIGKILL 自有 holder 後，以原 session 恢復且歷史僅一筆 user message。結束確認 server port 關閉，lab 目錄已清。未知 process group 不清除 attribution、不覆寫 runtime 檔案；attach 以完整 URL＋session 辨識。這些是零模型 fixture 證據，尚未完成真 OpenCode／三 backend 互傳驗收。
 
-Driver 事件已補 REST terminal assistant 回填（中途 tool-calls 不算回合完成）、持久 busy／idle 與 HTTP 429 usage 訊號。schema 0011 另保存已觀察 message id，事件 14 天清理後不重新發布同一回合。204 接受先記 Sent，完整歷史核對後才 Confirmed；閒置投遞最多等五秒取得真實回條，不偽造 Sent。原生測試覆蓋正常完成、abort、外來 assistant part 拒絕與事件刪除後不重複回填；尚未完成完整 DRV suite／429 原生錄製真證據。
+Driver 事件已補 REST terminal assistant 回填（中途 tool-calls 不算回合完成）、持久 busy／idle 與 HTTP 429 usage 訊號。schema 0011 另保存已觀察 message id，事件 14 天清理後不重新發布同一回合。204 接受先記 Sent，完整歷史核對後才 Confirmed；running instance 的新投遞最多等五秒取得真實回條，不偽造 Sent。原生測試覆蓋正常完成、abort、外來 assistant part 拒絕與事件刪除後不重複回填；完整 DRV suite 10/10 已通過（實際 Driver／Worker、原生 REST producer、每次 boot 重開 SQLite）；429 原生錄製真證據仍待完成。
+
+固定 SHA-256 的真 1.18.34 已完成零 session／零 prompt provider inventory：可用 opencode-go 與 openrouter，測試帳戶只複製至私有 namespace，原始 auth digest 不變，自有 process group／目錄已清。證據在 `AgEnD-ops/g12b-api-20261007/model-inventory`；尚未送模型 prompt。
 
 ## 下一步
 

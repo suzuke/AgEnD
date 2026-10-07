@@ -29,18 +29,6 @@ impl super::SqliteStore {
             }).collect()
         }).await
     }
-    pub async fn opencode_reported_idle(
-        &self,
-        instance: &str,
-        session: &str,
-    ) -> Result<bool, StoreError> {
-        let (instance, session) = (instance.to_owned(), session.to_owned());
-        self.call(move |c| {
-            use rusqlite::OptionalExtension;
-            let value:Option<String>=c.query_row("SELECT payload FROM driver_events WHERE instance_id=?1 AND session_id=?2 AND kind='OpenCodeState' ORDER BY seq DESC LIMIT 1",params![instance,session],|r|r.get(0)).optional()?;
-            Ok(value.and_then(|v|serde_json::from_str::<serde_json::Value>(&v).ok()).is_some_and(|v|v["busy"]==false))
-        }).await
-    }
     pub async fn begin_opencode_attempt(
         &self,
         id: &str,
