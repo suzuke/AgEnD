@@ -27,9 +27,11 @@ python3 -B scripts/verify_smoke_contract.py --agend <固定 agend binary>
 
 [v8](gate-12a-observed-smoke-v8.md) 的原始 audit 顯示四個啟動 `gh auth token` 被拒絕，另有一次正確的工作 `gh_merge`。修正版在兩個初始 idle 後、INITIAL 傳送前保存完整 audit prefix；prefix 中的 gh 只允許 A／B 在各自精確 cwd 的 `refuse`／`gh_token`／`auth token`。prefix 之後仍只允許一個 A `gh_merge`，任何額外 gh（包含 token）、prefix 改寫／截短與未知啟動 gh 都拒絕；不以時間戳推定啟動邊界。原始 prefix、完整 audit 與失敗觀察私有保留。
 
-Bash／zsh 各由真 shim 產生四個 startup token 拒絕，再跑 INITIAL；各二十個反例、空 prefix 正例與缺 baseline 負例通過，fixture 刪除。七則 prompt、ACK／route／session、900 秒及零重跑不變；只改 verifier 的讀檔順序與 audit 核對，不修改 daemon／防護政策。
+Bash／zsh 各由真 shim 產生四個 startup token 拒絕，再跑 INITIAL；各二十三個反例、空 prefix 正例與缺 baseline 負例通過，fixture 刪除。七則 prompt、ACK／route／session、900 秒及零重跑不變；只改 verifier 的讀檔順序與 audit 核對，不修改 daemon／防護政策。
 
 本批只改 scripts／文件；使用的歷史 native binaries 釘 SHA，與本批 Rust source tree 比對，不能宣稱重新編譯，也不能認證真模型行為。全新覆核與 CI 完成後填入紀錄。
+
+全新 verifier 在固定 `a85a91a`／未執行 v9 發現 `read_text()` 會正規化 LF／CRLF，prefix 的 byte 改寫未被拒絕，保留原 REFUTED。修正版改用 `read_bytes()`，逐 byte 核 prefix，原始資料以 base64 一併保存；換行改寫與無效 UTF-8 都拒絕，失敗 bytes 仍可還原。Bash／zsh 各二十三個反例通過，新固定計畫另覆核。
 
 ## 進度紀錄
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run generated work in Bash and zsh against native shims, without Claude."""
 import argparse
+import base64
 import copy
 import json
 import os
@@ -54,7 +55,7 @@ def verify(binary, shell_executable):
                                          capture_output=True, text=True, timeout=5)
                 assert refused.returncode == 1 and "agend-shim: refused" in refused.stderr
         run.capture_guard_baseline()
-        baseline = run.guard_audit_baseline
+        baseline = run.guard_audit_baseline.decode("utf-8")
         assert len(run.startup_gh_records(baseline)) == 4
         result = subprocess.run([shell_executable, "-c", shell], cwd=work, env=environment,
                                 capture_output=True, text=True, timeout=10)
@@ -69,7 +70,7 @@ def verify(binary, shell_executable):
         suffix = native[len(baseline):]
         record = json.loads(suffix)
         empty = object.__new__(smoke.Smoke)
-        empty.home, empty.out, empty.guard_audit_baseline = home, out, ""
+        empty.home, empty.out, empty.guard_audit_baseline = home, out, b""
         log.write_text(suffix)
         assert not empty.guard_evidence()["startup_gh_refusals"]
         log.write_text(native)
@@ -92,17 +93,34 @@ def verify(binary, shell_executable):
         mutations["missing-native-refusal"] = baseline
         mutations["removed-startup-prefix"] = suffix
         mutations["altered-startup-prefix"] = baseline.replace('"gh_token"', '"gh_merge"', 1) + suffix
+        mutations["byte-altered-prefix-newlines"] = baseline.replace("\n", "\r\n") + suffix
+        mutations["invalid-utf8-observation"] = native.encode("utf-8") + b"\xff\n"
         mutations["late-auth-token"] = native + baseline.splitlines()[0] + "\n"
         mutations["late-unknown-gh"] = native + json.dumps(dict(record, code="unknown")) + "\n"
         rejected = []
         for name, contents in mutations.items():
-            log.write_text(contents)
+            encoded = contents.encode("utf-8") if isinstance(contents, str) else contents
+            log.write_bytes(encoded)
             try:
                 run.guard_evidence()
             except RuntimeError:
                 rejected.append(name)
             else:
                 raise AssertionError("accepted false native evidence: " + name)
+            saved = json.loads((out / "gh-guard-observation.json").read_text())
+            assert base64.b64decode(saved["raw_base64"]["audit/shim.jsonl"]) == encoded
+        log.write_text(native)
+        bad_start = object.__new__(smoke.Smoke)
+        bad_start.home, bad_start.out = home, out
+        log.write_bytes(b"\xff\n")
+        try:
+            bad_start.capture_guard_baseline()
+        except RuntimeError:
+            rejected.append("invalid-utf8-startup")
+        else:
+            raise AssertionError("accepted invalid UTF-8 startup audit")
+        saved = json.loads((out / "gh-guard-baseline.json").read_text())
+        assert base64.b64decode(saved["raw_base64"]) == b"\xff\n" and saved["validation"] == "pending"
         log.write_text(native)
         for field, value in [("event", "bypass"), ("code", "gh_merge"),
                              ("argv", ["pr", "merge"]), ("instance", "foreign"),

@@ -19,6 +19,8 @@
 
 Bash／zsh 分別跑真正 shim 產生的四個 startup refusals 與 INITIAL，核空 prefix 正例、缺 baseline 負例、各二十個 mutations、完整 peer quoting 與七段語法。fixtures 自動移除，前後實際 check-deps/no-std 與 fmt 通過。七個 prompt、budget、driver、startup classifier、ACK／route／session 與 gh 政策不改；歷史 native binary pins 未重建，Rust source tree 未改。
 
+全新 verifier 對固定 `a85a91a`／v9 零模型覆核判 REFUTED：`read_text()` 把 CRLF 正規化成 LF，使 byte 改寫仍被接受。v9 沒有執行，也不覆寫原覆核；修正版使用 raw bytes／base64 保存及逐 byte prefix 比對，追加換行改寫與無效 UTF-8 反例，兩個 shell 各二十三個反例通過。新計畫待另一次全新覆核。
+
 ## CI、清理與覆核
 
 `81804dc` push Ubuntu 原輪在既有 TUI application-cursor 按鍵測試逾時；相同 head PR Ubuntu 通過，本機原 case 六次通過。同一 head 只重跑失敗 job 一次後四 checks 全通，原始 log 保留，沒有宣稱修復時序問題。

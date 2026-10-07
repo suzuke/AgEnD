@@ -5,6 +5,7 @@ No backend is executed by --plan or by argument/authorization validation.
 The real CLI and daemon are the producers; SQLite is read only AFTER exit.
 """
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -40,6 +41,13 @@ def require(ok, message):
 def digest(path):
     with Path(path).open("rb") as file:
         return hashlib.file_digest(file, "sha256").hexdigest()
+
+
+def audit_text(raw):
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise RuntimeError("shim audit is not UTF-8") from error
 
 
 def completed_startup(row):
@@ -248,30 +256,38 @@ class Smoke:
     def capture_guard_baseline(self):
         require(not hasattr(self, "guard_audit_baseline"), "startup shim audit already captured")
         path = self.home / "audit" / "shim.jsonl"
-        raw = path.read_text() if path.is_file() else ""
+        raw = path.read_bytes() if path.is_file() else b""
         write_json(self.out / "gh-guard-baseline.json", {
-            "audit/shim.jsonl": raw, "captured_before": "INITIAL harness send",
+            "audit/shim.jsonl": raw.decode("utf-8", errors="replace"),
+            "raw_base64": base64.b64encode(raw).decode("ascii"),
+            "captured_before": "INITIAL harness send",
             "validation": "pending",
         })
-        gh = self.startup_gh_records(raw)
+        gh = self.startup_gh_records(audit_text(raw))
         write_json(self.out / "gh-guard-baseline.json", {
-            "audit/shim.jsonl": raw, "gh_records": gh,
+            "audit/shim.jsonl": audit_text(raw), "raw_base64": base64.b64encode(raw).decode("ascii"),
+            "gh_records": gh,
             "captured_before": "INITIAL harness send", "validation": "passed",
         })
         self.guard_audit_baseline = raw
 
     def guard_evidence(self):
         work = self.home / "workspace" / IDS[0]
-        files = {name: path.read_text() if path.is_file() else None for name, path in (
+        raw_files = {name: path.read_bytes() if path.is_file() else None for name, path in (
             ("shim-paths.txt", work / "shim-paths.txt"),
             ("gh-guard.txt", work / "gh-guard.txt"),
             ("gh-exit.txt", work / "gh-exit.txt"),
             ("audit/shim.jsonl", self.home / "audit" / "shim.jsonl"),
         )}
+        files = {name: data.decode("utf-8", errors="replace") if data is not None else None
+                 for name, data in raw_files.items()}
         # Keep the actual observations even when a later assertion fails and
         # owned workspace cleanup runs; a failure label is not raw evidence.
-        write_json(self.out / "gh-guard-observation.json", files)
+        write_json(self.out / "gh-guard-observation.json", dict(files, raw_base64={
+            name: base64.b64encode(data).decode("ascii") if data is not None else None
+            for name, data in raw_files.items()}))
         require(all(value is not None for value in files.values()), "gh guard observation missing")
+        files = {name: audit_text(data) for name, data in raw_files.items()}
         paths = files["shim-paths.txt"].splitlines()
         require(paths == [str(self.home / "bin" / t) for t in ("git", "kill", "pkill", "killall", "gh")],
                 "external shim PATH observation differs")
@@ -280,9 +296,9 @@ class Smoke:
                 "gh guard was not observed")
         require(hasattr(self, "guard_audit_baseline"), "startup shim audit baseline missing")
         prefix = self.guard_audit_baseline
-        startup_gh = self.startup_gh_records(prefix)
-        require(files["audit/shim.jsonl"].startswith(prefix), "startup shim audit prefix changed")
-        suffix = files["audit/shim.jsonl"][len(prefix):]
+        startup_gh = self.startup_gh_records(audit_text(prefix))
+        require(raw_files["audit/shim.jsonl"].startswith(prefix), "startup shim audit prefix changed")
+        suffix = audit_text(raw_files["audit/shim.jsonl"][len(prefix):])
         records = [json.loads(line) for line in suffix.splitlines() if line]
         gh = [r for r in records if r.get("tool") == "gh"]
         require(len(gh) == 1 and gh[0].get("event") == "refuse" and gh[0].get("code") == "gh_merge"
