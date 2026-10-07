@@ -224,7 +224,10 @@ fn passive_known_trust_sends_no_startup_keys_at_both_widths() {
         capture::run(&opts, &agend()).unwrap();
         assert!(!root.path().join("input-received").exists());
         let recorded = fs::read_to_string(out.join("screens.jsonl")).unwrap();
-        assert!(recorded.contains("No, exit"));
+        assert!(
+            recorded.contains("No, exit"),
+            "missing native trust screen: {recorded}"
+        );
         let result: Value =
             serde_json::from_str(&fs::read_to_string(out.join("result.json")).unwrap()).unwrap();
         assert_eq!(result["input_sent"], false);
@@ -737,7 +740,10 @@ fn real_holder_captures_two_widths_without_any_input_and_cleans_up() {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(rendered.contains("NATIVE STARTUP CAPTURE"));
+        assert!(
+            rendered.contains("NATIVE STARTUP CAPTURE"),
+            "missing native banner: {rendered}"
+        );
         assert!(rendered.contains("繁中 · 界 · é"), "{rendered}");
         assert!(
             rendered.contains(&format!("SIZE:24 {columns}")),
@@ -853,7 +859,7 @@ fn soft_wrapped_identifiers_are_redacted_as_a_complete_native_line() {
     );
     assert!(
         stored.contains("<email>"),
-        "native wrapped email was not redacted"
+        "native wrapped email was not redacted: {stored}"
     );
 }
 
