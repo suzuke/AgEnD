@@ -191,3 +191,5 @@ OpenCode `oversized_total_history_does_not_block_old_receipts_or_new_delivery` �
 `remote_cleanup_failure_releases_local_capacity_and_waits_for_operator_retry` 核遠端收尾失敗仍解除本機 binding，wake 不重送，operator Retry 才重新對帳。store 測試跨 DB 重開核 cleanup attempt 不可清除、complete 後不可重新 push。
 
 `unresolved_merge_never_replays_after_restart_or_operator_retry` 令獨立 API producer 收到 PUT 後無收據且 PR 仍 open，核強制重啟與 operator Retry 均維持 PUT 次數 1。此案例與立即可見的成功遺失回覆分開，防止假陽性。
+
+`github_pipeline::unknown_merge_preserves_approved_head_until_late_receipt_after_main_advances` 驗 unknown PUT 後遠端 main 前進與 operator Retry：分支保留原核准 head、不得 rebase；原 head 的雙 parent merge 收據晚到，再硬重啟可完成，PUT 仍一次，fixture 程序及目錄清空。

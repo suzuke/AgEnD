@@ -279,3 +279,5 @@
 - 2026-10-07：12C 持久化 remote cleanup 與真 daemon 離線端到端通過：重啟單次 merge、main 前進重跑 checks、取消關 PR／保存 WIP；遠端失敗仍釋放本機容量。尚待 base 政策、真 GitHub 驗收與全新覆核，未宣稱 12C 完成。
 
 - 2026-10-07：12C fresh review 重現 unknown merge 在重啟後重送；修正為 PUT 前持久 merge attempt，重啟／Retry 只讀對帳，pending merge 禁止重新 push／遠端清理。原生 Forge 6 案及 daemon 4 案通過，待獨立修正覆驗。
+
+- 2026-10-07：12C 獨立反例推翻 ecde512 的 unknown merge＋main 前進恢復；保留原核准 head 對帳，未確認前不 rebase，補晚到原 head 收據跨 daemon 重啟完成的原生 regression；PUT 維持一次，外部真測與政策決策仍未完成。

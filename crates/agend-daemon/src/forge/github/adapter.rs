@@ -121,6 +121,14 @@ impl GithubForge {
         let Some(number) = record.change.pull_number else {
             return Ok(None);
         };
+        if record
+            .change
+            .merge_head
+            .as_deref()
+            .is_some_and(|attempt| attempt != head)
+        {
+            return Err("GitHub recovery head differs from durable merge attempt".into());
+        }
         let repository = self.repository().await.map_err(|e| e.to_string())?;
         if repository.name != record.change.identity.repository
             || repository
@@ -139,6 +147,11 @@ impl GithubForge {
             .owned_pull(&record.change, &pull)
             .map_err(|e| e.to_string())?;
         if !pull.merged {
+            if record.change.merge_head.is_some() {
+                // Recovery precedes prepare_main/rebase. An unresolved merge
+                // must keep the approved head fixed until its receipt arrives.
+                return Err("GitHub merge outcome unresolved; reconcile original approved head before preparing main".into());
+            }
             return Ok(None);
         }
         match repository
@@ -276,6 +289,14 @@ impl Forge for GithubForge {
         request: &MergeRequest,
     ) -> Result<MergeResult, ExecutionError> {
         let mut record = self.owned(&request.branch).await?;
+        if record
+            .change
+            .merge_head
+            .as_deref()
+            .is_some_and(|attempt| attempt != request.expected_head)
+        {
+            return Err(blocked("GitHub head differs from durable merge attempt"));
+        }
         if record.change.push_intent.is_some() {
             return Err(blocked("GitHub push has an unresolved outcome"));
         }

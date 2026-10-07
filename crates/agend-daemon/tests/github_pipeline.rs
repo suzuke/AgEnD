@@ -306,3 +306,162 @@ fn unresolved_merge_never_replays_after_restart_or_operator_retry() {
             .any(|t| t.task_id == task && t.status == "running")
     );
 }
+
+#[test]
+fn unknown_merge_preserves_approved_head_until_late_receipt_after_main_advances() {
+    use agend_core::protocol::client::{AttentionAction, ClientRequest, ResolveAttentionData};
+    let mut lab = pipeline::Lab::new(&[]).unwrap();
+    fixture(&mut lab);
+    let root = lab.home.join("github-fixture");
+    let remote = root.join("remote");
+    std::fs::write(root.join("unknown-merge"), "").unwrap();
+    lab.boot(None).unwrap();
+    let task = lab.create("g10", "github", "fresh-late").unwrap();
+    lab.wait_stage(&task, "approve").unwrap();
+    let branch = "agend/t-1/fresh-late";
+    let approved = pipeline::git(&lab.repo(), &["rev-parse", branch]).unwrap();
+    lab.approve(&task).unwrap();
+    pipeline::wait_until(&lab, || {
+        Ok(lab.fleet()?.attention.iter().any(|a| {
+            a.task_id.as_deref() == Some(&task) && a.actions.contains(&AttentionAction::Retry)
+        }))
+    })
+    .unwrap();
+    assert_eq!(mutations(&lab, "PUT"), 1);
+    pipeline::git(&remote, &["config", "user.name", "Fixture"]).unwrap();
+    pipeline::git(
+        &remote,
+        &["config", "user.email", "fixture@example.invalid"],
+    )
+    .unwrap();
+    let base = pipeline::git(&remote, &["rev-parse", "main"]).unwrap();
+    let tree = pipeline::git(&remote, &["rev-parse", "main^{tree}"]).unwrap();
+    let advanced = pipeline::git(
+        &remote,
+        &[
+            "commit-tree",
+            &tree,
+            "-p",
+            &base,
+            "-m",
+            "unrelated main advance after unknown",
+        ],
+    )
+    .unwrap();
+    pipeline::git(
+        &remote,
+        &["update-ref", "refs/heads/main", &advanced, &base],
+    )
+    .unwrap();
+    let attention = lab
+        .fleet()
+        .unwrap()
+        .attention
+        .into_iter()
+        .find(|a| {
+            a.task_id.as_deref() == Some(&task) && a.actions.contains(&AttentionAction::Retry)
+        })
+        .unwrap()
+        .attention_id
+        .unwrap();
+    lab.request(
+        None,
+        ClientRequest::ResolveAttention {
+            data: ResolveAttentionData {
+                request_id: "fresh-retry".into(),
+                attention_id: attention,
+                action: AttentionAction::Retry,
+                note: None,
+            },
+        },
+    )
+    .unwrap();
+    pipeline::wait_until(&lab, || {
+        Ok(lab.fleet()?.attention.iter().any(|a| {
+            a.task_id.as_deref() == Some(&task) && a.reason.contains("before preparing main")
+        }))
+    })
+    .unwrap();
+    pipeline::wait_until(&lab, || {
+        Ok(lab.fleet()?.attention.iter().any(|a| {
+            a.task_id.as_deref() == Some(&task) && a.actions.contains(&AttentionAction::Retry)
+        }))
+    })
+    .unwrap();
+    assert_eq!(
+        pipeline::git(&lab.repo(), &["rev-parse", branch]).unwrap(),
+        approved
+    );
+    assert!(!lab.logs().contains("main advanced; rebased"));
+    assert_eq!(mutations(&lab, "PUT"), 1);
+    assert_eq!(mutations(&lab, "PATCH"), 0);
+    // Native Git produces the delayed original approved-head merge. No API mutation.
+    let tree = pipeline::git(
+        &remote,
+        &["merge-tree", "--write-tree", &advanced, &approved],
+    )
+    .unwrap()
+    .lines()
+    .next()
+    .unwrap()
+    .to_owned();
+    let merged = pipeline::git(
+        &remote,
+        &[
+            "commit-tree",
+            &tree,
+            "-p",
+            &advanced,
+            "-p",
+            &approved,
+            "-m",
+            "late original merge receipt",
+        ],
+    )
+    .unwrap();
+    pipeline::git(
+        &remote,
+        &["update-ref", "refs/heads/main", &merged, &advanced],
+    )
+    .unwrap();
+    let mut states: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(root.join("pull-state.json")).unwrap())
+            .unwrap();
+    states[0]["state"] = serde_json::json!("closed");
+    states[0]["merged"] = serde_json::json!(true);
+    states[0]["merge_commit"] = serde_json::json!(merged);
+    std::fs::write(
+        root.join("pull-state.json"),
+        serde_json::to_vec(&states).unwrap(),
+    )
+    .unwrap();
+    lab.stop(true);
+    {
+        let store = SqliteStore::open(&lab.home, 0).unwrap();
+        let ledger = block_on(store.github_change(&task)).unwrap().unwrap();
+        assert_eq!(ledger.change.merge_head.as_deref(), Some(approved.as_str()));
+    }
+    lab.boot(None).unwrap();
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    let mut done = false;
+    while std::time::Instant::now() < until {
+        if lab
+            .fleet()
+            .unwrap()
+            .tasks
+            .iter()
+            .any(|t| t.task_id == task && t.status == "done")
+        {
+            done = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    assert_eq!(mutations(&lab, "PUT"), 1);
+    let home = lab.home.clone();
+    let repo = lab.repo();
+    drop(lab);
+    assert!(!home.exists());
+    assert!(!repo.exists());
+    assert!(done, "late valid original-head receipt must recover");
+}
