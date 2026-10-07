@@ -34,3 +34,5 @@ python3 -B /Users/suzuke/Documents/Hack/AgEnD-ops/g12a-smoke-contract-20261006/v
 ## 下一步
 
 核對全新 outcome 結論與最新 CI；依第 12 關持續授權交付，清理已合併工作樹後推進 OpenCode。
+
+2026-10-07 收尾：全新 verifier `CONFIRMED_SCOPED_SUCCESS`；固定 c82be62 的 push／PR Ubuntu／macOS 四個 CI jobs 全部通過。依持續完成第 12 關授權，#154 已合併為 `a6cdb4c`；已刪除自有 12A worktree 與本機 branch，保留必要證據、native pins 與使用者指定的 trust entries。12A 完成，12B–D 繼續施工。
