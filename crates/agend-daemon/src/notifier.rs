@@ -6,4 +6,8 @@
 //! it via `agend doctor` instead).
 
 pub mod config;
+pub mod delivery;
 pub mod http;
+
+#[cfg(test)]
+mod tests;

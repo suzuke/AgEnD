@@ -263,3 +263,5 @@
 - 2026-10-07：#155 固定 `e96f429` 全新 verifier CONFIRMED_SCOPED_SUCCESS：workspace 1,062 passed／0 failed／2 既有 ignored、fmt／clippy／實際 no-std；獨立核對六方向真模型 12 筆 Confirmed。補清早期 model-smoke-v1 自有 holder／attach，原清理誤判及更正保留；目前狀態文件更新，最終 CI／合併仍待完成。
 
 - 2026-10-07：12D 開始 secret-reference／allowlist 設定與 HTTPS 傳輸；getMe 唯讀一次、零訊息，基礎測試通過；正式 notifier、手機操作與 G4 仍待實作。12C 未合併工作樹保留供覆核，開 D 前已確認完成的 12B 與本輪 C 測試暫存清理。
+
+- 2026-10-07：12D 通知完整分段與 SQLite 逐段送出意圖／收據通過 NTF、長 Unicode 及未知結果重開不重送測試。真 Telegram 三則文字探測均已刪除；發現裸文字會 trim，改用首尾標記保留完整內容。daemon worker、手機操作及 G4 尚未完成。

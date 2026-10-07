@@ -1,0 +1,122 @@
+//! Durable Telegram delivery boundary; no network, clock or secret values.
+use crate::traits::{Notification, NotificationSeverity};
+use alloc::{
+    format,
+    string::{String, ToString},
+    vec::Vec,
+};
+use core::future::Future;
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TelegramDestination {
+    pub bot_id: u64,
+    pub chat_id: i64,
+    pub topic_id: Option<i64>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TelegramDelivery {
+    pub id: String,
+    pub destination: TelegramDestination,
+    pub notification: Notification,
+    pub parts: Vec<String>,
+    pub next_part: usize,
+    pub in_flight: bool,
+    pub message_ids: Vec<i64>,
+    pub abandoned: bool,
+    pub created_at_ms: u64,
+}
+impl TelegramDelivery {
+    pub fn new(
+        id: String,
+        destination: TelegramDestination,
+        notification: Notification,
+        now: u64,
+    ) -> Self {
+        let parts = render(&notification);
+        Self {
+            id,
+            destination,
+            notification,
+            parts,
+            next_part: 0,
+            in_flight: false,
+            message_ids: Vec::new(),
+            abandoned: false,
+            created_at_ms: now,
+        }
+    }
+    pub fn complete(&self) -> bool {
+        self.next_part == self.parts.len() && !self.in_flight && !self.abandoned
+    }
+    pub fn valid(&self) -> bool {
+        !self.id.is_empty()
+            && self.destination.bot_id > 0
+            && self.destination.bot_id < (1 << 52)
+            && self.destination.chat_id != 0
+            && self.destination.chat_id.unsigned_abs() < (1 << 52)
+            && self.destination.topic_id.is_none_or(|id| id > 0)
+            && self.parts == render(&self.notification)
+            && !self.parts.is_empty()
+            && self.next_part <= self.parts.len()
+            && self.message_ids.len() == self.next_part
+            && self.message_ids.iter().all(|id| *id > 0)
+            && (!self.in_flight || self.next_part < self.parts.len())
+    }
+}
+
+/// Telegram trims outer whitespace. A visible frame preserves the original
+/// payload inside it. Chunks count UTF-16 units without splitting UTF-8 scalars.
+pub fn render(note: &Notification) -> Vec<String> {
+    let severity = match note.severity {
+        NotificationSeverity::Info => "Info",
+        NotificationSeverity::Attention => "Attention",
+        NotificationSeverity::Error => "Error",
+    };
+    let task = note.task_id.as_deref().unwrap_or("—");
+    let payload = format!(
+        "[{severity}]\nTitle: {}\nTask: {task}\n\n{}",
+        note.title, note.body
+    );
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    let mut units = 0;
+    for (offset, character) in payload.char_indices() {
+        if units + character.len_utf16() > 4000 {
+            chunks.push(payload[start..offset].to_string());
+            start = offset;
+            units = 0;
+        }
+        units += character.len_utf16();
+    }
+    chunks.push(payload[start..].to_string());
+    let total = chunks.len();
+    chunks
+        .into_iter()
+        .enumerate()
+        .map(|(index, chunk)| format!("AgEnD · {}/{total}\n{chunk}\n——", index + 1))
+        .collect()
+}
+
+pub trait TelegramStore: Sync {
+    type Error: Send;
+    fn enqueue_telegram<'a>(
+        &'a self,
+        delivery: &'a TelegramDelivery,
+    ) -> impl Future<Output = Result<TelegramDelivery, Self::Error>> + Send + 'a;
+    fn telegram_delivery<'a>(
+        &'a self,
+        id: &'a str,
+    ) -> impl Future<Output = Result<Option<TelegramDelivery>, Self::Error>> + Send + 'a;
+    fn claim_telegram_part<'a>(
+        &'a self,
+        id: &'a str,
+        part: usize,
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send + 'a;
+    fn confirm_telegram_part<'a>(
+        &'a self,
+        id: &'a str,
+        part: usize,
+        message_id: i64,
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send + 'a;
+}

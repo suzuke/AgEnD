@@ -48,7 +48,7 @@ impl Api {
     pub fn new(token: Token) -> Self {
         Self::with_origin(token, "https://api.telegram.org".into())
     }
-    fn with_origin(token: Token, base: String) -> Self {
+    pub(super) fn with_origin(token: Token, base: String) -> Self {
         let config = ureq::Agent::config_builder()
             .proxy(None)
             .max_redirects(0)

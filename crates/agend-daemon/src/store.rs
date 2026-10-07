@@ -58,6 +58,7 @@ pub mod pipeline;
 pub mod retention;
 pub mod snapshot;
 pub mod task_row;
+pub mod telegram;
 
 use std::fmt;
 use std::fs::{self, DirBuilder, File, OpenOptions};

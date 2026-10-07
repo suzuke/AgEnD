@@ -132,3 +132,5 @@ xtask 的 `claude_1_5_envelopes_are_additive_and_receipts_keep_native_attributio
 授權只完成 workspace 信任，沒有確認 development channels，不宣稱 P5／P6 完成。
 
 12D config consumer 測試位於 daemon `notifier::config`：TOML parser 驗 secret reference 與 allowlist，core 不增加 I/O 相依。
+
+12D 分段與 delivery 狀態由 daemon 原生 NTF／SQLite 測試驗證，包含 Unicode／空白全文及重啟後未知結果不重送。

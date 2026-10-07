@@ -62,6 +62,14 @@ pub struct Rule {
 pub const RETENTION: &[Rule] = &[
     Rule {
         target: Target::Table {
+            name: "telegram_outbox",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "gate 12D: receipts and unknown send claims prevent replay; explicit archival policy follows worker integration",
+    },
+    Rule {
+        target: Target::Table {
             name: "opencode_observed",
             time_column: None,
         },
