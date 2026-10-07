@@ -14,6 +14,7 @@ pub struct Worker {
     pub session: Session,
     pub cancelled: Arc<AtomicBool>,
     pub model: Option<(String, String)>,
+    pub history_before: std::cell::RefCell<Option<String>>,
     pub reconcile_after: std::cell::Cell<i64>,
 }
 impl Worker {
@@ -54,7 +55,20 @@ impl Worker {
                 )
             })
             .map_err(|e| e.to_string())?;
-        let history = self.session.history()?;
+        let (mut history, newest_next) = self.session.history_page(16, None)?;
+        let before = self.history_before.borrow().clone();
+        let next = if let Some(before) = before {
+            let (older, next) = self.session.history_page(16, Some(&before))?;
+            let rows = history.as_array_mut().expect("validated page");
+            for row in older.as_array().expect("validated page") {
+                if !rows.iter().any(|r| r["info"]["id"] == row["info"]["id"]) {
+                    rows.push(row.clone());
+                }
+            }
+            next
+        } else {
+            newest_next
+        };
         let id = self.instance.clone();
         let after = self.reconcile_after.get();
         let rows = self
@@ -73,7 +87,24 @@ impl Worker {
             }
             let text =
                 crate::delivery::render(&row.from_instance, row.task_id.as_deref(), &row.body);
-            if history::confirmed(self.session.id(), &row.id, &text, &history)? {
+            let lookup = if history
+                .as_array()
+                .expect("validated")
+                .iter()
+                .any(|r| r["info"]["id"] == backend)
+            {
+                None
+            } else {
+                self.session
+                    .message(&backend)?
+                    .map(|r| serde_json::Value::Array(vec![r]))
+            };
+            if history::confirmed(
+                self.session.id(),
+                &row.id,
+                &text,
+                lookup.as_ref().unwrap_or(&history),
+            )? {
                 let (id, session) = (row.id.clone(), self.session.id().to_owned());
                 self.store
                     .call_blocking(move |conn| {
@@ -82,7 +113,7 @@ impl Worker {
                     .map_err(|e| e.to_string())?;
             }
         }
-        self.reconcile_after.set(if rows.len() < 128 {
+        self.reconcile_after.set(if rows.len() < 8 {
             0
         } else {
             rows.last().unwrap().seq
@@ -100,6 +131,7 @@ impl Worker {
                 )
             })
             .map_err(|e| e.to_string())?;
+        *self.history_before.borrow_mut() = next;
         let mut busy = self.session.busy()?;
         let id = self.instance.clone();
         let rows = self
@@ -178,6 +210,104 @@ mod tests {
     use std::time::Duration;
 
     #[test]
+    fn oversized_total_history_does_not_block_old_receipts_or_new_delivery() {
+        let dir = TempDir::new("opencode-large-history").unwrap();
+        let store = Arc::new(SqliteStore::open(dir.path(), 0).unwrap());
+        let server = Server::start(0, Duration::from_secs(600), None).unwrap();
+        let session =
+            Session::create(Http::new(server.port(), "fixture", "/fixture").unwrap()).unwrap();
+        block_on(store.add_instance(&Instance {
+            id: "open-1".into(),
+            backend: Backend::Opencode,
+            program: "unused".into(),
+            args: vec![],
+            working_directory: dir.path().display().to_string(),
+            session_id: Some(session.id().into()),
+            status: InstanceStatus::Running,
+            session_started: true,
+            agent_pid: None,
+            legacy_no_thread: false,
+            delivery: "push".into(),
+        }))
+        .unwrap();
+        let claim = |id: &str| {
+            block_on(store.claim_message(
+                &crate::store::NewMessage {
+                    id: id.into(),
+                    from_instance: "sender".into(),
+                    to_instance: "open-1".into(),
+                    task_id: None,
+                    body: id.into(),
+                    level: BusyLevel::Queue,
+                },
+                1,
+            ))
+            .unwrap()
+        };
+        claim("old");
+        assert!(
+            block_on(store.begin_opencode_attempt(
+                "old",
+                "open-1",
+                session.id(),
+                &history::message_id("old"),
+                1
+            ))
+            .unwrap()
+        );
+        session.submit("old", "From: sender\n\nold", None).unwrap();
+        session.abort().unwrap();
+        let large = "x".repeat(1_200_000);
+        for n in 0..18 {
+            session
+                .submit(&format!("foreign-{n}"), &large, None)
+                .unwrap();
+        }
+        assert!(
+            session.history().is_err(),
+            "unpaged history must exceed the real transport cap"
+        );
+        let worker = Worker {
+            store: store.clone(),
+            instance: "open-1".into(),
+            session,
+            cancelled: Arc::new(AtomicBool::new(false)),
+            model: None,
+            history_before: std::cell::RefCell::new(None),
+            reconcile_after: std::cell::Cell::new(0),
+        };
+        claim("new");
+        worker.tick().unwrap();
+        assert_eq!(
+            block_on(store.message("old")).unwrap().unwrap().state,
+            DeliveryState::Confirmed
+        );
+        assert_eq!(
+            block_on(store.message("new")).unwrap().unwrap().state,
+            DeliveryState::Sent
+        );
+        for _ in 0..6 {
+            worker.tick().unwrap();
+        }
+        assert_eq!(
+            block_on(store.message("new")).unwrap().unwrap().state,
+            DeliveryState::Confirmed
+        );
+        let events = block_on(OpenCodeDriver::new(store.clone()).events("open-1", None)).unwrap();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| matches!(
+                    e.kind,
+                    agend_core::traits::DriverEventKind::TurnCompleted { .. }
+                ))
+                .count(),
+            1,
+            "old aborted completion backfilled once"
+        );
+    }
+
+    #[test]
     fn interrupt_after_busy_queue_submits_once_even_when_backend_starts_queued_work() {
         for level in [BusyLevel::Steer, BusyLevel::Interrupt] {
             let dir = TempDir::new("opencode-interrupt").unwrap();
@@ -205,6 +335,7 @@ mod tests {
                 session,
                 cancelled: Arc::new(AtomicBool::new(false)),
                 model: None,
+                history_before: std::cell::RefCell::new(None),
                 reconcile_after: std::cell::Cell::new(0),
             };
             for (id, level) in [
@@ -288,6 +419,7 @@ mod tests {
             session,
             cancelled: Arc::new(AtomicBool::new(false)),
             model: None,
+            history_before: std::cell::RefCell::new(None),
             reconcile_after: std::cell::Cell::new(0),
         };
         let driver = OpenCodeDriver::new(store.clone());
@@ -336,8 +468,9 @@ mod tests {
             block_on(store.message("request-1")).unwrap().unwrap().state,
             DeliveryState::Sent
         );
-        worker.tick().unwrap();
-        worker.tick().unwrap();
+        for _ in 0..20 {
+            worker.tick().unwrap();
+        }
         assert_eq!(
             block_on(driver.deliver("open-1", &message, BusyLevel::Queue))
                 .unwrap()

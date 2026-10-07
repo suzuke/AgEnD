@@ -247,3 +247,5 @@
 - 2026-10-07：12B unknown delivery attention／operator-only Abandon 已接線；原生兩次重啟、agent 拒絕、人工終結、晚到確認與零重送驗證通過。長 REST 歷史分頁仍待修正。
 
 - 2026-10-07：12B 真 1.18.34 零模型捕獲兩頁游標與單筆歷史查詢；新增固定 endpoint 分頁 API 與 captured producer 回歸。worker 分頁接線仍待完成，原長歷史缺陷保持未完成。
+
+- 2026-10-07：12B worker 已接最新頁／歷史回填與舊 attempt 定點查詢；超過 16 MiB 原生歷史回歸核舊收件、新派工與早期完成只發布一次，沒有提高傳輸上限。

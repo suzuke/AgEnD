@@ -155,6 +155,7 @@ fn run(
         session,
         cancelled: cancelled.clone(),
         model,
+        history_before: std::cell::RefCell::new(None),
         reconcile_after: std::cell::Cell::new(0),
     };
     let mut failure = None;

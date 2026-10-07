@@ -68,10 +68,14 @@ impl Session {
         before: Option<&str>,
     ) -> Result<(Value, Option<String>), String> {
         self.verify()?;
-        let (rows, next) = self
-            .http
-            .page(&self.path("/message"), limit, before)
-            .map_err(|e| e.to_string())?;
+        let mut size = limit;
+        let (rows, next) = loop {
+            match self.http.page(&self.path("/message"), size, before) {
+                Ok(page) => break page,
+                Err(super::http::Error::TooLarge) if size > 1 => size = (size / 2).max(1),
+                Err(e) => return Err(e.to_string()),
+            }
+        };
         history::users(&self.id, &rows)?;
         if rows.as_array().expect("validated").len() > limit {
             return Err("OpenCode page exceeds requested limit".into());

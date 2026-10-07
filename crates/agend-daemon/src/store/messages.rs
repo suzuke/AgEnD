@@ -126,7 +126,7 @@ pub(crate) fn opencode_page(
          ORDER BY seq LIMIT ?4"
     ))?;
     let rows = stmt.query_map(
-        rusqlite::params![to, after, attempted, if attempted { 128 } else { 32 }],
+        rusqlite::params![to, after, attempted, if attempted { 8 } else { 32 }],
         from_row,
     )?;
     rows.map(|row| row?).collect()

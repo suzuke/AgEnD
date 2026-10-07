@@ -27,7 +27,7 @@
 
 完成後須涵蓋：一次寫入與斷線對帳、人工訊息不能誤認、busy queue／interrupt、遺失 session、daemon／holder 重啟、permission 漏事件與過期回覆、跨 backend 互傳、全新 verifier、雙平台 CI。真測使用固定版本／模型／有限訊息與時間預算；舊結果不替代真測。
 
-2026-10-07 daemon worker 已保存原 session、先記 attempt 再 POST，以 REST 原生歷史確認後發布持久事件；斷線不重送。舊 attempt 採每頁 128 筆循環核對，新工作獨立取 32 筆，140 筆 unknown 前綴不阻塞新工作。REST 錯誤立即轉 unknown；idle 需持續五秒。啟動前拒絕改寫仍存活 holder 的私人檔案；缺 session 不允許 resume。daemon 單元測試 108 項通過；這不等於 holder／真模型完整驗收。
+2026-10-07 daemon worker 已保存原 session、先記 attempt 再 POST，以 REST 原生歷史確認後發布持久事件；斷線不重送。舊 attempt 採每頁 8 筆循環定點核對，新工作獨立取 32 筆，140 筆 unknown 前綴不阻塞新工作。REST 錯誤立即轉 unknown；idle 需持續五秒。啟動前拒絕改寫仍存活 holder 的私人檔案；缺 session 不允許 resume。daemon 單元測試 108 項通過；這不等於 holder／真模型完整驗收。
 
 權限 API 已依本機 1.18.34 `/doc` 接上新版 reply route；回覆前比對 session 與完整原始請求，只支持 once／reject。migration 0010 保存觀察、決策與單次 HTTP attempt；重開 SQLite 再觀察同一請求不重設 attempt。原生 producer 測試覆蓋外來 session、內容變更、重複 id、過期回覆與重啟後不能再 claim。worker 已輪詢保存；「需要你」發布與 operator-only AnswerAsk 已接線。只接受明確選項，free text 拒絕；回覆不明時保留無重送動作的提示。完整 holder／協定端到端真測尚未完成。
 
@@ -45,11 +45,13 @@ OpenCode 同樣使用 daemon 的 `ZDOTDIR`，避免 login zsh 的系統 profile 
 
 正式 daemon 的六方向互傳原生測試已通過：Claude／Codex／OpenCode 每對雙向共六則，Unicode 與換行保留，各 receiver 只有兩筆且均 Confirmed。Claude 經真 helper 的 Written／ACK／Stop，Codex 與 OpenCode 經 native producer 及正式 Driver 對帳；這是零模型路由證據，不代表三個真模型都已互傳。測試初版漏 Stop 導致下一次 Claude 收件逾時，補齊 producer 生命週期後通過，沒有更改產品的忙閒規則。
 
-全新 context 缺口覆核（`1fd948d`）指出：unknown 投遞會被 30 天清理、全量 REST history 超 16 MiB 會卡住，以及 unknown 缺人工終結出口；因此不合併。schema 0012 正新增獨立 attempt 歸屬（instance 移除也不丟失），未終結 queued／sent 不清理，Confirmed／Failed 按最後更新滿 30 天才連同歸屬清理。45 天 fake-clock 回歸涵蓋 queued、sent、terminal cascade。REST 分頁仍待修正，unknown attention 已接上（下述原生證據），完整覆核另跑。
+全新 context 缺口覆核（`1fd948d`）指出：unknown 投遞會被 30 天清理、全量 REST history 超 16 MiB 會卡住，以及 unknown 缺人工終結出口；因此不合併。schema 0012 正新增獨立 attempt 歸屬（instance 移除也不丟失），未終結 queued／sent 不清理，Confirmed／Failed 按最後更新滿 30 天才連同歸屬清理。45 天 fake-clock 回歸涵蓋 queued、sent、terminal cascade。REST 分頁與 unknown attention 已補實作（下述原生證據），固定 head 全新覆核仍待完成，完整覆核另跑。
 
 OpenCode 投遞超過 10 秒仍未經完整歷史確認時，發布 `opencode-delivery:<id>` attention，只提供 operator 的 Abandon。重啟重新建提示，後到的有效 receipt 可正常消除提示；Abandon 經 DB thread 再核未終結狀態，原子記 Failed 與原因事件，晚到確認不復活。native daemon／holder 測試核兩次重啟、agent Forbidden、operator 終結及 backend 零 user message，確認未知 attempt 沒有重送。
 
-真 1.18.34 零模型分頁捕獲已完成：四筆 `noReply` user，`limit=2` 分兩頁，`X-Next-Cursor` 作不透明游標，舊 message 單筆查詢與原頁相同。新 API 封装僅在固定 loopback endpoint 附加 query，不跟隨 Link URL；captured producer 測試放入外來 Link，仍只使用原 endpoint。自有 server／目錄已清。這批先建立實測分頁接點，worker 尚未改為分頁，16 MiB 長歷史缺陷尚未宣稱修完。
+真 1.18.34 零模型分頁捕獲已完成：四筆 `noReply` user，`limit=2` 分兩頁，`X-Next-Cursor` 作不透明游標，舊 message 單筆查詢與原頁相同。新 API 封装僅在固定 loopback endpoint 附加 query，不跟隨 Link URL；captured producer 測試放入外來 Link，仍只使用原 endpoint。自有 server／目錄已清。worker 已接分頁與定點查詢，見以下超限回歸。
+
+worker 每輪讀最新 16 筆及一頁更早歷史，超限頁以更小 limit 重讀；最多 8 個舊 attempt 用單筆 endpoint 對帳，新投遞獨立取批次。游標只在該輪完成事件已入庫後前移，重啟可重掃且依 durable observed 去重。原生 21 MiB 以上歷史回歸先確認全量 API 超限，再核舊 receipt、新投遞与早期完成回填均成功。單筆記錄本身超過 16 MiB 仍拒絕，沒有移除傳輸安全上限；本修正處理 session 多筆累積超限。
 
 ## 下一步
 

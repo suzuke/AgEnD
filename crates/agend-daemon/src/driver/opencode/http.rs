@@ -20,6 +20,7 @@ pub enum Error {
     Transport(String),
     Status(u16),
     InvalidJson,
+    TooLarge,
 }
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -27,6 +28,7 @@ impl std::fmt::Display for Error {
             Self::InvalidRequest => f.write_str("invalid OpenCode request"),
             Self::Transport(error) => write!(f, "OpenCode transport: {error}"),
             Self::Status(status) => write!(f, "OpenCode HTTP status {status}"),
+            Self::TooLarge => f.write_str("OpenCode response exceeds size limit"),
             Self::InvalidJson => f.write_str("invalid OpenCode JSON response"),
         }
     }
@@ -146,6 +148,15 @@ fn decode(mut response: ureq::http::Response<ureq::Body>) -> Result<Value, Error
     if !(200..300).contains(&status) {
         // Backend error bodies may contain prompts or credentials.
         return Err(Error::Status(status));
+    }
+    if response
+        .headers()
+        .get("content-length")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u64>().ok())
+        .is_some_and(|n| n > MAX_JSON_BYTES)
+    {
+        return Err(Error::TooLarge);
     }
     let bytes = response
         .body_mut()

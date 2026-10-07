@@ -645,6 +645,52 @@ fn serve(stream: TcpStream, shared: &Shared) -> io::Result<()> {
         state.subscribers.push(stream);
         return Ok(());
     }
+    // Native 1.18.34 pagination: chronological page, opaque next cursor.
+    let segments: Vec<_> = request.path.trim_matches('/').split('/').collect();
+    if request.method == "GET"
+        && let ["session", sid, "message"] = segments.as_slice()
+    {
+        let query: std::collections::BTreeMap<_, _> = request
+            .query
+            .split('&')
+            .filter_map(|p| p.split_once('='))
+            .collect();
+        if let Some(limit) = query.get("limit").and_then(|s| s.parse::<usize>().ok()) {
+            use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+            let state = lock(&shared.state);
+            if let Some(session) = state.sessions.get(*sid) {
+                let before = query
+                    .get("before")
+                    .and_then(|c| URL_SAFE_NO_PAD.decode(c).ok())
+                    .and_then(|b| serde_json::from_slice::<Value>(&b).ok());
+                let end = before
+                    .as_ref()
+                    .and_then(|c| {
+                        session
+                            .messages
+                            .iter()
+                            .position(|m| m["info"]["id"] == c["id"])
+                    })
+                    .unwrap_or(session.messages.len());
+                let start = end.saturating_sub(limit);
+                let rows = &session.messages[start..end];
+                let cursor = if start > 0 {
+                    format!("X-Next-Cursor: {}\r\n",URL_SAFE_NO_PAD.encode(json!({"id":rows[0]["info"]["id"],"time":rows[0]["info"]["time"]["created"]}).to_string()))
+                } else {
+                    String::new()
+                };
+                let body = serde_json::to_string(rows).unwrap();
+                use std::io::Write;
+                let mut output = &stream;
+                write!(
+                    output,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{cursor}Connection: close\r\n\r\n{body}",
+                    body.len()
+                )?;
+                return Ok(());
+            }
+        }
+    }
     let (status, body) = route(&request, shared);
     http::respond(&stream, status, body.as_deref())
 }
@@ -677,6 +723,9 @@ fn route(request: &Request, shared: &Shared) -> (u16, Option<String>) {
             Some(json!({"name": "NotFoundError", "data": {"message": format!("session not found: {id}")}}).to_string()),
         ),
         ("GET", ["session", id]) => ok(state.sessions[*id].info.clone()),
+        ("GET", ["session", id, "message", mid]) => match state.sessions[*id].messages.iter().find(|m|m["info"]["id"]==*mid) {
+            Some(row)=>ok(row.clone()), None=>(404,Some(json!({"name":"NotFoundError"}).to_string())),
+        },
         ("GET", ["session", id, "message"]) => ok(Value::Array(state.sessions[*id].messages.clone())),
         ("POST", ["session", id, "prompt_async"]) => match text_of(&request.body) {
             Some((text, model)) => {

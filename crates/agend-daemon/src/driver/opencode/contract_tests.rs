@@ -92,6 +92,7 @@ impl DriverFixture for Fixture {
             .unwrap(),
             cancelled: cancel.clone(),
             model: None,
+            history_before: std::cell::RefCell::new(None),
             reconcile_after: Cell::new(0),
         };
         worker.tick().unwrap(); // Restore backend events before serving a cursor.
