@@ -173,3 +173,5 @@ cargo xtask accept cli             # 第 9 施工關 demo：cli_demo（在 agend
 既有無 SessionStart、人工控制、結果不明與四次開機回歸維持；這些測試不啟動真 Claude、不送模型訊息。
 
 12B OpenCode push 以 supervisor worker 接 loopback REST：claim 與傳輸分離，先持久化 attempt 再送一次，REST 歷史確認收件。原 session 經私人 holder wrapper handoff 恢復；權限由 operator 回覆，unknown 投遞提供 Abandon。原生恢復／權限／DRV 及固定版本模型真測已通過，最終覆核與 CI 以 [12B 紀錄](../../docs/gates/gate-12b-opencode.md) 為準。
+
+12D 設定 parser、private token reference 與固定 Telegram HTTPS API 已建立；尚未接正式 worker／通知／手機操作。進度見 [Telegram](../../docs/gates/gate-12d-telegram.md)。

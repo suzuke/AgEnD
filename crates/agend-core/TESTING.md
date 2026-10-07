@@ -130,3 +130,5 @@ xtask 的 `claude_1_5_envelopes_are_additive_and_receipts_keep_native_attributio
 都為 Claude StartupMenu，其他 backend 不匹配、沒有 suggested key。
 原規則對 development channels 回 None 的反例已保存，新規則補上已觀察標頭。
 授權只完成 workspace 信任，沒有確認 development channels，不宣稱 P5／P6 完成。
+
+12D config consumer 測試位於 daemon `notifier::config`：TOML parser 驗 secret reference 與 allowlist，core 不增加 I/O 相依。

@@ -261,3 +261,5 @@
 - 2026-10-07：12B worker 已接最新頁／歷史回填與舊 attempt 定點查詢；超過 16 MiB 原生歷史回歸核舊收件、新派工與早期完成只發布一次，沒有提高傳輸上限。
 
 - 2026-10-07：#155 固定 `e96f429` 全新 verifier CONFIRMED_SCOPED_SUCCESS：workspace 1,062 passed／0 failed／2 既有 ignored、fmt／clippy／實際 no-std；獨立核對六方向真模型 12 筆 Confirmed。補清早期 model-smoke-v1 自有 holder／attach，原清理誤判及更正保留；目前狀態文件更新，最終 CI／合併仍待完成。
+
+- 2026-10-07：12D 開始 secret-reference／allowlist 設定與 HTTPS 傳輸；getMe 唯讀一次、零訊息，基礎測試通過；正式 notifier、手機操作與 G4 仍待實作。12C 未合併工作樹保留供覆核，開 D 前已確認完成的 12B 與本輪 C 測試暫存清理。
