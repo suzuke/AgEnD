@@ -1,9 +1,9 @@
 # 第 12D：Telegram
 
 > **TL;DR**
-> - 已實作通知完整分段、持久 outbox 與逐段收據；已接 daemon worker 與 inbound 操作防護，手機已讀／確認已驗收；其餘端到端與整體驗收尚未完成。
+> - 已實作通知完整分段、持久 outbox 與逐段收據；已接 daemon worker 與 inbound 操作防護，手機已讀／確認、多行回覆及真 forum 分流／重啟已驗收；等待最終覆核與合併。
 > - 專用 bot 已做 getMe 與三則限額文字真測，三則均已刪除；token 設定檔未改動。
-> - 下一步：剩餘 inbound 操作、真 forum topic、真 forum／自由文字 reply 與最終整體驗收。
+> - 下一步：核對最終覆核與同一 head 的 CI，依第 12 關持續授權合併及清理。
 
 ## 設定與憑證
 
@@ -41,11 +41,11 @@ Task 通知另保存 CAS version／attention revision；CLI 或 TUI 清除再開
 
 getMe 與 Message fixture 來自 2026-10-07 真 Telegram，僅替換識別資料。三則 sendMessage 各搭配一次 deleteMessage，三次刪除均確認；未重試 mutation。計畫及必要證據保留於 AgEnD-ops。
 
-真 daemon serve 的 Retry／排隊停機組合已補；尚未完成真 forum topic、最小真自由文字 reply 捕獲、整體 CI／合併。這批不是第 12D 完成認證。
+真 daemon serve 的 Retry／排隊停機組合已補。下方保留各 checkpoint 當時限制；多行回覆、forum 與整體原生驗收的最新結果見文末，合併仍待最終覆核。
 
 ## 下一步
 
-已讀／確認私訊真測已完成；接續驗其餘 inbound 操作與關機邊界、真 forum topic。所有真測僅使用已提供的專用 bot／chat，先固定命令、預算與清理範圍；不修改共享帳戶或 Claude trust entries。
+真測僅使用使用者提供的專用 bot／chat，固定命令、預算與清理範圍；不修改共享帳戶或 Claude trust entries。驗收結果見文末，後續只處理覆核發現及合併收尾。
 
 Schema v14 是新的 forward migration；已提交的 v13 保持原樣，舊 outbox 可直接升級。扣住第一段回覆的測試涵蓋停機、事項解除與替換，確認不開始舊通知第二段。
 
@@ -88,3 +88,14 @@ Retry lifecycle checkpoint：正式 daemon serve／poll／supervisor／holder �
 自由文字探針準備：`telegram_reply_probe` 配合 `support/telegram_reply.py`，正式 daemon 保存多行答案與單筆 inbox，檢查來源、ask turn delivered、無存活 holder 後清理。`--local` 零網路重驗已通過；真測尚未執行，不能以 CLI source 代替 Telegram source。等待窗本機 30 秒／真測 300 秒；正常預期兩則 bot 訊息（提問、結果），並非 transport 硬上限，非預期 attention 即停止。收據刪除最多三則且逐筆核對本 bot／chat 與持久完整收據，未知結果保留 home，不自動重試。
 
 本機命令：先 `cargo build -p agend --example telegram_reply_probe`，再 `python3 -B crates/agend/examples/support/telegram_reply.py --target "$CARGO_TARGET_DIR" --out <新的證據目錄> --local`；真測以 `--credentials <專用私人 env 檔>` 取代 `--local`，由使用者回覆通知中的兩行文字。
+
+
+## 最終原生與真測證據（2026-10-07）
+
+固定程式碼 `8c0538b` 的 `cargo xtask accept 12` exit 0，包含 startup capture 20／20、外層 PTY 8／8 與實際 no-std；四個 macOS／Ubuntu CI jobs 全數成功。全新 mailbox verifier 另完成 App 21／21、ready 3／3 與獨立 outer 8／8。先前 debug 389.290 ms 失敗與 release 診斷均保留，不能以這次通過宣稱所有負載下皆無長尾延遲。
+
+使用者以 Telegram「回覆」送出完整兩行繁中、換行、é 與 emoji。正式 daemon 保存 `AnswerSource::Telegram`，ask turn delivered 一次，提問者 inbox 一筆且內容完全一致（`reply-live-v2`）。先前 `reply-live-v1` 只收到「Telegram 回覆」，exact-answer 失敗；兩輪均清理自有程序、home 與兩則 bot 通知，使用者訊息保留。
+
+真 forum 測試使用兩個已由使用者建立的 topic。正式 daemon 將 Needs you 與 Team general 各送到指定 topic，Telegram 回覆的 bot／chat／topic／全文經正式 transport 驗證後保存收據；第二次 boot 的兩份 delivery 與 message IDs 完全不變，沒有重送（`forum-live-v1`）。兩次正常退出，兩則通知刪除確認，home 已移除，零模型程序。這輪停用 inbound，證明 topic 路由與重啟去重；手機操作證據是先前私訊的 callback 與自由文字回覆，不把它寫成 forum 按鈕驗收。
+
+必要原始證據位於 `AgEnD-ops/g12d-telegram-20261007/`：`accept12-8c0538b-result.json`、`ci-8c0538b.json`、`reply-live-v2/result.json`、`forum-live-v1/`。forum 探針經全新只讀覆核，固定腳本與 binary 雜湊後才執行。未合併 worktree 與供收尾驗證的 debug target 暫留，合併後清理；Claude trust entries 未動。

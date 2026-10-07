@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - 依 crate 由下往上分 13 個施工關；每個施工關單獨驗收，使用者確認後才開下一個施工關（D22）。
-> - 目前狀態：**第 1–11 施工關完成並已合併**；第 12A Claude 完整真模型 smoke、獨立覆核及 CI 通過，#154 已合併。12B OpenCode #155 已合併並清理；12C GitHub forge 原生 pipeline 已實作，base 保護策略待決；12D Telegram outbound worker 已接入，手機操作與 G4 尚待完成，第 13 施工關未開始。
-> - 下一步：依持續授權完成 12C 保護策略與真測，以及 [12D Telegram](gates/gate-12d-telegram.md) 手機操作／G4。
+> - 目前狀態：**第 1–11 施工關完成並已合併**；第 12A Claude 完整真模型 smoke、獨立覆核及 CI 通過，#154 已合併。12B OpenCode #155 已合併並清理；12C GitHub forge 原生 pipeline 已實作，嚴格 base 保護策略已選定待接入；12D Telegram 手機操作、G4、真 forum 分流及原生驗收通過，覆核／合併收尾中，第 13 施工關未開始。
+> - 下一步：依持續授權完成 [12D Telegram](gates/gate-12d-telegram.md) 合併收尾，再整合 12C 嚴格分支保護與真測。
 
 ## 13 個施工關
 
@@ -307,3 +307,5 @@
 - 2026-10-07：固定 `e0da767` binary 的 startup capture 隔離重驗 20／20 通過（329.79 秒），過程未替換 binary。TUI 正試將已解碼 frame mailbox 的檢查與 50 ms tick 分離，空輪不繪圖或發維護請求；原 300 ms 時效與控制權契約仍待驗，完整 12D 尚未完成。
 
 - 2026-10-07：TUI mailbox 候選的 89 tests 通過，包括三個真 parser／Source spy 反例；debug outer 7／8，100×24 背景啟動取樣仍有 389.290 ms。相同原生 final_dirty 測試另以 release 診斷，36 筆為 62.769–118.094 ms、2 tests 通過；不以此取代 debug 驗收，原 300 ms 斷言與失敗證據保留，完整 12D 待最終覆核／CI及真測。
+
+- 2026-10-07：PR #156 固定 `8c0538b` 的原生 accept 12 exit 0、四個雙平台 CI jobs 全綠；使用者多行 Telegram 回覆逐字一致且單次投遞，真 forum 的 Needs you／team 摘要分流與第二次 boot 收據不變通過。自有訊息、程序及 home 已清理；保留首次回覆內容不完整與歷史延遲失敗，等待最終覆核／合併。12C 使用者已選定嚴格 up-to-date 分支保護，後續實作不得以 head CAS 代替 base 保護。
