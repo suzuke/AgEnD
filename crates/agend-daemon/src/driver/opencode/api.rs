@@ -240,6 +240,41 @@ mod tests {
         assert!(session.permissions().unwrap().is_empty());
         assert!(session.reply_permission(&permission, true).is_err());
         assert!(!session.busy().unwrap());
+        session
+            .submit("permission-handler", "run: echo handler", None)
+            .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let permission = loop {
+            if let Some(p) = session.permissions().unwrap().into_iter().next() {
+                break p;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        let key = crate::store::opencode_permissions::identity("open-permission", &permission);
+        store
+            .call_blocking(move |c| {
+                crate::store::opencode_permissions::observe(
+                    c,
+                    "open-permission",
+                    &permission.session,
+                    std::slice::from_ref(&permission),
+                    6,
+                )
+            })
+            .unwrap();
+        crate::handlers::opencode_attention::send_decision(&store, &key, false, &session).unwrap();
+        assert!(session.permissions().unwrap().is_empty());
+        assert!(
+            crate::handlers::opencode_attention::send_decision(&store, &key, true, &session)
+                .is_err()
+        );
+        assert!(
+            store
+                .call_blocking(|c| crate::store::opencode_permissions::pending(c))
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

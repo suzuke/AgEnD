@@ -225,3 +225,5 @@
 - 2026-10-07：12B OpenCode 初版 Driver／supervisor worker 接線，持久 attempt、分頁 REST 核對與 unknown 狀態；108 個 daemon 單元測試通過，holder／permission／真測尚未完成（feat/g12b-opencode）。
 
 - 2026-10-07：12B 權限 REST 核對與 schema v10 單次決策 attempt 持久化；worker 輪詢保存，attention／operator 接線仍待完成（feat/g12b-opencode）。
+
+- 2026-10-07：12B permission attention 與 operator-only AnswerAsk 接線，完整 snapshot 再核對、持久單次回覆，pipeline refresh 保留 backend 權限提示；holder／真測尚未完成（feat/g12b-opencode）。

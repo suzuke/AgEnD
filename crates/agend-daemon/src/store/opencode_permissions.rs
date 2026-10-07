@@ -78,6 +78,11 @@ pub fn claim(
         .map_err(StoreError::Invalid)?
         .pop()
         .ok_or_else(|| StoreError::Invalid("missing stored permission".into()))?;
+    if identity(&instance, &p) != id {
+        return Err(StoreError::Invalid(
+            "permission snapshot identity changed".into(),
+        ));
+    }
     tx.execute("UPDATE opencode_permissions SET decision=?2,attempted_at_unix_ms=?3,status='unknown' WHERE id=?1", params![id,if allow {"once"} else {"reject"},now])?;
     tx.commit()?;
     Ok(Some((instance, p)))
@@ -86,4 +91,50 @@ pub fn claim(
 pub fn resolved(conn: &Connection, id: &str) -> Result<(), StoreError> {
     conn.execute("UPDATE opencode_permissions SET status='resolved' WHERE id=?1 AND status='unknown' AND attempted_at_unix_ms IS NOT NULL", [id])?;
     Ok(())
+}
+
+#[derive(Clone)]
+pub struct Pending {
+    pub id: String,
+    pub instance: String,
+    pub permission: Permission,
+    pub unknown: bool,
+    pub created: u64,
+}
+
+pub fn pending(conn: &Connection) -> Result<Vec<Pending>, StoreError> {
+    let mut stmt = conn.prepare("SELECT p.id,p.instance_id,p.session_id,p.native,p.status,p.created_at_unix_ms FROM opencode_permissions p JOIN instances i ON i.id=p.instance_id AND i.session_id=p.session_id WHERE p.status IN ('pending','unknown') AND i.backend='opencode' AND i.delivery='push' ORDER BY p.created_at_unix_ms,p.id")?;
+    let rows = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, String>(3)?,
+            r.get::<_, String>(4)?,
+            r.get::<_, u64>(5)?,
+        ))
+    })?;
+    rows.map(|r| {
+        let (id, instance, session, text, status, created) = r?;
+        let native: serde_json::Value =
+            serde_json::from_str(&text).map_err(|e| StoreError::Invalid(e.to_string()))?;
+        let permission =
+            crate::driver::opencode::permission::parse(&session, serde_json::json!([native]))
+                .map_err(StoreError::Invalid)?
+                .pop()
+                .ok_or_else(|| StoreError::Invalid("missing permission".into()))?;
+        if identity(&instance, &permission) != id {
+            return Err(StoreError::Invalid(
+                "permission snapshot identity changed".into(),
+            ));
+        }
+        Ok(Pending {
+            id,
+            instance,
+            permission,
+            unknown: status == "unknown",
+            created,
+        })
+    })
+    .collect()
 }

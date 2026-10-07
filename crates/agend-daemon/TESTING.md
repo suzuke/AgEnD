@@ -157,3 +157,5 @@ Claude bridge／Driver／native startup capture 的案例、限制與重驗指�
 OpenCode worker 原生 producer 案例含 140 筆結果不明前綴、獨立新投遞批次與一次確認事件；這是 REST 對帳窗口測試，尚非網路遺失回覆故障注入。supervisor 測試另覆蓋保存 session 的 wrapper resume、缺 session 拒絕與不支援的參數拒絕。
 
 12B permission 原生 producer 測試核對完整請求、session／request identity 與拒絕後失效；SQLite reopen 後決策 attempt 不可重取。schema v10 及 v1–v10 fixture 升級保存既有資料；permission 歷史保留至明確移除 instance，透過 FK cascade 刪除。尚未涵蓋 TUI／handler 端到端權限回覆。
+
+`handlers::opencode_attention` 回歸驗證 agent 不能 AnswerAsk、operator free text 不會取得 permission attempt。API 原生 producer 案例使用同一 `send_decision` 路徑驗拒絕、重複回覆不送與待處理紀錄消失；完整 socket／holder 端到端測試仍待補齊。

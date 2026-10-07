@@ -25,6 +25,7 @@
 
 pub mod agent;
 pub(crate) mod claude_attention;
+pub(crate) mod opencode_attention;
 pub mod operator;
 
 use std::path::PathBuf;
@@ -186,6 +187,9 @@ pub async fn handle(ctx: &Context, caller: Option<&str>, request: ClientRequest)
                     "only the operator can answer asks",
                 )
             } else {
+                if data.ask_id.starts_with(opencode_attention::PREFIX) {
+                    return Outcome::Reply(opencode_attention::answer(ctx, data).await);
+                }
                 let id = data.request_id.clone();
                 pipeline_reply(id, ctx.pipeline.answer(data).await)
             }

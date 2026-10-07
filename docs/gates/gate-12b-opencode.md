@@ -29,7 +29,7 @@
 
 2026-10-07 daemon worker 已保存原 session、先記 attempt 再 POST，以 REST 原生歷史確認後發布持久事件；斷線不重送。舊 attempt 採每頁 128 筆循環核對，新工作獨立取 32 筆，140 筆 unknown 前綴不阻塞新工作。REST 錯誤立即轉 unknown；idle 需持續五秒。啟動前拒絕改寫仍存活 holder 的私人檔案；缺 session 不允許 resume。daemon 單元測試 108 項通過；這不等於 holder／真模型完整驗收。
 
-權限 API 已依本機 1.18.34 `/doc` 接上新版 reply route；回覆前比對 session 與完整原始請求，只支持 once／reject。migration 0010 保存觀察、決策與單次 HTTP attempt；重開 SQLite 再觀察同一請求不重設 attempt。原生 producer 測試覆蓋外來 session、內容變更、重複 id、過期回覆與重啟後不能再 claim。worker 已輪詢保存；「需要你」發布與操作者回覆接線尚未完成。
+權限 API 已依本機 1.18.34 `/doc` 接上新版 reply route；回覆前比對 session 與完整原始請求，只支持 once／reject。migration 0010 保存觀察、決策與單次 HTTP attempt；重開 SQLite 再觀察同一請求不重設 attempt。原生 producer 測試覆蓋外來 session、內容變更、重複 id、過期回覆與重啟後不能再 claim。worker 已輪詢保存；「需要你」發布與 operator-only AnswerAsk 已接線。只接受明確選項，free text 拒絕；回覆不明時保留無重送動作的提示。完整 holder／協定端到端真測尚未完成。
 
 ## 下一步
 

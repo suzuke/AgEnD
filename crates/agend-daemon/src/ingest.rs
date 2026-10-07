@@ -114,6 +114,11 @@ pub(crate) async fn run(home: PathBuf, ctx: Arc<Context>, bridge: Arc<ClaudeBrid
             Ok(after) => unknown_after = after,
             Err(e) => crate::log::line(&format!("Claude delivery attention refresh failed: {e}")),
         }
+        if let Err(e) = crate::handlers::opencode_attention::refresh(&ctx).await {
+            crate::log::line(&format!(
+                "OpenCode permission attention refresh failed: {e}"
+            ));
+        }
         for kind in ["hooks", "acks"] {
             let dir_home = home.clone();
             let after = cursors.get(kind).cloned();
