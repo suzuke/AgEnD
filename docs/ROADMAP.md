@@ -303,3 +303,7 @@
 - 2026-10-07：獨立真 Screen 100×24 微測不支持 RawValue decoder 優化，已回復原解析規則並加入十八個未知值拒絕反例；轉向 holder／daemon bounded writer 外包 8 KiB BufWriter，任何 serialization／flush 失敗仍整段拒絕。微測 byte equality 與界線通過，正式原生／整體驗收待完成。
 
 - 2026-10-07：holder 完整 61 tests 與嚴格解碼四項回歸通過；外層 PTY 仍有背景啟動取樣 315.887 ms 超過 300 ms，完整 12D 未通過。曾試將 frame 編碼移出 holder mutex，未解決超標，已撤回該候選；保留原界線與失敗證據，不擴大控制／回覆交錯範圍。
+
+- 2026-10-07：固定 `e0da767` binary 的 startup capture 隔離重驗 20／20 通過（329.79 秒），過程未替換 binary。TUI 正試將已解碼 frame mailbox 的檢查與 50 ms tick 分離，空輪不繪圖或發維護請求；原 300 ms 時效與控制權契約仍待驗，完整 12D 尚未完成。
+
+- 2026-10-07：TUI mailbox 候選的 89 tests 通過，包括三個真 parser／Source spy 反例；debug outer 7／8，100×24 背景啟動取樣仍有 389.290 ms。相同原生 final_dirty 測試另以 release 診斷，36 筆為 62.769–118.094 ms、2 tests 通過；不以此取代 debug 驗收，原 300 ms 斷言與失敗證據保留，完整 12D 待最終覆核／CI及真測。

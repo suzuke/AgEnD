@@ -45,6 +45,8 @@ App 已選用此路徑；真 daemon／holder／PTY 的單次 Source 輸入與 th
 後續 notice 不延長等待，持續輸出不會餓死；首次訂閱／控制 frame 仍即時回覆。
 原 300ms 回歸與 CI 失敗證據保留，新獨立驗證待核。
 
+完整終端另在既有 tick 之間檢查本機 frame mailbox，最多等待 10 ms 後再檢查；只有 tick、native event 或非空 mailbox 才繪圖。空 mailbox 不做 resize／viewport 或 fleet poll；原 tick 的尺寸維護保留。此候選只減少已接收 frame 的等待，300 ms 原生驗收與控制權／過期畫面反例仍須通過。
+
 新 draw-size case 省略 Resize event、再注入舊尺寸；以共用 native draw helper 的實際 backend area 核 20×4 grant，未確認不送鍵。移除同步的 mutant exit 101；[CI 反例與重跑](../../docs/gates/gate-11c-regression-validation.md)。
 
 完整終端可用 tui_full 互動 demo；真 holder parser 經 FakeDaemon／ClientSource，支援兩個 client、鍵鼠、貼上、歷史與重連。沒有啟動真 agent；[指令與驗證範圍](../../docs/gates/gate-11c-demo.md)。
