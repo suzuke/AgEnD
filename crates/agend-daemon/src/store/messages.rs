@@ -112,6 +112,26 @@ pub(crate) fn to_instance(conn: &Connection, to: &str) -> Result<Vec<Message>, S
     rows.map(|row| row?).collect()
 }
 
+/// Pending OpenCode writes and reconciliation use separate bounded pages so
+/// a prefix of ambiguous attempts cannot starve new queued work.
+pub(crate) fn opencode_page(
+    conn: &Connection,
+    to: &str,
+    attempted: bool,
+    after: i64,
+) -> Result<Vec<Message>, StoreError> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLUMNS} FROM messages WHERE to_instance=?1 AND seq>?2 \
+         AND state IN ('queued','sent') AND (attempted_at_unix_ms IS NOT NULL)=?3 \
+         ORDER BY seq LIMIT ?4"
+    ))?;
+    let rows = stmt.query_map(
+        rusqlite::params![to, after, attempted, if attempted { 8 } else { 32 }],
+        from_row,
+    )?;
+    rows.map(|row| row?).collect()
+}
+
 /// Bounded unattempted Claude messages; retained history is never loaded
 /// just to find the next dispatch batch.
 pub(crate) fn pending_claude(

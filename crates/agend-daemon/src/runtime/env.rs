@@ -7,8 +7,8 @@
 //!   and `PATH` = `$AGEND_HOME/bin` (the shims, found first) + the daemon's
 //!   `PATH`.
 //! - Copied from the daemon when set: [`PASS_THROUGH`].
-//! - codex only (gate 7 P4, option A; amends gate 6 H3): `ZDOTDIR` =
-//!   `$AGEND_HOME/zsh`, so the login zsh codex runs commands with puts the
+//! - codex and OpenCode: `ZDOTDIR` =
+//!   `$AGEND_HOME/zsh`, so a backend login zsh puts the
 //!   shims first again after `/etc/zprofile`.
 //!
 //! Must NOT: copy any other variable, including other `AGEND_*` ones (for
@@ -71,7 +71,7 @@ pub fn agent_env(
     env.insert("PATH".into(), format!("{}:{rest}", bin.display()));
     env.insert("AGEND_HOME".into(), home.display().to_string());
     env.insert("AGEND_INSTANCE".into(), id.into());
-    if backend == Backend::Codex {
+    if matches!(backend, Backend::Codex | Backend::Opencode) {
         let zdotdir = crate::driver::codex::launch::zdotdir(home);
         env.insert("ZDOTDIR".into(), zdotdir.display().to_string());
     }
@@ -128,9 +128,12 @@ mod tests {
             )
         );
         // codex: the same plus ZDOTDIR (gate 7 P4 option A).
-        let mut codex = agent_env(Path::new("/h"), "g6-1", Backend::Codex, daemon);
+        let mut codex = agent_env(Path::new("/h"), "g6-1", Backend::Codex, daemon.clone());
         assert_eq!(codex.remove("ZDOTDIR").as_deref(), Some("/h/zsh"));
         assert_eq!(codex, env);
+        let mut opencode = agent_env(Path::new("/h"), "g6-1", Backend::Opencode, daemon);
+        assert_eq!(opencode.remove("ZDOTDIR").as_deref(), Some("/h/zsh"));
+        assert_eq!(opencode, env);
     }
 
     #[test]

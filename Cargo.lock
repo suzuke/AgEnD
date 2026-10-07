@@ -13,7 +13,7 @@ dependencies = [
  "agend-shim",
  "agend-testkit",
  "agend-tui",
- "base64",
+ "base64 0.22.1",
  "clap",
  "libc",
  "portable-pty",
@@ -31,7 +31,7 @@ dependencies = [
  "agend-core",
  "agend-holder",
  "agend-testkit",
- "base64",
+ "base64 0.22.1",
  "serde",
  "serde_json",
  "socket2",
@@ -50,6 +50,7 @@ version = "0.0.0"
 dependencies = [
  "agend-core",
  "agend-testkit",
+ "base64 0.22.1",
  "libc",
  "rusqlite",
  "serde_json",
@@ -58,6 +59,7 @@ dependencies = [
  "tokio",
  "toml",
  "tungstenite",
+ "ureq",
 ]
 
 [[package]]
@@ -67,7 +69,7 @@ dependencies = [
  "agend-core",
  "agend-testkit",
  "alacritty_terminal",
- "base64",
+ "base64 0.22.1",
  "libc",
  "parking_lot",
  "portable-pty",
@@ -92,7 +94,7 @@ version = "0.0.0"
 dependencies = [
  "agend-core",
  "agend-holder",
- "base64",
+ "base64 0.22.1",
  "libc",
  "serde_json",
  "tungstenite",
@@ -106,7 +108,7 @@ dependencies = [
  "agend-core",
  "agend-holder",
  "agend-testkit",
- "base64",
+ "base64 0.22.1",
  "ratatui",
  "serde_json",
  "unicode-width",
@@ -127,7 +129,7 @@ version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bda177466b9524d59f1b12f0dd30b68696788e9992a7e959021c4a0ed96fcf59"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "bitflags 2.13.2",
  "home",
  "libc",
@@ -204,6 +206,12 @@ name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
+
+[[package]]
+name = "base64"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 
 [[package]]
 name = "bit-set"
@@ -1211,6 +1219,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "percent-encoding"
+version = "2.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
+
+[[package]]
 name = "pest"
 version = "2.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1917,7 +1931,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4676b37242ccbd1aabf56edb093a4827dc49086c0ffd764a5705899e0f35f8f7"
 dependencies = [
  "anyhow",
- "base64",
+ "base64 0.22.1",
  "bitflags 2.13.2",
  "fancy-regex",
  "filedescriptor",
@@ -2135,6 +2149,37 @@ name = "unicode-width"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
+
+[[package]]
+name = "ureq"
+version = "3.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a7ac20be9b7726e0bbdbf974c059676d9acb1cd414961f570a4e8231cacd7fc"
+dependencies = [
+ "base64 0.23.1",
+ "log",
+ "percent-encoding",
+ "ureq-proto",
+ "utf8-zero",
+]
+
+[[package]]
+name = "ureq-proto"
+version = "0.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f86fd172ccca569e458f61b6bdd6220965a9ef36e672a6852953b51a0e1583be"
+dependencies = [
+ "base64 0.23.1",
+ "http",
+ "httparse",
+ "log",
+]
+
+[[package]]
+name = "utf8-zero"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8c0a043c9540bae7c578c88f91dda8bd82e59ae27c21baca69c8b191aaf5a6e"
 
 [[package]]
 name = "utf8parse"

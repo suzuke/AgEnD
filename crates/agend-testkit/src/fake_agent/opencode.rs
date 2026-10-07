@@ -89,12 +89,24 @@ fn usage(error: &str) -> ExitCode {
 
 pub struct Server {
     port: u16,
+    shared: Arc<Shared>,
 }
 
 impl Server {
     /// Listens on `127.0.0.1:<port>` (0 picks a free port). With `state`,
     /// sessions are loaded from and saved to that file.
     pub fn start(port: u16, turn: Duration, state: Option<PathBuf>) -> io::Result<Server> {
+        Self::start_version(port, turn, state, VERSION)
+    }
+
+    /// CLI launch fixture uses the recorded 1.18.34 health version while the
+    /// legacy conformance producer remains pinned to its 1.18.31 recordings.
+    pub fn start_version(
+        port: u16,
+        turn: Duration,
+        state: Option<PathBuf>,
+        version: &'static str,
+    ) -> io::Result<Server> {
         let listener = TcpListener::bind(("127.0.0.1", port))?;
         let port = listener.local_addr()?.port();
         let mut initial = State {
@@ -107,6 +119,10 @@ impl Server {
         let shared = Arc::new(Shared {
             state: Mutex::new(initial),
             turn,
+            version,
+            lost_reply: Mutex::new(None),
+            failed_get: Mutex::new(None),
+            posts: Mutex::new(Vec::new()),
         });
         let ticker = Arc::clone(&shared);
         std::thread::spawn(move || {
@@ -115,15 +131,33 @@ impl Server {
                 lock(&ticker.state).finish_due_turns(ticker.turn);
             }
         });
+        let serving = Arc::clone(&shared);
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
-                let shared = Arc::clone(&shared);
+                let shared = Arc::clone(&serving);
                 std::thread::spawn(move || {
                     let _ = serve(stream, &shared);
                 });
             }
         });
-        Ok(Server { port })
+        Ok(Server { port, shared })
+    }
+
+    /// Commit the next matching POST normally, then close without its reply.
+    pub fn lose_next_post_reply(&self, path: &str) {
+        *lock(&self.shared.lost_reply) = Some(path.to_owned());
+    }
+
+    /// Fail one read before routing it; no backend mutation occurs.
+    pub fn fail_next_get(&self, path: &str) {
+        *lock(&self.shared.failed_get) = Some(path.to_owned());
+    }
+
+    pub fn post_count(&self, path: &str) -> usize {
+        lock(&self.shared.posts)
+            .iter()
+            .filter(|p| p.as_str() == path)
+            .count()
     }
 
     pub fn port(&self) -> u16 {
@@ -134,6 +168,10 @@ impl Server {
 struct Shared {
     state: Mutex<State>,
     turn: Duration,
+    version: &'static str,
+    lost_reply: Mutex<Option<String>>,
+    failed_get: Mutex<Option<String>>,
+    posts: Mutex<Vec<String>>,
 }
 
 #[derive(Default)]
@@ -289,12 +327,22 @@ impl State {
     }
 
     /// Adds the user message (sent at once) and starts its turn, or queues it.
-    fn prompt(&mut self, session_id: &str, text: String, model: &Value, turn: Duration) {
+    fn prompt(
+        &mut self,
+        session_id: &str,
+        text: String,
+        model: &Value,
+        turn: Duration,
+        given: Option<&str>,
+    ) {
         let (provider, model_id) = (
             model["providerID"].as_str().unwrap_or("fake").to_owned(),
             model["modelID"].as_str().unwrap_or("fake-model").to_owned(),
         );
-        let id = self.id("msg");
+        // Client-selected ids are also captured from native 1.18.34 with
+        // noReply in agend-daemon's OpenCode history fixture. Legacy recorded
+        // calls omit this field and retain their original generated ids.
+        let id = given.map(str::to_owned).unwrap_or_else(|| self.id("msg"));
         let part_id = self.id("prt");
         let created = self.now();
         let user = json!({
@@ -612,6 +660,13 @@ fn text_of(body: &[u8]) -> Option<(String, Value)> {
 
 fn serve(stream: TcpStream, shared: &Shared) -> io::Result<()> {
     let request = http::read_request(&stream)?;
+    if request.method == "GET" {
+        let mut failed = lock(&shared.failed_get);
+        if failed.as_deref() == Some(request.path.as_str()) {
+            *failed = None;
+            return http::respond(&stream, 503, None);
+        }
+    }
     if request.method == "GET" && request.path == "/event" {
         http::start_event_stream(&stream)?;
         let mut state = lock(&shared.state);
@@ -622,7 +677,63 @@ fn serve(stream: TcpStream, shared: &Shared) -> io::Result<()> {
         state.subscribers.push(stream);
         return Ok(());
     }
+    // Native 1.18.34 pagination: chronological page, opaque next cursor.
+    let segments: Vec<_> = request.path.trim_matches('/').split('/').collect();
+    if request.method == "GET"
+        && let ["session", sid, "message"] = segments.as_slice()
+    {
+        let query: std::collections::BTreeMap<_, _> = request
+            .query
+            .split('&')
+            .filter_map(|p| p.split_once('='))
+            .collect();
+        if let Some(limit) = query.get("limit").and_then(|s| s.parse::<usize>().ok()) {
+            use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+            let state = lock(&shared.state);
+            if let Some(session) = state.sessions.get(*sid) {
+                let before = query
+                    .get("before")
+                    .and_then(|c| URL_SAFE_NO_PAD.decode(c).ok())
+                    .and_then(|b| serde_json::from_slice::<Value>(&b).ok());
+                let end = before
+                    .as_ref()
+                    .and_then(|c| {
+                        session
+                            .messages
+                            .iter()
+                            .position(|m| m["info"]["id"] == c["id"])
+                    })
+                    .unwrap_or(session.messages.len());
+                let start = end.saturating_sub(limit);
+                let rows = &session.messages[start..end];
+                let cursor = if start > 0 {
+                    format!("X-Next-Cursor: {}\r\n",URL_SAFE_NO_PAD.encode(json!({"id":rows[0]["info"]["id"],"time":rows[0]["info"]["time"]["created"]}).to_string()))
+                } else {
+                    String::new()
+                };
+                let body = serde_json::to_string(rows).unwrap();
+                use std::io::Write;
+                let mut output = &stream;
+                write!(
+                    output,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{cursor}Connection: close\r\n\r\n{body}",
+                    body.len()
+                )?;
+                return Ok(());
+            }
+        }
+    }
+    if request.method == "POST" {
+        lock(&shared.posts).push(request.path.clone());
+    }
     let (status, body) = route(&request, shared);
+    if request.method == "POST" {
+        let mut lost = lock(&shared.lost_reply);
+        if lost.as_deref() == Some(request.path.as_str()) {
+            *lost = None;
+            return Ok(());
+        }
+    }
     http::respond(&stream, status, body.as_deref())
 }
 
@@ -630,7 +741,7 @@ fn route(request: &Request, shared: &Shared) -> (u16, Option<String>) {
     let segments: Vec<&str> = request.path.trim_matches('/').split('/').collect();
     let mut state = lock(&shared.state);
     match (request.method.as_str(), segments.as_slice()) {
-        ("GET", ["global", "health"]) => ok(json!({"healthy": true, "version": VERSION})),
+        ("GET", ["global", "health"]) => ok(json!({"healthy": true, "version": shared.version})),
         ("GET", ["permission"]) => ok(Value::Array(
             state.permissions.values().map(|(_, ask)| ask.clone()).collect(),
         )),
@@ -654,10 +765,16 @@ fn route(request: &Request, shared: &Shared) -> (u16, Option<String>) {
             Some(json!({"name": "NotFoundError", "data": {"message": format!("session not found: {id}")}}).to_string()),
         ),
         ("GET", ["session", id]) => ok(state.sessions[*id].info.clone()),
+        ("GET", ["session", id, "message", mid]) => match state.sessions[*id].messages.iter().find(|m|m["info"]["id"]==*mid) {
+            Some(row)=>ok(row.clone()), None=>(404,Some(json!({"name":"NotFoundError"}).to_string())),
+        },
         ("GET", ["session", id, "message"]) => ok(Value::Array(state.sessions[*id].messages.clone())),
         ("POST", ["session", id, "prompt_async"]) => match text_of(&request.body) {
             Some((text, model)) => {
-                state.prompt(id, text, &model, shared.turn);
+                let body: Value = serde_json::from_slice(&request.body).unwrap_or_default();
+                let given = body["messageID"].as_str();
+                if given.is_some_and(|id| !id.starts_with("msg")) { return bad_body(); }
+                state.prompt(id, text, &model, shared.turn, given);
                 (204, None)
             }
             None => bad_body(),
@@ -666,6 +783,16 @@ fn route(request: &Request, shared: &Shared) -> (u16, Option<String>) {
             let id = (*id).to_owned();
             state.abort(&id, shared.turn);
             ok(json!(true))
+        }
+        // 1.18.34 /doc exposes the same pending requests through this route.
+        ("POST", ["permission", pid, "reply"]) => {
+            let body: Value = serde_json::from_slice(&request.body).unwrap_or_default();
+            let Some(response @ ("once" | "always" | "reject")) = body["reply"].as_str() else { return bad_body(); };
+            let owner = state.permissions.get(*pid).map(|(id, _)| id.clone());
+            match owner {
+                Some(id) if state.reply_permission(&id, pid, response, shared.turn) => ok(json!(true)),
+                _ => (404, Some(json!({"name":"PermissionNotFoundError"}).to_string())),
+            }
         }
         ("POST", ["session", id, "permissions", pid]) => {
             let body: Value = serde_json::from_slice(&request.body).unwrap_or_default();
@@ -683,7 +810,7 @@ fn route(request: &Request, shared: &Shared) -> (u16, Option<String>) {
             };
             let id = (*id).to_owned();
             let before = state.sessions[&id].messages.len();
-            state.prompt(&id, text, &model, shared.turn);
+            state.prompt(&id, text, &model, shared.turn, None);
             drop(state);
             wait_for_reply(shared, &id, before)
         }

@@ -152,3 +152,7 @@ DRV fixture 的 actor readiness hint 不代替 daemon idle：送達前讀實際 
 `claude_startup::startup_variable_ready_suggestions_replay_actual_v5_and_both_widths` 經真 daemon／holder／PTY 重播 v5 兩份捕獲及 140 欄變體，核五秒初始 idle 與 Ready 不加鍵；
 `startup_variable_ready_rejects_unknown_footer_and_split_hint_without_idle_or_more_keys` 拒絕未知 footer／分行建議。
 既有無 SessionStart、人工控制、結果不明與四次開機回歸維持；這些測試不啟動真 Claude、不送模型訊息。
+
+## 第 12B 原生 OpenCode bridge
+
+先 `cargo build -p agend -p agend-testkit --bins`，再 `cargo test -p agend --test opencode_bridge`。兩個案例使用真 daemon／holder／shell wrapper 和原生 fake OpenCode CLI：保存一筆權限工作，daemon 重啟保留 holder／ask，拒絕後重複回覆失敗，再分別正常停止與 SIGKILL 自有 holder；新 holder 恢復原 session、歷史只有一筆 user message，最後確認 server port 關閉。Fixture 僅清自己的 lab；panic 路徑停止自有 holders，依 marker sweep 舊 group。零模型呼叫；不替代真 1.18.34 驗收。

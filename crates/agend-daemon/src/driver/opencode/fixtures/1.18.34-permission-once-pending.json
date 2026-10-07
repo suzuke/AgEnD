@@ -1,0 +1,20 @@
+[
+  {
+    "id": "per_1154e86bd001m7NDV4TDT6MKq3",
+    "sessionID": "ses_eeab1832effe8IcoZmvjZ5qYH1",
+    "permission": "bash",
+    "patterns": [
+      "printf AGEND_G12B_ONCE"
+    ],
+    "metadata": {
+      "command": "printf AGEND_G12B_ONCE"
+    },
+    "always": [
+      "printf *"
+    ],
+    "tool": {
+      "messageID": "msg_1154e7e5e001FCdsTRcjeMnDiI",
+      "callID": "call_26RIv2ArIMyruTYBlTKtYLXM"
+    }
+  }
+]

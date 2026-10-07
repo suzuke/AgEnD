@@ -1,0 +1,159 @@
+{
+  "session": {
+    "id": "ses_eeabe7cbdffezHu9ZdofGNu4nJ",
+    "slug": "cosmic-pixel",
+    "projectID": "global",
+    "directory": "/private/tmp/agend-g12b-pagination-02n82o76",
+    "path": "private/tmp/agend-g12b-pagination-02n82o76",
+    "cost": 0,
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+        "read": 0,
+        "write": 0
+      }
+    },
+    "title": "New session - 2026-10-07T07:26:17.410Z",
+    "version": "1.18.34",
+    "time": {
+      "created": 1791357977410,
+      "updated": 1791357977410
+    }
+  },
+  "pages": [
+    {
+      "before": null,
+      "rows": [
+        {
+          "info": {
+            "role": "user",
+            "time": {
+              "created": 1791357977882
+            },
+            "agent": "build",
+            "model": {
+              "providerID": "opencode",
+              "modelID": "big-pickle"
+            },
+            "id": "msgf615f53329cc77bc4cb5852ef22624a3856f5a286669601fff93b4f0b5c10bb4",
+            "sessionID": "ses_eeabe7cbdffezHu9ZdofGNu4nJ"
+          },
+          "parts": [
+            {
+              "type": "text",
+              "text": "page 2",
+              "id": "prt_11541851b0017PL172cdvd0qNv",
+              "sessionID": "ses_eeabe7cbdffezHu9ZdofGNu4nJ",
+              "messageID": "msgf615f53329cc77bc4cb5852ef22624a3856f5a286669601fff93b4f0b5c10bb4"
+            }
+          ]
+        },
+        {
+          "info": {
+            "role": "user",
+            "time": {
+              "created": 1791357977889
+            },
+            "agent": "build",
+            "model": {
+              "providerID": "opencode",
+              "modelID": "big-pickle"
+            },
+            "id": "msg0ae175c8f6a2b01fd574ecb7c2cfa59af2734db0cf54e82de7f6f8d571a7ab98",
+            "sessionID": "ses_eeabe7cbdffezHu9ZdofGNu4nJ"
+          },
+          "parts": [
+            {
+              "type": "text",
+              "text": "page 3",
+              "id": "prt_1154185210012SrqInr0uq66W5",
+              "sessionID": "ses_eeabe7cbdffezHu9ZdofGNu4nJ",
+              "messageID": "msg0ae175c8f6a2b01fd574ecb7c2cfa59af2734db0cf54e82de7f6f8d571a7ab98"
+            }
+          ]
+        }
+      ],
+      "next": "eyJpZCI6Im1zZ2Y2MTVmNTMzMjljYzc3YmM0Y2I1ODUyZWYyMjYyNGEzODU2ZjVhMjg2NjY5NjAxZmZmOTNiNGYwYjVjMTBiYjQiLCJ0aW1lIjoxNzkxMzU3OTc3ODgyfQ"
+    },
+    {
+      "before": "eyJpZCI6Im1zZ2Y2MTVmNTMzMjljYzc3YmM0Y2I1ODUyZWYyMjYyNGEzODU2ZjVhMjg2NjY5NjAxZmZmOTNiNGYwYjVjMTBiYjQiLCJ0aW1lIjoxNzkxMzU3OTc3ODgyfQ",
+      "rows": [
+        {
+          "info": {
+            "id": "msgd4cb1e30b4186ffcf7ea692839c810da332a42c11c28829904978000c51c6a6b",
+            "sessionID": "ses_eeabe7cbdffezHu9ZdofGNu4nJ",
+            "role": "user",
+            "time": {
+              "created": 1791357977811
+            },
+            "agent": "build",
+            "model": {
+              "providerID": "opencode",
+              "modelID": "big-pickle"
+            }
+          },
+          "parts": [
+            {
+              "id": "prt_1154184d8001HLJrab1fEKzm0U",
+              "sessionID": "ses_eeabe7cbdffezHu9ZdofGNu4nJ",
+              "messageID": "msgd4cb1e30b4186ffcf7ea692839c810da332a42c11c28829904978000c51c6a6b",
+              "type": "text",
+              "text": "page 0"
+            }
+          ]
+        },
+        {
+          "info": {
+            "id": "msg35e3192aad54e9579e0ceab87f70883eda51f9ff123929be98ef2d1f8d420c6d",
+            "sessionID": "ses_eeabe7cbdffezHu9ZdofGNu4nJ",
+            "role": "user",
+            "time": {
+              "created": 1791357977875
+            },
+            "agent": "build",
+            "model": {
+              "providerID": "opencode",
+              "modelID": "big-pickle"
+            }
+          },
+          "parts": [
+            {
+              "id": "prt_1154185130019Oq4qcopeGO8xd",
+              "sessionID": "ses_eeabe7cbdffezHu9ZdofGNu4nJ",
+              "messageID": "msg35e3192aad54e9579e0ceab87f70883eda51f9ff123929be98ef2d1f8d420c6d",
+              "type": "text",
+              "text": "page 1"
+            }
+          ]
+        }
+      ],
+      "next": null
+    }
+  ],
+  "single": {
+    "info": {
+      "id": "msgd4cb1e30b4186ffcf7ea692839c810da332a42c11c28829904978000c51c6a6b",
+      "sessionID": "ses_eeabe7cbdffezHu9ZdofGNu4nJ",
+      "role": "user",
+      "time": {
+        "created": 1791357977811
+      },
+      "agent": "build",
+      "model": {
+        "providerID": "opencode",
+        "modelID": "big-pickle"
+      }
+    },
+    "parts": [
+      {
+        "id": "prt_1154184d8001HLJrab1fEKzm0U",
+        "sessionID": "ses_eeabe7cbdffezHu9ZdofGNu4nJ",
+        "messageID": "msgd4cb1e30b4186ffcf7ea692839c810da332a42c11c28829904978000c51c6a6b",
+        "type": "text",
+        "text": "page 0"
+      }
+    ]
+  }
+}

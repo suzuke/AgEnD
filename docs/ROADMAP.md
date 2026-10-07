@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - 依 crate 由下往上分 13 個施工關；每個施工關單獨驗收，使用者確認後才開下一個施工關（D22）。
-> - 目前狀態：**第 1–11 施工關完成並已合併**；第 11 施工關 C 段 #145 經全新 verifier、雙平台 CI、實機及後續自動驗收與清理，使用者於 2026-10-03 確認合併（`b2152db`）。第 12 施工關 A 段設計 #138 已 merge，client 基礎 #147 已 merge，持久化 #148 已 merge，protocol 1.5／channel／Stop／ACK spool 基礎 #149 已 merge，共用 gh 防護 #150 已 merge，Claude Driver #151 與正式啟動／初始 idle #152 已合併，完整真模型 smoke 改為必要驗收，Claude 接入尚未驗收；第 13 施工關未開始。
-> - 下一步：第 12A [完整模型 smoke 已回報 PASS](gates/gate-12a-complete-smoke.md)，完成獨立覆核／CI 收尾後，依持續授權推進 B–D。
+> - 目前狀態：**第 1–11 施工關完成並已合併**；第 12A Claude 完整真模型 smoke、獨立覆核及 CI 通過，#154 已合併。12B OpenCode 原生契約、受控真測與六方向模型互傳通過，#155 正在最終覆核／CI；12C GitHub forge 與 12D Telegram 待實作，第 13 施工關未開始。
+> - 下一步：完成 [12B OpenCode](gates/gate-12b-opencode.md) 的合併與清理，再依持續授權推進 12C／12D。
 
 ## 13 個施工關
 
@@ -22,7 +22,7 @@
 | 9 `cli` | [完成（2026-09-29；已 merge #136）](gates/gate-09-cli.md) | agend CLI：agent 命令、操作者命令、status；安裝相關先做 `doctor`、`init`，服務註冊留第 13 施工關 | 對假／真 daemon 驗輸出與錯誤；兩個假 Codex agent 互傳訊息、中途重啟不漏不重 |
 | 10 `pipeline` | [完成（2026-10-02；#143 已確認合併）](gates/gate-10-pipeline.md) | daemon：pipeline、git、runner、forge local、supervisor、reconcile | 假 driver + 暫存 repo：task 從派工走到 merge |
 | 11 `tui` | [完成（A、B、C 已 merge；C 段 #145）](gates/gate-11-tui.md) | attention-first TUI、完整終端、resize、多視窗、鍵鼠／貼上與歷史 | 最終 `cfee027` 全新 verifier CONFIRMED；四個雙平台 CI jobs 各 900 passed／0 failed／2 既有 ignored、實際 no-std；0.159.3 真 U17 已核實並獲版本許可。實機紀錄及後續自動驗收、清理完成，使用者確認 merge `b2152db` |
-| 12 `adapters` | [實作中（A 段完整 smoke PASS，覆核／合併收尾中；B–D 待實作）](gates/gate-12-adapters.md) | A claude、B opencode driver、C forge github、D Telegram | 先對假實作，再做真 backend smoke test |
+| 12 `adapters` | [實作中（A 已合併；B 最終覆核／CI；C／D 待實作）](gates/gate-12-adapters.md) | A claude、B opencode driver、C forge github、D Telegram | 先對假實作，再做真 backend smoke test |
 | 13 `install` | [未開始](gates/gate-13-install.md) | 安裝與發布（最後一個施工關）：服務註冊、`agend uninstall`、`agend telegram setup`（由 daemon 配對）、`xtask release`、brew、GitHub release、`cargo install` | CI 用全新 HOME + 假 agent，從安裝到第一個 task 完成 < 5 分鐘；每個 `doctor` 檢查都有「故意弄壞 → 看到修正指令」的測試 |
 
 ## 第 1 施工關：開工前先提案、經使用者確認才實作
@@ -68,7 +68,7 @@
 
 ## 下一步
 
-第 1–11 施工關已完成並合併。第 11 施工關 C 段 #145 使用者於 2026-10-03 明確確認合併，原驗收範圍與限制見 [收尾紀錄](gates/gate-11c-closeout.md)。第 12A #138 的 P1–P10 已依本輪使用者確認寫定為 [D40](decisions/d40.md)，剩餘採建議；設計文件已依使用者「merge後開工」合併（#138、`4390633`）；第 12A 在獨立 worktree 實作中，Claude 接入尚未完成。
+第 1–11 施工關及 12A 已完成並合併。12B 於 #155 收尾，合併前完成全新 verifier 與雙平台 CI；清理自有 worktree／暫存後進入 12C／12D。使用者已授權持續完成第 12 施工關，範圍見 [AGENTS.md](../AGENTS.md#第-12-施工關持續授權2026-10-07)。
 
 ## 進度紀錄
 
@@ -96,6 +96,16 @@
 
 
 - 2026-10-02 C 段第一個實作提交 `a13d31c`（[draft PR #145](https://github.com/suzuke/AgEnD/pull/145)）：holder 1.1 的結構化 frame、request id、generation／revision、色彩／游標／mode、歷史 viewport 與 8 MiB 整份拒絕。holder 47 passed；accept core 含 workspace clippy／實際 no-std 通過，兩個既有 deep explorers ignored。完整 C 段與 U17 仍在實作，尚未獨立／人工驗收或 merge。
+
+- 2026-10-07：12B 補已套用 POST／回覆遺失故障注入，三次 SQLite 重開不重送；chunked 超限統一分頁縮小。OpenCode 18 tests、clippy 與 check-deps 通過；這是 native producer 自動測試，非真模型網路故障驗證。
+
+- 2026-10-07：12B 真 OpenCode 1.18.34 兩則權限蒐證通過，REST 無 SSE 取得請求、once 完成與 reject 拒絕；原始輸出納入回歸，自有程序／port／暫存已清，共享 auth 不變。尚未代表完整 12B 驗收。
+
+- 2026-10-07：12B 三真 backend v1 因完整 workspace 被 CLI 截短而在送件前停止，零工作訊息且自有資源已清；獨立靜態覆核另找到 permission 驗證 GET 失敗會提前耗用 claim 的 P2，接續修正，未合併。
+
+- 2026-10-07：12B 修正獨立覆核的 permission GET／claim 次序問題，原版本反例失敗、修正版與 lost-POST 重啟回歸通過；三真 backend v2 採短 namespace 與唯讀原 thread 狀態，尚未執行。
+
+- 2026-10-07：12B 三真 backend v2 六方向 PASS，12 筆完整身分訊息全數 Confirmed；自有程序／暫存／session artifacts 已清，共享帳戶與 Claude trust 保留。permission P2 局部覆核已解決；進入完整覆核與 CI，尚未合併。
 
 歷史紀錄見 [2026-10-02–03](roadmap-progress-20261002-03.md) 與 [較早紀錄](roadmap-progress.md)。
 
@@ -218,3 +228,36 @@
 - 2026-10-07：#154 的 v11 完成啟動與 INITIAL ACK，但模型將命令後說明送入 Bash，peer send exit 2；提前停止自有 runner 並清理，未進入 queue／Interrupt。命令改用獨立區塊，Bash／zsh 原生參數檢查通過；完整 12A 仍未完成，詳見 [Stop idle](gates/gate-12a-stop-idle.md)。
 
 - 2026-10-07：#154 固定 `0f4b8e0` 的 v12 完整真模型 smoke 單次 PASS：七則 confirmed（六 channel／一 Stop）、模型互傳、queue 後恢復 idle、Interrupt 完成，自有清理成功且保留 trust。全新 outcome／CI 收尾中；[完整紀錄](gates/gate-12a-complete-smoke.md)。使用者表示 Telegram 測試憑證稍後提供，先推進其餘工作。
+- 2026-10-07：依持續完成第 12 關授權，12B 在 `feat/g12b-opencode` 開始傳輸／session／歷史核對；daemon lib 102 tests、clippy 與前後實際 no-std 通過。真 OpenCode 1.18.34 的 noReply 身分捕獲已納入回歸，程序與隔離目錄已清；正式 Driver／holder／恢復／真模型測試仍待接，尚未 merge。12D Telegram 專用 bot 與 chat 資料由使用者稍後提供，不阻擋其他實作。
+
+- 2026-10-07：12A 完整真測、全新覆核及固定 head 雙平台四 CI jobs 通過，#154 合併為 `a6cdb4c`；12A worktree／本機 branch 已刪。12B 已 rebase 至合併後版本，Telegram 專用測試設定已備齊（私有設定不入 repo），12B–D 持續實作。
+
+- 2026-10-07：12B OpenCode 初版 Driver／supervisor worker 接線，持久 attempt、分頁 REST 核對與 unknown 狀態；108 個 daemon 單元測試通過，holder／permission／真測尚未完成（feat/g12b-opencode）。
+
+- 2026-10-07：12B 權限 REST 核對與 schema v10 單次決策 attempt 持久化；worker 輪詢保存，attention／operator 接線仍待完成（feat/g12b-opencode）。
+
+- 2026-10-07：12B permission attention 與 operator-only AnswerAsk 接線，完整 snapshot 再核對、持久單次回覆，pipeline refresh 保留 backend 權限提示；holder／真測尚未完成（feat/g12b-opencode）。
+
+- 2026-10-07：12B 原生 daemon／holder 兩種恢復路徑（正常停止／SIGKILL）、permission 回覆與單次投遞整合通過；自有 lab 清除，真 CLI／模型及三 backend 驗收待完成（feat/g12b-opencode）。
+
+- 2026-10-07：12B terminal event 回填、schema v11 去重與真 HTTP acceptance→Sent 接線；10 原生 OpenCode 案例／兩個 holder 恢復案例通過，完整 DRV／模型驗收未完成（feat/g12b-opencode）。
+
+- 2026-10-07：12B 完整 DRV suite 10/10（原生 REST／重開 SQLite）通過；固定版本零 prompt provider inventory 完成並清理，接續受控模型真測（feat/g12b-opencode）。
+
+- 2026-10-07：12B 固定 OpenCode 1.18.34／gpt-6-luna 正式 daemon 真模型單則 smoke 通過，原生歷史與 DB 確認單次投遞及完成；自有程序／port／目錄已清，共享 auth 不變。busy／跨 backend 與 fresh verifier 仍待完成。
+
+- 2026-10-07：12B busy queue→interrupt 原生反例重現並修正：abort 回覆成功後單次提交，不等待可能不存在的 idle 空窗；新增 steer／interrupt 兩條路徑的完整歷史與無重送檢查。
+
+- 2026-10-07：12B 真 OpenCode 1.18.34 busy smoke v2 通過三筆 Confirmed／首輪中斷／緊急回覆；保留 v1 過早 busy 斷言與 v2 精確範圍，原生歷史加入回歸，自有程序與暫存已清。
+
+- 2026-10-07：12B 三 backend 六方向正式 daemon 路由驗證通過，六則均 Confirmed、內容完整且每 receiver 恰兩筆；Claude 使用實際 helper ACK／Stop。此為零模型 fixture 驗證，真模型互傳與完整覆核仍待完成。
+
+- 2026-10-07：12B 獨立缺口覆核找出 unknown retention、全量歷史上限與人工終結三項不足；先補 schema 0012 投遞歸屬及未終結保留，未宣稱完整通過。
+
+- 2026-10-07：12B unknown delivery attention／operator-only Abandon 已接線；原生兩次重啟、agent 拒絕、人工終結、晚到確認與零重送驗證通過。長 REST 歷史分頁仍待修正。
+
+- 2026-10-07：12B 真 1.18.34 零模型捕獲兩頁游標與單筆歷史查詢；新增固定 endpoint 分頁 API 與 captured producer 回歸。worker 分頁接線仍待完成，原長歷史缺陷保持未完成。
+
+- 2026-10-07：12B worker 已接最新頁／歷史回填與舊 attempt 定點查詢；超過 16 MiB 原生歷史回歸核舊收件、新派工與早期完成只發布一次，沒有提高傳輸上限。
+
+- 2026-10-07：#155 固定 `e96f429` 全新 verifier CONFIRMED_SCOPED_SUCCESS：workspace 1,062 passed／0 failed／2 既有 ignored、fmt／clippy／實際 no-std；獨立核對六方向真模型 12 筆 Confirmed。補清早期 model-smoke-v1 自有 holder／attach，原清理誤判及更正保留；目前狀態文件更新，最終 CI／合併仍待完成。

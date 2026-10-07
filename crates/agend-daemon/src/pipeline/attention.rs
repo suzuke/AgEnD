@@ -32,7 +32,10 @@ where
                 && a.ask.is_none()
                 && let Some(id) = a.attention_id
             {
-                if id.starts_with(crate::handlers::claude_attention::PREFIX) {
+                if id.starts_with(crate::handlers::claude_attention::PREFIX)
+                    || id.starts_with(crate::handlers::opencode_attention::PREFIX)
+                    || id.starts_with(crate::handlers::opencode_delivery_attention::PREFIX)
+                {
                     continue;
                 }
                 if pending.as_deref() == Some(id.as_str()) {
@@ -405,6 +408,8 @@ where
             if let Some(id) = old.attention_id
                 && !id.starts_with("instance-failed:")
                 && !id.starts_with(crate::handlers::claude_attention::PREFIX)
+                && !id.starts_with(crate::handlers::opencode_attention::PREFIX)
+                && !id.starts_with(crate::handlers::opencode_delivery_attention::PREFIX)
                 && !expected.contains_key(&id)
             {
                 self.fleet.dismiss(&id);

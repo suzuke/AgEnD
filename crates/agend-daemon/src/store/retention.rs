@@ -62,6 +62,22 @@ pub struct Rule {
 pub const RETENTION: &[Rule] = &[
     Rule {
         target: Target::Table {
+            name: "opencode_observed",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "gate 12B: REST backfill deduplication survives event retention, removed with its instance",
+    },
+    Rule {
+        target: Target::Table {
+            name: "opencode_permissions",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "gate 12B: permission decisions retain single-attempt attribution until explicit instance removal cascades",
+    },
+    Rule {
+        target: Target::Table {
             name: "claude_startup",
             time_column: None,
         },
@@ -83,6 +99,14 @@ pub const RETENTION: &[Rule] = &[
         },
         keep: Keep::Days(14),
         why: "D40: driver history 14 days from ingestion, not the historical source time",
+    },
+    Rule {
+        target: Target::Table {
+            name: "opencode_attempts",
+            time_column: None,
+        },
+        keep: Keep::WithMessage,
+        why: "Unknown OpenCode attempts retain no-replay attribution; terminal messages cascade",
     },
     Rule {
         target: Target::Table {
@@ -286,8 +310,9 @@ pub(super) fn prune(conn: &mut Connection, now_unix_ms: u64) -> Result<PruneRepo
             if name == "messages" {
                 tx.execute("DELETE FROM messages WHERE \
                     (NOT EXISTS (SELECT 1 FROM claude_deliveries d WHERE d.message_id = messages.id) \
+                        AND NOT EXISTS (SELECT 1 FROM opencode_attempts o WHERE o.message_id = messages.id) \
                         AND created_at_unix_ms < ?1) OR \
-                    (EXISTS (SELECT 1 FROM claude_deliveries d WHERE d.message_id = messages.id) \
+                    ((EXISTS (SELECT 1 FROM claude_deliveries d WHERE d.message_id = messages.id) OR EXISTS (SELECT 1 FROM opencode_attempts o WHERE o.message_id = messages.id)) \
                         AND state IN ('confirmed', 'failed') AND updated_at_unix_ms < ?1)", [cutoff])?;
             } else {
                 tx.execute(&format!("DELETE FROM {name} WHERE {column} < ?1"), [cutoff])?;

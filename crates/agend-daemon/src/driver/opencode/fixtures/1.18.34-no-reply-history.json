@@ -1,0 +1,26 @@
+[
+  {
+    "info": {
+      "id": "msg441904b159244794a96b2abfc7e67a0753143f7ba3ca29614b4b43841ce5c73a",
+      "sessionID": "ses_eeb4acea6ffezbBb0MgBBKc5Mk",
+      "role": "user",
+      "time": {
+        "created": 1791348781766
+      },
+      "agent": "build",
+      "model": {
+        "providerID": "opencode",
+        "modelID": "big-pickle"
+      }
+    },
+    "parts": [
+      {
+        "id": "prt_114b532cc0013Q3ilwO4br1ZE6",
+        "sessionID": "ses_eeb4acea6ffezbBb0MgBBKc5Mk",
+        "messageID": "msg441904b159244794a96b2abfc7e67a0753143f7ba3ca29614b4b43841ce5c73a",
+        "type": "text",
+        "text": "AgEnD identity probe\n繁中 é"
+      }
+    ]
+  }
+]

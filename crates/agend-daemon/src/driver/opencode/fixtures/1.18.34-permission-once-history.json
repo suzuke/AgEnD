@@ -1,0 +1,147 @@
+[
+  {
+    "info": {
+      "id": "msgb9dc5c6093008cb6c82e2b0d27cc51dea731241d299abea2e2089e4b8043b762",
+      "sessionID": "ses_eeab1832effe8IcoZmvjZ5qYH1",
+      "role": "user",
+      "time": {
+        "created": 1791358827847
+      },
+      "summary": {
+        "diffs": []
+      },
+      "agent": "build",
+      "model": {
+        "providerID": "opencode-go",
+        "modelID": "gpt-6-luna"
+      }
+    },
+    "parts": [
+      {
+        "id": "prt_1154e7d4a001SVYTGIbxS6qV9U",
+        "sessionID": "ses_eeab1832effe8IcoZmvjZ5qYH1",
+        "messageID": "msgb9dc5c6093008cb6c82e2b0d27cc51dea731241d299abea2e2089e4b8043b762",
+        "type": "text",
+        "text": "Use the bash tool exactly once to run this exact command: printf AGEND_G12B_ONCE. Do not use other tools or change the command. If permission is denied, do not retry; reply DENIED. Otherwise reply DONE."
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_1154e7e5e001FCdsTRcjeMnDiI",
+      "sessionID": "ses_eeab1832effe8IcoZmvjZ5qYH1",
+      "role": "assistant",
+      "time": {
+        "created": 1791358828126,
+        "completed": 1791358830389
+      },
+      "parentID": "msgb9dc5c6093008cb6c82e2b0d27cc51dea731241d299abea2e2089e4b8043b762",
+      "modelID": "gpt-6-luna",
+      "providerID": "opencode-go",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/private/tmp/agend-g12b-permission-166kjocw/workspace",
+        "root": "/"
+      },
+      "cost": 0.00069855,
+      "tokens": {
+        "total": 5514,
+        "input": 3,
+        "output": 25,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 5486
+        }
+      },
+      "finish": "tool-calls"
+    },
+    "parts": [
+      {
+        "id": "prt_1154e85fe001KHIWuLIJ4xpsm3",
+        "sessionID": "ses_eeab1832effe8IcoZmvjZ5qYH1",
+        "messageID": "msg_1154e7e5e001FCdsTRcjeMnDiI",
+        "type": "step-start"
+      },
+      {
+        "id": "prt_1154e85ff001C1pWPgoq33Gka7",
+        "sessionID": "ses_eeab1832effe8IcoZmvjZ5qYH1",
+        "messageID": "msg_1154e7e5e001FCdsTRcjeMnDiI",
+        "type": "tool",
+        "callID": "call_26RIv2ArIMyruTYBlTKtYLXM",
+        "tool": "bash",
+        "state": {
+          "status": "completed",
+          "input": {
+            "command": "printf AGEND_G12B_ONCE"
+          },
+          "output": "AGEND_G12B_ONCE",
+          "title": "printf AGEND_G12B_ONCE",
+          "metadata": {
+            "output": "AGEND_G12B_ONCE",
+            "exit": 0,
+            "truncated": false
+          },
+          "time": {
+            "start": 1791358830254,
+            "end": 1791358830384
+          }
+        },
+        "metadata": {
+          "openai": {
+            "itemId": "fc_0f5882e33d741287016ac5f76e0d5887d2b46d70e0ddf003bf"
+          }
+        }
+      },
+      {
+        "id": "prt_1154e8732001Z3ti41stKX0qFe",
+        "sessionID": "ses_eeab1832effe8IcoZmvjZ5qYH1",
+        "messageID": "msg_1154e7e5e001FCdsTRcjeMnDiI",
+        "type": "step-finish",
+        "reason": "tool-calls",
+        "cost": 0.00069855,
+        "tokens": {
+          "total": 5514,
+          "input": 3,
+          "output": 25,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 5486
+          }
+        }
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_1154e87370017qb9m3ayKBowIB",
+      "sessionID": "ses_eeab1832effe8IcoZmvjZ5qYH1",
+      "role": "assistant",
+      "time": {
+        "created": 1791358830391
+      },
+      "parentID": "msgb9dc5c6093008cb6c82e2b0d27cc51dea731241d299abea2e2089e4b8043b762",
+      "modelID": "gpt-6-luna",
+      "providerID": "opencode-go",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/private/tmp/agend-g12b-permission-166kjocw/workspace",
+        "root": "/"
+      },
+      "cost": 0,
+      "tokens": {
+        "input": 0,
+        "output": 0,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 0
+        }
+      }
+    },
+    "parts": []
+  }
+]

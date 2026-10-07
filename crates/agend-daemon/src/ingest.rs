@@ -108,11 +108,22 @@ pub(crate) async fn run(home: PathBuf, ctx: Arc<Context>, bridge: Arc<ClaudeBrid
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     let mut cursors = std::collections::BTreeMap::new();
     let mut unknown_after = 0;
+    let mut open_unknown_after = 0;
     loop {
         tick.tick().await;
         match crate::handlers::claude_attention::refresh(&ctx, unknown_after).await {
             Ok(after) => unknown_after = after,
             Err(e) => crate::log::line(&format!("Claude delivery attention refresh failed: {e}")),
+        }
+        match crate::handlers::opencode_delivery_attention::refresh(&ctx, open_unknown_after).await
+        {
+            Ok(after) => open_unknown_after = after,
+            Err(e) => crate::log::line(&format!("OpenCode delivery attention refresh failed: {e}")),
+        }
+        if let Err(e) = crate::handlers::opencode_attention::refresh(&ctx).await {
+            crate::log::line(&format!(
+                "OpenCode permission attention refresh failed: {e}"
+            ));
         }
         for kind in ["hooks", "acks"] {
             let dir_home = home.clone();

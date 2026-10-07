@@ -10,6 +10,8 @@ mod claude_pipeline;
 mod claude_startup;
 #[path = "../../agend-daemon/tests/common/daemon_process.rs"]
 mod lab;
+#[path = "common/three_backend_delivery.rs"]
+mod three_backend_delivery;
 use agend_core::{
     model::{Backend, DeliveryState},
     policy::busy::BusyLevel,

@@ -1,22 +1,22 @@
 # 第 12 施工關：其餘 adapter（`adapters`）
 
 > **TL;DR**
-> - A claude、B opencode、C GitHub forge、D Telegram；A 段已開始實作，接入尚未完成。
+> - A claude、B opencode、C GitHub forge、D Telegram；A 已合併完成，B 正在實作與驗證，C／D 待開工。
 > - 第 1–11 施工關已完成並合併；A 段設計 D40 已於 #138 合併（`4390633`）。
-> - 下一步：單次 client 請求基礎 #147 已 merge；持久化 #148 已 merge；bridge #149 已 merge；共用 gh 防護 #150 已 merge；完成 [Claude Driver／啟動設定與控制](gate-12a-driver.md)。
+> - 下一步：完成 [12B OpenCode](gate-12b-opencode.md) 的最終 CI／文件覆核與合併清理，再推進 C／D。
 
 ## 狀態
 
-**實作中**（2026-10-07）。A 段基礎 #147–#153 已合併；#154 修正 active Stop idle 與 smoke 工具，[v12 完整真模型 smoke](gate-12a-complete-smoke.md)已回報 PASS，獨立 outcome／CI 收尾中。使用者已持續授權推進至第 12 關完成，包含必要受控真測及驗證後合併，見 AGENTS.md。以下舊提案與進度條目保留歷史語境。
+**實作中**（2026-10-07）。A 段基礎 #147–#153 已合併；#154 修正 active Stop idle 與 smoke 工具，[v12 完整真模型 smoke](gate-12a-complete-smoke.md)已回報 PASS，獨立覆核與 CI 通過，#154 已合併為 `a6cdb4c`。使用者已持續授權推進至第 12 關完成，包含必要受控真測及驗證後合併，見 AGENTS.md。以下舊提案與進度條目保留歷史語境。
 
 ## 四段範圍
 
 | 段 | 範圍 | 目前進度 |
 |---|---|---|
-| A Claude | channel、hooks、啟動、忙碌策略、送達與清掃 | v12 七則完整 smoke PASS；#154 覆核／CI／合併收尾 |
-| B OpenCode | serve、session、送達、權限；三個 backend 互傳 | 尚未實作；已無模型讀取 1.18.34 本機 OpenAPI，隔離 server 已清理 |
+| A Claude | channel、hooks、啟動、忙碌策略、送達與清掃 | v12 七則完整 smoke PASS；#154 已合併 `a6cdb4c` |
+| B OpenCode | serve、session、送達、權限；三個 backend 互傳 | 正式 Driver／holder／權限與 DRV 10/10；基本／busy interrupt／permission 真測及三 backend 六方向互傳通過，全新 verifier：1,062 passed、fmt／clippy／no-std 通過；#155 文件覆核與最終 CI 中 |
 | C GitHub forge | push、PR、checks、head 對帳、merge 與收尾 | 尚未實作 |
-| D Telegram | notifier、allowlist、token、手機操作、G4 已讀 | 尚未實作；使用者稍後提供專用 bot 設定路徑／chat ID，先完成其餘部分 |
+| D Telegram | notifier、allowlist、token、手機操作、G4 已讀 | 尚未實作；專用 bot 設定與測試 chat 已備妥，憑證只留本機 |
 
 B–D 依現有決策與持續授權具體化；遇新的重大取捨才再請使用者決定。第 13 關安裝／發布不在此次範圍。
 
@@ -30,7 +30,7 @@ B–D 依現有決策與持續授權具體化；遇新的重大取捨才再請�
 | ingest 的 spool 已經寫好 | 原 baseline 兩者只有說明；本批 ingest 已有 hook／ACK replay，driver/claude 仍待接 | bridge／hooks／spool 已 merge；Claude Driver 與啟動配置仍須接入 |
 | 手動逐步驗收大部分 fake 行為 | 使用者要求可自動化的驗證由 agent 執行，完成後清理 | fresh verifier 重跑，提供可重驗指令；真 CLI／模型回合另需授權 |
 
-此表對齊目前程式與已確認設計；0007 與 store API 已於 #148 合併；1.5／helper／spool 本批已實作，完整 runtime 尚未接入，不能視為 A 段功能驗收通過。
+上表保留 12A 開工時的程式狀態；0007 與 store API 已於 #148 合併；1.5／helper／spool 本批已實作，完整 runtime 尚未接入，不能視為 A 段功能驗收通過。
 
 ## P1–P10 決策入口
 
@@ -59,7 +59,7 @@ A 段原限制：不加新的 core 事件或未知提示／忙閒判斷機制。
 
 ## 你親自驗收
 
-Claude 接入／A 段功能驗收尚未完成，bridge 基礎可用 [自動 native 指令](gate-12a-bridge.md#可重驗指令) 重驗；這不代替 A 段功能驗收。[驗收計畫](gate-12a-validation.md#真測與使用者可重驗)保留互傳訊息與權限等情境；A 段實作及自動驗證完成後，再提供逐步指令。真 CLI／模型回合須另行取得版本、範圍與預算授權。
+12A 已合併完成；完整真測見 [v12 紀錄](gate-12a-complete-smoke.md)。12B 原生重驗見 [OpenCode 指令](gate-12b-opencode.md#可重驗指令)。以下保留 12A 早期驗收安排：當時 bridge 基礎可用 [自動 native 指令](gate-12a-bridge.md#可重驗指令) 重驗；這不代替 A 段功能驗收。[驗收計畫](gate-12a-validation.md#真測與使用者可重驗)保留互傳訊息與權限等情境；A 段實作及自動驗證完成後，再提供逐步指令。真 CLI／模型回合須另行取得版本、範圍與預算授權。
 
 ## 驗收紀錄
 
@@ -93,7 +93,7 @@ Claude 接入／A 段功能驗收尚未完成，bridge 基礎可用 [自動 nati
 
 ## 下一步
 
-依已合併 [D40](../decisions/d40.md) 實作 Claude 接入；client 單次請求基礎已合併；store 已合併；bridge #149 已 merge；共用 gh 防護 #150 已合併，目前正進行 [Driver／啟動設定與控制](gate-12a-driver.md) 的實作及驗證。完成後提供全新 verifier 與可重驗指令，implementation merge 等使用者確認。
+12A 已合併完成。12B 依全新 verifier 與最終 CI 收尾，完成後清理自有資源並進入 12C／D；沿用第 12 關持續授權。
 
 - 2026-10-04：#148 全新 verifier CONFIRMED、雙平台 CI 通過，經使用者確認合併為 `7877dbe`；protocol 1.5／channel／Stop／ACK spool 在新 worktree 實作，範圍與限制見 [bridge 基礎](gate-12a-bridge.md)。
 

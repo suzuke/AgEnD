@@ -6,6 +6,8 @@
 > - 下一步：第 10 施工關 pipeline 驗證：`cargo xtask accept pipeline`；還原 DB 快照的步驟見下方「store」。
 
 正式 P5 啟動按鍵與 P6 初始 idle 的實作、schema v9 與 native 驗證邊界見 [啟動處理](../../docs/gates/gate-12a-startup-runtime.md)。
+
+第 12B 已接入 OpenCode Driver、supervisor／holder、REST 分頁對帳與 operator 權限回覆；原生契約及固定版本真測通過，#155 最終覆核／CI 進行中。範圍與限制見 [OpenCode](../../docs/gates/gate-12b-opencode.md)。
 private startup capture 在啟動前登記 manual 模式，停用 daemon 自動鍵與初始 resize，所有蒐證輸入仍受原授權計畫限制。
 
 ## 第 10 施工關（已驗收，2026-10-02）
@@ -56,7 +58,7 @@ pipeline 補 failed attention 的 unblocks 時，經 core port 原子比對捕�
 | `supervisor` | 讓 DB 裡的 instance 保持在跑：死了等 5 秒 `--resume`、10 分鐘 3 次仍死就 `failed`（變成「需要你」項目，操作者可 `retry`）；之後：卡住、額度、轉派、例外才找人 |
 | `scheduler` | timeout、cron |
 | `reconcile` | 開機與每日 DB ↔ git 對帳 |
-| `driver::{codex,claude,opencode}` | backend 結構化 API；codex 見下方「codex（第 7 施工關）」；Claude push 接入施工中，見[本批進度](../../docs/gates/gate-12a-driver.md)；opencode 留第 12B |
+| `driver::{codex,claude,opencode}` | backend 結構化 API；codex 見下方「codex（第 7 施工關）」；Claude push 已合併，見[接入說明](../../docs/gates/gate-12a-driver.md)；OpenCode REST 接入見[第 12B](../../docs/gates/gate-12b-opencode.md) |
 | `runtime` | `HolderRuntime`：起 holder、holder 協定 client、每個 holder 一條長連線（轉出 `PtyBytes` 給終端訂閱者）、agent 環境白名單、shim symlink |
 | `forge::{local,github}` | 提交與 merge |
 | `git` | 建立／移除 worktree 與 branch（先記錄再建立） |
@@ -75,7 +77,7 @@ pipeline 補 failed attention 的 unblocks 時，經 core port 原子比對捕�
 | instance | `instances` 表（migration 0002，永久保留）：id `[a-z0-9-]{1,24}`、backend、program、args、working_directory、session_id、status（`new`／`running`／`failed`） |
 | 啟動 holder | `agend holder <id>`，環境只有 `AGEND_HOME`；每 50 ms 試連、5 秒內連不上算失敗；第一次 `Spawn` 被 holder 確認後才把 `new` 改成 `running`（session 存在，之後都 resume）；自己起的 holder 由一條 thread `wait` 收屍 |
 | agent 環境 | 白名單：`AGEND_HOME`、`AGEND_INSTANCE`、`PATH`（`$AGEND_HOME/bin` 開頭）、`HOME`、`USER`、`LOGNAME`、`LANG`、`LC_ALL`、`LC_CTYPE`、`TMPDIR`、`TZ`；其他（例如 `TELEGRAM_BOT_TOKEN`、`AGEND_SHIM_BYPASS`）一律不給 |
-| session | claude：`new` 時 `--session-id <id>`，`running` 後只用 `--resume <id>`；codex：daemon 建的 thread，TUI 一律 `resume <thread>`（第 7 施工關）；opencode 還沒有 session id（第 12 施工關），死了就 `failed` |
+| session | claude：`new` 時 `--session-id <id>`，`running` 後只用 `--resume <id>`；codex：daemon 建的 thread，TUI 一律 `resume <thread>`（第 7 施工關）；opencode：私人 serve／attach handoff 保存原 session，holder 重啟恢復原 session；遺失時拒絕替換上下文 |
 | 死掉之後 | agent 結束、holder 死了（連線斷＋鎖放掉）、啟動失敗 → log → 5 秒後 `restart N/3 --resume <id>`（還是 `new` 就 `--session-id`）；10 分鐘內 3 次仍死 → `<id> failed: …`，不再起、關掉對 holder 的連線；次數只在記憶體 |
 | Ctrl-C | SIGINT／SIGTERM：關 holder 連線、關 DB、exit 0；**不送 `Shutdown`**，holder 照跑 |
 | log | stderr ＋ `logs/daemon-YYYY-MM-DD.log`（UTC，0600），留 7 天；`audit/shim.jsonl` 每天輪替成 `shim-YYYY-MM-DD.jsonl`、留 14 天；`run/holders/<id>.log` 在 holder 不在、7 天沒動時刪 |
@@ -105,9 +107,9 @@ socket、身分、事件與舊版終端規則見 [protocol server](PROTOCOL.md)�
 
 權限、status／send／inbox、instance 管理、restart 預檢與 stop 協定見 [protocol server](PROTOCOL.md#cli-的-daemon-端第-9-施工關)。
 
-## 第 12A Claude store 基礎（實作中）
+## 第 12A Claude store 基礎
 
-migration `0007` 及 DB-thread API 保存投遞開始／寫出／ACK／人工放棄；訊息 id 仍是唯一訊息冪等層。protocol 1.5／helper／spool 已接入本批 native bridge；完整 Claude Driver／啟動配置仍待完成。API、retention 與重驗指令見 [Claude store](../../docs/gates/gate-12a-store.md)。
+migration `0007` 及 DB-thread API 保存投遞開始／寫出／ACK／人工放棄；訊息 id 仍是唯一訊息冪等層。protocol 1.5／helper／spool 已接入本批 native bridge；完整 Claude Driver／啟動配置已合併，完整真模型驗收見 [12A smoke](../../docs/gates/gate-12a-complete-smoke.md)。API、retention 與重驗指令見 [Claude store](../../docs/gates/gate-12a-store.md)。
 
 ## store（第 5 施工關）
 
@@ -117,10 +119,10 @@ migration `0007` 及 DB-thread API 保存投遞開始／寫出／ACK／人工放
 | 建立 | 只有 `agend.db` 不存在時才建新 DB：先在 `.agend.db.new` 建好、所有 migration commit 後才 hard link（檔案系統不支援 hard link 時改 rename）成 `agend.db`；上次建到一半留下的 `.agend.db.new` 刪掉重建。`agend.db` 比 SQLite 檔頭（100 bytes）短、schema 版本 0、或缺它那個版本的表 → 拒絕開啟、檔案不動：`agend.db exists but is empty (0 bytes); refusing to start with an empty database — restore a snapshot from <home>/backups (see README)`，照下方步驟還原；指向不存在檔案的 symlink 或不是一般檔案 → `refusing to use <path>: …`。**刪掉 `agend.db` 等於從空 DB 重新開始**；空 DB 不做每日快照；instance 或 Codex thread 歸屬資料也算非空。但寫進第一個 task 後每天的快照照常輪替、一天擠掉一份舊的好快照：要還原請在那之前照下方步驟做 |
 | 執行緒 | 一條 `agend-db` 執行緒持有唯一連線；async 方法經 channel（256）送 closure；該執行緒 panic 後每個呼叫回 `store thread stopped` |
 | 同時開 | `locking_mode=EXCLUSIVE`，第二個程序：`agend.db is in use by another process (is another agend daemon running?)` |
-| 表 | `tasks`、`workflows`、`task_events`、`instances`、`messages`、`teams`、`bindings`、`asks`、`ask_turns`、`reminders`、`codex_input_threads`、`driver_events`、`claude_deliveries`、`claude_owned_files`、`claude_startup`（STRICT）；schema 版本在 `PRAGMA user_version`（目前 9），migration 在 `src/store/migrations/`；`0003` 在 `instances` 加 `session_started`（0／1，第一次 `Spawn` 被確認、寫 `running` 的同一個 statement 設 1；既有的 `running` 與 `failed` 的 codex／opencode 設 1）；`0004`（第 7 施工關）加 `messages`（`seq INTEGER PRIMARY KEY AUTOINCREMENT`（清空後也不重用號碼）、`attempted_at_unix_ms`（送出前寫入）、`id` UNIQUE、`from_instance`、`to_instance`、`task_id`、`body`、`level`、`state`、`turn_id`、時間）與 `instances.agent_pid`、`instances.legacy_no_thread`（那一刻 `codex`、沒有 thread、`running`／`failed` 而且 `session_started = 1` 的列設 1 並標 `failed`） |
+| 表 | `tasks`、`workflows`、`task_events`、`instances`、`messages`、`teams`、`bindings`、`asks`、`ask_turns`、`reminders`、`codex_input_threads`、`driver_events`、`claude_deliveries`、`claude_owned_files`、`claude_startup`（STRICT）；schema 版本在 `PRAGMA user_version`（目前 12；另含 `opencode_permissions`、`opencode_observed`、`opencode_attempts`），migration 在 `src/store/migrations/`；`0003` 在 `instances` 加 `session_started`（0／1，第一次 `Spawn` 被確認、寫 `running` 的同一個 statement 設 1；既有的 `running` 與 `failed` 的 codex／opencode 設 1）；`0004`（第 7 施工關）加 `messages`（`seq INTEGER PRIMARY KEY AUTOINCREMENT`（清空後也不重用號碼）、`attempted_at_unix_ms`（送出前寫入）、`id` UNIQUE、`from_instance`、`to_instance`、`task_id`、`body`、`level`、`state`、`turn_id`、時間）與 `instances.agent_pid`、`instances.legacy_no_thread`（那一刻 `codex`、沒有 thread、`running`／`failed` 而且 `session_started = 1` 的列設 1 並標 `failed`） |
 | 耐久 | WAL、`synchronous=FULL`、`foreign_keys=ON` |
-| 保留期限 | `store::retention::RETENTION`：task、workflow、instance、team、binding、請示／回答 receipt、reminder 與 Codex thread 輸入歸屬永久（binding／reminder 按生命週期刪除）；事件與 checks log 14 天；WIP archive 與一般訊息 30 天（`created_at_unix_ms`）；Claude push 未終結訊息／投遞資料持續保留，confirmed／failed 由 terminal update 起留 30 天、driver_events 從入庫時間留 14 天；`audit/shim.jsonl` 每日輪替留 14 天、daemon log 7 天、holder log 7 天（第 6 施工關 `housekeeping`） |
-| DB 快照 | `backups/agend-YYYY-MM-DD.db`（UTC；DB 沒有任何 task、task event、instance、driver event、Claude 投遞與 Codex thread 輸入歸屬時不做；只剩一般 messages 的既有行為不變，仍視為空），升級前 `agend-YYYY-MM-DD-pre-vN.db`；只留最新 7 份，其他檔案不動 |
+| 保留期限 | `store::retention::RETENTION`：task、workflow、instance、team、binding、請示／回答 receipt、reminder 與 Codex thread 輸入歸屬永久（binding／reminder 按生命週期刪除）；事件與 checks log 14 天；WIP archive 與一般訊息 30 天（`created_at_unix_ms`）；Claude push／OpenCode attempts 未終結訊息與投遞歸屬持續保留，confirmed／failed 由 terminal update 起留 30 天、driver_events 從入庫時間留 14 天；`audit/shim.jsonl` 每日輪替留 14 天、daemon log 7 天、holder log 7 天（第 6 施工關 `housekeeping`） |
+| DB 快照 | `backups/agend-YYYY-MM-DD.db`（UTC；DB 沒有任何 task、task event、instance、driver event、Claude 投遞／啟動／自有檔案、OpenCode 權限／歷史去重／attempts 與 Codex thread 輸入歸屬時不做；只剩一般 messages 的既有行為不變，仍視為空），升級前 `agend-YYYY-MM-DD-pre-vN.db`；只留最新 7 份，其他檔案不動 |
 | pipeline | `PipelineSnapshot` 存 task 的 `pipeline` 欄，workflow 固定建立時版本；snapshot、task、事件、attention_reason 清除與被接受結果的 dispatch confirmation 同一筆 CAS transaction，保留 failure acknowledgement，不重播事件；`0005` 加 team／role、binding、請示與提醒，詳見 [runtime](../../docs/architecture/pipeline-runtime.md) |
 
 ### 還原 DB 快照（手動）
@@ -169,3 +171,5 @@ cargo xtask accept cli             # 第 9 施工關 demo：cli_demo（在 agend
 `claude_startup::startup_variable_ready_suggestions_replay_actual_v5_and_both_widths` 經真 daemon／holder／PTY 重播 v5 兩份捕獲及 140 欄變體，核五秒初始 idle 與 Ready 不加鍵；
 `startup_variable_ready_rejects_unknown_footer_and_split_hint_without_idle_or_more_keys` 拒絕未知 footer／分行建議。
 既有無 SessionStart、人工控制、結果不明與四次開機回歸維持；這些測試不啟動真 Claude、不送模型訊息。
+
+12B OpenCode push 以 supervisor worker 接 loopback REST：claim 與傳輸分離，先持久化 attempt 再送一次，REST 歷史確認收件。原 session 經私人 holder wrapper handoff 恢復；權限由 operator 回覆，unknown 投遞提供 Abandon。原生恢復／權限／DRV 及固定版本模型真測已通過，最終覆核與 CI 以 [12B 紀錄](../../docs/gates/gate-12b-opencode.md) 為準。

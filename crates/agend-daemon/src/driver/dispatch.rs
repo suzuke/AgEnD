@@ -1,5 +1,5 @@
 //! Driver composition for all dispatch paths. Inbox instances keep the generic
-//! persisted message path; only Claude push uses the Claude adapter.
+//! persisted message path; push instances use their backend adapter.
 use super::claude::ClaudeDriver;
 use super::codex::{CodexDriver, DriverError};
 use crate::store::SqliteStore;
@@ -10,6 +10,7 @@ use std::sync::Arc;
 pub struct BackendDriver {
     codex: CodexDriver,
     claude: ClaudeDriver,
+    opencode: super::opencode::OpenCodeDriver,
     store: Arc<SqliteStore>,
 }
 impl BackendDriver {
@@ -17,16 +18,17 @@ impl BackendDriver {
         Self {
             codex,
             claude: ClaudeDriver::new(store.clone()),
+            opencode: super::opencode::OpenCodeDriver::new(store.clone()),
             store,
         }
     }
-    async fn claude_push(&self, id: &str) -> Result<bool, DriverError> {
+    async fn push_backend(&self, id: &str) -> Result<Option<Backend>, DriverError> {
         let instance = self
             .store
             .instance(id)
             .await?
             .ok_or_else(|| DriverError::UnknownInstance(id.into()))?;
-        Ok(instance.backend == Backend::Claude && instance.delivery == "push")
+        Ok((instance.delivery == "push").then_some(instance.backend))
     }
 }
 impl Driver for BackendDriver {
@@ -37,10 +39,10 @@ impl Driver for BackendDriver {
         message: &AgentMessage,
         mode: BusyLevel,
     ) -> Result<DeliveryReceipt, Self::Error> {
-        if self.claude_push(id).await? {
-            self.claude.deliver(id, message, mode).await
-        } else {
-            self.codex.deliver(id, message, mode).await
+        match self.push_backend(id).await? {
+            Some(Backend::Claude) => self.claude.deliver(id, message, mode).await,
+            Some(Backend::Opencode) => self.opencode.deliver(id, message, mode).await,
+            _ => self.codex.deliver(id, message, mode).await,
         }
     }
     async fn events(
@@ -48,10 +50,10 @@ impl Driver for BackendDriver {
         id: &str,
         cursor: Option<&str>,
     ) -> Result<Vec<DriverEvent>, Self::Error> {
-        if self.claude_push(id).await? {
-            self.claude.events(id, cursor).await
-        } else {
-            self.codex.events(id, cursor).await
+        match self.push_backend(id).await? {
+            Some(Backend::Claude) => self.claude.events(id, cursor).await,
+            Some(Backend::Opencode) => self.opencode.events(id, cursor).await,
+            _ => self.codex.events(id, cursor).await,
         }
     }
 }

@@ -73,7 +73,7 @@ AGEND_BLESS_GOLDEN=1 cargo test -p agend-daemon --test store   # 故意改 schem
 | `runtime::files::tests`（單元） | 只有 flock 被持有的鎖檔算 holder 在跑；鎖住但沒有活 pid 的檔案絕不回 0、1 或死掉的 pid，掃描時跳過它、其他照常（verifier r1 F3） |
 | `housekeeping::tests`（單元） | 假時鐘：daemon log 留 7 天、其他檔案不動；audit 每天輪替、留 14 份（13 份輪替＋今天的）；holder log 只在 holder 不在且 7 天沒動時刪（P8） |
 | `fleet::tests`（單元） | 第一個事件＝基準 + 1；還沒有事件時只有基準接得上；「最舊 − 1」到最新接得上，其他 `event_gap`；時鐘往回調：比新 daemon 最新的還大 → `event_gap`，落在新範圍內會被接受（已知風險，所以 1.1 client 重連一律重拿全貌）；沒變的 instance 不發事件；「需要你」加一次、解決一次（第 8 施工關 P4、P5） |
-| `supervisor::tests::a_failed_instance_is_a_needs_you_item_with_retry_unless_it_cannot_resume` | P5 的表：claude 一律有 `retry`；opencode 只有 session 沒建立過才有；codex（第 7 施工關）除了 `legacy_no_thread` 都有；沒有的 `actions` 空、「不處理的話」寫 `delete and re-add the instance (gate 9)` |
+| `supervisor::tests::a_failed_instance_is_a_needs_you_item_with_retry_unless_it_cannot_resume` | P5 的表：claude 一律有 `retry`；opencode push 有持久 session 或尚未建立過 session 才有；codex（第 7 施工關）除了 `legacy_no_thread` 都有；沒有的 `actions` 空、「不處理的話」寫 `delete and re-add the instance (gate 9)` |
 | `crates/agend/tests/cli.rs`（第 9 施工關，真 daemon） | `handlers::agent`／`handlers::operator`、`supervisor` 的 add／remove、`preflight`、`reaper`、`daemon` 的 `exec`：見 [agend TESTING](../agend/TESTING.md)（CLI-n 表、重啟 pid 與 holder 不變、預檢失敗 DB 位元組不變、一次一個重啟、繼承的 holder 不留殘屍而自己的 holder 與預檢子程序的 exit status 沒被搶、里程碑） |
 | `crates/agend/tests/client_protocol.rs`（CLP-13..17） | 權限兩個方向、`instance_add`／`remove`、`daemon_restart` 的形狀、`task_cancel` 不改狀態、`send` 同 id 只收一次與 `inbox --after`，對真 daemon（同一套也對假 daemon，見 testkit） |
 | `store::instances::tests`、`log::tests`（單元） | instance id 只能 `[a-z0-9-]{1,24}`；session id 是 UUID v4；log 檔名與時間戳是 UTC |
@@ -141,6 +141,10 @@ Failed 派工回歸：五種 fake queue 只用一個 dev，boot 派工失敗後�
 
 `pipeline_archive_display` 以真 daemon／shim 設 color.ui／color.diff=always 與 shared diff.noprefix，取消後須用預設 git apply 還原 commit／index／worktree 與原資料內 ESC bytes；patch-id 也不受顏色／prefix 影響。`pipeline_archive_nested` 另移除 inner HEAD、留下只有 Git objects／index 保存的 staged binary，Git 看不到其 metadata 時仍須保留全部資料。
 
+## 第 12B OpenCode
+
+第 12B 的傳輸／session／歷史核對以 `cargo test -p agend-daemon driver::opencode --lib` 驗證。原生假 producer 覆蓋 create／resume／busy／abort／history；1.18.34 真 `noReply` 捕獲覆蓋指定訊息 ID、中文／換行與防止誤認。這些案例不啟動模型，尚不代表正式 Driver／holder 恢復或完整 12B 驗收。
+
 ## 第 12A Claude
 
 Claude bridge／Driver／native startup capture 的案例、限制與重驗指令見 [Claude 測試](CLAUDE-TESTING.md)。
@@ -149,3 +153,25 @@ Claude bridge／Driver／native startup capture 的案例、限制與重驗指�
 `claude_startup::startup_variable_ready_suggestions_replay_actual_v5_and_both_widths` 經真 daemon／holder／PTY 重播 v5 兩份捕獲及 140 欄變體，核五秒初始 idle 與 Ready 不加鍵；
 `startup_variable_ready_rejects_unknown_footer_and_split_hint_without_idle_or_more_keys` 拒絕未知 footer／分行建議。
 既有無 SessionStart、人工控制、結果不明與四次開機回歸維持；這些測試不啟動真 Claude、不送模型訊息。
+
+OpenCode worker 原生 producer 案例含 140 筆結果不明前綴、獨立新投遞批次與一次確認事件；另以 `lost_native_mutation_replies_are_not_replayed_after_store_reopen` 注入 producer 已套用 POST 後直接斷線：prompt 由 history 確認、abort 結果不明不補送 prompt，跨三次 SQLite 重開均不重送。supervisor 測試另覆蓋保存 session 的 wrapper resume、缺 session 拒絕與不支援的參數拒絕。
+
+12B permission 原生 producer 測試核對完整請求、session／request identity 與拒絕後失效；SQLite reopen 後決策 attempt 不可重取。schema v10 及 v1–v10 fixture 升級保存既有資料；permission 歷史保留至明確移除 instance，透過 FK cascade 刪除。handler／正式 socket／holder 的權限回覆與重啟由 `opencode_bridge` 覆蓋；真模型權限證據是 REST API 捕獲，沒有宣稱真模型 TUI 權限端到端驗收。
+
+`handlers::opencode_attention` 回歸驗證 agent 不能 AnswerAsk、operator free text 不會取得 permission attempt。API 原生 producer 案例使用同一 `send_decision` 路徑驗拒絕、重複回覆不送與待處理紀錄消失；正式 socket／holder 端到端案例已納入 `opencode_bridge`。
+
+12B schema v11 保存 REST 回合事件去重；`driver::opencode` 驗正常 terminal assistant／abort、外來 assistant part、刪除 driver_events 後歷史不重新發布同一回合。schema v12 另保存 attempt 歸屬與未終結保留例外，store fixtures 核各版升級／golden／retention。完整 DRV 10/10 已通過；429 只有原生 producer 契約覆蓋，未蒐集真服務限額回覆。
+
+`driver::opencode::contract_tests` 直接使用未改動的 DRV 10 個案例，production Driver／Worker、原生 REST producer 與 SQLite。boot 結束會停 worker／關 DB，重新 boot 回填後服務游標；停機時直接經原生 API 讓 backend 完成回合。這是 Driver 契約層，真 daemon／holder 的兩條恢復路徑另由 `agend --test opencode_bridge` 驗。
+
+OpenCode `real_11834_model_capture_confirms_delivery_and_one_terminal_turn` 使用正式 daemon 的真模型 history，檢查完整訊息確認、terminal 完成、未完成排除與外來 part 拒絕；一般測試不呼叫模型。`runtime::env::tests` 同時核 OpenCode／Codex 的 `ZDOTDIR` 與 env 白名單，沿用真 login zsh 的 shim-first 測試。
+
+`cargo test -p agend --test claude_bridge three_backend_delivery` 以同一正式 daemon 啟動三種 backend 的 native producers，檢查六方向 sender／Unicode／newline 與 Confirmed；Claude 透過正式 channel helper 明確 ACK，再發 native Stop。需先 build agend-testkit bins，不呼叫模型。
+
+`opencode_bridge::unknown_delivery_survives_restart_and_only_operator_can_abandon_it` 透過正式 socket／daemon 驗證結果不明提示跨重啟、agent Forbidden、operator Abandon、晚到確認不復活及 native history 未被重送；沒有真模型呼叫。
+
+OpenCode `oversized_total_history_does_not_block_old_receipts_or_new_delivery` 建立超過 16 MiB 的 native REST history，先核全量讀取失敗，再核分頁／縮小頁數、舊 attempt 定點確認、新訊息送達與早期完成去重。單筆本身超限仍明確拒絕。
+
+`chunked_oversized_json_reports_the_same_limit_as_content_length` 核對無 Content-Length 的 chunked 超限回覆也可觸發分頁縮小，避免長歷史卡住。
+
+權限 native API 測試注入 session／permission GET 503：原版本會耗用尚未送出的 POST attempt，修正版保留 operator 答覆機會；另注入已套用 permission POST 後丟回覆，重開資料庫必須保持 unknown 且不能再 POST。
