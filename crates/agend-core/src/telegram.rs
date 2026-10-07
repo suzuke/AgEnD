@@ -1,4 +1,5 @@
 //! Durable Telegram delivery boundary; no network, clock or secret values.
+use crate::protocol::client::AttentionRequiredData;
 use crate::traits::{Notification, NotificationSeverity};
 use alloc::{
     format,
@@ -25,6 +26,11 @@ pub struct TelegramDelivery {
     pub message_ids: Vec<i64>,
     pub abandoned: bool,
     pub created_at_ms: u64,
+    #[serde(default)]
+    pub attention: Option<AttentionRequiredData>,
+    /// Task CAS version and durable attention-note revision, captured before delivery.
+    #[serde(default)]
+    pub task_version: Option<(u64, u64)>,
 }
 impl TelegramDelivery {
     pub fn new(
@@ -44,6 +50,8 @@ impl TelegramDelivery {
             message_ids: Vec::new(),
             abandoned: false,
             created_at_ms: now,
+            attention: None,
+            task_version: None,
         }
     }
     pub fn complete(&self) -> bool {
@@ -103,6 +111,10 @@ pub fn render(note: &Notification) -> Vec<String> {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TelegramNotice {
     pub key: String,
+    pub attention: Option<AttentionRequiredData>,
+    /// Task CAS version and durable attention-note revision, captured before delivery.
+    #[serde(default)]
+    pub task_version: Option<(u64, u64)>,
     pub notification: Notification,
 }
 
@@ -133,4 +145,51 @@ pub trait TelegramStore: Sync {
         part: usize,
         message_id: i64,
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send + 'a;
+}
+
+/// Durable inbound intent. Claiming a Telegram update precedes every operator
+/// action; a missing completion remains unknown and is never dispatched again.
+pub trait TelegramInboundStore: Sync {
+    type Error: Send;
+    fn telegram_offset(&self, bot: u64) -> impl Future<Output = Result<i64, Self::Error>> + Send;
+    fn claim_telegram_update<'a>(
+        &'a self,
+        bot: u64,
+        update: i64,
+        fingerprint: &'a str,
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send + 'a;
+    /// Consume a notification before its first operator effect, including unknown outcomes.
+    fn claim_telegram_action<'a>(
+        &'a self,
+        bot: u64,
+        update: i64,
+        delivery: &'a str,
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send + 'a;
+    fn finish_telegram_update<'a>(
+        &'a self,
+        bot: u64,
+        update: i64,
+        outcome: &'a str,
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send + 'a;
+    fn telegram_message(
+        &self,
+        bot: u64,
+        chat: i64,
+        message: i64,
+    ) -> impl Future<Output = Result<Option<TelegramDelivery>, Self::Error>> + Send;
+}
+
+/// Failed-instance timestamps identify durable episodes; other boot-local waits may vary.
+pub fn same_attention(a: &AttentionRequiredData, b: &AttentionRequiredData) -> bool {
+    let mut a = a.clone();
+    let mut b = b.clone();
+    if !a
+        .attention_id
+        .as_deref()
+        .is_some_and(|id| id.starts_with("instance-failed:"))
+    {
+        a.waiting_since_unix_ms = None;
+        b.waiting_since_unix_ms = None;
+    }
+    a == b
 }

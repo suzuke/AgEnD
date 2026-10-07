@@ -179,3 +179,5 @@ OpenCode `oversized_total_history_does_not_block_old_receipts_or_new_delivery` �
 12D `cargo test -p agend-daemon --lib notifier::` 驗 config allowlist、拒 inline secret、private file／symlink 邊界，以及 native HTTP 的真 getMe fixture／redirect／malformed response／429 安全錯誤。同組測試亦跑全套 NTF、長 Unicode 通知、失去或損壞第二段收據後 DB 重開不重送。`cargo test -p agend-daemon --lib store::telegram` 驗持久 CAS；`cargo test -p agend-daemon --test store` 驗 schema migration／golden。尚非手機操作完成認證。
 
 12D outbound worker 測試以真 Fleet／SQLite／native HTTP 驗通知、停機收據與等待時間改變不重送；store observer 驗 DB 重開保持 delivery id、重複 source rollback、內容更新／解除／再開建立新通知。
+
+12D inbound 的 `notifier::inbound` 測試以已捕獲的真 Message 收據和正式 keyboard producer 驗身分／allowlist／選項／修改原因、未確認或已消耗通知拒絕、不同 update ID 與重開不重播。Callback envelope 目前是 schema adversary，不是真手機 callback 證據。`pipeline_store_ports` 核注意事項版本持久化；`pipeline::tests::mobile_guard` 核 CLI／TUI 清除再開同原因後舊版本不得操作。`store` 核 instance failure episode 跨 boot 穩定、再次失敗更新，以及 schema 15 的舊版升級。

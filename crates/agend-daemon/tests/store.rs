@@ -1481,3 +1481,53 @@ fn ask_answers_have_a_permanent_outbox_receipt_and_stable_turn_ids() {
     );
     assert_eq!(pending[0].1, "ask:ask-1/4");
 }
+
+#[test]
+fn failure_episode_survives_boot_and_rejects_identical_recurrence() {
+    use agend_core::protocol::client::AttentionAction;
+    use agend_daemon::{fleet::Fleet, supervisor::failed_item};
+    let dir = TempDir::new("store-failure-episode").unwrap();
+    let store = SqliteStore::open(dir.path(), NOW).unwrap();
+    let instance = Instance {
+        id: "g6-1".into(),
+        backend: Backend::Claude,
+        program: "/bin/bash".into(),
+        args: vec!["-c".into(), "exit 0".into()],
+        working_directory: "/tmp".into(),
+        session_id: Some("s-1".into()),
+        status: InstanceStatus::New,
+        session_started: false,
+        agent_pid: None,
+        legacy_no_thread: false,
+        delivery: "push".into(),
+    };
+    block_on(store.add_instance(&instance)).unwrap();
+    let first = block_on(store.instance_failure(&instance.id, "failed", 50, true)).unwrap();
+    let old = failed_item(&instance, &first.0, first.1);
+    drop(store);
+    let store = SqliteStore::open(dir.path(), NOW).unwrap();
+    assert_eq!(
+        block_on(store.instance_failure(&instance.id, "boot fallback", 100, false)).unwrap(),
+        first
+    );
+    let next = block_on(store.instance_failure(&instance.id, "failed", 50, true)).unwrap();
+    assert!(next.1 > first.1);
+    let current = failed_item(&instance, &next.0, next.1);
+    let fleet = Fleet::new(NOW);
+    fleet.raise(old.clone());
+    assert!(
+        fleet
+            .resolve_if_current(&old, AttentionAction::Retry)
+            .is_some()
+    );
+    fleet.raise(current.clone());
+    assert!(
+        fleet
+            .resolve_if_current(&old, AttentionAction::Retry)
+            .is_none()
+    );
+    assert_eq!(
+        fleet.attention(old.attention_id.as_ref().unwrap()),
+        Some(current)
+    );
+}

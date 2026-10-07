@@ -14,7 +14,7 @@
 //!   [`RETAINED_EVENTS`]; a receiver that falls further behind gets
 //!   `Lagged` and the server closes that connection (P8).
 //! - Needs-you items here are the `failed` instances (P5); `waiting_since`
-//!   is when this daemon first saw the failure.
+//!   identifies the durable failure episode, preserved across daemon boots.
 //!
 //! Must NOT: hold the lock across an await, or do I/O.
 
@@ -256,6 +256,33 @@ impl Fleet {
 
     pub fn attention(&self, attention_id: &str) -> Option<AttentionRequiredData> {
         self.lock().attention.get(attention_id).cloned()
+    }
+
+    /// Compare the mobile notification version and consume its action atomically.
+    pub fn resolve_if_current(
+        &self,
+        expected: &AttentionRequiredData,
+        action: AttentionAction,
+    ) -> Option<AttentionRequiredData> {
+        let id = expected.attention_id.as_deref()?;
+        let mut inner = self.lock();
+        let current = inner.attention.get(id)?;
+        if !agend_core::telegram::same_attention(current, expected)
+            || !current.actions.contains(&action)
+        {
+            return None;
+        }
+        let item = inner.attention.remove(id)?;
+        self.push(
+            &mut inner,
+            DaemonEvent::AttentionResolved {
+                data: AttentionResolvedData {
+                    attention_id: id.into(),
+                    action,
+                },
+            },
+        );
+        Some(item)
     }
 
     /// Takes the item off the list and publishes `attention_resolved`, if

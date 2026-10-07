@@ -138,6 +138,7 @@ pub struct BindingRow {
 }
 #[derive(Debug, Clone)]
 pub struct Progress {
+    pub attention_revision: u64,
     pub data: TaskProgress,
     pub block_reason: Option<String>,
     pub attention_reason: Option<String>,

@@ -59,7 +59,9 @@ impl TelegramStore for SqliteStore {
                 let old = previous.iter().find(|(id,_,_)| *id == notice.key);
                 let existing = old.map(|(_,id,_)| load(&tx,id)).transpose()?.flatten();
                 if let (Some((_,_,true)), Some(row)) = (old, &existing)
-                    && row.notification == notice.notification {
+                    && row.notification == notice.notification
+                    && row.attention == notice.attention
+                    && row.task_version == notice.task_version {
                         // A config/token change must not create another copy.
                         pending.push(row.clone());
                         continue;
@@ -70,7 +72,9 @@ impl TelegramStore for SqliteStore {
                         save(&tx, &old)?;
                     }
                 let id = super::instances::new_session_id().map_err(|e| StoreError::Invalid(e.to_string()))?;
-                let row = TelegramDelivery::new(id.clone(), destination.clone(), notice.notification, now);
+                let mut row = TelegramDelivery::new(id.clone(), destination.clone(), notice.notification, now);
+                row.attention = notice.attention;
+                row.task_version = notice.task_version;
                 if !row.valid() { return Err(invalid()); }
                 tx.execute("INSERT INTO telegram_outbox(id,delivery) VALUES(?1,?2)",
                     params![id,serde_json::to_string(&row).map_err(|_| invalid())?])?;
@@ -106,6 +110,8 @@ impl TelegramStore for SqliteStore {
                 if old.destination != incoming.destination
                     || old.notification != incoming.notification
                     || old.parts != incoming.parts
+                    || old.attention != incoming.attention
+                    || old.task_version != incoming.task_version
                 {
                     return Err(invalid());
                 }
@@ -227,7 +233,9 @@ mod tests {
             topic_id: None,
         };
         let mut notice = TelegramNotice {
+            task_version: None,
             key: "approval:t-1/approve/1".into(),
+            attention: None,
             notification: Notification {
                 severity: NotificationSeverity::Attention,
                 title: "Approve".into(),

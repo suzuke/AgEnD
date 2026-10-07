@@ -62,6 +62,22 @@ pub struct Rule {
 pub const RETENTION: &[Rule] = &[
     Rule {
         target: Target::Table {
+            name: "instance_failures",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "gate 12D: failure episode identity survives restart; owning instance removal cascades",
+    },
+    Rule {
+        target: Target::Table {
+            name: "telegram_updates",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "gate 12D: inbound claims and outcomes prevent replay after restart",
+    },
+    Rule {
+        target: Target::Table {
             name: "telegram_notices",
             time_column: None,
         },

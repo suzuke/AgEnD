@@ -267,3 +267,5 @@
 - 2026-10-07：12D 通知完整分段與 SQLite 逐段送出意圖／收據通過 NTF、長 Unicode 及未知結果重開不重送測試。真 Telegram 三則文字探測均已刪除；發現裸文字會 trim，改用首尾標記保留完整內容。daemon worker、手機操作及 G4 尚未完成。
 
 - 2026-10-07：12D 接上 daemon config 與 outbound worker；持久 needs-you source 對帳避免 boot 游標重建造成重送，內容更新／解除／再開另立 delivery。手機 inbound、互動操作、G4 與整體驗收尚未完成。
+
+- 2026-10-07：12D 手機 inbound checkpoint：已確認通知收據綁 allowlist／選項，SQLite update 與單通知操作 claim 阻止重播；重試等待 supervisor 處理、修改原因以回覆輸入，pipeline 執行前核任務與注意事項版本。跨入口同原因再開、失敗事件重啟與 unknown 重開納入回歸；真手機 callback／G4、全新端到端驗證及 CI 尚未完成。

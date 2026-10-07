@@ -12,7 +12,7 @@ use agend_core::{
         client::AttentionRequiredData,
     },
     telegram::{TelegramDestination, TelegramNotice, TelegramStore},
-    traits::{Notification, NotificationSeverity},
+    traits::{Notification, NotificationSeverity, Store},
 };
 use std::{collections::BTreeSet, sync::Arc, time::Duration};
 use tokio::sync::watch;
@@ -20,6 +20,7 @@ use tokio::sync::watch;
 pub struct Worker {
     stop: watch::Sender<bool>,
     task: tokio::task::JoinHandle<()>,
+    inbound: Option<tokio::task::JoinHandle<()>>,
 }
 impl Worker {
     /// Finish the current bounded HTTP call before releasing the DB for restart.
@@ -29,25 +30,69 @@ impl Worker {
     pub async fn stop(self) {
         self.request_stop();
         let _ = self.task.await;
+        if let Some(inbound) = self.inbound {
+            let _ = inbound.await;
+        }
     }
 }
 
-pub fn start(
-    config: TelegramConfig,
-    token: Token,
-    store: Arc<SqliteStore>,
-    fleet: Arc<Fleet>,
-) -> Worker {
-    start_with_api(config, Arc::new(Api::new(token)), store, fleet)
+pub fn start(config: TelegramConfig, token: Token, ctx: Arc<crate::handlers::Context>) -> Worker {
+    run(
+        config,
+        Arc::new(Api::new(token)),
+        ctx.store.clone(),
+        ctx.fleet.clone(),
+        Some(ctx),
+    )
 }
 
+#[cfg(test)]
 pub(super) fn start_with_api(
     config: TelegramConfig,
     api: Arc<Api>,
     store: Arc<SqliteStore>,
     fleet: Arc<Fleet>,
 ) -> Worker {
+    run(config, api, store, fleet, None)
+}
+fn run(
+    config: TelegramConfig,
+    api: Arc<Api>,
+    store: Arc<SqliteStore>,
+    fleet: Arc<Fleet>,
+    ctx: Option<Arc<crate::handlers::Context>>,
+) -> Worker {
     let (stop, mut stopped) = watch::channel(false);
+    let (identity, ready) = tokio::sync::oneshot::channel();
+    let inbound = ctx.map(|ctx| {
+        let api = api.clone();
+        let config = config.clone();
+        let mut stopped = stopped.clone();
+        tokio::spawn(async move {
+            let destination = tokio::select! {
+                _ = stopped.changed() => return,
+                ready = ready => match ready { Ok(destination) => destination, Err(_) => return },
+            };
+            let mut reported = false;
+            loop {
+                if *stopped.borrow() {
+                    return;
+                }
+                match super::poll::once(&ctx, &config, api.clone(), &destination, &stopped).await {
+                    Err(error) if !reported => {
+                        crate::log::line(&format!("Telegram inbound: {error}"));
+                        reported = true;
+                    }
+                    Ok(()) => reported = false,
+                    _ => {}
+                }
+                tokio::select! {
+                    _ = stopped.changed() => return,
+                    _ = tokio::time::sleep(Duration::from_secs(1)) => {},
+                }
+            }
+        })
+    });
     let task = tokio::spawn(async move {
         let mut reported = false;
         let bot_id = loop {
@@ -79,13 +124,20 @@ pub(super) fn start_with_api(
             chat_id: config.chat_id,
             topic_id: config.needs_you_topic,
         };
-        let notifier = TelegramNotifier::new(api, store.clone(), destination.clone());
+        let _ = identity.send(destination.clone());
+        let notifier = TelegramNotifier::new(api.clone(), store.clone(), destination.clone());
         let mut failures = BTreeSet::new();
         loop {
             if *stopped.borrow() {
                 return;
             }
-            let notices: Vec<_> = fleet.view().attention.iter().filter_map(notice).collect();
+            let notices = match collect_notices(&store, &fleet).await {
+                Ok(n) => n,
+                Err(_) => {
+                    tokio::select! { _ = stopped.changed() => return, _ = tokio::time::sleep(Duration::from_secs(1)) => {} }
+                    continue;
+                }
+            };
             match store
                 .observe_telegram(&notices, &destination, crate::log::now_unix_ms())
                 .await
@@ -100,8 +152,10 @@ pub(super) fn start_with_api(
                         }
                         // Reconcile again after any previous HTTP await. Only a
                         // still-current delivery may start its next part.
-                        let current: Vec<_> =
-                            fleet.view().attention.iter().filter_map(notice).collect();
+                        let current = match collect_notices(&store, &fleet).await {
+                            Ok(n) => n,
+                            Err(_) => break,
+                        };
                         let current = match store
                             .observe_telegram(&current, &destination, crate::log::now_unix_ms())
                             .await
@@ -136,7 +190,37 @@ pub(super) fn start_with_api(
             }
         }
     });
-    Worker { stop, task }
+    Worker {
+        stop,
+        task,
+        inbound,
+    }
+}
+
+async fn collect_notices(
+    store: &SqliteStore,
+    fleet: &Fleet,
+) -> Result<Vec<TelegramNotice>, String> {
+    let mut notices = Vec::new();
+    for item in fleet.view().attention {
+        if let Some(mut notice) = notice(&item) {
+            if let Some(task) = &item.task_id {
+                let version = store
+                    .load_task(task)
+                    .await
+                    .map_err(|e| e.to_string())?
+                    .map(|t| t.version);
+                let revision = store
+                    .progress(task)
+                    .await
+                    .map_err(|e| e.to_string())?
+                    .map(|p| p.attention_revision);
+                notice.task_version = version.zip(revision);
+            }
+            notices.push(notice);
+        }
+    }
+    Ok(notices)
 }
 
 /// No boot-local wait timestamp: restarting does not change notification content.
@@ -192,8 +276,18 @@ pub(super) fn notice(item: &AttentionRequiredData) -> Option<TelegramNotice> {
         let actions: Vec<_> = item.actions.iter().map(|a| a.as_str()).collect();
         body.push_str(&format!("\nActions: {}", actions.join(", ")));
     }
+    let mut attention = item.clone();
+    if !attention
+        .attention_id
+        .as_deref()
+        .is_some_and(|id| id.starts_with("instance-failed:"))
+    {
+        attention.waiting_since_unix_ms = None;
+    }
     Some(TelegramNotice {
+        task_version: None,
         key,
+        attention: Some(attention),
         notification: Notification {
             severity: NotificationSeverity::Attention,
             title: "Needs you".into(),

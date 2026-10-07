@@ -341,9 +341,8 @@ async fn serve(
         restarting: AtomicBool::new(false),
         codex_input,
     });
-    let telegram_worker = telegram.map(|(config, token)| {
-        crate::notifier::worker::start(config, token, context.store.clone(), context.fleet.clone())
-    });
+    let telegram_worker = telegram
+        .map(|(config, token)| crate::notifier::worker::start(config, token, context.clone()));
     let server = Server::start(listener, socket.clone(), Arc::clone(&context));
     log::line(&format!("listening on {}", socket.display()));
     log::line(&format!(
@@ -364,6 +363,8 @@ async fn serve(
     });
 
     let stopped = supervisor.run(&mut queue).await;
+    // Reject new operations and release pending completion waiters before workers stop.
+    drop(queue);
     let why = match &stopped {
         Stopped::Signal(signal) => (*signal).to_owned(),
         Stopped::Exec(binary) => format!("restart with {}", binary.display()),

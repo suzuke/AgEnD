@@ -175,3 +175,5 @@ cargo xtask accept cli             # 第 9 施工關 demo：cli_demo（在 agend
 12B OpenCode push 以 supervisor worker 接 loopback REST：claim 與傳輸分離，先持久化 attempt 再送一次，REST 歷史確認收件。原 session 經私人 holder wrapper handoff 恢復；權限由 operator 回覆，unknown 投遞提供 Abandon。原生恢復／權限／DRV 及固定版本模型真測已通過，最終覆核與 CI 以 [12B 紀錄](../../docs/gates/gate-12b-opencode.md) 為準。
 
 12D 設定 parser、private token reference 與固定 Telegram HTTPS API 已建立；通知全文分段與持久逐段收據已接 Notifier 契約；daemon worker 已觀察 needs-you 並持久去重，手機操作尚未接入。進度見 [Telegram](../../docs/gates/gate-12d-telegram.md)。
+
+Telegram 手機操作先保存 update 與通知消耗意圖，再進入 operator 路徑；未知結果不重送。通知保存任務 CAS 版本與注意事項版本，pipeline 在執行時重新比對。Instance retry 在 supervisor queue 內檢查失敗事件並完成處理後回報；要求修改先提示回覆原因。Inbound polling 與 outbound 分段送出各自執行，停機等待有限 HTTP 呼叫收束。完整第 12D 驗收仍以施工關頁為準。

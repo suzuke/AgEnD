@@ -182,6 +182,39 @@ pub(crate) fn set_agent_pid(
     }
 }
 
+/// Preserve a restored episode, or atomically mark a new failure episode.
+pub(super) fn failure(
+    conn: &mut Connection,
+    id: &str,
+    reason: &str,
+    now: u64,
+    new_episode: bool,
+) -> Result<(String, u64), StoreError> {
+    let tx = conn.transaction()?;
+    let previous: Option<(String, u64)> = tx
+        .query_row(
+            "SELECT reason, since_ms FROM instance_failures WHERE instance_id=?1",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    if !new_episode && let Some(saved) = previous.as_ref() {
+        return Ok(saved.clone());
+    }
+    let since = previous.map_or(now, |(_, old)| now.max(old.saturating_add(1)));
+    if since > i64::MAX as u64 {
+        return Err(StoreError::Invalid("failure episode exhausted".into()));
+    }
+    set_status(&tx, id, InstanceStatus::Failed)?;
+    tx.execute(
+        "INSERT INTO instance_failures(instance_id,reason,since_ms) VALUES(?1,?2,?3)
+        ON CONFLICT(instance_id) DO UPDATE SET reason=excluded.reason,since_ms=excluded.since_ms",
+        rusqlite::params![id, reason, since],
+    )?;
+    tx.commit()?;
+    Ok((reason.to_owned(), since))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

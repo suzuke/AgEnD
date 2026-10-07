@@ -125,6 +125,11 @@ where
             if let Some(topic) = row.destination.topic_id {
                 request["message_thread_id"] = topic.into();
             }
+            if part + 1 == row.parts.len()
+                && let Some(markup) = super::inbound::keyboard(&row)
+            {
+                request["reply_markup"] = markup;
+            }
             let api = self.api.clone();
             let reply =
                 tokio::task::spawn_blocking(move || api.call(Method::SendMessage, &request))

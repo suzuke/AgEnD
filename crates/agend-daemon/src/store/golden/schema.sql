@@ -1,4 +1,4 @@
--- user_version = 14
+-- user_version = 15
 
 CREATE INDEX driver_events_by_time ON driver_events (ingested_at_unix_ms);
 
@@ -87,6 +87,12 @@ CREATE TABLE driver_events (
     occurred_at_unix_ms INTEGER NOT NULL CHECK (occurred_at_unix_ms >= 0),
     ingested_at_unix_ms INTEGER NOT NULL CHECK (ingested_at_unix_ms >= 0),
     replayed INTEGER NOT NULL CHECK (replayed IN (0, 1))
+) STRICT;
+
+CREATE TABLE instance_failures (
+    instance_id TEXT PRIMARY KEY REFERENCES instances(id) ON DELETE CASCADE,
+    reason TEXT NOT NULL,
+    since_ms INTEGER NOT NULL CHECK(since_ms >= 0)
 ) STRICT;
 
 CREATE TABLE "instances" (
@@ -183,7 +189,7 @@ CREATE TABLE "tasks" (
     block_reason TEXT,
     attention_reason TEXT,
     failure_acknowledged INTEGER NOT NULL DEFAULT 0 CHECK (failure_acknowledged IN (0,1))
-) STRICT;
+, attention_revision INTEGER NOT NULL DEFAULT 0 CHECK(attention_revision >= 0)) STRICT;
 
 CREATE TABLE teams (
     id TEXT NOT NULL PRIMARY KEY,
@@ -201,6 +207,15 @@ CREATE TABLE telegram_outbox (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     id TEXT NOT NULL UNIQUE,
     delivery TEXT NOT NULL CHECK(json_valid(delivery))
+) STRICT;
+
+CREATE TABLE telegram_updates (
+    bot_id INTEGER NOT NULL CHECK(bot_id > 0),
+    update_id INTEGER NOT NULL CHECK(update_id >= 0),
+    fingerprint TEXT NOT NULL,
+    outcome TEXT,
+    delivery_id TEXT UNIQUE REFERENCES telegram_outbox(id),
+    PRIMARY KEY(bot_id,update_id)
 ) STRICT;
 
 CREATE TABLE workflows (

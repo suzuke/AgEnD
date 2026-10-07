@@ -100,3 +100,5 @@ A 段原限制：不加新的 core 事件或未知提示／忙閒判斷機制。
 - 2026-10-04：[draft PR #149](https://github.com/suzuke/AgEnD/pull/149)（首個提交 `999203e`）接通 protocol 1.5、channel／Stop helpers 與 hook／ACK spool；13 native cases、accept core（fmt／workspace clippy／protocol／實際 no-std）通過。完整 workspace、全新 verifier／固定 head CI 收尾中；未 merge，完整 Claude Driver 與真 CLI 驗收仍待完成。
 
 - 2026-10-06：#151／#152 經使用者確認合併；依最新指示將完整真模型 smoke 列為必要驗收，見[固定計畫](gate-12a-live-smoke.md)。
+
+- 2026-10-07：12D 手機 inbound checkpoint：已確認通知收據綁 allowlist／選項，SQLite update 與單通知操作 claim 阻止重播；重試等待 supervisor 處理、修改原因以回覆輸入，pipeline 執行前核任務與注意事項版本。跨入口同原因再開、失敗事件重啟與 unknown 重開納入回歸；真手機 callback／G4、全新端到端驗證及 CI 尚未完成。
