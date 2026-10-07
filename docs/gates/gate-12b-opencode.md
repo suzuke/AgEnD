@@ -43,6 +43,8 @@ OpenCode 同樣使用 daemon 的 `ZDOTDIR`，避免 login zsh 的系統 profile 
 
 原生 busy queue→steer／interrupt 反例先重現失敗：abort 後 backend 立即開始既有排隊工作，等待 idle 五秒會把新訊息留成 unknown。修正為 abort 成功回覆後單次提交，不要求可觀察的 idle 空窗；測試核三筆完整 user message、只有首輪被中斷、各筆 Confirmed 與後續 tick 無重送。此為既有原生 producer 邊界證據；1.18.34 真 busy smoke v2 已核三筆 Confirmed、首輪 aborted 與最後 interrupt 回覆，程序及暫存已清，共享 auth 不變；queued user 沒有獨立 assistant 完成，不把收件與回合完成混為一談。v1 在 busy 尚未發布時過早斷言停止，未重送；兩份結果均保留。
 
+正式 daemon 的六方向互傳原生測試已通過：Claude／Codex／OpenCode 每對雙向共六則，Unicode 與換行保留，各 receiver 只有兩筆且均 Confirmed。Claude 經真 helper 的 Written／ACK／Stop，Codex 與 OpenCode 經 native producer 及正式 Driver 對帳；這是零模型路由證據，不代表三個真模型都已互傳。測試初版漏 Stop 導致下一次 Claude 收件逾時，補齊 producer 生命週期後通過，沒有更改產品的忙閒規則。
+
 ## 下一步
 
 完成 holder 原生整合、權限請求與恢復測試，再進行受控真測與 fresh verifier。

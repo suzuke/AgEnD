@@ -239,3 +239,5 @@
 - 2026-10-07：12B busy queue→interrupt 原生反例重現並修正：abort 回覆成功後單次提交，不等待可能不存在的 idle 空窗；新增 steer／interrupt 兩條路徑的完整歷史與無重送檢查。
 
 - 2026-10-07：12B 真 OpenCode 1.18.34 busy smoke v2 通過三筆 Confirmed／首輪中斷／緊急回覆；保留 v1 過早 busy 斷言與 v2 精確範圍，原生歷史加入回歸，自有程序與暫存已清。
+
+- 2026-10-07：12B 三 backend 六方向正式 daemon 路由驗證通過，六則均 Confirmed、內容完整且每 receiver 恰兩筆；Claude 使用實際 helper ACK／Stop。此為零模型 fixture 驗證，真模型互傳與完整覆核仍待完成。
