@@ -1015,3 +1015,110 @@ async fn native_mobile_approval_and_changes_require_current_receipt_and_explicit
         );
     }
 }
+
+#[tokio::test]
+async fn unknown_notification_is_local_operator_only_and_never_claims_receipt() {
+    use crate::handlers::{self, Outcome};
+    use agend_core::{
+        protocol::client::*,
+        telegram::TelegramDelivery,
+        traits::{Notification, NotificationSeverity},
+    };
+    let lab = Lab::new().await;
+    let row = TelegramDelivery::new(
+        "unknown-local".into(),
+        lab.destination.clone(),
+        Notification {
+            severity: NotificationSeverity::Error,
+            title: "Uncertain".into(),
+            body: "Full evidence".into(),
+            task_id: None,
+        },
+        1,
+    );
+    lab.ctx.store.enqueue_telegram(&row).await.unwrap();
+    lab.ctx.store.claim_telegram_part(&row.id, 0).await.unwrap();
+    handlers::telegram_attention::refresh(&lab.ctx, "")
+        .await
+        .unwrap();
+    assert!(
+        lab.ctx.fleet.view().attention.is_empty(),
+        "active send is not unknown"
+    );
+    lab.ctx.store.mark_telegram_unknown(&row.id).await.unwrap();
+    handlers::telegram_attention::refresh(&lab.ctx, "")
+        .await
+        .unwrap();
+    let id = format!("telegram-delivery:{}", row.id);
+    assert_eq!(
+        lab.ctx.fleet.attention(&id).unwrap().actions,
+        vec![AttentionAction::Abandon]
+    );
+    let request = |action| ClientRequest::ResolveAttention {
+        data: ResolveAttentionData {
+            request_id: "dispose".into(),
+            attention_id: id.clone(),
+            action,
+            note: Some("Operator ends uncertain notification".into()),
+        },
+    };
+    assert!(
+        matches!(handlers::handle(&lab.ctx, Some("agent"), request(AttentionAction::Abandon)).await, Outcome::Reply(ClientResponse::Error { data }) if data.code == error_code::FORBIDDEN)
+    );
+    assert!(matches!(
+        handlers::handle(&lab.ctx, None, request(AttentionAction::Retry)).await,
+        Outcome::Reply(ClientResponse::Error { .. })
+    ));
+    // The notification failure must not produce another Telegram failure loop.
+    let native = Native::new();
+    let w = worker::start_with_api(
+        lab.config.clone(),
+        native.api.clone(),
+        lab.ctx.store.clone(),
+        lab.ctx.fleet.clone(),
+    );
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    w.stop().await;
+    assert!(
+        !native
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(m, _)| m == "sendMessage")
+    );
+    assert!(matches!(
+        handlers::handle(&lab.ctx, None, request(AttentionAction::Abandon)).await,
+        Outcome::Reply(ClientResponse::CommandResult { .. })
+    ));
+    assert!(lab.ctx.fleet.attention(&id).is_none());
+    assert!(
+        !lab.ctx
+            .store
+            .confirm_telegram_part(&row.id, 0, 500)
+            .await
+            .unwrap()
+    );
+    assert!(!lab.ctx.store.claim_telegram_part(&row.id, 0).await.unwrap());
+    let saved = lab
+        .ctx
+        .store
+        .telegram_delivery(&row.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(saved.outcome_unknown && saved.in_flight && saved.abandoned);
+    assert!(saved.message_ids.is_empty());
+    assert_eq!(
+        saved.abandoned_by_operator.as_deref(),
+        Some("Operator ends uncertain notification")
+    );
+    handlers::telegram_attention::refresh(&lab.ctx, "")
+        .await
+        .unwrap();
+    assert!(lab.ctx.fleet.attention(&id).is_none());
+    assert!(matches!(
+        handlers::handle(&lab.ctx, None, request(AttentionAction::Abandon)).await,
+        Outcome::Reply(ClientResponse::Error { .. })
+    ));
+}

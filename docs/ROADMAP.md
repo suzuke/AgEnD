@@ -281,3 +281,5 @@
 - 2026-10-07：12D 補原生問答／追問流程：選項與完整多行自由文字經 HTTP、SQLite、正式 pipeline 各投 inbox 一次，重複輪詢與舊通知拒絕；真 Telegram 問答與其餘操作仍另驗。
 
 - 2026-10-07：12D 增補 native human approval／request_changes：原因提示不提前執行、空白拒絕、多行保留與舊按鈕拒絕；無 repo research 範圍，非 Git merge 或真 Telegram 核准認證。
+
+- 2026-10-07：12D 未知通知已接本機需要你／operator-only Abandon；正常傳輸不誤報，重啟恢復未知，不自動重送、不偽造收據。core／daemon 399 tests 通過（2 項既有 ignored）；正式 daemon 三次 boot 驗無 token 仍可處置、拒絕 agent、持久保留原文與未知證據。完整 12D 仍未完成。

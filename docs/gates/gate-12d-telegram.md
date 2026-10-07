@@ -21,13 +21,13 @@ Telegram `sendMessage` 長度有限，通知全文需完整分段保留，不能
 
 `TelegramNotifier` 先將通知全文、bot／chat／topic 與全部分段寫入 SQLite，再逐段保存送出意圖；回覆的 bot、chat、topic、全文及 message id 都符合，才確認該段。送出前以 getMe 核對 immutable API token 的 bot 身分，錯誤身分不 claim／不送出。固定 delivery id 再次入列不重送已完成通知；未知結果保留 in-flight，重啟後不自動重送。這會犧牲未知段落的自動重試，避免失去回覆後重複通知。
 
-真 Telegram 會刪除裸文字兩端空白，因此每段使用可見首尾標記保護原文，以 4000 UTF-16 units 分段、不拆 UTF-8 scalar；繁中、emoji、換行及尾端空白保留。第二、三則真測回傳全文逐字相同。outbox 目前保留全部紀錄，操作員處置與保留期限尚待接入。
+真 Telegram 會刪除裸文字兩端空白，因此每段使用可見首尾標記保護原文，以 4000 UTF-16 units 分段、不拆 UTF-8 scalar；繁中、emoji、換行及尾端空白保留。第二、三則真測回傳全文逐字相同。outbox 目前保留全部紀錄；未知通知可由本機操作員明確 Abandon，保留期限尚待接入。
 
 ## Daemon 通知流程
 
 worker 每秒觀察「需要你」，以持久 source id 對帳，不用 boot-local 事件游標或等待時間辨識通知。相同內容保留原 delivery；內容改變、或已觀察到解除後再出現，建立新 delivery。解除／替換時取消未完成舊通知的後續段落，未知段落仍保留意圖。snapshot 對帳與 outbox 建立同一 SQLite transaction，重啟不會把同一事項當新通知。
 
-worker 將完整 recap、請示對話與可用動作送到 needs-you topic；HTTP 在 blocking pool 執行，不佔用主 engine。每次只送一段，下一段前重新對帳；停止時只等待當前有限期限呼叫與收據完成，再釋放 DB。HTTP 結果未知只記安全錯誤，不自動再送。最後一段附上由已保存選項產生的互動按鈕；team topic 另送任務摘要；未知通知的操作員處置仍待完成。
+worker 將完整 recap、請示對話與可用動作送到 needs-you topic；HTTP 在 blocking pool 執行，不佔用主 engine。每次只送一段，下一段前重新對帳；停止時只等待當前有限期限呼叫與收據完成，再釋放 DB。HTTP 結果未知只記安全錯誤，不自動再送。最後一段附上由已保存選項產生的互動按鈕；team topic 另送任務摘要；未知通知的操作員處置見下節。
 
 ## 手機操作 checkpoint
 
@@ -68,3 +68,13 @@ Topic checkpoint：每個已設定 team topic 保存任務 ID、完整標題、s
 原生問答補驗：正式 pipeline 建立 Ask 與 FollowUp，經本機 HTTP Bot API producer → poll → SQLite → guarded pipeline，分別選第二個選項與回覆完整多行自由文字；核 AnswerSource::Telegram 與提問者 inbox 每輪各一筆。每次 sendMessage 回不同 message ID，重複輪詢不再投遞，舊通知不能回答新追問。此例使用 inbox，未啟動模型，也不是 Telegram 真問答操作證據。
 
 原生 human approval 補驗：無 repo 的 research 結果交付後，HTTP 通知按鈕經正式 pipeline 核准完成。要求修改須再回覆非空理由，提示按鈕與空白回覆不提前改 state；完整多行理由保存並退回 work。舊 callback 不重做動作。這是 bind_head=false 的原生路徑，不代替真 Telegram 核准或 Git head／merge 驗收。
+
+## 未知通知的本機處置
+
+送出取得 claim 後傳輸／收據失敗，保存 outcome_unknown；正在進行的正常請求不視為未知。daemon 取得 DB 後、啟動 worker 前，將上次留下的 in_flight 標為未知。即使停用 Telegram 或憑證已移除，本機 TUI／CLI 仍可看到 `telegram-delivery:<id>`，只能由操作員 Abandon；不能 Retry，不宣稱收到，也不補送後續段落。
+
+Abandon 保存明確理由與原始 payload／收據前綴；保留 in_flight 和 outcome_unknown 作為未知證據。自動來源消失／換版不等於操作員處置。這類 attention 不再送回 Telegram，避免故障通知自我循環。
+
+正常 Worker::stop 等候有限期限 HTTP 與收據，不 abort future。若直接取消公開 notifier future，或傳輸後保存 unknown 的 DB 寫入本身失敗，當次程序可能只有 in_flight、防重送但尚無 attention；重啟時恢復。此限制不被當作已確認送達。
+
+原生三次開機驗證通過：無 Telegram 設定／token 仍發布未知通知，agent 被 Forbidden 拒絕、operator Abandon 持久化；最後一次開機持續觀察三秒未復活，DB 保留原 payload、空 receipt 與處置理由，不可重新 claim。core／daemon 共 399 passed、2 項既有 ignored；直接取消公開 notifier future 的限制仍依上段記錄。

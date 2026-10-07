@@ -286,6 +286,7 @@ async fn unknown_or_corrupted_receipt_stops_parts_and_never_replays_after_db_reo
         let row = store.telegram_delivery("unknown").await.unwrap().unwrap();
         assert_eq!(row.next_part, 1);
         assert!(row.in_flight);
+        assert!(row.outcome_unknown);
         drop(notifier);
         drop(store);
         let store = Arc::new(SqliteStore::open(dir.path(), 1).unwrap());

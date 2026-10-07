@@ -28,6 +28,7 @@ pub(crate) mod claude_attention;
 pub(crate) mod opencode_attention;
 pub(crate) mod opencode_delivery_attention;
 pub mod operator;
+pub(crate) mod telegram_attention;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -239,6 +240,9 @@ pub async fn handle(ctx: &Context, caller: Option<&str>, request: ClientRequest)
                     error_code::FORBIDDEN,
                     OPERATOR_ONLY,
                 ));
+            }
+            if data.attention_id.starts_with(telegram_attention::PREFIX) {
+                return Outcome::Reply(telegram_attention::resolve(ctx, data).await);
             }
             if data.attention_id.starts_with(claude_attention::PREFIX) {
                 return Outcome::Reply(claude_attention::resolve(ctx, data).await);

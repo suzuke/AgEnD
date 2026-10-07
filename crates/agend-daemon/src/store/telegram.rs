@@ -189,6 +189,19 @@ impl TelegramStore for SqliteStore {
         })
         .await
     }
+    async fn mark_telegram_unknown(&self, id: &str) -> Result<(), StoreError> {
+        let id = id.to_owned();
+        self.call(move |c| {
+            if let Some(mut row) = load(c, &id)?
+                && row.in_flight
+            {
+                row.outcome_unknown = true;
+                save(c, &row)?;
+            }
+            Ok(())
+        })
+        .await
+    }
     async fn confirm_telegram_part(
         &self,
         id: &str,
@@ -210,7 +223,53 @@ impl TelegramStore for SqliteStore {
             }
             row.next_part += 1;
             row.in_flight = false;
+            row.outcome_unknown = false;
             row.message_ids.push(message_id);
+            save(c, &row)?;
+            Ok(true)
+        })
+        .await
+    }
+}
+
+impl SqliteStore {
+    /// Called once while boot owns the DB, before any Telegram workers start.
+    pub(crate) async fn recover_telegram_attempts(&self) -> Result<(), StoreError> {
+        self.call(|c| {
+            c.execute("UPDATE telegram_outbox SET delivery=json_set(delivery,'$.outcome_unknown',json('true')) WHERE json_extract(delivery,'$.in_flight')=1", [])?;
+            Ok(())
+        }).await
+    }
+    pub(crate) async fn unknown_telegram_after(
+        &self,
+        after: &str,
+    ) -> Result<Vec<TelegramDelivery>, StoreError> {
+        let after = after.to_owned();
+        self.call(move |c| {
+            let mut q = c.prepare("SELECT id FROM telegram_outbox WHERE id>?1 AND json_extract(delivery,'$.outcome_unknown')=1 AND json_extract(delivery,'$.abandoned_by_operator') IS NULL ORDER BY id LIMIT 100")?;
+            let ids = q.query_map([after], |r| r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
+            ids.into_iter().map(|id| load(c,&id)?.ok_or_else(invalid)).collect()
+        }).await
+    }
+    pub(crate) async fn abandon_unknown_telegram(
+        &self,
+        id: &str,
+        reason: &str,
+    ) -> Result<bool, StoreError> {
+        let id = id.to_owned();
+        let reason = reason.to_owned();
+        if reason.trim().is_empty() || reason.len() > 4096 {
+            return Err(invalid());
+        }
+        self.call(move |c| {
+            let Some(mut row) = load(c, &id)? else {
+                return Ok(false);
+            };
+            if !row.outcome_unknown || row.abandoned_by_operator.is_some() {
+                return Ok(false);
+            }
+            row.abandoned = true;
+            row.abandoned_by_operator = Some(reason);
             save(c, &row)?;
             Ok(true)
         })
@@ -324,5 +383,57 @@ mod tests {
             .remove(0);
         assert_ne!(reopened.id, changed.id);
         assert!(!reopened.abandoned);
+    }
+}
+
+#[cfg(test)]
+mod unknown_tests {
+    use super::*;
+    use agend_core::traits::{Notification, NotificationSeverity};
+    #[tokio::test]
+    async fn boot_marks_unconfirmed_attempts_unknown_and_disposition_survives_reopen() {
+        let dir = agend_testkit::tempdir::TempDir::new("telegram-unknown-disposition").unwrap();
+        let store = SqliteStore::open(dir.path(), 0).unwrap();
+        let row = TelegramDelivery::new(
+            "restart".into(),
+            TelegramDestination {
+                bot_id: 1,
+                chat_id: 42,
+                topic_id: None,
+            },
+            Notification {
+                severity: NotificationSeverity::Info,
+                title: "Saved".into(),
+                body: "whole body".into(),
+                task_id: None,
+            },
+            1,
+        );
+        store.enqueue_telegram(&row).await.unwrap();
+        assert!(store.claim_telegram_part(&row.id, 0).await.unwrap());
+        assert!(store.unknown_telegram_after("").await.unwrap().is_empty());
+        drop(store);
+        let store = SqliteStore::open(dir.path(), 0).unwrap();
+        store.recover_telegram_attempts().await.unwrap();
+        assert_eq!(store.unknown_telegram_after("").await.unwrap().len(), 1);
+        assert!(
+            store
+                .abandon_unknown_telegram(&row.id, "reviewed without receipt")
+                .await
+                .unwrap()
+        );
+        drop(store);
+        let store = SqliteStore::open(dir.path(), 0).unwrap();
+        store.recover_telegram_attempts().await.unwrap();
+        assert!(store.unknown_telegram_after("").await.unwrap().is_empty());
+        let saved = store.telegram_delivery(&row.id).await.unwrap().unwrap();
+        assert_eq!(saved.notification, row.notification);
+        assert!(saved.in_flight && saved.outcome_unknown && saved.abandoned);
+        assert!(saved.message_ids.is_empty());
+        assert_eq!(
+            saved.abandoned_by_operator.as_deref(),
+            Some("reviewed without receipt")
+        );
+        assert!(!store.claim_telegram_part(&row.id, 0).await.unwrap());
     }
 }

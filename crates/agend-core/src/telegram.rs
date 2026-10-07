@@ -23,6 +23,12 @@ pub struct TelegramDelivery {
     pub parts: Vec<String>,
     pub next_part: usize,
     pub in_flight: bool,
+    /// Transport finished without a confirmed receipt, or was interrupted by restart.
+    #[serde(default)]
+    pub outcome_unknown: bool,
+    /// Explicit operator disposition; automatic source replacement does not set this.
+    #[serde(default)]
+    pub abandoned_by_operator: Option<String>,
     pub message_ids: Vec<i64>,
     pub abandoned: bool,
     pub created_at_ms: u64,
@@ -47,6 +53,8 @@ impl TelegramDelivery {
             parts,
             next_part: 0,
             in_flight: false,
+            outcome_unknown: false,
+            abandoned_by_operator: None,
             message_ids: Vec::new(),
             abandoned: false,
             created_at_ms: now,
@@ -69,6 +77,8 @@ impl TelegramDelivery {
             && self.next_part <= self.parts.len()
             && self.message_ids.len() == self.next_part
             && self.message_ids.iter().all(|id| *id > 0)
+            && (!self.outcome_unknown || self.in_flight)
+            && (self.abandoned_by_operator.is_none() || (self.abandoned && self.outcome_unknown))
             && (!self.in_flight || self.next_part < self.parts.len())
     }
 }
@@ -148,6 +158,10 @@ pub trait TelegramStore: Sync {
         id: &'a str,
         part: usize,
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send + 'a;
+    fn mark_telegram_unknown<'a>(
+        &'a self,
+        id: &'a str,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'a;
     fn confirm_telegram_part<'a>(
         &'a self,
         id: &'a str,

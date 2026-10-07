@@ -191,3 +191,5 @@ OpenCode `oversized_total_history_does_not_block_old_receipts_or_new_delivery` �
 `notifier::poll_tests::native_mobile_choice_and_free_reply_reach_the_asking_agent_once` 以真 pipeline 建立問答及追問、原生 HTTP producer 收據與不同 message ID，驗選項／多行自由文字經 Telegram source 保存且各入 inbox 一次；重複輪詢／舊通知不回答新追問。沒有啟動 backend 模型。
 
 `native_mobile_approval_and_changes_require_current_receipt_and_explicit_reason` 以 core state machine 產生已交付的 research 結果，在正式 serialized pipeline 等 human approval，經本機 HTTP 收據／callback 核 approve 完成；request_changes 先提示、不執行，空白拒絕、多行理由完整保存後回 work。完成後新 update ID 重用舊按鈕不改 pipeline。此例 bind_head=false，不代替 Git head／merge 驗收。
+
+Telegram unknown 測試核 active claim 不提早發布、HTTP 收據遺失／毀損標 unknown、agent／Retry 拒絕、operator Abandon 不造收據、不重送，DB 重開保留處置與原文。`agend --test telegram_unknown` 另以正式 daemon 三次開機、無 token／設定核啟動恢復、操作員 socket 權限及持久處置。

@@ -70,9 +70,29 @@ where
     }
     async fn send_pending(
         &self,
+        row: TelegramDelivery,
+        one: bool,
+        stop: Option<&tokio::sync::watch::Receiver<bool>>,
+    ) -> Result<(), String> {
+        let id = row.id.clone();
+        let mut attempted = false;
+        let result = self
+            .send_pending_inner(row, one, stop, &mut attempted)
+            .await;
+        if result.is_err() && attempted {
+            self.store
+                .mark_telegram_unknown(&id)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        result
+    }
+    async fn send_pending_inner(
+        &self,
         mut row: TelegramDelivery,
         one: bool,
         stop: Option<&tokio::sync::watch::Receiver<bool>>,
+        attempted: &mut bool,
     ) -> Result<(), String> {
         if row.destination != self.destination {
             return Err("Telegram destination or bot identity changed; no send permitted".into());
@@ -120,6 +140,7 @@ where
             {
                 return Err("Telegram delivery claim changed; nothing sent".into());
             }
+            *attempted = true;
             let text = row.parts[part].clone();
             let mut request = json!({"chat_id":row.destination.chat_id,"text":text,"link_preview_options":{"is_disabled":true}});
             if let Some(topic) = row.destination.topic_id {
@@ -159,6 +180,7 @@ where
             {
                 return Err("Telegram receipt could not be committed; outcome unknown".into());
             }
+            *attempted = false;
             row.next_part += 1;
             row.message_ids.push(id);
             if one {

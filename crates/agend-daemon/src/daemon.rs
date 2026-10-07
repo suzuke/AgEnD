@@ -236,6 +236,12 @@ async fn serve(
         crate::notifier::config::Token,
     )>,
 ) -> Result<Stopped, ExitCode> {
+    if let Err(error) = store.recover_telegram_attempts().await {
+        log::line(&format!(
+            "agend daemon: cannot recover Telegram attempts: {error}"
+        ));
+        return Err(ExitCode::from(1));
+    }
     let (events, mut queue) = unbounded_channel();
     forward_signal(SignalKind::interrupt(), "SIGINT", events.clone());
     forward_signal(SignalKind::terminate(), "SIGTERM", events.clone());

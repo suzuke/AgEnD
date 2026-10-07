@@ -254,6 +254,14 @@ async fn collect_notices(
     let mut notices = Vec::new();
     let view = fleet.view();
     for item in &view.attention {
+        // Do not report a broken notification channel through itself.
+        if item
+            .attention_id
+            .as_deref()
+            .is_some_and(|id| id.starts_with(crate::handlers::telegram_attention::PREFIX))
+        {
+            continue;
+        }
         if let Some(mut notice) = notice(item) {
             if let Some(task) = &item.task_id {
                 let version = store
