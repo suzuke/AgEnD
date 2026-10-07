@@ -7,7 +7,6 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
-use std::time::{Duration, Instant};
 
 pub struct Worker {
     pub store: Arc<SqliteStore>,
@@ -138,17 +137,9 @@ impl Worker {
             self.live()?;
             if busy && row.level != BusyLevel::Queue {
                 self.session.abort()?;
-                let deadline = Instant::now() + Duration::from_secs(5);
-                while self.session.busy()? {
-                    self.live()?;
-                    if Instant::now() >= deadline {
-                        return Err(
-                            "OpenCode abort did not reach idle; attempt retained without replay"
-                                .into(),
-                        );
-                    }
-                    std::thread::sleep(Duration::from_millis(25));
-                }
+                // A queued turn can start immediately after the aborted one.
+                // Successful abort authorizes the following single POST; an
+                // observable idle gap is neither required nor guaranteed.
             }
             self.live()?;
             let text =
@@ -184,6 +175,91 @@ mod tests {
         traits::{AgentMessage, Driver},
     };
     use agend_testkit::{block_on, fake_agent::opencode::Server, tempdir::TempDir};
+    use std::time::Duration;
+
+    #[test]
+    fn interrupt_after_busy_queue_submits_once_even_when_backend_starts_queued_work() {
+        for level in [BusyLevel::Steer, BusyLevel::Interrupt] {
+            let dir = TempDir::new("opencode-interrupt").unwrap();
+            let store = Arc::new(SqliteStore::open(dir.path(), 0).unwrap());
+            let server = Server::start(0, Duration::from_secs(60), None).unwrap();
+            let session =
+                Session::create(Http::new(server.port(), "fixture", "/fixture").unwrap()).unwrap();
+            block_on(store.add_instance(&Instance {
+                id: "open-1".into(),
+                backend: Backend::Opencode,
+                program: "unused".into(),
+                args: vec![],
+                working_directory: dir.path().display().to_string(),
+                session_id: Some(session.id().into()),
+                status: InstanceStatus::Running,
+                session_started: true,
+                agent_pid: None,
+                legacy_no_thread: false,
+                delivery: "push".into(),
+            }))
+            .unwrap();
+            let worker = Worker {
+                store: store.clone(),
+                instance: "open-1".into(),
+                session,
+                cancelled: Arc::new(AtomicBool::new(false)),
+                model: None,
+                reconcile_after: std::cell::Cell::new(0),
+            };
+            for (id, level) in [
+                ("first", BusyLevel::Queue),
+                ("queued", BusyLevel::Queue),
+                ("urgent", level),
+            ] {
+                block_on(store.claim_message(
+                    &crate::store::NewMessage {
+                        id: id.into(),
+                        from_instance: "sender".into(),
+                        to_instance: "open-1".into(),
+                        task_id: None,
+                        body: id.into(),
+                        level,
+                    },
+                    1,
+                ))
+                .unwrap();
+                assert!(
+                    worker.tick().is_ok(),
+                    "accepted abort must not strand the urgent message"
+                );
+                assert!(worker.session.busy().unwrap());
+            }
+            worker.tick().unwrap();
+            let native = worker.session.history().unwrap();
+            assert_eq!(
+                history::users(worker.session.id(), &native).unwrap().len(),
+                3
+            );
+            assert_eq!(
+                native
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter(|r| r["info"]["error"]["name"] == "MessageAbortedError")
+                    .count(),
+                1
+            );
+            for id in ["first", "queued", "urgent"] {
+                assert_eq!(
+                    block_on(store.message(id)).unwrap().unwrap().state,
+                    DeliveryState::Confirmed
+                );
+            }
+            worker.tick().unwrap();
+            assert_eq!(
+                history::users(worker.session.id(), &worker.session.history().unwrap())
+                    .unwrap()
+                    .len(),
+                3
+            );
+        }
+    }
 
     #[test]
     fn native_worker_confirms_once_and_recovers_an_ambiguous_committed_attempt() {

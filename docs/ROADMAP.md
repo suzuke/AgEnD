@@ -235,3 +235,5 @@
 - 2026-10-07：12B 完整 DRV suite 10/10（原生 REST／重開 SQLite）通過；固定版本零 prompt provider inventory 完成並清理，接續受控模型真測（feat/g12b-opencode）。
 
 - 2026-10-07：12B 固定 OpenCode 1.18.34／gpt-6-luna 正式 daemon 真模型單則 smoke 通過，原生歷史與 DB 確認單次投遞及完成；自有程序／port／目錄已清，共享 auth 不變。busy／跨 backend 與 fresh verifier 仍待完成。
+
+- 2026-10-07：12B busy queue→interrupt 原生反例重現並修正：abort 回覆成功後單次提交，不等待可能不存在的 idle 空窗；新增 steer／interrupt 兩條路徑的完整歷史與無重送檢查。
