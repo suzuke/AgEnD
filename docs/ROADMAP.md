@@ -275,3 +275,5 @@
 - 2026-10-07：12D G4 共用已讀：SQLite v16／protocol 1.6 同步 TUI 與 Telegram；雙 TUI 真 daemon 重啟、native HTTP 保留動作、舊追問拒絕及斷線反例已補測，全新 focused 覆核通過。完整 D 真手機／topic／CI 尚未完成（feat/g12d-telegram 本次 checkpoint）。
 
 - 2026-10-07：12D 接上 team topic 任務摘要與輔助 outbox 恢復；native HTTP／SQLite 驗雙 topic、內容更新、重啟不重送及 unknown／foreign 排除。真手機／forum 與完整端到端驗收仍待完成（feat/g12d-telegram 本次 checkpoint）。
+
+- 2026-10-07：12D 專用 Telegram 私訊真測完成 Mark read → 正式 TUI 同步且待辦保持開啟 → acknowledge 關閉；SQLite 核 read／accepted，通知與自有程序／home 已清理。完整 12D 尚未完成；見 gate-12d-telegram 手機驗收。

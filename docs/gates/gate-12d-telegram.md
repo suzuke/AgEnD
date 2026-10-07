@@ -1,9 +1,9 @@
 # 第 12D：Telegram
 
 > **TL;DR**
-> - 已實作通知完整分段、持久 outbox 與逐段收據；已接 daemon worker 與 inbound 操作防護，完整端到端與手機驗收尚未完成。
+> - 已實作通知完整分段、持久 outbox 與逐段收據；已接 daemon worker 與 inbound 操作防護，手機已讀／確認已驗收；其餘端到端與整體驗收尚未完成。
 > - 專用 bot 已做 getMe 與三則限額文字真測，三則均已刪除；token 設定檔未改動。
-> - 下一步：原生 inbound 端到端、受控手機操作、真 daemon 停機端到端與整體覆核。
+> - 下一步：剩餘 inbound 操作、真 forum topic、真 daemon 停機端到端與整體覆核。
 
 ## 設定與憑證
 
@@ -41,11 +41,11 @@ Task 通知另保存 CAS version／attention revision；CLI 或 TUI 清除再開
 
 getMe 與 Message fixture 來自 2026-10-07 真 Telegram，僅替換識別資料。三則 sendMessage 各搭配一次 deleteMessage，三次刪除均確認；未重試 mutation。計畫及必要證據保留於 AgEnD-ops。
 
-尚未完成真 daemon 程序的 inbound／停機端到端驗證、真 forum topic／受控手機操作真測、整體全新覆核／CI／合併。這批不是第 12D 完成認證。
+尚未完成真 daemon 程序的 inbound／停機端到端驗證、真 forum topic、整體全新覆核／CI／合併。這批不是第 12D 完成認證。
 
 ## 下一步
 
-先驗原生 inbound 的操作與關機邊界，再做受控手機 callback 真測。所有真測僅使用已提供的專用 bot／chat，先固定命令、預算與清理範圍；不修改共享帳戶或 Claude trust entries。
+已讀／確認私訊真測已完成；接續驗其餘 inbound 操作與關機邊界、真 forum topic。所有真測僅使用已提供的專用 bot／chat，先固定命令、預算與清理範圍；不修改共享帳戶或 Claude trust entries。
 
 Schema v14 是新的 forward migration；已提交的 v13 保持原樣，舊 outbox 可直接升級。扣住第一段回覆的測試涵蓋停機、事項解除與替換，確認不開始舊通知第二段。
 
@@ -54,3 +54,13 @@ Schema v14 是新的 forward migration；已提交的 v13 保持原樣，舊 out
 共用已讀 checkpoint：schema v16 保存 read key，protocol 1.6 以 fleet／事件同步兩個 TUI；Telegram 最後一段提供 Mark read。已讀不 claim 通知動作、不關閉事項，後續核准／確認仍可使用。真 daemon 的雙 TUI 與重啟測試通過；native HTTP 驗收與跨 crate 回歸另列檢查紀錄。沿用 T17 的 ID＋問題次數：非問答同 ID 重現不產生新的已讀識別；此批未改成 episode 語意。
 
 Topic checkpoint：每個已設定 team topic 保存任務 ID、完整標題、status 與 current stage；只在內容改變時新建摘要，重啟保留原 delivery。摘要無操作按鈕。路由在送出前依當前設定重核，既有通知 destination 不搬移；改 topic 後舊未完成通知會拒送，內容改變才建立新的通知。辅助 Action result 在 enqueue 後、claim 前當機，worker 能依 bot／chat／topic 恢復；已 claim 未知結果與外來 destination 均不送。
+
+## 手機 callback 驗收（2026-10-07）
+
+專用私訊 bot 經正式 daemon／Telegram transport，先送一則 task-failed 通知，再停止／重啟 daemon。使用者點 Mark read 後，正式 Client 與 TUI App 狀態模型均觀察到 read key（此探針未渲染終端畫面），attention 仍開啟；再點 acknowledge，attention 關閉，停止後 SQLite 保存已讀與 failure_acknowledged=1，update outcome 依序為 read、accepted。未啟動模型。
+
+必要證據保留在 `AgEnD-ops/g12d-telegram-20261007/mobile-live-v3/`。自有通知已 deleteMessage 確認刪除，兩次 daemon boot 正常退出，自有 home 已移除。這不代表真 forum topic、所有 ask／approval 動作、完整故障恢復或整體 12D 通過。
+
+先前 v1 因驗證腳本在 daemon 持有 SQLite exclusive lock 時讀 DB 而失敗，已改為停機後讀取及明確關閉連線；v2 在 120 秒內未收到 callback 而失敗。兩輪失敗紀錄保留，兩則自有通知與 home 均已清理。v3 在使用者再次表示方便後，用 300 秒期限成功，未把前兩輪改記為通過。
+
+本機零網路重驗：先 build `agend` binary 與 `telegram_mobile_probe` example，再執行 `python3 -B crates/agend/examples/support/telegram_mobile.py --target "$CARGO_TARGET_DIR" --out <新的證據目錄> --local`。真測改用 `--credentials <私人 env 檔>`，僅供專用私訊 bot／chat；一次通知，先已讀再確認，結束刪除自有通知。
