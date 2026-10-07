@@ -42,6 +42,19 @@ impl Worker {
     /// again, then processes only messages that have never been attempted.
     pub fn tick(&self) -> Result<bool, String> {
         self.live()?;
+        let permissions = self.session.permissions()?;
+        let (id, session) = (self.instance.clone(), self.session.id().to_owned());
+        self.store
+            .call_blocking(move |conn| {
+                crate::store::opencode_permissions::observe(
+                    conn,
+                    &id,
+                    &session,
+                    &permissions,
+                    crate::log::now_unix_ms(),
+                )
+            })
+            .map_err(|e| e.to_string())?;
         let history = self.session.history()?;
         let id = self.instance.clone();
         let after = self.reconcile_after.get();

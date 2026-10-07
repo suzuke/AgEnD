@@ -155,3 +155,5 @@ Claude bridge／Driver／native startup capture 的案例、限制與重驗指�
 既有無 SessionStart、人工控制、結果不明與四次開機回歸維持；這些測試不啟動真 Claude、不送模型訊息。
 
 OpenCode worker 原生 producer 案例含 140 筆結果不明前綴、獨立新投遞批次與一次確認事件；這是 REST 對帳窗口測試，尚非網路遺失回覆故障注入。supervisor 測試另覆蓋保存 session 的 wrapper resume、缺 session 拒絕與不支援的參數拒絕。
+
+12B permission 原生 producer 測試核對完整請求、session／request identity 與拒絕後失效；SQLite reopen 後決策 attempt 不可重取。schema v10 及 v1–v10 fixture 升級保存既有資料；permission 歷史保留至明確移除 instance，透過 FK cascade 刪除。尚未涵蓋 TUI／handler 端到端權限回覆。

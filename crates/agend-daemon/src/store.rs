@@ -53,6 +53,7 @@ pub mod instances;
 pub mod messages;
 mod migrate;
 pub mod opencode;
+pub mod opencode_permissions;
 pub mod pipeline;
 pub mod retention;
 pub mod snapshot;

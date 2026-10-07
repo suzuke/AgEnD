@@ -223,3 +223,5 @@
 - 2026-10-07：12A 完整真測、全新覆核及固定 head 雙平台四 CI jobs 通過，#154 合併為 `a6cdb4c`；12A worktree／本機 branch 已刪。12B 已 rebase 至合併後版本，Telegram 專用測試設定已備齊（私有設定不入 repo），12B–D 持續實作。
 
 - 2026-10-07：12B OpenCode 初版 Driver／supervisor worker 接線，持久 attempt、分頁 REST 核對與 unknown 狀態；108 個 daemon 單元測試通過，holder／permission／真測尚未完成（feat/g12b-opencode）。
+
+- 2026-10-07：12B 權限 REST 核對與 schema v10 單次決策 attempt 持久化；worker 輪詢保存，attention／operator 接線仍待完成（feat/g12b-opencode）。

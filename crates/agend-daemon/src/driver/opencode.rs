@@ -10,6 +10,7 @@ pub mod driver;
 pub mod history;
 pub mod http;
 pub mod launch;
+pub mod permission;
 pub mod runtime;
 pub mod worker;
 pub use driver::OpenCodeDriver;

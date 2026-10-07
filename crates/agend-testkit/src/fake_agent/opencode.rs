@@ -680,6 +680,16 @@ fn route(request: &Request, shared: &Shared) -> (u16, Option<String>) {
             state.abort(&id, shared.turn);
             ok(json!(true))
         }
+        // 1.18.34 /doc exposes the same pending requests through this route.
+        ("POST", ["permission", pid, "reply"]) => {
+            let body: Value = serde_json::from_slice(&request.body).unwrap_or_default();
+            let Some(response @ ("once" | "always" | "reject")) = body["reply"].as_str() else { return bad_body(); };
+            let owner = state.permissions.get(*pid).map(|(id, _)| id.clone());
+            match owner {
+                Some(id) if state.reply_permission(&id, pid, response, shared.turn) => ok(json!(true)),
+                _ => (404, Some(json!({"name":"PermissionNotFoundError"}).to_string())),
+            }
+        }
         ("POST", ["session", id, "permissions", pid]) => {
             let body: Value = serde_json::from_slice(&request.body).unwrap_or_default();
             let response = body["response"].as_str().unwrap_or("reject").to_owned();

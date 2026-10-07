@@ -106,6 +106,37 @@ impl Session {
         Ok(())
     }
 
+    pub fn permissions(&self) -> Result<Vec<super::permission::Permission>, String> {
+        self.verify()?;
+        super::permission::parse(
+            &self.id,
+            self.http.get("/permission").map_err(|e| e.to_string())?,
+        )
+    }
+
+    /// The caller must persist an operator decision and single-attempt claim
+    /// before invoking this method. Never automatically repeat a lost reply.
+    pub fn reply_permission(
+        &self,
+        expected: &super::permission::Permission,
+        allow_once: bool,
+    ) -> Result<(), String> {
+        if expected.session != self.id || !self.permissions()?.iter().any(|p| p == expected) {
+            return Err("OpenCode permission is stale or belongs to another session".into());
+        }
+        let result = self
+            .http
+            .post(
+                &format!("/permission/{}/reply", expected.id),
+                &json!({"reply":if allow_once {"once"} else {"reject"}}),
+            )
+            .map_err(|e| e.to_string())?;
+        if result != true {
+            return Err("OpenCode did not acknowledge permission reply".into());
+        }
+        Ok(())
+    }
+
     pub fn abort(&self) -> Result<(), String> {
         let response = self
             .http
@@ -123,6 +154,93 @@ mod tests {
     use super::*;
     use agend_testkit::fake_agent::opencode::Server;
     use std::time::Duration;
+
+    #[test]
+    fn native_permissions_are_session_bound_and_stale_or_changed_requests_are_refused() {
+        let server = Server::start(0, Duration::from_millis(10), None).unwrap();
+        let http = || Http::new(server.port(), "fixture", "/fixture").unwrap();
+        let session = Session::create(http()).unwrap();
+        let foreign = Session::create(http()).unwrap();
+        session
+            .submit("permission-test", "run: echo permission-test", None)
+            .unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let permission = loop {
+            if let Some(p) = session.permissions().unwrap().into_iter().next() {
+                break p;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "native producer did not ask"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        // Native observations survive SQLite reopen. A lost HTTP reply must
+        // leave the exact operator decision claimed, never grant another POST.
+        let dir = agend_testkit::tempdir::TempDir::new("opencode-permission-db").unwrap();
+        let store = crate::store::SqliteStore::open(dir.path(), 0).unwrap();
+        agend_testkit::block_on(store.add_instance(&crate::store::Instance {
+            id: "open-permission".into(),
+            backend: agend_core::model::Backend::Opencode,
+            program: "unused".into(),
+            args: vec![],
+            working_directory: dir.path().display().to_string(),
+            session_id: Some(session.id().into()),
+            status: crate::store::InstanceStatus::Running,
+            session_started: true,
+            agent_pid: None,
+            legacy_no_thread: false,
+            delivery: "push".into(),
+        }))
+        .unwrap();
+        let observed = permission.clone();
+        let attention =
+            crate::store::opencode_permissions::identity("open-permission", &permission);
+        let key = attention.clone();
+        store
+            .call_blocking(move |conn| {
+                crate::store::opencode_permissions::observe(
+                    conn,
+                    "open-permission",
+                    &observed.session,
+                    std::slice::from_ref(&observed),
+                    1,
+                )?;
+                assert!(crate::store::opencode_permissions::claim(conn, &key, false, 2)?.is_some());
+                Ok(())
+            })
+            .unwrap();
+        drop(store);
+        let store = crate::store::SqliteStore::open(dir.path(), 3).unwrap();
+        let observed = permission.clone();
+        store
+            .call_blocking(move |conn| {
+                crate::store::opencode_permissions::observe(
+                    conn,
+                    "open-permission",
+                    &observed.session,
+                    std::slice::from_ref(&observed),
+                    4,
+                )?;
+                assert!(
+                    crate::store::opencode_permissions::claim(conn, &attention, true, 5)?.is_none()
+                );
+                Ok(())
+            })
+            .unwrap();
+        assert!(foreign.permissions().unwrap().is_empty());
+        assert!(foreign.reply_permission(&permission, true).is_err());
+        let mut changed = permission.clone();
+        changed.native["metadata"]["command"] = json!("different command");
+        assert!(session.reply_permission(&changed, true).is_err());
+        assert_eq!(session.permissions().unwrap(), vec![permission.clone()]);
+        let duplicate = json!([permission.native.clone(), permission.native.clone()]);
+        assert!(super::super::permission::parse(session.id(), duplicate).is_err());
+        session.reply_permission(&permission, false).unwrap();
+        assert!(session.permissions().unwrap().is_empty());
+        assert!(session.reply_permission(&permission, true).is_err());
+        assert!(!session.busy().unwrap());
+    }
 
     #[test]
     fn native_session_missing_context_is_not_idle_or_replaced() {

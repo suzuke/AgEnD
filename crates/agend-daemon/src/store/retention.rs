@@ -62,6 +62,14 @@ pub struct Rule {
 pub const RETENTION: &[Rule] = &[
     Rule {
         target: Target::Table {
+            name: "opencode_permissions",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "gate 12B: permission decisions retain single-attempt attribution until explicit instance removal cascades",
+    },
+    Rule {
+        target: Target::Table {
             name: "claude_startup",
             time_column: None,
         },
