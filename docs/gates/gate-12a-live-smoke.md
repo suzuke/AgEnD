@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 使用者 2026-10-06 要求完整模型 smoke 必做；#151／#152 已合併；首次真執行停於初始 idle 逾時，訊息階段未開始。
 > - 固定 Claude 2.1.284，兩個 Haiku 4.5 instance、七則工作訊息；首個失敗停止，不重跑。
-> - 下一步：[固定 observed v6](gate-12a-observed-smoke-v6.md)通過初始 idle／首則 ACK，但模型拒絕 gh 防護負例；完整 smoke 尚未通過；下一份計畫見[smoke 指令修正](gate-12a-smoke-contract.md)。
+> - 下一步：[固定 observed v8](gate-12a-observed-smoke-v8.md)通過初始 idle／首則 ACK，但 verifier 將 startup gh token 拒絕誤算進工作次數；完整 smoke 尚未通過；下一份計畫見[smoke 指令修正](gate-12a-smoke-contract.md)。
 
 ## 範圍與證據
 

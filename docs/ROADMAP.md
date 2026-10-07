@@ -208,3 +208,5 @@
 - 2026-10-06：#153 的 f1e1b70 Ready 可變提示修正經全新 verifier（1,046 cases、native10＋獨立10）、使用者重驗1,073 cases、accept core／前後 no-std 及 push／PR 雙平台四 CI jobs通過；作者與驗證編譯暫存／工作樹／程序已清理，未 merge。
 
 - 2026-10-06：固定 f1e1b70／[observed v6](gates/gate-12a-observed-smoke-v6.md)另行授權執行一次：兩個初始 idle、六 startup keys及第一則 channel 明確 ACK 通過；模型依 CLAUDE.md 拒絕 gh pr merge 0 負例，第一段工作逾時 FAILED，互傳／queue／Interrupt 未執行。native cleanup 已移除 home／holders／session 暫存；兩個 trust entries 因外來 Claude 程序使 guard 拒絕寫入而暫留，獨立覆核與後續方案待核，沒有重跑。
+
+- 2026-10-07：#154 固定 `81804dc`／[observed v8](gates/gate-12a-observed-smoke-v8.md) 經四個 CI checks 全通及另行授權單次執行；INITIAL confirmed、模型 peer sent，完整 smoke 因 startup gh token refusals 誤算進工作 audit 次數而 FAILED。自有 runtime／home／session 已清理、trust entries 保留；修 scripts 的 pre-INITIAL append-only prefix 邊界與原生雙 shell 反例，未改 Rust／防護政策，未重跑模型、未 merge。

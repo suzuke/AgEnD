@@ -139,7 +139,7 @@ DRV fixture 的 actor readiness hint 不代替 daemon idle：送達前讀實際 
 
 使用者要求完整真模型通訊 smoke 為必要驗收；固定版本、七則訊息計畫、執行 opt-in 與清理見[真模型 smoke](../../docs/gates/gate-12a-live-smoke.md)。`claude_live_cleanup` example 只停止 nonce-owned holders 與精確身分的孤兒群組；不啟動 backend。CI 仍不執行真模型。
 
-`python3 -B scripts/verify_smoke_contract.py --agend <固定 binary>` 分別以 Bash／zsh 執行生成的 INITIAL 與真 gh shim，零 Claude／daemon／訊息；核 `/usr/bin/which` 的五個外部 PATH、唯讀 `pr merge --help` 仍被 gh_merge 拒絕、peer prompt quoting、七段語法與每個 shell 的十個 audit／PATH／缺少觀察反例。失敗的路徑／拒絕／exit／原生 audit 先保存再判定；驗證只刪自有 fixture，真 smoke 保留使用者要求的 account trust entries，見[指令修正](../../docs/gates/gate-12a-smoke-contract.md)與[v7 原始失敗](../../docs/gates/gate-12a-observed-smoke-v7.md)。
+`python3 -B scripts/verify_smoke_contract.py --agend <固定 binary>` 分別以 Bash／zsh 執行生成的 INITIAL 與真 gh shim，零 Claude／daemon／訊息；核 `/usr/bin/which` 的五個外部 PATH、唯讀 `pr merge --help` 仍被 gh_merge 拒絕、peer prompt quoting、七段語法與每個 shell 的二十個 audit／PATH／缺少觀察與 prefix 反例，另核空 prefix 正例與缺 baseline 負例；四個 startup token 拒絕由真 shim 產生，prefix 必須在 INITIAL 前保存，工作 suffix 仍只允許一個 gh_merge。失敗的路徑／拒絕／exit／原生 audit 先保存再判定；驗證只刪自有 fixture，真 smoke 保留使用者要求的 account trust entries，見[指令修正](../../docs/gates/gate-12a-smoke-contract.md)、[v7 原始失敗](../../docs/gates/gate-12a-observed-smoke-v7.md)與[v8 原始失敗](../../docs/gates/gate-12a-observed-smoke-v8.md)。
 
 2026-10-06 啟動診斷取得四份相同真 frame，結果 CAPTURED、零工作訊息。
 新增完整 Ready 提示 fixture 的 native P6 回歸只跑 shell producer／真 daemon／holder，

@@ -126,6 +126,7 @@ def plan(agend, cleanup, output):
                         "AGEND_INSTANCE": "unset for operator", "CLAUDE_CONFIG_DIR": "unset"},
         "passthrough_environment": pass_environment(),
         "expected_resolved_model": "claude-haiku-4-5-20251001",
+        "gh_audit_scope": "Capture the append-only native audit before INITIAL. Only refused auth token calls by A/B in their exact workspaces may be startup gh records. After that prefix, require exactly one A gh_merge refusal; reject every additional gh call.",
         "failure": "Stop at first failure. No manual terminal input, daemon restart, automatic rerun, version substitution, or prompt repair.",
         "cleanup_policy": "Stop only the child daemon; native shutdown/sweep only nonce-owned holders. Remove own home and exact fresh session/project artifacts once processes are absent. Preserve foreign data and report leftovers. Keep private evidence outside Git. Retain ~/.claude.json trust entries by user instruction; never write the shared account file or stop foreign Claude sessions.",
     }
@@ -232,6 +233,33 @@ class Smoke:
             require(match is not None, "add reply has no session identity")
             self.sessions[argv[3]] = match.group(1)
 
+    def startup_gh_records(self, raw):
+        require(not raw or raw.endswith("\n"), "incomplete startup shim audit")
+        records = [json.loads(line) for line in raw.splitlines() if line]
+        gh = [r for r in records if r.get("tool") == "gh"]
+        for row in gh:
+            instance = row.get("instance")
+            require(instance in IDS and row.get("event") == "refuse"
+                    and row.get("code") == "gh_token" and row.get("argv") == ["auth", "token"]
+                    and row.get("cwd") == str(self.home / "workspace" / instance),
+                    "unexpected startup gh audit record")
+        return gh
+
+    def capture_guard_baseline(self):
+        require(not hasattr(self, "guard_audit_baseline"), "startup shim audit already captured")
+        path = self.home / "audit" / "shim.jsonl"
+        raw = path.read_text() if path.is_file() else ""
+        write_json(self.out / "gh-guard-baseline.json", {
+            "audit/shim.jsonl": raw, "captured_before": "INITIAL harness send",
+            "validation": "pending",
+        })
+        gh = self.startup_gh_records(raw)
+        write_json(self.out / "gh-guard-baseline.json", {
+            "audit/shim.jsonl": raw, "gh_records": gh,
+            "captured_before": "INITIAL harness send", "validation": "passed",
+        })
+        self.guard_audit_baseline = raw
+
     def guard_evidence(self):
         work = self.home / "workspace" / IDS[0]
         files = {name: path.read_text() if path.is_file() else None for name, path in (
@@ -250,19 +278,26 @@ class Smoke:
         output = files["gh-guard.txt"]
         require(files["gh-exit.txt"] == "1" and "agend-shim: refused `gh pr merge`" in output,
                 "gh guard was not observed")
-        records = [json.loads(line) for line in files["audit/shim.jsonl"].splitlines() if line]
+        require(hasattr(self, "guard_audit_baseline"), "startup shim audit baseline missing")
+        prefix = self.guard_audit_baseline
+        startup_gh = self.startup_gh_records(prefix)
+        require(files["audit/shim.jsonl"].startswith(prefix), "startup shim audit prefix changed")
+        suffix = files["audit/shim.jsonl"][len(prefix):]
+        records = [json.loads(line) for line in suffix.splitlines() if line]
         gh = [r for r in records if r.get("tool") == "gh"]
         require(len(gh) == 1 and gh[0].get("event") == "refuse" and gh[0].get("code") == "gh_merge"
                 and gh[0].get("instance") == IDS[0] and gh[0].get("cwd") == str(work)
                 and gh[0].get("argv") == ["pr", "merge"], "native gh refusal identity/count differs")
         evidence = {"requested_argv": ["gh", "pr", "merge", "--help"], "shim_paths": paths,
-                    "exit": 1, "output": output, "native_records": gh}
+                    "exit": 1, "output": output, "native_records": gh,
+                    "startup_gh_refusals": startup_gh}
         write_json(self.out / "gh-guard-evidence.json", evidence)
         return evidence
 
     def execute(self):
         self.start()
         self.idle()
+        self.capture_guard_baseline()
         self.initialized = True
         self.send("initial")
         work = self.home / "workspace" / IDS[0]

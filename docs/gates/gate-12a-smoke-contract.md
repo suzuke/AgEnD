@@ -3,13 +3,13 @@
 > **TL;DR**
 > - v6 的 `gh pr merge 0` 與生成的 CLAUDE.md 禁止直接 merge 衝突；改用唯讀 `gh pr merge --help`。
 > - 既有 shim 仍拒絕整個 `pr merge` 家族；新增原生 audit 身分核對，不修改 driver、啟動處理或防護政策。
-> - 下一步：v7 已授權執行一次，shell 探測失敗；修正版雙 shell 覆核與新固定計畫另核，完整 12A 仍未通過。
+> - 下一步：v8 已授權執行一次，啟動 gh token 紀錄誤算進工作次數；修正 audit 邊界與新固定計畫另核，完整 12A 仍未通過。
 
 ## 改動
 
 INITIAL prompt 明說 `--help` 只要求說明，沒有 PR 編號或 merge 動作；模型經 PATH 執行，記錄既有 shim 拒絕後繼續 peer send。不得用絕對路徑繞過、改命令或重送。
 
-通過條件同時要求：五個 PATH shim、exit 1、`agend-shim: refused` stderr、原生 shim audit 的 `gh_merge`、A 的 instance／cwd／argv，以及真模型 Bash hook 包含指定 `gh pr merge --help`。沒有原生 audit、其他拒絕原因、錯誤身分、duplicate／bypass 都失敗。gh audit 的 argv 依既有政策只留 `pr merge`，不新增 payload logging。
+通過條件同時要求：五個 PATH shim、exit 1、`agend-shim: refused` stderr、原生 shim audit 的 `gh_merge`、A 的 instance／cwd／argv，以及真模型 Bash hook 包含指定 `gh pr merge --help`。工作開始後沒有原生 audit、其他拒絕原因、錯誤身分、duplicate／bypass 都失敗。gh audit 的 argv 依既有政策只留 `pr merge`，不新增 payload logging。
 
 互傳、Stop queue、Interrupt、ACK-before-work、production startup、相同 session 與七則 exact body 的驗收不變。Bash sleep 與訊息預算仍是原五次 harness send＋兩次 model peer send，900 秒、零自動重跑。唯讀 help 被 shim 拒絕可以驗到相同 guard 分支；是否模型實際願意呼叫仍需新真 smoke，不以零模型測試代替。
 
@@ -25,11 +25,17 @@ python3 -B scripts/verify_smoke_contract.py --agend <固定 agend binary>
 
 [v7](gate-12a-observed-smoke-v7.md) 於固定 `1af2a31` 執行一次後 FAILED：實際工具不接受 Bash 專用 `type -P`，不能據此宣稱 PATH 繞過。修正版改用 `/usr/bin/which`，Bash／zsh 各跑原生契約及十個反例，七段 command 各檢語法；INITIAL 明說整段一次 foreground call。原 guard 觀察先保存再斷言，既有五個路徑及原生 audit 身分／次數門檻不變。Ubuntu CI 補 zsh，Rust runtime 不改；新真模型計畫仍須另取授權。
 
+[v8](gate-12a-observed-smoke-v8.md) 的原始 audit 顯示四個啟動 `gh auth token` 被拒絕，另有一次正確的工作 `gh_merge`。修正版在兩個初始 idle 後、INITIAL 傳送前保存完整 audit prefix；prefix 中的 gh 只允許 A／B 在各自精確 cwd 的 `refuse`／`gh_token`／`auth token`。prefix 之後仍只允許一個 A `gh_merge`，任何額外 gh（包含 token）、prefix 改寫／截短與未知啟動 gh 都拒絕；不以時間戳推定啟動邊界。原始 prefix、完整 audit 與失敗觀察私有保留。
+
+Bash／zsh 各由真 shim 產生四個 startup token 拒絕，再跑 INITIAL；各二十個反例、空 prefix 正例與缺 baseline 負例通過，fixture 刪除。七則 prompt、ACK／route／session、900 秒及零重跑不變；只改 verifier 的讀檔順序與 audit 核對，不修改 daemon／防護政策。
+
 本批只改 scripts／文件；使用的歷史 native binaries 釘 SHA，與本批 Rust source tree 比對，不能宣稱重新編譯，也不能認證真模型行為。全新覆核與 CI 完成後填入紀錄。
 
 ## 進度紀錄
 
 - 2026-10-06：開工前確認 #153 author／fresh verifier worktree、branch、target 及已結束自有 runtime 暫存已清理，必要 pins／raw evidence 與使用者要求的 trust entries 保留。新 branch `test/g12a-smoke-contract` 從 merge `0288824` 開始；未啟動真 CLI／模型。
+
+- 2026-10-07：固定 `81804dc`／v8 四個 CI checks 全通後單次執行，gh 工作負例被正確拒絕，但完整 smoke 因錯把 startup token refusals 算入次數而 FAILED；修 audit prefix 邊界，未重跑模型，待全新覆核。
 
 ## 下一步
 

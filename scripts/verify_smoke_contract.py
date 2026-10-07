@@ -42,28 +42,58 @@ def verify(binary, shell_executable):
             ". Do not use an absolute gh path", 1)[0]
         environment = {"PATH": f"{home / 'bin'}:{real}:/usr/bin:/bin",
                        "AGEND_HOME": str(home), "AGEND_INSTANCE": smoke.IDS[0]}
+        run = object.__new__(smoke.Smoke)
+        run.home, run.out = home, out
+        # Produce the actual startup refusals, not handwritten audit inputs.
+        for instance in smoke.IDS:
+            workspace = home / "workspace" / instance
+            workspace.mkdir(exist_ok=True)
+            for _ in range(2):
+                refused = subprocess.run([str(home / "bin" / "gh"), "auth", "token"],
+                                         cwd=workspace, env=dict(environment, AGEND_INSTANCE=instance),
+                                         capture_output=True, text=True, timeout=5)
+                assert refused.returncode == 1 and "agend-shim: refused" in refused.stderr
+        run.capture_guard_baseline()
+        baseline = run.guard_audit_baseline
+        assert len(run.startup_gh_records(baseline)) == 4
         result = subprocess.run([shell_executable, "-c", shell], cwd=work, env=environment,
                                 capture_output=True, text=True, timeout=10)
         assert result.returncode == 0, result.stderr
         assert not (home / "real-gh-called").exists(), "refused call executed real gh"
         expected = ["send", smoke.IDS[1], prompts["peer"]]
         assert (home / "received-send").read_bytes() == b"".join(arg.encode() + b"\0" for arg in expected), "peer prompt changed by shell quoting"
-        run = object.__new__(smoke.Smoke)
-        run.home, run.out = home, out
         evidence = run.guard_evidence()
         assert evidence["requested_argv"] == ["gh", "pr", "merge", "--help"]
         log = home / "audit" / "shim.jsonl"
         native = log.read_text()
-        record = json.loads(native)
+        suffix = native[len(baseline):]
+        record = json.loads(suffix)
+        empty = object.__new__(smoke.Smoke)
+        empty.home, empty.out, empty.guard_audit_baseline = home, out, ""
+        log.write_text(suffix)
+        assert not empty.guard_evidence()["startup_gh_refusals"]
+        log.write_text(native)
+        missing = object.__new__(smoke.Smoke)
+        missing.home, missing.out = home, out
+        try:
+            missing.guard_evidence()
+        except RuntimeError as error:
+            assert str(error) == "startup shim audit baseline missing"
+        else:
+            raise AssertionError("accepted missing startup baseline")
         mutations = {}
         for field, value in [("code", "shim_loop"), ("event", "bypass"),
                              ("instance", smoke.IDS[1]), ("cwd", str(home)),
                              ("argv", ["pr", "review"])]:
             row = copy.deepcopy(record)
             row[field] = value
-            mutations["wrong-" + field] = json.dumps(row) + "\n"
-        mutations["duplicate-refusal"] = native + native
-        mutations["missing-native-refusal"] = ""
+            mutations["wrong-" + field] = baseline + json.dumps(row) + "\n"
+        mutations["duplicate-refusal"] = native + suffix
+        mutations["missing-native-refusal"] = baseline
+        mutations["removed-startup-prefix"] = suffix
+        mutations["altered-startup-prefix"] = baseline.replace('"gh_token"', '"gh_merge"', 1) + suffix
+        mutations["late-auth-token"] = native + baseline.splitlines()[0] + "\n"
+        mutations["late-unknown-gh"] = native + json.dumps(dict(record, code="unknown")) + "\n"
         rejected = []
         for name, contents in mutations.items():
             log.write_text(contents)
@@ -74,6 +104,30 @@ def verify(binary, shell_executable):
             else:
                 raise AssertionError("accepted false native evidence: " + name)
         log.write_text(native)
+        for field, value in [("event", "bypass"), ("code", "gh_merge"),
+                             ("argv", ["pr", "merge"]), ("instance", "foreign"),
+                             ("cwd", str(home))]:
+            row = json.loads(baseline.splitlines()[0])
+            row[field] = value
+            changed = json.dumps(row) + "\n"
+            log.write_text(changed)
+            bad_start = object.__new__(smoke.Smoke)
+            bad_start.home, bad_start.out = home, out
+            try:
+                bad_start.capture_guard_baseline()
+            except RuntimeError:
+                rejected.append("startup-wrong-" + field)
+            else:
+                raise AssertionError("accepted unknown startup gh record: " + field)
+            saved = json.loads((out / "gh-guard-baseline.json").read_text())
+            assert saved["audit/shim.jsonl"] == changed and saved["validation"] == "pending"
+        log.write_text(native)
+        try:
+            run.startup_gh_records(baseline.rstrip("\n"))
+        except RuntimeError:
+            rejected.append("incomplete-startup-audit")
+        else:
+            raise AssertionError("accepted incomplete startup audit")
         (work / "gh-exit.txt").write_text("0")
         try:
             run.guard_evidence()
@@ -122,6 +176,8 @@ def verify(binary, shell_executable):
         report = {"verdict": "PASS", "shell": shell_executable, "native_binary": str(binary), "native_binary_sha256": smoke.digest(binary),
                   "generated_initial_shell_executed": True, "native_gh_refusal": record,
                   "exact_peer_prompt_preserved": True, "seven_shell_commands_parse": True,
+                  "four_native_startup_token_refusals": evidence["startup_gh_refusals"],
+                  "empty_startup_prefix_passed": True, "missing_baseline_refused": True,
                   "mutations_rejected": rejected, "failed_observation_preserved": True,
                   "Claude_executions": 0, "daemon_executions": 0,
                   "message_operations": 0, "shared_account_writes": 0,
