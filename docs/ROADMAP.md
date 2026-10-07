@@ -261,3 +261,7 @@
 - 2026-10-07：12B worker 已接最新頁／歷史回填與舊 attempt 定點查詢；超過 16 MiB 原生歷史回歸核舊收件、新派工與早期完成只發布一次，沒有提高傳輸上限。
 
 - 2026-10-07：#155 固定 `e96f429` 全新 verifier CONFIRMED_SCOPED_SUCCESS：workspace 1,062 passed／0 failed／2 既有 ignored、fmt／clippy／實際 no-std；獨立核對六方向真模型 12 筆 Confirmed。補清早期 model-smoke-v1 自有 holder／attach，原清理誤判及更正保留；目前狀態文件更新，最終 CI／合併仍待完成。
+
+- 2026-10-07：12B 最終 docs-only `0be0ef1` 已 push，CI 期間開工 12C；開 worktree 前核 12A 已清、12B 早期遺留 holder 已補清，未合併 B worktree／target 暫留供核驗。GitHub gh 傳輸與真 CLI 唯讀回覆捕獲開始；正式 Forge／pipeline 尚未接入。
+
+- 2026-10-07：12C gh API、原 PR 身分／head 與 merge parent 收據基礎完成；11 個針對測試、daemon lib/tests clippy、fmt 與前後實際 no-std 通過。只有真 GitHub 唯讀捕獲，未發出遠端寫入；正式 Forge／pipeline 及完整驗收仍待完成。

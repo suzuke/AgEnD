@@ -1,0 +1,4 @@
+HTTP/2.0 200 OK
+Content-Type: application/json; charset=utf-8
+
+{"number": 155, "state": "open", "merged": false, "merge_commit_sha": "b7141405413e97e638c1316c7754d498263b43cb", "html_url": "https://github.com/suzuke/AgEnD/pull/155", "head": {"ref": "feat/g12b-opencode", "sha": "0be0ef1da316d04b41e8716b23031c360de5b81b", "label": "suzuke:feat/g12b-opencode", "repo": {"id": 1187782676, "full_name": "suzuke/AgEnD", "html_url": "https://github.com/suzuke/AgEnD"}}, "base": {"ref": "v2", "sha": "a6cdb4c64b244ca86a23de0a2139a4eee29e5d54", "label": "suzuke:v2", "repo": {"id": 1187782676, "full_name": "suzuke/AgEnD", "html_url": "https://github.com/suzuke/AgEnD"}}}

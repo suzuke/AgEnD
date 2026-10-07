@@ -1,0 +1,16 @@
+{
+  "sha": "a6cdb4c64b244ca86a23de0a2139a4eee29e5d54",
+  "parents": [
+    {
+      "sha": "02888244e9af29aa61ffea84d53ac5664ff7f06e",
+      "url": "https://api.github.com/repos/suzuke/AgEnD/git/commits/02888244e9af29aa61ffea84d53ac5664ff7f06e",
+      "html_url": "https://github.com/suzuke/AgEnD/commit/02888244e9af29aa61ffea84d53ac5664ff7f06e"
+    },
+    {
+      "sha": "c82be62011184834dac963add1a468d45036910c",
+      "url": "https://api.github.com/repos/suzuke/AgEnD/git/commits/c82be62011184834dac963add1a468d45036910c",
+      "html_url": "https://github.com/suzuke/AgEnD/commit/c82be62011184834dac963add1a468d45036910c"
+    }
+  ],
+  "message": "Merge pull request #154 from suzuke/test/g12a-smoke-contract\n\nfix: restore Claude idle after queued work and verify smoke audit"
+}
