@@ -147,3 +147,5 @@ daemon 重啟：`RuntimeFixture`、`DriverFixture`、`StoreFixture` 各有一個
 `fake_agent::claude::{hook_payload, initialize_request}` 抽出既有 fake producer，讓 native helper consumer 使用相同形狀。`ack_request` 產生本次新增 agend_ack 契約。FakeClaude 仍沿用既有錄製檔，不自動呼叫新 ACK；完整新版本真 CLI conformance 尚未通過，不以 native bridge 代替。
 
 FakePipelineExecutor 記錄 forge 選擇、base refresh 與 merge recovery 的 kind，供 pipeline 接線測試核對；不是 GitHub API 的行為替代證據。
+
+12C 嚴格 base 政策限定 FRG-10 的第二條過期 sibling 必須回已識別的 policy refusal；驗 main 完全不變、先前 merge／head 保留、拒絕 head 未進 main 且 branch head 不變。預設 local／fake 仍跑原本兩次成功的 ancestry 斷言與 OverwritesBase mutant；strict 額外拒絕先改 base 才報錯、錯誤種類不符與意外成功的 mutants。FRG-5 成功前提含 server policy 允許；不略過任何案例。

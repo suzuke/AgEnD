@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 正式 GithubForge、pipeline 接線與持久化遠端收尾已實作；尚未驗收完成。
 > - 離線原生 FRG 1–10 與真正 daemon 程序的重啟、main 前進、取消／WIP 收尾已通過。
-> - 下一步：確認遠端 base 競爭政策、受控 GitHub 真測、全新 verifier、CI 與合併。
+> - 下一步：完成嚴格分支保護覆核、受控 GitHub 真測、migration 整合、CI 與合併。
 
 ## 正式接線
 
@@ -42,12 +42,18 @@ remote 失敗會產生 `cleanup-remote` attention，仍繼續本機 WIP 存檔�
 
 2026-10-07 全新覆核曾以真 daemon 重現 unknown merge 重啟會重送（e55d3df，REFUTED）；已補 durable merge attempt 與真 daemon regression，等待修正後獨立重驗。成功後遺失回覆與未確認仍 open 分別測試，不互相代替。後續獨立反例又確認 ecde512 在 unknown＋main 前進時先 rebase，令原 head 的晚到收據無法恢復；已補對帳前阻擋與正式 daemon regression，原生 Forge 六案與 pipeline 五案通過；獨立重驗確認原核准 head 保持不變、晚到收據跨重啟完成、PUT 一次且 cleanup.complete=true，自有 fixture／程序已清。此結果不涵蓋 GitHub 真測、base policy 或後續 migration 整合。
 
-## 待決策與剩餘工作
+## 已選政策與剩餘工作
 
-GitHub merge API 只有 approved-head CAS，沒有 expected-base CAS。已提出要求目標分支嚴格 up-to-date 保護（建議），或接受最後查核到 merge 間 main 前進的空窗；尚待使用者決定。完整 merge 認證及外部寫入驗證暫不進行，其餘實作／測試持續。
+GitHub merge API 只有 approved-head CAS，沒有 expected-base CAS。使用者已同意嚴格分支保護：forge 必須讀到 classic branch protection 的 `required_status_checks.strict=true`、非空 required contexts、`enforce_admins.enabled=true` 及允許 merge commit（required_linear_history=false），否則不送 merge。權限不足、查詢失敗、rulesets-only 或無法確認的設定都受阻；不自動修改共享 repo。分支在最後查核後前進時，由 GitHub 的 strict checks 拒絕過期分支。
+
+正式 adapter 完成 repo／PR／head／保護查核後，才以 CAS 保存 intent 並立即呼叫 PUT。查核失敗不保存 intent，修正設定後可 Retry；保存後的傳輸結果不明仍不自動重送。已完成 merge 的收據恢復只讀，不要求當前保護仍存在。管理員同時移除保護的競爭不屬於可保證的 server enforcement；需維持此設定。嚴格檢查語義見 [GitHub protected branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches)。
 
 尚需受控 GitHub 真 repo 流水線、全新 verifier、完整 CI、合併與施工目錄清理。本頁不宣稱第 12C 完成。
 
 ## 下一步
 
 先完成 base 政策，固定真測版本、repo、命令與有限預算，再執行受控真測。離線重驗：先 `cargo build -p agend -p agend-testkit --bins`，再 `cargo test -p agend-daemon --test github_forge --test github_pipeline`。
+
+2026-10-08 嚴格保護原生驗證：daemon crate 259 passed／0 failed；GitHub API 單元 19、原生 Forge 8、獨立 policy 2 與完整 contract_teeth 5 通過。honest strict producer 曾揭露原 FRG-10 的第二條 sibling 必須拒絕；改為 fixture 明列政策，local／fake 原始 ancestry 與 OverwritesBase 斷言不變，strict 額外核拒絕種類／base 與 head 不變，並加入三個反例。沒有以跳過或放寬所有錯誤來過關。全新 verifier 確認離線範圍；真 server enforcement 仍待測。
+
+`github_live_probe` 是人工有界計畫使用的 production Forge probe：明確 HOME、repo、task、branch，分別 submit／merge／recover／cleanup。它不啟動模型、不代表真 daemon 自動流水線已完成；真測前固定 binary／runner 雜湊與自有 repo 範圍。

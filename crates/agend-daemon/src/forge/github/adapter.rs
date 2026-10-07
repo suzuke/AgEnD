@@ -288,7 +288,7 @@ impl Forge for GithubForge {
         &self,
         request: &MergeRequest,
     ) -> Result<MergeResult, ExecutionError> {
-        let mut record = self.owned(&request.branch).await?;
+        let record = self.owned(&request.branch).await?;
         if record
             .change
             .merge_head
@@ -328,17 +328,20 @@ impl Forge for GithubForge {
                     "GitHub merge outcome unresolved; inspect the original PR; no repeat merge permitted",
                 ));
             }
-            record.change.merge_head = Some(request.expected_head.clone());
-            if !self
-                .store
-                .save_github_change(Some(record.revision), &record.change)
-                .await
-                .map_err(|e| blocked(e.to_string()))?
-            {
-                return Err(blocked("GitHub merge ownership revision changed"));
-            }
             repository
-                .merge_owned(&record.change, &request.expected_head)
+                .merge_owned_before_write(&record.change, &request.expected_head, async || {
+                    let mut attempted = record.change.clone();
+                    attempted.merge_head = Some(request.expected_head.clone());
+                    if !self
+                        .store
+                        .save_github_change(Some(record.revision), &attempted)
+                        .await
+                        .map_err(|e| blocked(e.to_string()))?
+                    {
+                        return Err(blocked("GitHub merge ownership revision changed"));
+                    }
+                    Ok(())
+                })
                 .await?
         };
         if matches!(result, MergeResult::Merged { .. }) {

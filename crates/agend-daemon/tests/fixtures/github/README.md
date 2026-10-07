@@ -27,3 +27,5 @@ API：[GitHub pull requests](https://docs.github.com/en/rest/pulls/pulls)。合�
 `repository.json`：2026-10-07 以 gh 2.102.0 唯讀 GET `repos/suzuke/AgEnD` 捕獲，只保留 id／full_name／html_url；SHA-256 `d6b2539370d52264ee3d42790357e2c173258120ca9a2a9302f6234350c5ef8a`。提交測試沿用原 PR 捕獲，明確注入任務 marker／遺失回覆，不宣稱真 GitHub 建立 PR。
 
 `tests/common/github/gh.py` 是離線 producer，沿用本目錄捕獲的 repo／PR／HTTP 形狀，動態 branch／head／merge tree／parents 由自有 bare Git 產生。`git.py` 只把固定 fixture URL 映射到該 bare repo。用於正式 GithubForge FRG 與故障測試，不聲稱真 GitHub server 行為或分支保護驗證。
+
+`branch-protection.json`：2026-10-08（台北）真 gh 唯讀 GET `repos/suzuke/AgEnD/branches/v2/protection`，原 JSON 完整保留。捕獲時 strict=false、enforce_admins=false，必須拒絕；正例明確將這兩個布林值改為 true，並將 required_linear_history.enabled 改為 false 以允許 merge commit，沒有改動遠端設定。離線 producer 使用這份形狀，不能取代真 GitHub 的 strict enforcement 驗收。

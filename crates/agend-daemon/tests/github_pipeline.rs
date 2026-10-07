@@ -39,6 +39,11 @@ fn fixture(lab: &mut pipeline::Lab) {
         serde_json::to_vec(&serde_json::json!({"git":git,"repository":repository})).unwrap(),
     )
     .unwrap();
+    std::fs::write(
+        root.join("protection-template.json"),
+        include_bytes!("fixtures/github/branch-protection.json"),
+    )
+    .unwrap();
     let bytes = include_bytes!("fixtures/github/pull.http");
     let boundary = bytes.windows(4).position(|s| s == b"\r\n\r\n").unwrap() + 4;
     std::fs::write(root.join("headers.bin"), &bytes[..boundary]).unwrap();

@@ -108,6 +108,11 @@ impl Lab {
             serde_json::to_vec(&serde_json::json!({"git":lab.real_git,"repository":repo})).unwrap(),
         )
         .unwrap();
+        std::fs::write(
+            lab.dir.path().join("protection-template.json"),
+            include_bytes!("fixtures/github/branch-protection.json"),
+        )
+        .unwrap();
         let bytes = include_bytes!("fixtures/github/pull.http");
         let boundary = bytes.windows(4).position(|s| s == b"\r\n\r\n").unwrap() + 4;
         std::fs::write(lab.dir.path().join("headers.bin"), &bytes[..boundary]).unwrap();
@@ -264,6 +269,12 @@ impl ContractFixture {
 impl agend_testkit::contract::forge::ForgeFixture for ContractFixture {
     type Forge = GithubForge;
     type Error = agend_core::pipeline::ports::ExecutionError;
+    fn requires_up_to_date_base(&self) -> bool {
+        true
+    }
+    fn is_stale_base_refusal(&self, error: &Self::Error) -> bool {
+        matches!(error, agend_core::pipeline::ports::ExecutionError::Blocked(reason) if reason.contains("HTTP 405"))
+    }
     fn forge(&self) -> &GithubForge {
         &self.forge
     }
@@ -557,4 +568,108 @@ async fn unknown_delete_does_not_retry_against_a_recreated_identical_head_after_
             .count(),
         1
     );
+}
+
+#[tokio::test]
+async fn weak_protection_blocks_before_intent_and_a_corrected_policy_can_retry() {
+    let lab = Lab::new();
+    let branch = lab.branch();
+    let store = Arc::new(SqliteStore::open(&lab.dir.path().join("home"), 0).unwrap());
+    store
+        .create_task(&Task::new("t-1", "policy", "team", "code", 1))
+        .await
+        .unwrap();
+    let forge = lab.forge(store.clone());
+    let submitted = forge
+        .submit(&Submission {
+            task_id: "t-1".into(),
+            branch: branch.clone(),
+            title: "policy".into(),
+            body: "body".into(),
+        })
+        .await
+        .unwrap();
+    let request = MergeRequest {
+        branch,
+        expected_head: submitted.head,
+    };
+    let marker = lab.dir.path().join("weak-protection");
+    std::fs::write(&marker, "").unwrap();
+    assert!(
+        forge
+            .merge_if_head_is(&request)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("strict")
+    );
+    assert_eq!(lab.writes("PUT"), 0);
+    assert!(
+        store
+            .github_change("t-1")
+            .await
+            .unwrap()
+            .unwrap()
+            .change
+            .merge_head
+            .is_none()
+    );
+    std::fs::remove_file(marker).unwrap();
+    assert!(matches!(
+        forge.merge_if_head_is(&request).await.unwrap(),
+        MergeResult::Merged { .. }
+    ));
+    assert_eq!(lab.writes("PUT"), 1);
+    // A later policy change cannot prevent read-only receipt recovery.
+    std::fs::write(lab.dir.path().join("weak-protection"), "").unwrap();
+    assert!(matches!(
+        forge.merge_if_head_is(&request).await.unwrap(),
+        MergeResult::Merged { .. }
+    ));
+    assert_eq!(lab.writes("PUT"), 1);
+}
+
+#[tokio::test]
+async fn strict_server_rejects_a_base_move_after_the_last_policy_read() {
+    let lab = Lab::new();
+    let branch = lab.branch();
+    let store = Arc::new(SqliteStore::open(&lab.dir.path().join("home"), 0).unwrap());
+    store
+        .create_task(&Task::new("t-1", "race", "team", "code", 1))
+        .await
+        .unwrap();
+    let forge = lab.forge(store.clone());
+    let submitted = forge
+        .submit(&Submission {
+            task_id: "t-1".into(),
+            branch: branch.clone(),
+            title: "race".into(),
+            body: "body".into(),
+        })
+        .await
+        .unwrap();
+    let request = MergeRequest {
+        branch,
+        expected_head: submitted.head,
+    };
+    std::fs::write(lab.dir.path().join("advance-base-before-put"), "").unwrap();
+    assert!(forge.merge_if_head_is(&request).await.is_err());
+    assert_eq!(lab.writes("PUT"), 1);
+    assert_eq!(
+        store
+            .github_change("t-1")
+            .await
+            .unwrap()
+            .unwrap()
+            .change
+            .merge_head
+            .as_deref(),
+        Some(request.expected_head.as_str())
+    );
+    assert!(forge.merge_if_head_is(&request).await.is_err());
+    assert_eq!(lab.writes("PUT"), 1);
+    let pulls: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(lab.dir.path().join("pull-state.json")).unwrap())
+            .unwrap();
+    assert_eq!(pulls[0]["merged"], false);
 }

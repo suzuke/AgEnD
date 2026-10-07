@@ -339,3 +339,69 @@ fn forge_without_change_ids_passes() {
     })
     .assert_passed();
 }
+
+struct StrictFixture(M);
+impl ForgeFixture for StrictFixture {
+    type Forge = M;
+    type Error = FakeError;
+    fn forge(&self) -> &M {
+        &self.0
+    }
+    fn commit_to(&self, branch: &str) -> String {
+        self.0.commit_to(branch)
+    }
+    fn base_head(&self) -> String {
+        self.0.base_head()
+    }
+    fn base_contains(&self, commit: &str) -> bool {
+        self.0.base_contains(commit)
+    }
+    fn requires_up_to_date_base(&self) -> bool {
+        true
+    }
+    fn is_stale_base_refusal(&self, error: &FakeError) -> bool {
+        error.message == "stale base"
+    }
+}
+
+#[test]
+fn strict_base_contract_rejects_mutation_wrong_error_and_unexpected_merge() {
+    let case = forge::cases::<StrictFixture>()
+        .into_iter()
+        .find(|c| c.rule == "FRG-10")
+        .unwrap();
+    let valid = || {
+        StrictFixture(M::new().merge(|m, r| {
+            if r.branch.ends_with("/keep-second") {
+                return Err(FakeError {
+                    operation: "merge",
+                    message: "stale base".into(),
+                });
+            }
+            m.real_merge(r)
+        }))
+    };
+    assert!((case.check)(valid()).is_ok());
+    let corrupt = StrictFixture(M::new().merge(|m, r| {
+        if r.branch.ends_with("/keep-second") {
+            m.forge.set_base(&r.expected_head);
+            return Err(FakeError {
+                operation: "merge",
+                message: "stale base".into(),
+            });
+        }
+        m.real_merge(r)
+    }));
+    assert!((case.check)(corrupt).is_err());
+    let wrong = StrictFixture(M::new().merge(|m, r| {
+        if r.branch.ends_with("/keep-second") {
+            return Err(FakeError {
+                operation: "merge",
+                message: "transport failure".into(),
+            });
+        }
+        m.real_merge(r)
+    }));
+    assert!((case.check)(wrong).is_err());
+    assert!((case.check)(StrictFixture(M::new())).is_err());
+}

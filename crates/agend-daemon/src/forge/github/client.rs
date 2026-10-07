@@ -79,13 +79,24 @@ where
         branch: &str,
         approved: &str,
     ) -> Result<MergeResult, ExecutionError> {
-        self.merge_checked(number, branch, approved, None).await
+        self.merge_checked(number, branch, approved, None, async || Ok(()))
+            .await
     }
 
     pub async fn merge_owned(
         &self,
         change: &agend_core::github::GithubChange,
         approved: &str,
+    ) -> Result<MergeResult, ExecutionError> {
+        self.merge_owned_before_write(change, approved, async || Ok(()))
+            .await
+    }
+
+    pub(super) async fn merge_owned_before_write(
+        &self,
+        change: &agend_core::github::GithubChange,
+        approved: &str,
+        before_write: impl AsyncFnOnce() -> Result<(), ExecutionError>,
     ) -> Result<MergeResult, ExecutionError> {
         if self.name != change.identity.repository
             || self.base != change.identity.base
@@ -96,8 +107,14 @@ where
         let number = change
             .pull_number
             .ok_or_else(|| blocked("GitHub merge has no owned PR"))?;
-        self.merge_checked(number, &change.identity.branch, approved, Some(change))
-            .await
+        self.merge_checked(
+            number,
+            &change.identity.branch,
+            approved,
+            Some(change),
+            before_write,
+        )
+        .await
     }
 
     async fn merge_checked(
@@ -106,6 +123,7 @@ where
         branch: &str,
         approved: &str,
         ownership: Option<&agend_core::github::GithubChange>,
+        before_write: impl AsyncFnOnce() -> Result<(), ExecutionError>,
     ) -> Result<MergeResult, ExecutionError> {
         let before = self.pull(number, branch).await?;
         if let Some(change) = ownership {
@@ -122,7 +140,9 @@ where
         if before.closed {
             return Err(blocked("GitHub pull request was closed without merging"));
         }
+        self.require_strict_base().await?;
         let endpoint = self.endpoint(&format!("pulls/{number}/merge"))?;
+        before_write().await?;
         let written = self
             .api
             .request(
@@ -228,6 +248,62 @@ mod tests {
         }
     }
     #[test]
+    fn unavailable_or_weak_protection_never_sends_a_merge_put() {
+        let (mut pending, _) = recorded();
+        pending["merged"] = Value::Bool(false);
+        pending["state"] = serde_json::json!("open");
+        pending["merge_commit_sha"] = Value::Null;
+        let weak: Value = serde_json::from_str(include_str!(
+            "../../../tests/fixtures/github/branch-protection.json"
+        ))
+        .unwrap();
+        for policy in [
+            response(&weak),
+            include_bytes!("../../../tests/fixtures/github/not-found.http").to_vec(),
+            vec![],
+        ] {
+            let repository = repository(vec![response(&pending), policy]);
+            assert!(
+                agend_testkit::block_on(repository.merge(
+                    154,
+                    "test/g12a-smoke-contract",
+                    pending["head"]["sha"].as_str().unwrap()
+                ))
+                .is_err()
+            );
+            let calls = repository.api.runner.commands.lock().unwrap();
+            assert_eq!(calls.len(), 2);
+            assert!(calls.iter().all(|c| c.contains("'--method' 'GET'")));
+        }
+    }
+    #[test]
+    fn failed_durable_intent_never_sends_the_put() {
+        let (mut pending, _) = recorded();
+        pending["merged"] = Value::Bool(false);
+        pending["state"] = serde_json::json!("open");
+        pending["merge_commit_sha"] = Value::Null;
+        let repository = repository(vec![
+            response(&pending),
+            response(&super::super::protection::tests::protected()),
+        ]);
+        let called = std::sync::atomic::AtomicBool::new(false);
+        let result = agend_testkit::block_on(repository.merge_checked(
+            154,
+            "test/g12a-smoke-contract",
+            pending["head"]["sha"].as_str().unwrap(),
+            None,
+            async || {
+                called.store(true, std::sync::atomic::Ordering::SeqCst);
+                Err(blocked("injected CAS failure"))
+            },
+        ));
+        assert!(result.is_err());
+        assert!(called.load(std::sync::atomic::Ordering::SeqCst));
+        let calls = repository.api.runner.commands.lock().unwrap();
+        assert_eq!(calls.len(), 2);
+        assert!(calls.iter().all(|c| c.contains("'--method' 'GET'")));
+    }
+    #[test]
     fn a_recorded_merged_pull_recovers_without_any_mutation() {
         let (pull, commit) = recorded();
         let repository = repository(vec![response(&pull), response(&commit)]);
@@ -271,6 +347,7 @@ mod tests {
         pending["merge_commit_sha"] = Value::Null;
         let repository = repository(vec![
             response(&pending),
+            response(&super::super::protection::tests::protected()),
             vec![],
             response(&pull),
             response(&commit),
@@ -290,7 +367,7 @@ mod tests {
                 .count(),
             1
         );
-        assert!(commands[1].contains(&format!("'sha={}'", pull["head"]["sha"].as_str().unwrap())));
+        assert!(commands[2].contains(&format!("'sha={}'", pull["head"]["sha"].as_str().unwrap())));
     }
     #[test]
     fn owned_merge_refuses_a_recreated_repository_before_writing() {
@@ -364,6 +441,7 @@ mod tests {
         let repository = repository(vec![
             response(&repo),
             response(&pending),
+            response(&super::super::protection::tests::protected()),
             vec![],
             response(&pull),
         ]);

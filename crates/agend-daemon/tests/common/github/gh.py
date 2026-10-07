@@ -51,6 +51,12 @@ status = 200
 fault = None
 if method == 'GET' and endpoint == prefix:
     result = repo
+elif method == 'GET' and endpoint == prefix + '/branches/main/protection':
+    result = json.loads((root / 'protection-template.json').read_text())
+    if not (root / 'weak-protection').exists():
+        result['required_status_checks']['strict'] = True
+        result['enforce_admins']['enabled'] = True
+        result['required_linear_history']['enabled'] = False
 elif endpoint == prefix + '/pulls' and method == 'GET':
     result = [pull(p) for p in states if f'{owner}:{p["branch"]}' == fields['head'] and p['base'] == fields['base']]
 elif endpoint == prefix + '/pulls' and method == 'POST':
@@ -77,7 +83,15 @@ elif endpoint == prefix + f'/pulls/{number}/merge' and method == 'PUT':
         sys.exit(1)
     head = git('rev-parse', f'refs/heads/{state["branch"]}')
     base = git('rev-parse', f'refs/heads/{state["base"]}')
-    if fields['sha'] != head:
+    if (root / 'advance-base-before-put').exists():
+        (root / 'advance-base-before-put').unlink()
+        moved = git('commit-tree', git('rev-parse', base + '^{tree}'), '-p', base, '-m', 'Racing base')
+        git('update-ref', f'refs/heads/{state["base"]}', moved, base)
+        base = moved
+    ancestor = subprocess.run([config['git'], '-C', str(bare), 'merge-base', '--is-ancestor', base, head]).returncode == 0
+    if not ancestor:
+        status, result = 405, {'message': 'Base branch was modified. Review and try the merge again.'}
+    elif fields['sha'] != head:
         status, result = 409, {'message': 'Head branch was modified'}
     else:
         assert fields['merge_method'] == 'merge'

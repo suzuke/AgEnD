@@ -281,3 +281,5 @@
 - 2026-10-07：12C fresh review 重現 unknown merge 在重啟後重送；修正為 PUT 前持久 merge attempt，重啟／Retry 只讀對帳，pending merge 禁止重新 push／遠端清理。原生 Forge 6 案及 daemon 4 案通過，待獨立修正覆驗。
 
 - 2026-10-07：12C 獨立反例推翻 ecde512 的 unknown merge＋main 前進恢復；保留原核准 head 對帳，未確認前不 rebase，補晚到原 head 收據跨 daemon 重啟完成的原生 regression；PUT 維持一次，外部真測與政策決策仍未完成。
+
+2026-10-08：12C 依使用者同意接入嚴格 branch protection 查核，全部查核通過才保存 PUT intent；原生弱保護零 PUT、修正後 Retry 及收據恢復通過。真 GitHub enforcement、migration 與最終驗收仍待完成。

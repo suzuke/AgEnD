@@ -11,3 +11,5 @@ pub mod push;
 pub mod submission;
 pub use adapter::GithubForge;
 pub mod cleanup;
+
+mod protection;

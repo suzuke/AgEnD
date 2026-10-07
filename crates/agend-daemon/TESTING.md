@@ -193,3 +193,5 @@ OpenCode `oversized_total_history_does_not_block_old_receipts_or_new_delivery` �
 `unresolved_merge_never_replays_after_restart_or_operator_retry` 令獨立 API producer 收到 PUT 後無收據且 PR 仍 open，核強制重啟與 operator Retry 均維持 PUT 次數 1。此案例與立即可見的成功遺失回覆分開，防止假陽性。
 
 `github_pipeline::unknown_merge_preserves_approved_head_until_late_receipt_after_main_advances` 驗 unknown PUT 後遠端 main 前進與 operator Retry：分支保留原核准 head、不得 rebase；原 head 的雙 parent merge 收據晚到，再硬重啟可完成，PUT 仍一次，fixture 程序及目錄清空。
+
+GitHub policy 測試沿用真 branch protection 捕獲，核 strict／enforce_admins／非空 checks，拒絕弱保護、404 與缺回覆。`github_forge` 核第一次政策拒絕不保存 intent、不 PUT；修正後可合併，完成後政策改變仍可讀回收據。離線測試不認證 GitHub server 的 strict enforcement。

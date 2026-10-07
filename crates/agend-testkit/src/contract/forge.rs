@@ -27,6 +27,15 @@ pub trait ForgeFixture {
 
     fn forge(&self) -> &Self::Forge;
 
+    /// A strict server must refuse the second stale sibling in FRG-10.
+    /// Default fixtures retain the original two-success ancestry regression.
+    fn requires_up_to_date_base(&self) -> bool {
+        false
+    }
+    fn is_stale_base_refusal(&self, _error: &Self::Error) -> bool {
+        false
+    }
+
     /// Adds a new commit on `branch` (creating the branch from the base if
     /// needed), makes it visible to the forge and returns the new head.
     fn commit_to(&self, branch: &str) -> String;
@@ -342,17 +351,37 @@ fn merge_keeps_earlier_merges<F: ForgeFixture>(fx: &F) -> CaseResult {
     let second = branch("keep-second");
     let first_head = fx.commit_to(&first);
     let second_head = fx.commit_to(&second);
-    let mut merge_commits = Vec::new();
+    let mut merge_commits: Vec<String> = Vec::new();
     for (b, head) in [(&first, &first_head), (&second, &second_head)] {
         ok("submit", block_on(fx.forge().submit(&submission(b))))?;
         let request = MergeRequest {
             branch: b.clone(),
             expected_head: head.clone(),
         };
-        match ok(
-            "merge_if_head_is",
-            block_on(fx.forge().merge_if_head_is(&request)),
-        )? {
+        let before = fx.base_head();
+        let result = block_on(fx.forge().merge_if_head_is(&request));
+        if b == &second && fx.requires_up_to_date_base() {
+            let error = result.err().ok_or("strict forge merged a stale sibling")?;
+            ensure(fx.is_stale_base_refusal(&error), || {
+                format!("unexpected refusal: {error:?}")
+            })?;
+            ensure(fx.base_head() == before, || {
+                "refused merge changed the base".into()
+            })?;
+            ensure(
+                fx.base_contains(&first_head) && fx.base_contains(&merge_commits[0]),
+                || "refusal lost the earlier merge".into(),
+            )?;
+            ensure(!fx.base_contains(&second_head), || {
+                "refused head entered the base".into()
+            })?;
+            ensure(
+                ok("head", block_on(fx.forge().head(&second)))? == second_head,
+                || "refusal changed the branch head".into(),
+            )?;
+            return Ok(());
+        }
+        match ok("merge_if_head_is", result)? {
             MergeResult::Merged { merge_commit } => merge_commits.push(merge_commit),
             other => return Err(format!("merge of {b}: expected Merged, got {other:?}")),
         }
