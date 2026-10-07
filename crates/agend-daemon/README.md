@@ -7,7 +7,7 @@
 
 正式 P5 啟動按鍵與 P6 初始 idle 的實作、schema v9 與 native 驗證邊界見 [啟動處理](../../docs/gates/gate-12a-startup-runtime.md)。
 
-第 12B 的 OpenCode HTTP／session／歷史核對正在實作，見[範圍與待辦](../../docs/gates/gate-12b-opencode.md)。目前尚未接入 supervisor 與正式派工，不代表 OpenCode adapter 已可用。
+第 12B 的 OpenCode HTTP／session／歷史核對正在實作，見[範圍與待辦](../../docs/gates/gate-12b-opencode.md)。已接入 supervisor、正式 Driver 與權限處理；完整真測尚未完成。
 private startup capture 在啟動前登記 manual 模式，停用 daemon 自動鍵與初始 resize，所有蒐證輸入仍受原授權計畫限制。
 
 ## 第 10 施工關（已驗收，2026-10-02）

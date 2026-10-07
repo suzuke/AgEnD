@@ -11,3 +11,5 @@
 原始計畫、request、result、server log、cleanup 與一次性捕獲程式保留於本機 `/Users/suzuke/Documents/Hack/AgEnD-ops/g12b-api-20261007/`。捕獲程式拒絕覆寫既有證據；一般測試只讀此 fixture，不啟動真 backend。
 
 此證據未驗模型收件、回覆遺失、duplicate messageID 的伺服器行為或權限流程。產品不得由此推定 POST 可以安全重送。
+
+`1.18.34-model-history.json` 來自 2026-10-07 正式 daemon／holder 的單則模型 smoke，固定同一 1.18.34 binary，模型 `opencode-go/gpt-6-luna`。這是未改寫的原生 REST history，包含專用暫存 workspace 路徑、user message、terminal assistant 與 usage；沒有憑證。AgEnD message id 為 `9d65a4ec-04c2-492c-8f2b-5181513615c1`。計畫、回條、DB 事件及清理結果在上述 ops 目錄的 `model-smoke-v2`。v1 在送出前因 DB 獨占鎖失敗；v2 僅送一則，清理補上 `--yes` 後 port／程序／目錄皆消失，共享 auth 不變。此錄製僅證明基本單回合。

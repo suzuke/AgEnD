@@ -148,6 +148,40 @@ mod tests {
     use std::time::Duration;
 
     #[test]
+    fn real_11834_model_capture_confirms_delivery_and_one_terminal_turn() {
+        let history: Value =
+            serde_json::from_str(include_str!("fixtures/1.18.34-model-history.json")).unwrap();
+        let session = history[0]["info"]["sessionID"].as_str().unwrap();
+        let body = history[0]["parts"][0]["text"].as_str().unwrap();
+        assert!(
+            confirmed(
+                session,
+                "9d65a4ec-04c2-492c-8f2b-5181513615c1",
+                body,
+                &history
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            completed(session, &history).unwrap(),
+            vec![(
+                "msg_1152eb0dc001UgXCLaHbfQRzM4".into(),
+                Some("AGEND_G12B_MODEL_OK".into()),
+                false
+            )]
+        );
+        let mut unfinished = history.clone();
+        unfinished[1]["info"]["time"]
+            .as_object_mut()
+            .unwrap()
+            .remove("completed");
+        assert!(completed(session, &unfinished).unwrap().is_empty());
+        let mut foreign = history.clone();
+        foreign[1]["parts"][1]["messageID"] = json!("msg_other");
+        assert!(completed(session, &foreign).is_err());
+    }
+
+    #[test]
     fn real_11834_capture_confirms_only_the_original_id_and_literal_body() {
         let history: Value =
             serde_json::from_str(include_str!("fixtures/1.18.34-no-reply-history.json")).unwrap();

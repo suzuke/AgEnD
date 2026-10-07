@@ -1,0 +1,104 @@
+[
+  {
+    "info": {
+      "id": "msgedf415441e90fb8cb49b384b7d129592eecc5a546353f511340b79143d20fdd1",
+      "sessionID": "ses_eead1511cffeRtixSBsF0Kfy57",
+      "role": "user",
+      "time": {
+        "created": 1791356743560
+      },
+      "summary": {
+        "diffs": []
+      },
+      "agent": "build",
+      "model": {
+        "providerID": "opencode-go",
+        "modelID": "gpt-6-luna"
+      }
+    },
+    "parts": [
+      {
+        "id": "prt_1152eaf8c001rwnmo2cmPQcG2I",
+        "sessionID": "ses_eead1511cffeRtixSBsF0Kfy57",
+        "messageID": "msgedf415441e90fb8cb49b384b7d129592eecc5a546353f511340b79143d20fdd1",
+        "type": "text",
+        "text": "From: open\n\nReply with exactly AGEND_G12B_MODEL_OK. Do not call tools or run commands."
+      }
+    ]
+  },
+  {
+    "info": {
+      "id": "msg_1152eb0dc001UgXCLaHbfQRzM4",
+      "sessionID": "ses_eead1511cffeRtixSBsF0Kfy57",
+      "role": "assistant",
+      "time": {
+        "created": 1791356743900,
+        "completed": 1791356746538
+      },
+      "parentID": "msgedf415441e90fb8cb49b384b7d129592eecc5a546353f511340b79143d20fdd1",
+      "modelID": "gpt-6-luna",
+      "providerID": "opencode-go",
+      "mode": "build",
+      "agent": "build",
+      "path": {
+        "cwd": "/private/tmp/agend-g12b-model-uqpwsol3/agend/workspace/open",
+        "root": "/"
+      },
+      "cost": 0.000691925,
+      "tokens": {
+        "total": 5503,
+        "input": 3,
+        "output": 11,
+        "reasoning": 0,
+        "cache": {
+          "read": 0,
+          "write": 5489
+        }
+      },
+      "finish": "stop"
+    },
+    "parts": [
+      {
+        "id": "prt_1152eb9de0016Ybp4XMoWY9BED",
+        "sessionID": "ses_eead1511cffeRtixSBsF0Kfy57",
+        "messageID": "msg_1152eb0dc001UgXCLaHbfQRzM4",
+        "type": "step-start"
+      },
+      {
+        "id": "prt_1152eb9df001FIf75rxXbD0ao4",
+        "sessionID": "ses_eead1511cffeRtixSBsF0Kfy57",
+        "messageID": "msg_1152eb0dc001UgXCLaHbfQRzM4",
+        "type": "text",
+        "text": "AGEND_G12B_MODEL_OK",
+        "time": {
+          "start": 1791356746207,
+          "end": 1791356746349
+        },
+        "metadata": {
+          "openai": {
+            "itemId": "msg_0f88069828b3ce72016ac5ef4a18a887d2a3c2d4e1cefa6a03",
+            "phase": "final_answer"
+          }
+        }
+      },
+      {
+        "id": "prt_1152ebb27001qmrIAdz5l7Afrr",
+        "sessionID": "ses_eead1511cffeRtixSBsF0Kfy57",
+        "messageID": "msg_1152eb0dc001UgXCLaHbfQRzM4",
+        "type": "step-finish",
+        "reason": "stop",
+        "cost": 0.000691925,
+        "tokens": {
+          "total": 5503,
+          "input": 3,
+          "output": 11,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 5489
+          }
+        }
+      }
+    ]
+  }
+]

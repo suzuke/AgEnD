@@ -233,3 +233,5 @@
 - 2026-10-07：12B terminal event 回填、schema v11 去重與真 HTTP acceptance→Sent 接線；10 原生 OpenCode 案例／兩個 holder 恢復案例通過，完整 DRV／模型驗收未完成（feat/g12b-opencode）。
 
 - 2026-10-07：12B 完整 DRV suite 10/10（原生 REST／重開 SQLite）通過；固定版本零 prompt provider inventory 完成並清理，接續受控模型真測（feat/g12b-opencode）。
+
+- 2026-10-07：12B 固定 OpenCode 1.18.34／gpt-6-luna 正式 daemon 真模型單則 smoke 通過，原生歷史與 DB 確認單次投遞及完成；自有程序／port／目錄已清，共享 auth 不變。busy／跨 backend 與 fresh verifier 仍待完成。

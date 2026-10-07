@@ -163,3 +163,5 @@ OpenCode worker 原生 producer 案例含 140 筆結果不明前綴、獨立新�
 12B schema v11 保存 REST 回合事件去重；`driver::opencode` 驗正常 terminal assistant／abort、外來 assistant part、刪除 driver_events 後歷史不重新發布同一回合。`store` 40 項含 v1–v11 升級／golden／retention。完整 DRV suite 與真 usage-limit 證據仍待驗。
 
 `driver::opencode::contract_tests` 直接使用未改動的 DRV 10 個案例，production Driver／Worker、原生 REST producer 與 SQLite。boot 結束會停 worker／關 DB，重新 boot 回填後服務游標；停機時直接經原生 API 讓 backend 完成回合。這是 Driver 契約層，真 daemon／holder 的兩條恢復路徑另由 `agend --test opencode_bridge` 驗。
+
+OpenCode `real_11834_model_capture_confirms_delivery_and_one_terminal_turn` 使用正式 daemon 的真模型 history，檢查完整訊息確認、terminal 完成、未完成排除與外來 part 拒絕；一般測試不呼叫模型。`runtime::env::tests` 同時核 OpenCode／Codex 的 `ZDOTDIR` 與 env 白名單，沿用真 login zsh 的 shim-first 測試。

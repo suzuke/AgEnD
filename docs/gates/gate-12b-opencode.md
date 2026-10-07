@@ -37,6 +37,10 @@ Driver 事件已補 REST terminal assistant 回填（中途 tool-calls 不算回
 
 固定 SHA-256 的真 1.18.34 已完成零 session／零 prompt provider inventory：可用 opencode-go 與 openrouter，測試帳戶只複製至私有 namespace，原始 auth digest 不變，自有 process group／目錄已清。證據在 `AgEnD-ops/g12b-api-20261007/model-inventory`；尚未送模型 prompt。
 
+真模型 smoke v2 已通過：固定 1.18.34／`opencode-go/gpt-6-luna`，正式 daemon→holder→REST→模型送一則訊息，原生歷史僅一筆 user，回覆 `AGEND_G12B_MODEL_OK`；DB 有 Confirmed 與單一 TurnCompleted。v1 在送出前因驗證腳本讀取獨占 SQLite 失敗；v2 改以 API 觀察，停止後讀 DB。初次清理漏 `--yes`，已重新接回 daemon 刪除本次 instance，確認 port 關閉、程序及目錄消失、共享 auth 未改。證據 `AgEnD-ops/g12b-api-20261007/model-smoke-v2`，原生歷史已納入零模型回歸；只證明一則基本回合，不替代 busy／跨 backend 驗收。
+
+OpenCode 同樣使用 daemon 的 `ZDOTDIR`，避免 login zsh 的系統 profile 把 shim PATH 移到後方。沿用共享 `.zprofile`，不改使用者 shell 設定。
+
 ## 下一步
 
 完成 holder 原生整合、權限請求與恢復測試，再進行受控真測與 fresh verifier。
