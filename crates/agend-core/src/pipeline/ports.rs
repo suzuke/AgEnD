@@ -194,6 +194,12 @@ pub trait PipelineExecutor: Clone + Send + Sync + 'static {
         task: &'a str,
         head: &'a str,
     ) -> impl Future<Output = Result<Option<(String, bool)>, String>> + Send + 'a;
+    fn cleanup_remote<'a>(
+        &'a self,
+        repo: &'a str,
+        task: &'a str,
+        merged: bool,
+    ) -> impl Future<Output = Result<(), String>> + Send + 'a;
     fn readiness(&self) -> impl Future<Output = Result<(), String>> + Send + '_;
     fn ensure<'a>(
         &'a self,

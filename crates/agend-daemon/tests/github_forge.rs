@@ -222,6 +222,26 @@ async fn production_forge_recovers_lost_create_and_merge_replies_without_duplica
     );
     assert_eq!(lab.writes("PUT"), 1);
     assert_eq!(lab.writes("POST"), 1);
+    forge.cleanup("t-1", true).await.unwrap();
+    assert!(
+        forge
+            .store
+            .github_change("t-1")
+            .await
+            .unwrap()
+            .unwrap()
+            .change
+            .cleanup
+            .complete
+    );
+    assert!(
+        lab.git(
+            &lab.dir.path().join("remote"),
+            &["for-each-ref", &format!("refs/heads/{}", request.branch)]
+        )
+        .is_empty()
+    );
+    assert_eq!(lab.writes("PATCH"), 0);
 }
 
 struct ContractFixture {
@@ -373,4 +393,168 @@ async fn dirty_local_main_does_not_erase_work_or_replay_a_completed_remote_merge
         MergeResult::Merged { .. }
     ));
     assert_eq!(lab.writes("PUT"), 1);
+}
+
+#[tokio::test]
+async fn cancelled_pr_cleanup_survives_lost_close_reply_and_does_not_delete_a_recreated_branch() {
+    let lab = Lab::new();
+    let branch = lab.branch();
+    let home = lab.dir.path().join("home");
+    let store = Arc::new(SqliteStore::open(&home, 0).unwrap());
+    store
+        .create_task(&Task::new("t-1", "native", "team", "code", 1))
+        .await
+        .unwrap();
+    let forge = lab.forge(store.clone());
+    let submitted = forge
+        .submit(&Submission {
+            task_id: "t-1".into(),
+            branch: branch.clone(),
+            title: "native".into(),
+            body: String::new(),
+        })
+        .await
+        .unwrap();
+    std::fs::write(lab.dir.path().join("lose-close-reply"), "").unwrap();
+    std::fs::write(lab.dir.path().join("lose-delete-reply"), "").unwrap();
+    forge.cleanup("t-1", false).await.unwrap();
+    assert!(
+        store
+            .github_change("t-1")
+            .await
+            .unwrap()
+            .unwrap()
+            .change
+            .cleanup
+            .complete
+    );
+    assert_eq!(lab.writes("PATCH"), 1);
+    let bare = lab.dir.path().join("remote");
+    assert!(
+        lab.git(&bare, &["for-each-ref", &format!("refs/heads/{branch}")])
+            .is_empty()
+    );
+    drop(forge);
+    drop(store);
+    // Simulate somebody creating the same name after our confirmed cleanup.
+    lab.git(
+        &bare,
+        &[
+            "update-ref",
+            &format!("refs/heads/{branch}"),
+            &submitted.head,
+        ],
+    );
+    let store = Arc::new(SqliteStore::open(&home, 1).unwrap());
+    lab.forge(store).cleanup("t-1", false).await.unwrap();
+    assert_eq!(
+        lab.git(&bare, &["rev-parse", &format!("refs/heads/{branch}")]),
+        submitted.head
+    );
+    assert_eq!(lab.writes("PATCH"), 1);
+}
+
+#[tokio::test]
+async fn cleanup_preserves_a_foreign_branch_update_before_closing_the_pr() {
+    let lab = Lab::new();
+    let branch = lab.branch();
+    let store = Arc::new(SqliteStore::open(&lab.dir.path().join("home"), 0).unwrap());
+    store
+        .create_task(&Task::new("t-1", "native", "team", "code", 1))
+        .await
+        .unwrap();
+    let forge = lab.forge(store.clone());
+    forge
+        .submit(&Submission {
+            task_id: "t-1".into(),
+            branch: branch.clone(),
+            title: "native".into(),
+            body: String::new(),
+        })
+        .await
+        .unwrap();
+    lab.git(&lab.local, &["checkout", &branch]);
+    lab.git(
+        &lab.local,
+        &["commit", "--allow-empty", "-m", "foreign work"],
+    );
+    let foreign = lab.git(&lab.local, &["rev-parse", "HEAD"]);
+    let bare = lab.dir.path().join("remote");
+    lab.git(
+        &lab.local,
+        &[
+            "push",
+            bare.to_str().unwrap(),
+            &format!("{foreign}:refs/heads/{branch}"),
+        ],
+    );
+    lab.git(&lab.local, &["checkout", "main"]);
+    assert!(forge.cleanup("t-1", false).await.is_err());
+    assert_eq!(lab.writes("PATCH"), 0);
+    assert_eq!(
+        lab.git(&bare, &["rev-parse", &format!("refs/heads/{branch}")]),
+        foreign
+    );
+    assert!(
+        !store
+            .github_change("t-1")
+            .await
+            .unwrap()
+            .unwrap()
+            .change
+            .cleanup
+            .complete
+    );
+}
+
+#[tokio::test]
+async fn unknown_delete_does_not_retry_against_a_recreated_identical_head_after_restart() {
+    let lab = Lab::new();
+    let branch = lab.branch();
+    let home = lab.dir.path().join("home");
+    let store = Arc::new(SqliteStore::open(&home, 0).unwrap());
+    store
+        .create_task(&Task::new("t-1", "native", "team", "code", 1))
+        .await
+        .unwrap();
+    let forge = lab.forge(store.clone());
+    let submitted = forge
+        .submit(&Submission {
+            task_id: "t-1".into(),
+            branch: branch.clone(),
+            title: "native".into(),
+            body: String::new(),
+        })
+        .await
+        .unwrap();
+    std::fs::write(lab.dir.path().join("recreate-after-delete"), "").unwrap();
+    assert!(forge.cleanup("t-1", false).await.is_err());
+    assert!(
+        store
+            .github_change("t-1")
+            .await
+            .unwrap()
+            .unwrap()
+            .change
+            .cleanup
+            .delete_attempted
+    );
+    drop(forge);
+    drop(store);
+    let store = Arc::new(SqliteStore::open(&home, 1).unwrap());
+    assert!(lab.forge(store).cleanup("t-1", false).await.is_err());
+    assert_eq!(
+        lab.git(
+            &lab.dir.path().join("remote"),
+            &["rev-parse", &format!("refs/heads/{branch}")]
+        ),
+        submitted.head
+    );
+    assert_eq!(
+        std::fs::read_to_string(lab.dir.path().join("delete-calls.jsonl"))
+            .unwrap()
+            .lines()
+            .count(),
+        1
+    );
 }

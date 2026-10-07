@@ -174,10 +174,4 @@ cargo xtask accept cli             # 第 9 施工關 demo：cli_demo（在 agend
 
 12B OpenCode push 以 supervisor worker 接 loopback REST：claim 與傳輸分離，先持久化 attempt 再送一次，REST 歷史確認收件。原 session 經私人 holder wrapper handoff 恢復；權限由 operator 回覆，unknown 投遞提供 Abandon。原生恢復／權限／DRV 及固定版本模型真測已通過，最終覆核與 CI 以 [12B 紀錄](../../docs/gates/gate-12b-opencode.md) 為準。
 
-第 12C 的 GitHub API／PR head 與 merge 收據核對已建立，尚未接入 Forge／pipeline；範圍與剩餘工作見 [GitHub forge](../../docs/gates/gate-12c-github.md)。
-
-12C schema 0013 保存 task 的 GitHub repo ID／branch／nonce、PR number、push intent 與 create attempt；CAS 更新禁止改綁，unknown attempt 不因 retention 過期。此批僅接 store 邊界，正式 Forge 仍施工中。
-
-12C 提交操作已有 single-attempt PR create／固定 nonce 查回，以及 persist-before-push、精確 force-with-lease 與遠端 head 核對；正式 Forge 選擇和 pipeline 接線仍未完成。
-
-12C 正式 SelectedForge／GithubForge 已接入 submit、checks、merge 及重啟對帳。GitHub checks 前後核 head；main 僅乾淨 fast-forward，remote head 外來變動時保留受阻任務。尚待完整原生流水線、遠端清理及 base 競爭政策確認，不宣稱 12C 完成。
+第 12C 正式 GithubForge／pipeline 已接入 submit、checks、merge、重啟對帳與持久化 remote cleanup。schema 0013 固定 task／repo ID／branch／nonce／PR；unknown mutation 只對帳、不重送。remote cleanup 受阻仍保存本機 WIP 並釋放 agent，等 operator Retry。原生離線 Forge／daemon 測試已通過；base 競爭政策與真 GitHub 驗收仍待完成，見 [GitHub forge](../../docs/gates/gate-12c-github.md)。

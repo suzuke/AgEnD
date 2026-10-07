@@ -130,6 +130,27 @@ impl PipelineExecutor for LocalExecutor {
     ) -> Result<Option<(String, bool)>, String> {
         self.forge(repo, kind, None).find_merge(task, head).await
     }
+    async fn cleanup_remote(&self, repo: &str, task: &str, merged: bool) -> Result<(), String> {
+        use agend_core::github::GithubStore;
+        let Some(record) = self
+            .store
+            .github_change(task)
+            .await
+            .map_err(|e| e.to_string())?
+        else {
+            return Ok(());
+        };
+        if record.change.cleanup.complete {
+            return Ok(());
+        }
+        match self.forge(repo, "github", None) {
+            crate::forge::selected::SelectedForge::Github(forge) => {
+                forge.cleanup(task, merged).await
+            }
+            crate::forge::selected::SelectedForge::Unavailable(reason) => Err(reason),
+            _ => Err("GitHub cleanup forge unavailable".into()),
+        }
+    }
     async fn readiness(&self) -> Result<(), String> {
         crate::checks::readiness(&self.home).await
     }

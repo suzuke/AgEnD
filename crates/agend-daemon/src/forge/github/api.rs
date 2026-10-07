@@ -84,7 +84,7 @@ where
         endpoint: &str,
         fields: &[(&str, &str)],
     ) -> Result<Response, String> {
-        if !matches!(method, "GET" | "POST" | "PUT" | "DELETE")
+        if !matches!(method, "GET" | "POST" | "PUT" | "PATCH" | "DELETE")
             || !endpoint.starts_with("repos/")
             || endpoint
                 .split('/')

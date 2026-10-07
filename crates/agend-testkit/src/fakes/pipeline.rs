@@ -21,6 +21,7 @@ pub struct FakePipelineExecutor {
     effects: Arc<Mutex<Vec<String>>>,
     projections: Arc<Mutex<BTreeMap<String, Option<BindingRow>>>>,
     ids: Arc<AtomicU64>,
+    remote_cleanup_failure: Arc<Mutex<Option<String>>>,
 }
 impl FakePipelineExecutor {
     pub fn new(store: Arc<FakeStore>) -> Self {
@@ -31,7 +32,11 @@ impl FakePipelineExecutor {
             effects: Arc::default(),
             projections: Arc::default(),
             ids: Arc::default(),
+            remote_cleanup_failure: Arc::default(),
         }
+    }
+    pub fn set_remote_cleanup_failure(&self, reason: Option<String>) {
+        *lock(&self.remote_cleanup_failure) = reason;
     }
     pub fn effects(&self) -> Vec<String> {
         lock(&self.effects).clone()
@@ -144,6 +149,13 @@ impl PipelineExecutor for FakePipelineExecutor {
             .forge
             .base_contains(head)
             .then(|| (self.forge.base_head(), true)))
+    }
+    async fn cleanup_remote(&self, _repo: &str, task: &str, merged: bool) -> Result<(), String> {
+        lock(&self.effects).push(format!("cleanup-remote:{task}:{merged}"));
+        match lock(&self.remote_cleanup_failure).clone() {
+            Some(reason) => Err(reason),
+            None => Ok(()),
+        }
     }
     async fn readiness(&self) -> Result<(), String> {
         lock(&self.effects).push("readiness".into());

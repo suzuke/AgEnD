@@ -24,7 +24,7 @@ where
     push_to(git, store, record, head, &origin).await
 }
 
-async fn remote_head<R: Runner>(
+pub(super) async fn remote_head<R: Runner>(
     git: &Git<R>,
     repo: &Path,
     origin: &str,
@@ -81,6 +81,9 @@ where
     R::Error: std::fmt::Display,
     S::Error: std::fmt::Display,
 {
+    if record.change.cleanup != Default::default() {
+        return Err("GitHub cleanup has begun; no new push permitted".into());
+    }
     let repo_path = record.change.identity.local_repo.clone();
     let repo = Path::new(&repo_path);
     let branch = record.change.identity.branch.clone();
@@ -250,6 +253,7 @@ mod tests {
                     pushed_head: None,
                     push_intent: None,
                     create_attempted: false,
+                    cleanup: Default::default(),
                 };
                 store.save_github_change(None, &change).await.unwrap();
                 let git = Git {

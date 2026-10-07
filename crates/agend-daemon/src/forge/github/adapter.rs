@@ -185,6 +185,7 @@ impl Forge for GithubForge {
                 pushed_head: None,
                 push_intent: None,
                 create_attempted: false,
+                cleanup: Default::default(),
             };
             // A concurrent claimant wins; load and validate that identity below.
             let _ = self

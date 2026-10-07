@@ -80,6 +80,7 @@ mod tests {
             pushed_head: None,
             push_intent: None,
             create_attempted: false,
+            cleanup: Default::default(),
         }
     }
     #[test]
@@ -132,6 +133,33 @@ mod tests {
                 .change,
             change
         );
+        change.cleanup.close_attempted = true;
+        assert!(block_on(store.save_github_change(Some(5), &change)).unwrap());
+        change.cleanup.delete_attempted = true;
+        assert!(block_on(store.save_github_change(Some(6), &change)).unwrap());
+        drop(store);
+        let store = SqliteStore::open(dir.path(), 3).unwrap();
+        assert_eq!(
+            block_on(store.github_change("t-1"))
+                .unwrap()
+                .unwrap()
+                .change,
+            change
+        );
+        for close in [true, false] {
+            invalid = change.clone();
+            if close {
+                invalid.cleanup.close_attempted = false;
+            } else {
+                invalid.cleanup.delete_attempted = false;
+            }
+            assert!(block_on(store.save_github_change(Some(7), &invalid)).is_err());
+        }
+        change.cleanup.complete = true;
+        assert!(block_on(store.save_github_change(Some(7), &change)).unwrap());
+        invalid = change.clone();
+        invalid.push_intent = Some("b".repeat(40));
+        assert!(block_on(store.save_github_change(Some(8), &invalid)).is_err());
         block_on(store.create_task(&Task::new("t-2", "github", "team", "code", 1))).unwrap();
         assert!(block_on(store.save_github_change(None, &initial("t-2"))).is_err());
     }

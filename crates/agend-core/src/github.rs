@@ -15,6 +15,13 @@ pub struct GithubIdentity {
     pub nonce: String,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GithubCleanup {
+    pub close_attempted: bool,
+    pub delete_attempted: bool,
+    pub complete: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GithubChange {
     pub identity: GithubIdentity,
@@ -25,6 +32,8 @@ pub struct GithubChange {
     pub push_intent: Option<String>,
     /// Persisted before a PR create attempt. Never cleared to authorize replay.
     pub create_attempted: bool,
+    #[serde(default)]
+    pub cleanup: GithubCleanup,
 }
 
 impl GithubChange {
@@ -52,9 +61,13 @@ impl GithubChange {
             return self.pull_number.is_none()
                 && self.pushed_head.is_none()
                 && self.push_intent.is_none()
-                && !self.create_attempted;
+                && !self.create_attempted
+                && self.cleanup == GithubCleanup::default();
         };
-        if i != &old.identity
+        if (old.cleanup.complete && self != old)
+            || (old.cleanup.close_attempted && !self.cleanup.close_attempted)
+            || (old.cleanup.delete_attempted && !self.cleanup.delete_attempted)
+            || i != &old.identity
             || (old.create_attempted && !self.create_attempted)
             || (self.pull_number.is_some() && !old.create_attempted)
             || (!old.create_attempted

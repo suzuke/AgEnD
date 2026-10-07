@@ -136,3 +136,5 @@ xtask 的 `claude_1_5_envelopes_are_additive_and_receipts_keep_native_attributio
 `GithubChange::follows` 的跨 adapter 契約由 daemon `store::github` 原生 SQLite 測試驗證：重開 DB 保留未確認 push／create，舊 revision、改綁 PR／repository 與重複 branch 所有權遭拒。尚未認證完整 GitHub pipeline。
 
 `forge_choice_rejects_unknown_names_and_mixed_ownership` 核未知名稱與混用 forge 被拒，合法 github 仍可通過 workflow 驗證。
+
+原生 store 測試另驗 cleanup close／delete attempt 跨重開保存、不能清除，complete 後拒絕新 push intent。

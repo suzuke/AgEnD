@@ -63,7 +63,10 @@ where
 
     /// Search only the fixed branch/base. Never adopt a foreign PR, even when
     /// it has the same head. A saturated search is inconclusive, not absent.
-    async fn find_owned_pull(&self, change: &GithubChange) -> Result<Option<Pull>, ExecutionError> {
+    pub(super) async fn find_owned_pull(
+        &self,
+        change: &GithubChange,
+    ) -> Result<Option<Pull>, ExecutionError> {
         let owner = self
             .name
             .split_once('/')
@@ -290,6 +293,7 @@ mod tests {
             pushed_head: None,
             push_intent: None,
             create_attempted: false,
+            cleanup: Default::default(),
         };
         store.save_github_change(None, &change).await.unwrap();
         change.push_intent = Some(native_pull(&change)["head"]["sha"].as_str().unwrap().into());

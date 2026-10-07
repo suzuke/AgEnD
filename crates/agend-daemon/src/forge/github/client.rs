@@ -312,6 +312,7 @@ mod tests {
             pushed_head: Some(pull["head"]["sha"].as_str().unwrap().into()),
             push_intent: None,
             create_attempted: true,
+            cleanup: Default::default(),
         };
         let mut repo: Value = serde_json::from_str(include_str!(
             "../../../tests/fixtures/github/repository.json"
@@ -347,6 +348,7 @@ mod tests {
             pushed_head: Some(pull["head"]["sha"].as_str().unwrap().into()),
             push_intent: None,
             create_attempted: true,
+            cleanup: Default::default(),
         };
         let repo: Value = serde_json::from_str(include_str!(
             "../../../tests/fixtures/github/repository.json"

@@ -18,6 +18,25 @@ where
         ) {
             return Ok(());
         }
+        let deferred = self
+            .store
+            .progress(&task.id)
+            .await
+            .map_err(db)?
+            .and_then(|p| p.attention_reason)
+            .is_some_and(|reason| reason.starts_with("cleanup-remote:"));
+        if !deferred
+            && let Some(repo) = self.team(&task.team_id).await?.repo
+            && let Err(reason) = self
+                .executor
+                .cleanup_remote(&repo, &task.id, task.merge_commit.is_some())
+                .await
+        {
+            // Keep remote ownership and expose Retry; local WIP archival
+            // and holder release can still finish independently.
+            self.note(&task.id, Some(format!("cleanup-remote:{reason}")))
+                .await?;
+        }
         for b in self.store.bindings().await.map_err(db)? {
             if b.task == task.id
                 && let Err((_, reason)) = self.release(&b, task.merge_commit.is_some()).await

@@ -315,33 +315,7 @@ where
             PipelineAction::TaskDone { .. }
             | PipelineAction::TaskCancelled { .. }
             | PipelineAction::TaskFailed { .. } => {
-                for b in self
-                    .store
-                    .bindings()
-                    .await
-                    .map_err(db)?
-                    .into_iter()
-                    .filter(|b| b.task == task.id)
-                {
-                    self.release(&b, state.merge_commit().is_some()).await?;
-                }
-                let row = self
-                    .store
-                    .load_task(&task.id)
-                    .await
-                    .map_err(db)?
-                    .ok_or_else(|| invalid("task disappeared"))?;
-                let mut free = row.task;
-                free.assignee = None;
-                if !matches!(
-                    self.store
-                        .compare_and_swap_task(&free, row.version)
-                        .await
-                        .map_err(db)?,
-                    CasResult::Written { .. }
-                ) {
-                    return Err(invalid("cleanup CAS conflict"));
-                }
+                self.cleanup_terminal(task).await?;
             }
             PipelineAction::NotifyTimeout { stage_id } => {
                 log::line(&format!("{}: {stage_id} timed out (notification)", task.id))

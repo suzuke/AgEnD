@@ -182,6 +182,10 @@ OpenCode `oversized_total_history_does_not_block_old_receipts_or_new_delivery` �
 
 12C `forge::github::submission` 以真捕獲 GitHub 回覆注入 task marker 與遺失回覆，配原生 SQLite 重開驗單次 create、unknown 不重送及外來 PR 拒絕。`forge::github::push` 執行真 Git／bare repo，測成功後遺失回覆與 lease 競爭失敗，重開 DB 後不重送。這些尚非正式 daemon pipeline 驗收。
 
-`github_workflow_selects_its_forge_for_submit_checks_and_merge` 經 whole-queue fakes 核 github 選擇，不允許退回 local；實際 local FRG 1–10、runner／sandbox regression 由 `pipeline_adapters` 覆蓋。GitHub API replay 另核 repo 重建與 PUT 後外來 marker 不可提供 merge 收據。尚無完整 GitHub 原生 FRG 認證。
+`github_workflow_selects_its_forge_for_submit_checks_and_merge` 經 whole-queue fakes 核 github 選擇，不允許退回 local；實際 local FRG 1–10、runner／sandbox regression 由 `pipeline_adapters` 覆蓋。GitHub API replay 另核 repo 重建與 PUT 後外來 marker 不可提供 merge 收據。正式 GitHub 原生 FRG 見下列整合測試。
 
 12C `cargo test -p agend-daemon --test github_forge` 跑正式 GithubForge 的 FRG 1–10、遺失 create／merge 回覆與跨 SQLite 重開、dirty main 保留及只讀恢復。獨立程序使用真捕獲形狀與真 bare Git 產生 object／parent；不代表 live GitHub policy 或 daemon 端到端已驗收。
+
+`github_forge` 另核 close／delete 遺失回覆、同 SHA 重建分支不重刪、外來 head 不關 PR。`github_pipeline` 使用真 daemon／holder／fake-worker：重啟恢復與單次 merge、main 前進後 checks attempt 2、取消關閉 PR 及 WIP／remote 清理。先 build agend／agend-testkit bins。GitHub API 是獨立離線 producer，不代表 live GitHub 保護政策。
+
+`remote_cleanup_failure_releases_local_capacity_and_waits_for_operator_retry` 核遠端收尾失敗仍解除本機 binding，wake 不重送，operator Retry 才重新對帳。store 測試跨 DB 重開核 cleanup attempt 不可清除、complete 後不可重新 push。

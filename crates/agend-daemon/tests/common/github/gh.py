@@ -65,6 +65,12 @@ elif endpoint == prefix + '/pulls' and method == 'POST':
 elif endpoint == prefix + f'/pulls/{number}' and method == 'GET':
     assert state
     result = pull(state)
+elif endpoint == prefix + f'/pulls/{number}' and method == 'PATCH':
+    assert state and not state['merged'] and fields['state'] == 'closed'
+    state['state'] = 'closed'
+    state_path.write_text(json.dumps(states))
+    result = pull(state)
+    fault = 'lose-close-reply'
 elif endpoint == prefix + f'/pulls/{number}/merge' and method == 'PUT':
     assert state and not state['merged'], 'duplicate merge'
     head = git('rev-parse', f'refs/heads/{state["branch"]}')
