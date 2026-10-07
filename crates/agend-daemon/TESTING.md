@@ -187,3 +187,5 @@ OpenCode `oversized_total_history_does_not_block_old_receipts_or_new_delivery` �
 共用已讀：`cargo test -p agend --test shared_read` 以兩個真 TUI client／daemon 程序驗同步與重啟保留；daemon `mobile_read_` 驗 native HTTP 按鈕不消耗原動作，`a_followup_remains_unread` 驗舊 read key 拒絕，store `read_receipts_` 驗 DB 重開。TUI `a_disconnected_source_` 驗斷線不能宣稱保存成功。上述不含真 Telegram 手機操作。
 
 `cargo test -p agend-daemon --lib notifier::` 包含 native HTTP 的 needs-you／雙 team topics、任務狀態更新、DB 重開不重送摘要，以及輔助 outbox pending 恢復、unknown／foreign bot 不送出。這些不宣稱真 Telegram forum 驗收。
+
+`notifier::poll_tests::native_mobile_choice_and_free_reply_reach_the_asking_agent_once` 以真 pipeline 建立問答及追問、原生 HTTP producer 收據與不同 message ID，驗選項／多行自由文字經 Telegram source 保存且各入 inbox 一次；重複輪詢／舊通知不回答新追問。沒有啟動 backend 模型。

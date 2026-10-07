@@ -64,3 +64,5 @@ Topic checkpoint：每個已設定 team topic 保存任務 ID、完整標題、s
 先前 v1 因驗證腳本在 daemon 持有 SQLite exclusive lock 時讀 DB 而失敗，已改為停機後讀取及明確關閉連線；v2 在 120 秒內未收到 callback 而失敗。兩輪失敗紀錄保留，兩則自有通知與 home 均已清理。v3 在使用者再次表示方便後，用 300 秒期限成功，未把前兩輪改記為通過。
 
 本機零網路重驗：先 build `agend` binary 與 `telegram_mobile_probe` example，再執行 `python3 -B crates/agend/examples/support/telegram_mobile.py --target "$CARGO_TARGET_DIR" --out <新的證據目錄> --local`。真測改用 `--credentials <私人 env 檔>`，僅供專用私訊 bot／chat；一次通知，先已讀再確認，結束刪除自有通知。
+
+原生問答補驗：正式 pipeline 建立 Ask 與 FollowUp，經本機 HTTP Bot API producer → poll → SQLite → guarded pipeline，分別選第二個選項與回覆完整多行自由文字；核 AnswerSource::Telegram 與提問者 inbox 每輪各一筆。每次 sendMessage 回不同 message ID，重複輪詢不再投遞，舊通知不能回答新追問。此例使用 inbox，未啟動模型，也不是 Telegram 真問答操作證據。
