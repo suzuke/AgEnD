@@ -39,8 +39,13 @@ def verify(binary, shell_executable):
         initial = prompts["initial"]
         assert "gh pr merge --help" in initial and "gh pr merge 0" not in initial
         assert "read-only help, with no PR number or merge action" in initial
-        shell = initial.split("run exactly this entire command in one foreground call: ", 1)[1].rsplit(
-            ". Do not use an absolute gh path", 1)[0]
+        def command_block(name, prompt):
+            tag = "agend_bash_" + ("return" if name == "peer_return" else name)
+            start, end = f"\n<{tag}>\n", f"\n</{tag}>"
+            # The opening tag mentioned in prose is not the command delimiter.
+            assert prompt.count(start) == 1 and prompt.endswith(end)
+            return prompt.split(start, 1)[1][:-len(end)]
+        shell = command_block("initial", initial)
         environment = {"PATH": f"{home / 'bin'}:{real}:/usr/bin:/bin",
                        "AGEND_HOME": str(home), "AGEND_INSTANCE": smoke.IDS[0]}
         run = object.__new__(smoke.Smoke)
@@ -177,18 +182,17 @@ def verify(binary, shell_executable):
         # Each shell parses every generated work request, including the nested peer
         # command; syntax checks execute no body and do not sleep or send.
         for name, prompt in prompts.items():
-            if name == "initial":
-                command = shell
-            elif name == "peer_return":
-                command = prompt.split("In Bash run exactly: ", 1)[1].split(". Do not send", 1)[0]
-            elif name == "peer":
-                command = prompt.split("with timeout 180000: ", 1)[1].split(". Send exactly once", 1)[0]
+            command = command_block(name, prompt)
+            if name == "peer":
                 tokens = shlex.split(command.split("; agend send ", 1)[1])
                 assert tokens == [smoke.IDS[0], prompts["peer_return"]], "return prompt changed by shell quoting"
-            elif name in ("busy", "blocking"):
-                command = prompt.split("not background: ", 1)[1].split(". Do not shorten", 1)[0]
-            else:
-                command = prompt.split("Use Bash: ", 1)[1].split(". Do not send", 1)[0]
+                (home / "workspace" / smoke.IDS[1] / "a-ready").write_text(nonce)
+                peer_run = subprocess.run([shell_executable, "-c", command], cwd=work,
+                                          env=environment, capture_output=True, text=True, timeout=5)
+                assert peer_run.returncode == 0, peer_run.stderr
+                expected_return = ["send", smoke.IDS[0], prompts["peer_return"]]
+                assert (home / "received-send").read_bytes() == b"".join(
+                    arg.encode() + b"\0" for arg in expected_return)
             parsed = subprocess.run([shell_executable, "-n", "-c", command], capture_output=True, text=True, timeout=5)
             assert parsed.returncode == 0, (name, parsed.stderr)
         report = {"verdict": "PASS", "shell": shell_executable, "native_binary": str(binary), "native_binary_sha256": smoke.digest(binary),

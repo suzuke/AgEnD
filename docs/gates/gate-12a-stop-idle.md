@@ -34,3 +34,9 @@ cargo test -p agend --test claude_bridge active_stop
 ## 下一步
 
 依使用者 2026-10-07 的第 12 施工關持續授權，固定新 binary／計畫後完成真模型 smoke；每次失敗先查原因。完整 CI 作為合併門檻，相關原生驗證及獨立覆核完成後即可進行受控真測。
+
+## v11：命令邊界偏差，未驗到 Stop idle 修正
+
+固定 `0a86271` 執行一次 v11；兩個 backend 完成啟動，INITIAL 有明確 ACK。模型將命令後的說明也放進 Bash，`agend send` 以 `unexpected argument 'Do' found`／exit 2 拒絕；另有三次 Read。PEER 未送出，queue／Interrupt 未執行，不能據此宣稱 Stop idle 修正已經真模型驗收。發現確定失敗後，對精確自有 runner 發 SIGTERM，走原清理流程；home 與自有 sessions 已移除，trust entries 保留。原始 evidence 與失敗紀錄不改寫。
+
+後續提示把每段命令放入各自命名的 XML 區塊，說明全部在前，結尾不接句點或說明文字。INITIAL／PEER 的巢狀 shell quoting 已在 Bash 和 zsh 實際執行，核對逐 byte 的接收參數；不啟動模型、不傳送真訊息。原 audit、七則工作預算、零自動重跑與清理邊界不變。此修正只改善命令邊界，無法保證模型遵守；下一次真測仍須獨立固定計畫。

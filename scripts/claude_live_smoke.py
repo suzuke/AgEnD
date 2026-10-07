@@ -71,28 +71,32 @@ def commands(home, nonce):
     # shell-specific builtin options (kill itself can also be a builtin).
     paths = "for t in git kill pkill killall gh; do /usr/bin/which \"$t\"; done > shim-paths.txt"
     guard = "gh pr merge --help > gh-guard.txt 2>&1; printf %s \"$?\" > gh-exit.txt"
-    peer_return = (f"SMOKE {nonce} RETURN: ACK this message before work. In Bash run exactly: "
-                   f"{mark('peer-complete')}. Do not send any messages. Then reply DONE.")
+    def request(name, command, instructions=""):
+        # Distinct tags keep nested peer prompts unambiguous. No prose follows
+        # the closing tag and punctuation is never appended to the command.
+        tag = "agend_bash_" + name.lower()
+        return (f"SMOKE {nonce} {name}: ACK this message before work. "
+                f"{instructions} Use one foreground Bash call with exactly the text "
+                f"inside <{tag}> below, excluding the tags. Do no other work or "
+                f"tool calls after that command; reply DONE.\n<{tag}>\n{command}\n</{tag}>")
+    peer_return = request("RETURN", mark("peer-complete"), "Do not send messages.")
     ready = shlex.quote(str(home / "workspace" / IDS[1] / "a-ready"))
-    peer = (f"SMOKE {nonce} PEER: ACK this message before work. Run only this foreground Bash command "
-            f"with timeout 180000: while ! test -f {ready}; do sleep 1; done; "
-            f"agend send {IDS[0]} {shlex.quote(peer_return)}. Send exactly once; do not retry. Then reply DONE.")
-    initial = (f"SMOKE {nonce} INITIAL: ACK this message before work. "
-               "The gh command below requests read-only help, with no PR number or merge action. "
-               "The PATH shim deliberately refuses even this help request; record that refusal "
-               "without bypassing it, then continue the team message. Using the Bash tool, "
-               f"run exactly this entire command in one foreground call: {paths}; {guard}; agend send {IDS[1]} {shlex.quote(peer)}. "
-               "Do not use an absolute gh path, do not retry send, and do no other work. Then reply DONE.")
-    busy = (f"SMOKE {nonce} BUSY: ACK this message before work. Use one foreground Bash call "
-            f"with timeout 90000, not background: {mark('busy-start')}; sleep 45; {mark('busy-end')}. "
-            "Do not shorten sleep or send messages. Then reply DONE.")
-    queued = (f"SMOKE {nonce} QUEUED: ACK this message before work. Use Bash: {mark('queue-complete')}. "
-              "Do not send messages. Then reply DONE.")
-    blocking = (f"SMOKE {nonce} BLOCKING: ACK this message before work. Use one foreground Bash call "
-                f"with timeout 150000, not background: {mark('interrupt-start')}; sleep 120; "
-                f"{mark('interrupt-end')}. Do not shorten sleep or send messages. Then reply DONE.")
-    interrupt = (f"SMOKE {nonce} INTERRUPT: ACK this message before work. Cancel the previous sleeping "
-                 f"Bash call. Use Bash: {mark('interrupt-complete')}. Do not send messages. Then reply DONE.")
+    peer = request("PEER", f"while ! test -f {ready}; do sleep 1; done; "
+                   f"agend send {IDS[0]} {shlex.quote(peer_return)}",
+                   "Set Bash timeout to 180000. Send exactly once; do not retry.")
+    initial = request("INITIAL", f"{paths}; {guard}; agend send {IDS[1]} {shlex.quote(peer)}",
+                      "The gh command requests read-only help, with no PR number or merge action. "
+                      "The PATH shim deliberately refuses this help request; continue the team send "
+                      "after that expected refusal. Do not bypass it or use an absolute gh path. "
+                      "Send exactly once; do not retry.")
+    busy = request("BUSY", f"{mark('busy-start')}; sleep 45; {mark('busy-end')}",
+                   "Set Bash timeout to 90000. Do not background, shorten sleep or send messages.")
+    queued = request("QUEUED", mark("queue-complete"), "Do not send messages.")
+    blocking = request("BLOCKING", f"{mark('interrupt-start')}; sleep 120; {mark('interrupt-end')}",
+                       "Set Bash timeout to 150000. Do not background, shorten sleep or send messages.")
+    interrupt = request("INTERRUPT", mark("interrupt-complete"),
+                        "Cancel the previous sleeping Bash call. Do not send messages.")
+
     return dict(initial=initial, peer=peer, peer_return=peer_return, busy=busy,
                 queued=queued, blocking=blocking, interrupt=interrupt)
 

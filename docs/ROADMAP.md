@@ -214,3 +214,5 @@
 - 2026-10-07：#154 的 `a85a91a`／未執行 v9 經全新 verifier 判 REFUTED：audit 文字讀取正規化 CRLF，漏掉 prefix bytes 改寫。原失敗保留，改逐 byte 保存／比對與 base64 失敗證據，雙 shell 各二十三個反例通過；沒有新增真模型執行，新固定計畫與獨立覆核待核。
 
 - 2026-10-07：使用者授權持續完成第 12 施工關 A–D，保留獨立覆核、合併 CI 與每批清理。#154 固定 ab5a296 的 v10 單次真測已有五則 confirmed（四 channel、一 Stop），queue 後 active Stop 被設成 busy 而 idle 逾時，Interrupt 未驗；原證據與獨立 FAILED 覆核保留。補原生反例及 idle 修正，完整 12A 仍待真測。
+
+- 2026-10-07：#154 的 v11 完成啟動與 INITIAL ACK，但模型將命令後說明送入 Bash，peer send exit 2；提前停止自有 runner 並清理，未進入 queue／Interrupt。命令改用獨立區塊，Bash／zsh 原生參數檢查通過；完整 12A 仍未完成，詳見 [Stop idle](gates/gate-12a-stop-idle.md)。
