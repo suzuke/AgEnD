@@ -24,6 +24,7 @@ use std::{
 struct Server {
     origin: String,
     received: Arc<Mutex<Vec<String>>>,
+    requests: Arc<Mutex<Vec<Value>>>,
     stop: Arc<AtomicBool>,
     pause: Arc<AtomicBool>,
     thread: Option<thread::JoinHandle<()>>,
@@ -40,6 +41,8 @@ impl Server {
         let origin = format!("http://{}", listener.local_addr().unwrap());
         let received = Arc::new(Mutex::new(Vec::new()));
         let output = received.clone();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let request_log = requests.clone();
         let stop = Arc::new(AtomicBool::new(false));
         let ending = stop.clone();
         let thread = thread::spawn(move || {
@@ -90,6 +93,7 @@ impl Server {
                     .unwrap();
                     continue;
                 }
+                request_log.lock().unwrap().push(request.clone());
                 assert_eq!(request["chat_id"], 42);
                 assert!(request.get("parse_mode").is_none());
                 let text = request["text"].as_str().unwrap();
@@ -133,6 +137,7 @@ impl Server {
             origin,
             pause,
             received,
+            requests,
             stop,
             thread: Some(thread),
         }
@@ -512,4 +517,164 @@ async fn stop_and_resolved_attention_never_start_another_part_after_active_recei
             assert_eq!(server.received.lock().unwrap().len(), row.parts.len());
         }
     }
+}
+
+#[tokio::test]
+async fn worker_routes_team_summaries_separately_and_does_not_repeat_them_after_reopen() {
+    use agend_core::{
+        config::{SecretRef, TelegramConfig},
+        protocol::client::{AttentionRequiredData, TaskView},
+    };
+    let dir = TempDir::new("telegram-topics").unwrap();
+    let server = Server::new(None, None);
+    let store = Arc::new(SqliteStore::open(dir.path(), 0).unwrap());
+    let fleet = Arc::new(crate::fleet::Fleet::new(1));
+    fleet.set_tasks(vec![TaskView {
+        task_id: "t-1".into(),
+        title: "Keep complete 繁中 summary".into(),
+        team_id: "alpha".into(),
+        assignee: None,
+        status: "running".into(),
+        current_stage: Some("checks".into()),
+        stages: vec!["checks".into()],
+        pipeline: None,
+    }]);
+    fleet.raise(AttentionRequiredData {
+        reason: "Needs human".into(),
+        task_id: None,
+        ask: None,
+        recap: None,
+        attention_id: Some("manual".into()),
+        unblocks: None,
+        waiting_since_unix_ms: None,
+        if_ignored: None,
+        actions: vec![],
+        instance_id: None,
+    });
+    let config = TelegramConfig {
+        token: SecretRef::Env("UNUSED".into()),
+        chat_id: 42,
+        allow_user_ids: vec![],
+        needs_you_topic: Some(10),
+        team_topics: [("alpha".into(), 20), ("beta".into(), 30)].into(),
+    };
+    let worker =
+        super::worker::start_with_api(config.clone(), server.api(), store.clone(), fleet.clone());
+    wait_sends(&server, 3).await;
+    worker.stop().await;
+    let requests = server.requests.lock().unwrap().clone();
+    assert_eq!(requests.len(), 3);
+    for (topic, text) in [
+        (10, "Needs human"),
+        (20, "Keep complete 繁中 summary"),
+        (30, "No tasks."),
+    ] {
+        let req = requests
+            .iter()
+            .find(|v| v["message_thread_id"] == topic)
+            .unwrap();
+        assert!(req["text"].as_str().unwrap().contains(text));
+        if topic != 10 {
+            assert!(req.get("reply_markup").is_none());
+        }
+    }
+    drop(store);
+    let store = Arc::new(SqliteStore::open(dir.path(), 0).unwrap());
+    let worker = super::worker::start_with_api(config, server.api(), store, fleet.clone());
+    tokio::time::sleep(Duration::from_millis(1150)).await;
+    assert_eq!(server.requests.lock().unwrap().len(), 3);
+    let mut tasks = fleet.view().tasks;
+    tasks[0].status = "done".into();
+    fleet.sync_tasks(tasks);
+    wait_sends(&server, 4).await;
+    worker.stop().await;
+    let requests = server.requests.lock().unwrap();
+    assert_eq!(requests.len(), 4);
+    assert_eq!(requests[3]["message_thread_id"], 20);
+    assert!(
+        requests[3]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Status: done")
+    );
+}
+
+async fn wait_sends(server: &Server, count: usize) {
+    tokio::time::timeout(Duration::from_secs(4), async {
+        while server.received.lock().unwrap().len() < count {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn worker_recovers_unsent_auxiliary_rows_but_never_replays_unknown_or_foreign_rows() {
+    use agend_core::{
+        config::{SecretRef, TelegramConfig},
+        telegram::TelegramDelivery,
+    };
+    let dir = TempDir::new("telegram-auxiliary").unwrap();
+    let server = Server::new(None, None);
+    let store = SqliteStore::open(dir.path(), 0).unwrap();
+    let note = Notification {
+        severity: NotificationSeverity::Info,
+        title: "Action result".into(),
+        body: "Accepted".into(),
+        task_id: None,
+    };
+    for id in ["unknown", "foreign", "pending"] {
+        let mut target = destination();
+        if id == "foreign" {
+            target.bot_id += 1;
+        }
+        store
+            .enqueue_telegram(&TelegramDelivery::new(id.into(), target, note.clone(), 0))
+            .await
+            .unwrap();
+    }
+    assert!(store.claim_telegram_part("unknown", 0).await.unwrap());
+    drop(store);
+    let store = Arc::new(SqliteStore::open(dir.path(), 0).unwrap());
+    let config = TelegramConfig {
+        token: SecretRef::Env("UNUSED".into()),
+        chat_id: 42,
+        allow_user_ids: vec![],
+        needs_you_topic: None,
+        team_topics: Default::default(),
+    };
+    let worker = super::worker::start_with_api(
+        config,
+        server.api(),
+        store.clone(),
+        Arc::new(crate::fleet::Fleet::new(1)),
+    );
+    wait_sends(&server, 1).await;
+    worker.stop().await;
+    assert!(
+        store
+            .telegram_delivery("pending")
+            .await
+            .unwrap()
+            .unwrap()
+            .complete()
+    );
+    assert!(
+        store
+            .telegram_delivery("unknown")
+            .await
+            .unwrap()
+            .unwrap()
+            .in_flight
+    );
+    assert!(
+        !store
+            .telegram_delivery("foreign")
+            .await
+            .unwrap()
+            .unwrap()
+            .complete()
+    );
+    assert_eq!(server.received.lock().unwrap().len(), 1);
 }

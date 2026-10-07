@@ -14,7 +14,11 @@ use agend_core::{
     telegram::{TelegramDestination, TelegramNotice, TelegramStore},
     traits::{Notification, NotificationSeverity, Store},
 };
-use std::{collections::BTreeSet, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+    time::Duration,
+};
 use tokio::sync::watch;
 
 pub struct Worker {
@@ -125,13 +129,22 @@ fn run(
             topic_id: config.needs_you_topic,
         };
         let _ = identity.send(destination.clone());
-        let notifier = TelegramNotifier::new(api.clone(), store.clone(), destination.clone());
+        let mut notifiers = BTreeMap::new();
+        for topic in std::iter::once(config.needs_you_topic)
+            .chain(config.team_topics.values().copied().map(Some))
+        {
+            let mut routed = destination.clone();
+            routed.topic_id = topic;
+            notifiers
+                .entry(topic)
+                .or_insert_with(|| TelegramNotifier::new(api.clone(), store.clone(), routed));
+        }
         let mut failures = BTreeSet::new();
         loop {
             if *stopped.borrow() {
                 return;
             }
-            let notices = match collect_notices(&store, &fleet).await {
+            let notices = match collect_notices(&store, &fleet, &config).await {
                 Ok(n) => n,
                 Err(_) => {
                     tokio::select! { _ = stopped.changed() => return, _ = tokio::time::sleep(Duration::from_secs(1)) => {} }
@@ -152,11 +165,11 @@ fn run(
                         }
                         // Reconcile again after any previous HTTP await. Only a
                         // still-current delivery may start its next part.
-                        let current = match collect_notices(&store, &fleet).await {
+                        let current = match collect_notices(&store, &fleet, &config).await {
                             Ok(n) => n,
                             Err(_) => break,
                         };
-                        let current = match store
+                        let current_rows = match store
                             .observe_telegram(&current, &destination, crate::log::now_unix_ms())
                             .await
                         {
@@ -168,9 +181,17 @@ fn run(
                                 break;
                             }
                         };
-                        if !current.iter().any(|n| n.id == row.id) {
+                        let Some((_, notice)) = current_rows
+                            .iter()
+                            .zip(&current)
+                            .find(|(n, _)| n.id == row.id)
+                        else {
                             continue;
-                        }
+                        };
+                        let topic = notice.topic_id.or(destination.topic_id);
+                        let Some(notifier) = notifiers.get(&topic) else {
+                            continue;
+                        };
                         if let Err(error) = notifier.resume_one(&row.id, &stopped).await
                             && failures.insert(row.id.clone())
                         {
@@ -181,6 +202,34 @@ fn run(
                 Err(_) => {
                     if failures.insert("store".into()) {
                         crate::log::line("Telegram outbox unavailable; no notification sent");
+                    }
+                }
+            }
+            // Result notifications are outside attention reconciliation. A crash
+            // after enqueue but before claim must not strand a never-sent row.
+            for (topic, notifier) in &notifiers {
+                if *stopped.borrow() {
+                    return;
+                }
+                let mut routed = destination.clone();
+                routed.topic_id = *topic;
+                match store.pending_telegram(&routed, 32).await {
+                    Ok(rows) => {
+                        for row in rows {
+                            if *stopped.borrow() {
+                                return;
+                            }
+                            if let Err(error) = notifier.resume_one(&row.id, &stopped).await
+                                && failures.insert(row.id.clone())
+                            {
+                                crate::log::line(&format!("Telegram delivery {}: {error}", row.id));
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        if failures.insert("auxiliary-store".into()) {
+                            crate::log::line("Telegram auxiliary outbox unavailable; nothing sent");
+                        }
                     }
                 }
             }
@@ -200,10 +249,12 @@ fn run(
 async fn collect_notices(
     store: &SqliteStore,
     fleet: &Fleet,
+    config: &TelegramConfig,
 ) -> Result<Vec<TelegramNotice>, String> {
     let mut notices = Vec::new();
-    for item in fleet.view().attention {
-        if let Some(mut notice) = notice(&item) {
+    let view = fleet.view();
+    for item in &view.attention {
+        if let Some(mut notice) = notice(item) {
             if let Some(task) = &item.task_id {
                 let version = store
                     .load_task(task)
@@ -219,6 +270,39 @@ async fn collect_notices(
             }
             notices.push(notice);
         }
+    }
+    for (team, topic) in &config.team_topics {
+        let mut tasks: Vec<_> = view.tasks.iter().filter(|t| &t.team_id == team).collect();
+        tasks.sort_by(|a, b| a.task_id.cmp(&b.task_id));
+        let body = if tasks.is_empty() {
+            "No tasks.".to_owned()
+        } else {
+            tasks
+                .into_iter()
+                .map(|task| {
+                    format!(
+                        "{}: {}\nStatus: {}\nStage: {}",
+                        task.task_id,
+                        task.title,
+                        task.status,
+                        task.current_stage.as_deref().unwrap_or("—")
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n\n")
+        };
+        notices.push(TelegramNotice {
+            key: format!("team-summary:{team}"),
+            topic_id: Some(*topic),
+            attention: None,
+            task_version: None,
+            notification: Notification {
+                severity: NotificationSeverity::Info,
+                title: format!("Team {team}"),
+                body,
+                task_id: None,
+            },
+        });
     }
     Ok(notices)
 }
@@ -285,6 +369,7 @@ pub(super) fn notice(item: &AttentionRequiredData) -> Option<TelegramNotice> {
         attention.waiting_since_unix_ms = None;
     }
     Some(TelegramNotice {
+        topic_id: None,
         task_version: None,
         key,
         attention: Some(attention),

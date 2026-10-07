@@ -72,7 +72,9 @@ impl TelegramStore for SqliteStore {
                         save(&tx, &old)?;
                     }
                 let id = super::instances::new_session_id().map_err(|e| StoreError::Invalid(e.to_string()))?;
-                let mut row = TelegramDelivery::new(id.clone(), destination.clone(), notice.notification, now);
+                let mut routed = destination.clone();
+                routed.topic_id = notice.topic_id.or(destination.topic_id);
+                let mut row = TelegramDelivery::new(id.clone(), routed, notice.notification, now);
                 row.attention = notice.attention;
                 row.task_version = notice.task_version;
                 if !row.valid() { return Err(invalid()); }
@@ -125,6 +127,46 @@ impl TelegramStore for SqliteStore {
                 ],
             )?;
             Ok(incoming)
+        })
+        .await
+    }
+    async fn pending_telegram(
+        &self,
+        destination: &TelegramDestination,
+        limit: usize,
+    ) -> Result<Vec<TelegramDelivery>, StoreError> {
+        let destination = destination.clone();
+        self.call(move |c| {
+            if !(1..=100).contains(&limit) {
+                return Err(invalid());
+            }
+            let ids = {
+                let mut q = c.prepare(
+                    "SELECT id FROM telegram_outbox WHERE
+                    id NOT IN (SELECT delivery_id FROM telegram_notices)
+                    AND json_extract(delivery,'$.attention') IS NULL
+                    AND json_extract(delivery,'$.abandoned')=0
+                    AND json_extract(delivery,'$.in_flight')=0
+                    AND json_extract(delivery,'$.next_part') < json_array_length(delivery,'$.parts')
+                    AND json_extract(delivery,'$.destination.bot_id')=?1
+                    AND json_extract(delivery,'$.destination.chat_id')=?2
+                    AND json_extract(delivery,'$.destination.topic_id') IS ?3
+                    ORDER BY rowid LIMIT ?4",
+                )?;
+                q.query_map(
+                    params![
+                        destination.bot_id,
+                        destination.chat_id,
+                        destination.topic_id,
+                        limit
+                    ],
+                    |r| r.get::<_, String>(0),
+                )?
+                .collect::<Result<Vec<_>, _>>()?
+            };
+            ids.into_iter()
+                .map(|id| load(c, &id)?.ok_or_else(invalid))
+                .collect()
         })
         .await
     }
@@ -233,6 +275,7 @@ mod tests {
             topic_id: None,
         };
         let mut notice = TelegramNotice {
+            topic_id: None,
             task_version: None,
             key: "approval:t-1/approve/1".into(),
             attention: None,

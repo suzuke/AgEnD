@@ -110,6 +110,9 @@ pub fn render(note: &Notification) -> Vec<String> {
 /// content changes or a resolved-and-reopened item start a new delivery.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TelegramNotice {
+    /// Explicit team topic; None uses the needs-you destination.
+    #[serde(default)]
+    pub topic_id: Option<i64>,
     pub key: String,
     pub attention: Option<AttentionRequiredData>,
     /// Task CAS version and durable attention-note revision, captured before delivery.
@@ -130,6 +133,12 @@ pub trait TelegramStore: Sync {
         &'a self,
         delivery: &'a TelegramDelivery,
     ) -> impl Future<Output = Result<TelegramDelivery, Self::Error>> + Send + 'a;
+    /// Unsent auxiliary notifications, excluding reconciled attention/summary rows.
+    fn pending_telegram<'a>(
+        &'a self,
+        destination: &'a TelegramDestination,
+        limit: usize,
+    ) -> impl Future<Output = Result<Vec<TelegramDelivery>, Self::Error>> + Send + 'a;
     fn telegram_delivery<'a>(
         &'a self,
         id: &'a str,

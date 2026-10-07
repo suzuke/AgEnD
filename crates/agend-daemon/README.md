@@ -179,3 +179,5 @@ cargo xtask accept cli             # 第 9 施工關 demo：cli_demo（在 agend
 Telegram 手機操作先保存 update 與通知消耗意圖，再進入 operator 路徑；未知結果不重送。通知保存任務 CAS 版本與注意事項版本，pipeline 在執行時重新比對。Instance retry 在 supervisor queue 內檢查失敗事件並完成處理後回報；要求修改先提示回覆原因。Inbound polling 與 outbound 分段送出各自執行，停機等待有限 HTTP 呼叫收束。完整第 12D 驗收仍以施工關頁為準。
 
 Protocol 1.6 新增共用已讀收據：`mark_attention_read`、`attention_read` 事件與 fleet `read_keys`。識別沿用事項 ID＋問題次數；後續追問重新未讀。daemon 保存 SQLite，TUI 與 Telegram 共用；已讀不等於回答、核准或解除。舊 daemon 仍使用 TUI 本機已讀。
+
+Telegram team topic 保存目前任務摘要（任務、狀態與階段）；needs-you topic 保留完整請示與操作按鈕。摘要按內容對帳，重啟不重送；未 claim 的輔助通知可恢復，in-flight 未知結果不重送。既有通知綁定原 destination，改 topic 不會自動搬移舊通知。

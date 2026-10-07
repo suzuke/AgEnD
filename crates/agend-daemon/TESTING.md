@@ -185,3 +185,5 @@ OpenCode `oversized_total_history_does_not_block_old_receipts_or_new_delivery` �
 `notifier::poll_tests` 使用 native HTTP 與 recorded Message schema，實際執行 SQLite claim、production pipeline acknowledgment，檢查未授權拒絕、一次作用與 stale callback 回覆。另一案例在 RetryConfirmed 等待中丟棄 receiver／event，驗 cancellation 不移除事項、不回 Accepted；它是 queue 邊界測試，並未啟動真 daemon 程序。
 
 共用已讀：`cargo test -p agend --test shared_read` 以兩個真 TUI client／daemon 程序驗同步與重啟保留；daemon `mobile_read_` 驗 native HTTP 按鈕不消耗原動作，`a_followup_remains_unread` 驗舊 read key 拒絕，store `read_receipts_` 驗 DB 重開。TUI `a_disconnected_source_` 驗斷線不能宣稱保存成功。上述不含真 Telegram 手機操作。
+
+`cargo test -p agend-daemon --lib notifier::` 包含 native HTTP 的 needs-you／雙 team topics、任務狀態更新、DB 重開不重送摘要，以及輔助 outbox pending 恢復、unknown／foreign bot 不送出。這些不宣稱真 Telegram forum 驗收。

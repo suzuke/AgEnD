@@ -273,3 +273,5 @@
 - 2026-10-07：12D 補 native HTTP／SQLite／production pipeline 的一次操作與失效按鈕回饋，另驗取消待處理重試不誤回成功；doctor 提示空 allowlist 並安全檢查 token reference。全新覆核 focused 14＋3＋1 通過，範圍不含真 daemon 停機程序／真手機／G4，完整 D 仍待完成。
 
 - 2026-10-07：12D G4 共用已讀：SQLite v16／protocol 1.6 同步 TUI 與 Telegram；雙 TUI 真 daemon 重啟、native HTTP 保留動作、舊追問拒絕及斷線反例已補測，全新 focused 覆核通過。完整 D 真手機／topic／CI 尚未完成（feat/g12d-telegram 本次 checkpoint）。
+
+- 2026-10-07：12D 接上 team topic 任務摘要與輔助 outbox 恢復；native HTTP／SQLite 驗雙 topic、內容更新、重啟不重送及 unknown／foreign 排除。真手機／forum 與完整端到端驗收仍待完成（feat/g12d-telegram 本次 checkpoint）。

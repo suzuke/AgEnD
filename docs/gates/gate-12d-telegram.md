@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 已實作通知完整分段、持久 outbox 與逐段收據；已接 daemon worker 與 inbound 操作防護，完整端到端與手機驗收尚未完成。
 > - 專用 bot 已做 getMe 與三則限額文字真測，三則均已刪除；token 設定檔未改動。
-> - 下一步：原生 inbound 端到端、受控手機操作、topic 路由與 G4 共用已讀。
+> - 下一步：原生 inbound 端到端、受控手機操作、真 daemon 停機端到端與整體覆核。
 
 ## 設定與憑證
 
@@ -27,7 +27,7 @@ Telegram `sendMessage` 長度有限，通知全文需完整分段保留，不能
 
 worker 每秒觀察「需要你」，以持久 source id 對帳，不用 boot-local 事件游標或等待時間辨識通知。相同內容保留原 delivery；內容改變、或已觀察到解除後再出現，建立新 delivery。解除／替換時取消未完成舊通知的後續段落，未知段落仍保留意圖。snapshot 對帳與 outbox 建立同一 SQLite transaction，重啟不會把同一事項當新通知。
 
-worker 將完整 recap、請示對話與可用動作送到 needs-you topic；HTTP 在 blocking pool 執行，不佔用主 engine。每次只送一段，下一段前重新對帳；停止時只等待當前有限期限呼叫與收據完成，再釋放 DB。HTTP 結果未知只記安全錯誤，不自動再送。最後一段附上由已保存選項產生的互動按鈕；team topic 路由與未知通知的操作員處置仍待完成。
+worker 將完整 recap、請示對話與可用動作送到 needs-you topic；HTTP 在 blocking pool 執行，不佔用主 engine。每次只送一段，下一段前重新對帳；停止時只等待當前有限期限呼叫與收據完成，再釋放 DB。HTTP 結果未知只記安全錯誤，不自動再送。最後一段附上由已保存選項產生的互動按鈕；team topic 另送任務摘要；未知通知的操作員處置仍待完成。
 
 ## 手機操作 checkpoint
 
@@ -41,7 +41,7 @@ Task 通知另保存 CAS version／attention revision；CLI 或 TUI 清除再開
 
 getMe 與 Message fixture 來自 2026-10-07 真 Telegram，僅替換識別資料。三則 sendMessage 各搭配一次 deleteMessage，三次刪除均確認；未重試 mutation。計畫及必要證據保留於 AgEnD-ops。
 
-尚未完成真 daemon 程序的 inbound／停機端到端驗證、topics 實際路由、共用已讀完整覆核、受控手機操作真測、整體全新覆核／CI／合併。這批不是第 12D 完成認證。
+尚未完成真 daemon 程序的 inbound／停機端到端驗證、真 forum topic／受控手機操作真測、整體全新覆核／CI／合併。這批不是第 12D 完成認證。
 
 ## 下一步
 
@@ -52,3 +52,5 @@ Schema v14 是新的 forward migration；已提交的 v13 保持原樣，舊 out
 原生 inbound checkpoint：真 HTTP transport → SQLite → production pipeline 已驗未授權使用者拒絕、task-failed 確認、不同 update ID 重用舊通知拒絕與合法失效按鈕回饋。關機反例以丟棄 supervisor queue／待回覆事件驗重試不誤報成功，未將它當作實際 daemon 程序重啟證據。doctor 已加入本機設定／token reference 檢查，空 allowlist 明示 inbound 停用；不呼叫網路。
 
 共用已讀 checkpoint：schema v16 保存 read key，protocol 1.6 以 fleet／事件同步兩個 TUI；Telegram 最後一段提供 Mark read。已讀不 claim 通知動作、不關閉事項，後續核准／確認仍可使用。真 daemon 的雙 TUI 與重啟測試通過；native HTTP 驗收與跨 crate 回歸另列檢查紀錄。沿用 T17 的 ID＋問題次數：非問答同 ID 重現不產生新的已讀識別；此批未改成 episode 語意。
+
+Topic checkpoint：每個已設定 team topic 保存任務 ID、完整標題、status 與 current stage；只在內容改變時新建摘要，重啟保留原 delivery。摘要無操作按鈕。路由在送出前依當前設定重核，既有通知 destination 不搬移；改 topic 後舊未完成通知會拒送，內容改變才建立新的通知。辅助 Action result 在 enqueue 後、claim 前當機，worker 能依 bot／chat／topic 恢復；已 claim 未知結果與外來 destination 均不送。
