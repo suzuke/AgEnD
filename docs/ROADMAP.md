@@ -269,3 +269,5 @@
 - 2026-10-07：12B #155 最終 head `0be0ef1` 四個雙平台 CI jobs 全通過，合併為 `2a02fda`；自有 worktree／本機與遠端 branch／target 已清，必要證據保留、Claude trust 不動。12C 已 rebase 到合併後版本。
 
 - 2026-10-07：12C schema 0013／GithubStore 邊界保存固定遠端身分及未確認嘗試，原生 SQLite 重開與 40 個 store 契約通過；fmt、core／daemon clippy、前後實際 no-std 通過。正式 Forge／pipeline 仍待接線，未宣稱完整驗收。
+
+- 2026-10-07：12C 增加持久單次 PR create／marker 對帳與精確 lease push；捕獲回覆＋SQLite 重開驗 PR 不重建，真 Git／bare repo 驗遺失回覆與競爭 writer 保護。正式 Forge／pipeline 尚未接入，未執行外部 GitHub mutation。

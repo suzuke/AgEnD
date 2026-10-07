@@ -179,3 +179,5 @@ OpenCode `oversized_total_history_does_not_block_old_receipts_or_new_delivery` �
 第 12C `cargo test -p agend-daemon --lib forge::github` 目前涵蓋 11 個基礎案例：gh 真唯讀捕獲解析、身份／head／merge parent 負例、實際 shell argv 與 token 不入 argv、錄製回覆下 stale head 零 PUT／已 merged 零寫入／PUT 回覆遺失後原 PR 對帳。這不是完整 FRG／pipeline 整合或真遠端 merge 驗收。
 
 12C `cargo test -p agend-daemon --lib store::github` 使用原生 SQLite 跨重開驗 pending push／create、stale revision、PR／repo 身分不可換綁及同 remote branch 不能分配兩個 task。schema 0013 另由 store migration／golden／retention 契約覆蓋。
+
+12C `forge::github::submission` 以真捕獲 GitHub 回覆注入 task marker 與遺失回覆，配原生 SQLite 重開驗單次 create、unknown 不重送及外來 PR 拒絕。`forge::github::push` 執行真 Git／bare repo，測成功後遺失回覆與 lease 競爭失敗，重開 DB 後不重送。這些尚非正式 daemon pipeline 驗收。

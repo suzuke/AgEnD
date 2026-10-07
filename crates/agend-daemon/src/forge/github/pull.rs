@@ -4,6 +4,8 @@ use serde_json::Value;
 #[derive(Debug, PartialEq, Eq)]
 pub struct Pull {
     pub number: u64,
+    pub repository_id: u64,
+    pub body: Option<String>,
     pub head: String,
     pub base: String,
     pub closed: bool,
@@ -81,6 +83,8 @@ impl Pull {
         }
         Ok(Self {
             number,
+            repository_id: repository_id.ok_or("missing repository identity")?,
+            body: value["body"].as_str().map(str::to_owned),
             head: string(&value["head"], "sha")?.into(),
             base: string(&value["base"], "sha")?.into(),
             closed,

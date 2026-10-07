@@ -29,3 +29,9 @@ API client 合併前先 GET 原 PR；head 不符直接回報 HeadChanged，已 m
 ## 身分持久化基礎
 
 schema 0013 保存固定 task／repo ID／branch／nonce 與 PR number，禁止 stale revision、改綁及兩個 task 佔用同一 repo ID／branch。未確認 push 必須先對帳相同 head；PR create attempt 一旦保存不能清回未嘗試。原生 SQLite 跨重開測試通過；正式 remote 操作尚未使用這個 ledger，不宣稱已完成重啟流水線。
+
+## 提交操作基礎（未接入 pipeline）
+
+`submit_pull` 先核 repo ID，PR 建立前持久 claim；回覆遺失只搜尋固定 branch／base 與 task nonce，unknown attempt 不重送，外來 PR 不認領。`push_owned` 核固定 origin，持久 push intent，再以完整舊 SHA 的 force-with-lease 更新單一 ref；回覆遺失核遠端 head，重啟未確認時不覆蓋新 head。
+
+新增兩個捕獲回覆＋原生 SQLite 重開案例，以及一個真 Git／bare repo 的成功遺失回覆、競爭 writer、重啟不重送案例。測試沒有外部 GitHub mutation；正式 Forge 選擇、pipeline 與完整 FRG 仍待完成。

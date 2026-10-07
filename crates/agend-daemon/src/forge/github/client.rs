@@ -17,7 +17,7 @@ impl<R: Runner> Repository<R>
 where
     R::Error: std::fmt::Display,
 {
-    fn endpoint(&self, suffix: &str) -> Result<String, ExecutionError> {
+    pub(super) fn endpoint(&self, suffix: &str) -> Result<String, ExecutionError> {
         if super::api::repository_from_origin(&format!("https://github.com/{}", self.name))
             .as_deref()
             != Ok(self.name.as_str())

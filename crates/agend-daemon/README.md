@@ -177,3 +177,5 @@ cargo xtask accept cli             # 第 9 施工關 demo：cli_demo（在 agend
 第 12C 的 GitHub API／PR head 與 merge 收據核對已建立，尚未接入 Forge／pipeline；範圍與剩餘工作見 [GitHub forge](../../docs/gates/gate-12c-github.md)。
 
 12C schema 0013 保存 task 的 GitHub repo ID／branch／nonce、PR number、push intent 與 create attempt；CAS 更新禁止改綁，unknown attempt 不因 retention 過期。此批僅接 store 邊界，正式 Forge 仍施工中。
+
+12C 提交操作已有 single-attempt PR create／固定 nonce 查回，以及 persist-before-push、精確 force-with-lease 與遠端 head 核對；正式 Forge 選擇和 pipeline 接線仍未完成。
