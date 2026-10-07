@@ -105,6 +105,8 @@
 
 - 2026-10-07：12B 修正獨立覆核的 permission GET／claim 次序問題，原版本反例失敗、修正版與 lost-POST 重啟回歸通過；三真 backend v2 採短 namespace 與唯讀原 thread 狀態，尚未執行。
 
+- 2026-10-07：12B 三真 backend v2 六方向 PASS，12 筆完整身分訊息全數 Confirmed；自有程序／暫存／session artifacts 已清，共享帳戶與 Claude trust 保留。permission P2 局部覆核已解決；進入完整覆核與 CI，尚未合併。
+
 歷史紀錄見 [2026-10-02–03](roadmap-progress-20261002-03.md) 與 [較早紀錄](roadmap-progress.md)。
 
 - 2026-10-04：依使用者確認合併 #138（`4390633`），於 `feat/gate-12a-claude` 開工；首批加入 client 單次請求 API 與 native socket 回歸，Claude 接入及第 12A 驗收尚未完成。

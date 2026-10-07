@@ -14,7 +14,7 @@
 | 段 | 範圍 | 目前進度 |
 |---|---|---|
 | A Claude | channel、hooks、啟動、忙碌策略、送達與清掃 | v12 七則完整 smoke PASS；#154 已合併 `a6cdb4c` |
-| B OpenCode | serve、session、送達、權限；三個 backend 互傳 | 正式 Driver／holder／權限與 DRV 10/10 已接通，單則真模型 smoke 通過；busy／互傳／獨立驗收仍待完成 |
+| B OpenCode | serve、session、送達、權限；三個 backend 互傳 | 正式 Driver／holder／權限與 DRV 10/10；基本／busy interrupt／permission 真測及三 backend 六方向互傳通過，最終覆核與 CI 待完成 |
 | C GitHub forge | push、PR、checks、head 對帳、merge 與收尾 | 尚未實作 |
 | D Telegram | notifier、allowlist、token、手機操作、G4 已讀 | 尚未實作；專用 bot 設定與測試 chat 已備妥，憑證只留本機 |
 

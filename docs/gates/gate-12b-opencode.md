@@ -5,6 +5,8 @@
 > - holder 持有 serve 與 attach；daemon 經有密碼的 loopback API 管理既有 session，不用 PTY 輸入工作。
 > - 下一步：完成傳輸／歷史核對、啟動與恢復、權限、三 backend 互傳及固定版本真測。
 
+帳戶準備見 [私人帳戶設定](gate-12b-account-setup.md)。
+
 ## 邊界
 
 - 1.18.34 本機 `/doc`／health 已由隔離 serve 讀取，無 session／prompt，已清理；相較舊 1.18.31 錄製重新核 API，不把舊證據當新版本驗收。
@@ -64,3 +66,7 @@ worker 每輪讀最新 16 筆及一頁更早歷史，超限頁以更小 limit �
 全新獨立靜態覆核 `ee024f7` 發現一項 P2：permission claim 在唯讀驗證 GET 前持久化，若 GET 失敗而未 POST，請求仍永久 unknown。需將完整 snapshot 驗證置於 claim 前，保留單次 POST 與不明結果不重送；修正及反例尚待完成。此覆核沒有執行測試，不替代最終驗收。
 
 2026-10-07 permission P2 已先以真 producer 的單次 GET 503 重現原版本失敗，再將 read-only snapshot 核對移到持久 claim 前，claim 成功後直接單次 POST。回歸同時覆蓋 session／permission GET 失敗均保留 pending、operator 重試，以及已套用 POST 丟回覆後重開 SQLite 仍 unknown／不重送。19 項 OpenCode tests 通過。新增唯讀 `three_backend_status` example，僅對 nonce 所有的原 Codex thread 執行 initialize／thread/read，供三真 backend 測試同步；不送 prompt 或 terminal input。上一輪早停漏清的專用 Codex rollout 已核原 thread／cwd 後移入必要證據並刪除，其他 sessions 不動。
+
+2026-10-07 三真 backend v2 PASS：固定 Claude 2.1.284／Haiku 4.5、Codex 0.159.3／gpt-6-astra low、OpenCode 1.18.34／opencode-go/gpt-6-luna。六個方向各由來源模型執行一次 `agend send`、接收模型寫專用 nonce 回條；六則 harness seeds 加六則模型訊息共 12 筆，全數 Confirmed，逐一核 body、from／to 身分且無額外訊息。短 workspace 通過既有 Ready 核對；Codex 以原 thread 唯讀狀態同步。證據在 ops `three-backend-smoke-v2`：固定計畫、trace、messages／events、六回條、PASS 與 cleanup。三 instance／程序／root 已清，共享 OpenCode auth 未變；自有 Claude／Codex session 證據移出暫存，Claude trust entries 保留。完整 CI 與最終全新覆核仍待完成，尚未合併。
+
+`d79e53e` 的獨立局部跟進覆核判定 permission P2 已解決，沒有發現該修正的新缺陷；此為 read-only code review，未重跑測試，不替代最終 gate 覆核。
