@@ -15,7 +15,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use agend_core::protocol::ProtocolVersion;
-use agend_core::protocol::client::{AgentState, InstanceView, ResultIdentity, V1_3, V1_7};
+use agend_core::protocol::client::{AgentState, InstanceView, ResultIdentity, V1_3, V1_8};
 use agend_testkit::fake_daemon::FakeDaemon;
 
 use crate::cli::{Cli, Run};
@@ -760,7 +760,7 @@ pub fn run_table(
         }
     }
     for r in rows.iter().filter(|r| matches!(r.on, On::Both | On::Real)) {
-        out.push((r.id, "real", run_row(&cli, r, V1_7)));
+        out.push((r.id, "real", run_row(&cli, r, V1_8)));
     }
     daemon.interrupt()?;
     for (_, target, verdict) in &mut out {

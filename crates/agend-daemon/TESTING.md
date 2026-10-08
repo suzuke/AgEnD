@@ -257,3 +257,5 @@ Claude outcome：`driver::claude::outcome` 使用先前真測 ACK/PostToolUse/St
 `codex_driver` 新增兩個原生生命週期反例：原生 Unix socket 接受連線但不回應握手時，disconnect 不能回報停止；實際 Gone callback 阻塞超過 close 等待時，舊代仍須列為 active，釋放 callback 後才能停止。使用正式 driver、原生 Unix socket／fake app-server，沒有模型呼叫。
 
 `agend/tests/backend_switch.rs` 用正式 daemon 及 CLI 驗持久 Prepared 的查詢／取消／重啟、agent 拒絕、空紀錄與 once decoder。此測試不啟動 backend，成功 prepare 與 holder 換版仍須後續原生整合驗證。
+
+重啟速度回歸跑 `cargo test -p agend --test cli --test client_protocol --test pinned_launcher`，並保留 `backend_versions::` 的改檔／身分拒絕測試。debug/test 的 sha2 壓縮迴圈最佳化不更改 10 秒 client 重連期限；本機固定 binary 的前後測不代替遠端兩平台 CI。

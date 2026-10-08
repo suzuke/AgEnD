@@ -219,3 +219,5 @@ Prepared 也暫停 agent 的 inbox 讀取：狀態檢查與內容查詢在同一
 Codex 的 `workers_stopped` 追蹤連線建立與已移出 link 表但仍在退出的 worker。disconnect 的有限等待逾時不會讓這項證據消失；呼叫端仍須序列化新 connect，並另查 backend 回合是否結束。
 
 1.8 backend switch 操作由 supervisor 序列處理：prepare 驗受管來源與目標 canary，持久化 Prepared 暫停新投遞；status 查紀錄，cancel 核精確 ID／設定後恢復。這些 RPC 尚不停止 holder、換版或回滾。
+
+取得 DB 鎖後立即啟用 daemon 日誌，記錄 executable／私有 launcher 驗證的開始、結果與耗時；在建立 socket 前卡住也能定位。失敗仍拒絕啟動，不因已有快取略過雜湊。

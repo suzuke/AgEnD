@@ -115,7 +115,7 @@ Runtime 保留該次意圖的 UUID，首次啟動核對 Spawned 與 GetLaunchBin
 
 ## 切換記錄（儲存層已實作，操作流程待接）
 
-Migration 0019 保存每 instance 最近一次 BackendSwitch；prepared 只保存原啟動意圖與目標，不改 program。commit／rollback 在同一 SQLite transaction 核對完整 switch 記錄、原設定與 agent_pid 已清除，再一起改 program 與 phase。過期請求不能覆寫目前狀態；不明結果先讀回，不盲目重送。新 prepare 以先前 switch ID 做 CAS，不能覆蓋未提交的 prepared；明確移除 instance 時 cascade。此層不取代 supervisor 的 canary、idle／派工暫停、精確 holder 停止及重啟驗證，尚無切換 CLI 或完整升級／回退流程。
+Migration 0019 保存每 instance 最近一次 BackendSwitch；prepared 只保存原啟動意圖與目標，不改 program。commit／rollback 在同一 SQLite transaction 核對完整 switch 記錄、原設定與 agent_pid 已清除，再一起改 program 與 phase。過期請求不能覆寫目前狀態；不明結果先讀回，不盲目重送。新 prepare 以先前 switch ID 做 CAS，不能覆蓋未提交的 prepared；明確移除 instance 時 cascade。此層不取代 supervisor 的 canary、idle／派工暫停、精確 holder 停止及重啟驗證，準備／查詢／取消 CLI 已接入，完整升級／回退流程仍未完成。
 
 ## 準備、查詢與取消（client 1.8）
 

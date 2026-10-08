@@ -4,7 +4,8 @@
 //!
 //! Boot order: check the client socket path fits (100 bytes) → open
 //! `agend.db` (the one daemon per home: the DB's exclusive lock, retried
-//! every 200 ms for 10 s while an old daemon hands it over) → remove a stale
+//! every 200 ms for 10 s while an old daemon hands it over) → initialize logs
+//! and verify/pin the executable (with elapsed time) → remove a stale
 //! `run/daemon.sock` → housekeeping (failures only logged) → shim symlinks
 //! and codex's `ZDOTDIR` (`zsh/.zprofile`, gate 7 P4) → the boot plan (reconnect / start / orphans) → bind `run/daemon.sock`
 //! (`run/` 0700, socket 0600, gate 8 P1) → `agend daemon ready: …`. A
@@ -120,18 +121,6 @@ fn run_with_policy(
             return ExitCode::from(1);
         }
     };
-    let launcher = if pin_executable {
-        match crate::backend_versions::ExecutableBinding::pin_running(&home, &exe) {
-            Ok((path, binding)) => (path, Ok(binding)),
-            Err(error) => {
-                eprintln!("agend daemon: cannot pin running executable: {error}");
-                return ExitCode::from(1);
-            }
-        }
-    } else {
-        let binding = crate::backend_versions::ExecutableBinding::capture_running(&exe);
-        (exe, binding)
-    };
     // Only now, with agend.db ours, does this daemon write to logs/.
     if let Err(e) = log::to_files(&home) {
         eprintln!("agend daemon: cannot write logs/: {e}");
@@ -144,6 +133,24 @@ fn run_with_policy(
     log::line(&format!(
         "agend.db opened (waited {} ms for the lock)",
         waited.as_millis()
+    ));
+    log::line("verifying daemon executable and private launcher");
+    let launcher_started = std::time::Instant::now();
+    let launcher = if pin_executable {
+        match crate::backend_versions::ExecutableBinding::pin_running(&home, &exe) {
+            Ok((path, binding)) => (path, Ok(binding)),
+            Err(error) => {
+                log::line(&format!("cannot pin running executable: {error}"));
+                return ExitCode::from(1);
+            }
+        }
+    } else {
+        let binding = crate::backend_versions::ExecutableBinding::capture_running(&exe);
+        (exe, binding)
+    };
+    log::line(&format!(
+        "daemon executable verified ({} ms)",
+        launcher_started.elapsed().as_millis()
     ));
     let _stop_flags = match stop_flag::install() {
         Ok(guard) => guard,

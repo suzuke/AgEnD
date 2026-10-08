@@ -27,3 +27,9 @@ agend-shim = { path = "crates/agend-shim" }
 agend-client = { path = "crates/agend-client" }
 agend-tui = { path = "crates/agend-tui" }
 agend-testkit = { path = "crates/agend-testkit" }
+
+# Debug daemons also fingerprint whole executables before opening their socket.
+# Keep the cryptographic compression loop optimized without disabling any checks.
+# The test profile inherits this dependency override from dev.
+[profile.dev.package.sha2]
+opt-level = 3
