@@ -114,3 +114,5 @@ doctor 的 `--version` probe 以同一 5 秒期限涵蓋程序退出與 stdout�
 13C canary 可加 `--model <id>`（OpenCode 為 `provider/model`）。只傳單一模型參數，不開放任意啟動旗標；報告的 `model` 是要求值，並非供應者解析後的模型證明。省略沿用 backend 預設，認證檔入口見下方說明；真模型仍待驗收。
 
 13C 明確 `--auth-file` 的格式、私有路徑與真測邊界見[canary 認證](../../docs/architecture/backend-canary-auth.md)。本機測試涵蓋 private copy、來源不變、OpenCode 正式 Layout 保留認證、scope 錯配與權限拒絕；完整 native canary 使用測試用憑證，沒有真帳戶或模型呼叫。
+
+Doctor 現在另列每個 instance 的設定程式：絕對路徑或有明確 cwd 的 ./ 路徑不再拿操作者 PATH 代替。保管版本先核 bytes，再核目前 CLI build 的 canary；變造檔案不執行。外部程式只執行有界 --version，登入／相容性沒有證據時顯示警告。

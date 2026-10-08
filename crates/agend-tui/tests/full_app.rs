@@ -307,6 +307,7 @@ fn an_old_protocol_peer_keeps_the_plaintext_view_read_only_with_upgrade_guidance
     use agend_testkit::fake_daemon::FakeDaemon;
     let fake = FakeDaemon::start().unwrap();
     fake.set_instance(InstanceView {
+        program: None,
         instance_id: parser::ID.into(),
         team_id: "general".into(),
         backend: "claude".into(),
@@ -692,6 +693,7 @@ fn failure_and_reconnect_never_restore_control_and_focus_is_mode_aware() {
         agend_testkit::fake_daemon::FakeDaemon::start_at(&dir.path().join("daemon.sock")).unwrap();
     let parser = parser::Parser::default();
     daemon.set_instance(InstanceView {
+        program: None,
         instance_id: parser::ID.into(),
         team_id: "general".into(),
         backend: "claude".into(),
@@ -712,6 +714,7 @@ fn failure_and_reconnect_never_restore_control_and_focus_is_mode_aware() {
     app.event(Event::FocusLost);
     received(&fake, b"\x1b[I\x1b[O");
     fake.daemon.set_instance(InstanceView {
+        program: None,
         instance_id: parser::ID.into(),
         team_id: "general".into(),
         backend: "claude".into(),
@@ -726,6 +729,7 @@ fn failure_and_reconnect_never_restore_control_and_focus_is_mode_aware() {
     app.event(Event::Paste("FAILED".into()));
     assert!(!app.full_mode() && !app.term.as_ref().unwrap().typing);
     fake.daemon.set_instance(InstanceView {
+        program: None,
         instance_id: parser::ID.into(),
         team_id: "general".into(),
         backend: "claude".into(),
@@ -748,6 +752,7 @@ fn failure_and_reconnect_never_restore_control_and_focus_is_mode_aware() {
     app.event(Event::Paste("OFFLINE".into()));
     let daemon = agend_testkit::fake_daemon::FakeDaemon::start_at(&socket).unwrap();
     daemon.set_instance(InstanceView {
+        program: None,
         instance_id: parser::ID.into(),
         team_id: "general".into(),
         backend: "claude".into(),

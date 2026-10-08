@@ -263,3 +263,5 @@ OpenCode 版本核對：受管程式使用匯入 artifact 的版本（supervisor
 私有 CanaryScope 對 instance args 做精確比對，讓 canary 明確選模型，同時拒絕未記錄的啟動參數。既有省略 args 的 scope 仍只接受空 args。
 
 13C 明確 `--auth-file` 的格式、私有路徑與真測邊界見[canary 認證](../../docs/architecture/backend-canary-auth.md)。本機測試涵蓋 private copy、來源不變、OpenCode 正式 Layout 保留認證、scope 錯配與權限拒絕；完整 native canary 使用測試用憑證，沒有真帳戶或模型呼叫。
+
+Fleet 的 program 取自 instance 設定，保留 driver wrapper 前的程式，供 doctor 診斷；不包含 args 或認證。

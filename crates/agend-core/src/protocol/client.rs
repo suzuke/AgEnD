@@ -719,6 +719,9 @@ pub struct TaskPipelineView {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InstanceView {
+    /// Configured backend executable, before driver wrappers. Older peers omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program: Option<String>,
     pub instance_id: String,
     pub team_id: String,
     /// `claude`, `codex` or `opencode`.

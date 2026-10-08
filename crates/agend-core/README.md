@@ -163,3 +163,5 @@ Client protocol 1.9 提供操作員 TelegramPairing 命令與 nullable PairingRe
 已確認 `PairingRecord::configuration()` 可在配對發現期限過後供操作員明確套用；Pending／Cancelled 不產生設定。
 
 CanaryScope 保存精確啟動 args；CanaryReport 的可選 model 保存操作者要求值，缺欄位相容既有報告，不宣稱 provider 實際解析結果。
+
+InstanceView 的可選 program 欄位表示 driver wrapper 前的設定程式；舊 producer 缺欄位可解碼，不能把它當作已解析路徑或正在執行的 image 身分。

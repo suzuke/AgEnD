@@ -418,6 +418,7 @@ fn a_restart_closes_connections_and_changes_the_boot_id() {
 
 fn instance(id: &str, backend: &str) -> InstanceView {
     InstanceView {
+        program: None,
         instance_id: id.into(),
         team_id: "general".into(),
         backend: backend.into(),

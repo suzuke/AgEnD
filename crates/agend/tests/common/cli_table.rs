@@ -717,6 +717,7 @@ pub fn run_table(
     let fake = FakeDaemon::start_at(&home.join("run/daemon.sock")).map_err(|e| e.to_string())?;
     for id in [A, B] {
         fake.set_instance(InstanceView {
+            program: None,
             instance_id: id.into(),
             team_id: "general".into(),
             backend: "claude".into(),

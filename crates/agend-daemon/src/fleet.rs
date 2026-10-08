@@ -503,6 +503,7 @@ mod tests {
     fn view_and_backlog_fit_together_and_items_come_and_go_once() {
         let fleet = Fleet::new(BOOT);
         let view = InstanceView {
+            program: None,
             instance_id: "g8-1".into(),
             team_id: DEFAULT_TEAM.into(),
             backend: "claude".into(),

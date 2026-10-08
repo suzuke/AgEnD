@@ -150,3 +150,11 @@ Prepare 在 SQLite 暫停新 reservation 後，捕捉已開始的 Claude／inbox
 目的版本提交為 Committed 或 Restoring 時，同一交易保存 300 秒 activation deadline；重啟、重複觀察及問題通知都不重新計時，真正開始還原才建立新的期限。到期且仍未通過 native readiness，下一次協調檢查保存逾時問題、保持投遞暫停與原 holder。到期不等於閒置，不授權強制停止；稍後通過 readiness 仍可完成並清除通知／期限。舊持久紀錄若沒有 deadline，未完成時明確提示缺少期限，不能當作重新獲得五分鐘。
 
 模型與明確認證來源見 [canary 認證](backend-canary-auth.md)。
+
+## Doctor 的設定程式診斷
+
+`InstanceView.program` 是 daemon 保存的原始程式設定，不包含 driver wrapper，也不聲稱它就是存活程序的 image。舊 daemon 未提供時顯示未知。Doctor 對絕對路徑，以及有絕對 working_directory 的 `./`／`../` 路徑做診斷；其他名稱需 daemon PATH 才能解析，不能拿操作者 PATH 的同名 CLI 冒充。
+
+保管版本先核正式 import manifest 與程式 bytes，變動就 fail 且不執行；完整 canary 報告另外綁目前 doctor CLI build，未通過或屬其他 build 顯示 warn。這不宣稱 live daemon build、帳戶登入或供應者服務狀態已驗證。外部程式只有有界 `--version` probe，沒有固定 bytes／canary 證據時仍 warn；缺檔或 probe 失敗則 fail。
+
+這補上設定程式的診斷，尚不取代 daemon 自動記錄／通知外部版本漂移，也不包含每日官方最新版查詢。

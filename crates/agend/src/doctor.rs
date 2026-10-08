@@ -33,6 +33,7 @@ use agend_daemon::runtime::files;
 use crate::cli::{Failure, Output, to_json};
 use crate::home;
 use crate::setup;
+mod programs;
 
 fn check(name: &str, status: CheckStatus, detail: String, fix: Option<String>) -> Check {
     Check {
@@ -58,6 +59,9 @@ pub fn checks(home: &Path) -> Vec<Check> {
     let mut out = vec![home_check(home), daemon, git(home)];
     for backend in Backend::ALL {
         out.push(backend_check(home, backend, fleet.as_ref()));
+    }
+    if let Some(fleet) = &fleet {
+        out.extend(programs::checks(home, &fleet.instances));
     }
     out.push(holders(home, fleet.as_ref()));
     out.push(disk(home));
@@ -232,7 +236,7 @@ fn backend_check(home: &Path, backend: Backend, fleet: Option<&FleetView>) -> Ch
         .map(|f| {
             f.instances
                 .iter()
-                .filter(|i| i.backend == name)
+                .filter(|i| i.backend == name && i.program.as_deref().is_none_or(|p| p == name))
                 .map(|i| i.instance_id.as_str())
                 .collect()
         })
@@ -242,7 +246,7 @@ fn backend_check(home: &Path, backend: Backend, fleet: Option<&FleetView>) -> Ch
             check(
                 name,
                 CheckStatus::Warn,
-                "not on PATH; no instance uses it".into(),
+                "not on PATH; no instance requires this PATH entry".into(),
                 fix,
             )
         } else {

@@ -172,3 +172,5 @@ BackendSwitch 階段的消費者驗證在 daemon `tests/backend_switch.rs`：以
 13D `native_pairing_*` 透過 notifier 的真 HTTP client 與本機 producer、既有 Telegram 錄製 message／GetMe 外形，核新鮮 nonce、精確確認、私聊／forum topic、bot 身分改變、過期不連線、轉傳／匿名／編輯／舊訊息／錯 bot／歧義目的地與重複 update 拒絕。配對只呼叫 GetMe／GetUpdates，不送訊息或啟用 allowlist；不代表持久化、CLI 或真 bot 已完成。
 
 CanaryScope 的模型參數綁定由 `agend/tests/backend_canary.rs` 使用正式 scope producer 驗替換／移除拒絕。
+
+CLP-14 由正式 InstanceAdd 產生 fleet，核 program 保留 /bin/sh；doctor 的舊 producer 缺欄位案例顯示未知，不採用操作者 PATH 冒充。

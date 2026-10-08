@@ -375,6 +375,7 @@ impl Supervisor {
     fn show(&self, instance: &Instance, state: AgentState, summary: String) {
         self.fleet.set_instance(
             InstanceView {
+                program: Some(instance.program.clone()),
                 instance_id: instance.id.clone(),
                 team_id: DEFAULT_TEAM.into(),
                 backend: instance.backend.as_str().into(),

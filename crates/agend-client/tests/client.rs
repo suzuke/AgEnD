@@ -255,6 +255,7 @@ fn events_follow_the_fleet_view_and_a_bad_cursor_is_a_gap() {
 
 fn instance(id: &str) -> agend_core::protocol::client::InstanceView {
     agend_core::protocol::client::InstanceView {
+        program: None,
         instance_id: id.into(),
         team_id: "general".into(),
         backend: "claude".into(),

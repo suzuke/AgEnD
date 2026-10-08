@@ -305,3 +305,5 @@ config encode 與 parse 共用正式 TOML producer／consumer；CLI apply 的原
 canary scope 參數比對在 agend 的 `backend_canary` 原生測試核正式 create producer，包含模型值被替換、移除與額外參數。
 
 13C 明確 `--auth-file` 的格式、私有路徑與真測邊界見[canary 認證](../../docs/architecture/backend-canary-auth.md)。本機測試涵蓋 private copy、來源不變、OpenCode 正式 Layout 保留認證、scope 錯配與權限拒絕；完整 native canary 使用測試用憑證，沒有真帳戶或模型呼叫。
+
+CLP-14 的真 daemon 契約核 InstanceAdd 指定的 program 出現在 fleet，避免 doctor 只取得 backend 名稱。

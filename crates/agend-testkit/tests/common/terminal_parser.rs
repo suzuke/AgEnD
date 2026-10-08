@@ -170,6 +170,7 @@ impl Default for Fake {
     fn default() -> Self {
         let daemon = FakeDaemon::start().unwrap();
         daemon.set_instance(InstanceView {
+            program: None,
             instance_id: ID.into(),
             team_id: "general".into(),
             backend: "claude".into(),

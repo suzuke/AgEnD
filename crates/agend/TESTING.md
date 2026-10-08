@@ -252,3 +252,5 @@ canary 模型選擇：`backend_canary` 的非法名稱案例在建立 home 前�
 13C 明確 `--auth-file` 的格式、私有路徑與真測邊界見[canary 認證](../../docs/architecture/backend-canary-auth.md)。本機測試涵蓋 private copy、來源不變、OpenCode 正式 Layout 保留認證、scope 錯配與權限拒絕；完整 native canary 使用測試用憑證，沒有真帳戶或模型呼叫。
 
 Doctor 的 probe timeout 與清理 timeout 分開計時；清理失敗需保留前面的 probe 錯誤。原生繼承 pipes 案例失敗會印出實際錯誤，時間斷言涵蓋兩段預算。
+
+install_home 以真 CLI／FakeDaemon 核自訂程式不在 PATH、缺檔、舊 peer 未提供 program、daemon PATH 未知、正式 import 尚無 canary，以及變造保管程式拒絕且不執行 marker。CLP-14 同時在真 daemon／fake producer 核設定 program 出現在 fleet。

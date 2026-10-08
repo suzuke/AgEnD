@@ -655,6 +655,7 @@ fn a_1_0_peer_decodes_1_1_messages() {
             instance_id: "g8-2".into(),
             summary: "failed".into(),
             instance: Some(InstanceView {
+                program: None,
                 instance_id: "g8-2".into(),
                 team_id: "general".into(),
                 backend: "claude".into(),
@@ -975,6 +976,7 @@ fn a_1_1_peer_decodes_1_2_messages() {
         })
     );
     let view = InstanceView {
+        program: Some("/private/imported/codex".into()),
         instance_id: "g9-1".into(),
         team_id: "general".into(),
         backend: "codex".into(),
@@ -1035,6 +1037,7 @@ fn a_1_2_peer_decodes_1_1_messages() {
         state: "unknown".into(),
     });
     assert_eq!(view.working_directory, None);
+    assert_eq!(view.program, None);
 }
 
 #[test]

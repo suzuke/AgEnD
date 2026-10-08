@@ -696,6 +696,7 @@ fn stopping_the_entry_service_invalidates_a_completed_owner_on_the_native_holder
             let fleet = Arc::new(Fleet::new(1));
             fleet.set_instance(
                 InstanceView {
+                    program: None,
                     instance_id: ID.into(),
                     team_id: "test".into(),
                     backend: "claude".into(),
@@ -948,6 +949,7 @@ fn backend_switch_drain_includes_native_terminal_writes_until_pty_acknowledgemen
         }).await.unwrap();
         let fleet = Arc::new(Fleet::new(1));
         fleet.set_instance(InstanceView {
+            program: None,
             instance_id: ID.into(), team_id: "test".into(), backend: "claude".into(),
             state: AgentState::Unknown, working_directory: None,
         }, "native drain test".into());

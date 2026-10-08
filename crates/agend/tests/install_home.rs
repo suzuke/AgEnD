@@ -193,6 +193,97 @@ fn doctor_backend_path_failure_recovers_without_starting_models() {
 }
 
 #[test]
+fn doctor_checks_configured_program_and_refuses_changed_import_without_executing_it() {
+    use agend_core::protocol::client::{AgentState, InstanceView};
+    let root = TempDir::new("g13-p").unwrap();
+    init(root.path());
+    let home = root.path().join(".agend");
+    fs::create_dir_all(home.join("run")).unwrap();
+    let daemon = FakeDaemon::start_at(&home.join("run/daemon.sock")).unwrap();
+    let program = root.path().join("dedicated-cli");
+    fs::write(
+        &program,
+        "#!/bin/sh\n[ \"$1\" = --version ] || exit 91\nprintf 'dedicated-version\\n'\n",
+    )
+    .unwrap();
+    fs::set_permissions(&program, fs::Permissions::from_mode(0o700)).unwrap();
+    let mut view = InstanceView {
+        program: Some(program.display().to_string()),
+        instance_id: "custom".into(),
+        team_id: "general".into(),
+        backend: "claude".into(),
+        state: AgentState::Idle,
+        working_directory: Some(root.path().display().to_string()),
+    };
+    daemon.set_instance(view.clone());
+    let check = diagnostic(command(root.path()), "backend/custom", "warn");
+    assert!(
+        check["detail"]
+            .as_str()
+            .unwrap()
+            .contains("dedicated-version")
+    );
+    // A custom executable does not require a second CLI under the backend's name.
+    diagnostic(command(root.path()), "claude", "warn");
+    view.program = Some("./dedicated-cli".into());
+    daemon.set_instance(view.clone());
+    let check = diagnostic(command(root.path()), "backend/custom", "warn");
+    assert!(
+        check["detail"]
+            .as_str()
+            .unwrap()
+            .contains("dedicated-version")
+    );
+    fs::remove_file(&program).unwrap();
+    diagnostic(command(root.path()), "backend/custom", "fail");
+    view.program = Some("claude".into());
+    daemon.set_instance(view.clone());
+    let check = diagnostic(command(root.path()), "backend/custom", "warn");
+    assert!(check["detail"].as_str().unwrap().contains("daemon PATH"));
+    view.program = None;
+    daemon.set_instance(view.clone());
+    let check = diagnostic(command(root.path()), "backend/custom", "warn");
+    assert!(check["detail"].as_str().unwrap().contains("did not report"));
+
+    let imported = command(root.path())
+        .args([
+            "backend",
+            "import",
+            "claude",
+            "--version",
+            "fixture",
+            "--program",
+            "/bin/echo",
+        ])
+        .output()
+        .unwrap();
+    assert!(imported.status.success(), "{imported:?}");
+    let managed = home.join("backends/claude/fixture/program");
+    view.program = Some(managed.display().to_string());
+    daemon.set_instance(view);
+    let check = diagnostic(command(root.path()), "backend/custom", "warn");
+    assert!(
+        check["detail"]
+            .as_str()
+            .unwrap()
+            .contains("imported bytes unchanged")
+    );
+    let marker = root.path().join("must-not-execute");
+    fs::set_permissions(&managed, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::write(
+        &managed,
+        format!("#!/bin/sh\n/bin/touch '{}'\n", marker.display()),
+    )
+    .unwrap();
+    let check = diagnostic(command(root.path()), "backend/custom", "fail");
+    assert!(check["detail"].as_str().unwrap().contains("changed"));
+    assert!(
+        !marker.exists(),
+        "doctor must not run changed managed bytes"
+    );
+}
+
+#[test]
 fn doctor_large_home_warning_recovers_after_removing_only_its_sparse_fixture() {
     let root = TempDir::new("g13-doctor-disk").unwrap();
     init(root.path());

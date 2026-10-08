@@ -291,6 +291,7 @@ impl Proxied {
         let fake = FakeDaemon::start_at(&home.join("fake.sock")).map_err(|e| e.to_string())?;
         for id in ["g9-a", "g9-b"] {
             fake.set_instance(InstanceView {
+                program: None,
                 instance_id: id.into(),
                 team_id: "general".into(),
                 backend: "claude".into(),
@@ -804,7 +805,7 @@ pub fn init_and_doctor(lab: &Lab) -> Result<Vec<String>, String> {
             "      fix: agend daemon",
             "ok    git       git 2.45.0",
             "ok    claude    2.1.3 (Claude Code)",
-            "warn  codex     not on PATH; no instance uses it\n      fix: npm install -g @openai/codex",
+            "warn  codex     not on PATH; no instance requires this PATH entry\n      fix: npm install -g @openai/codex",
             "ok    holders   0 running",
             "ok    disk      ",
             "next: agend daemon   (then, in another terminal) agend instance add dev-1 claude",
@@ -894,6 +895,7 @@ pub fn init_and_doctor(lab: &Lab) -> Result<Vec<String>, String> {
     fs::create_dir_all(home.join("run")).map_err(|e| e.to_string())?;
     let fake = FakeDaemon::start_at(&home.join(DAEMON_SOCKET)).map_err(|e| e.to_string())?;
     fake.set_instance(InstanceView {
+        program: None,
         instance_id: "g9-c".into(),
         team_id: "general".into(),
         backend: "codex".into(),

@@ -153,3 +153,5 @@ FakePipelineExecutor 記錄 forge 選擇、base refresh 與 merge recovery 的 k
 12C 嚴格 base 政策限定 FRG-10 的第二條過期 sibling 必須回已識別的 policy refusal；驗 main 完全不變、先前 merge／head 保留、拒絕 head 未進 main 且 branch head 不變。預設 local／fake 仍跑原本兩次成功的 ancestry 斷言與 OverwritesBase mutant；strict 額外拒絕先改 base 才報錯、錯誤種類不符與意外成功的 mutants。FRG-5 成功前提含 server policy 允許；不略過任何案例。
 
 13C canary credential fixture：三個 native fake CLI 在私有 scope 中看見合成認證檔時，必須核對實際 HOME、backend config/data 路徑及 Claude token 環境值；錯配直接失敗。僅接受測試用標記，不執行登入或模型。canary 的來源保留、輸出不含 dummy secret 與清理由 agend/backend_canary 驗證。
+
+FakeDaemon 的 InstanceAdd 與正式 producer 一樣回報設定 program；沒有明確 program 時使用 backend 名稱。

@@ -265,3 +265,7 @@ Brew 原生安裝驗證已接入 release workflow 的 macOS ARM64／Linux x86_64
 - 2026-10-08：13C 新增專用 --auth-file 私有副本與 canary HOME／Codex／Claude 環境隔離；啟動前核完整 scope 的 program／args，正常 fleet 不新增憑證白名單。Codex 模型用 app-server 支援的 -c model=…；三個真 native fake consumers 核實收到模型測試對應的認證與私有路徑，缺副本不得跳過。最後 7 項 canary 案例、binary 37 項、workspace clippy 與補強後 testkit clippy／fmt／check-deps 通過；來源不變且自有 lab／程序清理。未讀真憑證、未呼叫模型；真測與最終 fresh verifier 仍待完成（feat/g13-install，未合併）。
 
 - 2026-10-08：3f52828 的 macOS CI（37753100715）通過前輪 doctor timeout 案例，但 canary session-move 測試失敗；未印實際錯誤，根因仍待 CI 蒐證。補 probe 退出狀態與原生 fixture 的 setpgid／setsid 階段診斷，期限及必須真正 detached／回收的斷言不變。本機四個 process 案例通過，不據此宣稱已修復 CI（feat/g13-install，未合併）。
+
+- 2026-10-08：doctor 改診斷 fleet 明示的設定 program，保管 bytes 變動 fail 且不執行，無當前 CLI build canary／外部程式／無 daemon PATH 證據則 warn；不冒充登入或漂移通知完成。install_home 9 項及相對程式補驗、真／fake CLP（含新增 program producer 斷言）、CLI doctor、舊協定相容 16 項、workspace clippy／fmt／check-deps 通過。首輪 socket fixture 名過長及遺漏 xtask 初始化編譯失敗已修正、保留 log；自有 lab／程序已清（feat/g13-install，未合併）。
+
+- 2026-10-08：release-artifacts 37753100820（3f52828）全部成功：Linux x86_64／ARM64、macOS Intel／ARM64 archive 與首任務、formula、macOS／Linux Brew install／test／fresh HOME init／uninstall。這是 Actions 一次性環境驗證，尚未公開發布，亦未取代主機服務與真 backend／Telegram 驗收（feat/g13-install，未合併）。
