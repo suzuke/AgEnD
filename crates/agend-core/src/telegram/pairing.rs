@@ -146,3 +146,25 @@ pub struct PairingRecord {
     pub session: TelegramPairing,
     pub phase: PairingPhase,
 }
+
+/// Operator-only setup actions. No inline token or automatic confirmation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PairingOperation {
+    Status,
+    Begin {
+        id: String,
+        token: SecretRef,
+        previous: Option<String>,
+    },
+    Poll {
+        id: String,
+    },
+    Confirm {
+        id: String,
+        candidate: PairingCandidate,
+    },
+    Cancel {
+        id: String,
+    },
+}

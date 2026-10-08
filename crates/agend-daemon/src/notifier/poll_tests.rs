@@ -1302,3 +1302,178 @@ async fn native_pairing_refuses_forwarded_stale_ambiguous_and_malformed_updates(
     assert_eq!(config.needs_you_topic, Some(7));
     assert!(config.allows(-10042, 42, false));
 }
+
+#[tokio::test]
+async fn native_pairing_service_publishes_before_next_operator_and_guards_active_notifier() {
+    use super::pairing_service::PairingService;
+    use agend_core::telegram::pairing::{PairingOperation as Op, PairingPhase};
+    let native = Native::new();
+    let dir = TempDir::new("telegram-pair-service").unwrap();
+    let store = Arc::new(SqliteStore::open(dir.path(), 0).unwrap());
+    let service = PairingService::local_test(store.clone(), false, native.api.clone());
+    let id = "11111111-1111-4111-8111-111111111111".to_owned();
+    let begin = Op::Begin {
+        id: id.clone(),
+        token: SecretRef::Env("TEST_TOKEN".into()),
+        previous: None,
+    };
+    let initial = service.execute(begin.clone()).await.unwrap().unwrap();
+    let count = native.calls.lock().unwrap().len();
+    assert!(service.execute(begin.clone()).await.is_err());
+    assert_eq!(
+        native.calls.lock().unwrap().len(),
+        count,
+        "reject duplicate begin before HTTP"
+    );
+    *native.updates.lock().unwrap() = vec![pairing_message(
+        &initial.session.command(),
+        crate::log::now_unix_ms() / 1000,
+    )];
+    let observed = service
+        .execute(Op::Poll { id: id.clone() })
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(observed.phase, PairingPhase::Pending);
+    assert_eq!(observed.session.offset, 101);
+    assert_eq!(
+        store.telegram_pairing().await.unwrap(),
+        Some(observed.clone())
+    );
+    let configured = PairingService::local_test(store.clone(), true, native.api.clone());
+    let count = native.calls.lock().unwrap().len();
+    assert!(
+        configured
+            .execute(Op::Poll { id: id.clone() })
+            .await
+            .is_err()
+    );
+    assert!(configured.execute(begin).await.is_err());
+    assert_eq!(
+        configured.execute(Op::Status).await.unwrap(),
+        Some(observed.clone())
+    );
+    assert_eq!(
+        native.calls.lock().unwrap().len(),
+        count,
+        "active notifier cannot compete for updates"
+    );
+    let mut wrong = observed.session.candidate.clone().unwrap();
+    wrong.user_id += 1;
+    assert!(
+        service
+            .execute(Op::Confirm {
+                id: id.clone(),
+                candidate: wrong
+            })
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        native.calls.lock().unwrap().len(),
+        count,
+        "wrong confirmation never calls HTTP"
+    );
+    let confirmed = service
+        .execute(Op::Confirm {
+            id: id.clone(),
+            candidate: observed.session.candidate.unwrap(),
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(confirmed.phase, PairingPhase::Confirmed);
+    assert!(service.execute(Op::Cancel { id }).await.is_err());
+    assert_eq!(service.execute(Op::Status).await.unwrap(), Some(confirmed));
+    assert!(
+        native
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|(method, _)| method == "getMe" || method == "getUpdates")
+    );
+}
+
+#[tokio::test]
+async fn pairing_client_cancellation_keeps_http_owned_until_cursor_is_published() {
+    use super::pairing_service::PairingService;
+    use agend_core::telegram::pairing::PairingOperation as Op;
+    let native = Native::new();
+    let dir = TempDir::new("telegram-pair-service").unwrap();
+    let store = Arc::new(SqliteStore::open(dir.path(), 0).unwrap());
+    let service = PairingService::local_test(store.clone(), false, native.api.clone());
+    let id = "11111111-1111-4111-8111-111111111111".to_owned();
+    let pending = service
+        .execute(Op::Begin {
+            id: id.clone(),
+            token: SecretRef::Env("TEST_TOKEN".into()),
+            previous: None,
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    *native.updates.lock().unwrap() = vec![pairing_message(
+        &pending.session.command(),
+        crate::log::now_unix_ms() / 1000,
+    )];
+    let (held_tx, held_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let queue = native.updates.clone();
+    let gate = thread::spawn(move || {
+        let _held = queue.lock().unwrap();
+        held_tx.send(()).unwrap();
+        let _ = release_rx.recv_timeout(Duration::from_secs(5));
+    });
+    held_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    let caller = {
+        let service = service.clone();
+        let id = id.clone();
+        tokio::spawn(async move { service.execute(Op::Poll { id }).await })
+    };
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if native
+                .calls
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|(m, _)| m == "getUpdates")
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    caller.abort();
+    assert!(caller.await.unwrap_err().is_cancelled());
+    let next = {
+        let service = service.clone();
+        tokio::spawn(async move { service.execute(Op::Poll { id }).await })
+    };
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert!(
+        !next.is_finished(),
+        "cancelling the caller must not release HTTP ownership"
+    );
+    release_tx.send(()).unwrap();
+    gate.join().unwrap();
+    let record = next.await.unwrap().unwrap().unwrap();
+    assert_eq!(record.session.offset, 101);
+    assert!(record.session.candidate.is_some());
+    assert_eq!(store.telegram_pairing().await.unwrap(), Some(record));
+    assert_eq!(
+        native
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(m, _)| m == "getUpdates")
+            .count(),
+        1
+    );
+    service.stop().await;
+    assert!(service.execute(Op::Status).await.is_err());
+}

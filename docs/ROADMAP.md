@@ -428,3 +428,5 @@
 - 2026-10-08：13D 配對驗證層接既有 notifier HTTP：10 分鐘 nonce、fresh direct human /start、bot 身分重查、精確操作員確認後才產生 token reference／allowlist／topic 設定。原生本機 HTTP 配對反例及 notifier 全 23 項、core 125、daemon 188（1 ignored）、fmt／clippy／check-deps 通過；無真 bot／訊息／模型操作，自有 Telegram 暫存無殘留。尚未接持久 pairing／cursor、CLI／RPC、設定套用或真 Telegram 驗收；13C 未完成項目仍保留（feat/g13-install，未合併）。
 
 - 2026-10-08：13D schema 20 保存單一配對收據，候選／cursor 原子發布，精確快照拒絕舊操作，確認與取消可重啟查詢；配對 Store 4 項、既有 Store 42 項、core 125、daemon 188（1 ignored）及 fmt／clippy／check-deps 通過。自有配對測試暫存無殘留。CLI／RPC、設定套用與真 Telegram 尚未接入，整關仍施工中（feat/g13-install，未合併）。
+
+- 2026-10-08：13D PairingService 串行銜接 notifier HTTP 與持久收據，caller 取消後仍持鎖至發布；配置中的 notifier 拒絕配對讀取。真本機 HTTP 驗取消 caller、單次 getUpdates、錯目的地／重複 Begin 零 HTTP；配對 4 項、core 125、daemon 190（1 ignored）、fmt／clippy／check-deps 通過。配對自有暫存無殘留；服務尚待 daemon 啟停、CLI／RPC 接線，未做真 Telegram（feat/g13-install，未合併）。
