@@ -12,7 +12,7 @@
 | 13A home／設定 | 預設 home、init 權限、doctor 的配置程式解析、沙箱與服務診斷；install_home 回歸 | doctor 已分開執行檔／歷史 canary 範圍／unknown 登入；daemon 唯讀配置／觀測快照已接入並核 boot；四條版本敏感能力政策已列出；登入有效性、能力真環境證據與故障→修復人工矩陣仍待完成 |
 | 13B 服務 | launchd／systemd plan、安裝所有權、對帳、解除安裝、資料刪除互斥；Linux 隔離服務紀錄 | macOS 真 launchd capture 尚待核准；兩平台服務重啟後 holder 存活、解除安裝清理的最終版本證據 |
 | 13C 受管版本 | 匯入、canary 收據、版本切換／回退、身份綁定與 pending 恢復；原生假 backend 測試 | 三個 backend 的專用認證／真模型 canary、切換與回退完整驗收及所有故障切點 |
-| 13C 版本發現 | 固定 npm 公開 metadata、每日持久排程、外部 CLI 磁碟版本探測、待辦與 Telegram 精確確認 | 真實系統 CLI 的版本觀測驗收；正式 daemon 同時兩種 monitor active 的停機整合證據 |
+| 13C 版本發現 | 固定 npm 公開 metadata、每日持久排程、外部 CLI 磁碟版本探測、待辦與 Telegram 精確確認 | 真實系統 CLI 的版本觀測驗收；雙 monitor 同時 active 的正式 daemon 停機兩種完成順序已通過 |
 | 13C 重啟通知 | 真 daemon 三次啟動測試：worker 發現換版、通知重建、操作員確認持久化，agent 與錯誤 action 拒絕 | 此測試使用本機假 CLI，不能代替真模型或 service-manager 重啟驗收 |
 | 13D Telegram | daemon 配對、token reference、allowlist、設定套用；loopback HTTP producer 測試 | 專用 bot 的 /start→confirm→apply→重啟→通知／操作真驗收 |
 | 13E 打包 | 歷史 release-artifacts 37753100820 在 3f52828 通過四平台 archive／首任務與雙平台 Brew 驗證 | 最終提交的打包驗證、全新使用者真 backend 首任務、版本／發布交付計畫；尚未公開發布 |
@@ -35,6 +35,8 @@
 
 - 2026-10-08：13A doctor 增加四條 daemon 能力政策：Codex 人工輸入、Claude 完整啟動畫面、OpenCode endpoint 與獨立 permission gate。讀實際 policy／共用常數，不放寬准入；verification override 限定 instance，boot／配置失配不展示政策，runtime eligibility 仍 unknown。core 149 通過／2 既有 ignored、三 backend 原生 canary 7 項、OpenCode driver 20 項、原生三次重啟與診斷、權限／scope 回歸、workspace clippy／fmt／check-deps 通過；獨立唯讀覆核無 blocker。本批自有程序／測試目錄未見殘留，移除重複 build log；真認證／能力驗收仍待完成（feat/g13-install／PR #158）。
 
+- 2026-10-08：`40df658` 補雙 monitor 正式 daemon 停機驗收；兩種完成順序通過，兩個丟棄 worker handle 的 mutation 均被抓出。daemon lib 223 通過／2 子程序入口 ignored、workspace clippy／fmt／check-deps 通過；自有程序與暫存不存在。能力政策與本批停機提交尚需固定版本的整套驗收及雙平台 CI。
+
 ## 授權與清理邊界
 
 - 可繼續：feature branch 實作、隔離測試、push／draft PR／CI。
@@ -45,4 +47,4 @@
 
 ## 下一步
 
-自動驗收基線已取得；接著補兩種版本 monitor 同時運作的停機驗證、登入有效性與真環境驗收。需要使用者操作時，提供固定版本、命令、預算、影響範圍與清理方式，一次帶一個步驟。
+自動驗收基線已取得；接著在固定提交重跑整套自動驗收與四平台打包，補登入有效性與真環境驗收。需要使用者操作時，提供固定版本、命令、預算、影響範圍與清理方式，一次帶一個步驟。
