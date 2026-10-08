@@ -419,6 +419,13 @@ impl SqliteStore {
             .await
     }
 
+    /// Authorize a Codex content write only when no version switch holds it.
+    pub async fn begin_codex_attempt(&self, id: &str, now: u64) -> Result<bool, StoreError> {
+        let id = id.to_owned();
+        self.call(move |conn| messages::begin_codex_attempt(conn, &id, now))
+            .await
+    }
+
     pub async fn message(&self, id: &str) -> Result<Option<Message>, StoreError> {
         let id = id.to_owned();
         self.call(move |conn| messages::get(conn, &id)).await

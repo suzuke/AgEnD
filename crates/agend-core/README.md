@@ -143,3 +143,5 @@ holder 協定 1.3 加入 `SpawnBound`／`GetLaunchBinding` 與不含 argv／環�
 受管啟動紀錄 `ManagedLaunchIntent` 保存不透明 UUID、匯入 artifact 與設定／實際啟動參數，供 store、supervisor 和 runtime 共用；紀錄本身不代表 holder 存活或准入完成。
 
 13C `runtime_records::BackendSwitch` 保存明確版本切換的來源啟動意圖、目標 artifact、原生 session 與 phase；純序列化記錄，不判定 canary、程序或檔案狀態。
+
+`ClaudeReservation::Paused` 表示版本切換暫停新 attempt；它不授權寫入，也不將訊息判為失敗。

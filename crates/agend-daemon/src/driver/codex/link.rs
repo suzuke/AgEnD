@@ -803,9 +803,13 @@ impl Worker {
                 continue;
             }
             let (id, now) = (row.id.clone(), log::now_unix_ms());
-            self.store
-                .call_blocking(move |conn| messages::mark_attempted(conn, &id, now))
-                .map_err(store_error)?;
+            if !self
+                .store
+                .call_blocking(move |conn| messages::begin_codex_attempt(conn, &id, now))
+                .map_err(store_error)?
+            {
+                continue;
+            }
             let text = text_of(&row);
             let thread = self.thread.clone();
             let level = messages::level_text(row.level);

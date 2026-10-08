@@ -211,3 +211,5 @@ client protocol 1.7 的 operator `message_delivery` 只讀持久化收據：mess
 版本切換儲存層以 BackendSwitch 保存原啟動證據、目標與階段；program 與 phase 原子提交／回退，過期請求拒絕。Prepared 可取消並保留原 program 與執行中 agent，已提交的切換須走回滾。canary、停止 holder 及 CLI／supervisor 切換編排仍由後續流程接入。
 
 13C OpenCode runtime 保留尚未結束的舊代 worker，取消旗標與 `workers_stopped` 分開；只有所有執行緒退出才回報停止。這是本機投遞執行緒的證據，backend 回合是否結束仍需原生狀態核對。
+
+13C Prepared 切換記錄會暫停 Claude channel／Stop、Codex 與 OpenCode 的新 push attempt；檢查與 reservation 在同一 DB 工作序列執行。訊息保留 queued，取消後可恢復；既有 attempt 的回執仍可確認。準備前已取得的寫入權仍須排空，此限制不等於 holder 或 backend 已閒置；inbox 與完整 supervisor 切換編排尚未接入。

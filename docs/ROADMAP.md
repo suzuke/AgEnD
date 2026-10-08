@@ -366,3 +366,5 @@
 - 2026-10-08：13C Prepared 切換可取消，保留原 program 與 agent PID，取消後可建立新請求；Committed 拒絕取消，須走 rollback。原生 SQLite 4 項、fmt／clippy／前後 check-deps 通過，測試暫存與重複 log 已清理。這批只完成儲存契約，CLI、投遞排空及 supervisor 恢復仍未接入（feat/g13-install，未合併）。
 
 - 2026-10-08：13C OpenCode runtime 保留尚未退出的取消／舊代 worker，以實際 thread completion 提供停止查詢；重連及重複取消不會丟失舊代。新增原生 worker 生命週期 1 項、既有 OpenCode 20 項通過，fmt／clippy／check-deps 通過；對應測試暫存皆不存在。尚未接入 supervisor 版本切換，worker 停止不代表 backend 回合結束（feat/g13-install，未合併）。
+
+- 2026-10-08：13C Prepared 在正式 Claude channel／Stop、Codex、OpenCode reservation 暫停新的 push attempt，取消後恢復，原回執可確認；6 項切換測試、16 項 Codex 回歸、daemon 單元 185 項通過（1 項既有 ignored）。修正舊 store 測試以精確保留永久 maintenance lock 並核 inode／權限；fmt／clippy／check-deps 通過，85 種相關測試目錄無殘留。inbox、在途寫入排空、idle 與 supervisor 切換編排仍未完成（feat/g13-install，未合併）。

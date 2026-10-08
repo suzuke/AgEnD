@@ -249,3 +249,5 @@ Claude outcome：`driver::claude::outcome` 使用先前真測 ACK/PostToolUse/St
 `tests/backend_switch.rs` 使用原生 SQLite／正式 launch reservation producer，驗 prepare 不改 program、重開後 commit／rollback 的 program 與 phase 一致、重送舊記錄拒絕、設定衝突不留下半套狀態，Prepared 取消保留 program／PID 並允許新請求、Committed 拒絕取消，以及 instance 移除 cascade。這只驗儲存層，不證明 holder 停止或完整版本切換。
 
 `opencode_worker_lifecycle` 啟動真正 runtime worker，在缺 holder 的原生失敗回報處暫停；取消、建立新代及重複取消後，舊代未退出時不得回報停止。釋放所有回報後才變成停止；不使用模型，也不宣稱遠端回合已結束。
+
+`backend_switch` 另驗三 backend 的正式 reservation producer 在 Prepared／SQLite 重開後不留下 attempt，Claude channel／Stop 都暫停，取消後可取得 attempt；Claude／OpenCode 準備前的回執仍可確認。Codex driver 回歸驗既有投遞、重啟及歷史核對，這批不宣稱完整版本切換端到端通過。

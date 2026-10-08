@@ -8,13 +8,16 @@ use agend_core::{
 use agend_daemon::store::SqliteStore;
 use agend_testkit::{block_on, tempdir::TempDir};
 fn fixture(store: &SqliteStore) -> (Instance, ImportedBackend) {
+    fixture_backend(store, Backend::Codex)
+}
+fn fixture_backend(store: &SqliteStore, backend: Backend) -> (Instance, ImportedBackend) {
     let instance = Instance {
         id: "switch-1".into(),
-        backend: Backend::Codex,
+        backend,
         program: "/managed/old/program".into(),
         args: vec![],
         working_directory: "/workspace".into(),
-        session_id: Some("native-session".into()),
+        session_id: Some("11111111-1111-4111-8111-111111111111".into()),
         status: InstanceStatus::Running,
         session_started: true,
         agent_pid: None,
@@ -24,7 +27,7 @@ fn fixture(store: &SqliteStore) -> (Instance, ImportedBackend) {
     block_on(store.add_instance(&instance)).unwrap();
     let old = ImportedBackend {
         format: 1,
-        backend: "codex".into(),
+        backend: backend.as_str().into(),
         version: "1".into(),
         sha256: "a".repeat(64),
         bytes: 42,
@@ -216,4 +219,179 @@ fn cancelling_prepared_switch_preserves_running_agent_and_allows_a_new_request()
         ))
         .is_ok()
     );
+}
+
+#[test]
+fn prepared_switch_holds_all_three_native_reservations_across_reopen_until_cancel() {
+    use agend_core::{
+        policy::busy::BusyLevel,
+        runtime_records::{ClaudeReservation, ClaudeRoute, NewClaudeDelivery, NewMessage},
+    };
+    for backend in [Backend::Claude, Backend::Codex, Backend::Opencode] {
+        let root = TempDir::new("backend-switch-dispatch").unwrap();
+        let store = SqliteStore::open(root.path(), 0).unwrap();
+        let (instance, target) = fixture_backend(&store, backend);
+        block_on(store.claim_message(
+            &NewMessage {
+                id: "pending".into(),
+                from_instance: "operator".into(),
+                to_instance: instance.id.clone(),
+                task_id: None,
+                body: "keep queued during switch".into(),
+                level: BusyLevel::Queue,
+            },
+            0,
+        ))
+        .unwrap();
+        let prepared =
+            block_on(store.prepare_backend_switch(&instance, target, "/managed/new/program", None))
+                .unwrap();
+        drop(store);
+        let store = SqliteStore::open(root.path(), 1).unwrap();
+        let reserve = |route| NewClaudeDelivery {
+            message_id: "pending".into(),
+            delivery_id: "22222222-2222-4222-8222-222222222222".into(),
+            instance_id: instance.id.clone(),
+            session_id: instance.session_id.clone().unwrap(),
+            route,
+        };
+        for _ in 0..2 {
+            match backend {
+                Backend::Claude => {
+                    for route in [ClaudeRoute::Channel, ClaudeRoute::Stop] {
+                        assert_eq!(
+                            block_on(store.reserve_claude_delivery(reserve(route), 2)).unwrap(),
+                            ClaudeReservation::Paused
+                        );
+                    }
+                }
+                Backend::Codex => {
+                    assert!(!block_on(store.begin_codex_attempt("pending", 2)).unwrap())
+                }
+                Backend::Opencode => assert!(
+                    !block_on(store.begin_opencode_attempt(
+                        "pending",
+                        &instance.id,
+                        instance.session_id.as_ref().unwrap(),
+                        "native-message",
+                        2
+                    ))
+                    .unwrap()
+                ),
+            }
+            let row = block_on(store.message("pending")).unwrap().unwrap();
+            assert_eq!(row.state, agend_core::model::DeliveryState::Queued);
+            assert_eq!(row.attempted_at_unix_ms, None);
+        }
+        block_on(store.cancel_backend_switch(&prepared)).unwrap();
+        match backend {
+            Backend::Claude => assert!(matches!(
+                block_on(store.reserve_claude_delivery(reserve(ClaudeRoute::Channel), 3)).unwrap(),
+                ClaudeReservation::Started(_)
+            )),
+            Backend::Codex => assert!(block_on(store.begin_codex_attempt("pending", 3)).unwrap()),
+            Backend::Opencode => assert!(
+                block_on(store.begin_opencode_attempt(
+                    "pending",
+                    &instance.id,
+                    instance.session_id.as_ref().unwrap(),
+                    "native-message",
+                    3
+                ))
+                .unwrap()
+            ),
+        }
+        assert_eq!(
+            block_on(store.message("pending"))
+                .unwrap()
+                .unwrap()
+                .attempted_at_unix_ms,
+            Some(3)
+        );
+    }
+}
+
+#[test]
+fn prepared_switch_still_accepts_receipts_for_previously_reserved_content() {
+    use agend_core::{
+        model::DeliveryState,
+        policy::busy::BusyLevel,
+        runtime_records::{
+            ClaudeAck, ClaudeAckResult, ClaudeReservation, ClaudeRoute, NewClaudeDelivery,
+            NewMessage,
+        },
+    };
+    for backend in [Backend::Claude, Backend::Opencode] {
+        let root = TempDir::new("backend-switch-receipts").unwrap();
+        let store = SqliteStore::open(root.path(), 0).unwrap();
+        let (instance, target) = fixture_backend(&store, backend);
+        block_on(store.claim_message(
+            &NewMessage {
+                id: "inflight".into(),
+                from_instance: "operator".into(),
+                to_instance: instance.id.clone(),
+                task_id: None,
+                body: "already reserved".into(),
+                level: BusyLevel::Queue,
+            },
+            0,
+        ))
+        .unwrap();
+        let session = instance.session_id.clone().unwrap();
+        let delivery = "22222222-2222-4222-8222-222222222222";
+        if backend == Backend::Claude {
+            assert!(matches!(
+                block_on(store.reserve_claude_delivery(
+                    NewClaudeDelivery {
+                        message_id: "inflight".into(),
+                        delivery_id: delivery.into(),
+                        instance_id: instance.id.clone(),
+                        session_id: session.clone(),
+                        route: ClaudeRoute::Channel,
+                    },
+                    1
+                ))
+                .unwrap(),
+                ClaudeReservation::Started(_)
+            ));
+        } else {
+            assert!(
+                block_on(store.begin_opencode_attempt(
+                    "inflight",
+                    &instance.id,
+                    &session,
+                    "native-message",
+                    1
+                ))
+                .unwrap()
+            );
+        }
+        block_on(store.prepare_backend_switch(&instance, target, "/managed/new/program", None))
+            .unwrap();
+        if backend == Backend::Claude {
+            assert_eq!(
+                block_on(store.acknowledge_claude(
+                    ClaudeAck {
+                        message_id: "inflight".into(),
+                        delivery_id: delivery.into(),
+                        instance_id: instance.id.clone(),
+                        session_id: session,
+                    },
+                    2
+                ))
+                .unwrap(),
+                ClaudeAckResult::Confirmed
+            );
+        } else {
+            assert!(
+                block_on(store.confirm_opencode_attempt("inflight", &session, "native-message", 2))
+                    .unwrap()
+                    .is_some()
+            );
+        }
+        assert_eq!(
+            block_on(store.message("inflight")).unwrap().unwrap().state,
+            DeliveryState::Confirmed
+        );
+    }
 }

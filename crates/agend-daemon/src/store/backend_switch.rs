@@ -30,6 +30,12 @@ fn read(conn: &Connection, instance: &str) -> Result<Option<BackendSwitch>, Stor
     })
     .transpose()
 }
+/// Read on the same DB thread/transaction as the attempt reservation. Existing
+/// receipts remain valid; only new outbound content is held while Prepared.
+pub(crate) fn delivery_paused(conn: &Connection, instance: &str) -> Result<bool, StoreError> {
+    Ok(read(conn, instance)?.is_some_and(|r| r.phase == BackendSwitchPhase::Prepared))
+}
+
 fn write(conn: &Connection, record: &BackendSwitch) -> Result<(), StoreError> {
     let json = serde_json::to_string(record).map_err(|e| StoreError::Invalid(e.to_string()))?;
     conn.execute(
