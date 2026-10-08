@@ -297,10 +297,10 @@ fn pending_switch_boot_preserves_launch_reservation_without_ordinary_restart() {
         ))
         .unwrap();
         if phase != BackendSwitchPhase::Prepared {
-            record = block_on(store.commit_backend_switch(&record, false)).unwrap();
+            record = block_on(store.commit_backend_switch(&record, false, 0)).unwrap();
         }
         if phase == BackendSwitchPhase::Restoring {
-            record = block_on(store.commit_backend_switch(&record, true)).unwrap();
+            record = block_on(store.commit_backend_switch(&record, true, 0)).unwrap();
         }
         let snapshot = block_on(store.instance("managed")).unwrap().unwrap();
         drop(store);
@@ -309,9 +309,36 @@ fn pending_switch_boot_preserves_launch_reservation_without_ordinary_restart() {
         // must instead preserve the exact durable snapshot and reservation.
         let mut daemon = lab::Daemon::start(&lab, &home, &[]).unwrap();
         daemon.ready().unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+        loop {
+            let observed: agend_core::runtime_records::BackendSwitch =
+                serde_json::from_value(value(cli(&home, &["status", "managed"], false))).unwrap();
+            let mut expected = record.clone();
+            expected.problem = observed.problem.clone();
+            assert_eq!(observed, expected);
+            if phase == BackendSwitchPhase::Prepared {
+                assert!(observed.problem.is_none());
+                break;
+            }
+            if let Some(problem) = &observed.problem {
+                assert!(problem.reason.contains("exceeded 300 seconds"));
+                record = observed;
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "missing expired activation notification"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        daemon.interrupt().unwrap();
+        daemon = lab::Daemon::start(&lab, &home, &[]).unwrap();
+        daemon.ready().unwrap();
+        let restored: agend_core::runtime_records::BackendSwitch =
+            serde_json::from_value(value(cli(&home, &["status", "managed"], false))).unwrap();
         assert_eq!(
-            value(cli(&home, &["status", "managed"], false))["id"],
-            record.id
+            restored, record,
+            "restart must not reset deadline or problem"
         );
         daemon.interrupt().unwrap();
         let store = SqliteStore::open(&home, 0).unwrap();

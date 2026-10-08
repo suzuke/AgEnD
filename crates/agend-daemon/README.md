@@ -251,3 +251,5 @@ OpenCode `session_idle` 重讀 REST session 狀態，查詢前後核 holder／in
 OpenCode 版本核對：受管程式使用匯入 artifact 的版本（supervisor 仍須先核成功 canary）；私有 canary daemon 使用精確 CanaryScope；一般未受管程式維持 1.18.34。REST health 必須與 wrapper 回報的版本相同。scope 存在但不匹配時直接拒絕，不退回一般路徑。
 
 換版的 `problem` 保存具體失敗原因與首次等待時間；driver 斷線、啟動失敗或自動回退被拒時，在「需要你」顯示 `backend-switch:<instance>:<switch-id>`，並由 `backend switch status` 顯示原因。daemon 重啟恢復同一通知，pipeline 同步不移除它。通知沒有一般 Retry 動作；操作員先查狀態，仍循正式換版／回退入口。成功啟用、回退、取消或移除 instance 才清除通知。這不代表斷線本身授權停止存活 holder；啟動逾時政策仍待完成。
+
+目的版本提交為 Committed 或 Restoring 時，同一交易保存 300 秒 activation deadline；重啟、重複觀察及問題通知都不重新計時，真正開始還原才建立新的期限。到期且仍未通過 native readiness，下一次協調檢查保存逾時問題、保持投遞暫停與原 holder。到期不等於閒置，不授權強制停止；稍後通過 readiness 仍可完成並清除通知／期限。舊持久紀錄若沒有 deadline，未完成時明確提示缺少期限，不能當作重新獲得五分鐘。

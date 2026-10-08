@@ -195,7 +195,7 @@ impl Supervisor {
         self.sweep(instance, "backend version transition").await;
         let committed = self
             .store
-            .commit_backend_switch(&record, rollback)
+            .commit_backend_switch(&record, rollback, log::now_unix_ms())
             .await
             .map_err(|e| e.to_string())?;
         let current = self
@@ -306,6 +306,16 @@ impl Supervisor {
                     "{}: backend switch {} activated",
                     instance.id, record.id
                 ));
+            } else if record.problem.is_none() {
+                if record.activation_expired(log::now_unix_ms()) {
+                    self.report_switch_problem(&instance.id,
+                        "backend activation exceeded 300 seconds; holder preserved; inspect switch status and terminal"
+                    ).await;
+                } else if record.activation_deadline_unix_ms.is_none() {
+                    self.report_switch_problem(&instance.id,
+                        "pending activation predates deadline tracking; holder preserved; inspect switch status and terminal"
+                    ).await;
+                }
             }
         }
     }

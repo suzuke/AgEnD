@@ -88,7 +88,7 @@ fn program_and_phase_survive_reopen_and_rollback_without_replaying_stale_request
         block_on(store.backend_switch(&instance.id)).unwrap(),
         Some(prepared.clone())
     );
-    let committed = block_on(store.commit_backend_switch(&prepared, false)).unwrap();
+    let committed = block_on(store.commit_backend_switch(&prepared, false, 0)).unwrap();
     assert_eq!(committed.phase, BackendSwitchPhase::Committed);
     assert!(block_on(store.cancel_backend_switch(&committed)).is_err());
     assert_eq!(
@@ -98,7 +98,7 @@ fn program_and_phase_survive_reopen_and_rollback_without_replaying_stale_request
             .program,
         "/managed/new/program"
     );
-    assert!(block_on(store.commit_backend_switch(&prepared, false)).is_err());
+    assert!(block_on(store.commit_backend_switch(&prepared, false, 0)).is_err());
     drop(store);
     let store = SqliteStore::open(&home, 2).unwrap();
     assert_eq!(
@@ -114,13 +114,13 @@ fn program_and_phase_survive_reopen_and_rollback_without_replaying_stale_request
         Some(rollback.clone())
     );
     assert!(block_on(store.prepare_backend_rollback(&committed)).is_err());
-    let restored = block_on(store.commit_backend_switch(&rollback, true)).unwrap();
+    let restored = block_on(store.commit_backend_switch(&rollback, true, 0)).unwrap();
     assert_eq!(restored.phase, BackendSwitchPhase::Restoring);
     assert_eq!(
         block_on(store.instance(&instance.id)).unwrap().unwrap(),
         instance
     );
-    assert!(block_on(store.commit_backend_switch(&committed, true)).is_err());
+    assert!(block_on(store.commit_backend_switch(&committed, true, 0)).is_err());
     block_on(store.remove_instance(&instance.id)).unwrap();
     assert!(
         block_on(store.backend_switch(&instance.id))
@@ -146,7 +146,7 @@ fn changed_configuration_refuses_commit_and_preserves_prepared_record() {
     .unwrap();
     drop(db);
     let store = SqliteStore::open(&home, 1).unwrap();
-    assert!(block_on(store.commit_backend_switch(&prepared, false)).is_err());
+    assert!(block_on(store.commit_backend_switch(&prepared, false, 0)).is_err());
     assert_eq!(
         block_on(store.backend_switch(&instance.id)).unwrap(),
         Some(prepared)
@@ -182,7 +182,7 @@ fn replaced_launch_reservation_cannot_be_committed_by_an_old_switch() {
         Some(&prepared.previous.binding),
     ))
     .unwrap();
-    assert!(block_on(store.commit_backend_switch(&prepared, false)).is_err());
+    assert!(block_on(store.commit_backend_switch(&prepared, false, 0)).is_err());
     assert_eq!(
         block_on(store.backend_switch(&instance.id)).unwrap(),
         Some(prepared)
@@ -224,7 +224,7 @@ fn cancelling_prepared_switch_preserves_running_agent_and_allows_a_new_request()
         block_on(store.instance(&instance.id)).unwrap(),
         Some(running.clone())
     );
-    assert!(block_on(store.commit_backend_switch(&prepared, false)).is_err());
+    assert!(block_on(store.commit_backend_switch(&prepared, false, 0)).is_err());
     assert!(block_on(store.cancel_backend_switch(&prepared)).is_err());
     assert!(
         block_on(store.prepare_backend_switch(
@@ -534,7 +534,7 @@ fn commit_and_restore_keep_all_delivery_paused_until_exact_activation_snapshot()
                 None,
             ))
             .unwrap();
-            let committed = block_on(store.commit_backend_switch(&prepared, false)).unwrap();
+            let committed = block_on(store.commit_backend_switch(&prepared, false, 0)).unwrap();
             let assert_paused = |store: &SqliteStore| {
                 assert!(block_on(store.inbox_messages(&instance.id, None, 20)).is_err());
                 match backend {
@@ -581,7 +581,7 @@ fn commit_and_restore_keep_all_delivery_paused_until_exact_activation_snapshot()
             assert_paused(&store);
             let (record, artifact) = if rollback {
                 (
-                    block_on(store.commit_backend_switch(&committed, true)).unwrap(),
+                    block_on(store.commit_backend_switch(&committed, true, 0)).unwrap(),
                     prepared.previous.artifact.clone(),
                 )
             } else {
@@ -645,6 +645,7 @@ fn commit_and_restore_keep_all_delivery_paused_until_exact_activation_snapshot()
                 block_on(store.backend_switch_problem(&record, "startup was delayed", 42)).unwrap();
             let finished = block_on(store.finish_backend_switch(&record, &ready, &launch)).unwrap();
             assert!(finished.problem.is_none());
+            assert!(finished.activation_deadline_unix_ms.is_none());
             assert_eq!(
                 finished.phase,
                 if rollback {
@@ -707,9 +708,9 @@ fn commit_and_restore_keep_all_delivery_paused_until_exact_activation_snapshot()
                 assert!(block_on(store.inbox_messages(&instance.id, None, 20)).is_err());
                 assert!(block_on(store.prepare_backend_rollback(&active)).is_err());
                 assert!(block_on(store.cancel_backend_switch(&paused)).is_err());
-                assert!(block_on(store.commit_backend_switch(&paused, true)).is_err());
+                assert!(block_on(store.commit_backend_switch(&paused, true, 0)).is_err());
                 block_on(store.set_agent_pid(&instance.id, None)).unwrap();
-                let restoring = block_on(store.commit_backend_switch(&paused, true)).unwrap();
+                let restoring = block_on(store.commit_backend_switch(&paused, true, 0)).unwrap();
                 assert_eq!(restoring.phase, BackendSwitchPhase::Restoring);
             }
         }
@@ -743,7 +744,7 @@ fn prepared_pauses_startup_keys_without_blocking_target_activation() {
             // Refusal consumed no intent; the original startup can continue.
             assert!(block_on(store.reserve_claude_startup_key(key)).unwrap());
         } else {
-            block_on(store.commit_backend_switch(&prepared, false)).unwrap();
+            block_on(store.commit_backend_switch(&prepared, false, 0)).unwrap();
             block_on(store.begin_claude_startup(&instance.id, session)).unwrap();
             // The new launch invalidates an old reserved snapshot.
             assert!(!block_on(store.reserve_claude_startup_key(key.clone())).unwrap());
@@ -785,4 +786,37 @@ fn pending_problem_survives_reopen_rejects_stale_updates_and_clears_on_cancel() 
     let cancelled = block_on(store.cancel_backend_switch(&again)).unwrap();
     assert!(cancelled.problem.is_none());
     assert!(block_on(store.backend_switch_problem(&cancelled, "late", 400)).is_err());
+}
+
+#[test]
+fn activation_deadline_is_atomic_durable_and_renewed_only_for_restore() {
+    let root = TempDir::new("backend-switch-deadline").unwrap();
+    let store = SqliteStore::open(root.path(), 0).unwrap();
+    let (instance, target) = fixture(&store);
+    let prepared =
+        block_on(store.prepare_backend_switch(&instance, target, "/managed/new/program", None))
+            .unwrap();
+    assert!(!prepared.activation_expired(u64::MAX));
+    let committed = block_on(store.commit_backend_switch(&prepared, false, 100)).unwrap();
+    assert_eq!(committed.activation_deadline_unix_ms, Some(300_100));
+    assert!(!committed.activation_expired(300_099));
+    assert!(committed.activation_expired(300_100));
+    assert!(!committed.activation_expired(99));
+    drop(store);
+    let store = SqliteStore::open(root.path(), 0).unwrap();
+    assert_eq!(
+        block_on(store.backend_switch(&instance.id)).unwrap(),
+        Some(committed.clone())
+    );
+    let problem = block_on(store.backend_switch_problem(&committed, "late", 400_000)).unwrap();
+    assert_eq!(
+        problem.activation_deadline_unix_ms,
+        committed.activation_deadline_unix_ms
+    );
+    let rollback = block_on(store.prepare_backend_rollback(&problem)).unwrap();
+    assert!(!rollback.activation_expired(u64::MAX));
+    let restoring = block_on(store.commit_backend_switch(&rollback, true, 500_000)).unwrap();
+    assert_eq!(restoring.activation_deadline_unix_ms, Some(800_000));
+    assert!(!restoring.activation_expired(799_999));
+    assert!(restoring.activation_expired(800_000));
 }

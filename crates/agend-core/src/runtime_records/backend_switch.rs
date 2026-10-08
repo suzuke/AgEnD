@@ -41,6 +41,8 @@ pub struct BackendSwitch {
     pub phase: BackendSwitchPhase,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub problem: Option<BackendSwitchProblem>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activation_deadline_unix_ms: Option<u64>,
 }
 
 /// Durable explanation for an interrupted transition; does not authorize retry.
@@ -49,4 +51,17 @@ pub struct BackendSwitch {
 pub struct BackendSwitchProblem {
     pub reason: String,
     pub since_unix_ms: u64,
+}
+
+/// Five minutes to observe a committed destination; expiry never proves idle.
+pub const ACTIVATION_WINDOW_MS: u64 = 300_000;
+impl BackendSwitch {
+    pub fn activation_expired(&self, now: u64) -> bool {
+        matches!(
+            self.phase,
+            BackendSwitchPhase::Committed | BackendSwitchPhase::Restoring
+        ) && self
+            .activation_deadline_unix_ms
+            .is_some_and(|deadline| now >= deadline)
+    }
 }

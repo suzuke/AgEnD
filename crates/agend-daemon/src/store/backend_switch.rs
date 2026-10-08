@@ -154,6 +154,7 @@ impl SqliteStore {
                 session_id: instance.session_id.clone(),
                 phase: BackendSwitchPhase::Prepared,
                 problem: None,
+                activation_deadline_unix_ms: None,
             };
             if !config_matches(&instance, &record, &record.previous.configured_program)
                 || record.target == record.previous.artifact
@@ -193,6 +194,7 @@ impl SqliteStore {
             }
             current.phase = BackendSwitchPhase::Cancelled;
             current.problem = None;
+            current.activation_deadline_unix_ms = None;
             write(&tx, &current)?;
             tx.commit()?;
             Ok(current)
@@ -241,6 +243,7 @@ impl SqliteStore {
         &self,
         expected: &BackendSwitch,
         rollback: bool,
+        now: u64,
     ) -> Result<BackendSwitch, StoreError> {
         let expected = expected.clone();
         self.call(move |conn| {
@@ -292,6 +295,10 @@ impl SqliteStore {
                 params![current.instance_id, to],
             )?;
             current.phase = phase;
+            current.activation_deadline_unix_ms =
+                Some(now.saturating_add(
+                    agend_core::runtime_records::backend_switch::ACTIVATION_WINDOW_MS,
+                ));
             write(&tx, &current)?;
             tx.commit()?;
             Ok(current)
@@ -356,6 +363,7 @@ impl SqliteStore {
             }
             current.phase = phase;
             current.problem = None;
+            current.activation_deadline_unix_ms = None;
             write(&tx, &current)?;
             tx.commit()?;
             Ok(current)

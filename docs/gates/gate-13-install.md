@@ -209,3 +209,5 @@ cat docs/gates/gate-13-install.md
 - 2026-10-08：13C 將經啟動身分驗證的目前代 AgentExited 與 driver 斷線分開；目的 backend 原生退出後先持久回退意圖、排空回覆與 worker，再核精確 holder 停止及恢復舊版本／session。canary 全 14 項、daemon 186 項（1 ignored）通過；補設定快照保護後重驗 Codex 退出案例。初輪 fixture 只讓 app-server 退出而外層包裝仍活著，保留失敗 log；改成完成交接後 TUI 自行退出。app-server 單獨失敗、啟動掛住與完整 crash／通知政策仍待處理（feat/g13-install，未合併）。
 
 - 2026-10-08：13C 換版問題持久保存原因／首次等待時間，正式 status 與「需要你」顯示，重啟恢復且不提供一般 Retry；成功完成／取消／移除時清除。原生 Codex app-server 退出但 wrapper／holder 存活測試核通知、重啟同一等待時間與 holder 通過；Store 10、core 125、daemon 186（1 ignored）、client 52 項及 fmt／clippy／check-deps 通過。測試找出 pipeline 同步誤刪通知並修復；另修正測試對省略空 actions 的錯誤假設，保留失敗證據。自有 switch／Store／canary 暫存無殘留；存活 backend 啟動逾時與完整故障矩陣仍未完成（feat/g13-install，未合併）。
+
+- 2026-10-08：13C Committed／Restoring 同交易保存 300 秒 activation deadline；到期未就緒保存問題／通知，保留 holder 與投遞暫停，重啟不重置。正式 Store 的時鐘邊界、重開與還原新期限共 11 項、原生兩次 boot／RPC 共 2 項、core 125、daemon 186（1 ignored）及 fmt／clippy／check-deps 通過，自有 recovery／rpc／Store 暫存無殘留。這是觀察逾時，不把逾時當停止授權；真版本隔離、完整故障矩陣與整關驗收仍未完成，接續 13D 配對（feat/g13-install，未合併）。
