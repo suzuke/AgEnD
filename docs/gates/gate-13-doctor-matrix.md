@@ -17,7 +17,7 @@
 | observation/&lt;instance&gt; | boot／配置不符→重新取得匹配快照 | `doctor/observations.rs` 反例與 backend observation 原生整合；匹配快照仍不證明 running image／登入 |
 | capability/&lt;instance&gt;/&lt;capability&gt; | 補齊各能力的版本及執行時條件 | 目前只列 daemon 政策、eligibility unknown；尚無真環境「壞→修復」完成證據 |
 | authentication | 缺失／失效認證→專用帳戶重新登入 | 目前固定 warn／unknown；缺 authoritative live producer，尚未完成。不得用 Ready 或歷史 canary 改標登入有效 |
-| holders | 孤兒 holder→daemon boot sweep | CLI 真 holder＋FakeDaemon 驗 orphan warning；該案例由測試主動 Shutdown，不是照 fix 重啟 daemon 的修復證明。boot sweep 原生測試須在最終矩陣另行連結 |
+| holders | 孤兒 holder→daemon boot sweep | `cli::doctor_orphan_warning_recovers_by_starting_the_real_daemon`：離線真 holder→doctor 提示啟動 daemon→正式 boot sweep Shutdown→子程序退出、lock 釋放→doctor ok。另有 FakeDaemon 孤兒提示案例；離線修復不冒充在線 restart 驗收 |
 | disk | 可用空間小於 1 GB→釋放空間；home 大於 20 GB→清自有資料 | 原生小 volume 留存 fail→ok 證據；`install_home` 用 sparse fixture 驗大 home warn→ok，不填滿主機磁碟 |
 | sandbox | 缺工具→恢復 sandbox 工具 | `install_home` 先指定不存在工具，再以平台原生 sandbox readiness 恢復；不移除主機工具 |
 | telegram | 非法設定／空 allowlist／token 權限不符→修正專用設定 | `install_home` 及 doctor 原生設定測試；僅本機設定，未向 Telegram 發送。真配對與通知另驗 |
@@ -31,4 +31,4 @@
 
 ## 下一步
 
-先補登入 producer／真能力證據及 holders 的建議修復路徑，再將固定提交的自動測試與逐步人工結果逐項綁定。本表目前沒有將任何缺口降為非必要。
+先補登入 producer／真能力證據，再將固定提交的自動測試與逐步人工結果逐項綁定。本表目前沒有將任何缺口降為非必要。

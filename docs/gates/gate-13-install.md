@@ -311,3 +311,5 @@ Brew 原生安裝驗證已接入 release workflow 的 macOS ARM64／Linux x86_64
 - 2026-10-08：13B 正式加入唯讀 user-bus readiness 共用期限；只等待原生合法 false，錯誤／逾時拒絕，完整有效設定與程序身分檢查保留。service 24 項、install_service 6 項、workspace clippy／fmt／check-deps 通過，獨立唯讀覆核無 blocker。f08fe43 雙平台 CI 37778088087 已成功；新修正仍待 Linux production 冷啟動真測，不宣稱整關完成（feat/g13-install／PR #158）。
 
 - 2026-10-08：固定 d78f530 的四平台 archive／formula／雙平台 Brew 全部成功（release 37783051296）；原版 Linux ARM64 archive 在隔離 systemd、一般使用者下完成安裝、同 holder 重接、拒絕外來 MainPID 與安全移除五階段，container／image／暫存已精確清理。macOS 26 CI 的 setsid fixture 準備失敗另以限定 EPERM 的有界重試處理，要求真 session、清理前存活及 SIGKILL 終止；本機 binary 40 項、clippy／fmt／check-deps 通過，仍待新 CI。真 backend／macOS 服務／Telegram 與最終驗收未完成（PR #158）。
+
+- 2026-10-08：補 doctor 離線孤兒 holder 修復原生測試：提示啟動 daemon→正式 boot sweep Shutdown→子程序正常退出、鎖釋放→holders ok；fallback 不計成功，自有 lab 刪除有斷言。聚焦覆核意見已納入，單例與 workspace clippy／fmt／check-deps 通過；不代表在線 restart、真 backend 或整關驗收（PR #158）。

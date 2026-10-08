@@ -274,3 +274,5 @@ backend_version_monitor 的三次真 daemon 啟動案例同時驗 BackendDiagnos
 backend_canary 的三 backend 原生 managed fleet 透過 doctor 消費正式 daemon 的 capability rows；仍為 Warn，不把 canary 通過升格為全部能力准入。boot／配置反例帶非空 policy sentinel，確保邊界失配不展示政策。
 
 `service::manager` 的 user-bus readiness 測試消費 systemd 255 真 `NameHasOwner` false／true 回覆，驗合法 false 才等待、RPC／exit／JSON 錯誤不重試、一直未就緒與逾時成功拒絕；另以真 `/bin/sleep` 核共用子程序期限，過期期限在 spawn 前拒絕。這些測試不代表修正後的真服務已驗收。
+
+第 13 關 doctor 孤兒修復：`cargo test -p agend --test cli doctor_orphan_warning_recovers_by_starting_the_real_daemon -- --exact` 在隔離 HOME／PATH 起自有原生 holder，核 doctor 的啟動 daemon 提示、正式 boot sweep Shutdown、子程序退出／lock 釋放及 holders 恢復 ok。失敗後的 Child 清理不計入成功判斷；不啟模型、不改主機服務。
