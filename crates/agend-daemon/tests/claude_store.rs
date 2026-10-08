@@ -488,3 +488,55 @@ fn pending_claude_data_alone_is_snapshotted_after_instance_removal() {
         ClaudeAckResult::Confirmed
     );
 }
+
+#[test]
+fn execution_outcome_requires_native_post_ack_and_stop_and_survives_reopen() {
+    let home = TempDir::new("g13-claude-outcome").unwrap();
+    let store = SqliteStore::open(home.path(), 0).unwrap();
+    seed(&store, "m", 0);
+    block_on(store.reserve_claude_delivery(reservation("m"), 1)).unwrap();
+    block_on(store.acknowledge_claude(ack("m"), 2)).unwrap();
+    assert_eq!(block_on(store.claude_message_outcome("m")).unwrap(), None);
+    let captured: serde_json::Value = serde_json::from_str(include_str!(
+        "../src/driver/claude/fixtures/ack-stop-outcome.json"
+    ))
+    .unwrap();
+    for (index, kind, now) in [(1, "PostToolUse", 3), (2, "Stop", 4)] {
+        let mut payload = captured["events"][index]["payload"].clone();
+        payload["session_id"] = serde_json::json!(SESSION);
+        if kind == "PostToolUse" {
+            payload["tool_input"]["receipts"][0] =
+                serde_json::json!({"message_id":"m","delivery_id":DELIVERY,"session_id":SESSION});
+        }
+        let e = NewDriverEvent {
+            id: if index == 1 { DELIVERY } else { OTHER }.into(),
+            instance_id: "claude".into(),
+            session_id: SESSION.into(),
+            kind: kind.into(),
+            payload: payload.to_string(),
+            occurred_at_unix_ms: now,
+            replayed: false,
+        };
+        block_on(store.append_driver_event(e, now)).unwrap();
+        if kind == "PostToolUse" {
+            assert_eq!(block_on(store.claude_message_outcome("m")).unwrap(), None);
+        }
+    }
+    let before = block_on(store.message("m")).unwrap();
+    let expected = Some("9a9acc3a-7936-42c6-91da-96feec7f4b9e".to_string());
+    assert_eq!(
+        block_on(store.claude_message_outcome("m")).unwrap(),
+        expected
+    );
+    assert_eq!(block_on(store.message("m")).unwrap(), before);
+    drop(store);
+    let store = SqliteStore::open(home.path(), 5).unwrap();
+    assert_eq!(
+        block_on(store.claude_message_outcome("m")).unwrap(),
+        expected
+    );
+    assert_eq!(
+        block_on(store.claude_message_outcome("absent")).unwrap(),
+        None
+    );
+}

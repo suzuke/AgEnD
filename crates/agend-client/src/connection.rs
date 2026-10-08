@@ -437,6 +437,50 @@ impl Client {
         }
     }
 
+    /// Reads a persisted receipt on a fresh one-shot connection within the
+    /// caller's budget. Never retries, confirms, or mutates the message.
+    pub fn message_delivery(
+        &mut self,
+        message_id: &str,
+        within: Duration,
+    ) -> Result<Option<agend_core::protocol::client::MessageDeliveryData>, ClientError> {
+        use agend_core::protocol::client::{CommandResult, OperatorCommand, OperatorData, V1_7};
+        version::check_at_least(self.selected(), V1_7).map_err(ClientError::Version)?;
+        if message_id.is_empty() || message_id.len() > 128 {
+            return Err(ClientError::Daemon {
+                code: error_code::INVALID_REQUEST.into(),
+                message: "message id must contain 1-128 bytes".into(),
+            });
+        }
+        let request = ClientRequest::Operator {
+            data: OperatorData {
+                request_id: self.next_request_id(),
+                command: OperatorCommand::MessageDelivery {
+                    message_id: message_id.into(),
+                },
+            },
+        };
+        let deadline = Instant::now()
+            .checked_add(within)
+            .ok_or_else(|| ClientError::Disconnected("invalid delivery receipt deadline".into()))?;
+        match crate::exchange_once(&self.socket, self.caller.clone(), V1_7, &request, deadline)? {
+            ClientResponse::CommandResult { data } => match data.result {
+                CommandResult::MessageDelivery { data } => {
+                    if data.as_ref().is_some_and(|d| d.message_id != message_id) {
+                        return Err(ClientError::Disconnected(
+                            "delivery receipt identity mismatch".into(),
+                        ));
+                    }
+                    Ok(data)
+                }
+                _ => Err(ClientError::Disconnected(
+                    "unexpected delivery receipt response".into(),
+                )),
+            },
+            other => Err(unexpected(&other)),
+        }
+    }
+
     pub fn mark_attention_read(
         &mut self,
         attention_id: &str,

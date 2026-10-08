@@ -166,7 +166,7 @@ gh 防護由 `agend_shim::gh` 在執行工具前拒絕 merge、明確 PR approve
 | `agend debug watch` | `agend debug watch` | `agend` 子命令（唯讀） | 連上 daemon 印全貌摘要，之後每個事件印一行；連不上或斷線時跟 TUI 一樣用 `connect_once` 每 500 ms 重試、不放棄（印 `reconnecting…`），連上就重拿全貌。 | `agend debug ping`（單次或計次連線檢查，不追事件） | [第 8 施工關 P7](gates/gate-08-client.md#p7agend-client-的-api重試錯誤訊息) |
 | `sandbox-missing` | sandbox-missing | — | 「需要你」的新來源之一：checks 沙箱工具沒裝好或試跑失敗，task 留在 checks 關卡等 `retry`。第 10 施工關已實作並驗收。 | hard gate（backend 卡住畫面的訊號；這是 daemon 自己偵測沙箱） | [第 10 施工關 P6](gates/gate-10-pipeline.md#p6command-關卡runner) |
 | ticket | ticket | — | 結果類 CLI 命令帶的 `<task_id>/<stage_id>/<attempt>`（例如 `t-42/review/2`）；派工訊息與 `agend status` 都印它，agent 照抄。已實作並驗收。 | task id；attempt（ticket 是兩者加 stage id 組出來的字串） | [第 9 施工關 P2](gates/gate-09-cli.md#p2agent-命令的語法task-id-與-attempt-從哪來ticket) |
-| 操作者請求 | operator request | — | client protocol 只收操作者身分的請求（`instance_add`、`instance_remove`、`daemon_restart`…），與唯讀請求、agent 專用的 `command` 請求分開。已實作並驗收。 | `command` 請求（agent 命令）；請示 | [第 9 施工關 P6](gates/gate-09-cli.md#p6操作者命令instance協定的下一個-minor) |
+| 操作者請求 | operator request | — | client protocol 只收操作者身分的請求（`instance_add`、`instance_remove`、`daemon_restart`…；13C 加入 `send_message`／`driver_status`，真人 sender `@operator` 使用 instance 不允許的名稱空間），與唯讀請求、agent 專用的 `command` 請求分開。已實作並驗收。 | `command` 請求（agent 命令）；請示 | [第 9 施工關 P6](gates/gate-09-cli.md#p6操作者命令instance協定的下一個-minor) |
 | 完整終端模式 | full terminal mode | `agend_tui::app::full_terminal::FullView`（D39） | `i` 明確進入的 agent 終端操作畫面，只留一行 AgEnD 狀態列；Ctrl-] 回唯讀。已接通真 holder／daemon／client／TUI；C 段已完成驗收並經使用者確認合併（#145，2026-10-03）。 | B 段純文字 attach 與輸入模式 | [C 段 P1](gates/gate-11c-proposal.md#p1完整模式的入口與退出) |
 | 終端連線憑證 | terminal connection | `runtime::terminal::TerminalConnection` | runtime 長連線的能力與 epoch；背景操作只送到取得憑證時的 holder 連線，斷線或取消在途控制操作即失效。 | holder process generation；client attach id | D39／第 11 施工關 C 段 P2、P3 |
 | 終端 frame | terminal frame | `protocol::terminal::TerminalFrame` | holder 同時取出的 viewport cells、樣式、游標、mode 與歷史定位資料，附 generation／revision。已由真 holder parser 產生，經 daemon／client 送至 TUI，附 generation／revision 的端到端回歸已建立。 | 純文字 screen snapshot；PTY 原始位元組 | [C 段 P2](gates/gate-11c-proposal.md#p2畫面由-holder-提供協定採加法) |
@@ -231,3 +231,11 @@ SQLite 中每個 task 的固定 repository ID、branch、nonce 與 PR number；�
 - **共用已讀收據（shared read receipt）**：daemon 保存操作員已查看的事項 ID＋問題次數，供 TUI 與 Telegram 同步。後續追問使用新 key；單純送達不算已讀，已讀不解除待辦。非問答事項沿用同一 ID 的既定 T17 行為。
 
 - **Telegram 未知通知**：送出意圖已保存但沒有完整確認收據的通知；不自動重送。`telegram-delivery:<id>` 由本機操作員 Abandon 結束後續投遞，仍保留未知證據，不表示已送達。
+
+- **匯入 backend（imported backend）**：AgEnD 在獨立版本目錄保存的 executable 副本與內容 manifest；宣告版本未經探測，匯入不等於 canary 通過或啟用。見[版本管理](architecture/backend-versions.md)。
+
+回合結果（message outcome）：`MessageOutcomeData`；與 delivery 收據分開，核對相同訊息的 backend 回合成功及 assistant 回覆。confirmed 僅代表送達，不代表回合成功。
+
+回合證據 ID（execution_id）：`MessageOutcomeData.execution_id`；Codex／OpenCode 使用既有回合參照，Claude 使用 native prompt_id。與訊息的 delivery turn_id 分開；Claude 不為 ACK 虛構 turn_id。
+
+固定啟動副本（pinned launcher）：依目前執行映像 SHA-256 保存、不覆寫的私有 AgEnD executable，供 daemon 啟動 holder 與 helper，避免正常升級原始路徑改變執行版本；存活 holder 使用期間須保留。

@@ -105,6 +105,7 @@ fn run_with_policy(
             return ExitCode::from(1);
         }
     };
+    let pin_executable = agend.is_none();
     let exe = match agend.map(Ok).unwrap_or_else(std::env::current_exe) {
         Ok(exe) => exe,
         Err(e) => {
@@ -118,6 +119,18 @@ fn run_with_policy(
             eprintln!("agend daemon: {e}");
             return ExitCode::from(1);
         }
+    };
+    let launcher = if pin_executable {
+        match crate::backend_versions::ExecutableBinding::pin_running(&home, &exe) {
+            Ok((path, binding)) => (path, Ok(binding)),
+            Err(error) => {
+                eprintln!("agend daemon: cannot pin running executable: {error}");
+                return ExitCode::from(1);
+            }
+        }
+    } else {
+        let binding = crate::backend_versions::ExecutableBinding::capture_running(&exe);
+        (exe, binding)
     };
     // Only now, with agend.db ours, does this daemon write to logs/.
     if let Err(e) = log::to_files(&home) {
@@ -151,7 +164,7 @@ fn run_with_policy(
     };
     let stopped = runtime.block_on(serve(
         home,
-        exe,
+        launcher,
         store,
         codex_input,
         telegram,
@@ -238,7 +251,10 @@ fn forward_signal(kind: SignalKind, name: &'static str, events: UnboundedSender<
 
 async fn serve(
     home: PathBuf,
-    exe: PathBuf,
+    launcher: (
+        PathBuf,
+        Result<crate::backend_versions::ExecutableBinding, String>,
+    ),
     store: SqliteStore,
     codex_input: agend_core::policy::codex_input::CodexInputPolicy,
     telegram: Option<(
@@ -248,6 +264,7 @@ async fn serve(
     #[cfg(test)] telegram_api: Option<Arc<crate::notifier::http::Api>>,
     #[cfg(test)] hold_supervisor_for_stop: bool,
 ) -> Result<Stopped, ExitCode> {
+    let (exe, executable_binding) = launcher;
     if let Err(error) = store.recover_telegram_attempts().await {
         log::line(&format!(
             "agend daemon: cannot recover Telegram attempts: {error}"
@@ -300,7 +317,7 @@ async fn serve(
     });
     // Before any holder starts: the holders an exec restart left us.
     let inherited = crate::reaper::inherited(&home);
-    let runtime = HolderRuntime::new(&home, &exe, daemon_env, sink);
+    let runtime = HolderRuntime::with_binding(&home, &exe, daemon_env, sink, executable_binding);
     let fleet = Arc::new(Fleet::new(log::now_unix_ms()));
     use agend_core::attention_read::AttentionReadStore;
     fleet.restore_read_keys(store.attention_read_keys().await.map_err(|e| {

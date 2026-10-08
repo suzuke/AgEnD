@@ -7,6 +7,7 @@
 //! Must NOT: run commands, read or write files, or register services (the
 //! `agend` crate's `setup` module executes these rules).
 
+pub mod backend;
 pub mod service;
 
 use alloc::string::String;

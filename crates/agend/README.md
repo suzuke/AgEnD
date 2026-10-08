@@ -63,9 +63,9 @@
 
 watch 的 task_changed 顯示事件 TaskView 的 current_stage；舊 peer 未帶該欄位時仍顯示原摘要。
 
-## 第 13B 服務預覽（施工中）
+## 第 13B 使用者服務（施工中）
 
-`agend service plan [--manager launchd|systemd] [--json]` 產生可審閱的 user-service 定義與目的路徑；不寫檔、不呼叫服務管理器。daemon 執行檔規劃保存於 home 的 `service/agend`，避免綁定施工用 target。launchd 保留 process group，systemd 用 `KillMode=process`；自動註冊、所有權對帳與 uninstall 尚在施工。
+`agend service plan [--manager launchd|systemd] [--json]` 產生可審閱的 user-service 定義與目的路徑；不寫檔、不呼叫服務管理器。daemon 執行檔規劃保存於 home 的 `service/agend`，避免綁定施工用 target。launchd 保留 process group，systemd 用 `KillMode=process`；`service install --no-start` 可先發布自有定義與 receipt；註冊、status 和預設保留資料的 uninstall 已接上，仍待完整真服務驗收。systemd 的操作另核對已載入的 argv／環境／drop-in／停止行為，並核對 live MainPID 的 executable、argv、home 與程序世代；enable／disable 使用 `--no-reload`，避免驗證後隱含載入其他設定。
 
 ## 下一步
 
@@ -88,3 +88,7 @@ cargo run -p agend -- --version
 `claude_startup::startup_variable_ready_suggestions_replay_actual_v5_and_both_widths` 經真 daemon／holder／PTY 重播 v5 兩份捕獲及 140 欄變體，核五秒初始 idle 與 Ready 不加鍵；
 `startup_variable_ready_rejects_unknown_footer_and_split_hint_without_idle_or_more_keys` 拒絕未知 footer／分行建議。
 既有無 SessionStart、人工控制、結果不明與四次開機回歸維持；這些測試不啟動真 Claude、不送模型訊息。
+
+明確資料刪除使用 `uninstall --delete-data --confirm-home <canonical home>`；預設保留資料，拒絕仍有 Git workspace 或跨掛載的 home。鎖檔保留、並行與重試限制見[服務安裝](../../docs/architecture/service-install.md)。
+
+13C 施工中的 `backend import`／`backend inspect` 提供操作員匯入原生 executable 與內容核對；不執行、不啟用、不宣稱 canary 通過。介面與限制見[版本管理](../../docs/architecture/backend-versions.md)。

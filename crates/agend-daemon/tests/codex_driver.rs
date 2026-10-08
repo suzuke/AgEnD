@@ -439,3 +439,86 @@ fn a_queue_left_waiting_by_a_human_interrupt_is_started() {
         assert_eq!(fx.state("m-q").unwrap(), "confirmed", "restart={restart}");
     }
 }
+
+#[test]
+fn execution_outcome_requires_the_identified_successful_turn_and_response() {
+    use agend_core::protocol::client::MessageOutcomeState as State;
+    use agend_daemon::driver::codex::history::message_outcome;
+    use serde_json::json;
+    let lab = lab();
+    let backend = codex::Backend::new(&lab.home(0), "outcome", Duration::from_millis(100)).unwrap();
+    let fixture = codex::Fixture::boot(&backend).unwrap();
+    fixture
+        .deliver("outcome-message", "Respond briefly", BusyLevel::Queue)
+        .unwrap();
+    fixture.settle(1).unwrap();
+    let row = block_on(fixture.store.message("outcome-message"))
+        .unwrap()
+        .unwrap();
+    let turns = backend.turns(&fixture.thread().unwrap()).unwrap();
+    assert_eq!(message_outcome(&turns, &row), State::Completed);
+    assert_eq!(
+        block_on(fixture.driver.message_outcome(row.clone())).unwrap(),
+        State::Completed
+    );
+    for status in ["failed", "interrupted", "inProgress", "future-state"] {
+        let mut changed = turns.clone();
+        changed[0]["status"] = json!(status);
+        assert_ne!(
+            message_outcome(&changed, &row),
+            State::Completed,
+            "{status}"
+        );
+    }
+    let mut changed = turns.clone();
+    changed[0]["error"] = json!({"message":"authentication failed"});
+    assert_ne!(message_outcome(&changed, &row), State::Completed);
+    let mut changed = turns.clone();
+    changed[0]["items"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|i| i["type"] != "agentMessage");
+    assert_ne!(message_outcome(&changed, &row), State::Completed);
+    let mut changed = turns.clone();
+    for item in changed[0]["items"].as_array_mut().unwrap() {
+        if item["type"] == "userMessage" {
+            item["clientId"] = json!("foreign-message");
+        }
+    }
+    assert_ne!(message_outcome(&changed, &row), State::Completed);
+    let mut changed = turns.clone();
+    changed.push(changed[0].clone());
+    assert_ne!(message_outcome(&changed, &row), State::Completed);
+    let mut changed = turns.clone();
+    changed[0].as_object_mut().unwrap().remove("error");
+    assert_ne!(message_outcome(&changed, &row), State::Completed);
+    for client_id in [row.id.as_str(), "another-input"] {
+        let mut changed = turns.clone();
+        let items = changed[0]["items"].as_array_mut().unwrap();
+        let mut extra = items
+            .iter()
+            .find(|i| i["type"] == "userMessage")
+            .unwrap()
+            .clone();
+        extra["clientId"] = json!(client_id);
+        extra["content"][0]["text"] = json!("different input");
+        items.insert(1, extra);
+        assert_ne!(message_outcome(&changed, &row), State::Completed);
+    }
+    let mut changed = turns.clone();
+    for item in changed[0]["items"].as_array_mut().unwrap() {
+        if item["type"] == "agentMessage" {
+            item["text"] = json!("  ");
+        }
+    }
+    assert_ne!(message_outcome(&changed, &row), State::Completed);
+    let mut foreign = row.clone();
+    foreign.turn_id = Some("foreign-turn".into());
+    assert_ne!(message_outcome(&turns, &foreign), State::Completed);
+    assert_eq!(
+        block_on(fixture.store.message(&row.id)).unwrap().unwrap(),
+        row
+    );
+    fixture.driver.disconnect(&backend.id);
+    assert!(block_on(fixture.driver.message_outcome(row)).is_err());
+}

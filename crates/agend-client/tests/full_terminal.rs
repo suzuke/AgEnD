@@ -650,3 +650,16 @@ fn native_frames_decode_when_payload_precedes_discriminator() {
     drop(client);
     worker.join().unwrap();
 }
+
+#[test]
+fn delivery_receipt_capability_is_rejected_before_io_on_an_old_daemon() {
+    let (_dir, mut client, worker) = peer(&[V1_6], |mut reader, _| {
+        assert!(read(&mut reader).is_none());
+    });
+    assert!(matches!(
+        client.message_delivery("m-1", Duration::from_secs(1)),
+        Err(ClientError::Version(_))
+    ));
+    drop(client);
+    worker.join().unwrap();
+}

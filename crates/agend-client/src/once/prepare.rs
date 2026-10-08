@@ -113,6 +113,22 @@ impl Budget {
     }
     fn operator(&mut self, command: &OperatorCommand) -> io::Result<()> {
         match command {
+            OperatorCommand::DriverStatus { instance_id } => self.add(instance_id),
+            OperatorCommand::SendMessage {
+                to,
+                message,
+                message_id,
+            } => {
+                if message.len() > MAX_MESSAGE_BYTES {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "send body exceeds message limit",
+                    ));
+                }
+                self.strings([to.as_str(), message, message_id])
+            }
+            OperatorCommand::MessageDelivery { message_id }
+            | OperatorCommand::MessageOutcome { message_id } => self.strings([message_id.as_str()]),
             OperatorCommand::InstanceAdd {
                 instance_id,
                 backend,

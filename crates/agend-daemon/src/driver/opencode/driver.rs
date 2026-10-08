@@ -13,6 +13,67 @@ impl OpenCodeDriver {
     pub fn new(store: Arc<SqliteStore>) -> Self {
         Self { store }
     }
+    /// Bounded read-only snapshot of the current holder/session's latest history.
+    pub async fn message_outcome(
+        &self,
+        row: crate::store::Message,
+    ) -> Result<agend_core::protocol::client::MessageOutcomeState, String> {
+        let store = self.store.clone();
+        tokio::task::spawn_blocking(move || {
+            use super::{api::Session, history, http::Http, launch::Layout};
+            use agend_core::protocol::client::MessageOutcomeState as State;
+            if row.state != agend_core::model::DeliveryState::Confirmed {
+                return Ok(State::Unknown);
+            }
+            let id = row.to_instance.clone();
+            let lookup = id.clone();
+            let instance = store
+                .call_blocking(move |c| crate::store::instances::get(c, &lookup))
+                .map_err(|e| e.to_string())?
+                .ok_or("instance missing")?;
+            if instance.backend != Backend::Opencode
+                || instance.status != crate::store::InstanceStatus::Running
+            {
+                return Ok(State::Unknown);
+            }
+            let session_id = instance.session_id.as_deref().ok_or("session missing")?;
+            let expected =
+                crate::store::opencode::reference(session_id, &history::message_id(&row.id));
+            if row.turn_id.as_deref() != Some(expected.as_str()) {
+                return Ok(State::Unknown);
+            }
+            let holder = crate::runtime::files::running(store.home(), &id)
+                .map_err(|e| e.to_string())?
+                .ok_or("holder missing")?;
+            let layout = Layout::new(store.home(), &id)?;
+            let endpoint = layout.endpoint(holder).map_err(|e| e.to_string())?;
+            let http = Http::new(
+                endpoint.0,
+                &layout.password().map_err(|e| e.to_string())?,
+                &instance.working_directory,
+            )
+            .map_err(|e| e.to_string())?;
+            let session = Session::resume(http, session_id)?;
+            let (history, _) = session.history_page(16, None)?;
+            let body =
+                crate::delivery::render(&row.from_instance, row.task_id.as_deref(), &row.body);
+            let outcome = history::message_outcome(session_id, &row.id, &body, &history)?;
+            let lookup = id.clone();
+            let current = store
+                .call_blocking(move |c| crate::store::instances::get(c, &lookup))
+                .map_err(|e| e.to_string())?;
+            if current.as_ref() != Some(&instance)
+                || crate::runtime::files::running(store.home(), &id).map_err(|e| e.to_string())?
+                    != Some(holder)
+                || layout.endpoint(holder).map_err(|e| e.to_string())? != endpoint
+            {
+                return Ok(State::Unknown);
+            }
+            Ok(outcome)
+        })
+        .await
+        .map_err(|e| e.to_string())?
+    }
 }
 impl Driver for OpenCodeDriver {
     type Error = DriverError;

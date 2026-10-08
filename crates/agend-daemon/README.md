@@ -189,3 +189,13 @@ Telegram delivery 區分 in_flight 與 outcome_unknown，後者供本機 `telegr
 GitHub merge 前要求可讀的 classic branch protection：strict、非空 required checks、enforce_admins 且未要求 linear history；設定不足先受阻，daemon 不代改共享 repo。已 merge 的收據對帳維持只讀。[政策與限制](../../docs/gates/gate-12c-github.md)。
 
 本機 WIP 存檔失敗時，取消／完成當下仍回報原錯誤並保留 binding；背景 wake 可稍後重試。遠端收尾失敗另記 cleanup-remote attention，不吞掉本機存檔錯誤。
+
+第 13B 維護排他：`SqliteStore` 在建立／開啟資料庫前取得 `.agend-maintenance.lock` 的共享 flock，持有到 DB thread 關閉。服務解除安裝以排他 flock 阻止新 store 啟動，並取得既有 DB 的原生 SQLite 鎖以拒絕舊 daemon；不建立缺少的 DB、不執行 migration。鎖檔保留同一 inode，避免其他程序鎖到被替換的檔案。
+
+13C agent 環境覆寫 Claude／OpenCode 更新開關；本機版本匯入使用 `maintenance::Activity` 共享 lease，阻止解除安裝在發布期間刪資料。操作員共用設定不變，見[版本管理](../../docs/architecture/backend-versions.md)。
+
+client protocol 1.7 的 operator `message_delivery` 只讀持久化收據：message ID、sender／target、state、turn ID 與時間，不回 body、不推進狀態。供 canary 核對真正的 confirmed，尚未接完整 canary 升級流程。
+
+13C 施工中的 protocol 1.7：操作員 `send_message` 固定以 `@operator` 真人身分 queue 投遞，必填 UUID v4；`driver_status` 回傳 instance 與就緒狀態，Codex 必須有連線，unknown 不代表 idle。這些 RPC 不切換 backend 版本。
+
+正常 daemon 將執行映像固定至 home/runtime-binaries 的私有副本，holder／hook 與 shim 使用該副本；原始 binary 升級不改變本次啟動路徑。副本保留供存活 holder 使用；重連受管 backend 的啟動身分對帳尚未完成，版本准入仍關閉。

@@ -139,6 +139,67 @@ pub fn completed(
     Ok(result)
 }
 
+/// Outcome of one literal input; delivery confirmation alone is insufficient.
+/// Native OpenCode omits error on successful assistant records.
+pub fn message_outcome(
+    session: &str,
+    agend_id: &str,
+    body: &str,
+    history: &Value,
+) -> Result<agend_core::protocol::client::MessageOutcomeState, String> {
+    use agend_core::protocol::client::MessageOutcomeState as State;
+    if !confirmed(session, agend_id, body, history)? {
+        return Ok(State::Unknown);
+    }
+    // Validate every completed part, including records unrelated to this input.
+    completed(session, history)?;
+    let expected = message_id(agend_id);
+    let siblings: Vec<_> = history
+        .as_array()
+        .expect("validated")
+        .iter()
+        .filter(|row| row["info"]["role"] == "assistant" && row["info"]["parentID"] == expected)
+        .collect();
+    if siblings.iter().any(|r| !r["info"]["error"].is_null()) {
+        return Ok(State::Failed);
+    }
+    if siblings
+        .iter()
+        .any(|r| !r["info"]["time"]["completed"].is_u64())
+    {
+        return Ok(State::Unknown);
+    }
+    let responses: Vec<_> = siblings
+        .into_iter()
+        .filter(|r| r["info"]["finish"] != "tool-calls")
+        .collect();
+    if responses.len() != 1 {
+        return Ok(State::Unknown);
+    }
+    let row = responses[0];
+    let info = &row["info"];
+    if !info["error"].is_null()
+        || matches!(info["finish"].as_str(), Some("length" | "content-filter"))
+    {
+        return Ok(State::Failed);
+    }
+    if info["finish"] != "stop" {
+        return Ok(State::Unknown);
+    }
+    let parts = row["parts"].as_array().ok_or("invalid outcome parts")?;
+    let response = parts.iter().any(|p| {
+        p["type"] == "text"
+            && matches!(p["synthetic"], Value::Null | Value::Bool(false))
+            && matches!(p["ignored"], Value::Null | Value::Bool(false))
+            && p["text"].as_str().is_some_and(|t| !t.trim().is_empty())
+    });
+    Ok(if response {
+        State::Completed
+    } else {
+        State::Unknown
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::http::Http;
@@ -146,6 +207,66 @@ mod tests {
     use agend_testkit::fake_agent::opencode::Server;
     use serde_json::json;
     use std::time::Duration;
+
+    #[test]
+    fn native_model_outcome_requires_parent_success_and_real_response() {
+        use agend_core::protocol::client::MessageOutcomeState as State;
+        let history: Value =
+            serde_json::from_str(include_str!("fixtures/1.18.34-model-history.json")).unwrap();
+        let session = history[0]["info"]["sessionID"].as_str().unwrap();
+        let body = history[0]["parts"][0]["text"].as_str().unwrap();
+        let query =
+            |v: &Value| message_outcome(session, "9d65a4ec-04c2-492c-8f2b-5181513615c1", body, v);
+        assert_eq!(query(&history).unwrap(), State::Completed);
+        for (field, value) in [
+            ("parentID", json!("msg_foreign")),
+            ("finish", json!("length")),
+            ("finish", json!("tool-calls")),
+            ("error", json!({"name":"APIError"})),
+        ] {
+            let mut changed = history.clone();
+            changed[1]["info"][field] = value;
+            assert_ne!(query(&changed).unwrap(), State::Completed, "{field}");
+        }
+        let mut changed = history.clone();
+        changed[1]["info"]["time"]
+            .as_object_mut()
+            .unwrap()
+            .remove("completed");
+        assert_ne!(query(&changed).unwrap(), State::Completed);
+        for mode in ["empty", "synthetic", "foreign"] {
+            let mut changed = history.clone();
+            for p in changed[1]["parts"].as_array_mut().unwrap() {
+                if p["type"] == "text" {
+                    match mode {
+                        "empty" => p["text"] = json!("  "),
+                        "synthetic" => p["synthetic"] = json!(true),
+                        _ => p["messageID"] = json!("msg_foreign"),
+                    }
+                }
+            }
+            assert!(!matches!(query(&changed), Ok(State::Completed)), "{mode}");
+        }
+        for error in [Value::Null, json!({"name":"APIError"})] {
+            let mut changed = history.clone();
+            let mut pending = changed[1].clone();
+            pending["info"]["id"] = json!("msg_pending");
+            pending["info"]["time"]
+                .as_object_mut()
+                .unwrap()
+                .remove("completed");
+            pending["info"]["error"] = error;
+            for part in pending["parts"].as_array_mut().unwrap() {
+                part["messageID"] = json!("msg_pending");
+            }
+            changed.as_array_mut().unwrap().push(pending);
+            assert_ne!(query(&changed).unwrap(), State::Completed);
+        }
+        let mut changed = history.clone();
+        let duplicate = changed[1].clone();
+        changed.as_array_mut().unwrap().push(duplicate);
+        assert!(query(&changed).is_err());
+    }
 
     #[test]
     fn real_11834_busy_capture_keeps_three_receipts_and_two_terminal_records() {

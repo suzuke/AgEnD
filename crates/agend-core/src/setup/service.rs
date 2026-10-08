@@ -34,6 +34,25 @@ pub struct ServiceSpec {
     pub search_path: String,
 }
 
+/// Persist intent before external service-manager operations so retries reconcile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InstallPhase {
+    Prepared,
+    Registered,
+    Removing,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Installation {
+    pub version: u32,
+    pub spec: ServiceSpec,
+    pub service_path: String,
+    pub program_sha256: String,
+    pub phase: InstallPhase,
+}
+
 impl ServiceSpec {
     pub fn render(&self) -> Result<String, &'static str> {
         for path in [&self.program, &self.home, &self.user_home] {

@@ -88,6 +88,7 @@ pub struct HolderRuntime {
 struct Inner {
     home: PathBuf,
     agend: PathBuf,
+    executable_binding: Result<crate::backend_versions::ExecutableBinding, String>,
     daemon_env: Vec<(String, String)>,
     sink: EventSink,
     links: Mutex<BTreeMap<String, link::Link>>,
@@ -104,10 +105,27 @@ impl HolderRuntime {
         daemon_env: Vec<(String, String)>,
         sink: EventSink,
     ) -> Self {
+        Self::with_binding(
+            home,
+            agend,
+            daemon_env,
+            sink,
+            crate::backend_versions::ExecutableBinding::capture_running(agend),
+        )
+    }
+
+    pub(crate) fn with_binding(
+        home: &Path,
+        agend: &Path,
+        daemon_env: Vec<(String, String)>,
+        sink: EventSink,
+        executable_binding: Result<crate::backend_versions::ExecutableBinding, String>,
+    ) -> Self {
         Self {
             inner: Arc::new(Inner {
                 home: home.to_path_buf(),
                 agend: agend.to_path_buf(),
+                executable_binding,
                 daemon_env,
                 sink,
                 links: Mutex::new(BTreeMap::new()),
@@ -122,6 +140,36 @@ impl HolderRuntime {
 
     pub fn executable(&self) -> &Path {
         &self.inner.agend
+    }
+
+    /// Verifies managed artifacts using the same cwd and PATH as agent spawn.
+    pub async fn check_backend_program(
+        &self,
+        backend: agend_core::model::Backend,
+        program: &str,
+        working_directory: &str,
+    ) -> Result<(), RuntimeError> {
+        let inner = Arc::clone(&self.inner);
+        let program = program.to_owned();
+        let working_directory = working_directory.to_owned();
+        blocking(move || {
+            let path = format!(
+                "{}:{}",
+                inner.home.join("bin").display(),
+                env::launch_path(&inner.home, &inner.daemon_env.iter().cloned().collect())
+            );
+            crate::backend_versions::check_launch(
+                &inner.home,
+                backend.as_str(),
+                &program,
+                Path::new(&working_directory),
+                &path,
+                &inner.agend,
+                inner.executable_binding.as_ref(),
+            )
+            .map_err(err)
+        })
+        .await
     }
 
     /// Starts a holder for `launch` and its agent.

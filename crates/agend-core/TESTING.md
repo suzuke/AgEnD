@@ -152,3 +152,9 @@ xtask 的 `claude_1_5_envelopes_are_additive_and_receipts_keep_native_attributio
 `cargo xtask accept core` 核對 no-std 與依賴界線。初始設定交給真 daemon 設定 parser 的契約、home 選擇與檔案權限由 `agend/tests/install_home.rs` 驗證；不在 core 模擬檔案系統。
 
 `setup::service` 測 unit／XML 特殊字元跳脫、拒絕 directive 注入與保留 holder 的設定；原生 parser 驗證由 `agend/tests/install_service.rs` 完成。
+
+13C `setup::backend` 的 manifest 由 `agend/tests/backend_import.rs` 消費真 CLI producer 驗證，包括修改 backend identity 後拒絕；core 的 no-std 限制仍由 check-deps 驗證。
+
+client 1.7 新增唯讀 operator MessageDelivery 與明確 MessageDeliveryState（未知值仍為 Unknown，不視為 confirmed）。真 producer／consumer 契約見 `agend/tests/message_delivery.rs`；一般 client 最低版本仍為 1.3。
+
+CanaryReport 的收據／outcome 綁定由 agend native canary producer 測試；純驗證仍經 no-std build。

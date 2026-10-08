@@ -7,7 +7,7 @@
 
 ## 狀態
 
-**施工中：13A 回歸／13B 服務安裝**（2026-10-08）。使用者指示自行安排優先順序並建立 goal；第 12 關已合併清理。尚未完成整關驗收。
+**施工中：13B 服務安裝／13C 版本管理**（2026-10-08）。使用者指示自行安排優先順序並建立 goal；第 12 關已合併清理。尚未完成整關驗收。
 
 ## 施工順序（2026-10-08）
 
@@ -97,8 +97,35 @@
 
 日期 + 一行 + commit／PR，新的在上面。
 
+- 2026-10-08：13C runtime 保存 executable 指紋，並核實際 running image：macOS executable mapping／Linux procfs，比對 capture 前後與後續檔案身分；macOS 兩項 native binding、4 項 canary 與 5 項匯入回歸通過。覆核確認捕獲前替換缺口修補；驗證到 exec 的路徑替換仍待修，因此即使 canary 正確也維持拒絕受管啟動。Linux 新 binding 尚待原生執行（feat/g13-install，未合併）。
+
+- 2026-10-08：13C 完整 fake canary 已涵蓋三 backend：4 項共用原生程序測試通過，Claude 走真 Ready parser、MCP ACK helper、PostToolUse／Stop，再核三個不同 execution ID；缺失／重用 execution ID 的報告拒絕。歷史 fake Claude 3 項與 conformance 6 項通過，聚焦覆核未發現 blocker。未執行新真模型、未驗證認證隔離、未准入或切換版本（feat/g13-install，未合併）。
+
+- 2026-10-08：13C OpenCode 接入獨立回合證據，核對 native parentID／literal input／成功回覆及查詢前後 session／holder／endpoint；真 1.18.34 capture 反例與原生 fake CLI canary 驗證，保留不准入與不切換 fleet 的邊界。Claude outcome 與整體版本切換仍待完成（feat/g13-install，未合併）。
+- 2026-10-08：13C canary 新增獨立 message_outcome；Codex 以正式 thread history 核對單一輸入、訊息身分、成功回合與非空白回覆，排除 confirmed／idle 誤認成功；原生流程與異常證據覆核持續驗證。Claude／OpenCode outcome、版本准入與切換尚未完成（feat/g13-install，未合併）。
+- 2026-10-08：13C 受控 canary 的 fake Codex 三訊息流程與操作員 sender 命名空間通過；版本探測限制子程序建立、self-setsid 回收及路徑轉向拒絕通過 macOS／Linux ARM64 原生證據與聚焦覆核。這不是三 backend 真模型或整關認證；13B 真 launchd、13C 切換／回退、13D–E 尚未完成（feat/g13-install，未合併）。
+
 - 2026-10-08 13A home／初始設定已通過核心驗收與 fresh-context 六組對抗測試，含 32 個並行 init；13A 的 agend 回歸累計 290 項通過。13B 加入唯讀 service plan；macOS plutil 與隔離 Ubuntu 24.04／systemd 255 parser 通過，修正 WorkingDirectory 的原始路徑格式及含引號 executable 的 env exec 路徑。服務註冊、解除安裝和整關驗收仍未完成（feat/g13-install）。
 - 2026-09-29 補「從其他施工關帶來的筆記」：backend CLI 自動更新（版本漂移）與 canary——第 7 施工關交給本關，原本頁面漏記；加上使用者討論出的方向（AgEnD 保管 agent 用的版本、被動＋主動兩種偵測、canary 失敗留在舊版）與待查證事項。
+
+### 13B 施工覆核（Linux 已真測，整關尚未驗收）
+
+- 安裝／解除安裝 receipt 對帳已加入；真 CLI 的五項隔離檔案測試通過，不註冊使用者服務。
+- fresh-context source review 找出 systemd effective overrides、holder 路徑轉向、daemon 啟動前 socket 空窗三個阻擋項。
+- holder 路徑加入逐層目錄與 socket 檢查，兩個反例及八項 lifecycle 模型測試通過；仍待重新獨立覆核。
+- daemon 排他生命週期加入共享／排他維護鎖與原生 SQLite 鎖；startup 空窗反例與 42 項 store、5 項跨程序回歸通過；fresh source review 確認新 daemon 的移除排他。註冊前的探測會在呼叫 manager start 前釋鎖，僅能拒絕當時存在的 owner；競爭啟動仍由 SQLite 排他仲裁，不能宣稱原子移交。systemd 已核對實際載入的 D-Bus 屬性，原生 systemd 255 baseline／drop-in fixture 測試通過；覆核追加的「停止時隱含 reload」及「恢復設定但 MainPID 仍為外來程序」已補防護，Linux 真執行反例已通過：未載入的 ExecStop 未執行、外來 MainPID 拒絕且存活；停止／重啟 daemon 保留同一 holder，解除安裝停止自有 holder、保留資料／外來 drop-in。另以全新 home 完成直接安裝、執行中狀態及解除安裝。已加入明確刪資料路徑確認與保留鎖 inode 的清理，獨立覆核後補實際 mount identity 檢查；Linux 真 bind mount 反例已通過，外部資料保持不變；macOS 真服務驗收仍待完成。以上結果不代表 13B 或第 13 關通過。
+
+操作與刪除邊界見[服務安裝](../architecture/service-install.md)。
+
+- 2026-10-08：macOS live PID 的映射 inode／argv／home／UID／世代檢查與 native C／SDK ABI／同路徑替換反例已通過，整組服務 16 tests 通過。尚未註冊本機服務；唯一暫時 label 的 launchd 設定捕獲已備妥，待授權後執行，不代替完整 Rust daemon 驗收。
+
+13C 已加入原生副本匯入／inspect、agent 更新環境隔離及啟動前受管路徑核對；另補 1.7 唯讀 delivery 收據 API 供 canary 對帳。[介面與限制](../architecture/backend-versions.md)。套件、漂移、canary、切換／回退尚未完成。
+
+- 2026-10-08：13C 加入 Claude 原生 ACK／PostToolUse／Stop 的唯讀完成判定，以 prompt ID 綁定單次執行；SessionStart／SessionEnd 即使 replay 或延遲也會阻斷跨生命週期拼接。保存的原生證據反例與 Store 重開測試通過，獨立覆核關閉此缺口；尚未執行完整 Claude canary 或真模型。自有測試暫存／程序已核對無殘留，未合併工作區與必要證據保留。
+
+- 2026-10-08：正常 daemon 已使用固定啟動副本；原始 binary 替換後的新 holder／shim、停止 daemon 保留 holder，以及自有 Lab 清理的原生測試通過。覆核發現服務 shim ownership 需接受安裝紀錄 digest 對應的副本，已補處理與反例測試；完整回歸、跨版本重連與准入仍未完成。
+
+- 2026-10-08：固定產物下三 backend canary 4 項、服務 6 項、shim ownership 與 daemon 回歸已通過，fmt／clippy／check-deps 通過；清理確認無本批自有程序與暫存。准入仍缺重連時存活 backend 的持久啟動綁定，保留 D3／D5 既有跨版本契約，並非要求所有 holder 同 build。
 
 ## 下一步
 

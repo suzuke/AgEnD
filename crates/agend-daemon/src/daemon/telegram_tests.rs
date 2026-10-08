@@ -43,9 +43,13 @@ fn child() {
     let stopped = runtime
         .block_on(serve(
             home,
-            std::env::var_os("AGEND_TELEGRAM_TEST_EXE")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| std::env::current_exe().unwrap()),
+            {
+                let exe = std::env::var_os("AGEND_TELEGRAM_TEST_EXE")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| std::env::current_exe().unwrap());
+                let binding = crate::backend_versions::ExecutableBinding::capture_running(&exe);
+                (exe, binding)
+            },
             store,
             agend_core::policy::codex_input::CodexInputPolicy::approved(),
             Some((config, token)),

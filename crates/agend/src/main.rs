@@ -13,6 +13,7 @@
 //!
 //! Must NOT: do any work before the argv[0] dispatch.
 
+mod backend;
 mod claude;
 mod cli;
 mod debug;

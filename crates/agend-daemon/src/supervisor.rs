@@ -605,6 +605,17 @@ impl Supervisor {
     /// so their holder can only lack an agent if the agent never ran).
     async fn reconnect(&mut self, instance: &Instance, pid: u32) {
         let id = instance.id.clone();
+        if let Err(error) = self
+            .runtime
+            .check_backend_program(
+                instance.backend,
+                &instance.program,
+                &instance.working_directory,
+            )
+            .await
+        {
+            return self.fail(&id, &error.to_string()).await;
+        }
         if !self.prepare_claude(instance).await {
             return;
         }
@@ -653,6 +664,17 @@ impl Supervisor {
     /// the n-th restart, for the log.
     async fn start(&mut self, instance: &Instance, resume: bool, restart: Option<usize>) {
         let id = instance.id.clone();
+        if let Err(error) = self
+            .runtime
+            .check_backend_program(
+                instance.backend,
+                &instance.program,
+                &instance.working_directory,
+            )
+            .await
+        {
+            return self.fail(&id, &error.to_string()).await;
+        }
         if !self.prepare_claude(instance).await {
             return;
         }

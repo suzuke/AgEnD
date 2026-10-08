@@ -72,6 +72,12 @@
 
 ## 進度紀錄
 
+- 2026-10-08：13C OpenCode 接入獨立回合證據，核對 native parentID／literal input／成功回覆及查詢前後 session／holder／endpoint；真 1.18.34 capture 反例與原生 fake CLI canary 驗證，保留不准入與不切換 fleet 的邊界。Claude outcome 與整體版本切換仍待完成（feat/g13-install，未合併）。
+- 2026-10-08：13C canary 新增獨立 message_outcome；Codex 以正式 thread history 核對單一輸入、訊息身分、成功回合與非空白回覆，排除 confirmed／idle 誤認成功；原生流程與異常證據覆核持續驗證。Claude／OpenCode outcome、版本准入與切換尚未完成（feat/g13-install，未合併）。
+- 2026-10-08 13C 補 client 1.7 操作員唯讀 delivery 收據查詢，供 canary 區分受理／送出／確認；canary 執行器與升級流程尚未完成（feat/g13-install）。
+
+- 2026-10-08 13C 加入原生 backend 匯入／inspect 與 agent 更新環境隔離；daemon 建立 holder 前共用核對受管內容，未驗版本拒絕並保存失敗原因。版本漂移、canary、切換／回退仍待完成，見[版本管理](architecture/backend-versions.md)（feat/g13-install，施工中）。
+
 - 2026-10-08 第 13A 完成預設 home／安全初始設定與 290 項 agend 回歸；第 13B 唯讀 service plan 通過 macOS plist／Ubuntu systemd 原生解析。仍在施工，尚未服務註冊或整關驗收（feat/g13-install）。
 - 2026-10-08：#157 合併 `3f406f5`，完整 accept 12／獨立覆核／四個最終 CI jobs 通過，自有 worktree、分支、target 與測試程序清理；必要證據與 Claude trust entries 保留。依使用者新 goal 開始 13A：預設 home 與初始化設定，後續服務／版本／配對／發布仍待實作。
 
@@ -316,3 +322,25 @@
 2026-10-08：12D #156 四個最終 CI jobs 通過後合併為 9dbfac7；自有 worktree、branch、target 已刪除，保留必要證據。12C 嚴格 base protection、production Forge 真 GitHub submit／merge／重開收據／405 拒絕／cleanup 已通過獨立覆核；暫存遠端 repo 與 local lab 已刪。正整合已發布 Telegram v13–16，GitHub migration 改為 v17，再跑整合驗收／CI。第 12 關尚未標完成。
 
 - 2026-10-08：#157 整合 migration 17 的獨立覆核通過；完整 accept 12／四個 CI jobs 揭露終結 action 吞掉本機 WIP 存檔錯誤，修正恢復原 Refusal，保留背景 wake 及遠端收尾行為。原始失敗保留，修正後獨立回歸與完整驗收另核。
+
+- 2026-10-08：13B Linux 真服務流程與所有權反例通過：daemon 停止／重啟保留 holder、解除安裝不載入外來 ExecStop、不停止恢復設定後仍執行的外來 MainPID；另完成全新 home 直接安裝／狀態／解除安裝。13 項 Linux 服務測試、clippy 與無 std 依賴檢查通過；資料刪除確認、macOS 真驗收及 13C–E 仍待完成（feat/g13-install，尚未合併）。
+
+- 2026-10-08：13B 加入刪資料的完整 home 確認與保留鎖 inode 的清理；macOS 15 項服務／6 項 CLI、Linux 16 項服務及另跑的真 bind mount 反例通過，外部 symlink／掛載資料保持不變。獨立覆核修正掛載判定與提前釋放 SQLite 鎖；容器／專用映像／建置暫存已清，施工 worktree／target 保留待合併。macOS 真服務、13C–E 與整關驗收仍未完成（feat/g13-install）。
+
+- 2026-10-08：13B macOS live PID 防護加入 native executable 映射 inode、argv／home、UID／世代；自有 C producer 與 SDK ABI 比對、同路徑替換反例通過，整組服務 16 tests 通過。僅程序檢查，未註冊 host service；loaded launchd 定義捕獲計畫已備妥待授權，13C–E 仍未完成（feat/g13-install）。
+
+- 2026-10-08：13C canary 加入隔離執行器及原生程序清理反例；修正 macOS zombie-only 群組 EPERM、回收後不再 signal 與 daemon 結束等待上限。三項程序測試通過，完整 fake canary 因 fleet unknown 逾時仍未通過，另待正式操作員投遞與脫離群組後代清理；未執行真模型／未准入版本（feat/g13-install，未合併）。
+
+- 2026-10-08：13C 補 1.7 操作員 send_message／driver_status，真人 sender 使用 instance 不允許的 `@operator` 命名空間，歷史同名 agent 收據衝突拒絕且不改寫舊資料；身分邊界通過獨立覆核。送訊息沿用 driver 收據去重。原生 fake Codex 三訊息 canary 與版本不符案例通過，權限／內容衝突／未知 instance／重啟收據測試通過；尚待 detached descendant 清理、真 backend 身分隔離與准入切換（feat/g13-install）。
+
+- 2026-10-08：13C 版本探測加入 macOS process-fork／Linux seccomp 限制，保留執行緒而拒絕建立子程序；未回收 Child 正 PID 停止涵蓋探測程序自行切換 session。macOS 四項原生反例、fake canary 與 Linux ARM64 production 模組驗證通過，獨立覆核關閉版本探測 detached-child 缺口；容器與建置 lab 已清，Linux x86_64 真跑、實際 backend 與准入切換仍待驗（feat/g13-install）。
+
+- 2026-10-08：13C 完成判定增加 Claude ACK／PostToolUse／Stop 與原生 prompt ID 綁定，跨生命週期、重複與缺失證據拒絕；保存原生事件反例、Store 重開、fake canary／收據回歸、fmt／clippy／無 std 依賴檢查通過。此範圍獨立覆核完成，測試暫存與程序無殘留；完整 Claude canary、真模型與版本准入尚未完成（feat/g13-install，未合併）。
+
+- 2026-10-08：13C 完整 fake canary 擴至 Claude／Codex／OpenCode，4 項測試通過；Claude 經保存的 Ready 畫面、正式 channel／hook helper 跑三次 ACK→PostToolUse→Stop，Unknown 在期限內等待，Completed 必須具 execution ID。缺失／重用 execution ID 拒絕，legacy fake 3 項與 conformance 6 項通過。真模型、認證隔離、版本准入與切換仍待完成（feat/g13-install，未合併）。
+
+- 2026-10-08：13C startup executable binding 加入實際 running inode 核對，拒絕 pathname 已被替換或後續替換；macOS 兩項 binding、4 項 canary／5 項匯入回歸通過。獨立覆核指出 preflight→exec 仍有替換空窗，准入維持拒絕，下一步固定實際執行檔再開放；Linux binding 與完整版本管理尚未驗收（feat/g13-install，未合併）。
+
+- 2026-10-08：13C 正常 daemon 已接入私有固定啟動副本；原始 binary 被替換後仍能啟動 holder，daemon 停止保留 holder／副本，最後自有 Lab 清理通過。4 項 binding／snapshot 測試通過；三 backend canary 回歸為 3 通過／1 失敗：Claude 報告覆核抓到同時建置造成的 binary 身分改動，須固定產物重驗；准入仍關閉（feat/g13-install，未合併）。
+
+- 2026-10-08：固定 AgEnD 啟動副本整批重驗完成：4 項三 backend fake canary、6 項服務安裝、原生 holder 替換／存活、shim ownership 反例及 daemon 生命週期回歸通過，workspace clippy／無 std 依賴檢查通過。覆核確認 D3／D5 不要求同 build holder；准入尚缺存活 backend 與持久啟動身分對帳。自有程序／暫存無殘留，工作樹未合併保留（feat/g13-install）。

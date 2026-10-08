@@ -41,6 +41,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Map, Value, json};
 
 use super::{Args, reply_to};
+pub mod receipt_cli;
 
 pub const ESC: u8 = 0x1b;
 pub const IDLE_LINE: &str = "fake-claude: idle";
@@ -61,6 +62,7 @@ fn run_command(prompt: &str) -> Option<String> {
 }
 
 enum Event {
+    Response(Value),
     Input(Vec<u8>),
     InputClosed,
     Channel {
@@ -198,6 +200,7 @@ impl Claude {
                 },
             };
             match event {
+                Event::Response(_) => {}
                 Event::InputClosed => return Ok(()),
                 Event::Input(bytes) => {
                     for byte in bytes {
@@ -496,6 +499,9 @@ fn start_channel(cwd: &Path, name: &str, tx: Sender<Event>) -> Result<(Child, Ch
                 continue;
             };
             if message["method"] != "notifications/claude/channel" {
+                if message.get("id").is_some() {
+                    let _ = tx.send(Event::Response(message));
+                }
                 continue;
             }
             let params = &message["params"];

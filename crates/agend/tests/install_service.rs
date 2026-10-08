@@ -121,3 +121,110 @@ fn current_platform_parser_accepts_the_real_generated_definition() {
         String::from_utf8_lossy(&result.stderr)
     );
 }
+
+fn install(root: &Path) -> std::process::Output {
+    Command::new(BIN)
+        .env_clear()
+        .env("HOME", root)
+        .env("PATH", "/usr/bin:/bin")
+        .args(["service", "install", "--no-start", "--json"])
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn real_cli_prepares_private_owned_files_and_reuses_them_without_touching_data() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = TempDir::new("g13s-install").unwrap();
+    let first = install(root.path());
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stdout)
+    );
+    let value: Value = serde_json::from_slice(&first.stdout).unwrap();
+    assert_eq!(value["phase"], "prepared");
+    let record = &value["installation"];
+    let unit = Path::new(record["service_path"].as_str().unwrap());
+    let program = Path::new(record["spec"]["program"].as_str().unwrap());
+    let home = Path::new(record["spec"]["home"].as_str().unwrap());
+    assert_eq!(
+        fs::metadata(unit).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert_eq!(
+        fs::metadata(program).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+    let before = fs::metadata(program).unwrap().modified().unwrap();
+    fs::write(home.join("config.toml"), b"# user settings\n").unwrap();
+    let second = install(root.path());
+    assert!(
+        second.status.success(),
+        "{}",
+        String::from_utf8_lossy(&second.stdout)
+    );
+    assert_eq!(fs::metadata(program).unwrap().modified().unwrap(), before);
+    assert_eq!(
+        fs::read(home.join("config.toml")).unwrap(),
+        b"# user settings\n"
+    );
+    assert_eq!(fs::read_dir(home.join("service")).unwrap().count(), 3);
+}
+
+#[test]
+fn real_cli_preserves_an_edited_unit_and_agent_setup_is_refused() {
+    let root = TempDir::new("g13s-edit").unwrap();
+    let first = install(root.path());
+    assert!(first.status.success());
+    let value: Value = serde_json::from_slice(&first.stdout).unwrap();
+    let unit = Path::new(value["installation"]["service_path"].as_str().unwrap());
+    fs::write(unit, b"operator replacement").unwrap();
+    let second = install(root.path());
+    assert_eq!(second.status.code(), Some(1));
+    assert_eq!(fs::read(unit).unwrap(), b"operator replacement");
+    let agent = Command::new(BIN)
+        .env_clear()
+        .env("HOME", root.path())
+        .env("PATH", "/bin")
+        .env("AGEND_INSTANCE", "agent")
+        .args(["service", "install", "--no-start", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(agent.status.code(), Some(2));
+}
+
+#[test]
+fn data_deletion_requires_exact_confirmation_and_an_owned_receipt_before_io() {
+    let root = TempDir::new("g13s-confirm").unwrap();
+    let home = root.path().canonicalize().unwrap().join("data");
+    fs::create_dir(&home).unwrap();
+    fs::write(home.join("sentinel"), b"keep").unwrap();
+    for (extra, expected) in [
+        (vec!["--delete-data"], 2),
+        (vec!["--delete-data", "--confirm-home", "/wrong-home"], 2),
+        (vec!["--confirm-home", home.to_str().unwrap()], 2),
+        (
+            vec!["--delete-data", "--confirm-home", home.to_str().unwrap()],
+            1,
+        ),
+    ] {
+        let out = Command::new(BIN)
+            .env_clear()
+            .env("HOME", root.path())
+            .env("AGEND_HOME", &home)
+            .env("PATH", "/usr/bin:/bin")
+            .args(["uninstall", "--json"])
+            .args(extra)
+            .output()
+            .unwrap();
+        assert_eq!(
+            out.status.code(),
+            Some(expected),
+            "{}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+        assert_eq!(fs::read(home.join("sentinel")).unwrap(), b"keep");
+        assert_eq!(fs::read_dir(&home).unwrap().count(), 1);
+    }
+}

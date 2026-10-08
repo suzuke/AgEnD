@@ -181,6 +181,48 @@ impl CodexDriver {
         })
     }
 
+    /// A disconnected cached busy flag is not readiness evidence.
+    pub fn connected_busy(&self, id: &str) -> Option<bool> {
+        let links = self.inner.lock_links();
+        let link = links.get(id)?;
+        link.shared
+            .connected
+            .load(Ordering::SeqCst)
+            .then(|| link.shared.busy.load(Ordering::SeqCst))
+    }
+
+    /// Query the connected thread without sending or confirming any message.
+    pub async fn message_outcome(
+        &self,
+        row: Message,
+    ) -> Result<agend_core::protocol::client::MessageOutcomeState, DriverError> {
+        let inner = Arc::clone(&self.inner);
+        blocking(move || {
+            let id = &row.to_instance;
+            let generation = inner.lock_current().get(id).copied();
+            let instance = inner
+                .instance(id)?
+                .ok_or_else(|| DriverError::UnknownInstance(id.clone()))?;
+            let wait = inner
+                .lock_links()
+                .get(id)
+                .filter(|link| link.shared.connected.load(Ordering::SeqCst))
+                .map(Link::turns_request)
+                .ok_or_else(|| DriverError::NotConnected(id.clone()))?;
+            let turns = wait
+                .wait(Duration::from_secs(5))
+                .map_err(DriverError::Backend)?;
+            if generation.is_none()
+                || inner.lock_current().get(id).copied() != generation
+                || inner.instance(id)?.and_then(|i| i.session_id) != instance.session_id
+            {
+                return Err(DriverError::NotConnected(id.clone()));
+            }
+            Ok(super::history::message_outcome(&turns, &row))
+        })
+        .await
+    }
+
     /// Busy as the link of `id` sees it (not debounced); `None` without a link.
     pub fn busy(&self, id: &str) -> Option<bool> {
         self.inner

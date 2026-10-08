@@ -55,6 +55,18 @@ fn command(bytes: &[u8], deadline: Instant) -> io::Result<ClientCommandResultDat
             text: data(envelope.text, deadline)?,
         },
         "accepted" => CommandResult::Accepted,
+        "message_outcome" => CommandResult::MessageOutcome {
+            data: data(envelope.data, deadline)?,
+        },
+        "driver_status" => CommandResult::DriverStatus {
+            data: data(envelope.data, deadline)?,
+        },
+        "message_delivery" => CommandResult::MessageDelivery {
+            data: match envelope.data {
+                Some(raw) => parse(raw.get().as_bytes(), deadline)?,
+                None => None,
+            },
+        },
         "status" => CommandResult::Status {
             data: data(envelope.data, deadline)?,
         },

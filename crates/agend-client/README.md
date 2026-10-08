@@ -98,3 +98,7 @@ daemon 多視窗／frame 更新與 TUI 已接通，六項 fake／真 C 契約及
 ```
 
 Protocol 1.6 新增共用已讀收據：`mark_attention_read`、`attention_read` 事件與 fleet `read_keys`。識別沿用事項 ID＋問題次數；後續追問重新未讀。daemon 保存 SQLite，TUI 與 Telegram 共用；已讀不等於回答、核准或解除。舊 daemon 仍使用 TUI 本機已讀。
+
+13C client 1.7 加入 `Client::message_delivery(id, within)`：專用一次性連線查持久化收據，整個 exchange 共用期限，不重試、不回傳 body、不確認訊息。舊 daemon 在 I/O 前拒絕此能力；一般連線仍只要求 1.3。這是 canary 的觀測基礎，尚非完整 canary。
+
+13C 施工中的 protocol 1.7：操作員 `send_message` 固定以 `@operator` 真人身分 queue 投遞，必填 UUID v4；`driver_status` 回傳 instance 與就緒狀態，Codex 必須有連線，unknown 不代表 idle。這些 RPC 不切換 backend 版本。

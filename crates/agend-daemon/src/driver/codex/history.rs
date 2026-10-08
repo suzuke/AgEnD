@@ -189,6 +189,60 @@ pub fn after(turns: &[Value], events: Vec<DriverEvent>, cursor: Option<&str>) ->
         .collect()
 }
 
+/// Read-only execution evidence for an identified, already confirmed message.
+/// A failed/interrupted turn may still have confirmed its input.
+pub fn message_outcome(
+    turns: &[Value],
+    row: &Message,
+) -> agend_core::protocol::client::MessageOutcomeState {
+    use agend_core::protocol::client::MessageOutcomeState as State;
+    if row.state != DeliveryState::Confirmed {
+        return State::Unknown;
+    }
+    let Some(id) = row.turn_id.as_deref() else {
+        return State::Unknown;
+    };
+    let matches: Vec<_> = turns
+        .iter()
+        .filter(|t| t["id"].as_str() == Some(id))
+        .collect();
+    if matches.len() != 1 {
+        return State::Unknown;
+    }
+    let turn = matches[0];
+    let Some(items) = turn["items"].as_array() else {
+        return State::Unknown;
+    };
+    // The isolated queue canary has exactly one input per turn. Multiple
+    // inputs make attribution of the assistant response ambiguous.
+    let users: Vec<_> = items
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| item["type"] == "userMessage")
+        .collect();
+    if users.len() != 1
+        || !UserItem::from_item(id, users[0].1).is_some_and(|u| {
+            u.client_id.as_deref() == Some(row.id.as_str()) && u.text == text_of(row)
+        })
+    {
+        return State::Unknown;
+    }
+    match turn["status"].as_str() {
+        Some("failed" | "interrupted") => State::Failed,
+        Some("inProgress") => State::Running,
+        Some("completed")
+            if turn.get("error") == Some(&Value::Null)
+                && items[users[0].0 + 1..].iter().any(|i| {
+                    i["type"] == "agentMessage"
+                        && i["text"].as_str().is_some_and(|s| !s.trim().is_empty())
+                }) =>
+        {
+            State::Completed
+        }
+        _ => State::Unknown,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

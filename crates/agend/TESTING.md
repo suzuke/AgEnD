@@ -164,3 +164,29 @@ DRV fixture 的 actor readiness hint 不代替 daemon idle：送達前讀實際 
 第 13A 的 `tests/install_home.rs` 以隔離 HOME 執行正式 CLI：預設 socket 對真協定 producer、明確覆寫、agent 不可退回預設、init 權限／重跑保存編輯、v1 與 symlink 拒絕。所有路徑由 TempDir 擁有並清理；既有 missing-home 案例同時移除 HOME，避免碰測試執行者的真實 home。
 
 第 13B `cargo test -p agend --test install_service` 驗真 CLI 的唯讀 service plan、特殊字元與環境拒絕；macOS 使用 plutil、Linux 使用 systemd-analyze verify 解析實際產物。測試僅寫隔離 fixture，不註冊服務，不能代替 holder 存活的真服務驗收。
+
+13B 施工中的 `cargo test -p agend --bin agend service::tests` 檢查安裝 receipt 對帳、遺失註冊回覆、中斷解除安裝、外來與修改過的檔案保存。holder 路徑反例涵蓋 `run`／`run/holders` symlink 與 live lock 配上外部 socket symlink；後者用真 UnixListener 確認沒有連線，並驗證尚未呼叫 service stop。此組使用 manager 狀態模型，不能證明 launchd／systemd 真服務生命週期。`install_service` 另以真 CLI 驗 `--no-start` 的發布權限、重跑與修改後拒絕。
+
+`service::manager::systemd` 消費隔離 systemd 255 的實際 GetAll JSON：baseline 通過，drop-in 和各項有效設定變更拒絕。Linux-only `live_process_identity_uses_the_actual_executable_arguments_and_home` 以自有原生程序驗 `/proc` identity，結束會 kill/wait 精確 Child；macOS 不執行這一項；2026-10-08 已在隔離 Ubuntu 24.04／systemd 255 執行通過。該批另以正式 CLI 驗證全新安裝、daemon 重啟保留 holder、兩個 systemd 反例與預設保留資料的解除安裝；原始腳本及分段結果保存在 `AgEnD-ops/g13-install-20261008/linux-service-*.py`／`.log`。
+
+13B 資料刪除：`service::tests` 使用真 SQLite DB 與真 Git repository，驗明確刪除、鎖 inode 保留、外部 symlink 目標不變、live store／Git workspace 拒絕；`install_service` 用正式 CLI 驗缺少／錯誤路徑確認及缺 receipt 時零刪除。Linux `same_device_bind_mount_cannot_delete_external_data` 預設 ignored，必須在自有可掛載的隔離環境另以 `--ignored` 執行；一般 tests 全綠不代表該項已驗。
+
+macOS `service::manager::launchd::tests::native_process_identity_checks_executable_argv_home_and_exit` 以自有 C 程式消費真 proc API，另用當機 SDK 核 Region／RegionPath 的 ABI size／offset。驗 executable 映射 inode、精確 argv／home、UID／世代與退出；原程序仍存活時替換同一路徑 executable 必須拒絕。Child guard 精確 kill/wait、TempDir 清理，零 launchd 註冊／模型。此測試不代替 loaded definition 或真 Rust daemon 的服務驗收。
+
+13C `cargo test -p agend --test backend_import` 使用真 CLI／原生 executable 檔案驗隔離副本、重複與竄改拒絕、外部 symlink 保留、版本 identity、wrapper／agent 拒絕及維護期間零發布。不執行 backend，不代替完整 canary 驗收。
+
+13C `daemon_refuses_unverified_or_changed_managed_program_before_starting_a_holder` 以真 CLI 匯入 manifest，再啟動七個隔離 daemon case，核未驗版本、修改後 executable、外部 symlink alias、裸 PATH 命令及相對 cwd 路徑 都在 holder 建立前拒絕，停止後 DB 保留 Failed。自有 Lab 負責程序與目錄清理，沒有執行真 backend。
+
+受管路徑測試另驗 PATH 前項為 0610（owner 無執行權）時不能遮蔽後面的受管 binary，以及 ambiguous `foo/bar` 拒絕。此項需 non-root 使用者執行，以真正測到 access(X_OK) 權限語義。
+
+`cargo test -p agend --test message_delivery` 用真 Store producer 與兩次 daemon 開機驗四種 delivery state、精確 ID／對象／attempt 時間、missing 回 None、agent forbidden、無 body 及查詢不改狀態。無 backend／模型程序，Lab 清除 daemon 與 home。
+
+13C canary 施工：`cargo test -p agend --bin agend backend::canary::process::tests` 使用原生 C probe，驗證 fork／posix_spawn 拒絕而 pthread 仍可用、版本逾時回收、探測程序自行 setsid 的回收與外部 run symlink 拒絕。`backend_canary` 以既有原生 fake Codex 驗三則 confirmed、idle、版本不符拒絕、完成後沒有 canary home 與 fleet activation。`message_delivery` 另驗操作員 sender、重送相同 ID 不改內容、相同 ID 不同內容拒絕、agent 無權使用操作員 RPC 與未知 instance 不存訊息。版本探測子程序限制已通過 macOS 與 Linux ARM64 原生驗證；Linux x86_64 與真 backend 尚待驗，測試不使用真模型。
+
+- Canary 保留報告：使用原生 producer 的報告，變更 artifact／binary／平台／版本、清理結果、收據身份與狀態，以及時間順序／越界／overflow；正式 verifier 必須拒絕，inspect 顯示 invalid 且不啟用版本。
+
+Canary 必須取得三筆與 delivery 綁定的 completed outcomes；修改 failed／foreign turn／缺 outcome 必須拒絕。
+
+執行 backend_canary 前建置 `cargo build -p agend --example fake_codex` 與 `cargo build -p agend-testkit --bin fake-opencode-cli --bin fake-claude-cli`。共用測試對 Codex／OpenCode／Claude 各核三筆 delivery／outcome、錯版拒絕、報告異常與清理，不執行真模型。Claude fixture 以保存的 Ready 畫面走真 holder parser，經正式 channel helper 的 MCP ACK 回覆後才發 PostToolUse 與 Stop；ACK 到 Stop 間留延遲，但單憑延遲不宣稱一定讀到中間 Unknown 狀態。
+
+`cargo test -p agend --test pinned_launcher` 在自有短路徑 Lab 啟動正式 daemon，原地以 false 替換原始 AgEnD 路徑，再以正式 InstanceAdd 啟動 bash fixture；核對 holder 與 shim 使用固定副本、daemon 停止後 holder／副本保留，以及停止自有 holder 後整個 Lab 可清除。無模型或主機服務註冊。

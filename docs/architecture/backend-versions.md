@@ -1,0 +1,102 @@
+# Backend 版本管理（13C 施工中）
+
+> **TL;DR**
+> - `backend import` 保存獨立的原生 executable；`backend inspect` 核對保存的內容。
+> - 匯入不執行程式、不驗證宣告的版本、不切換 fleet，也不代表 canary 通過。
+> - 套件目錄、漂移偵測、canary、升級與回退仍在施工。
+
+## 目前可用
+
+```bash
+agend backend import claude --version 2.1.284 --program /absolute/path/to/claude
+agend backend inspect claude --version 2.1.284 --json
+```
+
+backend 可選 claude、codex、opencode；版本名稱限 1–80 個 ASCII 英數或 `.-_+`，首字必須英數。
+只供操作員使用，帶 `AGEND_INSTANCE` 的呼叫拒絕。
+
+副本位於 `$AGEND_HOME/backends/<backend>/<version>/program`，權限 0500；
+最後才發布 0600 的 `import.json`，記錄 backend、宣告版本、大小與 SHA-256。
+版本目錄 0700，已有目錄一律保留並拒絕覆寫。
+來源不得大於 1 GiB，必須有 ELF／Mach-O 原生格式標頭及執行權限；標頭不保證可執行或可搬移。
+匯入核對複製前後來源 identity、大小、mtime 與內容 digest，來源變動則拒絕發布。
+inspect 重新核對 manifest identity、檔案大小、權限與 digest；缺 manifest 的中斷匯入拒絕採用。
+
+shell／npm wrapper 目前拒絕，避免只複製入口卻漏掉相依套件。
+JSON 的 `canary` 回報 `not_run`、`passed` 或 `invalid`；`invalid` 附 `canary_reason`。
+inspect 重新核對報告與目前 artifact、AgEnD binary、平台及版本的綁定，並要求清理成功、三筆唯一 confirmed 收據與合法時間順序。
+超過 64 KiB、缺收據、時間越界或 overflow 均拒絕；`active` 目前一律為 false。
+報告只是當下內容檢查，不防同 UID 偽造；長期運作的 daemon 必須保留啟動時的 binary digest。
+runtime 已保存啟動 fingerprint 與檔案身分；macOS 核實際 executable mapping，Linux 核 `/proc/self/exe`，拒絕磁碟路徑已換成另一映像的情況。後續檢查不重新採納替換檔的 digest。
+正常 daemon 啟動會在 `runtime-binaries/<sha256>/agend` 建立私有、不覆寫的副本，holder、hook、shim 與重啟預設路徑共用它；副本保留供存活的 holder 使用，不能在 daemon 停止時直接刪除。目錄 0700、程式 0500；這是正常升級隔離，不防惡意同 UID 修改私有檔案。
+現有 instance 的 program 不受這兩個命令更動。
+
+新 holder 啟動前，daemon 核對指向受管目錄的 program（包含指向該檔案的 symlink alias、依 agent PATH 選定的裸名稱與依 instance cwd 解析的相對路徑）。
+內容有變或尚無 canary 的版本拒絕啟動，保存 failed 原因並顯示需要你；不先建立 holder。
+核對由 daemon 與 CLI inspect 共用，hash 工作移到 blocking pool。
+目前尚無 canary admission／切換入口，因此所有匯入版本都不能作為受管 instance 啟動。
+目前固定副本已接入正常 daemon，原始 binary 替換的原生 holder 測試通過；三 backend fake canary 回歸與固定副本覆核已通過；受管版本准入仍待重連啟動身分完成後才開放。Canary 證明目前 daemon 與匯入 artifact 的新啟動、Ready、三輪成功回應；舊 holder 的相容協定重連另循 D3，shared shim 隨 daemon 更新循 D5，不要求所有程序使用同一 AgEnD build。既有 `already_spawned` 無啟動身分，尚不能證明存活 backend 對應受管 artifact；下一步補持久啟動綁定及 holder 對帳。
+裸名稱依目前使用者的 `access(X_OK)` 選擇 PATH 中可執行檔。
+未以 `./` 或 `../` 開頭的相對 slash 路徑（如 `foo/bar`）在 shell／PTY 有歧義，要求改用絕對路徑或 `./`。
+其他非受管 program 維持既有行為；這不是任意 shell／wrapper 的執行沙箱，也尚未偵測系統 CLI 的更新。
+
+## 與資料刪除互斥
+
+匯入取得 home 共享維護鎖，整段發布完成才釋放；可與運作中的 daemon 共存。
+解除安裝刪資料需要排他維護鎖，因此不能與發布交錯。
+遇到維護中的 home 立即拒絕，操作員可等完成後重試；不自動重送。
+已發布檔案可被同一使用者修改，digest 檢查會拒絕不一致；這不是抵抗同 UID 惡意程式的隔離機制。
+
+## Agent 程序內的更新設定
+
+- Claude：`DISABLE_AUTOUPDATER=1` 與 `DISABLE_UPDATES=1`。
+- OpenCode：`OPENCODE_DISABLE_AUTOUPDATE=1`；既有 launcher 也設定 `autoupdate: false`。
+- Codex：既有 launcher 逐次傳入 `check_for_update_on_startup=false`。
+
+這些設定只套用在 AgEnD 啟動的 agent，不修改操作員共用 CLI、設定或 Claude trust entries。
+環境設定不能防止共用 executable 被其他程序更新，因此仍需隔離版本及啟動前核對。
+Claude 設定語義見[官方環境變數](https://code.claude.com/docs/en/env-vars)，
+OpenCode 見[官方 CLI 環境變數](https://opencode.ai/docs/cli/)。
+
+## Canary 收據查詢（1.7）
+
+操作員 `message_delivery` RPC 讀取 daemon 保存的 queued／sent／confirmed／failed，
+保留訊息 ID、sender／target、turn ID 與 attempted／updated 時間；不存在回 None。
+agent 禁止使用，回覆不含訊息 body。查詢不會推進任何狀態。
+client 使用一次性、有共同期限的 exchange；舊 daemon 拒絕此能力，未知狀態不算 confirmed。
+這個 API 供 canary 對帳。`backend canary --allow-model` 執行器正在施工，尚未通過完整驗證，不可用於版本准入。
+目前隔離 daemon home 與程序 HOME、核對 `--version`，並先發布失敗狀態的 canary.json；不改 fleet 或 active version。
+版本探測有 5 秒期限、8 KiB 輸出上限；工作期限與結束清理期限分開。
+版本探測只允許執行緒，不允許建立子程序：macOS 使用 sandbox-exec 的 process-fork 拒絕規則，
+Linux x86_64／aarch64 使用 seccomp，拒絕 fork／vfork 與非執行緒 clone；clone3 回 ENOSYS，允許 libc 回退到可檢查旗標的 clone。
+架構不符、工具缺失或限制安裝失敗時拒絕探測，不降級成無限制執行。
+這只保護探測程序的生命週期，不是檔案／網路沙箱；不修改父程序、其他 session 或系統服務。
+探測程序即使自行切換 session，也透過未回收的 Child PID 停止；回收後不再送訊號。
+原生測試涵蓋 fork／spawn 拒絕、執行緒允許、逾時、自行切換 session，以及在連線前拒絕外部 run 目錄。
+macOS 四項與 Linux ARM64 實際 production 模組已通過；Linux x86_64 分支本輪僅做原碼覆核，待該平台實跑。
+Linux syscall 規則依[核心 seccomp 文件](https://kernel.org/doc/html/latest/userspace-api/seccomp_filter.html)。
+1.7 新增操作員 `send_message`（固定 sender=@operator、queue、必填 UUID v4）與 `driver_status`。
+投遞沿用正式 driver 的去重／內容衝突檢查；一次性 client 不重送結果未知的請求。
+`@operator` 使用 instance 名稱不允許的 `@`，與既有名為 operator 的 agent 及歷史訊息分開。
+新操作員 RPC 不得採用同 ID 的舊 agent 訊息；衝突拒絕，不更名、刪除或改寫歷史收據。
+Codex 狀態取自已連線 driver；未連線回 unknown，不把 fleet 的 unknown 當 idle。
+其他 backend 目前使用 daemon fleet 狀態，真 backend 的就緒證據與隔離登入資料仍待驗證。
+原生 fake Codex 的三則 confirmed、逐次 idle、版本不符拒絕及暫存清理已通過；不是三家真模型認證。
+新增操作員 `message_outcome` 唯讀查詢；Codex 必須在同一 thread 的唯一 turn 中找到相同 client ID 與原訊息內容，
+並確認 completed、無 error，且 user item 之後有非空白 assistant 回覆。failed／interrupted 不因已 confirmed 或 idle 而通過。
+canary 的三筆 outcome 必須各自對上收據的 message／instance／turn；查詢不重送或確認訊息，也不回傳訊息內容。
+OpenCode 另核對 literal user、hashed message ID、assistant parentID、完成時間、finish=stop、無錯誤及非空白回覆；
+唯讀取得最新 16 筆歷史，前後核對 instance、holder 與 endpoint，較舊或缺失證據回 unknown。
+Claude 從同一資料庫快照核對 confirmed delivery、持久 ACK、單筆精確 receipt 的 native PostToolUse，
+以及相同 prompt_id 的 Stop 與非空白最後回覆；任一 SessionStart／SessionEnd 橫跨該投遞即拒絕，包含延遲／replay 紀錄。
+不讀 transcript 或共享設定。execution_id 保存 native prompt_id；delivery turn_id 仍維持 None，不偽造 backend turn。
+報告的三筆 execution_id 不得重複。Claude 另以獨立 fake CLI 經真 daemon／channel／hook helper 跑三筆 ACK→PostToolUse→Stop，初始 Ready 畫面來自保存的真 CLI 錄製。這不代替新真模型、認證隔離或啟動選單驗收。Unknown 可暫無 execution_id；Completed 必須有 ID，未完成仍受同一 deadline 約束。
+三則訊息預算不等於模型內部工具／token 的硬上限；目前未執行真模型。
+
+## 驗證與下一步
+
+`cargo test -p agend --test backend_import` 使用真 CLI 與原生 `/usr/bin/true` 檔案作 producer，
+不執行 backend；涵蓋內容與來源保存、重複匯入、竄改、路徑轉向、非法版本、wrapper、agent 拒絕及維護互斥。
+`cargo test -p agend-daemon --lib store::maintenance` 驗共享發布、store 與排他移除的生命週期。
+
+下一步接套件匯入、版本探測與漂移提醒、受控 canary、明確切換／回退，之後才驗整個 fleet 的版本管理。

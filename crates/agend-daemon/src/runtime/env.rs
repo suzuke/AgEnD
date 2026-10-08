@@ -71,6 +71,21 @@ pub fn agent_env(
     env.insert("PATH".into(), format!("{}:{rest}", bin.display()));
     env.insert("AGEND_HOME".into(), home.display().to_string());
     env.insert("AGEND_INSTANCE".into(), id.into());
+    // Only the managed agent gets these settings; never write shared backend
+    // config or mutate the operator's environment. Version promotion belongs
+    // to AgEnD's explicit upgrade/canary flow, not the backend's updater.
+    match backend {
+        Backend::Claude => {
+            env.insert("DISABLE_AUTOUPDATER".into(), "1".into());
+            env.insert("DISABLE_UPDATES".into(), "1".into());
+        }
+        Backend::Opencode => {
+            env.insert("OPENCODE_DISABLE_AUTOUPDATE".into(), "1".into());
+        }
+        // The codex launch wrapper already passes its per-launch
+        // check_for_update_on_startup=false option to both processes.
+        Backend::Codex => {}
+    }
     if matches!(backend, Backend::Codex | Backend::Opencode) {
         let zdotdir = crate::driver::codex::launch::zdotdir(home);
         env.insert("ZDOTDIR".into(), zdotdir.display().to_string());
@@ -107,6 +122,9 @@ mod tests {
             ("TELEGRAM_BOT_TOKEN", "secret"),
             ("ANTHROPIC_API_KEY", "secret"),
             ("AGEND_SHIM_BYPASS", "1"),
+            ("DISABLE_AUTOUPDATER", "0"),
+            ("DISABLE_UPDATES", "0"),
+            ("OPENCODE_DISABLE_AUTOUPDATE", "0"),
             ("AGEND_HOME", "/elsewhere"),
             ("HOME", "/Users/me"),
             ("LANG", "en_US.UTF-8"),
@@ -120,6 +138,8 @@ mod tests {
                 [
                     ("AGEND_HOME", "/h"),
                     ("AGEND_INSTANCE", "g6-1"),
+                    ("DISABLE_AUTOUPDATER", "1"),
+                    ("DISABLE_UPDATES", "1"),
                     ("HOME", "/Users/me"),
                     ("LANG", "en_US.UTF-8"),
                     ("PATH", "/h/bin:/opt/homebrew/bin:/usr/bin"),
@@ -127,13 +147,20 @@ mod tests {
                 .map(|(k, v)| (k.to_owned(), v.to_owned()))
             )
         );
-        // codex: the same plus ZDOTDIR (gate 7 P4 option A).
+        let mut common = env.clone();
+        common.remove("DISABLE_AUTOUPDATER");
+        common.remove("DISABLE_UPDATES");
+        // Backend-owned options do not leak into other backend launches.
         let mut codex = agent_env(Path::new("/h"), "g6-1", Backend::Codex, daemon.clone());
         assert_eq!(codex.remove("ZDOTDIR").as_deref(), Some("/h/zsh"));
-        assert_eq!(codex, env);
+        assert_eq!(codex, common);
         let mut opencode = agent_env(Path::new("/h"), "g6-1", Backend::Opencode, daemon);
         assert_eq!(opencode.remove("ZDOTDIR").as_deref(), Some("/h/zsh"));
-        assert_eq!(opencode, env);
+        assert_eq!(
+            opencode.remove("OPENCODE_DISABLE_AUTOUPDATE").as_deref(),
+            Some("1")
+        );
+        assert_eq!(opencode, common);
     }
 
     #[test]

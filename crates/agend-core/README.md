@@ -131,3 +131,9 @@ Protocol 1.6 新增共用已讀收據：`mark_attention_read`、`attention_read`
 Telegram team topic 保存目前任務摘要（任務、狀態與階段）；needs-you topic 保留完整請示與操作按鈕。摘要按內容對帳，重啟不重送；未 claim 的輔助通知可恢復，in-flight 未知結果不重送。既有通知綁定原 destination，改 topic 不會自動搬移舊通知。
 
 Telegram delivery 區分 in_flight 與 outcome_unknown，後者供本機 `telegram-delivery:<id>` 處置。操作員 Abandon 保存理由、原文及未知收據前綴，不確認送達、不重送；一般 agent 不可操作。daemon 開機在取得 DB 後恢復未確認意圖，本機處置不依賴 token；此類通知不經 Telegram 再投遞。
+
+13C `setup::backend` 定義匯入內容 manifest 與版本名稱驗證，沒有檔案或程序 I/O；消費端與限制見[版本管理](../../docs/architecture/backend-versions.md)。
+
+client 1.7 的 `OperatorCommand::MessageDelivery`／`MessageDeliveryData` 只表達持久化 delivery 狀態與 identity，不攜帶 body；未知狀態保留 Unknown。I/O 與權限由 daemon／client 實作。
+
+13C 施工中的 protocol 1.7：操作員 `send_message` 固定以 `@operator` 真人身分 queue 投遞，必填 UUID v4；`driver_status` 回傳 instance 與就緒狀態，Codex 必須有連線，unknown 不代表 idle。這些 RPC 不切換 backend 版本。

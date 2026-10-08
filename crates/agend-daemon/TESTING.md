@@ -225,3 +225,17 @@ Terminal frame 解碼維持原 internally-tagged serde 路徑；RawValue 優化�
 GitHub migration 17 接在已發布 Telegram 13–16 後；`github_upgrade_preserves_published_telegram_reads` 從 v16 fixture 升級，核已讀保留、GitHub ledger 初始空及 schema=17。
 
 12C 整合回歸保留 `agend/tests/pipeline_archive.rs` 的取消錯誤契約：archive 路徑故障必須回報拒絕、保留原 WIP／binding，修復後由 wake 完成；remote cleanup 失敗仍獨立釋放本機容量並等 Retry。
+
+第 13B：`cargo test -p agend-daemon --lib store::maintenance` 驗證缺少資料庫時的維護排他、DB owner 已存在但 socket 尚未建立、維護結束後重新開啟，以及未持新 flock 的原生 SQLite owner 拒絕。搭配 `--test store --test store_process` 檢查資料庫開啟、重啟與 crash 回歸；這些測試不代替真 service manager 驗收。
+
+13C `store::maintenance` 驗 Activity 可與真 SqliteStore 共存、釋放前拒絕移除、排他維護期間拒絕 Activity。`runtime::env` 及真 daemon 的 `the_agent_gets_the_whitelisted_environment_and_the_shims_first` 驗 daemon 傳入更新旗標 0 時 agent 仍取得 1；不啟動模型。
+
+13C operator delivery 收據由 `agend/tests/message_delivery.rs` 以真 CLI daemon、正式 Store 四態與重啟驗證；agent 身分拒絕，單純讀取維持 queued／sent。
+
+13C codex_driver::execution_outcome_requires_the_identified_successful_turn_and_response 使用真 fake app-server turns，再變更失敗／中斷、error、回覆缺失、身分與重複 turn；查詢前後 Store 不變，disconnect 後拒絕。
+
+13C OpenCode outcome 以保存的真 1.18.34 model history 驗 parentID、finish、error、缺完成時間、空白／synthetic／外來 part、重複 ID 拒絕；backend_canary 另啟動原生 fake-opencode-cli 驗正式 daemon／HTTP／client 全流程。
+
+Claude outcome：`driver::claude::outcome` 使用先前真測 ACK/PostToolUse/Stop 的欄位投影（fixture 附來源 SHA-256），驗缺失／重播／錯 session／空白回覆與生命週期中斷；`claude_store::execution_outcome` 以正式 reservation/ACK/event producer 驗只 ACK 不成功、Stop 後成功、查詢不改狀態與重開保存。不代表新的真 Claude 回合驗收。
+
+13C `backend_versions::tests` 核 runtime 啟動時的 executable binding：實際執行映像可辨識、相同 bytes 的不同 inode 拒絕、捕獲後原子替換不採納。macOS 實際 mapping 已原生測試；Linux `/proc/self/exe` 路徑尚待 Linux 執行。受管啟動仍拒絕，直到驗證與 exec 之間的檔案固定完成。
