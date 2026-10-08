@@ -454,3 +454,5 @@
 - 2026-10-08：CI 加入 workflow＋ref concurrency，同分支／PR 的較新提交取代舊 run，其他 workflow／分支分開。已核身分後取消本施工分支五批被取代 CI，保留 869a664 基準與獨立 release 驗收；取消不視為通過。actionlint 通過（feat/g13-install，未合併）。
 
 - 2026-10-08：13E 磁碟診斷補真 CLI sparse file 邏輯用量 >20 GB 警告／刪 fixture 後恢復，install_home 全 8 項通過。另以自有 64 MB HFS+ sparse image 實測 62 MB free→disk fail，卸載擴容 2 GB 再掛載→ok；映像已卸載刪除並核 hdiutil 無自有掛載。未填滿主機磁碟，未啟動模型。c085ddf 四平台 release 首任務及 formula 全部通過；全關 CI／真服務及模型驗收仍待完成（feat/g13-install，未合併）。
+
+- 2026-10-08：新增 `xtask demo install` 並接 `accept 13`，建置三 backend fixtures、共 52 項原生 home／service／import／switch／canary／配對案例通過。初輪首任務遇 macOS 長 socket 路徑而失敗，改 TMPDIR=/tmp 後首任務 10.292 秒完成且唯一 merge／清理通過；保留失敗 log，未重跑已通過案例。xtask tests、clippy、fmt、check-deps 通過；這是離線原生 demo，Brew／真服務／真模型與外部 Telegram 驗收仍另列（feat/g13-install，未合併）。

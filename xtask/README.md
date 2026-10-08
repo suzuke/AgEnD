@@ -26,7 +26,7 @@
 - `accept codex`：對 agend-daemon、agend-testkit、agend 跑 fmt、clippy、test（含 DRV-1..9 對 codex driver、四次開機、真 daemon 與 `sh` 包裝），再跑 check-deps，然後 build `agend` 與 example `fake_codex`、執行 `agend-daemon` 的 `codex_demo` example（`== busy`／`== idempotent`／`== crash-window`／`== approval`／`== restart`（含反向檢查）／`== resume`／`== sweep`／`== give-up`／`== app-server-dies`／`== first-start-interrupted`／`== legacy`／`== cleanup`），最後一行 `gate 7 (codex): checks passed`。不跑真 codex（`codex_live` 只有使用者手動跑）。
 - `accept client`：對 agend-client、agend-daemon、agend-testkit、agend-core、agend 跑 fmt、clippy、test（含 CLP 契約對假 daemon 與真 `agend daemon`、mutant），再跑 check-deps，然後 build `agend`、執行 `agend-daemon` 的 `client_demo` example（`== contract` 每條 `CLP-n` 印 `fake`／`real` 兩行與反向檢查，之後 `== version`／`== slow-client`／`== socket`／`== retry`／`== terminal`／`== restart`／`== cleanup`），最後一行 `gate 8 (client): checks passed`。
 - `accept tui`：對 agend-tui、agend-client、agend-daemon、agend-testkit、agend 跑 fmt、clippy、test（含 CLP-18..20 對假、真 daemon 與 mutant、TUI 對真 daemon），再跑 check-deps，然後執行 `tui_accept` example（假 daemon 經 `agend-client`：`== screens`／`== navigate`／`== resolve`／`== disconnect`／`== retry`／`== terminal`／`== input`，每段有檢查），再 build `agend`、執行 `agend` 的 `tui_real` example（真 `agend daemon`：`== real daemon`／`== retry`／`== terminal`／`== input`／`== reconnect`／`== agend app`），最後一行 `gate 11 (tui): checks passed`。
-- `demo adapters`：先建置正式 agend 與假 producer，執行 Claude driver／bridge／holder、OpenCode driver／bridge、Telegram transport／inbound／topic、daemon 關機與 Retry、G4 共用已讀、未知通知處置及 doctor 原生案例。沒有真模型或外部 API 呼叫；真測紀錄另驗。`accept adapters` 對 core／daemon／client／tui／testkit／agend 跑 checks 及 no-std，再執行 demo；GitHub forge 尚未合入，本入口不宣稱完整第 12 關通過。
+- `demo adapters`：先建置正式 agend 與假 producer，執行 Claude driver／bridge／holder、OpenCode driver／bridge、Telegram transport／inbound／topic、daemon 關機與 Retry、G4 共用已讀、未知通知處置及 doctor 原生案例。沒有真模型或外部 API 呼叫；真測紀錄另驗。`accept adapters` 對 core／daemon／client／tui／testkit／agend 跑 checks 及 no-std，再執行 demo；真測與人工驗收紀錄另見第 12 關頁。
 - 其他 `accept <施工關>`：對該施工關的 crate 跑 fmt、clippy、test，再跑 check-deps；demo 隨各施工關加入
 - `record <backend> [情境…] --sandbox <腳本>`：build `agend-record`（agend-testkit），在 `<腳本>`（寫入沙箱）裡對**真的** CLI 錄製到 `mktemp -d /private/tmp/agend-rec-out-XXXX`，再在沙箱外把成功的錄製檔複製進 `crates/agend-testkit/transcripts/<backend>/`（見 [RECORDER.md](../crates/agend-testkit/RECORDER.md)）。沒有 `--sandbox` 就不跑
 
@@ -114,10 +114,16 @@ cargo xtask accept core
 
 `cargo xtask release --out /absolute/new/directory` 要求乾淨的已提交 checkout，以 `--locked --release` 建置本機 target 的 agend，執行 `--version` 核對 Cargo metadata，再產生 tar.gz、SHA256SUMS 與 manifest.json（版本、target、source commit、binary／archive SHA-256）。支援 macOS／Linux 的 x86_64／aarch64 native build，沒有交叉執行或假稱跨平台驗證。輸出目錄必須不存在且位於 checkout 外。
 
-壓縮檔含 executable、README 與 LICENSE；暫存 payload 完成後移除。失敗可能保留尚未完成的輸出目錄，必須檢查後清理；不自動重用。此命令只打包，不建立 tag、不改服務、不上傳 GitHub。Brew／發布 workflow 與全新 HOME 五分鐘驗收仍待完成。
+壓縮檔含 executable、README 與 LICENSE；暫存 payload 完成後移除。失敗可能保留尚未完成的輸出目錄，必須檢查後清理；不自動重用。此命令只打包，不建立 tag、不改服務、不上傳 GitHub。四平台 workflow 已接上 archive 全新 HOME 五分鐘首任務（fake worker）；Brew 實際安裝與真 backend 驗收仍待完成。
 
-`.github/workflows/release.yml` 可手動建置 macOS／Linux × Intel／ARM64 原生產物，只有 contents:read 與 14 天 Actions artifacts，沒有公開發布。`scripts/verify_release.py` 核來源提交／target、archive 與 binary 雜湊、精確 tar 清單，再於暫存 HOME 執行解壓 binary 的 --version。runner 版本是建置環境，不表示已驗所有較舊 OS；四平台實跑與 Brew 接線仍待驗證。
+`.github/workflows/release.yml` 可手動建置 macOS／Linux × Intel／ARM64 原生產物，只有 contents:read 與 14 天 Actions artifacts，沒有公開發布。`scripts/verify_release.py` 核來源提交／target、archive 與 binary 雜湊、精確 tar 清單，再於暫存 HOME 執行解壓 binary 的 --version。runner 版本是建置環境，不表示已驗所有較舊 OS；四平台已實跑，Brew formula 生成已接線；實際 Brew 安裝仍待驗證。
 
 `release_formula.py --artifacts <四個 native artifact 子目錄的父目錄> --commit <40 字元 SHA> --out <新 agend.rb>` 重新核對 archive 後生成四平台 Brew formula。URL 使用 `v<version>` Release，並不代表該 Release 已存在；0.0.0 產物仍只供施工驗證。workflow 在四個 native jobs 成功後產生並做 Ruby 語法檢查；施工分支的發布相關檔案 push 也會觸發。沒有 brew services／post_install／帳戶設定變更。
 
 使用者安裝方式、Actions 與 Brew 產物的驗證／發布邊界見 [安裝文件](../docs/install-release.md)。
+
+## 第 13 關原生 demo
+
+`cargo xtask demo install` 建置正式 agend、fake-worker 與 pipeline_probe，從 Cargo 的 artifact 訊息取得執行檔路徑。依序執行 home／doctor、服務定義、backend import／switch／canary、Telegram 配對與服務 lifecycle 模型案例，再以全新 HOME 執行 init、首任務、唯一 merge 及清理。`accept 13` 在一般 crate checks 與 check-deps 後呼叫同一入口。
+
+測試只用隔離目錄、假 backend 與本機 Telegram producer，不註冊主機服務或呼叫真模型。archive 四平台驗證另由 release workflow 執行；Brew install、真服務與真 backend／Telegram 驗收不可由此 demo 的成功取代。

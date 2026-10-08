@@ -66,3 +66,9 @@ cargo test -p xtask
 發布 workflow 修改後跑 `actionlint .github/workflows/release.yml`。對真正由 `xtask release` 產生的本機產物跑 `python3 -B scripts/test_verify_release.py /absolute/artifact-directory`：先通過原始產物，再拒絕錯 commit／target／archive hash／binary hash／checksum、額外檔案與 symlink；每個竄改副本在結束時清除。此測試不等於四平台發布或全新環境首任務驗收。
 
 Brew generator 的完整成功路徑需要四個真正的 native 產物；不得以改 target 名稱的本機 binary 宣稱跨平台通過。本機已用正式 macOS archive 確認缺平台時拒絕；workflow aggregate job 重驗同 commit／version 與各 hash，並跑 ruby -c。Brew 實際安裝仍須另外驗收。
+
+## 第 13 關原生 demo
+
+`cargo xtask demo install` 建置正式 agend、fake-worker 與 pipeline_probe，從 Cargo 的 artifact 訊息取得執行檔路徑。依序執行 home／doctor、服務定義、backend import／switch／canary、Telegram 配對與服務 lifecycle 模型案例，再以全新 HOME 執行 init、首任務、唯一 merge 及清理。`accept 13` 在一般 crate checks 與 check-deps 後呼叫同一入口。
+
+測試只用隔離目錄、假 backend 與本機 Telegram producer，不註冊主機服務或呼叫真模型。archive 四平台驗證另由 release workflow 執行；Brew install、真服務與真 backend／Telegram 驗收不可由此 demo 的成功取代。
