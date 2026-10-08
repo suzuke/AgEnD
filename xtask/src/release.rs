@@ -154,6 +154,7 @@ fn package(
         let archive = format!("{name}.tar.gz");
         output(
             Command::new("tar")
+                .env("COPYFILE_DISABLE", "1")
                 .args(["-czf"])
                 .arg(out.join(&archive))
                 .arg("-C")
@@ -257,6 +258,21 @@ mod tests {
             serde_json::from_slice(&fs::read(out.join("manifest.json")).unwrap()).unwrap();
         let archive = out.join(manifest["archive"].as_str().unwrap());
         assert_eq!(manifest["archive_sha256"], digest(&archive).unwrap());
+        let listing = output(Command::new("tar").arg("-tzf").arg(&archive)).unwrap();
+        let mut entries: Vec<_> = listing
+            .lines()
+            .map(|line| line.trim_end_matches('/'))
+            .collect();
+        entries.sort();
+        assert_eq!(
+            entries,
+            vec![
+                "agend-0.0.0-test-native",
+                "agend-0.0.0-test-native/LICENSE",
+                "agend-0.0.0-test-native/README.md",
+                "agend-0.0.0-test-native/agend"
+            ]
+        );
         let extracted = dir.0.join("extracted");
         fs::create_dir(&extracted).unwrap();
         output(
