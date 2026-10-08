@@ -267,3 +267,5 @@ Claude outcome：`driver::claude::outcome` 使用先前真測 ACK/PostToolUse/St
 `backend_switch::commit_and_restore_keep_all_delivery_paused_until_exact_activation_snapshot` 以三 backend × 啟用／回滾路徑，重開正式 SQLite 後驗 channel／Stop、Codex、OpenCode 與 inbox 保持暫停；精確新意圖／Running 快照才放行。過期 PID、舊 launch、不同 artifact、第二次 finish／新 prepare／cancel 都不能提前釋放；這是 Store 契約，不是實際 backend 啟動驗收。
 
 `agend/tests/terminal_hub.rs` 的 pending_backend_switch 案例在啟動前以正式 Store 保存 Prepared，daemon 啟動後驗 acquire／resize／input／legacy 拒絕、唯讀可用，正式 cancel RPC 後恢復；不是 canary 或 managed holder 身分驗證。backend_switch_drain 案例用真 holder／PTY 暫停讀取製造背壓，確認控制請求返回前排空未完成，放行後核完整 bytes；持有真控制權時即使 Prepared 也可 release。
+
+`codex_driver::fresh_thread_idle_requires_terminal_native_turns_and_a_live_connection` 對 fake app-server 的真 socket 核空 thread、執行中、完成、斷線；從 producer 的回合與分頁做缺欄／未知狀態反例，不以 cached busy 判閒置。這不是受管 holder 停止或真模型 smoke。

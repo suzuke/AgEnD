@@ -604,3 +604,61 @@ fn a_retired_native_worker_remains_active_after_the_bounded_close_wait() {
         std::thread::sleep(Duration::from_millis(5));
     }
 }
+
+#[test]
+fn fresh_thread_idle_requires_terminal_native_turns_and_a_live_connection() {
+    use agend_daemon::driver::codex::history::all_turns_terminal;
+    use serde_json::json;
+    let lab = lab();
+    let backend = codex::Backend::new(&lab.home(73), "idle-proof", Duration::from_secs(2)).unwrap();
+    let fixture = codex::Fixture::boot(&backend).unwrap();
+    assert!(block_on(fixture.driver.thread_idle(&backend.id)).unwrap());
+    fixture
+        .deliver("idle-message", "Respond briefly", BusyLevel::Queue)
+        .unwrap();
+    assert!(!block_on(fixture.driver.thread_idle(&backend.id)).unwrap());
+    fixture.settle(1).unwrap();
+    assert!(block_on(fixture.driver.thread_idle(&backend.id)).unwrap());
+    let turns = backend.turns(&fixture.thread().unwrap()).unwrap();
+    assert!(!turns.is_empty());
+    assert!(all_turns_terminal(&turns));
+    let page = backend
+        .probe()
+        .unwrap()
+        .call(
+            "thread/turns/list",
+            json!({"threadId": fixture.thread().unwrap(), "cursor": null, "limit": 100}),
+        )
+        .unwrap();
+    use agend_daemon::driver::codex::history::turn_page;
+    assert!(turn_page(&page).is_ok());
+    for key in ["data", "nextCursor"] {
+        let mut changed = page.clone();
+        changed.as_object_mut().unwrap().remove(key);
+        assert!(turn_page(&changed).is_err());
+        changed[key] = json!(false);
+        assert!(turn_page(&changed).is_err());
+    }
+    for status in ["inProgress", "future-state", ""] {
+        let mut changed = turns.clone();
+        changed[0]["status"] = json!(status);
+        assert!(!all_turns_terminal(&changed));
+    }
+    let mut changed = turns.clone();
+    changed[0].as_object_mut().unwrap().remove("status");
+    assert!(!all_turns_terminal(&changed));
+    let mut changed = turns;
+    changed[0]["id"] = json!("");
+    assert!(!all_turns_terminal(&changed));
+    let original = fixture.thread().unwrap();
+    block_on(
+        fixture
+            .store
+            .set_session_id(&backend.id, "different-thread"),
+    )
+    .unwrap();
+    assert!(block_on(fixture.driver.thread_idle(&backend.id)).is_err());
+    block_on(fixture.store.set_session_id(&backend.id, &original)).unwrap();
+    fixture.driver.disconnect(&backend.id);
+    assert!(block_on(fixture.driver.thread_idle(&backend.id)).is_err());
+}

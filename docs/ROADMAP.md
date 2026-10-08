@@ -388,3 +388,5 @@
 - 2026-10-08：holder 啟動改為只在既有 AGEND_HOME 建立 run／holders 子目錄，避免延遲啟動重建已清理 home。原生子程序在 exec 前停住、刪 home 後放行，核拒絕且無目錄復活；holder 65 項、holder_process 8 項、holder_runtime 10 項及 clippy／check-deps 通過。兩個已發現的自有晚啟動 holder 與 home 已確認消失；此修正不宣稱解決並行啟動 5 秒逾時（feat/g13-install，未合併）。
 
 - 2026-10-08：遠端 b54099a 的 Ubuntu／macOS CI 均停在 testkit 的舊 Hello 版本清單斷言；同步為目前 1.3–1.8，保留精確錯誤內容與 EOF 檢查。agend-testkit 全套 116 項、clippy／check-deps 通過；新 head 完整 CI 尚待執行（feat/g13-install，未合併）。
+
+- 2026-10-08：13C Codex 新增 thread_idle，透過既有連線查完整回合，核 session／連線物件／generation／instance 未變，只認 completed／failed／interrupted；分頁缺 data 或 nextCursor 拒絕，不當空閒。原生 fake app-server 驗空 thread／busy／完成／session 變更／斷線與 producer 變異反例，Codex driver 19 項通過；daemon 單元 185 項通過（1 項既有 ignored）。這是閒置觀察，尚須 supervisor 暫停／排空、受管 holder 身分與完整換版／恢復接入（feat/g13-install，未合併）。

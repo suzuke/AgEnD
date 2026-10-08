@@ -229,3 +229,5 @@ Codex 的 `workers_stopped` 追蹤連線建立與已移出 link 表但仍在退�
 13C Committed／Restoring 仍暫停新投遞；只有 native readiness 呼叫者提供且 DB 核對未變的 Running instance、PID／session、新 launch 意圖及目標 artifact，`finish_backend_switch` 才記 Activated／RolledBack 並恢復。原啟動 UUID、過期快照與未完成切換覆寫會拒絕；Store 不代替 native readiness，完整 supervisor 編排待接。
 
 13C 正式 TerminalHub 在完整終端 acquire／resize／input 與 legacy input 執行前查持久切換暫停；唯讀 frame／viewport 與 release 保留。操作先加入同一排空範圍再查 DB，所以競爭中的操作不是被拒絕，就是被先前回覆排空捕捉。完整終端追蹤到 holder 控制請求返回；legacy guard 隨實際 blocking write 工作持有。這仍不代表遠端回合結束；失敗／斷線不能當成 native readiness。
+
+Codex `thread_idle` 透過目前連線重讀完整分頁回合，核連線物件、generation 與 instance 快照未變；僅已知終止狀態可判閒置，缺失／異常分頁拒絕。這是當下 thread 觀察，呼叫者仍須先暫停並排空輸入、核受管 holder 身分；尚未接入換版 coordinator。

@@ -100,6 +100,7 @@ impl Shared {
 /// The driver's handle on a link thread.
 pub(crate) struct Link {
     id: String,
+    pub session_id: String,
     commands: Option<Sender<Command>>,
     pub shared: Arc<Shared>,
     thread: Option<JoinHandle<()>>,
@@ -338,6 +339,7 @@ impl Worker {
     pub fn spawn(self, sink: CodexSink, activity: Arc<()>) -> std::io::Result<Link> {
         let shared = Arc::clone(&self.shared);
         let id = self.id.clone();
+        let session_id = self.thread.clone();
         let (tx, rx) = mpsc::channel();
         let (done_tx, done) = mpsc::channel();
         let thread = std::thread::Builder::new()
@@ -349,6 +351,7 @@ impl Worker {
             })?;
         Ok(Link {
             id,
+            session_id,
             commands: Some(tx),
             shared,
             thread: Some(thread),
@@ -678,14 +681,18 @@ impl Worker {
                 // yet; thread/turns/list is unavailable before first user
                 // message`, codex_live 2026-09-28): no turns.
                 Err(RpcError::Rpc { code, message })
-                    if code == INVALID_REQUEST && message.contains("not materialized yet") =>
+                    if code == INVALID_REQUEST
+                        && message.contains("not materialized yet")
+                        && turns.is_empty()
+                        && cursor.is_null() =>
                 {
                     return Ok(Vec::new());
                 }
                 Err(e) => return Err(e),
             };
-            turns.extend(page["data"].as_array().cloned().unwrap_or_default());
-            match page["nextCursor"].as_str() {
+            let (data, next) = super::history::turn_page(&page).map_err(RpcError::Transport)?;
+            turns.extend(data.iter().cloned());
+            match next {
                 Some(next) => cursor = json!(next),
                 None => {
                     turns.reverse();

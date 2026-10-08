@@ -224,6 +224,50 @@ impl CodexDriver {
             .then(|| link.shared.busy.load(Ordering::SeqCst))
     }
 
+    /// Fresh read-only thread snapshot, never a cached busy flag. The caller
+    /// must pause all input, drain writers, and separately verify the managed
+    /// holder identity before using this observation to stop a backend.
+    pub async fn thread_idle(&self, id: &str) -> Result<bool, DriverError> {
+        let inner = Arc::clone(&self.inner);
+        let id = id.to_owned();
+        blocking(move || {
+            let generation = inner.lock_current().get(&id).copied();
+            let instance = inner
+                .instance(&id)?
+                .ok_or_else(|| DriverError::UnknownInstance(id.clone()))?;
+            if instance.session_id.is_none()
+                || instance.backend != Backend::Codex
+                || instance.status != crate::store::InstanceStatus::Running
+            {
+                return Err(DriverError::NotConnected(id));
+            }
+            let (shared, wait) = inner
+                .lock_links()
+                .get(&id)
+                .filter(|link| {
+                    link.shared.connected.load(Ordering::SeqCst)
+                        && instance.session_id.as_deref() == Some(link.session_id.as_str())
+                })
+                .map(|link| (Arc::clone(&link.shared), link.turns_request()))
+                .ok_or_else(|| DriverError::NotConnected(id.clone()))?;
+            let turns = wait
+                .wait(Duration::from_secs(5))
+                .map_err(DriverError::Backend)?;
+            let same_link = inner.lock_links().get(&id).is_some_and(|link| {
+                Arc::ptr_eq(&shared, &link.shared) && link.shared.connected.load(Ordering::SeqCst)
+            });
+            if !same_link
+                || generation.is_none()
+                || inner.lock_current().get(&id).copied() != generation
+                || inner.instance(&id)?.as_ref() != Some(&instance)
+            {
+                return Err(DriverError::NotConnected(id));
+            }
+            Ok(!shared.busy.load(Ordering::SeqCst) && super::history::all_turns_terminal(&turns))
+        })
+        .await
+    }
+
     /// Query the connected thread without sending or confirming any message.
     pub async fn message_outcome(
         &self,

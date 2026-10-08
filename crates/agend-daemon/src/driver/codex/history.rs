@@ -28,6 +28,31 @@ use serde_json::Value;
 use crate::delivery::render;
 use crate::store::Message;
 
+/// Validate a native history page before treating it as an idle observation.
+pub fn turn_page(page: &Value) -> Result<(&[Value], Option<&str>), String> {
+    let data = page["data"]
+        .as_array()
+        .ok_or("thread/turns/list omitted its data array")?;
+    let cursor = match page.get("nextCursor") {
+        Some(Value::Null) => None,
+        Some(Value::String(cursor)) if !cursor.is_empty() => Some(cursor.as_str()),
+        _ => return Err("thread/turns/list omitted or malformed nextCursor".into()),
+    };
+    Ok((data, cursor))
+}
+
+/// Only explicit terminal statuses prove that no returned turn is running.
+/// Unknown/malformed statuses fail closed; an empty newly started thread is idle.
+pub fn all_turns_terminal(turns: &[Value]) -> bool {
+    turns.iter().all(|turn| {
+        turn["id"].as_str().is_some_and(|id| !id.is_empty())
+            && matches!(
+                turn["status"].as_str(),
+                Some("completed" | "failed" | "interrupted")
+            )
+    })
+}
+
 /// One user message of the thread.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UserItem {
