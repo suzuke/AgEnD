@@ -470,3 +470,5 @@
 - 2026-10-08：CI 37749079770 Ubuntu 通過、macOS version probe 斷言失敗；舊斷言未印實際錯誤，根因尚未證實。probe 清理失敗時保留原始錯誤、斷言印錯誤，時間斷言涵蓋 250 ms probe 加 2 秒清理預算（未延長實際期限）。本機 binary 37 項及 workspace clippy 通過，macOS CI 待重驗（feat/g13-install，未合併）。
 
 - 2026-10-08：13C 新增專用 --auth-file 私有副本與 canary HOME／Codex／Claude 環境隔離；啟動前核完整 scope 的 program／args，正常 fleet 不新增憑證白名單。Codex 模型用 app-server 支援的 -c model=…；三個真 native fake consumers 核實收到模型測試對應的認證與私有路徑，缺副本不得跳過。最後 7 項 canary 案例、binary 37 項、workspace clippy 與補強後 testkit clippy／fmt／check-deps 通過；來源不變且自有 lab／程序清理。未讀真憑證、未呼叫模型；真測與最終 fresh verifier 仍待完成（feat/g13-install，未合併）。
+
+- 2026-10-08：3f52828 的 macOS CI（37753100715）通過前輪 doctor timeout 案例，但 canary session-move 測試失敗；未印實際錯誤，根因仍待 CI 蒐證。補 probe 退出狀態與原生 fixture 的 setpgid／setsid 階段診斷，期限及必須真正 detached／回收的斷言不變。本機四個 process 案例通過，不據此宣稱已修復 CI（feat/g13-install，未合併）。

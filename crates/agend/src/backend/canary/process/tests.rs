@@ -139,8 +139,20 @@ fn a_probe_that_moves_itself_to_a_new_session_is_still_reaped() {
         r#"
 #include <unistd.h>
 #include <stdio.h>
+#include <errno.h>
 int main(void) {
-    if (setpgid(0, getpgid(getppid())) || setsid() < 0) return 2;
+    FILE *d = fopen("session-progress", "w");
+    if (!d) return 4;
+    fprintf(d, "pid=%d parent=%d group=%d parent_group=%d\n",
+        getpid(), getppid(), getpgid(0), getpgid(getppid()));
+    fflush(d);
+    if (setpgid(0, getpgid(getppid()))) {
+        fprintf(d, "setpgid errno=%d\n", errno); fclose(d); return 2;
+    }
+    if (setsid() < 0) {
+        fprintf(d, "setsid errno=%d\n", errno); fclose(d); return 2;
+    }
+    fputs("detached\n", d); fclose(d);
     FILE *f = fopen("detached-self", "w");
     if (!f) return 3;
     fputs("ready", f); fclose(f);
@@ -159,13 +171,15 @@ int main(void) {
             .unwrap()
             .success()
     );
+    // The production deadline is unchanged; on failure distinguish startup,
+    // group movement and cleanup without logging backend output or credentials.
+    let error = lab
+        .version(&program, Instant::now() + Duration::from_secs(5))
+        .unwrap_err();
     assert!(
-        // Use the production probe budget: first execution of a newly linked
-        // native binary may take longer than 500 ms on a loaded macOS runner.
-        // The ready marker below still proves setsid ran before cleanup.
-        lab.version(&program, Instant::now() + Duration::from_secs(5))
-            .unwrap_err()
-            .contains("timed out")
+        error.contains("timed out"),
+        "{error}; fixture progress: {:?}",
+        fs::read_to_string(lab.home.join("session-progress"))
     );
     assert_eq!(fs::read(lab.home.join("detached-self")).unwrap(), b"ready");
     lab.cleanup().unwrap();

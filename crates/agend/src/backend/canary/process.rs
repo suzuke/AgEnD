@@ -95,7 +95,7 @@ impl Lab {
                 let status = stop_probe(self.probe.as_mut().unwrap())?;
                 self.probe = None;
                 if !status.success() {
-                    return Err("backend version probe failed".into());
+                    return Err(format!("backend version probe failed ({status})"));
                 }
                 return fs::read_to_string(output)
                     .map_err(|_| "backend version output is not UTF-8".into());
