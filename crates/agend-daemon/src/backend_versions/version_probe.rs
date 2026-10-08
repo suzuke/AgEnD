@@ -291,11 +291,8 @@ int main(void) {{
             root.path(),
             "while :; do printf 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'; done",
         );
-        assert!(
-            probe(&path, Duration::from_secs(2))
-                .unwrap_err()
-                .contains("output exceeds")
-        );
+        let error = probe(&path, Duration::from_secs(2)).unwrap_err();
+        assert!(error.contains("output exceeds"), "{error}");
         // The direct shell exits, but its native sleep child retains both pipes.
         let pid_file = root.path().join("descendant");
         script(

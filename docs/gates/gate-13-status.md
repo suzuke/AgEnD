@@ -41,6 +41,9 @@ doctor 逐項覆蓋與缺口見 [故障／修復矩陣](gate-13-doctor-matrix.md
 
 - 2026-10-08：`40df658` 補雙 monitor 正式 daemon 停機驗收；兩種完成順序通過，兩個丟棄 worker handle 的 mutation 均被抓出。daemon lib 223 通過／2 子程序入口 ignored、workspace clippy／fmt／check-deps 通過；自有程序與暫存不存在。上述程式已包含於 f08fe43 的完整自動驗收與雙平台 CI；後續提交仍需自己的驗證。
 
+
+- 2026-10-08：7907e7e 的 accept install 在 daemon version probe 輸出上限斷言失敗（222 通過、1 失敗、2 ignored），當時斷言未印實際錯誤。只補錯誤診斷，未改期限或 production；daemon lib 重跑 223 通過／2 ignored，一次 8 並行、32 案例探測未重現，精確核自有目錄與程序無殘留。根因仍未知，不把重跑視為修復；該次整關驗收維持失敗（PR #158）。
+
 ## 授權與清理邊界
 
 - 可繼續：feature branch 實作、隔離測試、push／draft PR／CI。
