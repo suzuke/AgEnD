@@ -9,6 +9,7 @@ on:
       - .github/workflows/release.yml
       - scripts/*release*.py
       - xtask/src/release.rs
+      - crates/agend-daemon/examples/pipeline_probe.rs
 
 permissions:
   contents: read
@@ -56,6 +57,26 @@ jobs:
           --target "$EXPECTED_TARGET"
       - name: Reject corrupted copies of the native artifact
         run: python3 -B scripts/test_verify_release.py "$RELEASE_OUT"
+      - name: Install Linux checks sandbox
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          if test -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+      - name: Build native acceptance fixtures
+        run: |
+          cargo build --locked -p agend-testkit --bin fake-worker
+          cargo build --locked -p agend-daemon --example pipeline_probe
+      - name: Fresh HOME to first task using the extracted release
+        run: >-
+          python3 -B scripts/release_install_smoke.py
+          --directory "$RELEASE_OUT"
+          --commit "$GITHUB_SHA"
+          --target "$EXPECTED_TARGET"
+          --probe "$CARGO_TARGET_DIR/debug/examples/pipeline_probe"
+          --worker "$CARGO_TARGET_DIR/debug/fake-worker"
       - uses: actions/upload-artifact@v4
         with:
           name: agend-${{ matrix.target }}-${{ github.sha }}

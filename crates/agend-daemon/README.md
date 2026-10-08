@@ -257,3 +257,5 @@ OpenCode 版本核對：受管程式使用匯入 artifact 的版本（supervisor
 13D 配對驗證已加入純邏輯與 notifier adapter：10 分鐘 nonce、GetMe 身分、直接人類 /start、時間／目的地核對、精確操作員確認後產生 token reference／單一 user allowlist 設定。觀察與確認重查 bot，拒絕中途換 bot；群組 topic 綁 message_thread_id。SQLite schema 20 另保存單一配對收據，候選對象與更新游標同交易發布；過期、舊快照或已關閉操作拒絕。CLI／RPC 已接入，設定套用由操作員 CLI 的 setup apply 完成，也未執行真 Telegram。daemon 不改寫人寫的 config.toml（D8）；設定套用由操作員 CLI 負責。
 
 13D `PairingService` 串行執行 HTTP 與 SQLite 發布；caller 取消不釋放正在執行的操作，後續請求以 Status 查收據。已配置 notifier 時拒絕 Begin／Poll／Confirm，避免兩個 getUpdates consumer；停止介面先關閉准入再等待發布。此服務已接 daemon 啟停及 protocol 1.9 操作員 RPC；停止時關閉准入並等待既有發布，之後才停止 server。
+
+13E 的 `pipeline_probe install` 強制指定 AGEND_BIN，先在全新 HOME 以該 binary init，再共用正式 pipeline fixture 驗首任務及清理。這是已安裝 binary 的 native fake-worker smoke；不啟動真模型或主機服務。
