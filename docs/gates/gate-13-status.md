@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 第 13 關仍未完成、未核准合併；PR #158 是 draft。
 > - 功能提交、局部測試、整關驗收與真環境驗收分別記錄，不能互相替代。
-> - 下一步：完成當前 accept install，處理以下缺口，再交付 final fresh verifier 與逐步人工驗收。
+> - 下一步：處理 accept install 與 CI 的失敗，完成以下缺口，再交付 final fresh verifier 與逐步人工驗收。
 
 此頁整理 2026-10-08 的當前狀態；歷史過程保留在 [施工關紀錄](gate-13-install.md)。
 
@@ -20,7 +20,9 @@
 
 ## 當前自動驗收
 
-- `cargo xtask accept install` 在本機提交 `21ecf59` 啟動；結果以程序結束狀態及完整 log 為準，啟動不算通過。執行期間另修正 fake-worker 的 --version 入口，故本輪不得冒充固定舊 head 的全套證據。
+- `cargo xtask accept install` 在 `21ecf59` 啟動，已以 exit 1 結束：`backend_canary` 16 通過、1 失敗，Codex 假 CLI 的版本探測逾時；尚未到 install demo。執行期間另提交 fake-worker 修正，故本輪也不是固定 head 的全套證據。
+- `9a8bcf7` 的 macOS CI 在 pipeline 有兩項失敗（WIP 未封存、預期 rework 卻首次完成）。`e64e629` 修正 fake-worker 的版本查詢誤入 inbox；獨立 source review 確認此路徑與兩項症狀相符。修正後已重建 fake-worker，固定程式 head `e64e629` 的完整 pipeline 15 項重驗通過；新 head CI 尚待完成。
+- Codex canary 原失敗案例在 `e64e629` 單獨執行通過（14.81 秒，版本探測仍限 5 秒）。這只證明單例可通過，尚未確認原逾時根因；正在以原預設並行方式診斷整個 backend_canary suite，不把重跑成功當作問題已修好。
 - `backend_version_monitor` 已納入 install demo；它不註冊主機服務、不啟動真 backend、不讀真認證。
 - 新測試若在 CI 之前提交，舊 head 的綠燈不能代表新 head 通過；仍在跑的 CI 不因觀察逾時重啟。
 - 最終 fresh verifier 必須重跑並嘗試推翻；目前逐批 read-only source review 不能冒充最終驗證。

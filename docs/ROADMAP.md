@@ -504,3 +504,5 @@
 - 2026-10-08：第 13 關新增 [目前證據與缺口](gates/gate-13-status.md)，分開 13A–E 已有實作、局部／原生測試、真環境驗收、最終 fresh verifier 與授權；修正外部版本偵測的過時敘述。21ecf59 的 accept install 正在原程序執行，尚不宣告通過（feat/g13-install，未合併）。
 
 - 2026-10-08：整套 accept install 執行期間，source audit 發現 fake-worker 不識別 --version，背景探測可能啟動第二份 inbox consumer。fixture 加入立即回傳版本的入口；真子程序測試核無 agend 呼叫 marker、無游標寫入且限時退出。這是驗收 fixture 修正，不改真 backend／認證；本輪整套驗收始於21ecf59、期間加入此修正，不能宣稱固定舊 head 全套證據（feat/g13-install，未合併）。
+
+- 2026-10-08：收齊版本監測整關驗收失敗：Codex 假 backend 版本 probe 逾時；macOS CI pipeline 兩項失敗與舊 fake-worker 搶 inbox 路徑相符。重建 e64e629 fixture 後 pipeline 15/15 通過；Codex 原失敗單例通過但根因未定，保留失敗與診斷證據，整關仍未通過（feat/g13-install）。

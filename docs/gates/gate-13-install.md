@@ -295,3 +295,5 @@ Brew 原生安裝驗證已接入 release workflow 的 macOS ARM64／Linux x86_64
 - 2026-10-08：新增 backend_version_monitor 真 daemon 三次啟動驗證：原生 probe 保存歷史基準後改磁碟版本，worker／ingest／socket 自行產生提醒；第二次保留 ID、拒 agent 與錯 action、操作員確認；第三次不重現，每次停機重開 SQLite 核值且無 holder 殘留。原生案例通過並納入 xtask accept install；不等於 launchd／systemd 服務重啟或真模型驗收（feat/g13-install，未合併）。
 
 - 2026-10-08：整套 accept install 執行期間，source audit 發現 fake-worker 不識別 --version，背景探測可能啟動第二份 inbox consumer。fixture 加入立即回傳版本的入口；真子程序測試核無 agend 呼叫 marker、無游標寫入且限時退出。這是驗收 fixture 修正，不改真 backend／認證；本輪整套驗收始於21ecf59、期間加入此修正，不能宣稱固定舊 head 全套證據（feat/g13-install，未合併）。
+
+- 2026-10-08：收齊版本監測整關驗收失敗：Codex 假 backend 版本 probe 逾時；macOS CI pipeline 兩項失敗與舊 fake-worker 搶 inbox 路徑相符。重建 e64e629 fixture 後 pipeline 15/15 通過；Codex 原失敗單例通過但根因未定，保留失敗與診斷證據，整關仍未通過（feat/g13-install）。
