@@ -12,6 +12,7 @@ pub(crate) mod monitor;
 pub mod registry;
 mod running;
 mod snapshot;
+pub(crate) mod system_monitor;
 pub mod system_version;
 pub mod version_probe;
 

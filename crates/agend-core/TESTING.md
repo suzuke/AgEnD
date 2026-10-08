@@ -182,3 +182,5 @@ registry_checks 的 TOML 解析／缺省行為與離線 native lab 由 daemon／
 SystemBackendVersion 的資料由 daemon 原生腳本 producer 產生；PATH／cwd／環境及路徑切換拒絕見 daemon system_version 測試。
 
 外部版本觀測型別由 daemon 的原生假程式探測 producer 與 SQLite 重開測試驗證；不以人工 JSON 冒充 probe 結果。
+
+backend_version_checks 的缺省、停用、型別拒絕與 TOML round-trip 由 daemon config 測試涵蓋。

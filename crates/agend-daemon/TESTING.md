@@ -323,3 +323,5 @@ system_version 四項 native 測試涵蓋 daemon PATH／相對 cwd、版本替�
 `store::system_versions` 使用真正的 `system_version::observe` 執行本機假 CLI，再經 SQLite 預約／完成／確認及重開驗證：首次基準、換版、失敗保留、恢復、同值去重、時鐘倒退、舊 attempt、重複完成、配置變動、偽造 scope、刪除重建同名 instance 的舊結果與舊確認。migration 0022 追加 system_versions，外鍵在 instance 刪除時連帶清理。
 
 重新預約時若 backend／program／cwd 改變，建立新 generation 並重建基準，不沿用舊設定的成功值或確認。確認時亦核目前 scope。只有實際觀測到的 scope 變更可識別；兩次預約間未被觀測的 A→B→A 不宣稱可偵測。
+
+`native_external_version_*` 使用正式 runtime 執行假 CLI、SQLite、Fleet 與 loopback Telegram HTTP，驗證 monitor 停機等待 child／保存結果／不探測下一 instance，以及失敗提醒、手機確認、refresh 不重現與舊按鈕不能確認新 revision。共用 native Lab 同時停用 registry_checks 與 backend_version_checks，避免額外網路或 CLI 執行。

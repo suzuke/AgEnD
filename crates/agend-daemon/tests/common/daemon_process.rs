@@ -78,8 +78,11 @@ impl Lab {
     pub fn home(&self, n: usize) -> PathBuf {
         let home = self.root.join(format!("h{n}"));
         if fs::DirBuilder::new().mode(0o700).create(&home).is_ok() {
-            fs::write(home.join("config.toml"), "registry_checks = false\n")
-                .expect("offline native lab configuration");
+            fs::write(
+                home.join("config.toml"),
+                "registry_checks = false\nbackend_version_checks = false\n",
+            )
+            .expect("offline native lab configuration");
         }
         home
     }

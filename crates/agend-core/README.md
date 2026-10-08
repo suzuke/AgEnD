@@ -177,3 +177,5 @@ config.toml 的 registry_checks 可設 false，停用受管 fleet 公開版本�
 SystemBackendVersion 保存外部設定程式的解析路徑、版本輸出與內容 hash；只描述這次 --version 觀測，不代表既存 holder 載入的映像。
 
 `SystemVersionObservation` 描述外部版本探測的持久狀態；以 generation 隔開同名 instance 的不同生命週期。
+
+`Config.backend_version_checks` 可獨立關閉本機外部 CLI 的版本探測；未設定時啟用，不改 registry_checks 的網路查詢語意。

@@ -29,12 +29,14 @@ migration 0021 的 backend_registry 最多保存三筆（每個 backend 一筆�
 
 `HolderRuntime::observe_backend_version` 以 daemon 捕獲的 PATH 與 instance cwd 解析外部程式，使用 agent_env 白名單（含 backend 更新停用旗標），不繼承 daemon token。共用限時 --version probe，執行前後核檔案 hash／metadata 與 PATH／symlink 解析結果；不接受在探測期間換程式的結果。受管路徑先核 manifest，無效 bytes 不得退回外部探測。
 
-這只描述當次磁碟程式，不宣稱存活 holder 已換版；尚未接持久漂移紀錄與提醒。
+這只描述當次磁碟程式，不宣稱存活 holder 已換版；持久紀錄與提醒見下方 monitor 說明。
 
 ## 下一步
 
 補未受管 CLI 的被動漂移與整體原生服務驗收。worker 的 active HTTP 停機已由真 loopback／SQLite 測試覆蓋，尚未取代完整服務測試；查詢失敗不能推進為已知最新版，也不能影響正在工作的 backend。
 
-外部觀測的持久資料由 `system_versions` 保存，每個 instance 一列並在明確刪除 instance 時 cascade。先預約 attempt 再探測；完成時核 generation、attempt、scope 與目前 instance 設定。首個成功值只建立基準；後續身份變動、失敗及恢復才增加 revision，失敗保留最後成功值。generation 防止同名 instance 重建時沿用舊確認。此 Store API 尚未接背景 worker／提醒。
+外部觀測的持久資料由 `system_versions` 保存，每個 instance 一列並在明確刪除 instance 時 cascade。先預約 attempt 再探測；完成時核 generation、attempt、scope 與目前 instance 設定。首個成功值只建立基準；後續身份變動、失敗及恢復才增加 revision，失敗保留最後成功值。generation 防止同名 instance 重建時沿用舊確認。此 Store API 供背景 worker 與提醒共用。
 
 重新預約時若 backend／program／cwd 改變，建立新 generation 並重建基準，不沿用舊設定的成功值或確認。確認時亦核目前 scope。只有實際觀測到的 scope 變更可識別；兩次預約間未被觀測的 A→B→A 不宣稱可偵測。
+
+外部觀測已接獨立 system_monitor（立即首輪、其後每 60 秒，Store 控制實際預約頻率），受管 launch 與 canary home 跳過。停機等待當次探測及保存後退出，不啟動下一 instance。backend-version 提醒只提供 acknowledge，綁 instance／generation／revision，經一般 operator 與 Telegram 路由同一持久 handler；ingest 恢復未確認提醒，pipeline 清理不刪除此類提醒。此觀測不代表既存 holder 已載入磁碟上的版本。

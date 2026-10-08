@@ -260,3 +260,5 @@ install_home 以真 CLI／FakeDaemon 核自訂程式不在 PATH、缺檔、舊 p
 原生 backend_switch fixture 使用 registry_checks=false，停機後核 DB 無公開查詢 reservation。共用版本探測的原生程序測試位於 daemon；Telegram apply 測試繼續核對配置保留。
 
 Claude bridge 的外部 spool 拒絕案例使用獨立空目錄，不把 Lab home 的離線設定檔誤判為越界寫入；目標目錄仍須零檔案。
+
+原生 Lab 的 config.toml 預設設 registry_checks=false 與 backend_version_checks=false，隔離測試與自動探測；Telegram apply 的設定建構保留兩者的缺省語意。

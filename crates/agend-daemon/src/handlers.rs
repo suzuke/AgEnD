@@ -25,6 +25,7 @@
 
 pub mod agent;
 pub(crate) mod backend_registry;
+pub(crate) mod backend_version;
 pub(crate) mod claude_attention;
 pub(crate) mod opencode_attention;
 pub(crate) mod opencode_delivery_attention;
@@ -242,6 +243,9 @@ pub async fn handle(ctx: &Context, caller: Option<&str>, request: ClientRequest)
                     error_code::FORBIDDEN,
                     OPERATOR_ONLY,
                 ));
+            }
+            if data.attention_id.starts_with(backend_version::PREFIX) {
+                return Outcome::Reply(backend_version::resolve(ctx, data).await);
             }
             if data.attention_id.starts_with(backend_registry::PREFIX) {
                 return Outcome::Reply(backend_registry::resolve(ctx, data).await);

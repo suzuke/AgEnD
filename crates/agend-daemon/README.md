@@ -266,7 +266,7 @@ OpenCode 版本核對：受管程式使用匯入 artifact 的版本（supervisor
 
 Fleet 的 program 取自 instance 設定，保留 driver wrapper 前的程式，供 doctor 診斷；不包含 args 或認證。
 
-backend_versions::registry 提供阻塞唯讀 latest 查詢，daemon 使用時需放在 worker；固定 npm HTTPS、拒轉址、5 秒期限與 256 KiB 上限。沒有認證或下載／執行步驟。每日檢查與通知排程尚未接入。
+backend_versions::registry 提供阻塞唯讀 latest 查詢，daemon 使用時需放在 worker；固定 npm HTTPS、拒轉址、5 秒期限與 256 KiB 上限。沒有認證或下載／執行步驟。受管 fleet 的每日檢查與持久通知由 registry monitor 接入。
 
 `store::backend_registry` 在網路查詢前保存每日嘗試；完成與確認均核對當前 attempt／revision。migration 0021 最多保存三筆公開版本觀測，daemon monitor 與 ingest 使用這份紀錄執行每日查詢及恢復提醒。
 
@@ -274,6 +274,8 @@ backend_versions::registry 提供阻塞唯讀 latest 查詢，daemon 使用時�
 
 離線環境可在 config.toml 設 registry_checks = false；native daemon lab 預設使用此公開設定，避免 fake 受管版本觸發網際網路查詢。Telegram registry acknowledge 與本機共用持久 handler。version_probe 共用 doctor 的限時程序／pipe 清理，另支援明示 cwd 與環境供漂移偵測接入。
 
-HolderRuntime::observe_backend_version 使用 daemon 捕獲的 PATH 與 agent_env 白名單，限時執行外部設定程式的 --version；前後核解析路徑與 executable 身分。受管版本交既有 manifest 核對，無效受管 bytes 不會被外部探測執行。此 API 尚未接持久漂移排程或提醒。
+HolderRuntime::observe_backend_version 使用 daemon 捕獲的 PATH 與 agent_env 白名單，限時執行外部設定程式的 --version；前後核解析路徑與 executable 身分。受管版本交既有 manifest 核對，無效受管 bytes 不會被外部探測執行。此 API 由外部版本 monitor 呼叫。
 
-外部 CLI 版本觀測 Store 每個 instance 最多一列；探測前預約、60 秒內及時鐘倒退不重複預約，失敗保留上次成功值。首次成功靜默建立基準，後續變動、失敗與恢復產生 revision；確認綁 generation 與 revision。此批為持久 API，背景探測與 attention 接線尚待完成。
+外部 CLI 版本觀測 Store 每個 instance 最多一列；探測前預約、60 秒內及時鐘倒退不重複預約，失敗保留上次成功值。首次成功靜默建立基準，後續變動、失敗與恢復產生 revision；確認綁 generation 與 revision。背景探測與 attention 共用此持久 API。
+
+外部 CLI 的持久版本紀錄已接背景 monitor 與 attention：每 60 秒檢查已設定 instance，沿用 daemon 的 cwd／PATH 與環境白名單。受管 launch 與 canary home 跳過；`backend_version_checks=false` 可停用本機探測。停機等待當次 child probe 收尾與結果保存，確認不會安裝、切換或重啟 backend。

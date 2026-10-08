@@ -1617,3 +1617,207 @@ async fn native_registry_callback_acknowledges_only_the_current_persisted_revisi
         "old mobile button must not consume the new reminder"
     );
 }
+
+async fn version_instance(lab: &Lab, id: &str, program: &str) {
+    use agend_core::{
+        model::Backend,
+        runtime_records::{Instance, InstanceStatus},
+    };
+    lab.ctx
+        .store
+        .add_instance(&Instance {
+            id: id.into(),
+            backend: Backend::Codex,
+            program: program.into(),
+            args: vec![],
+            working_directory: lab
+                ._dir
+                .path()
+                .canonicalize()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .into(),
+            session_id: None,
+            status: InstanceStatus::New,
+            session_started: false,
+            agent_pid: None,
+            legacy_no_thread: false,
+            delivery: "push".into(),
+        })
+        .await
+        .unwrap();
+}
+#[tokio::test]
+async fn native_external_version_monitor_waits_for_child_before_stop_and_skips_next_instance() {
+    use std::os::unix::fs::PermissionsExt;
+    let lab = Lab::new().await;
+    let home = lab._dir.path().canonicalize().unwrap();
+    let script = home.join("backend");
+    std::fs::write(&script,"#!/bin/sh\n[ \"$1\" = --version ] || exit 2\ntouch entered\nwhile [ ! -f release ]; do /bin/sleep 0.02; done\nprintf 'fake 1.0\\n'\n").unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+    version_instance(&lab, "a-version", script.to_str().unwrap()).await;
+    version_instance(&lab, "b-version", script.to_str().unwrap()).await;
+    let monitor = crate::backend_versions::system_monitor::Monitor::start(lab.ctx.clone());
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while !home.join("entered").exists() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let mut stopping = tokio::spawn(monitor.stop());
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), &mut stopping)
+            .await
+            .is_err()
+    );
+    std::fs::write(home.join("release"), "").unwrap();
+    tokio::time::timeout(Duration::from_secs(3), stopping)
+        .await
+        .unwrap()
+        .unwrap();
+    let row = lab
+        .ctx
+        .store
+        .system_version_observation("a-version")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.latest.unwrap().version_output, "fake 1.0");
+    assert_eq!(row.revision, 0);
+    assert!(row.completed_ms.is_some());
+    assert!(
+        lab.ctx
+            .store
+            .system_version_observation("b-version")
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+#[tokio::test]
+async fn native_external_version_failure_notifies_and_mobile_ack_survives_refresh() {
+    let lab = Lab::new().await;
+    let native = Native::new();
+    version_instance(&lab, "version-test", "/nonexistent/agend-version-test").await;
+    let monitor = crate::backend_versions::system_monitor::Monitor::start(lab.ctx.clone());
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if lab
+                .ctx
+                .store
+                .system_version_observation("version-test")
+                .await
+                .unwrap()
+                .is_some_and(|r| r.completed_ms.is_some())
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    monitor.stop().await;
+    crate::handlers::backend_version::refresh(&lab.ctx.store, &lab.ctx.fleet)
+        .await
+        .unwrap();
+    let item = lab
+        .ctx
+        .fleet
+        .view()
+        .attention
+        .into_iter()
+        .find(|a| {
+            a.attention_id
+                .as_deref()
+                .is_some_and(|id| id.starts_with(crate::handlers::backend_version::PREFIX))
+        })
+        .unwrap();
+    assert!(item.reason.contains("probe failed"));
+    let row = lab
+        .ctx
+        .store
+        .observe_telegram(&[worker::notice(&item).unwrap()], &lab.destination, 102)
+        .await
+        .unwrap()
+        .remove(0);
+    let notifier = super::delivery::TelegramNotifier::new(
+        native.api.clone(),
+        lab.ctx.store.clone(),
+        lab.destination.clone(),
+    );
+    notifier.resume(&row.id).await.unwrap();
+    let markup = inbound::keyboard(&row).unwrap();
+    let receipt =
+        serde_json::from_str::<Value>(include_str!("../../tests/fixtures/telegram/message.json"))
+            .unwrap()["result"]
+            .clone();
+    let update = json!({"update_id":1,"callback_query":{"id":"version-ack","from":{"id":7,"is_bot":false},"message":receipt,"data":markup["inline_keyboard"][0][0]["callback_data"]}});
+    let (_stop, stopped) = tokio::sync::watch::channel(false);
+    native.updates.lock().unwrap().push(update.clone());
+    poll::once(
+        &lab.ctx,
+        &lab.config,
+        native.api.clone(),
+        &lab.destination,
+        &stopped,
+    )
+    .await
+    .unwrap();
+    let acknowledged = lab
+        .ctx
+        .store
+        .system_version_observation("version-test")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(acknowledged.acknowledged_revision, 1);
+    crate::handlers::backend_version::refresh(&lab.ctx.store, &lab.ctx.fleet)
+        .await
+        .unwrap();
+    assert!(
+        lab.ctx
+            .fleet
+            .attention(item.attention_id.as_deref().unwrap())
+            .is_none()
+    );
+    let now = acknowledged.started_ms + crate::store::system_versions::CHECK_INTERVAL_MS;
+    let ticket = lab
+        .ctx
+        .store
+        .begin_system_version_check("version-test", now)
+        .await
+        .unwrap()
+        .unwrap();
+    lab.ctx
+        .store
+        .finish_system_version_check(&ticket, now, Err("new failure".into()))
+        .await
+        .unwrap();
+    crate::handlers::backend_version::refresh(&lab.ctx.store, &lab.ctx.fleet)
+        .await
+        .unwrap();
+    let mut stale = update;
+    stale["update_id"] = json!(2);
+    native.updates.lock().unwrap().push(stale);
+    poll::once(
+        &lab.ctx,
+        &lab.config,
+        native.api.clone(),
+        &lab.destination,
+        &stopped,
+    )
+    .await
+    .unwrap();
+    let newer = lab
+        .ctx
+        .store
+        .system_version_observation("version-test")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(newer.revision, 2);
+    assert_eq!(newer.acknowledged_revision, 1);
+}

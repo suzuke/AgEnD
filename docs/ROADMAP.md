@@ -492,3 +492,7 @@
 - 2026-10-08：PR CI 37760144687 雙平台在同一舊 fixture 斷言失敗：Lab home 新增離線 config.toml，外部目錄不再為空。改用 home 下獨立空目錄作 symlink 目標，仍嚴格核零檔案；原 failed_local_ack_publication 精確案例重跑通過，未放寬禁止向外寫入的契約（feat/g13-install，未合併）。
 
 - 2026-10-08：13C migration 0022 新增每 instance 一列的外部版本觀測持久 API，探測前預約，首成功建基準，換版／失敗／恢復按 revision 確認；刪除 instance cascade、重建與觀測到的 scope 變更使用新 generation。獨立覆核找到「新 scope 同錯誤沿用舊 ack」已修正並確認解除，另補 scope 改變後尚未重新預約的未確認拒絕反例。3 項原生假 CLI→SQLite 案例、Store 42 項歷史升級／retention、workspace clippy／check-deps 通過；背景 worker／attention 接線仍待完成，未啟動真 backend（feat/g13-install，未合併）。
+
+- 2026-10-08：13C 外部版本持久紀錄接 system_monitor、ingest attention、operator／Telegram 確認與 pipeline 保留；預設每 60 秒檢查，backend_version_checks 可獨立停用，canary home 與受管 launch 跳過。原生假 CLI 停機等待／保存／下一 instance 不啟動，以及 Store→Fleet→loopback Telegram 確認與舊按鈕拒絕通過；daemon 全組 216 項通過（1 child entry ignored）。source review 未見資料／確認 blocker，建議兩個 monitor 同時停止已改 tokio::join!；正式 daemon 雙 monitor active 的整合驗收、成功換版完整通知重開證據仍待補。非真 backend／真 Telegram 驗收（feat/g13-install，未合併）。
+
+- 2026-10-08：外部 monitor 接線後，原生 backend_switch 2 項（核離線 Lab 無本機版本 reservation）、Telegram apply 5 項（保留兩個探測設定）、workspace clippy／check-deps／fmt 通過；通知測試暫存無殘留。保留未合併 Gate 13 工作樹與共用 target 供後續驗收（feat/g13-install，未合併）。

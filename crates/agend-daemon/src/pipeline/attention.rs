@@ -414,6 +414,7 @@ where
                 && !id.starts_with(crate::handlers::opencode_attention::PREFIX)
                 && !id.starts_with(crate::handlers::opencode_delivery_attention::PREFIX)
                 && !id.starts_with(crate::handlers::telegram_attention::PREFIX)
+                && !id.starts_with(crate::handlers::backend_version::PREFIX)
                 && !id.starts_with(crate::handlers::backend_registry::PREFIX)
                 && !expected.contains_key(&id)
             {

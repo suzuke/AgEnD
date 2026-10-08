@@ -405,6 +405,7 @@ async fn serve(
         }
         crate::notifier::worker::start(config, token, context.clone())
     });
+    let system_monitor = crate::backend_versions::system_monitor::Monitor::start(context.clone());
     let registry_monitor = crate::backend_versions::monitor::Monitor::start(context.clone());
     let server = Server::start(listener, socket.clone(), Arc::clone(&context));
     supervisor.set_delivery_replies(server.delivery_replies());
@@ -457,7 +458,7 @@ async fn serve(
     log::line(&format!(
         "agend daemon stopping ({why}); holders keep running"
     ));
-    registry_monitor.stop().await;
+    tokio::join!(system_monitor.stop(), registry_monitor.stop());
     context.pairing.stop().await;
     server.stop().await;
     if let Some(worker) = telegram_worker {

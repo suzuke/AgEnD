@@ -112,6 +112,12 @@ pub(crate) async fn run(home: PathBuf, ctx: Arc<Context>, bridge: Arc<ClaudeBrid
     let mut telegram_unknown_after = String::new();
     loop {
         tick.tick().await;
+        if let Err(error) = crate::handlers::backend_version::refresh(&ctx.store, &ctx.fleet).await
+        {
+            crate::log::line(&format!(
+                "Backend version attention refresh failed: {error}"
+            ));
+        }
         if let Err(error) = crate::handlers::backend_registry::refresh(&ctx.store, &ctx.fleet).await
         {
             crate::log::line(&format!(

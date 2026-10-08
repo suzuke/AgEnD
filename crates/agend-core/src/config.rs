@@ -84,5 +84,8 @@ pub struct Config {
     /// None enables daily public registry discovery; false supports offline installations.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub registry_checks: Option<bool>,
+    /// None enables local external-backend version probes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend_version_checks: Option<bool>,
     pub telegram: Option<TelegramConfig>,
 }

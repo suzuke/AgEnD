@@ -224,6 +224,14 @@ fn native_status_cancel_and_restart_preserve_program_and_refuse_agents_and_stale
     daemon.interrupt().unwrap();
     {
         let offline_store = SqliteStore::open(&home, 0).unwrap();
+        for instance in block_on(offline_store.instances()).unwrap() {
+            assert!(
+                block_on(offline_store.system_version_observation(&instance.id))
+                    .unwrap()
+                    .is_none(),
+                "offline lab must not reserve local probes"
+            );
+        }
         assert!(
             block_on(offline_store.registry_observation(Backend::Claude))
                 .unwrap()

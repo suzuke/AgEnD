@@ -150,6 +150,15 @@ mod tests {
         assert!(resolve(&SecretRef::File(dir.path().display().to_string())).is_err());
     }
     #[test]
+    fn local_backend_version_checks_have_an_independent_disable_switch() {
+        assert!(parse("").unwrap().backend_version_checks.unwrap_or(true));
+        let config = parse("backend_version_checks = false\n").unwrap();
+        assert_eq!(config.backend_version_checks, Some(false));
+        assert!(config.registry_checks.unwrap_or(true));
+        assert!(parse("backend_version_checks = 'false'").is_err());
+        assert_eq!(parse(&toml::to_string(&config).unwrap()).unwrap(), config);
+    }
+    #[test]
     fn registry_checks_default_to_enabled_and_round_trip_offline_without_credentials() {
         assert!(parse("").unwrap().registry_checks.unwrap_or(true));
         let offline = parse("registry_checks = false\n").unwrap();
