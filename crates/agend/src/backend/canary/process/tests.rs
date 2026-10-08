@@ -160,7 +160,10 @@ int main(void) {
             .success()
     );
     assert!(
-        lab.version(&program, Instant::now() + Duration::from_millis(500))
+        // Use the production probe budget: first execution of a newly linked
+        // native binary may take longer than 500 ms on a loaded macOS runner.
+        // The ready marker below still proves setsid ran before cleanup.
+        lab.version(&program, Instant::now() + Duration::from_secs(5))
             .unwrap_err()
             .contains("timed out")
     );

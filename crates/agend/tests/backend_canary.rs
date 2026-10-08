@@ -496,6 +496,29 @@ fn native_opencode_switch_activates_and_rolls_back_with_the_same_session() {
     );
 }
 fn native_switch(backend: &str, old: &str, next: &str, old_version: &str, next_version: &str) {
+    native_switch_case(backend, old, next, old_version, next_version, false);
+}
+
+#[test]
+fn native_codex_committed_switch_recovers_when_the_target_holder_is_absent() {
+    native_switch_case(
+        "codex",
+        "examples/fake_codex",
+        "examples/fake_codex_next",
+        "0.158.0",
+        "0.159.0",
+        true,
+    );
+}
+
+fn native_switch_case(
+    backend: &str,
+    old: &str,
+    next: &str,
+    old_version: &str,
+    next_version: &str,
+    remove_holder: bool,
+) {
     use std::time::{Duration, Instant};
     let root = lab::Lab::with_prefix(Path::new(BIN), "g13-switch-live");
     let home = root.root.join("home");
@@ -631,9 +654,19 @@ fn native_switch(backend: &str, old: &str, next: &str, old_version: &str, next_v
         assert_eq!(surviving.len(), 1);
         daemon.kill9().unwrap();
         assert_eq!(root.running_holders(), surviving);
+        if remove_holder {
+            root.stop_all_holders();
+            assert!(root.running_holders().is_empty());
+        }
         daemon = lab::Daemon::start(&root, &home, &[]).unwrap();
         daemon.expect("daemon ready").unwrap();
-        assert_eq!(root.running_holders(), surviving);
+        if remove_holder {
+            let replacement = root.running_holders();
+            assert_eq!(replacement.len(), 1);
+            assert_ne!(replacement[0].2, surviving[0].2);
+        } else {
+            assert_eq!(root.running_holders(), surviving);
+        }
         fs::remove_file(hold_start).unwrap();
     }
     let deadline = Instant::now() + Duration::from_secs(40);

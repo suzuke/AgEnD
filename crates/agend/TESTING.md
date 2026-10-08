@@ -224,3 +224,5 @@ Canary 必須取得三筆與 delivery 綁定的 completed outcomes；修改 fail
 `backend_canary::canary_scope_rejects_other_homes_instances_and_changed_artifacts` 經正式 import CLI 與 scope producer 驗正常版本觀察，及跨 home、錯 instance、額外 argv、修改 executable 的拒絕；另核 scope 本身沒有成功 canary 報告，不可取得 fleet 准入。此案例不執行 backend。
 
 版本往返測試在 target holder 已啟動、尚未建立 backend ready 時用私有 workspace marker 暫停 fixture，確認正式 activate 回覆 Committed，硬殺自有 daemon 並重啟，核同一 holder PID 存活才釋放 marker；後續須完成 Activated／RolledBack 並保留 session。這個切點不涵蓋 Ready 已觀察但尚未持久完成、目的 holder 死亡或還原中再次中斷。
+
+`native_codex_committed_switch_recovers_when_the_target_holder_is_absent` 在硬殺 daemon 後由 Lab 停止目的 holder，再重開 daemon，核新 holder 啟動並完成原 session 的啟用／回滾。probe 清理先等待 SIGKILL 子程序成為可回收狀態，再檢查群組；setsid fixture 使用正式 5 秒 probe 預算且必須留下 ready marker，不能把尚未執行到 setsid 算作通過。

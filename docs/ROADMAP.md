@@ -414,3 +414,5 @@
 - 2026-10-08：三 backend 的 canary 全組 8 項並行通過（75.27 秒），包括各雙版本正式 runner、啟用／回滾及 session 保留；fmt、clippy、check-deps 通過。仍僅為原生假 backend 證據，不代表真新版模型相容或完整 crash 驗收。
 
 - 2026-10-08：13C 三 backend 新增 Committed／新 holder 未就緒切點：fixture 在自有 workspace 等待，硬殺自有 daemon 後重開，核 holder PID 未變再繼續啟用／回滾與 session 保留；三項並行通過（75.97 秒）。fmt／clippy／check-deps 通過。尚未涵蓋 Ready 已出現、還原途中再中斷與自動失敗回滾；沒有執行真模型或改主機服務（feat/g13-install，未合併）。
+
+- 2026-10-08：b4f9032 macOS CI 揭露 probe SIGKILL 後、waitable exit 前群組 EPERM 的競態；改先限時等待未回收 Child 退出（PID 仍固定），再清理群組／回收／核群組不存在。4 項原生 probe 通過；setsid 測試首輪未及寫 marker，改採正式 5 秒 probe 預算，仍核 marker。另驗 Codex Committed 下 daemon 硬中斷、目的 holder 由 Lab 停止後重開，核新 holder／正確版本／原 session／完整回滾通過；不代表所有 backend 或所有 crash 切點已完成（feat/g13-install，未合併）。

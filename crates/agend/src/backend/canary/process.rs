@@ -283,6 +283,17 @@ fn stop_probe(probe: &mut Probe) -> Result<std::process::ExitStatus, String> {
                 return Err(format!("cannot stop the owned version probe: {error}"));
             }
         }
+        // SIGKILL delivery does not synchronously publish waitable exit. Keep
+        // the child unreaped (pinning its PID) until termination is observed,
+        // then inspect its group; macOS may already reject group signalling
+        // during that transition.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !exited_unreaped(&probe.child)? {
+            if Instant::now() >= deadline {
+                return Err("version probe did not stop; home retained".into());
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
         // SAFETY: version probes use their own group and have never been reaped.
         if unsafe { libc::kill(-(pid as i32), libc::SIGKILL) } != 0 {
             let error = std::io::Error::last_os_error();
@@ -296,13 +307,6 @@ fn stop_probe(probe: &mut Probe) -> Result<std::process::ExitStatus, String> {
                     "cannot stop the owned version probe group: {error}"
                 ));
             }
-        }
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while !exited_unreaped(&probe.child)? {
-            if Instant::now() >= deadline {
-                return Err("version probe did not stop; home retained".into());
-            }
-            std::thread::sleep(Duration::from_millis(20));
         }
         probe.status = Some(probe.child.wait().map_err(|e| e.to_string())?);
     }
