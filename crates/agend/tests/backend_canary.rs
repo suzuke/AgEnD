@@ -392,3 +392,177 @@ fn managed_fleet(lab: &lab::Lab, home: &Path, backend: &str, version: &str) {
     lab.stop_all_holders();
     assert!(lab.running_holders().is_empty());
 }
+
+#[test]
+fn native_codex_switch_activates_an_admitted_version_and_preserves_session() {
+    use std::time::{Duration, Instant};
+    let root = lab::Lab::with_prefix(Path::new(BIN), "g13-switch-live");
+    let home = root.root.join("home");
+    let user = root.root.join("user");
+    fs::create_dir(&user).unwrap();
+    for (version, name) in [("0.158.0", "fake_codex"), ("0.159.0", "fake_codex_next")] {
+        let fake = Path::new(BIN).parent().unwrap().join("examples").join(name);
+        assert!(fake.is_file(), "build both fake Codex examples first");
+        for args in [
+            vec![
+                "backend",
+                "import",
+                "codex",
+                "--version",
+                version,
+                "--program",
+                fake.to_str().unwrap(),
+            ],
+            vec![
+                "backend",
+                "canary",
+                "codex",
+                "--version",
+                version,
+                "--allow-model",
+                "--timeout-seconds",
+                "180",
+            ],
+        ] {
+            let out = cli(&home, &user, &args);
+            assert!(
+                out.status.success(),
+                "{} {}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+    }
+    let mut daemon = lab::Daemon::start(&root, &home, &[]).unwrap();
+    daemon.ready().unwrap();
+    let program = home.join("backends/codex/0.158.0/program");
+    let out = cli(
+        &home,
+        &user,
+        &[
+            "instance",
+            "add",
+            "managed",
+            "codex",
+            "--program",
+            program.to_str().unwrap(),
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    daemon
+        .expect_within("managed: holder pid=", Duration::from_secs(30))
+        .unwrap();
+    let instance = || {
+        let db = rusqlite::Connection::open(home.join("agend.db")).unwrap();
+        db.busy_timeout(Duration::from_secs(5)).unwrap();
+        db.query_row(
+            "SELECT session_id,agent_pid FROM instances WHERE id='managed'",
+            [],
+            |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, Option<u32>>(1)?)),
+        )
+        .unwrap()
+    };
+    daemon
+        .expect_within(" created", Duration::from_secs(30))
+        .unwrap();
+    let before_holders = root.running_holders();
+    assert_eq!(before_holders.len(), 1);
+    let out = cli(
+        &home,
+        &user,
+        &[
+            "backend",
+            "switch",
+            "prepare",
+            "managed",
+            "--version",
+            "0.159.0",
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let record: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let id = record["id"].as_str().unwrap();
+    let out = cli(
+        &home,
+        &user,
+        &[
+            "backend",
+            "switch",
+            "activate",
+            "managed",
+            "--switch-id",
+            id,
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "{} {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let deadline = Instant::now() + Duration::from_secs(40);
+    loop {
+        let out = cli(&home, &user, &["backend", "switch", "status", "managed"]);
+        assert!(out.status.success());
+        let status: Value = serde_json::from_slice(&out.stdout).unwrap();
+        if status["phase"] == "activated" {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "activation did not finish: {status}"
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    let after_holders = root.running_holders();
+    assert_eq!(after_holders.len(), 1);
+    assert_ne!(before_holders[0].2, after_holders[0].2);
+    let out = cli(
+        &home,
+        &user,
+        &[
+            "backend",
+            "switch",
+            "rollback",
+            "managed",
+            "--switch-id",
+            id,
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "{} {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let deadline = Instant::now() + Duration::from_secs(40);
+    loop {
+        let out = cli(&home, &user, &["backend", "switch", "status", "managed"]);
+        assert!(out.status.success());
+        let status: Value = serde_json::from_slice(&out.stdout).unwrap();
+        if status["phase"] == "rolled_back" {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "rollback did not finish: {status}"
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    let restored_holders = root.running_holders();
+    assert_eq!(restored_holders.len(), 1);
+    assert_ne!(restored_holders[0].2, after_holders[0].2);
+    daemon.interrupt().unwrap();
+    let after = instance();
+    assert_eq!(record["session_id"].as_str(), after.0.as_deref());
+    root.stop_all_holders();
+    assert!(root.running_holders().is_empty());
+}

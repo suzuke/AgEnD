@@ -685,6 +685,21 @@ fn commit_and_restore_keep_all_delivery_paused_until_exact_activation_snapshot()
                     .unwrap()
                 ),
             }
+            if !rollback {
+                let active = block_on(store.backend_switch(&instance.id))
+                    .unwrap()
+                    .unwrap();
+                let paused = block_on(store.prepare_backend_rollback(&active)).unwrap();
+                assert_eq!(paused.phase, BackendSwitchPhase::RollbackPrepared);
+                assert!(paused.phase.pending());
+                assert!(block_on(store.inbox_messages(&instance.id, None, 20)).is_err());
+                assert!(block_on(store.prepare_backend_rollback(&active)).is_err());
+                assert!(block_on(store.cancel_backend_switch(&paused)).is_err());
+                assert!(block_on(store.commit_backend_switch(&paused, true)).is_err());
+                block_on(store.set_agent_pid(&instance.id, None)).unwrap();
+                let restoring = block_on(store.commit_backend_switch(&paused, true)).unwrap();
+                assert_eq!(restoring.phase, BackendSwitchPhase::Restoring);
+            }
         }
     }
 }

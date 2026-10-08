@@ -141,6 +141,29 @@ fn native_status_cancel_and_restart_preserve_program_and_refuse_agents_and_stale
         );
     }
 
+    // New transitions must not commit a missing/unadmitted destination or
+    // accept rollback from Prepared; refusal keeps the original durable ID.
+    for action in ["activate", "rollback"] {
+        assert!(
+            !cli(
+                &home,
+                &[action, "managed", "--switch-id", &record.id],
+                false
+            )
+            .status
+            .success()
+        );
+        assert_eq!(
+            value(cli(&home, &["status", "managed"], false))["phase"],
+            "prepared"
+        );
+        assert!(
+            !cli(&home, &[action, "managed", "--switch-id", &record.id], true)
+                .status
+                .success()
+        );
+    }
+
     let denied = cli(&home, &["status", "managed"], true);
     assert!(!denied.status.success());
     assert_eq!(

@@ -189,3 +189,7 @@ cat docs/gates/gate-13-install.md
 - 2026-10-08：13C 一般 boot start／death restart／延遲 restart／operator retry 遇到持久 pending switch 時保留現況，讀取失敗也不停止 holder；由換版恢復流程決定後續啟停。原生 daemon 驗 Prepared／Committed／Restoring 跨 boot 精確保留 instance、managed launch、switch，連同既有 switch RPC 共 2 項通過；fmt／clippy／前後 check-deps 通過。這批未完成換版專用恢復／啟用／回滾（feat/g13-install，未合併）。
 
 - 2026-10-08：13C Codex 閒置查詢改在同 worker 串行查原生 queue 與完整 turns；queue 非空、缺 data／nextCursor 或 continuation 不可認閒置。真 fake app-server 驗第二筆待執行訊息與消化後空 queue，producer 變異反例、Codex driver 全 19 項及 fmt／clippy／前後 check-deps 通過。仍是換版閒置前置條件，啟用／回滾編排未完成（feat/g13-install，未合併）。
+
+- 2026-10-08：13C 接上明確 Activate／Rollback RPC 與 CLI，目的准入、reply fence、native idle、worker 結束及 exact holder stop 後提交版本並啟動；定期核新 holder binding／readiness 後釋放投遞。Activated 回退先持久 RollbackPrepared，boot 對 Committed／Restoring 缺 holder 的合格目的可重啟。Codex 雙原生假版本經正式 canary 完整啟用／回滾，核 session 保留與兩次 holder 更換通過；Store 9 項、holder runtime 10 項、switch RPC 2 項、client 52 項、core 149 項（2 ignored）、clippy／check-deps 通過。前兩輪新測試錯用外部 SQLite 查 live daemon，被獨占鎖拒絕；已改正式 RPC＋停機後核 DB。新 store 測試誤把 inbox 暫停當 None，改為正式拒絕後通過；保留失敗證據。尚未認證三後端完整往返、全部 crash 切點與自動失敗回滾（feat/g13-install，未合併）。
+
+- 2026-10-08：本批換版回歸補 daemon 單元 186 項（1 ignored）、terminal hub 10 項、Claude startup cancel 1 項。前一批 boot 保護使兩個啟動前種 Prepared 的 shell fixture 不再啟動，改為先啟動原 holder 再停 daemon 種 pause，重連時僅保留 pause 測試所需資料，不宣稱這些 shell 具 managed admission；取消操作保留有效 terminal，僅恢復缺少的 driver。保留原回歸失敗與編譯錯誤證據，最新 fmt／clippy／check-deps 通過；自有測試目錄檢查無殘留，移除被最終證據取代的成功 logs（feat/g13-install，未合併）。

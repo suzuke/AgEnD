@@ -501,6 +501,8 @@ while True:
 fn startup_prepared_switch_holds_native_keys_until_operator_cancels() {
     use agend_core::{setup::backend::ImportedBackend, traits::HolderLaunch};
     let mut f = producer(100, |_| {}, false);
+    f.start();
+    f.stop();
     let prepared = {
         let store = f.store();
         let instance = block_on(store.instance("claude")).unwrap().unwrap();
@@ -526,8 +528,17 @@ fn startup_prepared_switch_holds_native_keys_until_operator_cancels() {
             sha256: "b".repeat(64),
             ..old
         };
-        block_on(store.prepare_backend_switch(&instance, target, "/managed/new/program", None))
-            .unwrap()
+        let prepared =
+            block_on(store.prepare_backend_switch(&instance, target, "/managed/new/program", None))
+                .unwrap();
+        // Reconnect the original unversioned shell. This is only a native
+        // startup-pause fixture, not evidence of managed activation.
+        drop(store);
+        {
+            let db = rusqlite::Connection::open(f.home.join("agend.db")).unwrap();
+            db.execute("DELETE FROM managed_launches", []).unwrap();
+        }
+        prepared
     };
     f.start();
     fs::write(f.home.join("show"), b"").unwrap();

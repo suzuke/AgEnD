@@ -41,7 +41,12 @@ pub(crate) fn delivery_paused(conn: &Connection, instance: &str) -> Result<bool,
 /// Prepared holds the old backend still. Committed/Restoring must permit the
 /// newly reserved launch to pass startup menus before activation is finished.
 pub(crate) fn startup_paused(conn: &Connection, instance: &str) -> Result<bool, StoreError> {
-    Ok(read(conn, instance)?.is_some_and(|r| r.phase == BackendSwitchPhase::Prepared))
+    Ok(read(conn, instance)?.is_some_and(|r| {
+        matches!(
+            r.phase,
+            BackendSwitchPhase::Prepared | BackendSwitchPhase::RollbackPrepared
+        )
+    }))
 }
 
 fn write(conn: &Connection, record: &BackendSwitch) -> Result<(), StoreError> {
@@ -158,6 +163,36 @@ impl SqliteStore {
         .await
     }
 
+    /// Pause an already activated destination before any rollback side effect.
+    pub async fn prepare_backend_rollback(
+        &self,
+        expected: &BackendSwitch,
+    ) -> Result<BackendSwitch, StoreError> {
+        let expected = expected.clone();
+        self.call(move |conn| {
+            let tx = conn.transaction()?;
+            let mut current = read(&tx, &expected.instance_id)?
+                .ok_or_else(|| invalid("backend switch missing"))?;
+            if current != expected || current.phase != BackendSwitchPhase::Activated {
+                return Err(invalid(
+                    "only the current activated switch can prepare rollback",
+                ));
+            }
+            let instance = instances::get(&tx, &current.instance_id)?
+                .ok_or_else(|| invalid("instance missing"))?;
+            if !config_matches(&instance, &current, &current.target_program) {
+                return Err(invalid(
+                    "backend switch configuration changed before rollback",
+                ));
+            }
+            current.phase = BackendSwitchPhase::RollbackPrepared;
+            write(&tx, &current)?;
+            tx.commit()?;
+            Ok(current)
+        })
+        .await
+    }
+
     /// Caller proves holder absence first. Persist phase and program in one
     /// transaction; preserve the old launch proof until a new native spawn.
     pub async fn commit_backend_switch(
@@ -188,7 +223,9 @@ impl SqliteStore {
                     current.target_program.clone(),
                 )
             };
-            if current.phase != required {
+            if current.phase != required
+                && !(rollback && current.phase == BackendSwitchPhase::RollbackPrepared)
+            {
                 return Err(invalid(
                     "backend switch phase does not allow this operation",
                 ));

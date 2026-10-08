@@ -24,6 +24,18 @@ pub enum Command {
     },
     /// Read the durable switch record after any interrupted request
     Status { instance: String },
+    /// Activate exactly this prepared switch; readiness completes asynchronously
+    Activate {
+        instance: String,
+        #[arg(long)]
+        switch_id: String,
+    },
+    /// Restore the original version of this switch
+    Rollback {
+        instance: String,
+        #[arg(long)]
+        switch_id: String,
+    },
     /// Cancel exactly this prepared switch and resume new delivery
     Cancel {
         instance: String,
@@ -50,6 +62,26 @@ pub fn run(command: Command) -> Result<Output, Failure> {
             instance.clone(),
             BackendSwitchCommand::Status {
                 instance_id: instance,
+            },
+        ),
+        Command::Activate {
+            instance,
+            switch_id,
+        } => (
+            instance.clone(),
+            BackendSwitchCommand::Activate {
+                instance_id: instance,
+                switch_id,
+            },
+        ),
+        Command::Rollback {
+            instance,
+            switch_id,
+        } => (
+            instance.clone(),
+            BackendSwitchCommand::Rollback {
+                instance_id: instance,
+                switch_id,
             },
         ),
         Command::Cancel {
@@ -105,6 +137,7 @@ pub fn run(command: Command) -> Result<Output, Failure> {
                 BackendSwitchPhase::Committed =>
                     "target selected; activation pending; delivery paused",
                 BackendSwitchPhase::Activated => "activated; new delivery resumed",
+                BackendSwitchPhase::RollbackPrepared => "rollback prepared; new delivery paused",
                 BackendSwitchPhase::Restoring =>
                     "original selected; activation pending; delivery paused",
                 BackendSwitchPhase::RolledBack => "rolled back",

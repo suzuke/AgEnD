@@ -63,6 +63,7 @@
 
 mod backend_switch;
 mod managed;
+mod switch_activation;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -320,6 +321,7 @@ pub struct Supervisor {
     opencode: crate::driver::opencode::runtime::Runtime,
     pipeline: Option<crate::pipeline::Handle>,
     delivery_replies: Option<Arc<crate::delivery::Replies>>,
+    claude: Option<crate::server::ClaudeObserver>,
     events: UnboundedSender<Event>,
     watches: BTreeMap<String, Watch>,
     fleet: Arc<Fleet>,
@@ -358,6 +360,7 @@ impl Supervisor {
             codex,
             pipeline: None,
             delivery_replies: None,
+            claude: None,
             events,
             watches: BTreeMap::new(),
             fleet,
@@ -393,6 +396,10 @@ impl Supervisor {
 
     pub fn set_delivery_replies(&mut self, replies: Arc<crate::delivery::Replies>) {
         self.delivery_replies = Some(replies);
+    }
+
+    pub fn set_claude_observer(&mut self, observer: crate::server::ClaudeObserver) {
+        self.claude = Some(observer);
     }
 
     pub fn store(&self) -> &SqliteStore {
@@ -600,11 +607,14 @@ impl Supervisor {
                     self.reconnect(instance, pid).await;
                 }
                 BootAction::Start { id, resume } => {
+                    let instance = instances.iter().find(|i| i.id == id).expect("planned");
                     if self.switch_holds_recovery(&id).await {
+                        if self.recover_switch_start(instance).await {
+                            report.started += 1;
+                        }
                         continue;
                     }
                     report.started += 1;
-                    let instance = instances.iter().find(|i| i.id == id).expect("planned");
                     self.start(instance, resume, None).await;
                 }
                 BootAction::Orphan { id } => {
@@ -1193,7 +1203,13 @@ impl Supervisor {
 
     /// Handles events until a stop signal or a restart.
     pub async fn run(&mut self, events: &mut UnboundedReceiver<Event>) -> Stopped {
-        while let Some(event) = events.recv().await {
+        let mut switches = tokio::time::interval(Duration::from_secs(2));
+        switches.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            let event = tokio::select! {
+                event = events.recv() => match event { Some(event) => event, None => break },
+                _ = switches.tick() => { self.finish_switches().await; continue; }
+            };
             match event {
                 Event::BackendSwitch { command, reply } => {
                     let _ = reply.send(self.backend_switch(command).await);

@@ -89,3 +89,5 @@ Terminal frame 解碼維持原 internally-tagged serde 路徑；RawValue 優化�
 1.7 message_outcome 的 staged decoder 由 agend native backend_canary 全流程使用；缺失／未知狀態不准入。
 
 1.8 BackendSwitch 的一次性回覆 decoder 由 `agend/tests/backend_switch.rs` 連真 daemon 驗有紀錄與 null；避免自製 wire fixture。既有版本不合測試核新增 1.8 的完整支援清單及不重試。
+
+13C 未發布的 client 1.8 新增 Activate／Rollback 操作，字串預檢涵蓋 instance 與 switch ID，mutation 不重送；BackendSwitchPhase 新增持久 RollbackPrepared（pending），避免已啟用版本回退時漏掉暫停投遞。

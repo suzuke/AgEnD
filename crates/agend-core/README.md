@@ -149,3 +149,5 @@ holder 協定 1.3 加入 `SpawnBound`／`GetLaunchBinding` 與不含 argv／環�
 Client protocol 1.8 新增操作員 BackendSwitchCommand（prepare／status／cancel）與可空的 BackendSwitch 結果。Prepare 只建立持久準備狀態，型別不代表新版已啟動。
 
 `BackendSwitchPhase::pending()` 定義 Prepared／Committed／Restoring 仍屬進行中；選定路徑不代表啟動成功，Activated／RolledBack 才表示呼叫者完成啟動驗證。實際 I/O 與原子狀態轉移在 daemon。
+
+13C 未發布的 client 1.8 新增 Activate／Rollback 操作，字串預檢涵蓋 instance 與 switch ID，mutation 不重送；BackendSwitchPhase 新增持久 RollbackPrepared（pending），避免已啟用版本回退時漏掉暫停投遞。

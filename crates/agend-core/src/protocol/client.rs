@@ -248,6 +248,14 @@ pub enum BackendSwitchCommand {
         version: String,
         expected_previous: Option<String>,
     },
+    Activate {
+        instance_id: String,
+        switch_id: String,
+    },
+    Rollback {
+        instance_id: String,
+        switch_id: String,
+    },
     Cancel {
         instance_id: String,
         switch_id: String,

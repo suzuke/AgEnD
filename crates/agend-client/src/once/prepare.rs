@@ -126,6 +126,14 @@ impl Budget {
                 BackendSwitchCommand::Cancel {
                     instance_id,
                     switch_id,
+                }
+                | BackendSwitchCommand::Activate {
+                    instance_id,
+                    switch_id,
+                }
+                | BackendSwitchCommand::Rollback {
+                    instance_id,
+                    switch_id,
                 } => self.strings([instance_id.as_str(), switch_id]),
             },
             OperatorCommand::DriverStatus { instance_id } => self.add(instance_id),

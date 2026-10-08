@@ -29,6 +29,35 @@ pub(super) fn stop(
     if !check_holder(home, id, holder_pid)? {
         return Ok(());
     }
+    let mut conn = verified_connection(home, intent, holder_pid, agent_pid)?;
+    if !check_holder(home, id, holder_pid)? {
+        return Ok(());
+    }
+    conn.send(&HolderRequest::Shutdown)
+        .map_err(|e| err(format!("managed Shutdown outcome unknown: {e}")))?;
+    let deadline = Instant::now() + STOP_WITHIN;
+    while check_holder(home, id, holder_pid)? {
+        if Instant::now() >= deadline {
+            return Err(err(
+                "managed holder still runs after Shutdown; outcome unknown",
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    Ok(())
+}
+
+/// Establish identity on one socket without stopping or replacing a runtime link.
+pub(super) fn verified_connection(
+    home: &Path,
+    intent: &ManagedLaunchIntent,
+    holder_pid: u32,
+    agent_pid: u32,
+) -> Result<Conn, RuntimeError> {
+    let id = &intent.instance_id;
+    if !check_holder(home, id, holder_pid)? {
+        return Err(err("managed holder is absent"));
+    }
     // Unlike the generic stop path, do not retry a failed connection: a later
     // peer may be a different holder. The caller reconciles durable state.
     let (mut conn, _) = Conn::connect(&files::socket_path(home, id))
@@ -73,18 +102,7 @@ pub(super) fn stop(
         }
     }
     if !check_holder(home, id, holder_pid)? {
-        return Ok(());
+        return Err(err("managed holder disappeared"));
     }
-    conn.send(&HolderRequest::Shutdown)
-        .map_err(|e| err(format!("managed Shutdown outcome unknown: {e}")))?;
-    let deadline = Instant::now() + STOP_WITHIN;
-    while check_holder(home, id, holder_pid)? {
-        if Instant::now() >= deadline {
-            return Err(err(
-                "managed holder still runs after Shutdown; outcome unknown",
-            ));
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    Ok(())
+    Ok(conn)
 }

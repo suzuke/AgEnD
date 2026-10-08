@@ -34,7 +34,7 @@ runtime 已保存啟動 fingerprint 與檔案身分；macOS 核實際 executable
 新 holder 啟動前，daemon 核對指向受管目錄的 program（包含指向該檔案的 symlink alias、依 agent PATH 選定的裸名稱與依 instance cwd 解析的相對路徑）。
 內容有變或尚無 canary 的版本拒絕啟動，保存 failed 原因並顯示需要你；不先建立 holder。
 核對由 daemon 與 CLI inspect 共用，hash 工作移到 blocking pool。
-有有效 canary 的受管程式可由 instance 的明確 `--program` 啟動；已有準備／查詢／取消入口；實際 fleet 換版／回退仍未接入。
+有有效 canary 的受管程式可由 instance 的明確 `--program` 啟動；已有準備／查詢／取消入口；啟用／回退已接 supervisor，Codex 原生假 backend 的完整往返已通過；三後端與故障恢復驗收尚未完成。
 新啟動使用 canonical 匯入路徑，先持久化 artifact／設定／啟動 UUID，再送 SpawnBound。
 重連核對原 artifact bytes、設定與 holder UUID；缺少意圖或不符時保留 holder 並標記失敗，不自動替換。
 Canary 證明目前 daemon 與匯入 artifact 的新啟動、Ready、三輪成功回應；
@@ -109,13 +109,13 @@ Claude 從同一資料庫快照核對 confirmed delivery、持久 ACK、單筆�
 
 受管啟動意圖由 SQLite migration 0018 保存，每 instance 一筆，與 instance 移除 cascade。儲存時核對 instance 快照並以舊 binding CAS；不明結果先讀回，不能盲目重試。新 holder 啟動前才可替換意圖，重連不得建立新意圖；supervisor 必須先證明舊 holder 已離開。supervisor 在確認舊 holder 不存在、orphan 已清理後保存意圖；解析受管別名後以 canonical 匯入路徑建立實際 argv，保留原始設定供重連核對。
 
-Runtime 保留該次意圖的 UUID，首次啟動核對 Spawned 與 GetLaunchBinding 的 agent PID 一致；重連只讀回 UUID／PID，核對前不發布 writer。未驗證 Exited 不觸發生命週期處理；取消中的核對不發失敗通知。supervisor 收到當前 generation 的 binding rejection 時標記失敗並 detach，保留 holder；重連核對持久 artifact 與 instance 設定，再讀 holder UUID；缺失或不符直接標記失敗，保留 holder，不排自動替換。三種原生替身已驗新啟動、保留原 holder 重連、錯 UUID 拒絕且不替換程序。明確升級／回退與真模型認證隔離尚未完成。
+Runtime 保留該次意圖的 UUID，首次啟動核對 Spawned 與 GetLaunchBinding 的 agent PID 一致；重連只讀回 UUID／PID，核對前不發布 writer。未驗證 Exited 不觸發生命週期處理；取消中的核對不發失敗通知。supervisor 收到當前 generation 的 binding rejection 時標記失敗並 detach，保留 holder；重連核對持久 artifact 與 instance 設定，再讀 holder UUID；缺失或不符直接標記失敗，保留 holder，不排自動替換。三種原生替身已驗新啟動、保留原 holder 重連、錯 UUID 拒絕且不替換程序。明確升級／回退正在原生驗證，真模型認證隔離尚未完成。
 
 重連沿用既有啟動准入證據，只核對受管 bytes／設定與 holder 原 UUID；不因 daemon 升級要求重新跑 canary。新 Spawn 仍須當前 daemon 指紋的 canary。intent 的 session 是啟動時指定值：首次 Codex／OpenCode 的 None 可由正式 driver 後續建立 session；原本 Some 或 Claude 仍精確核對。
 
 ## 切換記錄（儲存層已實作，操作流程待接）
 
-Migration 0019 保存每 instance 最近一次 BackendSwitch；prepared 只保存原啟動意圖與目標，不改 program。commit／rollback 在同一 SQLite transaction 核對完整 switch 記錄、原設定與 agent_pid 已清除，再一起改 program 與 phase。過期請求不能覆寫目前狀態；不明結果先讀回，不盲目重送。新 prepare 以先前 switch ID 做 CAS，不能覆蓋 Prepared／Committed／Restoring 的進行中切換；明確移除 instance 時 cascade。此層不取代 supervisor 的 canary、idle／派工暫停、精確 holder 停止及重啟驗證，準備／查詢／取消 CLI 已接入，完整升級／回退流程仍未完成。
+Migration 0019 保存每 instance 最近一次 BackendSwitch；prepared 只保存原啟動意圖與目標，不改 program。commit／rollback 在同一 SQLite transaction 核對完整 switch 記錄、原設定與 agent_pid 已清除，再一起改 program 與 phase。過期請求不能覆寫目前狀態；不明結果先讀回，不盲目重送。新 prepare 以先前 switch ID 做 CAS，不能覆蓋 Prepared／Committed／RollbackPrepared／Restoring 的進行中切換；明確移除 instance 時 cascade。此層不取代 supervisor 的 canary、idle／派工暫停、精確 holder 停止及重啟驗證，準備／查詢／取消 CLI 已接入，完整升級／回退流程仍未完成。
 
 ## 準備、查詢與取消（client 1.8）
 
@@ -123,18 +123,20 @@ Migration 0019 保存每 instance 最近一次 BackendSwitch；prepared 只保�
 agend backend switch prepare <instance> --version <version>
 agend backend switch status <instance> --json
 agend backend switch cancel <instance> --switch-id <id>
+agend backend switch activate <instance> --switch-id <id>
+agend backend switch rollback <instance> --switch-id <id>
 ```
 
 由 daemon supervisor 序列處理。prepare 要求來源為 running 受管 instance、來源 artifact／設定與持久意圖一致，以及目標通過目前 daemon 的 canary 檢查；Prepared 暫停新 push reservation 與 agent inbox 讀取，不停止舊 holder，也不啟用目標。
-已有完成／取消紀錄時，下一次 prepare 必須帶 `--previous <id>`，避免覆寫其他操作者的新請求。cancel 只接受精確 Prepared ID 且 instance 設定仍吻合；恢復新投遞但不改 program／PID。RPC 失去回覆時先查 status，不自動重送。
+已有完成／取消紀錄時，下一次 prepare 必須帶 `--previous <id>`，避免覆寫其他操作者的新請求。cancel 只接受精確 Prepared ID 且 instance 設定仍吻合；保留 program；holder 仍在時重連投遞，已消失的 running instance 重新啟動原版本。RPC 失去回覆時先查 status，不自動重送。
 
-目前整合測試證明中斷 Prepared 的查詢、取消與重啟保留；尚未證明成功 prepare 後的在途排空、停止舊版、啟動新版與 rollback。不要把 Prepared 視為完成換版。
+Codex 原生假 backend 整合測試已經兩個版本的正式 canary、prepare、activate 到 Activated、rollback 到 RolledBack，核 holder 更換與 session 保留。這不是 Claude／OpenCode、真模型或所有中斷恢復情境的證據；Prepared 仍不是完成換版。
 
 換版停止原語 `HolderRuntime::stop_reserved` 要求持久意圖及精確 holder／agent PID。查 LaunchBinding 與 Shutdown 使用同一連線，後續 socket 路徑替換不會把停止送到新 peer；回覆不符或 holder PID 改變時保留程序，結果不明須對帳。呼叫前的回合結束證據、在途排空及新啟動序列化仍由 supervisor 負責，尚未完成。
 
 Prepare 在 SQLite 暫停新 reservation 後，捕捉已開始的 Claude／inbox server 回覆，最多等待 10 秒直到既有 handler／socket write 全部完成或連線任務結束。其後的空輪詢不加入舊範圍；逾時仍保存 Prepared，呼叫者查 status 對帳。ACK、backend 完成與 worker 停止是後續獨立條件；socket 已寫完不代表模型已消費內容。
 
 
-切換持久狀態分成 Prepared（尚未改路徑）、Committed（已選新版、待啟動驗證）、Activated（新版已驗）、Restoring（已恢復舊路徑、待重新啟動驗證）、RolledBack（舊版已重新驗證）與 Cancelled。前三種進行中狀態 Prepared／Committed／Restoring 都暫停新投遞，重開 DB 不會解除。`finish_backend_switch` 以精確切換紀錄、Running instance／PID／session 及新 launch UUID 做 CAS，檢查 artifact 與設定後才釋放；不能以原本已停止的 launch 意圖宣告回滾成功。呼叫者仍須先驗真正 native readiness，Store 的快照驗證本身不是程序存活證據；supervisor 啟用／回滾接線尚未完成。
+切換持久狀態分成 Prepared（尚未改路徑）、Committed（已選新版、待啟動驗證）、Activated（新版已驗）、Restoring（已恢復舊路徑、待重新啟動驗證）、RolledBack（舊版已重新驗證）與 Cancelled。前三種進行中狀態 Prepared／Committed／RollbackPrepared／Restoring 都暫停新投遞，重開 DB 不會解除。`finish_backend_switch` 以精確切換紀錄、Running instance／PID／session 及新 launch UUID 做 CAS，檢查 artifact 與設定後才釋放；不能以原本已停止的 launch 意圖宣告回滾成功。呼叫者仍須先驗真正 native readiness，Store 的快照驗證本身不是程序存活證據；supervisor 定期核 native 閒置與 holder 綁定後才完成狀態。Activated 的回滾先保存 RollbackPrepared 暫停投遞，再停止目前 holder；Committed／Restoring 無 holder 的 boot 只對設定吻合且仍准入的目標啟動。失敗維持 pending，需查 status；自動失敗回滾與全部重啟切點仍待驗證。
 
 進行中的切換也拒絕操作員完整終端 acquire／resize／input 與 legacy input，避免閒置核對期間再開始工作；唯讀與 release 可用。TerminalHub actor 在查 DB 前加入排空追蹤，完整控制請求直到返回才釋放；legacy blocking writer 自己持有追蹤，actor 取消不提前釋放。完整控制逾時／斷線與 legacy 寫出不證明 backend 已停止工作，仍須獨立 native 回合完成與身分核對。

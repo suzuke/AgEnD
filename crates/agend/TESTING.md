@@ -216,3 +216,5 @@ Canary 必須取得三筆與 delivery 綁定的 completed outcomes；修改 fail
 `claude_idle_observation_requires_live_hook_session_and_original_holder_connection` 將實際 server 放在本程序，啟動原生 holder 與 hook helper，核 Stop 穩定期、busy 撤銷、session 變更及重連失效；新連線須先有 routing hook 才可重建 idle。只用 shell producer，不執行 Claude／模型。
 
 13C：pending backend switch 阻止一般 boot start、自動重啟與 operator retry 改寫啟動意圖。`backend_switch::pending_switch_boot_preserves_launch_reservation_without_ordinary_restart` 經原生 daemon 驗三種 pending phase 跨 boot 保留精確資料；專用換版恢復仍待串接。
+
+13C 新增 `backend switch activate／rollback --switch-id`：精確持久 ID、目的版本准入、投遞排空與 native idle 後停止受管 holder；Committed／Restoring 保持暫停，核新 holder 綁定及 readiness 後才釋放。Activated 回滾先保存 RollbackPrepared。Codex 原生假 backend 的雙版本 canary、啟用、回滾及 session 保留已驗；三後端與完整 crash matrix 尚未完成。

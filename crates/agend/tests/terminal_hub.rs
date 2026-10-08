@@ -810,6 +810,9 @@ fn pending_backend_switch_refuses_terminal_mutations_but_preserves_reads() {
     let native = lab::Lab::with_prefix(Path::new(BIN), "g13-terminal-pause");
     let home = native.home(1);
     clp::add(&home, ID, Backend::Claude, SHELL).unwrap();
+    let mut initial = lab::Daemon::start(&native, &home, &[]).unwrap();
+    initial.ready().unwrap();
+    initial.interrupt().unwrap();
     let store = SqliteStore::open(&home, 0).unwrap();
     let instance = block_on(store.instance(ID)).unwrap().unwrap();
     // Seed via the real Store before the daemon owns its DB lock. This fixture
@@ -845,7 +848,13 @@ fn pending_backend_switch_refuses_terminal_mutations_but_preserves_reads() {
         None,
     ))
     .unwrap();
+    // Keep this unversioned shell holder reconnectable. The seeded switch
+    // exercises pause admission only, never source binding or activation.
     drop(store);
+    {
+        let db = rusqlite::Connection::open(home.join("agend.db")).unwrap();
+        db.execute("DELETE FROM managed_launches", []).unwrap();
+    }
     let mut daemon = lab::Daemon::start(&native, &home, &[]).unwrap();
     daemon.ready().unwrap();
     let lab = Lab {

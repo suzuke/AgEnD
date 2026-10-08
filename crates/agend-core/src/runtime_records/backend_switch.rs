@@ -12,6 +12,8 @@ pub enum BackendSwitchPhase {
     /// Target program selected, but native activation is not yet verified.
     Committed,
     Activated,
+    /// Delivery paused before stopping an activated target for rollback.
+    RollbackPrepared,
     /// Original program restored, but its new native launch is not yet verified.
     Restoring,
     RolledBack,
@@ -19,7 +21,10 @@ pub enum BackendSwitchPhase {
 
 impl BackendSwitchPhase {
     pub fn pending(self) -> bool {
-        matches!(self, Self::Prepared | Self::Committed | Self::Restoring)
+        matches!(
+            self,
+            Self::Prepared | Self::Committed | Self::RollbackPrepared | Self::Restoring
+        )
     }
 }
 

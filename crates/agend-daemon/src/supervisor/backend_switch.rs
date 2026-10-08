@@ -37,7 +37,9 @@ impl Supervisor {
         let id = match &command {
             BackendSwitchCommand::Status { instance_id }
             | BackendSwitchCommand::Prepare { instance_id, .. }
-            | BackendSwitchCommand::Cancel { instance_id, .. } => instance_id,
+            | BackendSwitchCommand::Cancel { instance_id, .. }
+            | BackendSwitchCommand::Activate { instance_id, .. }
+            | BackendSwitchCommand::Rollback { instance_id, .. } => instance_id,
         };
         validate_id(id).map_err(|e| refused(e.to_string()))?;
         let instance = self
@@ -47,6 +49,16 @@ impl Supervisor {
             .map_err(|e| refused(e.to_string()))?
             .ok_or_else(|| (error_code::UNKNOWN_INSTANCE, format!("no instance {id}")))?;
         match command {
+            BackendSwitchCommand::Activate { switch_id, .. } => self
+                .activate_switch(&instance, &switch_id, false)
+                .await
+                .map(Some)
+                .map_err(refused),
+            BackendSwitchCommand::Rollback { switch_id, .. } => self
+                .activate_switch(&instance, &switch_id, true)
+                .await
+                .map(Some)
+                .map_err(refused),
             BackendSwitchCommand::Status { .. } => self
                 .store
                 .backend_switch(&instance.id)
@@ -62,11 +74,45 @@ impl Supervisor {
                     .ok_or_else(|| {
                         refused("backend switch changed or missing; query status before cancelling")
                     })?;
-                self.store
+                let cancelled = self
+                    .store
                     .cancel_backend_switch(&record)
                     .await
-                    .map(Some)
-                    .map_err(|e| refused(e.to_string()))
+                    .map_err(|e| refused(e.to_string()))?;
+                if instance.status == InstanceStatus::Running {
+                    match files::running(&self.home, &instance.id) {
+                        Ok(Some(pid)) => {
+                            let connected = self
+                                .runtime
+                                .terminal_connection(&instance.id)
+                                .is_ok_and(|c| c.is_current());
+                            if connected {
+                                let restart_delivery = match instance.backend {
+                                    Backend::Claude => false,
+                                    Backend::Codex => {
+                                        self.codex.connected_busy(&instance.id).is_none()
+                                    }
+                                    Backend::Opencode => {
+                                        self.opencode.workers_stopped(&instance.id)
+                                    }
+                                };
+                                if restart_delivery
+                                    && let Some(watch) = self.watches.get(&instance.id)
+                                {
+                                    self.connect_codex(&instance, watch.generation);
+                                }
+                            } else {
+                                self.reconnect(&instance, pid).await;
+                            }
+                        }
+                        Ok(None) => self.start(&instance, instance.session_started, None).await,
+                        Err(error) => log::line(&format!(
+                            "{}: cancelled but resume inspection failed: {error}",
+                            instance.id
+                        )),
+                    }
+                }
+                Ok(Some(cancelled))
             }
             BackendSwitchCommand::Prepare {
                 version,

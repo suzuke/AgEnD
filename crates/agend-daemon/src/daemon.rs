@@ -403,6 +403,7 @@ async fn serve(
     });
     let server = Server::start(listener, socket.clone(), Arc::clone(&context));
     supervisor.set_delivery_replies(server.delivery_replies());
+    supervisor.set_claude_observer(server.claude_observer());
     log::line(&format!("listening on {}", socket.display()));
     log::line(&format!(
         "agend daemon ready: instances={} recovered={} started={} orphans={}",

@@ -303,6 +303,22 @@ impl HolderRuntime {
         blocking(move || inner.stop(&id)).await
     }
 
+    /// Query native binding without mutating the long-lived runtime connection.
+    pub async fn verify_reserved(
+        &self,
+        intent: &agend_core::runtime_records::ManagedLaunchIntent,
+        holder_pid: u32,
+        agent_pid: u32,
+    ) -> Result<(), RuntimeError> {
+        reserved_launch(intent)?;
+        let home = self.inner.home.clone();
+        let intent = intent.clone();
+        blocking(move || {
+            managed_stop::verified_connection(&home, &intent, holder_pid, agent_pid).map(drop)
+        })
+        .await
+    }
+
     /// Stop only the holder/agent identified by this persisted launch. Caller
     /// must first drain delivery and serialize starts for this instance. A
     /// refusal preserves the process, but may detach its runtime connection.

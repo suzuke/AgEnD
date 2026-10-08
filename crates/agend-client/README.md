@@ -104,3 +104,5 @@ Protocol 1.6 新增共用已讀收據：`mark_attention_read`、`attention_read`
 13C 施工中的 protocol 1.7：操作員 `send_message` 固定以 `@operator` 真人身分 queue 投遞，必填 UUID v4；`driver_status` 回傳 instance 與就緒狀態，Codex 必須有連線，unknown 不代表 idle。這些 RPC 不切換 backend 版本。
 
 Client protocol 1.8 提供 backend switch prepare／status／cancel；一般連線最低版本仍 1.3。CLI 在操作前要求 1.8，mutation 不重送，結果不明用 status 查持久紀錄。一次性 encoder 計入巢狀操作字串，decoder 支援可空的 BackendSwitch 回覆。
+
+13C 未發布的 client 1.8 新增 Activate／Rollback 操作，字串預檢涵蓋 instance 與 switch ID，mutation 不重送；BackendSwitchPhase 新增持久 RollbackPrepared（pending），避免已啟用版本回退時漏掉暫停投遞。
