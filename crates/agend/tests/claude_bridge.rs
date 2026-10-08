@@ -1318,7 +1318,9 @@ fn refused_ack_is_a_tool_error_retained_without_confirming_any_message() {
 #[test]
 fn failed_local_ack_publication_is_a_tool_error_and_does_not_write_outside_home() {
     let f = Fixture::new(0);
-    let outside = f.lab.home(1);
+    // Lab homes contain offline configuration. Use an empty foreign directory
+    // so any entry here still proves an unintended spool publication.
+    let outside = f.lab.home(1).join("outside-spool");
     fs::create_dir_all(&outside).unwrap();
     fs::create_dir_all(f.home.join("spool")).unwrap();
     std::os::unix::fs::symlink(&outside, f.home.join("spool/acks")).unwrap();
