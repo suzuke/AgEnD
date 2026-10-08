@@ -329,3 +329,5 @@ system_version 四項 native 測試涵蓋 daemon PATH／相對 cwd、版本替�
 外部版本通知補強：`native_disk_change_notice_and_exact_ack_survive_database_and_fleet_restarts` 以真 probe 對本機假 CLI 的 1.0／2.0／3.0 產生資料，核首次靜默、變動提醒、資料庫／Fleet 重開、確認持久化與舊確認拒絕；這是 producer→Store→通知完整路徑，未宣稱完整 daemon 服務重啟。停用／錯誤設定／canary 案例等待 worker 自行結束後才送 stop，核無 reservation 與執行 marker；managed 排除案例先放受管 instance，再等待下一外部 instance 完成以證實迴圈確實跑過。
 
 跨程序版本 monitor 的三次 daemon 啟動、socket operator／agent 邊界與確認持久化，另見 agend 的 `backend_version_monitor` integration suite。
+
+store::system_versions 診斷案例驗失敗保留歷史成功、配置 scope 改變不回傳舊紀錄、刪除 instance 得 None、managed args 變動不冒用預約且不刪原證據。tests/managed_launch.rs 驗正式 reservation producer 的 projection 排除 args／session；跨 RPC 的 agent／版本拒絕與 doctor consumer 見 agend backend_version_monitor。

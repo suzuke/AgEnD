@@ -402,10 +402,10 @@ async fn connection(
                     continue;
                 }
                 if let ClientRequest::Operator { data } = &request
-                    && matches!(data.command, agend_core::protocol::client::OperatorCommand::TelegramPairing { .. })
+                    && matches!(data.command, agend_core::protocol::client::OperatorCommand::TelegramPairing { .. } | agend_core::protocol::client::OperatorCommand::BackendDiagnostic { .. })
                     && selected_version < V1_9
                 {
-                    let reply = error(Some(data.request_id.clone()), error_code::NOT_SUPPORTED, "Telegram pairing requires client protocol 1.9; upgrade and reconnect");
+                    let reply = error(Some(data.request_id.clone()), error_code::NOT_SUPPORTED, "this operator request requires client protocol 1.9; upgrade and reconnect");
                     if !client.send(&reply).await { return; }
                     continue;
                 }

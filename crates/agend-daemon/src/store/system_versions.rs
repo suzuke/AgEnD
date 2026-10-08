@@ -43,6 +43,51 @@ fn write(conn: &Connection, row: &SystemVersionObservation) -> Result<(), StoreE
     Ok(())
 }
 impl SqliteStore {
+    /// Read configuration and its matching evidence in one database transaction.
+    /// No arguments, environment, credentials, or session tokens leave the store.
+    pub async fn backend_diagnostic(
+        &self,
+        id: &str,
+    ) -> Result<Option<agend_core::setup::backend::observation::BackendDiagnostic>, StoreError>
+    {
+        use agend_core::setup::backend::observation::{BackendDiagnostic, ManagedDiagnostic};
+        let id = id.to_owned();
+        self.call(move |conn| {
+            let tx = conn.transaction()?;
+            let Some(instance) = super::instances::get(&tx, &id)? else {
+                return Ok(None);
+            };
+            let backend = instance.backend.as_str().to_owned();
+            let external_version = read(&tx, &id)?.filter(|row| {
+                row.backend == backend
+                    && row.program == instance.program
+                    && row.working_directory == instance.working_directory
+            });
+            let managed_reservation = super::managed_launch::get(&tx, &id)?
+                .filter(|row| {
+                    row.artifact.backend == backend
+                        && row.configured_program == instance.program
+                        && row.configured_args == instance.args
+                        && row.working_directory == instance.working_directory
+                        && row.session_id == instance.session_id
+                        && row.delivery == instance.delivery
+                })
+                .map(|row| ManagedDiagnostic {
+                    binding: row.binding,
+                    artifact: row.artifact,
+                });
+            Ok(Some(BackendDiagnostic {
+                instance_id: id,
+                backend,
+                configured_program: instance.program,
+                working_directory: instance.working_directory,
+                external_version,
+                managed_reservation,
+            }))
+        })
+        .await
+    }
+
     pub async fn system_version_observation(
         &self,
         id: &str,
@@ -297,6 +342,10 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(failed.latest, Some(v2.clone()));
+        let snapshot = block_on(store.backend_diagnostic("version-test"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(snapshot.external_version, Some(failed.clone()));
         assert_eq!(failed.revision, 2);
         assert!(
             !block_on(store.acknowledge_system_version("version-test", &third.generation, 1))
@@ -348,7 +397,19 @@ mod tests {
         assert!(
             !block_on(store.finish_system_version_check(&first, 100, Ok(value.clone()))).unwrap()
         );
+        let snapshot = block_on(store.backend_diagnostic("version-test"))
+            .unwrap()
+            .unwrap();
+        assert!(
+            snapshot.external_version.is_none(),
+            "changed scope exposed stale evidence"
+        );
         assert!(block_on(store.remove_instance("version-test")).unwrap());
+        assert!(
+            block_on(store.backend_diagnostic("version-test"))
+                .unwrap()
+                .is_none()
+        );
         assert!(
             block_on(store.system_version_observation("version-test"))
                 .unwrap()
@@ -371,6 +432,59 @@ mod tests {
             block_on(store.acknowledge_system_version("version-test", &new.generation, 1)).unwrap()
         );
     }
+    #[test]
+    fn diagnostic_omits_managed_reservation_after_configured_arguments_change() {
+        use agend_core::{setup::backend::ImportedBackend, traits::HolderLaunch};
+        let dir = TempDir::new("diagnostic-managed-scope").unwrap();
+        let home = dir.path().canonicalize().unwrap();
+        let store = SqliteStore::open(&home, 0).unwrap();
+        let instance = instance(&home);
+        block_on(store.add_instance(&instance)).unwrap();
+        let launch = HolderLaunch {
+            instance_id: instance.id.clone(),
+            backend: instance.backend,
+            executable: instance.program.clone(),
+            args: instance.args.clone(),
+            working_directory: instance.working_directory.clone(),
+        };
+        let artifact = ImportedBackend {
+            format: 1,
+            backend: "codex".into(),
+            version: "1.0".into(),
+            sha256: "a".repeat(64),
+            bytes: 1,
+        };
+        block_on(store.prepare_managed_launch(&instance, &launch, artifact, None)).unwrap();
+        assert!(
+            block_on(store.backend_diagnostic(&instance.id))
+                .unwrap()
+                .unwrap()
+                .managed_reservation
+                .is_some()
+        );
+        block_on(store.call(|conn| {
+            conn.execute(
+                "UPDATE instances SET args=?1 WHERE id='version-test'",
+                [serde_json::to_string(&vec!["--changed"]).unwrap()],
+            )?;
+            Ok(())
+        }))
+        .unwrap();
+        assert!(
+            block_on(store.backend_diagnostic(&instance.id))
+                .unwrap()
+                .unwrap()
+                .managed_reservation
+                .is_none()
+        );
+        assert!(
+            block_on(store.managed_launch(&instance.id))
+                .unwrap()
+                .is_some(),
+            "diagnostic erased evidence"
+        );
+    }
+
     #[test]
     fn changed_scope_with_the_same_error_never_inherits_an_old_ack() {
         let dir = TempDir::new("system-version-scope").unwrap();

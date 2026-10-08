@@ -61,6 +61,9 @@ fn command(bytes: &[u8], deadline: Instant) -> io::Result<ClientCommandResultDat
                 None => None,
             },
         },
+        "backend_diagnostic" => CommandResult::BackendDiagnostic {
+            data: data(envelope.data, deadline)?,
+        },
         "backend_switch" => CommandResult::BackendSwitch {
             data: match envelope.data {
                 Some(raw) => parse(raw.get().as_bytes(), deadline)?,

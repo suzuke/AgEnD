@@ -51,3 +51,29 @@ pub struct SystemVersionObservation {
     pub revision: u64,
     pub acknowledged_revision: u64,
 }
+
+/// Read-only database snapshot, not a claim about a loaded process or live login.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackendDiagnostic {
+    pub instance_id: String,
+    pub backend: String,
+    pub configured_program: String,
+    pub working_directory: String,
+    /// Only an observation whose scope still matches the configured instance.
+    pub external_version: Option<SystemVersionObservation>,
+    /// A pre-spawn reservation, never proof that a holder started or is alive.
+    pub managed_reservation: Option<ManagedDiagnostic>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManagedDiagnostic {
+    pub binding: String,
+    pub artifact: super::ImportedBackend,
+}
+
+/// The daemon incarnation that produced this configuration snapshot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackendDiagnosticReply {
+    pub boot_id: u64,
+    pub snapshot: Option<BackendDiagnostic>,
+}

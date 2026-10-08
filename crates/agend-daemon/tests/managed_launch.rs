@@ -51,6 +51,17 @@ fn persisted_intent_requires_cas_and_instance_removal_prevents_old_receipt_adopt
     assert_eq!(first.args, launch.args);
     assert_eq!(first.artifact, artifact);
     assert_eq!(first.session_id, instance.session_id);
+    let diagnostic = block_on(store.backend_diagnostic(&instance.id))
+        .unwrap()
+        .unwrap();
+    let reservation = diagnostic.managed_reservation.as_ref().unwrap();
+    assert_eq!(reservation.binding, first.binding);
+    assert_eq!(reservation.artifact, first.artifact);
+    let wire = serde_json::to_value(&diagnostic).unwrap();
+    assert!(wire.get("args").is_none());
+    assert!(wire.get("session_id").is_none());
+    assert!(wire["managed_reservation"].get("args").is_none());
+    assert!(wire["managed_reservation"].get("session_id").is_none());
     // An unknown/lost result does not authorize a second reservation.
     assert!(
         block_on(store.prepare_managed_launch(&instance, &launch, artifact.clone(), None)).is_err()

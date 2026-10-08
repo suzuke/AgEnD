@@ -257,3 +257,5 @@ SQLite 中每個 task 的固定 repository ID、branch、nonce 與 PR number；�
 - **系統版本觀測（SystemBackendVersion）**：用 daemon 的啟動 PATH／cwd／環境探測外部設定程式，保存解析路徑、第一行版本輸出與 SHA-256；不是既存 holder 的映像身分或 canary 准入。
 
 - **SystemVersionObservation**：每個 instance 的外部 CLI 磁碟版本觀測紀錄；含不可沿用的 generation、探測 attempt、最後成功值與精確確認 revision。首次成功只建基準，並非既存 holder 已載入該版本的證據。
+
+- **backend 診斷快照（BackendDiagnostic）**：daemon 在同一資料庫交易讀取的當前配置與相符版本觀測／受管啟動意圖摘要；回覆綁 daemon boot ID，不含 args、session 或環境。屬歷史觀測與預約證據，不證明目前登入或執行映像。

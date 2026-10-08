@@ -179,3 +179,5 @@ SystemBackendVersion 保存外部設定程式的解析路徑、版本輸出與�
 `SystemVersionObservation` 描述外部版本探測的持久狀態；以 generation 隔開同名 instance 的不同生命週期。
 
 `Config.backend_version_checks` 可獨立關閉本機外部 CLI 的版本探測；未設定時啟用，不改 registry_checks 的網路查詢語意。
+
+未發布的 client 1.9 增加 BackendDiagnostic 唯讀 operator RPC。BackendDiagnosticReply 綁 daemon boot ID，snapshot 只含當前設定、相符外部版本紀錄及受管 pre-spawn reservation 的 binding／artifact 投影，不回傳 args、session 或環境；不是 loaded-holder 或 live-auth 證據。

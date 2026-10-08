@@ -9,7 +9,7 @@
 
 | 範圍 | 已實作／已有證據 | 尚未證明完成 |
 |---|---|---|
-| 13A home／設定 | 預設 home、init 權限、doctor 的配置程式解析、沙箱與服務診斷；install_home 回歸 | doctor 已分開執行檔／歷史 canary 範圍／unknown 登入；daemon 診斷快照、backend 登入有效性與完整能力相容矩陣、故障→修復人工矩陣仍待完成 |
+| 13A home／設定 | 預設 home、init 權限、doctor 的配置程式解析、沙箱與服務診斷；install_home 回歸 | doctor 已分開執行檔／歷史 canary 範圍／unknown 登入；daemon 唯讀配置／觀測快照已接入並核 boot；backend 登入有效性與完整能力相容矩陣、故障→修復人工矩陣仍待完成 |
 | 13B 服務 | launchd／systemd plan、安裝所有權、對帳、解除安裝、資料刪除互斥；Linux 隔離服務紀錄 | macOS 真 launchd capture 尚待核准；兩平台服務重啟後 holder 存活、解除安裝清理的最終版本證據 |
 | 13C 受管版本 | 匯入、canary 收據、版本切換／回退、身份綁定與 pending 恢復；原生假 backend 測試 | 三個 backend 的專用認證／真模型 canary、切換與回退完整驗收及所有故障切點 |
 | 13C 版本發現 | 固定 npm 公開 metadata、每日持久排程、外部 CLI 磁碟版本探測、待辦與 Telegram 精確確認 | 真實系統 CLI 的版本觀測驗收；正式 daemon 同時兩種 monitor active 的停機整合證據 |
@@ -30,6 +30,8 @@
 ## 本批進度
 
 - 2026-10-08：doctor 分開執行檔完整性、歷史 canary 範圍與 unknown 登入；有效歷史收據不再提示重跑 canary，明示尚未驗證目前 daemon／登入／其他能力。正式假 backend producer 收據與錯 build 回歸 7/7、install_home 9/9、CLI init_and_doctor、workspace clippy、fmt、check-deps 通過，獨立唯讀覆核無 blocker；自有測試目錄／程序未見殘留。此改動未補足 live-auth producer 或整關真環境驗收（feat/g13-install／PR #158）。
+
+- 2026-10-08：13A 接入 operator-only BackendDiagnostic 1.9；同一 SQLite transaction 讀配置與匹配觀測／受管預約摘要，排除 args／session／環境。doctor 一次性 RPC 核 fleet 的 daemon boot 與配置，跨 boot 或 scope 不符回 unknown；外部樣本不冒充執行映像、預約不冒充存活。原生三次啟動 RPC／doctor、1.8 與 agent 拒絕、store 4 項、managed 2 項、boot／scope 反例、install_home 9 項與 CLI 回歸通過；client 全套 52 項通過，workspace clippy／fmt／check-deps 通過。獨立覆核指出的通用 client 重連問題已改為 exchange_once 並複核；重啟競態仍是組合證據，非單一中途重啟案例。自有測試程序／目錄未見殘留，登入 producer／能力矩陣與真環境驗收仍待完成（feat/g13-install／PR #158）。
 
 ## 授權與清理邊界
 

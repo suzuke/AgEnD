@@ -124,3 +124,5 @@ Doctor 現在另列每個 instance 的設定程式：絕對路徑或有明確 cw
 Canary 版本探測逾時只記錄 elapsed_ms、budget_ms 與 stdout_bytes（或 unavailable），不記錄 backend 輸出內容；維持原 5 秒上限與整體 deadline，沒有自動重試。原生 process tests 驗證逾時後自有程序與暫存清理。
 
 Doctor 的 PATH backend 列只證明操作員 PATH 的版本 probe；`backend/<instance>` 只描述設定程式／受管 bytes，`compatibility/<instance>` 另列歷史 canary 的 backend、版本、兩個 digest、平台、時間與要求模型。成功歷史仍為 warn，因為沒有當前 daemon build／登入／其他能力的證據；沒有正式 auth producer 時，獨立 `authentication` 列明示 unknown。`install_home` 驗 probe 成功／Idle／缺失收據不變成登入成功；`backend_canary` 用正式 runner 的三 backend 收據驗歷史範圍，再變造 build digest 驗拒絕。daemon 唯讀診斷快照、完整能力矩陣與真登入驗收仍未完成。
+
+doctor 的 observation/<instance> 透過 protocol 1.9 一次性唯讀 RPC 取得 daemon 的設定快照；回覆 boot ID 與 fleet 不符或設定變動就顯示 unknown。外部版本是磁碟探測的持久紀錄，失敗時保留的成功值可能早於本次 attempt；受管紀錄只代表 pre-spawn reservation。這些都不證明目前 holder 載入的程式、登入或 daemon binary digest。

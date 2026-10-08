@@ -184,3 +184,5 @@ SystemBackendVersion 的資料由 daemon 原生腳本 producer 產生；PATH／c
 外部版本觀測型別由 daemon 的原生假程式探測 producer 與 SQLite 重開測試驗證；不以人工 JSON 冒充 probe 結果。
 
 backend_version_checks 的缺省、停用、型別拒絕與 TOML round-trip 由 daemon config 測試涵蓋。
+
+BackendDiagnostic 的 consumer 由 agend/backend_version_monitor 以正式 daemon／SQLite producer 驗證；原生 client 1.8 拒絕與 agent forbidden，不手寫 wire JSON。doctor 的 boot／配置不同拒絕由實際 store snapshot 覆蓋。

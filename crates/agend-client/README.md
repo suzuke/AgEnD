@@ -108,3 +108,5 @@ Client protocol 1.8 提供 backend switch prepare／status／cancel；一般連�
 13C 未發布的 client 1.8 新增 Activate／Rollback 操作，字串預檢涵蓋 instance 與 switch ID，mutation 不重送；BackendSwitchPhase 新增持久 RollbackPrepared（pending），避免已啟用版本回退時漏掉暫停投遞。
 
 Protocol 1.9 加入 TelegramPairing 操作員 request／收據；one-shot preparation 計入所有可變字串，deadline decoder 處理 nullable 配對收據。一般連線仍相容舊 daemon，配對呼叫者必須要求 1.9 且不重送。
+
+BackendDiagnostic 的1.9 nullable snapshot 包在帶 boot ID 的回覆內，由 one-shot deadline decoder 解析。doctor 使用 exchange_once 並核對 fleet 的 daemon boot；通用 request 的 Redo::Never 仍可能在寫入失敗時重連，不能拿來維持同一 boot 的診斷身分。

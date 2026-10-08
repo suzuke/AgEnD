@@ -93,3 +93,5 @@ Terminal frame 解碼維持原 internally-tagged serde 路徑；RawValue 優化�
 13C 未發布的 client 1.8 新增 Activate／Rollback 操作，字串預檢涵蓋 instance 與 switch ID，mutation 不重送；BackendSwitchPhase 新增持久 RollbackPrepared（pending），避免已啟用版本回退時漏掉暫停投遞。
 
 13D `agend/tests/telegram_pairing.rs` 對正式 daemon producer 驗 one-shot nullable／非空配對收據，不用手寫 response JSON；既有 client 版本錯誤測試涵蓋 1.9 offer。
+
+BackendDiagnostic one-shot decoder 由 agend/tests/backend_version_monitor.rs 的正式 daemon 回覆驗證。既有 once 測試保持丟失回覆不重送、hello 與 reply 共用期限的保證。

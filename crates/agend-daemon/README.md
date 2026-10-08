@@ -279,3 +279,5 @@ HolderRuntime::observe_backend_version 使用 daemon 捕獲的 PATH 與 agent_en
 外部 CLI 版本觀測 Store 每個 instance 最多一列；探測前預約、60 秒內及時鐘倒退不重複預約，失敗保留上次成功值。首次成功靜默建立基準，後續變動、失敗與恢復產生 revision；確認綁 generation 與 revision。背景探測與 attention 共用此持久 API。
 
 外部 CLI 的持久版本紀錄已接背景 monitor 與 attention：每 60 秒檢查已設定 instance，沿用 daemon 的 cwd／PATH 與環境白名單。受管 launch 與 canary home 跳過；`backend_version_checks=false` 可停用本機探測。停機等待當次 child probe 收尾與結果保存，確認不會安裝、切換或重啟 backend。
+
+operator BackendDiagnostic 在單一 SQLite transaction 讀配置及相符的外部版本／受管預約紀錄，無 backend 執行、設定寫入或通知確認。RPC 回覆綁本次 daemon boot；args、session、環境不出現在 projection。配置已變更的紀錄不回傳但仍保留於 store。

@@ -156,7 +156,8 @@ impl Budget {
                     switch_id,
                 } => self.strings([instance_id.as_str(), switch_id]),
             },
-            OperatorCommand::DriverStatus { instance_id } => self.add(instance_id),
+            OperatorCommand::DriverStatus { instance_id }
+            | OperatorCommand::BackendDiagnostic { instance_id } => self.add(instance_id),
             OperatorCommand::SendMessage {
                 to,
                 message,

@@ -81,6 +81,34 @@ pub async fn handle(ctx: &Context, data: OperatorData) -> Outcome {
         )
     };
     let reply = match data.command {
+        OperatorCommand::BackendDiagnostic { instance_id } => {
+            if agend_core::runtime_records::validate_id(&instance_id).is_err() {
+                return Outcome::Reply(error(
+                    Some(request_id),
+                    error_code::INVALID_REQUEST,
+                    "invalid instance id",
+                ));
+            }
+            match ctx.store.backend_diagnostic(&instance_id).await {
+                Ok(data) => result(
+                    request_id,
+                    CommandResult::BackendDiagnostic {
+                        data: Box::new(
+                            agend_core::setup::backend::observation::BackendDiagnosticReply {
+                                boot_id: ctx.fleet.base(),
+                                snapshot: data,
+                            },
+                        ),
+                    },
+                ),
+                Err(_) => error(
+                    Some(request_id),
+                    error_code::INVALID_REQUEST,
+                    "backend diagnostic evidence unavailable",
+                ),
+            }
+        }
+
         OperatorCommand::TelegramPairing { operation } => {
             match ctx.pairing.execute(operation).await {
                 Ok(data) => result(

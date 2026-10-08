@@ -104,6 +104,7 @@ fn native_daemon_detects_changed_disk_version_and_retains_exact_ack_across_three
             }
             std::thread::sleep(Duration::from_millis(20));
         }
+        diagnostic_contract(&socket, &home, client.daemon().boot_id);
         drop(client);
         daemon.interrupt().unwrap();
         let store = SqliteStore::open(&home, 0).unwrap();
@@ -136,4 +137,112 @@ fn store_setup(store: &SqliteStore, home: &Path, program: &Path) {
         delivery: "push".into(),
     }))
     .unwrap();
+}
+
+fn diagnostic_contract(socket: &Path, home: &Path, boot: Option<u64>) {
+    use agend_core::protocol::client::{
+        ClientRequest, ClientResponse, CommandResult, OperatorCommand, OperatorData, V1_9,
+    };
+    let query = |id: &str, caller| {
+        agend_client::exchange_once(
+            socket,
+            caller,
+            V1_9,
+            &ClientRequest::Operator {
+                data: OperatorData {
+                    request_id: "snapshot".into(),
+                    command: OperatorCommand::BackendDiagnostic {
+                        instance_id: id.into(),
+                    },
+                },
+            },
+            Instant::now() + Duration::from_secs(3),
+        )
+    };
+    let snapshot = || {
+        let ClientResponse::CommandResult { data } = query("version-test", None).unwrap() else {
+            panic!("missing result")
+        };
+        let CommandResult::BackendDiagnostic { data: reply } = data.result else {
+            panic!("missing snapshot")
+        };
+        assert_eq!(Some(reply.boot_id), boot);
+        reply.snapshot.unwrap()
+    };
+    old_protocol_refuses_snapshot(socket);
+    let before = snapshot();
+    assert_eq!(
+        before.configured_program,
+        home.join("backend").to_str().unwrap()
+    );
+    let observed = before.external_version.as_ref().unwrap();
+    assert_eq!(observed.latest.as_ref().unwrap().version_output, "fake 2.0");
+    assert!(observed.completed_ms.is_some());
+    assert!(before.managed_reservation.is_none());
+    assert!(matches!(query("version-test", Some("version-test".into())),
+        Err(agend_client::ClientError::Daemon { code, .. }) if code == agend_core::protocol::client::error_code::FORBIDDEN));
+    assert!(
+        matches!(query("absent", None).unwrap(), ClientResponse::CommandResult { data }
+        if matches!(&data.result, CommandResult::BackendDiagnostic { data } if data.snapshot.is_none()))
+    );
+    assert!(query("../invalid", None).is_err());
+    assert_eq!(snapshot(), before, "read-only RPC changed durable evidence");
+    let out = std::process::Command::new(BIN)
+        .env_clear()
+        .env("HOME", home)
+        .env("AGEND_HOME", home)
+        .env("PATH", "/usr/bin:/bin")
+        .args(["--json", "doctor"])
+        .output()
+        .unwrap();
+    let rows: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout).unwrap();
+    let row = rows
+        .iter()
+        .find(|r| r["check"] == "observation/version-test")
+        .unwrap();
+    let detail = row["detail"].as_str().unwrap();
+    assert!(detail.contains("fake 2.0"));
+    assert!(detail.contains(&format!("daemon boot {boot:?}")));
+    assert!(detail.contains("may predate the current attempt"));
+    assert!(detail.contains("live authentication and running daemon binary digest unknown"));
+    assert_eq!(row["status"], "warn");
+}
+
+fn old_protocol_refuses_snapshot(socket: &Path) {
+    use agend_core::protocol::client::{
+        ClientHello, ClientRequest, ClientResponse, OperatorCommand, OperatorData, V1_8,
+    };
+    use std::io::{BufRead, BufReader, Write};
+    let mut stream = std::os::unix::net::UnixStream::connect(socket).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    let mut send = |request: ClientRequest| {
+        serde_json::to_writer(&mut stream, &request).unwrap();
+        stream.write_all(b"\n").unwrap();
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        serde_json::from_str::<ClientResponse>(&line).unwrap()
+    };
+    assert!(matches!(
+        send(ClientRequest::Hello {
+            data: ClientHello {
+                supported: vec![V1_8],
+                caller: None
+            }
+        }),
+        ClientResponse::Hello { .. }
+    ));
+    let response = send(ClientRequest::Operator {
+        data: OperatorData {
+            request_id: "old-diagnostic".into(),
+            command: OperatorCommand::BackendDiagnostic {
+                instance_id: "version-test".into(),
+            },
+        },
+    });
+    assert!(
+        matches!(response, ClientResponse::Error { data } if data.code == agend_core::protocol::client::error_code::NOT_SUPPORTED)
+    );
 }
