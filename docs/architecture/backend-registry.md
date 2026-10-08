@@ -15,6 +15,12 @@
 
 三個 npm 原始 manifest 保存在 daemon 的 tests/fixtures/backend_registry，來源、時間及 SHA-256 一併記錄。測試透過本機 HTTP 重播，另變造套件名稱／版本及測試轉址、5xx、非 JSON、超量與逾時。
 
+## 持久紀錄
+
+migration 0021 的 backend_registry 最多保存三筆（每個 backend 一筆）。查詢前先保存 attempt 與開始時間；24 小時內不再預約，包含重啟與沒有完成回報的情況。時鐘倒退不提前觸發；舊 attempt 與重複完成均拒絕。失敗保留最近成功 metadata，另外保存 error，不能把歷史值當作本次成功。
+
+結果內容或錯誤改變才增加 revision；同樣結果不重開提醒。acknowledge 必須匹配當前非零 revision；查詢本身不安裝、啟用或確認任何版本。此批是已測的 Store API，尚未啟動 daemon 定時查詢或 attention。
+
 ## 下一步
 
-接持久觀測紀錄、每日查詢與 daemon attention；查詢失敗不能推進為已知最新版，也不能影響正在工作的 backend。
+接每日查詢 worker 與 daemon attention；查詢失敗不能推進為已知最新版，也不能影響正在工作的 backend。

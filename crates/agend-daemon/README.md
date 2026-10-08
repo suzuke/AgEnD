@@ -267,3 +267,5 @@ OpenCode 版本核對：受管程式使用匯入 artifact 的版本（supervisor
 Fleet 的 program 取自 instance 設定，保留 driver wrapper 前的程式，供 doctor 診斷；不包含 args 或認證。
 
 backend_versions::registry 提供阻塞唯讀 latest 查詢，daemon 使用時需放在 worker；固定 npm HTTPS、拒轉址、5 秒期限與 256 KiB 上限。沒有認證或下載／執行步驟。每日檢查與通知排程尚未接入。
+
+`store::backend_registry` 在網路查詢前保存每日嘗試；完成與確認均核對當前 attempt／revision。migration 0021 最多保存三筆公開版本觀測，daemon 排程與 attention 接線尚待完成。

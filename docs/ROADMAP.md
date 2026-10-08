@@ -478,3 +478,5 @@
 - 2026-10-08：release-artifacts 37753100820（3f52828）全部成功：Linux x86_64／ARM64、macOS Intel／ARM64 archive 與首任務、formula、macOS／Linux Brew install／test／fresh HOME init／uninstall。這是 Actions 一次性環境驗證，尚未公開發布，亦未取代主機服務與真 backend／Telegram 驗收（feat/g13-install，未合併）。
 
 - 2026-10-08：13C 新增 backend latest，固定 npm 公開來源、核套件身分，拒絕轉址／超量／錯誤，5 秒期限涵蓋標頭與 body。真 metadata 三套查詢及無 HOME／agent 拒絕驗證通過；四項 HTTP fixture 反例、core 全組（兩個 deep ignored）、daemon 194 項（1 child ignored）、CLI 37 項及 workspace clippy／fmt／check-deps 通過。未呼叫模型或切換版本；每日排程、持久漂移通知及整關真測仍待完成（feat/g13-install，未合併）。
+
+- 2026-10-08：13C migration 0021 保存每日 registry 嘗試與結果，重啟／時鐘倒退不提早重查，失敗保留上次成功值，舊 attempt／重複完成及舊 revision 確認拒絕。真 SQLite 兩項重開反例、Store 42 項（含全部歷史 schema 升級／retention）、workspace clippy／fmt／check-deps 通過；clippy 初輪多餘 unit expression 已修正。測試暫存無殘留；此批是持久 Store API，定時 worker／attention 與被動漂移仍待接線（feat/g13-install，未合併）。

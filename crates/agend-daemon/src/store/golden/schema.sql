@@ -1,4 +1,4 @@
--- user_version = 20
+-- user_version = 21
 
 CREATE INDEX driver_events_by_time ON driver_events (ingested_at_unix_ms);
 
@@ -28,6 +28,11 @@ CREATE TABLE asks (
 ) STRICT;
 
 CREATE TABLE attention_reads (read_key TEXT PRIMARY KEY, read_at_unix_ms INTEGER NOT NULL CHECK(read_at_unix_ms >= 0)) STRICT;
+
+CREATE TABLE backend_registry (
+    backend TEXT NOT NULL PRIMARY KEY CHECK(backend IN ('claude','codex','opencode')),
+    record TEXT NOT NULL CHECK(json_valid(record) AND json_type(record) = 'object')
+) STRICT;
 
 CREATE TABLE backend_switches (
     instance_id TEXT NOT NULL PRIMARY KEY REFERENCES instances(id) ON DELETE CASCADE,

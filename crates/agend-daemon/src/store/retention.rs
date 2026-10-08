@@ -62,6 +62,14 @@ pub struct Rule {
 pub const RETENTION: &[Rule] = &[
     Rule {
         target: Target::Table {
+            name: "backend_registry",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "gate 13: at most three registry observations retain daily schedule and exact acknowledgements",
+    },
+    Rule {
+        target: Target::Table {
             name: "telegram_pairing",
             time_column: None,
         },

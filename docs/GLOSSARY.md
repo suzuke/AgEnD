@@ -251,3 +251,5 @@ SQLite 中每個 task 的固定 repository ID、branch、nonce 與 PR number；�
 - **canary 執行範圍（CanaryScope）**：顯式 canary runner 在私有 home 建立的版本觀察紀錄，綁定 home 路徑與 inode/device、canary instance、workspace 及來源匯入 artifact。只供隔離執行版本核對，不是成功報告，也不授予 fleet 准入。
 
 - **公開版本資訊（PublishedBackend）**：從固定 npm registry 取得的 backend 套件名稱與 latest tag 版本；只代表公開 metadata，不代表已安裝、較新、相容或 canary 通過。見[公開版本查詢](architecture/backend-registry.md)。
+
+- **公開版本觀測（RegistryObservation）**：每日查詢的持久嘗試與結果；保留最近成功 metadata、另外記錯誤，確認綁定修訂號。尚未完成的嘗試不代表查詢成功。

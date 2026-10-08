@@ -4,6 +4,7 @@
 use alloc::{string::String, vec::Vec};
 use serde::{Deserialize, Serialize};
 pub mod canary;
+pub mod observation;
 
 /// Public npm package used for release discovery, not automatic installation.
 pub fn npm_package(backend: crate::model::Backend) -> &'static str {

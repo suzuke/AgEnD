@@ -46,6 +46,7 @@
 //! does not match the DB snapshot name pattern.
 
 pub mod attention_read;
+pub mod backend_registry;
 pub mod backend_switch;
 pub mod claude;
 pub mod claude_startup;
