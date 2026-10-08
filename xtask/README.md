@@ -119,3 +119,5 @@ cargo xtask accept core
 `.github/workflows/release.yml` 可手動建置 macOS／Linux × Intel／ARM64 原生產物，只有 contents:read 與 14 天 Actions artifacts，沒有公開發布。`scripts/verify_release.py` 核來源提交／target、archive 與 binary 雜湊、精確 tar 清單，再於暫存 HOME 執行解壓 binary 的 --version。runner 版本是建置環境，不表示已驗所有較舊 OS；四平台實跑與 Brew 接線仍待驗證。
 
 `release_formula.py --artifacts <四個 native artifact 子目錄的父目錄> --commit <40 字元 SHA> --out <新 agend.rb>` 重新核對 archive 後生成四平台 Brew formula。URL 使用 `v<version>` Release，並不代表該 Release 已存在；0.0.0 產物仍只供施工驗證。workflow 在四個 native jobs 成功後產生並做 Ruby 語法檢查；施工分支的發布相關檔案 push 也會觸發。沒有 brew services／post_install／帳戶設定變更。
+
+使用者安裝方式、Actions 與 Brew 產物的驗證／發布邊界見 [安裝文件](../docs/install-release.md)。
