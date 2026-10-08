@@ -242,3 +242,7 @@ Canary 必須取得三筆與 delivery 綁定的 completed outcomes；修改 fail
 `service::tests::diagnostic_observes_recovery_without_mutating_the_installation_or_manager` 使用正式 Owned::prepare/register producer 與 manager state model，持 lifecycle 鎖驗 Prepared／Registered／Absent／running、定義遺失／恢復／變造，核收據未改與 manager 呼叫數未增加。`cli::init_and_doctor` 的 JSON 列表加入 service，install_home 回歸仍走真 CLI；這些不取代真 launchd／systemd 驗收。
 
 磁碟恢復：install_home 用 create_new + set_len(MAX_HOME_BYTES + 1) 的自有 sparse fixture 驗實際目錄掃描，doctor 不刪檔，測試刪除後恢復。低可用空間另有 macOS 原生證據：自有 hdiutil 64m HFS+ SPARSE 映像，62 MB free 為 fail；detach 後 resize 2g、重新 attach 為 ok，再 detach／刪除。這份低空間證據不宣稱 Linux 亦已實測。
+
+doctor 的 `--version` probe 以同一 5 秒期限涵蓋程序退出與 stdout／stderr EOF，輸出合計上限 64 KiB；非零退出、非 UTF-8、逾時或超量回報診斷失敗，不當成版本。probe 使用自有程序群組，保留直接子程序未回收身分直到清理，再停止直接子程序與原群組並回收；清理另有最多 2 秒觀察期限，失敗會回報 PID／群組，不等待無期限 reader thread。原生 shell 測試涵蓋錯誤退出、stdout／stderr 分離、持續輸出及直接程序退出後子程序持有 pipes；真 doctor 測試確認三 backend 非零退出為 warn。這不等於已驗證 backend 版本相容性或登入。doctor 允許一般 CLI wrapper fork；此 probe 不是程序沙箱，不保證攔住刻意另建 session 的後代。
+
+安裝／Telegram apply 共用的 install.lock 使用明確 unlock 的 guard，避免並行 fork 到 exec 之間的繼承描述符延長鎖生命。反例保留同一 open-file description 的副本，核釋放／重新取得／關閉舊副本不解開新鎖。

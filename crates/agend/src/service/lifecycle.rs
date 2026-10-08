@@ -16,7 +16,7 @@ pub struct Owned {
     pub record: Installation,
     dir: PathBuf,
     source: PathBuf,
-    _lock: File,
+    _lock: files::InstallLock,
 }
 
 impl Owned {

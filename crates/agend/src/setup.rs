@@ -6,11 +6,12 @@
 //! Must NOT: change anything, or hold setup rules itself.
 
 use std::ffi::CString;
-use std::io::Read;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+mod version;
+pub use version::version_line;
 
 /// Longest a `--version` probe may run.
 pub const PROBE_WITHIN: Duration = Duration::from_secs(5);
@@ -28,53 +29,6 @@ pub fn find_on_path(name: &str, skip: &Path) -> Option<PathBuf> {
 fn is_executable(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
     std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-}
-
-/// The first non-empty line `program --version` prints (stdout, else
-/// stderr), waiting at most [`PROBE_WITHIN`].
-pub fn version_line(program: &Path) -> Result<String, String> {
-    let mut child = Command::new(program)
-        .arg("--version")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("cannot run {}: {e}", program.display()))?;
-    let mut stdout = child.stdout.take().expect("piped");
-    let mut stderr = child.stderr.take().expect("piped");
-    let out = std::thread::spawn(move || {
-        let mut text = String::new();
-        let _ = stdout.read_to_string(&mut text);
-        text
-    });
-    let err = std::thread::spawn(move || {
-        let mut text = String::new();
-        let _ = stderr.read_to_string(&mut text);
-        text
-    });
-    let deadline = Instant::now() + PROBE_WITHIN;
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
-            _ => {
-                // Our own child, not yet reaped.
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(format!(
-                    "{} --version did not answer within {} s",
-                    program.display(),
-                    PROBE_WITHIN.as_secs()
-                ));
-            }
-        }
-    }
-    let text = out.join().unwrap_or_default() + &err.join().unwrap_or_default();
-    text.lines()
-        .map(str::trim)
-        .find(|l| !l.is_empty())
-        .map(str::to_owned)
-        .ok_or_else(|| format!("{} --version printed nothing", program.display()))
 }
 
 /// Free bytes for unprivileged users on the disk of `path` (`statvfs`).

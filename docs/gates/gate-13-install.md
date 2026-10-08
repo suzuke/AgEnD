@@ -251,3 +251,5 @@ cat docs/gates/gate-13-install.md
 - 2026-10-08：新增 `xtask demo install` 並接 `accept 13`，建置三 backend fixtures、共 52 項原生 home／service／import／switch／canary／配對案例通過。初輪首任務遇 macOS 長 socket 路徑而失敗，改 TMPDIR=/tmp 後首任務 10.292 秒完成且唯一 merge／清理通過；保留失敗 log，未重跑已通過案例。xtask tests、clippy、fmt、check-deps 通過；這是離線原生 demo，Brew／真服務／真模型與外部 Telegram 驗收仍另列（feat/g13-install，未合併）。
 
 Brew 原生安裝驗證已接入 release workflow 的 macOS ARM64／Linux x86_64 jobs，僅在一次性 Actions runner 執行。`release_brew_smoke.py` 重新產生並逐字核對四平台 formula，僅將下載 URL 換成同輪 archive 的 file URL，保留 SHA 與安裝邏輯；建立唯一 tap，拒絕既有 agend 安裝，跑 install／formula test／全新 HOME init／uninstall 並檢查清理。這不證明公開 Release URL 已可下載；實跑結果另記。
+
+- 2026-10-08：13E 覆核找出 doctor 版本 probe 無界 reader join 與非零退出誤判，改非阻塞／64 KiB 上限／5 秒總 probe 期限及 2 秒限時清理，核尚未回收的直接 PID 與原群組。原生錯誤／超量／繼承 pipes／自行換群組反例通過；整組測試另抓安裝鎖 close 遇 fork 繼承的競態，改明確 unlock guard 加副本反例後並行 binary 35、install_home 8 項通過。保留初輪失敗，暫存已清；doctor 非惡意程序沙箱，登入／版本相容／漂移與真測仍待補（feat/g13-install，未合併）。

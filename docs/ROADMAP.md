@@ -458,3 +458,5 @@
 - 2026-10-08：新增 `xtask demo install` 並接 `accept 13`，建置三 backend fixtures、共 52 項原生 home／service／import／switch／canary／配對案例通過。初輪首任務遇 macOS 長 socket 路徑而失敗，改 TMPDIR=/tmp 後首任務 10.292 秒完成且唯一 merge／清理通過；保留失敗 log，未重跑已通過案例。xtask tests、clippy、fmt、check-deps 通過；這是離線原生 demo，Brew／真服務／真模型與外部 Telegram 驗收仍另列（feat/g13-install，未合併）。
 
 - 2026-10-08：13E 新增一次性 Actions runner 的 Brew install／test／fresh HOME init／uninstall 驗證，macOS ARM64 與 Linux x86_64；只替換同輪已驗 archive 的 URL，不改 formula SHA 或安裝內容。以 c085ddf 四平台真產物核四個 local URL、變造 formula 拒絕及本機執行拒絕，下載暫存已清；actionlint／check-deps 通過，Brew 實跑待 CI（feat/g13-install，未合併）。
+
+- 2026-10-08：13E 覆核找出 doctor 版本 probe 無界 reader join 與非零退出誤判，改非阻塞／64 KiB 上限／5 秒總 probe 期限及 2 秒限時清理，核尚未回收的直接 PID 與原群組。原生錯誤／超量／繼承 pipes／自行換群組反例通過；整組測試另抓安裝鎖 close 遇 fork 繼承的競態，改明確 unlock guard 加副本反例後並行 binary 35、install_home 8 項通過。保留初輪失敗，暫存已清；doctor 非惡意程序沙箱，登入／版本相容／漂移與真測仍待補（feat/g13-install，未合併）。

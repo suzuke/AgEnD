@@ -88,7 +88,7 @@ fn owned(meta: &fs::Metadata) -> bool {
 
 /// Serialize installers with a kernel lock, released even on process death.
 /// Keep the lock inode after uninstall so waiters cannot acquire a replaced lock.
-pub fn lock(dir: &Path) -> Result<File, String> {
+pub fn lock(dir: &Path) -> Result<InstallLock, String> {
     private_dir(dir)?;
     let path = dir.join("install.lock");
     let file = OpenOptions::new()
@@ -104,11 +104,25 @@ pub fn lock(dir: &Path) -> Result<File, String> {
     if !meta.is_file() || !owned(&meta) || meta.mode() & 0o077 != 0 {
         return Err("installation lock must be an owned private regular file".into());
     }
-    // SAFETY: fd is owned, and closing the returned File releases this flock.
+    // SAFETY: fd is owned; the returned guard releases this flock.
     if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
         return Err("another installation operation is running; retry after it finishes".into());
     }
-    Ok(file)
+    Ok(InstallLock(file))
+}
+
+/// Explicitly unlock before close: fork may briefly retain the same open-file
+/// description until exec, even though Rust opens descriptors with CLOEXEC.
+pub struct InstallLock(File);
+impl Drop for InstallLock {
+    fn drop(&mut self) {
+        // SAFETY: this guard owns the live descriptor and its exclusive lock.
+        while unsafe { libc::flock(self.0.as_raw_fd(), libc::LOCK_UN) } != 0 {
+            if std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted {
+                break;
+            }
+        }
+    }
 }
 
 pub fn regular(path: &Path) -> Result<Option<File>, String> {
@@ -234,4 +248,27 @@ pub fn matches_program(record: &Installation) -> Result<bool, String> {
         return Err("managed executable changed; preserving it".into());
     }
     Ok(true)
+}
+
+#[cfg(test)]
+mod lock_tests {
+    use super::*;
+
+    #[test]
+    fn dropping_install_guard_unlocks_even_with_a_duplicated_description() {
+        let root = agend_testkit::tempdir::TempDir::new("g13-lock-fork").unwrap();
+        let guard = lock(root.path()).unwrap();
+        let inherited = guard.0.try_clone().unwrap();
+        assert!(lock(root.path()).is_err());
+        drop(guard);
+        let next = lock(root.path()).expect("inherited description must not retain the lock");
+        assert!(lock(root.path()).is_err());
+        drop(inherited);
+        assert!(
+            lock(root.path()).is_err(),
+            "closing old description must not unlock new owner"
+        );
+        drop(next);
+        assert!(lock(root.path()).is_ok());
+    }
 }

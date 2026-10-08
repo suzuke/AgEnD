@@ -183,6 +183,11 @@ fn doctor_backend_path_failure_recovers_without_starting_models() {
         restored.env("PATH", format!("{}:/usr/bin:/bin", root.path().display()));
         let check = diagnostic(restored, backend, "ok");
         assert_eq!(check["detail"], "fixture-version");
+        fs::write(&tool, "#!/bin/sh\nprintf 'fixture-version\\n'\nexit 7\n").unwrap();
+        let mut failed = command(root.path());
+        failed.env("PATH", format!("{}:/usr/bin:/bin", root.path().display()));
+        let check = diagnostic(failed, backend, "warn");
+        assert!(check["detail"].as_str().unwrap().contains("unsuccessfully"));
         fs::remove_file(tool).unwrap();
     }
 }

@@ -106,3 +106,7 @@ cargo run -p agend -- --version
 13E `install_home` 現在以真 CLI doctor JSON 驗故障與恢復：缺 home／權限過寬、Telegram 損壞且原文不變、sandbox 工具缺失及原生恢復、三 backend PATH 遺失及只允許 --version 的 fixture 恢復；每個非 ok 結果須有 fix，exit code 必須對應所有 checks 的 fail。這不涵蓋磁碟容量、登入、版本相容或真服務健康的完整驗收。
 
 doctor 的 service 列唯讀檢查安裝收據、私有 executable／定義與 manager 狀態；沒有安裝仍可前景執行。service running 只代表 manager 的觀察，daemon 就緒另由 daemon 列判斷。它不取得安裝鎖，不進行 start／stop／reload，檔案異動時保留原檔並要求檢查。
+
+doctor 的 `--version` probe 以同一 5 秒期限涵蓋程序退出與 stdout／stderr EOF，輸出合計上限 64 KiB；非零退出、非 UTF-8、逾時或超量回報診斷失敗，不當成版本。probe 使用自有程序群組，保留直接子程序未回收身分直到清理，再停止直接子程序與原群組並回收；清理另有最多 2 秒觀察期限，失敗會回報 PID／群組，不等待無期限 reader thread。原生 shell 測試涵蓋錯誤退出、stdout／stderr 分離、持續輸出及直接程序退出後子程序持有 pipes；真 doctor 測試確認三 backend 非零退出為 warn。這不等於已驗證 backend 版本相容性或登入。doctor 允許一般 CLI wrapper fork；此 probe 不是程序沙箱，不保證攔住刻意另建 session 的後代。
+
+安裝／Telegram apply 共用的 install.lock 使用明確 unlock 的 guard，避免並行 fork 到 exec 之間的繼承描述符延長鎖生命。反例保留同一 open-file description 的副本，核釋放／重新取得／關閉舊副本不解開新鎖。
