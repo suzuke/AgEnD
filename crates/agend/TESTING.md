@@ -181,7 +181,7 @@ macOS `service::manager::launchd::tests::native_process_identity_checks_executab
 
 `cargo test -p agend --test message_delivery` 用真 Store producer 與兩次 daemon 開機驗四種 delivery state、精確 ID／對象／attempt 時間、missing 回 None、agent forbidden、無 body 及查詢不改狀態。無 backend／模型程序，Lab 清除 daemon 與 home。
 
-13C canary 施工：`cargo test -p agend --bin agend backend::canary::process::tests` 使用原生 C probe，驗證 fork／posix_spawn 拒絕而 pthread 仍可用、版本逾時回收、探測程序自行 setsid 的回收與外部 run symlink 拒絕。`backend_canary` 以既有原生 fake Codex 驗三則 confirmed、idle、版本不符拒絕、完成後沒有 canary home 與 fleet activation。`message_delivery` 另驗操作員 sender、重送相同 ID 不改內容、相同 ID 不同內容拒絕、agent 無權使用操作員 RPC 與未知 instance 不存訊息。版本探測子程序限制已通過 macOS 與 Linux ARM64 原生驗證；Linux x86_64 與真 backend 尚待驗，測試不使用真模型。
+13C canary 施工：`cargo test -p agend --bin agend backend::canary::process::tests` 使用原生 C probe，驗證 fork／posix_spawn 拒絕而 pthread 仍可用、版本逾時回收、探測程序自行 setsid 的回收與外部 run symlink 拒絕。setsid fixture 只在仍屬父程序群組且收到 EPERM 時做有界重試；必須實際建立新 session、在清理前仍存活，清理後取得 SIGKILL 終止狀態，不能把準備失敗當成回收通過。`backend_canary` 以既有原生 fake Codex 驗三則 confirmed、idle、版本不符拒絕、完成後沒有 canary home 與 fleet activation。`message_delivery` 另驗操作員 sender、重送相同 ID 不改內容、相同 ID 不同內容拒絕、agent 無權使用操作員 RPC 與未知 instance 不存訊息。版本探測子程序限制已通過 macOS 與 Linux ARM64 原生驗證；Linux x86_64 與真 backend 尚待驗，測試不使用真模型。
 
 - Canary 保留報告：使用原生 producer 的報告，變更 artifact／binary／平台／版本、清理結果、收據身份與狀態，以及時間順序／越界／overflow；正式 verifier 必須拒絕，inspect 顯示 invalid 且不啟用版本。
 

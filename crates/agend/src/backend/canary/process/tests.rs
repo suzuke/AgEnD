@@ -2,6 +2,7 @@ use super::*;
 use agend_testkit::tempdir::TempDir;
 use std::os::unix::fs::symlink;
 use std::os::unix::net::UnixListener;
+use std::os::unix::process::ExitStatusExt;
 
 fn native_probe(root: &Path) -> PathBuf {
     let source = root.join("probe.c");
@@ -149,10 +150,30 @@ int main(void) {
     if (setpgid(0, getpgid(getppid()))) {
         fprintf(d, "setpgid errno=%d\n", errno); fclose(d); return 2;
     }
-    if (setsid() < 0) {
-        fprintf(d, "setsid errno=%d\n", errno); fclose(d); return 2;
+    fprintf(d, "moved group=%d session=%d\n", getpgid(0), getsid(0));
+    fflush(d);
+    /* Session preparation may briefly see the old group still registered.
+       Only retry EPERM while we remain in the parent's group. This fixture
+       must actually establish a new session before testing production cleanup. */
+    int attempts;
+    for (attempts = 0; attempts < 100; ++attempts) {
+        if (setsid() >= 0) break;
+        int saved = errno;
+        if (attempts == 0)
+            fprintf(d, "setsid errno=%d group=%d session=%d\n",
+                saved, getpgid(0), getsid(0));
+        if (saved != EPERM || getpgid(0) == getpid() ||
+            getpgid(0) != getpgid(getppid())) {
+            fclose(d); return 2;
+        }
+        usleep(10000);
     }
-    fputs("detached\n", d); fclose(d);
+    if (attempts == 100 || getsid(0) != getpid() || getpgid(0) != getpid()) {
+        fprintf(d, "session preparation failed after %d attempts\n", attempts);
+        fclose(d); return 2;
+    }
+    fprintf(d, "detached attempts=%d group=%d session=%d\n",
+        attempts + 1, getpgid(0), getsid(0)); fclose(d);
     FILE *f = fopen("detached-self", "w");
     if (!f) return 3;
     fputs("ready", f); fclose(f);
@@ -182,6 +203,11 @@ int main(void) {
         fs::read_to_string(lab.home.join("session-progress"))
     );
     assert_eq!(fs::read(lab.home.join("detached-self")).unwrap(), b"ready");
+    assert!(!exited_unreaped(&lab.probe.as_ref().unwrap().child).unwrap());
     lab.cleanup().unwrap();
+    assert_eq!(
+        lab.probe.as_ref().unwrap().status.unwrap().signal(),
+        Some(libc::SIGKILL)
+    );
     assert!(!lab.home.exists());
 }
