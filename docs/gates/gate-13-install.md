@@ -205,3 +205,5 @@ cat docs/gates/gate-13-install.md
 - 2026-10-08：b4f9032 macOS CI 揭露 probe SIGKILL 後、waitable exit 前群組 EPERM 的競態；改先限時等待未回收 Child 退出（PID 仍固定），再清理群組／回收／核群組不存在。4 項原生 probe 通過；setsid 測試首輪未及寫 marker，改採正式 5 秒 probe 預算，仍核 marker。另驗 Codex Committed 下 daemon 硬中斷、目的 holder 由 Lab 停止後重開，核新 holder／正確版本／原 session／完整回滾通過；不代表所有 backend 或所有 crash 切點已完成（feat/g13-install，未合併）。
 
 - 2026-10-08：13C 目前代 Committed 目的 holder 確認消失且 launch 精確吻合時自動回退；Committed／Activated 先持久 RollbackPrepared，server 就緒後續行重啟前意圖。三 backend 原生假 canary／往返／holder 消失全組 12 項通過；其後補 Codex 正式 Store 建立回退切點、重啟恢復舊版本與 session 的 1 項通過。Store 9 項、daemon 單元 186 項（1 ignored）、fmt／clippy／check-deps 通過；自有 switch／managed／canary 暫存無殘留。存活但未 ready 的 backend、Ready 已觀察後中斷、Restoring 再失敗與通知政策仍待完成；未宣稱全 crash matrix 或真模型驗收（feat/g13-install，未合併）。
+
+- 2026-10-08：13C 將經啟動身分驗證的目前代 AgentExited 與 driver 斷線分開；目的 backend 原生退出後先持久回退意圖、排空回覆與 worker，再核精確 holder 停止及恢復舊版本／session。canary 全 14 項、daemon 186 項（1 ignored）通過；補設定快照保護後重驗 Codex 退出案例。初輪 fixture 只讓 app-server 退出而外層包裝仍活著，保留失敗 log；改成完成交接後 TUI 自行退出。app-server 單獨失敗、啟動掛住與完整 crash／通知政策仍待處理（feat/g13-install，未合併）。

@@ -244,7 +244,7 @@ OpenCode `session_idle` 重讀 REST session 狀態，查詢前後核 holder／in
 
 13C Codex 閒置觀察在同一 worker 排序於先前 RPC 之後，先確認原生 queue 的 data 為空且 nextCursor 明確為 null，再讀完整 turns；後端佇列非空或欄位缺失不當作閒置。原生 fake app-server 測試包含第二筆排隊訊息、消化後空佇列，以及真 producer 回覆的缺欄位／錯形狀反例。
 
-13C 新增 `backend switch activate／rollback --switch-id`：精確持久 ID、目的版本准入、投遞排空與 native idle 後停止受管 holder；Committed／Restoring 保持暫停，核新 holder 綁定及 readiness 後才釋放。Activated／Committed 回滾先保存 RollbackPrepared；daemon 重啟後由定期協調器繼續。三 backend 原生假版本往返與目的 holder 消失後自動回退已驗；完整 crash matrix 尚未完成。
+13C 新增 `backend switch activate／rollback --switch-id`：精確持久 ID、目的版本准入、投遞排空與 native idle 後停止受管 holder；Committed／Restoring 保持暫停，核新 holder 綁定及 readiness 後才釋放。Activated／Committed 回滾先保存 RollbackPrepared；daemon 重啟後由定期協調器繼續。三 backend 原生假版本往返與目的 holder 消失後自動回退已驗；目前代原生 AgentExited 亦可核精確 holder 後回退，Codex 已驗。driver 斷線不當作退出；完整 crash matrix 尚未完成。
 
 受管 holder 的就緒身分查詢走既有 runtime socket；另開查詢連線會取代 holder 的唯一 client，不能用於保持 Ready 觀察的驗證。回覆核 binding／instance／agent PID、holder PID 與原 terminal connection 仍有效；斷線或逾時拒絕完成切換。
 

@@ -11,5 +11,8 @@ fn main() -> std::process::ExitCode {
     while hold.exists() {
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
+    if args.iter().any(|arg| arg == "resume") && std::path::Path::new(".g13-exit-start").exists() {
+        return std::process::ExitCode::FAILURE;
+    }
     agend_testkit::fake_agent::codex_cli::main(args)
 }

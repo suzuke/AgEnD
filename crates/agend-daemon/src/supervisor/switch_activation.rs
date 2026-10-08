@@ -3,9 +3,9 @@ use super::*;
 use agend_core::runtime_records::{BackendSwitch, BackendSwitchPhase};
 
 impl Supervisor {
-    /// A current-generation holder death may roll back only an unactivated
+    /// A current-generation native exit may roll back only an unactivated
     /// candidate whose persisted launch still identifies the target exactly.
-    pub(super) async fn rollback_lost_candidate(&mut self, id: &str) {
+    pub(super) async fn rollback_lost_candidate(&mut self, id: &str, agent_exited: bool) {
         let attempt = async {
             let record = self
                 .store
@@ -13,7 +13,9 @@ impl Supervisor {
                 .await
                 .map_err(|e| e.to_string())?
                 .ok_or("backend switch missing")?;
-            if record.phase != BackendSwitchPhase::Committed {
+            if record.phase != BackendSwitchPhase::Committed
+                && !(agent_exited && record.phase == BackendSwitchPhase::RollbackPrepared)
+            {
                 return Ok(());
             }
             let instance = self
@@ -29,15 +31,37 @@ impl Supervisor {
             if launch.binding == record.previous.binding
                 || launch.artifact != record.target
                 || instance.program != record.target_program
-                || files::running(&self.home, id)
-                    .map_err(|e| e.to_string())?
-                    .is_some()
+                || instance.session_id != record.session_id
+                || instance.args != record.previous.configured_args
+                || instance.working_directory != record.previous.working_directory
+                || instance.delivery != record.previous.delivery
             {
                 return Err("candidate death or launch identity not established".into());
             }
+            if let Some(pid) = files::running(&self.home, id).map_err(|e| e.to_string())? {
+                if !agent_exited {
+                    return Err("candidate holder still exists".into());
+                }
+                // Only a verified current-generation native Exited event may
+                // replace idle evidence. Driver disconnects are insufficient.
+                if record.phase == BackendSwitchPhase::Committed {
+                    self.store
+                        .prepare_backend_rollback(&record)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                }
+                self.drain_switch_replies(id).await?;
+                self.codex.disconnect(id);
+                self.opencode.disconnect(id);
+                self.wait_switch_workers(id, true).await?;
+                self.runtime
+                    .stop_reserved(&launch, pid, instance.agent_pid.ok_or("agent PID missing")?)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
             self.activate_switch(&instance, &record.id, true).await?;
             log::line(&format!(
-                "{id}: lost candidate holder; restoring previous backend"
+                "{id}: candidate exited; restoring previous backend"
             ));
             Ok::<(), String>(())
         }
@@ -132,18 +156,7 @@ impl Supervisor {
                 .await
                 .map_err(|e| e.to_string())?;
         }
-        let fence = self
-            .delivery_replies
-            .as_ref()
-            .ok_or("server reply tracker unavailable")?
-            .fence(id);
-        tokio::time::timeout(Duration::from_secs(10), async {
-            while !fence.drained() {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .map_err(|_| "prior input has not drained; switch remains pending")?;
+        self.drain_switch_replies(id).await?;
         let holder = files::running(&self.home, id).map_err(|e| e.to_string())?;
         if let Some(pid) = holder {
             let intent = self
@@ -192,6 +205,22 @@ impl Supervisor {
             .ok_or("instance disappeared")?;
         self.start(&current, current.session_started, None).await;
         Ok(committed)
+    }
+
+    async fn drain_switch_replies(&self, id: &str) -> Result<(), String> {
+        let fence = self
+            .delivery_replies
+            .as_ref()
+            .ok_or("server reply tracker unavailable")?
+            .fence(id);
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !fence.drained() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .map_err(|_| "prior input has not drained; switch remains pending")?;
+        Ok(())
     }
 
     async fn wait_switch_workers(&self, id: &str, codex: bool) -> Result<(), String> {

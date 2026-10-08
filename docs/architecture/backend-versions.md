@@ -142,3 +142,5 @@ Prepare 在 SQLite 暫停新 reservation 後，捕捉已開始的 Claude／inbox
 進行中的切換也拒絕操作員完整終端 acquire／resize／input 與 legacy input，避免閒置核對期間再開始工作；唯讀與 release 可用。TerminalHub actor 在查 DB 前加入排空追蹤，完整控制請求直到返回才釋放；legacy blocking writer 自己持有追蹤，actor 取消不提前釋放。完整控制逾時／斷線與 legacy 寫出不證明 backend 已停止工作，仍須獨立 native 回合完成與身分核對。
 
 目前代目的 holder 確認消失、且持久 launch 精確對應 Committed 目標時，自動回退先保存 RollbackPrepared，再恢復舊版本；不接受舊代退出事件作為依據。RollbackPrepared 在 daemon server 排空追蹤器就緒後續行，涵蓋回退意圖保存後重啟。三 backend 原生假版本的 holder 消失回退已驗；Codex 重啟案例用正式 Store API 建立精確持久切點。仍存活但未就緒的 backend、Ready 已觀察後的中斷、Restoring 再次失敗及完整通知政策仍待完成。
+
+經身分驗證的目前代 `AgentExited` 也可觸發目的版本回退：先保存 RollbackPrepared、排空既有回覆及 worker，再以持久 UUID／holder PID／agent PID 停止精確 holder，恢復舊版本。driver Gone 或 StartFailed 不等於原生退出，不能走這條捷徑。Codex fixture 在 app-server 交接完成後讓 TUI 自行退出，已驗恢復舊版及原 session；app-server 單獨退出而包裝仍存活的情況尚待處理。

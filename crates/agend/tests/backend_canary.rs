@@ -496,7 +496,15 @@ fn native_opencode_switch_activates_and_rolls_back_with_the_same_session() {
     );
 }
 fn native_switch(backend: &str, old: &str, next: &str, old_version: &str, next_version: &str) {
-    native_switch_case(backend, old, next, old_version, next_version, false, false);
+    native_switch_case(
+        backend,
+        old,
+        next,
+        old_version,
+        next_version,
+        false,
+        SwitchFailure::None,
+    );
 }
 
 #[test]
@@ -508,7 +516,7 @@ fn native_codex_committed_switch_recovers_when_the_target_holder_is_absent() {
         "0.158.0",
         "0.159.0",
         true,
-        false,
+        SwitchFailure::None,
     );
 }
 
@@ -521,7 +529,7 @@ fn native_codex_lost_candidate_holder_automatically_restores_the_previous_versio
         "0.158.0",
         "0.159.0",
         false,
-        true,
+        SwitchFailure::Holder,
     );
 }
 
@@ -534,7 +542,7 @@ fn native_codex_persisted_rollback_resumes_after_daemon_restart() {
         "0.158.0",
         "0.159.0",
         true,
-        true,
+        SwitchFailure::Holder,
     );
 }
 
@@ -547,7 +555,7 @@ fn native_claude_lost_candidate_holder_automatically_restores_the_previous_versi
         "2.1.284",
         "2.1.285",
         false,
-        true,
+        SwitchFailure::Holder,
     );
 }
 
@@ -560,7 +568,27 @@ fn native_opencode_lost_candidate_holder_automatically_restores_the_previous_ver
         "1.18.34",
         "1.18.35",
         false,
-        true,
+        SwitchFailure::Holder,
+    );
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum SwitchFailure {
+    None,
+    Holder,
+    Agent,
+}
+
+#[test]
+fn native_codex_exited_candidate_automatically_restores_the_previous_version() {
+    native_switch_case(
+        "codex",
+        "examples/fake_codex",
+        "examples/fake_codex_next",
+        "0.158.0",
+        "0.159.0",
+        false,
+        SwitchFailure::Agent,
     );
 }
 
@@ -571,7 +599,7 @@ fn native_switch_case(
     old_version: &str,
     next_version: &str,
     remove_holder: bool,
-    auto_rollback: bool,
+    failure: SwitchFailure,
 ) {
     use std::time::{Duration, Instant};
     let root = lab::Lab::with_prefix(Path::new(BIN), "g13-switch-live");
@@ -704,7 +732,7 @@ fn native_switch_case(
     {
         let committed: Value = serde_json::from_slice(&out.stdout).unwrap();
         assert_eq!(committed["phase"], "committed");
-        if auto_rollback {
+        if failure != SwitchFailure::None {
             if remove_holder {
                 daemon.kill9().unwrap();
                 // Seed the exact durable cut through the production Store API;
@@ -714,7 +742,14 @@ fn native_switch_case(
                 agend_testkit::block_on(store.prepare_backend_rollback(&record)).unwrap();
                 drop(store);
             }
-            root.stop_all_holders();
+            if failure == SwitchFailure::Agent {
+                // The native candidate exits itself; its holder remains alive
+                // until the coordinator verifies and shuts it down.
+                fs::write(home.join("workspace/managed/.g13-exit-start"), b"exit").unwrap();
+                fs::remove_file(&hold_start).unwrap();
+            } else {
+                root.stop_all_holders();
+            }
             if remove_holder {
                 daemon = lab::Daemon::start(&root, &home, &[]).unwrap();
                 daemon.ready().unwrap();

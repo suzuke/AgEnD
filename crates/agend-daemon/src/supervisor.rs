@@ -963,7 +963,14 @@ impl Supervisor {
 
     /// A death of the current generation: plan the restart or give up.
     /// `holder_gone`: the holder itself died (the codex sweep runs first).
-    async fn died(&mut self, id: &str, generation: u64, what: String, holder_gone: bool) {
+    async fn died(
+        &mut self,
+        id: &str,
+        generation: u64,
+        what: String,
+        holder_gone: bool,
+        agent_exited: bool,
+    ) {
         let Some(watch) = self.watches.get(id) else {
             return;
         };
@@ -971,8 +978,8 @@ impl Supervisor {
             return;
         }
         if self.switch_holds_recovery(id).await {
-            if holder_gone {
-                self.rollback_lost_candidate(id).await;
+            if holder_gone || agent_exited {
+                self.rollback_lost_candidate(id, agent_exited).await;
             }
             return;
         }
@@ -1223,11 +1230,11 @@ impl Supervisor {
                     exited,
                 }) => {
                     let what = format!("agent {id} exited ({})", describe_exit(&exited));
-                    self.died(&id, generation, what, false).await;
+                    self.died(&id, generation, what, false, true).await;
                 }
                 Event::Holder(HolderEvent::HolderGone { id, generation }) => {
                     let what = format!("holder {id} died");
-                    self.died(&id, generation, what, true).await;
+                    self.died(&id, generation, what, true, false).await;
                 }
                 Event::Holder(HolderEvent::LaunchBindingRejected {
                     id,
@@ -1246,11 +1253,11 @@ impl Supervisor {
                     error,
                 } => {
                     let what = format!("{id}: start failed: {error}");
-                    self.died(&id, generation, what, false).await;
+                    self.died(&id, generation, what, false, false).await;
                 }
                 Event::Codex(CodexEvent::Gone { id, generation }) => {
                     let what = format!("{id}: its app-server is gone");
-                    self.died(&id, generation, what, false).await;
+                    self.died(&id, generation, what, false, false).await;
                 }
                 Event::OpenCodeState {
                     id,
