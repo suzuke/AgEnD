@@ -176,3 +176,81 @@ fn native_pairing_rpc_recovers_receipt_and_refuses_agents_and_old_protocol() {
         "# operator-owned configuration\n"
     );
 }
+
+#[test]
+fn native_cli_applies_only_exact_confirmed_receipt_and_preserves_original() {
+    let lab = lab::Lab::with_prefix(Path::new(BIN), "g13-pair-apply");
+    let home = lab.home(1);
+    let original = "# operator-owned notes 繁中\n";
+    std::fs::write(home.join("config.toml"), original).unwrap();
+    let store = SqliteStore::open(&home, 0).unwrap();
+    let clock = FakeClock::new(1000);
+    let mut session = TelegramPairing::new(
+        "22222222-2222-4222-8222-222222222222".into(),
+        SecretRef::File("/private/unused-pairing-token".into()),
+        123,
+        "fixture_bot".into(),
+        &clock,
+    )
+    .unwrap();
+    let pending = block_on(store.begin_telegram_pairing(&session, None, 1000)).unwrap();
+    let candidate = PairingCandidate {
+        chat_id: -10042,
+        user_id: 42,
+        topic_id: Some(7),
+    };
+    session
+        .observe(candidate.clone(), &session.command(), 1, &clock)
+        .unwrap();
+    session.offset = 101;
+    let observed = block_on(store.observe_telegram_pairing(&pending, &session, 1000)).unwrap();
+    let confirmed = block_on(store.confirm_telegram_pairing(&observed, &candidate, 1000)).unwrap();
+    drop(store);
+    let mut daemon = lab::Daemon::start(&lab, &home, &[]).unwrap();
+    daemon.ready().unwrap();
+    let apply = |id: &str, agent: bool| {
+        let mut command = std::process::Command::new(BIN);
+        command
+            .env_clear()
+            .env("AGEND_HOME", &home)
+            .env("HOME", &home)
+            .args(["telegram", "setup", "apply", "--id", id, "--json"]);
+        if agent {
+            command.env("AGEND_INSTANCE", "agent");
+        }
+        command.output().unwrap()
+    };
+    assert!(!apply("stale", false).status.success());
+    assert!(!apply(&session.id, true).status.success());
+    assert_eq!(
+        std::fs::read_to_string(home.join("config.toml")).unwrap(),
+        original
+    );
+    let result = apply(&session.id, false);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let receipt: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(receipt["applied"], true);
+    let text = std::fs::read_to_string(home.join("config.toml")).unwrap();
+    assert!(text.starts_with(original));
+    assert_eq!(
+        agend_daemon::notifier::config::parse(&text)
+            .unwrap()
+            .telegram,
+        Some(confirmed.configuration().unwrap())
+    );
+    assert_eq!(
+        std::fs::read_to_string(home.join(format!("config.before-telegram-{}.toml", session.id)))
+            .unwrap(),
+        original
+    );
+    let repeated = apply(&session.id, false);
+    assert!(repeated.status.success());
+    let receipt: serde_json::Value = serde_json::from_slice(&repeated.stdout).unwrap();
+    assert_eq!(receipt["already_matches"], true);
+    // Stop without restarting: this fixture must never resolve a token or contact Telegram.
+    daemon.interrupt().unwrap();
+}

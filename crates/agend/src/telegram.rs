@@ -1,4 +1,5 @@
 //! Pairing RPCs; token resolution and all Telegram HTTP stay in the daemon.
+mod apply;
 use crate::cli::{Failure, Output, Target, to_json};
 use agend_client::Redo;
 use agend_core::{config::SecretRef, protocol::client::*, telegram::pairing::*};
@@ -49,6 +50,11 @@ pub enum Setup {
         #[arg(long)]
         topic: Option<i64>,
     },
+    /// Apply this confirmed receipt to config.toml; retain an original backup
+    Apply {
+        #[arg(long)]
+        id: String,
+    },
     /// Cancel exactly this pairing
     Cancel {
         #[arg(long)]
@@ -64,8 +70,12 @@ pub fn run(command: Command) -> Result<Output, Failure> {
         ));
     }
     let Command::Setup(setup) = command;
+    let apply_id = match &setup {
+        Setup::Apply { id } => Some(id.clone()),
+        _ => None,
+    };
     let operation = match setup {
-        Setup::Status => PairingOperation::Status,
+        Setup::Status | Setup::Apply { .. } => PairingOperation::Status,
         Setup::Begin {
             token_env,
             token_file,
@@ -140,6 +150,18 @@ pub fn run(command: Command) -> Result<Output, Failure> {
             "unexpected pairing result; query status",
         ));
     };
+    if let Some(id) = apply_id {
+        let record = data
+            .as_deref()
+            .filter(|record| record.session.id == id)
+            .ok_or_else(|| {
+                Failure::new(
+                    "invalid_request",
+                    "pairing changed or missing; query status",
+                )
+            })?;
+        return apply::run(&crate::home::resolve()?, record);
+    }
     let mut lines = Vec::new();
     match &data {
         None => lines.push("No Telegram pairing; run agend telegram setup begin --help".into()),
@@ -160,9 +182,10 @@ pub fn run(command: Command) -> Result<Output, Failure> {
                         record.session.expires_at_ms
                     ));
                 }
-                PairingPhase::Confirmed => {
-                    lines.push("Destination confirmed; config.toml has not been changed".into())
-                }
+                PairingPhase::Confirmed => lines.push(format!(
+                    "Destination confirmed; apply with agend telegram setup apply --id {}",
+                    record.session.id
+                )),
                 PairingPhase::Cancelled => lines.push("Pairing cancelled".into()),
             }
         }

@@ -147,6 +147,22 @@ pub struct PairingRecord {
     pub phase: PairingPhase,
 }
 
+impl PairingRecord {
+    /// A durable confirmation remains applicable after the discovery window expires.
+    /// Applying it to a human-owned file is a separate explicit operator action.
+    pub fn configuration(&self) -> Result<TelegramConfig, &'static str> {
+        if self.phase != PairingPhase::Confirmed {
+            return Err("Telegram pairing is not confirmed");
+        }
+        let candidate = self
+            .session
+            .candidate
+            .as_ref()
+            .ok_or("confirmed pairing has no destination")?;
+        self.session.config_for(candidate)
+    }
+}
+
 /// Operator-only setup actions. No inline token or automatic confirmation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]

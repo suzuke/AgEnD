@@ -254,6 +254,6 @@ OpenCode 版本核對：受管程式使用匯入 artifact 的版本（supervisor
 
 目的版本提交為 Committed 或 Restoring 時，同一交易保存 300 秒 activation deadline；重啟、重複觀察及問題通知都不重新計時，真正開始還原才建立新的期限。到期且仍未通過 native readiness，下一次協調檢查保存逾時問題、保持投遞暫停與原 holder。到期不等於閒置，不授權強制停止；稍後通過 readiness 仍可完成並清除通知／期限。舊持久紀錄若沒有 deadline，未完成時明確提示缺少期限，不能當作重新獲得五分鐘。
 
-13D 配對驗證已加入純邏輯與 notifier adapter：10 分鐘 nonce、GetMe 身分、直接人類 /start、時間／目的地核對、精確操作員確認後產生 token reference／單一 user allowlist 設定。觀察與確認重查 bot，拒絕中途換 bot；群組 topic 綁 message_thread_id。SQLite schema 20 另保存單一配對收據，候選對象與更新游標同交易發布；過期、舊快照或已關閉操作拒絕。CLI／RPC 已接入，設定套用尚未完成，也未執行真 Telegram。daemon 不改寫人寫的 config.toml（D8）；設定套用將由操作員 CLI 負責。
+13D 配對驗證已加入純邏輯與 notifier adapter：10 分鐘 nonce、GetMe 身分、直接人類 /start、時間／目的地核對、精確操作員確認後產生 token reference／單一 user allowlist 設定。觀察與確認重查 bot，拒絕中途換 bot；群組 topic 綁 message_thread_id。SQLite schema 20 另保存單一配對收據，候選對象與更新游標同交易發布；過期、舊快照或已關閉操作拒絕。CLI／RPC 已接入，設定套用由操作員 CLI 的 setup apply 完成，也未執行真 Telegram。daemon 不改寫人寫的 config.toml（D8）；設定套用由操作員 CLI 負責。
 
 13D `PairingService` 串行執行 HTTP 與 SQLite 發布；caller 取消不釋放正在執行的操作，後續請求以 Status 查收據。已配置 notifier 時拒絕 Begin／Poll／Confirm，避免兩個 getUpdates consumer；停止介面先關閉准入再等待發布。此服務已接 daemon 啟停及 protocol 1.9 操作員 RPC；停止時關閉准入並等待既有發布，之後才停止 server。

@@ -297,3 +297,5 @@ Claude observer 的原生測試在 `agend/tests/claude_bridge.rs` 的 `claude_id
 13D notifier native HTTP 測試另驗 `PairingService`：重複 Begin／錯目的地在 HTTP 前拒絕、已配置 worker 不競爭 getUpdates、取消 caller 後第二個請求等待 cursor 發布且只讀一次更新。僅本機 fixture，沒有真 Telegram 操作。
 
 配對 RPC／daemon 啟停與正式 CLI 回歸位於 `agend/tests/telegram_pairing.rs`；HTTP／caller 取消語意由 notifier native tests 涵蓋，真 bot 驗收尚未執行。
+
+config encode 與 parse 共用正式 TOML producer／consumer；CLI apply 的原生測試核對重讀值與確認收據相同。daemon 仍不寫 config.toml。

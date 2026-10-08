@@ -15,6 +15,14 @@ pub fn parse(text: &str) -> Result<Config, String> {
     Ok(config)
 }
 
+/// Encode references only; the operator CLI owns publishing this configuration.
+pub fn encode(config: &Config) -> Result<String, String> {
+    if let Some(telegram) = &config.telegram {
+        telegram.validate()?;
+    }
+    toml::to_string(config).map_err(|_| "cannot encode Telegram configuration".into())
+}
+
 /// Missing configuration disables Telegram. Invalid present configuration fails boot.
 pub fn load(home: &Path) -> Result<Option<(agend_core::config::TelegramConfig, Token)>, String> {
     let text = match std::fs::read_to_string(home.join("config.toml")) {
