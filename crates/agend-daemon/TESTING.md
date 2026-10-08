@@ -307,3 +307,5 @@ canary scope 參數比對在 agend 的 `backend_canary` 原生測試核正式 cr
 13C 明確 `--auth-file` 的格式、私有路徑與真測邊界見[canary 認證](../../docs/architecture/backend-canary-auth.md)。本機測試涵蓋 private copy、來源不變、OpenCode 正式 Layout 保留認證、scope 錯配與權限拒絕；完整 native canary 使用測試用憑證，沒有真帳戶或模型呼叫。
 
 CLP-14 的真 daemon 契約核 InstanceAdd 指定的 program 出現在 fleet，避免 doctor 只取得 backend 名稱。
+
+registry 的四組測試經 native loopback HTTP 重播真 npm manifest；捕獲來源與 SHA-256 在 tests/fixtures/backend_registry/README.md。變造套件／版本、非 JSON、3xx／5xx、超量、標頭延遲與 body 傳送中停頓皆拒絕；不把樣本版本宣稱為支援版本。

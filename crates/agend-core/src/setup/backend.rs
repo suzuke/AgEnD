@@ -5,6 +5,22 @@ use alloc::{string::String, vec::Vec};
 use serde::{Deserialize, Serialize};
 pub mod canary;
 
+/// Public npm package used for release discovery, not automatic installation.
+pub fn npm_package(backend: crate::model::Backend) -> &'static str {
+    match backend {
+        crate::model::Backend::Claude => "@anthropic-ai/claude-code",
+        crate::model::Backend::Codex => "@openai/codex",
+        crate::model::Backend::Opencode => "opencode-ai",
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublishedBackend {
+    pub backend: String,
+    pub package: String,
+    pub version: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ImportedBackend {

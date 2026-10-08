@@ -8,6 +8,7 @@ use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::Path;
 pub mod canary_scope;
 pub(crate) mod launcher;
+pub mod registry;
 mod running;
 mod snapshot;
 

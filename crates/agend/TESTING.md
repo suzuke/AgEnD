@@ -254,3 +254,5 @@ canary 模型選擇：`backend_canary` 的非法名稱案例在建立 home 前�
 Doctor 的 probe timeout 與清理 timeout 分開計時；清理失敗需保留前面的 probe 錯誤。原生繼承 pipes 案例失敗會印出實際錯誤，時間斷言涵蓋兩段預算。
 
 install_home 以真 CLI／FakeDaemon 核自訂程式不在 PATH、缺檔、舊 peer 未提供 program、daemon PATH 未知、正式 import 尚無 canary，以及變造保管程式拒絕且不執行 marker。CLP-14 同時在真 daemon／fake producer 核設定 program 出現在 fleet。
+
+`backend latest` 使用 daemon 的固定 origin registry adapter；adapter 以真 npm 回應 fixture 經本機 HTTP 核套件身分、轉址、錯誤、非法 JSON／版本、超量與期限。CLI 真 public metadata 查詢另記證據；agent 呼叫在連線前拒絕。

@@ -17,6 +17,11 @@ mod switch;
 
 #[derive(Subcommand)]
 pub enum Command {
+    /// Read the public registry's latest tag (no installation or model execution)
+    Latest {
+        #[arg(value_parser = ["claude", "codex", "opencode"])]
+        backend: String,
+    },
     /// Prepare, inspect or cancel a backend version switch through the daemon
     #[command(subcommand)]
     Switch(switch::Command),
@@ -70,9 +75,23 @@ pub fn run(command: Command) -> Result<Output, Failure> {
             "backend installation requires an operator terminal",
         ));
     }
+    if let Command::Latest { backend } = &command {
+        let backend =
+            Backend::parse(backend).ok_or_else(|| Failure::usage("unsupported backend"))?;
+        let release = agend_daemon::backend_versions::registry::latest(backend)
+            .map_err(|reason| Failure::new("backend_registry_failed", reason))?;
+        return Ok(Output::new(
+            vec![format!(
+                "{}: registry latest {}; not installed or canary-verified",
+                backend.as_str(),
+                release.version
+            )],
+            json!({"release":release,"source":"https://registry.npmjs.org","installed":false,"canary_verified":false}),
+        ));
+    }
     let home = crate::home::resolve()?;
     let (backend, version) = match &command {
-        Command::Switch(_) => unreachable!("handled before local import"),
+        Command::Switch(_) | Command::Latest { .. } => unreachable!("handled before local import"),
         Command::Import {
             backend, version, ..
         }
@@ -129,7 +148,7 @@ pub fn run(command: Command) -> Result<Output, Failure> {
     let parent = root.join(backend);
     let dir = parent.join(version);
     let record = match command {
-        Command::Switch(_) => unreachable!("handled before local import"),
+        Command::Switch(_) | Command::Latest { .. } => unreachable!("handled before local import"),
         Command::Canary { .. } => unreachable!("handled before import"),
         Command::Import {
             backend,

@@ -265,3 +265,5 @@ OpenCode 版本核對：受管程式使用匯入 artifact 的版本（supervisor
 13C 明確 `--auth-file` 的格式、私有路徑與真測邊界見[canary 認證](../../docs/architecture/backend-canary-auth.md)。本機測試涵蓋 private copy、來源不變、OpenCode 正式 Layout 保留認證、scope 錯配與權限拒絕；完整 native canary 使用測試用憑證，沒有真帳戶或模型呼叫。
 
 Fleet 的 program 取自 instance 設定，保留 driver wrapper 前的程式，供 doctor 診斷；不包含 args 或認證。
+
+backend_versions::registry 提供阻塞唯讀 latest 查詢，daemon 使用時需放在 worker；固定 npm HTTPS、拒轉址、5 秒期限與 256 KiB 上限。沒有認證或下載／執行步驟。每日檢查與通知排程尚未接入。

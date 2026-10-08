@@ -269,3 +269,5 @@ Brew 原生安裝驗證已接入 release workflow 的 macOS ARM64／Linux x86_64
 - 2026-10-08：doctor 改診斷 fleet 明示的設定 program，保管 bytes 變動 fail 且不執行，無當前 CLI build canary／外部程式／無 daemon PATH 證據則 warn；不冒充登入或漂移通知完成。install_home 9 項及相對程式補驗、真／fake CLP（含新增 program producer 斷言）、CLI doctor、舊協定相容 16 項、workspace clippy／fmt／check-deps 通過。首輪 socket fixture 名過長及遺漏 xtask 初始化編譯失敗已修正、保留 log；自有 lab／程序已清（feat/g13-install，未合併）。
 
 - 2026-10-08：release-artifacts 37753100820（3f52828）全部成功：Linux x86_64／ARM64、macOS Intel／ARM64 archive 與首任務、formula、macOS／Linux Brew install／test／fresh HOME init／uninstall。這是 Actions 一次性環境驗證，尚未公開發布，亦未取代主機服務與真 backend／Telegram 驗收（feat/g13-install，未合併）。
+
+- 2026-10-08：13C 新增 backend latest，固定 npm 公開來源、核套件身分，拒絕轉址／超量／錯誤，5 秒期限涵蓋標頭與 body。真 metadata 三套查詢及無 HOME／agent 拒絕驗證通過；四項 HTTP fixture 反例、core 全組（兩個 deep ignored）、daemon 194 項（1 child ignored）、CLI 37 項及 workspace clippy／fmt／check-deps 通過。未呼叫模型或切換版本；每日排程、持久漂移通知及整關真測仍待完成（feat/g13-install，未合併）。

@@ -249,3 +249,5 @@ SQLite 中每個 task 的固定 repository ID、branch、nonce 與 PR number；�
 單一 instance 最近一次明確版本切換的持久記錄，保存原 managed launch、目標 artifact／program、當時原生 session 與 Prepared／Cancelled／Committed／Activated／RollbackPrepared／Restoring／RolledBack 階段。RollbackPrepared 先暫停已啟用目標的投遞，尚未改 program；真正改路徑時 program 與階段一起更新。Committed／Restoring 仍暫停投遞，完成新啟動驗證才記 Activated／RolledBack。記錄本身不代表 holder 已停止或 canary 已通過，這兩項由 supervisor 核對。
 
 - **canary 執行範圍（CanaryScope）**：顯式 canary runner 在私有 home 建立的版本觀察紀錄，綁定 home 路徑與 inode/device、canary instance、workspace 及來源匯入 artifact。只供隔離執行版本核對，不是成功報告，也不授予 fleet 准入。
+
+- **公開版本資訊（PublishedBackend）**：從固定 npm registry 取得的 backend 套件名稱與 latest tag 版本；只代表公開 metadata，不代表已安裝、較新、相容或 canary 通過。見[公開版本查詢](architecture/backend-registry.md)。
