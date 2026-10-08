@@ -44,6 +44,10 @@ impl Monitor {
         });
         Self { stop, task }
     }
+    #[cfg(test)]
+    pub(crate) fn is_finished(&self) -> bool {
+        self.task.is_finished()
+    }
     pub(crate) async fn stop(self) {
         let _ = self.stop.send(true);
         let _ = self.task.await;

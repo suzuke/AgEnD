@@ -1821,3 +1821,124 @@ async fn native_external_version_failure_notifies_and_mobile_ack_survives_refres
     assert_eq!(newer.revision, 2);
     assert_eq!(newer.acknowledged_revision, 1);
 }
+
+#[tokio::test]
+async fn disabled_invalid_and_canary_homes_never_reserve_or_execute_external_probes() {
+    use std::os::unix::fs::PermissionsExt;
+    for mode in ["disabled", "invalid", "canary"] {
+        let lab = Lab::new().await;
+        let home = lab._dir.path().canonicalize().unwrap();
+        let script = home.join("backend");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\ntouch unexpected-probe\nprintf 'fake 1.0\\n'\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        version_instance(&lab, "version-test", script.to_str().unwrap()).await;
+        match mode {
+            "disabled" => {
+                std::fs::write(home.join("config.toml"), "backend_version_checks = false\n")
+                    .unwrap()
+            }
+            "invalid" => std::fs::write(
+                home.join("config.toml"),
+                "backend_version_checks = 'false'\n",
+            )
+            .unwrap(),
+            "canary" => std::fs::write(home.join("canary-scope.json"), "{}").unwrap(),
+            _ => unreachable!(),
+        }
+        let monitor = crate::backend_versions::system_monitor::Monitor::start(lab.ctx.clone());
+        let exited = tokio::time::timeout(Duration::from_secs(3), async {
+            while !monitor.is_finished() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .is_ok();
+        monitor.stop().await;
+        assert!(
+            exited,
+            "{mode}: disabled worker must exit without being stopped"
+        );
+        assert!(!home.join("unexpected-probe").exists(), "{mode}");
+        assert!(
+            lab.ctx
+                .store
+                .system_version_observation("version-test")
+                .await
+                .unwrap()
+                .is_none(),
+            "{mode}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn managed_launch_is_skipped_while_the_next_external_instance_is_probed() {
+    use agend_core::{setup::backend::ImportedBackend, traits::HolderLaunch};
+    use sha2::{Digest, Sha256};
+    use std::os::unix::fs::PermissionsExt;
+    let lab = Lab::new().await;
+    let home = lab._dir.path().canonicalize().unwrap();
+    let script = home.join("backend");
+    let bytes=b"#!/bin/sh\n[ \"$1\" = --version ] || exit 2\ntouch \"probe-$AGEND_INSTANCE\"\nprintf 'fake 1.0\\n'\n";
+    std::fs::write(&script, bytes).unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+    version_instance(&lab, "a-managed", script.to_str().unwrap()).await;
+    version_instance(&lab, "b-external", script.to_str().unwrap()).await;
+    let instance = lab.ctx.store.instance("a-managed").await.unwrap().unwrap();
+    lab.ctx
+        .store
+        .prepare_managed_launch(
+            &instance,
+            &HolderLaunch {
+                instance_id: instance.id.clone(),
+                backend: instance.backend,
+                executable: instance.program.clone(),
+                args: vec![],
+                working_directory: instance.working_directory.clone(),
+            },
+            ImportedBackend {
+                format: 1,
+                backend: "codex".into(),
+                version: "1.0".into(),
+                sha256: format!("{:x}", Sha256::digest(bytes)),
+                bytes: bytes.len() as u64,
+            },
+            None,
+        )
+        .await
+        .unwrap();
+    let monitor = crate::backend_versions::system_monitor::Monitor::start(lab.ctx.clone());
+    let completed = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if lab
+                .ctx
+                .store
+                .system_version_observation("b-external")
+                .await
+                .unwrap()
+                .is_some_and(|r| r.completed_ms.is_some())
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .is_ok();
+    monitor.stop().await;
+    assert!(completed);
+    assert!(home.join("probe-b-external").exists());
+    assert!(!home.join("probe-a-managed").exists());
+    assert!(
+        lab.ctx
+            .store
+            .system_version_observation("a-managed")
+            .await
+            .unwrap()
+            .is_none()
+    );
+}

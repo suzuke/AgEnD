@@ -289,3 +289,5 @@ Brew 原生安裝驗證已接入 release workflow 的 macOS ARM64／Linux x86_64
 - 2026-10-08：13C 外部版本持久紀錄接 system_monitor、ingest attention、operator／Telegram 確認與 pipeline 保留；預設每 60 秒檢查，backend_version_checks 可獨立停用，canary home 與受管 launch 跳過。原生假 CLI 停機等待／保存／下一 instance 不啟動，以及 Store→Fleet→loopback Telegram 確認與舊按鈕拒絕通過；daemon 全組 216 項通過（1 child entry ignored）。source review 未見資料／確認 blocker，建議兩個 monitor 同時停止已改 tokio::join!；正式 daemon 雙 monitor active 的整合驗收、成功換版完整通知重開證據仍待補。非真 backend／真 Telegram 驗收（feat/g13-install，未合併）。
 
 - 2026-10-08：外部 monitor 接線後，原生 backend_switch 2 項（核離線 Lab 無本機版本 reservation）、Telegram apply 5 項（保留兩個探測設定）、workspace clippy／check-deps／fmt 通過；通知測試暫存無殘留。保留未合併 Gate 13 工作樹與共用 target 供後續驗收（feat/g13-install，未合併）。
+
+- 2026-10-08：補外部版本的成功路徑與排除證據：真本機假 CLI 1→2→提醒→SQLite／Fleet 重開→確認→重開→3 拒舊確認；停用／錯誤設定／canary 等 worker 自行退出後核無執行；受管排除等下一外部 instance 真探測完成再核無執行。3 項測試及 workspace clippy／check-deps／fmt 通過，read-only fresh reviewer 確認覆蓋有效、未見新 blocker（未獨立重跑）。自有暫存無殘留；這是組件整合，正式 daemon／定時 worker 重啟與服務真驗收仍待完成（feat/g13-install，未合併）。
