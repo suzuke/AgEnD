@@ -18,6 +18,8 @@
 | 13E 打包 | d78f530 的 release-artifacts 37783051296 通過四平台 archive、formula 與雙平台 Brew 七個 jobs | 最終提交的打包驗證、全新使用者真 backend 首任務、版本／發布交付計畫；尚未公開發布 |
 | 整關 | 持續執行局部原生測試與獨立 source review | 當前提交的 accept install、完整雙平台 CI、最終 fresh-context verifier、使用者逐步驗收與合併確認 |
 
+doctor 逐項覆蓋與缺口見 [故障／修復矩陣](gate-13-doctor-matrix.md)。
+
 ## 當前自動驗收
 
 - 固定程式提交 `f08fe43` 的 `cargo xtask accept install` 以 exit 0 完成，耗時 2,200.61 秒；起訖 HEAD 相同且工作樹乾淨。包含 core／daemon／CLI checks、安裝 demo、三種原生假 backend canary、服務 lifecycle 模型與配對隔離測試。
