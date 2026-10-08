@@ -240,3 +240,5 @@ Canary 必須取得三筆與 delivery 綁定的 completed outcomes；修改 fail
 13E `install_home` 現在以真 CLI doctor JSON 驗故障與恢復：缺 home／權限過寬、Telegram 損壞且原文不變、sandbox 工具缺失及原生恢復、三 backend PATH 遺失及只允許 --version 的 fixture 恢復；每個非 ok 結果須有 fix，exit code 必須對應所有 checks 的 fail。這不涵蓋磁碟容量、登入、版本相容或真服務健康的完整驗收。
 
 `service::tests::diagnostic_observes_recovery_without_mutating_the_installation_or_manager` 使用正式 Owned::prepare/register producer 與 manager state model，持 lifecycle 鎖驗 Prepared／Registered／Absent／running、定義遺失／恢復／變造，核收據未改與 manager 呼叫數未增加。`cli::init_and_doctor` 的 JSON 列表加入 service，install_home 回歸仍走真 CLI；這些不取代真 launchd／systemd 驗收。
+
+磁碟恢復：install_home 用 create_new + set_len(MAX_HOME_BYTES + 1) 的自有 sparse fixture 驗實際目錄掃描，doctor 不刪檔，測試刪除後恢復。低可用空間另有 macOS 原生證據：自有 hdiutil 64m HFS+ SPARSE 映像，62 MB free 為 fail；detach 後 resize 2g、重新 attach 為 ok，再 detach／刪除。這份低空間證據不宣稱 Linux 亦已實測。

@@ -452,3 +452,5 @@
 - 2026-10-08：13E doctor 新增唯讀 service 診斷：無安裝可前景執行；核收據歸屬／artifact／manager 狀態與查詢後收據一致，Prepared／Removing／未執行提示修正，缺失或變造拒絕。診斷不取得或建立 install.lock，不啟停／reload。持正式 lifecycle 鎖的 model 故障／恢復反例、service 18、install_home 7、CLI doctor 1 項與 clippy 通過；初輪測試缺 Path import 已修正並保留 log。未驗主機服務，登入／版本與整關故障矩陣仍待完成（feat/g13-install，未合併）。
 
 - 2026-10-08：CI 加入 workflow＋ref concurrency，同分支／PR 的較新提交取代舊 run，其他 workflow／分支分開。已核身分後取消本施工分支五批被取代 CI，保留 869a664 基準與獨立 release 驗收；取消不視為通過。actionlint 通過（feat/g13-install，未合併）。
+
+- 2026-10-08：13E 磁碟診斷補真 CLI sparse file 邏輯用量 >20 GB 警告／刪 fixture 後恢復，install_home 全 8 項通過。另以自有 64 MB HFS+ sparse image 實測 62 MB free→disk fail，卸載擴容 2 GB 再掛載→ok；映像已卸載刪除並核 hdiutil 無自有掛載。未填滿主機磁碟，未啟動模型。c085ddf 四平台 release 首任務及 formula 全部通過；全關 CI／真服務及模型驗收仍待完成（feat/g13-install，未合併）。

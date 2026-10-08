@@ -186,3 +186,25 @@ fn doctor_backend_path_failure_recovers_without_starting_models() {
         fs::remove_file(tool).unwrap();
     }
 }
+
+#[test]
+fn doctor_large_home_warning_recovers_after_removing_only_its_sparse_fixture() {
+    let root = TempDir::new("g13-doctor-disk").unwrap();
+    init(root.path());
+    diagnostic(command(root.path()), "disk", "ok");
+    let path = root.path().join(".agend/large-owned-fixture");
+    let file = fs::File::create_new(&path).unwrap();
+    // Logical file size exercises the actual directory scanner without filling disk.
+    file.set_len(agend_core::setup::MAX_HOME_BYTES + 1).unwrap();
+    drop(file);
+    let warning = diagnostic(command(root.path()), "disk", "warn");
+    assert!(
+        warning["detail"]
+            .as_str()
+            .unwrap()
+            .contains("more than 20 GB")
+    );
+    assert!(path.exists(), "doctor must not remove user files");
+    fs::remove_file(path).unwrap();
+    diagnostic(command(root.path()), "disk", "ok");
+}
