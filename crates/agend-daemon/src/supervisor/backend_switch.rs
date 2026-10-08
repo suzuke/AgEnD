@@ -11,6 +11,25 @@ fn refused(message: impl Into<String>) -> Refusal {
 }
 
 impl Supervisor {
+    /// Generic restart/retry must not replace a durable switch's source launch.
+    /// Read failures also preserve the holder; only switch reconciliation may
+    /// decide what to stop or launch while the transition is pending.
+    pub(super) async fn switch_holds_recovery(&self, id: &str) -> bool {
+        let reason = match self.store.backend_switch(id).await {
+            Ok(Some(record)) if record.phase.pending() => {
+                format!(
+                    "backend switch {} is pending; ordinary recovery held",
+                    record.id
+                )
+            }
+            Ok(_) => return false,
+            Err(error) => format!("cannot inspect backend switch: {error}; ordinary recovery held"),
+        };
+        log::line(&format!("{id}: {reason}"));
+        self.set_state(id, AgentState::Unknown, reason);
+        true
+    }
+
     pub(super) async fn backend_switch(
         &mut self,
         command: BackendSwitchCommand,

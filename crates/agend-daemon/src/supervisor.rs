@@ -600,6 +600,9 @@ impl Supervisor {
                     self.reconnect(instance, pid).await;
                 }
                 BootAction::Start { id, resume } => {
+                    if self.switch_holds_recovery(&id).await {
+                        continue;
+                    }
                     report.started += 1;
                     let instance = instances.iter().find(|i| i.id == id).expect("planned");
                     self.start(instance, resume, None).await;
@@ -913,6 +916,9 @@ impl Supervisor {
             return;
         };
         let id = id.as_str();
+        if self.switch_holds_recovery(id).await {
+            return self.fleet.raise(item);
+        }
         log::line(&format!("{id}: retry requested by the operator"));
         if let Err(e) = self.runtime.stop(id).await {
             // `fail` lists a new item with this reason.
@@ -952,6 +958,9 @@ impl Supervisor {
             return;
         };
         if watch.generation != generation || watch.state != State::Up {
+            return;
+        }
+        if self.switch_holds_recovery(id).await {
             return;
         }
         log::line(&what);
@@ -1006,6 +1015,9 @@ impl Supervisor {
             return;
         };
         if watch.generation != generation {
+            return;
+        }
+        if self.switch_holds_recovery(id).await {
             return;
         }
         // The agent may have ended in a holder that still runs: a holder

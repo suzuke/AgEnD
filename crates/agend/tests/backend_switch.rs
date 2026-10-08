@@ -216,3 +216,95 @@ fn native_status_cancel_and_restart_preserve_program_and_refuse_agents_and_stale
     );
     assert!(lab.running_holders().is_empty());
 }
+
+#[test]
+fn pending_switch_boot_preserves_launch_reservation_without_ordinary_restart() {
+    use agend_core::runtime_records::BackendSwitchPhase;
+    for phase in [
+        BackendSwitchPhase::Prepared,
+        BackendSwitchPhase::Committed,
+        BackendSwitchPhase::Restoring,
+    ] {
+        let lab = lab::Lab::with_prefix(Path::new(BIN), "g13-switch-recovery");
+        let home = lab.home(1);
+        let store = SqliteStore::open(&home, 0).unwrap();
+        let instance = Instance {
+            id: "managed".into(),
+            backend: Backend::Claude,
+            program: "/managed/old/program".into(),
+            args: vec![],
+            working_directory: home.to_string_lossy().into_owned(),
+            session_id: Some("11111111-1111-4111-8111-111111111111".into()),
+            status: InstanceStatus::Running,
+            session_started: true,
+            agent_pid: None,
+            legacy_no_thread: false,
+            delivery: "push".into(),
+        };
+        block_on(store.add_instance(&instance)).unwrap();
+        let old = ImportedBackend {
+            format: 1,
+            backend: "claude".into(),
+            version: "old".into(),
+            sha256: "a".repeat(64),
+            bytes: 42,
+        };
+        let launch = block_on(store.prepare_managed_launch(
+            &instance,
+            &HolderLaunch {
+                instance_id: instance.id.clone(),
+                backend: instance.backend,
+                executable: instance.program.clone(),
+                args: vec![],
+                working_directory: instance.working_directory.clone(),
+            },
+            old.clone(),
+            None,
+        ))
+        .unwrap();
+        let mut record = block_on(store.prepare_backend_switch(
+            &instance,
+            ImportedBackend {
+                version: "new".into(),
+                sha256: "b".repeat(64),
+                ..old
+            },
+            "/managed/new/program",
+            None,
+        ))
+        .unwrap();
+        if phase != BackendSwitchPhase::Prepared {
+            record = block_on(store.commit_backend_switch(&record, false)).unwrap();
+        }
+        if phase == BackendSwitchPhase::Restoring {
+            record = block_on(store.commit_backend_switch(&record, true)).unwrap();
+        }
+        let snapshot = block_on(store.instance("managed")).unwrap().unwrap();
+        drop(store);
+        // No executable/canary is installed. Ordinary boot would attempt
+        // admission and mutate the running row into failed; switch recovery
+        // must instead preserve the exact durable snapshot and reservation.
+        let mut daemon = lab::Daemon::start(&lab, &home, &[]).unwrap();
+        daemon.ready().unwrap();
+        assert_eq!(
+            value(cli(&home, &["status", "managed"], false))["id"],
+            record.id
+        );
+        daemon.interrupt().unwrap();
+        let store = SqliteStore::open(&home, 0).unwrap();
+        assert_eq!(block_on(store.instance("managed")).unwrap(), Some(snapshot));
+        assert_eq!(
+            block_on(store.managed_launch("managed")).unwrap(),
+            Some(launch)
+        );
+        assert_eq!(
+            block_on(store.backend_switch("managed")).unwrap(),
+            Some(record)
+        );
+        assert!(
+            agend_daemon::runtime::files::running(&home, "managed")
+                .unwrap()
+                .is_none()
+        );
+    }
+}
