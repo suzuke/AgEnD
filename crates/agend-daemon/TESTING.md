@@ -246,4 +246,4 @@ Claude outcome：`driver::claude::outcome` 使用先前真測 ACK/PostToolUse/St
 
 受管 link 的取消測試 `closing_a_pending_binding_query_is_prompt_and_emits_no_rejection` 以 native socket 收到真序列化 GetLaunchBinding 後扣住回覆，驗證 intentional close 一秒內停止且不發 LaunchBindingRejected；核對仍共用原始十秒期限。全路徑 native holder 與 SQLite 重連在 `agend/tests/holder_runtime.rs`。
 
-`tests/backend_switch.rs` 使用原生 SQLite／正式 launch reservation producer，驗 prepare 不改 program、重開後 commit／rollback 的 program 與 phase 一致、重送舊記錄拒絕、設定衝突不留下半套狀態，以及 instance 移除 cascade。這只驗儲存層，不證明 holder 停止或完整版本切換。
+`tests/backend_switch.rs` 使用原生 SQLite／正式 launch reservation producer，驗 prepare 不改 program、重開後 commit／rollback 的 program 與 phase 一致、重送舊記錄拒絕、設定衝突不留下半套狀態，Prepared 取消保留 program／PID 並允許新請求、Committed 拒絕取消，以及 instance 移除 cascade。這只驗儲存層，不證明 holder 停止或完整版本切換。

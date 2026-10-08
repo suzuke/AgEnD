@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum BackendSwitchPhase {
     Prepared,
+    Cancelled,
     Committed,
     RolledBack,
 }

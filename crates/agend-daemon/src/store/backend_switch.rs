@@ -115,6 +115,37 @@ impl SqliteStore {
         })
         .await
     }
+    /// Cancel only an uncommitted request. No process or program mutation is
+    /// needed; even a running original agent may remain in place.
+    pub async fn cancel_backend_switch(
+        &self,
+        expected: &BackendSwitch,
+    ) -> Result<BackendSwitch, StoreError> {
+        let expected = expected.clone();
+        self.call(move |conn| {
+            let tx = conn.transaction()?;
+            let mut current = read(&tx, &expected.instance_id)?
+                .ok_or_else(|| invalid("backend switch missing"))?;
+            if current != expected || current.phase != BackendSwitchPhase::Prepared {
+                return Err(invalid(
+                    "only the current prepared backend switch can be cancelled",
+                ));
+            }
+            let instance = instances::get(&tx, &current.instance_id)?
+                .ok_or_else(|| invalid("backend switch instance disappeared"))?;
+            if !config_matches(&instance, &current, &current.previous.configured_program) {
+                return Err(invalid(
+                    "backend switch configuration changed before cancellation",
+                ));
+            }
+            current.phase = BackendSwitchPhase::Cancelled;
+            write(&tx, &current)?;
+            tx.commit()?;
+            Ok(current)
+        })
+        .await
+    }
+
     /// Caller proves holder absence first. Persist phase and program in one
     /// transaction; preserve the old launch proof until a new native spawn.
     pub async fn commit_backend_switch(

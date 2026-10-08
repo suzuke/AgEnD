@@ -80,6 +80,7 @@ fn program_and_phase_survive_reopen_and_rollback_without_replaying_stale_request
     );
     let committed = block_on(store.commit_backend_switch(&prepared, false)).unwrap();
     assert_eq!(committed.phase, BackendSwitchPhase::Committed);
+    assert!(block_on(store.cancel_backend_switch(&committed)).is_err());
     assert_eq!(
         block_on(store.instance(&instance.id))
             .unwrap()
@@ -170,5 +171,49 @@ fn replaced_launch_reservation_cannot_be_committed_by_an_old_switch() {
     assert_eq!(
         block_on(store.instance(&instance.id)).unwrap(),
         Some(instance)
+    );
+}
+
+#[test]
+fn cancelling_prepared_switch_preserves_running_agent_and_allows_a_new_request() {
+    let root = TempDir::new("backend-switch-cancel").unwrap();
+    let home = root.path().join("home");
+    let store = SqliteStore::open(&home, 0).unwrap();
+    let (instance, target) = fixture(&store);
+    let prepared = block_on(store.prepare_backend_switch(
+        &instance,
+        target.clone(),
+        "/managed/new/program",
+        None,
+    ))
+    .unwrap();
+    drop(store);
+    // Persist a PID using the same native column the runtime owns. This test
+    // performs no process IO; cancellation must not require clearing the PID.
+    let db = rusqlite::Connection::open(home.join("agend.db")).unwrap();
+    db.execute(
+        "UPDATE instances SET agent_pid=23456 WHERE id=?1",
+        [&instance.id],
+    )
+    .unwrap();
+    drop(db);
+    let store = SqliteStore::open(&home, 1).unwrap();
+    let running = block_on(store.instance(&instance.id)).unwrap().unwrap();
+    let cancelled = block_on(store.cancel_backend_switch(&prepared)).unwrap();
+    assert_eq!(cancelled.phase, BackendSwitchPhase::Cancelled);
+    assert_eq!(
+        block_on(store.instance(&instance.id)).unwrap(),
+        Some(running.clone())
+    );
+    assert!(block_on(store.commit_backend_switch(&prepared, false)).is_err());
+    assert!(block_on(store.cancel_backend_switch(&prepared)).is_err());
+    assert!(
+        block_on(store.prepare_backend_switch(
+            &running,
+            target.clone(),
+            "/managed/new/program",
+            Some(&prepared.id)
+        ))
+        .is_ok()
     );
 }

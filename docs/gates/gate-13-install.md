@@ -149,3 +149,5 @@ cat docs/gates/gate-13-install.md
 - 2026-10-08：補受管 canary build 身分失配反例，正式報告改成不匹配 digest 後，新啟動准入拒絕，三 backend 的原 holder 仍以持久 UUID 重連；原生 4 項通過（99.98 秒），fmt／clippy／check-deps 通過，自有程序／lab 清理完成。更新版本管理文件移除已失效的「全部拒絕准入」敘述；不宣稱已驗證所有跨版本 driver 相容性（feat/g13-install）。
 
 - 2026-10-08：13C migration 0019 保存每 instance 最近一次 BackendSwitch，prepare 不改 program，commit／rollback 與 phase 同交易；設定、舊 switch 或來源啟動意圖變更拒絕提交。原生 SQLite 3 項、store 42 項、core 149 項通過（2 項既有 ignored），fmt／clippy／check-deps 通過；聚焦儲存契約覆核無 blocker，測試暫存與重複 clippy log 已清理。尚未接操作入口、idle 排空、停止／啟動與 Prepared 取消／恢復，不宣稱完整版本切換完成（feat/g13-install）。
+
+- 2026-10-08：13C Prepared 切換可取消，保留原 program 與 agent PID，取消後可建立新請求；Committed 拒絕取消，須走 rollback。原生 SQLite 4 項、fmt／clippy／前後 check-deps 通過，測試暫存與重複 log 已清理。這批只完成儲存契約，CLI、投遞排空及 supervisor 恢復仍未接入（feat/g13-install，未合併）。
