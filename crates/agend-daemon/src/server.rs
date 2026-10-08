@@ -89,14 +89,30 @@ pub fn bind(socket: &Path) -> io::Result<UnixListener> {
 pub struct Server {
     stop: watch::Sender<bool>,
     task: JoinHandle<()>,
+    delivery_replies: Arc<crate::delivery::Replies>,
 }
 
 impl Server {
     /// Serves connections from `listener` (bound at `socket`) until stopped.
     pub fn start(listener: UnixListener, socket: PathBuf, ctx: Arc<Context>) -> Server {
         let (stop, stopped) = watch::channel(false);
-        let task = tokio::spawn(accept_loop(listener, socket, ctx, stopped));
-        Server { stop, task }
+        let delivery_replies = Arc::new(crate::delivery::Replies::default());
+        let task = tokio::spawn(accept_loop(
+            listener,
+            socket,
+            ctx,
+            stopped,
+            delivery_replies.clone(),
+        ));
+        Server {
+            stop,
+            task,
+            delivery_replies,
+        }
+    }
+
+    pub fn delivery_replies(&self) -> Arc<crate::delivery::Replies> {
+        self.delivery_replies.clone()
     }
 
     /// Stops accepting, removes the socket file, closes every connection,
@@ -112,6 +128,7 @@ async fn accept_loop(
     socket: PathBuf,
     ctx: Arc<Context>,
     mut stopped: watch::Receiver<bool>,
+    delivery_replies: Arc<crate::delivery::Replies>,
 ) {
     let hub =
         TerminalHub::with_codex_driver(ctx.runtime.clone(), ctx.fleet.clone(), ctx.codex.clone());
@@ -133,7 +150,7 @@ async fn accept_loop(
             accepted = listener.accept() => match accepted {
                 Ok((stream, _)) => {
                     let number = next.fetch_add(1, Ordering::Relaxed);
-                    connections.spawn(connection(stream, Arc::clone(&ctx), hub.clone(), number, claude.clone()));
+                    connections.spawn(connection(stream, Arc::clone(&ctx), hub.clone(), number, claude.clone(), delivery_replies.clone()));
                 }
                 Err(e) => {
                     log::line(&format!("client socket: accept failed: {e}"));
@@ -274,6 +291,7 @@ async fn connection(
     hub: TerminalHub,
     number: u64,
     claude: Arc<crate::claude_bridge::ClaudeBridge>,
+    delivery_replies: Arc<crate::delivery::Replies>,
 ) {
     let (reader, writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
@@ -370,6 +388,15 @@ async fn connection(
                     if let Err(data) = result && !client.send(&ClientResponse::Error { data }).await { return; }
                     continue;
                 }
+                // Hold through serialization and the complete bounded socket
+                // write, not just through the handler's database reservation.
+                let _delivery_reply = match &request {
+                    ClientRequest::Claude { data } => Some(delivery_replies.begin(&data.instance_id)),
+                    ClientRequest::Command { data }
+                        if matches!(data.command, agend_core::protocol::client::AgentCommand::Inbox { .. }) =>
+                            client.caller.as_deref().map(|id| delivery_replies.begin(id)),
+                    _ => None,
+                };
                 if let ClientRequest::Claude { data } = request {
                     let reply = claude.handle(&ctx, client.caller.as_deref(), selected_version, data).await;
                     if !client.send(&reply).await { return; }

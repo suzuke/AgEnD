@@ -23,6 +23,11 @@ use agend_testkit::contract::client;
 
 const BIN: &str = env!("CARGO_BIN_EXE_agend");
 
+#[test]
+fn inbox_delivery_fence_tracks_complete_disconnected_and_timed_out_socket_writes() {
+    clp::inbox_reply_drain();
+}
+
 fn show(lines: &[String]) {
     for line in lines {
         println!("{line}");

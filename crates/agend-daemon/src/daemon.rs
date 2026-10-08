@@ -396,6 +396,7 @@ async fn serve(
         crate::notifier::worker::start(config, token, context.clone())
     });
     let server = Server::start(listener, socket.clone(), Arc::clone(&context));
+    supervisor.set_delivery_replies(server.delivery_replies());
     log::line(&format!("listening on {}", socket.display()));
     log::line(&format!(
         "agend daemon ready: instances={} recovered={} started={} orphans={}",

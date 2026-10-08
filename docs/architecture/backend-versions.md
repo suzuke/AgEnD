@@ -131,3 +131,5 @@ agend backend switch cancel <instance> --switch-id <id>
 目前整合測試證明中斷 Prepared 的查詢、取消與重啟保留；尚未證明成功 prepare 後的在途排空、停止舊版、啟動新版與 rollback。不要把 Prepared 視為完成換版。
 
 換版停止原語 `HolderRuntime::stop_reserved` 要求持久意圖及精確 holder／agent PID。查 LaunchBinding 與 Shutdown 使用同一連線，後續 socket 路徑替換不會把停止送到新 peer；回覆不符或 holder PID 改變時保留程序，結果不明須對帳。呼叫前的回合結束證據、在途排空及新啟動序列化仍由 supervisor 負責，尚未完成。
+
+Prepare 在 SQLite 暫停新 reservation 後，捕捉已開始的 Claude／inbox server 回覆，最多等待 10 秒直到既有 handler／socket write 全部完成或連線任務結束。其後的空輪詢不加入舊範圍；逾時仍保存 Prepared，呼叫者查 status 對帳。ACK、backend 完成與 worker 停止是後續獨立條件；socket 已寫完不代表模型已消費內容。

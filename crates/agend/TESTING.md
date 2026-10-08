@@ -202,3 +202,5 @@ Canary 必須取得三筆與 delivery 綁定的 completed outcomes；修改 fail
 `cargo test -p agend --test backend_switch` 用正式 Store 建立中斷的 Prepared，再經真 daemon／CLI 驗 status、空紀錄、精確 cancel、舊 ID／agent 拒絕與重啟保留；另以 exchange_once 解碼真 producer 的 Some／None。Failed fixture 不啟動 backend，故不證明成功 prepare 的 canary 准入或實際換版。Lab 負責程序與目錄清理。
 
 `cargo test -p agend --test holder_runtime managed_stop_` 驗換版專用停止的精確身分與 socket 路徑替換反例；全部只啟動自有 sleep fixture，Lab 清理 holders 與 home，沒有模型或主機服務。
+
+13C 回覆排空由 `cargo test -p agend --test client_protocol inbox_delivery_fence_` 跑正式 server 的 socket 背壓；不以 handler 已返回代替整段寫入完成。不證明遠端模型回合結束。

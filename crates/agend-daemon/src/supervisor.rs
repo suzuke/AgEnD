@@ -319,6 +319,7 @@ pub struct Supervisor {
     codex: CodexDriver,
     opencode: crate::driver::opencode::runtime::Runtime,
     pipeline: Option<crate::pipeline::Handle>,
+    delivery_replies: Option<Arc<crate::delivery::Replies>>,
     events: UnboundedSender<Event>,
     watches: BTreeMap<String, Watch>,
     fleet: Arc<Fleet>,
@@ -356,6 +357,7 @@ impl Supervisor {
             runtime,
             codex,
             pipeline: None,
+            delivery_replies: None,
             events,
             watches: BTreeMap::new(),
             fleet,
@@ -387,6 +389,10 @@ impl Supervisor {
 
     pub fn set_pipeline(&mut self, pipeline: crate::pipeline::Handle) {
         self.pipeline = Some(pipeline);
+    }
+
+    pub fn set_delivery_replies(&mut self, replies: Arc<crate::delivery::Replies>) {
+        self.delivery_replies = Some(replies);
     }
 
     pub fn store(&self) -> &SqliteStore {

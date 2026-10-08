@@ -85,7 +85,11 @@ impl Supervisor {
                     .await
                     .map_err(|e| refused(e.to_string()))?
                     .ok_or_else(|| refused("backend switch target is not managed"))?;
-                self.store
+                let replies = self.delivery_replies.as_ref().ok_or_else(|| {
+                    refused("backend switch requires the active server reply tracker")
+                })?;
+                let record = self
+                    .store
                     .prepare_backend_switch(
                         &instance,
                         artifact,
@@ -93,8 +97,21 @@ impl Supervisor {
                         expected_previous.as_deref(),
                     )
                     .await
-                    .map(Some)
-                    .map_err(|e| refused(e.to_string()))
+                    .map_err(|e| refused(e.to_string()))?;
+                let fence = replies.fence(&instance.id);
+                let drained = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                    while !fence.drained() {
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                    }
+                })
+                .await;
+                if drained.is_err() {
+                    return Err(refused(format!(
+                        "switch {} remains prepared; prior delivery replies have not drained; query status before proceeding",
+                        record.id
+                    )));
+                }
+                Ok(Some(record))
             }
         }
     }
