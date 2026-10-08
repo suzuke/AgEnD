@@ -839,8 +839,18 @@ pub fn init_and_doctor(lab: &Lab) -> Result<Vec<String>, String> {
     ensure(
         names
             == [
-                "home", "daemon", "git", "claude", "codex", "opencode", "holders", "disk",
-                "sandbox", "telegram", "service",
+                "home",
+                "daemon",
+                "git",
+                "claude",
+                "codex",
+                "opencode",
+                "authentication",
+                "holders",
+                "disk",
+                "sandbox",
+                "telegram",
+                "service",
             ],
         || format!("doctor --json checks: {names:?}"),
     )?;

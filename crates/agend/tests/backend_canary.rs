@@ -222,6 +222,11 @@ fn native_canary(backend: &str, executable: &str, version: &str, wrong_version: 
             String::from_utf8_lossy(&out.stdout)
         );
         assert_eq!(report["passed"], passed);
+        if passed {
+            doctor_keeps_native_canary_evidence_separate_from_live_auth(
+                &home, &user, backend, version, &report,
+            );
+        }
         assert_eq!(report["cleanup_complete"], true);
         assert!(report["retained_home"].is_null());
         let id = report["run_id"].as_str().unwrap();
@@ -273,6 +278,78 @@ fn native_canary(backend: &str, executable: &str, version: &str, wrong_version: 
         fs::read(user.join(".claude.json")).unwrap(),
         b"preserve trust entries"
     );
+}
+fn doctor_keeps_native_canary_evidence_separate_from_live_auth(
+    home: &Path,
+    user: &Path,
+    backend: &str,
+    version: &str,
+    report: &Value,
+) {
+    use agend_core::protocol::client::{AgentState, InstanceView};
+    fs::create_dir_all(home.join("run")).unwrap();
+    let daemon =
+        agend_testkit::fake_daemon::FakeDaemon::start_at(&home.join("run/daemon.sock")).unwrap();
+    daemon.set_instance(InstanceView {
+        instance_id: "evidence".into(),
+        backend: backend.into(),
+        program: Some(
+            home.join("backends")
+                .join(backend)
+                .join(version)
+                .join("program")
+                .display()
+                .to_string(),
+        ),
+        team_id: "general".into(),
+        working_directory: Some(user.display().to_string()),
+        state: AgentState::Idle,
+    });
+    let diagnose = || {
+        let out = cli(home, user, &["doctor"]);
+        let rows: Vec<Value> = serde_json::from_slice(&out.stdout).unwrap();
+        let row = |name| {
+            rows.iter()
+                .find(|row| row["check"] == name)
+                .unwrap()
+                .clone()
+        };
+        assert_eq!(row("backend/evidence")["status"], "ok");
+        let auth = row("authentication");
+        assert_eq!(auth["status"], "warn");
+        assert!(auth["detail"].as_str().unwrap().starts_with("unknown;"));
+        let evidence = row("compatibility/evidence");
+        assert_eq!(evidence["status"], "warn");
+        (
+            evidence["detail"].as_str().unwrap().to_owned(),
+            evidence["fix"].as_str().unwrap().to_owned(),
+        )
+    };
+    let (detail, fix) = diagnose();
+    assert!(fix.contains("review this historical scope"));
+    assert!(!fix.contains("run an explicitly authorized canary"));
+    assert!(detail.contains("historical canary verified"));
+    assert!(detail.contains(report["agend_sha256"].as_str().unwrap()));
+    assert!(detail.contains(&report["started_at_unix_ms"].to_string()));
+    assert!(detail.contains("test/canary"));
+    assert!(
+        detail.contains(
+            "running daemon build, current login and other capabilities are not verified"
+        )
+    );
+    let path = home
+        .join("backends")
+        .join(backend)
+        .join(version)
+        .join("canary.json");
+    let original = fs::read(&path).unwrap();
+    let mut changed = report.clone();
+    changed["agend_sha256"] = Value::String("0".repeat(64));
+    fs::write(&path, serde_json::to_vec(&changed).unwrap()).unwrap();
+    let (detail, _) = diagnose();
+    assert!(detail.contains("canary not verified"));
+    assert!(!detail.contains("historical canary verified"));
+    fs::write(path, original).unwrap();
 }
 
 fn verify_retained_report(home: &Path, user: &Path, backend: &str, version: &str, report: &Value) {

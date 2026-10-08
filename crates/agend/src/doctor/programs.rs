@@ -10,7 +10,16 @@ pub(super) fn checks(home: &Path, instances: &[InstanceView]) -> Vec<Check> {
     let build = OnceCell::new();
     instances
         .iter()
-        .map(|instance| diagnose(home, instance, &build))
+        .flat_map(|instance| {
+            let mut evidence = check(
+                &format!("compatibility/{}", instance.instance_id),
+                CheckStatus::Warn,
+                "unknown; no verified canary evidence for this configured program".into(),
+                Some("import a fixed backend and run an explicitly authorized canary with dedicated test credentials".into()),
+            );
+            let executable = diagnose(home, instance, &build, &mut evidence);
+            [executable, evidence]
+        })
         .collect()
 }
 
@@ -18,6 +27,7 @@ fn diagnose(
     home: &Path,
     instance: &InstanceView,
     build: &OnceCell<Result<String, String>>,
+    evidence: &mut Check,
 ) -> Check {
     let name = format!("backend/{}", instance.instance_id);
     let warn = |detail: String| {
@@ -72,13 +82,22 @@ fn diagnose(
                 .and_then(|exe| agend_daemon::backend_versions::fingerprint(&exe)));
             let verified = digest.as_ref().map_err(Clone::clone).and_then(|digest|
                 agend_daemon::backend_versions::verify_canary(home, &instance.backend, &artifact.version, digest));
-            match verified {
-                Ok(_) => ok(&name, format!("{}: imported bytes unchanged; current CLI build canary passed; live login not probed", selected.display())),
-                Err(error) => warn(format!("{}: imported bytes unchanged; canary not verified for current CLI build: {error}", selected.display())),
-            }
+            evidence.detail = match verified {
+                Ok(report) => {
+                    evidence.fix = Some("review this historical scope against the running daemon and required capabilities; doctor has no live authentication producer".into());
+                    format!(
+                    "historical canary verified for this CLI build: backend={}, version={}, artifact_sha256={}, agend_sha256={}, platform={}/{}, started_at_unix_ms={}, elapsed_ms={}, requested_model={:?}; running daemon build, current login and other capabilities are not verified",
+                    report.artifact.backend, report.artifact.version, report.artifact.sha256,
+                    report.agend_sha256, report.os, report.arch, report.started_at_unix_ms,
+                    report.elapsed_ms, report.model
+                )
+                },
+                Err(error) => format!("unknown; canary not verified for current CLI build: {error}"),
+            };
+            ok(&name, format!("{}: imported bytes unchanged; executable integrity only", selected.display()))
         }
         Ok(None) => match crate::setup::version_line(&selected) {
-            Ok(version) => warn(format!("{}: {version}; unmanaged executable, no pinned bytes or canary evidence; login not probed", selected.display())),
+            Ok(version) => warn(format!("{}: {version}; version probe only; unmanaged executable, no pinned bytes", selected.display())),
             Err(error) => check(&name, CheckStatus::Fail, format!("{}: {error}", selected.display()),
                 Some("restore the configured executable or switch this instance to a verified imported backend".into())),
         },

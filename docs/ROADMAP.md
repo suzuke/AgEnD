@@ -511,4 +511,6 @@
 
 - 2026-10-08：9a8bcf7 雙平台 CI 已結束失敗，Ubuntu 為 GitHub pipeline WIP 封存案例，使用相同舊 fake-worker。修正後本機 GitHub pipeline 5/5 通過；f762f47 逾時診斷經獨立唯讀覆核無 blocker。批次推送前保留兩平台失敗 log，未宣稱 Linux 已由本機 macOS 重驗取代（feat/g13-install）。
 
-- 2026-10-08：固定提交 8507a05 的 accept install exit 0、CI 37767137610 雙平台成功。安裝 demo 的假 backend canary 17/17，全新 HOME 首任務 t-1 done／唯一 merge／5,994 ms／0 模型呼叫；核自有 HOME／repo／相关測試目錄與 target daemon／fake backend 程序無殘留。保留 active 未合併 worktree／target 及必要證據；真服務／模型／Telegram、登入相容診斷、最終 fresh verifier 與人工驗收仍待完成。
+- 2026-10-08：固定提交 8507a05 的 accept install exit 0、CI 37767137610 雙平台成功。安裝 demo 的假 backend canary 17/17，全新 HOME 首任務 t-1 done／唯一 merge／5,994 ms／0 模型呼叫；核自有 HOME／repo／相關測試目錄與 target daemon／fake backend 程序無殘留。保留 active 未合併 worktree／target 及必要證據；真服務／模型／Telegram、登入相容診斷、最終 fresh verifier 與人工驗收仍待完成。
+
+- 2026-10-08：doctor 分開執行檔完整性、歷史 canary 範圍與 unknown 登入；有效歷史收據不再提示重跑 canary，明示尚未驗證目前 daemon／登入／其他能力。正式假 backend producer 收據與錯 build 回歸 7/7、install_home 9/9、CLI init_and_doctor、workspace clippy、fmt、check-deps 通過，獨立唯讀覆核無 blocker；自有測試目錄／程序未見殘留。此改動未補足 live-auth producer 或整關真環境驗收（feat/g13-install／PR #158）。

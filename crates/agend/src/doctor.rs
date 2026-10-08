@@ -63,6 +63,12 @@ pub fn checks(home: &Path) -> Vec<Check> {
     if let Some(fleet) = &fleet {
         out.extend(programs::checks(home, &fleet.instances));
     }
+    out.push(check(
+        "authentication",
+        CheckStatus::Warn,
+        "unknown; no authoritative live backend authentication observation is available; executable versions, Ready states and historical canaries do not prove current login".into(),
+        Some("verify authentication in a dedicated backend test session; do not reuse shared session credentials for an isolated canary".into()),
+    ));
     out.push(holders(home, fleet.as_ref()));
     out.push(disk(home));
     out.push(sandbox(home));
@@ -259,7 +265,12 @@ fn backend_check(home: &Path, backend: Backend, fleet: Option<&FleetView>) -> Ch
         };
     };
     match setup::version_line(&program) {
-        Ok(line) => ok(name, line),
+        Ok(line) => ok(
+            name,
+            format!(
+                "{line}; operator PATH version probe only; compatibility and login not verified"
+            ),
+        ),
         Err(e) => check(name, CheckStatus::Warn, e, fix),
     }
 }

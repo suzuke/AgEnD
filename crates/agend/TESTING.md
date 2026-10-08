@@ -266,3 +266,5 @@ Claude bridge 的外部 spool 拒絕案例使用獨立空目錄，不把 Lab hom
 `backend_version_monitor` 啟動真 daemon 三次，使用隔離 home 與本機假 CLI：先保存真 probe 產生的歷史 1.0 基準，磁碟改成 2.0，由 daemon worker 自行發現並經 ingest／socket 暴露通知；重啟保留同一 attention，拒絕 agent 確認與錯誤 action，操作員確認後第三次啟動不重現。每次停機重開 SQLite 核持久值，registry 保持停用，最後無 holder。此 suite 納入 `xtask accept install`；不涉及 service manager 註冊或真模型。
 
 Canary 版本探測逾時只記錄 elapsed_ms、budget_ms 與 stdout_bytes（或 unavailable），不記錄 backend 輸出內容；維持原 5 秒上限與整體 deadline，沒有自動重試。原生 process tests 驗證逾時後自有程序與暫存清理。
+
+Doctor 的 PATH backend 列只證明操作員 PATH 的版本 probe；`backend/<instance>` 只描述設定程式／受管 bytes，`compatibility/<instance>` 另列歷史 canary 的 backend、版本、兩個 digest、平台、時間與要求模型。成功歷史仍為 warn，因為沒有當前 daemon build／登入／其他能力的證據；沒有正式 auth producer 時，獨立 `authentication` 列明示 unknown。`install_home` 驗 probe 成功／Idle／缺失收據不變成登入成功；`backend_canary` 用正式 runner 的三 backend 收據驗歷史範圍，再變造 build digest 驗拒絕。daemon 唯讀診斷快照、完整能力矩陣與真登入驗收仍未完成。
