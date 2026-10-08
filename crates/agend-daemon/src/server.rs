@@ -85,11 +85,24 @@ pub fn bind(socket: &Path) -> io::Result<UnixListener> {
     Ok(listener)
 }
 
+/// Read-only Claude observation shared with lifecycle coordination.
+#[derive(Clone)]
+pub struct ClaudeObserver {
+    context: Arc<Context>,
+    bridge: Arc<crate::claude_bridge::ClaudeBridge>,
+}
+impl ClaudeObserver {
+    pub async fn session_idle(&self, id: &str) -> Result<bool, String> {
+        self.bridge.session_idle(&self.context, id).await
+    }
+}
+
 /// A running server; [`Server::stop`] ends it.
 pub struct Server {
     stop: watch::Sender<bool>,
     task: JoinHandle<()>,
     delivery_replies: Arc<crate::delivery::Replies>,
+    claude: ClaudeObserver,
 }
 
 impl Server {
@@ -97,18 +110,28 @@ impl Server {
     pub fn start(listener: UnixListener, socket: PathBuf, ctx: Arc<Context>) -> Server {
         let (stop, stopped) = watch::channel(false);
         let delivery_replies = Arc::new(crate::delivery::Replies::default());
+        let claude = ClaudeObserver {
+            context: ctx.clone(),
+            bridge: Arc::default(),
+        };
         let task = tokio::spawn(accept_loop(
             listener,
             socket,
             ctx,
             stopped,
             delivery_replies.clone(),
+            claude.bridge.clone(),
         ));
         Server {
             stop,
             task,
             delivery_replies,
+            claude,
         }
+    }
+
+    pub fn claude_observer(&self) -> ClaudeObserver {
+        self.claude.clone()
     }
 
     pub fn delivery_replies(&self) -> Arc<crate::delivery::Replies> {
@@ -129,11 +152,11 @@ async fn accept_loop(
     ctx: Arc<Context>,
     mut stopped: watch::Receiver<bool>,
     delivery_replies: Arc<crate::delivery::Replies>,
+    claude: Arc<crate::claude_bridge::ClaudeBridge>,
 ) {
     let hub =
         TerminalHub::with_codex_driver(ctx.runtime.clone(), ctx.fleet.clone(), ctx.codex.clone())
             .with_switch_delivery(ctx.store.clone(), delivery_replies.clone());
-    let claude = Arc::new(crate::claude_bridge::ClaudeBridge::default());
     let startup = tokio::spawn(crate::claude_bridge::startup::run(
         ctx.clone(),
         claude.clone(),

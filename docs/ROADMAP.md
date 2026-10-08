@@ -396,3 +396,5 @@
 - 2026-10-08：13C 將 Claude startup 按鍵納入暫停／本機排空：Prepared 在 reservation 同交易拒絕新鍵，原操作在 server tracker 追蹤至返回；Committed／Restoring 允許新 launch 走啟動選單。SQLite 9 項及原生 Prepared 無鍵／正式 cancel 後三鍵測試通過；完整 startup 並行 5 過 6 失敗（holder 5 秒未啟動），序列 11 項通過，保留兩份證據，不宣稱並行穩定。Claude 閒置證明與 supervisor 完整換版仍待接入（feat/g13-install，未合併）。
 
 - 2026-10-08：定位私有 executable 首次執行延遲：8 份新複本並行 --version 最慢 5.734 秒，暖啟動 7–13 ms，皆 exit 0。daemon 現在於準備階段對已驗 binding 的私有 launcher 執行 --version（30 秒等待、清空環境、前後核身分），不延長 holder 5 秒連線期限。先前失敗的 startup 預設並行 11 項及 terminal hub 預設並行 10 項全過；launcher 原生成功／失敗／逾時／替換拒絕、fmt／clippy／check-deps 通過，暫存已清。初版單元成功案例 100 ms 太短，改 5 秒，故意逾時案例仍 100 ms；保留原失敗證據。完整最新 head CI 尚未完成（feat/g13-install，未合併）。
+
+- 2026-10-08：13C Claude 閒置觀察綁定 live hook 的 session 與原 holder connection；重連、工具活動、session 結束撤銷舊候選，初始 Ready 另核完整畫面與 generation。原生 hook／holder 反例通過，startup 回歸 11 項通過，最終 clippy／check-deps 通過；尚未接 supervisor 換版編排。21cd574 的兩平台 CI 均停在 xtask 兩個舊 Hello 清單斷言，修正後 xtask 42 項本機通過，完整新 head CI 待驗（feat/g13-install，未合併）。

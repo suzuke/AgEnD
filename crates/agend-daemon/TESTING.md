@@ -275,3 +275,5 @@ OpenCode 即時閒置查詢的跨程序驗證在 `agend/tests/opencode_bridge.rs
 `backend_switch::prepared_pauses_startup_keys_without_blocking_target_activation` 核 Prepared 不消耗 key intent、cancel 可繼續、Committed 新 startup 可 reservation 而舊快照拒絕。原生按鍵驗證在 `agend` 的 `claude_startup::startup_prepared_switch_holds_native_keys_until_operator_cancels`。
 
 `backend_versions::launcher::tests::native_launcher_success_failure_timeout_and_changed_identity` 使用原生 shell 子程序核 launcher 參數、失敗、逾時清理與修改後拒絕。macOS 新複本並行首次執行另保存冷／暖啟動計時；功能驗證重跑 `agend --test claude_bridge claude_startup::` 的預設並行模式，不以序列結果代替。
+
+Claude observer 的原生測試在 `agend/tests/claude_bridge.rs` 的 `claude_idle_observation_requires_live_hook_session_and_original_holder_connection`；實際 server／holder／hook helper 驗穩定期、busy、錯 session、重連與只有 Stop 不足以重綁。

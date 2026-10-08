@@ -149,9 +149,15 @@ pub(crate) async fn run(
                 {
                     if known == Some(Prompt::Ready) {
                         let generation = frame.as_ref().unwrap().generation.clone();
-                        if state.ready_generation.as_ref() != Some(&generation) {
+                        if state.ready_generation.as_ref() != Some(&generation)
+                            || state
+                                .idle_connection
+                                .as_ref()
+                                .is_none_or(|c| !c.is_current())
+                        {
                             state.idle = Some(Instant::now());
                             state.ready_generation = Some(generation);
+                            state.idle_connection = connection.clone();
                         }
                     } else {
                         state.idle = None;

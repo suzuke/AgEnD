@@ -237,3 +237,5 @@ OpenCode `session_idle` 重讀 REST session 狀態，查詢前後核 holder／in
 換版 Prepared 也暫停 Claude startup key reservation；reservation 與暫停檢查同 SQLite 交易，既有按鍵操作納入 server 排空追蹤。Committed／Restoring 允許新 launch 完成啟動選單，否則無法驗 readiness。操作逾時仍是未知結果，不能因此推論 backend 已結束。
 
 私有 launcher 在 daemon 準備階段先以清空環境執行 `--version`，最多等待 30 秒，前後核 executable binding。首次執行可能耗在 OS 載入／驗證，不能挪用 holder 的 5 秒 socket 連線期限；失敗停止 daemon 準備，逾時只清理自己的短命 child。
+
+`Server::claude_observer` 提供只讀 session_idle：本次連線的 SessionStart／UserPromptSubmit 與 Stop 候選、5 秒穩定期、live screen 無 hard gate，查詢後再核 session／revision／連線。重連不能沿用舊候選；初始 Ready 仍須完整錄製規則。這是觀察，不代替暫停排空、managed launch 身分及 supervisor 停止授權。

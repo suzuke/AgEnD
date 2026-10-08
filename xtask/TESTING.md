@@ -40,6 +40,8 @@ cargo test -p xtask
 
 `cargo xtask demo adapters` 先 build agend／testkit binaries 與 fake_codex，再共用 Claude driver／bridge、OpenCode driver／bridge、Telegram notifier／lifecycle／shared-read／unknown／doctor 原生測試。任何 cargo 子程序非 0 都使 demo 失敗；最後明示 GitHub forge 與剩餘真測不在本 demo 認證範圍。`accept adapters` 的 crate 清單包含 G4 跨越的 core／daemon／client／tui／testkit／agend；child 測試入口仍由父測試執行。
 
+目前 Hello wire shape 精確核對支援 1.8、1.7、1.6、1.5、1.4、1.3；凍結舊版解碼器仍保留，版本清單變更不移除舊版相容測試。
+
 ## 用到的假實作
 
 - 無。
