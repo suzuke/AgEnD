@@ -115,3 +115,5 @@ cargo xtask accept core
 `cargo xtask release --out /absolute/new/directory` 要求乾淨的已提交 checkout，以 `--locked --release` 建置本機 target 的 agend，執行 `--version` 核對 Cargo metadata，再產生 tar.gz、SHA256SUMS 與 manifest.json（版本、target、source commit、binary／archive SHA-256）。支援 macOS／Linux 的 x86_64／aarch64 native build，沒有交叉執行或假稱跨平台驗證。輸出目錄必須不存在且位於 checkout 外。
 
 壓縮檔含 executable、README 與 LICENSE；暫存 payload 完成後移除。失敗可能保留尚未完成的輸出目錄，必須檢查後清理；不自動重用。此命令只打包，不建立 tag、不改服務、不上傳 GitHub。Brew／發布 workflow 與全新 HOME 五分鐘驗收仍待完成。
+
+`.github/workflows/release.yml` 可手動建置 macOS／Linux × Intel／ARM64 原生產物，只有 contents:read 與 14 天 Actions artifacts，沒有公開發布。`scripts/verify_release.py` 核來源提交／target、archive 與 binary 雜湊、精確 tar 清單，再於暫存 HOME 執行解壓 binary 的 --version。runner 版本是建置環境，不表示已驗所有較舊 OS；四平台實跑與 Brew 接線仍待驗證。

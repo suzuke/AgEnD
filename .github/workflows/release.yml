@@ -1,0 +1,58 @@
+name: release-artifacts
+
+# Deliberately builds only: publishing a GitHub Release is a separate action.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+          - runner: macos-14
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    env:
+      EXPECTED_TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set isolated output paths
+        shell: bash
+        run: |
+          echo "CARGO_TARGET_DIR=$RUNNER_TEMP/agend-release-target" >> "$GITHUB_ENV"
+          echo "RELEASE_OUT=$RUNNER_TEMP/agend-release" >> "$GITHUB_ENV"
+      - run: rustup toolchain install
+      - name: Check native architecture
+        shell: bash
+        run: |
+          test "$(rustc -vV | sed -n 's/^host: //p')" = "$EXPECTED_TARGET"
+      - run: cargo xtask check-deps
+      - name: Build locked native archive
+        run: cargo xtask release --out "$RELEASE_OUT"
+      - name: Verify the extracted artifact
+        run: >-
+          python3 -B scripts/verify_release.py
+          --directory "$RELEASE_OUT"
+          --commit "$GITHUB_SHA"
+          --target "$EXPECTED_TARGET"
+      - name: Reject corrupted copies of the native artifact
+        run: python3 -B scripts/test_verify_release.py "$RELEASE_OUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agend-${{ matrix.target }}-${{ github.sha }}
+          path: ${{ env.RELEASE_OUT }}/
+          if-no-files-found: error
+          retention-days: 14

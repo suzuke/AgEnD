@@ -438,3 +438,5 @@
 - 2026-10-08：13E 新增 `xtask release --out` native locked release 打包，要求乾淨提交／新輸出目錄，核版本並附 source commit、binary／archive SHA-256；不建立 tag 或公開發布。xtask 45 項、fmt／clippy／check-deps 通過；整組測試找出並修正 1.9 offer 的兩處舊快照，保留初輪失敗 log。正式 release binary 打包、brew／workflow、全新 HOME 驗收仍待驗證（feat/g13-install，未合併）。
 
 - 2026-10-08：13E 首次正式 macOS release build 成功，但獨立解壓檢查拒絕 AppleDouble `._` metadata；打包停用 COPYFILE metadata 並新增精確 archive 清單測試。另依雙平台 CI 修正剩餘 1.9 協商斷言，Claude busy-control 1、CLI 19、terminal hub 10、xtask 45 項與 clippy／check-deps 通過；正式修正版安裝包待重產驗證，未公開發布（feat/g13-install，未合併）。
+
+- 2026-10-08：13E 修正版 macOS ARM64 release `869a664` 已核 archive 精確清單、雙雜湊與解壓版本；新增手動四平台 native Actions 打包（只保留 artifacts、不公開發布）及共用 verifier。真安裝包 round-trip 與 7 種竄改拒絕通過，actionlint 通過；初版 YAML／runner context 錯誤已修正。四平台遠端建置、Brew、全新 HOME 與整關驗收仍待完成（feat/g13-install，未合併）。
