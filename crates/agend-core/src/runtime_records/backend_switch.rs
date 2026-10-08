@@ -9,8 +9,18 @@ use serde::{Deserialize, Serialize};
 pub enum BackendSwitchPhase {
     Prepared,
     Cancelled,
+    /// Target program selected, but native activation is not yet verified.
     Committed,
+    Activated,
+    /// Original program restored, but its new native launch is not yet verified.
+    Restoring,
     RolledBack,
+}
+
+impl BackendSwitchPhase {
+    pub fn pending(self) -> bool {
+        matches!(self, Self::Prepared | Self::Committed | Self::Restoring)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

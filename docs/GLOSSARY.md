@@ -246,4 +246,4 @@ SQLite 中每個 task 的固定 repository ID、branch、nonce 與 PR number；�
 
 ## 版本切換記錄（BackendSwitch）
 
-單一 instance 最近一次明確版本切換的持久記錄，保存原 managed launch、目標 artifact／program、當時原生 session 與 Prepared／Cancelled／Committed／RolledBack 階段。資料庫的 program 與階段一起更新；它不代表 holder 已停止或 canary 已通過，這兩項由 supervisor 核對。
+單一 instance 最近一次明確版本切換的持久記錄，保存原 managed launch、目標 artifact／program、當時原生 session 與 Prepared／Cancelled／Committed／Activated／Restoring／RolledBack 階段。資料庫的 program 與階段一起更新；Committed／Restoring 仍暫停投遞，完成新啟動驗證才記 Activated／RolledBack。記錄本身不代表 holder 已停止或 canary 已通過，這兩項由 supervisor 核對。

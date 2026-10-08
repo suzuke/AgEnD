@@ -164,3 +164,5 @@ holder 協商測試核 1.3 優先、1.2／1.1 仍可選；啟動綁定的狀態�
 受管啟動紀錄是跨層資料型別，SQLite 持久化與 CAS／instance 重建反例在 daemon 的 `tests/managed_launch.rs` 驗證；core 維持 no-std 與 serde 邊界。
 
 1.8 BackendSwitchCommand／CommandResult 的原生 producer 互通由 `agend/tests/backend_switch.rs` 覆蓋；儲存 CAS／取消由 daemon 的 backend_switch 測試覆蓋。
+
+BackendSwitch 階段的消費者驗證在 daemon `tests/backend_switch.rs`：以正式 SQLite 的三 backend 投遞 reservation 與重開檢查 pending 階段不提前放行，未以 enum 名稱或 JSON round-trip 代替行為驗證。

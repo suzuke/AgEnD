@@ -147,3 +147,5 @@ holder 協定 1.3 加入 `SpawnBound`／`GetLaunchBinding` 與不含 argv／環�
 `ClaudeReservation::Paused` 表示版本切換暫停新 attempt；它不授權寫入，也不將訊息判為失敗。
 
 Client protocol 1.8 新增操作員 BackendSwitchCommand（prepare／status／cancel）與可空的 BackendSwitch 結果。Prepare 只建立持久準備狀態，型別不代表新版已啟動。
+
+`BackendSwitchPhase::pending()` 定義 Prepared／Committed／Restoring 仍屬進行中；選定路徑不代表啟動成功，Activated／RolledBack 才表示呼叫者完成啟動驗證。實際 I/O 與原子狀態轉移在 daemon。

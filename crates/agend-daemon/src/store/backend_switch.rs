@@ -1,7 +1,9 @@
 //! Atomic program transition and rollback records. The supervisor must verify
 //! canary admission and stop the exact old holder before committing either way.
 use super::{SqliteStore, StoreError, instances, managed_launch};
-use agend_core::runtime_records::{BackendSwitch, BackendSwitchPhase, Instance};
+use agend_core::runtime_records::{
+    BackendSwitch, BackendSwitchPhase, Instance, InstanceStatus, ManagedLaunchIntent,
+};
 use agend_core::setup::backend::{ImportedBackend, valid_version};
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -31,9 +33,9 @@ fn read(conn: &Connection, instance: &str) -> Result<Option<BackendSwitch>, Stor
     .transpose()
 }
 /// Read on the same DB thread/transaction as the attempt reservation. Existing
-/// receipts remain valid; only new outbound content is held while Prepared.
+/// receipts remain valid; new content is held until activation is verified.
 pub(crate) fn delivery_paused(conn: &Connection, instance: &str) -> Result<bool, StoreError> {
-    Ok(read(conn, instance)?.is_some_and(|r| r.phase == BackendSwitchPhase::Prepared))
+    Ok(read(conn, instance)?.is_some_and(|r| r.phase.pending()))
 }
 
 fn write(conn: &Connection, record: &BackendSwitch) -> Result<(), StoreError> {
@@ -91,9 +93,7 @@ impl SqliteStore {
             }
             let old = read(&tx, &instance.id)?;
             if old.as_ref().map(|s| s.id.as_str()) != expected.as_deref()
-                || old
-                    .as_ref()
-                    .is_some_and(|s| s.phase == BackendSwitchPhase::Prepared)
+                || old.as_ref().is_some_and(|s| s.phase.pending())
             {
                 return Err(invalid("backend switch changed or is still pending"));
             }
@@ -170,7 +170,7 @@ impl SqliteStore {
             let (required, phase, from, to) = if rollback {
                 (
                     BackendSwitchPhase::Committed,
-                    BackendSwitchPhase::RolledBack,
+                    BackendSwitchPhase::Restoring,
                     current.target_program.clone(),
                     current.previous.configured_program.clone(),
                 )
@@ -206,6 +206,69 @@ impl SqliteStore {
                 "UPDATE instances SET program=?2 WHERE id=?1",
                 params![current.instance_id, to],
             )?;
+            current.phase = phase;
+            write(&tx, &current)?;
+            tx.commit()?;
+            Ok(current)
+        })
+        .await
+    }
+
+    /// The caller verifies native readiness and launch binding first, serialized
+    /// with lifecycle operations. This transaction only validates that its exact
+    /// instance/launch snapshot still applies before releasing queued delivery.
+    /// Program commit alone is never activation evidence.
+    pub async fn finish_backend_switch(
+        &self,
+        expected: &BackendSwitch,
+        ready: &Instance,
+        launch: &ManagedLaunchIntent,
+    ) -> Result<BackendSwitch, StoreError> {
+        let expected = expected.clone();
+        let ready = ready.clone();
+        let launch = launch.clone();
+        self.call(move |conn| {
+            let tx = conn.transaction()?;
+            let mut current = read(&tx, &expected.instance_id)?
+                .ok_or_else(|| invalid("backend switch missing"))?;
+            if current != expected {
+                return Err(invalid(
+                    "backend switch changed; reconcile before finishing",
+                ));
+            }
+            let (program, artifact, phase) = match current.phase {
+                BackendSwitchPhase::Committed => (
+                    &current.target_program,
+                    &current.target,
+                    BackendSwitchPhase::Activated,
+                ),
+                BackendSwitchPhase::Restoring => (
+                    &current.previous.configured_program,
+                    &current.previous.artifact,
+                    BackendSwitchPhase::RolledBack,
+                ),
+                _ => return Err(invalid("backend switch is not awaiting activation")),
+            };
+            if ready.id != current.instance_id
+                || instances::get(&tx, &current.instance_id)?.as_ref() != Some(&ready)
+                || ready.status != InstanceStatus::Running
+                || !ready.session_started
+                || ready.agent_pid.is_none_or(|pid| pid <= 1)
+                || !config_matches(&ready, &current, program)
+                || managed_launch::get(&tx, &current.instance_id)?.as_ref() != Some(&launch)
+                || launch.binding == current.previous.binding
+                || launch.instance_id != current.instance_id
+                || launch.artifact != *artifact
+                || launch.configured_program != *program
+                || launch.configured_args != ready.args
+                || launch.working_directory != ready.working_directory
+                || launch.delivery != ready.delivery
+                || launch.session_id != ready.session_id
+            {
+                return Err(invalid(
+                    "backend activation snapshot or launch identity changed",
+                ));
+            }
             current.phase = phase;
             write(&tx, &current)?;
             tx.commit()?;

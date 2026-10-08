@@ -167,3 +167,5 @@ cat docs/gates/gate-13-install.md
 - 2026-10-08：13C 新增 stop_reserved，停止前核 holder PID，並在同一連線核持久 UUID／instance／agent PID 後 Shutdown；錯身分、legacy 與替代 holder 保留。三項原生反例含 binding 回覆時替換 socket 路徑，核另一 holder 存活；holder runtime 全 10 項、fmt／clippy／check-deps 通過，g6／bound-stop 測試暫存無殘留。回合結束與在途排空、supervisor 換版編排仍待接入（feat/g13-install，未合併）。
 
 - 2026-10-08：13C prepare 在持久暫停投遞後，等待先前 Claude／inbox 回覆完成 socket 寫入；逾時保留 Prepared，後來的輪詢不延長排空範圍。原生背壓完整送出／斷線／逾時測試、daemon 185 項（1 項既有 ignored）、switch／channel／Stop 回歸通過。這只證明本機回覆結束，尚不代表 backend 回合完成或換版可安全啟動。遠端 c263492 兩平台失敗均為測試仍預期協定 1.7；更新目前 daemon 的 1.8 斷言後，Claude 控制權測試與 terminal hub 8 項通過，保留舊版相容案例。client protocol 全 10 項及 fmt／clippy／check-deps 通過，自有 g8／g12b／g11h／g11stop／switch-rpc 暫存均不存在（feat/g13-install，未合併）。
+
+- 2026-10-08：13C 將改 program 與啟動完成分開：Committed／Restoring 跨重開維持 push／inbox 暫停，精確 Running／PID／session／新 managed launch 與 artifact 快照才可完成為 Activated／RolledBack；進行中不可被新 prepare 覆蓋。三 backend × 啟用／回滾 Store 反例及既有切換共 8 項、core 149 項（2 項既有 ignored）、daemon 單元 185 項（1 項既有 ignored）、CLI 回歸與 fmt／clippy／check-deps 通過。這是持久狀態契約，真 native readiness 與 supervisor 切換編排仍待接入（feat/g13-install，未合併）。

@@ -263,3 +263,5 @@ Claude outcome：`driver::claude::outcome` 使用先前真測 ACK/PostToolUse/St
 `agend/tests/holder_runtime.rs` 的三項 `managed_stop_` 用真 SQLite 意圖及 holder producer 驗 UUID／holder PID／agent PID 不符拒絕、已消失對帳、替代與 legacy holder 保留。原生 proxy 在回傳 LaunchBinding 時替換 socket 路徑，確認 Shutdown 仍只送到原連線且另一 holder 存活；不手製 holder wire reply。
 
 `client_protocol::inbox_delivery_fence_tracks_complete_disconnected_and_timed_out_socket_writes` 經正式 Store／server 與 Unix socket，用 20 筆完整訊息製造背壓，驗完整接收、對端斷線、正式 5 秒寫入逾時都釋放回覆範圍；同一 instance 後來的新回覆不延長舊範圍。測試 producer 使用原生 ClientRequest；逾時的截斷回覆不視為完整訊息。
+
+`backend_switch::commit_and_restore_keep_all_delivery_paused_until_exact_activation_snapshot` 以三 backend × 啟用／回滾路徑，重開正式 SQLite 後驗 channel／Stop、Codex、OpenCode 與 inbox 保持暫停；精確新意圖／Running 快照才放行。過期 PID、舊 launch、不同 artifact、第二次 finish／新 prepare／cancel 都不能提前釋放；這是 Store 契約，不是實際 backend 啟動驗收。

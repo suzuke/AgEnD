@@ -106,7 +106,7 @@ fn program_and_phase_survive_reopen_and_rollback_without_replaying_stale_request
         Some(committed.clone())
     );
     let restored = block_on(store.commit_backend_switch(&committed, true)).unwrap();
-    assert_eq!(restored.phase, BackendSwitchPhase::RolledBack);
+    assert_eq!(restored.phase, BackendSwitchPhase::Restoring);
     assert_eq!(
         block_on(store.instance(&instance.id)).unwrap().unwrap(),
         instance
@@ -462,4 +462,229 @@ fn prepared_switch_holds_inbox_reads_without_hiding_operator_history() {
             .unwrap(),
         expected
     );
+}
+
+/// Native Store produces both the saved reservation and the observed snapshot.
+/// These fixtures assert persistence rules, not actual process readiness.
+fn next_launch(
+    store: &SqliteStore,
+    artifact: ImportedBackend,
+) -> (Instance, agend_core::runtime_records::ManagedLaunchIntent) {
+    let instance = block_on(store.instance("switch-1")).unwrap().unwrap();
+    let previous = block_on(store.managed_launch(&instance.id))
+        .unwrap()
+        .unwrap();
+    let launch = HolderLaunch {
+        instance_id: instance.id.clone(),
+        backend: instance.backend,
+        executable: instance.program.clone(),
+        args: instance.args.clone(),
+        working_directory: instance.working_directory.clone(),
+    };
+    let intent = block_on(store.prepare_managed_launch(
+        &instance,
+        &launch,
+        artifact,
+        Some(&previous.binding),
+    ))
+    .unwrap();
+    block_on(store.set_agent_pid(&instance.id, Some(23456))).unwrap();
+    (
+        block_on(store.instance(&instance.id)).unwrap().unwrap(),
+        intent,
+    )
+}
+
+#[test]
+fn commit_and_restore_keep_all_delivery_paused_until_exact_activation_snapshot() {
+    use agend_core::{
+        policy::busy::BusyLevel,
+        runtime_records::{ClaudeReservation, ClaudeRoute, NewClaudeDelivery, NewMessage},
+    };
+    for backend in [Backend::Claude, Backend::Codex, Backend::Opencode] {
+        for rollback in [false, true] {
+            let root = TempDir::new("backend-switch-activation").unwrap();
+            let store = SqliteStore::open(root.path(), 0).unwrap();
+            let (instance, target) = fixture_backend(&store, backend);
+            block_on(store.claim_message(
+                &NewMessage {
+                    id: "pending".into(),
+                    from_instance: "operator".into(),
+                    to_instance: instance.id.clone(),
+                    task_id: None,
+                    body: "hold until native activation".into(),
+                    level: BusyLevel::Queue,
+                },
+                0,
+            ))
+            .unwrap();
+            let prepared = block_on(store.prepare_backend_switch(
+                &instance,
+                target.clone(),
+                "/managed/new/program",
+                None,
+            ))
+            .unwrap();
+            let committed = block_on(store.commit_backend_switch(&prepared, false)).unwrap();
+            let assert_paused = |store: &SqliteStore| {
+                assert!(block_on(store.inbox_messages(&instance.id, None, 20)).is_err());
+                match backend {
+                    Backend::Claude => {
+                        for route in [ClaudeRoute::Channel, ClaudeRoute::Stop] {
+                            assert_eq!(
+                                block_on(store.reserve_claude_delivery(
+                                    NewClaudeDelivery {
+                                        message_id: "pending".into(),
+                                        delivery_id: "22222222-2222-4222-8222-222222222222".into(),
+                                        instance_id: instance.id.clone(),
+                                        session_id: instance.session_id.clone().unwrap(),
+                                        route,
+                                    },
+                                    1
+                                ))
+                                .unwrap(),
+                                ClaudeReservation::Paused
+                            );
+                        }
+                    }
+                    Backend::Codex => {
+                        assert!(!block_on(store.begin_codex_attempt("pending", 1)).unwrap())
+                    }
+                    Backend::Opencode => assert!(
+                        !block_on(store.begin_opencode_attempt(
+                            "pending",
+                            &instance.id,
+                            instance.session_id.as_deref().unwrap(),
+                            "native-message",
+                            1,
+                        ))
+                        .unwrap()
+                    ),
+                }
+                assert_eq!(
+                    block_on(store.message("pending"))
+                        .unwrap()
+                        .unwrap()
+                        .attempted_at_unix_ms,
+                    None
+                );
+            };
+            assert_paused(&store);
+            let (record, artifact) = if rollback {
+                (
+                    block_on(store.commit_backend_switch(&committed, true)).unwrap(),
+                    prepared.previous.artifact.clone(),
+                )
+            } else {
+                (committed, target.clone())
+            };
+            drop(store);
+            let store = SqliteStore::open(root.path(), 2).unwrap();
+            assert_paused(&store);
+            let current = block_on(store.instance(&instance.id)).unwrap().unwrap();
+            assert!(
+                block_on(store.prepare_backend_switch(
+                    &current,
+                    target.clone(),
+                    "/managed/third/program",
+                    Some(&record.id),
+                ))
+                .is_err()
+            );
+            assert!(block_on(store.cancel_backend_switch(&record)).is_err());
+            // Restoring the program does not authorize the original dead launch.
+            assert!(
+                block_on(store.finish_backend_switch(&record, &current, &prepared.previous))
+                    .is_err()
+            );
+            // A real replacement reservation with the wrong bytes must fail
+            // even though both the supplied and stored launch match exactly.
+            let mut foreign = artifact.clone();
+            foreign.sha256 = "d".repeat(64);
+            let (foreign_ready, foreign_launch) = next_launch(&store, foreign);
+            assert!(
+                block_on(store.finish_backend_switch(&record, &foreign_ready, &foreign_launch))
+                    .is_err()
+            );
+            assert_paused(&store);
+            block_on(store.set_agent_pid(&instance.id, None)).unwrap();
+            let (ready, launch) = next_launch(&store, artifact);
+            let mut third = target.clone();
+            third.version = "3".into();
+            third.sha256 = "e".repeat(64);
+            assert!(
+                block_on(store.prepare_backend_switch(
+                    &ready,
+                    third,
+                    "/managed/third/program",
+                    Some(&record.id),
+                ))
+                .is_err(),
+                "an unfinished activation was overwritten"
+            );
+            let mut wrong = launch.clone();
+            wrong.artifact.sha256 = "c".repeat(64);
+            assert!(block_on(store.finish_backend_switch(&record, &ready, &wrong)).is_err());
+            let mut stale = ready.clone();
+            stale.agent_pid = Some(23457);
+            assert!(block_on(store.finish_backend_switch(&record, &stale, &launch)).is_err());
+            block_on(store.set_agent_pid(&instance.id, None)).unwrap();
+            assert!(block_on(store.finish_backend_switch(&record, &ready, &launch)).is_err());
+            assert_paused(&store);
+            block_on(store.set_agent_pid(&instance.id, ready.agent_pid)).unwrap();
+            let finished = block_on(store.finish_backend_switch(&record, &ready, &launch)).unwrap();
+            assert_eq!(
+                finished.phase,
+                if rollback {
+                    BackendSwitchPhase::RolledBack
+                } else {
+                    BackendSwitchPhase::Activated
+                }
+            );
+            assert!(!finished.phase.pending());
+            assert!(block_on(store.finish_backend_switch(&record, &ready, &launch)).is_err());
+            drop(store);
+            let store = SqliteStore::open(root.path(), 3).unwrap();
+            assert_eq!(
+                block_on(store.backend_switch(&instance.id)).unwrap(),
+                Some(finished)
+            );
+            assert_eq!(
+                block_on(store.inbox_messages(&instance.id, None, 20))
+                    .unwrap()
+                    .unwrap()
+                    .len(),
+                1
+            );
+            match backend {
+                Backend::Claude => assert!(matches!(
+                    block_on(store.reserve_claude_delivery(
+                        NewClaudeDelivery {
+                            message_id: "pending".into(),
+                            delivery_id: "22222222-2222-4222-8222-222222222222".into(),
+                            instance_id: instance.id.clone(),
+                            session_id: instance.session_id.clone().unwrap(),
+                            route: ClaudeRoute::Channel,
+                        },
+                        4
+                    ))
+                    .unwrap(),
+                    ClaudeReservation::Started(_)
+                )),
+                Backend::Codex => {
+                    assert!(block_on(store.begin_codex_attempt("pending", 4)).unwrap())
+                }
+                Backend::Opencode => assert!(
+                    block_on(store.begin_opencode_attempt(
+                        "pending",
+                        &instance.id,
+                        instance.session_id.as_deref().unwrap(),
+                        "native-message",
+                        4,
+                    ))
+                    .unwrap()
+                ),
+            }
+        }
+    }
 }

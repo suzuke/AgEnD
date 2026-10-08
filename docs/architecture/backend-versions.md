@@ -115,7 +115,7 @@ Runtime 保留該次意圖的 UUID，首次啟動核對 Spawned 與 GetLaunchBin
 
 ## 切換記錄（儲存層已實作，操作流程待接）
 
-Migration 0019 保存每 instance 最近一次 BackendSwitch；prepared 只保存原啟動意圖與目標，不改 program。commit／rollback 在同一 SQLite transaction 核對完整 switch 記錄、原設定與 agent_pid 已清除，再一起改 program 與 phase。過期請求不能覆寫目前狀態；不明結果先讀回，不盲目重送。新 prepare 以先前 switch ID 做 CAS，不能覆蓋未提交的 prepared；明確移除 instance 時 cascade。此層不取代 supervisor 的 canary、idle／派工暫停、精確 holder 停止及重啟驗證，準備／查詢／取消 CLI 已接入，完整升級／回退流程仍未完成。
+Migration 0019 保存每 instance 最近一次 BackendSwitch；prepared 只保存原啟動意圖與目標，不改 program。commit／rollback 在同一 SQLite transaction 核對完整 switch 記錄、原設定與 agent_pid 已清除，再一起改 program 與 phase。過期請求不能覆寫目前狀態；不明結果先讀回，不盲目重送。新 prepare 以先前 switch ID 做 CAS，不能覆蓋 Prepared／Committed／Restoring 的進行中切換；明確移除 instance 時 cascade。此層不取代 supervisor 的 canary、idle／派工暫停、精確 holder 停止及重啟驗證，準備／查詢／取消 CLI 已接入，完整升級／回退流程仍未完成。
 
 ## 準備、查詢與取消（client 1.8）
 
@@ -133,3 +133,6 @@ agend backend switch cancel <instance> --switch-id <id>
 換版停止原語 `HolderRuntime::stop_reserved` 要求持久意圖及精確 holder／agent PID。查 LaunchBinding 與 Shutdown 使用同一連線，後續 socket 路徑替換不會把停止送到新 peer；回覆不符或 holder PID 改變時保留程序，結果不明須對帳。呼叫前的回合結束證據、在途排空及新啟動序列化仍由 supervisor 負責，尚未完成。
 
 Prepare 在 SQLite 暫停新 reservation 後，捕捉已開始的 Claude／inbox server 回覆，最多等待 10 秒直到既有 handler／socket write 全部完成或連線任務結束。其後的空輪詢不加入舊範圍；逾時仍保存 Prepared，呼叫者查 status 對帳。ACK、backend 完成與 worker 停止是後續獨立條件；socket 已寫完不代表模型已消費內容。
+
+
+切換持久狀態分成 Prepared（尚未改路徑）、Committed（已選新版、待啟動驗證）、Activated（新版已驗）、Restoring（已恢復舊路徑、待重新啟動驗證）、RolledBack（舊版已重新驗證）與 Cancelled。前三種進行中狀態 Prepared／Committed／Restoring 都暫停新投遞，重開 DB 不會解除。`finish_backend_switch` 以精確切換紀錄、Running instance／PID／session 及新 launch UUID 做 CAS，檢查 artifact 與設定後才釋放；不能以原本已停止的 launch 意圖宣告回滾成功。呼叫者仍須先驗真正 native readiness，Store 的快照驗證本身不是程序存活證據；supervisor 啟用／回滾接線尚未完成。

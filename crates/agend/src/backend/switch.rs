@@ -102,7 +102,11 @@ pub fn run(command: Command) -> Result<Output, Failure> {
                 BackendSwitchPhase::Prepared =>
                     "prepared; new delivery paused; target not activated",
                 BackendSwitchPhase::Cancelled => "cancelled; new delivery resumed",
-                BackendSwitchPhase::Committed => "committed",
+                BackendSwitchPhase::Committed =>
+                    "target selected; activation pending; delivery paused",
+                BackendSwitchPhase::Activated => "activated; new delivery resumed",
+                BackendSwitchPhase::Restoring =>
+                    "original selected; activation pending; delivery paused",
                 BackendSwitchPhase::RolledBack => "rolled back",
             }
         ),
