@@ -71,7 +71,7 @@
 
    - [ ] 通過
 
-3. 解除安裝（這時的 `agend` 是第 1 步裝好的正式版；v2 服務標籤暫定 `dev.agend.daemon`，確切值開工時細化）。
+3. 解除安裝（這時的 `agend` 是第 1 步裝好的固定驗收版本，AGEND_HOME 必須指向該次專用測試安裝）。執行前先核對 `agend service plan --json` 的 home／service_path 與安裝收據；不對既有日常安裝照抄此步。
 
    ```bash
    agend uninstall
@@ -81,7 +81,7 @@
    systemctl --user list-units --all | grep -F agend-daemon.service; echo "service matches: $?"
    ```
 
-   應該看到：刪資料前先問；之後服務檢查印 `service matches: 1`（grep 找不到東西），agent PATH 的 shim 不見了。只比對 v2 的標籤，所以 v1 的 `com.agend-terminal.daemon` 不會被算進來。
+   應該看到：自有服務與 shim 移除，工作資料保留；服務檢查印 `service matches: 1`（grep 找不到東西）。預設不詢問刪資料，也不刪工作資料。若本次另有刪除資料驗收，須在安裝收據仍存在時，改用 `agend uninstall --delete-data --confirm-home /該次專用測試home`；不得先完成一般 uninstall 再補刪除旗標。只比對 v2 標籤，不會把 v1 的 `com.agend-terminal.daemon` 算進來。
 
    - [ ] 通過
 
