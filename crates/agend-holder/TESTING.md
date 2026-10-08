@@ -80,3 +80,7 @@
 ```
 
 Structured frame JSON 在既有 FrameLine 大小受限 sink 外加 8 KiB BufWriter；必須明確 flush 成功才發布完整 response，失敗保持原 frame-too-large 路徑。原 wire producer golden、精確行界線與超限拒絕仍為驗證依據。
+
+`tests/server.rs` 的四個 `launch_binding_*` 原生 PTY 案例核對成功後跨連線保持 UUID／pid、第二次啟動不能替換、錯 instance、非法 UUID、失敗啟動、legacy 程序不能補認、1.2 peer 拒絕新能力，以及 agent 結束後保留原綁定。全部經正式 serializer／server producer，不使用真模型。
+
+停止重疊反例等待 agent 真正收到 HUP 後，在 grace 期間送第二個 SpawnBound 並建立新連線，兩者都拒絕；停機結束無第二個 marker／程序。移除 stopping／永久 spawned 防護的 mutant 會實際建立第二個原生 PID，測試失敗；恢復後重跑 holder 全套。

@@ -344,3 +344,5 @@
 - 2026-10-08：13C 正常 daemon 已接入私有固定啟動副本；原始 binary 被替換後仍能啟動 holder，daemon 停止保留 holder／副本，最後自有 Lab 清理通過。4 項 binding／snapshot 測試通過；三 backend canary 回歸為 3 通過／1 失敗：Claude 報告覆核抓到同時建置造成的 binary 身分改動，須固定產物重驗；准入仍關閉（feat/g13-install，未合併）。
 
 - 2026-10-08：固定 AgEnD 啟動副本整批重驗完成：4 項三 backend fake canary、6 項服務安裝、原生 holder 替換／存活、shim ownership 反例及 daemon 生命週期回歸通過，workspace clippy／無 std 依賴檢查通過。覆核確認 D3／D5 不要求同 build holder；准入尚缺存活 backend 與持久啟動身分對帳。自有程序／暫存無殘留，工作樹未合併保留（feat/g13-install）。
+
+- 2026-10-08：holder 1.3 加入不可補認的原生啟動 UUID 回報；65 項 holder、149 項 core（另 2 項既有 ignored 未執行）、workspace clippy／check-deps 通過。覆核發現停止時第二次 Spawn 競態，已以永久 spawned 與 stopping guard 修正；原生 HUP 重疊測試通過，移除防護的 mutant 實際產生第二個 PID 並失敗。daemon 持久綁定仍待接入、准入關閉，本批 holder 暫存已清理（feat/g13-install，未合併）。

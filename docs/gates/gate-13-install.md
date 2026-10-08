@@ -127,6 +127,8 @@
 
 - 2026-10-08：固定產物下三 backend canary 4 項、服務 6 項、shim ownership 與 daemon 回歸已通過，fmt／clippy／check-deps 通過；清理確認無本批自有程序與暫存。准入仍缺重連時存活 backend 的持久啟動綁定，保留 D3／D5 既有跨版本契約，並非要求所有 holder 同 build。
 
+- 2026-10-08：holder 1.3 加入不可補認的原生啟動 UUID 回報；65 項 holder、149 項 core（另 2 項既有 ignored 未執行）、workspace clippy／check-deps 通過。覆核發現停止時第二次 Spawn 競態，已以永久 spawned 與 stopping guard 修正；原生 HUP 重疊測試通過，移除防護的 mutant 實際產生第二個 PID 並失敗。daemon 持久綁定仍待接入、准入關閉，本批 holder 暫存已清理（feat/g13-install，未合併）。
+
 ## 下一步
 
 ```bash

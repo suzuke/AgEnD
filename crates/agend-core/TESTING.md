@@ -158,3 +158,5 @@ xtask 的 `claude_1_5_envelopes_are_additive_and_receipts_keep_native_attributio
 client 1.7 新增唯讀 operator MessageDelivery 與明確 MessageDeliveryState（未知值仍為 Unknown，不視為 confirmed）。真 producer／consumer 契約見 `agend/tests/message_delivery.rs`；一般 client 最低版本仍為 1.3。
 
 CanaryReport 的收據／outcome 綁定由 agend native canary producer 測試；純驗證仍經 no-std build。
+
+holder 協商測試核 1.3 優先、1.2／1.1 仍可選；啟動綁定的狀態與原生程序證據由 agend-holder 的 `launch_binding_*` 測試驗證。

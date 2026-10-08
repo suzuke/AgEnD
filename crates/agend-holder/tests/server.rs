@@ -257,7 +257,7 @@ fn reconnect_gets_snapshot_then_live_bytes_without_gap_or_duplicate() {
     drop(first);
 
     let (mut client, greeting) = holder.connect();
-    assert_eq!(greeting.version, ProtocolVersion::new(1, 2));
+    assert_eq!(greeting.version, ProtocolVersion::new(1, 3));
     assert_eq!(greeting.exited, None);
     let last_row = greeting
         .screen
@@ -401,7 +401,7 @@ fn version_mismatch_is_refused_and_the_holder_keeps_serving() {
     assert_eq!(wait_error(&mut client), "version_mismatch");
     assert!(client.wait_closed(LONG));
     let (_, greeting) = holder.connect();
-    assert_eq!(greeting.version, ProtocolVersion::new(1, 2));
+    assert_eq!(greeting.version, ProtocolVersion::new(1, 3));
 }
 
 #[test]
@@ -727,3 +727,218 @@ fn oversized_frame_is_refused_whole_and_connection_still_reads_snapshots() {
 
 #[path = "support/terminal_control.rs"]
 mod terminal_control;
+
+fn read_launch_binding(
+    client: &mut HolderClient,
+) -> agend_core::protocol::holder::LaunchBindingData {
+    client
+        .send(&HolderRequest::GetLaunchBinding {
+            instance_id: ID.into(),
+        })
+        .unwrap();
+    let deadline = Instant::now() + LONG;
+    loop {
+        assert!(Instant::now() < deadline, "launch binding reply timed out");
+        match client.recv(Duration::from_millis(100)).unwrap() {
+            Some(HolderResponse::LaunchBinding { data }) => return data,
+            Some(HolderResponse::PtyBytes { .. } | HolderResponse::Exited { .. }) | None => {}
+            other => panic!("unexpected binding response: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn launch_binding_survives_reconnect_and_cannot_be_adopted_by_a_second_spawn() {
+    use agend_core::protocol::holder::BoundSpawnData;
+    let holder = TestHolder::start(LONG);
+    let (mut client, greeting) = holder.connect();
+    assert_eq!(greeting.version, agend_core::protocol::holder::V1_3);
+    assert_eq!(read_launch_binding(&mut client).binding, None);
+    let HolderRequest::Spawn { data } =
+        holder.spawn_request("/bin/bash", &["-c", "echo bound; sleep 30"])
+    else {
+        unreachable!()
+    };
+    let binding = agend_core::protocol::client::uuid_v4([1; 16]);
+    client
+        .send(&HolderRequest::SpawnBound {
+            data: BoundSpawnData {
+                binding: binding.clone(),
+                spawn: data.clone(),
+            },
+        })
+        .unwrap();
+    let pid = loop {
+        match client.recv(LONG).unwrap() {
+            Some(HolderResponse::Spawned { data }) => break data.process_id.unwrap(),
+            Some(HolderResponse::PtyBytes { .. }) => {}
+            other => panic!("expected bound spawn: {other:?}"),
+        }
+    };
+    let first = read_launch_binding(&mut client);
+    assert_eq!(first.instance_id, ID);
+    assert_eq!(first.binding.as_deref(), Some(binding.as_str()));
+    assert_eq!(first.process_id, Some(pid));
+    drop(client);
+    let (mut client, _) = holder.connect();
+    assert_eq!(read_launch_binding(&mut client), first);
+    client
+        .send(&HolderRequest::SpawnBound {
+            data: BoundSpawnData {
+                binding: agend_core::protocol::client::uuid_v4([2; 16]),
+                spawn: data,
+            },
+        })
+        .unwrap();
+    assert_eq!(wait_error(&mut client), "already_spawned");
+    assert_eq!(read_launch_binding(&mut client), first);
+    client
+        .send(&HolderRequest::GetLaunchBinding {
+            instance_id: "other".into(),
+        })
+        .unwrap();
+    assert_eq!(wait_error(&mut client), "instance_mismatch");
+    assert!(!processes_in_group(pid).is_empty());
+}
+
+#[test]
+fn launch_binding_refuses_invalid_failed_and_legacy_adoption() {
+    use agend_core::protocol::holder::BoundSpawnData;
+    let holder = TestHolder::start(LONG);
+    let (mut client, _) = holder.connect();
+    let HolderRequest::Spawn { data } = holder.spawn_request("/missing-agend-test-program", &[])
+    else {
+        unreachable!()
+    };
+    client
+        .send(&HolderRequest::SpawnBound {
+            data: BoundSpawnData {
+                binding: "invalid".into(),
+                spawn: data.clone(),
+            },
+        })
+        .unwrap();
+    assert_eq!(wait_error(&mut client), "invalid_launch_binding");
+    assert_eq!(read_launch_binding(&mut client).binding, None);
+    client
+        .send(&HolderRequest::SpawnBound {
+            data: BoundSpawnData {
+                binding: agend_core::protocol::client::uuid_v4([3; 16]),
+                spawn: data,
+            },
+        })
+        .unwrap();
+    assert_eq!(wait_error(&mut client), "spawn_failed");
+    assert_eq!(read_launch_binding(&mut client).binding, None);
+    drop(client);
+    let (mut client, _) = holder.spawn_bash("sleep 30");
+    let legacy = read_launch_binding(&mut client);
+    assert_eq!(legacy.binding, None);
+    assert!(legacy.process_id.is_some());
+    let HolderRequest::Spawn { data } =
+        holder.spawn_request("/bin/bash", &["-c", "echo forbidden"])
+    else {
+        unreachable!()
+    };
+    client
+        .send(&HolderRequest::SpawnBound {
+            data: BoundSpawnData {
+                binding: agend_core::protocol::client::uuid_v4([4; 16]),
+                spawn: data,
+            },
+        })
+        .unwrap();
+    assert_eq!(wait_error(&mut client), "already_spawned");
+    assert_eq!(read_launch_binding(&mut client), legacy);
+}
+
+#[test]
+fn launch_binding_is_unavailable_to_older_peers_and_preserved_after_agent_exit() {
+    use agend_core::protocol::holder::{BoundSpawnData, V1_2};
+    let holder = TestHolder::start(LONG);
+    let hello = HolderRequest::Hello {
+        data: Hello::new(&[V1_2]),
+    };
+    let mut client = HolderClient::connect_with(&holder.socket, &hello).unwrap();
+    assert!(
+        matches!(client.recv(LONG).unwrap(), Some(HolderResponse::Hello { data }) if data.selected == V1_2)
+    );
+    assert!(matches!(
+        client.recv(LONG).unwrap(),
+        Some(HolderResponse::ScreenSnapshot { .. })
+    ));
+    client
+        .send(&HolderRequest::GetLaunchBinding {
+            instance_id: ID.into(),
+        })
+        .unwrap();
+    assert_eq!(wait_error(&mut client), "unsupported_version");
+    let HolderRequest::Spawn { data } = holder.spawn_request("/bin/bash", &["-c", "exit 0"]) else {
+        unreachable!()
+    };
+    let bound = HolderRequest::SpawnBound {
+        data: BoundSpawnData {
+            binding: agend_core::protocol::client::uuid_v4([5; 16]),
+            spawn: data,
+        },
+    };
+    client.send(&bound).unwrap();
+    assert_eq!(wait_error(&mut client), "unsupported_version");
+    drop(client);
+    let (mut client, _) = holder.connect();
+    assert_eq!(read_launch_binding(&mut client).process_id, None);
+    client.send(&bound).unwrap();
+    let mut pid = None;
+    loop {
+        match client.recv(LONG).unwrap() {
+            Some(HolderResponse::Spawned { data }) => pid = data.process_id,
+            Some(HolderResponse::Exited { .. }) => break,
+            Some(HolderResponse::PtyBytes { .. }) => {}
+            other => panic!("unexpected native spawn response: {other:?}"),
+        }
+    }
+    assert!(pid.is_some());
+    let result = read_launch_binding(&mut client);
+    assert_eq!(result.process_id, pid);
+    assert_eq!(
+        result.binding,
+        Some(agend_core::protocol::client::uuid_v4([5; 16]))
+    );
+}
+
+#[test]
+fn launch_binding_cannot_spawn_during_shutdown_grace() {
+    use agend_core::protocol::holder::BoundSpawnData;
+    let mut holder = TestHolder::start(LONG);
+    let (mut client, pid) = holder
+        .spawn_bash("trap 'echo hup > stopping' HUP; echo ready; while :; do sleep 0.1; done");
+    wait_screen(&mut client, |s| s.contains("ready"));
+    client.send(&HolderRequest::Shutdown).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !holder.dir.path().join("stopping").exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        holder.dir.path().join("stopping").exists(),
+        "native agent must observe shutdown HUP"
+    );
+    let HolderRequest::Spawn { data } =
+        holder.spawn_request("/bin/bash", &["-c", "echo second > forbidden-second-spawn"])
+    else {
+        unreachable!()
+    };
+    client
+        .send(&HolderRequest::SpawnBound {
+            data: BoundSpawnData {
+                binding: agend_core::protocol::client::uuid_v4([6; 16]),
+                spawn: data,
+            },
+        })
+        .unwrap();
+    assert_eq!(wait_error(&mut client), "stopping");
+    let mut late = HolderClient::connect_with(&holder.socket, &HolderRequest::hello()).unwrap();
+    assert_eq!(wait_error(&mut late), "stopping");
+    assert_eq!(holder.join(), Stop::Shutdown);
+    assert!(!holder.dir.path().join("forbidden-second-spawn").exists());
+    assert!(processes_in_group(pid).is_empty());
+}

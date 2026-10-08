@@ -43,7 +43,7 @@ impl Conn {
         match conn.recv_within(GREETING_TIMEOUT)? {
             HolderResponse::Hello { data }
                 if data.selected.major == 1
-                    && data.selected <= agend_core::protocol::holder::V1_2 =>
+                    && data.selected <= agend_core::protocol::holder::V1_3 =>
             {
                 conn.version = data.selected;
             }

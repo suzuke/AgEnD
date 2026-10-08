@@ -137,3 +137,5 @@ Telegram delivery 區分 in_flight 與 outcome_unknown，後者供本機 `telegr
 client 1.7 的 `OperatorCommand::MessageDelivery`／`MessageDeliveryData` 只表達持久化 delivery 狀態與 identity，不攜帶 body；未知狀態保留 Unknown。I/O 與權限由 daemon／client 實作。
 
 13C 施工中的 protocol 1.7：操作員 `send_message` 固定以 `@operator` 真人身分 queue 投遞，必填 UUID v4；`driver_status` 回傳 instance 與就緒狀態，Codex 必須有連線，unknown 不代表 idle。這些 RPC 不切換 backend 版本。
+
+holder 協定 1.3 加入 `SpawnBound`／`GetLaunchBinding` 與不含 argv／環境的 `LaunchBindingData`，供第 13 關受管啟動對帳；保留 1.2／1.1 協商。

@@ -100,3 +100,5 @@ Claude 從同一資料庫快照核對 confirmed delivery、持久 ACK、單筆�
 `cargo test -p agend-daemon --lib store::maintenance` 驗共享發布、store 與排他移除的生命週期。
 
 下一步接套件匯入、版本探測與漂移提醒、受控 canary、明確切換／回退，之後才驗整個 fleet 的版本管理。
+
+啟動綁定目前已完成 holder 1.3 producer：`SpawnBound` 成功時保存 opaque UUID，`GetLaunchBinding` 在重連後回原 UUID／instance／pid；沒有綁定的 legacy 程序回 None，不能被新請求補認。daemon 的持久 intent 與匯入 artifact 對帳尚待接入，版本准入繼續拒絕。

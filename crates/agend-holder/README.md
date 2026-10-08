@@ -85,3 +85,9 @@ holder 1.2 新增 `DaemonKey`，daemon 必須帶目前 generation／screen revis
 ~/.cargo/bin/cargo test -p agend-holder
 ~/.cargo/bin/cargo xtask accept holder
 ```
+
+## 第 13 關啟動綁定（施工中）
+
+holder 1.3 的 `SpawnBound` 在成功建立原生程序的同一把狀態鎖內保存 UUID；`GetLaunchBinding` 只讀原始 instance／UUID／pid，不回傳 argv 或環境。重連不補認既有未綁定程序，失敗或第二次 Spawn 不改 UUID；舊 peer 仍可用 1.2／1.1，但不能使用此能力。daemon 的持久綁定紀錄及受管版本准入仍待接入。
+
+Shutdown、home 刪除與 idle 停機進入同一 stopping 狀態；即使清理暫時取走 agent handle，也不能建立第二個程序。永久 successful-spawn 標記與 stopping guard 共同保護單次啟動，停止期間不接受新連線。
