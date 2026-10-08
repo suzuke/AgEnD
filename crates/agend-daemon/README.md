@@ -205,3 +205,5 @@ client protocol 1.7 的 operator `message_delivery` 只讀持久化收據：mess
 13C migration 0018 的 `managed_launches` 保存每個 instance 的啟動意圖：在任何 SpawnBound I/O 前提交，重連只讀回核對；新啟動須由 supervisor 先證明舊 holder 已離開，再以舊 binding 做 CAS。instance 明確移除時 cascade 刪除，重建同名 instance 不能繼承舊紀錄。儲存 API 已實作，supervisor／runtime 串接仍待完成，受管准入維持拒絕。
 
 受管 runtime 提供 `start_reserved`／`attach_reserved`：前者送持久 UUID 的 SpawnBound，再核 holder 回報的 UUID／PID；後者只讀 GetLaunchBinding，絕不補送 Spawn。連線須核對成功才開放輸入，transport 重連也重新核對；不符時保留 holder 並回報失敗。核對前的 Exited 暫存，避免未驗證事件觸發 supervisor 重啟；主動取消不誤報身分失敗。這些 API 仍待接入 supervisor 的受管啟動決策，版本准入保持關閉。
+
+13C supervisor 在受管 canary 核對後，以 canonical 匯入程式建立 launch，確認舊 holder／orphan 已離開才保存 SQLite 意圖並送 SpawnBound。重連只讀原意圖，核對設定、artifact 與 holder UUID；不符保留程序並標記失敗。版本切換／回退仍待完成。

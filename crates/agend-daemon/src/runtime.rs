@@ -148,7 +148,29 @@ impl HolderRuntime {
         backend: agend_core::model::Backend,
         program: &str,
         working_directory: &str,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<Option<agend_core::setup::backend::ImportedBackend>, RuntimeError> {
+        self.backend_program(backend, program, working_directory, true)
+            .await
+    }
+
+    /// Identifies managed bytes for inherited-holder reconciliation, not new spawn admission.
+    pub async fn inspect_backend_program(
+        &self,
+        backend: agend_core::model::Backend,
+        program: &str,
+        working_directory: &str,
+    ) -> Result<Option<agend_core::setup::backend::ImportedBackend>, RuntimeError> {
+        self.backend_program(backend, program, working_directory, false)
+            .await
+    }
+
+    async fn backend_program(
+        &self,
+        backend: agend_core::model::Backend,
+        program: &str,
+        working_directory: &str,
+        admit: bool,
+    ) -> Result<Option<agend_core::setup::backend::ImportedBackend>, RuntimeError> {
         let inner = Arc::clone(&self.inner);
         let program = program.to_owned();
         let working_directory = working_directory.to_owned();
@@ -158,15 +180,25 @@ impl HolderRuntime {
                 inner.home.join("bin").display(),
                 env::launch_path(&inner.home, &inner.daemon_env.iter().cloned().collect())
             );
-            crate::backend_versions::check_launch(
-                &inner.home,
-                backend.as_str(),
-                &program,
-                Path::new(&working_directory),
-                &path,
-                &inner.agend,
-                inner.executable_binding.as_ref(),
-            )
+            if admit {
+                crate::backend_versions::check_launch(
+                    &inner.home,
+                    backend.as_str(),
+                    &program,
+                    Path::new(&working_directory),
+                    &path,
+                    &inner.agend,
+                    inner.executable_binding.as_ref(),
+                )
+            } else {
+                crate::backend_versions::inspect_launch(
+                    &inner.home,
+                    backend.as_str(),
+                    &program,
+                    Path::new(&working_directory),
+                    &path,
+                )
+            }
             .map_err(err)
         })
         .await

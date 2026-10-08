@@ -154,7 +154,38 @@ pub fn check_launch(
     search_path: &str,
     agend_executable: &Path,
     binding: Result<&ExecutableBinding, &String>,
-) -> Result<(), String> {
+) -> Result<Option<ImportedBackend>, String> {
+    let Some(artifact) = inspect_launch(home, backend, program, cwd, search_path)? else {
+        return Ok(None);
+    };
+    if fs::symlink_metadata(
+        home.join("backends")
+            .join(backend)
+            .join(&artifact.version)
+            .join("canary.json"),
+    )
+    .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+    {
+        return Err(
+            "managed backend canary not run; imported version is not admitted to the fleet".into(),
+        );
+    }
+    let binding =
+        binding.map_err(|e| format!("startup executable fingerprint unavailable: {e}"))?;
+    let digest = binding.digest_if_unchanged(agend_executable)?;
+    verify_canary(home, backend, &artifact.version, digest)?;
+    Ok(Some(artifact))
+}
+
+/// Identify immutable managed bytes for an inherited holder, without admitting
+/// any new execution under the current daemon build.
+pub fn inspect_launch(
+    home: &Path,
+    backend: &str,
+    program: &str,
+    cwd: &Path,
+    search_path: &str,
+) -> Result<Option<ImportedBackend>, String> {
     let root = home
         .canonicalize()
         .map_err(|e| e.to_string())?
@@ -196,7 +227,7 @@ pub fn check_launch(
         .or_else(|| path.strip_prefix(&root).ok())
         .or_else(|| resolved.as_deref().and_then(|p| p.strip_prefix(&root).ok()));
     let Some(relative) = relative else {
-        return Ok(());
+        return Ok(None);
     };
     let parts: Vec<_> = relative.components().collect();
     if parts.len() != 3 || parts[0].as_os_str() != backend || parts[2].as_os_str() != "program" {
@@ -206,19 +237,8 @@ pub fn check_launch(
         .as_os_str()
         .to_str()
         .ok_or("invalid backend version path")?;
-    inspect(home, backend, version)?;
-    if fs::symlink_metadata(root.join(backend).join(version).join("canary.json"))
-        .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
-    {
-        return Err(
-            "managed backend canary not run; imported version is not admitted to the fleet".into(),
-        );
-    }
-    let binding =
-        binding.map_err(|e| format!("startup executable fingerprint unavailable: {e}"))?;
-    let digest = binding.digest_if_unchanged(agend_executable)?;
-    verify_canary(home, backend, version, digest)?;
-    Err("managed backend canary verified; launch-boundary pinning is not yet available; admission refused".into())
+    let artifact = inspect(home, backend, version)?;
+    Ok(Some(artifact))
 }
 
 fn executable(path: &Path) -> bool {

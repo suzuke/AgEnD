@@ -1,5 +1,7 @@
 //! Full production canary runner using native fake backend producers.
 #![cfg(unix)]
+#[path = "../../agend-daemon/tests/common/daemon_process.rs"]
+mod lab;
 use agend_testkit::tempdir::TempDir;
 use serde_json::Value;
 use std::{
@@ -49,9 +51,9 @@ fn native_canary(backend: &str, executable: &str, version: &str, wrong_version: 
         fake.is_file(),
         "build fake_codex example and agend-testkit fake-opencode-cli first"
     );
-    let root = TempDir::new("g13-canary").unwrap();
-    let home = root.path().join("home");
-    let user = root.path().join("user");
+    let root = lab::Lab::with_prefix(Path::new(BIN), "g13-managed");
+    let home = root.root.as_path().join("home");
+    let user = root.root.as_path().join("user");
     fs::create_dir(&user).unwrap();
     fs::write(user.join(".claude.json"), b"preserve trust entries").unwrap();
     for (version, passed) in [(version, true), (wrong_version, false)] {
@@ -149,6 +151,7 @@ fn native_canary(backend: &str, executable: &str, version: &str, wrong_version: 
             assert!(report["error"].as_str().unwrap().contains("version"));
         }
     }
+    managed_fleet(&root, &home, backend, version);
     assert_eq!(
         fs::read(user.join(".claude.json")).unwrap(),
         b"preserve trust entries"
@@ -288,5 +291,83 @@ fn verify_retained_report(home: &Path, user: &Path, backend: &str, version: &str
     );
     fs::write(path, original).unwrap();
     assert_eq!(inspect()["canary"], "passed");
-    assert!(admission().unwrap_err().contains("launch-boundary pinning"));
+    assert_eq!(admission().unwrap().unwrap().backend, backend);
+}
+
+// Exercise admission after a report made by the actual production canary.
+fn managed_fleet(lab: &lab::Lab, home: &Path, backend: &str, version: &str) {
+    use agend_core::runtime_records::ManagedLaunchIntent;
+    let program = home
+        .join("backends")
+        .join(backend)
+        .join(version)
+        .join("program");
+    let mut daemon = lab::Daemon::start(lab, home, &[]).unwrap();
+    daemon.ready().unwrap();
+    let out = cli(
+        home,
+        &lab.root,
+        &[
+            "instance",
+            "add",
+            "managed",
+            backend,
+            "--program",
+            program.to_str().unwrap(),
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    daemon
+        .expect_within("managed: holder pid=", std::time::Duration::from_secs(30))
+        .unwrap();
+    let read_intent = || {
+        let db = rusqlite::Connection::open(home.join("agend.db")).unwrap();
+        let json: String = db
+            .query_row(
+                "SELECT intent FROM managed_launches WHERE instance_id='managed'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        serde_json::from_str::<ManagedLaunchIntent>(&json).unwrap()
+    };
+    let holders = lab.running_holders();
+    assert_eq!(holders.len(), 1);
+    daemon.interrupt().unwrap();
+    let original = read_intent();
+    let mut daemon = lab::Daemon::start(lab, home, &[]).unwrap();
+    daemon.ready().unwrap();
+    daemon.expect("managed: reconnected to holder").unwrap();
+    assert_eq!(lab.running_holders(), holders);
+    daemon.interrupt().unwrap();
+    assert_eq!(read_intent(), original);
+    // A valid but foreign UUID cannot be adopted or trigger replacement.
+    let mut foreign = original.clone();
+    foreign.binding = "12345678-1234-4234-8234-123456789abc".into();
+    let db = rusqlite::Connection::open(home.join("agend.db")).unwrap();
+    db.execute(
+        "UPDATE managed_launches SET binding=?1,intent=?2 WHERE instance_id='managed'",
+        rusqlite::params![foreign.binding, serde_json::to_string(&foreign).unwrap()],
+    )
+    .unwrap();
+    drop(db);
+    let mut daemon = lab::Daemon::start(lab, home, &[]).unwrap();
+    daemon.ready().unwrap();
+    assert!(
+        daemon
+            .log
+            .iter()
+            .any(|l| l.contains("managed holder identity unproven")),
+        "{:?}",
+        daemon.log
+    );
+    assert_eq!(lab.running_holders(), holders);
+    daemon.interrupt().unwrap();
+    assert_eq!(read_intent(), foreign);
+    lab.stop_all_holders();
+    assert!(lab.running_holders().is_empty());
 }

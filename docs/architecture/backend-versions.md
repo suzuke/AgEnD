@@ -101,8 +101,10 @@ Claude 從同一資料庫快照核對 confirmed delivery、持久 ACK、單筆�
 
 下一步接套件匯入、版本探測與漂移提醒、受控 canary、明確切換／回退，之後才驗整個 fleet 的版本管理。
 
-啟動綁定目前已完成 holder 1.3 producer：`SpawnBound` 成功時保存 opaque UUID，`GetLaunchBinding` 在重連後回原 UUID／instance／pid；沒有綁定的 legacy 程序回 None，不能被新請求補認。daemon 的持久 intent 與匯入 artifact 對帳尚待接入，版本准入繼續拒絕。
+啟動綁定目前已完成 holder 1.3 producer：`SpawnBound` 成功時保存 opaque UUID，`GetLaunchBinding` 在重連後回原 UUID／instance／pid；沒有綁定的 legacy 程序回 None，不能被新請求補認。daemon 已接入持久 intent 與匯入 artifact 對帳；受管路徑須通過當前 AgEnD 指紋的 canary 才可新啟動。
 
-受管啟動意圖由 SQLite migration 0018 保存，每 instance 一筆，與 instance 移除 cascade。儲存時核對 instance 快照並以舊 binding CAS；不明結果先讀回，不能盲目重試。新 holder 啟動前才可替換意圖，重連不得建立新意圖；supervisor 必須先證明舊 holder 已離開。此儲存層已實作，runtime／准入串接未完成。
+受管啟動意圖由 SQLite migration 0018 保存，每 instance 一筆，與 instance 移除 cascade。儲存時核對 instance 快照並以舊 binding CAS；不明結果先讀回，不能盲目重試。新 holder 啟動前才可替換意圖，重連不得建立新意圖；supervisor 必須先證明舊 holder 已離開。supervisor 在確認舊 holder 不存在、orphan 已清理後保存意圖；解析受管別名後以 canonical 匯入路徑建立實際 argv，保留原始設定供重連核對。
 
-Runtime 保留該次意圖的 UUID，首次啟動核對 Spawned 與 GetLaunchBinding 的 agent PID 一致；重連只讀回 UUID／PID，核對前不發布 writer。未驗證 Exited 不觸發生命週期處理；取消中的核對不發失敗通知。supervisor 收到當前 generation 的 binding rejection 時標記失敗並 detach，保留 holder；完整受管啟動決策串接仍未完成。
+Runtime 保留該次意圖的 UUID，首次啟動核對 Spawned 與 GetLaunchBinding 的 agent PID 一致；重連只讀回 UUID／PID，核對前不發布 writer。未驗證 Exited 不觸發生命週期處理；取消中的核對不發失敗通知。supervisor 收到當前 generation 的 binding rejection 時標記失敗並 detach，保留 holder；重連核對持久 artifact 與 instance 設定，再讀 holder UUID；缺失或不符直接標記失敗，保留 holder，不排自動替換。三種原生替身已驗新啟動、保留原 holder 重連、錯 UUID 拒絕且不替換程序。明確升級／回退與真模型認證隔離尚未完成。
+
+重連沿用既有啟動准入證據，只核對受管 bytes／設定與 holder 原 UUID；不因 daemon 升級要求重新跑 canary。新 Spawn 仍須當前 daemon 指紋的 canary。intent 的 session 是啟動時指定值：首次 Codex／OpenCode 的 None 可由正式 driver 後續建立 session；原本 Some 或 Claude 仍精確核對。

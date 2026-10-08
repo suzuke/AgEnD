@@ -61,6 +61,8 @@
 //! Must NOT: kill or respawn holders on daemon shutdown; start an agent
 //! fresh once it has run.
 
+mod managed;
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -610,17 +612,10 @@ impl Supervisor {
     /// so their holder can only lack an agent if the agent never ran).
     async fn reconnect(&mut self, instance: &Instance, pid: u32) {
         let id = instance.id.clone();
-        if let Err(error) = self
-            .runtime
-            .check_backend_program(
-                instance.backend,
-                &instance.program,
-                &instance.working_directory,
-            )
-            .await
-        {
-            return self.fail(&id, &error.to_string()).await;
-        }
+        let managed = match self.managed_reconnect(instance).await {
+            Ok(intent) => intent,
+            Err(error) => return self.fail(&id, &error).await,
+        };
         if !self.prepare_claude(instance).await {
             return;
         }
@@ -631,7 +626,11 @@ impl Supervisor {
             Ok(launch) => launch,
             Err(e) => return self.fail(&id, &e).await,
         };
-        match self.runtime.attach(&launch, pid).await {
+        let attached = match &managed {
+            Some(intent) => self.runtime.attach_reserved(intent, pid).await,
+            None => self.runtime.attach(&launch, pid).await,
+        };
+        match attached {
             Ok(started) => {
                 if !resume {
                     self.mark_running(&id).await;
@@ -654,6 +653,11 @@ impl Supervisor {
                 self.connect_codex(instance, started.generation);
             }
             Err(e) => {
+                if managed.is_some() {
+                    return self
+                        .fail(&id, &format!("managed holder identity unproven: {e}"))
+                        .await;
+                }
                 let generation = self.watches.get(&id).map_or(0, |w| w.generation);
                 self.watch(&id, generation);
                 let _ = self.events.send(Event::StartFailed {
@@ -669,7 +673,7 @@ impl Supervisor {
     /// the n-th restart, for the log.
     async fn start(&mut self, instance: &Instance, resume: bool, restart: Option<usize>) {
         let id = instance.id.clone();
-        if let Err(error) = self
+        let artifact = match self
             .runtime
             .check_backend_program(
                 instance.backend,
@@ -678,12 +682,20 @@ impl Supervisor {
             )
             .await
         {
-            return self.fail(&id, &error.to_string()).await;
+            Ok(artifact) => artifact,
+            Err(error) => return self.fail(&id, &error.to_string()).await,
+        };
+        let mut effective = instance.clone();
+        if let Some(artifact) = &artifact {
+            match self.managed_program(artifact) {
+                Ok(program) => effective.program = program,
+                Err(error) => return self.fail(&id, &error).await,
+            }
         }
         if !self.prepare_claude(instance).await {
             return;
         }
-        let launch = match launch(&self.home, instance, resume) {
+        let launch = match launch(&self.home, &effective, resume) {
             Ok(launch) => launch,
             Err(e) => return self.fail(&id, &e).await,
         };
@@ -739,19 +751,30 @@ impl Supervisor {
         };
         log::line(&format!("{id}: {}", what.trim_end()));
         self.show(instance, AgentState::Starting, what.trim_end().to_owned());
-        let started = if instance.backend == Backend::Claude && instance.delivery == "push" {
+        let claude_geometry = if instance.backend == Backend::Claude && instance.delivery == "push"
+        {
             let Some(session) = instance.session_id.as_deref() else {
                 return self.fail(&id, "missing Claude session").await;
             };
             match self.store.begin_claude_startup(&id, session).await {
-                Ok(true) => self.runtime.start_claude(&launch).await,
-                Ok(false) => self.runtime.start(&launch).await,
+                Ok(geometry) => geometry,
                 Err(e) => {
                     return self
                         .fail(&id, &format!("cannot persist Claude startup: {e}"))
                         .await;
                 }
             }
+        } else {
+            false
+        };
+        let started = if let Some(artifact) = artifact {
+            let intent = match self.reserve_managed(instance, &launch, artifact).await {
+                Ok(intent) => intent,
+                Err(error) => return self.fail(&id, &error).await,
+            };
+            self.runtime.start_reserved(&intent, claude_geometry).await
+        } else if claude_geometry {
+            self.runtime.start_claude(&launch).await
         } else {
             self.runtime.start(&launch).await
         };
