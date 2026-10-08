@@ -577,6 +577,7 @@ enum SwitchFailure {
     None,
     Holder,
     Agent,
+    AppServer,
 }
 
 #[test]
@@ -589,6 +590,19 @@ fn native_codex_exited_candidate_automatically_restores_the_previous_version() {
         "0.159.0",
         false,
         SwitchFailure::Agent,
+    );
+}
+
+#[test]
+fn native_codex_disconnected_candidate_reports_a_durable_problem_without_stopping_holder() {
+    native_switch_case(
+        "codex",
+        "examples/fake_codex",
+        "examples/fake_codex_next",
+        "0.158.0",
+        "0.159.0",
+        false,
+        SwitchFailure::AppServer,
     );
 }
 
@@ -732,6 +746,56 @@ fn native_switch_case(
     {
         let committed: Value = serde_json::from_slice(&out.stdout).unwrap();
         assert_eq!(committed["phase"], "committed");
+        if failure == SwitchFailure::AppServer {
+            let holders = root.running_holders();
+            fs::write(home.join("workspace/managed/.g13-exit-server"), b"exit").unwrap();
+            fs::remove_file(&hold_start).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(40);
+            let saved = loop {
+                let out = cli(&home, &user, &["backend", "switch", "status", "managed"]);
+                assert!(out.status.success());
+                let status: Value = serde_json::from_slice(&out.stdout).unwrap();
+                if status["problem"].is_object() {
+                    break status;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "missing switch problem: {status}"
+                );
+                std::thread::sleep(Duration::from_millis(100));
+            };
+            assert_eq!(saved["phase"], "committed");
+            assert_eq!(root.running_holders(), holders);
+            let attention = format!("backend-switch:managed:{}", saved["id"].as_str().unwrap());
+            let check_attention = || {
+                let out = cli(&home, &user, &["status"]);
+                assert!(out.status.success());
+                let fleet: Value = serde_json::from_slice(&out.stdout).unwrap();
+                let item = fleet["attention"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|item| item["attention_id"] == attention)
+                    .unwrap_or_else(|| panic!("missing {attention}: {fleet}"));
+                assert_eq!(
+                    item["waiting_since_unix_ms"],
+                    saved["problem"]["since_unix_ms"]
+                );
+                let item: agend_core::protocol::client::AttentionRequiredData =
+                    serde_json::from_value(item.clone()).unwrap();
+                assert!(item.actions.is_empty());
+            };
+            check_attention();
+            daemon.interrupt().unwrap();
+            daemon = lab::Daemon::start(&root, &home, &[]).unwrap();
+            daemon.ready().unwrap();
+            check_attention();
+            assert_eq!(root.running_holders(), holders);
+            daemon.interrupt().unwrap();
+            root.stop_all_holders();
+            assert!(root.running_holders().is_empty());
+            return;
+        }
         if failure != SwitchFailure::None {
             if remove_holder {
                 daemon.kill9().unwrap();

@@ -641,7 +641,10 @@ fn commit_and_restore_keep_all_delivery_paused_until_exact_activation_snapshot()
             assert!(block_on(store.finish_backend_switch(&record, &ready, &launch)).is_err());
             assert_paused(&store);
             block_on(store.set_agent_pid(&instance.id, ready.agent_pid)).unwrap();
+            let record =
+                block_on(store.backend_switch_problem(&record, "startup was delayed", 42)).unwrap();
             let finished = block_on(store.finish_backend_switch(&record, &ready, &launch)).unwrap();
+            assert!(finished.problem.is_none());
             assert_eq!(
                 finished.phase,
                 if rollback {
@@ -752,4 +755,34 @@ fn prepared_pauses_startup_keys_without_blocking_target_activation() {
             assert!(block_on(store.reserve_claude_startup_key(next)).unwrap());
         }
     }
+}
+
+#[test]
+fn pending_problem_survives_reopen_rejects_stale_updates_and_clears_on_cancel() {
+    let root = TempDir::new("backend-switch-problem").unwrap();
+    let home = root.path().join("home");
+    let store = SqliteStore::open(&home, 0).unwrap();
+    let (instance, target) = fixture(&store);
+    let record =
+        block_on(store.prepare_backend_switch(&instance, target, "/managed/new/program", None))
+            .unwrap();
+    let saved =
+        block_on(store.backend_switch_problem(&record, "driver disconnected", 100)).unwrap();
+    assert_eq!(saved.phase, record.phase);
+    assert_eq!(
+        block_on(store.instance(&instance.id)).unwrap().unwrap(),
+        instance
+    );
+    assert!(block_on(store.backend_switch_problem(&record, "stale", 200)).is_err());
+    drop(store);
+    let store = SqliteStore::open(&home, 0).unwrap();
+    assert_eq!(
+        block_on(store.backend_switch(&instance.id)).unwrap(),
+        Some(saved.clone())
+    );
+    let again = block_on(store.backend_switch_problem(&saved, "driver disconnected", 300)).unwrap();
+    assert_eq!(again, saved);
+    let cancelled = block_on(store.cancel_backend_switch(&again)).unwrap();
+    assert!(cancelled.problem.is_none());
+    assert!(block_on(store.backend_switch_problem(&cancelled, "late", 400)).is_err());
 }

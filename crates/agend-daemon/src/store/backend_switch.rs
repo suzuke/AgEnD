@@ -74,6 +74,41 @@ impl SqliteStore {
         let instance = instance.to_owned();
         self.call(move |conn| read(conn, &instance)).await
     }
+    /// Record an exact pending transition's first failure time. Repeated
+    /// observations do not create a fresh notification episode.
+    pub async fn backend_switch_problem(
+        &self,
+        expected: &BackendSwitch,
+        reason: &str,
+        now: u64,
+    ) -> Result<BackendSwitch, StoreError> {
+        if reason.is_empty() || reason.len() > 4096 {
+            return Err(invalid("backend switch problem must be 1..4096 bytes"));
+        }
+        let expected = expected.clone();
+        let reason = reason.to_owned();
+        self.call(move |conn| {
+            let tx = conn.transaction()?;
+            let mut current = read(&tx, &expected.instance_id)?
+                .ok_or_else(|| invalid("backend switch missing"))?;
+            if current != expected || !current.phase.pending() {
+                return Err(invalid("backend switch changed or is no longer pending"));
+            }
+            let since = current.problem.as_ref().map_or(now, |p| p.since_unix_ms);
+            current.problem = Some(
+                agend_core::runtime_records::backend_switch::BackendSwitchProblem {
+                    reason,
+                    since_unix_ms: since,
+                },
+            );
+            if current != expected {
+                write(&tx, &current)?;
+            }
+            tx.commit()?;
+            Ok(current)
+        })
+        .await
+    }
     /// Reserve without changing program. Unknown results are reconciled by read,
     /// never a new request. Only a completed previous transition can be replaced.
     pub async fn prepare_backend_switch(
@@ -118,6 +153,7 @@ impl SqliteStore {
                 target_program: program,
                 session_id: instance.session_id.clone(),
                 phase: BackendSwitchPhase::Prepared,
+                problem: None,
             };
             if !config_matches(&instance, &record, &record.previous.configured_program)
                 || record.target == record.previous.artifact
@@ -156,6 +192,7 @@ impl SqliteStore {
                 ));
             }
             current.phase = BackendSwitchPhase::Cancelled;
+            current.problem = None;
             write(&tx, &current)?;
             tx.commit()?;
             Ok(current)
@@ -318,6 +355,7 @@ impl SqliteStore {
                 ));
             }
             current.phase = phase;
+            current.problem = None;
             write(&tx, &current)?;
             tx.commit()?;
             Ok(current)

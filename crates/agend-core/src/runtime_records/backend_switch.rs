@@ -39,4 +39,14 @@ pub struct BackendSwitch {
     /// Native session at preparation, including post-spawn discovery.
     pub session_id: Option<String>,
     pub phase: BackendSwitchPhase,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub problem: Option<BackendSwitchProblem>,
+}
+
+/// Durable explanation for an interrupted transition; does not authorize retry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BackendSwitchProblem {
+    pub reason: String,
+    pub since_unix_ms: u64,
 }

@@ -11,6 +11,67 @@ fn refused(message: impl Into<String>) -> Refusal {
 }
 
 impl Supervisor {
+    pub(super) fn show_switch_problem(&self, record: &BackendSwitch) {
+        let Some(problem) = &record.problem else {
+            return;
+        };
+        self.fleet.upsert_attention(AttentionRequiredData {
+            attention_id: Some(format!(
+                "backend-switch:{}:{}",
+                record.instance_id, record.id
+            )),
+            instance_id: Some(record.instance_id.clone()),
+            task_id: None,
+            ask: None,
+            recap: None,
+            reason: format!(
+                "{}: backend switch held: {}",
+                record.instance_id, problem.reason
+            ),
+            unblocks: Some(0),
+            waiting_since_unix_ms: Some(problem.since_unix_ms),
+            if_ignored: Some(format!(
+                "delivery remains paused; inspect agend backend switch status {}",
+                record.instance_id
+            )),
+            actions: Vec::new(),
+        });
+    }
+    pub(super) async fn report_switch_problem(&self, id: &str, reason: &str) {
+        let result = async {
+            let Some(record) = self.store.backend_switch(id).await? else {
+                return Ok(());
+            };
+            if !record.phase.pending() {
+                return Ok(());
+            }
+            let mut reason = reason.to_owned();
+            if reason.len() > 4096 {
+                let mut end = 4096;
+                while !reason.is_char_boundary(end) {
+                    end -= 1;
+                }
+                reason.truncate(end);
+            }
+            let saved = self
+                .store
+                .backend_switch_problem(&record, &reason, log::now_unix_ms())
+                .await?;
+            self.show_switch_problem(&saved);
+            Ok::<(), crate::store::StoreError>(())
+        }
+        .await;
+        if let Err(error) = result {
+            log::line(&format!("{id}: cannot save switch problem: {error}"));
+        }
+    }
+    pub(super) fn dismiss_switch_problem(&self, record: &BackendSwitch) {
+        self.fleet.dismiss(&format!(
+            "backend-switch:{}:{}",
+            record.instance_id, record.id
+        ));
+    }
+
     /// Generic restart/retry must not replace a durable switch's source launch.
     /// Read failures also preserve the holder; only switch reconciliation may
     /// decide what to stop or launch while the transition is pending.
@@ -112,6 +173,7 @@ impl Supervisor {
                         )),
                     }
                 }
+                self.dismiss_switch_problem(&cancelled);
                 Ok(Some(cancelled))
             }
             BackendSwitchCommand::Prepare {

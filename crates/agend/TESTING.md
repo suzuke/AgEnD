@@ -228,3 +228,5 @@ Canary 必須取得三筆與 delivery 綁定的 completed outcomes；修改 fail
 `native_codex_committed_switch_recovers_when_the_target_holder_is_absent` 在硬殺 daemon 後由 Lab 停止目的 holder，再重開 daemon，核新 holder 啟動並完成原 session 的啟用／回滾。probe 清理先等待 SIGKILL 子程序成為可回收狀態，再檢查群組；setsid fixture 使用正式 5 秒 probe 預算且必須留下 ready marker，不能把尚未執行到 setsid 算作通過。
 
 經身分驗證的目前代 `AgentExited` 也可觸發目的版本回退：先保存 RollbackPrepared、排空既有回覆及 worker，再以持久 UUID／holder PID／agent PID 停止精確 holder，恢復舊版本。driver Gone 或 StartFailed 不等於原生退出，不能走這條捷徑。Codex fixture 在 app-server 交接完成後讓 TUI 自行退出，已驗恢復舊版及原 session；app-server 單獨退出而包裝仍存活的情況尚待處理。
+
+13C 換版問題的原生 Store 測試驗重開保留原因／等待時間、重複觀察不刷新、舊快照拒絕、取消及成功啟用／回退清除問題。`native_codex_disconnected_candidate_reports_a_durable_problem_without_stopping_holder` 讓假 app-server 自行退出但保留包裝／holder，經正式 status 核持久問題、「需要你」通知及 daemon 重啟後同一等待時間／holder，沒有真 backend 或模型呼叫。

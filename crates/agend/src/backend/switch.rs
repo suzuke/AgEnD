@@ -125,7 +125,7 @@ pub fn run(command: Command) -> Result<Output, Failure> {
             "unexpected backend switch result",
         ));
     };
-    let text = match &data {
+    let mut text = match &data {
         None => format!("{instance}: no backend switch"),
         Some(record) => format!(
             "{instance}: switch {}: {}",
@@ -144,5 +144,8 @@ pub fn run(command: Command) -> Result<Output, Failure> {
             }
         ),
     };
+    if let Some(problem) = data.as_ref().and_then(|record| record.problem.as_ref()) {
+        text.push_str(&format!("; held: {}", problem.reason));
+    }
     Ok(Output::new(vec![text], to_json(&data)))
 }

@@ -207,3 +207,5 @@ cat docs/gates/gate-13-install.md
 - 2026-10-08：13C 目前代 Committed 目的 holder 確認消失且 launch 精確吻合時自動回退；Committed／Activated 先持久 RollbackPrepared，server 就緒後續行重啟前意圖。三 backend 原生假 canary／往返／holder 消失全組 12 項通過；其後補 Codex 正式 Store 建立回退切點、重啟恢復舊版本與 session 的 1 項通過。Store 9 項、daemon 單元 186 項（1 ignored）、fmt／clippy／check-deps 通過；自有 switch／managed／canary 暫存無殘留。存活但未 ready 的 backend、Ready 已觀察後中斷、Restoring 再失敗與通知政策仍待完成；未宣稱全 crash matrix 或真模型驗收（feat/g13-install，未合併）。
 
 - 2026-10-08：13C 將經啟動身分驗證的目前代 AgentExited 與 driver 斷線分開；目的 backend 原生退出後先持久回退意圖、排空回覆與 worker，再核精確 holder 停止及恢復舊版本／session。canary 全 14 項、daemon 186 項（1 ignored）通過；補設定快照保護後重驗 Codex 退出案例。初輪 fixture 只讓 app-server 退出而外層包裝仍活著，保留失敗 log；改成完成交接後 TUI 自行退出。app-server 單獨失敗、啟動掛住與完整 crash／通知政策仍待處理（feat/g13-install，未合併）。
+
+- 2026-10-08：13C 換版問題持久保存原因／首次等待時間，正式 status 與「需要你」顯示，重啟恢復且不提供一般 Retry；成功完成／取消／移除時清除。原生 Codex app-server 退出但 wrapper／holder 存活測試核通知、重啟同一等待時間與 holder 通過；Store 10、core 125、daemon 186（1 ignored）、client 52 項及 fmt／clippy／check-deps 通過。測試找出 pipeline 同步誤刪通知並修復；另修正測試對省略空 actions 的錯誤假設，保留失敗證據。自有 switch／Store／canary 暫存無殘留；存活 backend 啟動逾時與完整故障矩陣仍未完成（feat/g13-install，未合併）。

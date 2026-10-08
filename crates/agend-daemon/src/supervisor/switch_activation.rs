@@ -68,6 +68,7 @@ impl Supervisor {
         .await;
         if let Err(error) = attempt {
             log::line(&format!("{id}: automatic backend rollback held: {error}"));
+            self.report_switch_problem(id, &error).await;
         }
     }
 
@@ -287,7 +288,9 @@ impl Supervisor {
             if record.phase == BackendSwitchPhase::RollbackPrepared {
                 // Server reply fencing exists only after boot. Resume the
                 // persisted rollback here, whether its holder survived or not.
-                let _ = self.activate_switch(&instance, &record.id, true).await;
+                if let Err(error) = self.activate_switch(&instance, &record.id, true).await {
+                    self.report_switch_problem(&instance.id, &error).await;
+                }
                 continue;
             }
             if !matches!(
@@ -298,6 +301,7 @@ impl Supervisor {
             }
             let result = self.finish_switch(&instance, &record).await;
             if let Ok(true) = result {
+                self.dismiss_switch_problem(&record);
                 log::line(&format!(
                     "{}: backend switch {} activated",
                     instance.id, record.id

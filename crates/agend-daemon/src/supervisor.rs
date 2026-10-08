@@ -572,6 +572,9 @@ impl Supervisor {
         );
         let now = log::now_unix_ms();
         for instance in &instances {
+            if let Ok(Some(record)) = self.store.backend_switch(&instance.id).await {
+                self.show_switch_problem(&record);
+            }
             if instance.status == InstanceStatus::Failed {
                 self.show(instance, AgentState::Failed, "failed".into());
                 let reason = if instance.legacy_no_thread {
@@ -980,6 +983,8 @@ impl Supervisor {
         if self.switch_holds_recovery(id).await {
             if holder_gone || agent_exited {
                 self.rollback_lost_candidate(id, agent_exited).await;
+            } else {
+                self.report_switch_problem(id, &what).await;
             }
             return;
         }
@@ -1197,12 +1202,16 @@ impl Supervisor {
             ));
         }
         self.sweep(&instance, "removed").await;
+        let switch = self.store.backend_switch(id).await.map_err(read)?;
         self.store.remove_instance(id).await.map_err(|e| {
             (
                 error_code::INVALID_REQUEST,
                 format!("cannot remove {id}: {e}"),
             )
         })?;
+        if let Some(record) = switch {
+            self.dismiss_switch_problem(&record);
+        }
         self.fleet.remove_instance(id);
         log::line(&format!(
             "{id}: removed (workspace kept at {})",
