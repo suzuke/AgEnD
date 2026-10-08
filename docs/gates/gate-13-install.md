@@ -299,3 +299,5 @@ Brew 原生安裝驗證已接入 release workflow 的 macOS ARM64／Linux x86_64
 - 2026-10-08：收齊版本監測整關驗收失敗：Codex 假 backend 版本 probe 逾時；macOS CI pipeline 兩項失敗與舊 fake-worker 搶 inbox 路徑相符。重建 e64e629 fixture 後 pipeline 15/15 通過；Codex 原失敗單例通過但根因未定，保留失敗與診斷證據，整關仍未通過（feat/g13-install）。
 
 - 2026-10-08：Codex canary 單例與原預設並行 17 項均通過，原版本探測逾時尚未穩定重現；新增只含等待時間／期限／輸出位元組數的診斷，無原始內容、無重試、不延長期限。process 原生生命週期 4 項、clippy／fmt／check-deps 通過，自有 probe 暫存已清；不宣稱整關通過（feat/g13-install）。
+
+- 2026-10-08：9a8bcf7 雙平台 CI 已結束失敗，Ubuntu 為 GitHub pipeline WIP 封存案例，使用相同舊 fake-worker。修正後本機 GitHub pipeline 5/5 通過；f762f47 逾時診斷經獨立唯讀覆核無 blocker。批次推送前保留兩平台失敗 log，未宣稱 Linux 已由本機 macOS 重驗取代（feat/g13-install）。
