@@ -259,3 +259,5 @@ SQLite 中每個 task 的固定 repository ID、branch、nonce 與 PR number；�
 - **SystemVersionObservation**：每個 instance 的外部 CLI 磁碟版本觀測紀錄；含不可沿用的 generation、探測 attempt、最後成功值與精確確認 revision。首次成功只建基準，並非既存 holder 已載入該版本的證據。
 
 - **backend 診斷快照（BackendDiagnostic）**：daemon 在同一資料庫交易讀取的當前配置與相符版本觀測／受管啟動意圖摘要；回覆綁 daemon boot ID，不含 args、session 或環境。屬歷史觀測與預約證據，不證明目前登入或執行映像。
+
+- **能力政策（BackendCapabilityPolicy）**：daemon 對一項具名能力所採用的版本規則、額外條件及證據範圍；不是 runtime eligibility 或已授予控制權的回覆。見[backend 能力政策](architecture/backend-capabilities.md)。

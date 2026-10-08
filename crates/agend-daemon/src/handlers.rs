@@ -24,6 +24,7 @@
 //! (socket, future MCP adapter) carried the call.
 
 pub mod agent;
+mod backend_capabilities;
 pub(crate) mod backend_registry;
 pub(crate) mod backend_version;
 pub(crate) mod claude_attention;

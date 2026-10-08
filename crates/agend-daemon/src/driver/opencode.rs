@@ -5,6 +5,10 @@
 //!
 //! Must NOT: treat SSE as the only source of permission requests.
 
+/// Separate policies: changing endpoint admission must not widen permission replies.
+pub const UNMANAGED_ENDPOINT_VERSION: &str = "1.18.34";
+pub const PERMISSION_REPLY_VERSION: &str = "1.18.34";
+
 pub mod api;
 pub mod driver;
 pub mod history;

@@ -270,3 +270,5 @@ Canary 版本探測逾時只記錄 elapsed_ms、budget_ms 與 stdout_bytes（或
 Doctor 的 PATH backend 列只證明操作員 PATH 的版本 probe；`backend/<instance>` 只描述設定程式／受管 bytes，`compatibility/<instance>` 另列歷史 canary 的 backend、版本、兩個 digest、平台、時間與要求模型。成功歷史仍為 warn，因為沒有當前 daemon build／登入／其他能力的證據；沒有正式 auth producer 時，獨立 `authentication` 列明示 unknown。`install_home` 驗 probe 成功／Idle／缺失收據不變成登入成功；`backend_canary` 用正式 runner 的三 backend 收據驗歷史範圍，再變造 build digest 驗拒絕。daemon 唯讀診斷快照、完整能力矩陣與真登入驗收仍未完成。
 
 backend_version_monitor 的三次真 daemon 啟動案例同時驗 BackendDiagnostic 的正式 RPC／one-shot decoder／doctor consumer、agent 拒絕、1.8 拒絕、未知 instance、唯讀不改 attempt。doctor::observations 的正式 SQLite snapshot 驗 boot 與配置邊界；這些案例仍只用本機假 backend，沒有模型呼叫。
+
+backend_canary 的三 backend 原生 managed fleet 透過 doctor 消費正式 daemon 的 capability rows；仍為 Warn，不把 canary 通過升格為全部能力准入。boot／配置反例帶非空 policy sentinel，確保邊界失配不展示政策。

@@ -75,5 +75,28 @@ pub struct ManagedDiagnostic {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BackendDiagnosticReply {
     pub boot_id: u64,
+    pub policies: alloc::vec::Vec<BackendCapabilityPolicy>,
     pub snapshot: Option<BackendDiagnostic>,
+}
+
+/// A rule of the responding daemon, never a grant or runtime eligibility result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackendCapabilityPolicy {
+    pub capability_id: String,
+    pub policy_kind: CapabilityPolicyKind,
+    pub version_constraint: String,
+    pub additional_requirements: String,
+    pub evidence_scope: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapabilityPolicyKind {
+    ExactVersion,
+    RecordedFrames,
+    ScopedVersion,
+    Disabled,
+    VerificationOverride,
+    #[serde(other)]
+    Unknown,
 }

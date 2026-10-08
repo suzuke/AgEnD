@@ -110,3 +110,5 @@ Client protocol 1.8 提供 backend switch prepare／status／cancel；一般連�
 Protocol 1.9 加入 TelegramPairing 操作員 request／收據；one-shot preparation 計入所有可變字串，deadline decoder 處理 nullable 配對收據。一般連線仍相容舊 daemon，配對呼叫者必須要求 1.9 且不重送。
 
 BackendDiagnostic 的1.9 nullable snapshot 包在帶 boot ID 的回覆內，由 one-shot deadline decoder 解析。doctor 使用 exchange_once 並核對 fleet 的 daemon boot；通用 request 的 Redo::Never 仍可能在寫入失敗時重連，不能拿來維持同一 boot 的診斷身分。
+
+BackendDiagnosticReply 的 policies 描述回覆 daemon 的規則；一次性 decoder 保留結構化 policy kind／constraint／requirements／scope，Unknown kind 不代表支援或准入。

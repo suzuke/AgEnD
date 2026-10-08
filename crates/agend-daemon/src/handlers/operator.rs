@@ -96,6 +96,12 @@ pub async fn handle(ctx: &Context, data: OperatorData) -> Outcome {
                         data: Box::new(
                             agend_core::setup::backend::observation::BackendDiagnosticReply {
                                 boot_id: ctx.fleet.base(),
+                                policies: data
+                                    .as_ref()
+                                    .map(|row| {
+                                        super::backend_capabilities::policies(row, &ctx.codex_input)
+                                    })
+                                    .unwrap_or_default(),
                                 snapshot: data,
                             },
                         ),

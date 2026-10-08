@@ -95,3 +95,5 @@ Terminal frame 解碼維持原 internally-tagged serde 路徑；RawValue 優化�
 13D `agend/tests/telegram_pairing.rs` 對正式 daemon producer 驗 one-shot nullable／非空配對收據，不用手寫 response JSON；既有 client 版本錯誤測試涵蓋 1.9 offer。
 
 BackendDiagnostic one-shot decoder 由 agend/tests/backend_version_monitor.rs 的正式 daemon 回覆驗證。既有 once 測試保持丟失回覆不重送、hello 與 reply 共用期限的保證。
+
+BackendDiagnosticReply 的非空 policy 清單由三 backend 的 native managed fleet doctor 測試消費正式回覆；這是描述型資料，不取代 driver 的准入判定。

@@ -96,7 +96,7 @@ pub(crate) async fn answer(ctx: &Context, data: AnswerAskData) -> ClientResponse
             .ok_or("OpenCode holder unavailable")?;
         let layout = Layout::new(store.home(), &instance.id)?;
         let (port, version) = layout.endpoint(holder).map_err(|e| e.to_string())?;
-        if version != "1.18.34" {
+        if version != crate::driver::opencode::PERMISSION_REPLY_VERSION {
             return Err("unverified OpenCode version".into());
         }
         let http = Http::new(

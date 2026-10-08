@@ -529,6 +529,37 @@ fn managed_fleet(lab: &lab::Lab, home: &Path, backend: &str, version: &str) {
             .unwrap();
         serde_json::from_str::<ManagedLaunchIntent>(&json).unwrap()
     };
+    let diagnostic = cli(home, &lab.root, &["doctor"]);
+    let rows: Vec<Value> = serde_json::from_slice(&diagnostic.stdout).unwrap();
+    let policies: Vec<_> = rows
+        .iter()
+        .filter(|row| {
+            row["check"]
+                .as_str()
+                .unwrap()
+                .starts_with("capability/managed/")
+        })
+        .collect();
+    let expected = match backend {
+        "codex" => vec![("codex_terminal_input", "codex-cli 0.159.3")],
+        "claude" => vec![("claude_startup_frame_recognition", "2.1.284")],
+        "opencode" => vec![
+            ("opencode_driver_endpoint", "1.18.34"),
+            ("opencode_permission_reply", "1.18.34"),
+        ],
+        _ => unreachable!(),
+    };
+    assert_eq!(policies.len(), expected.len());
+    for (capability, version) in expected {
+        let policy = policies
+            .iter()
+            .find(|row| row["check"] == format!("capability/managed/{capability}"))
+            .unwrap();
+        assert_eq!(policy["status"], "warn");
+        let detail = policy["detail"].as_str().unwrap();
+        assert!(detail.contains(version));
+        assert!(detail.contains("runtime eligibility unknown"));
+    }
     let holders = lab.running_holders();
     assert_eq!(holders.len(), 1);
     daemon.interrupt().unwrap();

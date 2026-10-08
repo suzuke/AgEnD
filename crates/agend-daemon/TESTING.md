@@ -331,3 +331,5 @@ system_version 四項 native 測試涵蓋 daemon PATH／相對 cwd、版本替�
 跨程序版本 monitor 的三次 daemon 啟動、socket operator／agent 邊界與確認持久化，另見 agend 的 `backend_version_monitor` integration suite。
 
 store::system_versions 診斷案例驗失敗保留歷史成功、配置 scope 改變不回傳舊紀錄、刪除 instance 得 None、managed args 變動不冒用預約且不刪原證據。tests/managed_launch.rs 驗正式 reservation producer 的 projection 排除 args／session；跨 RPC 的 agent／版本拒絕與 doctor consumer 見 agend backend_version_monitor。
+
+handlers::backend_capabilities 驗 Codex default／approved／verification-own／verification-other；既有 OpenCode driver／permission 回歸保留版本與身分條件，三 backend 的政策 consumer 由 agend backend_canary 真 daemon／假 backend 案例驗證。

@@ -181,3 +181,5 @@ SystemBackendVersion 保存外部設定程式的解析路徑、版本輸出與�
 `Config.backend_version_checks` 可獨立關閉本機外部 CLI 的版本探測；未設定時啟用，不改 registry_checks 的網路查詢語意。
 
 未發布的 client 1.9 增加 BackendDiagnostic 唯讀 operator RPC。BackendDiagnosticReply 綁 daemon boot ID，snapshot 只含當前設定、相符外部版本紀錄及受管 pre-spawn reservation 的 binding／artifact 投影，不回傳 args、session 或環境；不是 loaded-holder 或 live-auth 證據。
+
+BackendCapabilityPolicy 描述具名能力的版本規則、額外條件與證據範圍；不是 runtime eligibility。Codex 精確輸出常數與實際 policy 共用；Claude 的錄製來源標籤與實際 frame 尺寸分開，辨識仍以完整錄製 frame 為準。

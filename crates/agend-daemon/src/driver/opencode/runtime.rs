@@ -144,7 +144,7 @@ fn run(
         // before creating the managed launch and holder.
         artifact.version
     } else {
-        "1.18.34".into()
+        super::UNMANAGED_ENDPOINT_VERSION.into()
     };
     if version != expected {
         return Err(format!(
