@@ -141,3 +141,5 @@ cat docs/gates/gate-13-install.md
 - 2026-10-08：修正固定 launcher 重啟時的重複雜湊，重用快照驗證產生的檔案身分 binding；保留 running image／摘要／ownership 檢查與 10 秒 CLI 等待期限。原失敗 CLI table 原生重跑通過（38.92 秒），snapshot 2 項與 pinned launcher 1 項、clippy、check-deps 通過，聚焦獨立覆核未發現 blocker。同時更新 client 1.7 協商斷言；整關 CI／持久啟動紀錄仍待完成（feat/g13-install，未合併）。
 
 - 2026-10-08：13C migration 0018 新增受管啟動意圖，UUID、artifact 與啟動參數在同一 SQLite transaction 以 instance 快照及舊 binding CAS 保存；明確移除 instance 時 cascade，重建不繼承。原生 SQLite 新測試 2 項、既有 store 42 項及 core 149 項通過（2 項既有 ignored 未執行），fmt／clippy／check-deps 通過；聚焦覆核無 blocker，測試暫存已清理。supervisor／runtime 串接與准入仍未完成（feat/g13-install，未合併）。
+
+- 2026-10-08：13C reserved runtime 接入 SpawnBound／GetLaunchBinding，持久 UUID／PID 核對後才發布 writer；重連不送 Spawn，不符時保留 holder。未驗證 Exited 暫存，intentional close 不誤報失敗且核對可取消。原生 holder 7 項、runtime 19 項、終端 hub 8 項與 fmt／clippy／check-deps 通過，聚焦覆核缺口已修正；清除重複驗證 logs。supervisor 的受管啟動／版本准入決策尚未串接（feat/g13-install，未合併）。

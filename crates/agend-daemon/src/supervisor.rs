@@ -452,9 +452,14 @@ impl Supervisor {
     }
 
     async fn record_agent_pid(&self, id: &str, spawn: Option<SpawnOutcome>) {
-        if let Some(SpawnOutcome::Spawned {
-            agent_pid: Some(pid),
-        }) = spawn
+        if let Some(
+            SpawnOutcome::Spawned {
+                agent_pid: Some(pid),
+            }
+            | SpawnOutcome::BoundExisting {
+                agent_pid: Some(pid),
+            },
+        ) = spawn
             && let Err(e) = self.store.set_agent_pid(id, Some(pid)).await
         {
             log::line(&format!("{id}: cannot record agent_pid: {e}"));
@@ -1155,6 +1160,17 @@ impl Supervisor {
                 Event::Holder(HolderEvent::HolderGone { id, generation }) => {
                     let what = format!("holder {id} died");
                     self.died(&id, generation, what, true).await;
+                }
+                Event::Holder(HolderEvent::LaunchBindingRejected {
+                    id,
+                    generation,
+                    error,
+                }) => {
+                    if self.watches.get(&id).is_some_and(|watch| {
+                        watch.generation == generation && watch.state == State::Up
+                    }) {
+                        self.fail(&id, &error).await;
+                    }
                 }
                 Event::StartFailed {
                     id,

@@ -192,3 +192,5 @@ Canary 必須取得三筆與 delivery 綁定的 completed outcomes；修改 fail
 `cargo test -p agend --test pinned_launcher` 在自有短路徑 Lab 啟動正式 daemon，原地以 false 替換原始 AgEnD 路徑，再以正式 InstanceAdd 啟動 bash fixture；核對 holder 與 shim 使用固定副本、daemon 停止後 holder／副本保留，以及停止自有 holder 後整個 Lab 可清除。無模型或主機服務註冊。
 
 `backend_canary` 的三 backend 原生整合案例使用正式預設 180 秒總期限；期限仍涵蓋版本探測、三回合、最終驗證與清理。Ubuntu debug binary 的複製／雜湊在並行測試下曾使 60 秒測試預算於最終驗證逾時（三回合已完成），因此測試與正式預設對齊；這不放寬產品期限，也不代表真模型已驗證。
+
+`holder_runtime` 新增 SQLite 預存 UUID → native holder 啟動 → 新 runtime 重連同一 agent PID、錯 UUID／legacy holder 拒絕且保留程序、未驗證 holder 的歷史 Exited 不送入 supervisor 三項。既有 RTM-1..9 與四 boot 跨程序案例持續驗證。此批是 holder 連線契約，尚未開放 CLI 受管版本准入。

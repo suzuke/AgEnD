@@ -176,7 +176,7 @@ impl HolderRuntime {
     pub async fn start(&self, launch: &HolderLaunch) -> Result<Started, RuntimeError> {
         let inner = Arc::clone(&self.inner);
         let launch = launch.clone();
-        blocking(move || inner.start(&launch, None)).await
+        blocking(move || inner.start(&launch, None, None)).await
     }
 
     /// Sets a recorded startup geometry before Spawn, only for a new holder.
@@ -190,6 +190,7 @@ impl HolderRuntime {
                     rows: 24,
                     columns: 100,
                 }),
+                None,
             )
         })
         .await
@@ -202,7 +203,56 @@ impl HolderRuntime {
         let inner = Arc::clone(&self.inner);
         let launch = launch.clone();
         blocking(move || {
-            let (attached, generation) = inner.attach(&launch, None)?;
+            let (attached, generation) = inner.attach(&launch, None, None)?;
+            Ok(Started {
+                handle: inner.handle(&launch.instance_id, pid),
+                attached,
+                generation,
+            })
+        })
+        .await
+    }
+
+    /// Uses an already persisted reservation. Artifact admission is the caller's responsibility.
+    pub async fn start_reserved(
+        &self,
+        intent: &agend_core::runtime_records::ManagedLaunchIntent,
+        claude_geometry: bool,
+    ) -> Result<Started, RuntimeError> {
+        let launch = reserved_launch(intent)?;
+        let binding = intent.binding.clone();
+        let inner = Arc::clone(&self.inner);
+        blocking(move || {
+            inner.start(
+                &launch,
+                claude_geometry.then_some(agend_core::protocol::terminal::TerminalSize {
+                    rows: 24,
+                    columns: 100,
+                }),
+                Some(binding),
+            )
+        })
+        .await
+    }
+
+    /// Only queries the existing holder's original binding; never sends Spawn.
+    pub async fn attach_reserved(
+        &self,
+        intent: &agend_core::runtime_records::ManagedLaunchIntent,
+        pid: u32,
+    ) -> Result<Started, RuntimeError> {
+        let launch = reserved_launch(intent)?;
+        let binding = intent.binding.clone();
+        let inner = Arc::clone(&self.inner);
+        blocking(move || {
+            let (attached, generation) = inner.attach(
+                &launch,
+                None,
+                Some(link::LaunchProof {
+                    binding,
+                    reconnect: true,
+                }),
+            )?;
             Ok(Started {
                 handle: inner.handle(&launch.instance_id, pid),
                 attached,
@@ -311,6 +361,22 @@ async fn blocking<T: Send + 'static>(
     }
 }
 
+fn reserved_launch(
+    intent: &agend_core::runtime_records::ManagedLaunchIntent,
+) -> Result<HolderLaunch, RuntimeError> {
+    if !agend_core::protocol::client::is_uuid_v4(&intent.binding) {
+        return Err(err("invalid persisted launch binding"));
+    }
+    Ok(HolderLaunch {
+        instance_id: intent.instance_id.clone(),
+        backend: agend_core::model::Backend::parse(&intent.artifact.backend)
+            .ok_or_else(|| err("invalid managed backend"))?,
+        executable: intent.executable.clone(),
+        args: intent.args.clone(),
+        working_directory: intent.working_directory.clone(),
+    })
+}
+
 impl Inner {
     fn lock_links(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, link::Link>> {
         self.links.lock().unwrap_or_else(|e| e.into_inner())
@@ -328,6 +394,7 @@ impl Inner {
         &self,
         launch: &HolderLaunch,
         initial_size: Option<agend_core::protocol::terminal::TerminalSize>,
+        binding: Option<String>,
     ) -> Result<Started, RuntimeError> {
         let id = &launch.instance_id;
         validate_id(id).map_err(err)?;
@@ -377,7 +444,14 @@ impl Inner {
         if let Err(e) = reaper {
             return Err(err(format!("cannot start the reaper thread: {e}")));
         }
-        let (attached, generation) = self.attach(launch, initial_size)?;
+        let (attached, generation) = self.attach(
+            launch,
+            initial_size,
+            binding.map(|binding| link::LaunchProof {
+                binding,
+                reconnect: false,
+            }),
+        )?;
         Ok(Started {
             handle: self.handle(id, pid),
             attached,
@@ -389,6 +463,7 @@ impl Inner {
         &self,
         launch: &HolderLaunch,
         initial_size: Option<agend_core::protocol::terminal::TerminalSize>,
+        proof: Option<link::LaunchProof>,
     ) -> Result<(Attached, u64), RuntimeError> {
         let id = launch.instance_id.clone();
         // The old link first: a new connection takes over the old one, which
@@ -410,6 +485,7 @@ impl Inner {
             id.clone(),
             generation,
             Some(spawn),
+            proof,
             initial_size,
             Arc::clone(&self.sink),
         )

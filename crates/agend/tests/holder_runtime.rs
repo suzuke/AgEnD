@@ -271,3 +271,130 @@ fn four_boots_with_a_new_home_each_boot_fail() {
     assert!(error.starts_with("boot 2 failed"), "{error}");
     assert!(error.contains("boot 2 recovered []"), "{error}");
 }
+
+fn reserve(home: &Path, launch: &HolderLaunch) -> agend_core::runtime_records::ManagedLaunchIntent {
+    use agend_core::runtime_records::{Instance, InstanceStatus};
+    use agend_core::setup::backend::ImportedBackend;
+    let store = agend_daemon::store::SqliteStore::open(home, 0).unwrap();
+    let instance = Instance {
+        id: launch.instance_id.clone(),
+        backend: launch.backend,
+        program: launch.executable.clone(),
+        args: launch.args.clone(),
+        working_directory: launch.working_directory.clone(),
+        session_id: Some("test-session".into()),
+        status: InstanceStatus::New,
+        session_started: false,
+        agent_pid: None,
+        legacy_no_thread: false,
+        delivery: "push".into(),
+    };
+    block_on(store.add_instance(&instance)).unwrap();
+    let artifact = ImportedBackend {
+        format: 1,
+        backend: launch.backend.as_str().into(),
+        version: "native-fixture".into(),
+        sha256: agend_daemon::backend_versions::fingerprint(Path::new(&launch.executable)).unwrap(),
+        bytes: std::fs::metadata(&launch.executable).unwrap().len(),
+    };
+    block_on(store.prepare_managed_launch(&instance, launch, artifact, None)).unwrap()
+}
+
+#[test]
+fn persisted_binding_reconnects_same_native_child_and_refuses_a_different_intent() {
+    use agend_daemon::runtime::SpawnOutcome;
+    let lab = lab::Lab::new(Path::new(BIN));
+    let home = lab.home(1);
+    let launch = launch(
+        &home,
+        "bound",
+        "printf 'started\\n' >> starts; exec sleep 600",
+    );
+    let intent = reserve(&home, &launch);
+    let rt = runtime(&home);
+    let started = block_on(rt.start_reserved(&intent, false)).unwrap();
+    let pid = started.handle.process_id.unwrap();
+    let Some(SpawnOutcome::Spawned { agent_pid }) = started.attached.spawn else {
+        panic!("fresh bound spawn");
+    };
+    drop(rt);
+    let store = agend_daemon::store::SqliteStore::open(&home, 1).unwrap();
+    let saved = block_on(store.managed_launch("bound")).unwrap().unwrap();
+    drop(store);
+    assert_eq!(intent, saved);
+    let rt = runtime(&home);
+    let mut wrong = saved.clone();
+    wrong.binding = agend_daemon::store::instances::new_session_id().unwrap();
+    assert!(block_on(rt.attach_reserved(&wrong, pid)).is_err());
+    assert_eq!(files::running(&home, "bound").unwrap(), Some(pid));
+    let attached = block_on(rt.attach_reserved(&saved, pid)).unwrap();
+    assert_eq!(
+        attached.attached.spawn,
+        Some(SpawnOutcome::BoundExisting { agent_pid })
+    );
+    assert_eq!(
+        std::fs::read_to_string(home.join("starts")).unwrap(),
+        "started\n"
+    );
+    block_on(rt.stop("bound")).unwrap();
+    assert!(lab.running_holders().is_empty());
+}
+
+#[test]
+fn persisted_intent_does_not_adopt_a_legacy_holder() {
+    let lab = lab::Lab::new(Path::new(BIN));
+    let home = lab.home(1);
+    let launch = launch(&home, "unbound", "exec sleep 600");
+    let rt = runtime(&home);
+    let started = block_on(rt.start(&launch)).unwrap();
+    let pid = started.handle.process_id.unwrap();
+    drop(rt);
+    let intent = reserve(&home, &launch);
+    let rt = runtime(&home);
+    assert!(block_on(rt.attach_reserved(&intent, pid)).is_err());
+    assert_eq!(files::running(&home, "unbound").unwrap(), Some(pid));
+    block_on(rt.stop("unbound")).unwrap();
+    assert!(lab.running_holders().is_empty());
+}
+
+#[test]
+fn rejected_binding_does_not_publish_an_unverified_holders_exit() {
+    use agend_daemon::runtime::HolderEvent;
+    let lab = lab::Lab::new(Path::new(BIN));
+    let home = lab.home(1);
+    let launch = launch(&home, "exited", "exit 0");
+    let (tx, rx) = std::sync::mpsc::channel();
+    let rt = HolderRuntime::new(
+        &home,
+        Path::new(BIN),
+        Vec::new(),
+        Arc::new(move |event| {
+            tx.send(event).unwrap();
+        }),
+    );
+    let started = block_on(rt.start(&launch)).unwrap();
+    let pid = started.handle.process_id.unwrap();
+    assert!(matches!(
+        rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+        HolderEvent::AgentExited { .. }
+    ));
+    drop(rt);
+    let intent = reserve(&home, &launch);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let rt = HolderRuntime::new(
+        &home,
+        Path::new(BIN),
+        Vec::new(),
+        Arc::new(move |event| {
+            let _ = tx.send(event);
+        }),
+    );
+    assert!(block_on(rt.attach_reserved(&intent, pid)).is_err());
+    assert!(
+        rx.try_recv().is_err(),
+        "unverified Exited must not reach supervisor"
+    );
+    assert_eq!(files::running(&home, "exited").unwrap(), Some(pid));
+    block_on(rt.stop("exited")).unwrap();
+    assert!(lab.running_holders().is_empty());
+}
