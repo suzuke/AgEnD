@@ -236,3 +236,5 @@ Canary 必須取得三筆與 delivery 綁定的 completed outcomes；修改 fail
 `cargo test -p agend --test telegram_pairing` 跑真 daemon／正式 client／CLI：nullable 與有資料收據解碼、兩次重啟、舊 ID／agent／過期拒絕、1.8 capability 拒絕、CLI JSON 與相對 token 路徑拒絕。fixture 經正式 Store 建立；不接真 bot、不讀 token。
 
 13D `telegram::apply` 五項檔案測試驗原文／0600／冪等、未確認／不同設定／symlink 拒絕、安裝鎖、原檔變更、備份撞名與失敗暫存清理。`telegram_pairing` 另由正式 Store 生產已確認收據，經真 daemon RPC 與 CLI apply 驗指定 ID、agent 拒絕、備份與 idempotency；不重啟套用後的 daemon，避免解析 fixture token／連外。
+
+13E `install_home` 現在以真 CLI doctor JSON 驗故障與恢復：缺 home／權限過寬、Telegram 損壞且原文不變、sandbox 工具缺失及原生恢復、三 backend PATH 遺失及只允許 --version 的 fixture 恢復；每個非 ok 結果須有 fix，exit code 必須對應所有 checks 的 fail。這不涵蓋磁碟容量、登入、版本相容或真服務健康的完整驗收。

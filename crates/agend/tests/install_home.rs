@@ -118,3 +118,71 @@ fn init_refuses_v1_default_and_never_follows_config_symlinks() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("regular file"));
     assert_eq!(fs::read_to_string(foreign).unwrap(), "untouched");
 }
+
+fn diagnostic(mut cmd: Command, name: &str, status: &str) -> serde_json::Value {
+    let out = cmd.args(["doctor", "--json"]).output().unwrap();
+    let checks: Vec<serde_json::Value> =
+        serde_json::from_slice(&out.stdout).unwrap_or_else(|e| panic!("doctor JSON: {e}: {out:?}"));
+    let check = checks.iter().find(|c| c["check"] == name).unwrap();
+    assert_eq!(check["status"], status, "{out:?}");
+    if status != "ok" {
+        assert!(!check["fix"].as_str().unwrap().is_empty(), "{check}");
+    }
+    assert_eq!(
+        out.status.code(),
+        Some(i32::from(checks.iter().any(|c| c["status"] == "fail")))
+    );
+    check.clone()
+}
+
+#[test]
+fn doctor_home_and_telegram_failures_recover_without_rewriting_config() {
+    let root = TempDir::new("g13-doctor-home").unwrap();
+    diagnostic(command(root.path()), "home", "fail");
+    init(root.path());
+    let home = root.path().join(".agend");
+    let config = home.join("config.toml");
+    let original = fs::read(&config).unwrap();
+    diagnostic(command(root.path()), "home", "ok");
+    fs::set_permissions(&home, fs::Permissions::from_mode(0o755)).unwrap();
+    diagnostic(command(root.path()), "home", "warn");
+    fs::set_permissions(&home, fs::Permissions::from_mode(0o700)).unwrap();
+    diagnostic(command(root.path()), "home", "ok");
+    fs::write(&config, "[telegram\n").unwrap();
+    diagnostic(command(root.path()), "telegram", "fail");
+    assert_eq!(fs::read_to_string(&config).unwrap(), "[telegram\n");
+    fs::write(&config, &original).unwrap();
+    diagnostic(command(root.path()), "telegram", "ok");
+    assert_eq!(fs::read(&config).unwrap(), original);
+}
+
+#[test]
+fn doctor_sandbox_missing_tool_recovers_using_the_native_probe() {
+    let root = TempDir::new("g13-doctor-sandbox").unwrap();
+    init(root.path());
+    let mut broken = command(root.path());
+    broken.env("AGEND_SANDBOX_TOOL", root.path().join("missing-sandbox"));
+    diagnostic(broken, "sandbox", "fail");
+    diagnostic(command(root.path()), "sandbox", "ok");
+}
+
+#[test]
+fn doctor_backend_path_failure_recovers_without_starting_models() {
+    let root = TempDir::new("g13-doctor-backend").unwrap();
+    init(root.path());
+    for backend in ["claude", "codex", "opencode"] {
+        diagnostic(command(root.path()), backend, "warn");
+        let tool = root.path().join(backend);
+        fs::write(
+            &tool,
+            "#!/bin/sh\n[ \"$1\" = --version ] || exit 91\nprintf 'fixture-version\\n'\n",
+        )
+        .unwrap();
+        fs::set_permissions(&tool, fs::Permissions::from_mode(0o755)).unwrap();
+        let mut restored = command(root.path());
+        restored.env("PATH", format!("{}:/usr/bin:/bin", root.path().display()));
+        let check = diagnostic(restored, backend, "ok");
+        assert_eq!(check["detail"], "fixture-version");
+        fs::remove_file(tool).unwrap();
+    }
+}

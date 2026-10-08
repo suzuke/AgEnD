@@ -233,3 +233,5 @@ cat docs/gates/gate-13-install.md
 - 2026-10-08：13E 安裝 smoke 使用已驗 `869a664` macOS ARM64 archive，解壓後全新 HOME init、0700／0600 權限、正式 daemon／holder 與 fake worker 完成 checks／review／核准／唯一 merge，archive 到完成含清理 9.81 秒；設定原文保留、worktree 消失。新增 pipeline_probe install 與 release_install_smoke.py，接四平台 workflow；fmt、範例 clippy、actionlint、check-deps 通過，自有目錄與匹配 holder／worker 無殘留。此證據使用 fake worker／fixture 設定，不宣稱真 backend 首任務、Brew install 或整關完成（feat/g13-install，未合併）。
 
 - 2026-10-08：13E 四平台 native release 及 formula job 在 run 37738455556（0825e23）全部通過，保留生成公式；該 run 尚未含後續首任務 smoke。macOS ARM64 以 `cargo install --locked --path crates/agend --root <自有暫存>` 安裝 c085ddf，真 installed binary + fake worker 首任務通過，含建置共 100.699 秒，prefix 已刪。補安裝文件並明列 crates.io 未發布、真 backend／Brew 安裝與完整驗收待補（feat/g13-install，未合併）。
+
+- 2026-10-08：13E doctor 補真 CLI 故障／恢復案例：缺 HOME、0755→0700、Telegram 語法損壞且不覆寫、sandbox 工具缺失→真 probe 恢復、三 backend 缺 PATH→僅 --version fixture 恢復。install_home 共 7 項通過、focused clippy 通過；未執行真模型。磁碟容量故障、服務／登入／版本診斷與整關矩陣仍未完成（feat/g13-install，未合併）。

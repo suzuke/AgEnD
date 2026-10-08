@@ -102,3 +102,5 @@ cargo run -p agend -- --version
 目的版本提交為 Committed 或 Restoring 時，同一交易保存 300 秒 activation deadline；重啟、重複觀察及問題通知都不重新計時，真正開始還原才建立新的期限。到期且仍未通過 native readiness，下一次協調檢查保存逾時問題、保持投遞暫停與原 holder。到期不等於閒置，不授權強制停止；稍後通過 readiness 仍可完成並清除通知／期限。舊持久紀錄若沒有 deadline，未完成時明確提示缺少期限，不能當作重新獲得五分鐘。
 
 13D 新增 `agend telegram setup begin --token-env NAME`（或 `--token-file /absolute/private/file`）、`status`、`poll --id ID`、`confirm --id ID --chat CHAT --user USER [--topic TOPIC]`、`cancel --id ID`。token 只由 daemon 解析，CLI 不讀秘密或聯絡 Telegram；操作不重送，斷線查 status。確認保存收據；再執行 `agend telegram setup apply --id ID`，由操作員 CLI 保留原文、備份並加入 Telegram 設定。不同的既有 Telegram 設定拒絕覆寫，相同設定重跑不變；套用後需重啟 daemon 生效。
+
+13E `install_home` 現在以真 CLI doctor JSON 驗故障與恢復：缺 home／權限過寬、Telegram 損壞且原文不變、sandbox 工具缺失及原生恢復、三 backend PATH 遺失及只允許 --version 的 fixture 恢復；每個非 ok 結果須有 fix，exit code 必須對應所有 checks 的 fail。這不涵蓋磁碟容量、登入、版本相容或真服務健康的完整驗收。
