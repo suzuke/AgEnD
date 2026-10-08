@@ -72,6 +72,8 @@
 
 ## 進度紀錄
 
+- 2026-10-08：pipeline fixture 清理不再忽略 holder Shutdown 錯誤；失敗保留 home／repo 並回報。真 holder socket 暫移→拒絕刪除→恢復 socket→正常退出與刪除的回歸通過，既有 pipeline 15/15、workspace clippy／fmt／check-deps 通過，獨立局部覆核無 blocker；僅涵蓋已登錄 holder shutdown 錯誤，未擴稱所有清理競態已驗證（PR #158）。
+
 - 2026-10-08：固定 `d46d53b` 整關 accept install exit 0（2,039.20 秒、起訖 HEAD 相同且乾淨）；fake 全新 HOME 首任務 4,853 ms、一次 merge，demo root／匹配程序已核清理。release-artifacts 37791663365 四平台 archive、formula、雙平台 Brew 七 jobs 全過；同版雙平台 CI 37791469987 全過，7907e7e 偶發失敗根因仍未知，真 backend／Telegram／macOS 服務與最終覆核仍待完成（PR #158，未合併）。
 
 - 2026-10-08：13C OpenCode 接入獨立回合證據，核對 native parentID／literal input／成功回覆及查詢前後 session／holder／endpoint；真 1.18.34 capture 反例與原生 fake CLI canary 驗證，保留不准入與不切換 fleet 的邊界。Claude outcome 與整體版本切換仍待完成（feat/g13-install，未合併）。
