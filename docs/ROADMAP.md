@@ -354,3 +354,5 @@
 - 2026-10-08：13C migration 0018 新增受管啟動意圖，UUID、artifact 與啟動參數在同一 SQLite transaction 以 instance 快照及舊 binding CAS 保存；明確移除 instance 時 cascade，重建不繼承。原生 SQLite 新測試 2 項、既有 store 42 項及 core 149 項通過（2 項既有 ignored 未執行），fmt／clippy／check-deps 通過；聚焦覆核無 blocker，測試暫存已清理。supervisor／runtime 串接與准入仍未完成（feat/g13-install，未合併）。
 
 - 2026-10-08：13C reserved runtime 接入 SpawnBound／GetLaunchBinding，持久 UUID／PID 核對後才發布 writer；重連不送 Spawn，不符時保留 holder。未驗證 Exited 暫存，intentional close 不誤報失敗且核對可取消。原生 holder 7 項、runtime 19 項、終端 hub 8 項與 fmt／clippy／check-deps 通過，聚焦覆核缺口已修正；清除重複驗證 logs。supervisor 的受管啟動／版本准入決策尚未串接（feat/g13-install，未合併）。
+
+- 2026-10-08：Ubuntu CI `37710056778` 定位至 CLI 兩 Codex agent 重啟的 10 秒連線逾時，尚未判定根因；補上該測試失敗時停止自有 daemon 並保留 stderr 的診斷。本機原生重跑通過（恢復 6.1 秒，20 則各一次），fmt／clippy／check-deps 通過；未放寬 timeout，也不宣稱 Ubuntu 已修復（feat/g13-install）。

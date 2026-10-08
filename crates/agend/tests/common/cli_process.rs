@@ -611,7 +611,15 @@ pub fn milestone(lab: &Lab) -> Result<Vec<String>, String> {
                 dropped.load(Ordering::SeqCst)
             })?;
             let restart = cli.run(None, &["daemon", "restart"]);
-            expect_run(&restart, 0, &["the daemon is back"])?;
+            if let Err(error) = expect_run(&restart, 0, &["the daemon is back"]) {
+                // Drain native stderr before the lab removes its files. Keep the
+                // original restart failure even if stopping this child also fails.
+                let stopped = daemon.interrupt();
+                return Err(format!(
+                    "{error}\ndaemon cleanup: {stopped:?}\ndaemon log:\n{}",
+                    daemon.log.join("\n")
+                ));
+            }
             out.push("a5 reached the daemon, its reply was lost; agend daemon restart:".into());
             out.extend(restart.shown().into_iter().map(|l| format!("  {l}")));
             let run = finish(
