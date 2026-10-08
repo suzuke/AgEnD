@@ -466,3 +466,5 @@
 - 2026-10-08：13C canary 新增明確 `--model`，OpenCode 使用 provider/model；模型參數綁定私有 scope 並寫入報告（要求值，不冒充 provider 解析結果）。非法名稱建 home 前拒絕、替換／移除 scope args 拒絕，以及原生 OpenCode fake 三次成功 outcome／清理通過。真帳戶認證與真模型驗收仍待完成（feat/g13-install，未合併）。
 
 - 2026-10-08：release 37749079834 四平台 archive／首任務、formula 與 macOS Brew 通過，Linux Brew 再次因 tap-new 作者身分失敗；Brew 過濾 Git 身分環境值，改一次性 tap-new --no-git，避免更動共享 Git 設定。Python 語法檢查通過，原生 install／test／uninstall 留待下一輪 CI（feat/g13-install，未合併）。
+
+- 2026-10-08：CI 37749079770 Ubuntu 通過、macOS version probe 斷言失敗；舊斷言未印實際錯誤，根因尚未證實。probe 清理失敗時保留原始錯誤、斷言印錯誤，時間斷言涵蓋 250 ms probe 加 2 秒清理預算（未延長實際期限）。本機 binary 37 項及 workspace clippy 通過，macOS CI 待重驗（feat/g13-install，未合併）。

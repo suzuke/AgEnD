@@ -54,7 +54,10 @@ fn probe(program: &Path, within: Duration) -> Result<String, String> {
         }
         Ok::<_, String>((out, err))
     })();
-    let status = owned.finish().map_err(|e| e.to_string())?;
+    let status = owned.finish().map_err(|cleanup| match &result {
+        Err(primary) => format!("{primary}; cleanup: {cleanup}"),
+        Ok(_) => format!("cleanup: {cleanup}"),
+    })?;
     let (out, err) = result?;
     if !status.success() {
         return Err(format!("exited unsuccessfully ({status})"));
@@ -285,12 +288,10 @@ int main(void) {{
             ),
         );
         let start = Instant::now();
-        assert!(
-            probe(&path, Duration::from_millis(250))
-                .unwrap_err()
-                .contains("did not complete")
-        );
-        assert!(start.elapsed() < Duration::from_secs(2));
+        let error = probe(&path, Duration::from_millis(250)).unwrap_err();
+        assert!(error.contains("did not complete"), "{error}");
+        // The 250 ms probe and the separate 2 s cleanup budget are additive.
+        assert!(start.elapsed() < Duration::from_secs(3), "{error}");
         let pid = fs::read_to_string(pid_file).unwrap();
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
