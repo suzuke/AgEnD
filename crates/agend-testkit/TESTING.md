@@ -106,3 +106,5 @@ Forge 契約的不同 branch 使用不同 task ID，Submission.task_id 由 work_
 13C canary credential fixture：三個 native fake CLI 在私有 scope 中看見合成認證檔時，必須核對實際 HOME、backend config/data 路徑及 Claude token 環境值；錯配直接失敗。僅接受測試用標記，不執行登入或模型。canary 的來源保留、輸出不含 dummy secret 與清理由 agend/backend_canary 驗證。
 
 CLP-14 新增 fleet configured program 斷言，fake／native 使用同一條契約。
+
+`fake-worker --version` 立即印出 fixture 版本，不啟動 inbox loop。`fake_worker_version` 真子程序測試以 CLI marker 與游標檔核對沒有副作用，逾時會回收自有程序，避免新增的背景版本 monitor 變成第二個收件 worker。

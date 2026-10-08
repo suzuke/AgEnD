@@ -20,7 +20,7 @@
 
 ## 當前自動驗收
 
-- `cargo xtask accept install` 在本機提交 `21ecf59` 啟動；結果以程序結束狀態及完整 log 為準，啟動不算通過。
+- `cargo xtask accept install` 在本機提交 `21ecf59` 啟動；結果以程序結束狀態及完整 log 為準，啟動不算通過。執行期間另修正 fake-worker 的 --version 入口，故本輪不得冒充固定舊 head 的全套證據。
 - `backend_version_monitor` 已納入 install demo；它不註冊主機服務、不啟動真 backend、不讀真認證。
 - 新測試若在 CI 之前提交，舊 head 的綠燈不能代表新 head 通過；仍在跑的 CI 不因觀察逾時重啟。
 - 最終 fresh verifier 必須重跑並嘗試推翻；目前逐批 read-only source review 不能冒充最終驗證。

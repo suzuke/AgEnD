@@ -155,3 +155,5 @@ FakePipelineExecutor 記錄 forge 選擇、base refresh 與 merge recovery 的 k
 13C canary credential fixture：三個 native fake CLI 在私有 scope 中看見合成認證檔時，必須核對實際 HOME、backend config/data 路徑及 Claude token 環境值；錯配直接失敗。僅接受測試用標記，不執行登入或模型。canary 的來源保留、輸出不含 dummy secret 與清理由 agend/backend_canary 驗證。
 
 FakeDaemon 的 InstanceAdd 與正式 producer 一樣回報設定 program；沒有明確 program 時使用 backend 名稱。
+
+`fake-worker --version` 立即印出 fixture 版本，不啟動 inbox loop。`fake_worker_version` 真子程序測試以 CLI marker 與游標檔核對沒有副作用，逾時會回收自有程序，避免新增的背景版本 monitor 變成第二個收件 worker。
