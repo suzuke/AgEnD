@@ -279,3 +279,5 @@ OpenCode 即時閒置查詢的跨程序驗證在 `agend/tests/opencode_bridge.rs
 Claude observer 的原生測試在 `agend/tests/claude_bridge.rs` 的 `claude_idle_observation_requires_live_hook_session_and_original_holder_connection`；實際 server／holder／hook helper 驗穩定期、busy、錯 session、重連與只有 Stop 不足以重綁。
 
 13C：pending backend switch 阻止一般 boot start、自動重啟與 operator retry 改寫啟動意圖。`backend_switch::pending_switch_boot_preserves_launch_reservation_without_ordinary_restart` 經原生 daemon 驗三種 pending phase 跨 boot 保留精確資料；專用換版恢復仍待串接。
+
+13C Codex 閒置觀察在同一 worker 排序於先前 RPC 之後，先確認原生 queue 的 data 為空且 nextCursor 明確為 null，再讀完整 turns；後端佇列非空或欄位缺失不當作閒置。原生 fake app-server 測試包含第二筆排隊訊息、消化後空佇列，以及真 producer 回覆的缺欄位／錯形狀反例。

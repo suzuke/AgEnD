@@ -64,6 +64,7 @@ const RECONNECT_EVERY: Duration = Duration::from_millis(100);
 pub(crate) enum Command {
     Flush(Sender<()>),
     Turns(Sender<Result<Vec<Value>, String>>),
+    Idle(Sender<Result<bool, String>>),
 }
 
 /// How long [`Link::close`] waits for the link thread; after that it is
@@ -126,7 +127,24 @@ impl Pending<Result<Vec<Value>, String>> {
     }
 }
 
+impl Pending<Result<bool, String>> {
+    pub fn wait(self, within: Duration) -> Result<bool, String> {
+        let rx = self.0.ok_or("the link has ended")?;
+        rx.recv_timeout(within)
+            .map_err(|_| "no answer from the link".to_owned())?
+    }
+}
+
 impl Link {
+    /// Serialize idle observation behind any in-flight delivery on this worker.
+    pub fn idle_request(&self) -> Pending<Result<bool, String>> {
+        let (tx, rx) = mpsc::channel();
+        let sent = self
+            .commands
+            .as_ref()
+            .is_some_and(|c| c.send(Command::Idle(tx)).is_ok());
+        Pending(sent.then_some(rx))
+    }
     /// Asks the link to send every `queued` message.
     pub fn flush_request(&self) -> Pending<()> {
         let (tx, rx) = mpsc::channel();
@@ -460,6 +478,15 @@ impl Worker {
                             return false;
                         }
                     }
+                    Ok(Command::Idle(reply)) => {
+                        let idle = self.idle_snapshot();
+                        let broken =
+                            matches!(idle, Err(RpcError::Transport(_) | RpcError::Timeout(_)));
+                        let _ = reply.send(idle.map_err(|e| e.to_string()));
+                        if broken {
+                            return false;
+                        }
+                    }
                     Ok(Command::Turns(reply)) => {
                         let turns = self.turns_all();
                         let broken =
@@ -503,6 +530,9 @@ impl Worker {
                     let _ = reply.send(());
                 }
                 Ok(Command::Turns(reply)) => {
+                    let _ = reply.send(Err("the app-server is not connected".into()));
+                }
+                Ok(Command::Idle(reply)) => {
                     let _ = reply.send(Err("the app-server is not connected".into()));
                 }
                 Err(RecvTimeoutError::Disconnected) => return false,
@@ -666,6 +696,19 @@ impl Worker {
     /// Every turn, oldest first. `thread/turns/list` answers newest first
     /// and `nextCursor` pages back to older turns (U5, turns_list.jsonl,
     /// codex 0.158.0; K14), so the pages are read in order and reversed.
+    fn idle_snapshot(&mut self) -> Result<bool, RpcError> {
+        let queue = self.call_within(
+            "thread/queue/list",
+            json!({"threadId": self.thread}),
+            CALL_WITHIN,
+        )?;
+        if !super::history::queue_empty(&queue) {
+            return Ok(false);
+        }
+        let turns = self.turns_all()?;
+        Ok(!self.busy && super::history::all_turns_terminal(&turns))
+    }
+
     fn turns_all(&mut self) -> Result<Vec<Value>, RpcError> {
         let mut turns = Vec::new();
         let mut cursor = Value::Null;

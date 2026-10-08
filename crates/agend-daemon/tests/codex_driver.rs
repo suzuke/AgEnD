@@ -617,7 +617,41 @@ fn fresh_thread_idle_requires_terminal_native_turns_and_a_live_connection() {
         .deliver("idle-message", "Respond briefly", BusyLevel::Queue)
         .unwrap();
     assert!(!block_on(fixture.driver.thread_idle(&backend.id)).unwrap());
-    fixture.settle(1).unwrap();
+    fixture
+        .deliver("idle-queued", "Second reply", BusyLevel::Queue)
+        .unwrap();
+    let queue = backend
+        .probe()
+        .unwrap()
+        .call(
+            "thread/queue/list",
+            json!({"threadId": fixture.thread().unwrap()}),
+        )
+        .unwrap();
+    use agend_daemon::driver::codex::history::queue_empty;
+    assert!(
+        !queue["data"].as_array().unwrap().is_empty(),
+        "native queued submission required"
+    );
+    assert!(!queue_empty(&queue));
+    assert!(!block_on(fixture.driver.thread_idle(&backend.id)).unwrap());
+    fixture.settle(2).unwrap();
+    let empty = backend
+        .probe()
+        .unwrap()
+        .call(
+            "thread/queue/list",
+            json!({"threadId": fixture.thread().unwrap()}),
+        )
+        .unwrap();
+    assert!(queue_empty(&empty));
+    for key in ["data", "nextCursor"] {
+        let mut changed = empty.clone();
+        changed.as_object_mut().unwrap().remove(key);
+        assert!(!queue_empty(&changed));
+        changed[key] = json!("continuation-or-invalid-shape");
+        assert!(!queue_empty(&changed));
+    }
     assert!(block_on(fixture.driver.thread_idle(&backend.id)).unwrap());
     let turns = backend.turns(&fixture.thread().unwrap()).unwrap();
     assert!(!turns.is_empty());

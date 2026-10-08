@@ -400,3 +400,5 @@
 - 2026-10-08：13C Claude 閒置觀察綁定 live hook 的 session 與原 holder connection；重連、工具活動、session 結束撤銷舊候選，初始 Ready 另核完整畫面與 generation。原生 hook／holder 反例通過，startup 回歸 11 項通過，最終 clippy／check-deps 通過；尚未接 supervisor 換版編排。21cd574 的兩平台 CI 均停在 xtask 兩個舊 Hello 清單斷言，修正後 xtask 42 項本機通過，完整新 head CI 待驗（feat/g13-install，未合併）。
 
 - 2026-10-08：13C 一般 boot start／death restart／延遲 restart／operator retry 遇到持久 pending switch 時保留現況，讀取失敗也不停止 holder；由換版恢復流程決定後續啟停。原生 daemon 驗 Prepared／Committed／Restoring 跨 boot 精確保留 instance、managed launch、switch，連同既有 switch RPC 共 2 項通過；fmt／clippy／前後 check-deps 通過。這批未完成換版專用恢復／啟用／回滾（feat/g13-install，未合併）。
+
+- 2026-10-08：13C Codex 閒置查詢改在同 worker 串行查原生 queue 與完整 turns；queue 非空、缺 data／nextCursor 或 continuation 不可認閒置。真 fake app-server 驗第二筆待執行訊息與消化後空 queue，producer 變異反例、Codex driver 全 19 項及 fmt／clippy／前後 check-deps 通過。仍是換版閒置前置條件，啟用／回滾編排未完成（feat/g13-install，未合併）。

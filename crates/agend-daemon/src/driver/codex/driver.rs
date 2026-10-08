@@ -248,9 +248,9 @@ impl CodexDriver {
                     link.shared.connected.load(Ordering::SeqCst)
                         && instance.session_id.as_deref() == Some(link.session_id.as_str())
                 })
-                .map(|link| (Arc::clone(&link.shared), link.turns_request()))
+                .map(|link| (Arc::clone(&link.shared), link.idle_request()))
                 .ok_or_else(|| DriverError::NotConnected(id.clone()))?;
-            let turns = wait
+            let idle = wait
                 .wait(Duration::from_secs(5))
                 .map_err(DriverError::Backend)?;
             let same_link = inner.lock_links().get(&id).is_some_and(|link| {
@@ -263,7 +263,7 @@ impl CodexDriver {
             {
                 return Err(DriverError::NotConnected(id));
             }
-            Ok(!shared.busy.load(Ordering::SeqCst) && super::history::all_turns_terminal(&turns))
+            Ok(!shared.busy.load(Ordering::SeqCst) && idle)
         })
         .await
     }

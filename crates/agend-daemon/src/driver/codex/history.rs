@@ -41,6 +41,15 @@ pub fn turn_page(page: &Value) -> Result<(&[Value], Option<&str>), String> {
     Ok((data, cursor))
 }
 
+/// Queued native submissions can still start a turn after terminal history.
+/// Missing fields or a continuation cursor never prove an empty queue.
+pub fn queue_empty(page: &Value) -> bool {
+    page.get("data")
+        .and_then(Value::as_array)
+        .is_some_and(Vec::is_empty)
+        && page.get("nextCursor") == Some(&Value::Null)
+}
+
 /// Only explicit terminal statuses prove that no returned turn is running.
 /// Unknown/malformed statuses fail closed; an empty newly started thread is idle.
 pub fn all_turns_terminal(turns: &[Value]) -> bool {

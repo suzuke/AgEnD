@@ -241,3 +241,5 @@ OpenCode `session_idle` 重讀 REST session 狀態，查詢前後核 holder／in
 `Server::claude_observer` 提供只讀 session_idle：本次連線的 SessionStart／UserPromptSubmit 與 Stop 候選、5 秒穩定期、live screen 無 hard gate，查詢後再核 session／revision／連線。重連不能沿用舊候選；初始 Ready 仍須完整錄製規則。這是觀察，不代替暫停排空、managed launch 身分及 supervisor 停止授權。
 
 13C：pending backend switch 阻止一般 boot start、自動重啟與 operator retry 改寫啟動意圖。`backend_switch::pending_switch_boot_preserves_launch_reservation_without_ordinary_restart` 經原生 daemon 驗三種 pending phase 跨 boot 保留精確資料；專用換版恢復仍待串接。
+
+13C Codex 閒置觀察在同一 worker 排序於先前 RPC 之後，先確認原生 queue 的 data 為空且 nextCursor 明確為 null，再讀完整 turns；後端佇列非空或欄位缺失不當作閒置。原生 fake app-server 測試包含第二筆排隊訊息、消化後空佇列，以及真 producer 回覆的缺欄位／錯形狀反例。
