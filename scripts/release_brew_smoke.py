@@ -47,11 +47,7 @@ def run(args):
         raise RuntimeError("runner has no Homebrew")
     with tempfile.TemporaryDirectory(prefix="agend-brew-", dir=os.environ["RUNNER_TEMP"]) as temporary:
         root = Path(temporary)
-        env = dict(os.environ, GIT_AUTHOR_NAME="Agend release verification",
-                   GIT_AUTHOR_EMAIL="verification@example.invalid",
-                   GIT_COMMITTER_NAME="Agend release verification",
-                   GIT_COMMITTER_EMAIL="verification@example.invalid",
-                   HOMEBREW_NO_AUTO_UPDATE="1", HOMEBREW_NO_ANALYTICS="1",
+        env = dict(os.environ, HOMEBREW_NO_AUTO_UPDATE="1", HOMEBREW_NO_ANALYTICS="1",
                    HOMEBREW_NO_INSTALL_CLEANUP="1", HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK="1",
                    HOMEBREW_CACHE=str(root / "cache"), HOMEBREW_LOGS=str(root / "logs"),
                    HOMEBREW_TEMP=str(root / "tmp"))
@@ -77,7 +73,9 @@ def run(args):
         if os.path.lexists(tap_path):
             raise RuntimeError("refusing an existing validation tap")
         try:
-            command("tap-new", tap)
+            # A disposable local formula needs no Git history. Brew sanitizes
+            # GIT_AUTHOR_*; avoid a commit rather than changing account config.
+            command("tap-new", "--no-git", tap)
             if Path(command("--repo", tap)) != tap_path:
                 raise RuntimeError("unexpected validation tap path")
             destination = tap_path / "Formula/agend.rb"

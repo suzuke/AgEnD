@@ -257,3 +257,5 @@ Brew 原生安裝驗證已接入 release workflow 的 macOS ARM64／Linux x86_64
 - 2026-10-08：release run 37747622359 的四平台 archive／首任務、formula 與 macOS ARM64 Brew install／test／init／uninstall 全部通過。Linux Brew 在 tap-new 的 Git commit 因 runner 無作者身分而失敗，tap 已 untap 清理；測試子程序補專用 Git author／committer 環境值，不改全域設定，待重驗（feat/g13-install，未合併）。
 
 - 2026-10-08：13C canary 新增明確 `--model`，OpenCode 使用 provider/model；模型參數綁定私有 scope 並寫入報告（要求值，不冒充 provider 解析結果）。非法名稱建 home 前拒絕、替換／移除 scope args 拒絕，以及原生 OpenCode fake 三次成功 outcome／清理通過。真帳戶認證與真模型驗收仍待完成（feat/g13-install，未合併）。
+
+- 2026-10-08：release 37749079834 四平台 archive／首任務、formula 與 macOS Brew 通過，Linux Brew 再次因 tap-new 作者身分失敗；Brew 過濾 Git 身分環境值，改一次性 tap-new --no-git，避免更動共享 Git 設定。Python 語法檢查通過，原生 install／test／uninstall 留待下一輪 CI（feat/g13-install，未合併）。
