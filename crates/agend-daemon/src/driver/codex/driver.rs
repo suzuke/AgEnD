@@ -88,6 +88,7 @@ struct Inner {
     /// older connect still running gives up instead of storing a thread,
     /// writing `$GO` or keeping a link.
     current: Mutex<BTreeMap<String, u64>>,
+    activity: Mutex<BTreeMap<String, Vec<std::sync::Weak<()>>>>,
 }
 
 impl Drop for Inner {
@@ -140,6 +141,7 @@ impl CodexDriver {
                 input_policy,
                 links: Mutex::new(BTreeMap::new()),
                 current: Mutex::new(BTreeMap::new()),
+                activity: Mutex::new(BTreeMap::new()),
             }),
         }
     }
@@ -150,15 +152,46 @@ impl CodexDriver {
     pub async fn connect(&self, id: &str, generation: u64) -> Result<Option<Vec<String>>, String> {
         let inner = Arc::clone(&self.inner);
         let id = id.to_owned();
-        blocking(move || inner.connect(&id, generation).map_err(DriverError::Backend))
-            .await
-            .map_err(|e| e.to_string())
+        let activity = Arc::new(());
+        {
+            let mut active = inner.activity.lock().unwrap_or_else(|p| p.into_inner());
+            let generations = active.entry(id.clone()).or_default();
+            generations.retain(|token| token.strong_count() != 0);
+            generations.push(Arc::downgrade(&activity));
+        }
+        blocking(move || {
+            inner
+                .connect(&id, generation, activity)
+                .map_err(DriverError::Backend)
+        })
+        .await
+        .map_err(|e| e.to_string())
     }
 
     /// Closes the link of `id` (nothing is sent to codex); a connect still
     /// running for it gives up.
     pub fn disconnect(&self, id: &str) {
         self.inner.disconnect(id);
+    }
+
+    /// Includes pending handshakes and retired link workers whose bounded
+    /// disconnect wait expired. Callers must serialize new connects with a
+    /// version switch; backend turn completion is a separate check.
+    pub fn workers_stopped(&self, id: &str) -> bool {
+        let mut active = self
+            .inner
+            .activity
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let Some(generations) = active.get_mut(id) else {
+            return true;
+        };
+        generations.retain(|token| token.strong_count() != 0);
+        let stopped = generations.is_empty();
+        if stopped {
+            active.remove(id);
+        }
+        stopped
     }
 
     /// Whether the link of `id` is connected now.
@@ -263,7 +296,12 @@ impl Inner {
             .call_blocking(move |conn| crate::store::instances::get(conn, &id))
     }
 
-    fn connect(&self, id: &str, generation: u64) -> Result<Option<Vec<String>>, String> {
+    fn connect(
+        &self,
+        id: &str,
+        generation: u64,
+        activity: Arc<()>,
+    ) -> Result<Option<Vec<String>>, String> {
         {
             let mut current = self.lock_current();
             if current.get(id).is_some_and(|&newer| newer > generation) {
@@ -402,7 +440,7 @@ impl Inner {
             .catch_up()
             .map_err(|e| format!("catching up with the thread: {e}"))?;
         let link = worker
-            .spawn(Arc::clone(&self.sink))
+            .spawn(Arc::clone(&self.sink), activity)
             .map_err(|e| format!("cannot start the link thread: {e}"))?;
         let mut links = self.lock_links();
         if !self.is_current(id, generation) {

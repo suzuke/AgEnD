@@ -253,3 +253,5 @@ Claude outcome：`driver::claude::outcome` 使用先前真測 ACK/PostToolUse/St
 `backend_switch` 另驗三 backend 的正式 reservation producer 在 Prepared／SQLite 重開後不留下 attempt，Claude channel／Stop 都暫停，取消後可取得 attempt；Claude／OpenCode 準備前的回執仍可確認。Codex driver 回歸驗既有投遞、重啟及歷史核對，這批不宣稱完整版本切換端到端通過。
 
 `backend_switch::prepared_switch_holds_inbox_reads_without_hiding_operator_history` 以 inbox instance、正式 message／launch reservation producer 驗最後筆數、after 與未知游標、Prepared 重開後拒絕、外來 instance 不受影響及取消恢復。`agend --test pipeline_context` 覆蓋原有 pipeline 經正式 socket 讀取 inbox 的行為。
+
+`codex_driver` 新增兩個原生生命週期反例：原生 Unix socket 接受連線但不回應握手時，disconnect 不能回報停止；實際 Gone callback 阻塞超過 close 等待時，舊代仍須列為 active，釋放 callback 後才能停止。使用正式 driver、原生 Unix socket／fake app-server，沒有模型呼叫。

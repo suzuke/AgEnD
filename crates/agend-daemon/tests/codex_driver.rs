@@ -522,3 +522,85 @@ fn execution_outcome_requires_the_identified_successful_turn_and_response() {
     fixture.driver.disconnect(&backend.id);
     assert!(block_on(fixture.driver.message_outcome(row)).is_err());
 }
+
+#[test]
+fn a_pending_native_handshake_is_not_stopped_merely_because_disconnect_returns() {
+    use agend_daemon::driver::codex::launch;
+    use std::os::unix::net::UnixListener;
+    use std::time::Instant;
+    let lab = lab();
+    let home = lab.home(71);
+    let id = format!("g7-{}pending", tag());
+    codex::add_codex(&home, &id, None).unwrap();
+    let listen = launch::socket_path(&home, &id);
+    let server = UnixListener::bind(&listen).unwrap();
+    server.set_nonblocking(true).unwrap();
+    let store = Arc::new(SqliteStore::open(&home, 0).unwrap());
+    let driver = CodexDriver::new(&home, store, Arc::new(|_| {}));
+    assert!(driver.workers_stopped(&id));
+    let connecting = driver.clone();
+    let name = id.clone();
+    let thread = std::thread::spawn(move || block_on(connecting.connect(&name, 1)));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let peer = loop {
+        match server.accept() {
+            Ok((peer, _)) => break peer,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(e) => panic!("native listener failed: {e}"),
+        }
+        assert!(Instant::now() < deadline, "native handshake did not start");
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    // Keep the accepted native socket open without any handshake response.
+    // No fabricated protocol input is supplied to the production driver.
+    driver.disconnect(&id);
+    assert!(!driver.workers_stopped(&id));
+    drop(peer);
+    drop(server);
+    assert!(thread.join().unwrap().unwrap().is_none());
+    assert!(driver.workers_stopped(&id));
+}
+
+#[test]
+fn a_retired_native_worker_remains_active_after_the_bounded_close_wait() {
+    use agend_daemon::driver::codex::launch;
+    use agend_testkit::fake_agent::codex::Server;
+    use std::{
+        sync::{Mutex, mpsc},
+        time::Instant,
+    };
+    let lab = lab();
+    let home = lab.home(72);
+    let id = format!("g7-{}retired", tag());
+    codex::add_codex(&home, &id, None).unwrap();
+    let listen = launch::socket_path(&home, &id);
+    let server = Server::bind(&listen, Duration::from_millis(100), None).unwrap();
+    let store = Arc::new(SqliteStore::open(&home, 0).unwrap());
+    let (arrived, arrival) = mpsc::channel();
+    let (release, wait) = mpsc::channel();
+    let wait = Mutex::new(wait);
+    let driver = CodexDriver::new(
+        &home,
+        store,
+        Arc::new(move |_| {
+            arrived.send(()).unwrap();
+            let _ = wait.lock().unwrap().recv_timeout(Duration::from_secs(15));
+        }),
+    );
+    block_on(driver.connect(&id, 1)).unwrap().unwrap();
+    assert!(!driver.workers_stopped(&id));
+    drop(server);
+    arrival.recv_timeout(Duration::from_secs(30)).unwrap();
+    // The actual worker is inside the native Gone callback. Closing its socket
+    // cannot finish this callback; the bounded close wait must not lose it.
+    driver.disconnect(&id);
+    assert!(!driver.workers_stopped(&id));
+    driver.disconnect(&id);
+    assert!(!driver.workers_stopped(&id));
+    release.send(()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !driver.workers_stopped(&id) {
+        assert!(Instant::now() < deadline, "retired worker did not finish");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}

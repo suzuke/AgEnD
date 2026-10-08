@@ -335,7 +335,7 @@ impl Worker {
     }
 
     /// Starts the link thread; `sink` hears when the app-server is gone.
-    pub fn spawn(self, sink: CodexSink) -> std::io::Result<Link> {
+    pub fn spawn(self, sink: CodexSink, activity: Arc<()>) -> std::io::Result<Link> {
         let shared = Arc::clone(&self.shared);
         let id = self.id.clone();
         let (tx, rx) = mpsc::channel();
@@ -343,6 +343,7 @@ impl Worker {
         let thread = std::thread::Builder::new()
             .name(format!("codex-link-{}", self.id))
             .spawn(move || {
+                let _activity = activity;
                 self.run(&rx, &sink);
                 let _ = done_tx.send(());
             })?;
