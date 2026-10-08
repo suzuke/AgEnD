@@ -7,7 +7,7 @@
 
 ## 狀態
 
-**施工中：13B 服務安裝／13C 版本管理**（2026-10-08）。使用者指示自行安排優先順序並建立 goal；第 12 關已合併清理。尚未完成整關驗收。
+**施工中：13D 配對；13B／13C 驗收待補**（2026-10-08）。使用者指示自行安排優先順序並建立 goal；第 12 關已合併清理。尚未完成整關驗收。
 
 ## 施工順序（2026-10-08）
 
@@ -211,3 +211,5 @@ cat docs/gates/gate-13-install.md
 - 2026-10-08：13C 換版問題持久保存原因／首次等待時間，正式 status 與「需要你」顯示，重啟恢復且不提供一般 Retry；成功完成／取消／移除時清除。原生 Codex app-server 退出但 wrapper／holder 存活測試核通知、重啟同一等待時間與 holder 通過；Store 10、core 125、daemon 186（1 ignored）、client 52 項及 fmt／clippy／check-deps 通過。測試找出 pipeline 同步誤刪通知並修復；另修正測試對省略空 actions 的錯誤假設，保留失敗證據。自有 switch／Store／canary 暫存無殘留；存活 backend 啟動逾時與完整故障矩陣仍未完成（feat/g13-install，未合併）。
 
 - 2026-10-08：13C Committed／Restoring 同交易保存 300 秒 activation deadline；到期未就緒保存問題／通知，保留 holder 與投遞暫停，重啟不重置。正式 Store 的時鐘邊界、重開與還原新期限共 11 項、原生兩次 boot／RPC 共 2 項、core 125、daemon 186（1 ignored）及 fmt／clippy／check-deps 通過，自有 recovery／rpc／Store 暫存無殘留。這是觀察逾時，不把逾時當停止授權；真版本隔離、完整故障矩陣與整關驗收仍未完成，接續 13D 配對（feat/g13-install，未合併）。
+
+- 2026-10-08：13D 配對驗證層接既有 notifier HTTP：10 分鐘 nonce、fresh direct human /start、bot 身分重查、精確操作員確認後才產生 token reference／allowlist／topic 設定。原生本機 HTTP 配對反例及 notifier 全 23 項、core 125、daemon 188（1 ignored）、fmt／clippy／check-deps 通過；無真 bot／訊息／模型操作，自有 Telegram 暫存無殘留。尚未接持久 pairing／cursor、CLI／RPC、設定套用或真 Telegram 驗收；13C 未完成項目仍保留（feat/g13-install，未合併）。

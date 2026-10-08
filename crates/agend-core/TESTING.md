@@ -168,3 +168,5 @@ holder 協商測試核 1.3 優先、1.2／1.1 仍可選；啟動綁定的狀態�
 BackendSwitch 階段的消費者驗證在 daemon `tests/backend_switch.rs`：以正式 SQLite 的三 backend 投遞 reservation 與重開檢查 pending 階段不提前放行，未以 enum 名稱或 JSON round-trip 代替行為驗證。
 
 13C 未發布的 client 1.8 新增 Activate／Rollback 操作，字串預檢涵蓋 instance 與 switch ID，mutation 不重送；BackendSwitchPhase 新增持久 RollbackPrepared（pending），避免已啟用版本回退時漏掉暫停投遞。
+
+13D `native_pairing_*` 透過 notifier 的真 HTTP client 與本機 producer、既有 Telegram 錄製 message／GetMe 外形，核新鮮 nonce、精確確認、私聊／forum topic、bot 身分改變、過期不連線、轉傳／匿名／編輯／舊訊息／錯 bot／歧義目的地與重複 update 拒絕。配對只呼叫 GetMe／GetUpdates，不送訊息或啟用 allowlist；不代表持久化、CLI 或真 bot 已完成。

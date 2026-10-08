@@ -289,3 +289,5 @@ Claude observer 的原生測試在 `agend/tests/claude_bridge.rs` 的 `claude_id
 13C 換版問題的原生 Store 測試驗重開保留原因／等待時間、重複觀察不刷新、舊快照拒絕、取消及成功啟用／回退清除問題。`native_codex_disconnected_candidate_reports_a_durable_problem_without_stopping_holder` 讓假 app-server 自行退出但保留包裝／holder，經正式 status 核持久問題、「需要你」通知及 daemon 重啟後同一等待時間／holder，沒有真 backend 或模型呼叫。
 
 13C activation deadline 的 Store 測試使用明確時鐘值，核到期前一毫秒／邊界、時間倒退、重開、問題更新不延長期限，以及 Restoring 才重新計時。原生 pending boot 測試用正式 Store 建立已過期 Committed／Restoring，兩次 daemon 啟動核相同 deadline／problem、原設定與啟動意圖不變；Prepared 不誤報逾時。這是故障狀態恢復證據，不代表真模型啟動耗時測量。
+
+13D `native_pairing_*` 透過 notifier 的真 HTTP client 與本機 producer、既有 Telegram 錄製 message／GetMe 外形，核新鮮 nonce、精確確認、私聊／forum topic、bot 身分改變、過期不連線、轉傳／匿名／編輯／舊訊息／錯 bot／歧義目的地與重複 update 拒絕。配對只呼叫 GetMe／GetUpdates，不送訊息或啟用 allowlist；不代表持久化、CLI 或真 bot 已完成。

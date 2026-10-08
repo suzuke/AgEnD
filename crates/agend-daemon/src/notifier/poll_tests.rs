@@ -27,6 +27,7 @@ use std::{
 struct Native {
     api: Arc<Api>,
     updates: Arc<Mutex<Vec<Value>>>,
+    bot: Arc<Mutex<Value>>,
     calls: Arc<Mutex<Vec<(String, Value)>>>,
     receipts: Arc<Mutex<Vec<Value>>>,
     stop: Arc<AtomicBool>,
@@ -37,6 +38,14 @@ impl Native {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let origin = format!("http://{}", listener.local_addr().unwrap());
+        let bot = Arc::new(Mutex::new(
+            serde_json::from_str::<Value>(include_str!(
+                "../../tests/fixtures/telegram/get-me.json"
+            ))
+            .unwrap()["result"]
+                .clone(),
+        ));
+        let identity = bot.clone();
         let updates = Arc::new(Mutex::new(Vec::<Value>::new()));
         let queue = updates.clone();
         let calls = Arc::new(Mutex::new(Vec::new()));
@@ -102,11 +111,7 @@ impl Native {
                             .collect(),
                     ),
                     "answerCallbackQuery" => json!(true),
-                    "getMe" => serde_json::from_str::<Value>(include_str!(
-                        "../../tests/fixtures/telegram/get-me.json"
-                    ))
-                    .unwrap()["result"]
-                        .clone(),
+                    "getMe" => identity.lock().unwrap().clone(),
                     "sendMessage" => {
                         let mut receipt = serde_json::from_str::<Value>(include_str!(
                             "../../tests/fixtures/telegram/message.json"
@@ -138,6 +143,7 @@ impl Native {
                 origin,
             )),
             updates,
+            bot,
             calls,
             receipts,
             stop,
@@ -1121,4 +1127,178 @@ async fn unknown_notification_is_local_operator_only_and_never_claims_receipt() 
         handlers::handle(&lab.ctx, None, request(AttentionAction::Abandon)).await,
         Outcome::Reply(ClientResponse::Error { .. })
     ));
+}
+
+fn pairing_message(command: &str, date: u64) -> Value {
+    // Mutate the recorded native message producer into a human /start update.
+    let mut message =
+        serde_json::from_str::<Value>(include_str!("../../tests/fixtures/telegram/message.json"))
+            .unwrap()["result"]
+            .clone();
+    message["from"]["id"] = json!(42);
+    message["from"]["is_bot"] = json!(false);
+    message["text"] = json!(command);
+    message["date"] = json!(date);
+    json!({"update_id":100,"message":message})
+}
+
+#[tokio::test]
+async fn native_pairing_requires_fresh_challenge_and_exact_operator_confirmation() {
+    use super::pairing;
+    use agend_core::telegram::pairing::PAIRING_WINDOW_MS;
+    use agend_testkit::fakes::FakeClock;
+    let native = Native::new();
+    let clock = FakeClock::new(1_791_367_350_123);
+    let pending = pairing::begin(
+        native.api.clone(),
+        "11111111-1111-4111-8111-111111111111".into(),
+        SecretRef::File("/private/test-token".into()),
+        &clock,
+    )
+    .await
+    .unwrap();
+    assert!(pending.candidate.is_none());
+    assert_eq!(pending.bot_id, 123456789);
+    assert_eq!(pending.bot_username, "agend_fixture_bot");
+    let update = pairing_message(&pending.command(), clock.peek() / 1000);
+    *native.updates.lock().unwrap() = vec![update];
+    let observed = pairing::poll(native.api.clone(), &pending, &clock)
+        .await
+        .unwrap();
+    assert!(
+        pending.candidate.is_none(),
+        "caller persists a new snapshot, never a partial mutation"
+    );
+    assert_eq!(observed.offset, 101);
+    let candidate = observed.candidate.as_ref().unwrap();
+    assert_eq!(
+        (candidate.chat_id, candidate.user_id, candidate.topic_id),
+        (42, 42, None)
+    );
+    let mut wrong = candidate.clone();
+    wrong.user_id = 43;
+    assert!(observed.confirm(&wrong, &clock).is_err());
+    assert!(pending.confirm(candidate, &clock).is_err());
+    let config = pairing::confirm(native.api.clone(), &observed, candidate, &clock)
+        .await
+        .unwrap();
+    assert!(config.allows(42, 42, false));
+    assert!(!config.allows(42, 43, false));
+    assert!(!config.allows(42, 42, true));
+    native.bot.lock().unwrap()["id"] = json!(987654321);
+    assert!(
+        pairing::confirm(native.api.clone(), &observed, candidate, &clock)
+            .await
+            .is_err()
+    );
+    assert!(
+        pairing::poll(native.api.clone(), &pending, &clock)
+            .await
+            .is_err()
+    );
+    native.bot.lock().unwrap()["id"] = json!(123456789);
+    let calls = native.calls.lock().unwrap().len();
+    assert_eq!(
+        pairing::poll(native.api.clone(), &observed, &clock)
+            .await
+            .unwrap(),
+        observed
+    );
+    assert_eq!(native.calls.lock().unwrap().len(), calls);
+    clock.advance(PAIRING_WINDOW_MS);
+    assert!(observed.confirm(candidate, &clock).is_err());
+    assert!(
+        pairing::poll(native.api.clone(), &pending, &clock)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        native.calls.lock().unwrap().len(),
+        calls,
+        "expired pairing performs no HTTP"
+    );
+    assert!(
+        native
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|(method, _)| matches!(method.as_str(), "getMe" | "getUpdates"))
+    );
+}
+
+#[tokio::test]
+async fn native_pairing_refuses_forwarded_stale_ambiguous_and_malformed_updates() {
+    use super::pairing;
+    use agend_testkit::fakes::FakeClock;
+    let native = Native::new();
+    let clock = FakeClock::new(1_791_367_350_123);
+    let pending = pairing::begin(
+        native.api.clone(),
+        "11111111-1111-4111-8111-111111111111".into(),
+        SecretRef::File("/private/test-token".into()),
+        &clock,
+    )
+    .await
+    .unwrap();
+    let valid = pairing_message(&pending.command(), clock.peek() / 1000);
+    for case in 0..10 {
+        let mut update = valid.clone();
+        match case {
+            0 => update["message"]["text"] = json!("/start unrelated"),
+            1 => update["message"]["date"] = json!(clock.peek() / 1000 - 1),
+            2 => update["message"]["date"] = json!(clock.peek() / 1000 + 1),
+            3 => update["message"]["from"]["is_bot"] = json!(true),
+            4 => update["message"]["forward_origin"] = json!({"type":"user"}),
+            5 => update["message"]["sender_chat"] = json!({"id":42}),
+            6 => update["message"]["edit_date"] = json!(clock.peek() / 1000),
+            7 => update["message"]["chat"]["type"] = json!("channel"),
+            8 => update["message"]["message_thread_id"] = json!(7),
+            9 => {
+                update["message"]["text"] =
+                    json!(pending.command().replace("/start", "/start@other_bot"))
+            }
+            _ => unreachable!(),
+        }
+        *native.updates.lock().unwrap() = vec![update];
+        let result = pairing::poll(native.api.clone(), &pending, &clock)
+            .await
+            .unwrap();
+        assert!(result.candidate.is_none(), "admitted case {case}");
+    }
+    *native.updates.lock().unwrap() = vec![valid.clone(), valid.clone()];
+    assert!(
+        pairing::poll(native.api.clone(), &pending, &clock)
+            .await
+            .is_err()
+    );
+    let mut second = valid.clone();
+    second["update_id"] = json!(101);
+    second["message"]["from"]["id"] = json!(43);
+    *native.updates.lock().unwrap() = vec![valid.clone(), second];
+    assert!(
+        pairing::poll(native.api.clone(), &pending, &clock)
+            .await
+            .is_err()
+    );
+    assert!(pending.candidate.is_none());
+    let mut forum = valid;
+    forum["message"]["chat"]["id"] = json!(-10042);
+    forum["message"]["chat"]["type"] = json!("supergroup");
+    forum["message"]["is_topic_message"] = json!(true);
+    forum["message"]["message_thread_id"] = json!(7);
+    forum["message"]["text"] = json!(
+        pending
+            .command()
+            .replace("/start", "/start@agend_fixture_bot")
+    );
+    *native.updates.lock().unwrap() = vec![forum];
+    let result = pairing::poll(native.api.clone(), &pending, &clock)
+        .await
+        .unwrap();
+    let config = result
+        .confirm(result.candidate.as_ref().unwrap(), &clock)
+        .unwrap();
+    assert_eq!(config.needs_you_topic, Some(7));
+    assert!(config.allows(-10042, 42, false));
 }
