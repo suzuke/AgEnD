@@ -222,3 +222,5 @@ Canary 必須取得三筆與 delivery 綁定的 completed outcomes；修改 fail
 `holder_runtime::managed_identity_queries_preserve_the_native_terminal_connection` 使用真 holder 檢查正確與錯 binding／agent PID，並核原 terminal connection 未失效且仍可讀 snapshot。`backend_canary` 的 Claude／OpenCode 第二版本為同協定 fixture，不代表真新版相容；Claude fixture 閒置持續等待，測試期限與清理由 harness 管理。
 
 `backend_canary::canary_scope_rejects_other_homes_instances_and_changed_artifacts` 經正式 import CLI 與 scope producer 驗正常版本觀察，及跨 home、錯 instance、額外 argv、修改 executable 的拒絕；另核 scope 本身沒有成功 canary 報告，不可取得 fleet 准入。此案例不執行 backend。
+
+版本往返測試在 target holder 已啟動、尚未建立 backend ready 時用私有 workspace marker 暫停 fixture，確認正式 activate 回覆 Committed，硬殺自有 daemon 並重啟，核同一 holder PID 存活才釋放 marker；後續須完成 Activated／RolledBack 並保留 session。這個切點不涵蓋 Ready 已觀察但尚未持久完成、目的 holder 死亡或還原中再次中斷。

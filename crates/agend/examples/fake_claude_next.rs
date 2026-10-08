@@ -5,5 +5,8 @@ fn main() -> std::process::ExitCode {
         println!("2.1.285 (Claude Code)");
         return std::process::ExitCode::SUCCESS;
     }
+    while std::path::Path::new(".g13-hold-start").exists() {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
     agend_testkit::fake_agent::claude::receipt_cli::main(args)
 }

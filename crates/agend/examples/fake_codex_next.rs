@@ -5,5 +5,11 @@ fn main() -> std::process::ExitCode {
         println!("codex-cli 0.159.0");
         return std::process::ExitCode::SUCCESS;
     }
+    // The crash harness can hold only its fleet launch before the app-server
+    // becomes ready; isolated canary workspaces never contain this marker.
+    let hold = std::path::Path::new(".g13-hold-start");
+    while hold.exists() {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
     agend_testkit::fake_agent::codex_cli::main(args)
 }

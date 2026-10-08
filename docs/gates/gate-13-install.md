@@ -199,3 +199,5 @@ cat docs/gates/gate-13-install.md
 - 2026-10-08：13C OpenCode 新版 canary 與 fleet 版本核對改依精確匯入 artifact／私有 CanaryScope；scope 綁 home inode/device、instance、workspace、program 與來源雜湊，不是 fleet 成功報告。正式 import＋scope producer 的跨 home／錯 instance／額外 argv／修改 artifact 反例通過；OpenCode 雙假版本完整 canary／啟用／回滾及 session 保留通過（66.22 秒）。未執行真模型，三 backend 全組回歸及全關驗收尚待完成（feat/g13-install，未合併）。
 
 - 2026-10-08：三 backend 的 canary 全組 8 項並行通過（75.27 秒），包括各雙版本正式 runner、啟用／回滾及 session 保留；fmt、clippy、check-deps 通過。仍僅為原生假 backend 證據，不代表真新版模型相容或完整 crash 驗收。
+
+- 2026-10-08：13C 三 backend 新增 Committed／新 holder 未就緒切點：fixture 在自有 workspace 等待，硬殺自有 daemon 後重開，核 holder PID 未變再繼續啟用／回滾與 session 保留；三項並行通過（75.97 秒）。fmt／clippy／check-deps 通過。尚未涵蓋 Ready 已出現、還原途中再中斷與自動失敗回滾；沒有執行真模型或改主機服務（feat/g13-install，未合併）。

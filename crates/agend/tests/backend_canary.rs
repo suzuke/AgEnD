@@ -604,6 +604,8 @@ fn native_switch(backend: &str, old: &str, next: &str, old_version: &str, next_v
     );
     let record: Value = serde_json::from_slice(&out.stdout).unwrap();
     let id = record["id"].as_str().unwrap();
+    let hold_start = home.join("workspace/managed/.g13-hold-start");
+    fs::write(&hold_start, b"hold only this test's target launch").unwrap();
     let out = cli(
         &home,
         &user,
@@ -622,6 +624,18 @@ fn native_switch(backend: &str, old: &str, next: &str, old_version: &str, next_v
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
+    {
+        let committed: Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(committed["phase"], "committed");
+        let surviving = root.running_holders();
+        assert_eq!(surviving.len(), 1);
+        daemon.kill9().unwrap();
+        assert_eq!(root.running_holders(), surviving);
+        daemon = lab::Daemon::start(&root, &home, &[]).unwrap();
+        daemon.expect("daemon ready").unwrap();
+        assert_eq!(root.running_holders(), surviving);
+        fs::remove_file(hold_start).unwrap();
+    }
     let deadline = Instant::now() + Duration::from_secs(40);
     loop {
         let out = cli(&home, &user, &["backend", "switch", "status", "managed"]);
