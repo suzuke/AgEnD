@@ -95,6 +95,8 @@
 
 ## 進度紀錄
 
+- 2026-10-08：固定 `d46d53b` 整關 accept install exit 0（2,039.20 秒、起訖 HEAD 相同且乾淨）；fake 全新 HOME 首任務 4,853 ms、一次 merge，demo root／匹配程序已核清理。release-artifacts 37791663365 四平台 archive、formula、雙平台 Brew 七 jobs 全過；同版雙平台 CI 37791469987 全過，7907e7e 偶發失敗根因仍未知，真 backend／Telegram／macOS 服務與最終覆核仍待完成（PR #158，未合併）。
+
 日期 + 一行 + commit／PR，新的在上面。
 
 - 2026-10-08：13C runtime 保存 executable 指紋，並核實際 running image：macOS executable mapping／Linux procfs，比對 capture 前後與後續檔案身分；macOS 兩項 native binding、4 項 canary 與 5 項匯入回歸通過。覆核確認捕獲前替換缺口修補；驗證到 exec 的路徑替換仍待修，因此即使 canary 正確也維持拒絕受管啟動。Linux 新 binding 尚待原生執行（feat/g13-install，未合併）。

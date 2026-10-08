@@ -72,6 +72,8 @@
 
 ## 進度紀錄
 
+- 2026-10-08：固定 `d46d53b` 整關 accept install exit 0（2,039.20 秒、起訖 HEAD 相同且乾淨）；fake 全新 HOME 首任務 4,853 ms、一次 merge，demo root／匹配程序已核清理。release-artifacts 37791663365 四平台 archive、formula、雙平台 Brew 七 jobs 全過；同版雙平台 CI 37791469987 全過，7907e7e 偶發失敗根因仍未知，真 backend／Telegram／macOS 服務與最終覆核仍待完成（PR #158，未合併）。
+
 - 2026-10-08：13C OpenCode 接入獨立回合證據，核對 native parentID／literal input／成功回覆及查詢前後 session／holder／endpoint；真 1.18.34 capture 反例與原生 fake CLI canary 驗證，保留不准入與不切換 fleet 的邊界。Claude outcome 與整體版本切換仍待完成（feat/g13-install，未合併）。
 - 2026-10-08：13C canary 新增獨立 message_outcome；Codex 以正式 thread history 核對單一輸入、訊息身分、成功回合與非空白回覆，排除 confirmed／idle 誤認成功；原生流程與異常證據覆核持續驗證。Claude／OpenCode outcome、版本准入與切換尚未完成（feat/g13-install，未合併）。
 - 2026-10-08 13C 補 client 1.7 操作員唯讀 delivery 收據查詢，供 canary 區分受理／送出／確認；canary 執行器與升級流程尚未完成（feat/g13-install）。

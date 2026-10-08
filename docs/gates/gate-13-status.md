@@ -10,7 +10,7 @@
 | 範圍 | 已實作／已有證據 | 尚未證明完成 |
 |---|---|---|
 | 13A home／設定 | 預設 home、init 權限、doctor 的配置程式解析、沙箱與服務診斷；install_home 回歸 | doctor 已分開執行檔／歷史 canary 範圍／unknown 登入；daemon 唯讀配置／觀測快照已接入並核 boot；四條版本敏感能力政策已列出；登入有效性、能力真環境證據與故障→修復人工矩陣仍待完成 |
-| 13B 服務 | launchd／systemd plan、安裝所有權、對帳、解除安裝、資料刪除互斥；d78f530 的 Linux ARM64 正式 archive 在隔離 systemd／一般使用者下通過五階段生命周期 | macOS 真 launchd capture 尚待核准；macOS daemon／holder 生命周期、登入登出與最終版本驗收 |
+| 13B 服務 | launchd／systemd plan、安裝所有權、對帳、解除安裝、資料刪除互斥；d78f530 的 Linux ARM64 正式 archive 在隔離 systemd／一般使用者下通過五階段生命周期 | macOS 真 launchd capture 尚待核准；macOS daemon／holder 生命周期與最終版本驗收（登入登出尚未測試，不另列為原始施工關的必要條件） |
 | 13C 受管版本 | 匯入、canary 收據、版本切換／回退、身份綁定與 pending 恢復；原生假 backend 測試 | 三個 backend 的專用認證／真模型 canary、切換與回退完整驗收及所有故障切點 |
 | 13C 版本發現 | 固定 npm 公開 metadata、每日持久排程、外部 CLI 磁碟版本探測、待辦與 Telegram 精確確認 | 真實系統 CLI 的版本觀測驗收；雙 monitor 同時 active 的正式 daemon 停機兩種完成順序已通過 |
 | 13C 重啟通知 | 真 daemon 三次啟動測試：worker 發現換版、通知重建、操作員確認持久化，agent 與錯誤 action 拒絕 | 此測試使用本機假 CLI，不能代替真模型或 service-manager 重啟驗收 |
@@ -22,11 +22,14 @@ doctor 逐項覆蓋與缺口見 [故障／修復矩陣](gate-13-doctor-matrix.md
 
 ## 當前自動驗收
 
+- 固定提交 `d46d53b` 的 `cargo xtask accept install` exit 0，耗時 2,039.20 秒，起訖 HEAD 相同且工作樹乾淨；安裝 demo 的 canary 17/17、Telegram pairing 2/2、服務模型 14/14 通過。全新 HOME 首任務 `t-1` 在 4,853 ms 完成且恰好一次 merge（fake workers，0 模型呼叫）；demo root 已移除，程序 argv 核對未見匹配的自有 agend／worker。此清理核對僅涵蓋該 demo，不冒充整套測試所有 lab 的獨立稽核。
+- 同一 `d46d53b` 的 [release-artifacts 37791663365](https://github.com/suzuke/AgEnD/actions/runs/37791663365) 七個 jobs 全部成功：四平台 archive、formula、macOS／Linux Brew。產物尚未公開發布；該提交的 [CI 37791469987](https://github.com/suzuke/AgEnD/actions/runs/37791469987) 已在 macOS／Ubuntu 全部成功。前述成功不解釋 `7907e7e` 偶發輸出上限失敗的未知根因。
+
 - 固定程式提交 `f08fe43` 的 `cargo xtask accept install` 以 exit 0 完成，耗時 2,200.61 秒；起訖 HEAD 相同且工作樹乾淨。包含 core／daemon／CLI checks、安裝 demo、三種原生假 backend canary、服務 lifecycle 模型與配對隔離測試。
 - 該版全新 HOME 首任務 `t-1` 完成，恰好一次 merge，耗時 5,597 ms；使用 fake workers，0 模型呼叫。自有 HOME／repo 已清理。
 - [CI 37778088087](https://github.com/suzuke/AgEnD/actions/runs/37778088087) 的 `f08fe43` 在 macOS／Ubuntu 成功；不能把結果套用到後續修改。
 - `d78f530` 的 [release-artifacts 37783051296](https://github.com/suzuke/AgEnD/actions/runs/37783051296) 七個 jobs 全部成功。正式 Linux ARM64 archive（binary SHA-256 `caaeee85b06c830c6d70822c1edf965981fd295d0ab90a5dd9967709ae32873f`）以原生 busctl、非 root 使用者驗安裝、重啟接回相同 holder／agent 世代、解除安裝保留資料與外來 drop-in、拒絕外來 MainPID、完整清理。隔離 container／image／暫存已刪除；未碰主機服務、未用真 backend，未驗登入登出。成功案例未記錄 readiness false→true，該分支另由捕獲的原生 fixture 與前置實驗支持。
-- `d78f530` 的 macOS 26 PR CI 在 self-setsid fixture 準備階段收到 EPERM。`64c35eb` 僅為 fixture 加入限定 EPERM／父程序群組的有界重試，必須建立真 session，清理前仍存活且最終由 SIGKILL 終止；production 期限與清理邏輯未改。本機 binary 40 項、fmt／clippy／check-deps 通過，新 CI 尚待結果。
+- `d78f530` 的 macOS 26 PR CI 在 self-setsid fixture 準備階段收到 EPERM。`64c35eb` 僅為 fixture 加入限定 EPERM／父程序群組的有界重試，必須建立真 session，清理前仍存活且最終由 SIGKILL 終止；production 期限與清理邏輯未改。本機 binary 40 項、fmt／clippy／check-deps 通過；該提交的 [CI 37785631445](https://github.com/suzuke/AgEnD/actions/runs/37785631445) 已在 macOS／Ubuntu 全部成功。
 - 歷史 `9a8bcf7` CI 的 pipeline／GitHub pipeline WIP 與返工失敗，經 `e64e629` 修正 fake-worker --version 誤入 inbox 後，本機完整 pipeline 15/15、GitHub pipeline 5/5 與上述雙平台 CI 通過。
 - 前輪 accept install 的 Codex 假 CLI 版本 probe 曾逾時；單例、並行全組及本輪 accept／demo 均通過，但原偶發逾時未穩定重現。`f762f47` 只增加 elapsed_ms／budget_ms／stdout_bytes，不記原始輸出、不重試、不延長期限。
 - 上述不代表真 backend、真 Telegram 或主機 service-manager 驗收；最終 fresh-context verifier 必須重跑並嘗試推翻，目前逐批 read-only review 不能代替。
