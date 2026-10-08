@@ -171,3 +171,5 @@ cat docs/gates/gate-13-install.md
 - 2026-10-08：13C 將改 program 與啟動完成分開：Committed／Restoring 跨重開維持 push／inbox 暫停，精確 Running／PID／session／新 managed launch 與 artifact 快照才可完成為 Activated／RolledBack；進行中不可被新 prepare 覆蓋。三 backend × 啟用／回滾 Store 反例及既有切換共 8 項、core 149 項（2 項既有 ignored）、daemon 單元 185 項（1 項既有 ignored）、CLI 回歸與 fmt／clippy／check-deps 通過。這是持久狀態契約，真 native readiness 與 supervisor 切換編排仍待接入（feat/g13-install，未合併）。
 
 - 2026-10-08：13C 正式終端 acquire／resize／input 與 legacy input 接入持久暫停及在途排空，唯讀／release 保留；原生 PTY 背壓核完整 bytes，啟動前 Prepared 經正式 cancel RPC 恢復輸入。terminal hub 序列 10 項通過；並行跑有 holder 5 秒未建 socket 的啟動失敗，已加失敗日誌並保存證據，尚未解決，不以序列通過宣稱整體穩定。初版測試另開已鎖 DB 被拒，已改成啟動前建狀態。daemon 單元 185 項（1 項既有 ignored）、fmt／clippy／check-deps 通過。另發現兩個逾時後才啟動的自有 holder 重建已刪 home，保存日誌並移除自有 home 觸發 watchdog；啟動生命週期缺口仍待修正。native 回合完成與 supervisor 啟用／恢復仍待接入（feat/g13-install，未合併）。
+
+- 2026-10-08：holder 啟動改為只在既有 AGEND_HOME 建立 run／holders 子目錄，避免延遲啟動重建已清理 home。原生子程序在 exec 前停住、刪 home 後放行，核拒絕且無目錄復活；holder 65 項、holder_process 8 項、holder_runtime 10 項及 clippy／check-deps 通過。兩個已發現的自有晚啟動 holder 與 home 已確認消失；此修正不宣稱解決並行啟動 5 秒逾時（feat/g13-install，未合併）。

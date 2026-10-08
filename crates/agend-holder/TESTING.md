@@ -84,3 +84,5 @@ Structured frame JSON 在既有 FrameLine 大小受限 sink 外加 8 KiB BufWrit
 `tests/server.rs` 的四個 `launch_binding_*` 原生 PTY 案例核對成功後跨連線保持 UUID／pid、第二次啟動不能替換、錯 instance、非法 UUID、失敗啟動、legacy 程序不能補認、1.2 peer 拒絕新能力，以及 agent 結束後保留原綁定。全部經正式 serializer／server producer，不使用真模型。
 
 停止重疊反例等待 agent 真正收到 HUP 後，在 grace 期間送第二個 SpawnBound 並建立新連線，兩者都拒絕；停機結束無第二個 marker／程序。移除 stopping／永久 spawned 防護的 mutant 會實際建立第二個原生 PID，測試失敗；恢復後重跑 holder 全套。
+
+`holder_process::a_late_holder_cannot_recreate_its_removed_home` 先讓自有 shell child 停在 exec 前，刪除其 home，再 exec 真 agend holder；必須 exit 2 且 home 保持不存在。原有 holder 跨啟動器／四次 daemon boot、重複啟動及 stale PID 測試維持不變；不以延長連線期限掩蓋晚啟動。
