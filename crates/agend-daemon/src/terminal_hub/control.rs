@@ -17,6 +17,19 @@ impl Actor {
             scope.send(error(Some(id.clone()), "stale_terminal", message));
             return;
         }
+        // Releasing control remains possible while paused. Acquire, resize and
+        // input can affect the backend and must finish before the switch drain.
+        let _switch_input = if matches!(data.operation, ClientTerminalOperation::Release { .. }) {
+            None
+        } else {
+            match self.switch_input().await {
+                Ok(guard) => guard,
+                Err(message) => {
+                    scope.send(error(Some(id.clone()), "backend_switch_pending", message));
+                    return;
+                }
+            }
+        };
         let acquire = matches!(data.operation, ClientTerminalOperation::Acquire { .. });
         let sized = matches!(
             data.operation,

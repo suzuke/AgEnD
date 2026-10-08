@@ -265,3 +265,5 @@ Claude outcome：`driver::claude::outcome` 使用先前真測 ACK/PostToolUse/St
 `client_protocol::inbox_delivery_fence_tracks_complete_disconnected_and_timed_out_socket_writes` 經正式 Store／server 與 Unix socket，用 20 筆完整訊息製造背壓，驗完整接收、對端斷線、正式 5 秒寫入逾時都釋放回覆範圍；同一 instance 後來的新回覆不延長舊範圍。測試 producer 使用原生 ClientRequest；逾時的截斷回覆不視為完整訊息。
 
 `backend_switch::commit_and_restore_keep_all_delivery_paused_until_exact_activation_snapshot` 以三 backend × 啟用／回滾路徑，重開正式 SQLite 後驗 channel／Stop、Codex、OpenCode 與 inbox 保持暫停；精確新意圖／Running 快照才放行。過期 PID、舊 launch、不同 artifact、第二次 finish／新 prepare／cancel 都不能提前釋放；這是 Store 契約，不是實際 backend 啟動驗收。
+
+`agend/tests/terminal_hub.rs` 的 pending_backend_switch 案例在啟動前以正式 Store 保存 Prepared，daemon 啟動後驗 acquire／resize／input／legacy 拒絕、唯讀可用，正式 cancel RPC 後恢復；不是 canary 或 managed holder 身分驗證。backend_switch_drain 案例用真 holder／PTY 暫停讀取製造背壓，確認控制請求返回前排空未完成，放行後核完整 bytes；持有真控制權時即使 Prepared 也可 release。

@@ -136,3 +136,5 @@ Prepare 在 SQLite 暫停新 reservation 後，捕捉已開始的 Claude／inbox
 
 
 切換持久狀態分成 Prepared（尚未改路徑）、Committed（已選新版、待啟動驗證）、Activated（新版已驗）、Restoring（已恢復舊路徑、待重新啟動驗證）、RolledBack（舊版已重新驗證）與 Cancelled。前三種進行中狀態 Prepared／Committed／Restoring 都暫停新投遞，重開 DB 不會解除。`finish_backend_switch` 以精確切換紀錄、Running instance／PID／session 及新 launch UUID 做 CAS，檢查 artifact 與設定後才釋放；不能以原本已停止的 launch 意圖宣告回滾成功。呼叫者仍須先驗真正 native readiness，Store 的快照驗證本身不是程序存活證據；supervisor 啟用／回滾接線尚未完成。
+
+進行中的切換也拒絕操作員完整終端 acquire／resize／input 與 legacy input，避免閒置核對期間再開始工作；唯讀與 release 可用。TerminalHub actor 在查 DB 前加入排空追蹤，完整控制請求直到返回才釋放；legacy blocking writer 自己持有追蹤，actor 取消不提前釋放。完整控制逾時／斷線與 legacy 寫出不證明 backend 已停止工作，仍須獨立 native 回合完成與身分核對。

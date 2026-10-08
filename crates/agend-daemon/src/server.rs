@@ -131,7 +131,8 @@ async fn accept_loop(
     delivery_replies: Arc<crate::delivery::Replies>,
 ) {
     let hub =
-        TerminalHub::with_codex_driver(ctx.runtime.clone(), ctx.fleet.clone(), ctx.codex.clone());
+        TerminalHub::with_codex_driver(ctx.runtime.clone(), ctx.fleet.clone(), ctx.codex.clone())
+            .with_switch_delivery(ctx.store.clone(), delivery_replies.clone());
     let claude = Arc::new(crate::claude_bridge::ClaudeBridge::default());
     let startup = tokio::spawn(crate::claude_bridge::startup::run(
         ctx.clone(),

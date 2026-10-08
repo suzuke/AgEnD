@@ -17,6 +17,7 @@
 //! as a failure.
 
 mod replies;
+pub(crate) use replies::ReplyGuard;
 pub use replies::{Replies, ReplyFence};
 
 /// The text the agent receives: `From:` and `Task:` headers (no `Task:`

@@ -204,3 +204,5 @@ Canary 必須取得三筆與 delivery 綁定的 completed outcomes；修改 fail
 `cargo test -p agend --test holder_runtime managed_stop_` 驗換版專用停止的精確身分與 socket 路徑替換反例；全部只啟動自有 sleep fixture，Lab 清理 holders 與 home，沒有模型或主機服務。
 
 13C 回覆排空由 `cargo test -p agend --test client_protocol inbox_delivery_fence_` 跑正式 server 的 socket 背壓；不以 handler 已返回代替整段寫入完成。不證明遠端模型回合結束。
+
+13C 終端切換保護：`cargo test -p agend --test terminal_hub`。新增 Prepared 下操作拒絕與真正 PTY 背壓排空案例；fixture panic 會保留 daemon 日誌於測試輸出，區分 holder 啟動失敗與輸入政策拒絕。

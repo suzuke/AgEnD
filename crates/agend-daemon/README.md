@@ -227,3 +227,5 @@ Codex 的 `workers_stopped` 追蹤連線建立與已移出 link 表但仍在退�
 13C server 追蹤 Claude helper 與 inbox 回覆，從 handler 執行前持有到序列化與 bounded socket write 結束。prepare 先持久化投遞暫停，再捕捉既有回覆並最多等 10 秒排空；後續空輪詢不延長這個範圍。逾時保留 Prepared 並要求查 status，不改程式或停止 holder。這只證明本機寫入結束，backend 消費／回合完成仍須另驗。
 
 13C Committed／Restoring 仍暫停新投遞；只有 native readiness 呼叫者提供且 DB 核對未變的 Running instance、PID／session、新 launch 意圖及目標 artifact，`finish_backend_switch` 才記 Activated／RolledBack 並恢復。原啟動 UUID、過期快照與未完成切換覆寫會拒絕；Store 不代替 native readiness，完整 supervisor 編排待接。
+
+13C 正式 TerminalHub 在完整終端 acquire／resize／input 與 legacy input 執行前查持久切換暫停；唯讀 frame／viewport 與 release 保留。操作先加入同一排空範圍再查 DB，所以競爭中的操作不是被拒絕，就是被先前回覆排空捕捉。完整終端追蹤到 holder 控制請求返回；legacy guard 隨實際 blocking write 工作持有。這仍不代表遠端回合結束；失敗／斷線不能當成 native readiness。

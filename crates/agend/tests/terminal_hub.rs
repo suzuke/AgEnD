@@ -57,6 +57,9 @@ impl Drop for Lab {
     fn drop(&mut self) {
         if let Some(mut daemon) = self.daemon.take() {
             let _ = daemon.interrupt();
+            if std::thread::panicking() {
+                eprintln!("terminal fixture daemon log:\n{}", daemon.log.join("\n"));
+            }
         }
     }
 }
@@ -562,8 +565,9 @@ fn the_dedicated_client_reader_and_sender_use_the_real_daemon_path() {
             },
         })
         .unwrap();
-    let FullTerminalUpdate::Frame(frame) = reader.next_full_terminal().unwrap() else {
-        panic!("initial frame expected")
+    let initial = reader.next_full_terminal().unwrap();
+    let FullTerminalUpdate::Frame(frame) = initial else {
+        panic!("initial frame expected: {initial:?}")
     };
     let make = |id: &str, operation| ClientTerminalControlData {
         request_id: id.into(),
@@ -796,4 +800,221 @@ fn stopping_the_entry_service_invalidates_a_completed_owner_on_the_native_holder
             assert_eq!(error.code, "control_lost");
         });
     rt.detach(ID);
+}
+
+#[test]
+fn pending_backend_switch_refuses_terminal_mutations_but_preserves_reads() {
+    use agend_core::{setup::backend::ImportedBackend, traits::HolderLaunch};
+    use agend_daemon::store::SqliteStore;
+    use agend_testkit::block_on;
+    let native = lab::Lab::with_prefix(Path::new(BIN), "g13-terminal-pause");
+    let home = native.home(1);
+    clp::add(&home, ID, Backend::Claude, SHELL).unwrap();
+    let store = SqliteStore::open(&home, 0).unwrap();
+    let instance = block_on(store.instance(ID)).unwrap().unwrap();
+    // Seed via the real Store before the daemon owns its DB lock. This fixture
+    // tests persisted terminal admission, not managed holder/canary identity.
+    let artifact = ImportedBackend {
+        format: 1,
+        backend: "claude".into(),
+        version: "1".into(),
+        sha256: "a".repeat(64),
+        bytes: 42,
+    };
+    block_on(store.prepare_managed_launch(
+        &instance,
+        &HolderLaunch {
+            instance_id: ID.into(),
+            backend: Backend::Claude,
+            executable: instance.program.clone(),
+            args: instance.args.clone(),
+            working_directory: instance.working_directory.clone(),
+        },
+        artifact.clone(),
+        None,
+    ))
+    .unwrap();
+    let prepared = block_on(store.prepare_backend_switch(
+        &instance,
+        ImportedBackend {
+            version: "2".into(),
+            sha256: "b".repeat(64),
+            ..artifact
+        },
+        "/managed/new/program",
+        None,
+    ))
+    .unwrap();
+    drop(store);
+    let mut daemon = lab::Daemon::start(&native, &home, &[]).unwrap();
+    daemon.ready().unwrap();
+    let lab = Lab {
+        native,
+        home,
+        daemon: Some(daemon),
+    };
+    let mut window = lab.window("switch-view", 12);
+    window.until_text("READY");
+    refused(
+        window.input("paused-input", "no-owner", b"DENIED-INPUT\n"),
+        "backend_switch_pending",
+    );
+    refused(
+        window.control(
+            "paused-resize",
+            ClientTerminalOperation::Resize {
+                attach_id: "no-owner".into(),
+                size: TerminalSize {
+                    rows: 20,
+                    columns: 80,
+                },
+            },
+        ),
+        "backend_switch_pending",
+    );
+    refused(
+        window.control(
+            "paused-acquire",
+            ClientTerminalOperation::Acquire {
+                size: TerminalSize {
+                    rows: 20,
+                    columns: 80,
+                },
+            },
+        ),
+        "backend_switch_pending",
+    );
+    assert!(text(&window.viewport("read-paused", None, 12).frame).contains("READY"));
+    let (mut legacy, _) = ProbeClient::hello(&lab.socket(), None).unwrap();
+    legacy
+        .send(&ClientRequest::TerminalInput {
+            data: TerminalInputData {
+                instance_id: ID.into(),
+                bytes_base64: STANDARD.encode(b"DENIED-LEGACY\n"),
+            },
+        })
+        .unwrap();
+    refused(
+        legacy.recv_within(Duration::from_secs(5)).unwrap().unwrap(),
+        "backend_switch_pending",
+    );
+    assert!(!lab.delivered().contains("DENIED"));
+    let response = legacy
+        .request(&ClientRequest::Operator {
+            data: OperatorData {
+                request_id: "cancel-switch".into(),
+                command: OperatorCommand::BackendSwitch {
+                    operation: BackendSwitchCommand::Cancel {
+                        instance_id: ID.into(),
+                        switch_id: prepared.id,
+                    },
+                },
+            },
+        })
+        .unwrap();
+    assert!(matches!(response, ClientResponse::CommandResult { .. }));
+    let token = window.acquire("after-cancel", 12, 60);
+    accepted(window.input("after-input", &token, b"AFTER\n"));
+    wait_for(|| lab.delivered().contains("AFTER"));
+    assert_eq!(lab.delivered(), "AFTER\n");
+}
+
+#[test]
+fn backend_switch_drain_includes_native_terminal_writes_until_pty_acknowledgement() {
+    use agend_core::traits::HolderLaunch;
+    use agend_daemon::terminal_hub::{ReplyScope, TerminalHub};
+    use agend_daemon::{
+        delivery::Replies, fleet::Fleet, runtime::HolderRuntime, store::SqliteStore,
+    };
+    use std::sync::{Arc, atomic::AtomicBool};
+    use tokio::sync::mpsc;
+    let native = lab::Lab::with_prefix(Path::new(BIN), "g13-terminal-drain");
+    let home = native.home(1);
+    let rt = HolderRuntime::new(&home, Path::new(BIN), Vec::new(), Arc::new(|_| {}));
+    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+        rt.start(&HolderLaunch {
+            instance_id: ID.into(), backend: Backend::Claude, executable: "/bin/bash".into(),
+            args: vec!["-c".into(), "stty raw -echo; printf READY; while ! test -e release-input; do sleep 0.05; done; head -c 131072 > delivered; sleep 600".into()],
+            working_directory: home.display().to_string(),
+        }).await.unwrap();
+        let fleet = Arc::new(Fleet::new(1));
+        fleet.set_instance(InstanceView {
+            instance_id: ID.into(), team_id: "test".into(), backend: "claude".into(),
+            state: AgentState::Unknown, working_directory: None,
+        }, "native drain test".into());
+        let tracker = Arc::new(Replies::default());
+        let store = Arc::new(SqliteStore::open(&home, 0).unwrap());
+        let hub = TerminalHub::new(rt.clone(), fleet).with_switch_delivery(store.clone(), tracker.clone());
+        let (replies, mut receiver) = mpsc::channel(8);
+        let scope = ReplyScope { client: 1, alive: Arc::new(AtomicBool::new(true)), replies };
+        let mut view = hub.subscribe(scope.clone(), TerminalSubscribeData {
+            request_id: "sub".into(), instance_id: ID.into(),
+            viewport: TerminalViewport { top: None, rows: 5 },
+        }).unwrap();
+        let ClientResponse::TerminalFrame { data } = tokio::time::timeout(Duration::from_secs(15), receiver.recv()).await.unwrap().unwrap() else { panic!("frame expected") };
+        let mut frame = data.frame;
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !text(&frame).contains("READY") {
+                let update = view.next().await.unwrap().unwrap();
+                if let ClientResponse::TerminalFrame { data } = &*update { frame = data.frame.clone(); }
+            }
+        }).await.unwrap();
+        hub.control(scope.clone(), &view, ClientTerminalControlData {
+            request_id: "acquire".into(), instance_id: ID.into(), view_id: view.view_id.clone(),
+            generation: frame.generation.clone(),
+            operation: ClientTerminalOperation::Acquire { size: TerminalSize { rows: 5, columns: 40 } },
+        }).unwrap();
+        let ClientResponse::TerminalControlAck { data: ack } = tokio::time::timeout(Duration::from_secs(15), receiver.recv()).await.unwrap().unwrap() else { panic!("grant expected") };
+        let ack_generation = frame.generation.clone();
+        let TerminalControlState::Controlled { attach_id } = ack.control else { panic!("owner expected") };
+        hub.control(scope.clone(), &view, ClientTerminalControlData {
+            request_id: "blocked-input".into(), instance_id: ID.into(), view_id: view.view_id.clone(),
+            generation: frame.generation,
+            operation: ClientTerminalOperation::Input { attach_id: attach_id.clone(), bytes_base64: STANDARD.encode(vec![b'x'; 131072]) },
+        }).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while tracker.fence(ID).drained() { tokio::time::sleep(Duration::from_millis(10)).await; }
+        }).await.unwrap();
+        let fence = tracker.fence(ID);
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert!(!fence.drained(), "queued native PTY write was declared drained");
+        assert!(tracker.fence("unrelated").drained());
+        fs::write(home.join("release-input"), b"go").unwrap();
+        let ack = tokio::time::timeout(Duration::from_secs(15), receiver.recv()).await.unwrap().unwrap();
+        assert!(matches!(ack, ClientResponse::TerminalControlAck { data } if data.request_id == "blocked-input"));
+        assert!(fence.drained());
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while fs::read(home.join("delivered")).unwrap_or_default().len() != 131072 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }).await.unwrap();
+        assert_eq!(fs::read(home.join("delivered")).unwrap(), vec![b'x'; 131072]);
+        // A pending switch must not prevent the current operator from releasing
+        // their real holder grant. This Store fixture does not claim a managed
+        // native launch or perform any switch/stop admission.
+        use agend_core::{runtime_records::{Instance, InstanceStatus}, setup::backend::ImportedBackend};
+        let instance = Instance {
+            id: ID.into(), backend: Backend::Claude, program: "/bin/bash".into(), args: vec![],
+            working_directory: home.display().to_string(),
+            session_id: Some("11111111-1111-4111-8111-111111111111".into()),
+            status: InstanceStatus::Running, session_started: true, agent_pid: None,
+            legacy_no_thread: false, delivery: "inbox".into(),
+        };
+        store.add_instance(&instance).await.unwrap();
+        let artifact = ImportedBackend { format: 1, backend: "claude".into(), version: "1".into(), sha256: "a".repeat(64), bytes: 42 };
+        store.prepare_managed_launch(&instance, &HolderLaunch {
+            instance_id: ID.into(), backend: Backend::Claude, executable: instance.program.clone(),
+            args: vec![], working_directory: instance.working_directory.clone(),
+        }, artifact.clone(), None).await.unwrap();
+        store.prepare_backend_switch(&instance, ImportedBackend { version: "2".into(), ..artifact }, "/managed/new/program", None).await.unwrap();
+        hub.control(scope, &view, ClientTerminalControlData {
+            request_id: "release-while-paused".into(), instance_id: ID.into(), view_id: view.view_id.clone(),
+            generation: ack_generation,
+            operation: ClientTerminalOperation::Release { attach_id },
+        }).unwrap();
+        let reply = tokio::time::timeout(Duration::from_secs(15), receiver.recv()).await.unwrap().unwrap();
+        assert!(matches!(reply, ClientResponse::TerminalControlAck { data } if data.control == TerminalControlState::ReadOnly));
+        hub.stop();
+        rt.stop(ID).await.unwrap();
+    });
 }
