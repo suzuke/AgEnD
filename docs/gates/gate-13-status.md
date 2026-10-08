@@ -20,12 +20,12 @@
 
 ## 當前自動驗收
 
-- `cargo xtask accept install` 在 `21ecf59` 啟動，已以 exit 1 結束：`backend_canary` 16 通過、1 失敗，Codex 假 CLI 的版本探測逾時；尚未到 install demo。執行期間另提交 fake-worker 修正，故本輪也不是固定 head 的全套證據。
-- `9a8bcf7` 的 macOS CI 在 pipeline 有兩項失敗（WIP 未封存、預期 rework 卻首次完成）。`e64e629` 修正 fake-worker 的版本查詢誤入 inbox；獨立 source review 確認此路徑與兩項症狀相符。修正後已重建 fake-worker，固定程式 head `e64e629` 的完整 pipeline 15 項重驗通過；Ubuntu 同一輪 CI 的 GitHub pipeline WIP 案例亦失敗；本機修正後 GitHub pipeline 全 5 項通過（25.64 秒，真 daemon／holder、離線 GitHub producer）。新 head CI 尚待完成。
-- Codex canary 原失敗案例在 `e64e629` 單獨執行通過（14.81 秒，版本探測仍限 5 秒）。這只證明單例可通過，尚未確認原逾時根因；原預設並行方式的 backend_canary 17 項也通過（77.83 秒），仍不把重跑成功當作問題已修好。補逾時的 elapsed_ms、budget_ms、stdout_bytes 診斷，不保存輸出內容、不增加重試或延長期限。
-- `backend_version_monitor` 已納入 install demo；它不註冊主機服務、不啟動真 backend、不讀真認證。
-- 新測試若在 CI 之前提交，舊 head 的綠燈不能代表新 head 通過；仍在跑的 CI 不因觀察逾時重啟。
-- 最終 fresh verifier 必須重跑並嘗試推翻；目前逐批 read-only source review 不能冒充最終驗證。
+- 固定程式提交 `8507a05` 的 `cargo xtask accept install` 已以 exit 0 完成；期間工作樹保持乾淨。包含 core／daemon／CLI checks、安裝 demo、三種原生假 backend canary、服務 lifecycle 模型與配對隔離測試。
+- 全新 HOME 的首任務 `t-1` 完成，恰好一次 merge，耗時 5,994 ms；使用 fake workers，0 模型呼叫。該 HOME／repo 已不存在，檢查未見本批 target 的 daemon／fake backend 程序或相關 g13 test roots 殘留。
+- [CI 37767137610](https://github.com/suzuke/AgEnD/actions/runs/37767137610) 的 head 精確為 `8507a05`，macOS 與 Ubuntu 兩個 job 均 success。不能把此結果套用到後續程式修改。
+- 歷史 `9a8bcf7` CI 的 pipeline／GitHub pipeline WIP 與返工失敗，經 `e64e629` 修正 fake-worker --version 誤入 inbox 後，本機完整 pipeline 15/15、GitHub pipeline 5/5 與上述雙平台 CI 通過。
+- 前輪 accept install 的 Codex 假 CLI 版本 probe 曾逾時；單例、並行全組及本輪 accept／demo 均通過，但原偶發逾時未穩定重現。`f762f47` 只增加 elapsed_ms／budget_ms／stdout_bytes，不記原始輸出、不重試、不延長期限。
+- 上述不代表真 backend、真 Telegram 或主機 service-manager 驗收；最終 fresh-context verifier 必須重跑並嘗試推翻，目前逐批 read-only review 不能代替。
 
 ## 授權與清理邊界
 
@@ -37,4 +37,4 @@
 
 ## 下一步
 
-先取得當前自動驗收結果；其間補可隔離完成的缺口。需要使用者操作時，提供固定版本、命令、預算、影響範圍與清理方式，一次帶一個步驟。
+自動驗收基線已取得；接著補登入／相容性診斷與其餘隔離驗證缺口。需要使用者操作時，提供固定版本、命令、預算、影響範圍與清理方式，一次帶一個步驟。
