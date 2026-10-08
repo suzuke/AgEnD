@@ -346,3 +346,5 @@
 - 2026-10-08：固定 AgEnD 啟動副本整批重驗完成：4 項三 backend fake canary、6 項服務安裝、原生 holder 替換／存活、shim ownership 反例及 daemon 生命週期回歸通過，workspace clippy／無 std 依賴檢查通過。覆核確認 D3／D5 不要求同 build holder；准入尚缺存活 backend 與持久啟動身分對帳。自有程序／暫存無殘留，工作樹未合併保留（feat/g13-install）。
 
 - 2026-10-08：holder 1.3 加入不可補認的原生啟動 UUID 回報；65 項 holder、149 項 core（另 2 項既有 ignored 未執行）、workspace clippy／check-deps 通過。覆核發現停止時第二次 Spawn 競態，已以永久 spawned 與 stopping guard 修正；原生 HUP 重疊測試通過，移除防護的 mutant 實際產生第二個 PID 並失敗。daemon 持久綁定仍待接入、准入關閉，本批 holder 暫存已清理（feat/g13-install，未合併）。
+
+- 2026-10-08：holder 啟動 UUID 與關閉競態修補提交 `715bdf0`；65 項 holder、149 項 core（另 2 項既有 ignored）、runtime 回歸與 clippy／check-deps 通過。Ubuntu canary 三回合完成後超出 60 秒測試預算，整合測試改採正式 180 秒預設；本機三 backend 原生 fake canary 4 項於 87.23 秒通過，包含程序／暫存清理。遠端 CI 與 daemon 持久啟動紀錄仍待完成，不宣稱整關或真模型通過。

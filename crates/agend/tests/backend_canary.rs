@@ -84,7 +84,10 @@ fn native_canary(backend: &str, executable: &str, version: &str, wrong_version: 
                 version,
                 "--allow-model",
                 "--timeout-seconds",
-                "60",
+                // Match the production default. Unoptimized Linux binaries
+                // are large; three concurrent native cases also hash copies.
+                // The runner still enforces the same end-to-end deadline.
+                "180",
             ],
         );
         let record = home

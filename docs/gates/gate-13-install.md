@@ -135,3 +135,5 @@
 cat docs/gates/gate-13-install.md
 ~/.cargo/bin/cargo xtask accept install
 ```
+
+- 2026-10-08：holder 啟動 UUID 與關閉競態修補提交 `715bdf0`；65 項 holder、149 項 core（另 2 項既有 ignored）、runtime 回歸與 clippy／check-deps 通過。Ubuntu canary 三回合完成後超出 60 秒測試預算，整合測試改採正式 180 秒預設；本機三 backend 原生 fake canary 4 項於 87.23 秒通過，包含程序／暫存清理。遠端 CI 與 daemon 持久啟動紀錄仍待完成，不宣稱整關或真模型通過。

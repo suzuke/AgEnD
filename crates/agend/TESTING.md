@@ -190,3 +190,5 @@ Canary 必須取得三筆與 delivery 綁定的 completed outcomes；修改 fail
 執行 backend_canary 前建置 `cargo build -p agend --example fake_codex` 與 `cargo build -p agend-testkit --bin fake-opencode-cli --bin fake-claude-cli`。共用測試對 Codex／OpenCode／Claude 各核三筆 delivery／outcome、錯版拒絕、報告異常與清理，不執行真模型。Claude fixture 以保存的 Ready 畫面走真 holder parser，經正式 channel helper 的 MCP ACK 回覆後才發 PostToolUse 與 Stop；ACK 到 Stop 間留延遲，但單憑延遲不宣稱一定讀到中間 Unknown 狀態。
 
 `cargo test -p agend --test pinned_launcher` 在自有短路徑 Lab 啟動正式 daemon，原地以 false 替換原始 AgEnD 路徑，再以正式 InstanceAdd 啟動 bash fixture；核對 holder 與 shim 使用固定副本、daemon 停止後 holder／副本保留，以及停止自有 holder 後整個 Lab 可清除。無模型或主機服務註冊。
+
+`backend_canary` 的三 backend 原生整合案例使用正式預設 180 秒總期限；期限仍涵蓋版本探測、三回合、最終驗證與清理。Ubuntu debug binary 的複製／雜湊在並行測試下曾使 60 秒測試預算於最終驗證逾時（三回合已完成），因此測試與正式預設對齊；這不放寬產品期限，也不代表真模型已驗證。
