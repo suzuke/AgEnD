@@ -19,3 +19,15 @@ pub struct RegistryObservation {
     pub revision: u64,
     pub acknowledged_revision: u64,
 }
+
+/// A bounded --version observation of an external configured executable.
+/// This is not a claim about an already running holder or its loaded image.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SystemBackendVersion {
+    pub backend: String,
+    pub configured_program: String,
+    pub resolved_program: String,
+    pub version_output: String,
+    pub sha256: String,
+}

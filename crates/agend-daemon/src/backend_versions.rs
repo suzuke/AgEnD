@@ -12,6 +12,7 @@ pub(crate) mod monitor;
 pub mod registry;
 mod running;
 mod snapshot;
+pub mod system_version;
 pub mod version_probe;
 
 /// Read-only ownership check for service reconciliation of its pinned shims.

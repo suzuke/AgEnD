@@ -178,3 +178,5 @@ CLP-14 由正式 InstanceAdd 產生 fleet，核 program 保留 /bin/sh；doctor 
 RegistryObservation 的持久化與重開行為由 daemon 真 SQLite 測試驗證；core 僅定義資料與每日間隔。
 
 registry_checks 的 TOML 解析／缺省行為與離線 native lab 由 daemon／CLI 測試核對；Telegram apply 必須保留既有 root 設定。
+
+SystemBackendVersion 的資料由 daemon 原生腳本 producer 產生；PATH／cwd／環境及路徑切換拒絕見 daemon system_version 測試。

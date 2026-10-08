@@ -25,6 +25,12 @@ migration 0021 的 backend_registry 最多保存三筆（每個 backend 一筆�
 
 結果內容或錯誤改變才增加 revision；同樣結果不重開提醒。acknowledge 必須匹配當前非零 revision；查詢本身不安裝、啟用或確認任何版本。daemon 每分鐘檢查受管 fleet，設定 program 必須仍符合 managed launch 才啟動每日查詢。canary home 不額外查最新版。查詢在 blocking worker，停機等待當前有期限的 HTTP 結束，不遺留脫離管理的查詢。ingest 恢復提醒，operator 只能 acknowledge；等待時間綁結果變動時間，確認與刷新序列化，避免舊快照重新發布已確認提醒。
 
+## 被動版本探測入口
+
+`HolderRuntime::observe_backend_version` 以 daemon 捕獲的 PATH 與 instance cwd 解析外部程式，使用 agent_env 白名單（含 backend 更新停用旗標），不繼承 daemon token。共用限時 --version probe，執行前後核檔案 hash／metadata 與 PATH／symlink 解析結果；不接受在探測期間換程式的結果。受管路徑先核 manifest，無效 bytes 不得退回外部探測。
+
+這只描述當次磁碟程式，不宣稱存活 holder 已換版；尚未接持久漂移紀錄與提醒。
+
 ## 下一步
 
 補未受管 CLI 的被動漂移與整體原生服務驗收。worker 的 active HTTP 停機已由真 loopback／SQLite 測試覆蓋，尚未取代完整服務測試；查詢失敗不能推進為已知最新版，也不能影響正在工作的 backend。

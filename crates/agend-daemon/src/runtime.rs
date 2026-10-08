@@ -206,6 +206,34 @@ impl HolderRuntime {
         .await
     }
 
+    /// Probe the configured external program using this daemon's launch environment.
+    /// Does not describe the image already loaded by a surviving holder.
+    pub async fn observe_backend_version(
+        &self,
+        id: &str,
+        backend: agend_core::model::Backend,
+        program: &str,
+        working_directory: &str,
+    ) -> Result<Option<agend_core::setup::backend::observation::SystemBackendVersion>, RuntimeError>
+    {
+        let inner = Arc::clone(&self.inner);
+        let id = id.to_owned();
+        let program = program.to_owned();
+        let cwd = working_directory.to_owned();
+        blocking(move || {
+            let environment = env::agent_env(&inner.home, &id, backend, inner.daemon_env.clone());
+            crate::backend_versions::system_version::observe(
+                &inner.home,
+                backend,
+                &program,
+                Path::new(&cwd),
+                &environment,
+            )
+            .map_err(err)
+        })
+        .await
+    }
+
     /// Starts a holder for `launch` and its agent.
     pub async fn start(&self, launch: &HolderLaunch) -> Result<Started, RuntimeError> {
         let inner = Arc::clone(&self.inner);

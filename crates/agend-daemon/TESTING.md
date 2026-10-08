@@ -317,3 +317,5 @@ registry notification 測試以真 SQLite／Fleet 核對重啟恢復、等待時
 registry 覆核補測：native Telegram HTTP callback 真正更新觀測 ack、舊按鈕不能確認新 revision；相同／混合／未受管 fleet 通知判斷；原生 backend_switch lab 停機後 registry 表仍無嘗試，證明離線設定在 reservation 前生效。version_probe 原有三個程序測試搬入 daemon，新增只接收明示環境與 cwd 的原生腳本測試。
 
 monitor 停機案例用真 loopback HTTP 重播 npm manifest，body 傳到一半時請求 stop，先核 stop 未完成，放行 body 後核結果已提交、第二 backend 沒有 reservation，重開 SQLite 仍有成功結果。這是 worker／HTTP／DB 生命週期證據，不代替主機 launchd 驗收。
+
+system_version 四項 native 測試涵蓋 daemon PATH／相對 cwd、版本替換、symlink 在查詢中改指向、無效受管 manifest 不執行，以及真 runtime 不傳入非白名單測試 secret。全為私有假 CLI，未執行使用者的真 backend。
