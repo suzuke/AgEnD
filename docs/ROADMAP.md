@@ -498,3 +498,5 @@
 - 2026-10-08：外部 monitor 接線後，原生 backend_switch 2 項（核離線 Lab 無本機版本 reservation）、Telegram apply 5 項（保留兩個探測設定）、workspace clippy／check-deps／fmt 通過；通知測試暫存無殘留。保留未合併 Gate 13 工作樹與共用 target 供後續驗收（feat/g13-install，未合併）。
 
 - 2026-10-08：補外部版本的成功路徑與排除證據：真本機假 CLI 1→2→提醒→SQLite／Fleet 重開→確認→重開→3 拒舊確認；停用／錯誤設定／canary 等 worker 自行退出後核無執行；受管排除等下一外部 instance 真探測完成再核無執行。3 項測試及 workspace clippy／check-deps／fmt 通過，read-only fresh reviewer 確認覆蓋有效、未見新 blocker（未獨立重跑）。自有暫存無殘留；這是組件整合，正式 daemon／定時 worker 重啟與服務真驗收仍待完成（feat/g13-install，未合併）。
+
+- 2026-10-08：新增 backend_version_monitor 真 daemon 三次啟動驗證：原生 probe 保存歷史基準後改磁碟版本，worker／ingest／socket 自行產生提醒；第二次保留 ID、拒 agent 與錯 action、操作員確認；第三次不重現，每次停機重開 SQLite 核值且無 holder 殘留。原生案例通過並納入 xtask accept install；不等於 launchd／systemd 服務重啟或真模型驗收（feat/g13-install，未合併）。

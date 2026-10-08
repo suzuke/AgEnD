@@ -78,6 +78,7 @@ pub fn run() -> Result<(), String> {
         "install_service",
         "backend_import",
         "backend_switch",
+        "backend_version_monitor",
         "backend_canary",
         "telegram_pairing",
     ] {

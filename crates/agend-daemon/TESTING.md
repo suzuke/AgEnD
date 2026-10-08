@@ -327,3 +327,5 @@ system_version 四項 native 測試涵蓋 daemon PATH／相對 cwd、版本替�
 `native_external_version_*` 使用正式 runtime 執行假 CLI、SQLite、Fleet 與 loopback Telegram HTTP，驗證 monitor 停機等待 child／保存結果／不探測下一 instance，以及失敗提醒、手機確認、refresh 不重現與舊按鈕不能確認新 revision。共用 native Lab 同時停用 registry_checks 與 backend_version_checks，避免額外網路或 CLI 執行。
 
 外部版本通知補強：`native_disk_change_notice_and_exact_ack_survive_database_and_fleet_restarts` 以真 probe 對本機假 CLI 的 1.0／2.0／3.0 產生資料，核首次靜默、變動提醒、資料庫／Fleet 重開、確認持久化與舊確認拒絕；這是 producer→Store→通知完整路徑，未宣稱完整 daemon 服務重啟。停用／錯誤設定／canary 案例等待 worker 自行結束後才送 stop，核無 reservation 與執行 marker；managed 排除案例先放受管 instance，再等待下一外部 instance 完成以證實迴圈確實跑過。
+
+跨程序版本 monitor 的三次 daemon 啟動、socket operator／agent 邊界與確認持久化，另見 agend 的 `backend_version_monitor` integration suite。
