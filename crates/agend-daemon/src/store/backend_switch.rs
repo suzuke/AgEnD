@@ -163,7 +163,7 @@ impl SqliteStore {
         .await
     }
 
-    /// Pause an already activated destination before any rollback side effect.
+    /// Persist rollback intent before any side effect, including failed activation.
     pub async fn prepare_backend_rollback(
         &self,
         expected: &BackendSwitch,
@@ -173,9 +173,14 @@ impl SqliteStore {
             let tx = conn.transaction()?;
             let mut current = read(&tx, &expected.instance_id)?
                 .ok_or_else(|| invalid("backend switch missing"))?;
-            if current != expected || current.phase != BackendSwitchPhase::Activated {
+            if current != expected
+                || !matches!(
+                    current.phase,
+                    BackendSwitchPhase::Activated | BackendSwitchPhase::Committed
+                )
+            {
                 return Err(invalid(
-                    "only the current activated switch can prepare rollback",
+                    "only the current committed or activated switch can prepare rollback",
                 ));
             }
             let instance = instances::get(&tx, &current.instance_id)?

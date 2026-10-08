@@ -496,7 +496,7 @@ fn native_opencode_switch_activates_and_rolls_back_with_the_same_session() {
     );
 }
 fn native_switch(backend: &str, old: &str, next: &str, old_version: &str, next_version: &str) {
-    native_switch_case(backend, old, next, old_version, next_version, false);
+    native_switch_case(backend, old, next, old_version, next_version, false, false);
 }
 
 #[test]
@@ -508,6 +508,59 @@ fn native_codex_committed_switch_recovers_when_the_target_holder_is_absent() {
         "0.158.0",
         "0.159.0",
         true,
+        false,
+    );
+}
+
+#[test]
+fn native_codex_lost_candidate_holder_automatically_restores_the_previous_version() {
+    native_switch_case(
+        "codex",
+        "examples/fake_codex",
+        "examples/fake_codex_next",
+        "0.158.0",
+        "0.159.0",
+        false,
+        true,
+    );
+}
+
+#[test]
+fn native_codex_persisted_rollback_resumes_after_daemon_restart() {
+    native_switch_case(
+        "codex",
+        "examples/fake_codex",
+        "examples/fake_codex_next",
+        "0.158.0",
+        "0.159.0",
+        true,
+        true,
+    );
+}
+
+#[test]
+fn native_claude_lost_candidate_holder_automatically_restores_the_previous_version() {
+    native_switch_case(
+        "claude",
+        "fake-claude-cli",
+        "examples/fake_claude_next",
+        "2.1.284",
+        "2.1.285",
+        false,
+        true,
+    );
+}
+
+#[test]
+fn native_opencode_lost_candidate_holder_automatically_restores_the_previous_version() {
+    native_switch_case(
+        "opencode",
+        "fake-opencode-cli",
+        "examples/fake_opencode_next",
+        "1.18.34",
+        "1.18.35",
+        false,
+        true,
     );
 }
 
@@ -518,6 +571,7 @@ fn native_switch_case(
     old_version: &str,
     next_version: &str,
     remove_holder: bool,
+    auto_rollback: bool,
 ) {
     use std::time::{Duration, Instant};
     let root = lab::Lab::with_prefix(Path::new(BIN), "g13-switch-live");
@@ -650,6 +704,54 @@ fn native_switch_case(
     {
         let committed: Value = serde_json::from_slice(&out.stdout).unwrap();
         assert_eq!(committed["phase"], "committed");
+        if auto_rollback {
+            if remove_holder {
+                daemon.kill9().unwrap();
+                // Seed the exact durable cut through the production Store API;
+                // the real target launch/session and artifact remain intact.
+                let store = agend_daemon::store::SqliteStore::open(&home, 0).unwrap();
+                let record = serde_json::from_value(committed.clone()).unwrap();
+                agend_testkit::block_on(store.prepare_backend_rollback(&record)).unwrap();
+                drop(store);
+            }
+            root.stop_all_holders();
+            if remove_holder {
+                daemon = lab::Daemon::start(&root, &home, &[]).unwrap();
+                daemon.ready().unwrap();
+            }
+            let deadline = Instant::now() + Duration::from_secs(40);
+            loop {
+                let out = cli(&home, &user, &["backend", "switch", "status", "managed"]);
+                assert!(out.status.success());
+                let status: Value = serde_json::from_slice(&out.stdout).unwrap();
+                if status["phase"] == "rolled_back" {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "automatic rollback did not finish: {status}"
+                );
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            daemon.interrupt().unwrap();
+            assert_eq!(record["session_id"].as_str(), instance().0.as_deref());
+            let db = rusqlite::Connection::open(home.join("agend.db")).unwrap();
+            let program: String = db
+                .query_row(
+                    "SELECT program FROM instances WHERE id='managed'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                program,
+                record["previous"]["configured_program"].as_str().unwrap()
+            );
+            drop(db);
+            root.stop_all_holders();
+            assert!(root.running_holders().is_empty());
+            return;
+        }
         let surviving = root.running_holders();
         assert_eq!(surviving.len(), 1);
         daemon.kill9().unwrap();

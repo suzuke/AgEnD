@@ -971,6 +971,9 @@ impl Supervisor {
             return;
         }
         if self.switch_holds_recovery(id).await {
+            if holder_gone {
+                self.rollback_lost_candidate(id).await;
+            }
             return;
         }
         log::line(&what);

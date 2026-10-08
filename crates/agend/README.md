@@ -95,4 +95,4 @@ cargo run -p agend -- --version
 
 13C `backend switch prepare <instance> --version <version> [--previous <id>]` 經 daemon 驗目標 canary 並暫停新投遞；`status <instance>` 讀持久紀錄，`cancel <instance> --switch-id <id>` 精確取消並恢復。要求 client protocol 1.8，只允許操作員；逾時查 status，不重送 mutation。prepare 尚不停止 holder 或啟用新版，完整切換／回滾仍施工中。
 
-13C 新增 `backend switch activate／rollback --switch-id`：精確持久 ID、目的版本准入、投遞排空與 native idle 後停止受管 holder；Committed／Restoring 保持暫停，核新 holder 綁定及 readiness 後才釋放。Activated 回滾先保存 RollbackPrepared。Codex 原生假 backend 的雙版本 canary、啟用、回滾及 session 保留已驗；三後端與完整 crash matrix 尚未完成。
+13C 新增 `backend switch activate／rollback --switch-id`：精確持久 ID、目的版本准入、投遞排空與 native idle 後停止受管 holder；Committed／Restoring 保持暫停，核新 holder 綁定及 readiness 後才釋放。Activated／Committed 回滾先保存 RollbackPrepared；daemon 重啟後由定期協調器繼續。三 backend 原生假版本往返與目的 holder 消失後自動回退已驗；完整 crash matrix 尚未完成。

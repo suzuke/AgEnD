@@ -137,6 +137,8 @@ Codex 原生假 backend 整合測試已經兩個版本的正式 canary、prepare
 Prepare 在 SQLite 暫停新 reservation 後，捕捉已開始的 Claude／inbox server 回覆，最多等待 10 秒直到既有 handler／socket write 全部完成或連線任務結束。其後的空輪詢不加入舊範圍；逾時仍保存 Prepared，呼叫者查 status 對帳。ACK、backend 完成與 worker 停止是後續獨立條件；socket 已寫完不代表模型已消費內容。
 
 
-切換持久狀態分成 Prepared（尚未改路徑）、Committed（已選新版、待啟動驗證）、Activated（新版已驗）、Restoring（已恢復舊路徑、待重新啟動驗證）、RolledBack（舊版已重新驗證）與 Cancelled。前三種進行中狀態 Prepared／Committed／RollbackPrepared／Restoring 都暫停新投遞，重開 DB 不會解除。`finish_backend_switch` 以精確切換紀錄、Running instance／PID／session 及新 launch UUID 做 CAS，檢查 artifact 與設定後才釋放；不能以原本已停止的 launch 意圖宣告回滾成功。呼叫者仍須先驗真正 native readiness，Store 的快照驗證本身不是程序存活證據；supervisor 定期核 native 閒置與 holder 綁定後才完成狀態。Activated 的回滾先保存 RollbackPrepared 暫停投遞，再停止目前 holder；Committed／Restoring 無 holder 的 boot 只對設定吻合且仍准入的目標啟動。失敗維持 pending，需查 status；自動失敗回滾與全部重啟切點仍待驗證。
+切換持久狀態分成 Prepared（尚未改路徑）、Committed（已選新版、待啟動驗證）、Activated（新版已驗）、Restoring（已恢復舊路徑、待重新啟動驗證）、RolledBack（舊版已重新驗證）與 Cancelled。四種進行中狀態 Prepared／Committed／RollbackPrepared／Restoring 都暫停新投遞，重開 DB 不會解除。`finish_backend_switch` 以精確切換紀錄、Running instance／PID／session 及新 launch UUID 做 CAS，檢查 artifact 與設定後才釋放；不能以原本已停止的 launch 意圖宣告回滾成功。呼叫者仍須先驗真正 native readiness，Store 的快照驗證本身不是程序存活證據；supervisor 定期核 native 閒置與 holder 綁定後才完成狀態。Activated 的回滾先保存 RollbackPrepared 暫停投遞，再停止目前 holder；Committed／Restoring 無 holder 的 boot 只對設定吻合且仍准入的目標啟動。失敗維持 pending，需查 status；自動失敗回滾與全部重啟切點仍待驗證。
 
 進行中的切換也拒絕操作員完整終端 acquire／resize／input 與 legacy input，避免閒置核對期間再開始工作；唯讀與 release 可用。TerminalHub actor 在查 DB 前加入排空追蹤，完整控制請求直到返回才釋放；legacy blocking writer 自己持有追蹤，actor 取消不提前釋放。完整控制逾時／斷線與 legacy 寫出不證明 backend 已停止工作，仍須獨立 native 回合完成與身分核對。
+
+目前代目的 holder 確認消失、且持久 launch 精確對應 Committed 目標時，自動回退先保存 RollbackPrepared，再恢復舊版本；不接受舊代退出事件作為依據。RollbackPrepared 在 daemon server 排空追蹤器就緒後續行，涵蓋回退意圖保存後重啟。三 backend 原生假版本的 holder 消失回退已驗；Codex 重啟案例用正式 Store API 建立精確持久切點。仍存活但未就緒的 backend、Ready 已觀察後的中斷、Restoring 再次失敗及完整通知政策仍待完成。

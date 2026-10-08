@@ -105,7 +105,16 @@ fn program_and_phase_survive_reopen_and_rollback_without_replaying_stale_request
         block_on(store.backend_switch(&instance.id)).unwrap(),
         Some(committed.clone())
     );
-    let restored = block_on(store.commit_backend_switch(&committed, true)).unwrap();
+    let rollback = block_on(store.prepare_backend_rollback(&committed)).unwrap();
+    assert_eq!(rollback.phase, BackendSwitchPhase::RollbackPrepared);
+    drop(store);
+    let store = SqliteStore::open(&home, 3).unwrap();
+    assert_eq!(
+        block_on(store.backend_switch(&instance.id)).unwrap(),
+        Some(rollback.clone())
+    );
+    assert!(block_on(store.prepare_backend_rollback(&committed)).is_err());
+    let restored = block_on(store.commit_backend_switch(&rollback, true)).unwrap();
     assert_eq!(restored.phase, BackendSwitchPhase::Restoring);
     assert_eq!(
         block_on(store.instance(&instance.id)).unwrap().unwrap(),

@@ -3,6 +3,50 @@ use super::*;
 use agend_core::runtime_records::{BackendSwitch, BackendSwitchPhase};
 
 impl Supervisor {
+    /// A current-generation holder death may roll back only an unactivated
+    /// candidate whose persisted launch still identifies the target exactly.
+    pub(super) async fn rollback_lost_candidate(&mut self, id: &str) {
+        let attempt = async {
+            let record = self
+                .store
+                .backend_switch(id)
+                .await
+                .map_err(|e| e.to_string())?
+                .ok_or("backend switch missing")?;
+            if record.phase != BackendSwitchPhase::Committed {
+                return Ok(());
+            }
+            let instance = self
+                .store
+                .instance(id)
+                .await
+                .map_err(|e| e.to_string())?
+                .ok_or("backend switch instance missing")?;
+            let launch = self
+                .managed_reconnect(&instance)
+                .await?
+                .ok_or("candidate launch missing")?;
+            if launch.binding == record.previous.binding
+                || launch.artifact != record.target
+                || instance.program != record.target_program
+                || files::running(&self.home, id)
+                    .map_err(|e| e.to_string())?
+                    .is_some()
+            {
+                return Err("candidate death or launch identity not established".into());
+            }
+            self.activate_switch(&instance, &record.id, true).await?;
+            log::line(&format!(
+                "{id}: lost candidate holder; restoring previous backend"
+            ));
+            Ok::<(), String>(())
+        }
+        .await;
+        if let Err(error) = attempt {
+            log::line(&format!("{id}: automatic backend rollback held: {error}"));
+        }
+    }
+
     async fn backend_idle(&self, instance: &Instance) -> Result<bool, String> {
         if instance.delivery != "push" {
             return Err("backend switch requires native push readiness".into());
@@ -76,7 +120,12 @@ impl Supervisor {
         if artifact.as_ref() != Some(expected) {
             return Err("backend switch destination changed or is not admitted".into());
         }
-        if rollback && record.phase == BackendSwitchPhase::Activated {
+        if rollback
+            && matches!(
+                record.phase,
+                BackendSwitchPhase::Activated | BackendSwitchPhase::Committed
+            )
+        {
             record = self
                 .store
                 .prepare_backend_rollback(&record)
@@ -206,6 +255,12 @@ impl Supervisor {
             let Ok(Some(record)) = self.store.backend_switch(&instance.id).await else {
                 continue;
             };
+            if record.phase == BackendSwitchPhase::RollbackPrepared {
+                // Server reply fencing exists only after boot. Resume the
+                // persisted rollback here, whether its holder survived or not.
+                let _ = self.activate_switch(&instance, &record.id, true).await;
+                continue;
+            }
             if !matches!(
                 record.phase,
                 BackendSwitchPhase::Committed | BackendSwitchPhase::Restoring
