@@ -212,4 +212,6 @@ client protocol 1.7 的 operator `message_delivery` 只讀持久化收據：mess
 
 13C OpenCode runtime 保留尚未結束的舊代 worker，取消旗標與 `workers_stopped` 分開；只有所有執行緒退出才回報停止。這是本機投遞執行緒的證據，backend 回合是否結束仍需原生狀態核對。
 
-13C Prepared 切換記錄會暫停 Claude channel／Stop、Codex 與 OpenCode 的新 push attempt；檢查與 reservation 在同一 DB 工作序列執行。訊息保留 queued，取消後可恢復；既有 attempt 的回執仍可確認。準備前已取得的寫入權仍須排空，此限制不等於 holder 或 backend 已閒置；inbox 與完整 supervisor 切換編排尚未接入。
+13C Prepared 切換記錄會暫停 Claude channel／Stop、Codex 與 OpenCode 的新 push attempt；檢查與 reservation 在同一 DB 工作序列執行。訊息保留 queued，取消後可恢復；既有 attempt 的回執仍可確認。準備前已取得的寫入權仍須排空，此限制不等於 holder 或 backend 已閒置；完整 supervisor 切換編排尚未接入。
+
+Prepared 也暫停 agent 的 inbox 讀取：狀態檢查與內容查詢在同一 DB 工作執行，回覆明確暫停原因。操作員歷史查詢不受影響；取消後沿用原有最後 20 筆／after 游標。已完成讀取但尚未寫回 socket 的回覆仍需由切換編排排空。

@@ -481,6 +481,32 @@ impl SqliteStore {
             .await
     }
 
+    /// Agent-visible inbox contents. Serialize the read with version-switch
+    /// preparation; administrative message/history reads remain available.
+    pub async fn inbox_messages(
+        &self,
+        to: &str,
+        after: Option<&str>,
+        last: usize,
+    ) -> Result<Option<Vec<Message>>, StoreError> {
+        let (to, after) = (to.to_owned(), after.map(str::to_owned));
+        self.call(move |conn| {
+            if backend_switch::delivery_paused(conn, &to)? {
+                return Err(StoreError::Invalid(
+                    "backend version switch is prepared; inbox delivery is paused until the switch completes or is cancelled".into(),
+                ));
+            }
+            if let Some(after) = after {
+                messages::to_instance_after(conn, &to, &after)
+            } else {
+                let mut rows = messages::to_instance(conn, &to)?;
+                let skip = rows.len().saturating_sub(last);
+                rows.drain(..skip);
+                Ok(Some(rows))
+            }
+        }).await
+    }
+
     /// Messages to `to` newer than the one with id `after` (by `seq`), or
     /// `None` when `to` has no message `after` (gate 9 P2).
     pub async fn messages_after(

@@ -205,27 +205,12 @@ async fn inbox(
             format!("cannot read messages: {e}"),
         )
     };
-    let messages = match after {
-        None => {
-            let mut all = ctx.store.messages_to(caller).await.map_err(read)?;
-            let skip = all.len().saturating_sub(INBOX_LAST);
-            all.drain(..skip);
-            all
-        }
-        Some(after) => ctx
-            .store
-            .messages_after(caller, &after)
-            .await
-            .map_err(read)?
-            .ok_or_else(|| {
-                (
-                    error_code::UNKNOWN_MESSAGE,
-                    format!(
-                        "you have no message {after} (unknown, older than 30 days, or not yours); run agend inbox without --after"
-                    ),
-                )
-            })?,
-    };
+    let messages = ctx.store.inbox_messages(caller, after.as_deref(), INBOX_LAST)
+        .await.map_err(read)?.ok_or_else(|| {
+            let after = after.as_deref().unwrap_or_default();
+            (error_code::UNKNOWN_MESSAGE,
+             format!("you have no message {after} (unknown, older than 30 days, or not yours); run agend inbox without --after"))
+        })?;
     Ok(CommandResult::Messages {
         data: MessagesData {
             messages: messages.into_iter().map(shown).collect(),

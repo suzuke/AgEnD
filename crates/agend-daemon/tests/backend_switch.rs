@@ -11,6 +11,13 @@ fn fixture(store: &SqliteStore) -> (Instance, ImportedBackend) {
     fixture_backend(store, Backend::Codex)
 }
 fn fixture_backend(store: &SqliteStore, backend: Backend) -> (Instance, ImportedBackend) {
+    fixture_delivery(store, backend, "push")
+}
+fn fixture_delivery(
+    store: &SqliteStore,
+    backend: Backend,
+    delivery: &str,
+) -> (Instance, ImportedBackend) {
     let instance = Instance {
         id: "switch-1".into(),
         backend,
@@ -22,7 +29,7 @@ fn fixture_backend(store: &SqliteStore, backend: Backend) -> (Instance, Imported
         session_started: true,
         agent_pid: None,
         legacy_no_thread: false,
-        delivery: "push".into(),
+        delivery: delivery.into(),
     };
     block_on(store.add_instance(&instance)).unwrap();
     let old = ImportedBackend {
@@ -394,4 +401,65 @@ fn prepared_switch_still_accepts_receipts_for_previously_reserved_content() {
             DeliveryState::Confirmed
         );
     }
+}
+
+#[test]
+fn prepared_switch_holds_inbox_reads_without_hiding_operator_history() {
+    use agend_core::{policy::busy::BusyLevel, runtime_records::NewMessage};
+    let root = TempDir::new("backend-switch-inbox").unwrap();
+    let store = SqliteStore::open(root.path(), 0).unwrap();
+    let (instance, target) = fixture_delivery(&store, Backend::Claude, "inbox");
+    for id in ["first", "second", "third"] {
+        block_on(store.claim_message(
+            &NewMessage {
+                id: id.into(),
+                from_instance: "operator".into(),
+                to_instance: instance.id.clone(),
+                task_id: None,
+                body: id.into(),
+                level: BusyLevel::Queue,
+            },
+            0,
+        ))
+        .unwrap();
+    }
+    let expected = block_on(store.inbox_messages(&instance.id, None, 2))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        expected.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+        vec!["second", "third"]
+    );
+    assert_eq!(
+        block_on(store.inbox_messages(&instance.id, Some("first"), 2))
+            .unwrap()
+            .unwrap(),
+        expected
+    );
+    assert!(
+        block_on(store.inbox_messages(&instance.id, Some("foreign"), 2))
+            .unwrap()
+            .is_none()
+    );
+    let prepared =
+        block_on(store.prepare_backend_switch(&instance, target, "/managed/new/program", None))
+            .unwrap();
+    drop(store);
+    let store = SqliteStore::open(root.path(), 1).unwrap();
+    for after in [None, Some("first")] {
+        let error = block_on(store.inbox_messages(&instance.id, after, 2)).unwrap_err();
+        assert!(error.to_string().contains("inbox delivery is paused"));
+    }
+    assert_eq!(block_on(store.messages_to(&instance.id)).unwrap().len(), 3);
+    assert_eq!(
+        block_on(store.inbox_messages("other", None, 2)).unwrap(),
+        Some(vec![])
+    );
+    block_on(store.cancel_backend_switch(&prepared)).unwrap();
+    assert_eq!(
+        block_on(store.inbox_messages(&instance.id, None, 2))
+            .unwrap()
+            .unwrap(),
+        expected
+    );
 }
