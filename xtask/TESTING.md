@@ -60,3 +60,5 @@ cargo test -p xtask
 ```
 
 第 12C 整合後 `demo adapters`／`accept 12` 包含正式 GitHub Forge／strict base policy／原生 daemon 重啟與清理案例。這些全為離線原生測試；真 GitHub 驗收另記 gate-12c，不在 CI 呼叫外部 API。
+
+`release::tests` 使用真正 tar 建立／解開本機 executable，核對 manifest／binary hash、權限、LICENSE、staging 清理及拒絕覆寫；另建立真 git repo 驗乾淨提交、修改與 untracked 拒絕。這些測試不取代正式 agend release build 或跨平台驗收。

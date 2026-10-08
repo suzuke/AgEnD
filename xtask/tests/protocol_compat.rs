@@ -16,7 +16,7 @@ use serde_json::json;
 fn client_request_wire_shapes_are_stable_and_approval_does_not_supply_a_head() {
     assert_eq!(
         serde_json::to_value(ClientRequest::hello()).unwrap(),
-        json!({"type": "hello", "data": {"supported": [{"major": 1, "minor": 8}, {"major": 1, "minor": 7}, {"major": 1, "minor": 6}, {"major": 1, "minor": 5}, {"major": 1, "minor": 4}, {"major": 1, "minor": 3}]}})
+        json!({"type": "hello", "data": {"supported": [{"major": 1, "minor": 9}, {"major": 1, "minor": 8}, {"major": 1, "minor": 7}, {"major": 1, "minor": 6}, {"major": 1, "minor": 5}, {"major": 1, "minor": 4}, {"major": 1, "minor": 3}]}})
     );
 
     let review = ClientRequest::Command {
@@ -562,6 +562,7 @@ fn a_1_0_peer_decodes_1_1_messages() {
         v1_0::ClientRequest::Hello {
             data: v1_0::Hello {
                 supported: vec![
+                    v1_0::Version { major: 1, minor: 9 },
                     v1_0::Version { major: 1, minor: 8 },
                     v1_0::Version { major: 1, minor: 7 },
                     v1_0::Version { major: 1, minor: 6 },

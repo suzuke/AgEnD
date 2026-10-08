@@ -434,3 +434,5 @@
 - 2026-10-08：13D 接 daemon 啟停、protocol 1.9 操作員配對 RPC 與 `telegram setup begin/status/poll/confirm/cancel` CLI；token 由 daemon 解析，操作不重送。真 daemon／client／CLI 測試驗 nullable 收據、重啟、agent／舊協定／過期／舊 ID 拒絕及 config 原文保留；client 52、core 125、daemon 190（1 ignored）、CLI 單元 25、fake daemon 14 與 fmt／clippy／check-deps 通過。自有配對 labs 無殘留；設定套用、真 Telegram 及整關驗收仍未完成（feat/g13-install，未合併）。
 
 - 2026-10-08：13D `telegram setup apply --id` 由操作員 CLI 讀已確認收據，保留原文與原檔備份、0600 完整發布；不同既有設定、symlink、備份撞名及未確認收據拒絕，相同設定冪等。CLI 單元 30、原生配對／套用 2、core 125、daemon 190（1 ignored）、fmt／clippy／check-deps 通過；自有配對／apply labs 無殘留。daemon 未改寫設定或自動重啟；真 Telegram、其餘 13B/C/E 及整關驗收仍未完成（feat/g13-install，未合併）。
+
+- 2026-10-08：13E 新增 `xtask release --out` native locked release 打包，要求乾淨提交／新輸出目錄，核版本並附 source commit、binary／archive SHA-256；不建立 tag 或公開發布。xtask 45 項、fmt／clippy／check-deps 通過；整組測試找出並修正 1.9 offer 的兩處舊快照，保留初輪失敗 log。正式 release binary 打包、brew／workflow、全新 HOME 驗收仍待驗證（feat/g13-install，未合併）。

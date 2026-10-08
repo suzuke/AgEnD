@@ -35,7 +35,8 @@
 ## 不負責
 
 - 擋刻意繞過（例如改 xtask、加長 allowlist）：靠 code review
-- 產生 protocol JSON schema、打包 release（規劃中，未實作）
+- 產生 protocol JSON schema（規劃中，未實作）
+- 公開發布 release（打包與發布分開，打包命令不建立 tag／上傳）
 - 錄製器本身（在 agend-testkit；xtask 不依賴 testkit，只執行它的 binary）
 
 ## 模組
@@ -108,3 +109,9 @@ cargo xtask accept core
 ```
 
 第 12C 整合後 `demo adapters`／`accept 12` 包含正式 GitHub Forge／strict base policy／原生 daemon 重啟與清理案例。這些全為離線原生測試；真 GitHub 驗收另記 gate-12c，不在 CI 呼叫外部 API。
+
+## Native release 打包（13E 施工中）
+
+`cargo xtask release --out /absolute/new/directory` 要求乾淨的已提交 checkout，以 `--locked --release` 建置本機 target 的 agend，執行 `--version` 核對 Cargo metadata，再產生 tar.gz、SHA256SUMS 與 manifest.json（版本、target、source commit、binary／archive SHA-256）。支援 macOS／Linux 的 x86_64／aarch64 native build，沒有交叉執行或假稱跨平台驗證。輸出目錄必須不存在且位於 checkout 外。
+
+壓縮檔含 executable、README 與 LICENSE；暫存 payload 完成後移除。失敗可能保留尚未完成的輸出目錄，必須檢查後清理；不自動重用。此命令只打包，不建立 tag、不改服務、不上傳 GitHub。Brew／發布 workflow 與全新 HOME 五分鐘驗收仍待完成。
