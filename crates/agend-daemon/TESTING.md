@@ -315,3 +315,5 @@ registry 的四組測試經 native loopback HTTP 重播真 npm manifest；捕獲
 registry notification 測試以真 SQLite／Fleet 核對重啟恢復、等待時間不因下一次查詢改變、舊 revision 不可確認新版、ack 重開後仍有效；worker 測試核對查詢前已有持久 reservation，重開不重送。HTTP 整體期限由 registry 原生 loopback 四項測試覆蓋；真服務生命週期仍屬後續驗收。
 
 registry 覆核補測：native Telegram HTTP callback 真正更新觀測 ack、舊按鈕不能確認新 revision；相同／混合／未受管 fleet 通知判斷；原生 backend_switch lab 停機後 registry 表仍無嘗試，證明離線設定在 reservation 前生效。version_probe 原有三個程序測試搬入 daemon，新增只接收明示環境與 cwd 的原生腳本測試。
+
+monitor 停機案例用真 loopback HTTP 重播 npm manifest，body 傳到一半時請求 stop，先核 stop 未完成，放行 body 後核結果已提交、第二 backend 沒有 reservation，重開 SQLite 仍有成功結果。這是 worker／HTTP／DB 生命週期證據，不代替主機 launchd 驗收。

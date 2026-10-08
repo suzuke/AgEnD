@@ -13,7 +13,11 @@ pub fn latest(backend: Backend) -> Result<PublishedBackend, String> {
     fetch(backend, ORIGIN, Duration::from_secs(5))
 }
 
-fn fetch(backend: Backend, origin: &str, within: Duration) -> Result<PublishedBackend, String> {
+pub(super) fn fetch(
+    backend: Backend,
+    origin: &str,
+    within: Duration,
+) -> Result<PublishedBackend, String> {
     let package = npm_package(backend);
     let config = ureq::Agent::config_builder()
         .proxy(None)

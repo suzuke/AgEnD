@@ -27,4 +27,4 @@ migration 0021 的 backend_registry 最多保存三筆（每個 backend 一筆�
 
 ## 下一步
 
-補未受管 CLI 的被動漂移與整體原生服務驗收；查詢失敗不能推進為已知最新版，也不能影響正在工作的 backend。
+補未受管 CLI 的被動漂移與整體原生服務驗收。worker 的 active HTTP 停機已由真 loopback／SQLite 測試覆蓋，尚未取代完整服務測試；查詢失敗不能推進為已知最新版，也不能影響正在工作的 backend。
