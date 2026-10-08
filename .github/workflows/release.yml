@@ -3,6 +3,12 @@ name: release-artifacts
 # Deliberately builds only: publishing a GitHub Release is a separate action.
 on:
   workflow_dispatch:
+  push:
+    branches: [feat/g13-install]
+    paths:
+      - .github/workflows/release.yml
+      - scripts/*release*.py
+      - xtask/src/release.rs
 
 permissions:
   contents: read
@@ -54,5 +60,31 @@ jobs:
         with:
           name: agend-${{ matrix.target }}-${{ github.sha }}
           path: ${{ env.RELEASE_OUT }}/
+          if-no-files-found: error
+          retention-days: 14
+
+  formula:
+    needs: native
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: agend-*-${{ github.sha }}
+          path: ${{ runner.temp }}/native-artifacts
+      - name: Generate formula from the complete verified matrix
+        run: >-
+          python3 -B scripts/release_formula.py
+          --artifacts "$RUNNER_TEMP/native-artifacts"
+          --commit "$GITHUB_SHA"
+          --out "$RUNNER_TEMP/agend.rb"
+      - run: ruby -c "$RUNNER_TEMP/agend.rb"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agend-formula-${{ github.sha }}
+          path: ${{ runner.temp }}/agend.rb
           if-no-files-found: error
           retention-days: 14

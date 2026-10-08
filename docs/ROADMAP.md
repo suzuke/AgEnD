@@ -440,3 +440,5 @@
 - 2026-10-08：13E 首次正式 macOS release build 成功，但獨立解壓檢查拒絕 AppleDouble `._` metadata；打包停用 COPYFILE metadata 並新增精確 archive 清單測試。另依雙平台 CI 修正剩餘 1.9 協商斷言，Claude busy-control 1、CLI 19、terminal hub 10、xtask 45 項與 clippy／check-deps 通過；正式修正版安裝包待重產驗證，未公開發布（feat/g13-install，未合併）。
 
 - 2026-10-08：13E 修正版 macOS ARM64 release `869a664` 已核 archive 精確清單、雙雜湊與解壓版本；新增手動四平台 native Actions 打包（只保留 artifacts、不公開發布）及共用 verifier。真安裝包 round-trip 與 7 種竄改拒絕通過，actionlint 通過；初版 YAML／runner context 錯誤已修正。四平台遠端建置、Brew、全新 HOME 與整關驗收仍待完成（feat/g13-install，未合併）。
+
+- 2026-10-08：13E 新增 Brew formula 產生器，必須提供四份同版本／同提交且 archive 內容與雜湊通過的 native 產物；既有輸出拒絕覆寫。workflow 接四平台完成後的 formula job，施工分支相關檔案 push 觸發，只有 artifacts、不發布或改 tap。本機 native verifier 回歸及缺平台拒絕通過、actionlint 通過；完整矩陣／formula 成功路徑待遠端執行（feat/g13-install，未合併）。

@@ -14,7 +14,7 @@ def sha256(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def verify(directory, commit, target):
+def inspect_archive(directory, commit, target):
     manifest = json.loads((directory / "manifest.json").read_text())
     if manifest.get("format") != 1 or manifest.get("git_commit") != commit:
         raise ValueError("wrong manifest format or source commit")
@@ -54,6 +54,12 @@ def verify(directory, commit, target):
         binary = tar.extractfile(executable).read()
     if sha256(binary) != manifest.get("binary_sha256"):
         raise ValueError("binary hash mismatch")
+    return manifest, binary
+
+
+def verify(directory, commit, target):
+    manifest, binary = inspect_archive(directory, commit, target)
+    version = manifest["version"]
     # Never extract arbitrary member paths, and never inherit the user's HOME.
     with tempfile.TemporaryDirectory(prefix="agend-release-verify-") as temporary:
         root = Path(temporary)

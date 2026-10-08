@@ -64,3 +64,5 @@ cargo test -p xtask
 `release::tests` 使用真正 tar 建立／解開本機 executable，核對 manifest／binary hash、權限、LICENSE、staging 清理及拒絕覆寫；另建立真 git repo 驗乾淨提交、修改與 untracked 拒絕。這些測試不取代正式 agend release build 或跨平台驗收。
 
 發布 workflow 修改後跑 `actionlint .github/workflows/release.yml`。對真正由 `xtask release` 產生的本機產物跑 `python3 -B scripts/test_verify_release.py /absolute/artifact-directory`：先通過原始產物，再拒絕錯 commit／target／archive hash／binary hash／checksum、額外檔案與 symlink；每個竄改副本在結束時清除。此測試不等於四平台發布或全新環境首任務驗收。
+
+Brew generator 的完整成功路徑需要四個真正的 native 產物；不得以改 target 名稱的本機 binary 宣稱跨平台通過。本機已用正式 macOS archive 確認缺平台時拒絕；workflow aggregate job 重驗同 commit／version 與各 hash，並跑 ruby -c。Brew 實際安裝仍須另外驗收。
