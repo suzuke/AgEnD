@@ -47,7 +47,11 @@ def run(args):
         raise RuntimeError("runner has no Homebrew")
     with tempfile.TemporaryDirectory(prefix="agend-brew-", dir=os.environ["RUNNER_TEMP"]) as temporary:
         root = Path(temporary)
-        env = dict(os.environ, HOMEBREW_NO_AUTO_UPDATE="1", HOMEBREW_NO_ANALYTICS="1",
+        env = dict(os.environ, GIT_AUTHOR_NAME="Agend release verification",
+                   GIT_AUTHOR_EMAIL="verification@example.invalid",
+                   GIT_COMMITTER_NAME="Agend release verification",
+                   GIT_COMMITTER_EMAIL="verification@example.invalid",
+                   HOMEBREW_NO_AUTO_UPDATE="1", HOMEBREW_NO_ANALYTICS="1",
                    HOMEBREW_NO_INSTALL_CLEANUP="1", HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK="1",
                    HOMEBREW_CACHE=str(root / "cache"), HOMEBREW_LOGS=str(root / "logs"),
                    HOMEBREW_TEMP=str(root / "tmp"))

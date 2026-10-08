@@ -253,3 +253,5 @@ cat docs/gates/gate-13-install.md
 Brew 原生安裝驗證已接入 release workflow 的 macOS ARM64／Linux x86_64 jobs，僅在一次性 Actions runner 執行。`release_brew_smoke.py` 重新產生並逐字核對四平台 formula，僅將下載 URL 換成同輪 archive 的 file URL，保留 SHA 與安裝邏輯；建立唯一 tap，拒絕既有 agend 安裝，跑 install／formula test／全新 HOME init／uninstall 並檢查清理。這不證明公開 Release URL 已可下載；實跑結果另記。
 
 - 2026-10-08：13E 覆核找出 doctor 版本 probe 無界 reader join 與非零退出誤判，改非阻塞／64 KiB 上限／5 秒總 probe 期限及 2 秒限時清理，核尚未回收的直接 PID 與原群組。原生錯誤／超量／繼承 pipes／自行換群組反例通過；整組測試另抓安裝鎖 close 遇 fork 繼承的競態，改明確 unlock guard 加副本反例後並行 binary 35、install_home 8 項通過。保留初輪失敗，暫存已清；doctor 非惡意程序沙箱，登入／版本相容／漂移與真測仍待補（feat/g13-install，未合併）。
+
+- 2026-10-08：release run 37747622359 的四平台 archive／首任務、formula 與 macOS ARM64 Brew install／test／init／uninstall 全部通過。Linux Brew 在 tap-new 的 Git commit 因 runner 無作者身分而失敗，tap 已 untap 清理；測試子程序補專用 Git author／committer 環境值，不改全域設定，待重驗（feat/g13-install，未合併）。

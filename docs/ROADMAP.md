@@ -460,3 +460,5 @@
 - 2026-10-08：13E 新增一次性 Actions runner 的 Brew install／test／fresh HOME init／uninstall 驗證，macOS ARM64 與 Linux x86_64；只替換同輪已驗 archive 的 URL，不改 formula SHA 或安裝內容。以 c085ddf 四平台真產物核四個 local URL、變造 formula 拒絕及本機執行拒絕，下載暫存已清；actionlint／check-deps 通過，Brew 實跑待 CI（feat/g13-install，未合併）。
 
 - 2026-10-08：13E 覆核找出 doctor 版本 probe 無界 reader join 與非零退出誤判，改非阻塞／64 KiB 上限／5 秒總 probe 期限及 2 秒限時清理，核尚未回收的直接 PID 與原群組。原生錯誤／超量／繼承 pipes／自行換群組反例通過；整組測試另抓安裝鎖 close 遇 fork 繼承的競態，改明確 unlock guard 加副本反例後並行 binary 35、install_home 8 項通過。保留初輪失敗，暫存已清；doctor 非惡意程序沙箱，登入／版本相容／漂移與真測仍待補（feat/g13-install，未合併）。
+
+- 2026-10-08：release run 37747622359 的四平台 archive／首任務、formula 與 macOS ARM64 Brew install／test／init／uninstall 全部通過。Linux Brew 在 tap-new 的 Git commit 因 runner 無作者身分而失敗，tap 已 untap 清理；測試子程序補專用 Git author／committer 環境值，不改全域設定，待重驗（feat/g13-install，未合併）。
