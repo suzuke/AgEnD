@@ -305,3 +305,7 @@ Brew 原生安裝驗證已接入 release workflow 的 macOS ARM64／Linux x86_64
 - 2026-10-08：固定提交 8507a05 的 accept install exit 0、CI 37767137610 雙平台成功。安裝 demo 的假 backend canary 17/17，全新 HOME 首任務 t-1 done／唯一 merge／5,994 ms／0 模型呼叫；核自有 HOME／repo／相关測試目錄與 target daemon／fake backend 程序無殘留。保留 active 未合併 worktree／target 及必要證據；真服務／模型／Telegram、登入相容診斷、最終 fresh verifier 與人工驗收仍待完成。
 
 - 2026-10-08：13C 補正式 daemon 的雙 monitor 同時 active 停機驗證，兩種放行順序均等待另一 worker 收尾、持久化完成且不啟動下一工作；兩個丟 JoinHandle mutation 分別被抓出。daemon lib 223 通過、2 個子程序入口 ignored（由父測試呼叫），workspace clippy／fmt／check-deps 通過；修正 macOS 測試 socket 繼承非阻塞模式，測試自有程序／暫存清理完成。獨立唯讀覆核無新 blocker；不代替真服務、holder 或模型驗收（feat/g13-install，未合併）。
+
+- 2026-10-08：固定 f08fe43 的 accept install 完整通過（來源與工作目錄未變），全新 HOME 首任務 5,597 ms／唯一 merge／0 模型呼叫；同版四平台 release archive、formula 與 macOS／Linux Brew 七個 jobs 成功。Linux 冷啟動真測另發現 user-bus 名稱尚未註冊；root／一般使用者 readiness wrapper 實驗通過且精確清理。正式 bounded readiness 修正施工中，不能用 wrapper 成功替正式服務或整關驗收（feat/g13-install／PR #158）。
+
+- 2026-10-08：13B 正式加入唯讀 user-bus readiness 共用期限；只等待原生合法 false，錯誤／逾時拒絕，完整有效設定與程序身分檢查保留。service 24 項、install_service 6 項、workspace clippy／fmt／check-deps 通過，獨立唯讀覆核無 blocker。f08fe43 雙平台 CI 37778088087 已成功；新修正仍待 Linux production 冷啟動真測，不宣稱整關完成（feat/g13-install／PR #158）。

@@ -22,7 +22,7 @@
 ## 所有權與並行
 
 - 收據先持久化，再發布檔案／註冊；中斷後以同一收據對帳，不收編未知或被修改的 service／executable。
-- systemd 核對 D-Bus 實際有效設定與 live MainPID 身分。停止時不隱含 reload 未檢查的 drop-in。
+- systemd 先唯讀查 `NameHasOwner`，只有合法 false 才在共用 2 秒期限內等待；bus／格式錯誤拒絕，禁止 autoactivation。期限涵蓋 readiness 子程序與解析，不涵蓋後續 GetAll；同步 spawn 無法由期限中斷，因此不宣稱嚴格 2 秒返回。名稱就緒不代表 unit 所有權，也不解決兩次屬性查詢間的 bus owner 更換。接著核對 D-Bus 實際有效設定與 live MainPID 身分。停止時不隱含 reload 未檢查的 drop-in。
 - macOS 執行中 PID 加核映射 executable inode、精確 argv／home、UID 與開始時間；已用自有 native 程序驗同路徑替換拒絕。loaded launchd 定義解析與真 Rust daemon 尚待原生驗收。
 - daemon 重新啟動保留 holder；解除安裝才停止通過 home／lock／socket 檢查的自有 holder。
 - 移除階段持有 installation lock、home maintenance flock 與既有 DB 的 SQLite 排他鎖。當前版本的 daemon 在建立／開啟 DB 前必須取得共享 home lock。

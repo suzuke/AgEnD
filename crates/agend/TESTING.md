@@ -272,3 +272,5 @@ Doctor 的 PATH backend 列只證明操作員 PATH 的版本 probe；`backend/<i
 backend_version_monitor 的三次真 daemon 啟動案例同時驗 BackendDiagnostic 的正式 RPC／one-shot decoder／doctor consumer、agent 拒絕、1.8 拒絕、未知 instance、唯讀不改 attempt。doctor::observations 的正式 SQLite snapshot 驗 boot 與配置邊界；這些案例仍只用本機假 backend，沒有模型呼叫。
 
 backend_canary 的三 backend 原生 managed fleet 透過 doctor 消費正式 daemon 的 capability rows；仍為 Warn，不把 canary 通過升格為全部能力准入。boot／配置反例帶非空 policy sentinel，確保邊界失配不展示政策。
+
+`service::manager` 的 user-bus readiness 測試消費 systemd 255 真 `NameHasOwner` false／true 回覆，驗合法 false 才等待、RPC／exit／JSON 錯誤不重試、一直未就緒與逾時成功拒絕；另以真 `/bin/sleep` 核共用子程序期限，過期期限在 spawn 前拒絕。這些測試不代表修正後的真服務已驗收。

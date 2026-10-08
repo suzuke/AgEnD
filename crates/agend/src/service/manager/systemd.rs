@@ -4,11 +4,13 @@
 use agend_core::setup::service::Installation;
 use serde_json::{Value, json};
 
-use super::{State, run_program};
+use super::{State, run_program, run_program_until};
+use std::time::{Duration, Instant};
 
 const OBJECT: &str = "/org/freedesktop/systemd1/unit/agend_2ddaemon_2eservice";
 
 pub(super) fn inspect(record: &Installation) -> Result<State, String> {
+    wait_for_user_bus()?;
     let unit = properties("org.freedesktop.systemd1.Unit")?;
     let service = properties("org.freedesktop.systemd1.Service")?;
     let state = validate(record, &unit, &service)?;
@@ -19,6 +21,67 @@ pub(super) fn inspect(record: &Installation) -> Result<State, String> {
         live_process(record, pid)?;
     }
     Ok(state)
+}
+
+fn wait_for_user_bus() -> Result<(), String> {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    wait_for_name_owner(deadline, |deadline| {
+        run_program_until(
+            "/usr/bin/busctl",
+            &[
+                "--user",
+                "--json=short",
+                "--auto-start=no",
+                "--allow-interactive-authorization=no",
+                "call",
+                "org.freedesktop.DBus",
+                "/org/freedesktop/DBus",
+                "org.freedesktop.DBus",
+                "NameHasOwner",
+                "s",
+                "org.freedesktop.systemd1",
+            ],
+            deadline,
+        )
+    })
+}
+
+fn wait_for_name_owner(
+    deadline: Instant,
+    mut probe: impl FnMut(Instant) -> Result<super::Reply, String>,
+) -> Result<(), String> {
+    loop {
+        if Instant::now() >= deadline {
+            return Err("systemd user bus readiness deadline expired; preserving service".into());
+        }
+        let reply = probe(deadline)?;
+        if reply.code != 0 {
+            return Err("cannot inspect user bus readiness; preserving service".into());
+        }
+        let ready = name_has_owner(&reply.stdout)?;
+        if Instant::now() >= deadline {
+            return Err("systemd user bus readiness deadline expired; preserving service".into());
+        }
+        if ready {
+            return Ok(());
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err("systemd user bus is not ready; preserving service".into());
+        }
+        std::thread::sleep(remaining.min(Duration::from_millis(50)));
+    }
+}
+
+fn name_has_owner(output: &str) -> Result<bool, String> {
+    let value: Value =
+        serde_json::from_str(output).map_err(|_| "invalid user bus readiness JSON")?;
+    if value["type"] != "b" || value["data"].as_array().is_none_or(|a| a.len() != 1) {
+        return Err("unexpected user bus readiness envelope".into());
+    }
+    value["data"][0]
+        .as_bool()
+        .ok_or_else(|| "invalid user bus readiness boolean".into())
 }
 
 fn properties(interface: &str) -> Result<Value, String> {
@@ -204,6 +267,94 @@ fn live_process(record: &Installation, pid: u64) -> Result<(), String> {
 mod tests {
     use super::*;
     use agend_core::setup::service::{InstallPhase, Manager, ServiceSpec};
+
+    #[test]
+    fn native_readiness_booleans_are_strictly_decoded() {
+        let absent =
+            include_str!("../../../tests/fixtures/systemd-effective/native-name-owner-false.json");
+        let present =
+            include_str!("../../../tests/fixtures/systemd-effective/native-name-owner-true.json");
+        assert!(!name_has_owner(absent).unwrap());
+        assert!(name_has_owner(present).unwrap());
+        let native: Value = serde_json::from_str(absent).unwrap();
+        for replacement in [json!("false"), json!(0), Value::Null] {
+            let mut changed = native.clone();
+            changed["data"][0] = replacement;
+            assert!(name_has_owner(&changed.to_string()).is_err());
+        }
+        let mut changed = native.clone();
+        changed["data"].as_array_mut().unwrap().push(json!(false));
+        assert!(name_has_owner(&changed.to_string()).is_err());
+        let mut changed = native;
+        changed.as_object_mut().unwrap().remove("type");
+        assert!(name_has_owner(&changed.to_string()).is_err());
+        assert!(name_has_owner(&present[..present.len() / 2]).is_err());
+    }
+
+    fn native_readiness_reply(present: bool) -> super::super::Reply {
+        super::super::Reply {
+            code: 0,
+            stdout: if present {
+                include_str!(
+                    "../../../tests/fixtures/systemd-effective/native-name-owner-true.json"
+                )
+            } else {
+                include_str!(
+                    "../../../tests/fixtures/systemd-effective/native-name-owner-false.json"
+                )
+            }
+            .into(),
+            stderr: String::new(),
+        }
+    }
+
+    #[test]
+    fn readiness_waits_only_for_a_native_false_reply() {
+        let mut calls = 0;
+        wait_for_name_owner(Instant::now() + Duration::from_secs(2), |_| {
+            calls += 1;
+            Ok(native_readiness_reply(calls == 2))
+        })
+        .unwrap();
+        assert_eq!(calls, 2);
+        for failure in 0..3 {
+            let mut calls = 0;
+            let result = wait_for_name_owner(Instant::now() + Duration::from_secs(2), |_| {
+                calls += 1;
+                if failure == 0 {
+                    return Err("native transport refused".into());
+                }
+                let mut reply = native_readiness_reply(false);
+                if failure == 1 {
+                    reply.code = 1;
+                } else {
+                    reply.stdout.truncate(reply.stdout.len() / 2);
+                }
+                Ok(reply)
+            });
+            assert!(result.is_err());
+            assert_eq!(calls, 1);
+        }
+    }
+
+    #[test]
+    fn readiness_rejects_absence_and_success_after_the_deadline() {
+        let started = Instant::now();
+        assert!(
+            wait_for_name_owner(started + Duration::from_millis(30), |_| {
+                Ok(native_readiness_reply(false))
+            })
+            .is_err()
+        );
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(
+            wait_for_name_owner(Instant::now() + Duration::from_millis(10), |_| {
+                std::thread::sleep(Duration::from_millis(30));
+                Ok(native_readiness_reply(true))
+            })
+            .is_err()
+        );
+    }
 
     fn record() -> Installation {
         let home = "/tmp/g13 data % $value \"quote\"";

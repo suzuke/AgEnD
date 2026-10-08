@@ -65,7 +65,7 @@ watch 的 task_changed 顯示事件 TaskView 的 current_stage；舊 peer 未帶
 
 ## 第 13B 使用者服務（施工中）
 
-`agend service plan [--manager launchd|systemd] [--json]` 產生可審閱的 user-service 定義與目的路徑；不寫檔、不呼叫服務管理器。daemon 執行檔規劃保存於 home 的 `service/agend`，避免綁定施工用 target。launchd 保留 process group，systemd 用 `KillMode=process`；`service install --no-start` 可先發布自有定義與 receipt；註冊、status 和預設保留資料的 uninstall 已接上，仍待完整真服務驗收。systemd 的操作另核對已載入的 argv／環境／drop-in／停止行為，並核對 live MainPID 的 executable、argv、home 與程序世代；enable／disable 使用 `--no-reload`，避免驗證後隱含載入其他設定。
+`agend service plan [--manager launchd|systemd] [--json]` 產生可審閱的 user-service 定義與目的路徑；不寫檔、不呼叫服務管理器。daemon 執行檔規劃保存於 home 的 `service/agend`，避免綁定施工用 target。launchd 保留 process group，systemd 用 `KillMode=process`；`service install --no-start` 可先發布自有定義與 receipt；註冊、status 和預設保留資料的 uninstall 已接上，仍待完整真服務驗收。systemd 在查有效設定前，以共用 2 秒 readiness 期限唯讀等待 user bus 的 systemd 名稱註冊；只有原生 boolean false 會等待，錯誤立即拒絕，不啟用服務。systemd 的操作另核對已載入的 argv／環境／drop-in／停止行為，並核對 live MainPID 的 executable、argv、home 與程序世代；enable／disable 使用 `--no-reload`，避免驗證後隱含載入其他設定。
 
 ## 下一步
 

@@ -30,6 +30,10 @@ XDG_RUNTIME_DIR=/run/user/0 busctl --user --json=short call \
 
 格式依據：[busctl JSON 型別保留](https://github.com/systemd/systemd/blob/v255/man/busctl.xml)、[systemd D-Bus 屬性](https://github.com/systemd/systemd/blob/v255/man/org.freedesktop.systemd1.xml)。原始擷取與失敗環境診斷保存在 `AgEnD-ops/g13-install-20261008/systemd-effective-*.log`。
 
+## User bus readiness
+
+`native-name-owner-{false,true}.json` 保留 2026-10-08 隔離 Ubuntu 24.04／systemd 255 的原生 boolean envelope。以 UID 19413 啟動 user manager 後，使用 `busctl --user --json=short --auto-start=no --allow-interactive-authorization=no call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus NameHasOwner s org.freedesktop.systemd1` 取得 false，約 57 ms 後取得 true；原始紀錄為 `AgEnD-ops/g13-install-20261008/linux-release-service-user-ready-native.jsonl`。容器／映像／暫存已刪除。當次用實驗 wrapper 完成生命週期，不冒充正式修正的驗收。
+
 ## 下一步
 
 `cargo test -p agend --bin agend service::manager::systemd`，再於隔離 Linux 執行實際安裝／停止／解除安裝驗收；不得由這四份 fixture 宣稱整關通過。

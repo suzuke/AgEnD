@@ -200,6 +200,13 @@ fn run(manager: Manager, args: &[&str]) -> Result<Reply, String> {
 }
 
 fn run_program(program: &str, args: &[&str]) -> Result<Reply, String> {
+    run_program_until(program, args, Instant::now() + Duration::from_secs(20))
+}
+
+fn run_program_until(program: &str, args: &[&str], deadline: Instant) -> Result<Reply, String> {
+    if Instant::now() >= deadline {
+        return Err("service manager deadline expired before execution".into());
+    }
     let mut child = Command::new(program)
         .args(args)
         .env_remove("AGEND_INSTANCE")
@@ -210,7 +217,6 @@ fn run_program(program: &str, args: &[&str]) -> Result<Reply, String> {
         .spawn()
         .map_err(|e| format!("cannot run {program}: {e}"))?;
     let pid = child.id();
-    let deadline = Instant::now() + Duration::from_secs(20);
     let (tx, rx) = mpsc::channel();
     let stdout = child.stdout.take().expect("piped");
     let stderr = child.stderr.take().expect("piped");
@@ -250,6 +256,9 @@ fn run_program(program: &str, args: &[&str]) -> Result<Reply, String> {
             output[index] =
                 String::from_utf8(bytes).map_err(|_| "service manager output is not UTF-8")?;
         }
+        if Instant::now() >= deadline {
+            return Err("service manager deadline expired while reading output".into());
+        }
         Ok(Reply {
             code: status.code().unwrap_or(-1),
             stdout: output[0].clone(),
@@ -266,4 +275,26 @@ fn run_program(program: &str, args: &[&str]) -> Result<Reply, String> {
         let _ = child.wait();
     }
     result
+}
+
+#[cfg(test)]
+mod deadline_tests {
+    use super::*;
+
+    #[test]
+    fn expired_deadline_does_not_spawn_even_an_invalid_program() {
+        let result = run_program_until("/does-not-exist/agend-expired", &[], Instant::now());
+        assert_eq!(
+            result.err().as_deref(),
+            Some("service manager deadline expired before execution")
+        );
+    }
+
+    #[test]
+    fn a_hung_native_command_uses_the_supplied_deadline() {
+        let started = Instant::now();
+        let result = run_program_until("/bin/sleep", &["5"], started + Duration::from_millis(100));
+        assert!(result.is_err());
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
 }
