@@ -209,3 +209,5 @@ client protocol 1.7 的 operator `message_delivery` 只讀持久化收據：mess
 13C supervisor 在受管 canary 核對後，以 canonical 匯入程式建立 launch，確認舊 holder／orphan 已離開才保存 SQLite 意圖並送 SpawnBound。重連只讀原意圖，核對設定、artifact 與 holder UUID；不符保留程序並標記失敗。版本切換／回退仍待完成。
 
 版本切換儲存層以 BackendSwitch 保存原啟動證據、目標與階段；program 與 phase 原子提交／回退，過期請求拒絕。Prepared 可取消並保留原 program 與執行中 agent，已提交的切換須走回滾。canary、停止 holder 及 CLI／supervisor 切換編排仍由後續流程接入。
+
+13C OpenCode runtime 保留尚未結束的舊代 worker，取消旗標與 `workers_stopped` 分開；只有所有執行緒退出才回報停止。這是本機投遞執行緒的證據，backend 回合是否結束仍需原生狀態核對。
