@@ -785,7 +785,7 @@ fn busy_interrupt_keeps_queued_without_writing_or_stealing_operator_control() {
     f.start();
     f.hook("UserPromptSubmit", json!({"prompt":"busy"}));
     let (mut owner, version) = ProbeClient::hello(&f.home.join(DAEMON_SOCKET), None).unwrap();
-    assert_eq!(version, V1_6);
+    assert_eq!(version, V1_7);
     owner
         .send(&ClientRequest::SubscribeTerminalFrames {
             data: TerminalSubscribeData {

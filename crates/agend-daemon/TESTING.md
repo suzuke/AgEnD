@@ -239,3 +239,5 @@ GitHub migration 17 接在已發布 Telegram 13–16 後；`github_upgrade_prese
 Claude outcome：`driver::claude::outcome` 使用先前真測 ACK/PostToolUse/Stop 的欄位投影（fixture 附來源 SHA-256），驗缺失／重播／錯 session／空白回覆與生命週期中斷；`claude_store::execution_outcome` 以正式 reservation/ACK/event producer 驗只 ACK 不成功、Stop 後成功、查詢不改狀態與重開保存。不代表新的真 Claude 回合驗收。
 
 13C `backend_versions::tests` 核 runtime 啟動時的 executable binding：實際執行映像可辨識、相同 bytes 的不同 inode 拒絕、捕獲後原子替換不採納。macOS 實際 mapping 已原生測試；Linux `/proc/self/exe` 路徑尚待 Linux 執行。受管啟動仍拒絕，直到驗證與 exec 之間的檔案固定完成。
+
+13C 快照 proof reuse：`backend_versions::snapshot::tests` 核對回傳 binding 屬於快照 inode、不能套用到原始檔，並保留來源替換／錯摘要／symlink 拒絕案例。搭配 `agend` 的 `pinned_launcher` 與 CLI table 原生重啟測試，確認減少重複雜湊後仍保留啟動完整性與既有 CLI 等待期限。

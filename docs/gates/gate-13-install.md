@@ -137,3 +137,5 @@ cat docs/gates/gate-13-install.md
 ```
 
 - 2026-10-08：holder 啟動 UUID 與關閉競態修補提交 `715bdf0`；65 項 holder、149 項 core（另 2 項既有 ignored）、runtime 回歸與 clippy／check-deps 通過。Ubuntu canary 三回合完成後超出 60 秒測試預算，整合測試改採正式 180 秒預設；本機三 backend 原生 fake canary 4 項於 87.23 秒通過，包含程序／暫存清理。遠端 CI 與 daemon 持久啟動紀錄仍待完成，不宣稱整關或真模型通過。
+
+- 2026-10-08：修正固定 launcher 重啟時的重複雜湊，重用快照驗證產生的檔案身分 binding；保留 running image／摘要／ownership 檢查與 10 秒 CLI 等待期限。原失敗 CLI table 原生重跑通過（38.92 秒），snapshot 2 項與 pinned launcher 1 項、clippy、check-deps 通過，聚焦獨立覆核未發現 blocker。同時更新 client 1.7 協商斷言；整關 CI／持久啟動紀錄仍待完成（feat/g13-install，未合併）。

@@ -2,7 +2,7 @@
 //! overwritten or automatically removed: holders and hook helpers outlive a
 //! daemon. This protects against normal upgrades of the source pathname, not
 //! a hostile process with the same UID editing the private cache itself.
-use super::{fingerprint, identity};
+use super::{ExecutableBinding, fingerprint, identity};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
@@ -17,7 +17,7 @@ fn directory(path: &Path, mode: u32) -> Result<(), String> {
     Ok(())
 }
 
-fn verify(dir: &Path, digest: &str) -> Result<PathBuf, String> {
+fn verify(dir: &Path, digest: &str) -> Result<(PathBuf, ExecutableBinding), String> {
     directory(dir, 0o700)?;
     let path = dir.join("agend");
     let meta = fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
@@ -26,11 +26,14 @@ fn verify(dir: &Path, digest: &str) -> Result<PathBuf, String> {
         || meta.uid() != unsafe { libc::getuid() }
         || meta.mode() & 0o777 != 0o500
         || meta.nlink() != 1
-        || fingerprint(&path)? != digest
     {
         return Err("pinned executable changed; preserving cache and refusing launch".into());
     }
-    Ok(path)
+    let binding = ExecutableBinding::capture(&path)?;
+    if binding.digest != digest || binding.identity != identity(&meta) {
+        return Err("pinned executable changed; preserving cache and refusing launch".into());
+    }
+    Ok((path, binding))
 }
 
 pub(super) fn existing(home: &Path, digest: &str) -> Result<PathBuf, String> {
@@ -39,10 +42,14 @@ pub(super) fn existing(home: &Path, digest: &str) -> Result<PathBuf, String> {
     }
     let root = home.join("runtime-binaries");
     directory(&root, 0o700)?;
-    verify(&root.join(digest), digest)
+    verify(&root.join(digest), digest).map(|(path, _)| path)
 }
 
-pub(super) fn pin(home: &Path, source: &Path, digest: &str) -> Result<PathBuf, String> {
+pub(super) fn pin_bound(
+    home: &Path,
+    source: &Path,
+    digest: &str,
+) -> Result<(PathBuf, ExecutableBinding), String> {
     if digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err("invalid pinned executable digest".into());
     }
@@ -150,13 +157,19 @@ mod tests {
     use std::os::unix::fs::symlink;
     use std::process::Command;
 
+    fn pin(home: &Path, source: &Path, digest: &str) -> Result<PathBuf, String> {
+        pin_bound(home, source, digest).map(|(path, _)| path)
+    }
+
     #[test]
     fn native_snapshot_survives_source_replacement_and_reuses_exact_bytes() {
         let root = TempDir::new("g13-executable-pin").unwrap();
         let source = root.path().join("source");
         fs::copy("/usr/bin/true", &source).unwrap();
         let digest = fingerprint(&source).unwrap();
-        let pinned = pin(root.path(), &source, &digest).unwrap();
+        let (pinned, binding) = pin_bound(root.path(), &source, &digest).unwrap();
+        assert_eq!(binding.digest_if_unchanged(&pinned).unwrap(), digest);
+        assert!(binding.digest_if_unchanged(&source).is_err());
         let inode = fs::metadata(&pinned).unwrap().ino();
         let replacement = root.path().join("replacement");
         fs::copy("/usr/bin/false", &replacement).unwrap();

@@ -35,12 +35,9 @@ impl ExecutableBinding {
     /// digest. The private cache outlives the daemon, like its holders.
     pub fn pin_running(home: &Path, source: &Path) -> Result<(std::path::PathBuf, Self), String> {
         let running = Self::capture_running(source)?;
-        let path = snapshot::pin(home, source, &running.digest)?;
-        let binding = Self::capture(&path)?;
-        if binding.digest != running.digest {
-            return Err("pinned AgEnD digest differs from the running image".into());
-        }
-        Ok((path, binding))
+        // Snapshot verification already hashes the published file and binds
+        // its identity. Reuse that proof instead of hashing it a third time.
+        snapshot::pin_bound(home, source, &running.digest)
     }
     pub fn capture_running(path: &Path) -> Result<Self, String> {
         running::matches(path)?;

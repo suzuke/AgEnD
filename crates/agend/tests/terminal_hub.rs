@@ -68,7 +68,7 @@ struct Window {
 impl Window {
     fn open(socket: &Path, caller: Option<&str>, id: &str, rows: u16) -> Self {
         let (mut client, version) = ProbeClient::hello(socket, caller).unwrap();
-        assert_eq!(version, V1_6);
+        assert_eq!(version, V1_7);
         client
             .send(&ClientRequest::SubscribeTerminalFrames {
                 data: TerminalSubscribeData {
@@ -550,7 +550,7 @@ fn the_dedicated_client_reader_and_sender_use_the_real_daemon_path() {
     use agend_client::{Client, FullTerminalUpdate};
     let lab = Lab::start(SHELL);
     let mut reader = Client::connect_once(&lab.socket(), None).unwrap();
-    assert_eq!(reader.selected(), V1_6);
+    assert_eq!(reader.selected(), V1_7);
     let mut sender = reader.sender().unwrap();
     sender
         .subscribe_terminal_frames(TerminalSubscribeData {

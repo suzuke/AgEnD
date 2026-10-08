@@ -199,3 +199,5 @@ client protocol 1.7 的 operator `message_delivery` 只讀持久化收據：mess
 13C 施工中的 protocol 1.7：操作員 `send_message` 固定以 `@operator` 真人身分 queue 投遞，必填 UUID v4；`driver_status` 回傳 instance 與就緒狀態，Codex 必須有連線，unknown 不代表 idle。這些 RPC 不切換 backend 版本。
 
 正常 daemon 將執行映像固定至 home/runtime-binaries 的私有副本，holder／hook 與 shim 使用該副本；原始 binary 升級不改變本次啟動路徑。副本保留供存活 holder 使用；重連受管 backend 的啟動身分對帳尚未完成，版本准入仍關閉。
+
+固定 launcher 的快照驗證直接回傳摘要與檔案身分 binding，供 runtime 沿用；重啟時仍重新驗證 running image 與快照內容，但不再第三次雜湊相同快照。既有 holder 跨 daemon 重啟保留（D3／D5）。
