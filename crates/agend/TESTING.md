@@ -208,3 +208,5 @@ Canary 必須取得三筆與 delivery 綁定的 completed outcomes；修改 fail
 13C 終端切換保護：`cargo test -p agend --test terminal_hub`。新增 Prepared 下操作拒絕與真正 PTY 背壓排空案例；fixture panic 會保留 daemon 日誌於測試輸出，區分 holder 啟動失敗與輸入政策拒絕。
 
 13C 晚 holder 清理回歸：`cargo test -p agend --test holder_process a_late_holder_cannot_recreate_its_removed_home`。真 shell child 在 exec 前與測試同步，home 清理後真 holder 必須拒絕，不能重建目錄。
+
+`opencode_bridge` 的兩條 holder 重啟路徑也驗 `OpenCodeDriver::session_idle`：native REST 閒置／忙碌／abort 後閒置、session 與 handoff 不符、holder 停止後拒絕；只用 fake backend。

@@ -231,3 +231,5 @@ Codex 的 `workers_stopped` 追蹤連線建立與已移出 link 表但仍在退�
 13C 正式 TerminalHub 在完整終端 acquire／resize／input 與 legacy input 執行前查持久切換暫停；唯讀 frame／viewport 與 release 保留。操作先加入同一排空範圍再查 DB，所以競爭中的操作不是被拒絕，就是被先前回覆排空捕捉。完整終端追蹤到 holder 控制請求返回；legacy guard 隨實際 blocking write 工作持有。這仍不代表遠端回合結束；失敗／斷線不能當成 native readiness。
 
 Codex `thread_idle` 透過目前連線重讀完整分頁回合，核連線物件、generation 與 instance 快照未變；僅已知終止狀態可判閒置，缺失／異常分頁拒絕。這是當下 thread 觀察，呼叫者仍須先暫停並排空輸入、核受管 holder 身分；尚未接入換版 coordinator。
+
+OpenCode `session_idle` 重讀 REST session 狀態，查詢前後核 holder／instance／session handoff／endpoint／私有憑證；缺失或改變拒絕。不以 daemon 的閒置快取、訊息回執或 HTTP 接受當成回合完成；換版仍須先暫停排空並核 managed launch。
