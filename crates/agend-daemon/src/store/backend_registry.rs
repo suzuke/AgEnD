@@ -76,6 +76,7 @@ impl SqliteStore {
                 completed_ms: None,
                 latest: None,
                 error: None,
+                changed_ms: None,
                 revision: 0,
                 acknowledged_revision: 0,
             });
@@ -121,6 +122,7 @@ impl SqliteStore {
             }
             if previous != (row.latest.clone(), row.error.clone()) {
                 row.revision = row.revision.checked_add(1).ok_or_else(invalid)?;
+                row.changed_ms = Some(now);
             }
             row.completed_ms = Some(now);
             write(&tx, &row)?;

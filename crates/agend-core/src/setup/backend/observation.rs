@@ -14,6 +14,8 @@ pub struct RegistryObservation {
     /// Last successful observation, retained when the next check fails.
     pub latest: Option<super::PublishedBackend>,
     pub error: Option<String>,
+    #[serde(default)]
+    pub changed_ms: Option<u64>,
     pub revision: u64,
     pub acknowledged_revision: u64,
 }

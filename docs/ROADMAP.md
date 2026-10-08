@@ -480,3 +480,5 @@
 - 2026-10-08：13C 新增 backend latest，固定 npm 公開來源、核套件身分，拒絕轉址／超量／錯誤，5 秒期限涵蓋標頭與 body。真 metadata 三套查詢及無 HOME／agent 拒絕驗證通過；四項 HTTP fixture 反例、core 全組（兩個 deep ignored）、daemon 194 項（1 child ignored）、CLI 37 項及 workspace clippy／fmt／check-deps 通過。未呼叫模型或切換版本；每日排程、持久漂移通知及整關真測仍待完成（feat/g13-install，未合併）。
 
 - 2026-10-08：13C migration 0021 保存每日 registry 嘗試與結果，重啟／時鐘倒退不提早重查，失敗保留上次成功值，舊 attempt／重複完成及舊 revision 確認拒絕。真 SQLite 兩項重開反例、Store 42 項（含全部歷史 schema 升級／retention）、workspace clippy／fmt／check-deps 通過；clippy 初輪多餘 unit expression 已修正。測試暫存無殘留；此批是持久 Store API，定時 worker／attention 與被動漂移仍待接線（feat/g13-install，未合併）。
+
+- 2026-10-08：13C 受管 fleet 接每日 registry worker（60 秒檢查持久排程、canary home 跳過），停機等待有限 HTTP 操作；ingest 恢復 acknowledge 提醒、確認與發布序列化，等待起點綁結果變動時間。受管 fleet 全部同版時不提醒，未受管 CLI 被動漂移尚待補。registry／Store／通知 7 項、worker 1 項、daemon 198 項（1 child ignored）通過；同版判斷補強後通知案例與 workspace clippy／fmt／check-deps 通過。初輪 fixture Store.clone 編譯錯誤及 clippy 巢狀 if 已修正，測試暫存無殘留；全原生服務生命週期及最終 fresh verifier 仍待驗收（feat/g13-install，未合併）。

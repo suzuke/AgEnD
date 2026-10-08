@@ -169,3 +169,5 @@ InstanceView 的可選 program 欄位表示 driver wrapper 前的設定程式；
 setup::backend 保存三 backend 的 npm package 名稱與 PublishedBackend 公開版本紀錄；版本資訊不授權安裝或 canary 准入。
 
 `RegistryObservation` 保存每日查詢嘗試、最近成功 metadata、獨立錯誤與確認修訂號；不授予版本准入。
+
+公開觀測另保存 changed_ms，讓新一次每日查詢不重置原提醒的等待起點。

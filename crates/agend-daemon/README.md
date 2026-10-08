@@ -268,4 +268,6 @@ Fleet 的 program 取自 instance 設定，保留 driver wrapper 前的程式，
 
 backend_versions::registry 提供阻塞唯讀 latest 查詢，daemon 使用時需放在 worker；固定 npm HTTPS、拒轉址、5 秒期限與 256 KiB 上限。沒有認證或下載／執行步驟。每日檢查與通知排程尚未接入。
 
-`store::backend_registry` 在網路查詢前保存每日嘗試；完成與確認均核對當前 attempt／revision。migration 0021 最多保存三筆公開版本觀測，daemon 排程與 attention 接線尚待完成。
+`store::backend_registry` 在網路查詢前保存每日嘗試；完成與確認均核對當前 attempt／revision。migration 0021 最多保存三筆公開版本觀測，daemon monitor 與 ingest 使用這份紀錄執行每日查詢及恢復提醒。
+
+受管 fleet 現在由 registry monitor 每分鐘核對是否到了每日查詢時間；查詢在 blocking worker 執行，停止時等待當前有限 HTTP 操作結束。canary home 跳過；外部未受管 CLI 的被動漂移仍待接入。持久觀測透過 ingest 恢復為 acknowledge 提醒，不安裝或切換。

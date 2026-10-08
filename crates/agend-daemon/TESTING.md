@@ -311,3 +311,5 @@ CLP-14 的真 daemon 契約核 InstanceAdd 指定的 program 出現在 fleet，�
 registry 的四組測試經 native loopback HTTP 重播真 npm manifest；捕獲來源與 SHA-256 在 tests/fixtures/backend_registry/README.md。變造套件／版本、非 JSON、3xx／5xx、超量、標頭延遲與 body 傳送中停頓皆拒絕；不把樣本版本宣稱為支援版本。
 
 `store::backend_registry` 用真 SQLite 重開驗證每日邊界、時鐘倒退、遺失完成、舊 attempt、重複完成、錯誤保留成功資料、重複錯誤不重開提醒、舊 revision 不可確認新提醒。全 schema fixture 升級與 retention 檢查涵蓋 migration 0021。
+
+registry notification 測試以真 SQLite／Fleet 核對重啟恢復、等待時間不因下一次查詢改變、舊 revision 不可確認新版、ack 重開後仍有效；worker 測試核對查詢前已有持久 reservation，重開不重送。HTTP 整體期限由 registry 原生 loopback 四項測試覆蓋；真服務生命週期仍屬後續驗收。

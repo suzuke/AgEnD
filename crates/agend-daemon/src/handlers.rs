@@ -24,6 +24,7 @@
 //! (socket, future MCP adapter) carried the call.
 
 pub mod agent;
+pub(crate) mod backend_registry;
 pub(crate) mod claude_attention;
 pub(crate) mod opencode_attention;
 pub(crate) mod opencode_delivery_attention;
@@ -241,6 +242,9 @@ pub async fn handle(ctx: &Context, caller: Option<&str>, request: ClientRequest)
                     error_code::FORBIDDEN,
                     OPERATOR_ONLY,
                 ));
+            }
+            if data.attention_id.starts_with(backend_registry::PREFIX) {
+                return Outcome::Reply(backend_registry::resolve(ctx, data).await);
             }
             if data.attention_id.starts_with(telegram_attention::PREFIX) {
                 return Outcome::Reply(telegram_attention::resolve(ctx, data).await);
