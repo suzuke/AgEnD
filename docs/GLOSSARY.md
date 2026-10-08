@@ -243,3 +243,7 @@ SQLite 中每個 task 的固定 repository ID、branch、nonce 與 PR number；�
 啟動綁定（launch binding）：daemon 持久記錄的 UUID 與一次 holder 原生啟動的關聯。holder 只在成功啟動時保存，重連讀回而不補認；它不是認證憑證，也不證明回合或工作完成。
 
 - **受管啟動意圖（ManagedLaunchIntent）**：daemon 在發送 SpawnBound 前提交的 UUID 與版本／啟動參數紀錄。它用來核對 holder 原始啟動身分；本身不是存活證明或 canary 成功證明。
+
+## 版本切換記錄（BackendSwitch）
+
+單一 instance 最近一次明確版本切換的持久記錄，保存原 managed launch、目標 artifact／program、當時原生 session 與 Prepared／Committed／RolledBack 階段。資料庫的 program 與階段一起更新；它不代表 holder 已停止或 canary 已通過，這兩項由 supervisor 核對。

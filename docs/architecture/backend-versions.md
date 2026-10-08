@@ -112,3 +112,7 @@ Claude 從同一資料庫快照核對 confirmed delivery、持久 ACK、單筆�
 Runtime 保留該次意圖的 UUID，首次啟動核對 Spawned 與 GetLaunchBinding 的 agent PID 一致；重連只讀回 UUID／PID，核對前不發布 writer。未驗證 Exited 不觸發生命週期處理；取消中的核對不發失敗通知。supervisor 收到當前 generation 的 binding rejection 時標記失敗並 detach，保留 holder；重連核對持久 artifact 與 instance 設定，再讀 holder UUID；缺失或不符直接標記失敗，保留 holder，不排自動替換。三種原生替身已驗新啟動、保留原 holder 重連、錯 UUID 拒絕且不替換程序。明確升級／回退與真模型認證隔離尚未完成。
 
 重連沿用既有啟動准入證據，只核對受管 bytes／設定與 holder 原 UUID；不因 daemon 升級要求重新跑 canary。新 Spawn 仍須當前 daemon 指紋的 canary。intent 的 session 是啟動時指定值：首次 Codex／OpenCode 的 None 可由正式 driver 後續建立 session；原本 Some 或 Claude 仍精確核對。
+
+## 切換記錄（儲存層已實作，操作流程待接）
+
+Migration 0019 保存每 instance 最近一次 BackendSwitch；prepared 只保存原啟動意圖與目標，不改 program。commit／rollback 在同一 SQLite transaction 核對完整 switch 記錄、原設定與 agent_pid 已清除，再一起改 program 與 phase。過期請求不能覆寫目前狀態；不明結果先讀回，不盲目重送。新 prepare 以先前 switch ID 做 CAS，不能覆蓋未提交的 prepared；明確移除 instance 時 cascade。此層不取代 supervisor 的 canary、idle／派工暫停、精確 holder 停止及重啟驗證，尚無切換 CLI 或完整升級／回退流程。

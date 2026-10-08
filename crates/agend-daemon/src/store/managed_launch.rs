@@ -8,7 +8,7 @@ use agend_core::{
 };
 use rusqlite::{Connection, OptionalExtension, params};
 
-fn get(conn: &Connection, id: &str) -> Result<Option<ManagedLaunchIntent>, StoreError> {
+pub(super) fn get(conn: &Connection, id: &str) -> Result<Option<ManagedLaunchIntent>, StoreError> {
     let row: Option<(String, String)> = conn
         .query_row(
             "SELECT binding,intent FROM managed_launches WHERE instance_id=?1",

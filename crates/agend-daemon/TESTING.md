@@ -245,3 +245,5 @@ Claude outcome：`driver::claude::outcome` 使用先前真測 ACK/PostToolUse/St
 `cargo test -p agend-daemon --test managed_launch --test store` 使用真 SQLite 檔驗證關閉重開後紀錄不變、未取回結果不可盲目重試、舊 CAS／改變的 instance／錯 backend 與摘要拒絕、同名 instance 刪除重建不繼承 binding。schema v18 fixture 與既有各版升級、retention 覆蓋一併檢查。此批只證明持久儲存契約，尚非端到端受管啟動。
 
 受管 link 的取消測試 `closing_a_pending_binding_query_is_prompt_and_emits_no_rejection` 以 native socket 收到真序列化 GetLaunchBinding 後扣住回覆，驗證 intentional close 一秒內停止且不發 LaunchBindingRejected；核對仍共用原始十秒期限。全路徑 native holder 與 SQLite 重連在 `agend/tests/holder_runtime.rs`。
+
+`tests/backend_switch.rs` 使用原生 SQLite／正式 launch reservation producer，驗 prepare 不改 program、重開後 commit／rollback 的 program 與 phase 一致、重送舊記錄拒絕、設定衝突不留下半套狀態，以及 instance 移除 cascade。這只驗儲存層，不證明 holder 停止或完整版本切換。

@@ -1,4 +1,6 @@
 //! Runtime records crossing domain/adapters; no IO or runtime dependencies.
+pub mod backend_switch;
+pub use backend_switch::{BackendSwitch, BackendSwitchPhase};
 pub mod managed_launch;
 pub use managed_launch::ManagedLaunchIntent;
 pub mod claude;

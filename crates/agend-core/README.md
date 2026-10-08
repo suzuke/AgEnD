@@ -141,3 +141,5 @@ client 1.7 的 `OperatorCommand::MessageDelivery`／`MessageDeliveryData` 只表
 holder 協定 1.3 加入 `SpawnBound`／`GetLaunchBinding` 與不含 argv／環境的 `LaunchBindingData`，供第 13 關受管啟動對帳；保留 1.2／1.1 協商。
 
 受管啟動紀錄 `ManagedLaunchIntent` 保存不透明 UUID、匯入 artifact 與設定／實際啟動參數，供 store、supervisor 和 runtime 共用；紀錄本身不代表 holder 存活或准入完成。
+
+13C `runtime_records::BackendSwitch` 保存明確版本切換的來源啟動意圖、目標 artifact、原生 session 與 phase；純序列化記錄，不判定 canary、程序或檔案狀態。
