@@ -62,6 +62,14 @@ pub struct Rule {
 pub const RETENTION: &[Rule] = &[
     Rule {
         target: Target::Table {
+            name: "telegram_pairing",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "gate 13: one bounded pairing receipt retained for restart and explicit replacement",
+    },
+    Rule {
+        target: Target::Table {
             name: "backend_switches",
             time_column: None,
         },

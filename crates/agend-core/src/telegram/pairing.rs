@@ -130,3 +130,19 @@ impl TelegramPairing {
         Ok(config)
     }
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PairingPhase {
+    Pending,
+    Confirmed,
+    Cancelled,
+}
+
+/// One durable setup operation. Confirmation is distinct from applying config.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PairingRecord {
+    pub session: TelegramPairing,
+    pub phase: PairingPhase,
+}

@@ -291,3 +291,5 @@ Claude observer 的原生測試在 `agend/tests/claude_bridge.rs` 的 `claude_id
 13C activation deadline 的 Store 測試使用明確時鐘值，核到期前一毫秒／邊界、時間倒退、重開、問題更新不延長期限，以及 Restoring 才重新計時。原生 pending boot 測試用正式 Store 建立已過期 Committed／Restoring，兩次 daemon 啟動核相同 deadline／problem、原設定與啟動意圖不變；Prepared 不誤報逾時。這是故障狀態恢復證據，不代表真模型啟動耗時測量。
 
 13D `native_pairing_*` 透過 notifier 的真 HTTP client 與本機 producer、既有 Telegram 錄製 message／GetMe 外形，核新鮮 nonce、精確確認、私聊／forum topic、bot 身分改變、過期不連線、轉傳／匿名／編輯／舊訊息／錯 bot／歧義目的地與重複 update 拒絕。配對只呼叫 GetMe／GetUpdates，不送訊息或啟用 allowlist；不代表持久化、CLI 或真 bot 已完成。
+
+13D `telegram_pairing_store` 使用正式 core 配對 producer 與真 SQLite，驗候選／游標重開、保留期限、精確確認、過期、身分及游標竄改、明確替換與兩個執行緒取消／觀察競爭。確認收據不等於 config 已套用；CLI／RPC 與真 Telegram 尚未涵蓋。`store` 驗 schema 1–20 升級及 golden schema。

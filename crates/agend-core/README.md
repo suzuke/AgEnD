@@ -153,3 +153,5 @@ Client protocol 1.8 新增操作員 BackendSwitchCommand（prepare／status／ca
 13C 未發布的 client 1.8 新增 Activate／Rollback 操作，字串預檢涵蓋 instance 與 switch ID，mutation 不重送；BackendSwitchPhase 新增持久 RollbackPrepared（pending），避免已啟用版本回退時漏掉暫停投遞。
 
 13D 配對驗證已加入純邏輯與 notifier adapter：10 分鐘 nonce、GetMe 身分、直接人類 /start、時間／目的地核對、精確操作員確認後產生 token reference／單一 user allowlist 設定。觀察與確認重查 bot，拒絕中途換 bot；群組 topic 綁 message_thread_id。此批只有驗證層，尚未接入持久配對交易、CLI／RPC 或設定套用，也未執行真 Telegram。daemon 不改寫人寫的 config.toml（D8）；設定套用將由操作員 CLI 負責。
+
+13D `PairingRecord` 區分 Pending／Confirmed／Cancelled；Confirmed 只代表精確配對已確認，並不宣稱操作員的設定檔已寫入。

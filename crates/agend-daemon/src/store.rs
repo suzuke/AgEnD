@@ -65,6 +65,7 @@ pub mod snapshot;
 pub mod task_row;
 pub mod telegram;
 pub mod telegram_inbound;
+pub mod telegram_pairing;
 
 use std::fmt;
 use std::fs::{self, DirBuilder, File, OpenOptions};

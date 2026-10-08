@@ -1,4 +1,4 @@
--- user_version = 19
+-- user_version = 20
 
 CREATE INDEX driver_events_by_time ON driver_events (ingested_at_unix_ms);
 
@@ -231,6 +231,12 @@ CREATE TABLE telegram_outbox (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     id TEXT NOT NULL UNIQUE,
     delivery TEXT NOT NULL CHECK(json_valid(delivery))
+) STRICT;
+
+CREATE TABLE telegram_pairing (
+    slot INTEGER NOT NULL PRIMARY KEY CHECK(slot = 1),
+    id TEXT NOT NULL UNIQUE,
+    record TEXT NOT NULL CHECK(json_valid(record))
 ) STRICT;
 
 CREATE TABLE telegram_updates (
