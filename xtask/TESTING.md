@@ -72,3 +72,5 @@ Brew generator 的完整成功路徑需要四個真正的 native 產物；不得
 `cargo xtask demo install` 建置正式 agend、fake-worker 與 pipeline_probe，從 Cargo 的 artifact 訊息取得執行檔路徑。依序執行 home／doctor、服務定義、backend import／switch／canary、Telegram 配對與服務 lifecycle 模型案例，再以全新 HOME 執行 init、首任務、唯一 merge 及清理。`accept 13` 在一般 crate checks 與 check-deps 後呼叫同一入口。
 
 測試只用隔離目錄、假 backend 與本機 Telegram producer，不註冊主機服務或呼叫真模型。archive 四平台驗證另由 release workflow 執行；Brew install、真服務與真 backend／Telegram 驗收不可由此 demo 的成功取代。
+
+Brew 原生安裝驗證已接入 release workflow 的 macOS ARM64／Linux x86_64 jobs，僅在一次性 Actions runner 執行。`release_brew_smoke.py` 重新產生並逐字核對四平台 formula，僅將下載 URL 換成同輪 archive 的 file URL，保留 SHA 與安裝邏輯；建立唯一 tap，拒絕既有 agend 安裝，跑 install／formula test／全新 HOME init／uninstall 並檢查清理。這不證明公開 Release URL 已可下載；實跑結果另記。

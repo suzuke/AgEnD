@@ -456,3 +456,5 @@
 - 2026-10-08：13E 磁碟診斷補真 CLI sparse file 邏輯用量 >20 GB 警告／刪 fixture 後恢復，install_home 全 8 項通過。另以自有 64 MB HFS+ sparse image 實測 62 MB free→disk fail，卸載擴容 2 GB 再掛載→ok；映像已卸載刪除並核 hdiutil 無自有掛載。未填滿主機磁碟，未啟動模型。c085ddf 四平台 release 首任務及 formula 全部通過；全關 CI／真服務及模型驗收仍待完成（feat/g13-install，未合併）。
 
 - 2026-10-08：新增 `xtask demo install` 並接 `accept 13`，建置三 backend fixtures、共 52 項原生 home／service／import／switch／canary／配對案例通過。初輪首任務遇 macOS 長 socket 路徑而失敗，改 TMPDIR=/tmp 後首任務 10.292 秒完成且唯一 merge／清理通過；保留失敗 log，未重跑已通過案例。xtask tests、clippy、fmt、check-deps 通過；這是離線原生 demo，Brew／真服務／真模型與外部 Telegram 驗收仍另列（feat/g13-install，未合併）。
+
+- 2026-10-08：13E 新增一次性 Actions runner 的 Brew install／test／fresh HOME init／uninstall 驗證，macOS ARM64 與 Linux x86_64；只替換同輪已驗 archive 的 URL，不改 formula SHA 或安裝內容。以 c085ddf 四平台真產物核四個 local URL、變造 formula 拒絕及本機執行拒絕，下載暫存已清；actionlint／check-deps 通過，Brew 實跑待 CI（feat/g13-install，未合併）。

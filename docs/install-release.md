@@ -48,3 +48,5 @@ formula generator 要求四份同提交／同版本的產物，重新核對 arch
 ## 下一步
 
 安裝後執行 `agend init`。它建立預設 `$HOME/.agend` 與設定並執行 doctor；既有設定保留。需要獨立資料目錄時，先設定絕對路徑的 AGEND_HOME。第 13 關完整服務／backend／Telegram 驗收進度見 [施工關頁](gates/gate-13-install.md)。
+
+Brew 原生安裝驗證已接入 release workflow 的 macOS ARM64／Linux x86_64 jobs，僅在一次性 Actions runner 執行。`release_brew_smoke.py` 重新產生並逐字核對四平台 formula，僅將下載 URL 換成同輪 archive 的 file URL，保留 SHA 與安裝邏輯；建立唯一 tap，拒絕既有 agend 安裝，跑 install／formula test／全新 HOME init／uninstall 並檢查清理。這不證明公開 Release URL 已可下載；實跑結果另記。

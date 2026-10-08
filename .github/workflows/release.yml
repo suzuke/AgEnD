@@ -109,3 +109,33 @@ jobs:
           path: ${{ runner.temp }}/agend.rb
           if-no-files-found: error
           retention-days: 14
+
+  brew:
+    needs: formula
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-14, ubuntu-22.04]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: agend-*-*-${{ github.sha }}
+          path: ${{ runner.temp }}/native-artifacts
+      - uses: actions/download-artifact@v4
+        with:
+          name: agend-formula-${{ github.sha }}
+          path: ${{ runner.temp }}/formula
+      - name: Add Linux Homebrew to PATH
+        if: runner.os == 'Linux'
+        run: echo /home/linuxbrew/.linuxbrew/bin >> "$GITHUB_PATH"
+      - name: Install, test and uninstall the generated formula
+        run: >-
+          python3 -B scripts/release_brew_smoke.py
+          --artifacts "$RUNNER_TEMP/native-artifacts"
+          --formula "$RUNNER_TEMP/formula/agend.rb"
+          --commit "$GITHUB_SHA"
