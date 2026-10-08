@@ -89,7 +89,8 @@ impl Lab {
             child: command.spawn().map_err(|e| e.to_string())?,
             status: None,
         });
-        let end = deadline.min(Instant::now() + Duration::from_secs(5));
+        let started = Instant::now();
+        let end = deadline.min(started + Duration::from_secs(5));
         loop {
             if exited_unreaped(&self.probe.as_ref().unwrap().child)? {
                 let status = stop_probe(self.probe.as_mut().unwrap())?;
@@ -101,7 +102,15 @@ impl Lab {
                     .map_err(|_| "backend version output is not UTF-8".into());
             }
             if Instant::now() >= end {
-                return Err("backend version probe timed out".into());
+                // Record only timing and size, never backend output or credentials.
+                let bytes = fs::metadata(&output)
+                    .map(|metadata| metadata.len().to_string())
+                    .unwrap_or_else(|_| "unavailable".into());
+                return Err(format!(
+                    "backend version probe timed out: elapsed_ms={}, budget_ms={}, stdout_bytes={bytes}",
+                    started.elapsed().as_millis(),
+                    end.saturating_duration_since(started).as_millis()
+                ));
             }
             std::thread::sleep(Duration::from_millis(20));
         }

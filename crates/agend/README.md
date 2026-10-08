@@ -120,3 +120,5 @@ Doctor 現在另列每個 instance 的設定程式：絕對路徑或有明確 cw
 `agend backend latest <claude|codex|opencode> --json` 向 npm 公開 registry 查 latest tag；固定 HTTPS origin、5 秒與 256 KiB 上限。只回報公開版本，不建立 home、不安裝或啟動 backend，也不代表版本已通過 canary。
 
 版本探測共用 daemon 的 backend_versions::version_probe；doctor 既有輸出與期限維持不變。
+
+Canary 版本探測逾時只記錄 elapsed_ms、budget_ms 與 stdout_bytes（或 unavailable），不記錄 backend 輸出內容；維持原 5 秒上限與整體 deadline，沒有自動重試。原生 process tests 驗證逾時後自有程序與暫存清理。

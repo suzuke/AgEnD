@@ -264,3 +264,5 @@ Claude bridge 的外部 spool 拒絕案例使用獨立空目錄，不把 Lab hom
 原生 Lab 的 config.toml 預設設 registry_checks=false 與 backend_version_checks=false，隔離測試與自動探測；Telegram apply 的設定建構保留兩者的缺省語意。
 
 `backend_version_monitor` 啟動真 daemon 三次，使用隔離 home 與本機假 CLI：先保存真 probe 產生的歷史 1.0 基準，磁碟改成 2.0，由 daemon worker 自行發現並經 ingest／socket 暴露通知；重啟保留同一 attention，拒絕 agent 確認與錯誤 action，操作員確認後第三次啟動不重現。每次停機重開 SQLite 核持久值，registry 保持停用，最後無 holder。此 suite 納入 `xtask accept install`；不涉及 service manager 註冊或真模型。
+
+Canary 版本探測逾時只記錄 elapsed_ms、budget_ms 與 stdout_bytes（或 unavailable），不記錄 backend 輸出內容；維持原 5 秒上限與整體 deadline，沒有自動重試。原生 process tests 驗證逾時後自有程序與暫存清理。
