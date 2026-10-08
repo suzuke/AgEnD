@@ -315,6 +315,10 @@ impl InProcess {
             ))
             .expect("pipeline");
         let context = Arc::new(Context {
+            pairing: agend_daemon::notifier::pairing_service::PairingService::new(
+                self.store.clone(),
+                false,
+            ),
             pipeline,
             fleet: Arc::clone(&self.fleet),
             runtime: HolderRuntime::new(

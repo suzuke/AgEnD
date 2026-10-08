@@ -187,6 +187,7 @@ impl Lab {
         .unwrap();
         let (supervisor, _) = tokio::sync::mpsc::unbounded_channel();
         let ctx = Arc::new(Context {
+            pairing: crate::notifier::pairing_service::PairingService::new(store.clone(), true),
             pipeline,
             fleet,
             runtime: crate::runtime::HolderRuntime::new(

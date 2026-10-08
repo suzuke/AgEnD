@@ -232,3 +232,5 @@ Canary 必須取得三筆與 delivery 綁定的 completed outcomes；修改 fail
 13C 換版問題的原生 Store 測試驗重開保留原因／等待時間、重複觀察不刷新、舊快照拒絕、取消及成功啟用／回退清除問題。`native_codex_disconnected_candidate_reports_a_durable_problem_without_stopping_holder` 讓假 app-server 自行退出但保留包裝／holder，經正式 status 核持久問題、「需要你」通知及 daemon 重啟後同一等待時間／holder，沒有真 backend 或模型呼叫。
 
 13C activation deadline 的 Store 測試使用明確時鐘值，核到期前一毫秒／邊界、時間倒退、重開、問題更新不延長期限，以及 Restoring 才重新計時。原生 pending boot 測試用正式 Store 建立已過期 Committed／Restoring，兩次 daemon 啟動核相同 deadline／problem、原設定與啟動意圖不變；Prepared 不誤報逾時。這是故障狀態恢復證據，不代表真模型啟動耗時測量。
+
+`cargo test -p agend --test telegram_pairing` 跑真 daemon／正式 client／CLI：nullable 與有資料收據解碼、兩次重啟、舊 ID／agent／過期拒絕、1.8 capability 拒絕、CLI JSON 與相對 token 路徑拒絕。fixture 經正式 Store 建立；不接真 bot、不讀 token。

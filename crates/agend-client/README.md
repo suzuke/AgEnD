@@ -106,3 +106,5 @@ Protocol 1.6 新增共用已讀收據：`mark_attention_read`、`attention_read`
 Client protocol 1.8 提供 backend switch prepare／status／cancel；一般連線最低版本仍 1.3。CLI 在操作前要求 1.8，mutation 不重送，結果不明用 status 查持久紀錄。一次性 encoder 計入巢狀操作字串，decoder 支援可空的 BackendSwitch 回覆。
 
 13C 未發布的 client 1.8 新增 Activate／Rollback 操作，字串預檢涵蓋 instance 與 switch ID，mutation 不重送；BackendSwitchPhase 新增持久 RollbackPrepared（pending），避免已啟用版本回退時漏掉暫停投遞。
+
+Protocol 1.9 加入 TelegramPairing 操作員 request／收據；one-shot preparation 計入所有可變字串，deadline decoder 處理 nullable 配對收據。一般連線仍相容舊 daemon，配對呼叫者必須要求 1.9 且不重送。

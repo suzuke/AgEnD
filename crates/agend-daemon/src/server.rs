@@ -43,7 +43,7 @@ use std::time::Duration;
 use crate::terminal_hub::{ReplyScope, TerminalHub, ViewStream, reject};
 use agend_core::protocol::client::{
     ClientRequest, ClientResponse, ErrorData, EventData, MAX_LINE_BYTES, MAX_MESSAGE_BYTES,
-    TerminalBytesData, V1_4, V1_8, error_code,
+    TerminalBytesData, V1_4, V1_9, error_code,
 };
 use agend_core::protocol::terminal::MAX_FRAME_LINE;
 use agend_core::protocol::{ProtocolVersion, negotiate};
@@ -383,7 +383,7 @@ async fn connection(
                         client.send(&reply).await;
                         return;
                     };
-                    match negotiate("client", &[V1_8], &data.supported) {
+                    match negotiate("client", &[V1_9], &data.supported) {
                         Ok(selected) => {
                             negotiated = true;
                             selected_version = selected;
@@ -399,6 +399,14 @@ async fn connection(
                             return;
                         }
                     }
+                    continue;
+                }
+                if let ClientRequest::Operator { data } = &request
+                    && matches!(data.command, agend_core::protocol::client::OperatorCommand::TelegramPairing { .. })
+                    && selected_version < V1_9
+                {
+                    let reply = error(Some(data.request_id.clone()), error_code::NOT_SUPPORTED, "Telegram pairing requires client protocol 1.9; upgrade and reconnect");
+                    if !client.send(&reply).await { return; }
                     continue;
                 }
                 if matches!(request, ClientRequest::SubscribeTerminal { .. }) {

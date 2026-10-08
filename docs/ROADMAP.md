@@ -430,3 +430,5 @@
 - 2026-10-08：13D schema 20 保存單一配對收據，候選／cursor 原子發布，精確快照拒絕舊操作，確認與取消可重啟查詢；配對 Store 4 項、既有 Store 42 項、core 125、daemon 188（1 ignored）及 fmt／clippy／check-deps 通過。自有配對測試暫存無殘留。CLI／RPC、設定套用與真 Telegram 尚未接入，整關仍施工中（feat/g13-install，未合併）。
 
 - 2026-10-08：13D PairingService 串行銜接 notifier HTTP 與持久收據，caller 取消後仍持鎖至發布；配置中的 notifier 拒絕配對讀取。真本機 HTTP 驗取消 caller、單次 getUpdates、錯目的地／重複 Begin 零 HTTP；配對 4 項、core 125、daemon 190（1 ignored）、fmt／clippy／check-deps 通過。配對自有暫存無殘留；服務尚待 daemon 啟停、CLI／RPC 接線，未做真 Telegram（feat/g13-install，未合併）。
+
+- 2026-10-08：13D 接 daemon 啟停、protocol 1.9 操作員配對 RPC 與 `telegram setup begin/status/poll/confirm/cancel` CLI；token 由 daemon 解析，操作不重送。真 daemon／client／CLI 測試驗 nullable 收據、重啟、agent／舊協定／過期／舊 ID 拒絕及 config 原文保留；client 52、core 125、daemon 190（1 ignored）、CLI 單元 25、fake daemon 14 與 fmt／clippy／check-deps 通過。自有配對 labs 無殘留；設定套用、真 Telegram 及整關驗收仍未完成（feat/g13-install，未合併）。

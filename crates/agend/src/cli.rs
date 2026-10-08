@@ -161,6 +161,9 @@ enum Command {
     /// Import and inspect isolated backend executables (operator)
     #[command(subcommand)]
     Backend(crate::backend::Command),
+    /// Pair Telegram through the daemon (operator)
+    #[command(subcommand)]
+    Telegram(crate::telegram::Command),
     /// Preview user-service installation
     #[command(subcommand)]
     Service(Service),
@@ -452,6 +455,7 @@ pub fn run(args: Vec<OsString>) -> ExitCode {
 fn dispatch(command: Command, json: bool) -> Result<Output, Failure> {
     match command {
         Command::Backend(command) => return crate::backend::run(command),
+        Command::Telegram(command) => return crate::telegram::run(command),
         Command::Doctor => return crate::doctor::run(),
         Command::Init => return crate::init::run(),
         Command::Uninstall {
@@ -507,7 +511,8 @@ fn dispatch(command: Command, json: bool) -> Result<Output, Failure> {
         | Command::Init
         | Command::Uninstall { .. }
         | Command::Service(_)
-        | Command::Backend(_) => {
+        | Command::Backend(_)
+        | Command::Telegram(_) => {
             unreachable!("handled above")
         }
     }

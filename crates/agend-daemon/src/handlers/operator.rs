@@ -81,6 +81,17 @@ pub async fn handle(ctx: &Context, data: OperatorData) -> Outcome {
         )
     };
     let reply = match data.command {
+        OperatorCommand::TelegramPairing { operation } => {
+            match ctx.pairing.execute(operation).await {
+                Ok(data) => result(
+                    request_id,
+                    CommandResult::TelegramPairing {
+                        data: data.map(Box::new),
+                    },
+                ),
+                Err(message) => error(Some(request_id), error_code::INVALID_REQUEST, message),
+            }
+        }
         OperatorCommand::BackendSwitch { operation: command } => {
             let (send, receive) = oneshot::channel();
             if ctx

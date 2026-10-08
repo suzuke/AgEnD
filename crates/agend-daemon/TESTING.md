@@ -295,3 +295,5 @@ Claude observer 的原生測試在 `agend/tests/claude_bridge.rs` 的 `claude_id
 13D `telegram_pairing_store` 使用正式 core 配對 producer 與真 SQLite，驗候選／游標重開、保留期限、精確確認、過期、身分及游標竄改、明確替換與兩個執行緒取消／觀察競爭。確認收據不等於 config 已套用；CLI／RPC 與真 Telegram 尚未涵蓋。`store` 驗 schema 1–20 升級及 golden schema。
 
 13D notifier native HTTP 測試另驗 `PairingService`：重複 Begin／錯目的地在 HTTP 前拒絕、已配置 worker 不競爭 getUpdates、取消 caller 後第二個請求等待 cursor 發布且只讀一次更新。僅本機 fixture，沒有真 Telegram 操作。
+
+配對 RPC／daemon 啟停與正式 CLI 回歸位於 `agend/tests/telegram_pairing.rs`；HTTP／caller 取消語意由 notifier native tests 涵蓋，真 bot 驗收尚未執行。

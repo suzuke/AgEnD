@@ -60,6 +60,7 @@ const SNAPSHOT_WITHIN: Duration = Duration::from_secs(5);
 
 /// What the handlers work with.
 pub struct Context {
+    pub pairing: Arc<crate::notifier::pairing_service::PairingService>,
     pub fleet: Arc<Fleet>,
     pub pipeline: crate::pipeline::Handle,
     pub runtime: HolderRuntime,

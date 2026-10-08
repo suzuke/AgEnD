@@ -1773,6 +1773,7 @@ fn claude_idle_observation_requires_live_hook_session_and_original_holder_connec
         .unwrap();
     let (supervisor, _events) = tokio::sync::mpsc::unbounded_channel();
     let ctx = Arc::new(Context {
+        pairing: agend_daemon::notifier::pairing_service::PairingService::new(store.clone(), false),
         fleet,
         pipeline,
         runtime: runtime.clone(),

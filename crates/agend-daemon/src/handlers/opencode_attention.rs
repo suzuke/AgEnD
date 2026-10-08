@@ -188,6 +188,7 @@ mod tests {
         .unwrap();
         let (supervisor, _) = tokio::sync::mpsc::unbounded_channel();
         let ctx = Context {
+            pairing: crate::notifier::pairing_service::PairingService::new(store.clone(), true),
             pipeline,
             fleet,
             runtime: crate::runtime::HolderRuntime::new(

@@ -113,6 +113,26 @@ impl Budget {
     }
     fn operator(&mut self, command: &OperatorCommand) -> io::Result<()> {
         match command {
+            OperatorCommand::TelegramPairing { operation } => {
+                use agend_core::{config::SecretRef, telegram::pairing::PairingOperation};
+                match operation {
+                    PairingOperation::Status => Ok(()),
+                    PairingOperation::Begin {
+                        id,
+                        token,
+                        previous,
+                    } => {
+                        self.add(id)?;
+                        self.add(match token {
+                            SecretRef::Env(value) | SecretRef::File(value) => value,
+                        })?;
+                        self.strings(previous.as_deref())
+                    }
+                    PairingOperation::Poll { id }
+                    | PairingOperation::Confirm { id, .. }
+                    | PairingOperation::Cancel { id } => self.add(id),
+                }
+            }
             OperatorCommand::BackendSwitch { operation: command } => match command {
                 BackendSwitchCommand::Status { instance_id } => self.add(instance_id),
                 BackendSwitchCommand::Prepare {

@@ -384,6 +384,10 @@ async fn serve(
         }
     };
     let context = Arc::new(Context {
+        pairing: crate::notifier::pairing_service::PairingService::new(
+            store.clone(),
+            telegram.is_some(),
+        ),
         pipeline,
         fleet,
         runtime,
@@ -452,6 +456,7 @@ async fn serve(
     log::line(&format!(
         "agend daemon stopping ({why}); holders keep running"
     ));
+    context.pairing.stop().await;
     server.stop().await;
     if let Some(worker) = telegram_worker {
         worker.stop().await;

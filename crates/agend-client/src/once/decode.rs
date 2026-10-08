@@ -55,6 +55,12 @@ fn command(bytes: &[u8], deadline: Instant) -> io::Result<ClientCommandResultDat
             text: data(envelope.text, deadline)?,
         },
         "accepted" => CommandResult::Accepted,
+        "telegram_pairing" => CommandResult::TelegramPairing {
+            data: match envelope.data {
+                Some(raw) => parse(raw.get().as_bytes(), deadline)?,
+                None => None,
+            },
+        },
         "backend_switch" => CommandResult::BackendSwitch {
             data: match envelope.data {
                 Some(raw) => parse(raw.get().as_bytes(), deadline)?,

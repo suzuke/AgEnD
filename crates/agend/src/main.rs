@@ -23,6 +23,7 @@ mod hooks;
 mod init;
 mod service;
 mod setup;
+mod telegram;
 
 use std::process::ExitCode;
 

@@ -61,7 +61,9 @@ pub const V1_6: ProtocolVersion = ProtocolVersion { major: 1, minor: 6 };
 pub const V1_7: ProtocolVersion = ProtocolVersion { major: 1, minor: 7 };
 /// Operator backend-switch preparation and reconciliation.
 pub const V1_8: ProtocolVersion = ProtocolVersion::new(1, 8);
-pub const OFFERED_VERSIONS: [ProtocolVersion; 6] = [V1_8, V1_7, V1_6, V1_5, V1_4, V1_3];
+/// Operator Telegram pairing with durable confirmation receipts.
+pub const V1_9: ProtocolVersion = ProtocolVersion::new(1, 9);
+pub const OFFERED_VERSIONS: [ProtocolVersion; 7] = [V1_9, V1_8, V1_7, V1_6, V1_5, V1_4, V1_3];
 /// Legacy fixture baseline. The real server and parser-backed fake fixtures
 /// advertise 1.4 independently once a full-terminal producer is available.
 pub const SUPPORTED_VERSIONS: [ProtocolVersion; 1] = [V1_3];
@@ -265,6 +267,10 @@ pub enum BackendSwitchCommand {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
 pub enum OperatorCommand {
+    /// 1.9: operator-only Telegram pairing, never an inline token.
+    TelegramPairing {
+        operation: crate::telegram::pairing::PairingOperation,
+    },
     /// 1.8: serialized operator version-switch operations.
     BackendSwitch {
         operation: BackendSwitchCommand,
@@ -812,6 +818,9 @@ pub struct TerminalBytesData {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "result", rename_all = "snake_case")]
 pub enum CommandResult {
+    TelegramPairing {
+        data: Option<alloc::boxed::Box<crate::telegram::pairing::PairingRecord>>,
+    },
     BackendSwitch {
         data: Option<alloc::boxed::Box<crate::runtime_records::BackendSwitch>>,
     },

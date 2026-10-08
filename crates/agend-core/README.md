@@ -157,3 +157,5 @@ Client protocol 1.8 新增操作員 BackendSwitchCommand（prepare／status／ca
 13D `PairingRecord` 區分 Pending／Confirmed／Cancelled；Confirmed 只代表精確配對已確認，並不宣稱操作員的設定檔已寫入。
 
 `PairingOperation` 定義 Status／Begin／Poll／Confirm／Cancel，Begin 只接受 SecretRef；操作員權限及 wire 接線由 daemon 協定層負責。
+
+Client protocol 1.9 提供操作員 TelegramPairing 命令與 nullable PairingRecord 回覆；一般 client 的最低版本仍為 1.3。
