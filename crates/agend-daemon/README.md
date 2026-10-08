@@ -271,3 +271,5 @@ backend_versions::registry 提供阻塞唯讀 latest 查詢，daemon 使用時�
 `store::backend_registry` 在網路查詢前保存每日嘗試；完成與確認均核對當前 attempt／revision。migration 0021 最多保存三筆公開版本觀測，daemon monitor 與 ingest 使用這份紀錄執行每日查詢及恢復提醒。
 
 受管 fleet 現在由 registry monitor 每分鐘核對是否到了每日查詢時間；查詢在 blocking worker 執行，停止時等待當前有限 HTTP 操作結束。canary home 跳過；外部未受管 CLI 的被動漂移仍待接入。持久觀測透過 ingest 恢復為 acknowledge 提醒，不安裝或切換。
+
+離線環境可在 config.toml 設 registry_checks = false；native daemon lab 預設使用此公開設定，避免 fake 受管版本觸發網際網路查詢。Telegram registry acknowledge 與本機共用持久 handler。version_probe 共用 doctor 的限時程序／pipe 清理，另支援明示 cwd 與環境供漂移偵測接入。

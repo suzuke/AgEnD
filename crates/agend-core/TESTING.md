@@ -176,3 +176,5 @@ CanaryScope 的模型參數綁定由 `agend/tests/backend_canary.rs` 使用正�
 CLP-14 由正式 InstanceAdd 產生 fleet，核 program 保留 /bin/sh；doctor 的舊 producer 缺欄位案例顯示未知，不採用操作者 PATH 冒充。
 
 RegistryObservation 的持久化與重開行為由 daemon 真 SQLite 測試驗證；core 僅定義資料與每日間隔。
+
+registry_checks 的 TOML 解析／缺省行為與離線 native lab 由 daemon／CLI 測試核對；Telegram apply 必須保留既有 root 設定。

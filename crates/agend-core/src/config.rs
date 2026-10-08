@@ -81,5 +81,8 @@ impl TelegramConfig {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    /// None enables daily public registry discovery; false supports offline installations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registry_checks: Option<bool>,
     pub telegram: Option<TelegramConfig>,
 }

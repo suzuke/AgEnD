@@ -11,6 +11,10 @@
 
 來源介面：[npm registry API](https://github.com/npm/registry/blob/main/docs/REGISTRY-API.md#getpackageversion)。latest 是 registry 的 tag，不保證大於目前使用版本，也不代表 AgEnD 支援；必須另做 import／canary／明確 switch。daemon 的受管 fleet 另以持久每日排程查詢；CLI 單次查詢不寫入 daemon 的每日紀錄。
 
+## 離線設定
+
+config.toml 的根層可設 `registry_checks = false`，停用 daemon 自動查詢；省略時啟用。`backend latest` 是操作員明確的單次查詢，不受此開關影響。native daemon 測試以此設定隔離外部網路；canary home 仍一律跳過。
+
 ## 驗證
 
 三個 npm 原始 manifest 保存在 daemon 的 tests/fixtures/backend_registry，來源、時間及 SHA-256 一併記錄。測試透過本機 HTTP 重播，另變造套件名稱／版本及測試轉址、5xx、非 JSON、超量與逾時。

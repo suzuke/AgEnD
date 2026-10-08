@@ -25,16 +25,21 @@ pub fn encode(config: &Config) -> Result<String, String> {
 
 /// Missing configuration disables Telegram. Invalid present configuration fails boot.
 pub fn load(home: &Path) -> Result<Option<(agend_core::config::TelegramConfig, Token)>, String> {
-    let text = match std::fs::read_to_string(home.join("config.toml")) {
-        Ok(text) => text,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(_) => return Err("cannot read config.toml".into()),
-    };
-    let Some(config) = parse(&text)?.telegram else {
+    let Some(config) = read(home)?.telegram else {
         return Ok(None);
     };
     let token = resolve(&config.token)?;
     Ok(Some((config, token)))
+}
+
+/// Read non-secret configuration without resolving any credentials.
+pub fn read(home: &Path) -> Result<Config, String> {
+    let text = match std::fs::read_to_string(home.join("config.toml")) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Config::default()),
+        Err(_) => return Err("cannot read config.toml".into()),
+    };
+    parse(&text)
 }
 
 /// Deliberately no Debug or Display, including on errors.
@@ -143,5 +148,13 @@ mod tests {
         std::fs::write(&path, "x".repeat(300)).unwrap();
         assert!(resolve(&reference).is_err());
         assert!(resolve(&SecretRef::File(dir.path().display().to_string())).is_err());
+    }
+    #[test]
+    fn registry_checks_default_to_enabled_and_round_trip_offline_without_credentials() {
+        assert!(parse("").unwrap().registry_checks.unwrap_or(true));
+        let offline = parse("registry_checks = false\n").unwrap();
+        assert_eq!(parse(&encode(&offline).unwrap()).unwrap(), offline);
+        assert!(!offline.registry_checks.unwrap_or(true));
+        assert!(parse("registry_checks = 'false'").is_err());
     }
 }

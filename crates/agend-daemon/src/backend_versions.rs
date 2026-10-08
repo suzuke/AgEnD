@@ -12,6 +12,7 @@ pub(crate) mod monitor;
 pub mod registry;
 mod running;
 mod snapshot;
+pub mod version_probe;
 
 /// Read-only ownership check for service reconciliation of its pinned shims.
 pub fn verified_pinned_executable(home: &Path, digest: &str) -> Result<std::path::PathBuf, String> {

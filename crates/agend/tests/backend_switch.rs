@@ -222,6 +222,15 @@ fn native_status_cancel_and_restart_preserve_program_and_refuse_agents_and_stale
         .success()
     );
     daemon.interrupt().unwrap();
+    {
+        let offline_store = SqliteStore::open(&home, 0).unwrap();
+        assert!(
+            block_on(offline_store.registry_observation(Backend::Claude))
+                .unwrap()
+                .is_none(),
+            "offline native lab must never reserve a public registry request"
+        );
+    }
     let mut daemon = lab::Daemon::start(&lab, &home, &[]).unwrap();
     daemon.ready().unwrap();
     assert_eq!(

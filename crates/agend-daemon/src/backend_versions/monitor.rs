@@ -12,6 +12,14 @@ impl Monitor {
     pub(crate) fn start(ctx: Arc<Context>) -> Self {
         let (stop, mut stopped) = watch::channel(false);
         let task = tokio::spawn(async move {
+            match crate::notifier::config::read(ctx.runtime.home()) {
+                Ok(config) if config.registry_checks == Some(false) => return,
+                Ok(_) => (),
+                Err(error) => {
+                    log::line(&format!("Backend registry monitor disabled: {error}"));
+                    return;
+                }
+            }
             // A canary checks a fixed candidate and must not discover unrelated
             // releases or make extra external requests during its budget.
             if ctx

@@ -10,12 +10,30 @@ use std::{
 const MAX_OUTPUT: usize = 64 * 1024;
 
 pub fn version_line(program: &Path) -> Result<String, String> {
-    probe(program, super::PROBE_WITHIN).map_err(|e| format!("{} --version: {e}", program.display()))
+    probe(program, Duration::from_secs(5))
+        .map_err(|e| format!("{} --version: {e}", program.display()))
 }
 
 fn probe(program: &Path, within: Duration) -> Result<String, String> {
+    probe_command(Command::new(program), within)
+}
+
+/// Probe with exactly the caller-selected cwd and environment. Daemon callers
+/// pass their launch whitelist; no unrelated daemon credentials are inherited.
+pub fn version_line_in(
+    program: &Path,
+    cwd: &Path,
+    environment: &std::collections::BTreeMap<String, String>,
+) -> Result<String, String> {
+    let mut command = Command::new(program);
+    command.current_dir(cwd).env_clear().envs(environment);
+    probe_command(command, Duration::from_secs(5))
+        .map_err(|e| format!("{} --version: {e}", program.display()))
+}
+
+fn probe_command(mut command: Command, within: Duration) -> Result<String, String> {
     let deadline = Instant::now() + within;
-    let child = Command::new(program)
+    let child = command
         .arg("--version")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -309,5 +327,23 @@ int main(void) {{
             );
             std::thread::sleep(Duration::from_millis(10));
         }
+    }
+    #[test]
+    fn native_scoped_probe_uses_only_selected_environment_and_cwd() {
+        let dir = TempDir::new("scoped-version-probe").unwrap();
+        let path = script(
+            dir.path(),
+            r#"[ "$1" = --version ] || exit 2
+[ "$PWD" = "$EXPECTED_CWD" ] || exit 3
+[ "$PROBE_MARK" = scoped ] || exit 4
+[ -z "${HOME+x}" ] || exit 5
+printf 'scoped 1.0\n'"#,
+        );
+        let cwd = dir.path().canonicalize().unwrap();
+        let env = std::collections::BTreeMap::from([
+            ("EXPECTED_CWD".into(), cwd.to_string_lossy().into_owned()),
+            ("PROBE_MARK".into(), "scoped".into()),
+        ]);
+        assert_eq!(version_line_in(&path, &cwd, &env).unwrap(), "scoped 1.0");
     }
 }

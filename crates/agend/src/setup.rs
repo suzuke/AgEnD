@@ -8,13 +8,8 @@
 use std::ffi::CString;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
-mod version;
-pub use version::version_line;
-
-/// Longest a `--version` probe may run.
-pub const PROBE_WITHIN: Duration = Duration::from_secs(5);
+pub use agend_daemon::backend_versions::version_probe::version_line;
 
 /// The first executable `name` on `PATH`, skipping `skip` (the agents'
 /// shim directory `$AGEND_HOME/bin`).

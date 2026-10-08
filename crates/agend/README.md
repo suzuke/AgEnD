@@ -118,3 +118,5 @@ doctor 的 `--version` probe 以同一 5 秒期限涵蓋程序退出與 stdout�
 Doctor 現在另列每個 instance 的設定程式：絕對路徑或有明確 cwd 的 ./ 路徑不再拿操作者 PATH 代替。保管版本先核 bytes，再核目前 CLI build 的 canary；變造檔案不執行。外部程式只執行有界 --version，登入／相容性沒有證據時顯示警告。
 
 `agend backend latest <claude|codex|opencode> --json` 向 npm 公開 registry 查 latest tag；固定 HTTPS origin、5 秒與 256 KiB 上限。只回報公開版本，不建立 home、不安裝或啟動 backend，也不代表版本已通過 canary。
+
+版本探測共用 daemon 的 backend_versions::version_probe；doctor 既有輸出與期限維持不變。

@@ -79,6 +79,7 @@ fn apply(home: &Path, record: &PairingRecord) -> Result<Output, String> {
         );
     }
     let encoded = config::encode(&Config {
+        registry_checks: None,
         telegram: Some(telegram.clone()),
     })?;
     let combined = format!("{text}\n{encoded}");
@@ -170,12 +171,13 @@ mod tests {
     fn preserves_original_comments_and_is_idempotent_without_resolving_token() {
         let dir = TempDir::new("telegram-apply").unwrap();
         let path = dir.path().join("config.toml");
-        let old = "# human notes 繁中\n# no inline secrets\n";
+        let old = "# human notes 繁中\nregistry_checks = false\n# no inline secrets\n";
         fs::write(&path, old).unwrap();
         let record = confirmed();
         apply(dir.path(), &record).unwrap();
         let text = fs::read_to_string(&path).unwrap();
         assert!(text.starts_with(old));
+        assert_eq!(config::parse(&text).unwrap().registry_checks, Some(false));
         assert_eq!(
             config::parse(&text).unwrap().telegram,
             Some(record.configuration().unwrap())
@@ -217,6 +219,7 @@ mod tests {
         let mut foreign = record.configuration().unwrap();
         foreign.chat_id -= 1;
         let text = config::encode(&Config {
+            registry_checks: None,
             telegram: Some(foreign),
         })
         .unwrap();

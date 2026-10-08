@@ -1478,3 +1478,142 @@ async fn pairing_client_cancellation_keeps_http_owned_until_cursor_is_published(
     service.stop().await;
     assert!(service.execute(Op::Status).await.is_err());
 }
+
+#[tokio::test]
+async fn native_registry_callback_acknowledges_only_the_current_persisted_revision() {
+    use agend_core::{
+        model::Backend,
+        setup::backend::{PublishedBackend, observation::REGISTRY_INTERVAL_MS},
+    };
+    let lab = Lab::new().await;
+    let native = Native::new();
+    let manifest: Value = serde_json::from_slice(include_bytes!(
+        "../../tests/fixtures/backend_registry/codex.json"
+    ))
+    .unwrap();
+    let release = PublishedBackend {
+        backend: "codex".into(),
+        package: manifest["name"].as_str().unwrap().into(),
+        version: manifest["version"].as_str().unwrap().into(),
+    };
+    let attempt = lab
+        .ctx
+        .store
+        .begin_registry_check(Backend::Codex, 100)
+        .await
+        .unwrap()
+        .unwrap();
+    lab.ctx
+        .store
+        .finish_registry_check(Backend::Codex, attempt.attempt, 101, Ok(release))
+        .await
+        .unwrap();
+    crate::handlers::backend_registry::refresh(&lab.ctx.store, &lab.ctx.fleet)
+        .await
+        .unwrap();
+    let item = lab
+        .ctx
+        .fleet
+        .view()
+        .attention
+        .into_iter()
+        .find(|a| {
+            a.attention_id
+                .as_deref()
+                .is_some_and(|id| id.starts_with(crate::handlers::backend_registry::PREFIX))
+        })
+        .unwrap();
+    let row = lab
+        .ctx
+        .store
+        .observe_telegram(&[worker::notice(&item).unwrap()], &lab.destination, 102)
+        .await
+        .unwrap()
+        .remove(0);
+    let notifier = super::delivery::TelegramNotifier::new(
+        native.api.clone(),
+        lab.ctx.store.clone(),
+        lab.destination.clone(),
+    );
+    notifier.resume(&row.id).await.unwrap();
+    let markup = inbound::keyboard(&row).unwrap();
+    let receipt =
+        serde_json::from_str::<Value>(include_str!("../../tests/fixtures/telegram/message.json"))
+            .unwrap()["result"]
+            .clone();
+    let mut update = json!({"update_id":1,"callback_query":{"id":"registry-ack","from":{"id":7,"is_bot":false},"message":receipt,"data":markup["inline_keyboard"][0][0]["callback_data"]}});
+    let (_stop, stopped) = tokio::sync::watch::channel(false);
+    native.updates.lock().unwrap().push(update.clone());
+    poll::once(
+        &lab.ctx,
+        &lab.config,
+        native.api.clone(),
+        &lab.destination,
+        &stopped,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        lab.ctx
+            .store
+            .registry_observation(Backend::Codex)
+            .await
+            .unwrap()
+            .unwrap()
+            .acknowledged_revision,
+        1
+    );
+    crate::handlers::backend_registry::refresh(&lab.ctx.store, &lab.ctx.fleet)
+        .await
+        .unwrap();
+    assert!(
+        lab.ctx
+            .fleet
+            .attention(item.attention_id.as_deref().unwrap())
+            .is_none()
+    );
+    let now = 100 + REGISTRY_INTERVAL_MS;
+    let second = lab
+        .ctx
+        .store
+        .begin_registry_check(Backend::Codex, now)
+        .await
+        .unwrap()
+        .unwrap();
+    lab.ctx
+        .store
+        .finish_registry_check(
+            Backend::Codex,
+            second.attempt,
+            now + 1,
+            Err("offline".into()),
+        )
+        .await
+        .unwrap();
+    crate::handlers::backend_registry::refresh(&lab.ctx.store, &lab.ctx.fleet)
+        .await
+        .unwrap();
+    update["update_id"] = json!(2);
+    native.updates.lock().unwrap().push(update);
+    poll::once(
+        &lab.ctx,
+        &lab.config,
+        native.api.clone(),
+        &lab.destination,
+        &stopped,
+    )
+    .await
+    .unwrap();
+    let current = lab
+        .ctx
+        .store
+        .registry_observation(Backend::Codex)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(current.revision, 2);
+    assert_eq!(
+        current.acknowledged_revision, 1,
+        "old mobile button must not consume the new reminder"
+    );
+}

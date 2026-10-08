@@ -240,4 +240,106 @@ mod tests {
             );
         });
     }
+    #[test]
+    fn only_an_entirely_current_managed_fleet_suppresses_the_notice() {
+        use agend_core::{
+            runtime_records::{Instance, InstanceStatus},
+            setup::backend::ImportedBackend,
+            traits::HolderLaunch,
+        };
+        block_on(async {
+            let dir = TempDir::new("registry-current-fleet").unwrap();
+            let store = SqliteStore::open(dir.path(), 0).unwrap();
+            let fleet = Fleet::new(0);
+            let manifest: serde_json::Value = serde_json::from_slice(include_bytes!(
+                "../../tests/fixtures/backend_registry/codex.json"
+            ))
+            .unwrap();
+            let release = PublishedBackend {
+                backend: "codex".into(),
+                package: manifest["name"].as_str().unwrap().into(),
+                version: manifest["version"].as_str().unwrap().into(),
+            };
+            let attempt = store
+                .begin_registry_check(Backend::Codex, 100)
+                .await
+                .unwrap()
+                .unwrap();
+            store
+                .finish_registry_check(Backend::Codex, attempt.attempt, 101, Ok(release.clone()))
+                .await
+                .unwrap();
+            for (id, version, managed) in [
+                ("current", release.version.as_str(), true),
+                ("older", "0.0.1", true),
+                ("external", release.version.as_str(), false),
+            ] {
+                let instance = Instance {
+                    id: id.into(),
+                    backend: Backend::Codex,
+                    program: format!("/managed/{id}"),
+                    args: vec![],
+                    working_directory: "/workspace".into(),
+                    session_id: None,
+                    status: InstanceStatus::Failed,
+                    session_started: false,
+                    agent_pid: None,
+                    legacy_no_thread: false,
+                    delivery: "push".into(),
+                };
+                store.add_instance(&instance).await.unwrap();
+                if managed {
+                    store
+                        .prepare_managed_launch(
+                            &instance,
+                            &HolderLaunch {
+                                instance_id: instance.id.clone(),
+                                backend: instance.backend,
+                                executable: instance.program.clone(),
+                                args: vec![],
+                                working_directory: instance.working_directory.clone(),
+                            },
+                            ImportedBackend {
+                                format: 1,
+                                backend: "codex".into(),
+                                version: version.into(),
+                                sha256: "a".repeat(64),
+                                bytes: 1,
+                            },
+                            None,
+                        )
+                        .await
+                        .unwrap();
+                }
+                fleet.set_instance(
+                    InstanceView {
+                        program: Some(instance.program),
+                        instance_id: id.into(),
+                        team_id: "general".into(),
+                        backend: "codex".into(),
+                        state: AgentState::Idle,
+                        working_directory: Some(instance.working_directory),
+                    },
+                    "fixture".into(),
+                );
+                refresh(&store, &fleet).await.unwrap();
+                assert_eq!(fleet.view().attention.is_empty(), id == "current");
+                if id != "current" {
+                    fleet.remove_instance(id);
+                }
+            }
+            refresh(&store, &fleet).await.unwrap();
+            assert!(fleet.view().attention.is_empty());
+            assert_eq!(
+                store
+                    .registry_observation(Backend::Codex)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .acknowledged_revision,
+                0,
+                "suppression does not acknowledge a version for future fleet changes"
+            );
+        });
+    }
 }
