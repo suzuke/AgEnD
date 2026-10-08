@@ -196,3 +196,5 @@ Canary 必須取得三筆與 delivery 綁定的 completed outcomes；修改 fail
 `holder_runtime` 新增 SQLite 預存 UUID → native holder 啟動 → 新 runtime 重連同一 agent PID、錯 UUID／legacy holder 拒絕且保留程序、未驗證 holder 的歷史 Exited 不送入 supervisor 三項。既有 RTM-1..9 與四 boot 跨程序案例持續驗證。此批是 holder 連線契約，尚未開放 CLI 受管版本准入。
 
 `backend_canary` 的三 backend 原生替身測試另驗 canary 後的受管 fleet 啟動：保存 intent、daemon 重啟保持 holder PID／UUID、持久 UUID 改成另一合法值後拒絕接回且保留程序。fixture 停止自有 holder 並移除 lab；不執行真模型。
+
+同一 native canary fixture 將正式報告的 AgEnD digest 改成不匹配值，確認新啟動准入拒絕，但已保存 UUID 的原 holder 仍可重連；這驗准入與重連分流，不宣稱替代所有跨版本 driver 相容性驗證。

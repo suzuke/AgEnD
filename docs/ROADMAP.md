@@ -358,3 +358,5 @@
 - 2026-10-08：Ubuntu CI `37710056778` 定位至 CLI 兩 Codex agent 重啟的 10 秒連線逾時，尚未判定根因；補上該測試失敗時停止自有 daemon 並保留 stderr 的診斷。本機原生重跑通過（恢復 6.1 秒，20 則各一次），fmt／clippy／check-deps 通過；未放寬 timeout，也不宣稱 Ubuntu 已修復（feat/g13-install）。
 
 - 2026-10-08：13C supervisor 接入受管啟動准入與持久 UUID；canonical 匯入程式進 launch argv，先核舊 holder／orphan 已離開再保存意圖。重連核原 artifact／設定／UUID，不重跑新版 canary；首次 Codex／OpenCode 原生 session 發現與啟動時指定 session 分開。三 backend 原生 canary＋fleet 啟動／重連／錯 UUID 保留程序共 4 項通過（102.21 秒），supervisor 8 項、匯入拒絕回歸 5 項、fmt／clippy／check-deps 通過；聚焦覆核兩項缺口已修正。版本切換／回退與整關驗收仍待完成（feat/g13-install，未合併）。
+
+- 2026-10-08：補受管 canary build 身分失配反例，正式報告改成不匹配 digest 後，新啟動准入拒絕，三 backend 的原 holder 仍以持久 UUID 重連；原生 4 項通過（99.98 秒），fmt／clippy／check-deps 通過，自有程序／lab 清理完成。更新版本管理文件移除已失效的「全部拒絕准入」敘述；不宣稱已驗證所有跨版本 driver 相容性（feat/g13-install）。

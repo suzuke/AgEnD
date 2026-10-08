@@ -339,6 +339,27 @@ fn managed_fleet(lab: &lab::Lab, home: &Path, backend: &str, version: &str) {
     assert_eq!(holders.len(), 1);
     daemon.interrupt().unwrap();
     let original = read_intent();
+    // An inherited holder needs its original launch identity, not a canary
+    // for a new daemon build. Make the native report's build identity stale,
+    // and independently prove it no longer authorizes any new execution.
+    let report_path = program.parent().unwrap().join("canary.json");
+    let mut report: Value = serde_json::from_slice(&fs::read(&report_path).unwrap()).unwrap();
+    report["agend_sha256"] = Value::String("0".repeat(64));
+    fs::write(&report_path, serde_json::to_vec(&report).unwrap()).unwrap();
+    let binding =
+        agend_daemon::backend_versions::ExecutableBinding::capture(Path::new(BIN)).unwrap();
+    assert!(
+        agend_daemon::backend_versions::check_launch(
+            home,
+            backend,
+            program.to_str().unwrap(),
+            home,
+            "/usr/bin:/bin",
+            Path::new(BIN),
+            Ok(&binding),
+        )
+        .is_err()
+    );
     let mut daemon = lab::Daemon::start(lab, home, &[]).unwrap();
     daemon.ready().unwrap();
     daemon.expect("managed: reconnected to holder").unwrap();

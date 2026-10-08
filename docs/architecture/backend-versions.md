@@ -3,7 +3,7 @@
 > **TL;DR**
 > - `backend import` 保存獨立的原生 executable；`backend inspect` 核對保存的內容。
 > - 匯入不執行程式、不驗證宣告的版本、不切換 fleet，也不代表 canary 通過。
-> - 套件目錄、漂移偵測、canary、升級與回退仍在施工。
+> - 原生匯入、canary、新啟動准入與持久身分重連已接入；套件目錄、漂移偵測、升級與回退仍在施工。
 
 ## 目前可用
 
@@ -34,8 +34,12 @@ runtime 已保存啟動 fingerprint 與檔案身分；macOS 核實際 executable
 新 holder 啟動前，daemon 核對指向受管目錄的 program（包含指向該檔案的 symlink alias、依 agent PATH 選定的裸名稱與依 instance cwd 解析的相對路徑）。
 內容有變或尚無 canary 的版本拒絕啟動，保存 failed 原因並顯示需要你；不先建立 holder。
 核對由 daemon 與 CLI inspect 共用，hash 工作移到 blocking pool。
-目前尚無 canary admission／切換入口，因此所有匯入版本都不能作為受管 instance 啟動。
-目前固定副本已接入正常 daemon，原始 binary 替換的原生 holder 測試通過；三 backend fake canary 回歸與固定副本覆核已通過；受管版本准入仍待重連啟動身分完成後才開放。Canary 證明目前 daemon 與匯入 artifact 的新啟動、Ready、三輪成功回應；舊 holder 的相容協定重連另循 D3，shared shim 隨 daemon 更新循 D5，不要求所有程序使用同一 AgEnD build。既有 `already_spawned` 無啟動身分，尚不能證明存活 backend 對應受管 artifact；下一步補持久啟動綁定及 holder 對帳。
+有有效 canary 的受管程式可由 instance 的明確 `--program` 啟動；尚無 fleet 版本切換／回退入口。
+新啟動使用 canonical 匯入路徑，先持久化 artifact／設定／啟動 UUID，再送 SpawnBound。
+重連核對原 artifact bytes、設定與 holder UUID；缺少意圖或不符時保留 holder 並標記失敗，不自動替換。
+Canary 證明目前 daemon 與匯入 artifact 的新啟動、Ready、三輪成功回應；
+既有 holder 重連另循 D3，不因新 daemon 的 canary 缺失或不匹配而重新執行 backend。
+shared shim 隨 daemon 更新循 D5，不要求所有程序使用同一 AgEnD build。
 裸名稱依目前使用者的 `access(X_OK)` 選擇 PATH 中可執行檔。
 未以 `./` 或 `../` 開頭的相對 slash 路徑（如 `foo/bar`）在 shell／PTY 有歧義，要求改用絕對路徑或 `./`。
 其他非受管 program 維持既有行為；這不是任意 shell／wrapper 的執行沙箱，也尚未偵測系統 CLI 的更新。
@@ -99,7 +103,7 @@ Claude 從同一資料庫快照核對 confirmed delivery、持久 ACK、單筆�
 不執行 backend；涵蓋內容與來源保存、重複匯入、竄改、路徑轉向、非法版本、wrapper、agent 拒絕及維護互斥。
 `cargo test -p agend-daemon --lib store::maintenance` 驗共享發布、store 與排他移除的生命週期。
 
-下一步接套件匯入、版本探測與漂移提醒、受控 canary、明確切換／回退，之後才驗整個 fleet 的版本管理。
+下一步接套件匯入、版本探測與漂移提醒、明確切換／回退，之後才驗整個 fleet 的版本管理。
 
 啟動綁定目前已完成 holder 1.3 producer：`SpawnBound` 成功時保存 opaque UUID，`GetLaunchBinding` 在重連後回原 UUID／instance／pid；沒有綁定的 legacy 程序回 None，不能被新請求補認。daemon 已接入持久 intent 與匯入 artifact 對帳；受管路徑須通過當前 AgEnD 指紋的 canary 才可新啟動。
 
