@@ -58,7 +58,15 @@ pub fn state_dir_for(listen: &Path) -> PathBuf {
 }
 
 fn app_server(args: Vec<String>) -> ExitCode {
-    let args = match Args::parse(args, &["--listen", "--turn-ms", "--disable"], &[], &[]) {
+    if let Err(error) = super::canary_credentials::check("codex") {
+        return usage(&error);
+    }
+    let args = match Args::parse(
+        args,
+        &["--listen", "--turn-ms", "--disable", "-c"],
+        &[],
+        &[],
+    ) {
         Ok(args) => args,
         Err(e) => return usage(&e),
     };

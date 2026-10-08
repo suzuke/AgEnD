@@ -248,3 +248,7 @@ doctor 的 `--version` probe 以同一 5 秒期限涵蓋程序退出與 stdout�
 安裝／Telegram apply 共用的 install.lock 使用明確 unlock 的 guard，避免並行 fork 到 exec 之間的繼承描述符延長鎖生命。反例保留同一 open-file description 的副本，核釋放／重新取得／關閉舊副本不解開新鎖。
 
 canary 模型選擇：`backend_canary` 的非法名稱案例在建立 home 前拒絕；原生 OpenCode 假後端案例帶 `--model test/canary` 並核報告與清理，scope 案例拒絕替换／移除模型參數。不代表真模型或帳戶認證已驗證。
+
+13C 明確 `--auth-file` 的格式、私有路徑與真測邊界見[canary 認證](../../docs/architecture/backend-canary-auth.md)。本機測試涵蓋 private copy、來源不變、OpenCode 正式 Layout 保留認證、scope 錯配與權限拒絕；完整 native canary 使用測試用憑證，沒有真帳戶或模型呼叫。
+
+Doctor 的 probe timeout 與清理 timeout 分開計時；清理失敗需保留前面的 probe 錯誤。原生繼承 pipes 案例失敗會印出實際錯誤，時間斷言涵蓋兩段預算。

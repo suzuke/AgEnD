@@ -111,4 +111,6 @@ doctor 的 `--version` probe 以同一 5 秒期限涵蓋程序退出與 stdout�
 
 安裝／Telegram apply 共用的 install.lock 使用明確 unlock 的 guard，避免並行 fork 到 exec 之間的繼承描述符延長鎖生命。反例保留同一 open-file description 的副本，核釋放／重新取得／關閉舊副本不解開新鎖。
 
-13C canary 可加 `--model <id>`（OpenCode 為 `provider/model`）。只傳單一模型參數，不開放任意啟動旗標；報告的 `model` 是要求值，並非供應者解析後的模型證明。省略沿用 backend 預設，認證隔離入口仍待完成。
+13C canary 可加 `--model <id>`（OpenCode 為 `provider/model`）。只傳單一模型參數，不開放任意啟動旗標；報告的 `model` 是要求值，並非供應者解析後的模型證明。省略沿用 backend 預設，認證檔入口見下方說明；真模型仍待驗收。
+
+13C 明確 `--auth-file` 的格式、私有路徑與真測邊界見[canary 認證](../../docs/architecture/backend-canary-auth.md)。本機測試涵蓋 private copy、來源不變、OpenCode 正式 Layout 保留認證、scope 錯配與權限拒絕；完整 native canary 使用測試用憑證，沒有真帳戶或模型呼叫。

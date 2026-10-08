@@ -303,3 +303,5 @@ config encode 與 parse 共用正式 TOML producer／consumer；CLI apply 的原
 13E：建置 `pipeline_probe` 與 `fake-worker` 後，跑 `python3 -B scripts/release_install_smoke.py --directory <release目錄> --commit <SHA> --target <native-target> --probe <pipeline_probe絕對路徑> --worker <fake-worker絕對路徑>`。驗證 archive 後僅解出 agend，以清空環境與自有 HOME 啟動 probe；核 init 私有權限、task done／唯一 merge／worktree 清理／設定原文保留與 300 秒預算。probe 使用正式 fixture 寫入測試 team／workflow／worker，因此不代表使用者真 backend onboarding 已驗收。
 
 canary scope 參數比對在 agend 的 `backend_canary` 原生測試核正式 create producer，包含模型值被替換、移除與額外參數。
+
+13C 明確 `--auth-file` 的格式、私有路徑與真測邊界見[canary 認證](../../docs/architecture/backend-canary-auth.md)。本機測試涵蓋 private copy、來源不變、OpenCode 正式 Layout 保留認證、scope 錯配與權限拒絕；完整 native canary 使用測試用憑證，沒有真帳戶或模型呼叫。

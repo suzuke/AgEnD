@@ -16,6 +16,7 @@ pub fn main(args: impl IntoIterator<Item = String>) -> ExitCode {
         args,
         &[
             "--session-id",
+            "--model",
             "--resume",
             "--settings",
             "--setting-sources",
@@ -36,6 +37,7 @@ pub fn main(args: impl IntoIterator<Item = String>) -> ExitCode {
 }
 
 fn run(args: &Args) -> Result<(), String> {
+    crate::fake_agent::canary_credentials::check("claude")?;
     let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
     let session = args
         .get("--session-id")

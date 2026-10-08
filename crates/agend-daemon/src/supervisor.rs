@@ -172,6 +172,9 @@ fn describe_session(instance: &Instance, resume: bool) -> String {
 /// The launch of `instance` under `home`, fresh or resuming. codex runs the
 /// gate 7 wrapper (`/bin/sh`).
 pub fn launch(home: &Path, instance: &Instance, resume: bool) -> Result<HolderLaunch, String> {
+    // Bind every backend's original executable and model args before wrappers
+    // transform them. Credential injection later only sees the holder launch.
+    crate::backend_versions::canary_scope::expected(home, instance)?;
     let (executable, args) = if instance.backend == Backend::Codex {
         (
             codex_launch::SHELL.to_owned(),

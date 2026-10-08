@@ -34,6 +34,9 @@ pub enum Command {
         /// Explicit model; OpenCode requires provider/model
         #[arg(long)]
         model: Option<String>,
+        /// Dedicated credential file: Codex/OpenCode auth JSON or Claude OAuth token
+        #[arg(long)]
+        auth_file: Option<PathBuf>,
     },
     /// Copy a native executable into an isolated, unverified version directory
     Import {
@@ -89,6 +92,7 @@ pub fn run(command: Command) -> Result<Output, Failure> {
         allow_model,
         timeout_seconds,
         model,
+        auth_file,
     } = command
     {
         if !allow_model {
@@ -96,8 +100,15 @@ pub fn run(command: Command) -> Result<Output, Failure> {
                 "canary executes the backend and three model messages; use --allow-model to proceed",
             ));
         }
-        let report = canary::run(&home, &backend, &version, timeout_seconds, model.as_deref())
-            .map_err(failed)?;
+        let report = canary::run(
+            &home,
+            &backend,
+            &version,
+            timeout_seconds,
+            model.as_deref(),
+            auth_file.as_deref(),
+        )
+        .map_err(failed)?;
         if !report.passed {
             return Err(failed(format!(
                 "canary failed: {}; report: {}",

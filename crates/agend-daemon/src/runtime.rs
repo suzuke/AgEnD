@@ -594,11 +594,21 @@ impl Inner {
         if let Some(old) = old {
             old.close();
         }
+        let mut environment =
+            env::agent_env(&self.home, &id, launch.backend, self.daemon_env.clone());
+        crate::backend_versions::canary_scope::isolate_environment(
+            &self.home,
+            &id,
+            launch.backend.as_str(),
+            Path::new(&launch.working_directory),
+            &mut environment,
+        )
+        .map_err(err)?;
         let spawn = SpawnData {
             instance_id: id.clone(),
             program: launch.executable.clone(),
             args: launch.args.clone(),
-            env: env::agent_env(&self.home, &id, launch.backend, self.daemon_env.clone()),
+            env: environment,
             working_directory: launch.working_directory.clone(),
         };
         let generation = self.next_generation.fetch_add(1, Ordering::SeqCst);

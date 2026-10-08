@@ -14,6 +14,7 @@
 use std::io::Read;
 use std::path::PathBuf;
 
+pub mod canary_credentials;
 pub mod claude;
 pub mod codex;
 #[cfg(unix)]

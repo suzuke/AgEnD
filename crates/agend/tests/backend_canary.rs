@@ -4,6 +4,7 @@
 mod lab;
 use agend_testkit::tempdir::TempDir;
 use serde_json::Value;
+use std::os::unix::fs::PermissionsExt;
 use std::{
     fs,
     path::Path,
@@ -66,6 +67,10 @@ fn canary_scope_rejects_other_homes_instances_and_changed_artifacts() {
     wrong = instance.clone();
     wrong.args[1] = "test/other".into();
     assert!(canary_scope::expected(&home, &wrong).is_err());
+    assert!(agend_daemon::supervisor::launch(&home, &wrong, false).is_err());
+    wrong = instance.clone();
+    wrong.program = "/bin/false".into();
+    assert!(agend_daemon::supervisor::launch(&home, &wrong, false).is_err());
     wrong = instance.clone();
     wrong.args.clear();
     assert!(canary_scope::expected(&home, &wrong).is_err());
@@ -158,6 +163,14 @@ fn native_canary(backend: &str, executable: &str, version: &str, wrong_version: 
     let user = root.root.as_path().join("user");
     fs::create_dir(&user).unwrap();
     fs::write(user.join(".claude.json"), b"preserve trust entries").unwrap();
+    let auth = user.join("canary-auth-input");
+    let auth_bytes = if backend == "claude" {
+        b"test-only-token".as_slice()
+    } else {
+        b"{\"test-only\":true}".as_slice()
+    };
+    fs::write(&auth, auth_bytes).unwrap();
+    fs::set_permissions(&auth, fs::Permissions::from_mode(0o600)).unwrap();
     for (version, passed) in [(version, true), (wrong_version, false)] {
         let out = cli(
             &home,
@@ -186,10 +199,10 @@ fn native_canary(backend: &str, executable: &str, version: &str, wrong_version: 
             "--allow-model",
             "--timeout-seconds",
             "180",
+            "--auth-file",
+            auth.to_str().unwrap(),
         ];
-        if backend == "opencode" {
-            canary_args.extend(["--model", "test/canary"]);
-        }
+        canary_args.extend(["--model", "test/canary"]);
         let out = cli(&home, &user, &canary_args);
         let record = home
             .join("backends")
@@ -197,11 +210,11 @@ fn native_canary(backend: &str, executable: &str, version: &str, wrong_version: 
             .join(version)
             .join("canary.json");
         let report: Value = serde_json::from_slice(&fs::read(record).unwrap()).unwrap();
-        if backend == "opencode" {
-            assert_eq!(report["model"], "test/canary");
-        } else {
-            assert!(report["model"].is_null());
-        }
+        assert_eq!(fs::read(&auth).unwrap(), auth_bytes);
+        assert!(!String::from_utf8_lossy(&out.stdout).contains("test-only"));
+        assert!(!String::from_utf8_lossy(&out.stderr).contains("test-only"));
+        assert!(!report.to_string().contains("test-only"));
+        assert_eq!(report["model"], "test/canary");
         assert_eq!(
             out.status.success(),
             passed,
@@ -967,4 +980,87 @@ fn native_switch_case(
     assert_eq!(record["session_id"].as_str(), after.0.as_deref());
     root.stop_all_holders();
     assert!(root.running_holders().is_empty());
+}
+
+#[test]
+fn credential_environment_requires_exact_canary_scope_and_preserves_fleet_env() {
+    use agend_daemon::backend_versions::{self, canary_scope};
+    use std::collections::BTreeMap;
+    use std::os::unix::fs::symlink;
+    let root = TempDir::new("g13-canary-credential-scope").unwrap();
+    let source = root.path().join("source");
+    let home = root.path().join("probe");
+    fs::create_dir_all(home.join("workspace")).unwrap();
+    fs::create_dir(home.join("probe-home")).unwrap();
+    let mut env = BTreeMap::from([("HOME".into(), "/original".into())]);
+    canary_scope::isolate_environment(&home, "fleet", "claude", &home.join("workspace"), &mut env)
+        .unwrap();
+    assert_eq!(env["HOME"], "/original");
+    assert!(
+        cli(
+            &source,
+            root.path(),
+            &[
+                "backend",
+                "import",
+                "claude",
+                "--version",
+                "2.1.284",
+                "--program",
+                "/bin/echo"
+            ]
+        )
+        .status
+        .success()
+    );
+    let artifact = backend_versions::inspect(&source, "claude", "2.1.284").unwrap();
+    canary_scope::create(&home, &source, &artifact, &[]).unwrap();
+    fs::create_dir(home.join("canary-auth")).unwrap();
+    let token = home.join("canary-auth/claude-oauth-token");
+    fs::write(&token, b"test-only-token").unwrap();
+    fs::set_permissions(&token, fs::Permissions::from_mode(0o600)).unwrap();
+    for (id, backend, workspace) in [
+        ("fleet", "claude", home.join("workspace")),
+        ("canary", "codex", home.join("workspace")),
+        ("canary", "claude", root.path().to_path_buf()),
+    ] {
+        assert!(
+            canary_scope::isolate_environment(&home, id, backend, &workspace, &mut env).is_err()
+        );
+        assert!(!env.contains_key("CLAUDE_CODE_OAUTH_TOKEN"));
+    }
+    canary_scope::isolate_environment(&home, "canary", "claude", &home.join("workspace"), &mut env)
+        .unwrap();
+    assert_eq!(env["CLAUDE_CODE_OAUTH_TOKEN"], "test-only-token");
+    assert_eq!(
+        env["CLAUDE_CONFIG_DIR"],
+        home.canonicalize()
+            .unwrap()
+            .join("probe-home/.claude")
+            .display()
+            .to_string()
+    );
+    fs::set_permissions(&token, fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(
+        canary_scope::isolate_environment(
+            &home,
+            "canary",
+            "claude",
+            &home.join("workspace"),
+            &mut BTreeMap::new()
+        )
+        .is_err()
+    );
+    fs::remove_file(&token).unwrap();
+    symlink(root.path().join("source"), &token).unwrap();
+    assert!(
+        canary_scope::isolate_environment(
+            &home,
+            "canary",
+            "claude",
+            &home.join("workspace"),
+            &mut BTreeMap::new()
+        )
+        .is_err()
+    );
 }

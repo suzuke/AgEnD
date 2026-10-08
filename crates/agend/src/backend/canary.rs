@@ -7,6 +7,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::time::{Duration, Instant};
+mod credentials;
 mod process;
 const ID: &str = "canary";
 
@@ -30,8 +31,12 @@ pub fn run(
     version: &str,
     seconds: u64,
     model: Option<&str>,
+    auth_file: Option<&Path>,
 ) -> Result<Report, String> {
     let args = model_args(backend, model)?;
+    let credentials = auth_file
+        .map(|path| credentials::read(backend, path))
+        .transpose()?;
     if !(10..=300).contains(&seconds) {
         return Err("canary timeout must be 10-300 seconds".into());
     }
@@ -83,6 +88,9 @@ pub fn run(
             return Err("backend --version did not match the imported version".into());
         }
         report.observed_version = Some(observed.trim().into());
+        if let Some(bytes) = &credentials {
+            credentials::install(&lab.home, backend, bytes)?;
+        }
         agend_daemon::backend_versions::canary_scope::create(
             &lab.home,
             home,
@@ -262,6 +270,16 @@ fn model_args(backend: &str, model: Option<&str>) -> Result<Vec<String>, String>
             .is_some_and(|(p, m)| !p.is_empty() && !m.is_empty())
     {
         return Err("OpenCode canary model must be provider/model".into());
+    }
+    if backend == "codex" {
+        // app-server has no TUI --model flag; use its global config override.
+        return Ok(vec![
+            "-c".into(),
+            format!(
+                "model={}",
+                serde_json::to_string(model).map_err(|_| "invalid model")?
+            ),
+        ]);
     }
     Ok(vec!["--model".into(), model.into()])
 }

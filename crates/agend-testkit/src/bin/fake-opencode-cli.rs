@@ -18,6 +18,7 @@ pub fn run(version: &'static str) -> Result<(), Box<dyn std::error::Error>> {
     }
     match args.first().map(String::as_str) {
         Some("serve") => {
+            agend_testkit::fake_agent::canary_credentials::check("opencode")?;
             let port = args
                 .windows(2)
                 .find(|w| w[0] == "--port")

@@ -48,6 +48,26 @@ pub fn create(
 /// Missing scope retains the legacy version policy. A present scope must match
 /// this exact private home, instance, workspace and still-intact imported bytes.
 pub fn expected(home: &Path, instance: &Instance) -> Result<Option<String>, String> {
+    let Some(scope) = read_scope(home)? else {
+        return Ok(None);
+    };
+    let home = home.canonicalize().map_err(|e| e.to_string())?;
+    if instance.id != "canary"
+        || instance.backend.as_str() != scope.artifact.backend
+        || Path::new(&instance.program) != Path::new(&scope.program)
+        || Path::new(&instance.working_directory)
+            .canonicalize()
+            .map_err(|e| e.to_string())?
+            != home.join("workspace")
+        || instance.args != scope.args
+        || instance.delivery != "push"
+    {
+        return Err("canary scope identity mismatch".into());
+    }
+    Ok(Some(scope.artifact.version))
+}
+
+fn read_scope(home: &Path) -> Result<Option<Scope>, String> {
     let path = home.join(FILE);
     match fs::symlink_metadata(&path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -69,15 +89,6 @@ pub fn expected(home: &Path, instance: &Instance) -> Result<Option<String>, Stri
     if Path::new(&scope.home) != home
         || scope.device != meta.dev()
         || scope.inode != meta.ino()
-        || instance.id != "canary"
-        || instance.backend.as_str() != scope.artifact.backend
-        || Path::new(&instance.program) != Path::new(&scope.program)
-        || Path::new(&instance.working_directory)
-            .canonicalize()
-            .map_err(|e| e.to_string())?
-            != home.join("workspace")
-        || instance.args != scope.args
-        || instance.delivery != "push"
         || Path::new(&scope.source) == home
         || Path::new(&scope.program)
             != Path::new(&scope.source)
@@ -93,5 +104,74 @@ pub fn expected(home: &Path, instance: &Instance) -> Result<Option<String>, Stri
     {
         return Err("canary scope identity mismatch".into());
     }
-    Ok(Some(scope.artifact.version))
+    Ok(Some(scope))
+}
+
+/// Only an identity-bound private canary home can provision credential variables.
+/// Never inherit credentials or config-directory overrides from daemon env.
+pub fn isolate_environment(
+    home: &Path,
+    id: &str,
+    backend: &str,
+    workspace: &Path,
+    env: &mut std::collections::BTreeMap<String, String>,
+) -> Result<(), String> {
+    let Some(scope) = read_scope(home)? else {
+        return Ok(());
+    };
+    let home = home.canonicalize().map_err(|e| e.to_string())?;
+    if id != "canary"
+        || backend != scope.artifact.backend
+        || workspace.canonicalize().map_err(|e| e.to_string())? != home.join("workspace")
+    {
+        return Err("canary credential scope mismatch".into());
+    }
+    let user = home.join("probe-home");
+    directory(&user)?;
+    env.insert("HOME".into(), user.display().to_string());
+    match backend {
+        "codex" => {
+            env.insert(
+                "CODEX_HOME".into(),
+                user.join(".codex").display().to_string(),
+            );
+        }
+        "claude" => {
+            env.insert(
+                "CLAUDE_CONFIG_DIR".into(),
+                user.join(".claude").display().to_string(),
+            );
+            let path = home.join("canary-auth/claude-oauth-token");
+            match fs::symlink_metadata(&path) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+                Err(_) => return Err("cannot inspect canary credential".into()),
+                Ok(_) => {
+                    directory(&home.join("canary-auth"))?;
+                    let file = regular(&path).map_err(|_| "invalid canary credential file")?;
+                    if file
+                        .metadata()
+                        .map_err(|_| "cannot inspect canary credential")?
+                        .mode()
+                        & 0o077
+                        != 0
+                    {
+                        return Err("canary credential must be private".into());
+                    }
+                    let mut token = String::new();
+                    file.take(16385)
+                        .read_to_string(&mut token)
+                        .map_err(|_| "cannot read canary credential")?;
+                    if token.is_empty()
+                        || token.len() > 16384
+                        || !token.bytes().all(|b| b.is_ascii_graphic())
+                    {
+                        return Err("invalid canary OAuth token".into());
+                    }
+                    env.insert("CLAUDE_CODE_OAUTH_TOKEN".into(), token);
+                }
+            }
+        }
+        _ => (),
+    }
+    Ok(())
 }
