@@ -73,9 +73,9 @@ fn run(args: &Args) -> Result<(), String> {
         std::io::stdout().flush().map_err(|e| e.to_string())?;
         let mut turn = 0u64;
         loop {
-            let event = rx
-                .recv_timeout(Duration::from_secs(10))
-                .map_err(|e| e.to_string())?;
+            // An idle CLI stays alive until its input/channel closes. The
+            // harness owns the test deadline; inactivity is not an exit.
+            let event = rx.recv().map_err(|e| e.to_string())?;
             match event {
                 Event::InputClosed => return Ok(()),
                 Event::Channel { content, meta } => {

@@ -75,6 +75,7 @@ pub fn run(home: &Path, backend: &str, version: &str, seconds: u64) -> Result<Re
             return Err("backend --version did not match the imported version".into());
         }
         report.observed_version = Some(observed.trim().into());
+        agend_daemon::backend_versions::canary_scope::create(&lab.home, home, &report.artifact)?;
         lab.start(&agend)?;
         while !lab.home.join(DAEMON_SOCKET).exists() {
             lab.check_alive()?;

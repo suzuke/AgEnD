@@ -124,14 +124,33 @@ fn run(
             Err(_) => std::thread::sleep(Duration::from_millis(50)),
         }
     };
-    if version != "1.18.34" {
-        return Err(format!("OpenCode {version} is not verified; use 1.18.34"));
-    }
     let lookup = id.clone();
     let instance = store
         .call_blocking(move |conn| instances::get(conn, &lookup))
         .map_err(|e| e.to_string())?
         .ok_or("OpenCode instance removed")?;
+    let expected = if let Some(version) =
+        crate::backend_versions::canary_scope::expected(store.home(), &instance)?
+    {
+        version
+    } else if let Some(artifact) = crate::backend_versions::inspect_launch(
+        store.home(),
+        "opencode",
+        &instance.program,
+        std::path::Path::new(&instance.working_directory),
+        &std::env::var("PATH").unwrap_or_default(),
+    )? {
+        // The supervisor already required this artifact's daemon-bound canary
+        // before creating the managed launch and holder.
+        artifact.version
+    } else {
+        "1.18.34".into()
+    };
+    if version != expected {
+        return Err(format!(
+            "OpenCode {version} differs from expected {expected}"
+        ));
+    }
     // Explicitly reject unsupported launch options instead of silently dropping
     // an operator's requested model or permission configuration.
     let model = super::launch::model(&instance.args)?;

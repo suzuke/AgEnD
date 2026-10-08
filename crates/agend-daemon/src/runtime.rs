@@ -311,12 +311,58 @@ impl HolderRuntime {
         agent_pid: u32,
     ) -> Result<(), RuntimeError> {
         reserved_launch(intent)?;
-        let home = self.inner.home.clone();
-        let intent = intent.clone();
-        blocking(move || {
-            managed_stop::verified_connection(&home, &intent, holder_pid, agent_pid).map(drop)
+        let id = &intent.instance_id;
+        if !managed_stop::check_holder(&self.inner.home, id, holder_pid)? {
+            return Err(err("managed holder is absent"));
+        }
+        let (connection, reply, writer) = {
+            let links = self.inner.lock_links();
+            let link = links
+                .get(id)
+                .ok_or_else(|| err("managed holder link missing"))?;
+            let connection = link
+                .terminal_connection()
+                .map_err(|e| err(format!("{e:?}")))?;
+            let (reply, writer) = link.binding_request();
+            (connection, reply, writer)
+        };
+        let mut line = serde_json::to_vec(
+            &agend_core::protocol::holder::HolderRequest::GetLaunchBinding {
+                instance_id: id.clone(),
+            },
+        )
+        .map_err(|e| err(e.to_string()))?;
+        line.push(b'\n');
+        if !blocking(move || Ok(link::send_line(&writer, &line))).await? {
+            return Err(err("managed binding query write failed"));
+        }
+        let data = blocking(move || {
+            let mut reply = reply;
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                match reply.try_recv() {
+                    Ok(data) => return Ok(data),
+                    Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+                        return Err(err("managed binding connection ended"));
+                    }
+                    Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {}
+                }
+                if std::time::Instant::now() >= deadline {
+                    return Err(err("managed binding query timed out"));
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
         })
-        .await
+        .await?;
+        if !connection.is_current()
+            || data.instance_id != *id
+            || data.binding.as_deref() != Some(intent.binding.as_str())
+            || data.process_id != Some(agent_pid)
+            || !managed_stop::check_holder(&self.inner.home, id, holder_pid)?
+        {
+            return Err(err("managed launch identity changed"));
+        }
+        Ok(())
     }
 
     /// Stop only the holder/agent identified by this persisted launch. Caller

@@ -193,3 +193,9 @@ cat docs/gates/gate-13-install.md
 - 2026-10-08：13C 接上明確 Activate／Rollback RPC 與 CLI，目的准入、reply fence、native idle、worker 結束及 exact holder stop 後提交版本並啟動；定期核新 holder binding／readiness 後釋放投遞。Activated 回退先持久 RollbackPrepared，boot 對 Committed／Restoring 缺 holder 的合格目的可重啟。Codex 雙原生假版本經正式 canary 完整啟用／回滾，核 session 保留與兩次 holder 更換通過；Store 9 項、holder runtime 10 項、switch RPC 2 項、client 52 項、core 149 項（2 ignored）、clippy／check-deps 通過。前兩輪新測試錯用外部 SQLite 查 live daemon，被獨占鎖拒絕；已改正式 RPC＋停機後核 DB。新 store 測試誤把 inbox 暫停當 None，改為正式拒絕後通過；保留失敗證據。尚未認證三後端完整往返、全部 crash 切點與自動失敗回滾（feat/g13-install，未合併）。
 
 - 2026-10-08：本批換版回歸補 daemon 單元 186 項（1 ignored）、terminal hub 10 項、Claude startup cancel 1 項。前一批 boot 保護使兩個啟動前種 Prepared 的 shell fixture 不再啟動，改為先啟動原 holder 再停 daemon 種 pause，重連時僅保留 pause 測試所需資料，不宣稱這些 shell 具 managed admission；取消操作保留有效 terminal，僅恢復缺少的 driver。保留原回歸失敗與編譯錯誤證據，最新 fmt／clippy／check-deps 通過；自有測試目錄檢查無殘留，移除被最終證據取代的成功 logs（feat/g13-install，未合併）。
+
+- 2026-10-08：Claude 雙假版本 canary／啟用／回滾與 session 保留通過；修正身分查詢另開 holder socket 導致原 Ready 連線被取代，改在既有連線查詢並核連線及 PID／binding。holder runtime 11 項通過（含錯身分拒絕且原連線保留）；首輪新增測試發現無 Tokio reactor 呼叫不相容，已改 blocking 等待並保留失敗證據。Codex driver 19 項通過、check-deps 通過。OpenCode 新版准入、完整 crash matrix／自動回滾及全關驗收未完成；本輪自有 switch／binding 測試目錄無殘留，保留施工 worktree／target 與必要證據。
+
+- 2026-10-08：13C OpenCode 新版 canary 與 fleet 版本核對改依精確匯入 artifact／私有 CanaryScope；scope 綁 home inode/device、instance、workspace、program 與來源雜湊，不是 fleet 成功報告。正式 import＋scope producer 的跨 home／錯 instance／額外 argv／修改 artifact 反例通過；OpenCode 雙假版本完整 canary／啟用／回滾及 session 保留通過（66.22 秒）。未執行真模型，三 backend 全組回歸及全關驗收尚待完成（feat/g13-install，未合併）。
+
+- 2026-10-08：三 backend 的 canary 全組 8 項並行通過（75.27 秒），包括各雙版本正式 runner、啟用／回滾及 session 保留；fmt、clippy、check-deps 通過。仍僅為原生假 backend 證據，不代表真新版模型相容或完整 crash 驗收。

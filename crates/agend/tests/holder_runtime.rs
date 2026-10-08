@@ -358,6 +358,43 @@ fn persisted_intent_does_not_adopt_a_legacy_holder() {
 }
 
 #[test]
+fn managed_identity_queries_preserve_the_native_terminal_connection() {
+    use agend_daemon::runtime::SpawnOutcome;
+    let lab = lab::Lab::with_prefix(Path::new(BIN), "g13-bound-query");
+    let home = lab.home(1);
+    let intent = reserve(&home, &launch(&home, "bound", "exec sleep 600"));
+    let rt = runtime(&home);
+    let started = block_on(rt.start_reserved(&intent, false)).unwrap();
+    let holder = started.handle.process_id.unwrap();
+    let Some(SpawnOutcome::Spawned {
+        agent_pid: Some(agent),
+    }) = started.attached.spawn
+    else {
+        panic!("fresh native bound spawn");
+    };
+    let connection = rt.terminal_connection("bound").unwrap();
+    let mut wrong = intent.clone();
+    wrong.binding = agend_daemon::store::instances::new_session_id().unwrap();
+    for (proof, pid, expected) in [
+        (&wrong, agent, false),
+        (&intent, agent + 1, false),
+        (&intent, agent, true),
+    ] {
+        assert_eq!(
+            block_on(rt.verify_reserved(proof, holder, pid)).is_ok(),
+            expected
+        );
+        assert!(
+            connection.is_current(),
+            "identity query replaced the terminal"
+        );
+        assert!(block_on(rt.live_terminal("bound").unwrap()).is_ok());
+    }
+    block_on(rt.stop_reserved(&intent, holder, agent)).unwrap();
+    assert!(lab.running_holders().is_empty());
+}
+
+#[test]
 fn managed_stop_checks_binding_and_both_pids_before_stopping_the_native_holder() {
     use agend_daemon::runtime::SpawnOutcome;
     let lab = lab::Lab::with_prefix(Path::new(BIN), "g13-bound-stop");

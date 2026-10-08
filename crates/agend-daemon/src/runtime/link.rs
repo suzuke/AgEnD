@@ -94,6 +94,7 @@ pub type TerminalFeed = (String, broadcast::Receiver<String>);
 struct Terminal {
     /// Waiting for the answer to their `Snapshot`.
     pending: Vec<oneshot::Sender<TerminalFeed>>,
+    bindings: Vec<oneshot::Sender<agend_core::protocol::holder::LaunchBindingData>>,
     live: broadcast::Sender<String>,
 }
 
@@ -212,6 +213,7 @@ impl Link {
             operations: Some(operations),
             terminal: Arc::new(Mutex::new(Terminal {
                 pending: Vec::new(),
+                bindings: Vec::new(),
                 live: broadcast::channel(TERMINAL_CHUNKS).0,
             })),
             wake: None,
@@ -221,6 +223,19 @@ impl Link {
 
     /// Where [`input`] writes: the caller can drop its lock on the links
     /// before writing.
+    pub fn binding_request(
+        &self,
+    ) -> (
+        oneshot::Receiver<agend_core::protocol::holder::LaunchBindingData>,
+        Writer,
+    ) {
+        let (tx, rx) = oneshot::channel();
+        let mut terminal = lock(&self.terminal);
+        terminal.bindings.retain(|waiting| !waiting.is_closed());
+        terminal.bindings.push(tx);
+        (rx, self.writer())
+    }
+
     pub fn writer(&self) -> Writer {
         Writer {
             stream: Arc::clone(&self.stream),
@@ -326,6 +341,7 @@ pub(super) fn open(
     );
     let terminal = Arc::new(Mutex::new(Terminal {
         pending: Vec::new(),
+        bindings: Vec::new(),
         live: broadcast::channel(TERMINAL_CHUNKS).0,
     }));
     let (wake_tx, wake) = mpsc::channel();
@@ -467,6 +483,7 @@ impl Worker {
             self.structured
                 .disconnected("the holder connection ended; acquire control again");
             lock(&self.terminal).pending.clear();
+            lock(&self.terminal).bindings.clear();
             lock(&self.stream).take();
             match self.reconnect(&socket) {
                 Some(next) => conn = next,
@@ -601,6 +618,11 @@ impl Worker {
                         let _ = waiting.send((data.screen.clone(), terminal.live.subscribe()));
                     }
                 }
+                Ok(Some(HolderResponse::LaunchBinding { data })) => {
+                    for waiting in std::mem::take(&mut lock(&self.terminal).bindings) {
+                        let _ = waiting.send(data.clone());
+                    }
+                }
                 Ok(Some(HolderResponse::PtyBytes { data })) => {
                     self.structured.output_changed();
                     // No subscriber is not an error.
@@ -685,6 +707,7 @@ mod tests {
             stream: published,
             terminal: Arc::new(Mutex::new(Terminal {
                 pending: Vec::new(),
+                bindings: Vec::new(),
                 live: broadcast::channel(1).0,
             })),
             structured,

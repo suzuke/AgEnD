@@ -612,7 +612,23 @@ fn fresh_thread_idle_requires_terminal_native_turns_and_a_live_connection() {
     let lab = lab();
     let backend = codex::Backend::new(&lab.home(73), "idle-proof", Duration::from_secs(2)).unwrap();
     let fixture = codex::Fixture::boot(&backend).unwrap();
-    assert!(block_on(fixture.driver.thread_idle(&backend.id)).unwrap());
+    // connect spawns the link worker; its connected flag is published by
+    // Worker::run, which need not have been scheduled when connect returns.
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        match block_on(fixture.driver.thread_idle(&backend.id)) {
+            Ok(idle) => {
+                assert!(idle);
+                break;
+            }
+            Err(agend_daemon::driver::codex::DriverError::NotConnected(_))
+                if std::time::Instant::now() < deadline =>
+            {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => panic!("initial native idle observation failed: {error}"),
+        }
+    }
     fixture
         .deliver("idle-message", "Respond briefly", BusyLevel::Queue)
         .unwrap();

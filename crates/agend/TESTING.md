@@ -218,3 +218,7 @@ Canary 必須取得三筆與 delivery 綁定的 completed outcomes；修改 fail
 13C：pending backend switch 阻止一般 boot start、自動重啟與 operator retry 改寫啟動意圖。`backend_switch::pending_switch_boot_preserves_launch_reservation_without_ordinary_restart` 經原生 daemon 驗三種 pending phase 跨 boot 保留精確資料；專用換版恢復仍待串接。
 
 13C 新增 `backend switch activate／rollback --switch-id`：精確持久 ID、目的版本准入、投遞排空與 native idle 後停止受管 holder；Committed／Restoring 保持暫停，核新 holder 綁定及 readiness 後才釋放。Activated 回滾先保存 RollbackPrepared。Codex 原生假 backend 的雙版本 canary、啟用、回滾及 session 保留已驗；三後端與完整 crash matrix 尚未完成。
+
+`holder_runtime::managed_identity_queries_preserve_the_native_terminal_connection` 使用真 holder 檢查正確與錯 binding／agent PID，並核原 terminal connection 未失效且仍可讀 snapshot。`backend_canary` 的 Claude／OpenCode 第二版本為同協定 fixture，不代表真新版相容；Claude fixture 閒置持續等待，測試期限與清理由 harness 管理。
+
+`backend_canary::canary_scope_rejects_other_homes_instances_and_changed_artifacts` 經正式 import CLI 與 scope producer 驗正常版本觀察，及跨 home、錯 instance、額外 argv、修改 executable 的拒絕；另核 scope 本身沒有成功 canary 報告，不可取得 fleet 准入。此案例不執行 backend。

@@ -10,6 +10,78 @@ use std::{
     process::{Command, Output},
 };
 const BIN: &str = env!("CARGO_BIN_EXE_agend");
+
+#[test]
+fn canary_scope_rejects_other_homes_instances_and_changed_artifacts() {
+    use agend_core::{
+        model::Backend,
+        runtime_records::{Instance, InstanceStatus},
+    };
+    use agend_daemon::backend_versions::{self, canary_scope};
+    let root = TempDir::new("g13-canary-scope").unwrap();
+    let source = root.path().join("source");
+    let home = root.path().join("probe");
+    fs::create_dir_all(home.join("workspace")).unwrap();
+    let out = cli(
+        &source,
+        root.path(),
+        &[
+            "backend",
+            "import",
+            "opencode",
+            "--version",
+            "1.18.35",
+            "--program",
+            "/bin/echo",
+        ],
+    );
+    assert!(out.status.success(), "{out:?}");
+    let artifact = backend_versions::inspect(&source, "opencode", "1.18.35").unwrap();
+    let program = source
+        .join("backends/opencode/1.18.35/program")
+        .canonicalize()
+        .unwrap();
+    let instance = Instance {
+        id: "canary".into(),
+        backend: Backend::Opencode,
+        program: program.to_str().unwrap().into(),
+        args: vec![],
+        working_directory: home.join("workspace").to_str().unwrap().into(),
+        session_id: None,
+        status: InstanceStatus::Running,
+        session_started: true,
+        agent_pid: None,
+        legacy_no_thread: false,
+        delivery: "push".into(),
+    };
+    assert_eq!(canary_scope::expected(&home, &instance).unwrap(), None);
+    canary_scope::create(&home, &source, &artifact).unwrap();
+    assert_eq!(
+        canary_scope::expected(&home, &instance).unwrap().as_deref(),
+        Some("1.18.35")
+    );
+    let mut wrong = instance.clone();
+    wrong.id = "fleet".into();
+    assert!(canary_scope::expected(&home, &wrong).is_err());
+    wrong = instance.clone();
+    wrong.args.push("--other".into());
+    assert!(canary_scope::expected(&home, &wrong).is_err());
+    let other = root.path().join("other");
+    fs::create_dir_all(other.join("workspace")).unwrap();
+    fs::copy(
+        home.join("canary-scope.json"),
+        other.join("canary-scope.json"),
+    )
+    .unwrap();
+    assert!(canary_scope::expected(&other, &instance).is_err());
+    // Scope is not admission: no successful report has been published.
+    assert!(backend_versions::verify_canary(&source, "opencode", "1.18.35", "unused").is_err());
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&program, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::write(&program, b"changed executable").unwrap();
+    assert!(canary_scope::expected(&home, &instance).is_err());
+}
+
 fn cli(home: &Path, user: &Path, args: &[&str]) -> Output {
     Command::new(BIN)
         .env_clear()
@@ -395,19 +467,51 @@ fn managed_fleet(lab: &lab::Lab, home: &Path, backend: &str, version: &str) {
 
 #[test]
 fn native_codex_switch_activates_an_admitted_version_and_preserves_session() {
+    native_switch(
+        "codex",
+        "examples/fake_codex",
+        "examples/fake_codex_next",
+        "0.158.0",
+        "0.159.0",
+    );
+}
+#[test]
+fn native_claude_switch_activates_and_rolls_back_with_the_same_session() {
+    native_switch(
+        "claude",
+        "fake-claude-cli",
+        "examples/fake_claude_next",
+        "2.1.284",
+        "2.1.285",
+    );
+}
+#[test]
+fn native_opencode_switch_activates_and_rolls_back_with_the_same_session() {
+    native_switch(
+        "opencode",
+        "fake-opencode-cli",
+        "examples/fake_opencode_next",
+        "1.18.34",
+        "1.18.35",
+    );
+}
+fn native_switch(backend: &str, old: &str, next: &str, old_version: &str, next_version: &str) {
     use std::time::{Duration, Instant};
     let root = lab::Lab::with_prefix(Path::new(BIN), "g13-switch-live");
     let home = root.root.join("home");
     let user = root.root.join("user");
     fs::create_dir(&user).unwrap();
-    for (version, name) in [("0.158.0", "fake_codex"), ("0.159.0", "fake_codex_next")] {
-        let fake = Path::new(BIN).parent().unwrap().join("examples").join(name);
-        assert!(fake.is_file(), "build both fake Codex examples first");
+    for (version, name) in [(old_version, old), (next_version, next)] {
+        let fake = Path::new(BIN).parent().unwrap().join(name);
+        assert!(
+            fake.is_file(),
+            "build native fixture binaries and next-version examples first"
+        );
         for args in [
             vec![
                 "backend",
                 "import",
-                "codex",
+                backend,
                 "--version",
                 version,
                 "--program",
@@ -416,7 +520,7 @@ fn native_codex_switch_activates_an_admitted_version_and_preserves_session() {
             vec![
                 "backend",
                 "canary",
-                "codex",
+                backend,
                 "--version",
                 version,
                 "--allow-model",
@@ -435,7 +539,11 @@ fn native_codex_switch_activates_an_admitted_version_and_preserves_session() {
     }
     let mut daemon = lab::Daemon::start(&root, &home, &[]).unwrap();
     daemon.ready().unwrap();
-    let program = home.join("backends/codex/0.158.0/program");
+    let program = home
+        .join("backends")
+        .join(backend)
+        .join(old_version)
+        .join("program");
     let out = cli(
         &home,
         &user,
@@ -443,7 +551,7 @@ fn native_codex_switch_activates_an_admitted_version_and_preserves_session() {
             "instance",
             "add",
             "managed",
-            "codex",
+            backend,
             "--program",
             program.to_str().unwrap(),
         ],
@@ -466,9 +574,15 @@ fn native_codex_switch_activates_an_admitted_version_and_preserves_session() {
         )
         .unwrap()
     };
-    daemon
-        .expect_within(" created", Duration::from_secs(30))
-        .unwrap();
+    if backend == "codex" {
+        daemon
+            .expect_within(" created", Duration::from_secs(30))
+            .unwrap();
+    } else {
+        // Claude's exact Ready frame must remain stable for five seconds.
+        // OpenCode establishes its native session asynchronously after spawn.
+        std::thread::sleep(Duration::from_secs(6));
+    }
     let before_holders = root.running_holders();
     assert_eq!(before_holders.len(), 1);
     let out = cli(
@@ -480,7 +594,7 @@ fn native_codex_switch_activates_an_admitted_version_and_preserves_session() {
             "prepare",
             "managed",
             "--version",
-            "0.159.0",
+            next_version,
         ],
     );
     assert!(
@@ -516,10 +630,18 @@ fn native_codex_switch_activates_an_admitted_version_and_preserves_session() {
         if status["phase"] == "activated" {
             break;
         }
-        assert!(
-            Instant::now() < deadline,
-            "activation did not finish: {status}"
-        );
+        if Instant::now() >= deadline {
+            let screen = (|| {
+                let mut client =
+                    agend_client::Client::connect_once(&home.join("run/daemon.sock"), None)?;
+                client.sender()?.subscribe_terminal("managed")?;
+                client.next_terminal()
+            })();
+            let diagnostics = daemon
+                .expect_within("__activation_timeout__", Duration::from_millis(10))
+                .unwrap_err();
+            panic!("activation did not finish: {status}; screen={screen:?}; {diagnostics}");
+        }
         std::thread::sleep(Duration::from_millis(200));
     }
     let after_holders = root.running_holders();

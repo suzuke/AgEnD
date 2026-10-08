@@ -15,6 +15,19 @@ pub struct ImportedBackend {
     pub bytes: u64,
 }
 
+/// Private execution scope created by the explicit canary runner. This is not
+/// a passed canary report and never authorizes a fleet launch.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CanaryScope {
+    pub home: String,
+    pub device: u64,
+    pub inode: u64,
+    pub source: String,
+    pub program: String,
+    pub artifact: ImportedBackend,
+}
+
 pub fn valid_version(version: &str) -> bool {
     !version.is_empty()
         && version.len() <= 80
