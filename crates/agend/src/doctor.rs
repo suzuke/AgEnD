@@ -63,6 +63,7 @@ pub fn checks(home: &Path) -> Vec<Check> {
     out.push(disk(home));
     out.push(sandbox(home));
     out.push(telegram(home));
+    out.push(crate::service::diagnostic(home));
     out
 }
 

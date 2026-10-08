@@ -4,6 +4,7 @@
 use std::cell::{Cell, RefCell};
 use std::fs;
 use std::os::unix::fs::{PermissionsExt, symlink};
+use std::path::Path;
 
 use agend_core::setup::service::{InstallPhase, Installation, Manager, ServiceSpec};
 use agend_testkit::tempdir::TempDir;
@@ -78,6 +79,41 @@ fn fixture() -> (TempDir, Plan) {
         source,
     };
     (root, plan)
+}
+
+#[test]
+fn diagnostic_observes_recovery_without_mutating_the_installation_or_manager() {
+    use agend_core::setup::CheckStatus;
+    let (_root, plan) = fixture();
+    let model = Model::new();
+    let mut owned = Owned::prepare(&plan, &plan.source, None).unwrap();
+    let record_path = Path::new(&plan.spec.home).join("service/installation.json");
+    let prepared = fs::read(&record_path).unwrap();
+    // Keep the exclusive lifecycle lock held: diagnosis must not create/acquire it.
+    let observe = || super::diagnostic::observe(&plan, &model);
+    assert_eq!(observe().unwrap().status, CheckStatus::Warn);
+    assert_eq!(fs::read(&record_path).unwrap(), prepared);
+    assert_eq!(model.launches.get(), 0);
+    assert_eq!(model.stops.get(), 0);
+    owned.register(&model).unwrap();
+    let registered = fs::read(&record_path).unwrap();
+    assert_eq!(observe().unwrap().status, CheckStatus::Ok);
+    *model.state.borrow_mut() = State::Absent;
+    assert_eq!(observe().unwrap().status, CheckStatus::Warn);
+    *model.state.borrow_mut() = State::Owned { running: true };
+    assert_eq!(observe().unwrap().status, CheckStatus::Ok);
+    let definition = fs::read(&plan.service_path).unwrap();
+    fs::remove_file(&plan.service_path).unwrap();
+    assert!(observe().unwrap_err().contains("missing"));
+    assert!(!plan.service_path.exists());
+    fs::write(&plan.service_path, &definition).unwrap();
+    assert_eq!(observe().unwrap().status, CheckStatus::Ok);
+    fs::write(&plan.service_path, b"foreign edit").unwrap();
+    assert!(observe().unwrap_err().contains("changed"));
+    assert_eq!(fs::read(&plan.service_path).unwrap(), b"foreign edit");
+    assert_eq!(fs::read(&record_path).unwrap(), registered);
+    assert_eq!(model.launches.get(), 1);
+    assert_eq!(model.stops.get(), 0);
 }
 
 #[test]

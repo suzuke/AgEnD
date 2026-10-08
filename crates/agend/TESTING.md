@@ -238,3 +238,5 @@ Canary 必須取得三筆與 delivery 綁定的 completed outcomes；修改 fail
 13D `telegram::apply` 五項檔案測試驗原文／0600／冪等、未確認／不同設定／symlink 拒絕、安裝鎖、原檔變更、備份撞名與失敗暫存清理。`telegram_pairing` 另由正式 Store 生產已確認收據，經真 daemon RPC 與 CLI apply 驗指定 ID、agent 拒絕、備份與 idempotency；不重啟套用後的 daemon，避免解析 fixture token／連外。
 
 13E `install_home` 現在以真 CLI doctor JSON 驗故障與恢復：缺 home／權限過寬、Telegram 損壞且原文不變、sandbox 工具缺失及原生恢復、三 backend PATH 遺失及只允許 --version 的 fixture 恢復；每個非 ok 結果須有 fix，exit code 必須對應所有 checks 的 fail。這不涵蓋磁碟容量、登入、版本相容或真服務健康的完整驗收。
+
+`service::tests::diagnostic_observes_recovery_without_mutating_the_installation_or_manager` 使用正式 Owned::prepare/register producer 與 manager state model，持 lifecycle 鎖驗 Prepared／Registered／Absent／running、定義遺失／恢復／變造，核收據未改與 manager 呼叫數未增加。`cli::init_and_doctor` 的 JSON 列表加入 service，install_home 回歸仍走真 CLI；這些不取代真 launchd／systemd 驗收。

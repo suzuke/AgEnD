@@ -235,3 +235,5 @@ cat docs/gates/gate-13-install.md
 - 2026-10-08：13E 四平台 native release 及 formula job 在 run 37738455556（0825e23）全部通過，保留生成公式；該 run 尚未含後續首任務 smoke。macOS ARM64 以 `cargo install --locked --path crates/agend --root <自有暫存>` 安裝 c085ddf，真 installed binary + fake worker 首任務通過，含建置共 100.699 秒，prefix 已刪。補安裝文件並明列 crates.io 未發布、真 backend／Brew 安裝與完整驗收待補（feat/g13-install，未合併）。
 
 - 2026-10-08：13E doctor 補真 CLI 故障／恢復案例：缺 HOME、0755→0700、Telegram 語法損壞且不覆寫、sandbox 工具缺失→真 probe 恢復、三 backend 缺 PATH→僅 --version fixture 恢復。install_home 共 7 項通過、focused clippy 通過；未執行真模型。磁碟容量故障、服務／登入／版本診斷與整關矩陣仍未完成（feat/g13-install，未合併）。
+
+- 2026-10-08：13E doctor 新增唯讀 service 診斷：無安裝可前景執行；核收據歸屬／artifact／manager 狀態與查詢後收據一致，Prepared／Removing／未執行提示修正，缺失或變造拒絕。診斷不取得或建立 install.lock，不啟停／reload。持正式 lifecycle 鎖的 model 故障／恢復反例、service 18、install_home 7、CLI doctor 1 項與 clippy 通過；初輪測試缺 Path import 已修正並保留 log。未驗主機服務，登入／版本與整關故障矩陣仍待完成（feat/g13-install，未合併）。

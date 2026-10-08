@@ -1,6 +1,7 @@
 //! Reviewable user-service plan. Applying it is a separate installation step.
 //! Keep the service's executable under its home, independent of build targets.
 
+mod diagnostic;
 pub(crate) mod files;
 mod lifecycle;
 mod manager;
@@ -156,6 +157,10 @@ pub fn status() -> Result<Output, Failure> {
         vec![format!("service: {state:?}")],
         json!({"installed":true,"state":format!("{state:?}"),"installation":owned.record}),
     ))
+}
+
+pub(crate) fn diagnostic(home: &Path) -> agend_core::setup::Check {
+    diagnostic::check(home)
 }
 
 pub fn uninstall(delete_data: bool, confirm_home: Option<&str>) -> Result<Output, Failure> {

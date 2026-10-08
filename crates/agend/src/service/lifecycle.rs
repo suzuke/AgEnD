@@ -197,7 +197,7 @@ impl Owned {
     }
 }
 
-fn validate(record: &Installation, plan: &Plan) -> Result<(), String> {
+pub(super) fn validate(record: &Installation, plan: &Plan) -> Result<(), String> {
     if record.version != 1
         || record.spec.manager != plan.spec.manager
         || record.spec.home != plan.spec.home

@@ -104,3 +104,5 @@ cargo run -p agend -- --version
 13D 新增 `agend telegram setup begin --token-env NAME`（或 `--token-file /absolute/private/file`）、`status`、`poll --id ID`、`confirm --id ID --chat CHAT --user USER [--topic TOPIC]`、`cancel --id ID`。token 只由 daemon 解析，CLI 不讀秘密或聯絡 Telegram；操作不重送，斷線查 status。確認保存收據；再執行 `agend telegram setup apply --id ID`，由操作員 CLI 保留原文、備份並加入 Telegram 設定。不同的既有 Telegram 設定拒絕覆寫，相同設定重跑不變；套用後需重啟 daemon 生效。
 
 13E `install_home` 現在以真 CLI doctor JSON 驗故障與恢復：缺 home／權限過寬、Telegram 損壞且原文不變、sandbox 工具缺失及原生恢復、三 backend PATH 遺失及只允許 --version 的 fixture 恢復；每個非 ok 結果須有 fix，exit code 必須對應所有 checks 的 fail。這不涵蓋磁碟容量、登入、版本相容或真服務健康的完整驗收。
+
+doctor 的 service 列唯讀檢查安裝收據、私有 executable／定義與 manager 狀態；沒有安裝仍可前景執行。service running 只代表 manager 的觀察，daemon 就緒另由 daemon 列判斷。它不取得安裝鎖，不進行 start／stop／reload，檔案異動時保留原檔並要求檢查。
