@@ -241,3 +241,5 @@ SQLite 中每個 task 的固定 repository ID、branch、nonce 與 PR number；�
 固定啟動副本（pinned launcher）：依目前執行映像 SHA-256 保存、不覆寫的私有 AgEnD executable，供 daemon 啟動 holder 與 helper，避免正常升級原始路徑改變執行版本；存活 holder 使用期間須保留。
 
 啟動綁定（launch binding）：daemon 持久記錄的 UUID 與一次 holder 原生啟動的關聯。holder 只在成功啟動時保存，重連讀回而不補認；它不是認證憑證，也不證明回合或工作完成。
+
+- **受管啟動意圖（ManagedLaunchIntent）**：daemon 在發送 SpawnBound 前提交的 UUID 與版本／啟動參數紀錄。它用來核對 holder 原始啟動身分；本身不是存活證明或 canary 成功證明。

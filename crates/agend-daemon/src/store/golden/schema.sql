@@ -1,4 +1,4 @@
--- user_version = 17
+-- user_version = 18
 
 CREATE INDEX driver_events_by_time ON driver_events (ingested_at_unix_ms);
 
@@ -121,6 +121,12 @@ CREATE TABLE "instances" (
     team_id TEXT NOT NULL DEFAULT 'general' REFERENCES teams(id),
     role TEXT NOT NULL DEFAULT '',
     delivery TEXT NOT NULL DEFAULT 'push' CHECK (delivery IN ('push','inbox'))
+) STRICT;
+
+CREATE TABLE managed_launches (
+    instance_id TEXT NOT NULL PRIMARY KEY REFERENCES instances(id) ON DELETE CASCADE,
+    binding TEXT NOT NULL UNIQUE,
+    intent TEXT NOT NULL CHECK(json_valid(intent) AND json_type(intent) = 'object')
 ) STRICT;
 
 CREATE TABLE messages (

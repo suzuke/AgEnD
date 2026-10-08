@@ -1577,6 +1577,6 @@ fn github_upgrade_preserves_published_telegram_reads() {
     assert_eq!(
         conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
             .unwrap(),
-        17
+        LATEST_VERSION
     );
 }

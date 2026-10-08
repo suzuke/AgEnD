@@ -139,3 +139,5 @@ client 1.7 的 `OperatorCommand::MessageDelivery`／`MessageDeliveryData` 只表
 13C 施工中的 protocol 1.7：操作員 `send_message` 固定以 `@operator` 真人身分 queue 投遞，必填 UUID v4；`driver_status` 回傳 instance 與就緒狀態，Codex 必須有連線，unknown 不代表 idle。這些 RPC 不切換 backend 版本。
 
 holder 協定 1.3 加入 `SpawnBound`／`GetLaunchBinding` 與不含 argv／環境的 `LaunchBindingData`，供第 13 關受管啟動對帳；保留 1.2／1.1 協商。
+
+受管啟動紀錄 `ManagedLaunchIntent` 保存不透明 UUID、匯入 artifact 與設定／實際啟動參數，供 store、supervisor 和 runtime 共用；紀錄本身不代表 holder 存活或准入完成。

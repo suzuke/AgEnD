@@ -241,3 +241,5 @@ Claude outcome：`driver::claude::outcome` 使用先前真測 ACK/PostToolUse/St
 13C `backend_versions::tests` 核 runtime 啟動時的 executable binding：實際執行映像可辨識、相同 bytes 的不同 inode 拒絕、捕獲後原子替換不採納。macOS 實際 mapping 已原生測試；Linux `/proc/self/exe` 路徑尚待 Linux 執行。受管啟動仍拒絕，直到驗證與 exec 之間的檔案固定完成。
 
 13C 快照 proof reuse：`backend_versions::snapshot::tests` 核對回傳 binding 屬於快照 inode、不能套用到原始檔，並保留來源替換／錯摘要／symlink 拒絕案例。搭配 `agend` 的 `pinned_launcher` 與 CLI table 原生重啟測試，確認減少重複雜湊後仍保留啟動完整性與既有 CLI 等待期限。
+
+`cargo test -p agend-daemon --test managed_launch --test store` 使用真 SQLite 檔驗證關閉重開後紀錄不變、未取回結果不可盲目重試、舊 CAS／改變的 instance／錯 backend 與摘要拒絕、同名 instance 刪除重建不繼承 binding。schema v18 fixture 與既有各版升級、retention 覆蓋一併檢查。此批只證明持久儲存契約，尚非端到端受管啟動。

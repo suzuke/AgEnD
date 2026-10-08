@@ -91,6 +91,10 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0017_github_changes",
         sql: include_str!("migrations/0017_github_changes.sql"),
     },
+    Migration {
+        name: "0018_managed_launches",
+        sql: include_str!("migrations/0018_managed_launches.sql"),
+    },
 ];
 
 /// The schema version this binary creates and supports.

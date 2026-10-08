@@ -201,3 +201,5 @@ client protocol 1.7 的 operator `message_delivery` 只讀持久化收據：mess
 正常 daemon 將執行映像固定至 home/runtime-binaries 的私有副本，holder／hook 與 shim 使用該副本；原始 binary 升級不改變本次啟動路徑。副本保留供存活 holder 使用；重連受管 backend 的啟動身分對帳尚未完成，版本准入仍關閉。
 
 固定 launcher 的快照驗證直接回傳摘要與檔案身分 binding，供 runtime 沿用；重啟時仍重新驗證 running image 與快照內容，但不再第三次雜湊相同快照。既有 holder 跨 daemon 重啟保留（D3／D5）。
+
+13C migration 0018 的 `managed_launches` 保存每個 instance 的啟動意圖：在任何 SpawnBound I/O 前提交，重連只讀回核對；新啟動須由 supervisor 先證明舊 holder 已離開，再以舊 binding 做 CAS。instance 明確移除時 cascade 刪除，重建同名 instance 不能繼承舊紀錄。儲存 API 已實作，supervisor／runtime 串接仍待完成，受管准入維持拒絕。

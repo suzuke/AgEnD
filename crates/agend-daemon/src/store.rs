@@ -53,6 +53,7 @@ pub mod driver_events;
 pub mod github;
 pub mod instances;
 pub mod maintenance;
+pub mod managed_launch;
 pub mod messages;
 mod migrate;
 pub mod opencode;

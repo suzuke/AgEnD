@@ -62,6 +62,14 @@ pub struct Rule {
 pub const RETENTION: &[Rule] = &[
     Rule {
         target: Target::Table {
+            name: "managed_launches",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "gate 13: launch intent survives daemon restart; explicit instance removal cascades",
+    },
+    Rule {
+        target: Target::Table {
             name: "github_changes",
             time_column: None,
         },
