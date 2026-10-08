@@ -221,3 +221,5 @@ Codex 的 `workers_stopped` 追蹤連線建立與已移出 link 表但仍在退�
 1.8 backend switch 操作由 supervisor 序列處理：prepare 驗受管來源與目標 canary，持久化 Prepared 暫停新投遞；status 查紀錄，cancel 核精確 ID／設定後恢復。這些 RPC 尚不停止 holder、換版或回滾。
 
 取得 DB 鎖後立即啟用 daemon 日誌，記錄 executable／私有 launcher 驗證的開始、結果與耗時；在建立 socket 前卡住也能定位。失敗仍拒絕啟動，不因已有快取略過雜湊。
+
+13C runtime `stop_reserved` 核對目前 holder PID，再在同一條 holder 1.3 連線查啟動 UUID／instance／agent PID 後送 Shutdown；不重連重送，不停止替代或 legacy holder。呼叫者仍須先暫停投遞、確認回合結束並序列化新啟動；拒絕可能斷開 runtime link，但保留程序。這是停止身分契約，尚未接入完整換版編排。

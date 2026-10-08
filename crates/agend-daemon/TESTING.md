@@ -259,3 +259,5 @@ Claude outcome：`driver::claude::outcome` 使用先前真測 ACK/PostToolUse/St
 `agend/tests/backend_switch.rs` 用正式 daemon 及 CLI 驗持久 Prepared 的查詢／取消／重啟、agent 拒絕、空紀錄與 once decoder。此測試不啟動 backend，成功 prepare 與 holder 換版仍須後續原生整合驗證。
 
 重啟速度回歸跑 `cargo test -p agend --test cli --test client_protocol --test pinned_launcher`，並保留 `backend_versions::` 的改檔／身分拒絕測試。debug/test 的 sha2 壓縮迴圈最佳化不更改 10 秒 client 重連期限；本機固定 binary 的前後測不代替遠端兩平台 CI。
+
+`agend/tests/holder_runtime.rs` 的三項 `managed_stop_` 用真 SQLite 意圖及 holder producer 驗 UUID／holder PID／agent PID 不符拒絕、已消失對帳、替代與 legacy holder 保留。原生 proxy 在回傳 LaunchBinding 時替換 socket 路徑，確認 Shutdown 仍只送到原連線且另一 holder 存活；不手製 holder wire reply。

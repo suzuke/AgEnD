@@ -358,6 +358,101 @@ fn persisted_intent_does_not_adopt_a_legacy_holder() {
 }
 
 #[test]
+fn managed_stop_checks_binding_and_both_pids_before_stopping_the_native_holder() {
+    use agend_daemon::runtime::SpawnOutcome;
+    let lab = lab::Lab::with_prefix(Path::new(BIN), "g13-bound-stop");
+    let home = lab.home(1);
+    let intent = reserve(&home, &launch(&home, "bound", "exec sleep 600"));
+    let rt = runtime(&home);
+    let started = block_on(rt.start_reserved(&intent, false)).unwrap();
+    let holder_pid = started.handle.process_id.unwrap();
+    let Some(SpawnOutcome::Spawned {
+        agent_pid: Some(agent_pid),
+    }) = started.attached.spawn
+    else {
+        panic!("fresh native bound spawn");
+    };
+    let mut wrong = intent.clone();
+    wrong.binding = agend_daemon::store::instances::new_session_id().unwrap();
+    for (proof, holder, agent) in [
+        (&wrong, holder_pid, agent_pid),
+        (&intent, holder_pid, agent_pid + 1),
+        (&intent, holder_pid + 1, agent_pid),
+    ] {
+        assert!(block_on(rt.stop_reserved(proof, holder, agent)).is_err());
+        assert_eq!(files::running(&home, "bound").unwrap(), Some(holder_pid));
+        assert_eq!(
+            block_on(rt.attach_reserved(&intent, holder_pid))
+                .unwrap()
+                .attached
+                .spawn,
+            Some(SpawnOutcome::BoundExisting {
+                agent_pid: Some(agent_pid)
+            })
+        );
+    }
+    block_on(rt.stop_reserved(&intent, holder_pid, agent_pid)).unwrap();
+    assert!(lab.running_holders().is_empty());
+    // Reconciling an already absent holder sends nothing and remains successful.
+    block_on(rt.stop_reserved(&intent, holder_pid, agent_pid)).unwrap();
+}
+
+#[test]
+fn managed_stop_preserves_a_replacement_and_a_legacy_holder() {
+    use agend_daemon::runtime::SpawnOutcome;
+    let lab = lab::Lab::with_prefix(Path::new(BIN), "g13-bound-stop");
+    let home = lab.home(1);
+    let launch = launch(&home, "bound", "exec sleep 600");
+    let original = reserve(&home, &launch);
+    let rt = runtime(&home);
+    let first = block_on(rt.start_reserved(&original, false)).unwrap();
+    let old_holder = first.handle.process_id.unwrap();
+    let Some(SpawnOutcome::Spawned {
+        agent_pid: Some(old_agent),
+    }) = first.attached.spawn
+    else {
+        panic!("fresh native bound spawn");
+    };
+    block_on(rt.stop_reserved(&original, old_holder, old_agent)).unwrap();
+    let store = agend_daemon::store::SqliteStore::open(&home, 1).unwrap();
+    let instance = block_on(store.instance("bound")).unwrap().unwrap();
+    let replacement = block_on(store.prepare_managed_launch(
+        &instance,
+        &launch,
+        original.artifact.clone(),
+        Some(&original.binding),
+    ))
+    .unwrap();
+    drop(store);
+    let second = block_on(rt.start_reserved(&replacement, false)).unwrap();
+    let new_holder = second.handle.process_id.unwrap();
+    let Some(SpawnOutcome::Spawned {
+        agent_pid: Some(new_agent),
+    }) = second.attached.spawn
+    else {
+        panic!("replacement native bound spawn");
+    };
+    assert!(block_on(rt.stop_reserved(&original, old_holder, old_agent)).is_err());
+    // Even with the replacement's PIDs, the stale binding cannot stop it.
+    assert!(block_on(rt.stop_reserved(&original, new_holder, new_agent)).is_err());
+    assert_eq!(files::running(&home, "bound").unwrap(), Some(new_holder));
+    block_on(rt.stop_reserved(&replacement, new_holder, new_agent)).unwrap();
+
+    let legacy = block_on(rt.start(&launch)).unwrap();
+    let legacy_holder = legacy.handle.process_id.unwrap();
+    let Some(SpawnOutcome::Spawned {
+        agent_pid: Some(legacy_agent),
+    }) = legacy.attached.spawn
+    else {
+        panic!("legacy native spawn");
+    };
+    assert!(block_on(rt.stop_reserved(&replacement, legacy_holder, legacy_agent)).is_err());
+    assert_eq!(files::running(&home, "bound").unwrap(), Some(legacy_holder));
+    block_on(rt.stop("bound")).unwrap();
+    assert!(lab.running_holders().is_empty());
+}
+
+#[test]
 fn rejected_binding_does_not_publish_an_unverified_holders_exit() {
     use agend_daemon::runtime::HolderEvent;
     let lab = lab::Lab::new(Path::new(BIN));
@@ -396,5 +491,72 @@ fn rejected_binding_does_not_publish_an_unverified_holders_exit() {
     );
     assert_eq!(files::running(&home, "exited").unwrap(), Some(pid));
     block_on(rt.stop("exited")).unwrap();
+    assert!(lab.running_holders().is_empty());
+}
+
+#[test]
+fn managed_stop_keeps_the_verified_connection_when_socket_path_is_replaced() {
+    use agend_core::protocol::holder::{HolderRequest, HolderResponse};
+    use agend_daemon::runtime::SpawnOutcome;
+    use agend_testkit::contract::client::proxy::{Direction, Options, Proxy};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    let lab = lab::Lab::with_prefix(Path::new(BIN), "g13-bound-stop");
+    let home = lab.home(1);
+    let intent = reserve(&home, &launch(&home, "bound", "exec sleep 600"));
+    let rt = runtime(&home);
+    let started = block_on(rt.start_reserved(&intent, false)).unwrap();
+    let holder_pid = started.handle.process_id.unwrap();
+    let Some(SpawnOutcome::Spawned {
+        agent_pid: Some(agent_pid),
+    }) = started.attached.spawn
+    else {
+        panic!("fresh native bound spawn");
+    };
+    let foreign = block_on(rt.start(&launch(&home, "foreign", "exec sleep 600"))).unwrap();
+    let foreign_pid = foreign.handle.process_id.unwrap();
+    drop(rt);
+
+    let socket = files::socket_path(&home, "bound");
+    let upstream = home.join("original.sock");
+    std::fs::rename(&socket, &upstream).unwrap();
+    let replaced = Arc::new(AtomicBool::new(false));
+    let shutdowns = Arc::new(AtomicUsize::new(0));
+    let (swapped, sent) = (Arc::clone(&replaced), Arc::clone(&shutdowns));
+    let (path, foreign_socket) = (socket.clone(), files::socket_path(&home, "foreign"));
+    let proxy = Proxy::start_at(
+        &socket,
+        upstream,
+        Options::rewrite(Arc::new(move |_, direction, line| {
+            if direction == Direction::ToClient
+                && matches!(
+                    serde_json::from_str::<HolderResponse>(&line),
+                    Ok(HolderResponse::LaunchBinding { .. })
+                )
+                && !swapped.swap(true, Ordering::SeqCst)
+            {
+                std::fs::rename(&path, path.with_extension("detached")).unwrap();
+                std::os::unix::fs::symlink(&foreign_socket, &path).unwrap();
+            }
+            if direction == Direction::ToServer
+                && matches!(
+                    serde_json::from_str::<HolderRequest>(&line),
+                    Ok(HolderRequest::Shutdown)
+                )
+            {
+                sent.fetch_add(1, Ordering::SeqCst);
+            }
+            vec![line]
+        })),
+    )
+    .unwrap();
+    let rt = runtime(&home);
+    block_on(rt.stop_reserved(&intent, holder_pid, agent_pid)).unwrap();
+    assert!(replaced.load(Ordering::SeqCst));
+    assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
+    assert_eq!(files::running(&home, "bound").unwrap(), None);
+    assert_eq!(files::running(&home, "foreign").unwrap(), Some(foreign_pid));
+    drop(proxy);
+    block_on(rt.stop("foreign")).unwrap();
     assert!(lab.running_holders().is_empty());
 }

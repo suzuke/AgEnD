@@ -129,3 +129,5 @@ agend backend switch cancel <instance> --switch-id <id>
 已有完成／取消紀錄時，下一次 prepare 必須帶 `--previous <id>`，避免覆寫其他操作者的新請求。cancel 只接受精確 Prepared ID 且 instance 設定仍吻合；恢復新投遞但不改 program／PID。RPC 失去回覆時先查 status，不自動重送。
 
 目前整合測試證明中斷 Prepared 的查詢、取消與重啟保留；尚未證明成功 prepare 後的在途排空、停止舊版、啟動新版與 rollback。不要把 Prepared 視為完成換版。
+
+換版停止原語 `HolderRuntime::stop_reserved` 要求持久意圖及精確 holder／agent PID。查 LaunchBinding 與 Shutdown 使用同一連線，後續 socket 路徑替換不會把停止送到新 peer；回覆不符或 holder PID 改變時保留程序，結果不明須對帳。呼叫前的回合結束證據、在途排空及新啟動序列化仍由 supervisor 負責，尚未完成。

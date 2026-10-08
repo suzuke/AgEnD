@@ -163,3 +163,5 @@ cat docs/gates/gate-13-install.md
 - 2026-10-08：13C client 1.8 接入操作員 prepare／status／cancel，RPC 不重送；原生 daemon／CLI 驗 Prepared 查詢、精確取消、重啟保留、agent／舊 ID 拒絕，以及 once decoder 的有紀錄／null。Client 52 項、core 149 項（2 項既有 ignored）、daemon 單元 185 項（1 項既有 ignored）與 switch 7 項、fmt／clippy／check-deps 通過；自有 switch Lab 無殘留。成功 prepare 准入整合、實際換版／回滾仍待完成。遠端 3e3867f CI 兩平台重啟連線逾時，已保存失敗 log，未宣稱整體通過（feat/g13-install，未合併）。
 
 - 2026-10-08：重啟逾時追查補 executable 驗證耗時日誌；固定 binary 的本機空 fleet 重測，debug sha2 最佳化使重啟指紋核對 7296→520 ms、CLI 全程 11.518→1.114 秒，所有驗證與 10 秒重連期限保留。CLI 原 18 項通過，協定預期更新 1.8 後完整表通過；client protocol 9 項、pinned launcher 1 項、雜湊保護 4 項及 fmt／clippy／check-deps 通過。自有 g8／g9／pin／timing 暫存無殘留；兩平台遠端 CI 尚待本次 head 驗證，不宣稱逾時已全面修復（feat/g13-install，未合併）。
+
+- 2026-10-08：13C 新增 stop_reserved，停止前核 holder PID，並在同一連線核持久 UUID／instance／agent PID 後 Shutdown；錯身分、legacy 與替代 holder 保留。三項原生反例含 binding 回覆時替換 socket 路徑，核另一 holder 存活；holder runtime 全 10 項、fmt／clippy／check-deps 通過，g6／bound-stop 測試暫存無殘留。回合結束與在途排空、supervisor 換版編排仍待接入（feat/g13-install，未合併）。

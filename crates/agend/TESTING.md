@@ -200,3 +200,5 @@ Canary 必須取得三筆與 delivery 綁定的 completed outcomes；修改 fail
 同一 native canary fixture 將正式報告的 AgEnD digest 改成不匹配值，確認新啟動准入拒絕，但已保存 UUID 的原 holder 仍可重連；這驗准入與重連分流，不宣稱替代所有跨版本 driver 相容性驗證。
 
 `cargo test -p agend --test backend_switch` 用正式 Store 建立中斷的 Prepared，再經真 daemon／CLI 驗 status、空紀錄、精確 cancel、舊 ID／agent 拒絕與重啟保留；另以 exchange_once 解碼真 producer 的 Some／None。Failed fixture 不啟動 backend，故不證明成功 prepare 的 canary 准入或實際換版。Lab 負責程序與目錄清理。
+
+`cargo test -p agend --test holder_runtime managed_stop_` 驗換版專用停止的精確身分與 socket 路徑替換反例；全部只啟動自有 sleep fixture，Lab 清理 holders 與 home，沒有模型或主機服務。

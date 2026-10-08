@@ -25,13 +25,15 @@
 //! tokio runtime.
 //!
 //! Must NOT: own the PTY or the agent process, send `Shutdown` except from
-//! [`HolderRuntime::stop`] / [`shutdown_holder`], or connect to a holder to
+//! [`HolderRuntime::stop`] / [`HolderRuntime::stop_reserved`] /
+//! [`shutdown_holder`], or connect to a holder to
 //! find out whether it runs.
 
 pub mod client;
 pub mod env;
 pub mod files;
 pub mod link;
+mod managed_stop;
 pub mod shims;
 pub mod terminal;
 
@@ -299,6 +301,32 @@ impl HolderRuntime {
         let inner = Arc::clone(&self.inner);
         let id = id.to_owned();
         blocking(move || inner.stop(&id)).await
+    }
+
+    /// Stop only the holder/agent identified by this persisted launch. Caller
+    /// must first drain delivery and serialize starts for this instance. A
+    /// refusal preserves the process, but may detach its runtime connection.
+    pub async fn stop_reserved(
+        &self,
+        intent: &agend_core::runtime_records::ManagedLaunchIntent,
+        holder_pid: u32,
+        agent_pid: u32,
+    ) -> Result<(), RuntimeError> {
+        reserved_launch(intent)?;
+        if holder_pid <= 1 || agent_pid <= 1 {
+            return Err(err("managed stop requires exact holder and agent PIDs"));
+        }
+        let inner = Arc::clone(&self.inner);
+        let intent = intent.clone();
+        blocking(move || {
+            managed_stop::check_holder(&inner.home, &intent.instance_id, holder_pid)?;
+            let link = inner.lock_links().remove(&intent.instance_id);
+            if let Some(link) = link {
+                link.close();
+            }
+            managed_stop::stop(&inner.home, &intent, holder_pid, agent_pid)
+        })
+        .await
     }
 
     /// Every running holder under the home, from the lock files alone.
