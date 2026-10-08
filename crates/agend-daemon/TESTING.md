@@ -319,3 +319,7 @@ registry 覆核補測：native Telegram HTTP callback 真正更新觀測 ack、�
 monitor 停機案例用真 loopback HTTP 重播 npm manifest，body 傳到一半時請求 stop，先核 stop 未完成，放行 body 後核結果已提交、第二 backend 沒有 reservation，重開 SQLite 仍有成功結果。這是 worker／HTTP／DB 生命週期證據，不代替主機 launchd 驗收。
 
 system_version 四項 native 測試涵蓋 daemon PATH／相對 cwd、版本替換、symlink 在查詢中改指向、無效受管 manifest 不執行，以及真 runtime 不傳入非白名單測試 secret。全為私有假 CLI，未執行使用者的真 backend。
+
+`store::system_versions` 使用真正的 `system_version::observe` 執行本機假 CLI，再經 SQLite 預約／完成／確認及重開驗證：首次基準、換版、失敗保留、恢復、同值去重、時鐘倒退、舊 attempt、重複完成、配置變動、偽造 scope、刪除重建同名 instance 的舊結果與舊確認。migration 0022 追加 system_versions，外鍵在 instance 刪除時連帶清理。
+
+重新預約時若 backend／program／cwd 改變，建立新 generation 並重建基準，不沿用舊設定的成功值或確認。確認時亦核目前 scope。只有實際觀測到的 scope 變更可識別；兩次預約間未被觀測的 A→B→A 不宣稱可偵測。

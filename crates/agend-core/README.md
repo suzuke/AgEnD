@@ -175,3 +175,5 @@ setup::backend 保存三 backend 的 npm package 名稱與 PublishedBackend 公�
 config.toml 的 registry_checks 可設 false，停用受管 fleet 公開版本查詢；省略時啟用。它不影響明確的 backend latest 單次查詢或 Telegram 配對。
 
 SystemBackendVersion 保存外部設定程式的解析路徑、版本輸出與內容 hash；只描述這次 --version 觀測，不代表既存 holder 載入的映像。
+
+`SystemVersionObservation` 描述外部版本探測的持久狀態；以 generation 隔開同名 instance 的不同生命週期。

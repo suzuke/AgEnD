@@ -490,3 +490,5 @@
 - 2026-10-08：13C 新增外部 SystemBackendVersion 觀測 API，依 daemon 的 cwd／PATH 與環境白名單執行限時 --version；拒絕損壞受管版本、持續換檔與 symlink 改向。4 項原生假程式案例及 daemon 單元全組 210 項通過（1 child entry ignored），workspace clippy／fmt／check-deps 通過；獨立 source review 未見 blocker，未獨立重跑。subprocess 的 5 秒期限不包含前置 fingerprint／manifest I/O，前後核對亦非固定 fd exec 保證。持久漂移與提醒接線仍待完成；自有探測暫存無殘留（feat/g13-install，未合併）。
 
 - 2026-10-08：PR CI 37760144687 雙平台在同一舊 fixture 斷言失敗：Lab home 新增離線 config.toml，外部目錄不再為空。改用 home 下獨立空目錄作 symlink 目標，仍嚴格核零檔案；原 failed_local_ack_publication 精確案例重跑通過，未放寬禁止向外寫入的契約（feat/g13-install，未合併）。
+
+- 2026-10-08：13C migration 0022 新增每 instance 一列的外部版本觀測持久 API，探測前預約，首成功建基準，換版／失敗／恢復按 revision 確認；刪除 instance cascade、重建與觀測到的 scope 變更使用新 generation。獨立覆核找到「新 scope 同錯誤沿用舊 ack」已修正並確認解除，另補 scope 改變後尚未重新預約的未確認拒絕反例。3 項原生假 CLI→SQLite 案例、Store 42 項歷史升級／retention、workspace clippy／check-deps 通過；背景 worker／attention 接線仍待完成，未啟動真 backend（feat/g13-install，未合併）。

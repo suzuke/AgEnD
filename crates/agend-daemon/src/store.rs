@@ -63,6 +63,7 @@ pub mod opencode_permissions;
 pub mod pipeline;
 pub mod retention;
 pub mod snapshot;
+pub mod system_versions;
 pub mod task_row;
 pub mod telegram;
 pub mod telegram_inbound;

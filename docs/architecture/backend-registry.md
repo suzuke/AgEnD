@@ -34,3 +34,7 @@ migration 0021 的 backend_registry 最多保存三筆（每個 backend 一筆�
 ## 下一步
 
 補未受管 CLI 的被動漂移與整體原生服務驗收。worker 的 active HTTP 停機已由真 loopback／SQLite 測試覆蓋，尚未取代完整服務測試；查詢失敗不能推進為已知最新版，也不能影響正在工作的 backend。
+
+外部觀測的持久資料由 `system_versions` 保存，每個 instance 一列並在明確刪除 instance 時 cascade。先預約 attempt 再探測；完成時核 generation、attempt、scope 與目前 instance 設定。首個成功值只建立基準；後續身份變動、失敗及恢復才增加 revision，失敗保留最後成功值。generation 防止同名 instance 重建時沿用舊確認。此 Store API 尚未接背景 worker／提醒。
+
+重新預約時若 backend／program／cwd 改變，建立新 generation 並重建基準，不沿用舊設定的成功值或確認。確認時亦核目前 scope。只有實際觀測到的 scope 變更可識別；兩次預約間未被觀測的 A→B→A 不宣稱可偵測。

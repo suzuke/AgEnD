@@ -31,3 +31,23 @@ pub struct SystemBackendVersion {
     pub version_output: String,
     pub sha256: String,
 }
+
+/// One durable external-program observation per configured instance.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SystemVersionObservation {
+    pub instance_id: String,
+    /// Never reused after instance removal and recreation.
+    pub generation: String,
+    pub backend: String,
+    pub program: String,
+    pub working_directory: String,
+    pub attempt: u64,
+    pub started_ms: u64,
+    pub completed_ms: Option<u64>,
+    pub latest: Option<SystemBackendVersion>,
+    pub error: Option<String>,
+    pub changed_ms: Option<u64>,
+    pub revision: u64,
+    pub acknowledged_revision: u64,
+}

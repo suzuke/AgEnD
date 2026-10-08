@@ -275,3 +275,5 @@ backend_versions::registry 提供阻塞唯讀 latest 查詢，daemon 使用時�
 離線環境可在 config.toml 設 registry_checks = false；native daemon lab 預設使用此公開設定，避免 fake 受管版本觸發網際網路查詢。Telegram registry acknowledge 與本機共用持久 handler。version_probe 共用 doctor 的限時程序／pipe 清理，另支援明示 cwd 與環境供漂移偵測接入。
 
 HolderRuntime::observe_backend_version 使用 daemon 捕獲的 PATH 與 agent_env 白名單，限時執行外部設定程式的 --version；前後核解析路徑與 executable 身分。受管版本交既有 manifest 核對，無效受管 bytes 不會被外部探測執行。此 API 尚未接持久漂移排程或提醒。
+
+外部 CLI 版本觀測 Store 每個 instance 最多一列；探測前預約、60 秒內及時鐘倒退不重複預約，失敗保留上次成功值。首次成功靜默建立基準，後續變動、失敗與恢復產生 revision；確認綁 generation 與 revision。此批為持久 API，背景探測與 attention 接線尚待完成。

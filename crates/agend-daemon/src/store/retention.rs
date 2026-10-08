@@ -62,6 +62,14 @@ pub struct Rule {
 pub const RETENTION: &[Rule] = &[
     Rule {
         target: Target::Table {
+            name: "system_versions",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "gate 13: one bounded version observation per instance; explicit instance removal cascades",
+    },
+    Rule {
+        target: Target::Table {
             name: "backend_registry",
             time_column: None,
         },

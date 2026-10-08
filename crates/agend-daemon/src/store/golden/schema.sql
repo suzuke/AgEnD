@@ -1,4 +1,4 @@
--- user_version = 21
+-- user_version = 22
 
 CREATE INDEX driver_events_by_time ON driver_events (ingested_at_unix_ms);
 
@@ -188,6 +188,11 @@ CREATE TABLE reminders (
 ) STRICT;
 
 CREATE TABLE sqlite_sequence(name,seq);
+
+CREATE TABLE system_versions (
+    instance_id TEXT NOT NULL PRIMARY KEY REFERENCES instances(id) ON DELETE CASCADE,
+    record TEXT NOT NULL CHECK(json_valid(record) AND json_type(record) = 'object')
+) STRICT;
 
 CREATE TABLE task_events (
     seq                 INTEGER NOT NULL PRIMARY KEY,

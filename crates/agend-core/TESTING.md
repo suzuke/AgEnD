@@ -180,3 +180,5 @@ RegistryObservation 的持久化與重開行為由 daemon 真 SQLite 測試驗�
 registry_checks 的 TOML 解析／缺省行為與離線 native lab 由 daemon／CLI 測試核對；Telegram apply 必須保留既有 root 設定。
 
 SystemBackendVersion 的資料由 daemon 原生腳本 producer 產生；PATH／cwd／環境及路徑切換拒絕見 daemon system_version 測試。
+
+外部版本觀測型別由 daemon 的原生假程式探測 producer 與 SQLite 重開測試驗證；不以人工 JSON 冒充 probe 結果。
