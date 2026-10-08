@@ -42,7 +42,7 @@ Canary 證明目前 daemon 與匯入 artifact 的新啟動、Ready、三輪成�
 shared shim 隨 daemon 更新循 D5，不要求所有程序使用同一 AgEnD build。
 裸名稱依目前使用者的 `access(X_OK)` 選擇 PATH 中可執行檔。
 未以 `./` 或 `../` 開頭的相對 slash 路徑（如 `foo/bar`）在 shell／PTY 有歧義，要求改用絕對路徑或 `./`。
-其他非受管 program 維持既有行為；這不是任意 shell／wrapper 的執行沙箱，也尚未偵測系統 CLI 的更新。
+其他非受管 program 維持既有啟動行為；外部磁碟版本的定期探測、持久通知與確認見 [版本觀測](backend-registry.md)。這不是任意 shell／wrapper 的執行沙箱，亦不宣稱存活 holder 已載入新版。
 
 ## 與資料刪除互斥
 
