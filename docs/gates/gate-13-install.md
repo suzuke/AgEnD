@@ -237,3 +237,5 @@ cat docs/gates/gate-13-install.md
 - 2026-10-08：13E doctor 補真 CLI 故障／恢復案例：缺 HOME、0755→0700、Telegram 語法損壞且不覆寫、sandbox 工具缺失→真 probe 恢復、三 backend 缺 PATH→僅 --version fixture 恢復。install_home 共 7 項通過、focused clippy 通過；未執行真模型。磁碟容量故障、服務／登入／版本診斷與整關矩陣仍未完成（feat/g13-install，未合併）。
 
 - 2026-10-08：13E doctor 新增唯讀 service 診斷：無安裝可前景執行；核收據歸屬／artifact／manager 狀態與查詢後收據一致，Prepared／Removing／未執行提示修正，缺失或變造拒絕。診斷不取得或建立 install.lock，不啟停／reload。持正式 lifecycle 鎖的 model 故障／恢復反例、service 18、install_home 7、CLI doctor 1 項與 clippy 通過；初輪測試缺 Path import 已修正並保留 log。未驗主機服務，登入／版本與整關故障矩陣仍待完成（feat/g13-install，未合併）。
+
+- 2026-10-08：CI 加入 workflow＋ref concurrency，同分支／PR 的較新提交取代舊 run，其他 workflow／分支分開。已核身分後取消本施工分支五批被取代 CI，保留 869a664 基準與獨立 release 驗收；取消不視為通過。actionlint 通過（feat/g13-install，未合併）。
