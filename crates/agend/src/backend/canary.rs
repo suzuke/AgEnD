@@ -24,7 +24,14 @@ fn publish(dir: &Path, report: &Report) -> Result<(), String> {
     files::publish(&path, 0o600, replace, |out| out.write_all(&bytes))
 }
 
-pub fn run(home: &Path, backend: &str, version: &str, seconds: u64) -> Result<Report, String> {
+pub fn run(
+    home: &Path,
+    backend: &str,
+    version: &str,
+    seconds: u64,
+    model: Option<&str>,
+) -> Result<Report, String> {
+    let args = model_args(backend, model)?;
     if !(10..=300).contains(&seconds) {
         return Err("canary timeout must be 10-300 seconds".into());
     }
@@ -53,6 +60,7 @@ pub fn run(home: &Path, backend: &str, version: &str, seconds: u64) -> Result<Re
         started_at_unix_ms: agend_daemon::log::now_unix_ms(),
         elapsed_ms: 0,
         observed_version: None,
+        model: model.map(str::to_owned),
         receipts: Vec::new(),
         outcomes: Vec::new(),
         passed: false,
@@ -75,7 +83,12 @@ pub fn run(home: &Path, backend: &str, version: &str, seconds: u64) -> Result<Re
             return Err("backend --version did not match the imported version".into());
         }
         report.observed_version = Some(observed.trim().into());
-        agend_daemon::backend_versions::canary_scope::create(&lab.home, home, &report.artifact)?;
+        agend_daemon::backend_versions::canary_scope::create(
+            &lab.home,
+            home,
+            &report.artifact,
+            &args,
+        )?;
         lab.start(&agend)?;
         while !lab.home.join(DAEMON_SOCKET).exists() {
             lab.check_alive()?;
@@ -91,7 +104,7 @@ pub fn run(home: &Path, backend: &str, version: &str, seconds: u64) -> Result<Re
                         backend: backend.into(),
                         working_directory: Some(lab.home.join("workspace").display().to_string()),
                         program: Some(program.display().to_string()),
-                        args: Vec::new(),
+                        args,
                     },
                 },
             },
@@ -231,6 +244,26 @@ pub fn run(home: &Path, backend: &str, version: &str, seconds: u64) -> Result<Re
     }
     publish(&dir, &report)?;
     Ok(report)
+}
+fn model_args(backend: &str, model: Option<&str>) -> Result<Vec<String>, String> {
+    let Some(model) = model else {
+        return Ok(Vec::new());
+    };
+    if model.is_empty()
+        || model.len() > 256
+        || model.starts_with('-')
+        || !model.bytes().all(|b| b.is_ascii_graphic())
+    {
+        return Err("canary model must be 1-256 printable ASCII characters without spaces or a leading dash".into());
+    }
+    if backend == "opencode"
+        && !model
+            .split_once('/')
+            .is_some_and(|(p, m)| !p.is_empty() && !m.is_empty())
+    {
+        return Err("OpenCode canary model must be provider/model".into());
+    }
+    Ok(vec!["--model".into(), model.into()])
 }
 fn pause(deadline: Instant) -> Result<(), String> {
     if Instant::now() >= deadline {

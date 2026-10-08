@@ -161,3 +161,5 @@ Client protocol 1.8 新增操作員 BackendSwitchCommand（prepare／status／ca
 Client protocol 1.9 提供操作員 TelegramPairing 命令與 nullable PairingRecord 回覆；一般 client 的最低版本仍為 1.3。
 
 已確認 `PairingRecord::configuration()` 可在配對發現期限過後供操作員明確套用；Pending／Cancelled 不產生設定。
+
+CanaryScope 保存精確啟動 args；CanaryReport 的可選 model 保存操作者要求值，缺欄位相容既有報告，不宣稱 provider 實際解析結果。

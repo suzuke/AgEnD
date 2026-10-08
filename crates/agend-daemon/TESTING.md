@@ -301,3 +301,5 @@ Claude observer 的原生測試在 `agend/tests/claude_bridge.rs` 的 `claude_id
 config encode 與 parse 共用正式 TOML producer／consumer；CLI apply 的原生測試核對重讀值與確認收據相同。daemon 仍不寫 config.toml。
 
 13E：建置 `pipeline_probe` 與 `fake-worker` 後，跑 `python3 -B scripts/release_install_smoke.py --directory <release目錄> --commit <SHA> --target <native-target> --probe <pipeline_probe絕對路徑> --worker <fake-worker絕對路徑>`。驗證 archive 後僅解出 agend，以清空環境與自有 HOME 啟動 probe；核 init 私有權限、task done／唯一 merge／worktree 清理／設定原文保留與 300 秒預算。probe 使用正式 fixture 寫入測試 team／workflow／worker，因此不代表使用者真 backend onboarding 已驗收。
+
+canary scope 參數比對在 agend 的 `backend_canary` 原生測試核正式 create producer，包含模型值被替換、移除與額外參數。

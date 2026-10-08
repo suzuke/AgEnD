@@ -45,7 +45,7 @@ fn canary_scope_rejects_other_homes_instances_and_changed_artifacts() {
         id: "canary".into(),
         backend: Backend::Opencode,
         program: program.to_str().unwrap().into(),
-        args: vec![],
+        args: vec!["--model".into(), "test/canary".into()],
         working_directory: home.join("workspace").to_str().unwrap().into(),
         session_id: None,
         status: InstanceStatus::Running,
@@ -55,13 +55,19 @@ fn canary_scope_rejects_other_homes_instances_and_changed_artifacts() {
         delivery: "push".into(),
     };
     assert_eq!(canary_scope::expected(&home, &instance).unwrap(), None);
-    canary_scope::create(&home, &source, &artifact).unwrap();
+    canary_scope::create(&home, &source, &artifact, &instance.args).unwrap();
     assert_eq!(
         canary_scope::expected(&home, &instance).unwrap().as_deref(),
         Some("1.18.35")
     );
     let mut wrong = instance.clone();
     wrong.id = "fleet".into();
+    assert!(canary_scope::expected(&home, &wrong).is_err());
+    wrong = instance.clone();
+    wrong.args[1] = "test/other".into();
+    assert!(canary_scope::expected(&home, &wrong).is_err());
+    wrong = instance.clone();
+    wrong.args.clear();
     assert!(canary_scope::expected(&home, &wrong).is_err());
     wrong = instance.clone();
     wrong.args.push("--other".into());
@@ -106,6 +112,30 @@ fn canary_requires_explicit_execution_opt_in_before_creating_a_home() {
     assert!(!home.exists());
 }
 #[test]
+fn invalid_canary_models_are_refused_before_creating_a_home() {
+    let root = TempDir::new("g13-canary-model").unwrap();
+    let home = root.path().join("home");
+    for model in ["", "provider/", "/model", "no-provider", "p/m\nextra"] {
+        let out = cli(
+            &home,
+            root.path(),
+            &[
+                "backend",
+                "canary",
+                "opencode",
+                "--version",
+                "1.18.34",
+                "--allow-model",
+                "--model",
+                model,
+            ],
+        );
+        assert!(!out.status.success());
+        assert!(String::from_utf8_lossy(&out.stdout).contains("model"));
+        assert!(!home.exists());
+    }
+}
+#[test]
 fn native_fake_canary_confirms_three_messages_cleans_and_never_activates() {
     native_canary("codex", "examples/fake_codex", "0.158.0", "0.159.0");
 }
@@ -147,29 +177,31 @@ fn native_canary(backend: &str, executable: &str, version: &str, wrong_version: 
             "{}",
             String::from_utf8_lossy(&out.stdout)
         );
-        let out = cli(
-            &home,
-            &user,
-            &[
-                "backend",
-                "canary",
-                backend,
-                "--version",
-                version,
-                "--allow-model",
-                "--timeout-seconds",
-                // Match the production default. Unoptimized Linux binaries
-                // are large; three concurrent native cases also hash copies.
-                // The runner still enforces the same end-to-end deadline.
-                "180",
-            ],
-        );
+        let mut canary_args = vec![
+            "backend",
+            "canary",
+            backend,
+            "--version",
+            version,
+            "--allow-model",
+            "--timeout-seconds",
+            "180",
+        ];
+        if backend == "opencode" {
+            canary_args.extend(["--model", "test/canary"]);
+        }
+        let out = cli(&home, &user, &canary_args);
         let record = home
             .join("backends")
             .join(backend)
             .join(version)
             .join("canary.json");
         let report: Value = serde_json::from_slice(&fs::read(record).unwrap()).unwrap();
+        if backend == "opencode" {
+            assert_eq!(report["model"], "test/canary");
+        } else {
+            assert!(report["model"].is_null());
+        }
         assert_eq!(
             out.status.success(),
             passed,

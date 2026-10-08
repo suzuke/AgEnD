@@ -6,7 +6,12 @@ use std::io::Write;
 
 const FILE: &str = "canary-scope.json";
 /// Called only by the explicit canary runner before starting its private daemon.
-pub fn create(home: &Path, source: &Path, artifact: &ImportedBackend) -> Result<(), String> {
+pub fn create(
+    home: &Path,
+    source: &Path,
+    artifact: &ImportedBackend,
+    args: &[String],
+) -> Result<(), String> {
     directory(home)?;
     let home = home.canonicalize().map_err(|e| e.to_string())?;
     let source = source.canonicalize().map_err(|e| e.to_string())?;
@@ -15,6 +20,7 @@ pub fn create(home: &Path, source: &Path, artifact: &ImportedBackend) -> Result<
     }
     let meta = fs::metadata(&home).map_err(|e| e.to_string())?;
     let scope = Scope {
+        args: args.to_vec(),
         program: source
             .join("backends")
             .join(&artifact.backend)
@@ -70,7 +76,7 @@ pub fn expected(home: &Path, instance: &Instance) -> Result<Option<String>, Stri
             .canonicalize()
             .map_err(|e| e.to_string())?
             != home.join("workspace")
-        || !instance.args.is_empty()
+        || instance.args != scope.args
         || instance.delivery != "push"
         || Path::new(&scope.source) == home
         || Path::new(&scope.program)

@@ -259,3 +259,5 @@ OpenCode 版本核對：受管程式使用匯入 artifact 的版本（supervisor
 13D `PairingService` 串行執行 HTTP 與 SQLite 發布；caller 取消不釋放正在執行的操作，後續請求以 Status 查收據。已配置 notifier 時拒絕 Begin／Poll／Confirm，避免兩個 getUpdates consumer；停止介面先關閉准入再等待發布。此服務已接 daemon 啟停及 protocol 1.9 操作員 RPC；停止時關閉准入並等待既有發布，之後才停止 server。
 
 13E 的 `pipeline_probe install` 強制指定 AGEND_BIN，先在全新 HOME 以該 binary init，再共用正式 pipeline fixture 驗首任務及清理。這是已安裝 binary 的 native fake-worker smoke；不啟動真模型或主機服務。
+
+私有 CanaryScope 對 instance args 做精確比對，讓 canary 明確選模型，同時拒絕未記錄的啟動參數。既有省略 args 的 scope 仍只接受空 args。

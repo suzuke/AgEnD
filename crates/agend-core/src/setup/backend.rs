@@ -1,7 +1,7 @@
 //! Identity of an imported, not-yet-admitted native backend executable.
 //! A claimed version never substitutes for a successful native canary.
 
-use alloc::string::String;
+use alloc::{string::String, vec::Vec};
 use serde::{Deserialize, Serialize};
 pub mod canary;
 
@@ -20,6 +20,8 @@ pub struct ImportedBackend {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CanaryScope {
+    #[serde(default)]
+    pub args: Vec<String>,
     pub home: String,
     pub device: u64,
     pub inode: u64,

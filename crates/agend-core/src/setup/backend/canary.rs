@@ -20,6 +20,9 @@ pub struct CanaryReport {
     pub started_at_unix_ms: u64,
     pub elapsed_ms: u64,
     pub observed_version: Option<String>,
+    /// Requested model, not an assertion about the provider's resolved model.
+    #[serde(default)]
+    pub model: Option<String>,
     pub receipts: Vec<MessageDeliveryData>,
     #[serde(default)]
     pub outcomes: Vec<MessageOutcomeData>,
