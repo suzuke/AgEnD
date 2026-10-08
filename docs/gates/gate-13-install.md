@@ -181,3 +181,5 @@ cat docs/gates/gate-13-install.md
 - 2026-10-08：13C OpenCode session_idle 讀 REST 狀態，前後核 instance／holder PID／session handoff／endpoint／憑證，錯 session 或 holder 消失拒絕。原生 daemon／holder／wrapper＋fake REST 兩條重啟路徑驗 idle／busy／abort 後 idle，共 3 項 native 與 20 項 OpenCode 回歸、fmt／clippy／check-deps 通過。初輪測試缺 Tokio runtime 已修正並保留失敗 log；g12open 程序與暫存無殘留。尚未接 supervisor 換版編排，不代表已驗證完整停止／啟動／回復（feat/g13-install，未合併）。
 
 - 2026-10-08：13C 將 Claude startup 按鍵納入暫停／本機排空：Prepared 在 reservation 同交易拒絕新鍵，原操作在 server tracker 追蹤至返回；Committed／Restoring 允許新 launch 走啟動選單。SQLite 9 項及原生 Prepared 無鍵／正式 cancel 後三鍵測試通過；完整 startup 並行 5 過 6 失敗（holder 5 秒未啟動），序列 11 項通過，保留兩份證據，不宣稱並行穩定。Claude 閒置證明與 supervisor 完整換版仍待接入（feat/g13-install，未合併）。
+
+- 2026-10-08：定位私有 executable 首次執行延遲：8 份新複本並行 --version 最慢 5.734 秒，暖啟動 7–13 ms，皆 exit 0。daemon 現在於準備階段對已驗 binding 的私有 launcher 執行 --version（30 秒等待、清空環境、前後核身分），不延長 holder 5 秒連線期限。先前失敗的 startup 預設並行 11 項及 terminal hub 預設並行 10 項全過；launcher 原生成功／失敗／逾時／替換拒絕、fmt／clippy／check-deps 通過，暫存已清。初版單元成功案例 100 ms 太短，改 5 秒，故意逾時案例仍 100 ms；保留原失敗證據。完整最新 head CI 尚未完成（feat/g13-install，未合併）。

@@ -273,3 +273,5 @@ Claude outcome：`driver::claude::outcome` 使用先前真測 ACK/PostToolUse/St
 OpenCode 即時閒置查詢的跨程序驗證在 `agend/tests/opencode_bridge.rs`：真 daemon 啟動 wrapper／fake REST 後停止 daemon，沿用存活 holder 查閒置與 busy、拒絕錯 session，停止 holder 後拒絕查詢；普通停止與 killed-holder 恢復兩條均覆蓋。
 
 `backend_switch::prepared_pauses_startup_keys_without_blocking_target_activation` 核 Prepared 不消耗 key intent、cancel 可繼續、Committed 新 startup 可 reservation 而舊快照拒絕。原生按鍵驗證在 `agend` 的 `claude_startup::startup_prepared_switch_holds_native_keys_until_operator_cancels`。
+
+`backend_versions::launcher::tests::native_launcher_success_failure_timeout_and_changed_identity` 使用原生 shell 子程序核 launcher 參數、失敗、逾時清理與修改後拒絕。macOS 新複本並行首次執行另保存冷／暖啟動計時；功能驗證重跑 `agend --test claude_bridge claude_startup::` 的預設並行模式，不以序列結果代替。

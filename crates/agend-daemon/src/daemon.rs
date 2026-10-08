@@ -138,7 +138,13 @@ fn run_with_policy(
     let launcher_started = std::time::Instant::now();
     let launcher = if pin_executable {
         match crate::backend_versions::ExecutableBinding::pin_running(&home, &exe) {
-            Ok((path, binding)) => (path, Ok(binding)),
+            Ok((path, binding)) => {
+                if let Err(error) = crate::backend_versions::launcher::prepare(&path, &binding) {
+                    log::line(&error);
+                    return ExitCode::from(1);
+                }
+                (path, Ok(binding))
+            }
             Err(error) => {
                 log::line(&format!("cannot pin running executable: {error}"));
                 return ExitCode::from(1);

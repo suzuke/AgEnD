@@ -6,6 +6,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::Read;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::Path;
+pub(crate) mod launcher;
 mod running;
 mod snapshot;
 

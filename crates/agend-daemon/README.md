@@ -235,3 +235,5 @@ Codex `thread_idle` 透過目前連線重讀完整分頁回合，核連線物件
 OpenCode `session_idle` 重讀 REST session 狀態，查詢前後核 holder／instance／session handoff／endpoint／私有憑證；缺失或改變拒絕。不以 daemon 的閒置快取、訊息回執或 HTTP 接受當成回合完成；換版仍須先暫停排空並核 managed launch。
 
 換版 Prepared 也暫停 Claude startup key reservation；reservation 與暫停檢查同 SQLite 交易，既有按鍵操作納入 server 排空追蹤。Committed／Restoring 允許新 launch 完成啟動選單，否則無法驗 readiness。操作逾時仍是未知結果，不能因此推論 backend 已結束。
+
+私有 launcher 在 daemon 準備階段先以清空環境執行 `--version`，最多等待 30 秒，前後核 executable binding。首次執行可能耗在 OS 載入／驗證，不能挪用 holder 的 5 秒 socket 連線期限；失敗停止 daemon 準備，逾時只清理自己的短命 child。
