@@ -61,6 +61,7 @@
 //! Must NOT: kill or respawn holders on daemon shutdown; start an agent
 //! fresh once it has run.
 
+mod backend_switch;
 mod managed;
 
 use std::collections::BTreeMap;
@@ -200,6 +201,10 @@ pub fn launch(home: &Path, instance: &Instance, resume: bool) -> Result<HolderLa
 
 #[derive(Debug)]
 pub enum Event {
+    BackendSwitch {
+        command: agend_core::protocol::client::BackendSwitchCommand,
+        reply: oneshot::Sender<Result<Option<agend_core::runtime_records::BackendSwitch>, Refusal>>,
+    },
     Holder(HolderEvent),
     StartFailed {
         id: String,
@@ -1172,6 +1177,9 @@ impl Supervisor {
     pub async fn run(&mut self, events: &mut UnboundedReceiver<Event>) -> Stopped {
         while let Some(event) = events.recv().await {
             match event {
+                Event::BackendSwitch { command, reply } => {
+                    let _ = reply.send(self.backend_switch(command).await);
+                }
                 Event::Holder(HolderEvent::AgentExited {
                     id,
                     generation,

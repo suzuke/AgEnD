@@ -81,6 +81,29 @@ pub async fn handle(ctx: &Context, data: OperatorData) -> Outcome {
         )
     };
     let reply = match data.command {
+        OperatorCommand::BackendSwitch { operation: command } => {
+            let (send, receive) = oneshot::channel();
+            if ctx
+                .supervisor
+                .send(Event::BackendSwitch {
+                    command,
+                    reply: send,
+                })
+                .is_err()
+            {
+                return Outcome::Reply(stopping(request_id));
+            }
+            match receive.await {
+                Ok(Ok(data)) => result(
+                    request_id,
+                    CommandResult::BackendSwitch {
+                        data: data.map(Box::new),
+                    },
+                ),
+                Ok(Err((code, message))) => error(Some(request_id), code, message),
+                Err(_) => stopping(request_id),
+            }
+        }
         OperatorCommand::SendMessage {
             to,
             message,

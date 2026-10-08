@@ -198,3 +198,5 @@ Canary 必須取得三筆與 delivery 綁定的 completed outcomes；修改 fail
 `backend_canary` 的三 backend 原生替身測試另驗 canary 後的受管 fleet 啟動：保存 intent、daemon 重啟保持 holder PID／UUID、持久 UUID 改成另一合法值後拒絕接回且保留程序。fixture 停止自有 holder 並移除 lab；不執行真模型。
 
 同一 native canary fixture 將正式報告的 AgEnD digest 改成不匹配值，確認新啟動准入拒絕，但已保存 UUID 的原 holder 仍可重連；這驗准入與重連分流，不宣稱替代所有跨版本 driver 相容性驗證。
+
+`cargo test -p agend --test backend_switch` 用正式 Store 建立中斷的 Prepared，再經真 daemon／CLI 驗 status、空紀錄、精確 cancel、舊 ID／agent 拒絕與重啟保留；另以 exchange_once 解碼真 producer 的 Some／None。Failed fixture 不啟動 backend，故不證明成功 prepare 的 canary 准入或實際換版。Lab 負責程序與目錄清理。

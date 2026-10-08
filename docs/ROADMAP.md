@@ -372,3 +372,5 @@
 - 2026-10-08：13C agent inbox 讀取與 Prepared 檢查在同一 DB 工作執行，準備中明確拒絕送出內容，操作員歷史與其他 instance 不受影響；取消恢復最後筆數／after 游標。7 項切換測試、3 項正式 pipeline context、既有 handler 回歸及 fmt／clippy／check-deps 通過。supervisor 的在途回覆排空、idle 與版本切換編排仍待接入（feat/g13-install，未合併）。
 
 - 2026-10-08：13C Codex activity 追蹤涵蓋建立中的連線與 bounded close 逾時後的舊 worker；disconnect 返回不當成停止證據。原生 Unix socket 握手阻塞與 fake app-server Gone callback 超時反例，連同既有 Codex 共 18 項通過；fmt／clippy／check-deps 通過。初版測試誤用 duplex=false（仍可完成握手）已改成原生無回覆 socket，保留失敗證據；supervisor 切換編排仍未接入（feat/g13-install，未合併）。
+
+- 2026-10-08：13C client 1.8 接入操作員 prepare／status／cancel，RPC 不重送；原生 daemon／CLI 驗 Prepared 查詢、精確取消、重啟保留、agent／舊 ID 拒絕，以及 once decoder 的有紀錄／null。Client 52 項、core 149 項（2 項既有 ignored）、daemon 單元 185 項（1 項既有 ignored）與 switch 7 項、fmt／clippy／check-deps 通過；自有 switch Lab 無殘留。成功 prepare 准入整合、實際換版／回滾仍待完成。遠端 3e3867f CI 兩平台重啟連線逾時，已保存失敗 log，未宣稱整體通過（feat/g13-install，未合併）。

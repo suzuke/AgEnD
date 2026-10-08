@@ -217,3 +217,5 @@ client protocol 1.7 的 operator `message_delivery` 只讀持久化收據：mess
 Prepared 也暫停 agent 的 inbox 讀取：狀態檢查與內容查詢在同一 DB 工作執行，回覆明確暫停原因。操作員歷史查詢不受影響；取消後沿用原有最後 20 筆／after 游標。已完成讀取但尚未寫回 socket 的回覆仍需由切換編排排空。
 
 Codex 的 `workers_stopped` 追蹤連線建立與已移出 link 表但仍在退出的 worker。disconnect 的有限等待逾時不會讓這項證據消失；呼叫端仍須序列化新 connect，並另查 backend 回合是否結束。
+
+1.8 backend switch 操作由 supervisor 序列處理：prepare 驗受管來源與目標 canary，持久化 Prepared 暫停新投遞；status 查紀錄，cancel 核精確 ID／設定後恢復。這些 RPC 尚不停止 holder、換版或回滾。

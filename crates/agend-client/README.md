@@ -102,3 +102,5 @@ Protocol 1.6 新增共用已讀收據：`mark_attention_read`、`attention_read`
 13C client 1.7 加入 `Client::message_delivery(id, within)`：專用一次性連線查持久化收據，整個 exchange 共用期限，不重試、不回傳 body、不確認訊息。舊 daemon 在 I/O 前拒絕此能力；一般連線仍只要求 1.3。這是 canary 的觀測基礎，尚非完整 canary。
 
 13C 施工中的 protocol 1.7：操作員 `send_message` 固定以 `@operator` 真人身分 queue 投遞，必填 UUID v4；`driver_status` 回傳 instance 與就緒狀態，Codex 必須有連線，unknown 不代表 idle。這些 RPC 不切換 backend 版本。
+
+Client protocol 1.8 提供 backend switch prepare／status／cancel；一般連線最低版本仍 1.3。CLI 在操作前要求 1.8，mutation 不重送，結果不明用 status 查持久紀錄。一次性 encoder 計入巢狀操作字串，decoder 支援可空的 BackendSwitch 回覆。

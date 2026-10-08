@@ -13,9 +13,13 @@ use serde_json::json;
 use crate::cli::{Failure, Output};
 use crate::service::files;
 mod canary;
+mod switch;
 
 #[derive(Subcommand)]
 pub enum Command {
+    /// Prepare, inspect or cancel a backend version switch through the daemon
+    #[command(subcommand)]
+    Switch(switch::Command),
     /// Run a bounded, three-message model canary in an isolated daemon home
     Canary {
         #[arg(value_parser = ["claude", "codex", "opencode"])]
@@ -52,6 +56,9 @@ fn failed(message: impl Into<String>) -> Failure {
 }
 
 pub fn run(command: Command) -> Result<Output, Failure> {
+    if let Command::Switch(command) = command {
+        return switch::run(command);
+    }
     if std::env::var_os("AGEND_INSTANCE").is_some() {
         return Err(Failure::usage(
             "backend installation requires an operator terminal",
@@ -59,6 +66,7 @@ pub fn run(command: Command) -> Result<Output, Failure> {
     }
     let home = crate::home::resolve()?;
     let (backend, version) = match &command {
+        Command::Switch(_) => unreachable!("handled before local import"),
         Command::Import {
             backend, version, ..
         }
@@ -105,6 +113,7 @@ pub fn run(command: Command) -> Result<Output, Failure> {
     let parent = root.join(backend);
     let dir = parent.join(version);
     let record = match command {
+        Command::Switch(_) => unreachable!("handled before local import"),
         Command::Canary { .. } => unreachable!("handled before import"),
         Command::Import {
             backend,

@@ -87,3 +87,5 @@ Terminal frame 解碼維持原 internally-tagged serde 路徑；RawValue 優化�
 13C delivery receipt：`full_terminal::delivery_receipt_capability_is_rejected_before_io_on_an_old_daemon` 核舊 peer 零操作；真 daemon／SQLite／重啟與權限契約在 `agend/tests/message_delivery.rs`，使用正式 Store 產生 queued／sent／confirmed／failed，不手寫 wire JSON。1.7 的一次性解碼沿用 deadline-aware RawValue 流程；既有 once 期限與不重送回歸仍需通過。
 
 1.7 message_outcome 的 staged decoder 由 agend native backend_canary 全流程使用；缺失／未知狀態不准入。
+
+1.8 BackendSwitch 的一次性回覆 decoder 由 `agend/tests/backend_switch.rs` 連真 daemon 驗有紀錄與 null；避免自製 wire fixture。既有版本不合測試核新增 1.8 的完整支援清單及不重試。

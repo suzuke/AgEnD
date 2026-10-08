@@ -162,3 +162,5 @@ CanaryReport 的收據／outcome 綁定由 agend native canary producer 測試�
 holder 協商測試核 1.3 優先、1.2／1.1 仍可選；啟動綁定的狀態與原生程序證據由 agend-holder 的 `launch_binding_*` 測試驗證。
 
 受管啟動紀錄是跨層資料型別，SQLite 持久化與 CAS／instance 重建反例在 daemon 的 `tests/managed_launch.rs` 驗證；core 維持 no-std 與 serde 邊界。
+
+1.8 BackendSwitchCommand／CommandResult 的原生 producer 互通由 `agend/tests/backend_switch.rs` 覆蓋；儲存 CAS／取消由 daemon 的 backend_switch 測試覆蓋。

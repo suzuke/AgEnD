@@ -34,7 +34,7 @@ runtime 已保存啟動 fingerprint 與檔案身分；macOS 核實際 executable
 新 holder 啟動前，daemon 核對指向受管目錄的 program（包含指向該檔案的 symlink alias、依 agent PATH 選定的裸名稱與依 instance cwd 解析的相對路徑）。
 內容有變或尚無 canary 的版本拒絕啟動，保存 failed 原因並顯示需要你；不先建立 holder。
 核對由 daemon 與 CLI inspect 共用，hash 工作移到 blocking pool。
-有有效 canary 的受管程式可由 instance 的明確 `--program` 啟動；尚無 fleet 版本切換／回退入口。
+有有效 canary 的受管程式可由 instance 的明確 `--program` 啟動；已有準備／查詢／取消入口；實際 fleet 換版／回退仍未接入。
 新啟動使用 canonical 匯入路徑，先持久化 artifact／設定／啟動 UUID，再送 SpawnBound。
 重連核對原 artifact bytes、設定與 holder UUID；缺少意圖或不符時保留 holder 並標記失敗，不自動替換。
 Canary 證明目前 daemon 與匯入 artifact 的新啟動、Ready、三輪成功回應；
@@ -116,3 +116,16 @@ Runtime 保留該次意圖的 UUID，首次啟動核對 Spawned 與 GetLaunchBin
 ## 切換記錄（儲存層已實作，操作流程待接）
 
 Migration 0019 保存每 instance 最近一次 BackendSwitch；prepared 只保存原啟動意圖與目標，不改 program。commit／rollback 在同一 SQLite transaction 核對完整 switch 記錄、原設定與 agent_pid 已清除，再一起改 program 與 phase。過期請求不能覆寫目前狀態；不明結果先讀回，不盲目重送。新 prepare 以先前 switch ID 做 CAS，不能覆蓋未提交的 prepared；明確移除 instance 時 cascade。此層不取代 supervisor 的 canary、idle／派工暫停、精確 holder 停止及重啟驗證，尚無切換 CLI 或完整升級／回退流程。
+
+## 準備、查詢與取消（client 1.8）
+
+```bash
+agend backend switch prepare <instance> --version <version>
+agend backend switch status <instance> --json
+agend backend switch cancel <instance> --switch-id <id>
+```
+
+由 daemon supervisor 序列處理。prepare 要求來源為 running 受管 instance、來源 artifact／設定與持久意圖一致，以及目標通過目前 daemon 的 canary 檢查；Prepared 暫停新 push reservation 與 agent inbox 讀取，不停止舊 holder，也不啟用目標。
+已有完成／取消紀錄時，下一次 prepare 必須帶 `--previous <id>`，避免覆寫其他操作者的新請求。cancel 只接受精確 Prepared ID 且 instance 設定仍吻合；恢復新投遞但不改 program／PID。RPC 失去回覆時先查 status，不自動重送。
+
+目前整合測試證明中斷 Prepared 的查詢、取消與重啟保留；尚未證明成功 prepare 後的在途排空、停止舊版、啟動新版與 rollback。不要把 Prepared 視為完成換版。

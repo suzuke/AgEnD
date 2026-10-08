@@ -59,7 +59,9 @@ pub const V1_5: ProtocolVersion = ProtocolVersion { major: 1, minor: 5 };
 pub const V1_6: ProtocolVersion = ProtocolVersion { major: 1, minor: 6 };
 /// Read-only operator delivery receipts for backend canaries.
 pub const V1_7: ProtocolVersion = ProtocolVersion { major: 1, minor: 7 };
-pub const OFFERED_VERSIONS: [ProtocolVersion; 5] = [V1_7, V1_6, V1_5, V1_4, V1_3];
+/// Operator backend-switch preparation and reconciliation.
+pub const V1_8: ProtocolVersion = ProtocolVersion::new(1, 8);
+pub const OFFERED_VERSIONS: [ProtocolVersion; 6] = [V1_8, V1_7, V1_6, V1_5, V1_4, V1_3];
 /// Legacy fixture baseline. The real server and parser-backed fake fixtures
 /// advertise 1.4 independently once a full-terminal producer is available.
 pub const SUPPORTED_VERSIONS: [ProtocolVersion; 1] = [V1_3];
@@ -234,11 +236,31 @@ pub struct OperatorData {
     pub command: OperatorCommand,
 }
 
-/// What the operator asks the daemon to do (gate 9 P6). Users see the
-/// instance id as its `name`.
+/// Durable backend-switch preparation and reconciliation (client 1.8).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+pub enum BackendSwitchCommand {
+    Status {
+        instance_id: String,
+    },
+    Prepare {
+        instance_id: String,
+        version: String,
+        expected_previous: Option<String>,
+    },
+    Cancel {
+        instance_id: String,
+        switch_id: String,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
 pub enum OperatorCommand {
+    /// 1.8: serialized operator version-switch operations.
+    BackendSwitch {
+        operation: BackendSwitchCommand,
+    },
     /// 1.7: explicit operator-originated queued message; never impersonates an agent.
     SendMessage {
         to: String,
@@ -782,6 +804,9 @@ pub struct TerminalBytesData {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "result", rename_all = "snake_case")]
 pub enum CommandResult {
+    BackendSwitch {
+        data: Option<alloc::boxed::Box<crate::runtime_records::BackendSwitch>>,
+    },
     MessageOutcome {
         data: MessageOutcomeData,
     },
