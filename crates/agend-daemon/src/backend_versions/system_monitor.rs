@@ -50,7 +50,9 @@ impl Monitor {
     }
     pub(crate) async fn stop(self) {
         let _ = self.stop.send(true);
+        log::line("Backend version monitor stop requested");
         let _ = self.task.await;
+        log::line("Backend version monitor stopped");
     }
 }
 async fn check(

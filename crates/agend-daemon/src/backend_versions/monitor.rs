@@ -20,6 +20,17 @@ impl Monitor {
             Arc::new(super::registry::latest),
         )
     }
+    #[cfg(test)]
+    pub(crate) fn start_at(ctx: Arc<Context>, origin: String) -> Self {
+        Self::start_with(
+            ctx.runtime.home().to_owned(),
+            ctx.store.clone(),
+            ctx.fleet.clone(),
+            Arc::new(move |backend| {
+                super::registry::fetch(backend, &origin, Duration::from_secs(5))
+            }),
+        )
+    }
     fn start_with(
         home: PathBuf,
         store: Arc<crate::store::SqliteStore>,
@@ -92,7 +103,9 @@ impl Monitor {
     }
     pub(crate) async fn stop(self) {
         let _ = self.stop.send(true);
+        log::line("Backend registry monitor stop requested");
         let _ = self.task.await;
+        log::line("Backend registry monitor stopped");
     }
 }
 

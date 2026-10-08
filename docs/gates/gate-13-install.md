@@ -303,3 +303,5 @@ Brew 原生安裝驗證已接入 release workflow 的 macOS ARM64／Linux x86_64
 - 2026-10-08：9a8bcf7 雙平台 CI 已結束失敗，Ubuntu 為 GitHub pipeline WIP 封存案例，使用相同舊 fake-worker。修正後本機 GitHub pipeline 5/5 通過；f762f47 逾時診斷經獨立唯讀覆核無 blocker。批次推送前保留兩平台失敗 log，未宣稱 Linux 已由本機 macOS 重驗取代（feat/g13-install）。
 
 - 2026-10-08：固定提交 8507a05 的 accept install exit 0、CI 37767137610 雙平台成功。安裝 demo 的假 backend canary 17/17，全新 HOME 首任務 t-1 done／唯一 merge／5,994 ms／0 模型呼叫；核自有 HOME／repo／相关測試目錄與 target daemon／fake backend 程序無殘留。保留 active 未合併 worktree／target 及必要證據；真服務／模型／Telegram、登入相容診斷、最終 fresh verifier 與人工驗收仍待完成。
+
+- 2026-10-08：13C 補正式 daemon 的雙 monitor 同時 active 停機驗證，兩種放行順序均等待另一 worker 收尾、持久化完成且不啟動下一工作；兩個丟 JoinHandle mutation 分別被抓出。daemon lib 223 通過、2 個子程序入口 ignored（由父測試呼叫），workspace clippy／fmt／check-deps 通過；修正 macOS 測試 socket 繼承非阻塞模式，測試自有程序／暫存清理完成。獨立唯讀覆核無新 blocker；不代替真服務、holder 或模型驗收（feat/g13-install，未合併）。

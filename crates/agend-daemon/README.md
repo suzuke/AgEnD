@@ -283,3 +283,5 @@ HolderRuntime::observe_backend_version 使用 daemon 捕獲的 PATH 與 agent_en
 operator BackendDiagnostic 在單一 SQLite transaction 讀配置及相符的外部版本／受管預約紀錄，無 backend 執行、設定寫入或通知確認。RPC 回覆綁本次 daemon boot；args、session、環境不出現在 projection。配置已變更的紀錄不回傳但仍保留於 store。
 
 BackendDiagnostic 的四條能力政策取自 daemon 實際設定：Codex input policy／限定 verification instance、Claude 完整錄製 frame、OpenCode endpoint 版本優先序與獨立 permission 版本。OpenCode 兩項 baseline 分開命名，不因 endpoint 升級連帶放寬權限回覆；政策 RPC 不額外做探測。
+
+兩個版本 monitor 收到 daemon 停機時同時請求停止，各自在 bounded I/O 與持久化結束後記錄 stopped；停機 log 可區分已請求停止與已收尾。

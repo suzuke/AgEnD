@@ -333,3 +333,5 @@ system_version 四項 native 測試涵蓋 daemon PATH／相對 cwd、版本替�
 store::system_versions 診斷案例驗失敗保留歷史成功、配置 scope 改變不回傳舊紀錄、刪除 instance 得 None、managed args 變動不冒用預約且不刪原證據。tests/managed_launch.rs 驗正式 reservation producer 的 projection 排除 args／session；跨 RPC 的 agent／版本拒絕與 doctor consumer 見 agend backend_version_monitor。
 
 handlers::backend_capabilities 驗 Codex default／approved／verification-own／verification-other；既有 OpenCode driver／permission 回歸保留版本與身分條件，三 backend 的政策 consumer 由 agend backend_canary 真 daemon／假 backend 案例驗證。
+
+`daemon::monitor_tests::daemon_shutdown_*` 在隔離子程序跑正式 serve，同時扣住 loopback registry 半份 manifest 與原生假 CLI --version。SIGINT 後先核兩個 stop requested，再分別以 HTTP／CLI 優先的兩種順序放行；第一個 monitor 已 stopped 時 daemon 必須仍活，最後核 DB 結果、下一 backend／instance 未啟動、socket／probe／暫存消失。兩個丟棄 JoinHandle 的 mutation 各由對應反序案例抓出。此測試不啟動 holder、真 backend、模型或主機服務，不代替 launchd／systemd 生命週期驗收。

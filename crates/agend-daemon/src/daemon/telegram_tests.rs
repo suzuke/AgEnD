@@ -54,7 +54,12 @@ fn child() {
             agend_core::policy::codex_input::CodexInputPolicy::approved(),
             Some((config, token)),
             Some(api),
-            std::env::var("AGEND_TELEGRAM_TEST_QUEUE_STOP").as_deref() == Ok("1"),
+            TestControl {
+                hold_supervisor_for_stop: std::env::var("AGEND_TELEGRAM_TEST_QUEUE_STOP")
+                    .as_deref()
+                    == Ok("1"),
+                registry_origin: None,
+            },
         ))
         .unwrap();
     assert!(matches!(stopped, Stopped::Signal("SIGINT")));

@@ -184,7 +184,7 @@ fn run_with_policy(
         #[cfg(test)]
         None,
         #[cfg(test)]
-        false,
+        TestControl::default(),
     ));
     // Pending restart timers and the like are dropped, not awaited.
     runtime.shutdown_timeout(Duration::from_secs(1));
@@ -262,6 +262,13 @@ fn forward_signal(kind: SignalKind, name: &'static str, events: UnboundedSender<
     }
 }
 
+#[cfg(test)]
+#[derive(Default)]
+struct TestControl {
+    hold_supervisor_for_stop: bool,
+    registry_origin: Option<String>,
+}
+
 async fn serve(
     home: PathBuf,
     launcher: (
@@ -275,7 +282,7 @@ async fn serve(
         crate::notifier::config::Token,
     )>,
     #[cfg(test)] telegram_api: Option<Arc<crate::notifier::http::Api>>,
-    #[cfg(test)] hold_supervisor_for_stop: bool,
+    #[cfg(test)] control: TestControl,
 ) -> Result<Stopped, ExitCode> {
     let (exe, executable_binding) = launcher;
     if let Err(error) = store.recover_telegram_attempts().await {
@@ -406,7 +413,15 @@ async fn serve(
         crate::notifier::worker::start(config, token, context.clone())
     });
     let system_monitor = crate::backend_versions::system_monitor::Monitor::start(context.clone());
+    #[cfg(not(test))]
     let registry_monitor = crate::backend_versions::monitor::Monitor::start(context.clone());
+    #[cfg(test)]
+    let registry_monitor = match control.registry_origin {
+        Some(origin) => {
+            crate::backend_versions::monitor::Monitor::start_at(context.clone(), origin)
+        }
+        None => crate::backend_versions::monitor::Monitor::start(context.clone()),
+    };
     let server = Server::start(listener, socket.clone(), Arc::clone(&context));
     supervisor.set_delivery_replies(server.delivery_replies());
     supervisor.set_claude_observer(server.claude_observer());
@@ -429,7 +444,7 @@ async fn serve(
     });
 
     #[cfg(test)]
-    if hold_supervisor_for_stop {
+    if control.hold_supervisor_for_stop {
         // Force Stop ahead of a real inbound RetryConfirmed without replacing
         // the production receiver, dispatcher or shutdown path.
         let deadline = Instant::now() + Duration::from_secs(15);
@@ -475,3 +490,6 @@ async fn serve(
 
 #[cfg(test)]
 mod telegram_tests;
+
+#[cfg(test)]
+mod monitor_tests;
