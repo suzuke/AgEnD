@@ -271,3 +271,5 @@ Claude outcome：`driver::claude::outcome` 使用先前真測 ACK/PostToolUse/St
 `codex_driver::fresh_thread_idle_requires_terminal_native_turns_and_a_live_connection` 對 fake app-server 的真 socket 核空 thread、執行中、完成、斷線；從 producer 的回合與分頁做缺欄／未知狀態反例，不以 cached busy 判閒置。這不是受管 holder 停止或真模型 smoke。
 
 OpenCode 即時閒置查詢的跨程序驗證在 `agend/tests/opencode_bridge.rs`：真 daemon 啟動 wrapper／fake REST 後停止 daemon，沿用存活 holder 查閒置與 busy、拒絕錯 session，停止 holder 後拒絕查詢；普通停止與 killed-holder 恢復兩條均覆蓋。
+
+`backend_switch::prepared_pauses_startup_keys_without_blocking_target_activation` 核 Prepared 不消耗 key intent、cancel 可繼續、Committed 新 startup 可 reservation 而舊快照拒絕。原生按鍵驗證在 `agend` 的 `claude_startup::startup_prepared_switch_holds_native_keys_until_operator_cancels`。

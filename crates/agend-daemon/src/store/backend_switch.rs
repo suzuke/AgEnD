@@ -38,6 +38,12 @@ pub(crate) fn delivery_paused(conn: &Connection, instance: &str) -> Result<bool,
     Ok(read(conn, instance)?.is_some_and(|r| r.phase.pending()))
 }
 
+/// Prepared holds the old backend still. Committed/Restoring must permit the
+/// newly reserved launch to pass startup menus before activation is finished.
+pub(crate) fn startup_paused(conn: &Connection, instance: &str) -> Result<bool, StoreError> {
+    Ok(read(conn, instance)?.is_some_and(|r| r.phase == BackendSwitchPhase::Prepared))
+}
+
 fn write(conn: &Connection, record: &BackendSwitch) -> Result<(), StoreError> {
     let json = serde_json::to_string(record).map_err(|e| StoreError::Invalid(e.to_string()))?;
     conn.execute(

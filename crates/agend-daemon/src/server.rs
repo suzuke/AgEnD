@@ -137,6 +137,7 @@ async fn accept_loop(
     let startup = tokio::spawn(crate::claude_bridge::startup::run(
         ctx.clone(),
         claude.clone(),
+        delivery_replies.clone(),
     ));
     let ingest = tokio::spawn(crate::ingest::run(
         ctx.store.home().to_owned(),

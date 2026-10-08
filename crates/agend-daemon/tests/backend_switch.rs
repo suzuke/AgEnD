@@ -688,3 +688,44 @@ fn commit_and_restore_keep_all_delivery_paused_until_exact_activation_snapshot()
         }
     }
 }
+
+#[test]
+fn prepared_pauses_startup_keys_without_blocking_target_activation() {
+    use agend_core::runtime_records::ClaudeStartupKey;
+    for cancel in [true, false] {
+        let root = TempDir::new("backend-switch-startup").unwrap();
+        let store = SqliteStore::open(root.path(), 0).unwrap();
+        let (instance, target) = fixture_backend(&store, Backend::Claude);
+        let session = instance.session_id.as_deref().unwrap();
+        block_on(store.begin_claude_startup(&instance.id, session)).unwrap();
+        let startup = block_on(store.claude_startup(&instance.id))
+            .unwrap()
+            .unwrap();
+        let key = ClaudeStartupKey {
+            startup,
+            generation: "native-generation".into(),
+            prompt: "trust_yes".into(),
+            attempt: "old-attempt".into(),
+        };
+        let prepared =
+            block_on(store.prepare_backend_switch(&instance, target, "/managed/new/program", None))
+                .unwrap();
+        assert!(!block_on(store.reserve_claude_startup_key(key.clone())).unwrap());
+        if cancel {
+            block_on(store.cancel_backend_switch(&prepared)).unwrap();
+            // Refusal consumed no intent; the original startup can continue.
+            assert!(block_on(store.reserve_claude_startup_key(key)).unwrap());
+        } else {
+            block_on(store.commit_backend_switch(&prepared, false)).unwrap();
+            block_on(store.begin_claude_startup(&instance.id, session)).unwrap();
+            // The new launch invalidates an old reserved snapshot.
+            assert!(!block_on(store.reserve_claude_startup_key(key.clone())).unwrap());
+            let mut next = key;
+            next.startup = block_on(store.claude_startup(&instance.id))
+                .unwrap()
+                .unwrap();
+            next.attempt = "new-attempt".into();
+            assert!(block_on(store.reserve_claude_startup_key(next)).unwrap());
+        }
+    }
+}

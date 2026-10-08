@@ -179,3 +179,5 @@ cat docs/gates/gate-13-install.md
 - 2026-10-08：13C Codex 新增 thread_idle，透過既有連線查完整回合，核 session／連線物件／generation／instance 未變，只認 completed／failed／interrupted；分頁缺 data 或 nextCursor 拒絕，不當空閒。原生 fake app-server 驗空 thread／busy／完成／session 變更／斷線與 producer 變異反例，Codex driver 19 項通過；daemon 單元 185 項通過（1 項既有 ignored）。這是閒置觀察，尚須 supervisor 暫停／排空、受管 holder 身分與完整換版／恢復接入（feat/g13-install，未合併）。
 
 - 2026-10-08：13C OpenCode session_idle 讀 REST 狀態，前後核 instance／holder PID／session handoff／endpoint／憑證，錯 session 或 holder 消失拒絕。原生 daemon／holder／wrapper＋fake REST 兩條重啟路徑驗 idle／busy／abort 後 idle，共 3 項 native 與 20 項 OpenCode 回歸、fmt／clippy／check-deps 通過。初輪測試缺 Tokio runtime 已修正並保留失敗 log；g12open 程序與暫存無殘留。尚未接 supervisor 換版編排，不代表已驗證完整停止／啟動／回復（feat/g13-install，未合併）。
+
+- 2026-10-08：13C 將 Claude startup 按鍵納入暫停／本機排空：Prepared 在 reservation 同交易拒絕新鍵，原操作在 server tracker 追蹤至返回；Committed／Restoring 允許新 launch 走啟動選單。SQLite 9 項及原生 Prepared 無鍵／正式 cancel 後三鍵測試通過；完整 startup 並行 5 過 6 失敗（holder 5 秒未啟動），序列 11 項通過，保留兩份證據，不宣稱並行穩定。Claude 閒置證明與 supervisor 完整換版仍待接入（feat/g13-install，未合併）。

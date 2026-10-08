@@ -210,3 +210,5 @@ Canary 必須取得三筆與 delivery 綁定的 completed outcomes；修改 fail
 13C 晚 holder 清理回歸：`cargo test -p agend --test holder_process a_late_holder_cannot_recreate_its_removed_home`。真 shell child 在 exec 前與測試同步，home 清理後真 holder 必須拒絕，不能重建目錄。
 
 `opencode_bridge` 的兩條 holder 重啟路徑也驗 `OpenCodeDriver::session_idle`：native REST 閒置／忙碌／abort 後閒置、session 與 handoff 不符、holder 停止後拒絕；只用 fake backend。
+
+`claude_startup::startup_prepared_switch_holds_native_keys_until_operator_cancels` 在 SQLite 預備切換後啟動真 holder/parser 與 recorded-menu PTY producer：Prepared 不送鍵，正式 operator cancel RPC 後送三鍵。此 shell fixture 只驗暫停契約，不宣稱 managed canary 或真模型驗證。
