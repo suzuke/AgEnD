@@ -11,7 +11,7 @@
 |---|---|---|
 | 13A home／設定 | 預設 home、init 權限、doctor 的配置程式解析、沙箱與服務診斷；install_home 回歸 | doctor 已分開執行檔／歷史 canary 範圍／unknown 登入；daemon 唯讀配置／觀測快照已接入並核 boot；四條版本敏感能力政策已列出；登入有效性、能力真環境證據與故障→修復人工矩陣仍待完成 |
 | 13B 服務 | launchd／systemd plan、安裝所有權、對帳、解除安裝、資料刪除互斥；63b083b 的 Linux ARM64 正式 archive 在隔離 systemd／一般使用者下通過五階段生命周期；macOS 原生 launchd 安裝／停機／重啟接回同 holder 與子程序／解除安裝保留資料通過，測試資源已清理 | macOS 本次使用固定 debug binary 與 C 等待程序，未替代 release archive 或真 backend；登入登出未測試 |
-| 13C 受管版本 | 匯入、canary 收據、版本切換／回退、身份綁定與 pending 恢復；原生假 backend 測試 | 三個 backend 的專用認證／真模型 canary、切換與回退完整驗收及所有故障切點 |
+| 13C 受管版本 | 匯入、canary 收據、版本切換／回退、身份綁定與 pending 恢復；原生假 backend 測試；固定三種真 CLI 的 import／inspect 與搬移後版本探測通過 | 三個 backend 的專用認證／真模型 canary、切換與回退完整驗收及所有故障切點 |
 | 13C 版本發現 | 固定 npm 公開 metadata、每日持久排程、外部 CLI 磁碟版本探測、待辦與 Telegram 精確確認 | 真實系統 CLI 的版本觀測驗收；雙 monitor 同時 active 的正式 daemon 停機兩種完成順序已通過 |
 | 13C 重啟通知 | 真 daemon 三次啟動測試：worker 發現換版、通知重建、操作員確認持久化，agent 與錯誤 action 拒絕 | 此測試使用本機假 CLI，不能代替真模型或 service-manager 重啟驗收 |
 | 13D Telegram | daemon 配對、token reference、allowlist、設定套用；專用 bot 真測完成 /start→confirm→apply→同 home 重啟→通知→Mark read→approve，任務 done 且唯一 merge | 本次限私聊人工 approval；不擴稱覆蓋所有 Telegram 動作或真模型 |
@@ -41,6 +41,10 @@ doctor 逐項覆蓋與缺口見 [故障／修復矩陣](gate-13-doctor-matrix.md
 - 以上歷史自動驗收不代表真 backend 或主機服務完整驗收；本輪獨立 accept 與 Telegram 真測的範圍見本節開頭。最終整關覆核仍待剩餘工作完成。
 
 ## 本批進度
+
+- 2026-10-09：正式 backend import／inspect 匯入固定 Claude 2.1.284、Codex 0.159.3、OpenCode 1.18.34 原生檔，雜湊核對後由 doctor 對搬移副本執行版本探測，三者皆 ok；14.211 秒完成、測試副本與匹配程序無殘留。authentication 維持 warn／unknown，未要求登入、模型或服務操作；真 canary／切換與 live-auth producer 仍待完成（PR #158，未合併）。
+
+- 該輪證據：`AgEnD-ops/g13-install-20261008/backend-native-version-check-result.json`。Claude 舊版原路徑已不存在，從官方固定版本下載並核與歷史驗收相同 SHA-256；專用原始 binary 暫保留供待執行 canary，未改共用安裝。
 
 - 2026-10-08：doctor 分開執行檔完整性、歷史 canary 範圍與 unknown 登入；有效歷史收據不再提示重跑 canary，明示尚未驗證目前 daemon／登入／其他能力。正式假 backend producer 收據與錯 build 回歸 7/7、install_home 9/9、CLI init_and_doctor、workspace clippy、fmt、check-deps 通過，獨立唯讀覆核無 blocker；自有測試目錄／程序未見殘留。此改動未補足 live-auth producer 或整關真環境驗收（feat/g13-install／PR #158）。
 
