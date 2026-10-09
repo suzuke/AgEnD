@@ -72,6 +72,9 @@
 
 ## 進度紀錄
 
+- 2026-10-09：固定 63b083b debug binary 在隔離 home 完成 macOS 真 launchd 安裝、重啟保持同 holder／子程序並重接、修改定義拒絕、解除安裝保留資料；11.054 秒通過，label／測試程序／root 均清理。使用 C 等待程序，不冒充真 backend 或 release archive；腳本已獨立覆核（PR #158，未合併）。
+
+
 - 2026-10-09：同步固定 63b083b 的獨立 accept install（1,969.572 秒）、雙平台 CI 37798841941、四平台 release 37800713214 與 Linux 五階段服務驗收；專用 Telegram 私聊完成配對／套用／重啟／Mark read／approve，假 worker 任務 done 且唯一 merge，測試程序與暫存已清。macOS nonce capture 只證明原生屬性，不替代完整生命周期；真模型、doctor 修復矩陣與整關驗收仍待完成（PR #158，未合併）。
 
 

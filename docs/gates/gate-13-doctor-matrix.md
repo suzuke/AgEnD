@@ -21,7 +21,7 @@
 | disk | 可用空間小於 1 GB→釋放空間；home 大於 20 GB→清自有資料 | 原生小 volume 留存 fail→ok 證據；`install_home` 用 sparse fixture 驗大 home warn→ok，不填滿主機磁碟 |
 | sandbox | 缺工具→恢復 sandbox 工具 | `install_home` 先指定不存在工具，再以平台原生 sandbox readiness 恢復；不移除主機工具 |
 | telegram | 非法設定／空 allowlist／token 權限不符→修正專用設定 | `install_home` 及 doctor 原生設定測試；僅本機設定，未向 Telegram 發送。真配對與通知另驗 |
-| service | 定義缺失／遭改／manager 停止→修復自有安裝 | `service::tests::diagnostic_observes_recovery_without_mutating_the_installation_or_manager` 為 lifecycle 模型；Linux 正式 archive 生命周期另有真測，macOS 待驗 |
+| service | 定義缺失／遭改／manager 停止→修復自有安裝 | `service::tests::diagnostic_observes_recovery_without_mutating_the_installation_or_manager` 為 lifecycle 模型；Linux 正式 archive 生命周期與 macOS 固定 debug binary／C 等待程序的原生 launchd 生命周期均通過；服務成功不代替每一個 doctor 修復提示的人工驗收 |
 
 ## 人工驗收邊界
 
