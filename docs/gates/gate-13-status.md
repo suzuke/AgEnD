@@ -5,22 +5,27 @@
 > - 功能提交、局部測試、整關驗收與真環境驗收分別記錄，不能互相替代。
 > - 下一步：以已通過的自動驗收為基線，完成以下缺口，再交付 final fresh verifier 與逐步人工驗收。
 
-此頁整理 2026-10-08 的當前狀態；歷史過程保留在 [施工關紀錄](gate-13-install.md)。
+此頁整理 2026-10-09 的當前狀態；歷史過程保留在 [施工關紀錄](gate-13-install.md)。
 
 | 範圍 | 已實作／已有證據 | 尚未證明完成 |
 |---|---|---|
 | 13A home／設定 | 預設 home、init 權限、doctor 的配置程式解析、沙箱與服務診斷；install_home 回歸 | doctor 已分開執行檔／歷史 canary 範圍／unknown 登入；daemon 唯讀配置／觀測快照已接入並核 boot；四條版本敏感能力政策已列出；登入有效性、能力真環境證據與故障→修復人工矩陣仍待完成 |
-| 13B 服務 | launchd／systemd plan、安裝所有權、對帳、解除安裝、資料刪除互斥；d78f530 的 Linux ARM64 正式 archive 在隔離 systemd／一般使用者下通過五階段生命周期 | macOS 真 launchd capture 尚待核准；macOS daemon／holder 生命周期與最終版本驗收（登入登出尚未測試，不另列為原始施工關的必要條件） |
+| 13B 服務 | launchd／systemd plan、安裝所有權、對帳、解除安裝、資料刪除互斥；63b083b 的 Linux ARM64 正式 archive 在隔離 systemd／一般使用者下通過五階段生命周期；macOS nonce launchd 原生屬性 capture 通過並清理 | macOS daemon／holder 完整生命周期驗收（登入登出尚未測試，不另列為原始施工關的必要條件） |
 | 13C 受管版本 | 匯入、canary 收據、版本切換／回退、身份綁定與 pending 恢復；原生假 backend 測試 | 三個 backend 的專用認證／真模型 canary、切換與回退完整驗收及所有故障切點 |
 | 13C 版本發現 | 固定 npm 公開 metadata、每日持久排程、外部 CLI 磁碟版本探測、待辦與 Telegram 精確確認 | 真實系統 CLI 的版本觀測驗收；雙 monitor 同時 active 的正式 daemon 停機兩種完成順序已通過 |
 | 13C 重啟通知 | 真 daemon 三次啟動測試：worker 發現換版、通知重建、操作員確認持久化，agent 與錯誤 action 拒絕 | 此測試使用本機假 CLI，不能代替真模型或 service-manager 重啟驗收 |
-| 13D Telegram | daemon 配對、token reference、allowlist、設定套用；loopback HTTP producer 測試 | 專用 bot 的 /start→confirm→apply→重啟→通知／操作真驗收 |
-| 13E 打包 | d78f530 的 release-artifacts 37783051296 通過四平台 archive、formula 與雙平台 Brew 七個 jobs | 最終提交的打包驗證、全新使用者真 backend 首任務、版本／發布交付計畫；尚未公開發布 |
-| 整關 | 持續執行局部原生測試與獨立 source review | 當前提交的 accept install、完整雙平台 CI、最終 fresh-context verifier、使用者逐步驗收與合併確認 |
+| 13D Telegram | daemon 配對、token reference、allowlist、設定套用；專用 bot 真測完成 /start→confirm→apply→同 home 重啟→通知→Mark read→approve，任務 done 且唯一 merge | 本次限私聊人工 approval；不擴稱覆蓋所有 Telegram 動作或真模型 |
+| 13E 打包 | 63b083b 的 release-artifacts 37800713214 通過四平台 archive、formula 與雙平台 Brew 七個 jobs | 全新使用者真 backend 首任務、版本／發布交付計畫；尚未公開發布 |
+| 整關 | 63b083b 的 fresh-context accept install、雙平台 CI、四平台打包均通過 | 剩餘實作與真測完成後的最終 fresh-context verifier、使用者逐步驗收與合併確認 |
 
 doctor 逐項覆蓋與缺口見 [故障／修復矩陣](gate-13-doctor-matrix.md)。
 
 ## 當前自動驗收
+
+- 固定 `63b083be43642e76ea94f20323900d0e98315727`，fresh-context verifier 一次執行 `cargo xtask accept install`，exit 0、1,969.572 秒，起訖 HEAD 與工作樹乾淨。checks 印出 898 passed／0 failed／4 ignored（含 child entry 計數，非 898 個不同契約）；no-std 實際通過。demo 56 passes 重複選定 suites；假 worker 首任務 4,774 ms、一次 merge、0 模型。獨立清理核對移除 41 個該輪新增、無 listener 的假 Codex socket，未碰外來項目。
+- 同版 [CI 37798841941](https://github.com/suzuke/AgEnD/actions/runs/37798841941) 雙平台成功；[release-artifacts 37800713214](https://github.com/suzuke/AgEnD/actions/runs/37800713214) 四平台 archive、formula、雙平台 Brew 七 jobs 成功。Linux ARM64 正式 archive 在隔離 systemd／非 root UID 下完成五階段服務驗收，78.917 秒；container、image、暫存皆移除。這些不證明真模型、新使用者認證或公開發布。
+- 2026-10-09 私聊 Telegram 真測通過：配對套用後重啟同一 home，確認配對收據保留；Mark read 產生正確 read key 且仍等待 approval，approve 的 accepted 收據綁原通知，任務 done、一次雙親 merge。使用 fake workers、0 模型。自有 daemon／holder／worker 與 home／repo 全部清理。前兩輪 external harness 因 SQLite exclusive lock 與缺少 agend PATH 失敗；分別修正為停 daemon 後讀收據、補 PATH，離線預驗與獨立腳本覆核後才重跑，沒有修改 production 來遷就驗收。
+- 本機原始證據保留於 `AgEnD-ops/g13-install-20261008`：`accept-63b083b-fresh/REPORT.txt`、`linux-release-service-63b083b-thread-scan-result.json`、`launchd-capture-result.json`、`telegram-live-control-g13-tgc-i3q3b1c9.json`。以下舊版紀錄是歷史證據，不取代上述固定提交結果。
 
 - 固定提交 `d46d53b` 的 `cargo xtask accept install` exit 0，耗時 2,039.20 秒，起訖 HEAD 相同且工作樹乾淨；安裝 demo 的 canary 17/17、Telegram pairing 2/2、服務模型 14/14 通過。全新 HOME 首任務 `t-1` 在 4,853 ms 完成且恰好一次 merge（fake workers，0 模型呼叫）；demo root 已移除，程序 argv 核對未見匹配的自有 agend／worker。此清理核對僅涵蓋該 demo，不冒充整套測試所有 lab 的獨立稽核。
 - 同一 `d46d53b` 的 [release-artifacts 37791663365](https://github.com/suzuke/AgEnD/actions/runs/37791663365) 七個 jobs 全部成功：四平台 archive、formula、macOS／Linux Brew。產物尚未公開發布；該提交的 [CI 37791469987](https://github.com/suzuke/AgEnD/actions/runs/37791469987) 已在 macOS／Ubuntu 全部成功。前述成功不解釋 `7907e7e` 偶發輸出上限失敗的未知根因。
@@ -32,7 +37,7 @@ doctor 逐項覆蓋與缺口見 [故障／修復矩陣](gate-13-doctor-matrix.md
 - `d78f530` 的 macOS 26 PR CI 在 self-setsid fixture 準備階段收到 EPERM。`64c35eb` 僅為 fixture 加入限定 EPERM／父程序群組的有界重試，必須建立真 session，清理前仍存活且最終由 SIGKILL 終止；production 期限與清理邏輯未改。本機 binary 40 項、fmt／clippy／check-deps 通過；該提交的 [CI 37785631445](https://github.com/suzuke/AgEnD/actions/runs/37785631445) 已在 macOS／Ubuntu 全部成功。
 - 歷史 `9a8bcf7` CI 的 pipeline／GitHub pipeline WIP 與返工失敗，經 `e64e629` 修正 fake-worker --version 誤入 inbox 後，本機完整 pipeline 15/15、GitHub pipeline 5/5 與上述雙平台 CI 通過。
 - 前輪 accept install 的 Codex 假 CLI 版本 probe 曾逾時；單例、並行全組及本輪 accept／demo 均通過，但原偶發逾時未穩定重現。`f762f47` 只增加 elapsed_ms／budget_ms／stdout_bytes，不記原始輸出、不重試、不延長期限。
-- 上述不代表真 backend、真 Telegram 或主機 service-manager 驗收；最終 fresh-context verifier 必須重跑並嘗試推翻，目前逐批 read-only review 不能代替。
+- 以上歷史自動驗收不代表真 backend 或主機服務完整驗收；本輪獨立 accept 與 Telegram 真測的範圍見本節開頭。最終整關覆核仍待剩餘工作完成。
 
 ## 本批進度
 
@@ -50,11 +55,11 @@ doctor 逐項覆蓋與缺口見 [故障／修復矩陣](gate-13-doctor-matrix.md
 ## 授權與清理邊界
 
 - 可繼續：feature branch 實作、隔離測試、push／draft PR／CI。
-- 待具體核准：實際使用者常駐服務變更、公開發布、三 backend 真模型與專用認證計畫，以及本關 merge。
-- 已準備的 nonce launchd capture 計畫尚未取得回答；不能把 goal 自動續行當成批准。
+- 已取得受控真測授權；nonce launchd capture 與專用 Telegram bot 流程已執行。三 backend 真測仍缺專用認證檔案路徑，不使用共享帳戶資料替代。
+- 實際使用者常駐服務變更、公開發布與本關 merge，仍需備妥具體結果後取得必要核准。
 - 保留 `~/.claude.json` trust entries、外來程序／worktree、AlphaCR runs。
 - 完成每批後清自有臨時程序與目錄；未合併 Gate 13 worktree 與 target 保留供驗收，合併後再清。
 
 ## 下一步
 
-自動驗收基線已取得；接著在固定提交重跑整套自動驗收與四平台打包，補登入有效性與真環境驗收。需要使用者操作時，提供固定版本、命令、預算、影響範圍與清理方式，一次帶一個步驟。
+63b083b 的獨立自動驗收、雙平台 CI 與四平台打包已取得；接著補 macOS 完整服務生命周期、登入有效性、三 backend 真測及 doctor 故障修復矩陣，不因文件同步重跑已通過的程式測試。需要使用者操作時，提供固定版本、命令、預算、影響範圍與清理方式，一次帶一個步驟。

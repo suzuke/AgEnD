@@ -30,7 +30,7 @@
 ### 從其他施工關帶來的筆記（開工時處理）
 
 - **`AGEND_HOME` 預設位置與 `config.toml` 要不要列 home**：第 9 施工關 P3 本關（CLI）沒有預設值，13A 已選定操作員預設 `$HOME/.agend`，`config.toml` 不重複列 home 路徑；原先延後的問題為預設位置與 home 設定歸屬（D8／[tui-and-setup](../architecture/tui-and-setup.md#設定與目錄d8) 的寫法）（見 [gate-09-cli P3](gate-09-cli.md#p3agendhome-怎麼找)）。
-- **backend CLI 自動更新（版本漂移）**：codex 會自己更新（2026-09-28 兩天內 0.156.1 → 0.158.0，一次改了 driver 依賴的 K14、K17、K18 與錄音沙箱要寫的檔），claude、opencode 也會。設計上有「偵測到 backend 版本變了，先在暫存 workspace 起 canary instance 確認能進 ready，再讓整個 fleet 重啟；不行就提前通知」（[delivery.md](../architecture/delivery.md#啟動與授權提示四層越上面越優先)），第 7 施工關把 canary 交給本關（[gate-07-codex P9](gate-07-codex.md#p9依賴規則這關不做的事)），但 daemon 目前跑著時完全不知道版本換了。本關開工時要決定：（1）canary 怎麼做；（2）AgEnD 要不要替 agent 關掉 backend 的自動更新（claude `DISABLE_AUTOUPDATER=1`、opencode `OPENCODE_DISABLE_AUTOUPDATE=1`；codex 的方法未查證），改由使用者手動升級。建議提前的一小步（不必等本關）：daemon 每次啟動 agent 前記下 backend `--version`，跟上次不同就 log 一行並在「需要你」出一項提醒（只提醒、不擋；第 7 施工關[已知風險](gate-07-codex.md#已知風險開工時處理)的建議 3），由第 10 或第 12 施工關順手做，做了就在這裡註明。
+- **backend CLI 自動更新（版本漂移）**：codex 會自己更新（2026-09-28 兩天內 0.156.1 → 0.158.0，一次改了 driver 依賴的 K14、K17、K18 與錄音沙箱要寫的檔），claude、opencode 也會。設計上有「偵測到 backend 版本變了，先在暫存 workspace 起 canary instance 確認能進 ready，再讓整個 fleet 重啟；不行就提前通知」（[delivery.md](../architecture/delivery.md#啟動與授權提示四層越上面越優先)），第 7 施工關把 canary 交給本關（[gate-07-codex P9](gate-07-codex.md#p9依賴規則這關不做的事)），這是第 13 關開工前的缺口；目前已接入持久版本 monitor 與 attention，範圍及真測缺口見 [目前狀態](gate-13-status.md)。本關開工時要決定：（1）canary 怎麼做；（2）AgEnD 要不要替 agent 關掉 backend 的自動更新（claude `DISABLE_AUTOUPDATER=1`、opencode `OPENCODE_DISABLE_AUTOUPDATE=1`；codex 的方法未查證），改由使用者手動升級。建議提前的一小步（不必等本關）：daemon 每次啟動 agent 前記下 backend `--version`，跟上次不同就 log 一行並在「需要你」出一項提醒（只提醒、不擋；第 7 施工關[已知風險](gate-07-codex.md#已知風險開工時處理)的建議 3），由第 10 或第 12 施工關順手做，做了就在這裡註明。
   - **使用者提出的方向（2026-09-29 討論，開工時再定）**：
     - **為什麼不能只關自動更新**：agent 與使用者自己開的 claude／codex 是同一個執行檔；只在 agent 環境關自動更新，使用者自己用時它還是會更新，agent 下次重起就跑新版。更新後舊版通常不會留下，所以「退回舊版」不能靠 CLI 自己。
     - **AgEnD 保管 agent 用的版本**：把能用的版本複製到 `$AGEND_HOME/backends/<backend>/<version>/`，agent 一律從那裡啟動（`--program`）；使用者自己的 CLI 照常更新，不影響 agent。
@@ -94,6 +94,9 @@
 |  |  |  |
 
 ## 進度紀錄
+
+- 2026-10-09：同步固定 63b083b 的獨立 accept install（1,969.572 秒）、雙平台 CI 37798841941、四平台 release 37800713214 與 Linux 五階段服務驗收；專用 Telegram 私聊完成配對／套用／重啟／Mark read／approve，假 worker 任務 done 且唯一 merge，測試程序與暫存已清。macOS nonce capture 只證明原生屬性，不替代完整生命周期；真模型、doctor 修復矩陣與整關驗收仍待完成（PR #158，未合併）。
+
 
 - 2026-10-08：pipeline fixture 清理不再忽略 holder Shutdown 錯誤；失敗保留 home／repo 並回報。真 holder socket 暫移→拒絕刪除→恢復 socket→正常退出與刪除的回歸通過，既有 pipeline 15/15、workspace clippy／fmt／check-deps 通過，獨立局部覆核無 blocker；僅涵蓋已登錄 holder shutdown 錯誤，未擴稱所有清理競態已驗證（PR #158）。
 
