@@ -3,7 +3,7 @@
 > **TL;DR**
 > - `backend canary --allow-model --model <id> --auth-file <絕對路徑>` 使用明確的專用認證來源。
 > - 不搜尋共享帳戶、不複製設定／plugins、不寫回來源；成功或已確認停止的失敗流程會清理私有 home。
-> - 目前只有原生假後端驗證；真 backend 的登入與三次模型回覆仍須另行驗收。
+> - OpenCode 1.18.33／1.18.34 已以隔離 API 認證通過三次模型回覆；Claude／Codex 真測仍待完成。
 
 ## 輸入與目的地
 

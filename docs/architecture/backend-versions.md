@@ -95,7 +95,7 @@ Claude 從同一資料庫快照核對 confirmed delivery、持久 ACK、單筆�
 以及相同 prompt_id 的 Stop 與非空白最後回覆；任一 SessionStart／SessionEnd 橫跨該投遞即拒絕，包含延遲／replay 紀錄。
 不讀 transcript 或共享設定。execution_id 保存 native prompt_id；delivery turn_id 仍維持 None，不偽造 backend turn。
 報告的三筆 execution_id 不得重複。Claude 另以獨立 fake CLI 經真 daemon／channel／hook helper 跑三筆 ACK→PostToolUse→Stop，初始 Ready 畫面來自保存的真 CLI 錄製。這不代替新真模型、認證隔離或啟動選單驗收。Unknown 可暫無 execution_id；Completed 必須有 ID，未完成仍受同一 deadline 約束。
-三則訊息預算不等於模型內部工具／token 的硬上限；目前未執行真模型。
+三則訊息預算不等於模型內部工具／token 的硬上限。OpenCode 1.18.33／1.18.34 已通過正式真模型 canary；Claude／Codex 尚無本流程的真模型通過證據。
 
 ## 驗證與下一步
 
@@ -130,7 +130,7 @@ agend backend switch rollback <instance> --switch-id <id>
 由 daemon supervisor 序列處理。prepare 要求來源為 running 受管 instance、來源 artifact／設定與持久意圖一致，以及目標通過目前 daemon 的 canary 檢查；Prepared 暫停新 push reservation 與 agent inbox 讀取，不停止舊 holder，也不啟用目標。
 已有完成／取消紀錄時，下一次 prepare 必須帶 `--previous <id>`，避免覆寫其他操作者的新請求。cancel 只接受精確 Prepared ID 且 instance 設定仍吻合；保留 program；holder 仍在時重連投遞，已消失的 running instance 重新啟動原版本。RPC 失去回覆時先查 status，不自動重送。
 
-Codex 原生假 backend 整合測試已經兩個版本的正式 canary、prepare、activate 到 Activated、rollback 到 RolledBack，核 holder 更換與 session 保留。這不是 Claude／OpenCode、真模型或所有中斷恢復情境的證據；Prepared 仍不是完成換版。
+三 backend 原生假程式已有兩版本正式 canary、prepare、activate 到 Activated、rollback 到 RolledBack 測試。2026-10-10 真 OpenCode 1.18.33→1.18.34→1.18.33 亦通過，核 holder 更換與 session 保留；證據及清理見 [第 13 關狀態](../gates/gate-13-status.md)。真 Claude／Codex 與完整故障恢復驗收仍待完成；Prepared 仍不是完成換版。
 
 換版停止原語 `HolderRuntime::stop_reserved` 要求持久意圖及精確 holder／agent PID。查 LaunchBinding 與 Shutdown 使用同一連線，後續 socket 路徑替換不會把停止送到新 peer；回覆不符或 holder PID 改變時保留程序，結果不明須對帳。呼叫前的回合結束證據、在途排空及新啟動序列化仍由 supervisor 負責，尚未完成。
 
