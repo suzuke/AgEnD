@@ -337,3 +337,7 @@ store::system_versions 診斷案例驗失敗保留歷史成功、配置 scope �
 handlers::backend_capabilities 驗 Codex default／approved／verification-own／verification-other；既有 OpenCode driver／permission 回歸保留版本與身分條件，三 backend 的政策 consumer 由 agend backend_canary 真 daemon／假 backend 案例驗證。
 
 `daemon::monitor_tests::daemon_shutdown_*` 在隔離子程序跑正式 serve，同時扣住 loopback registry 半份 manifest 與原生假 CLI --version。SIGINT 後先核兩個 stop requested，再分別以 HTTP／CLI 優先的兩種順序放行；第一個 monitor 已 stopped 時 daemon 必須仍活，最後核 DB 結果、下一 backend／instance 未啟動、socket／probe／暫存消失。兩個丟棄 JoinHandle 的 mutation 各由對應反序案例抓出。此測試不啟動 holder、真 backend、模型或主機服務，不代替 launchd／systemd 生命週期驗收。
+
+## OpenCode 任務目錄授權
+
+`opencode_worktree` 以 deterministic OpenCode producer 產生目錄請求，驗 current work stage／ticket／assignee／session／binding／task version、拒絕多 pattern 與越界路徑，以及 shared once claim 不重送。worker 測試實際跑 `tick`，驗不支援版本與不同 endpoint 不 POST，正確 endpoint 回覆後持久化 resolved。這是合成協定測試，不宣稱新的模型真測或原生目錄 capture。

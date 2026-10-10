@@ -172,7 +172,7 @@ cargo xtask accept cli             # 第 9 施工關 demo：cli_demo（在 agend
 `startup_variable_ready_rejects_unknown_footer_and_split_hint_without_idle_or_more_keys` 拒絕未知 footer／分行建議。
 既有無 SessionStart、人工控制、結果不明與四次開機回歸維持；這些測試不啟動真 Claude、不送模型訊息。
 
-12B OpenCode push 以 supervisor worker 接 loopback REST：claim 與傳輸分離，先持久化 attempt 再送一次，REST 歷史確認收件。原 session 經私人 holder wrapper handoff 恢復；權限由 operator 回覆，unknown 投遞提供 Abandon。原生恢復／權限／DRV 及固定版本模型真測已通過，最終覆核與 CI 以 [12B 紀錄](../../docs/gates/gate-12b-opencode.md) 為準。
+12B OpenCode push 以 supervisor worker 接 loopback REST：claim 與傳輸分離，先持久化 attempt 再送一次，REST 歷史確認收件。原 session 經私人 holder wrapper handoff 恢復；目前有效 work 階段分派的 canonical worktree，若原生 `external_directory` 只有該目錄的精確 `/*` pattern，daemon 在固定 1.18.34 endpoint、session、task version 與 ticket 重新核對後回覆一次 `once`；其他權限仍由 operator 回覆。結果不明不重送，unknown 投遞提供 Abandon。原生恢復／權限／DRV 及固定版本模型真測已通過，最終覆核與 CI 以 [12B 紀錄](../../docs/gates/gate-12b-opencode.md) 為準。
 
 12D 設定 parser、private token reference 與固定 Telegram HTTPS API 已建立；通知全文分段與持久逐段收據已接 Notifier 契約；daemon worker 已觀察 needs-you 並持久去重，手機操作已接 guarded pipeline，完整驗收尚未完成。進度見 [Telegram](../../docs/gates/gate-12d-telegram.md)。
 

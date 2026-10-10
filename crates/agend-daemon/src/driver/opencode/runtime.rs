@@ -199,6 +199,7 @@ fn run(
         instance: id.clone(),
         session,
         cancelled: cancelled.clone(),
+        endpoint: Some((holder, port, version.clone())),
         model,
         history_before: std::cell::RefCell::new(None),
         reconcile_after: std::cell::Cell::new(0),

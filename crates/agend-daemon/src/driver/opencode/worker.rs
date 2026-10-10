@@ -13,6 +13,7 @@ pub struct Worker {
     pub instance: String,
     pub session: Session,
     pub cancelled: Arc<AtomicBool>,
+    pub endpoint: Option<(u32, u16, String)>,
     pub model: Option<(String, String)>,
     pub history_before: std::cell::RefCell<Option<String>>,
     pub reconcile_after: std::cell::Cell<i64>,
@@ -38,6 +39,73 @@ impl Worker {
         Ok(())
     }
 
+    fn allow_current_worktree(&self) -> Result<(), String> {
+        use crate::store::{opencode_permissions as permissions, opencode_worktree};
+        let pending = self
+            .store
+            .call_blocking(|c| permissions::pending(c))
+            .map_err(|e| e.to_string())?;
+        for p in pending.into_iter().filter(|p| {
+            !p.unknown && p.instance == self.instance && p.permission.session == self.session.id()
+        }) {
+            let id = p.id.clone();
+            let Some(grant) = self
+                .store
+                .call_blocking(move |c| opencode_worktree::eligible(c, &id))
+                .map_err(|e| e.to_string())?
+            else {
+                continue;
+            };
+            self.live()?;
+            let Some((holder, port, version)) = &self.endpoint else {
+                continue;
+            };
+            if version != super::PERMISSION_REPLY_VERSION {
+                continue;
+            }
+            let check_endpoint = || -> Result<(), String> {
+                if crate::runtime::files::running(self.store.home(), &self.instance)
+                    .map_err(|e| e.to_string())?
+                    != Some(*holder)
+                {
+                    return Err("OpenCode permission holder changed".into());
+                }
+                let layout = super::launch::Layout::new(self.store.home(), &self.instance)?;
+                if layout.endpoint(*holder).map_err(|e| e.to_string())? != (*port, version.clone())
+                {
+                    return Err("OpenCode permission endpoint changed".into());
+                }
+                Ok(())
+            };
+            check_endpoint()?;
+            self.session.reply_permission(&p.permission, true, || {
+                self.live()?;
+                check_endpoint()?;
+                let id = p.id.clone();
+                let cancelled = self.cancelled.clone();
+                let claimed = self
+                    .store
+                    .call_blocking(move |c| {
+                        if cancelled.load(Ordering::SeqCst) {
+                            return Ok(false);
+                        }
+                        opencode_worktree::claim(c, &id, &grant, crate::log::now_unix_ms())
+                    })
+                    .map_err(|e| e.to_string())?;
+                if claimed {
+                    Ok(())
+                } else {
+                    Err("task worktree permission is no longer current".into())
+                }
+            })?;
+            let id = p.id;
+            self.store
+                .call_blocking(move |c| permissions::resolved(c, &id))
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
     /// REST failure does not reset attempted_at. A later tick reads history
     /// again, then processes only messages that have never been attempted.
     pub fn tick(&self) -> Result<bool, String> {
@@ -55,6 +123,7 @@ impl Worker {
                 )
             })
             .map_err(|e| e.to_string())?;
+        self.allow_current_worktree()?;
         let (mut history, newest_next) = self.session.history_page(16, None)?;
         let before = self.history_before.borrow().clone();
         let next = if let Some(before) = before {
@@ -257,6 +326,7 @@ mod tests {
                 instance: "open-1".into(),
                 session,
                 cancelled: Arc::new(AtomicBool::new(false)),
+                endpoint: None,
                 model: None,
                 history_before: std::cell::RefCell::new(None),
                 reconcile_after: std::cell::Cell::new(0),
@@ -282,6 +352,7 @@ mod tests {
                     )
                     .unwrap(),
                     cancelled: Arc::new(AtomicBool::new(false)),
+                    endpoint: None,
                     model: None,
                     history_before: std::cell::RefCell::new(None),
                     reconcile_after: std::cell::Cell::new(0),
@@ -392,6 +463,7 @@ mod tests {
             instance: "open-1".into(),
             session,
             cancelled: Arc::new(AtomicBool::new(false)),
+            endpoint: None,
             model: None,
             history_before: std::cell::RefCell::new(None),
             reconcile_after: std::cell::Cell::new(0),
@@ -454,6 +526,7 @@ mod tests {
                 instance: "open-1".into(),
                 session,
                 cancelled: Arc::new(AtomicBool::new(false)),
+                endpoint: None,
                 model: None,
                 history_before: std::cell::RefCell::new(None),
                 reconcile_after: std::cell::Cell::new(0),
@@ -538,6 +611,7 @@ mod tests {
             instance: "open-1".into(),
             session,
             cancelled: Arc::new(AtomicBool::new(false)),
+            endpoint: None,
             model: None,
             history_before: std::cell::RefCell::new(None),
             reconcile_after: std::cell::Cell::new(0),

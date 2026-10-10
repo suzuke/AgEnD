@@ -474,12 +474,19 @@ impl State {
         self.add_part(session_id, index, tool.clone());
         let id = self.id("per");
         let first_word = command.split_whitespace().next().unwrap_or_default();
-        let ask = json!({
+        let mut ask = json!({
             "id": id, "sessionID": session_id, "permission": "bash",
             "patterns": [command], "always": [format!("{first_word} *")],
             "metadata": {"command": command},
             "tool": {"messageID": message_id, "callID": call_id},
         });
+        // Deterministic directory permission producer; never accesses this path.
+        if let Some(path) = command.strip_prefix("external-directory: ") {
+            ask["permission"] = json!("external_directory");
+            ask["patterns"] = json!([format!("{path}/*")]);
+            ask["always"] = json!([format!("{path}/*")]);
+            ask["metadata"] = json!({"filepath": path});
+        }
         self.permissions
             .insert(id.clone(), (session_id.to_owned(), ask.clone()));
         if let Some(active) = self

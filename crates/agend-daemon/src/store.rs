@@ -60,6 +60,7 @@ pub mod messages;
 mod migrate;
 pub mod opencode;
 pub mod opencode_permissions;
+pub(crate) mod opencode_worktree;
 pub mod pipeline;
 pub mod retention;
 pub mod snapshot;
