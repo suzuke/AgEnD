@@ -557,3 +557,5 @@
 - 2026-10-10：13C OpenCode 1.18.34 正式隔離三訊息真模型 canary 通過，三收據／三 outcome、33.886 秒；認證來源不變，自有程序／canary home／匯入副本清理完成。Claude／Codex 與三 backend 受管切換／回退仍待驗證，PR #158 未合併。
 
 - 2026-10-10：13C 真 OpenCode 1.18.33／1.18.34 各通過正式三訊息 canary（33.636／33.405 秒），同一隔離 home 由正式 prepare／activate／rollback 完成 1.18.33→1.18.34→1.18.33，Activated／RolledBack 持久狀態與原生 version／go 檔核對一致；holder 49545→49809→49856，session 全程相同。換版不另送模型訊息；自有 instance／daemon／下載與匯入副本清理、來源 API 認證不變已核。證據 `AgEnD-ops/g13-install-20261008/opencode-switch-20261010`。首版腳本曾把 --json 誤傳 backend，啟動被拒且未換版，保留失敗紀錄後修正。此結果不涵蓋故障注入、Claude／Codex 或整關驗收。
+
+- 2026-10-10：補真 OpenCode 有歷史 session 的 1.18.33→1.18.34→1.18.33 往返；三階段各一訊息皆 confirmed／completed，REST 原生歷史既有 message ID 與完整內容跨版逐筆相同。Prepared 時正式停止／重啟自有 daemon，完整 switch record、holder、session 不變；之後 Activated／RolledBack 成功。兩版准入各三訊息，本次總共九訊息；owned 程序、canary home、下載與匯入 root 清理完成，認證來源不變。證據 `AgEnD-ops/g13-install-20261008/opencode-history-switch-20261010`（含失敗回非零 runner 與 cleanup.py）。此結果補足上一輪空 session 限制，尚未涵蓋 Committed→Activated 中斷窗口、Claude／Codex 真測或整關完成。
