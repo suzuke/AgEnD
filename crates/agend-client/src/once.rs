@@ -342,6 +342,7 @@ mod tests {
         use agend_testkit::fake_daemon::{FakeDaemon, ProbeClient};
         let daemon = FakeDaemon::start().unwrap();
         daemon.set_instance(InstanceView {
+            program: None,
             instance_id: "g-1".into(),
             team_id: "general".into(),
             backend: "claude".into(),

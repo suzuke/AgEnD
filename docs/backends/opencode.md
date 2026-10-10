@@ -41,3 +41,7 @@
 ```bash
 cat docs/V1-LESSONS.md
 ```
+
+## 任務 worktree 的目錄請求
+
+正式 worker 對目前分派的有效 work 階段，僅自動回覆精確 canonical worktree `/*` 的單一 `external_directory` 請求。回覆仍為 `once`，不建立永久 `always` 權限；原生請求重讀後，在同一 DB transaction 再核 task version、stage ticket、assignee、binding 與 session。限定 worker 原本的 holder／port 與 1.18.34 版本；review、其他目錄或權限仍由操作者決定。取消／重新分派後失效，結果不明不重送。

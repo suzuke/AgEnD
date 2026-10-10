@@ -41,6 +41,7 @@ fn unavailable(socket: &Path) {
             (
                 ClientRequest::SetTerminalViewport {
                     data: TerminalViewportData {
+                        fit_size: None,
                         request_id: "viewport-2".into(),
                         instance_id: "missing".into(),
                         view_id: "stale-view".into(),

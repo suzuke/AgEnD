@@ -21,7 +21,11 @@ pub enum Notice {
 pub type Sink = Arc<dyn Fn(Notice) + Send + Sync>;
 pub struct Runtime {
     store: Arc<SqliteStore>,
-    workers: Mutex<BTreeMap<String, Arc<AtomicBool>>>,
+    workers: Mutex<BTreeMap<String, Vec<RunningWorker>>>,
+}
+struct RunningWorker {
+    cancelled: Arc<AtomicBool>,
+    thread: std::thread::JoinHandle<()>,
 }
 impl Runtime {
     pub fn new(store: Arc<SqliteStore>) -> Self {
@@ -31,41 +35,63 @@ impl Runtime {
         }
     }
     pub fn disconnect(&self, id: &str) {
-        if let Some(flag) = self
-            .workers
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .remove(id)
-        {
-            flag.store(true, Ordering::SeqCst);
+        let mut workers = self.workers.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(generations) = workers.get_mut(id) {
+            for worker in generations.iter() {
+                worker.cancelled.store(true, Ordering::SeqCst);
+            }
+            generations.retain(|worker| !worker.thread.is_finished());
+            if generations.is_empty() {
+                workers.remove(id);
+            }
         }
     }
+    /// Actual thread completion, including older cancelled generations. The
+    /// supervisor must serialize a subsequent start with its switch workflow.
+    /// This proves local worker cessation, not backend turn completion.
+    pub fn workers_stopped(&self, id: &str) -> bool {
+        let mut workers = self.workers.lock().unwrap_or_else(|p| p.into_inner());
+        let Some(generations) = workers.get_mut(id) else {
+            return true;
+        };
+        generations.retain(|worker| !worker.thread.is_finished());
+        let stopped = generations.is_empty();
+        if stopped {
+            workers.remove(id);
+        }
+        stopped
+    }
     pub fn start(&self, id: &str, sink: Sink) {
-        self.disconnect(id);
+        let mut workers = self.workers.lock().unwrap_or_else(|p| p.into_inner());
+        let generations = workers.entry(id.into()).or_default();
+        for worker in generations.iter() {
+            worker.cancelled.store(true, Ordering::SeqCst);
+        }
+        generations.retain(|worker| !worker.thread.is_finished());
         let flag = Arc::new(AtomicBool::new(false));
-        self.workers
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .insert(id.into(), flag.clone());
+        let cancelled = flag.clone();
         let (store, id) = (self.store.clone(), id.to_owned());
-        std::thread::spawn(move || {
+        let thread = std::thread::spawn(move || {
             if let Err(error) = run(store, id, flag.clone(), &sink)
                 && !flag.load(Ordering::SeqCst)
             {
                 sink(Notice::Failed(error));
             }
         });
+        generations.push(RunningWorker { cancelled, thread });
     }
 }
 impl Drop for Runtime {
     fn drop(&mut self) {
-        for flag in self
+        for generations in self
             .workers
             .get_mut()
             .unwrap_or_else(|p| p.into_inner())
             .values()
         {
-            flag.store(true, Ordering::SeqCst);
+            for worker in generations {
+                worker.cancelled.store(true, Ordering::SeqCst);
+            }
         }
     }
 }
@@ -98,14 +124,33 @@ fn run(
             Err(_) => std::thread::sleep(Duration::from_millis(50)),
         }
     };
-    if version != "1.18.34" {
-        return Err(format!("OpenCode {version} is not verified; use 1.18.34"));
-    }
     let lookup = id.clone();
     let instance = store
         .call_blocking(move |conn| instances::get(conn, &lookup))
         .map_err(|e| e.to_string())?
         .ok_or("OpenCode instance removed")?;
+    let expected = if let Some(version) =
+        crate::backend_versions::canary_scope::expected(store.home(), &instance)?
+    {
+        version
+    } else if let Some(artifact) = crate::backend_versions::inspect_launch(
+        store.home(),
+        "opencode",
+        &instance.program,
+        std::path::Path::new(&instance.working_directory),
+        &std::env::var("PATH").unwrap_or_default(),
+    )? {
+        // The supervisor already required this artifact's daemon-bound canary
+        // before creating the managed launch and holder.
+        artifact.version
+    } else {
+        super::UNMANAGED_ENDPOINT_VERSION.into()
+    };
+    if version != expected {
+        return Err(format!(
+            "OpenCode {version} differs from expected {expected}"
+        ));
+    }
     // Explicitly reject unsupported launch options instead of silently dropping
     // an operator's requested model or permission configuration.
     let model = super::launch::model(&instance.args)?;
@@ -154,6 +199,7 @@ fn run(
         instance: id.clone(),
         session,
         cancelled: cancelled.clone(),
+        endpoint: Some((holder, port, version.clone())),
         model,
         history_before: std::cell::RefCell::new(None),
         reconcile_after: std::cell::Cell::new(0),

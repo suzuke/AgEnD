@@ -9,6 +9,8 @@ pub mod config;
 pub mod delivery;
 pub mod http;
 pub mod inbound;
+pub mod pairing;
+pub mod pairing_service;
 pub mod poll;
 pub mod worker;
 

@@ -3,8 +3,8 @@
 
 use agend_core::protocol::ask::AskReply;
 use agend_core::protocol::client::{
-    AgentCommand, CLAUDE_BATCH_COUNT, ClaudeOperation, ClientRequest, MAX_LINE_BYTES,
-    MAX_MESSAGE_BYTES, OperatorCommand, ResultIdentity,
+    AgentCommand, BackendSwitchCommand, CLAUDE_BATCH_COUNT, ClaudeOperation, ClientRequest,
+    MAX_LINE_BYTES, MAX_MESSAGE_BYTES, OperatorCommand, ResultIdentity,
 };
 use std::io;
 use std::time::Instant;
@@ -113,6 +113,66 @@ impl Budget {
     }
     fn operator(&mut self, command: &OperatorCommand) -> io::Result<()> {
         match command {
+            OperatorCommand::TelegramPairing { operation } => {
+                use agend_core::{config::SecretRef, telegram::pairing::PairingOperation};
+                match operation {
+                    PairingOperation::Status => Ok(()),
+                    PairingOperation::Begin {
+                        id,
+                        token,
+                        previous,
+                    } => {
+                        self.add(id)?;
+                        self.add(match token {
+                            SecretRef::Env(value) | SecretRef::File(value) => value,
+                        })?;
+                        self.strings(previous.as_deref())
+                    }
+                    PairingOperation::Poll { id }
+                    | PairingOperation::Confirm { id, .. }
+                    | PairingOperation::Cancel { id } => self.add(id),
+                }
+            }
+            OperatorCommand::BackendSwitch { operation: command } => match command {
+                BackendSwitchCommand::Status { instance_id } => self.add(instance_id),
+                BackendSwitchCommand::Prepare {
+                    instance_id,
+                    version,
+                    expected_previous,
+                } => {
+                    self.strings([instance_id.as_str(), version])?;
+                    self.strings(expected_previous.as_deref())
+                }
+                BackendSwitchCommand::Cancel {
+                    instance_id,
+                    switch_id,
+                }
+                | BackendSwitchCommand::Activate {
+                    instance_id,
+                    switch_id,
+                }
+                | BackendSwitchCommand::Rollback {
+                    instance_id,
+                    switch_id,
+                } => self.strings([instance_id.as_str(), switch_id]),
+            },
+            OperatorCommand::DriverStatus { instance_id }
+            | OperatorCommand::BackendDiagnostic { instance_id } => self.add(instance_id),
+            OperatorCommand::SendMessage {
+                to,
+                message,
+                message_id,
+            } => {
+                if message.len() > MAX_MESSAGE_BYTES {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "send body exceeds message limit",
+                    ));
+                }
+                self.strings([to.as_str(), message, message_id])
+            }
+            OperatorCommand::MessageDelivery { message_id }
+            | OperatorCommand::MessageOutcome { message_id } => self.strings([message_id.as_str()]),
             OperatorCommand::InstanceAdd {
                 instance_id,
                 backend,

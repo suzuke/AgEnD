@@ -2,8 +2,8 @@
 
 > **TL;DR**
 > - 依 crate 由下往上分 13 個施工關；每個施工關單獨驗收，使用者確認後才開下一個施工關（D22）。
-> - 目前狀態：第 1–11 施工關已完成；第 12A／B／D 已合併，12C 由 [#157](https://github.com/suzuke/AgEnD/pull/157) 收尾。第 12 關完成狀態於 #157 完整驗收、CI 通過並合併後生效。
-> - 下一步：完成 #157 合併與自有 worktree／target 清理；第 13 施工關尚未開始，須另行確認。
+> - 目前狀態：第 1–12 施工關已完成並合併。#157 已合併為 `3f406f5`，自有 worktree／branch／target 已清理。
+> - 下一步：第 13 施工關安裝與發布準備；先完成 home／設定與服務生命週期，再處理版本管理、Telegram 配對及發布驗收。
 
 ## 13 個施工關
 
@@ -22,8 +22,8 @@
 | 9 `cli` | [完成（2026-09-29；已 merge #136）](gates/gate-09-cli.md) | agend CLI：agent 命令、操作者命令、status；安裝相關先做 `doctor`、`init`，服務註冊留第 13 施工關 | 對假／真 daemon 驗輸出與錯誤；兩個假 Codex agent 互傳訊息、中途重啟不漏不重 |
 | 10 `pipeline` | [完成（2026-10-02；#143 已確認合併）](gates/gate-10-pipeline.md) | daemon：pipeline、git、runner、forge local、supervisor、reconcile | 假 driver + 暫存 repo：task 從派工走到 merge |
 | 11 `tui` | [完成（A、B、C 已 merge；C 段 #145）](gates/gate-11-tui.md) | attention-first TUI、完整終端、resize、多視窗、鍵鼠／貼上與歷史 | 最終 `cfee027` 全新 verifier CONFIRMED；四個雙平台 CI jobs 各 900 passed／0 failed／2 既有 ignored、實際 no-std；0.159.3 真 U17 已核實並獲版本許可。實機紀錄及後續自動驗收、清理完成，使用者確認 merge `b2152db` |
-| 12 `adapters` | [交付 #157（驗收／CI 通過並合併後完成）](gates/gate-12-adapters.md) | A claude、B opencode driver、C forge github、D Telegram | 先對假實作，再做真 backend smoke test |
-| 13 `install` | [未開始](gates/gate-13-install.md) | 安裝與發布（最後一個施工關）：服務註冊、`agend uninstall`、`agend telegram setup`（由 daemon 配對）、`xtask release`、brew、GitHub release、`cargo install` | CI 用全新 HOME + 假 agent，從安裝到第一個 task 完成 < 5 分鐘；每個 `doctor` 檢查都有「故意弄壞 → 看到修正指令」的測試 |
+| 12 `adapters` | [完成（#154–#157 已合併）](gates/gate-12-adapters.md) | A claude、B opencode driver、C forge github、D Telegram | 先對假實作，再做真 backend smoke test |
+| 13 `install` | [施工中（13A–E 已有實作，真環境驗收未完成）](gates/gate-13-install.md) | 安裝與發布（最後一個施工關）：服務註冊、`agend uninstall`、`agend telegram setup`（由 daemon 配對）、`xtask release`、brew、GitHub release、`cargo install` | CI 用全新 HOME + 假 agent，從安裝到第一個 task 完成 < 5 分鐘；每個 `doctor` 檢查都有「故意弄壞 → 看到修正指令」的測試 |
 
 ## 第 1 施工關：開工前先提案、經使用者確認才實作
 
@@ -68,9 +68,33 @@
 
 ## 下一步
 
-第 1–11 施工關及 12A／12B／12D 已完成並合併；已合併批次的自有 worktree／暫存已清理。12C 由 #157 完成最後整合驗收與 CI，通過後依持續授權合併。使用者已授權持續完成第 12 施工關，範圍見 [AGENTS.md](../AGENTS.md#第-12-施工關持續授權2026-10-07)。
+第 1–12 施工關已完成。使用者 2026-10-08 指示自行安排優先順序並建立 goal，開始第 13 關安裝與發布準備；[施工順序](gates/gate-13-install.md#施工順序2026-10-08)。
 
 ## 進度紀錄
+
+- 2026-10-09：固定 `63b083b` 的 macOS ARM64 正式 archive 通過原生 launchd 安裝、重啟接回同 holder／C 等待子程序、變造定義拒絕與解除安裝保留資料，6.407 秒完成；service label、程序、測試 root 與下載解壓目錄已清理。archive SHA-256 `2771f94734ff99369e0aa33237c9a47b893cde84f59860b4ecfb48f6154d3ad0`，binary SHA-256 `07796bc38a3921542e95d350e0e20b5f6209aaa3a4fe8c563dd0e9191713833b`。證據 `launchd-lifecycle-g13-ld-tc9ywmro.json`、`mac-release-cleanup.json`；未要求模型或認證操作，不代替真 backend 與登入登出驗收。
+
+- 2026-10-09：正式 backend import／inspect 匯入固定 Claude 2.1.284、Codex 0.159.3、OpenCode 1.18.34 原生檔，雜湊核對後由 doctor 對搬移副本執行版本探測，三者皆 ok；14.211 秒完成、測試副本與匹配程序無殘留。authentication 維持 warn／unknown，未要求登入、模型或服務操作；真 canary／切換與 live-auth producer 仍待完成（PR #158，未合併）。
+
+
+- 2026-10-09：固定 63b083b debug binary 在隔離 home 完成 macOS 真 launchd 安裝、重啟保持同 holder／子程序並重接、修改定義拒絕、解除安裝保留資料；11.054 秒通過，label／測試程序／root 均清理。使用 C 等待程序，不冒充真 backend 或 release archive；腳本已獨立覆核（PR #158，未合併）。
+
+
+- 2026-10-09：同步固定 63b083b 的獨立 accept install（1,969.572 秒）、雙平台 CI 37798841941、四平台 release 37800713214 與 Linux 五階段服務驗收；專用 Telegram 私聊完成配對／套用／重啟／Mark read／approve，假 worker 任務 done 且唯一 merge，測試程序與暫存已清。macOS nonce capture 只證明原生屬性，不替代完整生命周期；真模型、doctor 修復矩陣與整關驗收仍待完成（PR #158，未合併）。
+
+
+- 2026-10-08：pipeline fixture 清理不再忽略 holder Shutdown 錯誤；失敗保留 home／repo 並回報。真 holder socket 暫移→拒絕刪除→恢復 socket→正常退出與刪除的回歸通過，既有 pipeline 15/15、workspace clippy／fmt／check-deps 通過，獨立局部覆核無 blocker；僅涵蓋已登錄 holder shutdown 錯誤，未擴稱所有清理競態已驗證（PR #158）。
+
+- 2026-10-08：固定 `d46d53b` 整關 accept install exit 0（2,039.20 秒、起訖 HEAD 相同且乾淨）；fake 全新 HOME 首任務 4,853 ms、一次 merge，demo root／匹配程序已核清理。release-artifacts 37791663365 四平台 archive、formula、雙平台 Brew 七 jobs 全過；同版雙平台 CI 37791469987 全過，7907e7e 偶發失敗根因仍未知，真 backend／Telegram／macOS 服務與最終覆核仍待完成（PR #158，未合併）。
+
+- 2026-10-08：13C OpenCode 接入獨立回合證據，核對 native parentID／literal input／成功回覆及查詢前後 session／holder／endpoint；真 1.18.34 capture 反例與原生 fake CLI canary 驗證，保留不准入與不切換 fleet 的邊界。Claude outcome 與整體版本切換仍待完成（feat/g13-install，未合併）。
+- 2026-10-08：13C canary 新增獨立 message_outcome；Codex 以正式 thread history 核對單一輸入、訊息身分、成功回合與非空白回覆，排除 confirmed／idle 誤認成功；原生流程與異常證據覆核持續驗證。Claude／OpenCode outcome、版本准入與切換尚未完成（feat/g13-install，未合併）。
+- 2026-10-08 13C 補 client 1.7 操作員唯讀 delivery 收據查詢，供 canary 區分受理／送出／確認；canary 執行器與升級流程尚未完成（feat/g13-install）。
+
+- 2026-10-08 13C 加入原生 backend 匯入／inspect 與 agent 更新環境隔離；daemon 建立 holder 前共用核對受管內容，未驗版本拒絕並保存失敗原因。版本漂移、canary、切換／回退仍待完成，見[版本管理](architecture/backend-versions.md)（feat/g13-install，施工中）。
+
+- 2026-10-08 第 13A 完成預設 home／安全初始設定與 290 項 agend 回歸；第 13B 唯讀 service plan 通過 macOS plist／Ubuntu systemd 原生解析。仍在施工，尚未服務註冊或整關驗收（feat/g13-install）。
+- 2026-10-08：#157 合併 `3f406f5`，完整 accept 12／獨立覆核／四個最終 CI jobs 通過，自有 worktree、分支、target 與測試程序清理；必要證據與 Claude trust entries 保留。依使用者新 goal 開始 13A：預設 home 與初始化設定，後續服務／版本／配對／發布仍待實作。
 
 - 2026-10-06：#154 固定 `1af2a31` 的 v7 另行授權後、四 CI checks 通過才執行一次；兩個初始 idle／六 keys／兩則 channel ACK 通過，但 Bash 專用 `type -P` 在實際工具回報 bad option，空路徑檔使完整 smoke FAILED。自有 holders／home／session 暫存清理，trust entries 依使用者指示保留；[原始失敗與有限範圍](gates/gate-12a-observed-smoke-v7.md)。修正 shell 探測／保存原始 guard 觀察與雙 shell 零模型契約，未重跑模型，獨立覆核及新 head CI 另核。
 
@@ -313,3 +337,233 @@
 2026-10-08：12D #156 四個最終 CI jobs 通過後合併為 9dbfac7；自有 worktree、branch、target 已刪除，保留必要證據。12C 嚴格 base protection、production Forge 真 GitHub submit／merge／重開收據／405 拒絕／cleanup 已通過獨立覆核；暫存遠端 repo 與 local lab 已刪。正整合已發布 Telegram v13–16，GitHub migration 改為 v17，再跑整合驗收／CI。第 12 關尚未標完成。
 
 - 2026-10-08：#157 整合 migration 17 的獨立覆核通過；完整 accept 12／四個 CI jobs 揭露終結 action 吞掉本機 WIP 存檔錯誤，修正恢復原 Refusal，保留背景 wake 及遠端收尾行為。原始失敗保留，修正後獨立回歸與完整驗收另核。
+
+- 2026-10-08：13B Linux 真服務流程與所有權反例通過：daemon 停止／重啟保留 holder、解除安裝不載入外來 ExecStop、不停止恢復設定後仍執行的外來 MainPID；另完成全新 home 直接安裝／狀態／解除安裝。13 項 Linux 服務測試、clippy 與無 std 依賴檢查通過；資料刪除確認、macOS 真驗收及 13C–E 仍待完成（feat/g13-install，尚未合併）。
+
+- 2026-10-08：13B 加入刪資料的完整 home 確認與保留鎖 inode 的清理；macOS 15 項服務／6 項 CLI、Linux 16 項服務及另跑的真 bind mount 反例通過，外部 symlink／掛載資料保持不變。獨立覆核修正掛載判定與提前釋放 SQLite 鎖；容器／專用映像／建置暫存已清，施工 worktree／target 保留待合併。macOS 真服務、13C–E 與整關驗收仍未完成（feat/g13-install）。
+
+- 2026-10-08：13B macOS live PID 防護加入 native executable 映射 inode、argv／home、UID／世代；自有 C producer 與 SDK ABI 比對、同路徑替換反例通過，整組服務 16 tests 通過。僅程序檢查，未註冊 host service；loaded launchd 定義捕獲計畫已備妥待授權，13C–E 仍未完成（feat/g13-install）。
+
+- 2026-10-08：13C canary 加入隔離執行器及原生程序清理反例；修正 macOS zombie-only 群組 EPERM、回收後不再 signal 與 daemon 結束等待上限。三項程序測試通過，完整 fake canary 因 fleet unknown 逾時仍未通過，另待正式操作員投遞與脫離群組後代清理；未執行真模型／未准入版本（feat/g13-install，未合併）。
+
+- 2026-10-08：13C 補 1.7 操作員 send_message／driver_status，真人 sender 使用 instance 不允許的 `@operator` 命名空間，歷史同名 agent 收據衝突拒絕且不改寫舊資料；身分邊界通過獨立覆核。送訊息沿用 driver 收據去重。原生 fake Codex 三訊息 canary 與版本不符案例通過，權限／內容衝突／未知 instance／重啟收據測試通過；尚待 detached descendant 清理、真 backend 身分隔離與准入切換（feat/g13-install）。
+
+- 2026-10-08：13C 版本探測加入 macOS process-fork／Linux seccomp 限制，保留執行緒而拒絕建立子程序；未回收 Child 正 PID 停止涵蓋探測程序自行切換 session。macOS 四項原生反例、fake canary 與 Linux ARM64 production 模組驗證通過，獨立覆核關閉版本探測 detached-child 缺口；容器與建置 lab 已清，Linux x86_64 真跑、實際 backend 與准入切換仍待驗（feat/g13-install）。
+
+- 2026-10-08：13C 完成判定增加 Claude ACK／PostToolUse／Stop 與原生 prompt ID 綁定，跨生命週期、重複與缺失證據拒絕；保存原生事件反例、Store 重開、fake canary／收據回歸、fmt／clippy／無 std 依賴檢查通過。此範圍獨立覆核完成，測試暫存與程序無殘留；完整 Claude canary、真模型與版本准入尚未完成（feat/g13-install，未合併）。
+
+- 2026-10-08：13C 完整 fake canary 擴至 Claude／Codex／OpenCode，4 項測試通過；Claude 經保存的 Ready 畫面、正式 channel／hook helper 跑三次 ACK→PostToolUse→Stop，Unknown 在期限內等待，Completed 必須具 execution ID。缺失／重用 execution ID 拒絕，legacy fake 3 項與 conformance 6 項通過。真模型、認證隔離、版本准入與切換仍待完成（feat/g13-install，未合併）。
+
+- 2026-10-08：13C startup executable binding 加入實際 running inode 核對，拒絕 pathname 已被替換或後續替換；macOS 兩項 binding、4 項 canary／5 項匯入回歸通過。獨立覆核指出 preflight→exec 仍有替換空窗，准入維持拒絕，下一步固定實際執行檔再開放；Linux binding 與完整版本管理尚未驗收（feat/g13-install，未合併）。
+
+- 2026-10-08：13C 正常 daemon 已接入私有固定啟動副本；原始 binary 被替換後仍能啟動 holder，daemon 停止保留 holder／副本，最後自有 Lab 清理通過。4 項 binding／snapshot 測試通過；三 backend canary 回歸為 3 通過／1 失敗：Claude 報告覆核抓到同時建置造成的 binary 身分改動，須固定產物重驗；准入仍關閉（feat/g13-install，未合併）。
+
+- 2026-10-08：固定 AgEnD 啟動副本整批重驗完成：4 項三 backend fake canary、6 項服務安裝、原生 holder 替換／存活、shim ownership 反例及 daemon 生命週期回歸通過，workspace clippy／無 std 依賴檢查通過。覆核確認 D3／D5 不要求同 build holder；准入尚缺存活 backend 與持久啟動身分對帳。自有程序／暫存無殘留，工作樹未合併保留（feat/g13-install）。
+
+- 2026-10-08：holder 1.3 加入不可補認的原生啟動 UUID 回報；65 項 holder、149 項 core（另 2 項既有 ignored 未執行）、workspace clippy／check-deps 通過。覆核發現停止時第二次 Spawn 競態，已以永久 spawned 與 stopping guard 修正；原生 HUP 重疊測試通過，移除防護的 mutant 實際產生第二個 PID 並失敗。daemon 持久綁定仍待接入、准入關閉，本批 holder 暫存已清理（feat/g13-install，未合併）。
+
+- 2026-10-08：holder 啟動 UUID 與關閉競態修補提交 `715bdf0`；65 項 holder、149 項 core（另 2 項既有 ignored）、runtime 回歸與 clippy／check-deps 通過。Ubuntu canary 三回合完成後超出 60 秒測試預算，整合測試改採正式 180 秒預設；本機三 backend 原生 fake canary 4 項於 87.23 秒通過，包含程序／暫存清理。遠端 CI 與 daemon 持久啟動紀錄仍待完成，不宣稱整關或真模型通過。
+
+- 2026-10-08：修正固定 launcher 重啟時的重複雜湊，重用快照驗證產生的檔案身分 binding；保留 running image／摘要／ownership 檢查與 10 秒 CLI 等待期限。原失敗 CLI table 原生重跑通過（38.92 秒），snapshot 2 項與 pinned launcher 1 項、clippy、check-deps 通過，聚焦獨立覆核未發現 blocker。同時更新 client 1.7 協商斷言；整關 CI／持久啟動紀錄仍待完成（feat/g13-install，未合併）。
+
+- 2026-10-08：13C migration 0018 新增受管啟動意圖，UUID、artifact 與啟動參數在同一 SQLite transaction 以 instance 快照及舊 binding CAS 保存；明確移除 instance 時 cascade，重建不繼承。原生 SQLite 新測試 2 項、既有 store 42 項及 core 149 項通過（2 項既有 ignored 未執行），fmt／clippy／check-deps 通過；聚焦覆核無 blocker，測試暫存已清理。supervisor／runtime 串接與准入仍未完成（feat/g13-install，未合併）。
+
+- 2026-10-08：13C reserved runtime 接入 SpawnBound／GetLaunchBinding，持久 UUID／PID 核對後才發布 writer；重連不送 Spawn，不符時保留 holder。未驗證 Exited 暫存，intentional close 不誤報失敗且核對可取消。原生 holder 7 項、runtime 19 項、終端 hub 8 項與 fmt／clippy／check-deps 通過，聚焦覆核缺口已修正；清除重複驗證 logs。supervisor 的受管啟動／版本准入決策尚未串接（feat/g13-install，未合併）。
+
+- 2026-10-08：Ubuntu CI `37710056778` 定位至 CLI 兩 Codex agent 重啟的 10 秒連線逾時，尚未判定根因；補上該測試失敗時停止自有 daemon 並保留 stderr 的診斷。本機原生重跑通過（恢復 6.1 秒，20 則各一次），fmt／clippy／check-deps 通過；未放寬 timeout，也不宣稱 Ubuntu 已修復（feat/g13-install）。
+
+- 2026-10-08：13C supervisor 接入受管啟動准入與持久 UUID；canonical 匯入程式進 launch argv，先核舊 holder／orphan 已離開再保存意圖。重連核原 artifact／設定／UUID，不重跑新版 canary；首次 Codex／OpenCode 原生 session 發現與啟動時指定 session 分開。三 backend 原生 canary＋fleet 啟動／重連／錯 UUID 保留程序共 4 項通過（102.21 秒），supervisor 8 項、匯入拒絕回歸 5 項、fmt／clippy／check-deps 通過；聚焦覆核兩項缺口已修正。版本切換／回退與整關驗收仍待完成（feat/g13-install，未合併）。
+
+- 2026-10-08：補受管 canary build 身分失配反例，正式報告改成不匹配 digest 後，新啟動准入拒絕，三 backend 的原 holder 仍以持久 UUID 重連；原生 4 項通過（99.98 秒），fmt／clippy／check-deps 通過，自有程序／lab 清理完成。更新版本管理文件移除已失效的「全部拒絕准入」敘述；不宣稱已驗證所有跨版本 driver 相容性（feat/g13-install）。
+
+- 2026-10-08：13C migration 0019 保存每 instance 最近一次 BackendSwitch，prepare 不改 program，commit／rollback 與 phase 同交易；設定、舊 switch 或來源啟動意圖變更拒絕提交。原生 SQLite 3 項、store 42 項、core 149 項通過（2 項既有 ignored），fmt／clippy／check-deps 通過；聚焦儲存契約覆核無 blocker，測試暫存與重複 clippy log 已清理。尚未接操作入口、idle 排空、停止／啟動與 Prepared 取消／恢復，不宣稱完整版本切換完成（feat/g13-install）。
+
+- 2026-10-08：13C Prepared 切換可取消，保留原 program 與 agent PID，取消後可建立新請求；Committed 拒絕取消，須走 rollback。原生 SQLite 4 項、fmt／clippy／前後 check-deps 通過，測試暫存與重複 log 已清理。這批只完成儲存契約，CLI、投遞排空及 supervisor 恢復仍未接入（feat/g13-install，未合併）。
+
+- 2026-10-08：13C OpenCode runtime 保留尚未退出的取消／舊代 worker，以實際 thread completion 提供停止查詢；重連及重複取消不會丟失舊代。新增原生 worker 生命週期 1 項、既有 OpenCode 20 項通過，fmt／clippy／check-deps 通過；對應測試暫存皆不存在。尚未接入 supervisor 版本切換，worker 停止不代表 backend 回合結束（feat/g13-install，未合併）。
+
+- 2026-10-08：13C Prepared 在正式 Claude channel／Stop、Codex、OpenCode reservation 暫停新的 push attempt，取消後恢復，原回執可確認；6 項切換測試、16 項 Codex 回歸、daemon 單元 185 項通過（1 項既有 ignored）。修正舊 store 測試以精確保留永久 maintenance lock 並核 inode／權限；fmt／clippy／check-deps 通過，85 種相關測試目錄無殘留。inbox、在途寫入排空、idle 與 supervisor 切換編排仍未完成（feat/g13-install，未合併）。
+
+- 2026-10-08：13C agent inbox 讀取與 Prepared 檢查在同一 DB 工作執行，準備中明確拒絕送出內容，操作員歷史與其他 instance 不受影響；取消恢復最後筆數／after 游標。7 項切換測試、3 項正式 pipeline context、既有 handler 回歸及 fmt／clippy／check-deps 通過。supervisor 的在途回覆排空、idle 與版本切換編排仍待接入（feat/g13-install，未合併）。
+
+- 2026-10-08：13C Codex activity 追蹤涵蓋建立中的連線與 bounded close 逾時後的舊 worker；disconnect 返回不當成停止證據。原生 Unix socket 握手阻塞與 fake app-server Gone callback 超時反例，連同既有 Codex 共 18 項通過；fmt／clippy／check-deps 通過。初版測試誤用 duplex=false（仍可完成握手）已改成原生無回覆 socket，保留失敗證據；supervisor 切換編排仍未接入（feat/g13-install，未合併）。
+
+- 2026-10-08：13C client 1.8 接入操作員 prepare／status／cancel，RPC 不重送；原生 daemon／CLI 驗 Prepared 查詢、精確取消、重啟保留、agent／舊 ID 拒絕，以及 once decoder 的有紀錄／null。Client 52 項、core 149 項（2 項既有 ignored）、daemon 單元 185 項（1 項既有 ignored）與 switch 7 項、fmt／clippy／check-deps 通過；自有 switch Lab 無殘留。成功 prepare 准入整合、實際換版／回滾仍待完成。遠端 3e3867f CI 兩平台重啟連線逾時，已保存失敗 log，未宣稱整體通過（feat/g13-install，未合併）。
+
+- 2026-10-08：重啟逾時追查補 executable 驗證耗時日誌；固定 binary 的本機空 fleet 重測，debug sha2 最佳化使重啟指紋核對 7296→520 ms、CLI 全程 11.518→1.114 秒，所有驗證與 10 秒重連期限保留。CLI 原 18 項通過，協定預期更新 1.8 後完整表通過；client protocol 9 項、pinned launcher 1 項、雜湊保護 4 項及 fmt／clippy／check-deps 通過。自有 g8／g9／pin／timing 暫存無殘留；兩平台遠端 CI 尚待本次 head 驗證，不宣稱逾時已全面修復（feat/g13-install，未合併）。
+
+- 2026-10-08：13C 新增 stop_reserved，停止前核 holder PID，並在同一連線核持久 UUID／instance／agent PID 後 Shutdown；錯身分、legacy 與替代 holder 保留。三項原生反例含 binding 回覆時替換 socket 路徑，核另一 holder 存活；holder runtime 全 10 項、fmt／clippy／check-deps 通過，g6／bound-stop 測試暫存無殘留。回合結束與在途排空、supervisor 換版編排仍待接入（feat/g13-install，未合併）。
+
+- 2026-10-08：13C prepare 在持久暫停投遞後，等待先前 Claude／inbox 回覆完成 socket 寫入；逾時保留 Prepared，後來的輪詢不延長排空範圍。原生背壓完整送出／斷線／逾時測試、daemon 185 項（1 項既有 ignored）、switch／channel／Stop 回歸通過。這只證明本機回覆結束，尚不代表 backend 回合完成或換版可安全啟動。遠端 c263492 兩平台失敗均為測試仍預期協定 1.7；更新目前 daemon 的 1.8 斷言後，Claude 控制權測試與 terminal hub 8 項通過，保留舊版相容案例。client protocol 全 10 項及 fmt／clippy／check-deps 通過，自有 g8／g12b／g11h／g11stop／switch-rpc 暫存均不存在（feat/g13-install，未合併）。
+
+- 2026-10-08：13C 將改 program 與啟動完成分開：Committed／Restoring 跨重開維持 push／inbox 暫停，精確 Running／PID／session／新 managed launch 與 artifact 快照才可完成為 Activated／RolledBack；進行中不可被新 prepare 覆蓋。三 backend × 啟用／回滾 Store 反例及既有切換共 8 項、core 149 項（2 項既有 ignored）、daemon 單元 185 項（1 項既有 ignored）、CLI 回歸與 fmt／clippy／check-deps 通過。這是持久狀態契約，真 native readiness 與 supervisor 切換編排仍待接入（feat/g13-install，未合併）。
+
+- 2026-10-08：13C 正式終端 acquire／resize／input 與 legacy input 接入持久暫停及在途排空，唯讀／release 保留；原生 PTY 背壓核完整 bytes，啟動前 Prepared 經正式 cancel RPC 恢復輸入。terminal hub 序列 10 項通過；並行跑有 holder 5 秒未建 socket 的啟動失敗，已加失敗日誌並保存證據，尚未解決，不以序列通過宣稱整體穩定。初版測試另開已鎖 DB 被拒，已改成啟動前建狀態。daemon 單元 185 項（1 項既有 ignored）、fmt／clippy／check-deps 通過。另發現兩個逾時後才啟動的自有 holder 重建已刪 home，保存日誌並移除自有 home 觸發 watchdog；啟動生命週期缺口仍待修正。native 回合完成與 supervisor 啟用／恢復仍待接入（feat/g13-install，未合併）。
+
+- 2026-10-08：holder 啟動改為只在既有 AGEND_HOME 建立 run／holders 子目錄，避免延遲啟動重建已清理 home。原生子程序在 exec 前停住、刪 home 後放行，核拒絕且無目錄復活；holder 65 項、holder_process 8 項、holder_runtime 10 項及 clippy／check-deps 通過。兩個已發現的自有晚啟動 holder 與 home 已確認消失；此修正不宣稱解決並行啟動 5 秒逾時（feat/g13-install，未合併）。
+
+- 2026-10-08：遠端 b54099a 的 Ubuntu／macOS CI 均停在 testkit 的舊 Hello 版本清單斷言；同步為目前 1.3–1.8，保留精確錯誤內容與 EOF 檢查。agend-testkit 全套 116 項、clippy／check-deps 通過；新 head 完整 CI 尚待執行（feat/g13-install，未合併）。
+
+- 2026-10-08：13C Codex 新增 thread_idle，透過既有連線查完整回合，核 session／連線物件／generation／instance 未變，只認 completed／failed／interrupted；分頁缺 data 或 nextCursor 拒絕，不當空閒。原生 fake app-server 驗空 thread／busy／完成／session 變更／斷線與 producer 變異反例，Codex driver 19 項通過；daemon 單元 185 項通過（1 項既有 ignored）。這是閒置觀察，尚須 supervisor 暫停／排空、受管 holder 身分與完整換版／恢復接入（feat/g13-install，未合併）。
+
+- 2026-10-08：13C OpenCode session_idle 讀 REST 狀態，前後核 instance／holder PID／session handoff／endpoint／憑證，錯 session 或 holder 消失拒絕。原生 daemon／holder／wrapper＋fake REST 兩條重啟路徑驗 idle／busy／abort 後 idle，共 3 項 native 與 20 項 OpenCode 回歸、fmt／clippy／check-deps 通過。初輪測試缺 Tokio runtime 已修正並保留失敗 log；g12open 程序與暫存無殘留。尚未接 supervisor 換版編排，不代表已驗證完整停止／啟動／回復（feat/g13-install，未合併）。
+
+- 2026-10-08：13C 將 Claude startup 按鍵納入暫停／本機排空：Prepared 在 reservation 同交易拒絕新鍵，原操作在 server tracker 追蹤至返回；Committed／Restoring 允許新 launch 走啟動選單。SQLite 9 項及原生 Prepared 無鍵／正式 cancel 後三鍵測試通過；完整 startup 並行 5 過 6 失敗（holder 5 秒未啟動），序列 11 項通過，保留兩份證據，不宣稱並行穩定。Claude 閒置證明與 supervisor 完整換版仍待接入（feat/g13-install，未合併）。
+
+- 2026-10-08：定位私有 executable 首次執行延遲：8 份新複本並行 --version 最慢 5.734 秒，暖啟動 7–13 ms，皆 exit 0。daemon 現在於準備階段對已驗 binding 的私有 launcher 執行 --version（30 秒等待、清空環境、前後核身分），不延長 holder 5 秒連線期限。先前失敗的 startup 預設並行 11 項及 terminal hub 預設並行 10 項全過；launcher 原生成功／失敗／逾時／替換拒絕、fmt／clippy／check-deps 通過，暫存已清。初版單元成功案例 100 ms 太短，改 5 秒，故意逾時案例仍 100 ms；保留原失敗證據。完整最新 head CI 尚未完成（feat/g13-install，未合併）。
+
+- 2026-10-08：13C Claude 閒置觀察綁定 live hook 的 session 與原 holder connection；重連、工具活動、session 結束撤銷舊候選，初始 Ready 另核完整畫面與 generation。原生 hook／holder 反例通過，startup 回歸 11 項通過，最終 clippy／check-deps 通過；尚未接 supervisor 換版編排。21cd574 的兩平台 CI 均停在 xtask 兩個舊 Hello 清單斷言，修正後 xtask 42 項本機通過，完整新 head CI 待驗（feat/g13-install，未合併）。
+
+- 2026-10-08：13C 一般 boot start／death restart／延遲 restart／operator retry 遇到持久 pending switch 時保留現況，讀取失敗也不停止 holder；由換版恢復流程決定後續啟停。原生 daemon 驗 Prepared／Committed／Restoring 跨 boot 精確保留 instance、managed launch、switch，連同既有 switch RPC 共 2 項通過；fmt／clippy／前後 check-deps 通過。這批未完成換版專用恢復／啟用／回滾（feat/g13-install，未合併）。
+
+- 2026-10-08：13C Codex 閒置查詢改在同 worker 串行查原生 queue 與完整 turns；queue 非空、缺 data／nextCursor 或 continuation 不可認閒置。真 fake app-server 驗第二筆待執行訊息與消化後空 queue，producer 變異反例、Codex driver 全 19 項及 fmt／clippy／前後 check-deps 通過。仍是換版閒置前置條件，啟用／回滾編排未完成（feat/g13-install，未合併）。
+
+- 2026-10-08：13C 接上明確 Activate／Rollback RPC 與 CLI，目的准入、reply fence、native idle、worker 結束及 exact holder stop 後提交版本並啟動；定期核新 holder binding／readiness 後釋放投遞。Activated 回退先持久 RollbackPrepared，boot 對 Committed／Restoring 缺 holder 的合格目的可重啟。Codex 雙原生假版本經正式 canary 完整啟用／回滾，核 session 保留與兩次 holder 更換通過；Store 9 項、holder runtime 10 項、switch RPC 2 項、client 52 項、core 149 項（2 ignored）、clippy／check-deps 通過。前兩輪新測試錯用外部 SQLite 查 live daemon，被獨占鎖拒絕；已改正式 RPC＋停機後核 DB。新 store 測試誤把 inbox 暫停當 None，改為正式拒絕後通過；保留失敗證據。尚未認證三後端完整往返、全部 crash 切點與自動失敗回滾（feat/g13-install，未合併）。
+
+- 2026-10-08：本批換版回歸補 daemon 單元 186 項（1 ignored）、terminal hub 10 項、Claude startup cancel 1 項。前一批 boot 保護使兩個啟動前種 Prepared 的 shell fixture 不再啟動，改為先啟動原 holder 再停 daemon 種 pause，重連時僅保留 pause 測試所需資料，不宣稱這些 shell 具 managed admission；取消操作保留有效 terminal，僅恢復缺少的 driver。保留原回歸失敗與編譯錯誤證據，最新 fmt／clippy／check-deps 通過；自有測試目錄檢查無殘留，移除被最終證據取代的成功 logs（feat/g13-install，未合併）。
+
+- 2026-10-08：13C Claude 雙假版本往返找出身分查詢另開 socket 會取代 holder 唯一 client，導致 Ready 觀察失效；改用既有連線查 binding 並核原連線仍有效後，完整 canary／啟用／回滾與 session 保留通過（74.77 秒）。fixture 閒置不再 10 秒退出。35b787d CI 的 Codex 初次 idle 查詢早於 worker 就緒，改限時等待初次連線後全 19 項通過；完整 CI 尚待重跑。OpenCode 新版准入及完整 crash／自動回滾仍未完成（feat/g13-install，未合併）。
+
+- 2026-10-08：13C OpenCode 新版 canary 與 fleet 版本核對改依精確匯入 artifact／私有 CanaryScope；scope 綁 home inode/device、instance、workspace、program 與來源雜湊，不是 fleet 成功報告。正式 import＋scope producer 的跨 home／錯 instance／額外 argv／修改 artifact 反例通過；OpenCode 雙假版本完整 canary／啟用／回滾及 session 保留通過（66.22 秒）。未執行真模型，三 backend 全組回歸及全關驗收尚待完成（feat/g13-install，未合併）。
+
+- 2026-10-08：三 backend 的 canary 全組 8 項並行通過（75.27 秒），包括各雙版本正式 runner、啟用／回滾及 session 保留；fmt、clippy、check-deps 通過。仍僅為原生假 backend 證據，不代表真新版模型相容或完整 crash 驗收。
+
+- 2026-10-08：13C 三 backend 新增 Committed／新 holder 未就緒切點：fixture 在自有 workspace 等待，硬殺自有 daemon 後重開，核 holder PID 未變再繼續啟用／回滾與 session 保留；三項並行通過（75.97 秒）。fmt／clippy／check-deps 通過。尚未涵蓋 Ready 已出現、還原途中再中斷與自動失敗回滾；沒有執行真模型或改主機服務（feat/g13-install，未合併）。
+
+- 2026-10-08：b4f9032 macOS CI 揭露 probe SIGKILL 後、waitable exit 前群組 EPERM 的競態；改先限時等待未回收 Child 退出（PID 仍固定），再清理群組／回收／核群組不存在。4 項原生 probe 通過；setsid 測試首輪未及寫 marker，改採正式 5 秒 probe 預算，仍核 marker。另驗 Codex Committed 下 daemon 硬中斷、目的 holder 由 Lab 停止後重開，核新 holder／正確版本／原 session／完整回滾通過；不代表所有 backend 或所有 crash 切點已完成（feat/g13-install，未合併）。
+
+- 2026-10-08：13C 目前代 Committed 目的 holder 確認消失且 launch 精確吻合時自動回退；Committed／Activated 先持久 RollbackPrepared，server 就緒後續行重啟前意圖。三 backend 原生假 canary／往返／holder 消失全組 12 項通過；其後補 Codex 正式 Store 建立回退切點、重啟恢復舊版本與 session 的 1 項通過。Store 9 項、daemon 單元 186 項（1 ignored）、fmt／clippy／check-deps 通過；自有 switch／managed／canary 暫存無殘留。存活但未 ready 的 backend、Ready 已觀察後中斷、Restoring 再失敗與通知政策仍待完成；未宣稱全 crash matrix 或真模型驗收（feat/g13-install，未合併）。
+
+- 2026-10-08：13C 將經啟動身分驗證的目前代 AgentExited 與 driver 斷線分開；目的 backend 原生退出後先持久回退意圖、排空回覆與 worker，再核精確 holder 停止及恢復舊版本／session。canary 全 14 項、daemon 186 項（1 ignored）通過；補設定快照保護後重驗 Codex 退出案例。初輪 fixture 只讓 app-server 退出而外層包裝仍活著，保留失敗 log；改成完成交接後 TUI 自行退出。app-server 單獨失敗、啟動掛住與完整 crash／通知政策仍待處理（feat/g13-install，未合併）。
+
+- 2026-10-08：13C 換版問題持久保存原因／首次等待時間，正式 status 與「需要你」顯示，重啟恢復且不提供一般 Retry；成功完成／取消／移除時清除。原生 Codex app-server 退出但 wrapper／holder 存活測試核通知、重啟同一等待時間與 holder 通過；Store 10、core 125、daemon 186（1 ignored）、client 52 項及 fmt／clippy／check-deps 通過。測試找出 pipeline 同步誤刪通知並修復；另修正測試對省略空 actions 的錯誤假設，保留失敗證據。自有 switch／Store／canary 暫存無殘留；存活 backend 啟動逾時與完整故障矩陣仍未完成（feat/g13-install，未合併）。
+
+- 2026-10-08：13C Committed／Restoring 同交易保存 300 秒 activation deadline；到期未就緒保存問題／通知，保留 holder 與投遞暫停，重啟不重置。正式 Store 的時鐘邊界、重開與還原新期限共 11 項、原生兩次 boot／RPC 共 2 項、core 125、daemon 186（1 ignored）及 fmt／clippy／check-deps 通過，自有 recovery／rpc／Store 暫存無殘留。這是觀察逾時，不把逾時當停止授權；真版本隔離、完整故障矩陣與整關驗收仍未完成，接續 13D 配對（feat/g13-install，未合併）。
+
+- 2026-10-08：13D 配對驗證層接既有 notifier HTTP：10 分鐘 nonce、fresh direct human /start、bot 身分重查、精確操作員確認後才產生 token reference／allowlist／topic 設定。原生本機 HTTP 配對反例及 notifier 全 23 項、core 125、daemon 188（1 ignored）、fmt／clippy／check-deps 通過；無真 bot／訊息／模型操作，自有 Telegram 暫存無殘留。尚未接持久 pairing／cursor、CLI／RPC、設定套用或真 Telegram 驗收；13C 未完成項目仍保留（feat/g13-install，未合併）。
+
+- 2026-10-08：13D schema 20 保存單一配對收據，候選／cursor 原子發布，精確快照拒絕舊操作，確認與取消可重啟查詢；配對 Store 4 項、既有 Store 42 項、core 125、daemon 188（1 ignored）及 fmt／clippy／check-deps 通過。自有配對測試暫存無殘留。CLI／RPC、設定套用與真 Telegram 尚未接入，整關仍施工中（feat/g13-install，未合併）。
+
+- 2026-10-08：13D PairingService 串行銜接 notifier HTTP 與持久收據，caller 取消後仍持鎖至發布；配置中的 notifier 拒絕配對讀取。真本機 HTTP 驗取消 caller、單次 getUpdates、錯目的地／重複 Begin 零 HTTP；配對 4 項、core 125、daemon 190（1 ignored）、fmt／clippy／check-deps 通過。配對自有暫存無殘留；服務尚待 daemon 啟停、CLI／RPC 接線，未做真 Telegram（feat/g13-install，未合併）。
+
+- 2026-10-08：13D 接 daemon 啟停、protocol 1.9 操作員配對 RPC 與 `telegram setup begin/status/poll/confirm/cancel` CLI；token 由 daemon 解析，操作不重送。真 daemon／client／CLI 測試驗 nullable 收據、重啟、agent／舊協定／過期／舊 ID 拒絕及 config 原文保留；client 52、core 125、daemon 190（1 ignored）、CLI 單元 25、fake daemon 14 與 fmt／clippy／check-deps 通過。自有配對 labs 無殘留；設定套用、真 Telegram 及整關驗收仍未完成（feat/g13-install，未合併）。
+
+- 2026-10-08：13D `telegram setup apply --id` 由操作員 CLI 讀已確認收據，保留原文與原檔備份、0600 完整發布；不同既有設定、symlink、備份撞名及未確認收據拒絕，相同設定冪等。CLI 單元 30、原生配對／套用 2、core 125、daemon 190（1 ignored）、fmt／clippy／check-deps 通過；自有配對／apply labs 無殘留。daemon 未改寫設定或自動重啟；真 Telegram、其餘 13B/C/E 及整關驗收仍未完成（feat/g13-install，未合併）。
+
+- 2026-10-08：13E 新增 `xtask release --out` native locked release 打包，要求乾淨提交／新輸出目錄，核版本並附 source commit、binary／archive SHA-256；不建立 tag 或公開發布。xtask 45 項、fmt／clippy／check-deps 通過；整組測試找出並修正 1.9 offer 的兩處舊快照，保留初輪失敗 log。正式 release binary 打包、brew／workflow、全新 HOME 驗收仍待驗證（feat/g13-install，未合併）。
+
+- 2026-10-08：13E 首次正式 macOS release build 成功，但獨立解壓檢查拒絕 AppleDouble `._` metadata；打包停用 COPYFILE metadata 並新增精確 archive 清單測試。另依雙平台 CI 修正剩餘 1.9 協商斷言，Claude busy-control 1、CLI 19、terminal hub 10、xtask 45 項與 clippy／check-deps 通過；正式修正版安裝包待重產驗證，未公開發布（feat/g13-install，未合併）。
+
+- 2026-10-08：13E 修正版 macOS ARM64 release `869a664` 已核 archive 精確清單、雙雜湊與解壓版本；新增手動四平台 native Actions 打包（只保留 artifacts、不公開發布）及共用 verifier。真安裝包 round-trip 與 7 種竄改拒絕通過，actionlint 通過；初版 YAML／runner context 錯誤已修正。四平台遠端建置、Brew、全新 HOME 與整關驗收仍待完成（feat/g13-install，未合併）。
+
+- 2026-10-08：13E 新增 Brew formula 產生器，必須提供四份同版本／同提交且 archive 內容與雜湊通過的 native 產物；既有輸出拒絕覆寫。workflow 接四平台完成後的 formula job，施工分支相關檔案 push 觸發，只有 artifacts、不發布或改 tap。本機 native verifier 回歸及缺平台拒絕通過、actionlint 通過；完整矩陣／formula 成功路徑待遠端執行（feat/g13-install，未合併）。
+
+- 2026-10-08：13E 安裝 smoke 使用已驗 `869a664` macOS ARM64 archive，解壓後全新 HOME init、0700／0600 權限、正式 daemon／holder 與 fake worker 完成 checks／review／核准／唯一 merge，archive 到完成含清理 9.81 秒；設定原文保留、worktree 消失。新增 pipeline_probe install 與 release_install_smoke.py，接四平台 workflow；fmt、範例 clippy、actionlint、check-deps 通過，自有目錄與匹配 holder／worker 無殘留。此證據使用 fake worker／fixture 設定，不宣稱真 backend 首任務、Brew install 或整關完成（feat/g13-install，未合併）。
+
+- 2026-10-08：13E 四平台 native release 及 formula job 在 run 37738455556（0825e23）全部通過，保留生成公式；該 run 尚未含後續首任務 smoke。macOS ARM64 以 `cargo install --locked --path crates/agend --root <自有暫存>` 安裝 c085ddf，真 installed binary + fake worker 首任務通過，含建置共 100.699 秒，prefix 已刪。補安裝文件並明列 crates.io 未發布、真 backend／Brew 安裝與完整驗收待補（feat/g13-install，未合併）。
+
+- 2026-10-08：13E doctor 補真 CLI 故障／恢復案例：缺 HOME、0755→0700、Telegram 語法損壞且不覆寫、sandbox 工具缺失→真 probe 恢復、三 backend 缺 PATH→僅 --version fixture 恢復。install_home 共 7 項通過、focused clippy 通過；未執行真模型。磁碟容量故障、服務／登入／版本診斷與整關矩陣仍未完成（feat/g13-install，未合併）。
+
+- 2026-10-08：13E doctor 新增唯讀 service 診斷：無安裝可前景執行；核收據歸屬／artifact／manager 狀態與查詢後收據一致，Prepared／Removing／未執行提示修正，缺失或變造拒絕。診斷不取得或建立 install.lock，不啟停／reload。持正式 lifecycle 鎖的 model 故障／恢復反例、service 18、install_home 7、CLI doctor 1 項與 clippy 通過；初輪測試缺 Path import 已修正並保留 log。未驗主機服務，登入／版本與整關故障矩陣仍待完成（feat/g13-install，未合併）。
+
+- 2026-10-08：CI 加入 workflow＋ref concurrency，同分支／PR 的較新提交取代舊 run，其他 workflow／分支分開。已核身分後取消本施工分支五批被取代 CI，保留 869a664 基準與獨立 release 驗收；取消不視為通過。actionlint 通過（feat/g13-install，未合併）。
+
+- 2026-10-08：13E 磁碟診斷補真 CLI sparse file 邏輯用量 >20 GB 警告／刪 fixture 後恢復，install_home 全 8 項通過。另以自有 64 MB HFS+ sparse image 實測 62 MB free→disk fail，卸載擴容 2 GB 再掛載→ok；映像已卸載刪除並核 hdiutil 無自有掛載。未填滿主機磁碟，未啟動模型。c085ddf 四平台 release 首任務及 formula 全部通過；全關 CI／真服務及模型驗收仍待完成（feat/g13-install，未合併）。
+
+- 2026-10-08：新增 `xtask demo install` 並接 `accept 13`，建置三 backend fixtures、共 52 項原生 home／service／import／switch／canary／配對案例通過。初輪首任務遇 macOS 長 socket 路徑而失敗，改 TMPDIR=/tmp 後首任務 10.292 秒完成且唯一 merge／清理通過；保留失敗 log，未重跑已通過案例。xtask tests、clippy、fmt、check-deps 通過；這是離線原生 demo，Brew／真服務／真模型與外部 Telegram 驗收仍另列（feat/g13-install，未合併）。
+
+- 2026-10-08：13E 新增一次性 Actions runner 的 Brew install／test／fresh HOME init／uninstall 驗證，macOS ARM64 與 Linux x86_64；只替換同輪已驗 archive 的 URL，不改 formula SHA 或安裝內容。以 c085ddf 四平台真產物核四個 local URL、變造 formula 拒絕及本機執行拒絕，下載暫存已清；actionlint／check-deps 通過，Brew 實跑待 CI（feat/g13-install，未合併）。
+
+- 2026-10-08：13E 覆核找出 doctor 版本 probe 無界 reader join 與非零退出誤判，改非阻塞／64 KiB 上限／5 秒總 probe 期限及 2 秒限時清理，核尚未回收的直接 PID 與原群組。原生錯誤／超量／繼承 pipes／自行換群組反例通過；整組測試另抓安裝鎖 close 遇 fork 繼承的競態，改明確 unlock guard 加副本反例後並行 binary 35、install_home 8 項通過。保留初輪失敗，暫存已清；doctor 非惡意程序沙箱，登入／版本相容／漂移與真測仍待補（feat/g13-install，未合併）。
+
+- 2026-10-08：release run 37747622359 的四平台 archive／首任務、formula 與 macOS ARM64 Brew install／test／init／uninstall 全部通過。Linux Brew 在 tap-new 的 Git commit 因 runner 無作者身分而失敗，tap 已 untap 清理；測試子程序補專用 Git author／committer 環境值，不改全域設定，待重驗（feat/g13-install，未合併）。
+
+- 2026-10-08：13C canary 新增明確 `--model`，OpenCode 使用 provider/model；模型參數綁定私有 scope 並寫入報告（要求值，不冒充 provider 解析結果）。非法名稱建 home 前拒絕、替換／移除 scope args 拒絕，以及原生 OpenCode fake 三次成功 outcome／清理通過。真帳戶認證與真模型驗收仍待完成（feat/g13-install，未合併）。
+
+- 2026-10-08：release 37749079834 四平台 archive／首任務、formula 與 macOS Brew 通過，Linux Brew 再次因 tap-new 作者身分失敗；Brew 過濾 Git 身分環境值，改一次性 tap-new --no-git，避免更動共享 Git 設定。Python 語法檢查通過，原生 install／test／uninstall 留待下一輪 CI（feat/g13-install，未合併）。
+
+- 2026-10-08：CI 37749079770 Ubuntu 通過、macOS version probe 斷言失敗；舊斷言未印實際錯誤，根因尚未證實。probe 清理失敗時保留原始錯誤、斷言印錯誤，時間斷言涵蓋 250 ms probe 加 2 秒清理預算（未延長實際期限）。本機 binary 37 項及 workspace clippy 通過，macOS CI 待重驗（feat/g13-install，未合併）。
+
+- 2026-10-08：13C 新增專用 --auth-file 私有副本與 canary HOME／Codex／Claude 環境隔離；啟動前核完整 scope 的 program／args，正常 fleet 不新增憑證白名單。Codex 模型用 app-server 支援的 -c model=…；三個真 native fake consumers 核實收到模型測試對應的認證與私有路徑，缺副本不得跳過。最後 7 項 canary 案例、binary 37 項、workspace clippy 與補強後 testkit clippy／fmt／check-deps 通過；來源不變且自有 lab／程序清理。未讀真憑證、未呼叫模型；真測與最終 fresh verifier 仍待完成（feat/g13-install，未合併）。
+
+- 2026-10-08：3f52828 的 macOS CI（37753100715）通過前輪 doctor timeout 案例，但 canary session-move 測試失敗；未印實際錯誤，根因仍待 CI 蒐證。補 probe 退出狀態與原生 fixture 的 setpgid／setsid 階段診斷，期限及必須真正 detached／回收的斷言不變。本機四個 process 案例通過，不據此宣稱已修復 CI（feat/g13-install，未合併）。
+
+- 2026-10-08：doctor 改診斷 fleet 明示的設定 program，保管 bytes 變動 fail 且不執行，無當前 CLI build canary／外部程式／無 daemon PATH 證據則 warn；不冒充登入或漂移通知完成。install_home 9 項及相對程式補驗、真／fake CLP（含新增 program producer 斷言）、CLI doctor、舊協定相容 16 項、workspace clippy／fmt／check-deps 通過。首輪 socket fixture 名過長及遺漏 xtask 初始化編譯失敗已修正、保留 log；自有 lab／程序已清（feat/g13-install，未合併）。
+
+- 2026-10-08：release-artifacts 37753100820（3f52828）全部成功：Linux x86_64／ARM64、macOS Intel／ARM64 archive 與首任務、formula、macOS／Linux Brew install／test／fresh HOME init／uninstall。這是 Actions 一次性環境驗證，尚未公開發布，亦未取代主機服務與真 backend／Telegram 驗收（feat/g13-install，未合併）。
+
+- 2026-10-08：13C 新增 backend latest，固定 npm 公開來源、核套件身分，拒絕轉址／超量／錯誤，5 秒期限涵蓋標頭與 body。真 metadata 三套查詢及無 HOME／agent 拒絕驗證通過；四項 HTTP fixture 反例、core 全組（兩個 deep ignored）、daemon 194 項（1 child ignored）、CLI 37 項及 workspace clippy／fmt／check-deps 通過。未呼叫模型或切換版本；每日排程、持久漂移通知及整關真測仍待完成（feat/g13-install，未合併）。
+
+- 2026-10-08：13C migration 0021 保存每日 registry 嘗試與結果，重啟／時鐘倒退不提早重查，失敗保留上次成功值，舊 attempt／重複完成及舊 revision 確認拒絕。真 SQLite 兩項重開反例、Store 42 項（含全部歷史 schema 升級／retention）、workspace clippy／fmt／check-deps 通過；clippy 初輪多餘 unit expression 已修正。測試暫存無殘留；此批是持久 Store API，定時 worker／attention 與被動漂移仍待接線（feat/g13-install，未合併）。
+
+- 2026-10-08：13C 受管 fleet 接每日 registry worker（60 秒檢查持久排程、canary home 跳過），停機等待有限 HTTP 操作；ingest 恢復 acknowledge 提醒、確認與發布序列化，等待起點綁結果變動時間。受管 fleet 全部同版時不提醒，未受管 CLI 被動漂移尚待補。registry／Store／通知 7 項、worker 1 項、daemon 198 項（1 child ignored）通過；同版判斷補強後通知案例與 workspace clippy／fmt／check-deps 通過。初輪 fixture Store.clone 編譯錯誤及 clippy 巢狀 if 已修正，測試暫存無殘留；全原生服務生命週期及最終 fresh verifier 仍待驗收（feat/g13-install，未合併）。
+
+- 2026-10-08：registry fresh source review 找到 native fake 受管測試會連公開 npm，以及 Telegram acknowledge 誤走 task pipeline 兩項 blocker。新增 registry_checks=false 正式離線設定、共用 native lab 預設關閉並停機核無 reservation；Telegram 改走持久 handler，native HTTP callback／舊 revision 拒絕通過。補同版／混合版本／外部 instance 提醒測試；doctor 限時版本 probe 移至 daemon 共用，新增 scoped cwd／環境測試。原生 backend_switch 2 項、Telegram apply 5 項、版本 probe 4 項與新增聚焦案例、clippy／fmt／check-deps 通過，覆核再看 source 未見剩餘 blocker（未獨立重跑）。自有暫存無殘留；monitor active HTTP 停機與被動漂移／整關驗收仍待完成。原 PR CI 37754915221 在 d9796ca 雙平台成功（feat/g13-install，未合併）。
+
+- 2026-10-08：補 registry monitor active HTTP 停機證據：真 loopback 送半份原生 manifest 後停住，stop 必須等待；放行後保存成功結果、第二 backend 無 reservation，SQLite 重開仍有結果。production 固定 npm query 與測試共用同一 worker，另加 managed 身分查詢後的 stop 檢查。兩項 monitor 測試及 workspace clippy／check-deps／fmt 通過，自有暫存無殘留；本機服務與被動漂移仍待完成（feat/g13-install，未合併）。
+
+- 2026-10-08：13C 新增外部 SystemBackendVersion 觀測 API，依 daemon 的 cwd／PATH 與環境白名單執行限時 --version；拒絕損壞受管版本、持續換檔與 symlink 改向。4 項原生假程式案例及 daemon 單元全組 210 項通過（1 child entry ignored），workspace clippy／fmt／check-deps 通過；獨立 source review 未見 blocker，未獨立重跑。subprocess 的 5 秒期限不包含前置 fingerprint／manifest I/O，前後核對亦非固定 fd exec 保證。持久漂移與提醒接線仍待完成；自有探測暫存無殘留（feat/g13-install，未合併）。
+
+- 2026-10-08：PR CI 37760144687 雙平台在同一舊 fixture 斷言失敗：Lab home 新增離線 config.toml，外部目錄不再為空。改用 home 下獨立空目錄作 symlink 目標，仍嚴格核零檔案；原 failed_local_ack_publication 精確案例重跑通過，未放寬禁止向外寫入的契約（feat/g13-install，未合併）。
+
+- 2026-10-08：13C migration 0022 新增每 instance 一列的外部版本觀測持久 API，探測前預約，首成功建基準，換版／失敗／恢復按 revision 確認；刪除 instance cascade、重建與觀測到的 scope 變更使用新 generation。獨立覆核找到「新 scope 同錯誤沿用舊 ack」已修正並確認解除，另補 scope 改變後尚未重新預約的未確認拒絕反例。3 項原生假 CLI→SQLite 案例、Store 42 項歷史升級／retention、workspace clippy／check-deps 通過；背景 worker／attention 接線仍待完成，未啟動真 backend（feat/g13-install，未合併）。
+
+- 2026-10-08：13C 外部版本持久紀錄接 system_monitor、ingest attention、operator／Telegram 確認與 pipeline 保留；預設每 60 秒檢查，backend_version_checks 可獨立停用，canary home 與受管 launch 跳過。原生假 CLI 停機等待／保存／下一 instance 不啟動，以及 Store→Fleet→loopback Telegram 確認與舊按鈕拒絕通過；daemon 全組 216 項通過（1 child entry ignored）。source review 未見資料／確認 blocker，建議兩個 monitor 同時停止已改 tokio::join!；正式 daemon 雙 monitor active 的整合驗收、成功換版完整通知重開證據仍待補。非真 backend／真 Telegram 驗收（feat/g13-install，未合併）。
+
+- 2026-10-08：外部 monitor 接線後，原生 backend_switch 2 項（核離線 Lab 無本機版本 reservation）、Telegram apply 5 項（保留兩個探測設定）、workspace clippy／check-deps／fmt 通過；通知測試暫存無殘留。保留未合併 Gate 13 工作樹與共用 target 供後續驗收（feat/g13-install，未合併）。
+
+- 2026-10-08：補外部版本的成功路徑與排除證據：真本機假 CLI 1→2→提醒→SQLite／Fleet 重開→確認→重開→3 拒舊確認；停用／錯誤設定／canary 等 worker 自行退出後核無執行；受管排除等下一外部 instance 真探測完成再核無執行。3 項測試及 workspace clippy／check-deps／fmt 通過，read-only fresh reviewer 確認覆蓋有效、未見新 blocker（未獨立重跑）。自有暫存無殘留；這是組件整合，正式 daemon／定時 worker 重啟與服務真驗收仍待完成（feat/g13-install，未合併）。
+
+- 2026-10-08：新增 backend_version_monitor 真 daemon 三次啟動驗證：原生 probe 保存歷史基準後改磁碟版本，worker／ingest／socket 自行產生提醒；第二次保留 ID、拒 agent 與錯 action、操作員確認；第三次不重現，每次停機重開 SQLite 核值且無 holder 殘留。原生案例通過並納入 xtask accept install；不等於 launchd／systemd 服務重啟或真模型驗收（feat/g13-install，未合併）。
+
+- 2026-10-08：第 13 關新增 [目前證據與缺口](gates/gate-13-status.md)，分開 13A–E 已有實作、局部／原生測試、真環境驗收、最終 fresh verifier 與授權；修正外部版本偵測的過時敘述。21ecf59 的 accept install 正在原程序執行，尚不宣告通過（feat/g13-install，未合併）。
+
+- 2026-10-08：整套 accept install 執行期間，source audit 發現 fake-worker 不識別 --version，背景探測可能啟動第二份 inbox consumer。fixture 加入立即回傳版本的入口；真子程序測試核無 agend 呼叫 marker、無游標寫入且限時退出。這是驗收 fixture 修正，不改真 backend／認證；本輪整套驗收始於21ecf59、期間加入此修正，不能宣稱固定舊 head 全套證據（feat/g13-install，未合併）。
+
+- 2026-10-08：收齊版本監測整關驗收失敗：Codex 假 backend 版本 probe 逾時；macOS CI pipeline 兩項失敗與舊 fake-worker 搶 inbox 路徑相符。重建 e64e629 fixture 後 pipeline 15/15 通過；Codex 原失敗單例通過但根因未定，保留失敗與診斷證據，整關仍未通過（feat/g13-install）。
+
+- 2026-10-08：Codex canary 單例與原預設並行 17 項均通過，原版本探測逾時尚未穩定重現；新增只含等待時間／期限／輸出位元組數的診斷，無原始內容、無重試、不延長期限。process 原生生命週期 4 項、clippy／fmt／check-deps 通過，自有 probe 暫存已清；不宣稱整關通過（feat/g13-install）。
+
+- 2026-10-08：9a8bcf7 雙平台 CI 已結束失敗，Ubuntu 為 GitHub pipeline WIP 封存案例，使用相同舊 fake-worker。修正後本機 GitHub pipeline 5/5 通過；f762f47 逾時診斷經獨立唯讀覆核無 blocker。批次推送前保留兩平台失敗 log，未宣稱 Linux 已由本機 macOS 重驗取代（feat/g13-install）。
+
+- 2026-10-08：固定提交 8507a05 的 accept install exit 0、CI 37767137610 雙平台成功。安裝 demo 的假 backend canary 17/17，全新 HOME 首任務 t-1 done／唯一 merge／5,994 ms／0 模型呼叫；核自有 HOME／repo／相關測試目錄與 target daemon／fake backend 程序無殘留。保留 active 未合併 worktree／target 及必要證據；真服務／模型／Telegram、登入相容診斷、最終 fresh verifier 與人工驗收仍待完成。
+
+- 2026-10-08：doctor 分開執行檔完整性、歷史 canary 範圍與 unknown 登入；有效歷史收據不再提示重跑 canary，明示尚未驗證目前 daemon／登入／其他能力。正式假 backend producer 收據與錯 build 回歸 7/7、install_home 9/9、CLI init_and_doctor、workspace clippy、fmt、check-deps 通過，獨立唯讀覆核無 blocker；自有測試目錄／程序未見殘留。此改動未補足 live-auth producer 或整關真環境驗收（feat/g13-install／PR #158）。
+
+- 2026-10-08：13A 接入 operator-only BackendDiagnostic 1.9；同一 SQLite transaction 讀配置與匹配觀測／受管預約摘要，排除 args／session／環境。doctor 一次性 RPC 核 fleet 的 daemon boot 與配置，跨 boot 或 scope 不符回 unknown；外部樣本不冒充執行映像、預約不冒充存活。原生三次啟動 RPC／doctor、1.8 與 agent 拒絕、store 4 項、managed 2 項、boot／scope 反例、install_home 9 項與 CLI 回歸通過；client 全套 52 項通過，workspace clippy／fmt／check-deps 通過。獨立覆核指出的通用 client 重連問題已改為 exchange_once 並複核；重啟競態仍是組合證據，非單一中途重啟案例。自有測試程序／目錄未見殘留，登入 producer／能力矩陣與真環境驗收仍待完成（feat/g13-install／PR #158）。
+
+- 2026-10-08：13A doctor 增加四條 daemon 能力政策：Codex 人工輸入、Claude 完整啟動畫面、OpenCode endpoint 與獨立 permission gate。讀實際 policy／共用常數，不放寬准入；verification override 限定 instance，boot／配置失配不展示政策，runtime eligibility 仍 unknown。core 149 通過／2 既有 ignored、三 backend 原生 canary 7 項、OpenCode driver 20 項、原生三次重啟與診斷、權限／scope 回歸、workspace clippy／fmt／check-deps 通過；獨立唯讀覆核無 blocker。本批自有程序／測試目錄未見殘留，移除重複 build log；真認證／能力驗收仍待完成（feat/g13-install／PR #158）。
+
+- 2026-10-08：13C 補正式 daemon 的雙 monitor 同時 active 停機驗證，兩種放行順序均等待另一 worker 收尾、持久化完成且不啟動下一工作；兩個丟 JoinHandle mutation 分別被抓出。daemon lib 223 通過、2 個子程序入口 ignored（由父測試呼叫），workspace clippy／fmt／check-deps 通過；修正 macOS 測試 socket 繼承非阻塞模式，測試自有程序／暫存清理完成。獨立唯讀覆核無新 blocker；不代替真服務、holder 或模型驗收（feat/g13-install，未合併）。
+
+- 2026-10-08：固定 f08fe43 的 accept install 完整通過（來源與工作目錄未變），全新 HOME 首任務 5,597 ms／唯一 merge／0 模型呼叫；同版四平台 release archive、formula 與 macOS／Linux Brew 七個 jobs 成功。Linux 冷啟動真測另發現 user-bus 名稱尚未註冊；root／一般使用者 readiness wrapper 實驗通過且精確清理。正式 bounded readiness 修正施工中，不能用 wrapper 成功替正式服務或整關驗收（feat/g13-install／PR #158）。
+
+- 2026-10-08：13B 正式加入唯讀 user-bus readiness 共用期限；只等待原生合法 false，錯誤／逾時拒絕，完整有效設定與程序身分檢查保留。service 24 項、install_service 6 項、workspace clippy／fmt／check-deps 通過，獨立唯讀覆核無 blocker。f08fe43 雙平台 CI 37778088087 已成功；新修正仍待 Linux production 冷啟動真測，不宣稱整關完成（feat/g13-install／PR #158）。
+
+- 2026-10-08：固定 d78f530 的四平台 archive／formula／雙平台 Brew 全部成功（release 37783051296）；原版 Linux ARM64 archive 在隔離 systemd、一般使用者下完成安裝、同 holder 重接、拒絕外來 MainPID 與安全移除五階段，container／image／暫存已精確清理。macOS 26 CI 的 setsid fixture 準備失敗另以限定 EPERM 的有界重試處理，要求真 session、清理前存活及 SIGKILL 終止；本機 binary 40 項、clippy／fmt／check-deps 通過，仍待新 CI。真 backend／macOS 服務／Telegram 與最終驗收未完成（PR #158）。
+
+- 2026-10-08：補 doctor 離線孤兒 holder 修復原生測試：提示啟動 daemon→正式 boot sweep Shutdown→子程序正常退出、鎖釋放→holders ok；fallback 不計成功，自有 lab 刪除有斷言。聚焦覆核意見已納入，單例與 workspace clippy／fmt／check-deps 通過；不代表在線 restart、真 backend 或整關驗收（PR #158）。
+
+- 2026-10-08：7907e7e 的 accept install 在 daemon version probe 輸出上限斷言失敗（222 通過、1 失敗、2 ignored），當時斷言未印實際錯誤。只補錯誤診斷，未改期限或 production；daemon lib 重跑 223 通過／2 ignored，一次 8 並行、32 案例探測未重現，精確核自有目錄與程序無殘留。根因仍未知，不把重跑視為修復；該次整關驗收維持失敗（PR #158）。
+
+- 2026-10-10：修正試用 OpenCode 每次操作任務目錄都要求 Allow once：有效 work 階段的單一精確 canonical worktree pattern，由固定 holder／endpoint 的 worker 經原生重讀與 transaction 重新核任務歸屬後回覆 once；其他權限仍由操作者決定。獨立 source review 無 blocker，補 worker tick 與過期／越界／unknown 回歸；不代表第 13 關完成（feat/g13-install／PR #158）。
+
+- 2026-10-10：f2eb66a 修正經 daemon／testkit 測試、focused worker 回歸、workspace clippy／fmt／check-deps 通過；以正式 restart 更新使用者隔離試用 daemon，固定 OpenCode 1.18.34 完成 t-2 三個唯讀工具及 result，全程無人工目錄授權，pending permission 0、holder／session／repo HEAD 不變。任務 worktree 與本次暫存已清理，保留必要證據；PR #158 尚未合併，第 13 關仍未完成。
+
+- 2026-10-10：依使用者要求補唯讀終端自動 resize：optional viewport fit_size 只在無 controller 時調整 PTY，不授輸入權；每次外層尺寸只送一次，避免多視窗爭搶。真 daemon/holder 11 項、TUI/core/daemon lib/client full terminal/protocol compat、clippy/fmt/check-deps 通過，獨立 source review 無 blocker；真 OpenCode 1.18.34 唯讀兩尺寸及還原成功，0 input／0 模型 prompt。試用 daemon 已更新重接原 holder，需重開 TUI 載入新版；PR #158 未合併。
+
+- 2026-10-10：使用者確認唯讀 resize 正常；CI 揭露 Codex U17 拒絕輸入測試在首次非同步 fit 前取舊尺寸，改為先等 80×22 fit 再測拒絕控制／貼上，保留原安全斷言。Codex U17 12 項通過；下一步為 13C 真 backend canary／切換／回退，整關尚未完成（PR #158）。
+
+- 2026-10-10：13C OpenCode 1.18.34 正式隔離三訊息真模型 canary 通過，三收據／三 outcome、33.886 秒；認證來源不變，自有程序／canary home／匯入副本清理完成。Claude／Codex 與三 backend 受管切換／回退仍待驗證，PR #158 未合併。
+
+- 2026-10-10：13C 真 OpenCode 1.18.33／1.18.34 各通過正式三訊息 canary（33.636／33.405 秒），同一隔離 home 由正式 prepare／activate／rollback 完成 1.18.33→1.18.34→1.18.33，Activated／RolledBack 持久狀態與原生 version／go 檔核對一致；holder 49545→49809→49856，session 全程相同。換版不另送模型訊息；自有 instance／daemon／下載與匯入副本清理、來源 API 認證不變已核。證據 `AgEnD-ops/g13-install-20261008/opencode-switch-20261010`。首版腳本曾把 --json 誤傳 backend，啟動被拒且未換版，保留失敗紀錄後修正。此結果不涵蓋故障注入、Claude／Codex 或整關驗收。
+
+- 2026-10-10：補真 OpenCode 有歷史 session 的 1.18.33→1.18.34→1.18.33 往返；三階段各一訊息皆 confirmed／completed，REST 原生歷史既有 message ID 與完整內容跨版逐筆相同。Prepared 時正式停止／重啟自有 daemon，完整 switch record、holder、session 不變；之後 Activated／RolledBack 成功。兩版准入各三訊息，本次總共九訊息；owned 程序、canary home、下載與匯入 root 清理完成，認證來源不變。證據 `AgEnD-ops/g13-install-20261008/opencode-history-switch-20261010`（含失敗回非零 runner 與 cleanup.py）。此結果補足上一輪空 session 限制，尚未涵蓋 Committed→Activated 中斷窗口、Claude／Codex 真測或整關完成。
+
+- 2026-10-10：真 OpenCode activate 回覆後 SIGKILL 自有 daemon，退出後唯讀 DB 確認 phase=Committed 與原 switch／deadline；候選 holder 64219 保留。初版 harness 讀尚未產生的 version 檔失敗，且 SQLite context 未 close 擋第一次清理重啟，保留失敗紀錄；harness 退出釋鎖後從同一持久切點恢復，daemon recovered=1／started=0 重接 64219，Activated 後新訊息與歷史一致，回退 1.18.33 後亦成功。不是整支 runner 一次通過或全部 crash cuts。root／程序清理、認證來源不變；證據 `AgEnD-ops/g13-install-20261008/opencode-committed-switch-20261010`，獨立覆核待完成；Claude／Codex 真測仍缺專用認證。
+
+2026-10-11：13C 補 Codex canary access-only 外部登入與 refresh 拒絕，避免複製共享 refresh token；真模型 canary 尚待驗證，未宣告整關完成。
+
+- 2026-10-11：13C Codex 0.159.3 以使用者指定 auth.json 的 access-only 外部登入完成正式 canary，3 receipts confirmed／3 outcomes completed、23,143 ms；refresh 請求拒絕、來源雜湊不變、child home 及 import home 已清理。新增憑證白名單、兩次新連線刷新拒絕與 peer error 去敏回歸；真 Codex 版本切換／回退及 Claude 真測仍未完成。證據：AgEnD-ops/g13-install-20261008/codex-access-canary-20261011（PR #158，未合併）。
+
+- 2026-10-11：本批 backend_canary 首跑 16 通過／1 舊認證 fixture 失敗；更新 fixture 並強制 external thread/start 前登入後，原失敗案例單獨通過。憑證單元 4、external Worker 1、fake Codex 12 通過；fmt／workspace clippy／check-deps 通過。真 Codex 不重跑，保留首次通過與 fixture 失敗的分離證據。

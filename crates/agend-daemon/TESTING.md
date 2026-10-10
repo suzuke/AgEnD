@@ -16,6 +16,8 @@ private startup capture 明確登記 manual 模式，保留原初始尺寸、停
 
 ## 第 10 施工關驗證
 
+`agend/tests/pipeline_cleanup.rs` 驗證共用 pipeline fixture 的清理失敗路徑：真 holder 的 socket 暫移後，Shutdown 連線失敗必須保留 home、repo 與存活 holder；恢復 socket 後重試才可成功停止並移除資料。此案例沒有啟動模型，也不宣稱覆蓋未登錄 holder 或所有程序殘留。
+
 `cargo test -p agend-daemon --test pipeline_adapters` 跑真 Runner 的 RUN-1..9、LocalForge 的 FRG-1..10、metadata／cache／外部寫入／FIFO marker 反向測試、冷 cache、TCP 可連／daemon socket 不可連、父程序 SIGKILL 的子程序清理與真 cargo／npm 編譯測試；`tests/store.rs` 跑 STO-13、schema v7 與既有有資料的 migrations。 `pipeline_store_ports` 的 fake／SQLite 共享契約驗 attention 清除同 CAS transaction、ack 保留與 generic advance 語意；真 SQLite 拒絕 attention UPDATE 時，version／event／receipt／note 全部 rollback，移除故障後重試成功。
 
 ## 第 11 施工關 C 段（已驗收並合併 #145）
@@ -225,3 +227,121 @@ Terminal frame 解碼維持原 internally-tagged serde 路徑；RawValue 優化�
 GitHub migration 17 接在已發布 Telegram 13–16 後；`github_upgrade_preserves_published_telegram_reads` 從 v16 fixture 升級，核已讀保留、GitHub ledger 初始空及 schema=17。
 
 12C 整合回歸保留 `agend/tests/pipeline_archive.rs` 的取消錯誤契約：archive 路徑故障必須回報拒絕、保留原 WIP／binding，修復後由 wake 完成；remote cleanup 失敗仍獨立釋放本機容量並等 Retry。
+
+第 13B：`cargo test -p agend-daemon --lib store::maintenance` 驗證缺少資料庫時的維護排他、DB owner 已存在但 socket 尚未建立、維護結束後重新開啟，以及未持新 flock 的原生 SQLite owner 拒絕。搭配 `--test store --test store_process` 檢查資料庫開啟、重啟與 crash 回歸；這些測試不代替真 service manager 驗收。
+
+13C `store::maintenance` 驗 Activity 可與真 SqliteStore 共存、釋放前拒絕移除、排他維護期間拒絕 Activity。`runtime::env` 及真 daemon 的 `the_agent_gets_the_whitelisted_environment_and_the_shims_first` 驗 daemon 傳入更新旗標 0 時 agent 仍取得 1；不啟動模型。
+
+13C operator delivery 收據由 `agend/tests/message_delivery.rs` 以真 CLI daemon、正式 Store 四態與重啟驗證；agent 身分拒絕，單純讀取維持 queued／sent。
+
+13C codex_driver::execution_outcome_requires_the_identified_successful_turn_and_response 使用真 fake app-server turns，再變更失敗／中斷、error、回覆缺失、身分與重複 turn；查詢前後 Store 不變，disconnect 後拒絕。
+
+13C OpenCode outcome 以保存的真 1.18.34 model history 驗 parentID、finish、error、缺完成時間、空白／synthetic／外來 part、重複 ID 拒絕；backend_canary 另啟動原生 fake-opencode-cli 驗正式 daemon／HTTP／client 全流程。
+
+Claude outcome：`driver::claude::outcome` 使用先前真測 ACK/PostToolUse/Stop 的欄位投影（fixture 附來源 SHA-256），驗缺失／重播／錯 session／空白回覆與生命週期中斷；`claude_store::execution_outcome` 以正式 reservation/ACK/event producer 驗只 ACK 不成功、Stop 後成功、查詢不改狀態與重開保存。不代表新的真 Claude 回合驗收。
+
+13C `backend_versions::tests` 核 runtime 啟動時的 executable binding：實際執行映像可辨識、相同 bytes 的不同 inode 拒絕、捕獲後原子替換不採納。macOS 實際 mapping 已原生測試；Linux `/proc/self/exe` 路徑尚待 Linux 執行。受管啟動仍拒絕，直到驗證與 exec 之間的檔案固定完成。
+
+13C 快照 proof reuse：`backend_versions::snapshot::tests` 核對回傳 binding 屬於快照 inode、不能套用到原始檔，並保留來源替換／錯摘要／symlink 拒絕案例。搭配 `agend` 的 `pinned_launcher` 與 CLI table 原生重啟測試，確認減少重複雜湊後仍保留啟動完整性與既有 CLI 等待期限。
+
+`cargo test -p agend-daemon --test managed_launch --test store` 使用真 SQLite 檔驗證關閉重開後紀錄不變、未取回結果不可盲目重試、舊 CAS／改變的 instance／錯 backend 與摘要拒絕、同名 instance 刪除重建不繼承 binding。schema v18 fixture 與既有各版升級、retention 覆蓋一併檢查。此批只證明持久儲存契約，尚非端到端受管啟動。
+
+受管 link 的取消測試 `closing_a_pending_binding_query_is_prompt_and_emits_no_rejection` 以 native socket 收到真序列化 GetLaunchBinding 後扣住回覆，驗證 intentional close 一秒內停止且不發 LaunchBindingRejected；核對仍共用原始十秒期限。全路徑 native holder 與 SQLite 重連在 `agend/tests/holder_runtime.rs`。
+
+`tests/backend_switch.rs` 使用原生 SQLite／正式 launch reservation producer，驗 prepare 不改 program、重開後 commit／rollback 的 program 與 phase 一致、重送舊記錄拒絕、設定衝突不留下半套狀態，Prepared 取消保留 program／PID 並允許新請求、Committed 拒絕取消，以及 instance 移除 cascade。這只驗儲存層，不證明 holder 停止或完整版本切換。
+
+`opencode_worker_lifecycle` 啟動真正 runtime worker，在缺 holder 的原生失敗回報處暫停；取消、建立新代及重複取消後，舊代未退出時不得回報停止。釋放所有回報後才變成停止；不使用模型，也不宣稱遠端回合已結束。
+
+`backend_switch` 另驗三 backend 的正式 reservation producer 在 Prepared／SQLite 重開後不留下 attempt，Claude channel／Stop 都暫停，取消後可取得 attempt；Claude／OpenCode 準備前的回執仍可確認。Codex driver 回歸驗既有投遞、重啟及歷史核對，這批不宣稱完整版本切換端到端通過。
+
+`backend_switch::prepared_switch_holds_inbox_reads_without_hiding_operator_history` 以 inbox instance、正式 message／launch reservation producer 驗最後筆數、after 與未知游標、Prepared 重開後拒絕、外來 instance 不受影響及取消恢復。`agend --test pipeline_context` 覆蓋原有 pipeline 經正式 socket 讀取 inbox 的行為。
+
+`codex_driver` 新增兩個原生生命週期反例：原生 Unix socket 接受連線但不回應握手時，disconnect 不能回報停止；實際 Gone callback 阻塞超過 close 等待時，舊代仍須列為 active，釋放 callback 後才能停止。使用正式 driver、原生 Unix socket／fake app-server，沒有模型呼叫。
+
+`agend/tests/backend_switch.rs` 用正式 daemon 及 CLI 驗持久 Prepared 的查詢／取消／重啟、agent 拒絕、空紀錄與 once decoder。此測試不啟動 backend，成功 prepare 與 holder 換版仍須後續原生整合驗證。
+
+重啟速度回歸跑 `cargo test -p agend --test cli --test client_protocol --test pinned_launcher`，並保留 `backend_versions::` 的改檔／身分拒絕測試。debug/test 的 sha2 壓縮迴圈最佳化不更改 10 秒 client 重連期限；本機固定 binary 的前後測不代替遠端兩平台 CI。
+
+`agend/tests/holder_runtime.rs` 的三項 `managed_stop_` 用真 SQLite 意圖及 holder producer 驗 UUID／holder PID／agent PID 不符拒絕、已消失對帳、替代與 legacy holder 保留。原生 proxy 在回傳 LaunchBinding 時替換 socket 路徑，確認 Shutdown 仍只送到原連線且另一 holder 存活；不手製 holder wire reply。
+
+`client_protocol::inbox_delivery_fence_tracks_complete_disconnected_and_timed_out_socket_writes` 經正式 Store／server 與 Unix socket，用 20 筆完整訊息製造背壓，驗完整接收、對端斷線、正式 5 秒寫入逾時都釋放回覆範圍；同一 instance 後來的新回覆不延長舊範圍。測試 producer 使用原生 ClientRequest；逾時的截斷回覆不視為完整訊息。
+
+`backend_switch::commit_and_restore_keep_all_delivery_paused_until_exact_activation_snapshot` 以三 backend × 啟用／回滾路徑，重開正式 SQLite 後驗 channel／Stop、Codex、OpenCode 與 inbox 保持暫停；精確新意圖／Running 快照才放行。過期 PID、舊 launch、不同 artifact、第二次 finish／新 prepare／cancel 都不能提前釋放；這是 Store 契約，不是實際 backend 啟動驗收。
+
+`agend/tests/terminal_hub.rs` 的 pending_backend_switch 案例在啟動前以正式 Store 保存 Prepared，daemon 啟動後驗 acquire／resize／input／legacy 拒絕、唯讀可用，正式 cancel RPC 後恢復；不是 canary 或 managed holder 身分驗證。backend_switch_drain 案例用真 holder／PTY 暫停讀取製造背壓，確認控制請求返回前排空未完成，放行後核完整 bytes；持有真控制權時即使 Prepared 也可 release。
+
+`codex_driver::fresh_thread_idle_requires_terminal_native_turns_and_a_live_connection` 對 fake app-server 的真 socket 核空 thread、執行中、完成、斷線；從 producer 的回合與分頁做缺欄／未知狀態反例，不以 cached busy 判閒置。這不是受管 holder 停止或真模型 smoke。
+
+OpenCode 即時閒置查詢的跨程序驗證在 `agend/tests/opencode_bridge.rs`：真 daemon 啟動 wrapper／fake REST 後停止 daemon，沿用存活 holder 查閒置與 busy、拒絕錯 session，停止 holder 後拒絕查詢；普通停止與 killed-holder 恢復兩條均覆蓋。
+
+`backend_switch::prepared_pauses_startup_keys_without_blocking_target_activation` 核 Prepared 不消耗 key intent、cancel 可繼續、Committed 新 startup 可 reservation 而舊快照拒絕。原生按鍵驗證在 `agend` 的 `claude_startup::startup_prepared_switch_holds_native_keys_until_operator_cancels`。
+
+`backend_versions::launcher::tests::native_launcher_success_failure_timeout_and_changed_identity` 使用原生 shell 子程序核 launcher 參數、失敗、逾時清理與修改後拒絕。macOS 新複本並行首次執行另保存冷／暖啟動計時；功能驗證重跑 `agend --test claude_bridge claude_startup::` 的預設並行模式，不以序列結果代替。
+
+Claude observer 的原生測試在 `agend/tests/claude_bridge.rs` 的 `claude_idle_observation_requires_live_hook_session_and_original_holder_connection`；實際 server／holder／hook helper 驗穩定期、busy、錯 session、重連與只有 Stop 不足以重綁。
+
+13C：pending backend switch 阻止一般 boot start、自動重啟與 operator retry 改寫啟動意圖。`backend_switch::pending_switch_boot_preserves_launch_reservation_without_ordinary_restart` 經原生 daemon 驗三種 pending phase 跨 boot 保留精確資料；專用換版恢復仍待串接。
+
+13C Codex 閒置觀察在同一 worker 排序於先前 RPC 之後，先確認原生 queue 的 data 為空且 nextCursor 明確為 null，再讀完整 turns；後端佇列非空或欄位缺失不當作閒置。原生 fake app-server 測試包含第二筆排隊訊息、消化後空佇列，以及真 producer 回覆的缺欄位／錯形狀反例。
+
+13C 新增 `backend switch activate／rollback --switch-id`：精確持久 ID、目的版本准入、投遞排空與 native idle 後停止受管 holder；Committed／Restoring 保持暫停，核新 holder 綁定及 readiness 後才釋放。Activated／Committed 回滾先保存 RollbackPrepared；daemon 重啟後由定期協調器繼續。三 backend 原生假版本往返與目的 holder 消失後自動回退已驗；完整 crash matrix 尚未完成。
+
+經身分驗證的目前代 `AgentExited` 也可觸發目的版本回退：先保存 RollbackPrepared、排空既有回覆及 worker，再以持久 UUID／holder PID／agent PID 停止精確 holder，恢復舊版本。driver Gone 或 StartFailed 不等於原生退出，不能走這條捷徑。Codex fixture 在 app-server 交接完成後讓 TUI 自行退出，已驗恢復舊版及原 session；app-server 單獨退出而包裝仍存活的情況尚待處理。
+
+13C 換版問題的原生 Store 測試驗重開保留原因／等待時間、重複觀察不刷新、舊快照拒絕、取消及成功啟用／回退清除問題。`native_codex_disconnected_candidate_reports_a_durable_problem_without_stopping_holder` 讓假 app-server 自行退出但保留包裝／holder，經正式 status 核持久問題、「需要你」通知及 daemon 重啟後同一等待時間／holder，沒有真 backend 或模型呼叫。
+
+13C activation deadline 的 Store 測試使用明確時鐘值，核到期前一毫秒／邊界、時間倒退、重開、問題更新不延長期限，以及 Restoring 才重新計時。原生 pending boot 測試用正式 Store 建立已過期 Committed／Restoring，兩次 daemon 啟動核相同 deadline／problem、原設定與啟動意圖不變；Prepared 不誤報逾時。這是故障狀態恢復證據，不代表真模型啟動耗時測量。
+
+13D `native_pairing_*` 透過 notifier 的真 HTTP client 與本機 producer、既有 Telegram 錄製 message／GetMe 外形，核新鮮 nonce、精確確認、私聊／forum topic、bot 身分改變、過期不連線、轉傳／匿名／編輯／舊訊息／錯 bot／歧義目的地與重複 update 拒絕。配對只呼叫 GetMe／GetUpdates，不送訊息或啟用 allowlist；不代表持久化、CLI 或真 bot 已完成。
+
+13D `telegram_pairing_store` 使用正式 core 配對 producer 與真 SQLite，驗候選／游標重開、保留期限、精確確認、過期、身分及游標竄改、明確替換與兩個執行緒取消／觀察競爭。確認收據不等於 config 已套用；CLI／RPC 與真 Telegram 尚未涵蓋。`store` 驗 schema 1–20 升級及 golden schema。
+
+13D notifier native HTTP 測試另驗 `PairingService`：重複 Begin／錯目的地在 HTTP 前拒絕、已配置 worker 不競爭 getUpdates、取消 caller 後第二個請求等待 cursor 發布且只讀一次更新。僅本機 fixture，沒有真 Telegram 操作。
+
+配對 RPC／daemon 啟停與正式 CLI 回歸位於 `agend/tests/telegram_pairing.rs`；HTTP／caller 取消語意由 notifier native tests 涵蓋，真 bot 驗收尚未執行。
+
+config encode 與 parse 共用正式 TOML producer／consumer；CLI apply 的原生測試核對重讀值與確認收據相同。daemon 仍不寫 config.toml。
+
+13E：建置 `pipeline_probe` 與 `fake-worker` 後，跑 `python3 -B scripts/release_install_smoke.py --directory <release目錄> --commit <SHA> --target <native-target> --probe <pipeline_probe絕對路徑> --worker <fake-worker絕對路徑>`。驗證 archive 後僅解出 agend，以清空環境與自有 HOME 啟動 probe；核 init 私有權限、task done／唯一 merge／worktree 清理／設定原文保留與 300 秒預算。probe 使用正式 fixture 寫入測試 team／workflow／worker，因此不代表使用者真 backend onboarding 已驗收。
+
+canary scope 參數比對在 agend 的 `backend_canary` 原生測試核正式 create producer，包含模型值被替換、移除與額外參數。
+
+13C 明確 `--auth-file` 的格式、私有路徑與真測邊界見[canary 認證](../../docs/architecture/backend-canary-auth.md)。本機測試涵蓋 private copy、來源不變、OpenCode 正式 Layout 保留認證、scope 錯配與權限拒絕；完整 native canary 使用測試用憑證，沒有真帳戶或模型呼叫。
+
+CLP-14 的真 daemon 契約核 InstanceAdd 指定的 program 出現在 fleet，避免 doctor 只取得 backend 名稱。
+
+registry 的四組測試經 native loopback HTTP 重播真 npm manifest；捕獲來源與 SHA-256 在 tests/fixtures/backend_registry/README.md。變造套件／版本、非 JSON、3xx／5xx、超量、標頭延遲與 body 傳送中停頓皆拒絕；不把樣本版本宣稱為支援版本。
+
+`store::backend_registry` 用真 SQLite 重開驗證每日邊界、時鐘倒退、遺失完成、舊 attempt、重複完成、錯誤保留成功資料、重複錯誤不重開提醒、舊 revision 不可確認新提醒。全 schema fixture 升級與 retention 檢查涵蓋 migration 0021。
+
+registry notification 測試以真 SQLite／Fleet 核對重啟恢復、等待時間不因下一次查詢改變、舊 revision 不可確認新版、ack 重開後仍有效；worker 測試核對查詢前已有持久 reservation，重開不重送。HTTP 整體期限由 registry 原生 loopback 四項測試覆蓋；真服務生命週期仍屬後續驗收。
+
+registry 覆核補測：native Telegram HTTP callback 真正更新觀測 ack、舊按鈕不能確認新 revision；相同／混合／未受管 fleet 通知判斷；原生 backend_switch lab 停機後 registry 表仍無嘗試，證明離線設定在 reservation 前生效。version_probe 原有三個程序測試搬入 daemon，新增只接收明示環境與 cwd 的原生腳本測試。
+
+monitor 停機案例用真 loopback HTTP 重播 npm manifest，body 傳到一半時請求 stop，先核 stop 未完成，放行 body 後核結果已提交、第二 backend 沒有 reservation，重開 SQLite 仍有成功結果。這是 worker／HTTP／DB 生命週期證據，不代替主機 launchd 驗收。
+
+system_version 四項 native 測試涵蓋 daemon PATH／相對 cwd、版本替換、symlink 在查詢中改指向、無效受管 manifest 不執行，以及真 runtime 不傳入非白名單測試 secret。全為私有假 CLI，未執行使用者的真 backend。
+
+`store::system_versions` 使用真正的 `system_version::observe` 執行本機假 CLI，再經 SQLite 預約／完成／確認及重開驗證：首次基準、換版、失敗保留、恢復、同值去重、時鐘倒退、舊 attempt、重複完成、配置變動、偽造 scope、刪除重建同名 instance 的舊結果與舊確認。migration 0022 追加 system_versions，外鍵在 instance 刪除時連帶清理。
+
+重新預約時若 backend／program／cwd 改變，建立新 generation 並重建基準，不沿用舊設定的成功值或確認。確認時亦核目前 scope。只有實際觀測到的 scope 變更可識別；兩次預約間未被觀測的 A→B→A 不宣稱可偵測。
+
+`native_external_version_*` 使用正式 runtime 執行假 CLI、SQLite、Fleet 與 loopback Telegram HTTP，驗證 monitor 停機等待 child／保存結果／不探測下一 instance，以及失敗提醒、手機確認、refresh 不重現與舊按鈕不能確認新 revision。共用 native Lab 同時停用 registry_checks 與 backend_version_checks，避免額外網路或 CLI 執行。
+
+外部版本通知補強：`native_disk_change_notice_and_exact_ack_survive_database_and_fleet_restarts` 以真 probe 對本機假 CLI 的 1.0／2.0／3.0 產生資料，核首次靜默、變動提醒、資料庫／Fleet 重開、確認持久化與舊確認拒絕；這是 producer→Store→通知完整路徑，未宣稱完整 daemon 服務重啟。停用／錯誤設定／canary 案例等待 worker 自行結束後才送 stop，核無 reservation 與執行 marker；managed 排除案例先放受管 instance，再等待下一外部 instance 完成以證實迴圈確實跑過。
+
+跨程序版本 monitor 的三次 daemon 啟動、socket operator／agent 邊界與確認持久化，另見 agend 的 `backend_version_monitor` integration suite。
+
+store::system_versions 診斷案例驗失敗保留歷史成功、配置 scope 改變不回傳舊紀錄、刪除 instance 得 None、managed args 變動不冒用預約且不刪原證據。tests/managed_launch.rs 驗正式 reservation producer 的 projection 排除 args／session；跨 RPC 的 agent／版本拒絕與 doctor consumer 見 agend backend_version_monitor。
+
+handlers::backend_capabilities 驗 Codex default／approved／verification-own／verification-other；既有 OpenCode driver／permission 回歸保留版本與身分條件，三 backend 的政策 consumer 由 agend backend_canary 真 daemon／假 backend 案例驗證。
+
+`daemon::monitor_tests::daemon_shutdown_*` 在隔離子程序跑正式 serve，同時扣住 loopback registry 半份 manifest 與原生假 CLI --version。SIGINT 後先核兩個 stop requested，再分別以 HTTP／CLI 優先的兩種順序放行；第一個 monitor 已 stopped 時 daemon 必須仍活，最後核 DB 結果、下一 backend／instance 未啟動、socket／probe／暫存消失。兩個丟棄 JoinHandle 的 mutation 各由對應反序案例抓出。此測試不啟動 holder、真 backend、模型或主機服務，不代替 launchd／systemd 生命週期驗收。
+
+## OpenCode 任務目錄授權
+
+`opencode_worktree` 以 deterministic OpenCode producer 產生目錄請求，驗 current work stage／ticket／assignee／session／binding／task version、拒絕多 pattern 與越界路徑，以及 shared once claim 不重送。worker 測試實際跑 `tick`，驗不支援版本與不同 endpoint 不 POST，正確 endpoint 回覆後持久化 resolved。這是合成協定測試，不宣稱新的模型真測或原生目錄 capture。
+
+agend/tests/terminal_hub.rs 的 readonly_fit 案例經真 daemon、holder、PTY 驗唯讀 resize、偽 attach input 被拒、另一 controller 保持尺寸與輸入權，以及 release 後新 fit 生效。
+
+第 13C Codex external login 的 production runner 回歸位於 `agend/tests/backend_canary.rs`；使用合成憑證，不呼叫真模型。完整真 backend 驗證仍須另列證據。

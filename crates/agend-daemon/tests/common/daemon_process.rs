@@ -77,7 +77,13 @@ impl Lab {
     /// Home `n` of this lab (created on first use).
     pub fn home(&self, n: usize) -> PathBuf {
         let home = self.root.join(format!("h{n}"));
-        let _ = fs::DirBuilder::new().mode(0o700).create(&home);
+        if fs::DirBuilder::new().mode(0o700).create(&home).is_ok() {
+            fs::write(
+                home.join("config.toml"),
+                "registry_checks = false\nbackend_version_checks = false\n",
+            )
+            .expect("offline native lab configuration");
+        }
         home
     }
 
@@ -578,6 +584,8 @@ pub fn env(lab: &Lab, tag: &str) -> Result<Vec<String>, String> {
         &[
             ("TELEGRAM_BOT_TOKEN", "demo-secret"),
             ("AGEND_SHIM_BYPASS", "1"),
+            ("DISABLE_AUTOUPDATER", "0"),
+            ("DISABLE_UPDATES", "0"),
         ],
     )?;
     d.ready()?;
@@ -595,6 +603,10 @@ pub fn env(lab: &Lab, tag: &str) -> Result<Vec<String>, String> {
     let bin = home.join("bin");
     ensure(!env.contains_key("TELEGRAM_BOT_TOKEN"), || text.clone())?;
     ensure(!env.contains_key("AGEND_SHIM_BYPASS"), || text.clone())?;
+    ensure(
+        env.get("DISABLE_AUTOUPDATER") == Some(&"1") && env.get("DISABLE_UPDATES") == Some(&"1"),
+        || "agent update isolation missing".into(),
+    )?;
     ensure(env.get("AGEND_INSTANCE") == Some(&id.as_str()), || {
         text.clone()
     })?;
@@ -604,7 +616,9 @@ pub fn env(lab: &Lab, tag: &str) -> Result<Vec<String>, String> {
         || text.clone(),
     )?;
     let git = fs::read_link(bin.join("git")).map_err(|e| format!("bin/git: {e}"))?;
-    let agend = fs::canonicalize(&lab.agend).map_err(|e| e.to_string())?;
+    let digest = agend_daemon::backend_versions::fingerprint(&lab.agend)?;
+    let agend = agend_daemon::backend_versions::verified_pinned_executable(&home, &digest)?;
+    let agend = fs::canonicalize(agend).map_err(|e| e.to_string())?;
     ensure(fs::canonicalize(&git).ok() == Some(agend), || {
         format!("bin/git -> {}", git.display())
     })?;

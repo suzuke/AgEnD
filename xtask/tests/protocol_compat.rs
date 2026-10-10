@@ -16,7 +16,7 @@ use serde_json::json;
 fn client_request_wire_shapes_are_stable_and_approval_does_not_supply_a_head() {
     assert_eq!(
         serde_json::to_value(ClientRequest::hello()).unwrap(),
-        json!({"type": "hello", "data": {"supported": [{"major": 1, "minor": 6}, {"major": 1, "minor": 5}, {"major": 1, "minor": 4}, {"major": 1, "minor": 3}]}})
+        json!({"type": "hello", "data": {"supported": [{"major": 1, "minor": 9}, {"major": 1, "minor": 8}, {"major": 1, "minor": 7}, {"major": 1, "minor": 6}, {"major": 1, "minor": 5}, {"major": 1, "minor": 4}, {"major": 1, "minor": 3}]}})
     );
 
     let review = ClientRequest::Command {
@@ -562,6 +562,9 @@ fn a_1_0_peer_decodes_1_1_messages() {
         v1_0::ClientRequest::Hello {
             data: v1_0::Hello {
                 supported: vec![
+                    v1_0::Version { major: 1, minor: 9 },
+                    v1_0::Version { major: 1, minor: 8 },
+                    v1_0::Version { major: 1, minor: 7 },
                     v1_0::Version { major: 1, minor: 6 },
                     v1_0::Version { major: 1, minor: 5 },
                     v1_0::Version { major: 1, minor: 4 },
@@ -652,6 +655,7 @@ fn a_1_0_peer_decodes_1_1_messages() {
             instance_id: "g8-2".into(),
             summary: "failed".into(),
             instance: Some(InstanceView {
+                program: None,
                 instance_id: "g8-2".into(),
                 team_id: "general".into(),
                 backend: "claude".into(),
@@ -972,6 +976,7 @@ fn a_1_1_peer_decodes_1_2_messages() {
         })
     );
     let view = InstanceView {
+        program: Some("/private/imported/codex".into()),
         instance_id: "g9-1".into(),
         team_id: "general".into(),
         backend: "codex".into(),
@@ -1032,6 +1037,7 @@ fn a_1_2_peer_decodes_1_1_messages() {
         state: "unknown".into(),
     });
     assert_eq!(view.working_directory, None);
+    assert_eq!(view.program, None);
 }
 
 #[test]
@@ -1128,6 +1134,7 @@ fn full_terminal_requests_are_additive_and_acquire_cannot_choose_an_attach_id() 
         },
         ClientRequest::SetTerminalViewport {
             data: TerminalViewportData {
+                fit_size: None,
                 request_id: "v-2".into(),
                 instance_id: "i-1".into(),
                 view_id: "view-1".into(),

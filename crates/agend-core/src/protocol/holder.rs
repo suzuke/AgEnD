@@ -23,7 +23,8 @@ use super::{Hello, ProtocolVersion, VersionMismatch, negotiate};
 pub const V1: ProtocolVersion = ProtocolVersion::new(1, 0);
 pub const V1_1: ProtocolVersion = ProtocolVersion::new(1, 1);
 pub const V1_2: ProtocolVersion = ProtocolVersion::new(1, 2);
-pub const SUPPORTED_VERSIONS: [ProtocolVersion; 2] = [V1_2, V1_1];
+pub const V1_3: ProtocolVersion = ProtocolVersion::new(1, 3);
+pub const SUPPORTED_VERSIONS: [ProtocolVersion; 3] = [V1_3, V1_2, V1_1];
 
 /// Longest request line a holder reads, its newline included (1 MiB); a
 /// longer one gets `request_too_large` and the connection is closed. The
@@ -114,6 +115,14 @@ pub enum HolderRequest {
     Spawn {
         data: SpawnData,
     },
+    /// Atomically associates a daemon-persisted UUID with the one native spawn.
+    SpawnBound {
+        data: BoundSpawnData,
+    },
+    /// Reads the original binding; never adopts a new one for an existing agent.
+    GetLaunchBinding {
+        instance_id: String,
+    },
     Resize {
         data: ResizeData,
     },
@@ -156,6 +165,20 @@ pub struct SpawnData {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BoundSpawnData {
+    pub binding: String,
+    pub spawn: SpawnData,
+}
+
+/// Opaque launch receipt. Never returns argv, environment or credentials.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LaunchBindingData {
+    pub instance_id: String,
+    pub binding: Option<String>,
+    pub process_id: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResizeData {
     pub rows: u16,
     pub columns: u16,
@@ -179,6 +202,9 @@ pub enum HolderResponse {
     },
     Spawned {
         data: SpawnedData,
+    },
+    LaunchBinding {
+        data: LaunchBindingData,
     },
     ScreenSnapshot {
         data: ScreenSnapshotData,
@@ -271,11 +297,12 @@ mod tests {
     }
 
     #[test]
-    fn holder_hello_advertises_v1_2_and_keeps_v1_1() {
+    fn holder_hello_advertises_v1_3_and_keeps_older_versions() {
         let HolderRequest::Hello { data: hello } = HolderRequest::hello() else {
             unreachable!();
         };
-        assert_eq!(negotiate_version(&hello), Ok(V1_2));
+        assert_eq!(negotiate_version(&hello), Ok(V1_3));
+        assert_eq!(negotiate_version(&Hello::new(&[V1_2])), Ok(V1_2));
         assert_eq!(negotiate_version(&Hello::new(&[V1_1])), Ok(V1_1));
     }
 }

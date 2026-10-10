@@ -1,0 +1,42 @@
+# Backend 公開版本查詢
+
+> **TL;DR**
+> - `backend latest` 只讀 npm 公開 metadata。
+> - 固定來源、套件身分、期限與大小上限。
+> - 不取代 canary；受管 fleet 每日查詢並提供確認提醒。
+
+## 公開最新版查詢
+
+`agend backend latest claude --json`（亦接受 codex／opencode）讀取 npm 官方 registry 的對應 package `/latest` manifest，核 `name` 與受限版本字串。來源固定 https://registry.npmjs.org，TLS 驗證、拒轉址與 proxy 環境繼承，5 秒整體 HTTP deadline、256 KiB response 上限。不呼叫模型、不安裝、不改 fleet。
+
+來源介面：[npm registry API](https://github.com/npm/registry/blob/main/docs/REGISTRY-API.md#getpackageversion)。latest 是 registry 的 tag，不保證大於目前使用版本，也不代表 AgEnD 支援；必須另做 import／canary／明確 switch。daemon 的受管 fleet 另以持久每日排程查詢；CLI 單次查詢不寫入 daemon 的每日紀錄。
+
+## 離線設定
+
+config.toml 的根層可設 `registry_checks = false`，停用 daemon 自動查詢；省略時啟用。`backend latest` 是操作員明確的單次查詢，不受此開關影響。native daemon 測試以此設定隔離外部網路；canary home 仍一律跳過。
+
+## 驗證
+
+三個 npm 原始 manifest 保存在 daemon 的 tests/fixtures/backend_registry，來源、時間及 SHA-256 一併記錄。測試透過本機 HTTP 重播，另變造套件名稱／版本及測試轉址、5xx、非 JSON、超量與逾時。
+
+## 持久紀錄
+
+migration 0021 的 backend_registry 最多保存三筆（每個 backend 一筆）。查詢前先保存 attempt 與開始時間；24 小時內不再預約，包含重啟與沒有完成回報的情況。時鐘倒退不提前觸發；舊 attempt 與重複完成均拒絕。失敗保留最近成功 metadata，另外保存 error，不能把歷史值當作本次成功。
+
+結果內容或錯誤改變才增加 revision；同樣結果不重開提醒。acknowledge 必須匹配當前非零 revision；查詢本身不安裝、啟用或確認任何版本。daemon 每分鐘檢查受管 fleet，設定 program 必須仍符合 managed launch 才啟動每日查詢。canary home 不額外查最新版。查詢在 blocking worker，停機等待當前有期限的 HTTP 結束，不遺留脫離管理的查詢。ingest 恢復提醒，operator 只能 acknowledge；等待時間綁結果變動時間，確認與刷新序列化，避免舊快照重新發布已確認提醒。
+
+## 被動版本探測入口
+
+`HolderRuntime::observe_backend_version` 以 daemon 捕獲的 PATH 與 instance cwd 解析外部程式，使用 agent_env 白名單（含 backend 更新停用旗標），不繼承 daemon token。共用限時 --version probe，執行前後核檔案 hash／metadata 與 PATH／symlink 解析結果；不接受在探測期間換程式的結果。受管路徑先核 manifest，無效 bytes 不得退回外部探測。
+
+這只描述當次磁碟程式，不宣稱存活 holder 已換版；持久紀錄與提醒見下方 monitor 說明。
+
+## 下一步
+
+補未受管 CLI 的被動漂移與整體原生服務驗收。worker 的 active HTTP 停機已由真 loopback／SQLite 測試覆蓋，尚未取代完整服務測試；查詢失敗不能推進為已知最新版，也不能影響正在工作的 backend。
+
+外部觀測的持久資料由 `system_versions` 保存，每個 instance 一列並在明確刪除 instance 時 cascade。先預約 attempt 再探測；完成時核 generation、attempt、scope 與目前 instance 設定。首個成功值只建立基準；後續身份變動、失敗及恢復才增加 revision，失敗保留最後成功值。generation 防止同名 instance 重建時沿用舊確認。此 Store API 供背景 worker 與提醒共用。
+
+重新預約時若 backend／program／cwd 改變，建立新 generation 並重建基準，不沿用舊設定的成功值或確認。確認時亦核目前 scope。只有實際觀測到的 scope 變更可識別；兩次預約間未被觀測的 A→B→A 不宣稱可偵測。
+
+外部觀測已接獨立 system_monitor（立即首輪、其後每 60 秒，Store 控制實際預約頻率），受管 launch 與 canary home 跳過。停機等待當次探測及保存後退出，不啟動下一 instance。backend-version 提醒只提供 acknowledge，綁 instance／generation／revision，經一般 operator 與 Telegram 路由同一持久 handler；ingest 恢復未確認提醒，pipeline 清理不刪除此類提醒。此觀測不代表既存 holder 已載入磁碟上的版本。

@@ -17,6 +17,19 @@ impl Actor {
             scope.send(error(Some(id.clone()), "stale_terminal", message));
             return;
         }
+        // Releasing control remains possible while paused. Acquire, resize and
+        // input can affect the backend and must finish before the switch drain.
+        let _switch_input = if matches!(data.operation, ClientTerminalOperation::Release { .. }) {
+            None
+        } else {
+            match self.switch_input().await {
+                Ok(guard) => guard,
+                Err(message) => {
+                    scope.send(error(Some(id.clone()), "backend_switch_pending", message));
+                    return;
+                }
+            }
+        };
         let acquire = matches!(data.operation, ClientTerminalOperation::Acquire { .. });
         let sized = matches!(
             data.operation,
@@ -183,5 +196,47 @@ impl Actor {
                 }
             }
         }
+    }
+}
+
+impl Actor {
+    /// The actor serializes this temporary grant with every real controller.
+    /// No attach ID is published, and even a disconnected reader is released.
+    pub(super) async fn fit_readonly(
+        &mut self,
+        generation: &str,
+        size: TerminalSize,
+    ) -> Result<(), String> {
+        let hub = self.hub.upgrade().ok_or("terminal hub stopped")?;
+        let attach_id = token(&hub, "fit");
+        let connection = self.connection.as_ref().ok_or("terminal disconnected")?;
+        let ack = connection
+            .control(
+                generation.to_owned(),
+                TerminalControlOperation::Acquire {
+                    attach_id: attach_id.clone(),
+                    size,
+                },
+            )
+            .await
+            .map_err(|e| e.message)?;
+        connection
+            .control(
+                generation.to_owned(),
+                TerminalControlOperation::Release { attach_id },
+            )
+            .await
+            .map_err(|e| e.message)?;
+        let frame = ack
+            .frame
+            .ok_or("holder did not acknowledge readonly resize")?;
+        if frame.size != size || frame.generation != generation {
+            return Err("holder readonly resize identity mismatch".into());
+        }
+        for view in self.views.values_mut() {
+            view.size = size;
+        }
+        self.dirty = true;
+        Ok(())
     }
 }

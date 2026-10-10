@@ -399,6 +399,11 @@ pub fn run(arg: Option<&str>) -> Result<(), String> {
         println!(
             "gate 12 (adapters): native Claude, OpenCode, GitHub and Telegram checks passed; live acceptance is recorded separately"
         );
+    } else if gate.number == 13 {
+        crate::install_demo::run()?;
+        println!(
+            "gate 13 (install): native checks passed; release and live acceptance are recorded separately"
+        );
     } else {
         println!(
             "gate {} ({}): checks passed; demo not implemented yet (it is added when this gate is built)",

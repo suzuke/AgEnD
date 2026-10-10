@@ -1,0 +1,123 @@
+{
+  "type": "a{sv}",
+  "data": [
+    {
+      "Type": {
+        "type": "s",
+        "data": "exec"
+      },
+      "Restart": {
+        "type": "s",
+        "data": "always"
+      },
+      "MainPID": {
+        "type": "u",
+        "data": 0
+      },
+      "ExecConditionEx": {
+        "type": "a(sasasttttuii)",
+        "data": []
+      },
+      "ExecStartPreEx": {
+        "type": "a(sasasttttuii)",
+        "data": []
+      },
+      "ExecStartEx": {
+        "type": "a(sasasttttuii)",
+        "data": [
+          [
+            "/usr/bin/true",
+            [
+              "/usr/bin/true"
+            ],
+            [],
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "ExecStartPostEx": {
+        "type": "a(sasasttttuii)",
+        "data": []
+      },
+      "ExecStopEx": {
+        "type": "a(sasasttttuii)",
+        "data": [
+          [
+            "/usr/bin/true",
+            [
+              "/usr/bin/true"
+            ],
+            [],
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "ExecStopPostEx": {
+        "type": "a(sasasttttuii)",
+        "data": []
+      },
+      "Environment": {
+        "type": "as",
+        "data": [
+          "AGEND_HOME=/foreign",
+          "HOME=/tmp/g13-user",
+          "PATH=/usr/bin:/bin"
+        ]
+      },
+      "EnvironmentFiles": {
+        "type": "a(sb)",
+        "data": []
+      },
+      "PassEnvironment": {
+        "type": "as",
+        "data": []
+      },
+      "UnsetEnvironment": {
+        "type": "as",
+        "data": [
+          "AGEND_INSTANCE"
+        ]
+      },
+      "WorkingDirectory": {
+        "type": "s",
+        "data": "/tmp/g13 data % $value \"quote\""
+      },
+      "RootDirectory": {
+        "type": "s",
+        "data": ""
+      },
+      "RootImage": {
+        "type": "s",
+        "data": ""
+      },
+      "User": {
+        "type": "s",
+        "data": ""
+      },
+      "Group": {
+        "type": "s",
+        "data": ""
+      },
+      "KillMode": {
+        "type": "s",
+        "data": "control-group"
+      },
+      "KillSignal": {
+        "type": "i",
+        "data": 15
+      }
+    }
+  ]
+}

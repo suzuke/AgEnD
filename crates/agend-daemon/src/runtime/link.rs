@@ -94,6 +94,7 @@ pub type TerminalFeed = (String, broadcast::Receiver<String>);
 struct Terminal {
     /// Waiting for the answer to their `Snapshot`.
     pending: Vec<oneshot::Sender<TerminalFeed>>,
+    bindings: Vec<oneshot::Sender<agend_core::protocol::holder::LaunchBindingData>>,
     live: broadcast::Sender<String>,
 }
 
@@ -109,6 +110,11 @@ pub enum HolderEvent {
     },
     /// The holder is gone: its connection ended and its lock is free.
     HolderGone { id: String, generation: u64 },
+    LaunchBindingRejected {
+        id: String,
+        generation: u64,
+        error: String,
+    },
 }
 
 /// Receives a link's events (from the link's thread).
@@ -119,9 +125,14 @@ pub type EventSink = Arc<dyn Fn(HolderEvent) + Send + Sync>;
 pub enum SpawnOutcome {
     /// The holder started the agent now; its pid (gate 7 P2: the codex
     /// sweep's process group).
-    Spawned { agent_pid: Option<u32> },
+    Spawned {
+        agent_pid: Option<u32>,
+    },
     /// The holder already ran its agent (gate 4 G10); nothing changed.
     AlreadySpawned,
+    BoundExisting {
+        agent_pid: Option<u32>,
+    },
 }
 
 /// What the first connection saw.
@@ -130,6 +141,12 @@ pub struct Attached {
     /// The holder's screen when the connection was made (no byte replay).
     pub screen: String,
     pub spawn: Option<SpawnOutcome>,
+}
+
+#[derive(Clone)]
+pub(super) struct LaunchProof {
+    pub binding: String,
+    pub reconnect: bool,
 }
 
 pub struct Link {
@@ -196,6 +213,7 @@ impl Link {
             operations: Some(operations),
             terminal: Arc::new(Mutex::new(Terminal {
                 pending: Vec::new(),
+                bindings: Vec::new(),
                 live: broadcast::channel(TERMINAL_CHUNKS).0,
             })),
             wake: None,
@@ -205,6 +223,19 @@ impl Link {
 
     /// Where [`input`] writes: the caller can drop its lock on the links
     /// before writing.
+    pub fn binding_request(
+        &self,
+    ) -> (
+        oneshot::Receiver<agend_core::protocol::holder::LaunchBindingData>,
+        Writer,
+    ) {
+        let (tx, rx) = oneshot::channel();
+        let mut terminal = lock(&self.terminal);
+        terminal.bindings.retain(|waiting| !waiting.is_closed());
+        terminal.bindings.push(tx);
+        (rx, self.writer())
+    }
+
     pub fn writer(&self) -> Writer {
         Writer {
             stream: Arc::clone(&self.stream),
@@ -280,6 +311,8 @@ struct Worker {
     terminal: Arc<Mutex<Terminal>>,
     structured: Channel,
     wake: Receiver<()>,
+    proof: Option<LaunchProof>,
+    early_exit: Mutex<Option<ExitedData>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -289,11 +322,12 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 /// Connects to the holder of `id` (sending `spawn` first if given) and keeps
 /// the connection on a new thread. Returns once the first connection (and
 /// the `Spawn` reply) is done.
-pub fn open(
+pub(super) fn open(
     home: PathBuf,
     id: String,
     generation: u64,
     spawn: Option<SpawnData>,
+    proof: Option<LaunchProof>,
     initial_size: Option<agend_core::protocol::terminal::TerminalSize>,
     sink: EventSink,
 ) -> Result<(Link, Attached), String> {
@@ -307,6 +341,7 @@ pub fn open(
     );
     let terminal = Arc::new(Mutex::new(Terminal {
         pending: Vec::new(),
+        bindings: Vec::new(),
         live: broadcast::channel(TERMINAL_CHUNKS).0,
     }));
     let (wake_tx, wake) = mpsc::channel();
@@ -321,6 +356,8 @@ pub fn open(
         terminal: Arc::clone(&terminal),
         structured: structured.clone(),
         wake,
+        proof,
+        early_exit: Mutex::new(None),
     };
     let thread = std::thread::Builder::new()
         .name(format!("holder-link-{id}"))
@@ -397,10 +434,6 @@ impl Worker {
                 }
             }
         };
-        if !self.publish(&conn) {
-            let _ = first.send(Err("closed".into()));
-            return;
-        }
         if let Some(size) = initial_size
             && let Err(e) = conn.send(&HolderRequest::Resize {
                 data: agend_core::protocol::holder::ResizeData {
@@ -412,10 +445,34 @@ impl Worker {
             let _ = first.send(Err(format!("set initial terminal size: {e}")));
             return;
         }
-        let outcome = match spawn {
-            Some(data) => self.spawn(&mut conn, data).map(Some),
-            None => Ok(None),
+        let outcome = if self.proof.as_ref().is_some_and(|proof| proof.reconnect) {
+            self.verify_binding(&mut conn)
+                .map(|agent_pid| Some(SpawnOutcome::BoundExisting { agent_pid }))
+        } else {
+            match spawn {
+                Some(data) => self.spawn(&mut conn, data).and_then(|outcome| {
+                    if self.proof.is_some() {
+                        let verified_pid = self.verify_binding(&mut conn)?;
+                        if outcome
+                            != (SpawnOutcome::Spawned {
+                                agent_pid: verified_pid,
+                            })
+                        {
+                            return Err("spawn reply differs from holder launch binding".into());
+                        }
+                    }
+                    Ok(Some(outcome))
+                }),
+                None => Ok(None),
+            }
         };
+        let outcome = outcome.and_then(|outcome| {
+            if self.publish(&conn) {
+                Ok(outcome)
+            } else {
+                Err("closed".into())
+            }
+        });
         let failed = outcome.is_err();
         let _ = first.send(outcome.map(|spawn| Attached { screen, spawn }));
         if failed {
@@ -426,6 +483,7 @@ impl Worker {
             self.structured
                 .disconnected("the holder connection ended; acquire control again");
             lock(&self.terminal).pending.clear();
+            lock(&self.terminal).bindings.clear();
             lock(&self.stream).take();
             match self.reconnect(&socket) {
                 Some(next) => conn = next,
@@ -435,7 +493,20 @@ impl Worker {
     }
 
     fn spawn(&self, conn: &mut Conn, data: SpawnData) -> Result<SpawnOutcome, String> {
-        conn.send(&HolderRequest::Spawn { data })
+        let request = if let Some(proof) = &self.proof {
+            if conn.version < agend_core::protocol::holder::V1_3 {
+                return Err("managed launch requires holder protocol 1.3".into());
+            }
+            HolderRequest::SpawnBound {
+                data: agend_core::protocol::holder::BoundSpawnData {
+                    binding: proof.binding.clone(),
+                    spawn: data,
+                },
+            }
+        } else {
+            HolderRequest::Spawn { data }
+        };
+        conn.send(&request)
             .map_err(|e| format!("send Spawn: {e}"))?;
         loop {
             match conn.recv_within(SPAWN_REPLY_WITHIN) {
@@ -444,7 +515,9 @@ impl Worker {
                         agent_pid: data.process_id,
                     });
                 }
-                Ok(HolderResponse::Error { data }) if data.code == "already_spawned" => {
+                Ok(HolderResponse::Error { data })
+                    if data.code == "already_spawned" && self.proof.is_none() =>
+                {
                     return Ok(SpawnOutcome::AlreadySpawned);
                 }
                 Ok(HolderResponse::Error { data }) => {
@@ -452,9 +525,73 @@ impl Worker {
                 }
                 // An agent that ended before this connection: the holder
                 // sends `Exited` right after the screen.
-                Ok(HolderResponse::Exited { data }) => self.exited(data),
+                Ok(HolderResponse::Exited { data }) => {
+                    if self.proof.is_some() {
+                        *lock(&self.early_exit) = Some(data);
+                    } else {
+                        self.exited(data);
+                    }
+                }
                 Ok(_) => {}
                 Err(e) => return Err(format!("no reply to Spawn: {e}")),
+            }
+        }
+    }
+
+    fn reject_binding(&self, error: String) {
+        if !self.stopping.load(Ordering::SeqCst) {
+            (self.sink)(HolderEvent::LaunchBindingRejected {
+                id: self.id.clone(),
+                generation: self.generation,
+                error,
+            });
+        }
+    }
+
+    fn verify_binding(&self, conn: &mut Conn) -> Result<Option<u32>, String> {
+        let proof = self.proof.as_ref().ok_or("missing managed launch proof")?;
+        if conn.version < agend_core::protocol::holder::V1_3 {
+            return Err("managed reconnect requires holder protocol 1.3".into());
+        }
+        conn.send(&HolderRequest::GetLaunchBinding {
+            instance_id: self.id.clone(),
+        })
+        .map_err(|e| format!("query launch binding: {e}"))?;
+        let deadline = Instant::now() + SPAWN_REPLY_WITHIN;
+        loop {
+            if self.stopping.load(Ordering::SeqCst) {
+                return Err("closed".into());
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err("no launch binding reply before deadline".into());
+            }
+            let response = match conn.recv(Some(remaining.min(Duration::from_millis(100)))) {
+                Ok(Some(response)) => response,
+                Ok(None) => continue,
+                Err(e) => return Err(format!("no launch binding reply: {e}")),
+            };
+            match response {
+                HolderResponse::LaunchBinding { data } => {
+                    if data.instance_id != self.id
+                        || data.binding.as_deref() != Some(proof.binding.as_str())
+                        || data.process_id.is_none_or(|pid| pid <= 1)
+                    {
+                        return Err("holder launch binding differs from the persisted intent; holder preserved".into());
+                    }
+                    let exited = lock(&self.early_exit).take();
+                    if let Some(exited) = exited {
+                        self.exited(exited);
+                    }
+                    return Ok(data.process_id);
+                }
+                HolderResponse::Error { data } => {
+                    return Err(format!("launch binding refused: {}", data.code));
+                }
+                HolderResponse::Exited { data } => {
+                    *lock(&self.early_exit) = Some(data);
+                }
+                _ => {}
             }
         }
     }
@@ -479,6 +616,11 @@ impl Worker {
                     let mut terminal = lock(&self.terminal);
                     for waiting in std::mem::take(&mut terminal.pending) {
                         let _ = waiting.send((data.screen.clone(), terminal.live.subscribe()));
+                    }
+                }
+                Ok(Some(HolderResponse::LaunchBinding { data })) => {
+                    for waiting in std::mem::take(&mut lock(&self.terminal).bindings) {
+                        let _ = waiting.send(data.clone());
                     }
                 }
                 Ok(Some(HolderResponse::PtyBytes { data })) => {
@@ -519,7 +661,13 @@ impl Worker {
                 }
                 return None;
             }
-            if let Ok((conn, _)) = Conn::connect(socket) {
+            if let Ok((mut conn, _)) = Conn::connect(socket) {
+                if self.proof.is_some()
+                    && let Err(error) = self.verify_binding(&mut conn)
+                {
+                    self.reject_binding(error);
+                    return None;
+                }
                 if !self.publish(&conn) {
                     return None;
                 }
@@ -532,6 +680,64 @@ impl Worker {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn closing_a_pending_binding_query_is_prompt_and_emits_no_rejection() {
+        use std::io::{BufRead, BufReader};
+        let (stream, peer) = UnixStream::pair().unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let mut conn = Conn::test_stream(stream, agend_core::protocol::holder::V1_3);
+        let stopping = Arc::new(AtomicBool::new(false));
+        let published = Arc::new(Mutex::new(None));
+        let (structured, operations) = Channel::start(
+            Arc::clone(&published),
+            Arc::new(Mutex::new(())),
+            Arc::clone(&stopping),
+        );
+        let (events_tx, events_rx) = mpsc::channel();
+        let (_wake, wake) = mpsc::channel();
+        let worker = Worker {
+            home: PathBuf::new(),
+            id: "pending".into(),
+            generation: 1,
+            sink: Arc::new(move |event| {
+                let _ = events_tx.send(event);
+            }),
+            stopping: Arc::clone(&stopping),
+            stream: published,
+            terminal: Arc::new(Mutex::new(Terminal {
+                pending: Vec::new(),
+                bindings: Vec::new(),
+                live: broadcast::channel(1).0,
+            })),
+            structured,
+            wake,
+            proof: Some(LaunchProof {
+                binding: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".into(),
+                reconnect: true,
+            }),
+            early_exit: Mutex::new(None),
+        };
+        let thread = std::thread::spawn(move || {
+            let error = worker.verify_binding(&mut conn).unwrap_err();
+            worker.reject_binding(error.clone());
+            error
+        });
+        let mut peer = BufReader::new(peer);
+        let mut line = String::new();
+        peer.read_line(&mut line).unwrap();
+        assert!(matches!(
+            serde_json::from_str::<HolderRequest>(&line).unwrap(),
+            HolderRequest::GetLaunchBinding { .. }
+        ));
+        // The native socket remains open and deliberately withholds its reply.
+        let start = Instant::now();
+        stopping.store(true, Ordering::SeqCst);
+        assert_eq!(thread.join().unwrap(), "closed");
+        assert!(start.elapsed() < Duration::from_secs(1));
+        operations.join().unwrap();
+        assert!(events_rx.try_recv().is_err());
+    }
 
     fn writer_on(stream: UnixStream) -> Writer {
         Writer {

@@ -86,6 +86,40 @@ async fn send(
     level: Option<MessageLevel>,
     message_id: Option<String>,
 ) -> Result<CommandResult, Refusal> {
+    send_from(ctx, Some(caller), to, body, level, message_id).await
+}
+
+pub(super) async fn send_operator(
+    ctx: &Context,
+    to: String,
+    body: String,
+    message_id: String,
+) -> Result<CommandResult, Refusal> {
+    send_from(
+        ctx,
+        None,
+        to,
+        body,
+        Some(MessageLevel::Queue),
+        Some(message_id),
+    )
+    .await
+}
+
+async fn send_from(
+    ctx: &Context,
+    agent: Option<&str>,
+    to: String,
+    body: String,
+    level: Option<MessageLevel>,
+    message_id: Option<String>,
+) -> Result<CommandResult, Refusal> {
+    if agent == Some(agend_core::protocol::client::OPERATOR_MESSAGE_SENDER) {
+        return Err((
+            error_code::FORBIDDEN,
+            "the human sender namespace cannot be used by an agent".into(),
+        ));
+    }
     if body.len() > MAX_MESSAGE_BYTES {
         return Err((error_code::INVALID_REQUEST, too_long(body.len())));
     }
@@ -121,9 +155,12 @@ async fn send(
             format!("cannot read instances: {e}"),
         )
     };
-    if ctx.store.instance(caller).await.map_err(read)?.is_none() {
+    if let Some(caller) = agent
+        && ctx.store.instance(caller).await.map_err(read)?.is_none()
+    {
         return Err(not_an_instance(caller));
     }
+    let caller = agent.unwrap_or(agend_core::protocol::client::OPERATOR_MESSAGE_SENDER);
     let message = AgentMessage {
         id: id.clone(),
         from: caller.to_owned(),
@@ -168,27 +205,12 @@ async fn inbox(
             format!("cannot read messages: {e}"),
         )
     };
-    let messages = match after {
-        None => {
-            let mut all = ctx.store.messages_to(caller).await.map_err(read)?;
-            let skip = all.len().saturating_sub(INBOX_LAST);
-            all.drain(..skip);
-            all
-        }
-        Some(after) => ctx
-            .store
-            .messages_after(caller, &after)
-            .await
-            .map_err(read)?
-            .ok_or_else(|| {
-                (
-                    error_code::UNKNOWN_MESSAGE,
-                    format!(
-                        "you have no message {after} (unknown, older than 30 days, or not yours); run agend inbox without --after"
-                    ),
-                )
-            })?,
-    };
+    let messages = ctx.store.inbox_messages(caller, after.as_deref(), INBOX_LAST)
+        .await.map_err(read)?.ok_or_else(|| {
+            let after = after.as_deref().unwrap_or_default();
+            (error_code::UNKNOWN_MESSAGE,
+             format!("you have no message {after} (unknown, older than 30 days, or not yours); run agend inbox without --after"))
+        })?;
     Ok(CommandResult::Messages {
         data: MessagesData {
             messages: messages.into_iter().map(shown).collect(),

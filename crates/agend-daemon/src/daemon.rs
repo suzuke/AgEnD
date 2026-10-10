@@ -4,7 +4,8 @@
 //!
 //! Boot order: check the client socket path fits (100 bytes) → open
 //! `agend.db` (the one daemon per home: the DB's exclusive lock, retried
-//! every 200 ms for 10 s while an old daemon hands it over) → remove a stale
+//! every 200 ms for 10 s while an old daemon hands it over) → initialize logs
+//! and verify/pin the executable (with elapsed time) → remove a stale
 //! `run/daemon.sock` → housekeeping (failures only logged) → shim symlinks
 //! and codex's `ZDOTDIR` (`zsh/.zprofile`, gate 7 P4) → the boot plan (reconnect / start / orphans) → bind `run/daemon.sock`
 //! (`run/` 0700, socket 0600, gate 8 P1) → `agend daemon ready: …`. A
@@ -105,6 +106,7 @@ fn run_with_policy(
             return ExitCode::from(1);
         }
     };
+    let pin_executable = agend.is_none();
     let exe = match agend.map(Ok).unwrap_or_else(std::env::current_exe) {
         Ok(exe) => exe,
         Err(e) => {
@@ -132,6 +134,30 @@ fn run_with_policy(
         "agend.db opened (waited {} ms for the lock)",
         waited.as_millis()
     ));
+    log::line("verifying daemon executable and private launcher");
+    let launcher_started = std::time::Instant::now();
+    let launcher = if pin_executable {
+        match crate::backend_versions::ExecutableBinding::pin_running(&home, &exe) {
+            Ok((path, binding)) => {
+                if let Err(error) = crate::backend_versions::launcher::prepare(&path, &binding) {
+                    log::line(&error);
+                    return ExitCode::from(1);
+                }
+                (path, Ok(binding))
+            }
+            Err(error) => {
+                log::line(&format!("cannot pin running executable: {error}"));
+                return ExitCode::from(1);
+            }
+        }
+    } else {
+        let binding = crate::backend_versions::ExecutableBinding::capture_running(&exe);
+        (exe, binding)
+    };
+    log::line(&format!(
+        "daemon executable verified ({} ms)",
+        launcher_started.elapsed().as_millis()
+    ));
     let _stop_flags = match stop_flag::install() {
         Ok(guard) => guard,
         Err(e) => {
@@ -151,14 +177,14 @@ fn run_with_policy(
     };
     let stopped = runtime.block_on(serve(
         home,
-        exe,
+        launcher,
         store,
         codex_input,
         telegram,
         #[cfg(test)]
         None,
         #[cfg(test)]
-        false,
+        TestControl::default(),
     ));
     // Pending restart timers and the like are dropped, not awaited.
     runtime.shutdown_timeout(Duration::from_secs(1));
@@ -236,9 +262,19 @@ fn forward_signal(kind: SignalKind, name: &'static str, events: UnboundedSender<
     }
 }
 
+#[cfg(test)]
+#[derive(Default)]
+struct TestControl {
+    hold_supervisor_for_stop: bool,
+    registry_origin: Option<String>,
+}
+
 async fn serve(
     home: PathBuf,
-    exe: PathBuf,
+    launcher: (
+        PathBuf,
+        Result<crate::backend_versions::ExecutableBinding, String>,
+    ),
     store: SqliteStore,
     codex_input: agend_core::policy::codex_input::CodexInputPolicy,
     telegram: Option<(
@@ -246,8 +282,9 @@ async fn serve(
         crate::notifier::config::Token,
     )>,
     #[cfg(test)] telegram_api: Option<Arc<crate::notifier::http::Api>>,
-    #[cfg(test)] hold_supervisor_for_stop: bool,
+    #[cfg(test)] control: TestControl,
 ) -> Result<Stopped, ExitCode> {
+    let (exe, executable_binding) = launcher;
     if let Err(error) = store.recover_telegram_attempts().await {
         log::line(&format!(
             "agend daemon: cannot recover Telegram attempts: {error}"
@@ -300,7 +337,7 @@ async fn serve(
     });
     // Before any holder starts: the holders an exec restart left us.
     let inherited = crate::reaper::inherited(&home);
-    let runtime = HolderRuntime::new(&home, &exe, daemon_env, sink);
+    let runtime = HolderRuntime::with_binding(&home, &exe, daemon_env, sink, executable_binding);
     let fleet = Arc::new(Fleet::new(log::now_unix_ms()));
     use agend_core::attention_read::AttentionReadStore;
     fleet.restore_read_keys(store.attention_read_keys().await.map_err(|e| {
@@ -354,6 +391,10 @@ async fn serve(
         }
     };
     let context = Arc::new(Context {
+        pairing: crate::notifier::pairing_service::PairingService::new(
+            store.clone(),
+            telegram.is_some(),
+        ),
         pipeline,
         fleet,
         runtime,
@@ -371,7 +412,19 @@ async fn serve(
         }
         crate::notifier::worker::start(config, token, context.clone())
     });
+    let system_monitor = crate::backend_versions::system_monitor::Monitor::start(context.clone());
+    #[cfg(not(test))]
+    let registry_monitor = crate::backend_versions::monitor::Monitor::start(context.clone());
+    #[cfg(test)]
+    let registry_monitor = match control.registry_origin {
+        Some(origin) => {
+            crate::backend_versions::monitor::Monitor::start_at(context.clone(), origin)
+        }
+        None => crate::backend_versions::monitor::Monitor::start(context.clone()),
+    };
     let server = Server::start(listener, socket.clone(), Arc::clone(&context));
+    supervisor.set_delivery_replies(server.delivery_replies());
+    supervisor.set_claude_observer(server.claude_observer());
     log::line(&format!("listening on {}", socket.display()));
     log::line(&format!(
         "agend daemon ready: instances={} recovered={} started={} orphans={}",
@@ -391,7 +444,7 @@ async fn serve(
     });
 
     #[cfg(test)]
-    if hold_supervisor_for_stop {
+    if control.hold_supervisor_for_stop {
         // Force Stop ahead of a real inbound RetryConfirmed without replacing
         // the production receiver, dispatcher or shutdown path.
         let deadline = Instant::now() + Duration::from_secs(15);
@@ -420,6 +473,8 @@ async fn serve(
     log::line(&format!(
         "agend daemon stopping ({why}); holders keep running"
     ));
+    tokio::join!(system_monitor.stop(), registry_monitor.stop());
+    context.pairing.stop().await;
     server.stop().await;
     if let Some(worker) = telegram_worker {
         worker.stop().await;
@@ -435,3 +490,6 @@ async fn serve(
 
 #[cfg(test)]
 mod telegram_tests;
+
+#[cfg(test)]
+mod monitor_tests;

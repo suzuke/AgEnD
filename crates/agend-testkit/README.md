@@ -34,6 +34,8 @@ fake Codex 的 `-c agend_fake_manual_tui=true` 明確啟用 raw PTY frontend：b
 | 錄製器 | `recorder` + `src/bin/agend-record.rs` | 用假 agent 模擬的傳輸驅動真 CLI 跑 5 個情境（codex 另有第 7 施工關的 3 個：`turns_list`、`queue_idle`、`resume_empty`，錄了之前一致性檢查跳過），錄成 `transcripts/<backend>/<scenario>.jsonl`；同一段情境程式也驅動假 agent，`tests/conformance.rs` 按形狀比對（[RECORDER.md](RECORDER.md)） |
 | 暫存 git repo | `git_fixture` | `GitFixture`：canonical repo、bare team origin、linked worktree 與 branch，全部在一個新的暫存目錄裡；見下方「git fixture」 |
 
+13C 安裝 canary 另有 `fake-claude-cli`，只模擬原生 ACK／PostToolUse／Stop 的決策流程與版本回報，透過正式 helper 投遞事件；與歷史 `fake-claude` 分開。它不使用模型或共享認證，測試入口在 `agend/tests/backend_canary.rs`。
+
 ## 不負責
 
 - production 邏輯；呼叫真 backend 或模型
@@ -149,3 +151,11 @@ daemon 重啟：`RuntimeFixture`、`DriverFixture`、`StoreFixture` 各有一個
 FakePipelineExecutor 記錄 forge 選擇、base refresh 與 merge recovery 的 kind，供 pipeline 接線測試核對；不是 GitHub API 的行為替代證據。
 
 12C 嚴格 base 政策限定 FRG-10 的第二條過期 sibling 必須回已識別的 policy refusal；驗 main 完全不變、先前 merge／head 保留、拒絕 head 未進 main 且 branch head 不變。預設 local／fake 仍跑原本兩次成功的 ancestry 斷言與 OverwritesBase mutant；strict 額外拒絕先改 base 才報錯、錯誤種類不符與意外成功的 mutants。FRG-5 成功前提含 server policy 允許；不略過任何案例。
+
+13C canary credential fixture：三個 native fake CLI 在私有 scope 中看見合成認證檔時，必須核對實際 HOME、backend config/data 路徑及 Claude token 環境值；錯配直接失敗。僅接受測試用標記，不執行登入或模型。canary 的來源保留、輸出不含 dummy secret 與清理由 agend/backend_canary 驗證。
+
+FakeDaemon 的 InstanceAdd 與正式 producer 一樣回報設定 program；沒有明確 program 時使用 backend 名稱。
+
+`fake-worker --version` 立即印出 fixture 版本，不啟動 inbox loop。`fake_worker_version` 真子程序測試以 CLI marker 與游標檔核對沒有副作用，逾時會回收自有程序，避免新增的背景版本 monitor 變成第二個收件 worker。
+
+OpenCode deterministic producer 的 `run: external-directory: <path>` 產生單一 `<path>/*` 目錄授權請求，不讀寫該路徑；供 daemon 的 worktree 授權回歸使用。這是明確的合成擴充，並非新增真 CLI capture；原 bash 請求及 conformance 行為保持不變。

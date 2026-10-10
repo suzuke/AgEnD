@@ -1,0 +1,141 @@
+name: release-artifacts
+
+# Deliberately builds only: publishing a GitHub Release is a separate action.
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/g13-install]
+    paths:
+      - .github/workflows/release.yml
+      - scripts/*release*.py
+      - xtask/src/release.rs
+      - crates/agend-daemon/examples/pipeline_probe.rs
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+          - runner: macos-14
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    env:
+      EXPECTED_TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set isolated output paths
+        shell: bash
+        run: |
+          echo "CARGO_TARGET_DIR=$RUNNER_TEMP/agend-release-target" >> "$GITHUB_ENV"
+          echo "RELEASE_OUT=$RUNNER_TEMP/agend-release" >> "$GITHUB_ENV"
+      - run: rustup toolchain install
+      - name: Check native architecture
+        shell: bash
+        run: |
+          test "$(rustc -vV | sed -n 's/^host: //p')" = "$EXPECTED_TARGET"
+      - run: cargo xtask check-deps
+      - name: Build locked native archive
+        run: cargo xtask release --out "$RELEASE_OUT"
+      - name: Verify the extracted artifact
+        run: >-
+          python3 -B scripts/verify_release.py
+          --directory "$RELEASE_OUT"
+          --commit "$GITHUB_SHA"
+          --target "$EXPECTED_TARGET"
+      - name: Reject corrupted copies of the native artifact
+        run: python3 -B scripts/test_verify_release.py "$RELEASE_OUT"
+      - name: Install Linux checks sandbox
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          if test -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+      - name: Build native acceptance fixtures
+        run: |
+          cargo build --locked -p agend-testkit --bin fake-worker
+          cargo build --locked -p agend-daemon --example pipeline_probe
+      - name: Fresh HOME to first task using the extracted release
+        run: >-
+          python3 -B scripts/release_install_smoke.py
+          --directory "$RELEASE_OUT"
+          --commit "$GITHUB_SHA"
+          --target "$EXPECTED_TARGET"
+          --probe "$CARGO_TARGET_DIR/debug/examples/pipeline_probe"
+          --worker "$CARGO_TARGET_DIR/debug/fake-worker"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agend-${{ matrix.target }}-${{ github.sha }}
+          path: ${{ env.RELEASE_OUT }}/
+          if-no-files-found: error
+          retention-days: 14
+
+  formula:
+    needs: native
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: agend-*-${{ github.sha }}
+          path: ${{ runner.temp }}/native-artifacts
+      - name: Generate formula from the complete verified matrix
+        run: >-
+          python3 -B scripts/release_formula.py
+          --artifacts "$RUNNER_TEMP/native-artifacts"
+          --commit "$GITHUB_SHA"
+          --out "$RUNNER_TEMP/agend.rb"
+      - run: ruby -c "$RUNNER_TEMP/agend.rb"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agend-formula-${{ github.sha }}
+          path: ${{ runner.temp }}/agend.rb
+          if-no-files-found: error
+          retention-days: 14
+
+  brew:
+    needs: formula
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-14, ubuntu-22.04]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: agend-*-*-${{ github.sha }}
+          path: ${{ runner.temp }}/native-artifacts
+      - uses: actions/download-artifact@v4
+        with:
+          name: agend-formula-${{ github.sha }}
+          path: ${{ runner.temp }}/formula
+      - name: Add Linux Homebrew to PATH
+        if: runner.os == 'Linux'
+        run: echo /home/linuxbrew/.linuxbrew/bin >> "$GITHUB_PATH"
+      - name: Install, test and uninstall the generated formula
+        run: >-
+          python3 -B scripts/release_brew_smoke.py
+          --artifacts "$RUNNER_TEMP/native-artifacts"
+          --formula "$RUNNER_TEMP/formula/agend.rb"
+          --commit "$GITHUB_SHA"

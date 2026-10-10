@@ -271,3 +271,329 @@ fn four_boots_with_a_new_home_each_boot_fail() {
     assert!(error.starts_with("boot 2 failed"), "{error}");
     assert!(error.contains("boot 2 recovered []"), "{error}");
 }
+
+fn reserve(home: &Path, launch: &HolderLaunch) -> agend_core::runtime_records::ManagedLaunchIntent {
+    use agend_core::runtime_records::{Instance, InstanceStatus};
+    use agend_core::setup::backend::ImportedBackend;
+    let store = agend_daemon::store::SqliteStore::open(home, 0).unwrap();
+    let instance = Instance {
+        id: launch.instance_id.clone(),
+        backend: launch.backend,
+        program: launch.executable.clone(),
+        args: launch.args.clone(),
+        working_directory: launch.working_directory.clone(),
+        session_id: Some("test-session".into()),
+        status: InstanceStatus::New,
+        session_started: false,
+        agent_pid: None,
+        legacy_no_thread: false,
+        delivery: "push".into(),
+    };
+    block_on(store.add_instance(&instance)).unwrap();
+    let artifact = ImportedBackend {
+        format: 1,
+        backend: launch.backend.as_str().into(),
+        version: "native-fixture".into(),
+        sha256: agend_daemon::backend_versions::fingerprint(Path::new(&launch.executable)).unwrap(),
+        bytes: std::fs::metadata(&launch.executable).unwrap().len(),
+    };
+    block_on(store.prepare_managed_launch(&instance, launch, artifact, None)).unwrap()
+}
+
+#[test]
+fn persisted_binding_reconnects_same_native_child_and_refuses_a_different_intent() {
+    use agend_daemon::runtime::SpawnOutcome;
+    let lab = lab::Lab::new(Path::new(BIN));
+    let home = lab.home(1);
+    let launch = launch(
+        &home,
+        "bound",
+        "printf 'started\\n' >> starts; exec sleep 600",
+    );
+    let intent = reserve(&home, &launch);
+    let rt = runtime(&home);
+    let started = block_on(rt.start_reserved(&intent, false)).unwrap();
+    let pid = started.handle.process_id.unwrap();
+    let Some(SpawnOutcome::Spawned { agent_pid }) = started.attached.spawn else {
+        panic!("fresh bound spawn");
+    };
+    drop(rt);
+    let store = agend_daemon::store::SqliteStore::open(&home, 1).unwrap();
+    let saved = block_on(store.managed_launch("bound")).unwrap().unwrap();
+    drop(store);
+    assert_eq!(intent, saved);
+    let rt = runtime(&home);
+    let mut wrong = saved.clone();
+    wrong.binding = agend_daemon::store::instances::new_session_id().unwrap();
+    assert!(block_on(rt.attach_reserved(&wrong, pid)).is_err());
+    assert_eq!(files::running(&home, "bound").unwrap(), Some(pid));
+    let attached = block_on(rt.attach_reserved(&saved, pid)).unwrap();
+    assert_eq!(
+        attached.attached.spawn,
+        Some(SpawnOutcome::BoundExisting { agent_pid })
+    );
+    assert_eq!(
+        std::fs::read_to_string(home.join("starts")).unwrap(),
+        "started\n"
+    );
+    block_on(rt.stop("bound")).unwrap();
+    assert!(lab.running_holders().is_empty());
+}
+
+#[test]
+fn persisted_intent_does_not_adopt_a_legacy_holder() {
+    let lab = lab::Lab::new(Path::new(BIN));
+    let home = lab.home(1);
+    let launch = launch(&home, "unbound", "exec sleep 600");
+    let rt = runtime(&home);
+    let started = block_on(rt.start(&launch)).unwrap();
+    let pid = started.handle.process_id.unwrap();
+    drop(rt);
+    let intent = reserve(&home, &launch);
+    let rt = runtime(&home);
+    assert!(block_on(rt.attach_reserved(&intent, pid)).is_err());
+    assert_eq!(files::running(&home, "unbound").unwrap(), Some(pid));
+    block_on(rt.stop("unbound")).unwrap();
+    assert!(lab.running_holders().is_empty());
+}
+
+#[test]
+fn managed_identity_queries_preserve_the_native_terminal_connection() {
+    use agend_daemon::runtime::SpawnOutcome;
+    let lab = lab::Lab::with_prefix(Path::new(BIN), "g13-bound-query");
+    let home = lab.home(1);
+    let intent = reserve(&home, &launch(&home, "bound", "exec sleep 600"));
+    let rt = runtime(&home);
+    let started = block_on(rt.start_reserved(&intent, false)).unwrap();
+    let holder = started.handle.process_id.unwrap();
+    let Some(SpawnOutcome::Spawned {
+        agent_pid: Some(agent),
+    }) = started.attached.spawn
+    else {
+        panic!("fresh native bound spawn");
+    };
+    let connection = rt.terminal_connection("bound").unwrap();
+    let mut wrong = intent.clone();
+    wrong.binding = agend_daemon::store::instances::new_session_id().unwrap();
+    for (proof, pid, expected) in [
+        (&wrong, agent, false),
+        (&intent, agent + 1, false),
+        (&intent, agent, true),
+    ] {
+        assert_eq!(
+            block_on(rt.verify_reserved(proof, holder, pid)).is_ok(),
+            expected
+        );
+        assert!(
+            connection.is_current(),
+            "identity query replaced the terminal"
+        );
+        assert!(block_on(rt.live_terminal("bound").unwrap()).is_ok());
+    }
+    block_on(rt.stop_reserved(&intent, holder, agent)).unwrap();
+    assert!(lab.running_holders().is_empty());
+}
+
+#[test]
+fn managed_stop_checks_binding_and_both_pids_before_stopping_the_native_holder() {
+    use agend_daemon::runtime::SpawnOutcome;
+    let lab = lab::Lab::with_prefix(Path::new(BIN), "g13-bound-stop");
+    let home = lab.home(1);
+    let intent = reserve(&home, &launch(&home, "bound", "exec sleep 600"));
+    let rt = runtime(&home);
+    let started = block_on(rt.start_reserved(&intent, false)).unwrap();
+    let holder_pid = started.handle.process_id.unwrap();
+    let Some(SpawnOutcome::Spawned {
+        agent_pid: Some(agent_pid),
+    }) = started.attached.spawn
+    else {
+        panic!("fresh native bound spawn");
+    };
+    let mut wrong = intent.clone();
+    wrong.binding = agend_daemon::store::instances::new_session_id().unwrap();
+    for (proof, holder, agent) in [
+        (&wrong, holder_pid, agent_pid),
+        (&intent, holder_pid, agent_pid + 1),
+        (&intent, holder_pid + 1, agent_pid),
+    ] {
+        assert!(block_on(rt.stop_reserved(proof, holder, agent)).is_err());
+        assert_eq!(files::running(&home, "bound").unwrap(), Some(holder_pid));
+        assert_eq!(
+            block_on(rt.attach_reserved(&intent, holder_pid))
+                .unwrap()
+                .attached
+                .spawn,
+            Some(SpawnOutcome::BoundExisting {
+                agent_pid: Some(agent_pid)
+            })
+        );
+    }
+    block_on(rt.stop_reserved(&intent, holder_pid, agent_pid)).unwrap();
+    assert!(lab.running_holders().is_empty());
+    // Reconciling an already absent holder sends nothing and remains successful.
+    block_on(rt.stop_reserved(&intent, holder_pid, agent_pid)).unwrap();
+}
+
+#[test]
+fn managed_stop_preserves_a_replacement_and_a_legacy_holder() {
+    use agend_daemon::runtime::SpawnOutcome;
+    let lab = lab::Lab::with_prefix(Path::new(BIN), "g13-bound-stop");
+    let home = lab.home(1);
+    let launch = launch(&home, "bound", "exec sleep 600");
+    let original = reserve(&home, &launch);
+    let rt = runtime(&home);
+    let first = block_on(rt.start_reserved(&original, false)).unwrap();
+    let old_holder = first.handle.process_id.unwrap();
+    let Some(SpawnOutcome::Spawned {
+        agent_pid: Some(old_agent),
+    }) = first.attached.spawn
+    else {
+        panic!("fresh native bound spawn");
+    };
+    block_on(rt.stop_reserved(&original, old_holder, old_agent)).unwrap();
+    let store = agend_daemon::store::SqliteStore::open(&home, 1).unwrap();
+    let instance = block_on(store.instance("bound")).unwrap().unwrap();
+    let replacement = block_on(store.prepare_managed_launch(
+        &instance,
+        &launch,
+        original.artifact.clone(),
+        Some(&original.binding),
+    ))
+    .unwrap();
+    drop(store);
+    let second = block_on(rt.start_reserved(&replacement, false)).unwrap();
+    let new_holder = second.handle.process_id.unwrap();
+    let Some(SpawnOutcome::Spawned {
+        agent_pid: Some(new_agent),
+    }) = second.attached.spawn
+    else {
+        panic!("replacement native bound spawn");
+    };
+    assert!(block_on(rt.stop_reserved(&original, old_holder, old_agent)).is_err());
+    // Even with the replacement's PIDs, the stale binding cannot stop it.
+    assert!(block_on(rt.stop_reserved(&original, new_holder, new_agent)).is_err());
+    assert_eq!(files::running(&home, "bound").unwrap(), Some(new_holder));
+    block_on(rt.stop_reserved(&replacement, new_holder, new_agent)).unwrap();
+
+    let legacy = block_on(rt.start(&launch)).unwrap();
+    let legacy_holder = legacy.handle.process_id.unwrap();
+    let Some(SpawnOutcome::Spawned {
+        agent_pid: Some(legacy_agent),
+    }) = legacy.attached.spawn
+    else {
+        panic!("legacy native spawn");
+    };
+    assert!(block_on(rt.stop_reserved(&replacement, legacy_holder, legacy_agent)).is_err());
+    assert_eq!(files::running(&home, "bound").unwrap(), Some(legacy_holder));
+    block_on(rt.stop("bound")).unwrap();
+    assert!(lab.running_holders().is_empty());
+}
+
+#[test]
+fn rejected_binding_does_not_publish_an_unverified_holders_exit() {
+    use agend_daemon::runtime::HolderEvent;
+    let lab = lab::Lab::new(Path::new(BIN));
+    let home = lab.home(1);
+    let launch = launch(&home, "exited", "exit 0");
+    let (tx, rx) = std::sync::mpsc::channel();
+    let rt = HolderRuntime::new(
+        &home,
+        Path::new(BIN),
+        Vec::new(),
+        Arc::new(move |event| {
+            tx.send(event).unwrap();
+        }),
+    );
+    let started = block_on(rt.start(&launch)).unwrap();
+    let pid = started.handle.process_id.unwrap();
+    assert!(matches!(
+        rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+        HolderEvent::AgentExited { .. }
+    ));
+    drop(rt);
+    let intent = reserve(&home, &launch);
+    let (tx, rx) = std::sync::mpsc::channel();
+    let rt = HolderRuntime::new(
+        &home,
+        Path::new(BIN),
+        Vec::new(),
+        Arc::new(move |event| {
+            let _ = tx.send(event);
+        }),
+    );
+    assert!(block_on(rt.attach_reserved(&intent, pid)).is_err());
+    assert!(
+        rx.try_recv().is_err(),
+        "unverified Exited must not reach supervisor"
+    );
+    assert_eq!(files::running(&home, "exited").unwrap(), Some(pid));
+    block_on(rt.stop("exited")).unwrap();
+    assert!(lab.running_holders().is_empty());
+}
+
+#[test]
+fn managed_stop_keeps_the_verified_connection_when_socket_path_is_replaced() {
+    use agend_core::protocol::holder::{HolderRequest, HolderResponse};
+    use agend_daemon::runtime::SpawnOutcome;
+    use agend_testkit::contract::client::proxy::{Direction, Options, Proxy};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    let lab = lab::Lab::with_prefix(Path::new(BIN), "g13-bound-stop");
+    let home = lab.home(1);
+    let intent = reserve(&home, &launch(&home, "bound", "exec sleep 600"));
+    let rt = runtime(&home);
+    let started = block_on(rt.start_reserved(&intent, false)).unwrap();
+    let holder_pid = started.handle.process_id.unwrap();
+    let Some(SpawnOutcome::Spawned {
+        agent_pid: Some(agent_pid),
+    }) = started.attached.spawn
+    else {
+        panic!("fresh native bound spawn");
+    };
+    let foreign = block_on(rt.start(&launch(&home, "foreign", "exec sleep 600"))).unwrap();
+    let foreign_pid = foreign.handle.process_id.unwrap();
+    drop(rt);
+
+    let socket = files::socket_path(&home, "bound");
+    let upstream = home.join("original.sock");
+    std::fs::rename(&socket, &upstream).unwrap();
+    let replaced = Arc::new(AtomicBool::new(false));
+    let shutdowns = Arc::new(AtomicUsize::new(0));
+    let (swapped, sent) = (Arc::clone(&replaced), Arc::clone(&shutdowns));
+    let (path, foreign_socket) = (socket.clone(), files::socket_path(&home, "foreign"));
+    let proxy = Proxy::start_at(
+        &socket,
+        upstream,
+        Options::rewrite(Arc::new(move |_, direction, line| {
+            if direction == Direction::ToClient
+                && matches!(
+                    serde_json::from_str::<HolderResponse>(&line),
+                    Ok(HolderResponse::LaunchBinding { .. })
+                )
+                && !swapped.swap(true, Ordering::SeqCst)
+            {
+                std::fs::rename(&path, path.with_extension("detached")).unwrap();
+                std::os::unix::fs::symlink(&foreign_socket, &path).unwrap();
+            }
+            if direction == Direction::ToServer
+                && matches!(
+                    serde_json::from_str::<HolderRequest>(&line),
+                    Ok(HolderRequest::Shutdown)
+                )
+            {
+                sent.fetch_add(1, Ordering::SeqCst);
+            }
+            vec![line]
+        })),
+    )
+    .unwrap();
+    let rt = runtime(&home);
+    block_on(rt.stop_reserved(&intent, holder_pid, agent_pid)).unwrap();
+    assert!(replaced.load(Ordering::SeqCst));
+    assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
+    assert_eq!(files::running(&home, "bound").unwrap(), None);
+    assert_eq!(files::running(&home, "foreign").unwrap(), Some(foreign_pid));
+    drop(proxy);
+    block_on(rt.stop("foreign")).unwrap();
+    assert!(lab.running_holders().is_empty());
+}

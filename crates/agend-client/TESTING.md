@@ -83,3 +83,17 @@ cargo test -p agend-client --test once --lib
 共用已讀：`cargo test -p agend --test shared_read` 以兩個真 TUI client／daemon 程序驗同步與重啟保留；daemon `mobile_read_` 驗 native HTTP 按鈕不消耗原動作，`a_followup_remains_unread` 驗舊 read key 拒絕，store `read_receipts_` 驗 DB 重開。TUI `a_disconnected_source_` 驗斷線不能宣稱保存成功。上述不含真 Telegram 手機操作。
 
 Terminal frame 解碼維持原 internally-tagged serde 路徑；RawValue 優化因未知值拒絕域退化及微測無優勢而撤回。wire 格式、行長限制與身分檢查不變。`decode_contract` 用 holder 真 parser 的 producer golden 驗兩種欄位順序，以及重複 type／data／request_id、同列尾隨 JSON、截斷 JSON 拒絕；非 frame response 沿用既有 decoder。
+
+13C delivery receipt：`full_terminal::delivery_receipt_capability_is_rejected_before_io_on_an_old_daemon` 核舊 peer 零操作；真 daemon／SQLite／重啟與權限契約在 `agend/tests/message_delivery.rs`，使用正式 Store 產生 queued／sent／confirmed／failed，不手寫 wire JSON。1.7 的一次性解碼沿用 deadline-aware RawValue 流程；既有 once 期限與不重送回歸仍需通過。
+
+1.7 message_outcome 的 staged decoder 由 agend native backend_canary 全流程使用；缺失／未知狀態不准入。
+
+1.8 BackendSwitch 的一次性回覆 decoder 由 `agend/tests/backend_switch.rs` 連真 daemon 驗有紀錄與 null；避免自製 wire fixture。既有版本不合測試核新增 1.8 的完整支援清單及不重試。
+
+13C 未發布的 client 1.8 新增 Activate／Rollback 操作，字串預檢涵蓋 instance 與 switch ID，mutation 不重送；BackendSwitchPhase 新增持久 RollbackPrepared（pending），避免已啟用版本回退時漏掉暫停投遞。
+
+13D `agend/tests/telegram_pairing.rs` 對正式 daemon producer 驗 one-shot nullable／非空配對收據，不用手寫 response JSON；既有 client 版本錯誤測試涵蓋 1.9 offer。
+
+BackendDiagnostic one-shot decoder 由 agend/tests/backend_version_monitor.rs 的正式 daemon 回覆驗證。既有 once 測試保持丟失回覆不重送、hello 與 reply 共用期限的保證。
+
+BackendDiagnosticReply 的非空 policy 清單由三 backend 的 native managed fleet doctor 測試消費正式回覆；這是描述型資料，不取代 driver 的准入判定。

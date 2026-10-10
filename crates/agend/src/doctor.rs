@@ -33,6 +33,8 @@ use agend_daemon::runtime::files;
 use crate::cli::{Failure, Output, to_json};
 use crate::home;
 use crate::setup;
+mod observations;
+mod programs;
 
 fn check(name: &str, status: CheckStatus, detail: String, fix: Option<String>) -> Check {
     Check {
@@ -54,15 +56,26 @@ pub fn run() -> Result<Output, Failure> {
 
 /// Every check for `home`.
 pub fn checks(home: &Path) -> Vec<Check> {
-    let (daemon, fleet) = daemon(home);
+    let (daemon, fleet, observations) = daemon(home);
     let mut out = vec![home_check(home), daemon, git(home)];
     for backend in Backend::ALL {
         out.push(backend_check(home, backend, fleet.as_ref()));
     }
+    if let Some(fleet) = &fleet {
+        out.extend(programs::checks(home, &fleet.instances));
+    }
+    out.extend(observations);
+    out.push(check(
+        "authentication",
+        CheckStatus::Warn,
+        "unknown; no authoritative live backend authentication observation is available; executable versions, Ready states and historical canaries do not prove current login".into(),
+        Some("verify authentication in a dedicated backend test session; do not reuse shared session credentials for an isolated canary".into()),
+    ));
     out.push(holders(home, fleet.as_ref()));
     out.push(disk(home));
     out.push(sandbox(home));
     out.push(telegram(home));
+    out.push(crate::service::diagnostic(home));
     out
 }
 
@@ -163,7 +176,7 @@ fn home_check(home: &Path) -> Check {
 }
 
 /// The daemon line, and its fleet view when it answers (one attempt).
-fn daemon(home: &Path) -> (Check, Option<FleetView>) {
+fn daemon(home: &Path) -> (Check, Option<FleetView>, Vec<Check>) {
     let socket = home.join(DAEMON_SOCKET);
     let mut client = match Client::connect_once(&socket, None) {
         Ok(client) => client,
@@ -180,11 +193,16 @@ fn daemon(home: &Path) -> (Check, Option<FleetView>) {
                     Some(fix.into()),
                 ),
                 None,
+                vec![],
             );
         }
     };
-    let hello = client.daemon().clone();
     let fleet = client.get_fleet().ok();
+    let hello = client.daemon().clone();
+    let observations = fleet
+        .as_ref()
+        .map(|f| observations::checks(home, &client, &f.instances))
+        .unwrap_or_default();
     let detail = format!(
         "pid {}, {}, client protocol {}.{}",
         hello.daemon_pid.map_or("?".into(), |p| p.to_string()),
@@ -192,7 +210,7 @@ fn daemon(home: &Path) -> (Check, Option<FleetView>) {
         hello.selected.major,
         hello.selected.minor
     );
-    (ok("daemon", detail), fleet)
+    (ok("daemon", detail), fleet, observations)
 }
 
 fn git(home: &Path) -> Check {
@@ -231,7 +249,7 @@ fn backend_check(home: &Path, backend: Backend, fleet: Option<&FleetView>) -> Ch
         .map(|f| {
             f.instances
                 .iter()
-                .filter(|i| i.backend == name)
+                .filter(|i| i.backend == name && i.program.as_deref().is_none_or(|p| p == name))
                 .map(|i| i.instance_id.as_str())
                 .collect()
         })
@@ -241,7 +259,7 @@ fn backend_check(home: &Path, backend: Backend, fleet: Option<&FleetView>) -> Ch
             check(
                 name,
                 CheckStatus::Warn,
-                "not on PATH; no instance uses it".into(),
+                "not on PATH; no instance requires this PATH entry".into(),
                 fix,
             )
         } else {
@@ -254,7 +272,12 @@ fn backend_check(home: &Path, backend: Backend, fleet: Option<&FleetView>) -> Ch
         };
     };
     match setup::version_line(&program) {
-        Ok(line) => ok(name, line),
+        Ok(line) => ok(
+            name,
+            format!(
+                "{line}; operator PATH version probe only; compatibility and login not verified"
+            ),
+        ),
         Err(e) => check(name, CheckStatus::Warn, e, fix),
     }
 }

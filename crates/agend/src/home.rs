@@ -1,5 +1,5 @@
-//! Where AgEnD keeps its data (gate 9 P3): `AGEND_HOME`, which must always
-//! be set (there is no default before gate 13) and absolute. A directory
+//! Where AgEnD keeps its data: explicit `AGEND_HOME`, or `$HOME/.agend`
+//! for an operator. Agents must retain their explicit daemon home. A directory
 //! with v1's `fleet.yaml` in it is refused, so v2 never writes into a v1
 //! home. The CLI, `agend daemon`, `agend doctor` and `agend init` all go
 //! through [`resolve`].
@@ -13,12 +13,20 @@ use crate::cli::Failure;
 /// The v1 file that marks a v1 home.
 pub const V1_MARKER: &str = "fleet.yaml";
 
-/// `AGEND_HOME` when it is set and absolute (it may not exist yet).
+/// Resolve an absolute home without reading configuration or changing files.
 pub fn from_env() -> Result<PathBuf, Failure> {
     match std::env::var_os("AGEND_HOME") {
-        None => Err(Failure::usage(
-            "AGEND_HOME is not set; choose a directory for AgEnD's data and run: export AGEND_HOME=<absolute path>",
+        None if std::env::var_os("AGEND_INSTANCE").is_some() => Err(Failure::usage(
+            "AGEND_HOME is not set for this agent; restore its daemon-provided environment",
         )),
+        None => match std::env::var_os("HOME") {
+            Some(home) if !home.is_empty() && Path::new(&home).is_absolute() => {
+                Ok(PathBuf::from(home).join(agend_core::setup::DEFAULT_HOME_DIRECTORY))
+            }
+            _ => Err(Failure::usage(
+                "AGEND_HOME is not set and HOME is not an absolute path; run: export AGEND_HOME=<absolute path>",
+            )),
+        },
         Some(home) if home.is_empty() => Err(Failure::usage(
             "AGEND_HOME is empty; choose a directory for AgEnD's data and run: export AGEND_HOME=<absolute path>",
         )),

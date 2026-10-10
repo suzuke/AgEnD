@@ -34,6 +34,10 @@ struct Inner {
     fleet: Arc<Fleet>,
     codex_input: agend_core::policy::codex_input::CodexInputPolicy,
     codex: Option<crate::driver::codex::CodexDriver>,
+    switch_delivery: Option<(
+        Arc<crate::store::SqliteStore>,
+        Arc<crate::delivery::Replies>,
+    )>,
     next: AtomicU64,
     nonce: String,
     actors: Mutex<BTreeMap<String, Handle>>,
@@ -164,6 +168,7 @@ impl TerminalHub {
             fleet,
             codex_input,
             codex: None,
+            switch_delivery: None,
             next: AtomicU64::new(1),
             nonce,
             actors: Mutex::new(BTreeMap::new()),
@@ -179,6 +184,19 @@ impl TerminalHub {
         let mut hub = Self::new(runtime, fleet);
         Arc::get_mut(&mut hub.0).unwrap().codex = Some(codex);
         hub
+    }
+
+    /// Production terminal mutations share the durable switch pause and the
+    /// drain fence with backend delivery. Configure before cloning the hub.
+    pub fn with_switch_delivery(
+        mut self,
+        store: Arc<crate::store::SqliteStore>,
+        replies: Arc<crate::delivery::Replies>,
+    ) -> Self {
+        Arc::get_mut(&mut self.0)
+            .expect("configure before sharing hub")
+            .switch_delivery = Some((store, replies));
+        self
     }
 
     pub fn subscribe(

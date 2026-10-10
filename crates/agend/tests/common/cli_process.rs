@@ -291,6 +291,7 @@ impl Proxied {
         let fake = FakeDaemon::start_at(&home.join("fake.sock")).map_err(|e| e.to_string())?;
         for id in ["g9-a", "g9-b"] {
             fake.set_instance(InstanceView {
+                program: None,
                 instance_id: id.into(),
                 team_id: "general".into(),
                 backend: "claude".into(),
@@ -611,7 +612,15 @@ pub fn milestone(lab: &Lab) -> Result<Vec<String>, String> {
                 dropped.load(Ordering::SeqCst)
             })?;
             let restart = cli.run(None, &["daemon", "restart"]);
-            expect_run(&restart, 0, &["the daemon is back"])?;
+            if let Err(error) = expect_run(&restart, 0, &["the daemon is back"]) {
+                // Drain native stderr before the lab removes its files. Keep the
+                // original restart failure even if stopping this child also fails.
+                let stopped = daemon.interrupt();
+                return Err(format!(
+                    "{error}\ndaemon cleanup: {stopped:?}\ndaemon log:\n{}",
+                    daemon.log.join("\n")
+                ));
+            }
             out.push("a5 reached the daemon, its reply was lost; agend daemon restart:".into());
             out.extend(restart.shown().into_iter().map(|l| format!("  {l}")));
             let run = finish(
@@ -778,7 +787,7 @@ pub fn init_and_doctor(lab: &Lab) -> Result<Vec<String>, String> {
         &unset,
         2,
         &[
-            "agend: AGEND_HOME is not set; choose a directory for AgEnD's data and run: export AGEND_HOME=<absolute path>",
+            "agend: AGEND_HOME is not set and HOME is not an absolute path; run: export AGEND_HOME=<absolute path>",
         ],
     )?;
     ensure(!home.exists(), || {
@@ -796,7 +805,7 @@ pub fn init_and_doctor(lab: &Lab) -> Result<Vec<String>, String> {
             "      fix: agend daemon",
             "ok    git       git 2.45.0",
             "ok    claude    2.1.3 (Claude Code)",
-            "warn  codex     not on PATH; no instance uses it\n      fix: npm install -g @openai/codex",
+            "warn  codex     not on PATH; no instance requires this PATH entry\n      fix: npm install -g @openai/codex",
             "ok    holders   0 running",
             "ok    disk      ",
             "next: agend daemon   (then, in another terminal) agend instance add dev-1 claude",
@@ -830,8 +839,18 @@ pub fn init_and_doctor(lab: &Lab) -> Result<Vec<String>, String> {
     ensure(
         names
             == [
-                "home", "daemon", "git", "claude", "codex", "opencode", "holders", "disk",
-                "sandbox", "telegram",
+                "home",
+                "daemon",
+                "git",
+                "claude",
+                "codex",
+                "opencode",
+                "authentication",
+                "holders",
+                "disk",
+                "sandbox",
+                "telegram",
+                "service",
             ],
         || format!("doctor --json checks: {names:?}"),
     )?;
@@ -886,6 +905,7 @@ pub fn init_and_doctor(lab: &Lab) -> Result<Vec<String>, String> {
     fs::create_dir_all(home.join("run")).map_err(|e| e.to_string())?;
     let fake = FakeDaemon::start_at(&home.join(DAEMON_SOCKET)).map_err(|e| e.to_string())?;
     fake.set_instance(InstanceView {
+        program: None,
         instance_id: "g9-c".into(),
         team_id: "general".into(),
         backend: "codex".into(),
@@ -928,6 +948,87 @@ pub fn init_and_doctor(lab: &Lab) -> Result<Vec<String>, String> {
     )?;
     out.extend(with_daemon.shown());
     Ok(out)
+}
+
+/// Doctor's offline-holder fix starts the real daemon and lets its boot sweep
+/// remove the orphan. Cleanup fallback must not count as successful recovery.
+pub fn doctor_orphan_recovery(lab: &Lab) -> Result<Vec<String>, String> {
+    let home = lab.home(94);
+    fs::create_dir_all(&home).map_err(|e| e.to_string())?;
+    fs::set_permissions(&home, fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
+    let id = "g13-doctor-orphan";
+    let mut holder = std::process::Command::new(&lab.agend)
+        .args(["holder", id])
+        .env_clear()
+        .env("AGEND_HOME", &home)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    let result = (|| {
+        wait_for(Duration::from_secs(10), "doctor orphan ready", || {
+            files::running(&home, id).ok().flatten() == Some(holder.id())
+        })?;
+        let cli = Cli::new(&lab.agend, &home);
+        let isolated = [("HOME", home.to_str().unwrap()), ("PATH", "/usr/bin:/bin")];
+        let before = cli.run_with(Some(&home), None, &["doctor", "--json"], &isolated);
+        let checks: Vec<Value> = serde_json::from_str(&before.stdout)
+            .map_err(|e| format!("doctor before recovery: {e}"))?;
+        let warning = checks
+            .iter()
+            .find(|c| c["check"] == "holders")
+            .ok_or("missing holders check")?;
+        ensure(
+            warning["status"] == "warn"
+                && warning["fix"] == "agend daemon   (its boot sweep stops orphans)",
+            || format!("unexpected orphan diagnostic: {warning}"),
+        )?;
+        let mut daemon = Daemon::start(lab, &home, &isolated)?;
+        daemon.ready()?;
+        wait_for(Duration::from_secs(10), "boot sweep reaps orphan", || {
+            matches!(holder.try_wait(), Ok(Some(_)))
+        })?;
+        ensure(
+            holder
+                .try_wait()
+                .map_err(|e| e.to_string())?
+                .is_some_and(|status| status.success()),
+            || "orphan did not exit successfully after Shutdown".into(),
+        )?;
+        ensure(
+            files::running(&home, id)
+                .map_err(|e| e.to_string())?
+                .is_none(),
+            || "orphan still owns its lock after exit".into(),
+        )?;
+        ensure(
+            daemon
+                .log
+                .iter()
+                .any(|line| line.contains(&format!("orphan {id}: Shutdown sent"))),
+            || format!("missing boot sweep evidence: {:?}", daemon.log),
+        )?;
+        let after = cli.run_with(Some(&home), None, &["doctor", "--json"], &isolated);
+        let checks: Vec<Value> = serde_json::from_str(&after.stdout)
+            .map_err(|e| format!("doctor after recovery: {e}"))?;
+        ensure(
+            checks.iter().any(|c| {
+                c["check"] == "holders"
+                    && c["status"] == "ok"
+                    && c["detail"] == "0 running, 0 orphans"
+            }),
+            || format!("orphan warning did not recover: {checks:?}"),
+        )?;
+        daemon.interrupt()?;
+        Ok(vec!["doctor holders: warn -> suggested daemon boot -> orphan Shutdown and exit -> ok (0 running, 0 orphans)".into()])
+    })();
+    // Only this child is killed on failure; recovery assertions ran first.
+    if !matches!(holder.try_wait(), Ok(Some(_))) {
+        let _ = holder.kill();
+    }
+    let _ = holder.wait();
+    result
 }
 
 /// Whether a process with this pid is still there (and not a zombie):

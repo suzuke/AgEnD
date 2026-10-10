@@ -98,3 +98,17 @@ daemon 多視窗／frame 更新與 TUI 已接通，六項 fake／真 C 契約及
 ```
 
 Protocol 1.6 新增共用已讀收據：`mark_attention_read`、`attention_read` 事件與 fleet `read_keys`。識別沿用事項 ID＋問題次數；後續追問重新未讀。daemon 保存 SQLite，TUI 與 Telegram 共用；已讀不等於回答、核准或解除。舊 daemon 仍使用 TUI 本機已讀。
+
+13C client 1.7 加入 `Client::message_delivery(id, within)`：專用一次性連線查持久化收據，整個 exchange 共用期限，不重試、不回傳 body、不確認訊息。舊 daemon 在 I/O 前拒絕此能力；一般連線仍只要求 1.3。這是 canary 的觀測基礎，尚非完整 canary。
+
+13C 施工中的 protocol 1.7：操作員 `send_message` 固定以 `@operator` 真人身分 queue 投遞，必填 UUID v4；`driver_status` 回傳 instance 與就緒狀態，Codex 必須有連線，unknown 不代表 idle。這些 RPC 不切換 backend 版本。
+
+Client protocol 1.8 提供 backend switch prepare／status／cancel；一般連線最低版本仍 1.3。CLI 在操作前要求 1.8，mutation 不重送，結果不明用 status 查持久紀錄。一次性 encoder 計入巢狀操作字串，decoder 支援可空的 BackendSwitch 回覆。
+
+13C 未發布的 client 1.8 新增 Activate／Rollback 操作，字串預檢涵蓋 instance 與 switch ID，mutation 不重送；BackendSwitchPhase 新增持久 RollbackPrepared（pending），避免已啟用版本回退時漏掉暫停投遞。
+
+Protocol 1.9 加入 TelegramPairing 操作員 request／收據；one-shot preparation 計入所有可變字串，deadline decoder 處理 nullable 配對收據。一般連線仍相容舊 daemon，配對呼叫者必須要求 1.9 且不重送。
+
+BackendDiagnostic 的1.9 nullable snapshot 包在帶 boot ID 的回覆內，由 one-shot deadline decoder 解析。doctor 使用 exchange_once 並核對 fleet 的 daemon boot；通用 request 的 Redo::Never 仍可能在寫入失敗時重連，不能拿來維持同一 boot 的診斷身分。
+
+BackendDiagnosticReply 的 policies 描述回覆 daemon 的規則；一次性 decoder 保留結構化 policy kind／constraint／requirements／scope，Unknown kind 不代表支援或准入。

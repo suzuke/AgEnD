@@ -533,7 +533,7 @@ fn a_failed_creation_leaves_no_database_and_the_next_open_builds_it_again() {
     assert_eq!(mode(&home.join(DB_FILE)), 0o600);
     assert_eq!(
         listing(&home),
-        BTreeSet::from([DB_FILE.to_owned()]),
+        BTreeSet::from([DB_FILE.to_owned(), ".agend-maintenance.lock".into()]),
         "the build file is gone; closing checkpointed the WAL"
     );
 }
@@ -576,11 +576,15 @@ fn a_leftover_build_file_is_replaced_by_a_fresh_0600_v1_database() {
     assert_eq!(mode(&db), 0o600);
     assert_eq!(user_version(&db), LATEST_VERSION);
     assert_eq!(schema_dump(&db), golden().1, "no table of the leftover");
-    assert_eq!(listing(&home), BTreeSet::from([DB_FILE.to_owned()]));
+    assert_eq!(
+        listing(&home),
+        BTreeSet::from([DB_FILE.to_owned(), ".agend-maintenance.lock".into()])
+    );
 }
 
 /// A build file that is a symlink (or not a regular file) is not the
-/// store's; it is refused with the path named, and nothing is created.
+/// store's; it is refused with the path named. Only the persistent
+/// maintenance lock may be created; no database is published.
 #[test]
 fn a_leftover_build_file_that_is_a_symlink_is_refused() {
     let dir = TempDir::new("store-leftover-symlink").unwrap();
@@ -600,7 +604,10 @@ fn a_leftover_build_file_that_is_a_symlink_is_refused() {
             new.display()
         )
     );
-    assert_eq!(listing(&home), BTreeSet::from([NEW_DB.to_owned()]));
+    assert_eq!(
+        listing(&home),
+        BTreeSet::from([NEW_DB.to_owned(), ".agend-maintenance.lock".into()])
+    );
     assert_eq!(
         fs::metadata(&outside).unwrap().len(),
         0,
@@ -656,7 +663,8 @@ fn a_database_shorter_than_a_sqlite_header_is_refused_and_left_untouched() {
     let db = home.join(DB_FILE);
     for content in [&b"x"[..], &[0u8; 99][..]] {
         fs::write(&db, content).unwrap();
-        let before = (sha256(&db), listing(&home));
+        let mut before = (sha256(&db), listing(&home));
+        before.1.insert(".agend-maintenance.lock".into());
         let error = SqliteStore::open(&home, NOW).err().unwrap();
         assert_eq!(
             error.to_string(),
@@ -690,7 +698,10 @@ fn a_dangling_symlink_database_is_refused_with_a_clear_message() {
             db.display()
         )
     );
-    assert_eq!(listing(&home), BTreeSet::from([DB_FILE.to_owned()]));
+    assert_eq!(
+        listing(&home),
+        BTreeSet::from([DB_FILE.to_owned(), ".agend-maintenance.lock".into()])
+    );
     assert!(!dir.path().join("gone.db").exists());
 }
 
@@ -708,7 +719,8 @@ fn a_database_with_schema_version_zero_is_refused_and_left_untouched() {
         .execute_batch("CREATE TABLE scratch (a); DROP TABLE scratch;")
         .unwrap();
     assert_eq!(user_version(&db), 0);
-    let before = (sha256(&db), listing(&home));
+    let mut before = (sha256(&db), listing(&home));
+    before.1.insert(".agend-maintenance.lock".into());
 
     let error = SqliteStore::open(&home, NOW).err().unwrap();
     assert_eq!(
@@ -1565,6 +1577,6 @@ fn github_upgrade_preserves_published_telegram_reads() {
     assert_eq!(
         conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
             .unwrap(),
-        17
+        LATEST_VERSION
     );
 }

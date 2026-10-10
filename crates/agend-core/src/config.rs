@@ -1,4 +1,4 @@
-//! Daemon-level `config.toml`: home path, Telegram connection settings, and
+//! Daemon-level `config.toml`: Telegram connection settings and
 //! references (env var name or file path) to secrets.
 //!
 //! This is the only human-written config file. The daemon reads it and never
@@ -81,5 +81,11 @@ impl TelegramConfig {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    /// None enables daily public registry discovery; false supports offline installations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registry_checks: Option<bool>,
+    /// None enables local external-backend version probes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend_version_checks: Option<bool>,
     pub telegram: Option<TelegramConfig>,
 }

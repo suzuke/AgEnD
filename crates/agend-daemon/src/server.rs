@@ -43,7 +43,7 @@ use std::time::Duration;
 use crate::terminal_hub::{ReplyScope, TerminalHub, ViewStream, reject};
 use agend_core::protocol::client::{
     ClientRequest, ClientResponse, ErrorData, EventData, MAX_LINE_BYTES, MAX_MESSAGE_BYTES,
-    TerminalBytesData, V1_4, V1_6, error_code,
+    TerminalBytesData, V1_4, V1_9, error_code,
 };
 use agend_core::protocol::terminal::MAX_FRAME_LINE;
 use agend_core::protocol::{ProtocolVersion, negotiate};
@@ -85,18 +85,57 @@ pub fn bind(socket: &Path) -> io::Result<UnixListener> {
     Ok(listener)
 }
 
+/// Read-only Claude observation shared with lifecycle coordination.
+#[derive(Clone)]
+pub struct ClaudeObserver {
+    context: Arc<Context>,
+    bridge: Arc<crate::claude_bridge::ClaudeBridge>,
+}
+impl ClaudeObserver {
+    pub async fn session_idle(&self, id: &str) -> Result<bool, String> {
+        self.bridge.session_idle(&self.context, id).await
+    }
+}
+
 /// A running server; [`Server::stop`] ends it.
 pub struct Server {
     stop: watch::Sender<bool>,
     task: JoinHandle<()>,
+    delivery_replies: Arc<crate::delivery::Replies>,
+    claude: ClaudeObserver,
 }
 
 impl Server {
     /// Serves connections from `listener` (bound at `socket`) until stopped.
     pub fn start(listener: UnixListener, socket: PathBuf, ctx: Arc<Context>) -> Server {
         let (stop, stopped) = watch::channel(false);
-        let task = tokio::spawn(accept_loop(listener, socket, ctx, stopped));
-        Server { stop, task }
+        let delivery_replies = Arc::new(crate::delivery::Replies::default());
+        let claude = ClaudeObserver {
+            context: ctx.clone(),
+            bridge: Arc::default(),
+        };
+        let task = tokio::spawn(accept_loop(
+            listener,
+            socket,
+            ctx,
+            stopped,
+            delivery_replies.clone(),
+            claude.bridge.clone(),
+        ));
+        Server {
+            stop,
+            task,
+            delivery_replies,
+            claude,
+        }
+    }
+
+    pub fn claude_observer(&self) -> ClaudeObserver {
+        self.claude.clone()
+    }
+
+    pub fn delivery_replies(&self) -> Arc<crate::delivery::Replies> {
+        self.delivery_replies.clone()
     }
 
     /// Stops accepting, removes the socket file, closes every connection,
@@ -112,13 +151,16 @@ async fn accept_loop(
     socket: PathBuf,
     ctx: Arc<Context>,
     mut stopped: watch::Receiver<bool>,
+    delivery_replies: Arc<crate::delivery::Replies>,
+    claude: Arc<crate::claude_bridge::ClaudeBridge>,
 ) {
     let hub =
-        TerminalHub::with_codex_driver(ctx.runtime.clone(), ctx.fleet.clone(), ctx.codex.clone());
-    let claude = Arc::new(crate::claude_bridge::ClaudeBridge::default());
+        TerminalHub::with_codex_driver(ctx.runtime.clone(), ctx.fleet.clone(), ctx.codex.clone())
+            .with_switch_delivery(ctx.store.clone(), delivery_replies.clone());
     let startup = tokio::spawn(crate::claude_bridge::startup::run(
         ctx.clone(),
         claude.clone(),
+        delivery_replies.clone(),
     ));
     let ingest = tokio::spawn(crate::ingest::run(
         ctx.store.home().to_owned(),
@@ -133,7 +175,7 @@ async fn accept_loop(
             accepted = listener.accept() => match accepted {
                 Ok((stream, _)) => {
                     let number = next.fetch_add(1, Ordering::Relaxed);
-                    connections.spawn(connection(stream, Arc::clone(&ctx), hub.clone(), number, claude.clone()));
+                    connections.spawn(connection(stream, Arc::clone(&ctx), hub.clone(), number, claude.clone(), delivery_replies.clone()));
                 }
                 Err(e) => {
                     log::line(&format!("client socket: accept failed: {e}"));
@@ -274,6 +316,7 @@ async fn connection(
     hub: TerminalHub,
     number: u64,
     claude: Arc<crate::claude_bridge::ClaudeBridge>,
+    delivery_replies: Arc<crate::delivery::Replies>,
 ) {
     let (reader, writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
@@ -340,7 +383,7 @@ async fn connection(
                         client.send(&reply).await;
                         return;
                     };
-                    match negotiate("client", &[V1_6], &data.supported) {
+                    match negotiate("client", &[V1_9], &data.supported) {
                         Ok(selected) => {
                             negotiated = true;
                             selected_version = selected;
@@ -358,6 +401,14 @@ async fn connection(
                     }
                     continue;
                 }
+                if let ClientRequest::Operator { data } = &request
+                    && matches!(data.command, agend_core::protocol::client::OperatorCommand::TelegramPairing { .. } | agend_core::protocol::client::OperatorCommand::BackendDiagnostic { .. })
+                    && selected_version < V1_9
+                {
+                    let reply = error(Some(data.request_id.clone()), error_code::NOT_SUPPORTED, "this operator request requires client protocol 1.9; upgrade and reconnect");
+                    if !client.send(&reply).await { return; }
+                    continue;
+                }
                 if matches!(request, ClientRequest::SubscribeTerminal { .. }) {
                     terminal = None;
                     full = None;
@@ -370,6 +421,15 @@ async fn connection(
                     if let Err(data) = result && !client.send(&ClientResponse::Error { data }).await { return; }
                     continue;
                 }
+                // Hold through serialization and the complete bounded socket
+                // write, not just through the handler's database reservation.
+                let _delivery_reply = match &request {
+                    ClientRequest::Claude { data } => Some(delivery_replies.begin(&data.instance_id)),
+                    ClientRequest::Command { data }
+                        if matches!(data.command, agend_core::protocol::client::AgentCommand::Inbox { .. }) =>
+                            client.caller.as_deref().map(|id| delivery_replies.begin(id)),
+                    _ => None,
+                };
                 if let ClientRequest::Claude { data } = request {
                     let reply = claude.handle(&ctx, client.caller.as_deref(), selected_version, data).await;
                     if !client.send(&reply).await { return; }

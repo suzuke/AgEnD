@@ -61,6 +61,10 @@
 //! Must NOT: kill or respawn holders on daemon shutdown; start an agent
 //! fresh once it has run.
 
+mod backend_switch;
+mod managed;
+mod switch_activation;
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -168,6 +172,9 @@ fn describe_session(instance: &Instance, resume: bool) -> String {
 /// The launch of `instance` under `home`, fresh or resuming. codex runs the
 /// gate 7 wrapper (`/bin/sh`).
 pub fn launch(home: &Path, instance: &Instance, resume: bool) -> Result<HolderLaunch, String> {
+    // Bind every backend's original executable and model args before wrappers
+    // transform them. Credential injection later only sees the holder launch.
+    crate::backend_versions::canary_scope::expected(home, instance)?;
     let (executable, args) = if instance.backend == Backend::Codex {
         (
             codex_launch::SHELL.to_owned(),
@@ -198,6 +205,10 @@ pub fn launch(home: &Path, instance: &Instance, resume: bool) -> Result<HolderLa
 
 #[derive(Debug)]
 pub enum Event {
+    BackendSwitch {
+        command: agend_core::protocol::client::BackendSwitchCommand,
+        reply: oneshot::Sender<Result<Option<agend_core::runtime_records::BackendSwitch>, Refusal>>,
+    },
     Holder(HolderEvent),
     StartFailed {
         id: String,
@@ -312,6 +323,8 @@ pub struct Supervisor {
     codex: CodexDriver,
     opencode: crate::driver::opencode::runtime::Runtime,
     pipeline: Option<crate::pipeline::Handle>,
+    delivery_replies: Option<Arc<crate::delivery::Replies>>,
+    claude: Option<crate::server::ClaudeObserver>,
     events: UnboundedSender<Event>,
     watches: BTreeMap<String, Watch>,
     fleet: Arc<Fleet>,
@@ -349,6 +362,8 @@ impl Supervisor {
             runtime,
             codex,
             pipeline: None,
+            delivery_replies: None,
+            claude: None,
             events,
             watches: BTreeMap::new(),
             fleet,
@@ -360,6 +375,7 @@ impl Supervisor {
     fn show(&self, instance: &Instance, state: AgentState, summary: String) {
         self.fleet.set_instance(
             InstanceView {
+                program: Some(instance.program.clone()),
                 instance_id: instance.id.clone(),
                 team_id: DEFAULT_TEAM.into(),
                 backend: instance.backend.as_str().into(),
@@ -380,6 +396,14 @@ impl Supervisor {
 
     pub fn set_pipeline(&mut self, pipeline: crate::pipeline::Handle) {
         self.pipeline = Some(pipeline);
+    }
+
+    pub fn set_delivery_replies(&mut self, replies: Arc<crate::delivery::Replies>) {
+        self.delivery_replies = Some(replies);
+    }
+
+    pub fn set_claude_observer(&mut self, observer: crate::server::ClaudeObserver) {
+        self.claude = Some(observer);
     }
 
     pub fn store(&self) -> &SqliteStore {
@@ -452,9 +476,14 @@ impl Supervisor {
     }
 
     async fn record_agent_pid(&self, id: &str, spawn: Option<SpawnOutcome>) {
-        if let Some(SpawnOutcome::Spawned {
-            agent_pid: Some(pid),
-        }) = spawn
+        if let Some(
+            SpawnOutcome::Spawned {
+                agent_pid: Some(pid),
+            }
+            | SpawnOutcome::BoundExisting {
+                agent_pid: Some(pid),
+            },
+        ) = spawn
             && let Err(e) = self.store.set_agent_pid(id, Some(pid)).await
         {
             log::line(&format!("{id}: cannot record agent_pid: {e}"));
@@ -547,6 +576,9 @@ impl Supervisor {
         );
         let now = log::now_unix_ms();
         for instance in &instances {
+            if let Ok(Some(record)) = self.store.backend_switch(&instance.id).await {
+                self.show_switch_problem(&record);
+            }
             if instance.status == InstanceStatus::Failed {
                 self.show(instance, AgentState::Failed, "failed".into());
                 let reason = if instance.legacy_no_thread {
@@ -582,8 +614,14 @@ impl Supervisor {
                     self.reconnect(instance, pid).await;
                 }
                 BootAction::Start { id, resume } => {
-                    report.started += 1;
                     let instance = instances.iter().find(|i| i.id == id).expect("planned");
+                    if self.switch_holds_recovery(&id).await {
+                        if self.recover_switch_start(instance).await {
+                            report.started += 1;
+                        }
+                        continue;
+                    }
+                    report.started += 1;
                     self.start(instance, resume, None).await;
                 }
                 BootAction::Orphan { id } => {
@@ -605,6 +643,10 @@ impl Supervisor {
     /// so their holder can only lack an agent if the agent never ran).
     async fn reconnect(&mut self, instance: &Instance, pid: u32) {
         let id = instance.id.clone();
+        let managed = match self.managed_reconnect(instance).await {
+            Ok(intent) => intent,
+            Err(error) => return self.fail(&id, &error).await,
+        };
         if !self.prepare_claude(instance).await {
             return;
         }
@@ -615,7 +657,11 @@ impl Supervisor {
             Ok(launch) => launch,
             Err(e) => return self.fail(&id, &e).await,
         };
-        match self.runtime.attach(&launch, pid).await {
+        let attached = match &managed {
+            Some(intent) => self.runtime.attach_reserved(intent, pid).await,
+            None => self.runtime.attach(&launch, pid).await,
+        };
+        match attached {
             Ok(started) => {
                 if !resume {
                     self.mark_running(&id).await;
@@ -638,6 +684,11 @@ impl Supervisor {
                 self.connect_codex(instance, started.generation);
             }
             Err(e) => {
+                if managed.is_some() {
+                    return self
+                        .fail(&id, &format!("managed holder identity unproven: {e}"))
+                        .await;
+                }
                 let generation = self.watches.get(&id).map_or(0, |w| w.generation);
                 self.watch(&id, generation);
                 let _ = self.events.send(Event::StartFailed {
@@ -653,10 +704,29 @@ impl Supervisor {
     /// the n-th restart, for the log.
     async fn start(&mut self, instance: &Instance, resume: bool, restart: Option<usize>) {
         let id = instance.id.clone();
+        let artifact = match self
+            .runtime
+            .check_backend_program(
+                instance.backend,
+                &instance.program,
+                &instance.working_directory,
+            )
+            .await
+        {
+            Ok(artifact) => artifact,
+            Err(error) => return self.fail(&id, &error.to_string()).await,
+        };
+        let mut effective = instance.clone();
+        if let Some(artifact) = &artifact {
+            match self.managed_program(artifact) {
+                Ok(program) => effective.program = program,
+                Err(error) => return self.fail(&id, &error).await,
+            }
+        }
         if !self.prepare_claude(instance).await {
             return;
         }
-        let launch = match launch(&self.home, instance, resume) {
+        let launch = match launch(&self.home, &effective, resume) {
             Ok(launch) => launch,
             Err(e) => return self.fail(&id, &e).await,
         };
@@ -712,19 +782,30 @@ impl Supervisor {
         };
         log::line(&format!("{id}: {}", what.trim_end()));
         self.show(instance, AgentState::Starting, what.trim_end().to_owned());
-        let started = if instance.backend == Backend::Claude && instance.delivery == "push" {
+        let claude_geometry = if instance.backend == Backend::Claude && instance.delivery == "push"
+        {
             let Some(session) = instance.session_id.as_deref() else {
                 return self.fail(&id, "missing Claude session").await;
             };
             match self.store.begin_claude_startup(&id, session).await {
-                Ok(true) => self.runtime.start_claude(&launch).await,
-                Ok(false) => self.runtime.start(&launch).await,
+                Ok(geometry) => geometry,
                 Err(e) => {
                     return self
                         .fail(&id, &format!("cannot persist Claude startup: {e}"))
                         .await;
                 }
             }
+        } else {
+            false
+        };
+        let started = if let Some(artifact) = artifact {
+            let intent = match self.reserve_managed(instance, &launch, artifact).await {
+                Ok(intent) => intent,
+                Err(error) => return self.fail(&id, &error).await,
+            };
+            self.runtime.start_reserved(&intent, claude_geometry).await
+        } else if claude_geometry {
+            self.runtime.start_claude(&launch).await
         } else {
             self.runtime.start(&launch).await
         };
@@ -852,6 +933,9 @@ impl Supervisor {
             return;
         };
         let id = id.as_str();
+        if self.switch_holds_recovery(id).await {
+            return self.fleet.raise(item);
+        }
         log::line(&format!("{id}: retry requested by the operator"));
         if let Err(e) = self.runtime.stop(id).await {
             // `fail` lists a new item with this reason.
@@ -886,11 +970,26 @@ impl Supervisor {
 
     /// A death of the current generation: plan the restart or give up.
     /// `holder_gone`: the holder itself died (the codex sweep runs first).
-    async fn died(&mut self, id: &str, generation: u64, what: String, holder_gone: bool) {
+    async fn died(
+        &mut self,
+        id: &str,
+        generation: u64,
+        what: String,
+        holder_gone: bool,
+        agent_exited: bool,
+    ) {
         let Some(watch) = self.watches.get(id) else {
             return;
         };
         if watch.generation != generation || watch.state != State::Up {
+            return;
+        }
+        if self.switch_holds_recovery(id).await {
+            if holder_gone || agent_exited {
+                self.rollback_lost_candidate(id, agent_exited).await;
+            } else {
+                self.report_switch_problem(id, &what).await;
+            }
             return;
         }
         log::line(&what);
@@ -945,6 +1044,9 @@ impl Supervisor {
             return;
         };
         if watch.generation != generation {
+            return;
+        }
+        if self.switch_holds_recovery(id).await {
             return;
         }
         // The agent may have ended in a holder that still runs: a holder
@@ -1104,12 +1206,16 @@ impl Supervisor {
             ));
         }
         self.sweep(&instance, "removed").await;
+        let switch = self.store.backend_switch(id).await.map_err(read)?;
         self.store.remove_instance(id).await.map_err(|e| {
             (
                 error_code::INVALID_REQUEST,
                 format!("cannot remove {id}: {e}"),
             )
         })?;
+        if let Some(record) = switch {
+            self.dismiss_switch_problem(&record);
+        }
         self.fleet.remove_instance(id);
         log::line(&format!(
             "{id}: removed (workspace kept at {})",
@@ -1120,19 +1226,39 @@ impl Supervisor {
 
     /// Handles events until a stop signal or a restart.
     pub async fn run(&mut self, events: &mut UnboundedReceiver<Event>) -> Stopped {
-        while let Some(event) = events.recv().await {
+        let mut switches = tokio::time::interval(Duration::from_secs(2));
+        switches.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            let event = tokio::select! {
+                event = events.recv() => match event { Some(event) => event, None => break },
+                _ = switches.tick() => { self.finish_switches().await; continue; }
+            };
             match event {
+                Event::BackendSwitch { command, reply } => {
+                    let _ = reply.send(self.backend_switch(command).await);
+                }
                 Event::Holder(HolderEvent::AgentExited {
                     id,
                     generation,
                     exited,
                 }) => {
                     let what = format!("agent {id} exited ({})", describe_exit(&exited));
-                    self.died(&id, generation, what, false).await;
+                    self.died(&id, generation, what, false, true).await;
                 }
                 Event::Holder(HolderEvent::HolderGone { id, generation }) => {
                     let what = format!("holder {id} died");
-                    self.died(&id, generation, what, true).await;
+                    self.died(&id, generation, what, true, false).await;
+                }
+                Event::Holder(HolderEvent::LaunchBindingRejected {
+                    id,
+                    generation,
+                    error,
+                }) => {
+                    if self.watches.get(&id).is_some_and(|watch| {
+                        watch.generation == generation && watch.state == State::Up
+                    }) {
+                        self.fail(&id, &error).await;
+                    }
                 }
                 Event::StartFailed {
                     id,
@@ -1140,11 +1266,11 @@ impl Supervisor {
                     error,
                 } => {
                     let what = format!("{id}: start failed: {error}");
-                    self.died(&id, generation, what, false).await;
+                    self.died(&id, generation, what, false, false).await;
                 }
                 Event::Codex(CodexEvent::Gone { id, generation }) => {
                     let what = format!("{id}: its app-server is gone");
-                    self.died(&id, generation, what, false).await;
+                    self.died(&id, generation, what, false, false).await;
                 }
                 Event::OpenCodeState {
                     id,

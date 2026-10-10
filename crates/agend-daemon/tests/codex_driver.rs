@@ -439,3 +439,276 @@ fn a_queue_left_waiting_by_a_human_interrupt_is_started() {
         assert_eq!(fx.state("m-q").unwrap(), "confirmed", "restart={restart}");
     }
 }
+
+#[test]
+fn execution_outcome_requires_the_identified_successful_turn_and_response() {
+    use agend_core::protocol::client::MessageOutcomeState as State;
+    use agend_daemon::driver::codex::history::message_outcome;
+    use serde_json::json;
+    let lab = lab();
+    let backend = codex::Backend::new(&lab.home(0), "outcome", Duration::from_millis(100)).unwrap();
+    let fixture = codex::Fixture::boot(&backend).unwrap();
+    fixture
+        .deliver("outcome-message", "Respond briefly", BusyLevel::Queue)
+        .unwrap();
+    fixture.settle(1).unwrap();
+    let row = block_on(fixture.store.message("outcome-message"))
+        .unwrap()
+        .unwrap();
+    let turns = backend.turns(&fixture.thread().unwrap()).unwrap();
+    assert_eq!(message_outcome(&turns, &row), State::Completed);
+    assert_eq!(
+        block_on(fixture.driver.message_outcome(row.clone())).unwrap(),
+        State::Completed
+    );
+    for status in ["failed", "interrupted", "inProgress", "future-state"] {
+        let mut changed = turns.clone();
+        changed[0]["status"] = json!(status);
+        assert_ne!(
+            message_outcome(&changed, &row),
+            State::Completed,
+            "{status}"
+        );
+    }
+    let mut changed = turns.clone();
+    changed[0]["error"] = json!({"message":"authentication failed"});
+    assert_ne!(message_outcome(&changed, &row), State::Completed);
+    let mut changed = turns.clone();
+    changed[0]["items"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|i| i["type"] != "agentMessage");
+    assert_ne!(message_outcome(&changed, &row), State::Completed);
+    let mut changed = turns.clone();
+    for item in changed[0]["items"].as_array_mut().unwrap() {
+        if item["type"] == "userMessage" {
+            item["clientId"] = json!("foreign-message");
+        }
+    }
+    assert_ne!(message_outcome(&changed, &row), State::Completed);
+    let mut changed = turns.clone();
+    changed.push(changed[0].clone());
+    assert_ne!(message_outcome(&changed, &row), State::Completed);
+    let mut changed = turns.clone();
+    changed[0].as_object_mut().unwrap().remove("error");
+    assert_ne!(message_outcome(&changed, &row), State::Completed);
+    for client_id in [row.id.as_str(), "another-input"] {
+        let mut changed = turns.clone();
+        let items = changed[0]["items"].as_array_mut().unwrap();
+        let mut extra = items
+            .iter()
+            .find(|i| i["type"] == "userMessage")
+            .unwrap()
+            .clone();
+        extra["clientId"] = json!(client_id);
+        extra["content"][0]["text"] = json!("different input");
+        items.insert(1, extra);
+        assert_ne!(message_outcome(&changed, &row), State::Completed);
+    }
+    let mut changed = turns.clone();
+    for item in changed[0]["items"].as_array_mut().unwrap() {
+        if item["type"] == "agentMessage" {
+            item["text"] = json!("  ");
+        }
+    }
+    assert_ne!(message_outcome(&changed, &row), State::Completed);
+    let mut foreign = row.clone();
+    foreign.turn_id = Some("foreign-turn".into());
+    assert_ne!(message_outcome(&turns, &foreign), State::Completed);
+    assert_eq!(
+        block_on(fixture.store.message(&row.id)).unwrap().unwrap(),
+        row
+    );
+    fixture.driver.disconnect(&backend.id);
+    assert!(block_on(fixture.driver.message_outcome(row)).is_err());
+}
+
+#[test]
+fn a_pending_native_handshake_is_not_stopped_merely_because_disconnect_returns() {
+    use agend_daemon::driver::codex::launch;
+    use std::os::unix::net::UnixListener;
+    use std::time::Instant;
+    let lab = lab();
+    let home = lab.home(71);
+    let id = format!("g7-{}pending", tag());
+    codex::add_codex(&home, &id, None).unwrap();
+    let listen = launch::socket_path(&home, &id);
+    let server = UnixListener::bind(&listen).unwrap();
+    server.set_nonblocking(true).unwrap();
+    let store = Arc::new(SqliteStore::open(&home, 0).unwrap());
+    let driver = CodexDriver::new(&home, store, Arc::new(|_| {}));
+    assert!(driver.workers_stopped(&id));
+    let connecting = driver.clone();
+    let name = id.clone();
+    let thread = std::thread::spawn(move || block_on(connecting.connect(&name, 1)));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let peer = loop {
+        match server.accept() {
+            Ok((peer, _)) => break peer,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(e) => panic!("native listener failed: {e}"),
+        }
+        assert!(Instant::now() < deadline, "native handshake did not start");
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    // Keep the accepted native socket open without any handshake response.
+    // No fabricated protocol input is supplied to the production driver.
+    driver.disconnect(&id);
+    assert!(!driver.workers_stopped(&id));
+    drop(peer);
+    drop(server);
+    assert!(thread.join().unwrap().unwrap().is_none());
+    assert!(driver.workers_stopped(&id));
+}
+
+#[test]
+fn a_retired_native_worker_remains_active_after_the_bounded_close_wait() {
+    use agend_daemon::driver::codex::launch;
+    use agend_testkit::fake_agent::codex::Server;
+    use std::{
+        sync::{Mutex, mpsc},
+        time::Instant,
+    };
+    let lab = lab();
+    let home = lab.home(72);
+    let id = format!("g7-{}retired", tag());
+    codex::add_codex(&home, &id, None).unwrap();
+    let listen = launch::socket_path(&home, &id);
+    let server = Server::bind(&listen, Duration::from_millis(100), None).unwrap();
+    let store = Arc::new(SqliteStore::open(&home, 0).unwrap());
+    let (arrived, arrival) = mpsc::channel();
+    let (release, wait) = mpsc::channel();
+    let wait = Mutex::new(wait);
+    let driver = CodexDriver::new(
+        &home,
+        store,
+        Arc::new(move |_| {
+            arrived.send(()).unwrap();
+            let _ = wait.lock().unwrap().recv_timeout(Duration::from_secs(15));
+        }),
+    );
+    block_on(driver.connect(&id, 1)).unwrap().unwrap();
+    assert!(!driver.workers_stopped(&id));
+    drop(server);
+    arrival.recv_timeout(Duration::from_secs(30)).unwrap();
+    // The actual worker is inside the native Gone callback. Closing its socket
+    // cannot finish this callback; the bounded close wait must not lose it.
+    driver.disconnect(&id);
+    assert!(!driver.workers_stopped(&id));
+    driver.disconnect(&id);
+    assert!(!driver.workers_stopped(&id));
+    release.send(()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !driver.workers_stopped(&id) {
+        assert!(Instant::now() < deadline, "retired worker did not finish");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[test]
+fn fresh_thread_idle_requires_terminal_native_turns_and_a_live_connection() {
+    use agend_daemon::driver::codex::history::all_turns_terminal;
+    use serde_json::json;
+    let lab = lab();
+    let backend = codex::Backend::new(&lab.home(73), "idle-proof", Duration::from_secs(2)).unwrap();
+    let fixture = codex::Fixture::boot(&backend).unwrap();
+    // connect spawns the link worker; its connected flag is published by
+    // Worker::run, which need not have been scheduled when connect returns.
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        match block_on(fixture.driver.thread_idle(&backend.id)) {
+            Ok(idle) => {
+                assert!(idle);
+                break;
+            }
+            Err(agend_daemon::driver::codex::DriverError::NotConnected(_))
+                if std::time::Instant::now() < deadline =>
+            {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(error) => panic!("initial native idle observation failed: {error}"),
+        }
+    }
+    fixture
+        .deliver("idle-message", "Respond briefly", BusyLevel::Queue)
+        .unwrap();
+    assert!(!block_on(fixture.driver.thread_idle(&backend.id)).unwrap());
+    fixture
+        .deliver("idle-queued", "Second reply", BusyLevel::Queue)
+        .unwrap();
+    let queue = backend
+        .probe()
+        .unwrap()
+        .call(
+            "thread/queue/list",
+            json!({"threadId": fixture.thread().unwrap()}),
+        )
+        .unwrap();
+    use agend_daemon::driver::codex::history::queue_empty;
+    assert!(
+        !queue["data"].as_array().unwrap().is_empty(),
+        "native queued submission required"
+    );
+    assert!(!queue_empty(&queue));
+    assert!(!block_on(fixture.driver.thread_idle(&backend.id)).unwrap());
+    fixture.settle(2).unwrap();
+    let empty = backend
+        .probe()
+        .unwrap()
+        .call(
+            "thread/queue/list",
+            json!({"threadId": fixture.thread().unwrap()}),
+        )
+        .unwrap();
+    assert!(queue_empty(&empty));
+    for key in ["data", "nextCursor"] {
+        let mut changed = empty.clone();
+        changed.as_object_mut().unwrap().remove(key);
+        assert!(!queue_empty(&changed));
+        changed[key] = json!("continuation-or-invalid-shape");
+        assert!(!queue_empty(&changed));
+    }
+    assert!(block_on(fixture.driver.thread_idle(&backend.id)).unwrap());
+    let turns = backend.turns(&fixture.thread().unwrap()).unwrap();
+    assert!(!turns.is_empty());
+    assert!(all_turns_terminal(&turns));
+    let page = backend
+        .probe()
+        .unwrap()
+        .call(
+            "thread/turns/list",
+            json!({"threadId": fixture.thread().unwrap(), "cursor": null, "limit": 100}),
+        )
+        .unwrap();
+    use agend_daemon::driver::codex::history::turn_page;
+    assert!(turn_page(&page).is_ok());
+    for key in ["data", "nextCursor"] {
+        let mut changed = page.clone();
+        changed.as_object_mut().unwrap().remove(key);
+        assert!(turn_page(&changed).is_err());
+        changed[key] = json!(false);
+        assert!(turn_page(&changed).is_err());
+    }
+    for status in ["inProgress", "future-state", ""] {
+        let mut changed = turns.clone();
+        changed[0]["status"] = json!(status);
+        assert!(!all_turns_terminal(&changed));
+    }
+    let mut changed = turns.clone();
+    changed[0].as_object_mut().unwrap().remove("status");
+    assert!(!all_turns_terminal(&changed));
+    let mut changed = turns;
+    changed[0]["id"] = json!("");
+    assert!(!all_turns_terminal(&changed));
+    let original = fixture.thread().unwrap();
+    block_on(
+        fixture
+            .store
+            .set_session_id(&backend.id, "different-thread"),
+    )
+    .unwrap();
+    assert!(block_on(fixture.driver.thread_idle(&backend.id)).is_err());
+    block_on(fixture.store.set_session_id(&backend.id, &original)).unwrap();
+    fixture.driver.disconnect(&backend.id);
+    assert!(block_on(fixture.driver.thread_idle(&backend.id)).is_err());
+}

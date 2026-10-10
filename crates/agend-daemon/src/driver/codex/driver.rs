@@ -88,6 +88,7 @@ struct Inner {
     /// older connect still running gives up instead of storing a thread,
     /// writing `$GO` or keeping a link.
     current: Mutex<BTreeMap<String, u64>>,
+    activity: Mutex<BTreeMap<String, Vec<std::sync::Weak<()>>>>,
 }
 
 impl Drop for Inner {
@@ -140,6 +141,7 @@ impl CodexDriver {
                 input_policy,
                 links: Mutex::new(BTreeMap::new()),
                 current: Mutex::new(BTreeMap::new()),
+                activity: Mutex::new(BTreeMap::new()),
             }),
         }
     }
@@ -150,15 +152,46 @@ impl CodexDriver {
     pub async fn connect(&self, id: &str, generation: u64) -> Result<Option<Vec<String>>, String> {
         let inner = Arc::clone(&self.inner);
         let id = id.to_owned();
-        blocking(move || inner.connect(&id, generation).map_err(DriverError::Backend))
-            .await
-            .map_err(|e| e.to_string())
+        let activity = Arc::new(());
+        {
+            let mut active = inner.activity.lock().unwrap_or_else(|p| p.into_inner());
+            let generations = active.entry(id.clone()).or_default();
+            generations.retain(|token| token.strong_count() != 0);
+            generations.push(Arc::downgrade(&activity));
+        }
+        blocking(move || {
+            inner
+                .connect(&id, generation, activity)
+                .map_err(DriverError::Backend)
+        })
+        .await
+        .map_err(|e| e.to_string())
     }
 
     /// Closes the link of `id` (nothing is sent to codex); a connect still
     /// running for it gives up.
     pub fn disconnect(&self, id: &str) {
         self.inner.disconnect(id);
+    }
+
+    /// Includes pending handshakes and retired link workers whose bounded
+    /// disconnect wait expired. Callers must serialize new connects with a
+    /// version switch; backend turn completion is a separate check.
+    pub fn workers_stopped(&self, id: &str) -> bool {
+        let mut active = self
+            .inner
+            .activity
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let Some(generations) = active.get_mut(id) else {
+            return true;
+        };
+        generations.retain(|token| token.strong_count() != 0);
+        let stopped = generations.is_empty();
+        if stopped {
+            active.remove(id);
+        }
+        stopped
     }
 
     /// Whether the link of `id` is connected now.
@@ -179,6 +212,92 @@ impl CodexDriver {
                     .flatten()
                     == Some(link.shared.holder_pid.load(Ordering::SeqCst))
         })
+    }
+
+    /// A disconnected cached busy flag is not readiness evidence.
+    pub fn connected_busy(&self, id: &str) -> Option<bool> {
+        let links = self.inner.lock_links();
+        let link = links.get(id)?;
+        link.shared
+            .connected
+            .load(Ordering::SeqCst)
+            .then(|| link.shared.busy.load(Ordering::SeqCst))
+    }
+
+    /// Fresh read-only thread snapshot, never a cached busy flag. The caller
+    /// must pause all input, drain writers, and separately verify the managed
+    /// holder identity before using this observation to stop a backend.
+    pub async fn thread_idle(&self, id: &str) -> Result<bool, DriverError> {
+        let inner = Arc::clone(&self.inner);
+        let id = id.to_owned();
+        blocking(move || {
+            let generation = inner.lock_current().get(&id).copied();
+            let instance = inner
+                .instance(&id)?
+                .ok_or_else(|| DriverError::UnknownInstance(id.clone()))?;
+            if instance.session_id.is_none()
+                || instance.backend != Backend::Codex
+                || instance.status != crate::store::InstanceStatus::Running
+            {
+                return Err(DriverError::NotConnected(id));
+            }
+            let (shared, wait) = inner
+                .lock_links()
+                .get(&id)
+                .filter(|link| {
+                    link.shared.connected.load(Ordering::SeqCst)
+                        && instance.session_id.as_deref() == Some(link.session_id.as_str())
+                })
+                .map(|link| (Arc::clone(&link.shared), link.idle_request()))
+                .ok_or_else(|| DriverError::NotConnected(id.clone()))?;
+            let idle = wait
+                .wait(Duration::from_secs(5))
+                .map_err(DriverError::Backend)?;
+            let same_link = inner.lock_links().get(&id).is_some_and(|link| {
+                Arc::ptr_eq(&shared, &link.shared) && link.shared.connected.load(Ordering::SeqCst)
+            });
+            if !same_link
+                || generation.is_none()
+                || inner.lock_current().get(&id).copied() != generation
+                || inner.instance(&id)?.as_ref() != Some(&instance)
+            {
+                return Err(DriverError::NotConnected(id));
+            }
+            Ok(!shared.busy.load(Ordering::SeqCst) && idle)
+        })
+        .await
+    }
+
+    /// Query the connected thread without sending or confirming any message.
+    pub async fn message_outcome(
+        &self,
+        row: Message,
+    ) -> Result<agend_core::protocol::client::MessageOutcomeState, DriverError> {
+        let inner = Arc::clone(&self.inner);
+        blocking(move || {
+            let id = &row.to_instance;
+            let generation = inner.lock_current().get(id).copied();
+            let instance = inner
+                .instance(id)?
+                .ok_or_else(|| DriverError::UnknownInstance(id.clone()))?;
+            let wait = inner
+                .lock_links()
+                .get(id)
+                .filter(|link| link.shared.connected.load(Ordering::SeqCst))
+                .map(Link::turns_request)
+                .ok_or_else(|| DriverError::NotConnected(id.clone()))?;
+            let turns = wait
+                .wait(Duration::from_secs(5))
+                .map_err(DriverError::Backend)?;
+            if generation.is_none()
+                || inner.lock_current().get(id).copied() != generation
+                || inner.instance(id)?.and_then(|i| i.session_id) != instance.session_id
+            {
+                return Err(DriverError::NotConnected(id.clone()));
+            }
+            Ok(super::history::message_outcome(&turns, &row))
+        })
+        .await
     }
 
     /// Busy as the link of `id` sees it (not debounced); `None` without a link.
@@ -221,7 +340,12 @@ impl Inner {
             .call_blocking(move |conn| crate::store::instances::get(conn, &id))
     }
 
-    fn connect(&self, id: &str, generation: u64) -> Result<Option<Vec<String>>, String> {
+    fn connect(
+        &self,
+        id: &str,
+        generation: u64,
+        activity: Arc<()>,
+    ) -> Result<Option<Vec<String>>, String> {
         {
             let mut current = self.lock_current();
             if current.get(id).is_some_and(|&newer| newer > generation) {
@@ -245,6 +369,8 @@ impl Inner {
                 None => Ok(false),
             })
             .map_err(|e| format!("cannot read thread receipt attribution: {e}"))?;
+        let external_auth =
+            crate::backend_versions::canary_scope::codex_external_auth(&self.home, &instance)?;
         let listen = launch::socket_path(&self.home, id);
         let started = Instant::now();
         let mut worker = loop {
@@ -257,6 +383,7 @@ impl Inner {
                 listen.clone(),
                 Arc::clone(&self.store),
                 identified,
+                external_auth.clone(),
             ) {
                 Ok(worker) => break worker,
                 Err(e) if started.elapsed() >= launch::READY_WITHIN => {
@@ -360,7 +487,7 @@ impl Inner {
             .catch_up()
             .map_err(|e| format!("catching up with the thread: {e}"))?;
         let link = worker
-            .spawn(Arc::clone(&self.sink))
+            .spawn(Arc::clone(&self.sink), activity)
             .map_err(|e| format!("cannot start the link thread: {e}"))?;
         let mut links = self.lock_links();
         if !self.is_current(id, generation) {

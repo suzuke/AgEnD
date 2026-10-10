@@ -1269,6 +1269,7 @@ fn operator(state: &mut State, command: OperatorCommand) -> Result<CommandResult
             instance_id: id,
             backend,
             working_directory,
+            program,
             ..
         } => {
             let valid = !id.is_empty()
@@ -1299,6 +1300,7 @@ fn operator(state: &mut State, command: OperatorCommand) -> Result<CommandResult
             };
             let session_id = (backend == "claude").then(|| fresh_id(state));
             let view = InstanceView {
+                program: Some(program.unwrap_or_else(|| backend.clone())),
                 instance_id: id.clone(),
                 team_id: agend_core::model::DEFAULT_TEAM.into(),
                 backend,

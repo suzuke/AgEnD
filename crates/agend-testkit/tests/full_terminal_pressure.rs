@@ -41,6 +41,7 @@ impl TerminalProducer for Held {
 fn same_socket_fleet_replies_and_new_grant_waits_for_old_input() {
     let daemon = FakeDaemon::start().unwrap();
     daemon.set_instance(InstanceView {
+        program: None,
         instance_id: parser::ID.into(),
         team_id: "general".into(),
         backend: "claude".into(),
@@ -177,6 +178,7 @@ impl TerminalProducer for HeldFrame {
 fn a_capture_finishing_after_replacement_cannot_publish_the_old_view() {
     let daemon = FakeDaemon::start().unwrap();
     daemon.set_instance(InstanceView {
+        program: None,
         instance_id: parser::ID.into(),
         team_id: "general".into(),
         backend: "claude".into(),
@@ -205,6 +207,7 @@ fn a_capture_finishing_after_replacement_cannot_publish_the_old_view() {
     a.client
         .send(&ClientRequest::SetTerminalViewport {
             data: TerminalViewportData {
+                fit_size: None,
                 request_id: "old-selected".into(),
                 instance_id: parser::ID.into(),
                 view_id: old_view.clone(),

@@ -146,6 +146,9 @@ pub(crate) fn begin(
     let now =
         i64::try_from(now).map_err(|_| StoreError::Invalid("attempt time out of range".into()))?;
     let tx = conn.unchecked_transaction()?;
+    if super::backend_switch::delivery_paused(&tx, instance)? {
+        return Ok(false);
+    }
     let changed = tx.execute(
         "UPDATE messages SET attempted_at_unix_ms=?5, turn_id=?4, updated_at_unix_ms=?5 \
          WHERE id=?1 AND to_instance=?2 AND state='queued' AND attempted_at_unix_ms IS NULL \

@@ -13,6 +13,7 @@
 //!
 //! Must NOT: do any work before the argv[0] dispatch.
 
+mod backend;
 mod claude;
 mod cli;
 mod debug;
@@ -20,7 +21,9 @@ mod doctor;
 mod home;
 mod hooks;
 mod init;
+mod service;
 mod setup;
+mod telegram;
 
 use std::process::ExitCode;
 

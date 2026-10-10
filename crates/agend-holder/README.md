@@ -39,7 +39,7 @@ holder 1.2 新增 `DaemonKey`，daemon 必須帶目前 generation／screen revis
 
 | 項目 | 內容 |
 |---|---|
-| 指令 | `agend holder <instance-id>`，需要絕對路徑的 `AGEND_HOME`；instance id 只能用 `A-Z a-z 0-9 _ -`、最多 32 字 |
+| 指令 | `agend holder <instance-id>`，需要已存在、絕對路徑的 `AGEND_HOME`；instance id 只能用 `A-Z a-z 0-9 _ -`、最多 32 字 |
 | 檔案 | `$AGEND_HOME/run/holders/`（0700）下的 `<id>.sock`、`<id>.lock`（內容是 holder pid）、`<id>.log` |
 | exit code | 0：停止（`Shutdown` 或安全網）；1：已有 holder（印 `holder for <id> already running (pid N)`）；2：用法或設定錯誤（例如 socket 路徑超過 100 bytes） |
 | 在跑嗎 | 只看 lock：`paths::is_running`，只回活著、大於 1 的 pid（絕不回 0）。不連 socket，因為新連線會搶走 daemon 的連線 |
@@ -85,3 +85,11 @@ holder 1.2 新增 `DaemonKey`，daemon 必須帶目前 generation／screen revis
 ~/.cargo/bin/cargo test -p agend-holder
 ~/.cargo/bin/cargo xtask accept holder
 ```
+
+## 第 13 關啟動綁定（施工中）
+
+holder 1.3 的 `SpawnBound` 在成功建立原生程序的同一把狀態鎖內保存 UUID；`GetLaunchBinding` 只讀原始 instance／UUID／pid，不回傳 argv 或環境。重連不補認既有未綁定程序，失敗或第二次 Spawn 不改 UUID；舊 peer 仍可用 1.2／1.1，但不能使用此能力。daemon 的持久綁定紀錄及受管版本准入仍待接入。
+
+Shutdown、home 刪除與 idle 停機進入同一 stopping 狀態；即使清理暫時取走 agent handle，也不能建立第二個程序。永久 successful-spawn 標記與 stopping guard 共同保護單次啟動，停止期間不接受新連線。
+
+13C 清理保護：holder 只逐層建立既有 home 內的 `run` 與 `holders`，不遞迴建立 home。啟動器逾時並移除 home 後，晚到的 holder 會 exit 2，不重新建立已清理目錄；home 建立由 init／launcher 負責。這不更改存活 holder 跨 daemon 重啟保留的行為。

@@ -82,6 +82,7 @@ impl Drop for Lab {
 
 fn instance(id: &str, backend: &str, state: AgentState) -> InstanceView {
     InstanceView {
+        program: None,
         instance_id: id.into(),
         team_id: "general".into(),
         backend: backend.into(),

@@ -62,6 +62,7 @@ impl TerminalProducer for Demo {
 fn daemon(socket: &Path, producer: &Demo) -> io::Result<FakeDaemon> {
     let daemon = FakeDaemon::start_at(socket)?;
     daemon.set_instance(InstanceView {
+        program: None,
         instance_id: parser::ID.into(),
         team_id: "general".into(),
         backend: "claude".into(),

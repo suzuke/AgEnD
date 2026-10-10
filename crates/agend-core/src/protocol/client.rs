@@ -57,7 +57,13 @@ pub const V1_4: ProtocolVersion = ProtocolVersion::new(1, 4);
 pub const V1_5: ProtocolVersion = ProtocolVersion { major: 1, minor: 5 };
 /// Shared operator read receipts (G4); delivery does not imply read.
 pub const V1_6: ProtocolVersion = ProtocolVersion { major: 1, minor: 6 };
-pub const OFFERED_VERSIONS: [ProtocolVersion; 4] = [V1_6, V1_5, V1_4, V1_3];
+/// Read-only operator delivery receipts for backend canaries.
+pub const V1_7: ProtocolVersion = ProtocolVersion { major: 1, minor: 7 };
+/// Operator backend-switch preparation and reconciliation.
+pub const V1_8: ProtocolVersion = ProtocolVersion::new(1, 8);
+/// Operator Telegram pairing and read-only backend diagnostics.
+pub const V1_9: ProtocolVersion = ProtocolVersion::new(1, 9);
+pub const OFFERED_VERSIONS: [ProtocolVersion; 7] = [V1_9, V1_8, V1_7, V1_6, V1_5, V1_4, V1_3];
 /// Legacy fixture baseline. The real server and parser-backed fake fixtures
 /// advertise 1.4 independently once a full-terminal producer is available.
 pub const SUPPORTED_VERSIONS: [ProtocolVersion; 1] = [V1_3];
@@ -232,11 +238,66 @@ pub struct OperatorData {
     pub command: OperatorCommand,
 }
 
-/// What the operator asks the daemon to do (gate 9 P6). Users see the
-/// instance id as its `name`.
+/// Durable backend-switch preparation and reconciliation (client 1.8).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+pub enum BackendSwitchCommand {
+    Status {
+        instance_id: String,
+    },
+    Prepare {
+        instance_id: String,
+        version: String,
+        expected_previous: Option<String>,
+    },
+    Activate {
+        instance_id: String,
+        switch_id: String,
+    },
+    Rollback {
+        instance_id: String,
+        switch_id: String,
+    },
+    Cancel {
+        instance_id: String,
+        switch_id: String,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
 pub enum OperatorCommand {
+    /// 1.9: operator-only persisted backend evidence; never executes a probe.
+    BackendDiagnostic {
+        instance_id: String,
+    },
+    /// 1.9: operator-only Telegram pairing, never an inline token.
+    TelegramPairing {
+        operation: crate::telegram::pairing::PairingOperation,
+    },
+    /// 1.8: serialized operator version-switch operations.
+    BackendSwitch {
+        operation: BackendSwitchCommand,
+    },
+    /// 1.7: explicit operator-originated queued message; never impersonates an agent.
+    SendMessage {
+        to: String,
+        message: String,
+        message_id: String,
+    },
+    /// 1.7: live adapter readiness, separate from the presentation fleet cache.
+    DriverStatus {
+        instance_id: String,
+    },
+    /// 1.7: backend-correlated execution outcome, never inferred from idle.
+    MessageOutcome {
+        message_id: String,
+    },
+    /// 1.7: persisted delivery state, without message content or mutation.
+    MessageDelivery {
+        message_id: String,
+    },
+
     /// Adds an instance and starts it (answered `instance_added`).
     /// `working_directory` defaults to `$AGEND_HOME/workspace/<id>`,
     /// `program` to the backend's name; `args` are the agent's own.
@@ -662,6 +723,9 @@ pub struct TaskPipelineView {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InstanceView {
+    /// Configured backend executable, before driver wrappers. Older peers omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program: Option<String>,
     pub instance_id: String,
     pub team_id: String,
     /// `claude`, `codex` or `opencode`.
@@ -761,6 +825,26 @@ pub struct TerminalBytesData {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "result", rename_all = "snake_case")]
 pub enum CommandResult {
+    BackendDiagnostic {
+        data: alloc::boxed::Box<crate::setup::backend::observation::BackendDiagnosticReply>,
+    },
+    TelegramPairing {
+        data: Option<alloc::boxed::Box<crate::telegram::pairing::PairingRecord>>,
+    },
+    BackendSwitch {
+        data: Option<alloc::boxed::Box<crate::runtime_records::BackendSwitch>>,
+    },
+    MessageOutcome {
+        data: MessageOutcomeData,
+    },
+    DriverStatus {
+        data: DriverStatusData,
+    },
+    /// 1.7: None means no stored message with this id.
+    MessageDelivery {
+        data: Option<MessageDeliveryData>,
+    },
+
     Text {
         text: String,
     },
@@ -787,6 +871,50 @@ pub enum CommandResult {
     },
     #[serde(other)]
     Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageDeliveryState {
+    Queued,
+    Sent,
+    Confirmed,
+    Failed,
+    #[serde(other)]
+    Unknown,
+}
+
+/// Completion requires a backend success result and a nonempty assistant response.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageOutcomeState {
+    Running,
+    Completed,
+    Failed,
+    Unsupported,
+    #[serde(other)]
+    Unknown,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MessageOutcomeData {
+    pub message_id: String,
+    pub instance_id: String,
+    pub turn_id: Option<String>,
+    /// Backend turn reference, or Claude's native prompt_id (not a delivery id).
+    #[serde(default)]
+    pub execution_id: Option<String>,
+    pub state: MessageOutcomeState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MessageDeliveryData {
+    pub message_id: String,
+    pub from_instance: String,
+    pub to_instance: String,
+    pub state: MessageDeliveryState,
+    pub turn_id: Option<String>,
+    pub attempted_at_unix_ms: Option<u64>,
+    pub updated_at_unix_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1106,3 +1234,13 @@ mod tests {
         assert_eq!(ids, [Some("wide"), Some("old"), Some("new"), None]);
     }
 }
+
+/// Point-in-time readiness; Unknown never permits a canary step.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DriverStatusData {
+    pub instance_id: String,
+    pub state: AgentState,
+}
+
+/// Human-originated messages use a namespace that cannot be an instance id.
+pub const OPERATOR_MESSAGE_SENDER: &str = "@operator";

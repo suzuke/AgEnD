@@ -211,6 +211,19 @@ impl Layout {
         Ok(password.into())
     }
 
+    /// The attached session must match the durable instance, not merely share
+    /// the same REST server. A missing handoff is not a ready session.
+    pub fn session_endpoint(&self, holder_pid: u32, session: &str) -> io::Result<(u16, String)> {
+        let endpoint = self.endpoint(holder_pid)?;
+        let go = String::from_utf8(read_private(&self.root.join("go"), 1024)?)
+            .map_err(io::Error::other)?;
+        let expected = format!("{session}\nhttp://127.0.0.1:{}\n", endpoint.0);
+        if go != expected {
+            return Err(io::Error::other("OpenCode attached session mismatch"));
+        }
+        Ok(endpoint)
+    }
+
     /// A startup record must belong to the currently locked holder, not an old
     /// version of the executable found on PATH after a daemon restart.
     pub fn endpoint(&self, holder_pid: u32) -> io::Result<(u16, String)> {

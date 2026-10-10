@@ -92,6 +92,18 @@ fn inherited_holders_are_reaped_and_nothing_else_is() {
 }
 
 #[test]
+fn doctor_orphan_warning_recovers_by_starting_the_real_daemon() {
+    let lab = lab();
+    let root = lab.root.clone();
+    let result = sections::doctor_orphan_recovery(&lab);
+    lab.stop_all_holders();
+    assert!(lab.running_holders().is_empty());
+    drop(lab);
+    assert!(!root.exists(), "doctor recovery lab was not removed");
+    show(&result.unwrap());
+}
+
+#[test]
 fn init_and_doctor() {
     run(sections::init_and_doctor);
 }

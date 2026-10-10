@@ -57,6 +57,7 @@ fn producer_generation_and_instance_stop_make_the_owner_read_only() {
         },
     );
     fx.daemon.set_instance(InstanceView {
+        program: None,
         instance_id: fx.instance(),
         team_id: "general".into(),
         backend: "claude".into(),

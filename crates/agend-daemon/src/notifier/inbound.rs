@@ -299,7 +299,9 @@ pub async fn dispatch(ctx: &crate::handlers::Context, admitted: Admitted) -> Res
             .await
             .map_err(|_| "daemon stopped before confirming retry")?;
     }
-    if id.starts_with(handlers::claude_attention::PREFIX)
+    if id.starts_with(handlers::backend_version::PREFIX)
+        || id.starts_with(handlers::backend_registry::PREFIX)
+        || id.starts_with(handlers::claude_attention::PREFIX)
         || id.starts_with(handlers::opencode_delivery_attention::PREFIX)
         || id.starts_with(handlers::opencode_attention::PREFIX)
     {

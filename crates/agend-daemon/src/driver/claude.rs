@@ -9,6 +9,7 @@
 
 mod driver;
 pub mod launch;
+pub(crate) mod outcome;
 pub(crate) mod sweep;
 pub use driver::ClaudeDriver;
 

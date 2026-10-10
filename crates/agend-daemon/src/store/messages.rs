@@ -287,3 +287,23 @@ pub(crate) fn mark_attempted(conn: &Connection, id: &str, now: u64) -> Result<()
     )?;
     Ok(())
 }
+
+/// Serialize a Codex write reservation with version-switch preparation. A
+/// previously attempted row also waits: history reconciliation may still run,
+/// but a new outbound write must not start during a prepared switch.
+pub(crate) fn begin_codex_attempt(
+    conn: &Connection,
+    id: &str,
+    now: u64,
+) -> Result<bool, StoreError> {
+    let Some(row) = get(conn, id)? else {
+        return Ok(false);
+    };
+    if row.state != DeliveryState::Queued
+        || super::backend_switch::delivery_paused(conn, &row.to_instance)?
+    {
+        return Ok(false);
+    }
+    mark_attempted(conn, id, now)?;
+    Ok(true)
+}

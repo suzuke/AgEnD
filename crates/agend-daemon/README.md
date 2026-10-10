@@ -172,7 +172,7 @@ cargo xtask accept cli             # 第 9 施工關 demo：cli_demo（在 agend
 `startup_variable_ready_rejects_unknown_footer_and_split_hint_without_idle_or_more_keys` 拒絕未知 footer／分行建議。
 既有無 SessionStart、人工控制、結果不明與四次開機回歸維持；這些測試不啟動真 Claude、不送模型訊息。
 
-12B OpenCode push 以 supervisor worker 接 loopback REST：claim 與傳輸分離，先持久化 attempt 再送一次，REST 歷史確認收件。原 session 經私人 holder wrapper handoff 恢復；權限由 operator 回覆，unknown 投遞提供 Abandon。原生恢復／權限／DRV 及固定版本模型真測已通過，最終覆核與 CI 以 [12B 紀錄](../../docs/gates/gate-12b-opencode.md) 為準。
+12B OpenCode push 以 supervisor worker 接 loopback REST：claim 與傳輸分離，先持久化 attempt 再送一次，REST 歷史確認收件。原 session 經私人 holder wrapper handoff 恢復；目前有效 work 階段分派的 canonical worktree，若原生 `external_directory` 只有該目錄的精確 `/*` pattern，daemon 在固定 1.18.34 endpoint、session、task version 與 ticket 重新核對後回覆一次 `once`；其他權限仍由 operator 回覆。結果不明不重送，unknown 投遞提供 Abandon。原生恢復／權限／DRV 及固定版本模型真測已通過，最終覆核與 CI 以 [12B 紀錄](../../docs/gates/gate-12b-opencode.md) 為準。
 
 12D 設定 parser、private token reference 與固定 Telegram HTTPS API 已建立；通知全文分段與持久逐段收據已接 Notifier 契約；daemon worker 已觀察 needs-you 並持久去重，手機操作已接 guarded pipeline，完整驗收尚未完成。進度見 [Telegram](../../docs/gates/gate-12d-telegram.md)。
 
@@ -189,3 +189,103 @@ Telegram delivery 區分 in_flight 與 outcome_unknown，後者供本機 `telegr
 GitHub merge 前要求可讀的 classic branch protection：strict、非空 required checks、enforce_admins 且未要求 linear history；設定不足先受阻，daemon 不代改共享 repo。已 merge 的收據對帳維持只讀。[政策與限制](../../docs/gates/gate-12c-github.md)。
 
 本機 WIP 存檔失敗時，取消／完成當下仍回報原錯誤並保留 binding；背景 wake 可稍後重試。遠端收尾失敗另記 cleanup-remote attention，不吞掉本機存檔錯誤。
+
+第 13B 維護排他：`SqliteStore` 在建立／開啟資料庫前取得 `.agend-maintenance.lock` 的共享 flock，持有到 DB thread 關閉。服務解除安裝以排他 flock 阻止新 store 啟動，並取得既有 DB 的原生 SQLite 鎖以拒絕舊 daemon；不建立缺少的 DB、不執行 migration。鎖檔保留同一 inode，避免其他程序鎖到被替換的檔案。
+
+13C agent 環境覆寫 Claude／OpenCode 更新開關；本機版本匯入使用 `maintenance::Activity` 共享 lease，阻止解除安裝在發布期間刪資料。操作員共用設定不變，見[版本管理](../../docs/architecture/backend-versions.md)。
+
+client protocol 1.7 的 operator `message_delivery` 只讀持久化收據：message ID、sender／target、state、turn ID 與時間，不回 body、不推進狀態。供 canary 核對真正的 confirmed，尚未接完整 canary 升級流程。
+
+13C 施工中的 protocol 1.7：操作員 `send_message` 固定以 `@operator` 真人身分 queue 投遞，必填 UUID v4；`driver_status` 回傳 instance 與就緒狀態，Codex 必須有連線，unknown 不代表 idle。這些 RPC 不切換 backend 版本。
+
+正常 daemon 將執行映像固定至 home/runtime-binaries 的私有副本，holder／hook 與 shim 使用該副本；原始 binary 升級不改變本次啟動路徑。副本保留供存活 holder 使用；重連受管 backend 的啟動身分對帳尚未完成，版本准入仍關閉。
+
+固定 launcher 的快照驗證直接回傳摘要與檔案身分 binding，供 runtime 沿用；重啟時仍重新驗證 running image 與快照內容，但不再第三次雜湊相同快照。既有 holder 跨 daemon 重啟保留（D3／D5）。
+
+13C migration 0018 的 `managed_launches` 保存每個 instance 的啟動意圖：在任何 SpawnBound I/O 前提交，重連只讀回核對；新啟動須由 supervisor 先證明舊 holder 已離開，再以舊 binding 做 CAS。instance 明確移除時 cascade 刪除，重建同名 instance 不能繼承舊紀錄。儲存 API 已實作，supervisor／runtime 串接仍待完成，受管准入維持拒絕。
+
+受管 runtime 提供 `start_reserved`／`attach_reserved`：前者送持久 UUID 的 SpawnBound，再核 holder 回報的 UUID／PID；後者只讀 GetLaunchBinding，絕不補送 Spawn。連線須核對成功才開放輸入，transport 重連也重新核對；不符時保留 holder 並回報失敗。核對前的 Exited 暫存，避免未驗證事件觸發 supervisor 重啟；主動取消不誤報身分失敗。這些 API 仍待接入 supervisor 的受管啟動決策，版本准入保持關閉。
+
+13C supervisor 在受管 canary 核對後，以 canonical 匯入程式建立 launch，確認舊 holder／orphan 已離開才保存 SQLite 意圖並送 SpawnBound。重連只讀原意圖，核對設定、artifact 與 holder UUID；不符保留程序並標記失敗。版本切換／回退仍待完成。
+
+版本切換儲存層以 BackendSwitch 保存原啟動證據、目標與階段；program 與 phase 原子提交／回退，過期請求拒絕。Prepared 可取消並保留原 program 與執行中 agent，已提交的切換須走回滾。canary、停止 holder 及 CLI／supervisor 切換編排仍由後續流程接入。
+
+13C OpenCode runtime 保留尚未結束的舊代 worker，取消旗標與 `workers_stopped` 分開；只有所有執行緒退出才回報停止。這是本機投遞執行緒的證據，backend 回合是否結束仍需原生狀態核對。
+
+13C Prepared 切換記錄會暫停 Claude channel／Stop、Codex 與 OpenCode 的新 push attempt；檢查與 reservation 在同一 DB 工作序列執行。訊息保留 queued，取消後可恢復；既有 attempt 的回執仍可確認。準備前已取得的寫入權仍須排空，此限制不等於 holder 或 backend 已閒置；完整 supervisor 切換編排尚未接入。
+
+Prepared 也暫停 agent 的 inbox 讀取：狀態檢查與內容查詢在同一 DB 工作執行，回覆明確暫停原因。操作員歷史查詢不受影響；取消後沿用原有最後 20 筆／after 游標。已完成讀取但尚未寫回 socket 的回覆仍需由切換編排排空。
+
+Codex 的 `workers_stopped` 追蹤連線建立與已移出 link 表但仍在退出的 worker。disconnect 的有限等待逾時不會讓這項證據消失；呼叫端仍須序列化新 connect，並另查 backend 回合是否結束。
+
+1.8 backend switch 操作由 supervisor 序列處理：prepare 驗受管來源與目標 canary，持久化 Prepared 暫停新投遞；status 查紀錄，cancel 核精確 ID／設定後恢復。這些 RPC 尚不停止 holder、換版或回滾。
+
+取得 DB 鎖後立即啟用 daemon 日誌，記錄 executable／私有 launcher 驗證的開始、結果與耗時；在建立 socket 前卡住也能定位。失敗仍拒絕啟動，不因已有快取略過雜湊。
+
+13C runtime `stop_reserved` 核對目前 holder PID，再在同一條 holder 1.3 連線查啟動 UUID／instance／agent PID 後送 Shutdown；不重連重送，不停止替代或 legacy holder。呼叫者仍須先暫停投遞、確認回合結束並序列化新啟動；拒絕可能斷開 runtime link，但保留程序。這是停止身分契約，尚未接入完整換版編排。
+
+13C server 追蹤 Claude helper 與 inbox 回覆，從 handler 執行前持有到序列化與 bounded socket write 結束。prepare 先持久化投遞暫停，再捕捉既有回覆並最多等 10 秒排空；後續空輪詢不延長這個範圍。逾時保留 Prepared 並要求查 status，不改程式或停止 holder。這只證明本機寫入結束，backend 消費／回合完成仍須另驗。
+
+13C Committed／Restoring 仍暫停新投遞；只有 native readiness 呼叫者提供且 DB 核對未變的 Running instance、PID／session、新 launch 意圖及目標 artifact，`finish_backend_switch` 才記 Activated／RolledBack 並恢復。原啟動 UUID、過期快照與未完成切換覆寫會拒絕；Store 不代替 native readiness，完整 supervisor 編排待接。
+
+13C 正式 TerminalHub 在完整終端 acquire／resize／input 與 legacy input 執行前查持久切換暫停；唯讀 frame／viewport 與 release 保留。操作先加入同一排空範圍再查 DB，所以競爭中的操作不是被拒絕，就是被先前回覆排空捕捉。完整終端追蹤到 holder 控制請求返回；legacy guard 隨實際 blocking write 工作持有。這仍不代表遠端回合結束；失敗／斷線不能當成 native readiness。
+
+Codex `thread_idle` 透過目前連線重讀完整分頁回合，核連線物件、generation 與 instance 快照未變；僅已知終止狀態可判閒置，缺失／異常分頁拒絕。這是當下 thread 觀察，呼叫者仍須先暫停並排空輸入、核受管 holder 身分；尚未接入換版 coordinator。
+
+OpenCode `session_idle` 重讀 REST session 狀態，查詢前後核 holder／instance／session handoff／endpoint／私有憑證；缺失或改變拒絕。不以 daemon 的閒置快取、訊息回執或 HTTP 接受當成回合完成；換版仍須先暫停排空並核 managed launch。
+
+換版 Prepared 也暫停 Claude startup key reservation；reservation 與暫停檢查同 SQLite 交易，既有按鍵操作納入 server 排空追蹤。Committed／Restoring 允許新 launch 完成啟動選單，否則無法驗 readiness。操作逾時仍是未知結果，不能因此推論 backend 已結束。
+
+私有 launcher 在 daemon 準備階段先以清空環境執行 `--version`，最多等待 30 秒，前後核 executable binding。首次執行可能耗在 OS 載入／驗證，不能挪用 holder 的 5 秒 socket 連線期限；失敗停止 daemon 準備，逾時只清理自己的短命 child。
+
+`Server::claude_observer` 提供只讀 session_idle：本次連線的 SessionStart／UserPromptSubmit 與 Stop 候選、5 秒穩定期、live screen 無 hard gate，查詢後再核 session／revision／連線。重連不能沿用舊候選；初始 Ready 仍須完整錄製規則。這是觀察，不代替暫停排空、managed launch 身分及 supervisor 停止授權。
+
+13C：pending backend switch 阻止一般 boot start、自動重啟與 operator retry 改寫啟動意圖。`backend_switch::pending_switch_boot_preserves_launch_reservation_without_ordinary_restart` 經原生 daemon 驗三種 pending phase 跨 boot 保留精確資料；專用換版恢復仍待串接。
+
+13C Codex 閒置觀察在同一 worker 排序於先前 RPC 之後，先確認原生 queue 的 data 為空且 nextCursor 明確為 null，再讀完整 turns；後端佇列非空或欄位缺失不當作閒置。原生 fake app-server 測試包含第二筆排隊訊息、消化後空佇列，以及真 producer 回覆的缺欄位／錯形狀反例。
+
+13C 新增 `backend switch activate／rollback --switch-id`：精確持久 ID、目的版本准入、投遞排空與 native idle 後停止受管 holder；Committed／Restoring 保持暫停，核新 holder 綁定及 readiness 後才釋放。Activated／Committed 回滾先保存 RollbackPrepared；daemon 重啟後由定期協調器繼續。三 backend 原生假版本往返與目的 holder 消失後自動回退已驗；目前代原生 AgentExited 亦可核精確 holder 後回退，Codex 已驗。driver 斷線不當作退出；完整 crash matrix 尚未完成。
+
+受管 holder 的就緒身分查詢走既有 runtime socket；另開查詢連線會取代 holder 的唯一 client，不能用於保持 Ready 觀察的驗證。回覆核 binding／instance／agent PID、holder PID 與原 terminal connection 仍有效；斷線或逾時拒絕完成切換。
+
+OpenCode 版本核對：受管程式使用匯入 artifact 的版本（supervisor 仍須先核成功 canary）；私有 canary daemon 使用精確 CanaryScope；一般未受管程式維持 1.18.34。REST health 必須與 wrapper 回報的版本相同。scope 存在但不匹配時直接拒絕，不退回一般路徑。
+
+換版的 `problem` 保存具體失敗原因與首次等待時間；driver 斷線、啟動失敗或自動回退被拒時，在「需要你」顯示 `backend-switch:<instance>:<switch-id>`，並由 `backend switch status` 顯示原因。daemon 重啟恢復同一通知，pipeline 同步不移除它。通知沒有一般 Retry 動作；操作員先查狀態，仍循正式換版／回退入口。成功啟用、回退、取消或移除 instance 才清除通知。這不代表斷線本身授權停止存活 holder；啟動逾時政策仍待完成。
+
+目的版本提交為 Committed 或 Restoring 時，同一交易保存 300 秒 activation deadline；重啟、重複觀察及問題通知都不重新計時，真正開始還原才建立新的期限。到期且仍未通過 native readiness，下一次協調檢查保存逾時問題、保持投遞暫停與原 holder。到期不等於閒置，不授權強制停止；稍後通過 readiness 仍可完成並清除通知／期限。舊持久紀錄若沒有 deadline，未完成時明確提示缺少期限，不能當作重新獲得五分鐘。
+
+13D 配對驗證已加入純邏輯與 notifier adapter：10 分鐘 nonce、GetMe 身分、直接人類 /start、時間／目的地核對、精確操作員確認後產生 token reference／單一 user allowlist 設定。觀察與確認重查 bot，拒絕中途換 bot；群組 topic 綁 message_thread_id。SQLite schema 20 另保存單一配對收據，候選對象與更新游標同交易發布；過期、舊快照或已關閉操作拒絕。CLI／RPC 已接入，設定套用由操作員 CLI 的 setup apply 完成，也未執行真 Telegram。daemon 不改寫人寫的 config.toml（D8）；設定套用由操作員 CLI 負責。
+
+13D `PairingService` 串行執行 HTTP 與 SQLite 發布；caller 取消不釋放正在執行的操作，後續請求以 Status 查收據。已配置 notifier 時拒絕 Begin／Poll／Confirm，避免兩個 getUpdates consumer；停止介面先關閉准入再等待發布。此服務已接 daemon 啟停及 protocol 1.9 操作員 RPC；停止時關閉准入並等待既有發布，之後才停止 server。
+
+13E 的 `pipeline_probe install` 強制指定 AGEND_BIN，先在全新 HOME 以該 binary init，再共用正式 pipeline fixture 驗首任務及清理。這是已安裝 binary 的 native fake-worker smoke；不啟動真模型或主機服務。
+
+私有 CanaryScope 對 instance args 做精確比對，讓 canary 明確選模型，同時拒絕未記錄的啟動參數。既有省略 args 的 scope 仍只接受空 args。
+
+13C 明確 `--auth-file` 的格式、私有路徑與真測邊界見[canary 認證](../../docs/architecture/backend-canary-auth.md)。本機測試涵蓋 private copy、來源不變、OpenCode 正式 Layout 保留認證、scope 錯配與權限拒絕；完整 native canary 使用測試用憑證，沒有真帳戶或模型呼叫。
+
+Fleet 的 program 取自 instance 設定，保留 driver wrapper 前的程式，供 doctor 診斷；不包含 args 或認證。
+
+backend_versions::registry 提供阻塞唯讀 latest 查詢，daemon 使用時需放在 worker；固定 npm HTTPS、拒轉址、5 秒期限與 256 KiB 上限。沒有認證或下載／執行步驟。受管 fleet 的每日檢查與持久通知由 registry monitor 接入。
+
+`store::backend_registry` 在網路查詢前保存每日嘗試；完成與確認均核對當前 attempt／revision。migration 0021 最多保存三筆公開版本觀測，daemon monitor 與 ingest 使用這份紀錄執行每日查詢及恢復提醒。
+
+受管 fleet 現在由 registry monitor 每分鐘核對是否到了每日查詢時間；查詢在 blocking worker 執行，停止時等待當前有限 HTTP 操作結束。canary home 跳過；外部未受管 CLI 的被動漂移仍待接入。持久觀測透過 ingest 恢復為 acknowledge 提醒，不安裝或切換。
+
+離線環境可在 config.toml 設 registry_checks = false；native daemon lab 預設使用此公開設定，避免 fake 受管版本觸發網際網路查詢。Telegram registry acknowledge 與本機共用持久 handler。version_probe 共用 doctor 的限時程序／pipe 清理，另支援明示 cwd 與環境供漂移偵測接入。
+
+HolderRuntime::observe_backend_version 使用 daemon 捕獲的 PATH 與 agent_env 白名單，限時執行外部設定程式的 --version；前後核解析路徑與 executable 身分。受管版本交既有 manifest 核對，無效受管 bytes 不會被外部探測執行。此 API 由外部版本 monitor 呼叫。
+
+外部 CLI 版本觀測 Store 每個 instance 最多一列；探測前預約、60 秒內及時鐘倒退不重複預約，失敗保留上次成功值。首次成功靜默建立基準，後續變動、失敗與恢復產生 revision；確認綁 generation 與 revision。背景探測與 attention 共用此持久 API。
+
+外部 CLI 的持久版本紀錄已接背景 monitor 與 attention：每 60 秒檢查已設定 instance，沿用 daemon 的 cwd／PATH 與環境白名單。受管 launch 與 canary home 跳過；`backend_version_checks=false` 可停用本機探測。停機等待當次 child probe 收尾與結果保存，確認不會安裝、切換或重啟 backend。
+
+operator BackendDiagnostic 在單一 SQLite transaction 讀配置及相符的外部版本／受管預約紀錄，無 backend 執行、設定寫入或通知確認。RPC 回覆綁本次 daemon boot；args、session、環境不出現在 projection。配置已變更的紀錄不回傳但仍保留於 store。
+
+BackendDiagnostic 的四條能力政策取自 daemon 實際設定：Codex input policy／限定 verification instance、Claude 完整錄製 frame、OpenCode endpoint 版本優先序與獨立 permission 版本。OpenCode 兩項 baseline 分開命名，不因 endpoint 升級連帶放寬權限回覆；政策 RPC 不額外做探測。
+
+兩個版本 monitor 收到 daemon 停機時同時請求停止，各自在 bounded I/O 與持久化結束後記錄 stopped；停機 log 可區分已請求停止與已收尾。
+
+TerminalViewportData 的 optional fit_size 在 actor 內序列化檢查 owner：無 owner 才以不公開的 temporary attach resize 並 release，不授予 client 輸入權。有 owner 時只更新閱讀 viewport，不改 PTY。操作沿用 backend switch fence，失敗關閉 terminal connection。
+
+隔離 Codex canary 可在 initialize 後、thread start/resume 前使用 access-only 外部登入；認證快照只從完整 scope 綁定的私有檔取得，reconnect 沿用同份快照，refresh 請求明確拒絕。一般 instance 不讀取此認證來源。

@@ -27,6 +27,7 @@ use std::{
 struct Native {
     api: Arc<Api>,
     updates: Arc<Mutex<Vec<Value>>>,
+    bot: Arc<Mutex<Value>>,
     calls: Arc<Mutex<Vec<(String, Value)>>>,
     receipts: Arc<Mutex<Vec<Value>>>,
     stop: Arc<AtomicBool>,
@@ -37,6 +38,14 @@ impl Native {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let origin = format!("http://{}", listener.local_addr().unwrap());
+        let bot = Arc::new(Mutex::new(
+            serde_json::from_str::<Value>(include_str!(
+                "../../tests/fixtures/telegram/get-me.json"
+            ))
+            .unwrap()["result"]
+                .clone(),
+        ));
+        let identity = bot.clone();
         let updates = Arc::new(Mutex::new(Vec::<Value>::new()));
         let queue = updates.clone();
         let calls = Arc::new(Mutex::new(Vec::new()));
@@ -102,11 +111,7 @@ impl Native {
                             .collect(),
                     ),
                     "answerCallbackQuery" => json!(true),
-                    "getMe" => serde_json::from_str::<Value>(include_str!(
-                        "../../tests/fixtures/telegram/get-me.json"
-                    ))
-                    .unwrap()["result"]
-                        .clone(),
+                    "getMe" => identity.lock().unwrap().clone(),
                     "sendMessage" => {
                         let mut receipt = serde_json::from_str::<Value>(include_str!(
                             "../../tests/fixtures/telegram/message.json"
@@ -138,6 +143,7 @@ impl Native {
                 origin,
             )),
             updates,
+            bot,
             calls,
             receipts,
             stop,
@@ -181,6 +187,7 @@ impl Lab {
         .unwrap();
         let (supervisor, _) = tokio::sync::mpsc::unbounded_channel();
         let ctx = Arc::new(Context {
+            pairing: crate::notifier::pairing_service::PairingService::new(store.clone(), true),
             pipeline,
             fleet,
             runtime: crate::runtime::HolderRuntime::new(
@@ -1121,4 +1128,817 @@ async fn unknown_notification_is_local_operator_only_and_never_claims_receipt() 
         handlers::handle(&lab.ctx, None, request(AttentionAction::Abandon)).await,
         Outcome::Reply(ClientResponse::Error { .. })
     ));
+}
+
+fn pairing_message(command: &str, date: u64) -> Value {
+    // Mutate the recorded native message producer into a human /start update.
+    let mut message =
+        serde_json::from_str::<Value>(include_str!("../../tests/fixtures/telegram/message.json"))
+            .unwrap()["result"]
+            .clone();
+    message["from"]["id"] = json!(42);
+    message["from"]["is_bot"] = json!(false);
+    message["text"] = json!(command);
+    message["date"] = json!(date);
+    json!({"update_id":100,"message":message})
+}
+
+#[tokio::test]
+async fn native_pairing_requires_fresh_challenge_and_exact_operator_confirmation() {
+    use super::pairing;
+    use agend_core::telegram::pairing::PAIRING_WINDOW_MS;
+    use agend_testkit::fakes::FakeClock;
+    let native = Native::new();
+    let clock = FakeClock::new(1_791_367_350_123);
+    let pending = pairing::begin(
+        native.api.clone(),
+        "11111111-1111-4111-8111-111111111111".into(),
+        SecretRef::File("/private/test-token".into()),
+        &clock,
+    )
+    .await
+    .unwrap();
+    assert!(pending.candidate.is_none());
+    assert_eq!(pending.bot_id, 123456789);
+    assert_eq!(pending.bot_username, "agend_fixture_bot");
+    let update = pairing_message(&pending.command(), clock.peek() / 1000);
+    *native.updates.lock().unwrap() = vec![update];
+    let observed = pairing::poll(native.api.clone(), &pending, &clock)
+        .await
+        .unwrap();
+    assert!(
+        pending.candidate.is_none(),
+        "caller persists a new snapshot, never a partial mutation"
+    );
+    assert_eq!(observed.offset, 101);
+    let candidate = observed.candidate.as_ref().unwrap();
+    assert_eq!(
+        (candidate.chat_id, candidate.user_id, candidate.topic_id),
+        (42, 42, None)
+    );
+    let mut wrong = candidate.clone();
+    wrong.user_id = 43;
+    assert!(observed.confirm(&wrong, &clock).is_err());
+    assert!(pending.confirm(candidate, &clock).is_err());
+    let config = pairing::confirm(native.api.clone(), &observed, candidate, &clock)
+        .await
+        .unwrap();
+    assert!(config.allows(42, 42, false));
+    assert!(!config.allows(42, 43, false));
+    assert!(!config.allows(42, 42, true));
+    native.bot.lock().unwrap()["id"] = json!(987654321);
+    assert!(
+        pairing::confirm(native.api.clone(), &observed, candidate, &clock)
+            .await
+            .is_err()
+    );
+    assert!(
+        pairing::poll(native.api.clone(), &pending, &clock)
+            .await
+            .is_err()
+    );
+    native.bot.lock().unwrap()["id"] = json!(123456789);
+    let calls = native.calls.lock().unwrap().len();
+    assert_eq!(
+        pairing::poll(native.api.clone(), &observed, &clock)
+            .await
+            .unwrap(),
+        observed
+    );
+    assert_eq!(native.calls.lock().unwrap().len(), calls);
+    clock.advance(PAIRING_WINDOW_MS);
+    assert!(observed.confirm(candidate, &clock).is_err());
+    assert!(
+        pairing::poll(native.api.clone(), &pending, &clock)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        native.calls.lock().unwrap().len(),
+        calls,
+        "expired pairing performs no HTTP"
+    );
+    assert!(
+        native
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|(method, _)| matches!(method.as_str(), "getMe" | "getUpdates"))
+    );
+}
+
+#[tokio::test]
+async fn native_pairing_refuses_forwarded_stale_ambiguous_and_malformed_updates() {
+    use super::pairing;
+    use agend_testkit::fakes::FakeClock;
+    let native = Native::new();
+    let clock = FakeClock::new(1_791_367_350_123);
+    let pending = pairing::begin(
+        native.api.clone(),
+        "11111111-1111-4111-8111-111111111111".into(),
+        SecretRef::File("/private/test-token".into()),
+        &clock,
+    )
+    .await
+    .unwrap();
+    let valid = pairing_message(&pending.command(), clock.peek() / 1000);
+    for case in 0..10 {
+        let mut update = valid.clone();
+        match case {
+            0 => update["message"]["text"] = json!("/start unrelated"),
+            1 => update["message"]["date"] = json!(clock.peek() / 1000 - 1),
+            2 => update["message"]["date"] = json!(clock.peek() / 1000 + 1),
+            3 => update["message"]["from"]["is_bot"] = json!(true),
+            4 => update["message"]["forward_origin"] = json!({"type":"user"}),
+            5 => update["message"]["sender_chat"] = json!({"id":42}),
+            6 => update["message"]["edit_date"] = json!(clock.peek() / 1000),
+            7 => update["message"]["chat"]["type"] = json!("channel"),
+            8 => update["message"]["message_thread_id"] = json!(7),
+            9 => {
+                update["message"]["text"] =
+                    json!(pending.command().replace("/start", "/start@other_bot"))
+            }
+            _ => unreachable!(),
+        }
+        *native.updates.lock().unwrap() = vec![update];
+        let result = pairing::poll(native.api.clone(), &pending, &clock)
+            .await
+            .unwrap();
+        assert!(result.candidate.is_none(), "admitted case {case}");
+    }
+    *native.updates.lock().unwrap() = vec![valid.clone(), valid.clone()];
+    assert!(
+        pairing::poll(native.api.clone(), &pending, &clock)
+            .await
+            .is_err()
+    );
+    let mut second = valid.clone();
+    second["update_id"] = json!(101);
+    second["message"]["from"]["id"] = json!(43);
+    *native.updates.lock().unwrap() = vec![valid.clone(), second];
+    assert!(
+        pairing::poll(native.api.clone(), &pending, &clock)
+            .await
+            .is_err()
+    );
+    assert!(pending.candidate.is_none());
+    let mut forum = valid;
+    forum["message"]["chat"]["id"] = json!(-10042);
+    forum["message"]["chat"]["type"] = json!("supergroup");
+    forum["message"]["is_topic_message"] = json!(true);
+    forum["message"]["message_thread_id"] = json!(7);
+    forum["message"]["text"] = json!(
+        pending
+            .command()
+            .replace("/start", "/start@agend_fixture_bot")
+    );
+    *native.updates.lock().unwrap() = vec![forum];
+    let result = pairing::poll(native.api.clone(), &pending, &clock)
+        .await
+        .unwrap();
+    let config = result
+        .confirm(result.candidate.as_ref().unwrap(), &clock)
+        .unwrap();
+    assert_eq!(config.needs_you_topic, Some(7));
+    assert!(config.allows(-10042, 42, false));
+}
+
+#[tokio::test]
+async fn native_pairing_service_publishes_before_next_operator_and_guards_active_notifier() {
+    use super::pairing_service::PairingService;
+    use agend_core::telegram::pairing::{PairingOperation as Op, PairingPhase};
+    let native = Native::new();
+    let dir = TempDir::new("telegram-pair-service").unwrap();
+    let store = Arc::new(SqliteStore::open(dir.path(), 0).unwrap());
+    let service = PairingService::local_test(store.clone(), false, native.api.clone());
+    let id = "11111111-1111-4111-8111-111111111111".to_owned();
+    let begin = Op::Begin {
+        id: id.clone(),
+        token: SecretRef::Env("TEST_TOKEN".into()),
+        previous: None,
+    };
+    let initial = service.execute(begin.clone()).await.unwrap().unwrap();
+    let count = native.calls.lock().unwrap().len();
+    assert!(service.execute(begin.clone()).await.is_err());
+    assert_eq!(
+        native.calls.lock().unwrap().len(),
+        count,
+        "reject duplicate begin before HTTP"
+    );
+    *native.updates.lock().unwrap() = vec![pairing_message(
+        &initial.session.command(),
+        crate::log::now_unix_ms() / 1000,
+    )];
+    let observed = service
+        .execute(Op::Poll { id: id.clone() })
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(observed.phase, PairingPhase::Pending);
+    assert_eq!(observed.session.offset, 101);
+    assert_eq!(
+        store.telegram_pairing().await.unwrap(),
+        Some(observed.clone())
+    );
+    let configured = PairingService::local_test(store.clone(), true, native.api.clone());
+    let count = native.calls.lock().unwrap().len();
+    assert!(
+        configured
+            .execute(Op::Poll { id: id.clone() })
+            .await
+            .is_err()
+    );
+    assert!(configured.execute(begin).await.is_err());
+    assert_eq!(
+        configured.execute(Op::Status).await.unwrap(),
+        Some(observed.clone())
+    );
+    assert_eq!(
+        native.calls.lock().unwrap().len(),
+        count,
+        "active notifier cannot compete for updates"
+    );
+    let mut wrong = observed.session.candidate.clone().unwrap();
+    wrong.user_id += 1;
+    assert!(
+        service
+            .execute(Op::Confirm {
+                id: id.clone(),
+                candidate: wrong
+            })
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        native.calls.lock().unwrap().len(),
+        count,
+        "wrong confirmation never calls HTTP"
+    );
+    let confirmed = service
+        .execute(Op::Confirm {
+            id: id.clone(),
+            candidate: observed.session.candidate.unwrap(),
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(confirmed.phase, PairingPhase::Confirmed);
+    assert!(service.execute(Op::Cancel { id }).await.is_err());
+    assert_eq!(service.execute(Op::Status).await.unwrap(), Some(confirmed));
+    assert!(
+        native
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|(method, _)| method == "getMe" || method == "getUpdates")
+    );
+}
+
+#[tokio::test]
+async fn pairing_client_cancellation_keeps_http_owned_until_cursor_is_published() {
+    use super::pairing_service::PairingService;
+    use agend_core::telegram::pairing::PairingOperation as Op;
+    let native = Native::new();
+    let dir = TempDir::new("telegram-pair-service").unwrap();
+    let store = Arc::new(SqliteStore::open(dir.path(), 0).unwrap());
+    let service = PairingService::local_test(store.clone(), false, native.api.clone());
+    let id = "11111111-1111-4111-8111-111111111111".to_owned();
+    let pending = service
+        .execute(Op::Begin {
+            id: id.clone(),
+            token: SecretRef::Env("TEST_TOKEN".into()),
+            previous: None,
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    *native.updates.lock().unwrap() = vec![pairing_message(
+        &pending.session.command(),
+        crate::log::now_unix_ms() / 1000,
+    )];
+    let (held_tx, held_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let queue = native.updates.clone();
+    let gate = thread::spawn(move || {
+        let _held = queue.lock().unwrap();
+        held_tx.send(()).unwrap();
+        let _ = release_rx.recv_timeout(Duration::from_secs(5));
+    });
+    held_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    let caller = {
+        let service = service.clone();
+        let id = id.clone();
+        tokio::spawn(async move { service.execute(Op::Poll { id }).await })
+    };
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if native
+                .calls
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|(m, _)| m == "getUpdates")
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    caller.abort();
+    assert!(caller.await.unwrap_err().is_cancelled());
+    let next = {
+        let service = service.clone();
+        tokio::spawn(async move { service.execute(Op::Poll { id }).await })
+    };
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert!(
+        !next.is_finished(),
+        "cancelling the caller must not release HTTP ownership"
+    );
+    release_tx.send(()).unwrap();
+    gate.join().unwrap();
+    let record = next.await.unwrap().unwrap().unwrap();
+    assert_eq!(record.session.offset, 101);
+    assert!(record.session.candidate.is_some());
+    assert_eq!(store.telegram_pairing().await.unwrap(), Some(record));
+    assert_eq!(
+        native
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(m, _)| m == "getUpdates")
+            .count(),
+        1
+    );
+    service.stop().await;
+    assert!(service.execute(Op::Status).await.is_err());
+}
+
+#[tokio::test]
+async fn native_registry_callback_acknowledges_only_the_current_persisted_revision() {
+    use agend_core::{
+        model::Backend,
+        setup::backend::{PublishedBackend, observation::REGISTRY_INTERVAL_MS},
+    };
+    let lab = Lab::new().await;
+    let native = Native::new();
+    let manifest: Value = serde_json::from_slice(include_bytes!(
+        "../../tests/fixtures/backend_registry/codex.json"
+    ))
+    .unwrap();
+    let release = PublishedBackend {
+        backend: "codex".into(),
+        package: manifest["name"].as_str().unwrap().into(),
+        version: manifest["version"].as_str().unwrap().into(),
+    };
+    let attempt = lab
+        .ctx
+        .store
+        .begin_registry_check(Backend::Codex, 100)
+        .await
+        .unwrap()
+        .unwrap();
+    lab.ctx
+        .store
+        .finish_registry_check(Backend::Codex, attempt.attempt, 101, Ok(release))
+        .await
+        .unwrap();
+    crate::handlers::backend_registry::refresh(&lab.ctx.store, &lab.ctx.fleet)
+        .await
+        .unwrap();
+    let item = lab
+        .ctx
+        .fleet
+        .view()
+        .attention
+        .into_iter()
+        .find(|a| {
+            a.attention_id
+                .as_deref()
+                .is_some_and(|id| id.starts_with(crate::handlers::backend_registry::PREFIX))
+        })
+        .unwrap();
+    let row = lab
+        .ctx
+        .store
+        .observe_telegram(&[worker::notice(&item).unwrap()], &lab.destination, 102)
+        .await
+        .unwrap()
+        .remove(0);
+    let notifier = super::delivery::TelegramNotifier::new(
+        native.api.clone(),
+        lab.ctx.store.clone(),
+        lab.destination.clone(),
+    );
+    notifier.resume(&row.id).await.unwrap();
+    let markup = inbound::keyboard(&row).unwrap();
+    let receipt =
+        serde_json::from_str::<Value>(include_str!("../../tests/fixtures/telegram/message.json"))
+            .unwrap()["result"]
+            .clone();
+    let mut update = json!({"update_id":1,"callback_query":{"id":"registry-ack","from":{"id":7,"is_bot":false},"message":receipt,"data":markup["inline_keyboard"][0][0]["callback_data"]}});
+    let (_stop, stopped) = tokio::sync::watch::channel(false);
+    native.updates.lock().unwrap().push(update.clone());
+    poll::once(
+        &lab.ctx,
+        &lab.config,
+        native.api.clone(),
+        &lab.destination,
+        &stopped,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        lab.ctx
+            .store
+            .registry_observation(Backend::Codex)
+            .await
+            .unwrap()
+            .unwrap()
+            .acknowledged_revision,
+        1
+    );
+    crate::handlers::backend_registry::refresh(&lab.ctx.store, &lab.ctx.fleet)
+        .await
+        .unwrap();
+    assert!(
+        lab.ctx
+            .fleet
+            .attention(item.attention_id.as_deref().unwrap())
+            .is_none()
+    );
+    let now = 100 + REGISTRY_INTERVAL_MS;
+    let second = lab
+        .ctx
+        .store
+        .begin_registry_check(Backend::Codex, now)
+        .await
+        .unwrap()
+        .unwrap();
+    lab.ctx
+        .store
+        .finish_registry_check(
+            Backend::Codex,
+            second.attempt,
+            now + 1,
+            Err("offline".into()),
+        )
+        .await
+        .unwrap();
+    crate::handlers::backend_registry::refresh(&lab.ctx.store, &lab.ctx.fleet)
+        .await
+        .unwrap();
+    update["update_id"] = json!(2);
+    native.updates.lock().unwrap().push(update);
+    poll::once(
+        &lab.ctx,
+        &lab.config,
+        native.api.clone(),
+        &lab.destination,
+        &stopped,
+    )
+    .await
+    .unwrap();
+    let current = lab
+        .ctx
+        .store
+        .registry_observation(Backend::Codex)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(current.revision, 2);
+    assert_eq!(
+        current.acknowledged_revision, 1,
+        "old mobile button must not consume the new reminder"
+    );
+}
+
+async fn version_instance(lab: &Lab, id: &str, program: &str) {
+    use agend_core::{
+        model::Backend,
+        runtime_records::{Instance, InstanceStatus},
+    };
+    lab.ctx
+        .store
+        .add_instance(&Instance {
+            id: id.into(),
+            backend: Backend::Codex,
+            program: program.into(),
+            args: vec![],
+            working_directory: lab
+                ._dir
+                .path()
+                .canonicalize()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .into(),
+            session_id: None,
+            status: InstanceStatus::New,
+            session_started: false,
+            agent_pid: None,
+            legacy_no_thread: false,
+            delivery: "push".into(),
+        })
+        .await
+        .unwrap();
+}
+#[tokio::test]
+async fn native_external_version_monitor_waits_for_child_before_stop_and_skips_next_instance() {
+    use std::os::unix::fs::PermissionsExt;
+    let lab = Lab::new().await;
+    let home = lab._dir.path().canonicalize().unwrap();
+    let script = home.join("backend");
+    std::fs::write(&script,"#!/bin/sh\n[ \"$1\" = --version ] || exit 2\ntouch entered\nwhile [ ! -f release ]; do /bin/sleep 0.02; done\nprintf 'fake 1.0\\n'\n").unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+    version_instance(&lab, "a-version", script.to_str().unwrap()).await;
+    version_instance(&lab, "b-version", script.to_str().unwrap()).await;
+    let monitor = crate::backend_versions::system_monitor::Monitor::start(lab.ctx.clone());
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while !home.join("entered").exists() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let mut stopping = tokio::spawn(monitor.stop());
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), &mut stopping)
+            .await
+            .is_err()
+    );
+    std::fs::write(home.join("release"), "").unwrap();
+    tokio::time::timeout(Duration::from_secs(3), stopping)
+        .await
+        .unwrap()
+        .unwrap();
+    let row = lab
+        .ctx
+        .store
+        .system_version_observation("a-version")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.latest.unwrap().version_output, "fake 1.0");
+    assert_eq!(row.revision, 0);
+    assert!(row.completed_ms.is_some());
+    assert!(
+        lab.ctx
+            .store
+            .system_version_observation("b-version")
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+#[tokio::test]
+async fn native_external_version_failure_notifies_and_mobile_ack_survives_refresh() {
+    let lab = Lab::new().await;
+    let native = Native::new();
+    version_instance(&lab, "version-test", "/nonexistent/agend-version-test").await;
+    let monitor = crate::backend_versions::system_monitor::Monitor::start(lab.ctx.clone());
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if lab
+                .ctx
+                .store
+                .system_version_observation("version-test")
+                .await
+                .unwrap()
+                .is_some_and(|r| r.completed_ms.is_some())
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    monitor.stop().await;
+    crate::handlers::backend_version::refresh(&lab.ctx.store, &lab.ctx.fleet)
+        .await
+        .unwrap();
+    let item = lab
+        .ctx
+        .fleet
+        .view()
+        .attention
+        .into_iter()
+        .find(|a| {
+            a.attention_id
+                .as_deref()
+                .is_some_and(|id| id.starts_with(crate::handlers::backend_version::PREFIX))
+        })
+        .unwrap();
+    assert!(item.reason.contains("probe failed"));
+    let row = lab
+        .ctx
+        .store
+        .observe_telegram(&[worker::notice(&item).unwrap()], &lab.destination, 102)
+        .await
+        .unwrap()
+        .remove(0);
+    let notifier = super::delivery::TelegramNotifier::new(
+        native.api.clone(),
+        lab.ctx.store.clone(),
+        lab.destination.clone(),
+    );
+    notifier.resume(&row.id).await.unwrap();
+    let markup = inbound::keyboard(&row).unwrap();
+    let receipt =
+        serde_json::from_str::<Value>(include_str!("../../tests/fixtures/telegram/message.json"))
+            .unwrap()["result"]
+            .clone();
+    let update = json!({"update_id":1,"callback_query":{"id":"version-ack","from":{"id":7,"is_bot":false},"message":receipt,"data":markup["inline_keyboard"][0][0]["callback_data"]}});
+    let (_stop, stopped) = tokio::sync::watch::channel(false);
+    native.updates.lock().unwrap().push(update.clone());
+    poll::once(
+        &lab.ctx,
+        &lab.config,
+        native.api.clone(),
+        &lab.destination,
+        &stopped,
+    )
+    .await
+    .unwrap();
+    let acknowledged = lab
+        .ctx
+        .store
+        .system_version_observation("version-test")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(acknowledged.acknowledged_revision, 1);
+    crate::handlers::backend_version::refresh(&lab.ctx.store, &lab.ctx.fleet)
+        .await
+        .unwrap();
+    assert!(
+        lab.ctx
+            .fleet
+            .attention(item.attention_id.as_deref().unwrap())
+            .is_none()
+    );
+    let now = acknowledged.started_ms + crate::store::system_versions::CHECK_INTERVAL_MS;
+    let ticket = lab
+        .ctx
+        .store
+        .begin_system_version_check("version-test", now)
+        .await
+        .unwrap()
+        .unwrap();
+    lab.ctx
+        .store
+        .finish_system_version_check(&ticket, now, Err("new failure".into()))
+        .await
+        .unwrap();
+    crate::handlers::backend_version::refresh(&lab.ctx.store, &lab.ctx.fleet)
+        .await
+        .unwrap();
+    let mut stale = update;
+    stale["update_id"] = json!(2);
+    native.updates.lock().unwrap().push(stale);
+    poll::once(
+        &lab.ctx,
+        &lab.config,
+        native.api.clone(),
+        &lab.destination,
+        &stopped,
+    )
+    .await
+    .unwrap();
+    let newer = lab
+        .ctx
+        .store
+        .system_version_observation("version-test")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(newer.revision, 2);
+    assert_eq!(newer.acknowledged_revision, 1);
+}
+
+#[tokio::test]
+async fn disabled_invalid_and_canary_homes_never_reserve_or_execute_external_probes() {
+    use std::os::unix::fs::PermissionsExt;
+    for mode in ["disabled", "invalid", "canary"] {
+        let lab = Lab::new().await;
+        let home = lab._dir.path().canonicalize().unwrap();
+        let script = home.join("backend");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\ntouch unexpected-probe\nprintf 'fake 1.0\\n'\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        version_instance(&lab, "version-test", script.to_str().unwrap()).await;
+        match mode {
+            "disabled" => {
+                std::fs::write(home.join("config.toml"), "backend_version_checks = false\n")
+                    .unwrap()
+            }
+            "invalid" => std::fs::write(
+                home.join("config.toml"),
+                "backend_version_checks = 'false'\n",
+            )
+            .unwrap(),
+            "canary" => std::fs::write(home.join("canary-scope.json"), "{}").unwrap(),
+            _ => unreachable!(),
+        }
+        let monitor = crate::backend_versions::system_monitor::Monitor::start(lab.ctx.clone());
+        let exited = tokio::time::timeout(Duration::from_secs(3), async {
+            while !monitor.is_finished() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .is_ok();
+        monitor.stop().await;
+        assert!(
+            exited,
+            "{mode}: disabled worker must exit without being stopped"
+        );
+        assert!(!home.join("unexpected-probe").exists(), "{mode}");
+        assert!(
+            lab.ctx
+                .store
+                .system_version_observation("version-test")
+                .await
+                .unwrap()
+                .is_none(),
+            "{mode}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn managed_launch_is_skipped_while_the_next_external_instance_is_probed() {
+    use agend_core::{setup::backend::ImportedBackend, traits::HolderLaunch};
+    use sha2::{Digest, Sha256};
+    use std::os::unix::fs::PermissionsExt;
+    let lab = Lab::new().await;
+    let home = lab._dir.path().canonicalize().unwrap();
+    let script = home.join("backend");
+    let bytes=b"#!/bin/sh\n[ \"$1\" = --version ] || exit 2\ntouch \"probe-$AGEND_INSTANCE\"\nprintf 'fake 1.0\\n'\n";
+    std::fs::write(&script, bytes).unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+    version_instance(&lab, "a-managed", script.to_str().unwrap()).await;
+    version_instance(&lab, "b-external", script.to_str().unwrap()).await;
+    let instance = lab.ctx.store.instance("a-managed").await.unwrap().unwrap();
+    lab.ctx
+        .store
+        .prepare_managed_launch(
+            &instance,
+            &HolderLaunch {
+                instance_id: instance.id.clone(),
+                backend: instance.backend,
+                executable: instance.program.clone(),
+                args: vec![],
+                working_directory: instance.working_directory.clone(),
+            },
+            ImportedBackend {
+                format: 1,
+                backend: "codex".into(),
+                version: "1.0".into(),
+                sha256: format!("{:x}", Sha256::digest(bytes)),
+                bytes: bytes.len() as u64,
+            },
+            None,
+        )
+        .await
+        .unwrap();
+    let monitor = crate::backend_versions::system_monitor::Monitor::start(lab.ctx.clone());
+    let completed = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if lab
+                .ctx
+                .store
+                .system_version_observation("b-external")
+                .await
+                .unwrap()
+                .is_some_and(|r| r.completed_ms.is_some())
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .is_ok();
+    monitor.stop().await;
+    assert!(completed);
+    assert!(home.join("probe-b-external").exists());
+    assert!(!home.join("probe-a-managed").exists());
+    assert!(
+        lab.ctx
+            .store
+            .system_version_observation("a-managed")
+            .await
+            .unwrap()
+            .is_none()
+    );
 }

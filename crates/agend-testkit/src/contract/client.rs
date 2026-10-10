@@ -1026,6 +1026,10 @@ fn operator_adds_and_removes_instances<F: ClientProtocolFixture>(fx: &mut F) -> 
         listed.is_some_and(|i| i.working_directory.as_deref() == Some(dir.as_str())),
         || format!("the fleet view shows {listed:?}, expected {name} in {dir}"),
     )?;
+    ensure(
+        listed.is_some_and(|i| i.program.as_deref() == Some("/bin/sh")),
+        || format!("the fleet view lost the configured program: {listed:?}"),
+    )?;
     let reply = ask(
         &mut op,
         "clp-14c",
@@ -1535,6 +1539,7 @@ impl FakeDaemonFixture {
         self.base.store(daemon.event_id_start(), Ordering::SeqCst);
         for id in [FAKE_INSTANCE, FAKE_PEER] {
             daemon.set_instance(InstanceView {
+                program: None,
                 instance_id: id.into(),
                 team_id: "general".into(),
                 backend: "claude".into(),
@@ -1543,6 +1548,7 @@ impl FakeDaemonFixture {
             });
         }
         daemon.set_instance(InstanceView {
+            program: None,
             instance_id: FAKE_STOPPED.into(),
             team_id: "general".into(),
             backend: "claude".into(),

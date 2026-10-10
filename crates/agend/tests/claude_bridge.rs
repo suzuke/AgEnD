@@ -785,7 +785,7 @@ fn busy_interrupt_keeps_queued_without_writing_or_stealing_operator_control() {
     f.start();
     f.hook("UserPromptSubmit", json!({"prompt":"busy"}));
     let (mut owner, version) = ProbeClient::hello(&f.home.join(DAEMON_SOCKET), None).unwrap();
-    assert_eq!(version, V1_6);
+    assert_eq!(version, V1_9);
     owner
         .send(&ClientRequest::SubscribeTerminalFrames {
             data: TerminalSubscribeData {
@@ -1318,7 +1318,9 @@ fn refused_ack_is_a_tool_error_retained_without_confirming_any_message() {
 #[test]
 fn failed_local_ack_publication_is_a_tool_error_and_does_not_write_outside_home() {
     let f = Fixture::new(0);
-    let outside = f.lab.home(1);
+    // Lab homes contain offline configuration. Use an empty foreign directory
+    // so any entry here still proves an unintended spool publication.
+    let outside = f.lab.home(1).join("outside-spool");
     fs::create_dir_all(&outside).unwrap();
     fs::create_dir_all(f.home.join("spool")).unwrap();
     std::os::unix::fs::symlink(&outside, f.home.join("spool/acks")).unwrap();
@@ -1725,4 +1727,124 @@ fn first_native_hook_unlock_occurs_after_busy_is_committed_live() {
         !busy.event.replayed,
         "fresh busy hook was stolen by historical ingest"
     );
+}
+
+#[test]
+fn claude_idle_observation_requires_live_hook_session_and_original_holder_connection() {
+    use agend_core::traits::HolderLaunch;
+    use agend_daemon::{
+        driver::codex::CodexDriver,
+        fleet::Fleet,
+        handlers::Context,
+        runtime::HolderRuntime,
+        server::{self, Server},
+    };
+    use std::sync::{Arc, atomic::AtomicBool};
+    let f = Fixture::with_script(
+        0,
+        None,
+        "/bin/sh",
+        "printf 'native idle probe\\r\\n'; while :; do sleep 1; done",
+    );
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let store = Arc::new(f.store());
+    let instance = block_on(store.instance("claude")).unwrap().unwrap();
+    let runtime = HolderRuntime::new(&f.home, Path::new(BIN), vec![], Arc::new(|_| {}));
+    let launch = HolderLaunch {
+        instance_id: instance.id.clone(),
+        backend: instance.backend,
+        executable: instance.program.clone(),
+        args: instance.args.clone(),
+        working_directory: instance.working_directory.clone(),
+    };
+    let started = rt.block_on(runtime.start(&launch)).unwrap();
+    block_on(store.set_instance_status("claude", InstanceStatus::Running)).unwrap();
+    let fleet = Arc::new(Fleet::new(0));
+    let codex = CodexDriver::new(&f.home, store.clone(), Arc::new(|_| {}));
+    let (pipeline, worker) = rt
+        .block_on(agend_daemon::pipeline::start(
+            &f.home,
+            Path::new(BIN),
+            store.clone(),
+            fleet.clone(),
+            codex.clone(),
+        ))
+        .unwrap();
+    let (supervisor, _events) = tokio::sync::mpsc::unbounded_channel();
+    let ctx = Arc::new(Context {
+        pairing: agend_daemon::notifier::pairing_service::PairingService::new(store.clone(), false),
+        fleet,
+        pipeline,
+        runtime: runtime.clone(),
+        supervisor,
+        store: store.clone(),
+        codex,
+        exe: PathBuf::from(BIN),
+        restarting: AtomicBool::new(false),
+        codex_input: Default::default(),
+    });
+    let service = {
+        let _entered = rt.enter();
+        let socket = f.home.join(DAEMON_SOCKET);
+        Server::start(server::bind(&socket).unwrap(), socket, ctx)
+    };
+    let observer = service.claude_observer();
+    assert!(!rt.block_on(observer.session_idle("claude")).unwrap());
+    f.hook("UserPromptSubmit", json!({"prompt":"native idle probe"}));
+    f.hook("Stop", json!({"stop_hook_active":false}));
+    assert!(!rt.block_on(observer.session_idle("claude")).unwrap());
+    std::thread::sleep(Duration::from_millis(5100));
+    assert!(rt.block_on(observer.session_idle("claude")).unwrap());
+    block_on(store.set_session_id("claude", OTHER)).unwrap();
+    assert!(!rt.block_on(observer.session_idle("claude")).unwrap());
+    block_on(store.set_session_id("claude", SESSION)).unwrap();
+    f.hook("UserPromptSubmit", json!({"prompt":"second turn"}));
+    assert!(!rt.block_on(observer.session_idle("claude")).unwrap());
+    f.hook("Stop", json!({"stop_hook_active":true}));
+    std::thread::sleep(Duration::from_millis(5100));
+    assert!(rt.block_on(observer.session_idle("claude")).unwrap());
+    runtime.detach("claude");
+    assert!(!rt.block_on(observer.session_idle("claude")).unwrap());
+    rt.block_on(runtime.attach(&launch, started.handle.process_id.unwrap()))
+        .unwrap();
+    assert!(
+        !rt.block_on(observer.session_idle("claude")).unwrap(),
+        "old idle survived reconnect"
+    );
+    f.hook("Stop", json!({"stop_hook_active":false}));
+    std::thread::sleep(Duration::from_millis(5100));
+    assert!(
+        !rt.block_on(observer.session_idle("claude")).unwrap(),
+        "Stop without a current routing observation rebound old idle"
+    );
+    f.hook(
+        "UserPromptSubmit",
+        json!({"prompt":"current connection turn"}),
+    );
+    f.hook("Stop", json!({"stop_hook_active":false}));
+    std::thread::sleep(Duration::from_millis(5100));
+    assert!(rt.block_on(observer.session_idle("claude")).unwrap());
+
+    f.hook("PreToolUse", json!({"tool_name":"Read", "tool_input":{}}));
+    assert!(
+        !rt.block_on(observer.session_idle("claude")).unwrap(),
+        "tool activity retained idle proof"
+    );
+    f.hook("SessionEnd", json!({"reason":"test"}));
+    f.hook("Stop", json!({"stop_hook_active":false}));
+    std::thread::sleep(Duration::from_millis(5100));
+    assert!(
+        !rt.block_on(observer.session_idle("claude")).unwrap(),
+        "ended session retained routing proof"
+    );
+    rt.block_on(service.stop());
+    worker.abort();
+    rt.block_on(runtime.stop("claude")).unwrap();
+    drop(observer);
+    drop(runtime);
+    drop(store);
+    drop(rt);
 }

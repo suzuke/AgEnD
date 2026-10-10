@@ -29,6 +29,16 @@ pub struct Conn {
 }
 
 impl Conn {
+    #[cfg(test)]
+    pub(super) fn test_stream(stream: UnixStream, version: ProtocolVersion) -> Self {
+        Self {
+            writer: stream.try_clone().unwrap(),
+            reader: BufReader::new(SocketReader::new(stream)),
+            partial: Vec::new(),
+            version,
+        }
+    }
+
     /// Connects, says `hello`, and reads the reply and the screen snapshot.
     /// Returns the connection and the screen text.
     pub fn connect(socket: &Path) -> io::Result<(Self, String)> {
@@ -43,7 +53,7 @@ impl Conn {
         match conn.recv_within(GREETING_TIMEOUT)? {
             HolderResponse::Hello { data }
                 if data.selected.major == 1
-                    && data.selected <= agend_core::protocol::holder::V1_2 =>
+                    && data.selected <= agend_core::protocol::holder::V1_3 =>
             {
                 conn.version = data.selected;
             }

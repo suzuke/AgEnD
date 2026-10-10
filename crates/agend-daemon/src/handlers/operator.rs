@@ -81,6 +81,221 @@ pub async fn handle(ctx: &Context, data: OperatorData) -> Outcome {
         )
     };
     let reply = match data.command {
+        OperatorCommand::BackendDiagnostic { instance_id } => {
+            if agend_core::runtime_records::validate_id(&instance_id).is_err() {
+                return Outcome::Reply(error(
+                    Some(request_id),
+                    error_code::INVALID_REQUEST,
+                    "invalid instance id",
+                ));
+            }
+            match ctx.store.backend_diagnostic(&instance_id).await {
+                Ok(data) => result(
+                    request_id,
+                    CommandResult::BackendDiagnostic {
+                        data: Box::new(
+                            agend_core::setup::backend::observation::BackendDiagnosticReply {
+                                boot_id: ctx.fleet.base(),
+                                policies: data
+                                    .as_ref()
+                                    .map(|row| {
+                                        super::backend_capabilities::policies(row, &ctx.codex_input)
+                                    })
+                                    .unwrap_or_default(),
+                                snapshot: data,
+                            },
+                        ),
+                    },
+                ),
+                Err(_) => error(
+                    Some(request_id),
+                    error_code::INVALID_REQUEST,
+                    "backend diagnostic evidence unavailable",
+                ),
+            }
+        }
+
+        OperatorCommand::TelegramPairing { operation } => {
+            match ctx.pairing.execute(operation).await {
+                Ok(data) => result(
+                    request_id,
+                    CommandResult::TelegramPairing {
+                        data: data.map(Box::new),
+                    },
+                ),
+                Err(message) => error(Some(request_id), error_code::INVALID_REQUEST, message),
+            }
+        }
+        OperatorCommand::BackendSwitch { operation: command } => {
+            let (send, receive) = oneshot::channel();
+            if ctx
+                .supervisor
+                .send(Event::BackendSwitch {
+                    command,
+                    reply: send,
+                })
+                .is_err()
+            {
+                return Outcome::Reply(stopping(request_id));
+            }
+            match receive.await {
+                Ok(Ok(data)) => result(
+                    request_id,
+                    CommandResult::BackendSwitch {
+                        data: data.map(Box::new),
+                    },
+                ),
+                Ok(Err((code, message))) => error(Some(request_id), code, message),
+                Err(_) => stopping(request_id),
+            }
+        }
+        OperatorCommand::SendMessage {
+            to,
+            message,
+            message_id,
+        } => match super::agent::send_operator(ctx, to, message, message_id).await {
+            Ok(value) => result(request_id, value),
+            Err((code, message)) => error(Some(request_id), code, message),
+        },
+        OperatorCommand::DriverStatus { instance_id } => {
+            use agend_core::protocol::client::{AgentState, DriverStatusData};
+            let instance = match ctx.store.instance(&instance_id).await {
+                Ok(Some(instance)) => instance,
+                _ => {
+                    return Outcome::Reply(error(
+                        Some(request_id),
+                        error_code::UNKNOWN_INSTANCE,
+                        "driver instance is unavailable",
+                    ));
+                }
+            };
+            let state = if instance.status == crate::store::InstanceStatus::Failed {
+                AgentState::Failed
+            } else if instance.backend == agend_core::model::Backend::Codex {
+                match ctx.codex.connected_busy(&instance_id) {
+                    Some(true) => AgentState::Working,
+                    Some(false) => AgentState::Idle,
+                    None => AgentState::Unknown,
+                }
+            } else {
+                ctx.fleet
+                    .view()
+                    .instances
+                    .into_iter()
+                    .find(|i| i.instance_id == instance_id)
+                    .map(|i| i.state)
+                    .unwrap_or(AgentState::Unknown)
+            };
+            result(
+                request_id,
+                CommandResult::DriverStatus {
+                    data: DriverStatusData { instance_id, state },
+                },
+            )
+        }
+
+        OperatorCommand::MessageOutcome { message_id } => {
+            use agend_core::protocol::client::{MessageOutcomeData, MessageOutcomeState};
+            if message_id.is_empty() || message_id.len() > 128 {
+                return Outcome::Reply(error(
+                    Some(request_id),
+                    error_code::INVALID_REQUEST,
+                    "message id must contain 1-128 bytes",
+                ));
+            }
+            let row = match ctx.store.message(&message_id).await {
+                Ok(Some(row)) => row,
+                _ => {
+                    return Outcome::Reply(error(
+                        Some(request_id),
+                        error_code::INVALID_REQUEST,
+                        "message is unavailable",
+                    ));
+                }
+            };
+            let backend = ctx
+                .store
+                .instance(&row.to_instance)
+                .await
+                .ok()
+                .flatten()
+                .map(|i| i.backend);
+            let mut execution_id = row.turn_id.clone();
+            let state = if backend == Some(agend_core::model::Backend::Codex) {
+                ctx.codex
+                    .message_outcome(row.clone())
+                    .await
+                    .unwrap_or(MessageOutcomeState::Unknown)
+            } else if backend == Some(agend_core::model::Backend::Opencode) {
+                crate::driver::opencode::driver::OpenCodeDriver::new(ctx.store.clone())
+                    .message_outcome(row.clone())
+                    .await
+                    .unwrap_or(MessageOutcomeState::Unknown)
+            } else if backend == Some(agend_core::model::Backend::Claude) {
+                execution_id = ctx
+                    .store
+                    .claude_message_outcome(&message_id)
+                    .await
+                    .ok()
+                    .flatten();
+                if execution_id.is_some() {
+                    MessageOutcomeState::Completed
+                } else {
+                    MessageOutcomeState::Unknown
+                }
+            } else {
+                MessageOutcomeState::Unsupported
+            };
+            result(
+                request_id,
+                CommandResult::MessageOutcome {
+                    data: MessageOutcomeData {
+                        message_id,
+                        instance_id: row.to_instance,
+                        turn_id: row.turn_id,
+                        execution_id,
+                        state,
+                    },
+                },
+            )
+        }
+        OperatorCommand::MessageDelivery { message_id } => {
+            use agend_core::model::DeliveryState;
+            use agend_core::protocol::client::{MessageDeliveryData, MessageDeliveryState};
+            if message_id.is_empty() || message_id.len() > 128 {
+                return Outcome::Reply(error(
+                    Some(request_id),
+                    error_code::INVALID_REQUEST,
+                    "message id must contain 1-128 bytes",
+                ));
+            }
+            match ctx.store.message(&message_id).await {
+                Ok(message) => result(
+                    request_id,
+                    CommandResult::MessageDelivery {
+                        data: message.map(|m| MessageDeliveryData {
+                            message_id: m.id,
+                            from_instance: m.from_instance,
+                            to_instance: m.to_instance,
+                            state: match m.state {
+                                DeliveryState::Queued => MessageDeliveryState::Queued,
+                                DeliveryState::Sent => MessageDeliveryState::Sent,
+                                DeliveryState::Confirmed => MessageDeliveryState::Confirmed,
+                                DeliveryState::Failed => MessageDeliveryState::Failed,
+                            },
+                            turn_id: m.turn_id,
+                            attempted_at_unix_ms: m.attempted_at_unix_ms,
+                            updated_at_unix_ms: m.updated_at_unix_ms,
+                        }),
+                    },
+                ),
+                Err(_) => error(
+                    Some(request_id),
+                    error_code::INVALID_REQUEST,
+                    "cannot read persisted delivery receipt",
+                ),
+            }
+        }
         OperatorCommand::InstanceAdd {
             instance_id,
             backend,

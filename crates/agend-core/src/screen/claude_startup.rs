@@ -1,6 +1,20 @@
 //! Complete recorded 2.1.284 frames, with only the Ready suggestion variable.
 //! This only identifies startup screens; hooks and runtime decide busy/idle.
 use crate::protocol::holder::ControlKey;
+/// Evidence label only; recognition still requires the complete recorded frame.
+pub const RECORDED_VERSION: &str = "2.1.284";
+const ROWS: u16 = 24;
+
+pub fn recorded_dimensions() -> alloc::vec::Vec<(u16, u16)> {
+    let mut dimensions = alloc::vec::Vec::new();
+    for rule in RULES {
+        let size = (rule.columns, ROWS);
+        if !dimensions.contains(&size) {
+            dimensions.push(size);
+        }
+    }
+    dimensions
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Prompt {
@@ -76,7 +90,7 @@ const RULES: &[Rule] = &[
 /// Unknown dimensions/content stay manual. Only the text inside one complete
 /// single-row Ready suggestion may vary; its position and the rest must match.
 pub fn classify(screen: &str, workspace: &str, columns: u16, rows: u16) -> Option<Prompt> {
-    if rows != 24 || !workspace.starts_with('/') || workspace.chars().any(char::is_control) {
+    if rows != ROWS || !workspace.starts_with('/') || workspace.chars().any(char::is_control) {
         return None;
     }
     RULES.iter().find_map(|rule| {
@@ -171,6 +185,10 @@ mod tests {
     #[test]
     fn ready_suggestion_alone_varies_at_both_widths_without_authorizing_a_key() {
         for rule in RULES.iter().filter(|r| r.prompt == Prompt::Ready) {
+            assert!(
+                rule.frame
+                    .contains(&format!("Claude Code v{RECORDED_VERSION}"))
+            );
             let screen = rule.frame.replace(PATH, "/private/work space");
             let suggestion = screen
                 .lines()

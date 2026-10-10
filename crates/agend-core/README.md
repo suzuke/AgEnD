@@ -29,6 +29,10 @@
 
 `runtime_records::claude` 定義 `ClaudeDelivery`、`ClaudeAttempt`、`ClaudeAck`、`ClaudeReservation` 與 `DriverEvent` 等共用資料；`may_start`／`outcome_unknown` 保留既有四種 DeliveryState。只有新的 `Started` 可開始 transport，`Existing` 不授權重送；core 不讀時鐘或 DB。見 [store 範圍](../../docs/gates/gate-12a-store.md)。
 
+## 第 13A home／初始設定
+
+`setup::DEFAULT_HOME_DIRECTORY` 與 `INITIAL_CONFIG` 定義操作員預設目錄名稱和不含秘密的初始設定。環境變數解析、私有目錄建立與原子發布都由 `agend` 執行；core 不讀寫檔案。`setup::service::ServiceSpec` 產生 launchd／systemd 定義並拒絕控制字元與非絕對路徑，服務執行環境只列 HOME、AGEND_HOME 與 PATH。
+
 ## 負責
 
 - 所有 crate 共用型別（`model`）：backend、team、task、送達狀態、branch 命名空間
@@ -127,3 +131,57 @@ Protocol 1.6 新增共用已讀收據：`mark_attention_read`、`attention_read`
 Telegram team topic 保存目前任務摘要（任務、狀態與階段）；needs-you topic 保留完整請示與操作按鈕。摘要按內容對帳，重啟不重送；未 claim 的輔助通知可恢復，in-flight 未知結果不重送。既有通知綁定原 destination，改 topic 不會自動搬移舊通知。
 
 Telegram delivery 區分 in_flight 與 outcome_unknown，後者供本機 `telegram-delivery:<id>` 處置。操作員 Abandon 保存理由、原文及未知收據前綴，不確認送達、不重送；一般 agent 不可操作。daemon 開機在取得 DB 後恢復未確認意圖，本機處置不依賴 token；此類通知不經 Telegram 再投遞。
+
+13C `setup::backend` 定義匯入內容 manifest 與版本名稱驗證，沒有檔案或程序 I/O；消費端與限制見[版本管理](../../docs/architecture/backend-versions.md)。
+
+client 1.7 的 `OperatorCommand::MessageDelivery`／`MessageDeliveryData` 只表達持久化 delivery 狀態與 identity，不攜帶 body；未知狀態保留 Unknown。I/O 與權限由 daemon／client 實作。
+
+13C 施工中的 protocol 1.7：操作員 `send_message` 固定以 `@operator` 真人身分 queue 投遞，必填 UUID v4；`driver_status` 回傳 instance 與就緒狀態，Codex 必須有連線，unknown 不代表 idle。這些 RPC 不切換 backend 版本。
+
+holder 協定 1.3 加入 `SpawnBound`／`GetLaunchBinding` 與不含 argv／環境的 `LaunchBindingData`，供第 13 關受管啟動對帳；保留 1.2／1.1 協商。
+
+受管啟動紀錄 `ManagedLaunchIntent` 保存不透明 UUID、匯入 artifact 與設定／實際啟動參數，供 store、supervisor 和 runtime 共用；紀錄本身不代表 holder 存活或准入完成。
+
+13C `runtime_records::BackendSwitch` 保存明確版本切換的來源啟動意圖、目標 artifact、原生 session 與 phase；純序列化記錄，不判定 canary、程序或檔案狀態。
+
+`ClaudeReservation::Paused` 表示版本切換暫停新 attempt；它不授權寫入，也不將訊息判為失敗。
+
+Client protocol 1.8 新增操作員 BackendSwitchCommand（prepare／status／cancel）與可空的 BackendSwitch 結果。Prepare 只建立持久準備狀態，型別不代表新版已啟動。
+
+`BackendSwitchPhase::pending()` 定義 Prepared／Committed／Restoring 仍屬進行中；選定路徑不代表啟動成功，Activated／RolledBack 才表示呼叫者完成啟動驗證。實際 I/O 與原子狀態轉移在 daemon。
+
+13C 未發布的 client 1.8 新增 Activate／Rollback 操作，字串預檢涵蓋 instance 與 switch ID，mutation 不重送；BackendSwitchPhase 新增持久 RollbackPrepared（pending），避免已啟用版本回退時漏掉暫停投遞。
+
+13D 配對驗證已加入純邏輯與 notifier adapter：10 分鐘 nonce、GetMe 身分、直接人類 /start、時間／目的地核對、精確操作員確認後產生 token reference／單一 user allowlist 設定。觀察與確認重查 bot，拒絕中途換 bot；群組 topic 綁 message_thread_id。此批只有驗證層，尚未接入持久配對交易、CLI／RPC 或設定套用，也未執行真 Telegram。daemon 不改寫人寫的 config.toml（D8）；設定套用將由操作員 CLI 負責。
+
+13D `PairingRecord` 區分 Pending／Confirmed／Cancelled；Confirmed 只代表精確配對已確認，並不宣稱操作員的設定檔已寫入。
+
+`PairingOperation` 定義 Status／Begin／Poll／Confirm／Cancel，Begin 只接受 SecretRef；操作員權限及 wire 接線由 daemon 協定層負責。
+
+Client protocol 1.9 提供操作員 TelegramPairing 命令與 nullable PairingRecord 回覆；一般 client 的最低版本仍為 1.3。
+
+已確認 `PairingRecord::configuration()` 可在配對發現期限過後供操作員明確套用；Pending／Cancelled 不產生設定。
+
+CanaryScope 保存精確啟動 args；CanaryReport 的可選 model 保存操作者要求值，缺欄位相容既有報告，不宣稱 provider 實際解析結果。
+
+InstanceView 的可選 program 欄位表示 driver wrapper 前的設定程式；舊 producer 缺欄位可解碼，不能把它當作已解析路徑或正在執行的 image 身分。
+
+setup::backend 保存三 backend 的 npm package 名稱與 PublishedBackend 公開版本紀錄；版本資訊不授權安裝或 canary 准入。
+
+`RegistryObservation` 保存每日查詢嘗試、最近成功 metadata、獨立錯誤與確認修訂號；不授予版本准入。
+
+公開觀測另保存 changed_ms，讓新一次每日查詢不重置原提醒的等待起點。
+
+config.toml 的 registry_checks 可設 false，停用受管 fleet 公開版本查詢；省略時啟用。它不影響明確的 backend latest 單次查詢或 Telegram 配對。
+
+SystemBackendVersion 保存外部設定程式的解析路徑、版本輸出與內容 hash；只描述這次 --version 觀測，不代表既存 holder 載入的映像。
+
+`SystemVersionObservation` 描述外部版本探測的持久狀態；以 generation 隔開同名 instance 的不同生命週期。
+
+`Config.backend_version_checks` 可獨立關閉本機外部 CLI 的版本探測；未設定時啟用，不改 registry_checks 的網路查詢語意。
+
+未發布的 client 1.9 增加 BackendDiagnostic 唯讀 operator RPC。BackendDiagnosticReply 綁 daemon boot ID，snapshot 只含當前設定、相符外部版本紀錄及受管 pre-spawn reservation 的 binding／artifact 投影，不回傳 args、session 或環境；不是 loaded-holder 或 live-auth 證據。
+
+BackendCapabilityPolicy 描述具名能力的版本規則、額外條件與證據範圍；不是 runtime eligibility。Codex 精確輸出常數與實際 policy 共用；Claude 的錄製來源標籤與實際 frame 尺寸分開，辨識仍以完整錄製 frame 為準。
+
+TerminalViewportData.fit_size 是 optional 的唯讀尺寸建議；預設 None、不改舊 wire shape。新 daemon 只在沒有控制者時採用，不授予輸入權；舊 daemon 可忽略此欄位而維持既有唯讀尺寸。

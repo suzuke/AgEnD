@@ -2,10 +2,10 @@
 
 > **TL;DR**
 > - 這是 AgEnD（Agent Engineering Daemon）v2：異質 agent 團隊的自主 merge 流水線。
-> - 狀態：**pre-alpha**。第 1–11 施工關已完成並合併；第 11 施工關 C 段 #145 於 2026-10-03 經使用者確認合併（`b2152db`）。其他 backend adapter 與安裝發布仍待完成。
+> - 狀態：**pre-alpha**。第 1–12 施工關已完成並合併；第 12C #157 收尾於 `3f406f5`。第 13 施工關安裝與發布準備已開始，尚未完成。
 > - 下一步：先讀 [AGENTS.md](AGENTS.md)，再看 [docs/ROADMAP.md](docs/ROADMAP.md) 的目前狀態。
 
-第 12A Claude 已合併完成；[完整模型 smoke v12](docs/gates/gate-12a-complete-smoke.md)確認七則訊息、互傳、排隊與中斷。12B OpenCode 已通過原生契約、受控真測及三 backend 六方向模型互傳，#155 最終覆核／CI 中；GitHub forge、Telegram 仍待完成。
+第 12A Claude 已合併完成；[完整模型 smoke v12](docs/gates/gate-12a-complete-smoke.md)確認七則訊息、互傳、排隊與中斷。12B OpenCode #155、12C GitHub Forge #157、12D Telegram #156 均已合併；原生／真測範圍與限制見各施工關頁面。
 
 ## 這是什麼
 
@@ -109,3 +109,5 @@ cargo test --workspace && cargo xtask check-deps
 固定 observed v5 已授權執行一次，兩個 terminal 皆可讀，但兩個新的 Try 建議文字使完整 Ready literal 比對失敗；180秒初始 idle 逾時、24份frame、零工作訊息。已清理自有資源；[執行紀錄與後續決策](docs/gates/gate-12a-observed-smoke-v5.md)。
 
 使用者已確認 [D41](docs/decisions/d41.md)：Ready 唯一完整單行的 Try 建議文字可變，其他畫面與 idle 條件不變。修正通過全新覆核、使用者 1,073 組案例重驗與雙平台 CI。[固定 v6](docs/gates/gate-12a-observed-smoke-v6.md)另行授權後通過初始 idle 及第一則 ACK，但模型依 CLAUDE.md 拒絕 gh 防護負例；第一段工作逾時 FAILED，互傳／queue／Interrupt 未執行，完整 12A 尚未驗收。
+
+開發／測試 build 只對 sha2 依賴使用 opt-level=3，讓 daemon 啟動前的完整 executable 指紋核對不被未最佳化壓縮迴圈拖慢；AgEnD 本身保留 debug build，release 與雜湊／身分／逾時檢查不變。

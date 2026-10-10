@@ -24,6 +24,9 @@
 //! (socket, future MCP adapter) carried the call.
 
 pub mod agent;
+mod backend_capabilities;
+pub(crate) mod backend_registry;
+pub(crate) mod backend_version;
 pub(crate) mod claude_attention;
 pub(crate) mod opencode_attention;
 pub(crate) mod opencode_delivery_attention;
@@ -60,6 +63,7 @@ const SNAPSHOT_WITHIN: Duration = Duration::from_secs(5);
 
 /// What the handlers work with.
 pub struct Context {
+    pub pairing: Arc<crate::notifier::pairing_service::PairingService>,
     pub fleet: Arc<Fleet>,
     pub pipeline: crate::pipeline::Handle,
     pub runtime: HolderRuntime,
@@ -240,6 +244,12 @@ pub async fn handle(ctx: &Context, caller: Option<&str>, request: ClientRequest)
                     error_code::FORBIDDEN,
                     OPERATOR_ONLY,
                 ));
+            }
+            if data.attention_id.starts_with(backend_version::PREFIX) {
+                return Outcome::Reply(backend_version::resolve(ctx, data).await);
+            }
+            if data.attention_id.starts_with(backend_registry::PREFIX) {
+                return Outcome::Reply(backend_registry::resolve(ctx, data).await);
             }
             if data.attention_id.starts_with(telegram_attention::PREFIX) {
                 return Outcome::Reply(telegram_attention::resolve(ctx, data).await);

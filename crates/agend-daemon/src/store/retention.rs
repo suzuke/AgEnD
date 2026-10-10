@@ -62,6 +62,46 @@ pub struct Rule {
 pub const RETENTION: &[Rule] = &[
     Rule {
         target: Target::Table {
+            name: "system_versions",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "gate 13: one bounded version observation per instance; explicit instance removal cascades",
+    },
+    Rule {
+        target: Target::Table {
+            name: "backend_registry",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "gate 13: at most three registry observations retain daily schedule and exact acknowledgements",
+    },
+    Rule {
+        target: Target::Table {
+            name: "telegram_pairing",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "gate 13: one bounded pairing receipt retained for restart and explicit replacement",
+    },
+    Rule {
+        target: Target::Table {
+            name: "backend_switches",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "gate 13: latest program transition retained for explicit rollback; instance removal cascades",
+    },
+    Rule {
+        target: Target::Table {
+            name: "managed_launches",
+            time_column: None,
+        },
+        keep: Keep::Forever,
+        why: "gate 13: launch intent survives daemon restart; explicit instance removal cascades",
+    },
+    Rule {
+        target: Target::Table {
             name: "github_changes",
             time_column: None,
         },

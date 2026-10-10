@@ -146,3 +146,47 @@ xtask 的 `claude_1_5_envelopes_are_additive_and_receipts_keep_native_attributio
 共用已讀：`cargo test -p agend --test shared_read` 以兩個真 TUI client／daemon 程序驗同步與重啟保留；daemon `mobile_read_` 驗 native HTTP 按鈕不消耗原動作，`a_followup_remains_unread` 驗舊 read key 拒絕，store `read_receipts_` 驗 DB 重開。TUI `a_disconnected_source_` 驗斷線不能宣稱保存成功。上述不含真 Telegram 手機操作。
 
 `cargo test -p agend-daemon --lib notifier::` 包含 native HTTP 的 needs-you／雙 team topics、任務狀態更新、DB 重開不重送摘要，以及輔助 outbox pending 恢復、unknown／foreign bot 不送出。這些不宣稱真 Telegram forum 驗收。
+
+## 第 13A home／初始設定
+
+`cargo xtask accept core` 核對 no-std 與依賴界線。初始設定交給真 daemon 設定 parser 的契約、home 選擇與檔案權限由 `agend/tests/install_home.rs` 驗證；不在 core 模擬檔案系統。
+
+`setup::service` 測 unit／XML 特殊字元跳脫、拒絕 directive 注入與保留 holder 的設定；原生 parser 驗證由 `agend/tests/install_service.rs` 完成。
+
+13C `setup::backend` 的 manifest 由 `agend/tests/backend_import.rs` 消費真 CLI producer 驗證，包括修改 backend identity 後拒絕；core 的 no-std 限制仍由 check-deps 驗證。
+
+client 1.7 新增唯讀 operator MessageDelivery 與明確 MessageDeliveryState（未知值仍為 Unknown，不視為 confirmed）。真 producer／consumer 契約見 `agend/tests/message_delivery.rs`；一般 client 最低版本仍為 1.3。
+
+CanaryReport 的收據／outcome 綁定由 agend native canary producer 測試；純驗證仍經 no-std build。
+
+holder 協商測試核 1.3 優先、1.2／1.1 仍可選；啟動綁定的狀態與原生程序證據由 agend-holder 的 `launch_binding_*` 測試驗證。
+
+受管啟動紀錄是跨層資料型別，SQLite 持久化與 CAS／instance 重建反例在 daemon 的 `tests/managed_launch.rs` 驗證；core 維持 no-std 與 serde 邊界。
+
+1.8 BackendSwitchCommand／CommandResult 的原生 producer 互通由 `agend/tests/backend_switch.rs` 覆蓋；儲存 CAS／取消由 daemon 的 backend_switch 測試覆蓋。
+
+BackendSwitch 階段的消費者驗證在 daemon `tests/backend_switch.rs`：以正式 SQLite 的三 backend 投遞 reservation 與重開檢查 pending 階段不提前放行，未以 enum 名稱或 JSON round-trip 代替行為驗證。
+
+13C 未發布的 client 1.8 新增 Activate／Rollback 操作，字串預檢涵蓋 instance 與 switch ID，mutation 不重送；BackendSwitchPhase 新增持久 RollbackPrepared（pending），避免已啟用版本回退時漏掉暫停投遞。
+
+13D `native_pairing_*` 透過 notifier 的真 HTTP client 與本機 producer、既有 Telegram 錄製 message／GetMe 外形，核新鮮 nonce、精確確認、私聊／forum topic、bot 身分改變、過期不連線、轉傳／匿名／編輯／舊訊息／錯 bot／歧義目的地與重複 update 拒絕。配對只呼叫 GetMe／GetUpdates，不送訊息或啟用 allowlist；不代表持久化、CLI 或真 bot 已完成。
+
+CanaryScope 的模型參數綁定由 `agend/tests/backend_canary.rs` 使用正式 scope producer 驗替換／移除拒絕。
+
+CLP-14 由正式 InstanceAdd 產生 fleet，核 program 保留 /bin/sh；doctor 的舊 producer 缺欄位案例顯示未知，不採用操作者 PATH 冒充。
+
+RegistryObservation 的持久化與重開行為由 daemon 真 SQLite 測試驗證；core 僅定義資料與每日間隔。
+
+registry_checks 的 TOML 解析／缺省行為與離線 native lab 由 daemon／CLI 測試核對；Telegram apply 必須保留既有 root 設定。
+
+SystemBackendVersion 的資料由 daemon 原生腳本 producer 產生；PATH／cwd／環境及路徑切換拒絕見 daemon system_version 測試。
+
+外部版本觀測型別由 daemon 的原生假程式探測 producer 與 SQLite 重開測試驗證；不以人工 JSON 冒充 probe 結果。
+
+backend_version_checks 的缺省、停用、型別拒絕與 TOML round-trip 由 daemon config 測試涵蓋。
+
+BackendDiagnostic 的 consumer 由 agend/backend_version_monitor 以正式 daemon／SQLite producer 驗證；原生 client 1.8 拒絕與 agent forbidden，不手寫 wire JSON。doctor 的 boot／配置不同拒絕由實際 store snapshot 覆蓋。
+
+既有 Codex 版本拒絕反例沿用共用 literal；Claude Ready 規則核錄製 producer 的版本標頭與診斷標籤一致，其他版本與未知尺寸仍拒絕。diagnostic policy 本身不給控制權。
+
+optional TerminalViewportData.fit_size 預設不序列化；xtask protocol_compat 保留舊 wire shape，新增行為由真 daemon/holder terminal_hub readonly_fit 案例驗證。

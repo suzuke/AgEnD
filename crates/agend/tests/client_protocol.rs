@@ -23,6 +23,11 @@ use agend_testkit::contract::client;
 
 const BIN: &str = env!("CARGO_BIN_EXE_agend");
 
+#[test]
+fn inbox_delivery_fence_tracks_complete_disconnected_and_timed_out_socket_writes() {
+    clp::inbox_reply_drain();
+}
+
 fn show(lines: &[String]) {
     for line in lines {
         println!("{line}");
@@ -137,13 +142,15 @@ fn debug_needs_agend_home_and_valid_arguments() {
     let out = Command::new(BIN)
         .args(["debug", "ping"])
         .env_remove("AGEND_HOME")
+        .env_remove("HOME")
+        .env_remove("AGEND_INSTANCE")
         .output()
         .unwrap();
     // Gate 9 P3: one message and exit 2 everywhere.
     assert_eq!(out.status.code(), Some(2));
     assert_eq!(
         String::from_utf8_lossy(&out.stderr),
-        "agend: AGEND_HOME is not set; choose a directory for AgEnD's data and run: export AGEND_HOME=<absolute path>\n"
+        "agend: AGEND_HOME is not set and HOME is not an absolute path; run: export AGEND_HOME=<absolute path>\n"
     );
     for args in [
         &["debug"][..],

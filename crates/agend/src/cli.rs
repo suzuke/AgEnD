@@ -47,7 +47,7 @@ Examples:
 const MORE: &str = "\
 Also: agend daemon (run the daemon in the foreground; Ctrl-C stops it, the
 agents keep running), agend holder <name> (started by the daemon), agend
-debug ping|watch, agend --version. Every command needs AGEND_HOME; --json
+debug ping|watch, agend --version. Operator home defaults to $HOME/.agend; AGEND_HOME overrides it. --json
 prints one JSON value.";
 
 #[derive(Parser)]
@@ -155,9 +155,45 @@ enum Command {
     /// Check the setup; exit 1 when a check fails
     #[command(before_help = "Example: agend doctor")]
     Doctor,
-    /// Create AGEND_HOME (0700), run doctor, print the next steps
-    #[command(before_help = "Example: export AGEND_HOME=$HOME/agend-home && agend init")]
+    /// Create the home (0700) and initial config, run doctor, print next steps
+    #[command(before_help = "Example: agend init   (or: AGEND_HOME=/absolute/path agend init)")]
     Init,
+    /// Import and inspect isolated backend executables (operator)
+    #[command(subcommand)]
+    Backend(crate::backend::Command),
+    /// Pair Telegram through the daemon (operator)
+    #[command(subcommand)]
+    Telegram(crate::telegram::Command),
+    /// Preview user-service installation
+    #[command(subcommand)]
+    Service(Service),
+    /// Remove the owned service and shims; retain task and configuration data
+    Uninstall {
+        /// Delete data too; requires an exact --confirm-home path
+        #[arg(long)]
+        delete_data: bool,
+        /// Confirm irreversible deletion of this canonical AgEnD home
+        #[arg(long, requires = "delete_data")]
+        confirm_home: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum Service {
+    /// Install the owned user service from this binary
+    Install {
+        /// Publish files without starting or registering the service
+        #[arg(long)]
+        no_start: bool,
+    },
+    /// Check the owned installation against the service manager
+    Status,
+    /// Print the service definition without writing files or registering it
+    Plan {
+        /// Service manager (defaults to the current platform)
+        #[arg(long, value_parser = ["launchd", "systemd"])]
+        manager: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -418,8 +454,23 @@ pub fn run(args: Vec<OsString>) -> ExitCode {
 
 fn dispatch(command: Command, json: bool) -> Result<Output, Failure> {
     match command {
+        Command::Backend(command) => return crate::backend::run(command),
+        Command::Telegram(command) => return crate::telegram::run(command),
         Command::Doctor => return crate::doctor::run(),
         Command::Init => return crate::init::run(),
+        Command::Uninstall {
+            delete_data,
+            confirm_home,
+        } => {
+            return crate::service::uninstall(delete_data, confirm_home.as_deref());
+        }
+        Command::Service(Service::Install { no_start }) => {
+            return crate::service::install(no_start);
+        }
+        Command::Service(Service::Status) => return crate::service::status(),
+        Command::Service(Service::Plan { manager }) => {
+            return crate::service::plan(manager.as_deref());
+        }
         _ => {}
     }
     let target = Target::from_env()?;
@@ -456,7 +507,14 @@ fn dispatch(command: Command, json: bool) -> Result<Output, Failure> {
         Command::Instance(instance) => operator::instance(&target, instance, json),
         Command::Daemon(daemon) => operator::daemon(&target, daemon, json),
         Command::App { lang } => app(target, &lang),
-        Command::Doctor | Command::Init => unreachable!("handled above"),
+        Command::Doctor
+        | Command::Init
+        | Command::Uninstall { .. }
+        | Command::Service(_)
+        | Command::Backend(_)
+        | Command::Telegram(_) => {
+            unreachable!("handled above")
+        }
     }
 }
 

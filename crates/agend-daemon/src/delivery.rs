@@ -16,6 +16,10 @@
 //! Must NOT: fall back to typing into a PTY, or report a parked/queued message
 //! as a failure.
 
+mod replies;
+pub(crate) use replies::ReplyGuard;
+pub use replies::{Replies, ReplyFence};
+
 /// The text the agent receives: `From:` and `Task:` headers (no `Task:`
 /// without a task), a blank line, then the whole body, never cut.
 pub fn render(from: &str, task_id: Option<&str>, body: &str) -> String {

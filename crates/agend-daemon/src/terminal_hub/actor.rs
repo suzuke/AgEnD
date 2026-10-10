@@ -28,6 +28,28 @@ async fn notice(
     }
 }
 impl Actor {
+    /// Register before querying SQLite. If prepare races this query, either
+    /// the pause refuses the operation or its fence includes this operation
+    /// until the native PTY acknowledgement (or cancellation) completes.
+    pub(super) async fn switch_input(&self) -> Result<Option<crate::delivery::ReplyGuard>, String> {
+        let hub = self.hub.upgrade().ok_or("terminal hub stopped")?;
+        let Some((store, replies)) = &hub.switch_delivery else {
+            return Ok(None);
+        };
+        let guard = replies.begin(&self.instance);
+        if store
+            .backend_switch(&self.instance)
+            .await
+            .map_err(|e| e.to_string())?
+            .is_some_and(|record| record.phase.pending())
+        {
+            return Err(
+                "terminal input is paused for backend switching; query backend switch status"
+                    .into(),
+            );
+        }
+        Ok(Some(guard))
+    }
     pub(super) fn codex_input_allowed(&self) -> bool {
         self.codex.as_ref().map_or_else(
             || self.codex_input.allows_instance(&self.instance),
@@ -269,6 +291,38 @@ impl Actor {
                     ));
                     return;
                 }
+                if let Some(size) = data.fit_size {
+                    if !valid_size(size) {
+                        scope.send(error(
+                            Some(data.request_id),
+                            "invalid_size",
+                            "invalid readonly PTY size",
+                        ));
+                        return;
+                    }
+                    if self.owner.is_none() {
+                        let _guard = match self.switch_input().await {
+                            Ok(guard) => guard,
+                            Err(message) => {
+                                scope.send(error(
+                                    Some(data.request_id),
+                                    "backend_switch_pending",
+                                    message,
+                                ));
+                                return;
+                            }
+                        };
+                        if let Err(message) = self.fit_readonly(&data.generation, size).await {
+                            scope.send(error(
+                                Some(data.request_id),
+                                "stale_terminal",
+                                message.clone(),
+                            ));
+                            self.invalidate(&message);
+                            return;
+                        }
+                    }
+                }
                 let view = self.views.get_mut(&data.view_id).unwrap();
                 view.selection = data.request_id;
                 view.viewport = TerminalViewport {
@@ -280,6 +334,13 @@ impl Actor {
             }
             Job::Control { scope, data } => self.control(scope, data).await,
             Job::Legacy { scope, line } => {
+                let _switch_input = match self.switch_input().await {
+                    Ok(guard) => guard,
+                    Err(message) => {
+                        scope.send(error(None, "backend_switch_pending", message));
+                        return;
+                    }
+                };
                 if self
                     .fleet
                     .instance(&self.instance)
@@ -297,9 +358,14 @@ impl Actor {
                 let instance = self.instance.clone();
                 // The old holder write is blocking, but not on the socket's
                 // reader task. Keep it ordered with grants in this actor.
-                if !tokio::task::spawn_blocking(move || runtime.terminal_input(&instance, line))
-                    .await
-                    .unwrap_or(false)
+                if !tokio::task::spawn_blocking(move || {
+                    // A dropped actor cannot cancel a spawn_blocking write.
+                    // Keep its drain lifetime in the actual writing task.
+                    let _switch_input = _switch_input;
+                    runtime.terminal_input(&instance, line)
+                })
+                .await
+                .unwrap_or(false)
                 {
                     scope.send(error(
                         None,

@@ -27,6 +27,8 @@ CLP-26 的 EOF release 判定以獨立 PTY consumer 紀錄為準；`GetFleet` �
 
 CLP-25 控制請求寫入時必須同時讀取同 socket 的 parser frame；testkit 的每份完整 JSON 行都使用有 socket timeout 的 writer thread，原 reader 持續處理關聯回覆，不重送。native `small_socket_buffers_reject_large_input_and_keep_native_consumer_live` 把自有 socket 收送 buffer 降至 4 KiB，核 pending 真 frame、超限拒絕、後續同連線輸入與 PTY consumer 未收到被拒位元組。原同步 fixture 在相同條件 BrokenPipe；只對 >64KiB 並行的版本也被全新 verifier 以合法 24KiB input 推翻，原負例保留。`small_socket_buffers_accept_valid_input_below_the_previous_duplex_threshold` 另核編碼後 <64KiB 的合法分行輸入，真 PTY consumer 精確收到 24KiB 與後續 sentinel。不能用固定請求大小推斷它會否超過 socket buffer。
 
+`fake_daemon::incompatible_major_gets_a_clear_error_and_close` 核對目前 Hello 宣告的完整版本清單（1.3–1.8）、錯誤內容與拒絕後 EOF；新增協定版本時須同步更新此精確斷言，舊版相容案例仍保留。
+
 ## 怎麼跑
 
 ```bash
@@ -91,6 +93,8 @@ C 段 CLP 拒絕案例同跑真 parser-backed fake 與真 daemon：agent caller 
 
 抽出的 hook_payload／initialize_request 仍由 FakeClaude 與原 conformance 使用；新的 ack_request 用 shared core ClaudeReceipt 產生 MCP 工具請求。真正 consumer 的跨 process 回歸在 `agend/tests/claude_bridge.rs`，對真 helper／daemon 跑；未新增真 CLI 錄製或模型回合。
 
+13C 的獨立 `fake-claude-cli` 固定回報 2.1.284，重播已保存的 Ready 畫面；由正式 MCP channel helper 接收訊息、呼叫 agend_ack 並等待對應回覆，再送原生 PostToolUse／Stop hook。僅模型決策是假，不寫 daemon DB、不代替 hook helper；不涵蓋真 CLI 認證、啟動選單或忙碌排隊。歷史 `fake-claude` 的未確認 channel 行為不變，沿用原 conformance。
+
 `fake-opencode-cli` 為 12B holder 整合提供 version／serve／attach，API 沿用錄製對照的原生 producer，health 固定 1.18.34，資料只寫自有 AGEND_HOME/opencode 內的 XDG_DATA_HOME。舊 fake-opencode-serve 與 1.18.31 conformance 固定不變；此 CLI fixture 不驗真 TUI 畫面、不啟動模型。
 
 12C whole-queue 測試從 executor effects 核 `forge:github`／`prepare-main:github`／`find-merge:github`，搭配真 API／Git 測試使用，不能獨立證明遠端 GitHub 合併。
@@ -98,3 +102,11 @@ C 段 CLP 拒絕案例同跑真 parser-backed fake 與真 daemon：agent caller 
 Forge 契約的不同 branch 使用不同 task ID，Submission.task_id 由 work_branch 的正式 parser 取回；保留所有 head／merge／多 PR 斷言。local 與 GitHub 原生 adapter 均跑同套，`contract_teeth` 繼續驗每個故障 mutant 會被抓出。
 
 12C 嚴格 base 政策限定 FRG-10 的第二條過期 sibling 必須回已識別的 policy refusal；驗 main 完全不變、先前 merge／head 保留、拒絕 head 未進 main 且 branch head 不變。預設 local／fake 仍跑原本兩次成功的 ancestry 斷言與 OverwritesBase mutant；strict 額外拒絕先改 base 才報錯、錯誤種類不符與意外成功的 mutants。FRG-5 成功前提含 server policy 允許；不略過任何案例。
+
+13C canary credential fixture：三個 native fake CLI 在私有 scope 中看見合成認證檔時，必須核對實際 HOME、backend config/data 路徑及 Claude token 環境值；錯配直接失敗。僅接受測試用標記，不執行登入或模型。canary 的來源保留、輸出不含 dummy secret 與清理由 agend/backend_canary 驗證。
+
+CLP-14 新增 fleet configured program 斷言，fake／native 使用同一條契約。
+
+`fake-worker --version` 立即印出 fixture 版本，不啟動 inbox loop。`fake_worker_version` 真子程序測試以 CLI marker 與游標檔核對沒有副作用，逾時會回收自有程序，避免新增的背景版本 monitor 變成第二個收件 worker。
+
+OpenCode deterministic producer 的 `run: external-directory: <path>` 產生單一 `<path>/*` 目錄授權請求，不讀寫該路徑；供 daemon 的 worktree 授權回歸使用。這是明確的合成擴充，並非新增真 CLI capture；原 bash 請求及 conformance 行為保持不變。

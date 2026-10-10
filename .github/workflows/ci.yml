@@ -4,6 +4,11 @@ on:
   push:
   pull_request:
 
+# A newer commit supersedes checks for the same branch/PR, not other workflows.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     strategy:

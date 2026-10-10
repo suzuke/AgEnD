@@ -587,6 +587,7 @@ mod tests {
                 task("t-2", "g-1", "running", Some("review")),
             ],
             instances: vec![InstanceView {
+                program: None,
                 instance_id: "g-1".into(),
                 team_id: "general".into(),
                 backend: "codex".into(),

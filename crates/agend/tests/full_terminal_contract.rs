@@ -256,6 +256,7 @@ fn small_socket_buffers_reject_large_input_and_keep_native_consumer_live() {
         .client
         .send(&ClientRequest::SetTerminalViewport {
             data: TerminalViewportData {
+                fit_size: None,
                 request_id: "duplex-pending-frame".into(),
                 instance_id: window.frame.instance_id.clone(),
                 view_id: window.frame.view_id.clone(),
@@ -329,6 +330,7 @@ fn small_socket_buffers_accept_valid_input_below_the_previous_duplex_threshold()
         .client
         .send(&ClientRequest::SetTerminalViewport {
             data: TerminalViewportData {
+                fit_size: None,
                 request_id: "duplex-pending-frame".into(),
                 instance_id: window.frame.instance_id.clone(),
                 view_id: window.frame.view_id.clone(),

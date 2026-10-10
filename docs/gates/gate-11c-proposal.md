@@ -103,3 +103,5 @@
 ## 下一步
 
 最新文件經全新 verifier 與 CI 通過後合併 #144；再開 `feat/gate-11c-terminal` 與新 worktree 實作。實作 merge 仍等使用者明確確認。
+
+2026-10-10 使用者追加要求：唯讀終端在沒有控制者時可自動 fit 外層視窗。透過 optional viewport fit_size 實作，不改按 i 才取得輸入權的規則；有控制者時不得改對方 PTY 尺寸。

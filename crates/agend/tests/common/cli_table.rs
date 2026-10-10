@@ -15,7 +15,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use agend_core::protocol::ProtocolVersion;
-use agend_core::protocol::client::{AgentState, InstanceView, ResultIdentity, V1_3, V1_6};
+use agend_core::protocol::client::{AgentState, InstanceView, ResultIdentity, V1_3, V1_9};
 use agend_testkit::fake_daemon::FakeDaemon;
 
 use crate::cli::{Cli, Run};
@@ -161,7 +161,7 @@ pub fn rows() -> Vec<Row> {
                 fails(
                     2,
                     &[
-                        "agend: AGEND_HOME is not set; choose a directory for AgEnD's data and run: export AGEND_HOME=<absolute path>",
+                        "agend: AGEND_HOME is not set and HOME is not an absolute path; run: export AGEND_HOME=<absolute path>",
                     ],
                 ),
             )
@@ -717,6 +717,7 @@ pub fn run_table(
     let fake = FakeDaemon::start_at(&home.join("run/daemon.sock")).map_err(|e| e.to_string())?;
     for id in [A, B] {
         fake.set_instance(InstanceView {
+            program: None,
             instance_id: id.into(),
             team_id: "general".into(),
             backend: "claude".into(),
@@ -760,9 +761,17 @@ pub fn run_table(
         }
     }
     for r in rows.iter().filter(|r| matches!(r.on, On::Both | On::Real)) {
-        out.push((r.id, "real", run_row(&cli, r, V1_6)));
+        out.push((r.id, "real", run_row(&cli, r, V1_9)));
     }
     daemon.interrupt()?;
+    for (_, target, verdict) in &mut out {
+        if *target == "real"
+            && let Some(problem) = &mut verdict.problem
+        {
+            problem.push_str("\ndaemon log:\n");
+            problem.push_str(&daemon.log.join("\n"));
+        }
+    }
     Ok(out)
 }
 
