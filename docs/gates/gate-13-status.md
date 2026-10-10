@@ -71,3 +71,5 @@ doctor 逐項覆蓋與缺口見 [故障／修復矩陣](gate-13-doctor-matrix.md
 63b083b 的獨立自動驗收、雙平台 CI 與四平台打包已取得；macOS 原生服務生命周期亦已通過；接著補登入有效性、三 backend 真測及 doctor 故障修復矩陣，不因文件同步重跑已通過的程式測試。需要使用者操作時，提供固定版本、命令、預算、影響範圍與清理方式，一次帶一個步驟。
 
 - 2026-10-10：正式 `backend import`／`backend canary --allow-model` 對 OpenCode 1.18.34、`opencode-go/gpt-6-luna` 完成三則真模型訊息，三個 confirmed receipt／三個 outcome，33,886 ms、passed 與 cleanup_complete 均 true。使用試用環境已隔離的單 provider API 認證，來源雜湊不變；自有 canary home、程序及匯入副本清理核對通過，使用者 trial 保留。證據 `AgEnD-ops/g13-install-20261008/opencode-managed-canary-20261010/{plan,report,cleanup}.json`；build SHA e3a159222c8ba8353bc6a667bdd5221c7778cb5fe2e61b45584db9457aa5ef2b。這不證明受管切換／回退、Claude／Codex canary 或整關完成。
+
+- 2026-10-10：13C 真 OpenCode 1.18.33／1.18.34 各通過正式三訊息 canary（33.636／33.405 秒），同一隔離 home 由正式 prepare／activate／rollback 完成 1.18.33→1.18.34→1.18.33，Activated／RolledBack 持久狀態與原生 version／go 檔核對一致；holder 49545→49809→49856，session 全程相同。換版不另送模型訊息；自有 instance／daemon／下載與匯入副本清理、來源 API 認證不變已核。證據 `AgEnD-ops/g13-install-20261008/opencode-switch-20261010`。首版腳本曾把 --json 誤傳 backend，啟動被拒且未換版，保留失敗紀錄後修正。此結果不涵蓋故障注入、Claude／Codex 或整關驗收。

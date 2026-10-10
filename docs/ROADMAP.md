@@ -555,3 +555,5 @@
 - 2026-10-10：使用者確認唯讀 resize 正常；CI 揭露 Codex U17 拒絕輸入測試在首次非同步 fit 前取舊尺寸，改為先等 80×22 fit 再測拒絕控制／貼上，保留原安全斷言。Codex U17 12 項通過；下一步為 13C 真 backend canary／切換／回退，整關尚未完成（PR #158）。
 
 - 2026-10-10：13C OpenCode 1.18.34 正式隔離三訊息真模型 canary 通過，三收據／三 outcome、33.886 秒；認證來源不變，自有程序／canary home／匯入副本清理完成。Claude／Codex 與三 backend 受管切換／回退仍待驗證，PR #158 未合併。
+
+- 2026-10-10：13C 真 OpenCode 1.18.33／1.18.34 各通過正式三訊息 canary（33.636／33.405 秒），同一隔離 home 由正式 prepare／activate／rollback 完成 1.18.33→1.18.34→1.18.33，Activated／RolledBack 持久狀態與原生 version／go 檔核對一致；holder 49545→49809→49856，session 全程相同。換版不另送模型訊息；自有 instance／daemon／下載與匯入副本清理、來源 API 認證不變已核。證據 `AgEnD-ops/g13-install-20261008/opencode-switch-20261010`。首版腳本曾把 --json 誤傳 backend，啟動被拒且未換版，保留失敗紀錄後修正。此結果不涵蓋故障注入、Claude／Codex 或整關驗收。
