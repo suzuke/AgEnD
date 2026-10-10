@@ -188,3 +188,5 @@ backend_version_checks 的缺省、停用、型別拒絕與 TOML round-trip 由 
 BackendDiagnostic 的 consumer 由 agend/backend_version_monitor 以正式 daemon／SQLite producer 驗證；原生 client 1.8 拒絕與 agent forbidden，不手寫 wire JSON。doctor 的 boot／配置不同拒絕由實際 store snapshot 覆蓋。
 
 既有 Codex 版本拒絕反例沿用共用 literal；Claude Ready 規則核錄製 producer 的版本標頭與診斷標籤一致，其他版本與未知尺寸仍拒絕。diagnostic policy 本身不給控制權。
+
+optional TerminalViewportData.fit_size 預設不序列化；xtask protocol_compat 保留舊 wire shape，新增行為由真 daemon/holder terminal_hub readonly_fit 案例驗證。

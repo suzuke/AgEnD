@@ -1134,6 +1134,7 @@ fn full_terminal_requests_are_additive_and_acquire_cannot_choose_an_attach_id() 
         },
         ClientRequest::SetTerminalViewport {
             data: TerminalViewportData {
+                fit_size: None,
                 request_id: "v-2".into(),
                 instance_id: "i-1".into(),
                 view_id: "view-1".into(),

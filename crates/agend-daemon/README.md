@@ -285,3 +285,5 @@ operator BackendDiagnostic 在單一 SQLite transaction 讀配置及相符的外
 BackendDiagnostic 的四條能力政策取自 daemon 實際設定：Codex input policy／限定 verification instance、Claude 完整錄製 frame、OpenCode endpoint 版本優先序與獨立 permission 版本。OpenCode 兩項 baseline 分開命名，不因 endpoint 升級連帶放寬權限回覆；政策 RPC 不額外做探測。
 
 兩個版本 monitor 收到 daemon 停機時同時請求停止，各自在 bounded I/O 與持久化結束後記錄 stopped；停機 log 可區分已請求停止與已收尾。
+
+TerminalViewportData 的 optional fit_size 在 actor 內序列化檢查 owner：無 owner 才以不公開的 temporary attach resize 並 release，不授予 client 輸入權。有 owner 時只更新閱讀 viewport，不改 PTY。操作沿用 backend switch fence，失敗關閉 terminal connection。

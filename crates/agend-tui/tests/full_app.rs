@@ -157,6 +157,7 @@ fn acquire_and_latest_resize_complete_before_any_key_can_reach_the_consumer() {
             .daemon
             .requests()
             .iter()
+            .skip_while(|request| !matches!(request, ClientRequest::TerminalControl { data } if matches!(data.operation, ClientTerminalOperation::Acquire { .. })))
             .any(|request| matches!(request, ClientRequest::SetTerminalViewport { .. })),
         "viewport replaced the pending grant selection"
     );

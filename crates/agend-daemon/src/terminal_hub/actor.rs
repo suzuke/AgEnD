@@ -291,6 +291,38 @@ impl Actor {
                     ));
                     return;
                 }
+                if let Some(size) = data.fit_size {
+                    if !valid_size(size) {
+                        scope.send(error(
+                            Some(data.request_id),
+                            "invalid_size",
+                            "invalid readonly PTY size",
+                        ));
+                        return;
+                    }
+                    if self.owner.is_none() {
+                        let _guard = match self.switch_input().await {
+                            Ok(guard) => guard,
+                            Err(message) => {
+                                scope.send(error(
+                                    Some(data.request_id),
+                                    "backend_switch_pending",
+                                    message,
+                                ));
+                                return;
+                            }
+                        };
+                        if let Err(message) = self.fit_readonly(&data.generation, size).await {
+                            scope.send(error(
+                                Some(data.request_id),
+                                "stale_terminal",
+                                message.clone(),
+                            ));
+                            self.invalidate(&message);
+                            return;
+                        }
+                    }
+                }
                 let view = self.views.get_mut(&data.view_id).unwrap();
                 view.selection = data.request_id;
                 view.viewport = TerminalViewport {

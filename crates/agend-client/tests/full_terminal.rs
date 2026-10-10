@@ -444,6 +444,7 @@ fn viewport_and_control_requests_reach_the_peer_once_with_their_ids() {
     let mut sender = client.sender().unwrap();
     sender
         .set_terminal_viewport(TerminalViewportData {
+            fit_size: None,
             request_id: "viewport-2".into(),
             instance_id: "i-1".into(),
             view_id: "view-1".into(),

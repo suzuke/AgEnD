@@ -276,3 +276,5 @@ backend_canary 的三 backend 原生 managed fleet 透過 doctor 消費正式 da
 `service::manager` 的 user-bus readiness 測試消費 systemd 255 真 `NameHasOwner` false／true 回覆，驗合法 false 才等待、RPC／exit／JSON 錯誤不重試、一直未就緒與逾時成功拒絕；另以真 `/bin/sleep` 核共用子程序期限，過期期限在 spawn 前拒絕。這些測試不代表修正後的真服務已驗收。
 
 第 13 關 doctor 孤兒修復：`cargo test -p agend --test cli doctor_orphan_warning_recovers_by_starting_the_real_daemon -- --exact` 在隔離 HOME／PATH 起自有原生 holder，核 doctor 的啟動 daemon 提示、正式 boot sweep Shutdown、子程序退出／lock 釋放及 holders 恢復 ok。失敗後的 Child 清理不計入成功判斷；不啟模型、不改主機服務。
+
+terminal_hub::readonly_fit_resizes_without_granting_input_or_displacing_a_controller 經真 daemon/holder/PTY 驗兩個唯讀尺寸、無輸入 grant、另一 controller 的尺寸與 input 保留，以及 release 後新 fit 生效；不使用模型。

@@ -207,6 +207,7 @@ fn a_capture_finishing_after_replacement_cannot_publish_the_old_view() {
     a.client
         .send(&ClientRequest::SetTerminalViewport {
             data: TerminalViewportData {
+                fit_size: None,
                 request_id: "old-selected".into(),
                 instance_id: parser::ID.into(),
                 view_id: old_view.clone(),

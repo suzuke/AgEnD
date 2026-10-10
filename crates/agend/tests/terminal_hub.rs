@@ -174,6 +174,7 @@ impl Window {
         self.client
             .send(&ClientRequest::SetTerminalViewport {
                 data: TerminalViewportData {
+                    fit_size: None,
                     request_id: id.into(),
                     instance_id: ID.into(),
                     view_id: self.frame.view_id.clone(),
@@ -1028,4 +1029,68 @@ fn backend_switch_drain_includes_native_terminal_writes_until_pty_acknowledgemen
         hub.stop();
         rt.stop(ID).await.unwrap();
     });
+}
+
+#[test]
+fn readonly_fit_resizes_without_granting_input_or_displacing_a_controller() {
+    let lab = Lab::start(SHELL);
+    let mut a = lab.window("fit-a", 24);
+    let mut b = lab.window("fit-b", 24);
+    let fit = |window: &mut Window, id: &str, size: TerminalSize| {
+        window
+            .client
+            .send(&ClientRequest::SetTerminalViewport {
+                data: TerminalViewportData {
+                    fit_size: Some(size),
+                    request_id: id.into(),
+                    instance_id: ID.into(),
+                    view_id: window.frame.view_id.clone(),
+                    generation: window.frame.frame.generation.clone(),
+                    viewport: TerminalViewport {
+                        top: None,
+                        rows: size.rows,
+                    },
+                },
+            })
+            .unwrap();
+        let ClientResponse::TerminalFrame { data } =
+            window.response_matching(id, Duration::from_secs(15), true)
+        else {
+            panic!("fit frame expected")
+        };
+        data.frame.size
+    };
+    let first = TerminalSize {
+        rows: 30,
+        columns: 120,
+    };
+    assert_eq!(fit(&mut a, "fit-first", first), first);
+    assert!(matches!(
+        a.input("no-grant", "not-a-grant", b"BAD\n"),
+        ClientResponse::Error { .. }
+    ));
+    assert!(lab.delivered().is_empty());
+    let attach = b.acquire("controller", 22, 90);
+    let next = TerminalSize {
+        rows: 40,
+        columns: 140,
+    };
+    assert_eq!(
+        fit(&mut a, "fit-blocked", next),
+        TerminalSize {
+            rows: 22,
+            columns: 90
+        }
+    );
+    assert!(matches!(
+        b.input("still-owner", &attach, b"OWNER\n"),
+        ClientResponse::TerminalControlAck { .. }
+    ));
+    b.control(
+        "release",
+        ClientTerminalOperation::Release { attach_id: attach },
+    );
+    assert_eq!(fit(&mut a, "fit-after-release", next), next);
+    assert!(a.notices.is_empty());
+    assert!(b.notices.is_empty());
 }

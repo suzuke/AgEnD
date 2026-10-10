@@ -549,3 +549,5 @@
 - 2026-10-10：修正試用 OpenCode 每次操作任務目錄都要求 Allow once：有效 work 階段的單一精確 canonical worktree pattern，由固定 holder／endpoint 的 worker 經原生重讀與 transaction 重新核任務歸屬後回覆 once；其他權限仍由操作者決定。獨立 source review 無 blocker，補 worker tick 與過期／越界／unknown 回歸；不代表第 13 關完成（feat/g13-install／PR #158）。
 
 - 2026-10-10：f2eb66a 修正經 daemon／testkit 測試、focused worker 回歸、workspace clippy／fmt／check-deps 通過；以正式 restart 更新使用者隔離試用 daemon，固定 OpenCode 1.18.34 完成 t-2 三個唯讀工具及 result，全程無人工目錄授權，pending permission 0、holder／session／repo HEAD 不變。任務 worktree 與本次暫存已清理，保留必要證據；PR #158 尚未合併，第 13 關仍未完成。
+
+- 2026-10-10：依使用者要求補唯讀終端自動 resize：optional viewport fit_size 只在無 controller 時調整 PTY，不授輸入權；每次外層尺寸只送一次，避免多視窗爭搶。真 daemon/holder 11 項、TUI/core/daemon lib/client full terminal/protocol compat、clippy/fmt/check-deps 通過，獨立 source review 無 blocker；真 OpenCode 1.18.34 唯讀兩尺寸及還原成功，0 input／0 模型 prompt。試用 daemon 已更新重接原 holder，需重開 TUI 載入新版；PR #158 未合併。

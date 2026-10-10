@@ -13,6 +13,7 @@ use std::rc::Rc;
 struct Probe {
     events: Vec<FullTerminalEvent>,
     calls: Vec<&'static str>,
+    fits: Vec<Option<agend_core::protocol::terminal::TerminalSize>>,
 }
 struct Spy(Rc<RefCell<Probe>>);
 impl Spy {
@@ -37,8 +38,9 @@ impl Source for Spy {
         self.record("control");
         Ok(())
     }
-    fn terminal_viewport(&mut self, _: TerminalViewportData) -> Result<(), SourceError> {
+    fn terminal_viewport(&mut self, data: TerminalViewportData) -> Result<(), SourceError> {
         self.record("viewport");
+        self.0.borrow_mut().fits.push(data.fit_size);
         Ok(())
     }
     fn answer(&mut self, _: &str, _: AskReply) -> Result<(), SourceError> {
@@ -76,6 +78,11 @@ fn setup() -> (App, Rc<RefCell<Probe>>, HolderScreen) {
     app.resize(20, 4);
     let mut term = Term::new("mailbox-agent", TermMode::Live);
     term.full = Some(FullView::new(1000));
+    // Existing mailbox cases start after the initial size request.
+    term.full.as_mut().unwrap().fit_requested = Some(TerminalSize {
+        rows: 2,
+        columns: 20,
+    });
     app.term = Some(term);
     app.stack.push(View::new(
         Screen::Terminal {
@@ -200,7 +207,16 @@ fn control_loss_followed_by_late_frame_and_grant_never_restores_input() {
     assert!(app.pump_full_terminal_ready());
     assert!(!app.term.as_ref().unwrap().typing);
     screen.process(b"\r\nAFTER-LOSS");
-    let current = produced(&screen);
+    let mut current = produced(&screen);
+    current.request_id = app
+        .term
+        .as_ref()
+        .unwrap()
+        .full
+        .as_ref()
+        .unwrap()
+        .selection
+        .clone();
     deliver(&mut app, &probe, current.clone());
     probe.borrow_mut().events.extend([
         FullTerminalEvent::Frame(Box::new(old.clone())),
@@ -222,5 +238,48 @@ fn control_loss_followed_by_late_frame_and_grant_never_restores_input() {
     assert!(full.owner.is_none());
     assert!(full.pending.is_none());
     assert_eq!(full.data.as_ref(), Some(&current));
-    assert!(probe.borrow().calls.iter().all(|call| *call == "mailbox"));
+    assert!(
+        probe
+            .borrow()
+            .calls
+            .iter()
+            .all(|call| matches!(*call, "mailbox" | "viewport"))
+    );
+}
+
+#[test]
+fn readonly_fit_is_sent_once_per_outer_size_without_acquiring_control() {
+    let (mut app, probe, screen) = setup();
+    app.term
+        .as_mut()
+        .unwrap()
+        .full
+        .as_mut()
+        .unwrap()
+        .fit_requested = None;
+    probe
+        .borrow_mut()
+        .events
+        .push(FullTerminalEvent::Frame(Box::new(produced(&screen))));
+    app.pump_full_terminal_ready();
+    app.pump_full_terminal();
+    assert_eq!(
+        probe.borrow().fits,
+        vec![Some(TerminalSize {
+            rows: 2,
+            columns: 20
+        })]
+    );
+    app.pump_full_terminal();
+    assert_eq!(probe.borrow().fits.len(), 1);
+    app.resize(40, 10);
+    assert_eq!(
+        probe.borrow().fits.last(),
+        Some(&Some(TerminalSize {
+            rows: 8,
+            columns: 40
+        }))
+    );
+    assert!(!probe.borrow().calls.contains(&"control"));
+    assert!(!app.term.as_ref().unwrap().typing);
 }
