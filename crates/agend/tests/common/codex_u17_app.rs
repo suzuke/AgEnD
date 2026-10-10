@@ -402,7 +402,13 @@ pub fn denied_version(version: Option<&str>) {
     let mut daemon = lab::Daemon::start(&lab, &home, &[("AGEND_U17_PROBE", "1")]).unwrap();
     daemon.ready().unwrap();
     let (mut app, threads) = open(&home, ID, None);
-    let size = frame(&app).size;
+    // Read-only viewing may fit an unowned PTY without granting input.
+    // Wait for that asynchronous fit before testing the denied acquisition.
+    let size = TerminalSize {
+        rows: 22,
+        columns: 80,
+    };
+    wait(&mut app, |a| frame(a).size == size);
     key(&mut app, KeyCode::Char('i'));
     wait(&mut app, |a| {
         a.message

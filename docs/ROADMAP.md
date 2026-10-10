@@ -551,3 +551,5 @@
 - 2026-10-10：f2eb66a 修正經 daemon／testkit 測試、focused worker 回歸、workspace clippy／fmt／check-deps 通過；以正式 restart 更新使用者隔離試用 daemon，固定 OpenCode 1.18.34 完成 t-2 三個唯讀工具及 result，全程無人工目錄授權，pending permission 0、holder／session／repo HEAD 不變。任務 worktree 與本次暫存已清理，保留必要證據；PR #158 尚未合併，第 13 關仍未完成。
 
 - 2026-10-10：依使用者要求補唯讀終端自動 resize：optional viewport fit_size 只在無 controller 時調整 PTY，不授輸入權；每次外層尺寸只送一次，避免多視窗爭搶。真 daemon/holder 11 項、TUI/core/daemon lib/client full terminal/protocol compat、clippy/fmt/check-deps 通過，獨立 source review 無 blocker；真 OpenCode 1.18.34 唯讀兩尺寸及還原成功，0 input／0 模型 prompt。試用 daemon 已更新重接原 holder，需重開 TUI 載入新版；PR #158 未合併。
+
+- 2026-10-10：使用者確認唯讀 resize 正常；CI 揭露 Codex U17 拒絕輸入測試在首次非同步 fit 前取舊尺寸，改為先等 80×22 fit 再測拒絕控制／貼上，保留原安全斷言。Codex U17 12 項通過；下一步為 13C 真 backend canary／切換／回退，整關尚未完成（PR #158）。
