@@ -10,7 +10,7 @@
 | 範圍 | 已實作／已有證據 | 尚未證明完成 |
 |---|---|---|
 | 13A home／設定 | 預設 home、init 權限、doctor 的配置程式解析、沙箱與服務診斷；install_home 回歸 | doctor 已分開執行檔／歷史 canary 範圍／unknown 登入；daemon 唯讀配置／觀測快照已接入並核 boot；四條版本敏感能力政策已列出；登入有效性、能力真環境證據與故障→修復人工矩陣仍待完成 |
-| 13B 服務 | launchd／systemd plan、安裝所有權、對帳、解除安裝、資料刪除互斥；63b083b 的 Linux ARM64 正式 archive 在隔離 systemd／一般使用者下通過五階段生命周期；macOS 原生 launchd 安裝／停機／重啟接回同 holder 與子程序／解除安裝保留資料通過，測試資源已清理 | macOS 本次使用固定 debug binary 與 C 等待程序，未替代 release archive 或真 backend；登入登出未測試 |
+| 13B 服務 | launchd／systemd plan、安裝所有權、對帳、解除安裝、資料刪除互斥；63b083b 的 Linux ARM64 正式 archive 在隔離 systemd／一般使用者下通過五階段生命周期；macOS 原生 launchd 安裝／停機／重啟接回同 holder 與子程序／解除安裝保留資料通過，測試資源已清理 | macOS 已補正式 ARM64 archive 的相同流程；使用 C 等待程序，真 backend 與登入登出未測試 |
 | 13C 受管版本 | 匯入、canary 收據、版本切換／回退、身份綁定與 pending 恢復；原生假 backend 測試；固定三種真 CLI 的 import／inspect 與搬移後版本探測通過 | 三個 backend 的專用認證／真模型 canary、切換與回退完整驗收及所有故障切點 |
 | 13C 版本發現 | 固定 npm 公開 metadata、每日持久排程、外部 CLI 磁碟版本探測、待辦與 Telegram 精確確認 | 真實系統 CLI 的版本觀測驗收；雙 monitor 同時 active 的正式 daemon 停機兩種完成順序已通過 |
 | 13C 重啟通知 | 真 daemon 三次啟動測試：worker 發現換版、通知重建、操作員確認持久化，agent 與錯誤 action 拒絕 | 此測試使用本機假 CLI，不能代替真模型或 service-manager 重啟驗收 |
@@ -26,6 +26,7 @@ doctor 逐項覆蓋與缺口見 [故障／修復矩陣](gate-13-doctor-matrix.md
 - 同版 [CI 37798841941](https://github.com/suzuke/AgEnD/actions/runs/37798841941) 雙平台成功；[release-artifacts 37800713214](https://github.com/suzuke/AgEnD/actions/runs/37800713214) 四平台 archive、formula、雙平台 Brew 七 jobs 成功。Linux ARM64 正式 archive 在隔離 systemd／非 root UID 下完成五階段服務驗收，78.917 秒；container、image、暫存皆移除。這些不證明真模型、新使用者認證或公開發布。
 - 2026-10-09 私聊 Telegram 真測通過：配對套用後重啟同一 home，確認配對收據保留；Mark read 產生正確 read key 且仍等待 approval，approve 的 accepted 收據綁原通知，任務 done、一次雙親 merge。使用 fake workers、0 模型。自有 daemon／holder／worker 與 home／repo 全部清理。前兩輪 external harness 因 SQLite exclusive lock 與缺少 agend PATH 失敗；分別修正為停 daemon 後讀收據、補 PATH，離線預驗與獨立腳本覆核後才重跑，沒有修改 production 來遷就驗收。
 - 2026-10-09 macOS 原生 launchd 流程 11.054 秒通過：使用固定 63b083b debug binary 與隔離 home，正式 service install／bootout／重新安裝使 daemon PID 改變，同一 holder 與 C 等待子程序持續存活且有 reattach log；修改自有 plist 時 uninstall 拒絕，恢復後 uninstall 保留 DB／設定／資料。最後 label、程序與 root 均清理。這不等於真 backend 或 release archive 驗收；修改定義的反例未單獨驗證拒絕期間每個程序持續存活。證據 `launchd-lifecycle-g13-ld-9q9x8rht.json`；前輪複製系統 sleep 被終止、且 sleep 不接受 session 參數的失敗與離線重現保留，改用可接收 backend 參數的專屬 C fixture 後才重跑。
+- 2026-10-09：固定 `63b083b` 的 macOS ARM64 正式 archive 通過原生 launchd 安裝、重啟接回同 holder／C 等待子程序、變造定義拒絕與解除安裝保留資料，6.407 秒完成；service label、程序、測試 root 與下載解壓目錄已清理。archive SHA-256 `2771f94734ff99369e0aa33237c9a47b893cde84f59860b4ecfb48f6154d3ad0`，binary SHA-256 `07796bc38a3921542e95d350e0e20b5f6209aaa3a4fe8c563dd0e9191713833b`。證據 `launchd-lifecycle-g13-ld-tc9ywmro.json`、`mac-release-cleanup.json`；未要求模型或認證操作，不代替真 backend 與登入登出驗收。
 - 本機原始證據保留於 `AgEnD-ops/g13-install-20261008`：`accept-63b083b-fresh/REPORT.txt`、`linux-release-service-63b083b-thread-scan-result.json`、`launchd-capture-result.json`、`telegram-live-control-g13-tgc-i3q3b1c9.json`。以下舊版紀錄是歷史證據，不取代上述固定提交結果。
 
 - 固定提交 `d46d53b` 的 `cargo xtask accept install` exit 0，耗時 2,039.20 秒，起訖 HEAD 相同且工作樹乾淨；安裝 demo 的 canary 17/17、Telegram pairing 2/2、服務模型 14/14 通過。全新 HOME 首任務 `t-1` 在 4,853 ms 完成且恰好一次 merge（fake workers，0 模型呼叫）；demo root 已移除，程序 argv 核對未見匹配的自有 agend／worker。此清理核對僅涵蓋該 demo，不冒充整套測試所有 lab 的獨立稽核。

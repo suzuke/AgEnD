@@ -72,6 +72,8 @@
 
 ## 進度紀錄
 
+- 2026-10-09：固定 `63b083b` 的 macOS ARM64 正式 archive 通過原生 launchd 安裝、重啟接回同 holder／C 等待子程序、變造定義拒絕與解除安裝保留資料，6.407 秒完成；service label、程序、測試 root 與下載解壓目錄已清理。archive SHA-256 `2771f94734ff99369e0aa33237c9a47b893cde84f59860b4ecfb48f6154d3ad0`，binary SHA-256 `07796bc38a3921542e95d350e0e20b5f6209aaa3a4fe8c563dd0e9191713833b`。證據 `launchd-lifecycle-g13-ld-tc9ywmro.json`、`mac-release-cleanup.json`；未要求模型或認證操作，不代替真 backend 與登入登出驗收。
+
 - 2026-10-09：正式 backend import／inspect 匯入固定 Claude 2.1.284、Codex 0.159.3、OpenCode 1.18.34 原生檔，雜湊核對後由 doctor 對搬移副本執行版本探測，三者皆 ok；14.211 秒完成、測試副本與匹配程序無殘留。authentication 維持 warn／unknown，未要求登入、模型或服務操作；真 canary／切換與 live-auth producer 仍待完成（PR #158，未合併）。
 
 
