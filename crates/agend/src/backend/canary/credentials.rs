@@ -78,11 +78,47 @@ pub fn read(backend: &str, source: &Path) -> Result<Vec<u8>, String> {
             return Err("canary auth file must contain a JSON object".into());
         }
     }
+    if backend == "codex" {
+        let value: serde_json::Value =
+            serde_json::from_slice(&bytes).map_err(|_| "invalid Codex credentials")?;
+        if value.get("tokens").is_some() {
+            if value["auth_mode"] != "chatgpt" {
+                return Err("Codex OAuth credentials require chatgpt mode".into());
+            }
+            let token = value["tokens"]["access_token"].as_str().unwrap_or("");
+            let account = value["tokens"]["account_id"].as_str().unwrap_or("");
+            if token.is_empty()
+                || account.is_empty()
+                || !token.bytes().all(|b| b.is_ascii_graphic())
+                || !account.bytes().all(|b| b.is_ascii_graphic())
+            {
+                return Err("Codex OAuth credentials require access token and account id".into());
+            }
+            // Only these two fields cross into the isolated home. In particular,
+            // never publish the source's refresh token or ID token.
+            bytes = serde_json::to_vec(&serde_json::json!({
+                "type": "chatgptAuthTokens", "accessToken": token,
+                "chatgptAccountId": account
+            }))
+            .map_err(|_| "cannot prepare Codex external credentials")?;
+        } else {
+            let key = value["OPENAI_API_KEY"].as_str().unwrap_or("");
+            if key.is_empty() || !key.bytes().all(|b| b.is_ascii_graphic()) {
+                return Err("Codex credentials require native chatgpt tokens or an API key".into());
+            }
+            bytes = serde_json::to_vec(&serde_json::json!({"OPENAI_API_KEY": key}))
+                .map_err(|_| "cannot prepare Codex API credentials")?;
+        }
+    }
     Ok(bytes)
 }
 
 pub fn install(home: &Path, backend: &str, bytes: &[u8]) -> Result<(), String> {
+    let external = backend == "codex"
+        && serde_json::from_slice::<serde_json::Value>(bytes)
+            .is_ok_and(|v| v["type"] == "chatgptAuthTokens");
     let relative = match backend {
+        "codex" if external => "canary-auth/codex-external.json",
         "codex" => "probe-home/.codex/auth.json",
         "opencode" => "opencode/canary/data/opencode/auth.json",
         "claude" => "canary-auth/claude-oauth-token",
@@ -96,7 +132,10 @@ pub fn install(home: &Path, backend: &str, bytes: &[u8]) -> Result<(), String> {
     }
     files::publish(&path, 0o600, false, |out| out.write_all(bytes))?;
     if backend == "codex" {
-        files::publish(&parent.join("config.toml"), 0o600, false, |out| {
+        let config = home.join("probe-home/.codex");
+        files::private_dir(&home.join("probe-home"))?;
+        files::private_dir(&config)?;
+        files::publish(&config.join("config.toml"), 0o600, false, |out| {
             out.write_all(b"cli_auth_credentials_store = \"file\"\n")
         })?;
     }
@@ -169,6 +208,45 @@ mod tests {
             fs::remove_dir_all(&home).unwrap();
             assert_eq!(fs::read(src).unwrap(), bytes);
         }
+    }
+
+    #[test]
+    fn codex_oauth_snapshot_excludes_refresh_and_id_tokens_and_stored_auth() {
+        let root = TempDir::new("g13-codex-access-only").unwrap();
+        let original = br#"{"auth_mode":"chatgpt","tokens":{"access_token":"synthetic-access","account_id":"synthetic-account","refresh_token":"NEVER-COPY-REFRESH","id_token":"NEVER-COPY-ID"}}"#;
+        let src = source(root.path(), original);
+        let home = root.path().join("lab");
+        files::private_dir(&home).unwrap();
+        let snapshot = read("codex", &src).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&snapshot).unwrap();
+        assert_eq!(value.as_object().unwrap().len(), 3);
+        assert_eq!(value["accessToken"], "synthetic-access");
+        assert!(!String::from_utf8_lossy(&snapshot).contains("NEVER-COPY"));
+        install(&home, "codex", &snapshot).unwrap();
+        assert!(!home.join("probe-home/.codex/auth.json").exists());
+        assert_eq!(
+            fs::read(home.join("canary-auth/codex-external.json")).unwrap(),
+            snapshot
+        );
+        assert_eq!(fs::read(&src).unwrap(), original);
+        assert!(install(&home, "codex", &snapshot).is_err());
+        fs::write(
+            &src,
+            br#"{"auth_mode":"chatgpt","tokens":{"refresh_token":"NEVER-ECHO"}}"#,
+        )
+        .unwrap();
+        let error = read("codex", &src).unwrap_err();
+        assert!(!error.contains("NEVER-ECHO"));
+    }
+
+    #[test]
+    fn codex_api_projection_never_copies_unknown_secrets() {
+        let root = TempDir::new("g13-codex-api-projection").unwrap();
+        let src = source(root.path(), br#"{"OPENAI_API_KEY":"test-only","refresh_token":"NEVER-COPY","id_token":"NEVER-COPY"}"#);
+        let snapshot = read("codex", &src).unwrap();
+        assert_eq!(snapshot, br#"{"OPENAI_API_KEY":"test-only"}"#);
+        fs::write(&src, br#"{"type":"chatgptAuthTokens","accessToken":"test","chatgptAccountId":"test","refresh_token":"NEVER-COPY"}"#).unwrap();
+        assert!(read("codex", &src).is_err());
     }
 
     #[test]

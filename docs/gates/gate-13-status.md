@@ -5,13 +5,13 @@
 > - 功能提交、局部測試、整關驗收與真環境驗收分別記錄，不能互相替代。
 > - 下一步：以已通過的自動驗收為基線，完成以下缺口，再交付 final fresh verifier 與逐步人工驗收。
 
-此頁整理 2026-10-09 的當前狀態；歷史過程保留在 [施工關紀錄](gate-13-install.md)。
+此頁整理 2026-10-11 的當前狀態；歷史過程保留在 [施工關紀錄](gate-13-install.md)。
 
 | 範圍 | 已實作／已有證據 | 尚未證明完成 |
 |---|---|---|
 | 13A home／設定 | 預設 home、init 權限、doctor 的配置程式解析、沙箱與服務診斷；install_home 回歸 | doctor 已分開執行檔／歷史 canary 範圍／unknown 登入；daemon 唯讀配置／觀測快照已接入並核 boot；四條版本敏感能力政策已列出；登入有效性、能力真環境證據與故障→修復人工矩陣仍待完成 |
 | 13B 服務 | launchd／systemd plan、安裝所有權、對帳、解除安裝、資料刪除互斥；63b083b 的 Linux ARM64 正式 archive 在隔離 systemd／一般使用者下通過五階段生命周期；macOS 原生 launchd 安裝／停機／重啟接回同 holder 與子程序／解除安裝保留資料通過，測試資源已清理 | macOS 已補正式 ARM64 archive 的相同流程；使用 C 等待程序，真 backend 與登入登出未測試 |
-| 13C 受管版本 | 匯入、canary 收據、版本切換／回退、身份綁定與 pending 恢復；原生假 backend 測試；固定三種真 CLI 的 import／inspect 與搬移後版本探測通過 | Claude／Codex 真模型 canary；三 backend 切換與回退完整驗收及所有故障切點。OpenCode 1.18.34 三訊息 canary 已通過（見下方紀錄） |
+| 13C 受管版本 | 匯入、canary 收據、版本切換／回退、身份綁定與 pending 恢復；原生假 backend 測試；固定三種真 CLI 的 import／inspect 與搬移後版本探測通過 | Claude 真模型 canary；Codex 真跨版切換／回退，以及三 backend 完整故障切點。Codex 0.159.3 三訊息 canary 已通過；OpenCode 1.18.33／1.18.34 已有 canary、同 session 非空歷史切換／回退及限定重啟切點證據（見紀錄） |
 | 13C 版本發現 | 固定 npm 公開 metadata、每日持久排程、外部 CLI 磁碟版本探測、待辦與 Telegram 精確確認 | 真實系統 CLI 的版本觀測驗收；雙 monitor 同時 active 的正式 daemon 停機兩種完成順序已通過 |
 | 13C 重啟通知 | 真 daemon 三次啟動測試：worker 發現換版、通知重建、操作員確認持久化，agent 與錯誤 action 拒絕 | 此測試使用本機假 CLI，不能代替真模型或 service-manager 重啟驗收 |
 | 13D Telegram | daemon 配對、token reference、allowlist、設定套用；專用 bot 真測完成 /start→confirm→apply→同 home 重啟→通知→Mark read→approve，任務 done 且唯一 merge | 本次限私聊人工 approval；不擴稱覆蓋所有 Telegram 動作或真模型 |
@@ -61,7 +61,7 @@ doctor 逐項覆蓋與缺口見 [故障／修復矩陣](gate-13-doctor-matrix.md
 ## 授權與清理邊界
 
 - 可繼續：feature branch 實作、隔離測試、push／draft PR／CI。
-- 已取得受控真測授權；nonce launchd capture 與專用 Telegram bot 流程已執行。三 backend 真測仍缺專用認證檔案路徑，不使用共享帳戶資料替代。
+- 已取得受控真測授權；nonce launchd capture 與專用 Telegram bot 流程已執行。Claude 真測仍待可安全使用的認證；Codex 已依使用者指定來源裁剪 access-only 快照，透過外部登入拒絕刷新，原始認證檔本輪前後雜湊未變。OpenCode 使用指定 API 認證。
 - 實際使用者常駐服務變更、公開發布與本關 merge，仍需備妥具體結果後取得必要核准。
 - 保留 `~/.claude.json` trust entries、外來程序／worktree、AlphaCR runs。
 - 完成每批後清自有臨時程序與目錄；未合併 Gate 13 worktree 與 target 保留供驗收，合併後再清。
@@ -79,3 +79,5 @@ doctor 逐項覆蓋與缺口見 [故障／修復矩陣](gate-13-doctor-matrix.md
 - 2026-10-10：補真 OpenCode 有歷史 session 的 1.18.33→1.18.34→1.18.33 往返；三階段各一訊息皆 confirmed／completed，REST 原生歷史既有 message ID 與完整內容跨版逐筆相同。Prepared 時正式停止／重啟自有 daemon，完整 switch record、holder、session 不變；之後 Activated／RolledBack 成功。兩版准入各三訊息，本次總共九訊息；owned 程序、canary home、下載與匯入 root 清理完成，認證來源不變。證據 `AgEnD-ops/g13-install-20261008/opencode-history-switch-20261010`（含失敗回非零 runner 與 cleanup.py）。此結果補足上一輪空 session 限制，尚未涵蓋 Committed→Activated 中斷窗口、Claude／Codex 真測或整關完成。
 
 - 2026-10-10：真 OpenCode activate 回覆後 SIGKILL 自有 daemon，退出後唯讀 DB 確認 phase=Committed 與原 switch／deadline；候選 holder 64219 保留。初版 harness 讀尚未產生的 version 檔失敗，且 SQLite context 未 close 擋第一次清理重啟，保留失敗紀錄；harness 退出釋鎖後從同一持久切點恢復，daemon recovered=1／started=0 重接 64219，Activated 後新訊息與歷史一致，回退 1.18.33 後亦成功。不是整支 runner 一次通過或全部 crash cuts。root／程序清理、認證來源不變；證據 `AgEnD-ops/g13-install-20261008/opencode-committed-switch-20261010`，獨立覆核待完成；Claude／Codex 真測仍缺專用認證。
+
+- 2026-10-11：真 Codex 0.159.3 canary 3/3 confirmed 且 completed、23.143 秒；原生預設模型名稱未記錄。獨立覆核 report／stdout／plan 身分相符並確認測試目錄已刪；刷新拒絕由合成測試支持，本輪未觀測真 refresh 請求。證據 `AgEnD-ops/g13-install-20261008/codex-access-canary-20261011`。

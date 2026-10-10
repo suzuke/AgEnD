@@ -287,3 +287,5 @@ BackendDiagnostic 的四條能力政策取自 daemon 實際設定：Codex input 
 兩個版本 monitor 收到 daemon 停機時同時請求停止，各自在 bounded I/O 與持久化結束後記錄 stopped；停機 log 可區分已請求停止與已收尾。
 
 TerminalViewportData 的 optional fit_size 在 actor 內序列化檢查 owner：無 owner 才以不公開的 temporary attach resize 並 release，不授予 client 輸入權。有 owner 時只更新閱讀 viewport，不改 PTY。操作沿用 backend switch fence，失敗關閉 terminal connection。
+
+隔離 Codex canary 可在 initialize 後、thread start/resume 前使用 access-only 外部登入；認證快照只從完整 scope 綁定的私有檔取得，reconnect 沿用同份快照，refresh 請求明確拒絕。一般 instance 不讀取此認證來源。

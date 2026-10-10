@@ -369,6 +369,8 @@ impl Inner {
                 None => Ok(false),
             })
             .map_err(|e| format!("cannot read thread receipt attribution: {e}"))?;
+        let external_auth =
+            crate::backend_versions::canary_scope::codex_external_auth(&self.home, &instance)?;
         let listen = launch::socket_path(&self.home, id);
         let started = Instant::now();
         let mut worker = loop {
@@ -381,6 +383,7 @@ impl Inner {
                 listen.clone(),
                 Arc::clone(&self.store),
                 identified,
+                external_auth.clone(),
             ) {
                 Ok(worker) => break worker,
                 Err(e) if started.elapsed() >= launch::READY_WITHIN => {

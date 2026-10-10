@@ -278,3 +278,5 @@ backend_canary 的三 backend 原生 managed fleet 透過 doctor 消費正式 da
 第 13 關 doctor 孤兒修復：`cargo test -p agend --test cli doctor_orphan_warning_recovers_by_starting_the_real_daemon -- --exact` 在隔離 HOME／PATH 起自有原生 holder，核 doctor 的啟動 daemon 提示、正式 boot sweep Shutdown、子程序退出／lock 釋放及 holders 恢復 ok。失敗後的 Child 清理不計入成功判斷；不啟模型、不改主機服務。
 
 terminal_hub::readonly_fit_resizes_without_granting_input_or_displacing_a_controller 經真 daemon/holder/PTY 驗兩個唯讀尺寸、無輸入 grant、另一 controller 的尺寸與 input 保留，以及 release 後新 fit 生效；不使用模型。
+
+`backend::canary::credentials::tests` 驗 Codex OAuth/API 欄位白名單、未知格式拒絕及來源不變；`backend_canary` 的 Codex 情境使用 native fake producer 的 external login，再驗三次訊息與清理。真憑證及模型不在自動測試執行。

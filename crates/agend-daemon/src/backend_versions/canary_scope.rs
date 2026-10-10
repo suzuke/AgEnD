@@ -175,3 +175,51 @@ pub fn isolate_environment(
     }
     Ok(())
 }
+
+/// Access-only snapshot for an explicitly bound Codex canary. No shared-home
+/// discovery and no refresh credentials are supported by this interface.
+pub(crate) fn codex_external_auth(
+    home: &Path,
+    instance: &Instance,
+) -> Result<Option<serde_json::Value>, String> {
+    let path = home.join("canary-auth/codex-external.json");
+    match fs::symlink_metadata(&path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err("cannot inspect external Codex credential".into()),
+        Ok(_) => (),
+    }
+    if instance.backend.as_str() != "codex" || expected(home, instance)?.is_none() {
+        return Err("external Codex credential requires a bound canary".into());
+    }
+    directory(&home.join("canary-auth"))?;
+    let file = regular(&path).map_err(|_| "invalid external Codex credential file")?;
+    let meta = file
+        .metadata()
+        .map_err(|_| "cannot inspect external Codex credential")?;
+    if meta.mode() & 0o077 != 0 || meta.nlink() != 1 {
+        return Err("external Codex credential must be private and singly linked".into());
+    }
+    let mut bytes = Vec::new();
+    file.take(1024 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| "cannot read external Codex credential")?;
+    if bytes.len() > 1024 * 1024 {
+        return Err("external Codex credential exceeds limit".into());
+    }
+    let value: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|_| "invalid external Codex credential")?;
+    let valid = value.as_object().is_some_and(|v| v.len() == 3)
+        && value["type"] == "chatgptAuthTokens"
+        && ["accessToken", "chatgptAccountId"].iter().all(|key| {
+            value[key]
+                .as_str()
+                .is_some_and(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_graphic()))
+        });
+    if !valid {
+        return Err("invalid external Codex credential fields".into());
+    }
+    if home.join("probe-home/.codex/auth.json").exists() {
+        return Err("external Codex credentials cannot coexist with stored auth".into());
+    }
+    Ok(Some(value))
+}

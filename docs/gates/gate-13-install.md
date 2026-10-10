@@ -328,3 +328,5 @@ Brew 原生安裝驗證已接入 release workflow 的 macOS ARM64／Linux x86_64
 - 2026-10-08：補 doctor 離線孤兒 holder 修復原生測試：提示啟動 daemon→正式 boot sweep Shutdown→子程序正常退出、鎖釋放→holders ok；fallback 不計成功，自有 lab 刪除有斷言。聚焦覆核意見已納入，單例與 workspace clippy／fmt／check-deps 通過；不代表在線 restart、真 backend 或整關驗收（PR #158）。
 
 - 2026-10-08：7907e7e 的 accept install 在 daemon version probe 輸出上限斷言失敗（222 通過、1 失敗、2 ignored），當時斷言未印實際錯誤。只補錯誤診斷，未改期限或 production；daemon lib 重跑 223 通過／2 ignored，一次 8 並行、32 案例探測未重現，精確核自有目錄與程序無殘留。根因仍未知，不把重跑視為修復；該次整關驗收維持失敗（PR #158）。
+
+- 2026-10-11：13C Codex 0.159.3 以使用者指定 auth.json 的 access-only 外部登入完成正式 canary，3 receipts confirmed／3 outcomes completed、23,143 ms；refresh 請求拒絕、來源雜湊不變、child home 及 import home 已清理。新增憑證白名單、兩次新連線刷新拒絕與 peer error 去敏回歸；真 Codex 版本切換／回退及 Claude 真測仍未完成。證據：AgEnD-ops/g13-install-20261008/codex-access-canary-20261011（PR #158，未合併）。

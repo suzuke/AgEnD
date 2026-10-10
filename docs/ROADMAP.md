@@ -561,3 +561,9 @@
 - 2026-10-10：補真 OpenCode 有歷史 session 的 1.18.33→1.18.34→1.18.33 往返；三階段各一訊息皆 confirmed／completed，REST 原生歷史既有 message ID 與完整內容跨版逐筆相同。Prepared 時正式停止／重啟自有 daemon，完整 switch record、holder、session 不變；之後 Activated／RolledBack 成功。兩版准入各三訊息，本次總共九訊息；owned 程序、canary home、下載與匯入 root 清理完成，認證來源不變。證據 `AgEnD-ops/g13-install-20261008/opencode-history-switch-20261010`（含失敗回非零 runner 與 cleanup.py）。此結果補足上一輪空 session 限制，尚未涵蓋 Committed→Activated 中斷窗口、Claude／Codex 真測或整關完成。
 
 - 2026-10-10：真 OpenCode activate 回覆後 SIGKILL 自有 daemon，退出後唯讀 DB 確認 phase=Committed 與原 switch／deadline；候選 holder 64219 保留。初版 harness 讀尚未產生的 version 檔失敗，且 SQLite context 未 close 擋第一次清理重啟，保留失敗紀錄；harness 退出釋鎖後從同一持久切點恢復，daemon recovered=1／started=0 重接 64219，Activated 後新訊息與歷史一致，回退 1.18.33 後亦成功。不是整支 runner 一次通過或全部 crash cuts。root／程序清理、認證來源不變；證據 `AgEnD-ops/g13-install-20261008/opencode-committed-switch-20261010`，獨立覆核待完成；Claude／Codex 真測仍缺專用認證。
+
+2026-10-11：13C 補 Codex canary access-only 外部登入與 refresh 拒絕，避免複製共享 refresh token；真模型 canary 尚待驗證，未宣告整關完成。
+
+- 2026-10-11：13C Codex 0.159.3 以使用者指定 auth.json 的 access-only 外部登入完成正式 canary，3 receipts confirmed／3 outcomes completed、23,143 ms；refresh 請求拒絕、來源雜湊不變、child home 及 import home 已清理。新增憑證白名單、兩次新連線刷新拒絕與 peer error 去敏回歸；真 Codex 版本切換／回退及 Claude 真測仍未完成。證據：AgEnD-ops/g13-install-20261008/codex-access-canary-20261011（PR #158，未合併）。
+
+- 2026-10-11：本批 backend_canary 首跑 16 通過／1 舊認證 fixture 失敗；更新 fixture 並強制 external thread/start 前登入後，原失敗案例單獨通過。憑證單元 4、external Worker 1、fake Codex 12 通過；fmt／workspace clippy／check-deps 通過。真 Codex 不重跑，保留首次通過與 fixture 失敗的分離證據。

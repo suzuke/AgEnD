@@ -128,3 +128,5 @@ Doctor 的 PATH backend 列只證明操作員 PATH 的版本 probe；`backend/<i
 doctor 的 observation/<instance> 透過 protocol 1.9 一次性唯讀 RPC 取得 daemon 的設定快照；回覆 boot ID 與 fleet 不符或設定變動就顯示 unknown。外部版本是磁碟探測的持久紀錄，失敗時保留的成功值可能早於本次 attempt；受管紀錄只代表 pre-spawn reservation。這些都不證明目前 holder 載入的程式、登入或 daemon binary digest。
 
 doctor 的 capability/<instance>/<id> 列出回覆 daemon 的具名版本政策，與磁碟觀測／歷史 canary 分開；全部保留 runtime eligibility unknown，不從版本字串推論目前可操作。四條規則與證據界線見 [能力政策](../../docs/architecture/backend-capabilities.md)。
+
+Codex canary 的 `--auth-file` 接受原生 ChatGPT auth.json 或 API key；ChatGPT 模式只裁剪 access token/account ID，使用 app-server 外部 token 登入，拒絕刷新要求。來源不改寫，隔離 home 不落地 refresh／ID token。此支援不代表真模型 canary 已通過。

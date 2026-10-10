@@ -244,6 +244,7 @@ fn advance(
 }
 
 pub(crate) struct Worker {
+    external_auth: Option<Value>,
     pub id: String,
     pub generation: u64,
     pub thread: String,
@@ -270,11 +271,13 @@ impl Worker {
         listen: PathBuf,
         store: Arc<SqliteStore>,
         identified_receipts: bool,
+        external_auth: Option<Value>,
     ) -> Result<Worker, RpcError> {
         let conn = Conn::open(&listen).map_err(|e| RpcError::Transport(e.to_string()))?;
         let shared = Arc::new(Shared::default());
         shared.set_socket(&conn);
         let mut worker = Worker {
+            external_auth,
             id: id.to_owned(),
             generation,
             thread: String::new(),
@@ -306,7 +309,21 @@ impl Worker {
                    "capabilities": {"experimentalApi": true}}),
             Duration::from_secs(10),
         )?;
-        self.conn.send(&json!({"method": "initialized"}))
+        self.conn.send(&json!({"method": "initialized"}))?;
+        if let Some(params) = self.external_auth.clone() {
+            // Never log an authentication RPC response: the peer may echo input.
+            let reply = self
+                .call_within("account/login/start", params, CALL_WITHIN)
+                .map_err(|_| {
+                    RpcError::Transport("external Codex login failed; refresh disabled".into())
+                })?;
+            if reply["type"] != "chatgptAuthTokens" {
+                return Err(RpcError::Transport(
+                    "external Codex login was not accepted".into(),
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// `thread/start` in `cwd` (approval `never`, sandbox
@@ -677,7 +694,9 @@ impl Worker {
     }
 
     fn server_request(&mut self, id: Value, method: &str, params: &Value) {
-        let reply = if method.ends_with("requestApproval") {
+        let reply = if method == "account/chatgptAuthTokens/refresh" {
+            json!({"id": id, "error": {"code": -32000, "message": "Refresh disabled for isolated canary"}})
+        } else if method.ends_with("requestApproval") {
             let what = params["command"]
                 .as_str()
                 .or(params["reason"].as_str())
@@ -933,5 +952,48 @@ impl Rpc for Worker {
             }
         }
         true
+    }
+}
+
+#[cfg(test)]
+mod external_auth_tests {
+    use super::*;
+    use agend_testkit::{fake_agent::codex::Server, tempdir::TempDir};
+
+    #[test]
+    fn external_login_rejects_refresh_on_each_connection_and_redacts_peer_errors() {
+        let root = TempDir::new("external-codex-auth").unwrap();
+        let socket = root.path().join("app.sock");
+        let _server = Server::bind(&socket, Duration::from_millis(10), None).unwrap();
+        let store = Arc::new(SqliteStore::open(root.path(), 0).unwrap());
+        for expected in 1..=2 {
+            let mut worker = Worker::open("canary", 1, socket.clone(), store.clone(), false,
+                Some(json!({"type":"chatgptAuthTokens", "accessToken":"synthetic-refresh-probe", "chatgptAccountId":"synthetic-account"}))).unwrap();
+            let observed = worker
+                .call_within("agendFake/externalRefreshRefusals", json!({}), CALL_WITHIN)
+                .unwrap();
+            assert_eq!(observed["count"], expected);
+            let thread = worker.start_thread(root.path().to_str().unwrap()).unwrap();
+            assert!(!thread.is_empty());
+        }
+        let result = Worker::open(
+            "canary",
+            1,
+            socket,
+            store,
+            false,
+            Some(
+                json!({"type":"chatgptAuthTokens", "accessToken":"synthetic-echo-error", "chatgptAccountId":"synthetic-account"}),
+            ),
+        );
+        let error = match result {
+            Ok(_) => panic!("echoed auth failure must be rejected"),
+            Err(error) => error.to_string(),
+        };
+        assert_eq!(
+            error,
+            "app-server connection: external Codex login failed; refresh disabled"
+        );
+        assert!(!error.contains("synthetic"));
     }
 }

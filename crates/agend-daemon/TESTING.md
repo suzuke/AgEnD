@@ -343,3 +343,5 @@ handlers::backend_capabilities 驗 Codex default／approved／verification-own�
 `opencode_worktree` 以 deterministic OpenCode producer 產生目錄請求，驗 current work stage／ticket／assignee／session／binding／task version、拒絕多 pattern 與越界路徑，以及 shared once claim 不重送。worker 測試實際跑 `tick`，驗不支援版本與不同 endpoint 不 POST，正確 endpoint 回覆後持久化 resolved。這是合成協定測試，不宣稱新的模型真測或原生目錄 capture。
 
 agend/tests/terminal_hub.rs 的 readonly_fit 案例經真 daemon、holder、PTY 驗唯讀 resize、偽 attach input 被拒、另一 controller 保持尺寸與輸入權，以及 release 後新 fit 生效。
+
+第 13C Codex external login 的 production runner 回歸位於 `agend/tests/backend_canary.rs`；使用合成憑證，不呼叫真模型。完整真 backend 驗證仍須另列證據。

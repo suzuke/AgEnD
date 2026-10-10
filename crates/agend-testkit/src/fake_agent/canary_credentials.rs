@@ -22,7 +22,7 @@ pub fn check(backend: &str) -> Result<(), String> {
     let user = home.join("probe-home");
     let path = match backend {
         "claude" => home.join("canary-auth/claude-oauth-token"),
-        "codex" => user.join(".codex/auth.json"),
+        "codex" => home.join("canary-auth/codex-external.json"),
         "opencode" => home.join("opencode/canary/data/opencode/auth.json"),
         _ => return Err("unknown fixture backend".into()),
     };
@@ -37,7 +37,13 @@ pub fn check(backend: &str) -> Result<(), String> {
     } else {
         b"{\"test-only\":true}".as_slice()
     };
-    if bytes != expected {
+    let codex_external = backend == "codex"
+        && serde_json::from_slice::<serde_json::Value>(&bytes).ok()
+            == Some(serde_json::json!({
+                "type":"chatgptAuthTokens", "accessToken":"test-only-access", "chatgptAccountId":"test-only-account"
+            }))
+        && !user.join(".codex/auth.json").exists();
+    if (backend == "codex" && !codex_external) || (backend != "codex" && bytes != expected) {
         return Err("fixture only accepts synthetic canary credentials".into());
     }
     let expect_env = |name: &str, value: &str| -> Result<(), String> {

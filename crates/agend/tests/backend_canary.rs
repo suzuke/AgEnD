@@ -166,6 +166,8 @@ fn native_canary(backend: &str, executable: &str, version: &str, wrong_version: 
     let auth = user.join("canary-auth-input");
     let auth_bytes = if backend == "claude" {
         b"test-only-token".as_slice()
+    } else if backend == "codex" {
+        br#"{"auth_mode":"chatgpt","tokens":{"access_token":"test-only-access","account_id":"test-only-account","refresh_token":"test-only-refresh","id_token":"test-only-id"}}"#.as_slice()
     } else {
         b"{\"test-only\":true}".as_slice()
     };
