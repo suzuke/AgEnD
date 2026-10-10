@@ -553,3 +553,5 @@
 - 2026-10-10：依使用者要求補唯讀終端自動 resize：optional viewport fit_size 只在無 controller 時調整 PTY，不授輸入權；每次外層尺寸只送一次，避免多視窗爭搶。真 daemon/holder 11 項、TUI/core/daemon lib/client full terminal/protocol compat、clippy/fmt/check-deps 通過，獨立 source review 無 blocker；真 OpenCode 1.18.34 唯讀兩尺寸及還原成功，0 input／0 模型 prompt。試用 daemon 已更新重接原 holder，需重開 TUI 載入新版；PR #158 未合併。
 
 - 2026-10-10：使用者確認唯讀 resize 正常；CI 揭露 Codex U17 拒絕輸入測試在首次非同步 fit 前取舊尺寸，改為先等 80×22 fit 再測拒絕控制／貼上，保留原安全斷言。Codex U17 12 項通過；下一步為 13C 真 backend canary／切換／回退，整關尚未完成（PR #158）。
+
+- 2026-10-10：13C OpenCode 1.18.34 正式隔離三訊息真模型 canary 通過，三收據／三 outcome、33.886 秒；認證來源不變，自有程序／canary home／匯入副本清理完成。Claude／Codex 與三 backend 受管切換／回退仍待驗證，PR #158 未合併。

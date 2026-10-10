@@ -11,7 +11,7 @@
 |---|---|---|
 | 13A home／設定 | 預設 home、init 權限、doctor 的配置程式解析、沙箱與服務診斷；install_home 回歸 | doctor 已分開執行檔／歷史 canary 範圍／unknown 登入；daemon 唯讀配置／觀測快照已接入並核 boot；四條版本敏感能力政策已列出；登入有效性、能力真環境證據與故障→修復人工矩陣仍待完成 |
 | 13B 服務 | launchd／systemd plan、安裝所有權、對帳、解除安裝、資料刪除互斥；63b083b 的 Linux ARM64 正式 archive 在隔離 systemd／一般使用者下通過五階段生命周期；macOS 原生 launchd 安裝／停機／重啟接回同 holder 與子程序／解除安裝保留資料通過，測試資源已清理 | macOS 已補正式 ARM64 archive 的相同流程；使用 C 等待程序，真 backend 與登入登出未測試 |
-| 13C 受管版本 | 匯入、canary 收據、版本切換／回退、身份綁定與 pending 恢復；原生假 backend 測試；固定三種真 CLI 的 import／inspect 與搬移後版本探測通過 | 三個 backend 的專用認證／真模型 canary、切換與回退完整驗收及所有故障切點 |
+| 13C 受管版本 | 匯入、canary 收據、版本切換／回退、身份綁定與 pending 恢復；原生假 backend 測試；固定三種真 CLI 的 import／inspect 與搬移後版本探測通過 | Claude／Codex 真模型 canary；三 backend 切換與回退完整驗收及所有故障切點。OpenCode 1.18.34 三訊息 canary 已通過（見下方紀錄） |
 | 13C 版本發現 | 固定 npm 公開 metadata、每日持久排程、外部 CLI 磁碟版本探測、待辦與 Telegram 精確確認 | 真實系統 CLI 的版本觀測驗收；雙 monitor 同時 active 的正式 daemon 停機兩種完成順序已通過 |
 | 13C 重啟通知 | 真 daemon 三次啟動測試：worker 發現換版、通知重建、操作員確認持久化，agent 與錯誤 action 拒絕 | 此測試使用本機假 CLI，不能代替真模型或 service-manager 重啟驗收 |
 | 13D Telegram | daemon 配對、token reference、allowlist、設定套用；專用 bot 真測完成 /start→confirm→apply→同 home 重啟→通知→Mark read→approve，任務 done 且唯一 merge | 本次限私聊人工 approval；不擴稱覆蓋所有 Telegram 動作或真模型 |
@@ -69,3 +69,5 @@ doctor 逐項覆蓋與缺口見 [故障／修復矩陣](gate-13-doctor-matrix.md
 ## 下一步
 
 63b083b 的獨立自動驗收、雙平台 CI 與四平台打包已取得；macOS 原生服務生命周期亦已通過；接著補登入有效性、三 backend 真測及 doctor 故障修復矩陣，不因文件同步重跑已通過的程式測試。需要使用者操作時，提供固定版本、命令、預算、影響範圍與清理方式，一次帶一個步驟。
+
+- 2026-10-10：正式 `backend import`／`backend canary --allow-model` 對 OpenCode 1.18.34、`opencode-go/gpt-6-luna` 完成三則真模型訊息，三個 confirmed receipt／三個 outcome，33,886 ms、passed 與 cleanup_complete 均 true。使用試用環境已隔離的單 provider API 認證，來源雜湊不變；自有 canary home、程序及匯入副本清理核對通過，使用者 trial 保留。證據 `AgEnD-ops/g13-install-20261008/opencode-managed-canary-20261010/{plan,report,cleanup}.json`；build SHA e3a159222c8ba8353bc6a667bdd5221c7778cb5fe2e61b45584db9457aa5ef2b。這不證明受管切換／回退、Claude／Codex canary 或整關完成。
