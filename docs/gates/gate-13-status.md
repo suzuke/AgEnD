@@ -11,7 +11,7 @@
 |---|---|---|
 | 13A home／設定 | 預設 home、init 權限、doctor 的配置程式解析、沙箱與服務診斷；install_home 回歸 | doctor 已分開執行檔／歷史 canary 範圍／unknown 登入；daemon 唯讀配置／觀測快照已接入並核 boot；四條版本敏感能力政策已列出；登入有效性、能力真環境證據與故障→修復人工矩陣仍待完成 |
 | 13B 服務 | launchd／systemd plan、安裝所有權、對帳、解除安裝、資料刪除互斥；63b083b 的 Linux ARM64 正式 archive 在隔離 systemd／一般使用者下通過五階段生命周期；macOS 原生 launchd 安裝／停機／重啟接回同 holder 與子程序／解除安裝保留資料通過，測試資源已清理 | macOS 已補正式 ARM64 archive 的相同流程；使用 C 等待程序，真 backend 與登入登出未測試 |
-| 13C 受管版本 | 匯入、canary 收據、版本切換／回退、身份綁定與 pending 恢復；原生假 backend 測試；固定三種真 CLI 的 import／inspect 與搬移後版本探測通過 | Claude 真模型 canary；Codex 真跨版切換／回退，以及三 backend 完整故障切點。Codex 0.159.3 三訊息 canary 已通過；OpenCode 1.18.33／1.18.34 已有 canary、同 session 非空歷史切換／回退及限定重啟切點證據（見紀錄） |
+| 13C 受管版本 | 匯入、canary 收據、版本切換／回退、身份綁定與 pending 恢復；原生假 backend 測試；固定三種真 CLI 的 import／inspect 與搬移後版本探測通過 | Claude 真模型 canary／跨版切換／回退，以及三 backend 完整故障切點。Codex 0.159.3／0.160.0 已有 canary 及 external auth host 協助下的正常跨版／回退、非空歷史保留；OpenCode 1.18.33／1.18.34 已有同類證據及限定重啟切點（見紀錄） |
 | 13C 版本發現 | 固定 npm 公開 metadata、每日持久排程、外部 CLI 磁碟版本探測、待辦與 Telegram 精確確認 | 真實系統 CLI 的版本觀測驗收；雙 monitor 同時 active 的正式 daemon 停機兩種完成順序已通過 |
 | 13C 重啟通知 | 真 daemon 三次啟動測試：worker 發現換版、通知重建、操作員確認持久化，agent 與錯誤 action 拒絕 | 此測試使用本機假 CLI，不能代替真模型或 service-manager 重啟驗收 |
 | 13D Telegram | daemon 配對、token reference、allowlist、設定套用；專用 bot 真測完成 /start→confirm→apply→同 home 重啟→通知→Mark read→approve，任務 done 且唯一 merge | 本次限私聊人工 approval；不擴稱覆蓋所有 Telegram 動作或真模型 |
@@ -81,3 +81,5 @@ doctor 逐項覆蓋與缺口見 [故障／修復矩陣](gate-13-doctor-matrix.md
 - 2026-10-10：真 OpenCode activate 回覆後 SIGKILL 自有 daemon，退出後唯讀 DB 確認 phase=Committed 與原 switch／deadline；候選 holder 64219 保留。初版 harness 讀尚未產生的 version 檔失敗，且 SQLite context 未 close 擋第一次清理重啟，保留失敗紀錄；harness 退出釋鎖後從同一持久切點恢復，daemon recovered=1／started=0 重接 64219，Activated 後新訊息與歷史一致，回退 1.18.33 後亦成功。不是整支 runner 一次通過或全部 crash cuts。root／程序清理、認證來源不變；證據 `AgEnD-ops/g13-install-20261008/opencode-committed-switch-20261010`，獨立覆核待完成；Claude／Codex 真測仍缺專用認證。
 
 - 2026-10-11：真 Codex 0.159.3 canary 3/3 confirmed 且 completed、23.143 秒；原生預設模型名稱未記錄。獨立覆核 report／stdout／plan 身分相符並確認測試目錄已刪；刷新拒絕由合成測試支持，本輪未觀測真 refresh 請求。證據 `AgEnD-ops/g13-install-20261008/codex-access-canary-20261011`。
+
+- 2026-10-11：13C 真 Codex 0.159.3／0.160.0 各 3 則 canary 通過；正式 0.159.3→0.160.0→0.159.3 切換／回退保留同 session，holder 96363→96649→96797，三階段各 1 則 completed，原生歷史 1→2→3 且舊 turn 完整 JSON 不變。共 9 則模型訊息；由測試專用 external auth host 協助登入，非 production 自動登入；本輪無 refresh 請求，不涵蓋 crash／所有重連切點。auth 來源雜湊前後不變、隔離 auth.json 未出現、daemon exit 0；root／canary homes／socket 已清理，獨立覆核無 blocker。證據 `AgEnD-ops/g13-install-20261008/codex-switch-20261011`；Claude 真測仍待憑證（PR #158，未合併）。
