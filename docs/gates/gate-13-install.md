@@ -332,3 +332,5 @@ Brew 原生安裝驗證已接入 release workflow 的 macOS ARM64／Linux x86_64
 - 2026-10-11：13C Codex 0.159.3 以使用者指定 auth.json 的 access-only 外部登入完成正式 canary，3 receipts confirmed／3 outcomes completed、23,143 ms；refresh 請求拒絕、來源雜湊不變、child home 及 import home 已清理。新增憑證白名單、兩次新連線刷新拒絕與 peer error 去敏回歸；真 Codex 版本切換／回退及 Claude 真測仍未完成。證據：AgEnD-ops/g13-install-20261008/codex-access-canary-20261011（PR #158，未合併）。
 
 - 2026-10-11：13C 真 Codex 0.159.3／0.160.0 各 3 則 canary 通過；正式 0.159.3→0.160.0→0.159.3 切換／回退保留同 session，holder 96363→96649→96797，三階段各 1 則 completed，原生歷史 1→2→3 且舊 turn 完整 JSON 不變。共 9 則模型訊息；由測試專用 external auth host 協助登入，非 production 自動登入；本輪無 refresh 請求，不涵蓋 crash／所有重連切點。auth 來源雜湊前後不變、隔離 auth.json 未出現、daemon exit 0；root／canary homes／socket 已清理，獨立覆核無 blocker。證據 `AgEnD-ops/g13-install-20261008/codex-switch-20261011`；Claude 真測仍待憑證（PR #158，未合併）。
+
+- 2026-10-12：doctor 修復矩陣補不可寫 home 與 Git 版本恢復；修正 chmod／df／du 提示未引用 home 路徑，真 CLI 測試直接執行含空白、單引號與 shell 特殊字元的 chmod／du 提示。install_home 11、CLI doctor 2、doctor unit 2、service diagnostic 1 通過，workspace clippy／fmt／check-deps 通過；獨立唯讀覆核無 blocker。0 模型，暫存已清；非 UTF-8 路徑、登入／真能力與人工矩陣仍未完成（PR #158，未合併）。

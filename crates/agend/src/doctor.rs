@@ -139,6 +139,11 @@ fn plural(n: usize) -> &'static str {
     if n == 1 { "" } else { "s" }
 }
 
+/// Quote an operator path as one POSIX shell word, including apostrophes.
+fn shell_path(path: &Path) -> String {
+    format!("'{}'", path.display().to_string().replace('\'', "'\"'\"'"))
+}
+
 fn home_check(home: &Path) -> Check {
     let shown = home.display();
     let fail = |detail: String, fix: String| check("home", CheckStatus::Fail, detail, Some(fix));
@@ -160,7 +165,7 @@ fn home_check(home: &Path) -> Check {
     if !setup::writable(home) {
         return fail(
             format!("{shown} is not writable"),
-            format!("chmod u+rwx {shown}"),
+            format!("chmod u+rwx {}", shell_path(home)),
         );
     }
     let mode = meta.permissions().mode() & 0o777;
@@ -169,7 +174,7 @@ fn home_check(home: &Path) -> Check {
             "home",
             CheckStatus::Warn,
             format!("{shown} ({mode:04o}; others can read it)"),
-            Some(format!("chmod 700 {shown}")),
+            Some(format!("chmod 700 {}", shell_path(home))),
         );
     }
     ok("home", format!("{shown} (0700)"))
@@ -328,7 +333,7 @@ fn disk(home: &Path) -> Check {
                 "disk",
                 CheckStatus::Warn,
                 format!("cannot read the free space: {e}"),
-                Some(format!("df -h {}", home.display())),
+                Some(format!("df -h {}", shell_path(home))),
             );
         }
     };
@@ -347,7 +352,7 @@ fn disk(home: &Path) -> Check {
             "disk",
             CheckStatus::Warn,
             format!("{detail} (more than 20 GB)"),
-            Some(format!("du -sh {}/* | sort -h", home.display())),
+            Some(format!("du -sh {}/* | sort -h", shell_path(home))),
         );
     }
     ok("disk", detail)

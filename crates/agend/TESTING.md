@@ -115,7 +115,7 @@ cargo test -p agend
 
 - [x] 所有 CLI 命令、doctor、init（第 9 施工關：`tests/cli.rs`）
 - [ ] TTY 上 `instance remove` 的確認問題（測試的 stdin 不是終端；只驗了非 TTY 沒 `--yes` 回 exit 2）
-- [ ] doctor 的 `disk` fail／home 超過 20 GB、`home` 不能寫：規則是 `agend_core::setup` 的常數，沒有做出小磁碟或 20 GB 的 home（D24 的「每個 doctor 檢查都有故意弄壞的測試」在第 13 施工關補齊）
+- [x] doctor 的大 home／不可寫 home 已由 `install_home` 原生修復流程覆蓋；低空間 fail→ok 有 macOS 小 volume 證據，未宣稱 Linux 同項已真測（詳見下方）。
 
 `pipeline_attention_events` 經真 daemon／SQLite／Git 與 Rust CLI watch 驗 timeout 不重建核准項目、Approve／RequestChanges 真 action 各一次、新返工 attempt 才重新要求核准、stage 順序及 single merge。SQLite trigger 拒絕舊的 secondary note 寫入時，Approve／RequestChanges 仍各一次發布真 action、持久化決定並完成 single merge；不靠再重啟恢復。
 
@@ -280,3 +280,5 @@ backend_canary 的三 backend 原生 managed fleet 透過 doctor 消費正式 da
 terminal_hub::readonly_fit_resizes_without_granting_input_or_displacing_a_controller 經真 daemon/holder/PTY 驗兩個唯讀尺寸、無輸入 grant、另一 controller 的尺寸與 input 保留，以及 release 後新 fit 生效；不使用模型。
 
 `backend::canary::credentials::tests` 驗 Codex OAuth/API 欄位白名單、未知格式拒絕及來源不變；`backend_canary` 的 Codex 情境使用 native fake producer 的 external login，再驗三次訊息與清理。真憑證及模型不在自動測試執行。
+
+2026-10-12 doctor 修復矩陣：`install_home` 實際執行 doctor 回傳的 chmod／du 提示，UTF-8 路徑含空白、單引號及 shell 注入字串；不可寫 0500→0700、過寬 0755→0700、大 sparse home→僅刪自有 fixture，核配置保留及無額外檔案。不可寫測試須非 root（root 執行會明示略過）；本機以一般使用者通過。Git 2.37.9→2.38.0 使用只接受 --version 的原生 fixture，未降級共用 Git。非 UTF-8 路徑的 display 仍有既有有損限制；未宣稱涵蓋該情境。

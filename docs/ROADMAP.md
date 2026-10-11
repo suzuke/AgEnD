@@ -569,3 +569,7 @@
 - 2026-10-11：本批 backend_canary 首跑 16 通過／1 舊認證 fixture 失敗；更新 fixture 並強制 external thread/start 前登入後，原失敗案例單獨通過。憑證單元 4、external Worker 1、fake Codex 12 通過；fmt／workspace clippy／check-deps 通過。真 Codex 不重跑，保留首次通過與 fixture 失敗的分離證據。
 
 - 2026-10-11：13C 真 Codex 0.159.3／0.160.0 各 3 則 canary 通過；正式 0.159.3→0.160.0→0.159.3 切換／回退保留同 session，holder 96363→96649→96797，三階段各 1 則 completed，原生歷史 1→2→3 且舊 turn 完整 JSON 不變。共 9 則模型訊息；由測試專用 external auth host 協助登入，非 production 自動登入；本輪無 refresh 請求，不涵蓋 crash／所有重連切點。auth 來源雜湊前後不變、隔離 auth.json 未出現、daemon exit 0；root／canary homes／socket 已清理，獨立覆核無 blocker。證據 `AgEnD-ops/g13-install-20261008/codex-switch-20261011`；Claude 真測仍待憑證（PR #158，未合併）。
+
+- 2026-10-11：依使用者指示暫緩 Claude 真測；隔離啟動停於登入選單，無 canary 模型訊息，Keychain／共享設定未變，自有程序與暫存清理完成。其餘第 13 關缺口繼續依 gate-13-status 收斂；未宣告整關完成，後續模型真測採低成本模型。
+
+- 2026-10-12：doctor 修復矩陣補不可寫 home 與 Git 版本恢復；修正 chmod／df／du 提示未引用 home 路徑，真 CLI 測試直接執行含空白、單引號與 shell 特殊字元的 chmod／du 提示。install_home 11、CLI doctor 2、doctor unit 2、service diagnostic 1 通過，workspace clippy／fmt／check-deps 通過；獨立唯讀覆核無 blocker。0 模型，暫存已清；非 UTF-8 路徑、登入／真能力與人工矩陣仍未完成（PR #158，未合併）。

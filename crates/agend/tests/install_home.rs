@@ -300,7 +300,7 @@ fn doctor_checks_configured_program_and_refuses_changed_import_without_executing
 
 #[test]
 fn doctor_large_home_warning_recovers_after_removing_only_its_sparse_fixture() {
-    let root = TempDir::new("g13-doctor-disk").unwrap();
+    let root = TempDir::new("g13-doctor-disk ' ; touch UNEXPECTED ; #").unwrap();
     init(root.path());
     diagnostic(command(root.path()), "disk", "ok");
     let path = root.path().join(".agend/large-owned-fixture");
@@ -316,6 +316,84 @@ fn doctor_large_home_warning_recovers_after_removing_only_its_sparse_fixture() {
             .contains("more than 20 GB")
     );
     assert!(path.exists(), "doctor must not remove user files");
+    let inspection = Command::new("/bin/sh")
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .current_dir(root.path())
+        .args(["-c", warning["fix"].as_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(inspection.status.success(), "{inspection:?}");
+    assert!(String::from_utf8_lossy(&inspection.stdout).contains("large-owned-fixture"));
+    assert!(!root.path().join("UNEXPECTED").exists());
     fs::remove_file(path).unwrap();
     diagnostic(command(root.path()), "disk", "ok");
+}
+
+#[test]
+fn doctor_home_repairs_are_executable_for_literal_shell_paths() {
+    // Root bypasses directory write permissions; this contract needs a normal user.
+    if unsafe { libc::getuid() } == 0 {
+        eprintln!("requires a non-root user for access(W_OK) permission denial");
+        return;
+    }
+    let root = TempDir::new("g13-doctor-repair").unwrap();
+    let home = root.path().join("home space ' ; touch UNEXPECTED ; #");
+    fs::create_dir(&home).unwrap();
+    let config = home.join("config.toml");
+    fs::write(&config, "# preserve operator configuration\n").unwrap();
+    struct Restore<'a>(&'a Path);
+    impl Drop for Restore<'_> {
+        fn drop(&mut self) {
+            fs::set_permissions(self.0, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+    }
+    let _restore = Restore(&home);
+    for (mode, status) in [(0o500, "fail"), (0o755, "warn")] {
+        fs::set_permissions(&home, fs::Permissions::from_mode(mode)).unwrap();
+        let mut cmd = command(root.path());
+        cmd.env("AGEND_HOME", &home);
+        let broken = diagnostic(cmd, "home", status);
+        assert_eq!(
+            fs::metadata(&home).unwrap().permissions().mode() & 0o777,
+            mode
+        );
+        let repaired = Command::new("/bin/sh")
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .current_dir(root.path())
+            .args(["-c", broken["fix"].as_str().unwrap()])
+            .output()
+            .unwrap();
+        assert!(repaired.status.success(), "{repaired:?}");
+        let mut cmd = command(root.path());
+        cmd.env("AGEND_HOME", &home);
+        diagnostic(cmd, "home", "ok");
+        assert!(!root.path().join("UNEXPECTED").exists());
+        assert_eq!(
+            fs::read_to_string(&config).unwrap(),
+            "# preserve operator configuration\n"
+        );
+    }
+}
+
+#[test]
+fn doctor_old_git_recovers_after_replacing_only_the_fixture() {
+    let root = TempDir::new("g13-doctor-git-repair").unwrap();
+    init(root.path());
+    let tool = root.path().join("git");
+    for (version, status) in [("2.37.9", "fail"), ("2.38.0", "ok")] {
+        fs::write(
+            &tool,
+            format!(
+                "#!/bin/sh\n[ \"$1\" = --version ] || exit 91\nprintf 'git version {version}\\n'\n"
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&tool, fs::Permissions::from_mode(0o755)).unwrap();
+        let mut cmd = command(root.path());
+        cmd.env("PATH", format!("{}:/usr/bin:/bin", root.path().display()));
+        let check = diagnostic(cmd, "git", status);
+        assert!(check["detail"].as_str().unwrap().contains(version));
+    }
 }

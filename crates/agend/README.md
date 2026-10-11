@@ -130,3 +130,5 @@ doctor 的 observation/<instance> 透過 protocol 1.9 一次性唯讀 RPC 取得
 doctor 的 capability/<instance>/<id> 列出回覆 daemon 的具名版本政策，與磁碟觀測／歷史 canary 分開；全部保留 runtime eligibility unknown，不從版本字串推論目前可操作。四條規則與證據界線見 [能力政策](../../docs/architecture/backend-capabilities.md)。
 
 Codex canary 的 `--auth-file` 接受原生 ChatGPT auth.json 或 API key；ChatGPT 模式只裁剪 access token/account ID，使用 app-server 外部 token 登入，拒絕刷新要求。來源不改寫，隔離 home 不落地 refresh／ID token。此支援不代表真模型 canary 已通過。
+
+Doctor 的 home／磁碟修復提示會引用 UTF-8 路徑，包含空白、單引號與 shell 特殊字元；doctor 本身不執行修復。登入與能力的 unknown 不會因修復其他檢查而改成成功。
