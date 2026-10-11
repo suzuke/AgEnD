@@ -319,7 +319,10 @@ fn doctor_keeps_native_canary_evidence_separate_from_live_auth(
         assert_eq!(row("backend/evidence")["status"], "ok");
         let auth = row("authentication/evidence");
         assert_eq!(auth["status"], "warn");
-        assert!(auth["detail"].as_str().unwrap().starts_with("unknown;"));
+        assert_eq!(
+            auth["detail"],
+            "current native account/session observation unavailable; provider validity unknown"
+        );
         let evidence = row("compatibility/evidence");
         assert_eq!(evidence["status"], "warn");
         (
