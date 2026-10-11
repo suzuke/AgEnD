@@ -3,24 +3,31 @@
 > **TL;DR**
 > - 第 13 關仍未完成、未核准合併；PR #158 是 draft。
 > - 功能提交、局部測試、整關驗收與真環境驗收分別記錄，不能互相替代。
-> - 下一步：以已通過的自動驗收為基線，完成以下缺口，再交付 final fresh verifier 與逐步人工驗收。
+> - 下一步：非 Claude 實作與本機獨立覆核已完成；Claude 暫緩，接續逐步人工驗收與合併確認。
 
 此頁整理 2026-10-12 的當前狀態；歷史過程保留在 [施工關紀錄](gate-13-install.md)。
 
 | 範圍 | 已實作／已有證據 | 尚未證明完成 |
 |---|---|---|
-| 13A home／設定 | 預設 home、init 權限、doctor 的配置程式解析、沙箱與服務診斷；install_home 回歸 | 已補 Codex 唯讀帳戶設定、OpenCode 原生 session／供應者歷史、runtime gate 與 workflow 範圍 GitHub auth 診斷；不把 configured 或歷史成功冒充目前 token 有效。待最終固定提交驗收及人工確認，Claude 暫緩 |
+| 13A home／設定 | 預設 home、init 權限、doctor 的配置程式解析、沙箱與服務診斷；install_home 回歸 | 已補 Codex 唯讀帳戶設定、OpenCode 原生 session／供應者歷史、runtime gate 與 workflow 範圍 GitHub auth 診斷；不把 configured 或歷史成功冒充目前 token 有效。本批獨立驗收已通過（提交範圍見下），人工確認與 Claude 仍待完成 |
 | 13B 服務 | launchd／systemd plan、安裝所有權、對帳、解除安裝、資料刪除互斥；63b083b 的 Linux ARM64 正式 archive 在隔離 systemd／一般使用者下通過五階段生命周期；macOS 原生 launchd 安裝／停機／重啟接回同 holder 與子程序／解除安裝保留資料通過，測試資源已清理 | macOS 已補正式 ARM64 archive 的相同流程；使用 C 等待程序，真 backend 與登入登出未測試 |
 | 13C 受管版本 | 匯入、canary 收據、版本切換／回退、身份綁定與 pending 恢復；原生假 backend 測試；固定三種真 CLI 的 import／inspect 與搬移後版本探測通過 | Claude 真模型 canary／跨版切換／回退依使用者 2026-10-11 指示暫緩，維持未驗證；共用 Store 已補 Ready 快照後、過期 PID 完成被拒後的重開 DB／投遞暫停驗證；此為 persistence／CAS，非各真 CLI 全部 crash cuts。Codex 0.159.3／0.160.0 已有 canary 及 external auth host 協助下的正常跨版／回退、非空歷史保留；OpenCode 1.18.33／1.18.34 已有同類證據及限定重啟切點（見紀錄） |
 | 13C 版本發現 | 固定 npm 公開 metadata、每日持久排程、外部 CLI 磁碟版本探測、待辦與 Telegram 精確確認 | 已補真 Codex 0.159.3→0.160.0 專用副本漂移、精確確認及重啟保存；0 模型、原 holder 綁定不變。雙 monitor 停機兩種完成順序已通過 |
 | 13C 重啟通知 | 真 daemon 三次啟動測試：worker 發現換版、通知重建、操作員確認持久化，agent 與錯誤 action 拒絕 | 原假 CLI 測試之外，已補真 Codex 磁碟版本變動；不宣稱因此執行了模型或 service-manager 重啟 |
 | 13D Telegram | daemon 配對、token reference、allowlist、設定套用；專用 bot 真測完成 /start→confirm→apply→同 home 重啟→通知→Mark read→approve，任務 done 且唯一 merge | 本次限私聊人工 approval；不擴稱覆蓋所有 Telegram 動作或真模型 |
 | 13E 打包 | 63b083b 的 release-artifacts 37800713214 通過四平台 archive、formula 與雙平台 Brew 七個 jobs | cargo install 後全新 HOME 的真 OpenCode 首任務已通過（預先備妥認證、13.95 秒、不含編譯安裝）；4e73912 的 macOS ARM64 archive 下載、驗證、安裝至首個真 OpenCode 任務完成共 54.06 秒；預先備妥認證，非新帳戶註冊。發布步驟見版本／發布計畫，尚未公開發布 |
-| 整關 | 63b083b 的 fresh-context accept install、雙平台 CI、四平台打包均通過 | 剩餘實作與真測完成後的最終 fresh-context verifier、使用者逐步驗收與合併確認 |
+| 整關 | 63b083b 的 fresh-context accept install、雙平台 CI、四平台打包均通過 | 本批 fresh-context verifier 已通過；Claude 真測暫緩、使用者逐步驗收與合併確認未完成 |
 
 doctor 逐項覆蓋與缺口見 [故障／修復矩陣](gate-13-doctor-matrix.md)。
 
 ## 當前自動驗收
+
+- 2026-10-12：非 Claude 實作收尾：獨立 accept install 通過（912 checks passes／4 ignored、59 demo passes，含重複與 child entry，非不同契約數），全新 HOME 假 worker 首任務 4,346 ms、一次 merge；client 52／testkit 117、fmt／clippy／no-std 與 SetupDiagnostic 四項邊界通過。驗收從 797a7b9 到 test-only 2f3e35b，保留單一測試檔以外 tree 相同的證據，非單一不變 HEAD。清理 43 個新增測試 socket、13,529,198,592 bytes 編譯快取及約 216 MiB 暫緩 Claude 副本；保留使用者試用 CLI／環境、證據與未合併 worktree。Claude 真測仍暫緩；人工驗收、合併及公開發布另待確認（PR #158）。
+- 獨立報告與清理證據：`AgEnD-ops/g13-install-20261008/accept-797a7b9-fresh/REPORT.txt`、`build-cache-cleanup-20261012.json`。兩個 core 深度探索器未跑，其餘兩個 ignored 為由父測試執行的 daemon 子入口；runtime 身分競態仍為 source／組合覆蓋，不聲稱新增完整 E2E 注入。
+
+- 固定 `2f3e35b` 的 [CI 38162210653](https://github.com/suzuke/AgEnD/actions/runs/38162210653) 在 Ubuntu／macOS 完整 workspace 測試、fmt／clippy／no-std 全部成功。`797a7b9` 的 [release-artifacts 38161618197](https://github.com/suzuke/AgEnD/actions/runs/38161618197) 四平台 archive、formula、雙平台 Brew 七 jobs 成功；兩者僅 canary 測試斷言不同，production tree 相同。
+
+以下為歷史固定提交證據，不能替代後續變更的覆核。
 
 - 固定 `63b083be43642e76ea94f20323900d0e98315727`，fresh-context verifier 一次執行 `cargo xtask accept install`，exit 0、1,969.572 秒，起訖 HEAD 與工作樹乾淨。checks 印出 898 passed／0 failed／4 ignored（含 child entry 計數，非 898 個不同契約）；no-std 實際通過。demo 56 passes 重複選定 suites；假 worker 首任務 4,774 ms、一次 merge、0 模型。獨立清理核對移除 41 個該輪新增、無 listener 的假 Codex socket，未碰外來項目。
 - 同版 [CI 37798841941](https://github.com/suzuke/AgEnD/actions/runs/37798841941) 雙平台成功；[release-artifacts 37800713214](https://github.com/suzuke/AgEnD/actions/runs/37800713214) 四平台 archive、formula、雙平台 Brew 七 jobs 成功。Linux ARM64 正式 archive 在隔離 systemd／非 root UID 下完成五階段服務驗收，78.917 秒；container、image、暫存皆移除。這些不證明真模型、新使用者認證或公開發布。

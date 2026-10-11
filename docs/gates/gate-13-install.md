@@ -7,7 +7,7 @@
 
 ## 狀態
 
-**施工中：13A–E 已有實作；整套自動驗收與真環境驗收收斂中**（2026-10-08）。使用者指示自行安排優先順序並建立 goal；第 12 關已合併清理。尚未完成整關驗收。
+**施工中：非 Claude 實作與本機獨立覆核完成；Claude 真測暫緩**（2026-10-12）。已有 Codex／OpenCode 真 canary、跨版往返、真服務與 Telegram 的限定範圍證據；人工驗收、合併與公開發布仍分開追蹤，尚未完成整關驗收。
 
 ## 施工順序（2026-10-08）
 
@@ -338,3 +338,5 @@ Brew 原生安裝驗證已接入 release workflow 的 macOS ARM64／Linux x86_64
 - 2026-10-12：固定 6ac8ac6 以 cargo install --locked 的 release profile 安裝至專用 prefix；全新 HOME 以預先備妥的 API-only 私有副本，使用 OpenCode 1.18.34／opencode-go/gpt-6-luna 完成一個真模型 README 任務。work→submit→checks→自動驗證器核對精確 committed blob／100644 mode 後經 operator RPC 核准（非人工操作）→唯一一次雙親 local merge，task done、worktree 移除，init 至完成 13.9465 秒（不含編譯／安裝／取得認證）。首輪 harness 的中間目錄 0755 被拒，未執行模型，清理後改各層 0700 才重測；兩輪 root／程序已清，認證來源雜湊不變。非下載 archive、非互動新帳戶登入、非 GitHub merge；Claude 仍暫緩。證據 AgEnD-ops/g13-install-20261008/first-task-opencode-r2-20261012（PR #158，未合併）。
 
 - 2026-10-12：補唯讀 runtime doctor：Codex account/read 禁 refresh、OpenCode 原生 session／供應者歷史、GitHub 實際 workflow 範圍 auth status，policy 與 runtime capability 分列；不把帳戶設定或歷史成功冒充當前憑證有效。真 Codex 專用副本版本漂移、精確確認及重啟保存通過（0 模型）；4e73912 下載版真 OpenCode 首任務含下載安裝共 54.06 秒，來源認證未變、owned root／程序清理完成。Store 補 Ready／stale PID 後重開仍暫停投遞。新增發布交付計畫；本批最終回歸／獨立驗收另記，Claude 暫緩（PR #158，未合併）。
+
+- 2026-10-12：非 Claude 實作收尾：獨立 accept install 通過（912 checks passes／4 ignored、59 demo passes，含重複與 child entry，非不同契約數），全新 HOME 假 worker 首任務 4,346 ms、一次 merge；client 52／testkit 117、fmt／clippy／no-std 與 SetupDiagnostic 四項邊界通過。驗收從 797a7b9 到 test-only 2f3e35b，保留單一測試檔以外 tree 相同的證據，非單一不變 HEAD。清理 43 個新增測試 socket、13,529,198,592 bytes 編譯快取及約 216 MiB 暫緩 Claude 副本；保留使用者試用 CLI／環境、證據與未合併 worktree。Claude 真測仍暫緩；人工驗收、合併及公開發布另待確認（PR #158）。
