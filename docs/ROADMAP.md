@@ -573,3 +573,5 @@
 - 2026-10-11：依使用者指示暫緩 Claude 真測；隔離啟動停於登入選單，無 canary 模型訊息，Keychain／共享設定未變，自有程序與暫存清理完成。其餘第 13 關缺口繼續依 gate-13-status 收斂；未宣告整關完成，後續模型真測採低成本模型。
 
 - 2026-10-12：doctor 修復矩陣補不可寫 home 與 Git 版本恢復；修正 chmod／df／du 提示未引用 home 路徑，真 CLI 測試直接執行含空白、單引號與 shell 特殊字元的 chmod／du 提示。install_home 11、CLI doctor 2、doctor unit 2、service diagnostic 1 通過，workspace clippy／fmt／check-deps 通過；獨立唯讀覆核無 blocker。0 模型，暫存已清；非 UTF-8 路徑、登入／真能力與人工矩陣仍未完成（PR #158，未合併）。
+
+- 2026-10-12：固定 6ac8ac6 以 cargo install --locked 的 release profile 安裝至專用 prefix；全新 HOME 以預先備妥的 API-only 私有副本，使用 OpenCode 1.18.34／opencode-go/gpt-6-luna 完成一個真模型 README 任務。work→submit→checks→自動驗證器核對精確 committed blob／100644 mode 後經 operator RPC 核准（非人工操作）→唯一一次雙親 local merge，task done、worktree 移除，init 至完成 13.9465 秒（不含編譯／安裝／取得認證）。首輪 harness 的中間目錄 0755 被拒，未執行模型，清理後改各層 0700 才重測；兩輪 root／程序已清，認證來源雜湊不變。非下載 archive、非互動新帳戶登入、非 GitHub merge；Claude 仍暫緩。證據 AgEnD-ops/g13-install-20261008/first-task-opencode-r2-20261012（PR #158，未合併）。

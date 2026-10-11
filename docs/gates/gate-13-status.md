@@ -5,7 +5,7 @@
 > - 功能提交、局部測試、整關驗收與真環境驗收分別記錄，不能互相替代。
 > - 下一步：以已通過的自動驗收為基線，完成以下缺口，再交付 final fresh verifier 與逐步人工驗收。
 
-此頁整理 2026-10-11 的當前狀態；歷史過程保留在 [施工關紀錄](gate-13-install.md)。
+此頁整理 2026-10-12 的當前狀態；歷史過程保留在 [施工關紀錄](gate-13-install.md)。
 
 | 範圍 | 已實作／已有證據 | 尚未證明完成 |
 |---|---|---|
@@ -15,7 +15,7 @@
 | 13C 版本發現 | 固定 npm 公開 metadata、每日持久排程、外部 CLI 磁碟版本探測、待辦與 Telegram 精確確認 | 真實系統 CLI 的版本觀測驗收；雙 monitor 同時 active 的正式 daemon 停機兩種完成順序已通過 |
 | 13C 重啟通知 | 真 daemon 三次啟動測試：worker 發現換版、通知重建、操作員確認持久化，agent 與錯誤 action 拒絕 | 此測試使用本機假 CLI，不能代替真模型或 service-manager 重啟驗收 |
 | 13D Telegram | daemon 配對、token reference、allowlist、設定套用；專用 bot 真測完成 /start→confirm→apply→同 home 重啟→通知→Mark read→approve，任務 done 且唯一 merge | 本次限私聊人工 approval；不擴稱覆蓋所有 Telegram 動作或真模型 |
-| 13E 打包 | 63b083b 的 release-artifacts 37800713214 通過四平台 archive、formula 與雙平台 Brew 七個 jobs | 全新使用者真 backend 首任務、版本／發布交付計畫；尚未公開發布 |
+| 13E 打包 | 63b083b 的 release-artifacts 37800713214 通過四平台 archive、formula 與雙平台 Brew 七個 jobs | cargo install 後全新 HOME 的真 OpenCode 首任務已通過（預先備妥認證、13.95 秒、不含編譯安裝）；下載 archive 的同類真任務、新帳戶登入及版本／發布交付計畫仍待驗證，尚未公開發布 |
 | 整關 | 63b083b 的 fresh-context accept install、雙平台 CI、四平台打包均通過 | 剩餘實作與真測完成後的最終 fresh-context verifier、使用者逐步驗收與合併確認 |
 
 doctor 逐項覆蓋與缺口見 [故障／修復矩陣](gate-13-doctor-matrix.md)。
@@ -87,3 +87,5 @@ doctor 逐項覆蓋與缺口見 [故障／修復矩陣](gate-13-doctor-matrix.md
 - 2026-10-11：使用者要求先跳過 Claude，後續模型真測採低成本模型。本輪預設模型啟動被中止，改釘 Haiku 5.5 後停在隔離登入選單；兩輪均無 canary 訊息收據，未通過。測試程序、child／import homes 與 access-token 暫存已清理；Keychain 與 ~/.claude.json 前後不變。證據 `AgEnD-ops/g13-install-20261008/claude-haiku-canary-20261011`；暫緩不計為通過。
 
 - 2026-10-12：doctor 修復矩陣補不可寫 home 與 Git 版本恢復；修正 chmod／df／du 提示未引用 home 路徑，真 CLI 測試直接執行含空白、單引號與 shell 特殊字元的 chmod／du 提示。install_home 11、CLI doctor 2、doctor unit 2、service diagnostic 1 通過，workspace clippy／fmt／check-deps 通過；獨立唯讀覆核無 blocker。0 模型，暫存已清；非 UTF-8 路徑、登入／真能力與人工矩陣仍未完成（PR #158，未合併）。
+
+- 2026-10-12：固定 6ac8ac6 以 cargo install --locked 的 release profile 安裝至專用 prefix；全新 HOME 以預先備妥的 API-only 私有副本，使用 OpenCode 1.18.34／opencode-go/gpt-6-luna 完成一個真模型 README 任務。work→submit→checks→自動驗證器核對精確 committed blob／100644 mode 後經 operator RPC 核准（非人工操作）→唯一一次雙親 local merge，task done、worktree 移除，init 至完成 13.9465 秒（不含編譯／安裝／取得認證）。首輪 harness 的中間目錄 0755 被拒，未執行模型，清理後改各層 0700 才重測；兩輪 root／程序已清，認證來源雜湊不變。非下載 archive、非互動新帳戶登入、非 GitHub merge；Claude 仍暫緩。證據 AgEnD-ops/g13-install-20261008/first-task-opencode-r2-20261012（PR #158，未合併）。
