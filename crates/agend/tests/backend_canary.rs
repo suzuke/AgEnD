@@ -317,7 +317,7 @@ fn doctor_keeps_native_canary_evidence_separate_from_live_auth(
                 .clone()
         };
         assert_eq!(row("backend/evidence")["status"], "ok");
-        let auth = row("authentication");
+        let auth = row("authentication/evidence");
         assert_eq!(auth["status"], "warn");
         assert!(auth["detail"].as_str().unwrap().starts_with("unknown;"));
         let evidence = row("compatibility/evidence");
