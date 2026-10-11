@@ -345,3 +345,5 @@ handlers::backend_capabilities 驗 Codex default／approved／verification-own�
 agend/tests/terminal_hub.rs 的 readonly_fit 案例經真 daemon、holder、PTY 驗唯讀 resize、偽 attach input 被拒、另一 controller 保持尺寸與輸入權，以及 release 後新 fit 生效。
 
 第 13C Codex external login 的 production runner 回歸位於 `agend/tests/backend_canary.rs`；使用合成憑證，不呼叫真模型。完整真 backend 驗證仍須另列證據。
+
+Codex account/read、OpenCode 完成歷史、GitHub auth exit 狀態與 workflow 範圍均有原生 producer 測試；backend_switch 補 Ready 快照與 stale PID 拒絕後的 Store 重開，僅證明 persistence／CAS。

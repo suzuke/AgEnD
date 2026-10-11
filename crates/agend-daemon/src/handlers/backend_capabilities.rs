@@ -48,6 +48,54 @@ pub(super) fn policies(instance: &BackendDiagnostic, input: &CodexInputPolicy) -
     }
 }
 
+/// Observe without opening a second Codex connection or sending model input.
+pub(super) async fn runtime(
+    ctx: &super::Context,
+    expected: &BackendDiagnostic,
+) -> Option<agend_core::setup::backend::observation::RuntimeDiagnostic> {
+    use agend_core::{
+        model::Backend,
+        setup::{Check, CheckStatus, backend::observation::RuntimeDiagnostic},
+    };
+    let id = &expected.instance_id;
+    let before = ctx.store.instance(id).await.ok()??;
+    if before.backend.as_str() != expected.backend
+        || before.program != expected.configured_program
+        || before.working_directory != expected.working_directory
+    {
+        return None;
+    }
+    let holder = crate::runtime::files::running(ctx.runtime.home(), id).ok()??;
+    let result = match before.backend {
+        Backend::Codex => {
+            let configuration = ctx.codex.account_configuration(id).await.ok()?;
+            let eligible = ctx.codex.can_input(id);
+            RuntimeDiagnostic {
+                session_id: before.session_id.clone()?, holder_pid: holder,
+                observed_ms: crate::log::now_unix_ms(), credential_configuration: configuration,
+                provider_observations: vec![],
+                capabilities: vec![Check { check: "codex_terminal_input".into(),
+                    status: if eligible { CheckStatus::Ok } else { CheckStatus::Warn },
+                    detail: "current driver version/link/holder/strict attribution gate; terminal control must still be acquired separately".into(),
+                    fix: (!eligible).then(|| "check the instance terminal and supported input version; reconnect the instance after repairing its configuration".into()) }],
+            }
+        }
+        Backend::Opencode => crate::driver::opencode::OpenCodeDriver::new(ctx.store.clone())
+            .diagnostic(id)
+            .await
+            .ok()?,
+        Backend::Claude => return None,
+    };
+    if ctx.store.instance(id).await.ok()?.as_ref() != Some(&before)
+        || crate::runtime::files::running(ctx.runtime.home(), id).ok()? != Some(holder)
+        || result.holder_pid != holder
+        || before.session_id.as_deref() != Some(result.session_id.as_str())
+    {
+        return None;
+    }
+    Some(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

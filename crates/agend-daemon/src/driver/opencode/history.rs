@@ -380,3 +380,163 @@ mod tests {
             .unwrap();
     }
 }
+
+/// Last completed result per provider/model in a bounded current-session page.
+/// Message text, error bodies and credentials never enter the diagnostic.
+pub fn provider_observations(
+    session: &str,
+    rows: &Value,
+) -> Result<Vec<agend_core::setup::backend::observation::ProviderObservation>, String> {
+    use agend_core::setup::backend::observation::{ProviderObservation, ProviderOutcome as O};
+    users(session, rows)?;
+    let mut latest: std::collections::BTreeMap<(String, String), ProviderObservation> =
+        std::collections::BTreeMap::new();
+    for row in rows.as_array().expect("validated") {
+        let info = &row["info"];
+        if info["role"] != "assistant" {
+            continue;
+        }
+        let Some(time) = info["time"]["completed"].as_u64() else {
+            continue;
+        };
+        let (Some(provider), Some(model)) = (info["providerID"].as_str(), info["modelID"].as_str())
+        else {
+            continue;
+        };
+        let valid = |s: &str| {
+            !s.is_empty()
+                && s.len() <= 128
+                && s.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"-_.:/".contains(&b))
+        };
+        if !valid(provider) || !valid(model) {
+            continue;
+        }
+        let error = &info["error"];
+        let outcome = if error.is_null() {
+            if !matches!(
+                info["finish"].as_str(),
+                Some("stop" | "length" | "content-filter")
+            ) {
+                continue;
+            }
+            O::Succeeded
+        } else if error["name"] == "APIError" {
+            match error["data"]["statusCode"].as_u64() {
+                Some(401) => O::AuthenticationRejected,
+                Some(403) => O::AccessDenied,
+                Some(429) => O::RateLimited,
+                _ => O::Failed,
+            }
+        } else {
+            O::Failed
+        };
+        let key = (provider.to_owned(), model.to_owned());
+        let value = ProviderObservation {
+            provider: key.0.clone(),
+            model: key.1.clone(),
+            completed_ms: time,
+            outcome,
+        };
+        match latest.get(&key) {
+            Some(old) if old == &value => (),
+            Some(old) if old.completed_ms == time => {
+                return Err("ambiguous provider observation time".into());
+            }
+            Some(old) if old.completed_ms > time => (),
+            _ => {
+                latest.insert(key, value);
+            }
+        }
+    }
+    Ok(latest.into_values().collect())
+}
+
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+    use crate::driver::opencode::{api::Session, http::Http};
+    use agend_core::setup::backend::observation::ProviderOutcome as O;
+    use serde_json::json;
+    #[test]
+    fn native_provider_history_keeps_auth_access_and_quota_distinct() {
+        let server = agend_testkit::fake_agent::opencode::Server::start(
+            0,
+            std::time::Duration::from_millis(5),
+            None,
+        )
+        .unwrap();
+        let session =
+            Session::create(Http::new(server.port(), "fixture", "/workspace").unwrap()).unwrap();
+        session
+            .submit(
+                "diagnostic-turn",
+                "fixture response",
+                Some(("provider", "model")),
+            )
+            .unwrap();
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let original = loop {
+            let rows = session.history().unwrap();
+            if !provider_observations(session.id(), &rows)
+                .unwrap()
+                .is_empty()
+            {
+                break rows;
+            }
+            assert!(std::time::Instant::now() < end);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        };
+        let row = original
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["info"]["role"] == "assistant")
+            .unwrap()
+            .clone();
+        assert_eq!(
+            provider_observations(session.id(), &original).unwrap()[0].outcome,
+            O::Succeeded
+        );
+        for (code, expected) in [
+            (401, O::AuthenticationRejected),
+            (403, O::AccessDenied),
+            (429, O::RateLimited),
+        ] {
+            let mut failed = row.clone();
+            failed["info"]["error"] =
+                json!({"name":"APIError","data":{"statusCode":code,"message":"synthetic-secret"}});
+            let only = json!([failed.clone()]);
+            assert_eq!(
+                provider_observations(session.id(), &only).unwrap()[0].outcome,
+                expected
+            );
+            let mut later = row.clone();
+            later["info"]["id"] = json!("msgLater");
+            later["info"]["time"]["completed"] =
+                json!(row["info"]["time"]["completed"].as_u64().unwrap() + 1);
+            let recovered = json!([failed.clone(), later.clone()]);
+            assert_eq!(
+                provider_observations(session.id(), &recovered).unwrap()[0].outcome,
+                O::Succeeded
+            );
+            later["info"]["providerID"] = json!("other");
+            let different = provider_observations(session.id(), &json!([failed, later])).unwrap();
+            assert!(
+                different
+                    .iter()
+                    .any(|p| p.provider == "provider" && p.outcome == expected)
+            );
+            assert!(
+                !serde_json::to_string(&different)
+                    .unwrap()
+                    .contains("synthetic-secret")
+            );
+        }
+        assert!(provider_observations("sesOther", &original).is_err());
+        assert_eq!(
+            server.post_count(&format!("/session/{}/prompt_async", session.id())),
+            1
+        );
+    }
+}

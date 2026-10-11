@@ -61,6 +61,9 @@ fn command(bytes: &[u8], deadline: Instant) -> io::Result<ClientCommandResultDat
                 None => None,
             },
         },
+        "setup_diagnostic" => CommandResult::SetupDiagnostic {
+            data: data(envelope.data, deadline)?,
+        },
         "backend_diagnostic" => CommandResult::BackendDiagnostic {
             data: data(envelope.data, deadline)?,
         },

@@ -129,23 +129,7 @@ fn run(
         .call_blocking(move |conn| instances::get(conn, &lookup))
         .map_err(|e| e.to_string())?
         .ok_or("OpenCode instance removed")?;
-    let expected = if let Some(version) =
-        crate::backend_versions::canary_scope::expected(store.home(), &instance)?
-    {
-        version
-    } else if let Some(artifact) = crate::backend_versions::inspect_launch(
-        store.home(),
-        "opencode",
-        &instance.program,
-        std::path::Path::new(&instance.working_directory),
-        &std::env::var("PATH").unwrap_or_default(),
-    )? {
-        // The supervisor already required this artifact's daemon-bound canary
-        // before creating the managed launch and holder.
-        artifact.version
-    } else {
-        super::UNMANAGED_ENDPOINT_VERSION.into()
-    };
+    let expected = expected_version(store.home(), &instance)?;
     if version != expected {
         return Err(format!(
             "OpenCode {version} differs from expected {expected}"
@@ -255,4 +239,27 @@ fn run(
             std::thread::sleep(Duration::from_millis(50));
         }
     }
+}
+
+pub(super) fn expected_version(
+    home: &std::path::Path,
+    instance: &crate::store::Instance,
+) -> Result<String, String> {
+    let expected =
+        if let Some(version) = crate::backend_versions::canary_scope::expected(home, instance)? {
+            version
+        } else if let Some(artifact) = crate::backend_versions::inspect_launch(
+            home,
+            "opencode",
+            &instance.program,
+            std::path::Path::new(&instance.working_directory),
+            &std::env::var("PATH").unwrap_or_default(),
+        )? {
+            // The supervisor already required this artifact's daemon-bound canary
+            // before creating the managed launch and holder.
+            artifact.version
+        } else {
+            super::UNMANAGED_ENDPOINT_VERSION.into()
+        };
+    Ok(expected)
 }

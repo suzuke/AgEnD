@@ -712,3 +712,59 @@ fn fresh_thread_idle_requires_terminal_native_turns_and_a_live_connection() {
     fixture.driver.disconnect(&backend.id);
     assert!(block_on(fixture.driver.thread_idle(&backend.id)).is_err());
 }
+
+#[test]
+fn native_account_configuration_recovers_without_login_refresh_or_turns() {
+    use agend_core::setup::backend::observation::CredentialConfiguration as C;
+    use serde_json::json;
+    let lab = lab();
+    let backend =
+        codex::Backend::new(&lab.home(79), "account-proof", Duration::from_millis(5)).unwrap();
+    let fixture = codex::Fixture::boot(&backend).unwrap();
+    let end = std::time::Instant::now() + Duration::from_secs(5);
+    while !fixture.driver.is_connected(&backend.id) {
+        assert!(std::time::Instant::now() < end);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(
+        block_on(fixture.driver.account_configuration(&backend.id)).unwrap(),
+        C::Missing
+    );
+    let mut probe = backend.probe().unwrap();
+    probe.call("agendFake/diagnosticAccount", json!({"account":{"type":"chatgpt","email":"synthetic-secret","planType":"free"},"requiresOpenaiAuth":true})).unwrap();
+    assert_eq!(
+        block_on(fixture.driver.account_configuration(&backend.id)).unwrap(),
+        C::Configured
+    );
+    probe
+        .call(
+            "agendFake/diagnosticAccount",
+            json!({"account":null,"requiresOpenaiAuth":false}),
+        )
+        .unwrap();
+    assert_eq!(
+        block_on(fixture.driver.account_configuration(&backend.id)).unwrap(),
+        C::NotRequired
+    );
+    probe
+        .call(
+            "agendFake/diagnosticAccount",
+            json!({"account":{"type":"future"},"requiresOpenaiAuth":true}),
+        )
+        .unwrap();
+    assert_eq!(
+        block_on(fixture.driver.account_configuration(&backend.id)).unwrap(),
+        C::Unknown
+    );
+    assert_eq!(
+        probe.call("agendFake/accountReadCount", json!({})).unwrap(),
+        json!({"count":4,"logins":0})
+    );
+    assert!(
+        block_on(fixture.store.messages_to(&backend.id))
+            .unwrap()
+            .is_empty()
+    );
+    fixture.driver.disconnect(&backend.id);
+    assert!(block_on(fixture.driver.account_configuration(&backend.id)).is_err());
+}

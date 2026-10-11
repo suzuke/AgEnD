@@ -112,3 +112,5 @@ Protocol 1.9 加入 TelegramPairing 操作員 request／收據；one-shot prepar
 BackendDiagnostic 的1.9 nullable snapshot 包在帶 boot ID 的回覆內，由 one-shot deadline decoder 解析。doctor 使用 exchange_once 並核對 fleet 的 daemon boot；通用 request 的 Redo::Never 仍可能在寫入失敗時重連，不能拿來維持同一 boot 的診斷身分。
 
 BackendDiagnosticReply 的 policies 描述回覆 daemon 的規則；一次性 decoder 保留結構化 policy kind／constraint／requirements／scope，Unknown kind 不代表支援或准入。
+
+一次性 decoder 支援 SetupDiagnostic；共同 deadline 與不重送策略不變。

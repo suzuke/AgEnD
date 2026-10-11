@@ -234,7 +234,7 @@ fn doctor_checks_configured_program_and_refuses_changed_import_without_executing
     diagnostic(command(root.path()), "claude", "warn");
     view.program = Some("./dedicated-cli".into());
     daemon.set_instance(view.clone());
-    diagnostic(command(root.path()), "authentication", "warn");
+    diagnostic(command(root.path()), "authentication/custom", "warn");
     let check = diagnostic(command(root.path()), "backend/custom", "warn");
     assert!(
         check["detail"]

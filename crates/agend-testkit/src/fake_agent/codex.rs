@@ -228,6 +228,8 @@ struct State {
     /// (connection, request id) → (thread, turn).
     pending_approvals: BTreeMap<(u64, i64), (String, String)>,
     external_refresh_refusals: u64,
+    diagnostic_account: Option<Value>,
+    account_reads: u64,
     external_logins: BTreeSet<u64>,
     next_id: u64,
     next_request_id: i64,
@@ -1153,6 +1155,31 @@ fn handle(
                       "platformOs": std::env::consts::OS,
                       "userAgent": format!("fake-codex-app-server/{CLI_VERSION}")}),
             )
+        }
+        // Native 0.159.3/0.160.0 generated account/read schema. The fake
+        // rejects refresh rather than silently accepting a mutating probe.
+        "account/read" => {
+            if params != &json!({"refreshToken": false}) {
+                Err((INVALID_REQUEST, "diagnostics must not refresh".into()))
+            } else {
+                state.account_reads += 1;
+                Ok(state
+                    .diagnostic_account
+                    .clone()
+                    .unwrap_or_else(|| json!({"account": null, "requiresOpenaiAuth": true})))
+            }
+        }
+        "agendFake/diagnosticAccount" => {
+            state.diagnostic_account = Some(params.clone());
+            Ok(json!({}))
+        }
+        "agendFake/notificationFlood" => {
+            before
+                .extend((0..10_000).map(|_| json!({"method":"fixture/notification","params":{}})));
+            Ok(json!({}))
+        }
+        "agendFake/accountReadCount" => {
+            Ok(json!({"count":state.account_reads,"logins":state.external_logins.len()}))
         }
         // Native 0.159.3 external-token probe: only this auth mode is modelled.
         // Synthetic credentials only; the fake never contacts an auth service.

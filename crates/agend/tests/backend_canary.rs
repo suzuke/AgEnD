@@ -539,7 +539,7 @@ fn managed_fleet(lab: &lab::Lab, home: &Path, backend: &str, version: &str) {
             row["check"]
                 .as_str()
                 .unwrap()
-                .starts_with("capability/managed/")
+                .starts_with("policy/managed/")
         })
         .collect();
     let expected = match backend {
@@ -555,12 +555,12 @@ fn managed_fleet(lab: &lab::Lab, home: &Path, backend: &str, version: &str) {
     for (capability, version) in expected {
         let policy = policies
             .iter()
-            .find(|row| row["check"] == format!("capability/managed/{capability}"))
+            .find(|row| row["check"] == format!("policy/managed/{capability}"))
             .unwrap();
-        assert_eq!(policy["status"], "warn");
+        assert_eq!(policy["status"], "ok");
         let detail = policy["detail"].as_str().unwrap();
         assert!(detail.contains(version));
-        assert!(detail.contains("runtime eligibility unknown"));
+        assert!(detail.contains("policy description only"));
     }
     let holders = lab.running_holders();
     assert_eq!(holders.len(), 1);

@@ -429,3 +429,5 @@ pub async fn mark_attention_read(ctx: &Context, id: &str, key: &str) -> Result<(
     ctx.fleet.mark_read(key.to_owned());
     Ok(())
 }
+
+mod setup_diagnostic;

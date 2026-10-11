@@ -159,3 +159,5 @@ FakeDaemon 的 InstanceAdd 與正式 producer 一樣回報設定 program；沒�
 `fake-worker --version` 立即印出 fixture 版本，不啟動 inbox loop。`fake_worker_version` 真子程序測試以 CLI marker 與游標檔核對沒有副作用，逾時會回收自有程序，避免新增的背景版本 monitor 變成第二個收件 worker。
 
 OpenCode deterministic producer 的 `run: external-directory: <path>` 產生單一 `<path>/*` 目錄授權請求，不讀寫該路徑；供 daemon 的 worktree 授權回歸使用。這是明確的合成擴充，並非新增真 CLI capture；原 bash 請求及 conformance 行為保持不變。
+
+Fake Codex account/read 僅接受 refreshToken=false；diagnosticAccount 為測試專用注入，accountReadCount 核對讀取／登入次數。

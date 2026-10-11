@@ -289,3 +289,5 @@ BackendDiagnostic 的四條能力政策取自 daemon 實際設定：Codex input 
 TerminalViewportData 的 optional fit_size 在 actor 內序列化檢查 owner：無 owner 才以不公開的 temporary attach resize 並 release，不授予 client 輸入權。有 owner 時只更新閱讀 viewport，不改 PTY。操作沿用 backend switch fence，失敗關閉 terminal connection。
 
 隔離 Codex canary 可在 initialize 後、thread start/resume 前使用 access-only 外部登入；認證快照只從完整 scope 綁定的私有檔取得，reconnect 沿用同份快照，refresh 請求明確拒絕。一般 instance 不讀取此認證來源。
+
+BackendDiagnostic 的 runtime 觀測前後核配置、session 與 holder；SetupDiagnostic 僅對實際 GitHub workflow 執行有界 gh auth status，local-only 不執行 gh。

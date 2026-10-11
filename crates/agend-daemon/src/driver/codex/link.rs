@@ -63,6 +63,9 @@ const RECONNECT_EVERY: Duration = Duration::from_millis(100);
 
 pub(crate) enum Command {
     Flush(Sender<()>),
+    Account(
+        Sender<Result<agend_core::setup::backend::observation::CredentialConfiguration, String>>,
+    ),
     Turns(Sender<Result<Vec<Value>, String>>),
     Idle(Sender<Result<bool, String>>),
 }
@@ -135,7 +138,30 @@ impl Pending<Result<bool, String>> {
     }
 }
 
+impl Pending<Result<agend_core::setup::backend::observation::CredentialConfiguration, String>> {
+    pub fn wait(
+        self,
+        within: Duration,
+    ) -> Result<agend_core::setup::backend::observation::CredentialConfiguration, String> {
+        self.0
+            .ok_or("the link has ended")?
+            .recv_timeout(within)
+            .map_err(|_| "account observation timed out".to_owned())?
+    }
+}
+
 impl Link {
+    pub fn account_request(
+        &self,
+    ) -> Pending<Result<agend_core::setup::backend::observation::CredentialConfiguration, String>>
+    {
+        let (tx, rx) = mpsc::channel();
+        let sent = self
+            .commands
+            .as_ref()
+            .is_some_and(|c| c.send(Command::Account(tx)).is_ok());
+        Pending(sent.then_some(rx))
+    }
     /// Serialize idle observation behind any in-flight delivery on this worker.
     pub fn idle_request(&self) -> Pending<Result<bool, String>> {
         let (tx, rx) = mpsc::channel();
@@ -495,6 +521,19 @@ impl Worker {
                             return false;
                         }
                     }
+                    Ok(Command::Account(reply)) => {
+                        // The pinned native schema defines false as no proactive
+                        // refresh. Only typed configuration escapes this worker.
+                        let result = self.call_within(
+                            "account/read",
+                            json!({"refreshToken": false}),
+                            Duration::from_secs(2),
+                        );
+                        let account = result
+                            .map(|v| account_configuration(&v))
+                            .map_err(|_| "native account observation unavailable".to_owned());
+                        let _ = reply.send(account);
+                    }
                     Ok(Command::Idle(reply)) => {
                         let idle = self.idle_snapshot();
                         let broken =
@@ -549,6 +588,9 @@ impl Worker {
                 Ok(Command::Turns(reply)) => {
                     let _ = reply.send(Err("the app-server is not connected".into()));
                 }
+                Ok(Command::Account(reply)) => {
+                    let _ = reply.send(Err("the app-server is not connected".into()));
+                }
                 Ok(Command::Idle(reply)) => {
                     let _ = reply.send(Err("the app-server is not connected".into()));
                 }
@@ -589,18 +631,18 @@ impl Worker {
         let id = self.conn.request(method, params)?;
         let deadline = Instant::now() + within;
         loop {
+            if Instant::now() >= deadline {
+                return Err(RpcError::Timeout(format!(
+                    "{method} ({} s)",
+                    within.as_secs()
+                )));
+            }
+            if self.stopping() {
+                return Err(RpcError::Transport("the link is closing".into()));
+            }
             match self.conn.read_message()? {
                 Some(Incoming::Response { id: got, result }) if got == id => return result,
                 Some(other) => self.dispatch(other),
-                None if Instant::now() >= deadline => {
-                    return Err(RpcError::Timeout(format!(
-                        "{method} ({} s)",
-                        within.as_secs()
-                    )));
-                }
-                None if self.stopping() => {
-                    return Err(RpcError::Transport("the link is closing".into()));
-                }
                 None => {}
             }
         }
@@ -955,10 +997,42 @@ impl Rpc for Worker {
     }
 }
 
+fn account_configuration(
+    value: &Value,
+) -> agend_core::setup::backend::observation::CredentialConfiguration {
+    use agend_core::setup::backend::observation::CredentialConfiguration as C;
+    match (
+        value["account"]["type"].as_str(),
+        value["requiresOpenaiAuth"].as_bool(),
+    ) {
+        (Some("apiKey" | "chatgpt" | "amazonBedrock"), Some(_)) => C::Configured,
+        (None, Some(true)) if value["account"].is_null() => C::Missing,
+        (None, Some(false)) if value["account"].is_null() => C::NotRequired,
+        _ => C::Unknown,
+    }
+}
+
 #[cfg(test)]
 mod external_auth_tests {
     use super::*;
     use agend_testkit::{fake_agent::codex::Server, tempdir::TempDir};
+
+    #[test]
+    fn a_notification_stream_cannot_extend_the_native_observation_deadline() {
+        let root = TempDir::new("codex-query-deadline").unwrap();
+        let socket = root.path().join("app.sock");
+        let _server = Server::bind(&socket, Duration::from_millis(10), None).unwrap();
+        let store = Arc::new(SqliteStore::open(root.path(), 0).unwrap());
+        let mut worker = Worker::open("diagnostic", 1, socket, store, false, None).unwrap();
+        let started = Instant::now();
+        let result = worker.call_within(
+            "agendFake/notificationFlood",
+            json!({}),
+            Duration::from_millis(1),
+        );
+        assert!(matches!(result, Err(RpcError::Timeout(_))), "{result:?}");
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
 
     #[test]
     fn external_login_rejects_refresh_on_each_connection_and_redacts_peer_errors() {

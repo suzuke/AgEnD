@@ -643,6 +643,30 @@ fn commit_and_restore_keep_all_delivery_paused_until_exact_activation_snapshot()
             block_on(store.set_agent_pid(&instance.id, ready.agent_pid)).unwrap();
             let record =
                 block_on(store.backend_switch_problem(&record, "startup was delayed", 42)).unwrap();
+            // A process may stop after observing the exact ready launch, but
+            // before committing activation. Reopening must retain the pending
+            // phase, deadline and paused delivery, including during rollback.
+            drop(store);
+            let store = SqliteStore::open(root.path(), 43).unwrap();
+            assert_eq!(
+                block_on(store.backend_switch(&instance.id)).unwrap(),
+                Some(record.clone())
+            );
+            assert_paused(&store);
+            assert_eq!(
+                block_on(store.instance(&instance.id)).unwrap(),
+                Some(ready.clone())
+            );
+            // A failed recovery must not make a stale PID authoritative or
+            // erase the persisted switch. A second restart must still recover.
+            assert!(block_on(store.finish_backend_switch(&record, &stale, &launch)).is_err());
+            drop(store);
+            let store = SqliteStore::open(root.path(), 44).unwrap();
+            assert_eq!(
+                block_on(store.backend_switch(&instance.id)).unwrap(),
+                Some(record.clone())
+            );
+            assert_paused(&store);
             let finished = block_on(store.finish_backend_switch(&record, &ready, &launch)).unwrap();
             assert!(finished.problem.is_none());
             assert!(finished.activation_deadline_unix_ms.is_none());

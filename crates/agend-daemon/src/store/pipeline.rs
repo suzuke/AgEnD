@@ -6,6 +6,22 @@ use rusqlite::{OptionalExtension, params};
 pub use agend_core::runtime_records::{AskRow, BindingRow, Member, Progress, Team};
 
 impl SqliteStore {
+    /// Only configured team defaults and nonterminal pinned task workflows.
+    pub async fn github_diagnostic_scopes(&self) -> Result<Vec<String>, StoreError> {
+        self.call(|c| {
+            let tx = c.transaction()?;
+            let mut query = tx.prepare("SELECT t.repo,w.toml FROM teams t JOIN workflows w ON w.id=t.default_workflow WHERE t.repo IS NOT NULL AND w.version=(SELECT MAX(version) FROM workflows WHERE id=t.default_workflow) UNION SELECT t.repo,w.toml FROM tasks k JOIN teams t ON t.id=k.team_id JOIN workflows w ON w.id=k.workflow_id AND w.version=k.workflow_version WHERE t.repo IS NOT NULL AND k.status IN ('open','running','blocked','failed')")?;
+            let rows = query.query_map([], |r| Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?)))?;
+            let mut scopes = std::collections::BTreeSet::new();
+            for row in rows {
+                let (repo, text) = row?;
+                let workflow: agend_core::pipeline::workflow::Workflow = toml::from_str(&text).map_err(|_| StoreError::Invalid("invalid workflow in diagnostic scope".into()))?;
+                if workflow.forge_kind() == "github" { scopes.insert(repo); }
+            }
+            Ok(scopes.into_iter().collect())
+        }).await
+    }
+
     pub async fn advance_message(
         &self,
         id: &str,

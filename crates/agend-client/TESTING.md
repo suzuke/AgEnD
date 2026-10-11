@@ -97,3 +97,5 @@ Terminal frame 解碼維持原 internally-tagged serde 路徑；RawValue 優化�
 BackendDiagnostic one-shot decoder 由 agend/tests/backend_version_monitor.rs 的正式 daemon 回覆驗證。既有 once 測試保持丟失回覆不重送、hello 與 reply 共用期限的保證。
 
 BackendDiagnosticReply 的非空 policy 清單由三 backend 的 native managed fleet doctor 測試消費正式回覆；這是描述型資料，不取代 driver 的准入判定。
+
+doctor_native 從真 daemon 回覆經 exchange_once 解碼 setup／runtime 診斷；client 原生 once suite 保留期限與欄位順序回歸。

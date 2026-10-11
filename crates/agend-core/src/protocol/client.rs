@@ -267,7 +267,9 @@ pub enum BackendSwitchCommand {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
 pub enum OperatorCommand {
-    /// 1.9: operator-only persisted backend evidence; never executes a probe.
+    /// 1.9: read-only setup health in the daemon's actual environment.
+    SetupDiagnostic,
+    /// 1.9: backend evidence plus bounded native read-only observations.
     BackendDiagnostic {
         instance_id: String,
     },
@@ -825,6 +827,9 @@ pub struct TerminalBytesData {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "result", rename_all = "snake_case")]
 pub enum CommandResult {
+    SetupDiagnostic {
+        data: crate::setup::backend::observation::SetupDiagnosticReply,
+    },
     BackendDiagnostic {
         data: alloc::boxed::Box<crate::setup::backend::observation::BackendDiagnosticReply>,
     },

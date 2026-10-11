@@ -185,3 +185,5 @@ SystemBackendVersion 保存外部設定程式的解析路徑、版本輸出與�
 BackendCapabilityPolicy 描述具名能力的版本規則、額外條件與證據範圍；不是 runtime eligibility。Codex 精確輸出常數與實際 policy 共用；Claude 的錄製來源標籤與實際 frame 尺寸分開，辨識仍以完整錄製 frame 為準。
 
 TerminalViewportData.fit_size 是 optional 的唯讀尺寸建議；預設 None、不改舊 wire shape。新 daemon 只在沒有控制者時採用，不授予輸入權；舊 daemon 可忽略此欄位而維持既有唯讀尺寸。
+
+Protocol 1.9 新增唯讀 SetupDiagnostic 與 optional BackendDiagnostic.runtime；帳戶設定與歷史供應者結果分型，皆不等於當前 token 有效。

@@ -75,6 +75,7 @@ pub fn run() -> Result<(), String> {
     let probe = executable("pipeline_probe")?;
     for suite in [
         "install_home",
+        "doctor_native",
         "install_service",
         "backend_import",
         "backend_switch",

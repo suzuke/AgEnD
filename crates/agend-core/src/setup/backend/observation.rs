@@ -77,6 +77,8 @@ pub struct BackendDiagnosticReply {
     pub boot_id: u64,
     pub policies: alloc::vec::Vec<BackendCapabilityPolicy>,
     pub snapshot: Option<BackendDiagnostic>,
+    #[serde(default)]
+    pub runtime: Option<RuntimeDiagnostic>,
 }
 
 /// A rule of the responding daemon, never a grant or runtime eligibility result.
@@ -99,4 +101,49 @@ pub enum CapabilityPolicyKind {
     VerificationOverride,
     #[serde(other)]
     Unknown,
+}
+
+/// A bounded observation of one current holder/session, never an input grant.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeDiagnostic {
+    pub session_id: String,
+    pub holder_pid: u32,
+    pub observed_ms: u64,
+    pub credential_configuration: CredentialConfiguration,
+    pub provider_observations: alloc::vec::Vec<ProviderObservation>,
+    pub capabilities: alloc::vec::Vec<super::super::Check>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CredentialConfiguration {
+    Configured,
+    Missing,
+    NotRequired,
+    Unknown,
+}
+
+/// A historical native request result, not current token validity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderObservation {
+    pub provider: String,
+    pub model: String,
+    pub completed_ms: u64,
+    pub outcome: ProviderOutcome,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderOutcome {
+    Succeeded,
+    AuthenticationRejected,
+    AccessDenied,
+    RateLimited,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SetupDiagnosticReply {
+    pub boot_id: u64,
+    pub observed_ms: u64,
+    pub github: super::super::Check,
 }

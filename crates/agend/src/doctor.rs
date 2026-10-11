@@ -65,12 +65,14 @@ pub fn checks(home: &Path) -> Vec<Check> {
         out.extend(programs::checks(home, &fleet.instances));
     }
     out.extend(observations);
-    out.push(check(
+    if fleet.as_ref().is_none_or(|f| f.instances.is_empty()) {
+        out.push(check(
         "authentication",
         CheckStatus::Warn,
         "unknown; no authoritative live backend authentication observation is available; executable versions, Ready states and historical canaries do not prove current login".into(),
         Some("verify authentication in a dedicated backend test session; do not reuse shared session credentials for an isolated canary".into()),
     ));
+    }
     out.push(holders(home, fleet.as_ref()));
     out.push(disk(home));
     out.push(sandbox(home));

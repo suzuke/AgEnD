@@ -1,4 +1,4 @@
-//! Persisted evidence from the connected daemon; never starts a probe.
+//! Scoped persisted and read-only native observations from the connected daemon.
 use super::{Check, CheckStatus, check};
 use agend_client::Client;
 use agend_core::protocol::client::{
@@ -11,18 +11,19 @@ use std::{
 };
 
 pub(super) fn checks(home: &Path, client: &Client, instances: &[InstanceView]) -> Vec<Check> {
-    let mut out = Vec::new();
+    let mut out = vec![setup(home, client)];
     for instance in instances {
-        let (detail, policies) =
-            read(home, client, instance).unwrap_or_else(|e| (format!("unknown; {e}"), vec![]));
+        let (detail, policies, runtime) = read(home, client, instance)
+            .unwrap_or_else(|e| (format!("unknown; {e}"), vec![], None));
         out.push(check(&format!("observation/{}", instance.instance_id), CheckStatus::Warn, detail,
             Some("compare the recorded scope and attempt time with the current configuration; disk observations and launch reservations do not prove the running image or login".into())));
+        out.extend(runtime_checks(instance, runtime));
         for policy in policies {
-            out.push(check(&format!("capability/{}/{}", instance.instance_id, policy.capability_id),
-                CheckStatus::Warn,
-                format!("daemon policy {:?}: {}; requires {}; evidence scope: {}; runtime eligibility unknown",
+            out.push(check(&format!("policy/{}/{}", instance.instance_id, policy.capability_id),
+                CheckStatus::Ok,
+                format!("daemon policy {:?}: {}; requires {}; evidence scope: {}; policy description only; not a runtime grant",
                     policy.policy_kind, policy.version_constraint, policy.additional_requirements, policy.evidence_scope),
-                Some("check this capability's own runtime prerequisites; a matching disk version or successful canary does not establish eligibility".into())));
+                None));
         }
     }
     out
@@ -32,7 +33,14 @@ fn read(
     home: &Path,
     client: &Client,
     instance: &InstanceView,
-) -> Result<(String, Vec<BackendCapabilityPolicy>), String> {
+) -> Result<
+    (
+        String,
+        Vec<BackendCapabilityPolicy>,
+        Option<agend_core::setup::backend::observation::RuntimeDiagnostic>,
+    ),
+    String,
+> {
     if client.daemon().selected < V1_9 {
         return Err("daemon does not support backend diagnostics; upgrade and reconnect".into());
     }
@@ -53,7 +61,7 @@ fn read(
         None,
         V1_9,
         &request,
-        Instant::now() + Duration::from_secs(3),
+        Instant::now() + Duration::from_secs(20),
     )
     .map_err(|e| e.to_string())?;
     let ClientResponse::CommandResult { data } = response else {
@@ -69,7 +77,14 @@ fn describe(
     reply: agend_core::setup::backend::observation::BackendDiagnosticReply,
     instance: &InstanceView,
     boot_id: u64,
-) -> Result<(String, Vec<BackendCapabilityPolicy>), String> {
+) -> Result<
+    (
+        String,
+        Vec<BackendCapabilityPolicy>,
+        Option<agend_core::setup::backend::observation::RuntimeDiagnostic>,
+    ),
+    String,
+> {
     if reply.boot_id != boot_id {
         return Err("daemon restarted since fleet snapshot; run doctor again".into());
     }
@@ -107,8 +122,123 @@ fn describe(
     } else {
         parts.push("no matching managed launch reservation".into());
     }
-    parts.push("live authentication and running daemon binary digest unknown".into());
-    Ok((parts.join("; "), reply.policies))
+    parts.push(
+        "disk evidence does not establish authentication or the running daemon binary digest"
+            .into(),
+    );
+    Ok((parts.join("; "), reply.policies, reply.runtime))
+}
+
+fn runtime_checks(
+    instance: &InstanceView,
+    runtime: Option<agend_core::setup::backend::observation::RuntimeDiagnostic>,
+) -> Vec<Check> {
+    use agend_core::setup::backend::observation::{
+        CredentialConfiguration as C, ProviderOutcome as P,
+    };
+    let name = format!("authentication/{}", instance.instance_id);
+    let fix = Some("open this instance's terminal and configure its backend/provider login, then rerun doctor; doctor does not login, refresh, or send model requests".into());
+    let Some(runtime) = runtime else {
+        return vec![check(
+            &name,
+            CheckStatus::Warn,
+            "current native account/session observation unavailable; provider validity unknown"
+                .into(),
+            fix,
+        )];
+    };
+    let scope = format!(
+        "session={} holder={} observed_ms={}",
+        runtime.session_id, runtime.holder_pid, runtime.observed_ms
+    );
+    let (status, detail) = match runtime.credential_configuration {
+        C::Configured => (
+            CheckStatus::Ok,
+            "native account configured; provider validity not checked",
+        ),
+        C::Missing => (
+            CheckStatus::Fail,
+            "native account missing and authentication required",
+        ),
+        C::NotRequired => (
+            CheckStatus::Ok,
+            "native backend reports OpenAI authentication not required; other provider validity not checked",
+        ),
+        C::Unknown => (
+            CheckStatus::Warn,
+            "credential configuration unknown; local endpoint access does not prove provider login",
+        ),
+    };
+    let mut out = vec![check(
+        &name,
+        status,
+        format!("{scope}; {detail}"),
+        (status != CheckStatus::Ok).then(|| fix.clone().unwrap()),
+    )];
+    for provider in runtime.provider_observations {
+        let status = match provider.outcome {
+            P::Succeeded => CheckStatus::Ok,
+            P::AuthenticationRejected | P::AccessDenied => CheckStatus::Fail,
+            _ => CheckStatus::Warn,
+        };
+        out.push(check(&format!("provider/{}/{}/{}", instance.instance_id, provider.provider, provider.model), status,
+            format!("{scope}; latest completed result in native history page at {}: {:?}; historical request evidence, not current token validity", provider.completed_ms, provider.outcome),
+            (status != CheckStatus::Ok).then(|| match provider.outcome {
+                P::AuthenticationRejected => "repair this provider's login in the instance terminal; a later successful request for the same provider/model supersedes this failure",
+                P::AccessDenied => "check provider/model access; HTTP 403 is not proof of invalid login",
+                P::RateLimited => "check provider quota/rate limits; do not replace credentials solely because of HTTP 429",
+                _ => "inspect this instance's latest provider error in its terminal",
+            }.into())));
+    }
+    out.extend(runtime.capabilities.into_iter().map(|mut c| {
+        c.check = format!("capability/{}/{}", instance.instance_id, c.check);
+        c.detail = format!("{scope}; {}", c.detail);
+        c
+    }));
+    out
+}
+
+fn setup(home: &Path, client: &Client) -> Check {
+    let unknown = || {
+        check(
+            "authentication/github",
+            CheckStatus::Warn,
+            "daemon GitHub scope/authentication observation unavailable".into(),
+            Some("start or upgrade the daemon, then rerun doctor".into()),
+        )
+    };
+    if client.daemon().selected < V1_9 {
+        return unknown();
+    }
+    let request = ClientRequest::Operator {
+        data: OperatorData {
+            request_id: "doctor:setup".into(),
+            command: OperatorCommand::SetupDiagnostic,
+        },
+    };
+    let response = agend_client::exchange_once(
+        &home.join(agend_core::protocol::client::DAEMON_SOCKET),
+        None,
+        V1_9,
+        &request,
+        Instant::now() + Duration::from_secs(8),
+    );
+    match response {
+        Ok(ClientResponse::CommandResult { data }) => match data.result {
+            CommandResult::SetupDiagnostic { data }
+                if Some(data.boot_id) == client.daemon().boot_id =>
+            {
+                let mut check = data.github;
+                check.detail = format!(
+                    "daemon boot={} observed_ms={}; {}",
+                    data.boot_id, data.observed_ms, check.detail
+                );
+                check
+            }
+            _ => unknown(),
+        },
+        _ => unknown(),
+    }
 }
 
 #[cfg(test)]
@@ -142,6 +272,7 @@ mod tests {
         block_on(store.add_instance(&instance)).unwrap();
         let reply = BackendDiagnosticReply {
             boot_id: 101,
+            runtime: None,
             policies: vec![BackendCapabilityPolicy {
                 capability_id: "must-not-cross-boundary".into(),
                 policy_kind: agend_core::setup::backend::observation::CapabilityPolicyKind::Unknown,
@@ -159,10 +290,10 @@ mod tests {
             team_id: "general".into(),
             state: AgentState::Unknown,
         };
-        let (detail, policies) = describe(reply.clone(), &view, 101).unwrap();
+        let (detail, policies, _) = describe(reply.clone(), &view, 101).unwrap();
         assert_eq!(policies.len(), 1);
         assert!(detail.contains("no matching external version observation"));
-        assert!(detail.contains("live authentication and running daemon binary digest unknown"));
+        assert!(detail.contains("disk evidence does not establish authentication"));
         assert!(
             describe(reply.clone(), &view, 100)
                 .unwrap_err()

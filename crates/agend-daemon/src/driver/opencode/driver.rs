@@ -67,6 +67,80 @@ impl OpenCodeDriver {
         .map_err(|e| e.to_string())?
     }
 
+    /// Read only current native history; never send a prompt or refresh credentials.
+    pub async fn diagnostic(
+        &self,
+        id: &str,
+    ) -> Result<agend_core::setup::backend::observation::RuntimeDiagnostic, String> {
+        let store = self.store.clone();
+        let id = id.to_owned();
+        tokio::task::spawn_blocking(move || {
+            use super::{api::Session, http::Http, launch::Layout};
+            let lookup = id.clone();
+            let instance = store
+                .call_blocking(move |c| crate::store::instances::get(c, &lookup))
+                .map_err(|e| e.to_string())?
+                .ok_or("instance missing")?;
+            if instance.backend != Backend::Opencode
+                || instance.status != crate::store::InstanceStatus::Running
+            {
+                return Err("not a running OpenCode instance".into());
+            }
+            let session_id = instance.session_id.as_deref().ok_or("session missing")?;
+            let holder = crate::runtime::files::running(store.home(), &id)
+                .map_err(|e| e.to_string())?
+                .ok_or("holder missing")?;
+            let layout = Layout::new(store.home(), &id)?;
+            let endpoint = layout
+                .session_endpoint(holder, session_id)
+                .map_err(|e| e.to_string())?;
+            if endpoint.1 != super::runtime::expected_version(store.home(), &instance)? {
+                return Err("OpenCode endpoint version is not admitted".into());
+            }
+            let password = layout.password().map_err(|e| e.to_string())?;
+            let http = Http::new(endpoint.0, &password, &instance.working_directory).map_err(|e| e.to_string())?;
+            let health = http.get("/global/health").map_err(|_| "OpenCode health unavailable")?;
+            if health["healthy"] != true || health["version"] != endpoint.1 {
+                return Err("OpenCode health/version mismatch".into());
+            }
+            let session = Session::resume(http, session_id)?;
+            let (history, _) = session.history_page(64, None)?;
+            let providers = super::history::provider_observations(session_id, &history)?;
+            let lookup = id.clone();
+            let current = store
+                .call_blocking(move |c| crate::store::instances::get(c, &lookup))
+                .map_err(|e| e.to_string())?;
+            if current.as_ref() != Some(&instance)
+                || crate::runtime::files::running(store.home(), &id).map_err(|e| e.to_string())?
+                    != Some(holder)
+                || layout
+                    .session_endpoint(holder, session_id)
+                    .map_err(|e| e.to_string())?
+                    != endpoint
+                || layout.password().map_err(|e| e.to_string())? != password
+            {
+                return Err("OpenCode identity changed during idle query".into());
+            }
+            use agend_core::setup::{Check, CheckStatus, backend::observation::{RuntimeDiagnostic, CredentialConfiguration}};
+            let permission = endpoint.1 == super::PERMISSION_REPLY_VERSION;
+            Ok(RuntimeDiagnostic {
+                session_id: session_id.into(), holder_pid: holder,
+                observed_ms: crate::log::now_unix_ms(),
+                credential_configuration: CredentialConfiguration::Unknown,
+                provider_observations: providers,
+                capabilities: vec![
+                    Check { check: "opencode_driver_endpoint".into(), status: CheckStatus::Ok,
+                        detail: "current holder/session and native health/version match; local HTTP access only".into(), fix: None },
+                    Check { check: "opencode_permission_reply".into(), status: if permission { CheckStatus::Ok } else { CheckStatus::Warn },
+                        detail: "native version gate checked; each actual permission still requires a current pending request and durable operator decision".into(),
+                        fix: (!permission).then(|| format!("use the supported permission-reply version {}", super::PERMISSION_REPLY_VERSION)) },
+                ],
+            })
+        })
+        .await
+        .map_err(|e| e.to_string())?
+    }
+
     /// Bounded read-only snapshot of the current holder/session's latest history.
     pub async fn message_outcome(
         &self,

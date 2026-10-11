@@ -222,7 +222,8 @@ impl Budget {
             OperatorCommand::WorkflowCheck { toml } | OperatorCommand::WorkflowApply { toml } => {
                 self.add(toml)
             }
-            OperatorCommand::TeamList
+            OperatorCommand::SetupDiagnostic
+            | OperatorCommand::TeamList
             | OperatorCommand::WorkflowList
             | OperatorCommand::Unknown => Ok(()),
         }

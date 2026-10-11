@@ -81,6 +81,16 @@ pub async fn handle(ctx: &Context, data: OperatorData) -> Outcome {
         )
     };
     let reply = match data.command {
+        OperatorCommand::SetupDiagnostic => result(
+            request_id,
+            CommandResult::SetupDiagnostic {
+                data: agend_core::setup::backend::observation::SetupDiagnosticReply {
+                    boot_id: ctx.fleet.base(),
+                    observed_ms: crate::log::now_unix_ms(),
+                    github: super::setup_diagnostic::github(ctx).await,
+                },
+            },
+        ),
         OperatorCommand::BackendDiagnostic { instance_id } => {
             if agend_core::runtime_records::validate_id(&instance_id).is_err() {
                 return Outcome::Reply(error(
@@ -102,6 +112,12 @@ pub async fn handle(ctx: &Context, data: OperatorData) -> Outcome {
                                         super::backend_capabilities::policies(row, &ctx.codex_input)
                                     })
                                     .unwrap_or_default(),
+                                runtime: match data.as_ref() {
+                                    Some(snapshot) => {
+                                        super::backend_capabilities::runtime(ctx, snapshot).await
+                                    }
+                                    None => None,
+                                },
                                 snapshot: data,
                             },
                         ),

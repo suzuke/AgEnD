@@ -9,13 +9,13 @@
 
 | 範圍 | 已實作／已有證據 | 尚未證明完成 |
 |---|---|---|
-| 13A home／設定 | 預設 home、init 權限、doctor 的配置程式解析、沙箱與服務診斷；install_home 回歸 | doctor 已分開執行檔／歷史 canary 範圍／unknown 登入；daemon 唯讀配置／觀測快照已接入並核 boot；四條版本敏感能力政策已列出；登入有效性、能力真環境證據與故障→修復人工矩陣仍待完成 |
+| 13A home／設定 | 預設 home、init 權限、doctor 的配置程式解析、沙箱與服務診斷；install_home 回歸 | 已補 Codex 唯讀帳戶設定、OpenCode 原生 session／供應者歷史、runtime gate 與 workflow 範圍 GitHub auth 診斷；不把 configured 或歷史成功冒充目前 token 有效。待最終固定提交驗收及人工確認，Claude 暫緩 |
 | 13B 服務 | launchd／systemd plan、安裝所有權、對帳、解除安裝、資料刪除互斥；63b083b 的 Linux ARM64 正式 archive 在隔離 systemd／一般使用者下通過五階段生命周期；macOS 原生 launchd 安裝／停機／重啟接回同 holder 與子程序／解除安裝保留資料通過，測試資源已清理 | macOS 已補正式 ARM64 archive 的相同流程；使用 C 等待程序，真 backend 與登入登出未測試 |
-| 13C 受管版本 | 匯入、canary 收據、版本切換／回退、身份綁定與 pending 恢復；原生假 backend 測試；固定三種真 CLI 的 import／inspect 與搬移後版本探測通過 | Claude 真模型 canary／跨版切換／回退依使用者 2026-10-11 指示暫緩，維持未驗證；其餘仍缺完整故障切點。Codex 0.159.3／0.160.0 已有 canary 及 external auth host 協助下的正常跨版／回退、非空歷史保留；OpenCode 1.18.33／1.18.34 已有同類證據及限定重啟切點（見紀錄） |
-| 13C 版本發現 | 固定 npm 公開 metadata、每日持久排程、外部 CLI 磁碟版本探測、待辦與 Telegram 精確確認 | 真實系統 CLI 的版本觀測驗收；雙 monitor 同時 active 的正式 daemon 停機兩種完成順序已通過 |
-| 13C 重啟通知 | 真 daemon 三次啟動測試：worker 發現換版、通知重建、操作員確認持久化，agent 與錯誤 action 拒絕 | 此測試使用本機假 CLI，不能代替真模型或 service-manager 重啟驗收 |
+| 13C 受管版本 | 匯入、canary 收據、版本切換／回退、身份綁定與 pending 恢復；原生假 backend 測試；固定三種真 CLI 的 import／inspect 與搬移後版本探測通過 | Claude 真模型 canary／跨版切換／回退依使用者 2026-10-11 指示暫緩，維持未驗證；共用 Store 已補 Ready 快照後、過期 PID 完成被拒後的重開 DB／投遞暫停驗證；此為 persistence／CAS，非各真 CLI 全部 crash cuts。Codex 0.159.3／0.160.0 已有 canary 及 external auth host 協助下的正常跨版／回退、非空歷史保留；OpenCode 1.18.33／1.18.34 已有同類證據及限定重啟切點（見紀錄） |
+| 13C 版本發現 | 固定 npm 公開 metadata、每日持久排程、外部 CLI 磁碟版本探測、待辦與 Telegram 精確確認 | 已補真 Codex 0.159.3→0.160.0 專用副本漂移、精確確認及重啟保存；0 模型、原 holder 綁定不變。雙 monitor 停機兩種完成順序已通過 |
+| 13C 重啟通知 | 真 daemon 三次啟動測試：worker 發現換版、通知重建、操作員確認持久化，agent 與錯誤 action 拒絕 | 原假 CLI 測試之外，已補真 Codex 磁碟版本變動；不宣稱因此執行了模型或 service-manager 重啟 |
 | 13D Telegram | daemon 配對、token reference、allowlist、設定套用；專用 bot 真測完成 /start→confirm→apply→同 home 重啟→通知→Mark read→approve，任務 done 且唯一 merge | 本次限私聊人工 approval；不擴稱覆蓋所有 Telegram 動作或真模型 |
-| 13E 打包 | 63b083b 的 release-artifacts 37800713214 通過四平台 archive、formula 與雙平台 Brew 七個 jobs | cargo install 後全新 HOME 的真 OpenCode 首任務已通過（預先備妥認證、13.95 秒、不含編譯安裝）；下載 archive 的同類真任務、新帳戶登入及版本／發布交付計畫仍待驗證，尚未公開發布 |
+| 13E 打包 | 63b083b 的 release-artifacts 37800713214 通過四平台 archive、formula 與雙平台 Brew 七個 jobs | cargo install 後全新 HOME 的真 OpenCode 首任務已通過（預先備妥認證、13.95 秒、不含編譯安裝）；4e73912 的 macOS ARM64 archive 下載、驗證、安裝至首個真 OpenCode 任務完成共 54.06 秒；預先備妥認證，非新帳戶註冊。發布步驟見版本／發布計畫，尚未公開發布 |
 | 整關 | 63b083b 的 fresh-context accept install、雙平台 CI、四平台打包均通過 | 剩餘實作與真測完成後的最終 fresh-context verifier、使用者逐步驗收與合併確認 |
 
 doctor 逐項覆蓋與缺口見 [故障／修復矩陣](gate-13-doctor-matrix.md)。
@@ -68,7 +68,7 @@ doctor 逐項覆蓋與缺口見 [故障／修復矩陣](gate-13-doctor-matrix.md
 
 ## 下一步
 
-63b083b 的獨立自動驗收、雙平台 CI 與四平台打包已取得；macOS 原生服務生命周期亦已通過；接著補登入有效性、三 backend 真測及 doctor 故障修復矩陣，不因文件同步重跑已通過的程式測試。需要使用者操作時，提供固定版本、命令、預算、影響範圍與清理方式，一次帶一個步驟。
+完成本批 runtime 診斷回歸、固定提交獨立驗收與 CI 後交付。Claude 認證／真 canary／跨版往返維持暫緩；使用者驗收、merge 與公開發布各自保留確認邊界。發布順序見 [交付計畫](gate-13-release-plan.md)。
 
 - 2026-10-10：正式 `backend import`／`backend canary --allow-model` 對 OpenCode 1.18.34、`opencode-go/gpt-6-luna` 完成三則真模型訊息，三個 confirmed receipt／三個 outcome，33,886 ms、passed 與 cleanup_complete 均 true。使用試用環境已隔離的單 provider API 認證，來源雜湊不變；自有 canary home、程序及匯入副本清理核對通過，使用者 trial 保留。證據 `AgEnD-ops/g13-install-20261008/opencode-managed-canary-20261010/{plan,report,cleanup}.json`；build SHA e3a159222c8ba8353bc6a667bdd5221c7778cb5fe2e61b45584db9457aa5ef2b。這不證明受管切換／回退、Claude／Codex canary 或整關完成。
 
@@ -89,3 +89,5 @@ doctor 逐項覆蓋與缺口見 [故障／修復矩陣](gate-13-doctor-matrix.md
 - 2026-10-12：doctor 修復矩陣補不可寫 home 與 Git 版本恢復；修正 chmod／df／du 提示未引用 home 路徑，真 CLI 測試直接執行含空白、單引號與 shell 特殊字元的 chmod／du 提示。install_home 11、CLI doctor 2、doctor unit 2、service diagnostic 1 通過，workspace clippy／fmt／check-deps 通過；獨立唯讀覆核無 blocker。0 模型，暫存已清；非 UTF-8 路徑、登入／真能力與人工矩陣仍未完成（PR #158，未合併）。
 
 - 2026-10-12：固定 6ac8ac6 以 cargo install --locked 的 release profile 安裝至專用 prefix；全新 HOME 以預先備妥的 API-only 私有副本，使用 OpenCode 1.18.34／opencode-go/gpt-6-luna 完成一個真模型 README 任務。work→submit→checks→自動驗證器核對精確 committed blob／100644 mode 後經 operator RPC 核准（非人工操作）→唯一一次雙親 local merge，task done、worktree 移除，init 至完成 13.9465 秒（不含編譯／安裝／取得認證）。首輪 harness 的中間目錄 0755 被拒，未執行模型，清理後改各層 0700 才重測；兩輪 root／程序已清，認證來源雜湊不變。非下載 archive、非互動新帳戶登入、非 GitHub merge；Claude 仍暫緩。證據 AgEnD-ops/g13-install-20261008/first-task-opencode-r2-20261012（PR #158，未合併）。
+
+- 2026-10-12：補唯讀 runtime doctor：Codex account/read 禁 refresh、OpenCode 原生 session／供應者歷史、GitHub 實際 workflow 範圍 auth status，policy 與 runtime capability 分列；不把帳戶設定或歷史成功冒充當前憑證有效。真 Codex 專用副本版本漂移、精確確認及重啟保存通過（0 模型）；4e73912 下載版真 OpenCode 首任務含下載安裝共 54.06 秒，來源認證未變、owned root／程序清理完成。Store 補 Ready／stale PID 後重開仍暫停投遞。新增發布交付計畫；本批最終回歸／獨立驗收另記，Claude 暫緩（PR #158，未合併）。

@@ -204,7 +204,7 @@ fn diagnostic_contract(socket: &Path, home: &Path, boot: Option<u64>) {
     assert!(detail.contains("fake 2.0"));
     assert!(detail.contains(&format!("daemon boot {boot:?}")));
     assert!(detail.contains("may predate the current attempt"));
-    assert!(detail.contains("live authentication and running daemon binary digest unknown"));
+    assert!(detail.contains("disk evidence does not establish authentication"));
     assert_eq!(row["status"], "warn");
 }
 

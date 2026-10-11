@@ -282,3 +282,5 @@ terminal_hub::readonly_fit_resizes_without_granting_input_or_displacing_a_contro
 `backend::canary::credentials::tests` 驗 Codex OAuth/API 欄位白名單、未知格式拒絕及來源不變；`backend_canary` 的 Codex 情境使用 native fake producer 的 external login，再驗三次訊息與清理。真憑證及模型不在自動測試執行。
 
 2026-10-12 doctor 修復矩陣：`install_home` 實際執行 doctor 回傳的 chmod／du 提示，UTF-8 路徑含空白、單引號及 shell 注入字串；不可寫 0500→0700、過寬 0755→0700、大 sparse home→僅刪自有 fixture，核配置保留及無額外檔案。不可寫測試須非 root（root 執行會明示略過）；本機以一般使用者通過。Git 2.37.9→2.38.0 使用只接受 --version 的原生 fixture，未降級共用 Git。非 UTF-8 路徑的 display 仍有既有有損限制；未宣稱涵蓋該情境。
+
+`doctor_native` 以真 daemon／假 app-server 驗帳戶 missing→configured，固定 refreshToken=false、0 login（無真模型）、無敏感資料輸出；納入 accept install。

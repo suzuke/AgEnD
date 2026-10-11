@@ -11,7 +11,7 @@
 |---|---|---|
 | Codex 人工終端輸入 | production policy 精確接受完整 `codex-cli 0.159.3` 輸出；停用 policy 不開放版本，verification override 只限明示 instance | holder PID／production launch record、connected link、持久 own-clientId 歸屬、terminal control |
 | Claude 啟動畫面辨識 | 依 Claude 2.1.284 錄製的完整 frame；100／140×24；workspace 與其餘內容必須匹配，Ready 僅允許已批准的單行 Try 建議變動 | frame recognition 不等於可送按鍵；仍需 lifecycle、session／holder 與穩定畫面條件；不是登入證據 |
-| OpenCode driver endpoint | expected version 優先取 canary scope，其次 managed artifact，否則 unmanaged baseline 1.18.34；endpoint 與 health 的版本須一致 | holder／session 身分、healthy；診斷只描述優先序，不解析 canary scope 或認證 artifact |
+| OpenCode driver endpoint | expected version 優先取 canary scope，其次 managed artifact，否則 unmanaged baseline 1.18.34；endpoint 與 health 的版本須一致 | holder／session 身分、healthy；runtime 診斷共用 production 的 expected_version 解析 |
 | OpenCode permission reply | 另行精確限定 1.18.34，與 endpoint baseline 分開維護 | 當前 holder／endpoint、pending permission／session 與持久決策條件 |
 
 新版 OpenCode 即使通過 managed canary，也不會因此放寬 permission reply 的固定版本限制。Codex 人工輸入的限定同樣不是整個 Codex driver 的版本範圍。Claude 的版本標籤代表錄製來源，完整 frame parser 才是判定方式。
@@ -19,12 +19,12 @@
 ## 證據與作用範圍
 
 - `BackendDiagnosticReply` 的 boot ID 必須與 Fleet 所屬 daemon 一致，instance 配置也必須一致；否則 doctor 不展示該回覆的觀測或政策。
-- `capability/<instance>/<id>` 來自該 daemon 的政策，不採用操作員 PATH 上的 CLI 或 doctor 本身的版本政策冒充。顯示 Warn 與 `runtime eligibility unknown`；不授予輸入或啟用能力。
+- `policy/<instance>/<id>` 來自該 daemon 的政策；Ok 只表示讀取規則成功。`capability/<instance>/<id>` 另核當前 driver 的連線／版本／session 條件；均不授予輸入或取代實際操作時的 permission／control 檢查。
 - `observation/<instance>` 是 SQLite 的配置與匹配紀錄。外部 probe 失敗仍可能保留較早成功值；managed reservation 是啟動前意圖，不是存活證明。
 - `compatibility/<instance>` 的歷史 canary 綁 artifact、AgEnD build、平台、時間與指定模型；三則短回合不涵蓋所有工具、權限或模型。
 - provider 登入有效性、目前執行映像與完整能力驗收仍不可從上述資料推論。daemon binary digest 尚未由此 API 提供。
 
-診斷 RPC 是操作員限定的 1.9 唯讀請求，使用一次性連線與三秒總期限；不啟動 backend、不讀憑證、不自動執行 canary、不改版本。
+診斷 RPC 是操作員限定的 1.9 唯讀請求，使用一次性連線；BackendDiagnostic 20 秒、SetupDiagnostic 8 秒總期限。不啟動 backend、不直接讀取憑證、不自動執行 canary、不改版本。Codex 使用既有連線的 account/read（refreshToken=false）；OpenCode 只讀健康／session／最近 64 筆歷史；GitHub 只在已使用的 workflow 中執行有界 auth status。
 
 ## 實作與驗證位置
 

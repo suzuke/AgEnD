@@ -190,3 +190,5 @@ BackendDiagnostic 的 consumer 由 agend/backend_version_monitor 以正式 daemo
 既有 Codex 版本拒絕反例沿用共用 literal；Claude Ready 規則核錄製 producer 的版本標頭與診斷標籤一致，其他版本與未知尺寸仍拒絕。diagnostic policy 本身不給控制權。
 
 optional TerminalViewportData.fit_size 預設不序列化；xtask protocol_compat 保留舊 wire shape，新增行為由真 daemon/holder terminal_hub readonly_fit 案例驗證。
+
+runtime 的 serde 預設允許舊回覆缺少欄位；正式 producer／consumer 診斷契約在 agend 的 doctor_native 與 daemon driver 測試驗證。
