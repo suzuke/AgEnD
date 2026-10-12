@@ -141,9 +141,22 @@ fn plural(n: usize) -> &'static str {
     if n == 1 { "" } else { "s" }
 }
 
-/// Quote an operator path as one POSIX shell word, including apostrophes.
+/// Quote a directory as one POSIX shell word without losing Unix path bytes.
 fn shell_path(path: &Path) -> String {
-    format!("'{}'", path.display().to_string().replace('\'', "'\"'\"'"))
+    if let Some(text) = path.to_str() {
+        return format!("'{}'", text.replace('\'', "'\"'\"'"));
+    }
+    use std::os::unix::ffi::OsStrExt;
+    // A final slash prevents command substitution from removing trailing
+    // newline bytes. All callers refer to directories, so it keeps the target.
+    let octal: String = path
+        .as_os_str()
+        .as_bytes()
+        .iter()
+        .chain(std::iter::once(&b'/'))
+        .map(|byte| format!("\\{byte:03o}"))
+        .collect();
+    format!("\"$(printf '{octal}')\"")
 }
 
 fn home_check(home: &Path) -> Check {
@@ -411,5 +424,26 @@ mod telegram_tests {
         let check = telegram(dir.path());
         assert_eq!(check.status, CheckStatus::Fail);
         assert!(!format!("{check:?}").contains("TOP-SECRET"));
+    }
+}
+
+#[cfg(test)]
+mod shell_path_tests {
+    use super::*;
+    use std::os::unix::ffi::OsStrExt;
+
+    #[test]
+    fn directory_fix_preserves_non_utf8_and_trailing_newline_bytes() {
+        let raw = b"/tmp/home-\xff ' $(exit 99) `exit 98`\n\n";
+        let path = Path::new(std::ffi::OsStr::from_bytes(raw));
+        let output = std::process::Command::new("/bin/sh")
+            .env_clear()
+            .args(["-c", &format!("printf '%s' {}", shell_path(path))])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        let mut expected = raw.to_vec();
+        expected.push(b'/');
+        assert_eq!(output.stdout, expected);
     }
 }

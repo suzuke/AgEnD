@@ -32,4 +32,4 @@
 
 ## 下一步
 
-自動修復回歸與 runtime 診斷納入最終固定提交驗收；使用者逐步驗收仍獨立記錄。Claude 真測依使用者指示暫緩。不可寫 home 測試須一般使用者；非 UTF-8 路徑及 Linux 低磁碟真測未涵蓋，不能計為通過。
+自動修復回歸與 runtime 診斷納入最終固定提交驗收；使用者逐步驗收仍獨立記錄。Claude 真測依使用者指示暫緩。不可寫 home 測試須一般使用者；非 UTF-8 目錄修復已補原始 bytes 編碼與回歸；Linux 檔案系統案例等待本批 CI。Linux ARM64 低磁碟已以固定 797a7b9 正式 archive 驗同一 home 的 tmpfs 64 MiB→2 GiB，disk fail→ok、設定不變；只證明未改動的 disk／statvfs 路徑，不代表全部 doctor 檢查變成 ok。

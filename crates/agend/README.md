@@ -134,3 +134,5 @@ Codex canary 的 `--auth-file` 接受原生 ChatGPT auth.json 或 API key；Chat
 Doctor 的 home／磁碟修復提示會引用 UTF-8 路徑，包含空白、單引號與 shell 特殊字元；doctor 本身不執行修復。登入與能力的 unknown 不會因修復其他檢查而改成成功。
 
 Doctor 分開 policy 與 runtime capability；唯讀帳戶設定／供應者歷史／GitHub 工作流程診斷的範圍見 [doctor 矩陣](../../docs/gates/gate-13-doctor-matrix.md)。
+
+Doctor 的目錄修復提示保留 Unix 原始路徑位元組；非 UTF-8 路徑以 POSIX printf 八進位表示，避免 chmod／df／du 指向有損顯示後的另一個目錄。

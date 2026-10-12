@@ -583,3 +583,5 @@
 - 2026-10-12：依使用者核准第七版示意，新增 ≥110 欄 TUI 側欄、跨團隊任務總覽、需要你清單／詳情雙欄及前後切換；窄畫面與完整終端保留原操作。獨立覆核在 37a3e76 抓到 resize 隱藏所選選項，5cbb97f 修正；98 個 TUI 測試、fmt／workspace clippy／實際 no-std 與腳本原生 PTY smoke 通過。0 真模型；保留 demo／CLI 及未合併 worktree 供試用，Gate 13 與 Claude 狀態不變（feat/tui-layout，待人工外觀驗收）。
 
 - 2026-10-12：TUI 新增深色、終端預設、淺色、高對比四種配色；P 開啟、方向鍵預覽、Enter 儲存、Esc 取消，完整 Agent 終端保持原配色。3f5f69b 經全新 verifier 確認，102 個 TUI 測試與額外模態／尺寸反例、原生 PTY 儲存／重啟／錯誤提示通過；fmt、workspace clippy、check-deps 含實際 no-std 通過。僅更新本機介面偏好，0 真模型；沿用 draft PR #159，尚未合併，Gate 13／Claude 狀態不變。
+
+- 2026-10-12：依使用者指示排除 Claude 與人工操作，續補非 Claude 自動化：doctor 目錄修復改保留非 UTF-8 bytes，增加真 shell 與 Linux 相似目錄反例；Linux ARM64 固定 797a7b9 archive 的同 home 低磁碟 fail→ok 通過，核 disk 函式／setup.rs 與本批相同。release workflow 自動觸發改 v2，仍僅建產物。本批最終覆核與 CI 待完成；人工驗收／Claude／公開發布不列通過。

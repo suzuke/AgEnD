@@ -52,3 +52,5 @@ formula generator 要求四份同提交／同版本的產物，重新核對 arch
 Brew 原生安裝驗證已接入 release workflow 的 macOS ARM64／Linux x86_64 jobs，僅在一次性 Actions runner 執行。`release_brew_smoke.py` 重新產生並逐字核對四平台 formula，僅將下載 URL 換成同輪 archive 的 file URL，保留 SHA 與安裝邏輯；建立唯一 tap，拒絕既有 agend 安裝，跑 install／formula test／全新 HOME init／uninstall 並檢查清理。這不證明公開 Release URL 已可下載；實跑結果另記。
 
 正式版本、合併與發布順序見 [第 13 關交付計畫](gates/gate-13-release-plan.md)。
+
+`release-artifacts` 的自動觸發已從施工分支改為 `v2`；原有 paths 篩選維持不變，其他提交可用 workflow_dispatch 指定固定 ref 建置。此 workflow 僅建立 Actions 驗收產物，不會公開發布 Release。

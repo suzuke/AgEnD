@@ -397,3 +397,49 @@ fn doctor_old_git_recovers_after_replacing_only_the_fixture() {
         assert!(check["detail"].as_str().unwrap().contains(version));
     }
 }
+
+#[test]
+#[cfg(target_os = "linux")]
+fn doctor_repairs_non_utf8_home_without_touching_lossy_neighbor() {
+    use std::os::unix::ffi::OsStringExt;
+    let root = TempDir::new("g13-doctor-bytes").unwrap();
+    let name = std::ffi::OsString::from_vec(b"home-\xff ' $(touch UNEXPECTED)\n".to_vec());
+    let home = root.path().join(name);
+    let neighbor = root
+        .path()
+        .join(home.file_name().unwrap().to_string_lossy().as_ref());
+    for path in [&home, &neighbor] {
+        fs::create_dir(path).unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::write(path.join("config.toml"), "# unchanged\n").unwrap();
+    }
+    let mut cmd = command(root.path());
+    cmd.env("AGEND_HOME", &home);
+    let broken = diagnostic(cmd, "home", "warn");
+    let repair = Command::new("/bin/sh")
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .current_dir(root.path())
+        .args(["-c", broken["fix"].as_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(repair.status.success(), "{repair:?}");
+    assert_eq!(
+        fs::metadata(&home).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+    assert_eq!(
+        fs::metadata(&neighbor).unwrap().permissions().mode() & 0o777,
+        0o755
+    );
+    assert!(!root.path().join("UNEXPECTED").exists());
+    let mut cmd = command(root.path());
+    cmd.env("AGEND_HOME", &home);
+    diagnostic(cmd, "home", "ok");
+    for path in [&home, &neighbor] {
+        assert_eq!(
+            fs::read_to_string(path.join("config.toml")).unwrap(),
+            "# unchanged\n"
+        );
+    }
+}
