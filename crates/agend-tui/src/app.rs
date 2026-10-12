@@ -18,6 +18,7 @@
 //! (the daemon does, D17).
 
 pub mod full_terminal;
+pub(crate) mod shell;
 use agend_core::protocol::terminal::TerminalSize;
 use full_terminal::FullView;
 
@@ -154,6 +155,10 @@ pub struct Finder {
 }
 
 pub struct App {
+    pub theme: crate::theme::Theme,
+    pub(crate) theme_original: Option<crate::theme::Theme>,
+    pub(crate) theme_to_save: Option<crate::theme::Theme>,
+    pub(crate) shell: shell::ShellState,
     source: Box<dyn Source>,
     pub fleet: Fleet,
     pub lang: Language,
@@ -182,6 +187,10 @@ impl App {
     /// state and `tick` keeps trying.
     pub fn new(source: Box<dyn Source>, lang: Language) -> App {
         let mut app = App {
+            theme: crate::theme::Theme::default(),
+            theme_original: None,
+            theme_to_save: None,
+            shell: shell::ShellState::default(),
             source,
             fleet: Fleet::default(),
             lang,
@@ -350,6 +359,7 @@ impl App {
             selected: view.selected.as_ref(),
         };
         match &view.screen {
+            Screen::Home if self.shell_visible() => home::overview(&ctx),
             Screen::Home => home::rows(&ctx),
             Screen::NeedsYou => attention::rows(&ctx),
             Screen::Team { team, tab } => team::rows(&ctx, team, *tab),
@@ -445,6 +455,18 @@ impl App {
             self.quit = true;
             return;
         }
+        if self.theme_original.is_some() {
+            self.theme_key(key.code);
+            return;
+        }
+        if key.code == KeyCode::Char('P')
+            && self.finder.is_none()
+            && self.input.is_none()
+            && !matches!(self.screen(), Screen::Terminal { .. })
+        {
+            self.theme_original = Some(self.theme);
+            return;
+        }
         if self.finder.is_some() {
             self.finder_key(key.code);
         } else if self.input.is_some() {
@@ -463,10 +485,35 @@ impl App {
             }
         } else {
             self.message = None;
-            self.screen_key(key.code);
+            if !self.shell_key(key.code) {
+                self.screen_key(key.code);
+            }
         }
         self.sync_terminal();
         self.sync();
+    }
+
+    fn theme_key(&mut self, code: KeyCode) {
+        use crate::theme::Theme;
+        let index = Theme::ALL
+            .iter()
+            .position(|t| *t == self.theme)
+            .unwrap_or(0);
+        match code {
+            KeyCode::Up | KeyCode::Char('k') => self.theme = Theme::ALL[index.saturating_sub(1)],
+            KeyCode::Down | KeyCode::Char('j') => self.theme = Theme::ALL[(index + 1).min(3)],
+            KeyCode::Char(c @ '1'..='4') => self.theme = Theme::ALL[(c as u8 - b'1') as usize],
+            KeyCode::Enter => {
+                self.theme_original = None;
+                self.theme_to_save = Some(self.theme);
+            }
+            KeyCode::Esc => {
+                if let Some(original) = self.theme_original.take() {
+                    self.theme = original;
+                }
+            }
+            _ => {}
+        }
     }
 
     fn screen_key(&mut self, code: KeyCode) {
@@ -491,6 +538,8 @@ impl App {
             KeyCode::Char('/') => self.finder = Some(Finder::default()),
             KeyCode::Char('t') => self.open_terminal_of_row(),
             KeyCode::Char('a') => self.start_input(),
+            KeyCode::Char('[') => self.adjacent_attention(-1),
+            KeyCode::Char(']') => self.adjacent_attention(1),
             KeyCode::Char('i') => self.start_typing(),
             KeyCode::Left | KeyCode::Esc => {
                 if self.stack.len() > 1 {
@@ -724,7 +773,13 @@ impl App {
         };
         keys.into_iter()
             .filter(|(_, works)| *works)
-            .map(|(text, _)| self.lang.tr(text))
+            .map(|(text, _)| {
+                if text == Text::LangKey && !matches!(self.screen(), Screen::Terminal { .. }) {
+                    format!("{} · {}", self.lang.tr(text), self.lang.tr(Text::ThemeKey))
+                } else {
+                    self.lang.tr(text).to_owned()
+                }
+            })
             .collect::<Vec<_>>()
             .join(" · ")
     }

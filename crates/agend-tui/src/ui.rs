@@ -6,6 +6,8 @@
 //!
 //! Must NOT: change state (only `App::key` and `App::tick` do).
 
+mod shell;
+
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -232,7 +234,14 @@ pub fn goal_row(fleet: &Fleet, lang: crate::i18n::Language, border: &str, task: 
 }
 
 pub fn render(frame: &mut Frame, app: &mut App) {
+    render_inner(frame, app);
+    crate::theme::paint(frame.buffer_mut(), app);
+}
+fn render_inner(frame: &mut Frame, app: &mut App) {
     if crate::terminal::full::render(frame, app) {
+        return;
+    }
+    if shell::render(frame, app) {
         return;
     }
     let area = frame.area();
