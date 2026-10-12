@@ -88,7 +88,7 @@ agend instance add try-opencode opencode
 agend app --lang zh-TW
 ```
 
-**確認：** 介面開啟後，按 `/`，輸入 `try-opencode`，按 Enter 開啟它。按 `t` 查看終端，按 `i` 取得控制；可輸入「請只回覆試用成功，不要使用工具或修改檔案」。
+**確認：** 介面開啟後，按 `/`，輸入 `try-opencode`，按 Enter 查看它的終端，再按 `i` 取得控制；可輸入「請只回覆試用成功，不要使用工具或修改檔案」。
 
 模型回覆後，按 `Ctrl-]` 退出輸入模式，再按 Esc 返回。這一步只驗證能與 agent 對話；團隊派工還需要設定 repo、角色與 workflow，接著看 [任務流水線操作](docs/architecture/pipeline-runtime.md#命令與協定)。
 
