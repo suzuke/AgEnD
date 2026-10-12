@@ -1,0 +1,38 @@
+id = "first-task"
+version = 1
+requires = ["repo"]
+allow_unreviewed = false
+
+[[stages]]
+id = "work"
+[stages.stage]
+kind = "work"
+role = "dev"
+instructions = "Create README.md in the assigned task worktree. Describe the trial repository in Traditional Chinese. Commit the file and report the branch result using the assigned ticket."
+output = "branch"
+
+[[stages]]
+id = "submit"
+[stages.stage]
+kind = "submit"
+forge = "local"
+
+[[stages]]
+id = "checks"
+on_fail = "work"
+[stages.stage]
+kind = "command"
+command = "test -s README.md"
+
+[[stages]]
+id = "review"
+[stages.stage]
+kind = "approval"
+by = "human"
+count = 1
+bind_head = true
+
+[[stages]]
+id = "merge"
+[stages.stage]
+kind = "merge"
