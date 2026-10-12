@@ -5,6 +5,12 @@
 > - 記住：**畫面只讀 `source::Fleet`、只透過 `source::Source` 動作**；真的來源是 `source::client::ClientSource`，lib 裡沒有 socket 程式碼。
 > - 下一步：`~/.cargo/bin/cargo run -q -p agend-tui --example tui_fake` 自己操作；`~/.cargo/bin/cargo xtask accept tui` 看 demo。
 
+## 配色主題
+
+在 AgEnD 畫面按大寫 `P` 開配色選單，`↑↓` 或 `1`–`4` 即時預覽預設深色、終端機原色、淺色、高對比；Enter 保存、Esc 取消。預覽期間不會操作底下的待辦。Agent 終端保留原色；輸入模式的 `P` 仍送給 Agent。
+
+偏好只在確認後寫入 `$XDG_CONFIG_HOME/agend/tui-theme`，未設定時用 `~/.config/agend/tui-theme`。`AGEND_TUI_THEME_FILE` 可指定獨立檔案（測試／demo 隔離用）。設定損壞時用深色並提示；保存失敗保留當前配色、明確提示未保存。重開 App 會載入；沒有 daemon 設定或認證變更。
+
 ## 第七版畫面（候選）
 
 110 欄、20 列以上使用固定 26 欄側欄、低彩度選取與區塊標題；「需要你」保留左側事項清單和右側可換行／捲動的詳情。側欄 `›` 表示所在頁，底色表示鍵盤焦點。團隊標題點箭頭收合、點名稱開啟；Agent 可點選或按 Enter，`t` 看終端。滑鼠選事項只標已讀，只有選項才送出回答。

@@ -234,6 +234,10 @@ pub fn goal_row(fleet: &Fleet, lang: crate::i18n::Language, border: &str, task: 
 }
 
 pub fn render(frame: &mut Frame, app: &mut App) {
+    render_inner(frame, app);
+    crate::theme::paint(frame.buffer_mut(), app);
+}
+fn render_inner(frame: &mut Frame, app: &mut App) {
     if crate::terminal::full::render(frame, app) {
         return;
     }

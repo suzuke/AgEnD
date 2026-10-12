@@ -574,7 +574,7 @@ impl App {
     }
     pub fn paste(&mut self, text: &str) {
         self.refresh_input_state();
-        if !self.is_connected() || self.finder.is_some() {
+        if !self.is_connected() || self.finder.is_some() || self.theme_original.is_some() {
             return;
         }
         let Some(full) = self
@@ -608,7 +608,7 @@ impl App {
         use agend_core::protocol::terminal::TerminalMouseTracking;
         use ratatui::crossterm::event::MouseEventKind;
         self.refresh_input_state();
-        if !self.is_connected() || self.finder.is_some() {
+        if !self.is_connected() || self.finder.is_some() || self.theme_original.is_some() {
             return;
         }
         if self.shell_mouse(event) {
@@ -657,7 +657,7 @@ impl App {
     }
     pub fn focus(&mut self, gained: bool) {
         self.refresh_input_state();
-        if !self.is_connected() || self.finder.is_some() {
+        if !self.is_connected() || self.finder.is_some() || self.theme_original.is_some() {
             return;
         }
         if self

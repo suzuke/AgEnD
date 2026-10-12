@@ -5,6 +5,10 @@
 > - 記住：**餵畫面的資料由真的 producer 產生**：腳本假來源與 testkit 假 daemon 發出的都是 client protocol 型別，沒有手寫 JSON（只有模擬 `event_gap` 的 proxy 送一行 daemon 的錯誤）。
 > - 下一步：`~/.cargo/bin/cargo test -p agend-tui`；真 daemon 那側在 `~/.cargo/bin/cargo test -p agend --test tui_daemon`。
 
+## 主題驗證
+
+`tests/themes.rs` 驗即時預覽／取消、待辦選取保留、modal 隔離點擊、終端機原色無固定 RGB 背景、70／80／110／140 欄、偏好檔四種值往返、損壞／過大檔案與失敗寫入清理。完整 holder parser 的色彩／寬字測試逐一套四種主題，核 Agent cells 不被改色。互動 loop 的保存／重啟另用專用偏好檔與原生 PTY 驗，不讀寫操作者的設定。
+
 ## 第七版畫面驗證
 
 `tests/shell.rs` 使用 ScriptedSource 的 protocol producer：110／140 欄與中英畫面、團隊收合與 Agent 導覽、未分組資料、需要你前後切換／返回／縮窄保留選取、點清單不回答、長詳情捲動與鍵盤可達選項、resize 後拒絕舊座標的點擊。既有完整終端／Source／導覽測試仍執行。

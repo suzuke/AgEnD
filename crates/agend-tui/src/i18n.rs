@@ -61,6 +61,16 @@ impl Language {
 /// Every UI string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Text {
+    ThemeKey,
+    ThemeDark,
+    ThemeTerminal,
+    ThemeLight,
+    ThemeContrast,
+    ThemeTitle,
+    ThemeKeys,
+    ThemeSaved,
+    ThemeSaveFailed,
+    ThemeLoadFailed,
     SidebarKeys,
     TeamKeys,
     PreviousItem,
@@ -189,6 +199,22 @@ pub enum Text {
 fn strings(text: Text) -> (&'static str, &'static str) {
     use Text::*;
     match text {
+        ThemeKey => ("P theme", "P 配色"),
+        ThemeDark => ("Dark", "預設深色"),
+        ThemeTerminal => ("Terminal defaults", "終端機原色"),
+        ThemeLight => ("Light", "淺色"),
+        ThemeContrast => ("High contrast", "高對比"),
+        ThemeTitle => ("Appearance · live preview", "配色 · 即時預覽"),
+        ThemeKeys => (
+            "↑↓ / 1–4 preview · Enter save · Esc cancel",
+            "↑↓ / 1–4 預覽 · Enter 保存 · Esc 取消",
+        ),
+        ThemeSaved => ("Theme saved: {}", "已保存配色：{}"),
+        ThemeSaveFailed => ("Theme active but not saved: {}", "配色已套用，但未保存：{}"),
+        ThemeLoadFailed => (
+            "Cannot load theme; using dark: {}",
+            "無法讀取配色，使用預設深色：{}",
+        ),
         SidebarKeys => (
             "←/→ collapse/expand · Space toggle · Enter open · t terminal",
             "←/→ 收合／展開 · 空白鍵切換 · Enter 開啟 · t 終端",
@@ -205,8 +231,8 @@ fn strings(text: Text) -> (&'static str, &'static str) {
         Connected => ("Connected", "已連線"),
         ActiveTasks => ("Active tasks", "進行中的任務"),
         ShellKeys => (
-            "Tab focus · ↑↓ select · Enter open · h home · ! needs you · / find · Esc back · L 中文",
-            "Tab 焦點 · ↑↓ 選擇 · Enter 開啟 · h 總覽 · ! 需要你 · / 搜尋 · Esc 返回 · L English",
+            "P theme · Tab focus · ↑↓ select · Enter open · h home · ! needs you · / find · Esc back · L 中文",
+            "P 配色 · Tab 焦點 · ↑↓ 選擇 · Enter 開啟 · h 總覽 · ! 需要你 · / 搜尋 · Esc 返回 · L English",
         ),
         QueueKeys => (
             "[ previous · ] next · 1–9 choose · a answer · PgUp/PgDn scroll",
@@ -388,7 +414,10 @@ fn strings(text: Text) -> (&'static str, &'static str) {
             "type to filter · ↑↓ move · →/Enter open · ←/Esc close",
             "輸入以篩選 · ↑↓ 移動 · →/Enter 開啟 · ←/Esc 關閉",
         ),
-        HelpDisconnected => ("r retry now · {} · q quit", "r 立即重試 · {} · q 離開"),
+        HelpDisconnected => (
+            "r retry now · {} · P theme · q quit",
+            "r 立即重試 · {} · P 配色 · q 離開",
+        ),
         LangKey => ("L 中文", "L English"),
     }
 }

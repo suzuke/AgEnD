@@ -2,14 +2,7 @@
 use super::*;
 use crate::app::shell::{Hit, Nav};
 
-const BG: Color = Color::Rgb(24, 28, 39);
-const SIDE: Color = Color::Rgb(20, 24, 35);
-const FG: Color = Color::Rgb(204, 210, 226);
-const MUTED: Color = Color::Rgb(129, 139, 161);
-const BLUE: Color = Color::Rgb(164, 189, 242);
-const SELECT: Color = Color::Rgb(37, 51, 76);
-const HEADER: Color = Color::Rgb(32, 40, 56);
-const AMBER: Color = Color::Rgb(223, 183, 129);
+use crate::theme::{AMBER, BG, BLUE, FG, GREEN, HEADER, MUTED, RED, SELECT, SIDE};
 
 fn base() -> Style {
     Style::default().fg(FG).bg(BG)
@@ -217,9 +210,9 @@ fn sidebar(buf: &mut Buffer, app: &mut App, area: Rect) {
         {
             let state = app.fleet.agent_state(agent);
             let color = match state {
-                AgentState::Working => Color::Rgb(143, 198, 176),
+                AgentState::Working => GREEN,
                 AgentState::NeedsYou | AgentState::Stuck => AMBER,
-                AgentState::Failed => Color::Rgb(228, 143, 143),
+                AgentState::Failed => RED,
                 _ => MUTED,
             };
             text(buf, row_rect(4, rect.y, 1), glyph(state), style.fg(color));

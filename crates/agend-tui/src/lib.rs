@@ -14,7 +14,8 @@
 //!
 //! Must NOT: talk to the daemon except through a `Source`, or hold state the
 //! daemon does not also have, apart from what the protocol cannot carry yet
-//! (read marks; listed in docs/gates/gate-11-tui.md).
+//! (read marks; listed in docs/gates/gate-11-tui.md), or operator-local UI
+//! preferences (theme; never sent to the daemon).
 
 pub mod agent_detail;
 pub mod app;
@@ -26,6 +27,7 @@ pub mod source;
 pub mod task_detail;
 pub mod team;
 pub mod terminal;
+pub mod theme;
 pub mod ui;
 
 pub use app::App;
@@ -61,6 +63,15 @@ pub fn run_with(
     mut intercept: impl FnMut(&KeyEvent) -> bool,
 ) -> io::Result<()> {
     let mut app = App::new(source, lang);
+    let theme_path = theme::preferences::path();
+    if let Some(path) = &theme_path {
+        match theme::preferences::load(path) {
+            Ok(theme) => app.theme = theme,
+            Err(error) => {
+                app.message = Some(lang.fmt(i18n::Text::ThemeLoadFailed, &[&error.to_string()]))
+            }
+        }
+    }
     let mut terminal = ratatui::init();
     let result = (|| -> io::Result<()> {
         let _outer_modes = crate::terminal::native::OuterModes::enter(io::stdout())?;
@@ -83,6 +94,20 @@ pub fn run_with(
                 && app.term.as_ref().is_some_and(|term| term.full.is_some())
             {
                 redraw |= app.pump_full_terminal_ready();
+            }
+            if let Some(theme) = app.theme_to_save.take() {
+                let result = theme_path
+                    .as_ref()
+                    .ok_or_else(|| io::Error::other("no local config directory"))
+                    .and_then(|path| theme::preferences::save(path, theme));
+                app.message = Some(match result {
+                    Ok(()) => app
+                        .lang
+                        .fmt(i18n::Text::ThemeSaved, &[theme.label(app.lang)]),
+                    Err(error) => app
+                        .lang
+                        .fmt(i18n::Text::ThemeSaveFailed, &[&error.to_string()]),
+                });
             }
             if redraw {
                 let completed = terminal.draw(|frame| render_frame(frame, &mut app))?;

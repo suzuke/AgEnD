@@ -209,6 +209,12 @@ fn the_renderer_preserves_real_colors_wide_combining_cells_modes_and_cursor() {
             .as_bytes(),
     );
     let mut app = app(&fake, 40, 12);
+    for theme in agend_tui::theme::Theme::ALL {
+        app.theme = theme;
+        let (buffer, _) = agend_tui::render_buffer(&mut app, 40, 12);
+        assert_eq!(buffer[(0, 1)].fg, Color::Rgb(12, 34, 56));
+        assert_eq!(buffer[(0, 1)].bg, Color::Indexed(42));
+    }
     let (buffer, _) = agend_tui::render_buffer(&mut app, 40, 12);
     assert_eq!(buffer[(0, 1)].symbol(), "界");
     assert_eq!(buffer[(2, 1)].symbol(), "e\u{301}");

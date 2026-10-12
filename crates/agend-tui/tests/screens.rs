@@ -266,13 +266,13 @@ fn help_line_lists_only_the_keys_that_work_on_the_selected_row() {
     // Home, needs-you row with an asker: `t` works.
     assert_eq!(
         help(&mut app),
-        "↑↓ move · →/Enter open · t terminal · ! needs you · / find · L 中文 · q quit"
+        "↑↓ move · →/Enter open · t terminal · ! needs you · / find · L 中文 · P theme · q quit"
     );
     // Home, team header: no agent, so no `t`.
     press(&mut app, &[Down, Down, Down]);
     assert_eq!(
         help(&mut app),
-        "↑↓ move · →/Enter open · ! needs you · / find · L 中文 · q quit"
+        "↑↓ move · →/Enter open · ! needs you · / find · L 中文 · P theme · q quit"
     );
     press(&mut app, &[ch('t')]);
     assert_eq!(
@@ -285,12 +285,15 @@ fn help_line_lists_only_the_keys_that_work_on_the_selected_row() {
     press(&mut app, &[Enter]);
     assert_eq!(
         help(&mut app),
-        "↑↓ move · →/Enter choose · 1-9 option · a answer · t terminal · ←/Esc back · L 中文"
+        "↑↓ move · →/Enter choose · 1-9 option · a answer · t terminal · ←/Esc back · L 中文 · P theme"
     );
     // The non-ask item (reviewer-1's usage limit): none of them do anything.
     press(&mut app, &[Down, Down, Down]);
     assert!(render(&mut app).contains("›! reviewer-1 hit its usage limit"));
-    assert_eq!(help(&mut app), "↑↓ move · t terminal · ←/Esc back · L 中文");
+    assert_eq!(
+        help(&mut app),
+        "↑↓ move · t terminal · ←/Esc back · L 中文 · P theme"
+    );
     let before = render(&mut app);
     press(&mut app, &[Enter, ch('1'), ch('a')]);
     assert_eq!(
@@ -304,7 +307,7 @@ fn help_line_lists_only_the_keys_that_work_on_the_selected_row() {
     press(&mut app, &[Down, Down, Down]);
     assert_eq!(
         help(&mut app),
-        "↑↓ 移動 · →/Enter 開啟 · ! 需要你 · / 搜尋 · L English · q 離開"
+        "↑↓ 移動 · →/Enter 開啟 · ! 需要你 · / 搜尋 · L English · P 配色 · q 離開"
     );
 }
 
