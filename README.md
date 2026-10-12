@@ -38,7 +38,7 @@
 ### 1 · 下載原始碼
 
 ```sh
-git clone --branch v2 https://github.com/suzuke/AgEnD.git agend-v2
+git clone --branch main https://github.com/suzuke/AgEnD.git agend-v2
 cd agend-v2
 ```
 
@@ -122,5 +122,7 @@ cargo run --locked -p agend-tui --example tui_fake -- --lang zh-TW
 ## 文件
 
 [使用教學](docs/quickstart.md) · [任務教學](docs/first-task.md) · [進度](docs/ROADMAP.md) · [架構](docs/ARCHITECTURE.md) · [開發指南](AGENTS.md)
+
+舊版 TypeScript：[legacy/v1-typescript](https://github.com/suzuke/AgEnD/tree/legacy/v1-typescript)。目前 `main` 為 Rust v2。
 
 Apache-2.0 · [LICENSE](LICENSE) · [NOTICE](NOTICE)
