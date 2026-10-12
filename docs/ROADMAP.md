@@ -3,7 +3,8 @@
 > **TL;DR**
 > - 依 crate 由下往上分 13 個施工關；每個施工關單獨驗收，使用者確認後才開下一個施工關（D22）。
 > - 目前狀態：第 1–12 施工關已完成並合併。#157 已合併為 `3f406f5`，自有 worktree／branch／target 已清理。
-> - 下一步：#158／#159 已合併；完成 README 與剩餘驗收盤點。Claude 真測暫緩；人工／環境驗收與公開發布仍有非 Claude 項目，尚不符合「只剩 Claude」的預設分支切換條件。
+> - #158–#161 已合併；README、TUI 配色及 doctor 補驗已交付，預設 `main` 已為 Rust v2。
+> - 下一步：服務真 backend／登入登出補驗、人工驗收與發布準備；Claude 第 13C 真測暫緩。[剩餘任務](gates/gate-13-status.md#剩餘任務)
 
 ## 13 個施工關
 
@@ -593,3 +594,5 @@
 - 2026-10-12：依使用者指示排除 Claude 與人工操作，續補非 Claude 自動化：doctor 目錄修復改保留非 UTF-8 bytes，增加真 shell 與 Linux 相似目錄反例；Linux ARM64 固定 797a7b9 archive 的同 home 低磁碟 fail→ok 通過，核 disk 函式／setup.rs 與本批相同。release workflow 自動觸發改 v2，仍僅建產物。本批最終覆核與 CI 待完成；人工驗收／Claude／公開發布不列通過。
 
 - 2026-10-12：#161 合併前 Linux CI 揭露 sandbox 工具查找遍歷 UTF-8 環境時會因 byte path panic；改為只讀取查找需要的 PATH，保留原非 UTF-8 目錄與鄰居不變的程序回歸。
+
+- 2026-10-12：#160（`7c67061`）與 #161（`c23b3f6`）已合併 main；最終雙平台 CI 通過，README／分支文件、doctor 原始路徑修復及 Linux PATH 查找修正已交付。兩個自有 worktree／本機與遠端分支及約 2.9 GiB 編譯暫存已清理；同步第 13 關現況，保留 Claude 暫緩、服務真 backend／登入登出、人工驗收與公開發布待辦。

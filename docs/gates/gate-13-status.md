@@ -1,9 +1,9 @@
 # 第 13 施工關：目前證據與完成缺口
 
 > **TL;DR**
-> - 第 13 關整關驗收仍未完成；使用者已核准，PR #158 於 2026-10-12 合併為 64db11a。
+> - 第 1–12 關完成；第 13 關實作已合併，整關驗收與公開發布尚未完成。
 > - 功能提交、局部測試、整關驗收與真環境驗收分別記錄，不能互相替代。
-> - 下一步：非 Claude 實作與本機獨立覆核已完成；Claude 暫緩，接續人工／環境驗收與公開發布準備。
+> - #158–#161 已合併；下一步見下方剩餘任務。Claude 第 13C 真測依使用者指示暫緩。
 
 此頁整理 2026-10-12 的當前狀態；歷史過程保留在 [施工關紀錄](gate-13-install.md)。
 
@@ -20,19 +20,30 @@
 
 doctor 逐項覆蓋與缺口見 [故障／修復矩陣](gate-13-doctor-matrix.md)。
 
-## 現在還沒完成的項目（2026-10-12 合併後）
+## 剩餘任務
 
 | 類別 | 待辦 | 下一步 |
 |---|---|---|
-| Claude | 第 13C 真模型 canary、跨版切換／回退 | 依使用者指示暫緩；需要安全的專用認證與便宜模型 |
-| 人工驗收 | 全新安裝首任務、doctor 修復、解除安裝的逐步操作紀錄 | 已有自動化證據；尚不能替使用者勾選人工通過 |
-| 環境覆蓋 | doctor 非 UTF-8 路徑、Linux 低磁碟真測；服務真 backend／登入登出 | 明列現有測試邊界，補驗或明確決定延後範圍 |
+| 服務環境 | 真 backend 的服務重啟，以及登入／登出行為 | 現有 launchd／systemd 生命週期使用測試程序；另訂專用環境補驗範圍 |
+| 人工驗收 | 全新安裝首任務、doctor 修復、解除安裝的逐步操作紀錄 | 已有自動化證據；由使用者逐步操作後填驗收紀錄 |
+| TUI 試用 | 新版布局、待辦切換與四種配色的人工外觀確認 | 程式與自動測試已交付；保留人工試用項目 |
+| Claude（暫緩） | 第 13C 真模型 canary、跨版切換／回退與歷史保留 | 使用安全的專用認證及便宜模型；不影響第 12 關已完成的通訊驗收 |
 | 發布 | 正式版本號、固定提交產物、公開 Release、公開 URL／Brew 安裝 | 依 [交付計畫](gate-13-release-plan.md) 準備；目前仍為 0.0.0 驗收產物 |
-| 文件／預設分支 | 新手 README、清除過期狀態、v2 預設分支安排 | [切換計畫](../default-branch-v2.md)；目前尚非只剩 Claude，保持 main 預設 |
+| 整關結案 | 彙整剩餘驗收與發布結果，更新完成紀錄 | 第 13 關維持施工中，完成後清理該批自有資源 |
 
-合併是程式交付，不會自動補足上述驗收。第 1–12 施工關維持完成；第 13 關仍施工中。舊進度紀錄的「未合併」保留為當時事實，以本節判斷現況。
+## 已完成，不再列為待辦
 
-## 當前自動驗收
+- #158（`64db11a`）：第 13 關非 Claude 實作與限定範圍驗證；#159（`ea1e487`）：TUI 布局與四種配色。
+- #160（`7c67061`）：README 特色、安裝、試用與首任務指南。GitHub 預設 `main` 已為 Rust v2，舊版在 `legacy/v1-typescript`，見 [切換紀錄](../default-branch-v2.md)。
+- #161（`c23b3f6`）：doctor 非 UTF-8 路徑修復及 Linux sandbox 工具查找修正；最終 `4830162` 的 [PR CI](https://github.com/suzuke/AgEnD/actions/runs/38237661328) 與 [push CI](https://github.com/suzuke/AgEnD/actions/runs/38237657393) 在 macOS／Ubuntu 全部通過，合併 tree 相同。
+- Linux ARM64 低磁碟 fail→ok 已以固定 `797a7b9` archive、同一 home 的 64 MiB→2 GiB tmpfs 驗證；限定未改動的 disk／statvfs 路徑，不擴稱整個最新版 archive 已真測。
+- #160／#161 的自有 worktree、本機／遠端分支與約 2.9 GiB 編譯暫存已清理；必要證據及使用者試用環境保留。
+
+歷史進度中的「未合併」「待驗」描述當時狀態；目前以本頁剩餘任務為準。CI 曾有偶發失敗，後續通過不等於已確定所有根因，原失敗紀錄仍保留。
+
+## 自動驗收紀錄
+
+以下為 #158 合併前的固定提交驗收紀錄；最新合併與清理結果見上方「已完成，不再列為待辦」。
 
 - 2026-10-12：非 Claude 實作收尾：獨立 accept install 通過（912 checks passes／4 ignored、59 demo passes，含重複與 child entry，非不同契約數），全新 HOME 假 worker 首任務 4,346 ms、一次 merge；client 52／testkit 117、fmt／clippy／no-std 與 SetupDiagnostic 四項邊界通過。驗收從 797a7b9 到 test-only 2f3e35b，保留單一測試檔以外 tree 相同的證據，非單一不變 HEAD。清理 43 個新增測試 socket、13,529,198,592 bytes 編譯快取及約 216 MiB 暫緩 Claude 副本；保留使用者試用 CLI／環境、證據與未合併 worktree。Claude 真測仍暫緩；人工驗收、合併及公開發布另待確認（PR #158）。
 - 獨立報告與清理證據：`AgEnD-ops/g13-install-20261008/accept-797a7b9-fresh/REPORT.txt`、`build-cache-cleanup-20261012.json`。兩個 core 深度探索器未跑，其餘兩個 ignored 為由父測試執行的 daemon 子入口；runtime 身分競態仍為 source／組合覆蓋，不聲稱新增完整 E2E 注入。
@@ -81,7 +92,7 @@ doctor 逐項覆蓋與缺口見 [故障／修復矩陣](gate-13-doctor-matrix.md
 
 - 可繼續：feature branch 實作、隔離測試、push／draft PR／CI。
 - 已取得受控真測授權；nonce launchd capture 與專用 Telegram bot 流程已執行。Claude 真測依使用者指示暫緩；本輪 access-only 隔離啟動停在登入選單，未送模型訊息，Keychain 與共享設定前後未變；Codex 已依使用者指定來源裁剪 access-only 快照，透過外部登入拒絕刷新，原始認證檔本輪前後雜湊未變。OpenCode 使用指定 API 認證。
-- #158／#159 已獲使用者核准並合併。實際使用者常駐服務變更與公開發布，仍須備妥具體結果後取得必要核准。
+- #158–#161 已獲使用者核准並合併。實際使用者常駐服務變更與公開發布，仍須備妥具體結果後取得必要核准。
 - 保留 `~/.claude.json` trust entries、外來程序／worktree、AlphaCR runs。
 - 完成每批後清自有臨時程序與目錄；Gate 13／TUI 兩個已合併 worktree、本機與遠端分支及 target 已清理，必要證據與試用 binaries 保留。
 
