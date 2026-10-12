@@ -589,3 +589,7 @@
 - 2026-10-12：README 重排為特色、原生 TUI 預覽、安裝與基本操作；長篇教學拆至 quickstart／first-task，附可由 daemon 驗證的本機人工核准 workflow 範例。文件範例不代表新增真模型驗收；施工關狀態不變（PR #160）。
 
 - 2026-10-12：使用者授權調整分支入口：舊 main 改名 legacy/v1-typescript（2e38b5f），v2 改名 main（ea1e487）並設為預設；保留提交歷史與原保護政策，#160／#161 改接 main。此動作不代表施工關驗收完成或發布，名稱修正隨待審 PR 交付。
+
+- 2026-10-12：依使用者指示排除 Claude 與人工操作，續補非 Claude 自動化：doctor 目錄修復改保留非 UTF-8 bytes，增加真 shell 與 Linux 相似目錄反例；Linux ARM64 固定 797a7b9 archive 的同 home 低磁碟 fail→ok 通過，核 disk 函式／setup.rs 與本批相同。release workflow 自動觸發改 v2，仍僅建產物。本批最終覆核與 CI 待完成；人工驗收／Claude／公開發布不列通過。
+
+- 2026-10-12：#161 合併前 Linux CI 揭露 sandbox 工具查找遍歷 UTF-8 環境時會因 byte path panic；改為只讀取查找需要的 PATH，保留原非 UTF-8 目錄與鄰居不變的程序回歸。

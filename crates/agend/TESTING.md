@@ -284,3 +284,7 @@ terminal_hub::readonly_fit_resizes_without_granting_input_or_displacing_a_contro
 2026-10-12 doctor 修復矩陣：`install_home` 實際執行 doctor 回傳的 chmod／du 提示，UTF-8 路徑含空白、單引號及 shell 注入字串；不可寫 0500→0700、過寬 0755→0700、大 sparse home→僅刪自有 fixture，核配置保留及無額外檔案。不可寫測試須非 root（root 執行會明示略過）；本機以一般使用者通過。Git 2.37.9→2.38.0 使用只接受 --version 的原生 fixture，未降級共用 Git。非 UTF-8 路徑的 display 仍有既有有損限制；未宣稱涵蓋該情境。
 
 `doctor_native` 以真 daemon／假 app-server 驗帳戶 missing→configured，固定 refreshToken=false、0 login（無真模型）、無敏感資料輸出；納入 accept install。
+
+2026-10-12 補 `doctor::shell_path_tests`：透過真 POSIX shell 核非 UTF-8、引號、命令替換字串與尾端換行的原始 bytes。Linux `install_home::doctor_repairs_non_utf8_home_without_touching_lossy_neighbor` 建立原始 bytes 與有損顯示名稱兩個目錄，執行 doctor 的 chmod 修復並核只修改前者。Linux ARM64 真低空間驗收另以固定 797a7b9 archive，在同一容器 home 將 tmpfs 64 MiB 調為 2 GiB，disk fail→ok、設定不變；disk 函式及 setup.rs 與本批相同，非整個新版 binary 真測。
+
+Linux `doctor_repairs_non_utf8_home_without_touching_lossy_neighbor` 同時驗證 sandbox 工具查找不會因非 UTF-8 AGEND_HOME panic；診斷須回傳有效 JSON，修復不得碰到 lossy 同名鄰居。
