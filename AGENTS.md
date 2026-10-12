@@ -66,7 +66,7 @@ CI（`.github/workflows/ci.yml`）在 ubuntu 與 macOS 跑同一組檢查。
 
 > **TL;DR** 所有實作都在自己的 branch + git worktree 上做，用 PR 合併；**絕不直接改整合 branch**。
 
-- 整合 branch：**`v2`**（`main` 目前是舊版 TypeScript；切換後整合 branch 改為 `main`，規則不變）。
+- 整合 branch：**`main`**（Rust v2）；舊版 TypeScript 保留於 **`legacy/v1-typescript`**。
 - 禁止：在 `v2` 或 `main` 上直接 commit、push、`--force`；在別人的 worktree 裡改東西。
 - 一律用 PR 合併；合併方式與時機由使用者決定，agent 不自行 merge。
 - 本機所有新 task／verifier worktree 都放 `/Users/suzuke/AlphaCR-worktrees/`（使用者 2026-10-02 指定）；禁止在整合 worktree 實作。
@@ -77,7 +77,7 @@ CI（`.github/workflows/ci.yml`）在 ubuntu 與 macOS 跑同一組檢查。
 
 ```bash
 git fetch origin
-git worktree add /Users/suzuke/AlphaCR-worktrees/AgEnD-<主題> -b <類型>/<主題> origin/v2   # 類型：feat／fix／docs／test／build
+git worktree add /Users/suzuke/AlphaCR-worktrees/AgEnD-<主題> -b <類型>/<主題> origin/main   # 類型：feat／fix／docs／test／build
 cd /Users/suzuke/AlphaCR-worktrees/AgEnD-<主題>
 ```
 
@@ -85,7 +85,7 @@ cd /Users/suzuke/AlphaCR-worktrees/AgEnD-<主題>
 
 ```bash
 git push -u origin <類型>/<主題>
-gh pr create --base v2
+gh pr create --base main
 # PR 合併後
 git worktree remove /Users/suzuke/AlphaCR-worktrees/AgEnD-<主題> && git branch -d <類型>/<主題>
 ```
@@ -134,7 +134,7 @@ cargo xtask accept <施工關>                                # 1–13 或名稱
 - [ ] `cargo xtask check-deps` 通過
 - [ ] 行為變了 → 對應的 crate `README.md`／`TESTING.md` 與 `docs/` 已更新
 - [ ] 新名詞已寫進名詞表（[docs/GLOSSARY.md](docs/GLOSSARY.md)）
-- [ ] 在自己的 branch + worktree 上完成，以 PR 合併進 `v2`（沒有直接改 `v2`／`main`）
+- [ ] 在自己的 branch + worktree 上完成，以 PR 合併進 `main`（沒有直接改整合 branch）
 
 
 ## 寫作與程式規則

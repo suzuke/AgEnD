@@ -1,9 +1,9 @@
 # 第 13 關版本與發布交付計畫
 
 > **TL;DR**
-> - 目前為 0.0.0 驗收產物，PR #158 未合併，沒有公開 Release。
+> - 目前為 0.0.0 驗收產物，PR #158 已合併，沒有公開 Release。
 > - 非 Claude 項目先完成固定提交覆核；Claude 真 canary／跨版往返依使用者指示暫緩。
-> - 合併、正式版本號與公開發布須由使用者確認，不能以 Actions 成功代替。
+> - #158／#159 已經使用者核准合併；正式版本號與公開發布仍待確認。
 
 ## 交付順序
 
@@ -12,7 +12,7 @@
 | 固定提交 | fmt、clippy、check-deps、accept install、全新 context 覆核與 CI | feature branch 執行；保留失敗與成功各自範圍 |
 | 使用者驗收 | 依序操作 init／doctor、首任務、需要你的處理；記錄實際輸出 | 一次帶一步，不把自動 operator 核准寫成人工驗收 |
 | Claude 補驗 | 專用認證、便宜模型、固定兩版本 canary／非空歷史往返 | 目前暫緩；不碰共享 Keychain、trust 或其他 sessions |
-| 合併 | 使用者確認後將 PR #158 合併至 v2 | 不自行 merge；已合併才刪對應 worktree／branch |
+| 合併 | 已完成：#158 → 64db11a，#159 → ea1e487 | 兩個自有 worktree／本機 branch 已清理 |
 | 版本 | 建議第一個公開候選版本 2.0.0-rc.1，更新 workspace／lockfile | 尚未採用或建立 tag；若提前提供 preview，須明列 Claude 未驗證 |
 | 產物 | 該版本固定提交的四平台原生 archive、manifest、SHA256SUMS、formula，七 jobs 成功 | 不挪用不同 SHA 的舊產物；Actions 保留 14 天，正式發布須另保存 |
 | 公開發布 | 使用者核准 tag／Release 文案與四平台產物後發布，再更新 tap | 實際公開 URL 下載與 Brew 安裝另驗；不可用 file URL smoke 冒充 |
@@ -32,4 +32,4 @@ backend 換版使用正式 `backend switch prepare/status/activate/rollback`，�
 
 ## 下一步
 
-固定本批提交後取得獨立驗收與 CI。安裝命令及產物驗證方式見 [安裝文件](../install-release.md)；Claude 暫緩、使用者驗收及發布核准分開追蹤。
+本批獨立驗收與合併前雙平台 CI 已通過；接續核對剩餘人工／環境驗收，準備正式發布版本。安裝命令及產物驗證方式見 [安裝文件](../install-release.md)；Claude 暫緩、使用者驗收及發布核准分開追蹤。

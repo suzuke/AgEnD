@@ -5,6 +5,32 @@
 > - release archive 與從固定 checkout 執行 `cargo install --path` 是兩條安裝路徑。
 > - 安裝 executable 不會替你註冊服務、建立 agent 或修改 Claude trust entries。
 
+## 前置工具
+
+| 工具 | 需要什麼 |
+|---|---|
+| Git | 2.38 以上；用 `git --version` 確認 |
+| Rust | 使用 rustup；repo 的 `rust-toolchain.toml` 會選用 1.96.0 |
+| 本機編譯工具 | macOS 使用 [Xcode Command Line Tools](https://developer.apple.com/xcode/resources/)；Linux 需 C 編譯器、linker 與標準函式庫開發檔 |
+| Agent CLI | 實際派工前，至少安裝並登入一個支援的 backend；免登入 UI 示範不需要 |
+
+還沒安裝 Rust？依 [Rust 官方安裝說明](https://rust-lang.org/tools/install/) 執行：
+
+```sh
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+完成安裝後重開終端，再確認：
+
+```sh
+git --version
+rustup --version
+cargo --version
+cc --version
+```
+
+接著回到 [README 安裝步驟](../README.md#安裝)，下載 v2 並建置。
+
 ## 從原始碼安裝
 
 先切到經審閱的固定提交；使用 `rust-toolchain.toml` 的工具鏈。在 repo 根目錄執行：
