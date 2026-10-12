@@ -585,3 +585,5 @@
 - 2026-10-12：TUI 新增深色、終端預設、淺色、高對比四種配色；P 開啟、方向鍵預覽、Enter 儲存、Esc 取消，完整 Agent 終端保持原配色。3f5f69b 經全新 verifier 確認，102 個 TUI 測試與額外模態／尺寸反例、原生 PTY 儲存／重啟／錯誤提示通過；fmt、workspace clippy、check-deps 含實際 no-std 通過。僅更新本機介面偏好，0 真模型；沿用 draft PR #159，尚未合併，Gate 13／Claude 狀態不變。
 
 - 2026-10-12：使用者核准後，#158 合併為 `64db11a`、#159 改接 v2 後合併為 `ea1e487`；後者合併 tree 與通過四個 CI jobs 的 54fa604 完全相同。兩個工作樹與本機分支已移除，額外清除約 406 MiB no-std 快取，保留必要證據／試用 binaries。README 改為逐步試用入口；剩餘人工／環境驗收、Claude 真測及公開發布如實保留，預設分支切換條件與安排見 [切換計畫](default-branch-v2.md)。
+
+- 2026-10-12：README 重排為特色、原生 TUI 預覽、安裝與基本操作；長篇教學拆至 quickstart／first-task，附可由 daemon 驗證的本機人工核准 workflow 範例。文件範例不代表新增真模型驗收；施工關狀態不變（PR #160）。
