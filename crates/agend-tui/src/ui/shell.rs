@@ -369,10 +369,17 @@ fn attention(buf: &mut Buffer, app: &mut App, main: Rect) {
         app.shell.detail_offset = 0;
         app.shell.detail_key = Some(key);
     }
-    // Choices reached with the keyboard must always be visible.
-    if app.shell.detail_selection != app.view().selected
-        && let Some(Target::Choice(_, _)) = &app.view().selected
-        && let Some(position) = wrapped.iter().position(|r| r.target == app.view().selected)
+    // Reconcile against wrapping and viewport changes as well as selection.
+    // Manual scrolling remains independent while that anchor is unchanged.
+    let size = (detail.width, detail.height);
+    let choice_row = match app.view().selected {
+        Some(Target::Choice(_, _)) => wrapped.iter().position(|r| r.target == app.view().selected),
+        _ => None,
+    };
+    if (app.shell.detail_selection != app.view().selected
+        || app.shell.detail_size != size
+        || app.shell.detail_choice_row != choice_row)
+        && let Some(position) = choice_row
     {
         if position < app.shell.detail_offset {
             app.shell.detail_offset = position;
@@ -381,6 +388,8 @@ fn attention(buf: &mut Buffer, app: &mut App, main: Rect) {
         }
     }
     app.shell.detail_selection = app.view().selected.clone();
+    app.shell.detail_size = size;
+    app.shell.detail_choice_row = choice_row;
     app.shell.detail_offset = app
         .shell
         .detail_offset

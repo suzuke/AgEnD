@@ -26,6 +26,8 @@ pub(crate) struct ShellState {
     pub detail_offset: usize,
     pub detail_key: Option<String>,
     pub detail_selection: Option<Target>,
+    pub detail_size: (u16, u16),
+    pub detail_choice_row: Option<usize>,
     pub painted_size: (u16, u16),
     pub painted_rows: Vec<Row>,
     pub painted_nav: Vec<Nav>,

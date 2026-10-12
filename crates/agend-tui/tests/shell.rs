@@ -178,3 +178,23 @@ fn long_context_can_be_scrolled_without_leaving_the_selected_item() {
     assert!(choices.contains("[1] continue"), "{choices}");
     assert!(handle.answers().is_empty());
 }
+
+#[test]
+fn resizing_a_long_detail_keeps_the_selected_action_visible() {
+    let (mut app, handle) = demo(Language::En);
+    handle.follow_up(
+        "A-1",
+        "dev-2",
+        &"long context ".repeat(120),
+        &["VERIFY_VISIBLE_OPTION", "stop"],
+    );
+    app.tick();
+    render_to_string(&mut app, 140, 34);
+    press(&mut app, &[Char('!'), Enter]);
+    assert!(render_to_string(&mut app, 140, 34).contains("VERIFY_VISIBLE_OPTION"));
+    let small = render_to_string(&mut app, 110, 20);
+    assert!(small.contains("VERIFY_VISIBLE_OPTION"), "{small}");
+    assert!(handle.answers().is_empty());
+    press(&mut app, &[Enter]);
+    assert_eq!(handle.answers().len(), 1);
+}
