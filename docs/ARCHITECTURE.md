@@ -3,7 +3,7 @@
 > **TL;DR**
 > - daemon 是唯一的大型 I/O 層；agent 與附屬程序由每個 instance 一個的 holder 持有，所以 daemon 可隨時重啟。
 > - 記住：**crate 邊界就是架構**，由 `cargo xtask check-deps` 強制。
-> - 下一步：系統圖看 [README](../README.md#系統圖)；細節看本頁底部的分頁連結。
+> - 下一步：系統圖看 [系統圖](images/system.svg)；細節看本頁底部的分頁連結。
 
 來源：規劃 r4（§4、§5）與決策 D1–D37。後來的決策優先於規劃本文。
 

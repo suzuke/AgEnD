@@ -1,9 +1,9 @@
 # 第 13 施工關：目前證據與完成缺口
 
 > **TL;DR**
-> - 第 13 關仍未完成、未核准合併；PR #158 是 draft。
+> - 第 13 關整關驗收仍未完成；使用者已核准，PR #158 於 2026-10-12 合併為 64db11a。
 > - 功能提交、局部測試、整關驗收與真環境驗收分別記錄，不能互相替代。
-> - 下一步：非 Claude 實作與本機獨立覆核已完成；Claude 暫緩，接續逐步人工驗收與合併確認。
+> - 下一步：非 Claude 實作與本機獨立覆核已完成；Claude 暫緩，接續人工／環境驗收與公開發布準備。
 
 此頁整理 2026-10-12 的當前狀態；歷史過程保留在 [施工關紀錄](gate-13-install.md)。
 
@@ -16,9 +16,21 @@
 | 13C 重啟通知 | 真 daemon 三次啟動測試：worker 發現換版、通知重建、操作員確認持久化，agent 與錯誤 action 拒絕 | 原假 CLI 測試之外，已補真 Codex 磁碟版本變動；不宣稱因此執行了模型或 service-manager 重啟 |
 | 13D Telegram | daemon 配對、token reference、allowlist、設定套用；專用 bot 真測完成 /start→confirm→apply→同 home 重啟→通知→Mark read→approve，任務 done 且唯一 merge | 本次限私聊人工 approval；不擴稱覆蓋所有 Telegram 動作或真模型 |
 | 13E 打包 | 63b083b 的 release-artifacts 37800713214 通過四平台 archive、formula 與雙平台 Brew 七個 jobs | cargo install 後全新 HOME 的真 OpenCode 首任務已通過（預先備妥認證、13.95 秒、不含編譯安裝）；4e73912 的 macOS ARM64 archive 下載、驗證、安裝至首個真 OpenCode 任務完成共 54.06 秒；預先備妥認證，非新帳戶註冊。發布步驟見版本／發布計畫，尚未公開發布 |
-| 整關 | 63b083b 的 fresh-context accept install、雙平台 CI、四平台打包均通過 | 本批 fresh-context verifier 已通過；Claude 真測暫緩、使用者逐步驗收與合併確認未完成 |
+| 整關 | 63b083b 的 fresh-context accept install、雙平台 CI、四平台打包均通過 | 本批 fresh-context verifier 已通過；Claude 真測暫緩、使用者逐步驗收未完成；#158 已核准合併 |
 
 doctor 逐項覆蓋與缺口見 [故障／修復矩陣](gate-13-doctor-matrix.md)。
+
+## 現在還沒完成的項目（2026-10-12 合併後）
+
+| 類別 | 待辦 | 下一步 |
+|---|---|---|
+| Claude | 第 13C 真模型 canary、跨版切換／回退 | 依使用者指示暫緩；需要安全的專用認證與便宜模型 |
+| 人工驗收 | 全新安裝首任務、doctor 修復、解除安裝的逐步操作紀錄 | 已有自動化證據；尚不能替使用者勾選人工通過 |
+| 環境覆蓋 | doctor 非 UTF-8 路徑、Linux 低磁碟真測；服務真 backend／登入登出 | 明列現有測試邊界，補驗或明確決定延後範圍 |
+| 發布 | 正式版本號、固定提交產物、公開 Release、公開 URL／Brew 安裝 | 依 [交付計畫](gate-13-release-plan.md) 準備；目前仍為 0.0.0 驗收產物 |
+| 文件／預設分支 | 新手 README、清除過期狀態、v2 預設分支安排 | [切換計畫](../default-branch-v2.md)；目前尚非只剩 Claude，保持 main 預設 |
+
+合併是程式交付，不會自動補足上述驗收。第 1–12 施工關維持完成；第 13 關仍施工中。舊進度紀錄的「未合併」保留為當時事實，以本節判斷現況。
 
 ## 當前自動驗收
 
@@ -69,13 +81,13 @@ doctor 逐項覆蓋與缺口見 [故障／修復矩陣](gate-13-doctor-matrix.md
 
 - 可繼續：feature branch 實作、隔離測試、push／draft PR／CI。
 - 已取得受控真測授權；nonce launchd capture 與專用 Telegram bot 流程已執行。Claude 真測依使用者指示暫緩；本輪 access-only 隔離啟動停在登入選單，未送模型訊息，Keychain 與共享設定前後未變；Codex 已依使用者指定來源裁剪 access-only 快照，透過外部登入拒絕刷新，原始認證檔本輪前後雜湊未變。OpenCode 使用指定 API 認證。
-- 實際使用者常駐服務變更、公開發布與本關 merge，仍需備妥具體結果後取得必要核准。
+- #158／#159 已獲使用者核准並合併。實際使用者常駐服務變更與公開發布，仍須備妥具體結果後取得必要核准。
 - 保留 `~/.claude.json` trust entries、外來程序／worktree、AlphaCR runs。
-- 完成每批後清自有臨時程序與目錄；未合併 Gate 13 worktree 與 target 保留供驗收，合併後再清。
+- 完成每批後清自有臨時程序與目錄；Gate 13／TUI 兩個已合併 worktree、本機與遠端分支及 target 已清理，必要證據與試用 binaries 保留。
 
 ## 下一步
 
-完成本批 runtime 診斷回歸、固定提交獨立驗收與 CI 後交付。Claude 認證／真 canary／跨版往返維持暫緩；使用者驗收、merge 與公開發布各自保留確認邊界。發布順序見 [交付計畫](gate-13-release-plan.md)。
+runtime 診斷回歸、獨立覆核與合併前 CI 已完成。依本頁剩餘表處理人工／環境驗收與發布準備；Claude 認證／真 canary／跨版往返維持暫緩。發布順序見 [交付計畫](gate-13-release-plan.md)。
 
 - 2026-10-10：正式 `backend import`／`backend canary --allow-model` 對 OpenCode 1.18.34、`opencode-go/gpt-6-luna` 完成三則真模型訊息，三個 confirmed receipt／三個 outcome，33,886 ms、passed 與 cleanup_complete 均 true。使用試用環境已隔離的單 provider API 認證，來源雜湊不變；自有 canary home、程序及匯入副本清理核對通過，使用者 trial 保留。證據 `AgEnD-ops/g13-install-20261008/opencode-managed-canary-20261010/{plan,report,cleanup}.json`；build SHA e3a159222c8ba8353bc6a667bdd5221c7778cb5fe2e61b45584db9457aa5ef2b。這不證明受管切換／回退、Claude／Codex canary 或整關完成。
 

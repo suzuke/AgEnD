@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 依 crate 由下往上分 13 個施工關；每個施工關單獨驗收，使用者確認後才開下一個施工關（D22）。
 > - 目前狀態：第 1–12 施工關已完成並合併。#157 已合併為 `3f406f5`，自有 worktree／branch／target 已清理。
-> - 下一步：第 13 關非 Claude 實作已收尾；Claude 真測暫緩，人工驗收、合併與公開發布分開追蹤。
+> - 下一步：#158／#159 已合併；完成 README 與剩餘驗收盤點。Claude 真測暫緩；人工／環境驗收與公開發布仍有非 Claude 項目，尚不符合「只剩 Claude」的預設分支切換條件。
 
 ## 13 個施工關
 
@@ -23,7 +23,7 @@
 | 10 `pipeline` | [完成（2026-10-02；#143 已確認合併）](gates/gate-10-pipeline.md) | daemon：pipeline、git、runner、forge local、supervisor、reconcile | 假 driver + 暫存 repo：task 從派工走到 merge |
 | 11 `tui` | [完成（A、B、C 已 merge；C 段 #145）](gates/gate-11-tui.md) | attention-first TUI、完整終端、resize、多視窗、鍵鼠／貼上與歷史 | 最終 `cfee027` 全新 verifier CONFIRMED；四個雙平台 CI jobs 各 900 passed／0 failed／2 既有 ignored、實際 no-std；0.159.3 真 U17 已核實並獲版本許可。實機紀錄及後續自動驗收、清理完成，使用者確認 merge `b2152db` |
 | 12 `adapters` | [完成（#154–#157 已合併）](gates/gate-12-adapters.md) | A claude、B opencode driver、C forge github、D Telegram | 先對假實作，再做真 backend smoke test |
-| 13 `install` | [施工中（非 Claude 實作與本機覆核完成，待 Claude／人工驗收）](gates/gate-13-install.md) | 安裝與發布（最後一個施工關）：服務註冊、`agend uninstall`、`agend telegram setup`（由 daemon 配對）、`xtask release`、brew、GitHub release、`cargo install` | CI 用全新 HOME + 假 agent，從安裝到第一個 task 完成 < 5 分鐘；每個 `doctor` 檢查都有「故意弄壞 → 看到修正指令」的測試 |
+| 13 `install` | [施工中（實作已合併，待 Claude／人工環境驗收與發布）](gates/gate-13-install.md) | 安裝與發布（最後一個施工關）：服務註冊、`agend uninstall`、`agend telegram setup`（由 daemon 配對）、`xtask release`、brew、GitHub release、`cargo install` | CI 用全新 HOME + 假 agent，從安裝到第一個 task 完成 < 5 分鐘；每個 `doctor` 檢查都有「故意弄壞 → 看到修正指令」的測試 |
 
 ## 第 1 施工關：開工前先提案、經使用者確認才實作
 
@@ -583,3 +583,5 @@
 - 2026-10-12：依使用者核准第七版示意，新增 ≥110 欄 TUI 側欄、跨團隊任務總覽、需要你清單／詳情雙欄及前後切換；窄畫面與完整終端保留原操作。獨立覆核在 37a3e76 抓到 resize 隱藏所選選項，5cbb97f 修正；98 個 TUI 測試、fmt／workspace clippy／實際 no-std 與腳本原生 PTY smoke 通過。0 真模型；保留 demo／CLI 及未合併 worktree 供試用，Gate 13 與 Claude 狀態不變（feat/tui-layout，待人工外觀驗收）。
 
 - 2026-10-12：TUI 新增深色、終端預設、淺色、高對比四種配色；P 開啟、方向鍵預覽、Enter 儲存、Esc 取消，完整 Agent 終端保持原配色。3f5f69b 經全新 verifier 確認，102 個 TUI 測試與額外模態／尺寸反例、原生 PTY 儲存／重啟／錯誤提示通過；fmt、workspace clippy、check-deps 含實際 no-std 通過。僅更新本機介面偏好，0 真模型；沿用 draft PR #159，尚未合併，Gate 13／Claude 狀態不變。
+
+- 2026-10-12：使用者核准後，#158 合併為 `64db11a`、#159 改接 v2 後合併為 `ea1e487`；後者合併 tree 與通過四個 CI jobs 的 54fa604 完全相同。兩個工作樹與本機分支已移除，額外清除約 406 MiB no-std 快取，保留必要證據／試用 binaries。README 改為逐步試用入口；剩餘人工／環境驗收、Claude 真測及公開發布如實保留，預設分支切換條件與安排見 [切換計畫](default-branch-v2.md)。
