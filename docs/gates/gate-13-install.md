@@ -7,7 +7,7 @@
 
 ## 狀態
 
-**施工中：非 Claude 實作與本機獨立覆核完成；Claude 真測暫緩**（2026-10-12）。已有 Codex／OpenCode 真 canary、跨版往返、真服務與 Telegram 的限定範圍證據；PR #158 已於 2026-10-12 經使用者核准合併；人工／環境驗收與公開發布仍分開追蹤，尚未完成整關驗收。
+**施工中：非 Claude 實作與本機獨立覆核完成；Claude 真測暫緩**（2026-10-12）。已有 Codex／OpenCode 真 canary、跨版往返、真服務與 Telegram 的限定範圍證據；PR #158–#161 已於 2026-10-12 經使用者核准合併；README、doctor 非 UTF-8 修復與 Linux 低磁碟補驗已完成。服務真 backend／登入登出、人工驗收與公開發布仍待完成，詳見 [剩餘任務](gate-13-status.md#剩餘任務)。
 
 ## 施工順序（2026-10-08）
 
@@ -94,6 +94,8 @@
 |  |  |  |
 
 ## 進度紀錄
+
+- 2026-10-12：#160／#161 已合併，最終 macOS／Ubuntu CI 通過；同步目前狀態與剩餘任務，保留歷史驗收範圍及人工未勾選項目。
 
 - 2026-10-09：正式 backend import／inspect 匯入固定 Claude 2.1.284、Codex 0.159.3、OpenCode 1.18.34 原生檔，雜湊核對後由 doctor 對搬移副本執行版本探測，三者皆 ok；14.211 秒完成、測試副本與匹配程序無殘留。authentication 維持 warn／unknown，未要求登入、模型或服務操作；真 canary／切換與 live-auth producer 仍待完成（PR #158，未合併）。
 

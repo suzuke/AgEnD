@@ -3,7 +3,7 @@
 > **TL;DR**
 > - 2026-10-12 使用者授權將 v2 改為 main，舊版另存可辨識分支。
 > - GitHub 預設分支已改為 `main`（Rust v2）；舊版為 `legacy/v1-typescript`。
-> - 本次不代表完成 Claude、人工驗收或公開發布，也沒有合併待審 PR。
+> - 分支切換已完成；後續 #160／#161 也已核准合併。Claude、人工驗收與公開發布仍待完成。
 
 ## 分支對照
 
@@ -37,4 +37,4 @@ git remote set-head origin -a
 
 ## 下一步
 
-依 [README](../README.md) 安裝；後續 PR 以 main 為目標。安裝文件與 release workflow 的名稱修正隨 #160／#161 審查交付，不因此擅自合併。
+依 [README](../README.md) 安裝；後續 PR 以 main 為目標。安裝文件與 release workflow 的名稱修正已隨 #160（`7c67061`）／#161（`c23b3f6`）交付，最終 macOS／Ubuntu CI 通過。
