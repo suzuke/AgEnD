@@ -4,7 +4,7 @@ name: release-artifacts
 on:
   workflow_dispatch:
   push:
-    branches: [v2]
+    branches: [main]
     paths:
       - .github/workflows/release.yml
       - scripts/*release*.py
