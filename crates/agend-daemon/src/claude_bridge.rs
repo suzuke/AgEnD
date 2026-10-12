@@ -33,6 +33,8 @@ struct State {
     reported_busy: Option<bool>,
     initial: bool,
     ready_generation: Option<String>,
+    idle_connection: Option<crate::runtime::terminal::TerminalConnection>,
+    routing_connection: Option<crate::runtime::terminal::TerminalConnection>,
 }
 #[derive(Default)]
 pub(crate) struct ClaudeBridge {
@@ -40,6 +42,88 @@ pub(crate) struct ClaudeBridge {
 }
 
 impl ClaudeBridge {
+    /// An idle hook candidate plus a current holder observation. Callers must
+    /// pause/drain input and separately verify managed launch identity.
+    pub async fn session_idle(&self, ctx: &Context, id: &str) -> Result<bool, String> {
+        let instance = ctx
+            .store
+            .instance(id)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or("Claude instance missing")?;
+        if instance.backend != Backend::Claude
+            || instance.status != InstanceStatus::Running
+            || instance.delivery != "push"
+            || !instance.session_started
+        {
+            return Err("not a running Claude push instance".into());
+        }
+        let session = instance
+            .session_id
+            .as_deref()
+            .ok_or("Claude session missing")?;
+        let (revision, idle, initial, generation, connection) = {
+            let states = self.states.lock().await;
+            let Some(state) = states.get(id).filter(|s| s.session == session && !s.busy) else {
+                return Ok(false);
+            };
+            let Some(idle) = state
+                .idle
+                .filter(|at| at.elapsed() >= Duration::from_secs(5))
+            else {
+                return Ok(false);
+            };
+            let Some(connection) = state.idle_connection.clone().filter(|c| c.is_current()) else {
+                return Ok(false);
+            };
+            (
+                state.revision,
+                idle,
+                state.initial,
+                state.ready_generation.clone(),
+                connection,
+            )
+        };
+        if initial {
+            let ready = startup::frame(&connection).await.is_some_and(|frame| {
+                generation.as_deref() == Some(frame.generation.as_str())
+                    && startup::prompt(&frame, &instance.working_directory)
+                        == Some(agend_core::screen::claude_startup::Prompt::Ready)
+            });
+            if !ready {
+                return Ok(false);
+            }
+        }
+        let Some(feed) = ctx.runtime.live_terminal(id) else {
+            return Ok(false);
+        };
+        let Ok(Ok((screen, _))) = tokio::time::timeout(Duration::from_secs(2), feed).await else {
+            return Ok(false);
+        };
+        if classify(Backend::Claude, &screen, SCREEN_RULES).is_some()
+            || !connection.is_current()
+            || ctx
+                .store
+                .instance(id)
+                .await
+                .map_err(|e| e.to_string())?
+                .as_ref()
+                != Some(&instance)
+        {
+            return Ok(false);
+        }
+        let states = self.states.lock().await;
+        Ok(connection.is_current()
+            && states.get(id).is_some_and(|state| {
+                state.session == session
+                    && state.revision == revision
+                    && !state.busy
+                    && state.idle == Some(idle)
+                    && state.initial == initial
+                    && state.ready_generation == generation
+            }))
+    }
+
     pub async fn handle(
         &self,
         ctx: &Arc<Context>,
@@ -185,6 +269,7 @@ impl ClaudeBridge {
                             && *occurred_at_unix_ms >= state.last_route_hook
                         {
                             state.idle = None;
+                            state.routing_connection = None;
                             state.initial = false;
                             state.ready_generation = None;
                             state.busy = false;
@@ -229,6 +314,8 @@ impl ClaudeBridge {
                 reported_busy: None,
                 initial: false,
                 ready_generation: None,
+                idle_connection: None,
+                routing_connection: None,
             };
         }
         let route = match data.operation {
@@ -280,13 +367,25 @@ impl ClaudeBridge {
                 }
                 match event.as_str() {
                     "UserPromptSubmit" => {
+                        state.routing_connection =
+                            ctx.runtime.terminal_connection(&data.instance_id).ok();
                         state.initial = false;
                         state.idle = None;
                         state.busy = true;
                         report_state(ctx, &data.instance_id, state, true, now).await?;
                         return Ok(reply);
                     }
+                    "PreToolUse" | "PostToolUse" => {
+                        // Tool activity revokes a lifecycle idle observation,
+                        // even if an earlier prompt hook was lost.
+                        state.idle_connection = None;
+                        state.routing_connection =
+                            ctx.runtime.terminal_connection(&data.instance_id).ok();
+                        state.revision = state.revision.wrapping_add(1);
+                        return Ok(reply);
+                    }
                     "SessionEnd" => {
+                        state.routing_connection = None;
                         state.initial = false;
                         state.idle = None;
                         state.busy = false;
@@ -294,6 +393,8 @@ impl ClaudeBridge {
                         return Ok(reply);
                     }
                     "SessionStart" => {
+                        state.routing_connection =
+                            ctx.runtime.terminal_connection(&data.instance_id).ok();
                         state.busy = false;
                         state.initial = true;
                         state.idle = None;
@@ -310,6 +411,8 @@ impl ClaudeBridge {
                                 // again, but allow ordinary debounced idle polling.
                                 state.busy = false;
                                 state.idle = Some(Instant::now());
+                                state.idle_connection =
+                                    state.routing_connection.clone().filter(|c| c.is_current());
                                 return Ok(reply);
                             }
                             None => {
@@ -322,6 +425,8 @@ impl ClaudeBridge {
                         }
                         state.busy = false;
                         state.idle = Some(Instant::now());
+                        state.idle_connection =
+                            state.routing_connection.clone().filter(|c| c.is_current());
                         ClaudeRoute::Stop
                     }
                     _ => return Ok(reply),

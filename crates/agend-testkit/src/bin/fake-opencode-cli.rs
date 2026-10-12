@@ -5,14 +5,20 @@ use std::{
     path::PathBuf,
     time::Duration,
 };
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[allow(dead_code)] // Also included as a module by the second-version fixture.
+pub fn main() -> Result<(), Box<dyn std::error::Error>> {
+    run("1.18.34")
+}
+
+pub fn run(version: &'static str) -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args == ["--version"] {
-        println!("1.18.34");
+        println!("{version}");
         return Ok(());
     }
     match args.first().map(String::as_str) {
         Some("serve") => {
+            agend_testkit::fake_agent::canary_credentials::check("opencode")?;
             let port = args
                 .windows(2)
                 .find(|w| w[0] == "--port")
@@ -27,7 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 port,
                 Duration::from_millis(500),
                 Some(data.join("state.json")),
-                "1.18.34",
+                version,
             )?;
             println!(
                 "opencode server listening on http://127.0.0.1:{}",

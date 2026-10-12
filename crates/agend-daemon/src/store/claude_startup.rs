@@ -67,6 +67,9 @@ impl SqliteStore {
         }
         self.call(move |conn| {
             let tx=conn.transaction()?;
+            if super::backend_switch::startup_paused(&tx, &key.startup.instance)? {
+                return Ok(false);
+            }
             let path=format!("$.{}",key.prompt);
             let changed=tx.execute("UPDATE claude_startup SET generation=?1,keys=json_set(keys,?2,json(?3)) \
                 WHERE instance_id=?4 AND session_id=?5 AND launch_id=?6 AND halted=0 \

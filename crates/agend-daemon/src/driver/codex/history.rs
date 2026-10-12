@@ -28,6 +28,40 @@ use serde_json::Value;
 use crate::delivery::render;
 use crate::store::Message;
 
+/// Validate a native history page before treating it as an idle observation.
+pub fn turn_page(page: &Value) -> Result<(&[Value], Option<&str>), String> {
+    let data = page["data"]
+        .as_array()
+        .ok_or("thread/turns/list omitted its data array")?;
+    let cursor = match page.get("nextCursor") {
+        Some(Value::Null) => None,
+        Some(Value::String(cursor)) if !cursor.is_empty() => Some(cursor.as_str()),
+        _ => return Err("thread/turns/list omitted or malformed nextCursor".into()),
+    };
+    Ok((data, cursor))
+}
+
+/// Queued native submissions can still start a turn after terminal history.
+/// Missing fields or a continuation cursor never prove an empty queue.
+pub fn queue_empty(page: &Value) -> bool {
+    page.get("data")
+        .and_then(Value::as_array)
+        .is_some_and(Vec::is_empty)
+        && page.get("nextCursor") == Some(&Value::Null)
+}
+
+/// Only explicit terminal statuses prove that no returned turn is running.
+/// Unknown/malformed statuses fail closed; an empty newly started thread is idle.
+pub fn all_turns_terminal(turns: &[Value]) -> bool {
+    turns.iter().all(|turn| {
+        turn["id"].as_str().is_some_and(|id| !id.is_empty())
+            && matches!(
+                turn["status"].as_str(),
+                Some("completed" | "failed" | "interrupted")
+            )
+    })
+}
+
 /// One user message of the thread.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UserItem {
@@ -187,6 +221,60 @@ pub fn after(turns: &[Value], events: Vec<DriverEvent>, cursor: Option<&str>) ->
         .into_iter()
         .filter(|e| position(turns, &e.cursor).is_some_and(|at| at > from))
         .collect()
+}
+
+/// Read-only execution evidence for an identified, already confirmed message.
+/// A failed/interrupted turn may still have confirmed its input.
+pub fn message_outcome(
+    turns: &[Value],
+    row: &Message,
+) -> agend_core::protocol::client::MessageOutcomeState {
+    use agend_core::protocol::client::MessageOutcomeState as State;
+    if row.state != DeliveryState::Confirmed {
+        return State::Unknown;
+    }
+    let Some(id) = row.turn_id.as_deref() else {
+        return State::Unknown;
+    };
+    let matches: Vec<_> = turns
+        .iter()
+        .filter(|t| t["id"].as_str() == Some(id))
+        .collect();
+    if matches.len() != 1 {
+        return State::Unknown;
+    }
+    let turn = matches[0];
+    let Some(items) = turn["items"].as_array() else {
+        return State::Unknown;
+    };
+    // The isolated queue canary has exactly one input per turn. Multiple
+    // inputs make attribution of the assistant response ambiguous.
+    let users: Vec<_> = items
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| item["type"] == "userMessage")
+        .collect();
+    if users.len() != 1
+        || !UserItem::from_item(id, users[0].1).is_some_and(|u| {
+            u.client_id.as_deref() == Some(row.id.as_str()) && u.text == text_of(row)
+        })
+    {
+        return State::Unknown;
+    }
+    match turn["status"].as_str() {
+        Some("failed" | "interrupted") => State::Failed,
+        Some("inProgress") => State::Running,
+        Some("completed")
+            if turn.get("error") == Some(&Value::Null)
+                && items[users[0].0 + 1..].iter().any(|i| {
+                    i["type"] == "agentMessage"
+                        && i["text"].as_str().is_some_and(|s| !s.trim().is_empty())
+                }) =>
+        {
+            State::Completed
+        }
+        _ => State::Unknown,
+    }
 }
 
 #[cfg(test)]

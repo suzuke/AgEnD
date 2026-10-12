@@ -7,6 +7,9 @@
 //! Must NOT: run commands, read or write files, or register services (the
 //! `agend` crate's `setup` module executes these rules).
 
+pub mod backend;
+pub mod service;
+
 use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
@@ -14,6 +17,12 @@ use crate::model::Backend;
 
 /// The oldest git AgEnD works with: `git merge-tree --write-tree` (2.38).
 pub const GIT_MIN: (u32, u32) = (2, 38);
+
+/// Operator default beneath the OS user's HOME; agents require AGEND_HOME.
+pub const DEFAULT_HOME_DIRECTORY: &str = ".agend";
+
+/// Valid empty configuration. Secrets remain references, never inline values.
+pub const INITIAL_CONFIG: &str = "# AgEnD daemon settings. Instances and teams live in the database.\n# Home is selected by AGEND_HOME, or $HOME/.agend for the operator.\n# Telegram is disabled until configured with agend telegram setup.\n";
 
 /// Less free space than this on the home's disk fails `agend doctor`.
 pub const MIN_FREE_BYTES: u64 = 1 << 30;

@@ -409,10 +409,13 @@ where
         for old in before.attention {
             if let Some(id) = old.attention_id
                 && !id.starts_with("instance-failed:")
+                && !id.starts_with("backend-switch:")
                 && !id.starts_with(crate::handlers::claude_attention::PREFIX)
                 && !id.starts_with(crate::handlers::opencode_attention::PREFIX)
                 && !id.starts_with(crate::handlers::opencode_delivery_attention::PREFIX)
                 && !id.starts_with(crate::handlers::telegram_attention::PREFIX)
+                && !id.starts_with(crate::handlers::backend_version::PREFIX)
+                && !id.starts_with(crate::handlers::backend_registry::PREFIX)
                 && !expected.contains_key(&id)
             {
                 self.fleet.dismiss(&id);

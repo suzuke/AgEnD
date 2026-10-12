@@ -35,7 +35,7 @@
 |---|---|
 | instance、team、repo、workflow | 存 DB；由 CLI／TUI 管理 |
 | instance `lifetime` | `persistent`（daemon 啟動時拉起）或 `ephemeral`（隨 task／team 結束清理） |
-| `config.toml` | 人寫、daemon 只讀：home 路徑、Telegram 等連線設定 |
+| `config.toml` | 人寫、daemon 只讀：Telegram 等連線設定；home 由 AGEND_HOME 或操作員的 $HOME/.agend 決定，不在檔案內重複指定 |
 | secret | 以環境變數或檔案路徑引用，不寫進 DB |
 | 備份 | `agend export`／`agend import`；每天 `VACUUM INTO` 快照，保留 N 份 |
 | workspace | 每個 instance 一個常駐工作目錄；另給 agent 一個會被清掉的暫存目錄 |
@@ -71,3 +71,9 @@ Discord、tray、grok／kiro／agy／shell backend、Windows、deployments、qui
 ```bash
 cat docs/ROADMAP.md
 ```
+
+## 第 13 關 user-service 定義（施工中）
+
+`agend service plan` 唯讀產生 service 定義，macOS 使用 `dev.agend.daemon`，Linux 使用 `agend-daemon.service`。安裝用執行檔規劃在 `$AGEND_HOME/service/agend`，不依賴研究或建置目錄的存活。環境只明列 HOME、AGEND_HOME、PATH；不抄 token。
+
+依 [Apple launchd 文件](https://github.com/apple-oss-distributions/launchd/blob/main/man/launchd.plist.5) 設 `AbandonProcessGroup=true`；依 [systemd 文件](https://github.com/systemd/systemd/blob/main/man/systemd.kill.xml) 設 `KillMode=process`。兩者目的為 daemon 停止／重啟時保留 holder；仍須以實際服務驗收。systemd 以 `/usr/bin/env --` 直接 exec 目標，避免 systemd 第一個 executable word 不接受引號／反斜線路徑的限制；不經 shell。ExecStart／Environment 跳脫與 WorkingDirectory 原始路徑解析分開處理，`%` 不得成為 specifier。註冊、所有權對帳與解除安裝仍在施工。

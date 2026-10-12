@@ -40,6 +40,7 @@ pub fn task_view(task: &TaskInfo) -> TaskView {
 /// protocol state: it comes from the needs-you list).
 pub fn instance_view(agent: &AgentInfo) -> InstanceView {
     InstanceView {
+        program: None,
         instance_id: agent.id.clone(),
         team_id: agent.team_id.clone(),
         backend: agent.backend.as_str().into(),

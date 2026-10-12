@@ -93,6 +93,10 @@ fn handle(body: &str, flags: &[String]) -> Result<(), String> {
 }
 fn main() {
     let flags = std::env::args().skip(1).collect::<Vec<_>>();
+    if flags.first().is_some_and(|arg| arg == "--version") {
+        println!("agend-fake-worker {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
     loop {
         let after = std::fs::read_to_string(".inbox-cursor").ok();
         let args = after

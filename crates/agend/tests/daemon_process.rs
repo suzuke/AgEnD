@@ -117,13 +117,15 @@ fn the_daemon_needs_agend_home_and_takes_no_arguments() {
     let out = Command::new(BIN)
         .arg("daemon")
         .env_remove("AGEND_HOME")
+        .env_remove("HOME")
+        .env_remove("AGEND_INSTANCE")
         .output()
         .unwrap();
     // Gate 9 P3: `home::resolve`, one message and exit 2 everywhere.
     assert_eq!(out.status.code(), Some(2));
     assert_eq!(
         String::from_utf8_lossy(&out.stderr),
-        "agend: AGEND_HOME is not set; choose a directory for AgEnD's data and run: export AGEND_HOME=<absolute path>\n"
+        "agend: AGEND_HOME is not set and HOME is not an absolute path; run: export AGEND_HOME=<absolute path>\n"
     );
 
     let out = Command::new(BIN)

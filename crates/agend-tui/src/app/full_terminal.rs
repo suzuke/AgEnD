@@ -30,6 +30,7 @@ pub struct FullView {
     next: u64,
     input_pending: BTreeSet<String>,
     follow_top: u64,
+    fit_requested: Option<TerminalSize>,
 }
 impl FullView {
     fn new(rows: u16) -> Self {
@@ -45,6 +46,7 @@ impl FullView {
             next: 0,
             input_pending: BTreeSet::new(),
             follow_top: 0,
+            fit_requested: None,
         }
     }
     pub fn follows_live(&self) -> bool {
@@ -60,6 +62,7 @@ impl FullView {
         self.expanded = false;
         self.input_pending.clear();
         self.lost_control = false;
+        self.fit_requested = None;
     }
 }
 impl App {
@@ -236,7 +239,11 @@ impl App {
             } else {
                 readonly_rows
             };
-            if full.viewport.rows != rows {
+            let fit = TerminalSize {
+                rows: readonly_rows,
+                columns: size.columns.clamp(1, 1000),
+            };
+            if full.viewport.rows != rows || full.fit_requested != Some(fit) {
                 self.select_full_viewport(full_view_top(self), rows);
             }
         }
@@ -270,6 +277,10 @@ impl App {
         self.select_full_viewport(selection, rows);
     }
     fn select_full_viewport(&mut self, top: Option<u64>, rows: u16) {
+        let fit = TerminalSize {
+            rows: self.full_rows(false),
+            columns: self.outer_size.columns.clamp(1, 1000),
+        };
         let Some(term) = self.term.as_mut() else {
             return;
         };
@@ -287,6 +298,7 @@ impl App {
         let id = full.id();
         let viewport = TerminalViewport { top, rows };
         let request = TerminalViewportData {
+            fit_size: (!full.expanded && full.fit_requested != Some(fit)).then_some(fit),
             request_id: id.clone(),
             instance_id: term.agent.clone(),
             view_id,
@@ -297,6 +309,9 @@ impl App {
             Ok(()) => {
                 full.selection = id;
                 full.viewport = viewport;
+                if !full.expanded {
+                    full.fit_requested = Some(fit);
+                }
             }
             Err(error) => self.full_send_error(error),
         }

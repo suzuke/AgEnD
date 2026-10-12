@@ -64,7 +64,11 @@ pub(crate) fn prompt(frame: &TerminalFrame, workspace: &str) -> Option<Prompt> {
     claude_startup::classify(&text, workspace, frame.size.columns, frame.size.rows)
 }
 
-pub(crate) async fn run(ctx: Arc<Context>, bridge: Arc<ClaudeBridge>) {
+pub(crate) async fn run(
+    ctx: Arc<Context>,
+    bridge: Arc<ClaudeBridge>,
+    replies: Arc<crate::delivery::Replies>,
+) {
     // This observation cache is never key recovery state. Reconnecting starts
     // a fresh stability window; SQLite alone decides whether a key can run.
     let mut stable = BTreeMap::<String, (String, String, u64, Prompt, Instant)>::new();
@@ -145,9 +149,15 @@ pub(crate) async fn run(ctx: Arc<Context>, bridge: Arc<ClaudeBridge>) {
                 {
                     if known == Some(Prompt::Ready) {
                         let generation = frame.as_ref().unwrap().generation.clone();
-                        if state.ready_generation.as_ref() != Some(&generation) {
+                        if state.ready_generation.as_ref() != Some(&generation)
+                            || state
+                                .idle_connection
+                                .as_ref()
+                                .is_none_or(|c| !c.is_current())
+                        {
                             state.idle = Some(Instant::now());
                             state.ready_generation = Some(generation);
+                            state.idle_connection = connection.clone();
                         }
                     } else {
                         state.idle = None;
@@ -209,6 +219,9 @@ pub(crate) async fn run(ctx: Arc<Context>, bridge: Arc<ClaudeBridge>) {
                 prompt: known.name().into(),
                 attempt,
             };
+            // Register before the atomic pause/reservation check, so prepare
+            // either refuses this key or waits for its native write to finish.
+            let _write = replies.begin(&instance.id);
             if !ctx
                 .store
                 .reserve_claude_startup_key(intent.clone())

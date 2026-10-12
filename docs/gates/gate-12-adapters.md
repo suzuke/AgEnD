@@ -1,13 +1,13 @@
 # 第 12 施工關：其餘 adapter（`adapters`）
 
 > **TL;DR**
-> - A claude、B opencode、C GitHub forge、D Telegram；A／B／D 已合併完成，C 由 #157 交付。
+> - A claude、B opencode、C GitHub forge、D Telegram；A–D 全部完成並合併（#154–#157）。
 > - 第 1–11 施工關已完成並合併；A 段設計 D40 已於 #138 合併（`4390633`）。
-> - 下一步：完成 #157 最終驗收／CI、合併及清理；第 13 關另行確認。
+> - 下一步：第 12 關已收尾；依 2026-10-08 新 goal 推進第 13 關。
 
 ## 狀態
 
-**交付 #157**（2026-10-08）：第 12 關完成狀態於此 PR 完整驗收、CI 通過並合併後生效。A 段基礎 #147–#153 已合併；#154 修正 active Stop idle 與 smoke 工具，[v12 完整真模型 smoke](gate-12a-complete-smoke.md)已回報 PASS，獨立覆核與 CI 通過，#154 已合併為 `a6cdb4c`。使用者已持續授權推進至第 12 關完成，包含必要受控真測及驗證後合併，見 AGENTS.md。以下舊提案與進度條目保留歷史語境。
+**完成**（2026-10-08）：#157 已合併為 `3f406f5`；完整驗收、獨立覆核及四個最終 CI jobs 通過，自有工作樹／分支／target 已清理。A 段基礎 #147–#153 已合併；#154 修正 active Stop idle 與 smoke 工具，[v12 完整真模型 smoke](gate-12a-complete-smoke.md)已回報 PASS，獨立覆核與 CI 通過，#154 已合併為 `a6cdb4c`。使用者已持續授權推進至第 12 關完成，包含必要受控真測及驗證後合併，見 AGENTS.md。以下舊提案與進度條目保留歷史語境。
 
 ## 四段範圍
 
@@ -110,3 +110,5 @@ A 段原限制：不加新的 core 事件或未知提示／忙閒判斷機制。
 A #154、B #155、D #156 已合併並清理；C #157 包含正式 GitHub Forge、嚴格分支保護與 migration 17。原生／真測範圍、未知結果與歷史失敗分別保留於各段頁面；GitHub 真測是 production Forge 子程序，daemon 流水線另由原生案例覆蓋。使用者已實際完成 Telegram 私訊按鈕／多行回覆與群組設定；其他可自動化驗收依持續授權執行。
 
 完整離線重驗：`~/.cargo/bin/cargo xtask accept 12`。該入口涵蓋 Claude／OpenCode／GitHub／Telegram，真模型與外部 API 不會由此入口啟動。#157 必須通過最終驗收、全新覆核與雙平台 CI 才能合併；合併後刪除自有 C worktree／branch／target，保留必要證據及 Claude trust entries。第 13 關不在本次授權內。
+
+2026-10-08 最終收尾：#157 已合併（3f406f5）；完整 accept 12 為 1,105 次通過執行（含 demo 重複）、零失敗。以上合併前條件皆已達成，必要證據保留，清理完成。

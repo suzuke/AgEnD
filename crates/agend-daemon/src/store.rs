@@ -46,22 +46,29 @@
 //! does not match the DB snapshot name pattern.
 
 pub mod attention_read;
+pub mod backend_registry;
+pub mod backend_switch;
 pub mod claude;
 pub mod claude_startup;
 pub mod codex_input;
 pub mod driver_events;
 pub mod github;
 pub mod instances;
+pub mod maintenance;
+pub mod managed_launch;
 pub mod messages;
 mod migrate;
 pub mod opencode;
 pub mod opencode_permissions;
+pub(crate) mod opencode_worktree;
 pub mod pipeline;
 pub mod retention;
 pub mod snapshot;
+pub mod system_versions;
 pub mod task_row;
 pub mod telegram;
 pub mod telegram_inbound;
+pub mod telegram_pairing;
 
 use std::fmt;
 use std::fs::{self, DirBuilder, File, OpenOptions};
@@ -250,6 +257,7 @@ impl From<io::Error> for StoreError {
 /// The SQLite [`Store`]. Dropping it stops the DB thread and waits for it,
 /// so the file lock is released when `drop` returns.
 pub struct SqliteStore {
+    _maintenance: File,
     home: PathBuf,
     jobs: Option<mpsc::Sender<Job>>,
     thread: Option<JoinHandle<()>>,
@@ -270,6 +278,7 @@ impl SqliteStore {
         now_unix_ms: u64,
         migrations: &[Migration],
     ) -> Result<Self, StoreError> {
+        let maintenance = maintenance::reader(home)?;
         let conn = open_connection(home, now_unix_ms, migrations)?;
         let (jobs, mut queue) = mpsc::channel::<Job>(QUEUE_CAPACITY);
         let thread = thread::Builder::new()
@@ -281,6 +290,7 @@ impl SqliteStore {
                 }
             })?;
         Ok(Self {
+            _maintenance: maintenance,
             home: home.to_path_buf(),
             jobs: Some(jobs),
             thread: Some(thread),
@@ -413,6 +423,13 @@ impl SqliteStore {
             .await
     }
 
+    /// Authorize a Codex content write only when no version switch holds it.
+    pub async fn begin_codex_attempt(&self, id: &str, now: u64) -> Result<bool, StoreError> {
+        let id = id.to_owned();
+        self.call(move |conn| messages::begin_codex_attempt(conn, &id, now))
+            .await
+    }
+
     pub async fn message(&self, id: &str) -> Result<Option<Message>, StoreError> {
         let id = id.to_owned();
         self.call(move |conn| messages::get(conn, &id)).await
@@ -466,6 +483,32 @@ impl SqliteStore {
     pub async fn quick_check(&self) -> Result<String, StoreError> {
         self.call(|conn| Ok(conn.query_row("PRAGMA quick_check", [], |r| r.get(0))?))
             .await
+    }
+
+    /// Agent-visible inbox contents. Serialize the read with version-switch
+    /// preparation; administrative message/history reads remain available.
+    pub async fn inbox_messages(
+        &self,
+        to: &str,
+        after: Option<&str>,
+        last: usize,
+    ) -> Result<Option<Vec<Message>>, StoreError> {
+        let (to, after) = (to.to_owned(), after.map(str::to_owned));
+        self.call(move |conn| {
+            if backend_switch::delivery_paused(conn, &to)? {
+                return Err(StoreError::Invalid(
+                    "backend version switch is prepared; inbox delivery is paused until the switch completes or is cancelled".into(),
+                ));
+            }
+            if let Some(after) = after {
+                messages::to_instance_after(conn, &to, &after)
+            } else {
+                let mut rows = messages::to_instance(conn, &to)?;
+                let skip = rows.len().saturating_sub(last);
+                rows.drain(..skip);
+                Ok(Some(rows))
+            }
+        }).await
     }
 
     /// Messages to `to` newer than the one with id `after` (by `seq`), or

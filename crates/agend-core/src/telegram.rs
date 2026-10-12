@@ -1,4 +1,6 @@
 //! Durable Telegram delivery boundary; no network, clock or secret values.
+pub mod pairing;
+
 use crate::protocol::client::AttentionRequiredData;
 use crate::traits::{Notification, NotificationSeverity};
 use alloc::{

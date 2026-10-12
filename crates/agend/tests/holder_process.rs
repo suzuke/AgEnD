@@ -358,6 +358,45 @@ fn a_socket_path_over_100_bytes_is_refused_before_touching_anything() {
     assert!(!deep.exists(), "created directories for a refused holder");
 }
 
+/// A real child is parked before exec, while the launcher removes its home.
+/// The old recursive mkdir recreated it and left a holder after test teardown.
+#[test]
+fn a_late_holder_cannot_recreate_its_removed_home() {
+    use std::io::{BufRead, BufReader, Read, Write};
+    let home = Home::new();
+    let mut child = Command::new("/bin/bash")
+        .args([
+            "-c",
+            "printf 'WAIT\\n'; IFS= read -r release; exec \"$1\" holder late",
+            "launcher",
+            BIN,
+        ])
+        .env("AGEND_HOME", home.path())
+        .env("AGEND_HOLDER_IDLE_EXIT_SECS", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut output = BufReader::new(child.stdout.take().unwrap());
+    let mut ready = String::new();
+    output.read_line(&mut ready).unwrap();
+    assert_eq!(ready, "WAIT\n");
+    std::fs::remove_dir(home.path()).unwrap();
+    child.stdin.take().unwrap().write_all(b"go\n").unwrap();
+    let status = wait_within(&mut child, Duration::from_secs(30));
+    let mut error = String::new();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut error)
+        .unwrap();
+    assert_eq!(status.code(), Some(2), "{error}");
+    assert!(error.contains("AGEND_HOME must already exist"), "{error}");
+    assert!(!home.path().exists(), "late holder resurrected its home");
+}
+
 /// Verifier r1 scenario s8: a stale lock file (as left by a killed holder)
 /// and a tight `is_running` poll while a new holder starts. The probe must
 /// never report a pid other than the new holder's (never 0, never the stale

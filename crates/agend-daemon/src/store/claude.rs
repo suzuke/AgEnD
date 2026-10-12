@@ -99,6 +99,9 @@ pub(crate) fn reserve(
             "instance is not running Claude push in this session",
         ));
     }
+    if super::backend_switch::delivery_paused(&tx, &new.instance_id)? {
+        return Ok(ClaudeReservation::Paused);
+    }
     tx.execute(
         "UPDATE claude_deliveries SET delivery_id = ?2, session_id = ?3, route = ?4, \
         started_at_unix_ms = ?5 WHERE message_id = ?1",

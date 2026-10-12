@@ -444,6 +444,7 @@ fn viewport_and_control_requests_reach_the_peer_once_with_their_ids() {
     let mut sender = client.sender().unwrap();
     sender
         .set_terminal_viewport(TerminalViewportData {
+            fit_size: None,
             request_id: "viewport-2".into(),
             instance_id: "i-1".into(),
             view_id: "view-1".into(),
@@ -647,6 +648,19 @@ fn native_frames_decode_when_payload_precedes_discriminator() {
         panic!("expected frame")
     };
     assert_eq!(data.frame, expected);
+    drop(client);
+    worker.join().unwrap();
+}
+
+#[test]
+fn delivery_receipt_capability_is_rejected_before_io_on_an_old_daemon() {
+    let (_dir, mut client, worker) = peer(&[V1_6], |mut reader, _| {
+        assert!(read(&mut reader).is_none());
+    });
+    assert!(matches!(
+        client.message_delivery("m-1", Duration::from_secs(1)),
+        Err(ClientError::Version(_))
+    ));
     drop(client);
     worker.join().unwrap();
 }

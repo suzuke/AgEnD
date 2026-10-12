@@ -103,3 +103,5 @@ native 與 off-screen draw 共用實際 frame area 更新 App 尺寸；延遲或
 ```
 
 Protocol 1.6 新增共用已讀收據：`mark_attention_read`、`attention_read` 事件與 fleet `read_keys`。識別沿用事項 ID＋問題次數；後續追問重新未讀。daemon 保存 SQLite，TUI 與 Telegram 共用；已讀不等於回答、核准或解除。舊 daemon 仍使用 TUI 本機已讀。
+
+唯讀終端在初次畫面與外層尺寸變化時送一次 optional fit_size；沒有控制者才調整 PTY，按 i 才能輸入。其他視窗持有控制時保留其尺寸，不因收到不同大小的 frame 反覆爭搶尺寸；離開輸入模式會以新的唯讀視窗重新請求。

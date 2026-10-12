@@ -91,6 +91,7 @@ impl DriverFixture for Fixture {
             )
             .unwrap(),
             cancelled: cancel.clone(),
+            endpoint: None,
             model: None,
             history_before: std::cell::RefCell::new(None),
             reconcile_after: Cell::new(0),

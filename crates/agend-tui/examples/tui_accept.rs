@@ -360,6 +360,7 @@ fn disconnect() -> Check {
 
 fn instance(id: &str, state: AgentState) -> InstanceView {
     InstanceView {
+        program: None,
         instance_id: id.into(),
         team_id: "general".into(),
         backend: "claude".into(),

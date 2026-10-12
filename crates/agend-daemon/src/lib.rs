@@ -48,6 +48,8 @@ pub mod scheduler;
 pub mod supervisor;
 
 // adapters
+#[cfg(unix)]
+pub mod backend_versions;
 pub mod driver;
 pub mod forge;
 pub mod git;

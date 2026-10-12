@@ -36,13 +36,26 @@ fn without_hard_links_a_new_database_is_renamed_into_place() {
         (meta.permissions().mode() & 0o777, meta.nlink()),
         (0o600, 1)
     );
-    let names: Vec<String> = fs::read_dir(&home)
+    let mut names: Vec<String> = fs::read_dir(&home)
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
-    assert_eq!(names, vec![DB_FILE.to_owned()], "no build file left");
+    names.sort();
+    assert_eq!(
+        names,
+        vec![".agend-maintenance.lock", DB_FILE],
+        "only the database and permanent home lock remain"
+    );
+    let lock = fs::symlink_metadata(home.join(".agend-maintenance.lock")).unwrap();
+    assert!(lock.is_file());
+    assert_eq!(
+        (lock.permissions().mode() & 0o777, lock.nlink()),
+        (0o600, 1)
+    );
     let reopened = SqliteStore::open(&home, 0).unwrap();
     assert!(block_on(reopened.load_task("T-1")).unwrap().is_some());
+    let retained = fs::symlink_metadata(home.join(".agend-maintenance.lock")).unwrap();
+    assert_eq!((retained.dev(), retained.ino()), (lock.dev(), lock.ino()));
 }
 
 /// The fallback never replaces an `agend.db` that appeared meanwhile, and a

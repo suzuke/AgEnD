@@ -77,6 +77,43 @@ impl<R: Runner> Api<R>
 where
     R::Error: std::fmt::Display,
 {
+    /// Validate the active github.com account without printing credentials or refreshing it.
+    pub async fn authentication_status(&self) -> agend_core::setup::Check {
+        use agend_core::setup::{Check, CheckStatus};
+        let command = [
+            self.executable.to_string_lossy().as_ref(),
+            "auth",
+            "status",
+            "--active",
+            "--hostname",
+            "github.com",
+        ]
+        .iter()
+        .map(|v| quote(v))
+        .collect::<Vec<_>>()
+        .join(" ");
+        let result = self
+            .runner
+            .run(&command, &self.directory.to_string_lossy(), 5_000)
+            .await;
+        let (status, detail) = match result {
+            Ok(r) if !r.timed_out && r.exit_code == Some(0) => (
+                CheckStatus::Ok,
+                "native gh active github.com account check succeeded in daemon environment",
+            ),
+            Ok(r) if !r.timed_out && r.exit_code == Some(1) => (
+                CheckStatus::Fail,
+                "native gh active account check failed; login or connectivity requires attention",
+            ),
+            _ => (
+                CheckStatus::Warn,
+                "native gh authentication observation unavailable or timed out",
+            ),
+        };
+        Check { check: "authentication/github".into(), status, detail: detail.into(),
+            fix: (status != CheckStatus::Ok).then(|| "run gh auth status --active --hostname github.com in the daemon account; repair connectivity or use gh auth login --hostname github.com if login is missing".into()) }
+    }
+
     /// No automatic replay. Explicit github.com paths and literal arguments only.
     pub async fn request(
         &self,
@@ -225,6 +262,45 @@ mod tests {
                 response: response.into(),
                 exit,
             },
+        }
+    }
+    #[tokio::test]
+    async fn native_authentication_check_recovers_without_exposing_credentials() {
+        use agend_core::setup::CheckStatus;
+        use std::os::unix::fs::PermissionsExt;
+        let dir = agend_testkit::tempdir::TempDir::new("gh-doctor-auth").unwrap();
+        let executable = dir.path().join("gh");
+        let captured = dir.path().join("argv");
+        let exit = dir.path().join("exit");
+        std::fs::write(&executable, format!("#!/bin/sh\n[ \"$GH_TOKEN\" = synthetic-secret ] || exit 9\nprintf '%s\\n' \"$@\" > {}\necho synthetic-secret >&2\nexit \"$(/bin/cat {})\"\n", quote(&captured.to_string_lossy()),quote(&exit.to_string_lossy()))).unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let api = Api {
+            executable,
+            directory: dir.path().into(),
+            runner: ProcessRunner {
+                env: BTreeMap::from([
+                    ("PATH".into(), "/usr/bin:/bin".into()),
+                    ("GH_TOKEN".into(), "synthetic-secret".into()),
+                ]),
+            },
+        };
+        for (code, status) in [
+            (1, CheckStatus::Fail),
+            (0, CheckStatus::Ok),
+            (9, CheckStatus::Warn),
+        ] {
+            std::fs::write(&exit, code.to_string()).unwrap();
+            let result = api.authentication_status().await;
+            assert_eq!(result.status, status);
+            assert!(
+                !serde_json::to_string(&result)
+                    .unwrap()
+                    .contains("synthetic-secret")
+            );
+            assert_eq!(
+                std::fs::read_to_string(&captured).unwrap(),
+                "auth\nstatus\n--active\n--hostname\ngithub.com\n"
+            );
         }
     }
     const PULL: &[u8] = include_bytes!("../../../tests/fixtures/github/pull.http");

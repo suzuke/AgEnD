@@ -69,11 +69,22 @@ fn start(id: &str) -> Result<ExitCode, String> {
     paths.check_socket_len()?;
     let idle_exit = idle_exit_from_env()?;
 
-    fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(&paths.dir)
-        .map_err(|e| format!("create {}: {e}", paths.dir.display()))?;
+    // The launcher owns home creation. A holder may reach main only after its
+    // launcher timed out and removed the home; never resurrect that directory.
+    // Create each child separately so removal between steps also fails instead
+    // of recursively recreating a missing ancestor.
+    for dir in [agend_home.join("run"), paths.dir.clone()] {
+        match fs::DirBuilder::new().mode(0o700).create(&dir) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists && dir.is_dir() => {}
+            Err(e) => {
+                return Err(format!(
+                    "create {} (AGEND_HOME must already exist): {e}",
+                    dir.display()
+                ));
+            }
+        }
+    }
     fs::set_permissions(&paths.dir, fs::Permissions::from_mode(0o700))
         .map_err(|e| format!("chmod {}: {e}", paths.dir.display()))?;
 

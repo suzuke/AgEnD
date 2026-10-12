@@ -389,3 +389,63 @@ fn identical_attention_recurrence_has_a_durable_revision_without_changing_task_c
         version
     );
 }
+
+#[test]
+fn github_diagnostic_scope_keeps_active_tasks_pinned_when_team_default_changes() {
+    block_on(async {
+        let root = TempDir::new("github-doctor-scope").unwrap();
+        let store = agend_daemon::store::SqliteStore::open(root.path(), 0).unwrap();
+        let mut workflow = Workflow::builtin_code();
+        workflow.id = "diagnostic-github".into();
+        for stage in &mut workflow.stages {
+            if let agend_core::pipeline::workflow::Stage::Submit { forge } = &mut stage.stage {
+                *forge = "github".into();
+            }
+        }
+        store.save_workflow(&workflow).await.unwrap();
+        store
+            .save_workflow(&Workflow::builtin_research())
+            .await
+            .unwrap();
+        store
+            .add_team(&agend_core::runtime_records::Team {
+                id: "diagnostic".into(),
+                repo: Some("/repo".into()),
+                default_workflow: "research".into(),
+            })
+            .await
+            .unwrap();
+        assert!(store.github_diagnostic_scopes().await.unwrap().is_empty());
+        store
+            .set_team_workflow("diagnostic", &workflow.id)
+            .await
+            .unwrap();
+        assert_eq!(
+            store.github_diagnostic_scopes().await.unwrap(),
+            vec!["/repo"]
+        );
+        let task = Task::new(
+            "diagnostic-task",
+            "fixture",
+            "diagnostic",
+            &workflow.id,
+            workflow.version,
+        );
+        let state = PipelineState::new(
+            &task.id,
+            agend_daemon::pipeline::validate(workflow).unwrap(),
+        );
+        store
+            .create_pipeline_task(&task, &serde_json::to_string(&state.snapshot()).unwrap(), 0)
+            .await
+            .unwrap();
+        store
+            .set_team_workflow("diagnostic", "research")
+            .await
+            .unwrap();
+        assert_eq!(
+            store.github_diagnostic_scopes().await.unwrap(),
+            vec!["/repo"]
+        );
+    });
+}

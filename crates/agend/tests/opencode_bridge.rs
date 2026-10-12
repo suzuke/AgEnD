@@ -225,7 +225,7 @@ fn run(crash: bool) {
             .then_some(())
     });
     daemon.interrupt().unwrap();
-    let store = SqliteStore::open(&home, 0).unwrap();
+    let store = std::sync::Arc::new(SqliteStore::open(&home, 0).unwrap());
     let row = block_on(store.message("native-first")).unwrap().unwrap();
     assert_eq!(row.state, DeliveryState::Confirmed);
     let instance = block_on(store.instance("open")).unwrap().unwrap();
@@ -255,12 +255,31 @@ fn run(crash: bool) {
             .len(),
         1
     );
+    let driver = agend_daemon::driver::opencode::OpenCodeDriver::new(store.clone());
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    assert!(runtime.block_on(driver.session_idle("open")).unwrap());
+    let original_session = instance.session_id.as_deref().unwrap();
+    block_on(store.set_session_id("open", "ses_foreign")).unwrap();
+    assert!(runtime.block_on(driver.session_idle("open")).is_err());
+    block_on(store.set_session_id("open", original_session)).unwrap();
+    api.submit("idle-probe", "run: echo idle-probe", None)
+        .unwrap();
+    wait(&home, || api.busy().unwrap().then_some(()));
+    assert!(!runtime.block_on(driver.session_idle("open")).unwrap());
+    api.abort().unwrap();
+    wait(&home, || (!api.busy().unwrap()).then_some(()));
+    assert!(runtime.block_on(driver.session_idle("open")).unwrap());
     lab.stop_all_holders();
     wait(&home, || {
         TcpStream::connect(("127.0.0.1", port))
             .is_err()
             .then_some(())
     });
+    assert!(runtime.block_on(driver.session_idle("open")).is_err());
+    drop(driver);
     drop(store);
 }
 

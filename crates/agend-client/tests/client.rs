@@ -121,7 +121,7 @@ fn a_version_mismatch_is_not_retried() {
     assert!(started.elapsed() < Duration::from_secs(1));
     assert_eq!(
         error.to_string(),
-        "client protocol version mismatch: local supports 2.0, remote supports 1.3, 1.4, 1.5, 1.6"
+        "client protocol version mismatch: local supports 2.0, remote supports 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9"
     );
 }
 
@@ -255,6 +255,7 @@ fn events_follow_the_fleet_view_and_a_bad_cursor_is_a_gap() {
 
 fn instance(id: &str) -> agend_core::protocol::client::InstanceView {
     agend_core::protocol::client::InstanceView {
+        program: None,
         instance_id: id.into(),
         team_id: "general".into(),
         backend: "claude".into(),

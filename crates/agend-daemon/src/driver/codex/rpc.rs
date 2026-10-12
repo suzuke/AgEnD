@@ -149,28 +149,21 @@ impl Conn {
 
     /// The next message, or `None` after [`POLL`] without one.
     pub fn read_message(&mut self) -> Result<Option<Incoming>, RpcError> {
-        loop {
-            match self.ws.read() {
-                Ok(Message::Text(text)) => {
-                    let Ok(value) = serde_json::from_str::<Value>(text.as_str()) else {
-                        continue;
-                    };
-                    if let Some(incoming) = Incoming::parse(value) {
-                        return Ok(Some(incoming));
-                    }
-                }
-                Ok(Message::Close(_)) => return Err(transport("the app-server closed it")),
-                Ok(_) => {}
-                Err(tungstenite::Error::Io(e))
-                    if matches!(
-                        e.kind(),
-                        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
-                    ) =>
-                {
-                    return Ok(None);
-                }
-                Err(e) => return Err(transport(e)),
+        match self.ws.read() {
+            Ok(Message::Text(text)) => Ok(serde_json::from_str::<Value>(text.as_str())
+                .ok()
+                .and_then(Incoming::parse)),
+            Ok(Message::Close(_)) => Err(transport("the app-server closed it")),
+            Ok(_) => Ok(None),
+            Err(tungstenite::Error::Io(e))
+                if matches!(
+                    e.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                ) =>
+            {
+                Ok(None)
             }
+            Err(e) => Err(transport(e)),
         }
     }
 }

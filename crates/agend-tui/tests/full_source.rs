@@ -135,6 +135,7 @@ fn full_source_preserves_control_identity_and_owner_refusals() {
     assert!(!fake.parser.received().contains("DENIED"));
     assert!(a.poll().unwrap().is_empty());
     b.terminal_viewport(TerminalViewportData {
+        fit_size: None,
         request_id: "viewport".into(),
         instance_id: parser::ID.into(),
         view_id: frame_b.view_id,

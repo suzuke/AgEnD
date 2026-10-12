@@ -25,13 +25,15 @@
 //! tokio runtime.
 //!
 //! Must NOT: own the PTY or the agent process, send `Shutdown` except from
-//! [`HolderRuntime::stop`] / [`shutdown_holder`], or connect to a holder to
+//! [`HolderRuntime::stop`] / [`HolderRuntime::stop_reserved`] /
+//! [`shutdown_holder`], or connect to a holder to
 //! find out whether it runs.
 
 pub mod client;
 pub mod env;
 pub mod files;
 pub mod link;
+mod managed_stop;
 pub mod shims;
 pub mod terminal;
 
@@ -88,6 +90,7 @@ pub struct HolderRuntime {
 struct Inner {
     home: PathBuf,
     agend: PathBuf,
+    executable_binding: Result<crate::backend_versions::ExecutableBinding, String>,
     daemon_env: Vec<(String, String)>,
     sink: EventSink,
     links: Mutex<BTreeMap<String, link::Link>>,
@@ -104,10 +107,27 @@ impl HolderRuntime {
         daemon_env: Vec<(String, String)>,
         sink: EventSink,
     ) -> Self {
+        Self::with_binding(
+            home,
+            agend,
+            daemon_env,
+            sink,
+            crate::backend_versions::ExecutableBinding::capture_running(agend),
+        )
+    }
+
+    pub(crate) fn with_binding(
+        home: &Path,
+        agend: &Path,
+        daemon_env: Vec<(String, String)>,
+        sink: EventSink,
+        executable_binding: Result<crate::backend_versions::ExecutableBinding, String>,
+    ) -> Self {
         Self {
             inner: Arc::new(Inner {
                 home: home.to_path_buf(),
                 agend: agend.to_path_buf(),
+                executable_binding,
                 daemon_env,
                 sink,
                 links: Mutex::new(BTreeMap::new()),
@@ -124,11 +144,101 @@ impl HolderRuntime {
         &self.inner.agend
     }
 
+    /// Verifies managed artifacts using the same cwd and PATH as agent spawn.
+    pub async fn check_backend_program(
+        &self,
+        backend: agend_core::model::Backend,
+        program: &str,
+        working_directory: &str,
+    ) -> Result<Option<agend_core::setup::backend::ImportedBackend>, RuntimeError> {
+        self.backend_program(backend, program, working_directory, true)
+            .await
+    }
+
+    /// Identifies managed bytes for inherited-holder reconciliation, not new spawn admission.
+    pub async fn inspect_backend_program(
+        &self,
+        backend: agend_core::model::Backend,
+        program: &str,
+        working_directory: &str,
+    ) -> Result<Option<agend_core::setup::backend::ImportedBackend>, RuntimeError> {
+        self.backend_program(backend, program, working_directory, false)
+            .await
+    }
+
+    async fn backend_program(
+        &self,
+        backend: agend_core::model::Backend,
+        program: &str,
+        working_directory: &str,
+        admit: bool,
+    ) -> Result<Option<agend_core::setup::backend::ImportedBackend>, RuntimeError> {
+        let inner = Arc::clone(&self.inner);
+        let program = program.to_owned();
+        let working_directory = working_directory.to_owned();
+        blocking(move || {
+            let path = format!(
+                "{}:{}",
+                inner.home.join("bin").display(),
+                env::launch_path(&inner.home, &inner.daemon_env.iter().cloned().collect())
+            );
+            if admit {
+                crate::backend_versions::check_launch(
+                    &inner.home,
+                    backend.as_str(),
+                    &program,
+                    Path::new(&working_directory),
+                    &path,
+                    &inner.agend,
+                    inner.executable_binding.as_ref(),
+                )
+            } else {
+                crate::backend_versions::inspect_launch(
+                    &inner.home,
+                    backend.as_str(),
+                    &program,
+                    Path::new(&working_directory),
+                    &path,
+                )
+            }
+            .map_err(err)
+        })
+        .await
+    }
+
+    /// Probe the configured external program using this daemon's launch environment.
+    /// Does not describe the image already loaded by a surviving holder.
+    pub async fn observe_backend_version(
+        &self,
+        id: &str,
+        backend: agend_core::model::Backend,
+        program: &str,
+        working_directory: &str,
+    ) -> Result<Option<agend_core::setup::backend::observation::SystemBackendVersion>, RuntimeError>
+    {
+        let inner = Arc::clone(&self.inner);
+        let id = id.to_owned();
+        let program = program.to_owned();
+        let cwd = working_directory.to_owned();
+        blocking(move || {
+            let environment = env::agent_env(&inner.home, &id, backend, inner.daemon_env.clone());
+            crate::backend_versions::system_version::observe(
+                &inner.home,
+                backend,
+                &program,
+                Path::new(&cwd),
+                &environment,
+            )
+            .map_err(err)
+        })
+        .await
+    }
+
     /// Starts a holder for `launch` and its agent.
     pub async fn start(&self, launch: &HolderLaunch) -> Result<Started, RuntimeError> {
         let inner = Arc::clone(&self.inner);
         let launch = launch.clone();
-        blocking(move || inner.start(&launch, None)).await
+        blocking(move || inner.start(&launch, None, None)).await
     }
 
     /// Sets a recorded startup geometry before Spawn, only for a new holder.
@@ -142,6 +252,7 @@ impl HolderRuntime {
                     rows: 24,
                     columns: 100,
                 }),
+                None,
             )
         })
         .await
@@ -154,7 +265,56 @@ impl HolderRuntime {
         let inner = Arc::clone(&self.inner);
         let launch = launch.clone();
         blocking(move || {
-            let (attached, generation) = inner.attach(&launch, None)?;
+            let (attached, generation) = inner.attach(&launch, None, None)?;
+            Ok(Started {
+                handle: inner.handle(&launch.instance_id, pid),
+                attached,
+                generation,
+            })
+        })
+        .await
+    }
+
+    /// Uses an already persisted reservation. Artifact admission is the caller's responsibility.
+    pub async fn start_reserved(
+        &self,
+        intent: &agend_core::runtime_records::ManagedLaunchIntent,
+        claude_geometry: bool,
+    ) -> Result<Started, RuntimeError> {
+        let launch = reserved_launch(intent)?;
+        let binding = intent.binding.clone();
+        let inner = Arc::clone(&self.inner);
+        blocking(move || {
+            inner.start(
+                &launch,
+                claude_geometry.then_some(agend_core::protocol::terminal::TerminalSize {
+                    rows: 24,
+                    columns: 100,
+                }),
+                Some(binding),
+            )
+        })
+        .await
+    }
+
+    /// Only queries the existing holder's original binding; never sends Spawn.
+    pub async fn attach_reserved(
+        &self,
+        intent: &agend_core::runtime_records::ManagedLaunchIntent,
+        pid: u32,
+    ) -> Result<Started, RuntimeError> {
+        let launch = reserved_launch(intent)?;
+        let binding = intent.binding.clone();
+        let inner = Arc::clone(&self.inner);
+        blocking(move || {
+            let (attached, generation) = inner.attach(
+                &launch,
+                None,
+                Some(link::LaunchProof {
+                    binding,
+                    reconnect: true,
+                }),
+            )?;
             Ok(Started {
                 handle: inner.handle(&launch.instance_id, pid),
                 attached,
@@ -169,6 +329,94 @@ impl HolderRuntime {
         let inner = Arc::clone(&self.inner);
         let id = id.to_owned();
         blocking(move || inner.stop(&id)).await
+    }
+
+    /// Query native binding without mutating the long-lived runtime connection.
+    pub async fn verify_reserved(
+        &self,
+        intent: &agend_core::runtime_records::ManagedLaunchIntent,
+        holder_pid: u32,
+        agent_pid: u32,
+    ) -> Result<(), RuntimeError> {
+        reserved_launch(intent)?;
+        let id = &intent.instance_id;
+        if !managed_stop::check_holder(&self.inner.home, id, holder_pid)? {
+            return Err(err("managed holder is absent"));
+        }
+        let (connection, reply, writer) = {
+            let links = self.inner.lock_links();
+            let link = links
+                .get(id)
+                .ok_or_else(|| err("managed holder link missing"))?;
+            let connection = link
+                .terminal_connection()
+                .map_err(|e| err(format!("{e:?}")))?;
+            let (reply, writer) = link.binding_request();
+            (connection, reply, writer)
+        };
+        let mut line = serde_json::to_vec(
+            &agend_core::protocol::holder::HolderRequest::GetLaunchBinding {
+                instance_id: id.clone(),
+            },
+        )
+        .map_err(|e| err(e.to_string()))?;
+        line.push(b'\n');
+        if !blocking(move || Ok(link::send_line(&writer, &line))).await? {
+            return Err(err("managed binding query write failed"));
+        }
+        let data = blocking(move || {
+            let mut reply = reply;
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                match reply.try_recv() {
+                    Ok(data) => return Ok(data),
+                    Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+                        return Err(err("managed binding connection ended"));
+                    }
+                    Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {}
+                }
+                if std::time::Instant::now() >= deadline {
+                    return Err(err("managed binding query timed out"));
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        })
+        .await?;
+        if !connection.is_current()
+            || data.instance_id != *id
+            || data.binding.as_deref() != Some(intent.binding.as_str())
+            || data.process_id != Some(agent_pid)
+            || !managed_stop::check_holder(&self.inner.home, id, holder_pid)?
+        {
+            return Err(err("managed launch identity changed"));
+        }
+        Ok(())
+    }
+
+    /// Stop only the holder/agent identified by this persisted launch. Caller
+    /// must first drain delivery and serialize starts for this instance. A
+    /// refusal preserves the process, but may detach its runtime connection.
+    pub async fn stop_reserved(
+        &self,
+        intent: &agend_core::runtime_records::ManagedLaunchIntent,
+        holder_pid: u32,
+        agent_pid: u32,
+    ) -> Result<(), RuntimeError> {
+        reserved_launch(intent)?;
+        if holder_pid <= 1 || agent_pid <= 1 {
+            return Err(err("managed stop requires exact holder and agent PIDs"));
+        }
+        let inner = Arc::clone(&self.inner);
+        let intent = intent.clone();
+        blocking(move || {
+            managed_stop::check_holder(&inner.home, &intent.instance_id, holder_pid)?;
+            let link = inner.lock_links().remove(&intent.instance_id);
+            if let Some(link) = link {
+                link.close();
+            }
+            managed_stop::stop(&inner.home, &intent, holder_pid, agent_pid)
+        })
+        .await
     }
 
     /// Every running holder under the home, from the lock files alone.
@@ -263,6 +511,22 @@ async fn blocking<T: Send + 'static>(
     }
 }
 
+fn reserved_launch(
+    intent: &agend_core::runtime_records::ManagedLaunchIntent,
+) -> Result<HolderLaunch, RuntimeError> {
+    if !agend_core::protocol::client::is_uuid_v4(&intent.binding) {
+        return Err(err("invalid persisted launch binding"));
+    }
+    Ok(HolderLaunch {
+        instance_id: intent.instance_id.clone(),
+        backend: agend_core::model::Backend::parse(&intent.artifact.backend)
+            .ok_or_else(|| err("invalid managed backend"))?,
+        executable: intent.executable.clone(),
+        args: intent.args.clone(),
+        working_directory: intent.working_directory.clone(),
+    })
+}
+
 impl Inner {
     fn lock_links(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, link::Link>> {
         self.links.lock().unwrap_or_else(|e| e.into_inner())
@@ -280,6 +544,7 @@ impl Inner {
         &self,
         launch: &HolderLaunch,
         initial_size: Option<agend_core::protocol::terminal::TerminalSize>,
+        binding: Option<String>,
     ) -> Result<Started, RuntimeError> {
         let id = &launch.instance_id;
         validate_id(id).map_err(err)?;
@@ -329,7 +594,14 @@ impl Inner {
         if let Err(e) = reaper {
             return Err(err(format!("cannot start the reaper thread: {e}")));
         }
-        let (attached, generation) = self.attach(launch, initial_size)?;
+        let (attached, generation) = self.attach(
+            launch,
+            initial_size,
+            binding.map(|binding| link::LaunchProof {
+                binding,
+                reconnect: false,
+            }),
+        )?;
         Ok(Started {
             handle: self.handle(id, pid),
             attached,
@@ -341,6 +613,7 @@ impl Inner {
         &self,
         launch: &HolderLaunch,
         initial_size: Option<agend_core::protocol::terminal::TerminalSize>,
+        proof: Option<link::LaunchProof>,
     ) -> Result<(Attached, u64), RuntimeError> {
         let id = launch.instance_id.clone();
         // The old link first: a new connection takes over the old one, which
@@ -349,11 +622,21 @@ impl Inner {
         if let Some(old) = old {
             old.close();
         }
+        let mut environment =
+            env::agent_env(&self.home, &id, launch.backend, self.daemon_env.clone());
+        crate::backend_versions::canary_scope::isolate_environment(
+            &self.home,
+            &id,
+            launch.backend.as_str(),
+            Path::new(&launch.working_directory),
+            &mut environment,
+        )
+        .map_err(err)?;
         let spawn = SpawnData {
             instance_id: id.clone(),
             program: launch.executable.clone(),
             args: launch.args.clone(),
-            env: env::agent_env(&self.home, &id, launch.backend, self.daemon_env.clone()),
+            env: environment,
             working_directory: launch.working_directory.clone(),
         };
         let generation = self.next_generation.fetch_add(1, Ordering::SeqCst);
@@ -362,6 +645,7 @@ impl Inner {
             id.clone(),
             generation,
             Some(spawn),
+            proof,
             initial_size,
             Arc::clone(&self.sink),
         )

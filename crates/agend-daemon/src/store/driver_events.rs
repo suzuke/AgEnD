@@ -86,6 +86,28 @@ pub(super) fn append(
     })
 }
 impl SqliteStore {
+    /// One DB-thread snapshot; absent/expired/ambiguous history is not completion.
+    pub async fn claude_message_outcome(
+        &self,
+        message_id: &str,
+    ) -> Result<Option<String>, StoreError> {
+        let id = message_id.to_owned();
+        self.call(move |conn| {
+            let Some(message) = super::messages::get(conn, &id)? else { return Ok(None); };
+            if message.state != agend_core::model::DeliveryState::Confirmed { return Ok(None); }
+            let Some(delivery) = super::claude::get(conn, &id)? else { return Ok(None); };
+            let Some(attempt) = delivery.attempt.as_ref() else { return Ok(None); };
+            let current = super::instances::get(conn, &message.to_instance)?;
+            if !current.is_some_and(|i| i.backend == agend_core::model::Backend::Claude
+                && i.status == super::InstanceStatus::Running && i.session_id.as_deref() == Some(&attempt.session_id)
+                && i.id == delivery.instance_id) { return Ok(None); }
+            let mut query = conn.prepare(&format!("SELECT {COLUMNS} FROM driver_events WHERE instance_id=?1 AND session_id=?2 AND occurred_at_unix_ms>=?3 AND kind IN ('AgendAck','PostToolUse','Stop','SessionEnd','SessionStart') ORDER BY seq LIMIT 65"))?;
+            let events = query.query_map(rusqlite::params![delivery.instance_id,attempt.session_id,ms(attempt.started_at_unix_ms)?], row)?.collect::<Result<Vec<_>,_>>()?;
+            if events.len() > 64 { return Ok(None); }
+            Ok(crate::driver::claude::outcome::completed(&delivery, &events))
+        }).await
+    }
+
     /// Receipt waiting may follow the latest daemon-derived state, but this
     /// observation never grants permission to write content or replay an intent.
     pub(crate) async fn claude_reported_idle(

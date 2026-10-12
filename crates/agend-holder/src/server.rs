@@ -112,6 +112,7 @@ struct Agent {
 }
 
 mod control;
+mod launch_binding;
 
 struct State {
     control: Option<String>,
@@ -123,6 +124,8 @@ struct State {
     /// replaced (as opposed to dropped for lagging).
     latest_conn: u64,
     agent: Option<Agent>,
+    spawned_once: bool,
+    launch_binding: Option<String>,
     exited: Option<ExitedData>,
     output_done: bool,
     /// Last time a connection opened or closed, or the agent ended.
@@ -170,6 +173,8 @@ pub fn serve(listener: UnixListener, config: Config) -> Stop {
             next_conn: 1,
             latest_conn: 0,
             agent: None,
+            spawned_once: false,
+            launch_binding: None,
             exited: None,
             output_done: false,
             last_seen: Instant::now(),
@@ -206,6 +211,7 @@ pub fn serve(listener: UnixListener, config: Config) -> Stop {
         }
         holder.changed.wait_for(&mut state, tick);
     };
+    state.stop = Some(stop);
     holder.log(&format!("stopping: {stop:?}"));
     stop_agent(&holder, state);
     stop
@@ -454,6 +460,10 @@ fn connection(holder: &Arc<Holder>, stream: UnixStream) {
 
     let id = {
         let mut state = holder.lock();
+        if state.stop.is_some() {
+            let _ = direct.write_all(&frame(&error("stopping", "holder is stopping")));
+            return;
+        }
         let id = state.next_conn;
         state.next_conn += 1;
         if let Some(old) = state.conn.take() {
@@ -554,9 +564,16 @@ fn handle(
     state: &mut State,
     request: HolderRequest,
 ) -> Option<HolderResponse> {
+    if state.stop.is_some() {
+        return Some(error("stopping", "holder is stopping"));
+    }
     match request {
         HolderRequest::Hello { .. } => Some(error("unexpected_hello", "already said hello")),
         HolderRequest::Spawn { data } => Some(spawn_agent(holder, state, &data)),
+        HolderRequest::SpawnBound { data } => Some(launch_binding::spawn(holder, state, data)),
+        HolderRequest::GetLaunchBinding { instance_id } => {
+            Some(launch_binding::read(holder, state, &instance_id))
+        }
         HolderRequest::Resize {
             data: ResizeData { rows, columns },
         } => {
@@ -664,7 +681,10 @@ fn write_pty(state: &State, bytes: Vec<u8>) -> Option<HolderResponse> {
 }
 
 fn spawn_agent(holder: &Arc<Holder>, state: &mut State, data: &SpawnData) -> HolderResponse {
-    if state.agent.is_some() {
+    if state.stop.is_some() {
+        return error("stopping", "holder is stopping");
+    }
+    if state.spawned_once {
         return error(
             "already_spawned",
             "this holder already ran its agent; it never starts another",
@@ -685,6 +705,7 @@ fn spawn_agent(holder: &Arc<Holder>, state: &mut State, data: &SpawnData) -> Hol
         Err(message) => return error("spawn_failed", message),
     };
     let pid = spawned.pid;
+    state.spawned_once = true;
     let input = pty::start_writer(spawned.writer);
     let _ = state.replies.set(input.clone());
     state.agent = Some(Agent {

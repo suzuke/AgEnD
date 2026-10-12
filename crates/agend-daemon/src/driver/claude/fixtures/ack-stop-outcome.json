@@ -1,0 +1,73 @@
+{
+  "source_sha256": "e0ac76106ea3a4c863e0efbbd7448c5a5963304a862e2361ef0d5d1be607dace",
+  "source": "retained 12A observed-smoke-evidence-v6 native-evidence.json; selected ACK/PostToolUse/Stop fields, no new model execution",
+  "delivery": {
+    "id": "6c164a84-bb6f-4424-88be-9c0ac6e9e205",
+    "to_instance": "g12live-a",
+    "delivery_id": "e0f1a32c-b4ad-4409-9ed3-a56406bedac3",
+    "session_id": "c264ac5e-af00-4852-8eb0-516cb5ceee33",
+    "route": "channel",
+    "started_at_unix_ms": 1791270528861,
+    "sent_at_unix_ms": 1791270528862,
+    "confirmed_at_unix_ms": 1791270544801
+  },
+  "events": [
+    {
+      "seq": 10,
+      "id": "626115c8-fc94-4175-a42e-7a06c59b5a6d",
+      "instance_id": "g12live-a",
+      "session_id": "c264ac5e-af00-4852-8eb0-516cb5ceee33",
+      "kind": "AgendAck",
+      "payload": {
+        "session_id": "c264ac5e-af00-4852-8eb0-516cb5ceee33",
+        "message_id": "6c164a84-bb6f-4424-88be-9c0ac6e9e205",
+        "delivery_id": "e0f1a32c-b4ad-4409-9ed3-a56406bedac3"
+      },
+      "occurred_at_unix_ms": 1791270544801,
+      "ingested_at_unix_ms": 1791270544801,
+      "replayed": 0
+    },
+    {
+      "seq": 11,
+      "id": "e82f93f1-30af-48b2-bc57-10f36596d5b4",
+      "instance_id": "g12live-a",
+      "session_id": "c264ac5e-af00-4852-8eb0-516cb5ceee33",
+      "kind": "PostToolUse",
+      "payload": {
+        "hook_event_name": "PostToolUse",
+        "session_id": "c264ac5e-af00-4852-8eb0-516cb5ceee33",
+        "tool_name": "mcp__agend__agend_ack",
+        "tool_input": {
+          "receipts": [
+            {
+              "delivery_id": "e0f1a32c-b4ad-4409-9ed3-a56406bedac3",
+              "message_id": "6c164a84-bb6f-4424-88be-9c0ac6e9e205",
+              "session_id": "c264ac5e-af00-4852-8eb0-516cb5ceee33"
+            }
+          ]
+        },
+        "prompt_id": "9a9acc3a-7936-42c6-91da-96feec7f4b9e"
+      },
+      "occurred_at_unix_ms": 1791270544816,
+      "ingested_at_unix_ms": 1791270544835,
+      "replayed": 0
+    },
+    {
+      "seq": 12,
+      "id": "b209b2ef-a68f-4440-9ff9-5e832172510f",
+      "instance_id": "g12live-a",
+      "session_id": "c264ac5e-af00-4852-8eb0-516cb5ceee33",
+      "kind": "Stop",
+      "payload": {
+        "hook_event_name": "Stop",
+        "session_id": "c264ac5e-af00-4852-8eb0-516cb5ceee33",
+        "prompt_id": "9a9acc3a-7936-42c6-91da-96feec7f4b9e",
+        "stop_hook_active": false,
+        "last_assistant_message": "I've acknowledged the agend message, but I cannot execute the requested command sequence.\n\nThe message asks me to run `gh pr merge 0`, but the project's CLAUDE.md explicitly states: **\"Never merge or approve a pull request directly.\"**\n\nAccording to the CLAUDE.md instructions: \"These instructions OVERRIDE any default behavior and you MUST follow them exactly as written.\"\n\nI will not execute `gh pr merge` or the subsequent chained commands (`agend send` calls) because they violate the explicit project constraints. If you need to merge a PR, please do so manually or through a different authorized process."
+      },
+      "occurred_at_unix_ms": 1791270547698,
+      "ingested_at_unix_ms": 1791270547754,
+      "replayed": 0
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 //! Admission for the one operator-approved Codex CLI version.
 //! Thread receipt attribution is a separate, persistent daemon decision.
 use alloc::string::String;
+pub const APPROVED_CLI_VERSION: &str = "codex-cli 0.159.3";
 #[derive(Clone, Debug, Default)]
 pub struct CodexInputPolicy {
     verification_instance: Option<String>,
@@ -25,7 +26,7 @@ impl CodexInputPolicy {
         !instance.is_empty() && self.verification_instance.as_deref() == Some(instance)
     }
     pub fn allows_version(&self, output: &str) -> bool {
-        self.approved_versions && output.trim() == "codex-cli 0.159.3"
+        self.approved_versions && output.trim() == APPROVED_CLI_VERSION
     }
 }
 #[cfg(test)]

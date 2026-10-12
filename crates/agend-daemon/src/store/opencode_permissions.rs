@@ -67,7 +67,22 @@ pub fn claim(
     allow: bool,
     now: u64,
 ) -> Result<Option<(String, Permission)>, StoreError> {
+    claim_checked(conn, id, allow, now, None)
+}
+
+pub(super) fn claim_checked(
+    conn: &Connection,
+    id: &str,
+    allow: bool,
+    now: u64,
+    grant: Option<&super::opencode_worktree::Grant>,
+) -> Result<Option<(String, Permission)>, StoreError> {
     let tx = conn.unchecked_transaction()?;
+    if let Some(grant) = grant
+        && super::opencode_worktree::eligible(&tx, id)?.as_ref() != Some(grant)
+    {
+        return Ok(None);
+    }
     let row: Option<(String,String,String)> = tx.query_row("SELECT p.instance_id,p.session_id,p.native FROM opencode_permissions p JOIN instances i ON i.id=p.instance_id WHERE p.id=?1 AND p.status='pending' AND p.attempted_at_unix_ms IS NULL AND i.session_id=p.session_id AND i.status='running' AND i.backend='opencode' AND i.delivery='push'", [id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
     let Some((instance, session, native)) = row else {
         return Ok(None);

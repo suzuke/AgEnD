@@ -1,0 +1,29 @@
+{
+  "type": "a{sv}",
+  "data": [
+    {
+      "LoadState": {
+        "type": "s",
+        "data": "loaded"
+      },
+      "ActiveState": {
+        "type": "s",
+        "data": "inactive"
+      },
+      "FragmentPath": {
+        "type": "s",
+        "data": "/root/.config/systemd/user/agend-daemon.service"
+      },
+      "DropInPaths": {
+        "type": "as",
+        "data": [
+          "/root/.config/systemd/user/agend-daemon.service.d/override.conf"
+        ]
+      },
+      "Transient": {
+        "type": "b",
+        "data": false
+      }
+    }
+  ]
+}

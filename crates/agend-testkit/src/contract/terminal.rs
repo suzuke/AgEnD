@@ -200,6 +200,7 @@ impl Window {
         self.client
             .send(&ClientRequest::SetTerminalViewport {
                 data: TerminalViewportData {
+                    fit_size: None,
                     request_id: id.into(),
                     instance_id: self.frame.instance_id.clone(),
                     view_id: self.frame.view_id.clone(),

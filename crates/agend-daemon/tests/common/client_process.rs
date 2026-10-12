@@ -315,6 +315,10 @@ impl InProcess {
             ))
             .expect("pipeline");
         let context = Arc::new(Context {
+            pairing: agend_daemon::notifier::pairing_service::PairingService::new(
+                self.store.clone(),
+                false,
+            ),
             pipeline,
             fleet: Arc::clone(&self.fleet),
             runtime: HolderRuntime::new(
@@ -341,6 +345,112 @@ impl Drop for InProcess {
             self.runtime.block_on(server.stop());
         }
         let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
+/// Real server writes remain tracked through kernel socket backpressure.
+pub fn inbox_reply_drain() {
+    use agend_core::{
+        policy::busy::BusyLevel,
+        protocol::client::{AgentCommand, ClientCommandData, MAX_MESSAGE_BYTES},
+    };
+    use agend_daemon::store::NewMessage;
+    let fx = InProcess::start();
+    let replies = fx.server.as_ref().unwrap().delivery_replies();
+    let body = "x".repeat(MAX_MESSAGE_BYTES);
+    for i in 0..20 {
+        block_on(fx.store.claim_message(
+            &NewMessage {
+                id: format!("drain-{i}"),
+                from_instance: "operator".into(),
+                to_instance: "drain".into(),
+                task_id: None,
+                body: body.clone(),
+                level: BusyLevel::Queue,
+            },
+            i,
+        ))
+        .unwrap();
+    }
+    let wait = |done: &dyn Fn() -> bool| {
+        let until = Instant::now() + Duration::from_secs(10);
+        while !done() {
+            assert!(
+                Instant::now() < until,
+                "delivery reply fence did not reach the expected state"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    };
+    for mode in ["complete", "disconnect", "timeout"] {
+        let (mut peer, _) = ProbeClient::hello(&fx.socket, Some("drain")).unwrap();
+        peer.send(&ClientRequest::Command {
+            data: ClientCommandData {
+                request_id: mode.into(),
+                command: AgentCommand::Inbox {
+                    after_message_id: None,
+                },
+            },
+        })
+        .unwrap();
+        wait(&|| !replies.fence("drain").drained());
+        let fence = replies.fence("drain");
+        std::thread::sleep(Duration::from_millis(150));
+        assert!(
+            !fence.drained(),
+            "backpressured {mode} reply was declared drained"
+        );
+        assert!(replies.fence("other").drained());
+        match mode {
+            "complete" => {
+                // A newer reply from the same instance must not extend the
+                // captured fence. Read one native byte to prove it started.
+                let (mut later, _) = ProbeClient::hello(&fx.socket, Some("drain")).unwrap();
+                later
+                    .send(&ClientRequest::Command {
+                        data: ClientCommandData {
+                            request_id: "later".into(),
+                            command: AgentCommand::Inbox {
+                                after_message_id: None,
+                            },
+                        },
+                    })
+                    .unwrap();
+                let mut raw = later.writer_clone().unwrap();
+                std::io::Read::read_exact(&mut raw, &mut [0; 1]).unwrap();
+                let later_fence = replies.fence("drain");
+                let Some(ClientResponse::CommandResult { data }) = peer.recv().unwrap() else {
+                    panic!("native inbox result missing");
+                };
+                let CommandResult::Messages { data } = data.result else {
+                    panic!("native inbox messages missing");
+                };
+                assert_eq!(data.messages.len(), 20);
+                assert!(data.messages.iter().all(|message| message.body == body));
+                wait(&|| fence.drained());
+                assert!(
+                    !later_fence.drained(),
+                    "new reply incorrectly joined the old fence"
+                );
+                drop(raw);
+                drop(later);
+                wait(&|| later_fence.drained());
+            }
+            "disconnect" => {
+                drop(peer);
+                wait(&|| fence.drained());
+            }
+            "timeout" => {
+                // Keep the client alive without reading: only the production
+                // write deadline can close this reply and release its guard.
+                wait(&|| fence.drained());
+                assert!(
+                    !matches!(peer.recv(), Ok(Some(_))),
+                    "timed-out partial reply became a complete message"
+                );
+            }
+            _ => unreachable!(),
+        }
     }
 }
 

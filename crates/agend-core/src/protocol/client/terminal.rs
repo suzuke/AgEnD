@@ -14,6 +14,9 @@ pub struct TerminalSubscribeData {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TerminalViewportData {
+    /// Resize only when no view controls the PTY; never grants input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fit_size: Option<TerminalSize>,
     pub request_id: String,
     pub instance_id: String,
     pub view_id: String,

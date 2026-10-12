@@ -496,3 +496,72 @@ while True:
     );
     f.stop();
 }
+
+#[test]
+fn startup_prepared_switch_holds_native_keys_until_operator_cancels() {
+    use agend_core::{setup::backend::ImportedBackend, traits::HolderLaunch};
+    let mut f = producer(100, |_| {}, false);
+    f.start();
+    f.stop();
+    let prepared = {
+        let store = f.store();
+        let instance = block_on(store.instance("claude")).unwrap().unwrap();
+        // Domain metadata seeds only the pause contract; this shell fixture
+        // does not claim managed artifact admission or real model readiness.
+        let old = ImportedBackend {
+            format: 1,
+            backend: "claude".into(),
+            version: "1".into(),
+            sha256: "a".repeat(64),
+            bytes: 1,
+        };
+        let launch = HolderLaunch {
+            instance_id: instance.id.clone(),
+            backend: instance.backend,
+            executable: instance.program.clone(),
+            args: instance.args.clone(),
+            working_directory: instance.working_directory.clone(),
+        };
+        block_on(store.prepare_managed_launch(&instance, &launch, old.clone(), None)).unwrap();
+        let target = ImportedBackend {
+            version: "2".into(),
+            sha256: "b".repeat(64),
+            ..old
+        };
+        let prepared =
+            block_on(store.prepare_backend_switch(&instance, target, "/managed/new/program", None))
+                .unwrap();
+        // Reconnect the original unversioned shell. This is only a native
+        // startup-pause fixture, not evidence of managed activation.
+        drop(store);
+        {
+            let db = rusqlite::Connection::open(f.home.join("agend.db")).unwrap();
+            db.execute("DELETE FROM managed_launches", []).unwrap();
+        }
+        prepared
+    };
+    f.start();
+    fs::write(f.home.join("show"), b"").unwrap();
+    std::thread::sleep(Duration::from_millis(2500));
+    assert!(keys(&f).is_empty(), "Prepared allowed startup input");
+    let (mut client, _) = ProbeClient::hello(&f.home.join(DAEMON_SOCKET), None).unwrap();
+    let response = client
+        .request(&ClientRequest::Operator {
+            data: OperatorData {
+                request_id: id(),
+                command: OperatorCommand::BackendSwitch {
+                    operation: BackendSwitchCommand::Cancel {
+                        instance_id: "claude".into(),
+                        switch_id: prepared.id,
+                    },
+                },
+            },
+        })
+        .unwrap();
+    assert!(
+        matches!(response, ClientResponse::CommandResult { .. }),
+        "{response:?}"
+    );
+    wait_keys(&f, b"\x1b[B\r\r");
+    f.stop();
+}

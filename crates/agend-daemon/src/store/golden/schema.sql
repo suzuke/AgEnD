@@ -1,4 +1,4 @@
--- user_version = 17
+-- user_version = 22
 
 CREATE INDEX driver_events_by_time ON driver_events (ingested_at_unix_ms);
 
@@ -28,6 +28,17 @@ CREATE TABLE asks (
 ) STRICT;
 
 CREATE TABLE attention_reads (read_key TEXT PRIMARY KEY, read_at_unix_ms INTEGER NOT NULL CHECK(read_at_unix_ms >= 0)) STRICT;
+
+CREATE TABLE backend_registry (
+    backend TEXT NOT NULL PRIMARY KEY CHECK(backend IN ('claude','codex','opencode')),
+    record TEXT NOT NULL CHECK(json_valid(record) AND json_type(record) = 'object')
+) STRICT;
+
+CREATE TABLE backend_switches (
+    instance_id TEXT NOT NULL PRIMARY KEY REFERENCES instances(id) ON DELETE CASCADE,
+    id TEXT NOT NULL UNIQUE,
+    record TEXT NOT NULL CHECK(json_valid(record) AND json_type(record) = 'object')
+) STRICT;
 
 CREATE TABLE bindings (
     instance_id TEXT NOT NULL PRIMARY KEY REFERENCES instances(id),
@@ -123,6 +134,12 @@ CREATE TABLE "instances" (
     delivery TEXT NOT NULL DEFAULT 'push' CHECK (delivery IN ('push','inbox'))
 ) STRICT;
 
+CREATE TABLE managed_launches (
+    instance_id TEXT NOT NULL PRIMARY KEY REFERENCES instances(id) ON DELETE CASCADE,
+    binding TEXT NOT NULL UNIQUE,
+    intent TEXT NOT NULL CHECK(json_valid(intent) AND json_type(intent) = 'object')
+) STRICT;
+
 CREATE TABLE messages (
     seq                INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
     id                 TEXT    NOT NULL UNIQUE,
@@ -172,6 +189,11 @@ CREATE TABLE reminders (
 
 CREATE TABLE sqlite_sequence(name,seq);
 
+CREATE TABLE system_versions (
+    instance_id TEXT NOT NULL PRIMARY KEY REFERENCES instances(id) ON DELETE CASCADE,
+    record TEXT NOT NULL CHECK(json_valid(record) AND json_type(record) = 'object')
+) STRICT;
+
 CREATE TABLE task_events (
     seq                 INTEGER NOT NULL PRIMARY KEY,
     task_id             TEXT    NOT NULL REFERENCES tasks (id),
@@ -219,6 +241,12 @@ CREATE TABLE telegram_outbox (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     id TEXT NOT NULL UNIQUE,
     delivery TEXT NOT NULL CHECK(json_valid(delivery))
+) STRICT;
+
+CREATE TABLE telegram_pairing (
+    slot INTEGER NOT NULL PRIMARY KEY CHECK(slot = 1),
+    id TEXT NOT NULL UNIQUE,
+    record TEXT NOT NULL CHECK(json_valid(record))
 ) STRICT;
 
 CREATE TABLE telegram_updates (

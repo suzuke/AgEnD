@@ -166,7 +166,7 @@ gh 防護由 `agend_shim::gh` 在執行工具前拒絕 merge、明確 PR approve
 | `agend debug watch` | `agend debug watch` | `agend` 子命令（唯讀） | 連上 daemon 印全貌摘要，之後每個事件印一行；連不上或斷線時跟 TUI 一樣用 `connect_once` 每 500 ms 重試、不放棄（印 `reconnecting…`），連上就重拿全貌。 | `agend debug ping`（單次或計次連線檢查，不追事件） | [第 8 施工關 P7](gates/gate-08-client.md#p7agend-client-的-api重試錯誤訊息) |
 | `sandbox-missing` | sandbox-missing | — | 「需要你」的新來源之一：checks 沙箱工具沒裝好或試跑失敗，task 留在 checks 關卡等 `retry`。第 10 施工關已實作並驗收。 | hard gate（backend 卡住畫面的訊號；這是 daemon 自己偵測沙箱） | [第 10 施工關 P6](gates/gate-10-pipeline.md#p6command-關卡runner) |
 | ticket | ticket | — | 結果類 CLI 命令帶的 `<task_id>/<stage_id>/<attempt>`（例如 `t-42/review/2`）；派工訊息與 `agend status` 都印它，agent 照抄。已實作並驗收。 | task id；attempt（ticket 是兩者加 stage id 組出來的字串） | [第 9 施工關 P2](gates/gate-09-cli.md#p2agent-命令的語法task-id-與-attempt-從哪來ticket) |
-| 操作者請求 | operator request | — | client protocol 只收操作者身分的請求（`instance_add`、`instance_remove`、`daemon_restart`…），與唯讀請求、agent 專用的 `command` 請求分開。已實作並驗收。 | `command` 請求（agent 命令）；請示 | [第 9 施工關 P6](gates/gate-09-cli.md#p6操作者命令instance協定的下一個-minor) |
+| 操作者請求 | operator request | — | client protocol 只收操作者身分的請求（`instance_add`、`instance_remove`、`daemon_restart`…；13C 加入 `send_message`／`driver_status`，真人 sender `@operator` 使用 instance 不允許的名稱空間），與唯讀請求、agent 專用的 `command` 請求分開。已實作並驗收。 | `command` 請求（agent 命令）；請示 | [第 9 施工關 P6](gates/gate-09-cli.md#p6操作者命令instance協定的下一個-minor) |
 | 完整終端模式 | full terminal mode | `agend_tui::app::full_terminal::FullView`（D39） | `i` 明確進入的 agent 終端操作畫面，只留一行 AgEnD 狀態列；Ctrl-] 回唯讀。已接通真 holder／daemon／client／TUI；C 段已完成驗收並經使用者確認合併（#145，2026-10-03）。 | B 段純文字 attach 與輸入模式 | [C 段 P1](gates/gate-11c-proposal.md#p1完整模式的入口與退出) |
 | 終端連線憑證 | terminal connection | `runtime::terminal::TerminalConnection` | runtime 長連線的能力與 epoch；背景操作只送到取得憑證時的 holder 連線，斷線或取消在途控制操作即失效。 | holder process generation；client attach id | D39／第 11 施工關 C 段 P2、P3 |
 | 終端 frame | terminal frame | `protocol::terminal::TerminalFrame` | holder 同時取出的 viewport cells、樣式、游標、mode 與歷史定位資料，附 generation／revision。已由真 holder parser 產生，經 daemon／client 送至 TUI，附 generation／revision 的端到端回歸已建立。 | 純文字 screen snapshot；PTY 原始位元組 | [C 段 P2](gates/gate-11c-proposal.md#p2畫面由-holder-提供協定採加法) |
@@ -231,3 +231,33 @@ SQLite 中每個 task 的固定 repository ID、branch、nonce 與 PR number；�
 - **共用已讀收據（shared read receipt）**：daemon 保存操作員已查看的事項 ID＋問題次數，供 TUI 與 Telegram 同步。後續追問使用新 key；單純送達不算已讀，已讀不解除待辦。非問答事項沿用同一 ID 的既定 T17 行為。
 
 - **Telegram 未知通知**：送出意圖已保存但沒有完整確認收據的通知；不自動重送。`telegram-delivery:<id>` 由本機操作員 Abandon 結束後續投遞，仍保留未知證據，不表示已送達。
+
+- **匯入 backend（imported backend）**：AgEnD 在獨立版本目錄保存的 executable 副本與內容 manifest；宣告版本未經探測，匯入不等於 canary 通過或啟用。見[版本管理](architecture/backend-versions.md)。
+
+回合結果（message outcome）：`MessageOutcomeData`；與 delivery 收據分開，核對相同訊息的 backend 回合成功及 assistant 回覆。confirmed 僅代表送達，不代表回合成功。
+
+回合證據 ID（execution_id）：`MessageOutcomeData.execution_id`；Codex／OpenCode 使用既有回合參照，Claude 使用 native prompt_id。與訊息的 delivery turn_id 分開；Claude 不為 ACK 虛構 turn_id。
+
+固定啟動副本（pinned launcher）：依目前執行映像 SHA-256 保存、不覆寫的私有 AgEnD executable，供 daemon 啟動 holder 與 helper，避免正常升級原始路徑改變執行版本；存活 holder 使用期間須保留。
+
+啟動綁定（launch binding）：daemon 持久記錄的 UUID 與一次 holder 原生啟動的關聯。holder 只在成功啟動時保存，重連讀回而不補認；它不是認證憑證，也不證明回合或工作完成。
+
+- **受管啟動意圖（ManagedLaunchIntent）**：daemon 在發送 SpawnBound 前提交的 UUID 與版本／啟動參數紀錄。它用來核對 holder 原始啟動身分；本身不是存活證明或 canary 成功證明。
+
+## 版本切換記錄（BackendSwitch）
+
+單一 instance 最近一次明確版本切換的持久記錄，保存原 managed launch、目標 artifact／program、當時原生 session 與 Prepared／Cancelled／Committed／Activated／RollbackPrepared／Restoring／RolledBack 階段。RollbackPrepared 先暫停已啟用目標的投遞，尚未改 program；真正改路徑時 program 與階段一起更新。Committed／Restoring 仍暫停投遞，完成新啟動驗證才記 Activated／RolledBack。記錄本身不代表 holder 已停止或 canary 已通過，這兩項由 supervisor 核對。
+
+- **canary 執行範圍（CanaryScope）**：顯式 canary runner 在私有 home 建立的版本觀察紀錄，綁定 home 路徑與 inode/device、canary instance、workspace 及來源匯入 artifact。只供隔離執行版本核對，不是成功報告，也不授予 fleet 准入。
+
+- **公開版本資訊（PublishedBackend）**：從固定 npm registry 取得的 backend 套件名稱與 latest tag 版本；只代表公開 metadata，不代表已安裝、較新、相容或 canary 通過。見[公開版本查詢](architecture/backend-registry.md)。
+
+- **公開版本觀測（RegistryObservation）**：每日查詢的持久嘗試與結果；保留最近成功 metadata、另外記錯誤，確認綁定修訂號。尚未完成的嘗試不代表查詢成功。
+
+- **系統版本觀測（SystemBackendVersion）**：用 daemon 的啟動 PATH／cwd／環境探測外部設定程式，保存解析路徑、第一行版本輸出與 SHA-256；不是既存 holder 的映像身分或 canary 准入。
+
+- **SystemVersionObservation**：每個 instance 的外部 CLI 磁碟版本觀測紀錄；含不可沿用的 generation、探測 attempt、最後成功值與精確確認 revision。首次成功只建基準，並非既存 holder 已載入該版本的證據。
+
+- **backend 診斷快照（BackendDiagnostic）**：daemon 在同一資料庫交易讀取的當前配置與相符版本觀測／受管啟動意圖摘要；回覆綁 daemon boot ID，不含 args、session 或環境。屬歷史觀測與預約證據，不證明目前登入或執行映像。
+
+- **能力政策（BackendCapabilityPolicy）**：daemon 對一項具名能力所採用的版本規則、額外條件及證據範圍；不是 runtime eligibility 或已授予控制權的回覆。見[backend 能力政策](architecture/backend-capabilities.md)。

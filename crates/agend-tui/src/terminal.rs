@@ -1,7 +1,7 @@
 //! Attach view of a single agent's terminal, opened with `t` from any row
 //! that has an agent: the holder's screen, kept current by the app (gate 11
 //! B P5), from the left edge, following its last non-blank row (T19; no
-//! resize, columns past the edge are cut). The
+//! input grant; an uncontrolled PTY can fit the read-only viewport). The
 //! title says whether it is live, the last screen of a stopped agent, ended
 //! (retrying), or taking input; while typing the frame is highlighted.
 //! Split panes are out of scope for v2.0.

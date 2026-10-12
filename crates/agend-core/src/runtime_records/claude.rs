@@ -73,6 +73,8 @@ impl ClaudeDelivery {
 pub enum ClaudeReservation {
     /// Only this result authorizes the caller to start writing the content.
     Started(ClaudeDelivery),
+    /// Version switching holds new content without starting an attempt.
+    Paused,
     /// A previous reservation; never authorizes another write.
     Existing(ClaudeDelivery),
 }

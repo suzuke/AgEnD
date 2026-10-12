@@ -683,6 +683,7 @@ mod tests {
                     instance_id: id.into(),
                     summary: state.as_str().into(),
                     instance: Some(agend_core::protocol::client::InstanceView {
+                        program: None,
                         instance_id: id.into(),
                         team_id: "general".into(),
                         backend: "claude".into(),

@@ -40,6 +40,8 @@ cargo test -p xtask
 
 `cargo xtask demo adapters` 先 build agend／testkit binaries 與 fake_codex，再共用 Claude driver／bridge、OpenCode driver／bridge、Telegram notifier／lifecycle／shared-read／unknown／doctor 原生測試。任何 cargo 子程序非 0 都使 demo 失敗；最後明示 GitHub forge 與剩餘真測不在本 demo 認證範圍。`accept adapters` 的 crate 清單包含 G4 跨越的 core／daemon／client／tui／testkit／agend；child 測試入口仍由父測試執行。
 
+目前 Hello wire shape 精確核對支援 1.8、1.7、1.6、1.5、1.4、1.3；凍結舊版解碼器仍保留，版本清單變更不移除舊版相容測試。
+
 ## 用到的假實作
 
 - 無。
@@ -58,3 +60,17 @@ cargo test -p xtask
 ```
 
 第 12C 整合後 `demo adapters`／`accept 12` 包含正式 GitHub Forge／strict base policy／原生 daemon 重啟與清理案例。這些全為離線原生測試；真 GitHub 驗收另記 gate-12c，不在 CI 呼叫外部 API。
+
+`release::tests` 使用真正 tar 建立／解開本機 executable，核對 manifest／binary hash、權限、LICENSE、staging 清理及拒絕覆寫；另建立真 git repo 驗乾淨提交、修改與 untracked 拒絕。這些測試不取代正式 agend release build 或跨平台驗收。
+
+發布 workflow 修改後跑 `actionlint .github/workflows/release.yml`。對真正由 `xtask release` 產生的本機產物跑 `python3 -B scripts/test_verify_release.py /absolute/artifact-directory`：先通過原始產物，再拒絕錯 commit／target／archive hash／binary hash／checksum、額外檔案與 symlink；每個竄改副本在結束時清除。此測試不等於四平台發布或全新環境首任務驗收。
+
+Brew generator 的完整成功路徑需要四個真正的 native 產物；不得以改 target 名稱的本機 binary 宣稱跨平台通過。本機已用正式 macOS archive 確認缺平台時拒絕；workflow aggregate job 重驗同 commit／version 與各 hash，並跑 ruby -c。Brew 實際安裝仍須另外驗收。
+
+## 第 13 關原生 demo
+
+`cargo xtask demo install` 建置正式 agend、fake-worker 與 pipeline_probe，從 Cargo 的 artifact 訊息取得執行檔路徑。依序執行 home／doctor、服務定義、backend import／switch／canary、Telegram 配對與服務 lifecycle 模型案例，再以全新 HOME 執行 init、首任務、唯一 merge 及清理。`accept 13` 在一般 crate checks 與 check-deps 後呼叫同一入口。
+
+測試只用隔離目錄、假 backend 與本機 Telegram producer，不註冊主機服務或呼叫真模型。archive 四平台驗證另由 release workflow 執行；Brew install、真服務與真 backend／Telegram 驗收不可由此 demo 的成功取代。
+
+Brew 原生安裝驗證已接入 release workflow 的 macOS ARM64／Linux x86_64 jobs，僅在一次性 Actions runner 執行。`release_brew_smoke.py` 重新產生並逐字核對四平台 formula，僅將下載 URL 換成同輪 archive 的 file URL，保留 SHA 與安裝邏輯；建立唯一 tap，拒絕既有 agend 安裝，跑 install／formula test／全新 HOME init／uninstall 並檢查清理。這不證明公開 Release URL 已可下載；實跑結果另記。

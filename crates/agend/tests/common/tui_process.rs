@@ -359,6 +359,7 @@ pub fn agend_app(lab: &Lab, home: &Path) -> Result<Vec<String>, String> {
         let mut cmd = Command::new(&lab.agend);
         cmd.arg("app")
             .env_remove("AGEND_HOME")
+            .env_remove("HOME")
             .env_remove("AGEND_INSTANCE")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())

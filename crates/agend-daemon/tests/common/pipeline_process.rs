@@ -210,7 +210,8 @@ pub fn teardown(home: &Path) -> Result<(), String> {
         vec![]
     };
     for id in ids {
-        let _ = agend_daemon::runtime::shutdown_holder_within(home, &id, Duration::from_secs(5));
+        agend_daemon::runtime::shutdown_holder_within(home, &id, Duration::from_secs(5))
+            .map_err(|e| format!("fixture cleanup preserved {}: {e}", home.display()))?;
     }
     std::fs::remove_dir_all(home).map_err(|e| e.to_string())?;
     let repo = PathBuf::from(format!("{}-repo", home.display()));

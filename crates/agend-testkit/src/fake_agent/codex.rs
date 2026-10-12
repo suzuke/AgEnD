@@ -227,6 +227,10 @@ struct State {
     threads: BTreeMap<String, ThreadState>,
     /// (connection, request id) → (thread, turn).
     pending_approvals: BTreeMap<(u64, i64), (String, String)>,
+    external_refresh_refusals: u64,
+    diagnostic_account: Option<Value>,
+    account_reads: u64,
+    external_logins: BTreeSet<u64>,
     next_id: u64,
     next_request_id: i64,
     home: Option<PathBuf>,
@@ -1115,6 +1119,9 @@ fn handle(
     let mut state = lock(&shared.state);
     let mut out: Vec<Value> = outgoing.try_iter().collect();
     let Some(method) = message["method"].as_str() else {
+        if message["id"] == "external-refresh-probe" && message["error"]["code"] == -32000 {
+            state.external_refresh_refusals += 1;
+        }
         // A response to one of our requests (approval decision).
         let Some(id) = message["id"].as_i64() else {
             return out;
@@ -1149,7 +1156,65 @@ fn handle(
                       "userAgent": format!("fake-codex-app-server/{CLI_VERSION}")}),
             )
         }
+        // Native 0.159.3/0.160.0 generated account/read schema. The fake
+        // rejects refresh rather than silently accepting a mutating probe.
+        "account/read" => {
+            if params != &json!({"refreshToken": false}) {
+                Err((INVALID_REQUEST, "diagnostics must not refresh".into()))
+            } else {
+                state.account_reads += 1;
+                Ok(state
+                    .diagnostic_account
+                    .clone()
+                    .unwrap_or_else(|| json!({"account": null, "requiresOpenaiAuth": true})))
+            }
+        }
+        "agendFake/diagnosticAccount" => {
+            state.diagnostic_account = Some(params.clone());
+            Ok(json!({}))
+        }
+        "agendFake/notificationFlood" => {
+            before
+                .extend((0..10_000).map(|_| json!({"method":"fixture/notification","params":{}})));
+            Ok(json!({}))
+        }
+        "agendFake/accountReadCount" => {
+            Ok(json!({"count":state.account_reads,"logins":state.external_logins.len()}))
+        }
+        // Native 0.159.3 external-token probe: only this auth mode is modelled.
+        // Synthetic credentials only; the fake never contacts an auth service.
+        "account/login/start" if params["type"] == "chatgptAuthTokens" => {
+            if params["accessToken"].as_str().is_none_or(str::is_empty)
+                || params["chatgptAccountId"]
+                    .as_str()
+                    .is_none_or(str::is_empty)
+            {
+                Err((INVALID_REQUEST, "missing external token identity".into()))
+            } else {
+                if params["accessToken"] == "synthetic-echo-error" {
+                    return vec![
+                        json!({"id": id, "error": {"code": -32603, "message": params.to_string()}}),
+                    ];
+                }
+                if params["accessToken"] == "synthetic-refresh-probe" {
+                    before.push(json!({"id": "external-refresh-probe", "method": "account/chatgptAuthTokens/refresh", "params": {"reason": "unauthorized", "previousAccountId": "synthetic-account"}}));
+                }
+                state.external_logins.insert(connection);
+                Ok(json!({"type": "chatgptAuthTokens"}))
+            }
+        }
+        "agendFake/externalRefreshRefusals" => {
+            Ok(json!({"count": state.external_refresh_refusals}))
+        }
         "thread/start" => {
+            let external_required = std::env::var_os("AGEND_HOME")
+                .map(PathBuf::from)
+                .is_some_and(|home| home.join("canary-auth/codex-external.json").is_file());
+            if external_required && !state.external_logins.contains(&connection) {
+                return vec![
+                    json!({"id":id,"error":{"code":-32603,"message":"external login required before thread/start"}}),
+                ];
+            }
             let result = state.start_thread(params);
             let new_id = result["thread"]["id"]
                 .as_str()

@@ -63,7 +63,11 @@ const RECONNECT_EVERY: Duration = Duration::from_millis(100);
 
 pub(crate) enum Command {
     Flush(Sender<()>),
+    Account(
+        Sender<Result<agend_core::setup::backend::observation::CredentialConfiguration, String>>,
+    ),
     Turns(Sender<Result<Vec<Value>, String>>),
+    Idle(Sender<Result<bool, String>>),
 }
 
 /// How long [`Link::close`] waits for the link thread; after that it is
@@ -100,6 +104,7 @@ impl Shared {
 /// The driver's handle on a link thread.
 pub(crate) struct Link {
     id: String,
+    pub session_id: String,
     commands: Option<Sender<Command>>,
     pub shared: Arc<Shared>,
     thread: Option<JoinHandle<()>>,
@@ -125,7 +130,47 @@ impl Pending<Result<Vec<Value>, String>> {
     }
 }
 
+impl Pending<Result<bool, String>> {
+    pub fn wait(self, within: Duration) -> Result<bool, String> {
+        let rx = self.0.ok_or("the link has ended")?;
+        rx.recv_timeout(within)
+            .map_err(|_| "no answer from the link".to_owned())?
+    }
+}
+
+impl Pending<Result<agend_core::setup::backend::observation::CredentialConfiguration, String>> {
+    pub fn wait(
+        self,
+        within: Duration,
+    ) -> Result<agend_core::setup::backend::observation::CredentialConfiguration, String> {
+        self.0
+            .ok_or("the link has ended")?
+            .recv_timeout(within)
+            .map_err(|_| "account observation timed out".to_owned())?
+    }
+}
+
 impl Link {
+    pub fn account_request(
+        &self,
+    ) -> Pending<Result<agend_core::setup::backend::observation::CredentialConfiguration, String>>
+    {
+        let (tx, rx) = mpsc::channel();
+        let sent = self
+            .commands
+            .as_ref()
+            .is_some_and(|c| c.send(Command::Account(tx)).is_ok());
+        Pending(sent.then_some(rx))
+    }
+    /// Serialize idle observation behind any in-flight delivery on this worker.
+    pub fn idle_request(&self) -> Pending<Result<bool, String>> {
+        let (tx, rx) = mpsc::channel();
+        let sent = self
+            .commands
+            .as_ref()
+            .is_some_and(|c| c.send(Command::Idle(tx)).is_ok());
+        Pending(sent.then_some(rx))
+    }
     /// Asks the link to send every `queued` message.
     pub fn flush_request(&self) -> Pending<()> {
         let (tx, rx) = mpsc::channel();
@@ -225,6 +270,7 @@ fn advance(
 }
 
 pub(crate) struct Worker {
+    external_auth: Option<Value>,
     pub id: String,
     pub generation: u64,
     pub thread: String,
@@ -251,11 +297,13 @@ impl Worker {
         listen: PathBuf,
         store: Arc<SqliteStore>,
         identified_receipts: bool,
+        external_auth: Option<Value>,
     ) -> Result<Worker, RpcError> {
         let conn = Conn::open(&listen).map_err(|e| RpcError::Transport(e.to_string()))?;
         let shared = Arc::new(Shared::default());
         shared.set_socket(&conn);
         let mut worker = Worker {
+            external_auth,
             id: id.to_owned(),
             generation,
             thread: String::new(),
@@ -287,7 +335,21 @@ impl Worker {
                    "capabilities": {"experimentalApi": true}}),
             Duration::from_secs(10),
         )?;
-        self.conn.send(&json!({"method": "initialized"}))
+        self.conn.send(&json!({"method": "initialized"}))?;
+        if let Some(params) = self.external_auth.clone() {
+            // Never log an authentication RPC response: the peer may echo input.
+            let reply = self
+                .call_within("account/login/start", params, CALL_WITHIN)
+                .map_err(|_| {
+                    RpcError::Transport("external Codex login failed; refresh disabled".into())
+                })?;
+            if reply["type"] != "chatgptAuthTokens" {
+                return Err(RpcError::Transport(
+                    "external Codex login was not accepted".into(),
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// `thread/start` in `cwd` (approval `never`, sandbox
@@ -335,19 +397,22 @@ impl Worker {
     }
 
     /// Starts the link thread; `sink` hears when the app-server is gone.
-    pub fn spawn(self, sink: CodexSink) -> std::io::Result<Link> {
+    pub fn spawn(self, sink: CodexSink, activity: Arc<()>) -> std::io::Result<Link> {
         let shared = Arc::clone(&self.shared);
         let id = self.id.clone();
+        let session_id = self.thread.clone();
         let (tx, rx) = mpsc::channel();
         let (done_tx, done) = mpsc::channel();
         let thread = std::thread::Builder::new()
             .name(format!("codex-link-{}", self.id))
             .spawn(move || {
+                let _activity = activity;
                 self.run(&rx, &sink);
                 let _ = done_tx.send(());
             })?;
         Ok(Link {
             id,
+            session_id,
             commands: Some(tx),
             shared,
             thread: Some(thread),
@@ -456,6 +521,28 @@ impl Worker {
                             return false;
                         }
                     }
+                    Ok(Command::Account(reply)) => {
+                        // The pinned native schema defines false as no proactive
+                        // refresh. Only typed configuration escapes this worker.
+                        let result = self.call_within(
+                            "account/read",
+                            json!({"refreshToken": false}),
+                            Duration::from_secs(2),
+                        );
+                        let account = result
+                            .map(|v| account_configuration(&v))
+                            .map_err(|_| "native account observation unavailable".to_owned());
+                        let _ = reply.send(account);
+                    }
+                    Ok(Command::Idle(reply)) => {
+                        let idle = self.idle_snapshot();
+                        let broken =
+                            matches!(idle, Err(RpcError::Transport(_) | RpcError::Timeout(_)));
+                        let _ = reply.send(idle.map_err(|e| e.to_string()));
+                        if broken {
+                            return false;
+                        }
+                    }
                     Ok(Command::Turns(reply)) => {
                         let turns = self.turns_all();
                         let broken =
@@ -501,6 +588,12 @@ impl Worker {
                 Ok(Command::Turns(reply)) => {
                     let _ = reply.send(Err("the app-server is not connected".into()));
                 }
+                Ok(Command::Account(reply)) => {
+                    let _ = reply.send(Err("the app-server is not connected".into()));
+                }
+                Ok(Command::Idle(reply)) => {
+                    let _ = reply.send(Err("the app-server is not connected".into()));
+                }
                 Err(RecvTimeoutError::Disconnected) => return false,
                 Err(RecvTimeoutError::Timeout) => {}
             }
@@ -538,18 +631,18 @@ impl Worker {
         let id = self.conn.request(method, params)?;
         let deadline = Instant::now() + within;
         loop {
+            if Instant::now() >= deadline {
+                return Err(RpcError::Timeout(format!(
+                    "{method} ({} s)",
+                    within.as_secs()
+                )));
+            }
+            if self.stopping() {
+                return Err(RpcError::Transport("the link is closing".into()));
+            }
             match self.conn.read_message()? {
                 Some(Incoming::Response { id: got, result }) if got == id => return result,
                 Some(other) => self.dispatch(other),
-                None if Instant::now() >= deadline => {
-                    return Err(RpcError::Timeout(format!(
-                        "{method} ({} s)",
-                        within.as_secs()
-                    )));
-                }
-                None if self.stopping() => {
-                    return Err(RpcError::Transport("the link is closing".into()));
-                }
                 None => {}
             }
         }
@@ -643,7 +736,9 @@ impl Worker {
     }
 
     fn server_request(&mut self, id: Value, method: &str, params: &Value) {
-        let reply = if method.ends_with("requestApproval") {
+        let reply = if method == "account/chatgptAuthTokens/refresh" {
+            json!({"id": id, "error": {"code": -32000, "message": "Refresh disabled for isolated canary"}})
+        } else if method.ends_with("requestApproval") {
             let what = params["command"]
                 .as_str()
                 .or(params["reason"].as_str())
@@ -662,6 +757,19 @@ impl Worker {
     /// Every turn, oldest first. `thread/turns/list` answers newest first
     /// and `nextCursor` pages back to older turns (U5, turns_list.jsonl,
     /// codex 0.158.0; K14), so the pages are read in order and reversed.
+    fn idle_snapshot(&mut self) -> Result<bool, RpcError> {
+        let queue = self.call_within(
+            "thread/queue/list",
+            json!({"threadId": self.thread}),
+            CALL_WITHIN,
+        )?;
+        if !super::history::queue_empty(&queue) {
+            return Ok(false);
+        }
+        let turns = self.turns_all()?;
+        Ok(!self.busy && super::history::all_turns_terminal(&turns))
+    }
+
     fn turns_all(&mut self) -> Result<Vec<Value>, RpcError> {
         let mut turns = Vec::new();
         let mut cursor = Value::Null;
@@ -677,14 +785,18 @@ impl Worker {
                 // yet; thread/turns/list is unavailable before first user
                 // message`, codex_live 2026-09-28): no turns.
                 Err(RpcError::Rpc { code, message })
-                    if code == INVALID_REQUEST && message.contains("not materialized yet") =>
+                    if code == INVALID_REQUEST
+                        && message.contains("not materialized yet")
+                        && turns.is_empty()
+                        && cursor.is_null() =>
                 {
                     return Ok(Vec::new());
                 }
                 Err(e) => return Err(e),
             };
-            turns.extend(page["data"].as_array().cloned().unwrap_or_default());
-            match page["nextCursor"].as_str() {
+            let (data, next) = super::history::turn_page(&page).map_err(RpcError::Transport)?;
+            turns.extend(data.iter().cloned());
+            match next {
                 Some(next) => cursor = json!(next),
                 None => {
                     turns.reverse();
@@ -803,9 +915,13 @@ impl Worker {
                 continue;
             }
             let (id, now) = (row.id.clone(), log::now_unix_ms());
-            self.store
-                .call_blocking(move |conn| messages::mark_attempted(conn, &id, now))
-                .map_err(store_error)?;
+            if !self
+                .store
+                .call_blocking(move |conn| messages::begin_codex_attempt(conn, &id, now))
+                .map_err(store_error)?
+            {
+                continue;
+            }
             let text = text_of(&row);
             let thread = self.thread.clone();
             let level = messages::level_text(row.level);
@@ -878,5 +994,80 @@ impl Rpc for Worker {
             }
         }
         true
+    }
+}
+
+fn account_configuration(
+    value: &Value,
+) -> agend_core::setup::backend::observation::CredentialConfiguration {
+    use agend_core::setup::backend::observation::CredentialConfiguration as C;
+    match (
+        value["account"]["type"].as_str(),
+        value["requiresOpenaiAuth"].as_bool(),
+    ) {
+        (Some("apiKey" | "chatgpt" | "amazonBedrock"), Some(_)) => C::Configured,
+        (None, Some(true)) if value["account"].is_null() => C::Missing,
+        (None, Some(false)) if value["account"].is_null() => C::NotRequired,
+        _ => C::Unknown,
+    }
+}
+
+#[cfg(test)]
+mod external_auth_tests {
+    use super::*;
+    use agend_testkit::{fake_agent::codex::Server, tempdir::TempDir};
+
+    #[test]
+    fn a_notification_stream_cannot_extend_the_native_observation_deadline() {
+        let root = TempDir::new("codex-query-deadline").unwrap();
+        let socket = root.path().join("app.sock");
+        let _server = Server::bind(&socket, Duration::from_millis(10), None).unwrap();
+        let store = Arc::new(SqliteStore::open(root.path(), 0).unwrap());
+        let mut worker = Worker::open("diagnostic", 1, socket, store, false, None).unwrap();
+        let started = Instant::now();
+        let result = worker.call_within(
+            "agendFake/notificationFlood",
+            json!({}),
+            Duration::from_millis(1),
+        );
+        assert!(matches!(result, Err(RpcError::Timeout(_))), "{result:?}");
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn external_login_rejects_refresh_on_each_connection_and_redacts_peer_errors() {
+        let root = TempDir::new("external-codex-auth").unwrap();
+        let socket = root.path().join("app.sock");
+        let _server = Server::bind(&socket, Duration::from_millis(10), None).unwrap();
+        let store = Arc::new(SqliteStore::open(root.path(), 0).unwrap());
+        for expected in 1..=2 {
+            let mut worker = Worker::open("canary", 1, socket.clone(), store.clone(), false,
+                Some(json!({"type":"chatgptAuthTokens", "accessToken":"synthetic-refresh-probe", "chatgptAccountId":"synthetic-account"}))).unwrap();
+            let observed = worker
+                .call_within("agendFake/externalRefreshRefusals", json!({}), CALL_WITHIN)
+                .unwrap();
+            assert_eq!(observed["count"], expected);
+            let thread = worker.start_thread(root.path().to_str().unwrap()).unwrap();
+            assert!(!thread.is_empty());
+        }
+        let result = Worker::open(
+            "canary",
+            1,
+            socket,
+            store,
+            false,
+            Some(
+                json!({"type":"chatgptAuthTokens", "accessToken":"synthetic-echo-error", "chatgptAccountId":"synthetic-account"}),
+            ),
+        );
+        let error = match result {
+            Ok(_) => panic!("echoed auth failure must be rejected"),
+            Err(error) => error.to_string(),
+        };
+        assert_eq!(
+            error,
+            "app-server connection: external Codex login failed; refresh disabled"
+        );
+        assert!(!error.contains("synthetic"));
     }
 }

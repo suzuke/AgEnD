@@ -134,6 +134,7 @@ fn boot_child() {
         .unwrap();
     let (supervisor, _receiver) = tokio::sync::mpsc::unbounded_channel();
     let ctx = Arc::new(Context {
+        pairing: agend_daemon::notifier::pairing_service::PairingService::new(store.clone(), false),
         fleet,
         pipeline,
         runtime: runtime.clone(),

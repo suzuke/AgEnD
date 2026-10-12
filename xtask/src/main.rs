@@ -11,15 +11,16 @@
 //! - `record <backend> [scenario...] --sandbox <script>`: record the real
 //!   backend CLI into `crates/agend-testkit/transcripts/` (see `record`).
 //!
-//! Planned, not implemented: protocol JSON schema generation, release
-//! packaging.
+//! Planned, not implemented: protocol JSON schema generation.
 
 mod accept;
 mod adapters_demo;
 mod check_core;
 mod check_deps;
 mod core_demo;
+mod install_demo;
 mod record;
+mod release;
 mod shim_demo;
 
 use std::process::ExitCode;
@@ -28,11 +29,14 @@ const USAGE: &str = "\
 Usage: cargo xtask <command>
 
 Commands:
+  release --out <absolute-new-directory>
+                   Build and package the native release binary; never publish
   check-deps [--allow-skip]
                    Check crate-boundary rules (--allow-skip: do not fail if the
                    no-std target is not installed; still prints SKIPPED)
   accept <gate>    Run the acceptance checks of a build gate (1-13 or its name);
                    each gate is described in docs/gates/gate-NN-<name>.md
+  demo install    Run isolated installation scenarios (no host services/live APIs)
   demo adapters   Run native Claude/OpenCode/GitHub/Telegram scenarios (no live models/APIs)
   record <backend> [scenario...] --sandbox <script>
                    Record the REAL backend CLI (codex, opencode, claude) under a
@@ -47,6 +51,10 @@ fn main() -> ExitCode {
         Some("demo") if args.get(1).map(String::as_str) == Some("adapters") && args.len() == 2 => {
             adapters_demo::run()
         }
+        Some("demo") if args.get(1).map(String::as_str) == Some("install") && args.len() == 2 => {
+            install_demo::run()
+        }
+        Some("release") => release::run(&args[1..]),
         Some("record") => record::run(&args[1..]),
         _ => {
             eprint!("{USAGE}");
