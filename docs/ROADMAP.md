@@ -585,3 +585,5 @@
 - 2026-10-12：TUI 新增深色、終端預設、淺色、高對比四種配色；P 開啟、方向鍵預覽、Enter 儲存、Esc 取消，完整 Agent 終端保持原配色。3f5f69b 經全新 verifier 確認，102 個 TUI 測試與額外模態／尺寸反例、原生 PTY 儲存／重啟／錯誤提示通過；fmt、workspace clippy、check-deps 含實際 no-std 通過。僅更新本機介面偏好，0 真模型；沿用 draft PR #159，尚未合併，Gate 13／Claude 狀態不變。
 
 - 2026-10-12：依使用者指示排除 Claude 與人工操作，續補非 Claude 自動化：doctor 目錄修復改保留非 UTF-8 bytes，增加真 shell 與 Linux 相似目錄反例；Linux ARM64 固定 797a7b9 archive 的同 home 低磁碟 fail→ok 通過，核 disk 函式／setup.rs 與本批相同。release workflow 自動觸發改 v2，仍僅建產物。本批最終覆核與 CI 待完成；人工驗收／Claude／公開發布不列通過。
+
+- 2026-10-12：#161 合併前 Linux CI 揭露 sandbox 工具查找遍歷 UTF-8 環境時會因 byte path panic；改為只讀取查找需要的 PATH，保留原非 UTF-8 目錄與鄰居不變的程序回歸。

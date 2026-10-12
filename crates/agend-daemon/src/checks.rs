@@ -19,7 +19,13 @@ pub fn tool(home: &Path) -> Option<PathBuf> {
     }
     #[cfg(target_os = "linux")]
     {
-        let vars = std::env::vars().collect();
+        // Tool lookup only needs PATH. Iterating env::vars() would panic on
+        // unrelated non-UTF-8 values, including a valid Unix AGEND_HOME.
+        let vars = std::env::var("PATH")
+            .ok()
+            .map(|path| ("PATH".to_owned(), path))
+            .into_iter()
+            .collect();
         crate::runtime::env::launch_path(home, &vars)
             .split(':')
             .map(|p| Path::new(p).join("bwrap"))
