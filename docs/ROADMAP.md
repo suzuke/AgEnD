@@ -581,3 +581,5 @@
 - 2026-10-12：非 Claude 實作收尾：獨立 accept install 通過（912 checks passes／4 ignored、59 demo passes，含重複與 child entry，非不同契約數），全新 HOME 假 worker 首任務 4,346 ms、一次 merge；client 52／testkit 117、fmt／clippy／no-std 與 SetupDiagnostic 四項邊界通過。驗收從 797a7b9 到 test-only 2f3e35b，保留單一測試檔以外 tree 相同的證據，非單一不變 HEAD。清理 43 個新增測試 socket、13,529,198,592 bytes 編譯快取及約 216 MiB 暫緩 Claude 副本；保留使用者試用 CLI／環境、證據與未合併 worktree。Claude 真測仍暫緩；人工驗收、合併及公開發布另待確認（PR #158）。
 
 - 2026-10-12：依使用者核准第七版示意，新增 ≥110 欄 TUI 側欄、跨團隊任務總覽、需要你清單／詳情雙欄及前後切換；窄畫面與完整終端保留原操作。獨立覆核在 37a3e76 抓到 resize 隱藏所選選項，5cbb97f 修正；98 個 TUI 測試、fmt／workspace clippy／實際 no-std 與腳本原生 PTY smoke 通過。0 真模型；保留 demo／CLI 及未合併 worktree 供試用，Gate 13 與 Claude 狀態不變（feat/tui-layout，待人工外觀驗收）。
+
+- 2026-10-12：TUI 新增深色、終端預設、淺色、高對比四種配色；P 開啟、方向鍵預覽、Enter 儲存、Esc 取消，完整 Agent 終端保持原配色。3f5f69b 經全新 verifier 確認，102 個 TUI 測試與額外模態／尺寸反例、原生 PTY 儲存／重啟／錯誤提示通過；fmt、workspace clippy、check-deps 含實際 no-std 通過。僅更新本機介面偏好，0 真模型；沿用 draft PR #159，尚未合併，Gate 13／Claude 狀態不變。
