@@ -77,3 +77,7 @@ cat docs/ROADMAP.md
 `agend service plan` 唯讀產生 service 定義，macOS 使用 `dev.agend.daemon`，Linux 使用 `agend-daemon.service`。安裝用執行檔規劃在 `$AGEND_HOME/service/agend`，不依賴研究或建置目錄的存活。環境只明列 HOME、AGEND_HOME、PATH；不抄 token。
 
 依 [Apple launchd 文件](https://github.com/apple-oss-distributions/launchd/blob/main/man/launchd.plist.5) 設 `AbandonProcessGroup=true`；依 [systemd 文件](https://github.com/systemd/systemd/blob/main/man/systemd.kill.xml) 設 `KillMode=process`。兩者目的為 daemon 停止／重啟時保留 holder；仍須以實際服務驗收。systemd 以 `/usr/bin/env --` 直接 exec 目標，避免 systemd 第一個 executable word 不接受引號／反斜線路徑的限制；不經 shell。ExecStart／Environment 跳脫與 WorkingDirectory 原始路徑解析分開處理，`%` 不得成為 specifier。註冊、所有權對帳與解除安裝仍在施工。
+
+## TUI 第七版布局候選
+
+寬畫面（≥110 欄且 ≥20 列）用側欄集中團隊／Agent 導覽，主區顯示跨團隊任務；需要你採清單／詳情雙欄，`[`／`]` 逐項瀏覽。窄畫面、搜尋、斷線與完整終端維持原本可操作路徑。所有資料／動作仍只經 Fleet／Source；選取不等於回答。細節與可重跑例子見 [agend-tui README](../../crates/agend-tui/README.md)。

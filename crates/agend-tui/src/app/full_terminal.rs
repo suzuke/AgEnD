@@ -611,6 +611,9 @@ impl App {
         if !self.is_connected() || self.finder.is_some() {
             return;
         }
+        if self.shell_mouse(event) {
+            return;
+        }
         let Some(term) = &self.term else {
             return;
         };

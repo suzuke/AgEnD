@@ -18,6 +18,7 @@
 //! (the daemon does, D17).
 
 pub mod full_terminal;
+pub(crate) mod shell;
 use agend_core::protocol::terminal::TerminalSize;
 use full_terminal::FullView;
 
@@ -154,6 +155,7 @@ pub struct Finder {
 }
 
 pub struct App {
+    pub(crate) shell: shell::ShellState,
     source: Box<dyn Source>,
     pub fleet: Fleet,
     pub lang: Language,
@@ -182,6 +184,7 @@ impl App {
     /// state and `tick` keeps trying.
     pub fn new(source: Box<dyn Source>, lang: Language) -> App {
         let mut app = App {
+            shell: shell::ShellState::default(),
             source,
             fleet: Fleet::default(),
             lang,
@@ -350,6 +353,7 @@ impl App {
             selected: view.selected.as_ref(),
         };
         match &view.screen {
+            Screen::Home if self.shell_visible() => home::overview(&ctx),
             Screen::Home => home::rows(&ctx),
             Screen::NeedsYou => attention::rows(&ctx),
             Screen::Team { team, tab } => team::rows(&ctx, team, *tab),
@@ -463,7 +467,9 @@ impl App {
             }
         } else {
             self.message = None;
-            self.screen_key(key.code);
+            if !self.shell_key(key.code) {
+                self.screen_key(key.code);
+            }
         }
         self.sync_terminal();
         self.sync();
@@ -491,6 +497,8 @@ impl App {
             KeyCode::Char('/') => self.finder = Some(Finder::default()),
             KeyCode::Char('t') => self.open_terminal_of_row(),
             KeyCode::Char('a') => self.start_input(),
+            KeyCode::Char('[') => self.adjacent_attention(-1),
+            KeyCode::Char(']') => self.adjacent_attention(1),
             KeyCode::Char('i') => self.start_typing(),
             KeyCode::Left | KeyCode::Esc => {
                 if self.stack.len() > 1 {

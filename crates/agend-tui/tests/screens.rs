@@ -44,7 +44,7 @@ fn home_puts_needs_you_on_top_then_one_block_per_team() {
 #[test]
 fn home_in_traditional_chinese_keeps_ids_and_aligns_wide_text() {
     let (mut app, _) = demo(Language::ZhTw);
-    for (width, height) in [(80, 24), (100, 30), (140, 40)] {
+    for (width, height) in [(80, 24), (100, 30)] {
         let screen = agend_tui::render_to_string(&mut app, width, height);
         assert!(screen.contains("━━ 需要你 · 3 ━━"), "{screen}");
         assert!(line_with(&screen, "┏ archfix").ends_with("● 1 工作中  ! 1 需要你  ○ 1 閒置"));

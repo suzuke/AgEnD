@@ -126,3 +126,50 @@ fn team_block(ctx: &Ctx, team: &str) -> Vec<Row> {
     });
     rows
 }
+
+/// Wide dashboard: navigation lives in the sidebar, tasks span all teams.
+pub fn overview(ctx: &Ctx) -> Vec<Row> {
+    let needs = ctx.fleet.needs_you();
+    let mut rows = vec![Row::rule(
+        &ctx.fmt(Text::NeedsYouN, &[&needs.len().to_string()]),
+    )];
+    if needs.is_empty() {
+        rows.push(Row::line("", ctx.tr(Text::NothingNeedsYou)).dim());
+    }
+    rows.extend(needs.into_iter().map(|a| needs_you_row(ctx, a)));
+    rows.push(Row::blank());
+    rows.push(Row::rule(ctx.tr(Text::ActiveTasks)));
+    let tasks: Vec<_> = ctx
+        .fleet
+        .catalog
+        .tasks
+        .iter()
+        .filter(|t| !t.is_done())
+        .collect();
+    if tasks.is_empty() {
+        rows.push(Row::line("", ctx.tr(Text::NoActiveGoals)).dim());
+    }
+    for task in tasks {
+        rows.push(goal_row(ctx.fleet, ctx.lang, "", task));
+        rows.push(
+            Row::line(
+                "",
+                format!(
+                    "  {} / {}",
+                    task.team_id,
+                    task.current_stage()
+                        .and_then(|n| task.stages.get(n))
+                        .and_then(|s| s.agent.as_deref())
+                        .unwrap_or("—")
+                ),
+            )
+            .dim(),
+        );
+    }
+    rows.push(Row::blank());
+    rows.push(Row::rule(ctx.tr(Text::RecentEvents)));
+    for event in ctx.fleet.events().iter().rev().take(4) {
+        rows.push(Row::line("", crate::terminal::describe(&event.event)).dim());
+    }
+    rows
+}

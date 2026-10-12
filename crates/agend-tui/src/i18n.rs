@@ -61,6 +61,17 @@ impl Language {
 /// Every UI string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Text {
+    SidebarKeys,
+    TeamKeys,
+    PreviousItem,
+    NextItem,
+    Overview,
+    Teams,
+    Ungrouped,
+    Connected,
+    ActiveTasks,
+    ShellKeys,
+    QueueKeys,
     CrumbNeedsYou,
     CrumbTerminal,
     NeedsYouN,
@@ -178,6 +189,29 @@ pub enum Text {
 fn strings(text: Text) -> (&'static str, &'static str) {
     use Text::*;
     match text {
+        SidebarKeys => (
+            "←/→ collapse/expand · Space toggle · Enter open · t terminal",
+            "←/→ 收合／展開 · 空白鍵切換 · Enter 開啟 · t 終端",
+        ),
+        TeamKeys => (
+            "1 goals · 2 agents · 3 pipeline · t terminal",
+            "1 目標 · 2 Agent · 3 流水線 · t 終端",
+        ),
+        PreviousItem => ("[ Previous", "[ 上一項"),
+        NextItem => ("] Next", "] 下一項"),
+        Overview => ("Overview", "總覽"),
+        Teams => ("Teams", "團隊"),
+        Ungrouped => ("Ungrouped", "未分組"),
+        Connected => ("Connected", "已連線"),
+        ActiveTasks => ("Active tasks", "進行中的任務"),
+        ShellKeys => (
+            "Tab focus · ↑↓ select · Enter open · h home · ! needs you · / find · Esc back · L 中文",
+            "Tab 焦點 · ↑↓ 選擇 · Enter 開啟 · h 總覽 · ! 需要你 · / 搜尋 · Esc 返回 · L English",
+        ),
+        QueueKeys => (
+            "[ previous · ] next · 1–9 choose · a answer · PgUp/PgDn scroll",
+            "[ 上一項 · ] 下一項 · 1–9 選項 · a 回答 · PgUp/PgDn 捲動",
+        ),
         CrumbNeedsYou => ("Needs you", "需要你"),
         CrumbTerminal => ("Terminal", "終端"),
         NeedsYouN => ("Needs you · {}", "需要你 · {}"),

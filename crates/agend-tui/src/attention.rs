@@ -48,7 +48,7 @@ pub fn rows(ctx: &Ctx) -> Vec<Row> {
     rows
 }
 
-fn details(ctx: &Ctx, item: &Attention) -> Vec<Row> {
+pub(crate) fn details(ctx: &Ctx, item: &Attention) -> Vec<Row> {
     let key = item.key();
     let agent = ctx.fleet.item_agent(item);
     let from = agent.clone().unwrap_or_else(|| "—".into());

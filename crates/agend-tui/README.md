@@ -5,6 +5,14 @@
 > - 記住：**畫面只讀 `source::Fleet`、只透過 `source::Source` 動作**；真的來源是 `source::client::ClientSource`，lib 裡沒有 socket 程式碼。
 > - 下一步：`~/.cargo/bin/cargo run -q -p agend-tui --example tui_fake` 自己操作；`~/.cargo/bin/cargo xtask accept tui` 看 demo。
 
+## 第七版畫面（候選）
+
+110 欄、20 列以上使用固定 26 欄側欄、低彩度選取與區塊標題；「需要你」保留左側事項清單和右側可換行／捲動的詳情。側欄 `›` 表示所在頁，底色表示鍵盤焦點。團隊標題點箭頭收合、點名稱開啟；Agent 可點選或按 Enter，`t` 看終端。滑鼠選事項只標已讀，只有選項才送出回答。
+
+窄於 110 欄回單欄，選取與返回堆疊保留；完整終端仍使用整個可用視窗。`general` 是正式團隊；只有來源中 team 不在團隊清單的 Agent 才列「未分組」，不改 daemon 的成員關係。搜尋與斷線沿用既有全寬畫面。
+
+`cargo run -p agend-tui --example tui_preview > preview.html` 匯出實際 Ratatui 字格（腳本資料），供比對 110／140 欄外觀；不是網頁操作介面。互動試用仍用 `tui_fake`，真 daemon 用 `agend app`。
+
 ## 第 10 施工關（已驗收，2026-10-02）
 
 pipeline task detail 顯示 repo、關卡種類、agent、受阻理由與 WIP archive 路徑；人工核准可 approve／退回修改（先輸入理由），task failed 可 acknowledge。讀取資料與動作仍只經 Source 和 client protocol。
@@ -23,7 +31,7 @@ native 與 off-screen draw 共用實際 frame area 更新 App 尺寸；延遲或
 
 ## 負責
 
-- 首頁：跨 team 的「需要你」＋每個 team 一個區塊（agent 狀態數量、進行中的目標、最近變更）
+- 寬畫面首頁：跨 team 的「需要你」、進行中任務與最近事件；團隊與 Agent 導覽放在側欄。窄畫面維持原單欄團隊區塊。
 - 「需要你」：展開項目看脈絡摘要（D37）與對話（D35），選選項或用自由文字回答；已讀與已解決分開，agent 追問後回到未讀
 - team 頁：目標、Agents、流水線三個 tab
 - Task Detail（repo 只在這裡）、Agent Detail、單一 agent 終端（`t`：即時畫面；`i` 進輸入模式、`Ctrl-]` 離開）
@@ -71,7 +79,10 @@ native 與 off-screen draw 共用實際 frame area 更新 App 尺寸；延遲或
 | 貼上 | 完整模式的一次輸入；退出碼當資料，超限整段拒絕 |
 | `Ctrl-]`（或 `Ctrl-5`） | 輸入模式：離開；**其他每個鍵都送給 agent**（包括 `q`、`Esc`、`←`、`L`、`Ctrl-C`） |
 | `/` | 快速跳轉（agent → 終端、task → Task Detail、team → team 頁） |
-| `1` `2` `3`、`Tab`／`Shift-Tab` | team 頁切 tab |
+| `1` `2` `3` | team 頁切 tab；窄畫面另可用 `Tab`／`Shift-Tab` |
+| `Tab`／`Shift-Tab`（寬畫面） | 側欄／內容切換焦點；側欄 `←`／`→` 收合／展開、空白切換、Enter 開啟 |
+| `[`／`]` | 需要你的上一項／下一項；兩端停住，不回答或解除 |
+| `PgUp`／`PgDn`（寬畫面需要你） | 捲動詳情，保留目前事項 |
 | `1`–`9`、`a` | 「需要你」畫面：選選項或操作（`重試`）、用自由文字回答 |
 | `h`、`!` | 首頁、「需要你」 |
 | `L` | 切換英文／繁中（只有大寫） |
