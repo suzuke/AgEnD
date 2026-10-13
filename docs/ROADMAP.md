@@ -596,3 +596,5 @@
 - 2026-10-12：#161 合併前 Linux CI 揭露 sandbox 工具查找遍歷 UTF-8 環境時會因 byte path panic；改為只讀取查找需要的 PATH，保留原非 UTF-8 目錄與鄰居不變的程序回歸。
 
 - 2026-10-12：#160（`7c67061`）與 #161（`c23b3f6`）已合併 main；最終雙平台 CI 通過，README／分支文件、doctor 原始路徑修復及 Linux PATH 查找修正已交付。兩個自有 worktree／本機與遠端分支及約 2.9 GiB 編譯暫存已清理；同步第 13 關現況，保留 Claude 暫緩、服務真 backend／登入登出、人工驗收與公開發布待辦。
+
+- 2026-10-13：雲端容器全新驗證：fmt／clippy／check-deps（含 no-std）通過，`accept core` 167 通過；workspace 測試初跑 37 失敗，經實驗確認全屬環境（32 缺 bubblewrap、2 以 root 執行、3 為容器 PID 1 延遲回收的殭屍被 holder 測試計入）。holder 測試改不計殭屍、`pipeline_archive_flags` 權限測試明示 non-root，`crates/agend/TESTING.md` 補 Linux 前置條件；產品程式未改。

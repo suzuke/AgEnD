@@ -6,6 +6,17 @@
 > - CLI（第 9 施工關）：`tests/cli.rs` 跑真的 `agend` binary，比對 stdout、stderr、exit code；下面的 `CLI-n` 表每列對假 daemon（`FakeDaemon::start_at($AGEND_HOME/run/daemon.sock)`）與真 `agend daemon` 各跑一次（第 10 施工關才有 handler 的只對假）；各段與 `cli_demo` 共用 `tests/common/`。
 > - holder 的跨程序測試（`tests/holder_process.rs`）與 daemon ↔ holder 的測試（`tests/holder_runtime.rs`、`tests/daemon_process.rs`，第 6 施工關）也在這裡，因為要用真的 binary。
 
+## Linux 本機前置條件
+
+與 CI（`.github/workflows/ci.yml`）相同，否則失敗的是環境而不是程式：
+
+| 條件 | 缺少時的症狀 |
+|---|---|
+| 已裝 `bubblewrap`、`zsh`（`apt-get install -y bubblewrap zsh`） | pipeline／checks 相關約 32 個測試 panic：`Sandbox("sandbox tool not found")` |
+| 以非 root 使用者執行 | `backend_import`、`pipeline_archive_flags` 的權限測試明示要求 non-root 而失敗（root 可讀 mode 0 檔案） |
+
+holder 的程序群組檢查不計殭屍程序：容器 PID 1 回收孤兒可能慢 1 秒以上，殭屍已結束，不代表 agent 存活。
+
 ## 第 10 施工關驗證
 
 `cargo build -p agend -p agend-testkit --bins` 後跑 `cargo test -p agend --test pipeline`：happy、checks 返工、review 返工、WIP、main 前進、兩個 failpoint 的四次開機、沙箱、hook／cancel、問答／提醒、排隊與 no-role、sandbox retry、merge-blocked；完整 demo 用 `cargo xtask accept pipeline`。`pipeline_context` 以暫停 reviewer 驗 headless review 的等待／重啟／回報，避免自動 reviewer 搶先完成；`pipeline_archive*` 的九個 target 共 31 個回歸，涵蓋大 binary、merge-only 解法、staged-only bytes、隱藏 index 旗標與 stat cache、顯示設定、ignored 檔案，以及保存失敗不刪原 WIP／index。行尾／內容轉換、未解衝突與 nested Git metadata（含不完整狀態）須保留原資料；一般子目錄、空檔與 symlink 用真 git apply 還原。各組內容見 [daemon TESTING](../agend-daemon/TESTING.md)。 content-filter producer 先建立有效 stat cache，再用真 git add --renormalize 強制套用 attributes；不依賴檔案 timestamp 的競態碰巧觸發 clean filter。

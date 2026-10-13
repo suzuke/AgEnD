@@ -225,14 +225,20 @@ fn wait_error(client: &mut HolderClient) -> String {
 }
 
 /// Read-only: pids whose process group is `pgid`.
+/// Live (non-zombie) processes in `pgid`. Killed grandchildren are reparented
+/// to init; a lazy reaper (container PID 1) can leave them as zombies for over
+/// a second, and a zombie has already exited.
 fn processes_in_group(pgid: u32) -> Vec<String> {
     let out = std::process::Command::new("/bin/ps")
-        .args(["-A", "-o", "pid=,pgid="])
+        .args(["-A", "-o", "pid=,pgid=,stat="])
         .output()
         .unwrap();
     String::from_utf8_lossy(&out.stdout)
         .lines()
-        .filter(|l| l.split_whitespace().nth(1) == Some(&pgid.to_string()))
+        .filter(|l| {
+            let mut f = l.split_whitespace().skip(1);
+            f.next() == Some(&pgid.to_string()) && !f.next().is_some_and(|s| s.starts_with('Z'))
+        })
         .map(str::to_string)
         .collect()
 }
