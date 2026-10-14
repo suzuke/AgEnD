@@ -35,6 +35,12 @@ fn probe(flag: &str, split: bool, fail_archive: bool) {
     let before = std::fs::read(&index).unwrap();
     let archive = lab.home.join("archive");
     if fail_archive {
+        // SAFETY: getuid reads process identity. Root bypasses owner permission.
+        assert_ne!(
+            unsafe { libc::getuid() },
+            0,
+            "run this native permission test as a non-root user"
+        );
         // Fail after private index inspection while producing untracked patches.
         std::fs::create_dir_all(&archive).unwrap();
         // An unreadable untracked file prevents complete patch publication.
